@@ -52,30 +52,31 @@ float sandPx;
 `)
       .replace('#include <lights_fragment_end>', /* glsl */`#include <lights_fragment_end>
 {
-  float vis = sandMask * (1.0 - smoothstep(0.05, 0.14, sandPx)) * smoothstep(uSandWater - 0.02, uSandWater + 0.08, vSandW.y);
+  // (finer grains fade out sooner with distance: below a pixel they would only flicker)
+  float vis = sandMask * (1.0 - smoothstep(0.03, 0.08, sandPx)) * smoothstep(uSandWater - 0.02, uSandWater + 0.08, vSandW.y);
   if (vis > 0.0) {
-    vec2 sp = vSandW.xz / 0.045;
+    vec2 sp = vSandW.xz / 0.025;                              // 2.5 cm grain cells: fine glitter, not specks
     vec2 cell = floor(sp);
     vec3 h = sandHash3(cell + 3.7);
     vec2 c = 0.3 + 0.4 * sandHash3(cell + 11.3).xy;           // glint centre inside the cell
     float rr = length(fract(sp) - c);
-    float dotMask = 1.0 - smoothstep(0.1, 0.1 + max(fwidth(rr), 0.05), rr);
-    if (h.z > 0.82) {
+    float dotMask = 1.0 - smoothstep(0.08, 0.08 + max(fwidth(rr), 0.05), rr);
+    if (h.z > 0.7) {                                          // more grains catch the sun, each one tinier
       vec3 nW = inverseTransformDirection(normal, viewMatrix);
       vec3 facet = normalize(nW + vec3(h.x - 0.5, 0.0, h.y - 0.5) * 1.1);
       vec3 V = normalize(cameraPosition - vSandW);
       vec3 H = normalize(uSandSun + V);
-      float g = pow(max(dot(facet, H), 0.0), 1400.0);
+      float g = pow(max(dot(facet, H), 0.0), 2200.0);        // tighter: a pin-prick that twinkles as you move
       // sunlight reaching this point (includes the shadow): recover it from the direct diffuse term
       float lumD = dot(reflectedLight.directDiffuse, vec3(0.2126, 0.7152, 0.0722));
       float lumA = max(dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722)), 1e-3);
       float sun = lumD / lumA * PI;
-      reflectedLight.directSpecular += vec3(1.0, 0.96, 0.85) * g * sun * 2.5 * vis * dotMask;
+      reflectedLight.directSpecular += vec3(1.0, 0.96, 0.85) * g * sun * 1.6 * vis * dotMask;   // softer, so bloom doesn't blow each one into a blob
     }
   }
 }
 `);
   };
-  material.customProgramCacheKey = () => 'sand-detail-v6';
+  material.customProgramCacheKey = () => 'sand-detail-v7';
   material.needsUpdate = true;
 }
