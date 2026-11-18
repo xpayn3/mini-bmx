@@ -13,6 +13,9 @@ import { Terrain, WATER, MAT, FLOWER_TIME } from './terrain.js';
 import { addSandDetail } from './sand.js';
 import { Gauge } from './gauge.js';
 import { Rider } from './rider.js';
+import { Suspension } from './suspension.js';
+import { buildBike, STYLE_K } from './bikegen.js';
+import { listBikes, gameId, storeId } from './bikestore.js';
 import { FX } from './fx.js';
 import { Debris } from './debris.js';
 import { breakFence } from './fences.js';
@@ -124,11 +127,20 @@ const BIKES = {
       legStiff: 0.6, legDamp: 1.2, legComp: 1.3, legExt: 1.3, attackDrop: 1.3,
       pedalLaunch: 0.75, pedalPower: 0.85, pedalTop: 1.35, airDrag: 0.85, brakeForce: 1.3, popPower: 0.7,
       grip: 1.15, oversteer: 0.7,   // big knobbies bite harder and the rear lets go less
-      noseDrop: 0.85,               // long wheelbase + weight back: the front falls off ledges more slowly
+      tyreHz: 0.75, tyreDamp: 1.3, travel: 2.2,   // 200 mm of plush travel: lower, softer bounce, soaks more
     },
     land: 1.45,   // landings feel this much softer: SLAM! takes a drop ~1.45x as hard, less speed scrubbed
   },
 };
+// bikes made in the builder (+ Build / U). Their ride feel sits between the BMX (k = 0) and the
+// downhill bike (k = 1): the DH ride multipliers and pose, scaled by k
+for (const cfg of listBikes()) {
+  const k = STYLE_K[cfg.style] ?? 0, dh = BIKES.dh;
+  const ride = Object.fromEntries(Object.entries(dh.ride).map(([n, v]) => [n, 1 + (v - 1) * k]));
+  const pose = Object.fromEntries(Object.entries(dh.pose).filter(([n]) => n !== 'seatFloor').map(([n, v]) => [n, v * k]));
+  pose.seatFloor = k >= 0.5;
+  BIKES[gameId(cfg.id)] = { label: cfg.name || 'Bike', cfg, ride, pose, land: 1 + (dh.land - 1) * k };
+}
 const url = new URL(location.href);
 const store = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
                 set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } } };
@@ -138,6 +150,11 @@ const urlSeed = parseInt(url.searchParams.get('seed'), 10);
 let seed = Number.isFinite(urlSeed) ? urlSeed : (Math.random() * 1e6) | 0;
 const RIDE = BIKES[bikeId].ride || {}, LAND = BIKES[bikeId].land || 1;
 const T = new Proxy(TUNE, { get: (o, k) => o[k] * (RIDE[k] ?? 1) });   // TUNE, scaled for this bike
+function openBikeBuilder() {   // edits the bike being ridden if it is a built one
+  import('./builder.js').then(({ openBuilder }) => openBuilder({ editId: storeId(bikeId), onRide: (id) => {
+    store.set('bike', id); url.searchParams.set('bike', id); url.searchParams.set('seed', seed); location.replace(url.href);
+  } }));
+}
 function selectBike(id) {   // the rig is built once at load, so a switch reloads into the same world
   if (!isBike(id) || id === bikeId) return;
   store.set('bike', id);
@@ -152,6 +169,10 @@ function selectBike(id) {   // the rig is built once at load, so a switch reload
     btn.addEventListener('click', () => selectBike(id));
     el.appendChild(btn);
   }
+  const bb = document.createElement('button');
+  bb.textContent = '+ Build'; bb.title = 'U: bike builder';
+  bb.addEventListener('click', () => { bb.blur(); openBikeBuilder(); });
+  el.appendChild(bb);
   document.getElementById('loading').textContent = `Loading ${BIKES[bikeId].label}…`;
 }
 const terrain = new Terrain(scene, seed);
@@ -168,8 +189,8 @@ const HOP_PUSH = 0.09;   // s the legs spend straightening before the tyres leav
 const bikeRoot = new THREE.Group(), pitchG = new THREE.Group(), leanG = new THREE.Group();
 bikeRoot.add(pitchG); pitchG.add(leanG); scene.add(bikeRoot);
 
-const gltf = await new GLTFLoader().loadAsync(BIKES[bikeId].file);
-const bike = gltf.scene.getObjectByName(BIKES[bikeId].root);
+const bike = BIKES[bikeId].cfg ? buildBike(BIKES[bikeId].cfg, 'custom')   // built in the builder
+  : (await new GLTFLoader().loadAsync(BIKES[bikeId].file)).scene.getObjectByName(BIKES[bikeId].root);
 // wheelbase, wheel radii and BB position from the export (fallbacks: the BMX's)
 const bd = bike.userData;
 const L = bd.wheelbase || 0.8985, RWF = bd.wheelRadius || 0.261, RWR = bd.wheelRadiusRear || RWF,
@@ -178,12 +199,14 @@ leanG.add(bike);
 const part = (n) => bike.getObjectByName(n);
 const steerN = part('steer'), wheelF = part('wheel_front'), wheelR = part('wheel_rear'), crankN = part('crank');
 const steerAxis = new THREE.Vector3(...(bike.userData.steerAxis || [-0.2546, 0.967, 0])).normalize();
+// full-suspension bikes (dh.glb): fork + four-bar rear, posed every frame
+const susp = bd.suspension ? new Suspension(bike, bd) : null;
 
 const paint = new THREE.MeshPhysicalMaterial({ color: 0xe8432e, metalness: 0.25, roughness: 0.32, clearcoat: 1, clearcoatRoughness: 0.06 });
 bike.traverse((o) => {
   if (!o.isMesh) return;
   o.castShadow = true; o.receiveShadow = true;
-  if (o.material.name === 'paint') o.material = paint;
+  if (o.material.name === 'paint' && !BIKES[bikeId].cfg) o.material = paint;   // built bikes bring their own colour
   if (o.material.name === 'chrome') { o.material.envMapIntensity = 1.6; }
 });
 
@@ -274,6 +297,7 @@ addEventListener('keydown', (e) => {
   // hold Space for half a second to get up; only a press that starts after the crash counts
   if (crash.on && e.code === 'Space') crash.armed = true;
   if (e.code === 'KeyT') { tiltOn = !tiltOn; sizeTilt(); }
+  if (e.code === 'KeyU') openBikeBuilder();
   if (e.code === 'KeyB') { const ids = Object.keys(BIKES); selectBike(ids[(ids.indexOf(bikeId) + 1) % ids.length]); }
   if (e.code === 'KeyO') { aoWanted = !aoWanted; gtao.enabled = aoWanted && perf.level < 1; }
 });
@@ -395,7 +419,7 @@ function getUp() {
   // pick the bike up where it lies, keep facing the same way
   Object.assign(st, { v: 0, vy: 0, lean: 0, leanV: 0, bikeLean: 0, counter: 0, steer: 0, steerIn: 0, yawRate: 0, air: false,
     pitch: 0, compress: 0, compressV: 0, hopNose: 0, hopT: 0, load: 0,
-    slip: 0, wInit: false, frontAir: false, rearAir: false, pumpAcc: 0 });
+    slip: 0, wInit: false, frontAir: false, rearAir: false, pumpAcc: 0, pitchV: 0, cF: true, cR: true });
   st.course = st.heading;
   st.hopBlock = true;   // the Space press that got us up must not also pump-pop on release
   st.y = terrain.height(st.x, st.z); st.bodyY = st.y; st.bodyV = 0;
@@ -456,7 +480,7 @@ function respawn(newWorld) {
   Object.assign(st, { x: 0, z: 0, v: 0, vy: 0, heading: 0, steer: 0, steerIn: 0, lean: 0, leanV: 0, pitch: 0, air: false,
     bikeLean: 0, counter: 0, rock: 0, yawRate: 0, hopNose: 0, hopT: 0, airTime: 0, airK: 0, load: 0, compress: 0, compressV: 0,
     prep: 0, landPrep: 0, popFired: false, spunOut: false, shake: 0,
-    course: 0, slip: 0, wInit: false, frontAir: false, rearAir: false, pumpAcc: 0, sinceLand: 1 });
+    course: 0, slip: 0, wInit: false, frontAir: false, rearAir: false, pumpAcc: 0, sinceLand: 1, pitchV: 0, cF: true, cR: true });
   delete st.gPitch;
   st.y = terrain.height(0, 0); st.bodyY = st.y; st.bodyV = 0;
   rider.resetPose();   // drop the hip / chest spring momentum from before the teleport
@@ -692,7 +716,7 @@ function physics(dt) {
       if ((fwd.x * dx + fwd.z * dz) / d >= 0) continue;   // rolling off the back of it
       if (Math.abs(st.v) > 0.3) {
         st.air = true; st.airTime = 0;
-        st.vy = Math.max(st.vy, Math.sqrt(2 * G * (clear + 0.05)) + 0.2);
+        st.vy = Math.max(st.vy, Math.sqrt(2 * G * (clear + 0.05)) + 0.2); st.kickT = 0.3;
         st.hopNose = 0.1 + Math.min(0.35, clear * 0.5);
         st.v *= 1 - Math.min(0.35, clear * 0.3);
         st.shake = Math.max(st.shake, Math.min(0.2, clear * 0.25));
@@ -716,78 +740,126 @@ function physics(dt) {
     else st.v *= 0.97;
   }
 
-  // --- vertical: follow ground, launch off crests, land ---
+  // --- vertical + pitch: SPRING PHYSICS ---
+  // Bike + rider are one rigid body in the travel plane: height y (at the BB, on the line through
+  // the tyre contacts), pitch, and both their velocities. Each tyre sits on a spring-damper (tyre,
+  // fork / frame and the give in the rider's arms) that can only PUSH. Roll over a bump and it
+  // compresses, then gives that energy back: at speed the bike skips off sharp bumps and rebounds a
+  // little on landings. The ground falling away faster than gravity can follow lifts a wheel off on
+  // its own -- no special take-off rules. Past the end of travel a spring bottoms out (a dead stop),
+  // so big landings are soaked, not trampolined.
   g = sample();
-  if (!st.air) {
-    // ballistic test: if the ground drops away faster than gravity can pull us down, we fly.
-    // (threshold scales with dt^2 so lips launch the same at any frame rate)
-    // st.vy is the real vertical speed riding along the surface (speed x slope), so a fast
-    // run at a steep lip throws you high and far; too slow and you case the gap.
-    // The rider's legs soak up crests: we only leave the ground when the surface falls away
-    // harder than ~2.5 g (a real jump lip at speed), never off ordinary bumps.
-    // running into a steeper slope (a concave corner) bleeds speed into the face instead of
-    // turning it all into vertical speed -- otherwise any steep hillside acts like a launch ramp
+  {
+    // running into a steeper slope (a concave corner) bleeds speed into the face
     const dP = g.pitch - (st.gPitch ?? g.pitch);
-    if (dP > 0.02 && st.v > 0) st.v *= Math.cos(Math.min(dP, 1.2));
+    if (!st.air && dP > 0.02 && st.v > 0) st.v *= Math.cos(Math.min(dP, 1.2));
     st.gPitch = g.pitch;
-    if (!st.wInit) { st.wF = g.hf; st.wR = g.hr; st.vF = st.vR = 0; st.frontAir = st.rearAir = false; st.wInit = true; }
-    // fastest a tyre can really climb: a ~42 deg face at this speed. Anything steeper (a step, a
-    // ledge, a deck edge) is a bump the wheel rolls up, not a ramp that throws the bike skyward
-    const climbMax = Math.abs(st.v) * 0.9 + 0.3;
-    const natural = terrain.jump(st.x, st.z)[1] < 0.05;   // not on a built jump: legs soak crests, small pop at most
-    const vyNew = Math.min(st.v * Math.tan(g.pitch), climbMax);
-    // HOW HARD A CREST MAY THROW YOU. Every designed lip is under ~30 deg (slope <= 0.58), so off a real
-    // jump the launch is whatever that face gives. A face steeper than ~37 deg ridden just before (a step,
-    // a ledge, the steep side bank of a table) is something you roll up and over: a small pop, never a launch
+    const natural = terrain.jump(st.x, st.z)[1] < 0.05;   // not on a built jump
+    // a face steeper than ~37 deg ridden just before (a step, a ledge) is rolled up and over: small pop at most
     st.faceMax = Math.max(Math.tan(clamp(g.pitch, -1.4, 1.4)), (st.faceMax ?? 0) * Math.exp(-dt * 3));
     const isStep = st.faceMax > 0.75;
-    const launchCap = natural ? 1.5 : isStep ? 2 : Math.abs(st.v) * 0.62 + 0.3;
-    const needAccel = (vyNew - st.vy) / dt;              // vertical accel needed to stay glued
-    if (!st.frontAir && !st.rearAir && st.v > 2.5 && needAccel < -T.wheelStick * G) {
-      st.air = true; st.airTime = 0;
-      // only built jumps throw you: over a natural hill crest the legs soak it up, small pop at most
-      st.vy = Math.min(st.vy, launchCap);
-      if (!natural && !isStep) st.vy += T.autoPop * (st.prep || 0);   // the rider pumped the face: extra pop off the lip
-      st.vy -= G * dt; st.y += st.vy * dt;
-    } else {
-      // FRONT AND REAR WHEELS ride their own patch of ground. The legs keep a wheel pressed down over
-      // ordinary crests, but where the ground falls away faster than that (a ledge, a sharp knuckle,
-      // the edge of a rock) the wheel leaves it and drops: the front goes first and the bike noses over,
-      // then the rear follows -- or, at speed, both are off and the bike flies.
-      const stick = T.wheelStick * G;
-      const wheel = (w, vw, h, air, pull) => {
-        // the wheel's vertical speed rolling along the ground. Capped: a step 30 cm high in one 8 ms
-        // frame is NOT 37 m/s upward -- carrying that off the top edge is what shot the bike skyward
-        const vGround = Math.min((h - w) / dt, climbMax);
-        if (!air && !((vGround - vw) / dt < -stick && Math.abs(st.v) > 1)) return [h, vGround, false, 0];
-        if (!air) vw = Math.min(vw, launchCap);              // leaving the ground: no more than the face can throw
-        vw -= pull * dt; w += vw * dt;                      // falling free of the ground
-        if (w <= h) return [h, vGround, false, Math.max(0, -vw)];   // touched down: report how hard
-        return [w, vw, true, 0];
-      };
-      const wasFrontAir = st.frontAir;
-      const f = wheel(st.wF, st.vF, g.hf, st.frontAir, T.noseDrop * G);
-      const r = wheel(st.wR, st.vR, g.hr, st.rearAir, G);
-      [st.wF, st.vF, st.frontAir] = f; [st.wR, st.vR, st.rearAir] = r;
-      const pitchW = Math.atan2(st.wF - st.wR, L);
-      if (!wasFrontAir && st.frontAir) st.noseRef = g.pitch - dP;   // the slope we were riding when the front went over
-      if (st.frontAir && st.rearAir) {   // both off the ground: the whole bike flies (no extra pop)
-        st.air = true; st.airTime = 0;
-        st.y = st.wR + (st.wF - st.wR) * (BB_REAR / L); st.vy = st.vR + (st.vF - st.vR) * (BB_REAR / L);
-        st.vy = Math.min(st.vy, launchCap);
-      } else if (!st.frontAir && !st.rearAir) { st.y = g.y; st.vy = vyNew; }
-      else {
-        const yN = st.wR + (st.wF - st.wR) * (BB_REAR / L);
-        st.vy = (yN - st.y) / dt; st.y = yN;
-        // rolled off something big, too slowly: the bike tips over its front wheel
-        if (st.frontAir && pitchW - (st.noseRef ?? g.pitch) < -T.noseDive) crash.pending = 'NOSE DIVE!';
+    // hills are noise, not ramps: a natural crest may throw you this hard at most (built jumps: their face)
+    const launchCap = natural ? T.crestCap : isStep ? 2 : Math.abs(st.v) * 0.62 + 0.3;
+    // fastest the ground under a rolling tyre can really rise: a ~42 deg face at this speed. A step 30 cm
+    // high in one frame is NOT 37 m/s upward -- that is what used to shoot the bike skyward off ledges
+    const climbMax = Math.abs(st.v) * 0.9 + 0.3;
+    if (!st.wInit || st.hfPrev === undefined) { st.hfPrev = g.hf; st.hrPrev = g.hr; st.pitchV = 0; st.wInit = true; }
+    const hfP = st.hfPrev, hrP = st.hrPrev;
+    const vgF = Math.min((g.hf - hfP) / dt, climbMax), vgR = Math.min((g.hr - hrP) / dt, climbMax);
+    st.hfPrev = g.hf; st.hrPrev = g.hr;
+
+    const XF = L - BB_REAR, XR = -BB_REAR, shF = BB_REAR / L, shR = XF / L;   // weight split by lever arms
+    const K = (2 * Math.PI * T.tyreHz) ** 2, C = 2 * T.tyreDamp * Math.sqrt(K);  // per unit mass: heave at tyreHz
+    const IK = 0.22;                                  // pitch inertia / mass (m^2): bike + rider about the BB
+    // the rider keeps a little weight pressed into natural ground (not on jumps, not while hopping)
+    const press = natural && !(st.hopT > 0) ? T.legPress * G : 0;
+    const s0 = (G + press) / K;                       // static sag: at rest the contact line sits on the ground
+    const TRAVEL = T.travel;
+    const balMax = T.riderBalance * G * BB_REAR / IK; // how hard the rider can shift weight to hold a wheelie / nose
+    const wasAir = st.air, vyIn = st.vy, wasF = st.cF ?? true, wasR = st.cR ?? true;
+    let cF = false, cR = false;
+    const N = 4, h = dt / N;
+    for (let i = 1; i <= N; i++) {
+      const u = i / N, gF = hfP + (g.hf - hfP) * u, gR = hrP + (g.hr - hrP) * u;
+      const cs = Math.cos(st.pitch), sn = Math.sin(st.pitch);
+      const dF = gF - (st.y + XF * sn) + s0, dR = gR - (st.y + XR * sn) + s0;   // spring compression
+      const pvF = st.vy + XF * cs * st.pitchV, pvR = st.vy + XR * cs * st.pitchV;
+      cF = dF > 0; cR = dR > 0;
+      const FF = cF ? Math.max(0, shF * (K * dF + C * (vgF - pvF))) : 0;   // springs only push
+      const FR = cR ? Math.max(0, shR * (K * dR + C * (vgR - pvR))) : 0;
+      let alpha = (FF * XF + FR * XR) * cs / IK;
+      if (cF !== cR) {
+        // one wheel down: the rider shifts weight to hold the bike near the slope it was on
+        const ref = st.noseRef ?? g.pitch;
+        alpha += clamp(30 * (ref - st.pitch) - 9 * st.pitchV, -balMax, balMax);
+      } else if (!cF) {
+        // flying: follow the flight path, then bring the bike in to match the landing slope
+        const flight = 0.6 * Math.atan2(st.vy, Math.max(st.v, 1));
+        const near = 1 - smooth01((st.y - g.y) / 0.7);
+        const pT = flight + (g.pitch - flight) * near * (st.vy < 0 ? 1 : 0);
+        alpha += 20 * (pT - st.pitch) - 7 * st.pitchV;
       }
-      if (wasFrontAir && !st.frontAir && f[3] > 2) {   // front wheel slaps down
-        st.shake = Math.max(st.shake, Math.min(0.25, f[3] * 0.05)); st.compressV -= Math.min(1.5, f[3] * 0.25);
-        if (f[3] > 3.5) burst(tmp.set(st.x + fwd.x * (L - BB_REAR), g.hf + 0.03, st.z + fwd.z * (L - BB_REAR)), 10, surf, 0.8);
+      st.vy += (FF + FR - G - (cF || cR ? press : 0)) * h;
+      st.pitchV += alpha * h;
+      st.y += st.vy * h; st.pitch += st.pitchV * h;
+      // BOTTOM-OUT: the end of travel is a hard stop (inelastic contact on that wheel)
+      for (const [x, gg, vg] of [[XF, gF, vgF], [XR, gR, vgR]]) {
+        const c2 = Math.cos(st.pitch), d = gg - (st.y + x * Math.sin(st.pitch)) - TRAVEL;   // compression past s0 + TRAVEL
+        if (d <= 0) continue;
+        const lx = x * c2, mInv = 1 + lx * lx / IK;
+        const dq = d / mInv; st.y += dq; st.pitch += dq * lx / IK;
+        const vp = st.vy + lx * st.pitchV;
+        if (vp < vg) { const j = (vg - vp) / mInv; st.vy += j; st.pitchV += j * lx / IK; }
+        if (x === XF) cF = true; else cR = true;
       }
-      st.pitchW = pitchW;
     }
+    const air = !cF && !cR;
+    st.frontAir = !air && !cF; st.rearAir = !air && !cR;
+    // the slope we were riding when the front went over a ledge / the rear came up
+    if (!air && (st.frontAir || st.rearAir) && wasF && wasR) st.noseRef = g.pitch - dP;
+    if (st.frontAir && st.pitch - (st.noseRef ?? g.pitch) < -T.noseDive) crash.pending = 'NOSE DIVE!';
+    // where each tyre is (for the suspension rig): on its ground when touching
+    const snN = Math.sin(st.pitch);
+    st.wF = cF ? g.hf : st.y + XF * snN; st.wR = cR ? g.hr : st.y + XR * snN;
+    st.pitchW = st.pitch;
+    // WHERE TO DRAW THE FRAME. A rigid BMX is drawn with its tyres on the ground (the springs are the tyres
+    // and the rider's arms and legs: the body shows the give, see absorb). The downhill bike's frame rides
+    // at its physical height and its fork / linkage rig pushes the wheels down onto the ground.
+    if (susp) { st.yDraw = st.y; st.pitchDraw = st.pitch; }
+    else { st.yDraw = st.wR + (st.wF - st.wR) * (BB_REAR / L); st.pitchDraw = Math.atan2(st.wF - st.wR, L); }
+    // front tyre slapping back down after a ledge / manual
+    if (!wasAir && !air && !wasF && cF) {
+      const slap = Math.max(0, vgF - (vyIn + XF * Math.cos(st.pitch) * st.pitchV));
+      if (slap > 2) {
+        st.shake = Math.max(st.shake, Math.min(0.25, slap * 0.05)); st.compressV -= Math.min(1.5, slap * 0.25);
+        if (slap > 3.5) burst(tmp.set(st.x + fwd.x * XF, g.hf + 0.03, st.z + fwd.z * XF), 10, surf, 0.8);
+      }
+    }
+    st.cF = cF; st.cR = cR;
+    if (air && !wasAir) {   // TAKE-OFF
+      st.air = true; st.airTime = 0;
+      if (!(st.kickT > 0)) st.vy = Math.min(st.vy, launchCap);
+      if (!natural && !isStep) st.vy += T.autoPop * (st.prep || 0);   // the rider pumped the face: extra pop off the lip
+    } else if (!air && wasAir) {   // TOUCH-DOWN: the springs take it from here; judge how hard it was
+      // impact = how much of our fall the landing slope doesn't "catch" (smooth on a down-ramp, harsh on flat)
+      const vySurf = st.v * Math.tan(g.pitch);
+      const impact = Math.max(0, vySurf - vyIn) * Math.cos(g.pitch) / (LAND * (1 + T.landSoak * (st.landPrep || 0)));
+      const airTime = st.airTime;
+      // a drop too big for the legs to absorb throws you off
+      if (airTime > 0.3 && impact > 10.5) crash.pending = 'SLAM!';
+      st.air = false; st.sinceLand = 0;
+      st.bodyV = vyIn;   // hips are still falling: the extended legs now absorb it
+      st.noseRef = g.pitch;
+      if (impact > 3) st.v *= 1 - Math.min(0.45, (impact - 3) * 0.08);   // cased it / flat landing scrubs speed
+      if (impact > 5 && airTime > 0.3) flash('OOF!');
+      st.compressV -= Math.min(2.2, impact * 0.35);
+      if (susp) susp.land(Math.max(0, -vyIn) * Math.cos(g.pitch) * 0.5 + impact * 0.4, st.frontAir, st.rearAir);
+      if (airTime > 0.15) st.shake = Math.max(st.shake, Math.min(0.2, impact * 0.025));
+      if (airTime > 0.15) burst(tmp.set(st.x, st.y + 0.03, st.z), Math.round(10 + Math.min(30, impact * 6)), surf, 0.8 + Math.min(1.5, impact * 0.25));
+      if (airTime > 0.45) { bestAir = Math.max(bestAir, airTime); flash(`AIR ${airTime.toFixed(2)}s${airTime >= bestAir ? '  ★ best' : ''}`); }
+    }
+    if (st.air) st.airTime += dt;
+    st.kickT = Math.max(0, (st.kickT || 0) - dt);
   }
   // PUMP: hold Space to load (crouch), release to pop. Pop at the lip = big air.
   if (st.hopBlock && !keys.Space) st.hopBlock = false;
@@ -810,41 +882,13 @@ function physics(dt) {
     st.hopNose = Math.max(st.hopNose, (0.22 + 0.15 * st.hopLoad) * 0.6 * k);   // front wheel comes up as the arms pull
     if (st.hopT <= 0 || st.air) {   // legs are straight (or a lip already threw us): bike leaves the ground
       st.hopT = 0;
-      if (!st.air) { st.air = true; st.airTime = 0; st.vy = Math.max(st.vy, 0); }
-      st.vy += 1.4 + T.popPower * st.hopLoad;
+      st.vy = Math.max(st.vy, 0) + 1.4 + T.popPower * st.hopLoad;   // the springs unload and the tyres leave on their own
+      st.kickT = 0.3;   // a rider's hop is not a crest launch: no cap
       st.hopNose = 0.22 + 0.15 * st.hopLoad;
     }
   }
   if (!space || st.air) st.load = Math.max(0, st.load - dt * 6);
   st._hopHeld = space;
-  if (st.air) {
-    st.vy -= G * dt; st.y += st.vy * dt; st.airTime += dt;
-    // where each tyre is right now (the bike may come in nose- or tail-first)
-    const sp = Math.sin(st.pitch), wFa = st.y + (L - BB_REAR) * sp, wRa = st.y - BB_REAR * sp;
-    if (st.y <= g.y || wFa <= g.hf || wRa <= g.hr) {
-      // impact = how much of our fall the landing slope doesn't "catch" (smooth on a down-ramp, harsh on flat)
-      const vySurf = st.v * Math.tan(g.pitch);
-      const impact = Math.max(0, vySurf - st.vy) * Math.cos(g.pitch) / (LAND * (1 + T.landSoak * (st.landPrep || 0)));
-      const vyAir = st.vy;
-      // a drop too big for the legs to absorb throws you off. (Nose/tail angle and lean are not
-      // judged: the rider auto-levels on real jumps, so those checks only fired on hill crests/turns.)
-      if (st.airTime > 0.3 && impact > 10.5) crash.pending = 'SLAM!';
-      st.y = g.y; st.air = false; st.vy = vySurf; st.gPitch = g.pitch; st.sinceLand = 0;
-      st.bodyV = vyAir;   // hips are still falling: the extended legs now absorb it
-      // the wheel that touched is down; the other one, if still above its ground, drops after it
-      st.wInit = true; st.vF = st.vR = vyAir; st.noseRef = g.pitch;
-      st.frontAir = wFa > g.hf + 0.03; st.rearAir = wRa > g.hr + 0.03;
-      if (st.frontAir && st.rearAir) st.frontAir = st.rearAir = false;   // came down flat on the middle: both down
-      st.wF = st.frontAir ? wFa : g.hf; st.wR = st.rearAir ? wRa : g.hr;
-      if (st.frontAir || st.rearAir) st.y = st.wR + (st.wF - st.wR) * (BB_REAR / L);
-      if (impact > 3) st.v *= 1 - Math.min(0.45, (impact - 3) * 0.08);   // cased it / flat landing scrubs speed
-      if (impact > 5 && st.airTime > 0.3) flash('OOF!');
-      st.compressV -= Math.min(2.2, impact * 0.35);
-      if (st.airTime > 0.15) st.shake = Math.max(st.shake, Math.min(0.2, impact * 0.025));
-      if (st.airTime > 0.15) burst(tmp.set(st.x, st.y + 0.03, st.z), Math.round(10 + Math.min(30, impact * 6)), surf, 0.8 + Math.min(1.5, impact * 0.25));
-      if (st.airTime > 0.45) { bestAir = Math.max(bestAir, st.airTime); flash(`AIR ${st.airTime.toFixed(2)}s${st.airTime >= bestAir ? '  ★ best' : ''}`); }
-    }
-  }
   st.hopNose *= Math.exp(-dt * 3.5);
   // --- rider reads the trail like a real one: spots a lip ahead, sinks into the transition,
   // pumps up the face and pops at the top; in the air tucks, then reaches the bike down
@@ -880,16 +924,12 @@ function physics(dt) {
   st.compressV += ((cT - st.compress) * 120 - st.compressV * 14) * dt;
   st.compress = clamp(st.compress + st.compressV * dt, -0.28, 0.05);
   st.airK += ((st.air && st.airTime > 0.12 ? 1 : 0) - st.airK) * Math.min(1, dt * 6);
-  // in the air the bike follows its flight path; only close to the ground does the rider
-  // bring it in to match the landing slope (no reacting to the gap/lip shapes passing below)
-  const oneWheel = !st.air && (st.frontAir || st.rearAir);
-  let pitchT = oneWheel ? st.pitchW : g.pitch;   // one wheel off the ground: the bike pivots on the other
-  if (st.air) {
-    const flight = 0.6 * Math.atan2(st.vy, Math.max(st.v, 1));
-    const near = 1 - smooth01((st.y - g.y) / 0.7);
-    pitchT = flight + (g.pitch - flight) * near * (st.vy < 0 ? 1 : 0);
+  // --- suspension: soaks the ground under each tyre that the body line misses ---
+  if (susp) {
+    const sp = Math.sin(st.pitch);
+    susp.update(dt, { air: st.air, load: Math.max(st.load, -st.compress * 2.5), brake: brake && !st.air ? 1 : 0,
+      bumpF: st.air ? 0 : st.wF - (st.y + (L - BB_REAR) * sp), bumpR: st.air ? 0 : st.wR - (st.y - BB_REAR * sp) });
   }
-  st.pitch += (pitchT - st.pitch) * Math.min(1, dt * (st.air ? 2.5 : oneWheel ? 30 : 10));
 
   // --- wheels / cranks ---
   const w = st.v / RWF;
@@ -973,9 +1013,10 @@ function physics(dt) {
 }
 
 function place() {
-  bikeRoot.position.set(st.x, st.y, st.z);
+  const yDraw = crash.on ? st.y : st.yDraw ?? st.y, pDraw = crash.on ? st.pitch : st.pitchDraw ?? st.pitch;
+  bikeRoot.position.set(st.x, yDraw, st.z);
   bikeRoot.rotation.y = st.heading;
-  pitchG.rotation.z = st.pitch + st.hopNose;
+  pitchG.rotation.z = pDraw + st.hopNose;
   const wobble = Math.sin(t * 2.3) * 0.025 * Math.max(0, 1 - Math.abs(st.v) / 2);
   leanG.rotation.x = -(st.bikeLean + st.rock + wobble);
   steerN.quaternion.setFromAxisAngle(steerAxis, st.steer + wobble * -1.5);
@@ -983,6 +1024,7 @@ function place() {
   wheelR.rotation.z = -st.wheelR;
   crankN.rotation.z = -st.crank;
   for (const p of pedalPivots) p.rotation.z = st.crank;
+  if (susp) susp.apply();
   bikeRoot.updateMatrixWorld(true);
 
   const toLean = (obj, v, out) => leanG.worldToLocal(obj.localToWorld(out.copy(v)));
@@ -1102,11 +1144,11 @@ function frame(now) {
   for (const k in st) if (typeof st[k] === 'number' && !Number.isFinite(st[k])) { bad = true; break; }
   if (bad) {
     console.warn('physics went non-finite:', Object.keys(st).filter(k => typeof st[k] === 'number' && !Number.isFinite(st[k])).join(','), JSON.stringify(lastGood));
-    Object.assign(st, lastGood, { vy: 0, v: 0, air: false, leanV: 0, compressV: 0, bodyV: 0, bodyY: lastGood.y });
+    Object.assign(st, lastGood, { vy: 0, v: 0, air: false, leanV: 0, compressV: 0, bodyV: 0, bodyY: lastGood.y, pitchV: 0, wInit: false });
   } else for (const k in st) lastGood[k] = st[k];
   place();
   if (!crash.on) rider.update(dt, { footL, footR, handL, handR, v: st.v, lean: st.bikeLean + st.rock, steer: st.steer, yawRate: st.yawRate,
-    counter: st.counter + st.rock * 0.6, headRoll: st.bikeLean * 0.85, absorb: clamp(st.bodyY - st.y, -T.legComp, T.legExt), pitch: st.pitch, bodyLevel: T.bodyLevel, attackDrop: T.attackDrop,
+    counter: st.counter + st.rock * 0.6, headRoll: st.bikeLean * 0.85, absorb: clamp(st.bodyY - (crash.on ? st.y : st.yDraw ?? st.y), -T.legComp, T.legExt), pitch: crash.on ? st.pitch : st.pitchDraw ?? st.pitch, bodyLevel: T.bodyLevel, attackDrop: T.attackDrop,
     pedal: st.pedal, crank: st.crank, air: st.airK, compress: Math.max(0, -st.compress), t });
   terrain.update(st.x, st.z, 4);   // time-sliced chunk streaming (ms per frame)
   // announce the landscape as it changes under you

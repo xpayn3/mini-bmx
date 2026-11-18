@@ -1,0 +1,47 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Bike viewer</title>
+<style>body{margin:0;background:#bbb;font:13px sans-serif}#ui{position:fixed;left:10px;top:10px;background:#fffc;padding:8px;border-radius:6px}label{display:block}</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script></head><body>
+<div id="ui">
+<label>front <input id="f" type="range" min="-0.04" max="0.16" step="0.001" value="0"></label>
+<label>rear <input id="r" type="range" min="-0.06" max="0.14" step="0.001" value="0"></label>
+<div id="info"></div></div>
+<script type="module">
+// dev viewer: tools/bike_view.html?bike=dh&view=side|front|top|persp
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { Suspension } from '../src/suspension.js';
+const q = new URLSearchParams(location.search), id = q.get('bike') || 'dh';
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight); document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0xbbbbbb);
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment()).texture;
+scene.add(new THREE.DirectionalLight(0xffffff, 2).translateX(1).translateY(3).translateZ(2));
+const cam = new THREE.PerspectiveCamera(30, innerWidth / innerHeight, 0.01, 50);
+const v = q.get('view') || 'side';
+cam.position.set(...({ side: [0.2, 0.55, 3.6], front: [3.5, 0.6, 0.0], top: [0.2, 3.6, 0.01], persp: [1.9, 1.3, 2.6] }[v]));
+const ctl = new OrbitControls(cam, renderer.domElement); ctl.target.set(0.2, 0.5, 0); ctl.update();
+const grid = new THREE.GridHelper(4, 40); scene.add(grid);
+const gltf = await new GLTFLoader().loadAsync(`../assets/${id}.glb`);
+const bike = gltf.scene.getObjectByName(id);
+scene.add(gltf.scene);
+let tris = 0; gltf.scene.traverse(o => { if (o.isMesh) tris += o.geometry.index.count / 3; });
+const susp = bike.userData.suspension ? new Suspension(bike, bike.userData) : null;
+const info = document.getElementById('info');
+info.textContent = `${tris} tris` + (susp ? `, shock stroke at full travel ${(susp.stroke() * 1000).toFixed(1)} mm` : '');
+const fI = document.getElementById('f'), rI = document.getElementById('r');
+if (q.get('f')) fI.value = q.get('f'); if (q.get('r')) rI.value = q.get('r');
+function draw() {
+  if (susp) { susp.xF = +fI.value; susp.xR = +rI.value; susp.apply(); }
+  renderer.render(scene, cam); requestAnimationFrame(draw);
+}
+draw();
+window.susp = susp; window.bike = bike;
+</script></body></html>
