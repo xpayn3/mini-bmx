@@ -18,13 +18,22 @@ const POSE_DEFS := [
 		["kneesOut", "Knees out", -0.3, 0.7, 0.05, ""],
 		["stance", "Hip width", -0.09, 0.04, 0.005, "m"],
 	]],
-	["Torso & hips", [
+	["Spine", [
+		["spineCurve", "Back hunch (+) / arch (-)", -0.3, 0.3, 0.005, ""],
+		["spineSide", "Spine side curve", -0.2, 0.2, 0.005, ""],
+		["spineLow", "Bend low (hips) / high (shoulders)", 0.1, 0.9, 0.01, ""],
+		["twist", "Torso twist", -0.6, 0.6, 0.01, "rad"],
+	]],
+	["Pelvis", [
 		["hipZ", "Hips side shift", -0.15, 0.15, 0.005, "m"],
-		["pelvisTilt", "Pelvis tilt", -0.5, 0.5, 0.01, "rad"],
+		["pelvisTilt", "Pelvis tilt fwd / back", -0.5, 0.5, 0.01, "rad"],
+		["pelvisRoll", "Pelvis roll (hip drop)", -0.4, 0.4, 0.01, "rad"],
+		["pelvisYaw", "Pelvis turn", -0.5, 0.5, 0.01, "rad"],
+	]],
+	["Chest", [
 		["chestFwd", "Chest forward / back", -0.2, 0.2, 0.005, "m"],
 		["chestUp", "Chest up / down", -0.2, 0.2, 0.005, "m"],
 		["chestSide", "Chest side bend", -0.15, 0.15, 0.005, "m"],
-		["twist", "Torso twist", -0.6, 0.6, 0.01, "rad"],
 	]],
 	["Head", [
 		["headTilt", "Head tilt (+ looks down)", -0.5, 0.5, 0.01, "rad"],
@@ -79,7 +88,7 @@ const LENS := ["#ff7a2a", "#ffd21f", "#3fb6ff", "#7ed321", "#ff5fa2", "#8a96a8",
 const LOOK_ROWS := [
 	["Helmet", [["shell", "Shell", SW], ["peak", "Peak", SW]]],
 	["Goggles", [["lens", "Lens tint", LENS], ["goggleFrame", "Frame", SW], ["strap", "Strap", SW]]],
-	["Kit", [["jersey", "Jersey", SW], ["pants", "Pants", SW], ["gloves", "Gloves", SW], ["pads", "Shoulder pads", SW]]],
+	["Kit", [["jersey", "Jersey", SW], ["pants", "Pants", SW], ["gloves", "Gloves", SW]]],
 	["Shoes", [["shoes", "Upper", SW], ["shoeAccent", "Toe & collar", SW]]],
 ]
 

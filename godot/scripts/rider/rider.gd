@@ -12,13 +12,14 @@ const NEUTRAL := {hipX = 0.0, hipY = 0.0, lean = 0.0, elbowsOut = 0.0, kneesOut 
 	crouch = 1.0, standPedal = 1.0, sway = 1.0, bikeRock = 1.0, upright = 1.0, hipSway = 0.015, torso = 0.46,
 	shoulders = 0.2, headTilt = 0.0, headTurn = 1.0, lookAhead = 0.0,
 	# per-bone controls (garage Rider tab / K panel); 0 = the riding pose as computed
-	hipZ = 0.0, pelvisTilt = 0.0, chestFwd = 0.0, chestUp = 0.0, chestSide = 0.0, twist = 0.0,
+	hipZ = 0.0, pelvisTilt = 0.0, pelvisRoll = 0.0, pelvisYaw = 0.0,
+	spineCurve = 0.0, spineSide = 0.0, spineLow = 0.5, chestFwd = 0.0, chestUp = 0.0, chestSide = 0.0, twist = 0.0,
 	neck = 0.0, headYaw = 0.0, headRoll = 0.0,
 	shoulderFwd = 0.0, shoulderUp = 0.0, elbowsDown = 0.0, elbowOutL = 0.0, elbowOutR = 0.0, wristRoll = 0.0,
 	kneesFwd = 0.0, kneeOutL = 0.0, kneeOutR = 0.0, heelFwd = 0.0, heelUp = 0.0, footAngle = 0.0, footOut = 0.0}
 ## lookpanel.js DEFAULT_LOOK
 const DEFAULT_LOOK := {shell = "#16171a", peak = "#ececec", goggleFrame = "#f2f2ee", lens = "#ff7a2a", strap = "#ff6a4d",
-	jersey = "#ff6a4d", pants = "#1d2b64", gloves = "#ffd21f", shoes = "#26292f", shoeAccent = "#d8232a", pads = "#2b2e33"}
+	jersey = "#ff6a4d", pants = "#1d2b64", gloves = "#ffd21f", shoes = "#26292f", shoeAccent = "#d8232a"}
 ## where the helmet model sits on the head (head-local m / rad) and its scale
 const HELMET_FIT := {x = 0.01, y = 0.0, tilt = 0.0, scale = 1.3}
 ## goggles (RiderGear.build_goggles): lens position / tilt / size, strap ellipse round the shell
@@ -48,10 +49,6 @@ var hood_hem: MeshInstance3D
 var pelvis_mesh: MeshInstance3D
 var hood: MeshInstance3D
 var shoulder_sph: Array[MeshInstance3D] = []
-var pad_cap: Array[MeshInstance3D] = []     # shoulder pads: the cap over the joint
-var pad_arm: Array[MeshInstance3D] = []     # and the plate overlapping it down the upper arm
-var pad_mat: StandardMaterial3D
-var cloth: RiderCloth = null   # the loose jersey hem + sleeve cuffs (enable_cloth)
 var thigh: Array[MeshInstance3D] = []
 var shin: Array[MeshInstance3D] = []
 var knee: Array[MeshInstance3D] = []
@@ -117,6 +114,7 @@ func _init() -> void:
 	# torso + hips
 	torso = G.inst(GEAR.torso_geometry(), mCoral)
 	torso.name = "Torso"
+	_skin_torso()
 	add_child(torso)
 	hood_hem = cyl.call(0.15, 0.15, mCoralDark, 22)
 	hood_hem.visible = false
@@ -124,23 +122,7 @@ func _init() -> void:
 	pelvis_mesh.name = "Pelvis"
 	add_child(pelvis_mesh)
 	hood = sph.call(0.11, mCoralDark)
-	shoulder_sph.assign([sph.call(0.062, mCoral), sph.call(0.062, mCoral)])
-	# SHOULDER PADS: hard shell caps (a slice of a sphere, open underneath) -- one over the joint,
-	# a smaller one overlapping it down the upper arm, like riding body armour
-	pad_mat = mat("#2b2e33", 0.35)
-	pad_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	pad_mat.metallic = 0.1
-	var cap_geo := G.sphere(0.115, 20, 8, 0.0, TAU, 0.0, 1.25)
-	var arm_geo := G.sphere(0.1, 18, 7, 0.0, TAU, 0.0, 1.1)
-	for i in 2:
-		var c1 := G.inst(cap_geo, pad_mat)
-		c1.name = "ShoulderPad"
-		add_child(c1)
-		pad_cap.append(c1)
-		var c2 := G.inst(arm_geo, pad_mat)
-		c2.name = "ArmPad"
-		add_child(c2)
-		pad_arm.append(c2)
+	shoulder_sph.assign([sph.call(0.075, mCoral), sph.call(0.075, mCoral)])
 
 	# legs (0 = left, 1 = right)
 	thigh.assign([cyl.call(0.075, 0.062, mNavy), cyl.call(0.075, 0.062, mNavy)])
@@ -370,7 +352,6 @@ func set_look(l: Dictionary) -> void:
 	c.call(kit.pants[0], "pants")
 	shade.call(kit.pants[1], "pants", 0.1)
 	c.call(kit.gloves[0], "gloves")
-	c.call(pad_mat, "pads")
 	c.call(shoe_mats.upper, "shoes")
 	c.call(shoe_mats.accent, "shoeAccent")
 	c.call(goggle_mats.frame, "goggleFrame")
@@ -432,30 +413,7 @@ func set_style(s: Dictionary) -> void:
 		poles_arm.append(Vector3(-0.4 + 0.25 * eo, -0.5 + 0.4 * eo - float(style.elbowsDown), sd).normalized())
 
 
-## real cloth for the loose parts of the jersey (needs the .NET build; quietly skipped otherwise)
-func enable_cloth() -> void:
-	if cloth != null or not RiderCloth.available():
-		return
-	var m: StandardMaterial3D = kit.jersey[0]
-	m.cull_mode = BaseMaterial3D.CULL_DISABLED   # the cloth is a single sheet: both sides show
-	cloth = RiderCloth.new(self, m)
-	add_child(cloth)
-
 # ---------------- posing helpers ----------------
-
-## shoulder pads for one side: the cap sits over the joint facing out and up (away from the arm), long
-## axis front-to-back; the arm plate rides the outside of the upper arm a little lower
-func _place_pads(i: int, shp: Vector3, el: Vector3, chest: Vector3, fwd: Vector3) -> void:
-	var arm := (el - shp).normalized()
-	var out := shp - chest
-	out = (out - arm * out.dot(arm)).normalized() if out.length() > 1e-4 else Vector3(0, 1, 0)
-	var up := (out * 0.55 + Vector3.UP * 0.55 - arm * 0.6).normalized()
-	var b := _basis_from(up, fwd)
-	# the shell's rim sits just above the shoulder ball (r 0.062) so the dome stands proud of the jersey
-	pad_cap[i].transform = Transform3D(b.scaled_local(Vector3(1.3, 0.9, 1.1)), shp - up * 0.02)
-	var up2 := (out - arm * 0.25 + Vector3.UP * 0.15).normalized()
-	var b2 := _basis_from(up2, fwd)
-	pad_arm[i].transform = Transform3D(b2.scaled_local(Vector3(1.2, 0.8, 1.0)), shp + arm * 0.11 - up2 * 0.025)
 
 ## unit-height (+Y) cylinder between a and b
 static func set_limb(n: Node3D, a: Vector3, b: Vector3) -> void:
@@ -476,6 +434,66 @@ static func set_torso(n: Node3D, a: Vector3, b: Vector3, right: Vector3) -> void
 	var r := (right - d * right.dot(d)).normalized()
 	var f := d.cross(r)
 	n.transform = Transform3D(Basis(f, d * l, r), a + (b - a) * 0.5)
+
+
+# ---------------- the spine: the torso mesh is skinned to SPINE_BONES bones along its length so it can bend
+
+const SPINE_BONES := 5
+var spine_skel: Skeleton3D
+
+## weights each torso vertex to the two spine bones either side of its height (mesh y -0.5 .. 0.5)
+func _skin_torso() -> void:
+	var arr: Array = torso.mesh.surface_get_arrays(0)
+	var pos: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+	var bones := PackedInt32Array()
+	var wts := PackedFloat32Array()
+	bones.resize(pos.size() * 4)
+	wts.resize(pos.size() * 4)
+	var segs := SPINE_BONES - 1
+	for i in pos.size():
+		var u := clampf(pos[i].y + 0.5, 0.0, 1.0) * segs
+		var b0 := mini(int(u), segs - 1)
+		var w := u - b0
+		bones[i * 4] = b0
+		bones[i * 4 + 1] = b0 + 1
+		wts[i * 4] = 1.0 - w
+		wts[i * 4 + 1] = w
+	arr[Mesh.ARRAY_BONES] = bones
+	arr[Mesh.ARRAY_WEIGHTS] = wts
+	var m := ArrayMesh.new()
+	m.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+	torso.mesh = m
+	spine_skel = Skeleton3D.new()
+	spine_skel.name = "Spine"
+	add_child(spine_skel)
+	var skin := Skin.new()
+	for k in SPINE_BONES:
+		spine_skel.add_bone("s%d" % k)
+		skin.add_bind(k, Transform3D.IDENTITY)
+	torso.skin = skin
+	torso.skeleton = NodePath("../Spine")
+	torso.custom_aabb = AABB(Vector3(-3, -3, -3), Vector3(6, 6, 6))   # the bones move it anywhere
+
+## the torso from hip `a` to chest `b` as a curve: `curve` bows the back out (+, hunched) or in (-, arched),
+## `side` bows it sideways; `low` (0..1) moves the bend toward the hips (0) or the shoulders (1).
+## The cross-section turns from `right_lo` at the hips to `right_hi` at the chest (twist).
+func set_spine(a: Vector3, b: Vector3, right_lo: Vector3, right_hi: Vector3, curve := 0.0, side := 0.0, low := 0.5) -> void:
+	var d := b - a
+	var l := maxf(d.length(), 1e-4)
+	var dn := d / l
+	var r0 := (right_hi - dn * right_hi.dot(dn)).normalized()
+	var fwd := dn.cross(r0)   # toward the belly
+	var ctrl := a + d * clampf(low, 0.05, 0.95) - fwd * curve * l + r0 * side * l
+	for k in SPINE_BONES:
+		var t := float(k) / (SPINE_BONES - 1)
+		var p := a * (1 - t) * (1 - t) + ctrl * 2 * t * (1 - t) + b * t * t
+		var tg := (ctrl - a) * 2 * (1 - t) + (b - ctrl) * 2 * t
+		var tl := maxf(tg.length(), 1e-4)
+		var tn := tg / tl
+		var rr := right_lo.lerp(right_hi, t)
+		rr = (rr - tn * rr.dot(tn)).normalized()
+		var f := tn.cross(rr)
+		spine_skel.set_bone_pose(k, Transform3D(Basis(f, tn * tl, rr), p - tn * tl * (t - 0.5)))
 
 
 ## hand: +X along the forearm, +Z along the bar, +Y the back of the hand
@@ -536,20 +554,17 @@ func pose_ragdoll(P: Array) -> void:
 	var hp := [P[9], P[12]]
 	var kn := [P[10], P[13]]
 	var ft := [P[11], P[14]]
-	for i in mini(P.size(), J.size()):   # the cloth reads J: in a crash the rider sits at the world origin
-		J[i] = P[i]
 	var body_r: Vector3 = hp[1] - hp[0]
 	var bb := _basis_from(ch - pe, body_r)
 	pelvis_mesh.transform = Transform3D(bb, pe)
 	var hip: Vector3 = pe + (ch - pe).normalized() * 0.02
-	set_torso(torso, hip, ch, body_r)
+	set_spine(hip, ch, body_r.normalized(), (sh[1] - sh[0]).normalized())
 	set_limb(hood_hem, hip, hip.lerp(ch, 0.2))
 	hood.position = ch
 	var sh_r: Vector3 = sh[1] - sh[0]
 	head.transform = Transform3D(_basis_from(hd - ch, sh_r), hd)
 	for i in 2:
 		shoulder_sph[i].position = sh[i]
-		_place_pads(i, sh[i], el[i], ch, bb.x)
 		set_limb(upper_arm[i], sh[i], el[i])
 		set_limb(fore_arm[i], el[i], ha[i])
 		elbow[i].position = el[i]
@@ -733,8 +748,11 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var hip := Vector3(pelvis.x, pelvis.y + 0.02, pelvis.z)
 	var tw_axis := (chest - hip).normalized()
 	var tw := Basis(tw_axis, float(sty.twist))
-	set_torso(torso, hip, chest, tw * Vector3(0, 0, 1))
-	pelvis_mesh.transform = Transform3D(Basis(Vector3.BACK, -(ang * 0.3) - float(sty.pelvisTilt)), pelvis)
+	# pelvis: turn (yaw about up), roll (one hip drops, about forward), tilt (about the hip line)
+	var pel_b := Basis(Vector3.UP, float(sty.pelvisYaw)) * Basis(Vector3.RIGHT, float(sty.pelvisRoll))
+	set_spine(hip, chest, pel_b * Vector3(0, 0, 1), tw * Vector3(0, 0, 1),
+		float(sty.spineCurve), float(sty.spineSide), float(sty.spineLow))
+	pelvis_mesh.transform = Transform3D(pel_b * Basis(Vector3.BACK, -(ang * 0.3) - float(sty.pelvisTilt)), pelvis)
 	set_limb(hood_hem, Vector3(pelvis.x, pelvis.y + 0.04, pelvis.z), hip.lerp(chest, 0.2))
 
 	# neck / head
@@ -755,7 +773,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		var foot: Vector3 = p.get("footL" if i == 0 else "footR", Vector3.ZERO)
 		var hand: Vector3 = p.get("handL" if i == 0 else "handR", Vector3.ZERO)
 		# leg
-		var hp := Vector3(pelvis.x, pelvis.y - 0.02, pelvis.z + side * (0.11 + sty.stance))
+		var hp: Vector3 = pelvis + pel_b * Vector3(0, -0.02, side * (0.11 + sty.stance))
 		var ankle := Vector3(foot.x - 0.04 + sty.heelFwd, foot.y + 0.12 + sty.heelUp, foot.z)
 		var ik := solve_ik(hp, ankle, L_THIGH, L_SHIN, poles_leg[i])
 		set_limb(thigh[i], hp, ik[0])
@@ -778,7 +796,6 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		orient_hand(glove[i], ika[0], hand, right)
 		if sty.wristRoll != 0.0:
 			glove[i].rotate_object_local(Vector3.RIGHT, side * float(sty.wristRoll))
-		_place_pads(i, shp, ika[0], chest, Vector3(1, 0, 0))
 		J[3 + i * 3] = shp
 		J[4 + i * 3] = ika[0]
 		J[5 + i * 3] = hand

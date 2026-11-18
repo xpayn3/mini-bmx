@@ -89,6 +89,9 @@ func _ready() -> void:
 		stand_on = rcf.get_value("garage", "stand_on", true)
 	if OS.get_environment("BMX_GARAGE_RIDER") != "":   # tests: rider on, a preview, Rider tab
 		rider_on = true; rider_preview = OS.get_environment("BMX_GARAGE_RIDER"); stand_on = true
+		for kv in OS.get_environment("BMX_POSE").split(",", false):   # tests: "spineCurve=0.2,pelvisRoll=0.1" (not saved)
+			var p := kv.split("=")
+			if p.size() == 2: rider_pose[p[0]] = float(p[1])
 	if not PREVIEWS.has(rider_preview): rider_preview = "pedal"
 	_build_room()
 	add_child(cam)
@@ -367,7 +370,6 @@ func _add_rider() -> void:
 	rig.lean_g.add_child(rider)
 	rider.set_look(RiderPanels.load_look())
 	rider.set_style(rider_pose)
-	rider.enable_cloth()
 	if rig.seat != null: rider.seat = rig.seat
 	var grip := rig.grip_mid()
 	rider.fit = Vector3((grip.x - 0.4388) * 0.5, ((grip.y - 0.9646) + (rig.crank_n.position.y - 0.297)) * 0.5, 0)
@@ -441,7 +443,6 @@ func _update_stand_rider() -> void:
 		stand_rider.rotation.y = -PI / 2 + 0.35   # facing the camera, turned a little toward the bike
 		stand_rider.set_look(RiderPanels.load_look())
 		stand_rider.set_style(STAND_POSE)
-		stand_rider.enable_cloth()
 		# a soft warm fill from in front, so the kit colours read against the bright door
 		var fill := OmniLight3D.new()
 		fill.position = Vector3(0.9, 1.5, 0.6)   # rider space: in front of them, above head height
@@ -496,7 +497,6 @@ func _pose_rider(dt: float) -> void:
 		_spin_on_rollers(dt, cad * 2.78 * rig.wheel_rr * 0.55)   # wheel speed from the crank (gear ~2.8)
 	else:
 		_spin_on_rollers(dt, 2.0)   # coasting: the wheels keep turning on the drums
-	if rider.cloth: rider.cloth.air_extra = -rig.global_transform.basis.x * float(P.v)   # as if riding at that speed
 	var lt := rig.limb_targets()
 	rider.update_pose(dt, {"footL": lt.footL, "footR": lt.footR, "handL": lt.handL, "handR": lt.handR,
 		"v": P.v, "lean": 0.0, "steer": 0.0, "yawRate": 0.0, "counter": 0.0, "rockRoll": 0.0, "headRoll": 0.0,

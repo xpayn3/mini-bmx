@@ -38,6 +38,10 @@ var pitch := 0.0; var pitch_v := 0.0; var hop_nose := 0.0
 var air := false; var air_time := 0.0; var air_k := 0.0
 var compress := 0.0; var compress_v := 0.0; var load := 0.0
 var body_y := NAN; var body_v := 0.0; var body_x := 0.0; var hip_shift := 0.0
+# the rider's body as its own mass fore / aft: it lags the bike (braking and landings throw it forward,
+# drive pushes it back), and in the air the rider leans (W / S) and pulls the bike up (Space)
+var body_xv := 0.0; var hip_v := 0.0; var v_last := NAN
+var air_lean := 0.0; var air_pull := 0.0; var air_lock_w := false; var air_lock_s := false
 var wheel_f := 0.0; var wheel_r := 0.0; var crank := 0.0; var pedal := 0.0
 var yaw_rate := 0.0; var shake := 0.0
 var course := NAN; var slip := 0.0; var since_land := 1.0
@@ -130,6 +134,7 @@ func reset_at(px: float, pz: float, hd: float) -> void:
 	y = host.terrain.height(x, z); body_y = y; body_v = 0
 	n_f = NAN; n_r = NAN; n_ref = NAN; lip_state = 0; hf_prev = NAN; hr_prev = NAN
 	bank = 0; body_x = 0; hip_shift = 0; spin = 0; a_drive = 0; charge = 0; hop_charge = 0; lift_t = 0
+	body_xv = 0; hip_v = 0; v_last = NAN; air_lean = 0; air_pull = 0
 	sprint = 0; flow = 0; flow_t = 0; lat_m = 0; carve = 0; carve_acc = 0; carve_berm = false
 	y_draw = y; pitch_draw = 0; nose_ref = NAN; pitch_w = NAN; y_prev = NAN; face_max = 0; kick_t = 0
 	w_f = y; w_r = y
@@ -144,6 +149,7 @@ func get_up() -> void:
 	y = host.terrain.height(x, z); body_y = y; body_v = 0
 	n_f = NAN; n_r = NAN; n_ref = NAN; lip_state = 0; hf_prev = NAN; hr_prev = NAN
 	bank = 0; body_x = 0; hip_shift = 0; spin = 0; a_drive = 0; charge = 0; hop_charge = 0; lift_t = 0
+	body_xv = 0; hip_v = 0; v_last = NAN; air_lean = 0; air_pull = 0
 	sprint = 0; flow = 0; flow_t = 0; lat_m = 0; carve = 0; carve_acc = 0; carve_berm = false; y_draw = y; pitch_draw = 0
 
 func begin_crash() -> void:
@@ -244,6 +250,18 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	var brake_k: float = inp.brake
 	var brake := brake_k > 0.1
 	var steer_input: float = inp.steer
+	# air control: W leans forward (nose down), S back (nose up), Space pulls the bike up into the body.
+	# A key already held at take-off counts only once it is pressed again in the air.
+	if not air:
+		air_lock_w = throttle > 0.1; air_lock_s = brake
+	else:
+		if throttle <= 0.1: air_lock_w = false
+		if not brake: air_lock_s = false
+	var lean_in := 0.0
+	if air:
+		lean_in = (0.0 if air_lock_w else throttle) - (0.0 if air_lock_s else brake_k)
+	air_lean += (lean_in - air_lean) * minf(1.0, dt * 6)
+	air_pull += ((1.0 if air and inp.hop else 0.0) - air_pull) * minf(1.0, dt * 8)
 	var f := fwd()
 	_sample(f)
 	surf = terrain.surface(x, z)
@@ -531,9 +549,23 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			var R: float = T.weightShift
 			var x_brake: float = -0.8 * R * (1.0 if (brake and not air) else 0.0) + 0.5 * R * clampf(a_drive / 4, 0, 1)
 			var xT: float = 0.0 if air else x_brake + R * clampf(_g_pitch * 2.2, -1, 1)
-			var k := minf(1.0, dt * 6)
-			body_x += (clampf(xT, -R, R) - body_x) * k
-			hip_shift += (clampf(0.0 if air else x_brake, -R, R) - hip_shift) * k
+			# in the air the rider leans where they choose (W forward, S back)
+			if air:
+				xT = air_lean * R
+			var hT: float = air_lean * R if air else x_brake
+			# a damped spring to where the rider wants to be, pushed by the bike's own speed changes:
+			# the body carries on when the bike slows (braking, a landing, a root) and lags when it surges
+			var a_body := 0.0
+			if not is_nan(v_last) and not air:
+				a_body = clampf((v - v_last) / maxf(dt, 1e-4), -40.0, 40.0)
+			v_last = v
+			var kx: float = T.bodyStiff
+			var cx := 2 * sqrt(kx) * 0.75
+			var push: float = -a_body * T.bodyInertia
+			body_xv += (kx * (clampf(xT, -R, R) - body_x) - cx * body_xv + push) * dt
+			body_x = clampf(body_x + body_xv * dt, -R * 1.4, R * 1.4)
+			hip_v += (kx * (clampf(hT, -R, R) - hip_shift) - cx * hip_v + push) * dt
+			hip_shift = clampf(hip_shift + hip_v * dt, -R * 1.6, R * 1.6)
 		var tq: float = a_drive * T.loadHeight
 		var was_air := air
 		var vy_in := vy
@@ -574,6 +606,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 				var flight := 0.6 * atan2(vy, maxf(v, 1))
 				var near := 1 - smooth01((y - _g_y) / 0.7)
 				var pT := flight + (_g_pitch - flight) * near * (1.0 if vy < 0 else 0.0)
+				pT += -air_lean * T.airLean + air_pull * 0.06   # the rider's lean / pull steers the nose
 				alpha += 20 * (pT - pitch) - 7 * pitch_v
 			vy += (FF + FR - (press if (cF or cR) else 0.0) - mB * G - leg_f) / mB * h
 			pitch_v += alpha * h
@@ -755,9 +788,14 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		tgt += period * round((crank - tgt) / period)
 		crank += (tgt - crank) * minf(1.0, dt * 3.5)
 	if air:
-		var rel_t: float = T.legExt * land_prep
+		# legs reach for the landing; holding Space tucks the bike up into the body instead
+		var rel_t: float = T.legExt * land_prep - T.legComp * 0.85 * air_pull * (1 - land_prep)
 		var rel := _or(body_y, y) - _or(y_prev, y)
-		body_y = y + rel + (rel_t - rel) * (1 - exp(-dt * 12)); body_v = vy
+		var nrel := rel + (rel_t - rel) * (1 - exp(-dt * 12))
+		# body and bike push apart about their shared centre of mass, which flies on undisturbed:
+		# tucking lifts the bike, reaching down for the landing drops it
+		y -= clampf(T.riderMass, 0, 0.7) * (nrel - rel)
+		body_y = y + nrel; body_v = vy
 	y_prev = y
 
 	skid_fx = skid or spin > 0.3 or (not air and absf(slip) > 0.1 and va > 1.5)

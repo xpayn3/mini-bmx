@@ -243,13 +243,12 @@ func _show_controls() -> void:
 	close.grab_focus.call_deferred()
 
 # ---------------------------------------------------------------- unattended smoke test
+var _probe := {}
 func _autotest(seconds: float) -> void:
 	if OS.get_environment("BMX_SEED") != "":
 		GameState.seed = int(OS.get_environment("BMX_SEED"))
 		await _new_game()
 	_start_ride()
-	if OS.get_environment("BMX_CLOTH_PROBE") != "":
-		var probe = load("res://tools/cloth_probe.gd").new(); probe.game = game; add_child(probe)
 	if OS.get_environment("BMX_CAM") != "": game.cam.set_mode(OS.get_environment("BMX_CAM"))
 	var pedal := OS.get_environment("BMX_IDLE") == ""
 	if OS.get_environment("BMX_PANEL") != "": game.hud._toggle_side(OS.get_environment("BMX_PANEL"))
@@ -266,10 +265,20 @@ func _autotest(seconds: float) -> void:
 		if pedal and int(el) % 6 == 3: Input.action_press("steer_left")
 		else: Input.action_release("steer_left")
 		if pedal and int(el * 2) % 7 == 0: Input.action_press("hop")
+		elif OS.get_environment("BMX_AIRPULL") != "" and game.phys.air and game.phys.air_time > 0.1: Input.action_press("hop")   # tests: tuck in the air
 		else: Input.action_release("hop")
 		await get_tree().process_frame
+		if OS.get_environment("BMX_BODY_PROBE") != "":   # tests: the rider's body vs the bike
+			var ph = game.phys
+			_probe.hs_max = maxf(_probe.get("hs_max", 0.0), ph.hip_shift)
+			_probe.hs_min = minf(_probe.get("hs_min", 0.0), ph.hip_shift)
+			_probe.bx_max = maxf(_probe.get("bx_max", 0.0), absf(ph.body_x))
+			if ph.air:
+				_probe.air_f = _probe.get("air_f", 0) + 1
+				_probe.rel_min = minf(_probe.get("rel_min", 0.0), ph.body_y - ph.y)
+				_probe.pull_max = maxf(_probe.get("pull_max", 0.0), ph.air_pull)
 		frames += 1
-		tris += RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_PRIMITIVES_IN_FRAME)
+		tris +=RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_PRIMITIVES_IN_FRAME)
 		draws += RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME)
 	if OS.get_environment("BMX_PAUSE") != "":
 		_pause()
@@ -290,6 +299,7 @@ func _autotest(seconds: float) -> void:
 			await get_tree().process_frame
 			print("AUTOTEST resumed: paused=%s state_riding=%s" % [get_tree().paused, state == RIDING])
 	var st := game.phys
+	if not _probe.is_empty(): print("AUTOTEST body ", _probe)
 	print("AUTOTEST avg triangles/frame=%dk draw calls=%d" % [tris / maxi(frames, 1) / 1000, draws / maxi(frames, 1)])
 	print("AUTOTEST frames=%d fps=%.1f pos=(%.1f, %.1f, %.1f) v=%.2f crash=%s sane=%s" % [frames, frames / seconds, st.x, st.y, st.z, st.v, st.crash_on, st.is_sane()])
 	var shot := OS.get_environment("BMX_SHOT")

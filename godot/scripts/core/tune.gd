@@ -38,6 +38,7 @@ const DEFS := [
 	["Air", [
 		["airTurn", "Air twist speed", 0.7, 0, 3, 0.05, "rad/s"],
 		["airTwist", "Max air twist", 0.45, 0, 1.4, 0.05, "rad"],
+		["airLean", "Air lean (W / S) nose control", 0.35, 0, 0.8, 0.01, "rad"],
 	]],
 	["Wheels & pump", [
 		["tyreHz", "Bounce frequency", 3.2, 1.2, 7, 0.1, "Hz"],
@@ -67,6 +68,8 @@ const DEFS := [
 		["riderMass", "Body weight on legs", 0.45, 0, 0.7, 0.05, ""],
 		["weightShift", "Weight shift reach", 0.12, 0, 0.25, 0.01, "m"],
 		["loadHeight", "Weight transfer height", 0.25, 0, 1, 0.05, "m"],
+		["bodyStiff", "Body follows the bike", 60, 10, 200, 1, ""],
+		["bodyInertia", "Body thrown by braking / landings", 0.35, 0, 1.5, 0.01, ""],
 	]],
 	["Jumping", [
 		["prepTime", "Spot lip ahead", 0.55, 0.1, 1.2, 0.05, "s"],
