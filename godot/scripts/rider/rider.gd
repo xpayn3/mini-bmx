@@ -756,7 +756,8 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# torso from pelvis to chest
 	var hip := Vector3(pelvis.x, pelvis.y + 0.02, pelvis.z)
 	var tw_axis := (chest - hip).normalized()
-	var tw := Basis(tw_axis, float(sty.twist))
+	# spinning in the air: shoulders lead the bike round (the head turns via yawRate below)
+	var tw := Basis(tw_axis, float(sty.twist) + clampf(_num(p, "airSpin") * 0.07, -0.45, 0.45))
 	# pelvis: turn (yaw about up), roll (one hip drops, about forward), tilt (about the hip line)
 	var pel_b := Basis(Vector3.UP, float(sty.pelvisYaw)) * Basis(Vector3.RIGHT, float(sty.pelvisRoll))
 	set_spine(hip, chest, pel_b * Vector3(0, 0, 1), tw * Vector3(0, 0, 1),

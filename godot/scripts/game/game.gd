@@ -365,7 +365,7 @@ func burst(pos: Vector3, n: int, s: int, power: float) -> void:
 		if i % 2 == 0:
 			var cc: Color = DIRT_CHUNK if s == 1 else (dc * 0.8 if s == 3 else (GRASS_CHUNK if randf() < 0.5 else ROCK_CHUNK))
 			fx.chunk(Vector3(pos.x, pos.y + 0.05, pos.z), Vector3(cos(a) * r * 0.9, 1.2 + randf() * 1.8 * power, sin(a) * r * 0.9), cc, 0.028)
-	if audio: audio.thud(power)
+	# no thud sound on landings or knocks (the user found it annoying); smashing things still crunches
 
 func smash(c: Dictionary, vel: Vector3, pos: Vector3) -> bool:
 	if not terrain.break_collider(c, vel):
@@ -387,6 +387,7 @@ func rock_chips(c: Dictionary) -> void:
 func start_crash(reason: String) -> void:
 	phys.crash_pending = ""
 	if phys.crash_on: return
+	if OS.get_environment("BMX_TRICK") != "": print("CRASH ", reason, " v=%.1f air=%s" % [phys.v, phys.air])   # tests
 	var pts: Array = rider.joints_world()
 	var f := phys.fwd()
 	var body_vel := f * phys.v + Vector3(0, minf(maxf(phys.vy, 0), 6.0 if phys.air else 1.0) + 1.2, 0)
@@ -624,7 +625,8 @@ func _process(dt: float) -> void:
 			"counter": st.counter, "rockRoll": st.rock, "headRoll": st.bike_lean * 0.85,
 			"absorb": clampf(body_y - y_draw, -T.legComp, T.legExt), "pitch": p_draw, "bodyLevel": T.bodyLevel,
 			"attackDrop": T.attackDrop, "pedal": st.pedal, "sprint": st.sprint * st.pedal, "crank": st.crank,
-			"air": st.air_k, "compress": maxf(0.0, -st.compress), "hipShift": st.hip_shift, "t": t})
+			"air": st.air_k, "compress": maxf(0.0, -st.compress), "hipShift": st.hip_shift, "t": t,
+			"airSpin": st.yaw_rate if st.air else 0.0})
 	var vd: float = Settings.get_v("view_distance")
 	terrain.update_stream(st.x, st.z, 4.0)
 	biome_t -= dt

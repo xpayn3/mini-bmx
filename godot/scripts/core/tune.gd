@@ -38,7 +38,14 @@ const DEFS := [
 	["Air", [
 		["airTurn", "Air twist speed", 0.7, 0, 3, 0.05, "rad/s"],
 		["airTwist", "Max air twist", 0.45, 0, 1.4, 0.05, "rad"],
-		["airLean", "Air lean (W / S) nose control", 0.35, 0, 0.8, 0.01, "rad"],
+		["flipRate", "Flip speed (W / S held)", 6.0, 1, 12, 0.1, "rad/s"],
+		["flipAccel", "Flip snap", 28, 4, 80, 1, "rad/s²"],
+		["flipDamp", "Flip slows when let go", 0.8, 0, 6, 0.05, "/s"],
+		["spinRate", "Spin speed (A / D in the air)", 7.0, 1, 14, 0.1, "rad/s"],
+		["spinAccel", "Spin snap", 30, 4, 80, 1, "rad/s²"],
+		["spinDamp", "Spin slows when let go", 1.0, 0, 6, 0.05, "/s"],
+		["landPitch", "Landing angle allowed", 0.7, 0.2, 1.4, 0.05, "rad"],
+		["landTwist", "Landing twist allowed", 0.6, 0.2, 1.4, 0.05, "rad"],
 	]],
 	["Wheels & pump", [
 		["tyreHz", "Bounce frequency", 3.2, 1.2, 7, 0.1, "Hz"],

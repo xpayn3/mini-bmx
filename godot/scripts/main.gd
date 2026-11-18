@@ -301,6 +301,18 @@ func _autotest(seconds: float) -> void:
 				_probe.cam_dist_min = minf(_probe.get("cam_dist_min", 1e9), off.length())
 				_probe.cam_dist_max = maxf(_probe.get("cam_dist_max", 0.0), off.length())
 			_probe.cam_off = off
+		var trick := OS.get_environment("BMX_TRICK")   # tests: back / front / spin in every jump
+		if trick != "" and game.phys.air:
+			var ph = game.phys
+			Input.action_release("pedal"); Input.action_release("brake"); Input.action_release("steer_left")
+			if ph.air_time > 0.06:   # a fresh press after take-off (held keys are locked)
+				if trick == "back": Input.action_press("brake")
+				elif trick == "front": Input.action_press("pedal")
+				elif trick == "spin": Input.action_press("steer_left")
+			await get_tree().process_frame
+			continue
+		elif trick != "":
+			Input.action_release("brake")
 		if pedal and not straight and int(el) % 6 == 3: Input.action_press("steer_left")
 		else: Input.action_release("steer_left")
 		if pedal and not straight and int(el * 2) % 7 == 0: Input.action_press("hop")

@@ -130,7 +130,9 @@ func update_cam(dt: float) -> void:
 		dist = d
 	else:
 		if P.get("follow", false) and absf(st.v) > 0.5:
-			cam_yaw += BikePhysics.ang_diff(st.heading, cam_yaw) * minf(1.0, dt * P.get("rate", 1.4) * minf(1.0, absf(st.v) / 4))
+			# in the air follow the travel direction, not the bike (it may be spinning a 360)
+			var dir_h: float = st.course if st.air and not is_nan(st.course) else st.heading
+			cam_yaw += BikePhysics.ang_diff(dir_h, cam_yaw) * minf(1.0, dt * P.get("rate", 1.4) * minf(1.0, absf(st.v) / 4))
 		if P.has("spin"): orbit_t += P.spin * dt
 		orbit += (orbit_t - orbit) * minf(1.0, dt * 8)
 		cam_pitch += (cam_pitch_t - cam_pitch) * minf(1.0, dt * 8)

@@ -42,6 +42,8 @@ var body_y := NAN; var body_v := 0.0; var body_x := 0.0; var hip_shift := 0.0
 # drive pushes it back), and in the air the rider leans (W / S) and pulls the bike up (Space)
 var body_xv := 0.0; var hip_v := 0.0; var v_last := NAN
 var air_lean := 0.0; var air_pull := 0.0; var air_lock_w := false; var air_lock_s := false; var air_lock_h := false
+# air tricks: the rider's input this step, and how far the bike has turned since take-off (rad)
+var air_lock_a := false; var flip_in := 0.0; var spin_in := 0.0; var flip_acc := 0.0; var spin_acc := 0.0
 var wheel_f := 0.0; var wheel_r := 0.0; var crank := 0.0; var pedal := 0.0
 var yaw_rate := 0.0; var shake := 0.0
 var course := NAN; var slip := 0.0; var since_land := 1.0
@@ -137,7 +139,7 @@ func reset_at(px: float, pz: float, hd: float) -> void:
 	y = host.terrain.height(x, z); body_y = y; body_v = 0
 	n_f = NAN; n_r = NAN; n_ref = NAN; lip_state = 0; hf_prev = NAN; hr_prev = NAN
 	bank = 0; body_x = 0; hip_shift = 0; spin = 0; a_drive = 0; charge = 0; hop_charge = 0; lift_t = 0
-	body_xv = 0; hip_v = 0; v_last = NAN; air_lean = 0; air_pull = 0
+	body_xv = 0; hip_v = 0; v_last = NAN; air_lean = 0; air_pull = 0; flip_acc = 0; spin_acc = 0; flip_in = 0; spin_in = 0
 	sprint = 0; flow = 0; flow_t = 0; lat_m = 0; carve = 0; carve_acc = 0; carve_berm = false
 	y_draw = y; pitch_draw = 0; nose_ref = NAN; pitch_w = NAN; y_prev = NAN; face_max = 0; kick_t = 0
 	w_f = y; w_r = y
@@ -152,7 +154,7 @@ func get_up() -> void:
 	y = host.terrain.height(x, z); body_y = y; body_v = 0
 	n_f = NAN; n_r = NAN; n_ref = NAN; lip_state = 0; hf_prev = NAN; hr_prev = NAN
 	bank = 0; body_x = 0; hip_shift = 0; spin = 0; a_drive = 0; charge = 0; hop_charge = 0; lift_t = 0
-	body_xv = 0; hip_v = 0; v_last = NAN; air_lean = 0; air_pull = 0
+	body_xv = 0; hip_v = 0; v_last = NAN; air_lean = 0; air_pull = 0; flip_acc = 0; spin_acc = 0; flip_in = 0; spin_in = 0
 	sprint = 0; flow = 0; flow_t = 0; lat_m = 0; carve = 0; carve_acc = 0; carve_berm = false; y_draw = y; pitch_draw = 0
 
 func begin_crash() -> void:
@@ -253,19 +255,25 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	var brake_k: float = inp.brake
 	var brake := brake_k > 0.1
 	var steer_input: float = inp.steer
-	# air control: W leans forward (nose down), S back (nose up), Space pulls the bike up into the body.
-	# A key already held at take-off counts only once it is pressed again in the air.
+	# air control: W throws the nose down (front flip if held), S pulls it up (backflip if held), A / D spin
+	# the bike (360s), Space pulls the bike up into the body. W / S work at once; A / D and Space held at
+	# take-off count only once pressed again in the air (carving into a jump mustn't spin you).
 	if not air:
-		air_lock_w = throttle > 0.1; air_lock_s = brake; air_lock_h = inp.hop
+		air_lock_w = throttle > 0.1; air_lock_s = brake; air_lock_h = inp.hop; air_lock_a = absf(steer_input) > 0.1
 	else:
 		if throttle <= 0.1: air_lock_w = false
 		if not brake: air_lock_s = false
 		if not inp.hop: air_lock_h = false
+		if absf(steer_input) <= 0.1: air_lock_a = false
 	var lean_in := 0.0
-	if air:
-		lean_in = (0.0 if air_lock_w else throttle) - (0.0 if air_lock_s else brake_k)
+	if air:   # W / S act straight away, even if held from the ground (the user wants no re-press)
+		lean_in = throttle - brake_k
+	flip_in = -lean_in                                          # + = nose up (backflip)
+	spin_in = 0.0 if (not air or air_lock_a) else steer_input   # + = the steering direction
 	air_lean += (lean_in - air_lean) * minf(1.0, dt * 6)
-	air_pull += ((1.0 if air and inp.hop and not air_lock_h else 0.0) - air_pull) * minf(1.0, dt * 8)
+	# the rider tucks into a flip as well as when Space is held
+	var pull_t := maxf(1.0 if air and inp.hop and not air_lock_h else 0.0, 0.7 * absf(flip_in) if air else 0.0)
+	air_pull += (pull_t - air_pull) * minf(1.0, dt * 8)
 	var f := fwd()
 	_sample(f)
 	surf = terrain.surface(x, z)
@@ -413,9 +421,16 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 				if host.msg_idle(): host.flash("%s +%d km/h" % ["BERM" if carve_berm else "CARVE", roundi(gain * 3.6)])
 		carve_berm = (carve_berm or into_bank > 0.15) if carve > 0.6 else (carve_acc > 0 and carve_berm)
 	else:
-		var yaw_t: float = steer_input * T.airTurn if absf(steer_input) > 0.01 else -slip * 2.5
-		yaw_rate += (yaw_t - yaw_rate) * minf(1.0, dt * 4)
-		slip = clampf(slip + yaw_rate * dt, -T.airTwist, T.airTwist)
+		# spins: A / D turn the bike round its own axis, as far as you like (180s, 360s); let go and the
+		# turn carries on, slowed by the rider; a small twist with no spin left in it straightens up
+		if absf(spin_in) > 0.05:
+			yaw_rate += clampf((spin_in * T.spinRate - yaw_rate) * 7.0, -T.spinAccel, T.spinAccel) * dt
+		elif absf(slip) < T.airTwist and absf(yaw_rate) < 2.0:
+			yaw_rate += (-slip * 2.5 - yaw_rate) * minf(1.0, dt * 4)
+		else:
+			yaw_rate *= exp(-dt * T.spinDamp)
+		spin_acc += yaw_rate * dt
+		slip = wrapf(slip + yaw_rate * dt, -PI, PI)
 		heading = course + slip
 		lat_a = 0; lat_m = 0
 	var lean_t: float = lean * 0.98 if air else clampf(atan(lat_a / G), -T.leanMax + minf(0.0, bk), T.leanMax + maxf(0.0, bk))
@@ -609,12 +624,24 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			elif not cF:
 				var flight := 0.6 * atan2(vy, maxf(v, 1))
 				var near := 1 - smooth01((y - _g_y) / 0.7)
-				var pT := flight + (_g_pitch - flight) * near * (1.0 if vy < 0 else 0.0)
-				pT += -air_lean * T.airLean + air_pull * 0.06   # the rider's lean / pull steers the nose
-				alpha += 20 * (pT - pitch) - 7 * pitch_v
+				if absf(flip_in) > 0.05:
+					# the rider throws the bike round: it spins up toward the flip rate while the key is held
+					alpha += clampf((flip_in * T.flipRate - pitch_v) * 7.0, -T.flipAccel, T.flipAccel)
+				else:
+					# hands off: the rotation carries on, slowed by the rider. Only a bike that is already
+					# nearly lined up (within ~20 deg) gets helped to follow its arc / meet the landing;
+					# a long way off it keeps turning and the rider has to sort it out
+					alpha -= pitch_v * T.flipDamp
+					var pT := flight + (_g_pitch - flight) * near * (1.0 if vy < 0 else 0.0)
+					var err := wrapf(pT - pitch, -PI, PI)
+					var assist := 1.0 - smooth01((absf(err) - 0.35) / 0.4)
+					alpha += (20 * err - 7 * pitch_v) * assist
 			vy += (FF + FR - (press if (cF or cR) else 0.0) - mB * G - leg_f) / mB * h
 			pitch_v += alpha * h
 			y += vy * h; pitch += pitch_v * h
+			if not cF and not cR:   # in the air the bike can go all the way round (flips)
+				flip_acc += pitch_v * h
+				pitch = wrapf(pitch, -PI, PI)
 			# bottom-out
 			for wi in 2:
 				var xx := XF if wi == 0 else XR
@@ -653,7 +680,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		var gpC := asin(clampf((hfC - hrC) / L, -1, 1))
 		if cR and not cF and pitch - gpC > 0.6 and pitch - _local_slope(f, XR, RWR, cp0) > 1.15: crash_pending = "LOOPED OUT!"
 		elif cF and not cR and gpC - pitch > 0.6 and _local_slope(f, XF, RWF, cp0) - pitch > 1.15: crash_pending = "NOSE DIVE!"
-		if absf(pitch) > 1.45:
+		if absf(pitch) > 1.45 and (cF or cR):   # on the ground only: in the air flips go all the way round
 			pitch = signf(pitch) * 1.45; pitch_v = 0
 		if not now_air and (front_air or rear_air) and was_f and was_r: nose_ref = gpC - dP
 		if front_air and pitch - _or(nose_ref, _g_pitch) < -T.noseDive: crash_pending = "NOSE DIVE!"
@@ -672,7 +699,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 				if slap > 3.5: host.burst(Vector3(x + f.x * XF, _g_hf + 0.03, z + f.z * XF), 10, surf, 0.8)
 		c_f = cF; c_r = cR
 		if now_air and not was_air:
-			air = true; air_time = 0
+			air = true; air_time = 0; flip_acc = 0.0; spin_acc = 0.0
 			if not (kick_t > 0): vy = minf(vy, launch_cap)
 			if not natural and not is_step: vy += T.autoPop * prep
 			host.on_takeoff()
@@ -681,6 +708,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			var impact: float = maxf(0.0, vy_surf - vy_in) * cos(_g_pitch) / (LAND * (1 + T.landSoak * land_prep))
 			var at := air_time
 			if at > 0.3 and impact > 10.5: crash_pending = "SLAM!"
+			_land_trick(at)
 			air = false; since_land = 0
 			body_v = vy_in
 			nose_ref = _g_pitch
@@ -806,6 +834,34 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 
 	skid_fx = skid or spin > 0.3 or (not air and absf(slip) > 0.1 and va > 1.5)
 	host.ride_fx(dt, f, va, in_water)
+
+## touch-down after a jump: the bike must meet the slope roughly lined up and facing down the trail,
+## or the rider goes down; a clean flip / spin gets its name called out
+func _land_trick(at: float) -> void:
+	var flips := roundi(absf(flip_acc) / TAU)
+	var spins := roundi(absf(spin_acc) / TAU)
+	slip = wrapf(slip, -PI, PI)
+	if OS.get_environment("BMX_TRICK") != "":   # tests
+		print("TRICK air=%.2fs flip=%.0fdeg spin=%.0fdeg pitch_err=%.0fdeg twist=%.0fdeg" % [at, rad_to_deg(flip_acc),
+			rad_to_deg(spin_acc), rad_to_deg(absf(wrapf(pitch - _g_pitch, -PI, PI))), rad_to_deg(absf(slip))])
+	if at < 0.2:
+		return
+	var perr := absf(wrapf(pitch - _g_pitch, -PI, PI))
+	var twist := absf(slip)
+	if perr > T.landPitch:
+		crash_pending = ("UNDER-ROTATED!" if absf(flip_acc) > 1.5 else "BAD LANDING!")
+		return
+	if twist > T.landTwist:
+		crash_pending = "BACKWARDS!" if twist > 2.2 else "SIDEWAYS!"
+		return
+	var name := ""
+	if spins >= 1: name = str(spins * 360)
+	if flips >= 1:
+		var kind := "BACKFLIP" if flip_acc > 0 else "FRONTFLIP"
+		name += (" " if name != "" else "") + (["", "", "DOUBLE ", "TRIPLE "][mini(flips, 3)] if flips > 1 else "") + kind
+	if name != "":
+		host.flash(name + "!")
+		flow_up()
 
 func _local_slope(f: Vector3, xx: float, R: float, cp0: float) -> float:
 	return atan((_wheel_ground(f, xx + 0.05 / cp0, R, cp0) - _wheel_ground(f, xx - 0.05 / cp0, R, cp0)) / 0.1)
