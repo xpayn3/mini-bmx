@@ -19,6 +19,13 @@ const SUN := Vector3(0.3, 0.38, -0.87)
 var build: Dictionary
 var rig: BikeRig
 var outside: Node3D
+const SLAT := 0.2
+const DOOR_DELAY := 1.0     # s (after the garage is on screen) before the door starts to roll up
+const DOOR_TIME := 3.2      # s to roll it all the way up
+static var _door_opened_once := false   # the door rolls up on the first visit; it stays open after
+var door_slats: Node3D
+var door_open := 1.0
+var door_t := 0.0
 var cam := Camera3D.new()
 var orbit := 0.0
 var orbit_t := 0.0
@@ -181,6 +188,20 @@ func _build_room() -> void:
 	for sx in [-1, 1]:
 		_box(Vector3(0.1, DOOR_H, 0.14), Vector3(DOOR_X + sx * (dw + 0.05), DOOR_H / 2.0, -4.05), steel_dark)
 	_box(Vector3(DOOR_W + 0.2, 0.03, 0.3), Vector3(DOOR_X, 0.015, -4.2), _mat(Color(0.3, 0.3, 0.32), 0.5, 0.8))   # threshold strip
+	# the door curtain: ribbed steel slats that roll up into the drum (animated the first time)
+	door_slats = Node3D.new()
+	door_slats.name = "DoorSlats"
+	add_child(door_slats)
+	var slat_mat := _mat(Color(0.5, 0.52, 0.55), 0.5, 0.55)
+	var slat_n := ceili(DOOR_H / SLAT)
+	for i in slat_n:
+		var b := BoxMesh.new(); b.size = Vector3(DOOR_W - 0.04, SLAT - 0.012, 0.05)
+		var mi := MeshInstance3D.new(); mi.mesh = b; mi.material_override = slat_mat
+		mi.set_meta("y0", SLAT * (i + 0.5))
+		door_slats.add_child(mi)
+	door_slats.position = Vector3(DOOR_X, 0, -4.12)
+	door_open = 1.0 if _door_opened_once else 0.0
+	_place_slats()
 	_box(Vector3(0.2, 5, 12), Vector3(-7, 2.5, 1.8), wall)
 	_box(Vector3(0.2, 5, 12), Vector3(7, 2.5, 1.8), wall)
 	_box(Vector3(14.2, 0.2, 12.2), Vector3(0, 5, 1.8), _mat(Color(0.08, 0.08, 0.09)))
@@ -304,7 +325,24 @@ func _changed() -> void:
 	_update_stats()
 
 # ================================================================ camera
+## slats ride up by door_open * DOOR_H; any that reach the drum disappear into it
+func _place_slats() -> void:
+	var lift := DOOR_H * door_open
+	for mi in door_slats.get_children():
+		var y: float = mi.get_meta("y0") + lift
+		mi.position.y = y
+		mi.visible = y < DOOR_H - SLAT * 0.3
+
 func _process(dt: float) -> void:
+	if door_open < 1.0:
+		door_t += minf(dt, 0.05)   # the first frame after the long build has a huge dt: don't let it eat the wait
+		var k := clampf((door_t - DOOR_DELAY) / DOOR_TIME, 0.0, 1.0)
+		var e := k * k * (3.0 - 2.0 * k)
+		door_open = minf(1.0, e + sin(k * 37.0) * 0.004 * (1.0 - k) * k * 4.0)   # a little motor judder
+		if k >= 1.0:
+			door_open = 1.0
+			_door_opened_once = true
+		_place_slats()
 	if _dirty > 0:
 		_dirty -= dt
 		if _dirty <= 0: _rebuild_bike()
