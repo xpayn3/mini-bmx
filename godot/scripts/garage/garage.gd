@@ -11,10 +11,10 @@ const SWATCHES := ["e8432e", "ff6a00", "ffb000", "ffd21f", "c6ff1a", "35d04a", "
 
 const DOOR_W := 3.6
 const DOOR_H := 3.2
-const DOOR_X := 3.0   # the door sits off to the right; brick wall straight behind the bike
+const DOOR_X := 0.0   # the door is straight behind the bike
 ## the garage's sun: low, behind the open door (toward -Z), a little to the left, so daylight falls
 ## in through the doorway across the floor
-const SUN := Vector3(0.3, 0.38, -0.87)
+const SUN := Vector3(0.12, 0.38, -0.92)
 
 var build: Dictionary
 var rig: BikeRig
@@ -222,9 +222,9 @@ func _build_room() -> void:
 	_cyl(0.18, 0.04, Vector3(-4.1, 2.25, -4.01), chrome, Vector3(PI / 2, 0, 0))   # a chainring on the wall
 	# red tool cabinet + a stack of tyres on the right
 	var red := _mat(Color("b3261e"), 0.35, 0.3)
-	_box(Vector3(1.0, 1.1, 0.55), Vector3(-2.2, 0.55, -3.75), red)
+	_box(Vector3(1.0, 1.1, 0.55), Vector3(3.4, 0.55, -3.75), red)
 	for i in 5:
-		_box(Vector3(0.92, 0.01, 0.02), Vector3(-2.2, 0.2 + i * 0.2, -3.47), chrome)
+		_box(Vector3(0.92, 0.01, 0.02), Vector3(3.4, 0.2 + i * 0.2, -3.47), chrome)
 	var rubber := _mat(Color(0.06, 0.06, 0.06), 0.85)
 	for i in 4:
 		var t := TorusMesh.new(); t.inner_radius = 0.25; t.outer_radius = 0.37
