@@ -97,6 +97,10 @@ var defaults := {}
 var base := {}       # the player's slider values (before the bike's ride multipliers)
 var ride := {}       # multipliers for the bike being ridden
 var v := {}          # effective values: base * ride (what the physics reads)
+const DEFAULT_PINS := ["slowSteer", "turnWeight", "rollRes", "flowCarry", "carveBoost", "chargePop"]
+var pins: Array = DEFAULT_PINS.duplicate()   # sliders on the Quick tune card
+var quick_folded := false
+signal pins_changed
 
 func _ready() -> void:
 	for g in DEFS:
@@ -108,6 +112,8 @@ func _ready() -> void:
 		for k in cf.get_section_keys("tune") if cf.has_section("tune") else []:
 			if defaults.has(k):
 				base[k] = float(cf.get_value("tune", k))
+		pins = cf.get_value("ui", "pins", pins)
+		quick_folded = cf.get_value("ui", "quick_folded", false)
 	_rebuild()
 
 func set_ride(mult: Dictionary) -> void:
@@ -128,7 +134,21 @@ func save() -> void:
 	var cf := ConfigFile.new()
 	for k in base:
 		cf.set_value("tune", k, base[k])
+	cf.set_value("ui", "pins", pins)
+	cf.set_value("ui", "quick_folded", quick_folded)
 	cf.save(PATH)
+
+func toggle_pin(k: String) -> void:
+	if k in pins: pins.erase(k)
+	else: pins.append(k)
+	save()
+	pins_changed.emit()
+
+func row(k: String) -> Array:
+	for g in DEFS:
+		for r in g[1]:
+			if r[0] == k: return r
+	return []
 
 func _rebuild() -> void:
 	for k in base:

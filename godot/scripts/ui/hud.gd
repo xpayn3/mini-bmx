@@ -22,7 +22,7 @@ var getup_bar: BarView
 var getup_l: Label
 var air_card: AirCard
 var records_panel: PanelContainer
-var tune_panel: Control
+var quick: Control
 var fps_acc := 0.0
 var fps_frames := 0
 var msg_a := 0.0
@@ -52,7 +52,7 @@ func _ready() -> void:
 	root.add_child(msg_l)
 	biome_l = UITheme.label("", 13, UITheme.MUTED)
 	biome_l.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	biome_l.position = Vector2(-240, 40)
+	biome_l.position = Vector2(-240, 38)
 	biome_l.size = Vector2(222, 20)
 	biome_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	root.add_child(biome_l)
@@ -90,6 +90,9 @@ func _ready() -> void:
 	air_card.size = Vector2(230, 110); air_card.position = Vector2(-115, 14)
 	root.add_child(air_card)
 	_build_records()
+	quick = load("res://scripts/ui/quick_tune.gd").new()
+	quick.hud = self
+	root.add_child(quick)
 	gear_changed()
 	apply_settings()
 	root.resized.connect(_layout)
@@ -133,17 +136,40 @@ func _unhandled_input(e: InputEvent) -> void:
 	elif e.is_action_pressed("toggle_hud") and not e.is_echo():
 		hidden = not hidden; root.visible = not hidden
 	elif e.is_action_pressed("tune") and not e.is_echo():
-		if tune_panel == null:
-			tune_panel = load("res://scripts/ui/tune_panel.gd").new()
-			root.add_child(tune_panel)
-		else:
-			tune_panel.visible = not tune_panel.visible
+		toggle_tune()
+	elif e.is_action_pressed("pose_panel") and not e.is_echo():
+		_toggle_side("pose")
+	elif e.is_action_pressed("look_panel") and not e.is_echo():
+		_toggle_side("look")
 	elif e.is_action_pressed("screenshot") and not e.is_echo():
 		var dir := "user://screenshots"
 		DirAccess.make_dir_recursive_absolute(dir)
 		var p := "%s/bmx_%s.png" % [dir, Time.get_datetime_string_from_system().replace(":", "-")]
 		get_viewport().get_texture().get_image().save_png(p)
 		flash("Screenshot saved")
+
+var side_panels := {}
+
+## the right-hand panels (P tuning, K rider position, L rider look): one at a time
+func toggle_tune() -> void:
+	_toggle_side("tune")
+
+func _toggle_side(which: String) -> void:
+	var was_open: bool = side_panels.has(which) and side_panels[which].visible
+	for k in side_panels: side_panels[k].visible = false
+	if was_open:
+		quick.visible = true
+		return
+	if not side_panels.has(which):
+		var p: Control
+		match which:
+			"tune": p = load("res://scripts/ui/tune_panel.gd").new()
+			"pose": p = RiderPanels.PosePanel.new(game)
+			"look": p = RiderPanels.LookPanel.new(game)
+		root.add_child(p)
+		side_panels[which] = p
+	side_panels[which].visible = true
+	quick.visible = false
 
 func _build_records() -> void:
 	records_panel = PanelContainer.new()
@@ -268,8 +294,9 @@ class GearView extends Control:
 		var f := UITheme.font(true)
 		var n := st.cogs.size()
 		var w := 300.0 + n * 12.0 if st.gear >= 0 else 200.0
-		position = Vector2(-w / 2, -66)
-		size = Vector2(w, 54)
+		# anchored to the bottom centre: offsets, not position (position is from the parent's corner)
+		if not is_equal_approx(offset_right - offset_left, w):
+			offset_left = -w / 2; offset_right = w / 2; offset_top = -66; offset_bottom = -12
 		draw_style_box(UITheme.box(Color(0.08, 0.15, 0.2, 0.72), 18, 0, Color(1, 1, 1, 0.14), 1), Rect2(Vector2.ZERO, size))
 		if st.gear < 0:
 			draw_string(f, Vector2(18, 16), "GEAR", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, UITheme.MUTED)

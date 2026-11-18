@@ -14,7 +14,7 @@ func _ready() -> void:
 	head.add_child(t)
 	head.add_child(UITheme.button("Reset", func(): Tune.reset_defaults(); _rebuild(), 14))
 	vb.add_child(head)
-	vb.add_child(UITheme.label("Values are scaled by the bike you ride. P closes.", 12, UITheme.MUTED))
+	vb.add_child(UITheme.label("Scaled by the bike you ride · ☆ pins to Quick tune · P closes", 12, UITheme.MUTED))
 	var sc := ScrollContainer.new()
 	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -45,7 +45,14 @@ func _rebuild() -> void:
 			vl.custom_minimum_size.x = 70
 			vl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 			s.value_changed.connect(func(v): vl.text = _fmt(v, row[6]); Tune.set_value(key, v))
-			hb.add_child(l); hb.add_child(s); hb.add_child(vl)
+			var pin := Button.new()
+			pin.text = "★" if key in Tune.pins else "☆"
+			pin.tooltip_text = "Pin to the Quick tune card"
+			pin.focus_mode = Control.FOCUS_NONE
+			pin.flat = true
+			pin.add_theme_color_override("font_color", UITheme.ACCENT if key in Tune.pins else UITheme.MUTED)
+			pin.pressed.connect(func(): Tune.toggle_pin(key); _rebuild())
+			hb.add_child(pin); hb.add_child(l); hb.add_child(s); hb.add_child(vl)
 			list.add_child(hb)
 
 func _fmt(v: float, unit: String) -> String:

@@ -1,6 +1,6 @@
 class_name TerrainDebris
 extends Node3D
-## Rigid-body debris for smashed fences, cacti and tape (replaces the JS debris.js / TapeSim):
+## Rigid-body debris for smashed fences and cacti (replaces the JS debris.js; torn tape is TapeSim):
 ## Godot physics bodies on layer 4 that only collide with the chunk ground (layer 2), auto-freed.
 
 const LAYER := 1 << 3
@@ -119,32 +119,3 @@ func smash_cactus(rec: Dictionary, vel: Vector3) -> void:
 		var v := Vector3(vel.x * (0.35 + 0.4 * up) + _rs() * 1.5, maxf(0, vel.y) * 0.3 + (0.8 + randf() * 1.8) * up, vel.z * (0.35 + 0.4 * up) + _rs() * 1.5)
 		var spin := 2 + sp * 0.7 * up
 		spawn(pc["mesh"], scl, rec["col"], Transform3D(rot, c), pc["size"] * scl, v, Vector3(_rs() * spin, _rs() * spin, _rs() * spin), 2.0)
-
-
-## tape.js snap (simplified: the two torn halves become light foil shreds that float off downwind)
-func snap_tape(span: Dictionary, vel: Vector3, hit: Vector2) -> void:
-	var pts: PackedVector3Array = span["pts"]
-	var bi := 1
-	var bd := INF
-	for i in range(1, pts.size() - 1):
-		var d := Vector2(pts[i].x - hit.x, pts[i].z - hit.y).length()
-		if d < bd:
-			bd = d
-			bi = i
-	var cols: Array = span["cols"]
-	for h in 2:
-		var a := pts[0] if h == 0 else pts[pts.size() - 1]
-		var b := pts[bi]
-		var mid := (a + b) * 0.5
-		var dir := b - a
-		var L := dir.length()
-		if L < 0.05:
-			continue
-		var rot := Basis.looking_at(dir.normalized(), Vector3.UP) if absf(dir.normalized().y) < 0.99 else Basis()
-		var n := clampi(int(L / 0.6), 1, 3)
-		for k in n:
-			var p := a.lerp(b, (k + 0.5) / n)
-			var v := Vector3(vel.x * 0.4 + _rs() * 0.6, 0.6 + randf() * 1.2, vel.z * 0.4 + _rs() * 0.6)
-			var len := L / n
-			spawn(TerrainGeo.MESH["box"], Vector3(0.075, 0.006, len), cols[k & 1], Transform3D(rot, p), Vector3(0.075, 0.01, len), v,
-				Vector3(_rs() * 6, _rs() * 6, _rs() * 6), 0.02, 2.5, 0.35)

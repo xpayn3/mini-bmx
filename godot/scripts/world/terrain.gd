@@ -35,11 +35,15 @@ var _indices_n: int = -1
 var _ground_shader: Shader = preload("res://scripts/world/ground.gdshader")
 var _tape_mat: ShaderMaterial
 var _debris: TerrainDebris
+var _tapes: TapeSim              # torn tape ribbons (tape.js TapeSim)
+var _focus := Vector2.ZERO       # last update_stream() position: the torn tape simulates near it
 var _water: TerrainWater
 var _broken: Array = []          # [{kind, rec}] for clear_dynamic()
 var _time: float = 0.0
 var _wind_t: float = 0.0
 var _wind_ph: float = 0.0
+var _wind_dir := Vector3(0.8, 0, 0.6)
+var _wind_ws: float = 6.0
 var last_finalize_ms: float = 0.0
 var last_build_ms: float = 0.0
 
@@ -52,6 +56,10 @@ func _init() -> void:
 	_debris = TerrainDebris.new()
 	_debris.name = "Debris"
 	add_child(_debris)
+	_tapes = TapeSim.new()
+	_tapes.name = "TornTape"
+	_tapes.terrain = self
+	add_child(_tapes)
 	_water = TerrainWater.new()
 	_water.name = "Water"
 	_water.terrain = self
@@ -67,6 +75,7 @@ func _process(delta: float) -> void:
 	_time += delta
 	(TerrainGeo.MAT["flower"] as ShaderMaterial).set_shader_parameter("u_time", _time)
 	_update_wind(delta)
+	_tapes.update(delta, _focus.x, _focus.y, _wind_t, _wind_dir, _wind_ws)
 
 
 # ======================================================================
@@ -86,6 +95,8 @@ func set_seed(seed_in: int) -> void:
 	_broken.clear()
 	if _debris:
 		_debris.clear()
+	if _tapes:
+		_tapes.clear()
 	field = TerrainField.new()
 	field.setup(seed_in)
 	if _water:
@@ -94,6 +105,7 @@ func set_seed(seed_in: int) -> void:
 
 func clear_dynamic() -> void:
 	_debris.clear()
+	_tapes.clear()
 	for b in _broken:
 		var rec: Dictionary = b["rec"]
 		rec["broken"] = false
@@ -220,6 +232,7 @@ func _max_jobs() -> int:
 
 func update_stream(px: float, pz: float, budget_ms: float = 4.0) -> void:
 	var t0 := Time.get_ticks_usec()
+	_focus = Vector2(px, pz)
 	var ccx := WorldRng.jround(px / SIZE)
 	var ccz := WorldRng.jround(pz / SIZE)
 	var R := RADIUS
@@ -570,7 +583,8 @@ func grid_height(x: float, z: float) -> float:
 # ======================================================================
 # breakables
 # ======================================================================
-## fences / cacti / tape: smash it (hide the visual, throw rigid-body debris). Returns true if it broke.
+## fences / cacti: smash it (hide the visual, throw rigid-body debris); tape: snap it (hide the span, hand
+## its two halves to the ribbon sim). Returns true if it broke.
 func break_collider(c: Dictionary, vel: Vector3) -> bool:
 	if c.has("fence"):
 		var panel: Dictionary = c["fence"]
@@ -605,7 +619,7 @@ func break_collider(c: Dictionary, vel: Vector3) -> bool:
 		var ch = chunks.get(sp.get("chunk"))
 		if ch != null:
 			_rebuild_tape(ch)
-		_debris.snap_tape(sp, vel, Vector2(c["x"], c["z"]))
+		_tapes.snap(sp, Vector2(c["x"], c["z"]), vel)
 		return true
 	return false
 
@@ -624,6 +638,8 @@ func _update_wind(dt: float) -> void:
 	var ang := atan2(0.6, 0.8) + sin(t * 0.05) * 0.8 + sin(t * 0.21) * 0.25
 	var gust := 0.55 + 0.45 * (0.5 + 0.5 * sin(t * 0.7) * sin(t * 0.31 + 1.3)) + 0.25 * maxf(0, sin(t * 1.9) * sin(t * 0.45))
 	var ws := 4.0 * gust * 1.5
+	_wind_dir = Vector3(cos(ang), 0, sin(ang))
+	_wind_ws = ws
 	_wind_ph += dt * (4.5 + ws * 0.7)
 	_tape_mat.set_shader_parameter("u_time", t)
 	_tape_mat.set_shader_parameter("u_wind", Vector3(cos(ang), 0, sin(ang)) * ws)

@@ -177,9 +177,9 @@ func _pause() -> void:
 	get_tree().paused = true
 	pause_menu = PanelContainer.new()
 	pause_menu.theme = UITheme.get_theme()
-	pause_menu.set_anchors_preset(Control.PRESET_CENTER)
 	pause_menu.custom_minimum_size = Vector2(360, 0)
 	ui.add_child(pause_menu)
+	UITheme.centre(pause_menu)
 	var vb := VBoxContainer.new()
 	vb.add_theme_constant_override("separation", 10)
 	pause_menu.add_child(vb)
@@ -192,9 +192,7 @@ func _pause() -> void:
 	vb.add_child(UITheme.button("Controls", _show_controls))
 	vb.add_child(UITheme.button("Main menu", func(): _close_pause(); GameState.save(); _show_menu()))
 	vb.add_child(UITheme.button("Quit to desktop", func(): GameState.save(); get_tree().quit()))
-	await get_tree().process_frame
-	pause_menu.position = -pause_menu.size / 2
-	resume.grab_focus()
+	resume.grab_focus.call_deferred()
 
 func _close_pause() -> void:
 	if pause_menu: pause_menu.queue_free(); pause_menu = null
@@ -211,14 +209,17 @@ func _open_settings() -> void:
 	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
 	ui.add_child(dim)
 	settings_open = load("res://scripts/ui/settings_menu.gd").new()
-	settings_open.closed.connect(func(): dim.queue_free(); settings_open = null)
+	if pause_menu: pause_menu.visible = false
+	settings_open.closed.connect(func():
+		dim.queue_free(); settings_open = null
+		if pause_menu: pause_menu.visible = true)
 	ui.add_child(settings_open)
 
 func _show_controls() -> void:
 	var p := PanelContainer.new()
 	p.theme = UITheme.get_theme()
-	p.set_anchors_preset(Control.PRESET_CENTER)
 	ui.add_child(p)
+	UITheme.centre(p)
 	var vb := VBoxContainer.new()
 	p.add_child(vb)
 	vb.add_child(UITheme.label("CONTROLS", 24, UITheme.ACCENT, true))
@@ -233,15 +234,14 @@ func _show_controls() -> void:
 	vb.add_child(UITheme.label("Mouse drag: orbit · wheel: zoom · hold hop at a lip to pop higher · carve: hold a turn at speed", 13, UITheme.MUTED))
 	var close := UITheme.button("Close", func(): p.queue_free())
 	vb.add_child(close)
-	await get_tree().process_frame
-	p.position = -p.size / 2
-	close.grab_focus()
+	close.grab_focus.call_deferred()
 
 # ---------------------------------------------------------------- unattended smoke test
 func _autotest(seconds: float) -> void:
 	_start_ride()
 	if OS.get_environment("BMX_CAM") != "": game.cam.set_mode(OS.get_environment("BMX_CAM"))
 	var pedal := OS.get_environment("BMX_IDLE") == ""
+	if OS.get_environment("BMX_PANEL") != "": game.hud._toggle_side(OS.get_environment("BMX_PANEL"))
 	var t0 := Time.get_ticks_msec()
 	var frames := 0
 	while (Time.get_ticks_msec() - t0) / 1000.0 < seconds:
@@ -253,6 +253,10 @@ func _autotest(seconds: float) -> void:
 		else: Input.action_release("hop")
 		await get_tree().process_frame
 		frames += 1
+	if OS.get_environment("BMX_PAUSE") != "":
+		_pause()
+		if OS.get_environment("BMX_PAUSE") == "settings": _open_settings()
+		for i in 10: await get_tree().process_frame
 	var st := game.phys
 	print("AUTOTEST frames=%d fps=%.1f pos=(%.1f, %.1f, %.1f) v=%.2f crash=%s sane=%s" % [frames, frames / seconds, st.x, st.y, st.z, st.v, st.crash_on, st.is_sane()])
 	var shot := OS.get_environment("BMX_SHOT")

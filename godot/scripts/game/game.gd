@@ -71,8 +71,8 @@ func _ready() -> void:
 	ragdoll = Ragdoll.new(terrain)
 	rider = load("res://scripts/rider/rider.gd").new()
 	rig.lean_g.add_child(rider)
-	rider.set_look(Rider.DEFAULT_LOOK)
-	rider.set_style(bike_cfg.pose)
+	rider.set_look(RiderPanels.load_look())
+	rider.set_style(RiderPanels.load_pose(GameState.bike_id, bike_cfg.pose))
 	phys.bike_rock = float(rider.style.get("bikeRock", 1.0)) if rider.get("style") is Dictionary else 1.0
 	if rig.seat != null: rider.seat = rig.seat
 	var grip := rig.grip_mid()

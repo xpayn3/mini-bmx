@@ -121,3 +121,10 @@ static func button(text: String, cb: Callable, size := 19) -> Button:
 	b.pressed.connect(cb)
 	b.custom_minimum_size = Vector2(0, 44)
 	return b
+
+
+## Keep a panel centred on screen whatever its size (grows out from the middle).
+static func centre(c: Control) -> void:
+	c.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	c.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	c.grow_vertical = Control.GROW_DIRECTION_BOTH

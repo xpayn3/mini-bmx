@@ -11,9 +11,8 @@ var _controls_box: VBoxContainer
 func _ready() -> void:
 	theme = UITheme.get_theme()
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	set_anchors_preset(Control.PRESET_CENTER)
-	custom_minimum_size = Vector2(760, 600)
-	position = -custom_minimum_size / 2
+	custom_minimum_size = Vector2(820, 640)
+	UITheme.centre.call_deferred(self)
 	var vb := VBoxContainer.new()
 	vb.add_theme_constant_override("separation", 12)
 	add_child(vb)
@@ -26,10 +25,8 @@ func _ready() -> void:
 	var tabs := TabContainer.new()
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vb.add_child(tabs)
-	tabs.add_child(_graphics())
-	tabs.add_child(_gameplay())
-	tabs.add_child(_audio())
-	tabs.add_child(_controls())
+	for page in [_display(), _graphics(), _audio(), _gameplay(), _interface(), _controls()]:
+		tabs.add_child(page.get_parent())   # the page's ScrollContainer
 
 func _close() -> void:
 	closed.emit()
@@ -68,7 +65,7 @@ func _check(parent: Control, text: String, key: String, tip := "") -> void:
 	cb.toggled.connect(func(on): Settings.set_v(key, on))
 	_row(parent, text, cb, tip)
 
-func _slider(parent: Control, text: String, key: String, lo: float, hi: float, stepv: float, fmt := "%.2f") -> void:
+func _slider(parent: Control, text: String, key: String, lo: float, hi: float, stepv: float, fmt := "%.2f", tip := "") -> void:
 	var hb := HBoxContainer.new()
 	var s := HSlider.new()
 	s.min_value = lo; s.max_value = hi; s.step = stepv
@@ -80,34 +77,58 @@ func _slider(parent: Control, text: String, key: String, lo: float, hi: float, s
 	vl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	s.value_changed.connect(func(v): vl.text = fmt % v; Settings.set_v(key, v))
 	hb.add_child(s); hb.add_child(vl)
-	_row(parent, text, hb)
+	_row(parent, text, hb, tip)
 
-func _graphics() -> Control:
-	var p := _page("Graphics")
-	_option(p, "Display", "window_mode", ["Windowed", "Borderless fullscreen", "Exclusive fullscreen"])
+func _display() -> Control:
+	var p := _page("Display")
+	_option(p, "Display mode", "window_mode", ["Windowed", "Borderless fullscreen", "Exclusive fullscreen"])
+	var res := OptionButton.new()
+	var list := [""] + Array(Settings.RESOLUTIONS)
+	for r in list: res.add_item("Desktop / default" if r == "" else r.replace("x", " × "))
+	res.selected = maxi(0, list.find(Settings.get_v("resolution")))
+	res.item_selected.connect(func(i): Settings.set_v("resolution", list[i]))
+	_row(p, "Resolution", res, "Window size, or the screen mode in exclusive fullscreen")
+	var mon := OptionButton.new()
+	mon.add_item("Current screen")
+	for i in DisplayServer.get_screen_count():
+		var sz := DisplayServer.screen_get_size(i)
+		mon.add_item("Screen %d  (%d × %d)" % [i + 1, sz.x, sz.y])
+	mon.selected = int(Settings.get_v("monitor")) + 1
+	mon.item_selected.connect(func(i): Settings.set_v("monitor", i - 1))
+	_row(p, "Monitor", mon)
 	_check(p, "V-Sync", "vsync")
 	var fps := OptionButton.new()
-	var caps := [0, 30, 60, 120, 144, 165, 240]
+	var caps := [0, 30, 60, 75, 120, 144, 165, 240]
 	for c in caps: fps.add_item("Unlimited" if c == 0 else "%d FPS" % c)
 	fps.selected = maxi(0, caps.find(int(Settings.get_v("max_fps"))))
 	fps.item_selected.connect(func(i): Settings.set_v("max_fps", caps[i]))
 	_row(p, "Frame rate cap", fps)
+	_slider(p, "Brightness", "brightness", 0.6, 1.5, 0.05, "%.2f")
+	_slider(p, "Field of view", "fov", -10.0, 20.0, 1.0, "%+.0f°")
 	_slider(p, "3D resolution", "render_scale", 0.5, 1.0, 0.05, "%.2fx")
 	_option(p, "Upscaler", "upscaler", ["Bilinear", "AMD FSR 1", "AMD FSR 2"], "Used when 3D resolution is below 100%")
-	_option(p, "MSAA", "msaa", ["Off", "2x", "4x", "8x"])
-	_check(p, "FXAA", "fxaa")
-	_check(p, "TAA", "taa")
-	_option(p, "Shadows", "shadows", ["Low", "Medium", "High", "Ultra"])
-	_check(p, "Ambient occlusion", "ssao")
-	_check(p, "Bloom", "bloom")
-	_check(p, "Tilt-shift (miniature look)", "tilt_shift")
-	_check(p, "Colour grade + vignette", "grade")
-	_slider(p, "View distance", "view_distance", 0.6, 2.0, 0.1, "%.1fx")
+	return p
+
+func _graphics() -> Control:
+	var p := _page("Graphics")
 	var presets := HBoxContainer.new()
 	presets.add_theme_constant_override("separation", 8)
 	for pr in [["Low", 0], ["Medium", 1], ["High", 2], ["Ultra", 3]]:
 		presets.add_child(UITheme.button(pr[0], _preset.bind(pr[1]), 15))
 	_row(p, "Quick preset", presets)
+	_option(p, "Anti-aliasing (MSAA)", "msaa", ["Off", "2x", "4x", "8x"])
+	_check(p, "FXAA", "fxaa")
+	_check(p, "TAA", "taa", "Temporal anti-aliasing: smoothest edges, slightly softer image")
+	_option(p, "Texture filtering", "aniso", ["Bilinear", "2x anisotropic", "4x anisotropic", "8x anisotropic", "16x anisotropic"])
+	_option(p, "Shadows", "shadows", ["Low", "Medium", "High", "Ultra"])
+	_check(p, "Ambient occlusion", "ssao")
+	_check(p, "Screen-space reflections", "ssr", "Reflections in water and glossy paint")
+	_check(p, "Bloom", "bloom")
+	_check(p, "Tilt-shift (miniature look)", "tilt_shift")
+	_check(p, "Colour grade + vignette", "grade")
+	_slider(p, "View distance", "view_distance", 0.6, 2.0, 0.1, "%.1fx")
+	_slider(p, "Model detail (LOD)", "lod", 0.25, 4.0, 0.25, "%.2f", "Lower = more detail far away")
+	_slider(p, "Dust & dirt effects", "fx_density", 0.0, 1.5, 0.1, "%.1fx")
 	return p
 
 func _preset(level: int) -> void:
@@ -119,7 +140,7 @@ func _preset(level: int) -> void:
 	}[level]
 	for k in v: Settings.data[k] = v[k]
 	Settings.apply(); Settings.save()
-	_reopen(0)
+	_reopen(1)
 
 func _reopen(tab: int) -> void:
 	var p := get_parent()
@@ -138,18 +159,31 @@ func _gameplay() -> Control:
 	cams.selected = maxi(0, keys.find(Settings.get_v("camera")))
 	cams.item_selected.connect(func(i): Settings.set_v("camera", keys[i]))
 	_row(p, "Default camera", cams)
+	_slider(p, "Camera shake", "cam_shake", 0.0, 1.5, 0.05)
 	_slider(p, "Mouse sensitivity", "mouse_sens", 0.2, 3.0, 0.1, "%.1f")
 	_check(p, "Invert camera Y", "invert_y")
-	_slider(p, "Camera shake", "cam_shake", 0.0, 1.5, 0.05)
+	_slider(p, "Steering response (stick)", "steer_sens", 0.5, 2.0, 0.05, "%.2f", "Above 1: quicker off-centre; below 1: finer near centre")
 	_slider(p, "Stick deadzone", "deadzone", 0.05, 0.5, 0.01)
-	_check(p, "Show FPS", "show_fps")
+	_check(p, "Controller vibration", "rumble")
+	_check(p, "Pause when the window loses focus", "pause_unfocused")
 	var rb := UITheme.button("Reset ride tuning to defaults", func(): Tune.reset_defaults(), 15)
-	_row(p, "Tuning (P in game)", rb)
+	_row(p, "Ride tuning (P in game)", rb)
 	return p
 
 func _audio() -> Control:
 	var p := _page("Audio")
 	_slider(p, "Master volume", "volume", 0.0, 1.0, 0.05)
+	_slider(p, "Ride sounds", "sfx_volume", 0.0, 1.0, 0.05)
+	_check(p, "Mute when the window loses focus", "mute_unfocused")
+	return p
+
+func _interface() -> Control:
+	var p := _page("Interface")
+	_slider(p, "UI scale", "ui_scale", 0.75, 1.5, 0.05, "%.2fx")
+	_check(p, "Show FPS", "show_fps")
+	_check(p, "Bike computer (speed / slope)", "hud_gauge")
+	_check(p, "Gear shifter", "hud_gear")
+	_check(p, "Jump card", "hud_jump")
 	return p
 
 func _controls() -> Control:
