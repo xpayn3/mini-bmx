@@ -9,8 +9,9 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { HorizontalTiltShiftShader } from 'three/addons/shaders/HorizontalTiltShiftShader.js';
 import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftShader.js';
-import { Terrain, WATER, MAT } from './terrain.js';
+import { Terrain, WATER, MAT, FLOWER_TIME } from './terrain.js';
 import { addSandDetail } from './sand.js';
+import { Gauge } from './gauge.js';
 import { Rider } from './rider.js';
 import { FX } from './fx.js';
 import { Debris } from './debris.js';
@@ -20,6 +21,7 @@ import { breakCactus } from './cactus.js';
 import { Water } from './water.js';
 import { Ragdoll, J } from './ragdoll.js';
 import { TUNE, buildTunePanel } from './tune.js';
+import { buildPosePanel } from './posepanel.js';
 import { IS_TOUCH, buildTouchControls } from './touch.js';
 
 // ---------------- renderer / scene ----------------
@@ -64,6 +66,9 @@ composer.addPass(new RenderPass(scene, camera));
 const gtao = new GTAOPass(scene, camera, innerWidth, innerHeight);
 try { gtao.updateGtaoMaterial({ radius: 0.6, distanceExponent: 1.5, thickness: 1.5, scale: 1.2, samples: 8 }); } catch (e) { /* older api */ }
 gtao.blendIntensity = 0.9;
+// AO at half resolution: its own scene render (normals + depth) and the AO itself were the single
+// most expensive part of the frame; soft contact shadows look the same at half res once blurred
+{ const setSize = gtao.setSize.bind(gtao); gtao.setSize = (w, h) => setSize(Math.max(1, Math.round(w / 2)), Math.max(1, Math.round(h / 2))); }
 composer.addPass(gtao);
 const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth / 2, innerHeight / 2), 0.2, 0.5, 0.92);
 composer.addPass(bloom);
@@ -247,12 +252,13 @@ function groundDust(x, z, surf, out) {
 }
 function emit(pos, vel, col, life = 0.8) { fx.puff(pos, vel, col, 0.3, life * 1.6, 0.45); }
 function burst(pos, n, surf, power) {   // landing / crash: ring of smoke + chunks
+  if (surf === 2) return;   // water: no dust cloud, no dirt
   const dc = groundDust(pos.x, pos.z, surf, _bdc);
   for (let i = 0; i < n; i++) {
     const a = Math.random() * Math.PI * 2, r = (0.6 + Math.random()) * power;
     fx.puff(_ep.copy(pos).add(_ev.set(Math.cos(a) * 0.15, 0.05, Math.sin(a) * 0.15)), _ev.set(Math.cos(a) * r, 0.25 + Math.random() * 0.6, Math.sin(a) * r),
-      dc, 0.6, 3.4, surf === 1 ? 0.6 : surf === 2 ? 0.55 : surf === 3 ? 0.5 : 0.3);
-    if (surf !== 2 && i % 2 === 0) fx.chunk(_ep.copy(pos).setY(pos.y + 0.05), _ev.set(Math.cos(a) * r * 0.9, 1.2 + Math.random() * 1.8 * power, Math.sin(a) * r * 0.9),
+      dc, 0.6, 3.4, surf === 1 ? 0.6 : surf === 3 ? 0.5 : 0.3);
+    if (i % 2 === 0) fx.chunk(_ep.copy(pos).setY(pos.y + 0.05), _ev.set(Math.cos(a) * r * 0.9, 1.2 + Math.random() * 1.8 * power, Math.sin(a) * r * 0.9),
       surf === 1 ? DIRT_CHUNK : surf === 3 ? _pc.copy(dc).multiplyScalar(0.8) : Math.random() < 0.5 ? GRASS_CHUNK : ROCK_CHUNK, 0.028);
   }
 }
@@ -456,9 +462,11 @@ function respawn(newWorld) {
   rider.resetPose();   // drop the hip / chest spring momentum from before the teleport
 }
 respawn(false);
-window.bmx = st; window.terrain = terrain; window.bmxKeys = keys; window.rider = rider; window.crash = crash; window.ragdoll = ragdoll; window.fx = fx; window.debris = debris; window.tapes = tapes;   // debug handles
+window.bmxStep = (dt = 1 / 120) => physics(dt);   // debug: advance the ride physics by hand (tests)
+window.renderer = renderer; window.composer = composer; window.gtao = gtao; window.scene = scene; window.bmx = st; window.terrain = terrain; window.bmxKeys = keys; window.rider = rider; window.crash = crash; window.ragdoll = ragdoll; window.fx = fx; window.debris = debris; window.tapes = tapes;   // debug handles
 
-const hud = { speed: document.getElementById('speed'), msg: document.getElementById('msg') };
+const hud = { msg: document.getElementById('msg') };
+const gauge = new Gauge();
 let msgT = 0, bestAir = 0;
 let biomeT = 0, biomeCur = 'Green Hills', biomeNext = '', biomeHold = 0;
 // smash a fence panel: wood splinters, a puff of dust, and the planks become rigid-body debris
@@ -609,10 +617,14 @@ function physics(dt) {
     st.v -= Math.sign(st.v) * Math.min(Math.abs(st.v), scrub * dt);
     if (Math.abs(st.slip) > T.slipMax && va > 3) crash.pending = 'WASHED OUT!';
   } else {
-    st.yawRate += (steerIn * 1.6 - st.yawRate) * Math.min(1, dt * 3);   // a bit of air spin for fun
-    st.heading += st.yawRate * dt;
-    st.slip *= Math.exp(-dt * 3);   // the rider straightens the bike up in the air
-    st.course = st.heading - st.slip;
+    // IN THE AIR there is nothing to push against: the flight path (course) can't change at all.
+    // Steering only twists the bike a little relative to it (a slight turn-down / whip), and with
+    // the keys released the rider lines it back up with the direction of travel. Whatever angle is
+    // left at touchdown becomes slip, so the tyres have to catch it (or it washes out).
+    const yawT = steerIn ? steerIn * T.airTurn : -st.slip * 2.5;
+    st.yawRate += (yawT - st.yawRate) * Math.min(1, dt * 4);
+    st.slip = clamp(st.slip + st.yawRate * dt, -T.airTwist, T.airTwist);
+    st.heading = st.course + st.slip;
     st.latA = 0;
   }
   // lean follows the actual cornering force, so it scales with speed: almost upright when slow
@@ -719,13 +731,23 @@ function physics(dt) {
     if (dP > 0.02 && st.v > 0) st.v *= Math.cos(Math.min(dP, 1.2));
     st.gPitch = g.pitch;
     if (!st.wInit) { st.wF = g.hf; st.wR = g.hr; st.vF = st.vR = 0; st.frontAir = st.rearAir = false; st.wInit = true; }
-    const vyNew = st.v * Math.tan(g.pitch);
+    // fastest a tyre can really climb: a ~42 deg face at this speed. Anything steeper (a step, a
+    // ledge, a deck edge) is a bump the wheel rolls up, not a ramp that throws the bike skyward
+    const climbMax = Math.abs(st.v) * 0.9 + 0.3;
+    const natural = terrain.jump(st.x, st.z)[1] < 0.05;   // not on a built jump: legs soak crests, small pop at most
+    const vyNew = Math.min(st.v * Math.tan(g.pitch), climbMax);
+    // HOW HARD A CREST MAY THROW YOU. Every designed lip is under ~30 deg (slope <= 0.58), so off a real
+    // jump the launch is whatever that face gives. A face steeper than ~37 deg ridden just before (a step,
+    // a ledge, the steep side bank of a table) is something you roll up and over: a small pop, never a launch
+    st.faceMax = Math.max(Math.tan(clamp(g.pitch, -1.4, 1.4)), (st.faceMax ?? 0) * Math.exp(-dt * 3));
+    const isStep = st.faceMax > 0.75;
+    const launchCap = natural ? 1.5 : isStep ? 2 : Math.abs(st.v) * 0.62 + 0.3;
     const needAccel = (vyNew - st.vy) / dt;              // vertical accel needed to stay glued
     if (!st.frontAir && !st.rearAir && st.v > 2.5 && needAccel < -T.wheelStick * G) {
       st.air = true; st.airTime = 0;
       // only built jumps throw you: over a natural hill crest the legs soak it up, small pop at most
-      if (terrain.jump(st.x, st.z)[1] < 0.05) st.vy = Math.min(st.vy, 1.5);
-      else st.vy += T.autoPop * (st.prep || 0);   // the rider pumped the face: extra pop off the lip
+      st.vy = Math.min(st.vy, launchCap);
+      if (!natural && !isStep) st.vy += T.autoPop * (st.prep || 0);   // the rider pumped the face: extra pop off the lip
       st.vy -= G * dt; st.y += st.vy * dt;
     } else {
       // FRONT AND REAR WHEELS ride their own patch of ground. The legs keep a wheel pressed down over
@@ -734,8 +756,11 @@ function physics(dt) {
       // then the rear follows -- or, at speed, both are off and the bike flies.
       const stick = T.wheelStick * G;
       const wheel = (w, vw, h, air, pull) => {
-        const vGround = (h - w) / dt;
+        // the wheel's vertical speed rolling along the ground. Capped: a step 30 cm high in one 8 ms
+        // frame is NOT 37 m/s upward -- carrying that off the top edge is what shot the bike skyward
+        const vGround = Math.min((h - w) / dt, climbMax);
         if (!air && !((vGround - vw) / dt < -stick && Math.abs(st.v) > 1)) return [h, vGround, false, 0];
+        if (!air) vw = Math.min(vw, launchCap);              // leaving the ground: no more than the face can throw
         vw -= pull * dt; w += vw * dt;                      // falling free of the ground
         if (w <= h) return [h, vGround, false, Math.max(0, -vw)];   // touched down: report how hard
         return [w, vw, true, 0];
@@ -749,6 +774,7 @@ function physics(dt) {
       if (st.frontAir && st.rearAir) {   // both off the ground: the whole bike flies (no extra pop)
         st.air = true; st.airTime = 0;
         st.y = st.wR + (st.wF - st.wR) * (BB_REAR / L); st.vy = st.vR + (st.vF - st.vR) * (BB_REAR / L);
+        st.vy = Math.min(st.vy, launchCap);
       } else if (!st.frontAir && !st.rearAir) { st.y = g.y; st.vy = vyNew; }
       else {
         const yN = st.wR + (st.wF - st.wR) * (BB_REAR / L);
@@ -912,7 +938,7 @@ function physics(dt) {
     const carveK = clamp((latA - 1.5) / 6, 0, 1);
     const carve = carveK > 0.05;
     // smoke: always a little on dirt, lots when skidding, carving or sprinting
-    st.dustAcc = (st.dustAcc || 0) + dt * (inWater ? 30 : dirt ? 6 + va * 2.2 + (skidFx ? 50 : 0) + carveK * 60 + st.pedal * (va < 7 ? 10 : 0)
+    st.dustAcc = (st.dustAcc || 0) + dt * (inWater ? 0 : dirt ? 6 + va * 2.2 + (skidFx ? 50 : 0) + carveK * 60 + st.pedal * (va < 7 ? 10 : 0)   // water: no smoke at all
                                                        : sand ? 4 + va * 1.8 + (skidFx ? 40 : 0) + carveK * 45 + st.pedal * (va < 7 ? 6 : 0)
                                                        : (skidFx ? 14 : 0) + va * 0.8 + carveK * 12);
     while (st.dustAcc > 1) {
@@ -923,8 +949,8 @@ function physics(dt) {
       const back = va * 0.3 * (1 - carveK * 0.55);
       _ev.set(-fwd.x * back + side.x * (out + fan), 0.35 + Math.random() * 0.7 + carveK * 0.4,
               -fwd.z * back + side.z * (out + fan));
-      fx.puff(rear, _ev, inWater ? SPLASH : _pc.copy(dcol).multiplyScalar(Math.random() < 0.3 ? 0.86 : 1),
-        inWater ? 0.3 : skidFx ? 0.5 : 0.4, inWater ? 1.1 : 3.2, inWater ? 0.5 : dirt ? (skidFx ? 0.62 : 0.45) : sand ? (skidFx ? 0.55 : 0.4) : 0.26);
+      fx.puff(rear, _ev, _pc.copy(dcol).multiplyScalar(Math.random() < 0.3 ? 0.86 : 1),
+        skidFx ? 0.5 : 0.4, 3.2, dirt ? (skidFx ? 0.62 : 0.45) : sand ? (skidFx ? 0.55 : 0.4) : 0.26);
     }
     // roost: dirt and little rocks flicked off the back wheel
     if (!inWater) {
@@ -1027,6 +1053,8 @@ const lastGood = { ...st };   // the spawn state, so even a first-frame blow-up 
 const clock = new THREE.Clock();
 document.getElementById('loading').remove();
 buildTunePanel();
+buildPosePanel({ bikeId, bikeLabel: BIKES[bikeId].label, defaults: BIKES[bikeId].pose || {},   // K: rider position sliders
+  apply: (s) => rider.setStyle(s), sideView: () => { setCam('side'); flash('Side view'); } });
 buildTouchControls();
 // ---------------- FPS meter + automatic quality fallback ----------------
 const fpsEl = document.getElementById('fps');
@@ -1062,13 +1090,12 @@ function meter(now) {
   else perf.bad = 0;
   perf.frames = 0; perf.acc = 0; perf.worst = 0;
 }
-let lastSpeed = -1;
 
 function frame(now) {
   requestAnimationFrame(frame);
   meter(now ?? performance.now());
   const dt = Math.min(clock.getDelta(), 1 / 30);
-  t += dt;
+  t += dt; FLOWER_TIME.value = t;
   if (dt > 1e-4) physics(dt);
   // safety net: if anything went non-finite, restore the last good state (and say so)
   let bad = false;
@@ -1095,8 +1122,11 @@ function frame(now) {
   if (!crash.on) debris.kick(st.x, st.y, st.z, Math.cos(st.heading) * st.v, -Math.sin(st.heading) * st.v);
   else { const Pp = ragdoll.p[J.PELVIS], Pq = ragdoll.q[J.PELVIS]; debris.kick(Pp.x, Pp.y, Pp.z, (Pp.x - Pq.x) * 180, (Pp.z - Pq.z) * 180, 0.6); }
   fx.update(dt, camera, renderer);
-  const kmh = Math.round(Math.abs(st.v) * 3.6);
-  if (kmh !== lastSpeed) { lastSpeed = kmh; hud.speed.textContent = `${kmh} km/h`; }
+  {  // terrain slope along the direction of travel: + uphill, - downhill
+    const dir = st.v < -0.1 ? -1 : 1, hx = Math.cos(st.heading) * 0.6 * dir, hz = -Math.sin(st.heading) * 0.6 * dir;
+    const slope = Math.atan2(terrain.height(st.x + hx, st.z + hz) - terrain.height(st.x - hx, st.z - hz), 1.2);
+    gauge.update(Math.abs(st.v) * 3.6, THREE.MathUtils.radToDeg(slope), st.air, dt, st.y);
+  }
   if (msgT > 0) { msgT -= dt; if (msgT <= 0) hud.msg.style.opacity = 0; }
   composer.render();
 }

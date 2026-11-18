@@ -12,10 +12,8 @@
   html, body { margin: 0; height: 100%; overflow: hidden; background: #a9d6ea; font-family: ui-rounded, "Segoe UI", system-ui, sans-serif; }
   canvas { display: block; }
   #hud { position: fixed; inset: 0; pointer-events: none; color: #fff; text-shadow: 0 2px 6px rgba(0,0,0,.35); }
-  #title { position: absolute; top: 16px; left: 20px; font-weight: 800; font-size: 22px; letter-spacing: .5px; }
-  #fps { position: absolute; top: 48px; left: 20px; font: 700 12px/1 ui-monospace, Consolas, monospace; color: #b9ffb0;
+  #fps { position: absolute; top: 16px; left: 20px; font: 700 12px/1 ui-monospace, Consolas, monospace; color: #b9ffb0;
          background: rgba(10,20,30,.45); padding: 5px 8px; border-radius: 6px; text-shadow: none; font-variant-numeric: tabular-nums; }
-  #speed { position: absolute; top: 16px; right: 22px; font-weight: 800; font-size: 28px; font-variant-numeric: tabular-nums; }
   #help { position: relative; }
   #help summary { list-style: none; cursor: pointer; font: 800 13px/1 inherit; font-family: inherit; color: #fff; padding: 6px 10px;
                   border-radius: 8px; background: rgba(255,255,255,.16); user-select: none; }
@@ -39,7 +37,7 @@
   #getup .key span { position: relative; color: #fff; }
   #getup.holding .key span { color: #1d2b64; text-shadow: none; }
   #getup.holding .key { border-color: #ffd21f; }
-  #bikes { position: absolute; top: 78px; left: 20px; display: flex; gap: 4px; padding: 4px; border-radius: 10px;
+  #bikes { position: absolute; top: 46px; left: 20px; display: flex; gap: 4px; padding: 4px; border-radius: 10px;
            background: rgba(20,40,50,.35); backdrop-filter: blur(6px); pointer-events: auto; }
   #bikes button { font: 800 13px/1 inherit; font-family: inherit; color: #fff; background: transparent; border: 0; border-radius: 7px;
                   padding: 7px 12px; cursor: pointer; text-shadow: 0 1px 3px rgba(0,0,0,.35); }
@@ -52,11 +50,9 @@
          padding: 6px 8px; cursor: pointer; }
   /* phones / tablets: on-screen buttons replace the key legend; keep the HUD clear of the notch */
   html.touch, html.touch body { touch-action: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; overscroll-behavior: none; }
-  html.touch #title { display: none; }
   html.touch #fps { top: calc(10px + env(safe-area-inset-top)); left: calc(12px + env(safe-area-inset-left)); font-size: 10px; }
   html.touch #bikes { top: calc(34px + env(safe-area-inset-top)); left: calc(12px + env(safe-area-inset-left)); }
   html.touch #bikes button { padding: 9px 12px; }
-  html.touch #speed { top: calc(8px + env(safe-area-inset-top)); right: calc(14px + env(safe-area-inset-right)); font-size: 22px; }
   html.touch #camwrap { display: none; }
   html.touch #getup { bottom: calc(130px + env(safe-area-inset-bottom)); }
   html.touch #msg { font-size: 30px; }
@@ -73,12 +69,10 @@
 <body>
 <div id="loading">Loading BMX…</div>
 <div id="hud">
-  <div id="title">Mini BMX</div>
   <div id="fps">-- FPS</div>
   <div id="bikes" title="B: switch bike"></div>
   <div id="camwrap">Camera <select id="cam" title="C: next camera"></select>
-    <details id="help"><summary>Controls</summary><div id="keys"><span class="k"><b>W</b></span><span>pedal</span><span class="k"><b>S</b></span><span>brake / back</span><span class="k"><b>A</b> <b>D</b></span><span>steer</span><span class="k"><b>Space</b></span><span>hold + release: pump / pop</span><span class="k"><b>F</b></span><span>bail</span><span class="k"><b>R</b></span><span>new world</span><span class="k"><b>B</b></span><span>bike</span><span class="k"><b>C</b></span><span>camera</span><span class="k"><b>Q</b> <b>E</b></span><span>rotate cam (or drag)</span><span class="k"><b>wheel</b></span><span>zoom</span><span class="k"><b>T</b></span><span>tilt-shift</span><span class="k"><b>O</b></span><span>AO</span><span class="k"><b>G</b></span><span>quality</span><span class="k"><b>P</b></span><span>tune</span></div></details></div>
-  <div id="speed">0 km/h</div>
+    <details id="help"><summary>Controls</summary><div id="keys"><span class="k"><b>W</b></span><span>pedal</span><span class="k"><b>S</b></span><span>brake / back</span><span class="k"><b>A</b> <b>D</b></span><span>steer</span><span class="k"><b>Space</b></span><span>hold + release: pump / pop</span><span class="k"><b>F</b></span><span>bail</span><span class="k"><b>R</b></span><span>new world</span><span class="k"><b>B</b></span><span>bike</span><span class="k"><b>C</b></span><span>camera</span><span class="k"><b>Q</b> <b>E</b></span><span>rotate cam (or drag)</span><span class="k"><b>wheel</b></span><span>zoom</span><span class="k"><b>T</b></span><span>tilt-shift</span><span class="k"><b>O</b></span><span>AO</span><span class="k"><b>G</b></span><span>quality</span><span class="k"><b>P</b></span><span>tune</span><span class="k"><b>K</b></span><span>rider position</span><span class="k"><b>M</b></span><span>menu</span></div></details></div>
   <div id="msg"></div>
   <div id="getup"><div class="key"><div class="fill"></div><span>SPACE</span></div><div>Hold to get up</div></div>
 </div>
@@ -89,6 +83,7 @@
     sum.addEventListener('keydown', (e) => { e.preventDefault(); sum.blur(); });
     addEventListener('pointerdown', (e) => { if (help.open && !help.contains(e.target)) help.open = false; }); }
 </script>
+<script type="module" src="src/menu.js"></script>
 <script type="module" src="src/main.js"></script>
 </body>
 </html>

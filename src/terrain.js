@@ -28,8 +28,8 @@ function mulberry32(a) {
 // ---------- shared low-poly decoration geometry ----------
 // smooth, natural boulder: subdivided sphere pushed around by layered 3D noise, flat-ish base,
 // darker in the crevices, a touch lighter/mossy on top (vertex colours multiply the instance colour)
-function makeBoulder(seed) {
-  const g = new THREE.IcosahedronGeometry(1, 4);
+function makeBoulder(seed, detail = 4) {
+  const g = new THREE.IcosahedronGeometry(1, detail);
   const p = g.attributes.position, v = new THREE.Vector3();
   const h3 = (x, y, z) => { const n = Math.sin(x * 127.1 + y * 311.7 + z * 74.7 + seed * 13.1) * 43758.5453; return n - Math.floor(n); };
   const vn = (x, y, z) => {   // smooth 3D value noise
@@ -86,7 +86,10 @@ const GEO = {
     new THREE.ConeGeometry(0.75, 1.3, 6).translate(0, 1.6, 0),
     new THREE.ConeGeometry(0.45, 1.0, 6).translate(0, 2.3, 0),
   ]),
-  rock: makeBoulder(3),
+  // low-poly, faceted rocks to match the trees: ~1000 are in view and each is drawn three times a
+  // frame (view, AO, shadow), so boulders get 80 triangles (was 500) and pebbles just 20
+  rock: makeBoulder(3, 1),
+  pebble: makeBoulder(3, 0),
   box: new THREE.BoxGeometry(1, 1, 1),
   cactus: mergeGeometries([
     new THREE.CylinderGeometry(0.16, 0.18, 1.6, 6).translate(0, 0.8, 0),
@@ -100,20 +103,97 @@ const GEO = {
     g.translate(0, 0.16, 0); g.rotateZ(0.35); g.rotateY(i * 2.1);
     return g;
   })),
-  flower: mergeGeometries([
-    new THREE.CylinderGeometry(0.008, 0.008, 0.22, 3).translate(0, 0.11, 0).toNonIndexed(),
-    new THREE.IcosahedronGeometry(0.05, 0).translate(0, 0.23, 0),
-  ].map(g => { g.deleteAttribute('uv'); return g; })),
+  ...makeFlowers(),
 };
+// ---------- wildflowers: three low-poly kinds, a handful of triangles each ----------
+// Every vertex carries its own colour plus a `tint` weight: petals (tint 1) take the per-instance
+// flower colour, while stems, leaves and the golden eye of the daisy (tint 0) keep their own.
+function makeFlowers() {
+  const part = (g, hex, tint, shade = null) => {   // non-indexed, coloured, tint-masked piece
+    g = g.index ? g.toNonIndexed() : g;
+    if (g.attributes.uv) g.deleteAttribute('uv');
+    const n = g.attributes.position.count, col = new Float32Array(n * 3), c = new THREE.Color(hex);
+    for (let i = 0; i < n; i++) {
+      const k = shade ? shade(g.attributes.position, i) : 1;
+      col[i * 3] = c.r * k; col[i * 3 + 1] = c.g * k; col[i * 3 + 2] = c.b * k;
+    }
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    g.setAttribute('tint', new THREE.BufferAttribute(new Float32Array(n).fill(tint), 1));
+    g.computeVertexNormals();
+    return g;
+  };
+  // a flat diamond (two triangles) pointing along +x, its tip lifted by `cup`
+  const blade = (len, wid, cup) => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute([
+      0, 0, 0,  len * 0.45, cup * 0.4, -wid,  len, cup, 0,
+      0, 0, 0,  len, cup, 0,  len * 0.45, cup * 0.4, wid,
+    ], 3));
+    return g;
+  };
+  const STEM = 0x4c8a2c, LEAF = 0x5f9e38, EYE = 0xf0b030;
+  const stem = (h) => part(new THREE.CylinderGeometry(0.005, 0.008, h, 3, 1).translate(0, h / 2, 0), STEM, 0);
+  const leaves = (y, len) => [0, 2.6].map((a, i) => part(blade(len, 0.018, len * 0.35).rotateY(a + i * 0.4).translate(0, y + i * 0.03, 0), LEAF, 0));
+  // petals are paler at the base and full colour at the tip, so each one reads as a shape
+  const petalShade = (p, i) => 0.78 + 0.22 * Math.min(1, Math.hypot(p.getX(i), p.getZ(i)) / 0.06);
+
+  // daisy / cosmos: a ring of 8 cupped petals round a domed golden eye, face tipped to the sky
+  const DH = 0.24;
+  const daisyHead = [];
+  for (let i = 0; i < 8; i++) daisyHead.push(part(blade(0.075, 0.02, 0.018).rotateY(i * Math.PI / 4 + 0.2), 0xffffff, 1, petalShade));
+  daisyHead.push(part(new THREE.IcosahedronGeometry(0.022, 0).scale(1, 0.55, 1).translate(0, 0.006, 0), EYE, 0));
+  const daisy = mergeGeometries([stem(DH), ...leaves(0.05, 0.085),
+    ...daisyHead.map((g) => g.rotateZ(0.18).translate(0.012, DH, 0))]);
+
+  // tulip / bell: five petals standing up into a cup
+  const TH = 0.26, tulipHead = [];
+  for (let i = 0; i < 5; i++) tulipHead.push(part(blade(0.07, 0.026, 0.0).rotateZ(1.2).rotateY(i * Math.PI * 2 / 5), 0xffffff, 1,
+    (p, j) => 0.7 + 0.3 * Math.min(1, p.getY(j) / 0.06)));
+  const tulip = mergeGeometries([stem(TH), ...leaves(0.04, 0.11), ...tulipHead.map((g) => g.translate(0, TH - 0.01, 0))]);
+
+  // spike (lupin / lavender-ish): small florets stacked up the top of a taller stem, shrinking upward
+  const SH = 0.32, florets = [];
+  for (let i = 0; i < 6; i++) {
+    const y = SH - 0.13 + i * 0.026, r = 0.024 * (1 - i * 0.11), a = i * 2.4;
+    florets.push(part(new THREE.OctahedronGeometry(r, 0).translate(Math.cos(a) * 0.012, y, Math.sin(a) * 0.012), 0xffffff, 1,
+      () => 0.82 + i * 0.035));
+  }
+  const spike = mergeGeometries([stem(SH), ...leaves(0.06, 0.1), ...florets]);
+  return { daisy, tulip, spike };
+}
+// gentle breeze for the flowers (main.js advances .value every frame)
+export const FLOWER_TIME = { value: 0 };
 export const MAT = {
   terrain: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 }),
   wood: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, flatShading: true }),
   trunk: new THREE.MeshStandardMaterial({ color: 0x7a5233, flatShading: true, roughness: 0.9 }),
   leaf: new THREE.MeshStandardMaterial({ color: 0xffffff, flatShading: true, roughness: 0.8 }),
-  rock: new THREE.MeshStandardMaterial({ color: 0xa8a39a, vertexColors: true, roughness: 0.82, metalness: 0.02 }),
+  rock: new THREE.MeshStandardMaterial({ color: 0xa8a39a, vertexColors: true, flatShading: true, roughness: 0.82, metalness: 0.02 }),   // faceted
   tuft: new THREE.MeshStandardMaterial({ color: 0xffffff, flatShading: true, roughness: 0.9 }),
-  flower: new THREE.MeshStandardMaterial({ color: 0xffffff, flatShading: true, roughness: 0.6 }),
+  flower: new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, flatShading: true, roughness: 0.55, side: THREE.DoubleSide }),
 };
+MAT.flower.onBeforeCompile = (sh) => {
+  sh.uniforms.uTime = FLOWER_TIME;
+  sh.vertexShader = sh.vertexShader
+    .replace('#include <common>', '#include <common>\nattribute float tint;\nuniform float uTime;')
+    // instance colour only on the petals (tint 1); stems, leaves and the eye keep their own colour
+    .replace('#include <color_vertex>', `vColor = vec3(1.0);
+      #ifdef USE_COLOR
+        vColor *= color;
+      #endif
+      #ifdef USE_INSTANCING_COLOR
+        vColor *= mix(vec3(1.0), instanceColor.rgb, tint);
+      #endif`)
+    // sway in the breeze: the head moves, the base stays planted; each flower on its own phase
+    .replace('#include <begin_vertex>', `#include <begin_vertex>
+      #ifdef USE_INSTANCING
+        float ph = instanceMatrix[3].x * 0.9 + instanceMatrix[3].z * 0.7;
+        float bend = transformed.y * transformed.y * 9.0;
+        transformed.x += (sin(uTime * 1.6 + ph) * 0.6 + sin(uTime * 2.7 + ph * 1.3) * 0.25) * 0.02 * bend;
+        transformed.z += sin(uTime * 1.3 + ph * 0.8) * 0.015 * bend;
+      #endif`);
+};
+MAT.flower.customProgramCacheKey = () => 'flower-tint-sway';
 const C = (h) => new THREE.Color(h);
 const COL = {
   grassA: C(0x83c44e), grassB: C(0x5fa83c), meadow: C(0xb5cf5c), dirt: C(0xc98d55), dirtDark: C(0xa56d3e),
@@ -132,7 +212,10 @@ const PINES = [0x2f6e45, 0x3b7d4b, 0x2a5f44].map(C);
 const PLANKS = [0xb98a55, 0xa87a48, 0xc49663, 0x9e6f40, 0xb0814e].map(C), BEAM = C(0x7a5332);
 const _Y = new THREE.Vector3(0, 1, 0), _Z = new THREE.Vector3(0, 0, 1);
 const CACTI = [0x4f8a3c, 0x5c9a45, 0x6b9e4a].map(C);
-const FLOWERS = [0xff5d73, 0xffd23f, 0xffffff, 0x9b6bff, 0xff8f3f].map(C);
+// petal colours per kind (white-based petals are multiplied by these)
+const DAISIES = [0xffffff, 0xfff6e0, 0xffd84a, 0xff9ec4, 0xf26d9b, 0xffb35c].map(C);
+const TULIPS = [0xe8384a, 0xff6f61, 0xffc93c, 0xff8fb8, 0xf7f1ff, 0xd94f8c].map(C);
+const SPIKES = [0x9b7bea, 0x7a8cff, 0xc79bff, 0xf4a6d7, 0xffffff].map(C);
 
 export class Terrain {
   constructor(scene, seed) {
@@ -486,6 +569,12 @@ export class Terrain {
       if (Math.abs(c.cx - ccx) > R + 1 || Math.abs(c.cz - ccz) > R + 1) { this.disposeChunk(c); this.chunks.delete(k); }
     }
     if (this.job && (Math.abs(this.job.cx - ccx) > R + 1 || Math.abs(this.job.cz - ccz) > R + 1)) this.job = null;   // left behind
+    // ground clutter (grass, flowers, pebbles) only in the 3x3 chunks round the rider (~70 m):
+    // further out it's a few pixels each, but it was ~a fifth of the whole frame
+    for (const c of this.chunks.values()) {
+      const near = Math.abs(c.cx - ccx) <= 1 && Math.abs(c.cz - ccz) <= 1;
+      for (const o of c.small || []) o.visible = near;
+    }
     const t0 = performance.now();
     let deadline = t0 + ms;
     for (;;) {
@@ -549,7 +638,7 @@ export class Terrain {
 
     // decorations
     const rnd = mulberry32((cx * 73856093) ^ (cz * 19349663) ^ (this.seed * 83492791));
-    const lists = { trunk: [], blob: [], pine: [], rock: [], tuft: [], flower: [], cactus: [] };
+    const lists = { trunk: [], blob: [], pine: [], rock: [], pebble: [], tuft: [], daisy: [], tulip: [], spike: [], cactus: [] };
     const colliders = [];
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), s = new THREE.Vector3(), p = new THREE.Vector3();
     const put = (list, x, y, z, sx, sy, sz, yaw, col, tilt = 0) => {
@@ -697,7 +786,7 @@ export class Terrain {
       const h = this.height(x, z); if (Math.hypot(x, z) < 9) continue;
       const sc = 0.2 + rnd() ** 3 * 1.3, sx = sc * (1 + rnd() * .5);
       const sy = sc * (0.6 + rnd() * .4);
-      put(lists.rock, x, h - sc * 0.25, z, sx, sy, sc, rnd() * 6.28, null, 0.5);
+      put(sc < 0.6 ? lists.pebble : lists.rock, x, h - sc * 0.25, z, sx, sy, sc, rnd() * 6.28, null, 0.5);
       colliders.push({ x, z, r: (sx + sc) * 0.45, top: h - sc * 0.25 + sy * 0.9 });   // rocks have a top: jump over them
     }
     for (let i = 0; i < 260; i++) {
@@ -708,24 +797,41 @@ export class Terrain {
       const [dry, rug] = this.biome(x, z);
       if (rnd() < dry * 0.85 || rnd() < rug * 0.3) continue;   // bare sand and rock
       const tc = _c.copy(COL.tuftGreen).lerp(COL.tuftDry, smooth(0.1, 0.6, dry)).clone();
-      if (rnd() < 0.22 * (1 - dry)) put(lists.flower, x, h - 0.02, z, 1, 0.7 + rnd() * 0.6, 1, rnd() * 6.28, FLOWERS[(rnd() * FLOWERS.length) | 0], 0.4);
+      if (rnd() < 0.22 * (1 - dry)) {
+        // wildflowers grow in little clumps of one kind and colour, each bloom a touch different
+        const kind = rnd(), list = kind < 0.5 ? lists.daisy : kind < 0.78 ? lists.tulip : lists.spike;
+        const pal = list === lists.daisy ? DAISIES : list === lists.tulip ? TULIPS : SPIKES;
+        const col = pal[(rnd() * pal.length) | 0], n = 2 + ((rnd() * 4) | 0), sc = 1.35 + rnd() * 0.5;   // a bit larger than life so they read from the diorama camera
+        for (let j = 0; j < n; j++) {
+          const a = rnd() * 6.28, r = j ? 0.1 + rnd() * 0.32 : 0, fx = x + Math.cos(a) * r, fz = z + Math.sin(a) * r;
+          if (j && this.trail(fx, fz) > 0.1) continue;
+          const s = sc * (0.8 + rnd() * 0.35);
+          put(list, fx, this.height(fx, fz) - 0.015, fz, s, s * (0.8 + rnd() * 0.45), s, rnd() * 6.28,
+            _c.copy(col).multiplyScalar(0.88 + rnd() * 0.16).clone(), 0.35);
+        }
+      }
       else put(lists.tuft, x, h - 0.03, z, 1 + rnd(), 0.7 + rnd() * 0.8, 1 + rnd(), rnd() * 6.28, tc);
     }
-    const objects = [mesh];
-    const mk = (geo, mat, list, cast) => {
+    const objects = [mesh], small = [];
+    // small = ground clutter (grass, flowers, pebbles): only drawn in the chunks around the rider
+    const mk = (geo, mat, list, cast, isSmall = false) => {
       if (!list.length) return;
       const im = new THREE.InstancedMesh(geo, mat, list.length);
       list.forEach((it, i) => { im.setMatrixAt(i, it.m); if (it.col) im.setColorAt(i, it.col); });
       im.castShadow = cast; im.receiveShadow = true;
       im.computeBoundingSphere();
       objects.push(im);   // added to the scene by update() once the whole chunk is done
+      if (isSmall) small.push(im);
     };
     mk(GEO.trunk, MAT.trunk, lists.trunk, true);
     mk(GEO.blob, MAT.leaf, lists.blob, true);
     mk(GEO.pine, MAT.leaf, lists.pine, true);
     mk(GEO.rock, MAT.rock, lists.rock, true);
-    mk(GEO.tuft, MAT.tuft, lists.tuft, false);
-    mk(GEO.flower, MAT.flower, lists.flower, false);
+    mk(GEO.pebble, MAT.rock, lists.pebble, false, true);   // too small for a shadow worth drawing
+    mk(GEO.tuft, MAT.tuft, lists.tuft, false, true);
+    mk(GEO.daisy, MAT.flower, lists.daisy, false, true);
+    mk(GEO.tulip, MAT.flower, lists.tulip, false, true);
+    mk(GEO.spike, MAT.flower, lists.spike, false, true);
     mk(GEO.cactus, MAT.leaf, lists.cactus, true);
     if (lists.cactus.length) { const im = objects[objects.length - 1]; for (const k of colliders) if (k.cactus) k.cactus.im = im; }
     SHED_DESIGNS.forEach((d, i) => mk(shedGeo(d), MAT_SHED, shedLists[i], true));
@@ -742,7 +848,7 @@ export class Terrain {
     for (const j of woodF) if (j.x >= x0 && j.x < x0 + S && j.z >= z0 && j.z < z0 + S) this.woodModel(j, wl);
     mk(GEO.box, MAT.wood, wl.plank, true);
     mk(GEO.box, MAT.wood, wl.beam, true);
-    return { cx, cz, objects, colliders };
+    return { cx, cz, objects, colliders, small };
   }
 
   woodModel(j, wl) {

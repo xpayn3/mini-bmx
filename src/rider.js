@@ -222,8 +222,13 @@ export class Rider {
   // riding position (BMX = all zero). hipX/hipY move the hips (m, + forward / up), lean tips the
   // chest forward (rad), elbowsOut / kneesOut 0..1 swing the elbows and knees wide, stance widens
   // the hips (m per side)
-  setStyle({ hipX = 0, hipY = 0, lean = 0, elbowsOut = 0, kneesOut = 0, stance = 0, seatFloor = false }) {
-    this.style = { hipX, hipY, lean, stance, seatFloor };
+  // The rest are multipliers / offsets for the rider-pose panel (all neutral = the original pose):
+  // crouch (how deep the legs fold), standPedal (how far the rider rises to pedal), sway (pedalling
+  // sway + idle fidget), torso (chest length, m), shoulders (half shoulder width, m), headTilt (rad,
+  // + looks down), headTurn (how much the head looks into turns), lookAhead (head forward offset, m)
+  setStyle({ hipX = 0, hipY = 0, lean = 0, elbowsOut = 0, kneesOut = 0, stance = 0, seatFloor = false,
+    crouch = 1, standPedal = 1, sway = 1, torso = 0.46, shoulders = 0.2, headTilt = 0, headTurn = 1, lookAhead = 0 }) {
+    this.style = { hipX, hipY, lean, stance, seatFloor, crouch, standPedal, sway, torso, shoulders, headTilt, headTurn, lookAhead };
     // knees track forward over the pedals (just a hint outward); kneesOut widens them for a DH stance
     this.polesLeg = [-1, 1].map(s => new THREE.Vector3(1, 0.1, s * (0.1 + 0.3 * kneesOut)).normalize());
     this.polesArm = [-1, 1].map(s => new THREE.Vector3(-0.4 + 0.25 * elbowsOut, -0.5 + 0.4 * elbowsOut, s).normalize());
@@ -286,24 +291,24 @@ export class Rider {
     this.smShiftZ += (targetShift - this.smShiftZ) * k;
     const shift = clamp(this.smShiftZ, -0.6, 0.6);
 
-    const sway = Math.sin(p.crank || 0) * pedal;
-    const bob = Math.sin((p.crank || 0) * 2) * pedal;
-    const wig = clamp(1 - Math.abs(v) / 3, 0, 1);
+    const sty = this.style;
+    const sway = Math.sin(p.crank || 0) * pedal * sty.sway;
+    const bob = Math.sin((p.crank || 0) * 2) * pedal * sty.sway;
+    const wig = clamp(1 - Math.abs(v) / 3, 0, 1) * sty.sway;
     const air = typeof p.air === 'number' ? p.air : (p.air ? 1 : 0);
-    const comp = p.compress || 0;
+    const comp = (p.compress || 0) * sty.crouch;
 
     // pelvis
     _pelvis.set(
-      -0.16 - 0.07 * air + 0.06 * pedal - comp * 0.25,
-      0.80 - 0.07 * air - comp + 0.15 * pedal + 0.035 * bob,      // stand up out of the crouch to pedal
+      -0.16 - 0.07 * air + 0.06 * pedal * sty.standPedal - comp * 0.25,
+      0.80 - 0.07 * air - comp + 0.15 * pedal * sty.standPedal + 0.035 * bob,      // stand up out of the crouch to pedal
       sway * 0.09 + shift * 0.3 + Math.sin(t * 2.1) * 0.02 * wig
     ).add(this.fit);
-    const sty = this.style;
     _pelvis.x += sty.hipX * (1 - 0.5 * pedal); _pelvis.y += sty.hipY * (1 - 0.6 * pedal);   // pedalling stands up out of it
 
     // chest
     const ang = 0.72 - 0.14 * pedal + 0.15 * (comp / 0.3) + 0.08 * air + sty.lean * (1 - 0.5 * pedal);   // more upright when standing
-    const L = 0.46;
+    const L = sty.torso;
     _chest.set(
       _pelvis.x + Math.sin(ang) * L + 0.03 * pedal * (0.5 + 0.5 * bob),
       _pelvis.y + Math.cos(ang) * L,
@@ -363,7 +368,7 @@ export class Rider {
       const reach = (this.L_UARM + this.L_FARM) * 0.9;
       let worst = 0;
       for (const [side, hand] of [[-1, p.handL], [1, p.handR]]) {
-        _sh.set(_chest.x - 0.03, _chest.y - 0.04, _chest.z + side * 0.2);
+        _sh.set(_chest.x - 0.03, _chest.y - 0.04, _chest.z + side * sty.shoulders);
         const over = _sh.distanceTo(hand) - reach;
         if (over > worst) worst = over;
       }
@@ -394,13 +399,13 @@ export class Rider {
     // neck / head
     _neck.lerpVectors(_hip, _sh, 1.0);
     this.hood.position.set(_neck.x - 0.03, _neck.y + 0.0, _neck.z);
-    _headP.set(_neck.x + 0.05, _neck.y + 0.2, _neck.z);
+    _headP.set(_neck.x + 0.05 + sty.lookAhead, _neck.y + 0.2, _neck.z);
     this.head.position.copy(_headP);
     this.J[0].copy(_headP); this.J[1].copy(_chest); this.J[2].copy(_pelvis);
-    const yaw = clamp((p.steer || 0) * 1.2 + (p.yawRate || 0) * 0.15, -1.0, 1.0);
+    const yaw = clamp(((p.steer || 0) * 1.2 + (p.yawRate || 0) * 0.15) * sty.headTurn, -1.0, 1.0);
     this.head.rotation.x = p.headRoll !== undefined ? p.headRoll : (p.lean || 0) * 0.6;
     this.head.rotation.y = yaw;
-    this.head.rotation.z = -0.12 * (ang - 0.72) + 0.04 * Math.sin(t * 3.3) * wig;
+    this.head.rotation.z = -0.12 * (ang - 0.72) + 0.04 * Math.sin(t * 3.3) * wig - sty.headTilt;
 
 
     for (let i = 0; i < 2; i++) {
@@ -419,7 +424,7 @@ export class Rider {
       this.J[9 + i * 3].copy(_hip); this.J[10 + i * 3].copy(_joint); this.J[11 + i * 3].set(foot.x, foot.y + 0.08, foot.z);
 
       // arm
-      _sh.set(_chest.x - 0.03, _chest.y - 0.04, _chest.z + side * 0.2);
+      _sh.set(_chest.x - 0.03, _chest.y - 0.04, _chest.z + side * sty.shoulders);
       this.shoulderSph[i].position.copy(_sh);
       solveIK(_sh, hand, this.L_UARM, this.L_FARM, this.polesArm[i], _joint, _end);
       setLimb(this.upperArm[i], _sh, _joint);

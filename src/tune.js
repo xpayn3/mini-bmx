@@ -20,6 +20,10 @@ const DEFS = [
     ['slipRecover',  'Slide catch',          5,     0.5,  15,   0.5,  '/s'],
     ['slipMax',      'Wash-out angle',       0.85,  0.4,  1.4,  0.05, 'rad'],
   ]],
+  ['Air', [
+    ['airTurn',      'Air twist speed',      0.7,   0,    3,    0.05, 'rad/s'],
+    ['airTwist',     'Max air twist',        0.45,  0,    1.4,  0.05, 'rad'],
+  ]],
   ['Wheels & pump', [
     ['wheelStick',   'Legs keep wheels down',2.5,   1,    5,    0.1,  'g'],
     ['noseDrop',     'Front drop pull',      1.1,   0.4,  2,    0.05, 'g'],

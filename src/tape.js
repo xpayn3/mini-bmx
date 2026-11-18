@@ -10,27 +10,29 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 export const WIND = { dir: new THREE.Vector3(0.8, 0, 0.6).normalize(), speed: 4, gust: 1, t: 0 };
 const SEG = 30, WIDTH = 0.075, TAPE_H = 0.85, STEP = 7.5, OFF = 3.9;
 const RED = new THREE.Color(0xe8322b), WHITE = new THREE.Color(0xf6f5ef), YEL = new THREE.Color(0xf5c518), BLK = new THREE.Color(0x26241f);
-const uTime = { value: 0 }, uWind = { value: new THREE.Vector3() };
+const uTime = { value: 0 }, uWind = { value: new THREE.Vector3() }, uPh = { value: 0 };   // uPh: flutter phase, integrated (see update)
 
 export const TAPE_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.42, metalness: 0.05 });
 TAPE_MAT.onBeforeCompile = (sh) => {
-  sh.uniforms.uTime = uTime; sh.uniforms.uWind = uWind;
+  sh.uniforms.uTime = uTime; sh.uniforms.uWind = uWind; sh.uniforms.uPh = uPh;
   sh.vertexShader = sh.vertexShader
-    .replace('#include <common>', '#include <common>\nattribute vec3 aSide; attribute vec3 aFl; attribute vec3 aVar; attribute float aAlive; uniform float uTime; uniform vec3 uWind;')
+    .replace('#include <common>', '#include <common>\nattribute vec3 aSide; attribute vec3 aFl; attribute vec3 aVar; attribute float aAlive; uniform float uTime; uniform float uPh; uniform vec3 uWind;')
     .replace('#include <begin_vertex>', `#include <begin_vertex>
       // aFl: x = 0 at the stakes .. 1 mid-span, y = phase, z = +1 top edge / -1 bottom edge
       float ws = length(uWind);
       float push = dot(uWind, aSide);                                   // wind across the tape bows it
       // aVar (per span): x = speed, y = ripple length, z = twist -- so no two spans move alike
-      float tt = uTime * aVar.x, ph = aFl.y * aVar.y;
-      float wave = sin(tt * (7.0 + ws) - ph) * 0.55 + sin(tt * (11.3 + ws * 1.3) - ph * 1.9 + aVar.z * 4.0) * 0.3
-                 + sin(tt * 3.1 - ph * 0.45 + aVar.y * 7.0) * 0.35;
+      // the flutter phase is integrated on the CPU (faster in gusts) -- never time * windspeed, which
+      // jumps whenever the wind changes
+      float tt = uTime * aVar.x, pp = uPh * aVar.x, ph = aFl.y * aVar.y;
+      float wave = sin(pp - ph) * 0.55 + sin(pp * 1.53 - ph * 1.9 + aVar.z * 4.0) * 0.3
+                 + sin(tt * 2.2 - ph * 0.45 + aVar.y * 7.0) * 0.35;
       float gust = 0.7 + 0.3 * sin(uTime * 0.9 * aVar.x + aVar.z * 9.0);
       float amp = aFl.x * (0.025 + 0.012 * ws) * gust;
       // twist: top and bottom edge swing opposite ways around the centre line, by a varying angle
-      float tw = sin(tt * 4.3 - ph * 0.8 + aVar.y * 3.0) * aVar.z;
+      float tw = sin(pp * 0.4 - ph * 0.8 + aVar.y * 3.0) * aVar.z;
       transformed += aSide * (aFl.x * push * 0.035 * gust + amp * wave + aFl.x * aFl.z * 0.0375 * sin(tw));
-      transformed.y += aFl.x * (0.012 * ws * sin(tt * 5.0 - ph * 0.7) - 0.02) - aFl.x * aFl.z * 0.0375 * (1.0 - cos(tw));
+      transformed.y += aFl.x * (0.012 * ws * sin(pp * 0.7 - ph * 0.7) - 0.02) - aFl.x * aFl.z * 0.0375 * (1.0 - cos(tw));
       transformed *= aAlive;`);
 };
 
@@ -85,7 +87,7 @@ export function buildTape(T, cx, cz, S, colliders) {
     const { a, b } = sp, dx = b.x - a.x, dz = b.z - a.z, L = Math.hypot(dx, dz), sx = -dz / L, sz = dx / L;
     const ya = a.h + TAPE_H, yb = b.h + TAPE_H, phase0 = (sp.k * 1.7 + sp.side) % 6.28;
     const hr = (n) => { const v = Math.sin(sp.k * 127.1 + sp.side * 311.7 + n * 74.7) * 43758.5453; return v - Math.floor(v); };
-    const varS = 0.6 + hr(1) * 0.9, varL = 0.6 + hr(2) * 1.1, varT = 0.3 + hr(3) * 1.4;   // speed, ripple length, twist
+    const varS = 0.6 + hr(1) * 0.6, varL = 0.6 + hr(2) * 1.1, varT = 0.3 + hr(3) * 1.4;   // speed, ripple length, twist
     sp.pts = [];
     for (let i = 0; i <= SEG; i++) {
       const t = i / SEG, x = a.x + dx * t, z = a.z + dz * t;
@@ -191,6 +193,7 @@ export class TapeSim {
     WIND.dir.set(Math.cos(ang), 0, Math.sin(ang));
     const ws = WIND.speed * WIND.gust * 1.5;
     uTime.value = t; uWind.value.copy(WIND.dir).multiplyScalar(ws);
+    uPh.value += dt * (4.5 + ws * 0.7);   // flutter rate follows the wind smoothly
     const T = this.T, h = dt / SUB;
     for (let si = this.strips.length - 1; si >= 0; si--) {
       const s = this.strips[si];
@@ -210,7 +213,7 @@ export class TapeSim {
           _w.copy(WIND.dir).multiplyScalar(ws * (0.8 + 0.35 * Math.sin(tu * 1.7)));
           _w.x += Math.sin(tu * 2.3 + i) * ws * 0.35; _w.z += Math.cos(tu * 2.9 - i) * ws * 0.35;
           const alt = Math.min(1, Math.max(0, 1 - (p.y - G[i]) / 9));   // soars, but tops out ~9 m up
-          _w.y = ws * (0.16 * alt + 0.3 * Math.sin(tu * 1.3 + i * 0.7));   // lift: foil floats and soars
+          _w.y = ws * (0.16 * alt + 0.3 * Math.sin(tu * 1.3 + i * 0.7));   // lift: foil floats and soars   // lift: foil floats and soars
           const vx = (p.x - q.x) / h * (sub === 0 ? ratio : 1), vy = (p.y - q.y) / h * (sub === 0 ? ratio : 1), vz = (p.z - q.z) / h * (sub === 0 ? ratio : 1);
           const drag = 3.2, ax = (_w.x - vx) * drag, ay = (_w.y - vy) * drag - 9.81 * 0.35, az = (_w.z - vz) * drag;
           q.copy(p);
