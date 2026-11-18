@@ -118,14 +118,35 @@ func _build_room() -> void:
 	add_child(fl)
 	# walls
 	var wall := _mat(Color(0.2, 0.21, 0.23), 0.9)
+	_box(Vector3(14, 5, 0.2), Vector3(0, 2.5, -4.2), wall)
+	# back wall face: Poly Haven "Broken Brick Wall" (CC0), one tile = 1.8 m, with parallax depth
 	var brick := StandardMaterial3D.new()
-	brick.albedo_color = Color(0.24, 0.24, 0.26); brick.roughness = 0.95
-	_box(Vector3(14, 5, 0.2), Vector3(0, 2.5, -4.2), brick)
+	var btex := "res://assets/textures/broken_brick_wall/broken_brick_wall_%s_2k.jpg"
+	brick.albedo_texture = load(btex % "diff")
+	brick.normal_enabled = true
+	brick.normal_texture = load(btex % "nor_gl")
+	brick.roughness_texture = load(btex % "rough")
+	brick.roughness = 1.0
+	brick.ao_enabled = true
+	brick.ao_texture = load(btex % "ao")
+	brick.heightmap_enabled = true
+	brick.heightmap_texture = load(btex % "disp")
+	brick.heightmap_scale = 2.5
+	brick.heightmap_deep_parallax = true
+	brick.heightmap_min_layers = 8; brick.heightmap_max_layers = 24
+	brick.uv1_scale = Vector3(14.0 / 1.8, 5.0 / 1.8, 1)
+	brick.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	var brick_mesh := PlaneMesh.new()
+	brick_mesh.size = Vector2(14, 5); brick_mesh.orientation = PlaneMesh.FACE_Z
+	var bw := MeshInstance3D.new(); bw.mesh = brick_mesh; bw.material_override = brick
+	bw.position = Vector3(0, 2.5, -4.095)   # just in front of the wall box's inside face
+	add_child(bw)
 	_box(Vector3(0.2, 5, 12), Vector3(-6, 2.5, 0), wall)
 	_box(Vector3(0.2, 5, 12), Vector3(6, 2.5, 0), wall)
 	_box(Vector3(14, 0.2, 12), Vector3(0, 5, 0), _mat(Color(0.08, 0.08, 0.09)))
 	# roll-up door on the back wall
 	var door := _mat(Color(0.55, 0.57, 0.6), 0.45, 0.6)
+	_box(Vector3(4.3, 3.15, 0.01), Vector3(2.4, 1.6, -4.088), _mat(Color(0.03, 0.03, 0.035), 1.0))   # the door opening (no bricks between the slats)
 	for i in 16:
 		_box(Vector3(4.2, 0.17, 0.06), Vector3(2.4, 0.12 + i * 0.19, -4.07), door)
 	_box(Vector3(4.6, 0.25, 0.25), Vector3(2.4, 3.2, -4.0), _mat(Color(0.15, 0.15, 0.16), 0.6, 0.4))
