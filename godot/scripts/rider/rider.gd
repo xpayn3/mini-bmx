@@ -439,6 +439,7 @@ static func set_torso(n: Node3D, a: Vector3, b: Vector3, right: Vector3) -> void
 # ---------------- the spine: the torso mesh is skinned to SPINE_BONES bones along its length so it can bend
 
 const SPINE_BONES := 5
+var torso_ratio := 1.0   # tests: torso length / its rest length before the limit
 var spine_skel: Skeleton3D
 
 ## weights each torso vertex to the two spine bones either side of its height (mesh y -0.5 .. 0.5)
@@ -696,7 +697,9 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	pelvis.x += hs
 	chest.x += hs * 0.6
 	# keep the body level while the bike pitches (descents: almost fully; climbs: a little)
-	var pitch0 := _num(p, "pitch")
+	# only for slope-like angles: mid-flip (nose far up / down, upside down) the body stays on the bike
+	var pitch0 := wrapf(_num(p, "pitch"), -PI, PI)
+	pitch0 *= 1.0 - smoothstep(0.7, 1.3, absf(pitch0))
 	var pit := pitch0 * (0.2 if pitch0 > 0 else _num(p, "bodyLevel", 0.85))
 	if pit != 0.0:
 		var c := cos(-pit)
@@ -793,6 +796,16 @@ func update_pose(dt: float, p: Dictionary) -> void:
 				chest += d
 				pelvis += d * 0.35
 
+	# the torso never stretches or squashes: past its length range the hips follow the chest
+	var tv := chest - pelvis
+	var tl := tv.length()
+	var t_max: float = sty.torso * 1.08
+	var t_min: float = sty.torso * 0.75
+	torso_ratio = tl / maxf(float(sty.torso), 1e-4)
+	if tl > t_max:
+		pelvis = chest - tv / tl * t_max
+	elif tl < t_min and tl > 1e-4:
+		chest = pelvis + tv / tl * t_min
 	# torso from pelvis to chest
 	var hip := Vector3(pelvis.x, pelvis.y + 0.02, pelvis.z)
 	var tw_axis := (chest - hip).normalized()
@@ -833,6 +846,8 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		set_limb(thigh[i], hp, ik[0])
 		set_limb(shin[i], ik[0], ik[1])
 		knee[i].position = ik[0]
+		# out of reach: the foot stays at the end of the leg (limbs never stretch)
+		foot += ik[1] - ankle
 		shoe[i].position = Vector3(foot.x, foot.y + 0.03, foot.z)
 		shoe[i].basis = Basis(Vector3.UP, -side * float(sty.footOut)) * Basis(Vector3.BACK, float(sty.footAngle))
 		J[9 + i * 3] = hp
@@ -846,6 +861,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		set_limb(upper_arm[i], shp, ika[0])
 		set_limb(fore_arm[i], ika[0], ika[1])
 		elbow[i].position = ika[0]
+		hand = ika[1]   # out of reach: the hand stays at the end of the arm
 		glove[i].position = hand
 		orient_hand(glove[i], ika[0], hand, right)
 		if sty.wristRoll != 0.0:

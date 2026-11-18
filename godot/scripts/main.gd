@@ -316,16 +316,32 @@ func _autotest(seconds: float) -> void:
 				_probe.cam_dist_min = minf(_probe.get("cam_dist_min", 1e9), off.length())
 				_probe.cam_dist_max = maxf(_probe.get("cam_dist_max", 0.0), off.length())
 			_probe.cam_off = off
-		var trick := OS.get_environment("BMX_TRICK")   # tests: back / front / spin in every jump
+		var trick := OS.get_environment("BMX_TRICK")   # tests: back / front flip lean, side = A / D lean (alternating) in every jump
+		if OS.get_environment("BMX_KNEE_PROBE") != "" and game.rider != null:   # tests: biggest knee jump per frame
+			var tr: float = game.rider.torso_ratio
+			if el > 1.0: _probe.tmin = minf(_probe.get("tmin", 9.0), tr); _probe.tmax = maxf(_probe.get("tmax", 0.0), tr)
+			for i in 3:
+				var kp: Vector3 = game.rider.knee[i].position if i < 2 else game.rider.pelvis_mesh.position
+				var key := "knee%d" % i
+				if _probe.has(key):
+					var j: float = kp.distance_to(_probe[key])
+					var tag := ("air" if game.phys.air else "ground") + ("_hip" if i == 2 else "")
+					if j > _probe.get("jump_" + tag, 0.0): _probe["jump_" + tag] = j
+				_probe[key] = kp
+		var airshot := OS.get_environment("BMX_AIRSHOT")   # tests: dir/prefix -> shots mid-air (up to 8)
+		if airshot != "" and game.phys.air and game.phys.air_time > 0.25 and _airshots < 8 and el - _airshot_t > 0.6:
+			_airshot_t = el
+			get_viewport().get_texture().get_image().save_png("%s_%d.png" % [airshot, _airshots])
+			_airshots += 1
 		if trick != "" and game.phys.air:
 			var ph = game.phys
-			Input.action_release("pedal"); Input.action_release("brake"); Input.action_release("steer_left")
+			if ph.air_time > 0.06 and trick == "side": trick = "left" if int(el / 2.0) % 2 == 0 else "right"
+			Input.action_release("pedal"); Input.action_release("brake"); Input.action_release("steer_left"); Input.action_release("steer_right")
 			if ph.air_time > 0.06:   # a fresh press after take-off (held keys are locked)
 				if trick == "back": Input.action_press("brake")
 				elif trick == "front": Input.action_press("pedal")
-				elif trick == "spin": Input.action_press("steer_left")
-				elif trick == "whip" and ph.air_time < 0.45: Input.action_press("sprint"); Input.action_press("steer_left")
-				elif trick == "whip": Input.action_release("sprint")
+				elif trick == "left": Input.action_press("steer_left")
+				elif trick == "right": Input.action_press("steer_right")
 			await get_tree().process_frame
 			continue
 		elif trick != "":
@@ -386,6 +402,8 @@ func _autotest(seconds: float) -> void:
 
 ## BMX_FENCE test: at 2 s put the bike 6 m in front of the nearest fence panel, aimed at it; shots
 ## at the hit and after (BMX_FENCE=dir/prefix)
+var _airshots := 0
+var _airshot_t := -10.0
 var _fence := {}
 func _fence_test(el: float) -> void:
 	var ph = game.phys
