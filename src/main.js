@@ -345,6 +345,7 @@ if (bikeId === 'dh') {
   for (const nm of ['seatstay', 'swing']) { const n = part(nm); if (n) rest.set(n, inv.clone().multiply(n.matrixWorld)); }
   new GLTFLoader().loadAsync('assets/drivetrain.glb').then((g) => {
     drive = new Drivetrain(g.scene, { rigParent: part('seatstay'), chainParent: part('swing'), rest, ringTeeth: 34 });
+    drive.attachCassette(wheelR);
     window.drivetrain = drive;
   }).catch((e) => console.warn('drivetrain.glb', e));
 }
@@ -1395,7 +1396,10 @@ function physics(dt) {
   const w = st.v / RWF;
   st.wheelF += w * dt;
   if (!skid) st.wheelR += st.v / RWR * dt;
-  if (st.pedal > 0.05) st.crank += Math.max(w / (2.78 * gearK()), 3.5) * (1 + 0.3 * (st.sprint || 0)) * st.pedal * dt;
+  // the downhill bike's chain really drives the cassette: pedalling turns the cranks at the true gear
+  // ratio (chainring / cog), so chain, chainring and cog stay in mesh
+  if (st.pedal > 0.05) st.crank += (drive && gear >= 0 && w > 1 ? w * COGS[gear] / 34
+    : Math.max(w / (2.78 * gearK()), 3.5) * (1 + 0.3 * (st.sprint || 0))) * st.pedal * dt;
   else if (!st.air) {
     // coasting: outside pedal down in a turn, level pedals on the straight
     const aL = pedalPivots[0].userData.a0, aR = pedalPivots[1].userData.a0;

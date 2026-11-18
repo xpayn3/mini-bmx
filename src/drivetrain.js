@@ -91,6 +91,30 @@ export class Drivetrain {
     this.setGear(0); this.update(0);
   }
 
+  // The cassette sits on the freehub: it turns with the CHAIN, not the wheel (when you coast it stops while
+  // the wheel spins on). Its triangles are taken out of the rear wheel's meshes (drive side, inside the
+  // biggest cog) into a mesh of their own, which update() turns.
+  attachCassette(wheel) {
+    const rMax = 0.064, pieces = [];
+    wheel.updateMatrix();
+    for (const m of [...wheel.children]) {
+      if (!m.isMesh || !m.geometry.index || !['chrome', 'black'].includes(m.material.name)) continue;
+      const g = m.geometry, P = g.attributes.position, idx = g.index.array;
+      const on = (i) => P.getZ(i) > 0.006 && Math.hypot(P.getX(i), P.getY(i)) < rMax;
+      const keep = [], cas = [];
+      for (let t = 0; t < idx.length; t += 3) (on(idx[t]) && on(idx[t + 1]) && on(idx[t + 2]) ? cas : keep).push(idx[t], idx[t + 1], idx[t + 2]);
+      if (!cas.length) continue;
+      g.setIndex(keep);
+      const cg = g.clone(); cg.setIndex(cas);
+      pieces.push(new THREE.Mesh(cg, m.material));
+    }
+    if (!pieces.length) return;
+    this.cassette = new THREE.Group();
+    this.cassette.position.copy(wheel.position);   // on the axle, in the wheel's parent: not spun by the wheel
+    for (const p of pieces) { p.castShadow = true; this.cassette.add(p); }
+    wheel.parent.add(this.cassette);
+  }
+
   // gear: 0 .. n-1, fractional while shifting
   setGear(f) {
     f = Math.min(this.n - 1, Math.max(0, f));
@@ -129,6 +153,8 @@ export class Drivetrain {
     this.inner.count = ii; this.outer.count = io;
     this.inner.instanceMatrix.needsUpdate = true; this.outer.instanceMatrix.needsUpdate = true;
     this.rollers.instanceMatrix.needsUpdate = true;
+    // the cassette turns one tooth per link, on whichever cog the chain is on
+    if (this.cassette) this.cassette.rotation.z = -this.phase * Math.PI * 2 / this.cogs[Math.round(this.gearF)];
     // pulleys turn with the chain: one tooth per link
     const turn = this.phase * Math.PI * 2 / 11;
     for (const p of this.parts) if (p.spin) p.node.quaternion.copy(p.base).multiply(_qs.setFromAxisAngle(Z, -turn));
