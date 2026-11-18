@@ -82,7 +82,6 @@ func _exit_tree() -> void:
 
 func _process(delta: float) -> void:
 	_time += delta
-	(TerrainGeo.MAT["flower"] as ShaderMaterial).set_shader_parameter("u_time", _time)
 	_update_wind(delta)
 	_tapes.update(delta, _focus.x, _focus.y, _wind_t, _wind_dir, _wind_ws)
 
@@ -514,6 +513,26 @@ func _finalize(k: Vector2i) -> void:
 	gi.position = Vector3(ox, 0, oz)
 	gi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	node.add_child(gi)
+	# occluder: a coarse copy of the ground (4 m grid) sunk 0.6 m under it, so hills hide what's behind
+	# them when occlusion culling is on (Settings "occlusion"); always under the real surface = safe
+	var hm: PackedFloat32Array = o["hm"]
+	var occ_v := PackedVector3Array()
+	var occ_i := PackedInt32Array()
+	for iz in 13:
+		for ix in 13:
+			var hx := mini(ix * 4, 48)
+			var hz := mini(iz * 4, 48)
+			occ_v.append(Vector3(hx - 24.0, hm[hz * 49 + hx] - 0.6, hz - 24.0))
+	for iz in 12:
+		for ix in 12:
+			var v0 := iz * 13 + ix
+			occ_i.append_array([v0, v0 + 1, v0 + 13, v0 + 1, v0 + 14, v0 + 13])
+	var occ := ArrayOccluder3D.new()
+	occ.set_arrays(occ_v, occ_i)
+	var oi := OccluderInstance3D.new()
+	oi.occluder = occ
+	oi.position = Vector3(ox, 0, oz)
+	node.add_child(oi)
 	# cheap collider for debris only (layer 2)
 	var body := StaticBody3D.new()
 	body.collision_layer = LAYER_GROUND

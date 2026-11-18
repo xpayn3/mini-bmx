@@ -1,4 +1,4 @@
-"""Export the BMX from W:\\AR9\\houdini_bmx\\bmx_latest.hip to assets/bmx.glb
+"""Export the BMX from W:\\AR9\\houdini_bmx\\bmx_latest.hip to godot/assets/bmx.glb
 for the game. Splits the bike into animatable nodes:
 
   bmx
@@ -17,7 +17,7 @@ import numpy as np
 import hou
 
 HIP = r"W:\AR9\houdini_bmx\bmx_latest.hip"
-OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "bmx.glb")
+OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "godot", "assets", "bmx.glb")
 
 CLASSIFY = r"""
 string n = s@name; string pt = s@part;

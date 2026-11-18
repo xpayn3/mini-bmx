@@ -99,6 +99,7 @@ static func _frame(title: String, sub: String, on_reset: Callable) -> Array:
 	t.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(t)
 	head.add_child(UITheme.button("Reset", on_reset, 14))
+	head.add_child(UITheme.close_button(func(): p.get_tree().call_group("hud", "close_sides")))
 	vb.add_child(head)
 	vb.add_child(UITheme.label(sub, 12, UITheme.MUTED))
 	var sc := ScrollContainer.new()
@@ -137,7 +138,7 @@ class PosePanel extends Control:
 	func _slider(row: Array) -> void:
 		var key: String = row[0]
 		var hb := HBoxContainer.new()
-		var l := UITheme.label(row[1], 13); l.custom_minimum_size.x = 140; l.clip_text = true
+		var l := UITheme.label(row[1], 13); l.size_flags_horizontal = Control.SIZE_EXPAND_FILL; l.clip_text = true
 		var s := HSlider.new()
 		s.min_value = row[2]; s.max_value = row[3]; s.step = row[4]; s.value = float(pose.get(key, 0.0))
 		s.size_flags_horizontal = Control.SIZE_EXPAND_FILL; s.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -145,8 +146,10 @@ class PosePanel extends Control:
 		var vl := UITheme.label(_fmt(s.value, row[4], row[5]), 12, UITheme.MUTED)
 		vl.custom_minimum_size.x = 64; vl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		s.value_changed.connect(func(v): vl.text = _fmt(v, row[4], row[5]); pose[key] = v; _apply())
-		hb.add_child(l); hb.add_child(s); hb.add_child(vl)
+		hb.add_child(l); hb.add_child(vl)
+		hb.add_child(UITheme.reset_button(s, float(defaults.get(key, 0.0))))
 		list.add_child(hb)
+		list.add_child(s)
 	func _fmt(v: float, stp: float, unit: String) -> String:
 		var d := clampi(ceili(-log(stp) / log(10.0)), 0, 4)
 		return ("%." + str(d) + "f %s") % [v, unit]

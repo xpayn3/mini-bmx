@@ -1,17 +1,29 @@
 // Decorations (trees, rocks, sheds, fences, logs...): vertex colour x material colour x per-instance
 // colour (MultiMesh custom data, linear RGB) -- the three.js vertexColors * color * instanceColor.
+// sway > 0 (tree crowns, bushes, weeds): the wind nudges them, more the higher up. Cloud shadows drift over.
 shader_type spatial;
-render_mode blend_mix, depth_draw_opaque, cull_back, diffuse_burley, specular_schlick_ggx;
+render_mode blend_mix, depth_draw_opaque, cull_back, diffuse_burley, specular_schlick_ggx, world_vertex_coords;
+#include "res://shaders/atmos.gdshaderinc"
 
 uniform vec3 albedo = vec3(1.0);
 uniform float roughness = 0.85;
 uniform float metallic = 0.0;
 uniform bool use_instance = true;
+uniform float sway = 0.0;      // m of sway per m of height in a full gust
+uniform float backlight = 0.0;
 varying vec3 v_col;
+varying vec3 v_world;
 
 void vertex() {
 	vec3 ic = use_instance ? INSTANCE_CUSTOM.rgb : vec3(1.0);
 	v_col = albedo * COLOR.rgb * ic;
+	if (sway > 0.0) {
+		vec3 base = MODEL_MATRIX[3].xyz;
+		float h = max(VERTEX.y - base.y, 0.0);
+		vec3 o = wind_bend(base, 1.0, 1.0, 0.0);
+		VERTEX.xz += o.xz * h * sway;
+	}
+	v_world = VERTEX;
 }
 
 void fragment() {
@@ -19,4 +31,13 @@ void fragment() {
 	ROUGHNESS = roughness;
 	METALLIC = metallic;
 	SPECULAR = 0.4;
+}
+
+void light() {
+	vec3 _lc = atmos_light_col(ATTENUATION * LIGHT_COLOR, LIGHT_IS_DIRECTIONAL, v_world);
+	DIFFUSE_LIGHT += (clamp(dot(NORMAL, LIGHT), 0.0, 1.0) + clamp(dot(-NORMAL, LIGHT), 0.0, 1.0) * backlight) * _lc;
+	// a soft sheen so wet rock / painted wood still catch the sun
+	vec3 hv = normalize(VIEW + LIGHT);
+	float sp = pow(clamp(dot(NORMAL, hv), 0.0, 1.0), mix(64.0, 4.0, roughness)) * (1.0 - roughness) * 0.5;
+	SPECULAR_LIGHT += sp * _lc * clamp(dot(NORMAL, LIGHT), 0.0, 1.0);
 }

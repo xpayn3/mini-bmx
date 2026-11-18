@@ -1,6 +1,6 @@
 extends PanelContainer
 ## The Quick tune card (top right, like the web version): the pinned ride sliders, always at hand.
-## "All" opens the full tuning panel (P); "–" folds it.
+## "All" opens the full tuning panel (P); "–" folds it; "✕" hides it (Settings › Interface brings it back).
 
 var hud
 var list: VBoxContainer
@@ -23,6 +23,7 @@ func _ready() -> void:
 	fold_btn = UITheme.button("–", func(): Tune.quick_folded = not Tune.quick_folded; Tune.save(); _rebuild(), 13)
 	fold_btn.custom_minimum_size = Vector2(32, 28); fold_btn.focus_mode = Control.FOCUS_NONE
 	head.add_child(all); head.add_child(fold_btn)
+	head.add_child(UITheme.close_button(func(): Settings.set_v("hud_quick", false); hud.flash("Quick tune hidden · back in Settings › Interface")))
 	vb.add_child(head)
 	list = VBoxContainer.new()
 	vb.add_child(list)
@@ -43,11 +44,14 @@ func _rebuild() -> void:
 		var l := UITheme.label(r[1], 12); l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var vl := UITheme.label("", 12, UITheme.ACCENT, true); vl.name = "V_" + k
 		top.add_child(l); top.add_child(vl)
+		var rb := UITheme.reset_button(null, 0.0)
+		top.add_child(rb)
 		var s := HSlider.new()
 		s.name = "S_" + k
 		s.min_value = r[3]; s.max_value = r[4]; s.step = r[5]; s.value = Tune.base[k]
 		s.focus_mode = Control.FOCUS_NONE
 		s.value_changed.connect(func(val): Tune.set_value(k, val))
+		UITheme.bind_reset(rb, s, float(Tune.defaults.get(k, s.value)))
 		list.add_child(top); list.add_child(s)
 	_sync()
 

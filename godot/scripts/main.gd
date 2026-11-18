@@ -31,6 +31,8 @@ func _ready() -> void:
 		elif a.begins_with("--autotest"): _autotest(float(a.get_slice("=", 1)) if "=" in a else 10.0)
 		elif a == "--garage": _open_garage()
 		elif a.begins_with("--shot="): _shot(a.get_slice("=", 1))
+		elif a.begins_with("--bench="): _bench(a.get_slice("=", 1))
+		elif a.begins_with("--showcase="): _showcase(a.get_slice("=", 1))
 
 func _new_game() -> void:
 	if game:
@@ -268,7 +270,9 @@ func _autotest(seconds: float) -> void:
 		draws += RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME)
 	if OS.get_environment("BMX_PAUSE") != "":
 		_pause()
-		if OS.get_environment("BMX_PAUSE") == "settings": _open_settings()
+		if OS.get_environment("BMX_PAUSE") == "settings":
+			_open_settings()
+			if OS.get_environment("BMX_TAB") != "": settings_open.get_child(0).get_child(1).current_tab = int(OS.get_environment("BMX_TAB"))
 		for i in 10: await get_tree().process_frame
 		if OS.get_environment("BMX_PAUSE") == "preset":   # pause > settings > a quality preset > Done > resume
 			_open_settings()
@@ -297,4 +301,98 @@ func _shot(arg: String) -> void:
 	await get_tree().create_timer(secs, true, false, true).timeout
 	get_viewport().get_texture().get_image().save_png(path)
 	print("SHOT ", path)
+	get_tree().quit()
+
+
+## --bench=<dir>: fixed world (BMX_SEED, default 7), scripted ride through three cameras; prints frame
+## time (avg / 1% low), GPU time, triangles and draw calls per camera and saves a screenshot of each.
+## Combine with --quality=0..3. Vsync off, no frame cap.
+func _bench(dir: String) -> void:
+	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
+	Engine.max_fps = 0
+	GameState.seed = int(OS.get_environment("BMX_SEED")) if OS.get_environment("BMX_SEED") != "" else 7
+	await _new_game()
+	_start_ride()
+	game.hud.visible = false
+	var vp := get_viewport().get_viewport_rid()
+	RenderingServer.viewport_set_measure_render_time(vp, true)
+	for i in 90: await get_tree().process_frame   # let the world stream in, shaders compile
+	var q: int = Settings.get_v("quality")
+	var line := "BENCH quality=%s" % Settings.QUALITY_NAMES[q]
+	for cam in ["drone", "chase", "diorama"]:
+		game.cam.set_mode(cam)
+		var ft := PackedFloat32Array()
+		var gpu := 0.0
+		var tris := 0.0
+		var draws := 0.0
+		var t0 := Time.get_ticks_msec()
+		var last := Time.get_ticks_usec()
+		var n := 0
+		while Time.get_ticks_msec() - t0 < 7000:
+			var el := (Time.get_ticks_msec() - t0) / 1000.0
+			Input.action_press("pedal")
+			if int(el * 0.7) % 3 == 1: Input.action_press("steer_left")
+			else: Input.action_release("steer_left")
+			await get_tree().process_frame
+			var now := Time.get_ticks_usec()
+			if el > 1.0:   # skip the camera cut
+				ft.append((now - last) / 1000.0)
+				gpu += RenderingServer.viewport_get_measured_render_time_gpu(vp)
+				tris += RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_PRIMITIVES_IN_FRAME)
+				draws += RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME)
+				n += 1
+			last = now
+		Input.action_release("pedal"); Input.action_release("steer_left")
+		var sorted := ft.duplicate(); sorted.sort()
+		var avg := 0.0
+		for v in ft: avg += v
+		avg /= maxi(n, 1)
+		var p99 := sorted[int(sorted.size() * 0.99)] if sorted.size() > 0 else 0.0
+		line += "  | %s: %.2f ms avg (%.0f fps), 1%% low %.2f ms, GPU %.2f ms, %dk tris, %d draws" % [cam, avg, 1000.0 / avg, p99, gpu / maxi(n, 1), tris / maxi(n, 1) / 1000, draws / maxi(n, 1)]
+		get_viewport().get_texture().get_image().save_png("%s/%s_q%d.png" % [dir, cam, q])
+	print(line)
+	get_tree().quit()
+
+
+## --showcase=<dir>: screenshots of each effect forced on (mud, wet, dust cloud, speed blur, photo DoF)
+func _showcase(dir: String) -> void:
+	GameState.seed = int(OS.get_environment("BMX_SEED")) if OS.get_environment("BMX_SEED") != "" else 7
+	await _new_game()
+	_start_ride()
+	game.cam.set_mode("chase")
+	var ride := func(secs: float):
+		var t0 := Time.get_ticks_msec()
+		while Time.get_ticks_msec() - t0 < secs * 1000:
+			Input.action_press("pedal")
+			await get_tree().process_frame
+		Input.action_release("pedal")
+	var shot := func(n: String):
+		await get_tree().process_frame
+		get_viewport().get_texture().get_image().save_png("%s/show_%s.png" % [dir, n])
+	await ride.call(5.0)
+	await shot.call("plain")
+	game.grime.mud = 0.75
+	await ride.call(1.0)
+	await shot.call("mud")
+	game.grime.wet = 1.0
+	await ride.call(0.6)
+	await shot.call("wet")
+	game.grime.clean()
+	game.cam.set_mode("close")
+	for i in 3:
+		game.dust.cloud(game.drawn_pos, Vector3.ZERO, game.ground_dust(game.phys.x, game.phys.z, 1), 3.0, 1.2)
+		await ride.call(0.25)
+	await shot.call("dustcloud")
+	game.speed_k = 1.0
+	Settings.data["speed_fx"] = true
+	game.cam.set_mode("chase")
+	await ride.call(0.15)
+	(game.grade_rect.material as ShaderMaterial).set_shader_parameter("blur", 1.0)
+	await shot.call("speedblur")
+	game.cam.set_mode("dolly")
+	await ride.call(1.5)
+	game.toggle_photo()
+	for i in 20: await get_tree().process_frame
+	await shot.call("photo")
+	game.toggle_photo()
 	get_tree().quit()

@@ -78,6 +78,10 @@ static func _build_materials() -> void:
 	MAT["shed"] = _mat(w, 0.85)
 	MAT["fence"] = _mat(w, 0.9)
 	MAT["stake"] = _mat(w, 0.6)
+	# what the wind moves (m of sway per m of height in a full gust) and how much sun shows through
+	for k in [["leaf", 0.02, 0.2], ["leafSoft", 0.035, 0.25], ["tuft", 0.12, 0.3]]:
+		MAT[k[0]].set_shader_parameter("sway", k[1])
+		MAT[k[0]].set_shader_parameter("backlight", k[2])
 	var f := ShaderMaterial.new()
 	f.shader = preload("res://scripts/world/flower.gdshader")
 	MAT["flower"] = f

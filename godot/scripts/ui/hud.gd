@@ -31,6 +31,7 @@ var elev_t := 0.0
 var hidden := false
 
 func _ready() -> void:
+	add_to_group("hud")
 	layer = 5
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -106,6 +107,7 @@ func apply_settings() -> void:
 	if gauge: gauge.visible = Settings.get_v("hud_gauge")
 	if gear_v: gear_v.visible = Settings.get_v("hud_gear")
 	if air_card: air_card.enabled = Settings.get_v("hud_jump")
+	if quick: quick.visible = Settings.get_v("hud_quick") and not _side_open()
 
 func speed_text(ms: float) -> String:
 	return "%d" % roundi(absf(ms) * (2.23694 if Settings.get_v("units") == 1 else 3.6))
@@ -154,12 +156,22 @@ var side_panels := {}
 func toggle_tune() -> void:
 	_toggle_side("tune")
 
+func _side_open() -> bool:
+	for k in side_panels:
+		if side_panels[k].visible: return true
+	return false
+
+## the ✕ on a side panel
+func close_sides() -> void:
+	for k in side_panels: side_panels[k].visible = false
+	quick.visible = Settings.get_v("hud_quick")
+
 func _toggle_side(which: String) -> void:
 	var was_open: bool = side_panels.has(which) and side_panels[which].visible
-	for k in side_panels: side_panels[k].visible = false
 	if was_open:
-		quick.visible = true
+		close_sides()
 		return
+	for k in side_panels: side_panels[k].visible = false
 	if not side_panels.has(which):
 		var p: Control
 		match which:
@@ -184,7 +196,12 @@ func _build_records() -> void:
 func _refresh_records() -> void:
 	var vb := records_panel.get_node("VB")
 	for c in vb.get_children(): c.queue_free()
-	vb.add_child(UITheme.label("🏆  RECORDS", 22, UITheme.ACCENT, true))
+	var head := HBoxContainer.new()
+	var title := UITheme.label("🏆  RECORDS", 22, UITheme.ACCENT, true)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(title)
+	head.add_child(UITheme.close_button(func(): records_panel.visible = false))
+	vb.add_child(head)
 	var r: Dictionary = GameState.records
 	var rows := [["Longest jump", "%.1f m" % r.longest], ["Highest jump", "%.1f m" % r.highest], ["Longest air", "%.2f s" % r.air],
 		["Top speed", "%s %s" % [speed_text(r.top_speed / 3.6), speed_unit()]], ["Jumps landed", "%d" % r.jumps], ["Distance ridden", "%.1f km" % (r.distance / 1000.0)]]
@@ -193,7 +210,7 @@ func _refresh_records() -> void:
 		var a := UITheme.label(row[0], 16, UITheme.MUTED); a.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		hb.add_child(a); hb.add_child(UITheme.label(row[1], 17, Color.WHITE, true))
 		vb.add_child(hb)
-	vb.add_child(UITheme.label("H to close", 12, UITheme.MUTED))
+	vb.add_child(UITheme.label("H or ✕ to close", 12, UITheme.MUTED))
 
 func update_hud(dt: float) -> void:
 	var st: BikePhysics = game.phys

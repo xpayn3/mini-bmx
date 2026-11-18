@@ -1,6 +1,6 @@
 # Mini BMX — Godot 4 PC version
 
-A port of the three.js web game (`../src`, `../index.html`) to **Godot 4.7** (GDScript, Forward+).
+The game: **Godot 4.7** (GDScript, Forward+), a native PC game. It started as a port of the old three.js web prototype, which is kept for reference in `../legacy-threejs/` and is no longer developed.
 
 ## Run
 
@@ -12,6 +12,9 @@ build still runs, falling back to the slower GDScript terrain).
 - Terrain check (C# vs the GDScript reference, must be exact): `..._console.exe --headless --path godot -s res://tools/terrain_cs_cmp.gd`
 - Skip the title screen: add `-- --ride`.
 - Unattended smoke test (rides 10 s, prints FPS / state, quits): `..._console.exe --path godot -- --autotest=10`
+
+Graphics, quality presets, frame times and test flags (`--bench`, `--showcase`, `--quality`): see
+[docs/GRAPHICS.md](docs/GRAPHICS.md). Photo mode: O.
 
 ## Build a standalone .exe
 

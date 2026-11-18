@@ -13,6 +13,7 @@ func _ready() -> void:
 	t.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(t)
 	head.add_child(UITheme.button("Reset", func(): Tune.reset_defaults(); _rebuild(), 14))
+	head.add_child(UITheme.close_button(func(): get_tree().call_group("hud", "close_sides")))
 	vb.add_child(head)
 	vb.add_child(UITheme.label("Scaled by the bike you ride · ☆ pins to Quick tune · P closes", 12, UITheme.MUTED))
 	var sc := ScrollContainer.new()
@@ -33,7 +34,7 @@ func _rebuild() -> void:
 			var key: String = row[0]
 			var hb := HBoxContainer.new()
 			var l := UITheme.label(row[1], 13)
-			l.custom_minimum_size.x = 150
+			l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			l.clip_text = true
 			var s := HSlider.new()
 			s.min_value = row[3]; s.max_value = row[4]; s.step = row[5]
@@ -52,8 +53,11 @@ func _rebuild() -> void:
 			pin.flat = true
 			pin.add_theme_color_override("font_color", UITheme.ACCENT if key in Tune.pins else UITheme.MUTED)
 			pin.pressed.connect(func(): Tune.toggle_pin(key); _rebuild())
-			hb.add_child(pin); hb.add_child(l); hb.add_child(s); hb.add_child(vl)
+			# name, value and reset on top; the slider gets the full width below
+			hb.add_child(pin); hb.add_child(l); hb.add_child(vl)
+			hb.add_child(UITheme.reset_button(s, float(Tune.defaults.get(key, s.value))))
 			list.add_child(hb)
+			list.add_child(s)
 
 func _fmt(v: float, unit: String) -> String:
 	return ("%.4f" % v if absf(v) < 0.1 and v != 0 else "%.2f" % v) + " " + unit
