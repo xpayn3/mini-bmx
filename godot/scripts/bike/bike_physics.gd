@@ -441,7 +441,9 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	var cap_b: float = T.bikeLeanCap + (0.0 if (air or signf(bk) != signf(bl)) else absf(bk))
 	bike_lean = cap_b * tanh(bl / cap_b)
 	counter = bike_lean - lean * 0.85
-	rock = sin(crank) * 0.065 * (1 + 1.3 * sprint) * pedal * minf(1.0, va / 2 + 0.3) * bike_rock
+	# side-to-side rock from pedalling: full when grinding up to speed, fades out once the rider is spinning fast
+	var rock_fade: float = 1.0 - 0.85 * smoothstep(5.0, 12.0, va)
+	rock = sin(crank) * 0.065 * (1 + 1.3 * sprint) * pedal * minf(1.0, va / 2 + 0.3) * rock_fade * bike_rock
 
 	# --- move ---
 	f = fwd()

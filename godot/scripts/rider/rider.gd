@@ -631,8 +631,10 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var sty := style
 	var crank := _num(p, "crank")
 	var spr := clampf(_num(p, "sprint"), 0, 1)
-	var sway: float = sin(crank) * pedal * sty.sway * (1 + 0.9 * spr)
-	var bob: float = sin(crank * 2) * pedal * sty.sway * (1 + 0.6 * spr)
+	# hip sway / bob from pedalling: big when pushing off slowly, nearly still when spinning at speed
+	var hi_fade: float = 1.0 - 0.85 * smoothstep(5.0, 12.0, absf(v))
+	var sway: float = sin(crank) * pedal * sty.sway * (1 + 0.9 * spr) * hi_fade
+	var bob: float = sin(crank * 2) * pedal * sty.sway * (1 + 0.6 * spr) * lerpf(0.4, 1.0, hi_fade)
 	var wig: float = clampf(1 - absf(v) / 3, 0, 1) * sty.sway
 	var air := _num(p, "air")
 	var comp: float = _num(p, "compress") * sty.crouch
