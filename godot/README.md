@@ -9,6 +9,9 @@ A port of the three.js web game (`../src`, `../index.html`) to **Godot 4.7** (GD
 - Skip the title screen: add `-- --ride`.
 - Unattended smoke test (rides 10 s, prints FPS / state, quits): `..._console.exe --path godot -- --autotest=10`
 
+Graphics, quality presets, frame times and test flags (`--bench`, `--showcase`, `--quality`): see
+[docs/GRAPHICS.md](docs/GRAPHICS.md). Photo mode: O.
+
 ## Build a standalone .exe
 
 Install the export templates once (Editor → Manage Export Templates → Download), then
