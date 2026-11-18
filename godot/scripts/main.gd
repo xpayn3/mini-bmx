@@ -238,12 +238,20 @@ func _show_controls() -> void:
 
 # ---------------------------------------------------------------- unattended smoke test
 func _autotest(seconds: float) -> void:
+	if OS.get_environment("BMX_SEED") != "":
+		GameState.seed = int(OS.get_environment("BMX_SEED"))
+		await _new_game()
 	_start_ride()
 	if OS.get_environment("BMX_CAM") != "": game.cam.set_mode(OS.get_environment("BMX_CAM"))
 	var pedal := OS.get_environment("BMX_IDLE") == ""
 	if OS.get_environment("BMX_PANEL") != "": game.hud._toggle_side(OS.get_environment("BMX_PANEL"))
+	if OS.get_environment("BMX_NOLOD") != "": get_viewport().mesh_lod_threshold = 0.0
+	if OS.get_environment("BMX_LOD") != "": get_viewport().mesh_lod_threshold = float(OS.get_environment("BMX_LOD"))
+	if OS.get_environment("BMX_NOVSYNC") != "": DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED); Engine.max_fps = 0
 	var t0 := Time.get_ticks_msec()
 	var frames := 0
+	var tris := 0.0
+	var draws := 0.0
 	while (Time.get_ticks_msec() - t0) / 1000.0 < seconds:
 		var el := (Time.get_ticks_msec() - t0) / 1000.0
 		if pedal: Input.action_press("pedal")
@@ -253,11 +261,14 @@ func _autotest(seconds: float) -> void:
 		else: Input.action_release("hop")
 		await get_tree().process_frame
 		frames += 1
+		tris += RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_PRIMITIVES_IN_FRAME)
+		draws += RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME)
 	if OS.get_environment("BMX_PAUSE") != "":
 		_pause()
 		if OS.get_environment("BMX_PAUSE") == "settings": _open_settings()
 		for i in 10: await get_tree().process_frame
 	var st := game.phys
+	print("AUTOTEST avg triangles/frame=%dk draw calls=%d" % [tris / maxi(frames, 1) / 1000, draws / maxi(frames, 1)])
 	print("AUTOTEST frames=%d fps=%.1f pos=(%.1f, %.1f, %.1f) v=%.2f crash=%s sane=%s" % [frames, frames / seconds, st.x, st.y, st.z, st.v, st.crash_on, st.is_sane()])
 	var shot := OS.get_environment("BMX_SHOT")
 	if shot != "":

@@ -10,6 +10,7 @@ const WATER := -2.2
 const SIZE := 48.0
 const RADIUS := 3
 const ROCK_CELL := 2.0
+var view_scale := 1.0   # Settings view distance: scales the decoration draw ranges
 const LAYER_GROUND := 1 << 1    # physics layer 2: chunk ground colliders (only for debris)
 
 ## ground mesh / texture resolution per 48 m chunk (JS: 128 -> 0.375 m). 96 = 0.5 m keeps the
@@ -407,7 +408,13 @@ const LIST_SPEC := {
 }
 
 
-func _multimesh(parent: Node3D, mesh: Mesh, mat: Material, buf: PackedFloat32Array, count: int, cast: bool) -> MultiMesh:
+## how far (m, camera to the chunk's centre) each kind of decoration is drawn; past the fog they fade
+## out. Small ground clutter is also limited to the 3x3 chunks round the rider (update_stream).
+const VIS_RANGE := {"pebble": 90.0, "grass": 90.0, "daisy": 90.0, "tulip": 90.0, "spike": 90.0, "stick": 90.0,
+	"fern": 90.0, "mushroom": 90.0, "weed": 130.0, "bush": 170.0, "log": 170.0, "rock": 200.0,
+	"plank": 150.0, "beam": 150.0, "post": 150.0, "rail": 150.0, "picket": 150.0, "stake": 150.0}
+
+func _multimesh(parent: Node3D, mesh: Mesh, mat: Material, buf: PackedFloat32Array, count: int, cast: bool, vis := 0.0) -> MultiMesh:
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
 	mm.use_custom_data = true
@@ -418,6 +425,10 @@ func _multimesh(parent: Node3D, mesh: Mesh, mat: Material, buf: PackedFloat32Arr
 	mi.multimesh = mm
 	mi.material_override = mat
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if cast else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	if vis > 0.0:
+		mi.visibility_range_end = vis * view_scale
+		mi.visibility_range_end_margin = 20.0
+		mi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
 	parent.add_child(mi)
 	return mm
 
@@ -442,9 +453,10 @@ func _finalize(k: Vector2i) -> void:
 	arr[Mesh.ARRAY_VERTEX] = o["verts"]
 	arr[Mesh.ARRAY_NORMAL] = o["norms"]
 	arr[Mesh.ARRAY_TEX_UV] = o["uvs"]
-	arr[Mesh.ARRAY_INDEX] = _grid_indices(b.N)
+	arr[Mesh.ARRAY_INDEX] = o["indices"]
 	var mesh := ArrayMesh.new()
-	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+	# distance LOD: coarser grids keyed by their geometric error (terrain_chunk_builder._ground_lods)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr, [], o["lods"])
 	var mat := ShaderMaterial.new()
 	mat.shader = _ground_shader
 	mat.set_shader_parameter("land_tex", ImageTexture.create_from_image(o["land_img"]))
@@ -478,7 +490,7 @@ func _finalize(k: Vector2i) -> void:
 		if n == 0:
 			continue
 		var spec: Array = LIST_SPEC[name]
-		var mm := _multimesh(node, TerrainGeo.MESH[spec[0]], TerrainGeo.MAT[spec[1]], lists[name], n, spec[2])
+		var mm := _multimesh(node, TerrainGeo.MESH[spec[0]], TerrainGeo.MAT[spec[1]], lists[name], n, spec[2], VIS_RANGE.get(name, 0.0))
 		mms[name] = mm
 		if spec[3]:
 			small.append(node.get_child(node.get_child_count() - 1))

@@ -165,6 +165,7 @@ func _build_environment() -> void:
 	add_child(cl)
 
 func _apply_settings() -> void:
+	terrain.view_scale = float(Settings.get_v("view_distance"))
 	env.ssao_enabled = Settings.get_v("ssao")
 	env.ssr_enabled = Settings.get_v("ssr")
 	env.adjustment_brightness = float(Settings.get_v("brightness"))

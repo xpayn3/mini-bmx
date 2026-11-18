@@ -210,6 +210,7 @@ func _build() -> void:
 			LD[o] = f.cl_d
 	_stage("colour")
 	out["G"] = G
+	_ground_lods(verts, norms, uvs)   # adds edge skirts to the vertex arrays
 	out["verts"] = verts
 	out["norms"] = norms
 	out["uvs"] = uvs
@@ -995,3 +996,84 @@ func _wood_model(j: TerrainField.Feat) -> void:
 		var t: float = top.call(W.u1)
 		var g := f.ground(p.x, p.y) - 0.1
 		putw.call("beam", W.u1 - 0.05, 0.0, (t + g) / 2, 0.08, t - g, W.half * 2, 0.0, BEAM)
+
+
+# ----------------------------------------------------------------------------------------------
+# GROUND LOD: the full grid plus coarser versions (every 2nd / 4th / 8th point) that Godot swaps
+# in by distance. Each level's key is its real geometric error (largest height gap between the
+# fine grid and the coarse one), so bumpy chunks (jump lips, rock bands) stay detailed for longer
+# and flat meadows drop detail early. A skirt hangs 0.8 m down round the chunk's edge in every
+# level, hiding the cracks where a neighbour shows a different level.
+const SKIRT := 0.8
+const LOD_STEPS := [2, 4, 8]
+
+func _ground_lods(verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array) -> void:
+	var n := N
+	var nv := n + 1
+	# skirt vertices: the 4 edges, walked in order, each point copied SKIRT lower
+	var edges := []
+	for e in 4:
+		var line := PackedInt32Array()
+		for i in nv:
+			var ix := i if e < 2 else (0 if e == 2 else n)
+			var iz := (0 if e == 0 else n) if e < 2 else i
+			line.append(iz * nv + ix)
+		edges.append(line)
+	var skirt_of := {}
+	for line in edges:
+		for vi in line:
+			if skirt_of.has(vi): continue
+			skirt_of[vi] = verts.size()
+			verts.append(verts[vi] - Vector3(0, SKIRT, 0))
+			norms.append(norms[vi])
+			uvs.append(uvs[vi])
+	out["indices"] = _grid_lod_indices(1, edges, skirt_of)
+	var lods := {}
+	for s: int in LOD_STEPS:
+		if n % s != 0: continue
+		var err := 0.0
+		for iz in nv:
+			var cz0 := (iz / s) * s
+			var cz1 := mini(cz0 + s, n)
+			var tz := 0.0 if cz1 == cz0 else float(iz - cz0) / (cz1 - cz0)
+			for ix in nv:
+				var cx0 := (ix / s) * s
+				var cx1 := mini(cx0 + s, n)
+				var tx := 0.0 if cx1 == cx0 else float(ix - cx0) / (cx1 - cx0)
+				var h00 := verts[cz0 * nv + cx0].y
+				var h10 := verts[cz0 * nv + cx1].y
+				var h01 := verts[cz1 * nv + cx0].y
+				var h11 := verts[cz1 * nv + cx1].y
+				var hb := lerpf(lerpf(h00, h10, tx), lerpf(h01, h11, tx), tz)
+				err = maxf(err, absf(verts[iz * nv + ix].y - hb))
+		lods[maxf(err, 0.02 * s)] = _grid_lod_indices(s, edges, skirt_of)
+	out["lods"] = lods
+
+func _grid_lod_indices(s: int, edges: Array, skirt_of: Dictionary) -> PackedInt32Array:
+	var n := N
+	var nv := n + 1
+	var idx := PackedInt32Array()
+	var m := n / s
+	idx.resize(m * m * 6)
+	var o := 0
+	for iz in range(0, n, s):
+		for ix in range(0, n, s):
+			var v00 := iz * nv + ix
+			var v10 := v00 + s
+			var v01 := v00 + s * nv
+			var v11 := v01 + s
+			# clockwise seen from above (Godot front faces)
+			idx[o] = v00; idx[o + 1] = v10; idx[o + 2] = v01
+			idx[o + 3] = v10; idx[o + 4] = v11; idx[o + 5] = v01
+			o += 6
+	# skirts at this level's spacing, both windings (seen from either side)
+	for line in edges:
+		var i := 0
+		while i + s < line.size():
+			var a: int = line[i]
+			var b: int = line[i + s]
+			var a2: int = skirt_of[a]
+			var b2: int = skirt_of[b]
+			idx.append_array(PackedInt32Array([a, b, a2, b, b2, a2, a, a2, b, b, a2, b2]))
+			i += s
+	return idx
