@@ -79,7 +79,7 @@ const LENS := ["#ff7a2a", "#ffd21f", "#3fb6ff", "#7ed321", "#ff5fa2", "#8a96a8",
 const LOOK_ROWS := [
 	["Helmet", [["shell", "Shell", SW], ["peak", "Peak", SW]]],
 	["Goggles", [["lens", "Lens tint", LENS], ["goggleFrame", "Frame", SW], ["strap", "Strap", SW]]],
-	["Kit", [["jersey", "Jersey", SW], ["pants", "Pants", SW], ["gloves", "Gloves", SW]]],
+	["Kit", [["jersey", "Jersey", SW], ["pants", "Pants", SW], ["gloves", "Gloves", SW], ["pads", "Shoulder pads", SW]]],
 	["Shoes", [["shoes", "Upper", SW], ["shoeAccent", "Toe & collar", SW]]],
 ]
 

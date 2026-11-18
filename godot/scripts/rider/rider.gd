@@ -18,7 +18,7 @@ const NEUTRAL := {hipX = 0.0, hipY = 0.0, lean = 0.0, elbowsOut = 0.0, kneesOut 
 	kneesFwd = 0.0, kneeOutL = 0.0, kneeOutR = 0.0, heelFwd = 0.0, heelUp = 0.0, footAngle = 0.0, footOut = 0.0}
 ## lookpanel.js DEFAULT_LOOK
 const DEFAULT_LOOK := {shell = "#16171a", peak = "#ececec", goggleFrame = "#f2f2ee", lens = "#ff7a2a", strap = "#ff6a4d",
-	jersey = "#ff6a4d", pants = "#1d2b64", gloves = "#ffd21f", shoes = "#26292f", shoeAccent = "#d8232a"}
+	jersey = "#ff6a4d", pants = "#1d2b64", gloves = "#ffd21f", shoes = "#26292f", shoeAccent = "#d8232a", pads = "#2b2e33"}
 ## where the helmet model sits on the head (head-local m / rad) and its scale
 const HELMET_FIT := {x = 0.01, y = 0.0, tilt = 0.0, scale = 1.3}
 ## goggles (RiderGear.build_goggles): lens position / tilt / size, strap ellipse round the shell
@@ -48,6 +48,9 @@ var hood_hem: MeshInstance3D
 var pelvis_mesh: MeshInstance3D
 var hood: MeshInstance3D
 var shoulder_sph: Array[MeshInstance3D] = []
+var pad_cap: Array[MeshInstance3D] = []     # shoulder pads: the cap over the joint
+var pad_arm: Array[MeshInstance3D] = []     # and the plate overlapping it down the upper arm
+var pad_mat: StandardMaterial3D
 var thigh: Array[MeshInstance3D] = []
 var shin: Array[MeshInstance3D] = []
 var knee: Array[MeshInstance3D] = []
@@ -120,7 +123,23 @@ func _init() -> void:
 	pelvis_mesh.name = "Pelvis"
 	add_child(pelvis_mesh)
 	hood = sph.call(0.11, mCoralDark)
-	shoulder_sph.assign([sph.call(0.075, mCoral), sph.call(0.075, mCoral)])
+	shoulder_sph.assign([sph.call(0.062, mCoral), sph.call(0.062, mCoral)])
+	# SHOULDER PADS: hard shell caps (a slice of a sphere, open underneath) -- one over the joint,
+	# a smaller one overlapping it down the upper arm, like riding body armour
+	pad_mat = mat("#2b2e33", 0.35)
+	pad_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	pad_mat.metallic = 0.1
+	var cap_geo := G.sphere(0.115, 20, 8, 0.0, TAU, 0.0, 1.25)
+	var arm_geo := G.sphere(0.1, 18, 7, 0.0, TAU, 0.0, 1.1)
+	for i in 2:
+		var c1 := G.inst(cap_geo, pad_mat)
+		c1.name = "ShoulderPad"
+		add_child(c1)
+		pad_cap.append(c1)
+		var c2 := G.inst(arm_geo, pad_mat)
+		c2.name = "ArmPad"
+		add_child(c2)
+		pad_arm.append(c2)
 
 	# legs (0 = left, 1 = right)
 	thigh.assign([cyl.call(0.075, 0.062, mNavy), cyl.call(0.075, 0.062, mNavy)])
@@ -350,6 +369,7 @@ func set_look(l: Dictionary) -> void:
 	c.call(kit.pants[0], "pants")
 	shade.call(kit.pants[1], "pants", 0.1)
 	c.call(kit.gloves[0], "gloves")
+	c.call(pad_mat, "pads")
 	c.call(shoe_mats.upper, "shoes")
 	c.call(shoe_mats.accent, "shoeAccent")
 	c.call(goggle_mats.frame, "goggleFrame")
@@ -412,6 +432,20 @@ func set_style(s: Dictionary) -> void:
 
 
 # ---------------- posing helpers ----------------
+
+## shoulder pads for one side: the cap sits over the joint facing out and up (away from the arm), long
+## axis front-to-back; the arm plate rides the outside of the upper arm a little lower
+func _place_pads(i: int, shp: Vector3, el: Vector3, chest: Vector3, fwd: Vector3) -> void:
+	var arm := (el - shp).normalized()
+	var out := shp - chest
+	out = (out - arm * out.dot(arm)).normalized() if out.length() > 1e-4 else Vector3(0, 1, 0)
+	var up := (out * 0.55 + Vector3.UP * 0.55 - arm * 0.6).normalized()
+	var b := _basis_from(up, fwd)
+	# the shell's rim sits just above the shoulder ball (r 0.062) so the dome stands proud of the jersey
+	pad_cap[i].transform = Transform3D(b.scaled_local(Vector3(1.3, 0.9, 1.1)), shp - up * 0.02)
+	var up2 := (out - arm * 0.25 + Vector3.UP * 0.15).normalized()
+	var b2 := _basis_from(up2, fwd)
+	pad_arm[i].transform = Transform3D(b2.scaled_local(Vector3(1.2, 0.8, 1.0)), shp + arm * 0.11 - up2 * 0.025)
 
 ## unit-height (+Y) cylinder between a and b
 static func set_limb(n: Node3D, a: Vector3, b: Vector3) -> void:
@@ -503,6 +537,7 @@ func pose_ragdoll(P: Array) -> void:
 	head.transform = Transform3D(_basis_from(hd - ch, sh_r), hd)
 	for i in 2:
 		shoulder_sph[i].position = sh[i]
+		_place_pads(i, sh[i], el[i], ch, bb.x)
 		set_limb(upper_arm[i], sh[i], el[i])
 		set_limb(fore_arm[i], el[i], ha[i])
 		elbow[i].position = el[i]
@@ -731,6 +766,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		orient_hand(glove[i], ika[0], hand, right)
 		if sty.wristRoll != 0.0:
 			glove[i].rotate_object_local(Vector3.RIGHT, side * float(sty.wristRoll))
+		_place_pads(i, shp, ika[0], chest, Vector3(1, 0, 0))
 		J[3 + i * 3] = shp
 		J[4 + i * 3] = ika[0]
 		J[5 + i * 3] = hand
