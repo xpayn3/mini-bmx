@@ -10,7 +10,12 @@ const GEAR := preload("res://scripts/rider/rider_gear.gd")
 ## neutral riding style (posepanel.js NEUTRAL): BMX = all of these
 const NEUTRAL := {hipX = 0.0, hipY = 0.0, lean = 0.0, elbowsOut = 0.0, kneesOut = 0.0, stance = 0.0, seatFloor = false,
 	crouch = 1.0, standPedal = 1.0, sway = 1.0, bikeRock = 1.0, upright = 1.0, hipSway = 0.015, torso = 0.46,
-	shoulders = 0.2, headTilt = 0.0, headTurn = 1.0, lookAhead = 0.0}
+	shoulders = 0.2, headTilt = 0.0, headTurn = 1.0, lookAhead = 0.0,
+	# per-bone controls (garage Rider tab / K panel); 0 = the riding pose as computed
+	hipZ = 0.0, pelvisTilt = 0.0, chestFwd = 0.0, chestUp = 0.0, chestSide = 0.0, twist = 0.0,
+	neck = 0.0, headYaw = 0.0, headRoll = 0.0,
+	shoulderFwd = 0.0, shoulderUp = 0.0, elbowsDown = 0.0, elbowOutL = 0.0, elbowOutR = 0.0, wristRoll = 0.0,
+	kneesFwd = 0.0, kneeOutL = 0.0, kneeOutR = 0.0, heelFwd = 0.0, heelUp = 0.0, footAngle = 0.0, footOut = 0.0}
 ## lookpanel.js DEFAULT_LOOK
 const DEFAULT_LOOK := {shell = "#16171a", peak = "#ececec", goggleFrame = "#f2f2ee", lens = "#ff7a2a", strap = "#ff6a4d",
 	jersey = "#ff6a4d", pants = "#1d2b64", gloves = "#ffd21f", shoes = "#26292f", shoeAccent = "#d8232a"}
@@ -400,8 +405,10 @@ func set_style(s: Dictionary) -> void:
 	poles_leg.clear()
 	poles_arm.clear()
 	for sd in [-1.0, 1.0]:
-		poles_leg.append(Vector3(1, 0.1, sd * (0.1 + 0.3 * kneesOut)).normalized())
-		poles_arm.append(Vector3(-0.4 + 0.25 * elbowsOut, -0.5 + 0.4 * elbowsOut, sd).normalized())
+		var ko: float = kneesOut + float(style.kneeOutL if sd < 0 else style.kneeOutR)
+		var eo: float = elbowsOut + float(style.elbowOutL if sd < 0 else style.elbowOutR)
+		poles_leg.append(Vector3(1 + float(style.kneesFwd), 0.1 - 0.5 * float(style.kneesFwd), sd * (0.1 + 0.3 * ko)).normalized())
+		poles_arm.append(Vector3(-0.4 + 0.25 * eo, -0.5 + 0.4 * eo - float(style.elbowsDown), sd).normalized())
 
 
 # ---------------- posing helpers ----------------
@@ -568,6 +575,9 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		pelvis.y + cos(ang) * L,
 		pelvis.z + shift * 0.3 - sway * sty.hipSway + sin(t * 1.7 + 1.0) * 0.02 * wig)
 
+	pelvis.z += sty.hipZ
+	chest += Vector3(sty.chestFwd, sty.chestUp, sty.chestSide)
+
 	var absorb := _num(p, "absorb")
 	pelvis.y += absorb
 	chest.y += absorb * 0.9
@@ -674,19 +684,21 @@ func update_pose(dt: float, p: Dictionary) -> void:
 
 	# torso from pelvis to chest
 	var hip := Vector3(pelvis.x, pelvis.y + 0.02, pelvis.z)
-	set_torso(torso, hip, chest, Vector3(0, 0, 1))
-	pelvis_mesh.transform = Transform3D(Basis(Vector3.BACK, -(ang * 0.3)), pelvis)
+	var tw_axis := (chest - hip).normalized()
+	var tw := Basis(tw_axis, float(sty.twist))
+	set_torso(torso, hip, chest, tw * Vector3(0, 0, 1))
+	pelvis_mesh.transform = Transform3D(Basis(Vector3.BACK, -(ang * 0.3) - float(sty.pelvisTilt)), pelvis)
 	set_limb(hood_hem, Vector3(pelvis.x, pelvis.y + 0.04, pelvis.z), hip.lerp(chest, 0.2))
 
 	# neck / head
 	var neck := chest
 	hood.position = Vector3(neck.x - 0.03, neck.y, neck.z)
-	var head_p := Vector3(neck.x + 0.05 + sty.lookAhead, neck.y + 0.2, neck.z)
+	var head_p := Vector3(neck.x + 0.05 + sty.lookAhead, neck.y + 0.2 + sty.neck, neck.z)
 	J[0] = head_p
 	J[1] = chest
 	J[2] = pelvis
-	var yaw: float = clampf((_num(p, "steer") * 1.2 + _num(p, "yawRate") * 0.15) * sty.headTurn, -1.0, 1.0)
-	var rx := _num(p, "headRoll") if p.get("headRoll") != null else _num(p, "lean") * 0.6
+	var yaw: float = clampf((_num(p, "steer") * 1.2 + _num(p, "yawRate") * 0.15) * sty.headTurn, -1.0, 1.0) + sty.headYaw
+	var rx: float = (_num(p, "headRoll") if p.get("headRoll") != null else _num(p, "lean") * 0.6) + sty.headRoll
 	var rz: float = -0.12 * (ang - 0.72) + 0.04 * sin(t * 3.3) * wig - sty.headTilt
 	head.transform = Transform3D(GEAR.euler_xyz(rx, yaw, rz), head_p)
 
@@ -697,17 +709,19 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		var hand: Vector3 = p.get("handL" if i == 0 else "handR", Vector3.ZERO)
 		# leg
 		var hp := Vector3(pelvis.x, pelvis.y - 0.02, pelvis.z + side * (0.11 + sty.stance))
-		var ankle := Vector3(foot.x - 0.04, foot.y + 0.12, foot.z)
+		var ankle := Vector3(foot.x - 0.04 + sty.heelFwd, foot.y + 0.12 + sty.heelUp, foot.z)
 		var ik := solve_ik(hp, ankle, L_THIGH, L_SHIN, poles_leg[i])
 		set_limb(thigh[i], hp, ik[0])
 		set_limb(shin[i], ik[0], ik[1])
 		knee[i].position = ik[0]
 		shoe[i].position = Vector3(foot.x, foot.y + 0.03, foot.z)
+		shoe[i].basis = Basis(Vector3.UP, -side * float(sty.footOut)) * Basis(Vector3.BACK, float(sty.footAngle))
 		J[9 + i * 3] = hp
 		J[10 + i * 3] = ik[0]
 		J[11 + i * 3] = Vector3(foot.x, foot.y + 0.08, foot.z)
 		# arm
-		var shp := Vector3(chest.x - 0.03, chest.y - 0.04, chest.z + side * sty.shoulders)
+		var sh_off := Vector3(-0.03 + sty.shoulderFwd, -0.04 + sty.shoulderUp, side * sty.shoulders)
+		var shp: Vector3 = chest + tw * sh_off
 		shoulder_sph[i].position = shp
 		var ika := solve_ik(shp, hand, L_UARM, L_FARM, poles_arm[i])
 		set_limb(upper_arm[i], shp, ika[0])
@@ -715,6 +729,8 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		elbow[i].position = ika[0]
 		glove[i].position = hand
 		orient_hand(glove[i], ika[0], hand, right)
+		if sty.wristRoll != 0.0:
+			glove[i].rotate_object_local(Vector3.RIGHT, side * float(sty.wristRoll))
 		J[3 + i * 3] = shp
 		J[4 + i * 3] = ika[0]
 		J[5 + i * 3] = hand

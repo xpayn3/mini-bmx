@@ -19,6 +19,12 @@ const SUN := Vector3(0.12, 0.38, -0.92)
 var build: Dictionary
 var rig: BikeRig
 var outside: Node3D
+var rider: Rider = null
+var rider_on := false
+var rider_pose := {}
+var rider_preview := "pedal"
+var tab_buttons := {}
+var preview_crank := 0.6
 const SLAT := 0.2
 const DOOR_DELAY := 1.0     # s (after the garage is on screen) before the door starts to roll up
 const DOOR_TIME := 3.2      # s to roll it all the way up
@@ -55,10 +61,19 @@ const VIEWS := {
 	"wheels": [0.25, 8.0, 2.4, Vector3(0.6, 0.4, 0)],
 	"suspension": [1.0, 10.0, 2.2, Vector3(0.05, 0.6, 0)],
 	"drive": [PI / 2 + 0.3, 6.0, 2.0, Vector3(-0.3, 0.35, 0)],
+	"rider": [0.0, 7.0, 4.3, Vector3(-0.05, 1.0, 0)],
 }
 
 func _ready() -> void:
 	build = BikeBuild.load_build()
+	rider_pose = RiderPanels.load_pose("dh", GameState.BIKES.dh.pose)
+	var rcf := ConfigFile.new()
+	if rcf.load(RiderPanels.PATH) == OK:
+		rider_on = rcf.get_value("garage", "rider_on", false)
+		rider_preview = rcf.get_value("garage", "preview", "pedal")
+	if OS.get_environment("BMX_GARAGE_RIDER") != "":   # tests: rider on, a preview, Rider tab
+		rider_on = true; rider_preview = OS.get_environment("BMX_GARAGE_RIDER")
+	if not PREVIEWS.has(rider_preview): rider_preview = "pedal"
 	_build_room()
 	add_child(cam)
 	cam.fov = 38
@@ -66,7 +81,7 @@ func _ready() -> void:
 	_rebuild_bike()
 	add_child(ui)
 	_build_ui()
-	_set_tab("paint")
+	_set_tab("rider" if OS.get_environment("BMX_GARAGE_RIDER") != "" else "paint")
 
 # ================================================================ the room
 func _mat(c: Color, rough := 0.8, metal := 0.0) -> StandardMaterial3D:
@@ -317,8 +332,50 @@ func _rebuild_bike() -> void:
 		for i in 60:
 			rig.susp.update(1.0 / 60, {"air": false, "load": 0.0, "brake": 0.0, "bumpF": 0.0, "bumpR": 0.0})
 	rig.pose(-(L / 2 - bb), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -0.25, 0.0, 0.0, 0.6)
+	rider = null
+	if rider_on:
+		_add_rider()
 	for mi in rig.find_children("*", "MeshInstance3D", true, false):
 		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+
+# ---------------------------------------------------------------- the rider on the bike
+## the rider in the garage: same look and pose (sliders) as on the trail, posed every frame from the
+## bike's grips and pedals like a ride, in the chosen preview situation
+func _add_rider() -> void:
+	rider = Rider.new()
+	rig.lean_g.add_child(rider)
+	rider.set_look(RiderPanels.load_look())
+	rider.set_style(rider_pose)
+	if rig.seat != null: rider.seat = rig.seat
+	var grip := rig.grip_mid()
+	rider.fit = Vector3((grip.x - 0.4388) * 0.5, ((grip.y - 0.9646) + (rig.crank_n.position.y - 0.297)) * 0.5, 0)
+	var hs: Node3D = load("res://assets/helmet.glb").instantiate()
+	var helmet := hs.find_child("helmet", true, false)
+	if helmet:
+		helmet.get_parent().remove_child(helmet)
+		rider.set_helmet(helmet)
+	hs.free()
+
+const PREVIEWS := {
+	"coast": {"label": "Coasting", "pedal": 0.0, "pitch": 0.0, "air": 0.0, "compress": 0.0, "v": 4.0},
+	"pedal": {"label": "Pedalling", "pedal": 1.0, "pitch": 0.0, "air": 0.0, "compress": 0.0, "v": 6.0},
+	"sprint": {"label": "Sprinting", "pedal": 1.0, "sprint": 1.0, "pitch": 0.0, "air": 0.0, "compress": 0.0, "v": 9.0},
+	"descend": {"label": "Descending", "pedal": 0.0, "pitch": -0.35, "air": 0.0, "compress": 0.06, "v": 10.0},
+	"air": {"label": "In the air", "pedal": 0.0, "pitch": 0.1, "air": 1.0, "compress": 0.1, "v": 10.0},
+}
+
+func _pose_rider(dt: float) -> void:
+	if rider == null or not is_instance_valid(rider): return
+	var P: Dictionary = PREVIEWS[rider_preview]
+	if P.pedal > 0.5:
+		preview_crank += dt * (7.0 if P.get("sprint", 0.0) > 0 else 5.0)
+		rig.crank_n.rotation.z = -preview_crank
+		for pv in rig.pedal_pivots: pv.rotation.z = preview_crank
+	var lt := rig.limb_targets()
+	rider.update_pose(dt, {"footL": lt.footL, "footR": lt.footR, "handL": lt.handL, "handR": lt.handR,
+		"v": P.v, "lean": 0.0, "steer": 0.0, "yawRate": 0.0, "counter": 0.0, "rockRoll": 0.0, "headRoll": 0.0,
+		"absorb": 0.0, "pitch": P.pitch, "bodyLevel": 0.85, "attackDrop": 0.18, "pedal": P.pedal,
+		"sprint": P.get("sprint", 0.0), "crank": preview_crank, "air": P.air, "compress": P.compress, "hipShift": 0.0, "t": hand_t})
 
 func _changed() -> void:
 	_dirty = 0.12   # rebuild after the slider settles
@@ -357,6 +414,7 @@ func _process(dt: float) -> void:
 	# HANDHELD: someone holding the camera -- a slow few-cm drift and a fraction of a degree of wobble,
 	# from a few unrelated sine waves (never repeats visibly, never jerks)
 	hand_t += dt
+	_pose_rider(dt)
 	var t := hand_t
 	cam.position += cam.basis * Vector3(
 		(sin(t * 0.53) + 0.6 * sin(t * 1.31 + 1.7)) * 0.018,
@@ -400,7 +458,7 @@ func _build_ui() -> void:
 	var tabs := HBoxContainer.new()
 	tabs.add_theme_constant_override("separation", 6)
 	var grp := ButtonGroup.new()
-	for t in [["paint", "Paint"], ["logos", "Logos"], ["wheels", "Wheels"], ["suspension", "Suspension"], ["drive", "Gears"]]:
+	for t in [["paint", "Paint"], ["logos", "Logos"], ["wheels", "Wheels"], ["suspension", "Suspension"], ["drive", "Gears"], ["rider", "Rider"]]:
 		var b := Button.new()
 		b.text = t[1]; b.toggle_mode = true; b.button_group = grp
 		b.button_pressed = t[0] == tab
@@ -408,6 +466,7 @@ func _build_ui() -> void:
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.pressed.connect(_set_tab.bind(t[0]))
 		tabs.add_child(b)
+		tab_buttons[t[0]] = b
 	vb.add_child(tabs)
 	var sc := ScrollContainer.new()
 	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -496,6 +555,7 @@ func _set_tab(t: String) -> void:
 		pitch_t = v[1]; dist_t = v[2]; focus_t = v[3]
 		auto_spin = false
 	tab = t
+	if tab_buttons.has(t): tab_buttons[t].button_pressed = true   # (pressed, not toggled, drives _set_tab: no loop)
 	for c in body.get_children(): c.queue_free()
 	match t:
 		"paint": _paint_page()
@@ -503,6 +563,7 @@ func _set_tab(t: String) -> void:
 		"wheels": _wheels_page()
 		"suspension": _susp_page()
 		"drive": _drive_page()
+		"rider": _rider_page()
 
 # ---------------------------------------------------------------- widgets
 func _h(text: String) -> void:
@@ -718,6 +779,63 @@ func _drive_page() -> void:
 	var lo := float(D.ring) / float(cogs[cogs.size() - 1])
 	var hi := float(D.ring) / float(cogs[0])
 	body.add_child(UITheme.label("Ratios %.2f – %.2f. Bigger ring / smaller cog = higher top speed, harder to get going." % [lo, hi], 12, UITheme.MUTED))
+
+func _save_rider_ui() -> void:
+	var cf := ConfigFile.new(); cf.load(RiderPanels.PATH)
+	cf.set_value("garage", "rider_on", rider_on)
+	cf.set_value("garage", "preview", rider_preview)
+	cf.save(RiderPanels.PATH)
+
+func _rider_page() -> void:
+	var on := CheckButton.new()
+	on.text = "  Rider on the bike"
+	on.button_pressed = rider_on
+	on.add_theme_font_size_override("font_size", 17)
+	on.toggled.connect(func(v):
+		rider_on = v; _save_rider_ui()
+		if v and rider == null: _add_rider()
+		elif not v and rider: rider.queue_free(); rider = null
+		_set_tab.call_deferred("rider"))
+	body.add_child(on)
+	if not rider_on:
+		body.add_child(UITheme.label("Turn the rider on to see and shape the riding position: every joint has a slider, and the pose is used on the trail.", 13, UITheme.MUTED))
+		body.get_child(body.get_child_count() - 1).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		return
+	var items := []
+	for k in PREVIEWS: items.append([k, PREVIEWS[k].label])
+	_choice("Preview", items, rider_preview, func(v): rider_preview = v; _save_rider_ui())
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	row.add_child(UITheme.button("Reset pose", func():
+		rider_pose = Rider.NEUTRAL.duplicate(); rider_pose.merge(GameState.BIKES.dh.pose, true)
+		_apply_rider_pose(); _set_tab("rider"), 14))
+	row.add_child(UITheme.button("Mirror L → R", func():
+		rider_pose.elbowOutR = rider_pose.elbowOutL; rider_pose.kneeOutR = rider_pose.kneeOutL
+		_apply_rider_pose(); _set_tab("rider"), 14))
+	body.add_child(row)
+	for g in RiderPanels.POSE_DEFS:
+		_h(g[0].to_upper())
+		for r in g[1]:
+			var key: String = r[0]
+			var unit: String = r[5]
+			var stp: float = r[4]
+			var hb := HBoxContainer.new()
+			var s := HSlider.new()
+			s.min_value = r[2]; s.max_value = r[3]; s.step = stp; s.value = float(rider_pose.get(key, 0.0))
+			s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			s.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			s.focus_mode = Control.FOCUS_NONE
+			var dec := clampi(ceili(-log(stp) / log(10.0)), 0, 3)
+			var fmt := "%." + str(dec) + "f " + unit
+			var vl := UITheme.label(fmt % s.value, 13, UITheme.MUTED)
+			vl.custom_minimum_size.x = 70
+			s.value_changed.connect(func(v): vl.text = fmt % v; rider_pose[key] = v; _apply_rider_pose())
+			hb.add_child(s); hb.add_child(vl)
+			_row(r[1], hb)
+
+func _apply_rider_pose() -> void:
+	if rider: rider.set_style(rider_pose)
+	RiderPanels.save_pose("dh", rider_pose)
 
 func _randomise() -> void:
 	for k in build.paint:
