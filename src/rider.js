@@ -318,6 +318,9 @@ export class Rider {
     // legs absorb terrain: body glides while the bike goes up and down under it
     const absorb = p.absorb || 0;
     _pelvis.y += absorb; _chest.y += absorb * 0.9;
+    // weight shift (main.js moves the hips' mass fore / aft over the bike): the body goes with it
+    const hs = p.hipShift || 0;
+    _pelvis.x += hs; _chest.x += hs * 0.6;
     // keep the body level while the bike pitches under it: counter-rotate hips and chest about
     // the pedals, so on a descent the hips slide back and the chest stays up (downhill attack
     // position), and on a climb the rider leans forward over the bars.

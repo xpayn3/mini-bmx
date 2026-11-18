@@ -49,12 +49,15 @@ const DEFS = [
     ['legExt',       'Leg extend travel',    0.13,  0.02, 0.3,  0.01, 'm'],
     ['bodyLevel',    'Keep body level',      0.85,  0,    1,    0.05, ''],
     ['attackDrop',   'Get low on descents',  0.18,  0,    0.45, 0.01, 'm'],
+    ['riderMass',    'Body weight on legs',  0.45,  0,    0.7,  0.05, ''],
+    ['weightShift',  'Weight shift reach',   0.12,  0,    0.25, 0.01, 'm'],
+    ['loadHeight',   'Weight transfer height',0.25, 0,    1,    0.05, 'm'],
   ]],
   ['Jumping', [
     ['prepTime',     'Spot lip ahead',       0.55,  0.1,  1.2,  0.05, 's'],
     ['prepDepth',    'Crouch into lip',      0.16,  0,    0.3,  0.01, 'm'],
     ['popKick',      'Pump extension',       1.5,   0,    4,    0.1,  'm/s'],
-    ['autoPop',      'Lip pop height',       0.5,   0,    3,    0.05, 'm/s'],
+    ['autoPop',      'Lip pop height',       1.2,  0,    3,    0.05, 'm/s'],
     ['landPrepTime', 'Reach for landing',    0.35,  0.05, 1,    0.05, 's'],
     ['landSoak',     'Landing absorb',       0.3,   0,    1.5,  0.05, ''],
   ]],
@@ -69,6 +72,7 @@ const DEFS = [
 ];
 
 const KEY = 'bmx-tune-v1';
+const RETIRED = { autoPop: 0.5 };   // key -> previous default (autoPop raised to 1.2 with round-wheel contact)
 export const DEFAULTS = {};
 for (const [, rows] of DEFS) for (const [k, , d] of rows) DEFAULTS[k] = d;
 
@@ -76,6 +80,9 @@ export const TUNE = { ...DEFAULTS };
 try {
   const saved = JSON.parse(localStorage.getItem(KEY) || '{}');
   for (const k in saved) if (k in DEFAULTS && Number.isFinite(saved[k])) TUNE[k] = saved[k];
+  // defaults that changed: a saved value still sitting on the OLD default was never chosen by the player
+  // (save() stores every slider), so it moves to the new one
+  for (const [k, old] of Object.entries(RETIRED)) if (saved[k] === old) TUNE[k] = DEFAULTS[k];
 } catch { /* storage blocked: just use defaults */ }
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(TUNE)); } catch { /* ignore */ } };
 

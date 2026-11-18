@@ -185,6 +185,10 @@ scene.add(water.mesh);
 
 // ---------------- bike ----------------
 const G = 9.81;
+const PHYS_DT = 1 / 120, MAX_STEPS = 12;   // fixed physics step; at most 0.1 s of catch-up per frame
+const DRAW_KEYS = ['x', 'z', 'y', 'yDraw', 'pitch', 'pitchDraw', 'heading', 'bodyY'];
+const drawPrev = {}, drawn = { x: 0, y: 0, z: 0, yDraw: 0, pitch: 0, bodyY: 0 };   // drawn = between the last two steps
+let physAcc = 0, drawAlpha = 1;
 const HOP_PUSH = 0.09;   // s the legs spend straightening before the tyres leave the ground on a bunny hop
 const bikeRoot = new THREE.Group(), pitchG = new THREE.Group(), leanG = new THREE.Group();
 bikeRoot.add(pitchG); pitchG.add(leanG); scene.add(bikeRoot);
@@ -195,6 +199,7 @@ const bike = BIKES[bikeId].cfg ? buildBike(BIKES[bikeId].cfg, 'custom')   // bui
 const bd = bike.userData;
 const L = bd.wheelbase || 0.8985, RWF = bd.wheelRadius || 0.261, RWR = bd.wheelRadiusRear || RWF,
   BB_REAR = bd.bbToRearAxle || 0.3331;
+const SH_R = (L - BB_REAR) / L;   // rear tyre's share of the weight, from the lever arms about the BB
 leanG.add(bike);
 const part = (n) => bike.getObjectByName(n);
 const steerN = part('steer'), wheelF = part('wheel_front'), wheelR = part('wheel_rear'), crankN = part('crank');
@@ -450,6 +455,9 @@ function getUp() {
   st.course = st.heading;
   st.hopBlock = true;   // the Space press that got us up must not also pump-pop on release
   st.y = terrain.height(st.x, st.z); st.bodyY = st.y; st.bodyV = 0;
+  for (const k of ['nF', 'nR', 'nRef', 'lipLast', 'hfPrev', 'hrPrev']) delete st[k];
+  Object.assign(st, { bank: 0, bodyX: 0, hipShift: 0, spin: 0, aDrive: 0, yDraw: st.y, pitchDraw: 0 });
+  for (const k of DRAW_KEYS) drawPrev[k] = st[k];
   leanG.add(rider.group);
   rider.group.position.set(0, 0, 0); rider.group.quaternion.identity();
   rider.resetPose();
@@ -510,6 +518,9 @@ function respawn(newWorld) {
     course: 0, slip: 0, wInit: false, frontAir: false, rearAir: false, pumpAcc: 0, sinceLand: 1, pitchV: 0, cF: true, cR: true });
   delete st.gPitch;
   st.y = terrain.height(0, 0); st.bodyY = st.y; st.bodyV = 0;
+  for (const k of ['nF', 'nR', 'nRef', 'lipLast', 'hfPrev', 'hrPrev']) delete st[k];
+  Object.assign(st, { bank: 0, bodyX: 0, hipShift: 0, spin: 0, aDrive: 0, yDraw: st.y, pitchDraw: 0 });
+  for (const k of DRAW_KEYS) drawPrev[k] = st[k];
   rider.resetPose();   // drop the hip / chest spring momentum from before the teleport
 }
 respawn(false);
@@ -583,16 +594,31 @@ function physics(dt) {
   const rearDown = !st.air && !st.rearAir;   // the rear tyre is what pedals and brakes
   const skid = brake && st.v > 0.5 && rearDown;
   let aLong = 0;   // how much of the tyres' grip the pedals / brake are using (friction circle)
+  // TYRE LOADS: what the springs pushed with last step (per unit total mass, m/s^2; G when standing still).
+  // Grip is friction: it scales with how hard the tyre is pressed into the ground -- a pumped / landing
+  // tyre bites harder, an unweighted one (cresting, hopping, skipping over bumps) lets go sooner.
+  // Measured against plain riding (the rider's constant press into natural ground is not extra grip).
+  const nSc = G / (st.nRef ?? G);
+  const nR = st.air ? 0 : (st.nR ?? G * SH_R) * nSc, nF = st.air ? 0 : (st.nF ?? G * (1 - SH_R)) * nSc, nTot = nR + nF;
+  const mu = (surf === 1 ? 0.95 : surf === 3 ? 0.5 : surf === 2 ? 0.45 : 0.72) * T.grip;
+  st.spin = 0; st.aDrive = 0;
 
   // --- longitudinal ---
   if (!st.air) {
     // pedalling like a real rider: strong push from a standstill, then constant POWER (force = P / v),
     // so climbs settle at a decent speed; spinning out above ~38 km/h limits the top speed on the flat
     const vp = Math.max(st.v, 0.5);
-    let a = (rearDown ? throttle : 0) * Math.min(T.pedalLaunch, T.pedalPower / vp) * clamp((T.pedalTop - st.v) / 2.5, 0, 1);
-    aLong = Math.abs(a);
-    a -= G * Math.sin(slope);
-    if (brake && rearDown && st.v > 0.3) { a -= T.brakeForce; aLong += T.brakeForce; }
+    let drive = (rearDown ? throttle : 0) * Math.min(T.pedalLaunch, T.pedalPower / vp) * clamp((T.pedalTop - st.v) / 2.5, 0, 1);
+    // only the REAR tyre drives, and only as hard as it grips: stamp on it in sand or wet grass and the
+    // wheel spins (the rest of the push goes into roost, not speed)
+    const driveCap = mu * nR;
+    if (drive > driveCap) { st.spin = Math.min(1, (drive - driveCap) / 3); drive = driveCap + (drive - driveCap) * 0.15; }
+    aLong = Math.abs(drive);
+    let a = drive - G * Math.sin(slope);
+    // braking: the rear locks (skid) and the tyres can only stop you as hard as the ground holds them --
+    // full power on hard-pack, a long slide on sand, grass or in water, and none at all while unweighted
+    if (brake && rearDown && st.v > 0.3) { const b = Math.min(T.brakeForce, 0.85 * mu * nTot); a -= b; aLong += b; drive -= b; }
+    st.aDrive = drive;   // net tyre push along the ground: shifts weight front / rear (see pitch)
     // PUMPING: legs that extend push the bike into the ground. On a down-slope (the back of a
     // roller, a landing) part of that push points forward = free speed; folding the legs to soak
     // up an up-slope unweights the bike, so the face steals less speed. On the flat it does nothing.
@@ -630,11 +656,20 @@ function physics(dt) {
   const rate = steerIn ? inRate : T.steerRelease;
   st.steerIn = (st.steerIn || 0) + clamp(steerIn - (st.steerIn || 0), -rate * dt, rate * dt);
   const sIn = st.steerIn * (1 - T.steerCurve + T.steerCurve * Math.abs(st.steerIn));   // slightly soft centre, full lock at the end
-  // speed-aware turn limit: gentle near-upright turns when slow, up to ~0.7 g (~35 deg lean) when fast
-  const aLat = T.turnSlow + spdK * (T.turnFast - T.turnSlow);
+  // SIDE SLOPE under the bike: + = ground higher on the right, i.e. banked for a LEFT turn (lean sign).
+  // Sampled across the wheel contacts, smoothed so a single lumpy sample doesn't jerk the lean.
+  {
+    const w = 0.35, lx = fwd.z * w, lz = -fwd.x * w, mx = st.x + fwd.x * (L / 2 - BB_REAR), mz = st.z + fwd.z * (L / 2 - BB_REAR);
+    const b = st.air ? 0 : Math.atan((terrain.height(mx - lx, mz - lz) - terrain.height(mx + lx, mz + lz)) / (2 * w));
+    st.bank = (st.bank ?? b) + (clamp(b, -0.9, 0.9) - (st.bank ?? b)) * Math.min(1, dt * 20);
+  }
+  const bank = st.bank;
+  // speed-aware turn limit: gentle near-upright turns when slow, up to ~0.7 g (~35 deg lean) when fast.
+  // A berm leaning into the turn adds what the slope holds for free (g tan bank); off-camber takes it away
+  const aLat = Math.max(1.2, T.turnSlow + spdK * (T.turnFast - T.turnSlow) + G * Math.tan(bank) * Math.sign(sIn) * spdK);
   const dMax = Math.min(T.steerMax, Math.max(Math.atan(aLat * L / Math.max(va * va, 0.01)), Math.atan(T.turnFloor * L / Math.max(va, 0.1))));
   const cmd = sIn * dMax;
-  const leanNeed = clamp(Math.atan(st.v * (st.v * Math.tan(cmd) / L) / G), -T.leanMax, T.leanMax);
+  const leanNeed = clamp(Math.atan(st.v * (st.v * Math.tan(cmd) / L) / G), -T.leanMax + Math.min(0, bank), T.leanMax + Math.max(0, bank));   // a berm lets it lay over further
   // gentle countersteer only while tipping INTO a turn; released -> bars centre and the bike stands up
   const tippingIn = steerIn !== 0 && Math.abs(leanNeed) > Math.abs(st.lean) && Math.sign(leanNeed) === steerIn;
   const cMax = Math.abs(cmd) * T.counter;
@@ -646,15 +681,26 @@ function physics(dt) {
   // course = the direction the bike actually travels; heading = where it points. They differ by the
   // slip angle when a tyre lets go. Grip depends on the surface and on how much of it the pedals or
   // brake are already using; a locked rear (skid) lets the back end come round.
-  const muG = (surf === 1 ? 0.95 : surf === 3 ? 0.5 : surf === 2 ? 0.45 : 0.72) * T.grip * G;
+  // normal load from the springs, smoothed a touch so tyre chatter on rough ground doesn't flicker the grip
+  // (tyres are load-sensitive: double the load gives well under double the grip)
+  const loadK = clamp(Math.pow(Math.max(0, nTot / G), 0.7), 0.25, 1.5);
+  const muG = mu * G * loadK;
   const aGrip = muG * Math.sqrt(Math.max(0.05, 1 - (aLong / muG) ** 2)) * (skid ? 0.75 : 1);
   if (!st.air) {
     const yawCmd = st.frontAir ? 0 : st.v * Math.tan(st.steer) / L;   // front wheel in the air: no steering
-    const aLat = clamp(st.v * yawCmd, -aGrip, aGrip);                  // what the tyres actually deliver
+    // BANKED / OFF-CAMBER ground: a berm leans the ground into the turn, so part of the cornering force
+    // comes from the ground's slope, not friction (rail it far harder than a flat turn); on an off-camber
+    // the slope works against you and the tyres let go sooner. Classic banked-curve limits, with the
+    // "gravity" being what the tyres are really pressed with (unweighted, the slope pulls less too):
+    const gE = G * loadK, mE = aGrip / gE, cb = Math.cos(bank), sb = Math.sin(bank);
+    // (past mu * tan(bank) = 1 the formula says "infinite": a wall of ride, capped at 2.5 g)
+    const aMax = Math.min(2.5 * G, gE * (sb + mE * cb) / Math.max(0.2, cb - mE * sb));    // most it can turn left
+    const aMin = Math.max(-2.5 * G, gE * (sb - mE * cb) / Math.max(0.2, cb + mE * sb));   // most it can turn right (negative)
+    const aLat = clamp(st.v * yawCmd, aMin, aMax);                     // what the tyres actually deliver
     const courseRate = Math.abs(st.v) > 0.3 ? aLat / st.v : yawCmd;
     const excess = yawCmd - courseRate;                                 // rotation the tyres couldn't hold
     const share = skid ? 1 : T.oversteer;                               // rear steps out vs. front pushes wide
-    const margin = 1 - Math.min(1, Math.abs(aLat) / aGrip);
+    const margin = 1 - Math.min(1, Math.abs(aLat) / Math.max(0.1, aLat >= 0 ? aMax : -aMin));
     // grip left over pulls the slide back in; steering into the slide (countersteer) catches it faster
     const catchK = T.slipRecover * (0.25 + margin) + Math.max(0, -Math.sign(st.slip) * st.steer) * 8;
     const slipRate = excess * share - st.slip * catchK;
@@ -666,7 +712,7 @@ function physics(dt) {
     st.yawRate = courseRate + slipRate;
     st.latA = aLat;
     // a sideways tyre scrubs speed; a front tyre pushing wide bleeds a little too
-    const scrub = muG * Math.abs(Math.sin(st.slip)) * 0.9 + Math.abs(excess) * (1 - share) * Math.abs(st.v) * 0.15;
+    const scrub = mu * G * Math.min(loadK, 1.5) * Math.abs(Math.sin(st.slip)) * 0.9 +Math.abs(excess) * (1 - share) * Math.abs(st.v) * 0.15;
     st.v -= Math.sign(st.v) * Math.min(Math.abs(st.v), scrub * dt);
     if (Math.abs(st.slip) > T.slipMax && va > 3) crash.pending = 'WASHED OUT!';
   } else {
@@ -681,14 +727,15 @@ function physics(dt) {
     st.latA = 0;
   }
   // lean follows the actual cornering force, so it scales with speed: almost upright when slow
-  const leanT = st.air ? st.lean * 0.98 : clamp(Math.atan(st.latA / G), -T.leanMax, T.leanMax);
+  const leanT = st.air ? st.lean * 0.98 : clamp(Math.atan(st.latA / G), -T.leanMax + Math.min(0, bank), T.leanMax + Math.max(0, bank));
   // near-critically damped spring: quick roll-in/out with a hint of settle
   const kL = steerIn ? T.leanIn : T.leanOut;
   st.leanV += ((leanT - st.lean) * kL - st.leanV * 2 * Math.sqrt(kL) * T.leanDamp) * dt;
   st.lean += st.leanV * dt;
   // lean the BIKE a touch more than the rider; soft-limit so it never flops past ~40 deg
-  const bl = st.lean * T.bikeLeanMul;
-  st.bikeLean = T.bikeLeanCap * Math.tanh(bl / T.bikeLeanCap);
+  // (leaning INTO a berm the cap grows by the bank, so it can lay right over; upright stays upright)
+  const bl = st.lean * T.bikeLeanMul, capB = T.bikeLeanCap + (st.air || Math.sign(bank) !== Math.sign(bl) ? 0 : Math.abs(bank));
+  st.bikeLean = capB * Math.tanh(bl / capB);
   st.counter = st.bikeLean - st.lean * 0.85;
   st.rock = Math.sin(st.crank) * 0.065 * st.pedal * Math.min(1, va / 2 + 0.3);
 
@@ -797,23 +844,63 @@ function physics(dt) {
     // kept shoving the nose up until the bike looped out backwards.
     const XF = L - BB_REAR, XR = -BB_REAR;
     const cp0 = Math.cos(clamp(st.pitch, -1.3, 1.3));
-    const hfC = terrain.height(st.x + fwd.x * XF * cp0, st.z + fwd.z * XF * cp0);
-    const hrC = terrain.height(st.x + fwd.x * XR * cp0, st.z + fwd.z * XR * cp0);
+    // A WHEEL IS A CIRCLE, not a point: it rests on whatever it touches first across its whole width, so
+    // it rolls up onto a step edge instead of dropping into it, bridges small dips and ruts, and sits
+    // correctly on a slope (centre R / cos(slope) above the ground under it). The effective "ground"
+    // for the tyre spring is where the bottom of the wheel ends up.
+    const wheelGround = (x0, R) => {
+      let best = -Infinity;
+      for (let k = -3; k <= 3; k++) {
+        const s = k / 3 * R, d = x0 * cp0 + s;
+        const hh = terrain.height(st.x + fwd.x * d, st.z + fwd.z * d) + Math.sqrt(R * R - s * s) - R;
+        if (hh > best) best = hh;
+      }
+      return best;
+    };
+    const hfC = wheelGround(XF, RWF), hrC = wheelGround(XR, RWR);
     if (!st.wInit || st.hfPrev === undefined) { st.hfPrev = hfC; st.hrPrev = hrC; st.pitchV = 0; st.wInit = true; }
     const hfP = st.hfPrev, hrP = st.hrPrev;
     const vgF = Math.min((hfC - hfP) / dt, climbMax), vgR = Math.min((hrC - hrP) / dt, climbMax);
     st.hfPrev = hfC; st.hrPrev = hrC;
 
-    const shF = BB_REAR / L, shR = XF / L;            // weight split by lever arms
-    const K = (2 * Math.PI * T.tyreHz) ** 2, C = 2 * T.tyreDamp * Math.sqrt(K);  // per unit mass: heave at tyreHz
+    const shF = 1 - SH_R, shR = SH_R;                 // weight split by lever arms
     const IK = 0.32;                                  // pitch inertia / mass (m^2): bike + rider (CoM high above) about the BB
+    // THE RIDER IS A REAL MASS. The hips / torso (PHI of the total weight) ride on the legs as a spring,
+    // the rest (bike + legs) sits on the tyres. The leg force goes through the pedals into the bike: a
+    // body still falling after a landing drives the tyres deeper, extending the legs off a lip drags the
+    // bike up, and the tyres feel all of it as load (= grip). Forces below are per unit TOTAL mass.
+    const coupled = !st.air && !(st.hopT > 0);        // in the air / mid-hop the body is posed, not simulated
+    const PHI = coupled ? clamp(T.riderMass, 0, 0.7) : 0, mB = 1 - PHI;
+    const Kb = (2 * Math.PI * T.tyreHz) ** 2;
+    const K = Kb * mB, C = 2 * T.tyreDamp * Math.sqrt(Kb) * mB;   // the bike part still bounces at tyreHz
+    // legs: default ~0.9 Hz, soft with a little bounce. Spotting a lip the rider tenses up and drives up
+    // the face WITH the bike (stiff legs), instead of sagging into it and pinning the bike to the lip
+    const kB = T.legStiff * (1 + 5 * (st.prep || 0)), cB = 2 * Math.sqrt(kB) * T.legDamp;
     // the rider keeps a little weight pressed into natural ground (not on jumps, not while hopping)
     const press = natural && !(st.hopT > 0) ? T.legPress * G : 0;
     const s0 = (G + press) / K;                       // static sag: at rest the contact line sits on the ground
+    // what the tyres carry riding along normally (grip is relative to it). Eased in at about the rate the
+    // springs settle when the press switches on / off (natural ground <-> built jump), so crossing onto a
+    // jump is not read as a sudden load spike (= a burst of extra grip) or a dip
+    st.nRef = (st.nRef ?? G + press) + (G + press - (st.nRef ?? G + press)) * Math.min(1, dt * 2 * Math.PI * T.tyreHz * 0.6);
     const TRAVEL = T.travel;
     const balMax = T.riderBalance * G * BB_REAR / IK; // how hard the rider can shift weight to hold a wheelie / nose
+    // WEIGHT SHIFT: the hips move fore / aft over the bike. Back when braking or dropping down a slope
+    // (keeps the rear planted, stops the bike tipping onto its nose), forward to climb or sprint
+    // (keeps the front down). Their weight acts where they are, so it moves load between the tyres.
+    {
+      const R = T.weightShift;
+      const xBrake = -0.8 * R * (brake && !st.air ? 1 : 0) + 0.5 * R * clamp((st.aDrive || 0) / 4, 0, 1);
+      const xT = st.air ? 0 : xBrake + R * clamp(g.pitch * 2.2, -1, 1);
+      const k = Math.min(1, dt * 6);
+      st.bodyX = (st.bodyX ?? 0) + (clamp(xT, -R, R) - (st.bodyX ?? 0)) * k;
+      // what the pose shows: the slope part is already drawn by the rider keeping level (rider.js)
+      st.hipShift = (st.hipShift ?? 0) + (clamp(st.air ? 0 : xBrake, -R, R) - (st.hipShift ?? 0)) * k;
+    }
+    const tq = (st.aDrive || 0) * T.loadHeight;     // tyre push at the ground, CoM above it: squat / dive
     const wasAir = st.air, vyIn = st.vy, wasF = st.cF ?? true, wasR = st.cR ?? true;
-    let cF = false, cR = false;
+    let cF = false, cR = false, sumF = 0, sumR = 0;
+    if (st.bodyY === undefined || !Number.isFinite(st.bodyY)) { st.bodyY = st.y; st.bodyV = st.vy; }
     const N = 4, h = dt / N;
     for (let i = 1; i <= N; i++) {
       const u = i / N, gF = hfP + (hfC - hfP) * u, gR = hrP + (hrC - hrP) * u;
@@ -823,7 +910,15 @@ function physics(dt) {
       cF = dF > 0; cR = dR > 0;
       const FF = cF ? Math.max(0, shF * (K * dF + C * (vgF - pvF))) : 0;   // springs only push
       const FR = cR ? Math.max(0, shR * (K * dR + C * (vgR - pvR))) : 0;
-      let alpha = (FF * XF + FR * XR) * cs / IK;
+      sumF += FF; sumR += FR;
+      // legs: the hips are pushed toward their ride height above the bike
+      let legF = 0;
+      if (!wasAir) {
+        const fLeg = kB * (st.y - st.bodyY) - cB * (st.bodyV - st.vy);   // hip acceleration beyond holding them up
+        st.bodyV += fLeg * h; st.bodyY += st.bodyV * h;
+        legF = PHI * (G + fLeg);   // what the body pushes down through the pedals / bars
+      }
+      let alpha = (FF * XF + FR * XR - legF * st.bodyX) * cs / IK + (cF || cR ? tq / IK : 0);
       if (cF !== cR) {
         // one wheel down: the rider shifts weight to hold the bike near the slope it was on
         const ref = st.noseRef ?? g.pitch;
@@ -835,32 +930,42 @@ function physics(dt) {
         const pT = flight + (g.pitch - flight) * near * (st.vy < 0 ? 1 : 0);
         alpha += 20 * (pT - st.pitch) - 7 * st.pitchV;
       }
-      st.vy += (FF + FR - G - (cF || cR ? press : 0)) * h;
+      st.vy += (FF + FR - (cF || cR ? press : 0) - mB * G - legF) / mB * h;
       st.pitchV += alpha * h;
       st.y += st.vy * h; st.pitch += st.pitchV * h;
       // BOTTOM-OUT: the end of travel is a hard stop (inelastic contact on that wheel)
       for (const [x, gg, vg] of [[XF, gF, vgF], [XR, gR, vgR]]) {
         const c2 = Math.cos(st.pitch), d = gg - (st.y + x * Math.sin(st.pitch)) - TRAVEL;   // compression past s0 + TRAVEL
         if (d <= 0) continue;
-        const lx = x * c2, mInv = 1 + lx * lx / IK;
-        const dq = d / mInv; st.y += dq; st.pitch += dq * lx / IK;
+        const lx = x * c2, mInv = 1 / mB + lx * lx / IK;
+        const dq = d / mInv; st.y += dq / mB; st.pitch += dq * lx / IK;
         const vp = st.vy + lx * st.pitchV;
-        if (vp < vg) { const j = (vg - vp) / mInv; st.vy += j; st.pitchV += j * lx / IK; }
+        if (vp < vg) { const j = (vg - vp) / mInv; st.vy += j / mB; st.pitchV += j * lx / IK; }
         if (x === XF) cF = true; else cR = true;
       }
+      // end of the legs' travel: fully folded / straight, the body and bike move as one (momentum kept)
+      if (!wasAir) {
+        const rel = st.bodyY - st.y;
+        if (rel < -T.legComp) { st.bodyY = st.y - T.legComp; if (st.bodyV < st.vy) { const vc = coupled ? PHI * st.bodyV + mB * st.vy : st.vy; st.bodyV = st.vy = vc; } }
+        else if (rel > T.legExt) { st.bodyY = st.y + T.legExt; if (st.bodyV > st.vy) { const vc = coupled ? PHI * st.bodyV + mB * st.vy : st.vy; st.bodyV = st.vy = vc; } }
+      }
     }
+    // tyre loads for the grip next step (smoothed over ~30 ms)
+    const kN = Math.min(1, dt * 30);
+    st.nF = (st.nF ?? shF * G) + (sumF / N - (st.nF ?? shF * G)) * kN;
+    st.nR = (st.nR ?? shR * G) + (sumR / N - (st.nR ?? shR * G)) * kN;
     const air = !cF && !cR;
     st.frontAir = !air && !cF; st.rearAir = !air && !cR;
     // LOOPED OUT: rotated way past the slope (over the back wheel / onto the nose) is a crash, never a bike
     // standing upright and sinking into the hill. The hard clamp keeps cos(pitch) from ever flipping sign.
     const gpC = Math.asin(clamp((hfC - hrC) / L, -1, 1));
     // judged against the slope right under the tyre that is down (a wheel hanging over a ledge says nothing)
-    const localSlope = (x) => {
-      const px = st.x + fwd.x * x * cp0, pz = st.z + fwd.z * x * cp0;
-      return Math.atan((terrain.height(px + fwd.x * 0.3, pz + fwd.z * 0.3) - terrain.height(px - fwd.x * 0.3, pz - fwd.z * 0.3)) / 0.6);
-    };
-    if (cR && !cF && st.pitch - localSlope(XR) > 1.15) crash.pending = 'LOOPED OUT!';
-    else if (cF && !cR && localSlope(XF) - st.pitch > 1.15) crash.pending = 'NOSE DIVE!';
+    // -- the slope the WHEEL rolls on (its rounded contact), so a tyre rolling over a lip edge is not
+    // read as sitting on the vertical back of the kicker
+    const localSlope = (x, R) => Math.atan((wheelGround(x + 0.05 / cp0, R) - wheelGround(x - 0.05 / cp0, R)) / 0.1);   // tangent at the contact
+    // (only worth sampling when the bike is already rotated well away from the line between its wheels)
+    if (cR && !cF && st.pitch - gpC > 0.6 && st.pitch - localSlope(XR, RWR) > 1.15) crash.pending = 'LOOPED OUT!';
+    else if (cF && !cR && gpC - st.pitch > 0.6 && localSlope(XF, RWF) - st.pitch > 1.15) crash.pending = 'NOSE DIVE!';
     if (Math.abs(st.pitch) > 1.45) { st.pitch = Math.sign(st.pitch) * 1.45; st.pitchV = 0; }
     // the slope we were riding when the front went over a ledge / the rear came up
     if (!air && (st.frontAir || st.rearAir) && wasF && wasR) st.noseRef = gpC - dP;
@@ -940,8 +1045,11 @@ function physics(dt) {
   // --- rider reads the trail like a real one: spots a lip ahead, sinks into the transition,
   // pumps up the face and pops at the top; in the air tucks, then reaches the bike down
   // for the landing so the legs have their full travel to soak it up ---
+  // (a long look ahead: scanned every 3rd step, counted down in between -- it is the costliest sampling)
   let lipT = Infinity;
-  if (!st.air && st.v > 3) {
+  st.lipScan = ((st.lipScan || 0) + 1) % 3;
+  if (st.lipScan !== 0 && !st.air && st.v > 3 && st.lipLast !== undefined) lipT = st.lipLast === Infinity ? Infinity : Math.max(0, st.lipLast - dt);
+  else if (!st.air && st.v > 3) {
     const step = 0.3, n = Math.min(36, Math.ceil(st.v * (T.prepTime + 0.1) / step));
     let hPrev = terrain.height(st.x, st.z), sPrev = null;
     for (let i = 1; i <= n; i++) {
@@ -952,6 +1060,7 @@ function physics(dt) {
       sPrev = sl; hPrev = h;
     }
   }
+  st.lipLast = st.air || st.v <= 3 ? undefined : lipT;
   const prepT = lipT < T.prepTime ? smooth01(1 - lipT / T.prepTime) : 0;
   st.prep = st.air ? Math.max(0, (st.prep || 0) - dt * 4) : (st.prep || 0) + (prepT - (st.prep || 0)) * Math.min(1, dt * 8);
   const popping = lipT < 0.14;                    // last instant before the lip: extend hard
@@ -1003,21 +1112,14 @@ function physics(dt) {
     const rel = (st.bodyY ?? st.y) - (st.yPrev ?? st.y);
     st.bodyY = st.y + rel + (relT - rel) * (1 - Math.exp(-dt * 12)); st.bodyV = st.vy;
   }
-  else {
-    const kB = T.legStiff, cB = 2 * Math.sqrt(kB) * T.legDamp;   // default ~0.9 Hz, soft with a little bounce
-    st.bodyV = (st.bodyV ?? st.vy) + ((st.y - st.bodyY) * kB - ((st.bodyV ?? st.vy) - st.vy) * cB) * dt;
-    st.bodyY += st.bodyV * dt;
-    const rel = st.bodyY - st.y, LEG_COMP = T.legComp, LEG_EXT = T.legExt;                    // + = legs extended above ride height, - = compressed
-    if (rel < -LEG_COMP) { st.bodyY = st.y - LEG_COMP; st.bodyV = Math.max(st.bodyV, st.vy); }   // bottomed out
-    else if (rel > LEG_EXT) { st.bodyY = st.y + LEG_EXT; st.bodyV = Math.min(st.bodyV, st.vy); }  // legs straight
-  }
+  // on the ground the legs are simulated with the tyres (see the spring loop): the hips push on the bike
   st.yPrev = st.y;
 
   // --- dust smoke, flying dirt, tyre tracks ---
   const rear = _rear.set(st.x - fwd.x * BB_REAR, st.y + 0.03, st.z - fwd.z * BB_REAR);
   const front = _front.set(st.x + fwd.x * (L - BB_REAR), st.y + 0.03, st.z + fwd.z * (L - BB_REAR));
   const dcol = groundDust(rear.x, rear.z, surf, _gdc), sand = surf === 3;
-  const skidFx = skid || (!st.air && Math.abs(st.slip) > 0.1 && va > 1.5);   // locked rear OR a tyre sliding sideways
+  const skidFx = skid || st.spin > 0.3 || (!st.air && Math.abs(st.slip) > 0.1 && va > 1.5);   // locked rear, spinning rear OR a tyre sliding sideways
   if (!st.air && va > 0.6) {
     const dirt = surf === 1, side = _side.set(-fwd.z, 0, fwd.x);   // rider's right
     // cornering: lateral acceleration (v * yaw rate) decides how hard the tyre throws dirt to the OUTSIDE
@@ -1060,9 +1162,15 @@ function physics(dt) {
 }
 
 function place() {
-  const yDraw = crash.on ? st.y : st.yDraw ?? st.y, pDraw = crash.on ? st.pitch : st.pitchDraw ?? st.pitch;
-  bikeRoot.position.set(st.x, yDraw, st.z);
-  bikeRoot.rotation.y = st.heading;
+  // between the last two physics steps (a teleport / respawn snaps instead of sliding across the map)
+  const P = drawPrev, a = Math.hypot(st.x - P.x, st.z - P.z) < 2 ? drawAlpha : 1;
+  const lerp = (k) => (P[k] ?? st[k]) + (st[k] - (P[k] ?? st[k])) * a;
+  const yDraw = crash.on ? lerp('y') : lerp(st.yDraw === undefined ? 'y' : 'yDraw');
+  const pDraw = crash.on ? lerp('pitch') : lerp(st.pitchDraw === undefined ? 'pitch' : 'pitchDraw');
+  drawn.x = lerp('x'); drawn.z = lerp('z'); drawn.y = crash.on ? yDraw : lerp('y'); drawn.yDraw = yDraw; drawn.pitch = pDraw;
+  drawn.bodyY = lerp('bodyY');
+  bikeRoot.position.set(drawn.x, yDraw, drawn.z);
+  bikeRoot.rotation.y = (P.heading ?? st.heading) + angDiff(st.heading, P.heading ?? st.heading) * a;
   pitchG.rotation.z = pDraw + st.hopNose;
   const wobble = Math.sin(t * 2.3) * 0.025 * Math.max(0, 1 - Math.abs(st.v) / 2);
   leanG.rotation.x = -(st.bikeLean + st.rock + wobble);
@@ -1084,7 +1192,7 @@ function updateCamera(dt) {
   const P = CAM_PRESETS[camMode];
   fwd.set(Math.cos(st.heading), 0, -Math.sin(st.heading));
   const want = crash.on ? tmp.copy(ragdoll.p[J.PELVIS]).lerp(tmp2.set(st.x, st.y, st.z), 0.3).add(tmp2.set(0, 0.3, 0))
-    : tmp.set(st.x, st.y + 0.5, st.z).addScaledVector(fwd, clamp(st.v, -1, 10) * (P.mode === 'trackside' ? 0.05 : 0.25));
+    : tmp.set(drawn.x, drawn.y + 0.5, drawn.z).addScaledVector(fwd, clamp(st.v, -1, 10) * (P.mode === 'trackside' ? 0.05 : 0.25));
   camTarget.lerp(want, Math.min(1, dt * (P.lag || 5)));
   let fovT = P.fov;
   if (P.mode === 'trackside') {
@@ -1183,9 +1291,18 @@ function meter(now) {
 function frame(now) {
   requestAnimationFrame(frame);
   meter(now ?? performance.now());
-  const dt = Math.min(clock.getDelta(), 1 / 30);
+  const dt = Math.min(clock.getDelta(), 0.1);
   t += dt; FLOWER_TIME.value = t;
-  if (dt > 1e-4) physics(dt);
+  // FIXED-STEP physics: always 1/120 s steps, however fast the screen refreshes, so a jump flies the
+  // same at 30, 60 or 144 FPS. The bike is drawn between the last two steps (see place()).
+  physAcc += dt;
+  let steps = 0;
+  while (physAcc >= PHYS_DT && steps < MAX_STEPS) {
+    for (const k of DRAW_KEYS) drawPrev[k] = st[k];
+    physics(PHYS_DT); physAcc -= PHYS_DT; steps++;
+  }
+  if (steps === MAX_STEPS) physAcc = Math.min(physAcc, PHYS_DT);   // too slow to keep up: drop time rather than spiral
+  drawAlpha = physAcc / PHYS_DT;
   // safety net: if anything went non-finite, restore the last good state (and say so)
   let bad = false;
   for (const k in st) if (typeof st[k] === 'number' && !Number.isFinite(st[k])) { bad = true; break; }
@@ -1195,8 +1312,8 @@ function frame(now) {
   } else for (const k in st) lastGood[k] = st[k];
   place();
   if (!crash.on) rider.update(dt, { footL, footR, handL, handR, v: st.v, lean: st.bikeLean + st.rock, steer: st.steer, yawRate: st.yawRate,
-    counter: st.counter + st.rock * 0.6, headRoll: st.bikeLean * 0.85, absorb: clamp(st.bodyY - (crash.on ? st.y : st.yDraw ?? st.y), -T.legComp, T.legExt), pitch: crash.on ? st.pitch : st.pitchDraw ?? st.pitch, bodyLevel: T.bodyLevel, attackDrop: T.attackDrop,
-    pedal: st.pedal, crank: st.crank, air: st.airK, compress: Math.max(0, -st.compress), t });
+    counter: st.counter + st.rock * 0.6, headRoll: st.bikeLean * 0.85, absorb: clamp(drawn.bodyY - drawn.yDraw, -T.legComp, T.legExt), pitch: drawn.pitch, bodyLevel: T.bodyLevel, attackDrop: T.attackDrop,
+    pedal: st.pedal, crank: st.crank, air: st.airK, compress: Math.max(0, -st.compress), hipShift: st.hipShift || 0, t });
   terrain.update(st.x, st.z, 4);   // time-sliced chunk streaming (ms per frame)
   // announce the landscape as it changes under you
   biomeT -= dt;
@@ -1209,7 +1326,7 @@ function frame(now) {
   debris.update(dt);
   tapes.update(dt, st.x, st.z);
   if (!crash.on) debris.kick(st.x, st.y, st.z, Math.cos(st.heading) * st.v, -Math.sin(st.heading) * st.v);
-  else { const Pp = ragdoll.p[J.PELVIS], Pq = ragdoll.q[J.PELVIS]; debris.kick(Pp.x, Pp.y, Pp.z, (Pp.x - Pq.x) * 180, (Pp.z - Pq.z) * 180, 0.6); }
+  else { const Pp = ragdoll.p[J.PELVIS], Pq = ragdoll.q[J.PELVIS], iv = 1 / (ragdoll.lastH || PHYS_DT / 3); debris.kick(Pp.x, Pp.y, Pp.z, (Pp.x - Pq.x) * iv, (Pp.z - Pq.z) * iv, 0.6); }
   fx.update(dt, camera, renderer);
   {  // terrain slope along the direction of travel: + uphill, - downhill
     const dir = st.v < -0.1 ? -1 : 1, hx = Math.cos(st.heading) * 0.6 * dir, hz = -Math.sin(st.heading) * 0.6 * dir;
