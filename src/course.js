@@ -233,7 +233,9 @@ export class Course {
         q.d = legD; q.i = i; q.t = t; q.w = wl;
         const px = X[i] + (X[i + 1] - X[i]) * t, pz = Z[i] + (Z[i + 1] - Z[i]) * t;
         const tx = this.TX[i], tz = this.TZ[i];
-        q.a = -(x - px) * tz + (z - pz) * tx;
+        // signed TRUE distance: projecting on the vertex tangent jumps where the nearest point moves from
+        // one segment to the next (outside of bends), which left a step in every berm every 2 m
+        q.a = (-(x - px) * tz + (z - pz) * tx < 0 ? -1 : 1) * legD;
         q.kind = this.KD[t < 0.5 ? i : i + 1];
         q.k = this.KAP[i] + (this.KAP[i + 1] - this.KAP[i]) * t;
         q.bt = this.BT[i] + (this.BT[i + 1] - this.BT[i]) * t;

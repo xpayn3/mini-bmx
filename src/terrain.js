@@ -425,7 +425,12 @@ export class Terrain {
     let h = 0;
     // the course: every corner the crew banked (hairpins and esses hard, road sweepers a little)
     const q = this.course.query(x, z);
-    if (q.d < 12 && q.bt > 0.004) h = Math.max(h, this.bermShape(-q.a * Math.sign(q.k), q.bt));
+    // Each side's bank fades with the curvature, so where an S-bend changes direction the berm sinks
+    // away on one side as it rises on the other (sign(k) flipped it instantly: a cliff across the trail)
+    if (q.d < 12 && q.bt > 0.004) {
+      const wl = Math.min(1, Math.max(0, q.k / 0.02)), wr = Math.min(1, Math.max(0, -q.k / 0.02));
+      h = Math.max(h, this.bermShape(-q.a, q.bt * wl), this.bermShape(q.a, q.bt * wr));
+    }
     // trails: curvature of the path contour, measured at the trail CENTRE so each berm is one clean surface
     const P = (a, b) => this.pathN(a, b);
     const p = P(x, z);

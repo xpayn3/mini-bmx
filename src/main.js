@@ -25,6 +25,7 @@ import { Water } from './water.js';
 import { Ragdoll, J } from './ragdoll.js';
 import { TUNE, buildTunePanel } from './tune.js';
 import { buildLookPanel } from './lookpanel.js';
+import { addBikeDecals } from './decals.js';
 import { buildPosePanel, NEUTRAL as POSE0 } from './posepanel.js';
 import { IS_TOUCH, buildTouchControls } from './touch.js';
 
@@ -151,6 +152,11 @@ const BIKES = {   // the downhill bike is the main bike: listed first, and the o
       grip: 1.15, oversteer: 0.7,   // big knobbies bite harder and the rear lets go less
       tyreHz: 0.75, tyreDamp: 1.3, travel: 2.2,   // 200 mm of plush travel: lower, softer bounce, soaks more
     },
+    // lettering projected onto the model (decals.js): down tube both sides, both tyre sidewalls
+    decals: {
+      downTube: { mesh: 'frame_1', from: [0.168, 0.486], to: [0.404, 0.809], text: 'GIANT', length: 0.36, height: 0.062 },
+      tyres: { text: 'MAXXIS', meshes: ['wheel_front_3', 'wheel_rear_3'] },
+    },
     land: 1.45,   // landings feel this much softer: SLAM! takes a drop ~1.45x as hard, less speed scrubbed
   },
   bmx: { file: 'assets/bmx.glb', root: 'bmx', label: 'BMX' },
@@ -168,7 +174,8 @@ const url = new URL(location.href);
 const store = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
                 set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } } };
 const isBike = (id) => id != null && Object.hasOwn(BIKES, id);   // not 'constructor' & co.
-const bikeId = isBike(url.searchParams.get('bike')) ? url.searchParams.get('bike') : isBike(store.get('bike')) ? store.get('bike') : 'dh';
+// the downhill bike is the main bike: a fresh start always rides it; ?bike= (set by the bike buttons) picks another
+const bikeId = isBike(url.searchParams.get('bike')) ? url.searchParams.get('bike') : 'dh';
 const urlSeed = parseInt(url.searchParams.get('seed'), 10);
 let seed = Number.isFinite(urlSeed) ? urlSeed : (Math.random() * 1e6) | 0;
 const RIDE = BIKES[bikeId].ride || {}, LAND = BIKES[bikeId].land || 1;
@@ -305,6 +312,7 @@ bike.traverse((o) => {
   if (o.material.name === 'paint' && !BIKES[bikeId].cfg) o.material = paint;   // built bikes bring their own colour
   if (o.material.name === 'chrome') { o.material.envMapIntensity = 1.6; }
 });
+addBikeDecals(bike, BIKES[bikeId].decals);
 
 // grips: steer rubber mesh, split by side
 const gripL = new THREE.Vector3(), gripR = new THREE.Vector3();
