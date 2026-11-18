@@ -8,7 +8,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 // completely and blow away across the hills.
 
 export const WIND = { dir: new THREE.Vector3(0.8, 0, 0.6).normalize(), speed: 4, gust: 1, t: 0 };
-const SEG = 30, WIDTH = 0.075, TAPE_H = 0.85, STEP = 7.5, OFF = 3.9;
+const SEG = 30, WIDTH = 0.075, TAPE_H = 0.85;
 const RED = new THREE.Color(0xe8322b), WHITE = new THREE.Color(0xf6f5ef), YEL = new THREE.Color(0xf5c518), BLK = new THREE.Color(0x26241f);
 const uTime = { value: 0 }, uWind = { value: new THREE.Vector3() }, uPh = { value: 0 };   // uPh: flutter phase, integrated (see update)
 
@@ -46,27 +46,24 @@ const stakeGeo = mergeGeometries([   // thin white fibreglass stake with an oran
 
 // ---------------- placement: called by Terrain.buildGen for one chunk ----------------
 export function buildTape(T, cx, cz, S, colliders) {
-  const ox = cx * S, oz = cz * S;
-  const stake = (k, side) => {   // global stake sequence along the route -> {x, z, h} or null
-    const xp = k * STEP;
-    if (T.routeOn(xp) < 0.6) return null;
-    const d = T.routeZ(xp + 0.5) - T.routeZ(xp - 0.5), l = Math.sqrt(1 + d * d);
-    const x = xp - side * OFF * d / l, z = T.routeZ(xp) + side * OFF / l;
-    if (Math.hypot(x, z) < 14) return null;
-    const h = T.height(x, z);
-    if (h < -1.9 || T.jump(x, z)[0] > 0.05) return null;
-    return { x, z, h, xp };
+  // the stakes are planned with the course (course.js): both sides through technical sections and jump
+  // lines, funnelling in and out of them, and round the outside of the road's tighter bends. A chunk
+  // plants the stakes standing in it and strings each one back to the stake before it.
+  const plant = (st) => {
+    if (Math.hypot(st.x, st.z) < 10) return null;
+    const h = T.height(st.x, st.z);
+    if (h < -1.9 || T.jump(st.x, st.z)[0] > 0.05) return null;
+    return { x: st.x, z: st.z, h };
   };
   const spans = [], stakes = [];
-  const k0 = Math.floor((ox - S / 2 - OFF - 2) / STEP), k1 = Math.ceil((ox + S / 2 + OFF + 2) / STEP);
-  for (const side of [-1, 1]) for (let k = k0; k <= k1; k++) {
-    const a = stake(k, side); if (!a || Math.round(a.x / S) !== cx || Math.round(a.z / S) !== cz) continue;
-    stakes.push(a);
-    const b = stake(k + 1, side);
-    if (!b || Math.abs(b.h - a.h) > 2) continue;
-    const steep = T.pitches.some(([c, len]) => Math.abs(a.xp - c) < len / 2 + 6);   // caution colours on the steep pitches
-    spans.push({ a, b, k, side, cols: steep ? [YEL, BLK] : [RED, WHITE] });
-  }
+  T.course.stakes.forEach((st, k) => {
+    if (Math.round(st.x / S) !== cx || Math.round(st.z / S) !== cz) return;
+    const b = plant(st); if (!b) return;
+    stakes.push(b);
+    const a = st.prev && plant(st.prev);
+    if (!a || Math.abs(b.h - a.h) > 2) return;
+    spans.push({ a, b, k, side: st.side, cols: st.caution ? [YEL, BLK] : [RED, WHITE] });
+  });
   if (!spans.length && !stakes.length) return [];
   const out = [];
   if (stakes.length) {

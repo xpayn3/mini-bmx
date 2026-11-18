@@ -6,14 +6,16 @@ import { PROFILES, FEATURE_TYPES, ROUTE_TYPES, WOOD, DIG } from './features.js';
 import { MAT_SHED, SHED_DESIGNS, shedGeo, shedColliders } from './sheds.js';
 import { FENCE_MAT, FENCE_GEO, SPAN, buildFence, bindFences } from './fences.js';
 import { buildTape } from './tape.js';
+import { Course, K as CK, STEP as CSTEP } from './course.js';
 
 const perlin = new ImprovedNoise();
 export const WATER = -2.2;
 const ROCK_CELL = 2;   // m: grid for looking up the rocks under a point
 
 const JC = 34;
-// the start: a long ridge you roll down from spawn along +x, with a main trail down its spine
-const HILL_TOP = 58, HILL_LEN = 520, ROUTE_END = HILL_LEN + 90, ROUTE_GAP = 46;   // one trail feature per JC x JC metre cell (most cells)
+// THE MOUNTAIN: a broad slope you ride down from spawn along +x (steeper bands across it where the
+// course turns technical), ~300 m wide, its spine wandering a little; the course (course.js) is laid on it
+const HILL_TOP = 105, HILL_LEN = 1400, MTN_W = 150;
 const clamp01 = (x) => Math.min(1, Math.max(0, x));
 const smoother = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * t * (t * (6 * t - 15) + 10); };
 const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
@@ -283,7 +285,7 @@ const COL = {
   dryGrass: C(0xc9b45a), dune: C(0xedc98a), duneDark: C(0xd9aa66), desertDirt: C(0xd49a5c),
   red: C(0xc2603a), redLight: C(0xe38c55), redDark: C(0x8f4029), cream: C(0xf0d3a2),
   tuftGreen: C(0x5e9e37), tuftDry: C(0xb59a4a),
-  litter: C(0x77703a), clover: C(0x4d9a3a),
+  litter: C(0x77703a), clover: C(0x4d9a3a), gravel: C(0xb9a98c),
   grey: C(0x8d8a86), greyDark: C(0x5f5d5c), greyLight: C(0xb4b0a8), snow: C(0xf4f7f8), alpine: C(0x6f9a4a),
 };
 const _c = new THREE.Color(), _c2 = new THREE.Color(), _c3 = new THREE.Color(), _cD = new THREE.Color();
@@ -320,89 +322,93 @@ export class Terrain {
     this.jumpCache = new Map();
     const r = mulberry32(seed * 7919 + 13);
     this.rp = [r() * 6.28, r() * 6.28, r() < 0.5 ? 1 : -1];
-    // steep pitches on the way down: [centre x, length, share of the total drop]
+    // steep bands across the mountain: [centre x, length, share of the total drop]
     this.pitches = [];
-    for (let x = 90 + r() * 30, k = 0; k < 4 && x < HILL_LEN - 40; k++) {
-      const len = 22 + r() * 16;
-      this.pitches.push([x, len, 0.1 + r() * 0.04]);
-      x += len + 55 + r() * 60;
+    for (let x = 170 + r() * 80, k = 0; k < 5 && x < HILL_LEN - 140; k++) {
+      const len = 34 + r() * 24;
+      this.pitches.push([x, len, 0.06 + r() * 0.03]);
+      x += len + 190 + r() * 170;
     }
-    // S-bend sections: tighter corners with banked berms
-    this.bends = [];
-    for (let x = 60 + r() * 60, k = 0; k < 2 && x < HILL_LEN - 120; k++) {
-      const len = 80 + r() * 30;
-      this.bends.push([x, x + len, r() * 6.28]);
-      x += len + 110 + r() * 80;
-    }
-    this.routeFeats = null;   // built lazily (needs base(), which needs the route)
+    // lay out the course down it (needs landform(), which only needs the mountain)
+    this.course = new Course(mulberry32(seed * 31337 + 5), {
+      L: HILL_LEN, corridor: MTN_W - 40, pitches: this.pitches, water: WATER,
+      zc: (x) => this.zc(x), land: (x, z) => this.landform(x, z),
+    });
+    this.routeFeats = null;   // built lazily (needs base(), which needs the course)
   }
   feat(x, z, dx, dz, type, b0, b1) {
     const prof = PROFILES[type];
     return { x, z, dx, dz, len: prof.len, prof, b0, b1, type, wood: WOOD[type], dig: DIG[type],
       half: type === 'rhythm' || type === 'flow' ? 2.3 : type === 'bridge' ? 2.4 : type === 'skinny' ? 1.4 : 1.9 };
   }
-  // ---------- main downhill route ----------
-  routeZ(x) {
-    const [a, b, sg] = this.rp;
-    let z = sg * (22 * (Math.sin(x / 80 + a) - Math.sin(a)) + 5 * (Math.sin(x / 37 + b) - Math.sin(b)));
-    for (const [b0, b1, ph] of this.bends) if (x > b0 && x < b1) z += 5 * Math.sin((x - b0) / 16 + ph) * smoother(b0, b0 + 30, x) * (1 - smoother(b1 - 30, b1, x));   // C2 fade: no curvature kinks
-    return z;
+  // ---------- the mountain ----------
+  zc(x) { const [a, , sg] = this.rp; return sg * 40 * (Math.sin(x / 260 + a) - Math.sin(a)); }   // its spine
+  mtn(x, z) {   // 1 on the mountain face, fading out round its sides, back and foot
+    return (1 - smooth(MTN_W - 20, MTN_W + 90, Math.abs(z - this.zc(x)))) * smooth(-300, -170, x) * (1 - smooth(HILL_LEN, HILL_LEN + 150, x));
   }
-  routeDist(x, z) {   // ~perpendicular distance to the route centreline (Infinity off its ends)
-    if (x < -40 || x > ROUTE_END + 40) return Infinity;
-    const d = (this.routeZ(x + 0.5) - this.routeZ(x - 0.5));
-    return Math.abs(z - this.routeZ(x)) / Math.sqrt(1 + d * d);
-  }
-  routeOn(x) { return smooth(-40, -12, x) * (1 - smooth(ROUTE_END - 30, ROUTE_END, x)); }
-  hill(x, z) {   // big ridge: flat top behind spawn, then a long steady descent along +x
-    // gentle base grade plus a few short steep pitches (shares sum to ~0.6 of the drop)
+  routeDist(x, z) { return this.course.query(x, z).d; }   // m to the course centreline (Infinity if far)
+  hill(x, z) {   // flat top behind spawn, then a long descent along +x with a few steep bands
     let steep = 0, share = 0;
     for (const [c, len, sh] of this.pitches) { steep += sh * smooth(c - len / 2, c + len / 2, x); share += sh; }
     const lin = Math.min(1, Math.max(0, x / HILL_LEN));
-    const along = (1 - steep - (1 - share) * (0.6 * smooth(-10, HILL_LEN, x) + 0.4 * lin)) * smooth(-170, -70, x);
+    const along = (1 - steep - (1 - share) * (0.6 * smooth(-10, HILL_LEN, x) + 0.4 * lin)) * smooth(-330, -90, x);
     if (along <= 0) return 0;
-    const d = Math.abs(z - this.routeZ(Math.max(-40, Math.min(ROUTE_END, x))));
-    return HILL_TOP * along * (1 - smooth(55, 150, d));
+    return HILL_TOP * along * (1 - smooth(MTN_W, MTN_W + 260, Math.abs(z - this.zc(x))));
   }
+  // built features on the course: jump lines get a set back to back, long roads the odd roller or table
   buildRoute() {
-    const r = mulberry32(this.seed * 104729 + 7), list = [];
-    for (let x = 34; x < ROUTE_END - 40; x += ROUTE_GAP + r() * 22) {
-      const type = ROUTE_TYPES[(r() * ROUTE_TYPES.length) | 0], prof = PROFILES[type], len = prof.len;
-      // keep jumps off the steep pitches and their run-outs (too fast to land them nicely)
-      const clash = this.pitches.find(([c, pl]) => x < c + pl / 2 + 30 && x + len > c - pl / 2 - 6);
-      if (clash) { x = clash[0] + clash[1] / 2 + 30 - ROUTE_GAP + 2; continue; }
-      const bend = this.bends.find(([b0, b1]) => x < b1 && x + len > b0);
-      if (bend) { x = bend[1] - ROUTE_GAP + 2; continue; }
-      const z = this.routeZ(x), x2 = x + len, z2 = this.routeZ(x2), l = Math.hypot(x2 - x, z2 - z);
-      const dx = (x2 - x) / l, dz = (z2 - z) / l;
-      const b0 = this.base(x, z), b1 = this.base(x + dx * len, z + dz * len);
-      list.push(this.feat(x, z, dx, dz, type, b0, b1));
-      x += len;
+    const C = this.course, r = mulberry32(this.seed * 104729 + 7), list = [];
+    for (const [i0, i1, k] of C.runs()) {
+      const jump = k === CK.JUMP;
+      if (!jump && k !== CK.ROAD) continue;
+      let s = i0 * CSTEP + (jump ? 4 : 30);
+      const sEnd = i1 * CSTEP - (jump ? 2 : 30);
+      if (!jump) s += r() * 60;
+      while (s < sEnd) {
+        const types = jump ? ROUTE_TYPES : ['rhythm', 'rhythm', 'table', 'kicker'];
+        const type = types[(r() * types.length) | 0], len = PROFILES[type].len;
+        if (s + len > sEnd) break;
+        const [x, z] = C.at(s), [x2, z2] = C.at(s + len), l = Math.hypot(x2 - x, z2 - z);
+        if (l < len * 0.995) { s += 8; continue; }   // still bending: features only go on the straights
+        const dx = (x2 - x) / l, dz = (z2 - z) / l;
+        const f = this.feat(x, z, dx, dz, type, this.base(x, z), this.base(x + dx * len, z + dz * len));
+        f.s = s; list.push(f);
+        s += len + (jump ? 5 + r() * 8 : 70 + r() * 90);
+      }
     }
     this.routeFeats = list;
   }
   n(x, z, s) { return perlin.noise(x * s, z * s, this.sz); }
+  // the side-trail network: wherever this noise crosses zero there's a trail. On the mountain face it's
+  // pushed away from zero, so the side trails taper out at its edge and the course has the hill to itself
+  pathN(x, z) {
+    const v = this.n(x + 211.3, z - 97.1, 1 / 42), o = 0.3 * smooth(0.3, 0.75, this.mtn(x, z));
+    return v < 0 ? v - o : v + o;
+  }
 
   trail(x, z) {
-    const p = Math.abs(this.n(x + 211.3, z - 97.1, 1 / 42));
-    const main = (1 - smooth(1.9, 3.1, this.routeDist(x, z))) * this.routeOn(x);
+    const p = Math.abs(this.pathN(x, z));
+    const q = this.course.query(x, z);
+    const main = q.d < 12 ? 1 - smooth(q.w, q.w + 1.2, q.d) : 0;
     return Math.max(1 - smooth(0.03, 0.075, p), main);
   }
   // signed metres across the trail you are on (the main route, or a noise trail): 0 on its centre
   across(x, z) {
-    if (this.routeOn(x) > 0.5 && this.routeDist(x, z) < 4.5) {
-      const d = this.routeZ(x + 0.5) - this.routeZ(x - 0.5);
-      return (z - this.routeZ(x)) / Math.sqrt(1 + d * d);
-    }
-    const P = (a, b) => this.n(a + 211.3, b - 97.1, 1 / 42);
+    const q = this.course.query(x, z);
+    if (q.d < q.w + 2.6) return q.a;
+    const P = (a, b) => this.pathN(a, b);
     const gx = P(x + 0.5, z) - P(x - 0.5, z), gz = P(x, z + 0.5) - P(x, z - 0.5);
     return P(x, z) / Math.max(Math.hypot(gx, gz), 0.012);
   }
   // THE RIDDEN LINE: the strip everyone rides wears into a packed, darker groove about a tyre-track
   // wide pair. It wanders across the trail (a slow noise), so it cuts in and out like a real line.
+  // On the course's gravel roads it's a double-track instead: two wheel ruts ~1.7 m apart.
   line(x, z) {
-    const off = this.n(x + 91.7, z - 13.3, 1 / 23) * 1.5;
-    return 1 - smooth(0.25, 0.7, Math.abs(this.across(x, z) - off));
+    const off = this.n(x + 91.7, z - 13.3, 1 / 23) * 1.5, a = this.across(x, z), q = this.course.query(x, z);
+    const single = 1 - smooth(0.25, 0.7, Math.abs(a - off));
+    if (!(q.d < q.w + 2.6) || q.rd <= 0) return single;
+    const ruts = 1 - smooth(0.16, 0.48, Math.abs(Math.abs(a) - 0.85));
+    return single + (ruts - single) * q.rd;
   }
   // ---------- berms: the outside of tighter corners is banked up so you can rail them ----------
   bermShape(o, tan) {   // o = metres towards the outside of the turn from the trail centre
@@ -417,17 +423,11 @@ export class Terrain {
   }
   berm(x, z) {
     let h = 0;
-    // main route: curvature straight from the centreline
-    let win = 0;
-    for (const [b0, b1] of this.bends) win = Math.max(win, smooth(b0 - 5, b0 + 22, x) * (1 - smooth(b1 - 22, b1 + 5, x)));
-    if (win > 0 && this.routeOn(x) > 0) {
-      const z0 = this.routeZ(x), zp = this.routeZ(x + 1), zm = this.routeZ(x - 1);
-      const z1 = (zp - zm) / 2, z2 = zp - 2 * z0 + zm, k = 1 + z1 * z1;
-      const kap = z2 / (k * Math.sqrt(k)), s = (z - z0) / Math.sqrt(k);
-      if (Math.abs(s) < 8) h = Math.max(h, this.bermShape(-s * Math.sign(kap), Math.min(0.6, 17 * Math.abs(kap))) * this.routeOn(x) * win * this.bermOn(x, z0));
-    }
+    // the course: every corner the crew banked (hairpins and esses hard, road sweepers a little)
+    const q = this.course.query(x, z);
+    if (q.d < 12 && q.bt > 0.004) h = Math.max(h, this.bermShape(-q.a * Math.sign(q.k), q.bt));
     // trails: curvature of the path contour, measured at the trail CENTRE so each berm is one clean surface
-    const P = (a, b) => this.n(a + 211.3, b - 97.1, 1 / 42);
+    const P = (a, b) => this.pathN(a, b);
     const p = P(x, z);
     if (Math.abs(p) < 0.2) {
       const gx0 = P(x + 0.5, z) - P(x - 0.5, z), gz0 = P(x, z + 0.5) - P(x, z - 0.5), g0 = Math.max(Math.hypot(gx0, gz0), 1e-6);
@@ -449,8 +449,8 @@ export class Terrain {
   // the ground under a feature is flattened to a straight plane, so the shapes ride exactly as designed
   // the big shapes of the land (hills, mountains, rock bands, the start ridge) without small detail
   landform(x, z) {
-    // calm the hills along the main route so it is a steady downhill with no climbs
-    const calm = 1 - 0.85 * (1 - smooth(8, 45, this.routeDist(x, z))) * this.routeOn(x);
+    // calm the hills on the mountain face so the course is a steady downhill with no climbs
+    const calm = 1 - 0.85 * this.mtn(x, z);
     // some regions are much steeper and hillier than others
     const relief = 1 + 1.3 * smooth(0.0, 0.35, this.n(x + 5000, z - 800, 1 / 260));
     let h = (this.n(x, z, 1 / 90) * 10 * relief + this.n(x + 31.7, z - 17.2, 1 / 28) * 3.2 * (0.6 + 0.4 * relief)) * calm + this.hill(x, z);
@@ -460,14 +460,14 @@ export class Terrain {
     const t = this.trail(x, z);
     let h = this.landform(x, z);
     // distance to the trail centreline (noise value / its local slope; exact enough near the trail)
-    const P = (a, b) => this.n(a + 211.3, b - 97.1, 1 / 42);
+    const P = (a, b) => this.pathN(a, b);
     const p = P(x, z);
     let dist = 99;
     if (Math.abs(p) < 0.25) {
       const gx = (P(x + 0.5, z) - P(x - 0.5, z)), gz = (P(x, z + 0.5) - P(x, z - 0.5)), g = Math.max(Math.hypot(gx, gz), 0.012);
       dist = Math.abs(p) / g;
       // trails are benched into the hillside: level across, like a real cut path, with soft shoulders
-      const bench = (1 - smooth(3, 9.5, dist)) * smooth(6, 16, this.routeDist(x, z)) * (1 - smooth(0.15, 0.25, Math.abs(p)));   // not where trails cross the main route
+      const bench = (1 - smooth(3, 9.5, dist)) * smooth(6, 16, this.course.query(x, z).d) * (1 - smooth(0.15, 0.25, Math.abs(p)));   // not where trails cross the main route
       if (bench > 0) {
         const sd = p / g, cx = x - sd * gx / g, cz = z - sd * gz / g;
         // cut / fill is capped (~1 m) so steep sidehills keep a little tilt instead of getting carved walls
@@ -475,6 +475,10 @@ export class Terrain {
         h += d / (1 + Math.abs(d) / 1.1);
       }
     }
+    // the course is benched into the hill at the height the crew graded it to: level across, never
+    // climbing, with cut banks / fill shoulders easing back into the land
+    const cq = this.course.query(x, z);
+    if (cq.mask > 0) h += (cq.bench - h) * cq.mask;
     // small lumps only well away from the trail, faded in gently so the edges stay clean
     h += this.n(x - 5.3, z + 9.1, 1 / 8) * 0.5 * Math.max(smooth(2.5, 7, dist), smooth(0.15, 0.25, Math.abs(p))) * (1 - t);
     h -= 0.15 * t;                                         // trail sits slightly sunk in
@@ -487,8 +491,9 @@ export class Terrain {
     // never let a trail run into a lake: raise it on a dirt causeway with sloped banks
     const dry = WATER + 0.5;
     if (h < dry) {
-      const p = Math.abs(this.n(x + 211.3, z - 97.1, 1 / 42));
-      const bank = Math.max(1 - smooth(0.05, 0.14, p), (1 - smooth(2.6, 7, this.routeDist(x, z))) * this.routeOn(x));
+      const p = Math.abs(this.pathN(x, z));
+      const q = this.course.query(x, z);
+      const bank = Math.max(1 - smooth(0.05, 0.14, p), q.d < 20 ? 1 - smooth(q.w, q.w + 4.5, q.d) : 0);
       h += (dry - h) * bank;
     }
     return h;
@@ -505,11 +510,10 @@ export class Terrain {
     return rug > 0.5 ? 'Rocky Mountains' : 'Green Hills';
   }
   wildMask(x, z) {   // keep the big stuff off trails, the main route and the spawn
-    const route = 1 - (1 - smooth(22, 60, this.routeDist(x, z))) * this.routeOn(x);
-    return route * smooth(45, 90, Math.hypot(x, z));
+    return (1 - this.mtn(x, z)) * smooth(45, 90, Math.hypot(x, z));
   }
   trailMetres(x, z) {   // approx. distance to the nearest trail in metres (noise value / its slope)
-    const P = (a, b) => this.n(a + 211.3, b - 97.1, 1 / 42);
+    const P = (a, b) => this.pathN(a, b);
     return Math.abs(P(x, z)) / 0.022;   // fixed typical slope: smooth & steady (no blow-ups at noise saddles)
   }
   passMask(x, z) {   // trails cross hills through wide, gentle passes
@@ -564,12 +568,12 @@ export class Terrain {
       let bestV = 0.02;
       for (let i = 0; i < 24; i++) {
         const x = (cx + 0.2 + rnd() * 0.6) * C, z = (cz + 0.2 + rnd() * 0.6) * C;
-        const pv = Math.abs(this.n(x + 211.3, z - 97.1, 1 / 42));
+        const pv = Math.abs(this.pathN(x, z));
         if (pv < bestV && Math.hypot(x, z) > 20 && this.routeDist(x, z) > 14) { bestV = pv; best = { x, z }; }
       }
       if (best) {   // runs ALONG the trail (perpendicular to the path-noise gradient)
         const type = FEATURE_TYPES[(rnd() * FEATURE_TYPES.length) | 0], prof = PROFILES[type], len = prof.len;
-        const P = (a, b) => this.n(a + 211.3, b - 97.1, 1 / 42);
+        const P = (a, b) => this.pathN(a, b);
         const gx = P(best.x + 0.5, best.z) - P(best.x - 0.5, best.z), gz = P(best.x, best.z + 0.5) - P(best.x, best.z - 0.5);
         const l = Math.hypot(gx, gz) || 1;
         let dx = -gz / l, dz = gx / l;
@@ -613,10 +617,8 @@ export class Terrain {
       const j = this.jumpAt(cx + dx, cz + dz); if (j) this.featAt(j, x, z, o);
     }
     if (!this.routeFeats) this.buildRoute();
-    if (this.routeDist(x, z) < 12) for (const j of this.routeFeats) {
-      if (x < j.x - 8 || x > j.x + j.len + 8) continue;
-      this.featAt(j, x, z, o);
-    }
+    const q = this.course.query(x, z);
+    if (q.d < 12) { const s = q.s; for (const j of this.routeFeats) if (s > j.s - 10 && s < j.s + j.len + 10) this.featAt(j, x, z, o); }
     return [o.h, o.m, o.plane, o.dig, o.wood];
   }
   // ground() is the dirt/rock surface (what the terrain mesh shows);
@@ -712,6 +714,12 @@ export class Terrain {
     if (t > 0) {   // the ridden line is packed and darker; off it the dirt is loose, lighter and gritty
       const ln = this.line(x, z) * this.trail(x, z), grit = this.n(x + 13.7, z - 4.1, 1 / 0.9);
       outD.multiplyScalar((1 - 0.2 * ln) * (1 + (1 - ln) * (0.07 + grit * 0.09)));
+    }
+    // the course's roads are pale gravel, its rock gardens grey and stony
+    const q = this.course.query(x, z);
+    if (q.d < q.w + 3) {
+      if (q.rd > 0) outD.lerp(_c.copy(COL.gravel).lerp(COL.desertDirt, dry * 0.4), q.rd * 0.6 * (0.85 + 0.15 * this.n(x * 3, z * 3, 1 / 2)));
+      if (q.rk > 0) outD.lerp(COL.greyDark, q.rk * 0.45 * (0.6 + 0.4 * smooth(-0.3, 0.3, this.n(x - 9, z + 4, 1 / 1.3))));
     }
     if (h < WATER) { outG.lerp(COL.bed, 0.6); outD.lerp(COL.bed, 0.6); }
     return t;
@@ -838,11 +846,11 @@ export class Terrain {
     if (rs() < 0.32) for (let tries = 0; tries < 8; tries++) {
       const x = ox + (rs() - .5) * S * 0.8, z = oz + (rs() - .5) * S * 0.8;
       if (Math.hypot(x, z) < 30 || this.routeDist(x, z) < 9) continue;
-      const tm = this.trailMetres(x, z), rd = this.routeDist(x, z) * (this.routeOn(x) > 0.5 ? 1 : Infinity);
+      const tm = this.trailMetres(x, z), rd = this.routeDist(x, z);
       if (!((tm > 6 && tm < 16) || (rd > 9 && rd < 20)) && tries < 6) continue;   // sheds sit where you ride past them
       const di = (rs() * SHED_DESIGNS.length) | 0, d = SHED_DESIGNS[di], R = Math.hypot(d.s.hw, d.s.hd) + 0.6;
       // face the door roughly towards the nearest trail
-      const P = (a, b) => Math.abs(this.n(a + 211.3, b - 97.1, 1 / 42));
+      const P = (a, b) => Math.abs(this.pathN(a, b));
       const gx = P(x - 1, z) - P(x + 1, z), gz = P(x, z - 1) - P(x, z + 1);
       const yaw = Math.atan2(gx, gz) + (rs() - .5) * 0.8;
       let lo = Infinity, hi = -Infinity, ok = true;
@@ -864,9 +872,9 @@ export class Terrain {
       if (h < WATER + 0.3 || Math.hypot(x, z) < 14 || this.trail(x, z) > 0.15 || this.jump(x, z)[1] > 0.02 || isBlocked(x, z, 0.5)) return null;
       return h;
     };
-    const runFence = (pts, style) => {   // split the post line wherever a post can't stand, build each piece
+    const runFence = (pts, style, min = 3) => {   // split the post line wherever a post can't stand, build each piece
       let cur = [];
-      const flush = () => { if (cur.length >= 3) buildFence(cur, style, rs, fl, colliders); cur = []; };
+      const flush = () => { if (cur.length >= min) buildFence(cur, style, rs, fl, colliders); cur = []; };
       for (const [x, z] of pts) {
         const h = postOk(x, z);
         if (h === null || (cur.length && Math.abs(h - cur[cur.length - 1].h) > 0.9)) { flush(); if (h === null) continue; }
@@ -876,7 +884,7 @@ export class Terrain {
     };
     // fences that follow a trail at a fixed offset (projected back onto that offset after every step)
     if (rs() < 0.55) {
-      const P = (a, b) => this.n(a + 211.3, b - 97.1, 1 / 42);
+      const P = (a, b) => this.pathN(a, b);
       const D = (4.2 + rs() * 1.5) * 0.022;
       let x = ox + (rs() - .5) * S, z = oz + (rs() - .5) * S, pts = [];
       const project = () => {
@@ -906,18 +914,34 @@ export class Terrain {
         runFence(pts, rs() < 0.35 ? 'picket' : 'ranch');
       }
     }
-    // fences lining the main downhill route here and there
-    if (this.routeOn(ox) > 0.5 && rs() < 0.6) {
-      const side = rs() < 0.5 ? -1 : 1, off = 5.6 + rs() * 1.2, pts = [];
-      let x = ox + (rs() - .5) * S * 0.6;
-      const n = 5 + ((rs() * 8) | 0);
-      for (let i = 0; i < n; i++) {
-        const zc = this.routeZ(x), d = (this.routeZ(x + 0.5) - this.routeZ(x - 0.5)), l = Math.sqrt(1 + d * d);
-        const px = x - side * off * d / l, pz = zc + side * off / l;
-        if (Math.abs(pz - oz) < S / 2 + 10) pts.push([px, pz]);
-        x += SPAN / l;
+    // the course's own fences (planned in course.js): this chunk builds the panels whose first post
+    // stands in it; posts that land on a crossing trail or a feature drop out, leaving a gap
+    for (const f of this.course.fences) {
+      const P = f.posts; let cur = [];
+      for (let k = 0; k < P.length; k++) {
+        if (Math.round(P[k][0] / S) === cx && Math.round(P[k][1] / S) === cz) {
+          if (!cur.length) cur.push(P[k]);
+          if (k + 1 < P.length) cur.push(P[k + 1]);
+        } else if (cur.length) { runFence(cur, f.style, 2); cur = []; }
       }
-      runFence(pts, 'ranch');
+      if (cur.length) runFence(cur, f.style, 2);
+    }
+    // ROCK GARDENS: the chutes are strewn with half-buried rocks (rideable, like all rocks); a clean-ish
+    // line weaves through them for whoever finds it
+    {
+      const C = this.course, rk = mulberry32((cx * 83492791) ^ (cz * 2654435761) ^ (this.seed * 40503) ^ 0x1b873593);
+      for (let i = 0; i < C.n - 1; i++) {
+        if (C.KD[i] !== CK.ROCKS || Math.round(C.X[i] / S) !== cx || Math.round(C.Z[i] / S) !== cz) continue;
+        const tx = C.TX[i], tz = C.TZ[i], w = C.W[i] - 0.15, lineA = Math.sin(i * 0.23) * w * 0.55;
+        for (let k = 0; k < 4; k++) {
+          const a = (rk() * 2 - 1) * w, u = rk() * CSTEP;
+          if (Math.abs(a - lineA) < 0.45 && rk() < 0.8) continue;
+          const x = C.X[i] + tx * u - tz * a, z = C.Z[i] + tz * u + tx * a, h = this.ground(x, z);
+          const sc = 0.13 + rk() ** 2 * 0.34, sx = sc * (1 + rk() * 0.5), sy = sc * (0.5 + rk() * 0.35);
+          put(sc < 0.2 ? lists.pebble : lists.rock, x, h - sc * 0.3, z, sx, sy, sc, rk() * 6.28, null, 0.4);
+          colliders.push({ x, z, r: (sx + sc) * 0.45, top: h - sc * 0.3 + sy * 0.9 });
+        }
+      }
     }
     for (const pnl of fl.panels) blocked.push({ x: pnl.cx, z: pnl.cz, r: 1.6 });
     // race tape on stakes along both sides of the main downhill (keep trees out of its line)
@@ -929,7 +953,7 @@ export class Terrain {
       const x = ox + (rnd() - .5) * S, z = oz + (rnd() - .5) * S;
       const forest = this.n(x + 400, z, 1 / 38);
       if (rnd() > smooth(-0.25, 0.25, forest) * 0.9 + 0.05) continue;
-      if (this.trail(x, z) > 0.02 || Math.abs(this.n(x + 211.3, z - 97.1, 1 / 42)) < 0.1 || this.jump(x, z)[1] > 0 || isBlocked(x, z, 0.8)) continue;
+      if (this.trail(x, z) > 0.02 || Math.abs(this.pathN(x, z)) < 0.1 || this.jump(x, z)[1] > 0 || isBlocked(x, z, 0.8)) continue;
       const h = okSpot(x, z); if (h === null) continue;
       const sc = 0.7 + rnd() * 0.8, yaw = rnd() * 6.28;
       const [dry, rug] = this.biome(x, z);
