@@ -281,6 +281,15 @@ func _autotest(seconds: float) -> void:
 		if pedal: Input.action_press("pedal")
 		var straight := OS.get_environment("BMX_STRAIGHT") != ""   # tests: ride straight, no steering / hops
 		if OS.get_environment("BMX_CAM_ORBIT") != "": game.cam.orbit_t = float(OS.get_environment("BMX_CAM_ORBIT"))
+		if OS.get_environment("BMX_CAM_DIST") != "": game.cam.dist = float(OS.get_environment("BMX_CAM_DIST"))
+		if OS.get_environment("BMX_CAM_PROBE") != "":   # tests: the camera's offset from the rider, frame to frame
+			var off: Vector3 = game.cam.global_position - game.drawn_pos
+			if _probe.has("cam_off") and el > 1.0:
+				var jump: float = (off - _probe.cam_off).length()
+				_probe.cam_jump_max = maxf(_probe.get("cam_jump_max", 0.0), jump)
+				_probe.cam_dist_min = minf(_probe.get("cam_dist_min", 1e9), off.length())
+				_probe.cam_dist_max = maxf(_probe.get("cam_dist_max", 0.0), off.length())
+			_probe.cam_off = off
 		if pedal and not straight and int(el) % 6 == 3: Input.action_press("steer_left")
 		else: Input.action_release("steer_left")
 		if pedal and not straight and int(el * 2) % 7 == 0: Input.action_press("hop")

@@ -129,22 +129,27 @@ func update_cam(dt: float) -> void:
 		var need := 0.0
 		while need < 46 and pit + need < 84 and _blocked(pit + need, back, drawn.y):
 			need += 6
-		occ += (need - occ) * minf(1.0, dt * (5.0 if need > occ else 0.7))
+		occ += (need - occ) * minf(1.0, dt * (2.0 if need > occ else 0.7))   # rise gently: no hops at some angles
 		pit = minf(84, pit + occ)
 		var pr := deg_to_rad(pit)
 		var want_pos := target - back * dist * cos(pr) + Vector3(0, dist * sin(pr), 0)
 		if P.get("drift", false):
+			# the drone floats on a spring, but on its OFFSET from the rider (pos_s), not its world
+			# position: a world-space spring trailed ~10 m behind at speed, and when zoomed in that lag
+			# crossed the snap-back limit, so the camera kept jumping
+			var off_want := want_pos - target
 			if not pos_init:
-				pos_s = want_pos; pos_v = Vector3.ZERO; pos_init = true
+				pos_s = off_want; pos_v = Vector3.ZERO; pos_init = true
 			var w := 2.4
-			pos_v = (pos_v + (want_pos - pos_s) * w * w * dt) * exp(-2 * w * dt)
+			pos_v = (pos_v + (off_want - pos_s) * w * w * dt) * exp(-2 * w * dt)
 			pos_s += pos_v * dt
-			if pos_s.distance_to(want_pos) > dist * 1.5: pos_s = want_pos
-			global_position = pos_s
+			global_position = target + pos_s
 		else:
 			global_position = want_pos; pos_init = false
 		var gh: float = terrain.height(global_position.x, global_position.z) + 0.35
-		if global_position.y < gh: global_position.y = gh
+		if global_position.y < gh:
+			global_position.y = gh
+			if P.get("drift", false): pos_s.y = maxf(pos_s.y, gh - target.y); pos_v.y = maxf(pos_v.y, 0.0)
 	cam_fov += (fov_t - cam_fov) * minf(1.0, dt * (6.0 if P.get("mode", "") == "trackside" else 3.0))
 	fov = clampf(cam_fov * (1.0 + fov_boost / 34.0) + float(Settings.get_v("fov")), 5, 110)
 	var sk: float = st.shake * float(Settings.get_v("cam_shake"))
