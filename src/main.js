@@ -1277,10 +1277,12 @@ function physics(dt) {
     const latA = Math.abs(st.v * st.yawRate), turnDir = Math.sign(st.yawRate);   // +1 left turn -> throw right
     const carveK = clamp((latA - 1.5) / 6, 0, 1);
     const carve = carveK > 0.05;
-    // smoke: always a little on dirt, lots when skidding, carving or sprinting
-    st.dustAcc = (st.dustAcc || 0) + dt * (inWater ? 0 : dirt ? 6 + va * 2.2 + (skidFx ? 50 : 0) + carveK * 60 + st.pedal * (va < 7 ? 10 : 0)   // water: no smoke at all
-                                                       : sand ? 4 + va * 1.8 + (skidFx ? 40 : 0) + carveK * 45 + st.pedal * (va < 7 ? 6 : 0)
-                                                       : (skidFx ? 14 : 0) + va * 0.8 + carveK * 12);
+    // smoke: none from just rolling along; a light trail only when really fast (~30+ km/h),
+    // lots when skidding or carving, a little when stamping on the pedals from a standstill
+    const fastK = clamp((va - 8) / 6, 0, 1);
+    st.dustAcc = (st.dustAcc || 0) + dt * (inWater ? 0 : dirt ? fastK * 14 + (skidFx ? 50 : 0) + carveK * 60 + st.pedal * (va < 3 ? 6 : 0)   // water: no smoke at all
+                                                       : sand ? fastK * 10 + (skidFx ? 40 : 0) + carveK * 45 + st.pedal * (va < 3 ? 4 : 0)
+                                                       : (skidFx ? 14 : 0) + carveK * 12);
     while (st.dustAcc > 1) {
       st.dustAcc -= 1;
       // in a turn the cloud is flung sideways, out of the corner; on the straight it fans out behind
