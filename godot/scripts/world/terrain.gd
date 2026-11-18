@@ -53,6 +53,13 @@ var _wind_t: float = 0.0
 var _wind_ph: float = 0.0
 var _wind_dir := Vector3(0.8, 0, 0.6)
 var _wind_ws: float = 6.0
+## the endless trail: once the rider is within GROW_AHEAD m (along x) of the end of the course laid out
+## so far, a worker lays out GROW_STEP m more on a fork of the field; the main thread then takes it over
+const GROW_AHEAD := 2000.0
+const GROW_STEP := 3000.0
+var _grow_task: int = -1
+var _grow_gen: int = -1
+var _grow_box: Array = []   # the running grow job's result (each job has its own box)
 var last_finalize_ms: float = 0.0
 var last_build_ms: float = 0.0
 ## profiling (--hitch): main-thread ms of the last update_stream() call, chunks finalized in it, and
@@ -105,6 +112,9 @@ func set_seed(seed_in: int) -> void:
 	for k in _jobs:
 		_stale_tasks.append(_jobs[k]["task"])
 	_jobs.clear()
+	if _grow_task >= 0:
+		_stale_tasks.append(_grow_task)
+		_grow_task = -1
 	_rock_grid.clear()
 	_col_grid.clear()
 	_broken.clear()
@@ -287,6 +297,7 @@ func update_stream(px: float, pz: float, budget_ms: float = 4.0) -> void:
 	last_finalized = 0
 	fin_parts.fill(0.0)
 	_focus = Vector2(px, pz)
+	_update_grow(px)
 	var ccx := WorldRng.jround(px / SIZE)
 	var ccz := WorldRng.jround(pz / SIZE)
 	var R := RADIUS
@@ -378,6 +389,37 @@ func _dispatch(k: Vector2i, urgent: bool = false) -> void:
 	var b := TerrainChunkBuilder.new(query_field().fork(), k.x, k.y, seg, _gen)
 	var task := WorkerThreadPool.add_task(b.run, urgent, "terrain chunk")
 	_jobs[k] = {"task": task, "builder": b}
+
+
+func _update_grow(px: float) -> void:
+	if _grow_task >= 0:
+		if not WorkerThreadPool.is_task_completed(_grow_task):
+			return
+		WorkerThreadPool.wait_for_task_completion(_grow_task)
+		_grow_task = -1
+		if _grow_gen == _gen and not _grow_box.is_empty():
+			var t0 := Time.get_ticks_usec()
+			field.adopt_course(_grow_box[0])
+			if fcs != null:
+				fcs.rebind_course(field)
+			print("TRAIL grown to x=%.0f (%d points), adopted in %.1f ms" % [field.course.end_x(), field.course.n,
+				(Time.get_ticks_usec() - t0) / 1000.0])
+		_grow_box = []
+		return
+	var end := field.course.end_x()
+	if px < end - GROW_AHEAD:
+		return
+	var src := field
+	var to := end + GROW_STEP
+	_grow_gen = _gen
+	var box := []
+	_grow_box = box
+	_grow_task = WorkerThreadPool.add_task(func():
+		var t0 := Time.get_ticks_usec()
+		var g := src.fork()
+		g.grow_course(to)
+		box.append(g)
+		print("TRAIL grow on worker: %.0f ms" % ((Time.get_ticks_usec() - t0) / 1000.0)), false, "trail grow")
 
 
 func _reap_stale(block: bool) -> void:

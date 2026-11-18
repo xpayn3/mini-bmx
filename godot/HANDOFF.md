@@ -97,6 +97,14 @@ F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A 
   GDScript `TerrainField` is the reference: `tools/terrain_cs_cmp.gd` must report **EXACT** (≈736k
   comparisons, 0 mismatches). Switch: `Terrain.USE_CS`, env `BMX_TERRAIN_GD=1` forces GDScript.
 - `Terrain.new(seed)` — pass the seed to the constructor (calling `set_seed` after builds the world twice).
+- **Endless trail** (`trail_course.gd`): the mountain descent (1.4 km), then the trail runs on through the
+  hills for ever, twisting (tight road bends, esses, switchbacks, rock chutes, jump lines), its height
+  following the smoothed land. `TerrainField.COURSE_LEN` (4 km) is laid out at setup; when the rider is within
+  `Terrain.GROW_AHEAD` (2 km), a worker grows it by `GROW_STEP` (3 km) into a NEW `TrailCourse` on a fork
+  (`grow_course`, ~0.1–0.4 s), the main thread swaps it in (`adopt_course` + C# `rebind_course`, ~1 ms).
+  Already laid-out trail, marking and route features never change (marking has its own RNG; stakes are
+  stored in course order). Chunks read rocks / stakes / fences from per-chunk buckets, route features are
+  binary-searched — nothing scans the whole course. `tools/trail_grow_probe.gd` checks all of it.
 
 ### Rider
 - Procedural meshes posed every frame from the bike's grips/pedals with 2-bone IK; style dictionary
@@ -173,6 +181,7 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `BMX_GARAGE_CAM=orbit,pitch,dist`, `BMX_POSE=key=val,...` | garage camera / pose override |
 | `BMX_TYRE_PROBE=1` | measures tyre-to-floor / tyre-to-drum gaps for 12 wheel setups, then quits |
 | `-s res://tools/terrain_cs_cmp.gd --headless` | C# vs GDScript terrain must be EXACT |
+| `-s res://tools/trail_grow_probe.gd --headless` | grows the endless trail 6×: old trail unchanged, C# = GDScript, timings; must say `PASS` |
 | `-s res://tools/wood_edge_probe.gd --headless` | drives angled lines onto every wooden ramp; must report `walls=0` |
 | `BMX_AUDIO_PROBE=1` | prints the freewheel's click rate / volume / output peak twice a second |
 | `BMX_COAST=1` | autotest alternates 3 s pedalling / 3 s coasting (freewheel tests) |
