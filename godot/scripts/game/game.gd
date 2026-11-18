@@ -365,7 +365,6 @@ func burst(pos: Vector3, n: int, s: int, power: float) -> void:
 		if i % 2 == 0:
 			var cc: Color = DIRT_CHUNK if s == 1 else (dc * 0.8 if s == 3 else (GRASS_CHUNK if randf() < 0.5 else ROCK_CHUNK))
 			fx.chunk(Vector3(pos.x, pos.y + 0.05, pos.z), Vector3(cos(a) * r * 0.9, 1.2 + randf() * 1.8 * power, sin(a) * r * 0.9), cc, 0.028)
-	if audio: audio.thud(power)
 
 func smash(c: Dictionary, vel: Vector3, pos: Vector3) -> bool:
 	if not terrain.break_collider(c, vel):
@@ -377,7 +376,7 @@ func smash(c: Dictionary, vel: Vector3, pos: Vector3) -> bool:
 		fx.chunk(Vector3(c.x, pos.y + 0.3 + randf() * 0.6, c.z), Vector3(vel.x * 0.4 + (randf() - .5) * 3, 1 + randf() * 2.5, vel.z * 0.4 + (randf() - .5) * 3), col, 0.025)
 	for k in 3:
 		fx.puff(Vector3(c.x, pos.y + 0.4, c.z), Vector3((randf() - .5) * 1.5, 0.4 + randf() * 0.5, (randf() - .5) * 1.5), Color("cdb894"), 0.35, 1.4, 0.4)
-	if audio: audio.crunch()
+	if audio and not c.get("tape", false): audio.crunch()
 	return true
 
 func rock_chips(c: Dictionary) -> void:

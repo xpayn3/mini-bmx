@@ -24,6 +24,14 @@ var lp_r2 := 0.0
 var hp_s := 0.0
 var bp_s := 0.0
 var lp_wt := 0.0
+var wind_tone := 0.03   # wind low-pass coefficient: opens up (brighter) with speed
+var gust_ph := 0.0
+var gust_ph2 := 0.0
+var lp_wR := 0.0
+var lp_wR2 := 0.0
+var bp_lo := 0.0
+var bp_hi := 0.0
+var whistle := 0.0
 var tick_ph := 0.0
 var tick_env := 0.0
 var pan := 0.0
@@ -51,7 +59,11 @@ func update_audio(dt: float) -> void:
 	var va := absf(st.v)
 	var on_ground := not st.air and not st.crash_on
 	var k := minf(1.0, dt * 8)
-	wind += (clampf(va * va / 260.0, 0, 1) * 0.55 - wind) * k
+	# wind: louder AND brighter the faster you go, a touch more in the air (nothing else masks it)
+	var wt := clampf(va * va / 260.0, 0, 1) * (0.62 if st.air else 0.55)
+	wind += (wt - wind) * minf(1.0, dt * 4)
+	wind_tone += ((0.018 + clampf(va / 22.0, 0, 1) * 0.09) - wind_tone) * k
+	whistle += ((clampf((va - 9.0) / 10.0, 0, 1) * 0.12) - whistle) * k
 	var surf_amp: float = [0.32, 0.22, 0.0, 0.42][st.surf]
 	roll += ((clampf(va / 12.0, 0, 1) * surf_amp if on_ground else 0.0) - roll) * k
 	roll_tone += (([0.12, 0.2, 0.1, 0.06][st.surf]) - roll_tone) * k
@@ -68,15 +80,33 @@ func _fill() -> void:
 	if n <= 0: return
 	var buf := PackedVector2Array()
 	buf.resize(n)
-	var aw := 0.04       # wind low-pass
+	var aw := wind_tone  # wind low-pass, brighter with speed
 	var ar := roll_tone  # roll low-pass
 	var tick_inc := tick_rate / RATE
+	# slow gusts: two incommensurate LFOs so the wind breathes instead of hissing flat
+	var g_inc := 0.23 / RATE
+	var g_inc2 := 0.61 / RATE
+	var wl := 0.0
+	var wr := 0.0
 	for i in n:
+		gust_ph = fmod(gust_ph + g_inc, 1.0)
+		gust_ph2 = fmod(gust_ph2 + g_inc2, 1.0)
+		var gust := 0.78 + 0.16 * sin(TAU * gust_ph) + 0.08 * sin(TAU * gust_ph2)
+		# wind: two-pole low-passed noise, separate noise per ear for a wide stereo rush
 		var w := randf() * 2.0 - 1.0
-		# wind: two-pole low-passed noise
 		lp_w += (w - lp_w) * aw
 		lp_w2 += (lp_w - lp_w2) * aw
-		var s := lp_w2 * wind * 2.5
+		var wn := randf() * 2.0 - 1.0
+		lp_wR += (wn - lp_wR) * aw
+		lp_wR2 += (lp_wR - lp_wR2) * aw
+		# soft whistle past the helmet at speed: band-passed noise
+		bp_hi += (w - bp_hi) * 0.18
+		bp_lo += (bp_hi - bp_lo) * 0.06
+		var wh := (bp_hi - bp_lo) * whistle * (0.6 + 0.4 * sin(TAU * gust_ph2 * 3.0))
+		var wamp := wind * 2.6 / sqrt(maxf(aw, 0.02) / 0.03)  # keep loudness even as it brightens
+		wl = lp_w2 * wamp * gust + wh
+		wr = lp_wR2 * wamp * (1.56 - gust) + wh
+		var s := 0.0
 		# tyre roll: low rumble
 		var w2 := randf() * 2.0 - 1.0
 		lp_r += (w2 - lp_r) * ar
@@ -92,7 +122,7 @@ func _fill() -> void:
 		if tick_env > 0.001:
 			s += (randf() * 2.0 - 1.0) * tick_env * tick_amp
 			tick_env *= 0.82
-		buf[i] = Vector2(s, s)
+		buf[i] = Vector2(s + wl, s + wr)
 	# one-shots, mixed on top
 	for sh in shots:
 		var kind: String = sh[0]
