@@ -365,10 +365,7 @@ func burst(pos: Vector3, n: int, s: int, power: float) -> void:
 		if i % 2 == 0:
 			var cc: Color = DIRT_CHUNK if s == 1 else (dc * 0.8 if s == 3 else (GRASS_CHUNK if randf() < 0.5 else ROCK_CHUNK))
 			fx.chunk(Vector3(pos.x, pos.y + 0.05, pos.z), Vector3(cos(a) * r * 0.9, 1.2 + randf() * 1.8 * power, sin(a) * r * 0.9), cc, 0.028)
-<<<<<<< HEAD
 	# no thud sound on landings or knocks (the user found it annoying); smashing things still crunches
-=======
->>>>>>> claude/wind-sound-landing-audio-731cd2
 
 func smash(c: Dictionary, vel: Vector3, pos: Vector3) -> bool:
 	if not terrain.break_collider(c, vel):
