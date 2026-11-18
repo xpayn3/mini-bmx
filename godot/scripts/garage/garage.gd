@@ -24,6 +24,20 @@ var rider_on := false
 var rider_pose := {}
 var rider_preview := "pedal"
 var tab_buttons := {}
+# rollers: three drums in a frame; with the rider on, the bike stands on them and pedals in place
+const DRUM_R := 0.055
+const DRUM_Y := 0.075                  # drum centre height
+const ROLLER_TOP := DRUM_Y + DRUM_R    # where the tyres sit
+var rollers: Node3D = null
+var drums: Array[Node3D] = []
+var bike_x := 0.0
+var ride_y := ROLLER_TOP
+const DRUM_GAP := 0.13   # rear drums sit this far either side of the rear axle
+var wheel_ang := 0.0
+# the rider standing next to the bike (Kit tab)
+var stand_rider: Rider = null
+var stand_on := false
+const STAND_AT := Vector3(1.75, 0.0, 0.55)
 var preview_crank := 0.6
 const SLAT := 0.2
 const DOOR_DELAY := 1.0     # s (after the garage is on screen) before the door starts to roll up
@@ -62,6 +76,7 @@ const VIEWS := {
 	"suspension": [1.0, 10.0, 2.2, Vector3(0.05, 0.6, 0)],
 	"drive": [PI / 2 + 0.3, 6.0, 2.0, Vector3(-0.3, 0.35, 0)],
 	"rider": [0.0, 7.0, 4.3, Vector3(-0.05, 1.0, 0)],
+	"kit": [0.25, 4.0, 3.2, Vector3(1.55, 1.0, 0.55)],
 }
 
 func _ready() -> void:
@@ -71,8 +86,9 @@ func _ready() -> void:
 	if rcf.load(RiderPanels.PATH) == OK:
 		rider_on = rcf.get_value("garage", "rider_on", false)
 		rider_preview = rcf.get_value("garage", "preview", "pedal")
+		stand_on = rcf.get_value("garage", "stand_on", true)
 	if OS.get_environment("BMX_GARAGE_RIDER") != "":   # tests: rider on, a preview, Rider tab
-		rider_on = true; rider_preview = OS.get_environment("BMX_GARAGE_RIDER")
+		rider_on = true; rider_preview = OS.get_environment("BMX_GARAGE_RIDER"); stand_on = true
 	if not PREVIEWS.has(rider_preview): rider_preview = "pedal"
 	_build_room()
 	add_child(cam)
@@ -81,7 +97,7 @@ func _ready() -> void:
 	_rebuild_bike()
 	add_child(ui)
 	_build_ui()
-	_set_tab("rider" if OS.get_environment("BMX_GARAGE_RIDER") != "" else "paint")
+	_set_tab(OS.get_environment("BMX_GARAGE_TAB") if OS.get_environment("BMX_GARAGE_TAB") != "" else ("rider" if OS.get_environment("BMX_GARAGE_RIDER") != "" else "paint"))
 
 # ================================================================ the room
 func _mat(c: Color, rough := 0.8, metal := 0.0) -> StandardMaterial3D:
@@ -331,10 +347,15 @@ func _rebuild_bike() -> void:
 	if rig.susp:
 		for i in 60:
 			rig.susp.update(1.0 / 60, {"air": false, "load": 0.0, "brake": 0.0, "bumpF": 0.0, "bumpR": 0.0})
-	rig.pose(-(L / 2 - bb), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -0.25, 0.0, 0.0, 0.6)
+	bike_x = -(L / 2 - bb)
+	ride_y = DRUM_Y + sqrt(pow(rig.wheel_rr + DRUM_R, 2) - DRUM_GAP * DRUM_GAP) - rig.wheel_rr
+	rig.pose(bike_x, ride_y if rider_on else 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 if rider_on else -0.25, 0.0, 0.0, 0.6)
 	rider = null
+	_build_rollers(L, bb)
 	if rider_on:
 		_add_rider()
+	_update_stand_rider()
+	_rider_visibility()
 	for mi in rig.find_children("*", "MeshInstance3D", true, false):
 		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 
@@ -356,6 +377,104 @@ func _add_rider() -> void:
 		rider.set_helmet(helmet)
 	hs.free()
 
+## training rollers: an alloy frame with two drums under the rear tyre and one under the front;
+## only there while the rider is on (the bike stands on them and spins in place)
+func _build_rollers(L: float, bb: float) -> void:
+	if rollers: rollers.queue_free()
+	rollers = null
+	drums.clear()
+	if not rider_on: return
+	rollers = Node3D.new()
+	rollers.name = "Rollers"
+	add_child(rollers)
+	var alu := _mat(Color(0.72, 0.74, 0.77), 0.3, 0.9)
+	var drum_m := _mat(Color(0.12, 0.12, 0.13), 0.35, 0.4)
+	var black := _mat(Color(0.05, 0.05, 0.06), 0.6)
+	var rear_x := bike_x - bb
+	var front_x := bike_x + (L - bb)
+	var x0 := rear_x - 0.32
+	var x1 := front_x + 0.22
+	for sz in [-0.26, 0.26]:   # side rails
+		var rail := _box(Vector3(x1 - x0, 0.035, 0.05), Vector3((x0 + x1) / 2, 0.03, sz), alu)
+		rail.reparent(rollers)
+	for x in [x0 + 0.03, x1 - 0.03]:   # end bars + rubber feet
+		_box(Vector3(0.05, 0.035, 0.56), Vector3(x, 0.03, 0), alu).reparent(rollers)
+		for sz in [-0.26, 0.26]:
+			_box(Vector3(0.08, 0.015, 0.08), Vector3(x, 0.0075, sz), black).reparent(rollers)
+	# a drum touches the tyre where the wheel circle meets ROLLER_TOP: rear pair straddles the axle
+	for x in [rear_x - DRUM_GAP, rear_x + DRUM_GAP, front_x]:
+		var d := Node3D.new()
+		d.position = Vector3(x, DRUM_Y if x != front_x else ride_y - DRUM_R, 0)
+		rollers.add_child(d)
+		var c := CylinderMesh.new(); c.top_radius = DRUM_R; c.bottom_radius = DRUM_R; c.height = 0.44
+		var mi := MeshInstance3D.new(); mi.mesh = c; mi.material_override = drum_m
+		mi.rotation = Vector3(PI / 2, 0, 0)
+		d.add_child(mi)
+		for sz in [-0.24, 0.24]:   # end caps / bearings
+			var cap := CylinderMesh.new(); cap.top_radius = 0.03; cap.bottom_radius = 0.03; cap.height = 0.03
+			var ci := MeshInstance3D.new(); ci.mesh = cap; ci.material_override = alu
+			ci.rotation = Vector3(PI / 2, 0, 0); ci.position = Vector3(0, 0, sz)
+			d.add_child(ci)
+		drums.append(d)
+	# the belt from the rear drum to the front one, on the drive side
+	var belt := _box(Vector3(front_x - (rear_x + 0.13), 0.008, 0.012), Vector3((front_x + rear_x + 0.13) / 2, DRUM_Y + DRUM_R * 0.6, 0.235), black)
+	belt.reparent(rollers)
+	for mi in rollers.find_children("*", "MeshInstance3D", true, false):
+		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+
+## wheels and drums spin with the pedalling (on the rollers the bike goes nowhere)
+func _spin_on_rollers(dt: float, speed: float) -> void:
+	if rollers == null: return
+	wheel_ang += speed / rig.wheel_rr * dt
+	rig.wheel_r.rotation.z = -wheel_ang
+	rig.wheel_f.rotation.z = -wheel_ang * rig.wheel_rr / rig.wheel_rf
+	for d in drums:
+		d.rotation.z += speed / DRUM_R * dt   # drums turn the other way to the tyres
+
+# ---------------------------------------------------------------- the rider standing next to the bike
+func _update_stand_rider() -> void:
+	if stand_on and stand_rider == null:
+		stand_rider = Rider.new()
+		add_child(stand_rider)
+		stand_rider.position = STAND_AT
+		stand_rider.rotation.y = -PI / 2 + 0.35   # facing the camera, turned a little toward the bike
+		stand_rider.set_look(RiderPanels.load_look())
+		stand_rider.set_style(STAND_POSE)
+		# a soft warm fill from in front, so the kit colours read against the bright door
+		var fill := OmniLight3D.new()
+		fill.position = Vector3(0.9, 1.5, 0.6)   # rider space: in front of them, above head height
+		fill.light_color = Color(1.0, 0.9, 0.8); fill.light_energy = 1.1; fill.omni_range = 3.5
+		fill.light_volumetric_fog_energy = 0.0
+		stand_rider.add_child(fill)
+		var hs: Node3D = load("res://assets/helmet.glb").instantiate()
+		var helmet := hs.find_child("helmet", true, false)
+		if helmet:
+			helmet.get_parent().remove_child(helmet)
+			stand_rider.set_helmet(helmet)
+		hs.free()
+	elif not stand_on and stand_rider:
+		stand_rider.queue_free()
+		stand_rider = null
+
+## standing upright: the riding pose's numbers turned into a relaxed stand (see Rider.update_pose)
+const STAND_POSE := {"hipX": 0.17, "hipY": 0.16, "lean": -0.66, "crouch": 0.0, "standPedal": 0.0, "sway": 0.0,
+	"elbowsOut": -0.2, "kneesOut": 0.0, "stance": 0.0, "headTilt": 0.08, "headTurn": 0.0, "hipSway": 0.0}
+
+## one rider at a time: on the Kit tab they stand next to the bike, everywhere else they ride it
+func _rider_visibility() -> void:
+	var kit := tab == "kit" and stand_on
+	if stand_rider: stand_rider.visible = kit
+	if rider and is_instance_valid(rider): rider.visible = not kit
+
+func _pose_stand_rider(dt: float) -> void:
+	if stand_rider == null: return
+	var breathe := sin(hand_t * 1.6) * 0.006
+	stand_rider.update_pose(dt, {"footL": Vector3(0.0, 0.0, -0.13), "footR": Vector3(0.02, 0.0, 0.13),
+		"handL": Vector3(0.02, 0.83 + breathe, -0.29), "handR": Vector3(0.04, 0.83 + breathe, 0.29),
+		"v": 0.0, "lean": 0.0, "steer": 0.0, "yawRate": 0.0, "counter": 0.0, "rockRoll": 0.0, "headRoll": 0.0,
+		"absorb": breathe, "pitch": 0.0, "bodyLevel": 0.85, "attackDrop": 0.0, "pedal": 0.0, "sprint": 0.0,
+		"crank": 0.0, "air": 0.0, "compress": 0.0, "hipShift": 0.0, "t": hand_t})
+
 const PREVIEWS := {
 	"coast": {"label": "Coasting", "pedal": 0.0, "pitch": 0.0, "air": 0.0, "compress": 0.0, "v": 4.0},
 	"pedal": {"label": "Pedalling", "pedal": 1.0, "pitch": 0.0, "air": 0.0, "compress": 0.0, "v": 6.0},
@@ -368,9 +487,13 @@ func _pose_rider(dt: float) -> void:
 	if rider == null or not is_instance_valid(rider): return
 	var P: Dictionary = PREVIEWS[rider_preview]
 	if P.pedal > 0.5:
-		preview_crank += dt * (7.0 if P.get("sprint", 0.0) > 0 else 5.0)
+		var cad := 7.0 if P.get("sprint", 0.0) > 0 else 5.0
+		preview_crank += dt * cad
 		rig.crank_n.rotation.z = -preview_crank
 		for pv in rig.pedal_pivots: pv.rotation.z = preview_crank
+		_spin_on_rollers(dt, cad * 2.78 * rig.wheel_rr * 0.55)   # wheel speed from the crank (gear ~2.8)
+	else:
+		_spin_on_rollers(dt, 2.0)   # coasting: the wheels keep turning on the drums
 	var lt := rig.limb_targets()
 	rider.update_pose(dt, {"footL": lt.footL, "footR": lt.footR, "handL": lt.handL, "handR": lt.handR,
 		"v": P.v, "lean": 0.0, "steer": 0.0, "yawRate": 0.0, "counter": 0.0, "rockRoll": 0.0, "headRoll": 0.0,
@@ -415,6 +538,7 @@ func _process(dt: float) -> void:
 	# from a few unrelated sine waves (never repeats visibly, never jerks)
 	hand_t += dt
 	_pose_rider(dt)
+	_pose_stand_rider(dt)
 	var t := hand_t
 	cam.position += cam.basis * Vector3(
 		(sin(t * 0.53) + 0.6 * sin(t * 1.31 + 1.7)) * 0.018,
@@ -458,7 +582,7 @@ func _build_ui() -> void:
 	var tabs := HBoxContainer.new()
 	tabs.add_theme_constant_override("separation", 6)
 	var grp := ButtonGroup.new()
-	for t in [["paint", "Paint"], ["logos", "Logos"], ["wheels", "Wheels"], ["suspension", "Suspension"], ["drive", "Gears"], ["rider", "Rider"]]:
+	for t in [["paint", "Paint"], ["logos", "Logos"], ["wheels", "Wheels"], ["suspension", "Suspension"], ["drive", "Gears"], ["rider", "Rider"], ["kit", "Kit"]]:
 		var b := Button.new()
 		b.text = t[1]; b.toggle_mode = true; b.button_group = grp
 		b.button_pressed = t[0] == tab
@@ -556,6 +680,7 @@ func _set_tab(t: String) -> void:
 		auto_spin = false
 	tab = t
 	if tab_buttons.has(t): tab_buttons[t].button_pressed = true   # (pressed, not toggled, drives _set_tab: no loop)
+	_rider_visibility()
 	for c in body.get_children(): c.queue_free()
 	match t:
 		"paint": _paint_page()
@@ -564,6 +689,7 @@ func _set_tab(t: String) -> void:
 		"suspension": _susp_page()
 		"drive": _drive_page()
 		"rider": _rider_page()
+		"kit": _kit_page()
 
 # ---------------------------------------------------------------- widgets
 func _h(text: String) -> void:
@@ -784,17 +910,17 @@ func _save_rider_ui() -> void:
 	var cf := ConfigFile.new(); cf.load(RiderPanels.PATH)
 	cf.set_value("garage", "rider_on", rider_on)
 	cf.set_value("garage", "preview", rider_preview)
+	cf.set_value("garage", "stand_on", stand_on)
 	cf.save(RiderPanels.PATH)
 
 func _rider_page() -> void:
 	var on := CheckButton.new()
-	on.text = "  Rider on the bike"
+	on.text = "  Rider on the bike (on rollers)"
 	on.button_pressed = rider_on
 	on.add_theme_font_size_override("font_size", 17)
 	on.toggled.connect(func(v):
 		rider_on = v; _save_rider_ui()
-		if v and rider == null: _add_rider()
-		elif not v and rider: rider.queue_free(); rider = null
+		_rebuild_bike()   # onto / off the rollers
 		_set_tab.call_deferred("rider"))
 	body.add_child(on)
 	if not rider_on:
@@ -832,6 +958,70 @@ func _rider_page() -> void:
 			s.value_changed.connect(func(v): vl.text = fmt % v; rider_pose[key] = v; _apply_rider_pose())
 			hb.add_child(s); hb.add_child(vl)
 			_row(r[1], hb)
+
+## Kit: the rider stands beside the bike; kits and a colour for every part of their gear
+func _kit_page() -> void:
+	var on := CheckButton.new()
+	on.text = "  Rider next to the bike"
+	on.button_pressed = stand_on
+	on.add_theme_font_size_override("font_size", 17)
+	on.toggled.connect(func(v):
+		stand_on = v; _save_rider_ui(); _update_stand_rider(); _rider_visibility())
+	body.add_child(on)
+	var look := RiderPanels.load_look()
+	_h("KITS")
+	var kits := GridContainer.new(); kits.columns = 3
+	kits.add_theme_constant_override("h_separation", 6); kits.add_theme_constant_override("v_separation", 6)
+	for k in RiderPanels.KITS:
+		var kit_look: Dictionary = Rider.DEFAULT_LOOK.duplicate()
+		kit_look.merge(k[1], true)
+		var b := Button.new()
+		b.text = k[0]
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.custom_minimum_size.y = 52
+		b.add_theme_font_size_override("font_size", 14)
+		# a strip of the kit's colours along the bottom of the button
+		var strip := HBoxContainer.new()
+		strip.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+		strip.offset_top = -10; strip.offset_bottom = -4; strip.offset_left = 10; strip.offset_right = -10
+		strip.add_theme_constant_override("separation", 0)
+		strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		for part in ["shell", "jersey", "pants", "gloves", "lens"]:
+			var c := ColorRect.new(); c.color = Color(kit_look[part]); c.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			strip.add_child(c)
+		b.add_child(strip)
+		b.pressed.connect(func(): _set_look(kit_look); _set_tab("kit"))
+		kits.add_child(b)
+	body.add_child(kits)
+	for g in RiderPanels.LOOK_ROWS:
+		_h(g[0].to_upper())
+		for row in g[1]:
+			var key: String = row[0]
+			var hb := HBoxContainer.new()
+			hb.add_theme_constant_override("separation", 4)
+			for hex in row[2]:
+				var b := Button.new()
+				b.custom_minimum_size = Vector2(24, 24)
+				var sel: bool = str(look[key]).to_lower() == str(hex).to_lower()
+				b.add_theme_stylebox_override("normal", UITheme.box(Color(hex), 12, 0, Color.WHITE if sel else Color(1, 1, 1, 0.2), 3 if sel else 1))
+				b.add_theme_stylebox_override("hover", UITheme.box(Color(hex), 12, 0, UITheme.ACCENT, 2))
+				b.add_theme_stylebox_override("pressed", UITheme.box(Color(hex), 12, 0, UITheme.ACCENT, 3))
+				b.focus_mode = Control.FOCUS_NONE
+				b.pressed.connect(func(): look[key] = hex; _set_look(look); _set_tab("kit"))
+				hb.add_child(b)
+			var cp := ColorPickerButton.new()
+			cp.color = Color(look[key]); cp.edit_alpha = false
+			cp.custom_minimum_size = Vector2(34, 24)
+			cp.color_changed.connect(func(c): look[key] = "#" + c.to_html(false); _set_look(look))
+			hb.add_child(cp)
+			_row(row[1], hb)
+	body.add_child(UITheme.button("Reset kit", func(): _set_look(Rider.DEFAULT_LOOK.duplicate()); _set_tab("kit"), 14))
+
+func _set_look(l: Dictionary) -> void:
+	RiderPanels.save_look(l)
+	if stand_rider: stand_rider.set_look(l)
+	if rider: rider.set_look(l)
 
 func _apply_rider_pose() -> void:
 	if rider: rider.set_style(rider_pose)
