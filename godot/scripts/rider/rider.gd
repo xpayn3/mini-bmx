@@ -51,6 +51,7 @@ var shoulder_sph: Array[MeshInstance3D] = []
 var pad_cap: Array[MeshInstance3D] = []     # shoulder pads: the cap over the joint
 var pad_arm: Array[MeshInstance3D] = []     # and the plate overlapping it down the upper arm
 var pad_mat: StandardMaterial3D
+var cloth: RiderCloth = null   # the loose jersey hem + sleeve cuffs (enable_cloth)
 var thigh: Array[MeshInstance3D] = []
 var shin: Array[MeshInstance3D] = []
 var knee: Array[MeshInstance3D] = []
@@ -431,6 +432,15 @@ func set_style(s: Dictionary) -> void:
 		poles_arm.append(Vector3(-0.4 + 0.25 * eo, -0.5 + 0.4 * eo - float(style.elbowsDown), sd).normalized())
 
 
+## real cloth for the loose parts of the jersey (needs the .NET build; quietly skipped otherwise)
+func enable_cloth() -> void:
+	if cloth != null or not RiderCloth.available():
+		return
+	var m: StandardMaterial3D = kit.jersey[0]
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED   # the cloth is a single sheet: both sides show
+	cloth = RiderCloth.new(self, m)
+	add_child(cloth)
+
 # ---------------- posing helpers ----------------
 
 ## shoulder pads for one side: the cap sits over the joint facing out and up (away from the arm), long
@@ -526,6 +536,8 @@ func pose_ragdoll(P: Array) -> void:
 	var hp := [P[9], P[12]]
 	var kn := [P[10], P[13]]
 	var ft := [P[11], P[14]]
+	for i in mini(P.size(), J.size()):   # the cloth reads J: in a crash the rider sits at the world origin
+		J[i] = P[i]
 	var body_r: Vector3 = hp[1] - hp[0]
 	var bb := _basis_from(ch - pe, body_r)
 	pelvis_mesh.transform = Transform3D(bb, pe)

@@ -248,6 +248,8 @@ func _autotest(seconds: float) -> void:
 		GameState.seed = int(OS.get_environment("BMX_SEED"))
 		await _new_game()
 	_start_ride()
+	if OS.get_environment("BMX_CLOTH_PROBE") != "":
+		var probe = load("res://tools/cloth_probe.gd").new(); probe.game = game; add_child(probe)
 	if OS.get_environment("BMX_CAM") != "": game.cam.set_mode(OS.get_environment("BMX_CAM"))
 	var pedal := OS.get_environment("BMX_IDLE") == ""
 	if OS.get_environment("BMX_PANEL") != "": game.hud._toggle_side(OS.get_environment("BMX_PANEL"))
