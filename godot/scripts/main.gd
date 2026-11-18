@@ -163,7 +163,7 @@ func _start_ride() -> void:
 # ---------------------------------------------------------------- pause
 func _unhandled_input(e: InputEvent) -> void:
 	if not e.is_action_pressed("pause") or e.is_echo(): return
-	if settings_open or garage: return
+	if is_instance_valid(settings_open) or garage: return
 	if state == RIDING: _pause()
 	elif state == PAUSED: _resume()
 	get_viewport().set_input_as_handled()
@@ -203,16 +203,19 @@ func _resume() -> void:
 	get_tree().paused = false
 
 func _open_settings() -> void:
-	if settings_open: return
+	if is_instance_valid(settings_open): return
 	var dim := ColorRect.new()
 	dim.color = Color(0, 0, 0, 0.35)
 	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
 	ui.add_child(dim)
 	settings_open = load("res://scripts/ui/settings_menu.gd").new()
 	if pause_menu: pause_menu.visible = false
-	settings_open.closed.connect(func():
-		dim.queue_free(); settings_open = null
-		if pause_menu: pause_menu.visible = true)
+	# clean up when the menu actually leaves the tree, however it was closed: a missed `closed`
+	# signal used to leave this dim up (dark screen, every click swallowed) and Esc blocked
+	settings_open.tree_exiting.connect(func():
+		if is_instance_valid(dim): dim.queue_free()
+		settings_open = null
+		if is_instance_valid(pause_menu): pause_menu.visible = true)
 	ui.add_child(settings_open)
 
 func _show_controls() -> void:
@@ -267,6 +270,18 @@ func _autotest(seconds: float) -> void:
 		_pause()
 		if OS.get_environment("BMX_PAUSE") == "settings": _open_settings()
 		for i in 10: await get_tree().process_frame
+		if OS.get_environment("BMX_PAUSE") == "preset":   # pause > settings > a quality preset > Done > resume
+			_open_settings()
+			await get_tree().process_frame
+			settings_open._preset(2)
+			for i in 5: await get_tree().process_frame
+			settings_open._close()
+			for i in 3: await get_tree().process_frame
+			var dims := ui.get_children().filter(func(c): return c is ColorRect and c != fade).size()
+			print("AUTOTEST pause/settings: settings_open=%s dim_left=%d pause_menu_visible=%s" % [is_instance_valid(settings_open), dims, pause_menu.visible if is_instance_valid(pause_menu) else "gone"])
+			_resume()
+			await get_tree().process_frame
+			print("AUTOTEST resumed: paused=%s state_riding=%s" % [get_tree().paused, state == RIDING])
 	var st := game.phys
 	print("AUTOTEST avg triangles/frame=%dk draw calls=%d" % [tris / maxi(frames, 1) / 1000, draws / maxi(frames, 1)])
 	print("AUTOTEST frames=%d fps=%.1f pos=(%.1f, %.1f, %.1f) v=%.2f crash=%s sane=%s" % [frames, frames / seconds, st.x, st.y, st.z, st.v, st.crash_on, st.is_sane()])

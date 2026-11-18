@@ -13,6 +13,14 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	custom_minimum_size = Vector2(820, 640)
 	UITheme.centre.call_deferred(self)
+	_build(0)
+
+## (Re)build the contents in place. The menu node itself is never replaced: whoever opened it keeps
+## its connection to `closed` (replacing the node used to lose that, leaving the pause screen dark).
+func _build(tab: int) -> void:
+	for c in get_children():
+		remove_child(c); c.queue_free()
+	_wait_action = ""
 	var vb := VBoxContainer.new()
 	vb.add_theme_constant_override("separation", 12)
 	add_child(vb)
@@ -27,6 +35,7 @@ func _ready() -> void:
 	vb.add_child(tabs)
 	for page in [_display(), _graphics(), _audio(), _gameplay(), _interface(), _controls()]:
 		tabs.add_child(page.get_parent())   # the page's ScrollContainer
+	tabs.current_tab = tab
 
 func _close() -> void:
 	closed.emit()
@@ -143,12 +152,7 @@ func _preset(level: int) -> void:
 	_reopen(1)
 
 func _reopen(tab: int) -> void:
-	var p := get_parent()
-	var m = load("res://scripts/ui/settings_menu.gd").new()
-	m.closed.connect(func(): closed.emit())
-	p.add_child(m)
-	m.get_child(0).get_child(1).current_tab = tab
-	queue_free()
+	_build.call_deferred(tab)   # deferred: the button that asked is still mid-signal
 
 func _gameplay() -> Control:
 	var p := _page("Gameplay")
