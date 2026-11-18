@@ -8,6 +8,9 @@ const WATER := -2.2
 const JC := 34.0
 const HILL_TOP := 105.0
 const HILL_LEN := 1400.0
+## the trail never ends: it runs on through the hills after the mountain. The first COURSE_LEN m are laid
+## out at setup; Terrain grows it (grow_course) on a worker thread well before the rider gets near the end.
+const COURSE_LEN := 4000.0
 const MTN_W := 150.0
 const QR := 19.0
 const CELL := 16.0
@@ -104,7 +107,7 @@ var c_start := PackedInt32Array()
 var c_items := PackedInt32Array()
 # per segment i -> i+1: (bx, bz, bx*bx + bz*bz, midpoint x, midpoint z, skip radius^2)
 var c_seg := PackedFloat64Array()
-# per cell: runs of consecutive segment indices, packed as start * 65536 + end
+# per cell: runs of consecutive segment indices, packed as start * 256 + (end - start)
 var c_run_start := PackedInt32Array()
 var c_runs := PackedInt32Array()
 
@@ -231,11 +234,34 @@ func setup(seed_in: int) -> void:
 		k += 1
 	_reset_caches()
 	var crng := WorldRng.new(seed_in * 31337 + 5)
-	course = TrailCourse.new(crng, self, HILL_LEN, MTN_W - 40)
+	course = TrailCourse.make(crng, self, HILL_LEN, MTN_W - 40, COURSE_LEN, seed_in * 6151 + 3)
 	_bind_course()
 	course.plan_marking(self)
 	_reset_caches()
 	_build_route()
+
+
+## (worker thread, on a fork) lay the course out on to to_x: this fork gets the grown course, its
+## query tables, marking and route features; the main field takes them over with adopt_course()
+func grow_course(to_x: float) -> void:
+	course = course.grown(self, to_x)
+	_reset_caches()
+	_bind_course()
+	course.plan_marking(self)
+	_reset_caches()
+	_build_route()
+	_reset_caches()
+
+
+## (main thread) take over a course grown on a fork by grow_course()
+func adopt_course(g: TerrainField) -> void:
+	course = g.course
+	cX = g.cX; cZ = g.cZ; cKD = g.cKD; cTX = g.cTX; cTZ = g.cTZ; cKAP = g.cKAP; cW = g.cW; cBT = g.cBT; cE = g.cE
+	cRD = g.cRD; cRK = g.cRK
+	c_gx0 = g.c_gx0; c_gz0 = g.c_gz0; c_gnx = g.c_gnx; c_gnz = g.c_gnz; c_start = g.c_start; c_items = g.c_items
+	c_seg = g.c_seg; c_run_start = g.c_run_start; c_runs = g.c_runs
+	route_feats = g.route_feats
+	_reset_caches()
 
 
 func _local_tables() -> void:
@@ -288,15 +314,15 @@ func _bind_course(private: bool = false) -> void:
 		var b := -1
 		for k in range(c_start[ci], c_start[ci + 1]):
 			var it: int = c_items[k]
-			if a >= 0 and it == b + 1:
+			if a >= 0 and it == b + 1 and it - a < 255:
 				b = it
 			else:
 				if a >= 0:
-					c_runs.append(a * 65536 + b)
+					c_runs.append(a * 256 + (b - a))
 				a = it
 				b = it
 		if a >= 0:
-			c_runs.append(a * 65536 + b)
+			c_runs.append(a * 256 + (b - a))
 	c_run_start[c_start.size() - 1] = c_runs.size()
 	if private:
 		cX = cX.duplicate(); cZ = cZ.duplicate(); cKD = cKD.duplicate(); cTX = cTX.duplicate(); cTZ = cTZ.duplicate()
@@ -831,8 +857,20 @@ func jump_eval(x: float, z: float) -> void:
 	query(x, z)
 	if q_d < 12.0:
 		var s := q_s
-		for j in route_feats:
-			var f: Feat = j
+		# route_feats are in course order and don't overlap: binary search the first one that ends past s
+		var lo := 0
+		var hi := route_feats.size()
+		while lo < hi:
+			var mid := (lo + hi) >> 1
+			var fm: Feat = route_feats[mid]
+			if fm.s + fm.len + 10 > s:
+				hi = mid
+			else:
+				lo = mid + 1
+		for k in range(lo, route_feats.size()):
+			var f: Feat = route_feats[k]
+			if f.s - 10 >= s:
+				break
 			if s > f.s - 10 and s < f.s + f.len + 10:
 				_feat_at(f, x, z)
 	_fo_x = x; _fo_z = z
@@ -1033,8 +1071,8 @@ func query(x: float, z: float) -> void:
 	var prev := -9
 	var skip_r := QR + 1.03   # segments are STEP = 2 m long: half length 1 (+ margin)
 	for run in _cand:
-		var i: int = run >> 16
-		var i_end: int = run & 0xFFFF
+		var i: int = run >> 8
+		var i_end: int = i + (run & 0xFF)
 		if i - prev > 2:
 			if leg_d != INF:
 				_q_close(leg_d, leg_i, leg_t, x, z)

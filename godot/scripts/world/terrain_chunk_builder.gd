@@ -512,7 +512,9 @@ func _trail_fence(rs: WorldRng, ox: float, oz: float) -> void:
 
 
 func _course_fences(rs: WorldRng) -> void:
-	for fc in f.course.fences:
+	var C: TrailCourse = f.course
+	for fi in C.chunk_fences.get(TrailCourse.chunk_key(cx, cz), PackedInt32Array()):
+		var fc: Dictionary = C.fences[fi]
 		var P: Array = fc["posts"]
 		var cur := []
 		for k in P.size():
@@ -532,9 +534,7 @@ func _course_fences(rs: WorldRng) -> void:
 func _rock_gardens() -> void:
 	var C: TrailCourse = f.course
 	var rk := WorldRng.new(WorldRng.i32(cx * 83492791) ^ WorldRng.i32(cz * 2654435761) ^ WorldRng.i32(f.seed_value * 40503) ^ 0x1b873593)
-	for i in C.n - 1:
-		if C.KD[i] != TrailCourse.ROCKS or WorldRng.jround(C.X[i] / S) != cx or WorldRng.jround(C.Z[i] / S) != cz:
-			continue
+	for i in C.chunk_rocks.get(TrailCourse.chunk_key(cx, cz), PackedInt32Array()):
 		var tx: float = C.TX[i]
 		var tz: float = C.TZ[i]
 		var w: float = C.W[i] - 0.15
@@ -572,10 +572,8 @@ func _tape() -> void:
 	var stakes_all: Array = f.course.stakes
 	var spans := []
 	var stake_pos := []
-	for k in stakes_all.size():
+	for k in f.course.chunk_stakes.get(TrailCourse.chunk_key(cx, cz), PackedInt32Array()):
 		var st: Dictionary = stakes_all[k]
-		if WorldRng.jround(st["x"] / S) != cx or WorldRng.jround(st["z"] / S) != cz:
-			continue
 		var b := _plant(st)
 		if b.is_empty():
 			continue

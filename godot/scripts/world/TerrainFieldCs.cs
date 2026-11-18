@@ -478,6 +478,8 @@ internal sealed class TfShared
 	public Color[] red_bands, grey_bands;
 	public Godot.Collections.Dictionary col;
 	public GodotObject course;
+
+	public TfShared Clone() => (TfShared)MemberwiseClone();
 }
 
 [GlobalClass]
@@ -641,6 +643,22 @@ public partial class TerrainFieldCs : RefCounted
 		sh.rp_sg = f.Get("rp_sg").AsDouble();
 		sh.pitches = F64(f.Get("pitches"));
 		sh.pitch_share = f.Get("pitch_share").AsDouble();
+		_course_from(sh, f);
+		var col = f.Get("col").AsGodotDictionary();
+		sh.col = col.Duplicate();
+		Color C(string k) => col[k].AsColor();
+		sh.grassA = C("grassA"); sh.grassB = C("grassB"); sh.meadow = C("meadow"); sh.alpine = C("alpine");
+		sh.dryGrass = C("dryGrass"); sh.litter = C("litter"); sh.clover = C("clover"); sh.dune = C("dune");
+		sh.duneDark = C("duneDark"); sh.dirt = C("dirt"); sh.dirtDark = C("dirtDark"); sh.desertDirt = C("desertDirt");
+		sh.gravel = C("gravel"); sh.greyDark = C("greyDark"); sh.snow = C("snow"); sh.sand = C("sand"); sh.bed = C("bed");
+		sh.red_bands = f.Get("red_bands").AsColorArray();
+		sh.grey_bands = f.Get("grey_bands").AsColorArray();
+		_bind(sh);
+	}
+
+	// the course tables (layout, query grid, route features) of a GDScript TerrainField
+	private void _course_from(TfShared sh, GodotObject f)
+	{
 		sh.cX = F64(f.Get("cX"));
 		sh.cZ = F64(f.Get("cZ"));
 		sh.cKD = f.Get("cKD").AsInt32Array();
@@ -670,15 +688,14 @@ public partial class TerrainFieldCs : RefCounted
 			c.s = j.Get("s").AsDouble();
 			sh.route_feats[i] = c;
 		}
-		var col = f.Get("col").AsGodotDictionary();
-		sh.col = col.Duplicate();
-		Color C(string k) => col[k].AsColor();
-		sh.grassA = C("grassA"); sh.grassB = C("grassB"); sh.meadow = C("meadow"); sh.alpine = C("alpine");
-		sh.dryGrass = C("dryGrass"); sh.litter = C("litter"); sh.clover = C("clover"); sh.dune = C("dune");
-		sh.duneDark = C("duneDark"); sh.dirt = C("dirt"); sh.dirtDark = C("dirtDark"); sh.desertDirt = C("desertDirt");
-		sh.gravel = C("gravel"); sh.greyDark = C("greyDark"); sh.snow = C("snow"); sh.sand = C("sand"); sh.bed = C("bed");
-		sh.red_bands = f.Get("red_bands").AsColorArray();
-		sh.grey_bands = f.Get("grey_bands").AsColorArray();
+	}
+
+	/// take over a grown course (TerrainField.adopt_course) from the GDScript field: everything else is kept.
+	/// Forks made before keep the old tables (they are never changed in place).
+	public void rebind_course(GodotObject f)
+	{
+		var sh = (TfShared)_sh.Clone();
+		_course_from(sh, f);
 		_bind(sh);
 	}
 
@@ -1269,8 +1286,22 @@ public partial class TerrainFieldCs : RefCounted
 		if (q_d < 12.0)
 		{
 			double s = q_s;
-			foreach (var f in _route)
+			// _route is in course order and doesn't overlap: binary search the first one that ends past s
+			int lo = 0, hi = _route.Length;
+			while (lo < hi)
 			{
+				int mid = (lo + hi) >> 1;
+				var fm = _route[mid];
+				if (fm.s + fm.len + 10 > s)
+					hi = mid;
+				else
+					lo = mid + 1;
+			}
+			for (int k = lo; k < _route.Length; k++)
+			{
+				var f = _route[k];
+				if (f.s - 10 >= s)
+					break;
 				if (s > f.s - 10 && s < f.s + f.len + 10)
 					_feat_at(f, x, z);
 			}
@@ -1673,8 +1704,8 @@ public partial class TerrainFieldCs : RefCounted
 		for (int ri = 0; ri < _cand_n; ri++)
 		{
 			long run = _cand[ri];
-			long i = run >> 16;
-			long i_end = run & 0xFFFF;
+			long i = run >> 8;
+			long i_end = i + (run & 0xFF);
 			if (i - prev > 2)
 			{
 				if (leg_d != double.PositiveInfinity)

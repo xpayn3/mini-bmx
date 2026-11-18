@@ -1,6 +1,8 @@
 class_name TrailCourse
 extends RefCounted
-## Port of course.js: the long downhill course laid out by a "turtle" down the mountain.
+## Port of course.js: the long downhill course laid out by a "turtle" down the mountain -- and then on
+## through the hills for ever: grown() continues the turtle into a NEW course (the old one stays
+## untouched for threads still reading it); everything already laid out stays exactly as it was.
 ## query() lives in TerrainField (per-thread result cache); this holds the immutable layout.
 
 const STEP := 2.0
@@ -36,6 +38,12 @@ var cell_items := PackedInt32Array()
 # marking
 var fences: Array = []   # [{posts: Array[[x,z]], style}]
 var stakes: Array = []   # [{x, z, s, side, caution, prev (index or -1)}]
+# per terrain chunk (CHUNK m, keyed by chunk_key(cx, cz)): what the chunk builder needs there, so a
+# chunk never scans the whole (very long) course
+const CHUNK := 48.0
+var chunk_rocks := {}    # key -> PackedInt32Array of ROCKS centreline indices
+var chunk_stakes := {}   # key -> PackedInt32Array of stake indices
+var chunk_fences := {}   # key -> PackedInt32Array of fence indices with a post in the chunk
 
 # build state
 var _M  # TerrainField (zc, landform, pitches, water)
@@ -44,7 +52,8 @@ var _x := 0.0
 var _z := 0.0
 var _h := 0.0
 var _cells := {}
-var _L := 0.0
+var _L := 0.0      # course length along x (the trail runs on long past the mountain)
+var _hill := 0.0   # where the mountain ends
 var _corr := 0.0
 
 
@@ -57,13 +66,48 @@ static func wrap_angle(a: float) -> float:
 	return atan2(sin(a), cos(a))
 
 
-func _init(rnd: WorldRng, field, hill_len: float, corridor: float) -> void:
-	_M = field
-	_r = rnd
-	_L = hill_len
-	_corr = corridor
-	_build()
-	_finish()
+var _mark_seed: int = 0
+
+
+## a new course: the mountain, then on to x = course_len
+static func make(rnd: WorldRng, field, hill_len: float, corridor: float, course_len: float, mark_seed: int) -> TrailCourse:
+	var c := TrailCourse.new()
+	c._M = field
+	c._r = rnd
+	c._hill = hill_len
+	c._L = course_len
+	c._corr = corridor
+	c._mark_seed = mark_seed
+	c._x = -36; c._z = 0; c._h = 0
+	c._straight(76, START)
+	c._commit(0)
+	c._build()
+	c._finish()
+	return c
+
+
+## the furthest x laid out so far
+func end_x() -> float:
+	return _x
+
+
+## a copy of this course laid out on to x = to_x (field: the TerrainField to read the land from; call
+## plan_marking(field) on the result once the field queries it). This course is not changed.
+func grown(field, to_x: float) -> TrailCourse:
+	var c := TrailCourse.new()
+	c._M = field
+	c._r = WorldRng.new()
+	c._r.a = _r.a
+	c._hill = _hill
+	c._L = to_x
+	c._corr = _corr
+	c._mark_seed = _mark_seed
+	c._x = _x; c._z = _z; c._h = _h
+	c.X = X.duplicate(); c.Z = Z.duplicate(); c.KD = KD.duplicate()
+	c._cells = _cells.duplicate()
+	c._build()
+	c._finish()
+	return c
 
 
 # ---------------- layout ----------------
@@ -181,11 +225,12 @@ func _road(max_len: float) -> void:
 	while done < len:
 		var o := _off()
 		var lim := _corr - 30
-		var tgt := (_r.next() * 2 - 1) * 32 * D2R
-		if absf(o) > lim * 0.55:
-			tgt = -signf(o) * (10 + _r.next() * 22) * D2R
-		var seg := minf(len - done, 40 + _r.next() * 60)
-		var R := 55 + _r.next() * 90
+		var tgt := (_r.next() * 2 - 1) * 52 * D2R
+		if absf(o) > lim * 0.5:
+			tgt = -signf(o) * (18 + _r.next() * 34) * D2R
+		var seg := minf(len - done, 26 + _r.next() * 44)
+		# now and then a tight bend instead of a sweeper
+		var R := (16 + _r.next() * 18) if _r.next() < 0.3 else (38 + _r.next() * 60)
 		var n0 := X.size()
 		_turn_to(tgt, R, ROAD)
 		var used := (X.size() - n0) * STEP
@@ -245,12 +290,9 @@ func _jump_line() -> void:
 
 
 func _build() -> void:
-	_x = -36; _z = 0; _h = 0
-	_straight(76, START)
-	_commit(0)
 	var guard := 0
 	var P: PackedFloat64Array = _M.pitches
-	while _x < _L - 80 and guard < 60 and X.size() < 4000:
+	while _x < _L - 80 and guard < 4000:
 		guard += 1
 		var pk := _next_pitch()
 		var to_pitch := (P[pk] - P[pk + 1] / 2 - _x) if pk >= 0 else INF
@@ -266,6 +308,19 @@ func _build() -> void:
 			continue
 		var room := minf(to_pitch, _L - 80 - _x)
 		var pick2 := _r.next()
+		if pk < 0 and _x > _hill - 80:
+			# past the mountain: the trail runs on through the hills, never long without a twist
+			_attempt([[0, 60 + _r.next() * 120]])
+			var end_x := _x + 50 + _r.next() * 70
+			if pick2 < 0.3:
+				_attempt([[4, 0.0]])
+			elif pick2 < 0.6:
+				_attempt([[2, end_x], [1, end_x], [3, end_x]])
+			elif pick2 < 0.8:
+				_attempt([[1, end_x], [2, end_x], [3, end_x]])
+			else:
+				_attempt([[3, end_x], [2, end_x], [1, end_x]])
+			continue
 		if room > 230 and pick2 < 0.7:
 			_attempt([[0, maxf(50, room - 190)]])
 			_attempt([[4, 0.0]])
@@ -274,12 +329,7 @@ func _build() -> void:
 			_attempt([[5, 0.0]])
 		else:
 			_attempt([[0, maxf(40, to_pitch - 20)]])
-	var s := _snap()
-	_turn_to(0, 40, FINISH)
-	_straight(56, FINISH)
-	_commit(s[3])
 	n = X.size()
-	_cells = {}
 
 
 # ---------------- derived data ----------------
@@ -338,6 +388,13 @@ func _finish() -> void:
 	for i in range(1, n):
 		sm[i] = minf(sm[i], sm[i - 1])
 	E = _avg(sm, 2)
+	if _L > _hill + 1.0:
+		# past the mountain the trail follows the rolling land (smoothed hard, so climbs stay gentle)
+		var fr := _avg(_avg(_avg(raw, 10), 10), 10)
+		for i in n:
+			var w := smooth(_hill + 60, _hill + 360, X[i])
+			if w > 0.0:
+				E[i] = E[i] + (fr[i] - E[i]) * w
 	var rd := PackedFloat32Array(); rd.resize(n)
 	var rk := PackedFloat32Array(); rk.resize(n)
 	for i in n:
@@ -393,7 +450,7 @@ func runs() -> Array:
 
 # ---------------- fences and tape ----------------
 func plan_marking(field) -> void:
-	var r := _r
+	var r := WorldRng.new(_mark_seed)
 	var rr := runs()
 	var tape0 := PackedByteArray(); tape0.resize(n)
 	var tape1 := PackedByteArray(); tape1.resize(n)
@@ -505,3 +562,52 @@ func plan_marking(field) -> void:
 			else:
 				last = -1
 			s += minf(7.5, maxf(3.0, 0.32 / maxf(1e-4, absf(k))))
+	# both sides merged in course order, so a stake keeps its index when the course grows
+	var order := range(stakes.size())
+	order.sort_custom(func(a, b): return stakes[a]["s"] < stakes[b]["s"] or (stakes[a]["s"] == stakes[b]["s"] and a < b))
+	var remap := PackedInt32Array(); remap.resize(stakes.size())
+	for j in order.size():
+		remap[order[j]] = j
+	var merged := []
+	for j in order:
+		var st: Dictionary = stakes[j]
+		if st["prev"] >= 0:
+			st["prev"] = remap[st["prev"]]
+		merged.append(st)
+	stakes = merged
+	# the START / FINISH picket fences were appended after the course fences: move them to the front
+	var pick := []
+	var rest := []
+	for fc in fences:
+		(pick if fc["style"] == "picket" else rest).append(fc)
+	fences = pick + rest
+	_bucket()
+
+
+static func chunk_key(cx: int, cz: int) -> int:
+	return cx * 1048576 + cz
+
+
+func _chunk_of(x: float, z: float) -> int:
+	return chunk_key(WorldRng.jround(x / CHUNK), WorldRng.jround(z / CHUNK))
+
+
+static func _add(d: Dictionary, k: int, v: int) -> void:
+	if not d.has(k):
+		d[k] = PackedInt32Array()
+	var l: PackedInt32Array = d[k]
+	if l.is_empty() or l[l.size() - 1] != v:
+		l.append(v)
+	d[k] = l
+
+
+func _bucket() -> void:
+	chunk_rocks = {}; chunk_stakes = {}; chunk_fences = {}
+	for i in n - 1:
+		if KD[i] == ROCKS:
+			_add(chunk_rocks, _chunk_of(X[i], Z[i]), i)
+	for k in stakes.size():
+		_add(chunk_stakes, _chunk_of(stakes[k]["x"], stakes[k]["z"]), k)
+	for fi in fences.size():
+		for p in fences[fi]["posts"]:
+			_add(chunk_fences, _chunk_of(p[0], p[1]), fi)
