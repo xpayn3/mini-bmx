@@ -253,7 +253,7 @@ class GaugeView extends Control:
 	var hud
 	func _draw() -> void:
 		var st: BikePhysics = hud.game.phys
-		var f := UITheme.font(true)
+		var f := UITheme.lcd_font()
 		var r := Rect2(Vector2.ZERO, size)
 		draw_style_box(UITheme.box(Color("16181a"), 16, 0), r)
 		var scr := Rect2(7, 8, size.x - 14, size.y - 26)
