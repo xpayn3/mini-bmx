@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Mini BMX">
+<title>Mini BMX</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #a9d6ea; font-family: ui-rounded, "Segoe UI", system-ui, sans-serif; }
+  canvas { display: block; }
+  #hud { position: fixed; inset: 0; pointer-events: none; color: #fff; text-shadow: 0 2px 6px rgba(0,0,0,.35); }
+  #title { position: absolute; top: 16px; left: 20px; font-weight: 800; font-size: 22px; letter-spacing: .5px; }
+  #fps { position: absolute; top: 48px; left: 20px; font: 700 12px/1 ui-monospace, Consolas, monospace; color: #b9ffb0;
+         background: rgba(10,20,30,.45); padding: 5px 8px; border-radius: 6px; text-shadow: none; font-variant-numeric: tabular-nums; }
+  #speed { position: absolute; top: 16px; right: 22px; font-weight: 800; font-size: 28px; font-variant-numeric: tabular-nums; }
+  #help { position: relative; }
+  #help summary { list-style: none; cursor: pointer; font: 800 13px/1 inherit; font-family: inherit; color: #fff; padding: 6px 10px;
+                  border-radius: 8px; background: rgba(255,255,255,.16); user-select: none; }
+  #help summary::-webkit-details-marker { display: none; }
+  #help summary:hover, #help[open] summary { background: rgba(255,255,255,.28); }
+  #help summary::after { content: " ▾"; }
+  #help[open] summary::after { content: " ▴"; }
+  #keys { position: absolute; top: calc(100% + 8px); right: 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; align-items: center;
+          min-width: 250px; padding: 12px 14px; border-radius: 12px; background: rgba(16,30,40,.82); backdrop-filter: blur(8px);
+          font-size: 13px; font-weight: 600; white-space: nowrap; text-shadow: none; box-shadow: 0 8px 24px rgba(0,0,0,.25); }
+  #keys .k { text-align: right; }
+  #msg { position: absolute; top: 22%; width: 100%; text-align: center; font-size: 40px; font-weight: 900; opacity: 0; transition: opacity .3s; }
+  #loading { position: fixed; inset: 0; display: grid; place-items: center; color: #fff; font-size: 22px; font-weight: 700; }
+  #getup { position: absolute; left: 50%; bottom: 72px; transform: translate(-50%, 12px); opacity: 0; transition: opacity .25s, transform .25s;
+            display: flex; align-items: center; gap: 12px; padding: 10px 16px 10px 10px; border-radius: 16px;
+            background: rgba(20,40,50,.45); backdrop-filter: blur(6px); font-weight: 800; font-size: 16px; }
+  #getup.show { opacity: 1; transform: translate(-50%, 0); }
+  #getup .key { position: relative; overflow: hidden; width: 92px; height: 34px; border-radius: 9px; background: rgba(255,255,255,.18);
+                border: 2px solid rgba(255,255,255,.7); display: grid; place-items: center; font-size: 13px; letter-spacing: 1px; }
+  #getup .fill { position: absolute; inset: 0; transform-origin: left; transform: scaleX(0); background: #ffd21f; }
+  #getup .key span { position: relative; color: #fff; }
+  #getup.holding .key span { color: #1d2b64; text-shadow: none; }
+  #getup.holding .key { border-color: #ffd21f; }
+  #bikes { position: absolute; top: 78px; left: 20px; display: flex; gap: 4px; padding: 4px; border-radius: 10px;
+           background: rgba(20,40,50,.35); backdrop-filter: blur(6px); pointer-events: auto; }
+  #bikes button { font: 800 13px/1 inherit; font-family: inherit; color: #fff; background: transparent; border: 0; border-radius: 7px;
+                  padding: 7px 12px; cursor: pointer; text-shadow: 0 1px 3px rgba(0,0,0,.35); }
+  #bikes button:hover { background: rgba(255,255,255,.15); }
+  #bikes button.on { background: #ffd21f; color: #1d2b64; text-shadow: none; }
+  #camwrap { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); pointer-events: auto;
+             display: flex; align-items: center; gap: 8px; padding: 5px 6px 5px 12px; border-radius: 12px;
+             background: rgba(20,40,50,.35); backdrop-filter: blur(6px); font-weight: 800; font-size: 13px; }
+  #cam { font: 800 13px/1 inherit; font-family: inherit; color: #1d2b64; background: #fff; border: 0; border-radius: 8px;
+         padding: 6px 8px; cursor: pointer; }
+  /* phones / tablets: on-screen buttons replace the key legend; keep the HUD clear of the notch */
+  html.touch, html.touch body { touch-action: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; overscroll-behavior: none; }
+  html.touch #title { display: none; }
+  html.touch #fps { top: calc(10px + env(safe-area-inset-top)); left: calc(12px + env(safe-area-inset-left)); font-size: 10px; }
+  html.touch #bikes { top: calc(34px + env(safe-area-inset-top)); left: calc(12px + env(safe-area-inset-left)); }
+  html.touch #bikes button { padding: 9px 12px; }
+  html.touch #speed { top: calc(8px + env(safe-area-inset-top)); right: calc(14px + env(safe-area-inset-right)); font-size: 22px; }
+  html.touch #camwrap { display: none; }
+  html.touch #getup { bottom: calc(130px + env(safe-area-inset-bottom)); }
+  html.touch #msg { font-size: 30px; }
+  html.touch #tuneBtn { top: calc(44px + env(safe-area-inset-top)) !important; right: calc(12px + env(safe-area-inset-right)) !important; }
+  b { background: rgba(255,255,255,.22); padding: 1px 6px; border-radius: 5px; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="loading">Loading BMX…</div>
+<div id="hud">
+  <div id="title">Mini BMX</div>
+  <div id="fps">-- FPS</div>
+  <div id="bikes" title="B: switch bike"></div>
+  <div id="camwrap">Camera <select id="cam" title="C: next camera"></select>
+    <details id="help"><summary>Controls</summary><div id="keys"><span class="k"><b>W</b></span><span>pedal</span><span class="k"><b>S</b></span><span>brake / back</span><span class="k"><b>A</b> <b>D</b></span><span>steer</span><span class="k"><b>Space</b></span><span>hold + release: pump / pop</span><span class="k"><b>F</b></span><span>bail</span><span class="k"><b>R</b></span><span>new world</span><span class="k"><b>B</b></span><span>bike</span><span class="k"><b>C</b></span><span>camera</span><span class="k"><b>Q</b> <b>E</b></span><span>rotate cam (or drag)</span><span class="k"><b>wheel</b></span><span>zoom</span><span class="k"><b>T</b></span><span>tilt-shift</span><span class="k"><b>O</b></span><span>AO</span><span class="k"><b>G</b></span><span>quality</span><span class="k"><b>P</b></span><span>tune</span></div></details></div>
+  <div id="speed">0 km/h</div>
+  <div id="msg"></div>
+  <div id="getup"><div class="key"><div class="fill"></div><span>SPACE</span></div><div>Hold to get up</div></div>
+</div>
+<script>
+  // Controls dropdown: never keep keyboard focus (Space/keys must keep driving the bike), close on outside click
+  { const help = document.getElementById('help'), sum = help.querySelector('summary');
+    sum.addEventListener('click', () => setTimeout(() => sum.blur(), 0));
+    sum.addEventListener('keydown', (e) => { e.preventDefault(); sum.blur(); });
+    addEventListener('pointerdown', (e) => { if (help.open && !help.contains(e.target)) help.open = false; }); }
+</script>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
