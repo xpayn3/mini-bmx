@@ -203,6 +203,31 @@ const steerAxis = new THREE.Vector3(...(bike.userData.steerAxis || [-0.2546, 0.9
 const susp = bd.suspension ? new Suspension(bike, bd) : null;
 
 const paint = new THREE.MeshPhysicalMaterial({ color: 0xe8432e, metalness: 0.25, roughness: 0.32, clearcoat: 1, clearcoatRoughness: 0.06 });
+// ZERO-LENGTH NORMALS (degenerate faces in an export) make the lighting normalize(0): on many GPUs that is
+// NaN, which ambient occlusion and bloom smear into a flickering black square over the bike. Rebuild any
+// such normal from the faces around it, falling back to straight up.
+function fixNormals(root) {
+  root.traverse((o) => {
+    const g = o.isMesh && o.geometry, n = g && g.attributes.normal;
+    if (!n) return;
+    const bad = [];
+    for (let i = 0; i < n.count; i++) {
+      const x = n.getX(i), y = n.getY(i), z = n.getZ(i), l = x * x + y * y + z * z;
+      if (!(l > 1e-12) || !Number.isFinite(l)) bad.push(i);
+    }
+    if (!bad.length) return;
+    const tmpG = new THREE.BufferGeometry();
+    tmpG.setAttribute('position', g.attributes.position); if (g.index) tmpG.setIndex(g.index);
+    tmpG.computeVertexNormals();
+    const m = tmpG.attributes.normal;
+    for (const i of bad) {
+      const x = m.getX(i), y = m.getY(i), z = m.getZ(i), l = Math.hypot(x, y, z);
+      if (l > 1e-6 && Number.isFinite(l)) n.setXYZ(i, x / l, y / l, z / l); else n.setXYZ(i, 0, 1, 0);
+    }
+    n.needsUpdate = true; tmpG.dispose();
+  });
+}
+fixNormals(bike);
 bike.traverse((o) => {
   if (!o.isMesh) return;
   o.castShadow = true; o.receiveShadow = true;
@@ -247,6 +272,7 @@ const pedalPivots = [];
 }
 
 const rider = new Rider();
+fixNormals(rider.group);
 rider.setStyle(BIKES[bikeId].pose || {});
 { // the saddle (frame's plastic mesh): hips stay above it while over it, if the pose asks
   const m = part('frame').getObjectsByProperty('isMesh', true).find(o => o.material.name === 'plastic');
@@ -581,7 +607,9 @@ function physics(dt) {
     // Pedalling tops out around 37 km/h on the flat, but gravity downhill keeps adding speed.
     const roll = (surf === 0 ? 0.32 : surf === 3 ? 0.42 : 0.1) * Math.sign(st.v) * Math.min(1, Math.abs(st.v) * 4);
     a -= roll + T.airDrag * st.v * Math.abs(st.v);
-    if (inWater) a -= 2.5 * st.v;
+    // water drag ~ speed: pedalling settles near 20 km/h through it, coasting in at speed fades over
+    // a few seconds (was 2.5: ~10 km/h max and a near-instant stop)
+    if (inWater) a -= 0.7 * st.v;
     st.v = clamp(st.v + a * dt, -3, 24);
     if (brake && st.v <= 0.3) st.v += (-1.3 - st.v) * Math.min(1, dt * 3);   // walk it backwards
     if (!throttle && !brake && Math.abs(st.v) < 0.05 && Math.abs(g.pitch) < 0.03) st.v = 0;
@@ -763,14 +791,21 @@ function physics(dt) {
     // fastest the ground under a rolling tyre can really rise: a ~42 deg face at this speed. A step 30 cm
     // high in one frame is NOT 37 m/s upward -- that is what used to shoot the bike skyward off ledges
     const climbMax = Math.abs(st.v) * 0.9 + 0.3;
-    if (!st.wInit || st.hfPrev === undefined) { st.hfPrev = g.hf; st.hrPrev = g.hr; st.pitchV = 0; st.wInit = true; }
+    // ground under each tyre WHERE IT REALLY IS: on a slope the wheels sit closer together horizontally
+    // (lever x cos pitch). Sampling at the flat wheelbase read the front as buried on every climb and
+    // kept shoving the nose up until the bike looped out backwards.
+    const XF = L - BB_REAR, XR = -BB_REAR;
+    const cp0 = Math.cos(clamp(st.pitch, -1.3, 1.3));
+    const hfC = terrain.height(st.x + fwd.x * XF * cp0, st.z + fwd.z * XF * cp0);
+    const hrC = terrain.height(st.x + fwd.x * XR * cp0, st.z + fwd.z * XR * cp0);
+    if (!st.wInit || st.hfPrev === undefined) { st.hfPrev = hfC; st.hrPrev = hrC; st.pitchV = 0; st.wInit = true; }
     const hfP = st.hfPrev, hrP = st.hrPrev;
-    const vgF = Math.min((g.hf - hfP) / dt, climbMax), vgR = Math.min((g.hr - hrP) / dt, climbMax);
-    st.hfPrev = g.hf; st.hrPrev = g.hr;
+    const vgF = Math.min((hfC - hfP) / dt, climbMax), vgR = Math.min((hrC - hrP) / dt, climbMax);
+    st.hfPrev = hfC; st.hrPrev = hrC;
 
-    const XF = L - BB_REAR, XR = -BB_REAR, shF = BB_REAR / L, shR = XF / L;   // weight split by lever arms
+    const shF = BB_REAR / L, shR = XF / L;            // weight split by lever arms
     const K = (2 * Math.PI * T.tyreHz) ** 2, C = 2 * T.tyreDamp * Math.sqrt(K);  // per unit mass: heave at tyreHz
-    const IK = 0.22;                                  // pitch inertia / mass (m^2): bike + rider about the BB
+    const IK = 0.32;                                  // pitch inertia / mass (m^2): bike + rider (CoM high above) about the BB
     // the rider keeps a little weight pressed into natural ground (not on jumps, not while hopping)
     const press = natural && !(st.hopT > 0) ? T.legPress * G : 0;
     const s0 = (G + press) / K;                       // static sag: at rest the contact line sits on the ground
@@ -780,7 +815,7 @@ function physics(dt) {
     let cF = false, cR = false;
     const N = 4, h = dt / N;
     for (let i = 1; i <= N; i++) {
-      const u = i / N, gF = hfP + (g.hf - hfP) * u, gR = hrP + (g.hr - hrP) * u;
+      const u = i / N, gF = hfP + (hfC - hfP) * u, gR = hrP + (hrC - hrP) * u;
       const cs = Math.cos(st.pitch), sn = Math.sin(st.pitch);
       const dF = gF - (st.y + XF * sn) + s0, dR = gR - (st.y + XR * sn) + s0;   // spring compression
       const pvF = st.vy + XF * cs * st.pitchV, pvR = st.vy + XR * cs * st.pitchV;
@@ -815,18 +850,29 @@ function physics(dt) {
     }
     const air = !cF && !cR;
     st.frontAir = !air && !cF; st.rearAir = !air && !cR;
+    // LOOPED OUT: rotated way past the slope (over the back wheel / onto the nose) is a crash, never a bike
+    // standing upright and sinking into the hill. The hard clamp keeps cos(pitch) from ever flipping sign.
+    const gpC = Math.asin(clamp((hfC - hrC) / L, -1, 1));
+    // judged against the slope right under the tyre that is down (a wheel hanging over a ledge says nothing)
+    const localSlope = (x) => {
+      const px = st.x + fwd.x * x * cp0, pz = st.z + fwd.z * x * cp0;
+      return Math.atan((terrain.height(px + fwd.x * 0.3, pz + fwd.z * 0.3) - terrain.height(px - fwd.x * 0.3, pz - fwd.z * 0.3)) / 0.6);
+    };
+    if (cR && !cF && st.pitch - localSlope(XR) > 1.15) crash.pending = 'LOOPED OUT!';
+    else if (cF && !cR && localSlope(XF) - st.pitch > 1.15) crash.pending = 'NOSE DIVE!';
+    if (Math.abs(st.pitch) > 1.45) { st.pitch = Math.sign(st.pitch) * 1.45; st.pitchV = 0; }
     // the slope we were riding when the front went over a ledge / the rear came up
-    if (!air && (st.frontAir || st.rearAir) && wasF && wasR) st.noseRef = g.pitch - dP;
+    if (!air && (st.frontAir || st.rearAir) && wasF && wasR) st.noseRef = gpC - dP;
     if (st.frontAir && st.pitch - (st.noseRef ?? g.pitch) < -T.noseDive) crash.pending = 'NOSE DIVE!';
     // where each tyre is (for the suspension rig): on its ground when touching
     const snN = Math.sin(st.pitch);
-    st.wF = cF ? g.hf : st.y + XF * snN; st.wR = cR ? g.hr : st.y + XR * snN;
+    st.wF = cF ? hfC : st.y + XF * snN; st.wR = cR ? hrC : st.y + XR * snN;
     st.pitchW = st.pitch;
     // WHERE TO DRAW THE FRAME. A rigid BMX is drawn with its tyres on the ground (the springs are the tyres
     // and the rider's arms and legs: the body shows the give, see absorb). The downhill bike's frame rides
     // at its physical height and its fork / linkage rig pushes the wheels down onto the ground.
     if (susp) { st.yDraw = st.y; st.pitchDraw = st.pitch; }
-    else { st.yDraw = st.wR + (st.wF - st.wR) * (BB_REAR / L); st.pitchDraw = Math.atan2(st.wF - st.wR, L); }
+    else { st.yDraw = st.wR + (st.wF - st.wR) * (BB_REAR / L); st.pitchDraw = Math.asin(clamp((st.wF - st.wR) / L, -1, 1)); }
     // front tyre slapping back down after a ledge / manual
     if (!wasAir && !air && !wasF && cF) {
       const slap = Math.max(0, vgF - (vyIn + XF * Math.cos(st.pitch) * st.pitchV));
