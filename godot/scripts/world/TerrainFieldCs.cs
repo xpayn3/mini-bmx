@@ -174,6 +174,7 @@ internal sealed class TfWood
 /// trail_features.gd make_set(): immutable, so one set serves every thread
 internal static class TfSet
 {
+	public const double WOOD_EDGE = 0.12, WOOD_BEVEL = 1.2, WOOD_BEVEL_MAX = 0.44;
 	public static readonly double[][] TABLE = { new[] { 0.0, 0, 0 }, new[] { 5.5, 1.25, 0.5, 0 }, new[] { 9.5, 1.25, 0, 0 }, new[] { 11.5, 0.95, -0.36 }, new[] { 17.0, 0.18, -0.2 }, new[] { 21.0, 0, 0 } };
 	public static readonly double[][] DOUBLE = { new[] { 0.0, 0, 0 }, new[] { 5.0, 1.35, 0.58, -1.6 }, new[] { 6.0, 0.35, 0, 0 }, new[] { 7.5, 0.35, 0, 1.4 },
 		new[] { 9.2, 1.2, 0, 0 }, new[] { 10.2, 1.2, 0, 0 }, new[] { 12.5, 0.85, -0.34 }, new[] { 19.0, 0.15, -0.16 }, new[] { 23.0, 0, 0 } };
@@ -210,7 +211,7 @@ internal static class TfSet
 		{
 			["woodKicker"] = new TfWood(0, 0.0, 3.8, 0.85, true, kick, skin),
 			["skinny"] = new TfWood(1, 0.0, 19.0, 0.33, false, kick, skin),
-			["bridge"] = new TfWood(2, 0.0, 15.0, 0.8, false, kick, skin),
+			["bridge"] = new TfWood(2, 0.0, 15.0, 1.0, false, kick, skin),
 		};
 		DIG = new Dictionary<string, TfProfile>
 		{
@@ -1223,9 +1224,14 @@ public partial class TerrainFieldCs : RefCounted
 			fo_plane = pl;
 		}
 		var wd = j.wood;
-		if (wd != null && u >= wd.u0 && u <= wd.u1 && w <= wd.half)
+		if (wd != null && u >= wd.u0 && u <= wd.u1)
 		{
-			double top = pl + wd.top(u);
+			// grace past the plank edge, then a soft bevel on the low ramp parts (see trail_features.gd)
+			double wt = wd.top(u);
+			double over = w - wd.half - TfSet.WOOD_EDGE;
+			if (over > 0.0 && (wt >= TfSet.WOOD_BEVEL_MAX || over * TfSet.WOOD_BEVEL >= wt))
+				return;
+			double top = pl + wt - (over > 0.0 ? over : 0.0) * TfSet.WOOD_BEVEL;
 			if (!fo_has_wood || top > fo_wood)
 			{
 				fo_wood = top;

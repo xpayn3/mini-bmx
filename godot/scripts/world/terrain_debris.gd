@@ -80,30 +80,59 @@ static func _rs() -> float:
 	return randf() - 0.5
 
 
-## fences.js breakFence: pieces near the hit take most of it, rails often snap in two
+## a smashed fence span: rails and pickets go, a post only when the hit was right at it
+static func fence_part_goes(part: Dictionary, hit: Vector2) -> bool:
+	if part["kind"] != "post":
+		return true
+	var o: Vector3 = part["xform"].origin
+	return Vector2(o.x - hit.x, o.z - hit.y).length() < 0.7
+
+
+## fences.js breakFence, reworked: rails snap AT the hit (two real-length halves that swing away
+## from the break, plus a few splinters), pickets near the hit fly, far ones topple; untouched
+## posts stay in the ground
 func smash_fence(panel: Dictionary, vel: Vector3, hit: Vector2) -> void:
 	var sp := Vector2(vel.x, vel.z).length()
+	var dir := Vector3(vel.x, 0, vel.z).normalized() if sp > 0.1 else Vector3.ZERO
 	for part in panel["parts"]:
+		if not fence_part_goes(part, hit):
+			continue
 		var xf: Transform3D = part["xform"]
 		var kind: String = part["kind"]
 		var scl: Vector3 = part["scale"]
 		var rot := xf.basis.orthonormalized()
 		var mp := xf.origin
-		var near := 1.0 / (1.0 + Vector2(mp.x - hit.x, mp.z - hit.y).length() * 0.8)
-		var fling := (0.45 + 0.6 * near) * (0.75 + randf() * 0.35)
-		var pieces := 2 if kind == "rail" and randf() < 0.65 else 1
-		var ax := rot.x
 		var base_size: Vector3 = TerrainGeo.FENCE_SIZE[kind]
-		for k in pieces:
-			var off := (0.25 if k else -0.25) * scl.x if pieces == 2 else 0.0
-			var sc := Vector3(scl.x * (0.5 - 0.02), scl.y, scl.z) if pieces == 2 else scl
-			var p := mp + ax * off
-			var v := Vector3(vel.x * fling + _rs() * 1.2, maxf(0, vel.y) * 0.4 + 0.8 + randf() * (1 + sp * 0.18) * near, vel.z * fling + _rs() * 1.2)
-			var spin := 2 + sp * 0.9 * near
-			var w := Vector3(_rs() * spin, _rs() * spin, _rs() * spin)
-			if pieces == 2:
-				w += ax.cross(v).normalized() * ((1.0 if k else -1.0) * spin * 0.5)
-			spawn(TerrainGeo.MESH[kind], sc, part["col"], Transform3D(rot, p), base_size * sc, v, w, 0.6)
+		var near := 1.0 / (1.0 + Vector2(mp.x - hit.x, mp.z - hit.y).length() * 0.8)
+		if kind == "rail":
+			var ax := rot.x
+			var L := scl.x
+			# where along the rail the bike went through
+			var t := clampf((hit.x - mp.x) * ax.x + (hit.y - mp.z) * ax.z, -L / 2 + 0.25, L / 2 - 0.25)
+			for k in 2:
+				var a := -L / 2 if k == 0 else t
+				var b := t if k == 0 else L / 2
+				var len := b - a - 0.03
+				var c := mp + ax * ((a + b) / 2)
+				var side := -1.0 if k == 0 else 1.0
+				# the broken end is pushed along with the bike, the far end lags: a swing about the far end
+				var v := dir * sp * (0.35 + randf() * 0.2) + Vector3(_rs() * 0.6, 0.6 + randf() * (0.6 + sp * 0.08), _rs() * 0.6)
+				var swing := ax.cross(dir).normalized() * side * (1.5 + sp * 0.35) if dir != Vector3.ZERO else Vector3.ZERO
+				var w := swing + Vector3(_rs(), _rs(), _rs()) * (1.0 + sp * 0.2)
+				spawn(TerrainGeo.MESH[kind], Vector3(len, scl.y, scl.z), part["col"], Transform3D(rot, c), base_size * Vector3(len, scl.y, scl.z), v, w, 0.6)
+			# splinters from the break
+			var bp := mp + ax * t
+			for k in 3:
+				var ss := Vector3(0.12 + randf() * 0.18, scl.y * (0.25 + randf() * 0.3), scl.z * 0.6)
+				var v2 := dir * sp * (0.5 + randf() * 0.4) + Vector3(_rs() * 2.5, 1.0 + randf() * 2.0, _rs() * 2.5)
+				var w2 := Vector3(_rs(), _rs(), _rs()) * (6 + sp)
+				spawn(TerrainGeo.MESH[kind], ss, part["col"], Transform3D(rot, bp + Vector3(_rs() * 0.1, _rs() * 0.06, _rs() * 0.1)), base_size * ss, v2, w2, 0.15)
+			continue
+		var fling := (0.45 + 0.6 * near) * (0.75 + randf() * 0.35)
+		var v := Vector3(vel.x * fling + _rs() * 1.2, maxf(0, vel.y) * 0.4 + 0.8 + randf() * (1 + sp * 0.18) * near, vel.z * fling + _rs() * 1.2)
+		var spin := 2 + sp * 0.9 * near
+		var w := Vector3(_rs() * spin, _rs() * spin, _rs() * spin)
+		spawn(TerrainGeo.MESH[kind], scl, part["col"], Transform3D(rot, mp), base_size * scl, v, w, 0.6)
 
 
 ## cactus.js breakCactus: the base topples, the top and arms go flying

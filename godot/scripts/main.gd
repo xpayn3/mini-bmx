@@ -328,6 +328,8 @@ func _autotest(seconds: float) -> void:
 		elif OS.get_environment("BMX_AIRPULL") != "" and game.phys.air and game.phys.air_time > 0.1: Input.action_press("hop")   # tests: tuck in the air
 		else: Input.action_release("hop")
 		await get_tree().process_frame
+		if OS.get_environment("BMX_FENCE") != "":   # tests: ride straight into the nearest fence, shots around the hit
+			_fence_test(el)
 		if OS.get_environment("BMX_BODY_PROBE") != "":   # tests: the rider's body vs the bike
 			var ph = game.phys
 			_probe.hs_max = maxf(_probe.get("hs_max", 0.0), ph.hip_shift)
@@ -366,6 +368,48 @@ func _autotest(seconds: float) -> void:
 	if shot != "":
 		get_viewport().get_texture().get_image().save_png(shot)
 	get_tree().quit()
+
+## BMX_FENCE test: at 2 s put the bike 6 m in front of the nearest fence panel, aimed at it; shots
+## at the hit and after (BMX_FENCE=dir/prefix)
+var _fence := {}
+func _fence_test(el: float) -> void:
+	var ph = game.phys
+	if _fence.is_empty() and el > 2.0:
+		var best = null
+		var bd := INF
+		for key in game.terrain._col_grid:
+			for c in game.terrain._col_grid[key]:
+				if c.has("fence") and not c["fence"]["broken"] and (OS.get_environment("BMX_FENCE_STYLE") == "" or c["fence"]["style"] == OS.get_environment("BMX_FENCE_STYLE")):
+					var d := Vector2(c.x - ph.x, c.z - ph.z).length()
+					if d < bd: bd = d; best = c
+		if best == null: return
+		var p: Dictionary = best["fence"]
+		var dir := Vector2(p.cx - best.x, p.cz - best.z)
+		# the panel's own direction: from its first collider to its centre; ride across it
+		var along := Vector2(p.cx, p.cz) - Vector2(best.x, best.z)
+		var nrm := Vector2(-along.y, along.x).normalized() if along.length() > 0.1 else Vector2(1, 0)
+		var start := Vector2(p.cx, p.cz) - nrm * 6.0
+		ph.reset_at(start.x, start.y, atan2(-nrm.y, nrm.x))
+		ph.v = 7.0
+		_fence = {"panel": p, "t": el, "shot": 0}
+		print("FENCE test: panel at (%.1f, %.1f) style=%s parts=%d" % [p.cx, p.cz, p.style, p.parts.size()])
+	elif not _fence.is_empty():
+		var p: Dictionary = _fence.panel
+		var pre := OS.get_environment("BMX_FENCE")
+		if _fence.shot == 0 and el > _fence.t + 0.3:
+			get_viewport().get_texture().get_image().save_png(pre + "_0before.png"); _fence.shot = 1
+		if _fence.shot == 1 and p.broken:
+			_fence.hit = Engine.get_process_frames(); _fence.shot = 2
+			var seen := []
+			for k in game.terrain._col_grid:
+				for c in game.terrain._col_grid[k]:
+					if c.has("fence") and c["fence"]["broken"] and not seen.any(func(q): return is_same(q, c["fence"])):
+						seen.append(c["fence"])
+			var n := seen.size()
+			print("FENCE broken panels=%d debris=%d" % [n, game.terrain._debris._items.size()])
+		if _fence.shot >= 2 and _fence.shot < 6 and Engine.get_process_frames() >= _fence.hit + [0, 0, 2, 12, 30, 60][_fence.shot]:
+			get_viewport().get_texture().get_image().save_png(pre + "_%d.png" % _fence.shot); _fence.shot += 1
+
 
 ## --shot=<png path>@<seconds>: save a screenshot after that long, then quit (testing / store shots)
 func _shot(arg: String) -> void:
