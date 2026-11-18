@@ -54,6 +54,7 @@ class TextArt:
 	var R := 0.3
 	var r0 := 0.2
 	var r1 := 0.25
+	var count := 2              # ring: how many times the text goes round
 
 	# Godot's built-in font, emboldened (and slanted for italic) to stand in for "Arial Black":
 	# system fonts are not used, they render as solid boxes in this Godot build and vary per machine
@@ -129,7 +130,9 @@ class TextArt:
 			total += cw
 		var arc := total / r_mid
 		var mid_y := (font.get_ascent(ip) - font.get_descent(ip)) / 2.0
-		for mid in [-PI / 2.0, PI / 2.0]:   # top, then bottom (upside down, like a real tyre)
+		# evenly round the wheel from the top (2: top + bottom, upside down like a real tyre)
+		for q in maxi(1, count):
+			var mid := -PI / 2.0 + TAU * q / maxi(1, count)
 			var th: float = mid - arc / 2.0
 			for i in text.length():
 				var a: float = th + widths[i] / 2.0 / r_mid
@@ -173,13 +176,14 @@ static func word_texture(host: Node, text: String, aspect: float, opts: Dictiona
 	return _text_texture(host, art)
 
 
-static func ring_texture(host: Node, text: String, R: float, r0: float, r1: float, fill := Color8(0xf4, 0xf4, 0xf0)) -> Texture2D:
+static func ring_texture(host: Node, text: String, R: float, r0: float, r1: float, fill := Color8(0xf4, 0xf4, 0xf0), count := 2) -> Texture2D:
 	var art := TextArt.new()
 	art.mode = "ring"
 	art.text = text
 	art.size = Vector2i(2048, 2048)
 	art.R = R; art.r0 = r0; art.r1 = r1
 	art.fill = fill
+	art.count = count
 	return _text_texture(host, art)
 
 
@@ -427,7 +431,25 @@ static func add_bike_decals(bike: Node3D, cfg: Dictionary) -> Array:
 			var d := float(rims.get("depth", 0.025))
 			var r0 := R - d * 0.88
 			var r1 := R - d * 0.18
-			var rtex := ring_texture(bike, rims["text"], R, r0, r1, rims.get("fill", Color8(0xf4, 0xf4, 0xf0)))
+			var count := clampi(int(rims.get("count", 2)), 1, 4)
+			if rims.has("image"):
+				# a flat sticker per spot, its top toward the tyre, square to the radius
+				var tex := image_texture(rims["image"])
+				if tex == null:
+					continue
+				var hgt := (r1 - r0) * 0.92
+				var wid := minf(hgt * float(tex.get_width()) / maxf(1.0, tex.get_height()), R * 0.42)
+				var mat := decal_material(tex, 0.4)
+				var rm := (r0 + r1) / 2.0
+				for q in count:
+					var a := -PI / 2.0 + TAU * q / count
+					var ra := Vector3(cos(a), sin(a), 0.0)
+					var pos := c + ra * rm
+					# x axes picked so the image's up (z x x) points out along the radius on both sides
+					made.append(project(mi, si, Vector3(pos.x, pos.y, c.z), Vector3(sin(a), -cos(a), 0), Z, Vector3(wid, hgt, 0.2), mat))
+					made.append(project(mi, si, Vector3(pos.x, pos.y, c.z), Vector3(-sin(a), cos(a), 0), NZ, Vector3(wid, hgt, 0.2), mat))
+				continue
+			var rtex := ring_texture(bike, rims["text"], R, r0, r1, rims.get("fill", Color8(0xf4, 0xf4, 0xf0)), count)
 			var mat := decal_material(rtex, 0.4)
 			_bind_text(rtex, mat)
 			var size := Vector3(2.0 * R, 2.0 * R, 0.2)

@@ -59,6 +59,9 @@ func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
 			extras.suspension.fork.travel = mods.fork_travel
 			extras.suspension.rear.travel = mods.shock_travel
 		BikeBuild.apply_paint(model, build)
+		if build.has("bars"):
+			Handlebar.apply(steer_n as MeshInstance3D, build.bars)
+			_grips()   # the grips moved with the bar
 		decal_cfg = BikeBuild.decal_config(build)
 	if extras.has("suspension"):
 		susp = Suspension.new(model, extras)
@@ -144,6 +147,7 @@ func _grips() -> void:
 	if si < 0:
 		grip_l = Vector3(0, 0, -0.3); grip_r = Vector3(0, 0, 0.3); return
 	var verts: PackedVector3Array = mi.mesh.surface_get_arrays(si)[Mesh.ARRAY_VERTEX]
+	grip_l = Vector3.ZERO; grip_r = Vector3.ZERO
 	var nl := 0; var nr := 0
 	for p in verts:
 		if p.z > 0: grip_r += p; nr += 1

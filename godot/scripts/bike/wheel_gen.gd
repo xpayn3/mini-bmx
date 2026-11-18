@@ -32,6 +32,10 @@ const DEFAULTS := {
 	"rim_width_mm": 36.5,
 	"rim_color": Color(0.17, 0.17, 0.18),
 	"rim_finish": "matte",     # matte | gloss | chrome
+	"rim_profile": "hooked",   # hooked | hookless | box | vee | round (see RIM_PROFILES)
+	"rim_material": "alloy",   # alloy | carbon
+	"pattern": "",             # tread pattern (PATTERNS); "" -> the tread's default
+	"casing": "round",         # round | square (tyre shoulder shape)
 	"spokes": 32,
 	"lacing": 3,
 	"spoke_gauge": 1,          # 0 thin | 1 normal | 2 thick
@@ -47,6 +51,35 @@ const DEFAULTS := {
 
 const TAN := Color(0.66, 0.47, 0.28)
 const KNOB_H := {"knobby": 0.0055, "semi": 0.0042, "slick": 0.0}
+const RIM_PROFILES := ["hooked", "hookless", "box", "vee", "round"]
+const CASING_EXP := {"round": 1.0, "square": 0.62}   # superellipse exponent of the tyre profile
+
+## tread patterns. h: knob height, pitch: row spacing round the tyre (m), rows: alternating rows of
+## knobs [t offset from the crown (rad of the casing curve), half width, half length, height scale]
+const PATTERNS := {
+	"knobby": {"h": 0.0055, "pitch": 0.0185, "rows": [
+		[[-0.18, 0.0046, 0.0046, 1.0], [0.18, 0.0046, 0.0046, 1.0], [-0.90, 0.0056, 0.0066, 1.1], [0.90, 0.0056, 0.0066, 1.1]],
+		[[0.0, 0.0070, 0.0040, 1.0], [-0.54, 0.0042, 0.0050, 1.0], [0.54, 0.0042, 0.0050, 1.0], [-1.0, 0.0040, 0.0044, 0.95], [1.0, 0.0040, 0.0044, 0.95]]]},
+	"paddle": {"h": 0.0058, "pitch": 0.0205, "rows": [   # wide ramped paddles down the middle (rear tyres)
+		[[0.0, 0.0088, 0.0030, 1.0], [-0.93, 0.0056, 0.0068, 1.1], [0.93, 0.0056, 0.0068, 1.1]],
+		[[-0.24, 0.0040, 0.0038, 0.95], [0.24, 0.0040, 0.0038, 0.95], [-0.64, 0.0040, 0.0046, 1.0], [0.64, 0.0040, 0.0046, 1.0]]]},
+	"dense": {"h": 0.0056, "pitch": 0.0172, "rows": [    # three knobs across, big shoulders (wet-ish all-rounder)
+		[[-0.32, 0.0040, 0.0040, 1.0], [0.0, 0.0040, 0.0040, 1.0], [0.32, 0.0040, 0.0040, 1.0], [-0.96, 0.0056, 0.0064, 1.1], [0.96, 0.0056, 0.0064, 1.1]],
+		[[-0.16, 0.0044, 0.0036, 1.0], [0.16, 0.0044, 0.0036, 1.0], [-0.64, 0.0042, 0.0046, 1.0], [0.64, 0.0042, 0.0046, 1.0]]]},
+	"stagger": {"h": 0.0060, "pitch": 0.0192, "rows": [  # open staggered knobs (soft / loose ground)
+		[[-0.26, 0.0042, 0.0040, 1.0], [0.26, 0.0042, 0.0040, 1.0], [-0.95, 0.0050, 0.0062, 1.05], [0.95, 0.0050, 0.0062, 1.05]],
+		[[0.0, 0.0050, 0.0036, 1.0], [-0.60, 0.0040, 0.0048, 1.0], [0.60, 0.0040, 0.0048, 1.0]]]},
+	"block": {"h": 0.0050, "pitch": 0.0170, "rows": [    # squat square blocks (hardpack, long-lasting)
+		[[-0.2, 0.0050, 0.0034, 1.0], [0.2, 0.0050, 0.0034, 1.0], [-0.92, 0.0060, 0.0056, 1.05], [0.92, 0.0060, 0.0056, 1.05]],
+		[[0.0, 0.0034, 0.0050, 1.0], [-0.56, 0.0046, 0.0036, 1.0], [0.56, 0.0046, 0.0036, 1.0]]]},
+	"spike": {"h": 0.0078, "pitch": 0.0260, "rows": [    # tall widely spaced spikes (mud)
+		[[-0.30, 0.0034, 0.0034, 1.0], [0.30, 0.0034, 0.0034, 1.0], [-0.98, 0.0038, 0.0042, 1.0], [0.98, 0.0038, 0.0042, 1.0]],
+		[[0.0, 0.0034, 0.0034, 1.0], [-0.66, 0.0036, 0.0038, 1.0], [0.66, 0.0036, 0.0038, 1.0]]]},
+	"semi": {"h": 0.0042, "pitch": 0.0125, "rows": [
+		[[-0.13, 0.0026, 0.0022, 0.55], [0.13, 0.0026, 0.0022, 0.55], [-0.9, 0.0046, 0.0050, 1.0], [0.9, 0.0046, 0.0050, 1.0]],
+		[[0.0, 0.0026, 0.0022, 0.55], [-0.36, 0.0026, 0.0024, 0.6], [0.36, 0.0026, 0.0024, 0.6]]]},
+	"slick": {"h": 0.0, "pitch": 0.02, "rows": [[], []]},
+}
 const SPOKE_R := [0.0011, 0.0015, 0.0020]   # tube radius by gauge (real 2 mm spoke = r 1 mm)
 const FLANGE_R := 0.0285
 const HOLE_R := 0.0245
@@ -104,6 +137,16 @@ static func _norm(spec: Dictionary) -> Dictionary:
 	s["detail"] = clampf(float(s["detail"]), 0.25, 2.0)
 	if not KNOB_H.has(s["tread"]):
 		s["tread"] = "knobby"
+	if not PATTERNS.has(s["pattern"]):
+		s["pattern"] = s["tread"]
+	if s["tread"] == "slick":
+		s["pattern"] = "slick"
+	if not CASING_EXP.has(s["casing"]):
+		s["casing"] = "round"
+	if not (s["rim_profile"] in RIM_PROFILES):
+		s["rim_profile"] = "hooked"
+	if s["rim_material"] != "carbon":
+		s["rim_material"] = "alloy"
 	return s
 
 
@@ -279,8 +322,54 @@ static func _mat(name: String, col: Color, metallic: float, rough: float, vcol: 
 	return m
 
 
+static var _carbon: ImageTexture
+
+## A tileable 2x2 twill carbon weave (one tile = 4 tows each way), dark with a light sheen across each tow.
+static func carbon_texture() -> ImageTexture:
+	if _carbon != null:
+		return _carbon
+	var N := 128
+	var img := Image.create(N, N, false, Image.FORMAT_RGB8)
+	var cell := N / 4
+	for y in N:
+		for x in N:
+			var i := x / cell
+			var j := y / cell
+			var warp := ((i + j) & 3) < 2          # twill: the over/under steps one tow per row
+			var u := float(x % cell) / cell
+			var v := float(y % cell) / cell
+			var across := v if warp else u         # position across the tow
+			var along := u if warp else v
+			var sheen := pow(sin(across * PI), 0.6) * (0.75 + 0.25 * sin(along * PI))
+			var g := 0.035 + 0.11 * sheen * (1.0 if warp else 0.72)
+			img.set_pixel(x, y, Color(g, g, g * 1.04))
+	img.generate_mipmaps()
+	_carbon = ImageTexture.create_from_image(img)
+	return _carbon
+
+
+## A carbon material for any part (rims, bars). uv_scale: weave repeats over the part's UVs.
+static func carbon_material(name: String, gloss: bool, uv_scale: Vector3, tint := Color.WHITE) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.resource_name = name
+	m.albedo_texture = carbon_texture()
+	m.albedo_color = tint
+	m.uv1_scale = uv_scale
+	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	m.metallic = 0.15
+	m.roughness = 0.35 if gloss else 0.62
+	if gloss:
+		m.clearcoat_enabled = true
+		m.clearcoat = 1.0
+		m.clearcoat_roughness = 0.04
+	return m
+
+
 static func _rim_mat(s: Dictionary) -> StandardMaterial3D:
 	var col: Color = s["rim_color"]
+	if s["rim_material"] == "carbon":
+		# rim colour tints the weave a little (raw carbon stays near black)
+		return carbon_material("rim", s["rim_finish"] != "matte", Vector3(150, 8, 1), Color.WHITE.lerp(Color(col.r * 3.0, col.g * 3.0, col.b * 3.0), 0.25))
 	match String(s["rim_finish"]):
 		"chrome":
 			return _mat("rim", col, 1.0, 0.12)
@@ -335,18 +424,27 @@ static func _build(s: Dictionary) -> ArrayMesh:
 
 # ---------------------------------------------------------------- tyre
 
+## signed power: the superellipse helper
+static func _spow(x: float, e: float) -> float:
+	return signf(x) * pow(absf(x), e)
+
+
 static func _build_tyre(s: Surf, sp: Dictionary, rb: float, R: float, rim_w: float, segs: int) -> void:
-	var tread: String = sp["tread"]
-	var kh: float = KNOB_H[tread]
+	var PT: Dictionary = PATTERNS[sp["pattern"]]
+	var kh: float = PT["h"]
+	var e: float = CASING_EXP[sp["casing"]]                       # 1 = ellipse, < 1 = squarer shoulders
 	var a: float = float(sp["tyre_w_in"]) * 0.0254 * 0.5         # casing half width
 	var zb := minf(rim_w * 0.5 - 0.0035, a * 0.8)                # bead (inside the rim hooks)
 	var top := R - kh                                             # casing crown
-	var sb := sqrt(1.0 - (zb / a) * (zb / a))
+	var tb := acos(pow(zb / a, 1.0 / e))
+	var sb := pow(sin(tb), e)
 	var b := (top - rb) / (1.0 + sb)                              # radial semi-axis
 	var rc := top - b                                             # radius of the widest point
-	var tb := acos(zb / a)
 	var t0 := -tb
 	var t1 := PI + tb
+	# casing point (r, z) at parameter t (t = PI/2 is the crown)
+	var cas := func(t: float) -> Vector2:
+		return Vector2(rc + b * _spow(sin(t), e), a * _spow(cos(t), e))
 	var tcol: Color = sp["tyre_color"]
 	var tan_wall := String(sp["sidewall"]) == "tan"
 	var np := maxi(12, int(round(26.0 * float(sp["detail"]))))
@@ -356,7 +454,7 @@ static func _build_tyre(s: Surf, sp: Dictionary, rb: float, R: float, rim_w: flo
 	# a bead lip tucked under the rim hook, then the casing over the crown
 	for i in np + 1:
 		var t := lerpf(t0, t1, float(i) / float(np))
-		pts.append(Vector2(rc + b * sin(t), a * cos(t)))
+		pts.append(cas.call(t))
 		sharp.append(false)
 		var col := tcol
 		if tan_wall:
@@ -371,24 +469,9 @@ static func _build_tyre(s: Surf, sp: Dictionary, rb: float, R: float, rim_w: flo
 	# knobs. t offset from the crown (rad of the casing ellipse), half width along the profile (m),
 	# half length round the tyre (m), height scale, row phase
 	var circ := TAU * top
-	var pitch := 0.0185 if tread == "knobby" else 0.0125
+	var pitch: float = PT["pitch"]
 	var rows := int(round(circ / pitch / 2.0)) * 2
-	var pattern := []
-	if tread == "knobby":
-		pattern = [
-			# row A: paired centre knobs + big shoulder knobs
-			[[-0.18, 0.0046, 0.0046, 1.0], [0.18, 0.0046, 0.0046, 1.0],
-			 [-0.90, 0.0056, 0.0066, 1.1], [0.90, 0.0056, 0.0066, 1.1]],
-			# row B: one wide centre knob, transition knobs, smaller staggered shoulder knobs
-			[[0.0, 0.0070, 0.0040, 1.0], [-0.54, 0.0042, 0.0050, 1.0], [0.54, 0.0042, 0.0050, 1.0],
-			 [-1.0, 0.0040, 0.0044, 0.95], [1.0, 0.0040, 0.0044, 0.95]],
-		]
-	else:
-		pattern = [
-			[[-0.13, 0.0026, 0.0022, 0.55], [0.13, 0.0026, 0.0022, 0.55],
-			 [-0.9, 0.0046, 0.0050, 1.0], [0.9, 0.0046, 0.0050, 1.0]],
-			[[0.0, 0.0026, 0.0022, 0.55], [-0.36, 0.0026, 0.0024, 0.6], [0.36, 0.0026, 0.0024, 0.6]],
-		]
+	var pattern: Array = PT["rows"]
 	for q in rows:
 		var th := TAU * float(q) / float(rows)
 		var ct := cos(th)
@@ -396,9 +479,9 @@ static func _build_tyre(s: Surf, sp: Dictionary, rb: float, R: float, rim_w: flo
 		var tc := Vector3(-st, ct, 0.0)
 		for kn in pattern[q & 1]:
 			var t: float = PI * 0.5 + float(kn[0])
-			var pr := Vector2(rc + b * sin(t), a * cos(t))
-			var n2 := Vector2(sin(t) / b, cos(t) / a).normalized()      # ellipse normal (r, z)
-			var t2 := Vector2(b * cos(t), -a * sin(t)).normalized()     # profile tangent (r, z)
+			var pr: Vector2 = cas.call(t)
+			var t2: Vector2 = (cas.call(t + 0.002) - cas.call(t - 0.002)).normalized()   # profile tangent (r, z)
+			var n2 := Vector2(-t2.y, t2.x)                                             # outward normal (r, z)
 			var P := Vector3(pr.x * ct, pr.x * st, pr.y)
 			var nn := Vector3(n2.x * ct, n2.x * st, n2.y)
 			var tp := Vector3(t2.x * ct, t2.x * st, t2.y)
@@ -430,24 +513,32 @@ static func _build_tyre(s: Surf, sp: Dictionary, rb: float, R: float, rim_w: flo
 static func _build_rim(s: Surf, sp: Dictionary, rb: float, D: float, W: float, segs: int) -> void:
 	var h := W * 0.5
 	var col := Color.WHITE
-	# +z half, from the spoke bed centre out to the hook and into the (tyre-covered) channel
-	var half := [
-		[-D, 0.0, false],
-		[-D + 0.0005, h * 0.17, false],
-		[-D + 0.0017, h * 0.29, false],
-		[-D + 0.0032, h * 0.36, false],
-		[-D * 0.50, h * 0.93, false],
-		[-D * 0.40, h * 0.985, false],
-		[-D * 0.28, h, false],
-		[0.0, h, false],
-		[0.0042, h, false],
-		[0.0051, h - 0.0005, false],
-		[0.0055, h - 0.0016, false],
-		[0.0051, h - 0.0028, false],
-		[0.0040, h - 0.0034, true],
-		[0.0008, h - 0.0034, true],
-		[-0.0030, h - 0.0060, false],
-	]
+	var profile: String = sp["rim_profile"]
+	# +z half, from the spoke bed centre out along the side wall (the body differs per profile) ...
+	var body: Array
+	match profile:
+		"box":       # square box section: near-vertical walls, tight corners (Spank / Sun-style)
+			body = [[-D, 0.0, false], [-D + 0.0002, h * 0.55, false], [-D + 0.0009, h * 0.86, false],
+				[-D + 0.0026, h, false], [-D * 0.5, h, false]]
+		"vee":       # deep V: walls taper steadily to a narrow spoke bed (Deemax / aero-style)
+			body = [[-D, 0.0, false], [-D + 0.0006, h * 0.20, false], [-D * 0.80, h * 0.52, false],
+				[-D * 0.48, h * 0.84, false], [-D * 0.20, h * 0.985, false]]
+		"round":     # carbon tube: one big rounded curve from the bed to the wall
+			body = [[-D, 0.0, false], [-D + 0.0012, h * 0.34, false], [-D * 0.78, h * 0.66, false],
+				[-D * 0.55, h * 0.87, false], [-D * 0.30, h * 0.98, false]]
+		_:           # hooked / hookless alloy double wall: flat bed, rounded shoulder (DT / Race Face-style)
+			body = [[-D, 0.0, false], [-D + 0.0005, h * 0.17, false], [-D + 0.0017, h * 0.29, false],
+				[-D + 0.0032, h * 0.36, false], [-D * 0.50, h * 0.93, false], [-D * 0.40, h * 0.985, false],
+				[-D * 0.28, h, false]]
+	# ... then the bead wall: a flared hook, or a thicker flat-topped hookless wall
+	var top: Array
+	if profile == "hooked" or profile == "box":
+		top = [[0.0, h, false], [0.0042, h, false], [0.0051, h - 0.0005, false], [0.0055, h - 0.0016, false],
+			[0.0051, h - 0.0028, false], [0.0040, h - 0.0034, true]]
+	else:
+		top = [[0.0, h, false], [0.0034, h, false], [0.0043, h - 0.0007, false], [0.0046, h - 0.0019, false],
+			[0.0042, h - 0.0033, true]]
+	var half: Array = body + top + [[0.0008, h - 0.0034, true], [-0.0030, h - 0.0060, false]]
 	var pts := PackedVector2Array()
 	var sharp := []
 	var cols := PackedColorArray()
