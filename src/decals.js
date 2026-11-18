@@ -95,17 +95,19 @@ export function addBikeDecals(bike, spec) {
   bike.updateMatrixWorld(true);
   const Z = new THREE.Vector3(0, 0, 1), NZ = new THREE.Vector3(0, 0, -1);
 
-  if (spec.downTube) {   // { mesh, from: [x, y], to: [x, y], text, length, height }
-    const { mesh: name, from, to, text, length, height } = spec.downTube;
-    const mesh = bike.getObjectByName(name);
-    if (mesh) {
-      const a = new THREE.Vector3(from[0], from[1], 0), b = new THREE.Vector3(to[0], to[1], 0);
-      const dir = b.clone().sub(a).normalize(), mid = a.clone().lerp(b, 0.5);
-      const mat = decalMat(wordTexture(text, length / height), 0.3);
-      const size = new THREE.Vector3(length, height, 0.2);
-      project(mesh, mid, dir, Z, size, mat);                       // drive side: reads up the tube
-      project(mesh, mid, dir.clone().negate(), NZ, size, mat);     // other side: reads down it
-    }
+  // straight lettering on a tube, both sides of the bike:
+  // { mesh, from: [x, y], to: [x, y], text, length, height, z = 0, depth = 0.2, fill, stroke }
+  // from -> to is the tube's centre line in the mesh's space. A pair of parts (fork legs, chainstays)
+  // sits at +-z: give z (the outer face) and a shallow depth so each side only hits its own part.
+  for (const L of spec.labels || []) {
+    const mesh = bike.getObjectByName(L.mesh);
+    if (!mesh) continue;
+    const a = new THREE.Vector3(L.from[0], L.from[1], 0), b = new THREE.Vector3(L.to[0], L.to[1], 0);
+    const dir = b.clone().sub(a).normalize(), mid = a.clone().lerp(b, 0.5);
+    const mat = decalMat(wordTexture(L.text, L.length / L.height, L), 0.3);
+    const size = new THREE.Vector3(L.length, L.height, L.depth ?? 0.2), z = L.z ?? 0;
+    project(mesh, mid.clone().setZ(z), dir, Z, size, mat);                    // drive side: reads toward `to`
+    project(mesh, mid.clone().setZ(-z), dir.clone().negate(), NZ, size, mat); // other side: the other way
   }
 
   if (spec.tyres) {   // { text, meshes: [names] } -- radii come from each tyre and its rim

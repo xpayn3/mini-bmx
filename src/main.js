@@ -152,9 +152,15 @@ const BIKES = {   // the downhill bike is the main bike: listed first, and the o
       grip: 1.15, oversteer: 0.7,   // big knobbies bite harder and the rear lets go less
       tyreHz: 0.75, tyreDamp: 1.3, travel: 2.2,   // 200 mm of plush travel: lower, softer bounce, soaks more
     },
-    // lettering projected onto the model (decals.js): down tube both sides, both tyre sidewalls
+    // lettering projected onto the model (decals.js): down tube, top tube, chainstays, fork legs, tyres
     decals: {
-      downTube: { mesh: 'frame_1', from: [0.168, 0.486], to: [0.404, 0.809], text: 'GIANT', length: 0.36, height: 0.062 },
+      labels: [
+        { mesh: 'frame_1', from: [0.168, 0.486], to: [0.404, 0.809], text: 'GIANT', length: 0.36, height: 0.062 },    // down tube
+        { mesh: 'frame_1', from: [0.05, 0.74], to: [0.30, 0.86], text: 'GLORY', length: 0.19, height: 0.032 },         // top tube: model name
+        { mesh: 'swing_1', from: [-0.44, -0.025], to: [-0.25, 0.03], text: 'GIANT', length: 0.13, height: 0.026, z: 0.075, depth: 0.06 },   // chainstays
+        { mesh: 'fork_lower_2', from: [-0.045, 0.10], to: [-0.158, 0.32], text: 'FOX', length: 0.12, height: 0.042, z: 0.085, depth: 0.05,
+          italic: false, fill: '#ff7a1a', stroke: 'rgba(0,0,0,0.6)' },   // both fork legs
+      ],
       tyres: { text: 'MAXXIS', meshes: ['wheel_front_3', 'wheel_rear_3'] },
     },
     land: 1.45,   // landings feel this much softer: SLAM! takes a drop ~1.45x as hard, less speed scrubbed
