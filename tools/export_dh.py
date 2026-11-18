@@ -135,7 +135,11 @@ def cook():
     geo = hou.node("/obj").createNode("geo", "game_export")
     om = geo.createNode("object_merge"); om.parm("objpath1").set(n.path())
     drop = geo.createNode("attribwrangle"); drop.setInput(0, om); drop.parm("class").set(1)
-    drop.parm("snippet").set('string drop[] = {%s};\nif (find(drop, s@name) >= 0 || s@part == "rider") removeprim(0, @primnum, 1);'
+    # the derailleur and chain come from export_drivetrain.py (rigged, moving per gear)
+    drop.parm("snippet").set(('string drop[] = {%s};\n'
+                              'if (find(drop, s@name) >= 0 || s@part == "rider") removeprim(0, @primnum, 1);\n'
+                              'if ((s@part == "derailleur" && s@name != "hanger") || s@part == "chain"'
+                              ' || s@name == "jockey" || s@name == "jockey_cap") removeprim(0, @primnum, 1);')
                              % ",".join('"%s"' % d for d in sorted(DROP)))
     clean = geo.createNode("attribdelete"); clean.setInput(0, drop)
     clean.parm("vtxdel").set("*"); clean.parm("ptdel").set("* ^P"); clean.parm("primdel").set("* ^name ^part ^shop_materialpath")

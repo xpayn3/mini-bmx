@@ -14,6 +14,7 @@ import { Gauge } from './gauge.js';
 import { AirHud } from './airhud.js';
 import { Rider } from './rider.js';
 import { carPaint, RotorGlow } from './bikefx.js';
+import { Drivetrain } from './drivetrain.js';
 import { Suspension } from './suspension.js';
 import { buildBike, STYLE_K } from './bikegen.js';
 import { listBikes, gameId, storeId } from './bikestore.js';
@@ -195,7 +196,7 @@ const T = new Proxy(TUNE, { get: (o, k) => o[k] * (RIDE[k] ?? 1) });   // TUNE, 
 // cog has a high top speed, but on a climb the cadence drops, the push dies and you stall unless you
 // shift down. Gear 1 is the smallest cog (fastest). BMX and dirt-jump bikes are single speed.
 // g = how much harder than the 16T reference (the old single-gear feel) a gear is.
-const COGS = [11, 12, 14, 16, 18, 21, 24];
+const COGS = bikeId === 'dh' ? [10, 12, 14, 16, 18, 21, 24] : [11, 12, 14, 16, 18, 21, 24];   // dh: the Houdini cassette
 const GEARED = bikeId === 'dh' || (BIKES[bikeId].cfg && !['bmx', 'dj'].includes(BIKES[bikeId].cfg.style));
 let gear = GEARED ? 3 : -1;   // index into COGS (3 = 16T); -1 = single speed
 const gearK = () => gear < 0 ? 1 : 16 / COGS[gear];
@@ -335,6 +336,18 @@ bike.traverse((o) => {
 addBikeDecals(bike, BIKES[bikeId].decals);
 // brake discs that glow when they're worked hard (st.brakeHeat, built up in physics())
 const rotors = [wheelF, wheelR].map((w) => w && RotorGlow.find(w)).filter(Boolean);
+// the downhill bike's rigged derailleur + running chain (tools/export_drivetrain.py). The rest pose of
+// the nodes they ride on is taken now, before the suspension moves anything.
+let drive = null, gearShown = gear;
+if (bikeId === 'dh') {
+  bike.updateWorldMatrix(true, true);
+  const inv = bike.matrixWorld.clone().invert(), rest = new Map();
+  for (const nm of ['seatstay', 'swing']) { const n = part(nm); if (n) rest.set(n, inv.clone().multiply(n.matrixWorld)); }
+  new GLTFLoader().loadAsync('assets/drivetrain.glb').then((g) => {
+    drive = new Drivetrain(g.scene, { rigParent: part('seatstay'), chainParent: part('swing'), rest, ringTeeth: 34 });
+    window.drivetrain = drive;
+  }).catch((e) => console.warn('drivetrain.glb', e));
+}
 // bolts back in the rocker's pivot bores (main frame pivot, seatstay link, shock eye), from the export's pivots
 if (bd.suspension?.rear && part('rocker')) {
   const r = bd.suspension.rear;
@@ -1472,6 +1485,11 @@ function place() {
   wheelR.rotation.z = -st.wheelR;
   crankN.rotation.z = -st.crank;
   for (const p of pedalPivots) p.rotation.z = st.crank;
+  if (drive) {   // the derailleur walks to the new cog (~0.15 s a gear, like an AXS shift) and the chain runs
+    const now = performance.now(), sdt = Math.min(0.1, (now - (drive.lastT || now)) / 1000); drive.lastT = now;
+    if (gear >= 0) gearShown += Math.sign(gear - gearShown) * Math.min(Math.abs(gear - gearShown), sdt * 7);
+    drive.setGear(gearShown); drive.update(st.crank);
+  }
   if (susp) susp.apply();
   bikeRoot.updateMatrixWorld(true);
 
