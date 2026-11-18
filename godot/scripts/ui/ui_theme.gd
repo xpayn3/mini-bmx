@@ -26,6 +26,21 @@ static func font(black := false) -> Font:
 		_font_black = b
 	return _font_black if black else _font
 
+static var _lcd: Font
+
+## dot-matrix LCD type for the bike computer: Doto (OFL, assets/fonts/), heavy round dots;
+## glyphs Doto lacks (°, …) fall back to the UI font
+static func lcd_font() -> Font:
+	if _lcd == null:
+		var ff: FontFile = load("res://assets/fonts/Doto.ttf")
+		var ts := TextServerManager.get_primary_interface()
+		var v := FontVariation.new()
+		v.base_font = ff
+		v.variation_opentype = {ts.name_to_tag("wght"): 900, ts.name_to_tag("ROND"): 100}
+		v.fallbacks = [font(true)]
+		_lcd = v
+	return _lcd
+
 static func box(bg: Color, radius := 12, pad := 10, border := Color(0, 0, 0, 0), bw := 0) -> StyleBoxFlat:
 	var s := StyleBoxFlat.new()
 	s.bg_color = bg
