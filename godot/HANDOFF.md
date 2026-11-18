@@ -53,7 +53,7 @@ Player data: `%APPDATA%\Godot\app_userdata\Mini BMX\` — `settings.cfg`, `tune.
 W/↑ pedal · S/↓ brake · A/D steer · **Space** hop/pump (hold to charge; **in the air: tuck the bike up**) ·
 **W/S in the air: lean nose down/up** · Shift sprint (stamina) · Q/E shift gears · F bail · Backspace back to
 start · R new world · B next bike · C next camera · Z/X rotate camera · +/- zoom · mouse drag orbit ·
-H records · **P** ride tuning · **K** rider position sliders · **L** rider look · O photo mode · F1 hide HUD ·
+H records · **P / K / L** the tuning card on its Ride / Rider / Look tab · O photo mode · F1 hide HUD ·
 F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A hop, X sprint, bumpers gears.
 
 ## 4. Project layout (`godot/`)
@@ -68,7 +68,7 @@ F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A 
 | `scripts/world/` | `terrain.gd` (chunk streaming, LOD ground with skirts, decorations, water, debris, tape), `terrain_field.gd` (GDScript reference height field) + **`TerrainFieldCs.cs` / `TerrainFeatCs.cs` / `TerrainWoodCs.cs`** (C# port, must match exactly), `terrain_chunk_builder.gd` (worker-thread chunk build), `trail_course.gd`, `trail_features.gd`, `terrain_water.gd`, `terrain_debris.gd`, `tape_sim.gd` (torn tape ribbons), `atmos.gd` (wind, cloud shadows), shaders |
 | `scripts/game/` | `game.gd` (one ride: interpolated drawing between physics states, crash/ragdoll, fx feeding), `camera_rig.gd` (diorama/close/chase/side/iso/top/orbit/drone/trackside/dolly), `ride_audio.gd` (procedural sound) |
 | `scripts/garage/garage.gd` | the garage scene (room, open roller door with the real world outside, rollers, standing rider, all tabs) |
-| `scripts/ui/` | `hud.gd`, `settings_menu.gd`, `tune_panel.gd`, `quick_tune.gd`, `rider_panels.gd` (K/L panels + `POSE_DEFS`, `KITS`, `LOOK_ROWS`), `ui_theme.gd` |
+| `scripts/ui/` | `hud.gd`, `settings_menu.gd`, `tune_card.gd` (the one tuning card: Ride / Rider / Look tabs, each with category tabs), `quick_tune.gd`, `rider_panels.gd` (`POSE_DEFS`, `KITS`, `LOOK_ROWS` + saving), `ui_theme.gd` |
 | `scripts/fx/` | `fx.gd` (dust puffs, dirt chunks, **tyre tracks**), `ride_dust.gd` (GPU dust trail, FogVolume clouds) |
 | `shaders/` | `sky_hdri.gdshader`, `grade.gdshader`, `grime_mud/wet`, **`tyre_track.gdshader`** |
 | `assets/` | `dh.glb`, `helmet.glb`, BMX model, decals (Fox, Cinelli, Glory, Maxxis…), `hdri/` (Poly Haven **Kloofendal 4K**), `textures/painted_concrete_02` (garage floor), `textures/broken_brick_wall` |
@@ -86,7 +86,7 @@ F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A 
   (crouch before a lip, pop, reach for the landing), **fore/aft body spring** (`body_x`, `hip_shift`: braking
   and landings throw the body forward, drive sits it back), **air control** (Space tucks the bike up about the
   shared centre of mass, W/S lean the nose; keys held at take-off count only once pressed again).
-- Every tuning value lives in `Tune` (P panel); bikes multiply them (`BIKES.*.ride` + garage mods).
+- Every tuning value lives in `Tune` (tuning card, Ride tab + Rider › Physics); bikes multiply them (`BIKES.*.ride` + garage mods).
 - Safety net: `is_sane()` / `reset_body()` — a non-finite step restores the last good state.
 
 ### Terrain
@@ -102,7 +102,7 @@ F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A 
 - Procedural meshes posed every frame from the bike's grips/pedals with 2-bone IK; style dictionary
   (`Rider.NEUTRAL`) with a slider per bone: hips, **spine (hunch/arch, side curve, bend low/high, twist)**,
   **pelvis (tilt, roll/hip drop, turn)**, chest, head, shoulders, elbows, wrists, knees, heels, feet.
-  Pose saved per bike in `rider.cfg`; edited in the garage Rider tab and the K panel.
+  Pose saved per bike in `rider.cfg`; edited in the garage Rider tab and the tuning card's Rider tab.
 - The torso is **skinned to 5 spine bones** (Skeleton3D "Spine", identity binds) so it bends; its
   `custom_aabb` follows the body (needed in crashes when the rider node sits at the world origin).
 - Ragdoll on crashes (`ragdoll.gd`), then get up with Space.
@@ -133,7 +133,10 @@ F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A 
 ### Settings & tuning
 - Settings: display (mode, resolution, vsync, UI scale, FPS cap), graphics presets Low/Medium/High/Ultra
   + every option, audio buses, controls (rebind keys + pad), gameplay. Sliders apply on release.
-- P = full ride tuning, Quick tune card with pinned sliders, K = rider position, L = rider look.
+- One tuning card (`TuneCard`): tabs Ride (Steering, Lean, Grip, Speed, Suspension, Jumps), Rider (Body, Spine,
+  Head, Arms, Legs, Motion, Physics) and Look (Kits, Helmet, Clothes); P / K / L open it on Ride / Rider / Look,
+  Reset resets the category shown. Quick tune card keeps the pinned (☆) sliders. Test: `BMX_PANEL=ride|rider|look`
+  + `BMX_PANEL_CAT=<n>`.
 
 ## 6. Testing (the game drives itself — use these, don't ask the user to check)
 
@@ -212,7 +215,7 @@ All of it is on `main` (the Godot branch was merged, the web version removed). W
 Known, not fixed (lower priority from the code review):
 - Records: "distance ridden" always 0; top speed lost if the window is closed instead of quitting.
 - Camera ignores rebound gamepad/camera keys (reads the right stick directly); `cam_up/down` unused.
-- Tune sliders (P panel / Quick card) can show stale values after a reset.
+- Quick tune card sliders can show stale values after a reset (the tuning card re-reads on every tab).
 - HUD hotkeys (P/K/L/H) work on the title screen.
 - Rebinding: no conflict detection; pad rebind can't be cancelled.
 - Garage: test env `BMX_POSE` values get saved if you then touch a slider; config written on every slider tick.

@@ -273,7 +273,10 @@ func _autotest(seconds: float) -> void:
 		game._snap_prev()
 		game.cam.snap_to(Vector3(cp[0], game.phys.y + 0.5, cp[1]))
 	var pedal := OS.get_environment("BMX_IDLE") == ""
-	if OS.get_environment("BMX_PANEL") != "": game.hud._toggle_side(OS.get_environment("BMX_PANEL"))
+	if OS.get_environment("BMX_PANEL") != "":   # tests: open the tuning card (ride/rider/look), BMX_PANEL_CAT = category tab
+		var pt: String = game.hud.SIDE_TABS.get(OS.get_environment("BMX_PANEL"), "ride")
+		if OS.get_environment("BMX_PANEL_CAT") != "": TuneCard.last_cat[pt] = int(OS.get_environment("BMX_PANEL_CAT"))
+		game.hud._toggle_side(OS.get_environment("BMX_PANEL"))
 	if OS.get_environment("BMX_NOLOD") != "": get_viewport().mesh_lod_threshold = 0.0
 	if OS.get_environment("BMX_LOD") != "": get_viewport().mesh_lod_threshold = float(OS.get_environment("BMX_LOD"))
 	if OS.get_environment("BMX_NOVSYNC") != "": DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED); Engine.max_fps = 0
