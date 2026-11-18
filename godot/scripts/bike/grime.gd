@@ -43,9 +43,43 @@ func _exit_tree() -> void:
 	_mats.clear()
 	RenderingServer.global_shader_parameter_set("grime", Vector4.ZERO)
 
-func watch(n: Node) -> void:
+var rider_root: Node3D           # its parts get pinned mud (see _pin)
+var _bike_root: Node3D
+
+## pin: the node's parts move against the bike (the rider) -> their mud is pinned to each part
+func watch(n: Node, pin := false) -> void:
 	roots.append(n)
+	if pin: rider_root = n
 	_scan_t = 0.0
+
+## The mud pass picks splotches from each part's own vertices, and lets mud creep up from the ground by
+## height above the bike. On the rider both would follow the pose (legs pedalling, the spine bending,
+## a ragdoll), so the mud would slide over the body: instead each rider part gets, once, its height as a
+## fixed function of its own vertex, taken from the riding pose, and the skinned torso its rest shape.
+func _pin() -> void:
+	if rider_root == null or _bike_root == null or not is_instance_valid(rider_root): return
+	if not _bike_root.is_ancestor_of(rider_root): return   # crashed: wait for the riding pose
+	var inv := _bike_root.global_transform.affine_inverse()
+	var stack: Array[Node] = [rider_root]
+	while not stack.is_empty():
+		var o: Node = stack.pop_back()
+		stack.append_array(o.get_children())
+		if not (o is MeshInstance3D) or o.has_meta("grime_pinned"): continue
+		var mi := o as MeshInstance3D
+		if not mi.is_visible_in_tree(): continue
+		var skel := mi.get_node_or_null(mi.skeleton) as Skeleton3D if mi.skin else null
+		if skel and skel.get_bone_count() > 1:
+			# rest y -0.5 .. 0.5 runs from the first bone to the last (rider._skin_torso)
+			var nb := skel.get_bone_count()
+			var h0 := (inv * (skel.global_transform * skel.get_bone_global_pose(0) * Vector3(0, -0.5, 0))).y
+			var h1 := (inv * (skel.global_transform * skel.get_bone_global_pose(nb - 1) * Vector3(0, 0.5, 0))).y
+			mi.set_instance_shader_parameter("grime_hrow", Vector4(0, h1 - h0, 0, (h0 + h1) * 0.5))
+			mi.set_instance_shader_parameter("grime_pin", 2.0)
+		else:
+			var t := inv * mi.global_transform
+			mi.set_instance_shader_parameter("grime_hrow", Vector4(t.basis.x.y, t.basis.y.y, t.basis.z.y, t.origin.y))
+			mi.set_instance_shader_parameter("grime_pin", 1.0)
+		mi.set_meta("grime_pinned", true)
 
 func clean() -> void:
 	mud = 0.0; wet = 0.0
@@ -63,13 +97,26 @@ static func _bias_for(mat: Material, mi: Node) -> float:
 		if k in n: return 0.8
 	return 1.0
 
-func _mud_mat(bias: float) -> ShaderMaterial:
-	if not _mud_by_bias.has(bias):
+## a tyre: rubber on a wheel (not the grips). Its mud starts on the tread and spreads to the sidewalls.
+static func _is_tyre(mat: Material, mi: Node) -> bool:
+	var n := mat.resource_name.to_lower()
+	if not ("rubber" in n or "tyre" in n or "tire" in n): return false
+	var p := mi
+	for i in 4:
+		if p == null: break
+		if "wheel" in String(p.name).to_lower(): return true
+		p = p.get_parent()
+	return false
+
+func _mud_mat(bias: float, tyre := false) -> ShaderMaterial:
+	var key := -1.0 if tyre else bias
+	if not _mud_by_bias.has(key):
 		var m := ShaderMaterial.new()
 		m.shader = MUD_SHADER
 		m.set_shader_parameter("bias", bias)
-		_mud_by_bias[bias] = m
-	return _mud_by_bias[bias]
+		m.set_shader_parameter("tyre", tyre)
+		_mud_by_bias[key] = m
+	return _mud_by_bias[key]
 
 func _scan() -> void:
 	var stack: Array[Node] = []
@@ -91,7 +138,7 @@ func _scan() -> void:
 			if _mats.has(m) or m == _wet_mat or m.get_meta("grime_pass", false): continue
 			if m is BaseMaterial3D and (m as BaseMaterial3D).transparency != BaseMaterial3D.TRANSPARENCY_DISABLED: continue
 			if m.next_pass != null: continue   # already layered by something else: leave it alone
-			var mm := _mud_mat(_bias_for(m, mi))
+			var mm := _mud_mat(_bias_for(m, mi), _is_tyre(m, mi))
 			mm.set_meta("grime_pass", true)
 			_mats[m] = mm
 			_set_pass(m, _attached)
@@ -123,10 +170,13 @@ func feed(dt: float, surf: int, speed: float, skid: bool, air: bool, landed: flo
 ## per frame. bike_root: world -> bike-root transform source (the rig: y = height above the ground)
 func update(dt: float, bike_root: Node3D) -> void:
 	_t += dt
+	_bike_root = bike_root
 	_scan_t -= dt
 	if _scan_t <= 0.0:
 		_scan_t = 1.5   # catches parts that load later (helmet, drivetrain)
 		_scan()
+	if _t > 0.3 and int(_t * 4.0) != int((_t - dt) * 4.0):
+		_pin()   # once the rider is posed on the bike; new parts (helmet, kit) get pinned as they appear
 	var m := mud if enabled else 0.0
 	var w := wet if enabled else 0.0
 	var state := 0

@@ -267,6 +267,11 @@ func _autotest(seconds: float) -> void:
 		await _new_game()
 	_start_ride()
 	if OS.get_environment("BMX_CAM") != "": game.cam.set_mode(OS.get_environment("BMX_CAM"))
+	if OS.get_environment("BMX_AT") != "":   # tests: start this many metres down the course
+		var cp: Array = game.terrain.field.course.at(float(OS.get_environment("BMX_AT")))
+		game.phys.reset_at(cp[0], cp[1], atan2(-float(cp[3]), float(cp[2])))
+		game._snap_prev()
+		game.cam.snap_to(Vector3(cp[0], game.phys.y + 0.5, cp[1]))
 	var pedal := OS.get_environment("BMX_IDLE") == ""
 	if OS.get_environment("BMX_PANEL") != "": game.hud._toggle_side(OS.get_environment("BMX_PANEL"))
 	if OS.get_environment("BMX_NOLOD") != "": get_viewport().mesh_lod_threshold = 0.0
@@ -279,6 +284,7 @@ func _autotest(seconds: float) -> void:
 	while (Time.get_ticks_msec() - t0) / 1000.0 < seconds:
 		var el := (Time.get_ticks_msec() - t0) / 1000.0
 		if pedal: Input.action_press("pedal")
+		if OS.get_environment("BMX_MUD") != "": game.grime.mud = float(OS.get_environment("BMX_MUD"))   # tests: hold the mud level
 		var straight := OS.get_environment("BMX_STRAIGHT") != ""   # tests: ride straight, no steering / hops
 		if OS.get_environment("BMX_CAM_ORBIT") != "": game.cam.orbit_t = float(OS.get_environment("BMX_CAM_ORBIT"))
 		if pedal and not straight and int(el) % 6 == 3: Input.action_press("steer_left")

@@ -460,8 +460,15 @@ func _skin_torso() -> void:
 		wts[i * 4 + 1] = w
 	arr[Mesh.ARRAY_BONES] = bones
 	arr[Mesh.ARRAY_WEIGHTS] = wts
+	# the unbent shape, for the mud pass (shaders/grime_mud): its splotches stay put on the jersey
+	var rest := PackedFloat32Array()
+	rest.resize(pos.size() * 3)
+	for i in pos.size():
+		rest[i * 3] = pos[i].x; rest[i * 3 + 1] = pos[i].y; rest[i * 3 + 2] = pos[i].z
+	arr[Mesh.ARRAY_CUSTOM0] = rest
 	var m := ArrayMesh.new()
-	m.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+	m.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr, [], {},
+		Mesh.ARRAY_CUSTOM_RGB_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT)
 	torso.mesh = m
 	spine_skel = Skeleton3D.new()
 	spine_skel.name = "Spine"

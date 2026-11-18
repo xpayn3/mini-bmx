@@ -103,7 +103,7 @@ func _ready() -> void:
 	grime = Grime.new()
 	add_child(grime)
 	grime.watch(rig)
-	grime.watch(rider)
+	grime.watch(rider, true)
 	dust = RideDust.new()
 	add_child(dust)
 	audio = load("res://scripts/game/ride_audio.gd").new()

@@ -511,10 +511,10 @@ func berm_shape(o: float, tn: float) -> float:
 func berm(x: float, z: float) -> float:
 	var h := 0.0
 	query(x, z)
-	if q_d < 12.0 and q_bt > 0.004:
-		var wl := minf(1.0, maxf(0.0, q_k / 0.02))
-		var wr := minf(1.0, maxf(0.0, -q_k / 0.02))
-		h = maxf(h, maxf(berm_shape(-q_a, q_bt * wl), berm_shape(q_a, q_bt * wr)))
+	# q_bt is signed (> 0 left berm, < 0 right) and already smooth along the course
+	var bt := absf(q_bt) - 0.004
+	if q_d < 12.0 and bt > 0.0:
+		h = maxf(h, berm_shape(-q_a, bt) if q_bt > 0.0 else berm_shape(q_a, bt))
 	var p := pathN(x, z)
 	if absf(p) < 0.2:
 		_grad_at(x, z)
