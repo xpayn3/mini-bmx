@@ -1,4 +1,4 @@
-"""Export the rider's full-face helmet from the bicycle project to assets/helmet.glb.
+"""Export the rider's full-face helmet from the bicycle project to godot/assets/helmet.glb.
 
 Source: W:\\AR9\\houdini_bike_2026-09-09\\BIKE PROCEDURAL\\bicycle_procedural test .hip,
 node /obj/Bicycle/bike_skeleton1 (rider_helmet_file = full-face-mtb-helmet/FullFaceHelmet/FF_Helmet.fbx).
@@ -18,7 +18,7 @@ import hou
 
 HIP = r"W:\AR9\houdini_bike_2026-09-09\BIKE PROCEDURAL\bicycle_procedural test .hip"
 NODE = "/obj/Bicycle/bike_skeleton1"
-OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "helmet.glb")
+OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "godot", "assets", "helmet.glb")
 TARGET_TRIS = int(os.environ.get("HELMET_TRIS", "9000"))
 
 # part -> (colour parm, metallic, roughness)

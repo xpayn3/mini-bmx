@@ -1,6 +1,6 @@
 # Mini BMX — Godot 4 PC version
 
-A port of the three.js web game (`../src`, `../index.html`) to **Godot 4.7** (GDScript, Forward+).
+The game: **Godot 4.7** (GDScript, Forward+), a native PC game. It started as a port of the old three.js web prototype, which is kept for reference in `../legacy-threejs/` and is no longer developed.
 
 ## Run
 
