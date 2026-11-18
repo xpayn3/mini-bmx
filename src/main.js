@@ -1048,7 +1048,7 @@ function physics(dt) {
   // (a long look ahead: scanned every 3rd step, counted down in between -- it is the costliest sampling)
   let lipT = Infinity;
   st.lipScan = ((st.lipScan || 0) + 1) % 3;
-  if (st.lipScan !== 0 && !st.air && st.v > 3 && st.lipLast !== undefined) lipT = st.lipLast === Infinity ? Infinity : Math.max(0, st.lipLast - dt);
+  if (st.lipScan !== 0 && !st.air && st.v > 3 && st.lipLast !== undefined) lipT = st.lipLast === null ? Infinity : Math.max(0, st.lipLast - dt);
   else if (!st.air && st.v > 3) {
     const step = 0.3, n = Math.min(36, Math.ceil(st.v * (T.prepTime + 0.1) / step));
     let hPrev = terrain.height(st.x, st.z), sPrev = null;
@@ -1060,7 +1060,8 @@ function physics(dt) {
       sPrev = sl; hPrev = h;
     }
   }
-  st.lipLast = st.air || st.v <= 3 ? undefined : lipT;
+  // (null = no lip in sight: st must hold only finite numbers, the frame loop's safety net resets on any other)
+  st.lipLast = st.air || st.v <= 3 ? undefined : lipT === Infinity ? null : lipT;
   const prepT = lipT < T.prepTime ? smooth01(1 - lipT / T.prepTime) : 0;
   st.prep = st.air ? Math.max(0, (st.prep || 0) - dt * 4) : (st.prep || 0) + (prepT - (st.prep || 0)) * Math.min(1, dt * 8);
   const popping = lipT < 0.14;                    // last instant before the lip: extend hard
