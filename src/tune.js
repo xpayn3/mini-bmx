@@ -2,15 +2,19 @@
 // Values persist in localStorage; "Copy" puts the current set on the clipboard as JSON so it can be
 // pasted back here as new defaults.
 
+import { drawChart, chartTitle } from './tunechart.js';
+
 const DEFS = [
   ['Steering', [
-    ['steerRate',    'Steer build-up',       9,     1,    25,   0.5,  '/s'],
+    ['steerRate',    'Steer build-up',       12,     1,    25,   0.5,  '/s'],
     ['steerRelease', 'Steer release',        7,     1,    25,   0.5,  '/s'],
     ['steerCurve',   'Soft centre',          0.25,  0,    1,    0.05, ''],
     ['turnSlow',     'Turn force (slow)',    4.6,   1,    12,   0.1,  'm/s²'],
-    ['turnFast',     'Turn force (fast)',    7,     1,    14,   0.1,  'm/s²'],
+    ['turnFast',     'Turn force (fast)',    7.5,     1,    14,   0.1,  'm/s²'],
     ['turnFloor',    'Min turn rate',        1.7,   0.3,  3.5,  0.05, 'rad/s'],
     ['steerMax',     'Max bar angle',        0.55,  0.2,  0.9,  0.01, 'rad'],
+    ['slowSteer',    'Bar angle when slow',  1.0,   0.4,  1.4,  0.02, 'rad'],
+    ['slowSteerFade','Slow steering fades by',4,    1,    10,   0.5,  'm/s'],
     ['barSpeed',     'Bar speed',            18,    3,    40,   1,    '/s'],
     ['counter',      'Countersteer flick',   0.2,   0,    0.8,  0.02, ''],
   ]],
@@ -19,6 +23,17 @@ const DEFS = [
     ['oversteer',    'Rear steps out',       0.35,  0,    1,    0.05, ''],
     ['slipRecover',  'Slide catch',          5,     0.5,  15,   0.5,  '/s'],
     ['slipMax',      'Wash-out angle',       0.85,  0.4,  1.4,  0.05, 'rad'],
+  ]],
+  ['Momentum', [
+    ['turnWeight',   'Turn weight',          0.12,  0,    0.5,  0.01, 's'],
+    ['rollRes',      'Rolling resistance',   0.8,   0.3,  1.5,  0.05, '×'],
+    ['flowCarry',    'Flow speed carry',     0.4,   0,    0.8,  0.05, ''],
+    ['flowTime',     'Flow lasts',           4,     1,    10,   0.5,  's'],
+  ]],
+  ['Carving', [
+    ['carveBite',    'Carve extra turn',     2.0,   0,    5,    0.1,  'm/s²'],
+    ['carveGrip',    'Carve extra grip',     0.12,  0,    0.3,  0.01, '×'],
+    ['carveBoost',   'Carve exit speed',     1.2,   0,    3,    0.1,  'm/s'],
   ]],
   ['Air', [
     ['airTurn',      'Air twist speed',      0.7,   0,    3,    0.05, 'rad/s'],
@@ -36,7 +51,7 @@ const DEFS = [
   ]],
   ['Lean', [
     ['leanMax',      'Max lean',             0.65,  0.15, 1.1,  0.01, 'rad'],
-    ['leanIn',       'Roll-in stiffness',    75,    8,    200,  1,    ''],
+    ['leanIn',       'Roll-in stiffness',    95,    8,    200,  1,    ''],
     ['leanOut',      'Roll-out stiffness',   55,    8,    200,  1,    ''],
     ['leanDamp',     'Lean damping',         0.88,  0.3,  1.6,  0.02, ''],
     ['bikeLeanMul',  'Bike leans extra',     1.15,  0.7,  1.8,  0.01, '×'],
@@ -59,6 +74,8 @@ const DEFS = [
     ['popKick',      'Pump extension',       1.5,   0,    4,    0.1,  'm/s'],
     ['autoPop',      'Lip pop height',       1.2,  0,    3,    0.05, 'm/s'],
     ['landPrepTime', 'Reach for landing',    0.35,  0.05, 1,    0.05, 's'],
+    ['chargeTime',   'Hop charge time',      2,     0.5,  4,    0.1,  's'],
+    ['chargePop',    'Full-charge extra pop',0.6,   0,    4,    0.1,  'm/s'],
     ['landSoak',     'Landing absorb',       0.3,   0,    1.5,  0.05, ''],
   ]],
   ['Speed', [
@@ -72,7 +89,7 @@ const DEFS = [
 ];
 
 const KEY = 'bmx-tune-v1';
-const RETIRED = { autoPop: 0.5 };   // key -> previous default (autoPop raised to 1.2 with round-wheel contact)
+const RETIRED = { autoPop: 0.5, steerRate: 9, turnFast: 7, leanIn: 75 };   // key -> previous default
 export const DEFAULTS = {};
 for (const [, rows] of DEFS) for (const [k, , d] of rows) DEFAULTS[k] = d;
 
@@ -84,6 +101,8 @@ try {
   // (save() stores every slider), so it moves to the new one
   for (const [k, old] of Object.entries(RETIRED)) if (saved[k] === old) TUNE[k] = DEFAULTS[k];
 } catch { /* storage blocked: just use defaults */ }
+const PIN_KEY = 'bmx-tune-pins';
+const DEFAULT_PINS = ['slowSteer', 'turnWeight', 'rollRes', 'flowCarry', 'carveBoost', 'chargePop'];
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(TUNE)); } catch { /* ignore */ } };
 
 const fmt = (v, step) => {
@@ -91,7 +110,8 @@ const fmt = (v, step) => {
   return v.toFixed(dec);
 };
 
-export function buildTunePanel() {
+// ride: this bike's multipliers on the sliders (see BIKES in main.js), so the chart shows what it really rides like
+export function buildTunePanel(ride = {}) {
   const css = document.createElement('style');
   css.textContent = `
   #tune { position: fixed; top: 16px; left: 16px; bottom: 16px; width: 320px; max-width: calc(100vw - 32px); z-index: 31;
@@ -154,6 +174,51 @@ export function buildTunePanel() {
   #tune input[type=range]::-moz-range-track { height: 4px; border-radius: 2px; background: rgba(255,255,255,.14); }
   #tune input[type=range]::-moz-range-progress { height: 4px; border-radius: 2px; background: #ffd21f; }
   #tune input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border: 0; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.45); }
+  /* live chart of the group you're touching (stays in the header while the list scrolls) */
+  #tune .chart { margin-top: 10px; }
+  #tune .chart h4 { display: flex; align-items: center; gap: 6px; margin: 0 0 5px; font-size: 11.5px; font-weight: 800; }
+  #tune .chart h4 span { flex: 1; }
+  #tune .chart h4 small { font-weight: 600; font-size: 10.5px; color: rgba(255,255,255,.55); white-space: nowrap; }
+  #tune .chart h4 i { display: inline-block; width: 12px; margin: 0 3px 0 5px; vertical-align: middle; border-top: 2px solid #ffd21f; }
+  #tune .chart h4 i.ld { border-top: 2px dashed rgba(255,255,255,.5); }
+  #tune .chart canvas { display: block; width: 100%; height: 124px; border-radius: 10px; background: rgba(255,255,255,.05); }
+  #tune .chart p { margin: 6px 0 0; min-height: 2.6em; font-size: 11px; font-weight: 600; color: rgba(255,255,255,.7); }
+  #tune details.on summary { color: #ffd21f; }
+  /* pin a slider to the quick card */
+  #tune .pin { width: 22px; height: 22px; padding: 0; border-radius: 7px; font-size: 13px; line-height: 1; color: rgba(255,255,255,.35); background: none; }
+  #tune .pin:hover { color: #fff; background: rgba(255,255,255,.1); }
+  #tune .pin.on { color: #ffd21f; }
+  #tune .row .top label { flex: 1; }
+  /* quick card: the pinned sliders, small enough to keep open while riding */
+  #qtune { position: fixed; right: 16px; top: 92px; width: 236px; max-width: calc(100vw - 32px); max-height: calc(100vh - 170px); z-index: 19;
+    display: flex; flex-direction: column; overflow: hidden; color: #eef4f6; border-radius: 14px;
+    font: 600 11.5px/1.25 ui-rounded, "Segoe UI", system-ui, sans-serif; text-shadow: none;
+    background: rgba(14,24,31,.8); backdrop-filter: blur(12px) saturate(1.2);
+    box-shadow: 0 10px 28px rgba(0,0,0,.3), inset 0 0 0 1px rgba(255,255,255,.08); }
+  #qtune .qh { flex: none; display: flex; align-items: center; gap: 5px; padding: 8px 8px 6px 12px; }
+  #qtune .qh strong { flex: 1; font-size: 12px; font-weight: 800; }
+  #qtune button { border: 0; border-radius: 8px; padding: 4px 8px; cursor: pointer; color: #fff; background: rgba(255,255,255,.09);
+    font: 700 11px ui-rounded, "Segoe UI", system-ui, sans-serif; }
+  #qtune button:hover { background: rgba(255,255,255,.18); }
+  #qtune .qb { overflow-y: auto; padding: 0 12px 8px; scrollbar-width: thin; }
+  #qtune .qe { margin: 0; padding: 0 12px 10px; color: rgba(255,255,255,.55); }
+  #qtune.min .qb, #qtune.min .qe { display: none; }
+  #qtune .row { padding: 4px 0 5px; }
+  #qtune .row .top { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 3px; }
+  #qtune .row label { color: rgba(255,255,255,.88); }
+  #qtune .val { font-variant-numeric: tabular-nums; font-weight: 800; font-size: 11px; padding: 2px 6px; border-radius: 6px; background: rgba(255,255,255,.07); white-space: nowrap; }
+  #qtune .val.changed { color: #ffd21f; background: rgba(255,210,31,.14); cursor: pointer; }
+  #qtune .trk { position: relative; }
+  #qtune .trk::after { content: ''; position: absolute; left: calc(7px + (100% - 14px) * var(--d)); top: 4px; width: 2px; height: 10px;
+    margin-left: -1px; border-radius: 1px; background: rgba(255,255,255,.35); pointer-events: none; }
+  #qtune input[type=range] { -webkit-appearance: none; appearance: none; display: block; width: 100%; height: 18px; margin: 0; background: transparent; cursor: pointer; }
+  #qtune input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px;
+    background: linear-gradient(90deg, #ffd21f calc(var(--p) * 100%), rgba(255,255,255,.14) calc(var(--p) * 100%)); }
+  #qtune input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.45); }
+  #qtune input[type=range]::-moz-range-track { height: 4px; border-radius: 2px; background: rgba(255,255,255,.14); }
+  #qtune input[type=range]::-moz-range-progress { height: 4px; border-radius: 2px; background: #ffd21f; }
+  #qtune input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border: 0; border-radius: 50%; background: #fff; }
+  html.touch #qtune { top: auto; bottom: calc(150px + env(safe-area-inset-bottom)); }
   #tune .empty { display: none; padding: 24px 0; text-align: center; color: rgba(255,255,255,.45); }
   #tune .foot { flex: none; padding: 9px 14px 11px; border-top: 1px solid rgba(255,255,255,.07); font-size: 11px; color: rgba(255,255,255,.45); }
   #tuneBtn { position: fixed; right: 22px; top: 54px; z-index: 19; background: rgba(20,40,50,.45); color: #fff; border: 0; border-radius: 999px;
@@ -169,18 +234,35 @@ export function buildTunePanel() {
       <div class="title"><strong>Ride tuning</strong><kbd>P</kbd><button class="x" data-a="close" title="Close (P)">✕</button></div>
       <div class="tools"><input class="search" type="search" placeholder="Search settings…" spellcheck="false">
         <button data-a="copy" title="Copy values as JSON">Copy</button><button data-a="reset" title="Reset everything to defaults">Reset all</button></div>
+      <div class="chart"><h4><span></span><small><i></i>yours<i class="ld"></i>default</small></h4><canvas></canvas><p></p></div>
     </div>
     <div class="body"><div class="empty">No settings match</div></div>
-    <div class="foot">Click a yellow value to reset it · the tick marks the default</div>`;
+    <div class="foot">Click a yellow value to reset it · the tick marks the default · ☆ pins it to the quick card</div>`;
+  // the chart follows the section you hover or drag in: your values (yellow) against the defaults (dashed)
+  const canvas = panel.querySelector('.chart canvas'), chartH = panel.querySelector('.chart h4 span'), chartP = panel.querySelector('.chart p');
+  const cur = (k) => TUNE[k] * (ride[k] ?? 1), def = (k) => DEFAULTS[k] * (ride[k] ?? 1);
+  const secOf = {};
+  let active = DEFS[0][0];
+  const redraw = (group = active) => {
+    if (group !== active) { secOf[active]?.classList.remove('on'); active = group; }
+    secOf[active]?.classList.add('on');
+    if (!panel.classList.contains('open')) return;
+    chartH.textContent = chartTitle(active);
+    chartP.textContent = drawChart(canvas, active, cur, def);
+  };
+  // quick-card copies of a slider, kept in step with the panel's
+  const quick = {};
+  const syncQuick = (k) => { const q = quick[k]; if (!q) return; q.input.value = TUNE[k]; q.show(); };
   const body = panel.querySelector('.body');
   const rows = {}, sections = [];
   for (const [group, list] of DEFS) {
-    const sec = document.createElement('details'); sec.open = true;
+    const sec = document.createElement('details'); sec.open = true; secOf[group] = sec;
+    sec.addEventListener('pointerenter', () => redraw(group));
     sec.innerHTML = `<summary><span class="n">${group}</span><span class="badge"></span></summary>`;
     const badge = sec.querySelector('.badge'), keys = [];
     for (const [k, label, , min, max, step, unit] of list) {
       const row = document.createElement('div'); row.className = 'row'; row.dataset.label = label.toLowerCase();
-      row.innerHTML = `<div class="top"><label for="t_${k}">${label}</label><span class="val"></span></div>
+      row.innerHTML = `<div class="top"><label for="t_${k}">${label}</label><span class="val"></span><button class="pin" title="Pin to the quick card">☆</button></div>
         <div class="trk"><input id="t_${k}" type="range" min="${min}" max="${max}" step="${step}"></div>`;
       const input = row.querySelector('input'), val = row.querySelector('.val'), trk = row.querySelector('.trk');
       const frac = (v) => Math.min(1, Math.max(0, (v - min) / (max - min)));
@@ -192,14 +274,17 @@ export function buildTunePanel() {
         val.title = ch ? `Reset to ${fmt(DEFAULTS[k], step)}${unit ? ' ' + unit : ''}` : 'Default';
         input.style.setProperty('--p', frac(TUNE[k]));
         updateBadge();
+        syncQuick(k);
       };
       input.value = TUNE[k];
-      input.addEventListener('input', () => { TUNE[k] = +input.value; show(); save(); });
+      input.addEventListener('input', () => { TUNE[k] = +input.value; show(); save(); redraw(group); });
       // don't let the slider keep focus, or A/D and arrows would move it while riding
       input.addEventListener('pointerup', () => input.blur());
       input.addEventListener('keydown', (e) => e.preventDefault());
-      val.addEventListener('click', () => { if (TUNE[k] === DEFAULTS[k]) return; TUNE[k] = DEFAULTS[k]; input.value = TUNE[k]; show(); save(); });
-      rows[k] = { input, show, row };
+      val.addEventListener('click', () => { if (TUNE[k] === DEFAULTS[k]) return; TUNE[k] = DEFAULTS[k]; input.value = TUNE[k]; show(); save(); redraw(group); });
+      const pin = row.querySelector('.pin');
+      pin.addEventListener('click', () => { pin.blur(); togglePin(k); });
+      rows[k] = { input, show, row, pin, group, label, min, max, step, unit, frac };
       keys.push(k);
       sec.appendChild(row);
     }
@@ -226,11 +311,61 @@ export function buildTunePanel() {
   search.addEventListener('input', filter);
   document.body.appendChild(panel);
 
+  // ---- quick card: pinned sliders, to tweak while riding ----
+  let pins = null;
+  try { pins = JSON.parse(localStorage.getItem(PIN_KEY)); } catch { /* ignore */ }
+  if (!Array.isArray(pins)) pins = DEFAULT_PINS.slice();
+  pins = pins.filter((k) => k in rows);
+  const card = document.createElement('div'); card.id = 'qtune';
+  card.innerHTML = `<div class="qh"><strong>Quick tune</strong><button data-q="all" title="All settings (P)">All</button><button data-q="min" title="Fold">–</button></div>
+    <div class="qb"></div><p class="qe">Pin sliders with ☆ in the full panel (P) to tweak them here while you ride.</p>`;
+  const qb = card.querySelector('.qb'), qe = card.querySelector('.qe'), minBtn = card.querySelector('[data-q=min]');
+  const buildCard = () => {
+    for (const k in quick) delete quick[k];
+    qb.innerHTML = '';
+    for (const k of pins) {
+      const r = rows[k], row = document.createElement('div'); row.className = 'row';
+      row.innerHTML = `<div class="top"><label>${r.label}</label><span class="val" title="Click to reset"></span></div><div class="trk"><input type="range" min="${r.min}" max="${r.max}" step="${r.step}" aria-label="${r.label}"></div>`;
+      const input = row.querySelector('input'), val = row.querySelector('.val');
+      row.querySelector('.trk').style.setProperty('--d', r.frac(DEFAULTS[k]));
+      const show = () => { val.textContent = fmt(TUNE[k], r.step) + (r.unit ? ' ' + r.unit : ''); val.classList.toggle('changed', TUNE[k] !== DEFAULTS[k]); input.style.setProperty('--p', r.frac(TUNE[k])); };
+      quick[k] = { input, show };
+      input.value = TUNE[k]; show();
+      const set = (x) => { TUNE[k] = x; r.input.value = x; r.show(); save(); redraw(r.group); };
+      input.addEventListener('input', () => set(+input.value));
+      input.addEventListener('pointerup', () => input.blur());
+      input.addEventListener('keydown', (e) => e.preventDefault());
+      val.addEventListener('click', () => set(DEFAULTS[k]));
+      qb.appendChild(row);
+    }
+    qe.style.display = pins.length ? 'none' : '';
+    for (const k in rows) { const on = pins.includes(k); rows[k].pin.textContent = on ? '★' : '☆'; rows[k].pin.classList.toggle('on', on); }
+  };
+  const togglePin = (k) => {
+    pins = pins.includes(k) ? pins.filter((p) => p !== k) : pins.concat(k);
+    try { localStorage.setItem(PIN_KEY, JSON.stringify(pins)); } catch { /* ignore */ }
+    buildCard();
+  };
+  let folded = false;
+  try { folded = localStorage.getItem(PIN_KEY + '-min') === '1'; } catch { /* ignore */ }
+  const setFold = (f) => { folded = f; card.classList.toggle('min', f); minBtn.textContent = f ? '+' : '–'; try { localStorage.setItem(PIN_KEY + '-min', f ? '1' : '0'); } catch { /* ignore */ } };
+  setFold(folded);
+  buildCard();
+  card.addEventListener('pointerdown', (e) => e.stopPropagation());
+  card.addEventListener('wheel', (e) => e.stopPropagation(), { passive: true });
+  card.addEventListener('click', (e) => {
+    const q = e.target.dataset && e.target.dataset.q; if (!q) return;
+    e.target.blur();
+    if (q === 'min') setFold(!folded);
+    if (q === 'all') toggle();
+  });
+  document.body.appendChild(card);
+
   const btn = document.createElement('button');
   btn.id = 'tuneBtn'; btn.textContent = '⚙ Tune (P)';
   document.body.appendChild(btn);
 
-  const toggle = () => { panel.classList.toggle('open'); btn.style.display = panel.classList.contains('open') ? 'none' : ''; btn.blur(); };
+  const toggle = () => { panel.classList.toggle('open'); btn.style.display = panel.classList.contains('open') ? 'none' : ''; btn.blur(); redraw(); };
   btn.addEventListener('click', toggle);
   addEventListener('keydown', (e) => { if (e.code === 'KeyP' && !e.repeat) toggle(); });
   panel.addEventListener('pointerdown', (e) => e.stopPropagation());
@@ -240,7 +375,7 @@ export function buildTunePanel() {
     if (!a) return;
     e.target.blur();
     if (a === 'close') toggle();
-    if (a === 'reset') { Object.assign(TUNE, DEFAULTS); for (const k in rows) { rows[k].input.value = TUNE[k]; rows[k].show(); } save(); }
+    if (a === 'reset') { Object.assign(TUNE, DEFAULTS); for (const k in rows) { rows[k].input.value = TUNE[k]; rows[k].show(); } save(); redraw(); }
     if (a === 'copy') {
       const txt = JSON.stringify(TUNE, null, 2);
       try { await navigator.clipboard.writeText(txt); e.target.textContent = 'Copied!'; }

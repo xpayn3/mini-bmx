@@ -487,6 +487,7 @@ const bodyVel = new THREE.Vector3(), spinV = new THREE.Vector3();
 function startCrash(reason) {
   crash.pending = null;
   if (crash.on) return;
+  st.flow = 0; flowUI(0);
   crash.on = true; crash.t = 0; crash.rest = 0; crash.armed = false; crash.hold = 0;
   // the bike falls to the side it was already leaning (or a random one)
   crash.side = Math.abs(st.bikeLean) > 0.05 ? Math.sign(st.bikeLean) : (Math.random() < 0.5 ? -1 : 1);
@@ -506,6 +507,12 @@ function startCrash(reason) {
   burst(tmp.set(st.x, st.y + 0.05, st.z), 30, terrain.surface(st.x, st.z), 1.5);
   flash(reason);
 }
+const hopEl = document.getElementById('hopbar'), hopFill = hopEl.querySelector('.fill');
+function hopUI(show, k) {
+  hopEl.classList.toggle('show', show);
+  hopEl.classList.toggle('full', k >= 1);
+  hopFill.style.transform = `scaleX(${Math.min(1, k)})`;
+}
 const getupEl = document.getElementById('getup'), getupFill = getupEl.querySelector('.fill');
 function getupUI(show, holding, k) {
   getupEl.classList.toggle('show', show);
@@ -523,7 +530,7 @@ function getUp() {
   st.hopBlock = true;   // the Space press that got us up must not also pump-pop on release
   st.y = terrain.height(st.x, st.z); st.bodyY = st.y; st.bodyV = 0;
   for (const k of ['nF', 'nR', 'nRef', 'lipLast', 'hfPrev', 'hrPrev']) delete st[k];
-  Object.assign(st, { bank: 0, bodyX: 0, hipShift: 0, spin: 0, aDrive: 0, yDraw: st.y, pitchDraw: 0 });
+  Object.assign(st, { bank: 0, bodyX: 0, hipShift: 0, spin: 0, aDrive: 0, charge: 0, hopCharge: 0, liftT: 0, flow: 0, flowT: 0, latM: 0, carve: 0, carveAcc: 0, carveBerm: false, yDraw: st.y, pitchDraw: 0 });
   for (const k of DRAW_KEYS) drawPrev[k] = st[k];
   leanG.add(rider.group);
   rider.group.position.set(0, 0, 0); rider.group.quaternion.identity();
@@ -586,7 +593,7 @@ function respawn(newWorld) {
   delete st.gPitch;
   st.y = terrain.height(0, 0); st.bodyY = st.y; st.bodyV = 0;
   for (const k of ['nF', 'nR', 'nRef', 'lipLast', 'hfPrev', 'hrPrev']) delete st[k];
-  Object.assign(st, { bank: 0, bodyX: 0, hipShift: 0, spin: 0, aDrive: 0, yDraw: st.y, pitchDraw: 0 });
+  Object.assign(st, { bank: 0, bodyX: 0, hipShift: 0, spin: 0, aDrive: 0, charge: 0, hopCharge: 0, liftT: 0, flow: 0, flowT: 0, latM: 0, carve: 0, carveAcc: 0, carveBerm: false, yDraw: st.y, pitchDraw: 0 });
   for (const k of DRAW_KEYS) drawPrev[k] = st[k];
   rider.resetPose();   // drop the hip / chest spring momentum from before the teleport
 }
@@ -626,6 +633,18 @@ function smashCactus(c, vx, vy, vz) {
     tmp2.set(vx * 0.35 + (Math.random() - .5) * 3, 1 + Math.random() * 2.5, vz * 0.35 + (Math.random() - .5) * 3), CACTUS_PULP, 0.028);
   for (let k = 0; k < 3; k++) fx.puff(tmp.set(c.x, y + 0.3, c.z), tmp2.set((Math.random() - .5) * 1.2, 0.4 + Math.random() * 0.4, (Math.random() - .5) * 1.2), CACTUS_DUST, 0.35, 1.3, 0.4);
   return true;
+}
+const FLOW_MAX = 5;
+const flowEl = document.getElementById('flow');
+let flowShown = -1;
+function flowUI(f) {
+  const n = Math.ceil(f - 0.01);
+  if (n === flowShown) return; flowShown = n;
+  flowEl.classList.toggle('show', n > 0);
+  flowEl.querySelector('b').textContent = '●'.repeat(n) + '○'.repeat(FLOW_MAX - n);
+}
+function flowUp() {
+  st.flow = Math.min(FLOW_MAX, Math.floor(st.flow || 0) + 1); st.flowT = 0;
 }
 function flash(text) { hud.msg.textContent = text; hud.msg.style.opacity = 1; msgT = 1.4; }
 
@@ -696,13 +715,16 @@ function physics(dt) {
     a += aPump;
     if (st.compressV > 0.15 && pumpOK) st.pumpAcc = (st.pumpAcc || 0) + aPump * dt;
     else if (st.compressV <= 0.05) {
-      if ((st.pumpAcc || 0) > 0.35 && msgT <= 0) flash(`PUMP +${Math.round(st.pumpAcc * 3.6)} km/h`);
+      if ((st.pumpAcc || 0) > 0.35) { flowUp(); if (msgT <= 0) flash(`PUMP +${Math.round(st.pumpAcc * 3.6)} km/h`); }
       st.pumpAcc = 0;
     }
     // real cycling losses: small constant rolling resistance (more on grass) + air drag ~ v^2.
     // Pedalling tops out around 37 km/h on the flat, but gravity downhill keeps adding speed.
-    const roll = (surf === 0 ? 0.32 : surf === 3 ? 0.42 : 0.1) * Math.sign(st.v) * Math.min(1, Math.abs(st.v) * 4);
-    a -= roll + T.airDrag * st.v * Math.abs(st.v);
+    // (FLOW: riding a chain of jumps / pumps / carves without braking, you carry speed better -- the rider
+    // is light on the bike, on the good line, never scrubbing; up to flowCarry less rolling + air loss)
+    const carry = 1 - T.flowCarry * (st.flow || 0) / FLOW_MAX;
+    const roll = (surf === 0 ? 0.32 : surf === 3 ? 0.42 : 0.1) * T.rollRes * Math.sign(st.v) * Math.min(1, Math.abs(st.v) * 4);
+    a -= (roll + T.airDrag * st.v * Math.abs(st.v)) * carry;
     // water drag ~ speed: pedalling settles near 20 km/h through it, coasting in at speed fades over
     // a few seconds (was 2.5: ~10 km/h max and a near-instant stop)
     if (inWater) a -= 0.7 * st.v;
@@ -710,6 +732,13 @@ function physics(dt) {
     if (brake && st.v <= 0.3) st.v += (-1.3 - st.v) * Math.min(1, dt * 3);   // walk it backwards
     if (!throttle && !brake && Math.abs(st.v) < 0.05 && Math.abs(g.pitch) < 0.03) st.v = 0;
   }
+  // flow fades if nothing new happens for a while, and braking (scrubbing speed) bleeds it fast
+  if (st.flow > 0) {
+    st.flowT = (st.flowT || 0) + dt;
+    if (brake && st.v > 1) st.flow = Math.max(0, st.flow - dt * 3);
+    else if (st.flowT > T.flowTime) st.flow = Math.max(0, st.flow - dt * 1.5);
+  }
+  flowUI(st.flow || 0);
   // spin-out: past the pedal top speed no human can turn the cranks fast enough, so the rider
   // stops pedalling and coasts (pedals level). Picks it back up once the bike slows a bit.
   if (st.v > T.pedalTop + 0.3) st.spunOut = true;
@@ -733,10 +762,19 @@ function physics(dt) {
     st.bank = (st.bank ?? b) + (clamp(b, -0.9, 0.9) - (st.bank ?? b)) * Math.min(1, dt * 20);
   }
   const bank = st.bank;
+  // CARVE: hold a turn at speed and the rider sinks into it -- weight on the outside pedal, hips in,
+  // bike laid over on its knobs -- so it turns harder and the tyres bite a little better than a
+  // sloppy upright turn. Builds over ~0.5 s of holding, lets go fast; a slide breaks it.
+  const carving = !st.air && steerIn !== 0 && va > 4 && !skid && Math.abs(st.slip || 0) < 0.3;
+  st.carve = carving ? Math.min(1, (st.carve || 0) + dt * 2) : Math.max(0, (st.carve || 0) - dt * 5);
+  const carveF = st.carve * smooth01((va - 4) / 4);
   // speed-aware turn limit: gentle near-upright turns when slow, up to ~0.7 g (~35 deg lean) when fast.
   // A berm leaning into the turn adds what the slope holds for free (g tan bank); off-camber takes it away
-  const aLat = Math.max(1.2, T.turnSlow + spdK * (T.turnFast - T.turnSlow) + G * Math.tan(bank) * Math.sign(sIn) * spdK);
-  const dMax = Math.min(T.steerMax, Math.max(Math.atan(aLat * L / Math.max(va * va, 0.01)), Math.atan(T.turnFloor * L / Math.max(va, 0.1))));
+  const aLat = Math.max(1.2, T.turnSlow + spdK * (T.turnFast - T.turnSlow) + G * Math.tan(bank) * Math.sign(sIn) * spdK + carveF * T.carveBite);
+  // at walking pace the bars turn much further (like a real bike: tight U-turns, picking a line through
+  // rocks); the extra lock fades out by slowSteerFade so fast riding keeps its calm bars
+  const lock = T.steerMax + Math.max(0, T.slowSteer - T.steerMax) * (1 - smooth01(va / Math.max(0.5, T.slowSteerFade)));
+  const dMax = Math.min(lock, Math.max(Math.atan(aLat * L / Math.max(va * va, 0.01)), Math.atan(T.turnFloor * L / Math.max(va, 0.1))));
   const cmd = sIn * dMax;
   const leanNeed = clamp(Math.atan(st.v * (st.v * Math.tan(cmd) / L) / G), -T.leanMax + Math.min(0, bank), T.leanMax + Math.max(0, bank));   // a berm lets it lay over further
   // gentle countersteer only while tipping INTO a turn; released -> bars centre and the bike stands up
@@ -754,7 +792,7 @@ function physics(dt) {
   // (tyres are load-sensitive: double the load gives well under double the grip)
   const loadK = clamp(Math.pow(Math.max(0, nTot / G), 0.7), 0.25, 1.5);
   const muG = mu * G * loadK;
-  const aGrip = muG * Math.sqrt(Math.max(0.05, 1 - (aLong / muG) ** 2)) * (skid ? 0.75 : 1);
+  const aGrip = muG * Math.sqrt(Math.max(0.05, 1 - (aLong / muG) ** 2)) * (skid ? 0.75 : 1) * (1 + T.carveGrip * carveF);
   if (!st.air) {
     const yawCmd = st.frontAir ? 0 : st.v * Math.tan(st.steer) / L;   // front wheel in the air: no steering
     // BANKED / OFF-CAMBER ground: a berm leans the ground into the turn, so part of the cornering force
@@ -765,9 +803,21 @@ function physics(dt) {
     // (past mu * tan(bank) = 1 the formula says "infinite": a wall of ride, capped at 2.5 g)
     const aMax = Math.min(2.5 * G, gE * (sb + mE * cb) / Math.max(0.2, cb - mE * sb));    // most it can turn left
     const aMin = Math.max(-2.5 * G, gE * (sb - mE * cb) / Math.max(0.2, cb + mE * sb));   // most it can turn right (negative)
-    const aLat = clamp(st.v * yawCmd, aMin, aMax);                     // what the tyres actually deliver
-    const courseRate = Math.abs(st.v) > 0.3 ? aLat / st.v : yawCmd;
-    const excess = yawCmd - courseRate;                                 // rotation the tyres couldn't hold
+    // carving, the rider rides the edge of the grip instead of past it: the bars only ask for what the
+    // tyres can hold (a clean arc), where a sudden yank or a locked rear still breaks the back end loose
+    let yawUse = yawCmd;
+    if (carveF > 0 && !skid && Math.abs(st.v) > 0.3) {
+      const want = st.v * yawCmd, cap = (want >= 0 ? aMax : aMin) * 0.97;
+      if (Math.abs(want) > Math.abs(cap)) yawUse = yawCmd + (cap / st.v - yawCmd) * carveF;
+    }
+    const aLatT = clamp(st.v * yawUse, aMin, aMax);                    // what the tyres can deliver right now
+    // TURN MOMENTUM: bike + rider have weight, so the turn builds up and unwinds over a moment instead of
+    // snapping (rolls into a corner, swings a little out of it); more of it the faster you go
+    const tauY = T.turnWeight * (0.4 + 0.6 * spdK);
+    st.latM = tauY > 0.005 ? (st.latM ?? aLatT) + (aLatT - (st.latM ?? aLatT)) * (1 - Math.exp(-dt / tauY)) : aLatT;
+    const aLat = clamp(st.latM, aMin, aMax);
+    const courseRate = Math.abs(st.v) > 0.3 ? aLat / st.v : yawUse;
+    const excess = yawUse - courseRate;                                 // rotation the tyres couldn't hold
     const share = skid ? 1 : T.oversteer;                               // rear steps out vs. front pushes wide
     const margin = 1 - Math.min(1, Math.abs(aLat) / Math.max(0.1, aLat >= 0 ? aMax : -aMin));
     // grip left over pulls the slide back in; steering into the slide (countersteer) catches it faster
@@ -784,6 +834,17 @@ function physics(dt) {
     const scrub = mu * G * Math.min(loadK, 1.5) * Math.abs(Math.sin(st.slip)) * 0.9 +Math.abs(excess) * (1 - share) * Math.abs(st.v) * 0.15;
     st.v -= Math.sign(st.v) * Math.min(Math.abs(st.v), scrub * dt);
     if (Math.abs(st.slip) > T.slipMax && va > 3) crash.pending = 'WASHED OUT!';
+    // a clean carve, pumped out of the exit, gives speed back -- like pumping a roller, the legs push the
+    // bike through the turn. A berm (ground banked into the turn) pays far more than flat ground.
+    const intoBank = Math.max(0, bank * Math.sign(aLat));
+    if (Math.abs(st.slip) > 0.3) st.carveAcc = 0;   // slid it: no reward
+    else if (st.carve > 0.6) st.carveAcc = (st.carveAcc || 0) + Math.abs(aLat) * dt * (1 + 3 * intoBank);
+    else if (st.carve < 0.2 && st.carveAcc > 0) {
+      const gain = st.carveAcc > 2 ? Math.min(T.carveBoost * (intoBank > 0.1 || st.carveBerm ? 1 : 0.5), st.carveAcc * 0.08) : 0;
+      st.carveAcc = 0;
+      if (gain > 0.05 && st.v > 3) { st.v += gain; flowUp(); if (msgT <= 0) flash(`${st.carveBerm ? 'BERM' : 'CARVE'} +${Math.round(gain * 3.6)} km/h`); }
+    }
+    st.carveBerm = st.carve > 0.6 ? (st.carveBerm || intoBank > 0.15) : st.carveAcc > 0 && st.carveBerm;
   } else {
     // IN THE AIR there is nothing to push against: the flight path (course) can't change at all.
     // Steering only twists the bike a little relative to it (a slight turn-down / whip), and with
@@ -793,7 +854,7 @@ function physics(dt) {
     st.yawRate += (yawT - st.yawRate) * Math.min(1, dt * 4);
     st.slip = clamp(st.slip + st.yawRate * dt, -T.airTwist, T.airTwist);
     st.heading = st.course + st.slip;
-    st.latA = 0;
+    st.latA = 0; st.latM = 0;
   }
   // lean follows the actual cornering force, so it scales with speed: almost upright when slow
   const leanT = st.air ? st.lean * 0.98 : clamp(Math.atan(st.latA / G), -T.leanMax + Math.min(0, bank), T.leanMax + Math.max(0, bank));
@@ -946,7 +1007,7 @@ function physics(dt) {
     // the rest (bike + legs) sits on the tyres. The leg force goes through the pedals into the bike: a
     // body still falling after a landing drives the tyres deeper, extending the legs off a lip drags the
     // bike up, and the tyres feel all of it as load (= grip). Forces below are per unit TOTAL mass.
-    const coupled = !st.air && !(st.hopT > 0);        // in the air / mid-hop the body is posed, not simulated
+    const coupled = !st.air && !(st.hopT > 0) && !(st.liftT > 0);        // in the air / mid-hop the body is posed, not simulated
     const PHI = coupled ? clamp(T.riderMass, 0, 0.7) : 0, mB = 1 - PHI;
     const Kb = (2 * Math.PI * T.tyreHz) ** 2;
     const K = Kb * mB, C = 2 * T.tyreDamp * Math.sqrt(Kb) * mB;   // the bike part still bounces at tyreHz
@@ -954,7 +1015,7 @@ function physics(dt) {
     // the face WITH the bike (stiff legs), instead of sagging into it and pinning the bike to the lip
     const kB = T.legStiff * (1 + 5 * (st.prep || 0)), cB = 2 * Math.sqrt(kB) * T.legDamp;
     // the rider keeps a little weight pressed into natural ground (not on jumps, not while hopping)
-    const press = natural && !(st.hopT > 0) ? T.legPress * G : 0;
+    const press = natural && !(st.hopT > 0) && !(st.liftT > 0) ? T.legPress * G : 0;
     const s0 = (G + press) / K;                       // static sag: at rest the contact line sits on the ground
     // what the tyres carry riding along normally (grip is relative to it). Eased in at about the rate the
     // springs settle when the press switches on / off (natural ground <-> built jump), so crossing onto a
@@ -1085,6 +1146,7 @@ function physics(dt) {
       if (susp) susp.land(Math.max(0, -vyIn) * Math.cos(g.pitch) * 0.5 + impact * 0.4, st.frontAir, st.rearAir);
       if (airTime > 0.15) st.shake = Math.max(st.shake, Math.min(0.2, impact * 0.025));
       if (airTime > 0.15) burst(tmp.set(st.x, st.y + 0.03, st.z), Math.round(10 + Math.min(30, impact * 6)), surf, 0.8 + Math.min(1.5, impact * 0.25));
+      if (airTime > 0.45 && impact < 5) flowUp();   // a clean landing keeps the flow going (a cased one doesn't)
       if (airTime > 0.45) bestAir = Math.max(bestAir, airTime);   // the jump card (airhud.js) shows the result
     }
     if (st.air) st.airTime += dt;
@@ -1094,6 +1156,9 @@ function physics(dt) {
   if (st.hopBlock && !keys.Space) st.hopBlock = false;
   const space = keys.Space && !st.hopBlock;
   if (!st.air && space) st.load = Math.min(1, st.load + dt * 3.5);
+  // holding past a tap charges the hop: the bar fills over chargeTime and the rider sinks lower;
+  // a quick tap (bar barely started) is the plain bunny hop
+  if (!st.air && space && !(st.hopT > 0)) st.charge = Math.min(1, (st.charge || 0) + dt / T.chargeTime);
   // the hop happens in two beats like a real one: first the rider explodes up out of the crouch
   // with the tyres still on the ground (legs straighten, nose starts to lift), THEN the bike is
   // yanked off the ground and tucked up under the body.
@@ -1101,7 +1166,8 @@ function physics(dt) {
   // see PUMPING above), not a hop -- so a rhythm section can be pumped with Space alone
   const backside = !st.air && g.pitch < -0.06 && terrain.jump(st.x, st.z)[1] > 0.05;
   if (!space && st._hopHeld && !st.air && st.load > 0.15 && !(st.hopT > 0) && !backside) {
-    st.hopT = HOP_PUSH; st.hopLoad = st.load;
+    st.hopT = HOP_PUSH; st.hopLoad = Math.max(st.load, 0.5);
+    st.hopCharge = smooth01(Math.max(0, ((st.charge || 0) * T.chargeTime - 0.2) / (T.chargeTime - 0.2)));   // first 0.2 s is the tap
     st.compressV = Math.max(st.compressV, (0.05 - st.compress) / HOP_PUSH);   // straighten out of the crouch
     st.bodyV = st.vy + (T.legExt - Math.min(0, (st.bodyY ?? st.y) - st.y)) / HOP_PUSH;   // hips drive up first
   }
@@ -1111,12 +1177,19 @@ function physics(dt) {
     st.hopNose = Math.max(st.hopNose, (0.22 + 0.15 * st.hopLoad) * 0.6 * k);   // front wheel comes up as the arms pull
     if (st.hopT <= 0 || st.air) {   // legs are straight (or a lip already threw us): bike leaves the ground
       st.hopT = 0;
-      st.vy = Math.max(st.vy, 0) + 1.4 + T.popPower * st.hopLoad;   // the springs unload and the tyres leave on their own
+      st.vy = Math.max(st.vy, 0) + 1.4 + T.popPower * (0.4 + 0.6 * (st.hopCharge || 0)) + T.chargePop * (st.hopCharge || 0);   // BMX: tap ~0.3 m, full charge ~1 m   // the springs unload and the tyres leave on their own
       st.kickT = 0.3;   // a rider's hop is not a crest launch: no cap
-      st.hopNose = 0.22 + 0.15 * st.hopLoad;
+      st.hopNose = 0.22 + 0.15 * st.hopLoad + 0.08 * (st.hopCharge || 0);
+      st.hopCharge = 0;
+      // the rider jumps WITH the bike (arms pull it up into the body): the legs must not drag it back
+      // down before the tyres are off, so the body takes the same speed and the leg spring lets go briefly
+      st.bodyV = st.vy; st.liftT = 0.12;
     }
   }
   if (!space || st.air) st.load = Math.max(0, st.load - dt * 6);
+  if (!space || (st.air && st.airTime > 0.15)) st.charge = 0;   // a bump's brief float keeps the charge
+  if (st.liftT > 0) st.liftT = st.air ? 0 : Math.max(0, st.liftT - dt);
+  hopUI(space && (st.charge || 0) * T.chargeTime > 0.2, st.charge || 0);   // past a tap's length: show the bar
   st._hopHeld = space;
   st.hopNose *= Math.exp(-dt * 3.5);
   // --- rider reads the trail like a real one: spots a lip ahead, sinks into the transition,
@@ -1154,7 +1227,7 @@ function physics(dt) {
   }
   st.landPrep = landPrep;
   // damped spring for the crouch: pump-loading, approach crouch, air tuck; landing dip comes from impact
-  const cT = st.air ? -0.12 * tuck : popping || st.hopT > 0 ? 0.05 : -0.17 * st.load - T.prepDepth * st.prep;
+  const cT = st.air ? -0.12 * tuck : popping || st.hopT > 0 ? 0.05 : -0.17 * st.load - 0.1 * (st.charge || 0) - 0.06 * (st.carve || 0) - T.prepDepth * st.prep;
   st.compressV += ((cT - st.compress) * 120 - st.compressV * 14) * dt;
   st.compress = clamp(st.compress + st.compressV * dt, -0.28, 0.05);
   st.airK += ((st.air && st.airTime > 0.12 ? 1 : 0) - st.airK) * Math.min(1, dt * 6);
@@ -1352,7 +1425,7 @@ window.bmxCam = (dt = 1 / 60) => updateCamera(dt);   // debug: advance the camer
 const lastGood = { ...st };   // the spawn state, so even a first-frame blow-up has something to restore
 const clock = new THREE.Clock();
 document.getElementById('loading').remove();
-buildTunePanel();
+buildTunePanel(RIDE);
 buildPosePanel({ bikeId, bikeLabel: BIKES[bikeId].label, defaults: BIKES[bikeId].pose || {},   // K: rider position sliders
   apply: (s) => rider.setStyle(s), sideView: () => { setCam('side'); flash('Side view'); } });
 buildTouchControls();
