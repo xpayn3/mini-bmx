@@ -77,6 +77,7 @@ func _slider(parent: Control, text: String, key: String, lo: float, hi: float, s
 	vl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	s.value_changed.connect(func(v): vl.text = fmt % v; Settings.set_v(key, v))
 	hb.add_child(s); hb.add_child(vl)
+	hb.add_child(UITheme.reset_button(s, float(Settings.DEFAULTS.get(key, s.value))))
 	_row(parent, text, hb, tip)
 
 func _display() -> Control:
@@ -192,6 +193,7 @@ func _interface() -> Control:
 	_check(p, "Bike computer (speed / slope)", "hud_gauge")
 	_check(p, "Gear shifter", "hud_gear")
 	_check(p, "Jump card", "hud_jump")
+	_check(p, "Quick tune card", "hud_quick", "The pinned ride sliders, top right (its ✕ hides it)")
 	return p
 
 func _controls() -> Control:

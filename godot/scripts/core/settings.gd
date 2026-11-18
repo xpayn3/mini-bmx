@@ -91,6 +91,7 @@ const DEFAULTS := {
 	"hud_gauge": true,
 	"hud_gear": true,
 	"hud_jump": true,
+	"hud_quick": true,       # the Quick tune card (top right)
 }
 
 ## Quality presets: every expensive feature in one place (settings menu + --quality=N on the command line).
@@ -134,11 +135,16 @@ const RESOLUTIONS := ["1280x720", "1366x768", "1600x900", "1920x1080", "2560x144
 
 var data := DEFAULTS.duplicate()
 var bindings := {}   # action -> Array[InputEvent]
+var _had_quality := false
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	load_settings()
+	if not FileAccess.file_exists(PATH) or not _had_quality: _sync_quality()
 	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--set="):   # --set=key=value (testing / benchmarks), not saved
+			var kv := a.trim_prefix("--set=")
+			data[kv.get_slice("=", 0)] = str_to_var(kv.get_slice("=", 1))
 		if a.begins_with("--quality="):
 			var lvl := int(a.get_slice("=", 1))
 			for k in PRESETS[lvl]: data[k] = PRESETS[lvl][k]
@@ -225,6 +231,7 @@ func binding_text(action: String, pad: bool) -> String:
 func load_settings() -> void:
 	var cf := ConfigFile.new()
 	if cf.load(PATH) == OK:
+		_had_quality = cf.has_section_key("settings", "quality")
 		for k in DEFAULTS:
 			if cf.has_section_key("settings", k):
 				var val = cf.get_value("settings", k)
