@@ -9,15 +9,23 @@ signal closed(ride: bool)
 const SWATCHES := ["e8432e", "ff6a00", "ffb000", "ffd21f", "c6ff1a", "35d04a", "00a86b", "00c2c7", "2f7de1", "1d2b64",
 	"7b3fe4", "d22fbf", "ff4f9a", "f4f4f0", "b8bcc0", "6b6f75", "2b2d31", "111214", "c8a24a", "8a5a2b", "4a6b3a", "e0d3b8"]
 
-const DOOR_W := 5.0
-const DOOR_H := 3.4
+const DOOR_W := 3.6
+const DOOR_H := 3.2
+const DOOR_X := 0.0   # the door is straight behind the bike
 ## the garage's sun: low, behind the open door (toward -Z), a little to the left, so daylight falls
 ## in through the doorway across the floor
-const SUN := Vector3(-0.35, 0.42, -0.84)
+const SUN := Vector3(0.12, 0.38, -0.92)
 
 var build: Dictionary
 var rig: BikeRig
 var outside: Node3D
+const SLAT := 0.2
+const DOOR_DELAY := 1.0     # s (after the garage is on screen) before the door starts to roll up
+const DOOR_TIME := 3.2      # s to roll it all the way up
+static var _door_opened_once := false   # the door rolls up on the first visit; it stays open after
+var door_slats: Node3D
+var door_open := 1.0
+var door_t := 0.0
 var cam := Camera3D.new()
 var orbit := 0.0
 var orbit_t := 0.0
@@ -103,8 +111,15 @@ func _build_room() -> void:
 	env.fog_depth_end = 260.0
 	env.fog_sky_affect = 0.0
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.32, 0.36, 0.44)
-	env.ambient_light_energy = 0.35
+	env.ambient_light_color = Color(0.3, 0.26, 0.22)   # a warm, dim shed (most light comes in by the door)
+	env.ambient_light_energy = 0.22
+	# real light bounce: daylight off the floor and brick fills the shed (SDFGI)
+	env.sdfgi_enabled = true
+	env.sdfgi_use_occlusion = true
+	env.sdfgi_min_cell_size = 0.1
+	env.sdfgi_cascades = 4
+	env.sdfgi_energy = 1.0
+	env.sdfgi_bounce_feedback = 0.6
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
 	env.tonemap_exposure = 1.05
 	env.ssao_enabled = true
@@ -116,8 +131,9 @@ func _build_room() -> void:
 	env.glow_intensity = 0.5
 	env.glow_hdr_threshold = 0.9
 	env.volumetric_fog_enabled = true
-	env.volumetric_fog_density = 0.014
-	env.volumetric_fog_albedo = Color(0.9, 0.92, 0.95)
+	env.volumetric_fog_density = 0.012          # dusty air: the sunbeam through the door shows
+	env.volumetric_fog_albedo = Color(0.95, 0.9, 0.82)
+	env.volumetric_fog_gi_inject = 0.3
 	env.volumetric_fog_length = 14.0
 	env.adjustment_enabled = true
 	env.adjustment_contrast = 1.06
@@ -160,16 +176,32 @@ func _build_room() -> void:
 	brick.uv1_scale = Vector3.ONE / 1.8
 	brick.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
 	var dw := DOOR_W / 2.0
-	_box(Vector3(7 - dw, 5, 0.25), Vector3(-(7 + dw) / 2.0, 2.5, -4.2), brick)    # left of the door
-	_box(Vector3(7 - dw, 5, 0.25), Vector3((7 + dw) / 2.0, 2.5, -4.2), brick)     # right of the door
-	_box(Vector3(DOOR_W, 5 - DOOR_H, 0.25), Vector3(0, (5 + DOOR_H) / 2.0, -4.2), brick)   # header
+	var dl := DOOR_X - dw   # door's left edge
+	var dr := DOOR_X + dw   # and right edge
+	_box(Vector3(dl + 7, 5, 0.25), Vector3((dl - 7) / 2.0, 2.5, -4.2), brick)      # wall left of the door (behind the bike)
+	_box(Vector3(7 - dr, 5, 0.25), Vector3((7 + dr) / 2.0, 2.5, -4.2), brick)      # wall right of the door
+	_box(Vector3(DOOR_W, 5 - DOOR_H, 0.25), Vector3(DOOR_X, (5 + DOOR_H) / 2.0, -4.2), brick)   # header
 	# the roller door, rolled up into its drum above the opening, and its guide rails
 	var steel_dark := _mat(Color(0.18, 0.19, 0.21), 0.45, 0.7)
-	_cyl(0.32, DOOR_W + 0.3, Vector3(0, DOOR_H + 0.36, -4.0), _mat(Color(0.55, 0.57, 0.6), 0.45, 0.6), Vector3(0, 0, PI / 2))
-	_box(Vector3(DOOR_W + 0.5, 0.08, 0.7), Vector3(0, DOOR_H + 0.72, -3.95), steel_dark)
+	_cyl(0.3, DOOR_W + 0.3, Vector3(DOOR_X, DOOR_H + 0.34, -4.0), _mat(Color(0.55, 0.57, 0.6), 0.45, 0.6), Vector3(0, 0, PI / 2))
+	_box(Vector3(DOOR_W + 0.5, 0.08, 0.66), Vector3(DOOR_X, DOOR_H + 0.68, -3.95), steel_dark)
 	for sx in [-1, 1]:
-		_box(Vector3(0.1, DOOR_H, 0.14), Vector3(sx * (dw + 0.05), DOOR_H / 2.0, -4.05), steel_dark)
-	_box(Vector3(DOOR_W + 0.2, 0.03, 0.3), Vector3(0, 0.015, -4.2), _mat(Color(0.3, 0.3, 0.32), 0.5, 0.8))   # threshold strip
+		_box(Vector3(0.1, DOOR_H, 0.14), Vector3(DOOR_X + sx * (dw + 0.05), DOOR_H / 2.0, -4.05), steel_dark)
+	_box(Vector3(DOOR_W + 0.2, 0.03, 0.3), Vector3(DOOR_X, 0.015, -4.2), _mat(Color(0.3, 0.3, 0.32), 0.5, 0.8))   # threshold strip
+	# the door curtain: ribbed steel slats that roll up into the drum (animated the first time)
+	door_slats = Node3D.new()
+	door_slats.name = "DoorSlats"
+	add_child(door_slats)
+	var slat_mat := _mat(Color(0.5, 0.52, 0.55), 0.5, 0.55)
+	var slat_n := ceili(DOOR_H / SLAT)
+	for i in slat_n:
+		var b := BoxMesh.new(); b.size = Vector3(DOOR_W - 0.04, SLAT - 0.012, 0.05)
+		var mi := MeshInstance3D.new(); mi.mesh = b; mi.material_override = slat_mat
+		mi.set_meta("y0", SLAT * (i + 0.5))
+		door_slats.add_child(mi)
+	door_slats.position = Vector3(DOOR_X, 0, -4.12)
+	door_open = 1.0 if _door_opened_once else 0.0
+	_place_slats()
 	_box(Vector3(0.2, 5, 12), Vector3(-7, 2.5, 1.8), wall)
 	_box(Vector3(0.2, 5, 12), Vector3(7, 2.5, 1.8), wall)
 	_box(Vector3(14.2, 0.2, 12.2), Vector3(0, 5, 1.8), _mat(Color(0.08, 0.08, 0.09)))
@@ -190,14 +222,14 @@ func _build_room() -> void:
 	_cyl(0.18, 0.04, Vector3(-4.1, 2.25, -4.01), chrome, Vector3(PI / 2, 0, 0))   # a chainring on the wall
 	# red tool cabinet + a stack of tyres on the right
 	var red := _mat(Color("b3261e"), 0.35, 0.3)
-	_box(Vector3(1.0, 1.1, 0.55), Vector3(5.2, 0.55, -3.6), red)
+	_box(Vector3(1.0, 1.1, 0.55), Vector3(3.4, 0.55, -3.75), red)
 	for i in 5:
-		_box(Vector3(0.92, 0.01, 0.02), Vector3(5.2, 0.2 + i * 0.2, -3.32), chrome)
+		_box(Vector3(0.92, 0.01, 0.02), Vector3(3.4, 0.2 + i * 0.2, -3.47), chrome)
 	var rubber := _mat(Color(0.06, 0.06, 0.06), 0.85)
 	for i in 4:
 		var t := TorusMesh.new(); t.inner_radius = 0.25; t.outer_radius = 0.37
 		var mi := MeshInstance3D.new(); mi.mesh = t; mi.material_override = rubber
-		mi.position = Vector3(4.6, 0.06 + i * 0.12, -1.6); mi.rotation.y = i * 0.4
+		mi.position = Vector3(5.6, 0.06 + i * 0.12, -2.6); mi.rotation.y = i * 0.4
 		add_child(mi)
 	# a work stand leaning in the corner and a floor pump
 	_cyl(0.02, 1.4, Vector3(-6.5, 0.7, -2.2), steel, Vector3(0, 0, 0.12))
@@ -206,7 +238,7 @@ func _build_room() -> void:
 	var lamp := _cyl(0.28, 0.18, Vector3(0, 3.6, 0), _mat(Color(0.1, 0.1, 0.11), 0.4, 0.7))
 	lamp.rotation = Vector3.ZERO
 	var glow := StandardMaterial3D.new()
-	glow.emission_enabled = true; glow.emission = Color(1, 0.95, 0.85); glow.emission_energy_multiplier = 6.0
+	glow.emission_enabled = true; glow.emission = Color(1, 0.78, 0.5); glow.emission_energy_multiplier = 5.0
 	glow.albedo_color = Color(1, 1, 1)
 	_cyl(0.24, 0.01, Vector3(0, 3.505, 0), glow)
 	_cyl(0.008, 1.3, Vector3(0, 4.35, 0), steel)
@@ -214,26 +246,25 @@ func _build_room() -> void:
 	spot.position = Vector3(0, 3.5, 0)
 	spot.rotation = Vector3(-PI / 2, 0, 0)
 	spot.spot_range = 6.0
-	spot.spot_angle = 26.0
-	spot.spot_angle_attenuation = 0.9
-	spot.light_energy = 16.0
-	spot.light_color = Color(1, 0.95, 0.86)
-	spot.light_volumetric_fog_energy = 3.0
+	spot.spot_angle = 50.0                       # an old enamel shop lamp: warm, wide, soft-edged
+	spot.spot_angle_attenuation = 1.4
+	spot.light_energy = 7.0
+	spot.light_color = Color(1.0, 0.8, 0.58)
+	spot.light_volumetric_fog_energy = 1.0
 	spot.shadow_enabled = true
 	spot.shadow_blur = 1.5
 	add_child(spot)
-	# cool rim lights and a dim overhead fill so the room isn't black
-	for p in [[Vector3(-3, 2.6, 2.5), Color(0.45, 0.6, 1.0), 2.0], [Vector3(4.5, 2.2, -2.5), Color(1.0, 0.55, 0.3), 1.2]]:
-		var l := OmniLight3D.new()
-		l.position = p[0]; l.light_color = p[1]; l.light_energy = p[2]; l.omni_range = 7.0
-		l.light_volumetric_fog_energy = 0.0
-		add_child(l)
+	# the bulb's own glow round the room (the shade only throws light down)
+	var bulb := OmniLight3D.new()
+	bulb.position = Vector3(0, 3.3, 0); bulb.light_color = Color(1.0, 0.78, 0.52)
+	bulb.light_energy = 0.7; bulb.omni_range = 7.0; bulb.light_volumetric_fog_energy = 0.2
+	add_child(bulb)
 	# fluorescent strip over the bench
 	var strip := StandardMaterial3D.new()
-	strip.emission_enabled = true; strip.emission = Color(0.85, 0.92, 1.0); strip.emission_energy_multiplier = 4.0
+	strip.emission_enabled = true; strip.emission = Color(0.92, 0.95, 1.0); strip.emission_energy_multiplier = 2.5
 	_box(Vector3(1.6, 0.04, 0.08), Vector3(-5.0, 3.0, -3.7), strip)
 	var fl_l := OmniLight3D.new()
-	fl_l.position = Vector3(-5.0, 2.8, -3.4); fl_l.light_color = Color(0.85, 0.92, 1.0); fl_l.light_energy = 1.2; fl_l.omni_range = 4.0
+	fl_l.position = Vector3(-5.0, 2.8, -3.4); fl_l.light_color = Color(0.92, 0.95, 1.0); fl_l.light_energy = 0.6; fl_l.omni_range = 4.0
 	add_child(fl_l)
 
 ## The real procedural world outside the door: the world seed you ride, turned so you look down the
@@ -251,7 +282,7 @@ func _build_outside() -> void:
 	t.update_stream(spot.x, spot.y, INF)
 	outside.rotation.y = PI / 2   # world +X (down the trail) -> garage -Z (out of the door)
 	var to_world := func(gx: float, gz: float) -> Vector2:   # garage floor point -> terrain x / z
-		var w := Basis(Vector3.UP, -PI / 2) * Vector3(gx, 0, gz + 4.35)
+		var w := Basis(Vector3.UP, -PI / 2) * Vector3(gx - DOOR_X, 0, gz + 4.35)
 		return Vector2(spot.x + w.x, spot.y + w.z)
 	# sink the ground so none of it pokes up through the garage floor: the highest point under the
 	# building (with a margin) goes 5 cm below the floor; the threshold covers any step at the door
@@ -260,14 +291,14 @@ func _build_outside() -> void:
 		for gx in range(-8, 9):
 			var w: Vector2 = to_world.call(float(gx), float(gz))
 			h_top = maxf(h_top, t.height(w.x, w.y))
-	outside.position = Vector3(0, -h_top - 0.05, -4.35) - Basis(Vector3.UP, PI / 2) * Vector3(spot.x, 0, spot.y)
+	outside.position = Vector3(DOOR_X, -h_top - 0.05, -4.35) - Basis(Vector3.UP, PI / 2) * Vector3(spot.x, 0, spot.y)
 	var sun := DirectionalLight3D.new()
 	sun.light_color = Color("ffe2bd")
-	sun.light_energy = 2.2
+	sun.light_energy = 1.5
 	sun.shadow_enabled = true
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
 	sun.directional_shadow_max_distance = 120.0
-	sun.light_volumetric_fog_energy = 1.5
+	sun.light_volumetric_fog_energy = 1.0
 	add_child(sun)
 	sun.look_at_from_position(SUN.normalized(), Vector3.ZERO, Vector3.UP)
 
@@ -294,7 +325,24 @@ func _changed() -> void:
 	_update_stats()
 
 # ================================================================ camera
+## slats ride up by door_open * DOOR_H; any that reach the drum disappear into it
+func _place_slats() -> void:
+	var lift := DOOR_H * door_open
+	for mi in door_slats.get_children():
+		var y: float = mi.get_meta("y0") + lift
+		mi.position.y = y
+		mi.visible = y < DOOR_H - SLAT * 0.3
+
 func _process(dt: float) -> void:
+	if door_open < 1.0:
+		door_t += minf(dt, 0.05)   # the first frame after the long build has a huge dt: don't let it eat the wait
+		var k := clampf((door_t - DOOR_DELAY) / DOOR_TIME, 0.0, 1.0)
+		var e := k * k * (3.0 - 2.0 * k)
+		door_open = minf(1.0, e + sin(k * 37.0) * 0.004 * (1.0 - k) * k * 4.0)   # a little motor judder
+		if k >= 1.0:
+			door_open = 1.0
+			_door_opened_once = true
+		_place_slats()
 	if _dirty > 0:
 		_dirty -= dt
 		if _dirty <= 0: _rebuild_bike()
@@ -407,6 +455,13 @@ func _build_ui() -> void:
 	var ride := UITheme.button("Save & ride  ▶", func(): _close(true), 20)
 	ride.custom_minimum_size.x = 200
 	bot.add_child(ride)
+	# solid backs: the buttons sit over the sunlit floor
+	for b in bot.get_children():
+		if b is Button:
+			b.add_theme_stylebox_override("normal", UITheme.box(Color(0.06, 0.11, 0.15, 0.92), 10, 16))
+			b.add_theme_stylebox_override("hover", UITheme.box(Color(0.14, 0.22, 0.28, 0.95), 10, 16))
+	ride.add_theme_stylebox_override("normal", UITheme.box(UITheme.ACCENT, 10, 16))
+	ride.add_theme_color_override("font_color", UITheme.NAVY)
 	_file_dialog = FileDialog.new()
 	_file_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
 	_file_dialog.access = FileDialog.ACCESS_FILESYSTEM
