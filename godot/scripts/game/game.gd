@@ -15,7 +15,7 @@ const SKY := Color("a9d6ea")
 ## ride light: a clear afternoon. A strong warm sun against a cool blue sky fill (warm light, cool shade)
 const RIDE_SUN := 1.8
 const RIDE_SUN_COL := Color("fff1de")
-const RIDE_FOG := Color(0.68, 0.79, 0.92)
+const RIDE_FOG := Color(0.74, 0.85, 0.98)
 const DUST_SPLASH := Color("eef6fa")
 const DIRT_CHUNK := Color("7a5534")
 const ROCK_CHUNK := Color("8d8a84")
@@ -139,6 +139,7 @@ func _build_environment() -> void:
 	var target := atan2(SUN_DIR.x, -SUN_DIR.z)
 	sm.set_shader_parameter("rotation", target - (HDRI_SUN_U - 0.5) * TAU)
 	sm.set_shader_parameter("energy", 1.0)
+	sm.set_shader_parameter("sunny", 1.0)
 	sm.set_shader_parameter("light_energy", 0.55)
 	sky.radiance_size = Sky.RADIANCE_SIZE_256
 	sky.sky_material = sm
@@ -156,9 +157,7 @@ func _build_environment() -> void:
 	env.fog_enabled = true
 	env.fog_mode = Environment.FOG_MODE_DEPTH
 	env.fog_light_color = RIDE_FOG   # the HDRI's horizon, a clear day
-	env.fog_density = 0.85
-	env.fog_sky_affect = 0.25
-	env.fog_depth_curve = 1.0
+	_ride_fog()
 	env.ssao_radius = 0.6
 	env.ssao_intensity = 2.0
 	env.ssao_power = 1.5
@@ -249,8 +248,10 @@ func set_scenic(on: bool) -> void:
 		sun.shadow_blur = 2.0
 		sun_energy = 2.3
 		sky_mat.set_shader_parameter("golden", 1.0)
+		sky_mat.set_shader_parameter("sunny", 0.0)
 		sky_mat.set_shader_parameter("light_energy", 0.85)
 		env.fog_light_color = Color(0.93, 0.70, 0.52)
+		env.fog_aerial_perspective = 0.0
 		env.fog_sun_scatter = 0.35
 		env.fog_sky_affect = 0.0
 		env.fog_depth_curve = 1.25
@@ -273,12 +274,11 @@ func set_scenic(on: bool) -> void:
 		sun.shadow_blur = 1.0
 		sun_energy = RIDE_SUN
 		sky_mat.set_shader_parameter("golden", 0.0)
+		sky_mat.set_shader_parameter("sunny", 1.0)
 		sky_mat.set_shader_parameter("light_energy", 0.55)
 		env.fog_light_color = RIDE_FOG
 		env.fog_sun_scatter = 0.0
-		env.fog_sky_affect = 0.25
-		env.fog_depth_curve = 1.0
-		env.fog_density = 0.85
+		_ride_fog()
 		env.volumetric_fog_albedo = Color(0.86, 0.9, 0.95)
 		env.volumetric_fog_density = 0.0012
 		env.tonemap_exposure = 0.8
@@ -652,8 +652,8 @@ func _process(dt: float) -> void:
 		env.fog_depth_end = 3100.0
 		sun.directional_shadow_max_distance = 110.0
 	else:
-		env.fog_depth_begin = (cam.dist + 40) * vd
-		env.fog_depth_end = (cam.dist * 1.6 + 88) * vd
+		env.fog_depth_begin = (cam.dist + 55) * vd
+		env.fog_depth_end = (cam.dist * 1.6 + 100) * vd
 		sun.directional_shadow_max_distance = clampf(cam.dist * 2.2, 30, 120) * (0.7 if int(Settings.get_v("shadows")) == 0 else 1.0)
 	if cam_attr.dof_blur_far_enabled and scenic:   # lookout: keep the view sharp, soften only the horizon
 		cam_attr.dof_blur_far_distance = 900.0
@@ -672,3 +672,12 @@ func _process(dt: float) -> void:
 	if audio: audio.update_audio(dt)
 	if absf(st.v) * 3.6 > float(GameState.records.top_speed) + 0.5 and not st.crash_on:
 		GameState.records.top_speed = absf(st.v) * 3.6
+
+
+## ride fog: a light, sunny distance haze that takes the sky's own colour (no grey wall at the horizon)
+## and leaves the sky itself clear
+func _ride_fog() -> void:
+	env.fog_density = 0.6
+	env.fog_sky_affect = 0.0
+	env.fog_depth_curve = 1.6
+	env.fog_aerial_perspective = 0.75

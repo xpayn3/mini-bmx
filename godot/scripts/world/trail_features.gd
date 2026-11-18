@@ -88,6 +88,12 @@ class Flat:
 
 
 ## wooden deck: top(u) above the flattened ground for u0 <= u <= u1, |w| <= half
+## riding a deck: grace past the plank edge (m), side bevel slope, and the deck height below which the
+## sides are bevelled (the ramp-up parts; bridge / skinny / kicker tops keep a real edge)
+const WOOD_EDGE := 0.12
+const WOOD_BEVEL := 1.2
+const WOOD_BEVEL_MAX := 0.44
+
 class Wood:
 	extends RefCounted
 	var kind: int   # 0 woodKicker, 1 skinny, 2 bridge
@@ -163,7 +169,7 @@ static func make_set() -> Dictionary:
 	var wood := {
 		"woodKicker": Wood.new(0, 0.0, 3.8, 0.85, true, kick, skin),
 		"skinny": Wood.new(1, 0.0, 19.0, 0.33, false, kick, skin),
-		"bridge": Wood.new(2, 0.0, 15.0, 0.8, false, kick, skin),
+		"bridge": Wood.new(2, 0.0, 15.0, 1.0, false, kick, skin),
 	}
 	var dig := {"bridge": Hermite.new([[0, 0, 0], [1.6, 0, 0], [3.4, -1.9, 0], [11.6, -1.9, 0], [13.4, 0, 0], [15, 0, 0]])}
 	return {"profiles": profiles, "wood": wood, "dig": dig}

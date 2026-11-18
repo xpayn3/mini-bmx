@@ -793,8 +793,14 @@ func _feat_at(j: Feat, x: float, z: float) -> void:
 		fo_m = mk
 		fo_plane = pl
 	var wd := j.wood
-	if wd != null and u >= wd.u0 and u <= wd.u1 and w <= wd.half:
-		var top := pl + wd.top(u)
+	if wd != null and u >= wd.u0 and u <= wd.u1:
+		# a tyre's grace past the plank ends, then (on the low ramp parts only) a soft bevel down to the
+		# dirt, so rolling onto a ramp at an angle climbs it instead of hitting a wall
+		var wt := wd.top(u)
+		var over := w - wd.half - TrailFeatures.WOOD_EDGE
+		if over > 0.0 and (wt >= TrailFeatures.WOOD_BEVEL_MAX or over * TrailFeatures.WOOD_BEVEL >= wt):
+			return
+		var top := pl + wt - maxf(0.0, over) * TrailFeatures.WOOD_BEVEL
 		if not fo_has_wood or top > fo_wood:
 			fo_wood = top
 			fo_has_wood = true
