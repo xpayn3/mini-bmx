@@ -630,6 +630,12 @@ export class Terrain {
   // height() is what you ride on: the ground, or a wooden deck where there is one
   // height() is what you ride on: the ground, a wooden deck where there is one, and the tops of
   // rocks, logs and stumps (a dome over each one's footprint), so the wheels really roll over them
+  // the ground or a deck, WITHOUT the rock / log domes (for the cliff-wall test: rocks have their own
+  // rule -- low ones are rolled over, tall ones stop you -- and a dome's steep edge is not a cliff)
+  surface(x, z) {
+    const g = this.ground(x, z);
+    return this._wood !== null && this._wood > g ? this._wood : g;
+  }
   height(x, z) {
     let g = this.ground(x, z);
     if (this._wood !== null && this._wood > g) g = this._wood;

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { buildGoggles, buildShoe } from './gear.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { buildGoggles, buildShoe, buildHand, torsoGeometry } from './gear.js';
 
 // Low-poly cartoon BMX rider. Local frame: +X forward, +Y up, +Z rider's right.
 
@@ -21,6 +22,8 @@ const _ankle = new THREE.Vector3();
 const _neck = new THREE.Vector3();
 const _headP = new THREE.Vector3();
 const _m4 = new THREE.Matrix4();
+const _tm = new THREE.Matrix4(), _tr = new THREE.Vector3(), _tf = new THREE.Vector3(), _tu = new THREE.Vector3();
+const _right = new THREE.Vector3(0, 0, 1);
 const _q = new THREE.Quaternion();
 
 function mat(color, extra) {
@@ -36,6 +39,24 @@ function setLimb(mesh, a, b) {
   mesh.scale.set(1, len, 1);
   _d.multiplyScalar(1 / len);
   mesh.quaternion.setFromUnitVectors(UP, _d);
+}
+
+// Torso: like setLimb, but keeps its width across the body (`right`), so the shaped section doesn't twist.
+function setTorso(mesh, a, b, right) {
+  _d.subVectors(b, a);
+  const len = Math.max(_d.length(), 1e-4);
+  mesh.position.copy(a).addScaledVector(_d, 0.5);
+  mesh.scale.set(1, len, 1);
+  _d.multiplyScalar(1 / len);
+  const r = _tr.copy(right).addScaledVector(_d, -right.dot(_d)).normalize(), f = _tf.crossVectors(_d, r);
+  mesh.quaternion.setFromRotationMatrix(_tm.makeBasis(f, _d, r));
+}
+// Hand: +X along the forearm (elbow -> hand), +Z along the bar (across the body), +Y the back of the hand.
+function orientHand(hand, elbow, at, right) {
+  const x = _tf.subVectors(at, elbow).normalize();
+  const z = _tr.copy(right).addScaledVector(x, -right.dot(x)).normalize();
+  const y = _tu.crossVectors(z, x);
+  hand.quaternion.setFromRotationMatrix(_tm.makeBasis(x, y, z));
 }
 
 // Analytic two-bone IK. Writes mid joint into outJoint and reachable end into outEnd.
@@ -61,13 +82,15 @@ export class Rider {
     this.group = new THREE.Group();
     this.group.name = 'Rider';
 
-    const mCoral = mat(0xff6a4d);
-    const mCoralDark = mat(0xe04e34);
-    const mNavy = mat(0x1d2b64);
-    const mNavyLight = mat(0x3a4c9a);
+    // body / kit: smooth-shaded fabric (the helmet and shoes keep their own looks)
+    const soft = { flatShading: false, roughness: 0.8 };
+    const mCoral = mat(0xff6a4d, soft);
+    const mCoralDark = mat(0xe04e34, soft);
+    const mNavy = mat(0x1d2b64, soft);
+    const mNavyLight = mat(0x3a4c9a, soft);
     const mWhite = mat(0xf8f8f8);
     const mRed = mat(0xd8232a);
-    const mYellow = mat(0xffd21f);
+    const mYellow = mat(0xffd21f, { flatShading: false, roughness: 0.7 });
     const mTeal = mat(0x12d6c4, { roughness: 0.45 });
     const mTealDark = mat(0x0a9a8e);
     const mSkin = mat(0xffc8a0);
@@ -76,21 +99,23 @@ export class Rider {
     // recolourable kit (setLook): the darker / lighter partner of each colour follows it
     this.kit = { jersey: [mCoral, mCoralDark], pants: [mNavy, mNavyLight], gloves: [mYellow] };
     const g = this.group;
-    const cyl = (rt, rb, m, seg = 6) => {
+    const cyl = (rt, rb, m, seg = 16) => {
       const mesh = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, 1, seg), m);
       g.add(mesh);
       return mesh;
     };
-    const sph = (r, m, parent, ws = 7, hs = 5) => {
+    const sph = (r, m, parent, ws = 16, hs = 12) => {
       const mesh = new THREE.Mesh(new THREE.SphereGeometry(r, ws, hs), m);
       (parent || g).add(mesh);
       return mesh;
     };
 
     // torso + hips
-    this.torso = cyl(0.175, 0.14, mCoral, 7);
-    this.hoodHem = cyl(0.15, 0.15, mCoralDark, 7); // reused as belly band (short)
-    this.pelvisMesh = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.15, 0.3), mNavy);
+    this.torso = new THREE.Mesh(torsoGeometry(), mCoral);   // shaped jersey torso (gear.js), hips -> collar
+    g.add(this.torso);
+    this.hoodHem = cyl(0.15, 0.15, mCoralDark, 22); // old belly band: the shaped torso has its own waist
+    this.hoodHem.visible = false;
+    this.pelvisMesh = new THREE.Mesh(new RoundedBoxGeometry(0.2, 0.15, 0.3, 3, 0.05), mNavy);
     g.add(this.pelvisMesh);
     this.hood = sph(0.11, mCoralDark);
     this.shoulderSph = [sph(0.075, mCoral), sph(0.075, mCoral)];
@@ -117,7 +142,10 @@ export class Rider {
     this.upperArm = [cyl(0.055, 0.047, mCoral), cyl(0.055, 0.047, mCoral)];
     this.foreArm = [cyl(0.047, 0.04, mCoral), cyl(0.047, 0.04, mCoral)];
     this.elbow = [sph(0.055, mCoralDark), sph(0.055, mCoralDark)];
-    this.glove = [sph(0.058, mYellow, null, 6, 5), sph(0.058, mYellow, null, 6, 5)];
+    // gloved hands wrapped round the grips (gear.js); the back of the glove takes the kit colour
+    const dark = mat(0x1b1d22, { flatShading: false, roughness: 0.85 });
+    this.handMats = { glove: mYellow, knuckle: dark, palm: dark, cuff: dark };
+    this.glove = [-1, 1].map((side) => { const h = buildHand(this.handMats, side); g.add(h); return h; });
 
     // head
     this.head = new THREE.Group();
@@ -299,7 +327,7 @@ export class Rider {
     basis(bodyUp, bodyR, _q);
     this.pelvisMesh.position.copy(pe); this.pelvisMesh.quaternion.copy(_q);
     _hip.copy(pe).addScaledVector(_d, 0.02);
-    setLimb(this.torso, _hip, ch);
+    setTorso(this.torso, _hip, ch, bodyR);
     _end.lerpVectors(_hip, ch, 0.2);
     setLimb(this.hoodHem, _hip, _end);
     this.hood.position.copy(ch);
@@ -310,6 +338,7 @@ export class Rider {
       this.shoulderSph[i].position.copy(sh[i]);
       setLimb(this.upperArm[i], sh[i], el[i]); setLimb(this.foreArm[i], el[i], ha[i]);
       this.elbow[i].position.copy(el[i]); this.glove[i].position.copy(ha[i]);
+      orientHand(this.glove[i], el[i], ha[i], _neck.subVectors(shR, shL));
       setLimb(this.thigh[i], hp[i], kn[i]); setLimb(this.shin[i], kn[i], ft[i]);
       this.knee[i].position.copy(kn[i]);
       basis(_pole.subVectors(kn[i], ft[i]), _neck.subVectors(hpR, hpL), this.shoe[i].quaternion);
@@ -449,7 +478,7 @@ export class Rider {
     // torso mesh from pelvis to chest
     _hip.set(_pelvis.x, _pelvis.y + 0.02, _pelvis.z);
     _sh.set(_chest.x, _chest.y, _chest.z);
-    setLimb(this.torso, _hip, _sh);
+    setTorso(this.torso, _hip, _sh, _right);
     this.pelvisMesh.position.copy(_pelvis);
     this.pelvisMesh.rotation.z = -(ang * 0.3);
     // belly band
@@ -492,6 +521,7 @@ export class Rider {
       setLimb(this.foreArm[i], _joint, _end);
       this.elbow[i].position.copy(_joint);
       this.glove[i].position.copy(hand);
+      orientHand(this.glove[i], _joint, hand, _right);
       this.J[3 + i * 3].copy(_sh); this.J[4 + i * 3].copy(_joint); this.J[5 + i * 3].copy(hand);
     }
   }

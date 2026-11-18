@@ -15,6 +15,17 @@ function canvasTex(c) {
   return t;
 }
 
+// artwork from assets/decals (PNG with transparency); loads in the background
+const _texCache = new Map();
+function imageTexture(src) {
+  if (!_texCache.has(src)) {
+    const t = new THREE.TextureLoader().load(src);
+    t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+    _texCache.set(src, t);
+  }
+  return _texCache.get(src);
+}
+
 // straight lettering, sized to fill the canvas
 function wordTexture(text, aspect, { fill = '#ffffff', stroke = 'rgba(20,20,24,0.85)', italic = true } = {}) {
   const W = 1024, H = Math.round(W / aspect);
@@ -96,7 +107,7 @@ export function addBikeDecals(bike, spec) {
   const Z = new THREE.Vector3(0, 0, 1), NZ = new THREE.Vector3(0, 0, -1);
 
   // straight lettering on a tube, both sides of the bike:
-  // { mesh, from: [x, y], to: [x, y], text, length, height, z = 0, depth = 0.2, fill, stroke }
+  // { mesh, from: [x, y], to: [x, y], text | image, length, height, z = 0, depth = 0.2, fill, stroke, upright, imageMinus }
   // from -> to is the tube's centre line in the mesh's space. A pair of parts (fork legs, chainstays)
   // sits at +-z: give z (the outer face) and a shallow depth so each side only hits its own part.
   for (const L of spec.labels || []) {
@@ -104,8 +115,18 @@ export function addBikeDecals(bike, spec) {
     if (!mesh) continue;
     const a = new THREE.Vector3(L.from[0], L.from[1], 0), b = new THREE.Vector3(L.to[0], L.to[1], 0);
     const dir = b.clone().sub(a).normalize(), mid = a.clone().lerp(b, 0.5);
-    const mat = decalMat(wordTexture(L.text, L.length / L.height, L), 0.3);
     const size = new THREE.Vector3(L.length, L.height, L.depth ?? 0.2), z = L.z ?? 0;
+    if (L.upright) {
+      // a sticker standing along the part (fork legs): the image's up runs from -> to, `length` is its
+      // width across the part; image / imageMinus are the drive-side and other-side artwork
+      const sz = new THREE.Vector3(L.length, L.height, L.depth ?? 0.2);
+      for (const [zs, src] of [[Z, L.image], [NZ, L.imageMinus || L.image]]) {
+        const x = new THREE.Vector3().crossVectors(dir, zs).normalize();
+        project(mesh, mid.clone().setZ(z * zs.z), x, zs, sz, decalMat(imageTexture(src), 0.35));
+      }
+      continue;
+    }
+    const mat = decalMat(L.image ? imageTexture(L.image) : wordTexture(L.text, L.length / L.height, L), 0.3);
     project(mesh, mid.clone().setZ(z), dir, Z, size, mat);                    // drive side: reads toward `to`
     project(mesh, mid.clone().setZ(-z), dir.clone().negate(), NZ, size, mat); // other side: the other way
   }
@@ -125,5 +146,34 @@ export function addBikeDecals(bike, spec) {
       project(mesh, c, new THREE.Vector3(1, 0, 0), Z, size, mat);
       project(mesh, c, new THREE.Vector3(-1, 0, 0), NZ, size, mat);
     }
+  }
+}
+
+// PIVOT BOLTS: the export drops small parts (bolts) to keep the model light, which leaves the
+// suspension pivots as empty bores. Put back a through-axle and a hex bolt head on each outer face.
+//   list: [{ node, at: [x, y] (bike space, metres), z (outer face of the plate), r (bore radius) }]
+const BOLT_MAT = new THREE.MeshStandardMaterial({ color: 0x2a2d31, metalness: 0.85, roughness: 0.32 });
+const SOCKET_MAT = new THREE.MeshStandardMaterial({ color: 0x050506, metalness: 0.3, roughness: 0.8 });
+export function addPivotBolts(bike, list) {
+  if (!list) return;
+  bike.updateMatrixWorld(true);
+  for (const b of list) {
+    const node = bike.getObjectByName(b.node);
+    if (!node) continue;
+    const r = b.r ?? 0.006, z = b.z;
+    const g = new THREE.Group();
+    const axle = new THREE.Mesh(new THREE.CylinderGeometry(r * 1.02, r * 1.02, 2 * z, 16), BOLT_MAT);
+    axle.rotation.x = Math.PI / 2; g.add(axle);
+    for (const s of [-1, 1]) {
+      const head = new THREE.Mesh(new THREE.CylinderGeometry(r * 1.5, r * 1.5, 0.005, 6), BOLT_MAT);   // hex head
+      head.rotation.x = Math.PI / 2; head.position.z = s * (z + 0.0025); g.add(head);
+      const sock = new THREE.Mesh(new THREE.CircleGeometry(r * 0.6, 6), SOCKET_MAT);   // hex socket
+      sock.position.z = s * (z + 0.0051); if (s < 0) sock.rotation.y = Math.PI; g.add(sock);
+    }
+    g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    // into the node's own space, so it moves with the part (the rocker swings as the shock works)
+    const p = node.worldToLocal(bike.localToWorld(new THREE.Vector3(b.at[0], b.at[1], 0)));
+    g.position.copy(p);
+    node.add(g);
   }
 }

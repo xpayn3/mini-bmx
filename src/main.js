@@ -25,7 +25,7 @@ import { Water } from './water.js';
 import { Ragdoll, J } from './ragdoll.js';
 import { TUNE, buildTunePanel } from './tune.js';
 import { buildLookPanel } from './lookpanel.js';
-import { addBikeDecals } from './decals.js';
+import { addBikeDecals, addPivotBolts } from './decals.js';
 import { buildPosePanel, NEUTRAL as POSE0 } from './posepanel.js';
 import { IS_TOUCH, buildTouchControls } from './touch.js';
 
@@ -155,11 +155,11 @@ const BIKES = {   // the downhill bike is the main bike: listed first, and the o
     // lettering projected onto the model (decals.js): down tube, top tube, chainstays, fork legs, tyres
     decals: {
       labels: [
-        { mesh: 'frame_1', from: [0.168, 0.486], to: [0.404, 0.809], text: 'GIANT', length: 0.36, height: 0.062 },    // down tube
+        { mesh: 'frame_1', from: [0.168, 0.486], to: [0.404, 0.809], image: 'assets/decals/cinelli.png', length: 0.2, height: 0.0627 },   // down tube
         { mesh: 'frame_1', from: [0.05, 0.74], to: [0.30, 0.86], text: 'GLORY', length: 0.19, height: 0.032 },         // top tube: model name
-        { mesh: 'swing_1', from: [-0.44, -0.025], to: [-0.25, 0.03], text: 'GIANT', length: 0.13, height: 0.026, z: 0.075, depth: 0.06 },   // chainstays
-        { mesh: 'fork_lower_2', from: [-0.045, 0.10], to: [-0.158, 0.32], text: 'FOX', length: 0.12, height: 0.042, z: 0.085, depth: 0.05,
-          italic: false, fill: '#ff7a1a', stroke: 'rgba(0,0,0,0.6)' },   // both fork legs
+        { mesh: 'swing_1', from: [-0.44, -0.025], to: [-0.25, 0.03], image: 'assets/decals/cinelli.png', length: 0.09, height: 0.0282, z: 0.075, depth: 0.06 },   // chainstays
+        { mesh: 'fork_lower_2', from: [-0.03, 0.07], to: [-0.165, 0.335], upright: true, length: 0.062, height: 0.1, z: 0.085, depth: 0.05,
+          image: 'assets/decals/fox_right.png', imageMinus: 'assets/decals/fox_left.png' },   // both fork legs: the Fox stickers
       ],
       tyres: { text: 'MAXXIS', meshes: ['wheel_front_3', 'wheel_rear_3'] },
     },
@@ -234,7 +234,7 @@ const PHYS_DT = 1 / 120, MAX_STEPS = 12;   // fixed physics step; at most 0.1 s 
 const DRAW_KEYS = ['x', 'z', 'y', 'yDraw', 'pitch', 'pitchDraw', 'heading', 'bodyY'];
 const drawPrev = {}, drawn = { x: 0, y: 0, z: 0, yDraw: 0, pitch: 0, bodyY: 0 };   // drawn = between the last two steps
 let physAcc = 0, drawAlpha = 1;
-const CLIMB = 0.55;   // a rolling wheel climbs a rock / log up to this share of its radius; taller stops you
+const CLIMB = 1.2;   // a rolling wheel climbs a rock / log up to this share of its radius (DH ~45 cm, BMX ~31 cm); taller stops you
 const HOP_PUSH = 0.09;   // s the legs spend straightening before the tyres leave the ground on a bunny hop
 const bikeRoot = new THREE.Group(), pitchG = new THREE.Group(), leanG = new THREE.Group();
 bikeRoot.add(pitchG); pitchG.add(leanG); scene.add(bikeRoot);
@@ -328,6 +328,11 @@ bike.traverse((o) => {
   if (o.material.name === 'chrome') { o.material.envMapIntensity = 1.6; }
 });
 addBikeDecals(bike, BIKES[bikeId].decals);
+// bolts back in the rocker's pivot bores (main frame pivot, seatstay link, shock eye), from the export's pivots
+if (bd.suspension?.rear && part('rocker')) {
+  const r = bd.suspension.rear;
+  addPivotBolts(bike, [{ node: 'rocker', at: r.G2, z: 0.029 }, { node: 'rocker', at: r.C2, z: 0.029 }, { node: 'rocker', at: r.D, z: 0.031, r: 0.005 }]);
+}
 
 // grips: steer rubber mesh, split by side
 const gripL = new THREE.Vector3(), gripR = new THREE.Vector3();
@@ -685,19 +690,31 @@ function flowUI(f) {
 function flowUp() {
   st.flow = Math.min(FLOW_MAX, Math.floor(st.flow || 0) + 1); st.flowT = 0;
 }
-// gear chip under the stamina bar: the cassette, the cog you're on lit up
+// gear shifter, bottom middle: Q keycap | gear number | the cassette seen side-on, biggest cog on the
+// left, the chain on the lit cog | cog size | E keycap. Q moves the chain left (easier), E right (harder).
 const gearEl = document.createElement('div');
 gearEl.id = 'gear';
 document.body.appendChild(gearEl);
+gearEl.innerHTML = gear < 0
+  ? '<div class="gnum"><small>GEAR</small><b>1</b></div><div class="gsingle">single speed</div>'
+  : `${IS_TOUCH ? '' : '<div class="gkey"><span>Q</span><small>easier</small></div>'}
+     <div class="gnum"><small>GEAR</small><b></b></div>
+     <div class="gcass">${COGS.map((c, i) => [c, i]).reverse().map(([c, i]) =>
+       `<i data-g="${i}" style="height:${Math.round(c * 1.55)}px"></i>`).join('')}</div>
+     <div class="gteeth"><b></b><small>teeth</small></div>
+     ${IS_TOUCH ? '' : '<div class="gkey"><span>E</span><small>harder</small></div>'}`;
 function gearUI() {
-  if (gear < 0) { gearEl.innerHTML = '<b>1×</b> single speed'; return; }
-  gearEl.innerHTML = `<b>${gear + 1}</b>` + COGS.map((c, i) => `<i class="${i === gear ? 'on' : ''}" style="height:${6 + c * 0.75}px"></i>`).join('') + `<small>${COGS[gear]}T</small>`;
+  if (gear < 0) return;
+  gearEl.querySelector('.gnum b').textContent = gear + 1;
+  gearEl.querySelector('.gteeth b').textContent = COGS[gear];
+  for (const el of gearEl.querySelectorAll('.gcass i')) el.classList.toggle('on', +el.dataset.g === gear);
 }
 function shift(d) {   // d = +1 easier (bigger cog), -1 harder
   if (gear < 0) { flash('Single speed'); return; }
   const g = clamp(gear + d, 0, COGS.length - 1);
   if (g === gear) return;
   gear = g; gearUI();
+  gearEl.classList.remove('bump'); void gearEl.offsetWidth; gearEl.classList.add('bump');   // restart the pop
 }
 gearUI();
 function flash(text) { hud.msg.textContent = text; hud.msg.style.opacity = 1; msgT = 1.4; }
@@ -942,12 +959,13 @@ function physics(dt) {
 
   // --- move ---
   fwd.set(Math.cos(st.heading), 0, -Math.sin(st.heading));
-  const px = st.x, pz = st.z, gPrev = terrain.height(px, pz);
+  const px = st.x, pz = st.z, gPrev = terrain.surface(px, pz);
   st.x += Math.cos(st.course) * st.v * dt; st.z -= Math.sin(st.course) * st.v * dt;   // along the course, not the heading
 
   // --- cliff walls: the bike cannot climb a near-vertical face ---
   {
-    const step = Math.max(Math.abs(st.v) * dt, 1e-3), gNew = terrain.height(st.x, st.z);
+    // (ground only: rocks and logs are judged by their own height in the obstacle loop below)
+    const step = Math.max(Math.abs(st.v) * dt, 1e-3), gNew = terrain.surface(st.x, st.z);
     const wall = st.air ? gNew > st.y + 0.35 : (gNew - gPrev) / step > 1.6 && gNew - gPrev > 0.05;
     if (wall) {
       st.x = px; st.z = pz;

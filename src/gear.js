@@ -2,6 +2,7 @@
 // helmet) and flat-pedal MTB shoes. Both take a materials object so the look panel can recolour them.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 
 // ---------------- goggles ----------------
 // The outline is drawn flat (u = across, v = up, metres) and then bent round a vertical axis of
@@ -180,4 +181,96 @@ export function buildShoe(m) {
   s.add(new THREE.Mesh(mergeGeometries(laces), m.laces));
   s.traverse((o) => { if (o.isMesh) o.castShadow = true; });
   return s;
+}
+
+// ---------------- gloved hands ----------------
+// A fist wrapped round the grip. Hand-local frame: origin on the bar's axis, +Z along the bar (rider's
+// right), +X the forearm's direction carried on through the wrist, +Y the back of the hand.
+// side: -1 left hand, +1 right; the thumb wraps from the inner side (towards the stem).
+export function buildHand(m, side) {
+  const h = new THREE.Group();
+  const inner = -side;
+  // the fist: a padded block closed round the bar (the grip runs through it along Z)
+  const fist = new THREE.Mesh(new RoundedBoxGeometry(0.095, 0.078, 0.098, 4, 0.03), m.glove);
+  fist.position.set(0.008, 0.004, 0);
+  h.add(fist);
+  // fingers: four rolls down the front of the fist, curled over the bar
+  const fg = new THREE.CapsuleGeometry(0.0155, 0.036, 4, 10);
+  [-0.034, -0.0115, 0.0115, 0.034].forEach((z, k) => {
+    const f = new THREE.Mesh(fg, m.glove);
+    const edge = k === 0 || k === 3;
+    f.position.set(0.05 - (edge ? 0.004 : 0), -0.002 + (edge ? 0.003 : 0), z);
+    f.rotation.z = 0.18;                 // tips tuck back under the bar
+    f.scale.setScalar(edge ? 0.92 : 1);
+    h.add(f);
+  });
+  // thumb: along the inside of the fist, wrapping under the bar
+  const th = new THREE.Mesh(new THREE.CapsuleGeometry(0.016, 0.045, 4, 10), m.glove);
+  th.rotation.z = Math.PI / 2 + 0.35; th.position.set(0.012, -0.03, inner * 0.04);
+  h.add(th);
+  // knuckle pad across the back of the hand, and a dark palm under the bar
+  const pad = new THREE.Mesh(new RoundedBoxGeometry(0.06, 0.016, 0.08, 2, 0.007), m.knuckle);
+  pad.position.set(0.012, 0.043, 0); pad.rotation.z = -0.15;
+  h.add(pad);
+  const palm = new THREE.Mesh(new RoundedBoxGeometry(0.07, 0.014, 0.084, 2, 0.006), m.palm);
+  palm.position.set(-0.004, -0.036, 0);
+  h.add(palm);
+  // cuff round the wrist, a touch fatter than the forearm
+  const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.05, 0.05, 18), m.cuff);
+  cuff.rotation.z = Math.PI / 2; cuff.position.set(-0.058, 0.002, 0);
+  h.add(cuff);
+  h.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  return h;
+}
+
+// ---------------- torso ----------------
+// A jersey-clad torso instead of a tube: unit height (y -0.5 hips .. +0.5 shoulders/neck), lofted
+// through rounded-rectangle sections. Wider than deep, a waist, a fuller chest and back, square
+// shoulders tapering into the collar. +X is forward (chest), +Z the rider's right.
+export function torsoGeometry() {
+  //   t      half-width  half-depth  forward shift (x)
+  const S = [
+    [0.00, 0.150, 0.105, -0.005],
+    [0.12, 0.148, 0.102, 0.000],
+    [0.30, 0.138, 0.098, 0.006],    // waist
+    [0.50, 0.150, 0.108, 0.010],
+    [0.68, 0.172, 0.118, 0.012],    // chest
+    [0.82, 0.186, 0.114, 0.006],
+    [0.92, 0.180, 0.098, -0.004],   // shoulders
+    [0.97, 0.140, 0.080, -0.010],
+    [1.00, 0.075, 0.060, -0.012],   // collar
+  ];
+  const seg = 28, rows = 36, pos = [], idx = [];
+  const at = (t) => {   // smooth (Catmull-Rom-ish) interpolation of the section table
+    let i = 0; while (i < S.length - 2 && S[i + 1][0] < t) i++;
+    const a = S[i], b = S[i + 1], u = (t - a[0]) / (b[0] - a[0]), s = u * u * (3 - 2 * u);
+    return [a[1] + (b[1] - a[1]) * s, a[2] + (b[2] - a[2]) * s, a[3] + (b[3] - a[3]) * s];
+  };
+  for (let r = 0; r <= rows; r++) {
+    const t = r / rows, [w, d, fx] = at(t);
+    for (let j = 0; j < seg; j++) {
+      const a = (j / seg) * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
+      const k = 2 / 2.6;   // superellipse exponent: squarer than an ellipse, like a body
+      const x = Math.sign(c) * Math.abs(c) ** k * d + fx, z = Math.sign(s) * Math.abs(s) ** k * w;
+      pos.push(x, t - 0.5, z);
+    }
+  }
+  for (let r = 0; r < rows; r++) for (let j = 0; j < seg; j++) {
+    const a = r * seg + j, b = r * seg + (j + 1) % seg, c = a + seg, e = b + seg;
+    idx.push(a, c, b, b, c, e);
+  }
+  // close the bottom (into the shorts) and the collar
+  const cap = (r, flip) => {
+    const ctr = pos.length / 3, [, , fx] = at(r / rows);
+    pos.push(fx, r / rows - 0.5, 0);
+    for (let j = 0; j < seg; j++) {
+      const a = r * seg + j, b = r * seg + (j + 1) % seg;
+      flip ? idx.push(ctr, a, b) : idx.push(ctr, b, a);
+    }
+  };
+  cap(0, false); cap(rows, true);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
 }
