@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
@@ -12,6 +11,7 @@ import { VerticalTiltShiftShader } from 'three/addons/shaders/VerticalTiltShiftS
 import { Terrain, WATER, MAT, FLOWER_TIME } from './terrain.js';
 import { addSandDetail } from './sand.js';
 import { Gauge } from './gauge.js';
+import { AirHud } from './airhud.js';
 import { Rider } from './rider.js';
 import { Suspension } from './suspension.js';
 import { buildBike, STYLE_K } from './bikegen.js';
@@ -42,15 +42,36 @@ const SKY = new THREE.Color(0xa9d6ea);
 scene.background = SKY;
 scene.fog = new THREE.Fog(SKY, 38, 85);
 const pmrem = new THREE.PMREMGenerator(renderer);
-scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-scene.environmentIntensity = 0.3;
 
 const camera = new THREE.PerspectiveCamera(30, innerWidth / innerHeight, 0.1, 250);
 
-const hemi = new THREE.HemisphereLight(0xcfe6ff, 0x5a4a30, 0.55);
+const hemi = new THREE.HemisphereLight(0xc4ddff, 0x6b5a3a, 0.32);   // cool sky fill, warm earthy bounce
 scene.add(hemi);
 const sunDir = new THREE.Vector3(-0.55, 1, 0.42).normalize();
-const sun = new THREE.DirectionalLight(0xffdcae, 3.6);
+// OUTDOOR SKY LIGHT: ambient light and reflections come from a sky dome -- deep blue overhead, a bright
+// hazy horizon, a warm glow round the sun, earthy bounce below -- instead of a studio room, so shade
+// is cool and blue, sunlit sides warm, and shiny things (bike paint, water) reflect a sky
+{
+  const dome = new THREE.Scene();
+  dome.add(new THREE.Mesh(new THREE.SphereGeometry(10, 48, 24), new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false,
+    uniforms: { uSun: { value: sunDir } },
+    vertexShader: 'varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: `varying vec3 vD; uniform vec3 uSun;
+      void main(){
+        float y = vD.y;
+        vec3 zen = vec3(0.16, 0.36, 0.78), hor = vec3(0.78, 0.86, 0.9), gnd = vec3(0.28, 0.25, 0.17);
+        vec3 c = mix(hor, zen, smoothstep(0.0, 0.65, y));
+        c = mix(gnd, c, smoothstep(-0.12, 0.02, y));
+        float s = max(dot(vD, normalize(uSun)), 0.0);
+        c += vec3(1.0, 0.82, 0.55) * (pow(s, 6.0) * 0.55 + pow(s, 60.0) * 1.5);   // warm glow round the sun
+        gl_FragColor = vec4(c, 1.0);
+      }`,
+  })));
+  scene.environment = pmrem.fromScene(dome, 0.02).texture;
+  scene.environmentIntensity = 0.55;
+}
+const sun = new THREE.DirectionalLight(0xffd7a3, 3.4);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 Object.assign(sun.shadow.camera, { left: -16, right: 16, top: 16, bottom: -16, near: 1, far: 90 });
@@ -86,6 +107,7 @@ const grade = new ShaderPass({
     void main(){ vec4 c = texture2D(tDiffuse, vUv);
       float l = dot(c.rgb, vec3(0.299,0.587,0.114));
       c.rgb = mix(vec3(l), c.rgb, 1.16);
+      c.rgb += (l - 0.45) * vec3(0.035, 0.012, -0.03);   // split tone: warm highlights, cool shadows
       vec2 d = vUv - 0.5; c.rgb *= 1.0 - dot(d,d) * 0.6;
       gl_FragColor = c; }`,
 });
@@ -189,6 +211,7 @@ const PHYS_DT = 1 / 120, MAX_STEPS = 12;   // fixed physics step; at most 0.1 s 
 const DRAW_KEYS = ['x', 'z', 'y', 'yDraw', 'pitch', 'pitchDraw', 'heading', 'bodyY'];
 const drawPrev = {}, drawn = { x: 0, y: 0, z: 0, yDraw: 0, pitch: 0, bodyY: 0 };   // drawn = between the last two steps
 let physAcc = 0, drawAlpha = 1;
+const CLIMB = 0.55;   // a rolling wheel climbs a rock / log up to this share of its radius; taller stops you
 const HOP_PUSH = 0.09;   // s the legs spend straightening before the tyres leave the ground on a bunny hop
 const bikeRoot = new THREE.Group(), pitchG = new THREE.Group(), leanG = new THREE.Group();
 bikeRoot.add(pitchG); pitchG.add(leanG); scene.add(bikeRoot);
@@ -383,6 +406,8 @@ const CAM_PRESETS = {
   dolly:     { label: 'Low dolly',  dist: 5, pitch: 5, follow: true, fov: 24, orbit: Math.PI * 0.42, rate: 2.8, cine: true },
 };
 let camMode = 'diorama', camFov = 30, trackPos = null;
+let camOcc = 0, camPosInit = false;   // drone: extra pitch to see over hills, floating position spring
+const camPosS = new THREE.Vector3(), camPosV = new THREE.Vector3(), _camUp = new THREE.Vector3();
 function setCam(mode) {
   const P = CAM_PRESETS[mode]; if (!P) return;
   camMode = mode; trackPos = null;
@@ -529,6 +554,8 @@ window.renderer = renderer; window.composer = composer; window.gtao = gtao; wind
 
 const hud = { msg: document.getElementById('msg') };
 const gauge = new Gauge();
+const airHud = new AirHud();   // live jump counter + records
+window.airHud = airHud;   // debug handle
 let msgT = 0, bestAir = 0;
 let biomeT = 0, biomeCur = 'Green Hills', biomeNext = '', biomeHold = 0;
 // smash a fence panel: wood splinters, a puff of dust, and the planks become rigid-body debris
@@ -784,20 +811,28 @@ function physics(dt) {
       }
       continue;
     }
-    // rocks never stop you: you ride over them. The wheel rides up the rock and the bike gets
-    // bumped up by its height (big rocks cost more speed). Trees and cacti (no height) still block.
+    // ROCKS, LOGS, STUMPS are part of the ground you ride on (terrain.height has a dome over each),
+    // so the spring physics rolls the wheels up and over the ones a wheel can climb. One taller than
+    // about half a wheel is a wall to a rolling tyre: it stops you like a tree -- unless you are
+    // already above it (hopped / flying, or riding along its top).
     if (c.top !== undefined) {
-      const clear = c.top - st.y;                       // how far the rock sticks up above the wheels
-      if (clear < 0.04 || st.air) continue;             // already above it / flying over it
-      if ((fwd.x * dx + fwd.z * dz) / d >= 0) continue;   // rolling off the back of it
-      if (Math.abs(st.v) > 0.3) {
-        st.air = true; st.airTime = 0;
-        st.vy = Math.max(st.vy, Math.sqrt(2 * G * (clear + 0.05)) + 0.2); st.kickT = 0.3;
-        st.hopNose = 0.1 + Math.min(0.35, clear * 0.5);
-        st.v *= 1 - Math.min(0.35, clear * 0.3);
-        st.shake = Math.max(st.shake, Math.min(0.2, clear * 0.25));
-        for (let k = 0; k < 3 + clear * 8; k++) fx.chunk(tmp.set(c.x, c.top, c.z), tmp2.set((Math.random() - .5) * 2, 1 + Math.random(), (Math.random() - .5) * 2), ROCK_CHUNK, 0.02);
+      const clear = c.top - st.y;                       // how far it sticks up above the wheels
+      if (clear < CLIMB * RWF) continue;
+      // a rock meets the tyre well inside its collider circle (that is drawn round its widest point)
+      if (!hitF || fd > c.r * 0.85) continue;
+      if ((fwd.x * fdx + fwd.z * fdz) / fd >= 0) continue;   // riding away from it
+      if (Math.abs(st.v) > 2 && st.joltRock !== c) {
+        st.joltRock = c;
+        for (let k = 0; k < 6; k++) fx.chunk(tmp.set(c.x, c.top, c.z), tmp2.set((Math.random() - .5) * 2, 1 + Math.random(), (Math.random() - .5) * 2), ROCK_CHUNK, 0.02);
       }
+      // the tyre stops against its face: back off to where it touches, and BONK / over the bars
+      // exactly like a trunk (below)
+      const back = (c.r * 0.85 - fd) / fd;
+      st.x += fdx * back; st.z += fdz * back;
+      const head = (fwd.x * fdx + fwd.z * fdz) / fd;
+      if (head < -0.77 && -st.v * head > 6) crash.pending = 'BONK! Over the bars';
+      else if (head < -0.3 && st.v > 1.5) { burst(tmp.set(fx0, st.y + 0.3, fz0), 16, 0, 1.2); st.v *= -0.25; st.shake = 0.35; flash('BONK!'); }
+      else st.v *= 0.97;
       continue;
     }
     // flying higher than the obstacle: sail over it. Trees and cacti carry their real height (ceil);
@@ -1008,7 +1043,7 @@ function physics(dt) {
       if (susp) susp.land(Math.max(0, -vyIn) * Math.cos(g.pitch) * 0.5 + impact * 0.4, st.frontAir, st.rearAir);
       if (airTime > 0.15) st.shake = Math.max(st.shake, Math.min(0.2, impact * 0.025));
       if (airTime > 0.15) burst(tmp.set(st.x, st.y + 0.03, st.z), Math.round(10 + Math.min(30, impact * 6)), surf, 0.8 + Math.min(1.5, impact * 0.25));
-      if (airTime > 0.45) { bestAir = Math.max(bestAir, airTime); flash(`AIR ${airTime.toFixed(2)}s${airTime >= bestAir ? '  ★ best' : ''}`); }
+      if (airTime > 0.45) bestAir = Math.max(bestAir, airTime);   // the jump card (airhud.js) shows the result
     }
     if (st.air) st.airTime += dt;
     st.kickT = Math.max(0, (st.kickT || 0) - dt);
@@ -1193,8 +1228,10 @@ function updateCamera(dt) {
   const P = CAM_PRESETS[camMode];
   fwd.set(Math.cos(st.heading), 0, -Math.sin(st.heading));
   const want = crash.on ? tmp.copy(ragdoll.p[J.PELVIS]).lerp(tmp2.set(st.x, st.y, st.z), 0.3).add(tmp2.set(0, 0.3, 0))
-    : tmp.set(drawn.x, drawn.y + 0.5, drawn.z).addScaledVector(fwd, clamp(st.v, -1, 10) * (P.mode === 'trackside' ? 0.05 : 0.25));
-  camTarget.lerp(want, Math.min(1, dt * (P.lag || 5)));
+    : tmp.set(drawn.x, drawn.y + 0.5, drawn.z).addScaledVector(fwd, clamp(st.v, -1, 10) * (P.mode === 'trackside' ? 0.05 : P.drift ? 0.1 : 0.25));
+  // the drone keeps the rider near the middle of the frame: its AIM follows closely (the floaty feel
+  // comes from the drone's own position spring below), other views keep their preset lag
+  camTarget.lerp(want, Math.min(1, dt * (P.drift ? 7 : (P.lag || 5))));
   let fovT = P.fov;
   if (P.mode === 'trackside') {
     // broadcast-style: a long lens planted beside the track ahead; pan as the rider passes, then cut
@@ -1217,12 +1254,34 @@ function updateCamera(dt) {
     orbit += (orbitT - orbit) * Math.min(1, dt * 8);
     camPitch += (camPitchT - camPitch) * Math.min(1, dt * 8);
     let yaw = camYaw + orbit, pit = camPitch;
-    if (P.drift) { yaw += Math.sin(t * 0.13) * 0.35; pit += Math.sin(t * 0.09) * 5; }   // drone sway
-    const pitch = THREE.MathUtils.degToRad(pit);
+    if (P.drift) { yaw += Math.sin(t * 0.13) * 0.3; pit += Math.sin(t * 0.09) * 4; }   // drone sway
+    // DON'T LET HILLS CUT THE VIEW: march the sight line from the rider to the camera over the terrain;
+    // if a hill gets in the way, climb to a steeper angle until it clears. Climbs fast, settles back slowly.
     const back = tmp2.set(Math.cos(yaw), 0, -Math.sin(yaw));
-    camera.position.copy(camTarget)
-      .addScaledVector(back, -camDist * Math.cos(pitch))
-      .add(tmp.set(0, camDist * Math.sin(pitch), 0));
+    const blocked = (pDeg) => {
+      const pr = THREE.MathUtils.degToRad(pDeg), hx = -back.x * camDist * Math.cos(pr), hz = -back.z * camDist * Math.cos(pr), hy = camDist * Math.sin(pr);
+      const y0 = drawn.y + 0.6;
+      for (let i = 1; i <= 20; i++) {
+        const u = i / 21, x = camTarget.x + hx * u, z = camTarget.z + hz * u;
+        if (terrain.height(x, z) + 0.6 > y0 + (camTarget.y + hy - y0) * u) return true;
+      }
+      return false;
+    };
+    let need = 0;
+    while (need < 46 && pit + need < 84 && blocked(pit + need)) need += 6;
+    camOcc += (need - camOcc) * Math.min(1, dt * (need > camOcc ? 5 : 0.7));
+    pit = Math.min(84, pit + camOcc);
+    const pitch = THREE.MathUtils.degToRad(pit);
+    const wantPos = tmp.copy(camTarget).addScaledVector(back, -camDist * Math.cos(pitch)).add(_camUp.set(0, camDist * Math.sin(pitch), 0));
+    if (P.drift) {
+      // the drone body floats on a critically damped spring toward where it wants to hover
+      if (!camPosInit) { camPosS.copy(wantPos); camPosV.set(0, 0, 0); camPosInit = true; }
+      const w = 2.4;
+      camPosV.addScaledVector(_camUp.subVectors(wantPos, camPosS), w * w * dt).multiplyScalar(Math.exp(-2 * w * dt));
+      camPosS.addScaledVector(camPosV, dt);
+      if (camPosS.distanceTo(wantPos) > camDist * 1.5) camPosS.copy(wantPos);   // teleport / respawn: snap
+      camera.position.copy(camPosS);
+    } else { camera.position.copy(wantPos); camPosInit = false; }
     // never dip under the ground on low shots
     const gh = terrain.height(camera.position.x, camera.position.z) + 0.35;
     if (camera.position.y < gh) camera.position.y = gh;
@@ -1247,6 +1306,7 @@ function updateCamera(dt) {
   water.update(st.x, st.z, t);
 }
 
+window.bmxCam = (dt = 1 / 60) => updateCamera(dt);   // debug: advance the camera by hand (tests)
 const lastGood = { ...st };   // the spawn state, so even a first-frame blow-up has something to restore
 const clock = new THREE.Clock();
 document.getElementById('loading').remove();
@@ -1333,6 +1393,7 @@ function frame(now) {
     const dir = st.v < -0.1 ? -1 : 1, hx = Math.cos(st.heading) * 0.6 * dir, hz = -Math.sin(st.heading) * 0.6 * dir;
     const slope = Math.atan2(terrain.height(st.x + hx, st.z + hz) - terrain.height(st.x - hx, st.z - hz), 1.2);
     gauge.update(Math.abs(st.v) * 3.6, THREE.MathUtils.radToDeg(slope), st.air, dt, st.y);
+    airHud.update(st, dt, crash.on || !!crash.pending);
   }
   if (msgT > 0) { msgT -= dt; if (msgT <= 0) hud.msg.style.opacity = 0; }
   composer.render();

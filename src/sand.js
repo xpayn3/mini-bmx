@@ -40,17 +40,14 @@ float sandPx;
       .replace('#include <color_fragment>', /* glsl */`#include <color_fragment>
 {
   // how sandy is this colour? warm, yellowish, not green, not grey
-  vec3 s = pow(max(vColor.rgb, vec3(1e-4)), vec3(1.0 / 2.2));
+  vec3 s = pow(max(diffuseColor.rgb, vec3(1e-4)), vec3(1.0 / 2.2));   // the ground colour (texture)
   float gr = s.g / max(s.r, 1e-3), warm = (s.r - s.b) / max(s.r, 1e-3);
   sandMask = smoothstep(0.68, 0.76, gr) * (1.0 - smoothstep(0.98, 1.04, gr)) * smoothstep(0.16, 0.26, warm) * smoothstep(0.45, 0.6, s.r);
 
   vec2 p = mat2(0.8, -0.6, 0.6, 0.8) * vSandW.xz;   // rotated so nothing lines up with the axes
-  sandPx = length(fwidth(p));                       // metres per pixel
-  // fine noise only: two smooth octaves, faded out before they get smaller than a pixel
-  float n = (sandNoise(p * 28.0) - 0.5) * (1.0 - smoothstep(0.02, 0.06, sandPx))
-          + (sandNoise(p * 63.0 + 17.0) - 0.5) * (1.0 - smoothstep(0.01, 0.03, sandPx)) * 0.7;
-  float k = 1.0 + n * 0.14;
-  diffuseColor.rgb *= mix(1.0, k, sandMask);
+  sandPx = length(fwidth(p));                       // metres per pixel (the sparkle fades with it)
+  // (the grain noise that used to be multiplied in here was projected straight down, so it
+  // smeared into streaks on slopes: gone. The sparkle below stays.)
 }
 `)
       .replace('#include <lights_fragment_end>', /* glsl */`#include <lights_fragment_end>
@@ -79,6 +76,6 @@ float sandPx;
 }
 `);
   };
-  material.customProgramCacheKey = () => 'sand-detail-v4';
+  material.customProgramCacheKey = () => 'sand-detail-v6';
   material.needsUpdate = true;
 }

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { ImprovedNoise } from 'three/addons/math/ImprovedNoise.js';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+import { groundDetail, GROUND_KEY } from './grounddetail.js';
 import { PROFILES, FEATURE_TYPES, ROUTE_TYPES, WOOD, DIG } from './features.js';
 import { MAT_SHED, SHED_DESIGNS, shedGeo, shedColliders } from './sheds.js';
 import { FENCE_MAT, FENCE_GEO, SPAN, buildFence, bindFences } from './fences.js';
@@ -8,6 +9,7 @@ import { buildTape } from './tape.js';
 
 const perlin = new ImprovedNoise();
 export const WATER = -2.2;
+const ROCK_CELL = 2;   // m: grid for looking up the rocks under a point
 
 const JC = 34;
 // the start: a long ridge you roll down from spawn along +x, with a main trail down its spine
@@ -66,6 +68,39 @@ function makeBoulder(seed, detail = 4) {
   return g;
 }
 
+// a soft, round tree crown / bush: a smooth sphere pushed into a few big lumps (so it reads as a
+// cloud of foliage, not a ball), smooth-shaded; vertex colour darkens the underside and the hollows
+// between lumps and lifts the sunny top (multiplies the per-instance leaf colour)
+function makeCrown(seed, detail = 2, flatBase = false) {
+  const ico = new THREE.IcosahedronGeometry(1, detail);
+  ico.deleteAttribute('normal'); ico.deleteAttribute('uv');
+  const g = mergeVertices(ico);   // shared vertices -> smooth normals (the icosahedron comes unwelded)
+  const p = g.attributes.position, v = new THREE.Vector3();
+  const h3 = (x, y, z) => { const n = Math.sin(x * 127.1 + y * 311.7 + z * 74.7 + seed * 13.1) * 43758.5453; return n - Math.floor(n); };
+  const vn = (x, y, z) => {
+    const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z), xf = x - xi, yf = y - yi, zf = z - zi;
+    const u = xf * xf * (3 - 2 * xf), w = yf * yf * (3 - 2 * yf), t = zf * zf * (3 - 2 * zf), L = (a, b, k) => a + (b - a) * k;
+    return L(L(L(h3(xi, yi, zi), h3(xi + 1, yi, zi), u), L(h3(xi, yi + 1, zi), h3(xi + 1, yi + 1, zi), u), w),
+             L(L(h3(xi, yi, zi + 1), h3(xi + 1, yi, zi + 1), u), L(h3(xi, yi + 1, zi + 1), h3(xi + 1, yi + 1, zi + 1), u), w), t);
+  };
+  const lump = new Float32Array(p.count);
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i);
+    const l = vn(v.x * 1.6 + 4, v.y * 1.6, v.z * 1.6 - 2) * 0.7 + vn(v.x * 3.4, v.y * 3.4 + 9, v.z * 3.4) * 0.3;
+    const r = 0.84 + l * 0.32;
+    v.multiplyScalar(r);
+    if (flatBase && v.y < -0.35) v.y = -0.35 + (v.y + 0.35) * 0.3;   // bushes sit on the ground
+    p.setXYZ(i, v.x, v.y, v.z); lump[i] = l;
+  }
+  g.computeVertexNormals();
+  const col = new Float32Array(p.count * 3);
+  for (let i = 0; i < p.count; i++) {
+    const y = p.getY(i), c = (0.72 + 0.28 * Math.min(1, Math.max(0, y * 0.6 + 0.55))) * (0.86 + lump[i] * 0.22);
+    col[i * 3] = c; col[i * 3 + 1] = c; col[i * 3 + 2] = c * 0.97;
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  return g;
+}
 function jitter(geo, amt, seed) {
   const r = mulberry32(seed), p = geo.attributes.position;
   const map = new Map();
@@ -79,8 +114,8 @@ function jitter(geo, amt, seed) {
   return geo;
 }
 const GEO = {
-  trunk: new THREE.CylinderGeometry(0.1, 0.16, 1, 5).translate(0, 0.5, 0),
-  blob: jitter(new THREE.IcosahedronGeometry(1, 0), 0.35, 7),
+  trunk: new THREE.CylinderGeometry(0.1, 0.16, 1, 8).translate(0, 0.5, 0),
+  blob: makeCrown(7),                     // round tree crowns
   pine: mergeGeometries([
     new THREE.ConeGeometry(1, 1.6, 6).translate(0, 0.8, 0),
     new THREE.ConeGeometry(0.75, 1.3, 6).translate(0, 1.6, 0),
@@ -104,6 +139,14 @@ const GEO = {
     return g;
   })),
   ...makeFlowers(),
+  // forest floor and scrub
+  bush: makeCrown(11, 2, true).translate(0, 0.55, 0).scale(1, 0.7, 1),
+  log: mergeGeometries([
+    new THREE.CylinderGeometry(0.17, 0.21, 1, 7).rotateZ(Math.PI / 2),
+    new THREE.CylinderGeometry(0.035, 0.05, 0.4, 4).rotateZ(-0.7).translate(0.18, 0.2, 0.05),   // snapped-off branch
+  ].map(g => { g.deleteAttribute('uv'); return g; })),
+  stick: new THREE.CylinderGeometry(0.012, 0.02, 1, 4).rotateZ(Math.PI / 2),
+  weed: jitter(new THREE.IcosahedronGeometry(1, 1), 0.45, 23),   // tumbleweed / dry scrub ball
 };
 // ---------- wildflowers: three low-poly kinds, a handful of triangles each ----------
 // Every vertex carries its own colour plus a `tint` weight: petals (tint 1) take the per-instance
@@ -159,15 +202,53 @@ function makeFlowers() {
       () => 0.82 + i * 0.035));
   }
   const spike = mergeGeometries([stem(SH), ...leaves(0.06, 0.1), ...florets]);
-  return { daisy, tulip, spike };
+
+  // GRASS CLUMP: nine curved, tapered blades, dark at the root and bright at the tip (instance colour
+  // = the grass green / dry gold). Normals lean up so a clump catches light softly, like real turf,
+  // instead of each blade flashing as a flat card. Sways with the flowers.
+  const grassRnd = mulberry32(4242);
+  const grassBlades = [];
+  for (let b = 0; b < 9; b++) {
+    const h = 0.17 + grassRnd() * 0.2, w = 0.022 + grassRnd() * 0.012, lean = 0.25 + grassRnd() * 0.55, segs = 3;
+    const pts = [], P = (k) => { const u = k / segs; return [lean * h * u * u, h * u * (1 - 0.12 * u * u * lean)]; };
+    for (let k = 0; k < segs; k++) {
+      const [x0, y0] = P(k), [x1, y1] = P(k + 1), w0 = w * (1 - k / segs), w1 = w * (1 - (k + 1) / segs);
+      pts.push(x0, y0, -w0 / 2, x1, y1, -w1 / 2, x0, y0, w0 / 2);
+      if (w1 > 1e-5) pts.push(x0, y0, w0 / 2, x1, y1, -w1 / 2, x1, y1, w1 / 2);
+    }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    const pg = part(g, 0xffffff, 1, (p, i) => 0.42 + 0.72 * Math.min(1, p.getY(i) / h));
+    const n = pg.attributes.normal;
+    for (let i = 0; i < n.count; i++) { const nx = n.getX(i) * 0.35, ny = n.getY(i) * 0.35 + 1, nz = n.getZ(i) * 0.35, l = Math.hypot(nx, ny, nz); n.setXYZ(i, nx / l, ny / l, nz / l); }
+    const a = grassRnd() * Math.PI * 2, r = grassRnd() * 0.05;
+    grassBlades.push(pg.rotateY(a).translate(Math.cos(a) * r, 0, -Math.sin(a) * r));
+  }
+  const grass = mergeGeometries(grassBlades);
+
+  // fern: seven arching fronds fanned round the root (instance colour = the green)
+  const fronds = [];
+  for (let i = 0; i < 7; i++) {
+    const len = 0.3 + (i % 3) * 0.06;
+    fronds.push(part(blade(len, 0.045, len * 0.25).rotateZ(0.55 - (i % 2) * 0.15).rotateY(i * 0.9), 0xffffff, 1,
+      (p, j) => 0.75 + 0.25 * Math.min(1, Math.hypot(p.getX(j), p.getZ(j)) / len)));
+  }
+  const fern = mergeGeometries(fronds);
+  // mushroom: pale stalk, domed cap (instance colour = the cap)
+  const MH = 0.07;
+  const mushroom = mergeGeometries([
+    part(new THREE.CylinderGeometry(0.009, 0.013, MH, 5).translate(0, MH / 2, 0), 0xefe6d2, 0),
+    part(new THREE.SphereGeometry(0.034, 7, 3, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.6, 1).translate(0, MH - 0.004, 0), 0xffffff, 1),
+  ]);
+  return { daisy, tulip, spike, fern, mushroom, grass };
 }
 // gentle breeze for the flowers (main.js advances .value every frame)
 export const FLOWER_TIME = { value: 0 };
 export const MAT = {
-  terrain: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 }),
+  terrain: new THREE.MeshStandardMaterial({ roughness: 0.95 }),   // each chunk: a clone with its colour texture
   wood: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, flatShading: true }),
-  trunk: new THREE.MeshStandardMaterial({ color: 0x7a5233, flatShading: true, roughness: 0.9 }),
+  trunk: new THREE.MeshStandardMaterial({ color: 0x7a5233, roughness: 0.9 }),   // smooth, to go with the round crowns
   leaf: new THREE.MeshStandardMaterial({ color: 0xffffff, flatShading: true, roughness: 0.8 }),
+  leafSoft: new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.85 }),   // smooth crowns and bushes
   rock: new THREE.MeshStandardMaterial({ color: 0xa8a39a, vertexColors: true, flatShading: true, roughness: 0.82, metalness: 0.02 }),   // faceted
   tuft: new THREE.MeshStandardMaterial({ color: 0xffffff, flatShading: true, roughness: 0.9 }),
   flower: new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, flatShading: true, roughness: 0.55, side: THREE.DoubleSide }),
@@ -202,9 +283,10 @@ const COL = {
   dryGrass: C(0xc9b45a), dune: C(0xedc98a), duneDark: C(0xd9aa66), desertDirt: C(0xd49a5c),
   red: C(0xc2603a), redLight: C(0xe38c55), redDark: C(0x8f4029), cream: C(0xf0d3a2),
   tuftGreen: C(0x5e9e37), tuftDry: C(0xb59a4a),
+  litter: C(0x77703a), clover: C(0x4d9a3a),
   grey: C(0x8d8a86), greyDark: C(0x5f5d5c), greyLight: C(0xb4b0a8), snow: C(0xf4f7f8), alpine: C(0x6f9a4a),
 };
-const _c = new THREE.Color(), _c2 = new THREE.Color(), _c3 = new THREE.Color();
+const _c = new THREE.Color(), _c2 = new THREE.Color(), _c3 = new THREE.Color(), _cD = new THREE.Color();
 const RED_BANDS = [COL.red, COL.redLight, COL.redDark, COL.cream, COL.red, COL.redLight];
 const GREY_BANDS = [COL.grey, COL.greyDark, COL.greyLight, COL.grey, COL.greyDark];
 const LEAVES = [0x4f9a3a, 0x6cb544, 0x3f8a3f, 0x86c24a, 0x9bc94a, 0xe0a43a].map(C);
@@ -212,6 +294,10 @@ const PINES = [0x2f6e45, 0x3b7d4b, 0x2a5f44].map(C);
 const PLANKS = [0xb98a55, 0xa87a48, 0xc49663, 0x9e6f40, 0xb0814e].map(C), BEAM = C(0x7a5332);
 const _Y = new THREE.Vector3(0, 1, 0), _Z = new THREE.Vector3(0, 0, 1);
 const CACTI = [0x4f8a3c, 0x5c9a45, 0x6b9e4a].map(C);
+const BUSHES = [0x3f7f33, 0x4c8c38, 0x5a8f3a, 0x6a9a3e, 0x7a8f3a].map(C);
+const FERNS = [0x3f8a35, 0x4f9a3c, 0x5ea544, 0x8a9a3a].map(C);
+const SHROOMS = [0xc8382c, 0xb5652e, 0xd9b27a, 0xe8dcc0, 0x8a5a36].map(C);
+const SCRUB = [0x9a7a48, 0xb08a52, 0x8c6c3e, 0x7f8a4a].map(C);
 // petal colours per kind (white-based petals are multiplied by these)
 const DAISIES = [0xffffff, 0xfff6e0, 0xffd84a, 0xff9ec4, 0xf26d9b, 0xffb35c].map(C);
 const TULIPS = [0xe8384a, 0xff6f61, 0xffc93c, 0xff8fb8, 0xf7f1ff, 0xd94f8c].map(C);
@@ -221,6 +307,7 @@ export class Terrain {
   constructor(scene, seed) {
     this.scene = scene;
     this.size = 48; this.seg = 128; this.radius = 3;
+    this.rockGrid = new Map();
     this.chunks = new Map();
     this.setSeed(seed);
   }
@@ -301,6 +388,22 @@ export class Terrain {
     const main = (1 - smooth(1.9, 3.1, this.routeDist(x, z))) * this.routeOn(x);
     return Math.max(1 - smooth(0.03, 0.075, p), main);
   }
+  // signed metres across the trail you are on (the main route, or a noise trail): 0 on its centre
+  across(x, z) {
+    if (this.routeOn(x) > 0.5 && this.routeDist(x, z) < 4.5) {
+      const d = this.routeZ(x + 0.5) - this.routeZ(x - 0.5);
+      return (z - this.routeZ(x)) / Math.sqrt(1 + d * d);
+    }
+    const P = (a, b) => this.n(a + 211.3, b - 97.1, 1 / 42);
+    const gx = P(x + 0.5, z) - P(x - 0.5, z), gz = P(x, z + 0.5) - P(x, z - 0.5);
+    return P(x, z) / Math.max(Math.hypot(gx, gz), 0.012);
+  }
+  // THE RIDDEN LINE: the strip everyone rides wears into a packed, darker groove about a tyre-track
+  // wide pair. It wanders across the trail (a slow noise), so it cuts in and out like a real line.
+  line(x, z) {
+    const off = this.n(x + 91.7, z - 13.3, 1 / 23) * 1.5;
+    return 1 - smooth(0.25, 0.7, Math.abs(this.across(x, z) - off));
+  }
   // ---------- berms: the outside of tighter corners is banked up so you can rail them ----------
   bermShape(o, tan) {   // o = metres towards the outside of the turn from the trail centre
     if (o < -1.6) return 0;
@@ -374,7 +477,13 @@ export class Terrain {
     }
     // small lumps only well away from the trail, faded in gently so the edges stay clean
     h += this.n(x - 5.3, z + 9.1, 1 / 8) * 0.5 * Math.max(smooth(2.5, 7, dist), smooth(0.15, 0.25, Math.abs(p))) * (1 - t);
-    h -= 0.15 * t;                                         // trail sits slightly sunk in, smooth
+    h -= 0.15 * t;                                         // trail sits slightly sunk in
+    if (t > 0) {
+      // a ridden trail is never billiard-smooth: braking bumps and small dips, choppiest on the
+      // ridden line, which is also worn a few cm into the ground
+      const ln = this.line(x, z);
+      h += t * (this.n(x + 7.1, z + 3.3, 1 / 1.5) * 0.028 + this.n(x - 2.9, z + 8.4, 1 / 3.4) * 0.04 * (0.6 + 0.6 * ln) - 0.035 * ln);
+    }
     // never let a trail run into a lake: raise it on a dirt causeway with sloped banks
     const dry = WATER + 0.5;
     if (h < dry) {
@@ -512,7 +621,39 @@ export class Terrain {
   }
   // ground() is the dirt/rock surface (what the terrain mesh shows);
   // height() is what you ride on: the ground, or a wooden deck where there is one
-  height(x, z) { const g = this.ground(x, z); return this._wood !== null && this._wood > g ? this._wood : g; }
+  // height() is what you ride on: the ground, a wooden deck where there is one, and the tops of
+  // rocks, logs and stumps (a dome over each one's footprint), so the wheels really roll over them
+  height(x, z) {
+    let g = this.ground(x, z);
+    if (this._wood !== null && this._wood > g) g = this._wood;
+    const list = this.rockGrid.get(((Math.floor(x / ROCK_CELL) * 73856093) ^ (Math.floor(z / ROCK_CELL) * 19349663)) | 0);
+    if (list) for (const c of list) {
+      const dx = x - c.x, dz = z - c.z, q = (dx * dx + dz * dz) / (c.r * c.r);
+      if (q < 1) { const h = c.base + (c.top - c.base) * Math.sqrt(1 - q); if (h > g) g = h; }
+    }
+    return g;
+  }
+  // rocks / logs / stumps into a coarse grid (every cell their footprint touches), for height()
+  addRocks(c) {
+    for (const k of c.colliders) {
+      if (k.top === undefined || k.fence || k.tape || k.cactus) continue;
+      k.base ??= this.ground(k.x, k.z);
+      k.cells = [];
+      for (let gx = Math.floor((k.x - k.r) / ROCK_CELL); gx <= Math.floor((k.x + k.r) / ROCK_CELL); gx++)
+        for (let gz = Math.floor((k.z - k.r) / ROCK_CELL); gz <= Math.floor((k.z + k.r) / ROCK_CELL); gz++) {
+          const key = ((gx * 73856093) ^ (gz * 19349663)) | 0;
+          let l = this.rockGrid.get(key); if (!l) this.rockGrid.set(key, l = []);
+          l.push(k); k.cells.push(key);
+        }
+    }
+  }
+  removeRocks(c) {
+    for (const k of c.colliders) for (const key of k.cells || []) {
+      const l = this.rockGrid.get(key); if (!l) continue;
+      const i = l.indexOf(k); if (i >= 0) l.splice(i, 1);
+      if (!l.length) this.rockGrid.delete(key);
+    }
+  }
   ground(x, z) {
     let h = this.base(x, z);
     const [jh, jm, jp, jd, jw] = this.jump(x, z);
@@ -522,6 +663,11 @@ export class Terrain {
     this._wood = jw;
     const d = Math.hypot(x, z), f = smooth(5, 28, d);
     h = h * f + (1 - f) * (0.8 + this.hill(x, z));
+    // only some low ground holds a lake: elsewhere the basin is a dry, grassy hollow just above the
+    // waterline (a slow noise picks which; the lift fades in, so lake shores keep their shape)
+    const dryUp = 1 - smooth(-0.05, 0.2, this.n(x - 911.3, z + 613.7, 1 / 170));
+    const floor = WATER + 0.75;
+    if (dryUp > 0 && h < floor) h += (floor - h) * dryUp * 0.92;
     const bed = WATER - 0.35;
     if (h < bed) h = bed + (h - bed) * 0.08;
     return h;
@@ -533,31 +679,46 @@ export class Terrain {
     if (h < WATER + 0.45 || this.biome(x, z)[0] > 0.7) return 3;
     return 0;
   }
-  color(x, z, h, ny, out) {
+  // THE GROUND IN TWO LAYERS for the terrain shader, which blends them with a ragged, height-based
+  // edge (pebbles poke through, grass grows over the dirt): outG = the land (grass, meadow, sand,
+  // snow, rock faces), outD = trail dirt. Returns the dirt weight; this._steep = the rock-face weight
+  colorLayers(x, z, h, ny, outG, outD) {
     const v = this.n(x + 50, z + 50, 1 / 6) * 0.5 + 0.5;
     const [dry, rug] = this.biome(x, z);
-    out.copy(COL.grassA).lerp(COL.grassB, v);
-    out.lerp(COL.meadow, smooth(3.5, 8, h) * 0.8 * (1 - rug));
-    out.lerp(COL.alpine, rug * (1 - dry) * 0.6);
-    out.lerp(COL.dryGrass, smooth(0.15, 0.55, dry));
-    out.lerp(_c.copy(COL.dune).lerp(COL.duneDark, v), smooth(0.5, 0.85, dry));
-    out.lerp(COL.snow, smooth(11, 19, h - this.hill(x, z) + this.n(x, z, 1 / 9) * 3) * rug * (1 - dry) * smooth(0.75, 0.9, ny));
-    const t = Math.max(this.trail(x, z), this.jump(x, z)[1]);
-    if (t > 0) {
-      const d = _c.copy(COL.dirt).lerp(COL.dirtDark, smooth(-0.4, 0.4, this.n(x, z, 1 / 7)) * 0.7).lerp(COL.desertDirt, dry * 0.6);
-      out.lerp(d, t);
-    }
+    outG.copy(COL.grassA).lerp(COL.grassB, v);
+    outG.lerp(COL.meadow, smooth(3.5, 8, h) * 0.8 * (1 - rug));
+    outG.lerp(COL.alpine, rug * (1 - dry) * 0.6);
+    outG.lerp(COL.dryGrass, smooth(0.15, 0.55, dry));
+    // leaf litter under the woods, darker clover patches and mottling in the open grass
+    const wood = smooth(0.0, 0.35, this.n(x + 400, z, 1 / 38)) * (1 - dry);
+    outG.lerp(COL.litter, wood * 0.38 * (1 - rug * 0.5));
+    outG.lerp(COL.clover, smooth(0.25, 0.5, this.n(x - 71, z + 23, 1 / 5)) * 0.35 * (1 - dry) * (1 - wood));
+    outG.multiplyScalar(1 + this.n(x + 17, z - 29, 1 / 2.3) * 0.08);
+    outG.lerp(_c.copy(COL.dune).lerp(COL.duneDark, v), smooth(0.5, 0.85, dry));
+    outG.lerp(COL.snow, smooth(11, 19, h - this.hill(x, z) + this.n(x, z, 1 / 9) * 3) * rug * (1 - dry) * smooth(0.75, 0.9, ny));
     // steep faces: layered strata, red sandstone in the desert, grey rock elsewhere
-    const steep = smooth(0.86, 0.6, ny) * (1 - t);
+    const steep = smooth(0.86, 0.6, ny);
     if (steep > 0) {
       const bh = h * 0.3 + this.n(x, z, 1 / 40) * 0.5, bi = Math.floor(bh), bf = bh - bi;
       const pick = (B, o) => o.copy(B[((bi % B.length) + B.length) % B.length]).lerp(B[(((bi + 1) % B.length) + B.length) % B.length], smooth(0.75, 1, bf));
       const rock = pick(GREY_BANDS, _c2).lerp(pick(RED_BANDS, _c3), smooth(0.35, 0.65, dry));
-      out.lerp(rock, steep);
+      outG.lerp(rock, steep);
     }
-    if (h < WATER + 0.7) out.lerp(COL.sand, smooth(WATER + 0.7, WATER + 0.2, h) * (1 - t));   // causeways stay dirt
-    if (h < WATER) out.lerp(COL.bed, 0.6);
-    return out;
+    this._steep = steep;
+    if (h < WATER + 0.7) outG.lerp(COL.sand, smooth(WATER + 0.7, WATER + 0.2, h));
+    // trail dirt (also just off the trail: the shader may reach for it at the edge)
+    const t = Math.max(this.trail(x, z), this.jump(x, z)[1]);
+    outD.copy(COL.dirt).lerp(COL.dirtDark, smooth(-0.4, 0.4, this.n(x, z, 1 / 7)) * 0.7).lerp(COL.desertDirt, dry * 0.6);
+    if (t > 0) {   // the ridden line is packed and darker; off it the dirt is loose, lighter and gritty
+      const ln = this.line(x, z) * this.trail(x, z), grit = this.n(x + 13.7, z - 4.1, 1 / 0.9);
+      outD.multiplyScalar((1 - 0.2 * ln) * (1 + (1 - ln) * (0.07 + grit * 0.09)));
+    }
+    if (h < WATER) { outG.lerp(COL.bed, 0.6); outD.lerp(COL.bed, 0.6); }
+    return t;
+  }
+  color(x, z, h, ny, out) {   // the two layers flattened (dust, tracks, anything that wants one colour)
+    const t = this.colorLayers(x, z, h, ny, out, _cD);
+    return out.lerp(_cD, t);
   }
 
   // Streams chunks in around the player. Building a chunk is expensive (~35k noise-heavy samples),
@@ -597,13 +758,19 @@ export class Terrain {
         const c = r.value;
         for (const o of c.objects) this.scene.add(o);
         this.chunks.set(c.cx + ',' + c.cz, c);
+        this.addRocks(c);
         this.job = null;
       }
       if (performance.now() >= deadline) break;
     }
   }
   disposeChunk(c) {
-    for (const o of c.objects) { this.scene.remove(o); if (o.isInstancedMesh) o.dispose(); else o.geometry.dispose(); }
+    this.removeRocks(c);
+    for (const o of c.objects) {
+      this.scene.remove(o);
+      if (o.isInstancedMesh) o.dispose();
+      else { o.geometry.dispose(); if (o.material !== MAT.terrain && o.material?.map?.isDataTexture) { o.material.map.dispose(); o.material.userData.dirtTex?.dispose(); o.material.dispose(); } }
+    }
   }
   _late() { return performance.now() >= this._deadline; }
 
@@ -626,19 +793,30 @@ export class Terrain {
       nrmA[i * 3] = nx / l; nrmA[i * 3 + 1] = ny / l; nrmA[i * 3 + 2] = nz / l;
     }
     geo.setAttribute('normal', new THREE.BufferAttribute(nrmA, 3));
-    const nrm = geo.attributes.normal, cols = new Float32Array(pos.count * 3), c = new THREE.Color();
+    // THE GROUND AS TEXTURES, one texel per vertex (vertex colours are blended across each triangle,
+    // so every sharp change showed the triangle pattern; a texture on the same grid filters smoothly).
+    // Two layers -- land and trail dirt -- with the dirt weight and the rock-face weight in the alphas;
+    // the terrain shader (grounddetail.js) blends them by height. Baked at the end, with the AO.
+    const NV = N + 1, uv = geo.attributes.uv, nrm = geo.attributes.normal, cG = new THREE.Color(), cD = new THREE.Color();
+    const LG = new Float32Array(NV * NV * 3), LD = new Float32Array(NV * NV * 3), TW = new Float32Array(NV * NV), SW = new Float32Array(NV * NV);
     for (let i = 0; i < pos.count; i++) {
-      this.color(pos.getX(i) + ox, pos.getZ(i) + oz, pos.getY(i), nrm.getY(i), c);
-      cols[i * 3] = c.r; cols[i * 3 + 1] = c.g; cols[i * 3 + 2] = c.b;
+      const ix = Math.round((pos.getX(i) + S / 2) / d), iz = Math.round((pos.getZ(i) + S / 2) / d), o = iz * NV + ix;
+      TW[o] = this.colorLayers(pos.getX(i) + ox, pos.getZ(i) + oz, pos.getY(i), nrm.getY(i), cG, cD); SW[o] = this._steep;
+      LG[o * 3] = cG.r; LG[o * 3 + 1] = cG.g; LG[o * 3 + 2] = cG.b; LD[o * 3] = cD.r; LD[o * 3 + 1] = cD.g; LD[o * 3 + 2] = cD.b;
+      uv.setXY(i, (ix + 0.5) / NV, (iz + 0.5) / NV);   // texel centres sit exactly on the vertices
       if ((i & 63) === 63 && this._late()) yield;
     }
-    geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
-    const mesh = new THREE.Mesh(geo, MAT.terrain);
+    const mat = MAT.terrain.clone();
+    // the ground shader, then the terrain tweaks main.js adds to MAT.terrain later (sand sparkle)
+    mat.onBeforeCompile = (sh, r) => { groundDetail(sh, mat.userData.dirtTex); MAT.terrain.onBeforeCompile(sh, r); };
+    mat.customProgramCacheKey = () => GROUND_KEY + MAT.terrain.customProgramCacheKey();
+    const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(ox, 0, oz); mesh.receiveShadow = true;
 
     // decorations
     const rnd = mulberry32((cx * 73856093) ^ (cz * 19349663) ^ (this.seed * 83492791));
-    const lists = { trunk: [], blob: [], pine: [], rock: [], pebble: [], tuft: [], daisy: [], tulip: [], spike: [], cactus: [] };
+    const lists = { trunk: [], blob: [], pine: [], rock: [], pebble: [], tuft: [], daisy: [], tulip: [], spike: [], cactus: [],
+      bush: [], log: [], stick: [], fern: [], mushroom: [], weed: [] };
     const colliders = [];
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), s = new THREE.Vector3(), p = new THREE.Vector3();
     const put = (list, x, y, z, sx, sy, sz, yaw, col, tilt = 0) => {
@@ -812,6 +990,101 @@ export class Terrain {
       }
       else put(lists.tuft, x, h - 0.03, z, 1 + rnd(), 0.7 + rnd() * 0.8, 1 + rnd(), rnd() * 6.28, tc);
     }
+    // trail clutter: grit and stones kicked off the ridden line onto the shoulders, grass creeping in
+    // at the edges (own random stream: never reshuffles the trees and rocks of a seed)
+    const rt = mulberry32((cx * 2654435761) ^ (cz * 40503) ^ (this.seed * 2246822519) ^ 0x27d4eb2f);
+    for (let i = 0; i < 420; i++) {
+      if ((i & 31) === 31 && this._late()) yield;
+      const x = ox + (rt() - .5) * S, z = oz + (rt() - .5) * S;
+      const t = this.trail(x, z);
+      if (t < 0.04 || this.jump(x, z)[1] > 0.05 || isBlocked(x, z, 0.3)) continue;
+      const h = this.height(x, z); if (h < WATER + 0.2 || Math.hypot(x, z) < 6) continue;
+      const ln = this.line(x, z);
+      if (t > 0.45) {   // on the dirt: small stones, none on the ridden line itself
+        if (ln > 0.25 || rt() < 0.35) continue;
+        const sc = 0.035 + rt() ** 2 * 0.09;
+        put(lists.pebble, x, h - sc * 0.3, z, sc * (1 + rt() * 0.6), sc * (0.5 + rt() * 0.4), sc, rt() * 6.28, null, 0.6);
+      } else {          // the shoulder: tufts of grass (dry in the desert) and the odd bigger stone
+        const [dry] = this.biome(x, z);
+        if (rt() < 0.25) { const sc = 0.06 + rt() * 0.1; put(lists.pebble, x, h - sc * 0.3, z, sc * 1.3, sc * 0.7, sc, rt() * 6.28, null, 0.5); }
+        else if (rt() > dry * 0.7) put(lists.tuft, x, h - 0.03, z, 0.7 + rt() * 0.6, 0.5 + rt() * 0.6, 0.7 + rt() * 0.6, rt() * 6.28,
+          _c.copy(COL.tuftGreen).lerp(COL.tuftDry, smooth(0.1, 0.6, dry)).clone());
+      }
+    }
+    // GRASS: clumps of blades everywhere it is green (thick in meadows, sparse in dry and rocky land,
+    // none on dirt, sand or rock faces); a few clumps grouped together read as turf
+    const rg = mulberry32((cx * 668265263) ^ (cz * 374761393) ^ (this.seed * 2654435761) ^ 0x3c6ef372);
+    for (let i = 0; i < 420; i++) {
+      if ((i & 31) === 31 && this._late()) yield;
+      const x = ox + (rg() - .5) * S, z = oz + (rg() - .5) * S;
+      if (this.trail(x, z) > 0.15 || this.jump(x, z)[1] > 0.1) continue;
+      const h = this.height(x, z); if (h < WATER + 0.5) continue;
+      const [dry, rug] = this.biome(x, z);
+      if (rg() < dry * 0.95 + rug * 0.5) continue;
+      const n = 2 + ((rg() * 4) | 0), base = _c.copy(COL.tuftGreen).lerp(COL.grassB, rg() * 0.6).lerp(COL.tuftDry, smooth(0.1, 0.6, dry));
+      for (let k = 0; k < n; k++) {
+        const a = rg() * 6.28, d = k ? 0.15 + rg() * 0.45 : 0, gx = x + Math.cos(a) * d, gz = z + Math.sin(a) * d;
+        if (k && this.trail(gx, gz) > 0.15) continue;
+        const s2 = 0.9 + rg() * 0.9;
+        put(lists.tuft, gx, this.height(gx, gz) - 0.02, gz, s2, s2 * (0.8 + rg() * 0.5), s2, rg() * 6.28, base.clone().multiplyScalar(0.85 + rg() * 0.3), 0.15);
+      }
+    }
+    // NATURE: the things you'd find off the trail -- bushes, stumps and fallen logs, ferns, sticks
+    // and mushroom rings under the trees, dry scrub and tumbleweed in the desert, scree in the rocks
+    const rn = mulberry32((cx * 374761393) ^ (cz * 668265263) ^ (this.seed * 1274126177) ^ 0x6a09e667);
+    for (let i = 0; i < 220; i++) {
+      if ((i & 15) === 15 && this._late()) yield;
+      const x = ox + (rn() - .5) * S, z = oz + (rn() - .5) * S;
+      if (this.trail(x, z) > 0.03 || this.jump(x, z)[1] > 0 || isBlocked(x, z, 0.6) || Math.hypot(x, z) < 10) continue;
+      const h = okSpot(x, z, WATER + 0.5); if (h === null) continue;
+      const [dry, rug] = this.biome(x, z), wood = smooth(-0.05, 0.3, this.n(x + 400, z, 1 / 38));
+      const r = rn(), yaw = rn() * 6.28;
+      if (dry > 0.55) {                       // desert
+        if (r < 0.08) {
+          const sc = 0.25 + rn() * 0.25;
+          put(lists.weed, x, h + sc * 0.75, z, sc, sc * 0.85, sc, yaw, SCRUB[(rn() * SCRUB.length) | 0], 0.6);
+        } else if (r < 0.4) put(lists.tuft, x, h - 0.03, z, 2 + rn() * 1.5, 1.4 + rn(), 2 + rn() * 1.5, yaw, _c.copy(COL.tuftDry).multiplyScalar(0.8 + rn() * 0.3).clone());
+        else if (r < 0.55 && this.trailMetres(x, z) > 3) {   // scatter of desert stones
+          for (let k = 0; k < 3; k++) { const sc = 0.05 + rn() * 0.1, a = rn() * 6.28, d = rn() * 0.8; put(lists.pebble, x + Math.cos(a) * d, h - sc * 0.3, z + Math.sin(a) * d, sc * 1.3, sc * 0.7, sc, rn() * 6.28, null, 0.5); }
+        }
+        continue;
+      }
+      if (rug > 0.55 && r < 0.35) {          // rocky lands: scree
+        for (let k = 0; k < 4; k++) { const sc = 0.06 + rn() * 0.14, a = rn() * 6.28, d = rn() * 1.2; put(lists.pebble, x + Math.cos(a) * d, h - sc * 0.3, z + Math.sin(a) * d, sc * 1.3, sc * 0.75, sc, rn() * 6.28, null, 0.6); }
+        continue;
+      }
+      if (wood > 0.3) {                       // under the trees
+        if (r < 0.06) {                       // a fallen log, lying across the slope
+          const len = 1.6 + rn() * 2, sc = 0.8 + rn() * 0.5, dx = Math.cos(yaw), dz = -Math.sin(yaw);
+          const h2 = Math.min(this.height(x + dx * len / 2, z + dz * len / 2), this.height(x - dx * len / 2, z - dz * len / 2));
+          if (Math.abs(h - h2) > 0.35 || this.trail(x + dx * len / 2, z + dz * len / 2) > 0.02 || this.trail(x - dx * len / 2, z - dz * len / 2) > 0.02) continue;
+          put(lists.log, x, Math.min(h, h2) + 0.14 * sc, z, len, sc, sc, yaw, null, 0.08);
+          for (const u of [-0.35, 0, 0.35]) colliders.push({ x: x + dx * len * u, z: z + dz * len * u, r: 0.22 * sc, top: Math.min(h, h2) + 0.34 * sc });
+        } else if (r < 0.13) {                // stump
+          const sc = 1.3 + rn() * 0.9;
+          put(lists.trunk, x, h - 0.05, z, sc, 0.18 + rn() * 0.2, sc, yaw, null, 0.1);
+          colliders.push({ x, z, r: 0.16 * sc, top: h + 0.25 });
+        } else if (r < 0.45) {                // ferns, in little groups
+          const n = 1 + ((rn() * 4) | 0), col = FERNS[(rn() * FERNS.length) | 0];
+          for (let k = 0; k < n; k++) { const a = rn() * 6.28, d = k ? 0.3 + rn() * 0.5 : 0, fx = x + Math.cos(a) * d, fz = z + Math.sin(a) * d, s2 = 1 + rn() * 0.8; put(lists.fern, fx, this.height(fx, fz) - 0.02, fz, s2, s2 * (0.8 + rn() * 0.4), s2, rn() * 6.28, col, 0.2); }
+        } else if (r < 0.62) {                // sticks and fallen branches
+          const l = 0.4 + rn() * 0.9; put(lists.stick, x, h + 0.015, z, l, 0.8 + rn() * 0.6, 0.8 + rn() * 0.6, yaw, null, 0.15);
+        } else if (r < 0.72) {                // mushrooms, a few together
+          const col = SHROOMS[(rn() * SHROOMS.length) | 0], n = 2 + ((rn() * 5) | 0);
+          for (let k = 0; k < n; k++) { const a = rn() * 6.28, d = rn() * 0.25, fx = x + Math.cos(a) * d, fz = z + Math.sin(a) * d, s2 = 0.7 + rn() * 0.9; put(lists.mushroom, fx, this.height(fx, fz) - 0.01, fz, s2, s2 * (0.8 + rn() * 0.5), s2, rn() * 6.28, col, 0.3); }
+        } else if (r < 0.85) {
+          const sc = 0.5 + rn() * 0.6; put(lists.bush, x, h - 0.08, z, sc * (1 + rn() * 0.4), sc * (0.8 + rn() * 0.5), sc, yaw, BUSHES[(rn() * BUSHES.length) | 0], 0.3);
+        }
+        continue;
+      }
+      // open meadow: the odd bush or clump of shrubs, a lone stick
+      if (r < 0.14) {
+        const n = 1 + ((rn() * 3) | 0), col = BUSHES[(rn() * BUSHES.length) | 0];
+        for (let k = 0; k < n; k++) { const a = rn() * 6.28, d = k ? 0.5 + rn() * 0.7 : 0, fx = x + Math.cos(a) * d, fz = z + Math.sin(a) * d, sc = 0.35 + rn() * 0.55; if (this.trail(fx, fz) > 0.02) continue; put(lists.bush, fx, this.height(fx, fz) - 0.08, fz, sc * (1 + rn() * 0.4), sc * (0.7 + rn() * 0.5), sc, rn() * 6.28, _c.copy(col).multiplyScalar(0.85 + rn() * 0.3).clone(), 0.3); }
+      } else if (r < 0.2) {
+        const l = 0.3 + rn() * 0.6; put(lists.stick, x, h + 0.015, z, l, 0.8, 0.8, yaw, null, 0.15);
+      }
+    }
     const objects = [mesh], small = [];
     // small = ground clutter (grass, flowers, pebbles): only drawn in the chunks around the rider
     const mk = (geo, mat, list, cast, isSmall = false) => {
@@ -824,14 +1097,20 @@ export class Terrain {
       if (isSmall) small.push(im);
     };
     mk(GEO.trunk, MAT.trunk, lists.trunk, true);
-    mk(GEO.blob, MAT.leaf, lists.blob, true);
+    mk(GEO.blob, MAT.leafSoft, lists.blob, true);
     mk(GEO.pine, MAT.leaf, lists.pine, true);
     mk(GEO.rock, MAT.rock, lists.rock, true);
     mk(GEO.pebble, MAT.rock, lists.pebble, false, true);   // too small for a shadow worth drawing
-    mk(GEO.tuft, MAT.tuft, lists.tuft, false, true);
+    mk(GEO.grass, MAT.flower, lists.tuft, false, true);   // curved, swaying grass clumps
     mk(GEO.daisy, MAT.flower, lists.daisy, false, true);
     mk(GEO.tulip, MAT.flower, lists.tulip, false, true);
     mk(GEO.spike, MAT.flower, lists.spike, false, true);
+    mk(GEO.bush, MAT.leafSoft, lists.bush, true);
+    mk(GEO.log, MAT.trunk, lists.log, true);
+    mk(GEO.weed, MAT.tuft, lists.weed, true);
+    mk(GEO.stick, MAT.trunk, lists.stick, false, true);
+    mk(GEO.fern, MAT.flower, lists.fern, false, true);
+    mk(GEO.mushroom, MAT.flower, lists.mushroom, false, true);
     mk(GEO.cactus, MAT.leaf, lists.cactus, true);
     if (lists.cactus.length) { const im = objects[objects.length - 1]; for (const k of colliders) if (k.cactus) k.cactus.im = im; }
     SHED_DESIGNS.forEach((d, i) => mk(shedGeo(d), MAT_SHED, shedLists[i], true));
@@ -848,6 +1127,41 @@ export class Terrain {
     for (const j of woodF) if (j.x >= x0 && j.x < x0 + S && j.z >= z0 && j.z < z0 + S) this.woodModel(j, wl);
     mk(GEO.box, MAT.wood, wl.plank, true);
     mk(GEO.box, MAT.wood, wl.beam, true);
+    // ---- bake the ground textures, with AMBIENT OCCLUSION: hollows (lower than the ground ~1.5 m
+    // round them) and the ground at the foot of rocks, logs, stumps and trees go darker ----
+    {
+      const ao = new Float32Array(NV * NV).fill(1), R = 4, Gk = (ix, iz) => G[(Math.min(N + 1, Math.max(-1, iz)) + 1) * W + Math.min(N + 1, Math.max(-1, ix)) + 1];
+      for (let iz = 0; iz < NV; iz++) for (let ix = 0; ix < NV; ix++) {
+        const h0 = Gk(ix, iz), avg = (Gk(ix - R, iz) + Gk(ix + R, iz) + Gk(ix, iz - R) + Gk(ix, iz + R)) / 4;
+        ao[iz * NV + ix] = 1 - Math.min(0.3, Math.max(0, (avg - h0) * 0.6));
+      }
+      yield;
+      for (const k of colliders) {
+        if (k.fence || k.tape) continue;
+        const rock = k.top !== undefined, rad = rock ? k.r * 1.7 : 1.3, inner = rock ? k.r * 0.6 : 0.15, str = rock ? 0.42 : 0.3;
+        const fx = (k.x - ox + S / 2) / d, fz = (k.z - oz + S / 2) / d, rr = Math.ceil(rad / d);
+        for (let iz = Math.max(0, Math.floor(fz - rr)); iz <= Math.min(N, Math.ceil(fz + rr)); iz++)
+          for (let ix = Math.max(0, Math.floor(fx - rr)); ix <= Math.min(N, Math.ceil(fx + rr)); ix++) {
+            const dd = Math.hypot(ix - fx, iz - fz) * d;
+            if (dd < rad) ao[iz * NV + ix] *= 1 - str * (1 - smooth(inner, rad, dd));
+          }
+      }
+      const enc = (v) => Math.round(255 * Math.min(1, v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055));   // linear -> sRGB
+      const pG = new Uint8Array(NV * NV * 4), pD = new Uint8Array(NV * NV * 4);
+      for (let o = 0; o < NV * NV; o++) {
+        const a = ao[o];
+        pG[o * 4] = enc(LG[o * 3] * a); pG[o * 4 + 1] = enc(LG[o * 3 + 1] * a); pG[o * 4 + 2] = enc(LG[o * 3 + 2] * a); pG[o * 4 + 3] = Math.round(TW[o] * 255);
+        pD[o * 4] = enc(LD[o * 3] * a); pD[o * 4 + 1] = enc(LD[o * 3 + 1] * a); pD[o * 4 + 2] = enc(LD[o * 3 + 2] * a); pD[o * 4 + 3] = Math.round(SW[o] * 255);
+      }
+      const mk = (px) => {
+        const t = new THREE.DataTexture(px, NV, NV, THREE.RGBAFormat);
+        t.colorSpace = THREE.SRGBColorSpace;
+        t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true;
+        t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; t.anisotropy = 4; t.needsUpdate = true;
+        return t;
+      };
+      mat.map = mk(pG); mat.userData.dirtTex = mk(pD);
+    }
     return { cx, cz, objects, colliders, small };
   }
 

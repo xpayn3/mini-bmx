@@ -47,7 +47,7 @@ const css = `
 #ctl .tog.on .sw { background: #ffd21f; }
 #ctl .tog.on .sw::after { transform: translateX(14px); }
 #ctl .qv { padding: 4px 9px; border-radius: 8px; background: rgba(255,255,255,.1); font-weight: 800; font-size: 12px; }
-#ctl .acts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+#ctl .acts { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
 #ctl .act { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 10px 4px 8px; border: 0; border-radius: 12px; cursor: pointer;
   color: #fff; background: rgba(255,255,255,.08); font: 700 12px ui-rounded, "Segoe UI", system-ui, sans-serif; transition: background .15s; }
 #ctl .act:hover { background: rgba(255,255,255,.16); }
@@ -97,6 +97,7 @@ function build() {
       <button class="act" data-k="KeyR"><span class="ic">🌍</span>New world</button>
       <button class="act" data-k="KeyP"><span class="ic">⚙️</span>Tune</button>
       <button class="act" data-k="KeyK"><span class="ic">🧍</span>Rider</button>
+      <button class="act" data-k="KeyH"><span class="ic">🏆</span>Records</button>
     </div>
     <details class="keysec"><summary>Keyboard controls</summary><div class="keysSlot"></div></details>`;
   document.body.append(btn, panel);
@@ -125,7 +126,7 @@ function build() {
   btn.addEventListener('click', () => { setOpen(!panel.classList.contains('open')); btn.blur(); });
   panel.addEventListener('click', (e) => {
     const b = e.target.closest('[data-k]');
-    if (b) { press(b.dataset.k); if (['KeyP', 'KeyK', 'KeyR'].includes(b.dataset.k)) setOpen(false); }
+    if (b) { press(b.dataset.k); if (['KeyP', 'KeyK', 'KeyR', 'KeyH'].includes(b.dataset.k)) setOpen(false); }
     // never keep focus: Space / WASD must keep driving the bike
     setTimeout(() => { if (document.activeElement !== document.getElementById('cam')) document.activeElement?.blur?.(); }, 0);
   });
