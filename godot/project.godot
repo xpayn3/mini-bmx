@@ -31,3 +31,42 @@ anti_aliasing/quality/msaa_3d=2
 anti_aliasing/quality/screen_space_aa=1
 lights_and_shadows/directional_shadow/size=4096
 lights_and_shadows/directional_shadow/soft_shadow_filter_quality=3
+anti_aliasing/quality/use_debanding=true
+occlusion_culling/use_occlusion_culling=true
+rendering_device/pipeline_cache/enable=true
+shader_compiler/shader_cache/enabled=true
+environment/defaults/default_clear_color=Color(0.66, 0.84, 0.92, 1)
+camera/depth_of_field/depth_of_field_bokeh_shape=1
+camera/depth_of_field/depth_of_field_bokeh_quality=2
+environment/volumetric_fog/volume_size=96
+environment/volumetric_fog/volume_depth=96
+global_illumination/sdfgi/probe_ray_count=1
+global_illumination/sdfgi/frames_to_converge=1
+lights_and_shadows/directional_shadow/16_bits=true
+
+[shader_globals]
+
+atm_wind={
+"type": "vec4",
+"value": Vector4(0.8, 0.6, 0, 1)
+}
+atm_pusher={
+"type": "vec4",
+"value": Vector4(0, -10000, 0, 0)
+}
+atm_cloud={
+"type": "vec4",
+"value": Vector4(0, 0, 0.42, 1)
+}
+grime={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+mud_col={
+"type": "color",
+"value": Color(0.35, 0.235, 0.133, 1)
+}
+grime_root={
+"type": "mat4",
+"value": Projection(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
+}

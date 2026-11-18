@@ -23,6 +23,7 @@ render_mode unshaded, blend_mix, depth_draw_never, cull_disabled, shadows_disabl
 uniform sampler2D smoke_tex : hint_default_white, filter_linear, repeat_disable;
 uniform vec3 sun_col = vec3(1.6, 1.21, 0.77);   // 0xffe2b8 (linear) * 1.6
 uniform vec3 sky_col = vec3(0.6, 0.79, 1.0);    // 0xcfe6ff (linear)
+uniform sampler2D depth_tex : hint_depth_texture, filter_nearest;
 
 varying vec4 v_custom;   // x: rotation, y: atlas cell, z: life 0..1
 varying vec4 v_col;      // rgb: tint (linear), a: alpha
@@ -47,6 +48,10 @@ void fragment() {
 	float er = v_custom.z * 0.75;
 	float dens = t.r * smoothstep(er, er + 0.35, t.g);
 	float a = dens * v_col.a;
+	// soft particle: fade where the puff meets the ground, and right in front of the camera
+	float zd = textureLod(depth_tex, SCREEN_UV, 0.0).r;
+	vec4 sp = INV_PROJECTION_MATRIX * vec4(SCREEN_UV * 2.0 - 1.0, zd, 1.0);
+	a *= clamp((VERTEX.z - sp.z / sp.w) / 0.5, 0.0, 1.0) * smoothstep(0.4, 1.6, -VERTEX.z);
 	if (a < 0.003) discard;
 	// cheap volume lighting: top of the puff faces the sun, underside is self-shadowed
 	float up = 0.5 - UV.y;

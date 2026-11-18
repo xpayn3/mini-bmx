@@ -32,6 +32,15 @@ var sun: DirectionalLight3D
 var env: Environment
 var cam_attr: CameraAttributesPractical
 var grade_rect: ColorRect
+var atmos := Atmos.new()
+var grime: Grime
+var dust: RideDust
+var sun_energy := 1.6
+var speed_k := 0.0           # 0..1 speed feel (FOV boost, edge blur)
+var photo := false           # photo mode: time frozen, HUD hidden, focus on the rider
+var _photo_last := 0
+var _landed := 0.0           # landing impact to feed the mud next step
+var _cloud_t := 0.0
 var susp = null
 var pedal_a0 := [0.0, PI]
 
@@ -91,6 +100,12 @@ func _ready() -> void:
 	hud = load("res://scripts/ui/hud.gd").new()
 	hud.game = self
 	add_child(hud)
+	grime = Grime.new()
+	add_child(grime)
+	grime.watch(rig)
+	grime.watch(rider)
+	dust = RideDust.new()
+	add_child(dust)
 	audio = load("res://scripts/game/ride_audio.gd").new()
 	audio.game = self
 	add_child(audio)
@@ -98,6 +113,11 @@ func _ready() -> void:
 	Settings.changed.connect(_apply_settings)
 	_apply_settings()
 	respawn(false)
+	# shader warm-up behind the opening fade (pipeline cache + ubershaders do the rest)
+	grime.warm_frames = 4
+	dust.warm_up(Vector3(0, phys.y + 0.5, 0))
+	fx.puff(Vector3(0, phys.y + 0.4, 0), Vector3.ZERO, Color.WHITE, 0.3, 0.2, 0.0)
+	fx.chunk(Vector3(0, phys.y + 0.4, 0), Vector3.ZERO, Color.WHITE, 0.01, 0.2)
 
 # ---------------------------------------------------------------- environment
 func _build_environment() -> void:
@@ -133,25 +153,62 @@ func _build_environment() -> void:
 	env.ssao_radius = 0.6
 	env.ssao_intensity = 2.0
 	env.ssao_power = 1.5
-	env.glow_intensity = 0.2
-	env.glow_bloom = 0.0
+	env.ssao_detail = 0.5
+	env.ssao_horizon = 0.06
+	env.ssao_light_affect = 0.15      # a touch of AO in direct light too: contact under the bike, rocks
+	env.ssil_radius = 4.0
+	env.ssil_intensity = 0.7
+	env.sdfgi_use_occlusion = true
+	env.sdfgi_read_sky_light = true
+	env.sdfgi_cascades = 4
+	env.sdfgi_min_cell_size = 0.25
+	env.sdfgi_energy = 0.8
+	env.sdfgi_y_scale = Environment.SDFGI_Y_SCALE_75_PERCENT
+	env.ssr_max_steps = 48
+	env.ssr_fade_in = 0.15
+	env.ssr_fade_out = 2.0
+	env.glow_intensity = 0.25
+	env.glow_strength = 0.9
+	env.glow_bloom = 0.02
+	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_SOFTLIGHT
 	env.glow_hdr_threshold = 0.92
+	env.set_glow_level(0, 0.0); env.set_glow_level(1, 0.6); env.set_glow_level(2, 1.0)
+	env.set_glow_level(3, 0.6); env.set_glow_level(4, 0.3)
+	# volumetric fog: a light haze the sun shines through (shafts past trees, lit dust clouds); the
+	# depth fog above still does the far fade, so this stays thin
+	env.volumetric_fog_density = 0.0025
+	env.volumetric_fog_albedo = Color(0.86, 0.9, 0.95)
+	env.volumetric_fog_anisotropy = 0.55
+	env.volumetric_fog_length = 72.0
+	env.volumetric_fog_detail_spread = 1.6
+	env.volumetric_fog_ambient_inject = 0.4
+	env.volumetric_fog_sky_affect = 0.0
+	env.volumetric_fog_temporal_reprojection_enabled = true
+	env.volumetric_fog_temporal_reprojection_amount = 0.9
 	env.adjustment_enabled = true
 	env.adjustment_saturation = 1.22
 	env.adjustment_contrast = 1.08
 	we.environment = env
 	cam_attr = CameraAttributesPractical.new()
 	cam_attr.dof_blur_amount = 0.06
+	cam_attr.auto_exposure_enabled = false
 	we.camera_attributes = cam_attr
 	add_child(we)
 	sun = DirectionalLight3D.new()
 	sun.light_color = Color("ffd7a3")
 	sun.light_energy = 1.6
 	sun.shadow_enabled = true
-	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+	sun.directional_shadow_split_1 = 0.06
+	sun.directional_shadow_split_2 = 0.18
+	sun.directional_shadow_split_3 = 0.45
+	sun.directional_shadow_blend_splits = true
+	sun.directional_shadow_fade_start = 0.85
 	sun.directional_shadow_max_distance = 90.0
-	sun.shadow_bias = 0.03
-	sun.shadow_normal_bias = 1.0
+	sun.directional_shadow_pancake_size = 30.0
+	sun.shadow_bias = 0.02
+	sun.shadow_normal_bias = 1.2
+	sun.light_volumetric_fog_energy = 1.4
 	add_child(sun)
 	sun.look_at_from_position(SUN_DIR.normalized(), Vector3.ZERO, Vector3.UP)
 	# colour grade (split tone) + vignette, drawn over the 3D view
@@ -166,11 +223,28 @@ func _build_environment() -> void:
 
 func _apply_settings() -> void:
 	terrain.view_scale = float(Settings.get_v("view_distance"))
+	var sq: int = Settings.get_v("shadows")
+	# shadows: Low = 2 cascades, hard-ish; Ultra = 4 blended cascades + contact-hardening soft shadows
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS if sq == 0 else DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+	sun.directional_shadow_blend_splits = sq >= 2
+	sun.light_angular_distance = 0.6 if sq >= 3 else 0.0
 	env.ssao_enabled = Settings.get_v("ssao")
+	var gi: int = Settings.get_v("gi")
+	env.ssil_enabled = gi >= 1
+	env.sdfgi_enabled = gi >= 2
+	# SDFGI adds its own sky light and occlusion: drop the flat ambient so valleys can go dark
+	env.ambient_light_energy = 0.3 if gi >= 2 else 0.42
+	env.volumetric_fog_enabled = Settings.get_v("vol_fog")
+	dust.fog_on = env.volumetric_fog_enabled
+	atmos.wind_on = Settings.get_v("wind")
+	atmos.clouds_on = Settings.get_v("cloud_shadows")
+	grime.enabled = Settings.get_v("grime")
+	dust.emitter.amount = int(RideDust.MAX_RATE * 3.2 * clampf(float(Settings.get_v("fx_density")), 0.2, 1.5))
 	env.ssr_enabled = Settings.get_v("ssr")
 	env.adjustment_brightness = float(Settings.get_v("brightness"))
 	env.glow_enabled = Settings.get_v("bloom")
-	grade_rect.visible = Settings.get_v("grade")
+	(grade_rect.material as ShaderMaterial).set_shader_parameter("grade_amt", 1.0 if Settings.get_v("grade") else 0.0)
+	grade_rect.visible = Settings.get_v("grade") or Settings.get_v("speed_fx")
 	cam_attr.dof_blur_far_enabled = Settings.get_v("tilt_shift")
 	cam_attr.dof_blur_near_enabled = Settings.get_v("tilt_shift")
 	if hud: hud.apply_settings()
@@ -235,6 +309,8 @@ func start_crash(reason: String) -> void:
 	ragdoll.start(pts, body_vel, spin_v, 1.0 / 60)
 	rider.pose_ragdoll(ragdoll.p)
 	burst(Vector3(phys.x, phys.y + 0.05, phys.z), 30, terrain.surface(phys.x, phys.z), 1.5)
+	var cs: int = terrain.surface(phys.x, phys.z)
+	if cs != 2: dust.cloud(Vector3(phys.x, phys.y, phys.z), f * phys.v * 0.3, ground_dust(phys.x, phys.z, cs), 3.2, 1.2)
 	flash(reason)
 	if hud: hud.on_crash()
 	if audio: audio.crash()
@@ -259,6 +335,10 @@ func on_landing(air_time: float, impact: float) -> void:
 	var dist := Vector2(phys.x - takeoff.x, phys.z - takeoff.z).length()
 	var height := air_peak - maxf(takeoff.y, phys.y)
 	if hud: hud.on_landing(air_time, dist, maxf(0.0, height), impact)
+	_landed = clampf(impact / 6.0, 0.0, 1.0) if air_time > 0.25 else 0.0
+	var ls: int = terrain.surface(phys.x, phys.z)
+	if air_time > 0.45 and (ls == 1 or ls == 3):
+		dust.cloud(Vector3(phys.x, phys.y, phys.z), phys.fwd() * phys.v * 0.3, ground_dust(phys.x, phys.z, ls), 2.6 + impact * 0.15, 1.1)
 	if air_time > 0.2: Settings.rumble(clampf(impact / 8, 0.15, 1), clampf(impact / 12, 0, 1), 0.12 + minf(0.25, impact * 0.02))
 
 ## dust / roost / tyre tracks for one physics step (bottom of physics() in main.js)
@@ -285,15 +365,19 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 		elif sand: rate = fast_k * 10 + (40.0 if skid_fx else 0.0) + carve_k * 45 + st.pedal * (4.0 if va < 3 else 0.0)
 		else: rate = (14.0 if skid_fx else 0.0) + carve_k * 12
 		var fxd: float = Settings.get_v("fx_density")
-		st.dust_acc += dt * rate * fxd
-		while st.dust_acc > 1:
-			st.dust_acc -= 1
-			var out := turn_dir * carve_k * (2 + randf() * 3)
-			var fan := (randf() - .5) * (1.6 + va * 0.18) * (1 - carve_k * 0.6)
-			var back := va * 0.3 * (1 - carve_k * 0.55)
-			var ev := Vector3(-f.x * back + side.x * (out + fan), 0.35 + randf() * 0.7 + carve_k * 0.4, -f.z * back + side.z * (out + fan))
-			var a := (0.62 if skid_fx else 0.45) if dirt else ((0.55 if skid_fx else 0.4) if sand else 0.26)
-			fx.puff(rear, ev, dcol * (0.86 if randf() < 0.3 else 1.0), 0.5 if skid_fx else 0.4, 3.2, a)
+		# the dust trail: a GPU particle emitter at the rear tyre (fx/ride_dust.gd), thrown back and up,
+		# flung outward in a carve
+		var d_out := turn_dir * carve_k * 3.5
+		var d_back := va * 0.3 * (1 - carve_k * 0.55)
+		var d_ev := Vector3(-f.x * d_back + side.x * d_out, 0.7 + carve_k * 0.4, -f.z * d_back + side.z * d_out)
+		var d_fan := rad_to_deg(atan2((1.6 + va * 0.18) * (1 - carve_k * 0.6) * 0.5, maxf(d_back, 0.6)))
+		var d_a := (0.62 if skid_fx else 0.45) if dirt else ((0.55 if skid_fx else 0.4) if sand else 0.26)
+		dust.feed(rear, d_ev, rate * fxd, dcol, d_a, clampf(d_fan, 12.0, 70.0))
+		# a hard skid on loose ground kicks up a real cloud now and then (volumetric fog)
+		_cloud_t -= dt
+		if (dirt or sand) and skid_fx and va > 5 and _cloud_t <= 0:
+			_cloud_t = 0.45
+			dust.cloud(rear, d_ev * 0.5, dcol, 2.2 + va * 0.08, 0.9)
 		if not in_water:
 			var cr := 0.0
 			if dirt: cr = (30.0 if skid_fx else 0.0) + carve_k * 28 + st.pedal * (9.0 if va < 8 else 2.0)
@@ -307,6 +391,10 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 				var ev := Vector3(-f.x * back + side.x * out, 1 + randf() * 2.2, -f.z * back + side.z * out)
 				var cc: Color = (DIRT_CHUNK if randf() < 0.7 else ROCK_CHUNK) if dirt else (dcol * 0.8 if sand else GRASS_CHUNK)
 				fx.chunk(rear, ev, cc, 0.022)
+	if st.air or va <= 0.6 or in_water:
+		dust.feed(rear, Vector3.ZERO, 0.0, dcol, 0.0, 20.0)
+	grime.feed(dt, 2 if in_water else s, va, skid_fx, st.air, _landed, terrain.ground_color(rear.x, rear.z))
+	_landed = 0.0
 	var on_ground := not st.air and not in_water and va > 0.2
 	var tc: Color = TRACK_DIRT if s == 1 else (dcol * 0.6 if sand else TRACK_GRASS)
 	var ta := 0.6 if s == 1 else (0.5 if sand else 0.3)
@@ -323,6 +411,7 @@ func respawn(new_world: bool) -> void:
 		terrain.update_stream(0, 0, INF)
 		flash("New world #%d" % GameState.seed)
 	if fx.has_method("clear_tracks"): fx.clear_tracks()
+	if new_world: grime.clean()
 	phys.reset_at(0, 0, 0)
 	rider.reset_pose()
 	_snap_prev()
@@ -335,6 +424,8 @@ func _snap_prev() -> void:
 
 func _unhandled_input(e: InputEvent) -> void:
 	if get_tree().paused or not input_enabled: return
+	if e.is_action_pressed("photo") and not e.is_echo(): toggle_photo(); return
+	if photo: return
 	if e.is_action_pressed("new_world") and not e.is_echo(): respawn(true)
 	elif e.is_action_pressed("respawn") and not e.is_echo(): respawn(false)
 	elif e.is_action_pressed("bail") and not phys.crash_on: phys.crash_pending = "BAIL!"
@@ -385,7 +476,35 @@ func _physics_process(dt: float) -> void:
 		for k in ["x", "z", "y", "heading", "course", "pitch", "lean", "steer", "slip", "compress"]:
 			_last_good[k] = phys.get(k)
 
+func toggle_photo() -> void:
+	photo = not photo
+	Engine.time_scale = 0.0 if photo else 1.0
+	hud.visible = input_enabled and not photo
+	_photo_last = Time.get_ticks_usec()
+	if not photo:
+		cam_attr.dof_blur_amount = 0.06
+		_apply_settings()
+	flash("Photo mode  ·  drag to orbit, wheel to zoom, F12 to save, O to leave" if photo else "")
+
+func _exit_tree() -> void:
+	Engine.time_scale = 1.0
+
 func _process(dt: float) -> void:
+	if photo:
+		# time stands still; the camera moves on real time
+		var now := Time.get_ticks_usec()
+		var rdt := minf((now - _photo_last) / 1e6, 0.1)
+		_photo_last = now
+		cam.update_cam(rdt)
+		var fd := cam.global_position.distance_to(drawn_pos + Vector3(0, 0.7, 0))
+		cam_attr.dof_blur_far_enabled = true; cam_attr.dof_blur_near_enabled = true
+		cam_attr.dof_blur_amount = 0.16
+		cam_attr.dof_blur_far_distance = fd + 1.0
+		cam_attr.dof_blur_far_transition = maxf(2.0, fd * 0.5)
+		cam_attr.dof_blur_near_distance = maxf(0.3, fd - 1.0)
+		cam_attr.dof_blur_near_transition = maxf(0.5, fd * 0.3)
+		(grade_rect.material as ShaderMaterial).set_shader_parameter("blur", 0.0)
+		return
 	dt = minf(dt, 0.1)
 	t += dt
 	var st := phys
@@ -423,11 +542,20 @@ func _process(dt: float) -> void:
 			if biome_hold >= 3:
 				biome_cur = b
 				if msg_t <= 0: flash(b)
+	# weather: wind, the bike parting the grass, cloud shadows (the sun dims with the shade at the rider)
+	atmos.update(t, dt, drawn_pos, 0.0 if st.air or st.crash_on else clampf(absf(st.v) / 2.0, 0.0, 1.0))
+	sun.light_energy = sun_energy * atmos.shade
+	grime.update(dt, rig)
+	# speed feel: wider FOV and streaky screen edges when fast
+	var sk := clampf((absf(st.v) - 8.0) / 14.0, 0.0, 1.0) if Settings.get_v("speed_fx") and not st.crash_on else 0.0
+	speed_k += (sk - speed_k) * minf(1.0, dt * (2.5 if sk > speed_k else 1.2))
+	cam.fov_boost = speed_k * 9.0
+	(grade_rect.material as ShaderMaterial).set_shader_parameter("blur", speed_k * speed_k)
 	cam.update_cam(dt)
 	# fog + shadows sized to the zoom level, sun follows the rider
 	env.fog_depth_begin = (cam.dist + 26) * vd
 	env.fog_depth_end = (cam.dist * 1.6 + 70) * vd
-	sun.directional_shadow_max_distance = clampf(cam.dist * 2.2, 30, 120)
+	sun.directional_shadow_max_distance = clampf(cam.dist * 2.2, 30, 120) * (0.7 if int(Settings.get_v("shadows")) == 0 else 1.0)
 	if cam_attr.dof_blur_far_enabled:
 		cam_attr.dof_blur_far_distance = cam.dist * 1.25 + 4
 		cam_attr.dof_blur_far_transition = cam.dist * 0.9 + 6

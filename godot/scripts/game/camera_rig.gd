@@ -33,6 +33,7 @@ var pos_v := Vector3.ZERO
 var pos_init := false
 var t := 0.0
 var dragging := false
+var fov_boost := 0.0   # degrees added at speed (game.gd speed feel)
 
 func _ready() -> void:
 	near = 0.1
@@ -145,7 +146,7 @@ func update_cam(dt: float) -> void:
 		var gh: float = terrain.height(global_position.x, global_position.z) + 0.35
 		if global_position.y < gh: global_position.y = gh
 	cam_fov += (fov_t - cam_fov) * minf(1.0, dt * (6.0 if P.get("mode", "") == "trackside" else 3.0))
-	fov = clampf(cam_fov + float(Settings.get_v("fov")), 5, 110)
+	fov = clampf(cam_fov * (1.0 + fov_boost / 34.0) + float(Settings.get_v("fov")), 5, 110)
 	var sk: float = st.shake * float(Settings.get_v("cam_shake"))
 	if sk > 0:
 		global_position += Vector3(sin(t * 37) * sk * 0.12, sin(t * 29 + 1) * sk * 0.12, 0)

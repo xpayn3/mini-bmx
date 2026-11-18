@@ -123,6 +123,32 @@ static func button(text: String, cb: Callable, size := 19) -> Button:
 	return b
 
 
+## a small ✕ for a panel's title row
+static func close_button(cb: Callable) -> Button:
+	var b := button("✕", cb, 15)
+	b.custom_minimum_size = Vector2(34, 30)
+	b.focus_mode = Control.FOCUS_NONE
+	b.tooltip_text = "Close"
+	return b
+
+
+## a small ↺ next to a slider: puts it back to its default (and fires value_changed like a drag would)
+static func reset_button(s: Range, default_value: float) -> Button:
+	var b := Button.new()
+	b.text = "↺"
+	b.flat = true
+	b.focus_mode = Control.FOCUS_NONE
+	b.add_theme_font_size_override("font_size", 15)
+	b.add_theme_color_override("font_color", MUTED)
+	b.add_theme_color_override("font_hover_color", ACCENT)
+	if s != null: bind_reset(b, s, default_value)
+	return b
+
+static func bind_reset(b: Button, s: Range, default_value: float) -> void:
+	b.tooltip_text = "Reset to default (%s)" % str(snappedf(default_value, 0.0001))
+	b.pressed.connect(func(): s.value = default_value)
+
+
 ## Keep a panel centred on screen whatever its size (grows out from the middle).
 static func centre(c: Control) -> void:
 	c.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
