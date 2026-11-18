@@ -1,7 +1,8 @@
 extends Node
 ## Procedural ride sound (the web version was silent): wind that rises with speed, tyre roll whose
-## tone follows the surface, a freewheel ticking when coasting, skid hiss, splashes, and one-shot
-## thuds / crunches / gear clicks. All synthesised into one AudioStreamGenerator; no audio files.
+## tone follows the surface, skid hiss, splashes, and one-shot
+## crunches / gear clicks, synthesised into one AudioStreamGenerator; plus the freewheel, synthesised
+## in C# (FreewheelSynth.cs, modelled on a real hub) on its own 44.1 kHz generator for a crisp top end.
 
 const RATE := 22050.0
 
@@ -14,8 +15,6 @@ var roll := 0.0
 var roll_tone := 0.3
 var skid := 0.0
 var water := 0.0
-var tick_rate := 0.0
-var tick_amp := 0.0
 # filter / oscillator state
 var lp_w := 0.0
 var lp_w2 := 0.0
@@ -32,8 +31,15 @@ var lp_wR2 := 0.0
 var bp_lo := 0.0
 var bp_hi := 0.0
 var whistle := 0.0
-var tick_ph := 0.0
-var tick_env := 0.0
+# freewheel: pawl clicks synthesised in C#; speed sets the click rate only, the tone stays crisp
+const FW_RATE := 44100.0
+const FW_POE := 24.0   # pawl clicks per wheel turn
+var fw := AudioStreamPlayer.new()
+var fw_pb: AudioStreamGeneratorPlayback
+var fw_synth = null    # FreewheelSynth (C#); null on the non-.NET Godot -> no freewheel
+var fw_clicks := 0.0
+var fw_amp := 0.0
+var fw_peak := 0.0
 var pan := 0.0
 # one-shots: [kind, t, amp]
 var shots: Array = []
@@ -47,6 +53,17 @@ func _ready() -> void:
 	add_child(player)
 	player.play()
 	pb = player.get_stream_playback()
+	var cs = load("res://scripts/game/FreewheelSynth.cs")
+	if cs != null and cs.can_instantiate():
+		fw_synth = cs.new()
+		var g2 := AudioStreamGenerator.new()
+		g2.mix_rate = FW_RATE
+		g2.buffer_length = 0.1
+		fw.stream = g2
+		fw.bus = player.bus
+		add_child(fw)
+		fw.play()
+		fw_pb = fw.get_stream_playback()
 
 func thud(power: float) -> void: shots.append(["thud", 0.0, clampf(power * 0.5, 0.2, 1.0)])
 func crunch() -> void: shots.append(["crunch", 0.0, 0.8])
@@ -69,11 +86,27 @@ func update_audio(dt: float) -> void:
 	roll_tone += (([0.12, 0.2, 0.1, 0.06][st.surf]) - roll_tone) * k
 	skid += ((0.5 if (st.skid_fx and on_ground and va > 1) else 0.0) - skid) * minf(1.0, dt * 12)
 	water += ((clampf(va / 6, 0, 1) * 0.6 if (st.surf == 2 and on_ground) else 0.0) - water) * k
-	# freewheel pawls: ticks while the wheel turns but the cranks don't
-	var coasting := st.pedal < 0.1 and va > 0.5 and not st.crash_on
-	tick_rate = va / st.RWR / TAU * 24.0   # ~24 pawl clicks per wheel turn
-	tick_amp += ((0.18 if coasting else 0.0) - tick_amp) * k
+	# freewheel: the pawls click while the wheel turns but the cranks don't. The click rate follows the
+	# rear wheel exactly (FW_POE per turn: slow ticks -> a fast buzz); pedalling stops new clicks at once
+	# and the last ones ring out. A little quieter at speed, where the wind takes over.
+	var coasting := st.pedal < 0.1 and va > 0.12 and not st.crash_on
+	fw_clicks = va / st.RWR / TAU * FW_POE if coasting else 0.0
+	fw_amp = 0.23 * smoothstep(0.1, 1.0, va) * (1.0 - 0.3 * clampf((va - 8.0) / 10.0, 0.0, 1.0))
 	_fill()
+	_fill_fw()
+	if OS.get_environment("BMX_AUDIO_PROBE") != "" and Engine.get_process_frames() % 30 == 0:
+		print("FW v=%.1f pedal=%.2f clicks/s=%.0f amp=%.2f peak=%.3f" % [va, st.pedal, fw_clicks, fw_amp, fw_peak])
+		fw_peak = 0.0
+
+
+func _fill_fw() -> void:
+	if fw_synth == null: return
+	var n := fw_pb.get_frames_available()
+	if n <= 0: return
+	var buf: PackedVector2Array = fw_synth.Render(n, fw_clicks, fw_amp)
+	if OS.get_environment("BMX_AUDIO_PROBE") != "":
+		for v in buf: fw_peak = maxf(fw_peak, absf(v.x))
+	fw_pb.push_buffer(buf)
 
 func _fill() -> void:
 	var n := pb.get_frames_available()
@@ -82,7 +115,6 @@ func _fill() -> void:
 	buf.resize(n)
 	var aw := wind_tone  # wind low-pass, brighter with speed
 	var ar := roll_tone  # roll low-pass
-	var tick_inc := tick_rate / RATE
 	# slow gusts: two incommensurate LFOs so the wind breathes instead of hissing flat
 	var g_inc := 0.23 / RATE
 	var g_inc2 := 0.61 / RATE
@@ -115,13 +147,6 @@ func _fill() -> void:
 		# skid / splash: high-passed hiss
 		hp_s += (w2 - hp_s) * 0.25
 		s += (w2 - hp_s) * (skid * 0.35 + water * 0.25)
-		# freewheel ticks
-		tick_ph += tick_inc
-		if tick_ph >= 1.0:
-			tick_ph -= 1.0; tick_env = 1.0
-		if tick_env > 0.001:
-			s += (randf() * 2.0 - 1.0) * tick_env * tick_amp
-			tick_env *= 0.82
 		buf[i] = Vector2(s + wl, s + wr)
 	# one-shots, mixed on top
 	for sh in shots:

@@ -283,13 +283,19 @@ func _autotest(seconds: float) -> void:
 	if OS.get_environment("BMX_NOLOD") != "": get_viewport().mesh_lod_threshold = 0.0
 	if OS.get_environment("BMX_LOD") != "": get_viewport().mesh_lod_threshold = float(OS.get_environment("BMX_LOD"))
 	if OS.get_environment("BMX_NOVSYNC") != "": DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED); Engine.max_fps = 0
+	var rec: AudioEffectRecord = null
+	if OS.get_environment("BMX_REC") != "":   # tests: record the game's own sound to a wav
+		rec = AudioEffectRecord.new()
+		AudioServer.add_bus_effect(0, rec)
+		rec.set_recording_active(true)
 	var t0 := Time.get_ticks_msec()
 	var frames := 0
 	var tris := 0.0
 	var draws := 0.0
 	while (Time.get_ticks_msec() - t0) / 1000.0 < seconds:
 		var el := (Time.get_ticks_msec() - t0) / 1000.0
-		if pedal: Input.action_press("pedal")
+		if pedal and not (OS.get_environment("BMX_COAST") != "" and int(el) % 6 >= 3): Input.action_press("pedal")   # BMX_COAST: 3 s pedal / 3 s coast
+		else: Input.action_release("pedal")
 		var straight := OS.get_environment("BMX_STRAIGHT") != ""   # tests: ride straight, no steering / hops
 		if OS.get_environment("BMX_CAM_ORBIT") != "": game.cam.orbit_t = float(OS.get_environment("BMX_CAM_ORBIT"))
 		if pedal and not straight and int(el) % 6 == 3: Input.action_press("steer_left")
@@ -334,6 +340,9 @@ func _autotest(seconds: float) -> void:
 	if not _probe.is_empty(): print("AUTOTEST body ", _probe)
 	print("AUTOTEST avg triangles/frame=%dk draw calls=%d" % [tris / maxi(frames, 1) / 1000, draws / maxi(frames, 1)])
 	print("AUTOTEST frames=%d fps=%.1f pos=(%.1f, %.1f, %.1f) v=%.2f crash=%s sane=%s" % [frames, frames / seconds, st.x, st.y, st.z, st.v, st.crash_on, st.is_sane()])
+	if rec != null:
+		rec.set_recording_active(false)
+		rec.get_recording().save_to_wav(OS.get_environment("BMX_REC"))
 	var shot := OS.get_environment("BMX_SHOT")
 	if shot != "":
 		get_viewport().get_texture().get_image().save_png(shot)
