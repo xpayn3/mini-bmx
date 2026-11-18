@@ -1,5 +1,5 @@
 """Export the full-suspension downhill bike from the bicycle project to
-assets/dh.glb for the game.
+godot/assets/dh.glb for the game.
 
 Source: W:\\AR9\\houdini_bike_2026-09-09\\BIKE PROCEDURAL\\bicycle_procedural test .hip,
 node /obj/Bicycle/bike_skeleton1 (bike_skeleton HDA, preset DH_S3: dual-crown
@@ -41,7 +41,7 @@ import hou
 
 HIP = r"W:\AR9\houdini_bike_2026-09-09\BIKE PROCEDURAL\bicycle_procedural test .hip"
 NODE = "/obj/Bicycle/bike_skeleton1"
-OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "dh.glb")
+OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "godot", "assets", "dh.glb")
 REDUCE_PCT = float(os.environ.get("DH_REDUCE_PCT", "11"))   # PolyReduce: % of the polygons kept
 
 # asset toggles switched off: animation/rider/path, decals and lettering, UV extras,

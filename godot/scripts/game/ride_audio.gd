@@ -1,0 +1,116 @@
+extends Node
+## Procedural ride sound (the web version was silent): wind that rises with speed, tyre roll whose
+## tone follows the surface, a freewheel ticking when coasting, skid hiss, splashes, and one-shot
+## thuds / crunches / gear clicks. All synthesised into one AudioStreamGenerator; no audio files.
+
+const RATE := 22050.0
+
+var game
+var player := AudioStreamPlayer.new()
+var pb: AudioStreamGeneratorPlayback
+# smoothed control values
+var wind := 0.0
+var roll := 0.0
+var roll_tone := 0.3
+var skid := 0.0
+var water := 0.0
+var tick_rate := 0.0
+var tick_amp := 0.0
+# filter / oscillator state
+var lp_w := 0.0
+var lp_w2 := 0.0
+var lp_r := 0.0
+var lp_r2 := 0.0
+var hp_s := 0.0
+var bp_s := 0.0
+var lp_wt := 0.0
+var tick_ph := 0.0
+var tick_env := 0.0
+var pan := 0.0
+# one-shots: [kind, t, amp]
+var shots: Array = []
+
+func _ready() -> void:
+	var gen := AudioStreamGenerator.new()
+	gen.mix_rate = RATE
+	gen.buffer_length = 0.12
+	player.stream = gen
+	player.bus = "SFX" if AudioServer.get_bus_index("SFX") >= 0 else "Master"
+	add_child(player)
+	player.play()
+	pb = player.get_stream_playback()
+
+func thud(power: float) -> void: shots.append(["thud", 0.0, clampf(power * 0.5, 0.2, 1.0)])
+func crunch() -> void: shots.append(["crunch", 0.0, 0.8])
+func crash() -> void: shots.append(["thud", 0.0, 1.0]); shots.append(["crunch", 0.0, 0.5])
+func shift() -> void: shots.append(["click", 0.0, 0.6])
+
+func update_audio(dt: float) -> void:
+	if pb == null: return
+	var st: BikePhysics = game.phys
+	var va := absf(st.v)
+	var on_ground := not st.air and not st.crash_on
+	var k := minf(1.0, dt * 8)
+	wind += (clampf(va * va / 260.0, 0, 1) * 0.55 - wind) * k
+	var surf_amp: float = [0.32, 0.22, 0.0, 0.42][st.surf]
+	roll += ((clampf(va / 12.0, 0, 1) * surf_amp if on_ground else 0.0) - roll) * k
+	roll_tone += (([0.12, 0.2, 0.1, 0.06][st.surf]) - roll_tone) * k
+	skid += ((0.5 if (st.skid_fx and on_ground and va > 1) else 0.0) - skid) * minf(1.0, dt * 12)
+	water += ((clampf(va / 6, 0, 1) * 0.6 if (st.surf == 2 and on_ground) else 0.0) - water) * k
+	# freewheel pawls: ticks while the wheel turns but the cranks don't
+	var coasting := st.pedal < 0.1 and va > 0.5 and not st.crash_on
+	tick_rate = va / st.RWR / TAU * 24.0   # ~24 pawl clicks per wheel turn
+	tick_amp += ((0.18 if coasting else 0.0) - tick_amp) * k
+	_fill()
+
+func _fill() -> void:
+	var n := pb.get_frames_available()
+	if n <= 0: return
+	var buf := PackedVector2Array()
+	buf.resize(n)
+	var aw := 0.04       # wind low-pass
+	var ar := roll_tone  # roll low-pass
+	var tick_inc := tick_rate / RATE
+	for i in n:
+		var w := randf() * 2.0 - 1.0
+		# wind: two-pole low-passed noise
+		lp_w += (w - lp_w) * aw
+		lp_w2 += (lp_w - lp_w2) * aw
+		var s := lp_w2 * wind * 2.5
+		# tyre roll: low rumble
+		var w2 := randf() * 2.0 - 1.0
+		lp_r += (w2 - lp_r) * ar
+		lp_r2 += (lp_r - lp_r2) * ar
+		s += lp_r2 * roll * 2.2
+		# skid / splash: high-passed hiss
+		hp_s += (w2 - hp_s) * 0.25
+		s += (w2 - hp_s) * (skid * 0.35 + water * 0.25)
+		# freewheel ticks
+		tick_ph += tick_inc
+		if tick_ph >= 1.0:
+			tick_ph -= 1.0; tick_env = 1.0
+		if tick_env > 0.001:
+			s += (randf() * 2.0 - 1.0) * tick_env * tick_amp
+			tick_env *= 0.82
+		buf[i] = Vector2(s, s)
+	# one-shots, mixed on top
+	for sh in shots:
+		var kind: String = sh[0]
+		var t0: float = sh[1]
+		var amp: float = sh[2]
+		for i in n:
+			var t := t0 + i / RATE
+			var v := 0.0
+			match kind:
+				"thud":
+					v = sin(TAU * (70.0 - t * 60.0) * t) * exp(-t * 14.0) * amp + (randf() * 2 - 1) * exp(-t * 40.0) * amp * 0.4
+				"crunch":
+					v = (randf() * 2 - 1) * exp(-t * 9.0) * amp * (0.6 + 0.4 * sin(t * 900.0))
+				"click":
+					v = (randf() * 2 - 1) * exp(-t * 120.0) * amp + sin(TAU * 2400 * t) * exp(-t * 90.0) * amp * 0.3
+			buf[i] += Vector2(v, v)
+		sh[1] = t0 + n / RATE
+	shots = shots.filter(func(sh): return sh[1] < 0.8)
+	for i in n:
+		buf[i] = buf[i].clamp(Vector2(-1, -1), Vector2(1, 1))
+	pb.push_buffer(buf)

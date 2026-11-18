@@ -1,0 +1,8 @@
+.godot/
+/build/
+*.tmp
+
+# C# build output
+bin/
+obj/
+.mono/
