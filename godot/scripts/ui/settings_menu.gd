@@ -113,33 +113,41 @@ func _graphics() -> Control:
 	var p := _page("Graphics")
 	var presets := HBoxContainer.new()
 	presets.add_theme_constant_override("separation", 8)
-	for pr in [["Low", 0], ["Medium", 1], ["High", 2], ["Ultra", 3]]:
-		presets.add_child(UITheme.button(pr[0], _preset.bind(pr[1]), 15))
-	_row(p, "Quick preset", presets)
-	_option(p, "Anti-aliasing (MSAA)", "msaa", ["Off", "2x", "4x", "8x"])
-	_check(p, "FXAA", "fxaa")
-	_check(p, "TAA", "taa", "Temporal anti-aliasing: smoothest edges, slightly softer image")
-	_option(p, "Texture filtering", "aniso", ["Bilinear", "2x anisotropic", "4x anisotropic", "8x anisotropic", "16x anisotropic"])
-	_option(p, "Shadows", "shadows", ["Low", "Medium", "High", "Ultra"])
+	var cur: int = Settings.get_v("quality")
+	for lvl in 4:
+		var b := UITheme.button(Settings.QUALITY_NAMES[lvl], _preset.bind(lvl), 15)
+		b.toggle_mode = true
+		b.button_pressed = lvl == cur
+		presets.add_child(b)
+	_row(p, "Quality preset", presets, "Low / Medium / High / Ultra. Changing any option below makes it Custom.")
+	p.add_child(UITheme.label("Current: %s" % Settings.QUALITY_NAMES[cur], 13, UITheme.MUTED))
+	p.add_child(UITheme.label("LIGHTING", 13, UITheme.MUTED))
+	_option(p, "Shadows", "shadows", ["Low", "Medium", "High", "Ultra (soft contact-hardening)"])
+	_option(p, "Global illumination", "gi", ["Off", "SSIL (bounce light)", "SDFGI + SSIL (most expensive)"], "Light bouncing off the ground and hills")
 	_check(p, "Ambient occlusion", "ssao")
+	_check(p, "Volumetric fog", "vol_fog", "Haze the sun shines through, real dust clouds on big skids and landings")
+	_check(p, "Cloud shadows", "cloud_shadows")
 	_check(p, "Screen-space reflections", "ssr", "Reflections in water and glossy paint")
+	p.add_child(UITheme.label("IMAGE", 13, UITheme.MUTED))
+	_option(p, "Anti-aliasing (MSAA)", "msaa", ["Off", "2x", "4x", "8x"])
+	_check(p, "TAA", "taa", "Temporal anti-aliasing: no shimmering grass, slightly softer image")
+	_check(p, "FXAA", "fxaa")
+	_option(p, "Texture filtering", "aniso", ["Bilinear", "2x anisotropic", "4x anisotropic", "8x anisotropic", "16x anisotropic"])
 	_check(p, "Bloom", "bloom")
 	_check(p, "Tilt-shift (miniature look)", "tilt_shift")
 	_check(p, "Colour grade + vignette", "grade")
+	_check(p, "Speed effects", "speed_fx", "Wider view and blurred screen edges when you go fast")
+	p.add_child(UITheme.label("WORLD & EFFECTS", 13, UITheme.MUTED))
 	_slider(p, "View distance", "view_distance", 0.6, 2.0, 0.1, "%.1fx")
 	_slider(p, "Model detail (LOD)", "lod", 0.25, 4.0, 0.25, "%.2f", "Lower = more detail far away")
+	_check(p, "Wind in the grass", "wind")
+	_check(p, "Mud & wet bike", "grime", "Mud builds up on dirt and sand, washes off in water")
 	_slider(p, "Dust & dirt effects", "fx_density", 0.0, 1.5, 0.1, "%.1fx")
+	_check(p, "Occlusion culling", "occlusion", "Skip what hills hide. Helps low-down cameras on slower GPUs; costs some CPU")
 	return p
 
 func _preset(level: int) -> void:
-	var v: Dictionary = {
-		0: {"render_scale": 0.75, "upscaler": 1, "msaa": 0, "fxaa": true, "shadows": 0, "ssao": false, "bloom": false, "tilt_shift": false, "view_distance": 0.7},
-		1: {"render_scale": 1.0, "upscaler": 0, "msaa": 1, "fxaa": false, "shadows": 1, "ssao": false, "bloom": true, "tilt_shift": true, "view_distance": 1.0},
-		2: {"render_scale": 1.0, "upscaler": 0, "msaa": 2, "fxaa": false, "shadows": 2, "ssao": true, "bloom": true, "tilt_shift": true, "view_distance": 1.0},
-		3: {"render_scale": 1.0, "upscaler": 0, "msaa": 3, "fxaa": false, "shadows": 3, "ssao": true, "bloom": true, "tilt_shift": true, "view_distance": 1.5},
-	}[level]
-	for k in v: Settings.data[k] = v[k]
-	Settings.apply(); Settings.save()
+	Settings.apply_preset(level)
 	_reopen(1)
 
 func _reopen(tab: int) -> void:

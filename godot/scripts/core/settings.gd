@@ -35,6 +35,7 @@ const ACTIONS := {
 	"pause":        ["Pause",                    [KEY_ESCAPE],         [JOY_BUTTON_START],         []],
 	"screenshot":   ["Screenshot",               [KEY_F12],            [],                         []],
 	"toggle_hud":   ["Hide HUD",                 [KEY_F1],             [],                         []],
+	"photo":        ["Photo mode",               [KEY_O],              [],                         []],
 }
 
 const DEFAULTS := {
@@ -70,6 +71,14 @@ const DEFAULTS := {
 	"lod": 1.0,              # mesh detail: lower = more detail far away
 	"fx_density": 1.0,       # dust / roost / chunk amount
 	"aniso": 2,              # 0 off, 1 2x, 2 4x, 3 8x, 4 16x texture filtering
+	"quality": 2,            # last preset picked: 0 low, 1 medium, 2 high, 3 ultra, 4 custom
+	"gi": 1,                 # global illumination: 0 off (sky ambient only), 1 SSIL, 2 SDFGI (+ SSIL)
+	"vol_fog": true,         # volumetric fog: sun shafts in the haze, dust clouds you can see light through
+	"cloud_shadows": true,   # soft cloud shadows drifting over the land
+	"wind": true,            # gusts rolling over the grass (and the bike parting it)
+	"grime": true,           # mud build-up, wet look and drips on bike and rider
+	"speed_fx": true,        # FOV boost and edge blur at speed
+	"occlusion": false,      # occlusion culling (hills hide what's behind them; costs CPU)
 	# audio
 	"sfx_volume": 1.0,
 	"mute_unfocused": true,
@@ -84,6 +93,43 @@ const DEFAULTS := {
 	"hud_jump": true,
 }
 
+## Quality presets: every expensive feature in one place (settings menu + --quality=N on the command line).
+const PRESETS := {
+	0: {"render_scale": 0.75, "upscaler": 1, "msaa": 0, "fxaa": true, "taa": false, "shadows": 0, "ssao": false, "gi": 0,
+		"vol_fog": false, "ssr": false, "bloom": true, "tilt_shift": false, "view_distance": 0.7, "lod": 2.0, "fx_density": 0.6,
+		"aniso": 1, "cloud_shadows": true, "wind": true, "grime": true, "speed_fx": true},
+	1: {"render_scale": 1.0, "upscaler": 0, "msaa": 1, "fxaa": false, "taa": false, "shadows": 1, "ssao": true, "gi": 0,
+		"vol_fog": false, "ssr": false, "bloom": true, "tilt_shift": true, "view_distance": 1.0, "lod": 1.0, "fx_density": 1.0,
+		"aniso": 2, "cloud_shadows": true, "wind": true, "grime": true, "speed_fx": true},
+	2: {"render_scale": 1.0, "upscaler": 0, "msaa": 2, "fxaa": false, "taa": false, "shadows": 2, "ssao": true, "gi": 1,
+		"vol_fog": true, "ssr": false, "bloom": true, "tilt_shift": true, "view_distance": 1.0, "lod": 1.0, "fx_density": 1.0,
+		"aniso": 3, "cloud_shadows": true, "wind": true, "grime": true, "speed_fx": true},
+	3: {"render_scale": 1.0, "upscaler": 0, "msaa": 2, "fxaa": false, "taa": true, "shadows": 3, "ssao": true, "gi": 2,
+		"vol_fog": true, "ssr": true, "bloom": true, "tilt_shift": true, "view_distance": 1.4, "lod": 0.75, "fx_density": 1.2,
+		"aniso": 4, "cloud_shadows": true, "wind": true, "grime": true, "speed_fx": true},
+}
+const QUALITY_NAMES := ["Low", "Medium", "High", "Ultra", "Custom"]
+
+func apply_preset(level: int) -> void:
+	for k in PRESETS[level]: data[k] = PRESETS[level][k]
+	data["quality"] = level
+	apply()
+	save()
+
+## a graphics option changed by hand: the preset label becomes "Custom" unless it still matches one
+func _sync_quality() -> void:
+	for lvl in PRESETS:
+		var same := true
+		for k in PRESETS[lvl]:
+			var a = data.get(k)
+			var b = PRESETS[lvl][k]
+			if (typeof(b) == TYPE_FLOAT and not is_equal_approx(float(a), b)) or (typeof(b) != TYPE_FLOAT and a != b):
+				same = false; break
+		if same:
+			data["quality"] = lvl
+			return
+	data["quality"] = 4
+
 const RESOLUTIONS := ["1280x720", "1366x768", "1600x900", "1920x1080", "2560x1440", "3440x1440", "3840x2160"]
 
 var data := DEFAULTS.duplicate()
@@ -92,6 +138,11 @@ var bindings := {}   # action -> Array[InputEvent]
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	load_settings()
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--quality="):
+			var lvl := int(a.get_slice("=", 1))
+			for k in PRESETS[lvl]: data[k] = PRESETS[lvl][k]
+			data["quality"] = lvl
 	apply()
 
 func get_v(k: String):
@@ -99,6 +150,7 @@ func get_v(k: String):
 
 func set_v(k: String, val) -> void:
 	data[k] = val
+	if PRESETS[0].has(k): _sync_quality()
 	apply()
 	save()
 
@@ -232,7 +284,8 @@ func apply() -> void:
 		vp.mesh_lod_threshold = float(get_v("lod"))
 		vp.anisotropic_filtering_level = int(get_v("aniso")) as Viewport.AnisotropicFiltering
 		var sq: int = get_v("shadows")
-		RenderingServer.directional_shadow_atlas_set_size([1024, 2048, 4096, 8192][sq], true)
+		RenderingServer.directional_shadow_atlas_set_size([2048, 4096, 4096, 8192][sq], true)
+		vp.use_occlusion_culling = get_v("occlusion")
 		RenderingServer.directional_soft_shadow_filter_set_quality([RenderingServer.SHADOW_QUALITY_HARD, RenderingServer.SHADOW_QUALITY_SOFT_LOW, RenderingServer.SHADOW_QUALITY_SOFT_HIGH, RenderingServer.SHADOW_QUALITY_SOFT_ULTRA][sq])
 	AudioServer.set_bus_volume_db(0, linear_to_db(maxf(0.0001, float(get_v("volume")))))
 	var sfx := AudioServer.get_bus_index("SFX")
