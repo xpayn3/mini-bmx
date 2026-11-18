@@ -27,7 +27,12 @@ vec3 wind_bend(vec3 base, float h, float stiff, float push) {
 	vec2 d = atm_wind.xy;
 	float g = wind_gust(base.xz);
 	float ph = base.x * 0.9 + base.z * 0.7;
-	float flutter = sin(atm_wind.z * (3.1 + g * 3.0) + ph) * (0.25 + g * 0.6) + sin(atm_wind.z * 5.3 + ph * 1.7) * 0.15;
+	// fixed flutter rates; a gust only makes them bigger. (Scaling the RATE by g, as before, multiplied the
+	// ever-growing time by a changing number: every passing gust front whipped the grass faster the longer
+	// the ride went on.) The quicker partial fades in with the gust instead.
+	float tw = atm_wind.z;
+	float flutter = sin(tw * 3.1 + ph) * (0.25 + g * 0.35) + sin(tw * 4.7 + ph * 1.3) * g * 0.3
+		+ sin(tw * 5.3 + ph * 1.7) * 0.15;
 	vec2 off = d * (0.25 + g * 1.0 + flutter * 0.35) * step(0.001, atm_wind.w) + vec2(-d.y, d.x) * flutter * 0.25;
 	vec3 o = vec3(off.x, 0.0, off.y) * h * h * stiff;
 	vec2 aw = base.xz - atm_pusher.xz;
