@@ -22,8 +22,16 @@ const LAYER_GROUND := 1 << 1    # physics layer 2: chunk ground colliders (only 
 @export var spawn_jobs: int = 6
 @export var water_enabled: bool = true
 
+## the terrain math in C# (TerrainFieldCs.cs: same results as the GDScript TerrainField, bit for bit, ~10x
+## faster). false = everything through the GDScript TerrainField, which stays the reference. Falls back
+## to GDScript by itself when the C# assembly can't be loaded (e.g. a non-.NET Godot build).
+const USE_CS := true
+const CS_FIELD := "res://scripts/world/TerrainFieldCs.cs"
+var use_cs := USE_CS and OS.get_environment("BMX_TERRAIN_GD") == ""   # env BMX_TERRAIN_GD=1: GDScript (A/B runs); tools flip it before set_seed()
+
 var seed_value: int = 0
-var field: TerrainField          # main-thread field (physics queries)
+var field: TerrainField          # GDScript field: the seed's course / route tables (and every query without C#)
+var fcs = null                   # TerrainFieldCs on the main thread (physics queries), or null
 var chunks := {}                 # Vector2i -> chunk record (Dictionary)
 var _jobs := {}                  # Vector2i -> {task, builder}
 var _stale_tasks: Array = []     # task ids of a previous seed / far away, still to be joined
@@ -100,6 +108,9 @@ func set_seed(seed_in: int) -> void:
 		_tapes.clear()
 	field = TerrainField.new()
 	field.setup(seed_in)
+	fcs = _make_cs() if use_cs else null
+	if fcs != null:
+		fcs.setup_from(field)   # takes over the finished noise / course / route tables
 	if _water:
 		_water.invalidate()
 
@@ -130,12 +141,33 @@ func clear_dynamic() -> void:
 # ======================================================================
 # physics queries
 # ======================================================================
+static func _make_cs():
+	if not ResourceLoader.exists(CS_FIELD):
+		return null
+	var sc = load(CS_FIELD)
+	if sc == null or not sc.can_instantiate():
+		push_warning("Terrain: C# field unavailable, using the GDScript TerrainField")
+		return null
+	return sc.new()
+
+
+## the field the chunk builders fork: the C# one when it's on
+func query_field():
+	return fcs if fcs != null else field
+
+
+static func _chunk_id(k: Vector2i) -> int:
+	return k.x * 1048576 + k.y
+
+
 static func _rock_key(gx: int, gz: int) -> int:
 	return WorldRng.i32(gx * 73856093) ^ WorldRng.i32(gz * 19349663)
 
 
 ## what you ride on: ground, a wooden deck, and a dome over every rock / log / stump of loaded chunks
 func height(x: float, z: float) -> float:
+	if fcs != null:
+		return fcs.height(x, z)   # the same, domes included (mirrored by _finalize / _unload)
 	var f := field
 	var g := f.ground(x, z)
 	if f.has_wood and f.wood > g:
@@ -157,12 +189,16 @@ func height(x: float, z: float) -> float:
 
 ## the ground or a wooden deck WITHOUT the rock / log domes (JS's shadowed surface(): cliff-wall test)
 func deck_height(x: float, z: float) -> float:
+	if fcs != null:
+		return fcs.deck(x, z)
 	return field.deck(x, z)
 
 
 ## 0 grass, 1 trail, 2 water, 3 sand (beaches, dunes)
 func surface(x: float, z: float) -> int:
 	var h := height(x, z)
+	if fcs != null:
+		return fcs.surface_at(x, z, h)
 	if h < WATER - 0.05:
 		return 2
 	if field.trail(x, z) > 0.5:
@@ -177,24 +213,33 @@ func surface(x: float, z: float) -> int:
 
 ## [feature height, mask, flattened ground height, dug depth, wood deck top or null]
 func jump(x: float, z: float) -> Array:
+	if fcs != null:
+		return fcs.jump(x, z)
 	return field.jump(x, z)
 
 
 func jump_mask(x: float, z: float) -> float:
+	if fcs != null:
+		return fcs.jump_mask(x, z)
 	return field.jump_mask(x, z)
 
 
 func biome_name(x: float, z: float) -> String:
+	if fcs != null:
+		return fcs.biome_name(x, z)
 	return field.biome_name(x, z)
 
 
 ## the flattened terrain colour (JS color(x, z, height, ny = 1)), returned in sRGB (Godot convention)
 func ground_color(x: float, z: float, ny: float = 1.0) -> Color:
-	var c := field.color(x, z, height(x, z), ny)
+	var h := height(x, z)
+	var c: Color = fcs.color(x, z, h, ny) if fcs != null else field.color(x, z, h, ny)
 	return c.linear_to_srgb()
 
 
 func trail(x: float, z: float) -> float:
+	if fcs != null:
+		return fcs.trail(x, z)
 	return field.trail(x, z)
 
 
@@ -317,7 +362,7 @@ func _dispatch_missing(ccx: int, ccz: int) -> void:
 
 
 func _dispatch(k: Vector2i, urgent: bool = false) -> void:
-	var b := TerrainChunkBuilder.new(field.fork(), k.x, k.y, seg, _gen)
+	var b := TerrainChunkBuilder.new(query_field().fork(), k.x, k.y, seg, _gen)
 	var task := WorkerThreadPool.add_task(b.run, urgent, "terrain chunk")
 	_jobs[k] = {"task": task, "builder": b}
 
@@ -343,6 +388,8 @@ func _unload(k: Vector2i) -> void:
 	var c = chunks.get(k)
 	if c == null:
 		return
+	if fcs != null:
+		fcs.domes_remove(_chunk_id(k))
 	for key in c["rock_keys"]:
 		var l = _rock_grid.get(key)
 		if l == null:
@@ -534,6 +581,12 @@ func _finalize(k: Vector2i) -> void:
 				_rock_grid[key].append(c)
 				keys[key] = true
 	rec["rock_keys"] = keys.keys()
+	if fcs != null:
+		var dd := PackedFloat64Array()
+		for c in colliders:
+			if c.has("top"):
+				dd.append_array([c["x"], c["z"], c["r"], c["base"], c["top"]])
+		fcs.domes_add(_chunk_id(k), dd)
 	var ckeys := {}
 	for c in colliders:
 		c["chunk"] = k

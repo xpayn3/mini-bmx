@@ -56,7 +56,7 @@ static func ensure_static() -> void:
 	TAPE_COLS = L.call([0xe8322b, 0xf6f5ef, 0xf5c518, 0x26241f])
 
 
-var f: TerrainField
+var f   # TerrainField (GDScript reference) or TerrainFieldCs (C#): the same calls
 var cx: int
 var cz: int
 var N: int
@@ -80,7 +80,7 @@ func _stage(name: String) -> void:
 	_st = t
 
 
-func _init(field: TerrainField, ccx: int, ccz: int, seg: int, generation: int) -> void:
+func _init(field, ccx: int, ccz: int, seg: int, generation: int) -> void:
 	f = field
 	cx = ccx
 	cz = ccz
@@ -160,55 +160,17 @@ func _build() -> void:
 	var d := S / N
 	var W := N + 3
 	var NV := N + 1
-	# ---- height field with a 1-cell border ----
-	var G := PackedFloat32Array()
-	G.resize(W * W)
-	var pre_g := PackedColorArray(); pre_g.resize(NV * NV)
-	var pre_d := PackedColorArray(); pre_d.resize(NV * NV)
-	var pre_t := PackedFloat32Array(); pre_t.resize(NV * NV)
-	var pre_b := PackedFloat64Array(); pre_b.resize(NV * NV * 2)
-	for iz in range(-1, N + 2):
-		for ix in range(-1, N + 2):
-			var x := ox - S / 2 + ix * d
-			var z := oz - S / 2 + iz * d
-			var h := f.ground(x, z)
-			G[(iz + 1) * W + ix + 1] = h
-			if ix >= 0 and ix <= N and iz >= 0 and iz <= N:
-				# the colour's normal-independent half, while this point's memos are warm
-				var o := iz * NV + ix
-				f._cp_h = float(G[(iz + 1) * W + ix + 1])   # the float32 vertex height, like the JS
-				pre_t[o] = f.color_pre(x, z)
-				pre_g[o] = f.cl_g
-				pre_d[o] = f.cl_d
-				pre_b[o * 2] = f.cp_dry
-				pre_b[o * 2 + 1] = f.cp_rug
-	_stage("ground")
-	var verts := PackedVector3Array(); verts.resize(NV * NV)
-	var norms := PackedVector3Array(); norms.resize(NV * NV)
-	var uvs := PackedVector2Array(); uvs.resize(NV * NV)
-	var LG := PackedColorArray(); LG.resize(NV * NV)
-	var LD := PackedColorArray(); LD.resize(NV * NV)
-	var TW := PackedFloat32Array(); TW.resize(NV * NV)
-	var SW := PackedFloat32Array(); SW.resize(NV * NV)
-	for iz in NV:
-		for ix in NV:
-			var k := (iz + 1) * W + ix + 1
-			var o := iz * NV + ix
-			var lx := -S / 2 + ix * d
-			var lz := -S / 2 + iz * d
-			var h: float = G[k]
-			verts[o] = Vector3(lx, h, lz)
-			var nv := Vector3(G[k - 1] - G[k + 1], 2 * d, G[k - W] - G[k + W]).normalized()
-			norms[o] = nv
-			uvs[o] = Vector2((ix + 0.5) / NV, (iz + 0.5) / NV)
-			f.cl_g = pre_g[o]
-			f.cl_d = pre_d[o]
-			f.color_post(lx + ox, lz + oz, h, nv.y, pre_b[o * 2], pre_b[o * 2 + 1])
-			TW[o] = pre_t[o]
-			SW[o] = f.cl_steep
-			LG[o] = f.cl_g
-			LD[o] = f.cl_d
-	_stage("colour")
+	# ---- height field with a 1-cell border, vertices, normals, colour layers ----
+	var gs: Dictionary = ground_stage(ox, oz)
+	var G: PackedFloat32Array = gs["G"]
+	var verts: PackedVector3Array = gs["verts"]
+	var norms: PackedVector3Array = gs["norms"]
+	var uvs: PackedVector2Array = gs["uvs"]
+	var LG: PackedColorArray = gs["LG"]
+	var LD: PackedColorArray = gs["LD"]
+	var TW: PackedFloat32Array = gs["TW"]
+	var SW: PackedFloat32Array = gs["SW"]
+	_stage("ground+colour")
 	out["G"] = G
 	_ground_lods(verts, norms, uvs)   # adds edge skirts to the vertex arrays
 	out["verts"] = verts
@@ -300,6 +262,63 @@ func _build() -> void:
 	out["panels"] = panels
 
 
+## the ground + colour stages: G (with a 1-cell border), vertices, normals, uvs, the two colour layers and
+## their weights. The C# field does the same loops in one call (TerrainFieldCs.build_ground).
+func ground_stage(ox: float, oz: float) -> Dictionary:
+	if not (f is TerrainField):
+		return f.build_ground(ox, oz, N)
+	var d := S / N
+	var W := N + 3
+	var NV := N + 1
+	var G := PackedFloat32Array()
+	G.resize(W * W)
+	var pre_g := PackedColorArray(); pre_g.resize(NV * NV)
+	var pre_d := PackedColorArray(); pre_d.resize(NV * NV)
+	var pre_t := PackedFloat32Array(); pre_t.resize(NV * NV)
+	var pre_b := PackedFloat64Array(); pre_b.resize(NV * NV * 2)
+	for iz in range(-1, N + 2):
+		for ix in range(-1, N + 2):
+			var x := ox - S / 2 + ix * d
+			var z := oz - S / 2 + iz * d
+			var h: float = f.ground(x, z)
+			G[(iz + 1) * W + ix + 1] = h
+			if ix >= 0 and ix <= N and iz >= 0 and iz <= N:
+				# the colour's normal-independent half, while this point's memos are warm
+				var o := iz * NV + ix
+				f._cp_h = float(G[(iz + 1) * W + ix + 1])   # the float32 vertex height, like the JS
+				pre_t[o] = f.color_pre(x, z)
+				pre_g[o] = f.cl_g
+				pre_d[o] = f.cl_d
+				pre_b[o * 2] = f.cp_dry
+				pre_b[o * 2 + 1] = f.cp_rug
+	var verts := PackedVector3Array(); verts.resize(NV * NV)
+	var norms := PackedVector3Array(); norms.resize(NV * NV)
+	var uvs := PackedVector2Array(); uvs.resize(NV * NV)
+	var LG := PackedColorArray(); LG.resize(NV * NV)
+	var LD := PackedColorArray(); LD.resize(NV * NV)
+	var TW := PackedFloat32Array(); TW.resize(NV * NV)
+	var SW := PackedFloat32Array(); SW.resize(NV * NV)
+	for iz in NV:
+		for ix in NV:
+			var k := (iz + 1) * W + ix + 1
+			var o := iz * NV + ix
+			var lx := -S / 2 + ix * d
+			var lz := -S / 2 + iz * d
+			var h: float = G[k]
+			verts[o] = Vector3(lx, h, lz)
+			var nv := Vector3(G[k - 1] - G[k + 1], 2 * d, G[k - W] - G[k + W]).normalized()
+			norms[o] = nv
+			uvs[o] = Vector2((ix + 0.5) / NV, (iz + 0.5) / NV)
+			f.cl_g = pre_g[o]
+			f.cl_d = pre_d[o]
+			f.color_post(lx + ox, lz + oz, h, nv.y, pre_b[o * 2], pre_b[o * 2 + 1])
+			TW[o] = pre_t[o]
+			SW[o] = f.cl_steep
+			LG[o] = f.cl_g
+			LD[o] = f.cl_d
+	return {"G": G, "verts": verts, "norms": norms, "uvs": uvs, "LG": LG, "LD": LD, "TW": TW, "SW": SW}
+
+
 static func _gk(G: PackedFloat32Array, W: int, ix: int, iz: int) -> float:
 	var N := W - 3
 	return G[(mini(N + 1, maxi(-1, iz)) + 1) * W + mini(N + 1, maxi(-1, ix)) + 1]
@@ -320,8 +339,8 @@ func _sheds(rs: WorldRng, ox: float, oz: float) -> void:
 		var z := oz + (rs.next() - .5) * S * 0.8
 		if sqrt(x * x + z * z) < 30 or f.route_dist(x, z) < 9:
 			continue
-		var tm := f.trail_metres(x, z)
-		var rd := f.route_dist(x, z)
+		var tm: float = f.trail_metres(x, z)
+		var rd: float = f.route_dist(x, z)
 		if not ((tm > 6 and tm < 16) or (rd > 9 and rd < 20)) and tries < 6:
 			continue
 		var di := int(rs.next() * designs.size())
@@ -452,9 +471,9 @@ func _trail_fence(rs: WorldRng, ox: float, oz: float) -> void:
 	var st := [ox + (rs.next() - .5) * S, oz + (rs.next() - .5) * S]   # x, z (mutable through project)
 	var project := func() -> bool:
 		for it in 4:
-			var v := f.pathN(st[0], st[1])
-			var gx := f.pathN(st[0] + 0.5, st[1]) - f.pathN(st[0] - 0.5, st[1])
-			var gz := f.pathN(st[0], st[1] + 0.5) - f.pathN(st[0], st[1] - 0.5)
+			var v: float = f.pathN(st[0], st[1])
+			var gx: float = f.pathN(st[0] + 0.5, st[1]) - f.pathN(st[0] - 0.5, st[1])
+			var gz: float = f.pathN(st[0], st[1] + 0.5) - f.pathN(st[0], st[1] - 0.5)
 			var g2 := gx * gx + gz * gz
 			if g2 < 1e-10:
 				return false
@@ -473,8 +492,8 @@ func _trail_fence(rs: WorldRng, ox: float, oz: float) -> void:
 		var x: float = st[0]
 		var z: float = st[1]
 		pts.append([x, z])
-		var gx := f.pathN(x + 0.5, z) - f.pathN(x - 0.5, z)
-		var gz := f.pathN(x, z + 0.5) - f.pathN(x, z - 0.5)
+		var gx: float = f.pathN(x + 0.5, z) - f.pathN(x - 0.5, z)
+		var gz: float = f.pathN(x, z + 0.5) - f.pathN(x, z - 0.5)
 		var gl := sqrt(gx * gx + gz * gz)
 		var tx := -gz / gl
 		var tz := gx / gl
@@ -511,7 +530,7 @@ func _course_fences(rs: WorldRng) -> void:
 
 # ---------------- rock gardens ----------------
 func _rock_gardens() -> void:
-	var C := f.course
+	var C: TrailCourse = f.course
 	var rk := WorldRng.new(WorldRng.i32(cx * 83492791) ^ WorldRng.i32(cz * 2654435761) ^ WorldRng.i32(f.seed_value * 40503) ^ 0x1b873593)
 	for i in C.n - 1:
 		if C.KD[i] != TrailCourse.ROCKS or WorldRng.jround(C.X[i] / S) != cx or WorldRng.jround(C.Z[i] / S) != cz:
@@ -527,7 +546,7 @@ func _rock_gardens() -> void:
 				continue
 			var x: float = C.X[i] + tx * u - tz * a
 			var z: float = C.Z[i] + tz * u + tx * a
-			var h := f.ground(x, z)
+			var h: float = f.ground(x, z)
 			var r1 := rk.next()
 			var sc := 0.13 + r1 * r1 * 0.34
 			var sx := sc * (1 + rk.next() * 0.5)
@@ -639,7 +658,7 @@ func _trees(ox: float, oz: float) -> void:
 	for i in 90:
 		var x := ox + (rnd.next() - .5) * S
 		var z := oz + (rnd.next() - .5) * S
-		var forest := f.n(x + 400, z, TerrainField.I38)
+		var forest: float = f.n(x + 400, z, TerrainField.I38)
 		if rnd.next() > sm(-0.25, 0.25, forest) * 0.9 + 0.05:
 			continue
 		if f.trail(x, z) > 0.02 or absf(f.pathN(x, z)) < 0.1 or f.jump_mask(x, z) > 0 or is_blocked(x, z, 0.8):
@@ -650,8 +669,8 @@ func _trees(ox: float, oz: float) -> void:
 		var sc := 0.7 + rnd.next() * 0.8
 		var yaw := rnd.next() * 6.28
 		f.biome(x, z)
-		var dry := f.b_dry
-		var rug := f.b_rug
+		var dry: float = f.b_dry
+		var rug: float = f.b_rug
 		if rnd.next() < dry:
 			if rnd.next() < 0.35:
 				var cy := sc * (0.8 + rnd.next() * 0.6)
@@ -707,7 +726,7 @@ func _rocks(ox: float, oz: float) -> void:
 
 
 func _tuft_col(dry: float) -> Color:
-	var C := f.col
+	var C: Dictionary = f.col
 	return C["tuftGreen"].lerp(C["tuftDry"], sm(0.1, 0.6, dry))
 
 
@@ -728,8 +747,8 @@ func _tufts(ox: float, oz: float) -> void:
 		if h < WATER + 0.4:
 			continue
 		f.biome(x, z)
-		var dry := f.b_dry
-		var rug := f.b_rug
+		var dry: float = f.b_dry
+		var rug: float = f.b_rug
 		if rnd.next() < dry * 0.85 or rnd.next() < rug * 0.3:
 			continue
 		var tc := _tuft_col(dry)
@@ -765,13 +784,13 @@ func _trail_clutter(ox: float, oz: float) -> void:
 	for i in 420:
 		var x := ox + (rt.next() - .5) * S
 		var z := oz + (rt.next() - .5) * S
-		var t := f.trail(x, z)
+		var t: float = f.trail(x, z)
 		if t < 0.04 or f.jump_mask(x, z) > 0.05 or is_blocked(x, z, 0.3):
 			continue
 		var h := height(x, z)
 		if h < WATER + 0.2 or sqrt(x * x + z * z) < 6:
 			continue
-		var ln := f.line(x, z)
+		var ln: float = f.line(x, z)
 		if t > 0.45:
 			if ln > 0.25 or rt.next() < 0.35:
 				continue
@@ -782,7 +801,7 @@ func _trail_clutter(ox: float, oz: float) -> void:
 			put("pebble", x, h - sc * 0.3, z, sx, sy, sc, rt.next() * 6.28, null, 0.6)
 		else:
 			f.biome(x, z)
-			var dry := f.b_dry
+			var dry: float = f.b_dry
 			if rt.next() < 0.25:
 				var sc := 0.06 + rt.next() * 0.1
 				put("pebble", x, h - sc * 0.3, z, sc * 1.3, sc * 0.7, sc, rt.next() * 6.28, null, 0.5)
@@ -795,7 +814,7 @@ func _trail_clutter(ox: float, oz: float) -> void:
 
 func _grass(ox: float, oz: float) -> void:
 	var rg := WorldRng.new(WorldRng.i32(cx * 668265263) ^ WorldRng.i32(cz * 374761393) ^ WorldRng.i32(f.seed_value * 2654435761) ^ 0x3c6ef372)
-	var C := f.col
+	var C: Dictionary = f.col
 	for i in 420:
 		var x := ox + (rg.next() - .5) * S
 		var z := oz + (rg.next() - .5) * S
@@ -805,8 +824,8 @@ func _grass(ox: float, oz: float) -> void:
 		if h < WATER + 0.5:
 			continue
 		f.biome(x, z)
-		var dry := f.b_dry
-		var rug := f.b_rug
+		var dry: float = f.b_dry
+		var rug: float = f.b_rug
 		if rg.next() < dry * 0.95 + rug * 0.5:
 			continue
 		var n := 2 + int(rg.next() * 4)
@@ -828,7 +847,7 @@ func _grass(ox: float, oz: float) -> void:
 
 func _nature(ox: float, oz: float) -> void:
 	var rn := WorldRng.new(WorldRng.i32(cx * 374761393) ^ WorldRng.i32(cz * 668265263) ^ WorldRng.i32(f.seed_value * 1274126177) ^ 0x6a09e667)
-	var C := f.col
+	var C: Dictionary = f.col
 	for i in 220:
 		var x := ox + (rn.next() - .5) * S
 		var z := oz + (rn.next() - .5) * S
@@ -838,8 +857,8 @@ func _nature(ox: float, oz: float) -> void:
 		if is_nan(h):
 			continue
 		f.biome(x, z)
-		var dry := f.b_dry
-		var rug := f.b_rug
+		var dry: float = f.b_dry
+		var rug: float = f.b_rug
 		var wood := sm(-0.05, 0.3, f.n(x + 400, z, TerrainField.I38))
 		var r := rn.next()
 		var yaw := rn.next() * 6.28
@@ -947,7 +966,7 @@ func _wood(ox: float, oz: float) -> void:
 	var feats := []
 	for gz in range(floori(z0 / JC) - 1, floori((z0 + S) / JC) + 1):
 		for gx in range(floori(x0 / JC) - 1, floori((x0 + S) / JC) + 1):
-			var j := f.jump_at(gx, gz)
+			var j = f.jump_at(gx, gz)
 			if j != null and j.wood != null:
 				feats.append(j)
 	for j in f.route_feats:
@@ -958,8 +977,8 @@ func _wood(ox: float, oz: float) -> void:
 			_wood_model(j)
 
 
-func _wood_model(j: TerrainField.Feat) -> void:
-	var W := j.wood
+func _wood_model(j) -> void:   # TerrainField.Feat or TerrainFeatCs
+	var W = j.wood
 	var qy := Basis(Vector3.UP, atan2(-j.dz, j.dx))
 	var top := func(u: float) -> float:
 		return j.b0 + (j.b1 - j.b0) * clampf(u / j.len, 0, 1) + W.top(u)
@@ -969,7 +988,7 @@ func _wood_model(j: TerrainField.Feat) -> void:
 		var p: Vector2 = at.call(u, w)
 		_push(list, _scaled(qy * Basis(Vector3.BACK, pitch), sx, sy, sz), Vector3(p.x, y, p.y), c)
 	var r := WorldRng.new(WorldRng.i32f(j.x * 1000) ^ WorldRng.i32f(j.z * 7919))
-	var u := W.u0 + 0.13
+	var u: float = W.u0 + 0.13
 	while u < W.u1:
 		var sl: float = (top.call(minf(W.u1, u + 0.06)) - top.call(maxf(W.u0, u - 0.06))) / 0.12
 		putw.call("plank", u, 0.0, top.call(u) - 0.035, 0.23, 0.07, W.half * 2 + 0.08, atan(sl), PLANKS[int(r.next() * PLANKS.size())])
@@ -987,14 +1006,14 @@ func _wood_model(j: TerrainField.Feat) -> void:
 		while u <= W.u1 - 0.3:
 			var t: float = top.call(u) - 0.2
 			var p: Vector2 = at.call(u, w)
-			var g := f.ground(p.x, p.y) - 0.1
+			var g: float = f.ground(p.x, p.y) - 0.1
 			if t - g > 0.12:
 				putw.call("beam", u, w, (t + g) / 2, 0.11, t - g, 0.11, 0.0, BEAM)
 			u += 1.5
 	if W.back_wall:
 		var p: Vector2 = at.call(W.u1, 0.0)
 		var t: float = top.call(W.u1)
-		var g := f.ground(p.x, p.y) - 0.1
+		var g: float = f.ground(p.x, p.y) - 0.1
 		putw.call("beam", W.u1 - 0.05, 0.0, (t + g) / 2, 0.08, t - g, W.half * 2, 0.0, BEAM)
 
 
