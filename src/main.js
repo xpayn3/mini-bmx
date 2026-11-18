@@ -145,7 +145,7 @@ const url = new URL(location.href);
 const store = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
                 set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } } };
 const isBike = (id) => id != null && Object.hasOwn(BIKES, id);   // not 'constructor' & co.
-const bikeId = isBike(url.searchParams.get('bike')) ? url.searchParams.get('bike') : isBike(store.get('bike')) ? store.get('bike') : 'bmx';
+const bikeId = isBike(url.searchParams.get('bike')) ? url.searchParams.get('bike') : isBike(store.get('bike')) ? store.get('bike') : 'dh';
 const urlSeed = parseInt(url.searchParams.get('seed'), 10);
 let seed = Number.isFinite(urlSeed) ? urlSeed : (Math.random() * 1e6) | 0;
 const RIDE = BIKES[bikeId].ride || {}, LAND = BIKES[bikeId].land || 1;
@@ -403,6 +403,7 @@ function setCam(mode) {
     flash(CAM_PRESETS[camMode].label);
   });
 }
+setCam('drone');   // default view: the slow, swaying drone shot
 
 // ---------------- state ----------------
 const st = { x: 0, z: 0, y: 0, vy: 0, heading: 0, v: 0, steer: 0, lean: 0, rock: 0, pitch: 0, hopNose: 0,
