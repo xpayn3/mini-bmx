@@ -378,7 +378,7 @@ export class Rider {
     _pelvis.set(
       -0.16 - 0.07 * air + 0.06 * pedal * sty.standPedal - comp * 0.25,
       0.80 - 0.07 * air - comp + (0.15 * pedal + 0.05 * spr) * sty.standPedal + 0.035 * bob,      // stand up out of the crouch to pedal
-      sway * 0.09 + shift * 0.3 + Math.sin(t * 2.1) * 0.02 * wig
+      sway * 0.015 + shift * 0.3 + Math.sin(t * 2.1) * 0.02 * wig   // hips barely move: the BIKE rocks under a still body (main.js counter-rolls it)
     ).add(this.fit);
     _pelvis.x += sty.hipX * (1 - 0.5 * pedal); _pelvis.y += sty.hipY * (1 - 0.6 * pedal);   // pedalling stands up out of it
 
@@ -388,7 +388,7 @@ export class Rider {
     _chest.set(
       _pelvis.x + Math.sin(ang) * L + 0.03 * pedal * (0.5 + 0.5 * bob),
       _pelvis.y + Math.cos(ang) * L,
-      _pelvis.z + shift * 0.3 - sway * 0.04 + Math.sin(t * 1.7 + 1.0) * 0.02 * wig
+      _pelvis.z + shift * 0.3 - sway * 0.015 + Math.sin(t * 1.7 + 1.0) * 0.02 * wig
     );
 
     // legs absorb terrain: body glides while the bike goes up and down under it
@@ -451,6 +451,17 @@ export class Rider {
       V.x += ((T.x - S.x) * k - V.x * d) * h; V.y += ((T.y - S.y) * k - V.y * d) * h; V.z += ((T.z - S.z) * k - V.z * d) * h;
       S.addScaledVector(V, h);
       T.copy(S);
+    }
+    // PEDALLING ROCK (sprinting throws the bike side to side): the bike swings under a still body.
+    // Undo the bike's rock for the hips and chest about the tyres' contact line -- AFTER the springs,
+    // which would smooth a ~3 Hz rock away and leave the torso swinging with the frame.
+    const rr = p.rockRoll || 0;
+    if (rr) {
+      const c = Math.cos(rr), sn = Math.sin(rr);
+      for (const q of [_pelvis, _chest]) {
+        const dy = q.y, dz = q.z;
+        q.y = dy * c - dz * sn; q.z = dy * sn + dz * c;
+      }
     }
     // arms can only reach so far: if the bars are out of comfortable reach (weight far back on a
     // descent, a long downhill cockpit...), the torso follows the hands so the elbows keep a bend

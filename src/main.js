@@ -13,6 +13,7 @@ import { addSandDetail } from './sand.js';
 import { Gauge } from './gauge.js';
 import { AirHud } from './airhud.js';
 import { Rider } from './rider.js';
+import { carPaint, RotorGlow } from './bikefx.js';
 import { Suspension } from './suspension.js';
 import { buildBike, STYLE_K } from './bikegen.js';
 import { listBikes, gameId, storeId } from './bikestore.js';
@@ -325,9 +326,12 @@ bike.traverse((o) => {
   if (!o.isMesh) return;
   o.castShadow = true; o.receiveShadow = true;
   if (o.material.name === 'paint' && !BIKES[bikeId].cfg) o.material = paint;   // built bikes bring their own colour
+  if (o.material.name === 'paint') carPaint(o.material);   // metallic flake + clearcoat
   if (o.material.name === 'chrome') { o.material.envMapIntensity = 1.6; }
 });
 addBikeDecals(bike, BIKES[bikeId].decals);
+// brake discs that glow when they're worked hard (st.brakeHeat, built up in physics())
+const rotors = [wheelF, wheelR].map((w) => w && RotorGlow.find(w)).filter(Boolean);
 // bolts back in the rocker's pivot bores (main frame pivot, seatstay link, shock eye), from the export's pivots
 if (bd.suspension?.rear && part('rocker')) {
   const r = bd.suspension.rear;
@@ -792,7 +796,8 @@ function physics(dt) {
     let a = drive - G * Math.sin(slope);
     // braking: the rear locks (skid) and the tyres can only stop you as hard as the ground holds them --
     // full power on hard-pack, a long slide on sand, grass or in water, and none at all while unweighted
-    if (brake && rearDown && st.v > 0.3) { const b = Math.min(T.brakeForce, 0.85 * mu * nTot); a -= b; aLong += b; drive -= b; }
+    if (brake && rearDown && st.v > 0.3) { const b = Math.min(T.brakeForce, 0.85 * mu * nTot); a -= b; aLong += b; drive -= b;
+      st.brakeHeat = (st.brakeHeat || 0) + b * st.v * dt / 45; }   // energy into the discs (a hard stop from ~40 km/h = about 1)
     st.aDrive = drive;   // net tyre push along the ground: shifts weight front / rear (see pitch)
     // PUMPING: legs that extend push the bike into the ground. On a down-slope (the back of a
     // roller, a landing) part of that push points forward = free speed; folding the legs to soak
@@ -1571,6 +1576,9 @@ function frame(now) {
   }
   if (steps === MAX_STEPS) physAcc = Math.min(physAcc, PHYS_DT);   // too slow to keep up: drop time rather than spiral
   drawAlpha = physAcc / PHYS_DT;
+  // discs cool off over a few seconds; glow only past a good hard braking
+  st.brakeHeat = (st.brakeHeat || 0) * Math.exp(-dt / 3.5);
+  for (const r of rotors) r.set((st.brakeHeat - 0.35) / 0.9);
   // safety net: if anything went non-finite, restore the last good state (and say so)
   let bad = false;
   for (const k in st) if (typeof st[k] === 'number' && !Number.isFinite(st[k])) { bad = true; break; }
@@ -1580,7 +1588,7 @@ function frame(now) {
   } else for (const k in st) lastGood[k] = st[k];
   place();
   if (!crash.on) rider.update(dt, { footL, footR, handL, handR, v: st.v, lean: st.bikeLean + st.rock, steer: st.steer, yawRate: st.yawRate,
-    counter: st.counter + st.rock * 0.6, headRoll: st.bikeLean * 0.85, absorb: clamp(drawn.bodyY - drawn.yDraw, -T.legComp, T.legExt), pitch: drawn.pitch, bodyLevel: T.bodyLevel, attackDrop: T.attackDrop,
+    counter: st.counter, rockRoll: st.rock, headRoll: st.bikeLean * 0.85, absorb: clamp(drawn.bodyY - drawn.yDraw, -T.legComp, T.legExt), pitch: drawn.pitch, bodyLevel: T.bodyLevel, attackDrop: T.attackDrop,
     pedal: st.pedal, sprint: (st.sprint || 0) * st.pedal, crank: st.crank, air: st.airK, compress: Math.max(0, -st.compress), hipShift: st.hipShift || 0, t });
   terrain.update(st.x, st.z, 4);   // time-sliced chunk streaming (ms per frame)
   // announce the landscape as it changes under you
