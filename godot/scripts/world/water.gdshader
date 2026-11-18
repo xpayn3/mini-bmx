@@ -3,6 +3,7 @@
 // lines rolling in to the beach. Depth comes from a small texture baked from the terrain round the player.
 shader_type spatial;
 render_mode blend_mix, depth_draw_opaque, cull_back, diffuse_burley, specular_schlick_ggx;
+#include "res://shaders/atmos.gdshaderinc"
 
 uniform float u_time = 0.0;
 uniform sampler2D u_depth : filter_linear, repeat_disable;
@@ -107,7 +108,7 @@ void fragment() {
 	col *= 1.0 - clamp(fres * 1.25, 0.0, 0.8);
 	vec3 H = normalize(L + V);
 	float nh = max(dot(N, H), 0.0);
-	float glint = pow(nh, 700.0) * 2.2 / (1.0 + dist * 0.025) + pow(nh, 60.0) * 0.18;
+	float glint = (pow(nh, 700.0) * 2.2 / (1.0 + dist * 0.025) + pow(nh, 60.0) * 0.18) * smoothstep(0.7, 1.0, cloud_shade(v_world));
 	// foam: lines rolling in to the beach (shore distance approximated from the depth) + edge foam
 	vec2 wp = v_world.xz;
 	float sd = d / 0.12;

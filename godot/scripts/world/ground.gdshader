@@ -5,6 +5,7 @@
 //   dirt_tex rgb = trail dirt colour (with AO)   a = rock-face weight
 shader_type spatial;
 render_mode blend_mix, depth_draw_opaque, cull_back, diffuse_burley, specular_schlick_ggx;
+#include "res://shaders/atmos.gdshaderinc"
 
 uniform sampler2D land_tex : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
 uniform sampler2D dirt_tex : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
@@ -67,4 +68,9 @@ void fragment() {
 	ALBEDO = col;
 	ROUGHNESS = 0.95;
 	SPECULAR = 0.3;
+}
+
+// lit by hand only so cloud shadows can dim the sun here (shaders/atmos); ground is matte (roughness .95)
+void light() {
+	DIFFUSE_LIGHT += atmos_diffuse(NORMAL, LIGHT, ATTENUATION * LIGHT_COLOR, LIGHT_IS_DIRECTIONAL, v_world, 0.0);
 }
