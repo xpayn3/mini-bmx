@@ -510,7 +510,12 @@ func respawn(new_world: bool) -> void:
 	_snap_prev()
 	cam.snap_to(Vector3(0, phys.y + 0.5, 0))
 
-const DRAW_KEYS := ["x", "z", "y", "y_draw", "pitch", "pitch_draw", "heading", "body_y"]
+## the frame's tailwhip angle to draw (wrapped interpolation; BMX_WHIP_POSE=rad holds one for test shots)
+func _whip_draw(st, a: float) -> float:
+	if OS.get_environment("BMX_WHIP_POSE") != "": return float(OS.get_environment("BMX_WHIP_POSE"))
+	return _prev.whip + BikePhysics.ang_diff(st.whip, _prev.whip) * a
+
+const DRAW_KEYS := ["x", "z", "y", "y_draw", "pitch", "pitch_draw", "heading", "body_y", "whip"]
 
 func _snap_prev() -> void:
 	for k in DRAW_KEYS: _prev[k] = phys.get(k)
@@ -616,7 +621,7 @@ func _process(dt: float) -> void:
 	var body_y: float = lerp_k.call("body_y")
 	var wobble := sin(t * 2.3) * 0.025 * maxf(0.0, 1 - absf(st.v) / 2)
 	rig.pose(drawn_pos.x, y_draw, drawn_pos.z, hd, p_draw, st.hop_nose, st.bike_lean + st.rock + wobble,
-		st.steer - wobble * 1.5, st.wheel_f, st.wheel_r, st.crank)
+		st.steer - wobble * 1.5, st.wheel_f, st.wheel_r, st.crank, _whip_draw(st, a))
 	st.brake_heat *= exp(-dt / 3.5)
 	rig.set_brake_heat((st.brake_heat - 0.35) / 0.9)
 	if not st.crash_on:
@@ -628,7 +633,7 @@ func _process(dt: float) -> void:
 			"absorb": clampf(body_y - y_draw, -T.legComp, T.legExt), "pitch": p_draw, "bodyLevel": T.bodyLevel,
 			"attackDrop": T.attackDrop, "pedal": st.pedal, "sprint": st.sprint * st.pedal, "crank": st.crank,
 			"air": st.air_k, "compress": maxf(0.0, -st.compress), "hipShift": st.hip_shift, "t": t,
-			"airSpin": st.yaw_rate if st.air else 0.0})
+			"airSpin": st.yaw_rate if st.air else 0.0, "turn": 0.0 if st.air else st.yaw_rate * clampf(absf(st.v) / 3.0, 0.3, 1.0)})
 	var vd: float = Settings.get_v("view_distance")
 	terrain.update_stream(st.x, st.z, 4.0)
 	far_hills.follow(drawn_pos)
