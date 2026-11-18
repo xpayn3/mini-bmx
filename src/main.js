@@ -180,6 +180,15 @@ const urlSeed = parseInt(url.searchParams.get('seed'), 10);
 let seed = Number.isFinite(urlSeed) ? urlSeed : (Math.random() * 1e6) | 0;
 const RIDE = BIKES[bikeId].ride || {}, LAND = BIKES[bikeId].land || 1;
 const T = new Proxy(TUNE, { get: (o, k) => o[k] * (RIDE[k] ?? 1) });   // TUNE, scaled for this bike
+// GEARS (Q easier / E harder), like a real 7-speed downhill cassette: the cog sets how fast the legs
+// turn at a given speed. A big cog spins the legs fast -- strong push, but you spin out early; a small
+// cog has a high top speed, but on a climb the cadence drops, the push dies and you stall unless you
+// shift down. Gear 1 is the smallest cog (fastest). BMX and dirt-jump bikes are single speed.
+// g = how much harder than the 16T reference (the old single-gear feel) a gear is.
+const COGS = [11, 12, 14, 16, 18, 21, 24];
+const GEARED = bikeId === 'dh' || (BIKES[bikeId].cfg && !['bmx', 'dj'].includes(BIKES[bikeId].cfg.style));
+let gear = GEARED ? 3 : -1;   // index into COGS (3 = 16T); -1 = single speed
+const gearK = () => gear < 0 ? 1 : 16 / COGS[gear];
 function openBikeBuilder() {   // edits the bike being ridden if it is a built one
   import('./builder.js').then(({ openBuilder }) => openBuilder({ editId: storeId(bikeId), onRide: (id) => {
     store.set('bike', id); url.searchParams.set('bike', id); url.searchParams.set('seed', seed); location.replace(url.href);
@@ -414,11 +423,12 @@ addEventListener('keyup', (e) => { keys[e.code] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
 document.addEventListener('visibilitychange', () => { for (const k in keys) keys[k] = false; });
 let camDist = 38;   // default view: zoomed-out diorama
-// camera orbit: Q/E snap 45 deg, mouse drag = free orbit + tilt
+// camera orbit: Z/X snap 45 deg, mouse drag = free orbit + tilt
 let orbit = 0, orbitT = 0, camPitch = 46, camPitchT = 46, dragging = false, lastX = 0, lastY = 0;
 addEventListener('keydown', (e) => {
-  if (e.code === 'KeyQ') orbitT -= Math.PI / 4;
-  if (e.code === 'KeyE') orbitT += Math.PI / 4;
+  if (e.code === 'KeyZ') orbitT -= Math.PI / 4;
+  if (e.code === 'KeyX') orbitT += Math.PI / 4;
+  if ((e.code === 'KeyQ' || e.code === 'KeyE') && !e.repeat) shift(e.code === 'KeyQ' ? 1 : -1);
 });
 // one pointer = orbit/tilt; two touches = pinch zoom
 const touchPts = new Map(); let pinchD = 0;
@@ -669,6 +679,21 @@ function flowUI(f) {
 function flowUp() {
   st.flow = Math.min(FLOW_MAX, Math.floor(st.flow || 0) + 1); st.flowT = 0;
 }
+// gear chip under the stamina bar: the cassette, the cog you're on lit up
+const gearEl = document.createElement('div');
+gearEl.id = 'gear';
+document.body.appendChild(gearEl);
+function gearUI() {
+  if (gear < 0) { gearEl.innerHTML = '<b>1×</b> single speed'; return; }
+  gearEl.innerHTML = `<b>${gear + 1}</b>` + COGS.map((c, i) => `<i class="${i === gear ? 'on' : ''}" style="height:${6 + c * 0.75}px"></i>`).join('') + `<small>${COGS[gear]}T</small>`;
+}
+function shift(d) {   // d = +1 easier (bigger cog), -1 harder
+  if (gear < 0) { flash('Single speed'); return; }
+  const g = clamp(gear + d, 0, COGS.length - 1);
+  if (g === gear) return;
+  gear = g; gearUI();
+}
+gearUI();
 function flash(text) { hud.msg.textContent = text; hud.msg.style.opacity = 1; msgT = 1.4; }
 
 const clamp = THREE.MathUtils.clamp;
@@ -731,8 +756,11 @@ function physics(dt) {
     // pedalling like a real rider: strong push from a standstill, then constant POWER (force = P / v),
     // so climbs settle at a decent speed; spinning out above ~38 km/h limits the top speed on the flat
     const vp = Math.max(st.v, 0.5);
-    const pTop = T.pedalTop + T.sprintTop * spK, pMul = 1 + (T.sprintPower - 1) * spK;
-    let drive = (rearDown ? throttle : 0) * Math.min(T.pedalLaunch * pMul, T.pedalPower * pMul / vp) * clamp((pTop - st.v) / 2.5, 0, 1);
+    const gk = gearK(), pTop = (T.pedalTop + T.sprintTop * spK) * gk, pMul = 1 + (T.sprintPower - 1) * spK;
+    // cadence vs. the comfortable one (~90 rpm at 70 % of the top speed): turning the cranks too slowly
+    // in a hard gear (a climb, a standing start) the legs can't put the push down -- shift down
+    const cad = st.v / (gk * T.pedalTop * 0.7), grind = gear < 0 ? 1 : 0.35 + 0.65 * smooth01((cad - 0.15) / 0.7);
+    let drive = (rearDown ? throttle : 0) * Math.min(T.pedalLaunch * pMul / gk, T.pedalPower * pMul / vp) * grind * clamp((pTop - st.v) / 2.5, 0, 1);
     // only the REAR tyre drives, and only as hard as it grips: stamp on it in sand or wet grass and the
     // wheel spins (the rest of the push goes into roost, not speed)
     const driveCap = mu * nR;
@@ -777,7 +805,7 @@ function physics(dt) {
   flowUI(st.flow || 0);
   // spin-out: past the pedal top speed no human can turn the cranks fast enough, so the rider
   // stops pedalling and coasts (pedals level). Picks it back up once the bike slows a bit.
-  const topNow = T.pedalTop + T.sprintTop * (st.sprint || 0);
+  const topNow = (T.pedalTop + T.sprintTop * (st.sprint || 0)) * gearK();
   if (st.v > topNow + 0.3) st.spunOut = true;
   else if (st.v < topNow - 0.8) st.spunOut = false;
   st.pedal += ((throttle && !st.air && !st.spunOut ? 1 : 0) - st.pedal) * Math.min(1, dt * 6);
@@ -1279,7 +1307,7 @@ function physics(dt) {
   const w = st.v / RWF;
   st.wheelF += w * dt;
   if (!skid) st.wheelR += st.v / RWR * dt;
-  if (st.pedal > 0.05) st.crank += Math.max(w / 2.78, 3.5) * (1 + 0.3 * (st.sprint || 0)) * st.pedal * dt;
+  if (st.pedal > 0.05) st.crank += Math.max(w / (2.78 * gearK()), 3.5) * (1 + 0.3 * (st.sprint || 0)) * st.pedal * dt;
   else if (!st.air) {
     // coasting: outside pedal down in a turn, level pedals on the straight
     const aL = pedalPivots[0].userData.a0, aR = pedalPivots[1].userData.a0;

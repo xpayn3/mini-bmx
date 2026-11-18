@@ -220,13 +220,11 @@ export class Course {
     }
     if (!c.length) return q;
     c.sort((a, b) => a - b);
-    let sw = 0, se = 0, legD = Infinity, legI = 0, legT = 0, prev = -9;
+    let sw = 0, se = 0, sk = 0, sb = 0, legD = Infinity, legI = 0, legT = 0, prev = -9;
     const close = () => {   // one contiguous leg of the course: fold its nearest point into the blend
       if (legD === Infinity) return;
       legD = Math.sqrt(legD);
       const i = legI, t = legT, wl = this.W[i] + (this.W[i + 1] - this.W[i]) * t, e = this.E[i] + (this.E[i + 1] - this.E[i]) * t;
-      const wt = 1 / ((legD * legD + 1) * (legD * legD + 1));
-      sw += wt; se += wt * e;
       const m = 1 - smooth(wl + 1.5, wl + 8, legD);
       if (m > q.mask) q.mask = m;
       if (legD < q.d) {
@@ -252,11 +250,20 @@ export class Course {
       let t = ((x - ax) * bx + (z - az) * bz) / (bx * bx + bz * bz);
       t = t < 0 ? 0 : t > 1 ? 1 : t;
       const ex = x - ax - bx * t, ez = z - az - bz * t, d2 = ex * ex + ez * ez;
+      // bench: every nearby segment weighs in by its own distance (smooth everywhere). Using only each
+      // leg's nearest point jumped on the inside of tight bends, where that point skips along the trail;
+      // the weight fades to 0 before the query radius, where segments drop in and out of the candidates
+      const sd = Math.sqrt(d2), wt = (1 - smooth(QR - 9, QR - 2, sd)) / ((d2 + 1) * (d2 + 1));
+      if (wt > 0) {
+        sw += wt; se += wt * (this.E[i] + (this.E[i + 1] - this.E[i]) * t);
+        sk += wt * (this.KAP[i] + (this.KAP[i + 1] - this.KAP[i]) * t); sb += wt * (this.BT[i] + (this.BT[i + 1] - this.BT[i]) * t);
+      }
       if (d2 < legD) { legD = d2; legI = i; legT = t; }
     }
     close();
     if (q.d > QR) { q.d = Infinity; q.mask = 0; return q; }
-    q.bench = se / sw;
+    q.bench = sw > 0 ? se / sw : this.E[q.i] + (this.E[q.i + 1] - this.E[q.i]) * q.t;
+    if (sw > 0) { q.k = sk / sw; q.bt = sb / sw; }   // berm curvature / bank: blended the same way, no steps
     return q;
   }
   at(s) {   // point on the centreline at arc length s -> [x, z, tx, tz, i]
