@@ -13,8 +13,8 @@ const BIKES := {
 			"chestUp": -0.005, "chestSide": 0.005, "headRoll": -0.01, "shoulderFwd": 0.005, "elbowOutR": -0.05,
 			"wristRoll": 0.02, "kneesFwd": 0.05, "footAngle": 0.01},
 		"ride": {
-			"steerRate": 0.75, "steerRelease": 0.8, "barSpeed": 0.75, "steerMax": 0.85, "counter": 0.6,
-			"turnSlow": 0.9, "turnFast": 1.15,
+			"steerRate": 0.9, "steerRelease": 0.9, "barSpeed": 0.9, "steerMax": 0.9, "counter": 0.6,
+			"turnSlow": 1.0, "turnFast": 1.1,
 			"leanMax": 1.1, "leanIn": 0.8, "leanOut": 0.8, "leanDamp": 1.2,
 			"legStiff": 0.6, "legDamp": 1.2, "legComp": 1.3, "legExt": 1.3, "attackDrop": 1.3,
 			"pedalLaunch": 0.75, "pedalPower": 0.85, "pedalTop": 1.35, "airDrag": 0.85, "brakeForce": 1.3, "popPower": 0.7,

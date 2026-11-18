@@ -6,26 +6,26 @@ signal changed
 
 const DEFS := [
 	["Steering", [
-		["steerRate", "Steer build-up", 12, 1, 25, 0.5, "/s"],
-		["steerRelease", "Steer release", 7, 1, 25, 0.5, "/s"],
-		["steerCurve", "Soft centre", 0.25, 0, 1, 0.05, ""],
-		["turnSlow", "Turn force (slow)", 4.6, 1, 12, 0.1, "m/s²"],
-		["turnFast", "Turn force (fast)", 7.5, 1, 14, 0.1, "m/s²"],
-		["turnFloor", "Min turn rate", 1.7, 0.3, 3.5, 0.05, "rad/s"],
-		["steerMax", "Max bar angle", 0.55, 0.2, 0.9, 0.01, "rad"],
-		["slowSteer", "Bar angle when slow", 1.0, 0.4, 1.4, 0.02, "rad"],
+		["steerRate", "Steer build-up", 15, 1, 25, 0.5, "/s"],
+		["steerRelease", "Steer release", 10, 1, 25, 0.5, "/s"],
+		["steerCurve", "Soft centre", 0.1, 0, 1, 0.05, ""],
+		["turnSlow", "Turn force (slow)", 9, 1, 12, 0.1, "m/s²"],
+		["turnFast", "Turn force (fast)", 13, 1, 14, 0.1, "m/s²"],
+		["turnFloor", "Min turn rate", 2.6, 0.3, 3.5, 0.05, "rad/s"],
+		["steerMax", "Max bar angle", 0.7, 0.2, 0.9, 0.01, "rad"],
+		["slowSteer", "Bar angle when slow", 1.2, 0.4, 1.4, 0.02, "rad"],
 		["slowSteerFade", "Slow steering fades by", 4, 1, 10, 0.5, "m/s"],
-		["barSpeed", "Bar speed", 18, 3, 40, 1, "/s"],
+		["barSpeed", "Bar speed", 28, 3, 40, 1, "/s"],
 		["counter", "Countersteer flick", 0.2, 0, 0.8, 0.02, ""],
 	]],
 	["Grip & slides", [
-		["grip", "Tyre grip", 1, 0.4, 1.6, 0.02, "×"],
+		["grip", "Tyre grip", 1.3, 0.4, 1.6, 0.02, "×"],
 		["oversteer", "Rear steps out", 0.35, 0, 1, 0.05, ""],
-		["slipRecover", "Slide catch", 5, 0.5, 15, 0.5, "/s"],
-		["slipMax", "Wash-out angle", 0.85, 0.4, 1.4, 0.05, "rad"],
+		["slipRecover", "Slide catch", 8, 0.5, 15, 0.5, "/s"],
+		["slipMax", "Wash-out angle", 1.1, 0.4, 1.4, 0.05, "rad"],
 	]],
 	["Momentum", [
-		["turnWeight", "Turn weight", 0.12, 0, 0.5, 0.01, "s"],
+		["turnWeight", "Turn weight", 0.09, 0, 0.5, 0.01, "s"],
 		["rollRes", "Rolling resistance", 0.8, 0.3, 1.5, 0.05, "×"],
 		["flowCarry", "Flow speed carry", 0.4, 0, 0.8, 0.05, ""],
 		["flowTime", "Flow lasts", 4, 1, 10, 0.5, "s"],
@@ -39,13 +39,17 @@ const DEFS := [
 		["airTurn", "Air twist speed", 0.7, 0, 3, 0.05, "rad/s"],
 		["airTwist", "Max air twist", 0.45, 0, 1.4, 0.05, "rad"],
 		["flipRate", "Flip speed (W / S held)", 6.0, 1, 12, 0.1, "rad/s"],
-		["flipAccel", "Flip snap", 28, 4, 80, 1, "rad/s²"],
+		["flipAccel", "Flip snap", 40, 4, 80, 1, "rad/s²"],
 		["flipDamp", "Flip slows when let go", 0.8, 0, 6, 0.05, "/s"],
 		["spinRate", "Spin speed (A / D in the air)", 7.0, 1, 14, 0.1, "rad/s"],
-		["spinAccel", "Spin snap", 30, 4, 80, 1, "rad/s²"],
+		["spinAccel", "Spin snap", 45, 4, 80, 1, "rad/s²"],
 		["spinDamp", "Spin slows when let go", 1.0, 0, 6, 0.05, "/s"],
-		["landPitch", "Landing angle allowed", 0.7, 0.2, 1.4, 0.05, "rad"],
-		["landTwist", "Landing twist allowed", 0.6, 0.2, 1.4, 0.05, "rad"],
+		["landPitch", "Landing angle allowed", 0.8, 0.2, 1.4, 0.05, "rad"],
+		["landTwist", "Landing twist allowed", 0.75, 0.2, 1.4, 0.05, "rad"],
+		["whipRate", "Tailwhip speed (Shift + A / D)", 13, 4, 25, 0.5, "rad/s"],
+		["whipAccel", "Tailwhip kick", 90, 10, 200, 5, "rad/s²"],
+		["landWhip", "Whip landing slack", 0.5, 0.1, 1.2, 0.05, "rad"],
+		["pivotRate", "Pivot speed (brake + A / D, slow)", 5, 1, 10, 0.25, "rad/s"],
 	]],
 	["Wheels & pump", [
 		["tyreHz", "Bounce frequency", 3.2, 1.2, 7, 0.1, "Hz"],
@@ -58,12 +62,12 @@ const DEFS := [
 		["pumpGain", "Pump strength", 9, 0, 25, 0.5, ""],
 	]],
 	["Lean", [
-		["leanMax", "Max lean", 0.65, 0.15, 1.1, 0.01, "rad"],
-		["leanIn", "Roll-in stiffness", 95, 8, 200, 1, ""],
-		["leanOut", "Roll-out stiffness", 55, 8, 200, 1, ""],
-		["leanDamp", "Lean damping", 0.88, 0.3, 1.6, 0.02, ""],
+		["leanMax", "Max lean", 0.7, 0.15, 1.1, 0.01, "rad"],
+		["leanIn", "Roll-in stiffness", 40, 8, 200, 1, ""],
+		["leanOut", "Roll-out stiffness", 30, 8, 200, 1, ""],
+		["leanDamp", "Lean damping", 1.0, 0.3, 1.6, 0.02, ""],
 		["bikeLeanMul", "Bike leans extra", 1.15, 0.7, 1.8, 0.01, "×"],
-		["bikeLeanCap", "Bike lean soft cap", 0.75, 0.3, 1.2, 0.01, "rad"],
+		["bikeLeanCap", "Bike lean soft cap", 0.8, 0.3, 1.2, 0.01, "rad"],
 	]],
 	["Legs & body", [
 		["legStiff", "Leg spring", 30, 4, 150, 1, ""],
@@ -103,6 +107,10 @@ const DEFS := [
 ]
 
 const PATH := "user://tune.cfg"
+## bump VER when defaults are retuned: saved values of the RETUNED keys are dropped once
+const VER := 2
+const RETUNED := ["steerRate", "steerRelease", "steerCurve", "turnSlow", "turnFast", "turnFloor", "steerMax", "slowSteer",
+	"barSpeed", "grip", "slipRecover", "slipMax", "turnWeight", "leanMax", "leanIn", "leanOut", "leanDamp", "bikeLeanMul", "bikeLeanCap", "flipAccel", "spinAccel", "landPitch", "landTwist"]
 var defaults := {}
 var base := {}       # the player's slider values (before the bike's ride multipliers)
 var ride := {}       # multipliers for the bike being ridden
@@ -119,11 +127,14 @@ func _ready() -> void:
 	base = defaults.duplicate()
 	var cf := ConfigFile.new()
 	if cf.load(PATH) == OK:
+		var old_ver: int = cf.get_value("ui", "ver", 1)
 		for k in cf.get_section_keys("tune") if cf.has_section("tune") else []:
+			if old_ver < VER and k in RETUNED: continue   # new defaults win over values saved before the retune
 			if defaults.has(k):
 				base[k] = float(cf.get_value("tune", k))
 		pins = cf.get_value("ui", "pins", pins)
 		quick_folded = cf.get_value("ui", "quick_folded", false)
+		if old_ver < VER: save()
 	_rebuild()
 
 func set_ride(mult: Dictionary) -> void:
@@ -146,6 +157,7 @@ func save() -> void:
 		cf.set_value("tune", k, base[k])
 	cf.set_value("ui", "pins", pins)
 	cf.set_value("ui", "quick_folded", quick_folded)
+	cf.set_value("ui", "ver", VER)
 	cf.save(PATH)
 
 func toggle_pin(k: String) -> void:

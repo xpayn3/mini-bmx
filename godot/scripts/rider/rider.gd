@@ -521,6 +521,36 @@ static func orient_hand(n: Node3D, el: Vector3, at: Vector3, right: Vector3) -> 
 
 
 ## analytic two-bone IK -> [joint, reachable end]
+## Keep a knee clear of the frame: swing it outward round the hip -> ankle line (leg lengths unchanged)
+## until it sits at least KNEE_CLEAR off the bike's centre plane (z = 0 in the bike's leaning space).
+const KNEE_CLEAR := 0.12
+static func _knee_clear(hip: Vector3, ankle: Vector3, kn: Vector3, side: float) -> Vector3:
+	if side * kn.z >= KNEE_CLEAR:
+		return kn
+	var ax := ankle - hip
+	if ax.length_squared() < 1e-6:
+		return kn
+	ax = ax.normalized()
+	var c := hip + ax * (kn - hip).dot(ax)
+	var r := (kn - c).length()
+	if r < 1e-4:
+		return kn
+	var u := (kn - c) / r
+	var out := Vector3(0, 0, side) - ax * ax.z * side
+	if out.length_squared() < 1e-6:
+		return kn
+	out = out.normalized()
+	if u.dot(out) < -0.999 or side * (c + out * r).z < KNEE_CLEAR:
+		return c + out * r   # can't clear it: as far out as the leg allows
+	# smallest swing that clears (bisection, so the knee moves smoothly frame to frame)
+	var lo := 0.0
+	var hi := 1.0
+	for _k in 14:
+		var m := (lo + hi) * 0.5
+		if side * (c + u.slerp(out, m) * r).z >= KNEE_CLEAR: hi = m
+		else: lo = m
+	return c + u.slerp(out, hi) * r
+
 static func solve_ik(root: Vector3, target: Vector3, l1: float, l2: float, pole: Vector3) -> Array:
 	var d := target - root
 	var dist := d.length()
@@ -617,6 +647,7 @@ static func _num(p: Dictionary, k: String, def := 0.0) -> float:
 
 ## p: footL, footR, handL, handR (Vector3, this node's space), v, lean, steer, yawRate, counter, rockRoll,
 ## headRoll, absorb, pitch, bodyLevel, attackDrop, pedal, sprint, crank, air, compress, hipShift, t
+var sm_turn := 0.0
 func update_pose(dt: float, p: Dictionary) -> void:
 	var v := _num(p, "v")
 	var pedal := clampf(_num(p, "pedal"), 0, 1)
@@ -766,9 +797,12 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var hip := Vector3(pelvis.x, pelvis.y + 0.02, pelvis.z)
 	var tw_axis := (chest - hip).normalized()
 	# spinning in the air: shoulders lead the bike round (the head turns via yawRate below)
-	var tw := Basis(tw_axis, float(sty.twist) + clampf(_num(p, "airSpin") * 0.07, -0.45, 0.45))
+	# turning on the ground: shoulders and hips steer into the turn, the inside hip drops
+	var turn := clampf(_num(p, "turn"), -3.0, 3.0)
+	sm_turn += (turn - sm_turn) * (1.0 - exp(-8.0 * minf(dt, 0.1)))
+	var tw := Basis(tw_axis, float(sty.twist) + clampf(_num(p, "airSpin") * 0.07 + sm_turn * 0.13, -0.5, 0.5))
 	# pelvis: turn (yaw about up), roll (one hip drops, about forward), tilt (about the hip line)
-	var pel_b := Basis(Vector3.UP, float(sty.pelvisYaw)) * Basis(Vector3.RIGHT, float(sty.pelvisRoll))
+	var pel_b := Basis(Vector3.UP, float(sty.pelvisYaw) + clampf(sm_turn * 0.07, -0.22, 0.22)) * Basis(Vector3.RIGHT, float(sty.pelvisRoll) - clampf(sm_turn * 0.04, -0.12, 0.12))
 	set_spine(hip, chest, pel_b * Vector3(0, 0, 1), tw * Vector3(0, 0, 1),
 		float(sty.spineCurve), float(sty.spineSide), float(sty.spineLow))
 	pelvis_mesh.transform = Transform3D(pel_b * Basis(Vector3.BACK, -(ang * 0.3) - float(sty.pelvisTilt)), pelvis)
@@ -795,6 +829,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		var hp: Vector3 = pelvis + pel_b * Vector3(0, -0.02, side * (0.11 + sty.stance))
 		var ankle := Vector3(foot.x - 0.04 + sty.heelFwd, foot.y + 0.12 + sty.heelUp, foot.z)
 		var ik := solve_ik(hp, ankle, L_THIGH, L_SHIN, poles_leg[i])
+		ik[0] = _knee_clear(hp, ankle, ik[0], side)
 		set_limb(thigh[i], hp, ik[0])
 		set_limb(shin[i], ik[0], ik[1])
 		knee[i].position = ik[0]

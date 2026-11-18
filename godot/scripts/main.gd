@@ -318,11 +318,17 @@ func _autotest(seconds: float) -> void:
 				if trick == "back": Input.action_press("brake")
 				elif trick == "front": Input.action_press("pedal")
 				elif trick == "spin": Input.action_press("steer_left")
+				elif trick == "whip" and ph.air_time < 0.45: Input.action_press("sprint"); Input.action_press("steer_left")
+				elif trick == "whip": Input.action_release("sprint")
 			await get_tree().process_frame
 			continue
 		elif trick != "":
-			Input.action_release("brake")
-		if pedal and not straight and int(el) % 6 == 3: Input.action_press("steer_left")
+			Input.action_release("brake"); Input.action_release("sprint")
+		if OS.get_environment("BMX_STEER") != "":   # tests: hold a steady turn (+ left, - right) after 2 s
+			var sv := float(OS.get_environment("BMX_STEER")) if el > 2.0 else 0.0
+			Input.action_press("steer_left", maxf(sv, 0.0)) if sv > 0 else Input.action_release("steer_left")
+			Input.action_press("steer_right", maxf(-sv, 0.0)) if sv < 0 else Input.action_release("steer_right")
+		elif pedal and not straight and int(el) % 6 == 3: Input.action_press("steer_left")
 		else: Input.action_release("steer_left")
 		if pedal and not straight and int(el * 2) % 7 == 0: Input.action_press("hop")
 		elif OS.get_environment("BMX_AIRPULL") != "" and game.phys.air and game.phys.air_time > 0.1: Input.action_press("hop")   # tests: tuck in the air

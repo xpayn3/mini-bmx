@@ -20,6 +20,11 @@ var grip_r := Vector3.ZERO
 var seat = null
 var susp = null
 var rotors: Array = []
+# tailwhip: the frame turns round the head tube (axis + a point on it, in fit_g space); the bars stay put
+var model_t0 := Transform3D.IDENTITY
+var whip_axis := Vector3.UP
+var whip_piv := Vector3.ZERO
+var whip_w := 0.0
 
 func _init() -> void:
 	name = "BikeRig"
@@ -47,6 +52,14 @@ func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
 	wheel_r = model.find_child("wheel_rear", true, false)
 	crank_n = model.find_child("crank", true, false)
 	wheel_rf = float(extras.get("wheelRadius", 0.261)); wheel_rr = float(extras.get("wheelRadiusRear", wheel_rf))
+	model_t0 = model.transform
+	var chain := Transform3D.IDENTITY   # steer node's parent -> model space
+	var n: Node = steer_n.get_parent()
+	while n != null and n != model:
+		chain = (n as Node3D).transform * chain
+		n = n.get_parent()
+	whip_axis = (model_t0.basis * chain.basis * steer_axis).normalized()
+	whip_piv = model_t0 * (chain * steer_n.position)
 	_materials(cfg)
 	_grips()
 	_pedals()
@@ -215,12 +228,18 @@ func grip_mid() -> Vector3:
 
 ## Pose from the physics state (already interpolated by the caller).
 func pose(px: float, py: float, pz: float, heading: float, pitch: float, hop_nose: float, lean: float,
-		steer: float, wf: float, wr: float, crank: float) -> void:
+		steer: float, wf: float, wr: float, crank: float, whip := 0.0) -> void:
 	position = Vector3(px, py, pz)
+	whip_w = whip
+	if whip != 0.0:
+		var b := Basis(whip_axis, whip)
+		model.transform = Transform3D(b, whip_piv - b * whip_piv) * model_t0
+	else:
+		model.transform = model_t0
 	rotation = Vector3(0, heading, 0)
 	pitch_g.rotation = Vector3(0, 0, pitch + hop_nose)
 	lean_g.rotation = Vector3(-lean, 0, 0)
-	steer_n.quaternion = Quaternion(steer_axis, steer)
+	steer_n.quaternion = Quaternion(steer_axis, steer - whip)
 	wheel_f.rotation.z = -wf
 	wheel_r.rotation.z = -wr
 	crank_n.rotation.z = -crank
@@ -237,6 +256,16 @@ func limb_targets() -> Dictionary:
 	if pedal_pivots.size() == 2:
 		out.footL = lean_g.to_local(pedal_pivots[0].global_position)
 		out.footR = lean_g.to_local(pedal_pivots[1].global_position)
+		if whip_w != 0.0:
+			# mid-whip the feet leave the pedals: keep them where the pedals would be, spread wide
+			var b := Basis(whip_axis, whip_w)
+			var inv := (Transform3D(b, whip_piv - b * whip_piv)).affine_inverse()
+			var spread := minf(1.0, absf(wrapf(whip_w, -PI, PI)) * 3.0) * 0.12
+			for k in ["footL", "footR"]:
+				var pf: Vector3 = inv * fit_g.to_local(lean_g.to_global(out[k]))
+				var q := lean_g.to_local(fit_g.to_global(pf))
+				q.z += signf(q.z) * spread; q.y += spread * 0.5
+				out[k] = q
 	return out
 
 func set_brake_heat(k: float) -> void:
