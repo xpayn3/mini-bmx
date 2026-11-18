@@ -97,6 +97,7 @@ function build() {
       <button class="act" data-k="KeyR"><span class="ic">🌍</span>New world</button>
       <button class="act" data-k="KeyP"><span class="ic">⚙️</span>Tune</button>
       <button class="act" data-k="KeyK"><span class="ic">🧍</span>Rider</button>
+      <button class="act" data-k="KeyL"><span class="ic">🎨</span>Look</button>
       <button class="act" data-k="KeyH"><span class="ic">🏆</span>Records</button>
     </div>
     <details class="keysec"><summary>Keyboard controls</summary><div class="keysSlot"></div></details>`;
@@ -126,7 +127,7 @@ function build() {
   btn.addEventListener('click', () => { setOpen(!panel.classList.contains('open')); btn.blur(); });
   panel.addEventListener('click', (e) => {
     const b = e.target.closest('[data-k]');
-    if (b) { press(b.dataset.k); if (['KeyP', 'KeyK', 'KeyR', 'KeyH'].includes(b.dataset.k)) setOpen(false); }
+    if (b) { press(b.dataset.k); if (['KeyP', 'KeyK', 'KeyL', 'KeyR', 'KeyH'].includes(b.dataset.k)) setOpen(false); }
     // never keep focus: Space / WASD must keep driving the bike
     setTimeout(() => { if (document.activeElement !== document.getElementById('cam')) document.activeElement?.blur?.(); }, 0);
   });

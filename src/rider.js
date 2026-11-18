@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { buildGoggles, buildShoe } from './gear.js';
 
 // Low-poly cartoon BMX rider. Local frame: +X forward, +Y up, +Z rider's right.
 
@@ -72,6 +73,8 @@ export class Rider {
     const mSkin = mat(0xffc8a0);
     const mBlack = mat(0x111111, { roughness: 0.3 });
 
+    // recolourable kit (setLook): the darker / lighter partner of each colour follows it
+    this.kit = { jersey: [mCoral, mCoralDark], pants: [mNavy, mNavyLight], gloves: [mYellow] };
     const g = this.group;
     const cyl = (rt, rb, m, seg = 6) => {
       const mesh = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, 1, seg), m);
@@ -97,15 +100,15 @@ export class Rider {
     this.shin = [cyl(0.062, 0.05, mNavy), cyl(0.062, 0.05, mNavy)];
     this.knee = [sph(0.07, mNavyLight), sph(0.07, mNavyLight)];
     this.shoe = [];
+    // flat-pedal shoes (src/gear.js)
+    this.shoeMats = { upper: mat(0x26292f), accent: mat(0xd8232a), sole: mat(0x111214, { roughness: 0.95 }),
+      mid: mat(0xf2f2ee), laces: mat(0xf2f2ee) };
+    this.goggleMats = { frame: mat(0xf2f2ee, { roughness: 0.45, flatShading: false }), foam: mat(0x15171a, { roughness: 1, flatShading: false }),
+      strap: new THREE.MeshStandardMaterial({ color: 0xff6a4d, roughness: 0.8, side: THREE.DoubleSide }),
+      lens: new THREE.MeshPhysicalMaterial({ color: 0xff7a2a, metalness: 0.85, roughness: 0.06, clearcoat: 1, clearcoatRoughness: 0.05,
+        iridescence: 1, iridescenceIOR: 1.8, emissive: 0x401a08, side: THREE.DoubleSide }) };
     for (let i = 0; i < 2; i++) {
-      const s = new THREE.Group();
-      const sole = new THREE.Mesh(new THREE.BoxGeometry(0.29, 0.025, 0.115), mRed);
-      sole.position.set(0.03, 0.0125, 0);
-      const upper = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.07, 0.105), mWhite);
-      upper.position.set(0.035, 0.06, 0);
-      const toe = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.05, 0.11), mWhite);
-      toe.position.set(0.15, 0.048, 0);
-      s.add(sole, upper, toe);
+      const s = buildShoe(this.shoeMats);
       g.add(s);
       this.shoe.push(s);
     }
@@ -189,6 +192,7 @@ export class Rider {
       tab.position.set(-0.03, 0, sz * 0.1); tab.rotation.y = sz * 0.5;
       gog.add(tab);
     }
+    this.hel = hel; this.gog = gog;
     g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
 
     // constants
@@ -205,6 +209,60 @@ export class Rider {
     this.springInit = false;
     // joint positions in the rider's local frame, refreshed every update() (ragdoll hand-off)
     this.J = Array.from({ length: 15 }, () => new THREE.Vector3());
+  }
+
+  // swap the built-in helmet for a model (assets/helmet.glb: centred on its shell, +X = face, +Y up);
+  // keeps the goggles. HELMET_FIT places it on the head.
+  setHelmet(model) {
+    const F = Rider.HELMET_FIT;
+    for (const c of [...this.hel.children]) this.hel.remove(c);   // the built-in helmet and its box goggles
+    const w = new THREE.Group();
+    w.position.set(F.x, F.y, 0); w.rotation.z = F.tilt; w.scale.setScalar(F.scale);
+    w.add(model);
+    this.helmetMats = {};
+    model.traverse((o) => { if (o.isMesh) { o.castShadow = true; this.helmetMats[o.material.name] = o.material; } });
+    this.head.add(w);
+    this.helmetModel = w;
+    // dark face behind the opening, so it doesn't show through to the neck
+    const face = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 10), new THREE.MeshStandardMaterial({ color: 0x15181d, roughness: 0.9 }));
+    face.scale.set(1, 1.2, 0.95); face.position.y = -0.01;
+    this.hel.add(face);
+    // moto goggles in the eye port, strap round the shell (src/gear.js)
+    const G = Rider.GOGGLE_FIT;
+    // the strap hugs the real shell: cast rays outward from inside the helmet, in head space
+    const shell = []; model.traverse((o) => { if (o.isMesh && o.material.name === 'shell') shell.push(o); });
+    this.head.updateMatrixWorld(true);
+    const HW = this.head.matrixWorld, rc = new THREE.Raycaster(), o3 = new THREE.Vector3(), d3 = new THREE.Vector3();
+    const sc = new THREE.Vector3().setFromMatrixScale(HW).x;
+    const hug = (x, y, dx, dz) => {
+      o3.set(x + dx * 0.6, y, dz * 0.6).applyMatrix4(HW);            // start outside, look back in
+      d3.set(-dx, 0, -dz).transformDirection(HW);
+      rc.set(o3, d3);
+      const hit = rc.intersectObjects(shell, false)[0];
+      return hit ? 0.6 - hit.distance / sc : null;
+    };
+    this.goggles = buildGoggles(this.goggleMats, G, hug);
+    this.head.add(this.goggles);
+    if (this.look) this.setLook(this.look);
+  }
+
+  // colours: { shell, peak, jersey, pants, gloves, shoes, shoeAccent, goggleFrame, lens, strap } as '#rrggbb'
+  setLook(look) {
+    this.look = { ...this.look, ...look };
+    const L = this.look, c = (m, v) => { if (m && v) m.color.set(v); };
+    const shade = (m, v, dl) => { if (m && v) { m.color.set(v); m.color.offsetHSL(0, 0, dl); } };
+    if (this.helmetMats) {
+      c(this.helmetMats.shell, L.shell); c(this.helmetMats.peak, L.peak);
+      if (this.helmetMats.shell) { // glossy paint, a little metal flake on dark colours
+        this.helmetMats.shell.roughness = 0.28; this.helmetMats.shell.metalness = 0.25;
+      }
+    }
+    c(this.kit.jersey[0], L.jersey); shade(this.kit.jersey[1], L.jersey, -0.08);
+    c(this.kit.pants[0], L.pants); shade(this.kit.pants[1], L.pants, 0.1);
+    c(this.kit.gloves[0], L.gloves);
+    c(this.shoeMats.upper, L.shoes); c(this.shoeMats.accent, L.shoeAccent);
+    c(this.goggleMats.frame, L.goggleFrame); c(this.goggleMats.strap, L.strap);
+    if (L.lens) { this.goggleMats.lens.color.set(L.lens); this.goggleMats.lens.emissive.set(L.lens).multiplyScalar(0.25); }
   }
 
   // riding position (BMX = all zero). hipX/hipY move the hips (m, + forward / up), lean tips the
@@ -438,3 +496,7 @@ export class Rider {
     }
   }
 }
+// where the helmet model sits on the head (head-local m / rad), its scale, and whether the goggles stay
+Rider.HELMET_FIT = { x: 0.01, y: 0.0, tilt: 0.0, scale: 1.3 };
+// goggles (see buildGoggles in gear.js): lens position / tilt / size, and the strap ellipse round the shell
+Rider.GOGGLE_FIT = { x: 0.15, y: 0.025, tilt: 0.25, w: 0.2, h: 0.075, R: 0.12, strap: { cx: 0.01, ra: 0.236, rc: 0.162 } };

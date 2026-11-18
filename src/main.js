@@ -24,7 +24,8 @@ import { breakCactus } from './cactus.js';
 import { Water } from './water.js';
 import { Ragdoll, J } from './ragdoll.js';
 import { TUNE, buildTunePanel } from './tune.js';
-import { buildPosePanel } from './posepanel.js';
+import { buildLookPanel } from './lookpanel.js';
+import { buildPosePanel, NEUTRAL as POSE0 } from './posepanel.js';
 import { IS_TOUCH, buildTouchControls } from './touch.js';
 
 // ---------------- renderer / scene ----------------
@@ -129,15 +130,14 @@ addEventListener('resize', () => {
 
 // ---------------- world ----------------
 // ---------------- bike choice (URL ?bike=, else last pick) ----------------
-const BIKES = {
-  bmx: { file: 'assets/bmx.glb', root: 'bmx', label: 'BMX' },
+const BIKES = {   // the downhill bike is the main bike: listed first, and the one you start on
   dh: {
     file: 'assets/dh.glb', root: 'dh', label: 'Downhill',
     // ATTACK POSITION: standing over a slammed saddle, hips back above its tail, chest down over
-    // the bars, elbows and knees out, feet wide -- the stance a downhill rider holds the whole run.
+    // the bars; arms, knees and feet tuned in the rider panel (elbows in, knees a touch out, narrow hips).
     // hipY is + because this bike's saddle (top 0.83) sits far higher than the BMX's (0.65);
     // seatFloor keeps the hips clear of it on climbs and landings
-    pose: { hipX: -0.07, hipY: 0.075, lean: 0.22, elbowsOut: 0.8, kneesOut: 0.7, stance: 0.03, seatFloor: true },
+    pose: { hipX: -0.07, hipY: 0.075, lean: 0.22, elbowsOut: 0, shoulders: 0.165, kneesOut: 0.2, stance: -0.025, seatFloor: true },
     // RIDE STYLE, as multipliers on the tune panel (so its sliders still work on either bike):
     // a heavy, slack, long bike on big knobby tyres and 200 mm of travel -- slow to get going but
     // a tall top gear, calm steering that holds a line, more grip at speed, deep soft legs that
@@ -153,13 +153,14 @@ const BIKES = {
     },
     land: 1.45,   // landings feel this much softer: SLAM! takes a drop ~1.45x as hard, less speed scrubbed
   },
+  bmx: { file: 'assets/bmx.glb', root: 'bmx', label: 'BMX' },
 };
 // bikes made in the builder (+ Build / U). Their ride feel sits between the BMX (k = 0) and the
 // downhill bike (k = 1): the DH ride multipliers and pose, scaled by k
 for (const cfg of listBikes()) {
   const k = STYLE_K[cfg.style] ?? 0, dh = BIKES.dh;
   const ride = Object.fromEntries(Object.entries(dh.ride).map(([n, v]) => [n, 1 + (v - 1) * k]));
-  const pose = Object.fromEntries(Object.entries(dh.pose).filter(([n]) => n !== 'seatFloor').map(([n, v]) => [n, v * k]));
+  const pose = Object.fromEntries(Object.entries(dh.pose).filter(([n]) => n !== 'seatFloor').map(([n, v]) => [n, POSE0[n] + (v - POSE0[n]) * k]));
   pose.seatFloor = k >= 0.5;
   BIKES[gameId(cfg.id)] = { label: cfg.name || 'Bike', cfg, ride, pose, land: 1 + (dh.land - 1) * k };
 }
@@ -343,6 +344,9 @@ const pedalPivots = [];
 
 const rider = new Rider();
 fixNormals(rider.group);
+// the full-face helmet from the bike project (tools/export_helmet.py); the built-in one stays if it can't load
+new GLTFLoader().loadAsync('assets/helmet.glb').then((g) => rider.setHelmet(g.scene.getObjectByName('helmet')))
+  .catch((e) => console.warn('helmet.glb', e));
 rider.setStyle(BIKES[bikeId].pose || {});
 { // the saddle (frame's plastic mesh): hips stay above it while over it, if the pose asks
   const m = part('frame').getObjectsByProperty('isMesh', true).find(o => o.material.name === 'plastic');
@@ -1455,6 +1459,7 @@ document.getElementById('loading').remove();
 buildTunePanel(RIDE);
 buildPosePanel({ bikeId, bikeLabel: BIKES[bikeId].label, defaults: BIKES[bikeId].pose || {},   // K: rider position sliders
   apply: (s) => rider.setStyle(s), sideView: () => { setCam('side'); flash('Side view'); } });
+buildLookPanel({ apply: (l) => rider.setLook(l), view: () => { setCam('side'); flash('Side view'); } });   // L: rider colours
 buildTouchControls();
 // ---------------- FPS meter + automatic quality fallback ----------------
 const fpsEl = document.getElementById('fps');

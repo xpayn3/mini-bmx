@@ -11,10 +11,11 @@ const DEFS = [
     ['torso',      'Torso length',          0.36, 0.56, 0.005, 'm'],
   ]],
   ['Arms & legs', [
-    ['elbowsOut',  'Elbows out',            0,    1,    0.05,  ''],
-    ['shoulders',  'Shoulder width',        0.13, 0.28, 0.005, 'm'],
-    ['kneesOut',   'Knees out',             0,    1,    0.05,  ''],
-    ['stance',     'Hip width',            -0.04, 0.1,  0.005, 'm'],
+    // each range is centred on the downhill bike's default (main.js BIKES.dh.pose): its knob starts in the middle
+    ['elbowsOut',  'Elbows out',           -1,    1,     0.05,  ''],
+    ['shoulders',  'Shoulder width',        0.095, 0.235, 0.005, 'm'],
+    ['kneesOut',   'Knees out',            -0.3,  0.7,   0.05,  ''],
+    ['stance',     'Hip width',            -0.09, 0.04,  0.005, 'm'],
   ]],
   ['Head', [
     ['headTilt',   'Head tilt (+ looks down)', -0.5, 0.5, 0.01, 'rad'],
@@ -28,7 +29,7 @@ const DEFS = [
   ]],
 ];
 // neutral values (the rider's original pose) for anything a bike's pose doesn't set
-const NEUTRAL = { hipX: 0, hipY: 0, lean: 0, elbowsOut: 0, kneesOut: 0, stance: 0, seatFloor: false,
+export const NEUTRAL = { hipX: 0, hipY: 0, lean: 0, elbowsOut: 0, kneesOut: 0, stance: 0, seatFloor: false,
   crouch: 1, standPedal: 1, sway: 1, torso: 0.46, shoulders: 0.2, headTilt: 0, headTurn: 1, lookAhead: 0 };
 
 const fmt = (v, step) => v.toFixed(step >= 1 ? 0 : Math.min(4, Math.ceil(-Math.log10(step))));
