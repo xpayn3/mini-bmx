@@ -108,6 +108,20 @@ F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A 
 - Ragdoll on crashes (`ragdoll.gd`), then get up with Space.
 - Look: kits + a colour per part (helmet shell/peak, goggles, jersey, pants, gloves, shoes).
 
+### Ride light
+- Clear afternoon: `Game.RIDE_SUN` / `RIDE_SUN_COL` / `RIDE_FOG`, sky fill 80% sky + 20% flat cool blue
+  (`ambient_light_color`) so shade reads as sky light, thin volumetric haze (low ambient inject), cloud
+  shadows `Atmos.CLOUD_DEPTH` 0.3. Bright greens go yellow through ACES if sun/exposure are pushed higher.
+
+### Title screen (golden hour lookout)
+- `Game.set_scenic(true)` while the menu is up: a low warm sun ahead-right of the view, golden sky mode in
+  `sky_hdri.gdshader` (`golden`: warm gradient + sun glow, the HDRI's clouds re-lit), warm long fog.
+- Camera `vista` mode (`CameraRig.VISTA`, not in the C cycle): behind/above the rider facing `_best_view()`
+  (clear near eye line + hills far off), slow sway, drag turns it.
+- `FarHills` (`scripts/world/far_hills.gd`): coarse ground + far trees out to 2.6 km, built on a worker
+  thread; past ~450 m it adds rolling ridges (title screen only) so every seed has a hilly skyline.
+  Freed and the normal light restored when the ride starts. `BMX_SEED` now also fixes the menu world.
+
 ### Garage (`--garage` or from the menu)
 - Brick room, painted-concrete floor, **open roller door straight behind the bike** with the real
   procedural world outside (a Terrain rotated 90° and sunk under the floor), front wall closing the room,

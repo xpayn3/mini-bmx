@@ -12,6 +12,10 @@ const SUN_ELEV := 0.8376   # 48 deg
 const HDRI_SUN_U := 0.5952  # where the sun is across the HDRI (tools/hdri_sun.gd)
 static var SUN_DIR := Vector3(SUN_AZ.normalized().x * cos(SUN_ELEV), sin(SUN_ELEV), SUN_AZ.normalized().y * cos(SUN_ELEV))
 const SKY := Color("a9d6ea")
+## ride light: a clear afternoon. A strong warm sun against a cool blue sky fill (warm light, cool shade)
+const RIDE_SUN := 1.8
+const RIDE_SUN_COL := Color("fff1de")
+const RIDE_FOG := Color(0.68, 0.79, 0.92)
 const DUST_SPLASH := Color("eef6fa")
 const DIRT_CHUNK := Color("7a5534")
 const ROCK_CHUNK := Color("8d8a84")
@@ -35,7 +39,7 @@ var grade_rect: ColorRect
 var atmos := Atmos.new()
 var grime: Grime
 var dust: RideDust
-var sun_energy := 1.6
+var sun_energy := RIDE_SUN
 var speed_k := 0.0           # 0..1 speed feel (FOV boost, edge blur)
 var photo := false           # photo mode: time frozen, HUD hidden, focus on the rider
 var _photo_last := 0
@@ -57,6 +61,9 @@ var biome_hold := 0
 var takeoff := Vector3.ZERO
 var air_peak := 0.0
 var input_enabled := true
+var sky_mat: ShaderMaterial
+var scenic := false          # title screen: golden hour, a lookout camera, far hills to the horizon
+var far_hills: FarHills
 
 func _ready() -> void:
 	bike_cfg = GameState.bike_config()
@@ -132,22 +139,24 @@ func _build_environment() -> void:
 	var target := atan2(SUN_DIR.x, -SUN_DIR.z)
 	sm.set_shader_parameter("rotation", target - (HDRI_SUN_U - 0.5) * TAU)
 	sm.set_shader_parameter("energy", 1.0)
-	sm.set_shader_parameter("light_energy", 0.7)
+	sm.set_shader_parameter("light_energy", 0.55)
 	sky.radiance_size = Sky.RADIANCE_SIZE_256
 	sky.sky_material = sm
+	sky_mat = sm
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_sky_contribution = 1.0
+	env.ambient_light_sky_contribution = 0.8   # the rest: a flat cool blue, so shade reads as sky light
+	env.ambient_light_color = Color(0.55, 0.68, 0.9)
 	env.ambient_light_energy = 0.42   # the web version: sky env 0.55 + a 0.32 hemisphere fill
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_exposure = 0.85
+	env.tonemap_exposure = 0.8
 	env.tonemap_white = 6.0
 	env.fog_enabled = true
 	env.fog_mode = Environment.FOG_MODE_DEPTH
-	env.fog_light_color = Color(0.7, 0.78, 0.86)   # the HDRI's hazy horizon
-	env.fog_density = 1.0
+	env.fog_light_color = RIDE_FOG   # the HDRI's horizon, a clear day
+	env.fog_density = 0.85
 	env.fog_sky_affect = 0.25
 	env.fog_depth_curve = 1.0
 	env.ssao_radius = 0.6
@@ -176,18 +185,18 @@ func _build_environment() -> void:
 	env.set_glow_level(3, 0.6); env.set_glow_level(4, 0.3)
 	# volumetric fog: a light haze the sun shines through (shafts past trees, lit dust clouds); the
 	# depth fog above still does the far fade, so this stays thin
-	env.volumetric_fog_density = 0.0025
+	env.volumetric_fog_density = 0.0012
 	env.volumetric_fog_albedo = Color(0.86, 0.9, 0.95)
 	env.volumetric_fog_anisotropy = 0.55
 	env.volumetric_fog_length = 72.0
 	env.volumetric_fog_detail_spread = 1.6
-	env.volumetric_fog_ambient_inject = 0.4
+	env.volumetric_fog_ambient_inject = 0.12   # haze lit by the sun (shafts), not a milky veil
 	env.volumetric_fog_sky_affect = 0.0
 	env.volumetric_fog_temporal_reprojection_enabled = true
 	env.volumetric_fog_temporal_reprojection_amount = 0.9
 	env.adjustment_enabled = true
 	env.adjustment_saturation = 1.22
-	env.adjustment_contrast = 1.08
+	env.adjustment_contrast = 1.12
 	we.environment = env
 	cam_attr = CameraAttributesPractical.new()
 	cam_attr.dof_blur_amount = 0.06
@@ -195,8 +204,8 @@ func _build_environment() -> void:
 	we.camera_attributes = cam_attr
 	add_child(we)
 	sun = DirectionalLight3D.new()
-	sun.light_color = Color("ffd7a3")
-	sun.light_energy = 1.6
+	sun.light_color = RIDE_SUN_COL
+	sun.light_energy = RIDE_SUN
 	sun.shadow_enabled = true
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
 	sun.directional_shadow_split_1 = 0.06
@@ -221,6 +230,87 @@ func _build_environment() -> void:
 	cl.add_child(grade_rect)
 	add_child(cl)
 
+## Title screen look: golden hour from a lookout. The camera faces the best view from the spawn, the sun
+## sits low ahead and to the right of it, and a coarse copy of the landscape fills the view to the
+## horizon. Off = the normal ride light, as built above.
+func set_scenic(on: bool) -> void:
+	if on == scenic: return
+	scenic = on
+	if on:
+		var best := _best_view()
+		var sy := best - 0.62
+		var el := deg_to_rad(10.0)
+		sun.look_at_from_position(Vector3(cos(sy) * cos(el), sin(el), -sin(sy) * cos(el)), Vector3.ZERO, Vector3.UP)
+		sun.light_color = Color(1.0, 0.62, 0.34)
+		# a grazing sun: more bias or the ground shades itself in thin stripes (acne); softer edges so
+		# the long tree shadows don't read as flat black bands
+		sun.shadow_bias = 0.08
+		sun.shadow_normal_bias = 3.0
+		sun.shadow_blur = 2.0
+		sun_energy = 2.3
+		sky_mat.set_shader_parameter("golden", 1.0)
+		sky_mat.set_shader_parameter("light_energy", 0.85)
+		env.fog_light_color = Color(0.93, 0.70, 0.52)
+		env.fog_sun_scatter = 0.35
+		env.fog_sky_affect = 0.0
+		env.fog_depth_curve = 1.25
+		env.fog_density = 0.7
+		env.volumetric_fog_albedo = Color(1.0, 0.82, 0.62)
+		env.volumetric_fog_density = 0.0012
+		env.tonemap_exposure = 0.95
+		cam.far = 3500.0
+		cam.vista_yaw = best
+		cam.set_mode("vista")
+		if far_hills == null:
+			far_hills = FarHills.new()
+			add_child(far_hills)
+			far_hills.build(terrain, phys.x, phys.z)
+	else:
+		sun.look_at_from_position(SUN_DIR.normalized(), Vector3.ZERO, Vector3.UP)
+		sun.light_color = RIDE_SUN_COL
+		sun.shadow_bias = 0.02
+		sun.shadow_normal_bias = 1.2
+		sun.shadow_blur = 1.0
+		sun_energy = RIDE_SUN
+		sky_mat.set_shader_parameter("golden", 0.0)
+		sky_mat.set_shader_parameter("light_energy", 0.55)
+		env.fog_light_color = RIDE_FOG
+		env.fog_sun_scatter = 0.0
+		env.fog_sky_affect = 0.25
+		env.fog_depth_curve = 1.0
+		env.fog_density = 0.85
+		env.volumetric_fog_albedo = Color(0.86, 0.9, 0.95)
+		env.volumetric_fog_density = 0.0012
+		env.tonemap_exposure = 0.8
+		cam.far = 400.0
+		if far_hills:
+			far_hills.queue_free()
+			far_hills = null
+
+## the heading with the best view from the rider: nothing close blocking the eye line (ground + room
+## for trees) and hills rising far off. Seen from a few metres up, like the lookout camera.
+func _best_view() -> float:
+	var eye: float = phys.y + 6.0
+	var best := 0.0
+	var best_s := -INF
+	for i in 48:
+		var a := TAU * i / 48.0
+		var ca := cos(a); var sa := -sin(a)
+		var block := -1.0
+		var r := 25.0
+		while r < 450.0:
+			block = maxf(block, (terrain.height(phys.x + ca * r, phys.z + sa * r) + 5.0 - eye) / r)
+			r *= 1.25
+		var hills := -1.0
+		r = 450.0
+		while r < 1600.0:
+			hills = maxf(hills, (terrain.height(phys.x + ca * r, phys.z + sa * r) - eye) / r)
+			r += 100.0
+		var s := hills - block * 0.5 - maxf(0.0, block + 0.03) * 6.0
+		if s > best_s:
+			best_s = s; best = a
+	return best
+
 func _apply_settings() -> void:
 	terrain.set_view_scale(float(Settings.get_v("view_distance")))
 	var sq: int = Settings.get_v("shadows")
@@ -233,7 +323,7 @@ func _apply_settings() -> void:
 	env.ssil_enabled = gi >= 1
 	env.sdfgi_enabled = gi >= 2
 	# SDFGI adds its own sky light and occlusion: drop the flat ambient so valleys can go dark
-	env.ambient_light_energy = 0.3 if gi >= 2 else 0.42
+	env.ambient_light_energy = 0.26 if gi >= 2 else 0.36
 	env.volumetric_fog_enabled = Settings.get_v("vol_fog")
 	dust.fog_on = env.volumetric_fog_enabled
 	atmos.wind_on = Settings.get_v("wind")
@@ -558,10 +648,20 @@ func _process(dt: float) -> void:
 	(grade_rect.material as ShaderMaterial).set_shader_parameter("blur", speed_k * speed_k)
 	cam.update_cam(dt)
 	# fog + shadows sized to the zoom level, sun follows the rider
-	env.fog_depth_begin = (cam.dist + 26) * vd
-	env.fog_depth_end = (cam.dist * 1.6 + 70) * vd
-	sun.directional_shadow_max_distance = clampf(cam.dist * 2.2, 30, 120) * (0.7 if int(Settings.get_v("shadows")) == 0 else 1.0)
-	if cam_attr.dof_blur_far_enabled:
+	if scenic:
+		env.fog_depth_begin = 250.0
+		env.fog_depth_end = 3100.0
+		sun.directional_shadow_max_distance = 110.0
+	else:
+		env.fog_depth_begin = (cam.dist + 40) * vd
+		env.fog_depth_end = (cam.dist * 1.6 + 88) * vd
+		sun.directional_shadow_max_distance = clampf(cam.dist * 2.2, 30, 120) * (0.7 if int(Settings.get_v("shadows")) == 0 else 1.0)
+	if cam_attr.dof_blur_far_enabled and scenic:   # lookout: keep the view sharp, soften only the horizon
+		cam_attr.dof_blur_far_distance = 900.0
+		cam_attr.dof_blur_far_transition = 900.0
+		cam_attr.dof_blur_near_distance = 2.0
+		cam_attr.dof_blur_near_transition = 1.0
+	elif cam_attr.dof_blur_far_enabled:
 		cam_attr.dof_blur_far_distance = cam.dist * 1.25 + 4
 		cam_attr.dof_blur_far_transition = cam.dist * 0.9 + 6
 		cam_attr.dof_blur_near_distance = maxf(0.5, cam.dist * 0.6)
