@@ -15,6 +15,7 @@ const SKY := Color("a9d6ea")
 ## ride light: a clear afternoon. A strong warm sun against a cool blue sky fill (warm light, cool shade)
 const RIDE_SUN := 1.8
 const RIDE_SUN_COL := Color("fff1de")
+const RIDE_FAR := 2600.0   # camera far plane: the far hills (FarHills) reach the horizon
 const RIDE_FOG := Color(0.74, 0.85, 0.98)
 const DUST_SPLASH := Color("eef6fa")
 const DIRT_CHUNK := Color("7a5534")
@@ -73,6 +74,9 @@ func _ready() -> void:
 	add_child(terrain)
 	terrain.view_scale = float(Settings.get_v("view_distance"))   # before the first chunks are built
 	terrain.update_stream(0, 0, INF)
+	far_hills = FarHills.new()   # the distant landscape behind the streamed chunks
+	far_hills.setup(terrain)
+	add_child(far_hills)
 	fx = load("res://scripts/fx/fx.gd").new()
 	add_child(fx)
 	if fx.has_method("setup"): fx.setup(terrain)
@@ -103,6 +107,7 @@ func _ready() -> void:
 	cam.game = self
 	add_child(cam)
 	cam.current = true
+	cam.far = RIDE_FAR
 	cam.set_mode(Settings.get_v("camera"))
 	hud = load("res://scripts/ui/hud.gd").new()
 	hud.game = self
@@ -262,10 +267,6 @@ func set_scenic(on: bool) -> void:
 		cam.far = 3500.0
 		cam.vista_yaw = best
 		cam.set_mode("vista")
-		if far_hills == null:
-			far_hills = FarHills.new()
-			add_child(far_hills)
-			far_hills.build(terrain, phys.x, phys.z)
 	else:
 		sun.look_at_from_position(SUN_DIR.normalized(), Vector3.ZERO, Vector3.UP)
 		sun.light_color = RIDE_SUN_COL
@@ -282,10 +283,7 @@ func set_scenic(on: bool) -> void:
 		env.volumetric_fog_albedo = Color(0.86, 0.9, 0.95)
 		env.volumetric_fog_density = 0.0012
 		env.tonemap_exposure = 0.8
-		cam.far = 400.0
-		if far_hills:
-			far_hills.queue_free()
-			far_hills = null
+		cam.far = RIDE_FAR
 
 ## the heading with the best view from the rider: nothing close blocking the eye line (ground + room
 ## for trees) and hills rising far off. Seen from a few metres up, like the lookout camera.
@@ -500,6 +498,10 @@ func respawn(new_world: bool) -> void:
 		terrain.clear_dynamic()
 		terrain.set_seed(GameState.seed)
 		terrain.update_stream(0, 0, INF)
+		far_hills.queue_free()   # the new world's distant landscape
+		far_hills = FarHills.new()
+		far_hills.setup(terrain)
+		add_child(far_hills)
 		flash("New world #%d" % GameState.seed)
 	if fx.has_method("clear_tracks"): fx.clear_tracks()
 	if new_world: grime.clean()
@@ -629,6 +631,7 @@ func _process(dt: float) -> void:
 			"airSpin": st.yaw_rate if st.air else 0.0})
 	var vd: float = Settings.get_v("view_distance")
 	terrain.update_stream(st.x, st.z, 4.0)
+	far_hills.follow(drawn_pos)
 	biome_t -= dt
 	if biome_t <= 0:
 		biome_t = 0.5
