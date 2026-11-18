@@ -15,6 +15,9 @@ const PRESETS := {
 	"trackside": {"label": "Trackside",  "mode": "trackside", "fov": 14.0},
 	"dolly":     {"label": "Low dolly",  "dist": 5.0,  "pitch": 5.0,  "follow": true,  "fov": 24.0, "orbit": PI * 0.42, "rate": 2.8},
 }
+## title screen only (not in the C cycle): behind and above the rider, looking out over the landscape
+const VISTA := {"label": "Lookout", "mode": "vista", "fov": 42.0, "back": 19.0, "up": 5.0, "side": -4.4, "look": 160.0, "drop": 0.128}
+var vista_yaw := 0.0
 
 var game
 var mode := "drone"
@@ -40,7 +43,13 @@ func _ready() -> void:
 	far = 400.0
 	fov = cam_fov
 
+func preset() -> Dictionary:
+	return VISTA if mode == "vista" else PRESETS[mode]
+
 func set_mode(m: String) -> void:
+	if m == "vista":
+		mode = m; orbit = 0.0; orbit_t = 0.0; cam_pitch_t = 0.0; cam_pitch = 0.0
+		return
 	if not PRESETS.has(m): return
 	var P: Dictionary = PRESETS[m]
 	mode = m
@@ -53,6 +62,7 @@ func set_mode(m: String) -> void:
 
 func next_mode() -> String:
 	var ks := PRESETS.keys()
+	if not PRESETS.has(mode): mode = ks[ks.size() - 1]
 	set_mode(ks[(ks.find(mode) + 1) % ks.size()])
 	return PRESETS[mode].label
 
@@ -77,7 +87,10 @@ func _unhandled_input(e: InputEvent) -> void:
 func update_cam(dt: float) -> void:
 	t += dt
 	var st: BikePhysics = game.phys
-	var P: Dictionary = PRESETS[mode]
+	var P: Dictionary = preset()
+	if P.get("mode", "") == "vista":
+		_vista(dt, P)
+		return
 	# analog camera (gamepad right stick) + zoom keys
 	var ax := Input.get_joy_axis(0, JOY_AXIS_RIGHT_X)
 	var ay := Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y)
@@ -153,6 +166,23 @@ func update_cam(dt: float) -> void:
 	st.shake = maxf(0.0, st.shake - dt * 1.2)
 	if global_position.distance_to(target) > 0.01:
 		look_at(target, Vector3.UP)
+
+## lookout: a slow sway left/right over the view; a mouse drag turns it, the rider stays in the frame
+func _vista(dt: float, P: Dictionary) -> void:
+	orbit += (orbit_t - orbit) * minf(1.0, dt * 4)
+	var yaw := vista_yaw + orbit + sin(t * 0.05) * 0.22
+	var dir := Vector3(cos(yaw), 0, -sin(yaw))
+	var right := Vector3(-dir.z, 0, dir.x)
+	var base: Vector3 = game.drawn_pos
+	var pos: Vector3 = base - dir * P.back + right * P.side + Vector3(0, P.up + sin(t * 0.21) * 0.25, 0)
+	var gh: float = game.terrain.height(pos.x, pos.z) + 1.2
+	pos.y = maxf(pos.y, gh)
+	global_position = pos
+	var aim: Vector3 = pos + dir * P.look
+	aim.y = pos.y - P.look * float(P.drop)
+	look_at(aim, Vector3.UP)
+	cam_fov += (float(P.fov) - cam_fov) * minf(1.0, dt * 3.0)
+	fov = clampf(cam_fov + float(Settings.get_v("fov")), 5, 110)
 
 func _blocked(p_deg: float, back: Vector3, dy: float) -> bool:
 	var pr := deg_to_rad(p_deg)

@@ -220,7 +220,7 @@ func update_hud(dt: float) -> void:
 		fps_l.text = "%d FPS · %.1f ms" % [roundi(fps), 1000.0 / fps]
 		fps_l.add_theme_color_override("font_color", Color("b9ffb0") if fps >= 55 else Color("ffe38a") if fps >= 40 else Color("ff9a8a"))
 		fps_frames = 0; fps_acc = 0
-	info_l.text = "%s  ·  %s cam  ·  world #%d" % [GameState.BIKES[GameState.bike_id].label, CameraRig.PRESETS[game.cam.mode].label, GameState.seed]
+	info_l.text = "%s  ·  %s cam  ·  world #%d" % [GameState.BIKES[GameState.bike_id].label, game.cam.preset().label, GameState.seed]
 	if msg_a > 0:
 		msg_a -= dt
 	msg_l.modulate.a = clampf(msg_a / 0.3, 0, 1)

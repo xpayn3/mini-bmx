@@ -22,6 +22,8 @@ func _ready() -> void:
 	fade.set_anchors_preset(Control.PRESET_FULL_RECT)
 	fade.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(fade)
+	if OS.get_environment("BMX_SEED") != "":   # tests: a fixed world behind the title screen too
+		GameState.seed = int(OS.get_environment("BMX_SEED"))
 	if "--garage" not in OS.get_cmdline_user_args():   # straight to the garage: don't build the world first
 		_new_game()
 		_show_menu()
@@ -54,9 +56,8 @@ func restart_ride() -> void:
 func _set_riding(riding: bool) -> void:
 	game.input_enabled = riding
 	game.hud.visible = riding
-	if not riding:
-		game.cam.set_mode("orbitcam")
-	else:
+	game.set_scenic(not riding)   # title screen: golden hour over the hills
+	if riding:
 		game.cam.set_mode(Settings.get_v("camera"))
 
 # ---------------------------------------------------------------- title screen
@@ -73,10 +74,20 @@ func _show_menu() -> void:
 	menu.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(menu)
 	ui.move_child(menu, 0)
-	var shade := ColorRect.new()
+	# a soft dusk shade behind the menu that fades out into the view
+	var grad := Gradient.new()
+	grad.set_color(0, Color(0.05, 0.04, 0.07, 0.72))
+	grad.set_color(1, Color(0.05, 0.04, 0.07, 0.0))
+	grad.add_point(0.55, Color(0.05, 0.04, 0.07, 0.5))
+	var gt := GradientTexture2D.new()
+	gt.gradient = grad
+	gt.width = 256; gt.height = 4
+	var shade := TextureRect.new()
+	shade.texture = gt
+	shade.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	shade.stretch_mode = TextureRect.STRETCH_SCALE
 	shade.set_anchors_preset(Control.PRESET_LEFT_WIDE)
-	shade.custom_minimum_size.x = 520
-	shade.color = Color(0.04, 0.08, 0.12, 0.55)
+	shade.custom_minimum_size.x = 720
 	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	menu.add_child(shade)
 	var vb := VBoxContainer.new()
