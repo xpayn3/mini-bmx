@@ -1,0 +1,270 @@
+extends Node
+## Root: owns the ride (Game) and the menus. The world keeps running behind the title screen with a
+## slow orbiting camera; Esc pauses a ride.
+
+enum { MENU, RIDING, PAUSED }
+
+var game: Game
+var state := MENU
+var ui := CanvasLayer.new()
+var menu: Control
+var pause_menu: Control
+var settings_open: Control
+var fade: ColorRect
+
+func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	ui.layer = 20
+	add_child(ui)
+	fade = ColorRect.new()
+	fade.color = Color(0.66, 0.84, 0.92)
+	fade.set_anchors_preset(Control.PRESET_FULL_RECT)
+	fade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui.add_child(fade)
+	if "--garage" not in OS.get_cmdline_user_args():   # straight to the garage: don't build the world first
+		_new_game()
+		_show_menu()
+	create_tween().tween_property(fade, "modulate:a", 0.0, 0.8)
+	# command-line: --ride skips the title screen; --autotest=N rides N seconds unattended then quits
+	for a in OS.get_cmdline_user_args():
+		if a == "--ride": _start_ride()
+		elif a.begins_with("--autotest"): _autotest(float(a.get_slice("=", 1)) if "=" in a else 10.0)
+		elif a == "--garage": _open_garage()
+		elif a.begins_with("--shot="): _shot(a.get_slice("=", 1))
+
+func _new_game() -> void:
+	if game:
+		game.queue_free()
+		await game.tree_exited
+	game = Game.new()
+	game.process_mode = Node.PROCESS_MODE_PAUSABLE
+	add_child(game)
+	move_child(game, 0)
+
+func restart_ride() -> void:
+	fade.modulate.a = 1.0
+	await _new_game()
+	_set_riding(state != MENU)
+	create_tween().tween_property(fade, "modulate:a", 0.0, 0.5)
+
+func _set_riding(riding: bool) -> void:
+	game.input_enabled = riding
+	game.hud.visible = riding
+	if not riding:
+		game.cam.set_mode("orbitcam")
+	else:
+		game.cam.set_mode(Settings.get_v("camera"))
+
+# ---------------------------------------------------------------- title screen
+func _show_menu() -> void:
+	state = MENU
+	get_tree().paused = false
+	_set_riding(false)
+	if menu: menu.queue_free()
+	menu = Control.new()
+	menu.theme = UITheme.get_theme()
+	menu.set_anchors_preset(Control.PRESET_FULL_RECT)
+	menu.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ui.add_child(menu)
+	ui.move_child(menu, 0)
+	var shade := ColorRect.new()
+	shade.set_anchors_preset(Control.PRESET_LEFT_WIDE)
+	shade.custom_minimum_size.x = 520
+	shade.color = Color(0.04, 0.08, 0.12, 0.55)
+	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	menu.add_child(shade)
+	var vb := VBoxContainer.new()
+	vb.set_anchors_preset(Control.PRESET_LEFT_WIDE)
+	vb.offset_left = 64; vb.offset_right = 460; vb.offset_top = 90; vb.offset_bottom = -40
+	vb.add_theme_constant_override("separation", 12)
+	menu.add_child(vb)
+	vb.add_child(UITheme.label("MINI BMX", 64, UITheme.ACCENT, true))
+	vb.add_child(UITheme.label("Downhill & BMX on endless procedural trails", 17, UITheme.MUTED))
+	var sp := Control.new(); sp.custom_minimum_size.y = 28; vb.add_child(sp)
+	var ride := UITheme.button("RIDE", _start_ride, 24)
+	ride.custom_minimum_size.y = 58
+	vb.add_child(ride)
+	var gar := UITheme.button("GARAGE  ·  customise your downhill bike", _open_garage, 18)
+	gar.custom_minimum_size.y = 50
+	vb.add_child(gar)
+	# bike picker
+	var bikes := HBoxContainer.new()
+	bikes.add_theme_constant_override("separation", 8)
+	var group := ButtonGroup.new()
+	for id in GameState.BIKES:
+		var b := Button.new()
+		b.text = GameState.BIKES[id].label
+		b.toggle_mode = true
+		b.button_group = group
+		b.button_pressed = id == GameState.bike_id
+		b.custom_minimum_size = Vector2(0, 44)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.pressed.connect(func():
+			if GameState.bike_id != id:
+				GameState.bike_id = id; GameState.save(); restart_ride())
+		bikes.add_child(b)
+	vb.add_child(UITheme.label("BIKE", 13, UITheme.MUTED))
+	vb.add_child(bikes)
+	# world seed
+	vb.add_child(UITheme.label("WORLD", 13, UITheme.MUTED))
+	var seed_row := HBoxContainer.new()
+	seed_row.add_theme_constant_override("separation", 8)
+	var se := LineEdit.new()
+	se.text = str(GameState.seed)
+	se.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	se.custom_minimum_size.y = 44
+	se.text_submitted.connect(func(t):
+		if t.is_valid_int():
+			GameState.seed = int(t); restart_ride())
+	seed_row.add_child(se)
+	seed_row.add_child(UITheme.button("🎲 Random", func(): GameState.new_seed(); se.text = str(GameState.seed); restart_ride(), 16))
+	vb.add_child(seed_row)
+	var sp2 := Control.new(); sp2.custom_minimum_size.y = 12; vb.add_child(sp2)
+	vb.add_child(UITheme.button("Settings", _open_settings))
+	vb.add_child(UITheme.button("Controls", _show_controls))
+	vb.add_child(UITheme.button("Quit", func(): get_tree().quit()))
+	var foot := UITheme.label("v1.0 · Godot %s" % Engine.get_version_info().string, 12, UITheme.MUTED)
+	foot.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	foot.position = Vector2(64, -36)
+	menu.add_child(foot)
+	ride.grab_focus.call_deferred()
+
+var garage: Garage
+
+func _open_garage() -> void:
+	if menu: menu.queue_free(); menu = null
+	fade.modulate.a = 1.0
+	if game:
+		game.queue_free()
+		await game.tree_exited
+		game = null
+	GameState.bike_id = "dh"
+	garage = Garage.new()
+	add_child(garage)
+	garage.closed.connect(_close_garage)
+	create_tween().tween_property(fade, "modulate:a", 0.0, 0.5)
+
+func _close_garage(ride: bool) -> void:
+	fade.modulate.a = 1.0
+	garage.queue_free()
+	await garage.tree_exited
+	garage = null
+	await _new_game()
+	if ride: _start_ride()
+	else: _show_menu()
+	create_tween().tween_property(fade, "modulate:a", 0.0, 0.5)
+
+func _start_ride() -> void:
+	if menu: menu.queue_free(); menu = null
+	state = RIDING
+	game.respawn(false)
+	_set_riding(true)
+
+# ---------------------------------------------------------------- pause
+func _unhandled_input(e: InputEvent) -> void:
+	if not e.is_action_pressed("pause") or e.is_echo(): return
+	if settings_open or garage: return
+	if state == RIDING: _pause()
+	elif state == PAUSED: _resume()
+	get_viewport().set_input_as_handled()
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and state == RIDING and Settings.get_v("pause_unfocused") and OS.get_cmdline_user_args().is_empty():
+		_pause()
+
+func _pause() -> void:
+	state = PAUSED
+	get_tree().paused = true
+	pause_menu = PanelContainer.new()
+	pause_menu.theme = UITheme.get_theme()
+	pause_menu.set_anchors_preset(Control.PRESET_CENTER)
+	pause_menu.custom_minimum_size = Vector2(360, 0)
+	ui.add_child(pause_menu)
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 10)
+	pause_menu.add_child(vb)
+	vb.add_child(UITheme.label("PAUSED", 30, UITheme.ACCENT, true))
+	var resume := UITheme.button("Resume", _resume)
+	vb.add_child(resume)
+	vb.add_child(UITheme.button("Back to start", func(): _resume(); game.respawn(false)))
+	vb.add_child(UITheme.button("New world", func(): _resume(); game.respawn(true)))
+	vb.add_child(UITheme.button("Settings", _open_settings))
+	vb.add_child(UITheme.button("Controls", _show_controls))
+	vb.add_child(UITheme.button("Main menu", func(): _close_pause(); GameState.save(); _show_menu()))
+	vb.add_child(UITheme.button("Quit to desktop", func(): GameState.save(); get_tree().quit()))
+	await get_tree().process_frame
+	pause_menu.position = -pause_menu.size / 2
+	resume.grab_focus()
+
+func _close_pause() -> void:
+	if pause_menu: pause_menu.queue_free(); pause_menu = null
+
+func _resume() -> void:
+	_close_pause()
+	state = RIDING
+	get_tree().paused = false
+
+func _open_settings() -> void:
+	if settings_open: return
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.35)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	ui.add_child(dim)
+	settings_open = load("res://scripts/ui/settings_menu.gd").new()
+	settings_open.closed.connect(func(): dim.queue_free(); settings_open = null)
+	ui.add_child(settings_open)
+
+func _show_controls() -> void:
+	var p := PanelContainer.new()
+	p.theme = UITheme.get_theme()
+	p.set_anchors_preset(Control.PRESET_CENTER)
+	ui.add_child(p)
+	var vb := VBoxContainer.new()
+	p.add_child(vb)
+	vb.add_child(UITheme.label("CONTROLS", 24, UITheme.ACCENT, true))
+	var grid := GridContainer.new()
+	grid.columns = 3
+	grid.add_theme_constant_override("h_separation", 22)
+	for a in Settings.ACTIONS:
+		grid.add_child(UITheme.label(Settings.binding_text(a, false), 15, UITheme.ACCENT, true))
+		grid.add_child(UITheme.label(Settings.binding_text(a, true), 15, UITheme.MUTED))
+		grid.add_child(UITheme.label(Settings.ACTIONS[a][0], 15))
+	vb.add_child(grid)
+	vb.add_child(UITheme.label("Mouse drag: orbit · wheel: zoom · hold hop at a lip to pop higher · carve: hold a turn at speed", 13, UITheme.MUTED))
+	var close := UITheme.button("Close", func(): p.queue_free())
+	vb.add_child(close)
+	await get_tree().process_frame
+	p.position = -p.size / 2
+	close.grab_focus()
+
+# ---------------------------------------------------------------- unattended smoke test
+func _autotest(seconds: float) -> void:
+	_start_ride()
+	if OS.get_environment("BMX_CAM") != "": game.cam.set_mode(OS.get_environment("BMX_CAM"))
+	var pedal := OS.get_environment("BMX_IDLE") == ""
+	var t0 := Time.get_ticks_msec()
+	var frames := 0
+	while (Time.get_ticks_msec() - t0) / 1000.0 < seconds:
+		var el := (Time.get_ticks_msec() - t0) / 1000.0
+		if pedal: Input.action_press("pedal")
+		if pedal and int(el) % 6 == 3: Input.action_press("steer_left")
+		else: Input.action_release("steer_left")
+		if pedal and int(el * 2) % 7 == 0: Input.action_press("hop")
+		else: Input.action_release("hop")
+		await get_tree().process_frame
+		frames += 1
+	var st := game.phys
+	print("AUTOTEST frames=%d fps=%.1f pos=(%.1f, %.1f, %.1f) v=%.2f crash=%s sane=%s" % [frames, frames / seconds, st.x, st.y, st.z, st.v, st.crash_on, st.is_sane()])
+	var shot := OS.get_environment("BMX_SHOT")
+	if shot != "":
+		get_viewport().get_texture().get_image().save_png(shot)
+	get_tree().quit()
+
+## --shot=<png path>@<seconds>: save a screenshot after that long, then quit (testing / store shots)
+func _shot(arg: String) -> void:
+	var path := arg.get_slice("@", 0)
+	var secs := float(arg.get_slice("@", 1)) if "@" in arg else 4.0
+	await get_tree().create_timer(secs, true, false, true).timeout
+	get_viewport().get_texture().get_image().save_png(path)
+	print("SHOT ", path)
+	get_tree().quit()

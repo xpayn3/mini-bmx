@@ -1,0 +1,67 @@
+extends Node
+## Session + save data: which bike, which world seed, and the player's records.
+## Records persist in user://save.cfg.
+
+const SAVE := "user://save.cfg"
+
+## Bikes. `ride` multiplies the tuning values (see Tune); `pose` is handed to the rider.
+const BIKES := {
+	"dh": {
+		"label": "Downhill", "file": "res://assets/dh.glb", "root": "dh",
+		"pose": {"hipX": -0.07, "hipY": 0.075, "lean": 0.22, "elbowsOut": 0, "shoulders": 0.165, "kneesOut": 0.2, "stance": -0.025, "seatFloor": true},
+		"ride": {
+			"steerRate": 0.75, "steerRelease": 0.8, "barSpeed": 0.75, "steerMax": 0.85, "counter": 0.6,
+			"turnSlow": 0.9, "turnFast": 1.15,
+			"leanMax": 1.1, "leanIn": 0.8, "leanOut": 0.8, "leanDamp": 1.2,
+			"legStiff": 0.6, "legDamp": 1.2, "legComp": 1.3, "legExt": 1.3, "attackDrop": 1.3,
+			"pedalLaunch": 0.75, "pedalPower": 0.85, "pedalTop": 1.35, "airDrag": 0.85, "brakeForce": 1.3, "popPower": 0.7,
+			"grip": 1.15, "oversteer": 0.7,
+			"tyreHz": 0.75, "tyreDamp": 1.3, "travel": 2.2,
+		},
+		"land": 1.45, "geared": true, "decals": true,
+	},
+	"bmx": {"label": "BMX", "file": "res://assets/bmx.glb", "root": "bmx", "pose": {}, "ride": {}, "land": 1.0, "geared": false},
+}
+
+var bike_id := "dh"   # the downhill bike is the main bike: every launch starts on it (B / title screen switch)
+var seed := 0
+var records := {"longest": 0.0, "highest": 0.0, "air": 0.0, "top_speed": 0.0, "jumps": 0, "distance": 0.0}
+
+func _ready() -> void:
+	randomize()
+	seed = randi() % 1000000
+	var cf := ConfigFile.new()
+	if cf.load(SAVE) == OK:
+		for k in records:
+			records[k] = cf.get_value("records", k, records[k])
+
+## the bike to ride: the downhill bike carries the player's garage build (parts change the ride)
+func bike_config() -> Dictionary:
+	var cfg: Dictionary = BIKES[bike_id].duplicate(true)
+	if bike_id == "dh":
+		var b := BikeBuild.load_build()
+		var mods := BikeBuild.ride_mods(b)
+		cfg.build = b
+		cfg.mods = mods
+		for k in mods.ride:
+			cfg.ride[k] = float(cfg.ride.get(k, 1.0)) * float(mods.ride[k])
+	return cfg
+
+func save() -> void:
+	var cf := ConfigFile.new()
+	cf.set_value("game", "bike", bike_id)
+	for k in records:
+		cf.set_value("records", k, records[k])
+	cf.save(SAVE)
+
+func new_seed() -> int:
+	seed = randi() % 1000000
+	return seed
+
+## Returns true when `val` beat the record (and stores it).
+func submit(k: String, val: float) -> bool:
+	if val > float(records.get(k, 0.0)) + 1e-6:
+		records[k] = val
+		save()
+		return true
+	return false
