@@ -301,8 +301,8 @@ export class Rider {
   // sway + idle fidget), torso (chest length, m), shoulders (half shoulder width, m), headTilt (rad,
   // + looks down), headTurn (how much the head looks into turns), lookAhead (head forward offset, m)
   setStyle({ hipX = 0, hipY = 0, lean = 0, elbowsOut = 0, kneesOut = 0, stance = 0, seatFloor = false,
-    crouch = 1, standPedal = 1, sway = 1, torso = 0.46, shoulders = 0.2, headTilt = 0, headTurn = 1, lookAhead = 0 }) {
-    this.style = { hipX, hipY, lean, stance, seatFloor, crouch, standPedal, sway, torso, shoulders, headTilt, headTurn, lookAhead };
+    crouch = 1, standPedal = 1, sway = 1, torso = 0.46, shoulders = 0.2, headTilt = 0, headTurn = 1, lookAhead = 0, bikeRock = 1, upright = 1, hipSway = 0.015 }) {
+    this.style = { hipX, hipY, lean, stance, seatFloor, crouch, standPedal, sway, torso, shoulders, headTilt, headTurn, lookAhead, bikeRock, upright, hipSway };
     // knees track forward over the pedals (just a hint outward); kneesOut widens them for a DH stance
     this.polesLeg = [-1, 1].map(s => new THREE.Vector3(1, 0.1, s * (0.1 + 0.3 * kneesOut)).normalize());
     this.polesArm = [-1, 1].map(s => new THREE.Vector3(-0.4 + 0.25 * elbowsOut, -0.5 + 0.4 * elbowsOut, s).normalize());
@@ -378,7 +378,7 @@ export class Rider {
     _pelvis.set(
       -0.16 - 0.07 * air + 0.06 * pedal * sty.standPedal - comp * 0.25,
       0.80 - 0.07 * air - comp + (0.15 * pedal + 0.05 * spr) * sty.standPedal + 0.035 * bob,      // stand up out of the crouch to pedal
-      sway * 0.015 + shift * 0.3 + Math.sin(t * 2.1) * 0.02 * wig   // hips barely move: the BIKE rocks under a still body (main.js counter-rolls it)
+      sway * sty.hipSway + shift * 0.3 + Math.sin(t * 2.1) * 0.02 * wig   // hips barely move: the BIKE rocks under a still body
     ).add(this.fit);
     _pelvis.x += sty.hipX * (1 - 0.5 * pedal); _pelvis.y += sty.hipY * (1 - 0.6 * pedal);   // pedalling stands up out of it
 
@@ -388,7 +388,7 @@ export class Rider {
     _chest.set(
       _pelvis.x + Math.sin(ang) * L + 0.03 * pedal * (0.5 + 0.5 * bob),
       _pelvis.y + Math.cos(ang) * L,
-      _pelvis.z + shift * 0.3 - sway * 0.015 + Math.sin(t * 1.7 + 1.0) * 0.02 * wig
+      _pelvis.z + shift * 0.3 - sway * sty.hipSway + Math.sin(t * 1.7 + 1.0) * 0.02 * wig
     );
 
     // legs absorb terrain: body glides while the bike goes up and down under it
@@ -455,7 +455,7 @@ export class Rider {
     // PEDALLING ROCK (sprinting throws the bike side to side): the bike swings under a still body.
     // Undo the bike's rock for the hips and chest about the tyres' contact line -- AFTER the springs,
     // which would smooth a ~3 Hz rock away and leave the torso swinging with the frame.
-    const rr = p.rockRoll || 0;
+    const rr = (p.rockRoll || 0) * sty.upright;   // 1 = torso dead upright, 0 = swings with the bike
     if (rr) {
       const c = Math.cos(rr), sn = Math.sin(rr);
       for (const q of [_pelvis, _chest]) {

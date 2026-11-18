@@ -26,11 +26,14 @@ const DEFS = [
     ['crouch',     'Crouch depth',          0,    2,    0.05,  '×'],
     ['standPedal', 'Stand up to pedal',     0,    2,    0.05,  '×'],
     ['sway',       'Body sway',             0,    2,    0.05,  '×'],
+    ['bikeRock',   'Bike rock (sprint)',    0,    2,    0.05,  '×'],
+    ['upright',    'Torso stays upright',   0,    1,    0.05,  ''],
+    ['hipSway',    'Hip sway',              0,    0.12, 0.005, 'm'],
   ]],
 ];
 // neutral values (the rider's original pose) for anything a bike's pose doesn't set
 export const NEUTRAL = { hipX: 0, hipY: 0, lean: 0, elbowsOut: 0, kneesOut: 0, stance: 0, seatFloor: false,
-  crouch: 1, standPedal: 1, sway: 1, torso: 0.46, shoulders: 0.2, headTilt: 0, headTurn: 1, lookAhead: 0 };
+  crouch: 1, standPedal: 1, sway: 1, bikeRock: 1, upright: 1, hipSway: 0.015, torso: 0.46, shoulders: 0.2, headTilt: 0, headTurn: 1, lookAhead: 0 };
 
 const fmt = (v, step) => v.toFixed(step >= 1 ? 0 : Math.min(4, Math.ceil(-Math.log10(step))));
 

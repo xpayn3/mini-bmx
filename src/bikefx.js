@@ -13,7 +13,7 @@ vec3 flakeHash(vec3 p) {
 }`;
 
 // mat: a MeshPhysicalMaterial (kept: colour, env map). flake: flake size in m; sparkle: 0..1 strength
-export function carPaint(mat, { flake = 0.0014, sparkle = 0.45, metalness = 0.65, roughness = 0.3 } = {}) {
+export function carPaint(mat, { flake = 0.0016, sparkle = 0.22, metalness = 0.55, roughness = 0.34 } = {}) {
   if (mat.userData.carPaint) return mat;
   mat.userData.carPaint = true;
   mat.metalness = metalness; mat.roughness = roughness;   // base coat: metallic, a little soft (flakes do the sparkle)
@@ -29,9 +29,19 @@ export function carPaint(mat, { flake = 0.0014, sparkle = 0.45, metalness = 0.65
         vec3 fp = vFlakeP * uFlake;
         vec3 h = flakeHash(floor(fp)) * 2.0 - 1.0;
         // fade the flakes out where one pixel covers many of them (far away): no shimmering noise
-        float aa = clamp(1.6 - length(fwidth(fp)) * 0.8, 0.0, 1.0);
+        float aa = clamp(1.3 - length(fwidth(fp)) * 0.9, 0.0, 1.0);
         normal = normalize(normal + h * uSparkle * aa);
-      }`);
+        // a few flakes catch the light hard: tiny bright glints that twinkle as the bike moves
+        vec3 vdir = normalize(vViewPosition);
+        float glint = pow(max(0.0, dot(reflect(vdir, normal), normalize(vec3(0.3, 0.9, 0.3)))), 60.0);
+        flakeGlint = glint * step(0.9, flakeHash(floor(fp) + 7.0).x) * aa;
+        // metallic flop: the colour goes deep and dark where the tube turns away from you
+        float facing = clamp(dot(normalize(-vViewPosition), normal), 0.0, 1.0);
+        diffuseColor.rgb *= mix(0.62, 1.1, pow(facing, 0.6));
+      }`).replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        totalEmissiveRadiance += diffuseColor.rgb * flakeGlint * 2.0 + vec3(flakeGlint * 0.6);`);
+    sh.fragmentShader = sh.fragmentShader.replace('void main() {', `void main() {
+  float flakeGlint = 0.0;`);
   };
   mat.customProgramCacheKey = () => 'carPaint';
   mat.needsUpdate = true;
@@ -70,6 +80,7 @@ export class RotorGlow {
     this.uHeat = { value: 0 };
     const mat = mesh.material.clone();
     mat.name = 'rotor';
+    mat.userData.heat = this.uHeat;   // (debug handle)
     const uHeat = this.uHeat, r0 = r * 0.7, r1 = r * 0.86;
     mat.onBeforeCompile = (sh) => {
       sh.uniforms.uHeat = uHeat;
@@ -79,9 +90,10 @@ export class RotorGlow {
         // the pads ride on the outer band: it heats first and hottest, the glow creeping inwards as it builds
         float band = smoothstep(${r0.toFixed(4)} + 0.012 * (1.0 - uHeat), ${r1.toFixed(4)}, vRotorR);
         float h = uHeat * band;
-        vec3 col = mix(vec3(0.55, 0.02, 0.0), vec3(1.0, 0.28, 0.02), smoothstep(0.25, 0.7, h));
-        col = mix(col, vec3(1.0, 0.75, 0.3), smoothstep(0.75, 1.0, h));
-        totalEmissiveRadiance += col * h * h * 6.0;
+        vec3 col = mix(vec3(0.5, 0.015, 0.0), vec3(1.0, 0.16, 0.01), smoothstep(0.2, 0.7, h));
+        col = mix(col, vec3(1.0, 0.42, 0.08), smoothstep(0.8, 1.0, h));
+        diffuseColor.rgb *= 1.0 - 0.6 * h;   // hot steel loses its shine to the glow
+        totalEmissiveRadiance += col * h * (0.4 + 1.6 * h);
       }`);
     };
     mat.customProgramCacheKey = () => 'rotorGlow';

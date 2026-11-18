@@ -326,7 +326,7 @@ bike.traverse((o) => {
   if (!o.isMesh) return;
   o.castShadow = true; o.receiveShadow = true;
   if (o.material.name === 'paint' && !BIKES[bikeId].cfg) o.material = paint;   // built bikes bring their own colour
-  if (o.material.name === 'paint') carPaint(o.material);   // metallic flake + clearcoat
+  if (o.material === paint || o.material.name === 'paint') carPaint(o.material);   // metallic flake + clearcoat
   if (o.material.name === 'chrome') { o.material.envMapIntensity = 1.6; }
 });
 addBikeDecals(bike, BIKES[bikeId].decals);
@@ -960,7 +960,7 @@ function physics(dt) {
   const bl = st.lean * T.bikeLeanMul, capB = T.bikeLeanCap + (st.air || Math.sign(bank) !== Math.sign(bl) ? 0 : Math.abs(bank));
   st.bikeLean = capB * Math.tanh(bl / capB);
   st.counter = st.bikeLean - st.lean * 0.85;
-  st.rock = Math.sin(st.crank) * 0.065 * (1 + 1.3 * (st.sprint || 0)) * st.pedal * Math.min(1, va / 2 + 0.3);   // sprinting throws the bike side to side
+  st.rock = Math.sin(st.crank) * 0.065 * (1 + 1.3 * (st.sprint || 0)) * st.pedal * Math.min(1, va / 2 + 0.3) * (rider.style.bikeRock ?? 1);   // sprinting throws the bike side to side
 
   // --- move ---
   fwd.set(Math.cos(st.heading), 0, -Math.sin(st.heading));
