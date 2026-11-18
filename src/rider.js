@@ -312,7 +312,11 @@ export class Rider {
     // keep the body level while the bike pitches under it: counter-rotate hips and chest about
     // the pedals, so on a descent the hips slide back and the chest stays up (downhill attack
     // position), and on a climb the rider leans forward over the bars.
-    const pit = (p.pitch || 0) * (p.bodyLevel ?? 0.85);
+    // Descents: counter-rotate almost fully (attack position). Climbs: only a little -- keeping the body
+    // world-level on a climb leaves the rider leaning back over the rear wheel with the arms stretched
+    // to the bars. A climbing rider does the opposite (below): hips to the saddle nose, chest low.
+    const pitch0 = p.pitch || 0;
+    const pit = pitch0 * (pitch0 > 0 ? 0.2 : (p.bodyLevel ?? 0.85));
     if (pit) {
       const c = Math.cos(-pit), sn = Math.sin(-pit), y0 = 0.3;
       for (const q of [_pelvis, _chest]) {
@@ -322,6 +326,13 @@ export class Rider {
       const down = Math.max(0, -(p.pitch || 0));
       const drop = p.attackDrop ?? 0.18;
       _pelvis.y -= down * drop; _pelvis.x -= down * drop * 0.45;   // drop the hips and get low on steep stuff
+    }
+    // CLIMBING: weight forward so the front wheel stays down -- hips slide to the nose of the saddle,
+    // chest drops low over the bars, elbows bend (the arms follow the chest)
+    const climb = clamp(pitch0, 0, 0.6);
+    if (climb > 0) {
+      _pelvis.x += climb * 0.22; _pelvis.y -= climb * 0.04;
+      _chest.x += climb * 0.42; _chest.y -= climb * 0.24;
     }
     // lean the BIKE, not the body: roll the body back toward upright about the pedals
     const cr = p.counter || 0;

@@ -256,6 +256,48 @@ function fixNormals(root) {
   });
 }
 fixNormals(bike);
+// SPOKES a touch fatter so they read at game distance. They're merged into the wheels' meshes with the
+// hubs and bolts, so pick out the long thin pieces (welded parts >= 8 cm long, < 1 cm thick) and push
+// their surface out from each one's own centre line -- length and lacing stay exactly as modelled.
+function thickenSpokes(root, k) {
+  root.traverse((o) => {
+    if (!o.isMesh || !/wheel/i.test((o.name || '') + (o.parent?.name || '')) || !o.geometry.index) return;
+    const g = o.geometry, P = g.attributes.position, I = g.index.array, n = P.count;
+    const par = new Int32Array(n).map((_, i) => i);
+    const find = (a) => { while (par[a] !== a) a = par[a] = par[par[a]]; return a; };
+    for (let t = 0; t < I.length; t += 3) { const a = find(I[t]), b = find(I[t + 1]), c = find(I[t + 2]); par[b] = a; par[find(c)] = a; }
+    // flat-shaded exports split every face into its own vertices: weld by position so a spoke is one part
+    const seen = new Map();
+    for (let i = 0; i < n; i++) {
+      const key = `${Math.round(P.getX(i) * 2e4)},${Math.round(P.getY(i) * 2e4)},${Math.round(P.getZ(i) * 2e4)}`;
+      const j = seen.get(key); if (j === undefined) seen.set(key, i); else par[find(i)] = find(j);
+    }
+    const parts = new Map();
+    for (let i = 0; i < n; i++) { const r = find(i); (parts.get(r) || parts.set(r, []).get(r)).push(i); }
+    const v = (i, out) => out.set(P.getX(i), P.getY(i), P.getZ(i));
+    const A = new THREE.Vector3(), B = new THREE.Vector3(), Q = new THREE.Vector3(), D = new THREE.Vector3(), F = new THREE.Vector3();
+    let changed = false;
+    for (const ids of parts.values()) {
+      if (ids.length < 6 || ids.length > 200) continue;
+      // the part's long axis: farthest pair (two sweeps)
+      let a = ids[0], b = a, best = -1;
+      for (const i of ids) { const d = v(i, Q).distanceToSquared(v(a, A)); if (d > best) { best = d; b = i; } }
+      best = -1; for (const i of ids) { const d = v(i, Q).distanceToSquared(v(b, B)); if (d > best) { best = d; a = i; } }
+      v(a, A); v(b, B); D.subVectors(B, A); const len = D.length(); if (len < 0.08) continue; D.divideScalar(len);
+      A.set(0, 0, 0); for (const i of ids) A.add(v(i, Q)); A.divideScalar(ids.length);   // centre line through the centroid
+      let rMax = 0;
+      for (const i of ids) { v(i, Q).sub(A); F.copy(D).multiplyScalar(Q.dot(D)); rMax = Math.max(rMax, Q.sub(F).length()); }
+      if (rMax > 0.01 || rMax < 1e-5 || len / rMax < 20) continue;
+      for (const i of ids) {   // push out from the centre line
+        v(i, Q); const s = Q.clone().sub(A).dot(D); F.copy(A).addScaledVector(D, s);
+        Q.sub(F).multiplyScalar(k).add(F); P.setXYZ(i, Q.x, Q.y, Q.z);
+      }
+      changed = true;
+    }
+    if (changed) { P.needsUpdate = true; g.computeBoundingSphere(); }
+  });
+}
+thickenSpokes(bike, 1.5);
 bike.traverse((o) => {
   if (!o.isMesh) return;
   o.castShadow = true; o.receiveShadow = true;
@@ -1399,3 +1441,9 @@ function frame(now) {
   composer.render();
 }
 frame();
+// debug: run N whole frames by hand (the loop pauses in hidden tabs); skips the rAF re-arm
+window.bmxFrames = (n = 1, ms = 1000 / 60) => {
+  const raf = window.requestAnimationFrame, pnow = performance.now.bind(performance); let t0 = pnow();
+  window.requestAnimationFrame = () => 0; performance.now = () => t0;   // a fake clock that advances ms per frame
+  try { for (let i = 0; i < n; i++) { t0 += ms; frame(t0); } } finally { window.requestAnimationFrame = raf; performance.now = pnow; }
+};
