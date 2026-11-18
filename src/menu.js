@@ -1,22 +1,22 @@
-// One dropdown control panel (top-right) that gathers the scattered HUD controls:
+// One dropdown control panel (top-left) that gathers the scattered HUD controls:
 // FPS, bike picker, camera, display toggles, world / tune / rider actions and the key list.
 // Existing elements (#fps, #bikes, #cam, #keys) are MOVED in, so the code that drives them keeps working.
 // Action buttons fire the same key events as the keyboard shortcuts, so phones get them too.
 
 const css = `
-#ctlBtn { position: fixed; top: 14px; right: 16px; z-index: 30; width: 42px; height: 42px; border: 0; border-radius: 14px; cursor: pointer;
+#ctlBtn { position: fixed; top: 14px; left: 16px; z-index: 30; width: 42px; height: 42px; border: 0; border-radius: 14px; cursor: pointer;
   display: grid; place-items: center; color: #fff; background: rgba(18,30,38,.55); backdrop-filter: blur(10px);
   box-shadow: 0 4px 14px rgba(0,0,0,.22), inset 0 0 0 1px rgba(255,255,255,.12); transition: background .15s, transform .15s; }
 #ctlBtn:hover { background: rgba(18,30,38,.72); }
 #ctlBtn:active { transform: scale(.95); }
 #ctlBtn svg { width: 20px; height: 20px; transition: transform .25s; }
 #ctlBtn.open svg { transform: rotate(90deg); }
-#ctl { position: fixed; top: 64px; right: 16px; z-index: 30; width: 286px; max-height: calc(100vh - 84px); overflow-y: auto;
+#ctl { position: fixed; top: 64px; left: 16px; z-index: 30; width: 286px; max-height: calc(100vh - 84px); overflow-y: auto;
   padding: 6px 14px 14px; border-radius: 18px; color: #eef4f6; text-shadow: none;
   font: 600 13px/1.25 ui-rounded, "Segoe UI", system-ui, sans-serif;
   background: rgba(14,24,31,.84); backdrop-filter: blur(14px) saturate(1.2);
   box-shadow: 0 18px 40px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.08);
-  opacity: 0; transform: translateY(-8px) scale(.98); transform-origin: top right; pointer-events: none;
+  opacity: 0; transform: translateY(-8px) scale(.98); transform-origin: top left; pointer-events: none;
   transition: opacity .18s ease, transform .18s ease; scrollbar-width: thin; }
 #ctl.open { opacity: 1; transform: none; pointer-events: auto; }
 #ctl .hd { display: flex; align-items: center; justify-content: space-between; padding: 8px 0 4px; }
@@ -63,8 +63,8 @@ const css = `
 #ctl #keys b { font: 800 10px/1 ui-monospace, Consolas, monospace; padding: 3px 5px; border-radius: 5px; background: rgba(255,255,255,.12); }
 /* the old floating copies are replaced by the panel */
 #camwrap, #tuneBtn, #poseBtn { display: none !important; }
-html.touch #ctlBtn { top: calc(10px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right)); }
-html.touch #ctl { top: calc(60px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right)); max-height: calc(100vh - 140px); }
+html.touch #ctlBtn { top: calc(10px + env(safe-area-inset-top)); left: calc(12px + env(safe-area-inset-left)); }
+html.touch #ctl { top: calc(60px + env(safe-area-inset-top)); left: calc(12px + env(safe-area-inset-left)); max-height: calc(100vh - 140px); }
 html.touch #ctl .keysec { display: none; }
 `;
 

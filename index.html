@@ -41,6 +41,15 @@
           font-size: 13px; letter-spacing: 2px; padding: 4px 12px; border-radius: 999px; background: rgba(20,40,50,.45); backdrop-filter: blur(6px); }
   #flow b { color: #ffd21f; letter-spacing: 1px; }
   #flow.show { opacity: 1; }
+  /* stamina: flat block bar, top right (always on screen, like a game's health bar) */
+  #stamina { position: absolute; right: 18px; top: 20px; display: flex; gap: 3px; padding: 3px; background: rgba(0,0,0,.45); }
+  #stamina i { position: relative; width: 16px; height: 9px; background: rgba(255,255,255,.14); overflow: hidden; }
+  #stamina i::after { content: ''; position: absolute; inset: 0; transform-origin: left; transform: scaleX(var(--f, 1)); background: #4fd1ff; }
+  #stamina.on i::after { background: #ffd21f; }
+  #stamina.low i::after { background: #ff8a2a; }
+  #stamina.tired i::after { background: #8d979c; }
+  #stamina.tired { animation: tiredShake .3s; }
+  @keyframes tiredShake { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
   #hopbar { position: absolute; left: 50%; bottom: 72px; width: 180px; height: 12px; transform: translate(-50%, 8px); opacity: 0;
             transition: opacity .15s, transform .15s; border-radius: 999px; overflow: hidden; background: rgba(20,40,50,.45);
             border: 2px solid rgba(255,255,255,.7); backdrop-filter: blur(6px); }
@@ -82,9 +91,10 @@
   <div id="fps">-- FPS</div>
   <div id="bikes" title="B: switch bike"></div>
   <div id="camwrap">Camera <select id="cam" title="C: next camera"></select>
-    <details id="help"><summary>Controls</summary><div id="keys"><span class="k"><b>W</b></span><span>pedal</span><span class="k"><b>S</b></span><span>brake / back</span><span class="k"><b>A</b> <b>D</b></span><span>steer (hold at speed: carve)</span><span class="k"><b>Space</b></span><span>tap: bunny hop · hold to charge, release to pop (full bar = max)</span><span class="k"><b>F</b></span><span>bail</span><span class="k"><b>R</b></span><span>new world</span><span class="k"><b>B</b></span><span>bike</span><span class="k"><b>U</b></span><span>bike builder</span><span class="k"><b>C</b></span><span>camera</span><span class="k"><b>Q</b> <b>E</b></span><span>rotate cam (or drag)</span><span class="k"><b>wheel</b></span><span>zoom</span><span class="k"><b>T</b></span><span>tilt-shift</span><span class="k"><b>O</b></span><span>AO</span><span class="k"><b>G</b></span><span>quality</span><span class="k"><b>P</b></span><span>tune</span><span class="k"><b>K</b></span><span>rider position</span><span class="k"><b>M</b></span><span>menu</span><span class="k"><b>H</b></span><span>records</span></div></details></div>
+    <details id="help"><summary>Controls</summary><div id="keys"><span class="k"><b>W</b></span><span>pedal</span><span class="k"><b>S</b></span><span>brake / back</span><span class="k"><b>A</b> <b>D</b></span><span>steer (hold at speed: carve)</span><span class="k"><b>Space</b></span><span>tap: bunny hop · hold to charge, release to pop (full bar = max)</span><span class="k"><b>Shift</b></span><span>sprint (with W, 20 s of stamina)</span><span class="k"><b>F</b></span><span>bail</span><span class="k"><b>R</b></span><span>new world</span><span class="k"><b>B</b></span><span>bike</span><span class="k"><b>U</b></span><span>bike builder</span><span class="k"><b>C</b></span><span>camera</span><span class="k"><b>Q</b> <b>E</b></span><span>rotate cam (or drag)</span><span class="k"><b>wheel</b></span><span>zoom</span><span class="k"><b>T</b></span><span>tilt-shift</span><span class="k"><b>O</b></span><span>AO</span><span class="k"><b>G</b></span><span>quality</span><span class="k"><b>P</b></span><span>tune</span><span class="k"><b>K</b></span><span>rider position</span><span class="k"><b>M</b></span><span>menu</span><span class="k"><b>H</b></span><span>records</span></div></details></div>
   <div id="msg"></div>
   <div id="flow">FLOW <b></b></div>
+  <div id="stamina" title="Sprint stamina (Shift)"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
   <div id="hopbar"><div class="fill"></div></div>
   <div id="getup"><div class="key"><div class="fill"></div><span>SPACE</span></div><div>Hold to get up</div></div>
 </div>

@@ -24,10 +24,10 @@ function radius(t, v, carve, asked = false) {
   return asked ? r : Math.max(r, v * v / (0.95 * t('grip') * G * (1 + t('carveGrip') * cf)));      // what the tyres can hold
 }
 const hopV = (t, charge) => 1.4 + t('popPower') * (0.4 + 0.6 * charge) + t('chargePop') * charge;
-function speedCurve(t) {
-  let v = 0; const pts = [[0, 0]], dt = 0.05;
+function speedCurve(t, sprint = 0) {
+  let v = 0; const pts = [[0, 0]], dt = 0.05, m = 1 + (t('sprintPower') - 1) * sprint, top = t('pedalTop') + t('sprintTop') * sprint;
   for (let s = dt; s <= 14 + 1e-9; s += dt) {
-    const drive = Math.min(t('pedalLaunch'), t('pedalPower') / Math.max(v, 0.5)) * Math.min(1, Math.max(0, (t('pedalTop') - v) / 2.5));
+    const drive = Math.min(t('pedalLaunch') * m, t('pedalPower') * m / Math.max(v, 0.5)) * Math.min(1, Math.max(0, (top - v) / 2.5));
     v = Math.max(0, v + (drive - 0.1 - t('airDrag') * v * v) * dt);
     pts.push([s, v * 3.6]);
   }
@@ -96,8 +96,8 @@ const CHARTS = {
   },
   'Speed': {
     title: 'Pedalling from a standstill on the flat', x: 'time s', y: 'km/h',
-    lines: (t) => [{ pts: speedCurve(t) }],
-    note: (t) => `Brakes stop you from 30 km/h in ${((30 / 3.6) ** 2 / 2 / Math.min(t('brakeForce'), 0.85 * 0.95 * G)).toFixed(1)} m`,
+    lines: (t) => [{ pts: speedCurve(t), alt: true, label: 'pedal' }, { pts: speedCurve(t, 1), label: 'sprint (Shift)' }],
+    note: (t) => `Sprint: ${t('sprintTime')} s of stamina, refills in ${t('sprintRecharge')} s · brakes stop you from 30 km/h in ${((30 / 3.6) ** 2 / 2 / Math.min(t('brakeForce'), 0.85 * 0.95 * G)).toFixed(1)} m`,
   },
 };
 

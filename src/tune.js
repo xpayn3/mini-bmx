@@ -84,6 +84,10 @@ const DEFS = [
     ['pedalTop',     'Pedal top speed',      11.8,  4,    22,   0.2,  'm/s'],
     ['airDrag',      'Air drag',             0.0036,0,    0.012,0.0002,''],
     ['brakeForce',   'Brake',                7.5,   2,    15,   0.5,  'm/s²'],
+    ['sprintPower',  'Sprint power',         1.5,   1,    2.5,  0.05, '×'],
+    ['sprintTop',    'Sprint extra top speed',3,    0,    8,    0.2,  'm/s'],
+    ['sprintTime',   'Sprint stamina',       20,    3,    60,   1,    's'],
+    ['sprintRecharge','Stamina refill time', 45,    5,    120,  1,    's'],
     ['popPower',     'Pump pop',             2.4,   0.5,  6,    0.1,  'm/s'],
   ]],
 ];

@@ -120,7 +120,7 @@ export class AirHud {
 
     this.chip = document.createElement('button'); this.chip.id = 'trophy'; this.chip.title = 'Records (H)';
     this.chip.innerHTML = `${TROPHY}<span><small>BEST JUMP</small><b class="cb"></b></span>`;
-    document.body.appendChild(this.chip);
+    // (not put on screen: the top-left belongs to the menu button now; records stay on H and Menu > Records)
     this.board = document.createElement('div'); this.board.id = 'records';
     document.body.appendChild(this.board);
     this.chip.addEventListener('click', () => { this.toggleBoard(); this.chip.blur(); });

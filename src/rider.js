@@ -280,8 +280,9 @@ export class Rider {
     const shift = clamp(this.smShiftZ, -0.6, 0.6);
 
     const sty = this.style;
-    const sway = Math.sin(p.crank || 0) * pedal * sty.sway;
-    const bob = Math.sin((p.crank || 0) * 2) * pedal * sty.sway;
+    const spr = clamp(p.sprint || 0, 0, 1);   // all-out: up off the saddle, swinging the bike, chest down
+    const sway = Math.sin(p.crank || 0) * pedal * sty.sway * (1 + 0.9 * spr);
+    const bob = Math.sin((p.crank || 0) * 2) * pedal * sty.sway * (1 + 0.6 * spr);
     const wig = clamp(1 - Math.abs(v) / 3, 0, 1) * sty.sway;
     const air = typeof p.air === 'number' ? p.air : (p.air ? 1 : 0);
     const comp = (p.compress || 0) * sty.crouch;
@@ -289,13 +290,13 @@ export class Rider {
     // pelvis
     _pelvis.set(
       -0.16 - 0.07 * air + 0.06 * pedal * sty.standPedal - comp * 0.25,
-      0.80 - 0.07 * air - comp + 0.15 * pedal * sty.standPedal + 0.035 * bob,      // stand up out of the crouch to pedal
+      0.80 - 0.07 * air - comp + (0.15 * pedal + 0.05 * spr) * sty.standPedal + 0.035 * bob,      // stand up out of the crouch to pedal
       sway * 0.09 + shift * 0.3 + Math.sin(t * 2.1) * 0.02 * wig
     ).add(this.fit);
     _pelvis.x += sty.hipX * (1 - 0.5 * pedal); _pelvis.y += sty.hipY * (1 - 0.6 * pedal);   // pedalling stands up out of it
 
     // chest
-    const ang = 0.72 - 0.14 * pedal + 0.15 * (comp / 0.3) + 0.08 * air + sty.lean * (1 - 0.5 * pedal);   // more upright when standing
+    const ang = 0.72 - 0.14 * pedal + 0.12 * spr + 0.15 * (comp / 0.3) + 0.08 * air + sty.lean * (1 - 0.5 * pedal);   // more upright when standing
     const L = sty.torso;
     _chest.set(
       _pelvis.x + Math.sin(ang) * L + 0.03 * pedal * (0.5 + 0.5 * bob),

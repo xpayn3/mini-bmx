@@ -530,7 +530,7 @@ function getUp() {
   st.hopBlock = true;   // the Space press that got us up must not also pump-pop on release
   st.y = terrain.height(st.x, st.z); st.bodyY = st.y; st.bodyV = 0;
   for (const k of ['nF', 'nR', 'nRef', 'lipLast', 'hfPrev', 'hrPrev']) delete st[k];
-  Object.assign(st, { bank: 0, bodyX: 0, hipShift: 0, spin: 0, aDrive: 0, charge: 0, hopCharge: 0, liftT: 0, flow: 0, flowT: 0, latM: 0, carve: 0, carveAcc: 0, carveBerm: false, yDraw: st.y, pitchDraw: 0 });
+  Object.assign(st, { bank: 0, bodyX: 0, hipShift: 0, spin: 0, aDrive: 0, charge: 0, hopCharge: 0, liftT: 0, sprint: 0, flow: 0, flowT: 0, latM: 0, carve: 0, carveAcc: 0, carveBerm: false, yDraw: st.y, pitchDraw: 0 });
   for (const k of DRAW_KEYS) drawPrev[k] = st[k];
   leanG.add(rider.group);
   rider.group.position.set(0, 0, 0); rider.group.quaternion.identity();
@@ -593,7 +593,7 @@ function respawn(newWorld) {
   delete st.gPitch;
   st.y = terrain.height(0, 0); st.bodyY = st.y; st.bodyV = 0;
   for (const k of ['nF', 'nR', 'nRef', 'lipLast', 'hfPrev', 'hrPrev']) delete st[k];
-  Object.assign(st, { bank: 0, bodyX: 0, hipShift: 0, spin: 0, aDrive: 0, charge: 0, hopCharge: 0, liftT: 0, flow: 0, flowT: 0, latM: 0, carve: 0, carveAcc: 0, carveBerm: false, yDraw: st.y, pitchDraw: 0 });
+  Object.assign(st, { bank: 0, bodyX: 0, hipShift: 0, spin: 0, aDrive: 0, charge: 0, hopCharge: 0, liftT: 0, sprint: 0, flow: 0, flowT: 0, latM: 0, carve: 0, carveAcc: 0, carveBerm: false, yDraw: st.y, pitchDraw: 0 });
   for (const k of DRAW_KEYS) drawPrev[k] = st[k];
   rider.resetPose();   // drop the hip / chest spring momentum from before the teleport
 }
@@ -633,6 +633,17 @@ function smashCactus(c, vx, vy, vz) {
     tmp2.set(vx * 0.35 + (Math.random() - .5) * 3, 1 + Math.random() * 2.5, vz * 0.35 + (Math.random() - .5) * 3), CACTUS_PULP, 0.028);
   for (let k = 0; k < 3; k++) fx.puff(tmp.set(c.x, y + 0.3, c.z), tmp2.set((Math.random() - .5) * 1.2, 0.4 + Math.random() * 0.4, (Math.random() - .5) * 1.2), CACTUS_DUST, 0.35, 1.3, 0.4);
   return true;
+}
+const stamEl = document.getElementById('stamina'), stamBlocks = [...stamEl.querySelectorAll('i')];
+let stamLast = '';
+function staminaUI(k, on, tired) {   // ten blocks, the last one part-filled
+  const key = `${Math.round(k * 200)}|${on}|${tired}`;
+  if (key === stamLast) return; stamLast = key;
+  stamEl.classList.toggle('on', on);
+  stamEl.classList.toggle('low', k < 0.25);
+  stamEl.classList.toggle('tired', !!tired);
+  const n = stamBlocks.length;
+  stamBlocks.forEach((b, i) => b.style.setProperty('--f', Math.min(1, Math.max(0, k * n - i)).toFixed(3)));
 }
 const FLOW_MAX = 5;
 const flowEl = document.getElementById('flow');
@@ -681,6 +692,18 @@ function physics(dt) {
   const slope = !st.air && (st.frontAir || st.rearAir) ? (st.pitchW ?? g.pitch) : g.pitch;
   const rearDown = !st.air && !st.rearAir;   // the rear tyre is what pedals and brakes
   const skid = brake && st.v > 0.5 && rearDown;
+  // SPRINT: Shift + pedal = out of the saddle, all-out. Stronger push and a higher top speed while the
+  // stamina lasts (sprintTime s of it); empty, the legs are cooked until it has refilled a quarter.
+  // It refills slowly whenever you are not sprinting (sprintRecharge s from empty to full).
+  if (st.stamina === undefined) st.stamina = 1;
+  const wantSprint = (keys.ShiftLeft || keys.ShiftRight) && throttle && !brake;
+  if (st.stamina <= 0) st.tired = true; else if (st.stamina > 0.25) st.tired = false;
+  const sprinting = wantSprint && !st.tired && !inWater;
+  if (sprinting && !st.air) st.stamina = Math.max(0, st.stamina - dt / T.sprintTime);
+  else if (!sprinting) st.stamina = Math.min(1, st.stamina + dt / T.sprintRecharge);
+  st.sprint = (st.sprint || 0) + ((sprinting ? 1 : 0) - (st.sprint || 0)) * Math.min(1, dt * 5);   // eases in/out (legs wind up)
+  const spK = st.sprint;
+  staminaUI(st.stamina, sprinting, st.tired && wantSprint);
   let aLong = 0;   // how much of the tyres' grip the pedals / brake are using (friction circle)
   // TYRE LOADS: what the springs pushed with last step (per unit total mass, m/s^2; G when standing still).
   // Grip is friction: it scales with how hard the tyre is pressed into the ground -- a pumped / landing
@@ -696,7 +719,8 @@ function physics(dt) {
     // pedalling like a real rider: strong push from a standstill, then constant POWER (force = P / v),
     // so climbs settle at a decent speed; spinning out above ~38 km/h limits the top speed on the flat
     const vp = Math.max(st.v, 0.5);
-    let drive = (rearDown ? throttle : 0) * Math.min(T.pedalLaunch, T.pedalPower / vp) * clamp((T.pedalTop - st.v) / 2.5, 0, 1);
+    const pTop = T.pedalTop + T.sprintTop * spK, pMul = 1 + (T.sprintPower - 1) * spK;
+    let drive = (rearDown ? throttle : 0) * Math.min(T.pedalLaunch * pMul, T.pedalPower * pMul / vp) * clamp((pTop - st.v) / 2.5, 0, 1);
     // only the REAR tyre drives, and only as hard as it grips: stamp on it in sand or wet grass and the
     // wheel spins (the rest of the push goes into roost, not speed)
     const driveCap = mu * nR;
@@ -741,8 +765,9 @@ function physics(dt) {
   flowUI(st.flow || 0);
   // spin-out: past the pedal top speed no human can turn the cranks fast enough, so the rider
   // stops pedalling and coasts (pedals level). Picks it back up once the bike slows a bit.
-  if (st.v > T.pedalTop + 0.3) st.spunOut = true;
-  else if (st.v < T.pedalTop - 0.8) st.spunOut = false;
+  const topNow = T.pedalTop + T.sprintTop * (st.sprint || 0);
+  if (st.v > topNow + 0.3) st.spunOut = true;
+  else if (st.v < topNow - 0.8) st.spunOut = false;
   st.pedal += ((throttle && !st.air && !st.spunOut ? 1 : 0) - st.pedal) * Math.min(1, dt * 6);
 
   // --- steering, countersteer and lean ---
@@ -867,7 +892,7 @@ function physics(dt) {
   const bl = st.lean * T.bikeLeanMul, capB = T.bikeLeanCap + (st.air || Math.sign(bank) !== Math.sign(bl) ? 0 : Math.abs(bank));
   st.bikeLean = capB * Math.tanh(bl / capB);
   st.counter = st.bikeLean - st.lean * 0.85;
-  st.rock = Math.sin(st.crank) * 0.065 * st.pedal * Math.min(1, va / 2 + 0.3);
+  st.rock = Math.sin(st.crank) * 0.065 * (1 + 1.3 * (st.sprint || 0)) * st.pedal * Math.min(1, va / 2 + 0.3);   // sprinting throws the bike side to side
 
   // --- move ---
   fwd.set(Math.cos(st.heading), 0, -Math.sin(st.heading));
@@ -1242,7 +1267,7 @@ function physics(dt) {
   const w = st.v / RWF;
   st.wheelF += w * dt;
   if (!skid) st.wheelR += st.v / RWR * dt;
-  if (st.pedal > 0.05) st.crank += Math.max(w / 2.78, 3.5) * st.pedal * dt;
+  if (st.pedal > 0.05) st.crank += Math.max(w / 2.78, 3.5) * (1 + 0.3 * (st.sprint || 0)) * st.pedal * dt;
   else if (!st.air) {
     // coasting: outside pedal down in a turn, level pedals on the straight
     const aL = pedalPivots[0].userData.a0, aR = pedalPivots[1].userData.a0;
@@ -1491,7 +1516,7 @@ function frame(now) {
   place();
   if (!crash.on) rider.update(dt, { footL, footR, handL, handR, v: st.v, lean: st.bikeLean + st.rock, steer: st.steer, yawRate: st.yawRate,
     counter: st.counter + st.rock * 0.6, headRoll: st.bikeLean * 0.85, absorb: clamp(drawn.bodyY - drawn.yDraw, -T.legComp, T.legExt), pitch: drawn.pitch, bodyLevel: T.bodyLevel, attackDrop: T.attackDrop,
-    pedal: st.pedal, crank: st.crank, air: st.airK, compress: Math.max(0, -st.compress), hipShift: st.hipShift || 0, t });
+    pedal: st.pedal, sprint: (st.sprint || 0) * st.pedal, crank: st.crank, air: st.airK, compress: Math.max(0, -st.compress), hipShift: st.hipShift || 0, t });
   terrain.update(st.x, st.z, 4);   // time-sliced chunk streaming (ms per frame)
   // announce the landscape as it changes under you
   biomeT -= dt;
