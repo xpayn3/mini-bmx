@@ -33,6 +33,7 @@ func _ready() -> void:
 		elif a.begins_with("--shot="): _shot(a.get_slice("=", 1))
 		elif a.begins_with("--bench="): _bench(a.get_slice("=", 1))
 		elif a.begins_with("--showcase="): _showcase(a.get_slice("=", 1))
+		elif a.begins_with("--hitch"): _hitch(float(a.get_slice("=", 1)) if "=" in a else 30.0)
 
 func _new_game() -> void:
 	if game:
@@ -351,6 +352,95 @@ func _bench(dir: String) -> void:
 		line += "  | %s: %.2f ms avg (%.0f fps), 1%% low %.2f ms, GPU %.2f ms, %dk tris, %d draws" % [cam, avg, 1000.0 / avg, p99, gpu / maxi(n, 1), tris / maxi(n, 1) / 1000, draws / maxi(n, 1)]
 		get_viewport().get_texture().get_image().save_png("%s/%s_q%d.png" % [dir, cam, q])
 	print(line)
+	get_tree().quit()
+
+
+## --hitch=<secs>: scripted ride (chase camera, vsync off) that looks for frame-time spikes and what
+## the main thread was doing in them: terrain streaming (chunks turned into nodes, split into ground /
+## occluder / collider / decorations / grids), physics, the rest. Prints one summary.
+func _hitch(secs: float) -> void:
+	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
+	Engine.max_fps = 0
+	GameState.seed = int(OS.get_environment("BMX_SEED")) if OS.get_environment("BMX_SEED") != "" else 7
+	await _new_game()
+	_start_ride()
+	game.cam.set_mode("chase")
+	var vp := get_viewport().get_viewport_rid()
+	RenderingServer.viewport_set_measure_render_time(vp, true)
+	for i in 90: await get_tree().process_frame
+	var tr: Terrain = game.terrain
+	var ft := PackedFloat32Array()     # frame ms
+	var sm := PackedFloat32Array()     # update_stream ms
+	var nf := PackedInt32Array()       # chunks finalized
+	var gp := PackedFloat32Array()     # GPU ms
+	var ph := PackedFloat32Array()     # physics process ms
+	var parts := PackedFloat64Array([0, 0, 0, 0, 0])
+	var fin_ms := PackedFloat32Array()
+	var t0 := Time.get_ticks_msec()
+	var last := Time.get_ticks_usec()
+	var p0 := Vector2(game.phys.x, game.phys.z)
+	var dist := 0.0
+	var csv := FileAccess.open(OS.get_environment("BMX_HITCH_CSV"), FileAccess.WRITE) if OS.get_environment("BMX_HITCH_CSV") != "" else null
+	if csv: csv.store_line("t,frame,gpu,cpu_render,stream,fin,phys,draws,prims,speed,crash,puffs,air")
+	while Time.get_ticks_msec() - t0 < secs * 1000.0:
+		var el := (Time.get_ticks_msec() - t0) / 1000.0
+		Input.action_press("pedal")
+		if int(el * 0.7) % 3 == 1: Input.action_press("steer_left")
+		else: Input.action_release("steer_left")
+		await get_tree().process_frame
+		var now := Time.get_ticks_usec()
+		ft.append((now - last) / 1000.0)
+		last = now
+		sm.append(tr.last_stream_ms)
+		nf.append(tr.last_finalized)
+		if tr.last_finalized > 0:
+			fin_ms.append(tr.last_stream_ms / tr.last_finalized)
+			for i in 5: parts[i] += tr.fin_parts[i]
+		gp.append(RenderingServer.viewport_get_measured_render_time_gpu(vp))
+		ph.append(Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0)
+		if csv:
+			var puffs := 0
+			for i in game.dust._puff_age.size():
+				if game.dust._puff_age[i] < game.dust._puff_life[i]: puffs += 1
+			csv.store_line("%.3f,%.3f,%.3f,%.3f,%.3f,%d,%.3f,%d,%d,%.2f,%d,%d,%.2f" % [el, ft[-1], gp[-1],
+				RenderingServer.viewport_get_measured_render_time_cpu(vp), sm[-1], nf[-1], ph[-1],
+				RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME),
+				RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_PRIMITIVES_IN_FRAME),
+				game.phys.v, int(game.phys.crash_on), puffs, game.phys.air_k])
+		var p1 := Vector2(game.phys.x, game.phys.z)
+		dist += p1.distance_to(p0)
+		p0 = p1
+	Input.action_release("pedal"); Input.action_release("steer_left")
+	var sorted := ft.duplicate(); sorted.sort()
+	var n := ft.size()
+	var med: float = sorted[n / 2]
+	var spike := maxf(med * 2.0, med + 4.0)
+	var spikes := 0; var sp_fin := 0; var sp_after := 0; var sp_sm := 0.0; var sp_gpu := 0.0
+	var gpu_after := 0.0; var n_after := 0; var gpu_norm := 0.0; var n_norm := 0
+	for i in n:
+		var after := i > 0 and nf[i - 1] > 0
+		if after: gpu_after += gp[i]; n_after += 1
+		elif nf[i] == 0: gpu_norm += gp[i]; n_norm += 1
+		if ft[i] > spike:
+			spikes += 1
+			sp_sm += sm[i]
+			sp_gpu += gp[i]
+			if nf[i] > 0: sp_fin += 1
+			elif after: sp_after += 1
+	var chunks := 0
+	for v in nf: chunks += v
+	var fsorted := fin_ms.duplicate(); fsorted.sort()
+	print("HITCH %d frames, %.0f m ridden, %d chunks finalized | frame median %.2f ms, 1%% low %.2f, 0.1%% low %.2f, max %.2f" % [
+		n, dist, chunks, med, sorted[int(n * 0.99)], sorted[int(n * 0.999)], sorted[n - 1]])
+	print("HITCH spikes (> %.2f ms): %d | with a chunk finalize %d, frame right after one %d | avg stream %.2f ms, avg GPU %.2f ms in spikes" % [
+		spike, spikes, sp_fin, sp_after, sp_sm / maxi(spikes, 1), sp_gpu / maxi(spikes, 1)])
+	if fsorted.size() > 0:
+		var c := float(maxi(chunks, 1))
+		print("HITCH per chunk: avg %.2f ms, max %.2f | ground+tex %.2f, occluder %.2f, collider %.2f, decorations %.2f, grids+tape %.2f" % [
+			Array(fsorted).reduce(func(a, b): return a + b, 0.0) / fsorted.size(), fsorted[fsorted.size() - 1],
+			parts[0] / c, parts[1] / c, parts[2] / c, parts[3] / c, parts[4] / c])
+	print("HITCH GPU: normal frames %.2f ms, frame after a finalize %.2f ms | physics avg %.2f ms" % [
+		gpu_norm / maxi(n_norm, 1), gpu_after / maxi(n_after, 1), Array(ph).reduce(func(a, b): return a + b, 0.0) / n])
 	get_tree().quit()
 
 

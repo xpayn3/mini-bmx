@@ -96,6 +96,14 @@ runs, so the frames aren't pixel-identical.
 - **Shader hitches**: pipeline cache + shader cache on (Godot 4.7 also has ubershaders), and the new effect
   pipelines (mud, wet, drips, dust, fog puffs, chunks) are drawn once behind the opening fade.
 - **Physics**: already a fixed 120 Hz tick with the bike drawn between the last two states; unchanged.
+- **Terrain streaming**: chunks are built on worker threads, then turned into nodes on the main thread
+  (~1.3 ms each: ground mesh + its two textures ~0.65, decoration MultiMeshes ~0.13, grids/tape ~0.2,
+  collider and occluder ~0.1). Crossing a chunk border finishes a whole row of 7 at the fog edge at once,
+  and up to 4 used to land in one frame (3-5 ms spike). Now chunks further out than the 3x3 round the rider
+  are finalized one per frame; the worst streaming frame went from 5.3 ms to 1.7 ms.
+- **Textures**: the garage floor (Painted Concrete) was imported lossless without mipmaps (shimmering under
+  anisotropic filtering, ~64 MB VRAM) and the sky HDRI uncompressed; both are VRAM-compressed now (S3TC with
+  mipmaps, normal map flagged; BC6H for the 4k HDRI, 8 MB). Bike logo decals got mipmaps.
 - **FPS counter** (with ms) in the top left, Settings › Interface › Show FPS.
 
 ## Left out, and why
@@ -120,3 +128,7 @@ runs, so the frames aren't pixel-identical.
 - `--bench=<dir> [--quality=N] [--set=key=value]`: frame times + screenshots (above).
 - `--showcase=<dir>`: forces each effect on and saves a screenshot (mud, wet, dust cloud, speed blur, photo mode).
 - `--autotest=N`: the existing unattended smoke test.
+- `--hitch=<secs>`: scripted chase-cam ride that hunts frame spikes and says what the main thread was doing
+  in them (terrain finalize split by part, physics, GPU). `BMX_HITCH_CSV=<file>` also writes every frame.
+  Close other GPU apps first (Godot editor, Houdini, browsers): on a shared GPU the game shows a
+  regular every-4th-frame GPU spike that is time-slicing with the other app, not the game.

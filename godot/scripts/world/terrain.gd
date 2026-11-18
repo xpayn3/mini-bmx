@@ -55,6 +55,11 @@ var _wind_dir := Vector3(0.8, 0, 0.6)
 var _wind_ws: float = 6.0
 var last_finalize_ms: float = 0.0
 var last_build_ms: float = 0.0
+## profiling (--hitch): main-thread ms of the last update_stream() call, chunks finalized in it, and
+## that time split into ground mesh+textures / occluder / collider / decorations / grids+tape
+var last_stream_ms: float = 0.0
+var last_finalized: int = 0
+var fin_parts := PackedFloat64Array([0, 0, 0, 0, 0])
 
 
 func _init() -> void:
@@ -277,6 +282,8 @@ func _max_jobs() -> int:
 
 func update_stream(px: float, pz: float, budget_ms: float = 4.0) -> void:
 	var t0 := Time.get_ticks_usec()
+	last_finalized = 0
+	fin_parts.fill(0.0)
 	_focus = Vector2(px, pz)
 	var ccx := WorldRng.jround(px / SIZE)
 	var ccz := WorldRng.jround(pz / SIZE)
@@ -311,6 +318,7 @@ func update_stream(px: float, pz: float, budget_ms: float = 4.0) -> void:
 			if not any:
 				OS.delay_usec(500)
 		_reap_stale(true)
+		last_stream_ms = (Time.get_ticks_usec() - t0) / 1000.0
 		return
 	_dispatch_missing(ccx, ccz)
 	var budget_us := budget_ms * 1000.0
@@ -326,9 +334,12 @@ func update_stream(px: float, pz: float, budget_ms: float = 4.0) -> void:
 					best = k
 		if best == null:
 			break
-		# a chunk right next to the rider: allow a bigger slice so it never stays a hole
-		var lim := budget_us * (3.0 if bd <= 2 else 1.0)
-		if done_one and Time.get_ticks_usec() - t0 > lim:
+		# a chunk right next to the rider: allow a bigger slice so it never stays a hole. Anything
+		# further out is one chunk per frame: crossing a chunk border finishes a whole row (7) at
+		# once out at the edge of the fog, and turning several into nodes in one frame was a 3-5 ms hitch.
+		var near := bd <= 2
+		var lim := budget_us * (3.0 if near else 1.0)
+		if done_one and (not near or Time.get_ticks_usec() - t0 > lim):
 			break
 		WorkerThreadPool.wait_for_task_completion(_jobs[best]["task"])
 		_finalize(best)
@@ -336,6 +347,7 @@ func update_stream(px: float, pz: float, budget_ms: float = 4.0) -> void:
 		if Time.get_ticks_usec() - t0 > lim:
 			break
 	_dispatch_missing(ccx, ccz)
+	last_stream_ms = (Time.get_ticks_usec() - t0) / 1000.0
 
 
 func _missing(ccx: int, ccz: int) -> Array:
@@ -486,6 +498,8 @@ func _finalize(k: Vector2i) -> void:
 	if b.gen != _gen:
 		return
 	var t0 := Time.get_ticks_usec()
+	var tp := t0
+	last_finalized += 1
 	last_build_ms = b.ms_used
 	var o: Dictionary = b.out
 	var ox := k.x * SIZE
@@ -513,6 +527,7 @@ func _finalize(k: Vector2i) -> void:
 	gi.position = Vector3(ox, 0, oz)
 	gi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	node.add_child(gi)
+	fin_parts[0] += (Time.get_ticks_usec() - tp) / 1000.0; tp = Time.get_ticks_usec()
 	# occluder: a coarse copy of the ground (4 m grid) sunk 0.6 m under it, so hills hide what's behind
 	# them when occlusion culling is on (Settings "occlusion"); always under the real surface = safe
 	var hm: PackedFloat32Array = o["hm"]
@@ -533,6 +548,7 @@ func _finalize(k: Vector2i) -> void:
 	oi.occluder = occ
 	oi.position = Vector3(ox, 0, oz)
 	node.add_child(oi)
+	fin_parts[1] += (Time.get_ticks_usec() - tp) / 1000.0; tp = Time.get_ticks_usec()
 	# cheap collider for debris only (layer 2)
 	var body := StaticBody3D.new()
 	body.collision_layer = LAYER_GROUND
@@ -546,6 +562,7 @@ func _finalize(k: Vector2i) -> void:
 	cs.shape = shape
 	body.add_child(cs)
 	node.add_child(body)
+	fin_parts[2] += (Time.get_ticks_usec() - tp) / 1000.0; tp = Time.get_ticks_usec()
 	# instanced decorations
 	var counts: Dictionary = o["counts"]
 	var lists: Dictionary = o["lists"]
@@ -567,6 +584,7 @@ func _finalize(k: Vector2i) -> void:
 			_multimesh(node, TerrainGeo.SHEDS[i], TerrainGeo.MAT["shed"], buf, buf.size() / 16, true)
 	for p in o["panels"]:
 		p["meshes"] = mms
+	fin_parts[3] += (Time.get_ticks_usec() - tp) / 1000.0; tp = Time.get_ticks_usec()
 	var colliders: Array = o["colliders"]
 	var rec := {"cx": k.x, "cz": k.y, "node": node, "colliders": colliders, "small": small, "rock_keys": [],
 		"G": o["G"], "N": b.N, "mms": mms}
@@ -618,6 +636,7 @@ func _finalize(k: Vector2i) -> void:
 	chunks[k] = rec
 	if _water:
 		_water.mark_dirty()
+	fin_parts[4] += (Time.get_ticks_usec() - tp) / 1000.0
 	last_finalize_ms = (Time.get_ticks_usec() - t0) / 1000.0
 
 
