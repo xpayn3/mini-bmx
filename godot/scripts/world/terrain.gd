@@ -62,7 +62,9 @@ var last_finalized: int = 0
 var fin_parts := PackedFloat64Array([0, 0, 0, 0, 0])
 
 
-func _init() -> void:
+## seed_in: the world to build (pass it here rather than calling set_seed afterwards, which would
+## generate the world twice)
+func _init(seed_in := 12345) -> void:
 	TerrainGeo.ensure()
 	TerrainChunkBuilder.ensure_static()
 	_tape_mat = ShaderMaterial.new()
@@ -78,7 +80,7 @@ func _init() -> void:
 	_water.name = "Water"
 	_water.terrain = self
 	add_child(_water)
-	set_seed(12345)
+	set_seed(seed_in)
 
 
 func _exit_tree() -> void:
@@ -428,7 +430,7 @@ func _unload(k: Vector2i) -> void:
 	(c["node"] as Node).queue_free()
 	chunks.erase(k)
 	if _water:
-		_water.mark_dirty()
+		_water.mark_dirty(Vector2(k) * SIZE, SIZE)
 
 
 func _grid_indices(n: int) -> PackedInt32Array:
@@ -472,6 +474,19 @@ const VIS_RANGE := {"pebble": 90.0, "grass": 90.0, "daisy": 90.0, "tulip": 90.0,
 	"fern": 90.0, "mushroom": 90.0, "weed": 130.0, "bush": 170.0, "log": 170.0, "rock": 200.0,
 	"plank": 150.0, "beam": 150.0, "post": 150.0, "rail": 150.0, "picket": 150.0, "stake": 150.0}
 
+## the view-distance setting: rescales the draw range of decorations already built, not just new chunks
+func set_view_scale(s: float) -> void:
+	if is_equal_approx(s, view_scale):
+		return
+	view_scale = s
+	for k in chunks:
+		var n = chunks[k].get("node")
+		if not is_instance_valid(n): continue
+		for mi in (n as Node).find_children("*", "MultiMeshInstance3D", true, false):
+			if mi.has_meta("vis"):
+				mi.visibility_range_end = float(mi.get_meta("vis")) * view_scale
+
+
 func _multimesh(parent: Node3D, mesh: Mesh, mat: Material, buf: PackedFloat32Array, count: int, cast: bool, vis := 0.0) -> MultiMesh:
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
@@ -484,6 +499,7 @@ func _multimesh(parent: Node3D, mesh: Mesh, mat: Material, buf: PackedFloat32Arr
 	mi.material_override = mat
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if cast else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	if vis > 0.0:
+		mi.set_meta("vis", vis)
 		mi.visibility_range_end = vis * view_scale
 		mi.visibility_range_end_margin = 20.0
 		mi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
@@ -635,7 +651,7 @@ func _finalize(k: Vector2i) -> void:
 	rec["col_keys"] = ckeys.keys()
 	chunks[k] = rec
 	if _water:
-		_water.mark_dirty()
+		_water.mark_dirty(Vector2(k) * SIZE, SIZE)
 	fin_parts[4] += (Time.get_ticks_usec() - tp) / 1000.0
 	last_finalize_ms = (Time.get_ticks_usec() - t0) / 1000.0
 

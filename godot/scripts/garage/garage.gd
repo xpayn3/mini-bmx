@@ -14,7 +14,9 @@ const DOOR_H := 3.2
 const DOOR_X := 0.0   # the door is straight behind the bike
 ## the garage's sun: low, behind the open door (toward -Z), a little to the left, so daylight falls
 ## in through the doorway across the floor
-const SUN := Vector3(0.12, 0.38, -0.92)
+## where the sun is (towards it): high and off to the side behind the door, so its patch lands just
+## inside the doorway to one side, not under the bike, and it never shines into the camera
+const SUN := Vector3(0.5, 0.82, -0.28)
 
 var build: Dictionary
 var rig: BikeRig
@@ -40,6 +42,7 @@ var stand_on := false
 const STAND_AT := Vector3(1.75, 0.0, 0.55)
 var preview_crank := 0.6
 const SLAT := 0.2
+const WALL_IN := -4.075   # z of the back wall's inside face (the wall is 0.25 thick, centred on z = -4.2)
 const DOOR_DELAY := 1.0     # s (after the garage is on screen) before the door starts to roll up
 const DOOR_TIME := 3.2      # s to roll it all the way up
 static var _door_opened_once := false   # the door rolls up on the first visit; it stays open after
@@ -101,12 +104,30 @@ func _ready() -> void:
 	add_child(ui)
 	_build_ui()
 	_set_tab(OS.get_environment("BMX_GARAGE_TAB") if OS.get_environment("BMX_GARAGE_TAB") != "" else ("rider" if OS.get_environment("BMX_GARAGE_RIDER") != "" else "paint"))
+	if OS.get_environment("BMX_TYRE_PROBE") != "":
+		_tyre_probe.call_deferred()
+	var cv := OS.get_environment("BMX_GARAGE_CAM").split(",", false)   # tests: "orbit_rad,pitch_deg,dist"
+	if cv.size() == 3:
+		orbit_t = float(cv[0]); pitch_t = float(cv[1]); dist_t = float(cv[2])
+		orbit = orbit_t; pitch = pitch_t; dist = dist_t
 
 # ================================================================ the room
 func _mat(c: Color, rough := 0.8, metal := 0.0) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.albedo_color = c; m.roughness = rough; m.metallic = metal
 	return m
+
+## how far the camera can back away from `from` along `dir` and stay inside the room (walls at x = +-7,
+## back wall z = -4.2, front wall z = 7.8, ceiling 5), keeping a little clearance
+const ROOM_MIN := Vector3(-6.9, 0.15, -4.075)
+const ROOM_MAX := Vector3(6.9, 4.9, 7.7)
+func _room_reach(from: Vector3, dir: Vector3) -> float:
+	var best := INF
+	for a in 3:
+		if absf(dir[a]) < 1e-5: continue
+		var lim: float = (ROOM_MAX[a] if dir[a] > 0 else ROOM_MIN[a]) - signf(dir[a]) * 0.35
+		best = minf(best, maxf(0.5, (lim - from[a]) / dir[a]))
+	return best
 
 func _box(size: Vector3, pos: Vector3, mat: Material, rot := Vector3.ZERO) -> MeshInstance3D:
 	var b := BoxMesh.new(); b.size = size
@@ -162,8 +183,8 @@ func _build_room() -> void:
 	env.ssr_enabled = true
 	env.ssr_max_steps = 48
 	env.glow_enabled = true
-	env.glow_intensity = 0.5
-	env.glow_hdr_threshold = 0.9
+	env.glow_intensity = 0.3
+	env.glow_hdr_threshold = 1.2
 	env.volumetric_fog_enabled = true
 	env.volumetric_fog_density = 0.012          # dusty air: the sunbeam through the door shows
 	env.volumetric_fog_albedo = Color(0.95, 0.9, 0.82)
@@ -217,11 +238,13 @@ func _build_room() -> void:
 	_box(Vector3(DOOR_W, 5 - DOOR_H, 0.25), Vector3(DOOR_X, (5 + DOOR_H) / 2.0, -4.2), brick)   # header
 	# the roller door, rolled up into its drum above the opening, and its guide rails
 	var steel_dark := _mat(Color(0.18, 0.19, 0.21), 0.45, 0.7)
-	_cyl(0.3, DOOR_W + 0.3, Vector3(DOOR_X, DOOR_H + 0.34, -4.0), _mat(Color(0.55, 0.57, 0.6), 0.45, 0.6), Vector3(0, 0, PI / 2))
-	_box(Vector3(DOOR_W + 0.5, 0.08, 0.66), Vector3(DOOR_X, DOOR_H + 0.68, -3.95), steel_dark)
-	for sx in [-1, 1]:
-		_box(Vector3(0.1, DOOR_H, 0.14), Vector3(DOOR_X + sx * (dw + 0.05), DOOR_H / 2.0, -4.05), steel_dark)
-	_box(Vector3(DOOR_W + 0.2, 0.03, 0.3), Vector3(DOOR_X, 0.015, -4.2), _mat(Color(0.3, 0.3, 0.32), 0.5, 0.8))   # threshold strip
+	# everything is mounted on the wall's inside face (z = WALL_IN) and never cuts into the brick or shares
+	# a face with it (shared faces flicker)
+	_cyl(0.3, DOOR_W + 0.3, Vector3(DOOR_X, DOOR_H + 0.34, WALL_IN + 0.32), _mat(Color(0.55, 0.57, 0.6), 0.45, 0.6), Vector3(0, 0, PI / 2))
+	_box(Vector3(DOOR_W + 0.5, 0.08, 0.64), Vector3(DOOR_X, DOOR_H + 0.68, WALL_IN + 0.33), steel_dark)
+	for sx in [-1, 1]:   # guide rails overlap the opening's edges; the curtain runs inside them
+		_box(Vector3(0.1, DOOR_H + 0.1, 0.15), Vector3(DOOR_X + sx * (dw + 0.03), (DOOR_H + 0.1) / 2.0, WALL_IN + 0.08), steel_dark)
+	_box(Vector3(DOOR_W - 0.02, 0.03, 0.24), Vector3(DOOR_X, 0.015, -4.2), _mat(Color(0.3, 0.3, 0.32), 0.5, 0.8))   # threshold strip
 	# the door curtain: ribbed steel slats that roll up into the drum (animated the first time)
 	door_slats = Node3D.new()
 	door_slats.name = "DoorSlats"
@@ -229,13 +252,15 @@ func _build_room() -> void:
 	var slat_mat := _mat(Color(0.5, 0.52, 0.55), 0.5, 0.55)
 	var slat_n := ceili(DOOR_H / SLAT)
 	for i in slat_n:
-		var b := BoxMesh.new(); b.size = Vector3(DOOR_W - 0.04, SLAT - 0.012, 0.05)
+		# slats overlap a little (no light between them) and run past the opening into the rails
+		var b := BoxMesh.new(); b.size = Vector3(DOOR_W + 0.12, SLAT + 0.01, 0.05)
 		var mi := MeshInstance3D.new(); mi.mesh = b; mi.material_override = slat_mat
 		mi.set_meta("y0", SLAT * (i + 0.5))
 		door_slats.add_child(mi)
-	door_slats.position = Vector3(DOOR_X, 0, -4.12)
+	door_slats.position = Vector3(DOOR_X, 0, WALL_IN + 0.04)
 	door_open = 1.0 if _door_opened_once else 0.0
 	_place_slats()
+	_box(Vector3(14.2, 5, 0.2), Vector3(0, 2.5, 7.8), wall)   # front wall (the side opposite the door)
 	_box(Vector3(0.2, 5, 12), Vector3(-7, 2.5, 1.8), wall)
 	_box(Vector3(0.2, 5, 12), Vector3(7, 2.5, 1.8), wall)
 	_box(Vector3(14.2, 0.2, 12.2), Vector3(0, 5, 1.8), _mat(Color(0.08, 0.08, 0.09)))
@@ -308,10 +333,9 @@ func _build_outside() -> void:
 	outside = Node3D.new()
 	outside.name = "Outside"
 	add_child(outside)
-	var t = load("res://scripts/world/terrain.gd").new()
+	var t = load("res://scripts/world/terrain.gd").new(GameState.seed)
 	t.name = "Terrain"
 	outside.add_child(t)
-	t.set_seed(GameState.seed)
 	var spot := Vector2(-6.0, 0.0)   # just behind spawn on the flat hilltop: the trail runs away from here
 	t.update_stream(spot.x, spot.y, INF)
 	outside.rotation.y = PI / 2   # world +X (down the trail) -> garage -Z (out of the door)
@@ -332,12 +356,17 @@ func _build_outside() -> void:
 	sun.shadow_enabled = true
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
 	sun.directional_shadow_max_distance = 120.0
-	sun.light_volumetric_fog_energy = 1.0
+	sun.light_volumetric_fog_energy = 0.5
 	add_child(sun)
 	sun.look_at_from_position(SUN.normalized(), Vector3.ZERO, Vector3.UP)
 
 # ================================================================ bike
 func _rebuild_bike() -> void:
+	# keep the rider across part / paint changes: building one (helmet model, strap fitting) is the
+	# slow part of a rebuild and would hitch on every click
+	var keep: Rider = rider if rider_on and is_instance_valid(rider) else null
+	if keep:
+		keep.get_parent().remove_child(keep)
 	if rig:
 		rig.queue_free()
 	rig = BikeRig.new()
@@ -351,12 +380,22 @@ func _rebuild_bike() -> void:
 		for i in 60:
 			rig.susp.update(1.0 / 60, {"air": false, "load": 0.0, "brake": 0.0, "bumpF": 0.0, "bumpR": 0.0})
 	bike_x = -(L / 2 - bb)
-	ride_y = DRUM_Y + sqrt(pow(rig.wheel_rr + DRUM_R, 2) - DRUM_GAP * DRUM_GAP) - rig.wheel_rr
-	rig.pose(bike_x, ride_y if rider_on else 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 if rider_on else -0.25, 0.0, 0.0, 0.6)
+	rig.pose(bike_x, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 if rider_on else -0.25, 0.0, 0.0, 0.6)
+	# set the height from the real tyres (knob tips) and where the axles really sit after sag -- the
+	# nominal radius and axle height left the tread a few mm inside the floor / the roller drums
+	var tf := _tyre_circle(rig.wheel_f)
+	var tr := _tyre_circle(rig.wheel_r)
+	if rider_on:   # rear tyre resting on the two drums either side of its axle
+		ride_y = DRUM_Y + sqrt(pow(tr.r + DRUM_R, 2) - DRUM_GAP * DRUM_GAP) - tr.c.y + 0.0005
+	else:          # both tyres on the floor: the lower one just touches
+		ride_y = -minf(tf.c.y - tf.r, tr.c.y - tr.r) + 0.0005
+	rig.pose(bike_x, ride_y, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 if rider_on else -0.25, 0.0, 0.0, 0.6)
+	tf = _tyre_circle(rig.wheel_f)
+	tr = _tyre_circle(rig.wheel_r)
 	rider = null
-	_build_rollers(L, bb)
+	_build_rollers(tr.c.x, tf.c.x, tf.c.y - tf.r)
 	if rider_on:
-		_add_rider()
+		_add_rider(keep)
 	_update_stand_rider()
 	_rider_visibility()
 	for mi in rig.find_children("*", "MeshInstance3D", true, false):
@@ -365,14 +404,16 @@ func _rebuild_bike() -> void:
 # ---------------------------------------------------------------- the rider on the bike
 ## the rider in the garage: same look and pose (sliders) as on the trail, posed every frame from the
 ## bike's grips and pedals like a ride, in the chosen preview situation
-func _add_rider() -> void:
-	rider = Rider.new()
+func _add_rider(existing: Rider = null) -> void:
+	rider = existing if existing else Rider.new()
 	rig.lean_g.add_child(rider)
-	rider.set_look(RiderPanels.load_look())
-	rider.set_style(rider_pose)
 	if rig.seat != null: rider.seat = rig.seat
 	var grip := rig.grip_mid()
 	rider.fit = Vector3((grip.x - 0.4388) * 0.5, ((grip.y - 0.9646) + (rig.crank_n.position.y - 0.297)) * 0.5, 0)
+	if existing:
+		return
+	rider.set_look(RiderPanels.load_look())
+	rider.set_style(rider_pose)
 	var hs: Node3D = load("res://assets/helmet.glb").instantiate()
 	var helmet := hs.find_child("helmet", true, false)
 	if helmet:
@@ -382,7 +423,21 @@ func _add_rider() -> void:
 
 ## training rollers: an alloy frame with two drums under the rear tyre and one under the front;
 ## only there while the rider is on (the bike stands on them and spins in place)
-func _build_rollers(L: float, bb: float) -> void:
+## a wheel's tyre as a circle in the garage: {c: hub (world), r: outer radius to the knob tips}. The
+## tyre is the widest round mesh on the wheel; its own bounding box is unaffected by the wheel's spin.
+func _tyre_circle(w: Node3D) -> Dictionary:
+	var best := {"c": w.global_position, "r": 0.0}
+	for mi in w.find_children("*", "MeshInstance3D", true, false):
+		if not (mi as MeshInstance3D).visible or (mi as MeshInstance3D).mesh == null: continue
+		var bx: AABB = (mi as MeshInstance3D).mesh.get_aabb()
+		var xf: Transform3D = (mi as MeshInstance3D).global_transform
+		var r := bx.size.y * 0.5 * xf.basis.get_scale().y
+		if r > best.r:
+			best = {"c": xf * bx.get_center(), "r": r}
+	return best
+
+## rollers under the bike: rear_x / front_x = the axles, front_low = the front tyre's lowest point
+func _build_rollers(rear_x: float, front_x: float, front_low: float) -> void:
 	if rollers: rollers.queue_free()
 	rollers = null
 	drums.clear()
@@ -393,8 +448,6 @@ func _build_rollers(L: float, bb: float) -> void:
 	var alu := _mat(Color(0.72, 0.74, 0.77), 0.3, 0.9)
 	var drum_m := _mat(Color(0.12, 0.12, 0.13), 0.35, 0.4)
 	var black := _mat(Color(0.05, 0.05, 0.06), 0.6)
-	var rear_x := bike_x - bb
-	var front_x := bike_x + (L - bb)
 	var x0 := rear_x - 0.32
 	var x1 := front_x + 0.22
 	for sz in [-0.26, 0.26]:   # side rails
@@ -407,7 +460,7 @@ func _build_rollers(L: float, bb: float) -> void:
 	# a drum touches the tyre where the wheel circle meets ROLLER_TOP: rear pair straddles the axle
 	for x in [rear_x - DRUM_GAP, rear_x + DRUM_GAP, front_x]:
 		var d := Node3D.new()
-		d.position = Vector3(x, DRUM_Y if x != front_x else ride_y - DRUM_R, 0)
+		d.position = Vector3(x, DRUM_Y if x != front_x else front_low - DRUM_R - 0.0005, 0)
 		rollers.add_child(d)
 		var c := CylinderMesh.new(); c.top_radius = DRUM_R; c.bottom_radius = DRUM_R; c.height = 0.44
 		var mi := MeshInstance3D.new(); mi.mesh = c; mi.material_override = drum_m
@@ -514,7 +567,7 @@ func _place_slats() -> void:
 	for mi in door_slats.get_children():
 		var y: float = mi.get_meta("y0") + lift
 		mi.position.y = y
-		mi.visible = y < DOOR_H - SLAT * 0.3
+		mi.visible = y < DOOR_H + 0.3   # higher up it is inside the drum
 
 func _process(dt: float) -> void:
 	if door_open < 1.0:
@@ -535,7 +588,8 @@ func _process(dt: float) -> void:
 	dist = lerpf(dist, dist_t, minf(1.0, dt * 4))
 	focus = focus.lerp(focus_t, minf(1.0, dt * 4))
 	var p := deg_to_rad(pitch)
-	cam.position = focus + Vector3(sin(orbit) * cos(p), sin(p), cos(orbit) * cos(p)) * dist
+	var dir := Vector3(sin(orbit) * cos(p), sin(p), cos(orbit) * cos(p))
+	cam.position = focus + dir * minf(dist, _room_reach(focus, dir))
 	cam.look_at(focus, Vector3.UP)
 	# HANDHELD: someone holding the camera -- a slow few-cm drift and a fraction of a degree of wobble,
 	# from a few unrelated sine waves (never repeats visibly, never jerks)
@@ -566,30 +620,99 @@ func _unhandled_input(e: InputEvent) -> void:
 		_close(false)
 
 # ================================================================ UI
+## tests (BMX_TYRE_PROBE=1): every wheel-size / tyre-width combination, rider off and on: how far the
+## lowest point of each tyre is from the floor (or the roller drums), then quit. Nothing is saved.
+func _tyre_probe() -> void:
+	var lowest := func(n: Node3D) -> float:
+		var lo := INF
+		for mi in n.find_children("*", "MeshInstance3D", true, false):
+			if not (mi as MeshInstance3D).visible or (mi as MeshInstance3D).mesh == null: continue
+			var xf: Transform3D = (mi as MeshInstance3D).global_transform
+			for s in mi.mesh.get_surface_count():
+				for v in (mi.mesh.surface_get_arrays(s)[Mesh.ARRAY_VERTEX] as PackedVector3Array):
+					lo = minf(lo, (xf * v).y)
+		return lo
+	for on in [false, true]:
+		rider_on = on
+		for fr in [["26", "26"], ["27.5", "27.5"], ["29", "29"], ["29", "27.5"]]:
+			for tw in [2.2, 2.5, 2.8]:
+				build.wheels.front = fr[0]; build.wheels.rear = fr[1]; build.wheels.tyre_w = tw
+				_rebuild_bike()
+				for i in 5: await get_tree().process_frame
+				var f: float
+				var r: float
+				if not on:   # standing on the floor: the lowest point of each tyre (0 = touching)
+					f = lowest.call(rig.wheel_f); r = lowest.call(rig.wheel_r)
+				else:        # on the rollers: closest approach of each tyre to its drum(s) (0 = touching)
+					f = _drum_gap(rig.wheel_f); r = _drum_gap(rig.wheel_r)
+				print("TYRE rider=%s front=%s rear=%s w=%.1f  front=%+.4f  rear=%+.4f" % [on, fr[0], fr[1], tw, f, r])
+	get_tree().quit()
+
+## tests: the smallest distance from a wheel's visible vertices to the surface of any roller drum
+## (drums run along z; negative = the tyre cuts into a drum)
+func _drum_gap(n: Node3D) -> float:
+	var best := INF
+	for d in drums:
+		var c: Vector3 = (d as Node3D).global_position
+		for mi in n.find_children("*", "MeshInstance3D", true, false):
+			if not (mi as MeshInstance3D).visible or (mi as MeshInstance3D).mesh == null: continue
+			var xf: Transform3D = (mi as MeshInstance3D).global_transform
+			for s in mi.mesh.get_surface_count():
+				for v in (mi.mesh.surface_get_arrays(s)[Mesh.ARRAY_VERTEX] as PackedVector3Array):
+					var p := xf * v
+					best = minf(best, Vector2(p.x - c.x, p.y - c.y).length() - DRUM_R)
+	return best
+
+## the garage UI is drawn smaller than the game's menus so the bike stays in view
+const UI_SCALE := 0.82
+
+## the shared theme, tightened for the garage: smaller padding and corners
+static func _compact_theme() -> Theme:
+	var t: Theme = UITheme.get_theme().duplicate()
+	t.default_font_size = 15
+	t.set_stylebox("panel", "PanelContainer", UITheme.box(UITheme.PANEL, 14, 14))
+	t.set_stylebox("normal", "Button", UITheme.box(UITheme.PANEL_LIGHT, 7, 9))
+	t.set_stylebox("hover", "Button", UITheme.box(Color(1, 1, 1, 0.22), 7, 9))
+	t.set_stylebox("pressed", "Button", UITheme.box(UITheme.ACCENT, 7, 9))
+	t.set_stylebox("hover_pressed", "Button", UITheme.box(UITheme.ACCENT, 7, 9))
+	t.set_stylebox("focus", "Button", UITheme.box(Color(0, 0, 0, 0), 7, 9, UITheme.ACCENT, 2))
+	return t
+
 func _build_ui() -> void:
 	var root := Control.new()
-	root.theme = UITheme.get_theme()
-	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.theme = _compact_theme()
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(root)
+	# draw the whole layer scaled down; the root is sized up to match so anchors still reach the edges
+	ui.scale = Vector2(UI_SCALE, UI_SCALE)
+	var fit := func(): root.size = get_viewport().get_visible_rect().size / UI_SCALE
+	fit.call()
+	get_viewport().size_changed.connect(fit)
 	var title := UITheme.label("GARAGE", 40, UITheme.ACCENT, true)
 	title.position = Vector2(32, 18)
 	root.add_child(title)
 	panel = PanelContainer.new()
 	panel.set_anchors_preset(Control.PRESET_LEFT_WIDE)
-	panel.offset_left = 24; panel.offset_right = 470; panel.offset_top = 80; panel.offset_bottom = -90
+	panel.offset_left = 24; panel.offset_right = 404; panel.offset_top = 80; panel.offset_bottom = -90
 	root.add_child(panel)
 	var vb := VBoxContainer.new()
 	vb.add_theme_constant_override("separation", 10)
 	panel.add_child(vb)
 	var tabs := HBoxContainer.new()
-	tabs.add_theme_constant_override("separation", 6)
+	tabs.add_theme_constant_override("separation", 3)
 	var grp := ButtonGroup.new()
+	var tab_box := func(c: Color) -> StyleBoxFlat:
+		var s := UITheme.box(c, 6, 5); s.content_margin_top = 6; s.content_margin_bottom = 6
+		return s
 	for t in [["paint", "Paint"], ["logos", "Logos"], ["wheels", "Wheels"], ["suspension", "Suspension"], ["drive", "Gears"], ["rider", "Rider"], ["kit", "Kit"]]:
 		var b := Button.new()
 		b.text = t[1]; b.toggle_mode = true; b.button_group = grp
 		b.button_pressed = t[0] == tab
-		b.add_theme_font_size_override("font_size", 15)
+		b.add_theme_font_size_override("font_size", 13)
+		b.add_theme_stylebox_override("normal", tab_box.call(UITheme.PANEL_LIGHT))
+		b.add_theme_stylebox_override("hover", tab_box.call(Color(1, 1, 1, 0.22)))
+		b.add_theme_stylebox_override("pressed", tab_box.call(UITheme.ACCENT))
+		b.add_theme_stylebox_override("hover_pressed", tab_box.call(UITheme.ACCENT))
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.pressed.connect(_set_tab.bind(t[0]))
 		tabs.add_child(b)
@@ -695,15 +818,26 @@ func _set_tab(t: String) -> void:
 		"kit": _kit_page()
 
 # ---------------------------------------------------------------- widgets
+## a small grey hint line that wraps to the card's width (never widens it)
+func _note(text: String) -> void:
+	var l := UITheme.label(text, 12, UITheme.MUTED)
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.add_child(l)
+
 func _h(text: String) -> void:
 	body.add_child(UITheme.label(text, 13, UITheme.ACCENT, true))
 
 func _row(text: String, ctl: Control) -> void:
 	var hb := HBoxContainer.new()
-	var l := UITheme.label(text, 15)
+	var l := UITheme.label(text, 14)
 	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# long names shorten with "…" (full name on hover) instead of widening the card
+	l.clip_text = true
+	l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	l.tooltip_text = text
+	l.mouse_filter = Control.MOUSE_FILTER_PASS
 	hb.add_child(l)
-	ctl.custom_minimum_size.x = maxf(ctl.custom_minimum_size.x, 200)
+	ctl.custom_minimum_size.x = maxf(ctl.custom_minimum_size.x, 160)
 	hb.add_child(ctl)
 	body.add_child(hb)
 
@@ -743,15 +877,15 @@ func _color(text: String, cur: String, cb: Callable) -> void:
 func _swatches(cur: String, cb: Callable) -> void:
 	var g := GridContainer.new()
 	g.columns = 11
-	g.add_theme_constant_override("h_separation", 5)
-	g.add_theme_constant_override("v_separation", 5)
+	g.add_theme_constant_override("h_separation", 4)
+	g.add_theme_constant_override("v_separation", 4)
 	for hex in SWATCHES:
 		var b := Button.new()
-		b.custom_minimum_size = Vector2(32, 32)
+		b.custom_minimum_size = Vector2(26, 26)
 		var on: bool = hex == cur
-		b.add_theme_stylebox_override("normal", UITheme.box(Color(hex), 8, 0, Color.WHITE if on else Color(1, 1, 1, 0.15), 3 if on else 1))
-		b.add_theme_stylebox_override("hover", UITheme.box(Color(hex).lightened(0.15), 8, 0, UITheme.ACCENT, 2))
-		b.add_theme_stylebox_override("pressed", UITheme.box(Color(hex), 8, 0, UITheme.ACCENT, 3))
+		b.add_theme_stylebox_override("normal", UITheme.box(Color(hex), 6, 0, Color.WHITE if on else Color(1, 1, 1, 0.15), 3 if on else 1))
+		b.add_theme_stylebox_override("hover", UITheme.box(Color(hex).lightened(0.15), 6, 0, UITheme.ACCENT, 2))
+		b.add_theme_stylebox_override("pressed", UITheme.box(Color(hex), 6, 0, UITheme.ACCENT, 3))
 		b.pressed.connect(func(): cb.call(hex); _changed(); _set_tab(tab))
 		g.add_child(b)
 	body.add_child(g)
@@ -812,7 +946,7 @@ func _logos_page() -> void:
 		b.text = "Tyre walls" if k == "tyres" else ("Rims" if k == "rims" else BikeBuild.SLOTS[k].label)
 		b.toggle_mode = true; b.button_group = grp; b.button_pressed = k == logo_slot
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.add_theme_font_size_override("font_size", 14)
+		b.add_theme_font_size_override("font_size", 13)
 		b.pressed.connect(func(): logo_slot = k; _set_tab("logos"))
 		g.add_child(b)
 	body.add_child(g)
@@ -839,7 +973,7 @@ func _logos_page() -> void:
 	_choice("Logo", items, L.logo, func(v): L.logo = v; _set_tab.call_deferred("logos"))
 	var imp := UITheme.button("Import your own PNG…", func(): _file_dialog.popup_centered_ratio(0.6), 14)
 	body.add_child(imp)
-	body.add_child(UITheme.label("Transparent PNGs work best. Imported logos are kept in your garage.", 12, UITheme.MUTED))
+	_note("Transparent PNGs work best. Imported logos are kept in your garage.")
 	if L.logo == "text":
 		var te := LineEdit.new(); te.text = L.text; te.max_length = 16; te.placeholder_text = "YOUR TEXT"
 		te.text_changed.connect(func(t): L.text = t.to_upper(); _changed())
@@ -865,7 +999,9 @@ func _wheels_page() -> void:
 	_h("SIZE")
 	_choice("Front wheel", sizes, W.front, func(v): W.front = v)
 	_choice("Rear wheel", sizes, W.rear, func(v): W.rear = v)
-	body.add_child(UITheme.label("29\" front / 27.5\" rear is a mullet: big wheel rolls over, small one turns quick.", 12, UITheme.MUTED))
+	var tip := UITheme.label("29\" front / 27.5\" rear is a mullet: big wheel rolls over, small one turns quick.", 12, UITheme.MUTED)
+	tip.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART   # wraps instead of widening the card
+	body.add_child(tip)
 	_h("TYRES")
 	_slide("Width", 2.3, 2.6, 0.1, W.tyre_w, "in", func(v): W.tyre_w = v)
 	_choice("Tread", [["knobby", "Knobby (max grip)"], ["semi", "Semi-slick"], ["slick", "Slick (fast, sketchy)"]], W.tread, func(v): W.tread = v)
@@ -894,7 +1030,7 @@ func _susp_page() -> void:
 	_choice("Spring", rate, S.shock_spring, func(v): S.shock_spring = v)
 	_h("DAMPING")
 	_choice("Rebound", [[0, "Slow (planted)"], [1, "Medium"], [2, "Fast (poppy)"]], S.rebound, func(v): S.rebound = v)
-	body.add_child(UITheme.label("More travel soaks bigger drops; firmer springs pop and pump harder but kick on rough ground.", 12, UITheme.MUTED))
+	_note("More travel soaks bigger drops; firmer springs pop and pump harder but kick on rough ground.")
 
 func _drive_page() -> void:
 	var D: Dictionary = build.drive
@@ -907,7 +1043,7 @@ func _drive_page() -> void:
 	var cogs: Array = BikeBuild.CASSETTES[D.cassette].cogs
 	var lo := float(D.ring) / float(cogs[cogs.size() - 1])
 	var hi := float(D.ring) / float(cogs[0])
-	body.add_child(UITheme.label("Ratios %.2f – %.2f. Bigger ring / smaller cog = higher top speed, harder to get going." % [lo, hi], 12, UITheme.MUTED))
+	_note("Ratios %.2f – %.2f. Bigger ring / smaller cog = higher top speed, harder to get going." % [lo, hi])
 
 func _save_rider_ui() -> void:
 	var cf := ConfigFile.new(); cf.load(RiderPanels.PATH)
@@ -1003,9 +1139,11 @@ func _kit_page() -> void:
 			var key: String = row[0]
 			var hb := HBoxContainer.new()
 			hb.add_theme_constant_override("separation", 4)
+			# the part's name on its own line above its colours: the full name fits and the swatches line up
+			body.add_child(UITheme.label(row[1], 13, UITheme.MUTED))
 			for hex in row[2]:
 				var b := Button.new()
-				b.custom_minimum_size = Vector2(24, 24)
+				b.custom_minimum_size = Vector2(22, 22)
 				var sel: bool = str(look[key]).to_lower() == str(hex).to_lower()
 				b.add_theme_stylebox_override("normal", UITheme.box(Color(hex), 12, 0, Color.WHITE if sel else Color(1, 1, 1, 0.2), 3 if sel else 1))
 				b.add_theme_stylebox_override("hover", UITheme.box(Color(hex), 12, 0, UITheme.ACCENT, 2))
@@ -1015,10 +1153,10 @@ func _kit_page() -> void:
 				hb.add_child(b)
 			var cp := ColorPickerButton.new()
 			cp.color = Color(look[key]); cp.edit_alpha = false
-			cp.custom_minimum_size = Vector2(34, 24)
+			cp.custom_minimum_size = Vector2(34, 22)
 			cp.color_changed.connect(func(c): look[key] = "#" + c.to_html(false); _set_look(look))
 			hb.add_child(cp)
-			_row(row[1], hb)
+			body.add_child(hb)
 	body.add_child(UITheme.button("Reset kit", func(): _set_look(Rider.DEFAULT_LOOK.duplicate()); _set_tab("kit"), 14))
 
 func _set_look(l: Dictionary) -> void:

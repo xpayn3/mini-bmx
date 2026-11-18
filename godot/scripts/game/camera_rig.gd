@@ -69,7 +69,7 @@ func _unhandled_input(e: InputEvent) -> void:
 		elif e.button_index == MOUSE_BUTTON_WHEEL_DOWN and e.pressed: dist = clampf(dist * 1.1, 4, 80)
 		elif e.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT]: dragging = e.pressed
 	elif e is InputEventMouseMotion and dragging:
-		orbit_t += e.relative.x * 0.008 * sens
+		orbit_t -= e.relative.x * 0.008 * sens   # grab the world: drag right turns the scene right (as in the garage)
 		cam_pitch_t = clampf(cam_pitch_t + e.relative.y * 0.25 * sens * inv, 4, 85)
 	elif e.is_action_pressed("cam_left") and e is InputEventKey: orbit_t -= PI / 4
 	elif e.is_action_pressed("cam_right") and e is InputEventKey: orbit_t += PI / 4

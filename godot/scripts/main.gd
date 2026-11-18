@@ -10,6 +10,7 @@ var ui := CanvasLayer.new()
 var menu: Control
 var pause_menu: Control
 var settings_open: Control
+var controls_open: Control
 var fade: ColorRect
 
 func _ready() -> void:
@@ -62,6 +63,8 @@ func _set_riding(riding: bool) -> void:
 func _show_menu() -> void:
 	state = MENU
 	get_tree().paused = false
+	if game: game.exit_photo()
+	_close_controls()
 	_set_riding(false)
 	if menu: menu.queue_free()
 	menu = Control.new()
@@ -159,6 +162,7 @@ func _close_garage(ride: bool) -> void:
 
 func _start_ride() -> void:
 	if menu: menu.queue_free(); menu = null
+	if game: game.exit_photo()
 	state = RIDING
 	game.respawn(false)
 	_set_riding(true)
@@ -167,6 +171,10 @@ func _start_ride() -> void:
 func _unhandled_input(e: InputEvent) -> void:
 	if not e.is_action_pressed("pause") or e.is_echo(): return
 	if is_instance_valid(settings_open) or garage: return
+	if is_instance_valid(controls_open):   # Esc closes the controls card, back to the pause menu
+		_close_controls()
+		get_viewport().set_input_as_handled()
+		return
 	if state == RIDING: _pause()
 	elif state == PAUSED: _resume()
 	get_viewport().set_input_as_handled()
@@ -176,6 +184,7 @@ func _notification(what: int) -> void:
 		_pause()
 
 func _pause() -> void:
+	if game: game.exit_photo()
 	state = PAUSED
 	get_tree().paused = true
 	pause_menu = PanelContainer.new()
@@ -202,6 +211,7 @@ func _close_pause() -> void:
 
 func _resume() -> void:
 	_close_pause()
+	_close_controls()
 	state = RIDING
 	get_tree().paused = false
 
@@ -221,8 +231,15 @@ func _open_settings() -> void:
 		if is_instance_valid(pause_menu): pause_menu.visible = true)
 	ui.add_child(settings_open)
 
+func _close_controls() -> void:
+	if is_instance_valid(controls_open):
+		controls_open.queue_free()
+	controls_open = null
+
 func _show_controls() -> void:
+	if is_instance_valid(controls_open): return
 	var p := PanelContainer.new()
+	controls_open = p
 	p.theme = UITheme.get_theme()
 	ui.add_child(p)
 	UITheme.centre(p)
@@ -238,7 +255,7 @@ func _show_controls() -> void:
 		grid.add_child(UITheme.label(Settings.ACTIONS[a][0], 15))
 	vb.add_child(grid)
 	vb.add_child(UITheme.label("Mouse drag: orbit · wheel: zoom · hold hop at a lip to pop higher · carve: hold a turn at speed", 13, UITheme.MUTED))
-	var close := UITheme.button("Close", func(): p.queue_free())
+	var close := UITheme.button("Close", _close_controls)
 	vb.add_child(close)
 	close.grab_focus.call_deferred()
 
@@ -262,9 +279,11 @@ func _autotest(seconds: float) -> void:
 	while (Time.get_ticks_msec() - t0) / 1000.0 < seconds:
 		var el := (Time.get_ticks_msec() - t0) / 1000.0
 		if pedal: Input.action_press("pedal")
-		if pedal and int(el) % 6 == 3: Input.action_press("steer_left")
+		var straight := OS.get_environment("BMX_STRAIGHT") != ""   # tests: ride straight, no steering / hops
+		if OS.get_environment("BMX_CAM_ORBIT") != "": game.cam.orbit_t = float(OS.get_environment("BMX_CAM_ORBIT"))
+		if pedal and not straight and int(el) % 6 == 3: Input.action_press("steer_left")
 		else: Input.action_release("steer_left")
-		if pedal and int(el * 2) % 7 == 0: Input.action_press("hop")
+		if pedal and not straight and int(el * 2) % 7 == 0: Input.action_press("hop")
 		elif OS.get_environment("BMX_AIRPULL") != "" and game.phys.air and game.phys.air_time > 0.1: Input.action_press("hop")   # tests: tuck in the air
 		else: Input.action_release("hop")
 		await get_tree().process_frame

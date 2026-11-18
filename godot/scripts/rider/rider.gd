@@ -491,9 +491,18 @@ func set_spine(a: Vector3, b: Vector3, right_lo: Vector3, right_hi: Vector3, cur
 		var tl := maxf(tg.length(), 1e-4)
 		var tn := tg / tl
 		var rr := right_lo.lerp(right_hi, t)
-		rr = (rr - tn * rr.dot(tn)).normalized()
+		rr = rr - tn * rr.dot(tn)
+		if rr.length_squared() < 1e-6:   # hips and shoulders turned opposite ways (a tangled ragdoll)
+			rr = r0 - tn * r0.dot(tn)
+			if rr.length_squared() < 1e-6: rr = tn.cross(Vector3.UP if absf(tn.y) < 0.9 else Vector3.RIGHT)
+		rr = rr.normalized()
 		var f := tn.cross(rr)
 		spine_skel.set_bone_pose(k, Transform3D(Basis(f, tn * tl, rr), p - tn * tl * (t - 0.5)))
+	# the bones move the mesh, not the node, so the culling box must follow the body (in a crash the
+	# rider node sits at the world origin and the torso can be anywhere)
+	var c := (a + b) * 0.5
+	if not torso.custom_aabb.has_point(c - Vector3.ONE) or not torso.custom_aabb.has_point(c + Vector3.ONE):
+		torso.custom_aabb = AABB(c - Vector3(3, 3, 3), Vector3(6, 6, 6))
 
 
 ## hand: +X along the forearm, +Z along the bar, +Y the back of the hand

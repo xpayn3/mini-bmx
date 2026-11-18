@@ -110,6 +110,10 @@ var _a_stride := 4
 var _col_float := false
 var wheel_last := [Vector3.ZERO, Vector3.ZERO]
 var wheel_has := [false, false]
+var wheel_dist := [0.0, 0.0]   # metres of track laid per wheel: the tread pattern runs along it
+var _col_off := 0
+var _uv_off := 4
+var _uv_half := false
 
 static var _smoke_tex: ImageTexture
 
@@ -267,19 +271,17 @@ func _build_tracks() -> void:
 	var C := PackedColorArray()
 	C.resize(SEG_MAX * 6)
 	C.fill(Color(0, 0, 0, 0))
+	var UV := PackedVector2Array()
+	UV.resize(SEG_MAX * 6)
 	var arrs := []
 	arrs.resize(Mesh.ARRAY_MAX)
 	arrs[Mesh.ARRAY_VERTEX] = P
 	arrs[Mesh.ARRAY_COLOR] = C
+	arrs[Mesh.ARRAY_TEX_UV] = UV   # x: across the track (-1..1, +-2 = a skid smear), y: metres along it
 	track_mesh = ArrayMesh.new()
 	track_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrs)
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.vertex_color_use_as_albedo = true
-	mat.vertex_color_is_srgb = true
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var mat := ShaderMaterial.new()
+	mat.shader = preload("res://shaders/tyre_track.gdshader")
 	mat.render_priority = 1
 	track_mesh.surface_set_material(0, mat)
 	track_mi = MeshInstance3D.new()
@@ -292,7 +294,10 @@ func _build_tracks() -> void:
 	var fmt := track_mesh.surface_get_format(0)
 	_v_stride = RenderingServer.mesh_surface_get_format_vertex_stride(fmt, SEG_MAX * 6)
 	_a_stride = RenderingServer.mesh_surface_get_format_attribute_stride(fmt, SEG_MAX * 6)
-	_col_float = _a_stride >= 16
+	_col_off = RenderingServer.mesh_surface_get_format_offset(fmt, SEG_MAX * 6, Mesh.ARRAY_COLOR)
+	_uv_off = RenderingServer.mesh_surface_get_format_offset(fmt, SEG_MAX * 6, Mesh.ARRAY_TEX_UV)
+	_col_float = (_uv_off - _col_off) >= 16 if _uv_off > _col_off else _a_stride >= 16
+	_uv_half = (fmt & Mesh.ARRAY_FLAG_COMPRESS_ATTRIBUTES) != 0
 	_pos_bytes.resize(6 * _v_stride)
 	_col_bytes.resize(6 * _a_stride)
 
@@ -337,12 +342,14 @@ func chunk(pos: Vector3, vel: Vector3, color: Color, size := 0.03, life := 2.2) 
 	chunk_buf[o] = color.r * m; chunk_buf[o + 1] = color.g * m; chunk_buf[o + 2] = color.b * m; chunk_buf[o + 3] = 1.0
 
 
-## lay tyre track. wheel 0 = front, 1 = rear. strength 0 = break the track.
-func track(wheel: int, contact: Vector3, dir: Vector3, strength: float, color: Color, width := 0.055) -> void:
+## lay tyre track. wheel 0 = front, 1 = rear. strength 0 = break the track. smear: a skid (no tread,
+## streaks along the track instead)
+func track(wheel: int, contact: Vector3, dir: Vector3, strength: float, color: Color, width := 0.055, smear := false) -> void:
 	if strength <= 0.0:
 		wheel_has[wheel] = false
 		return
-	var p := Vector3(contact.x, _ground(contact.x, contact.z) + 0.035, contact.z)
+	# a hair above the ground; the shader pulls it toward the camera so it never flickers into the terrain
+	var p := Vector3(contact.x, _ground(contact.x, contact.z) + 0.015, contact.z)
 	if not wheel_has[wheel]:
 		wheel_last[wheel] = p
 		wheel_has[wheel] = true
@@ -371,14 +378,27 @@ func track(wheel: int, contact: Vector3, dir: Vector3, strength: float, color: C
 	seg_birth[i] = t
 	# colour is written once; tracks don't fade with time, they're only recycled when the buffer wraps
 	var a := clampf(strength, 0.0, 1.0)
+	var d0: float = wheel_dist[wheel]
+	var d1 := d0 + ln
+	# wrap the distance (float precision) on a whole number of tread repeats (2 rows x 0.024 m in the
+	# shader), so the pattern carries on seamlessly into the next segment
+	wheel_dist[wheel] = d1 - 480.0 if d1 >= 480.0 else d1
+	var s := 2.0 if smear else 1.0
+	var uvs := [Vector2(s, d0), Vector2(-s, d0), Vector2(-s, d1), Vector2(s, d0), Vector2(-s, d1), Vector2(s, d1)]
 	for k in 6:
-		var o := k * _a_stride
+		var o := k * _a_stride + _col_off
 		if _col_float:
 			_col_bytes.encode_float(o, color.r); _col_bytes.encode_float(o + 4, color.g)
 			_col_bytes.encode_float(o + 8, color.b); _col_bytes.encode_float(o + 12, a)
 		else:
 			_col_bytes[o] = color.r8; _col_bytes[o + 1] = color.g8; _col_bytes[o + 2] = color.b8
 			_col_bytes[o + 3] = roundi(a * 255.0)
+		var uo := k * _a_stride + _uv_off
+		var uv: Vector2 = uvs[k]
+		if _uv_half:
+			_col_bytes.encode_half(uo, uv.x); _col_bytes.encode_half(uo + 2, uv.y)
+		else:
+			_col_bytes.encode_float(uo, uv.x); _col_bytes.encode_float(uo + 4, uv.y)
 	# upload just this segment instead of the whole buffer
 	var rid := track_mesh.get_rid()
 	RenderingServer.mesh_surface_update_vertex_region(rid, 0, i * 6 * _v_stride, _pos_bytes)

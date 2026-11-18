@@ -62,9 +62,9 @@ func _ready() -> void:
 	bike_cfg = GameState.bike_config()
 	Tune.set_ride(bike_cfg.ride)
 	_build_environment()
-	terrain = load("res://scripts/world/terrain.gd").new()
+	terrain = load("res://scripts/world/terrain.gd").new(GameState.seed)
 	add_child(terrain)
-	terrain.set_seed(GameState.seed)
+	terrain.view_scale = float(Settings.get_v("view_distance"))   # before the first chunks are built
 	terrain.update_stream(0, 0, INF)
 	fx = load("res://scripts/fx/fx.gd").new()
 	add_child(fx)
@@ -222,7 +222,7 @@ func _build_environment() -> void:
 	add_child(cl)
 
 func _apply_settings() -> void:
-	terrain.view_scale = float(Settings.get_v("view_distance"))
+	terrain.set_view_scale(float(Settings.get_v("view_distance")))
 	var sq: int = Settings.get_v("shadows")
 	# shadows: Low = 2 cascades, hard-ish; Ultra = 4 blended cascades + contact-hardening soft shadows
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS if sq == 0 else DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
@@ -397,9 +397,9 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 	_landed = 0.0
 	var on_ground := not st.air and not in_water and va > 0.2
 	var tc: Color = TRACK_DIRT if s == 1 else (dcol * 0.6 if sand else TRACK_GRASS)
-	var ta := 0.6 if s == 1 else (0.5 if sand else 0.3)
-	fx.track(0, front, f, ta if on_ground else 0.0, tc, 0.06)
-	fx.track(1, rear, f, (minf(0.85, ta + 0.35) if skid_fx else ta) if on_ground else 0.0, tc, 0.08 if skid_fx else 0.065)
+	var ta := 0.85 if s == 1 else (0.75 if sand else 0.45)
+	fx.track(0, front, f, ta if on_ground else 0.0, tc, 0.085)
+	fx.track(1, rear, f, (minf(1.0, ta + 0.2) if skid_fx else ta) if on_ground else 0.0, tc, 0.12 if skid_fx else 0.095, skid_fx)
 
 # ---------------------------------------------------------------- ride control
 func respawn(new_world: bool) -> void:
@@ -470,8 +470,8 @@ func _physics_process(dt: float) -> void:
 	if not phys.is_sane():
 		push_warning("physics went non-finite; restoring last good state")
 		for k in _last_good: phys.set(k, _last_good[k])
-		phys.v = 0; phys.vy = 0; phys.air = false; phys.lean_v = 0; phys.compress_v = 0; phys.body_v = 0
-		phys.body_y = phys.y; phys.pitch_v = 0; phys.w_init = false
+		phys.v = 0; phys.vy = 0; phys.air = false; phys.w_init = false
+		phys.reset_body()
 	else:
 		for k in ["x", "z", "y", "heading", "course", "pitch", "lean", "steer", "slip", "compress"]:
 			_last_good[k] = phys.get(k)
@@ -485,6 +485,11 @@ func toggle_photo() -> void:
 		cam_attr.dof_blur_amount = 0.06
 		_apply_settings()
 	flash("Photo mode  ·  drag to orbit, wheel to zoom, F12 to save, O to leave" if photo else "")
+
+## leave photo mode if it is on (pausing, the menu or a new ride must never inherit a frozen world)
+func exit_photo() -> void:
+	if photo:
+		toggle_photo()
 
 func _exit_tree() -> void:
 	Engine.time_scale = 1.0

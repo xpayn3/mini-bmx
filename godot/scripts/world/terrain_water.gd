@@ -44,8 +44,14 @@ func invalidate() -> void:
 	_job_row = -1
 
 
-func mark_dirty() -> void:
-	_dirty = true
+## a chunk (centre, size) was built or dropped: re-bake only if it touches the baked square
+## (or the one being baked); far chunks stream in and out all the time and change nothing here
+func mark_dirty(c: Vector2, size: float) -> void:
+	var reach := BAKE_SIZE / 2 + size / 2
+	for ctr in [_center, _job_center]:
+		if is_finite(ctr.x) and absf(c.x - ctr.x) < reach and absf(c.y - ctr.y) < reach:
+			_dirty = true
+			return
 
 
 ## virtual depth: undo the terrain's lake-bed flattening so deep lakes still read as deep

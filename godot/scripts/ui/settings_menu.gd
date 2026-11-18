@@ -84,7 +84,16 @@ func _slider(parent: Control, text: String, key: String, lo: float, hi: float, s
 	var vl := UITheme.label(fmt % s.value, 15, UITheme.MUTED)
 	vl.custom_minimum_size.x = 56
 	vl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	s.value_changed.connect(func(v): vl.text = fmt % v; Settings.set_v(key, v))
+	# while dragging only the label follows: applying a setting re-sets the window, viewport, shadows,
+	# audio and bindings and writes the file, so it happens once on release (keys / wheel / reset: at once)
+	var drag := [false]
+	s.drag_started.connect(func(): drag[0] = true)
+	s.drag_ended.connect(func(changed):
+		drag[0] = false
+		if changed: Settings.set_v(key, s.value))
+	s.value_changed.connect(func(v):
+		vl.text = fmt % v
+		if not drag[0]: Settings.set_v(key, v))
 	hb.add_child(s); hb.add_child(vl)
 	hb.add_child(UITheme.reset_button(s, float(Settings.DEFAULTS.get(key, s.value))))
 	_row(parent, text, hb, tip)

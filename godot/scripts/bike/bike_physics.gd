@@ -41,7 +41,7 @@ var body_y := NAN; var body_v := 0.0; var body_x := 0.0; var hip_shift := 0.0
 # the rider's body as its own mass fore / aft: it lags the bike (braking and landings throw it forward,
 # drive pushes it back), and in the air the rider leans (W / S) and pulls the bike up (Space)
 var body_xv := 0.0; var hip_v := 0.0; var v_last := NAN
-var air_lean := 0.0; var air_pull := 0.0; var air_lock_w := false; var air_lock_s := false
+var air_lean := 0.0; var air_pull := 0.0; var air_lock_w := false; var air_lock_s := false; var air_lock_h := false
 var wheel_f := 0.0; var wheel_r := 0.0; var crank := 0.0; var pedal := 0.0
 var yaw_rate := 0.0; var shake := 0.0
 var course := NAN; var slip := 0.0; var since_land := 1.0
@@ -87,6 +87,9 @@ func setup(extras: Dictionary, bike_cfg: Dictionary) -> void:
 	if mods.has("cogs"):
 		cogs = mods.cogs; ring_k = mods.ring_k
 		LAND *= float(mods.get("land", 1.0))
+	else:
+		# no garage build (the BMX): one neutral 16T cog, ratio 1 like the web version -- not the DH cassette
+		cogs = [16]; ring_k = 1.0
 	if cogs.size() <= 1: geared = false
 	# start in the cog nearest the old 16T reference
 	gear = -1
@@ -253,15 +256,16 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	# air control: W leans forward (nose down), S back (nose up), Space pulls the bike up into the body.
 	# A key already held at take-off counts only once it is pressed again in the air.
 	if not air:
-		air_lock_w = throttle > 0.1; air_lock_s = brake
+		air_lock_w = throttle > 0.1; air_lock_s = brake; air_lock_h = inp.hop
 	else:
 		if throttle <= 0.1: air_lock_w = false
 		if not brake: air_lock_s = false
+		if not inp.hop: air_lock_h = false
 	var lean_in := 0.0
 	if air:
 		lean_in = (0.0 if air_lock_w else throttle) - (0.0 if air_lock_s else brake_k)
 	air_lean += (lean_in - air_lean) * minf(1.0, dt * 6)
-	air_pull += ((1.0 if air and inp.hop else 0.0) - air_pull) * minf(1.0, dt * 8)
+	air_pull += ((1.0 if air and inp.hop and not air_lock_h else 0.0) - air_pull) * minf(1.0, dt * 8)
 	var f := fwd()
 	_sample(f)
 	surf = terrain.surface(x, z)
@@ -790,7 +794,9 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	if air:
 		# legs reach for the landing; holding Space tucks the bike up into the body instead
 		var rel_t: float = T.legExt * land_prep - T.legComp * 0.85 * air_pull * (1 - land_prep)
-		var rel := _or(body_y, y) - _or(y_prev, y)
+		# on the take-off step the leg spring already moved body_y alongside y; after that body_y is
+		# last step's bike height + rel
+		var rel := _or(body_y, y) - (y if air_time <= dt * 1.5 else _or(y_prev, y))
 		var nrel := rel + (rel_t - rel) * (1 - exp(-dt * 12))
 		# body and bike push apart about their shared centre of mass, which flies on undisturbed:
 		# tucking lifts the bike, reaching down for the landing drops it
@@ -809,7 +815,13 @@ func flow_up() -> void:
 
 ## Every float field finite? (the frame loop's safety net)
 func is_sane() -> bool:
-	for k in ["x", "z", "y", "vy", "v", "heading", "pitch", "pitch_v", "lean", "lean_v", "steer", "slip", "course", "compress", "compress_v"]:
+	for k in ["x", "z", "y", "vy", "v", "heading", "pitch", "pitch_v", "lean", "lean_v", "steer", "slip", "course", "compress", "compress_v",
+			"body_x", "body_xv", "hip_shift", "hip_v", "air_lean", "air_pull", "a_drive"]:
 		if not is_finite(get(k)):
 			return false
 	return true
+
+## after a bad step: zero the body / rider state so a NaN there can't keep poisoning the ride
+func reset_body() -> void:
+	body_v = 0; body_y = y; body_x = 0; body_xv = 0; hip_shift = 0; hip_v = 0; v_last = NAN
+	air_lean = 0; air_pull = 0; a_drive = 0; pitch_v = 0; compress_v = 0; lean_v = 0

@@ -10,6 +10,8 @@ extends Node3D
 
 const MUD_SHADER := preload("res://shaders/grime_mud.gdshader")
 const WET_SHADER := preload("res://shaders/grime_wet.gdshader")
+## how fast mud builds up (1 = the web version: fully caked after ~40 s of fast dirt riding; 0.25 = ~2.5 min)
+const MUD_RATE := 0.25
 
 var roots: Array[Node] = []       # the bike rig + the rider (the rider leaves the rig in a crash)
 var mud := 0.0
@@ -31,6 +33,15 @@ func _init() -> void:
 	_wet_mat.shader = WET_SHADER
 	_wet_mat.render_priority = 1
 	_build_drips()
+
+## many base materials are shared (glb imports, the paint / wheel caches): take our passes off them when
+## the ride ends, or the next ride skips them as "already layered" and the garage bike keeps the mud
+func _exit_tree() -> void:
+	for m in _mats:
+		if is_instance_valid(m) and m.next_pass == _mats[m]:
+			m.next_pass = null
+	_mats.clear()
+	RenderingServer.global_shader_parameter_set("grime", Vector4.ZERO)
 
 func watch(n: Node) -> void:
 	roots.append(n)
@@ -100,7 +111,7 @@ func feed(dt: float, surf: int, speed: float, skid: bool, air: bool, landed: flo
 		elif surf == 3: rate = speed * 0.0016 + (0.05 if skid else 0.0)
 		else: rate = 0.01 if skid else 0.0
 	if wet > 0.3: rate *= 2.5   # a wet bike picks mud up much faster
-	var gain := rate * dt + (0.05 * landed if landed > 0.0 and surf != 0 else 0.0)
+	var gain := (rate * dt + (0.05 * landed if landed > 0.0 and surf != 0 else 0.0)) * MUD_RATE
 	if gain > 0.0:
 		# the colour shifts toward the ground it's picking up now (darker: damp, packed dirt)
 		var target := (col * (0.62 if surf == 3 else 0.5)).lerp(Color(0.3, 0.2, 0.11), 0.35)
