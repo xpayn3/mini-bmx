@@ -54,6 +54,58 @@ const LOGOS := {
 }
 
 const WHEEL_SIZES := {"26": 559, "27.5": 584, "29": 622}
+
+## tyre models (popular DH tyres, our own approximation of each tread). Picking one sets the tread,
+## casing, width and the sidewall lettering; touching any of those turns the model back to "custom".
+const TYRE_MODELS := {
+	"custom":          {"label": "Custom"},
+	"minion_dhf":      {"label": "Maxxis Minion DHF",     "brand": "MAXXIS",      "tread": "knobby", "pattern": "knobby",  "casing": "round",  "tyre_w": 2.5},
+	"minion_dhr":      {"label": "Maxxis Minion DHR II",  "brand": "MAXXIS",      "tread": "knobby", "pattern": "paddle",  "casing": "square", "tyre_w": 2.4},
+	"assegai":         {"label": "Maxxis Assegai",        "brand": "MAXXIS",      "tread": "knobby", "pattern": "dense",   "casing": "square", "tyre_w": 2.5},
+	"shorty":          {"label": "Maxxis Shorty (mud)",   "brand": "MAXXIS",      "tread": "knobby", "pattern": "spike",   "casing": "round",  "tyre_w": 2.4},
+	"minion_ss":       {"label": "Maxxis Minion SS",      "brand": "MAXXIS",      "tread": "semi",   "pattern": "semi",    "casing": "square", "tyre_w": 2.3},
+	"magic_mary":      {"label": "Schwalbe Magic Mary",   "brand": "SCHWALBE",    "tread": "knobby", "pattern": "stagger", "casing": "round",  "tyre_w": 2.4},
+	"big_betty":       {"label": "Schwalbe Big Betty",    "brand": "SCHWALBE",    "tread": "knobby", "pattern": "block",   "casing": "round",  "tyre_w": 2.4},
+	"dh22":            {"label": "Michelin DH22",         "brand": "MICHELIN",    "tread": "knobby", "pattern": "dense",   "casing": "square", "tyre_w": 2.4},
+	"dh_slick":        {"label": "Michelin DH Slick",     "brand": "MICHELIN",    "tread": "slick",  "pattern": "slick",   "casing": "round",  "tyre_w": 2.4},
+	"kryptotal":       {"label": "Continental Kryptotal", "brand": "CONTINENTAL", "tread": "knobby", "pattern": "block",   "casing": "square", "tyre_w": 2.4},
+	"butcher":         {"label": "Specialized Butcher",   "brand": "SPECIALIZED", "tread": "knobby", "pattern": "paddle",  "casing": "round",  "tyre_w": 2.6},
+}
+const PATTERN_NAMES := [["knobby", "Classic knobs"], ["paddle", "Paddle centre"], ["dense", "Dense 3-across"],
+	["stagger", "Open stagger"], ["block", "Square blocks"], ["spike", "Mud spikes"], ["semi", "Semi-slick"], ["slick", "Slick"]]
+
+## rim models (popular DH rims: profile shape, material, depth / outer width in mm, rim lettering)
+const RIM_MODELS := {
+	"custom":       {"label": "Custom"},
+	"fr560":        {"label": "DT Swiss FR 560",       "brand": "DT SWISS",      "profile": "hooked",   "material": "alloy",  "depth": 24, "width": 36},
+	"deemax":       {"label": "Mavic Deemax",          "brand": "MAVIC",         "profile": "vee",      "material": "alloy",  "depth": 28, "width": 35},
+	"arc30":        {"label": "Race Face ARC 30",      "brand": "RACE FACE",     "profile": "hooked",   "material": "alloy",  "depth": 21, "width": 35},
+	"oozy":         {"label": "Spank Oozy 350",        "brand": "SPANK",         "profile": "box",      "material": "alloy",  "depth": 26, "width": 35},
+	"flow":         {"label": "Stan's Flow MK4",       "brand": "STAN'S NOTUBES","profile": "hookless", "material": "alloy",  "depth": 21, "width": 35},
+	"lg1":          {"label": "e*thirteen LG1",        "brand": "E*THIRTEEN",    "profile": "hooked",   "material": "alloy",  "depth": 24, "width": 35},
+	"fuse":         {"label": "We Are One Fuse",       "brand": "WE ARE ONE",    "profile": "round",    "material": "carbon", "depth": 25, "width": 36},
+	"reserve30":    {"label": "Reserve 30 HD",         "brand": "RESERVE",       "profile": "hookless", "material": "carbon", "depth": 28, "width": 37},
+	"synthesis":    {"label": "Crankbrothers Synthesis","brand": "CRANKBROTHERS","profile": "vee",      "material": "carbon", "depth": 26, "width": 36},
+	"moto":         {"label": "Zipp 3Zero Moto",       "brand": "ZIPP",          "profile": "round",    "material": "carbon", "depth": 20, "width": 36},
+}
+const RIM_PROFILE_NAMES := [["hooked", "Hooked (classic)"], ["hookless", "Hookless"], ["box", "Box section"],
+	["vee", "Deep V"], ["round", "Round tube"]]
+
+## a tyre / rim model's numbers into the build (and its brand onto the lettering)
+static func apply_tyre_model(b: Dictionary, key: String) -> void:
+	b.wheels.tyre_model = key
+	var m: Dictionary = TYRE_MODELS.get(key, {})
+	if not m.has("brand"): return
+	for k in ["tread", "pattern", "casing", "tyre_w"]: b.wheels[k] = m[k]
+	b.logos.tyres.logo = "text"; b.logos.tyres.text = m.brand
+
+static func apply_rim_model(b: Dictionary, key: String) -> void:
+	b.wheels.rim_model = key
+	var m: Dictionary = RIM_MODELS.get(key, {})
+	if not m.has("brand"): return
+	b.wheels.rim_profile = m.profile; b.wheels.rim_material = m.material
+	b.wheels.rim_depth = m.depth; b.wheels.rim_width = m.width
+	b.logos.rims.logo = "text"; b.logos.rims.text = m.brand
 const CASSETTES := {
 	"dh7":   {"label": "7-speed DH 11–24", "cogs": [11, 12, 14, 16, 18, 21, 24]},
 	"dh7w":  {"label": "7-speed wide 11–28", "cogs": [11, 13, 15, 17, 20, 24, 28]},
@@ -84,13 +136,16 @@ static func default_build() -> Dictionary:
 			"chainstay": {"logo": "cinelli", "text": "", "fill": "f4f4f0", "stroke": "141418"},
 			"forklegs": {"logo": "fox", "text": "", "fill": "f4f4f0", "stroke": "141418"},
 			"tyres": {"logo": "text", "text": "MAXXIS", "fill": "f4f4f0", "stroke": "141418"},
-			"rims": {"logo": "text", "text": "GRAVITY", "fill": "f4f4f0", "stroke": "141418"},
+			"rims": {"logo": "text", "text": "GRAVITY", "fill": "f4f4f0", "stroke": "141418", "count": 2},
 		},
 		"wheels": {
 			"front": "29", "rear": "27.5", "tyre_w": 2.5, "tread": "knobby", "sidewall": "black",
+			"tyre_model": "custom", "pattern": "knobby", "casing": "round",
+			"rim_model": "custom", "rim_profile": "hooked", "rim_material": "alloy",
 			"rim_color": "1a1a1c", "rim_finish": "matte", "rim_depth": 28, "rim_width": 30,
 			"spokes": 32, "lacing": 3, "gauge": 1, "spoke_color": "b8bcc0", "nipple_color": "e8432e", "hub_color": "1a1a1c",
 		},
+		"bars": {"width": 780, "rise": 30, "material": "alloy"},
 		"suspension": {"fork_travel": 200, "shock_travel": 200, "fork_spring": 1, "shock_spring": 1, "rebound": 1},
 		"drive": {"ring": 34, "cassette": "dh7"},
 	}
@@ -101,6 +156,19 @@ static func load_build() -> Dictionary:
 		var j = JSON.parse_string(FileAccess.get_file_as_string(PATH))
 		if j is Dictionary:
 			_merge(b, j)
+	# tests: BMX_BUILD="wheels.rim_model=deemax;bars.width=820;..." (models applied through their presets)
+	for kv in OS.get_environment("BMX_BUILD").split(";", false):
+		var p := kv.split("=")
+		if p.size() != 2: continue
+		var path := p[0].split(".")
+		var d = b
+		for i in path.size() - 1:
+			d = d.get(path[i]) if d is Dictionary else null
+		var key: String = path[path.size() - 1]
+		if not (d is Dictionary) or not d.has(key) or d[key] is Dictionary: continue
+		if key == "tyre_model": apply_tyre_model(b, p[1]); continue
+		if key == "rim_model": apply_rim_model(b, p[1]); continue
+		d[key] = float(p[1]) if typeof(d[key]) in [TYPE_INT, TYPE_FLOAT] else p[1]
 	return b
 
 static func _merge(dst: Dictionary, src: Dictionary) -> void:
@@ -200,9 +268,19 @@ static func decal_config(b: Dictionary) -> Dictionary:
 	if tl.logo != "none" and tl.text.strip_edges() != "":
 		cfg.tyres = {"text": tl.text, "meshes": [["wheel_front", "rubber"], ["wheel_rear", "rubber"]]}
 	var rl: Dictionary = b.logos.rims
-	if rl.logo != "none" and rl.text.strip_edges() != "":
-		cfg.rims = {"text": rl.text, "fill": Color(rl.fill), "depth": float(b.wheels.rim_depth) / 1000.0,
-			"meshes": [["wheel_front", "rim"], ["wheel_rear", "rim"]]}
+	var rim := {"fill": Color(rl.fill), "depth": float(b.wheels.rim_depth) / 1000.0, "count": int(rl.get("count", 2)),
+		"meshes": [["wheel_front", "rim"], ["wheel_rear", "rim"]]}
+	var rlogo: String = rl.logo
+	if rlogo.begins_with("file:"):
+		rim.image = rlogo.substr(5)
+	elif rlogo == "text":
+		if rl.text.strip_edges() != "": rim.text = rl.text
+	elif LOGOS.has(rlogo):
+		var lg: Dictionary = LOGOS[rlogo]
+		if lg.has("image"): rim.image = lg.image
+		if lg.has("text"): rim.text = lg.text
+	if rim.has("text") or rim.has("image"):
+		cfg.rims = rim
 	return cfg
 
 static func wheel_spec(b: Dictionary, rear: bool) -> Dictionary:
@@ -210,6 +288,7 @@ static func wheel_spec(b: Dictionary, rear: bool) -> Dictionary:
 	var spec := {
 		"bsd_mm": WHEEL_SIZES[w.rear if rear else w.front], "tyre_w_in": w.tyre_w, "tread": w.tread, "sidewall": w.sidewall,
 		"rim_color": Color(w.rim_color), "rim_finish": w.rim_finish, "rim_depth_mm": w.rim_depth, "rim_width_mm": w.rim_width,
+		"rim_profile": w.rim_profile, "rim_material": w.rim_material, "pattern": w.pattern, "casing": w.casing,
 		"spokes": int(w.spokes), "lacing": int(w.lacing), "spoke_gauge": int(w.gauge), "spoke_color": Color(w.spoke_color),
 		"nipple_color": Color(w.nipple_color), "hub_color": Color(w.hub_color), "rear": rear,
 	}
@@ -230,16 +309,22 @@ static func ride_mods(b: Dictionary) -> Dictionary:
 	var trav := (float(s.fork_travel) + float(s.shock_travel)) / 400.0     # 1 = stock 200 / 200
 	var spring_k: float = [0.88, 1.0, 1.14][int(s.fork_spring)] * 0.5 + [0.88, 1.0, 1.14][int(s.shock_spring)] * 0.5
 	var reb: float = [1.25, 1.0, 0.8][int(s.rebound)]            # slow rebound = more damping
-	var tread_grip: float = {"knobby": 1.0, "semi": 0.94, "slick": 0.82}[w.tread]
-	var tread_roll: float = {"knobby": 1.0, "semi": 0.85, "slick": 0.7}[w.tread]
+	var tread_grip: float = {"knobby": 1.0, "semi": 0.94, "slick": 0.82}.get(w.tread, 1.0)
+	var tread_roll: float = {"knobby": 1.0, "semi": 0.85, "slick": 0.7}.get(w.tread, 1.0)
+	# the knob layout on top: dense / open knobs bite more and drag more, blocks roll fast
+	tread_grip *= {"dense": 1.03, "stagger": 1.02, "spike": 1.01, "block": 0.98}.get(w.pattern, 1.0)
+	tread_roll *= {"paddle": 1.02, "dense": 1.05, "stagger": 1.05, "spike": 1.12, "block": 0.94}.get(w.pattern, 1.0)
+	if w.casing == "square": tread_grip *= 1.02   # square shoulders hold an edge in turns
 	var width_grip := 1.0 + (float(w.tyre_w) - 2.5) * 0.25
 	var size_roll := 1.0 - ((rf + rr) / 2.0 - 0.3645) * 1.6         # bigger wheels roll over stuff easier
 	var spoke_w := 1.0 + (int(w.spokes) - 32) * 0.004 + (int(w.gauge) - 1) * 0.02 + (float(w.rim_depth) - 28) * 0.002
+	if w.rim_material == "carbon": spoke_w *= 0.97   # lighter, stiffer wheels
 	var ride := {
 		"travel": trav, "legComp": 0.9 + 0.1 * trav, "landSoak": trav,
 		"tyreHz": spring_k, "tyreDamp": reb,
 		"grip": tread_grip * width_grip, "rollRes": tread_roll * size_roll * (1.0 + (float(w.tyre_w) - 2.5) * 0.2),
-		"pedalLaunch": 1.0 / spoke_w, "steerRate": 1.0 / sqrt(spoke_w) * (1.0 - (rf - 0.374) * 1.2),
+		# wider bars: slower, steadier steering (780 mm = 1)
+		"pedalLaunch": 1.0 / spoke_w, "steerRate": 1.0 / sqrt(spoke_w) * (1.0 - (rf - 0.374) * 1.2) * (1.0 - (float(b.bars.width) - 780.0) * 0.0015),
 	}
 	var cogs: Array = CASSETTES[b.drive.cassette].cogs
 	return {"ride": ride, "wheel_f": rf, "wheel_r": rr, "cogs": cogs, "ring_k": float(b.drive.ring) / 34.0,

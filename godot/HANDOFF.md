@@ -128,9 +128,14 @@ F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A 
   warm shed lights + HDRI sky, SDFGI, volumetric fog. The door rolls up on the first visit each session.
 - Camera: subtle **handheld** front view, drag to orbit, wheel to zoom, **always kept inside the room**.
 - Tabs: Paint (parts × colour × NFS-style finishes: gloss/metallic/pearl/candy/satin/matte/chrome/anodized),
-  Logos (spots, built-in logos, import your own PNG, tyre/rim lettering), Wheels (26/27.5/29, tyre width,
-  tread, rims, spokes, lacing, gauge, colours), Suspension, Gears (chainring, cassettes), Rider (rider on
-  **training rollers**, preview situations, every bone slider), Kit (rider standing beside the bike).
+  Logos (spots, built-in logos, import your own PNG, tyre lettering, rim decals: lettering or any logo,
+  1–4 per side), Wheels (26/27.5/29; **tyre models** Maxxis/Schwalbe/Michelin/Continental/Specialized →
+  tread pattern + round/square casing + brand on the sidewall; **rim models** DT/Mavic/Race Face/Spank/
+  Stan's/e13/We Are One/Reserve/Crankbrothers/Zipp → profile hooked/hookless/box/deep V/round, alloy or
+  carbon weave, brand on the rim; spokes, lacing, gauge, colours), Bars (`handlebar.gd`: width 740–820,
+  rise 0–50 mm, alloy / carbon; reshapes the dh.glb steer mesh, grips + levers follow), Shocks, Gears
+  (chainring, cassettes), Rider (rider on **training rollers**, preview situations, every bone slider),
+  Kit (rider standing beside the bike).
 - Compact UI drawn at `UI_SCALE` 0.82 with a fixed-width card; long labels ellipsize.
 - Bike height is placed from the **real tyre size and real axle positions** (no tyre clipping into the floor
   or the roller drums; verified with `BMX_TYRE_PROBE`).
@@ -172,6 +177,7 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `BMX_GARAGE_TAB=paint…kit`, `BMX_GARAGE_RIDER=coast/pedal/sprint/descend/air` | garage tab / rider preview |
 | `BMX_GARAGE_CAM=orbit,pitch,dist`, `BMX_POSE=key=val,...` | garage camera / pose override |
 | `BMX_TYRE_PROBE=1` | measures tyre-to-floor / tyre-to-drum gaps for 12 wheel setups, then quits |
+| `BMX_BUILD=wheels.rim_model=deemax;bars.width=820;logos.rims.count=4` | overrides the garage build for a test run (not saved unless you touch a control) |
 | `-s res://tools/terrain_cs_cmp.gd --headless` | C# vs GDScript terrain must be EXACT |
 | `-s res://tools/wood_edge_probe.gd --headless` | drives angled lines onto every wooden ramp; must report `walls=0` |
 | `BMX_FENCE=dir/prefix` (+ `BMX_FENCE_STYLE=ranch/picket`) | autotest rides into the nearest fence, screenshots before / after the smash |

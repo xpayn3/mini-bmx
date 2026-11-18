@@ -76,6 +76,7 @@ const VIEWS := {
 	"paint": [0.0, 10.0, 4.4, Vector3(0, 0.85, 0)],
 	"logos": [PI / 2, 6.0, 3.0, Vector3(0, 0.6, 0)],
 	"wheels": [0.25, 8.0, 2.4, Vector3(0.6, 0.4, 0)],
+	"bars": [0.9, 14.0, 1.7, Vector3(0.45, 1.0, 0)],
 	"suspension": [1.0, 10.0, 2.2, Vector3(0.05, 0.6, 0)],
 	"drive": [PI / 2 + 0.3, 6.0, 2.0, Vector3(-0.3, 0.35, 0)],
 	"rider": [0.0, 7.0, 4.3, Vector3(-0.05, 1.0, 0)],
@@ -704,7 +705,7 @@ func _build_ui() -> void:
 	var tab_box := func(c: Color) -> StyleBoxFlat:
 		var s := UITheme.box(c, 6, 5); s.content_margin_top = 6; s.content_margin_bottom = 6
 		return s
-	for t in [["paint", "Paint"], ["logos", "Logos"], ["wheels", "Wheels"], ["suspension", "Suspension"], ["drive", "Gears"], ["rider", "Rider"], ["kit", "Kit"]]:
+	for t in [["paint", "Paint"], ["logos", "Logos"], ["wheels", "Wheels"], ["bars", "Bars"], ["suspension", "Shocks"], ["drive", "Gears"], ["rider", "Rider"], ["kit", "Kit"]]:
 		var b := Button.new()
 		b.text = t[1]; b.toggle_mode = true; b.button_group = grp
 		b.button_pressed = t[0] == tab
@@ -812,6 +813,7 @@ func _set_tab(t: String) -> void:
 		"paint": _paint_page()
 		"logos": _logos_page()
 		"wheels": _wheels_page()
+		"bars": _bars_page()
 		"suspension": _susp_page()
 		"drive": _drive_page()
 		"rider": _rider_page()
@@ -951,8 +953,31 @@ func _logos_page() -> void:
 		g.add_child(b)
 	body.add_child(g)
 	var L: Dictionary = build.logos[logo_slot]
-	if logo_slot in ["tyres", "rims"]:
-		_h("SIDEWALL LETTERING" if logo_slot == "tyres" else "RIM LETTERING")
+	if logo_slot == "rims":
+		_h("RIM DECALS")
+		var items := [["text", "Lettering"], ["none", "None"]]
+		for k in BikeBuild.LOGOS:
+			var lg: Dictionary = BikeBuild.LOGOS[k]
+			if lg.has("image") or lg.has("text"): items.append([k, lg.label])
+		for f in BikeBuild.imported_logos():
+			items.append(["file:" + f, "📁 " + f.get_file().get_basename()])
+		_choice("Decal", items, L.logo, func(v): L.logo = v; _set_tab.call_deferred("logos"))
+		_choice("Repeats", [[1, "1 per side"], [2, "2 per side"], [3, "3 per side"], [4, "4 per side"]], int(L.get("count", 2)),
+			func(v): L.count = v)
+		var imp := UITheme.button("Import your own PNG…", func(): _file_dialog.popup_centered_ratio(0.6), 14)
+		body.add_child(imp)
+		if L.logo == "text":
+			var te := LineEdit.new(); te.text = L.text; te.max_length = 14
+			te.text_changed.connect(func(t): L.text = t.to_upper(); _changed())
+			_row("Text", te)
+		if L.logo == "text" or BikeBuild.LOGOS.get(L.logo, {}).has("text"):
+			_h("COLOUR")
+			_swatches(L.fill, func(h): L.fill = h)
+			_color("Lettering", L.fill, func(h): L.fill = h)
+		_note("Picking a rim model in the Wheels tab puts its brand on the rims.")
+		return
+	if logo_slot == "tyres":
+		_h("SIDEWALL LETTERING")
 		_choice("Show", [["text", "On"], ["none", "Off"]], L.logo, func(v): L.logo = v)
 		var te := LineEdit.new(); te.text = L.text; te.max_length = 14
 		te.text_changed.connect(func(t): L.text = t.to_upper(); _changed())
@@ -988,7 +1013,7 @@ func _on_logo_file(path: String) -> void:
 	var p := BikeBuild.import_logo(path)
 	if p == "":
 		_toast("Couldn't read that image"); return
-	if BikeBuild.SLOTS.has(logo_slot):
+	if BikeBuild.SLOTS.has(logo_slot) or logo_slot == "rims":
 		build.logos[logo_slot].logo = "file:" + p
 	_changed()
 	_set_tab("logos")
@@ -1003,14 +1028,31 @@ func _wheels_page() -> void:
 	tip.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART   # wraps instead of widening the card
 	body.add_child(tip)
 	_h("TYRES")
-	_slide("Width", 2.3, 2.6, 0.1, W.tyre_w, "in", func(v): W.tyre_w = v)
-	_choice("Tread", [["knobby", "Knobby (max grip)"], ["semi", "Semi-slick"], ["slick", "Slick (fast, sketchy)"]], W.tread, func(v): W.tread = v)
+	var tyre_items := []
+	for k in BikeBuild.TYRE_MODELS: tyre_items.append([k, BikeBuild.TYRE_MODELS[k].label])
+	_choice("Model", tyre_items, W.tyre_model, func(v):
+		BikeBuild.apply_tyre_model(build, v); _set_tab.call_deferred("wheels"))
+	var tyre_custom := func(): W.tyre_model = "custom"
+	_slide("Width", 2.3, 2.6, 0.1, W.tyre_w, "in", func(v): W.tyre_w = v; tyre_custom.call())
+	_choice("Tread", [["knobby", "Knobby (max grip)"], ["semi", "Semi-slick"], ["slick", "Slick (fast, sketchy)"]], W.tread, func(v):
+		W.tread = v; W.pattern = v; tyre_custom.call(); _set_tab.call_deferred("wheels"))
+	if W.tread == "knobby":
+		_choice("Knobs", BikeBuild.PATTERN_NAMES.slice(0, 6), W.pattern, func(v): W.pattern = v; tyre_custom.call())
+	_choice("Profile", [["round", "Round"], ["square", "Square shoulders"]], W.casing, func(v): W.casing = v; tyre_custom.call())
 	_choice("Sidewall", [["black", "Black"], ["tan", "Tan wall"]], W.sidewall, func(v): W.sidewall = v)
 	_h("RIMS")
+	var rim_items := []
+	for k in BikeBuild.RIM_MODELS: rim_items.append([k, BikeBuild.RIM_MODELS[k].label])
+	_choice("Model", rim_items, W.rim_model, func(v):
+		BikeBuild.apply_rim_model(build, v); _set_tab.call_deferred("wheels"))
+	var rim_custom := func(): W.rim_model = "custom"
+	_choice("Profile", BikeBuild.RIM_PROFILE_NAMES, W.rim_profile, func(v): W.rim_profile = v; rim_custom.call())
+	_choice("Material", [["alloy", "Alloy"], ["carbon", "Carbon"]], W.rim_material, func(v): W.rim_material = v; rim_custom.call())
 	_swatches(W.rim_color, func(h): W.rim_color = h)
 	_choice("Finish", [["matte", "Matte"], ["gloss", "Gloss"], ["chrome", "Polished"]], W.rim_finish, func(v): W.rim_finish = v)
-	_slide("Rim depth", 20, 40, 1, W.rim_depth, "mm", func(v): W.rim_depth = v)
-	_slide("Rim width", 25, 40, 1, W.rim_width, "mm", func(v): W.rim_width = v)
+	_slide("Rim depth", 20, 40, 1, W.rim_depth, "mm", func(v): W.rim_depth = v; rim_custom.call())
+	_slide("Rim width", 25, 40, 1, W.rim_width, "mm", func(v): W.rim_width = v; rim_custom.call())
+	_note("Rim and tyre lettering: Logos tab → Rims / Tyre walls.")
 	_h("SPOKES")
 	_choice("Count", [[24, "24"], [28, "28"], [32, "32"], [36, "36"]], W.spokes, func(v): W.spokes = v)
 	_choice("Lacing", [[0, "Radial"], [1, "1-cross"], [2, "2-cross"], [3, "3-cross"]], W.lacing, func(v): W.lacing = v)
@@ -1018,6 +1060,14 @@ func _wheels_page() -> void:
 	_color("Spoke colour", W.spoke_color, func(h): W.spoke_color = h)
 	_color("Nipples", W.nipple_color, func(h): W.nipple_color = h)
 	_color("Hubs", W.hub_color, func(h): W.hub_color = h)
+
+func _bars_page() -> void:
+	var B: Dictionary = build.bars
+	_h("HANDLEBAR")
+	_choice("Width", Handlebar.WIDTHS.map(func(w): return [w, "%d mm" % w]), int(B.width), func(v): B.width = v)
+	_choice("Rise", Handlebar.RISES.map(func(r): return [r, "%d mm" % r if r > 0 else "Flat"]), int(B.rise), func(v): B.rise = v)
+	_choice("Material", Handlebar.MATERIALS, B.material, func(v): B.material = v)
+	_note("Wide bars steer slower but steadier; narrow bars turn quicker. Alloy bars take the bars / stem colour from Paint.")
 
 func _susp_page() -> void:
 	var S: Dictionary = build.suspension
