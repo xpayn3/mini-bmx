@@ -150,37 +150,34 @@ func _unhandled_input(e: InputEvent) -> void:
 		get_viewport().get_texture().get_image().save_png(p)
 		flash("Screenshot saved")
 
-var side_panels := {}
+var card: TuneCard   # the tuning card (P Ride, K Rider, L Look): built on first use
 
-## the right-hand panels (P tuning, K rider position, L rider look): one at a time
+const SIDE_TABS := {"tune": "ride", "pose": "rider", "look": "look", "ride": "ride", "rider": "rider"}
+
 func toggle_tune() -> void:
 	_toggle_side("tune")
 
 func _side_open() -> bool:
-	for k in side_panels:
-		if side_panels[k].visible: return true
-	return false
+	return card != null and card.visible
 
-## the ✕ on a side panel
+## the ✕ on the card
 func close_sides() -> void:
-	for k in side_panels: side_panels[k].visible = false
+	if card: card.visible = false
 	quick.visible = Settings.get_v("hud_quick")
 
+## open the card on a tab (tune / pose / look, or ride / rider / look); the same key again closes it
 func _toggle_side(which: String) -> void:
-	var was_open: bool = side_panels.has(which) and side_panels[which].visible
-	if was_open:
+	var t: String = SIDE_TABS.get(which, "ride")
+	if card and card.visible and card.tab == t:
 		close_sides()
 		return
-	for k in side_panels: side_panels[k].visible = false
-	if not side_panels.has(which):
-		var p: Control
-		match which:
-			"tune": p = load("res://scripts/ui/tune_panel.gd").new()
-			"pose": p = RiderPanels.PosePanel.new(game)
-			"look": p = RiderPanels.LookPanel.new(game)
-		root.add_child(p)
-		side_panels[which] = p
-	side_panels[which].visible = true
+	if card == null:
+		card = TuneCard.new(game)
+		card.tab = t
+		root.add_child(card)
+	else:
+		card.show_tab(t)
+	card.visible = true
 	quick.visible = false
 
 func _build_records() -> void:

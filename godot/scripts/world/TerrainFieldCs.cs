@@ -939,12 +939,10 @@ public partial class TerrainFieldCs : RefCounted
 	{
 		double h = 0.0;
 		query(x, z);
-		if (q_d < 12.0 && q_bt > 0.004)
-		{
-			double wl = minf(1.0, maxf(0.0, q_k / 0.02));
-			double wr = minf(1.0, maxf(0.0, -q_k / 0.02));
-			h = maxf(h, maxf(berm_shape(-q_a, q_bt * wl), berm_shape(q_a, q_bt * wr)));
-		}
+		// q_bt is signed (> 0 left berm, < 0 right) and already smooth along the course
+		double bt = Math.Abs(q_bt) - 0.004;
+		if (q_d < 12.0 && bt > 0.0)
+			h = maxf(h, q_bt > 0.0 ? berm_shape(-q_a, bt) : berm_shape(q_a, bt));
 		double p = pathN(x, z);
 		if (Math.Abs(p) < 0.2)
 		{

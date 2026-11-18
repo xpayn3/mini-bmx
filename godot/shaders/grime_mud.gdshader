@@ -11,9 +11,19 @@ global uniform vec4 grime;
 global uniform vec4 mud_col : source_color;
 global uniform mat4 grime_root;
 uniform float bias = 1.0;   // how readily this part collects mud (tyres 1.8 .. helmet 0.5)
+// rider parts move against the bike every frame (pedalling legs, a bending spine, ragdoll): grime.gd pins
+// them so the mud stays put on the part. 0 = free (bike parts), 1 = pinned, 2 = pinned + skinned (the
+// torso: noise from its rest shape in CUSTOM0, not the bent one). grime_hrow: height above the bike root
+// as a fixed function of the part's own vertex (taken once from the riding pose).
+// tyre: mud stuck to the rubber (no height term, so it doesn't swim while the wheel turns), first on the
+// tread where it meets the ground, spreading onto the sidewalls only as it builds. Axle = local Z.
+uniform bool tyre = false;
+instance uniform float grime_pin = 0.0;
+instance uniform vec4 grime_hrow = vec4(0.0);
 
 varying vec3 v_local;
 varying float v_hgt;
+varying float v_tread;
 
 float gr_hash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
 float gr_noise(vec3 x) {
@@ -23,8 +33,10 @@ float gr_noise(vec3 x) {
 }
 
 void vertex() {
-	v_local = VERTEX;
-	v_hgt = (grime_root * (MODEL_MATRIX * vec4(VERTEX, 1.0))).y;
+	vec3 rest = grime_pin > 1.5 ? CUSTOM0.xyz : VERTEX;
+	v_local = rest;
+	v_tread = smoothstep(0.5, 0.85, 1.0 - abs(normalize(NORMAL).z));
+	v_hgt = grime_pin > 0.5 ? dot(grime_hrow, vec4(rest, 1.0)) : (grime_root * (MODEL_MATRIX * vec4(VERTEX, 1.0))).y;
 	// drawn exactly over the part: nudge toward the camera so it wins the depth test (reverse Z)
 	POSITION = PROJECTION_MATRIX * (MODELVIEW_MATRIX * vec4(VERTEX, 1.0));
 	POSITION.z += 0.00004 * POSITION.w;
@@ -32,7 +44,7 @@ void vertex() {
 
 void fragment() {
 	float hgt = clamp(v_hgt / 1.5, 0.0, 1.0);
-	float cover = grime.x * bias * (1.25 - hgt * 1.4);
+	float cover = tyre ? grime.x * (0.25 + 1.0 * v_tread) : grime.x * bias * (1.25 - hgt * 1.4);
 	float n = gr_noise(v_local * 26.0) * 0.6 + gr_noise(v_local * 71.0) * 0.4;
 	float fleck = gr_noise(v_local * 190.0);
 	float m = max(smoothstep(1.0 - cover, 1.08 - cover, n), step(1.0 - cover * 0.35, fleck));

@@ -1,0 +1,314 @@
+class_name TuneCard
+extends PanelContainer
+## One card for every slider (right-hand side): RIDE (how the bike handles), RIDER (pose, movement and
+## body physics) and LOOK (kit colours), each split into category tabs so only one group shows at a
+## time. P / K / L open it on Ride / Rider / Look; the same key again closes it. Values save as they move.
+
+## [id, tab label, [[category, [sources...]], ...]]. A source is "T:<Tune.DEFS group>",
+## "P:<RiderPanels.POSE_DEFS group>", "L:<RiderPanels.LOOK_ROWS group>", "L:kits" or "seat".
+const TABS := [
+	["ride", "Ride", [
+		["Steering", ["T:Steering"]],
+		["Lean", ["T:Lean"]],
+		["Grip", ["T:Grip & slides", "T:Carving"]],
+		["Speed", ["T:Speed", "T:Momentum"]],
+		["Suspension", ["T:Wheels & pump"]],
+		["Jumps", ["T:Jumping", "T:Air"]],
+	]],
+	["rider", "Rider", [
+		["Body", ["P:Body position", "seat", "P:Pelvis"]],
+		["Spine", ["P:Spine", "P:Chest"]],
+		["Head", ["P:Head"]],
+		["Arms", ["P:Shoulders & arms"]],
+		["Legs", ["P:Legs & feet"]],
+		["Motion", ["P:Movement"]],
+		["Physics", ["T:Legs & body"]],
+	]],
+	["look", "Look", [
+		["Kits", ["L:kits"]],
+		["Helmet", ["L:Helmet", "L:Goggles"]],
+		["Clothes", ["L:Kit", "L:Shoes"]],
+	]],
+]
+
+static var last_cat := {"ride": 0, "rider": 0, "look": 0}   # remembered for the session
+
+var game
+var tab := "ride"
+var pose: Dictionary
+var pose_defaults: Dictionary
+var look: Dictionary
+var tab_row: HBoxContainer
+var cat_row: HFlowContainer
+var sub: Label
+var list: VBoxContainer
+var scroll: ScrollContainer
+
+
+func _init(g) -> void:
+	game = g
+
+
+func _ready() -> void:
+	theme = UITheme.get_theme()
+	set_anchors_preset(Control.PRESET_RIGHT_WIDE)
+	offset_left = -380; offset_right = -14; offset_top = 64; offset_bottom = -90
+	mouse_filter = Control.MOUSE_FILTER_STOP
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 6)
+	add_child(vb)
+	var head := HBoxContainer.new()
+	var t := UITheme.label("TUNING", 18, UITheme.ACCENT, true)
+	t.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(t)
+	var rs := UITheme.button("Reset", _reset_category, 13)
+	rs.tooltip_text = "Reset the sliders on this tab"
+	rs.custom_minimum_size = Vector2(0, 30); rs.focus_mode = Control.FOCUS_NONE
+	head.add_child(rs)
+	head.add_child(UITheme.close_button(func(): get_tree().call_group("hud", "close_sides")))
+	vb.add_child(head)
+	tab_row = HBoxContainer.new()
+	tab_row.add_theme_constant_override("separation", 4)
+	vb.add_child(tab_row)
+	cat_row = HFlowContainer.new()
+	cat_row.add_theme_constant_override("h_separation", 3)
+	cat_row.add_theme_constant_override("v_separation", 4)
+	vb.add_child(cat_row)
+	sub = UITheme.label("", 12, UITheme.MUTED)
+	sub.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vb.add_child(sub)
+	scroll = ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	vb.add_child(scroll)
+	list = VBoxContainer.new()
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(list)
+	var grp := ButtonGroup.new()
+	for d in TABS:
+		var b := _tab_button(d[1], grp, 14)
+		b.name = "T_" + d[0]
+		b.pressed.connect(func(): show_tab(d[0]))
+		tab_row.add_child(b)
+	show_tab(tab)
+
+
+## open on a tab (re-reads every value, so nothing shows stale after a reset elsewhere)
+func show_tab(id: String) -> void:
+	tab = id
+	var b := tab_row.get_node_or_null("T_" + id) as Button
+	if b: b.button_pressed = true
+	pose_defaults = Rider.NEUTRAL.duplicate(); pose_defaults.merge(GameState.BIKES[GameState.bike_id].pose, true)
+	pose = RiderPanels.load_pose(GameState.bike_id, GameState.BIKES[GameState.bike_id].pose)
+	look = RiderPanels.load_look()
+	for c in cat_row.get_children(): c.queue_free()
+	var grp := ButtonGroup.new()
+	var cats: Array = _cats()
+	for i in cats.size():
+		var cb := _tab_button(cats[i][0], grp, 12)
+		cb.size_flags_horizontal = Control.SIZE_FILL
+		cb.button_pressed = i == last_cat[tab]
+		cb.pressed.connect(func(): last_cat[tab] = i; _fill())
+		cat_row.add_child(cb)
+	match tab:
+		"ride": sub.text = "Scaled by the bike · ☆ pins to Quick tune"
+		"rider": sub.text = "%s · saved per bike" % GameState.BIKES[GameState.bike_id].label
+		"look": sub.text = "Helmet, goggles, kit and shoes"
+	_fill()
+
+
+func _cats() -> Array:
+	for d in TABS:
+		if d[0] == tab: return d[2]
+	return []
+
+
+func _fill() -> void:
+	for c in list.get_children(): c.queue_free()
+	var cats: Array = _cats()
+	var cat: Array = cats[clampi(last_cat[tab], 0, cats.size() - 1)]
+	if tab == "rider":
+		var sv := UITheme.button("Side view", func(): game.cam.set_mode("side"); game.flash("Side view"), 12)
+		sv.custom_minimum_size = Vector2(0, 28); sv.focus_mode = Control.FOCUS_NONE
+		list.add_child(sv)
+	for src: String in cat[1]:
+		var kind := src.substr(0, src.find(":")) if ":" in src else src
+		var name := src.substr(src.find(":") + 1)
+		match kind:
+			"T": _tune_group(name)
+			"P": _pose_group(name)
+			"seat": _seat_toggle()
+			"L": _look_group(name)
+	scroll.scroll_vertical = 0
+
+
+# ---------------------------------------------------------------- shared bits
+func _tab_button(text: String, grp: ButtonGroup, size: int) -> Button:
+	var mk := func(c: Color) -> StyleBoxFlat:
+		var s := UITheme.box(c, 6, 4); s.content_margin_top = 4; s.content_margin_bottom = 4
+		return s
+	var b := Button.new()
+	b.text = text; b.toggle_mode = true; b.button_group = grp
+	b.focus_mode = Control.FOCUS_NONE
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b.add_theme_font_size_override("font_size", size)
+	b.add_theme_stylebox_override("normal", mk.call(UITheme.PANEL_LIGHT))
+	b.add_theme_stylebox_override("hover", mk.call(Color(1, 1, 1, 0.22)))
+	b.add_theme_stylebox_override("pressed", mk.call(UITheme.ACCENT))
+	b.add_theme_stylebox_override("hover_pressed", mk.call(UITheme.ACCENT))
+	b.add_theme_color_override("font_pressed_color", Color.BLACK)
+	b.add_theme_color_override("font_hover_pressed_color", Color.BLACK)
+	return b
+
+
+func _header(text: String) -> void:
+	list.add_child(UITheme.label(text.to_upper(), 13, UITheme.ACCENT, true))
+
+
+## name / value / reset on one row, the slider full width below
+func _slider(label: String, lo: float, hi: float, stp: float, val: float, def: float, fmt: Callable,
+		on_change: Callable, pin: Button = null) -> void:
+	var hb := HBoxContainer.new()
+	var l := UITheme.label(label, 13); l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	l.clip_text = true; l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	var s := HSlider.new()
+	s.min_value = lo; s.max_value = hi; s.step = stp; s.value = val
+	s.size_flags_horizontal = Control.SIZE_EXPAND_FILL; s.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	s.focus_mode = Control.FOCUS_NONE
+	var vl := UITheme.label(fmt.call(val), 12, UITheme.MUTED)
+	vl.custom_minimum_size.x = 70; vl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	s.value_changed.connect(func(v): vl.text = fmt.call(v); on_change.call(v))
+	if pin: hb.add_child(pin)
+	hb.add_child(l); hb.add_child(vl)
+	hb.add_child(UITheme.reset_button(s, def))
+	list.add_child(hb)
+	list.add_child(s)
+
+
+static func _fmt_step(v: float, stp: float, unit: String) -> String:
+	var d := clampi(ceili(-log(stp) / log(10.0) - 0.001), 0, 4)
+	return (("%." + str(d) + "f") % v + " " + unit).strip_edges()
+
+
+# ---------------------------------------------------------------- RIDE + rider physics (Tune)
+func _tune_group(group: String) -> void:
+	for g in Tune.DEFS:
+		if g[0] != group: continue
+		_header("Body physics" if group == "Legs & body" else group)
+		for row in g[1]:
+			var key: String = row[0]
+			var pin := Button.new()
+			pin.text = "★" if key in Tune.pins else "☆"
+			pin.tooltip_text = "Pin to the Quick tune card"
+			pin.focus_mode = Control.FOCUS_NONE; pin.flat = true
+			pin.add_theme_color_override("font_color", UITheme.ACCENT if key in Tune.pins else UITheme.MUTED)
+			pin.pressed.connect(func(): Tune.toggle_pin(key); _fill())
+			var stp: float = row[5]
+			_slider(row[1], row[3], row[4], stp, Tune.base[key], float(Tune.defaults.get(key, Tune.base[key])),
+				func(v): return _fmt_step(v, stp, row[6]), func(v): Tune.set_value(key, v), pin)
+
+
+# ---------------------------------------------------------------- RIDER pose
+func _pose_group(group: String) -> void:
+	for g in RiderPanels.POSE_DEFS:
+		if g[0] != group: continue
+		_header(group)
+		for row in g[1]:
+			var key: String = row[0]
+			var stp: float = row[4]
+			_slider(row[1], row[2], row[3], stp, float(pose.get(key, 0.0)), float(pose_defaults.get(key, 0.0)),
+				func(v): return _fmt_step(v, stp, row[5]), func(v): pose[key] = v; _apply_pose())
+
+
+## the one pose setting that is a switch, not a slider
+func _seat_toggle() -> void:
+	var c := CheckButton.new()
+	c.text = "Keep hips above the saddle"
+	c.tooltip_text = "Never let the rider sink into the seat when sitting back"
+	c.button_pressed = bool(pose.get("seatFloor", false))
+	c.focus_mode = Control.FOCUS_NONE
+	c.add_theme_font_size_override("font_size", 13)
+	c.toggled.connect(func(on): pose.seatFloor = on; _apply_pose())
+	list.add_child(c)
+
+
+func _apply_pose() -> void:
+	game.rider.set_style(pose)
+	game.phys.bike_rock = float(pose.get("bikeRock", 1.0))
+	RiderPanels.save_pose(GameState.bike_id, pose)
+
+
+# ---------------------------------------------------------------- LOOK
+func _look_group(group: String) -> void:
+	if group == "kits":
+		_header("Kits")
+		var kits := GridContainer.new(); kits.columns = 3
+		kits.add_theme_constant_override("h_separation", 6); kits.add_theme_constant_override("v_separation", 6)
+		for k in RiderPanels.KITS:
+			var b := UITheme.button(k[0], func():
+				look = Rider.DEFAULT_LOOK.duplicate(); look.merge(k[1], true); _apply_look(); _fill(), 13)
+			b.size_flags_horizontal = Control.SIZE_EXPAND_FILL; b.focus_mode = Control.FOCUS_NONE
+			kits.add_child(b)
+		list.add_child(kits)
+		return
+	for g in RiderPanels.LOOK_ROWS:
+		if g[0] != group: continue
+		_header(group)
+		for row in g[1]:
+			var key: String = row[0]
+			list.add_child(UITheme.label(row[1], 13))
+			var hb := HFlowContainer.new()
+			hb.add_theme_constant_override("h_separation", 4); hb.add_theme_constant_override("v_separation", 4)
+			for hex in row[2]:
+				var b := Button.new()
+				b.custom_minimum_size = Vector2(22, 22)
+				var on: bool = str(look[key]).to_lower() == str(hex).to_lower()
+				b.add_theme_stylebox_override("normal", UITheme.box(Color(hex), 11, 0, Color.WHITE if on else Color(1, 1, 1, 0.2), 2 if on else 1))
+				b.add_theme_stylebox_override("hover", UITheme.box(Color(hex), 11, 0, UITheme.ACCENT, 2))
+				b.add_theme_stylebox_override("pressed", UITheme.box(Color(hex), 11, 0, UITheme.ACCENT, 2))
+				b.focus_mode = Control.FOCUS_NONE
+				b.pressed.connect(func(): look[key] = hex; _apply_look(); _fill())
+				hb.add_child(b)
+			var cp := ColorPickerButton.new()
+			cp.color = Color(look[key]); cp.edit_alpha = false
+			cp.custom_minimum_size = Vector2(30, 22)
+			cp.tooltip_text = "Any colour"
+			cp.color_changed.connect(func(c): look[key] = "#" + c.to_html(false); _apply_look())
+			hb.add_child(cp)
+			list.add_child(hb)
+
+
+func _apply_look() -> void:
+	game.rider.set_look(look)
+	RiderPanels.save_look(look)
+
+
+# ---------------------------------------------------------------- reset this category
+func _reset_category() -> void:
+	var cat: Array = _cats()[clampi(last_cat[tab], 0, _cats().size() - 1)]
+	var pose_touched := false
+	var look_touched := false
+	for src: String in cat[1]:
+		var name := src.substr(src.find(":") + 1)
+		if src.begins_with("T:"):
+			for g in Tune.DEFS:
+				if g[0] == name:
+					for row in g[1]: Tune.set_value(row[0], float(Tune.defaults[row[0]]))
+		elif src.begins_with("P:"):
+			for g in RiderPanels.POSE_DEFS:
+				if g[0] == name:
+					for row in g[1]: pose[row[0]] = pose_defaults.get(row[0], 0.0)
+			pose_touched = true
+		elif src == "seat":
+			pose.seatFloor = pose_defaults.get("seatFloor", false); pose_touched = true
+		elif src == "L:kits":
+			look = Rider.DEFAULT_LOOK.duplicate(); look_touched = true
+		elif src.begins_with("L:"):
+			for g in RiderPanels.LOOK_ROWS:
+				if g[0] == name:
+					for row in g[1]: look[row[0]] = Rider.DEFAULT_LOOK[row[0]]
+			look_touched = true
+	if pose_touched: _apply_pose()
+	if look_touched: _apply_look()
+	game.flash("%s reset" % cat[0])
+	_fill()

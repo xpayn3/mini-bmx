@@ -316,11 +316,21 @@ func _finish() -> void:
 	for i in n:
 		wsrc[i] = WIDTH[KD[i]]
 	W = _avg(wsrc, 5)
+	# BT is SIGNED: > 0 = berm on the left (turning left), < 0 = on the right. Each turn's bank is
+	# held a little past its ends (keeps the peak) and then smoothed three times (≈ a gaussian,
+	# ~20 m each way) so it builds up into the turn and unwinds out of it with no corner or step.
 	var bsrc := PackedFloat32Array(); bsrc.resize(n)
 	for i in n:
 		var k: float = KAP[i]
-		bsrc[i] = minf(0.6, 17 * absf(k)) * smooth(0.012, 0.03, absf(k)) * BERM[KD[i]]
-	BT = _avg(bsrc, 3)
+		bsrc[i] = signf(k) * minf(0.6, 17 * absf(k)) * smooth(0.012, 0.03, absf(k)) * BERM[KD[i]]
+	var held := PackedFloat32Array(); held.resize(n)
+	for i in n:
+		var best := 0.0
+		for k in range(maxi(0, i - 6), mini(n - 1, i + 6) + 1):
+			if absf(bsrc[k]) > absf(best):
+				best = bsrc[k]
+		held[i] = best
+	BT = _avg(_avg(_avg(held, 5), 5), 5)
 	var raw := PackedFloat32Array(); raw.resize(n)
 	for i in n:
 		raw[i] = maxf(TerrainField.WATER + 0.7, _M.landform(X[i], Z[i]))
