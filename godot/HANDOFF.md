@@ -1,11 +1,12 @@
 # Mini BMX (Godot) — project handoff
 
-Everything a new project / new chat needs to carry on with the Godot version of the game. Put this file
-in the new project's root as **`CLAUDE.md`** (Claude Code loads it into every chat automatically), or keep
-it as `HANDOFF.md` and point `CLAUDE.md` at it.
+Everything a new chat needs to carry on with the game. The repo root `CLAUDE.md` points here, so Claude Code
+loads it into every chat.
 
-State as of **2026-11-18**. Source: branch `claude/game-port-godot-2cd714` of `github.com/xpayn3/mini-bmx`
-(worktree `C:\Users\Luka\Documents\gamecycling\.claude\worktrees\game-port-godot-2cd714`), folder `godot/`.
+State as of **2026-11-18**. Repo `github.com/xpayn3/mini-bmx`, checkout `C:\Users\Luka\Documents\gamecycling`,
+branch `main`, folder `godot/`. The repo holds **only the Godot game** (`godot/`) and its Houdini exporters
+(`tools/`). The old three.js web prototype was moved out to `C:\Users\Luka\Documents\mini-bmx-web-archive`
+(not developed; still in git history before the removal commit).
 
 ---
 
@@ -14,8 +15,8 @@ State as of **2026-11-18**. Source: branch `claude/game-port-godot-2cd714` of `g
 A native **PC downhill / BMX riding game** in **Godot 4.7 (.NET edition)**: endless procedural trails
 (jumps, berms, rollers, rocks, fences, tape, water, biomes), physics-driven bike with suspension, a
 procedural rider with ragdoll crashes, mud / wet / dust / tyre tracks, and a **garage** to build and
-paint the downhill bike. It started as a 1:1 port of an older three.js web prototype (kept in
-`legacy-threejs/`, reference only — never develop it).
+paint the downhill bike. It started as a 1:1 port of an older three.js web prototype (archived outside the
+repo, see above — never develop it).
 
 - Main bike: **GLORY DH** (downhill frame `assets/dh.glb`), the player starts on it every launch.
   A BMX also exists (`B` cycles bikes). The web version's **bike builder is intentionally left out**.
@@ -181,7 +182,8 @@ and other GPU apps open; uncapped ~430 fps on an RTX 3090 after the C# terrain.
 
 ## 8. Decisions & the user's preferences (follow these)
 
-- **Godot only.** All work in `godot/`. Never develop `legacy-threejs/`. No browser/WebGL constraints.
+- **Godot only.** All work in `godot/`; the repo holds nothing else but the Houdini exporters. No web version,
+  no browser/WebGL constraints.
 - Leave the bike builder out. DH is the main bike. Garage changes must **not reset the camera**.
 - Garage: bike centred, open door straight behind it with the landscape outside, shed-like light, handheld
   front camera (subtle, not spinning), the room closed on all sides.
@@ -205,9 +207,7 @@ matches the garage; slower mud; review fixes (crash torso culling, NaN freeze, B
 photo mode, controls card, view distance, double world build, water re-bake, settings slider drag, garage
 rebuild hitch); rider body physics (fore/aft + air tuck/lean); bending spine + pelvis sliders.
 
-**Uncommitted at handoff time** — commit the `godot/` working tree before copying (or copy the folder as is).
-The Godot work is **not on `main` yet**: merge `claude/game-port-godot-2cd714` into `main` so new chats on
-the main checkout find it (`main` has no `godot/` folder).
+All of it is on `main` (the Godot branch was merged, the web version removed). Work continues in this repo.
 
 Known, not fixed (lower priority from the code review):
 - Records: "distance ridden" always 0; top speed lost if the window is closed instead of quitting.
@@ -227,10 +227,11 @@ Ideas offered, not started:
   garage props, loading screen, an art-style decision.
 - Rider solvers: terrain look-ahead (pump / pre-jump anticipation) and a balance/centre-of-mass solver.
 
-## 10. Starting the new project
+## 10. Setting up on a fresh checkout or machine
 
-1. Copy (or clone) the repo; the game is `godot/`, the Houdini exporters are root `tools/`.
-2. Put this file at the new project root as `CLAUDE.md`.
+1. Clone the repo; the game is `godot/`, the Houdini exporters are root `tools/`. The root `CLAUDE.md`
+   already loads this guide into every chat.
+2. Install Godot 4.7.2 .NET and the .NET 8 SDK (section 2).
 3. Open with the .NET Godot once (imports assets, builds C#), or run `dotnet build` in `godot/`.
 4. Smoke test: `BMX_SEED=4242` + `--autotest=10` → `sane=true`; `tools/terrain_cs_cmp.gd` → EXACT.
 5. Recreate the two memory notes if wanted: "Godot only" and "one game window, tests quit themselves".
