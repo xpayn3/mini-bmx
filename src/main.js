@@ -104,14 +104,17 @@ const tiltV = new ShaderPass(VerticalTiltShiftShader);
 composer.addPass(tiltH); composer.addPass(tiltV);
 composer.addPass(new OutputPass());
 const grade = new ShaderPass({
-  uniforms: { tDiffuse: { value: null } },
+  uniforms: { tDiffuse: { value: null }, uDanger: { value: 0 } },
   vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
-  fragmentShader: `uniform sampler2D tDiffuse; varying vec2 vUv;
+  fragmentShader: `uniform sampler2D tDiffuse; uniform float uDanger; varying vec2 vUv;
     void main(){ vec4 c = texture2D(tDiffuse, vUv);
       float l = dot(c.rgb, vec3(0.299,0.587,0.114));
       c.rgb = mix(vec3(l), c.rgb, 1.16);
       c.rgb += (l - 0.45) * vec3(0.035, 0.012, -0.03);   // split tone: warm highlights, cool shadows
-      vec2 d = vUv - 0.5; c.rgb *= 1.0 - dot(d,d) * 0.6;
+      vec2 d = vUv - 0.5; c.rgb *= 1.0 - dot(d,d) * (0.6 + 1.4 * uDanger);
+      // close to falling (see DANGER): the colour drains to black & white, a little contrast, darker edges
+      float g = dot(c.rgb, vec3(0.299,0.587,0.114));
+      c.rgb = mix(c.rgb, vec3((g - 0.5) * 1.15 + 0.5), uDanger * 0.92);
       gl_FragColor = c; }`,
 });
 composer.addPass(grade);
@@ -520,6 +523,25 @@ const st = { x: 0, z: 0, y: 0, vy: 0, heading: 0, v: 0, steer: 0, lean: 0, rock:
 // ---------------- crash / ragdoll ----------------
 const crash = { on: false, t: 0, pending: null, side: 1, rest: 0, bvy: 0, fallV: 0, armed: false, hold: 0 };
 const GETUP_HOLD = 0.5;   // seconds of holding Space to get back on the bike
+// DANGER (like Steep): a bad landing, a hit or a slide doesn't throw you off at once. Each mistake fills
+// the danger bar by how bad it was and the rider saves it; a second (or third) one before the bar has
+// drained is the crash. Riding clean for a moment drains it. Only a truly huge hit crashes outright.
+// While the bar is high the screen drains to black & white (grade pass, uDanger).
+const DANGER = { v: 0, since: 9, clock: 0, cool: {}, shown: 0 };
+function risk(reason, amount, save) {
+  if (crash.on || crash.pending) return;
+  if ((DANGER.cool[reason] ?? -9) > DANGER.clock) { if (save) save(); return; }   // the same mistake still unfolding
+  DANGER.cool[reason] = DANGER.clock + 0.8;
+  DANGER.v += amount; DANGER.since = 0;
+  if (DANGER.v >= 1) { crash.pending = reason; return; }
+  if (save) save();
+  st.shake = Math.max(st.shake || 0, 0.25 + amount * 0.3);
+  flash(DANGER.v > 0.6 ? 'SKETCHY!' : 'SAVED IT!');
+}
+function dangerTick(dt) {
+  DANGER.clock += dt; DANGER.since += dt;
+  if (DANGER.since > 1.2) DANGER.v = Math.max(0, DANGER.v - dt * 0.3);   // ~3 s of clean riding drains a full bar
+}
 const bodyVel = new THREE.Vector3(), spinV = new THREE.Vector3();
 function startCrash(reason) {
   crash.pending = null;
@@ -558,6 +580,7 @@ function getupUI(show, holding, k) {
 }
 function getUp() {
   crash.on = false; ragdoll.active = false; crash.hold = 0; crash.armed = false;
+  DANGER.v = 0; DANGER.cool = {};
   getupUI(false, false, 0);
   // pick the bike up where it lies, keep facing the same way
   Object.assign(st, { v: 0, vy: 0, lean: 0, leanV: 0, bikeLean: 0, counter: 0, steer: 0, steerIn: 0, yawRate: 0, air: false,
@@ -641,7 +664,7 @@ window.renderer = renderer; window.composer = composer; window.gtao = gtao; wind
 const hud = { msg: document.getElementById('msg') };
 const gauge = new Gauge();
 const airHud = new AirHud();   // live jump counter + records
-window.airHud = airHud;   // debug handle
+window.airHud = airHud; window.bmxDanger = DANGER;   // debug handles
 let msgT = 0, bestAir = 0;
 let biomeT = 0, biomeCur = 'Green Hills', biomeNext = '', biomeHold = 0;
 // smash a fence panel: wood splinters, a puff of dust, and the planks become rigid-body debris
@@ -721,6 +744,21 @@ function shift(d) {   // d = +1 easier (bigger cog), -1 harder
   gearEl.classList.remove('bump'); void gearEl.offsetWidth; gearEl.classList.add('bump');   // restart the pop
 }
 gearUI();
+// danger bar (top right, under the stamina): fills with every save, drains while you ride clean;
+// from about half full the picture drains to black & white
+const dangerEl = document.createElement('div');
+dangerEl.id = 'danger'; dangerEl.innerHTML = '<small>DANGER</small><span><i></i></span>';
+document.body.appendChild(dangerEl);
+const dangerFill = dangerEl.querySelector('i');
+function dangerUI(dt) {
+  const target = crash.on ? 0 : DANGER.v;
+  DANGER.shown += (target - DANGER.shown) * Math.min(1, dt * (target > DANGER.shown ? 14 : 4));
+  const k = DANGER.shown;
+  dangerFill.style.transform = `scaleX(${Math.min(1, k).toFixed(3)})`;
+  dangerEl.classList.toggle('show', k > 0.02);
+  dangerEl.classList.toggle('hot', k > 0.6);
+  grade.uniforms.uDanger.value = Math.min(1, Math.max(0, (k - 0.3) / 0.5));
+}
 function flash(text) { hud.msg.textContent = text; hud.msg.style.opacity = 1; msgT = 1.4; }
 
 const clamp = THREE.MathUtils.clamp;
@@ -735,6 +773,7 @@ const angDiff = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
 function physics(dt) {
   if (crash.pending) startCrash(crash.pending);
   if (crash.on) { crashPhysics(dt); return; }
+  dangerTick(dt);
   const throttle = keys.KeyW || keys.ArrowUp ? 1 : 0;
   const brake = keys.KeyS || keys.ArrowDown ? 1 : 0;
   const steerIn = (keys.KeyA || keys.ArrowLeft ? 1 : 0) - (keys.KeyD || keys.ArrowRight ? 1 : 0);
@@ -926,7 +965,7 @@ function physics(dt) {
     // a sideways tyre scrubs speed; a front tyre pushing wide bleeds a little too
     const scrub = mu * G * Math.min(loadK, 1.5) * Math.abs(Math.sin(st.slip)) * 0.9 +Math.abs(excess) * (1 - share) * Math.abs(st.v) * 0.15;
     st.v -= Math.sign(st.v) * Math.min(Math.abs(st.v), scrub * dt);
-    if (Math.abs(st.slip) > T.slipMax && va > 3) crash.pending = 'WASHED OUT!';
+    if (Math.abs(st.slip) > T.slipMax && va > 3) risk('WASHED OUT!', 0.45, () => { st.slip *= 0.45; st.v *= 0.85; });   // caught the slide
     // a clean carve, pumped out of the exit, gives speed back -- like pumping a roller, the legs push the
     // bike through the turn. A berm (ground banked into the turn) pays far more than flat ground.
     const intoBank = Math.max(0, bank * Math.sign(aLat));
@@ -964,18 +1003,18 @@ function physics(dt) {
 
   // --- move ---
   fwd.set(Math.cos(st.heading), 0, -Math.sin(st.heading));
-  const px = st.x, pz = st.z, gPrev = terrain.surface(px, pz);
+  const px = st.x, pz = st.z, gPrev = terrain.rideGround(px, pz);
   st.x += Math.cos(st.course) * st.v * dt; st.z -= Math.sin(st.course) * st.v * dt;   // along the course, not the heading
 
   // --- cliff walls: the bike cannot climb a near-vertical face ---
   {
     // (ground only: rocks and logs are judged by their own height in the obstacle loop below)
-    const step = Math.max(Math.abs(st.v) * dt, 1e-3), gNew = terrain.surface(st.x, st.z);
+    const step = Math.max(Math.abs(st.v) * dt, 1e-3), gNew = terrain.rideGround(st.x, st.z);
     const wall = st.air ? gNew > st.y + 0.35 : (gNew - gPrev) / step > 1.6 && gNew - gPrev > 0.05;
     if (wall) {
       st.x = px; st.z = pz;
-      if (Math.abs(st.v) > 6) crash.pending = 'SMACK! Hit the cliff';
-      else { if (Math.abs(st.v) > 1.5) { st.shake = 0.3; flash('BONK!'); } st.v *= -0.25; }
+      if (Math.abs(st.v) > 6) risk('SMACK! Hit the cliff', 0.45 + (Math.abs(st.v) - 6) * 0.1);
+      if (!crash.pending) { if (Math.abs(st.v) > 1.5) { st.shake = Math.max(st.shake, 0.3); if (msgT <= 0) flash('BONK!'); } st.v *= -0.25; }
     }
   }
 
@@ -1027,7 +1066,8 @@ function physics(dt) {
       const back = (c.r * 0.85 - fd) / fd;
       st.x += fdx * back; st.z += fdz * back;
       const head = (fwd.x * fdx + fwd.z * fdz) / fd;
-      if (head < -0.77 && -st.v * head > 6) crash.pending = 'BONK! Over the bars';
+      if (head < -0.77 && -st.v * head > 6) risk('BONK! Over the bars', 0.55 + (-st.v * head - 6) * 0.1);
+      if (crash.pending) { /* thrown off */ }
       else if (head < -0.3 && st.v > 1.5) { burst(tmp.set(fx0, st.y + 0.3, fz0), 16, 0, 1.2); st.v *= -0.25; st.shake = 0.35; flash('BONK!'); }
       else st.v *= 0.97;
       continue;
@@ -1043,7 +1083,8 @@ function physics(dt) {
     st.x += dx * push; st.z += dz * push;
     // over the bars only on a real head-on hit: closing speed toward the trunk > 6 m/s (~22 km/h)
     // and within ~40 deg of dead ahead -- clipping a tree while carving past it just glances off
-    if ((fwd.x * dx + fwd.z * dz) / d < -0.77 && -st.v * (fwd.x * dx + fwd.z * dz) / d > 6) { crash.pending = 'BONK! Over the bars'; }
+    if ((fwd.x * dx + fwd.z * dz) / d < -0.77 && -st.v * (fwd.x * dx + fwd.z * dz) / d > 6) risk('BONK! Over the bars', 0.55 + (-st.v * (fwd.x * dx + fwd.z * dz) / d - 6) * 0.1);
+    if (crash.pending) { /* thrown off */ }
     else if ((fwd.x * dx + fwd.z * dz) / d < -0.3 && st.v > 1.5) { burst(tmp.set(fx0, st.y + 0.3, fz0), 16, 0, 1.2); st.v *= -0.25; st.shake = 0.35; flash('BONK!'); }
     else st.v *= 0.97;
   }
@@ -1196,12 +1237,15 @@ function physics(dt) {
     // read as sitting on the vertical back of the kicker
     const localSlope = (x, R) => Math.atan((wheelGround(x + 0.05 / cp0, R) - wheelGround(x - 0.05 / cp0, R)) / 0.1);   // tangent at the contact
     // (only worth sampling when the bike is already rotated well away from the line between its wheels)
-    if (cR && !cF && st.pitch - gpC > 0.6 && st.pitch - localSlope(XR, RWR) > 1.15) crash.pending = 'LOOPED OUT!';
-    else if (cF && !cR && gpC - st.pitch > 0.6 && localSlope(XF, RWF) - st.pitch > 1.15) crash.pending = 'NOSE DIVE!';
+    // (the rider throws their weight and saves it -- unless the danger bar is already up: see risk())
+    const savePitch = () => { st.pitch = gpC + clamp(st.pitch - gpC, -0.45, 0.45); st.pitchV *= 0.2; };
+    if (cR && !cF && st.pitch - gpC > 0.6 && st.pitch - localSlope(XR, RWR) > 1.15) risk('LOOPED OUT!', 0.5, savePitch);
+    else if (cF && !cR && gpC - st.pitch > 0.6 && localSlope(XF, RWF) - st.pitch > 1.15) risk('NOSE DIVE!', 0.5, savePitch);
     if (Math.abs(st.pitch) > 1.45) { st.pitch = Math.sign(st.pitch) * 1.45; st.pitchV = 0; }
     // the slope we were riding when the front went over a ledge / the rear came up
     if (!air && (st.frontAir || st.rearAir) && wasF && wasR) st.noseRef = gpC - dP;
-    if (st.frontAir && st.pitch - (st.noseRef ?? g.pitch) < -T.noseDive) crash.pending = 'NOSE DIVE!';
+    if (st.frontAir && st.pitch - (st.noseRef ?? g.pitch) < -T.noseDive)
+      risk('NOSE DIVE!', 0.5, () => { st.pitch = (st.noseRef ?? g.pitch) - T.noseDive * 0.6; st.pitchV = Math.max(st.pitchV, 0); });
     // where each tyre is (for the suspension rig): on its ground when touching
     const snN = Math.sin(st.pitch);
     st.wF = cF ? hfC : st.y + XF * snN; st.wR = cR ? hrC : st.y + XR * snN;
@@ -1230,12 +1274,14 @@ function physics(dt) {
       const impact = Math.max(0, vySurf - vyIn) * Math.cos(g.pitch) / (LAND * (1 + T.landSoak * (st.landPrep || 0)));
       const airTime = st.airTime;
       // a drop too big for the legs to absorb throws you off
-      if (airTime > 0.3 && impact > 10.5) crash.pending = 'SLAM!';
+      // (a huge one throws you off for sure; a hard one fills the danger bar -- two in a row and you're down)
+      if (airTime > 0.3 && impact > 17) crash.pending = 'SLAM!';
+      else if (airTime > 0.3 && impact > 6) risk('SLAM!', 0.45 + (impact - 6) * 0.12);
       st.air = false; st.sinceLand = 0;
       st.bodyV = vyIn;   // hips are still falling: the extended legs now absorb it
       st.noseRef = g.pitch;
       if (impact > 3) st.v *= 1 - Math.min(0.45, (impact - 3) * 0.08);   // cased it / flat landing scrubs speed
-      if (impact > 5 && airTime > 0.3) flash('OOF!');
+      if (impact > 5 && impact <= 6 && airTime > 0.3) flash('OOF!');   // harder ones: SAVED IT! / SKETCHY! (risk)
       st.compressV -= Math.min(2.2, impact * 0.35);
       if (susp) susp.land(Math.max(0, -vyIn) * Math.cos(g.pitch) * 0.5 + impact * 0.4, st.frontAir, st.rearAir);
       if (airTime > 0.15) st.shake = Math.max(st.shake, Math.min(0.2, impact * 0.025));
@@ -1610,6 +1656,7 @@ function frame(now) {
     gauge.update(Math.abs(st.v) * 3.6, THREE.MathUtils.radToDeg(slope), st.air, dt, st.y);
     airHud.update(st, dt, crash.on || !!crash.pending);
   }
+  dangerUI(dt);
   if (msgT > 0) { msgT -= dt; if (msgT <= 0) hud.msg.style.opacity = 0; }
   composer.render();
 }

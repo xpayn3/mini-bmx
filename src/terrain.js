@@ -632,7 +632,7 @@ export class Terrain {
   // rocks, logs and stumps (a dome over each one's footprint), so the wheels really roll over them
   // the ground or a deck, WITHOUT the rock / log domes (for the cliff-wall test: rocks have their own
   // rule -- low ones are rolled over, tall ones stop you -- and a dome's steep edge is not a cliff)
-  surface(x, z) {
+  rideGround(x, z) {   // (not surface(): that one is the ground TYPE -- grass / dirt / water / sand)
     const g = this.ground(x, z);
     return this._wood !== null && this._wood > g ? this._wood : g;
   }

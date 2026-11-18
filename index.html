@@ -69,6 +69,14 @@
   #gear.bump .gnum b { animation: gearBump .28s cubic-bezier(.3,1.6,.5,1); }
   @keyframes gearBump { 0% { transform: scale(1.4); } 100% { transform: scale(1); } }
   html.touch #gear { bottom: calc(12px + env(safe-area-inset-bottom)); gap: 10px; }
+  /* danger bar: under the stamina, only while there is danger */
+  #danger { position: fixed; right: 18px; top: 40px; display: flex; align-items: center; gap: 6px; opacity: 0; transition: opacity .25s;
+    pointer-events: none; color: #fff; font: 900 9px ui-rounded, "Segoe UI", system-ui, sans-serif; letter-spacing: 1.5px; }
+  #danger.show { opacity: 1; }
+  #danger span { position: relative; width: 120px; height: 9px; padding: 0; background: rgba(0,0,0,.45); border: 3px solid rgba(0,0,0,.45); overflow: hidden; }
+  #danger i { position: absolute; inset: 0; transform-origin: left; transform: scaleX(0); background: linear-gradient(90deg, #ffb02e, #ff3b2e); }
+  #danger.hot span { animation: dangerPulse .5s infinite alternate; }
+  @keyframes dangerPulse { to { box-shadow: 0 0 12px #ff3b2e; } }
   #stamina { position: absolute; right: 18px; top: 20px; display: flex; gap: 3px; padding: 3px; background: rgba(0,0,0,.45); }
   #stamina i { position: relative; width: 16px; height: 9px; background: rgba(255,255,255,.14); overflow: hidden; }
   #stamina i::after { content: ''; position: absolute; inset: 0; transform-origin: left; transform: scaleX(var(--f, 1)); background: #4fd1ff; }
