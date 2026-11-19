@@ -7,7 +7,7 @@ extends Control
 
 const SCR := Vector2(136, 174)    # the screen in HUD pixels = the face's drawing space
 const PX := 0.01                  # metres per face pixel
-const TEX_K := 2.0                # texture pixels per face pixel
+const TEX_K := 4.0                # texture pixels per face pixel (high res: the dot-matrix text stays crisp up close)
 const HudScript := preload("res://scripts/ui/hud.gd")
 const DIST0 := 4.3
 const FOLLOW := 16.0              # how quickly the view follows the drag (1 / s)
@@ -85,6 +85,7 @@ func _ready() -> void:
 	_face_vp.transparent_bg = true
 	_face_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	_face_vp.size = Vector2i(SCR * TEX_K)
+	_face_vp.msaa_2d = Viewport.MSAA_4X
 	add_child(_face_vp)
 	_face = Face.new()
 	_face.size = SCR * TEX_K
@@ -158,7 +159,7 @@ func set_unit(id: String) -> void:
 	_face.k = TEX_K
 	_face.page_i = 0
 	var s: float = u.scale
-	_home = DIST0 * s
+	_home = DIST0 * s * 1.25   # a little further out so the whole device shows
 	dist_goal = _home
 	var w := 1.50 * s
 	var h := 2.24 * s
@@ -271,9 +272,9 @@ func _gui_input(e: InputEvent) -> void:
 					_yaw_t = 0.0; _pitch_t = 0.08
 					dist_goal = _home
 		elif e.pressed and e.button_index == MOUSE_BUTTON_WHEEL_UP:
-			dist_goal = clampf(dist_goal * 0.88, 2.2, 8.0)
+			dist_goal = clampf(dist_goal * 0.88, 2.2, 14.0)
 		elif e.pressed and e.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			dist_goal = clampf(dist_goal / 0.88, 2.6, 8.0)
+			dist_goal = clampf(dist_goal / 0.88, 2.6, 14.0)
 	elif e is InputEventMouseMotion and _drag:
 		_moved += e.relative.length()
 		var dy: float = e.relative.x * 0.0105

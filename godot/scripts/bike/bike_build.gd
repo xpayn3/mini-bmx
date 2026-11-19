@@ -54,7 +54,7 @@ const LOGOS := {
 	"text":    {"label": "Custom text…"},
 }
 
-const WHEEL_SIZES := {"26": 559, "27.5": 584, "29": 622}
+const WHEEL_SIZES := {"20": 406, "26": 559, "27.5": 584, "29": 622}
 
 ## tyre models (popular DH tyres, our own approximation of each tread). Picking one sets the tread,
 ## casing, width and the sidewall lettering; touching any of those turns the model back to "custom".
@@ -217,6 +217,14 @@ static func default_build() -> Dictionary:
 		"drive": {"ring": 34, "cassette": "dh7"},
 	}
 
+## the BMX only takes tyres: stock 20" wheels with this tyre model on them (single speed, no cassette)
+static func bmx_build(tyre_key: String) -> Dictionary:
+	var b := default_build()
+	b.wheels.front = "20"; b.wheels.rear = "20"
+	b.single_speed = true
+	apply_tyre_model(b, tyre_key)
+	return b
+
 static func load_build() -> Dictionary:
 	var b := default_build()
 	if FileAccess.file_exists(PATH):
@@ -362,7 +370,7 @@ static func wheel_spec(b: Dictionary, rear: bool) -> Dictionary:
 		"spokes": int(w.spokes), "lacing": int(w.lacing), "spoke_gauge": int(w.gauge), "spoke_color": Color(w.spoke_color),
 		"nipple_color": Color(w.nipple_color), "hub_color": Color(w.hub_color), "rear": rear,
 	}
-	if rear:
+	if rear and not b.get("single_speed", false):
 		spec.cogs = CASSETTES[b.drive.cassette].cogs
 		spec.cas_cols = cassette_cols(b.drive.cassette)
 		spec.cas_rough = CASSETTES[b.drive.cassette].rough

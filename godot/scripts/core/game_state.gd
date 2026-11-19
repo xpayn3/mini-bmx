@@ -37,6 +37,7 @@ const BIKES := {
 var bike_id := "dh"   # the downhill bike is the main bike: every launch starts on it (B / title screen switch)
 var computer_id := "classic"   # the bike computer mounted for every ride (ComputerUnits, chosen on the ride setup page)
 var computer_cfg := {}   # per bike computer: switched-off pages, alerts, beep, backlight (ComputerUnits.opt)
+var bmx_tyre := ""   # tyre model on the BMX ("" = the stock wheels); the DH frames take theirs from the garage build
 var seed := 0
 var records := {"longest": 0.0, "highest": 0.0, "air": 0.0, "top_speed": 0.0, "jumps": 0, "distance": 0.0}
 
@@ -53,11 +54,15 @@ func _ready() -> void:
 			var c = cf.get_value("computer_" + id, "cfg", {})
 			if c is Dictionary: computer_cfg[id] = c
 	if BIKES.has(OS.get_environment("BMX_BIKE")): bike_id = OS.get_environment("BMX_BIKE")   # tests: ride this frame
+	if BikeBuild.TYRE_MODELS.has(OS.get_environment("BMX_TYRE")): bmx_tyre = OS.get_environment("BMX_TYRE")   # tests: this tyre on the BMX
 	if OS.get_environment("BMX_COMPUTER") != "": computer_id = OS.get_environment("BMX_COMPUTER")   # tests: mount this unit
 
 ## the bike to ride: the downhill bike carries the player's garage build (parts change the ride)
 func bike_config() -> Dictionary:
-	var cfg: Dictionary = BIKES[bike_id].duplicate(true)
+	return bike_config_for(bike_id)
+
+func bike_config_for(id: String) -> Dictionary:
+	var cfg: Dictionary = BIKES[id].duplicate(true)
 	if cfg.get("garage", false):
 		var b := BikeBuild.load_build()
 		var mods := BikeBuild.ride_mods(b)
@@ -65,12 +70,15 @@ func bike_config() -> Dictionary:
 		cfg.mods = mods
 		for k in mods.ride:
 			cfg.ride[k] = float(cfg.ride.get(k, 1.0)) * float(mods.ride[k])
+	elif bmx_tyre != "":
+		cfg.tyre_build = BikeBuild.bmx_build(bmx_tyre)
 	return cfg
 
 func save() -> void:
 	var cf := ConfigFile.new()
 	cf.set_value("game", "bike", bike_id)
 	cf.set_value("game", "computer", computer_id)
+	cf.set_value("game", "bmx_tyre", bmx_tyre)
 	for id in computer_cfg:
 		cf.set_value("computer_" + id, "cfg", computer_cfg[id])
 	for k in records:
