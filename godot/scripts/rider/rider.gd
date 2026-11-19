@@ -446,6 +446,41 @@ static func set_torso(n: Node3D, a: Vector3, b: Vector3, right: Vector3) -> void
 const SPINE_BONES := 5
 var knee_dbg: Array = []   # tests: frames where a knee bends against its pole
 var torso_ratio := 1.0   # tests: torso length / its rest length before the limit
+## tests (BMX_LIMB_PROBE): per joint, how fast its bend direction turns (deg/s) and how far it moves
+## relative to its limb root per frame; frames over the limits are counted
+var limb_probe := OS.get_environment("BMX_LIMB_PROBE") != ""
+var limb_stats := {}
+var _limb_prev := {}
+var _probe_pitch := 0.0
+func _probe_limb(key: String, root: Vector3, joint: Vector3, end: Vector3, dt: float, air: float) -> void:
+	var ax := end - root
+	var bend := joint - root
+	if ax.length_squared() > 1e-8:
+		var an := ax.normalized()
+		bend = bend - an * bend.dot(an)
+	var bl := bend.length()
+	var bd := bend / bl if bl > 1e-6 else Vector3.ZERO
+	var rel := joint - root
+	var s: Dictionary = limb_stats.get(key, {"turn_max": 0.0, "jump_max": 0.0, "flips": 0, "jumps": 0, "frames": 0, "worst": []})
+	var now := Time.get_ticks_msec()
+	if _limb_prev.has(key) and dt > 1e-4 and now - int(_limb_prev[key][2]) < 100:   # not across a crash / respawn
+		var pv: Array = _limb_prev[key]
+		var turn := 0.0
+		if bd != Vector3.ZERO and pv[0] != Vector3.ZERO:
+			turn = rad_to_deg(acos(clampf(bd.dot(pv[0]), -1.0, 1.0)))
+		var jump: float = (rel - pv[1]).length()
+		s.frames += 1
+		if turn > s.turn_max: s.turn_max = turn
+		if jump > s.jump_max: s.jump_max = jump
+		if turn > 25.0 and bl > 0.03: s.flips += 1   # a visibly bent limb whose bend swings 25+ deg in one frame
+		if jump > 0.06: s.jumps += 1
+		if turn > 25.0 and bl > 0.03:
+			s.worst.append({"turn": snappedf(turn, 0.1), "jump": snappedf(jump, 0.001), "bend": snappedf(bl, 0.001), "air": snappedf(air, 0.01),
+				"reach": snappedf(ax.length(), 0.001), "dir": ax.normalized().snapped(Vector3.ONE * 0.01), "bd": bd.snapped(Vector3.ONE * 0.01), "pbd": (pv[0] as Vector3).snapped(Vector3.ONE * 0.01), "droot": snappedf(root.distance_to(pv[3]), 0.001), "dend": snappedf(end.distance_to(pv[4]), 0.001), "dt": snappedf(dt, 0.0001), "pitch": snappedf(_probe_pitch, 0.01)})
+			s.worst.sort_custom(func(x, y): return x.turn > y.turn)
+			if s.worst.size() > 8: s.worst.resize(8)
+	_limb_prev[key] = [bd, rel, now, root, end]
+	limb_stats[key] = s
 var spine_skel: Skeleton3D
 
 ## weights each torso vertex to the two spine bones either side of its height (mesh y -0.5 .. 0.5)
@@ -527,7 +562,6 @@ static func orient_hand(n: Node3D, el: Vector3, at: Vector3, right: Vector3) -> 
 	n.basis = Basis(x, y, z)
 
 
-## analytic two-bone IK -> [joint, reachable end]
 ## Keep a knee clear of the frame: swing it outward round the hip -> ankle line (leg lengths unchanged)
 ## until it sits at least KNEE_CLEAR off the bike's centre plane (z = 0 in the bike's leaning space).
 const KNEE_CLEAR := 0.12
@@ -558,31 +592,46 @@ static func _knee_clear(hip: Vector3, ankle: Vector3, kn: Vector3, side: float) 
 		else: lo = m
 	return c + u.slerp(out, hi) * r
 
-static func solve_ik(root: Vector3, target: Vector3, l1: float, l2: float, pole: Vector3) -> Array:
+## two-bone IK with joint limits -> [joint, reachable end, bend direction]
+## The joint is a hinge: it bends between `min_deg` (0 = straight; > 0 never locks out, so it can't snap
+## near full reach) and `max_deg` (how far it folds). It points to the side of `pole`; where the limb lines
+## up with `pole` (no side defined) it blends smoothly to `pole2`. `prev` (last frame's bend direction, or
+## ZERO) and `max_turn` (rad) limit how far the bend may swing round the limb this frame: no flips.
+static func limb_ik(root: Vector3, target: Vector3, l1: float, l2: float, pole: Vector3, pole2: Vector3,
+		min_deg: float, max_deg: float, prev: Vector3, max_turn: float) -> Array:
 	var d := target - root
 	var dist := d.length()
-	if dist < 1e-5:
-		d = Vector3(0, -1, 0)
-		dist = 1e-5
-	else:
-		d /= dist
-	var dir := d
-	dist = clampf(dist, absf(l1 - l2) + 0.01, (l1 + l2) * 0.9995)
+	var dir := d / dist if dist > 1e-5 else Vector3.DOWN
+	var dmax := sqrt(maxf(0.0, l1 * l1 + l2 * l2 + 2 * l1 * l2 * cos(deg_to_rad(min_deg))))
+	var dmin := sqrt(maxf(0.0, l1 * l1 + l2 * l2 + 2 * l1 * l2 * cos(deg_to_rad(max_deg))))
+	dist = clampf(dist, maxf(dmin, absf(l1 - l2) + 0.01), dmax)
+	var p1 := pole - dir * pole.dot(dir)
+	var p2 := pole2 - dir * pole2.dot(dir)
+	var w := smoothstep(0.2, 0.5, p1.length() / maxf(pole.length(), 1e-6))
+	var bd := Vector3.ZERO
+	if p1.length_squared() > 1e-10: bd += p1.normalized() * w
+	if p2.length_squared() > 1e-10: bd += p2.normalized() * (1.0 - w)
+	if bd.length_squared() < 1e-8:
+		bd = dir.cross(Vector3.FORWARD if absf(dir.z) < 0.9 else Vector3.RIGHT)
+	bd = (bd - dir * bd.dot(dir)).normalized()
+	if prev != Vector3.ZERO and max_turn < PI:
+		var pr := prev - dir * prev.dot(dir)
+		if pr.length_squared() > 1e-6:
+			pr = pr.normalized()
+			var ang := pr.signed_angle_to(bd, dir)
+			if absf(ang) > max_turn:
+				bd = pr.rotated(dir, clampf(ang, -max_turn, max_turn)).normalized()
 	var a := (l1 * l1 - l2 * l2 + dist * dist) / (2 * dist)
 	var h := sqrt(maxf(0.0, l1 * l1 - a * a))
-	var pp := pole - dir * pole.dot(dir)
-	# the limb pointing (nearly) along its pole leaves the bend side undefined and the joint flips
-	# round (a folded leg mid-flip with the pedal level in front of the hip): blend smoothly toward
-	# bending up (knee up) as the pole gets lined up with the limb
-	var w := smoothstep(0.15, 0.45, pp.length() / maxf(pole.length(), 1e-6))
-	if w < 1.0:
-		var up2 := Vector3.UP - dir * dir.y
-		if up2.length_squared() > 1e-6:
-			pp = pp * w + up2.normalized() * (1.0 - w) * maxf(pole.length(), 1e-3)
-	if pp.length_squared() < 1e-8:
-		pp = Vector3(0, 0, 1) - dir * dir.z
-	pp = pp.normalized()
-	return [root + dir * a + pp * h, root + dir * dist]
+	return [root + dir * a + bd * h, root + dir * dist, bd]
+
+## joint limits (degrees of bend, 0 = straight) and how fast a bend may swing round its limb
+const ELBOW_MIN := 12.0
+const ELBOW_MAX := 150.0
+const KNEE_MIN := 4.0
+const KNEE_MAX := 160.0
+const BEND_RATE := 6.0   # rad/s
+var _bd_prev: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]   # knee L, knee R, elbow L, elbow R
 
 
 ## rotation basis: up = Y, right projected = Z, forward = X
@@ -645,6 +694,7 @@ func reset_pose() -> void:
 	for s in shoe:
 		s.basis = Basis()
 	spring_init = false
+	_bd_prev.fill(Vector3.ZERO)
 	pel_v = Vector3.ZERO
 	ch_v = Vector3.ZERO
 
@@ -664,10 +714,13 @@ static func _num(p: Dictionary, k: String, def := 0.0) -> float:
 ## headRoll, absorb, pitch, bodyLevel, attackDrop, pedal, sprint, crank, air, compress, hipShift, t
 var sm_turn := 0.0
 var sm_aero := 0.0
+var sm_pitch0 := 0.0   # the slope the body levels against, rate-limited
+const PITCH_LEVEL_RATE := 2.5   # rad/s
 var _fy_prev := NAN; var _fv_prev := NAN; var _facc := 0.0   # the frame's height / speed / acceleration (bump bounce)
 var bounce_stats := [0.0, 0, 0.0, 0.0]   # tests: sum of squared body offsets, samples, biggest offset
 func update_pose(dt: float, p: Dictionary) -> void:
 	var v := _num(p, "v")
+	_probe_pitch = _num(p, "pitch")
 	var pedal := clampf(_num(p, "pedal"), 0, 1)
 	var t := _num(p, "t")
 	var low_speed := 1.0 - clampf(absf(v) / 6.0, 0, 1)
@@ -729,6 +782,13 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# only for slope-like angles: mid-flip (nose far up / down, upside down) the body stays on the bike
 	var pitch0 := wrapf(_num(p, "pitch"), -PI, PI)
 	pitch0 *= 1.0 - smoothstep(0.7, 1.3, absf(pitch0))
+	# that fade swings the body back ~2x the bike's own pitch rate as a flip passes through it, yanking
+	# the shoulders / hips 10-20 cm a frame (the limbs flail): the body follows it at a limited rate
+	var h0 := minf(dt, 0.1)
+	if not spring_init: sm_pitch0 = pitch0
+	var dp0 := (pitch0 - sm_pitch0) * (1.0 - exp(-12.0 * h0))
+	sm_pitch0 += clampf(dp0, -PITCH_LEVEL_RATE * h0, PITCH_LEVEL_RATE * h0)
+	pitch0 = sm_pitch0
 	var pit := pitch0 * (0.2 if pitch0 > 0 else _num(p, "bodyLevel", 0.85))
 	if pit != 0.0:
 		var c := cos(-pit)
@@ -913,6 +973,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	head.transform = Transform3D(GEAR.euler_xyz(rx, yaw, rz), head_p)
 
 	var right := Vector3(0, 0, 1)
+	var max_turn := BEND_RATE * minf(dt, 0.1) if dt > 0.0 else PI
 	for i in 2:
 		var side := -1.0 if i == 0 else 1.0
 		var foot: Vector3 = p.get("footL" if i == 0 else "footR", Vector3.ZERO)
@@ -923,7 +984,8 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		# turning: the inside knee opens out toward the turn, the outside leg drives down on its pedal
 		var inside: float = clampf(-side * _num(p, "lean") * 1.6, 0.0, 0.9) * float(sty.kneeOpen) * (1.0 - air)
 		var pole_l: Vector3 = (poles_leg[i] + Vector3(0, 0, side * inside)).normalized()
-		var ik := solve_ik(hp, ankle, L_THIGH, L_SHIN, pole_l)
+		var ik := limb_ik(hp, ankle, L_THIGH, L_SHIN, pole_l, Vector3.UP, KNEE_MIN, KNEE_MAX, _bd_prev[i], max_turn)
+		_bd_prev[i] = ik[2]
 		var ik_raw: Vector3 = ik[0]
 		ik[0] = _knee_clear(hp, ankle, ik[0], side)
 		if knee_dbg.size() < 40 and OS.get_environment("BMX_KNEE_PROBE") != "" and knee[i].position.distance_to(ik[0]) > 0.08:
@@ -942,7 +1004,9 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		var sh_off := Vector3(-0.03 + sty.shoulderFwd, -0.04 + sty.shoulderUp, side * sty.shoulders)
 		var shp: Vector3 = chest + tw * sh_off
 		shoulder_sph[i].position = shp
-		var ika := solve_ik(shp, hand, L_UARM, L_FARM, poles_arm[i])
+		# hand nearly on the elbow's pole line (deep turns, arms up in the air): elbow out and down
+		var ika := limb_ik(shp, hand, L_UARM, L_FARM, poles_arm[i], Vector3(0, -0.5, side), ELBOW_MIN, ELBOW_MAX, _bd_prev[2 + i], max_turn)
+		_bd_prev[2 + i] = ika[2]
 		set_limb(upper_arm[i], shp, ika[0])
 		set_limb(fore_arm[i], ika[0], ika[1])
 		elbow[i].position = ika[0]
@@ -954,3 +1018,6 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		J[3 + i * 3] = shp
 		J[4 + i * 3] = ika[0]
 		J[5 + i * 3] = hand
+		if limb_probe:
+			_probe_limb("elbow%d" % i, shp, ika[0], hand, dt, air)
+			_probe_limb("knee%d" % i, hp, ik[0], ik[1], dt, air)
