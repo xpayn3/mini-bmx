@@ -107,6 +107,8 @@ static func build_goggles(m: Dictionary, fit: Dictionary, hug: Callable) -> Node
 			var k := i * 2
 			idx.append_array([k, k + 1, k + 2, k + 1, k + 3, k + 2])
 	_add(root, {pos = pos, idx = idx}, m.strap)
+	# where the loose flapping tail hangs off the strap (outer side of the right clip, goggles-root space)
+	root.set_meta("flap_anchor", Vector3(ends[1].x - 0.004, yS, ends[1].z + 0.014))
 	return root
 
 
@@ -261,29 +263,47 @@ static func build_hand(m: Dictionary, side: int) -> Node3D:
 
 # ---------------- torso ----------------
 ## Unit height (y -0.5 hips .. +0.5 collar), lofted through rounded-rectangle sections.
+## sections: [t, half-width (z), half-depth (x), x offset]
+const TORSO_S := [
+	[0.00, 0.150, 0.105, -0.005],
+	[0.12, 0.148, 0.102, 0.000],
+	[0.30, 0.138, 0.098, 0.006],
+	[0.50, 0.150, 0.108, 0.010],
+	[0.68, 0.172, 0.118, 0.012],
+	[0.82, 0.186, 0.114, 0.006],
+	[0.92, 0.180, 0.098, -0.004],
+	[0.97, 0.140, 0.080, -0.010],
+	[1.00, 0.075, 0.060, -0.012],
+]
+
+
+## the torso section at t (0 hips .. 1 collar): [half-width, half-depth, x offset]
+static func torso_profile(t: float) -> Array:
+	var S := TORSO_S
+	var i := 0
+	while i < S.size() - 2 and S[i + 1][0] < t:
+		i += 1
+	var a: Array = S[i]
+	var b: Array = S[i + 1]
+	var u: float = (t - a[0]) / (b[0] - a[0])
+	var s := u * u * (3 - 2 * u)
+	return [a[1] + (b[1] - a[1]) * s, a[2] + (b[2] - a[2]) * s, a[3] + (b[3] - a[3]) * s]
+
+
+## how far behind the torso axis (mesh -x) the back surface is, at height t and sideways offset z
+static func torso_back_x(t: float, z: float) -> float:
+	var p := torso_profile(t)
+	var k := 2.0 / 2.6
+	var s := clampf(absf(z) / p[0], 0.0, 0.999)
+	var sa := pow(s, 1.0 / k)
+	var c := sqrt(1.0 - sa * sa)
+	return pow(c, k) * p[1] - p[2]
+
+
 static func torso_geometry() -> Dictionary:
-	var S := [
-		[0.00, 0.150, 0.105, -0.005],
-		[0.12, 0.148, 0.102, 0.000],
-		[0.30, 0.138, 0.098, 0.006],
-		[0.50, 0.150, 0.108, 0.010],
-		[0.68, 0.172, 0.118, 0.012],
-		[0.82, 0.186, 0.114, 0.006],
-		[0.92, 0.180, 0.098, -0.004],
-		[0.97, 0.140, 0.080, -0.010],
-		[1.00, 0.075, 0.060, -0.012],
-	]
 	var seg := 28
 	var rows := 36
-	var at := func(t: float) -> Array:
-		var i := 0
-		while i < S.size() - 2 and S[i + 1][0] < t:
-			i += 1
-		var a: Array = S[i]
-		var b: Array = S[i + 1]
-		var u: float = (t - a[0]) / (b[0] - a[0])
-		var s := u * u * (3 - 2 * u)
-		return [a[1] + (b[1] - a[1]) * s, a[2] + (b[2] - a[2]) * s, a[3] + (b[3] - a[3]) * s]
+	var at := torso_profile
 	var pos := PackedVector3Array()
 	var idx := PackedInt32Array()
 	var k := 2.0 / 2.6
