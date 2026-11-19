@@ -495,6 +495,7 @@ func burst(pos: Vector3, n: int, s: int, power: float, with_dust := true) -> voi
 func smash(c: Dictionary, vel: Vector3, pos: Vector3) -> bool:
 	if not terrain.break_collider(c, vel, pos + Vector3(0, 0.45, 0)):
 		return false
+	if c.get("tape", false): return true   # tape stretches first (TapeSim.grab): no bits fly off
 	var col := Color("c9a06a")
 	if c.get("cactus", false): col = Color("8fc25a")
 	elif c.get("tape", false): col = Color("e8322b")
@@ -1147,6 +1148,7 @@ func _process(dt: float) -> void:
 				_jitter_sample(ji[1] + "x", jp.x, 0.002); _jitter_sample(ji[1] + "y", jp.y, 0.002); _jitter_sample(ji[1] + "z", jp.z, 0.002)
 	var vd: float = Settings.get_v("view_distance")
 	terrain.update_stream(st.x, st.z, 4.0)
+	terrain.tape_push(null if phys.crash_on else Vector3(st.x, st.y + 0.85, st.z) + st.fwd() * 0.75)   # what a caught tape stretches over
 	far_hills.follow(drawn_pos)
 	sheep.follow(dt, drawn_pos, st.v, st.fwd())
 	biome_t -= dt

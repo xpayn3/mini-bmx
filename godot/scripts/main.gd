@@ -598,6 +598,8 @@ func _autotest(seconds: float) -> void:
 			if el > t0d and nk != _probe.get("dust_k", -1) and nk < 8:
 				_probe["dust_k"] = nk
 				get_viewport().get_texture().get_image().save_png("%s_%d.png" % [OS.get_environment("BMX_DUST_SHOTS"), nk])
+		if OS.get_environment("BMX_TAPE") != "":   # tests: ride square into the nearest race tape, shots as it stretches / snaps
+			_tape_test(el)
 		if OS.get_environment("BMX_FENCE") != "":   # tests: ride straight into the nearest fence, shots around the hit
 			_fence_test(el)
 		if OS.get_environment("BMX_FENCE_ALL") != "":   # tests: smash every fence within 70 m, then check each piece
@@ -675,6 +677,46 @@ func _autotest(seconds: float) -> void:
 	if shot != "":
 		get_viewport().get_texture().get_image().save_png(shot)
 	get_tree().quit()
+
+## BMX_TAPE test (=dir/prefix, BMX_TAPE_SPEED m/s, default 7; BMX_TAPE_STOP=secs brakes after the hit):
+## at 2 s the bike is put 6 m from the middle of the nearest tape span, square on; prints TAPE lines
+## (state, strain, strips) and saves a shot every 0.2 s for 2.4 s
+var _tape := {}
+func _tape_test(el: float) -> void:
+	var ph = game.phys
+	var ts: TapeSim = game.terrain._tapes
+	if _tape.is_empty() and el > 2.0:
+		var best = null
+		var bd := INF
+		for key in game.terrain._col_grid:
+			for c in game.terrain._col_grid[key]:
+				if c.has("tape") and not c["tape"]["broken"] and (c["tape"]["len"] as float) > 5.0:
+					var d := Vector2(c.x - ph.x, c.z - ph.z).length()
+					if d < bd: bd = d; best = c["tape"]
+		if best == null: return
+		var pts: PackedVector3Array = best["pts"]
+		var mid := pts[pts.size() / 2]
+		var along := Vector2(pts[pts.size() - 1].x - pts[0].x, pts[pts.size() - 1].z - pts[0].z).normalized()
+		var rd := Vector2(-along.y, along.x)
+		var spd := float(OS.get_environment("BMX_TAPE_SPEED")) if OS.get_environment("BMX_TAPE_SPEED") != "" else 7.0
+		var start := Vector2(mid.x, mid.z) - rd * 6.0
+		ph.reset_at(start.x, start.y, atan2(-rd.y, rd.x))
+		ph.v = spd
+		_tape = {"sp": best, "t": el, "shot": 0, "next": el}
+		print("TAPE test: span len=%.1f m at (%.1f, %.1f) speed=%.1f" % [best["len"], mid.x, mid.z, spd])
+	elif not _tape.is_empty():
+		if OS.get_environment("BMX_TAPE_STOP") != "" and el > _tape.t + float(OS.get_environment("BMX_TAPE_STOP")):
+			Input.action_press("brake"); Input.action_release("pedal")
+		if el >= _tape.next and _tape.shot < 120:
+			_tape.next = el + 0.05
+			var st := "-"; var strain := 0.0
+			for s in ts.strips:
+				if s.has("state") and is_same(s["sp"], _tape.sp): st = s["state"]; strain = s.get("strain", 0.0)
+			print("TAPE t=%.2f v=%.1f broken=%s state=%s strain=%.3f strips=%d" % [el - _tape.t, ph.v, _tape.sp.broken, st, strain, ts.strips.size()])
+			if OS.get_environment("BMX_TAPE").contains("/") and _tape.shot in [16, 18, 20, 22, 26, 34]:
+				get_viewport().get_texture().get_image().save_png(OS.get_environment("BMX_TAPE") + "_%02d.png" % _tape.shot)
+			_tape.shot += 1
+
 
 ## BMX_FENCE test: at 2 s put the bike 6 m in front of the nearest fence panel, aimed at it; shots
 ## at the hit and after (BMX_FENCE=dir/prefix)

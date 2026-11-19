@@ -796,6 +796,21 @@ func grid_height(x: float, z: float) -> float:
 # ======================================================================
 # breakables
 # ======================================================================
+## the bike's front at tape height (null while crashed / not riding): what a grabbed tape stretches over
+func tape_push(p) -> void:
+	if _tapes: _tapes.push_at = p
+
+
+## a tape that was stretched but not torn springs back: whole again (hittable, drawn by its chunk)
+func restore_tape(sp: Dictionary) -> void:
+	if not sp["broken"]: return
+	sp["broken"] = false
+	for i in range(_broken.size() - 1, -1, -1):
+		if is_same(_broken[i]["rec"], sp): _broken.remove_at(i)
+	var ch = chunks.get(sp.get("chunk"))
+	if ch != null and ch.has("tape"): _rebuild_tape(ch)
+
+
 ## fences / cacti: smash it (hide the visual, throw rigid-body debris); tape: snap it (hide the span, hand
 ## its two halves to the ribbon sim). Returns true if it broke.
 func break_collider(c: Dictionary, vel: Vector3, at = null) -> bool:
@@ -843,7 +858,7 @@ func break_collider(c: Dictionary, vel: Vector3, at = null) -> bool:
 		var ch = chunks.get(sp.get("chunk"))
 		if ch != null:
 			_rebuild_tape(ch)
-		_tapes.snap(sp, Vector2(c["x"], c["z"]), vel)
+		_tapes.grab(sp, Vector2(c["x"], c["z"]), vel)
 		return true
 	return false
 
