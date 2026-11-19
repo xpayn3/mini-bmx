@@ -171,12 +171,21 @@ F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A 
 - Torn race tape as cloth-like ribbons, wind over the grass, drifting cloud shadows, speed blur / FOV.
 
 ### HUD bike computer (`hud.gd` `GaugeView`)
-- Garmin-style computer bottom-left, three pages flipped with the ◀ ▶ bezel buttons under the screen:
-  page 1 speed, slope / grade, **gear** (the shifter: gear n/N, side-on cassette, teeth; digit flashes on a shift;
-  Settings › Gear shifter hides the row); page 2 elevation (`st.y`), ascent / descent this ride, 30 s profile.
-  Page 3 **map** (`MapView`): heading-up 2D topo, 170 m across: contour lines (5 m, every 25 m bolder; marching
-  squares over a 6 m height grid, 4 rows sampled per frame, rebuilt after 40 m), the trail centreline, the last 90 s
-  ridden in magenta, north dial, 50 m scale bar.
+- Garmin-style computer bottom-left; six pages flipped with the ◀ ▶ bezel buttons under the screen (mouse):
+  **RIDE** speed, slope / grade, gear (the shifter: n/N, cassette, teeth; flashes on a shift; Settings › Gear
+  shifter hides the row) · **TRIP** ride time, distance, avg / max, odometer (`records.distance`, now counted) ·
+  **EFFORT** heart rate (made up from power, sprint, stamina; beating heart, zone), cadence (from `crank`),
+  power (from `a_drive`), stamina, gear ratio · **AIR** last jump, height, air time, best, jumps, tricks
+  (`BikePhysics._land_trick` → `game.on_trick` → `hud.on_trick`) · **ELEV** elevation, ascent / descent, the last
+  30 s + the next 400 m of trail coloured by steepness (from `course.E`) · **MAP** (`MapView`) heading-up 2D topo,
+  170 m across: contours (5 m, every 25 m bolder; marching squares over a 6 m height grid, 4 rows a frame,
+  rebuilt after 40 m), trail centreline, the last 90 s ridden in magenta, north dial, 50 m scale.
+- **Alerts** (`hud._trail_scan`): the next bend (`course.KAP`, > 0 = right; LEFT / SHARP / HAIRPIN by the total
+  turn), route feature (`route_feats`: tabletop, kicker, rollers, bridge…) or rock garden within 120 m; a banner
+  pops up over any page when a new one appears, then stays from 40 m in. Off the trail (> 15 m) or riding it
+  backwards: no alerts. `BMX_ALERT_PROBE=1` walks 2.4 km of trail and prints every alert.
+- Small touches: "acquiring satellites" for the first 3 s of a ride, battery icon (drains 60 %/h of riding),
+  backlight for 3 s on a button press or a new alert.
 
 ### Settings & tuning
 - Settings: display (mode, resolution, vsync, UI scale, FPS cap), graphics presets Low/Medium/High/Ultra
@@ -205,7 +214,8 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `BMX_BODY_PROBE=1`, `BMX_AIRPULL=1` | prints the rider-body numbers / tucks in every jump |
 | `BMX_GARAGE_TAB=paint…kit`, `BMX_GARAGE_RIDER=coast/pedal/sprint/descend/air` | garage tab / rider preview |
 | `BMX_GARAGE_CAM=orbit,pitch,dist`, `BMX_POSE=key=val,...` | garage camera / pose override |
-| `BMX_GARMIN_PAGE=0/1/2` | bike computer opens on page 1 (speed / slope / gear), 2 (elevation) or 3 (map) |
+| `BMX_GARMIN_PAGE=0…5` | bike computer opens on that page (ride, trip, effort, air, elev, map) |
+| `BMX_ALERT_PROBE=1` | prints every Garmin trail alert along the first 2.4 km of trail |
 | `BMX_TRICK=back/front/side/manual` | autotest leans that way in every jump (side alternates A / D; manual holds the nose up at `BMX_MANUAL_PITCH` rad for back-wheel landings) and prints `TRICK` / `LAND` / `BOUNCE` / `CRASH` |
 | `BMX_STEER=1` / `-1` (+ `BMX_STRAIGHT=1`) | autotest holds a steady left / right turn after 2 s (lean / leg-clearance shots) |
 | `BMX_AIRSHOT=dir/prefix` | autotest saves up to 8 screenshots mid-air |
