@@ -40,6 +40,12 @@ var _last := 0
 var rect: ColorRect
 var title: WordView
 var sub: Label
+# rider + bike silhouette: a second camera renders only them (flat, unlit) while WASTED is up, and the
+# word is cut out there, so the falling rider and the bike stay in front of the letters
+const MASK_LAYER := 1 << 19
+var mask_vp: SubViewport
+var mask_cam: Camera3D
+var _masked: Array = []       # GeometryInstance3Ds given MASK_LAYER (taken off again at the end)
 
 func _init(g) -> void:
 	game = g
@@ -57,6 +63,15 @@ func _init(g) -> void:
 	title = WordView.new()
 	title.set_anchors_preset(Control.PRESET_FULL_RECT)
 	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var wm := ShaderMaterial.new()
+	var wsh := Shader.new()
+	wsh.code = """
+shader_type canvas_item;
+uniform sampler2D mask : filter_linear;
+void fragment() { COLOR.a *= 1.0 - texture(mask, SCREEN_UV).a; }
+"""
+	wm.shader = wsh
+	title.material = wm
 	add_child(title)
 	sub = Label.new()
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -79,6 +94,7 @@ func start(reason: String) -> void:
 	var r := reason.strip_edges().trim_suffix("!")
 	sub.text = "" if r == "" else r.to_upper()
 	visible = true
+	_mask_on()
 
 ## the rider got up (or the ride was reset): ease out now
 func finish() -> void:
@@ -91,6 +107,7 @@ func stop() -> void:
 	if active: _set_speed(1.0)
 	active = false
 	visible = false
+	_mask_off()
 
 func _process(_dt: float) -> void:
 	if not active: return
@@ -112,10 +129,12 @@ func _process(_dt: float) -> void:
 	var blur := clampf(1.0 - t / 0.35, 0.0, 1.0) * (1.0 - fade)
 	var tk := clampf((t - T_TEXT) / 0.22, 0.0, 1.0) * (1.0 - fade)
 	_show(k, blur, tk)
+	_mask_follow()
 	if fading and fade >= 1.0:
 		_set_speed(1.0)
 		active = false
 		visible = false
+		_mask_off()
 
 func _show(k: float, blur: float, tk: float) -> void:
 	var m := rect.material as ShaderMaterial
@@ -126,6 +145,54 @@ func _show(k: float, blur: float, tk: float) -> void:
 	title.modulate.a = tk
 	title.queue_redraw()
 	sub.modulate.a = clampf(tk * 2.0 - 1.0, 0.0, 1.0)
+
+func _mask_on() -> void:
+	if game == null or game.cam == null: return
+	if mask_vp == null:
+		mask_vp = SubViewport.new()
+		mask_vp.transparent_bg = true
+		mask_vp.debug_draw = Viewport.DEBUG_DRAW_UNSHADED
+		mask_vp.msaa_3d = Viewport.MSAA_DISABLED
+		mask_vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_DISABLED
+		mask_vp.use_taa = false
+		mask_vp.positional_shadow_atlas_size = 0
+		mask_cam = Camera3D.new()
+		mask_cam.cull_mask = MASK_LAYER
+		var env := Environment.new()   # plain: no sky, fog, GI or glow to pay for
+		env.background_mode = Environment.BG_CLEAR_COLOR
+		mask_cam.environment = env
+		mask_vp.add_child(mask_cam)
+		add_child(mask_vp)
+		(title.material as ShaderMaterial).set_shader_parameter("mask", mask_vp.get_texture())
+	mask_vp.size = get_tree().root.size
+	mask_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	mask_cam.current = true
+	_mask_off_layers()
+	for root in [game.rider, game.rig]:
+		if root == null: continue
+		for n in root.find_children("*", "GeometryInstance3D", true, false):
+			var gi := n as GeometryInstance3D
+			if gi.layers & MASK_LAYER == 0:
+				gi.layers |= MASK_LAYER
+				_masked.append(gi)
+	_mask_follow()
+
+func _mask_follow() -> void:
+	if mask_vp == null or game == null: return
+	var c: Camera3D = game.cam
+	mask_cam.global_transform = c.global_transform
+	mask_cam.fov = c.fov; mask_cam.near = c.near; mask_cam.far = c.far
+	mask_cam.keep_aspect = c.keep_aspect
+	mask_cam.h_offset = c.h_offset; mask_cam.v_offset = c.v_offset
+
+func _mask_off() -> void:
+	if mask_vp != null: mask_vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	_mask_off_layers()
+
+func _mask_off_layers() -> void:
+	for gi in _masked:
+		if is_instance_valid(gi): gi.layers &= ~MASK_LAYER
+	_masked.clear()
 
 func _set_speed(sp: float) -> void:
 	if game and game.photo: return
