@@ -55,6 +55,7 @@ class TextArt:
 	var r0 := 0.2
 	var r1 := 0.25
 	var count := 2              # ring: how many times the text goes round
+	var phase := 0.0            # ring: turned round the wheel by this much (radians)
 
 	# Godot's built-in font, emboldened (and slanted for italic) to stand in for "Arial Black":
 	# system fonts are not used, they render as solid boxes in this Godot build and vary per machine
@@ -132,7 +133,7 @@ class TextArt:
 		var mid_y := (font.get_ascent(ip) - font.get_descent(ip)) / 2.0
 		# evenly round the wheel from the top (2: top + bottom, upside down like a real tyre)
 		for q in maxi(1, count):
-			var mid := -PI / 2.0 + TAU * q / maxi(1, count)
+			var mid := -PI / 2.0 + TAU * q / maxi(1, count) + phase
 			var th: float = mid - arc / 2.0
 			for i in text.length():
 				var a: float = th + widths[i] / 2.0 / r_mid
@@ -176,7 +177,7 @@ static func word_texture(host: Node, text: String, aspect: float, opts: Dictiona
 	return _text_texture(host, art)
 
 
-static func ring_texture(host: Node, text: String, R: float, r0: float, r1: float, fill := Color8(0xf4, 0xf4, 0xf0), count := 2) -> Texture2D:
+static func ring_texture(host: Node, text: String, R: float, r0: float, r1: float, fill := Color8(0xf4, 0xf4, 0xf0), count := 2, phase := 0.0) -> Texture2D:
 	var art := TextArt.new()
 	art.mode = "ring"
 	art.text = text
@@ -184,6 +185,7 @@ static func ring_texture(host: Node, text: String, R: float, r0: float, r1: floa
 	art.R = R; art.r0 = r0; art.r1 = r1
 	art.fill = fill
 	art.count = count
+	art.phase = phase
 	return _text_texture(host, art)
 
 
@@ -349,6 +351,51 @@ static func _surface_aabb(mi: MeshInstance3D, si: int) -> AABB:
 	return bb
 
 
+## centre of the vertices of surface `si` whose |z| is within `tol` of `zc` on side `sgn`
+static func _ring_centre(P: PackedVector3Array, sgn: float, zc: float, tol: float) -> Variant:
+	var bb := AABB()
+	var n := 0
+	for p in P:
+		if p.z * sgn > 0.0 and absf(absf(p.z) - zc) <= tol:
+			bb = AABB(p, Vector3.ZERO) if n == 0 else bb.expand(p)
+			n += 1
+	return bb.get_center() if n >= 3 else null
+
+
+## handlebar stickers: one on each side of the stem, on top of the bar tube, sliding between the bend
+## and the grip (`pos`). The tube's centre is read from the bar's own vertex rings and interpolated.
+static func _bar_stickers(mi: MeshInstance3D, si: int, L: Dictionary, size: Vector3, rot: float, mat: Material) -> Array:
+	var out: Array = []
+	var arr := mi.mesh.surface_get_arrays(si)
+	var all: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+	var P := PackedVector3Array()   # only the vertices this surface uses (the arrays are shared with the stem)
+	var seen := {}
+	for i in arr[Mesh.ARRAY_INDEX]:
+		if not seen.has(i):
+			seen[i] = true
+			P.append(all[i])
+	var z0 := Handlebar.BEND
+	var z1 := float(L.get("grip_z", Handlebar.GRIP)) - 0.03   # the bar's visible run ends at the lever / grip
+	var zc := lerpf(z0 + size.x * 0.5 + 0.005, z1 - size.x * 0.5 - 0.005, clampf(float(L.get("pos", 0.5)), 0.0, 1.0))
+	zc = clampf(zc, z0, z1)
+	var up := Vector3(-0.35, 0.94, 0).normalized()   # toward the rider, slightly up
+	for sgn in [1.0, -1.0]:
+		var c0 = _ring_centre(P, sgn, z0, 0.012)
+		var zmax := 0.0
+		for p in P:
+			if p.z * sgn > 0.0: zmax = maxf(zmax, absf(p.z))
+		var c1 = _ring_centre(P, sgn, zmax - 0.012, 0.012)   # the outer end of the bar's tube
+		if c0 == null or c1 == null:
+			continue
+		var t := clampf((zc - absf((c0 as Vector3).z)) / maxf(0.001, absf((c1 as Vector3).z) - absf((c0 as Vector3).z)), 0.0, 1.0)
+		var c: Vector3 = (c0 as Vector3).lerp(c1, t)
+		var along: Vector3 = ((c1 as Vector3) - (c0 as Vector3)).normalized() * sgn   # the tube's own direction, +z side reads outward
+		var nrm: Vector3 = (up - along * up.dot(along)).normalized()                  # facing the rider, square to the tube
+		var x: Vector3 = along.rotated(nrm, rot * sgn)
+		out.append(project(mi, si, c, x, nrm, Vector3(size.x, size.y, 0.05), mat))
+	return out
+
+
 ## bike: the "dh" node; cfg: DH_DECALS (or the same shape). Returns the decal MeshInstance3Ds.
 ## labels: { mesh, surface, from: [x, y], to: [x, y], text | image, length, height, z = 0, depth = 0.2,
 ##   fill, stroke, upright, imageMinus } -- from -> to is the tube's centre line in the mesh's space. A
@@ -367,19 +414,37 @@ static func add_bike_decals(bike: Node3D, cfg: Dictionary) -> Array:
 			continue
 		var mi: MeshInstance3D = hit[0]
 		var si: int = hit[1]
-		var a := Vector3(L["from"][0], L["from"][1], 0.0)
-		var b := Vector3(L["to"][0], L["to"][1], 0.0)
+		var a := Vector3(L.get("from", [0, 0])[0], L.get("from", [0, 0])[1], 0.0)
+		var b := Vector3(L.get("to", [1, 0])[0], L.get("to", [1, 0])[1], 0.0)
 		var dir := (b - a).normalized()
-		var mid := a.lerp(b, 0.5)
+		# placement from the garage: slide along the tube (pos 0..1), scale, turn
+		var sc := clampf(float(L.get("scale", 1.0)), 0.2, 3.0)
+		var rot := deg_to_rad(float(L.get("rot", 0.0)))
+		var mid := a.lerp(b, clampf(float(L.get("pos", 0.5)), 0.0, 1.0))
 		var depth := float(L.get("depth", 0.2))
 		var z := float(L.get("z", 0.0))
-		var size := Vector3(L["length"], L["height"], depth)
+		var size := Vector3(float(L["length"]) * sc, float(L["height"]) * sc, depth)
+		if L.get("bar", false):
+			var btex: Texture2D
+			if L.has("image"):
+				btex = image_texture(L["image"])
+			else:
+				btex = word_texture(bike, L["text"], size.x / size.y, L)
+			if btex == null:
+				continue
+			var bmat := decal_material(btex, 0.3)
+			_bind_text(btex, bmat)
+			made.append_array(_bar_stickers(mi, si, L, size, rot, bmat))
+			continue
+		# the far side is seen from the other way, so it turns the opposite way round the part's axis
+		var dir_a := dir.rotated(Z, rot)
+		var dir_b := dir.rotated(Z, -rot)
 		if L.get("upright", false):
 			# a sticker standing along the part (fork legs): the image's up runs from -> to, `length` is its
 			# width across the part; image / imageMinus are the drive-side and other-side artwork
-			for side in [[Z, L["image"]], [NZ, L.get("imageMinus", L["image"])]]:
+			for side in [[Z, L["image"], dir_a], [NZ, L.get("imageMinus", L["image"]), dir_b]]:
 				var zs: Vector3 = side[0]
-				var x := dir.cross(zs).normalized()
+				var x := (side[2] as Vector3).cross(zs).normalized()
 				var m := decal_material(image_texture(side[1]), 0.35)
 				made.append(project(mi, si, Vector3(mid.x, mid.y, z * zs.z), x, zs, size, m))
 			continue
@@ -390,8 +455,8 @@ static func add_bike_decals(bike: Node3D, cfg: Dictionary) -> Array:
 			tex = word_texture(bike, L["text"], float(L["length"]) / float(L["height"]), L)
 		var mat := decal_material(tex, 0.3)
 		_bind_text(tex, mat)
-		made.append(project(mi, si, Vector3(mid.x, mid.y, z), dir, Z, size, mat))      # drive side: reads toward `to`
-		made.append(project(mi, si, Vector3(mid.x, mid.y, -z), -dir, NZ, size, mat))   # other side: the other way
+		made.append(project(mi, si, Vector3(mid.x, mid.y, z), dir_a, Z, size, mat))      # drive side: reads toward `to`
+		made.append(project(mi, si, Vector3(mid.x, mid.y, -z), -dir_b, NZ, size, mat))   # other side: the other way
 	var ty = cfg.get("tyres", null)
 	if ty != null:
 		for entry in ty["meshes"]:
@@ -432,6 +497,11 @@ static func add_bike_decals(bike: Node3D, cfg: Dictionary) -> Array:
 			var r0 := R - d * 0.88
 			var r1 := R - d * 0.18
 			var count := clampi(int(rims.get("count", 2)), 1, 4)
+			var rsc := clampf(float(rims.get("scale", 1.0)), 0.4, 1.6)
+			var rrot := deg_to_rad(float(rims.get("rot", 0.0)))
+			var rmid := (r0 + r1) / 2.0
+			r0 = rmid - (rmid - r0) * rsc
+			r1 = rmid + (r1 - rmid) * rsc
 			if rims.has("image"):
 				# a flat sticker per spot, its top toward the tyre, square to the radius
 				var tex := image_texture(rims["image"])
@@ -442,14 +512,14 @@ static func add_bike_decals(bike: Node3D, cfg: Dictionary) -> Array:
 				var mat := decal_material(tex, 0.4)
 				var rm := (r0 + r1) / 2.0
 				for q in count:
-					var a := -PI / 2.0 + TAU * q / count
+					var a := -PI / 2.0 + TAU * q / count + rrot
 					var ra := Vector3(cos(a), sin(a), 0.0)
 					var pos := c + ra * rm
 					# x axes picked so the image's up (z x x) points out along the radius on both sides
 					made.append(project(mi, si, Vector3(pos.x, pos.y, c.z), Vector3(sin(a), -cos(a), 0), Z, Vector3(wid, hgt, 0.2), mat))
 					made.append(project(mi, si, Vector3(pos.x, pos.y, c.z), Vector3(-sin(a), cos(a), 0), NZ, Vector3(wid, hgt, 0.2), mat))
 				continue
-			var rtex := ring_texture(bike, rims["text"], R, r0, r1, rims.get("fill", Color8(0xf4, 0xf4, 0xf0)), count)
+			var rtex := ring_texture(bike, rims["text"], R, r0, r1, rims.get("fill", Color8(0xf4, 0xf4, 0xf0)), count, rrot)
 			var mat := decal_material(rtex, 0.4)
 			_bind_text(rtex, mat)
 			var size := Vector3(2.0 * R, 2.0 * R, 0.2)
