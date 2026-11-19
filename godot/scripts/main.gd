@@ -27,7 +27,7 @@ func _ready() -> void:
 	if "--garage" not in OS.get_cmdline_user_args():   # straight to the garage: don't build the world first
 		_new_game()
 		_show_menu()
-	create_tween().tween_property(fade, "modulate:a", 0.0, 0.8)
+	create_tween().set_ignore_time_scale().tween_property(fade, "modulate:a", 0.0, 0.8)
 	# command-line: --ride skips the title screen; --autotest=N rides N seconds unattended then quits
 	for a in OS.get_cmdline_user_args():
 		if a == "--ride": _start_ride()
@@ -51,7 +51,7 @@ func restart_ride() -> void:
 	fade.modulate.a = 1.0
 	await _new_game()
 	_set_riding(state != MENU)
-	create_tween().tween_property(fade, "modulate:a", 0.0, 0.5)
+	create_tween().set_ignore_time_scale().tween_property(fade, "modulate:a", 0.0, 0.5)
 
 func _set_riding(riding: bool) -> void:
 	game.input_enabled = riding
@@ -159,7 +159,7 @@ func _open_garage() -> void:
 	garage = Garage.new()
 	add_child(garage)
 	garage.closed.connect(_close_garage)
-	create_tween().tween_property(fade, "modulate:a", 0.0, 0.5)
+	create_tween().set_ignore_time_scale().tween_property(fade, "modulate:a", 0.0, 0.5)
 
 func _close_garage(ride: bool) -> void:
 	fade.modulate.a = 1.0
@@ -169,7 +169,7 @@ func _close_garage(ride: bool) -> void:
 	await _new_game()
 	if ride: _start_ride()
 	else: _show_menu()
-	create_tween().tween_property(fade, "modulate:a", 0.0, 0.5)
+	create_tween().set_ignore_time_scale().tween_property(fade, "modulate:a", 0.0, 0.5)
 
 func _start_ride() -> void:
 	if menu: menu.queue_free(); menu = null
@@ -316,6 +316,10 @@ func _autotest(seconds: float) -> void:
 		var el := (Time.get_ticks_msec() - t0) / 1000.0
 		if OS.get_environment("BMX_MAP") != "" and el >= float(OS.get_environment("BMX_MAP")) and not _probe.get("map", false):   # tests: open the trail map
 			_probe.map = true; game.open_map()
+			if OS.get_environment("BMX_MAP_TILT") != "":   # tests: hold the right stick (body actions) while it's open
+				var tv := OS.get_environment("BMX_MAP_TILT").split(",")
+				Input.action_press("body_right" if float(tv[0]) > 0 else "body_left", absf(float(tv[0])))
+				Input.action_press("body_fwd" if float(tv[1]) > 0 else "body_back", absf(float(tv[1])))
 		if OS.get_environment("BMX_MAP_CLOSE") != "" and el >= float(OS.get_environment("BMX_MAP_CLOSE")) and not _probe.get("map_x", false):   # tests: M again
 			_probe.map_x = true
 			var ke := InputEventKey.new(); ke.keycode = KEY_M; ke.physical_keycode = KEY_M; ke.pressed = true

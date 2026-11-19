@@ -366,13 +366,16 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   -> `await bake()` prints once with mipmaps; `live = true` -> re-rendered every frame and **mouse / keys / pad go to
   it** (clicks are ray-traced onto the panels as they lie, `page_point`). `unfold = false` keeps it folded (a
   leaflet). cols even for unfolding (the outer panel's back = the cover, a strip under the page); odd cols only folded.
-  `close_actions` / `close_requested` / `auto_close`, `opened` / `closed`. Paper = ambientCG **Paper003** (CC0) scan in
+  `close_actions` / `close_requested` / `auto_close`, `opened` / `closed`, `tempo` (< 1 slower; the map 0.4),
+  `sound_stream` (a recording played in random faded slices; the map: `assets/audio/map_unfold_gravel.ogg`). Paper = ambientCG **Paper003** (CC0) scan in
   `assets/textures/paper/` × the print, creases worn (`shaders/paper_sheet.gdshader`). Rustle sound synthesised.
 - **Trail map** (`PaperMap`, `scripts/ui/paper_map.gd`; `Game.open_map` / `exit_map`): 4×2 panels (0.84 × 0.525 m),
   north-up topo 800 × 500 m around you: real ground colours washed out + hill shade, 5 m / 25 m contours, shore, trail in
   red dashes, route features, the last 90 s ridden, 100 m grid, title block, legend, scale bar, north arrow, YOU ARE
   HERE, a cover. Printed ~0.2 s, again only after 60 m / a new world. Ride frozen + HUD hidden while it's up; M / Esc /
-  bail fold it away.
+  bail fold it away. Unfolds at `tempo` 0.4 (~1.6 s), with the user's gravel-crunch recording. Held in the hands
+  (`handheld`): right stick tilts it (±0.3 rad), RT / LT (W / S) zoom 1–3×, left stick (A / D) pans when zoomed,
+  mouse wheel zooms, drag pans. The screen fades (`main.fade`) run on real time, or a map opened during one froze it.
 - **Pause leaflet** (`PausePamphlet`, `scripts/ui/pause_pamphlet.gd`, built in `main._pause`): a DL tri-fold (3 × 99 ×
   210 mm, Z-folded, stays folded). Cover photo = the ride's last frame grabbed at the moment of pausing (centre crop,
   away from the HUD corners), "DOWNHILL PARK / MINI BMX / <biome> · TRAIL GUIDE", the menu printed below as live
@@ -469,7 +472,7 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `BMX_DEBRIS_PROBE=1` | fence / cactus debris: moving / resting counts and the lowest piece (none may fall through the ground) |
 | `BMX_SPRITE_DUST=1`, `BMX_SMOKE_PROBE=1` | old sprite dust for comparison / smoke-sim timing prints |
 | `BMX_FENCE=dir/prefix` (+ `BMX_FENCE_STYLE=ranch/picket`, `BMX_FENCE_SPEED=m/s`, `BMX_FENCE_ANGLE=deg`) | autotest rides into the nearest fence, screenshots before / after the smash; with `BMX_DEBRIS_PROBE=1` every piece prints how far it landed from the hit and its gap to the drawn ground |
-| `BMX_MAP=secs` (+ `BMX_MAP_CLOSE=secs`) | autotest opens the trail map (presses M again); prints `AUTOTEST map: open= time_scale= hud=` |
+| `BMX_MAP=secs` (+ `BMX_MAP_CLOSE=secs`, `BMX_MAP_TILT=x,y` holds the right stick; the autotest's held pedal = RT zooms in, `BMX_IDLE=1` for none) | autotest opens the trail map (presses M again); prints `AUTOTEST map: open= time_scale= hud=` |
 | `BMX_MAP_SHOTS=dir/prefix` | saves the paper sheet's own render every 0.1 s while it unfolds (`PAPERSHOT`) |
 | `BMX_PAPER_AT=secs` | freezes every paper sheet's animation at that time (pair with `BMX_SHOT` for a frame mid-unfold) |
 | `BMX_PAUSE=1` (+ `BMX_PAUSE_HOVER=0.62`) | pause leaflet at the end of an autotest; HOVER moves the mouse to that screen height and prints where it lands on the page |
@@ -504,7 +507,6 @@ and other GPU apps open; uncapped ~430 fps on an RTX 3090 after the C# terrain.
 
 - Minimised test windows (`BMX_MIN`) render late / irregularly: frame-timed screenshots of an animation all come out
   the same. Use `BMX_OFFSCREEN=1` (or freeze the animation, `BMX_PAPER_AT`) for those.
-- A `SubViewport` texture's `get_image()` comes out upside down vs the screen: `flip_y()` it.
 - Packed arrays are values: `var dst := minor; dst.append(..)` does NOT append to `minor`.
 
 - Tyres are never drawn in the ground: see "Tyres follow the ground" in section 5 (`BikeRig.fit_wheels` / `unclip_tyres`). Smashed-fence / cactus debris is held above the terrain every physics
