@@ -12,7 +12,7 @@ solver closes a rigid triangle; the shock's lower eye rides on the swingarm.
 import bpy, sys, os, json, struct, math
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from bike_glb import extract, write_glb, dh_rotors
+from bike_glb import extract, write_glb, dh_rotors, glb_local_parts
 
 GLTF = sys.argv[-1]
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -32,7 +32,10 @@ def parts_of(o):
     n = len(mi); L = L.reshape(n, 3); N = N.reshape(n, 3, 3)
     return P[L].reshape(-1, 3), N.reshape(-1, 3), mi, names
 
+DERAIL = os.path.join(ROOT, "godot", "assets", "parts", "tues_derailleur.glb")
 ROTORS = dh_rotors(DH)
+TUES_CRANKS = glb_local_parts(os.path.join(ROOT, "godot", "assets", "parts", "tues_cranks.glb"))   # relative to its BB
+DERAIL_PARTS = glb_local_parts(DERAIL)   # the Tues rear derailleur, relative to its axle
 # ---------------------------------------------------------------- our parts from dh.glb (steer, fork lowers, crank)
 bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.ops.import_scene.gltf(filepath=DH)
@@ -48,6 +51,23 @@ for name in ("steer", "fork_lower", "crank", "frame"):
         if name == "frame" and names[k] != "plastic": continue   # only the saddle of the GLORY frame
         lst.append((P[sel], N[sel], names[k]))
     ours[name] = lst
+# the Tues pedals in place of the GLORY's (the crank's "plastic" surface is the pedal pair)
+def per_side(parts):   # {side: (pos, nrm, mat)} split by the sign of each triangle's z
+    out = {}
+    for p, n, m in parts:
+        tri_z = p.reshape(-1, 3, 3)[:, :, 2].mean(1)
+        for side in (-1, 1):
+            sel = np.repeat(np.sign(tri_z) == side, 3)
+            if sel.any(): out.setdefault(side, []).append((p[sel], n[sel], m))
+    return out
+old = [e for e in ours["crank"] if e[2] == "plastic"]
+ours["crank"] = [e for e in ours["crank"] if e[2] != "plastic"]
+new = per_side([e for e in TUES_CRANKS if e[2] == "plastic"])
+oldside = per_side(old)
+for side in (-1, 1):
+    cd = np.concatenate([e[0] for e in oldside[side]]).mean(0)        # the GLORY pedal's centre (absolute)
+    ct = np.concatenate([e[0] for e in new[side]]).mean(0)            # the Tues pedal's centre (relative to its BB)
+    ours["crank"] += [(p - ct + cd, n, "plastic") for p, n, m in new[side]]
 print("dh pivots", {k: v.round(4).tolist() for k, v in piv.items()})
 
 # ---------------------------------------------------------------- the Sketchfab frame
@@ -156,14 +176,16 @@ proj = (spr - FE) @ dirv
 seat0 = FE + dirv * proj.min(); spring_len = float(proj.max() - proj.min())
 ang = math.atan2(dirv[1], dirv[0]) - math.pi / 2
 z3 = lambda v: np.array([v[0], v[1], 0.0])
-tri = [(np.array([[0, 0, 0], [0.01, 0, 0], [0, 0.01, 0]], float), np.tile([0, 0, 1.0], (3, 1)), "rubber")]
+tri = [(np.array([[0, 0, 0], [0.01, 0, 0], [0, 0.01, 0]], float), np.tile([0, 0, 1.0], (3, 1)), "chrome")]
 rows = [("frame", None, np.zeros(3), groups["frame"]),
         ("steer", None, z3(SPn), moved(ours["steer"], shift)),
         ("fork_lower", "steer", z3(FAXn), moved(ours["fork_lower"], shift)),
         ("wheel_front", "fork_lower", z3(FAXn), tri + ROTORS["wheel_front"]),
         ("swing", None, z3(G1), []),
-        ("seatstay", None, z3(C1), groups["seatstay"]),
+        ("seatstay", None, z3(C1), groups["seatstay"] + [(p + np.array([A[0], A[1], 0.0]), n, m) for p, n, m in DERAIL_PARTS]),
         ("wheel_rear", "seatstay", z3(A), tri + ROTORS["wheel_rear"]),
+        ("pulley_1", "seatstay", z3(A + np.array([0.016, -0.062])), []),
+        ("pulley_2", "seatstay", z3(A + np.array([0.022, -0.138])), []),
         ("shock_body", None, z3(FE), groups["shock_body"]),
         ("shock_spring", "shock_body", z3(seat0), groups["shock_spring"]),
         ("shock_shaft", None, z3(D), groups["shock_shaft"]),
@@ -182,5 +204,6 @@ rear.update({"G1": G1.tolist(), "G2": G2.tolist(), "C1": C1.tolist(), "C2": C2.t
              "FE": FE.tolist(), "springLen": spring_len})
 extras["wheelbase"] = float(FAXn[0] - A[0]); extras["bbToRearAxle"] = float(-A[0])   # this frame has longer stays than the GLORY
 extras["noDecals"] = True
+extras["chain"] = {"ring_r": 0.092, "ring_z": 0.055, "cog_z": 0.060, "pulley_r": 0.0235, "pulley_z": 0.085}
 write_glb(OUT, nodes, extras)
 print("axle", A.round(3), "fork axle", FAXn.round(3), "shock L", np.linalg.norm(D - FE).round(3), "spring", round(spring_len, 3))

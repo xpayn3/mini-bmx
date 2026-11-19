@@ -69,6 +69,7 @@ def classify(base, i, mats, f, c):
     if base == "Drivetrain":
         if "Chain" in mats: return None
         if "Chain_Guide" in mats: return "frame"
+        if c[0] < -0.52: return "seatstay"          # the rear derailleur hangs off the axle
         if math.hypot(c[0] - BBF[0], c[1] - BBF[1]) < 0.27 and f >= 1: return "crank"
         return None
     return None
@@ -97,7 +98,7 @@ def to_game(p):   # (fx, fy, fz) -> game, BB at the origin
 
 
 parts = {}   # node -> list of (pos(tri*3,3), nrm, matname)
-lib = {"fork": [], "cranks": [], "cockpit": [], "brakes": []}
+lib = {"fork": [], "cranks": [], "cockpit": [], "brakes": [], "derail": []}
 for o in list(bpy.data.objects):
     if o.type != 'MESH' or len(o.data.polygons) == 0: continue
     base = o.name.split(".")[0]
@@ -122,6 +123,7 @@ for o in list(bpy.data.objects):
         entry = (node, pos[sel], nrm[sel], mn)
         if base == "Forks": lib["fork"].append(entry)
         if base == "Drivetrain" and node == "crank": lib["cranks"].append(entry)
+        if base == "Drivetrain" and node == "seatstay": lib["derail"].append(entry)
         if base == "Headset" or (base == "Brakes" and node == "steer"): lib["cockpit"].append(entry)
         if base == "Brakes" and node in ("fork_lower", "seatstay"): lib["brakes"].append(entry)
 
@@ -166,11 +168,12 @@ print("at the game's travel limits (rise +0.14 / -0.06): stroke %.3f / %.3f" % (
 z3 = lambda v: np.array([v[0], v[1], 0.0])
 PIV = {"frame": np.zeros(3), "steer": z3(SP), "fork_lower": z3(FAX), "wheel_front": z3(FAX), "swing": z3(G1),
        "seatstay": z3(C1), "wheel_rear": z3(A), "rocker": z3(G2), "shock_body": z3(FE), "shock_shaft": z3(D),
-       "crank": z3(g2(*BBF))}   # the crank turns about the bottom bracket
-PARENT = {"fork_lower": "steer", "wheel_front": "fork_lower", "wheel_rear": "seatstay"}
-tri = [(np.array([[0, 0, 0], [0.01, 0, 0], [0, 0.01, 0]], float), np.tile([0, 0, 1.0], (3, 1)), "rubber")]   # wheel placeholder
+       "crank": z3(g2(*BBF)),   # the crank turns about the bottom bracket
+       "pulley_1": z3(g2(-0.613, 0.298)), "pulley_2": z3(g2(-0.607, 0.222))}   # derailleur pulleys: the chain path
+PARENT = {"fork_lower": "steer", "wheel_front": "fork_lower", "wheel_rear": "seatstay", "pulley_1": "seatstay", "pulley_2": "seatstay"}
+tri = [(np.array([[0, 0, 0], [0.01, 0, 0], [0, 0.01, 0]], float), np.tile([0, 0, 1.0], (3, 1)), "chrome")]   # wheel placeholder
 nodes = []
-for name in ("frame", "steer", "fork_lower", "wheel_front", "swing", "seatstay", "wheel_rear", "rocker", "shock_body", "shock_shaft", "crank"):
+for name in ("frame", "steer", "fork_lower", "wheel_front", "swing", "seatstay", "wheel_rear", "pulley_1", "pulley_2", "rocker", "shock_body", "shock_shaft", "crank"):
     par = PARENT.get(name)
     pp = PIV[par] if par else np.zeros(3)
     nodes.append({"name": name, "parent": par, "t": PIV[name] - pp, "origin": PIV[name],
@@ -180,6 +183,7 @@ rear = {"travel": 0.2, "sag": 0.3, "G1": G1.tolist(), "G2": G2.tolist(), "C1": C
         "A": A.tolist(), "D": D.tolist(), "FE": FE.tolist(), "springLen": 0.1}
 extras = {"steerAxis": [float(axis[0]), float(axis[1]), 0.0], "wheelRadius": float(FAX[1]), "wheelRadiusRear": float(A[1]),
           "wheelbase": float(FAX[0] - A[0]), "bbToRearAxle": float(0.0 - A[0]), "noBarMod": True, "noDecals": True,
+          "chain": {"ring_r": 0.068, "ring_z": 0.070, "cog_z": 0.060, "pulley_r": 0.0235, "pulley_z": 0.085},
           "suspension": {"fork": {"travel": 0.2, "sag": 0.2}, "rear": rear}}
 write_glb(os.path.join(OUT, "tues.glb"), nodes, extras)
 
@@ -192,4 +196,5 @@ def lib_glb(fname, key, origin, root, nodename):
 lib_glb("tues_fork.glb", "fork", z3(FAX), "fork", "fork")
 lib_glb("tues_cranks.glb", "cranks", z3(g2(*BBF)), "cranks", "crank")
 lib_glb("tues_cockpit.glb", "cockpit", z3(SP), "cockpit", "cockpit")
+lib_glb("tues_derailleur.glb", "derail", z3(A), "derailleur", "derailleur")
 lib_glb("tues_brakes.glb", "brakes", np.zeros(3), "brakes", "brakes")

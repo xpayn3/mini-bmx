@@ -1071,6 +1071,7 @@ func _process(dt: float) -> void:
 	_update_dab(dt, st)
 	var wobble := sin(t * 2.3) * 0.025 * maxf(0.0, 1 - absf(st.v) / 2) * (1.0 - dab_k)
 	var dab_lean := -dab_side * DAB_LEAN * dab_k   # bike_lean > 0 tips the top to the rider's left
+	if rig.chain and phys.geared and phys.gear >= 0: rig.chain.cog_teeth = float(phys.cogs[phys.gear])
 	rig.pose(drawn_pos.x, y_draw + (1.5 if OS.get_environment("BMX_PITCH_POSE") != "" else 0.0), drawn_pos.z, hd, p_draw, st.hop_nose, st.bike_lean + st.rock + wobble + dab_lean,
 		st.steer + st.bar_catch - wobble * 1.5, st.wheel_f, st.wheel_r, st.crank)
 	DebugOverlay.draw(self, st, drawn_pos, hd)

@@ -20,6 +20,8 @@ var grip_r := Vector3.ZERO
 var seat = null
 var susp = null
 var rotors: Array = []
+var chain: BikeChain   # drawn chain + derailleur pulleys, for frames that carry "chain" in their extras
+var crank_angle := 0.0
 
 func _init() -> void:
 	name = "BikeRig"
@@ -68,6 +70,10 @@ func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
 			decal_cfg.erase("labels")
 	if extras.has("suspension"):
 		susp = Suspension.new(model, extras)
+	if extras.has("chain"):
+		chain = BikeChain.new()
+		model.add_child(chain)
+		chain.setup(self)
 	if not decal_cfg.is_empty():
 		BikeDecals.add_bike_decals(model, decal_cfg)
 	if extras.has("suspension") and model.find_child("rocker", true, false):
@@ -232,6 +238,7 @@ func pose(px: float, py: float, pz: float, heading: float, pitch: float, hop_nos
 	wheel_f.rotation.z = -wf
 	wheel_r.rotation.z = -wr
 	crank_n.rotation.z = -crank
+	crank_angle = crank
 	for p in pedal_pivots:
 		p.rotation.z = crank
 	if susp:

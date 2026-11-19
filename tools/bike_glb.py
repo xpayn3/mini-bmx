@@ -123,3 +123,24 @@ def dh_rotors(dh_path):
         out[name] = [(np.concatenate([a for a, _ in v]), np.concatenate([b for _, b in v]), m) for m, v in parts.items()]
         print("rotor", name, sum(len(a) // 3 for a, _, _ in out[name]), "tris")
     return out
+
+
+def glb_local_parts(path):
+    """every triangle of a glb's meshes as (pos, nrm, material) in game axes, node-local (a single-node parts file)"""
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    bpy.ops.import_scene.gltf(filepath=path)
+    out = []
+    for o in bpy.data.objects:
+        if o.type != 'MESH': continue
+        me = o.data; me.calc_loop_triangles()
+        V = np.empty(len(me.vertices) * 3); me.vertices.foreach_get("co", V); V = V.reshape(-1, 3)
+        by = {}
+        for t in me.loop_triangles:
+            m = me.materials[t.material_index].name if me.materials else "black"
+            p = V[list(t.vertices)]
+            n = np.array([list(v) for v in t.split_normals])
+            by.setdefault(m, []).append((p, n))
+        g = lambda a: np.stack([a[:, 0], a[:, 2], -a[:, 1]], 1)
+        for m, v in by.items():
+            out.append((g(np.concatenate([a for a, _ in v])), g(np.concatenate([b for _, b in v])), m))
+    return out
