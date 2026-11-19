@@ -395,6 +395,14 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   turn), route feature (`route_feats`: tabletop, kicker, rollers, bridge…) or rock garden within 120 m; a banner
   pops up over any page when a new one appears, then stays from 40 m in. Off the trail (> 15 m) or riding it
   backwards: no alerts. `BMX_ALERT_PROBE=1` walks 2.4 km of trail and prints every alert.
+- **Screen layout** (`hud.gd`): top left FPS / ride info / biome name / `StylePop` (STYLE total, trick + points: points
+  roll up, the banked "+N" flies into the total, which counts up gold with sparks + a ring, combo "xN" punches in);
+  top centre the jump card (`AirCard`, same dark LCD look as the alert); top right the **life bar** (red, heart) over
+  stamina; bottom centre the trail alert banner (`AlertBanner`, big) under the hop bar.
+- **Life** (`hud.life`): a crash takes 12–95 % by body speed (`on_crash(speed)`), heals 1.2 %/s from 4 s after it.
+  At zero the get-up prompt says KNOCKED OUT / hold hop 1.2 s to **revive** (`REVIVE_HOLD`, back with 50 %) or
+  Backspace back to start (full life, `on_respawn`). `BikePhysics.getup_need` is the hold time. Tests: `BMX_LIFE=0.1`
+  (start life), `BMX_LIFE_PROBE=1` (`LIFE` lines).
 - Piezo sounds (`ui/garmin_beep.gd`, rendered once into AudioStreamWAVs): a rising power-on chime 0.35 s after the
   HUD shows (ride start), a short key beep on the ◀ ▶ bezel buttons.
 - Small touches: "acquiring satellites" for the first 3 s of a ride, battery icon (drains 60 %/h of riding),

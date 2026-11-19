@@ -520,6 +520,7 @@ func start_crash(reason: String) -> void:
 	# the body carries on with the bike's own motion (no extra pop up: it used to throw the body into the air)
 	var body_vel := f * phys.v + Vector3(0, minf(maxf(phys.vy, 0), 6.0 if phys.air else 0.3) + 0.2, 0)
 	var spin_v := f * (1.0 + absf(phys.v) * 0.08)   # the top of the body keeps going a little as the bike stops
+	var crash_v := body_vel.length()
 	phys.begin_crash()
 	_break_action_cam(body_vel)
 	# detach the rider into world space
@@ -536,7 +537,7 @@ func start_crash(reason: String) -> void:
 	if cs != 2 and dust.sim == null: dust.cloud(Vector3(phys.x, phys.y, phys.z), f * phys.v * 0.3, ground_dust(phys.x, phys.z, cs), 3.2, 1.2)
 	if _wasted_on(): wasted.start(reason)
 	else: flash(reason)
-	if hud: hud.on_crash()
+	if hud: hud.on_crash(crash_v)
 	if audio: audio.crash()
 	Settings.rumble(1.0, 1.0, 0.45)
 
@@ -575,6 +576,7 @@ func get_up() -> void:
 	rider.remount_action_cam()
 	if OS.get_environment("BMX_GOPRO_PROBE") != "": print("GOPRO remounted: ", rider.action_cam.get_node_or_null("Body") != null)
 	_snap_prev()
+	if hud: hud.on_get_up()
 
 func on_trick(trick: String) -> void:
 	if hud: hud.on_trick(trick)
@@ -753,6 +755,7 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 # ---------------------------------------------------------------- ride control
 func respawn(new_world: bool) -> void:
 	if phys.crash_on: get_up()
+	if hud: hud.on_respawn()
 	if new_world:
 		GameState.new_seed()
 		terrain.clear_dynamic()

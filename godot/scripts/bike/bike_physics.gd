@@ -115,6 +115,7 @@ var skid_fx := false; var surf := 0; var hop_bar := 0.0; var hop_bar_show := fal
 
 # ---- crash ----
 var crash_on := false; var crash_t := 0.0; var crash_pending := ""; var crash_side := 1.0
+var getup_need := GETUP_HOLD   # hold time to get up (longer to revive at zero life, set by the HUD)
 var crash_rest := 0.0; var crash_bvy := 0.0; var crash_fall_v := 0.0; var crash_armed := false; var crash_hold := 0.0
 
 func _init(h) -> void:
@@ -295,7 +296,7 @@ func _crash_step(dt: float, inp: Dictionary) -> void:
 	if holding: crash_hold += dt
 	else:
 		crash_armed = false; crash_hold = maxf(0.0, crash_hold - dt * 3)
-	if crash_hold >= GETUP_HOLD:
+	if crash_hold >= getup_need:
 		host.get_up()
 
 # ---------------------------------------------------------------------
