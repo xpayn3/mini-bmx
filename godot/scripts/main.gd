@@ -1187,7 +1187,20 @@ func _autotest(seconds: float) -> void:
 					_probe["dust_k"] = nkf
 					get_viewport().get_texture().get_image().save_png("%s_%d.png" % [OS.get_environment("BMX_DUST_SHOTS"), nkf])
 			continue
-		if OS.get_environment("BMX_STEER") != "":   # tests: hold a steady turn (+ left, - right) after 2 s
+		if OS.get_environment("BMX_FLIPFLOP") != "":   # tests: full left / full right, swapped every half period (s), from 3 s
+			var per := float(OS.get_environment("BMX_FLIPFLOP"))
+			var sv := 0.0 if el < 3.0 else (1.0 if fmod(el - 3.0, per) < per * 0.5 else -1.0)
+			Input.action_press("steer_left", 1.0) if sv > 0 else Input.action_release("steer_left")
+			Input.action_press("steer_right", 1.0) if sv < 0 else Input.action_release("steer_right")
+			var ph3 = game.phys
+			var bl_prev: float = _probe.get("ff_bl", ph3.bike_lean)
+			var fdt := maxf(get_process_delta_time(), 1e-4)
+			_probe["ff_rate"] = maxf(_probe.get("ff_rate", 0.0), absf(ph3.bike_lean - bl_prev) / fdt) if el > 3.5 else 0.0
+			_probe["ff_bl"] = ph3.bike_lean
+			if el - float(_probe.get("ff_t", 0.0)) > 0.1:
+				_probe["ff_t"] = el
+				print("LEANFF t=%.1f v=%.1f key=%+.0f steer_in=%+.2f lat=%+.1f bike=%+.0fdeg body_hip=%+.0fdeg body_chest=%+.0fdeg max_rate=%.1frad/s" % [el, ph3.v, sv, ph3.steer_in, ph3.lat_a, rad_to_deg(ph3.bike_lean), rad_to_deg(game.rider.roll_p), rad_to_deg(game.rider.roll_c), _probe["ff_rate"]])
+		elif OS.get_environment("BMX_STEER") != "":   # tests: hold a steady turn (+ left, - right) after 2 s
 			var sv := float(OS.get_environment("BMX_STEER")) if el > 2.0 else 0.0
 			Input.action_press("steer_left", maxf(sv, 0.0)) if sv > 0 else Input.action_release("steer_left")
 			Input.action_press("steer_right", maxf(-sv, 0.0)) if sv < 0 else Input.action_release("steer_right")

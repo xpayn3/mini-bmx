@@ -6,6 +6,7 @@ signal changed
 
 const DEFS := [
 	["Steering", [
+		["steerEase", "Steer eases in (higher = snappier)", 12, 2, 25, 0.5, "/s"],
 		["steerRate", "Steer build-up", 15, 1, 25, 0.5, "/s"],
 		["steerRelease", "Steer release", 10, 1, 25, 0.5, "/s"],
 		["steerCurve", "Soft centre", 0.1, 0, 1, 0.05, ""],
@@ -72,9 +73,10 @@ const DEFS := [
 	]],
 	["Lean", [
 		["leanMax", "Max lean", 0.95, 0.15, 1.3, 0.01, "rad"],
-		["leanIn", "Roll-in stiffness", 40, 8, 200, 1, ""],
-		["leanOut", "Roll-out stiffness", 30, 8, 200, 1, ""],
+		["leanIn", "Roll-in stiffness", 37, 8, 200, 1, ""],
+		["leanOut", "Roll-out stiffness", 28, 8, 200, 1, ""],
 		["leanDamp", "Lean damping", 1.0, 0.3, 1.6, 0.02, ""],
+		["leanRate", "Fastest roll (side to side)", 3.6, 0.5, 5, 0.1, "rad/s"],
 		["bikeLeanMul", "Bike leans extra", 1.55, 0.7, 2.0, 0.01, "×"],
 		["bikeLeanCap", "Bike lean soft cap", 1.3, 0.3, 1.5, 0.01, "rad"],
 		["bodyLean", "Body leans with bike", 0.7, 0.3, 1.0, 0.01, "×"],
@@ -138,7 +140,7 @@ const DEFS := [
 		["flickTurn", "Lean into a turn: extra turn", 4.0, 0, 10, 0.1, "m/s²"],
 		["flickGrip", "Lean into a turn: extra grip", 0.2, 0, 0.6, 0.02, "×"],
 		["flickLean", "Bike thrown under the body", 0.35, 0, 0.8, 0.01, "rad"],
-		["flickSpeed", "Bike flick speed", 14, 3, 30, 0.5, "/s"],
+		["flickSpeed", "Bike flick speed", 10, 3, 30, 0.5, "/s"],
 		["flickKick", "Quick flick whips the bike round", 0.16, 0, 0.5, 0.01, "rad"],
 		["stickAirTilt", "Air: stick tilts the nose", 0.55, 0, 1.2, 0.05, "rad"],
 		["stickAirRoll", "Air: stick lays the bike over", 0.75, 0, 1.2, 0.05, "rad"],
@@ -182,10 +184,10 @@ const DEFS := [
 
 const PATH := "user://tune.cfg"
 ## bump VER when defaults are retuned: saved values of the RETUNED keys are dropped once
-const VER := 9
+const VER := 12
 ## later retunes, per version: only these keys are dropped for saves older than that version (bumping VER
 ## with one shared list would reset every earlier retuned key again)
-const RETUNED_AT := {8: ["manualFrom", "stickAirRoll", "stickSpinBuild", "stickYawRate"], 9: ["leanMax"]}
+const RETUNED_AT := {8: ["manualFrom", "stickAirRoll", "stickSpinBuild", "stickYawRate"], 9: ["leanMax"], 11: ["leanIn", "leanOut", "flickSpeed"], 12: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"]}
 const RETUNED := ["steerRate", "steerRelease", "steerCurve", "turnSlow", "turnFast", "turnFloor", "steerMax", "slowSteer",
 	"barSpeed", "grip", "slipRecover", "slipMax", "turnWeight", "leanMax", "leanIn", "leanOut", "leanDamp", "bikeLeanMul", "bikeLeanCap", "flipAccel", "flipRate", "airTwist", "landBack", "travel", "popKick"]
 var defaults := {}
