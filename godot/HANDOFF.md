@@ -226,6 +226,7 @@ F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A 
   forces the old box-mesh renderer (`smoke_render.gdshader`, the fallback).
   `.glsl` files need an import (`--headless --import`) after editing. Falls back to the
   old sprites / FogVolumes without a RenderingDevice; `BMX_SPRITE_DUST=1` forces the sprites.
+- **Dust tab** in the tuning card (Tune groups `Dust look` / `Dust trail` / `Dust spray`, keys `dust*`, read live every frame by `SmokeSim._read_tune` and `RideDust`): thickness, wispy edges, rise, swirl, curls, grit; fade speed, spread, wind, room ahead of the rider (the sim box trails behind: `ahead` 3 m = ~22 m of trail); rear / front amount, spray width, sideways, kick-up, throw, gusts, landing clouds. Ride presets leave `dust*` alone; Reset puts them back to the defaults. Test: `BMX_PANEL=dust`, `BMX_TUNE=dustOpacity=2`.
 - Dirt chunks, **tyre tracks**: one ring-buffer ArrayMesh
   (14 000 segments ≈ 1 km/wheel, one draw call, each segment uploads only its own bytes) drawn by
   `tyre_track.gdshader` — lit, knob-tread dimples bump-mapped, soft edges + soil lip, skid streaks, distance fade.

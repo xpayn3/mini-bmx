@@ -20,21 +20,23 @@ const HM := 32                    # heightmap cells across the box
 const HM_CELL := H * NX / HM      # 0.8 m; the box moves in whole heightmap cells
 const MAX_SRC := 64
 const PRESSURE_ITERS := 14
-const AHEAD := 7.0                # metres of box kept ahead of the rider
+var ahead := 3.0                  # metres of box kept ahead of the rider (the rest trails behind: long dust trails)
 const PASSES := ["advect", "curl", "confine", "divergence", "pressure", "project", "light", "occupancy"]
 const BRICK := 8                  # voxels per occupancy cell (empty-space skipping)
 const SRC_F := 20                 # floats per source: pos+r, vel+rate, blend/radial, colour, spin
 
 ## tuning
-var density_fade := 0.15          # /s
+var density_fade := 0.07          # /s (low: the trail hangs in the air a long way back)
 var vel_relax := 0.35             # /s back toward the wind
 var rise := float(OS.get_environment("BMX_SMOKE_RISE")) if OS.get_environment("BMX_SMOKE_RISE") != "" else 0.55   # m/s the dust rises through the air (more when riding fast)
 var vorticity := 0.9
-var extinction := 0.9      # light, see-through dust: the ground shows through (was 3.0)
+var extinction := 0.6      # light, see-through dust: the ground shows through (was 3.0, then 0.9)
 var turbulence := 6.5             # curl-noise swirl force
 var turb_scale := 0.7             # 1/m: swirl size ~ 1.5 m
-var disperse := 2.2               # /s: how fast dust mixes out into the air (turbulent diffusion)
+var disperse := 1.3               # /s: how fast dust mixes out into the air (turbulent diffusion)
 var disperse_reach := 1.6         # voxels
+var wisps := 1.15                 # noise erosion of the edges (render)
+var _rise_env := OS.get_environment("BMX_SMOKE_RISE") != ""
 
 var ok := false
 var terrain = null
@@ -184,6 +186,21 @@ func reset() -> void:
 	_n = 0
 	_last_focus = Vector3.INF
 
+## the Dust tab sliders (Tune "Dust look" / "Dust trail"), read every frame so they apply live
+func _read_tune() -> void:
+	var t: Dictionary = Tune.v
+	if t.is_empty(): return
+	extinction = float(t.get("dustOpacity", extinction))
+	wisps = float(t.get("dustWisps", wisps))
+	if not _rise_env: rise = float(t.get("dustRise", rise))
+	turbulence = float(t.get("dustSwirl", turbulence))
+	turb_scale = float(t.get("dustSwirlSize", turb_scale))
+	vorticity = float(t.get("dustCurl", vorticity))
+	density_fade = float(t.get("dustFade", density_fade))
+	disperse = float(t.get("dustSpread", disperse))
+	vel_relax = float(t.get("dustWindCarry", vel_relax))
+	ahead = float(t.get("dustAhead", ahead))
+
 func tint(col: Color) -> void:
 	_col_target = col
 
@@ -192,6 +209,7 @@ func tint(col: Color) -> void:
 func step(dt: float, focus: Vector3, fwd: Vector3) -> void:
 	if not ok: return
 	dt = clampf(dt, 1.0 / 240.0, 1.0 / 30.0)
+	_read_tune()
 	for i in range(_emit.size() - 1, -1, -1):
 		var e: Dictionary = _emit[i]
 		add_source(e.p, e.v, e.r, e.rate, e.blend, e.radial, e.col)
@@ -217,7 +235,7 @@ func step(dt: float, focus: Vector3, fwd: Vector3) -> void:
 	var f2 := Vector2(fwd.x, fwd.z)
 	if f2.length() > 0.1: _dir = _dir.lerp(f2.normalized(), 1.0 - exp(-dt * 1.2)).normalized()
 	var ext := Vector2(NX * H, NZ * H)
-	var center := Vector2(focus.x, focus.z) - _dir * (ext.x * 0.5 - AHEAD)
+	var center := Vector2(focus.x, focus.z) - _dir * (ext.x * 0.5 - ahead)
 	var want := ((center - ext * 0.5) / HM_CELL).floor() * HM_CELL
 	var shift := Vector2i.ZERO
 	var clear := false
@@ -279,7 +297,7 @@ func step(dt: float, focus: Vector3, fwd: Vector3) -> void:
 		compositor.params = {light = _tex3d, colv = _colr3d, occ = _occ3d, hmap = _hm_tex, detail = detail_texture(),
 			origin = Vector3(origin.x, 0, origin.y), hm_cells = float(HM), size_m = Vector3(NX * H, NY * H, NZ * H),
 			step = 0.08, ext = extinction, box_min = bmin, box_max = bmax, shadow_k = 0.62, sun_dir = sdir,
-			detail_amt = 1.15, sun_col = scol, max_steps = 160.0, amb_col = Vector3(amb_col.r, amb_col.g, amb_col.b),
+			detail_amt = wisps, sun_col = scol, max_steps = 160.0, amb_col = Vector3(amb_col.r, amb_col.g, amb_col.b),
 			dust_col = Vector3(dc.r, dc.g, dc.b), drift = _drift, cloud = cloud}
 	RenderingServer.call_on_render_thread(_gpu_step.bind(dt, shift, clear, bytes.to_byte_array(), n, sdir))
 

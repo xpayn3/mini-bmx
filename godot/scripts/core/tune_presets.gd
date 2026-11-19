@@ -63,6 +63,9 @@ static func preset(n: String) -> Dictionary:
 	var src: Dictionary = customs[n] if n in customs else BUILTIN.get(n, {})
 	for k in src:
 		if out.has(k): out[k] = float(src[k])
+	# dust sliders aren't ride feel: a ride preset leaves them as they are
+	for k in out:
+		if str(k).begins_with("dust"): out[k] = float(Tune.base.get(k, out[k]))
 	return out
 
 

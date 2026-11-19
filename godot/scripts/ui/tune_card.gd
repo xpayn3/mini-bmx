@@ -38,9 +38,14 @@ const TABS := [
 		["Time", ["W:time"]],
 		["Light", ["W:light"]],
 	]],
+	["dust", "Dust", [
+		["Look", ["T:Dust look"]],
+		["Trail", ["T:Dust trail"]],
+		["Spray", ["T:Dust spray"]],
+	]],
 ]
 
-static var last_cat := {"ride": 0, "rider": 0, "look": 0, "sound": 0, "light": 0}   # remembered for the session
+static var last_cat := {"ride": 0, "rider": 0, "look": 0, "sound": 0, "light": 0, "dust": 0}   # remembered for the session
 
 var game
 var tab := "ride"
@@ -127,6 +132,7 @@ func show_tab(id: String) -> void:
 		"look": sub.text = "Helmet, goggles, kit and shoes"
 		"sound": sub.text = "Coast (or Preview) to hear it · presets save as you go"
 		"light": sub.text = "Time of day, day / night cycle and the level's light"
+		"dust": sub.text = "Tyre dust: how it looks, how long the trail hangs, how it sprays"
 	if id != "sound": FreewheelSound.preview_speed = 0.0
 	_fill()
 
@@ -146,7 +152,7 @@ func _fill() -> void:
 		sv.custom_minimum_size = Vector2(0, 28); sv.focus_mode = Control.FOCUS_NONE
 		list.add_child(sv)
 	for src: String in cat[1]:
-		if src.begins_with("T:"):
+		if src.begins_with("T:") and not src.begins_with("T:Dust"):
 			_preset_bar(TunePresets, "Ride preset")
 			break
 	for src: String in cat[1]:
@@ -465,7 +471,8 @@ func _reset_category() -> void:
 		if src.begins_with("T:"):
 			for g in Tune.DEFS:
 				if g[0] == name:
-					for row in g[1]: Tune.set_value(row[0], TunePresets.value_of(row[0]))   # back to the preset's value
+					for row in g[1]:   # back to the preset's value (dust: the default)
+							Tune.set_value(row[0], Tune.defaults[row[0]] if str(row[0]).begins_with("dust") else TunePresets.value_of(row[0]))
 		elif src.begins_with("P:"):
 			for g in RiderPanels.POSE_DEFS:
 				if g[0] == name:

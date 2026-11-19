@@ -116,6 +116,32 @@ const DEFS := [
 		["wheelieClimb", "Wheelie climbs while held", 0.45, 0.0, 1.5, 0.05, "rad/s"],
 		["wheelieDrop", "Wheelie set-down speed", 1.6, 0.4, 4, 0.1, "rad/s"],
 	]],
+	# dust (tuning card › Dust tab; not part of the ride presets: TunePresets keeps their current values)
+	["Dust look", [
+		["dustOpacity", "Thickness", 0.6, 0.1, 3, 0.05, ""],
+		["dustWisps", "Wispy edges", 1.15, 0, 2.5, 0.05, ""],
+		["dustRise", "Rises into the air", 0.55, 0, 1.5, 0.05, "m/s"],
+		["dustSwirl", "Swirl strength", 6.5, 0, 15, 0.25, ""],
+		["dustSwirlSize", "Swirl size", 0.7, 0.2, 2, 0.05, "1/m"],
+		["dustCurl", "Curls / rolls", 0.9, 0, 3, 0.05, ""],
+		["dustGrit", "Grit (flying grains)", 1.0, 0, 3, 0.05, "×"],
+	]],
+	["Dust trail", [
+		["dustFade", "Fade speed (low = longer)", 0.07, 0, 0.6, 0.01, "/s"],
+		["dustSpread", "Spreads out / thins", 1.3, 0, 4, 0.05, "/s"],
+		["dustWindCarry", "Wind takes over", 0.35, 0, 1.5, 0.05, "/s"],
+		["dustAhead", "Room ahead (rest = trail)", 3.0, 0, 10, 0.5, "m"],
+	]],
+	["Dust spray", [
+		["dustAmount", "Rear tyre amount", 1.0, 0, 3, 0.05, "×"],
+		["dustFront", "Front tyre amount", 0.35, 0, 1.5, 0.05, "×"],
+		["dustWidth", "Spray width (fan)", 0.8, 0, 2.5, 0.05, "×"],
+		["dustPushOut", "Pushed out sideways", 1.0, 0, 3, 0.05, "×"],
+		["dustKickUp", "Kicked up", 1.0, 0, 3, 0.05, "×"],
+		["dustThrow", "Thrown back", 1.0, 0, 3, 0.05, "×"],
+		["dustGust", "Gusty / pulsing", 2.6, 0, 5, 0.1, ""],
+		["dustLanding", "Landing / crash clouds", 1.0, 0, 3, 0.05, "×"],
+	]],
 ]
 
 const PATH := "user://tune.cfg"
