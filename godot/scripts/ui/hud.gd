@@ -1,5 +1,5 @@
 extends CanvasLayer
-## In-ride HUD: bike computer (speed / slope / grade / elevation), gear shifter, stamina, flow,
+## In-ride HUD: bike computer (speed / slope / grade / gear / elevation), stamina, flow,
 ## hop-charge and get-up bars, message flashes, the live jump card with records, FPS.
 ## Port of gauge.js, airhud.js and the HUD bits of index.html / main.js.
 
@@ -14,7 +14,6 @@ var msg_l: Label
 var flow_l: Label
 var biome_l: Label
 var gauge: GaugeView
-var gear_v: GearView
 var stamina: StaminaView
 var hop_bar: BarView
 var getup: Control
@@ -28,6 +27,8 @@ var fps_frames := 0
 var msg_a := 0.0
 var elev_hist := PackedFloat32Array()
 var elev_t := 0.0
+var elev_up := 0.0     # metres climbed / descended this ride (bike computer page 2)
+var elev_down := 0.0
 var hidden := false
 
 func _ready() -> void:
@@ -58,12 +59,10 @@ func _ready() -> void:
 	biome_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	root.add_child(biome_l)
 	gauge = GaugeView.new(); gauge.hud = self
+	gauge.page = clampi(int(OS.get_environment("BMX_GARMIN_PAGE")), 0, GaugeView.PAGES - 1)
 	gauge.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	gauge.size = Vector2(150, 222); gauge.position = Vector2(20, -242)
+	gauge.size = Vector2(150, 212); gauge.position = Vector2(20, -232)
 	root.add_child(gauge)
-	gear_v = GearView.new(); gear_v.hud = self
-	gear_v.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	root.add_child(gear_v)
 	stamina = StaminaView.new(); stamina.hud = self
 	stamina.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	stamina.size = Vector2(196, 15); stamina.position = Vector2(-214, 20)
@@ -105,7 +104,7 @@ func _layout() -> void:
 func apply_settings() -> void:
 	if fps_l: fps_l.visible = Settings.get_v("show_fps") and not hidden
 	if gauge: gauge.visible = Settings.get_v("hud_gauge")
-	if gear_v: gear_v.visible = Settings.get_v("hud_gear")
+	if gauge: gauge.show_gear = Settings.get_v("hud_gear"); gauge.queue_redraw()
 	if air_card: air_card.enabled = Settings.get_v("hud_jump")
 	if quick: quick.visible = Settings.get_v("hud_quick") and not _side_open()
 
@@ -120,7 +119,7 @@ func flash(text: String) -> void:
 	msg_a = 1.4
 
 func gear_changed() -> void:
-	if gear_v: gear_v.bump = 1.0; gear_v.queue_redraw()
+	if gauge: gauge.bump = 1.0; gauge.queue_redraw()
 
 func on_takeoff() -> void:
 	air_card.takeoff()
@@ -231,12 +230,16 @@ func update_hud(dt: float) -> void:
 		getup_bar.k = st.crash_hold / BikePhysics.GETUP_HOLD
 		getup_l.text = "Hold %s to get up" % Settings.binding_text("hop", Input.get_connected_joypads().size() > 0 and Input.get_joy_name(0) != "" and false)
 	stamina.queue_redraw()
-	gear_v.bump = maxf(0.0, gear_v.bump - dt * 4)
-	gear_v.queue_redraw()
+	gauge.bump = maxf(0.0, gauge.bump - dt * 4)
 	# elevation profile
 	elev_t += dt
 	if elev_t >= HIST_DT:
 		elev_t = 0
+		if elev_hist.size() > 0 and not st.crash_on:
+			var dy: float = st.y - elev_hist[elev_hist.size() - 1]
+			if absf(dy) < 30.0:   # skip teleports (Backspace / new world)
+				if dy > 0: elev_up += dy
+				else: elev_down -= dy
 		elev_hist.append(st.y)
 		if elev_hist.size() > HIST: elev_hist.remove_at(0)
 	gauge.queue_redraw()
@@ -246,14 +249,31 @@ func update_hud(dt: float) -> void:
 
 # ======================================================================
 class GaugeView extends Control:
-	## a compact GPS bike computer: black body, pale LCD
+	## a compact GPS bike computer: black body, pale LCD, two pages flipped with the bezel
+	## buttons under the screen. Page 1: speed, slope / grade, gear (the shifter). Page 2: elevation.
+	const PAGES := 2
 	var hud
+	var page := 0
+	var bump := 0.0        # 1 on a shift, fades out: the gear digit flashes inverted
+	var show_gear := true  # Settings › HUD › Gear shifter
+	var press := [0.0, 0.0]   # bezel button press flash (left, right)
+	func _btn_rect(i: int) -> Rect2:
+		return Rect2(12 if i == 0 else size.x - 52, size.y - 23, 40, 14)
+	func _gui_input(e: InputEvent) -> void:
+		if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
+			for i in 2:
+				if _btn_rect(i).grow(4).has_point(e.position):
+					page = posmod(page + (-1 if i == 0 else 1), PAGES)
+					press[i] = 1.0
+					queue_redraw()
+					accept_event()
+					return
 	func _draw() -> void:
 		var st: BikePhysics = hud.game.phys
 		var f := UITheme.lcd_font()
 		var r := Rect2(Vector2.ZERO, size)
 		draw_style_box(UITheme.box(Color("16181a"), 16, 0), r)
-		var scr := Rect2(7, 8, size.x - 14, size.y - 26)
+		var scr := Rect2(7, 8, size.x - 14, size.y - 38)
 		draw_style_box(UITheme.box(Color("eceee8"), 6, 0), scr)
 		var ink := Color("111417")
 		var x0 := scr.position.x + 6
@@ -263,6 +283,25 @@ class GaugeView extends Control:
 		draw_string(f, Vector2(x0, scr.position.y + 11), "%02d:%02d" % [tm.hour, tm.minute], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("f2f3ef"))
 		if st.air:
 			draw_string(f, Vector2(x0, scr.position.y + 11), "AIR", HORIZONTAL_ALIGNMENT_RIGHT, w, 10, Color("ffd21f"))
+		else:
+			draw_string(f, Vector2(x0, scr.position.y + 11), "%d/%d" % [page + 1, PAGES], HORIZONTAL_ALIGNMENT_RIGHT, w, 10, Color(0.95, 0.95, 0.94, 0.6))
+		if page == 0: _page_ride(st, f, ink, scr, x0, w)
+		else: _page_elev(st, f, ink, scr, x0, w)
+		_bezel()
+	## bezel under the screen: a page button left and right, page dots between them
+	func _bezel() -> void:
+		var dt := get_process_delta_time()
+		for i in 2:
+			var br := _btn_rect(i)
+			var k: float = press[i]
+			draw_style_box(UITheme.box(Color("2b2e32").lerp(Color("55595e"), k), 7, 0, Color(1, 1, 1, 0.1), 1), br)
+			var c := br.get_center() + Vector2(0, k)
+			var s := 1.0 if i == 1 else -1.0
+			draw_colored_polygon(PackedVector2Array([c + Vector2(-3 * s, -4), c + Vector2(-3 * s, 4), c + Vector2(3 * s, 0)]), Color("b8bcc0"))
+			press[i] = maxf(0.0, k - dt * 5.0)
+		for j in PAGES:
+			draw_circle(Vector2(size.x / 2 + (j - (PAGES - 1) / 2.0) * 9, size.y - 16), 2.5, Color("d8dbd6") if j == page else Color("3a3d41"))
+	func _page_ride(st: BikePhysics, f: Font, ink: Color, scr: Rect2, x0: float, w: float) -> void:
 		var y := scr.position.y + 28
 		draw_string(f, Vector2(x0, y), "SPEED", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(ink, 0.6))
 		draw_string(f, Vector2(x0, y), hud.speed_unit(), HORIZONTAL_ALIGNMENT_RIGHT, w, 9, Color(ink, 0.7))
@@ -279,9 +318,24 @@ class GaugeView extends Control:
 		draw_string(f, Vector2(x0 + w * 0.5 + 4, y + 32), "%d%%" % roundi(tan(slope) * 100), HORIZONTAL_ALIGNMENT_RIGHT, w * 0.5 - 4, 18, ink)
 		draw_line(Vector2(scr.position.x + scr.size.x * 0.5, y), Vector2(scr.position.x + scr.size.x * 0.5, y + 40), Color(ink, 0.22))
 		y += 40
+		if show_gear:
+			draw_line(Vector2(scr.position.x, y), Vector2(scr.end.x, y), Color(ink, 0.22))
+			_gear_row(st, f, ink, x0, y, w)
+	## elevation now, climbed / descended this ride, and the last 30 s profile
+	func _page_elev(st: BikePhysics, f: Font, ink: Color, scr: Rect2, x0: float, w: float) -> void:
+		var y := scr.position.y + 28
+		draw_string(f, Vector2(x0, y), "ELEV", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(ink, 0.6))
+		draw_string(f, Vector2(x0, y), "m", HORIZONTAL_ALIGNMENT_RIGHT, w, 9, Color(ink, 0.7))
+		draw_string(f, Vector2(x0, y + 36), "%d" % roundi(st.y), HORIZONTAL_ALIGNMENT_RIGHT, w, 38, ink)
+		y += 46
 		draw_line(Vector2(scr.position.x, y), Vector2(scr.end.x, y), Color(ink, 0.22))
-		draw_string(f, Vector2(x0, y + 12), "ELEV", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(ink, 0.6))
-		draw_string(f, Vector2(x0, y + 12), "%d m" % roundi(st.y), HORIZONTAL_ALIGNMENT_RIGHT, w, 10, ink)
+		draw_string(f, Vector2(x0, y + 12), "ASC", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(ink, 0.6))
+		draw_string(f, Vector2(x0 + w * 0.5 + 4, y + 12), "DESC", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(ink, 0.6))
+		draw_string(f, Vector2(x0, y + 32), "%d" % roundi(hud.elev_up), HORIZONTAL_ALIGNMENT_RIGHT, w * 0.5 - 4, 18, ink)
+		draw_string(f, Vector2(x0 + w * 0.5 + 4, y + 32), "%d" % roundi(hud.elev_down), HORIZONTAL_ALIGNMENT_RIGHT, w * 0.5 - 4, 18, ink)
+		draw_line(Vector2(scr.position.x + scr.size.x * 0.5, y), Vector2(scr.position.x + scr.size.x * 0.5, y + 40), Color(ink, 0.22))
+		y += 40
+		draw_line(Vector2(scr.position.x, y), Vector2(scr.end.x, y), Color(ink, 0.22))
 		var hist: PackedFloat32Array = hud.elev_hist
 		if hist.size() > 1:
 			var lo: float = hist[0]
@@ -289,59 +343,47 @@ class GaugeView extends Control:
 			for e in hist:
 				lo = minf(lo, e); hi = maxf(hi, e)
 			hi = maxf(hi, lo + 2)
-			var gh := scr.end.y - y - 20
+			var gh := scr.end.y - y - 10
 			var pts := PackedVector2Array()
 			pts.append(Vector2(x0, scr.end.y - 4))
 			for i in hist.size():
 				pts.append(Vector2(x0 + w * i / float(HIST - 1), scr.end.y - 4 - (hist[i] - lo) / (hi - lo) * gh))
 			pts.append(Vector2(x0 + w * (hist.size() - 1) / float(HIST - 1), scr.end.y - 4))
 			draw_colored_polygon(pts, Color(0.18, 0.7, 0.29, 0.55))
-		draw_circle(Vector2(26, size.y - 9), 3, Color("3a3d41"))
-		draw_circle(Vector2(size.x - 26, size.y - 9), 3, Color("3a3d41"))
-
-class GearView extends Control:
-	## Q | GEAR n | the cassette side-on with the chain on the lit cog | teeth | E
-	var hud
-	var bump := 0.0
-	func _draw() -> void:
-		var st: BikePhysics = hud.game.phys
-		var f := UITheme.font(true)
-		var n := st.cogs.size()
-		var w := 300.0 + n * 12.0 if st.gear >= 0 else 200.0
-		# anchored to the bottom centre: offsets, not position (position is from the parent's corner)
-		if not is_equal_approx(offset_right - offset_left, w):
-			offset_left = -w / 2; offset_right = w / 2; offset_top = -66; offset_bottom = -12
-		draw_style_box(UITheme.box(Color(0.08, 0.15, 0.2, 0.72), 18, 0, Color(1, 1, 1, 0.14), 1), Rect2(Vector2.ZERO, size))
+	## GEAR n | the cassette side-on, chain on the dark cog | teeth (LCD ink, no colour)
+	func _gear_row(st: BikePhysics, f: Font, ink: Color, x0: float, y: float, w: float) -> void:
+		draw_string(f, Vector2(x0, y + 12), "GEAR", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(ink, 0.6))
 		if st.gear < 0:
-			draw_string(f, Vector2(18, 16), "GEAR", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, UITheme.MUTED)
-			draw_string(f, Vector2(18, 44), "1", HORIZONTAL_ALIGNMENT_LEFT, -1, 30, UITheme.ACCENT)
-			draw_string(f, Vector2(60, 34), "single speed", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, UITheme.MUTED)
+			draw_string(f, Vector2(x0, y + 33), "1", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, ink)
+			draw_string(f, Vector2(x0, y + 31), "SINGLE", HORIZONTAL_ALIGNMENT_RIGHT, w, 10, Color(ink, 0.7))
 			return
-		var kq := Settings.binding_text("gear_easier", false)
-		var ke := Settings.binding_text("gear_harder", false)
-		_key(Vector2(14, 8), kq, "easier", f)
-		_key(Vector2(w - 50, 8), ke, "harder", f)
-		draw_string(f, Vector2(66, 16), "GEAR", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, UITheme.MUTED)
-		draw_string(f, Vector2(66, 46), str(st.gear + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, int(32 + bump * 10), UITheme.ACCENT)
-		# cassette: biggest cog on the left
-		var cx := 112.0
-		draw_line(Vector2(cx - 4, 27), Vector2(cx + n * 12, 27), Color(1, 1, 1, 0.12), 2)
+		var n := st.cogs.size()
+		draw_string(f, Vector2(x0, y + 12), "%d/%d" % [st.gear + 1, n], HORIZONTAL_ALIGNMENT_RIGHT, w, 9, Color(ink, 0.6))
+		# the gear digit, inverted for a moment after a shift
+		var d := str(st.gear + 1)
+		if bump > 0.05:
+			draw_rect(Rect2(x0 - 2, y + 16, 26, 20), Color(ink, clampf(bump * 1.5, 0, 1)))
+		var dc := ink.lerp(Color("eceee8"), clampf(bump * 1.5, 0, 1))
+		draw_string(f, Vector2(x0, y + 33), d, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, dc)
+		# cassette: biggest cog on the left, between the digit and the teeth count
+		var tw := 30.0
+		var cx := x0 + 28.0
+		var span := w - 28.0 - tw - 4.0
+		var step := minf(7.0, span / maxf(1.0, n))
+		cx += (span - step * n) * 0.5
+		var mid := y + 26.0
+		draw_line(Vector2(cx - 2, mid), Vector2(cx + step * n, mid), Color(ink, 0.25), 1)
 		var big: float = st.cogs[n - 1]
 		for j in n:
 			var gi: int = n - 1 - j
-			var teeth: int = st.cogs[gi]
-			var hgt := teeth / big * 40.0
 			var on := gi == st.gear
-			var rr := Rect2(cx + j * 12, 27 - hgt / 2, 7.5 if on else 6.0, hgt)
-			draw_style_box(UITheme.box(UITheme.ACCENT if on else Color("737d83"), 3, 0), rr)
+			var hgt: float = st.cogs[gi] / big * 20.0
+			var bw := step - 2.0 if on else step - 3.0
+			draw_rect(Rect2(cx + j * step, mid - hgt / 2, maxf(1.5, bw), hgt), ink if on else Color(ink, 0.3))
 			if on:
-				draw_colored_polygon(PackedVector2Array([Vector2(rr.position.x - 1, rr.position.y - 9), Vector2(rr.end.x + 1, rr.position.y - 9), Vector2(rr.position.x + rr.size.x / 2, rr.position.y - 3)]), UITheme.ACCENT)
-		draw_string(f, Vector2(cx + n * 12 + 8, 30), str(st.cogs[st.gear]), HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color.WHITE)
-		draw_string(f, Vector2(cx + n * 12 + 8, 44), "teeth", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, UITheme.MUTED)
-	func _key(p: Vector2, k: String, sub: String, f: Font) -> void:
-		draw_style_box(UITheme.box(Color(1, 1, 1, 0.1), 8, 0, Color(1, 1, 1, 0.45), 1), Rect2(p + Vector2(4, 0), Vector2(30, 26)))
-		draw_string(f, p + Vector2(4, 19), k.substr(0, 3), HORIZONTAL_ALIGNMENT_CENTER, 30, 14, Color.WHITE)
-		draw_string(f, p + Vector2(0, 40), sub, HORIZONTAL_ALIGNMENT_CENTER, 38, 9, UITheme.MUTED)
+				var px := cx + j * step + bw / 2
+				draw_colored_polygon(PackedVector2Array([Vector2(px - 3, mid - hgt / 2 - 6), Vector2(px + 3, mid - hgt / 2 - 6), Vector2(px, mid - hgt / 2 - 2)]), ink)
+		draw_string(f, Vector2(x0, y + 33), "%dT" % st.cogs[st.gear], HORIZONTAL_ALIGNMENT_RIGHT, w, 12, ink)
 
 class StaminaView extends Control:
 	## ten flat blocks, the last part-filled (sprint stamina)
