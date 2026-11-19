@@ -11,7 +11,7 @@ var root := Control.new()
 var fps_l: Label
 var info_l: Label
 var msg_l: Label
-var flow_l: Label
+var flow_m: FlowMeter
 var biome_l: Label
 var gauge: GaugeView
 var stamina: StaminaView
@@ -89,11 +89,12 @@ func _ready() -> void:
 	stamina.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	stamina.size = Vector2(196, 15); stamina.position = Vector2(-214, 20)
 	root.add_child(stamina)
-	flow_l = UITheme.label("", 14, Color.WHITE, true)
-	flow_l.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	flow_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	flow_l.size = Vector2(240, 24); flow_l.position = Vector2(-120, -122)
-	root.add_child(flow_l)
+	flow_m = FlowMeter.new(); flow_m.hud = self
+	flow_m.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	flow_m.size = Vector2(270, 46); flow_m.position = Vector2(-135, -136)
+	flow_m.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	flow_m.visible = false
+	root.add_child(flow_m)
 	hop_bar = BarView.new()
 	hop_bar.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 	hop_bar.size = Vector2(180, 12); hop_bar.position = Vector2(-90, -100)
@@ -250,9 +251,7 @@ func update_hud(dt: float) -> void:
 	if msg_a > 0:
 		msg_a -= dt
 	msg_l.modulate.a = clampf(msg_a / 0.3, 0, 1)
-	var n := ceili(st.flow - 0.01)
-	flow_l.visible = n > 0
-	flow_l.text = "FLOW  " + "●".repeat(n) + "○".repeat(int(BikePhysics.FLOW_MAX) - n)
+	flow_m.tick(dt)
 	hop_bar.visible = st.hop_bar_show
 	hop_bar.k = st.hop_bar
 	getup.visible = st.crash_on and st.crash_t > 0.6
@@ -855,6 +854,137 @@ class StaminaView extends Control:
 			draw_rect(r, Color(1, 1, 1, 0.14))
 			var k := clampf(st.stamina * 10 - i, 0, 1)
 			if k > 0: draw_rect(Rect2(r.position, Vector2(16 * k, 9)), col)
+
+class FlowMeter extends Control:
+	## flow combo: slanted segments that fill and recolour by level, a pop + sparks + "+1" on every level
+	## up, a hold strip showing how long until the flow drains (red flash while braking it away),
+	## a shimmer at MAX. Slides / fades in when flow starts, out when it is gone.
+	const COLS := [Color("4fd1ff"), Color("5cf0a0"), Color("ffd21f"), Color("ff9a2a"), Color("ff4fb4")]
+	var hud
+	var a := 0.0           # fade
+	var shown := 0.0       # displayed fill (smoothed)
+	var level := 0
+	var pop := 0.0         # 1 right after a level up, decays
+	var drain_flash := 0.0
+	var t := 0.0
+	var prev_flow := 0.0
+	var sparks: Array = []  # [pos, vel, life, col]
+	var floats: Array = []  # [text, y, life]
+
+	func tick(dt: float) -> void:
+		var st: BikePhysics = hud.game.phys
+		t += dt
+		# tests: BMX_FLOW_DEMO=1 adds a flow level every 0.9 s from 3 s until MAX, then lets it drain
+		if OS.get_environment("BMX_FLOW_DEMO") != "" and t > 3.0 and fmod(t - 3.0, 0.9) < dt and t < 3.0 + 0.9 * BikePhysics.FLOW_MAX:
+			st.flow_up()
+		var n := ceili(st.flow - 0.01)
+		if n > level and n > 0:
+			pop = 1.0
+			var seg := _seg_rect(n - 1)
+			var c: Color = COLS[n - 1]
+			for i in 14:
+				var ang := randf() * TAU
+				sparks.append([seg.get_center(), Vector2(cos(ang), sin(ang) * 0.7) * randf_range(60, 170), randf_range(0.35, 0.6), c])
+			floats.append(["MAX FLOW!" if n >= int(BikePhysics.FLOW_MAX) else "+1", 0.0, 0.9])
+		level = n
+		shown = lerpf(shown, st.flow, minf(1.0, dt * 14))
+		# losing flow before the hold time is up = braking it away
+		var ft: float = st.T.get("flowTime", 4.0)
+		var braking: bool = st.flow < prev_flow - 1e-4 and st.flow_t < ft
+		prev_flow = st.flow
+		drain_flash = move_toward(drain_flash, 1.0 if braking else 0.0, dt * 8)
+		pop = maxf(0.0, pop - dt * 3.2)
+		for s in sparks:
+			s[0] += s[1] * dt; s[1] *= 1.0 - dt * 4.0; s[1].y += 140 * dt; s[2] -= dt
+		sparks = sparks.filter(func(s): return s[2] > 0)
+		for f in floats:
+			f[1] += dt * 46; f[2] -= dt
+		floats = floats.filter(func(f): return f[2] > 0)
+		a = move_toward(a, 1.0 if n > 0 else 0.0, dt * (5 if n > 0 else 2.5))
+		visible = a > 0.01 or not sparks.is_empty()
+		modulate.a = a
+		pivot_offset = size / 2
+		var e := pop * pop
+		scale = Vector2.ONE * (1.0 + 0.16 * e) * (0.92 + 0.08 * a)
+		offset_top = -136.0 + (1.0 - a) * 14.0   # anchored to the bottom centre: slide up as it fades in
+		offset_bottom = offset_top + 46.0
+		if visible: queue_redraw()
+
+	func _col() -> Color:
+		return COLS[clampi(level - 1, 0, COLS.size() - 1)]
+
+	## segment i as a slanted bar (its bounding rect)
+	func _seg_rect(i: int) -> Rect2:
+		var x0 := 92.0; var w := (size.x - x0 - 16) / BikePhysics.FLOW_MAX
+		return Rect2(x0 + i * w, 12, w - 6, 18)
+
+	func _slant(r: Rect2, k: float) -> PackedVector2Array:
+		var sk := 6.0
+		var x1 := r.position.x + (r.size.x) * k
+		return PackedVector2Array([Vector2(r.position.x + sk, r.position.y), Vector2(x1 + sk, r.position.y),
+			Vector2(x1, r.end.y), Vector2(r.position.x, r.end.y)])
+
+	func _draw() -> void:
+		var st: BikePhysics = hud.game.phys
+		var f := UITheme.font(true)
+		var c := _col()
+		var mx := level >= int(BikePhysics.FLOW_MAX)
+		var red := Color(1, 0.3, 0.25)
+		var bord := c.lerp(red, drain_flash)
+		bord.a = 0.35 + 0.5 * pop + (0.25 * (0.5 + 0.5 * sin(t * 8.0)) if mx else 0.0)
+		draw_style_box(UITheme.box(Color(0.055, 0.094, 0.12, 0.8), int(size.y / 2), 0, bord, 2), Rect2(Vector2.ZERO, size))
+		# glow behind the panel at high flow
+		if level >= 3:
+			var g := c; g.a = 0.10 + 0.06 * sin(t * 6.0) + 0.25 * pop
+			draw_style_box(UITheme.box(Color(0, 0, 0, 0), int(size.y / 2) + 4, 0, g, 4), Rect2(Vector2(-4, -4), size + Vector2(8, 8)))
+		# label + multiplier
+		draw_string(f, Vector2(16, 19), "FLOW", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, UITheme.MUTED)
+		var mc := c.lerp(Color.WHITE, pop * 0.7)
+		draw_string(f, Vector2(15, 41), "×%d" % maxi(level, 1), HORIZONTAL_ALIGNMENT_LEFT, -1, int(22 + 6 * pop), mc)
+		# segments
+		for i in int(BikePhysics.FLOW_MAX):
+			var r := _seg_rect(i)
+			draw_colored_polygon(_slant(r, 1.0), Color(1, 1, 1, 0.09))
+			var k := clampf(shown - i, 0.0, 1.0)
+			if k <= 0.0: continue
+			var sc := c
+			if i == level - 1: sc = sc.lerp(Color.WHITE, pop * 0.8)
+			sc = sc.lerp(red, drain_flash * 0.6)
+			# glow under the filled part
+			var gl := sc; gl.a = 0.28
+			draw_colored_polygon(_slant(r.grow(2.5), k), gl)
+			draw_colored_polygon(_slant(r, k), sc)
+			# top highlight
+			var hl := Color(1, 1, 1, 0.35)
+			draw_line(Vector2(r.position.x + 6, r.position.y + 1.5), Vector2(r.position.x + 6 + (r.size.x - 2) * k, r.position.y + 1.5), hl, 1.5)
+		# shimmer sweeping across at MAX
+		if mx:
+			var x0 := 92.0; var span := size.x - x0 - 16
+			var sx := x0 + fmod(t * 160.0, span + 120.0)   # sweep, then a short pause off the end
+			for j in (3 if sx < x0 + span - 24.0 else 0):
+				var w := 10.0 - j * 3.0
+				draw_colored_polygon(PackedVector2Array([Vector2(sx + j * 4 + 6, 12), Vector2(sx + j * 4 + 6 + w, 12),
+					Vector2(sx + j * 4 + w, 30), Vector2(sx + j * 4, 30)]), Color(1, 1, 1, 0.22 - j * 0.06))
+		# hold strip: time until the flow starts to drain
+		var ft: float = st.T.get("flowTime", 4.0)
+		var hold := clampf(1.0 - st.flow_t / maxf(ft, 0.01), 0.0, 1.0) if level > 0 else 0.0
+		var hr := Rect2(92, 35, size.x - 92 - 22, 4)
+		draw_rect(hr, Color(1, 1, 1, 0.08))
+		var hc := c if hold > 0.25 else c.lerp(red, 0.5 + 0.5 * sin(t * 14.0))
+		hc = hc.lerp(red, drain_flash)
+		draw_rect(Rect2(hr.position, Vector2(hr.size.x * hold, hr.size.y)), hc)
+		if hold <= 0.0 and level > 0:
+			draw_string(f, Vector2(hr.end.x - 60, hr.position.y - 1), "DRAINING", HORIZONTAL_ALIGNMENT_RIGHT, 60, 8, red)
+		# sparks + floating "+1"
+		for s in sparks:
+			var sp: Color = s[3]; sp.a = clampf(s[2] / 0.4, 0, 1)
+			draw_line(s[0], s[0] - (s[1] as Vector2) * 0.04, sp, 2.0, true)
+		for fl in floats:
+			var fa := clampf(fl[2] / 0.4, 0, 1)
+			var fc := c; fc.a = fa
+			var fs := int(20 + 8 * clampf((fl[2] - 0.7) / 0.2, 0, 1))   # starts big, settles
+			draw_string_outline(f, Vector2(0, -6 - fl[1]), fl[0], HORIZONTAL_ALIGNMENT_CENTER, size.x, fs, 5, Color(0, 0, 0, 0.55 * fa))
+			draw_string(f, Vector2(0, -6 - fl[1]), fl[0], HORIZONTAL_ALIGNMENT_CENTER, size.x, fs, fc)
 
 class BarView extends Control:
 	var k := 0.0
