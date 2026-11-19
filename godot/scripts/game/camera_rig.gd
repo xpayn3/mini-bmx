@@ -114,7 +114,10 @@ func update_cam(dt: float) -> void:
 	if Input.is_action_pressed("zoom_in"): dist = clampf(dist * (1 - dt * 1.2), 4, 80)
 	if Input.is_action_pressed("zoom_out"): dist = clampf(dist * (1 + dt * 1.2), 4, 80)
 
-	var f := Vector3(cos(st.heading), 0, -sin(st.heading))
+	# in the air the camera goes the way the rider is flying (course), never the way the bike points:
+	# a flat 180 / 360 spin turns the bike, not the view
+	var hd: float = st.course if st.air and not is_nan(st.course) else st.heading
+	var f := Vector3(cos(hd), 0, -sin(hd))
 	var drawn: Vector3 = game.drawn_pos
 	var want: Vector3
 	if st.crash_on and game.ragdoll:

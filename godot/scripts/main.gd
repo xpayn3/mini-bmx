@@ -438,6 +438,10 @@ func _autotest(seconds: float) -> void:
 				elif trick == "front": Input.action_press("pedal")
 				elif trick == "left": Input.action_press("steer_left")
 				elif trick == "right": Input.action_press("steer_right")
+				elif trick == "spin" and absf(ph.air_yaw) < 1.0:   # a flat spin (as the right stick gives)
+					ph.air_yaw = 7.0
+				if trick == "spin" and Engine.get_physics_frames() % 12 == 0:
+					print("SPIN t=%.2f cam_yaw=%.2f course=%.2f heading=%.2f" % [ph.air_time, game.cam.cam_yaw, ph.course, ph.heading])
 			await get_tree().process_frame
 			continue
 		elif trick != "":
