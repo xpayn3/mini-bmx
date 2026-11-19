@@ -881,6 +881,7 @@ func _land_trick(at: float) -> void:
 		name += (" " if name != "" else "") + (["", "", "DOUBLE ", "TRIPLE "][mini(whips, 3)] if whips > 1 else "") + "TAILWHIP"
 	if name != "":
 		host.flash(name + "!")
+		if host.has_method("on_trick"): host.on_trick(name)
 		flow_up()
 
 ## Tailwhip: held, the rider kicks the frame round the head tube at whipRate; let go, it carries on to the

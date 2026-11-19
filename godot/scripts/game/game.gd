@@ -415,6 +415,9 @@ func get_up() -> void:
 	rider.reset_pose()
 	_snap_prev()
 
+func on_trick(trick: String) -> void:
+	if hud: hud.on_trick(trick)
+
 func on_takeoff() -> void:
 	takeoff = Vector3(phys.x, phys.y, phys.z)
 	air_peak = phys.y
