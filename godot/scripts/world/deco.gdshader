@@ -14,7 +14,7 @@ uniform float backlight = 0.0;
 uniform bool tint_own = false;   // cacti: UV.x = 1 keeps the vertex colour (spines, flowers, cut flesh)
 varying vec3 v_col;
 varying vec3 v_world;
-// ride camera: anything between the camera and the rider dissolves (dither) so a tree never hides them.
+// ride camera: trees / rocks right at the lens dissolve (dither) so they never fill the screen.
 // cam_see = rider (w = on), cam_eye = the ride camera (other passes, e.g. shadows, have another eye: untouched)
 global uniform vec4 cam_see;
 global uniform vec4 cam_eye;
@@ -34,13 +34,8 @@ void vertex() {
 
 void fragment() {
 	if (cam_see.w > 0.0 && distance(CAMERA_POSITION_WORLD, cam_eye.xyz) < 0.5) {
-		vec3 c = cam_eye.xyz;
-		vec3 seg = cam_see.xyz - c;
-		float u = clamp(dot(v_world - c, seg) / max(dot(seg, seg), 1e-4), 0.0, 1.0);
-		float d = length(v_world - (c + seg * u));
-		float rad = mix(1.6, 3.2, u);   // a cone widening toward the rider
-		float cut = (1.0 - smoothstep(rad * 0.5, rad, d)) * (1.0 - smoothstep(0.9, 1.0, u));
-		cut = max(cut, 1.0 - smoothstep(1.5, 3.0, distance(v_world, c)));   // right in front of the lens
+		// only what is right at the camera lens dissolves; everything around the rider stays
+		float cut = 1.0 - smoothstep(1.5, 3.0, distance(v_world, cam_eye.xyz));
 		float n = fract(52.9829189 * fract(dot(FRAGCOORD.xy, vec2(0.06711056, 0.00583715))));
 		if (n < cut * 0.95) discard;
 	}
