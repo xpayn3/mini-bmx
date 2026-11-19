@@ -79,7 +79,7 @@ const VIEWS := {
 	"wheels": [0.25, 8.0, 2.4, Vector3(0.6, 0.4, 0)],
 	"bars": [0.9, 14.0, 1.7, Vector3(0.45, 1.0, 0)],
 	"suspension": [1.0, 10.0, 2.2, Vector3(0.05, 0.6, 0)],
-	"drive": [PI / 2 + 0.3, 6.0, 2.0, Vector3(-0.3, 0.35, 0)],
+	"drive": [-1.3, 8.0, 1.5, Vector3(-0.3, 0.35, 0)],   # the drive side: chainring + cassette
 	"rider": [0.0, 7.0, 4.3, Vector3(-0.05, 1.0, 0)],
 	"kit": [0.25, 4.0, 3.2, Vector3(1.55, 1.0, 0.55)],
 }
@@ -1298,12 +1298,18 @@ func _drive_page() -> void:
 	_slide("Teeth", 30, 38, 2, D.ring, "T", func(v): D.ring = int(v))
 	_h("CASSETTE")
 	var items := []
-	for k in BikeBuild.CASSETTES: items.append([k, BikeBuild.CASSETTES[k].label])
-	_choice("Cassette", items, D.cassette, func(v): D.cassette = v)
+	for k in BikeBuild.CASSETTES:
+		var m: Dictionary = BikeBuild.CASSETTES[k]
+		var cg: Array = m.cogs
+		var spec := "%d-speed  ·  %d–%dT" % [cg.size(), cg[0], cg[cg.size() - 1]] if cg.size() > 1 else "Single speed  ·  %dT" % cg[0]
+		if cg[cg.size() - 1] >= 50: spec = "▲ " + spec   # a granny gear for climbing
+		items.append({"key": k, "brand": m.brand, "name": m.name, "spec": spec,
+			"thumb": "cassette|%s" % k, "make": PartThumbs.make_cassette.bind(k), "view": Vector3(0.45, 0.35, 1.0)})
+	_cards(items, D.cassette, func(k): D.cassette = k)
 	var cogs: Array = BikeBuild.CASSETTES[D.cassette].cogs
 	var lo := float(D.ring) / float(cogs[cogs.size() - 1])
 	var hi := float(D.ring) / float(cogs[0])
-	_note("Ratios %.2f – %.2f. Bigger ring / smaller cog = higher top speed, harder to get going." % [lo, hi])
+	_note("Ratios %.2f – %.2f. Bigger ring / smaller cog = higher top speed, harder to get going. ▲ = a huge last cog (50T+): spins up the steepest hills." % [lo, hi])
 
 func _save_rider_ui() -> void:
 	var cf := ConfigFile.new(); cf.load(RiderPanels.PATH)

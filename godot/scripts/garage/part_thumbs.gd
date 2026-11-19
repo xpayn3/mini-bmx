@@ -236,6 +236,14 @@ static func make_fork(lowers: Dictionary, stanchions: Dictionary, crown_paint: D
 	return root
 
 
+## a cassette alone (cogs in their anodized colours, lockring, freehub stub)
+static func make_cassette(key: String) -> Node3D:
+	var c: Dictionary = BikeBuild.CASSETTES[key]
+	var mi := MeshInstance3D.new()
+	mi.mesh = WheelGen.build_cassette(c.cogs, BikeBuild.cassette_cols(key), float(c.rough))
+	return mi
+
+
 ## a whole wheel from the wheel generator (tyre + rim + spokes + hub)
 ## `crop` > 0 frames only the top part of it (that fraction of the height): a close-up of the tread
 static func make_wheel(spec: Dictionary, crop := 0.0) -> Node3D:
