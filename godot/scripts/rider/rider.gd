@@ -102,6 +102,9 @@ static func mat(color: Variant, roughness := 0.75, metal := 0.0) -> StandardMate
 	m.albedo_color = color if color is Color else Color(color)
 	m.roughness = roughness
 	m.metallic = metal
+	if metal < 0.5 and roughness >= 0.65:
+		m.metallic_specular = 0.18   # cloth / rubber / foam: matte, the sky + reflection probe must not make it shine
+		m.roughness = maxf(roughness, 0.9)
 	return m
 
 

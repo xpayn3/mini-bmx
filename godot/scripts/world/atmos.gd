@@ -5,7 +5,7 @@ extends RefCounted
 ## cloud_shade() is the shader's function bit for bit (integer hash), so the sun light can be dimmed
 ## by exactly the shade at the rider: bike and rider go into the shadow of a cloud with the ground.
 
-const CLOUD_DEPTH := 0.3
+const CLOUD_DEPTH := 0.6   # how much a cloud dims the sun (0.3 was too faint to see from the ride camera)
 const CLOUD_DRIFT := 4.0   # m/s
 
 var cloud_off := Vector2.ZERO

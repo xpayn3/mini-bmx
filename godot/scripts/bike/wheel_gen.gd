@@ -416,7 +416,10 @@ static func _build(s: Dictionary) -> ArrayMesh:
 		_build_cassette(chrome, s, H, det)
 
 	var mesh := ArrayMesh.new()
-	tyre.commit(mesh, _mat("rubber", Color.WHITE, 0.0, 0.86, true), "rubber")
+	# rubber is matte: low specular + full roughness so the sky / reflection probe and the sun do not make it glow
+	var rubber := _mat("rubber", Color.WHITE, 0.0, 1.0, true)
+	rubber.metallic_specular = 0.15
+	tyre.commit(mesh, rubber, "rubber")
 	rim.commit(mesh, _rim_mat(s), "rim")
 	spokes.commit(mesh, _mat("spokes", Color.WHITE, 0.6, 0.32, true), "spokes")
 	hub.commit(mesh, _mat("hub", s["hub_color"], 0.8, 0.26), "hub")

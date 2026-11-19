@@ -118,15 +118,16 @@ func set_design(d: String) -> void:
 		"enduro":
 			_add(thigh_part, M.thigh_plate, foam)
 			_add(shin_part, M.shin_plate, foam)
-			_add(shin_part, M.shin_insert, _shader(1, 4.0))
+			var ins := _shader(1, 4.0)
+			ins.set_shader_parameter("gloss", 0.0)
+			_add(shin_part, M.shin_insert, ins)
 		"race":
 			var guard := _shader(3, 4.0)
+			guard.set_shader_parameter("gloss", 0.0)
 			_logo_mat = guard
 			_add(thigh_part, M.thigh_guard, guard)
 			_add(shin_part, M.shin_guard, guard)
-			var bar := _mat("#1b1c20", 0.35)
-			bar.clearcoat_enabled = true
-			bar.clearcoat_roughness = 0.2
+			var bar := _mat("#1b1c20", 0.8)
 			_base_mats.append(bar)
 			var metal := _mat("#b9bcc2", 0.25)
 			metal.metallic = 1.0
@@ -401,6 +402,9 @@ static func _mat(color: String, roughness: float) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.albedo_color = Color(color)
 	m.roughness = roughness
+	if roughness >= 0.5:   # sleeves, foam, bands, straps: matte; only the kneecap shell shines
+		m.roughness = maxf(roughness, 0.92)
+		m.metallic_specular = 0.15
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED   # double sided: sleeves, plates and lips are open shells
 	return m
 
