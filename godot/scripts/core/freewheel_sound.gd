@@ -90,6 +90,15 @@ static func names() -> Array:
 	return out + cn
 
 
+static func get_active() -> String:
+	ensure_loaded()
+	return active
+
+
+static func builtin_count() -> int:
+	return BUILTIN.size()
+
+
 static func is_builtin(n: String) -> bool:
 	return n in BUILTIN
 

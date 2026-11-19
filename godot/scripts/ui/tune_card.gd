@@ -138,6 +138,10 @@ func _fill() -> void:
 		sv.custom_minimum_size = Vector2(0, 28); sv.focus_mode = Control.FOCUS_NONE
 		list.add_child(sv)
 	for src: String in cat[1]:
+		if src.begins_with("T:"):
+			_preset_bar(TunePresets, "Ride preset")
+			break
+	for src: String in cat[1]:
 		var kind := src.substr(0, src.find(":")) if ":" in src else src
 		var name := src.substr(src.find(":") + 1)
 		match kind:
@@ -211,8 +215,8 @@ func _tune_group(group: String) -> void:
 			pin.add_theme_color_override("font_color", UITheme.ACCENT if key in Tune.pins else UITheme.MUTED)
 			pin.pressed.connect(func(): Tune.toggle_pin(key); _fill())
 			var stp: float = row[5]
-			_slider(row[1], row[3], row[4], stp, Tune.base[key], float(Tune.defaults.get(key, Tune.base[key])),
-				func(v): return _fmt_step(v, stp, row[6]), func(v): Tune.set_value(key, v), pin)
+			_slider(row[1], row[3], row[4], stp, Tune.base[key], TunePresets.value_of(key),
+				func(v): return _fmt_step(v, stp, row[6]), func(v): Tune.set_value(key, v); _refresh_mod(TunePresets), pin)
 
 
 # ---------------------------------------------------------------- RIDER pose
@@ -290,37 +294,40 @@ func _apply_look() -> void:
 	RiderPanels.save_look(look)
 
 
-# ---------------------------------------------------------------- SOUND: freewheel
-var _fw_mod: Label
+# ---------------------------------------------------------------- presets (shared by Ride and Sound)
+var _preset_mod: Label
 
-func _freewheel_group() -> void:
-	FreewheelSound.ensure_loaded()
-	_header("Preset")
+## preset picker + Delete (own presets) + "changed" note + Save as. store: TunePresets or FreewheelSound
+## (same static API: names / is_builtin / get_active / builtin_count / select / save_as / delete / modified)
+func _preset_bar(store, title := "Preset") -> void:
+	_header(title)
 	var hb := HBoxContainer.new()
 	hb.add_theme_constant_override("separation", 4)
 	var ob := OptionButton.new()
 	ob.size_flags_horizontal = Control.SIZE_EXPAND_FILL; ob.focus_mode = Control.FOCUS_NONE
 	ob.add_theme_font_size_override("font_size", 13)
-	var names := FreewheelSound.names()
+	var names: Array = store.names()
+	var act: String = store.get_active()
 	for i in names.size():
 		var n: String = names[i]
-		if i == FreewheelSound.BUILTIN.size(): ob.add_separator("Yours")
-		ob.add_item(n if FreewheelSound.is_builtin(n) else "★ " + n, i)
-		if n == FreewheelSound.active: ob.select(ob.get_item_index(i))
-	ob.item_selected.connect(func(idx): FreewheelSound.select(names[ob.get_item_id(idx)]); _fill())
+		if i == store.builtin_count(): ob.add_separator("Yours")
+		ob.add_item(n if store.is_builtin(n) else "★ " + n, i)
+		if n == act: ob.select(ob.get_item_index(i))
+	ob.item_selected.connect(func(idx):
+		var n: String = names[ob.get_item_id(idx)]
+		store.select(n); game.flash(n); _fill())
 	hb.add_child(ob)
-	if not FreewheelSound.is_builtin(FreewheelSound.active):
+	if not store.is_builtin(act):
 		var del := UITheme.button("Delete", func():
-			var n := FreewheelSound.active
-			FreewheelSound.delete(n); game.flash("Deleted \"%s\"" % n); _fill(), 12)
+			store.delete(act); game.flash("Deleted \"%s\"" % act); _fill(), 12)
 		del.custom_minimum_size = Vector2(0, 28); del.focus_mode = Control.FOCUS_NONE
-		del.tooltip_text = "Delete this custom preset"
+		del.tooltip_text = "Delete this preset of yours"
 		hb.add_child(del)
 	list.add_child(hb)
-	_fw_mod = UITheme.label("Changed from \"%s\" — Save as to keep it" % FreewheelSound.active, 12, UITheme.MUTED)
-	_fw_mod.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_fw_mod.visible = FreewheelSound.is_builtin(FreewheelSound.active) and FreewheelSound.modified()
-	list.add_child(_fw_mod)
+	_preset_mod = UITheme.label("Changed from \"%s\" — Save as to keep it" % act, 12, UITheme.MUTED)
+	_preset_mod.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	list.add_child(_preset_mod)
+	_refresh_mod(store)
 	var sv := HBoxContainer.new()
 	sv.add_theme_constant_override("separation", 4)
 	var le := LineEdit.new()
@@ -328,7 +335,7 @@ func _freewheel_group() -> void:
 	le.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	le.add_theme_font_size_override("font_size", 13)
 	var save := func():
-		var n := FreewheelSound.save_as(le.text)
+		var n: String = store.save_as(le.text)
 		game.flash("Saved \"%s\"" % n)
 		_fill.call_deferred()
 	le.text_submitted.connect(func(_t): save.call())
@@ -338,6 +345,17 @@ func _freewheel_group() -> void:
 	sb.tooltip_text = "Save these sliders as your own preset"
 	sv.add_child(sb)
 	list.add_child(sv)
+
+
+func _refresh_mod(store) -> void:
+	if is_instance_valid(_preset_mod):
+		_preset_mod.visible = store.is_builtin(store.get_active()) and store.modified()
+
+
+# ---------------------------------------------------------------- SOUND: freewheel
+func _freewheel_group() -> void:
+	FreewheelSound.ensure_loaded()
+	_preset_bar(FreewheelSound)
 	var pv := CheckButton.new()
 	pv.text = "Preview (spin the wheel while standing)"
 	pv.button_pressed = FreewheelSound.preview_speed > 0.0
@@ -359,8 +377,7 @@ func _freewheel_group() -> void:
 			func(v): return _fmt_step(v, stp, row[6]),
 			func(v):
 				FreewheelSound.set_value(key, v)
-				if is_instance_valid(_fw_mod):
-					_fw_mod.visible = FreewheelSound.is_builtin(FreewheelSound.active) and FreewheelSound.modified())
+				_refresh_mod(FreewheelSound))
 
 
 # ---------------------------------------------------------------- reset this category
@@ -373,7 +390,7 @@ func _reset_category() -> void:
 		if src.begins_with("T:"):
 			for g in Tune.DEFS:
 				if g[0] == name:
-					for row in g[1]: Tune.set_value(row[0], float(Tune.defaults[row[0]]))
+					for row in g[1]: Tune.set_value(row[0], TunePresets.value_of(row[0]))   # back to the preset's value
 		elif src.begins_with("P:"):
 			for g in RiderPanels.POSE_DEFS:
 				if g[0] == name:
