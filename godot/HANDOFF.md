@@ -441,7 +441,8 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   (start life), `BMX_LIFE_PROBE=1` (`LIFE` lines).
 - Piezo sounds (`ui/garmin_beep.gd`, rendered once into AudioStreamWAVs): a rising power-on chime 0.35 s after the
   HUD shows (ride start), a short key beep on the ◀ ▶ bezel buttons.
-- Small touches: "acquiring satellites" for the first 3 s of a ride, battery icon (drains 60 %/h of riding),
+- Small touches: "acquiring satellites" for the first 3 s of a ride, battery icon (full to empty in 30 min of riding, `BAT_LIFE`; blinks under 10 %). Back to start / new world (`hud.on_respawn`) restarts the computer: ride timer,
+  trip (distance, avg, max), battery, GPS fix and power-on chime; test `BMX_RESPAWN=secs` presses Backspace then,
   backlight for 3 s on a button press or a new alert.
 
 ### Settings & tuning

@@ -187,9 +187,12 @@ func on_get_up() -> void:
 		flash("REVIVED")
 		if OS.get_environment("BMX_LIFE_PROBE") != "": print("LIFE revived life=%.2f" % life)
 
-## back to start / new world: full life
+## back to start / new world: full life, and the bike computer restarts (ride timer, trip, a full battery,
+## the GPS fix and the power-on chime again)
 func on_respawn() -> void:
 	life = 1.0; hurt_t = 99.0
+	ride_t = 0.0; ride_dist = 0.0; moving_t = 0.0; max_v = 0.0
+	if visible: _power_t = 0.0
 	if OS.get_environment("BMX_LIFE") != "": life = float(OS.get_environment("BMX_LIFE"))   # tests: start with this much life
 	if style_pop: style_pop.bail()
 	air_card.bail()
@@ -454,6 +457,7 @@ class GaugeView extends Control:
 	const LCD := Color("eceee8")
 	const LCD_LIT := Color("f2fbff")
 	const FIX_T := 3.0     # seconds to "find satellites" at the start of a ride
+	const BAT_LIFE := 1800.0   # seconds of riding from a full battery to empty
 	var map_v: MapView
 	var ov: Overlay
 	var hud
@@ -505,11 +509,13 @@ class GaugeView extends Control:
 		draw_string(f, Vector2(x0, hy), "%02d:%02d" % [tm.hour, tm.minute], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("f2f3ef"))
 		if st.air: draw_string(f, Vector2(x0, hy), "AIR", HORIZONTAL_ALIGNMENT_CENTER, w, 10, Color("ffd21f"))
 		else: draw_string(f, Vector2(x0, hy), TITLES[page], HORIZONTAL_ALIGNMENT_CENTER, w, 9, Color(0.95, 0.95, 0.94, 0.75))
-		var bat := clampf(1.0 - hud.ride_t / 3600.0 * 0.6, 0.05, 1.0)   # drains 60 % an hour
+		var bat := clampf(1.0 - hud.ride_t / BAT_LIFE, 0.0, 1.0)   # full to empty in 30 min of riding
+		if bat < 0.1 and fmod(hud.ride_t, 1.0) < 0.5: bat = -1.0   # nearly flat: the icon blinks
 		var br := Rect2(scr.end.x - 22, scr.position.y + 4, 14, 7)
-		draw_rect(br, Color(0.95, 0.95, 0.94, 0.8), false, 1.0)
-		draw_rect(Rect2(br.end.x, br.position.y + 2, 2, 3), Color(0.95, 0.95, 0.94, 0.8))
-		draw_rect(Rect2(br.position.x + 1.5, br.position.y + 1.5, (br.size.x - 3) * bat, br.size.y - 3), Color("8be36a") if bat > 0.2 else Color("ff6a4d"))
+		if bat >= 0.0:
+			draw_rect(br, Color(0.95, 0.95, 0.94, 0.8), false, 1.0)
+			draw_rect(Rect2(br.end.x, br.position.y + 2, 2, 3), Color(0.95, 0.95, 0.94, 0.8))
+			if bat > 0.0: draw_rect(Rect2(br.position.x + 1.5, br.position.y + 1.5, (br.size.x - 3) * bat, br.size.y - 3), Color("8be36a") if bat > 0.2 else Color("ff6a4d"))
 		map_v.visible = page == MAP_PAGE and hud.ride_t > FIX_T
 		match page:
 			0: _page_ride(st, f, ink, scr, x0, w)
