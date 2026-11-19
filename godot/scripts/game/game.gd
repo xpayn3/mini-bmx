@@ -33,6 +33,7 @@ var phys: BikePhysics
 var cam: CameraRig
 var hud
 var wasted                  # crash slow-mo + "WASTED" look (fx/wasted.gd)
+var area_title              # new area banner in the WASTED type (fx/area_title.gd)
 var audio
 var sun: DirectionalLight3D
 var env: Environment
@@ -158,6 +159,8 @@ func _ready() -> void:
 	add_child(audio)
 	wasted = preload("res://scripts/fx/wasted.gd").new(self)
 	add_child(wasted)
+	area_title = preload("res://scripts/fx/area_title.gd").new()
+	add_child(area_title)
 	Tune.changed.connect(func(): phys.T = Tune.v)
 	Settings.changed.connect(_apply_settings)
 	_apply_settings()
@@ -782,6 +785,10 @@ func respawn(new_world: bool) -> void:
 	rider.reset_pose()
 	_snap_prev()
 	cam.snap_to(Vector3(0, phys.y + 0.5, 0))
+	# the area you start in: its banner once the screen has faded in
+	biome_cur = terrain.biome_name(phys.x, phys.z)
+	biome_next = ""; biome_hold = 0
+	if area_title: area_title.show_area(biome_cur, 1.6)
 
 ## tests (BMX_WATER_SPAWN=1): a dry spot 6 m from the nearest lake, facing it -> (x, heading, z)
 func _water_spawn() -> Vector3:
@@ -1043,7 +1050,9 @@ func _process(dt: float) -> void:
 		var rdt := minf((now - _photo_last) / 1e6, 0.1)
 		_photo_last = now
 		photo_mode.update(rdt)
+		if area_title: area_title.view.visible = false
 		return
+	if area_title: area_title.view.visible = hud.visible
 	dt = minf(dt, 0.1)
 	t += dt
 	var st := phys
@@ -1158,7 +1167,7 @@ func _process(dt: float) -> void:
 			biome_next = b
 			if biome_hold >= 3:
 				biome_cur = b
-				if msg_t <= 0: flash(b)
+				area_title.show_area(b)
 	# weather: wind, the bike parting the grass, cloud shadows (the sun dims with the shade at the rider)
 	atmos.update(t, dt, drawn_pos, 0.0 if st.air or st.crash_on else clampf(absf(st.v) / 2.0, 0.0, 1.0))
 	_update_light(dt)

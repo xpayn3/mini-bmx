@@ -277,6 +277,10 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - **WASTED** (`fx/wasted.gd`, Settings › Gameplay › Crash slow motion): on a crash time drops to 0.22× (sound pitched down via
   `AudioServer.playback_speed_scale`) for ~2.4 s real time, then eases back; the screen goes grey + vignette, the word
   WASTED (BAIL for a bail on purpose, F) shows at once for 1.5 s then fades (the rider + bike drawn in front of it via a silhouette mask), flat red, squeezed narrow to fill the screen (no band, no stroke), the crash reason small below. Fades on getting up or after 5 s. Off in autotests unless `BMX_WASTED=1`.
+- **New area banner** (`fx/area_title.gd`, `Game.area_title`): when the biome changes (and 1.6 s into a ride) the name shows
+  top centre in the WASTED type (same red condensed face, same squeeze, ~8.5 % of the screen tall), small "ENTERING" above.
+  Letters stamp down one after another from 2.4x with an overshoot, white-hot cooling to red; a red rule draws out from
+  the middle; out they drift apart and fade (~4 s). Real time; hidden with the HUD. Test: `BMX_AREA_AT=secs` freezes it.
 - Look: kits + a colour per part (helmet shell/peak, goggles, jersey, pants, gloves, shoes).
 
 ### Ride light (time of day)
