@@ -720,6 +720,15 @@ func _autotest(seconds: float) -> void:
 			Input.parse_input_event(mv)
 			for i in 5: await get_tree().process_frame
 			print("HOVER at ", mv.position, " -> page ", pause_menu.page_point(pause_menu._screen_px(mv.position)), " win ", get_window().size)
+		if OS.get_environment("BMX_PAUSE") == "pad":   # tests (with BMX_PAD=1): pad down twice + A on the leaflet
+			for ev_b in [JOY_BUTTON_DPAD_DOWN, JOY_BUTTON_DPAD_DOWN, JOY_BUTTON_A]:
+				for down in [true, false]:
+					var jb := InputEventJoypadButton.new(); jb.button_index = ev_b; jb.pressed = down
+					Input.parse_input_event(jb)
+					for i in 3: await get_tree().process_frame
+				var f: Control = pause_menu.page.gui_get_focus_owner() if is_instance_valid(pause_menu) else null
+				print("PADPRESS ", ev_b, " focus=", f.get("text") if f else "-", " paused=", get_tree().paused)
+			await get_tree().create_timer(1.5, true, false, true).timeout
 		if OS.get_environment("BMX_PAUSE") == "preset":   # pause > settings > a quality preset > Done > resume
 			_open_settings()
 			await get_tree().process_frame
