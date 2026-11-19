@@ -191,11 +191,13 @@ func on_get_up() -> void:
 		hurt_t = LIFE_WAIT
 		life_bar.heal = 1.0
 		flash("REVIVED")
+		if game and game.grime: game.grime.blood = 0.0   # the blood on the rider washes off with a revive
 		if OS.get_environment("BMX_LIFE_PROBE") != "": print("LIFE revived life=%.2f" % life)
 
 ## back to start / new world: full life, and the bike computer restarts (ride timer, trip, a full battery,
 ## the GPS fix and the power-on chime again)
 func on_respawn() -> void:
+	if life <= 0.0 and game and game.grime: game.grime.blood = 0.0   # dead, then restarted: a fresh rider
 	life = 1.0; hurt_t = 99.0
 	ride_t = 0.0; ride_dist = 0.0; moving_t = 0.0; max_v = 0.0
 	if visible: _power_t = 0.0

@@ -534,6 +534,7 @@ func start_crash(reason: String) -> void:
 	rider.transform = Transform3D.IDENTITY
 	ragdoll.start(pts, body_vel, spin_v, 1.0 / 60)
 	if blood: blood.crash_start(Vector2(body_vel.x, body_vel.z).length())
+	grime.add_blood(clampf(0.12 + crash_v * 0.035, 0.0, 0.7))   # the rider + bike stay bloody until a death + revive
 	rider.pose_ragdoll(ragdoll.p)
 	# (no dust right where the crash starts with the smoke sim: only where the body / bike hit and slide)
 	burst(Vector3(phys.x, phys.y + 0.05, phys.z), 30 if dust.sim == null else 2, terrain.surface(phys.x, phys.z), 1.5, dust.sim == null)
