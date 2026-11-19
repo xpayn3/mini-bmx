@@ -157,7 +157,7 @@ func crash_step(pts: Array, prv: Array, h: float, rad: Array) -> void:
 	if not _wounds.is_empty(): _bleed_wounds(pts, get_process_delta_time())
 	if ragdoll != null and OS.get_environment("BMX_RAGDOLL_PROBE") != "" and Engine.get_process_frames() % 15 == 0:
 		var pel: Vector3 = pts[2]
-		print("RAGDOLL neutral_off=%.2f pelvis_up=%.2f" % [ragdoll.nb_off / maxf(1.0, 9.0 * 3.0 * 15.0), pel.y - terrain.height(pel.x, pel.z)])
+		print("RAGDOLL neutral_off=%.2f pelvis_up=%.2f rise=%.2f vup=%.1f t=%.2f" % [ragdoll.nb_off / maxf(1.0, 9.0 * 3.0 * 15.0), pel.y - terrain.height(pel.x, pel.z), ragdoll.probe_rise, ragdoll.probe_vup, ragdoll.t_fall])
 		ragdoll.nb_off = 0.0
 	for i in n:
 		var pp: Vector3 = pts[i]
@@ -265,6 +265,7 @@ func crash_end() -> void:
 	_air.resize(0)
 	_bleed.fill(0.0)
 	if probe: print("BLOOD end laid=%d smears=%d severed=%d" % [laid, smears, _severed])
+	if ragdoll != null and OS.get_environment("BMX_RAGDOLL_PROBE") != "": print("EJECT rise=%.2f vup=%.1f" % [ragdoll.probe_rise, ragdoll.probe_vup])
 
 ## respawn: everything laid so far fades away over WIPE seconds (the shader: born before wipe_t)
 func clear() -> void:

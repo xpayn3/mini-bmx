@@ -57,8 +57,8 @@ var _xbones: Array = []   # [a, b, len] extra bones (root - b)
 var _xlims: Array = []    # [a, b, min len] extra limits (root - grandchild)
 ## sliding on the ground: friction coefficient and a per-substep drag (the old per-pass friction stopped a
 ## body dead in ~0.1 s, so it never slid)
-const SLIDE_MU := 0.75
-const SLIDE_DRAG := 0.985
+const SLIDE_MU := 1.1
+const SLIDE_DRAG := 0.97
 
 ## NEUTRAL BODY POSTURE: the pose a relaxed body floats into with no load (NASA's microgravity studies):
 ## head tipped ~24° forward, upper arms forward / a little out, elbows bent ~90° (hands in front of the
@@ -107,6 +107,9 @@ const FEET_KICK := 0.8     # m/s up + forward given to the feet / knees
 const SQUIRM := 3.0        # m/s² of the chest / pelvis couple
 const SQUIRM_T := 4.0
 var t_fall := 0.0
+var probe_rise := 0.0      # tests: highest the centre of mass got above where the crash started
+var probe_vup := 0.0       # tests: fastest the centre of mass went up (m/s)
+var _com0 := 0.0
 ## SELF-PRESERVATION: while airborne the rider tries to save himself: the torso is twisted toward upright
 ## (RIGHT_ACC, a couple on chest / pelvis), the legs reach straight down to land on the feet (a little
 ## toward where he's going), the arms brace down and ahead to catch himself (after the startle).
@@ -212,6 +215,19 @@ func start(pts: Array, vel: Vector3, spin: Vector3, dt := 1.0 / 60) -> void:
 		var kick: Vector3 = (fr.y + fr.z) * FEET_KICK * (1.0 if j == FT_L or j == FT_R else 0.6) * (0.8 + randf() * 0.4)
 		q[j] = (q[j] as Vector3) - kick * hs
 	t_fall = 0.0
+	_com0 = _com().y
+	if OS.get_environment("BMX_RAGDOLL_PROBE") != "":
+		var deep := 0.0
+		var nb := 0
+		for i in RAD.size():
+			var pp: Vector3 = p[i]
+			var dg: float = terrain.height(pp.x, pp.z) + float(RAD[i]) - pp.y
+			if dg > 0.0: nb += 1; deep = maxf(deep, dg)
+		var v0 := Vector3.ZERO
+		for i in RAD.size(): v0 += (p[i] as Vector3) - (q[i] as Vector3)
+		print("RAGSTART buried=%d deepest=%.2f com_v=%s" % [nb, deep, str(v0 / RAD.size() / (dt / SUB))])
+	probe_rise = 0.0
+	probe_vup = 0.0
 	_sq_ph = Vector3(randf(), randf(), randf()) * 10.0
 	active = true
 	last_h = dt / SUB
@@ -278,11 +294,21 @@ func step(dt: float, colliders: Array) -> void:
 			qq.x = pp.x - dx * k
 			qq.z = pp.z - dz * k
 			q[i] = qq
+	var c := _com()
+	probe_rise = maxf(probe_rise, c.y - _com0)
+	var cq := Vector3.ZERO
+	for i in RAD.size(): cq += q[i]
+	probe_vup = maxf(probe_vup, (c.y - cq.y / RAD.size()) / h)
 	var sp := 0.0
 	for i in p.size():
 		sp = maxf(sp, (p[i] as Vector3).distance_to(q[i]) / h)
 	speed = sp
 
+
+func _com() -> Vector3:
+	var c := Vector3.ZERO
+	for i in RAD.size(): c += p[i]
+	return c / RAD.size()
 
 ## the torso's frame: x = right (hip to hip), y = up the spine, z = forward
 func _frame() -> Basis:
@@ -297,6 +323,11 @@ func _agency_update(h: float) -> void:
 	var up_h: float = pe.y - terrain.height(pe.x, pe.z)
 	var x := clampf((up_h - 0.35) / 0.55, 0.0, 1.0)
 	agency = exp(-t_fall / AGENCY_T) * x * x * (3.0 - 2.0 * x) * tone_k
+	# a foot / knee / hand down: he's landed, stop reaching (reaching on into the ground = jumping off it)
+	for j in [FT_L, FT_R, KN_L, KN_R, HA_L, HA_R]:
+		if _touch[j] == 1:
+			agency = 0.0
+			break
 	if agency < 0.01: return
 	var v: Vector3 = (pe - (q[PELVIS] as Vector3)) / maxf(h, 1e-5)
 	var hv := Vector3(v.x, 0, v.z)
@@ -309,7 +340,7 @@ func _agency_update(h: float) -> void:
 	var d := want * RIGHT_ACC * agency * h * h
 	p[CHEST] = (p[CHEST] as Vector3) + d
 	p[HEAD] = (p[HEAD] as Vector3) + d * 0.6
-	p[PELVIS] = pe - d * 0.8
+	p[PELVIS] = pe - d * 1.6   # balanced: it turns the body, never lifts or pushes it
 
 ## the chest twisting against the pelvis (see SQUIRM): two slow wandering sines, more while lying on the ground
 func _squirm(h: float) -> void:
@@ -321,8 +352,10 @@ func _squirm(h: float) -> void:
 	var t := t_fall
 	var f: Vector3 = b.x * sin(t * 2.3 + _sq_ph.x) * (0.7 + 0.3 * sin(t * 0.7 + _sq_ph.z)) + b.z * 0.6 * sin(t * 1.7 + _sq_ph.y)
 	var d := f * amp * h * h
+	# sideways it's not quite balanced (the centre of mass drifts a little); up / down it is, so it never lifts
+	var dp := Vector3(d.x * 0.8, d.y * 1.5, d.z * 0.8)
 	p[CHEST] = (p[CHEST] as Vector3) + d
-	p[PELVIS] = (p[PELVIS] as Vector3) - d * 0.8   # not quite balanced: the centre of mass drifts a little
+	p[PELVIS] = (p[PELVIS] as Vector3) - dp
 	p[HEAD] = (p[HEAD] as Vector3) + d * 0.5
 
 ## tension toward the neutral posture + a soft limit (see NEUTRAL)
@@ -361,6 +394,8 @@ func _neutral_pull() -> void:
 		# pull by how far it is past the dead zone; past the soft limit the resistance climbs steeply
 		var f := (TONE * ex + LIMIT_K * lx * (1.0 + 2.0 * lx)) * tone_k * firm
 		var corr := d / dl * minf(f * L, (dl - dead * L) * 0.06)
+		# never press a part that's on the ground down into it: the ground would push the body up (a jump)
+		if (_touch[c] == 1 and corr.y < 0.0) or (_touch[par] == 1 and corr.y > 0.0): corr.y = 0.0
 		# equal and opposite on the part and its parent: the body can't push itself along
 		p[c] = cp + corr * 0.5
 		p[par] = pc - corr * 0.5
