@@ -226,6 +226,14 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   through a crossover the legs extend (`ROLL_UNWEIGHT`); the inside knee follows a smoothed lean. Sliders (Rider › Motion,
   pose keys): `leanFollow` (how quickly), `leanSwing` (overshoot), `leanUnweight` (legs extend). Test: `BMX_FLIPFLOP=2.4`
   (+ `BMX_STRAIGHT=1`) swaps full left / right every 1.2 s and prints `LEANFF` lines (steer, lat, bike / hip / chest roll, peak roll rate).
+- **Corner life** (Rider › Motion › Corner life, `leanLively`): leaned over, the body roll gets a slow uneven balance sway
+  (~1-2 deg), bumps under the leaned bike nudge it, and the turn's load (`latG` from game.gd) presses the rider a few cm
+  down into the attack position. Hip / chest roll springs ring a touch more (`ROLL_*_Z` 0.52 / 0.44).
+- **Corner whip / drift** (`bike_physics.gd` `whip`, Ride › Body › `whip*`): both sticks hard the same way (steer + body
+  lean, > 0.6) above `whipMinSpeed` = the bike is thrown further over (`whipLean`) and the rear swings out to `whipDrift`
+  (~0.42 rad) at `whipSnap`, held while both stay there, speed mostly kept (`whipCarry` cuts the slide scrub); "WHIP!" after
+  0.3 s. `whip_hold` keeps control ~1 s after letting go so the drift is caught (without it the rear spun out to the
+  wash-out angle). Test: `BMX_WHIP=secs` (+ `BMX_WHIP_T0`, `BMX_STRAIGHT=1`) prints `WHIP` lines.
 - **Aerodynamics** (`aero_k` in `bike_physics.gd`): the air drag scales with the body: right stick forward on the ground = a race tuck
   (chest folded over the bars, hips back, knees bent) cuts drag by `tuckDrag` (0.42; half that while pedalling), stick back = sat up,
   `upDrag` more (an air brake). Straight test: 65.9 → 68.3 km/h in 20 s.

@@ -1187,7 +1187,23 @@ func _autotest(seconds: float) -> void:
 					_probe["dust_k"] = nkf
 					get_viewport().get_texture().get_image().save_png("%s_%d.png" % [OS.get_environment("BMX_DUST_SHOTS"), nkf])
 			continue
-		if OS.get_environment("BMX_FLIPFLOP") != "":   # tests: full left / full right, swapped every half period (s), from 3 s
+		if OS.get_environment("BMX_WHIP") != "":   # tests: corner whip - from 4 s hold steer + body lean the same way for secs, coast 1.5 s, other side
+			var hold := float(OS.get_environment("BMX_WHIP"))
+			var w0 := float(OS.get_environment("BMX_WHIP_T0")) if OS.get_environment("BMX_WHIP_T0") != "" else 4.0
+			var cyc := fmod(el - w0, (hold + 1.5) * 2.0) if el > w0 else -1.0
+			var side := 0.0
+			if cyc >= 0.0 and cyc < hold: side = 1.0
+			elif cyc >= hold + 1.5 and cyc < hold * 2.0 + 1.5: side = -1.0
+			for a in [["steer_left", "body_left", 1.0], ["steer_right", "body_right", -1.0]]:
+				if side == a[2]:
+					Input.action_press(a[0], 1.0); Input.action_press(a[1], 1.0)
+				else:
+					Input.action_release(a[0]); Input.action_release(a[1])
+			var ph4 = game.phys
+			if el - float(_probe.get("wh_t", 0.0)) > 0.1:
+				_probe["wh_t"] = el
+				print("WHIP t=%.1f in=%+.0f whip=%.2f slip=%+.2f v=%.1f bike=%+.0fdeg crash=%s" % [el, side, ph4.whip, ph4.slip, ph4.v, rad_to_deg(ph4.bike_lean), ph4.crash_on])
+		elif OS.get_environment("BMX_FLIPFLOP") != "":   # tests: full left / full right, swapped every half period (s), from 3 s
 			var per := float(OS.get_environment("BMX_FLIPFLOP"))
 			var sv := 0.0 if el < 3.0 else (1.0 if fmod(el - 3.0, per) < per * 0.5 else -1.0)
 			Input.action_press("steer_left", 1.0) if sv > 0 else Input.action_release("steer_left")
