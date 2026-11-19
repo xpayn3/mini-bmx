@@ -90,22 +90,22 @@ const POSE_DEFS := [
 const KITS := [
 	["Classic", {}],   # = Rider.DEFAULT_LOOK
 	["Stealth", {"shell": "#0c0d0f", "peak": "#1a1b1e", "goggleFrame": "#18191c", "lens": "#8a96a8", "strap": "#2a2c30",
-		"jersey": "#2b2e33", "pants": "#111215", "gloves": "#3a3d42", "shoes": "#141518", "shoeAccent": "#3a3d42"}],
+		"jersey": "#2b2e33", "pants": "#111215", "gloves": "#3a3d42", "shoes": "#141518", "shoeAccent": "#3a3d42", "pads": "#16171a"}],
 	["Race white", {"shell": "#f4f4f0", "peak": "#e8231f", "goggleFrame": "#e8231f", "lens": "#3fb6ff", "strap": "#e8231f",
-		"jersey": "#f4f4f0", "pants": "#202227", "gloves": "#e8231f", "shoes": "#f4f4f0", "shoeAccent": "#e8231f"}],
+		"jersey": "#f4f4f0", "pants": "#202227", "gloves": "#e8231f", "shoes": "#f4f4f0", "shoeAccent": "#e8231f", "pads": "#f4f4f0"}],
 	["Monster", {"shell": "#7ed321", "peak": "#111214", "goggleFrame": "#111214", "lens": "#7ed321", "strap": "#7ed321",
-		"jersey": "#111214", "pants": "#2c2f33", "gloves": "#7ed321", "shoes": "#111214", "shoeAccent": "#7ed321"}],
+		"jersey": "#111214", "pants": "#2c2f33", "gloves": "#7ed321", "shoes": "#111214", "shoeAccent": "#7ed321", "pads": "#111214"}],
 	["Ocean", {"shell": "#1478d4", "peak": "#f4f4f0", "goggleFrame": "#f4f4f0", "lens": "#ff9f2e", "strap": "#1478d4",
-		"jersey": "#11b3c9", "pants": "#0d2847", "gloves": "#f4f4f0", "shoes": "#0d2847", "shoeAccent": "#11b3c9"}],
+		"jersey": "#11b3c9", "pants": "#0d2847", "gloves": "#f4f4f0", "shoes": "#0d2847", "shoeAccent": "#11b3c9", "pads": "#0d2847"}],
 	["Sunset", {"shell": "#ff7a1a", "peak": "#6a1b9a", "goggleFrame": "#6a1b9a", "lens": "#ffd21f", "strap": "#ff7a1a",
-		"jersey": "#6a1b9a", "pants": "#2a2140", "gloves": "#ff7a1a", "shoes": "#2a2140", "shoeAccent": "#ff7a1a"}],
+		"jersey": "#6a1b9a", "pants": "#2a2140", "gloves": "#ff7a1a", "shoes": "#2a2140", "shoeAccent": "#ff7a1a", "pads": "#2a2140"}],
 ]
 const SW := ["#f4f4f0", "#16171a", "#e8231f", "#ff7a1a", "#ffd21f", "#7ed321", "#11b3c9", "#1478d4", "#6a1b9a", "#ff5fa2"]
 const LENS := ["#ff7a2a", "#ffd21f", "#3fb6ff", "#7ed321", "#ff5fa2", "#8a96a8", "#d0d4da"]
 const LOOK_ROWS := [
 	["Helmet", [["shell", "Shell", SW], ["peak", "Peak", SW]]],
 	["Goggles", [["lens", "Lens tint", LENS], ["goggleFrame", "Frame", SW], ["strap", "Strap", SW]]],
-	["Kit", [["jersey", "Jersey", SW], ["pants", "Pants", SW], ["gloves", "Gloves", SW]]],
+	["Kit", [["jersey", "Jersey", SW], ["pants", "Pants", SW], ["gloves", "Gloves", SW], ["pads", "Knee pads", SW]]],
 	["Shoes", [["shoes", "Upper", SW], ["shoeAccent", "Toe & collar", SW]]],
 ]
 
