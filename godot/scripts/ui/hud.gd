@@ -905,7 +905,7 @@ class Overlay extends Control:
 	func _draw() -> void: g.draw_over(self)
 
 class StaminaView extends Control:
-	## slim rounded capsule with a bolt icon: smooth gradient fill, a bright leading edge, tick marks,
+	## slim rounded capsule with a bolt icon: the fill ends straight (no rounded end, no edge line), tick marks,
 	## a glow while sprinting and a pulse when low (sprint stamina)
 	## life = true: the rider's life bar instead (heart icon, red, shakes on a crash)
 	var hud
@@ -914,10 +914,13 @@ class StaminaView extends Control:
 	var heal := 0.0    # 1 on a revive, fades: the life bar glows green
 	var shown := 1.0   # eased fill so it glides instead of jumping
 
-	static func _pill(ci: CanvasItem, r: Rect2, c: Color) -> void:
+	static func _pill(ci: CanvasItem, r: Rect2, c: Color, square_end := false) -> void:
 		var sb := StyleBoxFlat.new()
 		sb.bg_color = c
 		sb.set_corner_radius_all(int(r.size.y * 0.5))
+		if square_end:   # a fill: rounded where it starts, cut straight where it ends
+			sb.corner_radius_top_right = 0
+			sb.corner_radius_bottom_right = 0
 		sb.anti_aliasing = true
 		ci.draw_style_box(sb, r)
 
@@ -957,12 +960,10 @@ class StaminaView extends Control:
 		var fw := maxf(tr.size.y, tr.size.x * clampf(shown, 0, 1)) if shown > 0.01 else 0.0
 		if fw > 0.0:
 			if sprinting and not tired:
-				_pill(self, Rect2(tr.position - Vector2(2, 2), Vector2(fw + 4, tr.size.y + 4)), Color(col, 0.22))
-			_pill(self, Rect2(tr.position, Vector2(fw, tr.size.y)), Color(col, 0.55 + 0.45 * pulse))
+				_pill(self, Rect2(tr.position - Vector2(2, 2), Vector2(fw + 2, tr.size.y + 4)), Color(col, 0.22), true)
+			_pill(self, Rect2(tr.position, Vector2(fw, tr.size.y)), Color(col, 0.55 + 0.45 * pulse), fw < tr.size.x - 0.5)
 			# lighter top half for a soft gloss
-			_pill(self, Rect2(tr.position + Vector2(1, 1), Vector2(maxf(fw - 2, 2), tr.size.y * 0.4)), Color(1, 1, 1, 0.22))
-			# bright leading edge
-			draw_rect(Rect2(tr.position.x + fw - 2, tr.position.y + 1, 2, tr.size.y - 2), Color(1, 1, 1, 0.8))
+			_pill(self, Rect2(tr.position + Vector2(1, 1), Vector2(maxf(fw - 1, 2), tr.size.y * 0.4)), Color(1, 1, 1, 0.22), fw < tr.size.x - 0.5)
 		# tick marks every 10 %
 		for i in range(1, 10):
 			var x := tr.position.x + tr.size.x * i / 10.0
