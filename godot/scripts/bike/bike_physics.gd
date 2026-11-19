@@ -77,7 +77,7 @@ var pad := false
 var bank_probe := OS.get_environment("BMX_BANK_PROBE") != ""
 var lean_room := NAN   # how steeply the ground rises beside the bike on its lean side (rad, eased)
 var _lean_hist := []; var _bank_raw := 0.0   # the player is on a gamepad (Settings.pad_active): triggers don't tilt / throw in the air
-var wheel_f := 0.0; var wheel_r := 0.0; var crank := 0.0; var pedal := 0.0
+var wheel_f := 0.0; var wheel_r := 0.0; var crank := 0.0; var pedal := 0.0; var throttle_in := 0.0   # the raw gas key / trigger this step (pedal is its smoothed version)
 var yaw_rate := 0.0; var shake := 0.0
 var course := NAN; var slip := 0.0; var since_land := 1.0
 # tyre grip sim (_grip_step): slip_w = how fast the bike is yawing against its travel (the rear stepping out /
@@ -522,6 +522,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	if v > top_now + 0.3: spun_out = true
 	elif v < top_now - 0.8: spun_out = false
 	pedal += ((throttle if (not air and not spun_out) else 0.0) - pedal) * minf(1.0, dt * 6)
+	throttle_in = throttle
 
 	# --- steering, countersteer and lean ---
 	var va := absf(v)

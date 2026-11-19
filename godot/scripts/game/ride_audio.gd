@@ -177,7 +177,8 @@ func update_audio(dt: float) -> void:
 		var c := FreewheelSound.current
 		fw_synth.SetParams(c.pitch, c.ring, c.crack, c.crack_len, c.detune, c.tilt, c.uneven, c.jitter, c.vary)
 	var fs: float = va
-	var coasting := st.pedal < 0.1 and va > 0.12 and not st.crash_on
+	# (the raw key, not the smoothed pedal: that took ~0.4 s to fall under the threshold after letting go)
+	var coasting := st.throttle_in < 0.1 and va > 0.12 and not st.crash_on
 	if FreewheelSound.preview_speed > 0.0 and va < 0.5:
 		fs = FreewheelSound.preview_speed; coasting = true
 	var poe := FreewheelSound.get_value("poe")
