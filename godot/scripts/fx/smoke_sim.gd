@@ -30,7 +30,7 @@ var density_fade := 0.15          # /s
 var vel_relax := 0.35             # /s back toward the wind
 var rise := float(OS.get_environment("BMX_SMOKE_RISE")) if OS.get_environment("BMX_SMOKE_RISE") != "" else 0.55   # m/s the dust rises through the air (more when riding fast)
 var vorticity := 0.9
-var extinction := 3.0
+var extinction := 0.9      # light, see-through dust: the ground shows through (was 3.0)
 var turbulence := 6.5             # curl-noise swirl force
 var turb_scale := 0.7             # 1/m: swirl size ~ 1.5 m
 var disperse := 2.2               # /s: how fast dust mixes out into the air (turbulent diffusion)

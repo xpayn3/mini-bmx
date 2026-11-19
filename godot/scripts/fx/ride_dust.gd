@@ -97,7 +97,7 @@ var _front_p := Vector3.ZERO
 var _front_prev := Vector3.INF
 var _front_v := Vector3.ZERO
 var _front_rate := 0.0
-const PATCH_R := 0.24   # m: the contact patch, as small as the sim's 0.2 m cells allow
+const PATCH_R := 0.2    # m: the contact patch, as small as the sim's 0.2 m cells allow
 var _pulse_t := 0.0
 var _gust := FastNoiseLite.new()
 static var _dust_mat: ShaderMaterial
@@ -137,10 +137,10 @@ func sim_step(dt: float, focus: Vector3, fwd: Vector3, wind: Vector2) -> void:
 	if _feed_age > 0.1: _feed_on = false
 	if _front_age > 0.1: _front_on = false
 	_pulse_t += dt
-	var pulse := clampf(0.9 + _gust.get_noise_1d(_pulse_t * 60.0) * 2.6, 0.0, 2.6)   # gusts with gaps
+	var pulse := clampf(0.9 + _gust.get_noise_1d(_pulse_t * 60.0) * 2.6, 0.35, 2.6)   # gusts, never quite off
 	_feed_prev = _patch(_feed_on, _feed_p, _feed_prev, _feed_v, _feed_rate * pulse, _feed_fan, _feed_col)
 	# the front tyre kicks up a little too (its own gusts)
-	var fpulse := clampf(0.9 + _gust.get_noise_1d(_pulse_t * 60.0 + 500.0) * 2.6, 0.0, 2.6)
+	var fpulse := clampf(0.9 + _gust.get_noise_1d(_pulse_t * 60.0 + 500.0) * 2.6, 0.35, 2.6)
 	_front_prev = _patch(_front_on, _front_p, _front_prev, _front_v, _front_rate * fpulse, _feed_fan, _feed_col)
 	sim.step(dt, focus, fwd)
 	if grit != null:
@@ -161,11 +161,12 @@ func _patch(on: bool, p: Vector3, prev: Vector3, v: Vector3, rate: float, fan: f
 	var sp := v.length()
 	for i in k:
 		var at := from.lerp(p, (i + 1.0) / k)
-		var yaw := (randf() - 0.5) * deg_to_rad(fan) * 1.6
-		var jv := v.rotated(Vector3.UP, yaw) * (0.6 + randf() * 0.8) + Vector3(0, randf() * (0.8 + sp * 0.25), 0)
+		var yaw := (randf() - 0.5) * deg_to_rad(fan) * 0.8   # thrown mostly straight back: a narrow start
+		var jv := v.rotated(Vector3.UP, yaw) * (0.6 + randf() * 0.8) + Vector3(0, randf() * (0.45 + sp * 0.12), 0)
 		# faster riding flings the spray harder / wider: it grows into a cloud sooner
 		var fast := clampf((sim.speed - 3.0) / 9.0, 0.0, 1.0)
-		sim.add_source(at, jv * (1.0 + fast * 0.5), PATCH_R, rate * 14.0 / k, 10.0, 0.6 + randf() * 0.8 + fast * 1.6, col)
+		# a gentle sideways push only: it starts as narrow as the tyre and widens behind, not at the patch
+		sim.add_source(at, jv * (1.0 + fast * 0.5), PATCH_R, rate * 14.0 / k, 10.0, 0.15 + randf() * 0.25 + fast * 0.5, col)
 	# grit: grains flicked off the tread - only when going fast (none below ~30 km/h, a light spray at speed)
 	var gk := clampf((sim.speed - 8.3) / 5.0, 0.0, 1.0)
 	if grit != null and gk > 0.0:
