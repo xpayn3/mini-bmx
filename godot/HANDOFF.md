@@ -206,6 +206,16 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   (no flip-flop). Test: `BMX_BRAKETURN=secs` (sprint, then hard brake + full lock) prints `JITTER` / `JUMP` lines.
 - **Tune migrations**: `Tune.RETUNED_AT` lists keys whose defaults changed per version (only those reset).
 - **Tests run minimised**: `BMX_MIN=1` (they still render, screenshots work).
+- **Ride log** (`game/ride_log.gd`): the last 60 s of every physics step (bike physics, body, drawn-bike lift,
+  rider joints, all inputs) kept in a ring buffer; **R3 / F8** (`save_log`) writes it to
+  `%APPDATA%/Godot/app_userdata/Mini BMX/ridelogs/ride_<date>.csv` (last row = the press, `before_press` column).
+  The way to find a glitch the player saw. Test: `BMX_SAVELOG=secs`.
+- **Lean vs terrain**: the lean only changes as fast as the tyres are loaded (`kL *= load`): over a crest / edge the
+  bike carries its lean instead of snapping upright. The bank the bike feels changes at most 3 rad/s. The lean is
+  limited against the ground where the leaned tyre swings to (0.3 / 0.5 m to the lean side at both wheels,
+  `lean_room`, `groundLeanMax`): a deep lean toward rising ground beside the trail put the tyre into it and the
+  drawn bike was shoved up. Probe: `BMX_BANK_PROBE=1` (+ `BMX_FOLLOW=1 BMX_WEAVE=3.5` weaves over trail edges):
+  `BANKDROP`, `LIFT`, `BASEBIN` lines.
 - **Brake to a stop holds** (`brake_stop`): no creeping, even on slopes; a fresh brake press from a standstill backs up
   (`brake_back`). Rolling backwards the cranks turn back with the wheel. Test: `BMX_HOLD_BRAKE=secs` (`HOLD` lines).
 - **Wheelie / manual pose** (`rider.gd`, `slope` from the physics): the front up on the ground is not a climb; the

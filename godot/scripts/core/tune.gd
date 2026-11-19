@@ -68,6 +68,7 @@ const DEFS := [
 		["bikeLeanMul", "Bike leans extra", 1.55, 0.7, 2.0, 0.01, "×"],
 		["bikeLeanCap", "Bike lean soft cap", 1.3, 0.3, 1.5, 0.01, "rad"],
 		["bodyLean", "Body leans with bike", 0.7, 0.3, 1.0, 0.01, "×"],
+		["groundLeanMax", "Max lean against the ground (off-camber)", 1.05, 0.6, 1.4, 0.01, "rad"],
 	]],
 	["Legs & body", [
 		["legStiff", "Leg spring", 30, 4, 150, 1, ""],

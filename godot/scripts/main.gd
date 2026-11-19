@@ -331,6 +331,10 @@ func _autotest(seconds: float) -> void:
 				Input.action_press("steer_left" if int(ph_bt / 7.5) % 2 == 0 else "steer_right")
 			else:
 				Input.action_release("brake"); Input.action_release("steer_left"); Input.action_release("steer_right"); Input.action_press("pedal"); Input.action_press("sprint")
+		if OS.get_environment("BMX_SAVELOG") != "" and el >= float(OS.get_environment("BMX_SAVELOG")) and not _probe.has("logged"):   # tests: press "save ride log"
+			_probe["logged"] = true
+			var ev := InputEventAction.new(); ev.action = "save_log"; ev.pressed = true
+			Input.parse_input_event(ev)
 		var body_t := OS.get_environment("BMX_BODY")   # tests: the body stick. manual / fwd / lean / flick (from 3 s)
 		if body_t != "" and el >= 3.0:
 			var ph2: BikePhysics = game.phys
@@ -473,6 +477,10 @@ func _autotest(seconds: float) -> void:
 				var dd: float = Vector2(cp[0] - ph.x, cp[1] - ph.z).length_squared()
 				if dd < best_d: best_d = dd; _probe.fs = s0 + k
 			var tp: Array = crs.at(float(_probe.fs) + 6.0 + absf(ph.v) * 0.5)
+			var wv := OS.get_environment("BMX_WEAVE")   # tests: weave this far (m) either side of the centreline, over berm / trail edges
+			if wv != "":
+				var off: float = float(wv) * sin(el * 1.3)
+				tp = [tp[0] - float(tp[3]) * off, tp[1] + float(tp[2]) * off, tp[2], tp[3]]
 			var err: float = BikePhysics.ang_diff(atan2(-(tp[1] - ph.z), tp[0] - ph.x), ph.heading)
 			var sv := clampf(err * 2.5, -1.0, 1.0)
 			Input.action_press("steer_left", sv) if sv > 0.05 else Input.action_release("steer_left")
@@ -576,6 +584,10 @@ func _autotest(seconds: float) -> void:
 	print("AUTOTEST avg triangles/frame=%dk draw calls=%d" % [tris / maxi(frames, 1) / 1000, draws / maxi(frames, 1)])
 	print("AUTOTEST frames=%d fps=%.1f pos=(%.1f, %.1f, %.1f) v=%.2f crash=%s sane=%s" % [frames, frames / seconds, st.x, st.y, st.z, st.v, st.crash_on, st.is_sane()])
 	if OS.get_environment("BMX_BRAKETURN") != "": game.jitter_report()
+	if OS.get_environment("BMX_BANK_PROBE") != "":
+		for k in game._base_bins:
+			var acc: Array = game._base_bins[k]
+			print("BASEBIN lean %.2f-%.2f rad: base below ground %.3f m avg, load %.2f g, %d frames" % [k * 0.25, k * 0.25 + 0.25, -acc[0] / acc[1], acc[2] / acc[1], acc[1]])
 	if rec != null:
 		rec.set_recording_active(false)
 		rec.get_recording().save_to_wav(OS.get_environment("BMX_REC"))

@@ -771,6 +771,11 @@ func _snap_prev() -> void:
 func _unhandled_input(e: InputEvent) -> void:
 	if get_tree().paused or not input_enabled: return
 	if e.is_action_pressed("photo") and not e.is_echo(): toggle_photo(); return
+	if e.is_action_pressed("save_log") and not e.is_echo():   # the last 60 s of physics + inputs to a CSV
+		var lp := ride_log.save()
+		flash("Ride log saved (last 60 s)" if lp != "" else "Couldn't save the ride log")
+		if lp != "": print("RIDELOG ", lp)
+		return
 	if photo: return
 	if e.is_action_pressed("new_world") and not e.is_echo(): respawn(true)
 	elif e.is_action_pressed("respawn") and not e.is_echo(): respawn(false)
@@ -823,6 +828,9 @@ func _read_input() -> Dictionary:
 
 ## tests (BMX_BRAKETURN): which values vibrate - per value, how often its step-to-step change flips sign
 ## with a real size (a vibration), and the biggest such flip
+var _base_bins := {}
+var ride_log := RideLog.new()   # the last 60 s, saved with R3 / F8 (save_log)
+var _log_lift := 0.0
 var jitter_on := false
 var _jit_skip := 0
 var _jit_head := Vector3.INF
@@ -846,7 +854,9 @@ func jitter_report() -> void:
 
 func _physics_process(dt: float) -> void:
 	_snap_prev()
-	phys.step(dt, _read_input())
+	var inp := _read_input()
+	phys.step(dt, inp)
+	ride_log.record(dt, phys, inp, _log_lift, rig.position.y if rig else 0.0, rider.J if rider else [])
 	if jitter_on and not phys.crash_on:
 		for kv in [["slip", phys.slip, 0.002], ["yaw_rate", phys.yaw_rate, 0.02], ["lean", phys.lean, 0.002], ["bike_lean", phys.bike_lean, 0.003],
 				["counter", phys.counter, 0.003], ["steer", phys.steer, 0.003], ["hip_shift", phys.hip_shift, 0.001], ["body_x", phys.body_x, 0.001],
@@ -981,7 +991,25 @@ func _process(dt: float) -> void:
 	# (higher in hollows) with rocks and decks on it. Lift / tilt the drawn bike so no tyre is ever inside it
 	if OS.get_environment("BMX_NOUNCLIP") == "":
 		rig.fit_wheels(terrain.top_height)
+		var _pre_y := rig.position.y
+		var _dF0 := rig.tyre_depth(rig.wheel_f, rig.wheel_rf, terrain.top_height) if st.bank_probe else 0.0
+		var _dR0 := rig.tyre_depth(rig.wheel_r, rig.wheel_rr, terrain.top_height) if st.bank_probe else 0.0
+		var _base_over: float = rig.global_position.y - terrain.top_height(rig.global_position.x, rig.global_position.z)
+		var _axF_over_base: float = rig.wheel_f.global_position.y - rig.global_position.y
+		if st.bank_probe and not st.air:   # tests: how low the physics body sits vs the ground, by lean
+			var bin_k := mini(int(absf(st.bike_lean) / 0.25), 4)
+			var acc: Array = _base_bins.get(bin_k, [0.0, 0, 0.0])
+			acc[0] += _base_over; acc[1] += 1; acc[2] += st.n_load / BikePhysics.G
+			_base_bins[bin_k] = acc
+		var _axF: Vector3 = rig.wheel_f.global_position
+		var _axR: Vector3 = rig.wheel_r.global_position
 		var was: float = rig.unclip_tyres(terrain.top_height)
+		_log_lift = maxf(was, 0.0)
+		if st.bank_probe and was > 0.05 and not st.air:   # tests: the drawn bike lifted a lot (it "shoots up")
+			print("BASE over ground=%.3f  axleF over base=%.3f  susp xF=%.3f xR=%.3f  y_draw-y=%.3f" % [_base_over, _axF_over_base, rig.susp.xF if rig.susp else 0.0, rig.susp.xR if rig.susp else 0.0, y_draw - st.y])
+			print("LIFT %.3f m  bike_lean=%.2f lean=%.2f bank=%.2f v=%.1f  dF=%.3f dR=%.3f  axleF-ground=%.3f axleR-ground=%.3f  field-vs-mesh F=%.3f R=%.3f" % [was, st.bike_lean, st.lean, st.bank, st.v, _dF0, _dR0,
+				_axF.y - terrain.top_height(_axF.x, _axF.z), _axR.y - terrain.top_height(_axR.x, _axR.z),
+				terrain.top_height(_axF.x, _axF.z) - terrain.height(_axF.x, _axF.z), terrain.top_height(_axR.x, _axR.z) - terrain.height(_axR.x, _axR.z)])
 		if clip_probe:
 			clip_stats.frames += 1
 			if was > 0.002: clip_stats.fixed += 1

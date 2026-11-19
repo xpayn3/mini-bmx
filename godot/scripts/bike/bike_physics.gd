@@ -69,7 +69,10 @@ var spin_hold := 0.0; var spin_k := 1.0
 # built up gently and faster the longer it's held, eased out when let go (stick_yaw rad/s on top of air_yaw)
 var yaw_edge_s := 0.0; var yaw_hold := 0.0; var stick_yaw := 0.0
 var style_air := 0.0   # this jump's tweak: seconds x how far the stick swung the bike about (style points)   # how long it's been held one way, and the spin-rate multiplier that gives
-var pad := false   # the player is on a gamepad (Settings.pad_active): triggers don't tilt / throw in the air
+var pad := false
+var bank_probe := OS.get_environment("BMX_BANK_PROBE") != ""
+var lean_room := NAN   # how steeply the ground rises beside the bike on its lean side (rad, eased)
+var _lean_hist := []; var _bank_raw := 0.0   # the player is on a gamepad (Settings.pad_active): triggers don't tilt / throw in the air
 var wheel_f := 0.0; var wheel_r := 0.0; var crank := 0.0; var pedal := 0.0
 var yaw_rate := 0.0; var shake := 0.0
 var course := NAN; var slip := 0.0; var since_land := 1.0
@@ -80,7 +83,7 @@ var n_f := NAN; var n_r := NAN; var n_ref := NAN
 var flow := 0.0; var flow_t := 0.0
 var spun_out := false
 var bank := NAN; var carve := 0.0; var carve_acc := 0.0; var carve_berm := false
-var lat_m := NAN; var lat_a := 0.0
+var lat_m := NAN; var lat_a := 0.0; var n_load := G   # (n_load: the ground's push on the tyres, m/s², for the ride log)
 var g_pitch := NAN
 var w_init := false; var hf_prev := NAN; var hr_prev := NAN
 var nose_ref := NAN
@@ -440,6 +443,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	var nR := 0.0 if air else _or(n_r, G * SH_R) * n_sc
 	var nF := 0.0 if air else _or(n_f, G * (1 - SH_R)) * n_sc
 	var n_tot := nR + nF
+	n_load = n_tot
 	var mu: float = (0.95 if surf == 1 else 0.5 if surf == 3 else 0.45 if surf == 2 else 0.72) * T.grip
 	spin = 0; a_drive = 0
 
@@ -527,7 +531,11 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		var mx := x + f.x * (L / 2 - BB_REAR)
 		var mz := z + f.z * (L / 2 - BB_REAR)
 		var b := 0.0 if air else atan((terrain.height(mx - lx, mz - lz) - terrain.height(mx + lx, mz + lz)) / (2 * w))
-		bank = _or(bank, b) + (clampf(b, -0.9, 0.9) - _or(bank, b)) * minf(1.0, dt * 20)
+		_bank_raw = b
+		# a sharp edge (berm lip, trail edge) gives a one-frame spike across the 0.7 m: the bank the bike
+		# feels changes at most 3 rad/s
+		var b0: float = _or(bank, b)
+		bank = b0 + clampf((clampf(b, -0.9, 0.9) - b0) * minf(1.0, dt * 20), -3.0 * dt, 3.0 * dt)
 	var bk := bank
 	var carving := not air and absf(steer_eff) > 0.01 and va > 4 and not skid and absf(slip) < 0.3
 	carve = minf(1.0, carve + dt * 2) if carving else maxf(0.0, carve - dt * 5)
@@ -562,6 +570,12 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		var tau_y: float = T.turnWeight * (0.4 + 0.6 * spd_k)
 		lat_m = _or(lat_m, a_lat_t) + (a_lat_t - _or(lat_m, a_lat_t)) * (1 - exp(-dt / tau_y)) if tau_y > 0.005 else a_lat_t
 		var a_lat := clampf(lat_m, a_min, a_max)
+		if bank_probe:   # tests: the lean collapsing fast at speed, and what the bank / grip limits were then
+			_lean_hist.append(lean)
+			if _lean_hist.size() > 12: _lean_hist.pop_front()
+			if va > 7.0 and _lean_hist.size() == 12 and absf(lean - _lean_hist[0]) > 0.22 and absf(lean) < absf(_lean_hist[0]):
+				print("BANKDROP v=%.1f lean %.2f->%.2f bank=%.2f raw=%.2f lat_m=%.1f a_min=%.1f a_max=%.1f steer_in=%.2f slip=%.2f" % [va, _lean_hist[0], lean, bk, _bank_raw, lat_m, a_min, a_max, steer_in, slip])
+				_lean_hist.clear()
 		var course_rate := a_lat / v if absf(v) > 0.3 else yaw_use
 		var excess := yaw_use - course_rate
 		var share: float = 1.0 if skid else T.oversteer
@@ -614,12 +628,35 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	var lean_t: float = (roll_t if absf(roll_t) > 0.03 else lean * 0.98) if air else clampf(atan(lat_a / G), -T.leanMax + minf(0.0, bk), T.leanMax + maxf(0.0, bk))
 	var kL: float = T.leanIn if absf(steer_eff) > 0.01 else T.leanOut
 	if air and air_stick.length() > 0.02: kL = 45.0   # the stick lays the bike over in the air (soft, no snap)
+	if not air:
+		# only the ground pushing on the tyres can change the lean: over a crest or an edge (tyres light) the
+		# bike carries its lean on instead of snapping upright with the momentary lack of grip
+		kL *= clampf(n_tot / G, 0.12, 1.0)
 	lean_v += ((lean_t - lean) * kL - lean_v * 2 * sqrt(kL) * T.leanDamp) * dt
 	lean += lean_v * dt
 	# the body stick throws the bike over under the rider (the body stays upright: counter grows)
 	var bl: float = lean * T.bikeLeanMul + (0.0 if air else flick * float(T.get("flickLean", 0.35)) * smooth01(va / 3.0))
 	var cap_b: float = T.bikeLeanCap + (0.0 if (air or signf(bk) != signf(bl)) else absf(bk))
 	bike_lean = cap_b * tanh(bl / cap_b)
+	if not air and absf(bike_lean) > 0.05:
+		# what matters for the tyre is its lean against the ground WHERE IT SWINGS TO, not gravity: leaned deep
+		# toward ground that rises beside the bike (a trail's edge, the hillside, a berm's lip) the tyre went
+		# into it and the drawn bike was shoved 25-38 cm up ("shoots up for a sec"). Look 0.3 / 0.5 m to the
+		# lean side at both wheels: the bike leans at most groundLeanMax against the steepest rise there
+		var sg := signf(bike_lean)
+		var lx := -f.z * sg
+		var lz := f.x * sg   # unit vector to the lean side
+		var phi := -0.5
+		for wo in [L - BB_REAR, -BB_REAR]:
+			var wx: float = x + f.x * wo
+			var wz: float = z + f.z * wo
+			var h0: float = terrain.height(wx, wz)
+			for d in [0.3, 0.5]:
+				phi = maxf(phi, atan((terrain.height(wx + lx * d, wz + lz * d) - h0) / d))
+		lean_room = _or(lean_room, phi)
+		lean_room += clampf(phi - lean_room, -3.0 * dt, 3.0 * dt)
+		var lim: float = maxf(0.25, float(T.get("groundLeanMax", 1.05)) - maxf(lean_room, -0.3))
+		bike_lean = sg * minf(absf(bike_lean), lim)
 	# the bike leans under the rider: the body always stays a little more upright than the bike (never
 	# hangs inside it, or the inside leg cuts through the frame). The body leans ~70 % of the way the
 	# rider + bike lean, so in a fast turn the bike tips well under a fairly upright rider
