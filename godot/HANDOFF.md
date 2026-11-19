@@ -134,8 +134,10 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   lies over; 3 points across the round casing, `tyre_hw`) against `Terrain.top_height` = max(exact mesh
   triangles `mesh_height`, `height` with domes / decks) and lifts / tilts the drawn bike until clear
   (the physics isn't touched). ~1–2 % frame time. Rock meshes are only as exact as their domes.
-- **Fakie (backward landing)**: landing > 2.2 rad off the travel no longer crashes ("FAKIE!"): `_land_trick` sets `_rev_land`, the touch-down
-  makes `course = heading`, `v = -v` (reverse speed may exceed 3 m/s via `rev_cap`, which shrinks back; braking works in reverse, pedalling
+- **Graded landing zone** (`LAND_CONE` 1.05 rad ~60 deg): heading within the cone of the travel = normal landing. Past it the tyres grab the
+  nearer axis instead of a wash-out crash: < 90 deg = forward "SKETCHY!", > 90 deg = backwards "FAKIE!". The travel is dragged round to within
+  0.9 x `slipMax` of the heading, speed scaled by cos(angle dragged), the rest decays as a slide. `BMX_FAKIE=<deg>` forces the angle.
+- **Fakie (backward landing)**: `_land_trick` sets `_land_fix` / `_rev_land`, the touch-down makes `v = -v` (reverse speed may exceed 3 m/s via `rev_cap`, which shrinks back; braking works in reverse, pedalling
   doesn't drive while `rev_cap > 3`). Rolling back (v < -0.5) with **both sticks towards the pad's centre** (left stick right + right stick
   left, held 0.1 s) flips the travel (`course += PI`, `v = -v`, "SWITCH!") and the drawn heading swings round via `turn_off`. Test:
   `BMX_FOLLOW=1 BMX_FAKIE=1` (`FAKIE` lines).

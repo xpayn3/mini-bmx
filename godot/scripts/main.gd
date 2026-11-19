@@ -686,7 +686,7 @@ func _autotest(seconds: float) -> void:
 		if OS.get_environment("BMX_FAKIE") != "":   # tests: every jump lands backwards; 1 s later both sticks go towards the centre
 			var fp = game.phys
 			if fp.air and fp.air_time > 0.1 and fp.v > 0.0 and not _probe.has("fk_done"):
-				fp.slip = PI - 0.1; _probe.fk_land = el; _probe.fk_air = true
+				fp.slip = (deg_to_rad(float(OS.get_environment("BMX_FAKIE"))) if float(OS.get_environment("BMX_FAKIE")) > 1.0 else PI - 0.1); _probe.fk_land = el; _probe.fk_air = true
 			var since: float = el - float(_probe.get("fk_land", -99.0))
 			var go: bool = fp.v < -0.5 and not fp.air and since > 0.2 and since < 1.5
 			if _probe.has("fk_air") and since > 1.2 and fp.v > 0.5 and not fp.air: _probe.fk_done = true

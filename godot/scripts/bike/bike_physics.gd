@@ -83,7 +83,8 @@ var course := NAN; var slip := 0.0; var since_land := 1.0
 # riding backwards (fakie): landing turned ~180 deg from the travel doesn't crash, the bike just rolls on facing
 # backwards (v < 0, course = heading). Both sticks pushed towards the pad's centre (left stick right + right
 # stick left) swing it round to face forward (turn_off = the visual swing still to come, rad).
-var turn_off := 0.0; var rev_cap := 3.0; var _rev_land := false; var _fakie_hold := 0.0
+var turn_off := 0.0; var rev_cap := 3.0; var _rev_land := false; var _land_fix := false; var _fakie_hold := 0.0
+const LAND_CONE := 1.05   # heading within ~60 deg of the travel at touch-down = a normal landing; past it the tyres grab the nearer axis
 # tyre grip sim (_grip_step): slip_w = how fast the bike is yawing against its travel (the rear stepping out /
 # coming back), grip_r = the rear tyre's sideways grip left (0 locked / spinning .. 1 full), loose = how loose
 # the patch of ground under the rear is (0..1), bar_catch = the rider's drawn countersteer into a slide
@@ -1123,13 +1124,20 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			var impact: float = maxf(0.0, v * sin(_g_pitch) - vy_in * cos(_g_pitch))
 			var at := air_time
 			var back_land: bool = cR and not cF and wrapf(pitch - _g_pitch, -PI, PI) > 0.4
-			_rev_land = false
+			_rev_land = false; _land_fix = false
 			_land_trick(at)
-			if _rev_land:
-				# the travel stays, the bike now faces against it: heading is the new course, speed runs negative
-				_rev_land = false
-				course = heading; slip = 0.0; slip_w = 0.0; turn_off = 0.0
-				v = -v; rev_cap = maxf(3.0, -v)
+			if _land_fix:
+				# the tyres grab the nearer axis: the bike keeps its heading, the travel is dragged round to within
+				# slipMax of it (what's left decays as a normal slide), speed lost by the angle dragged through.
+				# Past 90 deg that axis is backwards: speed runs negative (fakie)
+				var base: float = wrapf(slip - PI, -PI, PI) if _rev_land else wrapf(slip, -PI, PI)
+				var keep: float = minf(absf(base), 0.9 * T.slipMax)
+				var sl: float = signf(base) * keep
+				var drag_a: float = absf(base) - keep
+				v = (-v if _rev_land else v) * cos(minf(drag_a, 1.4))
+				course = heading - sl; slip = sl; slip_w = 0.0; turn_off = 0.0
+				if _rev_land: rev_cap = maxf(3.0, -v)
+				_rev_land = false; _land_fix = false
 			air = false; since_land = 0; land_jolt = 0.0
 			body_v = vy_in
 			body_pw = air_w
@@ -1301,10 +1309,14 @@ func _land_trick(at: float) -> void:
 		crash_pending = ("UNDER-ROTATED!" if absf(flip_acc) > 3.0 and signf(perr_s) != signf(flip_acc) else
 			"OVER-ROTATED!" if absf(flip_acc) > 3.0 else "LOOPED OUT!" if perr_s > 0 else "BAD LANDING!")
 		return
-	if absf(slip) > 2.2:
-		# landed facing backwards: no crash, the bike rolls on backwards (applied at touch-down, see _ride_step)
-		_rev_land = true
-		host.flash("FAKIE!")
+	# Graded landing zone instead of a hard cut: within ~60 deg of the travel it is a normal landing; past that
+	# the bike lands sideways-ish and the tyres grab the nearer axis (forward, or backwards = fakie past 90 deg),
+	# dragging the travel round and scrubbing speed by how far (applied at touch-down, see _ride_step)
+	var a_s := absf(slip)
+	if a_s > LAND_CONE:
+		_rev_land = a_s > PI * 0.5
+		_land_fix = true
+		host.flash("FAKIE!" if _rev_land else "SKETCHY!")
 	var flips := roundi(absf(flip_acc) / TAU)
 	var turns := int((absf(spin_acc) + 0.6) / TAU)   # flat spins landed facing forward again (within ~35 deg): 360, 720...
 	if flips >= 1 or turns >= 1:
