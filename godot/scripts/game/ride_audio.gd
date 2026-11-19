@@ -1,6 +1,6 @@
 extends Node
 ## Procedural ride sound (the web version was silent): wind that rises with speed, tyre roll on gravel
-## (GravelSynth.cs, fitted to a real tyres-on-gravel recording; its tone follows the surface), skid hiss,
+## (GravelSynth.cs, fitted to a real tyres-on-gravel recording; its tone follows the surface; skids play it louder),
 ## splashes, and one-shot
 ## crunches / gear clicks, synthesised into one AudioStreamGenerator; plus the freewheel, synthesised
 ## in C# (FreewheelSynth.cs, modelled on a real hub) on its own 44.1 kHz generator for a crisp top end.
@@ -34,7 +34,8 @@ var bp_hi := 0.0
 var whistle := 0.0
 # freewheel: pawl clicks synthesised in C#; speed sets the click rate only, the tone stays crisp
 const FW_RATE := 44100.0
-const FW_POE := 24.0   # pawl clicks per wheel turn
+const FW_POE := 24.0   # pawl clicks per wheel turn (the recorded hub; FreewheelSound "poe" sets it)
+var fw_ver := -1       # FreewheelSound.version last applied to the synth
 var fw := AudioStreamPlayer.new()
 var fw_pb: AudioStreamGeneratorPlayback
 var fw_synth = null    # FreewheelSynth (C#); null on the non-.NET Godot -> no freewheel
@@ -98,20 +99,32 @@ func update_audio(dt: float) -> void:
 	roll += ((clampf(va / 12.0, 0, 1) * surf_amp if on_ground else 0.0) - roll) * k
 	roll_tone += (([0.12, 0.2, 0.1, 0.06][st.surf]) - roll_tone) * k
 	# gravel: knocks are laid per metre rolled, so speed sets the density; a little louder with speed too
-	var gp: Array = GRAVEL_SURF[st.surf]
-	g_speed = va if on_ground else 0.0
-	g_amp += ((gp[0] * (0.7 + 0.3 * clampf(va / 12.0, 0, 1)) if on_ground else 0.0) - g_amp) * k
-	g_tone += (gp[1] - g_tone) * k
-	g_crack += (gp[2] - g_crack) * k
-	g_rumble += (gp[3] - g_rumble) * k
+	# skidding = the same gravel, just louder, denser and grittier (the tyre scrapes instead of rolls)
 	skid += ((0.5 if (st.skid_fx and on_ground and va > 1) else 0.0) - skid) * minf(1.0, dt * 12)
+	var sk := skid * 2.0
+	var gp: Array = GRAVEL_SURF[st.surf]
+	g_speed = va * (1.0 + 0.6 * sk) if on_ground else 0.0
+	g_amp += ((gp[0] * (0.7 + 0.3 * clampf(va / 12.0, 0, 1)) * (1.0 + 1.6 * sk) if on_ground else 0.0) - g_amp) * k
+	g_tone += (gp[1] - g_tone) * k
+	g_crack += (gp[2] * (1.0 + sk) - g_crack) * k
+	g_rumble += (gp[3] - g_rumble) * k
 	water += ((clampf(va / 6, 0, 1) * 0.6 if (st.surf == 2 and on_ground) else 0.0) - water) * k
 	# freewheel: the pawls click while the wheel turns but the cranks don't. The click rate follows the
-	# rear wheel exactly (FW_POE per turn: slow ticks -> a fast buzz); pedalling stops new clicks at once
+	# rear wheel exactly ("poe" per turn: slow ticks -> a fast buzz); pedalling stops new clicks at once
 	# and the last ones ring out. A little quieter at speed, where the wind takes over.
+	# The sound itself is the player's (Sound tab: FreewheelSound); Preview spins it while standing still.
+	FreewheelSound.ensure_loaded()
+	if fw_synth != null and fw_ver != FreewheelSound.version:
+		fw_ver = FreewheelSound.version
+		var c := FreewheelSound.current
+		fw_synth.SetParams(c.pitch, c.ring, c.crack, c.crack_len, c.detune, c.tilt, c.uneven, c.jitter, c.vary)
+	var fs: float = va
 	var coasting := st.pedal < 0.1 and va > 0.12 and not st.crash_on
-	fw_clicks = va / st.RWR / TAU * FW_POE if coasting else 0.0
-	fw_amp = 0.23 * smoothstep(0.1, 1.0, va) * (1.0 - 0.3 * clampf((va - 8.0) / 10.0, 0.0, 1.0))
+	if FreewheelSound.preview_speed > 0.0 and va < 0.5:
+		fs = FreewheelSound.preview_speed; coasting = true
+	var poe := FreewheelSound.get_value("poe")
+	fw_clicks = fs / st.RWR / TAU * poe if coasting else 0.0
+	fw_amp = 0.23 * FreewheelSound.get_value("vol") * smoothstep(0.1, 1.0, fs) 		* (1.0 - FreewheelSound.get_value("fade") * clampf((fs - 8.0) / 10.0, 0.0, 1.0))
 	_fill()
 	_fill_fw()
 	if OS.get_environment("BMX_AUDIO_PROBE") != "" and Engine.get_process_frames() % 30 == 0:
@@ -165,9 +178,9 @@ func _fill() -> void:
 			lp_r += (w2 - lp_r) * ar
 			lp_r2 += (lp_r - lp_r2) * ar
 			s += lp_r2 * roll * 2.2
-		# skid / splash: high-passed hiss
+		# splash: high-passed hiss (skids too, but only without the gravel synth)
 		hp_s += (w2 - hp_s) * 0.25
-		s += (w2 - hp_s) * (skid * 0.35 + water * 0.25)
+		s += (w2 - hp_s) * ((skid * 0.35 if gravel == null else 0.0) + water * 0.25)
 		buf[i] = Vector2(s + wl, s + wr)
 	if gravel != null:
 		var gb: PackedVector2Array = gravel.Render(n, g_speed, g_amp, g_tone, g_crack, g_rumble)
