@@ -95,6 +95,7 @@ const DEFAULTS := {
 	# gameplay / controller
 	"pause_unfocused": true,
 	"rumble": true,
+	"wasted": true,          # crash: slow motion + "WASTED" screen
 	"steer_sens": 1.0,       # analog steering response (1 = linear)
 	# interface
 	"ui_scale": 1.0,

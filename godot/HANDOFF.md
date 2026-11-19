@@ -145,6 +145,9 @@ F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A 
   back and down, only a little out (the arm IK pole's sideways part scales with `elbowsOut`). Saved poses migrate once (`RiderPanels.POSE_VER` / `POSE_RETUNED`: only values still
   at the old default change). `BMX_LEAN_SHOT=prefix` saves shots of the first deep leans.
 - Ragdoll on crashes (`ragdoll.gd`), then get up with Space.
+- **WASTED** (`fx/wasted.gd`, Settings › Gameplay › Crash slow motion): on a crash time drops to 0.22× (sound pitched down via
+  `AudioServer.playback_speed_scale`) for ~2.4 s real time, then eases back; the screen goes grey + vignette, a red
+  WASTED card punches in with the crash reason under it. Fades on getting up or after 5 s. Off in autotests unless `BMX_WASTED=1`.
 - Look: kits + a colour per part (helmet shell/peak, goggles, jersey, pants, gloves, shoes).
 
 ### Ride light (time of day)
@@ -292,6 +295,7 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `BMX_COAST=1` | autotest alternates 3 s pedalling / 3 s coasting (freewheel tests) |
 | `BMX_REC=file.wav` | records the game's own sound output during an autotest |
 | `BMX_SKID=secs` / `BMX_DUST_SHOTS=dir/prefix` (+ `BMX_DUST_T0`) | autotest locks the rear wheel from secs / a screenshot every 0.5 s (dust tests; `BMX_CAM=side` avoids the tilt-shift blur) |
+| `BMX_WASTED=1` (+ `BMX_BAIL`, `BMX_DUST_SHOTS`) | crash slow-mo / WASTED screen in an autotest (off there by default) |
 | `BMX_LAND_TEST=secs` / `BMX_BAIL=secs` | autotest fakes a hard landing (landing dust) / bails (crash dust) at that time |
 | `BMX_DEBRIS_PROBE=1` | fence / cactus debris: moving / resting counts and the lowest piece (none may fall through the ground) |
 | `BMX_SPRITE_DUST=1`, `BMX_SMOKE_PROBE=1` | old sprite dust for comparison / smoke-sim timing prints |

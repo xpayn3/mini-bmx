@@ -32,6 +32,7 @@ var rig: BikeRig
 var phys: BikePhysics
 var cam: CameraRig
 var hud
+var wasted: Wasted          # crash slow-mo + "WASTED" look
 var audio
 var sun: DirectionalLight3D
 var env: Environment
@@ -141,6 +142,8 @@ func _ready() -> void:
 	audio = load("res://scripts/game/ride_audio.gd").new()
 	audio.game = self
 	add_child(audio)
+	wasted = Wasted.new(self)
+	add_child(wasted)
 	Tune.changed.connect(func(): phys.T = Tune.v)
 	Settings.changed.connect(_apply_settings)
 	_apply_settings()
@@ -507,13 +510,22 @@ func start_crash(reason: String) -> void:
 	var cs: int = terrain.surface(phys.x, phys.z)
 	# (with the smoke sim the ragdoll's own impacts throw the dust: _crash_dust)
 	if cs != 2 and dust.sim == null: dust.cloud(Vector3(phys.x, phys.y, phys.z), f * phys.v * 0.3, ground_dust(phys.x, phys.z, cs), 3.2, 1.2)
-	flash(reason)
+	if _wasted_on(): wasted.start(reason)
+	else: flash(reason)
 	if hud: hud.on_crash()
 	if audio: audio.crash()
 	Settings.rumble(1.0, 1.0, 0.45)
 
+## the crash slow-mo is on (Settings › Gameplay; autotests keep normal time unless BMX_WASTED=1)
+func _wasted_on() -> bool:
+	if OS.get_environment("BMX_WASTED") != "": return true
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--autotest"): return false
+	return bool(Settings.get_v("wasted"))
+
 func get_up() -> void:
 	phys.get_up()
+	if wasted: wasted.finish()
 	ragdoll.active = false
 	if rider.get_parent() != rig.lean_g:
 		rider.get_parent().remove_child(rider)
