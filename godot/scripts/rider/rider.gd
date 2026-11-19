@@ -125,6 +125,9 @@ func _init() -> void:
 	pelvis_mesh = G.inst(G.rounded_box(0.2, 0.15, 0.3, 3, 0.05), mNavy)
 	pelvis_mesh.name = "Pelvis"
 	add_child(pelvis_mesh)
+	var bib := BackNumber.new()   # race number paper pinned to the back, flaps with speed
+	bib.name = "BackNumber"
+	add_child(bib)
 	hood = sph.call(0.11, mCoralDark)
 	shoulder_sph.assign([sph.call(0.075, mCoral), sph.call(0.075, mCoral)])
 
@@ -288,6 +291,11 @@ func set_helmet(model: Node3D) -> void:
 			return _hug(shell_tris, x, y, dx, dz)
 	goggles = GEAR.build_goggles(goggle_mats, GOGGLE_FIT, hug)
 	head.add_child(goggles)
+	var flap := HelmetFlap.new()   # loose strap tail that flaps with speed
+	flap.name = "StrapFlap"
+	flap.anchor_local = goggles.get_meta("flap_anchor", Vector3.ZERO)
+	flap.material_override = goggle_mats.strap
+	goggles.add_child(flap)
 	if not look.is_empty():
 		set_look(look)
 
@@ -522,6 +530,16 @@ func _skin_torso() -> void:
 	torso.skin = skin
 	torso.skeleton = NodePath("../Spine")
 	torso.custom_aabb = AABB(Vector3(-3, -3, -3), Vector3(6, 6, 6))   # the bones move it anywhere
+
+## a point on (just off) the jersey's back in this node's space: t 0 hips .. 1 collar, z sideways, `off` out of the
+## surface. Follows the bent spine exactly like the skinned torso (identity binds, linear blend of two bones).
+func back_point(t: float, z: float, off := 0.0) -> Vector3:
+	var m := Vector3(-GEAR.torso_back_x(t, z) - off, t - 0.5, z)
+	var u := clampf(t, 0.0, 1.0) * (SPINE_BONES - 1)
+	var k := mini(int(u), SPINE_BONES - 2)
+	var w := u - k
+	return (spine_skel.get_bone_pose(k) * m) * (1.0 - w) + (spine_skel.get_bone_pose(k + 1) * m) * w
+
 
 ## the torso from hip `a` to chest `b` as a curve: `curve` bows the back out (+, hunched) or in (-, arched),
 ## `side` bows it sideways; `low` (0..1) moves the bend toward the hips (0) or the shoulders (1).
