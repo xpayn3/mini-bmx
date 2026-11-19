@@ -404,9 +404,10 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   `TRAVEL` m/s), **RT / LT / Q / E / wheel = zoom the print** 0.5–2.5× (the paper always stays fully in view; the frame
   is reprinted when the zoom settles so scale bar + "1 : n" follow), right stick / numpad = tilt the sheet ±0.3 rad.
   The view never runs past the world print; within `PREFETCH` (200 m) of its edge the next one is printed around
-  the view in the background (terrain sampling, contours and mipmaps on a WorkerThreadPool task with a
-  `query_field().fork()`, waited for in `_exit_tree`) and swapped in with no jump; ~70 ms hitch for the GPU
-  read-back + upload. First print on opening ~0.6 s; reused if you're within 60 m. `BMX_MAP_SCROLL` prints the worst
+  the view in the background and swapped in with no jump: the terrain is sampled on the main thread with the
+  game's own field, ≤ 4 ms a frame; land image, contours and mipmaps are built on a WorkerThreadPool task from that
+  plain data (waited for in `_exit_tree`); ~40 ms hitch for the GPU read-back + upload. **Don't hand C# terrain forks
+  to a worker from GDScript here**: their engine objects were finalized by C#'s GC after shutdown and crashed the quit. First print on opening ~0.6 s; reused if you're within 60 m. `BMX_MAP_SCROLL` prints the worst
   frame while travelling. Ride frozen + HUD hidden while it's up; M / Esc / bail fold it away.
   Unfolds at `tempo` 0.36 (~2.5 s) with the user's gravel-crunch recording. The screen fades (`main.fade`) run on real time, or
   a map opened during one froze it as a haze.
