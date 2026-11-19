@@ -90,6 +90,7 @@ const DEFS := [
 		["landSoak", "Landing absorb", 0.3, 0, 1.5, 0.05, ""],
 	]],
 	["Speed", [
+		["topSpeed", "Top speed", 1.2, 0.5, 2.0, 0.05, "×"],
 		["pedalLaunch", "Launch push", 8, 2, 16, 0.5, "m/s²"],
 		["pedalPower", "Pedal power", 21, 5, 50, 1, ""],
 		["pedalTop", "Pedal top speed", 11.8, 4, 22, 0.2, "m/s"],
@@ -132,6 +133,9 @@ func _ready() -> void:
 		pins = cf.get_value("ui", "pins", pins)
 		quick_folded = cf.get_value("ui", "quick_folded", false)
 		if old_ver < VER: save()
+	for kv in OS.get_environment("BMX_TUNE").split(",", false):   # tests: "topSpeed=1.6,grip=1.1" (not saved)
+		var p := kv.split("=")
+		if p.size() == 2 and defaults.has(p[0]): base[p[0]] = float(p[1])
 	_rebuild()
 
 func set_ride(mult: Dictionary) -> void:

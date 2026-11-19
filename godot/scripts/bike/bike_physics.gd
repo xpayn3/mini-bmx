@@ -309,11 +309,14 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	if not air:
 		var vp := maxf(v, 0.5)
 		var gk := gear_k()
-		var p_top: float = (T.pedalTop + T.sprintTop * sp_k) * gk
-		var p_mul: float = 1 + (T.sprintPower - 1) * sp_k
-		var cad: float = v / (gk * T.pedalTop * 0.7)
+		# Top speed (Settings > Controls / tuning card): scales the pedalling top speed, with the power
+		# to reach it and less drag holding it back (drag-limited top speed scales with it too)
+		var ts: float = T.topSpeed
+		var p_top: float = (T.pedalTop + T.sprintTop * sp_k) * gk * ts
+		var p_mul: float = (1 + (T.sprintPower - 1) * sp_k) * ts
+		var cad: float = v / (gk * T.pedalTop * ts * 0.7)
 		var grind := 1.0 if gear < 0 else 0.35 + 0.65 * smooth01((cad - 0.15) / 0.7)
-		var drive: float = (throttle if rear_down else 0.0) * minf(T.pedalLaunch * p_mul / gk, T.pedalPower * p_mul / vp) * grind * clampf((p_top - v) / 2.5, 0, 1)
+		var drive: float = (throttle if rear_down else 0.0) * minf(T.pedalLaunch * p_mul / ts / gk, T.pedalPower * p_mul / vp) * grind * clampf((p_top - v) / 2.5, 0, 1)
 		var drive_cap := mu * nR
 		if drive > drive_cap:
 			spin = minf(1.0, (drive - drive_cap) / 3); drive = drive_cap + (drive - drive_cap) * 0.15
@@ -335,16 +338,16 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			pump_acc = 0
 		var carry: float = 1 - T.flowCarry * flow / FLOW_MAX
 		var roll: float = (0.32 if surf == 0 else 0.42 if surf == 3 else 0.1) * T.rollRes * signf(v) * minf(1.0, absf(v) * 4)
-		a -= (roll + T.airDrag * v * absf(v)) * carry
+		a -= (roll + T.airDrag / (ts * ts) * v * absf(v)) * carry
 		if in_water: a -= 0.7 * v
-		v = clampf(v + a * dt, -3, 24)
+		v = clampf(v + a * dt, -3, 24 * maxf(1.0, ts))
 		if brake and v <= 0.3: v += (-1.3 - v) * minf(1.0, dt * 3)
 		if throttle < 0.1 and not brake and absf(v) < 0.05 and absf(_g_pitch) < 0.03: v = 0
 	if flow > 0:
 		flow_t += dt
 		if brake and v > 1: flow = maxf(0.0, flow - dt * 3)
 		elif flow_t > T.flowTime: flow = maxf(0.0, flow - dt * 1.5)
-	var top_now: float = (T.pedalTop + T.sprintTop * sprint) * gear_k()
+	var top_now: float = (T.pedalTop + T.sprintTop * sprint) * gear_k() * T.topSpeed
 	if v > top_now + 0.3: spun_out = true
 	elif v < top_now - 0.8: spun_out = false
 	pedal += ((throttle if (not air and not spun_out) else 0.0) - pedal) * minf(1.0, dt * 6)
@@ -825,7 +828,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	wheel_f += w * dt
 	if not skid: wheel_r += v / RWR * dt
 	if pedal > 0.05:
-		crank += maxf(w / (2.78 * gear_k()), 3.5) * (1 + 0.3 * sprint) * pedal * dt
+		crank += maxf(w / (2.78 * gear_k() * T.topSpeed), 3.5) * (1 + 0.3 * sprint) * pedal * dt
 	elif not air:
 		var aL: float = host.pedal_a0[0]
 		var aR: float = host.pedal_a0[1]
