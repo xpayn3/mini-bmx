@@ -642,6 +642,8 @@ func _process(dt: float) -> void:
 	var head_env := OS.get_environment("BMX_GARAGE_HEAD")
 	if head_env == "bike" and rider and rider_on:   # tests: frame the head + neck of the rider on the bike
 		focus_t = rider.head.global_position + Vector3(0, -0.05, 0)
+	elif stand_rider and head_env == "neck":   # tests: the standing rider's neck, collar + goggle strap
+		focus_t = stand_rider.head.global_position + Vector3(0, -0.1, 0)
 	elif stand_rider and head_env != "":   # tests: frame the standing rider's helmet
 		focus_t = stand_rider.head.global_position + Vector3(0, 0.15, 0)
 	focus = focus.lerp(focus_t, minf(1.0, dt * 4))

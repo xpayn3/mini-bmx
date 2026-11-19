@@ -446,8 +446,10 @@ static func torso_geometry() -> Dictionary:
 		for j in seg:
 			var a := r * seg + j
 			var b := r * seg + (j + 1) % seg
+			# wound to face OUT (top cap up, bottom down): the top one used to face in, was culled and left a
+			# hole round the neck you could see into the torso through
 			if cap[1]:
-				idx.append_array([ctr, a, b])
-			else:
 				idx.append_array([ctr, b, a])
+			else:
+				idx.append_array([ctr, a, b])
 	return {pos = pos, idx = idx}
