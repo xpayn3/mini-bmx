@@ -24,10 +24,12 @@ def extract(o):
         if r < 1.0:
             m = o.modifiers.new("d", 'DECIMATE'); m.ratio = r
             bpy.ops.object.modifier_apply(modifier=m.name)
-        try:
-            bpy.ops.object.shade_smooth_by_angle(angle=math.radians(40))
-        except RuntimeError:
-            pass   # keeps the normals the file came with (glTF imports)
+            # decimating drops the file's own normals: smooth only the soft surfaces again. Parts that were not
+            # decimated keep the normals they came with (re-smoothing them blurred every edge: ~10 deg off the faces)
+            try:
+                bpy.ops.object.shade_smooth_by_angle(angle=math.radians(30))
+            except RuntimeError:
+                pass
     me = o.data
     mw = o.matrix_world
     nm = mw.to_3x3().inverted().transposed()
