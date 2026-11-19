@@ -10,7 +10,7 @@ var game
 var root := Control.new()
 var fps_l: Label
 var info_l: Label
-var msg_l: Label
+var msg_l: MsgView
 var flow_leds := FlowLeds.new()   # flow shown on the bike computer's LEDs
 var biome_l: Label
 var gauge: GaugeView
@@ -26,6 +26,7 @@ var quick: Control
 var fps_acc := 0.0
 var fps_frames := 0
 var msg_a := 0.0
+var _demo_t := 0.0 if OS.get_environment("BMX_FLASH") != "" else -1.0
 var elev_hist := PackedFloat32Array()
 var elev_t := 0.0
 var elev_up := 0.0     # metres climbed / descended this ride (bike computer page 2)
@@ -72,13 +73,9 @@ func _ready() -> void:
 	info_l = UITheme.label("", 14, UITheme.MUTED)
 	info_l.position = Vector2(20, 36)
 	root.add_child(info_l)
-	msg_l = UITheme.label("", 44, Color.WHITE, true)
-	msg_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	msg_l.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	msg_l.offset_top = 0
-	msg_l.add_theme_constant_override("shadow_offset_y", 3)
-	msg_l.add_theme_constant_override("outline_size", 8)
-	msg_l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.25))
+	msg_l = MsgView.new()   # BERM +2 km/h, BONK!, tricks...: an achievement pop in the WASTED type
+	msg_l.set_anchors_preset(Control.PRESET_FULL_RECT)
+	msg_l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(msg_l)
 	biome_l = UITheme.label("", 13, UITheme.MUTED)
 	biome_l.position = Vector2(20, 58)   # top left, under the ride info line
@@ -109,7 +106,8 @@ func _ready() -> void:
 	getup.visible = false
 	root.add_child(getup)
 	style_pop = StylePop.new()
-	style_pop.position = Vector2(20, 82); style_pop.size = Vector2(420, 130)   # top left, under the biome name
+	style_pop.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	style_pop.size = Vector2(420, 130); style_pop.position = Vector2(-440, 62)   # top right, under the life + stamina bars (right-aligned)
 	style_pop.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(style_pop)
 	air_card = AirCard.new(); air_card.hud = self
@@ -127,7 +125,7 @@ func _ready() -> void:
 	_layout()
 
 func _layout() -> void:
-	msg_l.position.y = root.size.y * 0.2
+	pass
 
 func apply_settings() -> void:
 	if fps_l: fps_l.visible = Settings.get_v("show_fps") and not hidden
@@ -143,7 +141,7 @@ func speed_unit() -> String:
 	return "mph" if Settings.get_v("units") == 1 else "km/h"
 
 func flash(text: String) -> void:
-	msg_l.text = text
+	msg_l.show_msg(text)
 	msg_a = 1.4
 
 func gear_changed() -> void:
@@ -292,7 +290,18 @@ func update_hud(dt: float) -> void:
 	info_l.text = "%s  ·  %s cam  ·  world #%d" % [GameState.BIKES[GameState.bike_id].label, game.cam.preset().label, GameState.seed]
 	if msg_a > 0:
 		msg_a -= dt
-	msg_l.modulate.a = clampf(msg_a / 0.3, 0, 1)
+	# the area banner owns the spot while it's up: messages show under it
+	var at = game.area_title
+	msg_l.low = at != null and at.visible and at.view.t >= 0.0
+	msg_l.tick(dt)
+	if _demo_t >= 0.0:   # tests: BMX_FLASH=text shows it (and a scored trick) 3 s in; BMX_MSG_AT freezes the pop
+		_demo_t += dt
+		if _demo_t >= 3.0:
+			_demo_t = -1.0
+			flash(OS.get_environment("BMX_FLASH"))
+			if style_pop: style_pop.add(1250, "BACKFLIP")
+	if OS.get_environment("BMX_MSG_AT") != "" and _demo_t < 0.0:
+		msg_l.t = float(OS.get_environment("BMX_MSG_AT")); msg_l.queue_redraw()
 	flow_leds.tick(st, dt)
 	hop_bar.visible = st.hop_bar_show
 	hop_bar.k = st.hop_bar
@@ -1249,7 +1258,7 @@ class StylePop extends Control:
 		roll = 0.0
 		a = 1.0; pop = 1.0
 		if combo > 1: combo_pop = 1.0
-		_burst(Vector2(30, 70), 8, Color.WHITE, 120.0)
+		_burst(Vector2(size.x - 30, 70), 8, Color.WHITE, 120.0)
 
 	func bail() -> void:
 		if pend >= 0.0 and pend < BANK and a > 0.0:
@@ -1264,9 +1273,8 @@ class StylePop extends Control:
 			sparks.append({"p": at + Vector2(randf() - 0.5, randf() - 0.5) * 10.0, "v": Vector2(cos(an), sin(an) - 0.6) * sp,
 				"life": life, "max": life, "c": c if randf() < 0.7 else Color.WHITE, "s": 1.5 + randf() * 2.5})
 
-	func _total_end() -> float:
-		var f := UITheme.font(true)
-		return f.get_string_size("STYLE  " + _num(roundi(shown)), HORIZONTAL_ALIGNMENT_LEFT, -1, 17).x
+	func _total_end() -> float:   # right-aligned: the total ends at the right edge
+		return size.x
 
 	func _process(dt: float) -> void:
 		since += dt
@@ -1323,25 +1331,28 @@ class StylePop extends Control:
 		var counting := shown < total - 0.5
 		var lab := "STYLE  "
 		var lw := f.get_string_size(lab, HORIZONTAL_ALIGNMENT_LEFT, -1, 17).x
-		_txt(f, Vector2(0, 16), lab, 17, Color(1, 1, 1, hi * 0.8))
-		var tc := Color(1, 1, 1, hi).lerp(GOLD, clampf(tot_pop * 1.4 + (0.6 if counting else 0.0), 0, 1))
-		var nsc := 1.0 + 0.45 * ease(tot_pop, 0.4)
 		var num := _num(roundi(shown))
 		var nw := f.get_string_size(num, HORIZONTAL_ALIGNMENT_LEFT, -1, 17).x
+		var o1 := size.x - lw - nw      # each line is right-aligned
+		_txt(f, Vector2(o1, 16), lab, 17, Color(1, 1, 1, hi * 0.8))
+		lw += o1
+		var tc := Color(1, 1, 1, hi).lerp(GOLD, clampf(tot_pop * 1.4 + (0.6 if counting else 0.0), 0, 1))
+		var nsc := 1.0 + 0.45 * ease(tot_pop, 0.4)
 		if tot_pop > 0.0:   # soft gold glow behind the number
 			draw_circle(Vector2(lw + nw * 0.5, 10), (nw * 0.5 + 10) * nsc, Color(GOLD, 0.18 * tot_pop))
 		if ring < 1.0:      # a glow ring pulsing out
 			draw_arc(Vector2(lw + nw * 0.5, 10), 12 + ring * (nw * 0.5 + 40), 0, TAU, 40, Color(GOLD, 0.6 * (1.0 - ring)), 3.0 * (1.0 - ring) + 1.0, true)
-		_txt(f, Vector2(lw, 16), num, 17, tc, nsc)
+		_txt(f, Vector2(lw - nw * (nsc - 1.0), 16), num, 17, tc, nsc)
 		# ---- the banked points flying up into the total
 		for fl in flies:
 			var k := clampf(fl.t / FLY_T, 0, 1)
 			var e := k * k * (3.0 - 2.0 * k)
-			var from := Vector2(0, 84)
-			var to := Vector2(lw + nw + 8, 16)
+			var from := Vector2(size.x - 60, 84)
+			var to := Vector2(lw + nw * 0.5, 16)
 			var pos := from.lerp(to, e) + Vector2(0, -38 * sin(PI * e))   # arcs up and over
 			var fs := int(lerpf(30, 15, e))
-			_txt(f, pos, "+" + _num(int(fl.v)), fs, Color(GOLD, 1.0 - 0.3 * k))
+			var fw := f.get_string_size("+" + _num(int(fl.v)), HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+			_txt(f, pos - Vector2(fw * 0.5, 0), "+" + _num(int(fl.v)), fs, Color(GOLD, 1.0 - 0.3 * k))
 		# ---- sparks
 		for sp in sparks:
 			var t: float = sp.life / sp.max
@@ -1350,11 +1361,12 @@ class StylePop extends Control:
 			draw_line(sp.p, sp.p - sp.v * 0.03, Color(c, t * 0.6), sp.s * 0.6)
 		if a <= 0.0: return
 		# ---- the trick name and its points
-		_txt(f, Vector2(0, 44), label, 20, Color(1, 1, 1, a))
+		_txt(f, Vector2(size.x - f.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 20).x, 44), label, 20, Color(1, 1, 1, a))
 		var big := 34
 		var psc := 1.0 + 0.35 * ease(pop, 0.5)
 		if bailed:
-			_txt(f, Vector2(0, 84), "BAILED", big, Color(0.95, 0.3, 0.25, a), psc)
+			var bw := f.get_string_size("BAILED", HORIZONTAL_ALIGNMENT_LEFT, -1, big).x
+			_txt(f, Vector2(size.x - bw * psc, 84), "BAILED", big, Color(0.95, 0.3, 0.25, a), psc)
 			return
 		var banked := pend < 0.0
 		# once banked the points leave their spot: the flying copy takes over
@@ -1363,13 +1375,115 @@ class StylePop extends Control:
 		if pa <= 0.01: return
 		var pc := Color(UITheme.ACCENT, pa) if banked else Color(1, 1, 1, pa)
 		var pt := "+" + _num(roundi(roll))
-		_txt(f, Vector2(0, 84), pt, big, pc, psc)
 		var pw := f.get_string_size(pt, HORIZONTAL_ALIGNMENT_LEFT, -1, big).x * psc
+		var cw := 0.0
+		if combo > 1: cw = 14.0 + f.get_string_size("x%d" % combo, HORIZONTAL_ALIGNMENT_LEFT, -1, 26).x
+		var o3 := size.x - pw - cw
+		_txt(f, Vector2(o3, 84), pt, big, pc, psc)
 		# a shine sweeping across the number while it rolls up
 		if not banked and pend < 0.5:
-			var sx := lerpf(-20, pw + 20, pend / 0.5)
+			var sx := o3 + lerpf(-20, pw + 20, pend / 0.5)
 			draw_colored_polygon(PackedVector2Array([Vector2(sx, 54), Vector2(sx + 10, 54), Vector2(sx - 2, 90), Vector2(sx - 12, 90)]), Color(1, 1, 1, 0.35 * pa))
 		if combo > 1:   # combo multiplier punches in
 			var cs := 1.0 + 0.8 * ease(combo_pop, 0.4)
 			var cc := Color(GOLD, pa).lerp(Color(1, 1, 1, pa), combo_pop * 0.6)
-			_txt(f, Vector2(pw + 14, 82), "x%d" % combo, 26, cc, cs)
+			_txt(f, Vector2(o3 + pw + 14, 82), "x%d" % combo, 26, cc, cs)
+
+
+## A flash message as a little achievement: the same condensed display face as WASTED / the area banner.
+## "BERM +2 km/h" -> BERM in warm white, "+2 KM/H" in gold beside it. In: punches down from big with an
+## overshoot and a tilt, white-hot, a gold streak shoots out to each side and a shine sweeps over it.
+## Out: lifts a little and fades. Plain info lines ("Screenshot saved") come in quieter, smaller.
+class MsgView extends Control:
+	const T_SHOW := 1.4
+	const GOLD := Color("ffc93a")
+	const INK := Color(1.0, 0.97, 0.9)
+	const CAP_H := 0.068         # cap height, of the screen height (achievements)
+	const Y := 0.25              # cap centre, of the screen height
+	const Y_LOW := 0.37          # under the area banner while it's up
+	var head := ""
+	var tail := ""
+	var loud := true
+	var t := 99.0
+	var low := false
+	var y_k := 0.0               # eased low / normal
+	var font: SystemFont
+
+	func _init() -> void:
+		font = SystemFont.new()
+		font.font_names = PackedStringArray(["Haettenschweiler", "Impact", "Bahnschrift", "Arial Black"])
+		font.font_weight = 900
+		font.multichannel_signed_distance_field = true
+		font.msdf_pixel_range = 48   # room for the dark outline
+
+	func show_msg(text: String) -> void:
+		var i := text.find(" +")
+		head = text if i < 0 else text.substr(0, i)
+		tail = "" if i < 0 else text.substr(i + 1)
+		# all caps = something done (BERM, BACKFLIP!, BONK!); mixed case = an info line
+		loud = text == text.to_upper()
+		head = head.to_upper(); tail = tail.to_upper()
+		t = 0.0
+		queue_redraw()
+
+	func tick(dt: float) -> void:
+		y_k = move_toward(y_k, 1.0 if low else 0.0, dt * 5.0)
+		if t < T_SHOW + 0.5:
+			t += dt
+			queue_redraw()
+
+	static func _back(x: float) -> float:
+		var c := 2.2
+		x -= 1.0
+		return 1.0 + (c + 1.0) * x * x * x + c * x * x
+
+	func _draw() -> void:
+		if head == "" or t >= T_SHOW: return
+		var fs := 200
+		var cap := font.get_ascent(fs) * 0.74
+		var sy := size.y * CAP_H * (1.0 if loud else 0.62) / cap
+		var sx := sy * 0.86                          # squeezed a little, like the banner
+		var tail_k := 0.6                            # the "+2 KM/H" part is smaller
+		var gap := fs * 0.22
+		var hw := font.get_string_size(head, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		var tw := 0.0 if tail == "" else font.get_string_size(tail, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x * tail_k + gap
+		var w := hw + tw
+		var k := clampf(t / 0.32, 0.0, 1.0)          # in
+		var e := _back(k) if loud else k * k * (3.0 - 2.0 * k)
+		var out := clampf((t - (T_SHOW - 0.35)) / 0.35, 0.0, 1.0)
+		var a := clampf(k * 3.0, 0.0, 1.0) * (1.0 - out)
+		var sc := lerpf(1.9 if loud else 1.15, 1.0, e)
+		var rot := lerpf(-0.09, 0.0, e) if loud else 0.0
+		var hot := clampf(1.0 - (t - 0.1) / 0.35, 0.0, 1.0) if loud else 0.0
+		var cy := size.y * lerpf(Y, Y_LOW, y_k) - out * size.y * 0.02
+		var c := Vector2(size.x * 0.5, cy)
+		var outline := Color(0.08, 0.05, 0.03, 0.75 * a)
+		var shadow := Color(0, 0, 0, 0.35 * a)
+		var ol := 18
+		# gold streaks shooting out to each side as it lands
+		if loud:
+			var sk := clampf((t - 0.08) / 0.45, 0.0, 1.0)
+			if sk > 0.0 and sk < 1.0:
+				var se := 1.0 - pow(1.0 - sk, 3.0)
+				var half := w * sx * 0.5
+				var len := size.x * 0.12 * se
+				var th := maxf(2.0, size.y * 0.0035) * (1.0 - sk)
+				for sd: float in [-1.0, 1.0]:
+					var x0 := c.x + sd * (half + size.x * 0.012 + se * size.x * 0.03)
+					draw_line(Vector2(x0, cy), Vector2(x0 + sd * len, cy), Color(GOLD, (1.0 - sk) * a), th, true)
+		draw_set_transform(c, rot, Vector2(sx * sc, sy * sc))
+		var base := Vector2(-w * 0.5, cap * 0.5)
+		var hc := INK.lerp(Color.WHITE, hot)
+		hc.a = a
+		draw_string_outline(font, base + Vector2(6, 12), head, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, ol, shadow)
+		draw_string_outline(font, base, head, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, ol, outline)
+		draw_string(font, base, head, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, hc)
+		if tail != "":
+			var tb := Vector2(base.x + hw + gap, base.y)
+			draw_set_transform(c + Vector2(tb.x * sx * sc, tb.y * sy * sc).rotated(rot), rot, Vector2(sx * sc * tail_k, sy * sc * tail_k))
+			var gc := GOLD.lerp(Color.WHITE, hot)
+			gc.a = a
+			draw_string_outline(font, Vector2(6, 12), tail, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, ol, shadow)
+			draw_string_outline(font, Vector2.ZERO, tail, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, ol, outline)
+			draw_string(font, Vector2.ZERO, tail, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, gc)
+		draw_set_transform(Vector2.ZERO)

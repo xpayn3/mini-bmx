@@ -11,7 +11,7 @@ const T_LETTER := 0.42       # s one letter takes to land
 const T_HOLD := 2.6          # s fully up after the last letter landed
 const T_OUT := 0.7           # s spreading + fading out
 const CAP_H := 0.085         # cap height, of the screen height
-const TOP := 0.115           # cap centre, of the screen height
+const TOP := 0.25            # cap centre, of the screen height (under the jump card, in the message spot)
 const RED := Color("b3201b")
 
 var view: View
