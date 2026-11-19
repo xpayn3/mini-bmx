@@ -238,6 +238,7 @@ func crash_step(pts: Array, prv: Array, h: float, rad: Array) -> void:
 			_air[i] = 1 if p0.y - terrain.height(p0.x, p0.z) > float(rad[i]) + 0.18 else 0
 			_last[i] = null
 	if not _wounds.is_empty(): _bleed_wounds(pts, prv, h, get_process_delta_time())
+	if _spin_probe: _probe_spin(pts)
 	if ragdoll != null and OS.get_environment("BMX_RAGDOLL_PROBE") != "" and Engine.get_process_frames() % 15 == 0:
 		var pel: Vector3 = pts[2]
 		print("RAGDOLL neutral_off=%.2f pelvis_up=%.2f rise=%.2f vup=%.1f t=%.2f" % [ragdoll.nb_off / maxf(1.0, 9.0 * 3.0 * 15.0), pel.y - terrain.height(pel.x, pel.z), ragdoll.probe_rise, ragdoll.probe_vup, ragdoll.t_fall])
@@ -287,6 +288,26 @@ func crash_step(pts: Array, prv: Array, h: float, rad: Array) -> void:
 			_last[i] = at
 		elif hs < 0.2:
 			_last[i] = null
+
+## tests (BMX_SPIN_PROBE): how fast / how far the torso turns while crashed (per game second)
+var _spin_probe := OS.get_environment("BMX_SPIN_PROBE") != ""
+var _sp_last = null
+var spin_total := 0.0
+var spin_max := 0.0
+var _sp_t := 0.0
+func _probe_spin(pts: Array) -> void:
+	var u: Vector3 = ((pts[1] as Vector3) - (pts[2] as Vector3)).normalized()
+	var sx: Vector3 = ((pts[6] as Vector3) - (pts[3] as Vector3))
+	sx = (sx - u * sx.dot(u)).normalized()
+	var bs := Basis(sx, u, sx.cross(u)).orthonormalized()
+	var dt := get_process_delta_time()   # scaled by Engine.time_scale = game time
+	_sp_t += dt
+	if _sp_last != null and dt > 0.0:
+		var ang: float = Quaternion((_sp_last as Basis).inverse() * bs).get_angle()
+		spin_total += ang
+		spin_max = maxf(spin_max, ang / dt)
+		if Engine.get_process_frames() % 10 == 0: print("SPIN t=%.2f w=%.1f turns=%.2f ts=%.2f" % [_sp_t, ang / dt, spin_total / TAU, Engine.time_scale])
+	_sp_last = bs
 
 ## tear the limb off at joint a: free it in the ragdoll, throw it on, cap both ends, start the stump spurting
 func _sever(a: int, pts: Array, v: Vector3) -> void:
@@ -368,6 +389,8 @@ func crash_end() -> void:
 	_wounds.clear()
 	_air.resize(0)
 	_bleed.fill(0.0)
+	if _spin_probe: print("SPINEND turns=%.2f wmax=%.1f" % [spin_total / TAU, spin_max])
+	_sp_last = null; spin_total = 0.0; spin_max = 0.0; _sp_t = 0.0
 	if probe: print("BLOOD end laid=%d smears=%d severed=%d jet_drops=%d" % [laid, smears, _severed, jet_drops])
 	if ragdoll != null and OS.get_environment("BMX_RAGDOLL_PROBE") != "": print("EJECT rise=%.2f vup=%.1f" % [ragdoll.probe_rise, ragdoll.probe_vup])
 
