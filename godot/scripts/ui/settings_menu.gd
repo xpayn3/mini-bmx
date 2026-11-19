@@ -215,6 +215,7 @@ func _gameplay() -> Control:
 	_slider(p, "Steering response (stick)", "steer_sens", 0.5, 2.0, 0.05, "%.2f", "Above 1: quicker off-centre; below 1: finer near centre")
 	_slider(p, "Stick deadzone", "deadzone", 0.05, 0.5, 0.01)
 	_check(p, "Controller vibration", "rumble")
+	_check(p, "Crash slow motion (WASTED)", "wasted", "Time slows down and the screen goes grey when you fall")
 	_check(p, "Pause when the window loses focus", "pause_unfocused")
 	var rb := UITheme.button("Reset ride tuning to defaults", func(): Tune.reset_defaults(), 15)
 	_row(p, "Ride tuning (P in game)", rb)
