@@ -83,6 +83,10 @@ var _last_focus := Vector3.INF
 var _col_target := dust_col
 var _drift := Vector3.ZERO
 var _body: Array = []             # solid parts this frame: {p, v, r, spin}
+## drawn by this compositor effect on the ride camera when it works (half-res + temporal: smooth and
+## cheap); otherwise by the box mesh with smoke_render.gdshader. BMX_SMOKE_BOX=1 forces the box.
+var compositor: SmokeCompositor = null
+var cloud := Vector4(0, 0, 0, 1)  # atm_cloud (cloud shadows): drift xy, depth, shade at the rider
 
 var _scol := Vector3(3, 2.8, 2.5)
 
@@ -128,6 +132,8 @@ func _init() -> void:
 	add_child(_box)
 	ok = true
 	RenderingServer.call_on_render_thread(_gpu_create)
+	if OS.get_environment("BMX_SMOKE_BOX") == "":
+		compositor = SmokeCompositor.new()
 
 static var _detail: ImageTexture3D
 
@@ -205,6 +211,7 @@ func step(dt: float, focus: Vector3, fwd: Vector3) -> void:
 	if _idle > 14.0:   # nothing kicked up for a while: the air is clear, stop simulating
 		_n = 0
 		_box.visible = false
+		if compositor != null: compositor.active = false
 		return
 	# the box: ahead of the rider along their heading, moved in whole heightmap cells
 	var f2 := Vector2(fwd.x, fwd.z)
@@ -253,7 +260,8 @@ func step(dt: float, focus: Vector3, fwd: Vector3) -> void:
 	var bmin := Vector3(origin.x, mn - 0.3, origin.y)
 	var bmax := Vector3(origin.x + ext.x, mx + NY * H + 0.3, origin.y + ext.y)
 	_box.global_transform = Transform3D(Basis.from_scale(bmax - bmin), (bmin + bmax) * 0.5)
-	_box.visible = true
+	var use_comp := compositor != null and compositor.ok
+	_box.visible = not use_comp
 	_mat.set_shader_parameter("origin", Vector3(origin.x, 0, origin.y))
 	_mat.set_shader_parameter("box_min", bmin)
 	_mat.set_shader_parameter("box_max", bmax)
@@ -266,6 +274,13 @@ func step(dt: float, focus: Vector3, fwd: Vector3) -> void:
 	_mat.set_shader_parameter("ext", extinction)
 	_drift += Vector3(wind.x * 0.6, 0.12, wind.y * 0.6) * dt
 	_mat.set_shader_parameter("drift", _drift)
+	if use_comp:
+		compositor.active = true
+		compositor.params = {light = _tex3d, colv = _colr3d, occ = _occ3d, hmap = _hm_tex, detail = detail_texture(),
+			origin = Vector3(origin.x, 0, origin.y), hm_cells = float(HM), size_m = Vector3(NX * H, NY * H, NZ * H),
+			step = 0.08, ext = extinction, box_min = bmin, box_max = bmax, shadow_k = 0.62, sun_dir = sdir,
+			detail_amt = 1.15, sun_col = scol, max_steps = 160.0, amb_col = Vector3(amb_col.r, amb_col.g, amb_col.b),
+			dust_col = Vector3(dc.r, dc.g, dc.b), drift = _drift, cloud = cloud}
 	RenderingServer.call_on_render_thread(_gpu_step.bind(dt, shift, clear, bytes.to_byte_array(), n, sdir))
 
 func _ground(x: float, z: float) -> float:

@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://dxklq7mspm8mk"
+path="res://.godot/imported/smoke_march.glsl-3a585c0f859a659b3ae62816879e7269.res"
+
+[deps]
+
+source_file="res://shaders/smoke/smoke_march.glsl"
+dest_files=["res://.godot/imported/smoke_march.glsl-3a585c0f859a659b3ae62816879e7269.res"]
+
+[params]
+

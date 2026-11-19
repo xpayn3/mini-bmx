@@ -118,6 +118,10 @@ func _ready() -> void:
 	grime.watch(rider, true)
 	dust = RideDust.new()
 	add_child(dust)
+	if dust.sim != null and dust.sim.compositor != null:   # the dust is drawn as a compositor effect
+		var comp := Compositor.new()
+		comp.compositor_effects = [dust.sim.compositor]
+		cam.compositor = comp
 	audio = load("res://scripts/game/ride_audio.gd").new()
 	audio.game = self
 	add_child(audio)
@@ -746,6 +750,8 @@ func _process(dt: float) -> void:
 	elif dust.sim != null: dust.sim.set_body(_body_parts(st))
 	elif _rd_air.size() > 0: _rd_air.resize(0)
 	dust.attach(terrain, sun)
+	if dust.sim != null:
+		dust.sim.cloud = Vector4(atmos.cloud_off.x, atmos.cloud_off.y, Atmos.CLOUD_DEPTH if atmos.clouds_on else 0.0, atmos.shade)
 	dust.sim_step(dt, drawn_pos, st.fwd(), atmos.wind)
 	grime.update(dt, rig)
 	# speed feel: wider FOV and streaky screen edges when fast

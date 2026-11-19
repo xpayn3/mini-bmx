@@ -166,6 +166,11 @@ F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A 
   the render darkens the ground / bike under the dust with the light volume (dust shadows) and uses a
   3-octave multiple-scattering approximation. **Grit** (`fx/grit.gd`, `shaders/smoke/grit*.gdshader`):
   GPU particles (grains 5 mm–3 cm) carried by the sim's air velocity texture, sunlit + glints, land and fade.
+  **Drawn by `fx/smoke_compositor.gd`** (a CompositorEffect on the ride camera): half-res raymarch
+  (`smoke_march.glsl`) → temporal blend with reprojection + neighbourhood clamp (`smoke_taa.glsl`) →
+  depth-aware upsample + composite over the scene (`smoke_comp.glsl`). `sd.get_cam_projection()` is already
+  Godot's RD projection (reversed depth, y flipped): use it with ndc = (uv*2-1, depth). `BMX_SMOKE_BOX=1`
+  forces the old box-mesh renderer (`smoke_render.gdshader`, the fallback).
   `.glsl` files need an import (`--headless --import`) after editing. Falls back to the
   old sprites / FogVolumes without a RenderingDevice; `BMX_SPRITE_DUST=1` forces the sprites.
 - Dirt chunks, **tyre tracks**: one ring-buffer ArrayMesh
