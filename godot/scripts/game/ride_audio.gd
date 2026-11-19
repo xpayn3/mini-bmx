@@ -55,6 +55,13 @@ const GRAVEL_SURF := [[0.16, 420.0, 0.08, 1.3], [0.30, 650.0, 0.3, 1.0], [0.0, 5
 # one-shots: [kind, t, amp]
 var shots: Array = []
 
+## drop the C# synths while the engine is still up: if their .NET finalizers run during shutdown
+## instead, Godot can crash on exit ("Leaked unsafe reference" -> SEHException)
+func _exit_tree() -> void:
+	gravel = null
+	fw_synth = null
+
+
 func _ready() -> void:
 	var gen := AudioStreamGenerator.new()
 	gen.mix_rate = RATE
