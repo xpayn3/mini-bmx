@@ -278,7 +278,15 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - **WASTED** (`fx/wasted.gd`, Settings › Gameplay › Crash slow motion): on a crash time drops to 0.22× (sound pitched down via
   `AudioServer.playback_speed_scale`) for ~2.4 s real time, then eases back; the screen goes grey + vignette, the word
   WASTED (BAIL for a bail on purpose, F) shows at once for 1.5 s then fades (the rider + bike drawn in front of it via a silhouette mask), flat red, squeezed narrow to fill the screen (no band, no stroke), the crash reason small below. Fades on getting up or after 5 s. Off in autotests unless `BMX_WASTED=1`.
-- Look: kits + a colour per part (helmet shell/peak, goggles, jersey, pants, gloves, shoes).
+- Look: kits + a colour per part (helmet shell/peak, goggles, jersey, pants, gloves, shoes, knee pads).
+- **Knee pads** (`rider/knee_pad.gd` + `shaders/knee_cap.gdshader`, one `KneePad` per leg, posed in `update_pose` and
+  `pose_ragdoll`): articulated so no part ever spans the bend: the hard cap (glossy shell with chevron, vent slots,
+  rivets, pin line, on a foam bumper) sits on the bisector of thigh / shin, facing out of the bend, and wraps the knee as a
+  sphere shell; quilted foam plates + fabric sleeves are rigid to the thigh and to the shin (hard insert on the shin);
+  a fabric ball closes the joint. Near straight the front eases onto the IK pole (ride) / body forward (ragdoll), and
+  stays on the anatomical front when a broken knee bends backwards; a shin torn off at the knee takes its half, the cap
+  goes. Colours: Kit › Knee pads (`look.pads`), accent = the gloves colour. Check every bend (0–165°, sideways,
+  backwards) without the game: `..._console.exe --path godot -s res://tools/kneepad_gallery.gd -- out.png [cam=close yaw=-0.6]`.
 
 ### Ride light (time of day)
 - **Default: golden hour** (19:20, sun ~10° up). Everything comes from the clock: `Game._apply_light(hour, LightSettings.current)`
