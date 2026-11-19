@@ -466,7 +466,7 @@ static func style_button(b: Button, kind := "chip", size := Tokens.T_MD) -> Butt
 			b.add_theme_stylebox_override("normal", btn_box(Tokens.ACCENT, Tokens.CLEAR, 0, Tokens.R_LG, pad))
 			b.add_theme_stylebox_override("hover", btn_box(Tokens.ACCENT_HOT, Tokens.CLEAR, 0, Tokens.R_LG, pad))
 			b.add_theme_stylebox_override("pressed", btn_box(Tokens.ACCENT_DOWN, Tokens.CLEAR, 0, Tokens.R_LG, pad))
-			b.add_theme_stylebox_override("focus", marked(Tokens.CLEAR, Tokens.INK, SIDE_BOTTOM, Tokens.R_LG, pad))
+			b.add_theme_stylebox_override("focus", btn_box(Tokens.ACCENT_HOT, Tokens.CLEAR, 0, Tokens.R_LG, pad))   # no black bar
 		"secondary":
 			pad = Tokens.S5; weight = Tokens.W_BLACK; slant = Tokens.SLANT
 			b.add_theme_stylebox_override("normal", btn_box(Tokens.PAPER, Tokens.CLEAR, 0, Tokens.R_LG, pad))
