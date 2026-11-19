@@ -87,8 +87,9 @@ var _feed_v := Vector3.ZERO
 var _feed_rate := 0.0
 var _feed_r := 0.3
 var _feed_fan := 30.0
-var _rings: Array = []          # landing shockwaves in progress
 var _front_on := false
+var _feed_age := 0.0
+var _front_age := 0.0
 var _front_p := Vector3.ZERO
 var _front_prev := Vector3.INF
 var _front_v := Vector3.ZERO
@@ -124,7 +125,12 @@ func attach(terrain, sun: DirectionalLight3D) -> void:
 func sim_step(dt: float, focus: Vector3, fwd: Vector3, wind: Vector2) -> void:
 	if sim == null: return
 	sim.wind = wind * 2.8   # m/s at gust strength 1
-	_update_rings(dt)
+	# the tyres only dust while the ride feeds them (every physics step); in a crash nothing does, so
+	# switch them off instead of puffing on at the last wheel positions
+	_feed_age += dt
+	_front_age += dt
+	if _feed_age > 0.1: _feed_on = false
+	if _front_age > 0.1: _front_on = false
 	_pulse_t += dt
 	var pulse := clampf(0.9 + _gust.get_noise_1d(_pulse_t * 60.0) * 2.6, 0.0, 2.6)   # gusts with gaps
 	_feed_prev = _patch(_feed_on, _feed_p, _feed_prev, _feed_v, _feed_rate * pulse, _feed_fan)
@@ -152,45 +158,24 @@ func _patch(on: bool, p: Vector3, prev: Vector3, v: Vector3, rate: float, fan: f
 
 ## per physics step: the front tyre's patch (sim only; a lighter dusting than the rear)
 func feed_front(front: Vector3, throw_v: Vector3, rate: float, alpha: float) -> void:
+	_front_age = 0.0
 	_front_on = sim != null and rate > 0.5 and alpha > 0.0
 	if not _front_on: return
 	_front_p = front + Vector3(0, 0.08, 0)
 	_front_v = throw_v
 	_front_rate = rate * alpha * alpha * 2.2
 
-## a hard landing: the impact blasts a ring of dust out along the ground in every direction (air
-## pushed down onto the ground by the landing spreads outward), which then rolls up at its edge.
-## impact: landing speed (m/s), amount: 1 = dry dirt
-func landing_ring(pos: Vector3, impact: float, col: Color, amount: float) -> void:
+## a landing: dust squeezed out from under each tyre as it hits (the tyre and the air under it push it
+## out sideways along the ground), carried on a little with the bike. How much / how far: the impact.
+## patches: the tyres' ground contact points; vel: the bike's velocity
+func landing_dust(patches: Array, vel: Vector3, impact: float, col: Color, amount: float) -> void:
 	if sim == null or amount <= 0.0: return
-	var k := clampf((impact - 2.0) / 7.0, 0.15, 1.0)
-	_rings.append({p = pos + Vector3(0, 0.08, 0), t = 0.0, k = k, amount = amount, a0 = randf() * TAU,
-		reach = 1.1 + k * 1.9})
+	var k := clampf((impact - 1.5) / 7.0, 0.1, 1.0)
+	for p in patches:
+		var at: Vector3 = p + Vector3(0, 0.08, 0)
+		sim.burst(at, vel * 0.25 + Vector3(0, 0.3 + k * 0.6, 0), 0.26 + k * 0.12, (40.0 + 120.0 * k) * amount,
+			0.8 + k * 2.4, 0.07 + k * 0.05, col, 18.0)
 	sim.tint(col)
-	# the dusty core where the tyres hit
-	sim.burst(pos + Vector3(0, 0.12, 0), Vector3(0, 0.6, 0), 0.45, 45.0 * amount * k, 0.6, 0.1, col)
-
-## expanding landing shockwaves: each frame a ring of small sources at the front of the wave
-## (radius rushing out then slowing), dust thrown outward and up; the sim rolls it into a ring cloud
-func _update_rings(dt: float) -> void:
-	for i in range(_rings.size() - 1, -1, -1):
-		var r: Dictionary = _rings[i]
-		r.t += dt
-		var life := 0.55
-		if r.t > life:
-			_rings.remove_at(i)
-			continue
-		var e: float = 1.0 - exp(-r.t * 5.5)                  # 0 -> ~0.95 of the reach
-		var rad: float = 0.3 + r.reach * e
-		var spd: float = r.reach * 5.5 * exp(-r.t * 5.5)   # front speed m/s
-		var fade: float = 1.0 - r.t / life
-		var n := 22
-		var spin := randf() * TAU   # a fresh set of angles every frame: a continuous ring, not spokes
-		for j in n:
-			var an: float = spin + TAU * j / n
-			var d := Vector3(cos(an), 0.0, sin(an))
-			var rate: float = (45.0 + 60.0 * r.k) * r.amount * fade * (0.5 + randf())
-			sim.add_source(r.p + d * rad, d * spd * 0.8 + Vector3(0, 0.4 + spd * 0.12, 0), 0.26 + rad * 0.06, rate, 14.0, 0.3)
 
 ## a burst of dust (crash, smash, hard landing)
 func puff_burst(pos: Vector3, power: float, col: Color, amount: float) -> void:
@@ -268,6 +253,7 @@ func _build_emitter() -> void:
 func feed(rear: Vector3, throw_v: Vector3, rate: float, col: Color, alpha: float, fan_deg: float) -> void:
 	_rate = rate
 	if sim != null:
+		_feed_age = 0.0
 		_feed_on = rate > 0.5 and alpha > 0.0
 		if not _feed_on: return
 		_feed_p = rear + Vector3(0, 0.08, 0)   # the first cell above the ground

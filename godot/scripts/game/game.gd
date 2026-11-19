@@ -432,7 +432,11 @@ func on_landing(air_time: float, impact: float) -> void:
 	_landed = clampf(impact / 6.0, 0.0, 1.0) if air_time > 0.25 else 0.0
 	var ls: int = terrain.surface(phys.x, phys.z)
 	if dust.sim != null and air_time > 0.3 and ls != 2:   # real smoke sim: a ring of dust blasted outward
-		dust.landing_ring(Vector3(phys.x, phys.y, phys.z), impact, ground_dust(phys.x, phys.z, ls),
+		var lf := phys.fwd()
+		var lbb: float = phys.BB_REAR
+		var tyres := [Vector3(phys.x - lf.x * lbb, phys.y, phys.z - lf.z * lbb),
+			Vector3(phys.x + lf.x * (phys.L - lbb), phys.y, phys.z + lf.z * (phys.L - lbb))]
+		dust.landing_dust(tyres, lf * phys.v, impact, ground_dust(phys.x, phys.z, ls),
 			(1.0 if ls == 1 else 0.85 if ls == 3 else 0.3) * clampf(air_time / 0.8, 0.4, 1.3))
 	elif air_time > 0.45 and (ls == 1 or ls == 3):
 		dust.cloud(Vector3(phys.x, phys.y, phys.z), phys.fwd() * phys.v * 0.3, ground_dust(phys.x, phys.z, ls), 2.6 + impact * 0.15, 1.1)
@@ -472,11 +476,13 @@ func _crash_dust() -> void:
 			if hit > 1.5 and made < 6:
 				# the slam: a puff blown out round the impact, carried on a little the way it was going
 				var k := clampf((hit - 1.5) / 6.0, 0.15, 1.0)
+				if OS.get_environment("BMX_SMOKE_PROBE") != "": print("CRASHDUST impact i=%d t=%.2f hit=%.1f" % [i, phys.crash_t, hit])
 				dust.sim.burst(at, Vector3(v.x * 0.25, 0.6 + k * 0.8, v.z * 0.25), 0.3 + k * 0.25, (50.0 + 110.0 * k) * amt,
 					1.2 + k * 2.2, 0.08 + k * 0.05, ground_dust(pp.x, pp.z, s), 20.0)
 				made += 1
 		elif hs > 1.2 and made < 10:
 			# sliding / rolling along the ground
+			if OS.get_environment("BMX_SMOKE_PROBE") != "": print("CRASHDUST slide i=%d t=%.2f hs=%.1f" % [i, phys.crash_t, hs])
 			dust.sim.add_source(at, Vector3(v.x * 0.3, 0.4, v.z * 0.3), 0.25, minf(hs, 6.0) * 4.0 * amt, 6.0, 0.3)
 			made += 1
 	# the bike sliding / tumbling along the ground
@@ -485,6 +491,7 @@ func _crash_dust() -> void:
 		var g2: float = terrain.height(phys.x, phys.z)
 		var ba := 1.0 if bs == 1 else (0.85 if bs == 3 else 0.3)
 		var f := phys.fwd()
+		if OS.get_environment("BMX_SMOKE_PROBE") != "": print("CRASHDUST bike t=%.2f v=%.1f" % [phys.crash_t, phys.v])
 		for e in [-0.5, 0.5]:   # both wheels / the frame scraping
 			dust.sim.add_source(Vector3(phys.x + f.x * e, g2 + 0.1, phys.z + f.z * e), f * phys.v * 0.3 + Vector3(0, 0.6, 0),
 				0.3, minf(absf(phys.v), 10.0) * 9.0 * ba, 8.0, 0.5)
