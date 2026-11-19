@@ -53,7 +53,7 @@ var action_cam_at := Vector3.ZERO   # where it's mounted (head space)
 var torso: MeshInstance3D
 var hood_hem: MeshInstance3D
 var pelvis_mesh: MeshInstance3D
-var hood: MeshInstance3D
+var neck_mesh: MeshInstance3D
 var shoulder_sph: Array[MeshInstance3D] = []
 var thigh: Array[MeshInstance3D] = []
 var shin: Array[MeshInstance3D] = []
@@ -140,7 +140,10 @@ func _init() -> void:
 	var bib := BackNumber.new()   # race number paper pinned to the back, flaps with speed
 	bib.name = "BackNumber"
 	add_child(bib)
-	hood = sph.call(0.11, mCoralDark)
+	# the neck: a tapered tube (jersey collar colour) from inside the collar up into the helmet, posed
+	# every frame by _pose_neck (both ends are hidden, so it never shows a cap)
+	neck_mesh = cyl.call(NECK_R_TOP, NECK_R_BASE, mCoralDark, 18)
+	neck_mesh.name = "Neck"
 	shoulder_sph.assign([sph.call(0.075, mCoral), sph.call(0.075, mCoral)])
 
 	# legs (0 = left, 1 = right)
@@ -675,6 +678,20 @@ func set_spine(a: Vector3, b: Vector3, right_lo: Vector3, right_hi: Vector3, cur
 		torso.custom_aabb = AABB(c - Vector3(3, 3, 3), Vector3(6, 6, 6))
 
 
+## the neck tube: radii (it narrows from the collar up), where it starts inside the torso (mesh space of the
+## top spine bone: y 0.5 = the collar) and where it ends inside the helmet (head space, behind the jaw)
+const NECK_R_BASE := 0.056
+const NECK_R_TOP := 0.047
+const NECK_BASE := Vector3(-0.012, 0.42, 0.0)
+const NECK_TOP := Vector3(-0.035, -0.07, 0.0)
+
+
+## run after set_spine and the head transform: the tube follows the spine's bend and the head's turn / tilt
+func _pose_neck() -> void:
+	var base := spine_skel.get_bone_pose(SPINE_BONES - 1) * NECK_BASE
+	set_limb(neck_mesh, base, head.transform * NECK_TOP)
+
+
 ## hand: +X along the forearm, +Z along the bar, +Y the back of the hand
 static func orient_hand(n: Node3D, el: Vector3, at: Vector3, right: Vector3) -> void:
 	var x := (at - el).normalized()
@@ -793,9 +810,9 @@ func pose_ragdoll(P: Array, roots: Dictionary = {}) -> void:
 	var hip: Vector3 = pe + (ch - pe).normalized() * 0.02
 	set_spine(hip, ch, body_r.normalized(), (sh[1] - sh[0]).normalized())
 	set_limb(hood_hem, hip, hip.lerp(ch, 0.2))
-	hood.position = ch
 	var sh_r: Vector3 = sh[1] - sh[0]
 	head.transform = Transform3D(_basis_from(hd - ch, sh_r), hd)
+	_pose_neck()
 	for i in 2:
 		var ei: int = 4 if i == 0 else 7    # elbow / hand / knee / foot point of this side
 		var hi: int = ei + 1
@@ -1192,7 +1209,6 @@ func update_pose(dt: float, p: Dictionary) -> void:
 
 	# neck / head
 	var neck := chest
-	hood.position = Vector3(neck.x - 0.03, neck.y, neck.z)
 	var head_p := Vector3(neck.x + 0.05 + sty.lookAhead + 0.04 * aero, neck.y + 0.2 + sty.neck, neck.z)   # (forward: chin over the bars)
 	J[0] = head_p
 	J[1] = chest
@@ -1201,6 +1217,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var rx: float = (_num(p, "headRoll") if p.get("headRoll") != null else _num(p, "lean") * 0.6) + sty.headRoll
 	var rz: float = -0.12 * (ang - 0.72) + 0.04 * sin(t * 3.3) * wig - sty.headTilt * (1.0 - 0.6 * relax)
 	head.transform = Transform3D(GEAR.euler_xyz(rx, yaw, rz), head_p)
+	_pose_neck()
 
 	var right := Vector3(0, 0, 1)
 	var max_turn := BEND_RATE * minf(dt, 0.1) if dt > 0.0 else PI
