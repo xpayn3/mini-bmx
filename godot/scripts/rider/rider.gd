@@ -738,7 +738,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var hi_fade: float = 1.0 - 0.85 * smoothstep(5.0, 12.0, absf(v))
 	# effort: sprinting from slow the rider throws everything into it - up off the saddle, over the bars,
 	# hips swinging, body bobbing hard with every stroke (fades out once up to speed)
-	var effort: float = spr * pedal * BikePhysics.slowness(v)   # the slower, the harder they fight
+	var effort: float = spr * pedal * BikePhysics.slowness(v) * float(Tune.v.get("sprintEffort", 1.0))   # the slower, the harder they fight
 	sm_effort += (effort - sm_effort) * (1.0 - exp(-6.0 * minf(dt, 0.1)))
 	var eff: float = sm_effort
 	var sway: float = sin(crank) * pedal * sty.sway * (1 + 0.9 * spr + 1.3 * eff) * hi_fade

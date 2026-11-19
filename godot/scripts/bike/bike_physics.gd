@@ -122,11 +122,11 @@ static func start_gear(p_cogs: Array, p_ring_k: float) -> int:
 ## crank turn rate (rad/s) for a wheel spinning at w rad/s in gear gk; shared with the garage rollers
 static func crank_rate(w: float, gk: float, top_speed: float, p_sprint: float) -> float:
 	# a sprint from slow spins the legs up hard (~70 rpm at once), not just at the wheel's rate
-	return maxf(w / (2.78 * gk * top_speed), 3.5 + 4.0 * p_sprint * slowness(w * 0.37)) * (1 + 0.3 * p_sprint)
+	return maxf(w / (2.78 * gk * top_speed), 3.5 + float(Tune.v.get("sprintSpin", 4.0)) * p_sprint * slowness(w * 0.37)) * (1 + 0.3 * p_sprint)
 
 ## 1 standing still .. 0 by ~40 km/h (smooth): how hard a sprinting rider fights to get up to speed
 static func slowness(va: float) -> float:
-	return 1.0 - smooth01(absf(va) / 11.0)
+	return 1.0 - smooth01(absf(va) / float(Tune.v.get("sprintSlowTo", 11.0)))
 
 ## side-to-side rock from pedalling out of the saddle: the bike swings ~6 deg each way under a steady
 ## body (~10 deg sprinting), most when pushing hard from slow, about a third of that spinning at speed
@@ -134,7 +134,7 @@ static func pedal_rock(p_crank: float, p_sprint: float, p_pedal: float, va: floa
 	var rock_fade: float = 1.0 - 0.65 * smoothstep(5.0, 12.0, va)
 	# sprinting from slow: the bike is thrown hard side to side under the rider (~15 deg each way)
 	var effort: float = p_sprint * slowness(va)
-	return sin(p_crank) * 0.105 * (1 + 0.65 * p_sprint + 0.75 * effort) * p_pedal * minf(1.0, va / 2 + 0.3) * rock_fade * p_bike_rock
+	return sin(p_crank) * 0.105 * (1 + 0.65 * p_sprint + float(Tune.v.get("sprintRock", 0.75)) * effort) * p_pedal * minf(1.0, va / 2 + 0.3) * rock_fade * p_bike_rock
 
 func gear_k() -> float:
 	if gear < 0: return ring_k * 16.0 / float(cogs[0]) if cogs.size() > 0 else 1.0
@@ -680,9 +680,9 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		# sprint keeps pulling it higher (wheelieClimb rad/s) until it goes past the balance point and
 		# loops out. Let go and it is set back down
 		if pulling and (front_air or wheelie_up > 0.0):
-			wheelie_up = maxf(wheelie_up, 0.4) + float(T.get("wheelieClimb", 0.45)) * dt
+			wheelie_up = maxf(wheelie_up, float(T.get("wheelieAngle", 0.4))) + float(T.get("wheelieClimb", 0.45)) * dt
 		else:
-			wheelie_up = maxf(0.0, wheelie_up - 1.6 * dt)
+			wheelie_up = maxf(0.0, wheelie_up - float(T.get("wheelieDrop", 1.6)) * dt)
 		if wheelie_up > 0.0:
 			bal_max = maxf(bal_max, 30.0)   # the whole body holds a wheelie, not just the hands
 		var was_air := air
