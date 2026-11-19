@@ -352,9 +352,16 @@ func msg_idle() -> bool:
 func flow_up() -> void:
 	phys.flow_up()
 
+const GRASS_SOIL_DUST := Color(0.52, 0.4, 0.28)   # what a tyre digs up through grass: brown soil
+
+## the colour of the dust kicked up here. With the smoke sim: the road's own colour (barely lighter: fine
+## dust), and on grass the brown soil under it (never green). The old sprites used a paler mix.
 func ground_dust(px: float, pz: float, s: int) -> Color:
 	if s == 2: return DUST_SPLASH
 	var c: Color = terrain.ground_color(px, pz)
+	if dust != null and dust.sim != null:
+		if s == 0: return GRASS_SOIL_DUST
+		return c.lerp(Color.WHITE, 0.08)
 	return c.lerp(Color.WHITE, 0.42 if s == 0 else 0.28)
 
 func burst(pos: Vector3, n: int, s: int, power: float, with_dust := true) -> void:
