@@ -685,11 +685,12 @@ func _pose_letter(lift: float, acc: Array, breathe: float) -> void:
 	var PW := panel.x; var PH := panel.y
 	var o0 := clampf(acc[0], 0.0, 1.2); var o2 := clampf(acc[2], 0.0, 1.2)
 	var cup := 0.05 + 0.01 * breathe
-	var a0: float = lerpf(PI - 0.012, cup, o0)
-	var a2: float = lerpf(PI - 0.006, cup, o2)
-	var t0 := Transform3D(Basis(), Vector3(0, 0, 0.004 * clampf(1.0 - o0, 0.0, 1.0))) * Transform3D(Basis(Vector3.UP, a0), Vector3.ZERO)
+	# shut, the flaps lie almost flat on each other (a real leaflet is a few tenths of a mm thick)
+	var a0: float = lerpf(PI - 0.005, cup, o0)
+	var a2: float = lerpf(PI - 0.0025, cup, o2)
+	var t0 := Transform3D(Basis(), Vector3(0, 0, 0.0009 * clampf(1.0 - o0, 0.0, 1.0))) * Transform3D(Basis(Vector3.UP, a0), Vector3.ZERO)
 	var t1 := Transform3D.IDENTITY
-	var t2 := Transform3D(Basis(), Vector3(PW, 0, 0.002 * clampf(1.0 - o2, 0.0, 1.0))) * Transform3D(Basis(Vector3.UP, -a2), Vector3.ZERO)
+	var t2 := Transform3D(Basis(), Vector3(PW, 0, 0.00045 * clampf(1.0 - o2, 0.0, 1.0))) * Transform3D(Basis(Vector3.UP, -a2), Vector3.ZERO)
 	var xs := [t0, t1, t2]
 	var lo := Vector3(INF, INF, INF); var hi := -lo
 	for c in 3:
