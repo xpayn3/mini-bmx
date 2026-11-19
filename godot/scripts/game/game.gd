@@ -1025,7 +1025,7 @@ func _process(dt: float) -> void:
 			"counter": st.counter, "rockRoll": st.rock, "headRoll": st.bike_lean * 0.85,
 			"absorb": clampf(body_y - y_draw, -T.legComp, T.legExt), "pitch": p_draw, "bodyLevel": T.bodyLevel,
 			"attackDrop": T.attackDrop, "pedal": st.pedal, "sprint": st.sprint * st.pedal, "crank": st.crank,
-			"air": st.air_k, "compress": maxf(0.0, -st.compress), "hipShift": st.hip_shift, "bodyStick": st.body_in_s, "slope": st._g_pitch, "airTilt": st.air_tilt * float(Tune.v.get("stickBodyTilt", 0.6)) * clampf(st.air_stick.length() * 3.0 + absf(st.edge_s) * 2.0, 0.0, 1.0) if st.air else 0.0, "airLeanX": st.air_stick.x if st.air else 0.0, "t": t,
+			"air": st.air_k, "compress": maxf(0.0, -st.compress), "hipShift": st.hip_shift, "bodyStick": st.body_in_s, "slope": st._g_pitch, "airTilt": st.air_tilt * float(Tune.v.get("stickBodyTilt", 0.6)) * clampf(st.air_stick.length() * 3.0 + absf(st.edge_s) * 2.0, 0.0, 1.0) if st.air else 0.0, "bodyLat": st.air_stick.x if st.air else st.flick, "wheelR": rider.to_local(rig.wheel_r.global_position), "wheelRR": rig.wheel_rr, "t": t,
 			"airSpin": st.yaw_rate if st.air else 0.0, "wheelY": (rig.wheel_f.global_position.y + rig.wheel_r.global_position.y) * 0.5, "turn": 0.0 if st.air else st.yaw_rate * clampf(absf(st.v) / 3.0, 0.3, 1.0)})
 		if dab_probe: _dab_probe(st)
 		if st.crash_on: _jit_skip = 40

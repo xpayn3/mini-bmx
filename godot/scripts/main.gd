@@ -347,6 +347,15 @@ func _autotest(seconds: float) -> void:
 				Input.action_press("body_left", 1.0) if on3 else Input.action_release("body_left")
 				if ph2.air and OS.get_environment("BMX_BODY_PRINT") != "" and int(el * 20) % 2 == 0:
 					print("YAW t=%.2f air=%.2f stick_yaw=%.2f edge=%.2f hold=%.2f spin=%.0fdeg slip=%.2f" % [el, ph2.air_time, ph2.stick_yaw, ph2.yaw_edge_s, ph2.yaw_hold, rad_to_deg(ph2.spin_acc), ph2.slip])
+			elif body_t.begins_with("air:"):   # tests: in the air hold the stick at x,y (+x left, +y forward), e.g. air:0,0.75
+				var xy := body_t.trim_prefix("air:").split(",")
+				var on4: bool = ph2.air and ph2.air_time > 0.08
+				var ax := float(xy[0]) if on4 else 0.0
+				var ay := float(xy[1]) if on4 else 0.0
+				Input.action_press("body_left", ax) if ax > 0.0 else Input.action_release("body_left")
+				Input.action_press("body_right", -ax) if ax < 0.0 else Input.action_release("body_right")
+				Input.action_press("body_fwd", ay) if ay > 0.0 else Input.action_release("body_fwd")
+				Input.action_press("body_back", -ay) if ay < 0.0 else Input.action_release("body_back")
 			elif body_t == "circle":   # in the air: circle the stick (0.8 deflection, ~1 turn / s); hands off on the ground
 				var ca := el * TAU * 1.0
 				var on := ph2.air and ph2.air_time > 0.08

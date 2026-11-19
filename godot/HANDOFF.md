@@ -182,6 +182,13 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - **Posture is the player's**: neutral (stick centred) is an upright attack position (torso ~30 deg from vertical);
   the right stick forward folds the rider down into the full tuck (`aero` in `rider.gd`, nothing tucks by itself at
   speed any more), back sits up tall and back.
+- **Full-body leans** (right stick, `rider.gd`): forward = hips forward and up (legs extend), chest out over the bars,
+  chin forward, elbows up and out; back = hips behind and down, chest over the hips, arms long, elbows in; side
+  (`bodyLat` = `flick` on the ground / `air_stick.x` in the air) = the hips go to the outside of the leaning bike; in
+  the air a side lean is a tabletop (hips turn with the bike, shoulders back against it, hips drop so the feet stay
+  on the pedals). Test shots: `BMX_BODY=air:x,y` holds the stick mid-air.
+- **Rear-wheel clearance** (always on, in the safety limits, `wheelR` / `wheelRR` from game.gd): the hips may go below
+  the saddle but never inside the rear wheel's circle + 16 cm - the legs used to go into the wheel in the air.
 - **Skeleton safety limits** (`rider.gd`, just before the torso length clamp): hips in a box over the bike, the
   torso bends only -26..80 deg forward and +-34 deg sideways from the bike's up; body counter-roll capped at ~50 deg.
   Whatever stacks up (tuck, spin, lean, landing, sliders) the body can't be mangled.
