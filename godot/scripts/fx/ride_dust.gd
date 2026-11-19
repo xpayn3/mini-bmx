@@ -166,9 +166,10 @@ func _patch(on: bool, p: Vector3, prev: Vector3, v: Vector3, rate: float, fan: f
 		# faster riding flings the spray harder / wider: it grows into a cloud sooner
 		var fast := clampf((sim.speed - 3.0) / 9.0, 0.0, 1.0)
 		sim.add_source(at, jv * (1.0 + fast * 0.5), PATCH_R, rate * 14.0 / k, 10.0, 0.6 + randf() * 0.8 + fast * 1.6, col)
-	# grit: grains flicked off the tread with the dust (fewer but further than the dust)
-	if grit != null:
-		grit.emit(p, v * 1.4 + Vector3(0, 0.6 + sp * 0.15, 0), 0.8 + sp * 0.35, rate * 26.0, col)
+	# grit: grains flicked off the tread - only when going fast (none below ~30 km/h, a light spray at speed)
+	var gk := clampf((sim.speed - 8.3) / 5.0, 0.0, 1.0)
+	if grit != null and gk > 0.0:
+		grit.emit(p, v * 1.4 + Vector3(0, 0.6 + sp * 0.15, 0), 0.8 + sp * 0.35, rate * 4.0 * gk, col)
 	return p
 
 ## grains thrown for secs (landings, crash impacts)
@@ -195,7 +196,7 @@ func landing_dust(patches: Array, vel: Vector3, impact: float, col: Color, amoun
 		var at: Vector3 = p + Vector3(0, 0.08, 0)
 		sim.burst(at, vel * 0.25 + Vector3(0, 0.3 + k * 0.6, 0), 0.26 + k * 0.12, (40.0 + 120.0 * k) * amount,
 			0.8 + k * 2.4, 0.07 + k * 0.05, col, 18.0)
-		grit_burst(at, vel * 0.3 + Vector3(0, 0.8 + k * 1.2, 0), 1.0 + k * 2.5, 2400.0 * k * amount, 0.08, col)
+		grit_burst(at, vel * 0.3 + Vector3(0, 0.8 + k * 1.2, 0), 1.0 + k * 2.5, 700.0 * k * amount, 0.06, col)
 	sim.tint(col)
 
 ## a burst of dust (crash, smash, hard landing)
