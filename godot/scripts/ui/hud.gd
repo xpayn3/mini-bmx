@@ -475,7 +475,7 @@ func _trail_scan(p: Vector2, fw: Vector2, crashed: bool) -> void:
 				best_d = d; alert = {"kind": "K", "text": "ROCKS", "d": d}
 			break
 	if alert.get("text", "") != "" and alert.text != was:
-		gauge.light = 3.0   # the screen lights up for a new alert
+		if int(gauge.order[gauge.page]) == GaugeView.MAP_PAGE: gauge.light = 3.0   # the screen lights up for a new alert (map page only)
 		alert_new = 3.5
 
 func _nearest(tc: TrailCourse, p: Vector2, a: int, b: int) -> int:
@@ -699,20 +699,23 @@ class GaugeView extends Control:
 				c.draw_string(f, Vector2(inner.position.x, cx.y - 2), "GPS READY", HORIZONTAL_ALIGNMENT_CENTER, inner.size.x, 12, ink)
 				c.draw_polyline(PackedVector2Array([cx + Vector2(-8, 12), cx + Vector2(-2, 18), cx + Vector2(9, 6)]), ink, 2.5)
 			return
+		if int(order[page]) != MAP_PAGE: return   # the what's-next alert card is only for the MAP page
 		var al: Dictionary = hud.alert
 		# pops up when it first appears, then stays from 40 m in (the page shows the rest of the time)
 		if al.is_empty() or al.d > 100.0 or (al.d > 40.0 and hud.alert_new <= 0.0): return
 		# the bottom half of the screen: a dark box, the turn / feature icon + distance, the name under them
-		var top := scr.position.y + 76   # just under the speed row's divider
-		var bx := Rect2(inner.position.x + 3, top, inner.size.x - 6, inner.end.y - top - 3)
+		var bh := scr.size.y / 3.0   # the card takes the bottom third of the screen height
+		var top := inner.end.y - bh - 3
+		var bx := Rect2(inner.position.x + 3, top, inner.size.x - 6, bh)
 		draw_alert(c, bx, al, f)
 
 	## the trail alert in a box: icon top left, distance big on the right, the name along the bottom
 	static func draw_alert(c: CanvasItem, bx: Rect2, al: Dictionary, f: Font) -> void:
 		var yel := Color("ffd21f")
 		c.draw_style_box(UITheme.box(Color("111417"), 6, 0), bx)
-		var row := bx.size.y * 0.62
-		var ic := bx.position + Vector2(row * 0.5 + 2, row * 0.5 + 3)
+		var wide := bx.size.y < 64.0   # a short card (a third of the screen): icon left, distance + name stacked on the right
+		var row := bx.size.y - 10.0 if wide else bx.size.y * 0.62
+		var ic := bx.position + Vector2(row * 0.5 + 2, bx.size.y * 0.5 if wide else row * 0.5 + 3)
 		var sc := row / 26.0 * 0.95
 		var kind: String = al.kind
 		c.draw_set_transform(ic * (1.0 - sc), 0.0, Vector2(sc, sc))
@@ -744,6 +747,11 @@ class GaugeView extends Control:
 		c.draw_set_transform(Vector2.ZERO)
 		var dm: float = al.d
 		var dtx := "%dm" % (roundi(dm / 10.0) * 10 if dm > 50.0 else roundi(dm))
+		if wide:
+			var fs := int(clampf(bx.size.y * 0.42, 12.0, 22.0))
+			c.draw_string(f, Vector2(bx.position.x + row + 4, bx.position.y + 6 + fs), dtx, HORIZONTAL_ALIGNMENT_RIGHT, bx.size.x - row - 10, fs, yel)
+			c.draw_string(f, Vector2(bx.position.x + row + 4, bx.end.y - 6), al.text, HORIZONTAL_ALIGNMENT_RIGHT, bx.size.x - row - 10, 9, Color.WHITE)
+			return
 		c.draw_string(f, Vector2(bx.position.x + row + 4, bx.position.y + row * 0.5 + 12), dtx, HORIZONTAL_ALIGNMENT_RIGHT, bx.size.x - row - 10, 26, yel)
 		c.draw_string(f, Vector2(bx.position.x + 6, bx.end.y - 7), al.text, HORIZONTAL_ALIGNMENT_CENTER, bx.size.x - 12, 10, Color.WHITE)
 	## bezel under the screen: a page button left and right, page dots between them
