@@ -767,6 +767,14 @@ func _autotest(seconds: float) -> void:
 		if OS.get_environment("BMX_BAIL") != "" and el > float(OS.get_environment("BMX_BAIL")) and not _probe.has("bailed"):   # tests: bail (crash) here
 			_probe["bailed"] = true
 			game.phys.crash_pending = "BAIL!"
+		if OS.get_environment("BMX_TAP_RESET") != "" and el > float(OS.get_environment("BMX_TAP_RESET")) and not _probe.has("tapped"):   # tests: tap bail -> back on the trail
+			_probe["tapped"] = true
+			var p0 := Vector3(game.phys.x, game.phys.y, game.phys.z)
+			game.reset_to_trail()
+			var tc: TrailCourse = game.terrain.field.course
+			var dm := INF
+			for i in tc.n: dm = minf(dm, Vector2(tc.X[i] - game.phys.x, tc.Z[i] - game.phys.z).length())
+			print("TAPRESET from %s to (%.1f, %.1f) dist_to_trail=%.2f v=%.1f crash=%s" % [str(p0), game.phys.x, game.phys.z, dm, game.phys.v, str(game.phys.crash_on)])
 		if OS.get_environment("BMX_GOPRO_PROBE") != "" and _probe.has("bailed") and not _probe.has("gotup") \
 				and el > float(OS.get_environment("BMX_BAIL")) + 2.5 and game.phys.crash_on:   # tests: get up (new GoPro on)
 			_probe["gotup"] = true

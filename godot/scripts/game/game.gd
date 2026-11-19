@@ -791,6 +791,34 @@ func respawn(new_world: bool) -> void:
 	biome_next = ""; biome_hold = 0
 	if area_title: area_title.show_area(biome_cur, 1.6)
 
+const BAIL_HOLD_MS := 350   # holding bail this long throws the rider off; a shorter tap resets to the trail
+var _bail_down := -1        # tick (ms) the bail key went down, -1 = not held
+
+## a tap on bail: stand the rider back up on the nearest point of the trail, facing along it (not a new ride:
+## the computer, trip and world stay)
+func reset_to_trail() -> void:
+	var tc: TrailCourse = terrain.field.course if terrain and terrain.field else null
+	if tc == null or tc.n < 2: return
+	var best := 0
+	var bd := INF
+	for i in tc.n:
+		var d: float = (tc.X[i] - phys.x) * (tc.X[i] - phys.x) + (tc.Z[i] - phys.z) * (tc.Z[i] - phys.z)
+		if d < bd: bd = d; best = i
+	var tx: float = tc.X[best]
+	var tz: float = tc.Z[best]
+	if phys.crash_on: get_up()
+	if flying_cam and is_instance_valid(flying_cam): flying_cam.queue_free()
+	flying_cam = null
+	if blood: blood.clear()
+	if fx.has_method("clear_tracks"): fx.clear_tracks()
+	if bd > 40.0 * 40.0: terrain.update_stream(tx, tz, INF)   # a long way: load it first
+	phys.reset_at(tx, tz, atan2(-tc.TZ[best], tc.TX[best]))
+	rider.reset_pose()
+	_snap_prev()
+	cam.snap_to(Vector3(tx, phys.y + 0.5, tz))
+	if hud: hud.trail_i = -1
+	flash("Back on the trail")
+
 ## tests (BMX_WATER_SPAWN=1): a dry spot 6 m from the nearest lake, facing it -> (x, heading, z)
 func _water_spawn() -> Vector3:
 	for r in range(20, 1600, 8):
@@ -826,7 +854,11 @@ func _unhandled_input(e: InputEvent) -> void:
 	if e.is_action_pressed("map") and not e.is_echo(): open_map(); return
 	if e.is_action_pressed("new_world") and not e.is_echo(): respawn(true)
 	elif e.is_action_pressed("respawn") and not e.is_echo(): respawn(false)
-	elif e.is_action_pressed("bail") and not phys.crash_on: phys.crash_pending = "BAIL!"
+	elif e.is_action_pressed("bail") and not e.is_echo():   # tap = back on the nearest trail, hold = bail
+		_bail_down = Time.get_ticks_msec()
+	elif e.is_action_released("bail") and _bail_down >= 0:
+		_bail_down = -1
+		reset_to_trail()
 	elif e.is_action_pressed("gear_easier") and not e.is_echo(): _shift(1)
 	elif e.is_action_pressed("gear_harder") and not e.is_echo(): _shift(-1)
 	elif e.is_action_pressed("camera_next") and not e.is_echo():
@@ -1055,6 +1087,9 @@ func _process(dt: float) -> void:
 		if area_title: area_title.view.visible = false
 		return
 	if area_title: area_title.view.visible = hud.visible
+	if _bail_down >= 0 and Time.get_ticks_msec() - _bail_down >= BAIL_HOLD_MS:   # held: the real bail
+		_bail_down = -1
+		if not phys.crash_on: phys.crash_pending = "BAIL!"
 	dt = minf(dt, 0.1)
 	t += dt
 	var st := phys
