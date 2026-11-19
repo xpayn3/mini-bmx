@@ -32,7 +32,7 @@ var bike_rock := 1.0
 
 # ---- state (st in the JS) ----
 var x := 0.0; var z := 0.0; var y := 0.0; var vy := 0.0
-var heading := 0.0; var v := 0.0; var steer := 0.0; var steer_in := 0.0
+var heading := 0.0; var v := 0.0; var steer := 0.0; var steer_in := 0.0; var steer_in_v := 0.0
 var lean := 0.0; var lean_v := 0.0; var bike_lean := 0.0; var counter := 0.0; var rock := 0.0
 var pitch := 0.0; var pitch_v := 0.0; var hop_nose := 0.0
 var wheelie_up := 0.0   # sprint wheelie: how far up (rad) the rider is holding the front
@@ -202,7 +202,7 @@ func fwd() -> Vector3:
 func reset_at(px: float, pz: float, hd: float) -> void:
 	crash_on = false; crash_pending = ""; crash_hold = 0.0; crash_armed = false
 	x = px; z = pz; heading = hd
-	v = 0; vy = 0; steer = 0; steer_in = 0; lean = 0; lean_v = 0; pitch = 0; air = false
+	v = 0; vy = 0; steer = 0; steer_in = 0; steer_in_v = 0; lean = 0; lean_v = 0; pitch = 0; air = false
 	bike_lean = 0; counter = 0; rock = 0; yaw_rate = 0; hop_nose = 0; hop_t = 0; air_time = 0; air_k = 0
 	load = 0; compress = 0; compress_v = 0; prep = 0; land_prep = 0; pop_fired = false; spun_out = false; shake = 0
 	turn_off = 0.0; rev_cap = 3.0; _fakie_hold = 0.0
@@ -221,7 +221,7 @@ func reset_at(px: float, pz: float, hd: float) -> void:
 
 func get_up() -> void:
 	crash_on = false; crash_hold = 0; crash_armed = false
-	v = 0; vy = 0; lean = 0; lean_v = 0; bike_lean = 0; counter = 0; steer = 0; steer_in = 0; yaw_rate = 0; air = false
+	v = 0; vy = 0; lean = 0; lean_v = 0; bike_lean = 0; counter = 0; steer = 0; steer_in = 0; steer_in_v = 0; yaw_rate = 0; air = false
 	pitch = 0; compress = 0; compress_v = 0; hop_nose = 0; hop_t = 0; load = 0
 	slip = 0; slip_w = 0.0; bar_catch = 0.0; w_init = false; front_air = false; rear_air = false; pump_acc = 0; pitch_v = 0; c_f = true; c_r = true; wheelie_up = 0.0
 	course = heading; turn_off = 0.0; rev_cap = 3.0; _fakie_hold = 0.0
@@ -573,9 +573,14 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	var steer_eff := clampf(steer_input + flick * float(T.get("flickSteer", 0.5)), -1.0, 1.0)
 	# leaning with the steer: how much the two agree, smooth through zero (no on / off as the steer crosses)
 	var agree := clampf(flick * steer_eff * 2.0, 0.0, 1.0) * absf(flick)
-	var in_rate: float = T.steerRate * 1.5 if (steer_eff != 0 and signf(steer_eff) != signf(steer_in)) else T.steerRate
-	var rate: float = in_rate if absf(steer_eff) > 0.01 else T.steerRelease
-	steer_in += clampf(steer_eff - steer_in, -rate * dt, rate * dt)
+	# the bars follow the input on a critically damped spring (steerEase = its natural rate), capped at the
+	# build-up / release rate: a key press or a stick push starts turning gently and builds (an S-curve, no
+	# instant full lock), and a swap from full left to full right swings through over ~0.5 s
+	var rate: float = T.steerRate if absf(steer_eff) > 0.01 else T.steerRelease
+	var se_w: float = float(T.get("steerEase", 12.0))
+	steer_in_v += ((steer_eff - steer_in) * se_w * se_w - 2.0 * se_w * steer_in_v) * dt
+	steer_in_v = clampf(steer_in_v, -rate, rate)
+	steer_in = clampf(steer_in + steer_in_v * dt, -1.0, 1.0)
 	var s_in: float = steer_in * (1 - T.steerCurve + T.steerCurve * absf(steer_in))
 	if true:
 		var w := 0.5
@@ -716,6 +721,11 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		# bike carries its lean on instead of snapping upright with the momentary lack of grip
 		kL *= clampf(n_tot / G, 0.12, 1.0)
 	lean_v += ((lean_t - lean) * kL - lean_v * 2 * sqrt(kL) * T.leanDamp) * dt
+	if not air:
+		# a real bike + rider (~100 kg) only rolls so fast: the roll speed eases into a top rate (leanRate,
+		# rad/s of the body lean; the bike leans bikeLeanMul x that) instead of whipping from one side to the other
+		var lr: float = float(T.get("leanRate", 3.6))
+		lean_v = lr * tanh(lean_v / lr)
 	lean += lean_v * dt
 	# the body stick throws the bike over under the rider (the body stays upright: counter grows)
 	var bl: float = lean * T.bikeLeanMul + (0.0 if air else flick * float(T.get("flickLean", 0.35)) * smooth01(va / 3.0))
@@ -1452,7 +1462,7 @@ func flow_up() -> void:
 
 ## Every float field finite? (the frame loop's safety net)
 func is_sane() -> bool:
-	for k in ["x", "z", "y", "vy", "v", "heading", "pitch", "pitch_v", "lean", "lean_v", "steer", "slip", "slip_w", "course", "compress", "compress_v",
+	for k in ["x", "z", "y", "vy", "v", "heading", "pitch", "pitch_v", "lean", "lean_v", "steer", "steer_in", "steer_in_v", "slip", "slip_w", "course", "compress", "compress_v",
 			"body_x", "body_xv", "hip_shift", "hip_v", "air_lean", "air_pull", "a_drive"]:
 		if not is_finite(get(k)):
 			return false
@@ -1461,4 +1471,4 @@ func is_sane() -> bool:
 ## after a bad step: zero the body / rider state so a NaN there can't keep poisoning the ride
 func reset_body() -> void:
 	body_v = 0; body_y = y; body_x = 0; body_xv = 0; hip_shift = 0; hip_v = 0; v_last = NAN
-	air_lean = 0; air_pull = 0; a_drive = 0; pitch_v = 0; compress_v = 0; lean_v = 0
+	air_lean = 0; air_pull = 0; a_drive = 0; pitch_v = 0; compress_v = 0; lean_v = 0; steer_in_v = 0

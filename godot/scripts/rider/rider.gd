@@ -9,7 +9,7 @@ const GEAR := preload("res://scripts/rider/rider_gear.gd")
 
 ## neutral riding style (posepanel.js NEUTRAL): BMX = all of these
 const NEUTRAL := {hipX = 0.0, hipY = 0.0, lean = 0.0, elbowsOut = 0.0, kneesOut = 0.0, stance = 0.0, seatFloor = false,
-	crouch = 1.0, standPedal = 1.0, aero = 1.0, sway = 1.0, bikeRock = 1.0, upright = 1.0, hipSway = 0.015, torso = 0.46, attackStand = 1.0, kneeOpen = 1.0, bumpAbsorb = 2.0, bodyBounce = 0.4, bodyBob = 1.0,
+	crouch = 1.0, standPedal = 1.0, aero = 1.0, sway = 1.0, bikeRock = 1.0, upright = 1.0, hipSway = 0.015, torso = 0.46, attackStand = 1.0, kneeOpen = 1.0, bumpAbsorb = 2.0, bodyBounce = 0.4, leanFollow = 1.0, leanSwing = 1.0, leanUnweight = 1.0, bodyBob = 1.0,
 	# style (Rider > Style): the numbers the riding pose is built from
 	hipSteady = 90.0, standHeight = 0.15, standBack = 0.03, pedalChest = 0.05, turnLow = 1.0, turnTwist = 1.0,
 	turnHips = 1.0, slowWobble = 1.0, airCrouch = 1.0,
@@ -874,6 +874,7 @@ func reset_pose() -> void:
 	# what the pose remembers from before (a crash tumbling the bike nose-up left a "wheelie" behind that
 	# shoved the body about after getting up)
 	sm_wheelie = 0.0; sm_aero = 0.0; sm_effort = 0.0; sm_turn = 0.0
+	roll_init = false; roll_pv = 0.0; roll_cv = 0.0
 
 
 # ---------------- per-frame pose ----------------
@@ -897,6 +898,13 @@ var sm_wheelie := 0.0   # the slope the body levels against, rate-limited
 const PITCH_LEVEL_RATE := 2.5   # rad/s
 var _fy_prev := NAN; var _fv_prev := NAN; var _facc := 0.0   # the frame's height / speed / acceleration (bump bounce)
 var bounce_stats := [0.0, 0, 0.0, 0.0]   # tests: sum of squared body offsets, samples, biggest offset
+# the body's own roll (world, rad): hips and chest follow the bike's lean on their own springs, so the bike
+# is thrown over first and the body follows through (hips lead, shoulders after, a little overshoot)
+var roll_init := false
+var roll_p := 0.0; var roll_pv := 0.0; var roll_c := 0.0; var roll_cv := 0.0; var knee_lean := 0.0
+const ROLL_HIP_W := 9.0; const ROLL_HIP_Z := 0.6     # hips: natural rate (rad/s), damping
+const ROLL_CHEST_W := 7.0; const ROLL_CHEST_Z := 0.5  # chest / shoulders: slower, rings on a touch
+const ROLL_UNWEIGHT := 0.045                          # m the legs extend through a side-to-side crossover
 func update_pose(dt: float, p: Dictionary) -> void:
 	var v := _num(p, "v")
 	_probe_pitch = _num(p, "pitch")
@@ -1061,9 +1069,35 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		pelvis.y -= climb * 0.04
 		chest.x += climb * 0.42
 		chest.y -= climb * 0.24
-	# lean the BIKE, not the body: roll the body back toward upright about the pedals
-	var cr := clampf(_num(p, "counter"), -0.85, 0.85)   # past ~50 deg the hips swing off the bike and the legs cross the frame
-	if cr != 0.0:
+	# lean the BIKE, not the body: roll the body back toward upright about the pedals.
+	# The body is a mass of its own: where it should be (bike lean - counter, in the world) is followed on
+	# springs, hips first and the chest after, so a quick lean throws the bike over under the rider and the
+	# body follows through and settles (a touch of overshoot) instead of the whole rider snapping rigidly to
+	# the new angle. Through a crossover (rolling fast near upright) the legs extend: the rider unweights the
+	# bike between turns and sinks into the next one
+	var bl := _num(p, "lean") - _num(p, "rockRoll")   # the bike's lean without the pedalling rock
+	var roll_t := bl - clampf(_num(p, "counter"), -0.85, 0.85)
+	var hr := minf(dt, 0.05)
+	if not roll_init:
+		roll_p = roll_t; roll_c = roll_t; roll_pv = 0.0; roll_cv = 0.0; knee_lean = bl; roll_init = true
+	# sliders (Rider › Movement): Body follows = how quickly (scales both rates), Swings past = how much it
+	# overshoots (0 = settles without, 1 = the default ring, 2 = loose), Legs extend = the crossover unweighting
+	var fol: float = clampf(float(sty.get("leanFollow", 1.0)), 0.3, 3.0)
+	var swing: float = clampf(float(sty.get("leanSwing", 1.0)), 0.0, 2.0)
+	var hw: float = ROLL_HIP_W * fol
+	var cw: float = ROLL_CHEST_W * fol
+	var hz: float = lerpf(1.0, ROLL_HIP_Z, minf(swing, 1.0)) - 0.2 * maxf(swing - 1.0, 0.0)
+	var cz: float = lerpf(1.0, ROLL_CHEST_Z, minf(swing, 1.0)) - 0.2 * maxf(swing - 1.0, 0.0)
+	roll_pv += ((roll_t - roll_p) * hw * hw - 2.0 * hz * hw * roll_pv) * hr
+	roll_p += roll_pv * hr
+	roll_cv += ((roll_t - roll_c) * cw * cw - 2.0 * cz * cw * roll_cv) * hr
+	roll_c += roll_cv * hr
+	knee_lean += (bl - knee_lean) * (1.0 - exp(-7.0 * hr))
+	var cr := clampf(bl - roll_p, -0.85, 0.85)   # past ~50 deg the hips swing off the bike and the legs cross the frame
+	var cr_c := clampf(bl - roll_c, -0.95, 0.95)
+	var unweight: float = ROLL_UNWEIGHT * float(sty.get("leanUnweight", 1.0)) * clampf(absf(roll_pv) / 1.6, 0.0, 1.0) * (1.0 - smoothstep(0.15, 0.6, absf(roll_p))) * (1.0 - air)
+	pelvis.y += unweight; chest.y += unweight * 0.8
+	if cr != 0.0 or cr_c != 0.0:
 		var c := cos(cr)
 		var sn := sin(cr)
 		var y0 := 0.3
@@ -1071,6 +1105,8 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		var dz := pelvis.z
 		pelvis.y = y0 + dy * c - dz * sn
 		pelvis.z = dy * sn + dz * c
+		c = cos(cr_c)
+		sn = sin(cr_c)
 		dy = chest.y - y0
 		dz = chest.z
 		chest.y = y0 + dy * c - dz * sn
@@ -1273,7 +1309,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		var hp: Vector3 = pelvis + pel_b * Vector3(0, -0.02, side * (0.11 + sty.stance))
 		var ankle := Vector3(foot.x - 0.04 + sty.heelFwd, foot.y + 0.12 + sty.heelUp, foot.z)
 		# turning: the inside knee opens out toward the turn, the outside leg drives down on its pedal
-		var inside: float = clampf(-side * _num(p, "lean") * 1.6, 0.0, 0.9) * float(sty.kneeOpen) * (1.0 - air)
+		var inside: float = clampf(-side * knee_lean * 1.6, 0.0, 0.9) * float(sty.kneeOpen) * (1.0 - air)
 		var pole_l: Vector3 = (poles_leg[i] + Vector3(0, 0, side * inside)).normalized()
 		var ik := limb_ik(hp, ankle, L_THIGH, L_SHIN, pole_l, Vector3.UP, KNEE_MIN, KNEE_MAX, _bd_prev[i], max_turn)
 		_bd_prev[i] = ik[2]
