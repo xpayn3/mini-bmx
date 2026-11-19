@@ -271,6 +271,17 @@ func _autotest(seconds: float) -> void:
 		await _new_game()
 	_start_ride()
 	if OS.get_environment("BMX_CAM") != "": game.cam.set_mode(OS.get_environment("BMX_CAM"))
+	if OS.get_environment("BMX_CAM_CYCLE") != "":   # tests: press C (next camera; Y on a pad) every 0.6 s, print each mode
+		var cyc := func() -> void:
+			for i in game.cam.PRESETS.size() + 1:
+				await get_tree().create_timer(0.6).timeout
+				for down in [true, false]:
+					var ev := InputEventKey.new()
+					ev.keycode = KEY_C; ev.physical_keycode = KEY_C; ev.pressed = down
+					Input.parse_input_event(ev)
+				await get_tree().process_frame
+				print("CAMCYCLE ", i, " ", game.cam.mode)
+		cyc.call()
 	if OS.get_environment("BMX_AT") != "":   # tests: start this many metres down the course
 		var cp: Array = game.terrain.field.course.at(float(OS.get_environment("BMX_AT")))
 		game.phys.reset_at(cp[0], cp[1], atan2(-float(cp[3]), float(cp[2])))
