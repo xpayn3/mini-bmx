@@ -27,6 +27,19 @@ var _t := 0.0
 var _air := PackedByteArray()
 var _bleed := PackedFloat32Array()
 var _last: Array = []
+var _slid := PackedFloat32Array()   # how far each part has smeared since it started sliding (ramps the smear in)
+## a FATAL crash (> FATAL_SPEED, or a limb torn off): once the body lies still a pool of blood spreads from
+## under the chest (and each stump), slowly, to POOL_R, while he stays down; it stays until a respawn
+const FATAL_SPEED := 12.0
+const POOL_R := 1.15            # m, the chest pool's final radius (a stump's: 0.6)
+const POOL_T := 9.0             # s, how fast it spreads (most of it in the first POOL_T)
+const POOL_MAX := 8
+var _fatal := false
+var _rest_t := 0.0
+var _pool_mm: MultiMesh
+var _pools: Array = []          # {i, at: Vector3, n: Vector3, t, r}
+var _pool_next := 0
+var _pool_grow := false
 var probe := false
 ## torn-off limbs: a fast crash (> SEVER_SPEED) tears off the first limb that hits the ground hard enough
 ## (> 3), any limb hit > SEVER_HIT tears it off; at most SEVER_MAX limbs per crash. A hand / foot hit
@@ -83,6 +96,18 @@ func _init(p_terrain, p_fx) -> void:
 	mi.multimesh = mm
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mi)
+	_pool_mm = MultiMesh.new()
+	_pool_mm.transform_format = MultiMesh.TRANSFORM_3D
+	_pool_mm.use_custom_data = true
+	_pool_mm.mesh = q
+	_pool_mm.instance_count = POOL_MAX
+	_pool_mm.visible_instance_count = 0
+	_pool_mm.custom_aabb = mm.custom_aabb
+	var pmi := MultiMeshInstance3D.new()
+	pmi.name = "blood_pools"
+	pmi.multimesh = _pool_mm
+	pmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(pmi)
 	# the stump caps (body side + the torn-off piece's end): flattened dark red
 	_stump_mesh = SphereMesh.new()
 	_stump_mesh.radius = 0.05
@@ -114,6 +139,7 @@ func _process(dt: float) -> void:
 	_t += dt
 	mat.set_shader_parameter("now", _t)
 	if _jn > 0: _jet_step(minf(dt, 0.05))
+	if _pool_grow: _grow_pools(dt)
 
 ## one drop of the jet: at p going v (already moved `ahead` seconds along, so drops born within one
 ## frame spread out along the stream instead of bunching)
@@ -213,6 +239,11 @@ func crash_start(speed: float) -> void:
 	smears = 0
 	if not enabled: return
 	_sever_ready = speed > SEVER_SPEED or OS.get_environment("BMX_SEVER") != ""
+	_fatal = speed > FATAL_SPEED or OS.get_environment("BMX_FATAL") != ""
+	_rest_t = 0.0
+	_pools.clear()
+	_pools_started = false
+	_pool_grow = true
 	_severed = 0
 	var base := clampf((speed - 4.0) / 12.0, 0.0, 1.0)
 	_bleed.resize(BLEED_K.size())
@@ -229,6 +260,7 @@ func crash_step(pts: Array, prv: Array, h: float, rad: Array) -> void:
 		var n0 := _air.size()
 		_air.resize(n)
 		_last.resize(n)
+		_slid.resize(n)
 		if _bleed.size() < n:
 			var b0 := _bleed.size()
 			_bleed.resize(n)
@@ -237,8 +269,10 @@ func crash_step(pts: Array, prv: Array, h: float, rad: Array) -> void:
 			var p0: Vector3 = pts[i]
 			_air[i] = 1 if p0.y - terrain.height(p0.x, p0.z) > float(rad[i]) + 0.18 else 0
 			_last[i] = null
+			_slid[i] = 0.0
 	if not _wounds.is_empty(): _bleed_wounds(pts, prv, h, get_process_delta_time())
 	if _spin_probe: _probe_spin(pts)
+	if _fatal and _pools_started == false: _check_rest(pts, prv, h)
 	if ragdoll != null and OS.get_environment("BMX_RAGDOLL_PROBE") != "" and Engine.get_process_frames() % 15 == 0:
 		var pel: Vector3 = pts[2]
 		print("RAGDOLL neutral_off=%.2f pelvis_up=%.2f rise=%.2f vup=%.1f t=%.2f" % [ragdoll.nb_off / maxf(1.0, 9.0 * 3.0 * 15.0), pel.y - terrain.height(pel.x, pel.z), ragdoll.probe_rise, ragdoll.probe_vup, ragdoll.t_fall])
@@ -276,6 +310,7 @@ func crash_step(pts: Array, prv: Array, h: float, rad: Array) -> void:
 		if _bleed[i] > 0.05 and hs > 0.5:
 			if _last[i] == null:
 				_last[i] = at
+				_slid[i] = 0.0
 				continue
 			var last: Vector3 = _last[i]
 			var ln := Vector2(at.x - last.x, at.z - last.z).length()
@@ -283,11 +318,55 @@ func crash_step(pts: Array, prv: Array, h: float, rad: Array) -> void:
 			if ln > 1.2:
 				_last[i] = at
 				continue
-			smear(last, at, clampf(r * 1.5, 0.07, 0.2), minf(1.0, _bleed[i]))
+			# it starts as a faint narrow trace and builds up over the first ~metre of the slide
+			_slid[i] += ln
+			var ramp := smoothstep(0.0, 1.0, _slid[i])
+			smear(last, at, clampf(r * 1.5, 0.07, 0.2) * (0.35 + 0.65 * ramp), minf(1.0, _bleed[i]) * (0.12 + 0.88 * ramp))
 			_bleed[i] = maxf(0.0, _bleed[i] - ln * 0.09)   # ~10 m of smear from a full bleed
 			_last[i] = at
 		elif hs < 0.2:
 			_last[i] = null
+
+## fatal crash: wait until the body lies still, then start the pools (chest + each stump)
+var _pools_started := false
+func _check_rest(pts: Array, prv: Array, h: float) -> void:
+	var pe: Vector3 = pts[2]
+	var v := pe.distance_to(prv[2]) / maxf(h, 1e-4)
+	var dt := get_process_delta_time()
+	_rest_t = _rest_t + dt if v < 0.35 else 0.0
+	if _rest_t < 0.6: return
+	_pools_started = true
+	var c: Vector3 = ((pts[1] as Vector3) + (pts[2] as Vector3)) * 0.5
+	_add_pool(c, POOL_R * (0.85 + randf() * 0.3))
+	for w in _wounds:
+		_add_pool(pts[w.a], POOL_R * 0.6)
+	if probe: print("BLOOD pool start at=%s pools=%d" % [c, _pools.size()])
+
+func _add_pool(at: Vector3, r: float) -> void:
+	if terrain.surface(at.x, at.z) == 2: return   # in water: it washes away
+	var g := Vector3(at.x, _ground(at.x, at.z) + 0.016, at.z)
+	var i := _pool_next
+	_pool_next = (i + 1) % POOL_MAX
+	for k in range(_pools.size() - 1, -1, -1):
+		if _pools[k].i == i: _pools.remove_at(k)
+	_pools.append({i = i, at = g, n = _normal(g.x, g.z), t = 0.0, r = r})
+	_pool_mm.set_instance_custom_data(i, Color(randf() * 50.0, _t, 1.0, 2.0))
+	_pool_mm.visible_instance_count = maxi(_pool_mm.visible_instance_count, i + 1)
+	_put_pool(_pools[-1])
+
+func _put_pool(pl: Dictionary) -> void:
+	# spreads fast at first, then creeps: r(t) = R (1 - e^(-t/T)), never quite stops while he's down
+	var rr: float = maxf(0.04, float(pl.r) * (1.0 - exp(-float(pl.t) / POOL_T)))
+	var n: Vector3 = pl.n
+	var zd := Vector3.FORWARD - n * n.dot(Vector3.FORWARD)
+	zd = zd.normalized()
+	var xd := n.cross(zd).normalized()
+	_pool_mm.set_instance_transform(pl.i, Transform3D(Basis(xd * rr * 2.0, n, zd * rr * 2.0), pl.at))
+
+func _grow_pools(dt: float) -> void:
+	for pl in _pools:
+		pl.t += dt
+		_put_pool(pl)
 
 ## tests (BMX_SPIN_PROBE): how fast / how far the torso turns while crashed (per game second)
 var _spin_probe := OS.get_environment("BMX_SPIN_PROBE") != ""
@@ -316,6 +395,7 @@ func _sever(a: int, pts: Array, v: Vector3) -> void:
 	var root: int = ragdoll.sever(a, kick)
 	if root < 0: return
 	_severed += 1
+	_fatal = true
 	var w := {a = a, root = root, t = JET_T, ph = randf(), acc = 0.0, acc2 = 0.0, body = _cap(), end = _cap()}
 	_wounds.append(w)
 	var pa: Vector3 = pts[a]
@@ -383,6 +463,10 @@ func _bleed_wounds(pts: Array, prv: Array, h: float, dt: float) -> void:
 
 func crash_end() -> void:
 	_sever_ready = false
+	_pool_grow = false
+	_pools.clear()        # the pools stay where they are, they just stop spreading
+	_pools_started = false
+	_fatal = false
 	for w in _wounds:
 		(w.body as Node).queue_free()
 		(w.end as Node).queue_free()
