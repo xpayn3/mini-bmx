@@ -498,7 +498,9 @@ func smash(c: Dictionary, vel: Vector3, pos: Vector3) -> bool:
 	if dust.sim != null: dust.puff_burst(Vector3(c.x, pos.y + 0.1, c.z), 0.6, Color("cdb894"), 0.5)
 	for k in (0 if dust.sim != null else 3):
 		fx.puff(Vector3(c.x, pos.y + 0.4, c.z), Vector3((randf() - .5) * 1.5, 0.4 + randf() * 0.5, (randf() - .5) * 1.5), Color("cdb894"), 0.35, 1.4, 0.4)
-	if audio and not c.get("tape", false): audio.crunch()
+	if audio and not c.get("tape", false):
+		if c.get("cactus", false): audio.crunch()
+		else: audio.wood_crash(clampf(Vector2(vel.x, vel.z).length() / 12.0, 0.3, 1.5))
 	return true
 
 func rock_chips(c: Dictionary) -> void:
