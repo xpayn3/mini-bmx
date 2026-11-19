@@ -44,12 +44,9 @@ const CHUNK := 48.0
 var chunk_rocks := {}    # key -> PackedInt32Array of ROCKS centreline indices
 var chunk_stakes := {}   # key -> PackedInt32Array of stake indices
 var chunk_fences := {}   # key -> PackedInt32Array of fence indices with a post in the chunk
-var chunk_gates := {}    # key -> PackedInt32Array of centreline indices that carry a sponsor gate
-const GATE_FIRST := 40      # centreline index of the first gate (80 m down the trail)
+var chunk_gates := {}    # key -> PackedInt32Array of centreline indices that carry a distance gate
+const GATE_FIRST := 150    # centreline index of the first gate (300 m down the trail)
 const GATE_EVERY := 150     # one every 300 m
-var chunk_boards := {}   # key -> PackedInt32Array of centreline indices with a roadside billboard
-const BOARD_FIRST := 18
-const BOARD_EVERY := 41     # one every ~80 m, alternating sides
 
 # build state
 var _M  # TerrainField (zc, landform, pitches, water)
@@ -608,14 +605,7 @@ static func _add(d: Dictionary, k: int, v: int) -> void:
 
 
 func _bucket() -> void:
-	chunk_rocks = {}; chunk_stakes = {}; chunk_fences = {}; chunk_gates = {}; chunk_boards = {}
-	for i in range(BOARD_FIRST, n - 2, BOARD_EVERY):
-		var gd := posmod(i - GATE_FIRST, GATE_EVERY)
-		if gd < 8 or gd > GATE_EVERY - 8:
-			continue   # not right under a gate
-		var kb := KD[i]
-		if kb == ROAD or kb == START or kb == FINISH:
-			_add(chunk_boards, _chunk_of(X[i], Z[i]), i)
+	chunk_rocks = {}; chunk_stakes = {}; chunk_fences = {}; chunk_gates = {}
 	for i in n - 1:
 		if KD[i] == ROCKS:
 			_add(chunk_rocks, _chunk_of(X[i], Z[i]), i)
