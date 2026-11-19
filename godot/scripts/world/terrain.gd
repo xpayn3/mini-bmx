@@ -505,7 +505,9 @@ const LIST_SPEC := {
 	"daisy": ["daisy", "flower", false, true], "tulip": ["tulip", "flower", false, true], "spike": ["spike", "flower", false, true],
 	"bush": ["bush", "leafSoft", true, false], "log": ["log", "trunk", true, false], "weed": ["weed", "tuft", true, false],
 	"stick": ["stick", "trunk", false, true], "fern": ["fern", "flower", false, true], "mushroom": ["mushroom", "flower", false, true],
-	"cactus": ["cactus", "leaf", true, false], "plank": ["box", "wood", true, false], "beam": ["box", "wood", true, false],
+	"cactus0": ["cactus0", "cactus", true, false], "cactus1": ["cactus1", "cactus", true, false], "cactus2": ["cactus2", "cactus", true, false],
+	"cactus3": ["cactus3", "cactus", true, false], "cactus4": ["cactus4", "cactus", true, false],
+	"plank": ["box", "wood", true, false], "beam": ["box", "wood", true, false],
 	"post": ["post", "fence", true, false], "rail": ["rail", "fence", true, false], "picket": ["picket", "fence", true, false],
 	"stake": ["stake", "stake", true, false],
 }
@@ -649,7 +651,7 @@ func _finalize(k: Vector2i) -> void:
 		"G": o["G"], "N": b.N, "mms": mms}
 	for c in colliders:
 		if c.has("cactus"):
-			c["cactus"]["mm"] = mms.get("cactus")
+			c["cactus"]["mm"] = mms.get("cactus%d" % c["cactus"].get("kind", 0))
 	# race tape
 	if o.has("tape"):
 		var t: Dictionary = o["tape"]
@@ -780,7 +782,7 @@ func grid_height(x: float, z: float) -> float:
 # ======================================================================
 ## fences / cacti: smash it (hide the visual, throw rigid-body debris); tape: snap it (hide the span, hand
 ## its two halves to the ribbon sim). Returns true if it broke.
-func break_collider(c: Dictionary, vel: Vector3) -> bool:
+func break_collider(c: Dictionary, vel: Vector3, at = null) -> bool:
 	if c.has("fence"):
 		var panel: Dictionary = c["fence"]
 		if panel["broken"]:
@@ -806,7 +808,7 @@ func break_collider(c: Dictionary, vel: Vector3) -> bool:
 		var mm: MultiMesh = rec.get("mm")
 		if mm:
 			mm.set_instance_transform(rec["i"], Transform3D(Basis.from_scale(Vector3.ZERO), Vector3.ZERO))
-		_debris.smash_cactus(rec, vel, c.get("chunk"))
+		_debris.smash_cactus(rec, vel, at if at is Vector3 else Vector3(c["x"], rec["xform"].origin.y + 0.5, c["z"]), c.get("chunk"))
 		return true
 	if c.has("tape"):
 		var sp: Dictionary = c["tape"]
