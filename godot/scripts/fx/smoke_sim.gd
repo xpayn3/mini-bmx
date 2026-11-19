@@ -26,9 +26,9 @@ const BRICK := 8                  # voxels per occupancy cell (empty-space skipp
 const SRC_F := 20                 # floats per source: pos+r, vel+rate, blend/radial, colour, spin
 
 ## tuning
-var density_fade := 0.2          # /s
+var density_fade := 0.15          # /s
 var vel_relax := 0.35             # /s back toward the wind
-var settle := 0.05                # m/s dust falling through the air
+var rise := float(OS.get_environment("BMX_SMOKE_RISE")) if OS.get_environment("BMX_SMOKE_RISE") != "" else 0.55   # m/s the dust rises through the air (more when riding fast)
 var vorticity := 0.9
 var extinction := 3.0
 var turbulence := 6.5             # curl-noise swirl force
@@ -402,9 +402,9 @@ func _gpu_step(dt: float, shift: Vector2i, clear: bool, src: PackedByteArray, n:
 	var q := 1 - p
 	var cl := rd.compute_list_begin()
 	_disp(cl, "advect", _sets["advect%d" % p], PackedFloat32Array([dt, H, shift.x, shift.y,
-		wind.x, wind.y, n, _sim_t, density_fade, vel_relax, settle, 6.0,
+		wind.x, wind.y, n, _sim_t, density_fade, vel_relax, rise * (1.0 + _fast * 1.6), 6.0,
 		origin.x, origin.y, turbulence * (1.0 + _fast * 1.2), turb_scale,
-		disperse * (1.0 + _fast * 2.5), disperse_reach * (1.0 + _fast * 0.8), 0, 0]))
+		disperse * (1.0 + _fast * 0.6), disperse_reach * (1.0 + _fast * 0.5), 0, 0]))
 	_disp(cl, "curl", _sets["curl%d" % q], PackedFloat32Array([dt, H, 0, 0]))
 	_disp(cl, "confine", _sets["confine%d" % q], PackedFloat32Array([dt, H, vorticity, 0]))
 	_disp(cl, "divergence", _sets["divergence%d" % q], PackedFloat32Array([dt, H, 0, 0]))

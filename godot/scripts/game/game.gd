@@ -41,6 +41,11 @@ var atmos := Atmos.new()
 var grime: Grime
 var dust: RideDust
 var sun_energy := RIDE_SUN
+# level light (tuning card › Light, LightSettings): time of day, day / night cycle
+var tod := 19.33             # the clock (hours); the cycle runs it, a slider move resets it
+var light_ver := -1          # LightSettings.version last applied
+var light_t := 0.0
+var amb_base := 0.36         # flat ambient for the GI setting (SDFGI brings its own sky light)
 var speed_k := 0.0           # 0..1 speed feel (FOV boost, edge blur)
 var photo := false           # photo mode: time frozen, HUD hidden, focus on the rider
 var _photo_last := 0
@@ -292,6 +297,79 @@ func set_scenic(on: bool) -> void:
 		env.volumetric_fog_density = 0.0012
 		env.tonemap_exposure = 0.8
 		cam.far = RIDE_FAR
+		light_ver = -1   # the level light (time of day) takes over on the next frame
+
+## level light: time of day -> sun (or moon at night), sky mode, ambient, fog, haze, exposure.
+## Applied when the Light sliders change; with the cycle on, the clock runs and it re-applies 10x / s.
+func _update_light(dt: float) -> void:
+	if scenic: return
+	LightSettings.ensure_loaded()
+	var L: Dictionary = LightSettings.current
+	var changed := light_ver != LightSettings.version
+	if changed:
+		light_ver = LightSettings.version
+		tod = float(L.time)
+	if float(L.cycle) > 0.5:
+		tod = fposmod(tod + dt * 24.0 / (maxf(float(L.day_min), 0.5) * 60.0), 24.0)
+		light_t += dt
+		if light_t < 0.1 and not changed: return
+		light_t = 0.0
+	elif not changed:
+		return
+	_apply_light(tod, L)
+
+
+## sun height through the day: up at 6:00, 62 deg at 13:00, down at 20:00, -50 deg in the middle of the night
+static func sun_elev_deg(h: float) -> float:
+	var x := fposmod(h - 6.0, 24.0)
+	return 62.0 * sin(PI * x / 14.0) if x <= 14.0 else -50.0 * sin(PI * (x - 14.0) / 10.0)
+
+
+func _apply_light(h: float, L: Dictionary) -> void:
+	var el_deg := sun_elev_deg(h)
+	var x := fposmod(h - 6.0, 24.0)
+	# the sun swings ~200 deg across the day; 16:00 = the old afternoon sun (SUN_AZ)
+	var yaw := deg_to_rad(rad_to_deg(atan2(SUN_AZ.y, SUN_AZ.x)) + float(L.sun_turn) + (x - 10.0) * (100.0 / 7.0))
+	var g := 1.0 - smoothstep(8.0, 30.0, el_deg)        # how golden (low sun)
+	var n := 1.0 - smoothstep(-9.0, 0.5, el_deg)        # how much night
+	var day := 1.0 - n
+	var gw := clampf(g * day * float(L.warmth), 0.0, 1.0)
+	var dirv: Vector3
+	if el_deg > -3.0:
+		var e := deg_to_rad(maxf(el_deg, 2.5))   # never light from below the ground
+		dirv = Vector3(cos(yaw) * cos(e), sin(e), sin(yaw) * cos(e))
+		sun.light_color = Color(1.0, 0.95, 0.87).lerp(Color(1.0, 0.6, 0.34), gw)
+		sun_energy = lerpf(RIDE_SUN, 2.2, g) * smoothstep(-3.0, 5.0, el_deg) * float(L.sun)
+	else:
+		var e := deg_to_rad(38.0)   # the moon, opposite the sun
+		dirv = Vector3(cos(yaw + PI) * cos(e), sin(e), sin(yaw + PI) * cos(e))
+		sun.light_color = Color(0.62, 0.72, 1.0)
+		sun_energy = 0.32 * float(L.moon) * smoothstep(-3.0, -10.0, el_deg)
+	sun.look_at_from_position(dirv, Vector3.ZERO, Vector3.UP)
+	# grazing light needs more bias (acne) and softer edges on the long shadows
+	sun.shadow_bias = lerpf(0.02, 0.08, g)
+	sun.shadow_normal_bias = lerpf(1.2, 3.0, g)
+	sun.shadow_blur = lerpf(1.0, 2.0, g) * float(L.shadow_soft)
+	# sky: blue + white clouds by day, golden low, stars at night; its photographed sun follows ours
+	sky_mat.set_shader_parameter("rotation", atan2(dirv.x, -dirv.z) - (HDRI_SUN_U - 0.5) * TAU)
+	sky_mat.set_shader_parameter("golden", gw)
+	sky_mat.set_shader_parameter("sunny", day * (1.0 - gw))
+	sky_mat.set_shader_parameter("night", n)
+	sky_mat.set_shader_parameter("light_energy", lerpf(lerpf(0.55, 0.85, g), 0.3, n) * float(L.sky))
+	env.ambient_light_energy = amb_base * float(L.sky) * lerpf(1.0, 0.5, n)
+	env.ambient_light_color = Color(0.55, 0.68, 0.9).lerp(Color(0.3, 0.4, 0.78), n)
+	# fog / haze
+	_ride_fog()
+	env.fog_density *= float(L.haze)
+	env.fog_light_color = RIDE_FOG.lerp(Color(0.93, 0.72, 0.55), g * day).lerp(Color(0.07, 0.09, 0.16), n)
+	env.fog_sun_scatter = 0.3 * g * day
+	env.fog_aerial_perspective = 0.75 * (1.0 - n)
+	env.volumetric_fog_albedo = Color(0.86, 0.9, 0.95).lerp(Color(1.0, 0.84, 0.66), g * day).lerp(Color(0.45, 0.55, 0.8), n)
+	env.volumetric_fog_density = 0.0012 * float(L.haze)
+	env.tonemap_exposure = lerpf(lerpf(0.8, 0.95, g), 1.6, n) * float(L.exposure)
+	env.adjustment_saturation = float(L.saturation) * lerpf(1.0, 0.8, n)
+	env.adjustment_contrast = float(L.contrast)
+
 
 ## the heading with the best view from the rider: nothing close blocking the eye line (ground + room
 ## for trees) and hills rising far off. Seen from a few metres up, like the lookout camera.
@@ -329,7 +407,9 @@ func _apply_settings() -> void:
 	env.ssil_enabled = gi >= 1
 	env.sdfgi_enabled = gi >= 2
 	# SDFGI adds its own sky light and occlusion: drop the flat ambient so valleys can go dark
-	env.ambient_light_energy = 0.26 if gi >= 2 else 0.36
+	amb_base = 0.26 if gi >= 2 else 0.36
+	env.ambient_light_energy = amb_base
+	light_ver = -1   # re-apply the level light on top
 	env.volumetric_fog_enabled = Settings.get_v("vol_fog")
 	dust.fog_on = env.volumetric_fog_enabled
 	atmos.wind_on = Settings.get_v("wind")
@@ -356,9 +436,16 @@ func msg_idle() -> bool:
 func flow_up() -> void:
 	phys.flow_up()
 
+const GRASS_SOIL_DUST := Color(0.52, 0.4, 0.28)   # what a tyre digs up through grass: brown soil
+
+## the colour of the dust kicked up here. With the smoke sim: the road's own colour (barely lighter: fine
+## dust), and on grass the brown soil under it (never green). The old sprites used a paler mix.
 func ground_dust(px: float, pz: float, s: int) -> Color:
 	if s == 2: return DUST_SPLASH
 	var c: Color = terrain.ground_color(px, pz)
+	if dust != null and dust.sim != null:
+		if s == 0: return GRASS_SOIL_DUST
+		return c.lerp(Color.WHITE, 0.16)   # the road's colour, a touch lighter (fine dust scatters more)
 	return c.lerp(Color.WHITE, 0.42 if s == 0 else 0.28)
 
 func burst(pos: Vector3, n: int, s: int, power: float, with_dust := true) -> void:
@@ -544,18 +631,20 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 		var turn_dir := signf(st.yaw_rate)
 		var carve_k := clampf((lat_a - 1.5) / 6, 0, 1)
 		var fast_k := clampf((va - 8) / 6, 0, 1)
+		# riding fast on dry ground throws a real trail: rises from ~18 km/h, full by ~50 km/h
+		var dust_k := clampf((va - 5.0) / 9.0, 0.0, 1.0) if dust.sim != null else 0.0
 		var rate := 0.0
 		if in_water: rate = 0.0
-		elif dirt: rate = fast_k * 14 + (clampf(va / 7.0, 0, 1) * 12.0 if dust.sim != null else 0.0) + (50.0 if skid_fx else 0.0) + carve_k * 60 + st.pedal * (6.0 if va < 3 else 0.0)
-		elif sand: rate = fast_k * 10 + (clampf(va / 7.0, 0, 1) * 10.0 if dust.sim != null else 0.0) + (40.0 if skid_fx else 0.0) + carve_k * 45 + st.pedal * (4.0 if va < 3 else 0.0)
+		elif dirt: rate = fast_k * 14 + dust_k * 280.0 + (clampf(va / 7.0, 0, 1) * 12.0 if dust.sim != null else 0.0) + (50.0 if skid_fx else 0.0) + carve_k * 60 + st.pedal * (6.0 if va < 3 else 0.0)
+		elif sand: rate = fast_k * 10 + dust_k * 240.0 + (clampf(va / 7.0, 0, 1) * 10.0 if dust.sim != null else 0.0) + (40.0 if skid_fx else 0.0) + carve_k * 45 + st.pedal * (4.0 if va < 3 else 0.0)
 		else: rate = (14.0 if skid_fx else 0.0) + carve_k * 12
 		var fxd: float = Settings.get_v("fx_density")
 		# the dust trail: a GPU particle emitter at the rear tyre (fx/ride_dust.gd), thrown back and up,
 		# flung outward in a carve
 		var d_out := turn_dir * carve_k * 3.5
 		var d_back := va * 0.3 * (1 - carve_k * 0.55)
-		var d_ev := Vector3(-f.x * d_back + side.x * d_out, 0.7 + carve_k * 0.4, -f.z * d_back + side.z * d_out)
-		var d_fan := rad_to_deg(atan2((1.6 + va * 0.18) * (1 - carve_k * 0.6) * 0.5, maxf(d_back, 0.6)))
+		var d_ev := Vector3(-f.x * d_back + side.x * d_out, 0.7 + carve_k * 0.4 + dust_k * 1.4, -f.z * d_back + side.z * d_out)
+		var d_fan := rad_to_deg(atan2((1.6 + va * 0.18) * (1 - carve_k * 0.6) * 0.5, maxf(d_back, 0.6))) + dust_k * 25.0
 		var d_a := (0.62 if skid_fx else 0.45) if dirt else ((0.55 if skid_fx else 0.4) if sand else 0.26)
 		dust.feed(rear, d_ev, rate * fxd, dcol, d_a, clampf(d_fan, 12.0, 70.0))
 		# the front tyre dusts too, less: it rolls (no drive / little skid), so it mostly lifts dust
@@ -772,6 +861,7 @@ func _process(dt: float) -> void:
 				if msg_t <= 0: flash(b)
 	# weather: wind, the bike parting the grass, cloud shadows (the sun dims with the shade at the rider)
 	atmos.update(t, dt, drawn_pos, 0.0 if st.air or st.crash_on else clampf(absf(st.v) / 2.0, 0.0, 1.0))
+	_update_light(dt)
 	sun.light_energy = sun_energy * atmos.shade
 	# the dust simulation around the rider (fx/smoke_sim.gd)
 	if st.crash_on and dust.sim != null: _crash_dust()
