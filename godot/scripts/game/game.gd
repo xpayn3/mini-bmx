@@ -972,7 +972,7 @@ func open_map() -> void:
 	if paper_map == null:
 		paper_map = PaperMap.new()
 		paper_map.game = self
-		paper_map.close_actions = [&"map", &"pause", &"bail"]
+		paper_map.close_actions = [&"map", &"pause", &"bail", &"ui_cancel"]   # B folds it away too (console back)
 		add_child(paper_map)
 		paper_map.closed.connect(_map_closed)
 	Engine.time_scale = 0.0

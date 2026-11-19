@@ -12,6 +12,12 @@ const MUTED := UITheme.L_MUTED
 ## paper_size (set both before adding it)
 var paper := false
 var paper_size := Vector2.ZERO
+## type scale: printed on the leaflet the page has room, so everything is drawn bigger
+var fs := 1.0
+var nav: PadNav
+var _tabs: TabContainer
+
+func _f(n: float) -> int: return int(round(n * fs))
 
 func _title() -> String: return ""
 func _pages() -> Array: return []   # ScrollContainers from _page()
@@ -19,7 +25,13 @@ func _pages() -> Array: return []   # ScrollContainers from _page()
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	if paper:
-		theme = UITheme.print_theme()
+		fs = 1.45
+		var t: Theme = UITheme.print_theme().duplicate()
+		t.default_font_size = _f(19)
+		for c in ["Button", "OptionButton", "CheckButton", "PopupMenu", "TabContainer", "TabBar", "LineEdit"]:
+			t.set_font_size("font_size", c, _f(19))
+		t.set_font_size("font_size", "TabContainer", _f(20))
+		theme = t
 		add_theme_stylebox_override("panel", StyleBoxEmpty.new())
 		size = paper_size
 		custom_minimum_size = paper_size
@@ -36,19 +48,21 @@ func _ready() -> void:
 ## its connection to `closed`.
 func _build(tab: int) -> void:
 	for c in get_children():
+		if c == nav: continue
 		remove_child(c); c.queue_free()
 	var vb := VBoxContainer.new()
 	vb.add_theme_constant_override("separation", Tokens.S4)
 	add_child(vb)
+	move_child(vb, 0)   # (before PadNav: a rebuild keeps the focused row's place in the tree)
 	var head := HBoxContainer.new()
 	head.add_theme_constant_override("separation", Tokens.S4)
-	var title := UITheme.display(_title().to_upper(), Tokens.T_3XL, INK, Tokens.SLANT_TITLE)
+	var title := UITheme.display(_title().to_upper(), _f(Tokens.T_3XL), INK, Tokens.SLANT_TITLE)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(title)
 	var done: Button
 	if paper:   # printed: the print theme's stamped button, a red rule under the heading
-		done = UITheme.button("Fold up", _close, 17)
-		done.custom_minimum_size = Vector2(110, 44)
+		done = UITheme.button("Fold up", _close, _f(17))
+		done.custom_minimum_size = Vector2(_f(110), _f(44))
 	else:
 		done = UITheme.make_button("DONE", _close, "primary", Tokens.T_XL)
 		done.custom_minimum_size.y = Tokens.H_BTN
@@ -66,6 +80,19 @@ func _build(tab: int) -> void:
 		tabs.add_child(page.get_parent())   # the page's ScrollContainer
 	tabs.get_tab_bar().add_theme_constant_override("h_separation", Tokens.S2)
 	tabs.current_tab = tab
+	_tabs = tabs
+	if not nav:   # D-pad / stick between rows, A press, B back (on paper the leaflet's B folds it), LB / RB tabs
+		nav = PadNav.attach(self, {"tab_container": tabs, "back": Callable() if paper else _close, "style": "paper" if paper else "card"})
+	else:
+		nav.root = self; nav.tab_container = tabs
+		tabs.tab_changed.connect(func(_i): if nav._pad_recent(): nav.focus_first.call_deferred())
+		nav._prep_all(self)
+		return   # rebuilt after a change: PadNav puts focus back on the same row
+	_first_focus.call_deferred()
+
+## focus the page's first control (rebuilt / opened); keeps the row it was on after a rebuild if it can
+func _first_focus() -> void:
+	if is_instance_valid(nav): nav.focus_first()
 
 func _close() -> void:
 	closed.emit()
@@ -76,7 +103,7 @@ func _reopen(tab: int) -> void:
 
 # ---------------------------------------------------------------- building blocks
 func _lbl(text: String, size := 16, color := INK, black := false) -> Label:
-	return UITheme.label(text, size, color, black)
+	return UITheme.label(text, _f(size), color, black)
 
 func _page(name_: String) -> VBoxContainer:
 	var sc := ScrollContainer.new()
@@ -84,7 +111,8 @@ func _page(name_: String) -> VBoxContainer:
 	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	var vb := VBoxContainer.new()
 	vb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	vb.add_theme_constant_override("separation", 10)
+	vb.add_theme_constant_override("separation", _f(10))
+	sc.follow_focus = true
 	sc.add_child(vb)
 	return vb
 
@@ -96,7 +124,7 @@ func _section(parent: Control, text: String) -> void:
 	hb.add_theme_constant_override("separation", 8)
 	var tick := ColorRect.new()
 	tick.color = UITheme.ACCENT
-	tick.custom_minimum_size = Vector2(5, 16)
+	tick.custom_minimum_size = Vector2(5, _f(16))
 	tick.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	hb.add_child(tick)
 	hb.add_child(_lbl(text, 13, INK, true))
@@ -110,13 +138,14 @@ func _hint(parent: Control, text: String) -> void:
 
 func _row(parent: Control, text: String, ctl: Control, tip := "") -> void:
 	var hb := HBoxContainer.new()
-	hb.custom_minimum_size.y = 38
-	var l := _lbl(text, 16)
+	hb.custom_minimum_size.y = _f(38)
+	hb.set_meta("nav_row", true)   # PadNav marks the whole row when its control has focus
+	var l := _lbl("  " + text, 16)   # (room for the focus marker's bar)
 	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	l.tooltip_text = tip
 	l.mouse_filter = Control.MOUSE_FILTER_PASS
-	ctl.custom_minimum_size.x = 260
+	ctl.custom_minimum_size.x = _f(260)
 	hb.add_child(l); hb.add_child(ctl)
 	parent.add_child(hb)
 
@@ -142,7 +171,7 @@ func _slider_row(parent: Control, text: String, lo: float, hi: float, stepv: flo
 	s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	s.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var vl := _lbl(fmt % s.value, 15, MUTED)
-	vl.custom_minimum_size.x = 56
+	vl.custom_minimum_size.x = _f(56)
 	vl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	# while dragging only the label follows: applying a setting re-sets the window, viewport, shadows,
 	# audio and bindings and writes the file, so it happens once on release (keys / wheel / reset: at once)

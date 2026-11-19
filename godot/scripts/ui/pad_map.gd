@@ -58,6 +58,7 @@ const PHOTO_AT := {
 var _photo: Texture2D
 
 var _hover := ""
+var _sel := 0          # pad / keys: the callout picked (index in controls) while this has focus
 var _popup: PopupMenu
 var _popup_ctl: Array = []
 var _popup_items: Array = []
@@ -70,8 +71,11 @@ func _ready() -> void:
 		for c in controls:
 			c[4] = PHOTO_AT[c[0]] * sz
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	focus_mode = Control.FOCUS_ALL   # pad: D-pad moves between the callouts, A changes one
+	focus_entered.connect(queue_redraw); focus_exited.connect(queue_redraw)
 	_popup = PopupMenu.new()
 	_popup.theme = UITheme.light_theme()
+	_popup.add_theme_font_size_override("font_size", 20)   # (readable on the paper sheet, picked with the pad)
 	add_child(_popup)
 	_popup.id_pressed.connect(_picked)
 
@@ -178,7 +182,7 @@ func _draw() -> void:
 	# callout lines first: the controller is drawn over them, only their ends show
 	for c in controls:
 		var r := _label_rect(c)
-		var on: bool = _hover == c[0] or _pressed(c)
+		var on: bool = _hover == c[0] or _pressed(c) or (has_focus() and controls[_sel][0] == c[0])
 		var anchor: Vector2 = o + c[4]
 		var edge := Vector2(r.end.x, r.get_center().y) if c[5] == 0 else Vector2(r.position.x, r.get_center().y)
 		var mid := Vector2(anchor.x + (-26.0 if c[5] == 0 else 26.0), edge.y)
@@ -187,7 +191,7 @@ func _draw() -> void:
 	_draw_pad(o)
 	for c in controls:
 		var r := _label_rect(c)
-		var hot: bool = _hover == c[0]
+		var hot: bool = _hover == c[0] or (has_focus() and controls[_sel][0] == c[0])
 		var lit: bool = _pressed(c)
 		var col := C_HOT if (hot or lit) else UITheme.L_LINE
 		var bg := Color(1, 1, 1, 1.0 if hot else 0.85)
@@ -304,6 +308,26 @@ func _draw_pad(o: Vector2) -> void:
 
 # ------------------------------------------------------------------ input
 func _gui_input(e: InputEvent) -> void:
+	if e.is_action_pressed(&"ui_accept") and not e.is_echo():
+		var c: Array = controls[_sel]
+		var r := _label_rect(c)
+		_open(c, get_global_transform_with_canvas() * Vector2(r.position.x, r.end.y))
+		accept_event(); return
+	for a in [&"ui_up", &"ui_down", &"ui_left", &"ui_right"]:
+		if e.is_action_pressed(a, true):
+			var c: Array = controls[_sel]
+			var side: int = c[5]; var row: int = c[6]
+			match a:
+				&"ui_up": row -= 1
+				&"ui_down": row += 1
+				&"ui_left": side -= 1
+				&"ui_right": side += 1
+			if row < 0 or row > 7: return   # off the top / bottom: on to the rows above / below
+			side = clampi(side, 0, 1)
+			for i in controls.size():
+				if controls[i][5] == side and controls[i][6] == row: _sel = i
+			queue_redraw()
+			accept_event(); return
 	if e is InputEventMouseMotion:
 		var h := _hit(e.position)
 		if h != _hover:

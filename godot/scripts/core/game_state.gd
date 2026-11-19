@@ -51,6 +51,7 @@ func bike_config() -> Dictionary:
 	return cfg
 
 func save() -> void:
+	if OS.get_environment("BMX_PADSEQ") != "": return   # menu tests: never into the player\'s files
 	var cf := ConfigFile.new()
 	cf.set_value("game", "bike", bike_id)
 	for k in records:

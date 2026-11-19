@@ -78,7 +78,7 @@ func _ready() -> void:
 	head.add_child(t)
 	var rs := UITheme.button("Reset", _reset_category, 13)
 	rs.tooltip_text = "Reset the sliders on this tab"
-	rs.custom_minimum_size = Vector2(0, 30); rs.focus_mode = Control.FOCUS_NONE
+	rs.custom_minimum_size = Vector2(0, 30)
 	head.add_child(rs)
 	head.add_child(UITheme.close_button(func(): get_tree().call_group("hud", "close_sides")))
 	vb.add_child(head)
@@ -107,6 +107,32 @@ func _ready() -> void:
 		b.pressed.connect(func(): show_tab(d[0]))
 		tab_row.add_child(b)
 	show_tab(tab)
+	# Xbox, while the ride is paused (pause > Tuning): D-pad / stick rows, left / right values, A press,
+	# LB / RB category (on into the next tab), B close. Riding, the pad rides: nothing in here keeps focus.
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	nav = PadNav.attach(self, {"tabs": _pad_cat, "back": func(): get_tree().call_group("hud", "close_sides"), "style": "dark",
+		"first": func(): return PadNav.find_focusable(list)})
+	get_viewport().gui_focus_changed.connect(func(c):
+		if c and is_ancestor_of(c) and not get_tree().paused: c.release_focus.call_deferred())
+
+var nav: PadNav
+
+## LB / RB: the next / previous category, on into the next / previous tab at the ends
+func _pad_cat(d: int) -> void:
+	var cats := _cats()
+	var i: int = last_cat[tab] + d
+	if i < 0 or i >= cats.size():
+		var ti := 0
+		for j in TABS.size():
+			if TABS[j][0] == tab: ti = j
+		ti = wrapi(ti + d, 0, TABS.size())
+		last_cat[TABS[ti][0]] = 0 if d > 0 else TABS[ti][2].size() - 1
+		show_tab(TABS[ti][0])
+		return
+	last_cat[tab] = i
+	for k in cat_row.get_child_count():
+		(cat_row.get_child(k) as Button).button_pressed = k == i
+	_fill()
 
 
 ## open on a tab (re-reads every value, so nothing shows stale after a reset elsewhere)
@@ -150,7 +176,7 @@ func _fill() -> void:
 	var cat: Array = cats[clampi(last_cat[tab], 0, cats.size() - 1)]
 	if tab == "rider":
 		var sv := UITheme.button("Side view", func(): game.cam.set_mode("side"); game.flash("Side view"), 12)
-		sv.custom_minimum_size = Vector2(0, 28); sv.focus_mode = Control.FOCUS_NONE
+		sv.custom_minimum_size = Vector2(0, 28)
 		list.add_child(sv)
 	for src: String in cat[1]:
 		if src.begins_with("T:") and not src.begins_with("T:Dust"):
@@ -211,15 +237,18 @@ func _slider(label: String, lo: float, hi: float, stp: float, val: float, def: f
 	var s := HSlider.new()
 	s.min_value = lo; s.max_value = hi; s.step = stp; s.value = val
 	s.size_flags_horizontal = Control.SIZE_EXPAND_FILL; s.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	s.focus_mode = Control.FOCUS_NONE
 	var vl := UITheme.label(fmt.call(val), 12, UITheme.MUTED)
 	vl.custom_minimum_size.x = 70; vl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	s.value_changed.connect(func(v): vl.text = fmt.call(v); on_change.call(v))
 	if pin: hb.add_child(pin)
 	hb.add_child(l); hb.add_child(vl)
 	hb.add_child(UITheme.reset_button(s, def))
-	list.add_child(hb)
-	list.add_child(s)
+	var box := VBoxContainer.new()   # name row + slider: one row for the pad's focus marker
+	box.add_theme_constant_override("separation", 0)
+	box.set_meta("nav_row", true)
+	box.add_child(hb)
+	box.add_child(s)
+	list.add_child(box)
 	s.set_meta("value_label", vl)
 	s.set_meta("fmt", fmt)
 	return s
@@ -266,7 +295,6 @@ func _seat_toggle() -> void:
 	c.text = "Keep hips above the saddle"
 	c.tooltip_text = "Never let the rider sink into the seat when sitting back"
 	c.button_pressed = bool(pose.get("seatFloor", false))
-	c.focus_mode = Control.FOCUS_NONE
 	c.add_theme_font_size_override("font_size", 13)
 	c.toggled.connect(func(on): pose.seatFloor = on; _apply_pose())
 	list.add_child(c)
@@ -289,7 +317,7 @@ func _look_group(group: String) -> void:
 		for k in RiderPanels.KITS:
 			var b := UITheme.button(k[0], func():
 				look = Rider.DEFAULT_LOOK.duplicate(); look.merge(k[1], true); _apply_look(); _fill(), 13)
-			b.size_flags_horizontal = Control.SIZE_EXPAND_FILL; b.focus_mode = Control.FOCUS_NONE
+			b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			kits.add_child(b)
 		list.add_child(kits)
 		return
@@ -312,12 +340,13 @@ func _look_group(group: String) -> void:
 				b.add_theme_stylebox_override("normal", UITheme.box(Color(hex), 11, 0, Color.WHITE if on else Color(1, 1, 1, 0.2), 2 if on else 1))
 				b.add_theme_stylebox_override("hover", UITheme.box(Color(hex), 11, 0, UITheme.ACCENT, 2))
 				b.add_theme_stylebox_override("pressed", UITheme.box(Color(hex), 11, 0, UITheme.ACCENT, 2))
-				b.focus_mode = Control.FOCUS_NONE
+				b.add_theme_stylebox_override("focus", UITheme.box(Color(0, 0, 0, 0), 11, 0, UITheme.ACCENT, 3))
 				b.pressed.connect(func(): look[key] = hex; _apply_look(); _fill())
 				hb.add_child(b)
 			var cp := ColorPickerButton.new()
 			cp.color = Color(look[key]); cp.edit_alpha = false
 			cp.custom_minimum_size = Vector2(30, 22)
+			cp.focus_mode = Control.FOCUS_NONE   # (the pad uses the swatches)
 			cp.tooltip_text = "Any colour"
 			cp.color_changed.connect(func(c): look[key] = "#" + c.to_html(false); _apply_look())
 			hb.add_child(cp)
@@ -339,7 +368,7 @@ func _preset_bar(store, title := "Preset") -> void:
 	var hb := HBoxContainer.new()
 	hb.add_theme_constant_override("separation", 4)
 	var ob := OptionButton.new()
-	ob.size_flags_horizontal = Control.SIZE_EXPAND_FILL; ob.focus_mode = Control.FOCUS_NONE
+	ob.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	ob.add_theme_font_size_override("font_size", 13)
 	var names: Array = store.names()
 	var act: String = store.get_active()
@@ -355,7 +384,7 @@ func _preset_bar(store, title := "Preset") -> void:
 	if not store.is_builtin(act):
 		var del := UITheme.button("Delete", func():
 			store.delete(act); game.flash("Deleted \"%s\"" % act); _fill(), 12)
-		del.custom_minimum_size = Vector2(0, 28); del.focus_mode = Control.FOCUS_NONE
+		del.custom_minimum_size = Vector2(0, 28)
 		del.tooltip_text = "Delete this preset of yours"
 		hb.add_child(del)
 	list.add_child(hb)
@@ -376,7 +405,7 @@ func _preset_bar(store, title := "Preset") -> void:
 	le.text_submitted.connect(func(_t): save.call())
 	sv.add_child(le)
 	var sb := UITheme.button("Save as", save, 12)
-	sb.custom_minimum_size = Vector2(0, 28); sb.focus_mode = Control.FOCUS_NONE
+	sb.custom_minimum_size = Vector2(0, 28)
 	sb.tooltip_text = "Save these sliders as your own preset"
 	sv.add_child(sb)
 	list.add_child(sv)
@@ -404,7 +433,6 @@ func _light_group(which: String) -> void:
 		var cy := CheckButton.new()
 		cy.text = "Day / night cycle (the clock runs)"
 		cy.button_pressed = LightSettings.get_value("cycle") > 0.5
-		cy.focus_mode = Control.FOCUS_NONE
 		cy.add_theme_font_size_override("font_size", 13)
 		cy.toggled.connect(func(on):
 			if on: LightSettings.current.time = game.tod   # carry on from the time shown now
@@ -435,6 +463,7 @@ func _tick_clock() -> void:
 
 
 func _process(_dt: float) -> void:
+	if nav: nav.enabled = get_tree().paused   # riding (P / K / L) the pad rides the bike, not this card
 	if visible and tab == "light": _tick_clock()
 
 
@@ -445,7 +474,6 @@ func _freewheel_group() -> void:
 	var pv := CheckButton.new()
 	pv.text = "Preview (spin the wheel while standing)"
 	pv.button_pressed = FreewheelSound.preview_speed > 0.0
-	pv.focus_mode = Control.FOCUS_NONE
 	pv.add_theme_font_size_override("font_size", 13)
 	list.add_child(pv)
 	var pspeed := [FreewheelSound.preview_speed if FreewheelSound.preview_speed > 0.0 else 4.0]

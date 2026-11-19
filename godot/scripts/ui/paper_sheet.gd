@@ -65,7 +65,7 @@ var _dim: ColorRect
 var _mat: ShaderMaterial
 var _tex: Texture2D
 var _sound: AudioStreamPlayer
-var sound_stream: AudioStream        # set before add_child: a recording to play slices of (null = the synthesised rustle)
+var sound_stream: AudioStream        # set before add_child: a recording to play slices of (null = silent: only the user's recordings)
 var sound_db := -6.0
 var _snd_t := -1.0                   # seconds into the current slice (-1 = silent)
 var _snd_len := 0.0                  # how long this slice plays (it fades out over its last 40 %)
@@ -190,7 +190,7 @@ func setup(p_size: Vector2i, c_size := Vector2i.ZERO) -> void:
 	_view.texture = _vp.get_texture()
 	add_child(_view)
 	_sound = AudioStreamPlayer.new()
-	_sound.stream = sound_stream if sound_stream else rustle_sound()
+	_sound.stream = sound_stream   # only the user's recordings: no stream = silent (never the synthesised rustle)
 	_sound.bus = "SFX" if AudioServer.get_bus_index("SFX") >= 0 else "Master"
 	_sound.volume_db = sound_db
 	add_child(_sound)
@@ -271,8 +271,9 @@ func close(now := false) -> void:
 
 
 ## a slice of the sound: a recording plays from a random spot (no two unfolds sound the same), faded out
-## by the end; the synthesised rustle plays from its start
+## by the end
 func _play_slice(pitch: float, secs: float) -> void:
+	if not sound_stream or not _sound: return
 	_sound.pitch_scale = pitch
 	var from := 0.0
 	var total := _sound.stream.get_length()
@@ -406,7 +407,7 @@ func _process(_dt: float) -> void:
 
 func _input(e: InputEvent) -> void:
 	if state == 0 or state == 3 or not visible: return   # folding away: the game has its input back
-	for a in close_actions:
+	for a in ([] if _page_busy() else close_actions):   # an open dropdown / a rebind waiting takes B itself
 		if e.is_action_pressed(a) and not e.is_echo():
 			get_viewport().set_input_as_handled()
 			close_requested.emit()
@@ -424,6 +425,16 @@ func _input(e: InputEvent) -> void:
 		else:
 			page.push_input(e)
 	get_viewport().set_input_as_handled()   # nothing reaches the game while the paper is up
+
+
+## the live page has a dropdown open, or something waiting for a key / button (group "nav_modal")
+func _page_busy() -> bool:
+	if not live or not page: return false
+	for w in page.get_embedded_subwindows():
+		if w.visible: return true
+	for n in get_tree().get_nodes_in_group(&"nav_modal"):
+		if page.is_ancestor_of(n): return true
+	return false
 
 
 ## the root viewport's (stretched) coordinates -> window pixels (= the 3D view's)
@@ -513,7 +524,7 @@ var _hint_pad := false
 func prompt_items() -> Array:
 	if not handheld: return []
 	if Settings.pad_active:
-		return [[["LS"], "Travel"], [["RT", "LT"], "Zoom"], [["RS"], "Tilt"], [[PadGlyph.glyph_for("map")], "Close"]]
+		return [[["LS"], "Travel"], [["RT", "LT"], "Zoom"], [["RS"], "Tilt"], [["B"], "Close"]]
 	return [[["K:W", "K:A", "K:S", "K:D"], "Travel"], [["K:Q", "K:E", "WHEEL"], "Zoom"], [["MOUSE"], "Drag"], [[PadGlyph.glyph_for("map")], "Close"]]
 
 ## the controls at the bottom of the screen, as button icons (pad or keys, whichever is in use)
@@ -733,29 +744,3 @@ void fragment() {
 }
 """
 	return s
-
-
-## paper being unfolded: filtered noise in crackly bursts (rendered once, shared)
-static var _rustle: AudioStreamWAV
-static func rustle_sound() -> AudioStreamWAV:
-	if _rustle: return _rustle
-	var rate := 22050
-	var n := int(rate * 1.1)
-	var data := PackedByteArray(); data.resize(n * 2)
-	var rng := RandomNumberGenerator.new(); rng.seed = 77
-	var lp := 0.0; var prev := 0.0
-	var burst := 0.0
-	for i in n:
-		var t := float(i) / rate
-		if rng.randf() < 0.0035: burst = rng.randf_range(0.4, 1.0)   # a crinkle
-		burst *= 0.9975
-		var env := minf(1.0, t / 0.05) * clampf((1.1 - t) / 0.4, 0.0, 1.0)
-		lp += (rng.randf_range(-1.0, 1.0) - lp) * 0.55
-		var hp := lp - prev; prev = lp
-		data.encode_s16(i * 2, clampi(int(hp * (0.12 + burst) * env * 0.7 * 32767.0), -32768, 32767))
-	_rustle = AudioStreamWAV.new()
-	_rustle.format = AudioStreamWAV.FORMAT_16_BITS
-	_rustle.mix_rate = rate
-	_rustle.stereo = false
-	_rustle.data = data
-	return _rustle

@@ -134,6 +134,7 @@ static func load_pose(bike_id: String, bike_pose: Dictionary) -> Dictionary:
 	return p
 
 static func save_pose(bike_id: String, p: Dictionary) -> void:
+	if OS.get_environment("BMX_PADSEQ") != "": return   # menu tests: never into the player\'s files
 	var cf := ConfigFile.new(); cf.load(PATH)
 	if cf.has_section("pose_" + bike_id): cf.erase_section("pose_" + bike_id)
 	for k in p: cf.set_value("pose_" + bike_id, k, p[k])
@@ -152,6 +153,7 @@ static func load_look() -> Dictionary:
 	return l
 
 static func save_look(l: Dictionary) -> void:
+	if OS.get_environment("BMX_PADSEQ") != "": return   # menu tests: never into the player\'s files
 	var cf := ConfigFile.new(); cf.load(PATH)
 	for k in l: cf.set_value("look", k, l[k])
 	cf.save(PATH)
@@ -167,7 +169,6 @@ static func pad_style_picker(current: String, on_pick: Callable, size := 13) -> 
 		var b := UITheme.button(st[1], func(): on_pick.call(id), size)
 		b.toggle_mode = true
 		b.button_pressed = id == current
-		b.focus_mode = Control.FOCUS_NONE
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		grid.add_child(b)
 	return grid

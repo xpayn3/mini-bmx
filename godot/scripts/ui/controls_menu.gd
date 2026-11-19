@@ -20,7 +20,7 @@ func _bindings() -> Control:
 	return p
 
 func _fill_bindings() -> void:
-	for c in _bind_box.get_children(): c.queue_free()
+	for c in _bind_box.get_children(): _bind_box.remove_child(c); c.queue_free()
 	_hint(_bind_box, "Click a binding, then press the new key / button (Esc cancels).")
 	var grid := GridContainer.new()
 	grid.columns = 3
@@ -30,7 +30,7 @@ func _fill_bindings() -> void:
 	var a := _lbl("ACTION", 12, MUTED, true); a.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	grid.add_child(a)
 	for t in ["KEYBOARD", "GAMEPAD"]:
-		var h := _lbl(t, 12, MUTED, true); h.custom_minimum_size.x = 160
+		var h := _lbl(t, 12, MUTED, true); h.custom_minimum_size.x = _f(160)
 		grid.add_child(h)
 	for action in Settings.ACTIONS:
 		var l := _lbl(Settings.ACTIONS[action][0], 15)
@@ -41,12 +41,12 @@ func _fill_bindings() -> void:
 			var b := GlyphButton.new()
 			b.action = action; b.pad = pad
 			b.tooltip_text = Settings.binding_text(action, pad)
-			b.custom_minimum_size = Vector2(160, 38)
-			b.add_theme_font_size_override("font_size", 14)
+			b.custom_minimum_size = Vector2(_f(160), _f(38))
+			b.add_theme_font_size_override("font_size", _f(14))
 			b.pressed.connect(_start_rebind.bind(action, pad, b))
 			grid.add_child(b)
 	var hb := HBoxContainer.new()
-	hb.add_child(UITheme.button("Reset all controls", func(): Settings.reset_bindings(); _fill_bindings.call_deferred(), 15))
+	hb.add_child(UITheme.button("Reset all controls", func(): Settings.reset_bindings(); _fill_bindings.call_deferred(), _f(15)))
 	_bind_box.add_child(hb)
 	_section(_bind_box, "TIPS")
 	if Settings.pad_active:
@@ -59,11 +59,25 @@ func _start_rebind(action: String, pad: bool, b: Button) -> void:
 		_wait_btn.text = ""; _wait_btn.queue_redraw()
 	_wait_action = action; _wait_pad = pad; _wait_btn = b
 	b.text = "press…"; b.queue_redraw()
+	_modal(true)
+
+## while waiting for a key / button nothing else may take it (menu navigation, the leaflet's B)
+func _modal(on: bool) -> void:
+	if is_instance_valid(nav): nav.enabled = not on
+	if on: add_to_group(&"nav_modal")
+	elif is_in_group(&"nav_modal"): remove_from_group(&"nav_modal")
+
+## after the list is rebuilt: focus the binding that was just changed
+func _refocus(action: String, pad: bool) -> void:
+	for c in _bind_box.get_children():
+		if c is GridContainer:
+			for b in c.get_children():
+				if b is GlyphButton and b.action == action and b.pad == pad: b.grab_focus(); return
 
 func _input(e: InputEvent) -> void:
 	if _wait_action == "": return
 	if e is InputEventKey and e.pressed and e.physical_keycode == KEY_ESCAPE and not _wait_pad:
-		_wait_btn.text = ""; _wait_btn.queue_redraw(); _wait_action = ""
+		_wait_btn.text = ""; _wait_btn.queue_redraw(); _wait_action = ""; _modal(false)
 		get_viewport().set_input_as_handled(); return
 	var ok := false
 	if not _wait_pad and e is InputEventKey and e.pressed:
@@ -76,9 +90,12 @@ func _input(e: InputEvent) -> void:
 		var em := InputEventJoypadMotion.new(); em.axis = e.axis; em.axis_value = signf(e.axis_value)
 		Settings.rebind(_wait_action, em, 1); ok = true
 	if ok:
+		var was := [_wait_action, _wait_pad]
 		_wait_action = ""
 		get_viewport().set_input_as_handled()
 		_fill_bindings.call_deferred()
+		_refocus.call_deferred(was[0], was[1])
+		get_tree().create_timer(0.25, true, false, true).timeout.connect(_modal.bind(false))   # the button's release isn't a menu press
 
 # ---------------------------------------------------------------- camera + riding
 func _camera() -> Control:
@@ -104,7 +121,7 @@ func _camera() -> Control:
 	_check(p, "Always keep the rider in view", "cam_keep")
 	_check(p, "Fade things at the lens", "cam_fade", "Trees and rocks right in front of the camera dissolve")
 	var hb := HBoxContainer.new()
-	hb.add_child(UITheme.button("Reset camera", _reset_camera, 15))
+	hb.add_child(UITheme.button("Reset camera", _reset_camera, _f(15)))
 	p.add_child(hb)
 	_section(p, "RIDING")
 	_tune_slider(p, "Top speed", "topSpeed", "×%.2f",
@@ -131,5 +148,5 @@ class GlyphButton extends Button:
 			var f := get_theme_font("font")
 			draw_string(f, Vector2(0, size.y * 0.5 + 5), "—", HORIZONTAL_ALIGNMENT_CENTER, size.x, 14, Color(0, 0, 0, 0.4))
 			return
-		PadGlyph.draw(self, g, size * 0.5, minf(26.0, size.y - 8.0))
+		PadGlyph.draw(self, g, size * 0.5, minf(36.0, size.y - 14.0))
 

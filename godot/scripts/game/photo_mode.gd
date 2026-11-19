@@ -90,6 +90,10 @@ var _pages := {}
 var _tab_btns := {}
 var _ui_hidden := false
 var _shots := 0
+var _edit := false            # pad: Menu puts the D-pad / stick on the card (camera held), B / Menu back to the camera
+var _nav: PadNav
+var _help_l: Label
+var _cur_tab := "Camera"
 
 func _ready() -> void:
 	layer = 6
@@ -133,6 +137,7 @@ func open() -> void:
 
 func close() -> void:
 	if not active: return
+	_set_edit(false)
 	active = false
 	visible = false
 	_drag = 0
@@ -177,7 +182,7 @@ func update(dt: float) -> void:
 		V.roll = clampf(V.roll + (_k(KEY_X) - _k(KEY_Z)) * 40.0 * dt, -45.0, 45.0)
 		if Input.is_physical_key_pressed(KEY_EQUAL) or Input.is_physical_key_pressed(KEY_KP_ADD): _zoom(pow(0.4, dt))
 		if Input.is_physical_key_pressed(KEY_MINUS) or Input.is_physical_key_pressed(KEY_KP_SUBTRACT): _zoom(pow(2.5, dt))
-	if not Settings._test_run:
+	if not Settings._test_run and not _edit:
 		var lx := _axis(JOY_AXIS_LEFT_X); var ly := _axis(JOY_AXIS_LEFT_Y)
 		mv.x += lx; mv.z -= ly
 		mv.y += Input.get_joy_axis(0, JOY_AXIS_TRIGGER_RIGHT) - Input.get_joy_axis(0, JOY_AXIS_TRIGGER_LEFT)
@@ -309,13 +314,16 @@ func _unhandled_input(e: InputEvent) -> void:
 			_: handled = false
 	elif e is InputEventKey:
 		handled = false
-	elif e is InputEventJoypadButton and e.pressed and not Settings._test_run:
-		match (e as InputEventJoypadButton).button_index:
-			JOY_BUTTON_A: capture()
-			JOY_BUTTON_B: game.toggle_photo()
-			JOY_BUTTON_Y: _set_ui_hidden(not _ui_hidden)
-			JOY_BUTTON_X: _set_value("grid", float((int(V.grid) + 1) % GRIDS.size()))
-			_: handled = false
+	elif e is InputEventJoypadButton and e.pressed and (not Settings._test_run or OS.get_environment("BMX_PAD") != ""):
+		var bi := (e as InputEventJoypadButton).button_index
+		if bi == JOY_BUTTON_START: _set_edit(not _edit)
+		elif _edit: handled = false   # the card has the pad (PadNav: B = back to the camera)
+		else: match bi:
+				JOY_BUTTON_A: capture()
+				JOY_BUTTON_B: game.toggle_photo()
+				JOY_BUTTON_Y: _set_ui_hidden(not _ui_hidden)
+				JOY_BUTTON_X: _set_value("grid", float((int(V.grid) + 1) % GRIDS.size()))
+				_: handled = false
 	else:
 		handled = false
 	if handled: get_viewport().set_input_as_handled()
@@ -517,6 +525,34 @@ func _set_ui_hidden(h: bool) -> void:
 	_ui_hidden = h
 	_card.visible = not h
 	_help.visible = not h
+	_help_text()
+
+## pad: Menu = edit the card's settings (D-pad / stick rows, left / right change, LB / RB tabs, A press),
+## B / Menu = back to flying the camera
+func _set_edit(on: bool) -> void:
+	_edit = on
+	if not _nav: return
+	_nav.enabled = on
+	if on:
+		if _ui_hidden: _set_ui_hidden(false)
+		_nav.focus_first()
+	else:
+		var f := _card.get_viewport().gui_get_focus_owner()
+		if f and _card.is_ancestor_of(f): f.release_focus()
+	_help_text()
+
+func _help_text() -> void:
+	if not _help_l: return
+	if Settings.pad_active or _edit:
+		_help_l.text = ("D-pad / stick choose · ◀ ▶ change · LB / RB tab · A press · B / Menu done" if _edit else
+			"LS fly · RS look · LT / RT down / up · LB / RB roll · D-pad zoom · A shoot · X grid · Y hide · Menu settings · B leave")
+	else:
+		_help_l.text = "WASD fly · Q/E down/up · Shift fast · right drag look · left drag orbit · middle drag pan · wheel dolly · Z/X roll · F focus · Enter shoot · Tab hide · O leave"
+
+func _pad_tab(d: int) -> void:
+	var i := wrapi(TABS.find(_cur_tab) + d, 0, TABS.size())
+	(_tab_btns[TABS[i]] as Button).button_pressed = true
+	_show_tab(TABS[i])
 
 func _build_ui() -> void:
 	_ui = Control.new()
@@ -593,12 +629,10 @@ func _build_ui() -> void:
 			l.custom_minimum_size = Vector2(290, 0)
 			pg.add_child(l)
 		var rb := UITheme.button("Reset %s" % tname.to_lower(), _reset_tab.bind(tname), 14)
-		rb.focus_mode = Control.FOCUS_NONE
 		rb.custom_minimum_size = Vector2(0, 32)
 		pg.add_child(rb)
 
 	var shoot := UITheme.button("Take photo  (Enter)", capture, 18)
-	shoot.focus_mode = Control.FOCUS_NONE
 	shoot.add_theme_color_override("font_color", Color(0.08, 0.08, 0.08))
 	shoot.add_theme_color_override("font_hover_color", Color(0, 0, 0))
 	shoot.add_theme_color_override("font_pressed_color", Color(0, 0, 0))
@@ -610,10 +644,10 @@ func _build_ui() -> void:
 	var of := UITheme.button("Open folder", func():
 		DirAccess.make_dir_recursive_absolute("user://screenshots")
 		OS.shell_open(ProjectSettings.globalize_path("user://screenshots")), 14)
-	of.focus_mode = Control.FOCUS_NONE; of.size_flags_horizontal = Control.SIZE_EXPAND_FILL; of.custom_minimum_size = Vector2(0, 34)
+	of.size_flags_horizontal = Control.SIZE_EXPAND_FILL; of.custom_minimum_size = Vector2(0, 34)
 	row.add_child(of)
 	var lv := UITheme.button("Leave  (O)", func(): game.toggle_photo(), 14)
-	lv.focus_mode = Control.FOCUS_NONE; lv.size_flags_horizontal = Control.SIZE_EXPAND_FILL; lv.custom_minimum_size = Vector2(0, 34)
+	lv.size_flags_horizontal = Control.SIZE_EXPAND_FILL; lv.custom_minimum_size = Vector2(0, 34)
 	row.add_child(lv)
 	col.add_child(row)
 	_status = UITheme.label("", 13, UITheme.MUTED)
@@ -626,8 +660,10 @@ func _build_ui() -> void:
 	_help.offset_left = 16; _help.offset_top = -44; _help.offset_bottom = -16
 	_help.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	_help.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var hl := UITheme.label("WASD fly · Q/E down/up · Shift fast · right drag look · left drag orbit · middle drag pan · wheel dolly · Z/X roll · F focus · Enter shoot · Tab hide · O leave", 13, Color(1, 1, 1, 0.8))
+	var hl := UITheme.label("", 13, Color(1, 1, 1, 0.8))
 	_help.add_child(hl)
+	_help_l = hl
+	_help_text()
 	_ui.add_child(_help)
 
 	_flash = ColorRect.new()
@@ -637,8 +673,14 @@ func _build_ui() -> void:
 	add_child(_flash)
 	(_tab_btns["Camera"] as Button).button_pressed = true
 	_show_tab("Camera")
+	_nav = PadNav.attach(_card, {"tabs": _pad_tab, "back": _set_edit.bind(false), "style": "dark",
+		"first": func(): return PadNav.find_focusable(_pages[_cur_tab])})
+	_nav.enabled = false
+	_card.get_viewport().gui_focus_changed.connect(func(c):   # flying, nothing on the card keeps focus (arrows / stick)
+		if c and _card.is_ancestor_of(c) and not _edit: c.release_focus.call_deferred())
 
 func _show_tab(tname: String) -> void:
+	_cur_tab = tname
 	for k in _pages: (_pages[k] as Control).visible = k == tname
 
 func _add_row(parent: VBoxContainer, d: Array) -> void:
@@ -648,7 +690,6 @@ func _add_row(parent: VBoxContainer, d: Array) -> void:
 		"t":
 			var c := CheckButton.new()
 			c.text = d[1]
-			c.focus_mode = Control.FOCUS_NONE
 			c.add_theme_font_size_override("font_size", 15)
 			c.toggled.connect(func(on: bool):
 				V[k] = 1.0 if on else 0.0
@@ -661,7 +702,6 @@ func _add_row(parent: VBoxContainer, d: Array) -> void:
 			l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			h.add_child(l)
 			var ob := OptionButton.new()
-			ob.focus_mode = Control.FOCUS_NONE
 			ob.add_theme_font_size_override("font_size", 15)
 			var items: Array = FILTERS if k == "filter" else (GRIDS if k == "grid" else (BOKEH if k == "bokeh" else ASPECTS.map(func(a): return a[0])))
 			for it in items: ob.add_item(it)
@@ -670,6 +710,7 @@ func _add_row(parent: VBoxContainer, d: Array) -> void:
 				V[k] = float(i)
 				_changed(k))
 			h.add_child(ob)
+			h.set_meta("nav_row", true)
 			parent.add_child(h)
 			row.option = ob
 		_:
@@ -684,7 +725,6 @@ func _add_row(parent: VBoxContainer, d: Array) -> void:
 			h.add_child(vl)
 			var s := HSlider.new()
 			s.min_value = d[3]; s.max_value = d[4]; s.step = d[5]
-			s.focus_mode = Control.FOCUS_NONE
 			s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			s.value_changed.connect(func(v: float):
 				V[k] = v
@@ -696,6 +736,7 @@ func _add_row(parent: VBoxContainer, d: Array) -> void:
 			h.add_child(rb)
 			box.add_child(h)
 			box.add_child(s)
+			box.set_meta("nav_row", true)
 			parent.add_child(box)
 			row.slider = s
 			row.value = vl
