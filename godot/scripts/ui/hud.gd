@@ -380,7 +380,7 @@ func _ride_stats(st: BikePhysics, dt: float) -> void:
 ## mount the bike computer chosen on the ride setup page (size, pages, navigation)
 func set_computer() -> void:
 	gauge.unit = ComputerUnits.current()
-	gauge.order = gauge.unit.order
+	gauge.order = ComputerUnits.pages(GameState.computer_id)
 	gauge.page = 0
 	gauge.scale = Vector2.ONE * float(gauge.unit.scale)
 	if not gauge.unit.nav: alert = {}
@@ -409,7 +409,7 @@ func _probe_alerts() -> void:
 func _trail_scan(p: Vector2, fw: Vector2, crashed: bool) -> void:
 	var was: String = alert.get("text", "")
 	alert = {}
-	if not gauge.unit.nav: return   # a unit without navigation gives no turn / feature alerts
+	if not gauge.unit.nav or not ComputerUnits.opt(GameState.computer_id, "alerts"): return   # no navigation, or alerts off: no turn / feature alerts
 	if OS.get_environment("BMX_ALERT_DEMO") != "":   # tests: a fixed alert to look at
 		alert = {"kind": OS.get_environment("BMX_ALERT_DEMO"), "text": "HAIRPIN RIGHT", "d": 22.0}
 		return
@@ -534,6 +534,7 @@ class GaugeView extends Control:
 		var st: BikePhysics = hud.game.phys
 		var f := UITheme.lcd_font()
 		light = maxf(0.0, light - get_process_delta_time())
+		if int(ComputerUnits.opt(GameState.computer_id, "light")) == 1: light = 3.0   # backlight: always on
 		var lk := clampf(light / 0.4, 0, 1)
 		lcd = LCD.lerp(LCD_LIT, lk)
 		draw_style_box(UITheme.box(unit.body, 16, 0), Rect2(Vector2.ZERO, size))

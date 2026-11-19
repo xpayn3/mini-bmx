@@ -20,10 +20,12 @@ func _ready() -> void:
 		_key = _render([[3520.0, 0.04]])
 
 func power_on() -> void:
+	if not ComputerUnits.opt(GameState.computer_id, "beep"): return
 	stream = _power
 	play()
 
 func key() -> void:
+	if not ComputerUnits.opt(GameState.computer_id, "beep"): return
 	stream = _key
 	play()
 
