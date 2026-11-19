@@ -413,7 +413,7 @@ func _rebuild_bike() -> void:
 		rig.queue_free()
 	rig = BikeRig.new()
 	add_child(rig)
-	var cfg: Dictionary = GameState.BIKES.dh
+	var cfg: Dictionary = GameState.BIKES[GameState.bike_id] if GameState.BIKES[GameState.bike_id].get("garage", false) else GameState.BIKES.dh
 	rig.load_bike(cfg, build)
 	var L := float(rig.extras.get("wheelbase", 1.25))
 	var bb := float(rig.extras.get("bbToRearAxle", 0.44))
@@ -1047,6 +1047,14 @@ func _swatches(cur: String, cb: Callable) -> void:
 
 # ---------------------------------------------------------------- pages
 func _paint_page() -> void:
+	_h("FRAME")
+	var frames := []
+	for id in GameState.BIKES:
+		if GameState.BIKES[id].get("garage", false): frames.append([id, GameState.BIKES[id].label])
+	body.add_child(_choice("Frame", frames, GameState.bike_id, func(v):
+		if v == GameState.bike_id: return
+		GameState.bike_id = v; GameState.save()
+		_rebuild_bike(); _set_tab("paint")))
 	_h("PART")
 	var g := GridContainer.new()
 	g.columns = 2

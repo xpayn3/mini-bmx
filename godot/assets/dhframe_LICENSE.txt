@@ -1,0 +1,11 @@
+Model Information:
+* title:	DH bike frame
+* source:	https://sketchfab.com/3d-models/dh-bike-frame-4646f6b0a2c145278bce3d11abb1a0fe
+* author:	Once_a_goat_death (https://sketchfab.com/Once_a_goat_death)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "DH bike frame" (https://sketchfab.com/3d-models/dh-bike-frame-4646f6b0a2c145278bce3d11abb1a0fe) by Once_a_goat_death (https://sketchfab.com/Once_a_goat_death) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

@@ -321,7 +321,7 @@ func _open_garage(mode := "bike") -> void:
 		game.queue_free()
 		await game.tree_exited
 		game = null
-	GameState.bike_id = "dh"
+	if not GameState.BIKES[GameState.bike_id].get("garage", false): GameState.bike_id = "dh"   # the garage builds the DH frames
 	garage = Garage.new()
 	garage.mode = mode
 	add_child(garage)

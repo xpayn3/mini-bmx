@@ -21,6 +21,15 @@ repo, see above — never develop it).
 - Main bike: **GLORY DH** (downhill frame `assets/dh.glb`), the player starts on it every launch.
   A BMX also exists (`B` cycles bikes). The web version's **bike builder is intentionally left out**.
 - Single player, keyboard + gamepad, fully rebindable.
+- **More downhill frames** (B / the ride setup page cycle them, the garage builds whichever is selected; flag `garage` in `GameState.BIKES`):
+  **YT Tues** (`assets/tues.glb`, from a full-bike FBX by `tools/export_tues.py`, Blender: frame, its own fork / bars / brakes / cranks,
+  Horst-style linkage mapped onto the game's four-bar `Suspension`; wheels, tyres, shock paint etc. are the garage build) and **Goat DH**
+  (`assets/dhframe.glb`, Sketchfab "DH bike frame" by Once_a_goat_death, **CC-BY 4.0: credit needed wherever the game is shared**, text in
+  `assets/dhframe_LICENSE.txt`; `tools/export_dhframe.py`: its frame, single-pivot swingarm and coil shock on our fork / bars / cranks;
+  the solver gets G1 = G2 so the swingarm turns rigidly about its pivot; its link bars stay on the frame). Both ride the normal pipeline; the Tues
+  carries `noBarMod` / `noDecals` in its extras (own bars, logo slots are placed for GLORY). Extracted Tues parts for reuse:
+  `assets/parts/tues_fork.glb`, `tues_cranks.glb`, `tues_cockpit.glb`, `tues_brakes.glb` (not wired into the garage yet). Test: `BMX_BIKE=tues|goat|dh`.
+  Not done: chain (neither frame has one in the game), swapping the Tues fork onto the GLORY as a fork model.
 
 ## 2. Install / run
 
