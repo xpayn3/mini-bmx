@@ -833,6 +833,11 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var aero_t: float = clampf(bstick, 0.0, 1.0) * float(sty.get("aero", 1.0))
 	sm_aero += (aero_t - sm_aero) * (1.0 - exp(-(3.0 + 12.0 * air) * minf(dt, 0.1)))   # off the ground the tuck goes at once
 	var aero: float = sm_aero
+	# on the ground forward = fold down over the bars (chest low, hips back a little, knees bent: a race
+	# tuck); in the air forward = legs extend and push the bike away (the hips rise). Before, the ground
+	# lean also lifted the hips and threw them forward, so the torso came UP instead of down
+	var aero_g: float = aero * (1.0 - air)
+	var aero_a: float = aero * air
 
 	# attack position: rolling, a downhill rider stands off the saddle (knees and elbows soft, ready),
 	# not only while pedalling
@@ -841,9 +846,9 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# pelvis
 	var pelvis := Vector3(
 		-0.16 - 0.07 * air * float(sty.airCrouch) + 0.06 * pedal * sty.standPedal - float(sty.standBack) * stand - comp * 0.25,
-		0.80 - 0.07 * air * float(sty.airCrouch) - comp + (float(sty.standHeight) * stand + 0.05 * spr) * sty.standPedal + 0.035 * bob + 0.14 * aero,   # (forward: legs extend, up tall on the pedals)
+		0.80 - 0.07 * air * float(sty.airCrouch) - comp + (float(sty.standHeight) * stand + 0.05 * spr) * sty.standPedal + 0.035 * bob + 0.14 * aero_a - 0.07 * aero_g,   # (forward: in the air legs extend; on the ground knees bend into the tuck)
 		sway * sty.hipSway + shift * 0.3 + sin(t * 2.1) * 0.02 * wig) + fit
-	pelvis.x += sty.hipX * (1 - 0.5 * pedal) + 0.10 * aero + 0.07 * eff   # forward over the cranks (and with the stick)
+	pelvis.x += sty.hipX * (1 - 0.5 * pedal) + 0.10 * aero_a - 0.05 * aero_g + 0.07 * eff   # forward over the cranks (air stick: hips forward; ground tuck: a touch back)
 	pelvis.y += 0.04 * eff                                                   # up tall to stamp down
 	pelvis.y += sty.hipY * (1 - 0.6 * pedal)
 	pelvis.y -= 0.05 * smoothstep(0.8, 3.5, absf(_num(p, "airSpin"))) * air   # knees tucked up in a spin
@@ -851,7 +856,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 
 	# chest
 	# (pedalling out of the saddle the chest stays forward over the bars)
-	var ang: float = 0.52 - 0.2 * clampf(-bstick, 0.0, 1.0) - float(sty.pedalChest) * pedal + 0.12 * spr + 0.2 * eff + 0.15 * (comp / 0.3) + 0.08 * air + sty.lean * (1 - 0.5 * pedal) + 0.32 * aero
+	var ang: float = 0.52 - 0.2 * clampf(-bstick, 0.0, 1.0) - float(sty.pedalChest) * pedal + 0.12 * spr + 0.2 * eff + 0.15 * (comp / 0.3) + 0.08 * air + sty.lean * (1 - 0.5 * pedal) + 0.32 * aero_a + 0.6 * aero_g
 	# spinning in the air: tall and compact over the bike (chest up, knees in), the head and shoulders lead
 	var spin_style: float = smoothstep(0.8, 3.5, absf(_num(p, "airSpin"))) * air
 	ang = lerpf(ang, 0.42, 0.7 * spin_style)
@@ -868,7 +873,9 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	pelvis.y += absorb
 	chest.y += absorb * 0.9
 	var hs := _num(p, "hipShift")
-	pelvis.x += hs
+	# (the physics' forward weight shift is carried by the chest going out over the bars in a ground tuck,
+	# not by the hips sliding up to the stem)
+	pelvis.x += hs * (1.0 - 0.7 * aero_g if hs > 0.0 else 1.0)
 	chest.x += hs * 0.6
 	# body stick (gamepad right stick): forward = chest low over the bars, back = hips dropped behind the
 	# saddle with the arms long (manuals)
