@@ -83,6 +83,7 @@ var input_enabled := true
 var sky_mat: ShaderMaterial
 var scenic := false          # title screen: golden hour, a lookout camera, far hills to the horizon
 var far_hills: FarHills
+var sheep: SheepHerd
 
 func _ready() -> void:
 	bike_cfg = GameState.bike_config()
@@ -95,6 +96,9 @@ func _ready() -> void:
 	far_hills = FarHills.new()   # the distant landscape behind the streamed chunks
 	far_hills.setup(terrain)
 	add_child(far_hills)
+	sheep = SheepHerd.new()   # woolly flocks that graze and run from the bike
+	sheep.setup(terrain)
+	add_child(sheep)
 	fx = load("res://scripts/fx/fx.gd").new()
 	add_child(fx)
 	if fx.has_method("setup"): fx.setup(terrain)
@@ -249,7 +253,7 @@ func _build_environment() -> void:
 	sun.directional_shadow_split_3 = 0.45
 	sun.directional_shadow_blend_splits = true
 	sun.directional_shadow_fade_start = 0.85
-	sun.directional_shadow_max_distance = 90.0
+	sun.directional_shadow_max_distance = 200.0
 	sun.directional_shadow_pancake_size = 30.0
 	sun.shadow_bias = 0.02
 	sun.shadow_normal_bias = 1.2
@@ -498,7 +502,9 @@ func smash(c: Dictionary, vel: Vector3, pos: Vector3) -> bool:
 	if dust.sim != null: dust.puff_burst(Vector3(c.x, pos.y + 0.1, c.z), 0.6, Color("cdb894"), 0.5)
 	for k in (0 if dust.sim != null else 3):
 		fx.puff(Vector3(c.x, pos.y + 0.4, c.z), Vector3((randf() - .5) * 1.5, 0.4 + randf() * 0.5, (randf() - .5) * 1.5), Color("cdb894"), 0.35, 1.4, 0.4)
-	if audio and not c.get("tape", false): audio.crunch()
+	if audio and not c.get("tape", false):
+		if c.get("cactus", false): audio.crunch()
+		else: audio.wood_crash(clampf(Vector2(vel.x, vel.z).length() / 12.0, 0.3, 1.5))
 	return true
 
 func rock_chips(c: Dictionary) -> void:
@@ -738,6 +744,7 @@ func respawn(new_world: bool) -> void:
 		far_hills = FarHills.new()
 		far_hills.setup(terrain)
 		add_child(far_hills)
+		sheep.reset()
 		flash("New world #%d" % GameState.seed)
 	if fx.has_method("clear_tracks"): fx.clear_tracks()
 	if new_world: grime.clean()
@@ -1071,6 +1078,7 @@ func _process(dt: float) -> void:
 	var vd: float = Settings.get_v("view_distance")
 	terrain.update_stream(st.x, st.z, 4.0)
 	far_hills.follow(drawn_pos)
+	sheep.follow(dt, drawn_pos, st.v, st.fwd())
 	biome_t -= dt
 	if biome_t <= 0:
 		biome_t = 0.5
@@ -1105,11 +1113,11 @@ func _process(dt: float) -> void:
 	if scenic:
 		env.fog_depth_begin = 250.0
 		env.fog_depth_end = 3100.0
-		sun.directional_shadow_max_distance = 110.0
+		sun.directional_shadow_max_distance = 220.0
 	else:
 		env.fog_depth_begin = (cam.dist + 55) * vd
 		env.fog_depth_end = (cam.dist * 1.6 + 100) * vd
-		sun.directional_shadow_max_distance = clampf(cam.dist * 2.2, 30, 120) * (0.7 if int(Settings.get_v("shadows")) == 0 else 1.0)
+		sun.directional_shadow_max_distance = clampf(cam.dist * 4.5, 80, 260) * (0.7 if int(Settings.get_v("shadows")) == 0 else 1.0)
 	if cam_attr.dof_blur_far_enabled and scenic:   # lookout: keep the view sharp, soften only the horizon
 		cam_attr.dof_blur_far_distance = 900.0
 		cam_attr.dof_blur_far_transition = 900.0

@@ -5,7 +5,8 @@ extends Node3D
 ##    behind it (thinner and patchier the further it slides), and a part that slams down leaves a splat
 ##    with droplets. One MultiMesh of flat quads (shaders/blood_streak.gdshader), a ring of MAX quads.
 ##  * TORN-OFF LIMBS: a very hard crash can tear an arm or a leg off (at the shoulder / elbow / hip /
-##    knee, Ragdoll.sever): the piece tumbles away on its own and the stump spurts blood for a few seconds.
+##    knee, Ragdoll.sever): the piece tumbles away on its own; the stump pumps an arterial jet with each
+##    heartbeat (weakening over JET_T s) and the piece pours out of its end.
 ## Stays for the ride; a respawn (Backspace / new world) fades it all out over WIPE seconds (blood laid
 ## after the respawn stays).
 const WIPE := 4.0
@@ -40,6 +41,22 @@ var _sever_ready := false
 var _severed := 0
 var _wounds: Array = []         # {a, root, t, ph, body: MeshInstance3D, end: MeshInstance3D}
 var _stump_mesh: SphereMesh
+## the ARTERIAL JET: the stump pumps a stream with every heartbeat (HEART_HZ), strong at first and
+## weakening over JET_T seconds; the torn-off piece pours out of its end, weaker. Drops fly ballistic,
+## drawn stretched along their flight (shaders/blood_jet.gdshader) so they join into one stream; where
+## they land they pool (splats).
+const JET_MAX := 900
+const JET_T := 9.0              # how long the stump pumps
+const JET_RATE := 260.0         # drops per second per jet at full pressure
+const JET_SPEED := 5.0          # m/s out of the stump at the top of a beat
+const HEART_HZ := 2.0           # beats per second (a racing heart)
+const JET_SHADER := preload("res://shaders/blood_jet.gdshader")
+var _jet_mm: MultiMesh
+var _jp := PackedVector3Array()
+var _jv := PackedVector3Array()
+var _jw := PackedFloat32Array()   # drop width
+var _jn := 0
+var jet_drops := 0                # tests
 var laid := 0              # tests: quads laid this crash
 var smears := 0
 
@@ -74,10 +91,76 @@ func _init(p_terrain, p_fx) -> void:
 	smat.albedo_color = Color(0.2, 0.01, 0.01)
 	smat.roughness = 0.2
 	_stump_mesh.material = smat
+	# the jet drops
+	var jq := QuadMesh.new()
+	jq.size = Vector2.ONE
+	var jmat := ShaderMaterial.new()
+	jmat.shader = JET_SHADER
+	jq.material = jmat
+	_jet_mm = MultiMesh.new()
+	_jet_mm.transform_format = MultiMesh.TRANSFORM_3D
+	_jet_mm.mesh = jq
+	_jet_mm.instance_count = JET_MAX
+	_jet_mm.visible_instance_count = 0
+	_jet_mm.custom_aabb = AABB(Vector3(-1e5, -1e5, -1e5), Vector3(2e5, 2e5, 2e5))
+	var jmi := MultiMeshInstance3D.new()
+	jmi.name = "blood_jet"
+	jmi.multimesh = _jet_mm
+	jmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(jmi)
+	_jp.resize(JET_MAX); _jv.resize(JET_MAX); _jw.resize(JET_MAX)
 
 func _process(dt: float) -> void:
 	_t += dt
 	mat.set_shader_parameter("now", _t)
+	if _jn > 0: _jet_step(minf(dt, 0.05))
+
+## one drop of the jet: at p going v (already moved `ahead` seconds along, so drops born within one
+## frame spread out along the stream instead of bunching)
+func _jet_emit(p: Vector3, v: Vector3, width: float, ahead: float) -> void:
+	if _jn >= JET_MAX: return
+	var g := Vector3(0, -9.8, 0)
+	_jp[_jn] = p + v * ahead + g * (0.5 * ahead * ahead)
+	_jv[_jn] = v + g * ahead
+	_jw[_jn] = width
+	_jn += 1
+	jet_drops += 1
+	if probe and jet_drops % 200 == 1: print("JET drops=%d live=%d p=%s v=%s" % [jet_drops, _jn, _jp[_jn - 1], _jv[_jn - 1]])
+
+## fly the drops; a drop that reaches the ground goes, now and then leaving a splat (they pool up)
+func _jet_step(dt: float) -> void:
+	var cam := get_viewport().get_camera_3d()
+	var eye := cam.global_position if cam != null else Vector3.ZERO
+	var i := 0
+	while i < _jn:
+		var v: Vector3 = _jv[i]
+		v.y -= 9.8 * dt
+		v *= 1.0 - 0.15 * dt
+		var p: Vector3 = _jp[i] + v * dt
+		var g: float = _ground(p.x, p.z)
+		if p.y <= g + 0.01:
+			if randf() < 0.07:
+				splat(Vector3(p.x, 0, p.z), 0.07 + randf() * 0.1, 0.6 + randf() * 0.4, Vector3.ZERO, false)
+			_jn -= 1
+			_jp[i] = _jp[_jn]; _jv[i] = _jv[_jn]; _jw[i] = _jw[_jn]
+			continue
+		_jp[i] = p
+		_jv[i] = v
+		i += 1
+	# draw: each drop a quad along its flight, long enough to reach the next drop (one stream)
+	for j in _jn:
+		var p: Vector3 = _jp[j]
+		var v: Vector3 = _jv[j]
+		var sp := v.length()
+		var along := v / sp if sp > 1e-3 else Vector3.DOWN
+		var to_eye := (eye - p).normalized()
+		var side := along.cross(to_eye)
+		if side.length_squared() < 1e-6: side = along.cross(Vector3.RIGHT)
+		side = side.normalized()
+		var face := side.cross(along)
+		var ln := maxf(_jw[j] * 1.6, sp * 0.065)   # ~ the gap to the next drop: they overlap into a stream
+		_jet_mm.set_instance_transform(j, Transform3D(Basis(side * _jw[j], along * ln, face), p))
+	_jet_mm.visible_instance_count = _jn
 
 ## the ground under a point: the drawn mesh / rock / deck top, and its normal
 func _ground(x: float, z: float) -> float:
@@ -110,7 +193,7 @@ func smear(a: Vector3, b: Vector3, width: float, strength: float) -> void:
 	if probe and smears % 5 == 1: print("BLOOD smear #%d len=%.2f w=%.2f s=%.2f" % [smears, ln, width, strength])
 
 ## a splat (and droplets) where something hit the ground
-func splat(at: Vector3, size: float, strength: float, vel := Vector3.ZERO) -> void:
+func splat(at: Vector3, size: float, strength: float, vel := Vector3.ZERO, drops := true) -> void:
 	var g := _ground(at.x, at.z)
 	var p := Vector3(at.x, g + 0.014, at.z)
 	var fwd := Vector3(vel.x, 0, vel.z)
@@ -118,7 +201,7 @@ func splat(at: Vector3, size: float, strength: float, vel := Vector3.ZERO) -> vo
 	# stretched a little the way it was going
 	var k := clampf(fwd.length() / 8.0, 0.0, 0.6)
 	_put(p, _normal(p.x, p.z), fwd, size, size * (1.0 + k), strength, 1)
-	if fx != null:
+	if fx != null and drops:
 		for j in int(4 + 8 * strength):
 			var dv := Vector3((randf() - 0.5) * 2.4, 0.8 + randf() * 1.8, (randf() - 0.5) * 2.4) + Vector3(vel.x, 0, vel.z) * 0.25
 			fx.chunk(p + Vector3(0, 0.08, 0), dv, Color(0.2, 0.01, 0.01), 0.012, 0.9)
@@ -154,7 +237,8 @@ func crash_step(pts: Array, prv: Array, h: float, rad: Array) -> void:
 			var p0: Vector3 = pts[i]
 			_air[i] = 1 if p0.y - terrain.height(p0.x, p0.z) > float(rad[i]) + 0.18 else 0
 			_last[i] = null
-	if not _wounds.is_empty(): _bleed_wounds(pts, get_process_delta_time())
+	if not _wounds.is_empty(): _bleed_wounds(pts, prv, h, get_process_delta_time())
+	if _spin_probe: _probe_spin(pts)
 	if ragdoll != null and OS.get_environment("BMX_RAGDOLL_PROBE") != "" and Engine.get_process_frames() % 15 == 0:
 		var pel: Vector3 = pts[2]
 		print("RAGDOLL neutral_off=%.2f pelvis_up=%.2f rise=%.2f vup=%.1f t=%.2f" % [ragdoll.nb_off / maxf(1.0, 9.0 * 3.0 * 15.0), pel.y - terrain.height(pel.x, pel.z), ragdoll.probe_rise, ragdoll.probe_vup, ragdoll.t_fall])
@@ -205,6 +289,26 @@ func crash_step(pts: Array, prv: Array, h: float, rad: Array) -> void:
 		elif hs < 0.2:
 			_last[i] = null
 
+## tests (BMX_SPIN_PROBE): how fast / how far the torso turns while crashed (per game second)
+var _spin_probe := OS.get_environment("BMX_SPIN_PROBE") != ""
+var _sp_last = null
+var spin_total := 0.0
+var spin_max := 0.0
+var _sp_t := 0.0
+func _probe_spin(pts: Array) -> void:
+	var u: Vector3 = ((pts[1] as Vector3) - (pts[2] as Vector3)).normalized()
+	var sx: Vector3 = ((pts[6] as Vector3) - (pts[3] as Vector3))
+	sx = (sx - u * sx.dot(u)).normalized()
+	var bs := Basis(sx, u, sx.cross(u)).orthonormalized()
+	var dt := get_process_delta_time()   # scaled by Engine.time_scale = game time
+	_sp_t += dt
+	if _sp_last != null and dt > 0.0:
+		var ang: float = Quaternion((_sp_last as Basis).inverse() * bs).get_angle()
+		spin_total += ang
+		spin_max = maxf(spin_max, ang / dt)
+		if Engine.get_process_frames() % 10 == 0: print("SPIN t=%.2f w=%.1f turns=%.2f ts=%.2f" % [_sp_t, ang / dt, spin_total / TAU, Engine.time_scale])
+	_sp_last = bs
+
 ## tear the limb off at joint a: free it in the ragdoll, throw it on, cap both ends, start the stump spurting
 func _sever(a: int, pts: Array, v: Vector3) -> void:
 	if ragdoll == null: return
@@ -212,7 +316,7 @@ func _sever(a: int, pts: Array, v: Vector3) -> void:
 	var root: int = ragdoll.sever(a, kick)
 	if root < 0: return
 	_severed += 1
-	var w := {a = a, root = root, t = 2.5, ph = randf() * 3.0, body = _cap(), end = _cap()}
+	var w := {a = a, root = root, t = JET_T, ph = randf(), acc = 0.0, acc2 = 0.0, body = _cap(), end = _cap()}
 	_wounds.append(w)
 	var pa: Vector3 = pts[a]
 	splat(Vector3(pa.x, 0, pa.z), 0.45, 1.0, v)
@@ -230,8 +334,8 @@ func _cap() -> MeshInstance3D:
 	add_child(m)
 	return m
 
-## per frame for each torn-off limb: the caps follow both ends, the stump spurts in pulses
-func _bleed_wounds(pts: Array, dt: float) -> void:
+## per frame for each torn-off limb: the caps follow both ends, the stump pumps an arterial jet
+func _bleed_wounds(pts: Array, prv: Array, h: float, dt: float) -> void:
 	for w in _wounds:
 		var a: int = w.a
 		var pa: Vector3 = pts[a]
@@ -246,14 +350,35 @@ func _bleed_wounds(pts: Array, dt: float) -> void:
 		if w.t <= 0.0: continue
 		w.t -= dt
 		w.ph += dt
-		# spurts in pulses (a heartbeat), weaker as it runs out
-		var pulse := maxf(0.0, sin(float(w.ph) * 7.5)) * clampf(float(w.t) / 2.5, 0.0, 1.0)
-		if fx != null:
-			for j in int(pulse * 4.0):
-				var dv := out * (1.5 + 2.5 * pulse) + Vector3(randf() - 0.5, randf() * 0.8, randf() - 0.5) * 1.2
-				fx.chunk(pa + out * 0.05, dv, Color(0.2, 0.01, 0.01), 0.013, 0.8)
-		if pulse > 0.6 and randf() < dt * 6.0:
-			splat(pa + Vector3(out.x, 0, out.z) * (0.3 + randf() * 0.6), 0.1 + randf() * 0.12, 0.7)
+		# the heartbeat: a sharp surge each beat (systole) over a steady flow, the whole jet weakening
+		# as the blood runs out; the jet wobbles a little round the limb's axis
+		var f := fposmod(float(w.ph) * HEART_HZ, 1.0)
+		var beat := 0.25 + 0.75 * exp(-pow((f - 0.12) / 0.1, 2.0))
+		var left := pow(clampf(float(w.t) / JET_T, 0.0, 1.0), 0.7)
+		var press := beat * left
+		var va: Vector3 = (pa - (prv[a] as Vector3)) / maxf(h, 1e-4) if a < prv.size() else Vector3.ZERO
+		var wob := Vector3(sin(float(w.ph) * 5.3), cos(float(w.ph) * 4.1), sin(float(w.ph) * 3.7)) * 0.12
+		# a spurt arcs up and out (lying on the ground the stump would only squirt into the dirt)
+		var flat := Vector3(out.x, 0, out.z)
+		if flat.length() < 0.2: flat = Vector3(randf() - 0.5, 0, randf() - 0.5)
+		var dir := (flat.normalized() * 0.75 + Vector3.UP * (0.55 + maxf(out.y, 0.0)) + wob).normalized()
+		var n := float(w.acc) + JET_RATE * (0.35 + 0.65 * press) * left * dt
+		var cnt := int(n)
+		w.acc = n - cnt
+		for j in cnt:
+			var sp := JET_SPEED * (0.3 + 0.4 * left + 0.7 * press) * (0.95 + randf() * 0.1)
+			_jet_emit(pa + out * 0.04 + Vector3(0, 0.03, 0), dir * sp + va * 0.8, 0.010 + 0.007 * press, dt * float(j) / float(cnt))
+		# the torn-off piece pours out of its end: no pump, it runs out and dribbles
+		if r < pts.size():
+			var pr: Vector3 = pts[r]
+			var into: Vector3 = (pr - (pts[ragdoll.LIMB_NEXT[a]] as Vector3)).normalized()
+			var vr: Vector3 = (pr - (prv[r] as Vector3)) / maxf(h, 1e-4) if r < prv.size() else Vector3.ZERO
+			var m := float(w.acc2) + JET_RATE * 0.3 * left * dt
+			var c2 := int(m)
+			w.acc2 = m - c2
+			for j in c2:
+				var jit := Vector3(randf() - 0.5, randf() - 0.5, randf() - 0.5) * 0.15
+				_jet_emit(pr + into * 0.03, into * (0.5 + 0.6 * left) + jit + vr * 0.8, 0.008, dt * float(j) / float(c2))
 		_bleed[a] = maxf(_bleed[a], 1.0)
 
 func crash_end() -> void:
@@ -264,7 +389,9 @@ func crash_end() -> void:
 	_wounds.clear()
 	_air.resize(0)
 	_bleed.fill(0.0)
-	if probe: print("BLOOD end laid=%d smears=%d severed=%d" % [laid, smears, _severed])
+	if _spin_probe: print("SPINEND turns=%.2f wmax=%.1f" % [spin_total / TAU, spin_max])
+	_sp_last = null; spin_total = 0.0; spin_max = 0.0; _sp_t = 0.0
+	if probe: print("BLOOD end laid=%d smears=%d severed=%d jet_drops=%d" % [laid, smears, _severed, jet_drops])
 	if ragdoll != null and OS.get_environment("BMX_RAGDOLL_PROBE") != "": print("EJECT rise=%.2f vup=%.1f" % [ragdoll.probe_rise, ragdoll.probe_vup])
 
 ## respawn: everything laid so far fades away over WIPE seconds (the shader: born before wipe_t)
