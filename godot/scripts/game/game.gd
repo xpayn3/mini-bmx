@@ -511,8 +511,9 @@ func start_crash(reason: String) -> void:
 	if OS.get_environment("BMX_TRICK") != "": print("CRASH ", reason, " v=%.1f air=%s" % [phys.v, phys.air])   # tests
 	var pts: Array = rider.joints_world()
 	var f := phys.fwd()
-	var body_vel := f * phys.v + Vector3(0, minf(maxf(phys.vy, 0), 6.0 if phys.air else 1.0) + 1.2, 0)
-	var spin_v := f * (2.2 + absf(phys.v) * 0.25)
+	# the body carries on with the bike's own motion (no extra pop up: it used to throw the body into the air)
+	var body_vel := f * phys.v + Vector3(0, minf(maxf(phys.vy, 0), 6.0 if phys.air else 0.3) + 0.2, 0)
+	var spin_v := f * (1.0 + absf(phys.v) * 0.08)   # the top of the body keeps going a little as the bike stops
 	phys.begin_crash()
 	# detach the rider into world space
 	rider.get_parent().remove_child(rider)
