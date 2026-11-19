@@ -8,7 +8,7 @@ const SAVE := "user://save.cfg"
 const BIKES := {
 	"dh": {
 		"label": "Downhill", "file": "res://assets/dh.glb", "root": "dh",
-		"pose": {"hipX": -0.07, "hipY": 0.075, "lean": 0.22, "elbowsOut": 0.0, "shoulders": 0.14, "hipSway": 0.035, "kneesOut": 0.25, "stance": -0.035, "seatFloor": true,
+		"pose": {"hipX": -0.07, "hipY": 0.075, "lean": 0.22, "elbowsOut": 0.0, "shoulders": 0.19, "torso": 0.5, "hipSway": 0.035, "kneesOut": 0.25, "stance": -0.035, "seatFloor": true,
 			"headTilt": 0.12, "headTurn": 1.05, "hipZ": 0.005, "spineCurve": 0.24, "spineLow": 0.31,
 			"chestUp": -0.005, "chestSide": 0.005, "headRoll": -0.01, "shoulderFwd": 0.005,
 			"wristRoll": 0.02, "kneesFwd": 0.05, "footAngle": 0.01},

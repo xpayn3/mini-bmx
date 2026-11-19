@@ -112,8 +112,8 @@ const LOOK_ROWS := [
 # ---------------------------------------------------------------- persistence
 ## bump POSE_VER when a bike's default pose is retuned: a pose saved before keeps every value except the
 ## RETUNED ones that still hold the OLD default (a slider the player moved stays theirs)
-const POSE_VER := 2
-const POSE_RETUNED := {"elbowsOut": -0.25, "elbowOutR": -0.05, "hipSway": 0.015}
+const POSE_VER := 3
+const POSE_RETUNED := {"elbowsOut": -0.25, "elbowOutR": -0.05, "hipSway": 0.015, "shoulders": 0.14, "torso": 0.46}
 
 static func load_pose(bike_id: String, bike_pose: Dictionary) -> Dictionary:
 	var p: Dictionary = Rider.NEUTRAL.duplicate()
