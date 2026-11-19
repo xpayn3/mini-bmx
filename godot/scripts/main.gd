@@ -17,6 +17,7 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	ui.layer = 20
 	add_child(ui)
+	add_child(load("res://scripts/ui/fullscreen_button.gd").new())   # bottom-right fullscreen toggle (F11)
 	fade = ColorRect.new()
 	fade.color = Color(0.66, 0.84, 0.92)
 	fade.set_anchors_preset(Control.PRESET_FULL_RECT)
