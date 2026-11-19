@@ -51,7 +51,7 @@ var g_tone := 650.0
 var g_crack := 0.3
 var g_rumble := 1.0
 # per surface (0 ground/grass, 1 trail, 2 water, 3 dry/sand): [gain, tone Hz, crack, rumble]
-const GRAVEL_SURF := [[0.16, 420.0, 0.08, 1.3], [0.30, 650.0, 0.3, 1.0], [0.0, 500.0, 0.1, 0.5], [0.26, 560.0, 0.2, 0.8]]
+const GRAVEL_SURF := [[0.09, 420.0, 0.04, 1.2], [0.15, 600.0, 0.12, 0.9], [0.0, 500.0, 0.05, 0.5], [0.13, 520.0, 0.08, 0.7]]   # subtle: ~half the level, little crack (clicks)
 # one-shots: [kind, t, amp]
 var shots: Array = []
 
@@ -162,7 +162,7 @@ func update_audio(dt: float) -> void:
 	var sk := skid * 2.0
 	var gp: Array = GRAVEL_SURF[st.surf]
 	g_speed = va * (1.0 + 0.6 * sk) if on_ground else 0.0
-	g_amp += ((gp[0] * (0.7 + 0.3 * clampf(va / 12.0, 0, 1)) * (1.0 + 1.6 * sk) if on_ground else 0.0) - g_amp) * k
+	g_amp += ((gp[0] * (0.7 + 0.3 * clampf(va / 12.0, 0, 1)) * (1.0 + 0.9 * sk) if on_ground else 0.0) - g_amp) * k
 	g_tone += (gp[1] - g_tone) * k
 	g_crack += (gp[2] * (1.0 + sk) - g_crack) * k
 	g_rumble += (gp[3] - g_rumble) * k

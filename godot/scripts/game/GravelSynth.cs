@@ -81,11 +81,11 @@ public partial class GravelSynth : RefCounted
 				{
 					_next += Exp() / rate;
 					double a = 0.5 + _rng.NextDouble();
-					if (_rng.NextDouble() < 0.05) a *= 3.5;   // a bigger stone
+					if (_rng.NextDouble() < 0.02) a *= 1.6;   // a slightly bigger stone (3.5x made isolated clicks)
 					a *= m;
 					int v = _voice; _voice = (_voice + 1) % VOICES;
 					double f = Math.Min(5000.0, tone * (0.9 + 0.2 * Math.Min(1.0, sp / 10.0)) * Math.Exp(Gauss() * 0.45));
-					double tau = 0.002 + 0.004 * _rng.NextDouble();
+					double tau = 0.003 + 0.005 * _rng.NextDouble();   // softer, longer rings: less tick
 					double r = Math.Exp(-1.0 / (tau * Sr)), wv = 2.0 * Math.PI * f / Sr;
 					_c1[v] = 2.0 * r * Math.Cos(wv); _c2[v] = -r * r;
 					// excite with a quarter-period offset so each knock starts with a random phase
@@ -93,7 +93,7 @@ public partial class GravelSynth : RefCounted
 					_y1[v] = a * Math.Sin(ph); _y2[v] = a * Math.Sin(ph - wv) / r;
 					double p = (_rng.NextDouble() * 2.0 - 1.0) * 0.35;
 					_pl[v] = 1.0 - p; _pr[v] = 1.0 + p;
-					_crack += a * crack;
+					_crack += a * crack * 0.3;   // the bright sub-ms crack was the clicking
 				}
 			}
 			double l = 0.0, rr = 0.0;
@@ -112,7 +112,9 @@ public partial class GravelSynth : RefCounted
 			_r1 += (wn - _r1) * rl; _r2 += (_r1 - _r2) * rl; _r3 += (_r2 - _r3) * rh;
 			double dens = Math.Min(1.0, rate / 4000.0);
 			xin += (_r2 - _r3) * rumble * RUMBLE_K * Math.Sqrt(dens) * m;
-			double g = NORM * ga;
+			// slow rolling = a few lone knocks per second = ticking: fade the whole thing in over 0..2 m/s
+			double sparse = Math.Min(1.0, rate / 1000.0); sparse *= sparse;
+			double g = NORM * ga * sparse;
 			buf[i] = new Vector2((float)((l + xin) * g), (float)((rr + xin) * g));
 		}
 		_speed = speed; _amp = amp;
