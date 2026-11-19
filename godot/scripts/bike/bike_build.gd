@@ -137,13 +137,47 @@ static func apply_fork_model(b: Dictionary, key: String) -> void:
 	b.paint.fork = (m.lowers as Dictionary).duplicate()
 	b.paint.stanchions = (m.stanchions as Dictionary).duplicate()
 
+## cassettes: brand / name for the part cards, cogs (teeth, small to big), finish: "cols" = anodized colour per
+## cog (cycled; "rainbow" = oil-slick fade small -> big cog), "rough" = how matte. The big-range ones
+## (52T+) are granny gears for climbing: the biggest cog gives the most push at walking pace.
 const CASSETTES := {
-	"dh7":   {"label": "7-speed DH 11–24", "cogs": [11, 12, 14, 16, 18, 21, 24]},
-	"dh7w":  {"label": "7-speed wide 11–28", "cogs": [11, 13, 15, 17, 20, 24, 28]},
-	"mtb9":  {"label": "9-speed 11–32", "cogs": [11, 12, 14, 16, 18, 21, 24, 28, 32]},
-	"mtb11": {"label": "11-speed 10–42", "cogs": [10, 12, 14, 16, 18, 21, 24, 28, 32, 36, 42]},
-	"single":{"label": "Single speed 16T", "cogs": [16]},
+	"dh7":    {"label": "7-speed DH 11–24", "brand": "SRAM", "name": "X01 DH", "cogs": [11, 12, 14, 16, 18, 21, 24],
+		"cols": ["c9ccd1"], "rough": 0.18},
+	"dh7w":   {"label": "7-speed wide 11–28", "brand": "BOX", "name": "Prime 7 Wide", "cogs": [11, 13, 15, 17, 20, 24, 28],
+		"cols": ["202124"], "rough": 0.38},
+	"mtb9":   {"label": "9-speed 11–32", "brand": "SHIMANO", "name": "Deore 9", "cogs": [11, 12, 14, 16, 18, 21, 24, 28, 32],
+		"cols": ["aeb2b8"], "rough": 0.3},
+	"mtb11":  {"label": "11-speed 10–42", "brand": "SHIMANO", "name": "XT 11", "cogs": [10, 12, 14, 16, 18, 21, 24, 28, 32, 36, 42],
+		"cols": ["d4d6da", "34363a"], "rough": 0.22},
+	"single": {"label": "Single speed 16T", "brand": "DMR", "name": "Single cog 16T", "cogs": [16],
+		"cols": ["c8202a"], "rough": 0.3},
+	"eagle":  {"label": "12-speed 10–52", "brand": "SRAM", "name": "XX1 Eagle Gold", "cogs": [10, 12, 14, 16, 18, 21, 24, 28, 32, 36, 42, 52],
+		"cols": ["d9a43c"], "rough": 0.16},
+	"rainbow":{"label": "12-speed 10–52 rainbow", "brand": "SRAM", "name": "XX1 Eagle Rainbow", "cogs": [10, 12, 14, 16, 18, 21, 24, 28, 32, 36, 42, 52],
+		"cols": ["rainbow"], "rough": 0.12},
+	"xtr":    {"label": "12-speed 10–51", "brand": "SHIMANO", "name": "XTR 12", "cogs": [10, 12, 14, 16, 18, 21, 24, 28, 33, 39, 45, 51],
+		"cols": ["dfe1e4", "5a5d63"], "rough": 0.2},
+	"helix":  {"label": "12-speed 9–50", "brand": "E*THIRTEEN", "name": "Helix Race", "cogs": [9, 10, 12, 14, 16, 19, 22, 26, 30, 35, 42, 50],
+		"cols": ["1f6fe0", "16171a"], "rough": 0.28},
+	"summit": {"label": "12-speed 11–56", "brand": "GOATWORKS", "name": "Summit 56", "cogs": [11, 13, 15, 17, 19, 22, 25, 29, 34, 40, 47, 56],
+		"cols": ["ff6a13", "1a1a1c"], "rough": 0.26},
+	"everest":{"label": "13-speed 10–60", "brand": "GOATWORKS", "name": "Everest 60", "cogs": [10, 11, 13, 15, 17, 19, 22, 25, 29, 34, 41, 50, 60],
+		"cols": ["7b2fd0", "c9ccd1"], "rough": 0.2},
 }
+
+## the cassette's per-cog colours (small cog first) for the wheel generator
+static func cassette_cols(k: String) -> Array:
+	var c: Dictionary = CASSETTES[k]
+	var n: int = c.cogs.size()
+	var out := []
+	for i in n:
+		var h: String = c.cols[i % c.cols.size()]
+		if h == "rainbow":   # oil slick: blue -> purple -> magenta -> gold -> green over the stack
+			var t := float(i) / maxf(1.0, n - 1.0)
+			out.append(Color.from_hsv(fposmod(0.58 - t * 0.95, 1.0), 0.75, 0.95))
+		else:
+			out.append(Color(h))
+	return out
 
 static func default_build() -> Dictionary:
 	return {
@@ -323,7 +357,10 @@ static func wheel_spec(b: Dictionary, rear: bool) -> Dictionary:
 		"spokes": int(w.spokes), "lacing": int(w.lacing), "spoke_gauge": int(w.gauge), "spoke_color": Color(w.spoke_color),
 		"nipple_color": Color(w.nipple_color), "hub_color": Color(w.hub_color), "rear": rear,
 	}
-	if rear: spec.cogs = CASSETTES[b.drive.cassette].cogs
+	if rear:
+		spec.cogs = CASSETTES[b.drive.cassette].cogs
+		spec.cas_cols = cassette_cols(b.drive.cassette)
+		spec.cas_rough = CASSETTES[b.drive.cassette].rough
 	return spec
 
 ## tyre radius without the wheel generator (bead seat + tyre height, matched to the stock 29 / 27.5 x 2.5)

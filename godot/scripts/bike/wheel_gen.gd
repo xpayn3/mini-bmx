@@ -44,6 +44,8 @@ const DEFAULTS := {
 	"hub_color": Color(0.78, 0.78, 0.8),
 	"hub_width_mm": 0.0,       # flange spacing; 0 -> stock (62.5 front / 61 rear)
 	"cogs": [11, 12, 14, 16, 18, 21, 24],
+	"cas_cols": [],            # anodized colour per cog, small cog first (cycled); [] = plain silver
+	"cas_rough": 0.2,
 	"tyre_color": Color(0.14, 0.14, 0.14),
 	"sidewall": "black",       # black | tan
 	"detail": 1.0,             # segment multiplier (0.5 = a cheaper wheel)
@@ -418,7 +420,32 @@ static func _build(s: Dictionary) -> ArrayMesh:
 	rim.commit(mesh, _rim_mat(s), "rim")
 	spokes.commit(mesh, _mat("spokes", Color.WHITE, 0.6, 0.32, true), "spokes")
 	hub.commit(mesh, _mat("hub", s["hub_color"], 0.8, 0.26), "hub")
-	chrome.commit(mesh, _mat("chrome", Color(0.86, 0.86, 0.88), 1.0, 0.2), "chrome")
+	chrome.commit(mesh, _cas_mat(s), "chrome")
+	return mesh
+
+
+## the cassette's material: anodized colours ride in the vertex colours (one per cog)
+static func _cas_mat(s: Dictionary) -> StandardMaterial3D:
+	if (s["cas_cols"] as Array).is_empty():
+		return _mat("chrome", Color(0.86, 0.86, 0.88), 1.0, 0.2)
+	# anodized: a dyed oxide over the metal -- less mirror than chrome so the colour reads
+	return _mat("chrome", Color.WHITE, 0.7, float(s["cas_rough"]) + 0.08, true)
+
+
+## the cassette alone (cogs + lockring + a stub of freehub), for the garage's part cards
+static func build_cassette(cogs: Array, cols: Array, rough: float) -> ArrayMesh:
+	var s := DEFAULTS.duplicate(true)
+	s["rear"] = true; s["cogs"] = cogs; s["cas_cols"] = cols; s["cas_rough"] = rough
+	var chrome := Surf.new()
+	_build_cassette(chrome, s, HUB_REAR, 1.5)
+	var hub := Surf.new()
+	var z0: float = HUB_REAR["cas0"] - 0.004
+	var pts := PackedVector2Array([Vector2(0.006, z0), Vector2(0.0174, z0), Vector2(0.0174, HUB_REAR["cas1"] + 0.002), Vector2(0.006, HUB_REAR["cas1"] + 0.002)])
+	var c := Color(0.12, 0.12, 0.13)
+	_lathe(hub, pts, [false, true, false, true], PackedColorArray([c, c, c, c]), 32)
+	var mesh := ArrayMesh.new()
+	chrome.commit(mesh, _cas_mat(s), "chrome")
+	hub.commit(mesh, _mat("hub", Color.WHITE, 0.6, 0.4, true), "hub")
 	return mesh
 
 
@@ -678,13 +705,15 @@ static func _build_cassette(s: Surf, sp: Dictionary, H: Dictionary, det: float) 
 		pitch = minf(0.0039, (z1 - z0 - t) / float(nc - 1))
 		t = minf(t, pitch * 0.6)
 	var r_in := 0.0178
-	var col := Color.WHITE
+	var cc: Array = sp.get("cas_cols", [])   # small cog first
+	var col := Color.WHITE if cc.is_empty() else Color(cc[0])
 	var zlast := z0
 	for ci in nc:
 		var teeth: int = maxi(9, int(cogs[ci]))
 		var za := z0 + pitch * float(ci)
 		zlast = za + t
-		_cog(s, teeth, za, za + t, r_in, col, ci == 0)
+		var cogc := Color.WHITE if cc.is_empty() else Color(cc[(nc - 1 - ci) % cc.size()])
+		_cog(s, teeth, za, za + t, r_in, cogc, ci == 0)
 	# lockring
 	var pts := PackedVector2Array([Vector2(0.0176, zlast + 0.0016), Vector2(0.0205, zlast + 0.0016),
 		Vector2(0.0212, zlast + 0.0009), Vector2(0.0212, zlast), Vector2(0.0176, zlast)])
