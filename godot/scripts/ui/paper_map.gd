@@ -78,7 +78,7 @@ func show_map() -> void:
 	view_c = here; _shown_c = here
 	var t0 := Time.get_ticks_usec()
 	if _world_seed != GameState.seed or not _view_inside(here, 1.0) or here.distance_to(_world_o + Vector2(C_W, C_H) * 0.5) > 60.0:
-		await _print_world(here)
+		await _print_world(here, false)   # the ride is frozen: all at once
 	_frame.setup_from(game, 1.0)
 	await bake()
 	_frame_zoom = 1.0
@@ -90,22 +90,43 @@ func show_map() -> void:
 
 
 var _task := -1
-## the world print: terrain sampling + contours on a worker thread (its own fork of the terrain field, as the
-## chunk builders do), so travelling across the map doesn't stop while the next area prints
-func _print_world(centre: Vector2) -> void:
+## the world print. The terrain is sampled on the main thread with the game's own field (C# = fast), a few ms per
+## frame while you travel (all at once when the map opens: the ride is frozen anyway); the land image, contours
+## and mipmaps are built on a worker thread from that plain data. (C# terrain forks on a worker were left to C#'s
+## garbage collector and crashed the quit.)
+func _print_world(centre: Vector2, sliced := true) -> void:
 	var t0 := Time.get_ticks_usec()
 	var o := centre - Vector2(C_W, C_H) * 0.5
-	# a job object we keep (as the chunk builders do): the terrain fork - a C# object - must be dropped on the
-	# main thread; a lambda holding it was released on the worker and crashed the quit
+	var f = game.terrain.query_field()
 	var job := PrintJob.new()
-	job.f = game.terrain.query_field().fork()
 	job.o = o
+	job.nx = int(C_W / GRID) + 1; job.nz = int(C_H / GRID) + 1
+	job.cx = (job.nx + 1) / 2; job.cz = (job.nz + 1) / 2
+	job.h.resize(job.nx * job.nz)
+	job.c.resize(job.cx * job.cz)
+	var budget := 4000 if sliced else 1000000000
+	var s0 := Time.get_ticks_usec()
+	for j in job.nz:
+		var z := o.y + j * GRID
+		for i in job.nx:
+			job.h[j * job.nx + i] = f.ground(o.x + i * GRID, z)
+		if Time.get_ticks_usec() - s0 > budget:
+			await get_tree().process_frame
+			if not is_inside_tree(): return
+			s0 = Time.get_ticks_usec()
+	for j in job.cz:
+		for i in job.cx:
+			var hc := job.h[mini(j * 2, job.nz - 1) * job.nx + mini(i * 2, job.nx - 1)]
+			job.c[j * job.cx + i] = Color(0, 0, 0, 0) if hc < Terrain.WATER - 0.05 else f.color(o.x + i * 2 * GRID, o.y + j * 2 * GRID, hc, 1.0)
+		if Time.get_ticks_usec() - s0 > budget:
+			await get_tree().process_frame
+			if not is_inside_tree(): return
+			s0 = Time.get_ticks_usec()
 	_task = WorkerThreadPool.add_task(job.run)
 	while not WorkerThreadPool.is_task_completed(_task):
 		await get_tree().process_frame
 	WorkerThreadPool.wait_for_task_completion(_task)
 	_task = -1
-	job.f = null
 	if not is_inside_tree(): return
 	_world.finish(game, o, job.out)
 	_world_vp.render_target_update_mode = SubViewport.UPDATE_ONCE
@@ -198,10 +219,13 @@ func _reprint_world(c: Vector2) -> void:
 
 
 class PrintJob extends RefCounted:
-	var f
+	## plain data only (no engine objects): heights every GRID m, ground colours (linear) every 2 GRID m
 	var o := Vector2.ZERO
+	var nx := 0; var nz := 0; var cx := 0; var cz := 0
+	var h := PackedFloat32Array()
+	var c := PackedColorArray()
 	var out := {}
-	func run() -> void: out = World.sample(f, o)
+	func run() -> void: out = World.make(self)
 
 class MipJob extends RefCounted:
 	var img: Image
@@ -389,31 +413,21 @@ class World extends Ink:
 	func px(x: float, z: float) -> Vector2:
 		return Vector2((x - origin.x) * C_IW / C_W, (z - origin.y) * C_IH / C_H)
 
-	## worker thread: heights, the land image, contours. f = a private fork of the terrain field.
-	static func sample(f, o: Vector2) -> Dictionary:
-		var nx := int(C_W / GRID) + 1
-		var nz := int(C_H / GRID) + 1
-		var h := PackedFloat32Array(); h.resize(nx * nz)
-		for j in nz:
-			var z := o.y + j * GRID
-			for i in nx:
-				h[j * nx + i] = f.ground(o.x + i * GRID, z)
+	## worker thread: the land image + contours from the sampled heights / colours (PrintJob)
+	static func make(job) -> Dictionary:
+		var nx: int = job.nx; var nz: int = job.nz
+		var h: PackedFloat32Array = job.h
 		# land: the real ground colour (every 10 m, smoothed), washed out towards the paper, times a hill shade
 		# from the north-west (every 5 m); water flat blue
 		var paper := Color(0.97, 0.96, 0.9)
 		var light := Vector3(-0.55, 0.62, -0.55).normalized()
 		var wl := Terrain.WATER
-		var cx := (nx + 1) / 2; var cz := (nz + 1) / 2
+		var cx: int = job.cx; var cz: int = job.cz
 		var cimg := Image.create(cx, cz, false, Image.FORMAT_RGB8)
 		for j in cz:
 			for i in cx:
-				var hc := h[mini(j * 2, nz - 1) * nx + mini(i * 2, nx - 1)]
-				var g: Color
-				if hc < wl - 0.05: g = WATER.lerp(paper, 0.15)
-				else:
-					var lc: Color = f.color(o.x + i * 2 * GRID, o.y + j * 2 * GRID, hc, 1.0)
-					g = lc.linear_to_srgb().lerp(paper, 0.5)
-				cimg.set_pixel(i, j, g)
+				var lc: Color = job.c[j * cx + i]
+				cimg.set_pixel(i, j, WATER.lerp(paper, 0.15) if lc.a == 0.0 else lc.linear_to_srgb().lerp(paper, 0.5))
 		cimg.resize(nx, nz, Image.INTERPOLATE_BILINEAR)
 		var img := Image.create(nx, nz, false, Image.FORMAT_RGB8)
 		for j in nz:
