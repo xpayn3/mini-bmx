@@ -167,8 +167,8 @@ func _build_room() -> void:
 	env.fog_depth_end = 260.0
 	env.fog_sky_affect = 0.0
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.3, 0.26, 0.22)   # a warm, dim shed (most light comes in by the door)
-	env.ambient_light_energy = 0.22
+	env.ambient_light_color = Color(0.52, 0.5, 0.47)   # a lit workshop: walls and the bike's sides never go black
+	env.ambient_light_energy = 0.5
 	# real light bounce: daylight off the floor and brick fills the shed (SDFGI)
 	env.sdfgi_enabled = true
 	env.sdfgi_use_occlusion = true
@@ -177,7 +177,7 @@ func _build_room() -> void:
 	env.sdfgi_energy = 1.0
 	env.sdfgi_bounce_feedback = 0.6
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_exposure = 1.05
+	env.tonemap_exposure = 1.15
 	env.ssao_enabled = true
 	env.ssao_radius = 0.5
 	env.ssao_intensity = 2.0
@@ -326,6 +326,32 @@ func _build_room() -> void:
 	var fl_l := OmniLight3D.new()
 	fl_l.position = Vector3(-5.0, 2.8, -3.4); fl_l.light_color = Color(0.92, 0.95, 1.0); fl_l.light_energy = 0.6; fl_l.omni_range = 4.0
 	add_child(fl_l)
+	# workshop lighting so the bike reads from every side (it went black once orbited off the doorway):
+	# two cool-white ceiling tubes over the work area, a soft key from the front-right (true paint colour)
+	# and a rim from behind that lifts the bike off the background
+	var tube := StandardMaterial3D.new()
+	tube.emission_enabled = true; tube.emission = Color(0.94, 0.96, 1.0); tube.emission_energy_multiplier = 3.0
+	for tx in [-2.6, 2.6]:
+		_box(Vector3(0.12, 0.05, 2.4), Vector3(tx, 4.55, 1.2), tube)
+		_box(Vector3(0.2, 0.04, 2.5), Vector3(tx, 4.6, 1.2), steel)
+		var tl := OmniLight3D.new()
+		tl.position = Vector3(tx, 4.3, 1.2); tl.light_color = Color(0.93, 0.95, 1.0)
+		tl.light_energy = 1.6; tl.omni_range = 8.0; tl.omni_attenuation = 0.8
+		tl.light_volumetric_fog_energy = 0.1
+		add_child(tl)
+	var key := SpotLight3D.new()
+	add_child(key)
+	key.look_at_from_position(Vector3(2.8, 2.6, 3.2), Vector3(0, 0.8, 0), Vector3.UP)
+	key.spot_range = 9.0; key.spot_angle = 38.0; key.spot_angle_attenuation = 1.2
+	key.light_energy = 5.0; key.light_color = Color(1.0, 0.97, 0.92)
+	key.shadow_enabled = true; key.shadow_blur = 2.5
+	key.light_volumetric_fog_energy = 0.2
+	var rim := SpotLight3D.new()
+	add_child(rim)
+	rim.look_at_from_position(Vector3(-2.6, 2.4, -3.2), Vector3(0, 1.0, 0), Vector3.UP)
+	rim.spot_range = 8.0; rim.spot_angle = 35.0; rim.spot_angle_attenuation = 1.0
+	rim.light_energy = 4.0; rim.light_color = Color(0.85, 0.9, 1.0)
+	rim.light_volumetric_fog_energy = 0.1
 
 ## The real procedural world outside the door: the world seed you ride, turned so you look down the
 ## start of the trail (+X in the world) through the doorway (-Z here), with the spawn point just
