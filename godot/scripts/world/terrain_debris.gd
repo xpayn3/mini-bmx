@@ -20,6 +20,8 @@ var _items: Array = []   # [{body, t, chunk, half}]
 var _wrecks: Array = []  # [{node, chunk}] pieces at rest (no physics)
 var _mats := {}
 var _tag := Vector2i(1 << 30, 0)   # chunk of the thing being smashed (set by smash_*)
+var _hit := Vector2.ZERO           # where it was hit (probe)
+var _spawned := 0                  # pieces made so far (smash_fence reports how many it made)
 
 
 var _probe_t := 0.0
@@ -88,7 +90,11 @@ func _lay_down(it: Dictionary) -> void:
 	var mi: MeshInstance3D = null
 	for ch in b.get_children():
 		if ch is MeshInstance3D: mi = ch
-	if OS.get_environment("BMX_DEBRIS_PROBE") != "": print("DEBRIS lay_down y=%.2f t=%.1f sleeping=%s" % [b.global_position.y, it["t"], b.sleeping])
+	if OS.get_environment("BMX_DEBRIS_PROBE") != "":
+		var pp := b.global_position
+		var tr = get_parent()
+		var lo := pp.y - _reach(it, b.global_basis)
+		print("DEBRIS lay_down y=%.2f t=%.1f low_vs_field=%.3f low_vs_drawn=%.3f from_hit=%.1f m vis=%s" % [pp.y, it["t"], lo - tr.height(pp.x, pp.z), lo - tr.top_height(pp.x, pp.z), Vector2(pp.x - it.get("hx", pp.x), pp.z - it.get("hz", pp.z)).length(), str(b.is_visible_in_tree())])
 	if mi != null:
 		var xf := mi.global_transform
 		# never left inside / under the ground
@@ -177,10 +183,11 @@ func spawn(mesh: Mesh, mesh_scale: Vector3, col: Color, xf: Transform3D, size: V
 	b.linear_velocity = v
 	b.angular_velocity = w
 	var half := Vector3(maxf(size.x, 0.02), maxf(size.y, 0.02), maxf(size.z, 0.02)) * 0.5
-	var it := {"body": b, "t": 0.0, "chunk": _tag, "half": half}
+	var it := {"body": b, "t": 0.0, "chunk": _tag, "half": half, "hx": _hit.x, "hz": _hit.y}
 	if shape is ConvexPolygonShape3D:
 		it["pts"] = shape.points
 	_items.append(it)
+	_spawned += 1
 	return b
 
 
@@ -199,10 +206,12 @@ static func fence_part_goes(part: Dictionary, hit: Vector2) -> bool:
 ## fences.js breakFence, reworked: rails snap AT the hit (two real-length halves that swing away
 ## from the break, plus a few splinters), pickets near the hit fly, far ones topple; untouched
 ## posts stay in the ground
-func smash_fence(panel: Dictionary, vel: Vector3, hit: Vector2, chunk = null) -> void:
+func smash_fence(panel: Dictionary, vel: Vector3, hit: Vector2, chunk = null) -> int:
 	_tag = chunk if chunk is Vector2i else Vector2i(1 << 30, 0)
+	_hit = hit
 	var sp := Vector2(vel.x, vel.z).length()
 	var dir := Vector3(vel.x, 0, vel.z).normalized() if sp > 0.1 else Vector3.ZERO
+	var n0 := _spawned
 	for part in panel["parts"]:
 		if not fence_part_goes(part, hit):
 			continue
@@ -217,11 +226,12 @@ func smash_fence(panel: Dictionary, vel: Vector3, hit: Vector2, chunk = null) ->
 			var ax := rot.x
 			var L := scl.x
 			# where along the rail the bike went through
-			var t := clampf((hit.x - mp.x) * ax.x + (hit.y - mp.z) * ax.z, -L / 2 + 0.25, L / 2 - 0.25)
+			var edge := minf(0.25, L * 0.3)   # short rails too: never a half with no length
+			var t := clampf((hit.x - mp.x) * ax.x + (hit.y - mp.z) * ax.z, -L / 2 + edge, L / 2 - edge)
 			for k in 2:
 				var a := -L / 2 if k == 0 else t
 				var b := t if k == 0 else L / 2
-				var len := b - a - 0.03
+				var len := maxf(0.05, b - a - 0.03)
 				var c := mp + ax * ((a + b) / 2)
 				var side := -1.0 if k == 0 else 1.0
 				# the broken end is pushed along with the bike, the far end lags: a swing about the far end
@@ -242,6 +252,7 @@ func smash_fence(panel: Dictionary, vel: Vector3, hit: Vector2, chunk = null) ->
 		var spin := 2 + sp * 0.9 * near
 		var w := Vector3(_rs() * spin, _rs() * spin, _rs() * spin)
 		spawn(TerrainGeo.MESH[kind], scl, part["col"], Transform3D(rot, mp), base_size * scl, v, w, 0.6)
+	return _spawned - n0
 
 
 ## a smashed cactus breaks along its precomputed Voronoi cells (CactusGeo): the chunks round the hit

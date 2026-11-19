@@ -145,7 +145,15 @@ func _init() -> void:
 	lens.emission_enabled = true
 	lens.emission = Color("#401a08")
 	lens.cull_mode = BaseMaterial3D.CULL_DISABLED
-	goggle_mats = {frame = mat("#f2f2ee", 0.45), foam = mat("#15171a", 1.0), strap = strap, lens = lens}
+	# the wordmark printed on the strap (white lettering texture, tinted black / white by the strap colour)
+	var logo := mat("#ffffff", 0.8)
+	logo.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	logo.cull_mode = BaseMaterial3D.CULL_DISABLED
+	goggle_mats = {frame = mat("#f2f2ee", 0.45), foam = mat("#15171a", 1.0), strap = strap, lens = lens, logo = logo}
+	var baker := StrapLogo.new()
+	baker.mat = logo
+	baker.text = "GIANT"
+	add_child(baker)
 	for i in 2:
 		var s := GEAR.build_shoe(shoe_mats)
 		add_child(s)

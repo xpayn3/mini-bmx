@@ -54,7 +54,7 @@ W/↑ pedal · S/↓ brake · A/D steer · **Space** hop/pump (hold to charge; *
 **S/W pressed fresh as you leave a lip: throw a back/front flip** · **W/S in the air: tilt the bike nose down/up (limited, body shift)** · **A/D in the air: lean the bike left/right (no spins)** · **brake + A/D when slow: pivot (pirouette)** · Shift sprint (stamina) · Q/E shift gears · F bail · Backspace back to
 start · R new world · B next bike · C next camera · Z/X rotate camera · +/- zoom · mouse drag orbit ·
 H records · **P / K / L** the tuning card on its Ride / Rider / Look tab · O photo mode · F1 hide HUD ·
-F12 screenshot · Esc pause. Gamepad (Xbox): triggers pedal/brake, left stick steer, A hop, X sprint, bumpers gears, Y camera,
+F12 screenshot · Esc pause. Gamepad (Xbox): triggers pedal/brake, left stick steer, X hop (jump), A sprint, bumpers gears, Y camera, D-pad left / right rotate the camera,
 **right stick = the rider's body, all the time**: up / down shifts the weight forward over the bars / back (pulled well back
 rolling = a **manual**, yanked fresh at a lip = a flip throw, in the air = nose down / up), left / right throws the bike over under
 the body (leaning alone turns, leaning with the steer turns harder + grips more, a quick **flick** whips the bike round; in the
@@ -160,6 +160,8 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   Already laid-out trail, marking and route features never change (marking has its own RNG; stakes are
   stored in course order). Chunks read rocks / stakes / fences from per-chunk buckets, route features are
   binary-searched — nothing scans the whole course. `tools/trail_grow_probe.gd` checks all of it.
+
+- **Sponsor props** (`TrailCourse.chunk_gates` / `chunk_boards`, fixed spacing by centreline index so growing never moves them): a huge steel gantry with a sponsor banner over the trail every 300 m (`TrailGate.build`, made-up brands in `TrailGate.SPONSORS`, no collision, skipped on jumps) and breakable wooden roadside billboards every ~80 m (fence-style panel in `TerrainChunkBuilder._boards`, so the bike smashes them; the Label3D text is freed on smash). Probe: `BMX_GATE_PROBE=1`.
 
 ### Rider
 - Procedural meshes posed every frame from the bike's grips/pedals with 2-bone IK; style dictionary
@@ -409,7 +411,8 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `BMX_LAND_TEST=secs` / `BMX_BAIL=secs` | autotest fakes a hard landing (landing dust) / bails (crash dust) at that time |
 | `BMX_DEBRIS_PROBE=1` | fence / cactus debris: moving / resting counts and the lowest piece (none may fall through the ground) |
 | `BMX_SPRITE_DUST=1`, `BMX_SMOKE_PROBE=1` | old sprite dust for comparison / smoke-sim timing prints |
-| `BMX_FENCE=dir/prefix` (+ `BMX_FENCE_STYLE=ranch/picket`) | autotest rides into the nearest fence, screenshots before / after the smash |
+| `BMX_FENCE=dir/prefix` (+ `BMX_FENCE_STYLE=ranch/picket`, `BMX_FENCE_SPEED=m/s`, `BMX_FENCE_ANGLE=deg`) | autotest rides into the nearest fence, screenshots before / after the smash; with `BMX_DEBRIS_PROBE=1` every piece prints how far it landed from the hit and its gap to the drawn ground |
+| `BMX_FENCE_ALL=1` | smashes every fence within 70 m at random 4–18 m/s, 7 s later counts pieces buried / invisible / freed (all must be 0) |
 
 Typical check after a change: build C# → `--autotest=10` with `BMX_SEED=4242` (sane=true, no SCRIPT ERROR)
 → a `--shot` of what changed → look at the PNG. Frame rate reference: ~46–58 fps at 1600×900 with vsync
