@@ -146,8 +146,8 @@ F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A 
   at the old default change). `BMX_LEAN_SHOT=prefix` saves shots of the first deep leans.
 - Ragdoll on crashes (`ragdoll.gd`), then get up with Space.
 - **WASTED** (`fx/wasted.gd`, Settings › Gameplay › Crash slow motion): on a crash time drops to 0.22× (sound pitched down via
-  `AudioServer.playback_speed_scale`) for ~2.4 s real time, then eases back; the screen goes grey + vignette, a red
-  WASTED card punches in with the crash reason under it. Fades on getting up or after 5 s. Off in autotests unless `BMX_WASTED=1`.
+  `AudioServer.playback_speed_scale`) for ~2.4 s real time, then eases back; the screen goes grey + vignette, the word
+  WASTED punches in, flat red, squeezed narrow to fill the screen (no band, no stroke), the crash reason small below. Fades on getting up or after 5 s. Off in autotests unless `BMX_WASTED=1`.
 - Look: kits + a colour per part (helmet shell/peak, goggles, jersey, pants, gloves, shoes).
 
 ### Ride light (time of day)
@@ -235,6 +235,8 @@ F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A 
   turn), route feature (`route_feats`: tabletop, kicker, rollers, bridge…) or rock garden within 120 m; a banner
   pops up over any page when a new one appears, then stays from 40 m in. Off the trail (> 15 m) or riding it
   backwards: no alerts. `BMX_ALERT_PROBE=1` walks 2.4 km of trail and prints every alert.
+- Piezo sounds (`ui/garmin_beep.gd`, rendered once into AudioStreamWAVs): a rising power-on chime 0.35 s after the
+  HUD shows (ride start), a short key beep on the ◀ ▶ bezel buttons.
 - Small touches: "acquiring satellites" for the first 3 s of a ride, battery icon (drains 60 %/h of riding),
   backlight for 3 s on a button press or a new alert.
 
