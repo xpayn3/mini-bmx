@@ -9,7 +9,7 @@ const GEAR := preload("res://scripts/rider/rider_gear.gd")
 
 ## neutral riding style (posepanel.js NEUTRAL): BMX = all of these
 const NEUTRAL := {hipX = 0.0, hipY = 0.0, lean = 0.0, elbowsOut = 0.0, kneesOut = 0.0, stance = 0.0, seatFloor = false,
-	crouch = 1.0, standPedal = 1.0, aero = 1.0, sway = 1.0, bikeRock = 1.0, upright = 1.0, hipSway = 0.015, torso = 0.46, attackStand = 1.0, kneeOpen = 1.0, bumpAbsorb = 2.0, bodyBounce = 0.4, leanFollow = 1.0, leanSwing = 1.0, leanUnweight = 1.0, leanLively = 1.0, bodyBob = 1.0,
+	crouch = 1.0, standPedal = 1.0, aero = 1.0, sway = 1.0, bikeRock = 1.0, upright = 1.0, hipSway = 0.015, torso = 0.46, attackStand = 1.0, kneeOpen = 1.0, bumpAbsorb = 2.0, bodyBounce = 0.4, leanFollow = 1.0, leanSwing = 1.0, leanUnweight = 1.0, leanLively = 1.0, leanBalance = 1.0, leanBumps = 1.0, leanLoad = 1.0, bodyBob = 1.0,
 	# style (Rider > Style): the numbers the riding pose is built from
 	hipSteady = 90.0, standHeight = 0.15, standBack = 0.03, pedalChest = 0.05, turnLow = 1.0, turnTwist = 1.0,
 	turnHips = 1.0, slowWobble = 1.0, airCrouch = 1.0,
@@ -1099,10 +1099,10 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# a touch lower and forward), rising again as the turn lets go
 	var live: float = clampf(float(sty.get("leanLively", 1.0)), 0.0, 3.0) * (1.0 - air)
 	var in_turn: float = smoothstep(0.08, 0.5, absf(bl)) * live
-	roll_pv += (0.022 * sin(t * 1.9 + 0.7) + 0.014 * sin(t * 3.3 + 2.1) + 0.008 * sin(t * 5.7)) * in_turn * hw * hw * 0.6 * hr
-	roll_pv -= _facc * sin(bl) * 0.15 * live * hr
+	roll_pv += (0.022 * sin(t * 1.9 + 0.7) + 0.014 * sin(t * 3.3 + 2.1) + 0.008 * sin(t * 5.7)) * in_turn * hw * hw * 0.6 * float(sty.get("leanBalance", 1.0)) * hr
+	roll_pv -= _facc * sin(bl) * 0.15 * live * float(sty.get("leanBumps", 1.0)) * hr
 	lat_g_s += (clampf(absf(_num(p, "latG")), 0.0, 1.5) - lat_g_s) * (1.0 - exp(-5.0 * hr))
-	var sink: float = smoothstep(0.1, 1.0, lat_g_s) * live
+	var sink: float = smoothstep(0.1, 1.0, lat_g_s) * live * float(sty.get("leanLoad", 1.0))
 	pelvis.y -= 0.03 * sink
 	chest.y -= 0.035 * sink
 	chest.x += 0.02 * sink
