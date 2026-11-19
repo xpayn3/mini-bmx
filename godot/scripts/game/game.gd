@@ -647,7 +647,7 @@ func _crash_dust() -> void:
 				if OS.get_environment("BMX_SMOKE_PROBE") != "": print("CRASHDUST impact i=%d t=%.2f hit=%.1f" % [i, phys.crash_t, hit])
 				dust.sim.burst(at, Vector3(v.x * 0.25, 0.6 + k * 0.8, v.z * 0.25), 0.3 + k * 0.25, (50.0 + 110.0 * k) * amt * CRASH_DUST_BODY,
 					1.2 + k * 2.2, 0.08 + k * 0.05, ground_dust(pp.x, pp.z, s), 20.0)
-				dust.grit_burst(at, Vector3(v.x * 0.3, 0.8 + k * 1.6, v.z * 0.3), 1.0 + k * 2.5, 600.0 * k * amt * 0.2 * CRASH_DEBRIS, 0.06, ground_dust(pp.x, pp.z, s))
+				if OS.get_environment("BMX_NOGRIT") == "": dust.grit_burst(at, Vector3(v.x * 0.3, 0.8 + k * 1.6, v.z * 0.3), 1.0 + k * 2.5, 600.0 * k * amt * 0.2 * CRASH_DEBRIS, 0.06, ground_dust(pp.x, pp.z, s))
 				made += 1
 		elif hs > 1.2 and made < 10:
 			# sliding / rolling along the ground

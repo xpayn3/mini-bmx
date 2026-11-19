@@ -26,6 +26,9 @@ const LAYER_GROUND := 1 << 1    # physics layer 2: chunk ground colliders (only 
 ## faster). false = everything through the GDScript TerrainField, which stays the reference. Falls back
 ## to GDScript by itself when the C# assembly can't be loaded (e.g. a non-.NET Godot build).
 const USE_CS := true
+## render layer bit only the ground meshes have (on top of layer 1): Decals with this cull mask paint the
+## ground and nothing lying on it
+const GROUND_LAYER := 1 << 10
 const CS_FIELD := "res://scripts/world/TerrainFieldCs.cs"
 var use_cs := USE_CS and OS.get_environment("BMX_TERRAIN_GD") == ""   # env BMX_TERRAIN_GD=1: GDScript (A/B runs); tools flip it before set_seed()
 
@@ -586,6 +589,7 @@ func _finalize(k: Vector2i) -> void:
 	var gi := MeshInstance3D.new()
 	gi.mesh = mesh
 	gi.material_override = mat
+	gi.layers = 1 | GROUND_LAYER   # + its own layer: ground-only decals (blood splats, fx/blood.gd) project onto it
 	gi.position = Vector3(ox, 0, oz)
 	gi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	node.add_child(gi)
