@@ -217,12 +217,12 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   pedalling out of the saddle swings the bike ~±6° (±10° sprinting) under a steady body; elbows bend
   back and down, only a little out (the arm IK pole's sideways part scales with `elbowsOut`). Saved poses migrate once (`RiderPanels.POSE_VER` / `POSE_RETUNED`: only values still
   at the old default change). `BMX_LEAN_SHOT=prefix` saves shots of the first deep leans.
-- **Lean feel** (2026-11-19): the steer input follows the keys / stick on a critically damped spring (`steerEase` 12, Ride ›
-  Steering), so a press eases in instead of snapping to full lock; the lean's roll speed saturates at `leanRate` (3.6 rad/s,
-  Ride › Lean) with `leanIn` 37 / `leanOut` 28 and `flickSpeed` 10 (Tune VER 12 resets those; the user asked for this
-  middle ground after a slower first try).
+- **Lean feel** (2026-11-20): back to the old snappy response at the user's request, but tunable: the steer input follows
+  the keys / stick on a critically damped spring (`steerEase` 30, Ride › Steering; lower = gentler build-up), the lean's roll
+  speed saturates at `leanRate` (6 rad/s, Ride › Lean; ~2.8 felt too slow, 3.6 still too slow), `leanIn` 40 / `leanOut` 30,
+  `flickSpeed` 14 (the old values; Tune VER 13 resets them).
   The rider's body is its own mass: in `rider.gd` the hips (`ROLL_HIP_W/Z`) and chest (`ROLL_CHEST_W/Z`) follow the target
-  roll (bike lean - counter) on springs, so the bike goes over first and the body follows through with a little overshoot;
+  roll (bike lean - counter) on springs (12 / 10 rad/s), so the bike goes over first and the body follows through with a little overshoot;
   through a crossover the legs extend (`ROLL_UNWEIGHT`); the inside knee follows a smoothed lean. Sliders (Rider › Motion,
   pose keys): `leanFollow` (how quickly), `leanSwing` (overshoot), `leanUnweight` (legs extend). Test: `BMX_FLIPFLOP=2.4`
   (+ `BMX_STRAIGHT=1`) swaps full left / right every 1.2 s and prints `LEANFF` lines (steer, lat, bike / hip / chest roll, peak roll rate).
@@ -232,7 +232,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - **Corner whip / drift** (`bike_physics.gd` `whip`, Ride › Body › `whip*`): both sticks hard the same way (steer + body
   lean, > 0.6) above `whipMinSpeed` = the bike is thrown further over (`whipLean`) and the rear swings out to `whipDrift`
   (~0.42 rad) at `whipSnap`, held while both stay there, speed mostly kept (`whipCarry` cuts the slide scrub); "WHIP!" after
-  0.3 s. Sticks must pass `whipTrigger`; `whip_hold` keeps control `whipCatch` s after letting go so the drift is caught (without it the rear spun out to the
+  0.3 s. Sticks must pass `whipTrigger` and stay there 0.12 s (`_whip_arm`); the ride log has `whip`, `whip_hold`, `raw_right_x`, `raw_left_x` columns; `whip_hold` keeps control `whipCatch` s after letting go so the drift is caught (without it the rear spun out to the
   wash-out angle). Test: `BMX_WHIP=secs` (+ `BMX_WHIP_T0`, `BMX_STRAIGHT=1`) prints `WHIP` lines.
 - **Aerodynamics** (`aero_k` in `bike_physics.gd`): the air drag scales with the body: right stick forward on the ground = a race tuck
   (chest folded over the bars, hips back, knees bent) cuts drag by `tuckDrag` (0.42; half that while pedalling), stick back = sat up,

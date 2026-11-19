@@ -63,7 +63,7 @@ var aero_k := 1.0   # air drag scale from the body position (tuck < 1, sat up > 
 var body_in := 0.0; var body_in_s := 0.0; var flick_in := 0.0; var flick := 0.0; var flick_prev := 0.0
 var wheelie_time := 0.0; var wheelie_pedal := false   # how long the current stick wheelie / manual has been held
 var manual_up := 0.0; var lock_sb := false; var lock_sf := false; var flick_kick := 0.0
-var whip := 0.0; var whip_hold := 0.0; var whip_side := 0.0; var _whip_t := 0.0; var _whip_flashed := false   # corner whip / drift (both sticks one way)
+var whip := 0.0; var whip_hold := 0.0; var whip_side := 0.0; var _whip_t := 0.0; var _whip_flashed := false; var _whip_arm := 0.0   # corner whip / drift (both sticks one way)
 var flick_v := 0.0; var _flick_arm := 0.0; var _flick_side := 0.0   # flick spring speed, deliberate-flick detector
 const FLICK_VMAX := 6.0      # the bike can be thrown over at most this fast (stick units / s)
 const FLICK_WINDOW := 0.18   # centre -> edge within this long = a deliberate flick
@@ -215,7 +215,7 @@ func reset_at(px: float, pz: float, hd: float) -> void:
 	bank = 0; body_x = 0; hip_shift = 0; spin = 0; a_drive = 0; charge = 0; hop_charge = 0; lift_t = 0
 	body_xv = 0; hip_v = 0; v_last = NAN; air_lean = 0; air_pull = 0; flip_acc = 0; spin_acc = 0; flip_in = 0; spin_in = 0
 	body_pw = 0; throw_v = 0; air_w = 0; air_inertia = 1; air_tilt = 0; air_tilt_v = 0; air_yaw = 0; air_tw = 0; air_tw_v = 0; land_jolt = 0
-	pivot = 0; pivot_acc = 0; body_in_s = 0; flick = 0; flick_v = 0; _flick_arm = 0; _flick_side = 0; flick_prev = 0; manual_up = 0; flick_kick = 0; whip = 0; whip_hold = 0; _whip_t = 0; _whip_flashed = false
+	pivot = 0; pivot_acc = 0; body_in_s = 0; flick = 0; flick_v = 0; _flick_arm = 0; _flick_side = 0; flick_prev = 0; manual_up = 0; flick_kick = 0; whip = 0; whip_hold = 0; _whip_arm = 0; _whip_t = 0; _whip_flashed = false
 	sprint = 0; flow = 0; flow_t = 0; lat_m = 0; carve = 0; carve_acc = 0; carve_berm = false
 	y_draw = y; pitch_draw = 0; nose_ref = NAN; pitch_w = NAN; y_prev = NAN; kick_t = 0
 	w_f = y; w_r = y
@@ -232,7 +232,7 @@ func get_up() -> void:
 	bank = 0; body_x = 0; hip_shift = 0; spin = 0; a_drive = 0; charge = 0; hop_charge = 0; lift_t = 0
 	body_xv = 0; hip_v = 0; v_last = NAN; air_lean = 0; air_pull = 0; flip_acc = 0; spin_acc = 0; flip_in = 0; spin_in = 0
 	body_pw = 0; throw_v = 0; air_w = 0; air_inertia = 1; air_tilt = 0; air_tilt_v = 0; air_yaw = 0; air_tw = 0; air_tw_v = 0; land_jolt = 0
-	pivot = 0; pivot_acc = 0; body_in_s = 0; flick = 0; flick_v = 0; _flick_arm = 0; _flick_side = 0; flick_prev = 0; manual_up = 0; flick_kick = 0; whip = 0; whip_hold = 0; _whip_t = 0; _whip_flashed = false
+	pivot = 0; pivot_acc = 0; body_in_s = 0; flick = 0; flick_v = 0; _flick_arm = 0; _flick_side = 0; flick_prev = 0; manual_up = 0; flick_kick = 0; whip = 0; whip_hold = 0; _whip_arm = 0; _whip_t = 0; _whip_flashed = false
 	sprint = 0; flow = 0; flow_t = 0; lat_m = 0; carve = 0; carve_acc = 0; carve_berm = false; y_draw = y; pitch_draw = 0
 
 func begin_crash() -> void:
@@ -579,6 +579,10 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	# the tyres catch it. The lean / drift build in over ~0.25 s and ease out, nothing snaps
 	var wtr: float = float(T.get("whipTrigger", 0.6))
 	var whip_want := not air and va > float(T.get("whipMinSpeed", 4.0)) and absf(steer_input) > wtr and absf(flick_in) > wtr and signf(steer_input) == signf(flick_in) and float(T.get("whipDrift", 0.42)) > 0.0
+	# both sticks have to stay there a moment (0.12 s) before it starts: a thumb brushing the right stick while
+	# steering never whips
+	_whip_arm = _whip_arm + dt if whip_want else 0.0
+	if whip < 0.05 and _whip_arm < 0.12: whip_want = false
 	if whip_want and whip < 0.05: whip_side = signf(steer_input)
 	if whip_want and signf(steer_input) != whip_side: whip_want = false
 	whip = minf(1.0, whip + dt * 4.0) if whip_want else maxf(0.0, whip - dt * 3.0)
@@ -593,7 +597,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	# build-up / release rate: a key press or a stick push starts turning gently and builds (an S-curve, no
 	# instant full lock), and a swap from full left to full right swings through over ~0.5 s
 	var rate: float = T.steerRate if absf(steer_eff) > 0.01 else T.steerRelease
-	var se_w: float = float(T.get("steerEase", 12.0))
+	var se_w: float = float(T.get("steerEase", 30.0))
 	steer_in_v += ((steer_eff - steer_in) * se_w * se_w - 2.0 * se_w * steer_in_v) * dt
 	steer_in_v = clampf(steer_in_v, -rate, rate)
 	steer_in = clampf(steer_in + steer_in_v * dt, -1.0, 1.0)
@@ -749,7 +753,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	if not air:
 		# a real bike + rider (~100 kg) only rolls so fast: the roll speed eases into a top rate (leanRate,
 		# rad/s of the body lean; the bike leans bikeLeanMul x that) instead of whipping from one side to the other
-		var lr: float = float(T.get("leanRate", 3.6))
+		var lr: float = float(T.get("leanRate", 6.0))
 		lean_v = lr * tanh(lean_v / lr)
 	lean += lean_v * dt
 	# the body stick throws the bike over under the rider (the body stays upright: counter grows)
