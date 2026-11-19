@@ -117,9 +117,9 @@ class Wood:
 		else:
 			if u < 2.0:
 				return _ramp(0.0, 2.0, 0.02, 0.45, u)
-			if u < 13.0:
+			if u < u1 - 2.0:
 				return 0.45
-			return _ramp(13.0, 15.0, 0.45, 0.02, u)
+			return _ramp(u1 - 2.0, u1, 0.45, 0.02, u)
 	static func _ramp(a: float, b: float, h0: float, h1: float, u: float) -> float:
 		return h0 + (h1 - h0) * minf(1.0, maxf(0.0, (u - a) / (b - a)))
 
@@ -163,6 +163,7 @@ static func make_set() -> Dictionary:
 		"woodKicker": Hermite.new([[0, 0, 0], [4.6, 0, 0], [6.4, 0.9, 0.1, 0], [7.4, 0.9, 0, 0], [10, 0.72, -0.17], [20, 0.14, -0.08], [26, 0, 0]]),
 		"skinny": Flat.new(19.0),
 		"bridge": Flat.new(15.0),
+		"gorge": Flat.new(36.0),
 	}
 	var kick := Hermite.new([[0, 0, 0.1], [3.8, 0.95, 0.4]])
 	var skin := Hermite.new([[0, 0.02, 0.05], [2, 0.42, 0.3], [4, 0.85, 0]])
@@ -170,6 +171,8 @@ static func make_set() -> Dictionary:
 		"woodKicker": Wood.new(0, 0.0, 3.8, 0.85, true, kick, skin),
 		"skinny": Wood.new(1, 0.0, 19.0, 0.33, false, kick, skin),
 		"bridge": Wood.new(2, 0.0, 15.0, 1.0, false, kick, skin),
+		"gorge": Wood.new(2, 0.0, 36.0, 1.4, false, kick, skin),
 	}
-	var dig := {"bridge": Hermite.new([[0, 0, 0], [1.6, 0, 0], [3.4, -1.9, 0], [11.6, -1.9, 0], [13.4, 0, 0], [15, 0, 0]])}
+	var dig := {"bridge": Hermite.new([[0, 0, 0], [1.6, 0, 0], [3.4, -1.9, 0], [11.6, -1.9, 0], [13.4, 0, 0], [15, 0, 0]]),
+		"gorge": Hermite.new([[0, 0, 0], [3.0, 0, 0], [4.6, -9.0, 0], [31.4, -9.0, 0], [33.0, 0, 0], [36, 0, 0]])}
 	return {"profiles": profiles, "wood": wood, "dig": dig}

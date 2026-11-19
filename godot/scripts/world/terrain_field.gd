@@ -692,6 +692,8 @@ func make_feat(x: float, z: float, dx: float, dz: float, type: String, b0: float
 		f.half = 2.3
 	elif type == "bridge":
 		f.half = 2.4
+	elif type == "gorge":
+		f.half = 3.2
 	elif type == "skinny":
 		f.half = 1.4
 	else:
@@ -715,8 +717,19 @@ func _build_route() -> void:
 		if not jmp:
 			s += r.next() * 60
 		while s < s_end:
+			var in_drop := false
+			for dr in C.drops:
+				if s + 40 > dr[0] * CSTEP - 30 and s < dr[1] * CSTEP + 30:
+					in_drop = true
+					break
+			if in_drop:
+				s += 12
+				continue
 			var types: Array = TrailFeatures.ROUTE_TYPES if jmp else ["rhythm", "rhythm", "table", "kicker"]
 			var type: String = types[int(r.next() * types.size())]
+			# now and then (rare) a gorge: a deep crevasse crossed by a long wooden bridge
+			if not jmp and r.next() < 0.06:
+				type = "gorge"
 			var len: float = profiles[type].length
 			if s + len > s_end:
 				break

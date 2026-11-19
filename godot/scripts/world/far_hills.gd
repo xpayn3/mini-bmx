@@ -17,6 +17,8 @@ const TREE_R := 1900.0    # no far trees beyond this (fog)
 const REBUILD := 900.0
 const RIDGE_NEAR := 420.0
 const RIDGE_FAR := 1500.0
+const RIDGE_CLEAR_NEAR := 70.0    # no backdrop ridge within this of the trail, full ridge beyond ..FAR
+const RIDGE_CLEAR_FAR := 200.0
 
 const GROUND_SHADER := """
 shader_type spatial;
@@ -32,7 +34,10 @@ void vertex() {
 	VERTEX.y += k * CUSTOM0.w;
 	NORMAL = normalize(mix(CUSTOM0.xyz, NORMAL, k));
 	vec2 q = abs(VERTEX.xz - inner_c);
-	if (max(q.x, q.y) < inner_half) VERTEX.y -= sink;
+	float qm = max(q.x, q.y);
+	// well inside the streamed square the real chunks are certainly there: go deep so no spike of the coarse
+	// copy (a thin ridge / causeway / cliff sampled on a 20 m grid) can ever show through the real ground
+	if (qm < inner_half) VERTEX.y -= sink + 60.0 * (1.0 - smoothstep(inner_half * 0.4, inner_half * 0.65, qm));
 }
 void fragment() {
 	ALBEDO = COLOR.rgb;
@@ -136,12 +141,40 @@ func _run() -> void:
 	var z0 := cz - HALF
 	var hg := PackedFloat32Array(); hg.resize(n * n)   # real ground
 	var hr := PackedFloat32Array(); hr.resize(n * n)   # ridge on top
+	# no backdrop ridges over the trail: how far each cell is from the course (capped), then a fade
+	var rm := PackedFloat32Array(); rm.resize(n * n)
+	rm.fill(RIDGE_CLEAR_FAR)
+	var C = f.course
+	var rr := int(ceil(RIDGE_CLEAR_FAR / STEP))
+	for ci in range(0, C.n, 3):
+		var px: float = C.X[ci]
+		var pz: float = C.Z[ci]
+		var gx := int(roundf((px - x0) / STEP))
+		var gz := int(roundf((pz - z0) / STEP))
+		if gx < -rr or gz < -rr or gx > n + rr or gz > n + rr:
+			continue
+		for jz in range(maxi(0, gz - rr), mini(n - 1, gz + rr) + 1):
+			for jx in range(maxi(0, gx - rr), mini(n - 1, gx + rr) + 1):
+				var d := Vector2(x0 + jx * STEP - px, z0 + jz * STEP - pz).length()
+				if d < rm[jz * n + jx]:
+					rm[jz * n + jx] = d
+	for k in n * n:
+		rm[k] = smoothstep(RIDGE_CLEAR_NEAR, RIDGE_CLEAR_FAR, rm[k])
 	for iz in n:
 		for ix in n:
 			var x := x0 + ix * STEP
 			var z := z0 + iz * STEP
 			hg[iz * n + ix] = f.ground(x, z)
-			hr[iz * n + ix] = _ridge_h(x, z)
+			hr[iz * n + ix] = _ridge_h(x, z) * rm[iz * n + ix]
+	# despike: a lone sample far above all four neighbours (a thin raised trail on a 20 m grid) would be a
+	# tower in the coarse mesh
+	var hs := hg.duplicate()
+	for iz in range(1, n - 1):
+		for ix in range(1, n - 1):
+			var i0 := iz * n + ix
+			var top := maxf(maxf(hs[i0 - 1], hs[i0 + 1]), maxf(hs[i0 - n], hs[i0 + n]))
+			if hs[i0] > top + 4.0:
+				hg[i0] = top + 4.0
 	var verts := PackedVector3Array(); verts.resize(n * n)
 	var norms := PackedVector3Array(); norms.resize(n * n)
 	var cols := PackedColorArray(); cols.resize(n * n)
@@ -204,7 +237,7 @@ func _run() -> void:
 			# Transform3D rows (round shapes: no yaw), colour, custom (x = ridge height under the tree).
 			# The origin is the base; the mesh is lifted inside the transform so it stands on it.
 			buf.append_array([tw, 0, 0, x, 0, ht, 0, h, 0, 0, tw, z,
-				shade, shade, shade, 1.0, _ridge_h(x, z), 0, 0, 0])
+				shade, shade, shade, 1.0, _ridge_h(x, z) * rm[clampi(int(roundf((z - z0) / STEP)), 0, n - 1) * n + clampi(int(roundf((x - x0) / STEP)), 0, n - 1)], 0, 0, 0])
 	_job.out = {"verts": verts, "norms": norms, "cols": cols, "cust": cust, "idx": idx,
 		"pines": pines, "blobs": blobs, "cx": cx, "cz": cz}
 	_job.f = null

@@ -186,6 +186,7 @@ func _build() -> void:
 	for p in panels:
 		blocked.append([p["cx"], p["cz"], 1.6])
 	_gates()
+	_arches()
 	_boards()
 	_tape()
 	for k in colliders:
@@ -591,6 +592,39 @@ func _gates() -> void:
 		out["gates"] = list
 	if OS.get_environment("BMX_GATE_PROBE") != "":
 		print("GATES chunk=", cx, ",", cz, " cand=", C.chunk_gates.get(TrailCourse.chunk_key(cx, cz), PackedInt32Array()).size(), " placed=", list.size(), " boards_cand=", C.chunk_boards.get(TrailCourse.chunk_key(cx, cz), PackedInt32Array()).size())
+
+
+## rare rock tunnels / cliff overhangs over the trail (data only; Terrain builds the nodes)
+func _arches() -> void:
+	var C: TrailCourse = f.course
+	var list := []
+	for code in C.chunk_arches.get(TrailCourse.chunk_key(cx, cz), PackedInt32Array()):
+		var i: int = code >> 1
+		var tx: float = C.TX[i]
+		var tz: float = C.TZ[i]
+		var half: float = C.W[i] + 1.3
+		var nx := -tz
+		var nz := tx
+		var cxp: float = C.X[i]
+		var czp: float = C.Z[i]
+		if sqrt(cxp * cxp + czp * czp) < 30:
+			continue
+		var hl := height(cxp - nx * half, czp - nz * half)
+		var hr := height(cxp + nx * half, czp + nz * half)
+		if hl < WATER + 0.2 or hr < WATER + 0.2 or absf(hl - hr) > 4.0:
+			continue
+		var ok := true
+		for s in [-9.0, 0.0, 9.0]:
+			f.jump_eval(cxp + tx * s, czp + tz * s)
+			if f.fo_h > 0.05:
+				ok = false
+		if ok:
+			list.append({"x": cxp, "z": czp, "tx": tx, "tz": tz, "half": half, "hl": hl, "hr": hr,
+				"hc": height(cxp, czp), "i": i, "kind": code & 1})
+	if OS.get_environment("BMX_GATE_PROBE") != "":
+		print("ARCHES chunk=", cx, ",", cz, " cand=", C.chunk_arches.get(TrailCourse.chunk_key(cx, cz), PackedInt32Array()).size(), " placed=", list.size())
+	if not list.is_empty():
+		out["arches"] = list
 
 
 ## wooden roadside billboards: a fence-style panel (so the bike can smash it) of two posts and
