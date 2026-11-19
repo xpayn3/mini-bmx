@@ -613,18 +613,20 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 		var turn_dir := signf(st.yaw_rate)
 		var carve_k := clampf((lat_a - 1.5) / 6, 0, 1)
 		var fast_k := clampf((va - 8) / 6, 0, 1)
+		# riding fast on dry ground throws a real trail: rises from ~18 km/h, full by ~50 km/h
+		var dust_k := clampf((va - 5.0) / 9.0, 0.0, 1.0) if dust.sim != null else 0.0
 		var rate := 0.0
 		if in_water: rate = 0.0
-		elif dirt: rate = fast_k * 14 + (clampf(va / 7.0, 0, 1) * 12.0 if dust.sim != null else 0.0) + (50.0 if skid_fx else 0.0) + carve_k * 60 + st.pedal * (6.0 if va < 3 else 0.0)
-		elif sand: rate = fast_k * 10 + (clampf(va / 7.0, 0, 1) * 10.0 if dust.sim != null else 0.0) + (40.0 if skid_fx else 0.0) + carve_k * 45 + st.pedal * (4.0 if va < 3 else 0.0)
+		elif dirt: rate = fast_k * 14 + dust_k * 150.0 + (clampf(va / 7.0, 0, 1) * 12.0 if dust.sim != null else 0.0) + (50.0 if skid_fx else 0.0) + carve_k * 60 + st.pedal * (6.0 if va < 3 else 0.0)
+		elif sand: rate = fast_k * 10 + dust_k * 130.0 + (clampf(va / 7.0, 0, 1) * 10.0 if dust.sim != null else 0.0) + (40.0 if skid_fx else 0.0) + carve_k * 45 + st.pedal * (4.0 if va < 3 else 0.0)
 		else: rate = (14.0 if skid_fx else 0.0) + carve_k * 12
 		var fxd: float = Settings.get_v("fx_density")
 		# the dust trail: a GPU particle emitter at the rear tyre (fx/ride_dust.gd), thrown back and up,
 		# flung outward in a carve
 		var d_out := turn_dir * carve_k * 3.5
 		var d_back := va * 0.3 * (1 - carve_k * 0.55)
-		var d_ev := Vector3(-f.x * d_back + side.x * d_out, 0.7 + carve_k * 0.4, -f.z * d_back + side.z * d_out)
-		var d_fan := rad_to_deg(atan2((1.6 + va * 0.18) * (1 - carve_k * 0.6) * 0.5, maxf(d_back, 0.6)))
+		var d_ev := Vector3(-f.x * d_back + side.x * d_out, 0.7 + carve_k * 0.4 + dust_k * 1.4, -f.z * d_back + side.z * d_out)
+		var d_fan := rad_to_deg(atan2((1.6 + va * 0.18) * (1 - carve_k * 0.6) * 0.5, maxf(d_back, 0.6))) + dust_k * 25.0
 		var d_a := (0.62 if skid_fx else 0.45) if dirt else ((0.55 if skid_fx else 0.4) if sand else 0.26)
 		dust.feed(rear, d_ev, rate * fxd, dcol, d_a, clampf(d_fan, 12.0, 70.0))
 		# the front tyre dusts too, less: it rolls (no drive / little skid), so it mostly lifts dust
