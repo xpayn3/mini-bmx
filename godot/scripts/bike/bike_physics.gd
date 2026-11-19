@@ -687,7 +687,10 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		var now_air := not cF and not cR
 		front_air = not now_air and not cF; rear_air = not now_air and not cR
 		var gpC := asin(clampf((hfC - hrC) / L, -1, 1))
-		if cR and not cF and pitch - gpC > 0.6 and pitch - _local_slope(f, XR, RWR, cp0) > 1.15: crash_pending = "LOOPED OUT!"
+		# looped out: on the back wheel past what the rider can hold, or still rotating back well past
+		# the balance point (a back-wheel landing itself is caught, see _land_trick)
+		var back_up := pitch - _local_slope(f, XR, RWR, cp0) if cR and not cF and pitch - gpC > 0.6 else 0.0
+		if back_up > T.landBack + 0.1 or (back_up > 1.15 and pitch_v > 0.5 and not was_air): crash_pending = "LOOPED OUT!"
 		elif cF and not cR and gpC - pitch > 0.6 and _local_slope(f, XF, RWF, cp0) - pitch > 1.15: crash_pending = "NOSE DIVE!"
 		if absf(pitch) > 1.45 and (cF or cR):   # on the ground only: in the air flips go all the way round
 			pitch = signf(pitch) * 1.45; pitch_v = 0
@@ -708,6 +711,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 				if slap > 3.5: host.burst(Vector3(x + f.x * XF, _g_hf + 0.03, z + f.z * XF), 10, surf, 0.8)
 		c_f = cF; c_r = cR
 		if now_air and not was_air:
+			if since_land < 0.5 and OS.get_environment("BMX_TRICK") != "": print("BOUNCE %.2fs after landing vy=%.2f pitch=%.2f" % [since_land, vy, pitch])   # tests
 			air = true; air_time = 0; flip_acc = 0.0; spin_acc = 0.0
 			if not (kick_t > 0): vy = minf(vy, launch_cap)
 			if not natural and not is_step: vy += T.autoPop * prep
@@ -716,6 +720,10 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			var vy_surf := v * tan(_g_pitch)
 			var impact: float = maxf(0.0, vy_surf - vy_in) * cos(_g_pitch) / (LAND * (1 + T.landSoak * land_prep))
 			var at := air_time
+			# back wheel first (nose up): the rear shock and the rider's legs take the hit over a longer
+			# stroke, so less of it reaches the rider as a slam
+			var back_land: bool = cR and not cF and wrapf(pitch - _g_pitch, -PI, PI) > T.landPitch * 0.5
+			if back_land: impact *= 0.7
 			if at > 0.3 and impact > 10.5: crash_pending = "SLAM!"
 			_land_trick(at)
 			air = false; since_land = 0
@@ -723,8 +731,9 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			nose_ref = _g_pitch
 			if impact > 3: v *= 1 - minf(0.45, (impact - 3) * 0.08)
 			if impact > 5 and at > 0.3: host.flash("OOF!")
-			compress_v -= minf(2.2, impact * 0.35)
-			if host.susp != null: host.susp.land(maxf(0.0, -vy_in) * cos(_g_pitch) * 0.5 + impact * 0.4, front_air, rear_air)
+			compress_v -= minf(2.2, impact * 0.35) + (minf(1.2, impact * 0.2 + 0.4) if back_land else 0.0)
+			if host.susp != null: host.susp.land(maxf(0.0, -vy_in) * cos(_g_pitch) * 0.5 + impact * (0.57 if back_land else 0.4), front_air, rear_air)
+			if OS.get_environment("BMX_TRICK") != "": print("LAND impact=%.1f back=%s v_after=%.1f" % [impact, back_land, v])   # tests
 			if at > 0.15: shake = maxf(shake, minf(0.2, impact * 0.025))
 			if at > 0.15: host.burst(Vector3(x, y + 0.03, z), roundi(10 + minf(30, impact * 6)), surf, 0.8 + minf(1.5, impact * 0.25))
 			if at > 0.45 and impact < 5: flow_up()
@@ -849,15 +858,21 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 func _land_trick(at: float) -> void:
 	slip = wrapf(slip, -PI, PI)
 	if OS.get_environment("BMX_TRICK") != "":   # tests
-		print("TRICK air=%.2fs flip=%.0fdeg spin=%.0fdeg pitch_err=%.0fdeg twist=%.0fdeg" % [at, rad_to_deg(flip_acc),
+		print("TRICK air=%.2fs v=%.1f flip=%.0fdeg spin=%.0fdeg pitch_err=%.0fdeg twist=%.0fdeg" % [at, v, rad_to_deg(flip_acc),
 			rad_to_deg(spin_acc), rad_to_deg(absf(wrapf(pitch - _g_pitch, -PI, PI))), rad_to_deg(absf(slip))])
 	if at < 0.2:
 		return
-	var perr := absf(wrapf(pitch - _g_pitch, -PI, PI))
+	var perr_s := wrapf(pitch - _g_pitch, -PI, PI)   # + = nose up (back wheel first)
 	var twist := absf(slip)
-	if perr > T.landPitch:
-		crash_pending = ("UNDER-ROTATED!" if absf(flip_acc) > 1.5 else "BAD LANDING!")
+	if perr_s < -T.landPitch or perr_s > T.landBack:
+		crash_pending = ("UNDER-ROTATED!" if absf(flip_acc) > 1.5 and perr_s < 0 else
+			"LOOPED OUT!" if perr_s > 0 else "BAD LANDING!")
 		return
+	if perr_s > T.landPitch * 0.5:
+		# back-wheel landing: the rider soaks up the backward rotation with the arms and legs and
+		# lets the nose come down (balance torque on the rear wheel does the rest)
+		pitch_v = minf(pitch_v, 0.0) - perr_s * 0.8
+		body_x += 0.1; hip_shift += 0.08
 	if twist > T.landTwist:
 		crash_pending = "BACKWARDS!" if twist > 2.2 else "SIDEWAYS!"
 		return

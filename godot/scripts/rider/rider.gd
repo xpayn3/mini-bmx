@@ -439,6 +439,7 @@ static func set_torso(n: Node3D, a: Vector3, b: Vector3, right: Vector3) -> void
 # ---------------- the spine: the torso mesh is skinned to SPINE_BONES bones along its length so it can bend
 
 const SPINE_BONES := 5
+var knee_dbg: Array = []   # tests: frames where a knee bends against its pole
 var torso_ratio := 1.0   # tests: torso length / its rest length before the limit
 var spine_skel: Skeleton3D
 
@@ -565,6 +566,14 @@ static func solve_ik(root: Vector3, target: Vector3, l1: float, l2: float, pole:
 	var a := (l1 * l1 - l2 * l2 + dist * dist) / (2 * dist)
 	var h := sqrt(maxf(0.0, l1 * l1 - a * a))
 	var pp := pole - dir * pole.dot(dir)
+	# the limb pointing (nearly) along its pole leaves the bend side undefined and the joint flips
+	# round (a folded leg mid-flip with the pedal level in front of the hip): blend smoothly toward
+	# bending up (knee up) as the pole gets lined up with the limb
+	var w := smoothstep(0.15, 0.45, pp.length() / maxf(pole.length(), 1e-6))
+	if w < 1.0:
+		var up2 := Vector3.UP - dir * dir.y
+		if up2.length_squared() > 1e-6:
+			pp = pp * w + up2.normalized() * (1.0 - w) * maxf(pole.length(), 1e-3)
 	if pp.length_squared() < 1e-8:
 		pp = Vector3(0, 0, 1) - dir * dir.z
 	pp = pp.normalized()
@@ -842,7 +851,10 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		var hp: Vector3 = pelvis + pel_b * Vector3(0, -0.02, side * (0.11 + sty.stance))
 		var ankle := Vector3(foot.x - 0.04 + sty.heelFwd, foot.y + 0.12 + sty.heelUp, foot.z)
 		var ik := solve_ik(hp, ankle, L_THIGH, L_SHIN, poles_leg[i])
+		var ik_raw: Vector3 = ik[0]
 		ik[0] = _knee_clear(hp, ankle, ik[0], side)
+		if knee_dbg.size() < 40 and OS.get_environment("BMX_KNEE_PROBE") != "" and knee[i].position.distance_to(ik[0]) > 0.08:
+			knee_dbg.append([i, snappedf(_num(p, "pitch"), 0.01), knee[i].position.snapped(Vector3.ONE * 0.01), hp.snapped(Vector3.ONE * 0.01), ankle.snapped(Vector3.ONE * 0.01), ik_raw.snapped(Vector3.ONE * 0.01), (ik[0] as Vector3).snapped(Vector3.ONE * 0.01)])
 		set_limb(thigh[i], hp, ik[0])
 		set_limb(shin[i], ik[0], ik[1])
 		knee[i].position = ik[0]

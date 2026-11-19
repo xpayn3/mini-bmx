@@ -337,8 +337,14 @@ func _autotest(seconds: float) -> void:
 			var ph = game.phys
 			if ph.air_time > 0.06 and trick == "side": trick = "left" if int(el / 2.0) % 2 == 0 else "right"
 			Input.action_release("pedal"); Input.action_release("brake"); Input.action_release("steer_left"); Input.action_release("steer_right")
+			if OS.get_environment("BMX_BIGAIR") != "" and ph.air_time < 0.03 and ph.vy < 7.0: ph.vy = 7.0   # tests: big air for full flips
 			if ph.air_time > 0.06:   # a fresh press after take-off (held keys are locked)
 				if trick == "back": Input.action_press("brake")
+				elif trick == "manual":   # lean back to this nose-up angle (BMX_MANUAL_PITCH, rad) and hold it
+					var mp := float(OS.get_environment("BMX_MANUAL_PITCH")) if OS.get_environment("BMX_MANUAL_PITCH") != "" else 1.0
+					var e: float = mp - ph.pitch - ph.pitch_v * 0.25
+					if e > 0.05: Input.action_press("brake")
+					elif e < -0.05: Input.action_press("pedal")
 				elif trick == "front": Input.action_press("pedal")
 				elif trick == "left": Input.action_press("steer_left")
 				elif trick == "right": Input.action_press("steer_right")
@@ -390,6 +396,8 @@ func _autotest(seconds: float) -> void:
 			print("AUTOTEST resumed: paused=%s state_riding=%s" % [get_tree().paused, state == RIDING])
 	var st := game.phys
 	if not _probe.is_empty(): print("AUTOTEST body ", _probe)
+	if OS.get_environment("BMX_KNEE_PROBE") != "":
+		for row in game.rider.knee_dbg: print("KNEE ", row)
 	print("AUTOTEST avg triangles/frame=%dk draw calls=%d" % [tris / maxi(frames, 1) / 1000, draws / maxi(frames, 1)])
 	print("AUTOTEST frames=%d fps=%.1f pos=(%.1f, %.1f, %.1f) v=%.2f crash=%s sane=%s" % [frames, frames / seconds, st.x, st.y, st.z, st.v, st.crash_on, st.is_sane()])
 	if rec != null:
