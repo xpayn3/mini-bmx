@@ -68,3 +68,19 @@ func submit(k: String, val: float) -> bool:
 		save()
 		return true
 	return false
+
+
+## quit the game: first let C# collect + finalize its garbage while the engine is still up (CsGc.cs) - the
+## terrain's leftovers finalized after shutdown crashed the quit. Use instead of get_tree().quit().
+func quit(code := 0) -> void:
+	cs_gc()
+	get_tree().quit(code)
+
+
+static func cs_gc() -> void:
+	if ClassDB.class_exists("CsGc"): ClassDB.instantiate("CsGc").collect()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST: cs_gc()   # the window's close button (auto-accepted right after)
+

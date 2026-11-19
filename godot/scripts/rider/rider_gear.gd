@@ -67,9 +67,22 @@ static func build_goggles(m: Dictionary, fit: Dictionary, hug: Callable) -> Node
 		var a := p.x / R
 		var r := R + p.z
 		return Vector3(r * cos(a) - R, p.y, r * sin(a))
-	_add(g, G.prism(goggle_outline(w, h), goggle_outline(w, h, 0.01), -0.012, -0.002, bend, true), m.frame)
-	_add(g, G.prism(goggle_outline(w, h, 0.002), PackedVector2Array(), -0.022, -0.014, bend, true), m.foam)
-	_add(g, G.sheet(goggle_outline(w, h, 0.005, 12), -0.004, bend, true), m.lens)
+	var model: Mesh = m.get("model_mesh")
+	if model:   # the ski-goggle model in place of the built frame / foam / lens (fit: SKI_FIT)
+		var gm := MeshInstance3D.new()
+		gm.name = "SkiGoggle"
+		gm.mesh = model
+		gm.material_override = m.model_mat
+		var sk: float = fit.get("model_scale", 0.0082)
+		var front: Vector3 = fit.get("model_front", Vector3(0.0, 3.8, 0.34))   # model point that goes to g's origin
+		# model: +z forward, +x to its right -> head: +X forward (turned a quarter round Y)
+		gm.basis = Basis(Vector3.UP, PI * 0.5).scaled(Vector3.ONE * sk)
+		gm.position = -(gm.basis * front) + Vector3(fit.get("model_dx", 0.0), 0, 0)
+		g.add_child(gm)
+	else:
+		_add(g, G.prism(goggle_outline(w, h), goggle_outline(w, h, 0.01), -0.012, -0.002, bend, true), m.frame)
+		_add(g, G.prism(goggle_outline(w, h, 0.002), PackedVector2Array(), -0.022, -0.014, bend, true), m.foam)
+		_add(g, G.sheet(goggle_outline(w, h, 0.005, 12), -0.004, bend, true), m.lens)
 	# outriggers where the strap clips on
 	var ends: Array[Vector3] = []
 	for s in [-1.0, 1.0]:
@@ -78,6 +91,7 @@ static func build_goggles(m: Dictionary, fit: Dictionary, hug: Callable) -> Node
 		var o := _add(g, G.box(0.028, 0.032, 0.012), m.frame)
 		o.position = Vector3(r * cos(a) - R - 0.006, 0, r * sin(a) + s * 0.004)
 		o.basis = Basis(Vector3.UP, -a)
+		o.visible = model == null   # (the model has its own side pieces: only the strap's attach point is used)
 		ends.append(Transform3D(Basis(Vector3.BACK, tilt), g.position) * o.position)
 	# strap: outrigger -> round the back of the shell -> other outrigger
 	var yS := y - 0.004
@@ -107,11 +121,55 @@ static func build_goggles(m: Dictionary, fit: Dictionary, hug: Callable) -> Node
 			var k := i * 2
 			idx.append_array([k, k + 1, k + 2, k + 1, k + 3, k + 2])
 	_add(root, {pos = pos, idx = idx}, m.strap)
+	_add_strap_edges(root, pts, S.cx, hw)
 	if m.has("logo"):
 		_add_strap_logo(root, pts, S.cx, hw, m.logo)
 	# where the loose flapping tail hangs off the strap (outer side of the right clip, goggles-root space)
 	root.set_meta("flap_anchor", Vector3(ends[1].x - 0.004, yS, ends[1].z + 0.014))
 	return root
+
+
+static var _edge_mat: StandardMaterial3D
+
+## a thin white line along the top and bottom edge of the strap's outside, the whole way round (like a real
+## goggle strap's woven border): two narrow ribbons 1 mm off the strap
+static func _add_strap_edges(root: Node3D, pts: PackedVector3Array, cx: float, hw: float) -> void:
+	if _edge_mat == null:
+		_edge_mat = StandardMaterial3D.new()
+		_edge_mat.albedo_color = Color(0.96, 0.96, 0.94)
+		_edge_mat.roughness = 0.7
+		_edge_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var lw := 0.0024                 # line width
+	var inset := 0.0018              # from the strap's edge
+	var v3 := PackedVector3Array()
+	var nr := PackedVector3Array()
+	var idx := PackedInt32Array()
+	for side in [-1.0, 1.0]:
+		var yc: float = side * (hw - inset - lw * 0.5)
+		var base := v3.size()
+		for i in pts.size():
+			var p := pts[i]
+			var out := Vector3(p.x - cx, 0, p.z).normalized()
+			var q := p + out * 0.0012
+			v3.append(Vector3(q.x, q.y + yc - lw * 0.5, q.z))
+			v3.append(Vector3(q.x, q.y + yc + lw * 0.5, q.z))
+			nr.append(out); nr.append(out)
+			if i > 0:
+				var k := base + i * 2
+				idx.append_array([k - 2, k - 1, k, k - 1, k + 1, k])
+	var arr := []
+	arr.resize(Mesh.ARRAY_MAX)
+	arr[Mesh.ARRAY_VERTEX] = v3
+	arr[Mesh.ARRAY_NORMAL] = nr
+	arr[Mesh.ARRAY_INDEX] = idx
+	var am := ArrayMesh.new()
+	am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+	var mi := MeshInstance3D.new()
+	mi.name = "StrapEdges"
+	mi.mesh = am
+	mi.material_override = _edge_mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	root.add_child(mi)
 
 
 ## a brand wordmark printed along the middle of the strap's back: a thin overlay ribbon floating 2 mm off the

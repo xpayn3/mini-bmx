@@ -778,6 +778,30 @@ public partial class TerrainFieldCs : RefCounted
 		return _libm[fn].Execute(new Godot.Collections.Array { x }).AsDouble();
 	}
 
+	/// dispose the engine Expressions made for near-tie sin / exp / log now (made again if needed): the paper
+	/// map's colour batches created them on the main field, and left for C#'s collector they were finalized after
+	/// the engine shut down, which crashed the quit
+	public void release_libm()
+	{
+		if (_libm == null) return;
+		foreach (var e in _libm) e?.Dispose();
+		_libm = null;
+	}
+
+	/// on delete, dispose the engine objects this instance made (feature wrappers, Expressions) instead of leaving
+	/// them to the garbage collector, which could finalize them after the engine shut down (crashed the quit)
+	public override void _Notification(int what)
+	{
+		if (what != NotificationPredelete) return;
+		release_libm();
+		if (_route_wrap != null)
+		{
+			foreach (var v in _route_wrap) v.AsGodotObject()?.Dispose();
+			_route_wrap.Dispose();
+			_route_wrap = null;
+		}
+	}
+
 	private double gd_sin(double x)
 	{
 		double v = TfX87.Sin(x, out bool amb);

@@ -41,6 +41,8 @@ signal close_requested               # one of close_actions was pressed
 var close_actions: Array[StringName] = []     # actions that fold it away again (handled here, never reach the game)
 
 var cover_col := 0                   # the panel whose back is the cover
+var back_col := -1                   # a panel whose back carries the cover strip's second slot (the leaflet's back)
+var spin := 0.0                      # the sheet turned round its upright (rad): PI = you see its back
 var page: SubViewport                # what's printed: front (page_size) + cover strip below
 var content: Control                 # add your print here (sized to the whole page viewport)
 var page_size := Vector2i.ZERO
@@ -175,7 +177,7 @@ func setup(p_size: Vector2i, c_size := Vector2i.ZERO) -> void:
 			mi.material_override = _mat
 			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_DOUBLE_SIDED
 			mi.set_instance_shader_parameter("cell", Vector2(c, r))
-			mi.set_instance_shader_parameter("cover", 1.0 if (c == cover_col and r == 0) else 0.0)
+			mi.set_instance_shader_parameter("cover", 1.0 if (c == cover_col and r == 0) else (2.0 if (c == back_col and r == 0) else 0.0))
 			mi.set_instance_shader_parameter("pillow", 0.0)
 			_sheet.add_child(mi)
 			col.append(mi)
@@ -467,13 +469,26 @@ func _fit_camera() -> void:
 	_vp.size = vs
 	var asp := float(vs.x) / maxf(1.0, vs.y)
 	var th := tan(deg_to_rad(_cam.fov) * 0.5)
+	# the controls row at the bottom (prompt_items) gets its own strip: the sheet fits above it, never over it
+	_reserve = HINT_RESERVE if not prompt_items().is_empty() else 0.0
+	var avail := 1.0 - _reserve
 	var fit := func(sz: Vector2) -> float:
-		return maxf((sz.x / fill.x) * 0.5 / (th * asp), (sz.y / fill.y) * 0.5 / th)
+		return maxf((sz.x / fill.x) * 0.5 / (th * asp), (sz.y / (fill.y * avail)) * 0.5 / th)
 	_cam_open = fit.call(Vector2(cols * panel.x, rows * panel.y))
 	_cam_fold = fit.call(panel)
 	_cam_d = _cam_open if unfold and fold_style != "letter" else _cam_fold   # (a leaflet eases between the two)
-	_cam.position = Vector3(0, 0, _cam_d)
+	_cam_th = th
+	_cam.position = Vector3(0, _cam_y(_cam_d), _cam_d)
 	_cam.rotation = Vector3.ZERO
+
+
+const HINT_RESERVE := 0.1            # share of the screen height under the sheet for the controls row
+var _reserve := 0.0
+var _cam_th := 0.3
+
+## the camera moves down so the sheet sits in the middle of the space above the controls row
+func _cam_y(d: float) -> float:
+	return -d * _cam_th * _reserve
 
 
 # ------------------------------------------------------------------ held in the hands (handheld = true)
@@ -508,7 +523,7 @@ func _show_hint() -> void:
 	if _hint == null:
 		_hint = PadGlyph.PromptBar.new()
 		_hint.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-		_hint.offset_top = -64; _hint.offset_bottom = -14
+		_hint.anchor_top = 1.0 - HINT_RESERVE * 0.92; _hint.offset_top = 0; _hint.offset_bottom = -6
 		add_child(_hint)
 	_hint_pad = Settings.pad_active
 	_hint.set_items(it)
@@ -693,9 +708,11 @@ func _pose_letter(lift: float, acc: Array, breathe: float) -> void:
 	# the camera eases from fitting the shut leaflet to fitting it open
 	var open_k := clampf((o0 + o2) * 0.5, 0.0, 1.0)
 	_cam.position.z = lerpf(_cam_fold, _cam_open, open_k)
+	_cam.position.y = _cam_y(_cam.position.z)
 	var sw := 0.4 if live else 1.0
 	var sway := Vector2(sin(_idle * 0.9) * 0.012, sin(_idle * 0.7 + 1.0) * 0.015) * sw
 	var basis := Basis.from_euler(Vector3(lerpf(-0.9, -0.12 * sw, lift) + sway.x, lerpf(0.35, 0.0, lift) + sway.y, lerpf(-0.25, hold_roll * (1.0 - open_k), lift)))
+	basis = basis * Basis(Vector3.UP, spin)   # turned over (round its own upright)
 	_sheet.transform = Transform3D(basis, Vector3(0, lerpf(-0.75, -0.012, lift) * _cam.position.z / maxf(_cam_open, 0.01), 0))
 	(_dim.material as ShaderMaterial).set_shader_parameter("k", clampf(lift * 1.3, 0.0, 1.0) * dim)
 

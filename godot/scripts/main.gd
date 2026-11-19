@@ -143,7 +143,7 @@ func _menu_page_main() -> void:
 	vb.add_child(seed_row)
 	vb.add_child(UITheme.spacer(Tokens.S4))
 	# secondary: a quiet list
-	for it in [["SETTINGS", _open_settings], ["CONTROLS", _show_controls], ["QUIT", func(): get_tree().quit()]]:
+	for it in [["SETTINGS", _open_settings], ["CONTROLS", _show_controls], ["QUIT", func(): GameState.quit()]]:
 		vb.add_child(UITheme.make_button(it[0], it[1], "link", Tokens.T_XL))
 	ride.grab_focus.call_deferred()
 
@@ -285,7 +285,7 @@ func _pause() -> void:
 	pm.add_item("Settings", _open_settings)
 	pm.add_item("Controls", _show_controls)
 	pm.add_item("Main menu", func(): _close_pause(true); GameState.save(); _show_menu())
-	pm.add_item("Quit to desktop", func(): GameState.save(); get_tree().quit())
+	pm.add_item("Quit to desktop", func(): GameState.save(); GameState.quit())
 	pause_menu = pm
 	pm.open()
 	pm.focus_first.call_deferred()
@@ -755,7 +755,7 @@ func _autotest(seconds: float) -> void:
 	var shot := OS.get_environment("BMX_SHOT")
 	if shot != "":
 		get_viewport().get_texture().get_image().save_png(shot)
-	get_tree().quit()
+	GameState.quit()
 
 ## BMX_TAPE test (=dir/prefix, BMX_TAPE_SPEED m/s, default 7; BMX_TAPE_STOP=secs brakes after the hit):
 ## at 2 s the bike is put 6 m from the middle of the nearest tape span, square on; prints TAPE lines
@@ -921,7 +921,7 @@ func _shot(arg: String) -> void:
 	await get_tree().create_timer(secs, true, false, true).timeout
 	get_viewport().get_texture().get_image().save_png(path)
 	print("SHOT ", path)
-	get_tree().quit()
+	GameState.quit()
 
 
 ## --bench=<dir>: fixed world (BMX_SEED, default 7), scripted ride through three cameras; prints frame
@@ -971,7 +971,7 @@ func _bench(dir: String) -> void:
 		line += "  | %s: %.2f ms avg (%.0f fps), 1%% low %.2f ms, GPU %.2f ms, %dk tris, %d draws" % [cam, avg, 1000.0 / avg, p99, gpu / maxi(n, 1), tris / maxi(n, 1) / 1000, draws / maxi(n, 1)]
 		get_viewport().get_texture().get_image().save_png("%s/%s_q%d.png" % [dir, cam, q])
 	print(line)
-	get_tree().quit()
+	GameState.quit()
 
 
 ## --hitch=<secs>: scripted ride (chase camera, vsync off) that looks for frame-time spikes and what
@@ -1060,7 +1060,7 @@ func _hitch(secs: float) -> void:
 			parts[0] / c, parts[1] / c, parts[2] / c, parts[3] / c, parts[4] / c])
 	print("HITCH GPU: normal frames %.2f ms, frame after a finalize %.2f ms | physics avg %.2f ms" % [
 		gpu_norm / maxi(n_norm, 1), gpu_after / maxi(n_after, 1), Array(ph).reduce(func(a, b): return a + b, 0.0) / n])
-	get_tree().quit()
+	GameState.quit()
 
 
 ## --showcase=<dir>: screenshots of each effect forced on (mud, wet, dust cloud, speed blur, photo DoF)
@@ -1104,4 +1104,4 @@ func _showcase(dir: String) -> void:
 	for i in 20: await get_tree().process_frame
 	await shot.call("photo")
 	game.toggle_photo()
-	get_tree().quit()
+	GameState.quit()

@@ -690,7 +690,7 @@ func _tyre_probe() -> void:
 				else:        # on the rollers: closest approach of each tyre to its drum(s) (0 = touching)
 					f = _drum_gap(rig.wheel_f); r = _drum_gap(rig.wheel_r)
 				print("TYRE rider=%s front=%s rear=%s w=%.1f  front=%+.4f  rear=%+.4f" % [on, fr[0], fr[1], tw, f, r])
-	get_tree().quit()
+	GameState.quit()
 
 ## tests: the smallest distance from a wheel's visible vertices to the surface of any roller drum
 ## (drums run along z; negative = the tyre cuts into a drum)
