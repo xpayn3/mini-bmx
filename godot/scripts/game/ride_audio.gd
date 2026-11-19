@@ -146,6 +146,10 @@ func update_audio(dt: float) -> void:
 	var st: BikePhysics = game.phys
 	var va := absf(st.v)
 	var on_ground := not st.air and not st.crash_on
+	# the map / photo mode freeze the ride (time_scale 0) but leave the last speed in the physics: without
+	# this the tyres, wind and chain kept playing under the paper
+	if (game.paper_map != null and game.paper_map.busy()) or game.photo:
+		va = 0.0; on_ground = false
 	var k := minf(1.0, dt * 8)
 	# wind: louder AND brighter the faster you go, a touch more in the air (nothing else masks it)
 	# (keeps building past ~60 km/h: the roar is a big part of feeling fast)
