@@ -282,7 +282,7 @@ func _camera_section(p: Control) -> void:
 	_check(p, "Invert camera Y", "invert_y")
 	_check(p, "Re-centre after turning it", "cam_recenter", "After a drag / Z / X the camera swings back behind the rider")
 	_check(p, "Always keep the rider in view", "cam_keep")
-	_check(p, "See through trees", "cam_fade", "Trees and rocks between the camera and the rider dissolve")
+	_check(p, "Fade things at the lens", "cam_fade", "Trees and rocks right in front of the camera dissolve")
 	p.add_child(UITheme.button("Reset camera", _reset_camera, 15))
 
 func _reset_camera() -> void:
