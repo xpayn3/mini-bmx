@@ -140,17 +140,23 @@ func _build_computer_card() -> void:
 	pv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	pv.custom_minimum_size.y = 300
 	vb.add_child(pv)
-	vb.add_child(UITheme.text("DRAG TO TURN  ·  WHEEL TO ZOOM  ·  DOUBLE CLICK TO RESET", Tokens.INK_SOFT, Tokens.T_XS))
+	vb.add_child(UITheme.text("DRAG TO TURN  ·  WHEEL TO ZOOM  ·  CLICK THE SCREEN TO FLIP PAGES", Tokens.INK_SOFT, Tokens.T_XS))
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", Tokens.S2)
 	vb.add_child(row)
 	var group := ButtonGroup.new()
+	var set_box := VBoxContainer.new()
+	var build_settings := func(id: String) -> void: _build_computer_settings(set_box, pv, id)
+	vb.add_child(UITheme.caption("DEVICE SETTINGS"))
+	set_box.add_theme_constant_override("separation", Tokens.S2)
+	vb.add_child(set_box)
 	var apply := func(id: String) -> void:
 		var u := ComputerUnits.get_unit(id)
 		name_l.text = u.name
 		spec_l.text = ComputerUnits.spec(id)
 		blurb_l.text = u.blurb
 		pv.set_unit(id)
+		build_settings.call(id)
 	for id in ComputerUnits.ORDER:
 		var u := ComputerUnits.get_unit(id)
 		var b := UITheme.make_button(String(u.name).split(" ")[0], Callable(), "chip", Tokens.T_MD)
@@ -165,6 +171,44 @@ func _build_computer_card() -> void:
 			if game: game.hud.set_computer())
 		row.add_child(b)
 	apply.call(GameState.computer_id)
+
+## the DEVICE SETTINGS block of the computer card: pages, alerts, beep, backlight of the picked model (saved per model)
+func _build_computer_settings(box: VBoxContainer, pv: ComputerPreview, id: String) -> void:
+	for c in box.get_children():
+		box.remove_child(c); c.queue_free()
+	var u := ComputerUnits.get_unit(id)
+	var chip := func(text: String, on: bool, cb: Callable) -> Button:
+		var b := UITheme.make_button(text, Callable(), "chip", Tokens.T_SM)
+		b.toggle_mode = true
+		b.button_pressed = on
+		b.toggled.connect(func(v: bool):
+			cb.call(v)
+			GameState.save()
+			pv.refresh()
+			if game: game.hud.set_computer())
+		return b
+	box.add_child(UITheme.caption("PAGES", Tokens.INK_SOFT, Tokens.T_XS))
+	var pr := HFlowContainer.new()
+	pr.add_theme_constant_override("h_separation", Tokens.S2)
+	pr.add_theme_constant_override("v_separation", Tokens.S2)
+	box.add_child(pr)
+	var off: Array = ComputerUnits.opt(id, "off")
+	for p in u.order:
+		var pid := int(p)
+		if pid == 0: continue
+		pr.add_child(chip.call(ComputerUnits.TITLES[pid], not (pid in off), func(v: bool):
+			var o: Array = ComputerUnits.opt(id, "off").duplicate()
+			if v: o.erase(pid)
+			elif not (pid in o): o.append(pid)
+			ComputerUnits.set_opt(id, "off", o)))
+	var tr := HFlowContainer.new()
+	tr.add_theme_constant_override("h_separation", Tokens.S2)
+	tr.add_theme_constant_override("v_separation", Tokens.S2)
+	box.add_child(tr)
+	if u.nav:
+		tr.add_child(chip.call("TRAIL ALERTS", bool(ComputerUnits.opt(id, "alerts")), func(v: bool): ComputerUnits.set_opt(id, "alerts", v)))
+	tr.add_child(chip.call("BEEP", bool(ComputerUnits.opt(id, "beep")), func(v: bool): ComputerUnits.set_opt(id, "beep", v)))
+	tr.add_child(chip.call("BACKLIGHT ALWAYS ON", int(ComputerUnits.opt(id, "light")) == 1, func(v: bool): ComputerUnits.set_opt(id, "light", 1 if v else 0)))
 
 func _menu_clear() -> void:
 	if is_instance_valid(computer_card): computer_card.queue_free()
