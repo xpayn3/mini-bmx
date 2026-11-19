@@ -93,7 +93,11 @@ func start(reason: String) -> void:
 	t = 0.0
 	_last = Time.get_ticks_usec()
 	var r := reason.strip_edges().trim_suffix("!")
-	sub.text = "" if r == "" else r.to_upper()
+	# bailed on purpose (F): the big word says BAIL, no reason under it
+	var bailed := r.to_upper() == "BAIL"
+	title.word = "BAIL" if bailed else "WASTED"
+	title.queue_redraw()
+	sub.text = "" if r == "" or bailed else r.to_upper()
 	visible = true
 	_mask_on()
 
@@ -212,7 +216,7 @@ static func _ease(x: float) -> float:
 ## WASTED in caps, as big as the screen allows: the font is squeezed sideways (very condensed) so the
 ## letters can be ~60 % of the screen tall and still fit its width
 class WordView extends Control:
-	const WORD := "WASTED"
+	var word := "WASTED"     # "BAIL" when the rider bailed on purpose (F)
 	const FILL_W := 0.94      # of the screen width
 	const CAP_H := 0.62       # cap height, of the screen height
 	var zoom := 1.0
@@ -225,12 +229,12 @@ class WordView extends Control:
 	func _draw() -> void:
 		if modulate.a <= 0.0: return
 		var fs := 200
-		var w := font.get_string_size(WORD, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		var w := font.get_string_size(word, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 		var cap := font.get_ascent(fs) * 0.74            # cap height ~ 0.74 of the ascent (condensed display faces)
 		var sy := size.y * CAP_H / cap * zoom
 		var sx := size.x * FILL_W / w * zoom
 		var c := size * 0.5
 		var base := Vector2(-w * 0.5, cap * 0.5)          # centred on the caps, in font units
 		draw_set_transform(c, 0.0, Vector2(sx, sy))   # flat: no stroke, no shadow
-		draw_string(font, base, WORD, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color("b3201b"))
+		draw_string(font, base, word, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color("b3201b"))
 		draw_set_transform(Vector2.ZERO)
