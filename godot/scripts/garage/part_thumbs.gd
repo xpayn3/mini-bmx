@@ -218,12 +218,15 @@ static var _bar_stock: ArrayMesh = null
 ## the handlebar alone (bar, stem clamp, grips, levers) at a width / rise / material, painted like the build
 ## a whole bike (stock frame + the player's garage build when the frame takes one), for the ride setup cards
 static func make_bike(id: String) -> Node3D:
-	var cfg: Dictionary = GameState.BIKES[id].duplicate(true)
-	var build := {}
-	if cfg.get("garage", false): build = BikeBuild.load_build()
+	var cfg := GameState.bike_config_for(id)
 	var rig := BikeRig.new()
-	rig.load_bike(cfg, build)
+	rig.load_bike(cfg, cfg.get("build", {}))
 	return rig
+
+## drop the cached bike pictures (after a part changed)
+func forget_bikes() -> void:
+	for k in _cache.keys():
+		if String(k).begins_with("bike|"): _cache.erase(k)
 
 static func make_bars(m: Dictionary, crown_paint: Dictionary, grip_paint: Dictionary) -> Node3D:
 	if _bar_stock == null:

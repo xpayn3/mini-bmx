@@ -7,7 +7,7 @@ extends Control
 
 const SCR := Vector2(136, 174)    # the screen in HUD pixels = the face's drawing space
 const PX := 0.01                  # metres per face pixel
-const TEX_K := 2.0                # texture pixels per face pixel
+const TEX_K := 4.0                # texture pixels per face pixel (high res: the dot-matrix text stays crisp up close)
 const HudScript := preload("res://scripts/ui/hud.gd")
 const DIST0 := 4.3
 const FOLLOW := 16.0              # how quickly the view follows the drag (1 / s)
@@ -85,6 +85,7 @@ func _ready() -> void:
 	_face_vp.transparent_bg = true
 	_face_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	_face_vp.size = Vector2i(SCR * TEX_K)
+	_face_vp.msaa_2d = Viewport.MSAA_4X
 	add_child(_face_vp)
 	_face = Face.new()
 	_face.size = SCR * TEX_K

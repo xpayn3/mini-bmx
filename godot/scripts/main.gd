@@ -258,7 +258,8 @@ func _menu_page_main() -> void:
 	ride.grab_focus.call_deferred()
 
 ## RIDE -> choose the bike and the time of day, then GO
-const SETUP_STEPS := ["BIKE", "RIDER", "COMPUTER", "RACE"]
+const SETUP_STEPS := ["BIKE", "TUNE", "RIDER", "COMPUTER", "RACE"]
+const COMPUTER_STEP := 3
 var setup_step := 0
 var bike_dirty := false   # the bike was changed in the selection flow; the ride is rebuilt on RACE
 var bike_thumbs: PartThumbs   # small pictures for the cards
@@ -306,15 +307,15 @@ func _menu_page_setup(step := 0) -> void:
 	bg.color = Tokens.PAGE
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	scr.add_child(bg)
-	var split := setup_step != 2
-	var title: String = ["CHOOSE YOUR BIKE", "CHOOSE YOUR RIDER", "BIKE COMPUTER", "READY TO RACE"][setup_step]
+	var split := setup_step != COMPUTER_STEP
+	var title: String = ["CHOOSE YOUR BIKE", "COLOURS & WHEELS", "CHOOSE YOUR RIDER", "BIKE COMPUTER", "READY TO RACE"][setup_step]
 	var back_cb: Callable = (_menu_page_setup.bind(setup_step - 1) if setup_step > 0 else _menu_page_main)
 	var last := setup_step == SETUP_STEPS.size() - 1
 	var next_btn := _menu_button("RACE" if last else "NEXT", "" if last else SETUP_STEPS[setup_step + 1].capitalize(), _start_ride if last else _menu_page_setup.bind(setup_step + 1), true)
 	var bar := HBoxContainer.new()
 	bar.add_theme_constant_override("separation", Tokens.S2)
 	for i in SETUP_STEPS.size():
-		var sb := UITheme.make_button("%d  %s" % [i + 1, SETUP_STEPS[i]], _menu_page_setup.bind(i), "tab", Tokens.T_MD if split else Tokens.T_LG)
+		var sb := UITheme.make_button("%d  %s" % [i + 1, SETUP_STEPS[i]], _menu_page_setup.bind(i), "tab", Tokens.T_SM if split else Tokens.T_LG)
 		sb.toggle_mode = true
 		sb.button_pressed = i == setup_step
 		sb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -334,7 +335,8 @@ func _menu_page_setup(step := 0) -> void:
 		hero_view = BikeTurntable.new()
 		hero_view.set_anchors_preset(Control.PRESET_FULL_RECT)
 		left.add_child(hero_view)
-		hero_view.set_bike(GameState.bike_id)
+		if setup_step == 2: hero_view.show_rider(RiderPanels.load_look())   # the rider step shows the rider standing
+		else: hero_view.set_bike(GameState.bike_id)
 		var ov := MarginContainer.new()
 		ov.set_anchors_preset(Control.PRESET_FULL_RECT)
 		ov.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -360,6 +362,9 @@ func _menu_page_setup(step := 0) -> void:
 		hero_spec.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		lv.add_child(hero_spec)
 		_hero_text(GameState.bike_id)
+		if setup_step == 2:
+			hero_name.text = "YOUR RIDER"
+			hero_spec.text = "PICK A KIT  ·  DRAG TO TURN"
 		var bl := HBoxContainer.new()
 		bl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		bl.add_child(UITheme.make_button("BACK", back_cb, "link", Tokens.T_XL))
@@ -411,9 +416,10 @@ func _menu_page_setup(step := 0) -> void:
 		foot.add_child(next_btn)
 	match setup_step:
 		0: _setup_bike(content)
-		1: _setup_rider(content)
-		2: _setup_computer(content)
-		3: _setup_race(content)
+		1: _setup_tune(content)
+		2: _setup_rider(content)
+		3: _setup_computer(content)
+		4: _setup_race(content)
 	next_btn.grab_focus.call_deferred()
 
 ## step 1: the presets as picture cards (the big 3D bike is the left side of the screen)
@@ -453,7 +459,140 @@ func _setup_bike(content: HBoxContainer) -> void:
 				GameState.bike_id = id; GameState.save(); bike_dirty = true)
 		list.add_child(b)
 
-## step 2: the kit presets as colour cards
+var tune_cat := "colour"
+var tune_body: VBoxContainer
+var tune_build := {}
+const TUNE_SWATCHES := ["e8432e", "ff6a00", "ffb000", "ffd21f", "c6ff1a", "35d04a", "00a86b", "00c2c7", "2f7de1", "1d2b64",
+	"7b3fe4", "d22fbf", "ff4f9a", "f4f4f0", "b8bcc0", "6b6f75", "2b2d31", "111214", "c8a24a", "8a5a2b", "4a6b3a", "e0d3b8"]
+
+## step 2: colours and wheels (frame / fork colour, tyre model, rim colour). Everything else is in the garage.
+func _setup_tune(content: HBoxContainer) -> void:
+	var garage_bike: bool = GameState.BIKES[GameState.bike_id].get("garage", false)
+	tune_build = BikeBuild.load_build() if garage_bike else {}
+	if not garage_bike: tune_cat = "wheels"
+	var col := VBoxContainer.new()
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	col.add_theme_constant_override("separation", Tokens.S3)
+	content.add_child(col)
+	if garage_bike:
+		var tabs := HBoxContainer.new()
+		tabs.add_theme_constant_override("separation", Tokens.S2)
+		var grp := ButtonGroup.new()
+		for c in [["colour", "COLOURS"], ["wheels", "WHEELS & TYRES"]]:
+			var b := UITheme.make_button(c[1], Callable(), "chip", Tokens.T_MD)
+			b.toggle_mode = true; b.button_group = grp
+			b.button_pressed = c[0] == tune_cat
+			b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			b.pressed.connect(func(): tune_cat = c[0]; _tune_fill())
+			tabs.add_child(b)
+		col.add_child(tabs)
+	var sc := ScrollContainer.new()
+	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	col.add_child(sc)
+	tune_body = VBoxContainer.new()
+	tune_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	tune_body.add_theme_constant_override("separation", Tokens.S3)
+	sc.add_child(tune_body)
+	col.add_child(UITheme.make_button("MORE PARTS IN THE GARAGE", _open_garage, "link", Tokens.T_MD))
+	_tune_fill()
+
+## something changed: save it, and the ride is rebuilt on RACE
+func _tune_changed(repaint_only: bool) -> void:
+	if GameState.BIKES[GameState.bike_id].get("garage", false): BikeBuild.save_build(tune_build)
+	bike_dirty = true
+	bike_thumbs.forget_bikes()
+	if repaint_only: hero_view.repaint(tune_build)
+	else: hero_view.set_bike(GameState.bike_id, true)
+
+func _tune_fill() -> void:
+	for c in tune_body.get_children():
+		tune_body.remove_child(c); c.queue_free()
+	var garage_bike: bool = GameState.BIKES[GameState.bike_id].get("garage", false)
+	if tune_cat == "colour" and garage_bike:
+		tune_body.add_child(UITheme.caption("FRAME"))
+		tune_body.add_child(_swatch_grid(tune_build.paint.frame.color, func(h):
+			for k in ["frame", "rear"]: tune_build.paint[k].color = h
+			_tune_changed(true); _tune_fill()))
+		tune_body.add_child(UITheme.caption("FORK"))
+		tune_body.add_child(_swatch_grid(tune_build.paint.fork.color, func(h):
+			tune_build.paint.fork.color = h
+			_tune_changed(true); _tune_fill()))
+		tune_body.add_child(UITheme.caption("SHOCK SPRING"))
+		tune_body.add_child(_swatch_grid(tune_build.paint.spring.color, func(h):
+			tune_build.paint.spring.color = h
+			_tune_changed(true); _tune_fill()))
+		return
+	# wheels & tyres: a picture card per tyre model, then the rim colour
+	tune_body.add_child(UITheme.caption("TYRES"))
+	var cur: String = String(tune_build.wheels.get("tyre_model", "")) if garage_bike else GameState.bmx_tyre
+	var group := ButtonGroup.new()
+	for k in BikeBuild.TYRE_MODELS:
+		var tm: Dictionary = BikeBuild.TYRE_MODELS[k]
+		if not tm.has("brand"): continue
+		var tmp: Dictionary = tune_build.duplicate(true) if garage_bike else BikeBuild.bmx_build(k)
+		if garage_bike: BikeBuild.apply_tyre_model(tmp, k)
+		var spec := BikeBuild.wheel_spec(tmp, false)
+		var b := UITheme.make_button("", Callable(), "chip")
+		b.toggle_mode = true; b.button_group = group
+		b.button_pressed = k == cur
+		b.custom_minimum_size.y = 96
+		var row := HBoxContainer.new()
+		row.set_anchors_preset(Control.PRESET_FULL_RECT)
+		row.offset_left = Tokens.S3; row.offset_right = -Tokens.S3
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var pic := TextureRect.new()
+		pic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		pic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		pic.custom_minimum_size = Vector2(150, 0)
+		pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		bike_thumbs.request("tyre|%s|%s" % [k, JSON.stringify(spec)], PartThumbs.make_wheel.bind(spec, 0.3), Vector3(0.25, 0.75, 1.0),
+			func(t): if is_instance_valid(pic): pic.texture = t)
+		row.add_child(pic)
+		var tc := VBoxContainer.new()
+		tc.alignment = BoxContainer.ALIGNMENT_CENTER
+		tc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		tc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		for pair in [[UITheme.caption(String(tm.brand), Tokens.INK_SOFT, Tokens.T_XS), 0], [UITheme.display(String(tm.label).replace(String(tm.brand).capitalize() + " ", ""), Tokens.T_XL, Tokens.INK, Tokens.SLANT_TITLE), 0],
+				[UITheme.caption("%s  ·  %.1f in  ·  %s" % [String(tm.tread).to_upper(), float(tm.tyre_w), String(tm.casing).to_upper()], Tokens.INK_SOFT, Tokens.T_XS), 0]]:
+			(pair[0] as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
+			tc.add_child(pair[0])
+		row.add_child(tc)
+		b.add_child(row)
+		b.pressed.connect(func():
+			if garage_bike: BikeBuild.apply_tyre_model(tune_build, k)
+			else:
+				GameState.bmx_tyre = k; GameState.save()
+			_tune_changed(false))
+		tune_body.add_child(b)
+	if garage_bike:
+		tune_body.add_child(UITheme.caption("RIM COLOUR"))
+		tune_body.add_child(_swatch_grid(tune_build.wheels.rim_color, func(h):
+			tune_build.wheels.rim_color = h; tune_build.wheels.rim_model = "custom"
+			_tune_changed(false); _tune_fill()))
+
+## a sleek colour grid: flat squares, the picked one lifted with an ink bar under it
+func _swatch_grid(cur: String, cb: Callable) -> Control:
+	var g := GridContainer.new()
+	g.columns = 11
+	g.add_theme_constant_override("h_separation", Tokens.S2)
+	g.add_theme_constant_override("v_separation", Tokens.S2)
+	for hex in TUNE_SWATCHES:
+		var b := Button.new()
+		b.custom_minimum_size = Vector2(40, 40)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.focus_mode = Control.FOCUS_NONE
+		b.tooltip_text = "#" + hex
+		var on: bool = hex == cur.to_lower().trim_prefix("#")
+		var col := Color(hex)
+		for st in ["normal", "pressed", "focus"]:
+			b.add_theme_stylebox_override(st, UITheme.marked(col, Tokens.INK, SIDE_BOTTOM, Tokens.R_MD, 0) if on else UITheme.box(col, Tokens.R_MD, 0))
+		b.add_theme_stylebox_override("hover", UITheme.marked(col.lightened(0.12), Tokens.INK_SOFT, SIDE_BOTTOM, Tokens.R_MD, 0))
+		b.pressed.connect(func(): cb.call(hex))
+		g.add_child(b)
+	return g
+
+## step 3: the kit presets as colour cards
 func _setup_rider(content: HBoxContainer) -> void:
 	var look := RiderPanels.load_look()
 	var col0 := VBoxContainer.new()
@@ -498,6 +637,8 @@ func _setup_rider(content: HBoxContainer) -> void:
 		b.add_child(col)
 		b.pressed.connect(func():
 			RiderPanels.save_look(kit_look)
+			hero_view.set_look(kit_look)
+			hero_name.text = String(k[0]).to_upper()
 			if game and game.rider: game.rider.set_look(kit_look))
 		grid.add_child(b)
 	col0.add_child(UITheme.make_button("FINE TUNE IN THE RIDER ROOM", _open_garage.bind("rider"), "link", Tokens.T_MD))
@@ -517,20 +658,44 @@ func _setup_race(content: HBoxContainer) -> void:
 	content.add_child(side)
 	side.add_child(UITheme.caption("TIME OF DAY"))
 	var grid := GridContainer.new()
-	grid.columns = 1
-	grid.add_theme_constant_override("v_separation", Tokens.S2)
+	grid.columns = 2
+	grid.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	grid.add_theme_constant_override("h_separation", Tokens.S3)
+	grid.add_theme_constant_override("v_separation", Tokens.S3)
 	var tgroup := ButtonGroup.new()
 	var active := LightSettings.get_active()
 	for n in LightSettings.BUILTIN:
 		var p := LightSettings.preset(n)
-		var sub := "AUTO" if float(p.cycle) > 0.5 else LightSettings.clock(float(p.time))
-		var b := UITheme.make_button("%s   %s" % [String(n).to_upper(), sub], LightSettings.select.bind(n), "chip", Tokens.T_LG)
+		var cyc := float(p.cycle) > 0.5
+		var sub := "AUTO" if cyc else LightSettings.clock(float(p.time))
+		var b := UITheme.make_button("", LightSettings.select.bind(n), "chip")
 		b.toggle_mode = true
 		b.button_group = tgroup
 		b.button_pressed = n == active
-		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		b.custom_minimum_size.y = 52
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		b.custom_minimum_size.y = 108
+		# a postcard: the little landscape in a white border, the name and the time written under it
+		var cv := VBoxContainer.new()
+		cv.set_anchors_preset(Control.PRESET_FULL_RECT)
+		cv.offset_left = Tokens.S2; cv.offset_right = -Tokens.S2; cv.offset_top = Tokens.S2; cv.offset_bottom = -Tokens.S2
+		cv.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		cv.add_theme_constant_override("separation", Tokens.S1)
+		var ic := TimeIcon.new()
+		ic.hour = float(p.time); ic.cycle = cyc
+		ic.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		cv.add_child(ic)
+		var cap := HBoxContainer.new()
+		cap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var nl := UITheme.display(String(n).to_upper(), Tokens.T_MD, Tokens.INK, Tokens.SLANT_TITLE)
+		nl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		nl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		cap.add_child(nl)
+		var tl := UITheme.caption(sub, Tokens.INK_SOFT, Tokens.T_XS)
+		tl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		cap.add_child(tl)
+		cv.add_child(cap)
+		b.add_child(cv)
 		grid.add_child(b)
 	side.add_child(grid)
 	side.add_child(UITheme.text("Computer: " + String(ComputerUnits.get_unit(GameState.computer_id).name), Tokens.INK_SOFT, Tokens.T_MD))

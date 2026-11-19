@@ -55,6 +55,8 @@ func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
 	_pedals()
 	_saddle()
 	var decal_cfg: Dictionary = BikeDecals.DH_DECALS if cfg.get("decals", false) else {}
+	if build.is_empty() and cfg.has("tyre_build"):   # a frame without a garage build: just the tyres
+		_swap_wheels(cfg.tyre_build, BikeBuild.ride_mods(cfg.tyre_build))
 	if not build.is_empty():
 		var mods := BikeBuild.ride_mods(build)
 		_swap_wheels(build, mods)

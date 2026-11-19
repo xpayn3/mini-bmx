@@ -5,6 +5,7 @@ extends SubViewportContainer
 
 const SPIN := 0.5            # rad/s
 const LENS_MM := 100.0   # product / bike photographers shoot a 85-135 mm: flat perspective, no wide-angle stretch
+const BACKDROP := Color("e7e3da")   # subtle eggshell, not pure white
 const PODIUM_H := 0.03   # a low round platform, a couple of cm
 
 var vp := SubViewport.new()
@@ -14,8 +15,12 @@ var _rig: Node3D
 var _yaw_extra := 0.0
 var _drag := false
 var _bike_id := ""
+var _rider: Rider
+var _hand_t := 0.0
 var _r := 1.0
 var _h := 1.0
+var _keep_r := 1.0
+var _keep_h := 1.0
 
 
 func _init() -> void:
@@ -32,12 +37,12 @@ func _init() -> void:
 	sky.sky_material = pm_sky
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color(1, 1, 1)
+	env.background_color = BACKDROP
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	env.ambient_light_energy = 1.0
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
-	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR   # keeps the plain backdrop pure white
+	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR   # keeps the backdrop exactly the eggshell colour
 	env.adjustment_enabled = true
 	env.adjustment_contrast = 1.15
 	env.adjustment_saturation = 1.08
@@ -46,14 +51,14 @@ func _init() -> void:
 	# endless white floor, the low round platform and a soft contact shadow under the bike
 	var floor_m := StandardMaterial3D.new()
 	floor_m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	floor_m.albedo_color = Color(1, 1, 1)
+	floor_m.albedo_color = BACKDROP
 	var fl := MeshInstance3D.new()
 	var pm := PlaneMesh.new(); pm.size = Vector2(400, 400)
 	fl.mesh = pm; fl.material_override = floor_m
 	fl.position.y = -PODIUM_H
 	vp.add_child(fl)
 	var pod_m := StandardMaterial3D.new()
-	pod_m.albedo_color = Color(0.86, 0.87, 0.9)
+	pod_m.albedo_color = Color(0.84, 0.82, 0.78)
 	pod_m.roughness = 0.4
 	var pod := MeshInstance3D.new()
 	var cm := CylinderMesh.new()
@@ -106,9 +111,42 @@ static func _studio_hdri() -> ImageTexture:
 	return ImageTexture.create_from_image(img)
 
 
+## a rider standing in place of the bike (the Rider step); look = a RiderPanels look dictionary
+func show_rider(look: Dictionary) -> void:
+	if _rig != null: _rig.visible = false
+	if _rider == null:
+		_rider = Rider.new()
+		pivot.add_child(_rider)
+		_rider.set_look(look)
+		_rider.set_style(Garage.STAND_POSE)
+		var hs: Node3D = load("res://assets/helmet.glb").instantiate()
+		var helmet := hs.find_child("helmet", true, false)
+		if helmet:
+			helmet.get_parent().remove_child(helmet)
+			_rider.set_helmet(helmet)
+		hs.free()
+	else:
+		_rider.set_look(look)
+	_rider.visible = true
+	pivot.rotation = Vector3.ZERO
+	_r = 0.55; _h = 1.85
+	_fit()
+
+func set_look(look: Dictionary) -> void:
+	if _rider != null: _rider.set_look(look)
+
+## the paint of the shown bike follows the build (no rebuild)
+func repaint(build: Dictionary) -> void:
+	if _rig != null: BikeBuild.apply_paint((_rig as BikeRig).model, build)
+
 ## swap to this bike (GameState.BIKES id): its model sits centred on the podium, camera fitted to it
-func set_bike(id: String) -> void:
-	if id == _bike_id and _rig != null: return
+func set_bike(id: String, force := false) -> void:
+	if _rider != null: _rider.visible = false
+	if id == _bike_id and _rig != null and not force:
+		_rig.visible = true
+		_r = _keep_r; _h = _keep_h
+		_fit()
+		return
 	_bike_id = id
 	if _rig != null:
 		pivot.remove_child(_rig); _rig.queue_free()
@@ -127,12 +165,13 @@ func set_bike(id: String) -> void:
 	_rig.position = Vector3(-c.x, -box.position.y, -c.z)   # centred, tyres on the podium top
 	_r = maxf(box.size.x, box.size.z) * 0.5
 	_h = box.size.y
+	_keep_r = _r; _keep_h = _h
 	_fit()
 
 
 ## frame the whole bike, whatever the shape of the view and whichever way it is turned
 func _fit() -> void:
-	if _rig == null: return
+	if _rig == null and _rider == null: return
 	var aspect := maxf(size.x, 1.0) / maxf(size.y, 1.0)
 	var ext := maxf(_h * 0.62, _r * 1.0 / aspect)   # half the height the view has to show
 	var dist := ext * 1.1 / tan(deg_to_rad(cam.fov * 0.5))
@@ -141,8 +180,16 @@ func _fit() -> void:
 
 
 func _process(dt: float) -> void:
-	if not visible or _rig == null: return
+	if not visible: return
 	if not _drag: pivot.rotation.y += SPIN * dt
+	if _rider != null and _rider.visible:
+		_hand_t += dt
+		var breathe := sin(_hand_t * 1.6) * 0.006
+		_rider.update_pose(dt, {"footL": Vector3(0.0, 0.0, -0.13), "footR": Vector3(0.02, 0.0, 0.13),
+			"handL": Vector3(0.02, 0.83 + breathe, -0.29), "handR": Vector3(0.04, 0.83 + breathe, 0.29),
+			"v": 0.0, "lean": 0.0, "steer": 0.0, "yawRate": 0.0, "counter": 0.0, "rockRoll": 0.0, "headRoll": 0.0,
+			"absorb": breathe, "pitch": 0.0, "bodyLevel": 0.85, "attackDrop": 0.0, "pedal": 0.0, "sprint": 0.0,
+			"crank": 0.0, "air": 0.0, "compress": 0.0, "hipShift": 0.0, "t": _hand_t, "stand": 1.0, "relax": 1.0})
 
 
 func _gui_input(e: InputEvent) -> void:
