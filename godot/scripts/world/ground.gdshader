@@ -31,7 +31,7 @@ vec2 gd_pebbles(vec2 p) {
 			vec2 g = vec2(float(x), float(y));
 			vec3 h = gd_hash3(i + g + 17.0);
 			if (h.z < 0.55) continue;
-			float r = 0.08 + 0.3 * (h.z - 0.55) * (h.z - 0.55) * 4.0;
+			float r = 0.07 + 0.22 * (h.z - 0.55) * (h.z - 0.55) * 4.0;
 			vec2 dv = (g + 0.2 + 0.6 * h.xy - f) * vec2(1.0, 0.75 + 0.5 * h.x);
 			float k = 1.0 - smoothstep(r * 0.4, r, length(dv));
 			if (k > best.x) best = vec2(k, h.y * 2.0 - 0.6);
@@ -54,15 +54,15 @@ void fragment() {
 	float t = gA.a, rockW = gB.a;
 	float n0 = gd_noise3(P * 2.3 + 3.3), n1 = gd_noise3(P * 9.0), n2 = gd_noise3(P * 23.0 + 7.1);
 	float hG = mix(0.5, n1, f2) * 0.55 + mix(0.5, n2, f1) * 0.25 + n0 * 0.2;
-	vec2 pb = gd_pebbles(P.xz * 8.0);
-	float peb = pb.x * f2;
+	vec2 pb = gd_pebbles(P.xz * 16.0);   // fine grit: ~6 cm cells
+	float peb = pb.x * (1.0 - smoothstep(0.018, 0.06, gpx));   // gone before they're smaller than a pixel
 	float hD = peb * 0.6 + gd_noise3(P * 3.1 + 11.0) * 0.45 + gd_noise3(P * 0.9 + 2.0) * 0.3;
 	float a1 = (1.0 - t) + hG * 0.75, a2 = t + hD * 0.75;
 	float m = max(a1, a2) - 0.28;
 	float b1 = max(a1 - m, 0.0), b2 = max(a2 - m, 0.0);
 	float wd = mix(t, b2 / max(b1 + b2, 1e-4), f3);
 	vec3 col = mix(gA.rgb, gB.rgb, wd);
-	col *= mix(1.0, 1.0 + peb * 0.28 * pb.y + (n2 - 0.5) * 0.14 * f1, wd);
+	col *= mix(1.0, 1.0 + peb * 0.2 * pb.y + (n2 - 0.5) * 0.14 * f1, wd);
 	float rk = gd_noise3(P * 4.3 + 5.0) * 0.6 + gd_noise3(P * 13.0) * 0.4 * f2;
 	col *= mix(1.0, 0.78 + 0.44 * rk, rockW * (1.0 - wd) * f3);
 	ALBEDO = col;
