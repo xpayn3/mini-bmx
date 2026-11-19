@@ -1,16 +1,19 @@
 class_name PausePamphlet
 extends PaperSheet
 ## The pause menu (Esc) as a folded downhill-park leaflet held up in front of you: a real DL tri-fold (three
-## 99 x 210 mm panels, Z-folded, the cover is the outer panel's front): a photo of the spot you
+## 99 x 210 mm panels, letter-folded: the right flap folds in, the cover flap over it). A photo of the spot you
 ## stopped at on the cover (the last frame of the ride, grabbed before anything is drawn over it), the park's
 ## name over it, and the menu printed underneath - live buttons: mouse (traced onto the paper), keys and pad.
-## Hover / focus = a highlighter swipe. Built on PaperSheet (stays folded: unfold = false).
+## Hover / focus = a highlighter swipe. Settings / Controls open the leaflet (open_inside): the flaps swing open
+## and the menu is printed across the three inside panels, live; "Fold up" / Esc / B shuts it again.
+## Built on PaperSheet (fold_style "letter", starts shut).
 ## Use: var p := PausePamphlet.new(); p.photo = <Image>; add_child(p); p.add_item("Resume", cb) ...; p.open()
 
 const CW := 600                      # one panel (px): DL, 99 x 210 mm
 const CH := 1273
 const PHOTO_H := 640
-const COVER_X := CW * 2              # the cover = the front of the third panel (the one on top when folded)
+const COVER_Y := CH                  # the cover: the strip under the inside spread (printed on the cover flap's back)
+const INSIDE_SCALE := 1.3            # the inside menu, drawn this much bigger than its own pixels (readable)
 const INK := Color("1d1f22")
 const RED := Color("d22b25")
 
@@ -28,28 +31,33 @@ func _ready() -> void:
 	cols = 3; rows = 1
 	panel = Vector2(0.099, 0.21)
 	unfold = false
+	fold_style = "letter"
 	live = true
 	auto_close = false
 	hold_roll = -0.035
-	fill = Vector2(0.9, 0.88)
+	fill = Vector2(0.9, 0.8)
 	open_t = 0.7
 	close_t = 0.3
-	close_actions = [&"pause"]
+	close_actions = [&"pause", &"ui_cancel"]
 	_font = SystemFont.new()
 	_font.font_names = PackedStringArray(["Bahnschrift", "Arial Narrow", "Segoe UI", "Arial"])
 	_font.font_weight = 500
 	_font_b = SystemFont.new()
 	_font_b.font_names = _font.font_names
 	_font_b.font_weight = 800
-	setup(Vector2i(CW * 3, CH))                # the inside panels are bare paper for now
+	setup(Vector2i(CW * 3, CH), Vector2i(CW, CH))   # inside spread + the cover strip under it
+	_inside = Control.new()                         # the inside: a menu printed across the three panels
+	_inside.scale = Vector2.ONE * INSIDE_SCALE
+	_inside.size = Vector2(CW * 3, CH) / INSIDE_SCALE
+	content.add_child(_inside)
 	var cover := Cover.new()
 	cover.owner_p = self
-	cover.position = Vector2(COVER_X, 0)
+	cover.position = Vector2(0, COVER_Y)
 	cover.size = Vector2(CW, CH)
 	cover.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	content.add_child(cover)
 	_list = VBoxContainer.new()
-	_list.position = Vector2(COVER_X + 40, PHOTO_H + 34)
+	_list.position = Vector2(40, COVER_Y + PHOTO_H + 34)
 	_list.size = Vector2(CW - 80, CH - PHOTO_H - 120)
 	_list.add_theme_constant_override("separation", 2)
 	content.add_child(_list)
@@ -86,6 +94,40 @@ func add_item(text: String, cb: Callable) -> Button:
 	b.mouse_entered.connect(func(): b.grab_focus())   # mouse and pad share one highlight
 	_list.add_child(b)
 	return b
+
+
+var _inside: Control
+var _inside_menu: Control
+
+## open the leaflet on a menu (Settings / Controls, a MenuBase): printed across the inside, live
+func open_inside(menu: Control) -> void:
+	if is_instance_valid(_inside_menu): _inside_menu.queue_free()
+	menu.paper = true
+	var m := 26.0
+	menu.paper_size = _inside.size - Vector2(m, m) * 2.0
+	menu.position = Vector2(m, m)
+	_inside.add_child(menu)
+	_inside_menu = menu
+	menu.tree_exiting.connect(func(): if _inside_menu == menu: _inside_menu = null; set_unfolded(false); focus_first.call_deferred())
+	set_unfolded(true)
+	_show_hint()
+
+
+## shut the leaflet again (back to the cover)
+func fold_inside() -> void:
+	if is_instance_valid(_inside_menu): _inside_menu.queue_free()   # (its tree_exiting shuts the flaps)
+	else: set_unfolded(false)
+
+
+func prompt_items() -> Array:
+	if Settings.pad_active:
+		return [[["A"], "Select"], [["B"], "Fold up" if is_unfolded() else "Resume"]]
+	return [[["K:Enter"], "Select"], [["MOUSE"], "Click"], [["K:Esc"], "Fold up" if is_unfolded() else "Resume"]]
+
+
+func set_unfolded(on: bool) -> void:
+	super.set_unfolded(on)
+	if _hint: _hint.set_items(prompt_items())
 
 
 func focus_first() -> void:

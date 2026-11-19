@@ -32,11 +32,15 @@ signal close_requested               # one of close_actions was pressed
 @export var live := false
 @export var page_alpha := false               # the page is printed over a content layer (set_content): keep its alpha
 @export var hold_roll := 0.0                  # held a little crooked (rad), for charm
-@export var unfold := true                    # false: it comes up and stays folded, showing the cover (a pamphlet)
+@export var unfold := true                    # false: it comes up and stays folded, showing the cover (a pamphlet);
+												# set_unfolded() opens / shuts it while it's up
+@export var fold_style := "accordion"         # "letter": 3 panels rows 1, a roll-folded leaflet - the middle panel
+												# stays, the right flap folds in, the left (its back = the cover) over it
 @export var auto_close := true                # close_actions fold it away (false: just close_requested)
 @export var dim := 1.0                        # how much the game behind is blurred / darkened
 var close_actions: Array[StringName] = []     # actions that fold it away again (handled here, never reach the game)
 
+var cover_col := 0                   # the panel whose back is the cover
 var page: SubViewport                # what's printed: front (page_size) + cover strip below
 var content: Control                 # add your print here (sized to the whole page viewport)
 var page_size := Vector2i.ZERO
@@ -47,8 +51,8 @@ var k := 0.0                         # 0 put away .. 1 open
 var shots := ""                      # tests: dir/prefix -> its own render while it unfolds
 var freeze_at := float(OS.get_environment("BMX_PAPER_AT")) if OS.get_environment("BMX_PAPER_AT") != "" else -1.0   # tests: stop the animation at t s
 
-const EPS_C := 0.055                 # the folds never shut completely: the stack fans a little (rad)
-const EPS_R := 0.04
+const EPS_C := 0.09                 # the folds never shut completely: the stack fans a little (rad)
+const EPS_R := 0.006
 
 var _vp: SubViewport
 var _cam: Camera3D
@@ -80,7 +84,9 @@ func _ready() -> void:
 func setup(p_size: Vector2i, c_size := Vector2i.ZERO) -> void:
 	# (cols even: the outer panel lies face down and carries the cover on its back; odd cols only for a sheet
 	# that stays folded - its outer panel faces you, so print the cover on the front, in that panel's part)
-	assert((cols % 2 == 0 or not unfold) and rows >= 1 and rows <= 2, "PaperSheet: cols even (or unfold off), rows 1 or 2")
+	assert(fold_style == "letter" and cols == 3 and rows == 1 or (cols % 2 == 0 or not unfold) and rows >= 1 and rows <= 2,
+		"PaperSheet: cols even (or unfold off), rows 1 or 2; letter: 3 x 1")
+	cover_col = 0 if fold_style == "letter" else cols - 1
 	page_size = p_size
 	cover_size = c_size
 	_dim = ColorRect.new()
@@ -98,6 +104,12 @@ func setup(p_size: Vector2i, c_size := Vector2i.ZERO) -> void:
 	page.gui_embed_subwindows = true
 	page.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	add_child(page)
+	if not page_alpha:   # bare paper under whatever is printed (the viewport's clear colour showed through)
+		var white := ColorRect.new()
+		white.color = Color.WHITE
+		white.size = Vector2(page.size)
+		white.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		page.add_child(white)
 	content = Control.new()
 	content.size = Vector2(page.size)
 	content.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
@@ -156,13 +168,14 @@ func setup(p_size: Vector2i, c_size := Vector2i.ZERO) -> void:
 			q.subdivide_width = 10
 			q.subdivide_depth = 12
 			var y0 := 0.0 if rows == 1 else (0.5 if r == 0 else -0.5)
-			q.center_offset = Vector3(panel.x * 0.5, panel.y * y0, 0)
+			var x0 := -0.5 if (fold_style == "letter" and c == 0) else 0.5   # letter: the left flap hangs left of its hinge
+			q.center_offset = Vector3(panel.x * x0, panel.y * y0, 0)
 			var mi := MeshInstance3D.new()
 			mi.mesh = q
 			mi.material_override = _mat
 			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_DOUBLE_SIDED
 			mi.set_instance_shader_parameter("cell", Vector2(c, r))
-			mi.set_instance_shader_parameter("cover", 1.0 if (c == cols - 1 and r == 0) else 0.0)
+			mi.set_instance_shader_parameter("cover", 1.0 if (c == cover_col and r == 0) else 0.0)
 			mi.set_instance_shader_parameter("pillow", 0.0)
 			_sheet.add_child(mi)
 			col.append(mi)
@@ -223,7 +236,7 @@ func open() -> void:
 	_tl = 0.0
 	_reset_view()
 	if state == 1 and k == 0.0: _centre_s = Vector3(INF, INF, INF); _relax = 0.0
-	if handheld: _show_hint()
+	_show_hint()
 	visible = true
 	_fit_camera()
 	_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
@@ -232,6 +245,17 @@ func open() -> void:
 	_shot_i = 0; _shot_next = _idle
 	_play_slice(1.15, 1.1 / tempo)
 	_pose()
+
+
+## open / shut a sheet that is up (the leaflet: Settings opens it, Done shuts it)
+func set_unfolded(on: bool) -> void:
+	if unfold == on: return
+	unfold = on
+	if state == 1 or state == 2: _play_slice(1.2, 0.7)
+
+
+func is_unfolded() -> bool:
+	return unfold
 
 
 func close(now := false) -> void:
@@ -310,21 +334,29 @@ func _springs() -> Array:
 func _drive() -> void:
 	_springs()
 	var tl := _tl * tempo
-	if (state == 1 or state == 2) and not unfold:
+	if fold_style == "letter":
+		# a leaflet: up it comes shut (cover to you); opened, the cover flap swings open, then the inner flap;
+		# shut again (or put away) the other way round, then down it goes
+		var open := (state == 1 or state == 2) and unfold
+		_row.target = 1.0
+		_acc[1].target = 1.0
+		_acc[0].target = 1.0 if open else (0.0 if _acc[2].x < 0.45 else 1.0)
+		_acc[2].target = 1.0 if (open and _acc[0].x > 0.55) else (_acc[2].target if open else 0.0)
+		_lift.target = 1.0 if state != 3 else (0.0 if _acc[0].x < 0.1 else 1.0)
+	elif (state == 1 or state == 2) and not unfold:
 		_lift.target = 1.0
 		_row.target = 1.0 if rows == 1 else 0.0
 	elif state == 1 or state == 2:
-		# like opening a real map: up it comes (cover to you), the accordion is pulled open one panel after
-		# another from the outside, then the bottom half (folded over the map face) flips down
+		# like opening a real map: up it comes (cover to you), held at both ends and pulled apart - every crease
+		# of the accordion opens together, like bellows - then the bottom half (folded over the map face) drops
 		_lift.target = 1.0
 		if tl < 0.05: _row.target = 0.0
-		var t0 := 0.12
-		var step := 0.13
+		var t0 := 0.16
+		var step := 0.0
 		for c in range(1, cols):
-			_acc[c].target = 1.0 if tl > t0 + step * (cols - 1 - c) else 0.0
-		var calm := true   # the flap waits until every panel has come to rest (a still-swinging one opened a wedge)
-		for c in range(1, cols): calm = calm and absf(_acc[c].x - 1.0) < 0.012 and absf(_acc[c].v) < 0.1
-		if rows == 1 or (tl > t0 + step * (cols - 2) + 0.2 and calm): _row.target = 1.0
+			_acc[c].target = 1.0 if tl > t0 + 0.02 * absf(c - cols * 0.5) else 0.0
+		# the flap waits until every panel has come to rest (a still-swinging one opened a wedge)
+		if rows == 1 or (tl > t0 + step * (cols - 2) + 0.2 and accordion_calm() and not hold_flap): _row.target = 1.0
 	else:
 		# folding away: the other way round - bottom half up, the accordion shut from the inside, down it goes
 		var r0 := 0.12 if rows == 2 else 0.0
@@ -343,14 +375,16 @@ func _process(_dt: float) -> void:
 	_idle += dt
 	_tl += dt
 	_pose_dt = dt
+	_hint_tick(dt)
 	_sound_fade(dt)
 	_drive()
 	var opening := state != 3
 	# opening: lively (overshoot ~10 % = a flap swings ~20 deg past flat and back); closing: firmer
 	_lift.step(dt, (2.8 if opening else 3.4) * tempo, 0.62 if opening else 0.85, false)
-	_row.step(dt, 3.0 * tempo, 0.68 if opening else 0.75, not opening)   # the flap drops with one small bounce
-	for c in range(1, cols):
-		_acc[c].step(dt, 3.2 * tempo, 0.62 if opening else 0.8, not opening)
+	var shut_k := 1.0 if opening else 1.9   # folding away is quicker than opening
+	_row.step(dt, 3.0 * tempo * shut_k, 0.68 if opening else 0.75, not opening)   # the flap drops with one small bounce
+	for c in range(0 if fold_style == "letter" else 1, cols):
+		_acc[c].step(dt, 3.0 * tempo * shut_k, 0.78 if opening else 0.85, not opening or fold_style == "letter")   # paper: soft
 	k = clampf(_lift.x, 0.0, 1.0)
 	if state == 1 and _tl * tempo > open_t:
 		state = 2; opened.emit()
@@ -359,8 +393,8 @@ func _process(_dt: float) -> void:
 	if _vp.size != Vector2i(get_window().size): _fit_camera()
 	_pose()
 	if handheld: _hand_controls(dt)
-	if shots != "" and state != 3 and _idle >= _shot_next and _shot_i < 26:
-		_shot_next = _idle + 0.1
+	if shots != "" and state != 3 and _idle >= _shot_next and _shot_i < 34:
+		_shot_next = _idle + 0.15
 		get_viewport().get_texture().get_image().save_png("%s_%d.png" % [shots, _shot_i])   # the last frame on screen (BMX_OFFSCREEN: minimised windows draw late)
 		print("PAPERSHOT %s_%d.png t=%.2f lift=%.2f row=%.2f" % [shots, _shot_i, _tl, _lift.x, _row.x])
 		_shot_i += 1
@@ -414,12 +448,12 @@ func page_point(sp: Vector2) -> Vector2:
 			if t <= 0.0 or t >= best: continue
 			var h := lo + ld * t
 			var y0 := 0.0 if rows == 1 else (0.5 if r == 0 else -0.5)
-			var u := h.x / panel.x
+			var u := h.x / panel.x + (1.0 if (fold_style == "letter" and c == 0) else 0.0)
 			var v := 0.5 - (h.y / panel.y - y0)
 			if u < 0.0 or u > 1.0 or v < 0.0 or v > 1.0: continue
 			best = t
 			if ld.z > 0.0:   # its back: only the cover is printed there (mirrored, as the shader draws it)
-				out = Vector2((1.0 - u) * cover_size.x, page_size.y + v * cover_size.y) if (c == cols - 1 and r == 0 and cover_size.y > 0) else Vector2(-1, -1)
+				out = Vector2((1.0 - u) * cover_size.x, page_size.y + v * cover_size.y) if (c == cover_col and r == 0 and cover_size.y > 0) else Vector2(-1, -1)
 			else:
 				out = Vector2((c + u) / cols * page_size.x, (r + v) / rows * page_size.y)
 	return out
@@ -433,10 +467,11 @@ func _fit_camera() -> void:
 	_vp.size = vs
 	var asp := float(vs.x) / maxf(1.0, vs.y)
 	var th := tan(deg_to_rad(_cam.fov) * 0.5)
-	var sz := Vector2(cols * panel.x, rows * panel.y) if unfold else panel   # folded: one panel
-	var dw := (sz.x / fill.x) * 0.5 / (th * asp)
-	var dh := (sz.y / fill.y) * 0.5 / th
-	_cam_d = maxf(dw, dh)
+	var fit := func(sz: Vector2) -> float:
+		return maxf((sz.x / fill.x) * 0.5 / (th * asp), (sz.y / fill.y) * 0.5 / th)
+	_cam_open = fit.call(Vector2(cols * panel.x, rows * panel.y))
+	_cam_fold = fit.call(panel)
+	_cam_d = _cam_open if unfold and fold_style != "letter" else _cam_fold   # (a leaflet eases between the two)
 	_cam.position = Vector3(0, 0, _cam_d)
 	_cam.rotation = Vector3.ZERO
 
@@ -449,31 +484,46 @@ const TILT_MAX := 0.3                # rad
 const ZOOM_MAX := 2.5                # zoom = the print's scale (the sheet itself always stays fully in view)
 const ZOOM_MIN := 0.5
 var _cam_d := 1.0                    # camera distance that fits the sheet
+var _cam_open := 1.0
+var _cam_fold := 1.0
 var _zoom := 1.0
 var _zoom_t := 1.0
 var _tilt := Vector2.ZERO
 var _drag := false
 
-var _hint: Label
+var _hint: PadGlyph.PromptBar
+var _hint_pad := false
 
-## the controls, small at the bottom of the screen (pad or keys, whichever is in use)
-func _show_hint() -> void:
-	if _hint == null:
-		_hint = Label.new()
-		_hint.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-		_hint.offset_top = -46; _hint.offset_bottom = -18
-		_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		_hint.add_theme_font_override("font", UITheme.font())
-		_hint.add_theme_font_size_override("font_size", 17)
-		_hint.add_theme_color_override("font_color", Color(1, 1, 1, 0.85))
-		_hint.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
-		_hint.add_theme_constant_override("outline_size", 5)
-		add_child(_hint)
+## what the prompt bar at the bottom says: [[icons], label] items (PadGlyph). Override per sheet.
+func prompt_items() -> Array:
+	if not handheld: return []
 	if Settings.pad_active:
-		_hint.text = "Left stick  travel      RT / LT  zoom      Right stick  tilt      %s  close" % Settings.prompt("map")
-	else:
-		_hint.text = "WASD / drag  travel      Q / E or wheel  zoom      Numpad  tilt      %s  close" % Settings.prompt("map")
-	_hint.modulate.a = 0.0
+		return [[["LS"], "Travel"], [["RT", "LT"], "Zoom"], [["RS"], "Tilt"], [[PadGlyph.glyph_for("map")], "Close"]]
+	return [[["K:W", "K:A", "K:S", "K:D"], "Travel"], [["K:Q", "K:E", "WHEEL"], "Zoom"], [["MOUSE"], "Drag"], [[PadGlyph.glyph_for("map")], "Close"]]
+
+## the controls at the bottom of the screen, as button icons (pad or keys, whichever is in use)
+func _show_hint() -> void:
+	var it := prompt_items()
+	if it.is_empty(): return
+	if _hint == null:
+		_hint = PadGlyph.PromptBar.new()
+		_hint.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+		_hint.offset_top = -64; _hint.offset_bottom = -14
+		add_child(_hint)
+	_hint_pad = Settings.pad_active
+	_hint.set_items(it)
+	_hint.a = 0.0
+
+
+## fade the bar in once open, out while folding; follow a switch between pad and keys
+func _hint_tick(dt: float) -> void:
+	if _hint == null: return
+	if _hint_pad != Settings.pad_active:
+		_hint_pad = Settings.pad_active; _hint.set_items(prompt_items())
+	var t := 1.0 if (state == 2 or (state == 1 and _lift.x > 0.9)) else 0.0
+	if not is_equal_approx(_hint.a, t):
+		_hint.a = move_toward(_hint.a, t, dt * 3.0)
+		_hint.queue_redraw()
 
 
 func _reset_view() -> void:
@@ -503,12 +553,11 @@ func _hand_controls(dt: float) -> void:
 				if rt > 0.08: zi = maxf(zi, rt)
 				if lt > 0.08: zo = maxf(zo, lt)
 		scroll += test_scroll
-		_zoom_t = clampf(_zoom_t * exp((zi - zo) * 1.5 * dt), ZOOM_MIN, ZOOM_MAX)
+		_zoom_t = clampf(_zoom_t * exp((zi - zo) * 1.5 * dt), zoom_min, ZOOM_MAX)
 	else:   # folding away: back to the whole sheet
 		_zoom_t = 1.0
 	var e := 1.0 - exp(-dt * 9.0)
 	_tilt = _tilt.lerp(tilt_t, 1.0 - exp(-dt * 6.0))
-	if _hint: _hint.modulate.a = move_toward(_hint.modulate.a, 1.0 if state == 2 else 0.0, dt * 3.0)
 	_zoom = lerpf(_zoom, _zoom_t, e)
 	_sheet.transform.basis = Basis.from_euler(Vector3(-_tilt.y, _tilt.x, 0.0)) * _sheet.transform.basis
 	if scroll != Vector2.ZERO: _scroll(scroll.limit_length(1.0) * dt / _zoom, false)
@@ -519,13 +568,22 @@ func _hand_controls(dt: float) -> void:
 func _scroll(_amount: Vector2, _drag_m: bool) -> void:
 	pass
 
+## every accordion panel open and at rest
+func accordion_calm() -> bool:
+	if _acc.is_empty(): return false
+	for c in range(1, cols):
+		if absf(_acc[c].x - 1.0) > 0.012 or absf(_acc[c].v) > 0.1: return false
+	return true
+
 var test_scroll := Vector2.ZERO      # tests: as if the left stick were held
+var hold_flap := false               # the bottom half waits (the map: its print isn't ready yet)
+var zoom_min := ZOOM_MIN
 
 
 func _hand_mouse(e: InputEvent) -> void:
 	if e is InputEventMouseButton:
 		if e.button_index == MOUSE_BUTTON_WHEEL_UP and e.pressed: _zoom_t = minf(_zoom_t * 1.15, ZOOM_MAX)
-		elif e.button_index == MOUSE_BUTTON_WHEEL_DOWN and e.pressed: _zoom_t = maxf(_zoom_t / 1.15, ZOOM_MIN)
+		elif e.button_index == MOUSE_BUTTON_WHEEL_DOWN and e.pressed: _zoom_t = maxf(_zoom_t / 1.15, zoom_min)
 		elif e.button_index == MOUSE_BUTTON_LEFT: _drag = e.pressed
 	elif e is InputEventMouseMotion and _drag:
 		# metres on the sheet per screen pixel at this zoom; the print follows the hand
@@ -548,13 +606,16 @@ func _pose() -> void:
 	var lift := _lift.x                                                    # comes up from below
 	var row_open := _row.x if rows == 2 else 1.0                           # the half fold opens
 	var acc := []                                                          # then the accordion, outer panel first
-	for c in cols: acc.append(_acc[c].x if c > 0 else clampf(_acc[mini(1, cols - 1)].x, 0.0, 1.0))
+	for c in cols: acc.append(_acc[c].x if (c > 0 or fold_style == "letter") else clampf(_acc[mini(1, cols - 1)].x, 0.0, 1.0))
 	var breathe := sin(_idle * 1.3) * 0.5 + 0.5
 	# the creases relax into their few degrees only once the bottom half is down (bent creases while it swings
 	# opened slits between the bottom panels)
 	var settled := 1.0 if rows == 1 or (absf(_row.x - 1.0) < 0.03 and absf(_row.v) < 0.3) else 0.0
 	_relax = move_toward(_relax, settled, _pose_dt * 1.5)
 	var relax := _relax
+	if fold_style == "letter":
+		_pose_letter(lift, acc, breathe)
+		return
 	var tr := []                                                           # each column in sheet space
 	var t := Transform3D.IDENTITY
 	for c in cols:
@@ -576,7 +637,7 @@ func _pose() -> void:
 		if rows == 2:
 			# the bottom half folded up over the map face (the paper's own front), the same in every column: it
 			# rides along while the accordion opens, then flips down
-			var tb: Transform3D = tr[c] * Transform3D(Basis(), Vector3(0, 0, 0.0025 * clampf(1.0 - row_open, 0.0, 1.0))) 				* Transform3D(Basis(Vector3.RIGHT, -(PI - EPS_R) * (1.0 - row_open) + brest * row_open), Vector3.ZERO)   # a hair in front: no z-fight
+			var tb: Transform3D = tr[c] * Transform3D(Basis(), Vector3(0, 0, 0.0012 * clampf(1.0 - row_open, 0.0, 1.0))) 				* Transform3D(Basis(Vector3.RIGHT, -(PI - EPS_R) * (1.0 - row_open) + brest * row_open), Vector3.ZERO)   # a hair in front: no z-fight
 			pair.append(tb)
 			for corner in [Vector3(0, -PH, 0), Vector3(PW, -PH, 0)]:
 				var p: Vector3 = tb * corner
@@ -600,6 +661,42 @@ func _pose() -> void:
 	var basis := Basis.from_euler(Vector3(lerpf(-0.9, -0.12 * sw, lift) + sway.x, lerpf(0.35, 0.0, lift) + sway.y, lerpf(-0.25, hold_roll, lift)))
 	var depth := lerpf(0.18 if unfold else 0.0, 0.0, clampf(acc[0], 0.0, 1.0))   # a map is held closer while folded
 	_sheet.transform = Transform3D(basis, Vector3(0, lerpf(-0.75, -0.012, lift), depth))
+	(_dim.material as ShaderMaterial).set_shader_parameter("k", clampf(lift * 1.3, 0.0, 1.0) * dim)
+
+
+## the leaflet (fold_style "letter"): the middle panel stays put; the right flap swings in on its hinge, the left
+## (cover) flap over it - each a hair further out so they never cut through each other. Open, they cup a little.
+func _pose_letter(lift: float, acc: Array, breathe: float) -> void:
+	var PW := panel.x; var PH := panel.y
+	var o0 := clampf(acc[0], 0.0, 1.2); var o2 := clampf(acc[2], 0.0, 1.2)
+	var cup := 0.05 + 0.01 * breathe
+	var a0: float = lerpf(PI - 0.012, cup, o0)
+	var a2: float = lerpf(PI - 0.006, cup, o2)
+	var t0 := Transform3D(Basis(), Vector3(0, 0, 0.004 * clampf(1.0 - o0, 0.0, 1.0))) * Transform3D(Basis(Vector3.UP, a0), Vector3.ZERO)
+	var t1 := Transform3D.IDENTITY
+	var t2 := Transform3D(Basis(), Vector3(PW, 0, 0.002 * clampf(1.0 - o2, 0.0, 1.0))) * Transform3D(Basis(Vector3.UP, -a2), Vector3.ZERO)
+	var xs := [t0, t1, t2]
+	var lo := Vector3(INF, INF, INF); var hi := -lo
+	for c in 3:
+		var x0 := -PW if c == 0 else 0.0
+		for corner in [Vector3(x0, PH * 0.5, 0), Vector3(x0 + PW, PH * 0.5, 0), Vector3(x0, -PH * 0.5, 0), Vector3(x0 + PW, -PH * 0.5, 0)]:
+			var p: Vector3 = xs[c] * corner
+			lo = lo.min(p); hi = hi.max(p)
+	var centre := (lo + hi) * 0.5
+	centre.z = hi.z
+	if _centre_s.x == INF or _pose_dt <= 0.0: _centre_s = centre
+	else: _centre_s = _centre_s.lerp(centre, 1.0 - exp(-_pose_dt * 7.0))
+	var off := Transform3D(Basis(), -_centre_s)
+	for c in 3:
+		_panels[c][0].transform = off * xs[c]
+		_panels[c][0].set_instance_shader_parameter("pillow", 0.0)
+	# the camera eases from fitting the shut leaflet to fitting it open
+	var open_k := clampf((o0 + o2) * 0.5, 0.0, 1.0)
+	_cam.position.z = lerpf(_cam_fold, _cam_open, open_k)
+	var sw := 0.4 if live else 1.0
+	var sway := Vector2(sin(_idle * 0.9) * 0.012, sin(_idle * 0.7 + 1.0) * 0.015) * sw
+	var basis := Basis.from_euler(Vector3(lerpf(-0.9, -0.12 * sw, lift) + sway.x, lerpf(0.35, 0.0, lift) + sway.y, lerpf(-0.25, hold_roll * (1.0 - open_k), lift)))
+	_sheet.transform = Transform3D(basis, Vector3(0, lerpf(-0.75, -0.012, lift) * _cam.position.z / maxf(_cam_open, 0.01), 0))
 	(_dim.material as ShaderMaterial).set_shader_parameter("k", clampf(lift * 1.3, 0.0, 1.0) * dim)
 
 

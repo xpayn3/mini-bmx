@@ -207,7 +207,10 @@ func _pause() -> void:
 		pm.place = game.terrain.biome_name(game.phys.x, game.phys.z)
 		pm.sheet_no = GameState.seed
 	add_child(pm)
-	pm.close_requested.connect(func(): if state == PAUSED and pause_menu == pm: _resume())
+	pm.close_requested.connect(func():   # Esc / B: an open leaflet folds back to its cover first
+		if state != PAUSED or pause_menu != pm: return
+		if pm.is_unfolded(): pm.fold_inside()
+		else: _resume())
 	pm.add_item("Resume", _resume)
 	pm.add_item("Back to start", func(): _resume(); game.respawn(false))
 	pm.add_item("New world", func(): _resume(); game.respawn(true))
@@ -236,6 +239,10 @@ func _resume() -> void:
 
 func _open_settings() -> void:
 	if is_instance_valid(settings_open): return
+	if is_instance_valid(pause_menu) and pause_menu is PausePamphlet:   # printed inside the leaflet
+		settings_open = load("res://scripts/ui/settings_menu.gd").new()
+		pause_menu.open_inside(settings_open)
+		return
 	var dim := ColorRect.new()
 	dim.color = Color(0, 0, 0, 0.35)
 	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -258,6 +265,10 @@ func _close_controls() -> void:
 ## the Controls window (bindings + camera): its own screen, not part of Settings
 func _show_controls() -> void:
 	if is_instance_valid(controls_open) or is_instance_valid(settings_open): return
+	if is_instance_valid(pause_menu) and pause_menu is PausePamphlet:   # printed inside the leaflet
+		controls_open = load("res://scripts/ui/controls_menu.gd").new()
+		pause_menu.open_inside(controls_open)
+		return
 	var dim := ColorRect.new()
 	dim.color = Color(0, 0, 0, 0.35)
 	dim.set_anchors_preset(Control.PRESET_FULL_RECT)

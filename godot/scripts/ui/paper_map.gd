@@ -19,11 +19,11 @@ const IW := 2048                 # the frame page + the cover strip under it
 const IH := 1280
 const CW := 512
 const CH := 640
-const C_W := 1600.0              # the world print (m) and its pixels (2.56 px/m)
-const C_H := 1000.0
-const C_IW := 4096
-const C_IH := 2560
-const GRID := 5.0                # height samples (m)
+const C_W := 3200.0              # the world print (m) and its pixels (2 px/m): the whole area you can pan over,
+const C_H := 2000.0              # printed while the map unfolds
+const C_IW := 6400
+const C_IH := 4000
+const GRID := 10.0               # height samples (m)
 const CI := 5.0                  # contour interval (m)
 const TRAVEL := 320.0            # m/s across the world at zoom 1, stick fully over
 
@@ -49,6 +49,7 @@ func _ready() -> void:
 	sound_stream = load("res://assets/audio/map_unfold_gravel.ogg")   # the user's pick: gravel crunch for the unfold
 	sound_db = -4.0
 	tempo = 0.36                      # unfolds at an easy pace (~2 s), still springy
+	zoom_min = 0.25                   # zoomed right out: the whole printed area
 	handheld = true                   # right stick tilts it, triggers zoom the print, left stick travels
 	page_alpha = true                 # the frame is printed over the world
 	setup(Vector2i(IW, IH), Vector2i(CW, CH))
@@ -57,7 +58,7 @@ func _ready() -> void:
 	_frame.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	content.add_child(_frame)
 	_world_vp = SubViewport.new()
-	_world_vp.size = Vector2i(C_IW, C_IH)
+	_world_vp.size = Vector2i(2, 2)   # full size only while printing (a 100 MB render target)
 	_world_vp.disable_3d = true
 	_world_vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	add_child(_world_vp)
@@ -70,22 +71,26 @@ func _ready() -> void:
 		test_scroll = Vector2(float(sv[0]), float(sv[1]))
 
 
-## print what's needed, then unfold - centred on you
+## unfold at once, centred on you; the world is printed while it unfolds (the map face stays covered by the
+## folded-over bottom half until that flips down, and the flap waits for the print: hold_flap)
 func show_map() -> void:
 	if busy() or _printing: return
-	_printing = true
 	var here := Vector2(game.phys.x, game.phys.z)
 	view_c = here; _shown_c = here
-	var t0 := Time.get_ticks_usec()
-	if _world_seed != GameState.seed or not _view_inside(here, 1.0) or here.distance_to(_world_o + Vector2(C_W, C_H) * 0.5) > 60.0:
-		await _print_world(here, false)   # the ride is frozen: all at once
 	_frame.setup_from(game, 1.0)
 	await bake()
 	_frame_zoom = 1.0
-	_printing = false
-	print("PAPERMAP printed in %.0f ms" % ((Time.get_ticks_usec() - t0) / 1000.0))
+	var reprint := _world_seed != GameState.seed or here.distance_to(_world_o + Vector2(C_W, C_H) * 0.5) > 60.0
+	hold_flap = reprint
 	open()
-	if OS.get_environment("BMX_MAP_ZOOM") != "": _zoom_t = clampf(float(OS.get_environment("BMX_MAP_ZOOM")), ZOOM_MIN, ZOOM_MAX)
+	if reprint:
+		_printing = true
+		var t0 := Time.get_ticks_usec()
+		await _print_world(here)
+		_printing = false
+		hold_flap = false
+		print("PAPERMAP world printed in %.0f ms (while unfolding)" % ((Time.get_ticks_usec() - t0) / 1000.0))
+	if OS.get_environment("BMX_MAP_ZOOM") != "": _zoom_t = clampf(float(OS.get_environment("BMX_MAP_ZOOM")), zoom_min, ZOOM_MAX)
 	_update_rect()
 
 
@@ -97,27 +102,45 @@ var _task := -1
 func _print_world(centre: Vector2, sliced := true) -> void:
 	var t0 := Time.get_ticks_usec()
 	var o := centre - Vector2(C_W, C_H) * 0.5
-	var f = game.terrain.query_field()
+	var f = game.terrain.query_field()   # C#: batched rows (map_heights / map_colors); per-point C# calls from
+	# GDScript left C# objects behind that crashed the quit
 	var job := PrintJob.new()
 	job.o = o
 	job.nx = int(C_W / GRID) + 1; job.nz = int(C_H / GRID) + 1
 	job.cx = (job.nx + 1) / 2; job.cz = (job.nz + 1) / 2
 	job.h.resize(job.nx * job.nz)
 	job.c.resize(job.cx * job.cz)
-	var budget := 4000 if sliced else 1000000000
+	var budget := 10000 if sliced else 1000000000
+	_world_vp.size = Vector2i(C_IW, C_IH)
 	var s0 := Time.get_ticks_usec()
-	for j in job.nz:
-		var z := o.y + j * GRID
-		for i in job.nx:
-			job.h[j * job.nx + i] = f.ground(o.x + i * GRID, z)
+	var cs: bool = f.has_method("map_heights")
+	var j := 0
+	while j < job.nz:   # heights, a few rows per call / frame
+		var n := mini(8, job.nz - j)
+		if cs:
+			var rowsh: PackedFloat32Array = f.map_heights(o.x, o.y, GRID, job.nx, j, n)
+			for q in rowsh.size(): job.h[j * job.nx + q] = rowsh[q]
+		else:
+			for r in n:
+				for i in job.nx: job.h[(j + r) * job.nx + i] = f.ground(o.x + i * GRID, o.y + (j + r) * GRID)
+		j += n
 		if Time.get_ticks_usec() - s0 > budget:
 			await get_tree().process_frame
 			if not is_inside_tree(): return
 			s0 = Time.get_ticks_usec()
-	for j in job.cz:
-		for i in job.cx:
-			var hc := job.h[mini(j * 2, job.nz - 1) * job.nx + mini(i * 2, job.nx - 1)]
-			job.c[j * job.cx + i] = Color(0, 0, 0, 0) if hc < Terrain.WATER - 0.05 else f.color(o.x + i * 2 * GRID, o.y + j * 2 * GRID, hc, 1.0)
+	j = 0
+	while j < job.cz:   # ground colours every 2 GRID m
+		var n := mini(8, job.cz - j)
+		if cs:
+			var rowsc: PackedColorArray = f.map_colors(o.x, o.y, GRID * 2.0, job.cx, j, n, Terrain.WATER - 0.05)
+			for q in rowsc.size(): job.c[j * job.cx + q] = rowsc[q]
+		else:
+			for r in n:
+				for i in job.cx:
+					var x := o.x + i * 2 * GRID; var z := o.y + (j + r) * 2 * GRID
+					var hc: float = f.ground(x, z)
+					job.c[(j + r) * job.cx + i] = Color(0, 0, 0, 0) if hc < Terrain.WATER - 0.05 else f.color(x, z, hc, 1.0)
+		j += n
 		if Time.get_ticks_usec() - s0 > budget:
 			await get_tree().process_frame
 			if not is_inside_tree(): return
@@ -129,10 +152,16 @@ func _print_world(centre: Vector2, sliced := true) -> void:
 	_task = -1
 	if not is_inside_tree(): return
 	_world.finish(game, o, job.out)
+	# the three one-frame steps (draw, read back, upload) wait until the unfolding paper is still, so their
+	# hitches don't show in the motion
+	while state == 1 and not accordion_calm():
+		await get_tree().process_frame
+	if not is_inside_tree(): return
 	_world_vp.render_target_update_mode = SubViewport.UPDATE_ONCE
 	await RenderingServer.frame_post_draw
 	var mj := MipJob.new()
 	mj.img = _world_vp.get_texture().get_image()
+	_world_vp.size = Vector2i(2, 2)
 	_task = WorkerThreadPool.add_task(mj.run)   # the slow part, off the main thread
 	while not WorkerThreadPool.is_task_completed(_task):
 		await get_tree().process_frame
@@ -187,11 +216,9 @@ func _rebake_frame() -> void:
 	_frame_busy = false
 
 
-## where the world print sits on the sheet. The view never runs past the print (no catching up = no jump);
-## coming within PREFETCH of its edge prints the next one around the view early, and they swap seamlessly.
-const PREFETCH := 200.0
+## where the world print sits on the sheet; the view pans freely inside it and stops at its edge
 func _update_rect() -> void:
-	if _world_o.x == INF: return
+	if _world_o.x == INF or _printing: return   # (printing: the old print is under the flap; don't clamp to it)
 	var half := Vector2(SHEET_W_M, SHEET_H_M) / _zoom * 0.5
 	var lo := _world_o + half
 	var hi := _world_o + Vector2(C_W, C_H) - half
@@ -199,10 +226,6 @@ func _update_rect() -> void:
 	if lo.x > hi.x: view_c.x = _world_o.x + C_W * 0.5
 	if lo.y > hi.y: view_c.y = _world_o.y + C_H * 0.5
 	_shown_c = view_c
-	var room := minf(minf(view_c.x - lo.x, hi.x - view_c.x), minf(view_c.y - lo.y, hi.y - view_c.y))
-	var centred := view_c.distance_to(_world_o + Vector2(C_W, C_H) * 0.5) < 20.0
-	if room < PREFETCH and not centred and not _printing and state != 3:
-		_reprint_world(view_c)
 	var tl := _shown_c - half
 	set_content_rect(Rect2((tl - _world_o) / Vector2(C_W, C_H), half * 2.0 / Vector2(C_W, C_H)))
 
@@ -210,12 +233,6 @@ func _update_rect() -> void:
 func _exit_tree() -> void:
 	if _probe_max > 0.0: print("PAPERMAP worst frame while travelling %.0f ms" % _probe_max)
 	if _task >= 0: WorkerThreadPool.wait_for_task_completion(_task)   # never leave a task running at exit
-
-
-func _reprint_world(c: Vector2) -> void:
-	_printing = true
-	await _print_world(c)
-	_printing = false
 
 
 class PrintJob extends RefCounted:
@@ -230,8 +247,7 @@ class PrintJob extends RefCounted:
 class MipJob extends RefCounted:
 	var img: Image
 	func run() -> void:
-		img.convert(Image.FORMAT_RGB8)
-		img.generate_mipmaps()
+		img.generate_mipmaps()   # (kept RGBA8, as read back: an RGB8 upload got converted again)
 
 
 class Ink extends Control:
@@ -356,7 +372,7 @@ class Frame extends Ink:
 	func _scale_bar(p: Vector2) -> void:
 		var k := IW * zoom / SHEET_W_M   # page px per metre
 		var step := 100.0
-		for s in [10.0, 20.0, 25.0, 50.0, 100.0, 200.0, 250.0, 500.0]:   # 3 blocks of ~230 px
+		for s in [10.0, 20.0, 25.0, 50.0, 100.0, 200.0, 250.0, 500.0, 1000.0]:   # 3 blocks of ~230 px
 			if absf(s * k - 230.0) < absf(step * k - 230.0): step = s
 		var bw := step * k
 		_box(Rect2(p - Vector2(20, 44), Vector2(3 * bw + 100, 80)))

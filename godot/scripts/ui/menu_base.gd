@@ -8,12 +8,24 @@ signal closed
 const INK := UITheme.L_INK
 const MUTED := UITheme.L_MUTED
 
+## paper = true: printed on a sheet (the pause leaflet's inside): no card, the paper theme, it fills
+## paper_size (set both before adding it)
+var paper := false
+var paper_size := Vector2.ZERO
+
 func _title() -> String: return ""
 func _pages() -> Array: return []   # ScrollContainers from _page()
 
 func _ready() -> void:
-	theme = UITheme.light_theme()
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	if paper:
+		theme = UITheme.paper_theme()
+		add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+		size = paper_size
+		custom_minimum_size = paper_size
+		_build(0)
+		return
+	theme = UITheme.light_theme()
 	var vp := get_viewport_rect().size
 	custom_minimum_size = Vector2(minf(880.0, vp.x - 60.0), minf(660.0, vp.y - 60.0))
 	var st := UITheme.box(Color.WHITE, 22, 22, INK, 3)
@@ -26,7 +38,9 @@ func _ready() -> void:
 
 ## (Re)build the contents in place. The node itself is never replaced: whoever opened it keeps
 ## its connection to `closed`.
+var _tab_wanted := 0
 func _build(tab: int) -> void:
+	_tab_wanted = tab
 	for c in get_children():
 		remove_child(c); c.queue_free()
 	var vb := VBoxContainer.new()
@@ -35,7 +49,7 @@ func _build(tab: int) -> void:
 	var head := HBoxContainer.new()
 	head.add_theme_constant_override("separation", 12)
 	var slab := ColorRect.new()
-	slab.color = UITheme.ACCENT
+	slab.color = UITheme.P_RED if paper else UITheme.ACCENT
 	slab.custom_minimum_size = Vector2(10, 36)
 	slab.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	head.add_child(slab)
@@ -46,8 +60,13 @@ func _build(tab: int) -> void:
 	title.add_theme_font_override("font", slant)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(title)
-	var done := UITheme.button("Done", _close, 17)
+	var done := UITheme.button("Fold up" if paper else "Done", _close, 17)
 	done.custom_minimum_size = Vector2(110, 44)
+	if paper:   # printed: the theme's stamped button
+		head.add_child(done)
+		vb.add_child(head)
+		_after_head(vb)
+		return
 	done.add_theme_stylebox_override("normal", UITheme.box(INK, 12, 18))
 	done.add_theme_stylebox_override("hover", UITheme.box(Color("2d3647"), 12, 18))
 	done.add_theme_stylebox_override("pressed", UITheme.box(UITheme.ACCENT, 12, 18, INK, 2))
@@ -57,9 +76,13 @@ func _build(tab: int) -> void:
 	done.add_theme_color_override("font_focus_color", Color.WHITE)
 	head.add_child(done)
 	vb.add_child(head)
+	_after_head(vb)
+
+
+func _after_head(vb: VBoxContainer) -> void:
 	var bar := ColorRect.new()
-	bar.color = UITheme.ACCENT
-	bar.custom_minimum_size.y = 4
+	bar.color = UITheme.P_RED if paper else UITheme.ACCENT
+	bar.custom_minimum_size.y = 3 if paper else 4
 	vb.add_child(bar)
 	var tabs := TabContainer.new()
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -67,7 +90,7 @@ func _build(tab: int) -> void:
 	for page in _pages():
 		tabs.add_child(page.get_parent())   # the page's ScrollContainer
 	tabs.get_tab_bar().add_theme_constant_override("h_separation", 6)
-	tabs.current_tab = tab
+	tabs.current_tab = _tab_wanted
 
 func _close() -> void:
 	closed.emit()

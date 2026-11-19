@@ -38,9 +38,10 @@ func _fill_bindings() -> void:
 		l.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		grid.add_child(l)
 		for pad in [false, true]:
-			var b := Button.new()
-			b.text = Settings.binding_text(action, pad)
-			b.custom_minimum_size = Vector2(160, 34)
+			var b := GlyphButton.new()
+			b.action = action; b.pad = pad
+			b.tooltip_text = Settings.binding_text(action, pad)
+			b.custom_minimum_size = Vector2(160, 38)
 			b.add_theme_font_size_override("font_size", 14)
 			b.pressed.connect(_start_rebind.bind(action, pad, b))
 			grid.add_child(b)
@@ -55,14 +56,14 @@ func _fill_bindings() -> void:
 
 func _start_rebind(action: String, pad: bool, b: Button) -> void:
 	if _wait_btn and is_instance_valid(_wait_btn) and _wait_action != "":
-		_wait_btn.text = Settings.binding_text(_wait_action, _wait_pad)
+		_wait_btn.text = ""; _wait_btn.queue_redraw()
 	_wait_action = action; _wait_pad = pad; _wait_btn = b
-	b.text = "press…"
+	b.text = "press…"; b.queue_redraw()
 
 func _input(e: InputEvent) -> void:
 	if _wait_action == "": return
 	if e is InputEventKey and e.pressed and e.physical_keycode == KEY_ESCAPE and not _wait_pad:
-		_wait_btn.text = Settings.binding_text(_wait_action, _wait_pad); _wait_action = ""
+		_wait_btn.text = ""; _wait_btn.queue_redraw(); _wait_action = ""
 		get_viewport().set_input_as_handled(); return
 	var ok := false
 	if not _wait_pad and e is InputEventKey and e.pressed:
@@ -117,3 +118,18 @@ func _reset_camera() -> void:
 	Settings.apply()
 	Settings.save()
 	_reopen(1)   # rebuilt so the sliders show the defaults
+
+
+## a binding button: shows the key / pad button as its icon (PadGlyph); "press…" while waiting for a new one
+class GlyphButton extends Button:
+	var action := ""
+	var pad := false
+	func _draw() -> void:
+		if text != "": return
+		var g := PadGlyph.glyph_for(action, pad)
+		if g == "?":
+			var f := get_theme_font("font")
+			draw_string(f, Vector2(0, size.y * 0.5 + 5), "—", HORIZONTAL_ALIGNMENT_CENTER, size.x, 14, Color(0, 0, 0, 0.4))
+			return
+		PadGlyph.draw(self, g, size * 0.5, minf(26.0, size.y - 8.0))
+

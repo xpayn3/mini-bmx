@@ -1007,32 +1007,31 @@ class GetUpPrompt extends Control:
 			var tw0 := f.get_string_size(tl, HORIZONTAL_ALIGNMENT_LEFT, -1, 26).x
 			draw_string(f, Vector2((size.x - tw0) * 0.5 + 2, y - 22), tl, HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color(0, 0, 0, 0.5))
 			draw_string(f, Vector2((size.x - tw0) * 0.5, y - 24), tl, HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color(1, 0.3 * p, 0.28 * p))
-		var glyph := Settings.pad_active and key in ["A", "B", "X", "Y"]
-		if glyph:   # an Xbox face button: "HOLD (A) TO GET UP" with the button drawn in its colour
-			var l1 := "HOLD  "
-			var l2 := "  TO " + act
-			var w1 := f.get_string_size(l1, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-			var w2 := f.get_string_size(l2, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-			var x0 := (size.x - (w1 + 24 + w2)) * 0.5
-			for sh in [Vector2(1, 1), Vector2.ZERO]:
-				var c := Color(0, 0, 0, 0.45) if sh != Vector2.ZERO else Color.WHITE
-				draw_string(f, Vector2(x0, y) + sh, l1, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, c)
-				draw_string(f, Vector2(x0 + w1 + 24, y) + sh, l2, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, c)
-			var gc := Vector2(x0 + w1 + 12, y - 6)
-			draw_circle(gc, 12, Color(0, 0, 0, 0.55))
-			draw_circle(gc, 10.5, PadMap.FACE[["A", "B", "X", "Y"].find(key)])
-			draw_string(f, gc + Vector2(-12, 5.5), key, HORIZONTAL_ALIGNMENT_CENTER, 24, 15, Color.WHITE)
-		else:
-			var line := "HOLD  %s  TO %s" % [key.to_upper(), act]
-			var tw := f.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-			draw_string(f, Vector2((size.x - tw) * 0.5 + 1, y + 1), line, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0, 0, 0, 0.45))   # soft shadow
-			draw_string(f, Vector2((size.x - tw) * 0.5, y), line, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color.WHITE)
+		# "HOLD [button] TO GET UP": the button / key drawn as its icon (PadGlyph)
+		var g := PadGlyph.glyph_for("hop")
+		var gh := 30.0
+		var gw := PadGlyph.width(g, gh)
+		var l1 := "HOLD"
+		var l2 := "TO " + act
+		var w1 := f.get_string_size(l1, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		var w2 := f.get_string_size(l2, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		var x0 := (size.x - (w1 + 12 + gw + 12 + w2)) * 0.5
+		for sh in [Vector2(1, 1), Vector2.ZERO]:
+			var c := Color(0, 0, 0, 0.45) if sh != Vector2.ZERO else Color.WHITE
+			draw_string(f, Vector2(x0, y) + sh, l1, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, c)
+			draw_string(f, Vector2(x0 + w1 + 24 + gw, y) + sh, l2, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, c)
+		PadGlyph.draw(self, g, Vector2(x0 + w1 + 12 + gw * 0.5, y - 6), gh)
 		var bar := Rect2((size.x - 240) * 0.5, y + 14, 240, 5)
 		draw_rect(bar, Color(0, 0, 0, 0.45))
 		if k > 0.0: draw_rect(Rect2(bar.position, Vector2(bar.size.x * k, bar.size.y)), Color("5dff8a") if ko else Color.WHITE)
 		if ko:   # the other way out: back to the start with full life
-			var l3 := "%s  BACK TO START" % Settings.prompt("respawn").to_upper()
-			draw_string(f, Vector2(0, y + 38), l3, HORIZONTAL_ALIGNMENT_CENTER, size.x, 13, Color(1, 1, 1, 0.6))
+			var g3 := PadGlyph.glyph_for("respawn")
+			var l3 := "BACK TO START"
+			var w3 := f.get_string_size(l3, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
+			var g3w := PadGlyph.width(g3, 20.0)
+			var x3 := (size.x - (g3w + 8 + w3)) * 0.5
+			PadGlyph.draw(self, g3, Vector2(x3 + g3w * 0.5, y + 34), 20.0, 0.8)
+			draw_string(f, Vector2(x3 + g3w + 8, y + 39), l3, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1, 1, 1, 0.6))
 
 class FlowLeds extends RefCounted:
 	## flow on the bike computer's LEDs, kept like real hardware (Wahoo-style): small pinhole LEDs in a
