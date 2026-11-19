@@ -126,6 +126,12 @@ func _unhandled_input(e: InputEvent) -> void:
 	elif e.is_action_pressed("cam_left") and e is InputEventKey: orbit_t -= PI / 4; pan_t = t
 	elif e.is_action_pressed("cam_right") and e is InputEventKey: orbit_t += PI / 4; pan_t = t
 
+const CRASH_ZOOM := 0.45     # how much closer the camera gets to a crashed rider (fraction of the distance)
+const CRASH_ZOOM_T := 3.5    # real seconds the zoom-in takes
+var crash_cam_t := 0.0       # real seconds since the crash began
+var _crash_probe := OS.get_environment("BMX_CRASHCAM") != ""
+var crash_zoom := 0.0       # the current zoom-in on a crashed rider (0 = normal distance)
+
 func update_cam(dt: float) -> void:
 	t += dt
 	var st: BikePhysics = game.phys
@@ -159,7 +165,7 @@ func update_cam(dt: float) -> void:
 	var drawn: Vector3 = game.drawn_pos
 	var want: Vector3
 	if st.crash_on and game.ragdoll:
-		want = (game.ragdoll.p[Ragdoll.PELVIS] as Vector3).lerp(Vector3(st.x, st.y, st.z), 0.3) + Vector3(0, 0.3, 0)
+		want = (game.ragdoll.p[Ragdoll.PELVIS] as Vector3) + Vector3(0, 0.3, 0)   # the body itself (the bike slides off on its own)
 	elif P.get("ahead", false):
 		# aim a few metres up the trail (more at speed): the rider sits in the lower part of the frame
 		_look_dir(st, f, dt)   # steers cam_yaw toward the trail ahead (below)
@@ -179,12 +185,22 @@ func update_cam(dt: float) -> void:
 	else:
 		var k := 0.05 if P.get("mode", "") == "trackside" else (0.1 if P.get("drift", false) else 0.25)
 		want = Vector3(drawn.x, drawn.y + 0.5, drawn.z) + f * clampf(st.v, -1, 10) * k
-	target = target.lerp(want, minf(1.0, dt * (7.0 if P.get("drift", false) else P.get("lag", 5.0))))
+	# a crash: the view locks onto the ragdoll at once (real time: the slow motion shrinks dt ~5x), then
+	# slowly closes in on the body
+	var crashed: bool = st.crash_on and game.ragdoll != null
+	var rdt: float = dt / clampf(Engine.time_scale, 0.1, 1.0)
+	if crashed:
+		crash_cam_t += rdt
+		crash_zoom = CRASH_ZOOM * smoothstep(0.0, CRASH_ZOOM_T, crash_cam_t)
+	else:   # up again / reset: ease back out to the normal distance
+		crash_cam_t = 0.0
+		crash_zoom += (0.0 - crash_zoom) * minf(1.0, rdt * 2.5)
+	target = target.lerp(want, minf(1.0, (rdt * 18.0) if crashed else dt * (7.0 if P.get("drift", false) else P.get("lag", 5.0))))
 	if P.get("ahead", false) and not (st.crash_on and game.ragdoll):
 		# placed behind the RIDER (not behind the look point, which runs up to 14 m ahead)
 		anchor = anchor.lerp(Vector3(drawn.x, drawn.y + 1.0, drawn.z), minf(1.0, dt * 12.0)) if pos_init else Vector3(drawn.x, drawn.y + 1.0, drawn.z)
 	elif P.get("ahead", false):
-		anchor = anchor.lerp(target, minf(1.0, dt * 5.0))   # crash: glide over to the rider, no jump
+		anchor = anchor.lerp(target, minf(1.0, rdt * 12.0))   # crash: straight over to the ragdoll
 	else:
 		anchor = target
 	var fov_t: float = P.fov
@@ -227,6 +243,7 @@ func update_cam(dt: float) -> void:
 		var dist0 := dist
 		# speed: in closer while the FOV widens (the rider stays the same size, the world rushes past)
 		dist = dist0 * float(Settings.get_v("cam_dist")) * (1.0 - 0.2 * speed_feel)   # the zoom the user set × the Settings distance
+		dist *= 1.0 - crash_zoom   # crashed: slowly zooming in on the body (eases back out after a reset)
 		if P.get("drift", false):
 			yaw += sin(t * 0.13) * 0.3; pit += sin(t * 0.09) * 4
 		var back := Vector3(cos(yaw), 0, -sin(yaw))
@@ -256,6 +273,9 @@ func update_cam(dt: float) -> void:
 			global_position.y = gh
 			if P.get("drift", false) or P.get("ahead", false): pos_s.y = maxf(pos_s.y, gh - anchor.y); pos_v.y = maxf(pos_v.y, 0.0)
 		dist = dist0
+	if crashed and _crash_probe and int(crash_cam_t * 4.0) != int((crash_cam_t - rdt) * 4.0):   # BMX_CRASHCAM tests
+		var pv: Vector3 = game.ragdoll.p[Ragdoll.PELVIS]
+		print("CRASHCAM t=%.2f aim_to_pelvis=%.2f cam_to_pelvis=%.2f zoom=%.2f" % [crash_cam_t, target.distance_to(pv), global_position.distance_to(pv), crash_zoom])
 	cam_fov += (fov_t - cam_fov) * minf(1.0, dt * (6.0 if P.get("mode", "") == "trackside" else 3.0))
 	fov = clampf(cam_fov * (1.0 + fov_boost * float(Settings.get_v("cam_speed_fov")) / 34.0) + float(Settings.get_v("fov")), 5, 110)
 	var sk: float = st.shake * float(Settings.get_v("cam_shake"))
