@@ -783,6 +783,10 @@ func _unhandled_input(e: InputEvent) -> void:
 		flash("Ride log saved (last 60 s)" if lp != "" else "Couldn't save the ride log")
 		if lp != "": print("RIDELOG ", lp)
 		return
+	if e.is_action_pressed("debug_draw") and not e.is_echo():
+		if DebugOverlay.available(): flash("Physics overlay " + ("on" if DebugOverlay.toggle() else "off"))
+		else: flash("Debug Draw 3D addon not loaded")
+		return
 	if photo: return
 	if e.is_action_pressed("new_world") and not e.is_echo(): respawn(true)
 	elif e.is_action_pressed("respawn") and not e.is_echo(): respawn(false)
@@ -818,6 +822,18 @@ func _read_input() -> Dictionary:
 	# the rider's body (gamepad right stick, numpad on keys): round stick gate -> square, so diagonals reach full
 	var bf := Input.get_action_strength("body_fwd") - Input.get_action_strength("body_back")
 	var bl := Input.get_action_strength("body_left") - Input.get_action_strength("body_right")
+	# a thumb is never exactly on an axis: a side lean always carries a little fore / aft and the other way
+	# round. Near an axis the other one is faded out (side lean within ~15 deg of sideways = no fore / aft,
+	# full again by ~35 deg), so leaning into a turn can't pull a manual or a tuck by accident; plus a small
+	# round deadzone for a worn stick
+	var mag := Vector2(bf, bl).length()
+	if mag < 0.1:
+		bf = 0.0; bl = 0.0
+	else:
+		var ang := atan2(absf(bf), absf(bl))   # 0 = pure side, PI/2 = pure fore / aft
+		var k := (mag - 0.1) / 0.9 / mag
+		bf *= k * BikePhysics.smooth01((ang - deg_to_rad(15.0)) / deg_to_rad(20.0))
+		bl *= k * BikePhysics.smooth01((PI / 2 - ang - deg_to_rad(15.0)) / deg_to_rad(20.0))
 	var bm := maxf(absf(bf), absf(bl))
 	if bm > 0.01:
 		var sq := minf(Vector2(bf, bl).length() / bm, 1.4142)
@@ -995,6 +1011,7 @@ func _process(dt: float) -> void:
 	var dab_lean := -dab_side * DAB_LEAN * dab_k   # bike_lean > 0 tips the top to the rider's left
 	rig.pose(drawn_pos.x, y_draw + (1.5 if OS.get_environment("BMX_PITCH_POSE") != "" else 0.0), drawn_pos.z, hd, p_draw, st.hop_nose, st.bike_lean + st.rock + wobble + dab_lean,
 		st.steer + st.bar_catch - wobble * 1.5, st.wheel_f, st.wheel_r, st.crank)
+	DebugOverlay.draw(self, st, drawn_pos, hd)
 	# the physics' tyres are soft and follow the smooth height field; the drawn ground is a triangle mesh
 	# (higher in hollows) with rocks and decks on it. Lift / tilt the drawn bike so no tyre is ever inside it
 	if OS.get_environment("BMX_NOUNCLIP") == "":

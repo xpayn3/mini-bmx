@@ -372,6 +372,29 @@ func _autotest(seconds: float) -> void:
 				if on and OS.get_environment("BMX_BODY_PRINT") != "":
 					print("AIRSTICK t=%.2f stick=(%.2f,%.2f) pitch=%.2f g=%.2f bike_lean=%.2f air_tilt=%.2f" % [el, ph2.air_stick.x, ph2.air_stick.y, ph2.pitch, ph2._g_pitch, ph2.bike_lean, ph2.air_tilt])
 			elif body_t == "lean": Input.action_press("body_left", 1.0)
+			elif body_t == "both":   # both sticks: the right stick leans the way the left stick steers (+ hand wobble)
+				var s_l := Input.get_action_strength("steer_left") - Input.get_action_strength("steer_right")
+				var bl := clampf(s_l * 1.2 + sin(el * 7.3) * 0.12, -1.0, 1.0)
+				Input.action_press("body_left", bl) if bl > 0.0 else Input.action_release("body_left")
+				Input.action_press("body_right", -bl) if bl < 0.0 else Input.action_release("body_right")
+			elif body_t == "thumb":   # a real thumb on the right stick, leaning with the steer: never on the axis
+				# (+-0.35 fore / aft drift), re-grips (a jump to a new spot every ~0.4 s), small tremor
+				var s_l2 := Input.get_action_strength("steer_left") - Input.get_action_strength("steer_right")
+				var seg := floori(el / 0.4)
+				var rr := RandomNumberGenerator.new(); rr.seed = seg * 7919 + 13
+				var sx := clampf(s_l2 * rr.randf_range(0.7, 1.3) + rr.randf_range(-0.25, 0.25) + sin(el * 23.0) * 0.05, -1.0, 1.0)
+				var sy := rr.randf_range(-0.35, 0.35) + sin(el * 19.0) * 0.04
+				Input.action_press("body_left", sx) if sx > 0.0 else Input.action_release("body_left")
+				Input.action_press("body_right", -sx) if sx < 0.0 else Input.action_release("body_right")
+				Input.action_press("body_fwd", sy) if sy > 0.0 else Input.action_release("body_fwd")
+				Input.action_press("body_back", -sy) if sy < 0.0 else Input.action_release("body_back")
+				var ph3: BikePhysics = game.phys
+				if not ph3.air and not ph3.crash_on:
+					_probe.thumb_n = int(_probe.get("thumb_n", 0)) + 1
+					if ph3.manual_up > 0.05 or ph3.wheelie_up > 0.05: _probe.thumb_manual = int(_probe.get("thumb_manual", 0)) + 1
+					if absf(ph3.flick_kick) > 0.01: _probe.thumb_kick = int(_probe.get("thumb_kick", 0)) + 1
+					var dp: float = absf(ph3.body_in_s - float(_probe.get("thumb_bs", 0.0)))
+					_probe.thumb_bs = ph3.body_in_s; _probe.thumb_bsj = float(_probe.get("thumb_bsj", 0.0)) + dp
 			elif body_t == "flick":
 				var side := int(el * 1.5) % 2 == 0
 				Input.action_press("body_left", 1.0) if side else Input.action_release("body_left")
