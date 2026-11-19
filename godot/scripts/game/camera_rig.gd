@@ -3,20 +3,24 @@ extends Camera3D
 ## Port of updateCamera() + the camera presets from src/main.js: diorama / chase / side / drone /
 ## trackside... Orbit with Z / X or a mouse drag (or the right stick), zoom with the wheel or + / -.
 
+## C / pad Y cycle in this order (the most used first, so the default is never far away)
 const PRESETS := {
 	# default: high drone-like view a little off to the side, turning with the trail AHEAD (not the bike)
 	# and aiming past the rider so the rider sits low in the frame and you see what's coming
 	"trail":     {"label": "Trail",      "dist": 10.5, "pitch": 18.0, "follow": true,  "fov": 52.0, "orbit": 0.2, "rate": 2.6, "ahead": true, "occ_max": 16.0},
-	"diorama":   {"label": "Diorama",    "dist": 38.0, "pitch": 46.0, "follow": true,  "fov": 30.0},
-	"close":     {"label": "Close",      "dist": 16.0, "pitch": 40.0, "follow": true,  "fov": 30.0},
+	# POV from the action cam on top of the helmet (Rider.action_cam): wide lens, lightly stabilised
+	"helmet":    {"label": "Helmet",  "mode": "helmet", "fov": 88.0},
 	"chase":     {"label": "Chase",      "dist": 7.0,  "pitch": 16.0, "follow": true,  "fov": 42.0, "rate": 3.2},
+	# a camera drone: slow + floaty, banks into turns, pitches with speed, hovers in the wind, OSD overlay
+	"drone":     {"label": "Drone",      "dist": 22.0, "pitch": 36.0, "follow": true,  "fov": 34.0, "rate": 0.55, "lag": 1.4, "drift": true, "drone": true},
 	"side":      {"label": "Side",       "dist": 14.0, "pitch": 10.0, "follow": true,  "fov": 28.0, "orbit": PI / 2, "rate": 2.5},
+	"dolly":     {"label": "Low dolly",  "dist": 5.0,  "pitch": 5.0,  "follow": true,  "fov": 24.0, "orbit": PI * 0.42, "rate": 2.8},
+	"close":     {"label": "Close",      "dist": 16.0, "pitch": 40.0, "follow": true,  "fov": 30.0},
+	"diorama":   {"label": "Diorama",    "dist": 38.0, "pitch": 46.0, "follow": true,  "fov": 30.0},
+	"trackside": {"label": "Trackside",  "mode": "trackside", "fov": 14.0},
+	"orbitcam":  {"label": "Slow orbit", "dist": 12.0, "pitch": 20.0, "follow": true,  "fov": 32.0, "spin": 0.2},
 	"iso":       {"label": "Isometric",  "dist": 34.0, "pitch": 35.0, "follow": false, "fov": 28.0, "orbit": PI / 4},
 	"top":       {"label": "Top-down",   "dist": 34.0, "pitch": 84.0, "follow": false, "fov": 30.0},
-	"orbitcam":  {"label": "Slow orbit", "dist": 12.0, "pitch": 20.0, "follow": true,  "fov": 32.0, "spin": 0.2},
-	"drone":     {"label": "Drone",      "dist": 22.0, "pitch": 36.0, "follow": true,  "fov": 34.0, "rate": 0.55, "lag": 1.4, "drift": true},
-	"trackside": {"label": "Trackside",  "mode": "trackside", "fov": 14.0},
-	"dolly":     {"label": "Low dolly",  "dist": 5.0,  "pitch": 5.0,  "follow": true,  "fov": 24.0, "orbit": PI * 0.42, "rate": 2.8},
 }
 ## title screen only (not in the C cycle): behind and above the rider, looking out over the landscape
 const VISTA := {"label": "Lookout", "mode": "vista", "fov": 42.0, "back": 19.0, "up": 5.0, "side": -4.4, "look": 160.0, "drop": 0.128}
@@ -49,11 +53,28 @@ var speed_feel := 0.0  # 0..1 how fast it feels (game.gd): the camera pulls in (
 var bank_s := 0.0
 var pan_t := -100.0    # when the user last turned the camera (drag, Z / X, stick): re-centre waits for it
 var follow_k := 1.0    # Settings "cam_follow": how quickly the camera turns after the rider
+# drone feel: the airframe's own velocity / tilt (bank into turns, nose down with speed), wind noise
+var dr_prev := Vector3.ZERO
+var dr_vel := Vector3.ZERO
+var dr_acc := Vector3.ZERO
+var dr_roll := 0.0
+var dr_tilt := 0.0
+var dr_init := false
+var osd: Control = null      # drone OSD overlay (DroneOSD), shown only in the Drone view
+var helm_basis := Basis()    # Helmet cam: lightly stabilised orientation
+var helm_init := false
 
 func _ready() -> void:
 	near = 0.1
 	far = 400.0
 	fov = cam_fov
+	var layer := CanvasLayer.new()
+	layer.layer = 5
+	add_child(layer)
+	osd = DroneOSD.new()
+	osd.rig = self
+	osd.visible = false
+	layer.add_child(osd)
 
 func preset() -> Dictionary:
 	return VISTA if mode == "vista" else PRESETS[mode]
@@ -66,6 +87,10 @@ func set_mode(m: String) -> void:
 	var P: Dictionary = PRESETS[m]
 	mode = m
 	track_pos = null
+	dr_init = false; helm_init = false
+	if P.get("mode", "") == "helmet":   # crashed: the chase view takes over (PRESETS.chase), ready here
+		dist = PRESETS.chase.dist; cam_pitch_t = PRESETS.chase.pitch; orbit_t = 0.0; orbit = 0.0
+		return
 	if P.get("mode", "") != "trackside":
 		dist = P.dist; cam_pitch_t = P.pitch
 		orbit_t = P.get("orbit", 0.0); orbit = orbit_t
@@ -76,7 +101,7 @@ func next_mode() -> String:
 	var ks := PRESETS.keys()
 	if not PRESETS.has(mode): mode = ks[ks.size() - 1]
 	set_mode(ks[(ks.find(mode) + 1) % ks.size()])
-	return PRESETS[mode].label
+	return PRESETS[mode].label + (" (default)" if mode == "trail" else "")
 
 func snap_to(p: Vector3) -> void:
 	target = p; anchor = p
@@ -102,10 +127,17 @@ func update_cam(dt: float) -> void:
 	t += dt
 	var st: BikePhysics = game.phys
 	var P: Dictionary = preset()
+	if osd:
+		osd.visible = P.get("drone", false) and game.hud != null and game.hud.visible
 	if P.get("mode", "") == "vista":
 		RenderingServer.global_shader_parameter_set("cam_see", Vector4.ZERO)
 		_vista(dt, P)
 		return
+	if P.get("mode", "") == "helmet":
+		if not (st.crash_on and game.ragdoll) and _helmet(dt, P):
+			return
+		P = PRESETS.chase   # crashed (or no rider yet): watch from behind
+		helm_init = false
 	# analog camera from the rebindable cam_* actions (the gamepad right stick moves the rider's body now)
 	var ax := Input.get_axis("cam_left", "cam_right") if Input.get_connected_joypads().size() > 0 else 0.0
 	var ay := Input.get_axis("cam_up", "cam_down") if Input.get_connected_joypads().size() > 0 else 0.0
@@ -238,10 +270,71 @@ func update_cam(dt: float) -> void:
 		# bank into the turn a little with speed (the horizon tips the way the rider leans)
 		bank_s += (-st.bike_lean * 0.13 * speed_feel - bank_s) * minf(1.0, dt * 3.0)
 		rotate_object_local(Vector3.BACK, bank_s)
+	if P.get("drone", false):
+		_drone_feel(dt)
 	# trees / rocks between the camera and the rider dissolve (deco.gdshader)
 	var see: Vector3 = target if (st.crash_on and game.ragdoll) else drawn + Vector3(0, 0.9, 0)
 	RenderingServer.global_shader_parameter_set("cam_see", Vector4(see.x, see.y, see.z, 1.0 if bool(Settings.get_v("cam_fade")) else 0.0))
 	RenderingServer.global_shader_parameter_set("cam_eye", Vector4(global_position.x, global_position.y, global_position.z, 0.0))
+
+## Drone: the camera hangs under a quadcopter. It hovers (slow bob + gusts), the airframe banks into
+## its sideways acceleration and noses down as it speeds up; the gimbal only half cancels that, so the
+## horizon leans in turns and the view dips on a chase. A little prop buzz on top.
+func _drone_feel(dt: float) -> void:
+	var p := global_position
+	if not dr_init or dt <= 0.0:
+		dr_prev = p; dr_vel = Vector3.ZERO; dr_acc = Vector3.ZERO; dr_roll = 0.0; dr_tilt = 0.0; dr_init = true
+		return
+	var v := (p - dr_prev) / dt
+	dr_prev = p
+	dr_acc = dr_acc.lerp((v - dr_vel) / dt, minf(1.0, dt * 3.0))
+	dr_vel = dr_vel.lerp(v, minf(1.0, dt * 6.0))
+	var right := global_basis.x
+	var fwd := -global_basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized() if fwd.length_squared() > 1e-4 else Vector3.FORWARD
+	# bank: roll toward the sideways acceleration (+ a little toward the sideways speed), capped ~14°
+	var lat := dr_acc.dot(right) * 0.022 + dr_vel.dot(right) * 0.006
+	dr_roll += (clampf(lat, -0.25, 0.25) - dr_roll) * minf(1.0, dt * 2.5)
+	# nose: down when speeding up / flying forward, up when braking
+	var lon := dr_acc.dot(fwd) * 0.010 + dr_vel.dot(fwd) * 0.004
+	dr_tilt += (clampf(lon, -0.12, 0.12) - dr_tilt) * minf(1.0, dt * 2.0)
+	# hover: slow bob + wind gusts (sums of incommensurate sines = no visible loop)
+	var gust := sin(t * 0.37) * sin(t * 0.23 + 1.3)
+	global_position += Vector3(sin(t * 0.71) * 0.10 + gust * 0.18, sin(t * 0.9) * 0.12 + sin(t * 2.3) * 0.03, cos(t * 0.53) * 0.10)
+	# prop buzz: tiny fast jitter, more in gusts
+	var buzz := 0.0015 + absf(gust) * 0.002
+	var jr := sin(t * 23.0) * buzz + sin(t * 31.7 + 2.0) * buzz * 0.6
+	var jp := sin(t * 19.3 + 1.0) * buzz + sin(t * 27.1) * buzz * 0.5
+	rotate_object_local(Vector3.FORWARD, dr_roll * 0.55 + gust * 0.03 + jr)
+	rotate_object_local(Vector3.RIGHT, -dr_tilt * 0.5 + jp)
+
+
+## Helmet cam: looks out of the action cam's lens on the rider's helmet, its orientation lightly
+## stabilised (the head's jolts are softened, not removed). false = no rider / cam yet (orbit instead).
+func _helmet(dt: float, P: Dictionary) -> bool:
+	var r = game.rider
+	if r == null or r.action_cam == null or not is_instance_valid(r.action_cam):
+		return false
+	var lens: Node3D = r.action_cam.get_node_or_null("Body/Lens")
+	if lens == null or not lens.is_inside_tree():
+		return false
+	var xf: Transform3D = lens.global_transform
+	# head space +X = forward; a camera looks down -Z: camera z = -X, y = Y, x = y × z = +Z
+	var b := Basis(xf.basis.z, xf.basis.y, -xf.basis.x).orthonormalized()
+	if not helm_init:
+		helm_basis = b; helm_init = true
+	else:
+		helm_basis = helm_basis.slerp(b, minf(1.0, dt * 14.0)).orthonormalized()
+	global_transform = Transform3D(helm_basis, xf.origin)
+	cam_fov += (float(P.fov) - cam_fov) * minf(1.0, dt * 3.0)
+	fov = clampf(cam_fov * (1.0 + fov_boost * float(Settings.get_v("cam_speed_fov")) / 68.0) + float(Settings.get_v("fov")), 5, 120)
+	var st: BikePhysics = game.phys
+	st.shake = maxf(0.0, st.shake - dt * 1.2)
+	RenderingServer.global_shader_parameter_set("cam_see", Vector4.ZERO)
+	RenderingServer.global_shader_parameter_set("cam_eye", Vector4(xf.origin.x, xf.origin.y, xf.origin.z, 0.0))
+	return true
+
 
 func _exit_tree() -> void:
 	RenderingServer.global_shader_parameter_set("cam_see", Vector4.ZERO)

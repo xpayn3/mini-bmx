@@ -520,7 +520,9 @@ func start_crash(reason: String) -> void:
 	# the body carries on with the bike's own motion (no extra pop up: it used to throw the body into the air)
 	var body_vel := f * phys.v + Vector3(0, minf(maxf(phys.vy, 0), 6.0 if phys.air else 0.3) + 0.2, 0)
 	var spin_v := f * (1.0 + absf(phys.v) * 0.08)   # the top of the body keeps going a little as the bike stops
+	var crash_v := body_vel.length()
 	phys.begin_crash()
+	_break_action_cam(body_vel)
 	# detach the rider into world space
 	rider.get_parent().remove_child(rider)
 	add_child(rider)
@@ -535,9 +537,24 @@ func start_crash(reason: String) -> void:
 	if cs != 2 and dust.sim == null: dust.cloud(Vector3(phys.x, phys.y, phys.z), f * phys.v * 0.3, ground_dust(phys.x, phys.z, cs), 3.2, 1.2)
 	if _wasted_on(): wasted.start(reason)
 	else: flash(reason)
-	if hud: hud.on_crash()
+	if hud: hud.on_crash(crash_v)
 	if audio: audio.crash()
 	Settings.rumble(1.0, 1.0, 0.45)
+
+## the helmet action cam snaps off its hinge and tumbles away (FlyingCam); a new one is on the helmet
+## after getting up. The old one lies where it landed until a respawn or FlyingCam.LIFE.
+var flying_cam: FlyingCam = null
+func _break_action_cam(body_vel: Vector3) -> void:
+	var r: Dictionary = rider.break_action_cam()
+	if r.is_empty(): return
+	if flying_cam and is_instance_valid(flying_cam): flying_cam.queue_free()
+	var xf: Transform3D = r.xform
+	var side := xf.basis.z.normalized()
+	var vel := body_vel * 1.05 + Vector3(0, 2.0 + randf() * 2.5, 0) + side * (randf() - 0.5) * 3.0
+	var spin := Vector3(randf() - 0.5, randf() - 0.5, randf() - 0.5).normalized() * (12.0 + randf() * 14.0)
+	flying_cam = FlyingCam.launch(self, r.body, xf, terrain, vel, spin)
+	if OS.get_environment("BMX_CAM_PROBE") != "" or OS.get_environment("BMX_GOPRO_PROBE") != "":
+		print("GOPRO off at %s v=%s" % [str(xf.origin), str(vel)])
 
 ## the crash slow-mo is on (Settings › Gameplay; autotests keep normal time unless BMX_WASTED=1)
 func _wasted_on() -> bool:
@@ -556,7 +573,10 @@ func get_up() -> void:
 		rig.lean_g.add_child(rider)
 	rider.transform = Transform3D.IDENTITY
 	rider.reset_pose()
+	rider.remount_action_cam()
+	if OS.get_environment("BMX_GOPRO_PROBE") != "": print("GOPRO remounted: ", rider.action_cam.get_node_or_null("Body") != null)
 	_snap_prev()
+	if hud: hud.on_get_up()
 
 func on_trick(trick: String) -> void:
 	if hud: hud.on_trick(trick)
@@ -647,7 +667,7 @@ func _crash_dust() -> void:
 				if OS.get_environment("BMX_SMOKE_PROBE") != "": print("CRASHDUST impact i=%d t=%.2f hit=%.1f" % [i, phys.crash_t, hit])
 				dust.sim.burst(at, Vector3(v.x * 0.25, 0.6 + k * 0.8, v.z * 0.25), 0.3 + k * 0.25, (50.0 + 110.0 * k) * amt * CRASH_DUST_BODY,
 					1.2 + k * 2.2, 0.08 + k * 0.05, ground_dust(pp.x, pp.z, s), 20.0)
-				dust.grit_burst(at, Vector3(v.x * 0.3, 0.8 + k * 1.6, v.z * 0.3), 1.0 + k * 2.5, 600.0 * k * amt * 0.2 * CRASH_DEBRIS, 0.06, ground_dust(pp.x, pp.z, s))
+				if OS.get_environment("BMX_NOGRIT") == "": dust.grit_burst(at, Vector3(v.x * 0.3, 0.8 + k * 1.6, v.z * 0.3), 1.0 + k * 2.5, 600.0 * k * amt * 0.2 * CRASH_DEBRIS, 0.06, ground_dust(pp.x, pp.z, s))
 				made += 1
 		elif hs > 1.2 and made < 10:
 			# sliding / rolling along the ground
@@ -729,12 +749,16 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 	var on_ground := not st.air and not in_water and va > 0.2
 	var tc: Color = TRACK_DIRT if s == 1 else (dcol * 0.6 if sand else TRACK_GRASS)
 	var ta := 0.85 if s == 1 else (0.75 if sand else 0.45)
-	fx.track(0, front, f, ta if on_ground else 0.0, tc, 0.085)
-	fx.track(1, rear, f, (minf(1.0, ta + 0.2) if skid_fx else ta) if on_ground else 0.0, tc, 0.12 if skid_fx else 0.095, skid_fx)
+	# a tyre that rolled through blood prints red for a few metres (fx/blood.gd)
+	var tcf: Color = blood.tyre_color(0, front, tc) if blood and on_ground else tc
+	var tcr: Color = blood.tyre_color(1, rear, tc) if blood and on_ground else tc
+	fx.track(0, front, f, ta if on_ground else 0.0, tcf, 0.085)
+	fx.track(1, rear, f, (minf(1.0, ta + 0.2) if skid_fx else ta) if on_ground else 0.0, tcr, 0.12 if skid_fx else 0.095, skid_fx)
 
 # ---------------------------------------------------------------- ride control
 func respawn(new_world: bool) -> void:
 	if phys.crash_on: get_up()
+	if hud: hud.on_respawn()
 	if new_world:
 		GameState.new_seed()
 		terrain.clear_dynamic()
@@ -749,6 +773,8 @@ func respawn(new_world: bool) -> void:
 	if fx.has_method("clear_tracks"): fx.clear_tracks()
 	if new_world: grime.clean()
 	if blood: blood.clear()
+	if flying_cam and is_instance_valid(flying_cam): flying_cam.queue_free()
+	flying_cam = null
 	var sp := _water_spawn() if OS.get_environment("BMX_WATER_SPAWN") != "" else Vector3.ZERO
 	phys.reset_at(sp.x, sp.z, sp.y)
 	if sp != Vector3.ZERO: terrain.update_stream(sp.x, sp.z, INF)
@@ -783,7 +809,12 @@ func _unhandled_input(e: InputEvent) -> void:
 		flash("Ride log saved (last 60 s)" if lp != "" else "Couldn't save the ride log")
 		if lp != "": print("RIDELOG ", lp)
 		return
+	if e.is_action_pressed("debug_draw") and not e.is_echo():
+		if DebugOverlay.available(): flash("Physics overlay " + ("on" if DebugOverlay.toggle() else "off"))
+		else: flash("Debug Draw 3D addon not loaded")
+		return
 	if photo: return
+	if e.is_action_pressed("map") and not e.is_echo(): open_map(); return
 	if e.is_action_pressed("new_world") and not e.is_echo(): respawn(true)
 	elif e.is_action_pressed("respawn") and not e.is_echo(): respawn(false)
 	elif e.is_action_pressed("bail") and not phys.crash_on: phys.crash_pending = "BAIL!"
@@ -818,6 +849,18 @@ func _read_input() -> Dictionary:
 	# the rider's body (gamepad right stick, numpad on keys): round stick gate -> square, so diagonals reach full
 	var bf := Input.get_action_strength("body_fwd") - Input.get_action_strength("body_back")
 	var bl := Input.get_action_strength("body_left") - Input.get_action_strength("body_right")
+	# a thumb is never exactly on an axis: a side lean always carries a little fore / aft and the other way
+	# round. Near an axis the other one is faded out (side lean within ~15 deg of sideways = no fore / aft,
+	# full again by ~35 deg), so leaning into a turn can't pull a manual or a tuck by accident; plus a small
+	# round deadzone for a worn stick
+	var mag := Vector2(bf, bl).length()
+	if mag < 0.1:
+		bf = 0.0; bl = 0.0
+	else:
+		var ang := atan2(absf(bf), absf(bl))   # 0 = pure side, PI/2 = pure fore / aft
+		var k := (mag - 0.1) / 0.9 / mag
+		bf *= k * BikePhysics.smooth01((ang - deg_to_rad(15.0)) / deg_to_rad(20.0))
+		bl *= k * BikePhysics.smooth01((PI / 2 - ang - deg_to_rad(15.0)) / deg_to_rad(20.0))
 	var bm := maxf(absf(bf), absf(bl))
 	if bm > 0.01:
 		var sq := minf(Vector2(bf, bl).length() / bm, 1.4142)
@@ -903,6 +946,31 @@ func toggle_photo() -> void:
 func exit_photo() -> void:
 	if photo:
 		toggle_photo()
+	exit_map()
+
+## the paper trail map (M, ui/paper_map.gd): the ride freezes, a folded map comes up and unfolds. Built on
+## first use. It takes all input while it's up; M / Esc / bail fold it away again.
+var paper_map: PaperMap
+func open_map() -> void:
+	if photo or phys.crash_on or (paper_map and paper_map.busy()): return
+	if paper_map == null:
+		paper_map = PaperMap.new()
+		paper_map.game = self
+		paper_map.close_actions = [&"map", &"pause", &"bail"]
+		add_child(paper_map)
+		paper_map.closed.connect(_map_closed)
+	Engine.time_scale = 0.0
+	hud.visible = false
+	paper_map.show_map()
+
+func _map_closed() -> void:
+	Engine.time_scale = 1.0
+	hud.visible = input_enabled and not photo
+
+## put the map away at once (pause, menus, a new ride)
+func exit_map() -> void:
+	if paper_map and paper_map.busy():
+		paper_map.close(true)
 
 func _exit_tree() -> void:
 	Engine.time_scale = 1.0
@@ -995,6 +1063,7 @@ func _process(dt: float) -> void:
 	var dab_lean := -dab_side * DAB_LEAN * dab_k   # bike_lean > 0 tips the top to the rider's left
 	rig.pose(drawn_pos.x, y_draw + (1.5 if OS.get_environment("BMX_PITCH_POSE") != "" else 0.0), drawn_pos.z, hd, p_draw, st.hop_nose, st.bike_lean + st.rock + wobble + dab_lean,
 		st.steer + st.bar_catch - wobble * 1.5, st.wheel_f, st.wheel_r, st.crank)
+	DebugOverlay.draw(self, st, drawn_pos, hd)
 	# the physics' tyres are soft and follow the smooth height field; the drawn ground is a triangle mesh
 	# (higher in hollows) with rocks and decks on it. Lift / tilt the drawn bike so no tyre is ever inside it
 	if OS.get_environment("BMX_NOUNCLIP") == "":

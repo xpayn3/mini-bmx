@@ -47,6 +47,8 @@ var hand_mats := {}
 var helmet_mats := {}
 var helmet_model: Node3D = null
 var goggles: Node3D = null
+var action_cam: Node3D = null   # helmet-top action camera (ActionCam); its "Lens" is the Helmet camera view
+var action_cam_at := Vector3.ZERO   # where it's mounted (head space)
 
 var torso: MeshInstance3D
 var hood_hem: MeshInstance3D
@@ -250,6 +252,47 @@ func _build_builtin_helmet() -> void:
 	for sz in [-1.0, 1.0]:
 		var tab: MeshInstance3D = add.call(G.box(0.05, 0.03, 0.012), frameMat, gog)
 		tab.transform = Transform3D(Basis(Vector3.UP, sz * 0.5), Vector3(-0.03, 0, sz * 0.1))
+	_mount_action_cam(Vector3(0.03, hel.position.y + R * 0.96 - 0.004, 0))
+
+
+## the action camera on top of the helmet, just forward of the crown (`at` = shell top, head space)
+func _mount_action_cam(at: Vector3) -> void:
+	if action_cam and is_instance_valid(action_cam):
+		action_cam.get_parent().remove_child(action_cam)
+		action_cam.queue_free()
+	action_cam = ActionCam.build()
+	action_cam.position = at
+	action_cam_at = at
+	head.add_child(action_cam)
+
+
+## crash: the camera body snaps off its hinge (the base + buckle stay on the helmet). Returns the body
+## (taken out of the tree) and its world transform, or {} when it's already gone.
+func break_action_cam() -> Dictionary:
+	if action_cam == null or not is_instance_valid(action_cam):
+		return {}
+	var b := action_cam.get_node_or_null("Body") as Node3D
+	if b == null or not b.is_inside_tree():
+		return {}
+	var xf := b.global_transform
+	action_cam.remove_child(b)
+	return {body = b, xform = xf}
+
+
+## a fresh camera on the helmet (get-up / respawn), if the old one broke off
+func remount_action_cam() -> void:
+	if action_cam and is_instance_valid(action_cam) and action_cam.get_node_or_null("Body") != null:
+		return
+	_mount_action_cam(action_cam_at)
+
+
+## highest point of the shell near (x, z=0), head space (the action cam sits there)
+static func _shell_top(tris: PackedVector3Array, x: float) -> float:
+	var best := -1e9
+	for p in tris:
+		if absf(p.z) < 0.03 and absf(p.x - x) < 0.03 and p.y > best:
+			best = p.y
+	return best
 
 
 ## Swap the built-in helmet for the model (helmet.glb's "helmet" MeshInstance3D: centred on its shell,
@@ -313,6 +356,10 @@ func set_helmet(model: Node3D) -> void:
 	flap.anchor_local = goggles.get_meta("flap_anchor", Vector3.ZERO)
 	flap.material_override = goggle_mats.strap
 	goggles.add_child(flap)
+	var top := _shell_top(shell_tris, 0.03) if not shell_tris.is_empty() else -1e9
+	if top < -1e8:   # no shell triangles: the helmet's bounding box top
+		top = 0.2
+	_mount_action_cam(Vector3(0.03, top - 0.004, 0))
 	if not look.is_empty():
 		set_look(look)
 

@@ -623,6 +623,8 @@ func _process(dt: float) -> void:
 	orbit = lerpf(orbit, orbit_t, minf(1.0, dt * 4))
 	pitch = lerpf(pitch, pitch_t, minf(1.0, dt * 4))
 	dist = lerpf(dist, dist_t, minf(1.0, dt * 4))
+	if stand_rider and OS.get_environment("BMX_GARAGE_HEAD") != "":   # tests: frame the standing rider's helmet
+		focus_t = stand_rider.head.global_position + Vector3(0, 0.15, 0)
 	focus = focus.lerp(focus_t, minf(1.0, dt * 4))
 	var p := deg_to_rad(pitch)
 	var dir := Vector3(sin(orbit) * cos(p), sin(p), cos(orbit) * cos(p))
