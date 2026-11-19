@@ -52,7 +52,6 @@ var trick_last := ""
 var trail_i := -1       # nearest trail centreline point
 var trail_d := INF      # how far off the trail centreline (m)
 var alert := {}         # the next turn / feature on the trail: {kind, text, d}, or empty
-var alert_banner: Control
 var alert_new := 0.0    # seconds left to show a just-appeared alert while it is still far off
 const FEAT_NAMES := {"table": "TABLETOP", "tableLine": "JUMP LINE", "kicker": "KICKER", "rhythm": "ROLLERS",
 	"flow": "FLOW LINE", "woodKicker": "WOOD KICKER", "bridge": "BRIDGE"}
@@ -118,11 +117,6 @@ func _ready() -> void:
 	air_card.size = Vector2(260, 112); air_card.position = Vector2(-130, 14)   # top centre
 	root.add_child(air_card)
 	on_respawn()
-	alert_banner = AlertBanner.new(); alert_banner.hud = self
-	alert_banner.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	alert_banner.size = Vector2(340, 76); alert_banner.position = Vector2(-170, -84)   # bottom centre, under the hop bar
-	alert_banner.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	root.add_child(alert_banner)
 	_build_records()
 	quick = load("res://scripts/ui/quick_tune.gd").new()
 	quick.hud = self
@@ -376,6 +370,9 @@ func _probe_alerts() -> void:
 func _trail_scan(p: Vector2, fw: Vector2, crashed: bool) -> void:
 	var was: String = alert.get("text", "")
 	alert = {}
+	if OS.get_environment("BMX_ALERT_DEMO") != "":   # tests: a fixed alert to look at
+		alert = {"kind": OS.get_environment("BMX_ALERT_DEMO"), "text": "HAIRPIN RIGHT", "d": 22.0}
+		return
 	var t = game.terrain
 	if t == null or t.field == null or t.field.course == null: return
 	var tc: TrailCourse = t.field.course
@@ -618,6 +615,53 @@ class GaugeView extends Control:
 				c.draw_string(f, Vector2(inner.position.x, cx.y - 2), "GPS READY", HORIZONTAL_ALIGNMENT_CENTER, inner.size.x, 12, ink)
 				c.draw_polyline(PackedVector2Array([cx + Vector2(-8, 12), cx + Vector2(-2, 18), cx + Vector2(9, 6)]), ink, 2.5)
 			return
+		var al: Dictionary = hud.alert
+		# pops up when it first appears, then stays from 40 m in (the page shows the rest of the time)
+		if al.is_empty() or al.d > 100.0 or (al.d > 40.0 and hud.alert_new <= 0.0): return
+		# the bottom half of the screen: a dark box, the turn / feature icon + distance, the name under them
+		var top := scr.position.y + 76   # just under the speed row's divider
+		var bx := Rect2(inner.position.x + 3, top, inner.size.x - 6, inner.end.y - top - 3)
+		draw_alert(c, bx, al, f)
+
+	## the trail alert in a box: icon top left, distance big on the right, the name along the bottom
+	static func draw_alert(c: CanvasItem, bx: Rect2, al: Dictionary, f: Font) -> void:
+		var yel := Color("ffd21f")
+		c.draw_style_box(UITheme.box(Color("111417"), 6, 0), bx)
+		var row := bx.size.y * 0.62
+		var ic := bx.position + Vector2(row * 0.5 + 2, row * 0.5 + 3)
+		var sc := row / 26.0 * 0.95
+		var kind: String = al.kind
+		c.draw_set_transform(ic * (1.0 - sc), 0.0, Vector2(sc, sc))
+		if kind.ends_with("L") or kind.ends_with("R"):
+			var sx := -1.0 if kind.ends_with("L") else 1.0
+			var pts := PackedVector2Array()
+			if kind.begins_with("H"):   # hairpin: a U
+				pts.append(ic + Vector2(-5 * sx, 11))
+				for q in 9:
+					var an := PI * q / 8.0
+					pts.append(ic + Vector2(-5 * sx * cos(an), -2 - 7 * sin(an)))
+				pts.append(ic + Vector2(5 * sx, 4))
+			else:
+				var bend := 9.0 if kind.begins_with("S") else 6.0
+				pts.append(ic + Vector2(-2 * sx, 11)); pts.append(ic + Vector2(-2 * sx, 0))
+				pts.append(ic + Vector2(0, -bend * 0.6)); pts.append(ic + Vector2(bend * sx * 0.7, -bend * 0.9))
+			c.draw_polyline(pts, Color.WHITE, 3.0)
+			var tip := pts[pts.size() - 1]
+			var dv := (tip - pts[pts.size() - 2]).normalized()
+			var nv := Vector2(-dv.y, dv.x)
+			c.draw_colored_polygon(PackedVector2Array([tip + dv * 5, tip + nv * 4.5, tip - nv * 4.5]), Color.WHITE)
+		elif kind == "J":   # a ramp
+			c.draw_colored_polygon(PackedVector2Array([ic + Vector2(-11, 8), ic + Vector2(6, 8), ic + Vector2(6, -6)]), Color.WHITE)
+			c.draw_arc(ic + Vector2(0, -2), 9, -PI * 0.95, -PI * 0.45, 8, yel, 1.5)
+		else:   # rocks
+			c.draw_circle(ic + Vector2(-5, 5), 5, Color.WHITE)
+			c.draw_circle(ic + Vector2(5, 6), 4, Color.WHITE)
+			c.draw_circle(ic + Vector2(1, -3), 4, Color(1, 1, 1, 0.8))
+		c.draw_set_transform(Vector2.ZERO)
+		var dm: float = al.d
+		var dtx := "%dm" % (roundi(dm / 10.0) * 10 if dm > 50.0 else roundi(dm))
+		c.draw_string(f, Vector2(bx.position.x + row + 4, bx.position.y + row * 0.5 + 12), dtx, HORIZONTAL_ALIGNMENT_RIGHT, bx.size.x - row - 10, 26, yel)
+		c.draw_string(f, Vector2(bx.position.x + 6, bx.end.y - 7), al.text, HORIZONTAL_ALIGNMENT_CENTER, bx.size.x - 12, 10, Color.WHITE)
 	## bezel under the screen: a page button left and right, page dots between them
 	func _bezel() -> void:
 		var dt := get_process_delta_time()
@@ -846,58 +890,6 @@ class MapView extends Control:
 		draw_line(Vector2(x0 + sb, sy - 3), Vector2(x0 + sb, sy), ink, 1.5)
 		draw_string(f, Vector2(x0 + sb + 4, sy + 1), "50m", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, ink)
 		draw_string(f, Vector2(0, sy + 1), "%dm" % roundi(st.y), HORIZONTAL_ALIGNMENT_RIGHT, size.x - 6, 9, ink)
-
-class AlertBanner extends Control:
-	## the Garmin's next turn / feature alert, big at the bottom centre of the screen
-	var hud
-	func _process(_dt: float) -> void: queue_redraw()
-	func _draw() -> void:
-		if hud.game == null or hud.game.phys == null or hud.game.phys.crash_on or hud.ride_t < GaugeView.FIX_T + 0.8: return
-		var f := UITheme.lcd_font()
-		var ink := Color("111417")
-		var al: Dictionary = hud.alert
-		# pops up when it first appears, then stays from 40 m in
-		if al.is_empty() or al.d > 100.0 or (al.d > 40.0 and hud.alert_new <= 0.0): return
-		var bx := Rect2(Vector2.ZERO, size)
-		c_box(bx, ink)
-		var yel := Color("ffd21f")
-		var ic := bx.position + Vector2(bx.size.y * 0.5 + 4, bx.size.y * 0.5)
-		var sc := bx.size.y / 26.0 * 0.78
-		var kind: String = al.kind
-		draw_set_transform(ic * (1.0 - sc), 0.0, Vector2(sc, sc))
-		if kind.ends_with("L") or kind.ends_with("R"):
-			var sx := -1.0 if kind.ends_with("L") else 1.0
-			var pts := PackedVector2Array()
-			if kind.begins_with("H"):   # hairpin: a U
-				pts.append(ic + Vector2(-5 * sx, 11))
-				for q in 9:
-					var an := PI * q / 8.0
-					pts.append(ic + Vector2(-5 * sx * cos(an), -2 - 7 * sin(an)))
-				pts.append(ic + Vector2(5 * sx, 4))
-			else:
-				var bend := 9.0 if kind.begins_with("S") else 6.0
-				pts.append(ic + Vector2(-2 * sx, 11)); pts.append(ic + Vector2(-2 * sx, 0))
-				pts.append(ic + Vector2(0, -bend * 0.6)); pts.append(ic + Vector2(bend * sx * 0.7, -bend * 0.9))
-			draw_polyline(pts, Color.WHITE, 3.0)
-			var tip := pts[pts.size() - 1]
-			var dv := (tip - pts[pts.size() - 2]).normalized()
-			var nv := Vector2(-dv.y, dv.x)
-			draw_colored_polygon(PackedVector2Array([tip + dv * 5, tip + nv * 4.5, tip - nv * 4.5]), Color.WHITE)
-		elif kind == "J":   # a ramp
-			draw_colored_polygon(PackedVector2Array([ic + Vector2(-11, 8), ic + Vector2(6, 8), ic + Vector2(6, -6)]), Color.WHITE)
-			draw_arc(ic + Vector2(0, -2), 9, -PI * 0.95, -PI * 0.45, 8, yel, 1.5)
-		else:   # rocks
-			draw_circle(ic + Vector2(-5, 5), 5, Color.WHITE)
-			draw_circle(ic + Vector2(5, 6), 4, Color.WHITE)
-			draw_circle(ic + Vector2(1, -3), 4, Color(1, 1, 1, 0.8))
-		draw_set_transform(Vector2.ZERO)
-		var dm: float = al.d
-		var dtx := "%dm" % (roundi(dm / 10.0) * 10 if dm > 50.0 else roundi(dm))
-		var tx := bx.size.y + 14
-		draw_string(f, Vector2(tx, bx.size.y * 0.40), al.text, HORIZONTAL_ALIGNMENT_LEFT, bx.size.x - tx - 12, 20, Color.WHITE)
-		draw_string(f, Vector2(tx, bx.size.y * 0.86), dtx, HORIZONTAL_ALIGNMENT_LEFT, -1, 30, yel)
-	func c_box(bx: Rect2, ink: Color) -> void:
-		draw_style_box(UITheme.box(Color(ink, 0.92), 12, 0, Color(1, 1, 1, 0.12), 2), bx)
 
 class Overlay extends Control:
 	## draws GaugeView.draw_over() on top of the map

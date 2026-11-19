@@ -426,7 +426,8 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - **Screen layout** (`hud.gd`): top left FPS / ride info / biome name / `StylePop` (STYLE total, trick + points: points
   roll up, the banked "+N" flies into the total, which counts up gold with sparks + a ring, combo "xN" punches in);
   top centre the jump card (`AirCard`, same dark LCD look as the alert); top right the **life bar** (red, heart) over
-  stamina; bottom centre the trail alert banner (`AlertBanner`, big) under the hop bar.
+  stamina. The trail alert fills the bike computer's lower screen under the speed (`GaugeView.draw_alert`: icon,
+  distance big in yellow, name below); `BMX_ALERT_DEMO=HR|SR|J|K` forces one for screenshots.
 - **Life** (`hud.life`): a crash takes 12–95 % by body speed (`on_crash(speed)`), heals 1.2 %/s from 4 s after it.
   At zero the get-up prompt says KNOCKED OUT / hold hop 1.2 s to **revive** (`REVIVE_HOLD`, back with 50 %) or
   Backspace back to start (full life, `on_respawn`). `BikePhysics.getup_need` is the hold time. Tests: `BMX_LIFE=0.1`
