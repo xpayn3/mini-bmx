@@ -15,6 +15,7 @@ const COLS := [
 	"sprint", "stamina", "crash", "brake_stop",
 	"in_throttle", "in_brake", "in_steer", "in_body_fwd", "in_body_lean", "in_hop", "in_sprint", "pad",
 	"tyre_lift", "drawn_y", "pelvis_x", "pelvis_y", "pelvis_z", "chest_x", "chest_y", "chest_z", "head_x", "head_y", "head_z",
+	"whip", "whip_hold", "flick_kick", "raw_right_x", "raw_left_x",
 ]
 
 var _rows: Array = []
@@ -40,6 +41,8 @@ func record(dt: float, st: BikePhysics, inp: Dictionary, lift: float, drawn_y: f
 		float(inp.get("throttle", 0.0)), float(inp.get("brake", 0.0)), float(inp.get("steer", 0.0)),
 		float(inp.get("body_fwd", 0.0)), float(inp.get("body_lean", 0.0)), b.call(inp.get("hop", false)), b.call(inp.get("sprint", false)), b.call(inp.get("pad", false)),
 		lift, drawn_y, pel.x, pel.y, pel.z, ch.x, ch.y, ch.z, hd.x, hd.y, hd.z,
+		st.whip, st.whip_hold, st.flick_kick, Input.get_action_strength("body_right") - Input.get_action_strength("body_left"),
+		Input.get_action_strength("steer_right") - Input.get_action_strength("steer_left"),
 	])
 	_rows[_head] = r
 	_head = (_head + 1) % _rows.size()

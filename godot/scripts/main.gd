@@ -1196,7 +1196,8 @@ func _autotest(seconds: float) -> void:
 			elif cyc >= hold + 1.5 and cyc < hold * 2.0 + 1.5: side = -1.0
 			for a in [["steer_left", "body_left", 1.0], ["steer_right", "body_right", -1.0]]:
 				if side == a[2]:
-					Input.action_press(a[0], 1.0); Input.action_press(a[1], 1.0)
+					Input.action_press(a[0], 1.0)
+					if OS.get_environment("BMX_WHIP_STEERONLY") == "": Input.action_press(a[1], 1.0)
 				else:
 					Input.action_release(a[0]); Input.action_release(a[1])
 			var ph4 = game.phys

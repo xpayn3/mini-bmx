@@ -902,8 +902,8 @@ var bounce_stats := [0.0, 0, 0.0, 0.0]   # tests: sum of squared body offsets, s
 # is thrown over first and the body follows through (hips lead, shoulders after, a little overshoot)
 var roll_init := false
 var roll_p := 0.0; var roll_pv := 0.0; var roll_c := 0.0; var roll_cv := 0.0; var knee_lean := 0.0; var lat_g_s := 0.0
-const ROLL_HIP_W := 9.0; const ROLL_HIP_Z := 0.52     # hips: natural rate (rad/s), damping
-const ROLL_CHEST_W := 7.0; const ROLL_CHEST_Z := 0.44  # chest / shoulders: slower, rings on a touch
+const ROLL_HIP_W := 12.0; const ROLL_HIP_Z := 0.52     # hips: natural rate (rad/s), damping
+const ROLL_CHEST_W := 10.0; const ROLL_CHEST_Z := 0.44  # chest / shoulders: slower, rings on a touch
 const ROLL_UNWEIGHT := 0.045                          # m the legs extend through a side-to-side crossover
 func update_pose(dt: float, p: Dictionary) -> void:
 	var v := _num(p, "v")
