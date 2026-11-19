@@ -60,13 +60,34 @@ void vertex() {
 	vec3 push = to_cam * (0.003 + 0.0035 * d);
 	VERTEX += (inverse(MODEL_MATRIX) * vec4(push, 0.0)).xyz;
 }
+// the game's mud (bike/grime.gd) drives these: grime.x = how muddy the bike is 0..1, grime.y = wet, mud_col
+global uniform vec4 grime;
+global uniform vec4 mud_col : source_color;
+uniform vec2 paper_m = vec2(0.24, 0.19);   // paper size in metres: the mud noise lives on the paper, not the screen
+float gr_hash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float gr_noise(vec3 x) {
+	vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+	return mix(mix(mix(gr_hash(i), gr_hash(i + vec3(1,0,0)), f.x), mix(gr_hash(i + vec3(0,1,0)), gr_hash(i + vec3(1,1,0)), f.x), f.y),
+	           mix(mix(gr_hash(i + vec3(0,0,1)), gr_hash(i + vec3(1,0,1)), f.x), mix(gr_hash(i + vec3(0,1,1)), gr_hash(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
 void fragment() {
 	// slightly negative LOD bias keeps the number sharp from far away; some self-light keeps the white paper
 	// white under the warm low sun instead of turning brown
 	vec3 c = texture(tex, UV, -0.8).rgb;
-	ALBEDO = c;
-	EMISSION = c * 0.5;
-	ROUGHNESS = 0.9;
+	// mud: builds up from the bottom edge with the bike's mud level, first as flecks, then as splotches.
+	// Capped so the number always stays readable; the finest speckle fades out with distance (no shimmer)
+	float dist = length(VERTEX);
+	vec3 p = vec3(UV * paper_m, 0.37);
+	float cover = min(grime.x * (0.04 + 0.6 * UV.y * UV.y), 0.55);
+	float n = gr_noise(p * 26.0) * 0.6 + gr_noise(p * 71.0) * 0.4;
+	float fine = 1.0 - smoothstep(2.5, 9.0, dist);
+	float fleck = gr_noise(p * 190.0);
+	float m = smoothstep(1.0 - cover, 1.08 - cover, n);
+	m = max(m, fine * smoothstep(1.0 - cover * 0.35, 1.04 - cover * 0.35, fleck));
+	vec3 mc = mud_col.rgb * (0.8 + 0.4 * gr_noise(p * 9.0)) * (1.0 - grime.y * 0.43);
+	ALBEDO = mix(c * (1.0 - grime.y * 0.12), mc, m);
+	EMISSION = c * 0.5 * (1.0 - m);
+	ROUGHNESS = mix(0.9, mix(0.93, 0.3, grime.y), m);
 }
 """
 
@@ -79,6 +100,10 @@ func _ready() -> void:
 	var m := ShaderMaterial.new()
 	m.shader = sh
 	m.set_shader_parameter("tex", _vp.get_texture())
+	# the mud overlay (bike/grime.gd) must leave the paper alone: its extra pass doesn't get this shader's depth
+	# nudge (flicker up close) and its mud mask is pinned to a part that moves through the world (a brown cover
+	# from far away). The paper does its own mud above, from the same global values. Grime skips tagged materials.
+	m.set_meta("grime_pass", true)
 	material_override = m
 
 
