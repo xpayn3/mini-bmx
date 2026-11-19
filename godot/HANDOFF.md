@@ -51,7 +51,7 @@ Player data: `%APPDATA%\Godot\app_userdata\Mini BMX\` — `settings.cfg`, `tune.
 ## 3. Controls (defaults, all rebindable in Settings → Controls)
 
 W/↑ pedal · S/↓ brake · A/D steer · **Space** hop/pump (hold to charge; **in the air: tuck the bike up**) ·
-**W/S in the air: flip (front/back)** · **A/D in the air: spin (180/360)** · **Shift + A/D in the air: tailwhip** · **brake + A/D when slow: pivot (pirouette)** · Shift sprint (stamina) · Q/E shift gears · F bail · Backspace back to
+**W/S in the air: lean back/forward (keep leaning → back/front flip)** · **A/D in the air: lean the bike left/right (no spins)** · **brake + A/D when slow: pivot (pirouette)** · Shift sprint (stamina) · Q/E shift gears · F bail · Backspace back to
 start · R new world · B next bike · C next camera · Z/X rotate camera · +/- zoom · mouse drag orbit ·
 H records · **P / K / L** the tuning card on its Ride / Rider / Look tab · O photo mode · F1 hide HUD ·
 F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A hop, X sprint, bumpers gears.
@@ -193,9 +193,12 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `BMX_GARAGE_TAB=paint…kit`, `BMX_GARAGE_RIDER=coast/pedal/sprint/descend/air` | garage tab / rider preview |
 | `BMX_GARAGE_CAM=orbit,pitch,dist`, `BMX_POSE=key=val,...` | garage camera / pose override |
 | `BMX_GARMIN_PAGE=0/1/2` | bike computer opens on page 1 (speed / slope / gear), 2 (elevation) or 3 (map) |
-| `BMX_TRICK=back/front/spin/whip` | autotest throws that trick in every jump and prints `TRICK …` / `CRASH …` |
+| `BMX_TRICK=back/front/side/manual` | autotest leans that way in every jump (side alternates A / D; manual holds the nose up at `BMX_MANUAL_PITCH` rad for back-wheel landings) and prints `TRICK` / `LAND` / `BOUNCE` / `CRASH` |
 | `BMX_STEER=1` / `-1` (+ `BMX_STRAIGHT=1`) | autotest holds a steady left / right turn after 2 s (lean / leg-clearance shots) |
-| `BMX_WHIP_POSE=rad` | draws the frame at a fixed tailwhip angle (test shots) |
+| `BMX_AIRSHOT=dir/prefix` | autotest saves up to 8 screenshots mid-air |
+| `BMX_KNEE_PROBE=1` | prints the biggest knee / hip move per frame and the torso stretch range, and logs (`KNEE …`) frames where a knee jumps |
+| `BMX_BIGAIR=1` (+ `BMX_TRICK=front/back`) | autotest launches every jump high (1.4 s air) so full flips happen |
+| `BMX_PITCH_POSE=rad` / `sweep` | draws the bike at a fixed pitch (or spinning through flips) for rider-pose shots |
 | `BMX_TYRE_PROBE=1` | measures tyre-to-floor / tyre-to-drum gaps for 12 wheel setups, then quits |
 | `BMX_BUILD=wheels.rim_model=deemax;bars.width=820;logos.rims.count=4` | overrides the garage build for a test run (not saved unless you touch a control) |
 | `-s res://tools/terrain_cs_cmp.gd --headless` | C# vs GDScript terrain must be EXACT |

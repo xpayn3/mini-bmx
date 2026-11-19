@@ -439,6 +439,8 @@ static func set_torso(n: Node3D, a: Vector3, b: Vector3, right: Vector3) -> void
 # ---------------- the spine: the torso mesh is skinned to SPINE_BONES bones along its length so it can bend
 
 const SPINE_BONES := 5
+var knee_dbg: Array = []   # tests: frames where a knee bends against its pole
+var torso_ratio := 1.0   # tests: torso length / its rest length before the limit
 var spine_skel: Skeleton3D
 
 ## weights each torso vertex to the two spine bones either side of its height (mesh y -0.5 .. 0.5)
@@ -564,6 +566,14 @@ static func solve_ik(root: Vector3, target: Vector3, l1: float, l2: float, pole:
 	var a := (l1 * l1 - l2 * l2 + dist * dist) / (2 * dist)
 	var h := sqrt(maxf(0.0, l1 * l1 - a * a))
 	var pp := pole - dir * pole.dot(dir)
+	# the limb pointing (nearly) along its pole leaves the bend side undefined and the joint flips
+	# round (a folded leg mid-flip with the pedal level in front of the hip): blend smoothly toward
+	# bending up (knee up) as the pole gets lined up with the limb
+	var w := smoothstep(0.15, 0.45, pp.length() / maxf(pole.length(), 1e-6))
+	if w < 1.0:
+		var up2 := Vector3.UP - dir * dir.y
+		if up2.length_squared() > 1e-6:
+			pp = pp * w + up2.normalized() * (1.0 - w) * maxf(pole.length(), 1e-3)
 	if pp.length_squared() < 1e-8:
 		pp = Vector3(0, 0, 1) - dir * dir.z
 	pp = pp.normalized()
@@ -696,7 +706,9 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	pelvis.x += hs
 	chest.x += hs * 0.6
 	# keep the body level while the bike pitches (descents: almost fully; climbs: a little)
-	var pitch0 := _num(p, "pitch")
+	# only for slope-like angles: mid-flip (nose far up / down, upside down) the body stays on the bike
+	var pitch0 := wrapf(_num(p, "pitch"), -PI, PI)
+	pitch0 *= 1.0 - smoothstep(0.7, 1.3, absf(pitch0))
 	var pit := pitch0 * (0.2 if pitch0 > 0 else _num(p, "bodyLevel", 0.85))
 	if pit != 0.0:
 		var c := cos(-pit)
@@ -793,6 +805,16 @@ func update_pose(dt: float, p: Dictionary) -> void:
 				chest += d
 				pelvis += d * 0.35
 
+	# the torso never stretches or squashes: past its length range the hips follow the chest
+	var tv := chest - pelvis
+	var tl := tv.length()
+	var t_max: float = sty.torso * 1.08
+	var t_min: float = sty.torso * 0.75
+	torso_ratio = tl / maxf(float(sty.torso), 1e-4)
+	if tl > t_max:
+		pelvis = chest - tv / tl * t_max
+	elif tl < t_min and tl > 1e-4:
+		chest = pelvis + tv / tl * t_min
 	# torso from pelvis to chest
 	var hip := Vector3(pelvis.x, pelvis.y + 0.02, pelvis.z)
 	var tw_axis := (chest - hip).normalized()
@@ -829,10 +851,15 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		var hp: Vector3 = pelvis + pel_b * Vector3(0, -0.02, side * (0.11 + sty.stance))
 		var ankle := Vector3(foot.x - 0.04 + sty.heelFwd, foot.y + 0.12 + sty.heelUp, foot.z)
 		var ik := solve_ik(hp, ankle, L_THIGH, L_SHIN, poles_leg[i])
+		var ik_raw: Vector3 = ik[0]
 		ik[0] = _knee_clear(hp, ankle, ik[0], side)
+		if knee_dbg.size() < 40 and OS.get_environment("BMX_KNEE_PROBE") != "" and knee[i].position.distance_to(ik[0]) > 0.08:
+			knee_dbg.append([i, snappedf(_num(p, "pitch"), 0.01), knee[i].position.snapped(Vector3.ONE * 0.01), hp.snapped(Vector3.ONE * 0.01), ankle.snapped(Vector3.ONE * 0.01), ik_raw.snapped(Vector3.ONE * 0.01), (ik[0] as Vector3).snapped(Vector3.ONE * 0.01)])
 		set_limb(thigh[i], hp, ik[0])
 		set_limb(shin[i], ik[0], ik[1])
 		knee[i].position = ik[0]
+		# out of reach: the foot stays at the end of the leg (limbs never stretch)
+		foot += ik[1] - ankle
 		shoe[i].position = Vector3(foot.x, foot.y + 0.03, foot.z)
 		shoe[i].basis = Basis(Vector3.UP, -side * float(sty.footOut)) * Basis(Vector3.BACK, float(sty.footAngle))
 		J[9 + i * 3] = hp
@@ -846,6 +873,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		set_limb(upper_arm[i], shp, ika[0])
 		set_limb(fore_arm[i], ika[0], ika[1])
 		elbow[i].position = ika[0]
+		hand = ika[1]   # out of reach: the hand stays at the end of the arm
 		glove[i].position = hand
 		orient_hand(glove[i], ika[0], hand, right)
 		if sty.wristRoll != 0.0:
