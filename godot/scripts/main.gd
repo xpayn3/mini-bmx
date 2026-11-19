@@ -425,6 +425,11 @@ func _autotest(seconds: float) -> void:
 			if ls != "" and lt > 0.3 and lt - float(_probe.get("l_shot", -1.0)) > 0.4 and int(_probe.get("l_n", 0)) < 6:
 				_probe.l_shot = lt; _probe.l_n = int(_probe.get("l_n", 0)) + 1
 				get_viewport().get_texture().get_image().save_png("%s_%d.png" % [ls, _probe.l_n])
+		if OS.get_environment("BMX_GRIP_PROBE") != "" and el - float(_probe.get("grip_t", -1.0)) >= 0.25:   # tests: tyre grip sim
+			_probe.grip_t = el
+			var gp = game.phys
+			_probe.grip_max = maxf(float(_probe.get("grip_max", 0.0)), absf(gp.slip) if not gp.air else 0.0)
+			print("GRIP t=%.2f v=%.1f slip=%.1fdeg slip_w=%.2f grip_r=%.2f loose=%.2f squirm=%.1fdeg bars=%.1fdeg skid=%s air=%s" % [el, gp.v, rad_to_deg(gp.slip), gp.slip_w, gp.grip_r, gp.loose, rad_to_deg(gp._squirm), rad_to_deg(gp.bar_catch), gp.skid_fx, gp.air])
 		if OS.get_environment("BMX_VMAX") != "" and not game.phys.air: _probe.vmax_kmh = maxf(_probe.get("vmax_kmh", 0.0), game.phys.v * 3.6)   # tests
 		var airshot := OS.get_environment("BMX_AIRSHOT")   # tests: dir/prefix -> shots mid-air (up to 8)
 		if airshot != "" and game.phys.air and game.phys.air_time > 0.25 and _airshots < 8 and el - _airshot_t > 0.6:

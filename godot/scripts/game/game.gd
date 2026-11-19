@@ -983,7 +983,7 @@ func _process(dt: float) -> void:
 	var wobble := sin(t * 2.3) * 0.025 * maxf(0.0, 1 - absf(st.v) / 2) * (1.0 - dab_k)
 	var dab_lean := -dab_side * DAB_LEAN * dab_k   # bike_lean > 0 tips the top to the rider's left
 	rig.pose(drawn_pos.x, y_draw + (1.5 if OS.get_environment("BMX_PITCH_POSE") != "" else 0.0), drawn_pos.z, hd, p_draw, st.hop_nose, st.bike_lean + st.rock + wobble + dab_lean,
-		st.steer - wobble * 1.5, st.wheel_f, st.wheel_r, st.crank)
+		st.steer + st.bar_catch - wobble * 1.5, st.wheel_f, st.wheel_r, st.crank)
 	# the physics' tyres are soft and follow the smooth height field; the drawn ground is a triangle mesh
 	# (higher in hollows) with rocks and decks on it. Lift / tilt the drawn bike so no tyre is ever inside it
 	if OS.get_environment("BMX_NOUNCLIP") == "":

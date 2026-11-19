@@ -24,6 +24,15 @@ const DEFS := [
 		["slipRecover", "Slide catch", 8, 0.5, 15, 0.5, "/s"],
 		["slipMax", "Wash-out angle", 1.1, 0.4, 1.4, 0.05, "rad"],
 	]],
+	["Tyre grip sim", [
+		["gripRearLock", "Locked rear swings out (fishtail)", 1.0, 0, 2.5, 0.05, "×"],
+		["gripCatch", "Rider catches slides", 0.6, 0, 2, 0.05, "×"],
+		["gripLoose", "Loose patches (grip varies)", 0.5, 0, 1.5, 0.05, "×"],
+		["gripBumps", "Bumps knock the rear loose", 1.0, 0, 3, 0.05, "×"],
+		["gripPower", "Power slides / wheelspin", 1.0, 0, 3, 0.05, "×"],
+		["gripSquirm", "Tyres squirm in turns", 1.0, 0, 3, 0.05, "×"],
+		["gripPivot", "Rear swings round the front", 0.7, 0, 1, 0.05, ""],
+	]],
 	["Momentum", [
 		["turnWeight", "Turn weight", 0.09, 0, 0.5, 0.01, "s"],
 		["rollRes", "Rolling resistance", 0.8, 0.3, 1.5, 0.05, "×"],
