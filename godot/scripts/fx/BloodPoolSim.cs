@@ -171,6 +171,13 @@ public partial class BloodPoolSim : RefCounted
 		return Image.CreateFromData(_n, _n, false, Image.Format.Rf, _bytes);
 	}
 
+	/// blood depth (m) at grid cell (x, z); 0 outside
+	public float DepthAt(int x, int z)
+	{
+		if (x < 0 || z < 0 || x >= _n || z >= _n) return 0f;
+		return _d[x + z * _n];
+	}
+
 	public float Volume()
 	{
 		double v = 0;

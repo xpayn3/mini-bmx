@@ -154,6 +154,19 @@ func _reset_points() -> void:
 	free_pt.resize(RAD.size())
 	free_pt.fill(0)
 	_touch.resize(RAD.size())
+	broken.clear()
+
+## BROKEN BONES (fx/blood.gd on a very hard hit): an elbow / knee whose bone broke has no muscle tension
+## and no fold limit left: the forearm / shin flops and can bend the wrong way. `kick` throws it the
+## wrong way at once. Returns false if already broken / torn off.
+var broken := {}              # elbow / knee index -> true
+const LIM_MID := {0: EL_L, 1: EL_R, 2: KN_L, 3: KN_R}   # LIMITS index -> the joint between its ends
+func break_joint(j: int, kick: Vector3) -> bool:
+	if broken.has(j) or free_pt[j] == 1 or not LIMB_NEXT.has(j): return false
+	broken[j] = true
+	var c: int = LIMB_NEXT[j]
+	q[c] = (q[c] as Vector3) - kick * (last_h if last_h > 0.0 else 1.0 / 360.0)
+	return true
 
 ## tear off the limb below joint a (shoulder / elbow / hip / knee): its bone a-b goes, b and below fly free
 ## on their own root point. Returns the root's index (-1: already off / not a limb joint).
@@ -287,6 +300,7 @@ func step(dt: float, colliders: Array) -> void:
 				_dist(xb[0], xb[1], xb[2], 1.0, false)
 			for j in LIMITS.size():
 				if not cut.is_empty() and free_pt[LIMITS[j][0]] != free_pt[LIMITS[j][1]]: continue
+				if not broken.is_empty() and broken.has(LIM_MID.get(j, -1)): continue   # broken: folds any way
 				_dist(LIMITS[j][0], LIMITS[j][1], lim[j], 1.0, true)
 			for xl in _xlims:
 				_dist(xl[0], xl[1], xl[2], 1.0, true)
@@ -430,6 +444,7 @@ func _neutral_pull(kt := 1.0) -> void:
 	for k in NEUTRAL.size():
 		var c: int = NEUTRAL[k][0]
 		if free_pt[c] == 1: continue   # torn off: no muscles left to hold it
+		if not broken.is_empty() and broken.has(NEUTRAL[k][1]): continue   # broken bone: nothing holds it
 		var par: int = NEUTRAL[k][1]
 		var L: float = _nlen[k]
 		var pc: Vector3 = p[par]

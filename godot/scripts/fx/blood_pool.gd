@@ -6,13 +6,15 @@ extends MeshInstance3D
 ## start (top_height, the exact drawn ground) and interpolated by the sim.
 ## The depths go into a float texture; the mesh is a grid draped on the ground that reads it
 ## (shaders/blood_pool.gdshader: smooth edge, deep / thin colour, meniscus, gloss, bubbles).
-const N := 160
-const CELL := 0.04                 # m: the grid is N * CELL = 6.4 m across
-const GROUND_N := 41               # ground samples per side (16 cm apart)
+const N := 256
+const CELL := 0.04                 # m: the grid is N * CELL = 10.24 m across (room to run downhill: never cut off)
+const GROUND_N := 65               # ground samples per side (16 cm apart); the draped mesh uses them too
 const ITERS := 6                   # flow iterations per frame
-const MESH_N := 64                 # draped mesh resolution (10 cm: hugs the ground)
+const MESH_N := 64                 # draped mesh: one vertex per ground sample (16 cm)
 const SIM := "res://scripts/fx/BloodPoolSim.cs"
 const SHADER := preload("res://shaders/blood_pool.gdshader")
+const HALO := preload("res://shaders/blood_halo.gdshader")
+var _halo: ShaderMaterial
 
 var terrain
 var t := 0.0                       # seconds since it started
@@ -28,6 +30,7 @@ var _upl := 0.0
 var _seed := 0.0
 
 func _init(p_terrain, at: Vector3, radius: float, p_grow_t: float) -> void:
+	var t0 := Time.get_ticks_usec()
 	terrain = p_terrain
 	grow_t = p_grow_t
 	volume = 0.012 * pow(radius / 1.15, 2.0)
@@ -43,7 +46,7 @@ func _init(p_terrain, at: Vector3, radius: float, p_grow_t: float) -> void:
 	_sim.Setup(N, CELL, gr, GROUND_N, _seed)
 	_tex = ImageTexture.create_from_image(_sim.MakeImage())
 	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_build_mesh()
+	_build_mesh(gr)
 	var m := ShaderMaterial.new()
 	m.shader = SHADER
 	m.render_priority = 2
@@ -51,9 +54,18 @@ func _init(p_terrain, at: Vector3, radius: float, p_grow_t: float) -> void:
 	m.set_shader_parameter("seed", _seed)
 	m.set_shader_parameter("grid_m", size)
 	material_override = m
+	# the WET HALO: a second pass that darkens the dirt round the pool where blood has soaked in
+	_halo = ShaderMaterial.new()
+	_halo.shader = HALO
+	_halo.render_priority = 1
+	_halo.set_shader_parameter("depth_tex", _tex)
+	_halo.set_shader_parameter("seed", _seed)
+	_halo.set_shader_parameter("grid_m", size)
+	m.next_pass = _halo
+	if OS.get_environment("BMX_BLOOD_PROBE") != "": print("BLOOD pool setup %.1f ms" % ((Time.get_ticks_usec() - t0) / 1000.0))
 
 ## the ground under the grid, draped (+1.6 cm so it never flickers into it)
-func _build_mesh() -> void:
+func _build_mesh(gr: PackedFloat32Array) -> void:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var size := N * CELL
@@ -65,7 +77,7 @@ func _build_mesh() -> void:
 			var z := _o.z + v * size
 			st.set_uv(Vector2(u, v))
 			st.set_normal(Vector3.UP)
-			st.add_vertex(Vector3(x, terrain.top_height(x, z) + 0.03, z))
+			st.add_vertex(Vector3(x, gr[i + j * GROUND_N] + 0.03, z))   # MESH_N = GROUND_N - 1: the samples
 	for j in MESH_N:
 		for i in MESH_N:
 			var a := i + j * (MESH_N + 1)
@@ -81,6 +93,7 @@ func _process(dt: float) -> void:
 	if dt <= 0.0: return
 	t += dt
 	(material_override as ShaderMaterial).set_shader_parameter("pool_t", t)
+	_halo.set_shader_parameter("pool_t", t)
 	if not growing: return
 	# the pour: volume * (1 - e^(-t/T)) in total by now
 	var want := volume * (1.0 - exp(-t / grow_t))
@@ -97,7 +110,16 @@ func _process(dt: float) -> void:
 	# long after the pour it has settled: stop simulating
 	if t > grow_t * 4.0: growing = false
 
+## blood depth (m) under a world point (0 off the pool)
+func depth_at(x: float, z: float) -> float:
+	if _wiped: return 0.0
+	return _sim.DepthAt(int((x - _o.x) / CELL), int((z - _o.z) / CELL))
+
+var _wiped := false
 func wipe(_now_t: float, len: float) -> void:
+	_wiped = true
+	if _halo: _halo.set_shader_parameter("wipe_at", t)
+	if _halo: _halo.set_shader_parameter("wipe_len", len)
 	var m := material_override as ShaderMaterial
 	m.set_shader_parameter("wipe_at", t)
 	m.set_shader_parameter("wipe_len", len)
