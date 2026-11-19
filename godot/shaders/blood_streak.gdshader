@@ -30,7 +30,9 @@ void vertex() {
 	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	// pull a little toward the camera so it never flickers into the ground (as the tyre tracks)
 	vec3 view = (MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
-	VERTEX = (inverse(MODELVIEW_MATRIX) * vec4(view - normalize(view) * 0.035, 1.0)).xyz;
+	// more the further away (depth precision drops with distance): no z-fighting / clipping into the ground
+	float vd = length(view);
+	VERTEX = (inverse(MODELVIEW_MATRIX) * vec4(view - view / max(vd, 1e-3) * (0.04 + vd * 0.004), 1.0)).xyz;
 }
 
 void fragment() {
@@ -49,7 +51,9 @@ void fragment() {
 		float edge = 0.6 + 0.3 * bn(w * 7.0 + seed) - 0.3 * (1.0 - str);
 		float band = 1.0 - smoothstep(edge - 0.35, edge, abs(u));
 		// streaks: thin lines across, long along (cloth / skin dragging through it)
-		float fine = bn(vec2(x * 140.0 + seed * 7.0, y * 0.9 + seed));
+		float fine = bn(vec2(x * 70.0 + seed * 7.0, y * 0.9 + seed));
+		// fine streaks fade to their average once they're smaller than a pixel (no shimmer)
+		fine = mix(fine, 0.5, smoothstep(0.3, 0.8, fwidth(x * 70.0)));
 		float mid = bn(vec2(x * 45.0 - seed, y * 0.5));
 		float lines = fine * 0.55 + mid * 0.45;
 		// dry-brush: where there's little blood only the strongest streaks print
@@ -63,22 +67,34 @@ void fragment() {
 		a *= mix(0.55, 1.0, thick);                      // a thin film is see-through
 		fresh_in = 0.6;
 	} else if (v_c.w < 1.5) {
-		// splat: a noisy blob with a few droplets thrown round it
-		vec2 p = UV * 2.0 - 1.0;
-		float r = length(p);
-		float ang = atan(p.y, p.x);
-		float edge = 0.38 + 0.22 * bn(vec2(ang * 2.2 + seed, seed)) + 0.12 * bn(w * 14.0 + seed);
-		edge *= 0.7 + 0.3 * str;
-		a = 1.0 - smoothstep(edge - 0.04, edge, r);
-		// droplets: one maybe per small cell, more toward the middle
-		vec2 cell = floor(w * 22.0);
-		vec2 fc = fract(w * 22.0) - 0.5;
+		// splat: a few merged lobes (random sizes / places), the outline warped, never a circle
+		vec2 p0 = UV * 2.0 - 1.0;
+		float r = length(p0);
+		vec2 p = p0 + (vec2(bn(p0 * 2.3 + seed), bn(p0 * 2.3 + seed + 5.3)) - 0.5) * 0.8;
+		float f = 0.0;
+		for (int k = 0; k < 4; k++) {
+			float fk = float(k);
+			vec2 c = (vec2(bh(vec2(seed, fk)), bh(vec2(fk + 2.7, seed))) - 0.5) * 0.9;
+			float rr = (0.12 + 0.2 * bh(vec2(seed + fk, 3.3))) * (k == 0 ? 1.4 : 1.0);
+			f += rr * rr / (dot(p - c, p - c) + 1e-4);
+		}
+		f *= 0.6 + 0.4 * str;
+		f += (bn(w * 8.0 + seed) - 0.5) * 0.15;
+		a = smoothstep(0.85, 1.05, f) * step(r, 1.0);
+		float edge = 0.6;
+		// droplets: a few bigger ones thrown just outside the blob, soft-edged (tiny hard dots inside it
+		// were smaller than a pixel from a few metres away and shimmered like it was cutting into the ground)
+		vec2 cell = floor(w * 9.0);
+		vec2 fc = fract(w * 9.0) - 0.5;
 		float hsh = bh(cell + seed);
-		vec2 off = (vec2(bh(cell + 3.1), bh(cell + 7.7)) - 0.5) * 0.5;
-		float dr = 0.12 + 0.2 * bh(cell + 1.9);
-		float drop = step(length(fc - off), dr) * step(1.0 - 0.55 * (1.0 - r) * str, hsh) * step(r, 0.98);
+		vec2 off = (vec2(bh(cell + 3.1), bh(cell + 7.7)) - 0.5) * 0.45;
+		float dr = 0.1 + 0.12 * bh(cell + 1.9);
+		float dd = length(fc - off) - dr;
+		float aa = fwidth(dd) + 1e-4;
+		float ring = smoothstep(0.35, 0.6, r) * (1.0 - smoothstep(0.85, 1.0, r));
+		float drop = (1.0 - smoothstep(-aa, aa, dd)) * step(0.82 - 0.12 * str, hsh) * ring;
 		a = max(a, drop);
-		thick = 1.0 - smoothstep(0.0, edge, r) * 0.7;
+		thick = smoothstep(1.0, 3.5, f);
 		fresh_in = 0.15;
 	} else {
 		// pool (blood.gd grows the quad): a thick glossy puddle, lobed edge (it runs into the dips),

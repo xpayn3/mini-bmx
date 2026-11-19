@@ -27,6 +27,14 @@ var _t := 0.0
 var _air := PackedByteArray()
 var _bleed := PackedFloat32Array()
 var _last: Array = []
+## hit splats are projected Decals (they hug every bump of the ground, never clip or flicker): one of
+## SPLAT_KINDS textures made once (BloodSplatTex.cs), random turn / size / stretch; ground layer only
+const SPLAT_KINDS := 8
+const SPLAT_MAX := 160
+const DRY_T := 45.0
+var _splat_tex: Array = []
+var _splat_orm: ImageTexture
+var _decals: Array = []
 var _slid := PackedFloat32Array()   # how far each part has smeared since it started sliding (ramps the smear in)
 ## a FATAL crash (> FATAL_SPEED, or a limb torn off): once the body lies still a pool of blood spreads from
 ## under the chest (and each stump), slowly, to POOL_R, while he stays down; it stays until a respawn
@@ -36,10 +44,9 @@ const POOL_T := 9.0             # s, how fast it spreads (most of it in the firs
 const POOL_MAX := 8
 var _fatal := false
 var _rest_t := 0.0
-var _pool_mm: MultiMesh
-var _pools: Array = []          # {i, at: Vector3, n: Vector3, t, r}
-var _pool_next := 0
-var _pool_grow := false
+const POOL := preload("res://scripts/fx/blood_pool.gd")
+var _pools: Array = []          # blood_pool.gd nodes still spreading (this crash)
+var _all_pools: Array = []      # every pool on the ground (freed after a respawn wipe)
 var probe := false
 ## torn-off limbs: a fast crash (> SEVER_SPEED) tears off the first limb that hits the ground hard enough
 ## (> 3), any limb hit > SEVER_HIT tears it off; at most SEVER_MAX limbs per crash. A hand / foot hit
@@ -96,18 +103,6 @@ func _init(p_terrain, p_fx) -> void:
 	mi.multimesh = mm
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mi)
-	_pool_mm = MultiMesh.new()
-	_pool_mm.transform_format = MultiMesh.TRANSFORM_3D
-	_pool_mm.use_custom_data = true
-	_pool_mm.mesh = q
-	_pool_mm.instance_count = POOL_MAX
-	_pool_mm.visible_instance_count = 0
-	_pool_mm.custom_aabb = mm.custom_aabb
-	var pmi := MultiMeshInstance3D.new()
-	pmi.name = "blood_pools"
-	pmi.multimesh = _pool_mm
-	pmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(pmi)
 	# the stump caps (body side + the torn-off piece's end): flattened dark red
 	_stump_mesh = SphereMesh.new()
 	_stump_mesh.radius = 0.05
@@ -139,7 +134,6 @@ func _process(dt: float) -> void:
 	_t += dt
 	mat.set_shader_parameter("now", _t)
 	if _jn > 0: _jet_step(minf(dt, 0.05))
-	if _pool_grow: _grow_pools(dt)
 
 ## one drop of the jet: at p going v (already moved `ahead` seconds along, so drops born within one
 ## frame spread out along the stream instead of bunching)
@@ -200,6 +194,17 @@ func _put(origin: Vector3, n: Vector3, along: Vector3, width: float, length: flo
 	var zd := (along - n * along.dot(n)).normalized()
 	var xd := n.cross(zd).normalized()
 	var b := Basis(xd * width, n, zd * length)
+	# a flat sheet on bumpy ground: lift it until no part of it is under the ground (the exact drawn
+	# mesh height, Terrain.top_height), so it never z-fights / cuts into it (it flickered)
+	var lift := 0.0
+	for k in 9:
+		var fx := (float(k % 3) - 1.0) * 0.5
+		var fz := (float(k / 3) - 1.0) * 0.5
+		var pt := origin + xd * (width * fx) + zd * (length * fz)
+		var g := _ground(pt.x, pt.z) + 0.025
+		# the sheet's height at pt (pt.y) vs the ground there, measured along the sheet's normal
+		lift = maxf(lift, (g - pt.y) / maxf(n.y, 0.3))
+	origin += n * lift
 	var i := _next
 	_next = (i + 1) % MAX
 	_count = mini(_count + 1, MAX)
@@ -214,23 +219,59 @@ func smear(a: Vector3, b: Vector3, width: float, strength: float) -> void:
 	var ln := d.length()
 	if ln < 1e-3: return
 	var mid := (a + b) * 0.5
-	_put(mid + Vector3(0, 0.012, 0), _normal(mid.x, mid.z), d, width, ln + width * 0.35, strength, 0)
+	_put(mid + Vector3(0, 0.03, 0), _normal(mid.x, mid.z), d, width, ln + width * 0.35, strength, 0)
 	smears += 1
 	if probe and smears % 5 == 1: print("BLOOD smear #%d len=%.2f w=%.2f s=%.2f" % [smears, ln, width, strength])
 
 ## a splat (and droplets) where something hit the ground
 func splat(at: Vector3, size: float, strength: float, vel := Vector3.ZERO, drops := true) -> void:
 	var g := _ground(at.x, at.z)
-	var p := Vector3(at.x, g + 0.014, at.z)
+	var p := Vector3(at.x, g + 0.03, at.z)
 	var fwd := Vector3(vel.x, 0, vel.z)
 	if fwd.length() < 0.1: fwd = Vector3(randf() - 0.5, 0, randf() - 0.5)
 	# stretched a little the way it was going
 	var k := clampf(fwd.length() / 8.0, 0.0, 0.6)
-	_put(p, _normal(p.x, p.z), fwd, size, size * (1.0 + k), strength, 1)
+	_decal(Vector3(at.x, g, at.z), _normal(at.x, at.z), fwd, size, size * (1.0 + k), strength)
 	if fx != null and drops:
 		for j in int(4 + 8 * strength):
 			var dv := Vector3((randf() - 0.5) * 2.4, 0.8 + randf() * 1.8, (randf() - 0.5) * 2.4) + Vector3(vel.x, 0, vel.z) * 0.25
 			fx.chunk(p + Vector3(0, 0.08, 0), dv, Color(0.2, 0.01, 0.01), 0.012, 0.9)
+
+## a splat as a Decal: projected down onto the ground (layer GROUND_LAYER only, so never the rider / bike)
+func _decal(at: Vector3, n: Vector3, along: Vector3, width: float, length: float, strength: float) -> void:
+	if _splat_tex.is_empty():
+		var gen = load("res://scripts/fx/BloodSplatTex.cs").new()
+		for i in SPLAT_KINDS:
+			_splat_tex.append(ImageTexture.create_from_image(gen.Make(1000 + i * 77, 128)))
+		var orm := Image.create_empty(4, 4, false, Image.FORMAT_RGB8)
+		orm.fill(Color(1.0, 0.16, 0.0))   # AO, roughness (wet: glossy), metal
+		_splat_orm = ImageTexture.create_from_image(orm)
+	var d := Decal.new()
+	d.texture_albedo = _splat_tex[randi() % SPLAT_KINDS]
+	d.texture_orm = _splat_orm
+	d.cull_mask = terrain.GROUND_LAYER
+	d.size = Vector3(width * 2.0, 0.6, length * 2.0)   # the texture's splat fills ~half its square
+	d.upper_fade = 0.2
+	d.lower_fade = 0.2
+	d.normal_fade = 0.3
+	d.distance_fade_enabled = true
+	d.distance_fade_begin = 45.0
+	d.distance_fade_length = 15.0
+	var zd := (along - n * along.dot(n))
+	zd = zd.normalized() if zd.length() > 1e-3 else n.cross(Vector3.RIGHT).normalized()
+	var xd := n.cross(zd).normalized()
+	add_child(d)
+	d.global_transform = Transform3D(Basis(xd, n, zd).rotated(n, randf_range(-0.6, 0.6)), at)
+	var a := clampf(0.8 + 0.2 * strength, 0.0, 1.0)
+	d.modulate = Color(1, 1, 1, 0.0)
+	var tw := d.create_tween()
+	tw.tween_property(d, "modulate", Color(1, 1, 1, a), 0.15)            # soaks in
+	tw.tween_property(d, "modulate", Color(0.55, 0.42, 0.36, a), DRY_T)  # dries darker / browner
+	_decals.append(d)
+	laid += 1
+	while _decals.size() > SPLAT_MAX:
+		var old = _decals.pop_front()
+		if is_instance_valid(old): old.queue_free()
 
 ## the crash starts: a fast fall already has the rider bleeding a little everywhere
 func crash_start(speed: float) -> void:
@@ -243,7 +284,6 @@ func crash_start(speed: float) -> void:
 	_rest_t = 0.0
 	_pools.clear()
 	_pools_started = false
-	_pool_grow = true
 	_severed = 0
 	var base := clampf((speed - 4.0) / 12.0, 0.0, 1.0)
 	_bleed.resize(BLEED_K.size())
@@ -344,29 +384,12 @@ func _check_rest(pts: Array, prv: Array, h: float) -> void:
 
 func _add_pool(at: Vector3, r: float) -> void:
 	if terrain.surface(at.x, at.z) == 2: return   # in water: it washes away
-	var g := Vector3(at.x, _ground(at.x, at.z) + 0.016, at.z)
-	var i := _pool_next
-	_pool_next = (i + 1) % POOL_MAX
-	for k in range(_pools.size() - 1, -1, -1):
-		if _pools[k].i == i: _pools.remove_at(k)
-	_pools.append({i = i, at = g, n = _normal(g.x, g.z), t = 0.0, r = r})
-	_pool_mm.set_instance_custom_data(i, Color(randf() * 50.0, _t, 1.0, 2.0))
-	_pool_mm.visible_instance_count = maxi(_pool_mm.visible_instance_count, i + 1)
-	_put_pool(_pools[-1])
-
-func _put_pool(pl: Dictionary) -> void:
-	# spreads fast at first, then creeps: r(t) = R (1 - e^(-t/T)), never quite stops while he's down
-	var rr: float = maxf(0.04, float(pl.r) * (1.0 - exp(-float(pl.t) / POOL_T)))
-	var n: Vector3 = pl.n
-	var zd := Vector3.FORWARD - n * n.dot(Vector3.FORWARD)
-	zd = zd.normalized()
-	var xd := n.cross(zd).normalized()
-	_pool_mm.set_instance_transform(pl.i, Transform3D(Basis(xd * rr * 2.0, n, zd * rr * 2.0), pl.at))
-
-func _grow_pools(dt: float) -> void:
-	for pl in _pools:
-		pl.t += dt
-		_put_pool(pl)
+	var pl = POOL.new(terrain, at, r, POOL_T)
+	add_child(pl)
+	_pools.append(pl)
+	_all_pools.append(pl)
+	while _all_pools.size() > POOL_MAX:
+		(_all_pools.pop_front() as Node).queue_free()
 
 ## tests (BMX_SPIN_PROBE): how fast / how far the torso turns while crashed (per game second)
 var _spin_probe := OS.get_environment("BMX_SPIN_PROBE") != ""
@@ -463,8 +486,8 @@ func _bleed_wounds(pts: Array, prv: Array, h: float, dt: float) -> void:
 
 func crash_end() -> void:
 	_sever_ready = false
-	_pool_grow = false
-	_pools.clear()        # the pools stay where they are, they just stop spreading
+	for pl in _pools: pl.growing = false   # the pools stay where they are, they just stop spreading
+	_pools.clear()
 	_pools_started = false
 	_fatal = false
 	for w in _wounds:
@@ -482,3 +505,18 @@ func crash_end() -> void:
 func clear() -> void:
 	mat.set_shader_parameter("wipe_t", _t)
 	mat.set_shader_parameter("wipe_len", WIPE)
+	# splat decals fade with it, then go
+	for d in _decals:
+		if not is_instance_valid(d): continue
+		var tw := (d as Decal).create_tween()
+		var c: Color = d.modulate
+		tw.tween_property(d, "modulate", Color(c.r, c.g, c.b, 0.0), WIPE)
+		tw.tween_callback((d as Node).queue_free)
+	_decals.clear()
+	# pools fade with it, then go
+	for pl in _all_pools:
+		if not is_instance_valid(pl): continue
+		pl.wipe(_t, WIPE)
+		get_tree().create_timer(WIPE + 0.2).timeout.connect((pl as Node).queue_free)
+	_all_pools.clear()
+	_pools.clear()
