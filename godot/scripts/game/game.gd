@@ -555,6 +555,10 @@ func get_up() -> void:
 func on_trick(trick: String) -> void:
 	if hud: hud.on_trick(trick)
 
+func on_style(points: int, label: String) -> void:
+	if hud: hud.on_style(points, label)
+	if OS.get_environment("BMX_TRICK") != "": print("STYLE +%d %s" % [points, label])   # tests
+
 func on_takeoff() -> void:
 	takeoff = Vector3(phys.x, phys.y, phys.z)
 	air_peak = phys.y

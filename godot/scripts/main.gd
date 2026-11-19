@@ -296,6 +296,9 @@ func _autotest(seconds: float) -> void:
 	while (Time.get_ticks_msec() - t0) / 1000.0 < seconds:
 		var el := (Time.get_ticks_msec() - t0) / 1000.0
 		if OS.get_environment("BMX_IDLE_FOR") != "": pedal = el >= float(OS.get_environment("BMX_IDLE_FOR"))   # tests: stand still, then ride off
+		if OS.get_environment("BMX_HOLD_BRAKE") != "" and el >= float(OS.get_environment("BMX_HOLD_BRAKE")):   # tests: brake held to the end
+			pedal = false; Input.action_press("brake")
+			if int(el * 4) % 2 == 0 and int(el * 40) % 20 == 0: print("HOLD t=%.1f v=%.3f pos=(%.2f, %.2f) slope=%.2f" % [el, game.phys.v, game.phys.x, game.phys.z, game.phys._g_pitch])
 		var stop_at := OS.get_environment("BMX_STOP_AT")   # tests: "a,b" = pedal, brake to a stop from a s, ride off again at b s
 		if stop_at != "":
 			var sa := stop_at.split(",")

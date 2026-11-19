@@ -44,6 +44,7 @@ var jump_last := Vector3.ZERO   # air time, distance, height of the last landed 
 var jump_best := Vector3.ZERO
 var jumps := 0
 var tricks := 0
+var style_pop: StylePop
 var trick_last := ""
 var trail_i := -1       # nearest trail centreline point
 var trail_d := INF      # how far off the trail centreline (m)
@@ -101,6 +102,11 @@ func _ready() -> void:
 	getup.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	getup.visible = false
 	root.add_child(getup)
+	style_pop = StylePop.new()
+	style_pop.set_anchors_preset(Control.PRESET_CENTER_RIGHT)
+	style_pop.size = Vector2(380, 130); style_pop.position = Vector2(-400, -150)
+	style_pop.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(style_pop)
 	air_card = AirCard.new(); air_card.hud = self
 	air_card.set_anchors_preset(Control.PRESET_CENTER_TOP)
 	air_card.size = Vector2(230, 110); air_card.position = Vector2(-115, 40)   # under the stamina bar
@@ -147,11 +153,16 @@ func on_landing(air_time: float, dist: float, height: float, impact: float) -> v
 		jump_last = Vector3(air_time, dist, height)
 		jump_best = Vector3(maxf(jump_best.x, air_time), maxf(jump_best.y, dist), maxf(jump_best.z, height))
 
+## style points for a landed jump (bike_physics._style_points): the popup chains them into a combo
+func on_style(points: int, label: String) -> void:
+	if style_pop: style_pop.add(points, label)
+
 func on_trick(trick: String) -> void:
 	tricks += 1
 	trick_last = trick
 
 func on_crash() -> void:
+	if style_pop: style_pop.bail()
 	air_card.bail()
 
 func _unhandled_input(e: InputEvent) -> void:
@@ -1120,3 +1131,71 @@ class AirCard extends Control:
 			var rw := f.get_string_size(record, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x + 24
 			draw_style_box(UITheme.box(Color("ffc21a"), 10, 0), Rect2(size.x / 2 - rw / 2, -10, rw, 20))
 			draw_string(f, Vector2(size.x / 2 - rw / 2, 4), record, HORIZONTAL_ALIGNMENT_CENTER, rw, 10, Color("3a2400"))
+
+
+## Style points, right side: the trick line, "+1,250 x2" (a combo multiplies every landing chained within
+## COMBO_GAP seconds), and the ride's STYLE total. Points count once the landing holds (BANK s); a crash
+## before that drops them ("BAILED") and ends the combo.
+class StylePop extends Control:
+	const COMBO_GAP := 4.0
+	const BANK := 0.7
+	var total := 0
+	var combo := 0
+	var since := 99.0      # seconds since the last scored landing
+	var label := ""
+	var pts := 0
+	var pend := 0.0        # time the shown points have been waiting to bank (-1 = banked)
+	var bailed := false
+	var a := 0.0
+	var pop := 0.0
+
+	func add(p: int, l: String) -> void:
+		combo = combo + 1 if since < COMBO_GAP else 1
+		since = 0.0
+		pts = p * combo
+		label = l
+		pend = 0.0
+		bailed = false
+		a = 1.0; pop = 1.0
+
+	func bail() -> void:
+		if pend >= 0.0 and pend < BANK and a > 0.0:
+			bailed = true; pend = -1.0; a = 1.0; pop = 0.6
+		combo = 0; since = 99.0
+
+	func _process(dt: float) -> void:
+		since += dt
+		if pend >= 0.0:
+			pend += dt
+			if pend >= BANK:
+				total += pts; pend = -1.0
+		if since > COMBO_GAP and not bailed: combo = 0
+		pop = maxf(0.0, pop - dt * 4.0)
+		if since > 2.6 or (bailed and since > 1.6): a = maxf(0.0, a - dt * 2.0)
+		queue_redraw()
+
+	static func _num(n: int) -> String:
+		var t := str(absi(n))
+		var out := ""
+		while t.length() > 3:
+			out = "," + t.substr(t.length() - 3) + out
+			t = t.substr(0, t.length() - 3)
+		return t + out
+
+	func _draw() -> void:
+		var f := UITheme.font(true)
+		var sh := Color(0, 0, 0, 0.45)
+		var r := size.x - 4.0
+		if total > 0:   # the running total stays, faint
+			var tt := "STYLE  " + _num(total)
+			draw_string(f, Vector2(1, 121), tt, HORIZONTAL_ALIGNMENT_RIGHT, r, 15, sh)
+			draw_string(f, Vector2(0, 120), tt, HORIZONTAL_ALIGNMENT_RIGHT, r, 15, Color(1, 1, 1, 0.55 + 0.45 * a))
+		if a <= 0.0: return
+		var col := Color(1, 1, 1, a)
+		draw_string(f, Vector2(1, 33), label, HORIZONTAL_ALIGNMENT_RIGHT, r, 22, Color(0, 0, 0, 0.45 * a))
+		draw_string(f, Vector2(0, 32), label, HORIZONTAL_ALIGNMENT_RIGHT, r, 22, col)
+		var big := 38 + int(10.0 * pop)
+		var line := "BAILED" if bailed else "+" + _num(pts) + ("   x%d" % combo if combo > 1 else "")
+		var c2 := Color(0.95, 0.3, 0.25, a) if bailed else (Color(UITheme.ACCENT, a) if pend < 0.0 else Color(1, 1, 1, a))
+		draw_string(f, Vector2(2, 84), line, HORIZONTAL_ALIGNMENT_RIGHT, r, big, Color(0, 0, 0, 0.5 * a))
+		draw_string(f, Vector2(0, 82), line, HORIZONTAL_ALIGNMENT_RIGHT, r, big, c2)

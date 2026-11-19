@@ -179,6 +179,17 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   pedalling out of the saddle swings the bike ~±6° (±10° sprinting) under a steady body; elbows bend
   back and down, only a little out (the arm IK pole's sideways part scales with `elbowsOut`). Saved poses migrate once (`RiderPanels.POSE_VER` / `POSE_RETUNED`: only values still
   at the old default change). `BMX_LEAN_SHOT=prefix` saves shots of the first deep leans.
+- **Posture is the player's**: neutral (stick centred) is an upright attack position (torso ~30 deg from vertical);
+  the right stick forward folds the rider down into the full tuck (`aero` in `rider.gd`, nothing tucks by itself at
+  speed any more), back sits up tall and back.
+- **Skeleton safety limits** (`rider.gd`, just before the torso length clamp): hips in a box over the bike, the
+  torso bends only -26..80 deg forward and +-34 deg sideways from the bike's up; body counter-roll capped at ~50 deg.
+  Whatever stacks up (tuck, spin, lean, landing, sliders) the body can't be mangled.
+- **Air spin pose**: spinning in the air the rider sits tall and compact (knees in), head + shoulders lead.
+- **Style points** (`bike_physics._style_points` -> `hud.StylePop`): air time, 360s, flips, tweak, x1.5 clean landing,
+  combos (landings within 4 s chain and multiply); banked after 0.7 s, a crash before that = BAILED.
+- **Brake to a stop holds** (`brake_stop`): no creeping, even on slopes; a fresh brake press from a standstill backs up
+  (`brake_back`). Rolling backwards the cranks turn back with the wheel. Test: `BMX_HOLD_BRAKE=secs` (`HOLD` lines).
 - **Wheelie / manual pose** (`rider.gd`, `slope` from the physics): the front up on the ground is not a climb; the
   rider sits back, upright, arms long (leaning into the raised bars mangled the arms). Climbs use the ground slope.
 - **Joint limits** (`Rider.limb_ik`): elbows / knees are hinges that bend between `ELBOW_MIN`–`ELBOW_MAX` (12–150°) / `KNEE_MIN`–`KNEE_MAX` (4–160°); where a limb lines up with its pole the bend blends to a second pole (elbows: out + down, knees: up) instead of flipping, and the bend may swing round the limb at most `BEND_RATE` (6 rad/s). The slope body-levelling follows the bike pitch at most `PITCH_LEVEL_RATE` (it used to whip the torso mid-flip).

@@ -66,7 +66,8 @@ var edge_s := 0.0   # right stick held at its top / bottom edge in the air: the 
 var spin_hold := 0.0; var spin_k := 1.0
 # flat spins: the right stick held at its left / right edge in the air spins the bike round (180 / 360),
 # built up gently and faster the longer it's held, eased out when let go (stick_yaw rad/s on top of air_yaw)
-var yaw_edge_s := 0.0; var yaw_hold := 0.0; var stick_yaw := 0.0   # how long it's been held one way, and the spin-rate multiplier that gives
+var yaw_edge_s := 0.0; var yaw_hold := 0.0; var stick_yaw := 0.0
+var style_air := 0.0   # this jump's tweak: seconds x how far the stick swung the bike about (style points)   # how long it's been held one way, and the spin-rate multiplier that gives
 var pad := false   # the player is on a gamepad (Settings.pad_active): triggers don't tilt / throw in the air
 var wheel_f := 0.0; var wheel_r := 0.0; var crank := 0.0; var pedal := 0.0
 var yaw_rate := 0.0; var shake := 0.0
@@ -88,6 +89,8 @@ var lift_t := 0.0; var hop_block := false; var hop_held := false
 var prep := 0.0; var land_prep := 0.0; var pop_fired := false
 var lip_scan := 0; var lip_state := 0; var lip_last := 0.0   # lip_state: 0 unknown, 1 none in sight, 2 lip_last valid
 var y_prev := NAN; var pump_acc := 0.0; var brake_heat := 0.0
+var brake_stop := false   # braked to a standstill: held in place while the brake stays on
+var brake_back := false   # brake pressed fresh from a standstill: backs the bike up
 var dust_acc := 0.0; var chunk_acc := 0.0
 var joint_rock = null
 var distance := 0.0
@@ -369,6 +372,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	# over smoothly instead of snapping it
 	air_stick += (stick_raw - air_stick) * (1.0 - exp(-dt * float(T.get("stickAirEase", 3.5))))
 	if not air: air_stick = Vector2.ZERO
+	else: style_air += minf(air_stick.length(), 1.0) * dt
 	air_lean += (lean_in - air_lean) * minf(1.0, dt * 6)
 	# the rider tucks into a flip as well as when Space is held
 	var pull_t := maxf(1.0 if air and inp.hop and not air_lock_h else 0.0, 0.7 * absf(flip_in) if air else 0.0)
@@ -477,7 +481,16 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		a -= (roll + T.airDrag / (ts * ts) * v * absf(v)) * carry
 		if in_water: a -= 0.7 * v
 		v = clampf(v + a * dt, -3, 24 * maxf(1.0, ts))
-		if brake and v <= 0.3: v += (-1.3 - v) * minf(1.0, dt * 3)
+		# braked to a stop the brake holds the bike where it is (no creeping, even on a slope) until it's let
+		# go; pressing brake again from a standstill backs the bike up
+		if not brake:
+			brake_stop = false; brake_back = absf(v) < 0.3
+		elif v <= 0.3 and not brake_back:
+			brake_stop = true
+		if brake_stop:
+			v = 0.0
+		elif brake and brake_back and v <= 0.3:
+			v += (-1.3 - v) * minf(1.0, dt * 3)
 		if throttle < 0.1 and not brake and absf(v) < 0.05 and absf(_g_pitch) < 0.03: v = 0
 	if flow > 0:
 		flow_t += dt
@@ -939,7 +952,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			body_pw += (pitch_v - body_pw) * minf(1.0, dt * 4)
 		if now_air and not was_air:
 			if since_land < 0.5 and OS.get_environment("BMX_TRICK") != "": print("BOUNCE %.2fs after landing vy=%.2f pitch=%.2f" % [since_land, vy, pitch])   # tests
-			air = true; air_time = 0; flip_acc = 0.0; spin_acc = 0.0
+			air = true; air_time = 0; flip_acc = 0.0; spin_acc = 0.0; style_air = 0.0
 			# rider + bike fly off at the speed of their shared centre of mass: a bike kicked up by a roller
 			# while the body (on soft legs) lags behind doesn't launch the rider with it. In the air the
 			# two then move together (the legs only shift them about that centre)
@@ -1084,7 +1097,10 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	var w := v / RWF
 	wheel_f += w * dt
 	if not skid: wheel_r += v / RWR * dt
-	if pedal > 0.05:
+	if v < -0.05 and not air and not skid:
+		# rolling backwards the freewheel's pawls catch: the chain turns the cranks back with the wheel
+		crank += v / RWR / (2.78 * gear_k() * T.topSpeed) * dt
+	elif pedal > 0.05:
 		crank += crank_rate(w, gear_k(), T.topSpeed, sprint) * pedal * dt
 	elif not air:
 		var aL: float = host.pedal_a0[0]
@@ -1135,7 +1151,7 @@ func _land_trick(at: float) -> void:
 		crash_pending = "BACKWARDS!"
 		return
 	var flips := roundi(absf(flip_acc) / TAU)
-	var turns := roundi(absf(spin_acc) / TAU)   # flat spins landed facing forward again: 360, 720...
+	var turns := int((absf(spin_acc) + 0.6) / TAU)   # flat spins landed facing forward again (within ~35 deg): 360, 720...
 	if flips >= 1 or turns >= 1:
 		var trick := ""
 		if turns >= 1: trick = "%d" % (turns * 360)
@@ -1145,6 +1161,23 @@ func _land_trick(at: float) -> void:
 		host.flash(trick + "!")
 		if host.has_method("on_trick"): host.on_trick(trick)
 		flow_up()
+	_style_points(at, flips, turns)
+
+## style points for a landed jump: air time, spins, flips, tweaking the bike about with the stick, and a
+## clean (straight) landing bonus. The HUD chains them into combos and drops them if the rider goes down
+func _style_points(at: float, flips: int, turns: int) -> void:
+	if at < 0.35 or not host.has_method("on_style"): return
+	var pts := roundi(at * 250.0) + turns * 600 + flips * 1000 + roundi(minf(style_air, 3.0) * 400.0)
+	var parts := []
+	if turns >= 1: parts.append("%d" % (turns * 360))
+	if flips >= 1: parts.append(("%dx " % flips if flips > 1 else "") + ("BACKFLIP" if flip_acc > 0 else "FRONTFLIP"))
+	if style_air > 0.35: parts.append("TWEAK")
+	if parts.is_empty(): parts.append("BIG AIR" if at > 1.0 else "AIR")
+	var clean := absf(wrapf(slip, -PI, PI)) < 0.2 and absf(wrapf(pitch - _g_pitch, -PI, PI)) < 0.15
+	if clean:
+		pts = roundi(pts * 1.5)
+		parts.append("CLEAN")
+	host.on_style(pts, " + ".join(parts))
 
 ## Pivot (pirouette): slow, brake held and steering -> the rear swings round the front wheel, as far as you like
 func _pivot_step(dt: float, steer_input: float, brake_k: float) -> void:
