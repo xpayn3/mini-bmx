@@ -302,6 +302,11 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   top centre (the jump card is top left) in the WASTED type (same red condensed face, same squeeze, ~8.5 % of the screen tall), small "ENTERING" above.
   Letters stamp down one after another from 2.4x with an overshoot, white-hot cooling to red; a red rule draws out from
   the middle; out they drift apart and fade (~4 s). Real time; hidden with the HUD. Test: `BMX_AREA_AT=secs` freezes it.
+- **Helmet models** (`look.helmet`, `Rider.HELMETS`, picked in the garage Kit tab and the tuning card Look > Helmet; `Rider.use_helmet(id)`):
+  GLORY = the stock recolourable helmet + our goggles; **6D ATR-2** (black / silver skin) and **TLD SE5** (`assets/helmets/helmet_*.glb`, made by
+  `tools/export_helmets.py` + `tools/prep_helmet_textures.py` from the user's FBXs) are textured models with their own goggles + strap baked in
+  (glb extras `builtinGoggles`: the rider builds none; materials `tex_shell` / `tex_goggles` are not recoloured). Real brand logos on the
+  textures (6D, TLD, FXR, 100%): check before sharing the game. Unused: the Oakley Airbrake goggle maps from the same download.
 - Look: kits + a colour per part (helmet shell/peak, goggles, jersey, pants, gloves, shoes, knee pads).
 - **Knee pads** (`rider/knee_pad.gd` + `shaders/knee_cap.gdshader`, one `KneePad` per leg (`KneePad.new(side)`, -1 =
   left), posed in `update_pose` and `pose_ragdoll`): articulated so no part ever spans the bend: the cap sits on the

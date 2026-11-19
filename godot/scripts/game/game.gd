@@ -126,12 +126,7 @@ func _ready() -> void:
 	if rig.seat != null: rider.seat = rig.seat
 	var grip := rig.grip_mid()
 	rider.fit = Vector3((grip.x - 0.4388) * 0.5, ((grip.y - 0.9646) + (rig.crank_n.position.y - 0.297)) * 0.5, 0)
-	var hs: Node3D = load("res://assets/helmet.glb").instantiate()
-	var helmet := hs.find_child("helmet", true, false)
-	if helmet:
-		helmet.get_parent().remove_child(helmet)
-		rider.set_helmet(helmet)
-	hs.free()
+	rider.use_helmet(str(rider.look.get("helmet", "glory")))
 	cam = CameraRig.new()
 	cam.game = self
 	add_child(cam)

@@ -456,12 +456,7 @@ func _add_rider(existing: Rider = null) -> void:
 		return
 	rider.set_look(RiderPanels.load_look())
 	rider.set_style(rider_pose)
-	var hs: Node3D = load("res://assets/helmet.glb").instantiate()
-	var helmet := hs.find_child("helmet", true, false)
-	if helmet:
-		helmet.get_parent().remove_child(helmet)
-		rider.set_helmet(helmet)
-	hs.free()
+	rider.use_helmet(str(rider.look.get("helmet", "glory")))
 
 ## training rollers: an alloy frame with two drums under the rear tyre and one under the front;
 ## only there while the rider is on (the bike stands on them and spins in place)
@@ -544,12 +539,7 @@ func _update_stand_rider() -> void:
 		fill.light_color = Color(1.0, 0.9, 0.8); fill.light_energy = 1.1; fill.omni_range = 3.5
 		fill.light_volumetric_fog_energy = 0.0
 		stand_rider.add_child(fill)
-		var hs: Node3D = load("res://assets/helmet.glb").instantiate()
-		var helmet := hs.find_child("helmet", true, false)
-		if helmet:
-			helmet.get_parent().remove_child(helmet)
-			stand_rider.set_helmet(helmet)
-		hs.free()
+		stand_rider.use_helmet(str(stand_rider.look.get("helmet", "glory")))
 	elif not stand_on and stand_rider:
 		stand_rider.queue_free()
 		stand_rider = null
@@ -1444,6 +1434,10 @@ func _kit_page() -> void:
 	body.add_child(kits)
 	for g in RiderPanels.LOOK_ROWS:
 		_h(g[0].to_upper())
+		if g[0] == "Helmet":
+			body.add_child(UITheme.text("Model (the textured ones come with their own goggles)", SUB, Tokens.T_XS))
+			body.add_child(RiderPanels.helmet_picker(str(look.helmet), func(id):
+				look.helmet = id; _set_look(look); _set_tab("kit")))
 		if g[0] == "Kit":
 			body.add_child(UITheme.text("Knee pads design", SUB, Tokens.T_XS))
 			body.add_child(RiderPanels.pad_style_picker(str(look.padStyle), func(id):

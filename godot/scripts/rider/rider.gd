@@ -23,8 +23,16 @@ const NEUTRAL := {hipX = 0.0, hipY = 0.0, lean = 0.0, elbowsOut = 0.0, kneesOut 
 	kneesFwd = 0.0, kneeOutL = 0.0, kneeOutR = 0.0, heelFwd = 0.0, heelUp = 0.0, footAngle = 0.0, footOut = 0.0}
 ## lookpanel.js DEFAULT_LOOK
 const DEFAULT_LOOK := {shell = "#16171a", peak = "#ececec", goggleFrame = "#f2f2ee", lens = "#ff7a2a", strap = "#ff6a4d",
-	jersey = "#ff6a4d", pants = "#1d2b64", gloves = "#ffd21f", shoes = "#26292f", shoeAccent = "#d8232a", pads = "#1b1c20", padStyle = "enduro"}
+	jersey = "#ff6a4d", pants = "#1d2b64", gloves = "#ffd21f", shoes = "#26292f", shoeAccent = "#d8232a", pads = "#1b1c20", padStyle = "enduro", helmet = "glory"}
 ## where the helmet model sits on the head (head-local m / rad) and its scale
+## helmet models picked in the Look tab (look.helmet): id -> [label, glb]. The glory one is the stock helmet (recolourable
+## shell / peak, our goggles); the others come with textures and their own goggles (tools/export_helmets.py)
+const HELMETS := {
+	"glory": ["GLORY", "res://assets/helmet.glb"],
+	"6d_black": ["6D ATR-2 black", "res://assets/helmets/helmet_6d_black.glb"],
+	"6d_silver": ["6D ATR-2 silver", "res://assets/helmets/helmet_6d_silver.glb"],
+	"tld": ["TLD SE5", "res://assets/helmets/helmet_tld.glb"],
+}
 const HELMET_FIT := {x = 0.01, y = 0.0, tilt = 0.0, scale = 1.3}
 ## goggles (RiderGear.build_goggles): lens position / tilt / size, strap ellipse round the shell
 const SKI_GOGGLE_MESH := "res://assets/goggles/ski_goggle.obj"
@@ -66,6 +74,7 @@ var goggle_mats := {}
 var hand_mats := {}
 var helmet_mats := {}
 var helmet_model: Node3D = null
+var helmet_id := ""   # which HELMETS entry is on (set by use_helmet)
 var goggles: Node3D = null
 var action_cam: Node3D = null   # helmet-top action camera (ActionCam); its "Lens" is the Helmet camera view
 var action_cam_at := Vector3.ZERO   # where it's mounted (head space)
@@ -333,6 +342,15 @@ static func _shell_top(tris: PackedVector3Array, x: float) -> float:
 ## +X = face, +Y up). Adds the moto goggles with the strap hugging the shell.
 func set_helmet(model: Node3D) -> void:
 	var F := HELMET_FIT
+	var builtin: bool = bool((model.get_meta("extras", {}) as Dictionary).get("builtinGoggles", false))   # goggles are part of the model
+	if helmet_model and is_instance_valid(helmet_model):   # swapping helmets: the old one goes
+		helmet_model.get_parent().remove_child(helmet_model)
+		helmet_model.queue_free()
+		helmet_model = null
+	if goggles and is_instance_valid(goggles):
+		goggles.get_parent().remove_child(goggles)
+		goggles.queue_free()
+		goggles = null
 	for c in hel.get_children():
 		hel.remove_child(c)
 		c.queue_free()
@@ -363,7 +381,7 @@ func set_helmet(model: Node3D) -> void:
 			dup.resource_name = nm
 			mi.set_surface_override_material(si, dup)
 			helmet_mats[nm] = dup
-			if nm == "shell":
+			if nm == "shell" or nm == "tex_shell":
 				shell_tris.append_array(_surface_tris(mi.mesh, si, to_head))
 	head.add_child(w)
 	helmet_model = w
@@ -383,13 +401,14 @@ func set_helmet(model: Node3D) -> void:
 	if not shell_tris.is_empty():
 		hug = func(x: float, y: float, dx: float, dz: float) -> Variant:
 			return _hug(shell_tris, x, y, dx, dz)
-	goggles = GEAR.build_goggles(goggle_mats, GOGGLE_FIT, hug)
-	head.add_child(goggles)
-	var flap := HelmetFlap.new()   # loose strap tail that flaps with speed
-	flap.name = "StrapFlap"
-	flap.anchor_local = goggles.get_meta("flap_anchor", Vector3.ZERO)
-	flap.material_override = goggle_mats.strap
-	goggles.add_child(flap)
+	if not builtin:
+		goggles = GEAR.build_goggles(goggle_mats, GOGGLE_FIT, hug)
+		head.add_child(goggles)
+		var flap := HelmetFlap.new()   # loose strap tail that flaps with speed
+		flap.name = "StrapFlap"
+		flap.anchor_local = goggles.get_meta("flap_anchor", Vector3.ZERO)
+		flap.material_override = goggle_mats.strap
+		goggles.add_child(flap)
 	var top := _shell_top(shell_tris, 0.03) if not shell_tris.is_empty() else -1e9
 	if top < -1e8:   # no shell triangles: the helmet's bounding box top
 		top = 0.2
@@ -440,10 +459,31 @@ static func _hug(tris: PackedVector3Array, x: float, y: float, dx: float, dz: fl
 	return null if best == INF else 0.6 - best
 
 
+## put a HELMETS model on (loads the glb, mounts it like set_helmet); no-op when it is already on
+func use_helmet(id: String) -> void:
+	if not HELMETS.has(id):
+		id = "glory"
+	if id == helmet_id and helmet_model and is_instance_valid(helmet_model):
+		return
+	var hs: Node3D = load(HELMETS[id][1]).instantiate()
+	var helmet := hs.find_child("helmet", true, false)
+	if helmet == null:
+		hs.free()
+		return
+	helmet.get_parent().remove_child(helmet)
+	hs.free()
+	helmet_id = id
+	set_helmet(helmet)
+
+
 ## colours: {shell, peak, jersey, pants, gloves, shoes, shoeAccent, goggleFrame, lens, strap} as "#rrggbb"
 func set_look(l: Dictionary) -> void:
 	look.merge(l, true)
 	var L := look
+	var want := str(L.get("helmet", "glory"))
+	if hel != null and want != helmet_id and HELMETS.has(want):   # another helmet model: mount it (set_helmet re-applies the look)
+		use_helmet(want)
+		return
 	var c := func(m, k: String) -> void:
 		if m != null and L.get(k):
 			m.albedo_color = Color(L[k])
