@@ -38,9 +38,8 @@ var fade := 0.0              # 0..1 fading out
 var fading := false
 var _last := 0
 var rect: ColorRect
-var title: Label
+var title: WordView
 var sub: Label
-var band: ColorRect
 
 func _init(g) -> void:
 	game = g
@@ -54,47 +53,21 @@ func _init(g) -> void:
 	m.shader = sh
 	rect.material = m
 	add_child(rect)
-	# a dark band behind the letters
-	band = ColorRect.new()
-	band.color = Color(0, 0, 0, 0.55)
-	band.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	band.anchor_left = 0; band.anchor_right = 1; band.anchor_top = 0.5; band.anchor_bottom = 0.5
-	band.offset_top = -62; band.offset_bottom = 62
-	add_child(band)
-	title = Label.new()
-	title.text = "WASTED"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	# the word: drawn huge and squeezed narrow (WordView), no band behind it
+	title = WordView.new()
 	title.set_anchors_preset(Control.PRESET_FULL_RECT)
 	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var f := SystemFont.new()
-	f.font_names = PackedStringArray(["Pricedown", "Impact", "Haettenschweiler", "Arial Black", "Segoe UI"])
-	f.font_weight = 900
-	title.add_theme_font_override("font", f)
-	title.add_theme_font_size_override("font_size", 120)
-	title.add_theme_color_override("font_color", Color("b3201b"))
-	title.add_theme_color_override("font_outline_color", Color(0, 0, 0))
-	title.add_theme_constant_override("outline_size", 14)
-	title.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.6))
-	title.add_theme_constant_override("shadow_offset_x", 5)
-	title.add_theme_constant_override("shadow_offset_y", 6)
 	add_child(title)
 	sub = Label.new()
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	sub.anchor_left = 0; sub.anchor_right = 1; sub.anchor_top = 0.5; sub.anchor_bottom = 0.5
-	sub.offset_top = 70; sub.offset_bottom = 110
+	sub.anchor_left = 0; sub.anchor_right = 1; sub.anchor_top = 1; sub.anchor_bottom = 1
+	sub.offset_top = -64; sub.offset_bottom = -28
 	sub.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	sub.add_theme_font_override("font", UITheme.font(true))
 	sub.add_theme_font_size_override("font_size", 22)
 	sub.add_theme_color_override("font_color", Color(0.92, 0.9, 0.86))
-	sub.add_theme_color_override("font_outline_color", Color(0, 0, 0))
-	sub.add_theme_constant_override("outline_size", 6)
 	add_child(sub)
 	_show(0.0, 0.0, 0.0)
-
-func _ready() -> void:
-	title.resized.connect(func(): title.pivot_offset = title.size * 0.5)
-	title.pivot_offset = title.size * 0.5
 
 ## the crash started
 func start(reason: String) -> void:
@@ -148,13 +121,10 @@ func _show(k: float, blur: float, tk: float) -> void:
 	var m := rect.material as ShaderMaterial
 	m.set_shader_parameter("k", k)
 	m.set_shader_parameter("blur", blur)
-	# letters: punch in from big, settle with a tiny overshoot
-	var s := 1.0 + 0.6 * pow(1.0 - tk, 3.0) - 0.04 * sin(tk * PI)
-	title.scale = Vector2(s, s)
+	# letters: punch in from bigger, settle with a tiny overshoot
+	title.zoom = 1.0 + 0.25 * pow(1.0 - tk, 3.0) - 0.015 * sin(tk * PI)
 	title.modulate.a = tk
-	band.modulate.a = tk
-	band.scale.y = tk
-	band.pivot_offset = Vector2(0, 62)
+	title.queue_redraw()
 	sub.modulate.a = clampf(tk * 2.0 - 1.0, 0.0, 1.0)
 
 func _set_speed(sp: float) -> void:
@@ -169,3 +139,30 @@ func _exit_tree() -> void:
 
 static func _ease(x: float) -> float:
 	return x * x * (3.0 - 2.0 * x)
+
+
+## WASTED in caps, as big as the screen allows: the font is squeezed sideways (very condensed) so the
+## letters can be ~60 % of the screen tall and still fit its width
+class WordView extends Control:
+	const WORD := "WASTED"
+	const FILL_W := 0.94      # of the screen width
+	const CAP_H := 0.62       # cap height, of the screen height
+	var zoom := 1.0
+	var font: SystemFont
+	func _init() -> void:
+		font = SystemFont.new()
+		font.font_names = PackedStringArray(["Haettenschweiler", "Impact", "Bahnschrift", "Arial Black"])
+		font.font_weight = 900
+		font.multichannel_signed_distance_field = true   # stays sharp scaled up this much
+	func _draw() -> void:
+		if modulate.a <= 0.0: return
+		var fs := 200
+		var w := font.get_string_size(WORD, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		var cap := font.get_ascent(fs) * 0.74            # cap height ~ 0.74 of the ascent (condensed display faces)
+		var sy := size.y * CAP_H / cap * zoom
+		var sx := size.x * FILL_W / w * zoom
+		var c := size * 0.5
+		var base := Vector2(-w * 0.5, cap * 0.5)          # centred on the caps, in font units
+		draw_set_transform(c, 0.0, Vector2(sx, sy))   # flat: no stroke, no shadow
+		draw_string(font, base, WORD, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color("b3201b"))
+		draw_set_transform(Vector2.ZERO)
