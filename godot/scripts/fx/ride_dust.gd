@@ -87,6 +87,11 @@ var _feed_v := Vector3.ZERO
 var _feed_rate := 0.0
 var _feed_r := 0.3
 var _feed_fan := 30.0
+var _front_on := false
+var _front_p := Vector3.ZERO
+var _front_prev := Vector3.INF
+var _front_v := Vector3.ZERO
+var _front_rate := 0.0
 const PATCH_R := 0.24   # m: the contact patch, as small as the sim's 0.2 m cells allow
 var _pulse_t := 0.0
 var _gust := FastNoiseLite.new()
@@ -118,24 +123,36 @@ func attach(terrain, sun: DirectionalLight3D) -> void:
 func sim_step(dt: float, focus: Vector3, fwd: Vector3, wind: Vector2) -> void:
 	if sim == null: return
 	sim.wind = wind * 2.8   # m/s at gust strength 1
-	if _feed_on:
-		# dust comes only from the tyre's contact patch: small sources on the ground along the path the
-		# patch swept this frame, each spraying its own way (back / out / up, in gusts). The cloud is what
-		# the sim makes of that spray: it fans out, rolls and spreads from there.
-		_pulse_t += dt
-		var pulse := clampf(1.0 + 0.9 * _gust.get_noise_1d(_pulse_t * 60.0) * 2.0, 0.2, 2.2)
-		var from := _feed_prev if _feed_prev != Vector3.INF and _feed_prev.distance_to(_feed_p) < 2.0 else _feed_p
-		var k := clampi(ceili(from.distance_to(_feed_p) / 0.15), 1, 5)
-		var sp := _feed_v.length()
-		for i in k:
-			var at := from.lerp(_feed_p, (i + 1.0) / k)
-			var yaw := (randf() - 0.5) * deg_to_rad(_feed_fan) * 1.6
-			var jv := _feed_v.rotated(Vector3.UP, yaw) * (0.6 + randf() * 0.8) + Vector3(0, randf() * (0.8 + sp * 0.25), 0)
-			sim.add_source(at, jv, PATCH_R, _feed_rate * pulse * 14.0 / k, 10.0, 0.6 + randf() * 0.8)
-		_feed_prev = _feed_p
-	else:
-		_feed_prev = Vector3.INF
+	_pulse_t += dt
+	var pulse := clampf(1.0 + 0.9 * _gust.get_noise_1d(_pulse_t * 60.0) * 2.0, 0.2, 2.2)
+	_feed_prev = _patch(_feed_on, _feed_p, _feed_prev, _feed_v, _feed_rate * pulse, _feed_fan)
+	# the front tyre kicks up a little too (its own gusts)
+	var fpulse := clampf(1.0 + 0.9 * _gust.get_noise_1d(_pulse_t * 60.0 + 500.0) * 2.0, 0.2, 2.2)
+	_front_prev = _patch(_front_on, _front_p, _front_prev, _front_v, _front_rate * fpulse, _feed_fan)
 	sim.step(dt, focus, fwd)
+
+## dust comes only from a tyre's contact patch: small sources on the ground along the path the patch
+## swept this frame, each spraying its own way (back / out / up, in gusts). The cloud is what the sim
+## makes of that spray: it fans out, rolls and spreads from there. Returns the new "previous" point.
+func _patch(on: bool, p: Vector3, prev: Vector3, v: Vector3, rate: float, fan: float) -> Vector3:
+	if not on or rate <= 0.0: return Vector3.INF
+	var from := prev if prev != Vector3.INF and prev.distance_to(p) < 2.0 else p
+	var k := clampi(ceili(from.distance_to(p) / 0.15), 1, 5)
+	var sp := v.length()
+	for i in k:
+		var at := from.lerp(p, (i + 1.0) / k)
+		var yaw := (randf() - 0.5) * deg_to_rad(fan) * 1.6
+		var jv := v.rotated(Vector3.UP, yaw) * (0.6 + randf() * 0.8) + Vector3(0, randf() * (0.8 + sp * 0.25), 0)
+		sim.add_source(at, jv, PATCH_R, rate * 14.0 / k, 10.0, 0.6 + randf() * 0.8)
+	return p
+
+## per physics step: the front tyre's patch (sim only; a lighter dusting than the rear)
+func feed_front(front: Vector3, throw_v: Vector3, rate: float, alpha: float) -> void:
+	_front_on = sim != null and rate > 0.5 and alpha > 0.0
+	if not _front_on: return
+	_front_p = front + Vector3(0, 0.08, 0)
+	_front_v = throw_v
+	_front_rate = rate * alpha * alpha * 2.2
 
 ## a burst of dust (crash, smash, hard landing)
 func puff_burst(pos: Vector3, power: float, col: Color, amount: float) -> void:

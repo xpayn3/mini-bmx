@@ -465,6 +465,10 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 		var d_fan := rad_to_deg(atan2((1.6 + va * 0.18) * (1 - carve_k * 0.6) * 0.5, maxf(d_back, 0.6)))
 		var d_a := (0.62 if skid_fx else 0.45) if dirt else ((0.55 if skid_fx else 0.4) if sand else 0.26)
 		dust.feed(rear, d_ev, rate * fxd, dcol, d_a, clampf(d_fan, 12.0, 70.0))
+		# the front tyre dusts too, less: it rolls (no drive / little skid), so it mostly lifts dust
+		# sideways and up as it carves
+		var f_ev := Vector3(-f.x * d_back * 0.4 + side.x * d_out * 0.6, 0.5 + carve_k * 0.3, -f.z * d_back * 0.4 + side.z * d_out * 0.6)
+		dust.feed_front(front, f_ev, rate * fxd * 0.35, d_a)
 		# a hard skid on loose ground kicks up a real cloud now and then (volumetric fog)
 		_cloud_t -= dt
 		if (dirt or sand) and skid_fx and va > 5 and _cloud_t <= 0:
@@ -485,6 +489,7 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 				fx.chunk(rear, ev, cc, 0.022)
 	if st.air or va <= 0.6 or in_water:
 		dust.feed(rear, Vector3.ZERO, 0.0, dcol, 0.0, 20.0)
+		dust.feed_front(front, Vector3.ZERO, 0.0, 0.0)
 	grime.feed(dt, 2 if in_water else s, va, skid_fx, st.air, _landed, terrain.ground_color(rear.x, rear.z))
 	_landed = 0.0
 	var on_ground := not st.air and not in_water and va > 0.2
