@@ -70,7 +70,7 @@ const DEFS := [
 		["pumpGain", "Pump strength", 9, 0, 25, 0.5, ""],
 	]],
 	["Lean", [
-		["leanMax", "Max lean", 0.7, 0.15, 1.1, 0.01, "rad"],
+		["leanMax", "Max lean", 0.95, 0.15, 1.3, 0.01, "rad"],
 		["leanIn", "Roll-in stiffness", 40, 8, 200, 1, ""],
 		["leanOut", "Roll-out stiffness", 30, 8, 200, 1, ""],
 		["leanDamp", "Lean damping", 1.0, 0.3, 1.6, 0.02, ""],
@@ -181,10 +181,10 @@ const DEFS := [
 
 const PATH := "user://tune.cfg"
 ## bump VER when defaults are retuned: saved values of the RETUNED keys are dropped once
-const VER := 8
+const VER := 9
 ## later retunes, per version: only these keys are dropped for saves older than that version (bumping VER
 ## with one shared list would reset every earlier retuned key again)
-const RETUNED_AT := {8: ["manualFrom", "stickAirRoll", "stickSpinBuild", "stickYawRate"]}
+const RETUNED_AT := {8: ["manualFrom", "stickAirRoll", "stickSpinBuild", "stickYawRate"], 9: ["leanMax"]}
 const RETUNED := ["steerRate", "steerRelease", "steerCurve", "turnSlow", "turnFast", "turnFloor", "steerMax", "slowSteer",
 	"barSpeed", "grip", "slipRecover", "slipMax", "turnWeight", "leanMax", "leanIn", "leanOut", "leanDamp", "bikeLeanMul", "bikeLeanCap", "flipAccel", "flipRate", "airTwist", "landBack", "travel", "popKick"]
 var defaults := {}
