@@ -32,6 +32,7 @@ const ACTIONS := {
 	"cam_down":     ["Tilt camera down",         [],                   [],                         []],
 	"zoom_in":      ["Zoom in",                  [KEY_EQUAL],          [JOY_BUTTON_DPAD_UP],       []],
 	"zoom_out":     ["Zoom out",                 [KEY_MINUS],          [JOY_BUTTON_DPAD_DOWN],     []],
+	"map":          ["Trail map",                [KEY_M],              [JOY_BUTTON_MISC1],         []],
 	"records":      ["Records",                  [KEY_H],              [],                         []],
 	"tune":         ["Ride tuning panel",        [KEY_P],              [],                         []],
 	"pose_panel":   ["Rider position panel",     [KEY_K],              [],                         []],
@@ -347,6 +348,8 @@ func apply() -> void:
 			if mode == 0:
 				var scr := DisplayServer.screen_get_usable_rect(DisplayServer.window_get_current_screen())
 				DisplayServer.window_set_position(scr.position + (scr.size - sz) / 2)
+	if _test_run and OS.get_environment("BMX_OFFSCREEN") != "" and not headless:   # tests: a normal window parked off the screens
+		DisplayServer.window_set_position(Vector2i(-20000, 0))                       # (minimised windows draw late)
 	if not headless:
 		get_window().content_scale_factor = float(get_v("ui_scale"))
 	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_ENABLED if get_v("vsync") else DisplayServer.VSYNC_DISABLED)

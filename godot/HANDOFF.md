@@ -53,7 +53,7 @@ Player data: `%APPDATA%\Godot\app_userdata\Mini BMX\` — `settings.cfg`, `tune.
 W/↑ pedal · S/↓ brake · A/D steer · **Space** hop/pump (hold to charge; **in the air: tuck the bike up**) ·
 **S/W pressed fresh as you leave a lip: throw a back/front flip** · **W/S in the air: tilt the bike nose down/up (limited, body shift)** · **A/D in the air: lean the bike left/right (no spins)** · **brake + A/D when slow: pivot (pirouette)** · Shift sprint (stamina) · Q/E shift gears · F bail · Backspace back to
 start · R new world · B next bike · C next camera · Z/X rotate camera · +/- zoom · mouse drag orbit ·
-H records · **P / K / L** the tuning card on its Ride / Rider / Look tab · O photo mode · F1 hide HUD ·
+H records · **M trail map** (pad: Share) · **P / K / L** the tuning card on its Ride / Rider / Look tab · O photo mode · F1 hide HUD ·
 F12 screenshot · Esc pause. Gamepad (Xbox): triggers pedal/brake, left stick steer, X hop (jump), A sprint, bumpers gears, Y camera, D-pad left / right rotate the camera,
 **right stick = the rider's body, all the time**: up / down shifts the weight forward over the bars / back (pulled well back
 rolling = a **manual**, yanked fresh at a lip = a flip throw, in the air = nose down / up), left / right throws the bike over under
@@ -356,6 +356,28 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   (every body / piece closed, piece volumes = whole, must say `PASS`).
 - Torn race tape as cloth-like ribbons, wind over the grass, drifting cloud shadows, speed blur / FOV.
 
+### Paper: trail map (M) + pause leaflet (Esc) — and future paper menus
+- **`PaperSheet`** (`scripts/ui/paper_sheet.gd`, a CanvasLayer, layer 7): a folded sheet that comes up in front of the
+  camera and unfolds like a real map (half fold first, then the accordion, outer panel first). Its own small 3D world
+  (SubViewport: own light + shadows in the folds, no fog / DOF / time of day) drawn over the game, which is blurred +
+  darkened behind it. Every move is an underdamped **spring** (`Spring`: lift, half fold, one per crease) fired on a
+  timeline (`_drive`): quick, overshoots ~10 % and wobbles to rest; closing is firmer and bounces shut. Real time
+  (works at `Engine.time_scale = 0`). What's printed is any Control in `content` (a SubViewport page): `live = false`
+  -> `await bake()` prints once with mipmaps; `live = true` -> re-rendered every frame and **mouse / keys / pad go to
+  it** (clicks are ray-traced onto the panels as they lie, `page_point`). `unfold = false` keeps it folded (a
+  leaflet). cols even for unfolding (the outer panel's back = the cover, a strip under the page); odd cols only folded.
+  `close_actions` / `close_requested` / `auto_close`, `opened` / `closed`. Paper = ambientCG **Paper003** (CC0) scan in
+  `assets/textures/paper/` × the print, creases worn (`shaders/paper_sheet.gdshader`). Rustle sound synthesised.
+- **Trail map** (`PaperMap`, `scripts/ui/paper_map.gd`; `Game.open_map` / `exit_map`): 4×2 panels (0.84 × 0.525 m),
+  north-up topo 800 × 500 m around you: real ground colours washed out + hill shade, 5 m / 25 m contours, shore, trail in
+  red dashes, route features, the last 90 s ridden, 100 m grid, title block, legend, scale bar, north arrow, YOU ARE
+  HERE, a cover. Printed ~0.2 s, again only after 60 m / a new world. Ride frozen + HUD hidden while it's up; M / Esc /
+  bail fold it away.
+- **Pause leaflet** (`PausePamphlet`, `scripts/ui/pause_pamphlet.gd`, built in `main._pause`): a DL tri-fold (3 × 99 ×
+  210 mm, Z-folded, stays folded). Cover photo = the ride's last frame grabbed at the moment of pausing (centre crop,
+  away from the HUD corners), "DOWNHILL PARK / MINI BMX / <biome> · TRAIL GUIDE", the menu printed below as live
+  buttons (yellow highlighter on hover / focus). Settings / Controls hide it and show it again.
+
 ### HUD bike computer (`hud.gd` `GaugeView`)
 - Garmin-style computer bottom-left; six pages flipped with the ◀ ▶ bezel buttons under the screen (mouse):
   **RIDE** speed, slope / grade, gear (the shifter: n/N, cassette, teeth; flashes on a shift; Settings › Gear
@@ -447,6 +469,11 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `BMX_DEBRIS_PROBE=1` | fence / cactus debris: moving / resting counts and the lowest piece (none may fall through the ground) |
 | `BMX_SPRITE_DUST=1`, `BMX_SMOKE_PROBE=1` | old sprite dust for comparison / smoke-sim timing prints |
 | `BMX_FENCE=dir/prefix` (+ `BMX_FENCE_STYLE=ranch/picket`, `BMX_FENCE_SPEED=m/s`, `BMX_FENCE_ANGLE=deg`) | autotest rides into the nearest fence, screenshots before / after the smash; with `BMX_DEBRIS_PROBE=1` every piece prints how far it landed from the hit and its gap to the drawn ground |
+| `BMX_MAP=secs` (+ `BMX_MAP_CLOSE=secs`) | autotest opens the trail map (presses M again); prints `AUTOTEST map: open= time_scale= hud=` |
+| `BMX_MAP_SHOTS=dir/prefix` | saves the paper sheet's own render every 0.1 s while it unfolds (`PAPERSHOT`) |
+| `BMX_PAPER_AT=secs` | freezes every paper sheet's animation at that time (pair with `BMX_SHOT` for a frame mid-unfold) |
+| `BMX_PAUSE=1` (+ `BMX_PAUSE_HOVER=0.62`) | pause leaflet at the end of an autotest; HOVER moves the mouse to that screen height and prints where it lands on the page |
+| `BMX_OFFSCREEN=1` | a normal window parked off the screens instead of `BMX_MIN`: **minimised windows draw late**, so timed screenshots of animations come out stale — use this for those |
 | `BMX_FENCE_ALL=1` | smashes every fence within 70 m at random 4–18 m/s, 7 s later counts pieces buried / invisible / freed (all must be 0) |
 
 Typical check after a change: build C# → `--autotest=10` with `BMX_SEED=4242` (sane=true, no SCRIPT ERROR)
@@ -474,6 +501,11 @@ and other GPU apps open; uncapped ~430 fps on an RTX 3090 after the C# terrain.
   (0xC0000005 in ntdll, exit code 139 in bash, no Godot backtrace). Check test exit codes, not only the output.
 - PowerShell `Get-Content`/`WriteAllText` can change line endings — prefer the Edit tool for code edits.
 - Light through a doorway straight at the camera = glare; keep the sun high and to the side in the garage.
+
+- Minimised test windows (`BMX_MIN`) render late / irregularly: frame-timed screenshots of an animation all come out
+  the same. Use `BMX_OFFSCREEN=1` (or freeze the animation, `BMX_PAPER_AT`) for those.
+- A `SubViewport` texture's `get_image()` comes out upside down vs the screen: `flip_y()` it.
+- Packed arrays are values: `var dst := minor; dst.append(..)` does NOT append to `minor`.
 
 - Tyres are never drawn in the ground: see "Tyres follow the ground" in section 5 (`BikeRig.fit_wheels` / `unclip_tyres`). Smashed-fence / cactus debris is held above the terrain every physics
   tick (thin pieces used to tunnel through the chunk collision and vanish).
