@@ -2,12 +2,12 @@ class_name UITheme
 extends RefCounted
 ## The game's look: dark translucent glass panels, bold rounded type, yellow accent (from index.html).
 
-const ACCENT := Color("ffd21f")
+const ACCENT := Tokens.ACCENT
 const NAVY := Color("1d2b64")
 const PANEL := Color(0.08, 0.15, 0.2, 0.82)
 const PANEL_LIGHT := Color(1, 1, 1, 0.10)
-const TEXT := Color(1, 1, 1)
-const MUTED := Color(1, 1, 1, 0.6)
+const TEXT := Tokens.ON_SCENE
+const MUTED := Tokens.ON_SCENE_SOFT
 
 static var _theme: Theme
 static var _font: Font
@@ -26,6 +26,28 @@ static func font(black := false) -> Font:
 		_font_black = b
 	return _font_black if black else _font
 
+static var _display := {}
+
+## sporty display type for titles / big menu buttons: Bahnschrift (DIN-style, ships with Windows 10/11),
+## condensed + bold; `slant` leans it forward like a race number. Falls back to the UI font elsewhere.
+static func display_font(weight := 700, slant := 0.0) -> Font:
+	var key := "%d_%.2f" % [weight, slant]
+	if _display.has(key): return _display[key]
+	var f := SystemFont.new()
+	f.font_names = PackedStringArray(["Bahnschrift", "DIN Alternate", "Roboto Condensed", "Arial Narrow", "Segoe UI"])
+	f.font_weight = weight
+	f.font_stretch = 75
+	f.antialiasing = TextServer.FONT_ANTIALIASING_GRAY
+	f.fallbacks = [font(weight >= 800)]
+	var out: Font = f
+	if slant != 0.0:
+		var v := FontVariation.new()
+		v.base_font = f
+		v.variation_transform = Transform2D(Vector2(1, 0), Vector2(-slant, 1), Vector2.ZERO)
+		out = v
+	_display[key] = out
+	return out
+
 static var _lcd: Font
 
 ## dot-matrix LCD type for the bike computer: Doto (OFL, assets/fonts/), heavy round dots;
@@ -41,7 +63,7 @@ static func lcd_font() -> Font:
 		_lcd = v
 	return _lcd
 
-static func box(bg: Color, radius := 12, pad := 10, border := Color(0, 0, 0, 0), bw := 0) -> StyleBoxFlat:
+static func box(bg: Color, radius := Tokens.R_LG, pad := Tokens.S4, border := Tokens.CLEAR, bw := 0) -> StyleBoxFlat:
 	var s := StyleBoxFlat.new()
 	s.bg_color = bg
 	s.set_corner_radius_all(radius)
@@ -123,12 +145,12 @@ static func get_theme() -> Theme:
 
 # ---------------------------------------------------------------- light (white, opaque) window theme
 # Used by the Settings / Controls windows (MenuBase): a solid white card, ink text, yellow accent.
-const L_INK := Color("151a23")
-const L_MUTED := Color("6b7487")
-const L_PAGE := Color("f3f5f9")
-const L_LINE := Color("d3d9e4")
-const L_BTN := Color("e7eaf1")
-const L_BTN_HOT := Color("d6dce8")
+const L_INK := Tokens.INK
+const L_MUTED := Tokens.INK_SOFT
+const L_PAGE := Tokens.PAGE
+const L_LINE := Tokens.LINE
+const L_BTN := Tokens.FILL
+const L_BTN_HOT := Tokens.FILL_HOT
 
 static var _light: Theme
 
@@ -191,32 +213,32 @@ static func light_theme() -> Theme:
 	t.set_color("font_color", "Label", L_INK)
 	t.set_color("font_shadow_color", "Label", Color(0, 0, 0, 0))
 	t.set_constant("shadow_offset_y", "Label", 0)
-	t.set_stylebox("panel", "PanelContainer", box(Color.WHITE, 22, 22, L_INK, 3))
+	t.set_stylebox("panel", "PanelContainer", box(Tokens.PAPER, Tokens.R_XL, Tokens.S5))
 	# buttons
-	t.set_stylebox("normal", "Button", box(L_BTN, 10, 16))
-	t.set_stylebox("hover", "Button", box(L_BTN_HOT, 10, 16))
-	t.set_stylebox("pressed", "Button", box(ACCENT, 10, 16, L_INK, 2))
-	t.set_stylebox("hover_pressed", "Button", box(ACCENT, 10, 16, L_INK, 2))
-	t.set_stylebox("focus", "Button", box(Color(0, 0, 0, 0), 10, 16, L_INK, 2))
-	t.set_stylebox("disabled", "Button", box(Color("f0f2f6"), 10, 16))
+	t.set_stylebox("normal", "Button", box(Tokens.FILL, Tokens.R_LG, Tokens.S5))
+	t.set_stylebox("hover", "Button", box(Tokens.FILL_HOT, Tokens.R_LG, Tokens.S5))
+	t.set_stylebox("pressed", "Button", box(Tokens.ACCENT, Tokens.R_LG, Tokens.S5))
+	t.set_stylebox("hover_pressed", "Button", box(Tokens.ACCENT, Tokens.R_LG, Tokens.S5))
+	t.set_stylebox("focus", "Button", marked(Tokens.CLEAR, Tokens.INK, SIDE_BOTTOM, Tokens.R_LG, Tokens.S5))
+	t.set_stylebox("disabled", "Button", box(Tokens.PAGE, Tokens.R_LG, Tokens.S5))
 	for c in ["font_color", "font_hover_color", "font_pressed_color", "font_hover_pressed_color", "font_focus_color"]:
 		t.set_color(c, "Button", L_INK)
-	t.set_color("font_disabled_color", "Button", Color("a4acbb"))
+	t.set_color("font_disabled_color", "Button", Tokens.INK_FAINT)
 	# fields
 	for c in ["OptionButton", "LineEdit", "SpinBox"]:
-		t.set_stylebox("normal", c, box(Color.WHITE, 10, 12, L_LINE, 2))
-		t.set_stylebox("hover", c, box(Color.WHITE, 10, 12, L_INK, 2))
-		t.set_stylebox("pressed", c, box(Color("fff6cf"), 10, 12, L_INK, 2))
-		t.set_stylebox("focus", c, box(Color(0, 0, 0, 0), 10, 12, L_INK, 2))
+		t.set_stylebox("normal", c, box(Tokens.FILL, Tokens.R_LG, Tokens.S4))
+		t.set_stylebox("hover", c, box(Tokens.FILL_HOT, Tokens.R_LG, Tokens.S4))
+		t.set_stylebox("pressed", c, box(Tokens.ACCENT_TINT, Tokens.R_LG, Tokens.S4))
+		t.set_stylebox("focus", c, marked(Tokens.CLEAR, Tokens.ACCENT, SIDE_BOTTOM, Tokens.R_LG, Tokens.S4))
 		for fc in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
 			t.set_color(fc, c, L_INK)
-	t.set_stylebox("read_only", "LineEdit", box(L_PAGE, 10, 12, L_LINE, 2))
+	t.set_stylebox("read_only", "LineEdit", box(Tokens.PAGE, Tokens.R_LG, Tokens.S4))
 	t.set_icon("arrow", "OptionButton", tex_chevron(L_INK))
 	t.set_constant("arrow_margin", "OptionButton", 8)
 	# toggles
 	for st in ["normal", "hover", "pressed", "hover_pressed"]:
-		t.set_stylebox(st, "CheckButton", box(Color(0, 0, 0, 0), 8, 6))
-	t.set_stylebox("focus", "CheckButton", box(Color(0, 0, 0, 0), 8, 6, L_INK, 2))
+		t.set_stylebox(st, "CheckButton", box(Tokens.CLEAR, Tokens.R_MD, Tokens.S2))
+	t.set_stylebox("focus", "CheckButton", marked(Tokens.CLEAR, Tokens.INK, SIDE_BOTTOM, Tokens.R_MD, Tokens.S2))
 	for c in ["font_color", "font_hover_color", "font_pressed_color", "font_hover_pressed_color", "font_focus_color"]:
 		t.set_color(c, "CheckButton", L_INK)
 	var on := tex_toggle(true); var off := tex_toggle(false)
@@ -228,35 +250,35 @@ static func light_theme() -> Theme:
 	t.set_stylebox("slider", "HSlider", groove)
 	t.set_stylebox("grabber_area", "HSlider", fill)
 	t.set_stylebox("grabber_area_highlight", "HSlider", fill)
-	var g := tex_disc(24, ACCENT, L_INK, 3.5)
+	var g := tex_disc(Tokens.S6, Tokens.ACCENT, Tokens.ACCENT_DOWN, Tokens.B_BOLD)
 	for n in ["grabber", "grabber_highlight", "grabber_disabled"]: t.set_icon(n, "HSlider", g)
 	# tabs: pills; the open one is yellow with an ink outline
-	t.set_stylebox("tab_selected", "TabContainer", box(ACCENT, 12, 18, L_INK, 2))
-	t.set_stylebox("tab_unselected", "TabContainer", box(L_BTN, 12, 18, Color(0, 0, 0, 0), 2))
-	t.set_stylebox("tab_hovered", "TabContainer", box(L_BTN_HOT, 12, 18, Color(0, 0, 0, 0), 2))
-	t.set_stylebox("tab_focus", "TabContainer", box(Color(0, 0, 0, 0), 12, 18, L_INK, 2))
+	t.set_stylebox("tab_selected", "TabContainer", marked(Tokens.PAGE, Tokens.ACCENT, SIDE_BOTTOM, Tokens.R_LG, Tokens.S5))
+	t.set_stylebox("tab_unselected", "TabContainer", btn_box(Tokens.CLEAR, Tokens.CLEAR, 0, Tokens.R_LG, Tokens.S5))
+	t.set_stylebox("tab_hovered", "TabContainer", marked(Tokens.FILL, Tokens.LINE, SIDE_BOTTOM, Tokens.R_LG, Tokens.S5))
+	t.set_stylebox("tab_focus", "TabContainer", marked(Tokens.CLEAR, Tokens.INK, SIDE_BOTTOM, Tokens.R_LG, Tokens.S5))
 	t.set_stylebox("panel", "TabContainer", box(L_PAGE, 16, 14))
 	for c in ["font_selected_color", "font_unselected_color", "font_hovered_color"]:
 		t.set_color(c, "TabContainer", L_INK)
 	t.set_constant("side_margin", "TabContainer", 0)
-	t.set_font("font", "TabContainer", font(true))
-	t.set_font_size("font_size", "TabContainer", 16)
+	t.set_font("font", "TabContainer", display_font(Tokens.W_BOLD, Tokens.SLANT))
+	t.set_font_size("font_size", "TabContainer", Tokens.T_LG)
 	# popups (option lists, the pad remap menu)
-	t.set_stylebox("panel", "PopupMenu", box(Color.WHITE, 12, 8, L_LINE, 2))
-	t.set_stylebox("hover", "PopupMenu", box(ACCENT, 8, 8))
+	t.set_stylebox("panel", "PopupMenu", box(Tokens.PAPER, Tokens.R_LG, Tokens.S3))
+	t.set_stylebox("hover", "PopupMenu", box(Tokens.ACCENT, Tokens.R_MD, Tokens.S3))
 	t.set_color("font_color", "PopupMenu", L_INK)
 	t.set_color("font_hover_color", "PopupMenu", L_INK)
 	t.set_constant("v_separation", "PopupMenu", 6)
-	var rc := tex_disc(16, ACCENT, L_INK, 3.0); var ru := tex_disc(16, Color.WHITE, L_LINE, 2.0)
+	var rc := tex_disc(Tokens.S5, Tokens.ACCENT, Tokens.ACCENT_DOWN, Tokens.B_BOLD); var ru := tex_disc(Tokens.S5, Tokens.PAPER, Tokens.LINE, Tokens.B)
 	t.set_icon("radio_checked", "PopupMenu", rc); t.set_icon("checked", "PopupMenu", rc)
 	t.set_icon("radio_unchecked", "PopupMenu", ru); t.set_icon("unchecked", "PopupMenu", ru)
-	t.set_stylebox("panel", "TooltipPanel", box(L_INK, 8, 8))
+	t.set_stylebox("panel", "TooltipPanel", box(Tokens.INK, Tokens.R_MD, Tokens.S3))
 	t.set_color("font_color", "TooltipLabel", Color.WHITE)
 	# scrollbars
-	t.set_stylebox("scroll", "VScrollBar", box(Color("e3e7ef"), 5, 3))
-	t.set_stylebox("grabber", "VScrollBar", box(Color("a9b1c2"), 5, 3))
-	t.set_stylebox("grabber_highlight", "VScrollBar", box(Color("7d879b"), 5, 3))
-	t.set_stylebox("grabber_pressed", "VScrollBar", box(L_INK, 5, 3))
+	t.set_stylebox("scroll", "VScrollBar", box(Tokens.CLEAR, Tokens.R_SM, Tokens.SCROLL_W))
+	t.set_stylebox("grabber", "VScrollBar", box(Tokens.THUMB, Tokens.R_SM, Tokens.SCROLL_W))
+	t.set_stylebox("grabber_highlight", "VScrollBar", box(Tokens.THUMB_HOT, Tokens.R_SM, Tokens.SCROLL_W))
+	t.set_stylebox("grabber_pressed", "VScrollBar", box(Tokens.INK, Tokens.R_SM, Tokens.SCROLL_W))
 	_light = t
 	return t
 
@@ -308,3 +330,186 @@ static func centre(c: Control) -> void:
 	c.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	c.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	c.grow_vertical = Control.GROW_DIRECTION_BOTH
+
+
+# ================================================================ components (built only from Tokens)
+## a card: paper with an ink outline and a soft drop shadow
+## a card: flat paper, no outline, no shadow
+static func card_style(fill := Tokens.PAPER, radius := Tokens.R_XL, pad := Tokens.S5) -> StyleBoxFlat:
+	var s := box(fill, radius, pad)
+	s.content_margin_top = pad; s.content_margin_bottom = pad
+	return s
+
+## a flat fill with a coloured bar along one edge (selected / focused) instead of an outline
+static func marked(fill: Color, mark := Tokens.ACCENT, side := SIDE_BOTTOM, radius := Tokens.R_MD, pad := Tokens.S4) -> StyleBoxFlat:
+	var s := btn_box(fill, Tokens.CLEAR, 0, radius, pad)
+	s.border_color = mark
+	match side:
+		SIDE_LEFT: s.border_width_left = Tokens.MARK
+		SIDE_TOP: s.border_width_top = Tokens.MARK
+		SIDE_RIGHT: s.border_width_right = Tokens.MARK
+		_: s.border_width_bottom = Tokens.MARK
+	return s
+
+## a button-sized box: `pad` left / right, a fixed smaller pad top / bottom
+static func btn_box(fill: Color, border := Tokens.CLEAR, bw := 0, radius := Tokens.R_MD, pad := Tokens.S4) -> StyleBoxFlat:
+	var s := box(fill, radius, pad, border, bw)
+	s.content_margin_top = Tokens.S2; s.content_margin_bottom = Tokens.S2
+	return s
+
+## the button looks, one per role:
+##  primary   - yellow, bold outline (RIDE, GO, SAVE & RIDE)
+##  secondary - paper with an ink outline (BACK, SAVE)
+##  chip      - grey, yellow when picked (bike, time of day, finishes, parts)
+##  link      - bare text, a yellow bar + light wash on hover / focus (SETTINGS, QUIT)
+##  tab       - bare text, a yellow underline when open (the garage's categories)
+static func style_button(b: Button, kind := "chip", size := Tokens.T_MD) -> Button:
+	var pad := Tokens.S4
+	var weight := Tokens.W_BOLD
+	var slant := 0.0
+	match kind:
+		"primary":
+			pad = Tokens.S6; weight = Tokens.W_BLACK; slant = Tokens.SLANT
+			b.add_theme_stylebox_override("normal", btn_box(Tokens.ACCENT, Tokens.CLEAR, 0, Tokens.R_LG, pad))
+			b.add_theme_stylebox_override("hover", btn_box(Tokens.ACCENT_HOT, Tokens.CLEAR, 0, Tokens.R_LG, pad))
+			b.add_theme_stylebox_override("pressed", btn_box(Tokens.ACCENT_DOWN, Tokens.CLEAR, 0, Tokens.R_LG, pad))
+			b.add_theme_stylebox_override("focus", marked(Tokens.CLEAR, Tokens.INK, SIDE_BOTTOM, Tokens.R_LG, pad))
+		"secondary":
+			pad = Tokens.S5; weight = Tokens.W_BLACK; slant = Tokens.SLANT
+			b.add_theme_stylebox_override("normal", btn_box(Tokens.PAPER, Tokens.CLEAR, 0, Tokens.R_LG, pad))
+			b.add_theme_stylebox_override("hover", btn_box(Tokens.FILL, Tokens.CLEAR, 0, Tokens.R_LG, pad))
+			b.add_theme_stylebox_override("pressed", btn_box(Tokens.ACCENT, Tokens.CLEAR, 0, Tokens.R_LG, pad))
+			b.add_theme_stylebox_override("focus", marked(Tokens.CLEAR, Tokens.ACCENT, SIDE_BOTTOM, Tokens.R_LG, pad))
+		"chip":
+			b.add_theme_stylebox_override("normal", btn_box(Tokens.FILL))
+			b.add_theme_stylebox_override("hover", btn_box(Tokens.FILL_HOT))
+			b.add_theme_stylebox_override("pressed", btn_box(Tokens.ACCENT))
+			b.add_theme_stylebox_override("hover_pressed", btn_box(Tokens.ACCENT_HOT))
+			b.add_theme_stylebox_override("focus", marked(Tokens.CLEAR, Tokens.INK))
+		"link":
+			var clear := btn_box(Tokens.CLEAR, Tokens.CLEAR, 0, Tokens.R_SM, Tokens.S5)
+			var hot := marked(Tokens.PAGE, Tokens.ACCENT, SIDE_LEFT, Tokens.R_SM, Tokens.S5)
+			b.add_theme_stylebox_override("normal", clear)
+			b.add_theme_stylebox_override("hover", hot)
+			b.add_theme_stylebox_override("pressed", hot)
+			b.add_theme_stylebox_override("focus", hot)
+			b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		"tab":
+			slant = Tokens.SLANT
+			var off := btn_box(Tokens.CLEAR, Tokens.CLEAR, 0, 0, Tokens.S4)
+			off.content_margin_bottom = Tokens.S3
+			var on := off.duplicate(); on.border_color = Tokens.ACCENT; on.border_width_bottom = Tokens.MARK
+			var hov := off.duplicate(); hov.border_color = Tokens.LINE; hov.border_width_bottom = Tokens.MARK
+			b.add_theme_stylebox_override("normal", off)
+			b.add_theme_stylebox_override("hover", hov)
+			b.add_theme_stylebox_override("pressed", on)
+			b.add_theme_stylebox_override("hover_pressed", on)
+			b.add_theme_stylebox_override("focus", off)
+			b.add_theme_color_override("font_color", Tokens.INK_SOFT)
+	for c in ["font_hover_color", "font_pressed_color", "font_hover_pressed_color", "font_focus_color"]:
+		b.add_theme_color_override(c, Tokens.INK)
+	if kind != "tab": b.add_theme_color_override("font_color", Tokens.INK)
+	b.add_theme_font_override("font", display_font(weight, slant))
+	b.add_theme_font_size_override("font_size", size)
+	return b
+
+static func make_button(text: String, cb: Callable, kind := "chip", size := Tokens.T_MD) -> Button:
+	var b := Button.new()
+	b.text = text
+	if cb.is_valid(): b.pressed.connect(cb)
+	b.custom_minimum_size.y = Tokens.H_CHIP
+	return style_button(b, kind, size)
+
+## big display type (titles, names): condensed, leaning forward, no shadow (it sits on paper)
+static func display(text: String, size := Tokens.T_3XL, col := Tokens.INK, slant := Tokens.SLANT, weight := Tokens.W_BLACK) -> Label:
+	var l := label(text, size, col)
+	l.add_theme_font_override("font", display_font(weight, slant))
+	l.add_theme_color_override("font_shadow_color", Tokens.CLEAR)
+	return l
+
+static var _caption_font: FontVariation
+## small letter-spaced caps (section names, specs, hints)
+static func caption(text: String, col := Tokens.INK_SOFT, size := Tokens.T_SM) -> Label:
+	if _caption_font == null:
+		_caption_font = FontVariation.new()
+		_caption_font.base_font = display_font(Tokens.W_BOLD)
+		_caption_font.spacing_glyph = Tokens.TRACKING
+	var l := label(text, size, col)
+	l.add_theme_font_override("font", _caption_font)
+	l.add_theme_color_override("font_shadow_color", Tokens.CLEAR)
+	return l
+
+## body text on paper (rows, notes)
+static func text(t: String, col := Tokens.INK, size := Tokens.T_MD) -> Label:
+	var l := label(t, size, col)
+	l.add_theme_color_override("font_shadow_color", Tokens.CLEAR)
+	return l
+
+## a section heading: yellow mark, the name, a hairline to the edge
+static func heading(t: String) -> HBoxContainer:
+	var hb := HBoxContainer.new()
+	hb.add_theme_constant_override("separation", Tokens.S3)
+	var slab := ColorRect.new()
+	slab.color = Tokens.ACCENT
+	slab.custom_minimum_size = Tokens.SLAB
+	slab.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	hb.add_child(slab)
+	hb.add_child(display(t, Tokens.T_LG))
+	var line := ColorRect.new()
+	line.color = Tokens.LINE
+	line.custom_minimum_size.y = Tokens.B_HAIR
+	line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	line.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	hb.add_child(line)
+	return hb
+
+## a key cap ("Q", "ESC") for hints
+static func key_cap(k: String) -> PanelContainer:
+	var p := PanelContainer.new()
+	var s := box(Tokens.FILL, Tokens.R_SM, Tokens.S3)
+	s.content_margin_top = Tokens.B_HAIR; s.content_margin_bottom = Tokens.B_HAIR
+	p.add_theme_stylebox_override("panel", s)
+	p.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var l := display(k, Tokens.T_SM, Tokens.INK, 0.0, Tokens.W_BOLD)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	p.add_child(l)
+	return p
+
+static func spacer(h := Tokens.S3) -> Control:
+	var c := Control.new()
+	c.custom_minimum_size.y = h
+	return c
+
+static var _paper: Theme
+## the paper theme for whole screens (title menu, garage): the light theme + display type on buttons and
+## fields, chip buttons, a slim scrollbar
+static func paper_theme() -> Theme:
+	if _paper: return _paper
+	var t: Theme = light_theme().duplicate()
+	t.default_font_size = Tokens.T_MD
+	t.set_stylebox("panel", "PanelContainer", card_style())
+	t.set_stylebox("normal", "Button", btn_box(Tokens.FILL))
+	t.set_stylebox("hover", "Button", btn_box(Tokens.FILL_HOT))
+	t.set_stylebox("pressed", "Button", btn_box(Tokens.ACCENT))
+	t.set_stylebox("hover_pressed", "Button", btn_box(Tokens.ACCENT_HOT))
+	t.set_stylebox("focus", "Button", marked(Tokens.CLEAR, Tokens.INK))
+	# fields: flat grey, a yellow bar under the one being typed in
+	for st in ["normal", "read_only"]:
+		t.set_stylebox(st, "LineEdit", btn_box(Tokens.FILL))
+	t.set_stylebox("focus", "LineEdit", marked(Tokens.CLEAR, Tokens.ACCENT))
+	t.set_font("font", "Button", display_font(Tokens.W_BOLD))
+	t.set_font_size("font_size", "Button", Tokens.T_MD)
+	t.set_font("font", "LineEdit", display_font(Tokens.W_MEDIUM))
+	t.set_font_size("font_size", "LineEdit", Tokens.T_LG)
+	# slim scrollbar: no track, a thin round thumb that darkens on hover
+	var track := box(Tokens.CLEAR, Tokens.R_SM, Tokens.SCROLL_W)
+	t.set_stylebox("scroll", "VScrollBar", track)
+	t.set_stylebox("scroll_focus", "VScrollBar", track)
+	for g in [["grabber", Tokens.THUMB], ["grabber_highlight", Tokens.THUMB_HOT], ["grabber_pressed", Tokens.INK]]:
+		t.set_stylebox(g[0], "VScrollBar", box(g[1], Tokens.R_SM, Tokens.SCROLL_W))
+	for ic in ["increment", "increment_highlight", "increment_pressed", "decrement", "decrement_highlight", "decrement_pressed"]:
+		t.set_icon(ic, "VScrollBar", ImageTexture.new())
+	t.set_constant("scrollbar_h_separation", "ScrollContainer", Tokens.S2)
+	t.set_constant("scrollbar_v_separation", "ScrollContainer", Tokens.S2)
+	_paper = t
+	return t
