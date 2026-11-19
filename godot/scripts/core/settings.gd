@@ -103,6 +103,7 @@ const DEFAULTS := {
 	"wasted": true,          # crash: slow motion + "WASTED" screen
 	"blood": true,           # crash: blood smears on the ground, torn-off limbs on very hard crashes
 	"steer_sens": 1.0,       # analog steering response (1 = linear)
+	"pad_expo": 1.8,         # gamepad steering curve: higher = gentler near the centre
 	# interface
 	"ui_scale": 1.0,
 	"hud_gauge": true,
@@ -333,6 +334,7 @@ func apply() -> void:
 	var want := DisplayServer.WINDOW_MODE_WINDOWED
 	if mode == 1: want = DisplayServer.WINDOW_MODE_FULLSCREEN
 	elif mode == 2: want = DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN
+	if _test_run and OS.get_environment("BMX_MIN") != "": want = DisplayServer.WINDOW_MODE_MINIMIZED   # tests: out of the user's way
 	if DisplayServer.get_name() != "headless" and DisplayServer.window_get_mode() != want:
 		DisplayServer.window_set_mode(want)
 	var res: String = get_v("resolution")

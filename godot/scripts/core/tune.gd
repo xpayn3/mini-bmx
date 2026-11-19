@@ -118,7 +118,8 @@ const DEFS := [
 	]],
 	["Body stick", [
 		["stickShift", "Fore / aft reach (× weight shift)", 1.7, 0, 3, 0.05, "×"],
-		["manualFrom", "Manual: stick pulled back past", 0.55, 0.2, 0.95, 0.05, ""],
+		["manualFrom", "Manual / wheelie: stick pulled back past", 0.4, 0.1, 0.95, 0.05, ""],
+		["stickWheelie", "Wheelie (pedalling + stick back): front lifts to", 0.6, 0.1, 1.0, 0.01, "rad"],
 		["manualAngle", "Manual: front lifts to", 0.32, 0, 0.7, 0.01, "rad"],
 		["flickSteer", "Side lean turns the bars", 0.5, 0, 1, 0.05, ""],
 		["flickTurn", "Lean into a turn: extra turn", 4.0, 0, 10, 0.1, "m/s²"],
@@ -166,7 +167,10 @@ const DEFS := [
 
 const PATH := "user://tune.cfg"
 ## bump VER when defaults are retuned: saved values of the RETUNED keys are dropped once
-const VER := 7
+const VER := 8
+## later retunes, per version: only these keys are dropped for saves older than that version (bumping VER
+## with one shared list would reset every earlier retuned key again)
+const RETUNED_AT := {8: ["manualFrom", "stickAirRoll", "stickSpinBuild", "stickYawRate"]}
 const RETUNED := ["steerRate", "steerRelease", "steerCurve", "turnSlow", "turnFast", "turnFloor", "steerMax", "slowSteer",
 	"barSpeed", "grip", "slipRecover", "slipMax", "turnWeight", "leanMax", "leanIn", "leanOut", "leanDamp", "bikeLeanMul", "bikeLeanCap", "flipAccel", "flipRate", "airTwist", "landBack", "travel", "popKick"]
 var defaults := {}
@@ -187,7 +191,11 @@ func _ready() -> void:
 	if cf.load(PATH) == OK:
 		var old_ver: int = cf.get_value("ui", "ver", 1)
 		for k in cf.get_section_keys("tune") if cf.has_section("tune") else []:
-			if old_ver < VER and k in RETUNED: continue   # new defaults win over values saved before the retune
+			if old_ver < 7 and k in RETUNED: continue   # new defaults win over values saved before the retune
+			var stale := false
+			for rv in RETUNED_AT:
+				if old_ver < rv and k in RETUNED_AT[rv]: stale = true
+			if stale: continue
 			if defaults.has(k):
 				base[k] = float(cf.get_value("tune", k))
 		pins = cf.get_value("ui", "pins", pins)

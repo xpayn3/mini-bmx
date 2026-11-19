@@ -797,7 +797,10 @@ func _read_input() -> Dictionary:
 	if not input_enabled:
 		return {"throttle": 0.0, "brake": 0.0, "steer": 0.0, "hop": false, "sprint": false, "body_fwd": 0.0, "body_lean": 0.0}
 	var steer := Input.get_action_strength("steer_left") - Input.get_action_strength("steer_right")
-	steer = signf(steer) * pow(absf(steer), 1.0 / maxf(0.3, float(Settings.get_v("steer_sens"))))
+	# a thumbstick needs a curve: fine near the centre (the first bit of stick only tips the bike in a little),
+	# full lock at the edge. Keys (all or nothing) are unaffected. Steering response (Settings) scales it
+	var expo: float = float(Settings.get_v("pad_expo")) if Settings.pad_active else 1.0
+	steer = signf(steer) * pow(absf(steer), expo / maxf(0.3, float(Settings.get_v("steer_sens"))))
 	# the rider's body (gamepad right stick, numpad on keys): round stick gate -> square, so diagonals reach full
 	var bf := Input.get_action_strength("body_fwd") - Input.get_action_strength("body_back")
 	var bl := Input.get_action_strength("body_left") - Input.get_action_strength("body_right")
@@ -816,9 +819,37 @@ func _read_input() -> Dictionary:
 		"sprint": Input.is_action_pressed("sprint"),
 	}
 
+## tests (BMX_BRAKETURN): which values vibrate - per value, how often its step-to-step change flips sign
+## with a real size (a vibration), and the biggest such flip
+var jitter_on := false
+var _jit_skip := 0
+var _jit_head := Vector3.INF
+var _jit := {}
+func _jitter_sample(key: String, val: float, thr: float) -> void:
+	var j: Array = _jit.get(key, [NAN, 0.0, 0, 0.0, 0])   # last value, last delta, flips, biggest flip, samples
+	if not is_nan(j[0]):
+		var d: float = val - j[0]
+		if absf(d) > thr and absf(j[1]) > thr and signf(d) != signf(j[1]):
+			j[2] += 1; j[3] = maxf(j[3], absf(d - j[1]))
+		j[1] = d
+	j[0] = val; j[4] += 1
+	_jit[key] = j
+
+func jitter_report() -> void:
+	var keys := _jit.keys()
+	keys.sort_custom(func(a, b): return _jit[a][2] > _jit[b][2])
+	for k in keys:
+		var j: Array = _jit[k]
+		print("JITTER %-12s flips=%4d / %d samples  biggest=%.4f" % [k, j[2], j[4], j[3]])
+
 func _physics_process(dt: float) -> void:
 	_snap_prev()
 	phys.step(dt, _read_input())
+	if jitter_on and not phys.crash_on:
+		for kv in [["slip", phys.slip, 0.002], ["yaw_rate", phys.yaw_rate, 0.02], ["lean", phys.lean, 0.002], ["bike_lean", phys.bike_lean, 0.003],
+				["counter", phys.counter, 0.003], ["steer", phys.steer, 0.003], ["hip_shift", phys.hip_shift, 0.001], ["body_x", phys.body_x, 0.001],
+				["pitch", phys.pitch, 0.002], ["y", phys.y, 0.001], ["body_y", phys.body_y, 0.001], ["compress", phys.compress, 0.001], ["lat_a", phys.lat_a, 0.05], ["v", phys.v, 0.01]]:
+			_jitter_sample(kv[0], kv[1], kv[2])
 	if phys.crash_on:
 		rider.pose_ragdoll(ragdoll.p, _ragdoll_roots())
 	if not phys.is_sane():
@@ -997,6 +1028,16 @@ func _process(dt: float) -> void:
 			"air": st.air_k, "compress": maxf(0.0, -st.compress), "hipShift": st.hip_shift, "bodyStick": st.body_in_s, "slope": st._g_pitch, "airTilt": st.air_tilt * float(Tune.v.get("stickBodyTilt", 0.6)) * clampf(st.air_stick.length() * 3.0 + absf(st.edge_s) * 2.0, 0.0, 1.0) if st.air else 0.0, "airLeanX": st.air_stick.x if st.air else 0.0, "t": t,
 			"airSpin": st.yaw_rate if st.air else 0.0, "wheelY": (rig.wheel_f.global_position.y + rig.wheel_r.global_position.y) * 0.5, "turn": 0.0 if st.air else st.yaw_rate * clampf(absf(st.v) / 3.0, 0.3, 1.0)})
 		if dab_probe: _dab_probe(st)
+		if st.crash_on: _jit_skip = 40
+		elif _jit_skip > 0: _jit_skip -= 1
+		if jitter_on and _jit_skip == 0:   # tests: the drawn joints (rider space), per frame
+			var hj: Vector3 = rider.J[0]
+			if _jit_head != Vector3.INF and hj.distance_to(_jit_head) > 0.08:
+				print("JUMP head %.3f m  v=%.2f brake_stop=%s pivot=%.2f slip=%.2f counter=%.2f lean=%.2f pitch=%.2f slope=%.2f wheelie=%.2f air=%.2f hip=%.3f" % [hj.distance_to(_jit_head), st.v, st.brake_stop, st.pivot, st.slip, st.counter, st.lean, st.pitch, st._g_pitch, rider.sm_wheelie, st.air_k, st.hip_shift])
+			_jit_head = hj
+			for ji in [[0, "j_head"], [1, "j_chest"], [2, "j_pelvis"], [4, "j_elbowL"], [10, "j_kneeL"]]:
+				var jp: Vector3 = rider.J[ji[0]]
+				_jitter_sample(ji[1] + "x", jp.x, 0.002); _jitter_sample(ji[1] + "y", jp.y, 0.002); _jitter_sample(ji[1] + "z", jp.z, 0.002)
 	var vd: float = Settings.get_v("view_distance")
 	terrain.update_stream(st.x, st.z, 4.0)
 	far_hills.follow(drawn_pos)

@@ -60,6 +60,7 @@ var pivot := 0.0; var pivot_acc := 0.0
 # flick_in = side lean (+ = left, like steer). flick = the smoothed side lean (the bike is thrown under
 # the body), manual_up = how far a pulled-back stick holds the front up (rad)
 var body_in := 0.0; var body_in_s := 0.0; var flick_in := 0.0; var flick := 0.0; var flick_prev := 0.0
+var wheelie_time := 0.0; var wheelie_pedal := false   # how long the current stick wheelie / manual has been held
 var manual_up := 0.0; var lock_sb := false; var lock_sf := false; var flick_kick := 0.0
 var air_stick := Vector2.ZERO   # right stick in the air, eased: x lean (+ left), y nose (+ up)
 var edge_s := 0.0   # right stick held at its top / bottom edge in the air: the flip spin, built up gently
@@ -799,11 +800,22 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			wheelie_up = maxf(0.0, wheelie_up - float(T.get("wheelieDrop", 1.6)) * dt)
 		# manual: the body stick pulled well back on the ground lifts the front and balances it there (how
 		# far back = how high); let go and it's set down. Only rolling, not at a lip throw
-		var m_from: float = float(T.get("manualFrom", 0.55))
+		# Pedalling it's a WHEELIE: from walking pace, higher (stickWheelie at full stick), the legs keep it up.
+		var m_from: float = float(T.get("manualFrom", 0.4))
 		var m_t := 0.0
-		if not air and v > 1.5 and body_in < -m_from and throw_v <= 0.5:
-			m_t = float(T.get("manualAngle", 0.32)) * smooth01((-body_in - m_from) / maxf(0.05, 1.0 - m_from))
-		manual_up = m_t if m_t > manual_up else maxf(m_t, manual_up - float(T.get("wheelieDrop", 1.6)) * dt)
+		var pedalling := throttle > 0.1 and not brake
+		if not air and v > (0.6 if pedalling else 1.5) and body_in < -m_from and throw_v <= 0.5:
+			var top: float = float(T.get("stickWheelie", 0.6)) if pedalling else float(T.get("manualAngle", 0.32))
+			m_t = top * smooth01((-body_in - m_from) / maxf(0.05, 1.0 - m_from))
+		# up quick-ish (a pull on the bars + a pedal stroke), down at the set-down speed
+		manual_up = move_toward(manual_up, m_t, (2.5 if m_t > manual_up else float(T.get("wheelieDrop", 1.6))) * dt)
+		# style: a wheelie / manual held a while scores when it comes down
+		if manual_up > 0.12 and front_air and not rear_air:
+			wheelie_time += dt; wheelie_pedal = wheelie_pedal or pedalling
+		elif manual_up < 0.05 and wheelie_time > 0.0:
+			if wheelie_time > 1.0 and host.has_method("on_style"):
+				host.on_style(roundi(wheelie_time * 220.0), "%s %.1f s" % ["WHEELIE" if wheelie_pedal else "MANUAL", wheelie_time])
+			wheelie_time = 0.0; wheelie_pedal = false
 		wheelie_up = maxf(wheelie_up, manual_up)
 		if wheelie_up > 0.0:
 			bal_max = maxf(bal_max, 30.0)   # the whole body holds a wheelie, not just the hands

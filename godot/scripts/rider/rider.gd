@@ -725,6 +725,9 @@ func reset_pose() -> void:
 	_bd_prev.fill(Vector3.ZERO)
 	pel_v = Vector3.ZERO
 	ch_v = Vector3.ZERO
+	# what the pose remembers from before (a crash tumbling the bike nose-up left a "wheelie" behind that
+	# shoved the body about after getting up)
+	sm_wheelie = 0.0; sm_aero = 0.0; sm_effort = 0.0; sm_turn = 0.0
 
 
 # ---------------- per-frame pose ----------------
@@ -743,7 +746,8 @@ static func _num(p: Dictionary, k: String, def := 0.0) -> float:
 var sm_turn := 0.0
 var sm_aero := 0.0
 var sm_effort := 0.0
-var sm_pitch0 := 0.0   # the slope the body levels against, rate-limited
+var sm_pitch0 := 0.0
+var sm_wheelie := 0.0   # the slope the body levels against, rate-limited
 const PITCH_LEVEL_RATE := 2.5   # rad/s
 var _fy_prev := NAN; var _fv_prev := NAN; var _facc := 0.0   # the frame's height / speed / acceleration (bump bounce)
 var bounce_stats := [0.0, 0, 0.0, 0.0]   # tests: sum of squared body offsets, samples, biggest offset
@@ -842,7 +846,13 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# they sit back with long arms and stay fairly upright (leaning into the bars crushed the arms and
 	# threw the elbows up). The garage has no slope: all of the pitch counts as slope there.
 	var slope0: float = clampf(_num(p, "slope", pitch0), -1.3, 1.3) if p.has("slope") else pitch0
-	var wheelie: float = clampf(pitch0 - slope0, 0.0, 1.1) * (1.0 - clampf(air * 3.0, 0.0, 1.0))
+	# (raw bike pitch vs raw slope: the smoothed pitch0 lags a slope that changes fast in a hard turn and gave
+	# false "wheelies" that shoved the body about) - and the result eases in / out
+	var raw_p := wrapf(_num(p, "pitch"), -PI, PI)
+	var wh_t: float = clampf(raw_p - slope0, 0.0, 1.1) * (1.0 - clampf(air * 3.0, 0.0, 1.0)) if p.has("slope") else 0.0
+	if wh_t < 0.08: wh_t = 0.0   # small pitch noise is not a wheelie
+	sm_wheelie = move_toward(sm_wheelie, wh_t, 2.5 * minf(dt, 0.1))
+	var wheelie: float = sm_wheelie
 	var base := pitch0 - wheelie   # the slope part of the bike's pitch
 	var pit := base * (0.2 if base > 0 else _num(p, "bodyLevel", 0.85)) + wheelie * 0.75   # most of a wheelie's tilt is taken back
 	# in the air, when the rider tilts the bike with the stick, the body stays and the bike rotates under
@@ -1013,7 +1023,9 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	pelvis.z = clampf(pelvis.z, -0.22, 0.22)
 	var tv0 := chest - pelvis
 	var tl0 := maxf(tv0.length(), 1e-4)
-	var f_ang := clampf(atan2(tv0.x, maxf(tv0.y, 0.05)), -0.45, 1.4)   # forward lean from upright
+	# forward lean from upright. A chest at or below the hips counts as folded FORWARD whichever side of the
+	# hips it is (atan2 there flips between +-180 deg as it crosses over: the torso snapped back and forth)
+	var f_ang := 1.4 if tv0.y < 0.05 else clampf(atan2(tv0.x, tv0.y), -0.45, 1.4)
 	var s_ang := clampf(asin(clampf(tv0.z / tl0, -1.0, 1.0)), -0.6, 0.6)   # sideways
 	chest = pelvis + Vector3(sin(f_ang) * cos(s_ang), cos(f_ang) * cos(s_ang), sin(s_ang)) * tl0
 	# the torso never stretches or squashes: past its length range the hips follow the chest

@@ -188,6 +188,15 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - **Air spin pose**: spinning in the air the rider sits tall and compact (knees in), head + shoulders lead.
 - **Style points** (`bike_physics._style_points` -> `hud.StylePop`): air time, 360s, flips, tweak, x1.5 clean landing,
   combos (landings within 4 s chain and multiply); banked after 0.7 s, a crash before that = BAILED.
+- **Stick wheelie**: right stick pulled back while pedalling = a wheelie from walking pace (`stickWheelie`, height by
+  how far back), coasting = a manual (`manualAngle`); held > 1 s scores style points (WHEELIE / MANUAL x s).
+- **Pad steering curve** (`Settings.pad_expo`, Settings › Controller): the left stick's first travel tips the bike in
+  gently, full lock at the edge (keys unaffected).
+- **Pose memory resets on get-up** (`Rider.reset_pose`: wheelie / tuck / effort / turn smoothing) - a crash left a
+  "wheelie" behind that snapped the body about; the torso limit treats a chest below the hips as folded forward
+  (no flip-flop). Test: `BMX_BRAKETURN=secs` (sprint, then hard brake + full lock) prints `JITTER` / `JUMP` lines.
+- **Tune migrations**: `Tune.RETUNED_AT` lists keys whose defaults changed per version (only those reset).
+- **Tests run minimised**: `BMX_MIN=1` (they still render, screenshots work).
 - **Brake to a stop holds** (`brake_stop`): no creeping, even on slopes; a fresh brake press from a standstill backs up
   (`brake_back`). Rolling backwards the cranks turn back with the wheel. Test: `BMX_HOLD_BRAKE=secs` (`HOLD` lines).
 - **Wheelie / manual pose** (`rider.gd`, `slope` from the physics): the front up on the ground is not a climb; the
