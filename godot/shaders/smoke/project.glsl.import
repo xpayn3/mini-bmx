@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://b3u6enud7l5h7"
+path="res://.godot/imported/project.glsl-cb4e12c340ec2a9547bebc8fc7e4b482.res"
+
+[deps]
+
+source_file="res://shaders/smoke/project.glsl"
+dest_files=["res://.godot/imported/project.glsl-cb4e12c340ec2a9547bebc8fc7e4b482.res"]
+
+[params]
+

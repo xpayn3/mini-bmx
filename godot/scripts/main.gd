@@ -339,7 +339,15 @@ func _autotest(seconds: float) -> void:
 		if pedal and not straight and int(el * 2) % 7 == 0: Input.action_press("hop")
 		elif OS.get_environment("BMX_AIRPULL") != "" and game.phys.air and game.phys.air_time > 0.1: Input.action_press("hop")   # tests: tuck in the air
 		else: Input.action_release("hop")
+		if OS.get_environment("BMX_SKID") != "" and el > float(OS.get_environment("BMX_SKID")):   # tests: lock the rear (skid) from this time on
+			Input.action_release("pedal"); Input.action_press("brake")
 		await get_tree().process_frame
+		if OS.get_environment("BMX_DUST_SHOTS") != "":   # tests: dir/prefix — a screenshot every 0.5 s after BMX_DUST_T0 (3 s)
+			var t0d := float(OS.get_environment("BMX_DUST_T0")) if OS.get_environment("BMX_DUST_T0") != "" else 3.0
+			var nk := int((el - t0d) * 2.0)
+			if el > t0d and nk != _probe.get("dust_k", -1) and nk < 8:
+				_probe["dust_k"] = nk
+				get_viewport().get_texture().get_image().save_png("%s_%d.png" % [OS.get_environment("BMX_DUST_SHOTS"), nk])
 		if OS.get_environment("BMX_FENCE") != "":   # tests: ride straight into the nearest fence, shots around the hit
 			_fence_test(el)
 		if OS.get_environment("BMX_BODY_PROBE") != "":   # tests: the rider's body vs the bike

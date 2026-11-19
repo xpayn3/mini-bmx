@@ -8,6 +8,8 @@ extends Node3D
 ##    a fade near the camera (no hard intersections, no popping).
 ##  * big skids and landings also throw up FogVolume clouds (when volumetric fog is on): real
 ##    participating media the sun shines through and the shadows fall into.
+## With a RenderingDevice (the normal case) all of that is replaced by SmokeSim: a real 3D smoke
+## simulation on the GPU (fx/smoke_sim.gd); the sprites / FogVolumes above are only the fallback.
 
 const SOFT_DUST_SHADER := """
 shader_type spatial;
@@ -77,6 +79,15 @@ var _puff_peak: PackedFloat32Array
 var _puff_vel: Array[Vector3] = []
 var _puff_next := 0
 var fog_on := false
+var sim: SmokeSim = null
+var _feed_on := false
+var _feed_p := Vector3.ZERO
+var _feed_prev := Vector3.INF
+var _feed_v := Vector3.ZERO
+var _feed_rate := 0.0
+var _feed_r := 0.3
+var _pulse_t := 0.0
+var _gust := FastNoiseLite.new()
 static var _dust_mat: ShaderMaterial
 static var _fog_tex: NoiseTexture3D
 
@@ -84,6 +95,46 @@ func _init() -> void:
 	name = "RideDust"
 	_build_emitter()
 	_build_fog_puffs()
+	if RenderingServer.get_rendering_device() != null and OS.get_environment("BMX_SPRITE_DUST") == "":
+		sim = SmokeSim.new()
+		if sim.ok:
+			add_child(sim)
+			emitter.visible = false
+		else:
+			sim.free()
+			sim = null
+
+## the sim needs the ground and the sun (call once the world exists)
+func attach(terrain, sun: DirectionalLight3D) -> void:
+	if sim == null: return
+	if sim.terrain != terrain:   # a new world: forget the old ground and dust
+		sim.terrain = terrain
+		sim.reset()
+	sim.sun = sun
+
+## per drawn frame: run the simulation around the rider
+func sim_step(dt: float, focus: Vector3, fwd: Vector3, wind: Vector2) -> void:
+	if sim == null: return
+	sim.wind = wind * 1.3
+	if _feed_on:
+		# roost comes out in gusts and clods, not a steady stream: pulse the amount, kick the air about
+		# (that jitter is what the sim turns into rolling, tearing billows)
+		_pulse_t += dt
+		var pulse := clampf(0.35 + 0.9 * _gust.get_noise_1d(_pulse_t * 60.0) * 2.0 + 0.5, 0.15, 1.9)
+		var jv := Vector3(randf() - 0.5, randf() * 0.8, randf() - 0.5) * (1.2 + _feed_v.length() * 0.35)
+		var rr := _feed_r * (0.8 + randf() * 0.45)
+		sim.add_source(_feed_p, _feed_v + jv, rr, _feed_rate * pulse, 7.0, 0.35 + randf() * 0.6)
+		if _feed_prev != Vector3.INF and _feed_prev.distance_to(_feed_p) < 2.0:
+			sim.add_source((_feed_p + _feed_prev) * 0.5, _feed_v - jv * 0.5, rr, _feed_rate * pulse, 7.0, 0.3)
+		_feed_prev = _feed_p
+	else:
+		_feed_prev = Vector3.INF
+	sim.step(dt, focus, fwd)
+
+## a burst of dust (crash, smash, hard landing)
+func puff_burst(pos: Vector3, power: float, col: Color, amount: float) -> void:
+	if sim == null: return
+	sim.burst(pos + Vector3(0, 0.25, 0), Vector3(0, 0.6, 0), 0.5 + power * 0.25, 30.0 * amount, 1.2 + power * 1.4, 0.15, col)
 
 static func dust_material() -> ShaderMaterial:
 	if _dust_mat == null:
@@ -155,6 +206,15 @@ func _build_emitter() -> void:
 ## puffs per second, their colour (sRGB) and opacity
 func feed(rear: Vector3, throw_v: Vector3, rate: float, col: Color, alpha: float, fan_deg: float) -> void:
 	_rate = rate
+	if sim != null:
+		_feed_on = rate > 0.5 and alpha > 0.0
+		if not _feed_on: return
+		_feed_p = rear + Vector3(0, 0.12, 0)
+		_feed_v = throw_v
+		_feed_rate = rate * alpha * alpha * 3.2   # grass (low alpha) barely dusts, dry dirt billows
+		_feed_r = 0.32 + clampf(rate / 120.0, 0.0, 1.0) * 0.3 + fan_deg / 70.0 * 0.15
+		sim.tint(col)
+		return
 	emitter.global_position = rear
 	var sp := throw_v.length()
 	if sp > 0.05:
@@ -200,6 +260,9 @@ func _build_fog_puffs() -> void:
 
 ## a big dusty moment (hard skid, landing, crash): a dust cloud that swells, drifts and thins out
 func cloud(pos: Vector3, vel: Vector3, col: Color, size: float, density: float) -> void:
+	if sim != null:
+		sim.burst(pos + Vector3(0, 0.3, 0), vel + Vector3(0, 0.5, 0), size * 0.32, density * 22.0, 1.6 + size * 0.3, 0.22, col)
+		return
 	if not fog_on: return
 	var i := _puff_next
 	_puff_next = (i + 1) % _puffs.size()

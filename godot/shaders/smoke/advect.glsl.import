@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://bvc5wl4k8dh4w"
+path="res://.godot/imported/advect.glsl-8168215c905ae42058e697add521006c.res"
+
+[deps]
+
+source_file="res://shaders/smoke/advect.glsl"
+dest_files=["res://.godot/imported/advect.glsl-8168215c905ae42058e697add521006c.res"]
+
+[params]
+

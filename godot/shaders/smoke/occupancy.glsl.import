@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://dqwxtc1sk3vfv"
+path="res://.godot/imported/occupancy.glsl-f33234038b6bd3f20b2cd77048fde8ae.res"
+
+[deps]
+
+source_file="res://shaders/smoke/occupancy.glsl"
+dest_files=["res://.godot/imported/occupancy.glsl-f33234038b6bd3f20b2cd77048fde8ae.res"]
+
+[params]
+

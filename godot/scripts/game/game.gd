@@ -356,10 +356,12 @@ func ground_dust(px: float, pz: float, s: int) -> Color:
 func burst(pos: Vector3, n: int, s: int, power: float) -> void:
 	if s == 2: return
 	var dc := ground_dust(pos.x, pos.z, s)
+	if dust.sim != null:   # real smoke sim: one dust burst instead of sprite puffs
+		dust.puff_burst(pos, power, dc, (1.0 if s == 1 else 0.8 if s == 3 else 0.45) * clampf(float(n) / 20.0, 0.4, 2.0))
 	for i in n:
 		var a := randf() * TAU
 		var r := (0.6 + randf()) * power
-		fx.puff(pos + Vector3(cos(a) * 0.15, 0.05, sin(a) * 0.15), Vector3(cos(a) * r, 0.25 + randf() * 0.6, sin(a) * r), dc, 0.6, 3.4, 0.6 if s == 1 else 0.5 if s == 3 else 0.3)
+		if dust.sim == null: fx.puff(pos + Vector3(cos(a) * 0.15, 0.05, sin(a) * 0.15), Vector3(cos(a) * r, 0.25 + randf() * 0.6, sin(a) * r), dc, 0.6, 3.4, 0.6 if s == 1 else 0.5 if s == 3 else 0.3)
 		if i % 2 == 0:
 			var cc: Color = DIRT_CHUNK if s == 1 else (dc * 0.8 if s == 3 else (GRASS_CHUNK if randf() < 0.5 else ROCK_CHUNK))
 			fx.chunk(Vector3(pos.x, pos.y + 0.05, pos.z), Vector3(cos(a) * r * 0.9, 1.2 + randf() * 1.8 * power, sin(a) * r * 0.9), cc, 0.028)
@@ -373,7 +375,8 @@ func smash(c: Dictionary, vel: Vector3, pos: Vector3) -> bool:
 	elif c.get("tape", false): col = Color("e8322b")
 	for k in 12:
 		fx.chunk(Vector3(c.x, pos.y + 0.3 + randf() * 0.6, c.z), Vector3(vel.x * 0.4 + (randf() - .5) * 3, 1 + randf() * 2.5, vel.z * 0.4 + (randf() - .5) * 3), col, 0.025)
-	for k in 3:
+	if dust.sim != null: dust.puff_burst(Vector3(c.x, pos.y + 0.1, c.z), 0.6, Color("cdb894"), 0.5)
+	for k in (0 if dust.sim != null else 3):
 		fx.puff(Vector3(c.x, pos.y + 0.4, c.z), Vector3((randf() - .5) * 1.5, 0.4 + randf() * 0.5, (randf() - .5) * 1.5), Color("cdb894"), 0.35, 1.4, 0.4)
 	if audio and not c.get("tape", false): audio.crunch()
 	return true
@@ -450,8 +453,8 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 		var fast_k := clampf((va - 8) / 6, 0, 1)
 		var rate := 0.0
 		if in_water: rate = 0.0
-		elif dirt: rate = fast_k * 14 + (50.0 if skid_fx else 0.0) + carve_k * 60 + st.pedal * (6.0 if va < 3 else 0.0)
-		elif sand: rate = fast_k * 10 + (40.0 if skid_fx else 0.0) + carve_k * 45 + st.pedal * (4.0 if va < 3 else 0.0)
+		elif dirt: rate = fast_k * 14 + (clampf(va / 7.0, 0, 1) * 12.0 if dust.sim != null else 0.0) + (50.0 if skid_fx else 0.0) + carve_k * 60 + st.pedal * (6.0 if va < 3 else 0.0)
+		elif sand: rate = fast_k * 10 + (clampf(va / 7.0, 0, 1) * 10.0 if dust.sim != null else 0.0) + (40.0 if skid_fx else 0.0) + carve_k * 45 + st.pedal * (4.0 if va < 3 else 0.0)
 		else: rate = (14.0 if skid_fx else 0.0) + carve_k * 12
 		var fxd: float = Settings.get_v("fx_density")
 		# the dust trail: a GPU particle emitter at the rear tyre (fx/ride_dust.gd), thrown back and up,
@@ -650,6 +653,9 @@ func _process(dt: float) -> void:
 	# weather: wind, the bike parting the grass, cloud shadows (the sun dims with the shade at the rider)
 	atmos.update(t, dt, drawn_pos, 0.0 if st.air or st.crash_on else clampf(absf(st.v) / 2.0, 0.0, 1.0))
 	sun.light_energy = sun_energy * atmos.shade
+	# the dust simulation around the rider (fx/smoke_sim.gd)
+	dust.attach(terrain, sun)
+	dust.sim_step(dt, drawn_pos, st.fwd(), atmos.wind)
 	grime.update(dt, rig)
 	# speed feel: wider FOV and streaky screen edges when fast
 	var sk := clampf((absf(st.v) - 8.0) / 14.0, 0.0, 1.0) if Settings.get_v("speed_fx") and not st.crash_on else 0.0

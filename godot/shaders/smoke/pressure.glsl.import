@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://dvgslot8okvor"
+path="res://.godot/imported/pressure.glsl-6483267e0b52dc8c364fefee2de99d29.res"
+
+[deps]
+
+source_file="res://shaders/smoke/pressure.glsl"
+dest_files=["res://.godot/imported/pressure.glsl-6483267e0b52dc8c364fefee2de99d29.res"]
+
+[params]
+

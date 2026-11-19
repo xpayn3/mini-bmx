@@ -150,7 +150,17 @@ F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A 
 - Saved in `garage.json`; `GameState.bike_config()` applies it to the ride.
 
 ### Effects
-- Dust (GPU trail + soft puffs + FogVolume clouds), dirt chunks, **tyre tracks**: one ring-buffer ArrayMesh
+- **Dust = a real 3D smoke simulation** (`fx/smoke_sim.gd` + compute shaders `shaders/smoke/*.glsl`): a
+  128×32×128 grid (0.2 m voxels, 25.6×6.4×25.6 m) of air on the GPU that follows the rider (moves in
+  0.8 m steps, ahead along the heading) and follows the ground (voxel height is measured from a
+  terrain heightmap). Each frame: advect (velocity + dust, settling, wind, sources) → curl-noise
+  turbulence → vorticity confinement → pressure solve (red-black GS) → project → sun/sky light volume →
+  occupancy bricks. Drawn by raymarching (`smoke_render.gdshader`, empty-space skipping via the bricks,
+  3-octave noise erosion for wisps/billows). Sources: rear-wheel roost (pulsed + jittered, `RideDust.feed`),
+  skid/landing/crash clouds (`cloud`), `burst()` / smashes (`puff_burst`), the bike's wake. Stops when
+  the air is clear. `.glsl` files need an import (`--headless --import`) after editing. Falls back to the
+  old sprites / FogVolumes without a RenderingDevice; `BMX_SPRITE_DUST=1` forces the sprites.
+- Dirt chunks, **tyre tracks**: one ring-buffer ArrayMesh
   (14 000 segments ≈ 1 km/wheel, one draw call, each segment uploads only its own bytes) drawn by
   `tyre_track.gdshader` — lit, knob-tread dimples bump-mapped, soft edges + soil lip, skid streaks, distance fade.
 - Grime: mud builds up (slow: `Grime.MUD_RATE` 0.25) and washes off in water; wet gloss + drips. Passes
@@ -195,6 +205,8 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `BMX_AUDIO_PROBE=1` | prints the freewheel's click rate / volume / output peak twice a second |
 | `BMX_COAST=1` | autotest alternates 3 s pedalling / 3 s coasting (freewheel tests) |
 | `BMX_REC=file.wav` | records the game's own sound output during an autotest |
+| `BMX_SKID=secs` / `BMX_DUST_SHOTS=dir/prefix` (+ `BMX_DUST_T0`) | autotest locks the rear wheel from secs / a screenshot every 0.5 s (dust tests; `BMX_CAM=side` avoids the tilt-shift blur) |
+| `BMX_SPRITE_DUST=1`, `BMX_SMOKE_PROBE=1` | old sprite dust for comparison / smoke-sim timing prints |
 | `BMX_FENCE=dir/prefix` (+ `BMX_FENCE_STYLE=ranch/picket`) | autotest rides into the nearest fence, screenshots before / after the smash |
 
 Typical check after a change: build C# → `--autotest=10` with `BMX_SEED=4242` (sane=true, no SCRIPT ERROR)
@@ -241,7 +253,7 @@ and other GPU apps open; uncapped ~430 fps on an RTX 3090 after the C# terrain.
 
 ## 9. Status & open items
 
-Recently done (most recent first): bolder tread tyre tracks; no tyre clipping in the garage; compact garage
+Recently done (most recent first): dust is a real GPU smoke simulation (no sprites); bolder tread tyre tracks; no tyre clipping in the garage; compact garage
 UI; door/flicker/glare fixes; closed front wall + camera kept in the room; ride-camera drag direction
 matches the garage; slower mud; review fixes (crash torso culling, NaN freeze, BMX gearing, leftover mud,
 photo mode, controls card, view distance, double world build, water re-bake, settings slider drag, garage

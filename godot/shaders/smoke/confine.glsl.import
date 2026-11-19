@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://ctgsotvwy1ftl"
+path="res://.godot/imported/confine.glsl-79847a77c7480f20f36bf6b0ef4abe2a.res"
+
+[deps]
+
+source_file="res://shaders/smoke/confine.glsl"
+dest_files=["res://.godot/imported/confine.glsl-79847a77c7480f20f36bf6b0ef4abe2a.res"]
+
+[params]
+

@@ -12,12 +12,15 @@ var cloud_off := Vector2.ZERO
 var wind_on := true
 var clouds_on := true
 var shade := 1.0           # cloud shade at the rider this frame (1 = full sun)
+var wind := Vector2.ZERO   # direction * gust strength (0..1) this frame
 
 func update(t: float, dt: float, rider: Vector3, push: float) -> void:
 	# the wind slowly swings round and its strength breathes
 	var a := 0.62 + sin(t * 0.013) * 0.35
 	var w := Vector2(cos(a), sin(a))
-	RenderingServer.global_shader_parameter_set("atm_wind", Vector4(w.x, w.y, t, (0.75 + 0.25 * sin(t * 0.05)) if wind_on else 0.0))
+	var ws := (0.75 + 0.25 * sin(t * 0.05)) if wind_on else 0.0
+	wind = w * ws
+	RenderingServer.global_shader_parameter_set("atm_wind", Vector4(w.x, w.y, t, ws))
 	RenderingServer.global_shader_parameter_set("atm_pusher", Vector4(rider.x, rider.y, rider.z, push))
 	cloud_off -= w * CLOUD_DRIFT * dt
 	if cloud_off.length_squared() > 1e8: cloud_off = Vector2.ZERO   # keep the float offset small over hours
