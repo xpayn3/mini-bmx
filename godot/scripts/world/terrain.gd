@@ -832,6 +832,16 @@ func update_water(px: float, pz: float, t: float) -> void:
 		_water.follow(px, pz, t)
 
 
+## the ride light (sun / moon direction + colour, sky at the horizon / overhead) for the water's reflections
+func water_light(sun_dir: Vector3, sun_col: Color, sky_h: Color, sky_z: Color) -> void:
+	if _water:
+		var m := _water.material_override as ShaderMaterial
+		m.set_shader_parameter("u_sun_dir", sun_dir.normalized())
+		m.set_shader_parameter("u_sun_col", Vector3(sun_col.r, sun_col.g, sun_col.b))
+		m.set_shader_parameter("u_sky_h", sky_h)
+		m.set_shader_parameter("u_sky_z", sky_z)
+
+
 func _update_wind(dt: float) -> void:
 	_wind_t += dt
 	var t := _wind_t

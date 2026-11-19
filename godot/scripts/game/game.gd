@@ -384,6 +384,11 @@ func _apply_light(h: float, L: Dictionary) -> void:
 	env.tonemap_exposure = lerpf(lerpf(0.8, 0.95, g), 1.6, n) * float(L.exposure)
 	env.adjustment_saturation = float(L.saturation) * lerpf(1.0, 0.8, n)
 	env.adjustment_contrast = float(L.contrast)
+	# water: reflect this sky and glint where this sun is (it used to keep a fixed noon sky + sun)
+	if terrain and terrain.has_method("water_light"):
+		var hz := Color(0.784, 0.933, 0.969).lerp(Color(1.0, 0.78, 0.6), gw).lerp(Color(0.07, 0.09, 0.15), n)
+		var zn := Color(0.424, 0.765, 0.925).lerp(Color(0.62, 0.62, 0.72), gw).lerp(Color(0.02, 0.03, 0.07), n)
+		terrain.water_light(dirv, sun.light_color * clampf(sun_energy / maxf(RIDE_SUN, 0.01), 0.0, 1.5), hz, zn)
 
 
 ## the heading with the best view from the rider: nothing close blocking the eye line (ground + room
@@ -719,12 +724,28 @@ func respawn(new_world: bool) -> void:
 		flash("New world #%d" % GameState.seed)
 	if fx.has_method("clear_tracks"): fx.clear_tracks()
 	if new_world: grime.clean()
-	phys.reset_at(0, 0, 0)
+	var sp := _water_spawn() if OS.get_environment("BMX_WATER_SPAWN") != "" else Vector3.ZERO
+	phys.reset_at(sp.x, sp.z, sp.y)
+	if sp != Vector3.ZERO: terrain.update_stream(sp.x, sp.z, INF)
 	rider.reset_pose()
 	_snap_prev()
 	cam.snap_to(Vector3(0, phys.y + 0.5, 0))
 
-const DRAW_KEYS := ["x", "z", "y", "y_draw", "pitch", "pitch_draw", "heading", "body_y"]
+## tests (BMX_WATER_SPAWN=1): a dry spot 6 m from the nearest lake, facing it -> (x, heading, z)
+func _water_spawn() -> Vector3:
+	for r in range(20, 1600, 8):
+		for k in 48:
+			var a := TAU * k / 48.0
+			var x := cos(a) * r
+			var z := sin(a) * r
+			if terrain.field.ground(x, z) < Terrain.WATER - 0.3:
+				var bx := x - cos(a) * 9.0
+				var bz := z - sin(a) * 9.0
+				print("WATERSPAWN %.0f %.0f" % [bx, bz])
+				return Vector3(bx, -a, bz)
+	return Vector3.ZERO
+
+const DRAW_KEYS :=["x", "z", "y", "y_draw", "pitch", "pitch_draw", "heading", "body_y"]
 
 func _snap_prev() -> void:
 	for k in DRAW_KEYS: _prev[k] = phys.get(k)
