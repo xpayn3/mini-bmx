@@ -44,6 +44,9 @@ var pos_init := false
 var t := 0.0
 var dragging := false
 var fov_boost := 0.0   # degrees added at speed (game.gd speed feel)
+var speed_feel := 0.0  # 0..1 how fast it feels (game.gd): the camera pulls in (dolly-zoom with the wider FOV),
+                       # drops a little, rumbles and banks into turns
+var bank_s := 0.0
 var pan_t := -100.0    # when the user last turned the camera (drag, Z / X, stick): re-centre waits for it
 var follow_k := 1.0    # Settings "cam_follow": how quickly the camera turns after the rider
 
@@ -185,9 +188,10 @@ func update_cam(dt: float) -> void:
 		orbit += (orbit_t - orbit) * minf(1.0, dt * 8)
 		cam_pitch += (cam_pitch_t - cam_pitch) * minf(1.0, dt * 8)
 		var yaw := cam_yaw + orbit + deg_to_rad(float(Settings.get_v("cam_side")))
-		var pit := clampf(cam_pitch + float(Settings.get_v("cam_height")), 2.0, 84.0)
+		var pit := clampf(cam_pitch + float(Settings.get_v("cam_height")) - 4.0 * speed_feel, 2.0, 84.0)
 		var dist0 := dist
-		dist = dist0 * float(Settings.get_v("cam_dist"))   # the zoom the user set × the Settings distance
+		# speed: in closer while the FOV widens (the rider stays the same size, the world rushes past)
+		dist = dist0 * float(Settings.get_v("cam_dist")) * (1.0 - 0.2 * speed_feel)   # the zoom the user set × the Settings distance
 		if P.get("drift", false):
 			yaw += sin(t * 0.13) * 0.3; pit += sin(t * 0.09) * 4
 		var back := Vector3(cos(yaw), 0, -sin(yaw))
@@ -223,11 +227,17 @@ func update_cam(dt: float) -> void:
 	if sk > 0:
 		global_position += Vector3(sin(t * 37) * sk * 0.12, sin(t * 29 + 1) * sk * 0.12, 0)
 	st.shake = maxf(0.0, st.shake - dt * 1.2)
+	if speed_feel > 0.01 and not st.air:   # speed rumble: a fine, fast buzz through the frame (ground + wind)
+		var rk: float = speed_feel * speed_feel * 0.018 * float(Settings.get_v("cam_shake"))
+		global_position += Vector3(sin(t * 61.0) + sin(t * 97.0 + 2.0) * 0.6, sin(t * 73.0 + 1.0) + sin(t * 113.0) * 0.5, sin(t * 53.0 + 0.5)) * rk
 	var aim := target
 	if bool(Settings.get_v("cam_keep")) and not (st.crash_on and game.ragdoll):
 		aim = _keep_rider_in_view(target, drawn + Vector3(0, 0.9, 0))
 	if global_position.distance_to(aim) > 0.01:
 		look_at(aim, Vector3.UP)
+		# bank into the turn a little with speed (the horizon tips the way the rider leans)
+		bank_s += (-st.bike_lean * 0.13 * speed_feel - bank_s) * minf(1.0, dt * 3.0)
+		rotate_object_local(Vector3.BACK, bank_s)
 	# trees / rocks between the camera and the rider dissolve (deco.gdshader)
 	var see: Vector3 = target if (st.crash_on and game.ragdoll) else drawn + Vector3(0, 0.9, 0)
 	RenderingServer.global_shader_parameter_set("cam_see", Vector4(see.x, see.y, see.z, 1.0 if bool(Settings.get_v("cam_fade")) else 0.0))
