@@ -158,7 +158,7 @@ func set_unit(id: String) -> void:
 	_face.k = TEX_K
 	_face.page_i = 0
 	var s: float = u.scale
-	_home = DIST0 * s
+	_home = DIST0 * s * 1.25   # a little further out so the whole device shows
 	dist_goal = _home
 	var w := 1.50 * s
 	var h := 2.24 * s
@@ -271,9 +271,9 @@ func _gui_input(e: InputEvent) -> void:
 					_yaw_t = 0.0; _pitch_t = 0.08
 					dist_goal = _home
 		elif e.pressed and e.button_index == MOUSE_BUTTON_WHEEL_UP:
-			dist_goal = clampf(dist_goal * 0.88, 2.2, 8.0)
+			dist_goal = clampf(dist_goal * 0.88, 2.2, 14.0)
 		elif e.pressed and e.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			dist_goal = clampf(dist_goal / 0.88, 2.6, 8.0)
+			dist_goal = clampf(dist_goal / 0.88, 2.6, 14.0)
 	elif e is InputEventMouseMotion and _drag:
 		_moved += e.relative.length()
 		var dy: float = e.relative.x * 0.0105

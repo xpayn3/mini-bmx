@@ -100,7 +100,7 @@ func _frame(node: Node3D, view: Vector3) -> void:
 	var basis := Basis.looking_at(-d, Vector3.UP)
 	var right := basis.x; var up := basis.y
 	var tv := tan(deg_to_rad(_cam.fov * 0.5))
-	var th := tv * float(SIZE.x) / float(SIZE.y)
+	var th := tv * float(size.x) / float(size.y)
 	# the part's own points (not its box: a part lying at an angle has a much bigger box than itself, so it came
 	# out small and off centre): centre on their extent across the view, then fit them as big as the picture lets
 	var pts := _points(mis, 600)
@@ -216,6 +216,15 @@ static func _compact(arr: Array, K: PackedInt32Array) -> Array:
 static var _bar_stock: ArrayMesh = null
 
 ## the handlebar alone (bar, stem clamp, grips, levers) at a width / rise / material, painted like the build
+## a whole bike (stock frame + the player's garage build when the frame takes one), for the ride setup cards
+static func make_bike(id: String) -> Node3D:
+	var cfg: Dictionary = GameState.BIKES[id].duplicate(true)
+	var build := {}
+	if cfg.get("garage", false): build = BikeBuild.load_build()
+	var rig := BikeRig.new()
+	rig.load_bike(cfg, build)
+	return rig
+
 static func make_bars(m: Dictionary, crown_paint: Dictionary, grip_paint: Dictionary) -> Node3D:
 	if _bar_stock == null:
 		_bar_stock = _filter(glb_part("steer")[0], func(a, b, c): return a.y > BAR_CUT and b.y > BAR_CUT and c.y > BAR_CUT,
