@@ -300,7 +300,7 @@ func update_hud(dt: float) -> void:
 		fps_now = fps_frames / fps_acc
 		fps_frames = 0; fps_acc = 0
 	# the SYSTEM page shows the ride in 3D too: the Debug Draw 3D physics overlay is on while it's up
-	var sys_up: bool = gauge != null and gauge.visible and visible and gauge.page == GaugeView.SYS_PAGE
+	var sys_up: bool = gauge != null and gauge.visible and visible and gauge.order.size() > gauge.page and int(gauge.order[gauge.page]) == GaugeView.SYS_PAGE
 	if sys_up != _sys_overlay:
 		_sys_overlay = sys_up
 		if sys_up:
@@ -500,7 +500,7 @@ class GaugeView extends Control:
 	var ov: Overlay
 	var hud
 	var unit := ComputerUnits.get_unit("classic")
-	var order: Array = [0, 1, 2, 3, 4, 5]   # the page ids this model has
+	var order: Array = [0, 1, 2, 3, 4, 5, 6]   # the page ids this model has
 	var page := 0          # index into `order`
 	var bump := 0.0        # 1 on a shift, fades out: the gear digit flashes inverted
 	var show_gear := true  # Settings › HUD › Gear shifter
