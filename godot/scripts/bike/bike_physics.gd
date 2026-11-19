@@ -36,7 +36,7 @@ var heading := 0.0; var v := 0.0; var steer := 0.0; var steer_in := 0.0
 var lean := 0.0; var lean_v := 0.0; var bike_lean := 0.0; var counter := 0.0; var rock := 0.0
 var pitch := 0.0; var pitch_v := 0.0; var hop_nose := 0.0
 var wheelie_up := 0.0   # sprint wheelie: how far up (rad) the rider is holding the front
-var air := false; var air_time := 0.0; var air_k := 0.0
+var air := false; var air_time := 0.0; var air_k := 0.0; var cap_bank := 0.0; var lean_lim := 9.0
 var compress := 0.0; var compress_v := 0.0; var load := 0.0
 var body_y := NAN; var body_v := 0.0; var body_x := 0.0; var hip_shift := 0.0
 # the rider's body as its own mass fore / aft: it lags the bike (braking and landings throw it forward,
@@ -686,8 +686,13 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	lean += lean_v * dt
 	# the body stick throws the bike over under the rider (the body stays upright: counter grows)
 	var bl: float = lean * T.bikeLeanMul + (0.0 if air else flick * float(T.get("flickLean", 0.35)) * smooth01(va / 3.0))
-	var cap_b: float = T.bikeLeanCap + (0.0 if (air or signf(bk) != signf(bl)) else absf(bk))
+	if not air:
+		cap_bank = 0.0 if signf(bk) != signf(bl) else absf(bk)
+	else:   # the bank's extra room is carried off the lip, fading over 2 s (the lean must not snap at take-off)
+		cap_bank = maxf(0.0, cap_bank - dt * 0.5)
+	var cap_b: float = T.bikeLeanCap + cap_bank
 	bike_lean = cap_b * tanh(bl / cap_b)
+	var lim_t := 9.0
 	if not air and absf(bike_lean) > 0.05:
 		# what matters for the tyre is its lean against the ground WHERE IT SWINGS TO, not gravity: leaned deep
 		# toward ground that rises beside the bike (a trail's edge, the hillside, a berm's lip) the tyre went
@@ -707,8 +712,17 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 				phi = maxf(phi, atan((terrain.deck_height(wx + lx * d, wz + lz * d) - h0) / d))
 		lean_room = _or(lean_room, phi)
 		lean_room += clampf(phi - lean_room, -3.0 * dt, 3.0 * dt)
-		var lim: float = maxf(0.25, float(T.get("groundLeanMax", 1.05)) - maxf(lean_room, -0.3))
-		bike_lean = sg * minf(absf(bike_lean), lim)
+		lim_t = maxf(0.25, float(T.get("groundLeanMax", 1.05)) - maxf(lean_room, -0.3))
+	# the ground's limit on the lean opens / closes over a moment when the bike leaves / meets the ground: it used
+	# to switch on and off in a single step (a 0.5-0.8 rad jump of the bike and the rider at take-off and landing)
+	if air:
+		lean_lim = minf(9.0, lean_lim + 2.5 * dt)
+	elif since_land < 0.4:
+		lean_lim = maxf(lim_t, lean_lim - 4.0 * dt)
+	else:
+		lean_lim = lim_t
+	if lean_lim < 8.0:
+		bike_lean = signf(bike_lean) * minf(absf(bike_lean), lean_lim)
 	# the bike leans under the rider: the body always stays a little more upright than the bike (never
 	# hangs inside it, or the inside leg cuts through the frame). The body leans ~70 % of the way the
 	# rider + bike lean, so in a fast turn the bike tips well under a fairly upright rider
@@ -961,12 +975,21 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 					else:
 						air_w *= 1.0 - minf(1.0, T.airSpinStop * h) * arc
 				var tgt: float
+				var kt_base := 70.0
 				if absf(flip_in) > 0.05:
 					tgt = flip_in * T.airTilt
 				else:
 					var hh := maxf(0.0, y - _g_y)
 					var tg := (vy + sqrt(vy * vy + 2 * G * hh)) / G
 					tgt = wrapf(_g_pitch - (pitch - air_tilt + air_w * minf(tg, 1.0)), -PI, PI)
+					# hands off the rider doesn't snap the bike to the landing slope the moment he leaves the ground: he holds
+					# the attitude he took off with for airAimDelay s, then eases the bike round softly, and reaches for the
+					# landing (stiffer) only in the last moments
+					# (a bike that has turned well away from the landing slope is brought back at once)
+					var off_k := clampf((absf(tgt) - 0.3) / 0.3, 0.0, 1.0)
+					var aim_k: float = maxf(maxf(smooth01((air_time - float(T.get("airAimDelay", 1.0))) / 0.5), land_prep), off_k)
+					tgt *= aim_k
+					kt_base = lerpf(lerpf(float(T.get("airAimSpeed", 14.0)), 45.0, off_k), 70.0, land_prep)
 				tgt = clampf(tgt, -T.airTilt, T.airTilt)
 				# right stick: the nose goes where it points, on top of the landing aim
 				var st_t: float = float(T.get("stickAirTilt", 0.55))
@@ -975,7 +998,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 				# the rider's arms and legs move the bike: quick when they aim it at the landing on their own,
 				# softer (it takes the whole body) when the stick swings it round
 				var soft: float = clampf(air_stick.length() * 3.0 + absf(edge_s) * 2.0, 0.0, 1.0)
-				var kt: float = lerpf(70.0, 22.0, soft)
+				var kt: float = lerpf(kt_base, 22.0, soft)
 				air_tilt_v += (kt * (tgt - air_tilt) - 2.0 * sqrt(kt) * 0.85 * air_tilt_v) * h
 				air_tilt += air_tilt_v * h
 				if absf(air_tilt) > t_lim:

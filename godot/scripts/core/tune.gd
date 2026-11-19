@@ -99,6 +99,8 @@ const DEFS := [
 		["autoPump", "Pumps on his own (1 = no Space needed)", 0.4, 0, 1, 0.05, ""],
 		["airLift", "Lifts the bike after take-off", 0.6, 0, 1, 0.05, ""],
 		["landPrepTime", "Reach for landing", 0.35, 0.05, 1, 0.05, "s"],
+		["airAimDelay", "Wait before aiming at the landing", 1.0, 0, 2, 0.05, "s"],
+		["airAimSpeed", "Aim at the landing: softness", 14, 4, 70, 1, ""],
 		["chargeTime", "Hop charge time", 2, 0.5, 4, 0.1, "s"],
 		["chargePop", "Full-charge extra pop", 0.6, 0, 4, 0.1, "m/s"],
 	]],
