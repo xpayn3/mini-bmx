@@ -74,8 +74,8 @@ const BREAK_PARENT := {4: 3, 7: 6, 10: 9, 13: 12}                           # jo
 var _break_ready := false
 var _broken := 0
 var _fractures: Array = []      # {j, bone: MeshInstance3D, ring: MeshInstance3D}
-var _bone_mesh: CylinderMesh
-var _stub_mesh: CylinderMesh
+var _bone_mesh: Mesh
+var _stub_mesh: Mesh
 var _ring_mesh: SphereMesh
 var _crunch: AudioStreamWAV
 ## tyres that rolled through blood print red for a while (game.gd -> tyre_color)
@@ -485,7 +485,7 @@ func _break(j: int, pts: Array, v: Vector3) -> void:
 	_broken += 1
 	_bleed[j] = maxf(_bleed[j], 1.4)
 	splat(Vector3(pj.x, 0, pj.z), 0.3, 0.9, v)
-	_fractures.append({j = j, bone = _bone(_bone_m()), ring = _ring()})
+	_fractures.append({j = j, bone = _bone(_bone_m()), ring = _ring(), spin = randf() * TAU})
 	_play_crunch(pj)
 	if probe: print("BLOOD break joint=%d v=%.1f" % [j, v.length()])
 
@@ -500,46 +500,38 @@ func _place_fractures(pts: Array) -> void:
 		if d.length() < 0.15: d = a.cross(Vector3.UP)
 		if d.length() < 0.05: d = a.cross(Vector3.RIGHT)
 		d = d.normalized()
-		# tilt it a little along the upper bone (a splintered end, not a peg)
-		var dir := (d + a * 0.35).normalized()
+		# an open fracture: the upper bone's broken end carries on past the joint and pokes out through
+		# the skin on the outside of the bend, angled (not a spike straight out): mostly inside the limb
+		var dir := (-a * 0.75 + d * 0.65).normalized()
 		var r: float = ragdoll.rad[j] if j < ragdoll.rad.size() else 0.045
 		var bs := 3.0 if OS.get_environment("BMX_BONE_BIG") != "" else 1.0   # tests: see where it is
-		(fr.bone as MeshInstance3D).global_transform = Transform3D(Basis(Quaternion(Vector3.UP, dir)).scaled(Vector3.ONE * bs), pj + dir * (r * 0.3 + 0.065 * bs))
-		(fr.ring as MeshInstance3D).global_transform = Transform3D(Basis(Quaternion(Vector3.UP, dir)), pj + dir * r * 0.85)
+		var bb := Basis(Quaternion(Vector3.UP, dir)).rotated(dir, float(fr.get("spin", 0.0)))
+		(fr.bone as MeshInstance3D).global_transform = Transform3D(bb.scaled(Vector3.ONE * bs), pj + dir * 0.015 * bs + d * r * 0.25)
+		# the torn wound where it comes through, flat on the skin
+		(fr.ring as MeshInstance3D).global_transform = Transform3D(Basis(Quaternion(Vector3.UP, d)), pj + d * r * 0.8 + dir * 0.012)
 
 func _bone_m() -> Mesh:
 	if _bone_mesh == null:
-		_bone_mesh = CylinderMesh.new()
-		_bone_mesh.top_radius = 0.006      # the splintered tip
-		_bone_mesh.bottom_radius = 0.016
-		_bone_mesh.height = 0.13
-		_bone_mesh.radial_segments = 7
-		_bone_mesh.rings = 1
-		_bone_mesh.material = _bone_mat()
+		_bone_mesh = _capsule(0.011, 0.09)
 	return _bone_mesh
 
 func _stub_m() -> Mesh:
 	if _stub_mesh == null:
-		_stub_mesh = CylinderMesh.new()
-		_stub_mesh.top_radius = 0.009
-		_stub_mesh.bottom_radius = 0.014
-		_stub_mesh.height = 0.07
-		_stub_mesh.radial_segments = 7
-		_stub_mesh.rings = 1
-		_stub_mesh.material = _bone_mat()
+		_stub_mesh = _capsule(0.011, 0.06)
 	return _stub_mesh
 
-var _bmat: StandardMaterial3D
-func _bone_mat() -> StandardMaterial3D:
-	if _bmat == null:
-		_bmat = StandardMaterial3D.new()
-		_bmat.albedo_color = Color(0.86, 0.8, 0.68)    # bone: off-white, a little yellow
-		_bmat.roughness = 0.45
-		# blood-stained toward the base: a vertex-less trick, a red rim light from the wound
-		_bmat.rim_enabled = true
-		_bmat.rim = 0.3
-		_bmat.rim_tint = 0.8
-	return _bmat
+## a bone end: a plain capsule, bone coloured (centred on its middle, along Y)
+func _capsule(radius: float, height: float) -> Mesh:
+	var c := CapsuleMesh.new()
+	c.radius = radius
+	c.height = height
+	c.radial_segments = 12
+	c.rings = 4
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.88, 0.83, 0.71)   # off-white, a little yellow
+	m.roughness = 0.5
+	c.material = m
+	return c
 
 func _bone(m: Mesh) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
@@ -642,14 +634,14 @@ func _bleed_wounds(pts: Array, prv: Array, h: float, dt: float) -> void:
 		var pa: Vector3 = pts[a]
 		var out: Vector3 = (pa - (pts[CUT_PARENT[a]] as Vector3)).normalized()
 		(w.body as MeshInstance3D).global_transform = Transform3D(Basis(Quaternion(Vector3.UP, out)), pa + out * 0.03)
-		(w.bone_b as MeshInstance3D).global_transform = Transform3D(Basis(Quaternion(Vector3.UP, out)), pa + out * 0.05)
+		(w.bone_b as MeshInstance3D).global_transform = Transform3D(Basis(Quaternion(Vector3.UP, out)), pa + out * 0.025)
 		var r: int = w.root
 		if r < pts.size():
 			var pr: Vector3 = pts[r]
 			var b: int = ragdoll.LIMB_NEXT[a]
 			var into: Vector3 = (pr - (pts[b] as Vector3)).normalized()
 			(w.end as MeshInstance3D).global_transform = Transform3D(Basis(Quaternion(Vector3.UP, into)), pr)
-			(w.bone_e as MeshInstance3D).global_transform = Transform3D(Basis(Quaternion(Vector3.UP, into)), pr + into * 0.025)
+			(w.bone_e as MeshInstance3D).global_transform = Transform3D(Basis(Quaternion(Vector3.UP, into)), pr + into * 0.005)
 		if w.t <= 0.0: continue
 		w.t -= dt
 		w.ph += dt
