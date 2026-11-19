@@ -44,6 +44,8 @@ var pos_init := false
 var t := 0.0
 var dragging := false
 var fov_boost := 0.0   # degrees added at speed (game.gd speed feel)
+var pan_t := -100.0    # when the user last turned the camera (drag, Z / X, stick): re-centre waits for it
+var follow_k := 1.0    # Settings "cam_follow": how quickly the camera turns after the rider
 
 func _ready() -> void:
 	near = 0.1
@@ -87,21 +89,25 @@ func _unhandled_input(e: InputEvent) -> void:
 		elif e.button_index == MOUSE_BUTTON_WHEEL_DOWN and e.pressed: dist = clampf(dist * 1.1, 4, 80)
 		elif e.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT]: dragging = e.pressed
 	elif e is InputEventMouseMotion and dragging:
-		orbit_t -= e.relative.x * 0.008 * sens   # grab the world: drag right turns the scene right (as in the garage)
+		pan_t = t
+		orbit_t -=e.relative.x * 0.008 * sens   # grab the world: drag right turns the scene right (as in the garage)
 		cam_pitch_t = clampf(cam_pitch_t + e.relative.y * 0.25 * sens * inv, 4, 85)
-	elif e.is_action_pressed("cam_left") and e is InputEventKey: orbit_t -= PI / 4
-	elif e.is_action_pressed("cam_right") and e is InputEventKey: orbit_t += PI / 4
+	elif e.is_action_pressed("cam_left") and e is InputEventKey: orbit_t -= PI / 4; pan_t = t
+	elif e.is_action_pressed("cam_right") and e is InputEventKey: orbit_t += PI / 4; pan_t = t
 
 func update_cam(dt: float) -> void:
 	t += dt
 	var st: BikePhysics = game.phys
 	var P: Dictionary = preset()
 	if P.get("mode", "") == "vista":
+		RenderingServer.global_shader_parameter_set("cam_see", Vector4.ZERO)
 		_vista(dt, P)
 		return
 	# analog camera (gamepad right stick) + zoom keys
 	var ax := Input.get_joy_axis(0, JOY_AXIS_RIGHT_X)
 	var ay := Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y)
+	follow_k = float(Settings.get_v("cam_follow"))
+	if absf(ax) > 0.2 or absf(ay) > 0.2: pan_t = t
 	if absf(ax) > 0.2: orbit_t += ax * dt * 2.2
 	if absf(ay) > 0.2: cam_pitch_t = clampf(cam_pitch_t + ay * dt * 60 * (-1.0 if Settings.get_v("invert_y") else 1.0), 4, 85)
 	if Input.is_action_pressed("zoom_in"): dist = clampf(dist * (1 - dt * 1.2), 4, 80)
@@ -117,11 +123,13 @@ func update_cam(dt: float) -> void:
 		_look_dir(st, f, dt)   # steers cam_yaw toward the trail ahead (below)
 		# aim straight out along the camera's own heading from the rider: the rider always stays framed,
 		# even when the camera lags in a tight turn
-		var look := Vector3(cos(cam_yaw), 0, -sin(cam_yaw))
+		# + the user's drag (orbit): look the way the camera points, so a pan swings the view round the rider
+		var ly := cam_yaw + orbit + deg_to_rad(float(Settings.get_v("cam_side")))
+		var look := Vector3(cos(ly), 0, -sin(ly))
 		if not pos_init:
 			look = trail_dir if trail_dir.length_squared() > 0.01 else f
 			cam_yaw = atan2(-look.z, look.x)
-		var lead := clampf(5.0 + absf(st.v) * 0.6, 5.0, 14.0)
+		var lead := clampf(5.0 + absf(st.v) * 0.6, 5.0, 14.0) * float(Settings.get_v("cam_ahead"))
 		# aim at the ground up ahead (+ a little): on a descent the view tips down the slope with you
 		var ap: Vector3 = Vector3(drawn.x, 0, drawn.z) + look * lead
 		var gy: float = game.terrain.height(ap.x, ap.z)
@@ -163,12 +171,19 @@ func update_cam(dt: float) -> void:
 			var dir_h: float = st.course if st.air and not is_nan(st.course) else st.heading
 			if P.get("ahead", false) and trail_dir.length_squared() > 0.01:
 				dir_h = atan2(-trail_dir.z, trail_dir.x)
-			cam_yaw += BikePhysics.ang_diff(dir_h, cam_yaw) * minf(1.0, dt * P.get("rate", 1.4) * minf(1.0, absf(st.v) / 4))
+			cam_yaw += BikePhysics.ang_diff(dir_h, cam_yaw) * minf(1.0, dt * P.get("rate", 1.4) * follow_k * minf(1.0, absf(st.v) / 4))
 		if P.has("spin"): orbit_t += P.spin * dt
+		elif bool(Settings.get_v("cam_recenter")) and t - pan_t > 2.5 and not dragging:
+			# swing back to the preset angle a moment after the last drag / Z X / stick turn
+			var k := minf(1.0, dt * 1.2)
+			orbit_t += BikePhysics.ang_diff(float(P.get("orbit", 0.0)), orbit_t) * k
+			cam_pitch_t += (float(P.pitch) - cam_pitch_t) * k
 		orbit += (orbit_t - orbit) * minf(1.0, dt * 8)
 		cam_pitch += (cam_pitch_t - cam_pitch) * minf(1.0, dt * 8)
-		var yaw := cam_yaw + orbit
-		var pit := cam_pitch
+		var yaw := cam_yaw + orbit + deg_to_rad(float(Settings.get_v("cam_side")))
+		var pit := clampf(cam_pitch + float(Settings.get_v("cam_height")), 2.0, 84.0)
+		var dist0 := dist
+		dist = dist0 * float(Settings.get_v("cam_dist"))   # the zoom the user set × the Settings distance
 		if P.get("drift", false):
 			yaw += sin(t * 0.13) * 0.3; pit += sin(t * 0.09) * 4
 		var back := Vector3(cos(yaw), 0, -sin(yaw))
@@ -187,7 +202,7 @@ func update_cam(dt: float) -> void:
 			var off_want := want_pos - anchor
 			if not pos_init:
 				pos_s = off_want; pos_v = Vector3.ZERO; pos_init = true
-			var w := 3.2 if P.get("ahead", false) else 2.4
+			var w := (3.2 if P.get("ahead", false) else 2.4) * clampf(follow_k, 0.4, 2.5)
 			pos_v = (pos_v + (off_want - pos_s) * w * w * dt) * exp(-2 * w * dt)
 			pos_s += pos_v * dt
 			global_position = anchor + pos_s
@@ -197,14 +212,39 @@ func update_cam(dt: float) -> void:
 		if global_position.y < gh:
 			global_position.y = gh
 			if P.get("drift", false) or P.get("ahead", false): pos_s.y = maxf(pos_s.y, gh - anchor.y); pos_v.y = maxf(pos_v.y, 0.0)
+		dist = dist0
 	cam_fov += (fov_t - cam_fov) * minf(1.0, dt * (6.0 if P.get("mode", "") == "trackside" else 3.0))
-	fov = clampf(cam_fov * (1.0 + fov_boost / 34.0) + float(Settings.get_v("fov")), 5, 110)
+	fov = clampf(cam_fov * (1.0 + fov_boost * float(Settings.get_v("cam_speed_fov")) / 34.0) + float(Settings.get_v("fov")), 5, 110)
 	var sk: float = st.shake * float(Settings.get_v("cam_shake"))
 	if sk > 0:
 		global_position += Vector3(sin(t * 37) * sk * 0.12, sin(t * 29 + 1) * sk * 0.12, 0)
 	st.shake = maxf(0.0, st.shake - dt * 1.2)
-	if global_position.distance_to(target) > 0.01:
-		look_at(target, Vector3.UP)
+	var aim := target
+	if bool(Settings.get_v("cam_keep")) and not (st.crash_on and game.ragdoll):
+		aim = _keep_rider_in_view(target, drawn + Vector3(0, 0.9, 0))
+	if global_position.distance_to(aim) > 0.01:
+		look_at(aim, Vector3.UP)
+	# trees / rocks between the camera and the rider dissolve (deco.gdshader)
+	var see: Vector3 = target if (st.crash_on and game.ragdoll) else drawn + Vector3(0, 0.9, 0)
+	RenderingServer.global_shader_parameter_set("cam_see", Vector4(see.x, see.y, see.z, 1.0 if bool(Settings.get_v("cam_fade")) else 0.0))
+	RenderingServer.global_shader_parameter_set("cam_eye", Vector4(global_position.x, global_position.y, global_position.z, 0.0))
+
+func _exit_tree() -> void:
+	RenderingServer.global_shader_parameter_set("cam_see", Vector4.ZERO)
+
+## never lose the rider: if the look point would put them more than ~70% of the way to the frame edge
+## (dragging the camera round, tight turns, look-ahead), turn the aim toward them until they sit at that edge
+func _keep_rider_in_view(aim: Vector3, rider: Vector3) -> Vector3:
+	var to_t := aim - global_position
+	var to_r := rider - global_position
+	if to_t.length_squared() < 0.0001 or to_r.length_squared() < 0.0001:
+		return aim
+	var ang := to_t.angle_to(to_r)
+	var lim := deg_to_rad(fov) * 0.5 * 0.7   # vertical half-FOV (the narrower one) with a margin
+	if ang <= lim:
+		return aim
+	var d := to_t.normalized().slerp(to_r.normalized(), 1.0 - lim / ang)
+	return global_position + d * to_t.length()
 
 ## lookout: a slow sway left/right over the view; a mouse drag turns it, the rider stays in the frame
 func _vista(dt: float, P: Dictionary) -> void:

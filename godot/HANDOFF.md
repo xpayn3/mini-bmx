@@ -200,6 +200,9 @@ F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A 
 ### Settings & tuning
 - Settings: display (mode, resolution, vsync, UI scale, FPS cap), graphics presets Low/Medium/High/Ultra
   + every option, audio buses, controls (rebind keys + pad), gameplay. Sliders apply on release.
+  Controls page starts with CAMERA: default camera, FOV, wider view at speed, distance, height, side offset,
+  look ahead, follow speed, shake, mouse, re-centre after a drag, keep the rider in view (`_keep_rider_in_view`),
+  see through trees (`deco.gdshader` dithers what is between camera and rider; globals `cam_see` / `cam_eye`).
 - One tuning card (`TuneCard`): tabs Ride (Steering, Lean, Grip, Speed, Suspension, Jumps), Rider (Body, Spine,
   Head, Arms, Legs, Motion, Physics) and Look (Kits, Helmet, Clothes); P / K / L open it on Ride / Rider / Look,
   Reset resets the category shown. Quick tune card keeps the pinned (☆) sliders. Test: `BMX_PANEL=ride|rider|look`

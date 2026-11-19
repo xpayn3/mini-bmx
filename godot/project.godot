@@ -58,6 +58,14 @@ atm_pusher={
 "type": "vec4",
 "value": Vector4(0, -10000, 0, 0)
 }
+cam_see={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+cam_eye={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
 atm_cloud={
 "type": "vec4",
 "value": Vector4(0, 0, 0.42, 1)

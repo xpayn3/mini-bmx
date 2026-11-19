@@ -13,6 +13,10 @@ uniform float sway = 0.0;      // m of sway per m of height in a full gust
 uniform float backlight = 0.0;
 varying vec3 v_col;
 varying vec3 v_world;
+// ride camera: anything between the camera and the rider dissolves (dither) so a tree never hides them.
+// cam_see = rider (w = on), cam_eye = the ride camera (other passes, e.g. shadows, have another eye: untouched)
+global uniform vec4 cam_see;
+global uniform vec4 cam_eye;
 
 void vertex() {
 	vec3 ic = use_instance ? INSTANCE_CUSTOM.rgb : vec3(1.0);
@@ -27,6 +31,17 @@ void vertex() {
 }
 
 void fragment() {
+	if (cam_see.w > 0.0 && distance(CAMERA_POSITION_WORLD, cam_eye.xyz) < 0.5) {
+		vec3 c = cam_eye.xyz;
+		vec3 seg = cam_see.xyz - c;
+		float u = clamp(dot(v_world - c, seg) / max(dot(seg, seg), 1e-4), 0.0, 1.0);
+		float d = length(v_world - (c + seg * u));
+		float rad = mix(1.6, 3.2, u);   // a cone widening toward the rider
+		float cut = (1.0 - smoothstep(rad * 0.5, rad, d)) * (1.0 - smoothstep(0.9, 1.0, u));
+		cut = max(cut, 1.0 - smoothstep(1.5, 3.0, distance(v_world, c)));   // right in front of the lens
+		float n = fract(52.9829189 * fract(dot(FRAGCOORD.xy, vec2(0.06711056, 0.00583715))));
+		if (n < cut * 0.95) discard;
+	}
 	ALBEDO = v_col;
 	ROUGHNESS = roughness;
 	METALLIC = metallic;

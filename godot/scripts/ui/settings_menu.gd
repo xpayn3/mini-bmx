@@ -151,7 +151,6 @@ func _display() -> Control:
 	fps.item_selected.connect(func(i): Settings.set_v("max_fps", caps[i]))
 	_row(p, "Frame rate cap", fps)
 	_slider(p, "Brightness", "brightness", 0.6, 1.5, 0.05, "%.2f")
-	_slider(p, "Field of view", "fov", -10.0, 20.0, 1.0, "%+.0f°")
 	_slider(p, "3D resolution", "render_scale", 0.5, 1.0, 0.05, "%.2fx")
 	_option(p, "Upscaler", "upscaler", ["Bilinear", "AMD FSR 1", "AMD FSR 2"], "Used when 3D resolution is below 100%")
 	return p
@@ -203,15 +202,6 @@ func _reopen(tab: int) -> void:
 func _gameplay() -> Control:
 	var p := _page("Gameplay")
 	_option(p, "Speed units", "units", ["km/h", "mph"])
-	var cams := OptionButton.new()
-	var keys := CameraRig.PRESETS.keys()
-	for k in keys: cams.add_item(CameraRig.PRESETS[k].label)
-	cams.selected = maxi(0, keys.find(Settings.get_v("camera")))
-	cams.item_selected.connect(func(i): Settings.set_v("camera", keys[i]))
-	_row(p, "Default camera", cams)
-	_slider(p, "Camera shake", "cam_shake", 0.0, 1.5, 0.05)
-	_slider(p, "Mouse sensitivity", "mouse_sens", 0.2, 3.0, 0.1, "%.1f")
-	_check(p, "Invert camera Y", "invert_y")
 	_slider(p, "Steering response (stick)", "steer_sens", 0.5, 2.0, 0.05, "%.2f", "Above 1: quicker off-centre; below 1: finer near centre")
 	_slider(p, "Stick deadzone", "deadzone", 0.05, 0.5, 0.01)
 	_check(p, "Controller vibration", "rumble")
@@ -245,6 +235,8 @@ func _controls() -> Control:
 
 func _fill_controls() -> void:
 	for c in _controls_box.get_children(): c.queue_free()
+	_camera_section(_controls_box)
+	_controls_box.add_child(UITheme.label("RIDING", 13, UITheme.MUTED))
 	_tune_slider(_controls_box, "Top speed", "topSpeed", "×%.2f",
 		"How fast the rider can pedal the bike: top speed, the power to reach it and less drag (also in the tuning card, Ride › Speed)")
 	var head := HBoxContainer.new()
@@ -268,6 +260,38 @@ func _fill_controls() -> void:
 		_controls_box.add_child(hb)
 	_controls_box.add_child(UITheme.button("Reset all controls", func(): Settings.reset_bindings(); _fill_controls(), 15))
 	_controls_box.add_child(UITheme.label("Click a binding, then press the new key / button (Esc cancels).", 13, UITheme.MUTED))
+
+## camera: which one, field of view, where it sits, how it follows (all live while riding)
+func _camera_section(p: Control) -> void:
+	p.add_child(UITheme.label("CAMERA", 13, UITheme.MUTED))
+	var cams := OptionButton.new()
+	var keys := CameraRig.PRESETS.keys()
+	for k in keys: cams.add_item(CameraRig.PRESETS[k].label)
+	cams.selected = maxi(0, keys.find(Settings.get_v("camera")))
+	cams.item_selected.connect(func(i): Settings.set_v("camera", keys[i]))
+	_row(p, "Default camera", cams, "C cycles the cameras while riding")
+	_slider(p, "Field of view", "fov", -15.0, 30.0, 1.0, "%+.0f°", "Degrees added to every camera: higher = wider view")
+	_slider(p, "Wider view at speed", "cam_speed_fov", 0.0, 2.0, 0.1, "%.1fx", "How much the view widens when you go fast")
+	_slider(p, "Distance", "cam_dist", 0.5, 2.5, 0.05, "%.2fx", "How far the camera sits from the rider (the mouse wheel zooms too)")
+	_slider(p, "Height", "cam_height", -15.0, 40.0, 1.0, "%+.0f°", "Higher = looking down more from above")
+	_slider(p, "Side offset", "cam_side", -90.0, 90.0, 1.0, "%+.0f°", "Swing the camera round to the side of the rider")
+	_slider(p, "Look ahead", "cam_ahead", 0.0, 2.0, 0.1, "%.1fx", "How far up the trail the Trail camera looks (the rider sits lower in the frame)")
+	_slider(p, "Follow speed", "cam_follow", 0.3, 2.5, 0.05, "%.2fx", "How quickly the camera turns after the rider: lower = smoother, higher = tighter")
+	_slider(p, "Camera shake", "cam_shake", 0.0, 1.5, 0.05)
+	_slider(p, "Mouse sensitivity", "mouse_sens", 0.2, 3.0, 0.1, "%.1f")
+	_check(p, "Invert camera Y", "invert_y")
+	_check(p, "Re-centre after turning it", "cam_recenter", "After a drag / Z / X the camera swings back behind the rider")
+	_check(p, "Always keep the rider in view", "cam_keep")
+	_check(p, "See through trees", "cam_fade", "Trees and rocks between the camera and the rider dissolve")
+	p.add_child(UITheme.button("Reset camera", _reset_camera, 15))
+
+func _reset_camera() -> void:
+	for k in ["fov", "cam_speed_fov", "cam_dist", "cam_height", "cam_side", "cam_ahead", "cam_follow", "cam_shake",
+			"mouse_sens", "invert_y", "cam_recenter", "cam_keep", "cam_fade"]:
+		Settings.data[k] = Settings.DEFAULTS[k]
+	Settings.apply()
+	Settings.save()
+	_fill_controls.call_deferred()   # the button that asked is still mid-signal
 
 func _start_rebind(action: String, pad: bool, b: Button) -> void:
 	_wait_action = action; _wait_pad = pad; _wait_btn = b
