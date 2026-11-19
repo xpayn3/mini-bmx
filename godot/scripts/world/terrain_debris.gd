@@ -1,15 +1,21 @@
 class_name TerrainDebris
 extends Node3D
 ## Rigid-body debris for smashed fences and cacti (replaces the JS debris.js; torn tape is TapeSim):
-## Godot physics bodies on layer 4 that only collide with the chunk ground (layer 2), auto-freed.
+## Godot physics bodies on layer 4 that only collide with the chunk ground (layer 2). Once a piece has
+## come to rest it becomes a plain mesh lying where it fell (the broken fence stays broken), freed
+## with its chunk (a reloaded chunk builds the fence whole again) or on respawn / new world.
 
 const LAYER := 1 << 3
 const MASK := 1 << 1
-const LIFE := 8.0
-const MAX := 160
+const LIFE := 8.0         # a piece still moving after this long is laid to rest where it is
+const SETTLE := 1.2       # pieces can come to rest after this long
+const MAX := 160          # moving pieces
+const MAX_WRECK := 2500   # pieces lying on the ground
 
-var _items: Array = []   # [{body, t}]
+var _items: Array = []   # [{body, t, chunk}]
+var _wrecks: Array = []  # [{node, chunk}] pieces at rest (no physics)
 var _mats := {}
+var _tag := Vector2i(1 << 30, 0)   # chunk of the thing being smashed (set by smash_*)
 
 
 func _process(delta: float) -> void:
@@ -19,11 +25,48 @@ func _process(delta: float) -> void:
 		var b: RigidBody3D = it["body"]
 		if not is_instance_valid(b):
 			continue
-		if it["t"] > LIFE:
-			b.queue_free()
+		var still := b.sleeping or (b.linear_velocity.length_squared() < 0.02 and b.angular_velocity.length_squared() < 0.05)
+		if it["t"] > LIFE or (it["t"] > SETTLE and still):
+			_lay_down(it)
 		else:
 			keep.append(it)
 	_items = keep
+
+
+## a piece at rest: keep its mesh where it lies, drop the physics body
+func _lay_down(it: Dictionary) -> void:
+	var b: RigidBody3D = it["body"]
+	var mi: MeshInstance3D = null
+	for ch in b.get_children():
+		if ch is MeshInstance3D: mi = ch
+	if mi != null and b.global_position.y > -500.0:
+		var xf := mi.global_transform
+		b.remove_child(mi)
+		add_child(mi)
+		mi.global_transform = xf
+		while _wrecks.size() >= MAX_WRECK:
+			var old = _wrecks.pop_front()
+			if is_instance_valid(old["node"]): old["node"].queue_free()
+		_wrecks.append({"node": mi, "chunk": it["chunk"]})
+	b.queue_free()
+
+
+## the chunk was unloaded: its fences come back whole when it is built again
+func drop_chunk(k: Vector2i) -> void:
+	var keep := []
+	for w in _wrecks:
+		if w["chunk"] == k:
+			if is_instance_valid(w["node"]): w["node"].queue_free()
+		else:
+			keep.append(w)
+	_wrecks = keep
+	var keep2 := []
+	for it in _items:
+		if it["chunk"] == k:
+			if is_instance_valid(it["body"]): it["body"].queue_free()
+		else:
+			keep2.append(it)
+	_items = keep2
 
 
 func clear() -> void:
@@ -31,6 +74,10 @@ func clear() -> void:
 		if is_instance_valid(it["body"]):
 			it["body"].queue_free()
 	_items.clear()
+	for w in _wrecks:
+		if is_instance_valid(w["node"]):
+			w["node"].queue_free()
+	_wrecks.clear()
 
 
 func _material(c: Color) -> StandardMaterial3D:
@@ -72,7 +119,7 @@ func spawn(mesh: Mesh, mesh_scale: Vector3, col: Color, xf: Transform3D, size: V
 	b.global_transform = xf
 	b.linear_velocity = v
 	b.angular_velocity = w
-	_items.append({"body": b, "t": 0.0})
+	_items.append({"body": b, "t": 0.0, "chunk": _tag})
 	return b
 
 
@@ -91,7 +138,8 @@ static func fence_part_goes(part: Dictionary, hit: Vector2) -> bool:
 ## fences.js breakFence, reworked: rails snap AT the hit (two real-length halves that swing away
 ## from the break, plus a few splinters), pickets near the hit fly, far ones topple; untouched
 ## posts stay in the ground
-func smash_fence(panel: Dictionary, vel: Vector3, hit: Vector2) -> void:
+func smash_fence(panel: Dictionary, vel: Vector3, hit: Vector2, chunk = null) -> void:
+	_tag = chunk if chunk is Vector2i else Vector2i(1 << 30, 0)
 	var sp := Vector2(vel.x, vel.z).length()
 	var dir := Vector3(vel.x, 0, vel.z).normalized() if sp > 0.1 else Vector3.ZERO
 	for part in panel["parts"]:
@@ -136,7 +184,8 @@ func smash_fence(panel: Dictionary, vel: Vector3, hit: Vector2) -> void:
 
 
 ## cactus.js breakCactus: the base topples, the top and arms go flying
-func smash_cactus(rec: Dictionary, vel: Vector3) -> void:
+func smash_cactus(rec: Dictionary, vel: Vector3, chunk = null) -> void:
+	_tag = chunk if chunk is Vector2i else Vector2i(1 << 30, 0)
 	var xf: Transform3D = rec["xform"]
 	var rot := xf.basis.orthonormalized()
 	var scl := xf.basis.get_scale()

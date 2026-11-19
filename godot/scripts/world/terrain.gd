@@ -470,6 +470,7 @@ func _unload(k: Vector2i) -> void:
 		else:
 			_col_grid[key] = nl
 	(c["node"] as Node).queue_free()
+	if _debris: _debris.drop_chunk(k)
 	chunks.erase(k)
 	if _water:
 		_water.mark_dirty(Vector2(k) * SIZE, SIZE)
@@ -761,7 +762,7 @@ func break_collider(c: Dictionary, vel: Vector3) -> bool:
 			var mm: MultiMesh = panel["meshes"].get(part["kind"])
 			if mm:
 				mm.set_instance_transform(part["i"], zero)
-		_debris.smash_fence(panel, vel, hit)
+		_debris.smash_fence(panel, vel, hit, c.get("chunk"))
 		return true
 	if c.has("cactus"):
 		var rec: Dictionary = c["cactus"]
@@ -772,7 +773,7 @@ func break_collider(c: Dictionary, vel: Vector3) -> bool:
 		var mm: MultiMesh = rec.get("mm")
 		if mm:
 			mm.set_instance_transform(rec["i"], Transform3D(Basis.from_scale(Vector3.ZERO), Vector3.ZERO))
-		_debris.smash_cactus(rec, vel)
+		_debris.smash_cactus(rec, vel, c.get("chunk"))
 		return true
 	if c.has("tape"):
 		var sp: Dictionary = c["tape"]
