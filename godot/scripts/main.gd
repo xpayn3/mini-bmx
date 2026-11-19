@@ -113,8 +113,62 @@ const MENU_W := Tokens.CARD_W + Tokens.S8 + Tokens.S2
 
 ## the column under the title: everything after the title block (index 1 on) is the page
 var menu_col: VBoxContainer
+var computer_card: PanelContainer   # right side of the ride setup page: the bike computer close-up
+
+## RIDE setup, right card: pick the bike computer (size / model, some have no navigation), turn it round
+## in 3D, and it is mounted for every ride from now on
+func _build_computer_card() -> void:
+	var card := PanelContainer.new()
+	card.add_theme_stylebox_override("panel", UITheme.card_style(Tokens.PAPER, Tokens.R_XL, Tokens.S7))
+	card.set_anchors_preset(Control.PRESET_RIGHT_WIDE)
+	card.offset_left = -(MENU_EDGE + 440); card.offset_right = -MENU_EDGE
+	card.offset_top = MENU_EDGE; card.offset_bottom = -MENU_EDGE
+	menu.add_child(card)
+	computer_card = card
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", Tokens.S3)
+	card.add_child(vb)
+	vb.add_child(UITheme.caption("BIKE COMPUTER"))
+	var name_l := UITheme.display("", Tokens.T_3XL, Tokens.INK, Tokens.SLANT_TITLE)
+	vb.add_child(name_l)
+	var spec_l := UITheme.caption("", Tokens.INK_SOFT, Tokens.T_SM)
+	vb.add_child(spec_l)
+	var blurb_l := UITheme.text("", Tokens.INK_SOFT, Tokens.T_SM)
+	vb.add_child(blurb_l)
+	var pv := ComputerPreview.new()
+	pv.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	pv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pv.custom_minimum_size.y = 300
+	vb.add_child(pv)
+	vb.add_child(UITheme.text("DRAG TO TURN  ·  WHEEL TO ZOOM  ·  DOUBLE CLICK TO RESET", Tokens.INK_SOFT, Tokens.T_XS))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", Tokens.S2)
+	vb.add_child(row)
+	var group := ButtonGroup.new()
+	var apply := func(id: String) -> void:
+		var u := ComputerUnits.get_unit(id)
+		name_l.text = u.name
+		spec_l.text = ComputerUnits.spec(id)
+		blurb_l.text = u.blurb
+		pv.set_unit(id)
+	for id in ComputerUnits.ORDER:
+		var u := ComputerUnits.get_unit(id)
+		var b := UITheme.make_button(String(u.name).split(" ")[0], Callable(), "chip", Tokens.T_MD)
+		b.toggle_mode = true
+		b.button_group = group
+		b.button_pressed = id == GameState.computer_id
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.pressed.connect(func():
+			GameState.computer_id = id
+			GameState.save()
+			apply.call(id)
+			if game: game.hud.set_computer())
+		row.add_child(b)
+	apply.call(GameState.computer_id)
 
 func _menu_clear() -> void:
+	if is_instance_valid(computer_card): computer_card.queue_free()
+	computer_card = null
 	for i in range(menu_col.get_child_count() - 1, 0, -1):
 		var c := menu_col.get_child(i)
 		menu_col.remove_child(c); c.queue_free()
@@ -188,7 +242,8 @@ func _menu_page_setup() -> void:
 		grid.add_child(b)
 	vb.add_child(grid)
 	vb.add_child(UITheme.spacer(Tokens.S4))
-	var go := _menu_button("GO", "", _start_ride, true)
+	_build_computer_card()
+	var go :=_menu_button("GO", "", _start_ride, true)
 	vb.add_child(go)
 	vb.add_child(UITheme.make_button("BACK", _menu_page_main, "link", Tokens.T_XL))
 	go.grab_focus.call_deferred()
