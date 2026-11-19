@@ -40,6 +40,7 @@ var cam_attr: CameraAttributesPractical
 var grade_rect: ColorRect
 var atmos := Atmos.new()
 var grime: Grime
+var blood                    # blood on the ground + torn-off limbs after a crash (fx/blood.gd; loaded by path, no class cache needed)
 var dust: RideDust
 var sun_energy := RIDE_SUN
 # level light (tuning card › Light, LightSettings): time of day, day / night cycle
@@ -138,6 +139,9 @@ func _ready() -> void:
 	add_child(grime)
 	grime.watch(rig)
 	grime.watch(rider, true)
+	blood = preload("res://scripts/fx/blood.gd").new(terrain, fx)
+	blood.ragdoll = ragdoll
+	add_child(blood)
 	dust = RideDust.new()
 	add_child(dust)
 	if dust.sim != null and dust.sim.compositor != null:   # the dust is drawn as a compositor effect
@@ -435,6 +439,7 @@ func _apply_settings() -> void:
 	atmos.wind_on = Settings.get_v("wind")
 	atmos.clouds_on = Settings.get_v("cloud_shadows")
 	grime.enabled = Settings.get_v("grime")
+	if blood: blood.enabled = Settings.get_v("blood")
 	dust.emitter.amount = int(RideDust.MAX_RATE * 3.2 * clampf(float(Settings.get_v("fx_density")), 0.2, 1.5))
 	env.ssr_enabled = Settings.get_v("ssr")
 	env.adjustment_brightness = float(Settings.get_v("brightness"))
@@ -514,6 +519,7 @@ func start_crash(reason: String) -> void:
 	add_child(rider)
 	rider.transform = Transform3D.IDENTITY
 	ragdoll.start(pts, body_vel, spin_v, 1.0 / 60)
+	if blood: blood.crash_start(Vector2(body_vel.x, body_vel.z).length())
 	rider.pose_ragdoll(ragdoll.p)
 	# (no dust right where the crash starts with the smoke sim: only where the body / bike hit and slide)
 	burst(Vector3(phys.x, phys.y + 0.05, phys.z), 30 if dust.sim == null else 10, terrain.surface(phys.x, phys.z), 1.5, dust.sim == null)
@@ -537,6 +543,7 @@ func get_up() -> void:
 	phys.get_up()
 	if wasted: wasted.finish()
 	ragdoll.active = false
+	if blood: blood.crash_end()
 	if rider.get_parent() != rig.lean_g:
 		rider.get_parent().remove_child(rider)
 		rig.lean_g.add_child(rider)
@@ -590,6 +597,9 @@ func _body_parts(st: BikePhysics) -> Array:
 ## a crash kicks up dust where the ragdoll hits the ground: every time a body part slams down while
 ## tumbling it throws a puff (bigger the harder it hits), and a light dusting where it slides
 var _rd_air: PackedByteArray = PackedByteArray()
+## how much dust a crash throws (kept low so the blood on the ground shows: fx/blood.gd)
+const CRASH_DUST_BODY := 0.08
+const CRASH_DUST_BIKE := 0.15
 func _crash_dust() -> void:
 	var pts: Array = ragdoll.p
 	var prv: Array = ragdoll.q
@@ -622,14 +632,14 @@ func _crash_dust() -> void:
 				# the slam: a puff blown out round the impact, carried on a little the way it was going
 				var k := clampf((hit - 1.5) / 6.0, 0.15, 1.0)
 				if OS.get_environment("BMX_SMOKE_PROBE") != "": print("CRASHDUST impact i=%d t=%.2f hit=%.1f" % [i, phys.crash_t, hit])
-				dust.sim.burst(at, Vector3(v.x * 0.25, 0.6 + k * 0.8, v.z * 0.25), 0.3 + k * 0.25, (50.0 + 110.0 * k) * amt,
+				dust.sim.burst(at, Vector3(v.x * 0.25, 0.6 + k * 0.8, v.z * 0.25), 0.3 + k * 0.25, (50.0 + 110.0 * k) * amt * CRASH_DUST_BODY,
 					1.2 + k * 2.2, 0.08 + k * 0.05, ground_dust(pp.x, pp.z, s), 20.0)
-				dust.grit_burst(at, Vector3(v.x * 0.3, 0.8 + k * 1.6, v.z * 0.3), 1.0 + k * 2.5, 600.0 * k * amt, 0.06, ground_dust(pp.x, pp.z, s))
+				dust.grit_burst(at, Vector3(v.x * 0.3, 0.8 + k * 1.6, v.z * 0.3), 1.0 + k * 2.5, 600.0 * k * amt * 0.2, 0.06, ground_dust(pp.x, pp.z, s))
 				made += 1
 		elif hs > 1.2 and made < 10:
 			# sliding / rolling along the ground
 			if OS.get_environment("BMX_SMOKE_PROBE") != "": print("CRASHDUST slide i=%d t=%.2f hs=%.1f" % [i, phys.crash_t, hs])
-			dust.sim.add_source(at, Vector3(v.x * 0.3, 0.4, v.z * 0.3), 0.25, minf(hs, 6.0) * 4.0 * amt, 6.0, 0.3, ground_dust(pp.x, pp.z, s))
+			dust.sim.add_source(at, Vector3(v.x * 0.3, 0.4, v.z * 0.3), 0.25, minf(hs, 6.0) * 4.0 * amt * CRASH_DUST_BODY, 6.0, 0.3, ground_dust(pp.x, pp.z, s))
 			made += 1
 	# the bike sliding / tumbling along the ground
 	var bs: int = terrain.surface(phys.x, phys.z)
@@ -640,7 +650,7 @@ func _crash_dust() -> void:
 		if OS.get_environment("BMX_SMOKE_PROBE") != "": print("CRASHDUST bike t=%.2f v=%.1f" % [phys.crash_t, phys.v])
 		for e in [-0.5, 0.5]:   # both wheels / the frame scraping
 			dust.sim.add_source(Vector3(phys.x + f.x * e, g2 + 0.1, phys.z + f.z * e), f * phys.v * 0.3 + Vector3(0, 0.6, 0),
-				0.3, minf(absf(phys.v), 10.0) * 9.0 * ba, 8.0, 0.5, ground_dust(phys.x, phys.z, bs))
+				0.3, minf(absf(phys.v), 10.0) * 9.0 * ba * CRASH_DUST_BIKE, 8.0, 0.5, ground_dust(phys.x, phys.z, bs))
 
 ## dust / roost / tyre tracks for one physics step (bottom of physics() in main.js)
 func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
@@ -724,6 +734,7 @@ func respawn(new_world: bool) -> void:
 		flash("New world #%d" % GameState.seed)
 	if fx.has_method("clear_tracks"): fx.clear_tracks()
 	if new_world: grime.clean()
+	if blood: blood.clear()
 	var sp := _water_spawn() if OS.get_environment("BMX_WATER_SPAWN") != "" else Vector3.ZERO
 	phys.reset_at(sp.x, sp.z, sp.y)
 	if sp != Vector3.ZERO: terrain.update_stream(sp.x, sp.z, INF)
@@ -803,7 +814,7 @@ func _physics_process(dt: float) -> void:
 	_snap_prev()
 	phys.step(dt, _read_input())
 	if phys.crash_on:
-		rider.pose_ragdoll(ragdoll.p)
+		rider.pose_ragdoll(ragdoll.p, _ragdoll_roots())
 	if not phys.is_sane():
 		push_warning("physics went non-finite; restoring last good state")
 		for k in _last_good: phys.set(k, _last_good[k])
@@ -812,6 +823,14 @@ func _physics_process(dt: float) -> void:
 	else:
 		for k in ["x", "z", "y", "heading", "course", "pitch", "lean", "steer", "slip", "compress"]:
 			_last_good[k] = phys.get(k)
+
+## torn-off limbs: joint -> where its free piece's root point is now (Rider.pose_ragdoll)
+func _ragdoll_roots() -> Dictionary:
+	if ragdoll.cut.is_empty(): return {}
+	var out := {}
+	for b in ragdoll.cut:
+		out[b] = ragdoll.p[ragdoll.cut[b]]
+	return out
 
 func toggle_photo() -> void:
 	photo = not photo
@@ -990,6 +1009,7 @@ func _process(dt: float) -> void:
 	_update_light(dt)
 	sun.light_energy = sun_energy * atmos.shade
 	# the dust simulation around the rider (fx/smoke_sim.gd)
+	if st.crash_on and ragdoll.active: blood.crash_step(ragdoll.p, ragdoll.q, ragdoll.last_h, ragdoll.rad)
 	if st.crash_on and dust.sim != null: _crash_dust()
 	elif dust.sim != null: dust.sim.set_body(_body_parts(st))
 	elif _rd_air.size() > 0: _rd_air.resize(0)

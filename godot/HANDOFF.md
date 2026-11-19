@@ -165,7 +165,30 @@ air it leans the bike). Numpad 8/5/4/6 do the same on keys. The camera no longer
   back and down, only a little out (the arm IK pole's sideways part scales with `elbowsOut`). Saved poses migrate once (`RiderPanels.POSE_VER` / `POSE_RETUNED`: only values still
   at the old default change). `BMX_LEAN_SHOT=prefix` saves shots of the first deep leans.
 - **Joint limits** (`Rider.limb_ik`): elbows / knees are hinges that bend between `ELBOW_MIN`–`ELBOW_MAX` (12–150°) / `KNEE_MIN`–`KNEE_MAX` (4–160°); where a limb lines up with its pole the bend blends to a second pole (elbows: out + down, knees: up) instead of flipping, and the bend may swing round the limb at most `BEND_RATE` (6 rad/s). The slope body-levelling follows the bike pitch at most `PITCH_LEVEL_RATE` (it used to whip the torso mid-flip).
-- Ragdoll on crashes (`ragdoll.gd`), then get up with Space.
+- Ragdoll on crashes (`ragdoll.gd`), then get up with Space. Ground friction is sliding (Coulomb `SLIDE_MU` once per
+  substep, after the solver passes) so a fast fall slides a few metres. **Neutral body posture** (`NEUTRAL`, after
+  NASA's microgravity studies: head ~24° forward, arms forward with elbows ~90°, hips + knees ~50°): inside `DEAD`
+  (~15°) of neutral nothing pulls; past it a loose tension (`TONE`) pulls the part back, growing steeply past the soft
+  limit (`LIMIT` ~35°, `LIMIT_K`), damped (`TONE_DAMP`). The pull is equal and opposite on part + parent (an
+  uneven split used to launch the body). `BMX_RAGDOLL_PROBE=1` prints the mean offset from neutral + pelvis height,
+  `BMX_RAGDOLL_TONE=k` scales the tension (0 = limp; also turns off everything below).
+  **Still alive**: the first ~1.4 s the joints are held firmer (`ALIVE_K` 1.8x, smaller dead zone) so the body falls
+  with bent joints; startle reflex: the arms fly up (`REFLEX` dirs for `REFLEX_T`, `HAND_FLING`), the feet kick a
+  little up + forward (`FEET_KICK`); `SQUIRM`: a small wandering chest / pelvis twist, stronger on the ground.
+  **Self-preservation** (`agency`, fades over `AGENCY_T`, only while the pelvis is well off the ground): a righting
+  twist turns the spine upright (`RIGHT_ACC`), the legs reach down to land on the feet (`LEG_REACH`), the arms brace
+  down + ahead after the startle (`ARM_BRACE`). Measured with `BMX_BLOOD_PROBE` (first `BLOOD hit i=` = first part
+  down): 5 / 5 test bails land feet or hands first. Too firm (`ALIVE_K` 3+) made him pitch over head first.
+- **Blood** (`fx/blood.gd`, Settings › Gameplay › Blood): bleeding ragdoll parts that slide drag smears
+  (`shaders/blood_streak.gdshader`, one MultiMesh ring of 1500 flat quads, world-space noise so pieces join; fresh
+  = dark glossy red, dries matt in 45 s), hard touch-downs leave splats + droplets (`fx.chunk`). No blood on the
+  rider (the user didn't want it). A respawn fades all of it out over `WIPE` (4 s; shader `wipe_t`).
+  **Torn-off limbs**: a crash > `SEVER_SPEED` (16 m/s) tears off the first limb hitting hard (> 3), any limb hit >
+  `SEVER_HIT` too, at most `SEVER_MAX` (2) per crash; hand / foot hit = at the elbow / knee, elbow / knee hit = at the
+  shoulder / hip. `Ragdoll.sever(a)` drops bone a-b and gives the free piece its own root point (appended to `p`,
+  `cut[b]` = its index); `Rider.pose_ragdoll(P, roots)` draws that segment from the root. Dark red caps on both
+  ends, the stump spurts in pulses for 2.5 s. The head never comes off (the user didn't want it). Getting up
+  restores the body. Tests: `BMX_BLOOD_PROBE=1` (hits / smears / severs), `BMX_SEVER=1` forces one.
 - **WASTED** (`fx/wasted.gd`, Settings › Gameplay › Crash slow motion): on a crash time drops to 0.22× (sound pitched down via
   `AudioServer.playback_speed_scale`) for ~2.4 s real time, then eases back; the screen goes grey + vignette, the word
   WASTED shows at once for 1.5 s then fades (the rider + bike drawn in front of it via a silhouette mask), flat red, squeezed narrow to fill the screen (no band, no stroke), the crash reason small below. Fades on getting up or after 5 s. Off in autotests unless `BMX_WASTED=1`.

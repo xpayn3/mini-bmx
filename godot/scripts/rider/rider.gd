@@ -653,8 +653,10 @@ func joints_world() -> Array:
 	return out
 
 
-## drive the meshes from world-space ragdoll points (this node must sit at the world origin)
-func pose_ragdoll(P: Array) -> void:
+## drive the meshes from world-space ragdoll points (this node must sit at the world origin).
+## roots: torn-off limbs (Ragdoll.cut): joint index -> the free piece's root point, so the segment that
+## ends at that joint is drawn from the root instead of stretching back to the body
+func pose_ragdoll(P: Array, roots: Dictionary = {}) -> void:
 	var hd: Vector3 = P[0]
 	var ch: Vector3 = P[1]
 	var pe: Vector3 = P[2]
@@ -674,16 +676,24 @@ func pose_ragdoll(P: Array) -> void:
 	var sh_r: Vector3 = sh[1] - sh[0]
 	head.transform = Transform3D(_basis_from(hd - ch, sh_r), hd)
 	for i in 2:
+		var ei: int = 4 if i == 0 else 7    # elbow / hand / knee / foot point of this side
+		var hi: int = ei + 1
+		var ki: int = 10 if i == 0 else 13
+		var fi: int = ki + 1
+		var el_from: Vector3 = roots.get(ei, sh[i])
+		var ha_from: Vector3 = roots.get(hi, el[i])
+		var kn_from: Vector3 = roots.get(ki, hp[i])
+		var ft_from: Vector3 = roots.get(fi, kn[i])
 		shoulder_sph[i].position = sh[i]
-		set_limb(upper_arm[i], sh[i], el[i])
-		set_limb(fore_arm[i], el[i], ha[i])
+		set_limb(upper_arm[i], el_from, el[i])
+		set_limb(fore_arm[i], ha_from, ha[i])
 		elbow[i].position = el[i]
 		glove[i].position = ha[i]
-		orient_hand(glove[i], el[i], ha[i], sh_r)
-		set_limb(thigh[i], hp[i], kn[i])
-		set_limb(shin[i], kn[i], ft[i])
+		orient_hand(glove[i], ha_from, ha[i], sh_r)
+		set_limb(thigh[i], kn_from, kn[i])
+		set_limb(shin[i], ft_from, ft[i])
 		knee[i].position = kn[i]
-		var up: Vector3 = kn[i] - ft[i]
+		var up: Vector3 = ft_from - ft[i]
 		shoe[i].transform = Transform3D(_basis_from(up, body_r), ft[i] - up.normalized() * 0.08)
 
 
