@@ -492,6 +492,8 @@ class GaugeView extends Control:
 	const PAGES := 7
 	const MAP_PAGE := 5
 	const SYS_PAGE := 6
+	const LOGO := "CHARMIN"
+	const LOGO_TRACK := 0.8   # letter spacing of the wordmark
 	const LCD := Color("eceee8")
 	const LCD_LIT := Color("f2fbff")
 	const FIX_T := 3.0     # seconds to "find satellites" at the start of a ride
@@ -566,6 +568,7 @@ class GaugeView extends Control:
 			4: _page_elev(st, f, ink, scr, x0, w)
 			SYS_PAGE: _page_sys(f, ink, scr, x0, w)
 			_: _page_map(st, f, ink, scr, x0, w)
+		_page_bar()
 		_bezel()
 		ov.size = size
 		ov.queue_redraw()
@@ -612,10 +615,9 @@ class GaugeView extends Control:
 		if n > 0: avg /= n
 		y += 48
 		_pair(f, ink, scr_, x0, w, y, "AVG MS", "%.1f" % avg, "WORST", "%.0f" % worst)
-		y += 40
+		# the 3D physics view's state, small in the graph's top right
 		var on3d := DebugOverlay.on and DebugOverlay.available()
-		draw_string(f, Vector2(x0, y + 4), "3D VIEW", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(ink, 0.6))
-		draw_string(f, Vector2(x0, y + 4), "ON" if on3d else ("OFF" if DebugOverlay.available() else "N/A"), HORIZONTAL_ALIGNMENT_RIGHT, w, 9, ink)
+		draw_string(f, Vector2(g.position.x, g.position.y + 8), "3D " + ("ON" if on3d else ("OFF" if DebugOverlay.available() else "N/A")), HORIZONTAL_ALIGNMENT_RIGHT, g.size.x - 2, 7, Color(ink, 0.6))
 	## TRIP: ride time, distance, average / max speed, odometer (every ride, saved)
 	func _page_trip(f: Font, ink: Color, scr_: Rect2, x0: float, w: float) -> void:
 		var y := scr_.position.y + 28
@@ -752,9 +754,24 @@ class GaugeView extends Control:
 			var s := 1.0 if i == 1 else -1.0
 			draw_colored_polygon(PackedVector2Array([c + Vector2(-3 * s, -4), c + Vector2(-3 * s, 4), c + Vector2(3 * s, 0)]), Color("b8bcc0"))
 			press[i] = maxf(0.0, k - dt * 5.0)
+		# the maker's wordmark between the buttons (made-up brand)
+		var lf := UITheme.font(true)
+		var lw := lf.get_string_size(LOGO, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x + LOGO_TRACK * (LOGO.length() - 1)
+		var lx := size.x * 0.5 - lw * 0.5
+		for ch in LOGO:
+			draw_string(lf, Vector2(lx, size.y - 13), ch, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color("c9ccd0"))
+			lx += lf.get_string_size(ch, HORIZONTAL_ALIGNMENT_LEFT, -1, 8).x + LOGO_TRACK
+	## which page: a segmented bar along the bottom edge of the screen, the current page's segment dark
+	func _page_bar() -> void:
 		var np := order.size()
+		if np < 2: return
+		var strip := Rect2(scr.position.x + 3, scr.end.y - 6, scr.size.x - 6, 6)
+		draw_rect(Rect2(scr.position.x + 2, strip.position.y - 1, scr.size.x - 4, 7), lcd)
+		var gap := 2.0
+		var sw := (strip.size.x - gap * (np - 1)) / np
 		for j in np:
-			draw_circle(Vector2(size.x / 2 + (j - (np - 1) / 2.0) * 8, size.y - 16), 2.2, Color("d8dbd6") if j == page else Color("3a3d41"))
+			var r := Rect2(strip.position.x + j * (sw + gap), strip.position.y + 1, sw, 3)
+			draw_rect(r, Color("111417") if j == page else Color(0.07, 0.08, 0.09, 0.18))
 	func _page_ride(st: BikePhysics, f: Font, ink: Color, scr: Rect2, x0: float, w: float) -> void:
 		var y := scr.position.y + 28
 		draw_string(f, Vector2(x0, y), "SPEED", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(ink, 0.6))

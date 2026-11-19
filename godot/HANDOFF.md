@@ -511,7 +511,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   Used by: those bars, the get-up prompt (`hud.gd` `GetUpPrompt`), the controls menu bindings (`GlyphButton`).
 
 ### HUD bike computer (`hud.gd` `GaugeView`)
-- Garmin-style computer bottom-left; six pages flipped with the ◀ ▶ bezel buttons under the screen (mouse):
+- Garmin-style computer bottom-left (made-up brand **CHARMIN** on the bezel between the ◀ ▶ buttons; which page = a segmented bar along the screen's bottom edge, `_page_bar`); six pages flipped with the ◀ ▶ bezel buttons under the screen (mouse):
   **RIDE** speed, slope / grade, gear (the shifter: n/N, cassette, teeth; flashes on a shift; Settings › Gear
   shifter hides the row) · **TRIP** ride time, distance, avg / max, odometer (`records.distance`, now counted) ·
   **EFFORT** heart rate (made up from power, sprint, stamina; beating heart, zone), cadence (from `crank`),
