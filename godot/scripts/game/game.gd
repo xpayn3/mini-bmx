@@ -253,7 +253,7 @@ func _build_environment() -> void:
 	sun.directional_shadow_split_3 = 0.45
 	sun.directional_shadow_blend_splits = true
 	sun.directional_shadow_fade_start = 0.85
-	sun.directional_shadow_max_distance = 90.0
+	sun.directional_shadow_max_distance = 200.0
 	sun.directional_shadow_pancake_size = 30.0
 	sun.shadow_bias = 0.02
 	sun.shadow_normal_bias = 1.2
@@ -1085,11 +1085,11 @@ func _process(dt: float) -> void:
 	if scenic:
 		env.fog_depth_begin = 250.0
 		env.fog_depth_end = 3100.0
-		sun.directional_shadow_max_distance = 110.0
+		sun.directional_shadow_max_distance = 220.0
 	else:
 		env.fog_depth_begin = (cam.dist + 55) * vd
 		env.fog_depth_end = (cam.dist * 1.6 + 100) * vd
-		sun.directional_shadow_max_distance = clampf(cam.dist * 2.2, 30, 120) * (0.7 if int(Settings.get_v("shadows")) == 0 else 1.0)
+		sun.directional_shadow_max_distance = clampf(cam.dist * 4.5, 80, 260) * (0.7 if int(Settings.get_v("shadows")) == 0 else 1.0)
 	if cam_attr.dof_blur_far_enabled and scenic:   # lookout: keep the view sharp, soften only the horizon
 		cam_attr.dof_blur_far_distance = 900.0
 		cam_attr.dof_blur_far_transition = 900.0
