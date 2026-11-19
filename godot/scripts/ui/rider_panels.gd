@@ -167,6 +167,22 @@ static func save_look(l: Dictionary) -> void:
 	for k in l: cf.set_value("look", k, l[k])
 	cf.save(PATH)
 
+## the helmet model picker (Look > Helmet): one toggle per Rider.HELMETS entry, on_pick(helmet id)
+static func helmet_picker(current: String, on_pick: Callable, size := 13) -> GridContainer:
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 6)
+	grid.add_theme_constant_override("v_separation", 6)
+	for id in Rider.HELMETS:
+		var hid: String = id
+		var b := UITheme.button(Rider.HELMETS[id][0], func(): on_pick.call(hid), size)
+		b.toggle_mode = true
+		b.button_pressed = hid == current
+		b.focus_mode = Control.FOCUS_NONE
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		grid.add_child(b)
+	return grid
+
 ## the knee pad design picker (Kit > Knee pads): one toggle per design, on_pick(style id)
 static func pad_style_picker(current: String, on_pick: Callable, size := 13) -> GridContainer:
 	var grid := GridContainer.new()
