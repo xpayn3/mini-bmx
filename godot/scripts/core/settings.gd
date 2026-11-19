@@ -208,6 +208,16 @@ func _install_bindings() -> void:
 			# window (Godot reads joypads unfocused) and paused / steered the autotests
 			if _test_run and (e is InputEventJoypadButton or e is InputEventJoypadMotion): continue
 			InputMap.action_add_event(action, e)
+	# Godot's built-in menu actions have no pad buttons: A = press the focused button, B = back
+	# (the pause leaflet, title menu, settings). Test runs skip real pads (see above) unless BMX_PAD.
+	if not _test_run or OS.get_environment("BMX_PAD") != "":
+		for pair in [[&"ui_accept", JOY_BUTTON_A], [&"ui_cancel", JOY_BUTTON_B]]:
+			var has := false
+			for e in InputMap.action_get_events(pair[0]):
+				if e is InputEventJoypadButton and e.button_index == pair[1]: has = true
+			if not has:
+				var jb := InputEventJoypadButton.new(); jb.button_index = pair[1]
+				InputMap.action_add_event(pair[0], jb)
 
 func rebind(action: String, ev: InputEvent, slot: int) -> void:
 	## Replace the keyboard (slot 0) or gamepad (slot 1) binding of an action.

@@ -45,6 +45,13 @@ func _process(_dt: float) -> void:
 		return
 	var img := _vp.get_texture().get_image()
 	if img != null and not img.is_empty():
+		# centre the ink itself: the label centres its line box (room for descenders below, letter spacing after
+		# the last letter), which left capitals sitting high and a little left on the strap
+		var used := img.get_used_rect()
+		if used.size.x > 0 and used.size.y > 0:
+			var out := Image.create(PX_W, PX_H, false, img.get_format())
+			out.blit_rect(img, used, Vector2i((PX_W - used.size.x) / 2, (PX_H - used.size.y) / 2))
+			img = out
 		img.generate_mipmaps()
 		mat.albedo_texture = ImageTexture.create_from_image(img)
 	queue_free()

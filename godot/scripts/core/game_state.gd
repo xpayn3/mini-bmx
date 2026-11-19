@@ -27,6 +27,7 @@ const BIKES := {
 }
 
 var bike_id := "dh"   # the downhill bike is the main bike: every launch starts on it (B / title screen switch)
+var computer_id := "classic"   # the bike computer mounted for every ride (ComputerUnits, chosen on the ride setup page)
 var seed := 0
 var records := {"longest": 0.0, "highest": 0.0, "air": 0.0, "top_speed": 0.0, "jumps": 0, "distance": 0.0}
 
@@ -37,6 +38,9 @@ func _ready() -> void:
 	if cf.load(SAVE) == OK:
 		for k in records:
 			records[k] = cf.get_value("records", k, records[k])
+		computer_id = String(cf.get_value("game", "computer", computer_id))
+		if not ComputerUnits.UNITS.has(computer_id): computer_id = ComputerUnits.DEFAULT
+	if OS.get_environment("BMX_COMPUTER") != "": computer_id = OS.get_environment("BMX_COMPUTER")   # tests: mount this unit
 
 ## the bike to ride: the downhill bike carries the player's garage build (parts change the ride)
 func bike_config() -> Dictionary:
@@ -53,6 +57,7 @@ func bike_config() -> Dictionary:
 func save() -> void:
 	var cf := ConfigFile.new()
 	cf.set_value("game", "bike", bike_id)
+	cf.set_value("game", "computer", computer_id)
 	for k in records:
 		cf.set_value("records", k, records[k])
 	cf.save(SAVE)
