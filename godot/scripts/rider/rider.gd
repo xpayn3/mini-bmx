@@ -23,7 +23,8 @@ const NEUTRAL := {hipX = 0.0, hipY = 0.0, lean = 0.0, elbowsOut = 0.0, kneesOut 
 	kneesFwd = 0.0, kneeOutL = 0.0, kneeOutR = 0.0, heelFwd = 0.0, heelUp = 0.0, footAngle = 0.0, footOut = 0.0}
 ## lookpanel.js DEFAULT_LOOK
 const DEFAULT_LOOK := {shell = "#16171a", peak = "#ececec", goggleFrame = "#f2f2ee", lens = "#ff7a2a", strap = "#ff6a4d",
-	jersey = "#ff6a4d", pants = "#1d2b64", gloves = "#ffd21f", shoes = "#26292f", shoeAccent = "#d8232a", pads = "#1b1c20", padStyle = "enduro"}
+	jersey = "#ff6a4d", pants = "#1d2b64", gloves = "#ffd21f", shoes = "#26292f", shoeAccent = "#d8232a", pads = "#1b1c20", padStyle = "enduro",
+	helmetOn = "1", hairStyle = "long", beard = "1", hair = "#4a3022", skin = "#efc29f", eyes = "#4a6b8a", bibOn = "1", bibNumber = "27", bibText = "MINI BMX  •  DOWNHILL CUP"}
 ## where the helmet model sits on the head (head-local m / rad) and its scale
 const HELMET_FIT := {x = 0.01, y = 0.0, tilt = 0.0, scale = 1.3}
 ## goggles (RiderGear.build_goggles): lens position / tilt / size, strap ellipse round the shell
@@ -74,6 +75,21 @@ var torso: MeshInstance3D
 var hood_hem: MeshInstance3D
 var pelvis_mesh: MeshInstance3D
 var neck_mesh: MeshInstance3D
+var bib_node: BackNumber
+var face_root: Node3D       # the bare head: skin, eyes, brows, nose, mouth, ears (under the helmet when it is on)
+var scalp: MeshInstance3D   # hair-coloured cap over the top / back of the head
+var hair: Hair              # long hair, shown instead of the helmet
+var skin_mat: StandardMaterial3D
+var hair_mat: StandardMaterial3D
+var eye_mat: StandardMaterial3D
+var beard_node: MeshInstance3D   # the custom head's dark mesh: beard, brows and moustache
+var beard_mat: StandardMaterial3D
+var custom_head := false
+var helmet_fill: MeshInstance3D
+var hair_tail := false   # helmet on + long / bob hair: the tuft at the back is shown
+var face_base: Array[Node3D] = []   # the built-in head shape and features, hidden when the custom head is loaded
+var scalp_mat: StandardMaterial3D
+var neck_mat0: Material
 var shoulder_sph: Array[MeshInstance3D] = []
 var thigh: Array[MeshInstance3D] = []
 var shin: Array[MeshInstance3D] = []
@@ -159,6 +175,7 @@ func _init() -> void:
 	pelvis_mesh.add_child(buckle)
 	var bib := BackNumber.new()   # race number paper pinned to the back, flaps with speed
 	bib.name = "BackNumber"
+	bib_node = bib
 	add_child(bib)
 	# the neck: a tapered tube (jersey collar colour) from inside the collar up into the helmet, posed
 	# every frame by _pose_neck (both ends are hidden, so it never shows a cap)
@@ -176,6 +193,8 @@ func _init() -> void:
 		add_child(kp)
 		knee_pad.append(kp)
 	shoe_mats = {upper = mat("#26292f"), accent = mat("#d8232a"), sole = mat("#111214", 0.95), mid = mat("#f2f2ee"), laces = mat("#f2f2ee")}
+	for k in ["upper", "accent"]:   # the upper is an open shell (heel / toe fans): draw both faces so nothing shows through from behind
+		(shoe_mats[k] as BaseMaterial3D).cull_mode = BaseMaterial3D.CULL_DISABLED
 	var strap := mat("#ff6a4d", 0.8)
 	strap.cull_mode = BaseMaterial3D.CULL_DISABLED
 	var lens := mat("#ff7a2a", 0.06, 0.85)
@@ -219,11 +238,137 @@ func _init() -> void:
 	head = Node3D.new()
 	head.name = "Head"
 	add_child(head)
+	_build_face()
 	_build_builtin_helmet()
 
 	set_style({})
 	J.resize(15)
 	J.fill(Vector3.ZERO)
+
+
+## the bare head and the hair that replaces the helmet (look.helmetOn = "0"). A friendly, slightly cartoon face:
+## big bright eyes with a highlight, soft brows, a small nose, a gentle smile and a touch of blush.
+func _build_face() -> void:
+	skin_mat = mat("#efc29f", 0.7)
+	hair_mat = mat("#4a3022", 0.45)
+	eye_mat = mat("#4a6b8a", 0.25)
+	scalp_mat = mat("#4a3022", 0.5)
+	scalp_mat.vertex_color_use_as_albedo = true
+	scalp_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	scalp_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	face_root = Node3D.new()
+	face_root.name = "Face"
+	head.add_child(face_root)
+	helmet_fill = MeshInstance3D.new()
+	var hf := SphereMesh.new()
+	hf.radius = 0.1; hf.height = 0.2; hf.radial_segments = 16; hf.rings = 10
+	helmet_fill.mesh = hf
+	helmet_fill.material_override = mat("#15181d", 0.9)
+	helmet_fill.transform = Transform3D(Basis.from_scale(Vector3(1, 1.2, 0.95)), Vector3(0, -0.01, 0))
+	helmet_fill.visible = false
+	head.add_child(helmet_fill)
+	# the skull is an ellipsoid (radii 0.1 / 0.12 / 0.095 about (0, -0.01, 0)): the hair collides with it, so features are
+	# placed on its surface
+	var sx := func(y: float, z: float) -> float:
+		return 0.1 * sqrt(maxf(1.0 - pow((y + 0.01) / 0.12, 2.0) - pow(z / 0.095, 2.0), 0.0))
+	var ball := func(r: float, m: Material, pos: Vector3, scl := Vector3.ONE) -> MeshInstance3D:
+		var mi := MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		sm.radius = r; sm.height = r * 2.0; sm.radial_segments = 20; sm.rings = 12
+		mi.mesh = sm; mi.material_override = m
+		mi.transform = Transform3D(Basis.from_scale(scl), pos)
+		face_root.add_child(mi)
+		face_base.append(mi)
+		return mi
+	var bar := func(size: Vector3, m: Material, pos: Vector3, tilt: float) -> MeshInstance3D:   # tilt: about the forward axis
+		var mi := MeshInstance3D.new()
+		var bm := BoxMesh.new(); bm.size = size
+		mi.mesh = bm; mi.material_override = m
+		mi.transform = Transform3D(Basis(Vector3.RIGHT, tilt), pos)
+		face_root.add_child(mi)
+		face_base.append(mi)
+		return mi
+	face_base.append(ball.call(0.1, skin_mat, Vector3(0, -0.01, 0), Vector3(1, 1.2, 0.95)))                    # the head
+	face_base.append(ball.call(0.066, skin_mat, Vector3(0.024, -0.062, 0), Vector3(0.82, 0.8, 1.12)))          # soft cheeks and a small round chin
+	var white := mat("#fbf9f5", 0.3)
+	var pupil := mat("#17110e", 0.25)
+	var shine := mat("#ffffff", 0.1)
+	var blush := mat(Color(1.0, 0.5, 0.5, 0.3), 0.9)
+	blush.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	var lip := mat("#c8656c", 0.45)
+	for s in [-1.0, 1.0]:
+		var ez: float = s * 0.041
+		var ex: float = sx.call(0.0, ez) - 0.012
+		ball.call(0.0125, white, Vector3(ex, 0.004, ez), Vector3(0.4, 1.0, 0.95))                    # big round eyes
+		ball.call(0.0085, eye_mat, Vector3(ex + 0.003, 0.003, ez), Vector3(0.35, 1.0, 1.0))           # the iris
+		ball.call(0.0047, pupil, Vector3(ex + 0.0052, 0.003, ez), Vector3(0.3, 1.0, 1.0))
+		ball.call(0.003, shine, Vector3(ex + 0.0068, 0.008, ez - s * 0.003), Vector3(0.3, 1.0, 1.0))  # catch-light: makes the look alive
+		ball.call(0.0016, shine, Vector3(ex + 0.0068, -0.001, ez + s * 0.004), Vector3(0.3, 1.0, 1.0))
+		face_base.append(bar.call(Vector3(0.004, 0.0045, 0.03), hair_mat, Vector3(sx.call(0.046, s * 0.045) - 0.002, 0.046, s * 0.045), -s * 0.2))   # soft, slightly raised brows
+		ball.call(0.0145, blush, Vector3(sx.call(-0.03, s * 0.062) - 0.001, -0.03, s * 0.062), Vector3(0.2, 0.75, 1.0))   # a touch of blush
+		face_base.append(ball.call(0.018, skin_mat, Vector3(-0.006, -0.004, s * 0.098), Vector3(0.5, 1.15, 0.5)))                         # ears
+	face_base.append(ball.call(0.0085, skin_mat, Vector3(0.1, -0.02, 0), Vector3(1.0, 0.85, 0.9)))                                         # a small nose
+	for k in range(-3, 4):                                                                                            # a gentle smile
+		var mz: float = k * 0.0072
+		var my: float = -0.056 + 0.011 * pow(k / 3.0, 2.0)
+		face_base.append(ball.call(0.0032, lip, Vector3(sx.call(my, mz) - 0.0005, my, mz)))
+	_attach_custom_head()
+	scalp = MeshInstance3D.new()
+	scalp.mesh = Hair.scalp_mesh()
+	scalp.material_override = scalp_mat
+	scalp.visible = false
+	face_root.add_child(scalp)
+	hair = Hair.new()
+	hair.name = "Hair"
+	hair.head = head
+	hair.rider = self
+	hair.visible = false
+	add_child(hair)
+
+
+## the custom head (assets/head_lowpoly.glb, "Low-poly Head" by MvdE, CC-BY 4.0): its skin mesh replaces the built-in head
+## shape (nose, brows, ears, mouth come with it); its dark mesh is the beard / brows / moustache, in the hair colour.
+## Turned so its face looks along +X and sized to the skull the hair collides with (the file has a 0.6 scale in its own
+## node transforms, hence the division).
+const CUSTOM_HEAD := "res://assets/head_lowpoly.glb"
+func _attach_custom_head() -> void:
+	if not ResourceLoader.exists(CUSTOM_HEAD): return
+	var ps: PackedScene = load(CUSTOM_HEAD)
+	if ps == null: return
+	var root: Node3D = ps.instantiate()
+	var meshes := root.find_children("*", "MeshInstance3D", true, false)
+	if meshes.size() < 1:
+		root.free(); return
+	var holder := Node3D.new()
+	holder.name = "CustomHead"
+	holder.transform = Transform3D(Basis(Vector3.UP, -PI / 2) * Basis.from_scale(Vector3(0.17, 0.15, 0.125) / 0.6), Vector3(0.0, 0.0, 0.0))
+	face_root.add_child(holder)
+	holder.add_child(root)
+	beard_mat = mat("#4a3022", 0.6)
+	for i in meshes.size():
+		var mi := meshes[i] as MeshInstance3D
+		var m: Material = skin_mat if i == 0 else beard_mat
+		for si in mi.mesh.get_surface_count(): mi.set_surface_override_material(si, m)
+		if i == 1: beard_node = mi
+	for n in face_base: n.visible = false     # no built-in eyes, blush or mouth: the head is used as it is
+	if neck_mesh: neck_mesh.visible = false  # and its own neck replaces the rider's neck tube
+	custom_head = true
+
+
+## helmet on: the shell, goggles and action camera; off: the bare head with long hair
+func _apply_head_gear(on: bool) -> void:
+	if hel: hel.visible = on
+	if helmet_model: helmet_model.visible = on
+	if goggles: goggles.visible = on
+	if action_cam: action_cam.visible = on
+	if scalp: scalp.visible = not on
+	if face_root: face_root.visible = not on          # helmet on: the head (and its beard) is hidden inside it
+	if helmet_fill: helmet_fill.visible = on          # a dark inside, so the opening is not see-through
+	if hair: hair.visible = (not on) or hair_tail     # long hair: a tuft still comes out under the back of the helmet
+	if neck_mesh:
+		if neck_mat0 == null: neck_mat0 = neck_mesh.material_override
+		neck_mesh.material_override = neck_mat0 if on else skin_mat
+		neck_mesh.visible = on or not custom_head      # the custom head brings its own neck
 
 
 func _build_builtin_helmet() -> void:
@@ -367,17 +512,6 @@ func set_helmet(model: Node3D) -> void:
 				shell_tris.append_array(_surface_tris(mi.mesh, si, to_head))
 	head.add_child(w)
 	helmet_model = w
-	# dark face behind the opening
-	var face := MeshInstance3D.new()
-	var fs := SphereMesh.new()
-	fs.radius = 0.1
-	fs.height = 0.2
-	fs.radial_segments = 12
-	fs.rings = 10
-	face.mesh = fs
-	face.material_override = mat("#15181d", 0.9)
-	face.transform = Transform3D(Basis.from_scale(Vector3(1, 1.2, 0.95)), Vector3(0, -0.01, 0))
-	hel.add_child(face)
 	# strap hugging the shell: rays from outside looking back in (head space)
 	var hug := Callable()
 	if not shell_tris.is_empty():
@@ -475,6 +609,23 @@ func set_look(l: Dictionary) -> void:
 		goggle_mats.lens.albedo_color = Color(L.lens)
 		var e := Color(L.lens).srgb_to_linear() * 0.25
 		goggle_mats.lens.emission = Color(e.r, e.g, e.b).linear_to_srgb()
+	if skin_mat:
+		skin_mat.albedo_color = Color(str(L.get("skin", DEFAULT_LOOK.skin)))
+		hair_mat.albedo_color = Color(str(L.get("hair", DEFAULT_LOOK.hair)))
+		scalp_mat.albedo_color = hair_mat.albedo_color.lightened(0.04)
+		eye_mat.albedo_color = Color(str(L.get("eyes", DEFAULT_LOOK.eyes)))
+		if beard_mat:
+			beard_mat.albedo_color = hair_mat.albedo_color
+			if beard_node: beard_node.visible = str(L.get("beard", "1")) != "0"
+		hair.set_color(hair_mat.albedo_color)
+		var hs := str(L.get("hairStyle", "long"))
+		var helmet_on := str(L.get("helmetOn", "1")) != "0"
+		hair_tail = helmet_on and Hair.STYLES.get(hs, {}).get("short", true) == false   # long / bob under a helmet
+		hair.set_style(hs, helmet_on)
+		_apply_head_gear(str(L.get("helmetOn", "1")) != "0")
+	if bib_node:
+		bib_node.visible = str(L.get("bibOn", "1")) != "0"
+		bib_node.set_content(str(L.get("bibNumber", "27")).substr(0, 3), str(L.get("bibText", DEFAULT_LOOK.bibText)).substr(0, 30))
 
 
 ## three's Color.offsetHSL(0, 0, dl): HSL lightness offset in linear space

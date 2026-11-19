@@ -87,6 +87,9 @@ const POSE_DEFS := [
 	]],
 ]
 
+## look keys that belong to the person, not to a kit: picking a kit leaves them alone
+const NON_KIT := ["helmetOn", "hairStyle", "hair", "skin", "eyes", "beard", "bibOn", "bibNumber", "bibText"]
+
 const KITS := [
 	["Classic", {}],   # = Rider.DEFAULT_LOOK
 	["Stealth", {"shell": "#0c0d0f", "peak": "#1a1b1e", "goggleFrame": "#18191c", "lens": "#8a96a8", "strap": "#2a2c30",

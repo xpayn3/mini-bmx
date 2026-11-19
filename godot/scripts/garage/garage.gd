@@ -1439,7 +1439,11 @@ func _kit_page() -> void:
 			c.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			strip.add_child(c)
 		b.add_child(strip)
-		b.pressed.connect(func(): _set_look(kit_look); _set_tab("kit"))
+		b.pressed.connect(func():
+			var cur := RiderPanels.load_look()
+			var merged := kit_look.duplicate()
+			for key in RiderPanels.NON_KIT: merged[key] = cur[key]   # a kit changes the clothes, not the head / plate
+			_set_look(merged); _set_tab("kit"))
 		kits.add_child(b)
 	body.add_child(kits)
 	for g in RiderPanels.LOOK_ROWS:

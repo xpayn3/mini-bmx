@@ -5,8 +5,6 @@ extends MeshInstance3D
 ## are only loosely held, so at speed the lower half lifts, pumps and flaps. Drawn in world space; nothing on
 ## the jersey changes. The paper's face (header, number, sponsors) is drawn once into a small SubViewport.
 
-const NUMBER := "27"
-const CLASS_LINE := "ELITE  DOWNHILL"
 const C := 6                    # points across (sideways)
 const R := 5                    # points down
 const W := 0.24                 # paper size, m
@@ -25,6 +23,9 @@ const PX_W := 384
 const PX_H := 304
 
 var _imesh := ImmediateMesh.new()
+var number := "27"
+var header := "MINI BMX  •  DOWNHILL CUP"
+var class_line := "ELITE  DOWNHILL"
 var _vp: SubViewport
 var _vp_frames := 0
 var _P := PackedVector3Array()
@@ -107,6 +108,19 @@ func _ready() -> void:
 	material_override = m
 
 
+## change what is printed (the number, the header line); the face is drawn again and baked again
+func set_content(n: String, h: String) -> void:
+	if n == number and h == header: return
+	number = n
+	header = h
+	if material_override == null: return   # not in the tree yet: _ready draws it with these
+	if _vp != null: _vp.queue_free()
+	_vp = _build_face()
+	add_child(_vp)
+	_vp_frames = 0
+	(material_override as ShaderMaterial).set_shader_parameter("tex", _vp.get_texture())
+
+
 # ---------------- the printed paper ----------------
 
 static func _label(parent: Control, text: String, rect: Rect2, size: int, color: Color, black := true) -> Label:
@@ -153,11 +167,12 @@ func _build_face() -> SubViewport:
 	_box(root, Rect2(0, 0, PX_W, PX_H), Color("#f6f4ec"), ink, 5, 10)
 	# header band
 	_box(root, Rect2(5, 5, PX_W - 10, 50), red, red, 0, 6)
-	_label(root, "MINI BMX  •  DOWNHILL CUP", Rect2(5, 5, PX_W - 10, 50), 25, Color.WHITE)
+	_label(root, header, Rect2(5, 5, PX_W - 10, 50), 25 if header.length() <= 24 else maxi(13, int(25.0 * 24.0 / header.length())), Color.WHITE)
+	var nfs := 178 if number.length() <= 2 else 124
 	# the number: a soft grey offset behind it, then the black digits
-	_label(root, NUMBER, Rect2(6, 54, PX_W, 166), 178, Color(0, 0, 0, 0.16))
-	_label(root, NUMBER, Rect2(0, 50, PX_W, 166), 178, ink)
-	_label(root, CLASS_LINE, Rect2(0, 212, PX_W, 24), 17, Color("#3a3d44"))
+	_label(root, number, Rect2(6, 54, PX_W, 166), nfs, Color(0, 0, 0, 0.16))
+	_label(root, number, Rect2(0, 50, PX_W, 166), nfs, ink)
+	_label(root, class_line, Rect2(0, 212, PX_W, 24), 17, Color("#3a3d44"))
 	# sponsor row
 	_box(root, Rect2(12, 240, PX_W - 24, 2), ink, ink, 0, 0)
 	var sx := [12.0, 102.0, 192.0, 282.0]
