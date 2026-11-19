@@ -462,8 +462,11 @@ func _fence_test(el: float) -> void:
 					if c.has("fence") and c["fence"]["broken"] and not seen.any(func(q): return is_same(q, c["fence"])):
 						seen.append(c["fence"])
 			var n := seen.size()
-			print("FENCE broken panels=%d debris=%d" % [n, game.terrain._debris._items.size()])
-		if _fence.shot >= 2 and _fence.shot < 6 and Engine.get_process_frames() >= _fence.hit + [0, 0, 2, 12, 30, 60][_fence.shot]:
+			print("FENCE broken panels=%d debris=%d lying=%d" % [n, game.terrain._debris._items.size(), game.terrain._debris._wrecks.size()])
+		if _fence.has("hit") and Engine.get_process_frames() > _fence.hit + 25:   # stop near the wreck (later shots)
+			ph.v = move_toward(ph.v, 0.0, 0.6)
+		if _fence.shot >= 2 and _fence.shot < 7 and Engine.get_process_frames() >= _fence.hit + [0, 0, 2, 12, 30, 60, 720][_fence.shot]:
+			if _fence.shot == 6: print("FENCE after 12 s: moving=%d lying=%d" % [game.terrain._debris._items.size(), game.terrain._debris._wrecks.size()])
 			get_viewport().get_texture().get_image().save_png(pre + "_%d.png" % _fence.shot); _fence.shot += 1
 
 
