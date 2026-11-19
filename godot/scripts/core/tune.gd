@@ -128,6 +128,13 @@ const DEFS := [
 		["flickKick", "Quick flick whips the bike round", 0.16, 0, 0.5, 0.01, "rad"],
 		["stickAirTilt", "Air: stick tilts the nose", 0.55, 0, 1.2, 0.05, "rad"],
 		["stickAirRoll", "Air: stick lays the bike over", 0.75, 0, 1.2, 0.05, "rad"],
+		["stickAirEase", "Air: bike follows the stick (higher = snappier)", 3.5, 1, 12, 0.25, "/s"],
+		["stickSpinBuild", "Air: spin builds up (stick at the edge)", 2.5, 0.3, 5, 0.1, "/s"],
+		["stickSpinMax", "Air: flip spin strength (stick at the edge)", 0.7, 0.2, 1, 0.05, "×"],
+		["stickSpinGrow", "Air: spin speeds up the longer it is held", 0.8, 0, 2, 0.05, "×/s"],
+		["stickYawRate", "Air: flat spin speed (stick at left / right edge)", 5.0, 1, 9, 0.1, "rad/s"],
+		["stickBodyCounter", "Air: body leans against the bike", 0.25, 0, 0.6, 0.05, "×"],
+		["stickBodyTilt", "Air: body stays as the bike tilts", 0.6, 0, 1, 0.05, "×"],
 	]],
 ]
 

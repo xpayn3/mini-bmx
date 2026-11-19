@@ -61,7 +61,12 @@ var pivot := 0.0; var pivot_acc := 0.0
 # the body), manual_up = how far a pulled-back stick holds the front up (rad)
 var body_in := 0.0; var body_in_s := 0.0; var flick_in := 0.0; var flick := 0.0; var flick_prev := 0.0
 var manual_up := 0.0; var lock_sb := false; var lock_sf := false; var flick_kick := 0.0
-var air_stick := Vector2.ZERO   # right stick in the air: x lean (+ left), y nose (+ up)
+var air_stick := Vector2.ZERO   # right stick in the air, eased: x lean (+ left), y nose (+ up)
+var edge_s := 0.0   # right stick held at its top / bottom edge in the air: the flip spin, built up gently
+var spin_hold := 0.0; var spin_k := 1.0
+# flat spins: the right stick held at its left / right edge in the air spins the bike round (180 / 360),
+# built up gently and faster the longer it's held, eased out when let go (stick_yaw rad/s on top of air_yaw)
+var yaw_edge_s := 0.0; var yaw_hold := 0.0; var stick_yaw := 0.0   # how long it's been held one way, and the spin-rate multiplier that gives
 var pad := false   # the player is on a gamepad (Settings.pad_active): triggers don't tilt / throw in the air
 var wheel_f := 0.0; var wheel_r := 0.0; var crank := 0.0; var pedal := 0.0
 var yaw_rate := 0.0; var shake := 0.0
@@ -324,8 +329,33 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		# spin the bike. On a gamepad the triggers (held pedalling / braking into a jump) don't tilt it at all
 		# the right stick doesn't spin the bike, it points it (see air_stick); only pushed right to the top
 		# / bottom edge it keeps the bike turning over (flips in the air)
-		var edge := clampf((absf(body_in) - 0.88) / 0.12, 0.0, 1.0)
-		lean_in = clampf((0.0 if pad else throttle - brake_k) + signf(body_in) * edge, -1.0, 1.0)
+		# The spin builds up gently while the stick is held at the edge (stickSpinBuild /s) and eases out
+		# quicker when it comes off the edge: no sudden kick into a flip
+		var edge := signf(body_in) * clampf((absf(body_in) - 0.8) / 0.15, 0.0, 1.0)
+		var e_rate: float = float(T.get("stickSpinBuild", 2.5)) if absf(edge) > absf(edge_s) else 4.0
+		edge_s = move_toward(edge_s, edge, e_rate * dt)
+		# the longer it's held one way, the faster it spins (like winding it up): spin_hold seconds held,
+		# x (1 + stickSpinGrow per second, up to 1.5 s); turning the other way starts over
+		if absf(edge) > 0.5 and signf(edge) == signf(edge_s): spin_hold += dt
+		else: spin_hold = maxf(0.0, spin_hold - dt * 3.0)
+		spin_k = 1.0 + float(T.get("stickSpinGrow", 0.8)) * minf(spin_hold, 1.5) if absf(edge_s) > 0.01 else 1.0
+		lean_in = clampf((0.0 if pad else throttle - brake_k) + edge_s * float(T.get("stickSpinMax", 0.7)), -1.0, 1.0)
+		var ex := signf(flick_in) * clampf((absf(flick_in) - 0.8) / 0.15, 0.0, 1.0)
+		var ey_rate: float = float(T.get("stickSpinBuild", 2.5)) if absf(ex) > absf(yaw_edge_s) else 4.0
+		yaw_edge_s = move_toward(yaw_edge_s, ex, ey_rate * dt)
+		if absf(ex) > 0.5 and signf(ex) == signf(yaw_edge_s): yaw_hold += dt
+		else: yaw_hold = maxf(0.0, yaw_hold - dt * 3.0)
+		var yk: float = 1.0 + float(T.get("stickSpinGrow", 0.8)) * minf(yaw_hold, 1.5)
+		var y_t: float = yaw_edge_s * float(T.get("stickYawRate", 5.0)) * yk
+		if absf(ex) < 0.1 and land_prep > 0.2:
+			# coming in to land off a spin: the rider twists it the rest of the way straight if it's close
+			var off := wrapf(slip, -PI, PI)
+			if absf(off) < 1.0: y_t = clampf(-off * 6.0, -4.0, 4.0)
+		var y_resp: float = 4.0 if absf(y_t) > absf(stick_yaw) else 3.0
+		stick_yaw += (y_t - stick_yaw) * minf(1.0, y_resp * dt)
+	else:
+		edge_s = 0.0; spin_hold = 0.0; spin_k = 1.0
+		yaw_edge_s = 0.0; yaw_hold = 0.0; stick_yaw = 0.0
 	flip_in = -lean_in                                          # + = nose up
 	spin_in = 0.0 if (not air or air_lock_a) else steer_input   # + = the steering direction
 	var roll_keys := spin_in
@@ -333,8 +363,12 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	# 360° air control with the right stick: x = lay the bike over left / right, y = nose up / down. It sets
 	# the bike's attitude (held where the stick points, back to the landing aim when let go), so circling
 	# the stick swings the bike round through every mix of tilt and lean
-	air_stick = Vector2(flick_in, -body_in) if air else Vector2.ZERO
-	if air_stick.length() < 0.08: air_stick = Vector2.ZERO
+	var stick_raw := Vector2(flick_in, -body_in) if air else Vector2.ZERO
+	if stick_raw.length() < 0.08: stick_raw = Vector2.ZERO
+	# eased: the bike follows a smoothed stick (stickAirEase /s), so a quick flick of the thumb swings it
+	# over smoothly instead of snapping it
+	air_stick += (stick_raw - air_stick) * (1.0 - exp(-dt * float(T.get("stickAirEase", 3.5))))
+	if not air: air_stick = Vector2.ZERO
 	air_lean += (lean_in - air_lean) * minf(1.0, dt * 6)
 	# the rider tucks into a flip as well as when Space is held
 	var pull_t := maxf(1.0 if air and inp.hop and not air_lock_h else 0.0, 0.7 * absf(flip_in) if air else 0.0)
@@ -548,7 +582,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		# yaw in the air: a turn carried off the lip keeps turning rider + bike (nothing outside can stop
 		# it). The rider can only twist the bike at the hips, within airTwist, to keep it pointing where
 		# they fly; slip is the bike's heading against the travel direction
-		var sys_slip := wrapf(slip - air_tw, -PI, PI) + air_yaw * dt
+		var sys_slip := wrapf(slip - air_tw, -PI, PI) + (air_yaw + stick_yaw) * dt
 		var tw_t := clampf(-sys_slip, -T.airTwist, T.airTwist)
 		air_tw_v += (60.0 * (tw_t - air_tw) - 12.0 * air_tw_v) * dt
 		air_tw += air_tw_v * dt
@@ -565,7 +599,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	var roll_t: float = roll_keys * T.airRoll + air_stick.x * float(T.get("stickAirRoll", 0.75))
 	var lean_t: float = (roll_t if absf(roll_t) > 0.03 else lean * 0.98) if air else clampf(atan(lat_a / G), -T.leanMax + minf(0.0, bk), T.leanMax + maxf(0.0, bk))
 	var kL: float = T.leanIn if absf(steer_eff) > 0.01 else T.leanOut
-	if air and air_stick != Vector2.ZERO: kL = 160.0   # the stick throws the bike over in the air at once
+	if air and air_stick.length() > 0.02: kL = 45.0   # the stick lays the bike over in the air (soft, no snap)
 	lean_v += ((lean_t - lean) * kL - lean_v * 2 * sqrt(kL) * T.leanDamp) * dt
 	lean += lean_v * dt
 	# the body stick throws the bike over under the rider (the body stays upright: counter grows)
@@ -576,6 +610,11 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	# hangs inside it, or the inside leg cuts through the frame). The body leans ~70 % of the way the
 	# rider + bike lean, so in a fast turn the bike tips well under a fairly upright rider
 	counter = maxf(absf(bike_lean - lean * T.bodyLean), absf(bike_lean) * 0.2) * signf(bike_lean)
+	# in the air the stick's lean is the rider's doing: they push the bike over with the legs and arms and
+	# their body goes the other way a little (counter-lean), staying over the centre of mass
+	if air:
+		var wl := clampf(absf(air_stick.x) * 2.5, 0.0, 1.0)
+		counter = lerpf(counter, bike_lean * (1.0 + float(T.get("stickBodyCounter", 0.25))), wl)
 	rock = pedal_rock(crank, sprint, pedal, va, bike_rock)
 
 	# --- move ---
@@ -804,7 +843,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 				var arc: float = T.airArcade
 				if arc > 0.0:
 					if absf(flip_in) > 0.05:
-						air_w += (flip_in * T.airSpinRate - air_w) * minf(1.0, T.airSpinResp * h) * arc
+						air_w += (flip_in * T.airSpinRate * spin_k - air_w) * minf(1.0, T.airSpinResp * h) * arc
 					else:
 						air_w *= 1.0 - minf(1.0, T.airSpinStop * h) * arc
 				var tgt: float
@@ -819,7 +858,11 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 				var st_t: float = float(T.get("stickAirTilt", 0.55))
 				tgt += air_stick.y * st_t
 				var t_lim: float = T.airTilt + absf(air_stick.y) * st_t
-				air_tilt_v += (70.0 * (tgt - air_tilt) - 13.0 * air_tilt_v) * h
+				# the rider's arms and legs move the bike: quick when they aim it at the landing on their own,
+				# softer (it takes the whole body) when the stick swings it round
+				var soft: float = clampf(air_stick.length() * 3.0 + absf(edge_s) * 2.0, 0.0, 1.0)
+				var kt: float = lerpf(70.0, 22.0, soft)
+				air_tilt_v += (kt * (tgt - air_tilt) - 2.0 * sqrt(kt) * 0.85 * air_tilt_v) * h
 				air_tilt += air_tilt_v * h
 				if absf(air_tilt) > t_lim:
 					air_tilt = signf(air_tilt) * t_lim
@@ -1092,9 +1135,13 @@ func _land_trick(at: float) -> void:
 		crash_pending = "BACKWARDS!"
 		return
 	var flips := roundi(absf(flip_acc) / TAU)
-	if flips >= 1:
-		var kind := "BACKFLIP" if flip_acc > 0 else "FRONTFLIP"
-		var trick: String = (["", "", "DOUBLE ", "TRIPLE "][mini(flips, 3)] if flips > 1 else "") + kind
+	var turns := roundi(absf(spin_acc) / TAU)   # flat spins landed facing forward again: 360, 720...
+	if flips >= 1 or turns >= 1:
+		var trick := ""
+		if turns >= 1: trick = "%d" % (turns * 360)
+		if flips >= 1:
+			var kind := "BACKFLIP" if flip_acc > 0 else "FRONTFLIP"
+			trick = (trick + " " if trick != "" else "") + (["", "", "DOUBLE ", "TRIPLE "][mini(flips, 3)] if flips > 1 else "") + kind
 		host.flash(trick + "!")
 		if host.has_method("on_trick"): host.on_trick(trick)
 		flow_up()

@@ -67,6 +67,13 @@ right-stick yank from centre throws at a lip; a held lean never does).
 In the air the right stick is a **360° attitude control** (`air_stick`): y tilts the nose on top of the landing aim
 (`stickAirTilt`), x lays the bike over (`stickAirRoll`); only the very edge (> 0.88) keeps it turning over (flips). Test:
 `BMX_BODY=circle` circles the stick mid-air (`AIRSTICK` lines). Test runs ignore real controllers (`Settings._test_run`).
+Arcade-style feel: the stick is eased (`stickAirEase`), the tilt / lean springs go soft while it's used, and held at
+an **edge** it spins: top / bottom = flips (`edge_s` → `flip_in`), left / right = **flat spins** (`stick_yaw` on top of
+`air_yaw`, `stickYawRate`). Both build up gently (`stickSpinBuild`) and get faster the longer they're held
+(`stickSpinGrow`, up to 1.5 s); let go and they ease out. Near the landing a spin within ~57° of straight is twisted
+the rest of the way. Landed tricks are named "360", "720", "360 BACKFLIP"... In the air the rider's body drives it:
+counter-leans against the bike (`stickBodyCounter`) and stays steady while the bike tilts under it (`stickBodyTilt`).
+Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 
 ## 4. Project layout (`godot/`)
 

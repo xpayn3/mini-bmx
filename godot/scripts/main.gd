@@ -311,6 +311,16 @@ func _autotest(seconds: float) -> void:
 			if body_t == "manual": Input.action_press("body_back", 0.9 if int(el) % 4 < 3 else 0.0)
 			elif body_t == "fwd": Input.action_press("body_fwd", 1.0)
 			elif body_t == "lightfwd": Input.action_press("body_fwd", 0.25)   # resting the stick a little forward (attack position)
+			elif body_t == "holdback":   # in the air: stick held fully back (wind up a back flip), hands off on the ground
+				var on2 := ph2.air and ph2.air_time > 0.08
+				Input.action_press("body_back", 1.0) if on2 else Input.action_release("body_back")
+				if on2 and OS.get_environment("BMX_BODY_PRINT") != "":
+					print("SPIN t=%.2f air=%.2f edge=%.2f hold=%.2f k=%.2f pitch_v=%.2f lean=%.2f" % [el, ph2.air_time, ph2.edge_s, ph2.spin_hold, ph2.spin_k, ph2.pitch_v, ph2.bike_lean])
+			elif body_t == "spin360":   # in the air: stick fully left until ~300° round, then let go (the landing twist finishes it)
+				var on3: bool = ph2.air and ph2.air_time > 0.08 and absf(ph2.spin_acc) < 5.3
+				Input.action_press("body_left", 1.0) if on3 else Input.action_release("body_left")
+				if ph2.air and OS.get_environment("BMX_BODY_PRINT") != "" and int(el * 20) % 2 == 0:
+					print("YAW t=%.2f air=%.2f stick_yaw=%.2f edge=%.2f hold=%.2f spin=%.0fdeg slip=%.2f" % [el, ph2.air_time, ph2.stick_yaw, ph2.yaw_edge_s, ph2.yaw_hold, rad_to_deg(ph2.spin_acc), ph2.slip])
 			elif body_t == "circle":   # in the air: circle the stick (0.8 deflection, ~1 turn / s); hands off on the ground
 				var ca := el * TAU * 1.0
 				var on := ph2.air and ph2.air_time > 0.08

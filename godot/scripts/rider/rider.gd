@@ -823,6 +823,13 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var wheelie: float = clampf(pitch0 - slope0, 0.0, 1.1) * (1.0 - clampf(air * 3.0, 0.0, 1.0))
 	var base := pitch0 - wheelie   # the slope part of the bike's pitch
 	var pit := base * (0.2 if base > 0 else _num(p, "bodyLevel", 0.85)) + wheelie * 0.75   # most of a wheelie's tilt is taken back
+	# in the air, when the rider tilts the bike with the stick, the body stays and the bike rotates under
+	# it: nose down = arms push the bars away, hips back; nose up = bars pulled into the chest
+	var at := _num(p, "airTilt")
+	if at != 0.0:
+		pit += at
+		pelvis.x -= clampf(-at, 0.0, 0.6) * 0.12
+		chest.y -= absf(at) * 0.05
 	if pit != 0.0:
 		var c := cos(-pit)
 		var sn := sin(-pit)
@@ -868,6 +875,9 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		chest.y = y0 + dy * c - dz * sn
 		chest.z = dy * sn + dz * c
 		pelvis.y -= absf(cr) * 0.12 * float(sty.turnLow)
+		# in the air a stick lean: the hips move out against the bike (the legs push it over)
+		var alx := _num(p, "airLeanX")
+		if alx != 0.0: pelvis.z += -signf(cr) * absf(alx) * 0.06
 		chest.x += absf(cr) * 0.05
 	# foot down at a stop: the bike leans onto the foot, the body stays nearly upright over it,
 	# hips a little lower and toward the foot (standing over the top tube)
