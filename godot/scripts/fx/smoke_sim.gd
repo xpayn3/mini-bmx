@@ -18,7 +18,7 @@ const NZ := 128
 const H := 0.2                    # metres per voxel -> 25.6 x 6.4 x 25.6 m
 const HM := 32                    # heightmap cells across the box
 const HM_CELL := H * NX / HM      # 0.8 m; the box moves in whole heightmap cells
-const MAX_SRC := 32
+const MAX_SRC := 64
 const PRESSURE_ITERS := 14
 const AHEAD := 7.0                # metres of box kept ahead of the rider
 const PASSES := ["advect", "curl", "confine", "divergence", "pressure", "project", "light", "occupancy"]
@@ -30,7 +30,7 @@ var vel_relax := 0.35             # /s back toward the wind
 var settle := 0.05                # m/s dust falling through the air
 var vorticity := 0.9
 var extinction := 3.0
-var turbulence := 4.5             # curl-noise swirl force
+var turbulence := 6.5             # curl-noise swirl force
 var turb_scale := 0.7             # 1/m: swirl size ~ 1.5 m
 var disperse := 2.2               # /s: how fast dust mixes out into the air (turbulent diffusion)
 var disperse_reach := 1.6         # voxels
@@ -57,6 +57,7 @@ var _pipe := {}
 var _sets := {}
 var _cur := 0
 var _sim_t := 0.0
+var speed := 0.0                  # the rider's speed (smoothed): faster = a more turbulent wake
 
 var origin := Vector2.ZERO
 var _has_origin := false
@@ -137,9 +138,9 @@ func add_source(p: Vector3, vel: Vector3, r: float, rate: float, blend := 6.0, r
 	if rate > 0.0: _idle = 0.0
 
 ## a source that keeps going for secs (a landing / crash cloud)
-func burst(p: Vector3, vel: Vector3, r: float, rate: float, radial: float, secs := 0.2, col := Color(0, 0, 0, 0)) -> void:
+func burst(p: Vector3, vel: Vector3, r: float, rate: float, radial: float, secs := 0.2, col := Color(0, 0, 0, 0), blend := 7.0) -> void:
 	if not ok: return
-	_emit.append({p = p, v = vel, r = r, rate = rate, radial = radial, t = secs})
+	_emit.append({p = p, v = vel, r = r, rate = rate, radial = radial, t = secs, blend = blend})
 	if col.a > 0.0: tint(col)
 	_idle = 0.0
 
@@ -161,12 +162,14 @@ func step(dt: float, focus: Vector3, fwd: Vector3) -> void:
 	dt = clampf(dt, 1.0 / 240.0, 1.0 / 30.0)
 	for i in range(_emit.size() - 1, -1, -1):
 		var e: Dictionary = _emit[i]
-		add_source(e.p, e.v, e.r, e.rate, 7.0, e.radial)
+		add_source(e.p, e.v, e.r, e.rate, e.blend, e.radial)
 		e.t -= dt
 		if e.t <= 0.0: _emit.remove_at(i)
 	# the bike pushes the air: its wake drags and swirls the dust behind it
 	if _last_focus != Vector3.INF:
 		var bv := (focus - _last_focus) / dt
+		if bv.length() < 40.0:
+			speed += (bv.length() - speed) * (1.0 - exp(-dt * 3.0))
 		if bv.length() < 40.0 and bv.length() > 0.5:
 			add_source(focus + Vector3(0, 0.55, 0), bv * 0.9, 0.75, 0.0, 5.0)
 	_last_focus = focus
@@ -342,13 +345,14 @@ func _gpu_step(dt: float, shift: Vector2i, clear: bool, src: PackedByteArray, n:
 		rd.texture_clear(_st[1], Color(0, 0, 0, 0), 0, 1, 0, 1)
 	if n > 0: rd.buffer_update(_buf, 0, n * 48, src.slice(0, n * 48))
 	_sim_t += dt
+	var _fast := clampf((speed - 3.0) / 9.0, 0.0, 1.0)   # 0 below ~11 km/h .. 1 at ~43 km/h
 	var p := _cur
 	var q := 1 - p
 	var cl := rd.compute_list_begin()
 	_disp(cl, "advect", _sets["advect%d" % p], PackedFloat32Array([dt, H, shift.x, shift.y,
 		wind.x, wind.y, n, _sim_t, density_fade, vel_relax, settle, 6.0,
-		origin.x, origin.y, turbulence, turb_scale,
-		disperse, disperse_reach, 0, 0]))
+		origin.x, origin.y, turbulence * (1.0 + _fast * 1.2), turb_scale,
+		disperse * (1.0 + _fast * 2.5), disperse_reach * (1.0 + _fast * 0.8), 0, 0]))
 	_disp(cl, "curl", _sets["curl%d" % q], PackedFloat32Array([dt, H, 0, 0]))
 	_disp(cl, "confine", _sets["confine%d" % q], PackedFloat32Array([dt, H, vorticity, 0]))
 	_disp(cl, "divergence", _sets["divergence%d" % q], PackedFloat32Array([dt, H, 0, 0]))

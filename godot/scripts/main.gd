@@ -361,6 +361,12 @@ func _autotest(seconds: float) -> void:
 		if pedal and not straight and int(el * 2) % 7 == 0: Input.action_press("hop")
 		elif OS.get_environment("BMX_AIRPULL") != "" and game.phys.air and game.phys.air_time > 0.1: Input.action_press("hop")   # tests: tuck in the air
 		else: Input.action_release("hop")
+		if OS.get_environment("BMX_BAIL") != "" and el > float(OS.get_environment("BMX_BAIL")) and not _probe.has("bailed"):   # tests: bail (crash) here
+			_probe["bailed"] = true
+			game.phys.crash_pending = "BAIL!"
+		if OS.get_environment("BMX_LAND_TEST") != "" and el > float(OS.get_environment("BMX_LAND_TEST")) and not _probe.has("landed"):   # tests: fake a hard landing
+			_probe["landed"] = true
+			game.on_landing(1.0, 8.0)
 		if OS.get_environment("BMX_SKID") != "" and el > float(OS.get_environment("BMX_SKID")):   # tests: lock the rear (skid) from this time on
 			Input.action_release("pedal"); Input.action_press("brake")
 		await get_tree().process_frame

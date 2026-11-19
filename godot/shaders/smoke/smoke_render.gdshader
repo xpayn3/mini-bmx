@@ -68,15 +68,29 @@ void fragment() {
 				if (d > 0.004) {
 					// erode with two octaves of noise: thin dust tears into wisps, thick dust gets lumpy billows
 					vec3 q = p - drift;
-					n = texture(detail, q * 0.13 + 0.71).r * 0.4 + texture(detail, q * 0.37).r * 0.4 + texture(detail, q * 0.95 + 0.37).r * 0.2;
+					n = texture(detail, q * 0.13 + 0.71).r * 0.36 + texture(detail, q * 0.37).r * 0.34 + texture(detail, q * 0.95 + 0.37).r * 0.18
+						+ texture(detail, q * 2.3 + 0.19).r * 0.12;
 					d *= clamp(1.0 + (d * 1.6 - n) * 3.0 * detail_amt, 0.0, 2.2);
 				}
 				if (d > 0.004) {
 					ds = step_m;
 					if (cl < 0.0) cl = cloud_ratio(p);
 					float a = 1.0 - exp(-d * ext * ds);
+					// fine self-shadowing: how much dust sits just sunward of here (the grid's light volume is
+					// too coarse to shade the small billows) -> lit tops, shaded creases: depth
+					vec3 ps = p + sun_dir * 0.28;
+					vec2 gs = (ps.xz - origin.xz) / size_m.xz;
+					float gys = (ps.y - gr) / size_m.y;
+					float dsn = texture(smoke, vec3(gs.x, gys, gs.y)).r;
+					vec3 qs = ps - drift;
+					float ns = texture(detail, qs * 0.37).r * 0.6 + texture(detail, qs * 0.95 + 0.37).r * 0.4;
+					dsn *= clamp(1.0 + (dsn * 1.6 - ns) * 3.0 * detail_amt, 0.0, 2.2);
+					float occl = exp(-dsn * ext * 0.45);
+					// "powder": thin wisps let sunlight through without scattering much of it back -> dark
+					// edges inside thick dust read as depth
+					float powder = mix(1.0, 1.0 - exp(-d * 3.0), 0.45);
 					// sun (self-shadowed through the dust, cloud shadows) + sky, a little ground bounce
-					vec3 L = dust_col * (sun_col * (s.g * phase * cl * (1.25 - n * 0.7)) + amb_col * (0.3 + 0.7 * s.b) + sun_col * 0.04);
+					vec3 L = dust_col * (sun_col * (s.g * phase * cl * occl * powder * 1.45 * (1.25 - n * 0.7)) + amb_col * (0.3 + 0.7 * s.b) + sun_col * 0.04);
 					col += T * a * L;
 					T *= 1.0 - a;
 					if (T < 0.01) break;

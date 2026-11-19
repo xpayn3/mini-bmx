@@ -98,8 +98,9 @@ void main() {
 		vec3 wp = vec3(pc.d.x, 0.0, pc.d.y) + p * h;
 		float tt = pc.b.w;
 		vec3 q = wp * pc.d.w + vec3(-pc.b.x, -0.6, -pc.b.y) * tt * pc.d.w;
-		vec3 cn = curl_noise(q) + 0.5 * curl_noise(q * 2.3 + 17.0);
-		v += cn * pc.d.z * (0.25 + min(d, 1.2)) * dt;
+		// three sizes of swirl: big lazy meanders (~4 m), rolls (~1.5 m), small eddies (~0.6 m)
+		vec3 cn = 0.9 * curl_noise(q * 0.4 + 41.0) + curl_noise(q) + 0.5 * curl_noise(q * 2.3 + 17.0);
+		v += cn * pc.d.z * (0.6 + min(d, 1.0)) * dt;
 	}
 	if (id.y == 0) v.y = max(v.y, 0.0);
 	imageStore(dst, id, vec4(v, clamp(d, 0.0, 6.0)));

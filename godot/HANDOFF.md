@@ -157,7 +157,10 @@ F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A 
   turbulence → vorticity confinement → pressure solve (red-black GS) → project → sun/sky light volume →
   occupancy bricks. Drawn by raymarching (`smoke_render.gdshader`, empty-space skipping via the bricks,
   3-octave noise erosion for wisps/billows). Sources: rear-wheel roost (pulsed + jittered, `RideDust.feed`),
-  skid/landing/crash clouds (`cloud`), `burst()` / smashes (`puff_burst`), the bike's wake. Stops when
+  dust from the tyre contact patches only (rear + a third at the front, gusty spray), landing shockwave
+  ring (`landing_ring`), crash dust under the ragdoll and the sliding bike (`Game._crash_dust`), skid
+  clouds (`cloud`), `burst()` / smashes (`puff_burst`), the bike's wake; faster riding = more turbulence
+  and quicker spreading. Stops when
   the air is clear. `.glsl` files need an import (`--headless --import`) after editing. Falls back to the
   old sprites / FogVolumes without a RenderingDevice; `BMX_SPRITE_DUST=1` forces the sprites.
 - Dirt chunks, **tyre tracks**: one ring-buffer ArrayMesh
@@ -218,6 +221,7 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `BMX_COAST=1` | autotest alternates 3 s pedalling / 3 s coasting (freewheel tests) |
 | `BMX_REC=file.wav` | records the game's own sound output during an autotest |
 | `BMX_SKID=secs` / `BMX_DUST_SHOTS=dir/prefix` (+ `BMX_DUST_T0`) | autotest locks the rear wheel from secs / a screenshot every 0.5 s (dust tests; `BMX_CAM=side` avoids the tilt-shift blur) |
+| `BMX_LAND_TEST=secs` / `BMX_BAIL=secs` | autotest fakes a hard landing (dust ring) / bails (crash dust) at that time |
 | `BMX_SPRITE_DUST=1`, `BMX_SMOKE_PROBE=1` | old sprite dust for comparison / smoke-sim timing prints |
 | `BMX_FENCE=dir/prefix` (+ `BMX_FENCE_STYLE=ranch/picket`) | autotest rides into the nearest fence, screenshots before / after the smash |
 
