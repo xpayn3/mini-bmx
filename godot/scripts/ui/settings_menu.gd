@@ -98,6 +98,34 @@ func _slider(parent: Control, text: String, key: String, lo: float, hi: float, s
 	hb.add_child(UITheme.reset_button(s, float(Settings.DEFAULTS.get(key, s.value))))
 	_row(parent, text, hb, tip)
 
+## a slider for a ride tuning value (Tune, saved in tune.cfg), range and default from Tune.DEFS
+func _tune_slider(parent: Control, text: String, key: String, fmt: String, tip := "") -> void:
+	var row: Array = []
+	for g in Tune.DEFS:
+		for r in g[1]:
+			if r[0] == key: row = r
+	if row.is_empty(): return
+	var hb := HBoxContainer.new()
+	var s := HSlider.new()
+	s.min_value = row[3]; s.max_value = row[4]; s.step = row[5]
+	s.value = float(Tune.base.get(key, row[2]))
+	s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	s.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var vl := UITheme.label(fmt % s.value, 15, UITheme.MUTED)
+	vl.custom_minimum_size.x = 56
+	vl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	var drag := [false]   # applied on release (writes tune.cfg), the label follows the drag
+	s.drag_started.connect(func(): drag[0] = true)
+	s.drag_ended.connect(func(changed):
+		drag[0] = false
+		if changed: Tune.set_value(key, s.value))
+	s.value_changed.connect(func(v):
+		vl.text = fmt % v
+		if not drag[0]: Tune.set_value(key, v))
+	hb.add_child(s); hb.add_child(vl)
+	hb.add_child(UITheme.reset_button(s, float(row[2])))
+	_row(parent, text, hb, tip)
+
 func _display() -> Control:
 	var p := _page("Display")
 	_option(p, "Display mode", "window_mode", ["Windowed", "Borderless fullscreen", "Exclusive fullscreen"])
@@ -217,6 +245,8 @@ func _controls() -> Control:
 
 func _fill_controls() -> void:
 	for c in _controls_box.get_children(): c.queue_free()
+	_tune_slider(_controls_box, "Top speed", "topSpeed", "×%.2f",
+		"How fast the rider can pedal the bike: top speed, the power to reach it and less drag (also in the tuning card, Ride › Speed)")
 	var head := HBoxContainer.new()
 	var a := UITheme.label("Action", 13, UITheme.MUTED); a.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(a)

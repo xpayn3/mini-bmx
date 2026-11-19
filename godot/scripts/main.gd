@@ -328,6 +328,7 @@ func _autotest(seconds: float) -> void:
 					var tag := ("air" if game.phys.air else "ground") + ("_hip" if i == 2 else "")
 					if j > _probe.get("jump_" + tag, 0.0): _probe["jump_" + tag] = j
 				_probe[key] = kp
+		if OS.get_environment("BMX_VMAX") != "" and not game.phys.air: _probe.vmax_kmh = maxf(_probe.get("vmax_kmh", 0.0), game.phys.v * 3.6)   # tests
 		var airshot := OS.get_environment("BMX_AIRSHOT")   # tests: dir/prefix -> shots mid-air (up to 8)
 		if airshot != "" and game.phys.air and game.phys.air_time > 0.25 and _airshots < 8 and el - _airshot_t > 0.6:
 			_airshot_t = el
