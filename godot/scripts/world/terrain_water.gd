@@ -3,8 +3,11 @@ extends MeshInstance3D
 ## The water surface at Terrain.WATER, following the player (port of water.js). Depth is baked into a
 ## small texture from the loaded chunks' height grids, a few rows per frame.
 
-const BAKE_RES := 128     # texels per side
-const BAKE_SIZE := 128.0  # metres covered
+const BAKE_RES := 192     # texels per side
+const BAKE_SIZE := 192.0  # metres covered
+const MESH_SIZE := 280.0
+const MESH_DIV := 160
+const MESH_SNAP := MESH_SIZE / (MESH_DIV + 1) * 4   # whole grid cells: the swell's vertices never shift (no popping)
 const BAKE_SNAP := 16.0
 const BAKE_MS := 1.0
 
@@ -22,16 +25,16 @@ var _mat: ShaderMaterial
 
 func _init() -> void:
 	var pm := PlaneMesh.new()
-	pm.size = Vector2(280, 280)
-	pm.subdivide_width = 160
-	pm.subdivide_depth = 160
+	pm.size = Vector2(MESH_SIZE, MESH_SIZE)
+	pm.subdivide_width = MESH_DIV
+	pm.subdivide_depth = MESH_DIV
 	mesh = pm
 	_mat = ShaderMaterial.new()
 	_mat.shader = preload("res://scripts/world/water.gdshader")
 	material_override = _mat
 	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_buf.resize(BAKE_RES * BAKE_RES)
-	_img = Image.create_empty(BAKE_RES, BAKE_RES, false, Image.FORMAT_R8)
+	_buf.resize(BAKE_RES * BAKE_RES * 4)
+	_img = Image.create_empty(BAKE_RES, BAKE_RES, false, Image.FORMAT_RF)
 	_tex = ImageTexture.create_from_image(_img)
 	_mat.set_shader_parameter("u_depth", _tex)
 	_mat.set_shader_parameter("u_size", BAKE_SIZE)
@@ -65,7 +68,7 @@ func _depth(x: float, z: float) -> float:
 
 func follow(px: float, pz: float, t: float) -> void:
 	_mat.set_shader_parameter("u_time", t)
-	position = Vector3(roundf(px / 10) * 10, Terrain.WATER, roundf(pz / 10) * 10)
+	position = Vector3(roundf(px / MESH_SNAP) * MESH_SNAP, Terrain.WATER, roundf(pz / MESH_SNAP) * MESH_SNAP)
 	var c := Vector2(roundf(px / BAKE_SNAP) * BAKE_SNAP, roundf(pz / BAKE_SNAP) * BAKE_SNAP)
 	if not is_finite(_center.x):
 		_start(c)
@@ -98,11 +101,11 @@ func _bake(ms: float) -> void:
 		var z := z0 + j * step
 		for i in BAKE_RES:
 			var d := _depth(x0 + i * step, z)
-			_buf[j * BAKE_RES + i] = clampi(int((d + 1) / 5 * 255), 0, 255)
+			_buf.encode_float((j * BAKE_RES + i) * 4, clampf((d + 1) / 5, 0, 1))   # float: 8 bits gave 2 cm steps = jagged foam
 		j += 1
 	_job_row = j
 	if _job_row >= BAKE_RES:
-		_img.set_data(BAKE_RES, BAKE_RES, false, Image.FORMAT_R8, _buf)
+		_img.set_data(BAKE_RES, BAKE_RES, false, Image.FORMAT_RF, _buf)
 		_tex.update(_img)
 		_center = _job_center
 		_mat.set_shader_parameter("u_center", _center)
