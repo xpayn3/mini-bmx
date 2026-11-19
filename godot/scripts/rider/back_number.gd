@@ -14,8 +14,9 @@ const H := 0.19
 const T_TOP := 0.68             # on the spine: 0 hips .. 1 collar
 const T_BOT := 0.30
 const STAND := 0.009            # the paper floats this far off the jersey (the torso mesh is faceted)
-const MAX_STAND := 0.055        # nothing billows further off the jersey than this
-const TETHER := 0.06            # how far a bottom corner can lift off its pin spot
+const MAX_STAND := 0.09        # nothing billows further off the jersey than this
+const TETHER := 0.12            # how far a bottom corner can lift off its pin spot
+const MAX_AWAY := 0.11          # and no point strays further than this from its spot on the back (can't fold up over the neck)
 const SUB := 2
 const ITER := 5
 const DRAG := 5.0
@@ -45,13 +46,35 @@ func _init() -> void:
 		_ph.append(randf() * 6.28)
 
 
+## Depth precision gets coarse with distance, so a paper 9 mm off the jersey would z-fight from far away.
+## The vertex shader slides each vertex towards the camera along the view ray (no change on screen, only in
+## depth) by an amount that grows with distance.
+const SHADER := """
+shader_type spatial;
+render_mode cull_disabled;
+uniform sampler2D tex : source_color, filter_linear_mipmap, repeat_disable;
+void vertex() {
+	vec3 wp = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	float d = length(CAMERA_POSITION_WORLD - wp);
+	vec3 to_cam = (CAMERA_POSITION_WORLD - wp) / max(d, 0.001);
+	vec3 push = to_cam * (0.003 + 0.0035 * d);
+	VERTEX += (inverse(MODEL_MATRIX) * vec4(push, 0.0)).xyz;
+}
+void fragment() {
+	ALBEDO = texture(tex, UV).rgb;
+	ROUGHNESS = 0.85;
+}
+"""
+
+
 func _ready() -> void:
 	_vp = _build_face()
 	add_child(_vp)
-	var m := StandardMaterial3D.new()
-	m.albedo_texture = _vp.get_texture()
-	m.roughness = 0.85
-	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var sh := Shader.new()
+	sh.code = SHADER
+	var m := ShaderMaterial.new()
+	m.shader = sh
+	m.set_shader_parameter("tex", _vp.get_texture())
 	material_override = m
 
 
@@ -161,8 +184,15 @@ func _reset(A: PackedVector3Array) -> void:
 func _process(dt: float) -> void:
 	if _vp != null and _vp_frames >= 0:   # the face is drawn once (a few frames for fonts / layout), then frozen
 		_vp_frames += 1
-		if _vp_frames > 4:
-			_vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
+		if _vp_frames > 4:   # bake it into a mipmapped texture (no shimmer from far away) and drop the viewport
+			var img := _vp.get_texture().get_image()
+			if img != null and not img.is_empty():
+				img.generate_mipmaps()
+				(material_override as ShaderMaterial).set_shader_parameter("tex", ImageTexture.create_from_image(img))
+				_vp.queue_free()
+				_vp = null
+			else:
+				_vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
 			_vp_frames = -1
 	var rider := get_parent() as Rider
 	if rider == null or rider.spine_skel == null or not rider.is_visible_in_tree() or dt <= 0.0:
@@ -192,7 +222,7 @@ func _process(dt: float) -> void:
 	var dg := sqrt(cw * cw + ch * ch)
 	var side := nrm.cross(Vector3.UP).normalized()
 	var h := dt / SUB
-	var gust := clampf(speed / 6.0, 0.0, 1.0)   # nothing much at a walk, full flap from ~20 km/h
+	var gust := clampf(speed / 4.0, 0.0, 1.0)   # nothing much at a walk, full flap from ~20 km/h
 	for sub in SUB:
 		for r in R:
 			var low := 0.25 + 0.75 * float(r) / (R - 1)   # the loose lower half flaps most
@@ -202,9 +232,8 @@ func _process(dt: float) -> void:
 					continue
 				var tu := _t * 19.0 + _ph[i] + r * 0.9 + c * 1.3
 				# air in the rider's wake travels with him; the paper is pumped in and out and rattled sideways
-				var pump := 0.25 + 0.6 * sin(tu) + 0.35 * sin(tu * 1.9 + 2.0) + 0.2 * sin(_t * 52.0 + _ph[i] * 3.0)
-				var w := _vs * 0.4 + nrm * (speed * pump * low * gust) + side * (sin(tu * 1.4 + 1.0) * speed * 0.12 * low * gust)
-				w += Vector3.UP * (sin(tu * 1.1 + 0.5) * speed * 0.18 * low * gust)
+				var pump := 0.4 + 0.9 * sin(tu) + 0.5 * sin(tu * 1.9 + 2.0) + 0.3 * sin(_t * 52.0 + _ph[i] * 3.0)
+				var w := _vs * 0.4 + nrm * (speed * pump * low * gust) + side * (sin(tu * 1.4 + 1.0) * speed * 0.25 * low * gust)
 				var p := _P[i]
 				var v := (p - _Q[i]) / h
 				var acc := (w - v) * DRAG + Vector3(0, -9.81 * 0.5, 0)
@@ -237,6 +266,9 @@ func _process(dt: float) -> void:
 				_P[i] += nrm * (STAND - d)
 			elif d > MAX_STAND:
 				_P[i] -= nrm * (d - MAX_STAND)
+			var away := _P[i] - S[i]
+			if away.length() > MAX_AWAY:
+				_P[i] = S[i] + away.normalized() * MAX_AWAY
 	_draw(nrm)
 
 
