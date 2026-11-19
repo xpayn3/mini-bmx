@@ -513,12 +513,7 @@ func respawn(new_world: bool) -> void:
 	_snap_prev()
 	cam.snap_to(Vector3(0, phys.y + 0.5, 0))
 
-## the frame's tailwhip angle to draw (wrapped interpolation; BMX_WHIP_POSE=rad holds one for test shots)
-func _whip_draw(st, a: float) -> float:
-	if OS.get_environment("BMX_WHIP_POSE") != "": return float(OS.get_environment("BMX_WHIP_POSE"))
-	return _prev.whip + BikePhysics.ang_diff(st.whip, _prev.whip) * a
-
-const DRAW_KEYS := ["x", "z", "y", "y_draw", "pitch", "pitch_draw", "heading", "body_y", "whip"]
+const DRAW_KEYS := ["x", "z", "y", "y_draw", "pitch", "pitch_draw", "heading", "body_y"]
 
 func _snap_prev() -> void:
 	for k in DRAW_KEYS: _prev[k] = phys.get(k)
@@ -618,13 +613,16 @@ func _process(dt: float) -> void:
 	if Vector2(st.x - _prev.x, st.z - _prev.z).length() > 2: a = 1.0
 	var lerp_k := func(k: String) -> float: return lerpf(_prev[k], st.get(k), a)
 	var y_draw: float = lerp_k.call("y") if st.crash_on else lerp_k.call("y_draw")
-	var p_draw: float = lerp_k.call("pitch") if st.crash_on else lerp_k.call("pitch_draw")
+	# wrapped interpolation: mid-flip the pitch jumps +PI -> -PI between two steps
+	var pk := "pitch" if st.crash_on else "pitch_draw"
+	var p_draw: float = wrapf(_prev[pk] + BikePhysics.ang_diff(st.get(pk), _prev[pk]) * a, -PI, PI)
+	if OS.get_environment("BMX_PITCH_POSE") != "": p_draw = wrapf(t * 4.0, -PI, PI) if OS.get_environment("BMX_PITCH_POSE") == "sweep" else float(OS.get_environment("BMX_PITCH_POSE"))   # tests: draw at a fixed pitch (flip poses)
 	var hd: float = _prev.heading + BikePhysics.ang_diff(st.heading, _prev.heading) * a
 	drawn_pos = Vector3(lerp_k.call("x"), lerp_k.call("y"), lerp_k.call("z"))
 	var body_y: float = lerp_k.call("body_y")
 	var wobble := sin(t * 2.3) * 0.025 * maxf(0.0, 1 - absf(st.v) / 2)
-	rig.pose(drawn_pos.x, y_draw, drawn_pos.z, hd, p_draw, st.hop_nose, st.bike_lean + st.rock + wobble,
-		st.steer - wobble * 1.5, st.wheel_f, st.wheel_r, st.crank, _whip_draw(st, a))
+	rig.pose(drawn_pos.x, y_draw + (1.5 if OS.get_environment("BMX_PITCH_POSE") != "" else 0.0), drawn_pos.z, hd, p_draw, st.hop_nose, st.bike_lean + st.rock + wobble,
+		st.steer - wobble * 1.5, st.wheel_f, st.wheel_r, st.crank)
 	st.brake_heat *= exp(-dt / 3.5)
 	rig.set_brake_heat((st.brake_heat - 0.35) / 0.9)
 	if not st.crash_on:

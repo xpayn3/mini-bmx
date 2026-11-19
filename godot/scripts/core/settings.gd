@@ -55,7 +55,8 @@ const DEFAULTS := {
 	"view_distance": 1.0,    # fog / streaming multiplier
 	"show_fps": true,
 	"units": 0,              # 0 km/h, 1 mph
-	"camera": "drone",
+	"camera": "trail",
+	"cam_rev": 0,            # 1 = the Trail camera became the default (old saved "drone" moves over once)
 	"mouse_sens": 1.0,
 	"invert_y": false,
 	"cam_shake": 1.0,
@@ -247,6 +248,9 @@ func load_settings() -> void:
 							if e is InputEvent:
 								clean.append(e)
 						bindings[a] = clean
+	if int(data.cam_rev) < 1:
+		if data.camera == "drone": data.camera = "trail"
+		data.cam_rev = 1
 	_install_bindings()
 
 func save() -> void:
