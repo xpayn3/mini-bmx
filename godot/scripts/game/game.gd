@@ -40,7 +40,7 @@ var cam_attr: CameraAttributesPractical
 var grade_rect: ColorRect
 var atmos := Atmos.new()
 var grime: Grime
-var blood: Blood             # blood on the ground + torn-off limbs after a crash (fx/blood.gd)
+var blood                    # blood on the ground + torn-off limbs after a crash (fx/blood.gd; loaded by path, no class cache needed)
 var dust: RideDust
 var sun_energy := RIDE_SUN
 # level light (tuning card › Light, LightSettings): time of day, day / night cycle
@@ -139,7 +139,7 @@ func _ready() -> void:
 	add_child(grime)
 	grime.watch(rig)
 	grime.watch(rider, true)
-	blood = Blood.new(terrain, fx)
+	blood = preload("res://scripts/fx/blood.gd").new(terrain, fx)
 	blood.ragdoll = ragdoll
 	add_child(blood)
 	dust = RideDust.new()
