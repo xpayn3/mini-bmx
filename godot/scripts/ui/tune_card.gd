@@ -106,7 +106,8 @@ func show_tab(id: String) -> void:
 	tab = id
 	var b := tab_row.get_node_or_null("T_" + id) as Button
 	if b: b.button_pressed = true
-	pose_defaults = Rider.NEUTRAL.duplicate(); pose_defaults.merge(GameState.BIKES[GameState.bike_id].pose, true)
+	PosePresets.bike = GameState.bike_id
+	pose_defaults = PosePresets.preset(PosePresets.get_active())   # Reset / slider marks: the chosen position
 	pose = RiderPanels.load_pose(GameState.bike_id, GameState.BIKES[GameState.bike_id].pose)
 	look = RiderPanels.load_look()
 	for c in cat_row.get_children(): c.queue_free()
@@ -145,6 +146,16 @@ func _fill() -> void:
 	for src: String in cat[1]:
 		if src.begins_with("T:"):
 			_preset_bar(TunePresets, "Ride preset")
+			break
+	for src: String in cat[1]:
+		if src.begins_with("P:") or src == "seat":
+			# a position may just have been picked: re-read the pose and ride with it
+			PosePresets.bike = GameState.bike_id
+			pose_defaults = PosePresets.preset(PosePresets.get_active())
+			pose = RiderPanels.load_pose(GameState.bike_id, GameState.BIKES[GameState.bike_id].pose)
+			game.rider.set_style(pose)
+			game.phys.bike_rock = float(pose.get("bikeRock", 1.0))
+			_preset_bar(PosePresets, "Riding position")
 			break
 	for src: String in cat[1]:
 		var kind := src.substr(0, src.find(":")) if ":" in src else src
@@ -256,6 +267,8 @@ func _apply_pose() -> void:
 	game.rider.set_style(pose)
 	game.phys.bike_rock = float(pose.get("bikeRock", 1.0))
 	RiderPanels.save_pose(GameState.bike_id, pose)
+	PosePresets.pose_changed(pose)
+	_refresh_mod(PosePresets)
 
 
 # ---------------------------------------------------------------- LOOK

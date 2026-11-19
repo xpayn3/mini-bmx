@@ -543,17 +543,27 @@ const PREVIEWS := {
 func _pose_rider(dt: float) -> void:
 	if rider == null or not is_instance_valid(rider): return
 	var P: Dictionary = PREVIEWS[rider_preview]
+	# the same pedalling as a ride (BikePhysics): wheels turn at the preview speed, the cranks follow
+	# through the build's chainring + start cog and the Top speed tuning, the bike rocks with the stroke
+	var spr: float = P.get("sprint", 0.0)
+	var v: float = P.v if P.pedal > 0.5 else 2.0   # coasting / poses: the wheels keep turning on the drums
+	_spin_on_rollers(dt, v)
+	var rock := 0.0
 	if P.pedal > 0.5:
-		var cad := 7.0 if P.get("sprint", 0.0) > 0 else 5.0
-		preview_crank += dt * cad
+		var m := BikeBuild.ride_mods(build)
+		var cogs: Array = m.cogs
+		var g := BikePhysics.start_gear(cogs, m.ring_k)
+		var gk: float = m.ring_k * 16.0 / float(cogs[maxi(g, 0)])
+		var ts: float = Tune.v.topSpeed * float((m.ride as Dictionary).get("topSpeed", 1.0))
+		preview_crank += BikePhysics.crank_rate(v / rig.wheel_rf, gk, ts, spr) * dt
 		rig.crank_n.rotation.z = -preview_crank
 		for pv in rig.pedal_pivots: pv.rotation.z = preview_crank
-		_spin_on_rollers(dt, cad * 2.78 * rig.wheel_rr * 0.55)   # wheel speed from the crank (gear ~2.8)
-	else:
-		_spin_on_rollers(dt, 2.0)   # coasting: the wheels keep turning on the drums
+		var br: float = float(rider.style.get("bikeRock", 1.0)) if rider.get("style") is Dictionary else 1.0
+		rock = BikePhysics.pedal_rock(preview_crank, spr, 1.0, v, br)
+	rig.lean_g.rotation = Vector3(-rock, 0, 0)
 	var lt := rig.limb_targets()
 	rider.update_pose(dt, {"footL": lt.footL, "footR": lt.footR, "handL": lt.handL, "handR": lt.handR,
-		"v": P.v, "lean": 0.0, "steer": 0.0, "yawRate": 0.0, "counter": 0.0, "rockRoll": 0.0, "headRoll": 0.0,
+		"v": P.v, "lean": rock, "steer": 0.0, "yawRate": 0.0, "counter": 0.0, "rockRoll": rock, "headRoll": 0.0,
 		"absorb": 0.0, "pitch": P.pitch, "bodyLevel": 0.85, "attackDrop": 0.18, "pedal": P.pedal,
 		"sprint": P.get("sprint", 0.0), "crank": preview_crank, "air": P.air, "compress": P.compress, "hipShift": 0.0, "t": hand_t})
 
@@ -1119,10 +1129,11 @@ func _rider_page() -> void:
 	var items := []
 	for k in PREVIEWS: items.append([k, PREVIEWS[k].label])
 	_choice("Preview", items, rider_preview, func(v): rider_preview = v; _save_rider_ui())
+	_pose_presets()
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 6)
 	row.add_child(UITheme.button("Reset pose", func():
-		rider_pose = Rider.NEUTRAL.duplicate(); rider_pose.merge(GameState.BIKES.dh.pose, true)
+		rider_pose = PosePresets.preset(PosePresets.get_active())   # back to the chosen position
 		_apply_rider_pose(); _set_tab("rider"), 14))
 	row.add_child(UITheme.button("Mirror L → R", func():
 		rider_pose.elbowOutR = rider_pose.elbowOutL; rider_pose.kneeOutR = rider_pose.kneeOutL
@@ -1217,6 +1228,51 @@ func _set_look(l: Dictionary) -> void:
 func _apply_rider_pose() -> void:
 	if rider: rider.set_style(rider_pose)
 	RiderPanels.save_pose("dh", rider_pose)
+	PosePresets.bike = "dh"
+	PosePresets.pose_changed(rider_pose)
+	if is_instance_valid(_pose_mod): _pose_mod.visible = PosePresets.is_builtin(PosePresets.get_active()) and PosePresets.modified()
+
+## riding position presets: pick one (it is the pose you ride with), Save as your own, Delete yours
+var _pose_mod: Label
+func _pose_presets() -> void:
+	PosePresets.bike = "dh"
+	var names: Array = PosePresets.names()
+	var act := PosePresets.get_active()
+	var hb := HBoxContainer.new()
+	hb.add_theme_constant_override("separation", 4)
+	var ob := OptionButton.new()
+	ob.size_flags_horizontal = Control.SIZE_EXPAND_FILL; ob.focus_mode = Control.FOCUS_NONE
+	for i in names.size():
+		var n: String = names[i]
+		if i == PosePresets.builtin_count(): ob.add_separator("Yours")
+		ob.add_item(n if PosePresets.is_builtin(n) else "★ " + n, i)
+		if n == act: ob.select(ob.get_item_index(i))
+	ob.item_selected.connect(func(idx):
+		PosePresets.select(names[ob.get_item_id(idx)])
+		rider_pose = RiderPanels.load_pose("dh", GameState.BIKES.dh.pose)
+		if rider: rider.set_style(rider_pose)
+		_set_tab.call_deferred("rider"))
+	hb.add_child(ob)
+	if not PosePresets.is_builtin(act):
+		var del := UITheme.button("Delete", func(): PosePresets.delete(act); _set_tab.call_deferred("rider"), 13)
+		del.focus_mode = Control.FOCUS_NONE
+		hb.add_child(del)
+	_row("Position", hb)
+	_pose_mod = UITheme.label("Changed from \"%s\" — Save as to keep it" % act, 12, UITheme.MUTED)
+	_pose_mod.visible = PosePresets.is_builtin(act) and PosePresets.modified()
+	body.add_child(_pose_mod)
+	var sv := HBoxContainer.new()
+	sv.add_theme_constant_override("separation", 4)
+	var le := LineEdit.new()
+	le.placeholder_text = "New position name"
+	le.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var save := func(): PosePresets.save_as(le.text); _set_tab.call_deferred("rider")
+	le.text_submitted.connect(func(_t): save.call())
+	sv.add_child(le)
+	var sb := UITheme.button("Save as", save, 13)
+	sb.focus_mode = Control.FOCUS_NONE
+	sv.add_child(sb)
+	body.add_child(sv)
 
 func _randomise() -> void:
 	for k in build.paint:
