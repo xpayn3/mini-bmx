@@ -66,6 +66,7 @@ var rnd: WorldRng
 var lists := {}       # name -> PackedFloat32Array (16 floats / instance: 3x4 row-major + custom rgba)
 var counts := {}      # name -> int
 var shed_lists: Array = []
+var packs: Array = []   # health pack spots (Vector3, world) beside the sheds
 var colliders: Array = []
 var blocked: Array = []   # [x, z, r]
 var panels: Array = []
@@ -259,6 +260,7 @@ func _build() -> void:
 	out["lists"] = lists
 	out["counts"] = counts
 	out["sheds"] = shed_lists
+	out["packs"] = packs
 	out["colliders"] = colliders
 	out["panels"] = panels
 
@@ -373,6 +375,16 @@ func _sheds(rs: WorldRng, ox: float, oz: float) -> void:
 		shed_lists[di] = arr
 		_shed_colliders(dsg, x, z, yaw)
 		blocked.append([x, z, R + 0.4])
+		# a health pack just outside the door (local +z), a little to the side of the doorstep
+		var hd2: float = dsg["hd"]
+		var pc := cos(yaw)
+		var ps := sin(yaw)
+		var plx := -0.5
+		var plz := hd2 + 1.5
+		var pkx := x + plx * pc + plz * ps
+		var pkz := z - plx * ps + plz * pc
+		if height(pkx, pkz) > WATER + 0.3 and f.trail(pkx, pkz) <= 0.02:
+			packs.append(Vector3(pkx, height(pkx, pkz), pkz))
 		break
 
 

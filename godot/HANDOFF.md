@@ -180,6 +180,8 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 
 - **Sponsor props** (`TrailCourse.chunk_gates` / `chunk_boards`, fixed spacing by centreline index so growing never moves them): a huge steel gantry with a sponsor banner over the trail every 300 m (`TrailGate.build`, made-up brands in `TrailGate.SPONSORS`, no collision, skipped on jumps) and breakable wooden roadside billboards every ~80 m (fence-style panel in `TerrainChunkBuilder._boards`, so the bike smashes them; the Label3D text is freed on smash). Probe: `BMX_GATE_PROBE=1`.
 
+- **Health packs** (`world/health_pack.gd`): a GTA-style floating, spinning red backpack with a white cross and a glow ring, one outside the door of each roadside shed (`TerrainChunkBuilder._sheds` -> `out["packs"]`, made in `Terrain._finalize`). Ride within 1.6 m (`Terrain.take_pack`, called from `Game._process`) and `hud.on_health_pack` gives back `HealthPack.HEAL` (45 %); full-health riders leave it. Taken ones stay gone until a new seed. Tests: `BMX_PACK_PROBE=1` (`PACK at` lines), `BMX_PACK_SPAWN=x,z` (start 9 m before a pack), `BMX_LIFE=0.3 BMX_LIFE_PROBE=1`.
+
 ### Rider
 - Procedural meshes posed every frame from the bike's grips/pedals with 2-bone IK; style dictionary
   (`Rider.NEUTRAL`) with a slider per bone: hips, **spine (hunch/arch, side curve, bend low/high, twist)**,

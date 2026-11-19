@@ -184,6 +184,15 @@ func on_crash(speed := 0.0) -> void:
 	life_bar.shake = 1.0
 	if OS.get_environment("BMX_LIFE_PROBE") != "": print("LIFE crash v=%.1f life=%.2f" % [speed, life])
 
+## rolled through a health pack (the backpacks beside the roadside sheds): life back, the bar glows green
+func on_health_pack(amount: float) -> void:
+	if life >= 1.0:
+		return
+	life = minf(1.0, life + amount)
+	life_bar.heal = 1.0
+	flash("HEALTH +%d%%" % roundi(amount * 100.0))
+	if OS.get_environment("BMX_LIFE_PROBE") != "": print("LIFE health pack life=%.2f" % life)
+
 ## back on the bike: at zero life that was a revive (half life back, the bar glows green)
 func on_get_up() -> void:
 	if life <= 0.0:
