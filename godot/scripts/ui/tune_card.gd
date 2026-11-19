@@ -32,9 +32,13 @@ const TABS := [
 	["sound", "Sound", [
 		["Freewheel", ["F:freewheel"]],
 	]],
+	["light", "Light", [
+		["Time", ["W:time"]],
+		["Light", ["W:light"]],
+	]],
 ]
 
-static var last_cat := {"ride": 0, "rider": 0, "look": 0, "sound": 0}   # remembered for the session
+static var last_cat := {"ride": 0, "rider": 0, "look": 0, "sound": 0, "light": 0}   # remembered for the session
 
 var game
 var tab := "ride"
@@ -119,6 +123,7 @@ func show_tab(id: String) -> void:
 		"rider": sub.text = "%s · saved per bike" % GameState.BIKES[GameState.bike_id].label
 		"look": sub.text = "Helmet, goggles, kit and shoes"
 		"sound": sub.text = "Coast (or Preview) to hear it · presets save as you go"
+		"light": sub.text = "Time of day, day / night cycle and the level's light"
 	if id != "sound": FreewheelSound.preview_speed = 0.0
 	_fill()
 
@@ -150,6 +155,7 @@ func _fill() -> void:
 			"seat": _seat_toggle()
 			"L": _look_group(name)
 			"F": _freewheel_group()
+			"W": _light_group(name)
 	scroll.scroll_vertical = 0
 
 
@@ -178,7 +184,7 @@ func _header(text: String) -> void:
 
 ## name / value / reset on one row, the slider full width below
 func _slider(label: String, lo: float, hi: float, stp: float, val: float, def: float, fmt: Callable,
-		on_change: Callable, pin: Button = null) -> void:
+		on_change: Callable, pin: Button = null) -> HSlider:
 	var hb := HBoxContainer.new()
 	var l := UITheme.label(label, 13); l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	l.clip_text = true; l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
@@ -194,6 +200,9 @@ func _slider(label: String, lo: float, hi: float, stp: float, val: float, def: f
 	hb.add_child(UITheme.reset_button(s, def))
 	list.add_child(hb)
 	list.add_child(s)
+	s.set_meta("value_label", vl)
+	s.set_meta("fmt", fmt)
+	return s
 
 
 static func _fmt_step(v: float, stp: float, unit: String) -> String:
@@ -352,6 +361,57 @@ func _refresh_mod(store) -> void:
 		_preset_mod.visible = store.is_builtin(store.get_active()) and store.modified()
 
 
+# ---------------------------------------------------------------- LIGHT: time of day + light
+const LIGHT_TIME_KEYS := ["time", "day_min", "sun_turn"]
+var _clock_l: Label
+var _time_s: HSlider   # follows the clock while the cycle runs
+
+func _light_group(which: String) -> void:
+	LightSettings.ensure_loaded()
+	_preset_bar(LightSettings, "Light preset")
+	var base := LightSettings.preset(LightSettings.get_active())
+	if which == "time":
+		_clock_l = UITheme.label("", 22, Color.WHITE, true)
+		_clock_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		list.add_child(_clock_l)
+		_tick_clock()
+		var cy := CheckButton.new()
+		cy.text = "Day / night cycle (the clock runs)"
+		cy.button_pressed = LightSettings.get_value("cycle") > 0.5
+		cy.focus_mode = Control.FOCUS_NONE
+		cy.add_theme_font_size_override("font_size", 13)
+		cy.toggled.connect(func(on):
+			if on: LightSettings.current.time = game.tod   # carry on from the time shown now
+			LightSettings.set_value("cycle", 1.0 if on else 0.0); _refresh_mod(LightSettings))
+		list.add_child(cy)
+	_header("Time of day" if which == "time" else "Light")
+	for row in LightSettings.PARAMS:
+		var key: String = row[0]
+		if key == "cycle" or (key in LIGHT_TIME_KEYS) != (which == "time"): continue
+		var stp: float = row[5]
+		var fmt := (func(v): return LightSettings.clock(v)) if key == "time" else (func(v): return _fmt_step(v, stp, row[6]))
+		var sl := _slider(row[1], row[3], row[4], stp, LightSettings.get_value(key), float(base[key]), fmt,
+			func(v):
+				LightSettings.set_value(key, v)
+				_refresh_mod(LightSettings))
+		if key == "time": _time_s = sl
+
+
+func _tick_clock() -> void:
+	if is_instance_valid(_clock_l):
+		var cyc := LightSettings.get_value("cycle") > 0.5
+		var e := Game.sun_elev_deg(game.tod)
+		var part := "night" if e < -3.0 else ("golden hour" if e < 20.0 else "day")
+		_clock_l.text = LightSettings.clock(game.tod) + "  ·  " + part + ("  ·  cycle on" if cyc else "")
+		if cyc and is_instance_valid(_time_s):   # the time slider moves with the running clock
+			_time_s.set_value_no_signal(game.tod)
+			(_time_s.get_meta("value_label") as Label).text = LightSettings.clock(game.tod)
+
+
+func _process(_dt: float) -> void:
+	if visible and tab == "light": _tick_clock()
+
+
 # ---------------------------------------------------------------- SOUND: freewheel
 func _freewheel_group() -> void:
 	FreewheelSound.ensure_loaded()
@@ -402,6 +462,8 @@ func _reset_category() -> void:
 			look = Rider.DEFAULT_LOOK.duplicate(); look_touched = true
 		elif src == "F:freewheel":
 			FreewheelSound.reset()
+		elif src.begins_with("W:"):
+			LightSettings.reset()
 		elif src.begins_with("L:"):
 			for g in RiderPanels.LOOK_ROWS:
 				if g[0] == name:

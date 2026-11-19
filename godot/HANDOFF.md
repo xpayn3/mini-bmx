@@ -128,10 +128,17 @@ F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A 
 - Ragdoll on crashes (`ragdoll.gd`), then get up with Space.
 - Look: kits + a colour per part (helmet shell/peak, goggles, jersey, pants, gloves, shoes).
 
-### Ride light
-- Clear afternoon: `Game.RIDE_SUN` / `RIDE_SUN_COL` / `RIDE_FOG`, sky fill 80% sky + 20% flat cool blue
-  (`ambient_light_color`) so shade reads as sky light, thin volumetric haze (low ambient inject), cloud
-  shadows `Atmos.CLOUD_DEPTH` 0.3. Bright greens go yellow through ACES if sun/exposure are pushed higher.
+### Ride light (time of day)
+- **Default: golden hour** (19:20, sun ~10° up). Everything comes from the clock: `Game._apply_light(hour, LightSettings.current)`
+  sets the sun (or the **moon** at night, opposite it), sun colour / strength, shadow bias + softness, the sky mode
+  (`sky_hdri.gdshader`: `sunny` by day, `golden` low, `night` = stars + moon + dark clouds), ambient, fog colour,
+  haze, exposure, saturation / contrast. Sun height `Game.sun_elev_deg(h)`: up 6:00, 62° at 13:00, down 20:00;
+  16:00 = the old clear-afternoon look. The HDRI is turned so its photographed sun follows ours.
+- Tuning card **Light** tab (`scripts/core/light_settings.gd`, `user://light.cfg`): Time (preset, live clock, time
+  slider, day / night cycle switch, day length, sun direction) and Light (sun, warmth, sky fill, moonlight,
+  exposure, haze, shadow softness, saturation, contrast). Presets: Golden hour, Sunrise, Morning, Noon, Afternoon,
+  Dusk, Night, Day / night cycle + the player's own. With the cycle on, Game runs the clock and re-applies 10× / s.
+  Tests: `BMX_LIGHT_PRESET=Night`, `BMX_LIGHT=time=12,haze=2`, `BMX_PANEL=light`.
 
 ### Title screen (golden hour lookout)
 - `Game.set_scenic(true)` while the menu is up: a low warm sun ahead-right of the view, golden sky mode in
