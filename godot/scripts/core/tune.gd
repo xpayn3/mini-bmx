@@ -126,6 +126,8 @@ const DEFS := [
 		["flickLean", "Bike thrown under the body", 0.35, 0, 0.8, 0.01, "rad"],
 		["flickSpeed", "Bike flick speed", 14, 3, 30, 0.5, "/s"],
 		["flickKick", "Quick flick whips the bike round", 0.16, 0, 0.5, 0.01, "rad"],
+		["stickAirTilt", "Air: stick tilts the nose", 0.55, 0, 1.2, 0.05, "rad"],
+		["stickAirRoll", "Air: stick lays the bike over", 0.75, 0, 1.2, 0.05, "rad"],
 	]],
 ]
 

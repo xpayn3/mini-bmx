@@ -61,6 +61,7 @@ var pivot := 0.0; var pivot_acc := 0.0
 # the body), manual_up = how far a pulled-back stick holds the front up (rad)
 var body_in := 0.0; var body_in_s := 0.0; var flick_in := 0.0; var flick := 0.0; var flick_prev := 0.0
 var manual_up := 0.0; var lock_sb := false; var lock_sf := false; var flick_kick := 0.0
+var air_stick := Vector2.ZERO   # right stick in the air: x lean (+ left), y nose (+ up)
 var pad := false   # the player is on a gamepad (Settings.pad_active): triggers don't tilt / throw in the air
 var wheel_f := 0.0; var wheel_r := 0.0; var crank := 0.0; var pedal := 0.0
 var yaw_rate := 0.0; var shake := 0.0
@@ -321,11 +322,19 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	if air:   # W / S act straight away, even if held from the ground (the user wants no re-press)
 		# + the body stick (forward = nose down), with a dead band so a light lean held from the ground doesn't
 		# spin the bike. On a gamepad the triggers (held pedalling / braking into a jump) don't tilt it at all
-		var b_air := signf(body_in) * maxf(0.0, absf(body_in) - 0.3) / 0.7
-		lean_in = clampf((0.0 if pad else throttle - brake_k) + b_air, -1.0, 1.0)
+		# the right stick doesn't spin the bike, it points it (see air_stick); only pushed right to the top
+		# / bottom edge it keeps the bike turning over (flips in the air)
+		var edge := clampf((absf(body_in) - 0.88) / 0.12, 0.0, 1.0)
+		lean_in = clampf((0.0 if pad else throttle - brake_k) + signf(body_in) * edge, -1.0, 1.0)
 	flip_in = -lean_in                                          # + = nose up
 	spin_in = 0.0 if (not air or air_lock_a) else steer_input   # + = the steering direction
+	var roll_keys := spin_in
 	if air: spin_in = clampf(spin_in + flick_in, -1.0, 1.0)     # the body stick leans the bike too
+	# 360° air control with the right stick: x = lay the bike over left / right, y = nose up / down. It sets
+	# the bike's attitude (held where the stick points, back to the landing aim when let go), so circling
+	# the stick swings the bike round through every mix of tilt and lean
+	air_stick = Vector2(flick_in, -body_in) if air else Vector2.ZERO
+	if air_stick.length() < 0.08: air_stick = Vector2.ZERO
 	air_lean += (lean_in - air_lean) * minf(1.0, dt * 6)
 	# the rider tucks into a flip as well as when Space is held
 	var pull_t := maxf(1.0 if air and inp.hop and not air_lock_h else 0.0, 0.7 * absf(flip_in) if air else 0.0)
@@ -553,8 +562,10 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		lat_a = 0; lat_m = 0; flick_kick = 0.0
 	if not air:
 		_pivot_step(dt, steer_input, brake_k)
-	var lean_t: float = (spin_in * T.airRoll if absf(spin_in) > 0.05 else lean * 0.98) if air else clampf(atan(lat_a / G), -T.leanMax + minf(0.0, bk), T.leanMax + maxf(0.0, bk))
+	var roll_t: float = roll_keys * T.airRoll + air_stick.x * float(T.get("stickAirRoll", 0.75))
+	var lean_t: float = (roll_t if absf(roll_t) > 0.03 else lean * 0.98) if air else clampf(atan(lat_a / G), -T.leanMax + minf(0.0, bk), T.leanMax + maxf(0.0, bk))
 	var kL: float = T.leanIn if absf(steer_eff) > 0.01 else T.leanOut
+	if air and air_stick != Vector2.ZERO: kL = 160.0   # the stick throws the bike over in the air at once
 	lean_v += ((lean_t - lean) * kL - lean_v * 2 * sqrt(kL) * T.leanDamp) * dt
 	lean += lean_v * dt
 	# the body stick throws the bike over under the rider (the body stays upright: counter grows)
@@ -704,6 +715,8 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			var R2 := maxf(R, absf(body_in_s) * reach)   # stick idle: exactly the old limits
 			if not air:
 				xT = clampf(xT, -R, R) + body_in_s * reach; hT = clampf(hT, -R, R) + body_in_s * reach
+			else:   # in the air the body shifts with the stick too (the bike tilts against it)
+				xT += body_in_s * reach * 0.7; hT += body_in_s * reach * 0.7
 			# a damped spring to where the rider wants to be, pushed by the bike's own speed changes:
 			# the body carries on when the bike slows (braking, a landing, a root) and lags when it surges
 			var a_body := 0.0
@@ -802,10 +815,14 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 					var tg := (vy + sqrt(vy * vy + 2 * G * hh)) / G
 					tgt = wrapf(_g_pitch - (pitch - air_tilt + air_w * minf(tg, 1.0)), -PI, PI)
 				tgt = clampf(tgt, -T.airTilt, T.airTilt)
+				# right stick: the nose goes where it points, on top of the landing aim
+				var st_t: float = float(T.get("stickAirTilt", 0.55))
+				tgt += air_stick.y * st_t
+				var t_lim: float = T.airTilt + absf(air_stick.y) * st_t
 				air_tilt_v += (70.0 * (tgt - air_tilt) - 13.0 * air_tilt_v) * h
 				air_tilt += air_tilt_v * h
-				if absf(air_tilt) > T.airTilt:
-					air_tilt = signf(air_tilt) * T.airTilt
+				if absf(air_tilt) > t_lim:
+					air_tilt = signf(air_tilt) * t_lim
 					if air_tilt_v * air_tilt > 0: air_tilt_v = 0.0
 				pitch_v = air_w + air_tilt_v
 			y += vy * h; pitch += pitch_v * h

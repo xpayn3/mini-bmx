@@ -64,6 +64,9 @@ without it a drawn pad) with what every button does, click to remap (sticks pick
 swap), live button test, vibration on / off + strength. `Settings.pad_active` follows the last device used: prompts show
 Xbox names (`Settings.prompt(action)`), and on a pad the triggers don't tilt or throw the bike in the air (only a real
 right-stick yank from centre throws at a lip; a held lean never does).
+In the air the right stick is a **360° attitude control** (`air_stick`): y tilts the nose on top of the landing aim
+(`stickAirTilt`), x lays the bike over (`stickAirRoll`); only the very edge (> 0.88) keeps it turning over (flips). Test:
+`BMX_BODY=circle` circles the stick mid-air (`AIRSTICK` lines). Test runs ignore real controllers (`Settings._test_run`).
 
 ## 4. Project layout (`godot/`)
 
@@ -169,6 +172,8 @@ right-stick yank from centre throws at a lip; a held lean never does).
   pedalling out of the saddle swings the bike ~±6° (±10° sprinting) under a steady body; elbows bend
   back and down, only a little out (the arm IK pole's sideways part scales with `elbowsOut`). Saved poses migrate once (`RiderPanels.POSE_VER` / `POSE_RETUNED`: only values still
   at the old default change). `BMX_LEAN_SHOT=prefix` saves shots of the first deep leans.
+- **Wheelie / manual pose** (`rider.gd`, `slope` from the physics): the front up on the ground is not a climb; the
+  rider sits back, upright, arms long (leaning into the raised bars mangled the arms). Climbs use the ground slope.
 - **Joint limits** (`Rider.limb_ik`): elbows / knees are hinges that bend between `ELBOW_MIN`–`ELBOW_MAX` (12–150°) / `KNEE_MIN`–`KNEE_MAX` (4–160°); where a limb lines up with its pole the bend blends to a second pole (elbows: out + down, knees: up) instead of flipping, and the bend may swing round the limb at most `BEND_RATE` (6 rad/s). The slope body-levelling follows the bike pitch at most `PITCH_LEVEL_RATE` (it used to whip the torso mid-flip).
 - Ragdoll on crashes (`ragdoll.gd`), then get up with Space. Ground friction is sliding (Coulomb `SLIDE_MU` once per
   substep, after the solver passes) so a fast fall slides a few metres. **Neutral body posture** (`NEUTRAL`, after

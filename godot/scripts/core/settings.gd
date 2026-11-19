@@ -153,6 +153,7 @@ const RESOLUTIONS := ["1280x720", "1366x768", "1600x900", "1920x1080", "2560x144
 var data := DEFAULTS.duplicate()
 var bindings := {}   # action -> Array[InputEvent]
 var _had_quality := false
+var _test_run: bool = Array(OS.get_cmdline_user_args()).any(func(a): return a.begins_with("--autotest") or a.begins_with("--bench") or a.begins_with("--hitch") or a.begins_with("--showcase"))
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -199,6 +200,9 @@ func _install_bindings() -> void:
 			InputMap.add_action(action)
 		InputMap.action_set_deadzone(action, dz)
 		for e in bindings.get(action, default_events(action)):
+			# test runs ignore real controllers: a pad in use in another game window drives every
+			# window (Godot reads joypads unfocused) and paused / steered the autotests
+			if _test_run and (e is InputEventJoypadButton or e is InputEventJoypadMotion): continue
 			InputMap.action_add_event(action, e)
 
 func rebind(action: String, ev: InputEvent, slot: int) -> void:
@@ -380,6 +384,7 @@ signal input_device_changed(pad: bool)
 var pad_active := false
 
 func _input(e: InputEvent) -> void:
+	if _test_run: return   # tests: only BMX_PAD decides
 	var pad := pad_active
 	if e is InputEventJoypadButton and e.pressed: pad = true
 	elif e is InputEventJoypadMotion and absf(e.axis_value) > 0.5: pad = true

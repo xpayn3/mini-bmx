@@ -322,6 +322,17 @@ func _autotest(seconds: float) -> void:
 			if body_t == "manual": Input.action_press("body_back", 0.9 if int(el) % 4 < 3 else 0.0)
 			elif body_t == "fwd": Input.action_press("body_fwd", 1.0)
 			elif body_t == "lightfwd": Input.action_press("body_fwd", 0.25)   # resting the stick a little forward (attack position)
+			elif body_t == "circle":   # in the air: circle the stick (0.8 deflection, ~1 turn / s); hands off on the ground
+				var ca := el * TAU * 1.0
+				var on := ph2.air and ph2.air_time > 0.08
+				var sx := sin(ca) * 0.8 if on else 0.0
+				var sy := cos(ca) * 0.8 if on else 0.0
+				Input.action_press("body_left", sx) if sx > 0.0 else Input.action_release("body_left")
+				Input.action_press("body_right", -sx) if sx < 0.0 else Input.action_release("body_right")
+				Input.action_press("body_fwd", sy) if sy > 0.0 else Input.action_release("body_fwd")
+				Input.action_press("body_back", -sy) if sy < 0.0 else Input.action_release("body_back")
+				if on and OS.get_environment("BMX_BODY_PRINT") != "":
+					print("AIRSTICK t=%.2f stick=(%.2f,%.2f) pitch=%.2f g=%.2f bike_lean=%.2f air_tilt=%.2f" % [el, ph2.air_stick.x, ph2.air_stick.y, ph2.pitch, ph2._g_pitch, ph2.bike_lean, ph2.air_tilt])
 			elif body_t == "lean": Input.action_press("body_left", 1.0)
 			elif body_t == "flick":
 				var side := int(el * 1.5) % 2 == 0

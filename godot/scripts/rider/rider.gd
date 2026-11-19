@@ -815,7 +815,14 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var dp0 := (pitch0 - sm_pitch0) * (1.0 - exp(-12.0 * h0))
 	sm_pitch0 += clampf(dp0, -PITCH_LEVEL_RATE * h0, PITCH_LEVEL_RATE * h0)
 	pitch0 = sm_pitch0
-	var pit := pitch0 * (0.2 if pitch0 > 0 else _num(p, "bodyLevel", 0.85))
+	# the ground slope vs the bike's own nose-up: a wheelie / manual (front up on the ground) is not a
+	# climb. Climbing, the rider leans forward over the bars; in a wheelie the bars come up at them, so
+	# they sit back with long arms and stay fairly upright (leaning into the bars crushed the arms and
+	# threw the elbows up). The garage has no slope: all of the pitch counts as slope there.
+	var slope0: float = clampf(_num(p, "slope", pitch0), -1.3, 1.3) if p.has("slope") else pitch0
+	var wheelie: float = clampf(pitch0 - slope0, 0.0, 1.1) * (1.0 - clampf(air * 3.0, 0.0, 1.0))
+	var base := pitch0 - wheelie   # the slope part of the bike's pitch
+	var pit := base * (0.2 if base > 0 else _num(p, "bodyLevel", 0.85)) + wheelie * 0.75   # most of a wheelie's tilt is taken back
 	if pit != 0.0:
 		var c := cos(-pit)
 		var sn := sin(-pit)
@@ -830,12 +837,17 @@ func update_pose(dt: float, p: Dictionary) -> void:
 			pts[i] = q
 		pelvis = pts[0]
 		chest = pts[1]
-		var down := maxf(0.0, -pitch0)
+		var down := maxf(0.0, -base)
 		var drop := _num(p, "attackDrop", 0.18)
 		pelvis.y -= down * drop
 		pelvis.x -= down * drop * 0.45
 	# climbing: hips to the saddle nose, chest low over the bars
-	var climb := clampf(pitch0, 0, 0.6)
+	var climb := clampf(slope0, 0, 0.6)
+	if wheelie > 0.0:   # hips back and a little down behind the saddle, chest back over them, arms long
+		pelvis.x -= 0.15 * wheelie
+		pelvis.y -= 0.06 * wheelie
+		chest.x -= 0.27 * wheelie
+		chest.y -= 0.03 * wheelie
 	if climb > 0:
 		pelvis.x += climb * 0.22
 		pelvis.y -= climb * 0.04
