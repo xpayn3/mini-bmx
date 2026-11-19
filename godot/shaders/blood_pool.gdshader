@@ -58,15 +58,20 @@ void fragment() {
 	float since = pool_t;
 
 	// BUBBLES: maybe one per small cell, mostly near the fresh edge; each lives a while then pops
-	vec2 bc = w * 18.0;                   // ~5.5 cm cells (bigger bubbles, fewer)
+	// a rotated grid (no axis-aligned rows), bubbles in clumps with bare patches between,
+	// sizes from tiny to big, each jittered well off its cell centre
+	vec2 wr = vec2(w.x * 0.8 - w.y * 0.6, w.x * 0.6 + w.y * 0.8);
+	vec2 bc = wr * 18.0;
 	vec2 ci = floor(bc);
 	vec2 cf = fract(bc) - 0.5;
 	float hb = bh(ci + seed * 1.7);
-	vec2 bo = (vec2(bh(ci + 4.1), bh(ci + 8.3)) - 0.5) * 0.5;
-	float br = 0.15 + 0.25 * bh(ci + 2.2);
+	vec2 bo = (vec2(bh(ci + 4.1), bh(ci + 8.3)) - 0.5) * 0.7;
+	float sz = bh(ci + 2.2);
+	float br = 0.07 + 0.38 * sz * sz;
+	float clump = smoothstep(0.35, 0.8, bh(floor(wr * 2.3) + seed * 0.7));   // ~40 cm patches
 	float near_edge = rim;
 	float fresh = 1.0 - smoothstep(2.0, 12.0, since);
-	float density = 0.03 + 0.25 * near_edge * fresh + 0.04 * fresh;
+	float density = (0.004 + 0.14 * near_edge * fresh + 0.02 * fresh) * (0.05 + 1.6 * clump);
 	float life = fract(hb * 7.3 + pool_t * (0.05 + 0.1 * bh(ci + 6.6)));
 	float alive = step(hb, density) * step(life, 0.75);
 	vec2 bp = (cf - bo) / br;
