@@ -674,7 +674,7 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 		# the front tyre dusts too, less: it rolls (no drive / little skid), so it mostly lifts dust
 		# sideways and up as it carves
 		var f_ev := Vector3(-f.x * d_back * 0.4 + side.x * d_out * 0.6, 0.5 + carve_k * 0.3, -f.z * d_back * 0.4 + side.z * d_out * 0.6)
-		dust.feed_front(front, f_ev, rate * fxd * 0.35, d_a)
+		dust.feed_front(front, f_ev, 0.0 if st.front_air else rate * fxd * 0.35, d_a)   # none with the front up (wheelie)
 		# a hard skid on loose ground kicks up a real cloud now and then (volumetric fog)
 		_cloud_t -= dt
 		if (dirt or sand) and skid_fx and va > 5 and _cloud_t <= 0:

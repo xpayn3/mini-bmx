@@ -714,6 +714,7 @@ static func _num(p: Dictionary, k: String, def := 0.0) -> float:
 ## headRoll, absorb, pitch, bodyLevel, attackDrop, pedal, sprint, crank, air, compress, hipShift, t
 var sm_turn := 0.0
 var sm_aero := 0.0
+var sm_effort := 0.0
 var sm_pitch0 := 0.0   # the slope the body levels against, rate-limited
 const PITCH_LEVEL_RATE := 2.5   # rad/s
 var _fy_prev := NAN; var _fv_prev := NAN; var _facc := 0.0   # the frame's height / speed / acceleration (bump bounce)
@@ -735,9 +736,14 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var spr := clampf(_num(p, "sprint"), 0, 1)
 	# hip sway / bob from pedalling: big when pushing off slowly, nearly still when spinning at speed
 	var hi_fade: float = 1.0 - 0.85 * smoothstep(5.0, 12.0, absf(v))
-	var sway: float = sin(crank) * pedal * sty.sway * (1 + 0.9 * spr) * hi_fade
+	# effort: sprinting from slow the rider throws everything into it - up off the saddle, over the bars,
+	# hips swinging, body bobbing hard with every stroke (fades out once up to speed)
+	var effort: float = spr * pedal * BikePhysics.slowness(v)   # the slower, the harder they fight
+	sm_effort += (effort - sm_effort) * (1.0 - exp(-6.0 * minf(dt, 0.1)))
+	var eff: float = sm_effort
+	var sway: float = sin(crank) * pedal * sty.sway * (1 + 0.9 * spr + 1.3 * eff) * hi_fade
 	# (Body bob: how far the body rises and drops with each pedal stroke)
-	var bob: float = sin(crank * 2) * pedal * sty.sway * float(sty.get("bodyBob", 1.0)) * (1 + 0.6 * spr) * lerpf(0.4, 1.0, hi_fade)
+	var bob: float = sin(crank * 2) * pedal * sty.sway * float(sty.get("bodyBob", 1.0)) * (1 + 0.6 * spr + 1.0 * eff) * lerpf(0.4, 1.0, hi_fade)
 	var wig: float = clampf(1 - absf(v) / 3, 0, 1) * sty.sway * float(sty.slowWobble)
 	var air := _num(p, "air")
 	var comp: float = _num(p, "compress") * sty.crouch
@@ -757,12 +763,13 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		-0.16 - 0.07 * air * float(sty.airCrouch) + 0.06 * pedal * sty.standPedal - float(sty.standBack) * stand - comp * 0.25,
 		0.80 - 0.07 * air * float(sty.airCrouch) - comp + (float(sty.standHeight) * stand + 0.05 * spr) * sty.standPedal + 0.035 * bob - 0.07 * aero,
 		sway * sty.hipSway + shift * 0.3 + sin(t * 2.1) * 0.02 * wig) + fit
-	pelvis.x += sty.hipX * (1 - 0.5 * pedal) - 0.05 * aero
+	pelvis.x += sty.hipX * (1 - 0.5 * pedal) - 0.05 * aero + 0.07 * eff   # forward over the cranks
+	pelvis.y += 0.04 * eff                                                   # up tall to stamp down
 	pelvis.y += sty.hipY * (1 - 0.6 * pedal)
 
 	# chest
 	# (pedalling out of the saddle the chest stays forward over the bars)
-	var ang: float = 0.72 - float(sty.pedalChest) * pedal + 0.12 * spr + 0.15 * (comp / 0.3) + 0.08 * air + sty.lean * (1 - 0.5 * pedal) + 0.42 * aero
+	var ang: float = 0.72 - float(sty.pedalChest) * pedal + 0.12 * spr + 0.2 * eff + 0.15 * (comp / 0.3) + 0.08 * air + sty.lean * (1 - 0.5 * pedal) + 0.42 * aero
 	var L: float = sty.torso
 	var chest := Vector3(
 		pelvis.x + sin(ang) * L + 0.03 * pedal * (0.5 + 0.5 * bob),
