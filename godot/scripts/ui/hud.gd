@@ -900,99 +900,91 @@ class GetUpPrompt extends Control:
 		draw_string(f, Vector2(tx, size.y / 2 + 20), "hold %s" % key, HORIZONTAL_ALIGNMENT_LEFT, size.x - tx - 12, 13, UITheme.MUTED)
 
 class FlowLeds extends RefCounted:
-	## flow shown on the bike computer's LEDs, like a Wahoo's: one top LED per flow level (colour by
-	## level, glowing), side LEDs = hold time left before the flow drains (blink red when it drains or
-	## you brake it away). Level up: every LED flashes, the new one pulses, a "+1" floats up off the
-	## device. MAX: a light chases back and forth along the top row.
-	const COLS := [Color("4fd1ff"), Color("5cf0a0"), Color("ffd21f"), Color("ff9a2a"), Color("ff4fb4")]
-	const SIDE := 6
+	## flow on the bike computer's LEDs, kept like real hardware (Wahoo-style): small pinhole LEDs in a
+	## recessed slit along the top bezel, one per flow level, all showing the current level's colour;
+	## light bleeds softly onto the black plastic. A newly lit LED blinks twice, MAX breathes slowly,
+	## while flow drains the last LED blinks. Short side slits = hold time left before it drains.
+	const COLS := [Color("2f8cff"), Color("2fe36a"), Color("ffd21a"), Color("ff8a1a"), Color("b04dff")]
+	const SIDE := 4
 	var level := 0
 	var shown := 0.0
-	var pop := 0.0
 	var drain := 0.0       # 1 = losing flow right now
 	var hold := 0.0        # 0..1 hold time left
 	var t := 0.0
+	var new_t := 9.0       # seconds since the last level up (for the double blink)
 	var prev_flow := 0.0
-	var floats: Array = []  # [text, rise, life]
+	var top_b := PackedFloat32Array()    # per-LED brightness (LEDs switch fast, not instantly)
+	var side_b := PackedFloat32Array()
 
 	func tick(st: BikePhysics, dt: float) -> void:
 		t += dt
+		new_t += dt
 		# tests: BMX_FLOW_DEMO=1 adds a flow level every 0.9 s from 3 s until MAX, then lets it drain
 		if OS.get_environment("BMX_FLOW_DEMO") != "" and t > 3.0 and fmod(t - 3.0, 0.9) < dt and t < 3.0 + 0.9 * BikePhysics.FLOW_MAX:
 			st.flow_up()
 		var n := ceili(st.flow - 0.01)
-		if n > level and n > 0:
-			pop = 1.0
-			floats.append(["MAX FLOW!" if n >= int(BikePhysics.FLOW_MAX) else "FLOW +1", 0.0, 1.0])
+		if n > level and n > 0: new_t = 0.0
 		level = n
-		shown = lerpf(shown, st.flow, minf(1.0, dt * 14))
+		shown = st.flow
 		var ft: float = st.T.get("flowTime", 4.0)
 		hold = clampf(1.0 - st.flow_t / maxf(ft, 0.01), 0.0, 1.0) if n > 0 else 0.0
-		drain = move_toward(drain, 1.0 if st.flow < prev_flow - 1e-4 else 0.0, dt * 8)
+		drain = 1.0 if st.flow < prev_flow - 1e-4 else move_toward(drain, 0.0, dt * 4)
 		prev_flow = st.flow
-		pop = maxf(0.0, pop - dt * 2.8)
-		for f in floats:
-			f[1] += dt * 40; f[2] -= dt
-		floats = floats.filter(func(f): return f[2] > 0)
+		var nl := int(BikePhysics.FLOW_MAX)
+		if top_b.size() != nl: top_b.resize(nl); side_b.resize(SIDE)
+		var on_blink := float(int(t * 4.0) % 2)          # 2 Hz blink
+		for i in nl:
+			var target := 0.0
+			if i < level:
+				target = 1.0
+				if i == level - 1:
+					if new_t < 0.45: target = float(int(new_t / 0.1125) % 2 == 0)   # blink twice
+					elif drain > 0.5: target = on_blink * clampf(shown - i, 0.2, 1.0)
+				if level >= nl and drain < 0.5: target = 0.72 + 0.28 * (0.5 + 0.5 * sin(t * TAU * 0.6))   # MAX: slow breathe
+			top_b[i] = move_toward(top_b[i], target, dt * 30.0)
+		for j in SIDE:
+			var target := 1.0 if (level > 0 and drain < 0.5 and hold * SIDE > j) else 0.0
+			if j == 0 and level > 0 and drain < 0.5 and hold > 0.0 and hold <= 1.0 / SIDE: target = on_blink   # last bit of hold: blink
+			side_b[j] = move_toward(side_b[j], target, dt * 30.0)
 
 	func col() -> Color:
 		return COLS[clampi(level - 1, 0, COLS.size() - 1)]
 
-	## one LED: dark lens when off, lit core + glow when on (k = brightness 0..1)
-	static func _led(ci: CanvasItem, r: Rect2, c: Color, k: float) -> void:
-		ci.draw_style_box(UITheme.box(Color("0b0c0d"), 2, 0), r.grow(1))
-		ci.draw_style_box(UITheme.box(Color(0.16, 0.17, 0.18), 2, 0), r)
-		if k <= 0.01: return
-		var g := c; g.a = 0.18 * k
-		ci.draw_style_box(UITheme.box(g, 6, 0), r.grow(5))
-		g.a = 0.35 * k
-		ci.draw_style_box(UITheme.box(g, 4, 0), r.grow(2.5))
-		ci.draw_style_box(UITheme.box(Color(c, k), 2, 0), r)
-		ci.draw_rect(Rect2(r.position + Vector2(1, 0.5), Vector2(r.size.x - 2, 1)), Color(1, 1, 1, 0.55 * k))
+	## a dark recessed slit in the bezel
+	static func _slit(ci: CanvasItem, r: Rect2) -> void:
+		ci.draw_style_box(UITheme.box(Color("060707"), int(minf(r.size.x, r.size.y) / 2), 0), r)
+		ci.draw_line(Vector2(r.position.x + 2, r.end.y + 0.5), Vector2(r.end.x - 2, r.end.y + 0.5), Color(1, 1, 1, 0.07), 1.0)   # lower lip catching light
 
-	## top row across the bezel above the screen, columns down both sides of it
+	## one small LED: a dim lens when off; lit = hot core, coloured lens, soft bleed on the plastic
+	static func _led(ci: CanvasItem, c: Vector2, sz: Vector2, col: Color, k: float) -> void:
+		var r := Rect2(c - sz / 2, sz)
+		ci.draw_style_box(UITheme.box(Color(0.10, 0.105, 0.11), 1, 0), r)
+		if k <= 0.01: return
+		for g in [[9.0, 0.05], [6.0, 0.09], [3.8, 0.16]]:
+			ci.draw_circle(c, g[0], Color(col, g[1] * k))
+		ci.draw_style_box(UITheme.box(Color(col, k), 1, 0), r)
+		ci.draw_rect(Rect2(c - Vector2(sz.x * 0.25, 0.5), Vector2(sz.x * 0.5, 1.0)), Color(col.lerp(Color.WHITE, 0.6), k * 0.9))   # hot core
+
 	func draw(ci: CanvasItem, size: Vector2, scr: Rect2) -> void:
 		var c := col()
-		var red := Color(1, 0.25, 0.2)
-		var mx := level >= int(BikePhysics.FLOW_MAX)
-		var nled := int(BikePhysics.FLOW_MAX)
-		var lw := 16.0; var gap := 6.0
-		var x0 := size.x / 2 - (nled * lw + (nled - 1) * gap) / 2
-		var chase := absf(fmod(t * 2.2, 2.0) - 1.0) * (nled - 1)   # MAX: a bright spot sweeping back and forth
-		for i in nled:
-			var r := Rect2(x0 + i * (lw + gap), 6, lw, 5)
-			var k := clampf(shown - i, 0.0, 1.0)
-			var lc := c.lerp(red, drain * 0.7)
-			if i == level - 1: lc = lc.lerp(Color.WHITE, pop * 0.7)
-			var bright := k
-			if k > 0.0:
-				bright = k * (0.75 + 0.25 * pop)
-				if i == level - 1: bright *= 0.8 + 0.2 * sin(t * 10.0)
-				if mx: bright = 0.55 + 0.45 * clampf(1.0 - absf(i - chase), 0, 1)
-				if drain > 0.5: bright *= 0.4 + 0.6 * float(int(t * 8.0) % 2)
-			elif pop > 0.0:
-				lc = Color.WHITE; bright = pop * 0.5   # level up: the unlit ones flash too
-			_led(ci, r, lc, bright)
-		# side columns: hold time left, draining from the top
-		var sh := (scr.size.y - 12) / SIDE
+		var nl := int(BikePhysics.FLOW_MAX)
+		if top_b.size() != nl: return
+		# top: one slit, LEDs evenly spaced in it
+		var sw := size.x * 0.62
+		var slit := Rect2(size.x / 2 - sw / 2, 7, sw, 5)
+		_slit(ci, slit)
+		for i in nl:
+			var x := slit.position.x + sw * (i + 0.5) / nl
+			_led(ci, Vector2(x, slit.get_center().y), Vector2(6, 2.5), c, top_b[i])
+		# sides: a short slit each, LEDs bottom-up
+		var sh := 34.0
 		for side in 2:
-			var x := 1.5 if side == 0 else size.x - 4.5
+			var sx := 1.5 if side == 0 else size.x - 4.5
+			var sr := Rect2(sx, scr.position.y + 22, 3, sh)
+			_slit(ci, sr)
 			for j in SIDE:
-				var r := Rect2(x, scr.end.y - 6 - (j + 1) * sh + 2, 3, sh - 4)
-				var on := hold * SIDE - j
-				var hc := c if hold > 0.25 else c.lerp(red, 0.5 + 0.5 * sin(t * 14.0))
-				hc = hc.lerp(red, drain)
-				var b := clampf(on, 0.0, 1.0)
-				if level > 0 and hold <= 0.0: hc = red; b = 0.6 * float(int(t * 6.0) % 2) if j == 0 else 0.0
-				_led(ci, r, hc, b)
-		# "+1" / MAX FLOW! floating up off the top of the device
-		var f := UITheme.font(true)
-		for fl in floats:
-			var fa := clampf(fl[2] / 0.4, 0, 1)
-			var fs := int(15 + 6 * clampf((fl[2] - 0.8) / 0.2, 0, 1))
-			var p := Vector2(-20, -8 - fl[1])
-			ci.draw_string_outline(f, p, fl[0], HORIZONTAL_ALIGNMENT_CENTER, size.x + 40, fs, 5, Color(0, 0, 0, 0.55 * fa))
-			ci.draw_string(f, p, fl[0], HORIZONTAL_ALIGNMENT_CENTER, size.x + 40, fs, Color(c, fa))
+				var y := sr.end.y - sh * (j + 0.5) / SIDE
+				_led(ci, Vector2(sr.get_center().x, y), Vector2(1.6, 4.0), c, side_b[j])
 
 class BarView extends Control:
 	var k := 0.0
