@@ -55,9 +55,9 @@ static func _box(parent: Node3D, size: Vector3, pos: Vector3, mat: Material) -> 
 static func build(g: Dictionary) -> Node3D:
 	if _steel == null:
 		_steel = StandardMaterial3D.new()
-		_steel.albedo_color = Color(0.55, 0.57, 0.6)
-		_steel.metallic = 0.7
-		_steel.roughness = 0.45
+		_steel.albedo_color = Color(0.2, 0.22, 0.26)
+		_steel.metallic = 0.15
+		_steel.roughness = 0.6
 	var sp := sponsor(int(g["i"]))
 	var n := Node3D.new()
 	var fwd := Vector3(g["tx"], 0, g["tz"])
@@ -77,11 +77,11 @@ static func build(g: Dictionary) -> Node3D:
 		# diagonal brace up to the truss
 		var br := MeshInstance3D.new()
 		var bm := BoxMesh.new()
-		bm.size = Vector3(0.18, 4.2, 0.18)
+		bm.size = Vector3(0.2, 1.9, 0.2)
 		br.mesh = bm
 		br.material_override = _steel
-		br.position = Vector3(s * (half - 1.0), ytop - 1.9, 0)
-		br.rotation = Vector3(0, 0, -s * 0.5)
+		br.position = Vector3(s * (half - 0.8), ytop - bh - 0.4 - 0.75, 0)
+		br.rotation = Vector3(0, 0, -s * 0.7)
 		n.add_child(br)
 	# top truss (two chords + the banner hanging under it)
 	_box(n, Vector3(half * 2.0 + 1.1, 0.28, 0.5), Vector3(0, ytop, 0), _steel)
