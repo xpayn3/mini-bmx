@@ -190,7 +190,7 @@ func setup(p_size: Vector2i, c_size := Vector2i.ZERO) -> void:
 	_view.texture = _vp.get_texture()
 	add_child(_view)
 	_sound = AudioStreamPlayer.new()
-	if not sound_stream: sound_stream = load("res://assets/audio/map_unfold_gravel.ogg")   # the user's recording; no synthesised stand-in
+	if not sound_stream: sound_stream = load("res://assets/audio/paper_unfold.mp3")   # the user's recording; no synthesised stand-in
 	_sound.stream = sound_stream
 	_sound.bus = "SFX" if AudioServer.get_bus_index("SFX") >= 0 else "Master"
 	_sound.volume_db = sound_db
