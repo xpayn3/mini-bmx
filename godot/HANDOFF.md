@@ -358,7 +358,10 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 
 ### Paper: trail map (M) + pause leaflet (Esc) — and future paper menus
 - **`PaperSheet`** (`scripts/ui/paper_sheet.gd`, a CanvasLayer, layer 7): a folded sheet that comes up in front of the
-  camera and unfolds like a real map (half fold first, then the accordion, outer panel first). Its own small 3D world
+  camera and unfolds like a real map: up it comes cover first, the accordion is pulled open one panel after another
+  from the outside, then (rows = 2) the bottom half - folded up over the map face in every column - flips down once
+  every panel has come to rest; the creases relax into their few degrees only after that (bent creases opened
+  slits while it swung). Folding away runs it backwards. The held point follows the paper's middle smoothly. Its own small 3D world
   (SubViewport: own light + shadows in the folds, no fog / DOF / time of day) drawn over the game, which is blurred +
   darkened behind it. Every move is an underdamped **spring** (`Spring`: lift, half fold, one per crease) fired on a
   timeline (`_drive`): quick, overshoots ~10 % and wobbles to rest; closing is firmer and bounces shut. Real time
@@ -377,9 +380,12 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   Controls (`handheld`, hint at the bottom): **left stick / WASD / drag = travel** (the world scrolls under the paper,
   `TRAVEL` m/s), **RT / LT / Q / E / wheel = zoom the print** 0.5–2.5× (the paper always stays fully in view; the frame
   is reprinted when the zoom settles so scale bar + "1 : n" follow), right stick / numpad = tilt the sheet ±0.3 rad.
-  Scroll / zoom off the world print and it's printed again around the view (~0.3 s, a short stop). First print on
-  opening ~0.6 s; reused if you're within 60 m. Ride frozen + HUD hidden while it's up; M / Esc / bail fold it away.
-  Unfolds at `tempo` 0.4 with the user's gravel-crunch recording. The screen fades (`main.fade`) run on real time, or
+  The view never runs past the world print; within `PREFETCH` (200 m) of its edge the next one is printed around
+  the view in the background (terrain sampling, contours and mipmaps on a WorkerThreadPool task with a
+  `query_field().fork()`, waited for in `_exit_tree`) and swapped in with no jump; ~70 ms hitch for the GPU
+  read-back + upload. First print on opening ~0.6 s; reused if you're within 60 m. `BMX_MAP_SCROLL` prints the worst
+  frame while travelling. Ride frozen + HUD hidden while it's up; M / Esc / bail fold it away.
+  Unfolds at `tempo` 0.36 (~2.5 s) with the user's gravel-crunch recording. The screen fades (`main.fade`) run on real time, or
   a map opened during one froze it as a haze.
 - **Pause leaflet** (`PausePamphlet`, `scripts/ui/pause_pamphlet.gd`, built in `main._pause`): a DL tri-fold (3 × 99 ×
   210 mm, Z-folded, stays folded). Cover photo = the ride's last frame grabbed at the moment of pausing (centre crop,

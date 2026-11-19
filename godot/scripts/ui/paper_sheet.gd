@@ -222,6 +222,7 @@ func open() -> void:
 	state = 1
 	_tl = 0.0
 	_reset_view()
+	if state == 1 and k == 0.0: _centre_s = Vector3(INF, INF, INF); _relax = 0.0
 	if handheld: _show_hint()
 	visible = true
 	_fit_camera()
@@ -313,17 +314,24 @@ func _drive() -> void:
 		_lift.target = 1.0
 		_row.target = 1.0 if rows == 1 else 0.0
 	elif state == 1 or state == 2:
+		# like opening a real map: up it comes (cover to you), the accordion is pulled open one panel after
+		# another from the outside, then the bottom half (folded over the map face) flips down
 		_lift.target = 1.0
-		_row.target = 1.0 if (rows == 1 or tl > 0.1) else 0.0
-		var t0 := 0.26 if rows == 2 else 0.12
+		if tl < 0.05: _row.target = 0.0
+		var t0 := 0.12
+		var step := 0.13
 		for c in range(1, cols):
-			_acc[c].target = 1.0 if tl > t0 + 0.085 * (cols - 1 - c) else 0.0
+			_acc[c].target = 1.0 if tl > t0 + step * (cols - 1 - c) else 0.0
+		var calm := true   # the flap waits until every panel has come to rest (a still-swinging one opened a wedge)
+		for c in range(1, cols): calm = calm and absf(_acc[c].x - 1.0) < 0.012 and absf(_acc[c].v) < 0.1
+		if rows == 1 or (tl > t0 + step * (cols - 2) + 0.2 and calm): _row.target = 1.0
 	else:
+		# folding away: the other way round - bottom half up, the accordion shut from the inside, down it goes
+		var r0 := 0.12 if rows == 2 else 0.0
+		_row.target = 0.0 if rows == 2 else 1.0
 		for c in range(1, cols):
-			_acc[c].target = 0.0 if tl > 0.05 * (c - 1) else 1.0
-		var tr := 0.05 * (cols - 1)
-		_row.target = 0.0 if (rows == 2 and tl > tr) else 1.0
-		_lift.target = 0.0 if tl > tr + (0.12 if rows == 2 else 0.0) else 1.0
+			_acc[c].target = 0.0 if tl > r0 + 0.06 * (c - 1) else 1.0
+		_lift.target = 0.0 if tl > r0 + 0.06 * (cols - 1) + 0.05 else 1.0
 
 
 func _process(_dt: float) -> void:
@@ -334,14 +342,15 @@ func _process(_dt: float) -> void:
 	if freeze_at >= 0.0 and _tl + dt > freeze_at: dt = maxf(0.0, freeze_at - _tl)   # tests: hold that moment
 	_idle += dt
 	_tl += dt
+	_pose_dt = dt
 	_sound_fade(dt)
 	_drive()
 	var opening := state != 3
 	# opening: lively (overshoot ~10 % = a flap swings ~20 deg past flat and back); closing: firmer
 	_lift.step(dt, (2.8 if opening else 3.4) * tempo, 0.62 if opening else 0.85, false)
-	_row.step(dt, 3.6 * tempo, 0.55 if opening else 0.75, not opening)
+	_row.step(dt, 3.0 * tempo, 0.68 if opening else 0.75, not opening)   # the flap drops with one small bounce
 	for c in range(1, cols):
-		_acc[c].step(dt, (3.3 + 0.2 * c) * tempo, 0.52 if opening else 0.75, not opening)
+		_acc[c].step(dt, 3.2 * tempo, 0.62 if opening else 0.8, not opening)
 	k = clampf(_lift.x, 0.0, 1.0)
 	if state == 1 and _tl * tempo > open_t:
 		state = 2; opened.emit()
@@ -350,10 +359,10 @@ func _process(_dt: float) -> void:
 	if _vp.size != Vector2i(get_window().size): _fit_camera()
 	_pose()
 	if handheld: _hand_controls(dt)
-	if shots != "" and state != 3 and _idle >= _shot_next and _shot_i < 20:
+	if shots != "" and state != 3 and _idle >= _shot_next and _shot_i < 26:
 		_shot_next = _idle + 0.1
 		get_viewport().get_texture().get_image().save_png("%s_%d.png" % [shots, _shot_i])   # the last frame on screen (BMX_OFFSCREEN: minimised windows draw late)
-		print("PAPERSHOT %s_%d.png t=%.2f lift=%.2f" % [shots, _shot_i, _tl, _lift.x])
+		print("PAPERSHOT %s_%d.png t=%.2f lift=%.2f row=%.2f" % [shots, _shot_i, _tl, _lift.x, _row.x])
 		_shot_i += 1
 
 
@@ -530,6 +539,10 @@ static func ease_in_out(a: float, b: float, x: float) -> float:
 
 
 ## the fold angles and where the sheet is held, from k (0 put away .. 1 open)
+var _centre_s := Vector3(INF, INF, INF)
+var _relax := 0.0                    # 0 = creases held flat (the bottom half still swinging), 1 = relaxed
+var _pose_dt := 0.0
+
 func _pose() -> void:
 	var PW := panel.x; var PH := panel.y
 	var lift := _lift.x                                                    # comes up from below
@@ -537,12 +550,17 @@ func _pose() -> void:
 	var acc := []                                                          # then the accordion, outer panel first
 	for c in cols: acc.append(_acc[c].x if c > 0 else clampf(_acc[mini(1, cols - 1)].x, 0.0, 1.0))
 	var breathe := sin(_idle * 1.3) * 0.5 + 0.5
+	# the creases relax into their few degrees only once the bottom half is down (bent creases while it swings
+	# opened slits between the bottom panels)
+	var settled := 1.0 if rows == 1 or (absf(_row.x - 1.0) < 0.03 and absf(_row.v) < 0.3) else 0.0
+	_relax = move_toward(_relax, settled, _pose_dt * 1.5)
+	var relax := _relax
 	var tr := []                                                           # each column in sheet space
 	var t := Transform3D.IDENTITY
 	for c in cols:
 		if c > 0:
 			var s := -1.0 if c % 2 == 1 else 1.0
-			var ang: float = s * lerpf(PI - EPS_C, 0.05 + 0.015 * breathe, acc[c])   # a few degrees stay in every crease
+			var ang: float = s * lerpf(PI - EPS_C, (0.035 + 0.01 * breathe) * relax, acc[c])   # a few degrees stay in every crease
 			t = t * Transform3D(Basis(), Vector3(PW, 0, 0)) * Transform3D(Basis(Vector3.UP, ang), Vector3.ZERO)
 		tr.append(t)
 	var brest := 0.025 + 0.01 * breathe
@@ -556,10 +574,9 @@ func _pose() -> void:
 			var p: Vector3 = tr[c] * corner
 			lo = lo.min(p); hi = hi.max(p)
 		if rows == 2:
-			# odd columns lie flipped while the accordion is shut (local X = world -X): the half fold turns the
-			# other way in their space; the few degrees left when it's open turn the same way for all
-			var flip := -1.0 if c % 2 == 1 else 1.0
-			var tb: Transform3D = tr[c] * Transform3D(Basis(Vector3.RIGHT, flip * (PI - EPS_R) * (1.0 - row_open) + brest * row_open), Vector3.ZERO)
+			# the bottom half folded up over the map face (the paper's own front), the same in every column: it
+			# rides along while the accordion opens, then flips down
+			var tb: Transform3D = tr[c] * Transform3D(Basis(), Vector3(0, 0, 0.0025 * clampf(1.0 - row_open, 0.0, 1.0))) 				* Transform3D(Basis(Vector3.RIGHT, -(PI - EPS_R) * (1.0 - row_open) + brest * row_open), Vector3.ZERO)   # a hair in front: no z-fight
 			pair.append(tb)
 			for corner in [Vector3(0, -PH, 0), Vector3(PW, -PH, 0)]:
 				var p: Vector3 = tb * corner
@@ -567,9 +584,13 @@ func _pose() -> void:
 		xs.append(pair)
 	var centre := (lo + hi) * 0.5
 	centre.z = lerpf(hi.z, centre.z, acc[0])                               # folded: the front layer stays put
-	var off := Transform3D(Basis(), -centre)
+	# the held point drifts after the paper's middle instead of jumping with every flap
+	if _centre_s.x == INF or _pose_dt <= 0.0: _centre_s = centre
+	else: _centre_s = _centre_s.lerp(centre, 1.0 - exp(-_pose_dt * 7.0))
+	var off := Transform3D(Basis(), -_centre_s)
 	for c in cols:
-		var pil: float = 0.004 * acc[c] * (0.7 + 0.3 * breathe) * (1.0 if c % 2 == 0 else -1.0)
+		# the bulge between creases only once a panel lies open (with the half folded over it, it pushed through)
+		var pil: float = 0.004 * clampf(acc[c], 0.0, 1.0) * clampf(row_open, 0.0, 1.0) * (0.7 + 0.3 * breathe) * (1.0 if c % 2 == 0 else -1.0)
 		for r in rows:
 			_panels[c][r].transform = off * xs[c][r]
 			_panels[c][r].set_instance_shader_parameter("pillow", pil)
