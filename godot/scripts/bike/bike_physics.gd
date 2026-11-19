@@ -577,7 +577,8 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	# corner whip: both sticks thrown the same way (steer + body lean) in a tight corner. The rider whips the bike
 	# over and the rear steps out into a drift held as long as both stay there (Ride › Body: whip*); let go and
 	# the tyres catch it. The lean / drift build in over ~0.25 s and ease out, nothing snaps
-	var whip_want := not air and va > float(T.get("whipMinSpeed", 4.0)) and absf(steer_input) > 0.6 and absf(flick_in) > 0.6 and signf(steer_input) == signf(flick_in) and float(T.get("whipDrift", 0.42)) > 0.0
+	var wtr: float = float(T.get("whipTrigger", 0.6))
+	var whip_want := not air and va > float(T.get("whipMinSpeed", 4.0)) and absf(steer_input) > wtr and absf(flick_in) > wtr and signf(steer_input) == signf(flick_in) and float(T.get("whipDrift", 0.42)) > 0.0
 	if whip_want and whip < 0.05: whip_side = signf(steer_input)
 	if whip_want and signf(steer_input) != whip_side: whip_want = false
 	whip = minf(1.0, whip + dt * 4.0) if whip_want else maxf(0.0, whip - dt * 3.0)
@@ -669,7 +670,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		# while held the whip owns the slide (the rider holds it on the throttle of their weight), and for ~1 s after
 		# letting go it brings the rear back in line, so a released drift is caught instead of spinning on
 		var wk := whip * whip * (3.0 - 2.0 * whip)
-		whip_hold = maxf(wk, whip_hold - dt * 1.1)
+		whip_hold = maxf(wk, whip_hold - dt / maxf(0.1, float(T.get("whipCatch", 0.9))))
 		catch_k *= 1.0 - 0.85 * whip_hold
 		var slip_rate := (excess * share + slip_w) * (1.0 - 0.75 * whip_hold) - (slip - _squirm) * catch_k
 		if whip_hold > 0.0:

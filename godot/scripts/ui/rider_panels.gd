@@ -77,6 +77,9 @@ const POSE_DEFS := [
 		["leanSwing", "Body swings past in lean changes", 0.0, 2.0, 0.05, "×"],
 		["leanUnweight", "Legs extend between turns", 0.0, 3.0, 0.05, "×"],
 		["leanLively", "Corner life (balance, load, bumps)", 0.0, 3.0, 0.05, "×"],
+		["leanBalance", "Corner life: balance sway", 0.0, 3.0, 0.05, "×"],
+		["leanBumps", "Corner life: bumps rock the body", 0.0, 3.0, 0.05, "×"],
+		["leanLoad", "Corner life: turn presses the rider down", 0.0, 3.0, 0.05, "×"],
 	]],
 	["Style", [
 		["hipSteady", "Hips steady (up / down)", 20.0, 400.0, 5.0, ""],

@@ -147,6 +147,8 @@ const DEFS := [
 		["whipLean", "Corner whip: bike thrown over", 0.22, 0, 0.5, 0.01, "rad"],
 		["whipCarry", "Corner whip: drift keeps its speed", 0.6, 0, 1, 0.05, ""],
 		["whipMinSpeed", "Corner whip: from speed", 4.0, 1, 10, 0.5, "m/s"],
+		["whipTrigger", "Corner whip: how far both sticks must go", 0.6, 0.2, 0.95, 0.05, ""],
+		["whipCatch", "Corner whip: drift caught over (after letting go)", 0.9, 0.2, 3, 0.05, "s"],
 		["stickAirTilt", "Air: stick tilts the nose", 0.55, 0, 1.2, 0.05, "rad"],
 		["stickAirRoll", "Air: stick lays the bike over", 0.75, 0, 1.2, 0.05, "rad"],
 		["stickAirEase", "Air: bike follows the stick (higher = snappier)", 3.5, 1, 12, 0.25, "/s"],
