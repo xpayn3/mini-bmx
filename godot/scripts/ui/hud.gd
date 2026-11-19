@@ -8,7 +8,6 @@ const HIST_DT := 0.25
 
 var game
 var root := Control.new()
-var fps_l: Label
 var info_l: Label
 var msg_l: MsgView
 var flow_leds := FlowLeds.new()   # flow shown on the bike computer's LEDs
@@ -26,6 +25,12 @@ var quick: Control
 var fps_acc := 0.0
 var fps_frames := 0
 var msg_a := 0.0
+const FRAME_HIST := 120          # frames kept for the SYSTEM page's frame-time graph
+var frame_ms := PackedFloat32Array()
+var fps_now := 0.0
+var _frame_us := 0
+var _sys_overlay := false        # the SYSTEM page turned the 3D physics overlay on
+var _overlay_was := false        # ...and it was off before
 var _demo_t := 0.0 if OS.get_environment("BMX_FLASH") != "" else -1.0
 var elev_hist := PackedFloat32Array()
 var elev_t := 0.0
@@ -67,21 +72,14 @@ func _ready() -> void:
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.theme = UITheme.get_theme()
 	add_child(root)
-	fps_l = UITheme.label("-- FPS", 13, Color("b9ffb0"))
-	fps_l.position = Vector2(20, 14)
-	root.add_child(fps_l)
-	info_l = UITheme.label("", 14, UITheme.MUTED)
-	info_l.position = Vector2(20, 36)
-	root.add_child(info_l)
+	# bottom right, small and right-aligned, stacked over the fullscreen button: biome / ride info
+	# (FPS lives on the bike computer's SYSTEM page)
+	info_l = _corner_label("", UITheme.MUTED, 52)
 	msg_l = MsgView.new()   # BERM +2 km/h, BONK!, tricks...: an achievement pop in the WASTED type
 	msg_l.set_anchors_preset(Control.PRESET_FULL_RECT)
 	msg_l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(msg_l)
-	biome_l = UITheme.label("", 13, UITheme.MUTED)
-	biome_l.position = Vector2(20, 58)   # top left, under the ride info line
-	biome_l.size = Vector2(222, 20)
-	biome_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	root.add_child(biome_l)
+	biome_l = _corner_label("", UITheme.MUTED, 68)
 	gauge = GaugeView.new(); gauge.hud = self
 	gauge.page = clampi(int(OS.get_environment("BMX_GARMIN_PAGE")), 0, GaugeView.PAGES - 1)
 	gauge.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
@@ -111,8 +109,7 @@ func _ready() -> void:
 	style_pop.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(style_pop)
 	air_card = AirCard.new(); air_card.hud = self
-	air_card.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	air_card.size = Vector2(260, 112); air_card.position = Vector2(-130, 14)   # top centre
+	air_card.size = Vector2(260, 112); air_card.position = Vector2(20, 14)   # top left (top centre is the area banner's)
 	root.add_child(air_card)
 	on_respawn()
 	_build_records()
@@ -124,11 +121,20 @@ func _ready() -> void:
 	root.resized.connect(_layout)
 	_layout()
 
+## a small right-aligned line in the bottom-right corner, `up` px from the bottom
+func _corner_label(text: String, col: Color, up: float) -> Label:
+	var l := UITheme.label(text, 11, col)
+	l.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	l.size = Vector2(420, 16); l.position = Vector2(-440, -up - 16)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(l)
+	return l
+
 func _layout() -> void:
 	pass
 
 func apply_settings() -> void:
-	if fps_l: fps_l.visible = Settings.get_v("show_fps") and not hidden
 	if gauge: gauge.visible = Settings.get_v("hud_gauge")
 	if gauge: gauge.show_gear = Settings.get_v("hud_gear"); gauge.queue_redraw()
 	if air_card: air_card.enabled = Settings.get_v("hud_jump")
@@ -281,18 +287,28 @@ func update_hud(dt: float) -> void:
 		_power_t = maxf(_power_t, 0.0) + dt
 		if was < 0.35 and _power_t >= 0.35: beep.power_on()
 	var st: BikePhysics = game.phys
-	fps_frames += 1; fps_acc += dt
+	# frame times on real time (the SYSTEM page): FPS over half a second + the last FRAME_HIST frames
+	var now_us := Time.get_ticks_usec()
+	var fdt := (now_us - _frame_us) / 1000.0 if _frame_us > 0 else 16.7
+	_frame_us = now_us
+	frame_ms.append(fdt)
+	if frame_ms.size() > FRAME_HIST: frame_ms.remove_at(0)
+	fps_frames += 1; fps_acc += fdt / 1000.0
 	if fps_acc > 0.5:
-		var fps := fps_frames / fps_acc
-		fps_l.text = "%d FPS · %.1f ms" % [roundi(fps), 1000.0 / fps]
-		fps_l.add_theme_color_override("font_color", Color("b9ffb0") if fps >= 55 else Color("ffe38a") if fps >= 40 else Color("ff9a8a"))
+		fps_now = fps_frames / fps_acc
 		fps_frames = 0; fps_acc = 0
+	# the SYSTEM page shows the ride in 3D too: the Debug Draw 3D physics overlay is on while it's up
+	var sys_up: bool = gauge != null and gauge.visible and visible and gauge.page == GaugeView.SYS_PAGE
+	if sys_up != _sys_overlay:
+		_sys_overlay = sys_up
+		if sys_up:
+			_overlay_was = DebugOverlay.on
+			if not DebugOverlay.on and DebugOverlay.available(): DebugOverlay.toggle()
+		elif DebugOverlay.on and not _overlay_was: DebugOverlay.toggle()
 	info_l.text = "%s  ·  %s cam  ·  world #%d" % [GameState.BIKES[GameState.bike_id].label, game.cam.preset().label, GameState.seed]
 	if msg_a > 0:
 		msg_a -= dt
-	# the area banner owns the spot while it's up: messages show under it
-	var at = game.area_title
-	msg_l.low = at != null and at.visible and at.view.t >= 0.0
+	msg_l.low = false   # the banner is up top now; messages keep their spot
 	msg_l.tick(dt)
 	if _demo_t >= 0.0:   # tests: BMX_FLASH=text shows it (and a scored trick) 3 s in; BMX_MSG_AT freezes the pop
 		_demo_t += dt
@@ -460,9 +476,10 @@ func _nearest(tc: TrailCourse, p: Vector2, a: int, b: int) -> int:
 class GaugeView extends Control:
 	## a compact GPS bike computer: black body, pale LCD, pages flipped with the bezel buttons under the
 	## screen; a turn / feature alert drops over any page; GPS fix at the start, battery, backlight.
-	const TITLES := ["RIDE", "TRIP", "EFFORT", "AIR", "ELEV", "MAP"]
-	const PAGES := 6
+	const TITLES := ["RIDE", "TRIP", "EFFORT", "AIR", "ELEV", "MAP", "SYSTEM"]
+	const PAGES := 7
 	const MAP_PAGE := 5
+	const SYS_PAGE := 6
 	const LCD := Color("eceee8")
 	const LCD_LIT := Color("f2fbff")
 	const FIX_T := 3.0     # seconds to "find satellites" at the start of a ride
@@ -532,6 +549,7 @@ class GaugeView extends Control:
 			2: _page_effort(st, f, ink, scr, x0, w)
 			3: _page_air(f, ink, scr, x0, w)
 			4: _page_elev(st, f, ink, scr, x0, w)
+			SYS_PAGE: _page_sys(f, ink, scr, x0, w)
 			_: _page_map(st, f, ink, scr, x0, w)
 		_bezel()
 		ov.size = size
@@ -552,6 +570,37 @@ class GaugeView extends Control:
 	static func _clock(t: float) -> String:
 		var si := int(t)
 		return "%d:%02d:%02d" % [si / 3600, (si / 60) % 60, si % 60] if si >= 3600 else "%d:%02d" % [si / 60, si % 60]
+	## SYSTEM: frame rate, a frame-time graph (the last 120 frames; lines at 60 / 30 fps), average / worst
+	## frame, and whether the 3D physics view (Debug Draw 3D, drawn in the world while this page is up) is on
+	func _page_sys(f: Font, ink: Color, scr_: Rect2, x0: float, w: float) -> void:
+		var y := scr_.position.y + 28
+		_big(f, ink, x0, w, y, "FRAME RATE", "fps", "%d" % roundi(hud.fps_now))
+		y += 46
+		var g := Rect2(x0, y, w, 44)
+		draw_rect(g, Color(ink, 0.06))
+		var ms: PackedFloat32Array = hud.frame_ms
+		var top := 50.0                                   # ms at the top of the graph
+		for ref: float in [16.7, 33.3]:
+			var ly := g.end.y - g.size.y * ref / top
+			draw_line(Vector2(g.position.x, ly), Vector2(g.end.x, ly), Color(ink, 0.3), 1.0)
+			draw_string(f, Vector2(g.position.x + 1, ly - 1), "60" if ref < 20 else "30", HORIZONTAL_ALIGNMENT_LEFT, -1, 7, Color(ink, 0.45))
+		var n := ms.size()
+		var bw := g.size.x / float(FRAME_HIST)
+		var avg := 0.0
+		var worst := 0.0
+		for i in n:
+			var v := ms[i]
+			avg += v; worst = maxf(worst, v)
+			var h := minf(v / top, 1.0) * g.size.y
+			var c := ink if v <= 20.0 else (Color("b07a00") if v <= 34.0 else Color("c0392b"))
+			draw_rect(Rect2(g.end.x - (n - i) * bw, g.end.y - h, maxf(bw, 1.0), h), c)
+		if n > 0: avg /= n
+		y += 48
+		_pair(f, ink, scr_, x0, w, y, "AVG MS", "%.1f" % avg, "WORST", "%.0f" % worst)
+		y += 40
+		var on3d := DebugOverlay.on and DebugOverlay.available()
+		draw_string(f, Vector2(x0, y + 4), "3D VIEW", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(ink, 0.6))
+		draw_string(f, Vector2(x0, y + 4), "ON" if on3d else ("OFF" if DebugOverlay.available() else "N/A"), HORIZONTAL_ALIGNMENT_RIGHT, w, 9, ink)
 	## TRIP: ride time, distance, average / max speed, odometer (every ride, saved)
 	func _page_trip(f: Font, ink: Color, scr_: Rect2, x0: float, w: float) -> void:
 		var y := scr_.position.y + 28

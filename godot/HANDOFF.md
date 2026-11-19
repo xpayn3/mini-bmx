@@ -280,7 +280,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   `AudioServer.playback_speed_scale`) for ~2.4 s real time, then eases back; the screen goes grey + vignette, the word
   WASTED (BAIL for a bail on purpose, F) shows at once for 1.5 s then fades (the rider + bike drawn in front of it via a silhouette mask), flat red, squeezed narrow to fill the screen (no band, no stroke), the crash reason small below. Fades on getting up or after 5 s. Off in autotests unless `BMX_WASTED=1`.
 - **New area banner** (`fx/area_title.gd`, `Game.area_title`): when the biome changes (and 1.6 s into a ride) the name shows
-  at 25 % height (under the jump card) in the WASTED type (same red condensed face, same squeeze, ~8.5 % of the screen tall), small "ENTERING" above.
+  top centre (the jump card is top left) in the WASTED type (same red condensed face, same squeeze, ~8.5 % of the screen tall), small "ENTERING" above.
   Letters stamp down one after another from 2.4x with an overshoot, white-hot cooling to red; a red rule draws out from
   the middle; out they drift apart and fade (~4 s). Real time; hidden with the HUD. Test: `BMX_AREA_AT=secs` freezes it.
 - Look: kits + a colour per part (helmet shell/peak, goggles, jersey, pants, gloves, shoes, knee pads).
@@ -520,16 +520,19 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   30 s + the next 400 m of trail coloured by steepness (from `course.E`) · **MAP** (`MapView`) heading-up 2D topo,
   170 m across: contours (5 m, every 25 m bolder; marching squares over a 6 m height grid, 4 rows a frame,
   rebuilt after 40 m), trail centreline, the last 90 s ridden in magenta, north dial, 50 m scale.
+  · **SYSTEM** (`SYS_PAGE`): frame rate, frame-time graph of the last 120 frames (60 / 30 fps lines), avg / worst ms;
+  while it's up the Debug Draw 3D physics overlay (F3) is on (its text block sits top left under the jump card).
+  FPS is no longer in a screen corner.
 - **Alerts** (`hud._trail_scan`): the next bend (`course.KAP`, > 0 = right; LEFT / SHARP / HAIRPIN by the total
   turn), route feature (`route_feats`: tabletop, kicker, rollers, bridge…) or rock garden within 120 m; a banner
   pops up over any page when a new one appears, then stays from 40 m in. Off the trail (> 15 m) or riding it
   backwards: no alerts. `BMX_ALERT_PROBE=1` walks 2.4 km of trail and prints every alert.
-- **Screen layout** (`hud.gd`): top left FPS / ride info / biome name; `StylePop` (STYLE total, trick + points: points
+- **Screen layout** (`hud.gd`): `StylePop` (STYLE total, trick + points: points
   roll up, the banked "+N" flies into the total, which counts up gold with sparks + a ring, combo "xN" punches in);
-  top centre the jump card (`AirCard`, same dark LCD look as the alert); top right the **life bar** (red, heart) over
+  top centre the area banner, top left the jump card (`AirCard`); bottom right, small and right-aligned over the fullscreen button: biome + ride info (`_corner_label`); top right the **life bar** (red, heart) over
   stamina, and under them `StylePop` (right-aligned). Flash messages (`hud.flash` -> `MsgView`): an achievement pop in the
   WASTED face (all-caps text punches in white-hot with gold side streaks; a "+N" part in gold; mixed-case info lines quieter),
-  at 25 % height, pushed down under the area banner while that's up. Test: `BMX_FLASH="BERM +2 km/h"` (+ `BMX_MSG_AT=secs`). The trail alert fills the bike computer's lower screen under the speed (`GaugeView.draw_alert`: icon,
+  at 25 % height, under the area banner. Test: `BMX_FLASH="BERM +2 km/h"` (+ `BMX_MSG_AT=secs`). The trail alert fills the bike computer's lower screen under the speed (`GaugeView.draw_alert`: icon,
   distance big in yellow, name below); `BMX_ALERT_DEMO=HR|SR|J|K` forces one for screenshots.
 - **Life** (`hud.life`): a crash takes 12–95 % by body speed (`on_crash(speed)`), heals 1.2 %/s from 4 s after it.
   At zero the get-up prompt says KNOCKED OUT / hold hop 1.2 s to **revive** (`REVIVE_HOLD`, back with 50 %) or

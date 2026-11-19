@@ -72,6 +72,7 @@ static func draw(game, st, pos: Vector3, hd: float) -> void:
 		if land != Vector3.INF:
 			d3.draw_sphere(land, 0.25, Color(1.0, 0.3, 0.9))
 	if d2 != null:
+		d2.config.text_block_offset = Vector2i(12, 140)   # top left, under the HUD jump card
 		d2.set_text("DEBUG DRAW (F3)", "", 0, Color.WHITE)
 		d2.set_text("speed", "%.1f km/h" % (st.v * 3.6), 1)
 		d2.set_text("slide (slip)", "%.1f°  rate %.2f rad/s" % [rad_to_deg(st.slip), st.slip_w], 2)
