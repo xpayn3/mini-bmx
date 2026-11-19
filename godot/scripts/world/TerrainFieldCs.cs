@@ -1555,6 +1555,37 @@ public partial class TerrainFieldCs : RefCounted
 	// chunk builder: the ground + colour stages of TerrainChunkBuilder._build() in one call
 	// (same loops, same order, same float32 roundings as the GDScript)
 	// ======================================================================
+	/// the paper map (ui/paper_map.gd): ground heights for `rows` rows of nx samples every `step` m, the first at
+	/// (ox, oz + row0 * step). Batched: per-point calls from GDScript left C# objects behind (crashed the quit).
+	public float[] map_heights(double ox, double oz, double step, long nx, long row0, long rows)
+	{
+		var o = new float[nx * rows];
+		for (long r = 0; r < rows; r++)
+		{
+			double z = oz + (row0 + r) * step;
+			for (long i = 0; i < nx; i++)
+				o[r * nx + i] = (float)ground(ox + i * step, z);
+		}
+		return o;
+	}
+
+	/// the paper map: linear ground colours on the same kind of grid; under `water` the alpha is 0
+	public Color[] map_colors(double ox, double oz, double step, long nx, long row0, long rows, double water)
+	{
+		var o = new Color[nx * rows];
+		for (long r = 0; r < rows; r++)
+		{
+			double z = oz + (row0 + r) * step;
+			for (long i = 0; i < nx; i++)
+			{
+				double x = ox + i * step;
+				double h = ground(x, z);
+				o[r * nx + i] = h < water ? new Color(0, 0, 0, 0) : color(x, z, h, 1.0);
+			}
+		}
+		return o;
+	}
+
 	public Godot.Collections.Dictionary build_ground(double ox, double oz, long N)
 	{
 		const double S = 48.0;

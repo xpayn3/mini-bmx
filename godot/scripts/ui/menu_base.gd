@@ -8,12 +8,24 @@ signal closed
 const INK := UITheme.L_INK
 const MUTED := UITheme.L_MUTED
 
+## paper = true: printed on a sheet (the pause leaflet's inside): no card, UITheme.print_theme(), it fills
+## paper_size (set both before adding it)
+var paper := false
+var paper_size := Vector2.ZERO
+
 func _title() -> String: return ""
 func _pages() -> Array: return []   # ScrollContainers from _page()
 
 func _ready() -> void:
-	theme = UITheme.paper_theme()
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	if paper:
+		theme = UITheme.print_theme()
+		add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+		size = paper_size
+		custom_minimum_size = paper_size
+		_build(0)
+		return
+	theme = UITheme.paper_theme()
 	var vp := get_viewport_rect().size
 	custom_minimum_size = Vector2(minf(880.0, vp.x - 60.0), minf(660.0, vp.y - 60.0))
 	add_theme_stylebox_override("panel", UITheme.card_style(Tokens.PAPER, Tokens.R_XL, Tokens.S6))
@@ -33,10 +45,20 @@ func _build(tab: int) -> void:
 	var title := UITheme.display(_title().to_upper(), Tokens.T_3XL, INK, Tokens.SLANT_TITLE)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(title)
-	var done := UITheme.make_button("DONE", _close, "primary", Tokens.T_XL)
-	done.custom_minimum_size.y = Tokens.H_BTN
+	var done: Button
+	if paper:   # printed: the print theme's stamped button, a red rule under the heading
+		done = UITheme.button("Fold up", _close, 17)
+		done.custom_minimum_size = Vector2(110, 44)
+	else:
+		done = UITheme.make_button("DONE", _close, "primary", Tokens.T_XL)
+		done.custom_minimum_size.y = Tokens.H_BTN
 	head.add_child(done)
 	vb.add_child(head)
+	if paper:
+		var bar := ColorRect.new()
+		bar.color = UITheme.P_RED
+		bar.custom_minimum_size.y = 3
+		vb.add_child(bar)
 	var tabs := TabContainer.new()
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vb.add_child(tabs)

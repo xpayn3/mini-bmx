@@ -425,8 +425,8 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 
 ### Paper: trail map (M) + pause leaflet (Esc) — and future paper menus
 - **`PaperSheet`** (`scripts/ui/paper_sheet.gd`, a CanvasLayer, layer 7): a folded sheet that comes up in front of the
-  camera and unfolds like a real map: up it comes cover first, the accordion is pulled open one panel after another
-  from the outside, then (rows = 2) the bottom half - folded up over the map face in every column - flips down once
+  camera and unfolds like a real map: up it comes cover first, the accordion is pulled open like bellows (every crease
+  together, soft paper springs), then (rows = 2) the bottom half - folded up over the map face in every column - flips down once
   every panel has come to rest; the creases relax into their few degrees only after that (bent creases opened
   slits while it swung). Folding away runs it backwards. The held point follows the paper's middle smoothly. Its own small 3D world
   (SubViewport: own light + shadows in the folds, no fog / DOF / time of day) drawn over the game, which is blurred +
@@ -440,25 +440,41 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   `sound_stream` (a recording played in random faded slices; the map: `assets/audio/map_unfold_gravel.ogg`). Paper = ambientCG **Paper003** (CC0) scan in
   `assets/textures/paper/` × the print, creases worn (`shaders/paper_sheet.gdshader`). Rustle sound synthesised.
 - **Trail map** (`PaperMap`, `scripts/ui/paper_map.gd`; `Game.open_map` / `exit_map`): 4×2 panels (0.84 × 0.525 m),
-  two layers. **World** (`World`, `set_content`): a 1.6 × 1 km print around where it was made (2.56 px/m): real ground
-  colours washed out (sampled every 10 m) × hill shade (5 m), 5 m / 25 m contours, shore, 100 m grid with numbers,
-  trail in red dashes, route features, the last 90 s ridden, YOU ARE HERE. **Frame** (`Frame`, the page, printed with
-  alpha over it): white margin, neat lines, title block with the scale, legend, scale bar, north arrow, the cover.
-  Controls (`handheld`, hint at the bottom): **left stick / WASD / drag = travel** (the world scrolls under the paper,
-  `TRAVEL` m/s), **RT / LT / Q / E / wheel = zoom the print** 0.5–2.5× (the paper always stays fully in view; the frame
-  is reprinted when the zoom settles so scale bar + "1 : n" follow), right stick / numpad = tilt the sheet ±0.3 rad.
-  The view never runs past the world print; within `PREFETCH` (200 m) of its edge the next one is printed around
-  the view in the background and swapped in with no jump: the terrain is sampled on the main thread with the
-  game's own field, ≤ 4 ms a frame; land image, contours and mipmaps are built on a WorkerThreadPool task from that
-  plain data (waited for in `_exit_tree`); ~40 ms hitch for the GPU read-back + upload. **Don't hand C# terrain forks
-  to a worker from GDScript here**: their engine objects were finalized by C#'s GC after shutdown and crashed the quit. First print on opening ~0.6 s; reused if you're within 60 m. `BMX_MAP_SCROLL` prints the worst
-  frame while travelling. Ride frozen + HUD hidden while it's up; M / Esc / bail fold it away.
-  Unfolds at `tempo` 0.36 (~2.5 s) with the user's gravel-crunch recording. The screen fades (`main.fade`) run on real time, or
-  a map opened during one froze it as a haze.
+  two layers. **World** (`World`, `set_content`): one 3.2 × 2 km print around you (2 px/m, heights every 10 m,
+  colours every 20 m, hill shade, 5 m / 25 m contours, shore, 100 m grid with numbers, trail in red dashes, route
+  features, the last 90 s ridden, YOU ARE HERE), **printed while the map unfolds** - the map face is covered by the
+  folded-over bottom half until the flap drops, and the flap waits for the print (`hold_flap`). You then pan freely
+  inside it (no reloading; it stops at the edge). **Frame** (`Frame`, the page, printed with alpha over it): margin,
+  neat lines, title block with the scale, legend, scale bar, north arrow, the cover.
+  Controls (`handheld`, hint at the bottom): left stick / WASD / drag = travel (`TRAVEL` m/s), RT / LT / Q / E / wheel
+  = zoom the print 0.25–2.5× (the paper always stays fully in view; the frame is reprinted when the zoom settles so
+  scale bar + "1 : n" follow), right stick / numpad = tilt the sheet ±0.3 rad.
+  Printing: terrain sampled on the main thread with **batched C# calls** (`TerrainFieldCs.map_heights` /
+  `map_colors`, a few rows per call, ≤ 10 ms a frame, ~0.4 s); land image + contours on a WorkerThreadPool task from
+  that plain data; the one-frame GPU steps (draw, read back, upload, ~200 ms together) wait until the paper is still.
+  **Never call the C# field per point from GDScript in bulk, or hand C# forks to workers**: both left C# objects
+  for the garbage collector that got finalized after shutdown and crashed the quit (exit 132 / 139). The world
+  viewport is 2×2 except while printing (a 100 MB render target). Reused if you're within 60 m.
+  Ride frozen + HUD hidden while it's up; M / Esc / bail fold it away. Unfolds like a real map at `tempo` 0.36: the
+  cover comes up, the accordion opens like bellows (every crease together), then the bottom half drops; the user's
+  gravel-crunch recording plays. The screen fades (`main.fade`) run on real time, or a map opened during one froze it.
 - **Pause leaflet** (`PausePamphlet`, `scripts/ui/pause_pamphlet.gd`, built in `main._pause`): a DL tri-fold (3 × 99 ×
-  210 mm, Z-folded, stays folded). Cover photo = the ride's last frame grabbed at the moment of pausing (centre crop,
-  away from the HUD corners), "DOWNHILL PARK / MINI BMX / <biome> · TRAIL GUIDE", the menu printed below as live
-  buttons (yellow highlighter on hover / focus). Settings / Controls hide it and show it again.
+  210 mm), **letter-folded** (`fold_style = "letter"`: the middle panel stays, the right flap folds in, the cover flap
+  over it). Cover = the back of the cover flap: a photo of the spot you paused at (the ride's last frame, centre crop),
+  "DOWNHILL PARK / MINI BMX / <biome> · TRAIL GUIDE", the menu printed below as live buttons (highlighter on hover /
+  focus). **Settings / Controls open the leaflet** (`open_inside`, from `main._open_settings` / `_show_controls`):
+  the flaps swing open and the menu (`MenuBase` with `paper = true`: no card, `UITheme.paper_theme()` - ink outlines,
+  fill-in-line fields, printed tab headings with a red rule, red-ink sliders) is printed live across the three inside
+  panels (drawn ×1.3). "Fold up", Esc or B shuts it back to the cover (`fold_inside`); Esc / B on the cover resumes.
+  `PaperSheet.set_unfolded()` opens / shuts any sheet while it's up; the camera eases between the shut and open fit.
+
+### Button icons (`scripts/ui/pad_glyph.gd`)
+- `PadGlyph.draw(ci, name, centre, h)` draws Xbox Series–style icons in code: glossy dark face buttons with the
+  letter in its colour (A green, B red, X blue, Y yellow), LB / RB, LT / RT, LS / RS / L3 / R3, D-pad (arm lit),
+  VIEW / MENU / SHARE, MOUSE / WHEEL, and key caps (`"K:<text>"`). `glyph_for(action)` = the icon for the device in
+  use (falls back to the default pad binding; test runs install none). `PadGlyph.PromptBar` = a centred row of
+  [icons, label] on a dark pill (the map's and the leaflet's bottom bar, `PaperSheet.prompt_items()`).
+  Used by: those bars, the get-up prompt (`hud.gd` `GetUpPrompt`), the controls menu bindings (`GlyphButton`).
 
 ### HUD bike computer (`hud.gd` `GaugeView`)
 - Garmin-style computer bottom-left; six pages flipped with the ◀ ▶ bezel buttons under the screen (mouse):
@@ -565,7 +581,7 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `BMX_MAP=secs` (+ `BMX_MAP_CLOSE=secs`, `BMX_MAP_TILT=x,y` holds the right stick, `BMX_MAP_SCROLL=x,y` the left stick, `BMX_MAP_ZOOM=z`) | autotest opens the trail map (presses M again); prints `AUTOTEST map: open= time_scale= hud=` |
 | `BMX_MAP_SHOTS=dir/prefix` | saves the paper sheet's own render every 0.1 s while it unfolds (`PAPERSHOT`) |
 | `BMX_PAPER_AT=secs` | freezes every paper sheet's animation at that time (pair with `BMX_SHOT` for a frame mid-unfold) |
-| `BMX_PAUSE=1` (+ `BMX_PAUSE_HOVER=0.62`) | pause leaflet at the end of an autotest; HOVER moves the mouse to that screen height and prints where it lands on the page |
+| `BMX_PAUSE=1` (+ `BMX_PAUSE_HOVER=0.62`) | pause leaflet at the end of an autotest; HOVER moves the mouse to that screen height and prints where it lands on the page; `BMX_PAUSE=settings` / `controls` opens the leaflet on that menu |
 | `BMX_OFFSCREEN=1` | a normal window parked off the screens instead of `BMX_MIN`: **minimised windows draw late**, so timed screenshots of animations come out stale — use this for those |
 | `BMX_PHOTO=secs` (+ `BMX_PHOTO_CLOSE`, `_SET`, `_FLY`, `_ORBIT`, `_TAB`, `_SNAP`) | autotest opens photo mode, sets card values, moves the camera, saves a photo; prints `AUTOTEST photo:` |
 | `BMX_FENCE_ALL=1` | smashes every fence within 70 m at random 4–18 m/s, 7 s later counts pieces buried / invisible / freed (all must be 0) |

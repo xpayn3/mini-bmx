@@ -205,6 +205,99 @@ static func _seg_dist(p: Vector2, a: Vector2, b: Vector2) -> float:
 	var t := clampf((p - a).dot(ab) / ab.length_squared(), 0.0, 1.0)
 	return p.distance_to(a + ab * t)
 
+static var _print_t: Theme
+const P_INK := Color("1d1f22")
+const P_RED := Color("d22b25")
+
+## the light theme PRINTED on paper (the pause leaflet's inside, paper menus): no fills - ink lines on the
+## sheet, form fields as underlines, tabs as printed headings with a red rule, red-ink sliders, a highlighter
+## for hover / focus
+static func print_theme() -> Theme:
+	if _print_t: return _print_t
+	var t: Theme = light_theme().duplicate(true)
+	var pf := SystemFont.new()
+	pf.font_names = PackedStringArray(["Bahnschrift", "Arial Narrow", "Segoe UI", "Arial"])
+	pf.font_weight = 600
+	var pfb := SystemFont.new()
+	pfb.font_names = pf.font_names
+	pfb.font_weight = 800
+	t.default_font = pf
+	t.default_font_size = 19
+	var clear := Color(0, 0, 0, 0)
+	var hl := Color(1.0, 0.86, 0.18, 0.55)   # highlighter
+	var line := func(col: Color, bottom: int, all := 0) -> StyleBoxFlat:
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = clear
+		sb.border_color = col
+		sb.set_border_width_all(all)
+		sb.border_width_bottom = bottom
+		sb.content_margin_left = 10; sb.content_margin_right = 10
+		sb.content_margin_top = 6; sb.content_margin_bottom = 6
+		return sb
+	t.set_stylebox("panel", "PanelContainer", StyleBoxEmpty.new())
+	# buttons: a stamped outline; hover = highlighter
+	t.set_stylebox("normal", "Button", box(clear, 4, 14, P_INK, 2))
+	t.set_stylebox("hover", "Button", box(hl, 4, 14, P_INK, 2))
+	t.set_stylebox("pressed", "Button", box(ACCENT, 4, 14, P_INK, 2))
+	t.set_stylebox("hover_pressed", "Button", box(ACCENT, 4, 14, P_INK, 2))
+	t.set_stylebox("focus", "Button", box(clear, 4, 14, P_RED, 2))
+	for c in ["font_color", "font_hover_color", "font_pressed_color", "font_hover_pressed_color", "font_focus_color"]:
+		t.set_color(c, "Button", P_INK)
+	t.set_font("font", "Button", pfb)
+	# form fields: fill-in lines
+	for c in ["OptionButton", "LineEdit", "SpinBox"]:
+		t.set_stylebox("normal", c, line.call(Color(P_INK, 0.55), 2))
+		t.set_stylebox("hover", c, line.call(P_INK, 2))
+		t.get_stylebox("hover", c).bg_color = Color(hl, 0.35)
+		t.set_stylebox("pressed", c, line.call(P_RED, 3))
+		t.set_stylebox("focus", c, line.call(P_RED, 3))
+		for fc in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
+			t.set_color(fc, c, P_INK)
+	t.set_icon("arrow", "OptionButton", tex_chevron(P_INK))
+	# toggles: ink
+	for st in ["normal", "hover", "pressed", "hover_pressed"]:
+		t.set_stylebox(st, "CheckButton", box(clear, 4, 6))
+	t.set_stylebox("hover", "CheckButton", box(Color(hl, 0.35), 4, 6))
+	t.set_stylebox("focus", "CheckButton", box(clear, 4, 6, P_RED, 2))
+	# sliders: a printed rule, red ink filled
+	var groove := box(Color(P_INK, 0.25), 1, 0); groove.content_margin_top = 2; groove.content_margin_bottom = 2
+	var fill := box(P_RED, 1, 0); fill.content_margin_top = 2; fill.content_margin_bottom = 2
+	t.set_stylebox("slider", "HSlider", groove)
+	t.set_stylebox("grabber_area", "HSlider", fill)
+	t.set_stylebox("grabber_area_highlight", "HSlider", fill)
+	var g := tex_disc(22, Color("fbfaf5"), P_INK, 3.0)
+	for n in ["grabber", "grabber_highlight", "grabber_disabled"]: t.set_icon(n, "HSlider", g)
+	# tabs: printed headings, the open one with a red rule under it
+	var tsel: StyleBoxFlat = line.call(P_RED, 4)
+	t.set_stylebox("tab_selected", "TabContainer", tsel)
+	t.set_stylebox("tab_unselected", "TabContainer", line.call(clear, 4))
+	var thov: StyleBoxFlat = line.call(Color(P_INK, 0.4), 4)
+	thov.bg_color = Color(hl, 0.35)
+	t.set_stylebox("tab_hovered", "TabContainer", thov)
+	t.set_stylebox("tab_focus", "TabContainer", line.call(P_RED, 0, 2))
+	var page: StyleBoxFlat = line.call(Color(P_INK, 0.35), 0)
+	page.border_width_top = 2
+	page.content_margin_left = 6; page.content_margin_right = 6; page.content_margin_top = 14
+	t.set_stylebox("panel", "TabContainer", page)
+	t.set_color("font_selected_color", "TabContainer", P_INK)
+	t.set_color("font_unselected_color", "TabContainer", Color(P_INK, 0.55))
+	t.set_color("font_hovered_color", "TabContainer", P_INK)
+	t.set_font("font", "TabContainer", pfb)
+	t.set_font_size("font_size", "TabContainer", 19)
+	# lists dropping out of a field: a slip of paper
+	t.set_stylebox("panel", "PopupMenu", box(Color("fbfaf5"), 2, 8, P_INK, 2))
+	t.set_stylebox("hover", "PopupMenu", box(hl, 2, 8))
+	t.set_color("font_color", "PopupMenu", P_INK)
+	t.set_color("font_hover_color", "PopupMenu", P_INK)
+	t.set_stylebox("scroll", "VScrollBar", box(Color(P_INK, 0.08), 2, 3))
+	t.set_stylebox("grabber", "VScrollBar", box(Color(P_INK, 0.35), 2, 3))
+	t.set_stylebox("grabber_highlight", "VScrollBar", box(Color(P_INK, 0.55), 2, 3))
+	t.set_stylebox("grabber_pressed", "VScrollBar", box(P_RED, 2, 3))
+	t.set_color("font_color", "Label", P_INK)
+	_print_t = t
+	return t
+
+
 static func light_theme() -> Theme:
 	if _light: return _light
 	var t := Theme.new()
