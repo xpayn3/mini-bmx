@@ -107,9 +107,57 @@ static func build_goggles(m: Dictionary, fit: Dictionary, hug: Callable) -> Node
 			var k := i * 2
 			idx.append_array([k, k + 1, k + 2, k + 1, k + 3, k + 2])
 	_add(root, {pos = pos, idx = idx}, m.strap)
+	if m.has("logo"):
+		_add_strap_logo(root, pts, S.cx, hw, m.logo)
 	# where the loose flapping tail hangs off the strap (outer side of the right clip, goggles-root space)
 	root.set_meta("flap_anchor", Vector3(ends[1].x - 0.004, yS, ends[1].z + 0.014))
 	return root
+
+
+## a brand wordmark printed along the middle of the strap's back: a thin overlay ribbon floating 2 mm off the
+## strap, UV running along the strap (left to right seen from behind) and across it
+static func _add_strap_logo(root: Node3D, pts: PackedVector3Array, cx: float, hw: float, mat: Material, length := 0.27) -> void:
+	var s := PackedFloat32Array()
+	s.resize(pts.size())
+	for i in range(1, pts.size()):
+		s[i] = s[i - 1] + pts[i].distance_to(pts[i - 1])
+	var mid := s[pts.size() - 1] * 0.5
+	var v3 := PackedVector3Array()
+	var uv := PackedVector2Array()
+	var nr := PackedVector3Array()
+	var idx := PackedInt32Array()
+	for i in pts.size():
+		if absf(s[i] - mid) > length * 0.5:
+			continue
+		var p := pts[i]
+		var out := Vector3(p.x - cx, 0, p.z).normalized()
+		var u := (s[i] - (mid - length * 0.5)) / length
+		var q := p + out * 0.0022
+		v3.append(Vector3(q.x, q.y - hw * 0.92, q.z))
+		uv.append(Vector2(u, 1.0))
+		v3.append(Vector3(q.x, q.y + hw * 0.92, q.z))
+		uv.append(Vector2(u, 0.0))
+		nr.append(out)
+		nr.append(out)
+		var k := v3.size() - 2
+		if k >= 2:
+			idx.append_array([k - 2, k - 1, k, k - 1, k + 1, k])
+	if idx.is_empty():
+		return
+	var arr := []
+	arr.resize(Mesh.ARRAY_MAX)
+	arr[Mesh.ARRAY_VERTEX] = v3
+	arr[Mesh.ARRAY_NORMAL] = nr
+	arr[Mesh.ARRAY_TEX_UV] = uv
+	arr[Mesh.ARRAY_INDEX] = idx
+	var am := ArrayMesh.new()
+	am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+	var mi := MeshInstance3D.new()
+	mi.name = "StrapLogo"
+	mi.mesh = am
+	mi.material_override = mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	root.add_child(mi)
 
 
 # ---------------- shoes ----------------
@@ -174,6 +222,14 @@ static func _upper_geo(n := 22, m := 12) -> Dictionary:
 				idx.append_array([c, k, k + 1])
 			else:
 				idx.append_array([c, k + 1, k])
+		# the fan only covers the arch: close the bottom too (centre to the two sole corners) - the heel
+		# had a triangular hole you could see the trouser leg through
+		var k0 := ci * row
+		var km := ci * row + m
+		if cap[1]:
+			idx.append_array([c, km, k0])
+		else:
+			idx.append_array([c, k0, km])
 	return {pos = pos, idx = idx}
 
 

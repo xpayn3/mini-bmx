@@ -71,6 +71,7 @@ func _ready() -> void:
 	add_child(player)
 	player.play()
 	pb = player.get_stream_playback()
+	_setup_chain()
 	var gs = load("res://scripts/game/GravelSynth.cs")
 	if gs != null and gs.can_instantiate():
 		gravel = gs.new()
@@ -86,10 +87,59 @@ func _ready() -> void:
 		fw.play()
 		fw_pb = fw.get_stream_playback()
 
+# chain rub: the gravel recording looped very quietly under everything; louder with wheel speed and
+# when the chain is loaded (pedalling), silent when stopped or in the air
+const CHAIN_DB := -27.0
+var chain := AudioStreamPlayer.new()
+var chain_amp := 0.0
+
+func _setup_chain() -> void:
+	var s = load("res://assets/audio/chain_rub.mp3")
+	if s == null: return
+	if s is AudioStreamMP3: s.loop = true
+	chain.stream = s
+	chain.bus = player.bus
+	chain.volume_db = -80.0
+	add_child(chain)
+	chain.play()
+
+func _update_chain(dt: float, va: float, on_ground: bool, pedal: float) -> void:
+	if chain.stream == null: return
+	var t := clampf(va / 8.0, 0.0, 1.0) * (0.55 + 0.45 * clampf(pedal, 0.0, 1.0)) if on_ground else 0.0
+	chain_amp += (t - chain_amp) * minf(1.0, dt * 6.0)
+	chain.volume_db = CHAIN_DB + linear_to_db(maxf(chain_amp, 0.0001)) if chain_amp > 0.003 else -80.0
+	chain.pitch_scale = 0.8 + clampf(va / 20.0, 0.0, 1.0) * 0.5
+
 func thud(power: float) -> void: shots.append(["thud", 0.0, clampf(power * 0.5, 0.2, 1.0)])
 func crunch() -> void: shots.append(["crunch", 0.0, 0.8])
+
+## wooden planks breaking: a sharp splintering crack, then the pieces knocking and bouncing on the ground.
+## Each hit is a plank ringing (free-free beam modes, ratio 1 : 2.76 : 5.40) with a tick of noise; the hits
+## come faster and quieter as the pieces settle, each with its own pitch. Built per call so no two sound alike.
+func wood_crash(power: float = 1.0) -> void:
+	var hits: Array = []
+	var t := 0.012
+	var g := 1.0
+	for k in 7 + int(power * 6.0):
+		hits.append([t, randf_range(170.0, 620.0) * (1.0 + 0.5 * randf() * randf()), g * randf_range(0.55, 1.0)])
+		t += randf_range(0.018, 0.05) * (1.0 + k * 0.28)
+		g *= 0.86
+	shots.append(["wood", 0.0, clampf(0.55 + 0.35 * power, 0.5, 1.0), hits])
+
+func _wood_sample(t: float, hits: Array) -> float:
+	# crack: noise with a fast-falling brightness, plus a short splintering burst
+	var v := (randf() * 2 - 1) * exp(-t * 260.0) * 0.8
+	if t < 0.09:
+		v += (randf() * 2 - 1) * exp(-t * 60.0) * (0.5 + 0.5 * sin(t * 1300.0)) * 0.22
+	for h in hits:
+		var dt: float = t - h[0]
+		if dt < 0.0 or dt > 0.45: continue
+		var f: float = h[1]
+		var m := sin(TAU * f * dt) * exp(-dt * 38.0) + 0.5 * sin(TAU * f * 2.76 * dt) * exp(-dt * 70.0) + 0.25 * sin(TAU * f * 5.4 * dt) * exp(-dt * 140.0)
+		v += (m + (randf() * 2 - 1) * exp(-dt * 600.0) * 0.5) * h[2] * 0.55
+	return v
 func crash() -> void: shots.append(["thud", 0.0, 1.0]); shots.append(["crunch", 0.0, 0.5])
-func shift() -> void: shots.append(["click", 0.0, 0.6])
+func shift() -> void: shots.append(["click", 0.0, 0.7])
 
 func update_audio(dt: float) -> void:
 	if pb == null: return
@@ -98,10 +148,11 @@ func update_audio(dt: float) -> void:
 	var on_ground := not st.air and not st.crash_on
 	var k := minf(1.0, dt * 8)
 	# wind: louder AND brighter the faster you go, a touch more in the air (nothing else masks it)
-	var wt := clampf(va * va / 260.0, 0, 1) * (0.62 if st.air else 0.55)
+	# (keeps building past ~60 km/h: the roar is a big part of feeling fast)
+	var wt := clampf(va * va / 340.0, 0, 1.3) * (0.62 if st.air else 0.55)
 	wind += (wt - wind) * minf(1.0, dt * 4)
-	wind_tone += ((0.018 + clampf(va / 22.0, 0, 1) * 0.09) - wind_tone) * k
-	whistle += ((clampf((va - 9.0) / 10.0, 0, 1) * 0.12) - whistle) * k
+	wind_tone += ((0.018 + clampf(va / 24.0, 0, 1.15) * 0.09) - wind_tone) * k
+	whistle += ((clampf((va - 9.0) / 14.0, 0, 1) * 0.15) - whistle) * k
 	var surf_amp: float = [0.32, 0.22, 0.0, 0.42][st.surf]
 	roll += ((clampf(va / 12.0, 0, 1) * surf_amp if on_ground else 0.0) - roll) * k
 	roll_tone += (([0.12, 0.2, 0.1, 0.06][st.surf]) - roll_tone) * k
@@ -132,6 +183,7 @@ func update_audio(dt: float) -> void:
 	var poe := FreewheelSound.get_value("poe")
 	fw_clicks = fs / st.RWR / TAU * poe if coasting else 0.0
 	fw_amp = 0.23 * FreewheelSound.get_value("vol") * smoothstep(0.1, 1.0, fs) 		* (1.0 - FreewheelSound.get_value("fade") * clampf((fs - 8.0) / 10.0, 0.0, 1.0))
+	_update_chain(dt, va, on_ground, st.pedal)
 	_fill()
 	_fill_fw()
 	if OS.get_environment("BMX_AUDIO_PROBE") != "" and Engine.get_process_frames() % 30 == 0:
@@ -205,11 +257,22 @@ func _fill() -> void:
 					v = sin(TAU * (70.0 - t * 60.0) * t) * exp(-t * 14.0) * amp + (randf() * 2 - 1) * exp(-t * 40.0) * amp * 0.4
 				"crunch":
 					v = (randf() * 2 - 1) * exp(-t * 9.0) * amp * (0.6 + 0.4 * sin(t * 900.0))
+				"wood":
+					v = _wood_sample(t, sh[3]) * amp
 				"click":
-					v = (randf() * 2 - 1) * exp(-t * 120.0) * amp + sin(TAU * 2400 * t) * exp(-t * 90.0) * amp * 0.3
+					# shifter detent: a sharp snap (noise tick + bright metallic rings) then a softer
+					# lower "clack" as the lever seats ~34 ms later, over a small body thunk
+					var snap := (randf() * 2 - 1) * exp(-t * 700.0) * 0.9
+					snap += (sin(TAU * 3150.0 * t) * 0.5 + sin(TAU * 4720.0 * t) * 0.3 + sin(TAU * 1980.0 * t) * 0.45) * exp(-t * 170.0)
+					var t2 := t - 0.034
+					var clack := 0.0
+					if t2 > 0.0:
+						clack = ((randf() * 2 - 1) * exp(-t2 * 900.0) * 0.5 + (sin(TAU * 1320.0 * t2) * 0.6 + sin(TAU * 2610.0 * t2) * 0.3) * exp(-t2 * 230.0)) * 0.7
+					var body := sin(TAU * 190.0 * t) * exp(-t * 60.0) * 0.35
+					v = (snap + clack + body) * amp
 			buf[i] += Vector2(v, v)
 		sh[1] = t0 + n / RATE
-	shots = shots.filter(func(sh): return sh[1] < 0.8)
+	shots = shots.filter(func(sh): return sh[1] < (1.6 if sh[0] == "wood" else 0.8))
 	for i in n:
 		buf[i] = buf[i].clamp(Vector2(-1, -1), Vector2(1, 1))
 	pb.push_buffer(buf)

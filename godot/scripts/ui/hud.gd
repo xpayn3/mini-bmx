@@ -15,6 +15,9 @@ var flow_leds := FlowLeds.new()   # flow shown on the bike computer's LEDs
 var biome_l: Label
 var gauge: GaugeView
 var stamina: StaminaView
+var life_bar: StaminaView
+var life := 1.0          # rider health 0..1: crashes hurt (by speed), heals slowly while riding
+var hurt_t := 99.0       # seconds since the last crash
 var hop_bar: BarView
 var getup: GetUpPrompt
 var air_card: AirCard
@@ -44,6 +47,7 @@ var jump_last := Vector3.ZERO   # air time, distance, height of the last landed 
 var jump_best := Vector3.ZERO
 var jumps := 0
 var tricks := 0
+var style_pop: StylePop
 var trick_last := ""
 var trail_i := -1       # nearest trail centreline point
 var trail_d := INF      # how far off the trail centreline (m)
@@ -77,10 +81,9 @@ func _ready() -> void:
 	msg_l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.25))
 	root.add_child(msg_l)
 	biome_l = UITheme.label("", 13, UITheme.MUTED)
-	biome_l.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	biome_l.position = Vector2(-240, 38)
+	biome_l.position = Vector2(20, 58)   # top left, under the ride info line
 	biome_l.size = Vector2(222, 20)
-	biome_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	biome_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	root.add_child(biome_l)
 	gauge = GaugeView.new(); gauge.hud = self
 	gauge.page = clampi(int(OS.get_environment("BMX_GARMIN_PAGE")), 0, GaugeView.PAGES - 1)
@@ -88,9 +91,13 @@ func _ready() -> void:
 	gauge.size = Vector2(150, 224); gauge.position = Vector2(20, -244)   # +12 px top bezel for the flow LEDs
 	root.add_child(gauge)
 	stamina = StaminaView.new(); stamina.hud = self
-	stamina.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	stamina.size = Vector2(240, 16); stamina.position = Vector2(-120, 14)   # top centre
+	stamina.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	stamina.size = Vector2(220, 16); stamina.position = Vector2(-240, 36)   # top right, under the life bar
 	root.add_child(stamina)
+	life_bar = StaminaView.new(); life_bar.hud = self; life_bar.life = true
+	life_bar.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	life_bar.size = Vector2(220, 16); life_bar.position = Vector2(-240, 14)   # top right
+	root.add_child(life_bar)
 	hop_bar = BarView.new()
 	hop_bar.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 	hop_bar.size = Vector2(180, 12); hop_bar.position = Vector2(-90, -100)
@@ -101,10 +108,15 @@ func _ready() -> void:
 	getup.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	getup.visible = false
 	root.add_child(getup)
+	style_pop = StylePop.new()
+	style_pop.position = Vector2(20, 82); style_pop.size = Vector2(420, 130)   # top left, under the biome name
+	style_pop.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(style_pop)
 	air_card = AirCard.new(); air_card.hud = self
 	air_card.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	air_card.size = Vector2(230, 110); air_card.position = Vector2(-115, 40)   # under the stamina bar
+	air_card.size = Vector2(260, 112); air_card.position = Vector2(-130, 14)   # top centre
 	root.add_child(air_card)
+	on_respawn()
 	_build_records()
 	quick = load("res://scripts/ui/quick_tune.gd").new()
 	quick.hud = self
@@ -147,15 +159,46 @@ func on_landing(air_time: float, dist: float, height: float, impact: float) -> v
 		jump_last = Vector3(air_time, dist, height)
 		jump_best = Vector3(maxf(jump_best.x, air_time), maxf(jump_best.y, dist), maxf(jump_best.z, height))
 
+## style points for a landed jump (bike_physics._style_points): the popup chains them into a combo
+func on_style(points: int, label: String) -> void:
+	if style_pop: style_pop.add(points, label)
+
 func on_trick(trick: String) -> void:
 	tricks += 1
 	trick_last = trick
 
-func on_crash() -> void:
+## a crash hurts by how fast the body was going: a slow tip-over ~15 %, 12 m/s+ ~70 %+
+const LIFE_REGEN := 0.012   # per second while riding, from LIFE_WAIT s after a crash
+const LIFE_WAIT := 4.0
+const REVIVE_HOLD := 1.2    # out of life: hold hop this long to revive...
+const REVIVE_LIFE := 0.5    # ...and come back with this much
+func on_crash(speed := 0.0) -> void:
+	life = maxf(0.0, life - clampf(0.12 + speed / 12.0 * 0.6, 0.12, 0.95))
+	hurt_t = 0.0
+	life_bar.shake = 1.0
+	if OS.get_environment("BMX_LIFE_PROBE") != "": print("LIFE crash v=%.1f life=%.2f" % [speed, life])
+
+## back on the bike: at zero life that was a revive (half life back, the bar glows green)
+func on_get_up() -> void:
+	if life <= 0.0:
+		life = REVIVE_LIFE
+		hurt_t = LIFE_WAIT
+		life_bar.heal = 1.0
+		flash("REVIVED")
+		if OS.get_environment("BMX_LIFE_PROBE") != "": print("LIFE revived life=%.2f" % life)
+
+## back to start / new world: full life, and the bike computer restarts (ride timer, trip, a full battery,
+## the GPS fix and the power-on chime again)
+func on_respawn() -> void:
+	life = 1.0; hurt_t = 99.0
+	ride_t = 0.0; ride_dist = 0.0; moving_t = 0.0; max_v = 0.0
+	if visible: _power_t = 0.0
+	if OS.get_environment("BMX_LIFE") != "": life = float(OS.get_environment("BMX_LIFE"))   # tests: start with this much life
+	if style_pop: style_pop.bail()
 	air_card.bail()
 
 func _unhandled_input(e: InputEvent) -> void:
-	if get_tree().paused: return
+	if get_tree().paused or (game and game.photo): return   # photo mode has its own keys (and its own shot)
 	if e.is_action_pressed("records") and not e.is_echo():
 		_refresh_records(); records_panel.visible = not records_panel.visible
 	elif e.is_action_pressed("toggle_hud") and not e.is_echo():
@@ -255,6 +298,12 @@ func update_hud(dt: float) -> void:
 	hop_bar.k = st.hop_bar
 	getup.tick(dt)
 	stamina.queue_redraw()
+	hurt_t += dt
+	if not st.crash_on and hurt_t > LIFE_WAIT: life = minf(1.0, life + LIFE_REGEN * dt)
+	life_bar.shake = maxf(0.0, life_bar.shake - dt * 2.0)
+	life_bar.heal = maxf(0.0, life_bar.heal - dt * 0.8)
+	st.getup_need = REVIVE_HOLD if life <= 0.0 else BikePhysics.GETUP_HOLD
+	life_bar.queue_redraw()
 	gauge.bump = maxf(0.0, gauge.bump - dt * 4)
 	# elevation profile
 	elev_t += dt
@@ -324,6 +373,9 @@ func _probe_alerts() -> void:
 func _trail_scan(p: Vector2, fw: Vector2, crashed: bool) -> void:
 	var was: String = alert.get("text", "")
 	alert = {}
+	if OS.get_environment("BMX_ALERT_DEMO") != "":   # tests: a fixed alert to look at
+		alert = {"kind": OS.get_environment("BMX_ALERT_DEMO"), "text": "HAIRPIN RIGHT", "d": 22.0}
+		return
 	var t = game.terrain
 	if t == null or t.field == null or t.field.course == null: return
 	var tc: TrailCourse = t.field.course
@@ -405,6 +457,7 @@ class GaugeView extends Control:
 	const LCD := Color("eceee8")
 	const LCD_LIT := Color("f2fbff")
 	const FIX_T := 3.0     # seconds to "find satellites" at the start of a ride
+	const BAT_LIFE := 1800.0   # seconds of riding from a full battery to empty
 	var map_v: MapView
 	var ov: Overlay
 	var hud
@@ -456,11 +509,13 @@ class GaugeView extends Control:
 		draw_string(f, Vector2(x0, hy), "%02d:%02d" % [tm.hour, tm.minute], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("f2f3ef"))
 		if st.air: draw_string(f, Vector2(x0, hy), "AIR", HORIZONTAL_ALIGNMENT_CENTER, w, 10, Color("ffd21f"))
 		else: draw_string(f, Vector2(x0, hy), TITLES[page], HORIZONTAL_ALIGNMENT_CENTER, w, 9, Color(0.95, 0.95, 0.94, 0.75))
-		var bat := clampf(1.0 - hud.ride_t / 3600.0 * 0.6, 0.05, 1.0)   # drains 60 % an hour
+		var bat := clampf(1.0 - hud.ride_t / BAT_LIFE, 0.0, 1.0)   # full to empty in 30 min of riding
+		if bat < 0.1 and fmod(hud.ride_t, 1.0) < 0.5: bat = -1.0   # nearly flat: the icon blinks
 		var br := Rect2(scr.end.x - 22, scr.position.y + 4, 14, 7)
-		draw_rect(br, Color(0.95, 0.95, 0.94, 0.8), false, 1.0)
-		draw_rect(Rect2(br.end.x, br.position.y + 2, 2, 3), Color(0.95, 0.95, 0.94, 0.8))
-		draw_rect(Rect2(br.position.x + 1.5, br.position.y + 1.5, (br.size.x - 3) * bat, br.size.y - 3), Color("8be36a") if bat > 0.2 else Color("ff6a4d"))
+		if bat >= 0.0:
+			draw_rect(br, Color(0.95, 0.95, 0.94, 0.8), false, 1.0)
+			draw_rect(Rect2(br.end.x, br.position.y + 2, 2, 3), Color(0.95, 0.95, 0.94, 0.8))
+			if bat > 0.0: draw_rect(Rect2(br.position.x + 1.5, br.position.y + 1.5, (br.size.x - 3) * bat, br.size.y - 3), Color("8be36a") if bat > 0.2 else Color("ff6a4d"))
 		map_v.visible = page == MAP_PAGE and hud.ride_t > FIX_T
 		match page:
 			0: _page_ride(st, f, ink, scr, x0, w)
@@ -569,11 +624,18 @@ class GaugeView extends Control:
 		var al: Dictionary = hud.alert
 		# pops up when it first appears, then stays from 40 m in (the page shows the rest of the time)
 		if al.is_empty() or al.d > 100.0 or (al.d > 40.0 and hud.alert_new <= 0.0): return
-		var bx := Rect2(inner.position.x + 3, inner.position.y + 2, inner.size.x - 6, 26)
-		c.draw_style_box(UITheme.box(ink, 5, 0), bx)
+		# the bottom half of the screen: a dark box, the turn / feature icon + distance, the name under them
+		var top := scr.position.y + 76   # just under the speed row's divider
+		var bx := Rect2(inner.position.x + 3, top, inner.size.x - 6, inner.end.y - top - 3)
+		draw_alert(c, bx, al, f)
+
+	## the trail alert in a box: icon top left, distance big on the right, the name along the bottom
+	static func draw_alert(c: CanvasItem, bx: Rect2, al: Dictionary, f: Font) -> void:
 		var yel := Color("ffd21f")
-		var ic := bx.position + Vector2(15, 13)
-		var sc := 0.72
+		c.draw_style_box(UITheme.box(Color("111417"), 6, 0), bx)
+		var row := bx.size.y * 0.62
+		var ic := bx.position + Vector2(row * 0.5 + 2, row * 0.5 + 3)
+		var sc := row / 26.0 * 0.95
 		var kind: String = al.kind
 		c.draw_set_transform(ic * (1.0 - sc), 0.0, Vector2(sc, sc))
 		if kind.ends_with("L") or kind.ends_with("R"):
@@ -604,8 +666,8 @@ class GaugeView extends Control:
 		c.draw_set_transform(Vector2.ZERO)
 		var dm: float = al.d
 		var dtx := "%dm" % (roundi(dm / 10.0) * 10 if dm > 50.0 else roundi(dm))
-		c.draw_string(f, Vector2(bx.position.x + 28, bx.position.y + 11), al.text, HORIZONTAL_ALIGNMENT_LEFT, bx.size.x - 32, 8, Color.WHITE)
-		c.draw_string(f, Vector2(bx.position.x + 28, bx.position.y + 23), dtx, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, yel)
+		c.draw_string(f, Vector2(bx.position.x + row + 4, bx.position.y + row * 0.5 + 12), dtx, HORIZONTAL_ALIGNMENT_RIGHT, bx.size.x - row - 10, 26, yel)
+		c.draw_string(f, Vector2(bx.position.x + 6, bx.end.y - 7), al.text, HORIZONTAL_ALIGNMENT_CENTER, bx.size.x - 12, 10, Color.WHITE)
 	## bezel under the screen: a page button left and right, page dots between them
 	func _bezel() -> void:
 		var dt := get_process_delta_time()
@@ -841,50 +903,65 @@ class Overlay extends Control:
 	func _draw() -> void: g.draw_over(self)
 
 class StaminaView extends Control:
-	## slim rounded capsule with a bolt icon: smooth gradient fill, a bright leading edge, tick marks,
+	## slim rounded capsule with a bolt icon: the fill ends straight (no rounded end, no edge line), tick marks,
 	## a glow while sprinting and a pulse when low (sprint stamina)
+	## life = true: the rider's life bar instead (heart icon, red, shakes on a crash)
 	var hud
+	var life := false
 	var shake := 0.0
+	var heal := 0.0    # 1 on a revive, fades: the life bar glows green
 	var shown := 1.0   # eased fill so it glides instead of jumping
 
-	static func _pill(ci: CanvasItem, r: Rect2, c: Color) -> void:
+	static func _pill(ci: CanvasItem, r: Rect2, c: Color, square_end := false) -> void:
 		var sb := StyleBoxFlat.new()
 		sb.bg_color = c
 		sb.set_corner_radius_all(int(r.size.y * 0.5))
+		if square_end:   # a fill: rounded where it starts, cut straight where it ends
+			sb.corner_radius_top_right = 0
+			sb.corner_radius_bottom_right = 0
 		sb.anti_aliasing = true
 		ci.draw_style_box(sb, r)
 
 	func _draw() -> void:
 		var st: BikePhysics = hud.game.phys
-		var sprinting := st.sprint > 0.5
-		var low := st.stamina < 0.25 and not st.tired
-		var col := Color("4fd1ff")
-		if st.tired: col = Color("8d979c")
-		elif low: col = Color("ff8a2a")
+		var val: float = hud.life if life else st.stamina
+		var tired := st.tired and not life
+		var sprinting := st.sprint > 0.5 and not life
+		var low := val < 0.25 and not tired
+		var col := Color("ff4d5e") if life else Color("4fd1ff")
+		if tired: col = Color("8d979c")
+		elif low and not life: col = Color("ff8a2a")
 		elif sprinting: col = UITheme.ACCENT
-		shown = lerpf(shown, st.stamina, 0.25)
+		if heal > 0.0: col = col.lerp(Color("5dff8a"), heal)
+		shown = lerpf(shown, val, 0.25 if heal <= 0.0 else 0.06)   # a revive fills up visibly
 		var pulse := 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.012) if low else 1.0
 		var h := size.y
-		# bolt icon on the left
+		if shake > 0.0:
+			draw_set_transform(Vector2(sin(Time.get_ticks_msec() * 0.09) * 4.0 * shake, 0))
 		var ix := 8.0
 		var cy := h * 0.5
-		var bolt := PackedVector2Array([Vector2(ix + 3, cy - 6), Vector2(ix - 3, cy + 1), Vector2(ix, cy + 1),
-			Vector2(ix - 2, cy + 6), Vector2(ix + 4, cy - 1.5), Vector2(ix + 1, cy - 1.5)])
-		draw_colored_polygon(bolt, Color(col, 0.55 + 0.45 * pulse))
+		if life:   # heart icon on the left
+			var hc := Color(col, 0.55 + 0.45 * pulse)
+			draw_circle(Vector2(ix - 2.6, cy - 1.8), 3.2, hc)
+			draw_circle(Vector2(ix + 2.6, cy - 1.8), 3.2, hc)
+			draw_colored_polygon(PackedVector2Array([Vector2(ix - 5.6, cy - 0.8), Vector2(ix + 5.6, cy - 0.8), Vector2(ix, cy + 6)]), hc)
+		else:   # bolt icon on the left
+			var bolt := PackedVector2Array([Vector2(ix + 3, cy - 6), Vector2(ix - 3, cy + 1), Vector2(ix, cy + 1),
+				Vector2(ix - 2, cy + 6), Vector2(ix + 4, cy - 1.5), Vector2(ix + 1, cy - 1.5)])
+			draw_colored_polygon(bolt, Color(col, 0.55 + 0.45 * pulse))
 		# track
 		var tr := Rect2(22, 3, size.x - 22, h - 6)
+		if heal > 0.0: _pill(self, tr.grow(3 + 3 * heal), Color(0.36, 1.0, 0.54, 0.3 * heal))
 		_pill(self, Rect2(tr.position - Vector2(1, 1), tr.size + Vector2(2, 2)), Color(0, 0, 0, 0.55))
 		_pill(self, tr, Color(1, 1, 1, 0.10))
 		# fill
 		var fw := maxf(tr.size.y, tr.size.x * clampf(shown, 0, 1)) if shown > 0.01 else 0.0
 		if fw > 0.0:
-			if sprinting and not st.tired:
-				_pill(self, Rect2(tr.position - Vector2(2, 2), Vector2(fw + 4, tr.size.y + 4)), Color(col, 0.22))
-			_pill(self, Rect2(tr.position, Vector2(fw, tr.size.y)), Color(col, 0.55 + 0.45 * pulse))
+			if sprinting and not tired:
+				_pill(self, Rect2(tr.position - Vector2(2, 2), Vector2(fw + 2, tr.size.y + 4)), Color(col, 0.22), true)
+			_pill(self, Rect2(tr.position, Vector2(fw, tr.size.y)), Color(col, 0.55 + 0.45 * pulse), fw < tr.size.x - 0.5)
 			# lighter top half for a soft gloss
-			_pill(self, Rect2(tr.position + Vector2(1, 1), Vector2(maxf(fw - 2, 2), tr.size.y * 0.4)), Color(1, 1, 1, 0.22))
-			# bright leading edge
-			draw_rect(Rect2(tr.position.x + fw - 2, tr.position.y + 1, 2, tr.size.y - 2), Color(1, 1, 1, 0.8))
+			_pill(self, Rect2(tr.position + Vector2(1, 1), Vector2(maxf(fw - 1, 2), tr.size.y * 0.4)), Color(1, 1, 1, 0.22), fw < tr.size.x - 0.5)
 		# tick marks every 10 %
 		for i in range(1, 10):
 			var x := tr.position.x + tr.size.x * i / 10.0
@@ -904,7 +981,7 @@ class GetUpPrompt extends Control:
 		var st: BikePhysics = hud.game.phys
 		t += dt
 		var show: bool = st.crash_on and st.crash_t > 0.6
-		k = clampf(st.crash_hold / BikePhysics.GETUP_HOLD, 0.0, 1.0) if show else k
+		k = clampf(st.crash_hold / st.getup_need, 0.0, 1.0) if show else k
 		held = move_toward(held, 1.0 if (show and st.crash_hold > 0.0) else 0.0, dt * 12)
 		if OS.get_environment("BMX_GETUP_K") != "" and show:   # tests: draw it as if held this far
 			k = float(OS.get_environment("BMX_GETUP_K")); held = 1.0
@@ -920,10 +997,18 @@ class GetUpPrompt extends Control:
 		var f := UITheme.font(true)
 		var fs := 18
 		var y := size.y * 0.5
+		var ko: bool = hud.life <= 0.0   # out of life: revive instead of getting up
+		var act := "REVIVE" if ko else "GET UP"
+		if ko:
+			var p := 0.75 + 0.25 * sin(t * 6.0)
+			var tl := "KNOCKED OUT"
+			var tw0 := f.get_string_size(tl, HORIZONTAL_ALIGNMENT_LEFT, -1, 26).x
+			draw_string(f, Vector2((size.x - tw0) * 0.5 + 2, y - 22), tl, HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color(0, 0, 0, 0.5))
+			draw_string(f, Vector2((size.x - tw0) * 0.5, y - 24), tl, HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color(1, 0.3 * p, 0.28 * p))
 		var glyph := Settings.pad_active and key in ["A", "B", "X", "Y"]
 		if glyph:   # an Xbox face button: "HOLD (A) TO GET UP" with the button drawn in its colour
 			var l1 := "HOLD  "
-			var l2 := "  TO GET UP"
+			var l2 := "  TO " + act
 			var w1 := f.get_string_size(l1, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 			var w2 := f.get_string_size(l2, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 			var x0 := (size.x - (w1 + 24 + w2)) * 0.5
@@ -936,13 +1021,16 @@ class GetUpPrompt extends Control:
 			draw_circle(gc, 10.5, PadMap.FACE[["A", "B", "X", "Y"].find(key)])
 			draw_string(f, gc + Vector2(-12, 5.5), key, HORIZONTAL_ALIGNMENT_CENTER, 24, 15, Color.WHITE)
 		else:
-			var line := "HOLD  %s  TO GET UP" % key.to_upper()
+			var line := "HOLD  %s  TO %s" % [key.to_upper(), act]
 			var tw := f.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 			draw_string(f, Vector2((size.x - tw) * 0.5 + 1, y + 1), line, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0, 0, 0, 0.45))   # soft shadow
 			draw_string(f, Vector2((size.x - tw) * 0.5, y), line, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color.WHITE)
 		var bar := Rect2((size.x - 240) * 0.5, y + 14, 240, 5)
 		draw_rect(bar, Color(0, 0, 0, 0.45))
-		if k > 0.0: draw_rect(Rect2(bar.position, Vector2(bar.size.x * k, bar.size.y)), Color.WHITE)
+		if k > 0.0: draw_rect(Rect2(bar.position, Vector2(bar.size.x * k, bar.size.y)), Color("5dff8a") if ko else Color.WHITE)
+		if ko:   # the other way out: back to the start with full life
+			var l3 := "%s  BACK TO START" % Settings.prompt("respawn").to_upper()
+			draw_string(f, Vector2(0, y + 38), l3, HORIZONTAL_ALIGNMENT_CENTER, size.x, 13, Color(1, 1, 1, 0.6))
 
 class FlowLeds extends RefCounted:
 	## flow on the bike computer's LEDs, kept like real hardware (Wahoo-style): small pinhole LEDs in a
@@ -1095,28 +1183,194 @@ class AirCard extends Control:
 		visible = a > 0.01
 		if visible: queue_redraw()
 	func _draw() -> void:
-		var f := UITheme.font(true)
-		var bg := Color(0.055, 0.094, 0.12, 0.78)
-		var border := Color(1, 1, 1, 0.1)
-		if record != "": bg = Color(0.42, 0.28, 0.0, 0.85); border = Color("ffcf3a")
-		elif bailed: bg = Color(0.31, 0.05, 0.05, 0.8); border = Color(1, 0.31, 0.27, 0.8)
-		draw_style_box(UITheme.box(bg, 18, 0, border, 2), Rect2(Vector2.ZERO, size))
+		# same look as the trail alert banner: dark LCD-ink box, dot-matrix font, white + yellow
+		var f := UITheme.lcd_font()
+		var yel := Color("ffd21f")
+		var dim := Color(1, 1, 1, 0.6)
+		var bg := Color(Color("111417"), 0.92)
+		var border := Color(1, 1, 1, 0.12)
+		if record != "": border = yel
+		elif bailed: bg = Color(0.25, 0.04, 0.04, 0.92); border = Color(1, 0.31, 0.27, 0.8)
+		draw_style_box(UITheme.box(bg, 12, 0, border, 2), Rect2(Vector2.ZERO, size))
 		var tag := "BAILED" if bailed else ("AIR" if flying else "LANDED")
-		draw_string(f, Vector2(14, 18), tag, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, UITheme.MUTED)
-		var best := "best %.1f m" % float(GameState.records.longest)
-		draw_string(f, Vector2(14, 18), best, HORIZONTAL_ALIGNMENT_RIGHT, size.x - 28, 10, UITheme.MUTED)
-		draw_string(f, Vector2(0, 58), "%.1f" % dist, HORIZONTAL_ALIGNMENT_CENTER, size.x - 30, 38, UITheme.ACCENT if record != "" else Color.WHITE)
-		draw_string(f, Vector2(size.x / 2 + 30, 58), "m", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, UITheme.MUTED)
+		draw_string(f, Vector2(14, 22), tag, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color.WHITE)
+		var best := "BEST %.1fm" % float(GameState.records.longest)
+		draw_string(f, Vector2(14, 22), best, HORIZONTAL_ALIGNMENT_RIGHT, size.x - 28, 14, dim)
+		draw_string(f, Vector2(0, 62), "%.1f" % dist, HORIZONTAL_ALIGNMENT_CENTER, size.x - 30, 34, yel)
+		draw_string(f, Vector2(size.x / 2 + 34, 62), "m", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, dim)
 		if path.size() > 1:
 			var mx := maxf(1.0, path[path.size() - 1].x)
 			var my := 0.5
 			for p in path: my = maxf(my, absf(p.y))
 			var pts := PackedVector2Array()
-			for p in path: pts.append(Vector2(14 + (size.x - 28) * p.x / mx, 76 - p.y / my * 10))
-			draw_polyline(pts, Color("ff6a5a") if bailed else UITheme.ACCENT, 2.5, true)
-		draw_string(f, Vector2(14, 100), "↑ %.1f m" % height, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color.WHITE)
-		draw_string(f, Vector2(14, 100), "%.2f s" % air, HORIZONTAL_ALIGNMENT_RIGHT, size.x - 28, 12, Color.WHITE)
+			for p in path: pts.append(Vector2(14 + (size.x - 28) * p.x / mx, 80 - p.y / my * 10))
+			draw_polyline(pts, Color("ff6a5a") if bailed else yel, 2.5, true)
+		draw_string(f, Vector2(14, 102), "H %.1fm" % height, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color.WHITE)
+		draw_string(f, Vector2(14, 102), "%.2fs" % air, HORIZONTAL_ALIGNMENT_RIGHT, size.x - 28, 16, Color.WHITE)
 		if record != "":
-			var rw := f.get_string_size(record, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x + 24
-			draw_style_box(UITheme.box(Color("ffc21a"), 10, 0), Rect2(size.x / 2 - rw / 2, -10, rw, 20))
-			draw_string(f, Vector2(size.x / 2 - rw / 2, 4), record, HORIZONTAL_ALIGNMENT_CENTER, rw, 10, Color("3a2400"))
+			var rw := f.get_string_size(record, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 24
+			draw_style_box(UITheme.box(yel, 8, 0), Rect2(size.x / 2 - rw / 2, -11, rw, 22))
+			draw_string(f, Vector2(size.x / 2 - rw / 2, 5), record, HORIZONTAL_ALIGNMENT_CENTER, rw, 12, Color("111417"))
+
+
+## Style points, top left: the ride's STYLE total on top, the latest trick + "+1,250 x2" under it (a combo
+## multiplies every landing chained within COMBO_GAP seconds). Points count once the landing holds (BANK s);
+## a crash before that drops them ("BAILED") and ends the combo.
+## Eye candy: the trick's points roll up from 0, a shine sweeps over them; when they bank a "+N" flies up into
+## the total, which then counts up (gold, growing), sparks burst off it and a glow ring pulses out.
+class StylePop extends Control:
+	const COMBO_GAP := 4.0
+	const BANK := 0.7
+	const FLY_T := 0.45      # seconds the banked "+N" takes to fly into the total
+	const GOLD := Color("ffd21f")
+	var total := 0
+	var combo := 0
+	var since := 99.0      # seconds since the last scored landing
+	var label := ""
+	var pts := 0
+	var pend := 0.0        # time the shown points have been waiting to bank (-1 = banked)
+	var bailed := false
+	var a := 0.0
+	var pop := 0.0
+	var roll := 0.0        # the trick's points as shown, rolling up to pts
+	var shown := 0.0       # the total as shown, counting up to total
+	var tot_pop := 0.0     # the total's bump when points land in it
+	var ring := 1.0        # glow ring pulsing out of the total (0..1, 1 = done)
+	var combo_pop := 0.0
+	var flies := []        # {t, v}: banked points flying into the total
+	var sparks := []       # {p, v, life, max, c, s}
+
+	func add(p: int, l: String) -> void:
+		combo = combo + 1 if since < COMBO_GAP else 1
+		since = 0.0
+		pts = p * combo
+		label = l
+		pend = 0.0
+		bailed = false
+		roll = 0.0
+		a = 1.0; pop = 1.0
+		if combo > 1: combo_pop = 1.0
+		_burst(Vector2(30, 70), 8, Color.WHITE, 120.0)
+
+	func bail() -> void:
+		if pend >= 0.0 and pend < BANK and a > 0.0:
+			bailed = true; pend = -1.0; a = 1.0; pop = 0.6
+		combo = 0; since = 99.0
+
+	func _burst(at: Vector2, n: int, c: Color, speed: float) -> void:
+		for i in n:
+			var an := randf() * TAU
+			var sp := speed * (0.4 + randf() * 0.8)
+			var life := 0.45 + randf() * 0.4
+			sparks.append({"p": at + Vector2(randf() - 0.5, randf() - 0.5) * 10.0, "v": Vector2(cos(an), sin(an) - 0.6) * sp,
+				"life": life, "max": life, "c": c if randf() < 0.7 else Color.WHITE, "s": 1.5 + randf() * 2.5})
+
+	func _total_end() -> float:
+		var f := UITheme.font(true)
+		return f.get_string_size("STYLE  " + _num(roundi(shown)), HORIZONTAL_ALIGNMENT_LEFT, -1, 17).x
+
+	func _process(dt: float) -> void:
+		since += dt
+		if pend >= 0.0:
+			pend += dt
+			if pend >= BANK:
+				pend = -1.0
+				flies.append({"t": 0.0, "v": pts})
+		# the "+N" lands in the total: it counts up, bumps, sparks fly
+		for fl in flies: fl.t += dt
+		while flies.size() > 0 and flies[0].t >= FLY_T:
+			total += int(flies[0].v)
+			flies.pop_front()
+			tot_pop = 1.0; ring = 0.0
+			_burst(Vector2(_total_end() + 6, 10), 18, GOLD, 170.0)
+		if since > COMBO_GAP and not bailed: combo = 0
+		# roll the trick's points up (~0.35 s), count the total up (~0.8 s, eased)
+		roll = move_toward(roll, pts, maxf(pts * dt / 0.35, 1.0))
+		if shown < total:
+			shown = minf(total, shown + maxf((total - shown) * dt * 5.0, 60.0 * dt))
+		else: shown = total
+		pop = maxf(0.0, pop - dt * 4.0)
+		tot_pop = maxf(0.0, tot_pop - dt * 2.5)
+		combo_pop = maxf(0.0, combo_pop - dt * 3.0)
+		ring = minf(1.0, ring + dt * 2.2)
+		for sp in sparks:
+			sp.life -= dt
+			sp.v.y += 260.0 * dt
+			sp.v *= 1.0 - 1.5 * dt
+			sp.p += sp.v * dt
+		sparks = sparks.filter(func(sp): return sp.life > 0.0)
+		if since > 2.6 or (bailed and since > 1.6): a = maxf(0.0, a - dt * 2.0)
+		queue_redraw()
+
+	static func _num(n: int) -> String:
+		var t := str(absi(n))
+		var out := ""
+		while t.length() > 3:
+			out = "," + t.substr(t.length() - 3) + out
+			t = t.substr(0, t.length() - 3)
+		return t + out
+
+	## a string with a drop shadow, scaled about its left baseline point
+	func _txt(f: Font, at: Vector2, t: String, fs: int, c: Color, sc := 1.0) -> void:
+		draw_set_transform(at * (1.0 - sc), 0.0, Vector2(sc, sc))
+		draw_string(f, at + Vector2(1.5, 1.5), t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0, 0, 0, 0.5 * c.a))
+		draw_string(f, at, t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, c)
+		draw_set_transform(Vector2.ZERO)
+
+	func _draw() -> void:
+		var f := UITheme.font(true)
+		var hi := 0.7 + 0.3 * a
+		# ---- the total: counts up gold while it's catching up, bumps when points land
+		var counting := shown < total - 0.5
+		var lab := "STYLE  "
+		var lw := f.get_string_size(lab, HORIZONTAL_ALIGNMENT_LEFT, -1, 17).x
+		_txt(f, Vector2(0, 16), lab, 17, Color(1, 1, 1, hi * 0.8))
+		var tc := Color(1, 1, 1, hi).lerp(GOLD, clampf(tot_pop * 1.4 + (0.6 if counting else 0.0), 0, 1))
+		var nsc := 1.0 + 0.45 * ease(tot_pop, 0.4)
+		var num := _num(roundi(shown))
+		var nw := f.get_string_size(num, HORIZONTAL_ALIGNMENT_LEFT, -1, 17).x
+		if tot_pop > 0.0:   # soft gold glow behind the number
+			draw_circle(Vector2(lw + nw * 0.5, 10), (nw * 0.5 + 10) * nsc, Color(GOLD, 0.18 * tot_pop))
+		if ring < 1.0:      # a glow ring pulsing out
+			draw_arc(Vector2(lw + nw * 0.5, 10), 12 + ring * (nw * 0.5 + 40), 0, TAU, 40, Color(GOLD, 0.6 * (1.0 - ring)), 3.0 * (1.0 - ring) + 1.0, true)
+		_txt(f, Vector2(lw, 16), num, 17, tc, nsc)
+		# ---- the banked points flying up into the total
+		for fl in flies:
+			var k := clampf(fl.t / FLY_T, 0, 1)
+			var e := k * k * (3.0 - 2.0 * k)
+			var from := Vector2(0, 84)
+			var to := Vector2(lw + nw + 8, 16)
+			var pos := from.lerp(to, e) + Vector2(0, -38 * sin(PI * e))   # arcs up and over
+			var fs := int(lerpf(30, 15, e))
+			_txt(f, pos, "+" + _num(int(fl.v)), fs, Color(GOLD, 1.0 - 0.3 * k))
+		# ---- sparks
+		for sp in sparks:
+			var t: float = sp.life / sp.max
+			var c: Color = sp.c
+			draw_circle(sp.p, sp.s * (0.5 + 0.5 * t), Color(c, t))
+			draw_line(sp.p, sp.p - sp.v * 0.03, Color(c, t * 0.6), sp.s * 0.6)
+		if a <= 0.0: return
+		# ---- the trick name and its points
+		_txt(f, Vector2(0, 44), label, 20, Color(1, 1, 1, a))
+		var big := 34
+		var psc := 1.0 + 0.35 * ease(pop, 0.5)
+		if bailed:
+			_txt(f, Vector2(0, 84), "BAILED", big, Color(0.95, 0.3, 0.25, a), psc)
+			return
+		var banked := pend < 0.0
+		# once banked the points leave their spot: the flying copy takes over
+		var pa := a
+		if banked: pa = a * (1.0 - clampf(flies[flies.size() - 1].t / (FLY_T * 0.3), 0, 1) if flies.size() > 0 else 0.0)
+		if pa <= 0.01: return
+		var pc := Color(UITheme.ACCENT, pa) if banked else Color(1, 1, 1, pa)
+		var pt := "+" + _num(roundi(roll))
+		_txt(f, Vector2(0, 84), pt, big, pc, psc)
+		var pw := f.get_string_size(pt, HORIZONTAL_ALIGNMENT_LEFT, -1, big).x * psc
+		# a shine sweeping across the number while it rolls up
+		if not banked and pend < 0.5:
+			var sx := lerpf(-20, pw + 20, pend / 0.5)
+			draw_colored_polygon(PackedVector2Array([Vector2(sx, 54), Vector2(sx + 10, 54), Vector2(sx - 2, 90), Vector2(sx - 12, 90)]), Color(1, 1, 1, 0.35 * pa))
+		if combo > 1:   # combo multiplier punches in
+			var cs := 1.0 + 0.8 * ease(combo_pop, 0.4)
+			var cc := Color(GOLD, pa).lerp(Color(1, 1, 1, pa), combo_pop * 0.6)
+			_txt(f, Vector2(pw + 14, 82), "x%d" % combo, 26, cc, cs)

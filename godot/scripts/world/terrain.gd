@@ -26,6 +26,9 @@ const LAYER_GROUND := 1 << 1    # physics layer 2: chunk ground colliders (only 
 ## faster). false = everything through the GDScript TerrainField, which stays the reference. Falls back
 ## to GDScript by itself when the C# assembly can't be loaded (e.g. a non-.NET Godot build).
 const USE_CS := true
+## render layer bit only the ground meshes have (on top of layer 1): Decals with this cull mask paint the
+## ground and nothing lying on it
+const GROUND_LAYER := 1 << 10
 const CS_FIELD := "res://scripts/world/TerrainFieldCs.cs"
 var use_cs := USE_CS and OS.get_environment("BMX_TERRAIN_GD") == ""   # env BMX_TERRAIN_GD=1: GDScript (A/B runs); tools flip it before set_seed()
 
@@ -586,6 +589,7 @@ func _finalize(k: Vector2i) -> void:
 	var gi := MeshInstance3D.new()
 	gi.mesh = mesh
 	gi.material_override = mat
+	gi.layers = 1 | GROUND_LAYER   # + its own layer: ground-only decals (blood splats, fx/blood.gd) project onto it
 	gi.position = Vector3(ox, 0, oz)
 	gi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	node.add_child(gi)
@@ -639,6 +643,9 @@ func _finalize(k: Vector2i) -> void:
 		mms[name] = mm
 		if spec[3]:
 			small.append(node.get_child(node.get_child_count() - 1))
+	if o.has("gates"):
+		for g in o["gates"]:
+			node.add_child(TrailGate.build(g))
 	var sheds: Array = o["sheds"]
 	for i in sheds.size():
 		var buf: PackedFloat32Array = sheds[i]
@@ -646,6 +653,14 @@ func _finalize(k: Vector2i) -> void:
 			_multimesh(node, TerrainGeo.SHEDS[i], TerrainGeo.MAT["shed"], buf, buf.size() / 16, true)
 	for p in o["panels"]:
 		p["meshes"] = mms
+		if p.has("bb"):   # roadside billboard: its sponsor text (freed when it is smashed)
+			var bb: Dictionary = p["bb"]
+			p["labels"] = []
+			for s in [1.0, -1.0]:
+				var bas: Basis = bb["basis"] if s > 0 else Basis(Vector3.UP, PI) * bb["basis"]
+				var lb := TrailGate.label(bb["text"], bb["col"], bb["w"], bb["h"], bas, bb["at"] + bb["nrm"] * 0.045 * s)
+				node.add_child(lb)
+				p["labels"].append(lb)
 	fin_parts[3] += (Time.get_ticks_usec() - tp) / 1000.0; tp = Time.get_ticks_usec()
 	var colliders: Array = o["colliders"]
 	var rec := {"cx": k.x, "cz": k.y, "node": node, "colliders": colliders, "small": small, "rock_keys": [],
@@ -781,6 +796,21 @@ func grid_height(x: float, z: float) -> float:
 # ======================================================================
 # breakables
 # ======================================================================
+## the bike's front at tape height (null while crashed / not riding): what a grabbed tape stretches over
+func tape_push(p) -> void:
+	if _tapes: _tapes.push_at = p
+
+
+## a tape that was stretched but not torn springs back: whole again (hittable, drawn by its chunk)
+func restore_tape(sp: Dictionary) -> void:
+	if not sp["broken"]: return
+	sp["broken"] = false
+	for i in range(_broken.size() - 1, -1, -1):
+		if is_same(_broken[i]["rec"], sp): _broken.remove_at(i)
+	var ch = chunks.get(sp.get("chunk"))
+	if ch != null and ch.has("tape"): _rebuild_tape(ch)
+
+
 ## fences / cacti: smash it (hide the visual, throw rigid-body debris); tape: snap it (hide the span, hand
 ## its two halves to the ribbon sim). Returns true if it broke.
 func break_collider(c: Dictionary, vel: Vector3, at = null) -> bool:
@@ -792,13 +822,21 @@ func break_collider(c: Dictionary, vel: Vector3, at = null) -> bool:
 		_broken.append({"kind": "fence", "rec": panel})
 		var zero := Transform3D(Basis.from_scale(Vector3.ZERO), Vector3.ZERO)
 		var hit := Vector2(c["x"], c["z"])
+		# throw the debris first, only then hide the fence parts: a part is never hidden without its piece
+		var made: int = _debris.smash_fence(panel, vel, hit, c.get("chunk"))
+		if made <= 0:
+			panel["broken"] = false   # nothing came off: leave the fence standing
+			_broken.pop_back()
+			return false
 		for part in panel["parts"]:
 			if not TerrainDebris.fence_part_goes(part, hit):
 				continue   # a post you didn't hit stays standing
 			var mm: MultiMesh = panel["meshes"].get(part["kind"])
 			if mm:
 				mm.set_instance_transform(part["i"], zero)
-		_debris.smash_fence(panel, vel, hit, c.get("chunk"))
+		for lb in panel.get("labels", []):
+			if is_instance_valid(lb):
+				lb.queue_free()
 		return true
 	if c.has("cactus"):
 		var rec: Dictionary = c["cactus"]
@@ -820,7 +858,7 @@ func break_collider(c: Dictionary, vel: Vector3, at = null) -> bool:
 		var ch = chunks.get(sp.get("chunk"))
 		if ch != null:
 			_rebuild_tape(ch)
-		_tapes.snap(sp, Vector2(c["x"], c["z"]), vel)
+		_tapes.grab(sp, Vector2(c["x"], c["z"]), vel)
 		return true
 	return false
 

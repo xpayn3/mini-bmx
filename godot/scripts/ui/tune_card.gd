@@ -10,7 +10,7 @@ const TABS := [
 	["ride", "Ride", [
 		["Steering", ["T:Steering"]],
 		["Lean", ["T:Lean"]],
-		["Grip", ["T:Grip & slides", "T:Carving"]],
+		["Grip", ["T:Grip & slides", "T:Tyre grip sim", "T:Carving"]],
 		["Speed", ["T:Speed", "T:Momentum"]],
 		["Sprint", ["T:Sprint & wheelie"]],
 		["Body", ["T:Body stick"]],

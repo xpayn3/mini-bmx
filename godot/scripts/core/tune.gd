@@ -24,6 +24,15 @@ const DEFS := [
 		["slipRecover", "Slide catch", 8, 0.5, 15, 0.5, "/s"],
 		["slipMax", "Wash-out angle", 1.1, 0.4, 1.4, 0.05, "rad"],
 	]],
+	["Tyre grip sim", [
+		["gripRearLock", "Locked rear swings out (fishtail)", 1.0, 0, 2.5, 0.05, "×"],
+		["gripCatch", "Rider catches slides", 0.6, 0, 2, 0.05, "×"],
+		["gripLoose", "Loose patches (grip varies)", 0.5, 0, 1.5, 0.05, "×"],
+		["gripBumps", "Bumps knock the rear loose", 1.0, 0, 3, 0.05, "×"],
+		["gripPower", "Power slides / wheelspin", 1.0, 0, 3, 0.05, "×"],
+		["gripSquirm", "Tyres squirm in turns", 1.0, 0, 3, 0.05, "×"],
+		["gripPivot", "Rear swings round the front", 0.7, 0, 1, 0.05, ""],
+	]],
 	["Momentum", [
 		["turnWeight", "Turn weight", 0.09, 0, 0.5, 0.01, "s"],
 		["rollRes", "Rolling resistance", 0.8, 0.3, 1.5, 0.05, "×"],
@@ -68,6 +77,7 @@ const DEFS := [
 		["bikeLeanMul", "Bike leans extra", 1.55, 0.7, 2.0, 0.01, "×"],
 		["bikeLeanCap", "Bike lean soft cap", 1.3, 0.3, 1.5, 0.01, "rad"],
 		["bodyLean", "Body leans with bike", 0.7, 0.3, 1.0, 0.01, "×"],
+		["groundLeanMax", "Max lean against the ground (off-camber)", 1.05, 0.6, 1.4, 0.01, "rad"],
 	]],
 	["Legs & body", [
 		["legStiff", "Leg spring", 30, 4, 150, 1, ""],
@@ -118,7 +128,8 @@ const DEFS := [
 	]],
 	["Body stick", [
 		["stickShift", "Fore / aft reach (× weight shift)", 1.7, 0, 3, 0.05, "×"],
-		["manualFrom", "Manual: stick pulled back past", 0.55, 0.2, 0.95, 0.05, ""],
+		["manualFrom", "Manual / wheelie: stick pulled back past", 0.4, 0.1, 0.95, 0.05, ""],
+		["stickWheelie", "Wheelie (pedalling + stick back): front lifts to", 0.6, 0.1, 1.0, 0.01, "rad"],
 		["manualAngle", "Manual: front lifts to", 0.32, 0, 0.7, 0.01, "rad"],
 		["flickSteer", "Side lean turns the bars", 0.5, 0, 1, 0.05, ""],
 		["flickTurn", "Lean into a turn: extra turn", 4.0, 0, 10, 0.1, "m/s²"],
@@ -135,6 +146,8 @@ const DEFS := [
 		["stickYawRate", "Air: flat spin speed (stick at left / right edge)", 5.0, 1, 9, 0.1, "rad/s"],
 		["stickBodyCounter", "Air: body leans against the bike", 0.25, 0, 0.6, 0.05, "×"],
 		["stickBodyTilt", "Air: body stays as the bike tilts", 0.6, 0, 1, 0.05, "×"],
+		["tuckDrag", "Tuck: air drag cut (stick forward)", 0.42, 0, 0.8, 0.02, "×"],
+		["upDrag", "Sit up: extra air drag (stick back)", 0.3, 0, 1, 0.05, "×"],
 	]],
 	# dust (tuning card › Dust tab; not part of the ride presets: TunePresets keeps their current values)
 	["Dust look", [
@@ -166,7 +179,10 @@ const DEFS := [
 
 const PATH := "user://tune.cfg"
 ## bump VER when defaults are retuned: saved values of the RETUNED keys are dropped once
-const VER := 7
+const VER := 8
+## later retunes, per version: only these keys are dropped for saves older than that version (bumping VER
+## with one shared list would reset every earlier retuned key again)
+const RETUNED_AT := {8: ["manualFrom", "stickAirRoll", "stickSpinBuild", "stickYawRate"]}
 const RETUNED := ["steerRate", "steerRelease", "steerCurve", "turnSlow", "turnFast", "turnFloor", "steerMax", "slowSteer",
 	"barSpeed", "grip", "slipRecover", "slipMax", "turnWeight", "leanMax", "leanIn", "leanOut", "leanDamp", "bikeLeanMul", "bikeLeanCap", "flipAccel", "flipRate", "airTwist", "landBack", "travel", "popKick"]
 var defaults := {}
@@ -187,7 +203,11 @@ func _ready() -> void:
 	if cf.load(PATH) == OK:
 		var old_ver: int = cf.get_value("ui", "ver", 1)
 		for k in cf.get_section_keys("tune") if cf.has_section("tune") else []:
-			if old_ver < VER and k in RETUNED: continue   # new defaults win over values saved before the retune
+			if old_ver < 7 and k in RETUNED: continue   # new defaults win over values saved before the retune
+			var stale := false
+			for rv in RETUNED_AT:
+				if old_ver < rv and k in RETUNED_AT[rv]: stale = true
+			if stale: continue
 			if defaults.has(k):
 				base[k] = float(cf.get_value("tune", k))
 		pins = cf.get_value("ui", "pins", pins)

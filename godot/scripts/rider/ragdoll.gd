@@ -21,6 +21,11 @@ const FT_R := 14
 
 const WATER := -2.2   # terrain.js WATER: below it the body floats and drags
 const SUB := 3        # substeps per frame
+## the substep everything per-substep (damping, friction drag, joint tension) was tuned at: 120 Hz / SUB.
+## Shorter substeps (crash slow motion: Engine.time_scale 0.22) scale those terms so the body behaves the
+## same in game time (they used to act ~20x stronger in slow motion and set the body spinning).
+const H0 := 1.0 / 360.0
+var _no_lkeep := OS.get_environment("BMX_NO_LKEEP") != ""   # tests: compare without the spin fix
 const RAD := [0.2, 0.15, 0.12, 0.08, 0.06, 0.06, 0.08, 0.06, 0.06, 0.08, 0.07, 0.07, 0.08, 0.07, 0.07]
 
 ## [a, b, stiffness] rigid-ish bones; the torso is cross-braced so it keeps its shape
@@ -149,6 +154,19 @@ func _reset_points() -> void:
 	free_pt.resize(RAD.size())
 	free_pt.fill(0)
 	_touch.resize(RAD.size())
+	broken.clear()
+
+## BROKEN BONES (fx/blood.gd on a very hard hit): an elbow / knee whose bone broke has no muscle tension
+## and no fold limit left: the forearm / shin flops and can bend the wrong way. `kick` throws it the
+## wrong way at once. Returns false if already broken / torn off.
+var broken := {}              # elbow / knee index -> true
+const LIM_MID := {0: EL_L, 1: EL_R, 2: KN_L, 3: KN_R}   # LIMITS index -> the joint between its ends
+func break_joint(j: int, kick: Vector3) -> bool:
+	if broken.has(j) or free_pt[j] == 1 or not LIMB_NEXT.has(j): return false
+	broken[j] = true
+	var c: int = LIMB_NEXT[j]
+	q[c] = (q[c] as Vector3) - kick * (last_h if last_h > 0.0 else 1.0 / 360.0)
+	return true
 
 ## tear off the limb below joint a (shoulder / elbow / hip / knee): its bone a-b goes, b and below fly free
 ## on their own root point. Returns the root's index (-1: already off / not a limb joint).
@@ -249,21 +267,29 @@ func step(dt: float, colliders: Array) -> void:
 			_shapes.append({rock = true, x = c.x, z = c.z, y = base, R = c.r * 0.9, H = maxf(0.1, c.top - base)})
 		else:
 			_shapes.append({rock = false, x = c.x, z = c.z, R = maxf(0.08, (c.r - 0.1) * 0.6)})
+	var kt := h / H0
+	var air_damp := pow(0.998, kt)
+	var wet_damp := pow(0.94, kt)
+	var drag := pow(SLIDE_DRAG, kt)
 	for s in n:
 		for i in p.size():
 			var pp: Vector3 = p[i]
 			var qq: Vector3 = q[i]
 			var wet := pp.y < WATER
-			var damp := (0.94 if wet else 0.998) * (ratio if s == 0 else 1.0)
+			var damp := (wet_damp if wet else air_damp) * (ratio if s == 0 else 1.0)
 			var vel := (pp - qq) * damp
 			q[i] = pp
 			pp += vel
 			pp.y -= (2.0 if wet else 9.81) * h * h
 			p[i] = pp
 		t_fall += h
+		# the body's own muscles (reaching, tension, squirming) can bend it but can't spin it: whatever
+		# whole-body spin they add is taken back (only the ground / things it hits can turn it)
+		var L0 := _ang_mom()
 		_agency_update(h)
-		_neutral_pull()
+		_neutral_pull(kt)
 		_squirm(h)
+		if not _no_lkeep: _keep_ang_mom(L0)
 		_touch.fill(0)
 		for it in 6:
 			for j in BONES.size():
@@ -274,6 +300,7 @@ func step(dt: float, colliders: Array) -> void:
 				_dist(xb[0], xb[1], xb[2], 1.0, false)
 			for j in LIMITS.size():
 				if not cut.is_empty() and free_pt[LIMITS[j][0]] != free_pt[LIMITS[j][1]]: continue
+				if not broken.is_empty() and broken.has(LIM_MID.get(j, -1)): continue   # broken: folds any way
 				_dist(LIMITS[j][0], LIMITS[j][1], lim[j], 1.0, true)
 			for xl in _xlims:
 				_dist(xl[0], xl[1], xl[2], 1.0, true)
@@ -290,7 +317,7 @@ func step(dt: float, colliders: Array) -> void:
 			var d := sqrt(dx * dx + dz * dz)
 			if d < 1e-7: continue
 			var cut := minf(d, SLIDE_MU * 9.81 * h * h)   # Coulomb: speed drops by mu*g*h per substep
-			var k := (d - cut) / d * SLIDE_DRAG
+			var k := (d - cut) / d * drag
 			qq.x = pp.x - dx * k
 			qq.z = pp.z - dz * k
 			q[i] = qq
@@ -304,6 +331,51 @@ func step(dt: float, colliders: Array) -> void:
 		sp = maxf(sp, (p[i] as Vector3).distance_to(q[i]) / h)
 	speed = sp
 
+
+## the body's spin (angular momentum about its centre, equal masses, velocity = p - q); torn-off pieces
+## are their own bodies and left out
+func _ang_mom() -> Vector3:
+	var c := Vector3.ZERO
+	var m := 0
+	for i in p.size():
+		if i < free_pt.size() and free_pt[i] == 1: continue
+		c += p[i]
+		m += 1
+	c /= maxf(1.0, m)
+	var L := Vector3.ZERO
+	for i in p.size():
+		if i < free_pt.size() and free_pt[i] == 1: continue
+		var pp: Vector3 = p[i]
+		L += (pp - c).cross(pp - (q[i] as Vector3))
+	return L
+
+## put the body's spin back to L0: a rigid turn of every velocity by w = I^-1 (L - L0)
+func _keep_ang_mom(L0: Vector3) -> void:
+	var c := Vector3.ZERO
+	var m := 0
+	for i in p.size():
+		if i < free_pt.size() and free_pt[i] == 1: continue
+		c += p[i]
+		m += 1
+	c /= maxf(1.0, m)
+	var L := Vector3.ZERO
+	var xx := 0.0; var yy := 0.0; var zz := 0.0; var xy := 0.0; var xz := 0.0; var yz := 0.0
+	for i in p.size():
+		if i < free_pt.size() and free_pt[i] == 1: continue
+		var pp: Vector3 = p[i]
+		var r := pp - c
+		L += r.cross(pp - (q[i] as Vector3))
+		xx += r.x * r.x; yy += r.y * r.y; zz += r.z * r.z
+		xy += r.x * r.y; xz += r.x * r.z; yz += r.y * r.z
+	var dL := L - L0
+	if dL.length_squared() < 1e-14: return
+	var I := Basis(Vector3(yy + zz, -xy, -xz), Vector3(-xy, xx + zz, -yz), Vector3(-xz, -yz, xx + yy))
+	if absf(I.determinant()) < 1e-9: return
+	var w: Vector3 = I.inverse() * dL
+	for i in p.size():
+		if i < free_pt.size() and free_pt[i] == 1: continue
+		var r: Vector3 = (p[i] as Vector3) - c
+		q[i] = (q[i] as Vector3) + w.cross(r)
 
 func _com() -> Vector3:
 	var c := Vector3.ZERO
@@ -361,7 +433,7 @@ func _squirm(h: float) -> void:
 ## tension toward the neutral posture + a soft limit (see NEUTRAL)
 var tone_k := float(OS.get_environment("BMX_RAGDOLL_TONE")) if OS.get_environment("BMX_RAGDOLL_TONE") != "" else 1.0   # tests: x the tension / soft limit
 var nb_off := 0.0          # tests: summed neutral offsets (BMX_RAGDOLL_PROBE)
-func _neutral_pull() -> void:
+func _neutral_pull(kt := 1.0) -> void:
 	var b := _frame()
 	if not b.x.is_finite() or b.x.length_squared() < 0.5: return
 	var alive := exp(-t_fall / ALIVE_T)              # 1 at the start of the fall -> 0
@@ -372,6 +444,7 @@ func _neutral_pull() -> void:
 	for k in NEUTRAL.size():
 		var c: int = NEUTRAL[k][0]
 		if free_pt[c] == 1: continue   # torn off: no muscles left to hold it
+		if not broken.is_empty() and broken.has(NEUTRAL[k][1]): continue   # broken bone: nothing holds it
 		var par: int = NEUTRAL[k][1]
 		var L: float = _nlen[k]
 		var pc: Vector3 = p[par]
@@ -393,7 +466,7 @@ func _neutral_pull() -> void:
 		var lx := maxf(0.0, off - LIMIT * (1.0 - 0.4 * alive))
 		# pull by how far it is past the dead zone; past the soft limit the resistance climbs steeply
 		var f := (TONE * ex + LIMIT_K * lx * (1.0 + 2.0 * lx)) * tone_k * firm
-		var corr := d / dl * minf(f * L, (dl - dead * L) * 0.06)
+		var corr := d / dl * minf(f * L, (dl - dead * L) * 0.06) * (kt * kt)   # a spring: per substep ~ h^2
 		# never press a part that's on the ground down into it: the ground would push the body up (a jump)
 		if (_touch[c] == 1 and corr.y < 0.0) or (_touch[par] == 1 and corr.y > 0.0): corr.y = 0.0
 		# equal and opposite on the part and its parent: the body can't push itself along
@@ -401,7 +474,7 @@ func _neutral_pull() -> void:
 		p[par] = pc - corr * 0.5
 		# damping: bleed off the part's swing relative to its parent (muscles don't ring like springs)
 		var vrel: Vector3 = (cp - (q[c] as Vector3)) - (pc - (q[par] as Vector3))
-		var dv := vrel * TONE_DAMP
+		var dv := vrel * minf(0.5, TONE_DAMP * kt)
 		q[c] = (q[c] as Vector3) + dv * 0.5
 		q[par] = (q[par] as Vector3) - dv * 0.5
 

@@ -53,8 +53,9 @@ Player data: `%APPDATA%\Godot\app_userdata\Mini BMX\` — `settings.cfg`, `tune.
 W/↑ pedal · S/↓ brake · A/D steer · **Space** hop/pump (hold to charge; **in the air: tuck the bike up**) ·
 **S/W pressed fresh as you leave a lip: throw a back/front flip** · **W/S in the air: tilt the bike nose down/up (limited, body shift)** · **A/D in the air: lean the bike left/right (no spins)** · **brake + A/D when slow: pivot (pirouette)** · Shift sprint (stamina) · Q/E shift gears · F bail · Backspace back to
 start · R new world · B next bike · C next camera · Z/X rotate camera · +/- zoom · mouse drag orbit ·
-H records · **P / K / L** the tuning card on its Ride / Rider / Look tab · O photo mode · F1 hide HUD ·
-F12 screenshot · Esc pause. Gamepad (Xbox): triggers pedal/brake, left stick steer, A hop, X sprint, bumpers gears, Y camera,
+H records · **M trail map** (pad: Share) · **P / K / L** the tuning card on its Ride / Rider / Look tab · **O photo mode** (free camera, see section 5) · F1 hide HUD ·
+F12 screenshot · **F11 / the small button bottom right: fullscreen on / off** (`ui/fullscreen_button.gd`, on every screen,
+saves Settings › window mode; in the garage it sits above Save / Save & ride) · Esc pause. Gamepad (Xbox): triggers pedal/brake, left stick steer, X hop (jump), A sprint, bumpers gears, Y camera, D-pad left / right rotate the camera,
 **right stick = the rider's body, all the time**: up / down shifts the weight forward over the bars / back (pulled well back
 rolling = a **manual**, yanked fresh at a lip = a flip throw, in the air = nose down / up), left / right throws the bike over under
 the body (leaning alone turns, leaning with the steer turns harder + grips more, a quick **flick** whips the bike round; in the
@@ -85,7 +86,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 | `scripts/bike/` | `bike_physics.gd` (the ride, fixed 120 Hz, 1:1 port of web `physics()` + new body model), `bike_rig.gd` (model, pose, pedals, grips, limb targets), `suspension.gd`, `bike_build.gd` (garage data: paint finishes, logos, wheels, suspension, cassettes, ride mods, stats), `wheel_gen.gd` (procedural wheels/tyres), `decals.gd`, `bike_fx.gd`, `grime.gd` (mud/wet overlay passes) |
 | `scripts/rider/` | `rider.gd` (procedural rider posed every frame; **skinned spine** with 5 bones), `rider_gear.gd` (helmet, goggles, torso geometry), `rider_geo.gd`, `ragdoll.gd` |
 | `scripts/world/` | `terrain.gd` (chunk streaming, LOD ground with skirts, decorations, water, debris, tape), `terrain_field.gd` (GDScript reference height field) + **`TerrainFieldCs.cs` / `TerrainFeatCs.cs` / `TerrainWoodCs.cs`** (C# port, must match exactly), `terrain_chunk_builder.gd` (worker-thread chunk build), `trail_course.gd`, `trail_features.gd`, `terrain_water.gd`, `terrain_debris.gd`, `tape_sim.gd` (torn tape ribbons), `atmos.gd` (wind, cloud shadows), shaders |
-| `scripts/game/` | `game.gd` (one ride: interpolated drawing between physics states, crash/ragdoll, fx feeding), `camera_rig.gd` (**trail** = default: high, a little from the side, turns with the trail ahead; diorama/close/chase/side/iso/top/orbit/drone/trackside/dolly), `ride_audio.gd` (procedural sound) + `FreewheelSynth.cs` (freehub clicks: modal resonances fitted to a real hub recording, click rate = wheel speed × 24, tone never pitch-shifted) + `GravelSynth.cs` (tyre roll: ~500 pebble knocks per metre, damped rings around 650 Hz + cracks + casing rumble, fitted to a tyres-on-gravel recording within ~2 dB per band; tone per surface) |
+| `scripts/game/` | `game.gd` (one ride: interpolated drawing between physics states, crash/ragdoll, fx feeding), `camera_rig.gd` (**trail** = default: high, a little from the side, turns with the trail ahead; C / pad Y cycle: trail, **helmet** (POV from the action cam on the helmet, `Rider.action_cam` built by `rider/action_cam.gd`, lightly stabilised, chase view while crashed; in a crash the camera body snaps off its hinge and tumbles away, `fx/flying_cam.gd`, a new one is on after getting up), chase, **drone** (banks into turns, noses down with speed, hovers in gusts, prop buzz + `ui/drone_osd.gd` REC / height / distance overlay), side, dolly, close, diorama, trackside, orbit, iso, top), `ride_audio.gd` (procedural sound) + `FreewheelSynth.cs` (freehub clicks: modal resonances fitted to a real hub recording, click rate = wheel speed × 24, tone never pitch-shifted) + `GravelSynth.cs` (tyre roll: ~500 pebble knocks per metre, damped rings around 650 Hz + cracks + casing rumble, fitted to a tyres-on-gravel recording within ~2 dB per band; tone per surface) |
 | `scripts/garage/garage.gd` | the garage scene (room, open roller door with the real world outside, rollers, standing rider, all tabs) |
 | `scripts/ui/` | `hud.gd`, `settings_menu.gd`, `tune_card.gd` (the one tuning card: Ride / Rider / Look / Sound tabs, each with category tabs), `quick_tune.gd`, `rider_panels.gd` (`POSE_DEFS`, `KITS`, `LOOK_ROWS` + saving), `ui_theme.gd` |
 | `scripts/fx/` | `fx.gd` (dust puffs, dirt chunks, **tyre tracks**), `ride_dust.gd` (GPU dust trail, FogVolume clouds) |
@@ -142,6 +143,21 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   `BMX_LIP_SHOT=prefix` for tests; `BOUNCE body_rms` in the `BMX_CLIP_PROBE` output.
 - **Rider › Style** sliders (pose keys): `hipSteady` (up / down leg spring), `standHeight`, `standBack`, `pedalChest`,
   `turnLow`, `turnTwist`, `turnHips`, `slowWobble`, `airCrouch`; Motion has `bodyBob` (pedalling up / down).
+- **Tyre grip sim** (`BikePhysics._grip_step`, Ride › Grip › *Tyre grip sim*): the slip (heading vs travel) is a second-order
+  motion `slip_w`: the rear tyre's sideways grip `grip_r` (friction circle after braking / driving × rear load × the loose patch
+  under it, `loose` from a noise field per surface) pulls it back, the front tyre pushes it round, the rider catches it
+  (`gripCatch`, drawn countersteer `bar_catch`). Locked rear = fishtail (`gripRearLock`), wheelspin in a turn steps out
+  (`gripPower`), pedal stamps / bumps (`gripBumps`) / chatter nudge it, tyres run a few degrees of slip angle in turns
+  (`gripSquirm`), the rear swings round the front (`gripPivot`). Probe: `BMX_GRIP_PROBE=1` (`GRIP` lines).
+- **Right-stick lean is filtered** (so both sticks together don't glitch): `Game._read_input` fades the off axis near an axis
+  (a side lean within ~15-35 deg of sideways carries no fore / aft: no accidental manual / tuck) + a 0.1 round deadzone; the
+  physics follows the stick on a critically damped spring (`flickSpeed`, top speed `FLICK_VMAX`); the lean-with-steer bonus
+  (`agree`) is continuous; the flick yaw kick fires only for a deliberate throw centre -> edge within `FLICK_WINDOW`, once.
+  (The old raw-derivative kick fired on ~47 % of frames with a real thumb.) Test: `BMX_PAD=1 BMX_BODY=thumb` (+ `BMX_FOLLOW`).
+- **Bank and lean room ignore rocks / logs** (`terrain.deck_height`): a rock under or beside a wheel used to read as a 30 deg
+  berm / a wall and snap the lean. Bank is read across both axles, +-0.5 m. The wheels still ride over the rocks.
+- **Physics overlay** (F3, `BMX_DEBUG_DRAW=1`, `scripts/game/debug_overlay.gd`, addon `addons/debug_draw_3d` = Debug Draw 3D
+  1.7.3, MIT, Windows libs only): travel vs heading, front wheel aim, turn force, rear grip bar, loose ground, flight path.
 - Safety net: `is_sane()` / `reset_body()` — a non-finite step restores the last good state.
 
 ### Terrain
@@ -161,6 +177,8 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   stored in course order). Chunks read rocks / stakes / fences from per-chunk buckets, route features are
   binary-searched — nothing scans the whole course. `tools/trail_grow_probe.gd` checks all of it.
 
+- **Sponsor props** (`TrailCourse.chunk_gates` / `chunk_boards`, fixed spacing by centreline index so growing never moves them): a huge steel gantry with a sponsor banner over the trail every 300 m (`TrailGate.build`, made-up brands in `TrailGate.SPONSORS`, no collision, skipped on jumps) and breakable wooden roadside billboards every ~80 m (fence-style panel in `TerrainChunkBuilder._boards`, so the bike smashes them; the Label3D text is freed on smash). Probe: `BMX_GATE_PROBE=1`.
+
 ### Rider
 - Procedural meshes posed every frame from the bike's grips/pedals with 2-bone IK; style dictionary
   (`Rider.NEUTRAL`) with a slider per bone: hips, **spine (hunch/arch, side curve, bend low/high, twist)**,
@@ -179,6 +197,46 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   pedalling out of the saddle swings the bike ~±6° (±10° sprinting) under a steady body; elbows bend
   back and down, only a little out (the arm IK pole's sideways part scales with `elbowsOut`). Saved poses migrate once (`RiderPanels.POSE_VER` / `POSE_RETUNED`: only values still
   at the old default change). `BMX_LEAN_SHOT=prefix` saves shots of the first deep leans.
+- **Aerodynamics** (`aero_k` in `bike_physics.gd`): the air drag scales with the body: right stick forward on the ground = a race tuck
+  (chest folded over the bars, hips back, knees bent) cuts drag by `tuckDrag` (0.42; half that while pedalling), stick back = sat up,
+  `upDrag` more (an air brake). Straight test: 65.9 → 68.3 km/h in 20 s.
+- **Posture is the player's**: neutral (stick centred) is an upright attack position (torso ~30 deg from vertical);
+  the right stick forward folds the rider down into the full tuck (`aero` in `rider.gd`, nothing tucks by itself at
+  speed any more), back sits up tall and back.
+- **Full-body leans** (right stick, `rider.gd`): forward = hips forward and up (legs extend), chest out over the bars,
+  chin forward, elbows up and out; back = hips behind and down, chest over the hips, arms long, elbows in; side
+  (`bodyLat` = `flick` on the ground / `air_stick.x` in the air) = the hips go to the outside of the leaning bike; in
+  the air a side lean is a tabletop (hips turn with the bike, shoulders back against it, hips drop so the feet stay
+  on the pedals). Test shots: `BMX_BODY=air:x,y` holds the stick mid-air.
+- **Rear-wheel clearance** (always on, in the safety limits, `wheelR` / `wheelRR` from game.gd): the hips may go below
+  the saddle but never inside the rear wheel's circle + 16 cm - the legs used to go into the wheel in the air.
+- **Skeleton safety limits** (`rider.gd`, just before the torso length clamp): hips in a box over the bike, the
+  torso bends only -26..80 deg forward and +-34 deg sideways from the bike's up; body counter-roll capped at ~50 deg.
+  Whatever stacks up (tuck, spin, lean, landing, sliders) the body can't be mangled.
+- **Air spin pose**: spinning in the air the rider sits tall and compact (knees in), head + shoulders lead.
+- **Style points** (`bike_physics._style_points` -> `hud.StylePop`): air time, 360s, flips, tweak, x1.5 clean landing,
+  combos (landings within 4 s chain and multiply); banked after 0.7 s, a crash before that = BAILED.
+- **Stick wheelie**: right stick pulled back while pedalling = a wheelie from walking pace (`stickWheelie`, height by
+  how far back), coasting = a manual (`manualAngle`); held > 1 s scores style points (WHEELIE / MANUAL x s).
+- **Pad steering curve** (`Settings.pad_expo`, Settings › Controller): the left stick's first travel tips the bike in
+  gently, full lock at the edge (keys unaffected).
+- **Pose memory resets on get-up** (`Rider.reset_pose`: wheelie / tuck / effort / turn smoothing) - a crash left a
+  "wheelie" behind that snapped the body about; the torso limit treats a chest below the hips as folded forward
+  (no flip-flop). Test: `BMX_BRAKETURN=secs` (sprint, then hard brake + full lock) prints `JITTER` / `JUMP` lines.
+- **Tune migrations**: `Tune.RETUNED_AT` lists keys whose defaults changed per version (only those reset).
+- **Tests run minimised**: `BMX_MIN=1` (they still render, screenshots work).
+- **Ride log** (`game/ride_log.gd`): the last 60 s of every physics step (bike physics, body, drawn-bike lift,
+  rider joints, all inputs) kept in a ring buffer; **R3 / F8** (`save_log`) writes it to
+  `%APPDATA%/Godot/app_userdata/Mini BMX/ridelogs/ride_<date>.csv` (last row = the press, `before_press` column).
+  The way to find a glitch the player saw. Test: `BMX_SAVELOG=secs`.
+- **Lean vs terrain**: the lean only changes as fast as the tyres are loaded (`kL *= load`): over a crest / edge the
+  bike carries its lean instead of snapping upright. The bank the bike feels changes at most 3 rad/s. The lean is
+  limited against the ground where the leaned tyre swings to (0.3 / 0.5 m to the lean side at both wheels,
+  `lean_room`, `groundLeanMax`): a deep lean toward rising ground beside the trail put the tyre into it and the
+  drawn bike was shoved up. Probe: `BMX_BANK_PROBE=1` (+ `BMX_FOLLOW=1 BMX_WEAVE=3.5` weaves over trail edges):
+  `BANKDROP`, `LIFT`, `BASEBIN` lines.
+- **Brake to a stop holds** (`brake_stop`): no creeping, even on slopes; a fresh brake press from a standstill backs up
+  (`brake_back`). Rolling backwards the cranks turn back with the wheel. Test: `BMX_HOLD_BRAKE=secs` (`HOLD` lines).
 - **Wheelie / manual pose** (`rider.gd`, `slope` from the physics): the front up on the ground is not a climb; the
   rider sits back, upright, arms long (leaning into the raised bars mangled the arms). Climbs use the ground slope.
 - **Joint limits** (`Rider.limb_ik`): elbows / knees are hinges that bend between `ELBOW_MIN`–`ELBOW_MAX` (12–150°) / `KNEE_MIN`–`KNEE_MAX` (4–160°); where a limb lines up with its pole the bend blends to a second pole (elbows: out + down, knees: up) instead of flipping, and the bend may swing round the limb at most `BEND_RATE` (6 rad/s). The slope body-levelling follows the bike pitch at most `PITCH_LEVEL_RATE` (it used to whip the torso mid-flip).
@@ -201,6 +259,12 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   foot / knee / hand is down (all three used to launch the body). `BMX_RAGDOLL_PROBE` prints `rise` / `vup` (how
   high / fast the centre of mass went up from the crash start; now ~0.01 m) and `RAGSTART` (buried parts, start v).
   Ground friction `SLIDE_MU` 1.1 + `SLIDE_DRAG` 0.97.
+  **No self-spinning**: the muscles (tension, reaching, squirm) bend the body but can't spin it — each substep the
+  whole-body angular momentum they add is taken back (`_keep_ang_mom`; only the ground / things hit turn it; the
+  joint pulls weren't collinear and used to spin the body up). Everything tuned per substep (damping, drag, tension)
+  is scaled to the substep length (`H0` = 1/360 s) so crash slow motion (time scale 0.22) behaves like normal time
+  (it was ~20x stiffer and spun the body 2.5 turns). `BMX_SPIN_PROBE=1` prints torso spin (rad/s, turns);
+  `BMX_NO_LKEEP=1` turns the spin fix off for comparison.
 - **Blood** (`fx/blood.gd`, Settings › Gameplay › Blood): bleeding ragdoll parts that slide drag smears
   (`shaders/blood_streak.gdshader`, one MultiMesh ring of 1500 flat quads, world-space noise so pieces join; fresh
   = dark glossy red, dries matt in 45 s), hard touch-downs leave splats + droplets (`fx.chunk`). No blood on the
@@ -209,11 +273,15 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   `SEVER_HIT` too, at most `SEVER_MAX` (2) per crash; hand / foot hit = at the elbow / knee, elbow / knee hit = at the
   shoulder / hip. `Ragdoll.sever(a)` drops bone a-b and gives the free piece its own root point (appended to `p`,
   `cut[b]` = its index); `Rider.pose_ragdoll(P, roots)` draws that segment from the root. Dark red caps on both
-  ends, the stump spurts in pulses for 2.5 s. The head never comes off (the user didn't want it). Getting up
+  ends; the stump pumps an **arterial jet** with every heartbeat (`JET_T` 9 s, `HEART_HZ` 2, `JET_SPEED`; drops in their own MultiMesh drawn stretched along their flight by `shaders/blood_jet.gdshader` so they join into one stream, pooling where they land), the torn-off piece pours out of its end. Smears start as a faint narrow trace and build up over the first metre of a slide (`_slid`), fade in as they're laid (shader `soak`), drawn as a thin see-through film with drag streaks (pooled = deep red, dried = brown). **Fatal crash** (> `FATAL_SPEED` 12 m/s or a limb torn off; `BMX_FATAL=1` forces it): once the body lies still a pool spreads from under the chest (+ each stump) to `POOL_R` over ~`POOL_T` s; it is a small real liquid simulation that follows the ground (`fx/blood_pool.gd` + C# `BloodPoolSim.cs`: 256x256 cells of 4 cm = 10.24 m; ground sampled every 16 cm (the draped mesh uses the same samples) via `top_height` + mm bumps; each cell passes blood to lower neighbours by the surface difference but keeps a thin film, so it runs downhill in rivulets, fills dips, spreads unevenly and stops by itself; a film thinner than 4.5 mm soaks into the dirt, whatever reaches the border drains (never a straight cut); a second pass `shaders/blood_halo.gdshader` darkens the soaked dirt round it (wet halo, creeps out over 20 s); the depth texture drives `shaders/blood_pool.gdshader`: opaque cut-out with MSAA alpha-to-coverage edge, mirror gloss / sky + SSR reflections, meniscus from the depth slope, small domed bubbles that pop, dries brown from the rim); it stays until a respawn. Hit splats are projected **Decals** (`Blood._decal`; 8 textures made once by `BloodSplatTex.cs`: merged random lobes, warped outline, droplets) that only paint the ground: terrain ground meshes carry an extra render layer `Terrain.GROUND_LAYER` (bit 10) and the decals' cull mask is that layer, so they hug every bump, never clip / flicker and never paint the rider or bike; they soak in, dry darker over 45 s, fade on a respawn. All blood decals sit 3 cm up (lifted further until no corner is under `top_height`) and are pulled toward the camera more with distance (no z-fighting / clipping). `BMX_NOGRIT=1` turns off crash grit (tests). **Broken bones** (`Blood._break`, crash > `BREAK_SPEED` 9 m/s, a hand / forearm / foot / shin hit > `BREAK_HIT`; `BMX_BREAK=1` forces): `Ragdoll.break_joint` drops that elbow / knee's tension + fold limit (it flops, thrown the wrong way), a procedural crunch sound, a plain bone-coloured capsule (2.2 cm thick) poking out of the outside of the bend at an angle, mostly inside the limb, in a bloody wound; torn-off limbs show bone in both stumps. **Bloody tyre tracks**: `Blood.tyre_color` (game.gd's tracks) prints red after a tyre rolled through a pool / splat (`Blood.blood_at`), fading over ~10 m. The C# + pool shaders are warmed up when the ride loads (their first use cost ~0.14 s mid-crash). The head never comes off (the user didn't want it). Getting up
   restores the body. Tests: `BMX_BLOOD_PROBE=1` (hits / smears / severs), `BMX_SEVER=1` forces one.
 - **WASTED** (`fx/wasted.gd`, Settings › Gameplay › Crash slow motion): on a crash time drops to 0.22× (sound pitched down via
   `AudioServer.playback_speed_scale`) for ~2.4 s real time, then eases back; the screen goes grey + vignette, the word
-  WASTED shows at once for 1.5 s then fades (the rider + bike drawn in front of it via a silhouette mask), flat red, squeezed narrow to fill the screen (no band, no stroke), the crash reason small below. Fades on getting up or after 5 s. Off in autotests unless `BMX_WASTED=1`.
+  WASTED (BAIL for a bail on purpose, F) shows at once for 1.5 s then fades (the rider + bike drawn in front of it via a silhouette mask), flat red, squeezed narrow to fill the screen (no band, no stroke), the crash reason small below. Fades on getting up or after 5 s. Off in autotests unless `BMX_WASTED=1`.
+- **New area banner** (`fx/area_title.gd`, `Game.area_title`): when the biome changes (and 1.6 s into a ride) the name shows
+  top centre in the WASTED type (same red condensed face, same squeeze, ~8.5 % of the screen tall), small "ENTERING" above.
+  Letters stamp down one after another from 2.4x with an overshoot, white-hot cooling to red; a red rule draws out from
+  the middle; out they drift apart and fade (~4 s). Real time; hidden with the HUD. Test: `BMX_AREA_AT=secs` freezes it.
 - Look: kits + a colour per part (helmet shell/peak, goggles, jersey, pants, gloves, shoes).
 
 ### Ride light (time of day)
@@ -236,6 +304,20 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - `FarHills` (`scripts/world/far_hills.gd`): coarse ground + far trees out to 2.6 km, built on a worker
   thread; past ~450 m it adds rolling ridges (title screen only) so every seed has a hilly skyline.
   Freed and the normal light restored when the ride starts. `BMX_SEED` now also fixes the menu world.
+- Menu (`main._show_menu`): two pages in one column under the title. Main: RIDE, GARAGE, world seed + NEW WORLD,
+  Settings / Controls / Quit. RIDE opens the **ride setup** page (`_menu_page_setup`): bike (Downhill / BMX) +
+  time of day (the `LightSettings.BUILTIN` presets), then GO. Test: `BMX_MENU_PAGE=setup`.
+- **Design tokens** (`scripts/ui/tokens.gd`, class `Tokens`): every colour, gap, corner, border and type size the
+  menus use. Look = flat, Metro-like: white paper cards, **no outlines, no drop shadows**, 1–3 px corners; the
+  selected / focused thing is shown by a fill or a coloured bar (`Tokens.MARK`), never an outline. Components in
+  `UITheme` are built only from tokens: `paper_theme()` (whole screens), `card_style()`, `marked()`, `btn_box()`,
+  `make_button(text, cb, kind)` / `style_button` (kinds primary / secondary / chip / link / tab), `display()`,
+  `caption()`, `text()`, `heading()`, `key_cap()`, `spacer()`. The title menu, the garage and the Settings / Controls
+  windows (`MenuBase`) use them; write new UI with them, no literal numbers or colours. The dark in-ride theme
+  (`get_theme()`, HUD) is not tokenised yet.
+- Display type: `UITheme.display_font(weight, slant)` = Bahnschrift (ships with Windows), condensed, optional
+  forward slant; used by the menu and the garage. Keep source files UTF-8: a 🎲 once got saved double-encoded
+  and showed as "ðŸŽ²" on the Random button.
 
 ### Garage (`--garage` or from the menu)
 - Brick room, painted-concrete floor, **open roller door straight behind the bike** with the real
@@ -251,7 +333,18 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   rise 0–50 mm, alloy / carbon; reshapes the dh.glb steer mesh, grips + levers follow), Shocks, Gears
   (chainring, cassettes), Rider (rider on **training rollers**, preview situations, every bone slider),
   Kit (rider standing beside the bike).
-- Compact UI drawn at `UI_SCALE` 0.82 with a fixed-width card; long labels ellipsize.
+- Compact UI drawn at `UI_SCALE` 0.82 with a fixed-width card; long labels ellipsize. Racing-game shop look on
+  flat white cards (tokens above): header card with the category bar (click or **Q / E**), every option list is a
+  ◀ VALUE ▶ stepper with a dot per option (`_choice`), segmented stat meters (`StatBar`), key-hint pill at the bottom.
+- **Part cards** (`_cards`): Bars (`Handlebar.MODELS`: Renthal, Race Face, Deity, Chromag, Spank, OneUp, ENVE…),
+  Shocks › Fork (`BikeBuild.FORK_MODELS`: Fox 40, BoXXer, Öhlins DH38, Bomber 58, DVO Onyx, Dorado, EXT Era; sets
+  travel + paints lowers / stanchions), Wheels › Tyres / Rims (the existing models). Each card shows a picture of the
+  part alone, rendered by `PartThumbs` (`scripts/garage/part_thumbs.gd`: an off-screen studio SubViewport, one part
+  per frame, cached by key; bars / forks are cut out of dh.glb's steer + fork_lower meshes, wheels from
+  `WheelGen`), brand, name and a spec line. Touching width / rise / material / travel makes the model "custom".
+- The **Coasting** rider preview is the showcase pose: sat on the saddle, sitting up (`relax` input to
+  `Rider.update_pose`: straighter back, chest up, chin up, whatever the saved riding pose).
+- Light: little volumetric haze (0.004), exposure 1.0, contrast 1.16 / saturation 1.18, depth fog from 90 m.
 - Bike height is placed from the **real tyre size and real axle positions** (no tyre clipping into the floor
   or the roller drums; verified with `BMX_TYRE_PROBE`).
 - Saved in `garage.json`; `GameState.bike_config()` applies it to the ride.
@@ -294,7 +387,70 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   capped cuts in flesh colour, seeds denser at bike height); chunks get convex hulls, collide with each other,
   and are flung by their distance from the hit (`TerrainDebris.smash_cactus`). Check: `tools/cactus_probe.gd`
   (every body / piece closed, piece volumes = whole, must say `PASS`).
+- **Race tape stretches before it snaps** (`TapeSim.grab`): riding into a span hands it to the sim pinned at both stakes, its
+  hit point carried on the bike's front (`Terrain.tape_push`, set by `Game` every frame). It pulls straight, stretches, and tears
+  only past `SNAP_STRAIN` (17 %); the halves whip back towards their stakes. Stop / back off / slide off its end / crash before
+  that and it springs back (`SETTLE` 1.3 s) and is whole again (`Terrain.restore_tape`). Strips are drawn through a Catmull-Rom
+  spline (`SUBD` 4 pieces per sim segment): smooth when floating, no extra sim cost. Test: `BMX_TAPE=dir/prefix` (or `1`),
+  `BMX_TAPE_SPEED`, `BMX_TAPE_STOP=secs` (`TAPE` lines: state, strain).
 - Torn race tape as cloth-like ribbons, wind over the grass, drifting cloud shadows, speed blur / FOV.
+
+### Photo mode (O, `scripts/game/photo_mode.gd`)
+- Time freezes (`Engine.time_scale = 0`), HUD hidden, the camera comes loose: `Game._process` calls `PhotoMode.update(real dt)`
+  instead of the ride; `CameraRig` / `hud` ignore input while `game.photo`; Esc / O / pad B / the card's ✕ leave.
+- Camera: right drag look (mouse captured), left drag orbit the rider (`pivot()`: the bike +1 m, the ragdoll's centre
+  after a crash), middle / shift + left drag pan, wheel dolly, ctrl + wheel zoom; WASD fly, Q / E down / up, Shift ×4,
+  Alt ×¼, arrows look, Z / X roll, - / = zoom, R back to the start view. Pad: sticks fly / look, LT / RT down / up,
+  LB / RB roll, D-pad zoom, A shoot, X grid, Y hide the card. Kept within `RANGE` (70 m) of the rider and 15 cm above
+  `Terrain.top_height`.
+- Card (right, Tab / H hides it): **Camera** (fly speed, FOV, roll, look sensitivity, smoothing), **Focus** (DoF, auto focus
+  on the rider = yellow brackets, F = focus under the cursor, aperture, in-focus depth, foreground blur, bokeh shape;
+  DoF quality forced high while open), **Light** (time, sun direction / strength, exposure, haze: a copy of
+  `LightSettings.current` through `Game._apply_light`, never saved; the ride's light comes back on leaving), **Look**
+  (filters, saturation / contrast / brightness on the env, temperature, tint, fade, vignette, grain, lens fringing in
+  `grade.gdshader`'s `photo` / `p_*` uniforms), **Frame** (aspect bars, composition grid, hide rider / bike).
+- Enter / F12 / pad A / the button: UI hidden for two frames, the shot is cropped to the frame and saved as
+  `user://screenshots/photo_<date>.png`, shutter flash. Look / focus / frame prefs persist in `user://photo.cfg`
+  (not in test runs).
+- Tests: `BMX_PHOTO=secs` (+ `BMX_PHOTO_CLOSE=secs`, `BMX_PHOTO_SET=key=val,...`, `BMX_PHOTO_FLY=dx,dy,dz,yaw,pitch`,
+  `BMX_PHOTO_ORBIT=px`, `BMX_PHOTO_TAB=Look`, `BMX_PHOTO_SNAP=1` prints `PHOTO <path> WxH`).
+
+### Paper: trail map (M) + pause leaflet (Esc) — and future paper menus
+- **`PaperSheet`** (`scripts/ui/paper_sheet.gd`, a CanvasLayer, layer 7): a folded sheet that comes up in front of the
+  camera and unfolds like a real map: up it comes cover first, the accordion is pulled open one panel after another
+  from the outside, then (rows = 2) the bottom half - folded up over the map face in every column - flips down once
+  every panel has come to rest; the creases relax into their few degrees only after that (bent creases opened
+  slits while it swung). Folding away runs it backwards. The held point follows the paper's middle smoothly. Its own small 3D world
+  (SubViewport: own light + shadows in the folds, no fog / DOF / time of day) drawn over the game, which is blurred +
+  darkened behind it. Every move is an underdamped **spring** (`Spring`: lift, half fold, one per crease) fired on a
+  timeline (`_drive`): quick, overshoots ~10 % and wobbles to rest; closing is firmer and bounces shut. Real time
+  (works at `Engine.time_scale = 0`). What's printed is any Control in `content` (a SubViewport page): `live = false`
+  -> `await bake()` prints once with mipmaps; `live = true` -> re-rendered every frame and **mouse / keys / pad go to
+  it** (clicks are ray-traced onto the panels as they lie, `page_point`). `unfold = false` keeps it folded (a
+  leaflet). cols even for unfolding (the outer panel's back = the cover, a strip under the page); odd cols only folded.
+  `close_actions` / `close_requested` / `auto_close`, `opened` / `closed`, `tempo` (< 1 slower; the map 0.4),
+  `sound_stream` (a recording played in random faded slices; the map: `assets/audio/map_unfold_gravel.ogg`). Paper = ambientCG **Paper003** (CC0) scan in
+  `assets/textures/paper/` × the print, creases worn (`shaders/paper_sheet.gdshader`). Rustle sound synthesised.
+- **Trail map** (`PaperMap`, `scripts/ui/paper_map.gd`; `Game.open_map` / `exit_map`): 4×2 panels (0.84 × 0.525 m),
+  two layers. **World** (`World`, `set_content`): a 1.6 × 1 km print around where it was made (2.56 px/m): real ground
+  colours washed out (sampled every 10 m) × hill shade (5 m), 5 m / 25 m contours, shore, 100 m grid with numbers,
+  trail in red dashes, route features, the last 90 s ridden, YOU ARE HERE. **Frame** (`Frame`, the page, printed with
+  alpha over it): white margin, neat lines, title block with the scale, legend, scale bar, north arrow, the cover.
+  Controls (`handheld`, hint at the bottom): **left stick / WASD / drag = travel** (the world scrolls under the paper,
+  `TRAVEL` m/s), **RT / LT / Q / E / wheel = zoom the print** 0.5–2.5× (the paper always stays fully in view; the frame
+  is reprinted when the zoom settles so scale bar + "1 : n" follow), right stick / numpad = tilt the sheet ±0.3 rad.
+  The view never runs past the world print; within `PREFETCH` (200 m) of its edge the next one is printed around
+  the view in the background and swapped in with no jump: the terrain is sampled on the main thread with the
+  game's own field, ≤ 4 ms a frame; land image, contours and mipmaps are built on a WorkerThreadPool task from that
+  plain data (waited for in `_exit_tree`); ~40 ms hitch for the GPU read-back + upload. **Don't hand C# terrain forks
+  to a worker from GDScript here**: their engine objects were finalized by C#'s GC after shutdown and crashed the quit. First print on opening ~0.6 s; reused if you're within 60 m. `BMX_MAP_SCROLL` prints the worst
+  frame while travelling. Ride frozen + HUD hidden while it's up; M / Esc / bail fold it away.
+  Unfolds at `tempo` 0.36 (~2.5 s) with the user's gravel-crunch recording. The screen fades (`main.fade`) run on real time, or
+  a map opened during one froze it as a haze.
+- **Pause leaflet** (`PausePamphlet`, `scripts/ui/pause_pamphlet.gd`, built in `main._pause`): a DL tri-fold (3 × 99 ×
+  210 mm, Z-folded, stays folded). Cover photo = the ride's last frame grabbed at the moment of pausing (centre crop,
+  away from the HUD corners), "DOWNHILL PARK / MINI BMX / <biome> · TRAIL GUIDE", the menu printed below as live
+  buttons (yellow highlighter on hover / focus). Settings / Controls hide it and show it again.
 
 ### HUD bike computer (`hud.gd` `GaugeView`)
 - Garmin-style computer bottom-left; six pages flipped with the ◀ ▶ bezel buttons under the screen (mouse):
@@ -310,9 +466,19 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   turn), route feature (`route_feats`: tabletop, kicker, rollers, bridge…) or rock garden within 120 m; a banner
   pops up over any page when a new one appears, then stays from 40 m in. Off the trail (> 15 m) or riding it
   backwards: no alerts. `BMX_ALERT_PROBE=1` walks 2.4 km of trail and prints every alert.
+- **Screen layout** (`hud.gd`): top left FPS / ride info / biome name / `StylePop` (STYLE total, trick + points: points
+  roll up, the banked "+N" flies into the total, which counts up gold with sparks + a ring, combo "xN" punches in);
+  top centre the jump card (`AirCard`, same dark LCD look as the alert); top right the **life bar** (red, heart) over
+  stamina. The trail alert fills the bike computer's lower screen under the speed (`GaugeView.draw_alert`: icon,
+  distance big in yellow, name below); `BMX_ALERT_DEMO=HR|SR|J|K` forces one for screenshots.
+- **Life** (`hud.life`): a crash takes 12–95 % by body speed (`on_crash(speed)`), heals 1.2 %/s from 4 s after it.
+  At zero the get-up prompt says KNOCKED OUT / hold hop 1.2 s to **revive** (`REVIVE_HOLD`, back with 50 %) or
+  Backspace back to start (full life, `on_respawn`). `BikePhysics.getup_need` is the hold time. Tests: `BMX_LIFE=0.1`
+  (start life), `BMX_LIFE_PROBE=1` (`LIFE` lines).
 - Piezo sounds (`ui/garmin_beep.gd`, rendered once into AudioStreamWAVs): a rising power-on chime 0.35 s after the
   HUD shows (ride start), a short key beep on the ◀ ▶ bezel buttons.
-- Small touches: "acquiring satellites" for the first 3 s of a ride, battery icon (drains 60 %/h of riding),
+- Small touches: "acquiring satellites" for the first 3 s of a ride, battery icon (full to empty in 30 min of riding, `BAT_LIFE`; blinks under 10 %). Back to start / new world (`hud.on_respawn`) restarts the computer: ride timer,
+  trip (distance, avg, max), battery, GPS fix and power-on chime; test `BMX_RESPAWN=secs` presses Backspace then,
   backlight for 3 s on a button press or a new alert.
 
 ### Settings & tuning
@@ -339,6 +505,9 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `--hitch=<secs>` (+ `BMX_HITCH_CSV`) | hunts frame spikes and explains them |
 | `BMX_SEED=4242` | fixed world (4242 is the usual test seed) |
 | `BMX_CAM=chase` / `BMX_CAM_ORBIT=rad` | camera mode / angle for autotest shots |
+| `BMX_GOPRO_PROBE=1` (+ `BMX_BAIL=secs`) | prints the torn-off GoPro's flight (`GOPRO` lines), gets up 2.5 s after the bail and checks a new one is mounted |
+| `BMX_CAM_CYCLE=1` | autotest presses C (next camera) every 0.6 s and prints `CAMCYCLE i mode` |
+| `BMX_GARAGE_HEAD=1` (+ `BMX_GARAGE_TAB=kit BMX_GARAGE_CAM=1.9,22,0.75`) | garage camera frames the standing rider's helmet (action cam close-ups) |
 | `BMX_SHOT=file.png` | screenshot at the end of an autotest |
 | `BMX_STRAIGHT=1` | autotest rides straight (no steering/hops) — good for track shots |
 | `BMX_IDLE=1`, `BMX_NOVSYNC=1`, `BMX_LOD=`, `BMX_NOLOD=1`, `BMX_PANEL=`, `BMX_PAUSE=`, `BMX_TAB=` | misc |
@@ -357,6 +526,7 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `BMX_TUNE=topSpeed=1.6,grip=1.1` | overrides tuning values for a test run (not saved) |
 | `BMX_LAUNCH=pedal/sprint` (+ `BMX_LAUNCH_HOLD=secs`, `BMX_LAUNCH_SHOTS=dir/prefix`) | autotest stops at 3 s and pedals / sprints away: prints 0–15/25/35 km/h times, nose-up angle, wheelie time, loop-out; HOLD lets go of sprint after secs |
 | `BMX_CAM_PROBE=1` | prints `CAMPROBE` at the end: camera rattle (2nd difference of its offset from the rider, mm), aim jitter (mrad), frames with camera shake, all at > 29 km/h on the ground |
+| `BMX_GRIP_PROBE=1` | tyre grip sim: `GRIP` lines 4× / s (slip, slip_w, rear grip, loose, squirm, drawn countersteer); try with `BMX_SKID=11 BMX_STRAIGHT=1` |
 | `BMX_VMAX=1` | autotest prints the top ground speed reached (`vmax_kmh`) |
 | `BMX_BIGAIR=1` (+ `BMX_TRICK=front/back`) | autotest launches every jump high (1.4 s air) so full flips happen |
 | `BMX_PITCH_POSE=rad` / `sweep` | draws the bike at a fixed pitch (or spinning through flips) for rider-pose shots |
@@ -383,7 +553,14 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `BMX_LAND_TEST=secs` / `BMX_BAIL=secs` | autotest fakes a hard landing (landing dust) / bails (crash dust) at that time |
 | `BMX_DEBRIS_PROBE=1` | fence / cactus debris: moving / resting counts and the lowest piece (none may fall through the ground) |
 | `BMX_SPRITE_DUST=1`, `BMX_SMOKE_PROBE=1` | old sprite dust for comparison / smoke-sim timing prints |
-| `BMX_FENCE=dir/prefix` (+ `BMX_FENCE_STYLE=ranch/picket`) | autotest rides into the nearest fence, screenshots before / after the smash |
+| `BMX_FENCE=dir/prefix` (+ `BMX_FENCE_STYLE=ranch/picket`, `BMX_FENCE_SPEED=m/s`, `BMX_FENCE_ANGLE=deg`) | autotest rides into the nearest fence, screenshots before / after the smash; with `BMX_DEBRIS_PROBE=1` every piece prints how far it landed from the hit and its gap to the drawn ground |
+| `BMX_MAP=secs` (+ `BMX_MAP_CLOSE=secs`, `BMX_MAP_TILT=x,y` holds the right stick, `BMX_MAP_SCROLL=x,y` the left stick, `BMX_MAP_ZOOM=z`) | autotest opens the trail map (presses M again); prints `AUTOTEST map: open= time_scale= hud=` |
+| `BMX_MAP_SHOTS=dir/prefix` | saves the paper sheet's own render every 0.1 s while it unfolds (`PAPERSHOT`) |
+| `BMX_PAPER_AT=secs` | freezes every paper sheet's animation at that time (pair with `BMX_SHOT` for a frame mid-unfold) |
+| `BMX_PAUSE=1` (+ `BMX_PAUSE_HOVER=0.62`) | pause leaflet at the end of an autotest; HOVER moves the mouse to that screen height and prints where it lands on the page |
+| `BMX_OFFSCREEN=1` | a normal window parked off the screens instead of `BMX_MIN`: **minimised windows draw late**, so timed screenshots of animations come out stale — use this for those |
+| `BMX_PHOTO=secs` (+ `BMX_PHOTO_CLOSE`, `_SET`, `_FLY`, `_ORBIT`, `_TAB`, `_SNAP`) | autotest opens photo mode, sets card values, moves the camera, saves a photo; prints `AUTOTEST photo:` |
+| `BMX_FENCE_ALL=1` | smashes every fence within 70 m at random 4–18 m/s, 7 s later counts pieces buried / invisible / freed (all must be 0) |
 
 Typical check after a change: build C# → `--autotest=10` with `BMX_SEED=4242` (sane=true, no SCRIPT ERROR)
 → a `--shot` of what changed → look at the PNG. Frame rate reference: ~46–58 fps at 1600×900 with vsync
@@ -410,6 +587,10 @@ and other GPU apps open; uncapped ~430 fps on an RTX 3090 after the C# terrain.
   (0xC0000005 in ntdll, exit code 139 in bash, no Godot backtrace). Check test exit codes, not only the output.
 - PowerShell `Get-Content`/`WriteAllText` can change line endings — prefer the Edit tool for code edits.
 - Light through a doorway straight at the camera = glare; keep the sun high and to the side in the garage.
+
+- Minimised test windows (`BMX_MIN`) render late / irregularly: frame-timed screenshots of an animation all come out
+  the same. Use `BMX_OFFSCREEN=1` (or freeze the animation, `BMX_PAPER_AT`) for those.
+- Packed arrays are values: `var dst := minor; dst.append(..)` does NOT append to `minor`.
 
 - Tyres are never drawn in the ground: see "Tyres follow the ground" in section 5 (`BikeRig.fit_wheels` / `unclip_tyres`). Smashed-fence / cactus debris is held above the terrain every physics
   tick (thin pieces used to tunnel through the chunk collision and vanish).

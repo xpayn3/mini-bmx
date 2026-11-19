@@ -20,6 +20,24 @@ const WIDTHS := [740, 760, 780, 800, 820]
 const RISES := [0, 10, 20, 30, 40, 50]
 const MATERIALS := [["alloy", "Alloy (crown paint)"], ["carbon", "Carbon gloss"], ["carbon_matte", "Carbon matte"]]
 
+## popular DH bars (our approximation: width / rise snapped to the sizes above). Picking one sets the
+## width, rise and material; touching any of those turns the model back to "custom".
+const MODELS := {
+	"stock":        {"brand": "GLORY",      "label": "Stock riser",       "width": 780, "rise": 30, "material": "alloy"},
+	"fatbar":       {"brand": "RENTHAL",    "label": "Fatbar 35",         "width": 800, "rise": 30, "material": "alloy"},
+	"fatbar_c":     {"brand": "RENTHAL",    "label": "Fatbar Carbon 35",  "width": 800, "rise": 30, "material": "carbon_matte"},
+	"atlas":        {"brand": "RACE FACE",  "label": "Atlas 35",          "width": 820, "rise": 20, "material": "alloy"},
+	"sixc":         {"brand": "RACE FACE",  "label": "SixC 35",           "width": 820, "rise": 20, "material": "carbon"},
+	"skywire":      {"brand": "DEITY",      "label": "Skywire Carbon",    "width": 800, "rise": 20, "material": "carbon"},
+	"blacklabel":   {"brand": "DEITY",      "label": "Blacklabel 800",    "width": 800, "rise": 40, "material": "alloy"},
+	"bza":          {"brand": "CHROMAG",    "label": "BZA 35",            "width": 800, "rise": 50, "material": "alloy"},
+	"spike":        {"brand": "SPANK",      "label": "Spike 800 Vibrocore", "width": 800, "rise": 30, "material": "alloy"},
+	"oneup":        {"brand": "ONEUP",      "label": "Carbon Bar 35",     "width": 800, "rise": 40, "material": "carbon_matte"},
+	"m9":           {"brand": "ENVE",       "label": "M9 DH",             "width": 800, "rise": 10, "material": "carbon"},
+	"flat":         {"brand": "SPANK",      "label": "Oozy Flat 760",     "width": 760, "rise": 0,  "material": "alloy"},
+}
+const MATERIAL_SHORT := {"alloy": "Alloy", "carbon": "Carbon", "carbon_matte": "Carbon matte"}
+
 static var _cache := {}
 
 

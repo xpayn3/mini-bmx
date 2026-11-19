@@ -26,6 +26,7 @@ var rider_on := false
 var rider_pose := {}
 var rider_preview := "pedal"
 var tab_buttons := {}
+var thumbs: PartThumbs
 # rollers: three drums in a frame; with the rider on, the bike stands on them and pedals in place
 const DRUM_R := 0.055
 const DRUM_Y := 0.075                  # drum centre height
@@ -163,12 +164,12 @@ func _build_room() -> void:
 	env.fog_enabled = true
 	env.fog_mode = Environment.FOG_MODE_DEPTH
 	env.fog_light_color = Color(0.7, 0.78, 0.86)
-	env.fog_depth_begin = 40.0
-	env.fog_depth_end = 260.0
+	env.fog_depth_begin = 90.0
+	env.fog_depth_end = 420.0
 	env.fog_sky_affect = 0.0
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.3, 0.26, 0.22)   # a warm, dim shed (most light comes in by the door)
-	env.ambient_light_energy = 0.22
+	env.ambient_light_color = Color(0.52, 0.5, 0.47)   # a lit workshop: walls and the bike's sides never go black
+	env.ambient_light_energy = 0.32
 	# real light bounce: daylight off the floor and brick fills the shed (SDFGI)
 	env.sdfgi_enabled = true
 	env.sdfgi_use_occlusion = true
@@ -177,7 +178,8 @@ func _build_room() -> void:
 	env.sdfgi_energy = 1.0
 	env.sdfgi_bounce_feedback = 0.6
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_exposure = 1.05
+	env.tonemap_exposure = 1.0
+	env.tonemap_white = 6.0
 	env.ssao_enabled = true
 	env.ssao_radius = 0.5
 	env.ssao_intensity = 2.0
@@ -187,13 +189,13 @@ func _build_room() -> void:
 	env.glow_intensity = 0.3
 	env.glow_hdr_threshold = 1.2
 	env.volumetric_fog_enabled = true
-	env.volumetric_fog_density = 0.012          # dusty air: the sunbeam through the door shows
+	env.volumetric_fog_density = 0.004          # a little dust in the air: the beams show, the room stays clear
 	env.volumetric_fog_albedo = Color(0.95, 0.9, 0.82)
 	env.volumetric_fog_gi_inject = 0.3
 	env.volumetric_fog_length = 14.0
 	env.adjustment_enabled = true
-	env.adjustment_contrast = 1.06
-	env.adjustment_saturation = 1.08
+	env.adjustment_contrast = 1.16
+	env.adjustment_saturation = 1.18
 	we.environment = env
 	add_child(we)
 	# floor: polished concrete with a painted work-bay outline
@@ -326,6 +328,32 @@ func _build_room() -> void:
 	var fl_l := OmniLight3D.new()
 	fl_l.position = Vector3(-5.0, 2.8, -3.4); fl_l.light_color = Color(0.92, 0.95, 1.0); fl_l.light_energy = 0.6; fl_l.omni_range = 4.0
 	add_child(fl_l)
+	# workshop lighting so the bike reads from every side (it went black once orbited off the doorway):
+	# two cool-white ceiling tubes over the work area, a soft key from the front-right (true paint colour)
+	# and a rim from behind that lifts the bike off the background
+	var tube := StandardMaterial3D.new()
+	tube.emission_enabled = true; tube.emission = Color(0.94, 0.96, 1.0); tube.emission_energy_multiplier = 3.0
+	for tx in [-2.6, 2.6]:
+		_box(Vector3(0.12, 0.05, 2.4), Vector3(tx, 4.55, 1.2), tube)
+		_box(Vector3(0.2, 0.04, 2.5), Vector3(tx, 4.6, 1.2), steel)
+		var tl := OmniLight3D.new()
+		tl.position = Vector3(tx, 4.3, 1.2); tl.light_color = Color(0.93, 0.95, 1.0)
+		tl.light_energy = 1.6; tl.omni_range = 8.0; tl.omni_attenuation = 0.8
+		tl.light_volumetric_fog_energy = 0.1
+		add_child(tl)
+	var key := SpotLight3D.new()
+	add_child(key)
+	key.look_at_from_position(Vector3(2.8, 2.6, 3.2), Vector3(0, 0.8, 0), Vector3.UP)
+	key.spot_range = 9.0; key.spot_angle = 38.0; key.spot_angle_attenuation = 1.2
+	key.light_energy = 5.0; key.light_color = Color(1.0, 0.97, 0.92)
+	key.shadow_enabled = true; key.shadow_blur = 2.5
+	key.light_volumetric_fog_energy = 0.2
+	var rim := SpotLight3D.new()
+	add_child(rim)
+	rim.look_at_from_position(Vector3(-2.6, 2.4, -3.2), Vector3(0, 1.0, 0), Vector3.UP)
+	rim.spot_range = 8.0; rim.spot_angle = 35.0; rim.spot_angle_attenuation = 1.0
+	rim.light_energy = 4.0; rim.light_color = Color(0.85, 0.9, 1.0)
+	rim.light_volumetric_fog_energy = 0.1
 
 ## The real procedural world outside the door: the world seed you ride, turned so you look down the
 ## start of the trail (+X in the world) through the doorway (-Z here), with the spawn point just
@@ -533,7 +561,8 @@ func _pose_stand_rider(dt: float) -> void:
 		"crank": 0.0, "air": 0.0, "compress": 0.0, "hipShift": 0.0, "t": hand_t})
 
 const PREVIEWS := {
-	"coast": {"label": "Coasting", "pedal": 0.0, "pitch": 0.0, "air": 0.0, "compress": 0.0, "v": 4.0},
+	# coasting is the showcase pose: relaxed, sat on the saddle and sitting up (no attack crouch)
+	"coast": {"label": "Coasting", "pedal": 0.0, "pitch": 0.0, "air": 0.0, "compress": 0.0, "v": 4.0, "pose_v": 1.0, "body": -0.55, "drop": 0.0, "relax": 1.0},
 	"pedal": {"label": "Pedalling", "pedal": 1.0, "pitch": 0.0, "air": 0.0, "compress": 0.0, "v": 6.0},
 	"sprint": {"label": "Sprinting", "pedal": 1.0, "sprint": 1.0, "pitch": 0.0, "air": 0.0, "compress": 0.0, "v": 9.0},
 	"descend": {"label": "Descending", "pedal": 0.0, "pitch": -0.35, "air": 0.0, "compress": 0.06, "v": 10.0},
@@ -563,8 +592,8 @@ func _pose_rider(dt: float) -> void:
 	rig.lean_g.rotation = Vector3(-rock, 0, 0)
 	var lt := rig.limb_targets()
 	rider.update_pose(dt, {"footL": lt.footL, "footR": lt.footR, "handL": lt.handL, "handR": lt.handR,
-		"v": P.v, "lean": rock, "steer": 0.0, "yawRate": 0.0, "counter": 0.0, "rockRoll": rock, "headRoll": 0.0,
-		"absorb": 0.0, "pitch": P.pitch, "bodyLevel": 0.85, "attackDrop": 0.18, "pedal": P.pedal,
+		"v": P.get("pose_v", P.v), "bodyStick": P.get("body", 0.0), "relax": P.get("relax", 0.0), "lean": rock, "steer": 0.0, "yawRate": 0.0, "counter": 0.0, "rockRoll": rock, "headRoll": 0.0,
+		"absorb": 0.0, "pitch": P.pitch, "bodyLevel": 0.85, "attackDrop": P.get("drop", 0.18), "pedal": P.pedal,
 		"sprint": P.get("sprint", 0.0), "crank": preview_crank, "air": P.air, "compress": P.compress, "hipShift": 0.0, "t": hand_t})
 
 func _changed() -> void:
@@ -597,6 +626,8 @@ func _process(dt: float) -> void:
 	orbit = lerpf(orbit, orbit_t, minf(1.0, dt * 4))
 	pitch = lerpf(pitch, pitch_t, minf(1.0, dt * 4))
 	dist = lerpf(dist, dist_t, minf(1.0, dt * 4))
+	if stand_rider and OS.get_environment("BMX_GARAGE_HEAD") != "":   # tests: frame the standing rider's helmet
+		focus_t = stand_rider.head.global_position + Vector3(0, 0.15, 0)
 	focus = focus.lerp(focus_t, minf(1.0, dt * 4))
 	var p := deg_to_rad(pitch)
 	var dir := Vector3(sin(orbit) * cos(p), sin(p), cos(orbit) * cos(p))
@@ -629,6 +660,8 @@ func _unhandled_input(e: InputEvent) -> void:
 		pitch_t = clampf(pitch_t + e.relative.y * 0.2, -2, 70)
 	elif e.is_action_pressed("pause"):
 		_close(false)
+	elif e is InputEventKey and e.pressed and not e.echo and (e.keycode == KEY_Q or e.keycode == KEY_E):
+		_step_tab(-1 if e.keycode == KEY_Q else 1)
 
 # ================================================================ UI
 ## tests (BMX_TYRE_PROBE=1): every wheel-size / tyre-width combination, rider off and on: how far the
@@ -676,22 +709,21 @@ func _drum_gap(n: Node3D) -> float:
 
 ## the garage UI is drawn smaller than the game's menus so the bike stays in view
 const UI_SCALE := 0.82
-
-## the shared theme, tightened for the garage: smaller padding and corners
-static func _compact_theme() -> Theme:
-	var t: Theme = UITheme.get_theme().duplicate()
-	t.default_font_size = 15
-	t.set_stylebox("panel", "PanelContainer", UITheme.box(UITheme.PANEL, 14, 14))
-	t.set_stylebox("normal", "Button", UITheme.box(UITheme.PANEL_LIGHT, 7, 9))
-	t.set_stylebox("hover", "Button", UITheme.box(Color(1, 1, 1, 0.22), 7, 9))
-	t.set_stylebox("pressed", "Button", UITheme.box(UITheme.ACCENT, 7, 9))
-	t.set_stylebox("hover_pressed", "Button", UITheme.box(UITheme.ACCENT, 7, 9))
-	t.set_stylebox("focus", "Button", UITheme.box(Color(0, 0, 0, 0), 7, 9, UITheme.ACCENT, 2))
-	return t
+const INK := Tokens.INK
+const SUB := Tokens.INK_SOFT
+const LINE := Tokens.LINE
+const TABS := [["paint", "PAINT"], ["logos", "LOGOS"], ["wheels", "WHEELS"], ["bars", "BARS"], ["suspension", "SHOCKS"],
+	["drive", "GEARS"], ["rider", "RIDER"], ["kit", "KIT"]]
+const EDGE := Tokens.S7          # gap between the cards and the screen edge
+const BUILD_W := 330             # the build card (top right)
+const STAT_LABEL_W := 112
+const RIDE_W := 210
 
 func _build_ui() -> void:
+	thumbs = PartThumbs.new()
+	add_child(thumbs)
 	var root := Control.new()
-	root.theme = _compact_theme()
+	root.theme = UITheme.paper_theme()
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(root)
 	# draw the whole layer scaled down; the root is sized up to match so anchors still reach the edges
@@ -699,89 +731,111 @@ func _build_ui() -> void:
 	var fit := func(): root.size = get_viewport().get_visible_rect().size / UI_SCALE
 	fit.call()
 	get_viewport().size_changed.connect(fit)
-	var title := UITheme.label("GARAGE", 40, UITheme.ACCENT, true)
-	title.position = Vector2(32, 18)
-	root.add_child(title)
+	# header card: GARAGE + the category bar (Q / E or click)
+	var head_card := PanelContainer.new()
+	var hs := UITheme.card_style(); hs.content_margin_top = Tokens.S2; hs.content_margin_bottom = 0
+	head_card.add_theme_stylebox_override("panel", hs)
+	head_card.position = Vector2(EDGE, EDGE)
+	root.add_child(head_card)
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", Tokens.S6)
+	head_card.add_child(head)
+	var title := UITheme.display("GARAGE", Tokens.T_3XL, INK, Tokens.SLANT_TITLE)
+	title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	head.add_child(title)
+	var bar := HBoxContainer.new()
+	bar.add_theme_constant_override("separation", Tokens.S1)
+	head.add_child(bar)
+	bar.add_child(UITheme.key_cap("Q"))
+	var grp := ButtonGroup.new()
+	for t in TABS:
+		var b := UITheme.make_button(t[1], _set_tab.bind(t[0]), "tab", Tokens.T_XL)
+		b.toggle_mode = true; b.button_group = grp
+		b.button_pressed = t[0] == tab
+		b.focus_mode = Control.FOCUS_NONE
+		bar.add_child(b)
+		tab_buttons[t[0]] = b
+	bar.add_child(UITheme.key_cap("E"))
+	# the options card under it
 	panel = PanelContainer.new()
 	panel.set_anchors_preset(Control.PRESET_LEFT_WIDE)
-	panel.offset_left = 24; panel.offset_right = 404; panel.offset_top = 80; panel.offset_bottom = -90
+	panel.offset_left = EDGE; panel.offset_right = EDGE + Tokens.CARD_W
+	panel.offset_top = EDGE + Tokens.H_CHIP + Tokens.S6 + Tokens.S5; panel.offset_bottom = -(EDGE + Tokens.H_BTN + Tokens.S5)
 	root.add_child(panel)
-	var vb := VBoxContainer.new()
-	vb.add_theme_constant_override("separation", 10)
-	panel.add_child(vb)
-	var tabs := HBoxContainer.new()
-	tabs.add_theme_constant_override("separation", 3)
-	var grp := ButtonGroup.new()
-	var tab_box := func(c: Color) -> StyleBoxFlat:
-		var s := UITheme.box(c, 6, 5); s.content_margin_top = 6; s.content_margin_bottom = 6
-		return s
-	for t in [["paint", "Paint"], ["logos", "Logos"], ["wheels", "Wheels"], ["bars", "Bars"], ["suspension", "Shocks"], ["drive", "Gears"], ["rider", "Rider"], ["kit", "Kit"]]:
-		var b := Button.new()
-		b.text = t[1]; b.toggle_mode = true; b.button_group = grp
-		b.button_pressed = t[0] == tab
-		b.add_theme_font_size_override("font_size", 13)
-		b.add_theme_stylebox_override("normal", tab_box.call(UITheme.PANEL_LIGHT))
-		b.add_theme_stylebox_override("hover", tab_box.call(Color(1, 1, 1, 0.22)))
-		b.add_theme_stylebox_override("pressed", tab_box.call(UITheme.ACCENT))
-		b.add_theme_stylebox_override("hover_pressed", tab_box.call(UITheme.ACCENT))
-		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.pressed.connect(_set_tab.bind(t[0]))
-		tabs.add_child(b)
-		tab_buttons[t[0]] = b
-	vb.add_child(tabs)
 	var sc := ScrollContainer.new()
-	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	vb.add_child(sc)
+	panel.add_child(sc)
 	body = VBoxContainer.new()
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	body.add_theme_constant_override("separation", 8)
+	body.add_theme_constant_override("separation", Tokens.S3)
 	sc.add_child(body)
-	# performance bars, top right
+	# the build card, top right: name + performance meters
 	var sp := PanelContainer.new()
 	sp.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	sp.offset_left = -330; sp.offset_right = -24; sp.offset_top = 24
+	sp.offset_left = -(EDGE + BUILD_W); sp.offset_right = -EDGE; sp.offset_top = EDGE
 	root.add_child(sp)
 	stats_box = VBoxContainer.new()
+	stats_box.add_theme_constant_override("separation", Tokens.S2)
 	sp.add_child(stats_box)
+	stats_box.add_child(UITheme.caption("YOUR BUILD"))
 	var name_e := LineEdit.new()
 	name_e.text = build.name
 	name_e.placeholder_text = "Bike name"
+	name_e.add_theme_font_override("font", UITheme.display_font(Tokens.W_BLACK, Tokens.SLANT))
+	name_e.add_theme_font_size_override("font_size", Tokens.T_2XL)
+	var clear := UITheme.btn_box(Tokens.CLEAR, Tokens.CLEAR, 0, 0, 0)
+	name_e.add_theme_stylebox_override("normal", clear)
+	name_e.add_theme_stylebox_override("focus", UITheme.marked(Tokens.CLEAR, Tokens.ACCENT, SIDE_BOTTOM, 0, 0))
 	name_e.text_changed.connect(func(t): build.name = t)
 	stats_box.add_child(name_e)
 	for k in BikeBuild.stats(build):
-		var row := VBoxContainer.new()
-		row.add_child(UITheme.label(k.to_upper(), 12, UITheme.MUTED))
-		var bar := StatBar.new()
-		bar.custom_minimum_size = Vector2(280, 12)
-		row.add_child(bar)
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", Tokens.S3)
+		var l := UITheme.caption(k.to_upper(), INK)
+		l.custom_minimum_size.x = STAT_LABEL_W
+		row.add_child(l)
+		var sbar := StatBar.new()
+		sbar.custom_minimum_size.y = Tokens.S4
+		sbar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		sbar.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.add_child(sbar)
 		stats_box.add_child(row)
-		_stat_bars[k] = bar
+		_stat_bars[k] = sbar
 	_update_stats()
-	# bottom buttons
+	# bottom bar: back / stock / randomise left, hints in the middle, save + ride right
 	var bot := HBoxContainer.new()
 	bot.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	bot.offset_left = 24; bot.offset_right = -24; bot.offset_top = -72; bot.offset_bottom = -20
-	bot.add_theme_constant_override("separation", 10)
+	bot.offset_left = EDGE; bot.offset_right = -EDGE; bot.offset_top = -(EDGE + Tokens.H_BTN); bot.offset_bottom = -EDGE
+	bot.add_theme_constant_override("separation", Tokens.S3)
 	root.add_child(bot)
-	bot.add_child(UITheme.button("◀  Back", func(): _close(false)))
-	bot.add_child(UITheme.button("Stock", func(): build = BikeBuild.default_build(); _rebuild_bike(); _set_tab(tab); _update_stats()))
-	bot.add_child(UITheme.button("Randomise", _randomise))
+	var mk := func(text: String, cb: Callable, kind := "secondary") -> Button:
+		var b := UITheme.make_button(text, cb, kind, Tokens.T_XL if kind == "primary" else Tokens.T_LG)
+		b.custom_minimum_size.y = Tokens.H_BTN
+		return b
+	bot.add_child(mk.call("BACK", func(): _close(false)))
+	bot.add_child(mk.call("STOCK", func(): build = BikeBuild.default_build(); _rebuild_bike(); _set_tab(tab); _update_stats()))
+	bot.add_child(mk.call("RANDOMISE", _randomise))
 	var spacer := Control.new(); spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL; bot.add_child(spacer)
-	bot.add_child(UITheme.label("Drag to rotate · wheel to zoom", 13, UITheme.MUTED))
+	var pill := PanelContainer.new()
+	var ps := UITheme.card_style(Tokens.PILL, Tokens.R_PILL, Tokens.S4); ps.content_margin_top = Tokens.S2; ps.content_margin_bottom = Tokens.S2
+	pill.add_theme_stylebox_override("panel", ps)
+	pill.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var hints := HBoxContainer.new()
+	hints.add_theme_constant_override("separation", Tokens.S2)
+	pill.add_child(hints)
+	var first := true
+	for h in [["DRAG", "rotate"], ["WHEEL", "zoom"], ["Q E", "category"], ["ESC", "back"]]:
+		if not first:
+			var gap := Control.new(); gap.custom_minimum_size.x = Tokens.S3; hints.add_child(gap)
+		first = false
+		hints.add_child(UITheme.key_cap(h[0]))
+		hints.add_child(UITheme.caption(h[1].to_upper(), INK))
+	bot.add_child(pill)
 	var spacer2 := Control.new(); spacer2.size_flags_horizontal = Control.SIZE_EXPAND_FILL; bot.add_child(spacer2)
-	var save := UITheme.button("Save", func(): BikeBuild.save_build(build); _toast("Saved"))
-	bot.add_child(save)
-	var ride := UITheme.button("Save & ride  ▶", func(): _close(true), 20)
-	ride.custom_minimum_size.x = 200
+	bot.add_child(mk.call("SAVE", func(): BikeBuild.save_build(build); _toast("SAVED")))
+	var ride: Button = mk.call("SAVE & RIDE", func(): _close(true), "primary")
+	ride.custom_minimum_size.x = RIDE_W
 	bot.add_child(ride)
-	# solid backs: the buttons sit over the sunlit floor
-	for b in bot.get_children():
-		if b is Button:
-			b.add_theme_stylebox_override("normal", UITheme.box(Color(0.06, 0.11, 0.15, 0.92), 10, 16))
-			b.add_theme_stylebox_override("hover", UITheme.box(Color(0.14, 0.22, 0.28, 0.95), 10, 16))
-	ride.add_theme_stylebox_override("normal", UITheme.box(UITheme.ACCENT, 10, 16))
-	ride.add_theme_color_override("font_color", UITheme.NAVY)
 	_file_dialog = FileDialog.new()
 	_file_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
 	_file_dialog.access = FileDialog.ACCESS_FILESYSTEM
@@ -790,14 +844,22 @@ func _build_ui() -> void:
 	_file_dialog.file_selected.connect(_on_logo_file)
 	root.add_child(_file_dialog)
 
+## Q / E step through the categories
+func _step_tab(d: int) -> void:
+	var i := 0
+	for j in TABS.size():
+		if TABS[j][0] == tab: i = j
+	_set_tab(TABS[wrapi(i + d, 0, TABS.size())][0])
+
 func _close(ride: bool) -> void:
 	BikeBuild.save_build(build)
 	closed.emit(ride)
 
 func _toast(t: String) -> void:
-	var l := UITheme.label(t, 28, UITheme.ACCENT, true)
+	var l := UITheme.display(t, Tokens.T_2XL, Tokens.ACCENT)
+	l.add_theme_color_override("font_shadow_color", Tokens.SCENE_SHADOW)
 	l.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	l.position = Vector2(-60, 90)
+	l.position = Vector2(-Tokens.S8, Tokens.S8 * 2)
 	ui.get_child(0).add_child(l)
 	var tw := create_tween()
 	tw.tween_interval(0.8); tw.tween_property(l, "modulate:a", 0.0, 0.4); tw.tween_callback(l.queue_free)
@@ -831,39 +893,84 @@ func _set_tab(t: String) -> void:
 
 # ---------------------------------------------------------------- widgets
 ## a small grey hint line that wraps to the card's width (never widens it)
-func _note(text: String) -> void:
-	var l := UITheme.label(text, 12, UITheme.MUTED)
+func _note(t: String) -> void:
+	var l := UITheme.text(t, SUB, Tokens.T_XS)
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	body.add_child(l)
 
-func _h(text: String) -> void:
-	body.add_child(UITheme.label(text, 13, UITheme.ACCENT, true))
+func _h(t: String) -> void:
+	if body.get_child_count() > 0: body.add_child(UITheme.spacer(Tokens.S2))
+	body.add_child(UITheme.heading(t))
 
-func _row(text: String, ctl: Control) -> void:
+## caption shorthand for the pages
+func _cap(t: String, col := SUB) -> Label:
+	return UITheme.caption(t, col)
+
+func _row(t: String, ctl: Control) -> void:
 	var hb := HBoxContainer.new()
-	var l := UITheme.label(text, 14)
+	var l := UITheme.text(t)
 	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	# long names shorten with "…" (full name on hover) instead of widening the card
 	l.clip_text = true
 	l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	l.tooltip_text = text
+	l.tooltip_text = t
 	l.mouse_filter = Control.MOUSE_FILTER_PASS
 	hb.add_child(l)
-	ctl.custom_minimum_size.x = maxf(ctl.custom_minimum_size.x, 160)
+	ctl.custom_minimum_size.x = maxf(ctl.custom_minimum_size.x, Tokens.H_ROW_CTL)
 	hb.add_child(ctl)
 	body.add_child(hb)
 
-func _choice(text: String, items: Array, current, cb: Callable) -> OptionButton:
-	## items: [[value, label], ...]
-	var ob := OptionButton.new()
+## a part / option picker like a racing game's tuning shop: ◀ VALUE ▶ with a dot per option
+## items: [[value, label], ...]
+func _choice(t: String, items: Array, current, cb: Callable) -> Control:
 	var sel := 0
 	for i in items.size():
-		ob.add_item(str(items[i][1]))
 		if str(items[i][0]) == str(current): sel = i
-	ob.selected = sel
-	ob.item_selected.connect(func(i): cb.call(items[i][0]); _changed())
-	_row(text, ob)
-	return ob
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", Tokens.S1)
+	var hb := HBoxContainer.new()
+	hb.add_theme_constant_override("separation", 0)
+	var arrow := func(a: String) -> Button:
+		var b := UITheme.make_button(a, Callable(), "chip", Tokens.T_SM)
+		b.custom_minimum_size = Tokens.STEP_ARROW
+		b.focus_mode = Control.FOCUS_NONE
+		b.add_theme_stylebox_override("hover", UITheme.btn_box(Tokens.ACCENT))
+		b.add_theme_stylebox_override("pressed", UITheme.btn_box(Tokens.ACCENT_DOWN))
+		return b
+	var prev: Button = arrow.call("◀")
+	var next: Button = arrow.call("▶")
+	var val := UITheme.display(" ", Tokens.T_MD, INK, 0.0, Tokens.W_BOLD)
+	val.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	val.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	val.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	val.clip_text = true
+	val.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	val.mouse_filter = Control.MOUSE_FILTER_PASS
+	hb.add_child(prev); hb.add_child(val); hb.add_child(next)
+	box.add_child(hb)
+	var dots := HBoxContainer.new()
+	dots.alignment = BoxContainer.ALIGNMENT_CENTER
+	dots.add_theme_constant_override("separation", Tokens.S1)
+	if items.size() <= 14:
+		for i in items.size():
+			var d := ColorRect.new()
+			d.custom_minimum_size = Vector2(Tokens.S3, Tokens.S1)
+			dots.add_child(d)
+		box.add_child(dots)
+	var show := func():
+		val.text = str(items[sel][1]).to_upper()
+		val.tooltip_text = str(items[sel][1])
+		for i in dots.get_child_count():
+			(dots.get_child(i) as ColorRect).color = Tokens.ACCENT_DOWN if i == sel else LINE
+	show.call()
+	var step := func(d: int):
+		sel = wrapi(sel + d, 0, items.size())
+		show.call()
+		cb.call(items[sel][0]); _changed()
+	prev.pressed.connect(step.bind(-1))
+	next.pressed.connect(step.bind(1))
+	_row(t, box)
+	return box
 
 func _slide(text: String, lo: float, hi: float, stp: float, cur: float, unit: String, cb: Callable) -> void:
 	var hb := HBoxContainer.new()
@@ -872,8 +979,8 @@ func _slide(text: String, lo: float, hi: float, stp: float, cur: float, unit: St
 	s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	s.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var fmt := "%d " + unit if stp >= 1 else "%.1f " + unit
-	var vl := UITheme.label(fmt % cur, 14, UITheme.MUTED)
-	vl.custom_minimum_size.x = 64
+	var vl := UITheme.text(fmt % cur, SUB, Tokens.T_SM)
+	vl.custom_minimum_size.x = Tokens.S8 + Tokens.S5
 	s.value_changed.connect(func(v): vl.text = fmt % v; cb.call(v); _changed())
 	hb.add_child(s); hb.add_child(vl)
 	_row(text, hb)
@@ -889,15 +996,17 @@ func _color(text: String, cur: String, cb: Callable) -> void:
 func _swatches(cur: String, cb: Callable) -> void:
 	var g := GridContainer.new()
 	g.columns = 11
-	g.add_theme_constant_override("h_separation", 4)
-	g.add_theme_constant_override("v_separation", 4)
+	g.add_theme_constant_override("h_separation", Tokens.S2)
+	g.add_theme_constant_override("v_separation", Tokens.S2)
 	for hex in SWATCHES:
 		var b := Button.new()
-		b.custom_minimum_size = Vector2(26, 26)
+		b.custom_minimum_size = Vector2.ONE * (Tokens.S6 + Tokens.S2)
 		var on: bool = hex == cur
-		b.add_theme_stylebox_override("normal", UITheme.box(Color(hex), 6, 0, Color.WHITE if on else Color(1, 1, 1, 0.15), 3 if on else 1))
-		b.add_theme_stylebox_override("hover", UITheme.box(Color(hex).lightened(0.15), 6, 0, UITheme.ACCENT, 2))
-		b.add_theme_stylebox_override("pressed", UITheme.box(Color(hex), 6, 0, UITheme.ACCENT, 3))
+		# the picked colour gets an ink bar under it (flat: no outlines)
+		b.add_theme_stylebox_override("normal", UITheme.marked(Color(hex), INK, SIDE_BOTTOM, Tokens.R_SM, 0) if on else UITheme.box(Color(hex), Tokens.R_SM, 0))
+		b.add_theme_stylebox_override("hover", UITheme.marked(Color(hex).lightened(0.15), Tokens.ACCENT, SIDE_BOTTOM, Tokens.R_SM, 0))
+		b.add_theme_stylebox_override("pressed", UITheme.marked(Color(hex), Tokens.ACCENT, SIDE_BOTTOM, Tokens.R_SM, 0))
+		b.add_theme_stylebox_override("focus", UITheme.box(Tokens.CLEAR, Tokens.R_SM, 0))
 		b.pressed.connect(func(): cb.call(hex); _changed(); _set_tab(tab))
 		g.add_child(b)
 	body.add_child(g)
@@ -907,15 +1016,15 @@ func _paint_page() -> void:
 	_h("PART")
 	var g := GridContainer.new()
 	g.columns = 2
-	g.add_theme_constant_override("h_separation", 6)
-	g.add_theme_constant_override("v_separation", 6)
+	g.add_theme_constant_override("h_separation", Tokens.S2)
+	g.add_theme_constant_override("v_separation", Tokens.S2)
 	var grp := ButtonGroup.new()
 	for k in BikeBuild.PARTS:
 		var b := Button.new()
 		b.text = BikeBuild.PARTS[k][0]; b.toggle_mode = true; b.button_group = grp
 		b.button_pressed = k == part
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.add_theme_font_size_override("font_size", 14)
+		b.add_theme_font_size_override("font_size", Tokens.T_MD)
 		b.pressed.connect(func(): part = k; _set_tab("paint"))
 		g.add_child(b)
 	body.add_child(g)
@@ -926,31 +1035,31 @@ func _paint_page() -> void:
 	_h("FINISH")
 	var fg := GridContainer.new()
 	fg.columns = 4
-	fg.add_theme_constant_override("h_separation", 6)
-	fg.add_theme_constant_override("v_separation", 6)
+	fg.add_theme_constant_override("h_separation", Tokens.S2)
+	fg.add_theme_constant_override("v_separation", Tokens.S2)
 	var fgrp := ButtonGroup.new()
 	for f in BikeBuild.FINISHES:
 		var b := Button.new()
 		b.text = BikeBuild.FINISHES[f].label; b.toggle_mode = true; b.button_group = fgrp
 		b.button_pressed = f == P.finish
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.add_theme_font_size_override("font_size", 13)
+		b.add_theme_font_size_override("font_size", Tokens.T_MD)
 		b.pressed.connect(func(): P.finish = f; _changed(); _set_tab("paint"))
 		fg.add_child(b)
 	body.add_child(fg)
 	if P.finish == "pearl":
 		_color("Shift colour (at the edges)", P.color2, func(h): P.color2 = h)
-	var copy := UITheme.button("Copy this paint to the whole frame", func():
+	var copy := UITheme.make_button("Copy this paint to the whole frame", func():
 		for k in ["frame", "rear"]: build.paint[k] = P.duplicate()
-		_changed(), 14)
+		_changed(), "chip", Tokens.T_MD)
 	body.add_child(copy)
 
 func _logos_page() -> void:
 	_h("SPOT")
 	var g := GridContainer.new()
 	g.columns = 3
-	g.add_theme_constant_override("h_separation", 6)
-	g.add_theme_constant_override("v_separation", 6)
+	g.add_theme_constant_override("h_separation", Tokens.S2)
+	g.add_theme_constant_override("v_separation", Tokens.S2)
 	var grp := ButtonGroup.new()
 	var slots := BikeBuild.SLOTS.keys() + ["tyres", "rims"]
 	for k in slots:
@@ -958,7 +1067,7 @@ func _logos_page() -> void:
 		b.text = "Tyre walls" if k == "tyres" else ("Rims" if k == "rims" else BikeBuild.SLOTS[k].label)
 		b.toggle_mode = true; b.button_group = grp; b.button_pressed = k == logo_slot
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.add_theme_font_size_override("font_size", 13)
+		b.add_theme_font_size_override("font_size", Tokens.T_MD)
 		b.pressed.connect(func(): logo_slot = k; _set_tab("logos"))
 		g.add_child(b)
 	body.add_child(g)
@@ -970,11 +1079,11 @@ func _logos_page() -> void:
 			var lg: Dictionary = BikeBuild.LOGOS[k]
 			if lg.has("image") or lg.has("text"): items.append([k, lg.label])
 		for f in BikeBuild.imported_logos():
-			items.append(["file:" + f, "📁 " + f.get_file().get_basename()])
+			items.append(["file:" + f, "Imported · " + f.get_file().get_basename()])
 		_choice("Decal", items, L.logo, func(v): L.logo = v; _set_tab.call_deferred("logos"))
 		_choice("Repeats", [[1, "1 per side"], [2, "2 per side"], [3, "3 per side"], [4, "4 per side"]], int(L.get("count", 2)),
 			func(v): L.count = v)
-		var imp := UITheme.button("Import your own PNG…", func(): _file_dialog.popup_centered_ratio(0.6), 14)
+		var imp := UITheme.make_button("Import your own PNG…", func(): _file_dialog.popup_centered_ratio(0.6), "chip", Tokens.T_MD)
 		body.add_child(imp)
 		if L.logo == "text":
 			var te := LineEdit.new(); te.text = L.text; te.max_length = 14
@@ -1004,9 +1113,9 @@ func _logos_page() -> void:
 		if upright and (lg.has("text") or k == "text"): continue
 		items.append([k, lg.label])
 	for f in BikeBuild.imported_logos():
-		items.append(["file:" + f, "📁 " + f.get_file().get_basename()])
+		items.append(["file:" + f, "Imported · " + f.get_file().get_basename()])
 	_choice("Logo", items, L.logo, func(v): L.logo = v; _set_tab.call_deferred("logos"))
-	var imp := UITheme.button("Import your own PNG…", func(): _file_dialog.popup_centered_ratio(0.6), 14)
+	var imp := UITheme.make_button("Import your own PNG…", func(): _file_dialog.popup_centered_ratio(0.6), "chip", Tokens.T_MD)
 	body.add_child(imp)
 	_note("Transparent PNGs work best. Imported logos are kept in your garage.")
 	if L.logo == "text":
@@ -1034,14 +1143,12 @@ func _wheels_page() -> void:
 	_h("SIZE")
 	_choice("Front wheel", sizes, W.front, func(v): W.front = v)
 	_choice("Rear wheel", sizes, W.rear, func(v): W.rear = v)
-	var tip := UITheme.label("29\" front / 27.5\" rear is a mullet: big wheel rolls over, small one turns quick.", 12, UITheme.MUTED)
+	var tip := UITheme.text("29\" front / 27.5\" rear is a mullet: big wheel rolls over, small one turns quick.", SUB, Tokens.T_XS)
 	tip.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART   # wraps instead of widening the card
 	body.add_child(tip)
 	_h("TYRES")
-	var tyre_items := []
-	for k in BikeBuild.TYRE_MODELS: tyre_items.append([k, BikeBuild.TYRE_MODELS[k].label])
-	_choice("Model", tyre_items, W.tyre_model, func(v):
-		BikeBuild.apply_tyre_model(build, v); _set_tab.call_deferred("wheels"))
+	_wheel_cards(BikeBuild.TYRE_MODELS, W.tyre_model, BikeBuild.apply_tyre_model,
+		func(m): return "%.1f\"  ·  %s  ·  %s" % [m.tyre_w, m.tread.capitalize(), m.casing.capitalize()], "tyre")
 	var tyre_custom := func(): W.tyre_model = "custom"
 	_slide("Width", 2.3, 2.6, 0.1, W.tyre_w, "in", func(v): W.tyre_w = v; tyre_custom.call())
 	_choice("Tread", [["knobby", "Knobby (max grip)"], ["semi", "Semi-slick"], ["slick", "Slick (fast, sketchy)"]], W.tread, func(v):
@@ -1051,10 +1158,8 @@ func _wheels_page() -> void:
 	_choice("Profile", [["round", "Round"], ["square", "Square shoulders"]], W.casing, func(v): W.casing = v; tyre_custom.call())
 	_choice("Sidewall", [["black", "Black"], ["tan", "Tan wall"]], W.sidewall, func(v): W.sidewall = v)
 	_h("RIMS")
-	var rim_items := []
-	for k in BikeBuild.RIM_MODELS: rim_items.append([k, BikeBuild.RIM_MODELS[k].label])
-	_choice("Model", rim_items, W.rim_model, func(v):
-		BikeBuild.apply_rim_model(build, v); _set_tab.call_deferred("wheels"))
+	_wheel_cards(BikeBuild.RIM_MODELS, W.rim_model, BikeBuild.apply_rim_model,
+		func(m): return "%s  ·  %d mm wide  ·  %s" % [m.material.capitalize(), m.width, m.profile.capitalize()], "rim")
 	var rim_custom := func(): W.rim_model = "custom"
 	_choice("Profile", BikeBuild.RIM_PROFILE_NAMES, W.rim_profile, func(v): W.rim_profile = v; rim_custom.call())
 	_choice("Material", [["alloy", "Alloy"], ["carbon", "Carbon"]], W.rim_material, func(v): W.rim_material = v; rim_custom.call())
@@ -1071,26 +1176,121 @@ func _wheels_page() -> void:
 	_color("Nipples", W.nipple_color, func(h): W.nipple_color = h)
 	_color("Hubs", W.hub_color, func(h): W.hub_color = h)
 
+## part cards with a picture of the part alone (rendered by PartThumbs), brand, name and a spec line,
+## two to a row; the fitted one is outlined. items: [{key, brand, name, spec, thumb (cache key), make, view}]
+func _cards(items: Array, current: String, cb: Callable) -> void:
+	var g := GridContainer.new()
+	g.columns = 2
+	g.add_theme_constant_override("h_separation", Tokens.S3)
+	g.add_theme_constant_override("v_separation", Tokens.S3)
+	for it in items:
+		var on: bool = it.key == current
+		var b := Button.new()
+		b.custom_minimum_size.y = Tokens.CARD_TILE_H
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.tooltip_text = "%s %s" % [it.brand, it.name]
+		# flat tiles: grey at rest, lighter on hover; the fitted one is yellow-washed with a yellow bar
+		var rest := UITheme.marked(Tokens.ACCENT_TINT, Tokens.ACCENT, SIDE_BOTTOM, Tokens.R_LG, 0) if on else UITheme.box(Tokens.PAGE, Tokens.R_LG, 0)
+		b.add_theme_stylebox_override("normal", rest)
+		b.add_theme_stylebox_override("hover", UITheme.marked(Tokens.ACCENT_TINT if on else Tokens.FILL, Tokens.ACCENT if on else Tokens.LINE, SIDE_BOTTOM, Tokens.R_LG, 0))
+		b.add_theme_stylebox_override("pressed", UITheme.marked(Tokens.ACCENT_TINT, Tokens.ACCENT, SIDE_BOTTOM, Tokens.R_LG, 0))
+		b.add_theme_stylebox_override("focus", UITheme.box(Tokens.CLEAR, Tokens.R_LG, 0))
+		var col := VBoxContainer.new()
+		col.set_anchors_preset(Control.PRESET_FULL_RECT)
+		col.offset_left = Tokens.S3; col.offset_right = -Tokens.S3; col.offset_top = Tokens.S2; col.offset_bottom = -Tokens.S3
+		col.add_theme_constant_override("separation", 0)
+		col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var pic := TextureRect.new()
+		pic.custom_minimum_size.y = Tokens.CARD_THUMB_H
+		pic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		pic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		col.add_child(pic)
+		thumbs.request(it.thumb, it.make, it.view, func(t):
+			if is_instance_valid(pic): pic.texture = t)
+		col.add_child(UITheme.caption(String(it.brand), SUB, Tokens.T_XS))
+		var nm := UITheme.display(String(it.name).to_upper(), Tokens.T_LG)
+		nm.clip_text = true
+		nm.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		col.add_child(nm)
+		var sp := UITheme.text(String(it.spec), SUB, Tokens.T_XS)
+		sp.clip_text = true
+		sp.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		col.add_child(sp)
+		b.add_child(col)
+		if on:
+			var tag := UITheme.display("FITTED", Tokens.T_XS, INK, 0.0)
+			var ts := UITheme.btn_box(Tokens.ACCENT, Tokens.CLEAR, 0, Tokens.R_SM, Tokens.S2)
+			ts.content_margin_top = 0; ts.content_margin_bottom = 0
+			tag.add_theme_stylebox_override("normal", ts)
+			tag.position = Vector2(Tokens.S3, Tokens.S3)
+			b.add_child(tag)
+		b.pressed.connect(func(): cb.call(it.key); _changed(); _set_tab(tab))
+		g.add_child(b)
+	body.add_child(g)
+
 func _bars_page() -> void:
 	var B: Dictionary = build.bars
-	_h("HANDLEBAR")
-	_choice("Width", Handlebar.WIDTHS.map(func(w): return [w, "%d mm" % w]), int(B.width), func(v): B.width = v)
-	_choice("Rise", Handlebar.RISES.map(func(r): return [r, "%d mm" % r if r > 0 else "Flat"]), int(B.rise), func(v): B.rise = v)
-	_choice("Material", Handlebar.MATERIALS, B.material, func(v): B.material = v)
+	var cur: String = B.get("model", "custom")
+	_h("HANDLEBARS")
+	var items := []
+	for k in Handlebar.MODELS:
+		var m: Dictionary = Handlebar.MODELS[k]
+		items.append({"key": k, "brand": m.brand, "name": m.label,
+			"spec": "%d mm  ·  %s  ·  %s" % [m.width, ("%d mm rise" % m.rise) if m.rise > 0 else "flat", Handlebar.MATERIAL_SHORT[m.material]],
+			"thumb": "bar|%s|%s|%s" % [k, JSON.stringify(build.paint.crown), JSON.stringify(build.paint.grips)],
+			"make": PartThumbs.make_bars.bind(m, build.paint.crown, build.paint.grips), "view": Vector3(1.0, 0.75, 0.55)})
+	_cards(items, cur, func(k):
+		var m: Dictionary = Handlebar.MODELS[k]
+		B.model = k; B.width = m.width; B.rise = m.rise; B.material = m.material)
+	_h("FINE TUNE")
+	var custom := func(): B.model = "custom"
+	_choice("Width", Handlebar.WIDTHS.map(func(w): return [w, "%d mm" % w]), int(B.width), func(v): B.width = v; custom.call())
+	_choice("Rise", Handlebar.RISES.map(func(r): return [r, "%d mm" % r if r > 0 else "Flat"]), int(B.rise), func(v): B.rise = v; custom.call())
+	_choice("Material", Handlebar.MATERIALS, B.material, func(v): B.material = v; custom.call())
 	_note("Wide bars steer slower but steadier; narrow bars turn quicker. Alloy bars take the bars / stem colour from Paint.")
 
 func _susp_page() -> void:
 	var S: Dictionary = build.suspension
 	var rate := [[0, "Soft"], [1, "Medium"], [2, "Firm"]]
 	_h("FORK")
-	_slide("Travel", 160, 220, 10, S.fork_travel, "mm", func(v): S.fork_travel = int(v))
+	var items := []
+	for k in BikeBuild.FORK_MODELS:
+		var m: Dictionary = BikeBuild.FORK_MODELS[k]
+		items.append({"key": k, "brand": m.brand, "name": m.label,
+			"spec": "%d mm  ·  %s  ·  %s stanchions" % [m.travel, m.spring, m.coat],
+			"thumb": "fork|%s|%s" % [k, JSON.stringify(build.paint.crown)],
+			"make": PartThumbs.make_fork.bind(m.lowers, m.stanchions, build.paint.crown), "view": Vector3(0.35, 0.22, 1.0)})
+	_cards(items, S.get("fork_model", "custom"), func(k): BikeBuild.apply_fork_model(build, k))
+	_slide("Travel", 160, 220, 10, S.fork_travel, "mm", func(v): S.fork_travel = int(v); S.fork_model = "custom")
 	_choice("Spring", rate, S.fork_spring, func(v): S.fork_spring = v)
 	_h("REAR SHOCK")
 	_slide("Travel", 160, 220, 10, S.shock_travel, "mm", func(v): S.shock_travel = int(v))
 	_choice("Spring", rate, S.shock_spring, func(v): S.shock_spring = v)
 	_h("DAMPING")
 	_choice("Rebound", [[0, "Slow (planted)"], [1, "Medium"], [2, "Fast (poppy)"]], S.rebound, func(v): S.rebound = v)
-	_note("More travel soaks bigger drops; firmer springs pop and pump harder but kick on rough ground.")
+	_note("More travel soaks bigger drops; firmer springs pop and pump harder but kick on rough ground. Fork colours can be changed in Paint.")
+
+## "Maxxis Minion DHF" + MAXXIS -> "Minion DHF" (the card shows the brand above the name)
+static func _model_name(label: String, brand: String) -> String:
+	if label.to_upper().begins_with(brand): return label.substr(brand.length()).strip_edges()
+	var w := label.split(" ", false, 1)
+	if w.size() > 1 and brand.begins_with(w[0].to_upper()): return w[1]
+	return label
+
+## tyre / rim model cards: a front wheel built with that model on the current wheel
+func _wheel_cards(models: Dictionary, current: String, apply: Callable, spec_line: Callable, kind: String) -> void:
+	var items := []
+	for k in models:
+		var m: Dictionary = models[k]
+		if not m.has("brand"): continue
+		var tmp: Dictionary = build.duplicate(true)
+		apply.call(tmp, k)
+		var spec := BikeBuild.wheel_spec(tmp, false)
+		items.append({"key": k, "brand": m.brand, "name": _model_name(m.label, m.brand),
+			"spec": spec_line.call(m), "thumb": "%s|%s|%s" % [kind, k, JSON.stringify(spec)],
+			"make": PartThumbs.make_wheel.bind(spec, 0.3 if kind == "tyre" else 0.0), "view": Vector3(0.25, 0.75, 1.0) if kind == "tyre" else Vector3(0.3, 0.12, 1.0)})
+	_cards(items, current, func(k): apply.call(build, k))
 
 func _drive_page() -> void:
 	var D: Dictionary = build.drive
@@ -1116,14 +1316,14 @@ func _rider_page() -> void:
 	var on := CheckButton.new()
 	on.text = "  Rider on the bike (on rollers)"
 	on.button_pressed = rider_on
-	on.add_theme_font_size_override("font_size", 17)
+	on.add_theme_font_size_override("font_size", Tokens.T_MD)
 	on.toggled.connect(func(v):
 		rider_on = v; _save_rider_ui()
 		_rebuild_bike()   # onto / off the rollers
 		_set_tab.call_deferred("rider"))
 	body.add_child(on)
 	if not rider_on:
-		body.add_child(UITheme.label("Turn the rider on to see and shape the riding position: every joint has a slider, and the pose is used on the trail.", 13, UITheme.MUTED))
+		body.add_child(UITheme.text("Turn the rider on to see and shape the riding position: every joint has a slider, and the pose is used on the trail.", SUB, Tokens.T_XS))
 		body.get_child(body.get_child_count() - 1).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		return
 	var items := []
@@ -1131,13 +1331,13 @@ func _rider_page() -> void:
 	_choice("Preview", items, rider_preview, func(v): rider_preview = v; _save_rider_ui())
 	_pose_presets()
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 6)
-	row.add_child(UITheme.button("Reset pose", func():
+	row.add_theme_constant_override("separation", Tokens.S2)
+	row.add_child(UITheme.make_button("Reset pose", func():
 		rider_pose = PosePresets.preset(PosePresets.get_active())   # back to the chosen position
-		_apply_rider_pose(); _set_tab("rider"), 14))
-	row.add_child(UITheme.button("Mirror L → R", func():
+		_apply_rider_pose(); _set_tab("rider"), "chip", Tokens.T_MD))
+	row.add_child(UITheme.make_button("Mirror L → R", func():
 		rider_pose.elbowOutR = rider_pose.elbowOutL; rider_pose.kneeOutR = rider_pose.kneeOutL
-		_apply_rider_pose(); _set_tab("rider"), 14))
+		_apply_rider_pose(); _set_tab("rider"), "chip", Tokens.T_MD))
 	body.add_child(row)
 	for g in RiderPanels.POSE_DEFS:
 		_h(g[0].to_upper())
@@ -1153,7 +1353,7 @@ func _rider_page() -> void:
 			s.focus_mode = Control.FOCUS_NONE
 			var dec := clampi(ceili(-log(stp) / log(10.0)), 0, 3)
 			var fmt := "%." + str(dec) + "f " + unit
-			var vl := UITheme.label(fmt % s.value, 13, UITheme.MUTED)
+			var vl := UITheme.text(fmt % s.value, SUB, Tokens.T_XS)
 			vl.custom_minimum_size.x = 70
 			s.value_changed.connect(func(v): vl.text = fmt % v; rider_pose[key] = v; _apply_rider_pose())
 			hb.add_child(s); hb.add_child(vl)
@@ -1164,14 +1364,14 @@ func _kit_page() -> void:
 	var on := CheckButton.new()
 	on.text = "  Rider next to the bike"
 	on.button_pressed = stand_on
-	on.add_theme_font_size_override("font_size", 17)
+	on.add_theme_font_size_override("font_size", Tokens.T_MD)
 	on.toggled.connect(func(v):
 		stand_on = v; _save_rider_ui(); _update_stand_rider(); _rider_visibility())
 	body.add_child(on)
 	var look := RiderPanels.load_look()
 	_h("KITS")
 	var kits := GridContainer.new(); kits.columns = 3
-	kits.add_theme_constant_override("h_separation", 6); kits.add_theme_constant_override("v_separation", 6)
+	kits.add_theme_constant_override("h_separation", Tokens.S2); kits.add_theme_constant_override("v_separation", Tokens.S2)
 	for k in RiderPanels.KITS:
 		var kit_look: Dictionary = Rider.DEFAULT_LOOK.duplicate()
 		kit_look.merge(k[1], true)
@@ -1179,7 +1379,7 @@ func _kit_page() -> void:
 		b.text = k[0]
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.custom_minimum_size.y = 52
-		b.add_theme_font_size_override("font_size", 14)
+		b.add_theme_font_size_override("font_size", Tokens.T_MD)
 		# a strip of the kit's colours along the bottom of the button
 		var strip := HBoxContainer.new()
 		strip.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
@@ -1199,26 +1399,26 @@ func _kit_page() -> void:
 		for row in g[1]:
 			var key: String = row[0]
 			var hb := HBoxContainer.new()
-			hb.add_theme_constant_override("separation", 4)
+			hb.add_theme_constant_override("separation", Tokens.S2)
 			# the part's name on its own line above its colours: the full name fits and the swatches line up
-			body.add_child(UITheme.label(row[1], 13, UITheme.MUTED))
+			body.add_child(UITheme.text(row[1], SUB, Tokens.T_XS))
 			for hex in row[2]:
 				var b := Button.new()
-				b.custom_minimum_size = Vector2(22, 22)
+				b.custom_minimum_size = Vector2.ONE * Tokens.S6
 				var sel: bool = str(look[key]).to_lower() == str(hex).to_lower()
-				b.add_theme_stylebox_override("normal", UITheme.box(Color(hex), 12, 0, Color.WHITE if sel else Color(1, 1, 1, 0.2), 3 if sel else 1))
-				b.add_theme_stylebox_override("hover", UITheme.box(Color(hex), 12, 0, UITheme.ACCENT, 2))
-				b.add_theme_stylebox_override("pressed", UITheme.box(Color(hex), 12, 0, UITheme.ACCENT, 3))
+				b.add_theme_stylebox_override("normal", UITheme.marked(Color(hex), INK, SIDE_BOTTOM, Tokens.R_SM, 0) if sel else UITheme.box(Color(hex), Tokens.R_SM, 0))
+				b.add_theme_stylebox_override("hover", UITheme.marked(Color(hex), Tokens.ACCENT, SIDE_BOTTOM, Tokens.R_SM, 0))
+				b.add_theme_stylebox_override("pressed", UITheme.marked(Color(hex), Tokens.ACCENT, SIDE_BOTTOM, Tokens.R_SM, 0))
 				b.focus_mode = Control.FOCUS_NONE
 				b.pressed.connect(func(): look[key] = hex; _set_look(look); _set_tab("kit"))
 				hb.add_child(b)
 			var cp := ColorPickerButton.new()
 			cp.color = Color(look[key]); cp.edit_alpha = false
-			cp.custom_minimum_size = Vector2(34, 22)
+			cp.custom_minimum_size = Vector2(Tokens.S7, Tokens.S6)
 			cp.color_changed.connect(func(c): look[key] = "#" + c.to_html(false); _set_look(look))
 			hb.add_child(cp)
 			body.add_child(hb)
-	body.add_child(UITheme.button("Reset kit", func(): _set_look(Rider.DEFAULT_LOOK.duplicate()); _set_tab("kit"), 14))
+	body.add_child(UITheme.make_button("Reset kit", func(): _set_look(Rider.DEFAULT_LOOK.duplicate()); _set_tab("kit"), "chip", Tokens.T_MD))
 
 func _set_look(l: Dictionary) -> void:
 	RiderPanels.save_look(l)
@@ -1239,7 +1439,7 @@ func _pose_presets() -> void:
 	var names: Array = PosePresets.names()
 	var act := PosePresets.get_active()
 	var hb := HBoxContainer.new()
-	hb.add_theme_constant_override("separation", 4)
+	hb.add_theme_constant_override("separation", Tokens.S2)
 	var ob := OptionButton.new()
 	ob.size_flags_horizontal = Control.SIZE_EXPAND_FILL; ob.focus_mode = Control.FOCUS_NONE
 	for i in names.size():
@@ -1254,22 +1454,22 @@ func _pose_presets() -> void:
 		_set_tab.call_deferred("rider"))
 	hb.add_child(ob)
 	if not PosePresets.is_builtin(act):
-		var del := UITheme.button("Delete", func(): PosePresets.delete(act); _set_tab.call_deferred("rider"), 13)
+		var del := UITheme.make_button("Delete", func(): PosePresets.delete(act); _set_tab.call_deferred("rider"), "chip", Tokens.T_SM)
 		del.focus_mode = Control.FOCUS_NONE
 		hb.add_child(del)
 	_row("Position", hb)
-	_pose_mod = UITheme.label("Changed from \"%s\" — Save as to keep it" % act, 12, UITheme.MUTED)
+	_pose_mod = UITheme.text("Changed from \"%s\" — Save as to keep it" % act, SUB, Tokens.T_XS)
 	_pose_mod.visible = PosePresets.is_builtin(act) and PosePresets.modified()
 	body.add_child(_pose_mod)
 	var sv := HBoxContainer.new()
-	sv.add_theme_constant_override("separation", 4)
+	sv.add_theme_constant_override("separation", Tokens.S2)
 	var le := LineEdit.new()
 	le.placeholder_text = "New position name"
 	le.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var save := func(): PosePresets.save_as(le.text); _set_tab.call_deferred("rider")
 	le.text_submitted.connect(func(_t): save.call())
 	sv.add_child(le)
-	var sb := UITheme.button("Save as", save, 13)
+	var sb := UITheme.make_button("Save as", save, "chip", Tokens.T_SM)
 	sb.focus_mode = Control.FOCUS_NONE
 	sv.add_child(sb)
 	body.add_child(sv)
@@ -1295,5 +1495,17 @@ class StatBar extends Control:
 	func _process(dt: float) -> void:
 		k = lerpf(k, target, minf(1.0, dt * 6)); queue_redraw()
 	func _draw() -> void:
-		draw_style_box(UITheme.box(Color(1, 1, 1, 0.12), 4, 0), Rect2(Vector2.ZERO, size))
-		draw_style_box(UITheme.box(UITheme.ACCENT, 4, 0), Rect2(Vector2.ZERO, Vector2(size.x * clampf(k, 0.02, 1), size.y)))
+		# segmented meter: 12 slanted blocks, lit up to the value
+		var n := Tokens.METER_SEGMENTS
+		var gap := float(Tokens.S1)
+		var w := (size.x - gap * (n - 1)) / n
+		var lit := clampf(k, 0.02, 1.0) * n
+		for i in n:
+			var x := i * (w + gap)
+			var f := clampf(lit - i, 0.0, 1.0)
+			var sk := size.y * 0.35
+			var pts := PackedVector2Array([Vector2(x + sk, 0), Vector2(x + w + sk, 0), Vector2(x + w - sk, size.y), Vector2(x - sk, size.y)])
+			draw_colored_polygon(pts, Tokens.TRACK)
+			if f > 0.0:
+				var xr := x + w * f
+				draw_colored_polygon(PackedVector2Array([Vector2(x + sk, 0), Vector2(xr + sk, 0), Vector2(xr - sk, size.y), Vector2(x - sk, size.y)]), Tokens.ACCENT_DOWN)

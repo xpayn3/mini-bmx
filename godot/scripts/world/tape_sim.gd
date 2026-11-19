@@ -1,6 +1,6 @@
 class_name TapeSim
 extends MeshInstance3D
-## Torn race tape (1:1 port of tape.js TapeSim): ride through a span and it SNAPS at the hit; the two
+## Torn race tape (from tape.js TapeSim): ride into a span and it stretches over the bike, then SNAPS at the hit; the two
 ## halves become light foil ribbons simulated with Verlet that stream and float in the wind from their
 ## stakes, drape over the ground -- or, now and then (25 %), rip off the stake and blow away.
 ## All strips are drawn as one double-sided ribbon strip mesh (rebuilt each frame), lit like the intact tape.
@@ -10,6 +10,9 @@ const WIDTH := 0.075
 const MAX_STRIPS := 40
 const SUB := 3
 const ITER := 6
+const SNAP_STRAIN := 0.17      # the tape tears once stretched 17 % past its length (pulled straight first)
+const SUBD := 4                  # drawn: each sim segment is split into 4 along a smooth spline
+const SETTLE := 1.3              # a released (not torn) tape springs back this long, then is whole again
 
 var terrain: Terrain
 var strips: Array = []           # [{P, Q, seg, pin, cols, age, tw, last, tr, tk, ta, td, tp, G, V, N}]
@@ -33,45 +36,120 @@ func clear() -> void:
 	_dirty = false
 
 
-## the bike (velocity vel) hit span `sp` near `hit` (x, z): tear it there. The caller hides the span.
-func snap(sp: Dictionary, hit: Vector2, vel: Vector3) -> void:
+## the bike (velocity vel) ran into span `sp` near `hit` (x, z). The tape doesn't snap at once: the span
+## (hidden by the caller) becomes a sim strip pinned at both stakes, its hit point carried on the bike's
+## front (`push_at`, set every frame by the game). It pulls taut, stretches, and only when it has stretched
+## SNAP_STRAIN past its length does it tear there - the two halves spring back towards their stakes.
+## Stop, back off or slide off its end before that and it springs back and is whole again.
+func grab(sp: Dictionary, hit: Vector2, vel: Vector3) -> void:
 	var pts: PackedVector3Array = sp["pts"]
-	var bi := 1
-	var bd := INF
-	for i in range(1, SEG):   # tear at the point nearest the hit
-		var d := Vector2(pts[i].x - hit.x, pts[i].z - hit.y).length()
-		if d < bd:
-			bd = d
-			bi = i
-	var seg_len: float = sp["len"] / SEG
-	var span_cols: Array = sp["cols"]
-	# each half: points from its stake to the tear
-	var back := pts.slice(bi)
-	back.reverse()
-	var halves := [pts.slice(0, bi + 1), back]
-	for h in 2:
-		var hp: PackedVector3Array = halves[h]
-		if hp.size() < 2:
+	var n := pts.size()
+	var A := pts[0]
+	var B := pts[n - 1]
+	var ab := Vector2(B.x - A.x, B.z - A.z).normalized()
+	var nrm := Vector2(-ab.y, ab.x)
+	var vv := Vector2(vel.x, vel.z)
+	var s0 := signf(vv.dot(nrm)) if absf(vv.dot(nrm)) > 0.05 else signf(Vector2(hit.x - A.x, hit.y - A.z).dot(nrm) + 1e-6) * -1.0
+	var segs := PackedFloat32Array()
+	var rest := 0.0
+	for i in n - 1:
+		var l := pts[i].distance_to(pts[i + 1])
+		segs.append(l)
+		rest += l
+	var cols := []
+	for i in n - 1:
+		cols.append((sp["cols"] as Array)[i & 1])
+	_add(pts.duplicate(), pts.duplicate(), cols, sp["len"] / SEG, A)
+	var st: Dictionary = strips[strips.size() - 1]
+	st.merge({"state": "stretch", "pin2": B, "segs": segs, "rest": segs.duplicate(), "rest_len": rest,
+		"sp": sp, "nrm": nrm * s0, "grab": -1, "tw_k": 0.0, "vel": vel, "strain": -1.0})
+
+
+## tear a stretched strip at its grab point: two pinned halves (or one blown free) that recoil
+func _snap(s: Dictionary) -> void:
+	var P: PackedVector3Array = s["P"]
+	var Q: PackedVector3Array = s["Q"]
+	var n := P.size()
+	var gi: int = s["grab"]
+	var span_cols: Array = (s["sp"] as Dictionary)["cols"]
+	var vel: Vector3 = s["vel"]
+	var h: float = s["last"]
+	var over := clampf((float(s["strain"]) + 0.05) / (SNAP_STRAIN + 0.05), 0.5, 1.5)
+	var idx := [range(0, gi + 1), range(n - 1, gi - 1, -1)]
+	for side in 2:
+		var ii: Array = idx[side]
+		var m := ii.size()
+		if m < 2:
 			continue
-		var free := randf() < 0.25
+		var hp := PackedVector3Array()
+		var hq := PackedVector3Array()
+		var stake: Vector3 = P[ii[0]]
+		for j in m:
+			var k := float(j) / (m - 1)
+			var p := P[ii[j]]
+			# the stored stretch springs back: the torn end whips back past its stake, faster the
+			# harder it was pulled; the very end flicks on with the bike a little
+			var back := (stake - p)
+			back.y = 0.0
+			var rv := back.normalized() * (7.0 * over * k * k) if back.length_squared() > 1e-6 else Vector3.ZERO
+			rv += vel * 0.25 * k * k + Vector3(0, 1.5 * k * k * randf(), 0)
+			hp.append(p)
+			hq.append(p - (rv + (P[ii[j]] - Q[ii[j]]) / h * 0.3) * (1.0 / 60.0))
 		var cols := []
-		for i in hp.size() - 1:
-			cols.append(span_cols[(SEG - 1 - i if h else i) & 1])
-		var n := hp.size()
-		var P := hp.duplicate()
-		var Q := hp.duplicate()
-		for i in n:   # the end near the hit is dragged along with the bike
-			var near := float(i) / (n - 1)
-			var k := near * near
-			Q[i].x -= (vel.x * 0.55 * k + (randf() - .5) * 0.6 * k) / 60.0
-			Q[i].y -= (maxf(0.0, vel.y) * 0.3 * k + (0.6 + randf()) * k) / 60.0
-			Q[i].z -= (vel.z * 0.55 * k + (randf() - .5) * 0.6 * k) / 60.0
-		_add(P, Q, cols, seg_len, null if free else hp[0])
+		for j in m - 1:
+			cols.append(span_cols[(SEG - 1 - j if side else j) & 1])
+		var free := randf() < 0.25
+		_add(hp, hq, cols, float(s["seg"]), null if free else stake)
+		var t: Dictionary = strips[strips.size() - 1]
+		t["last"] = 1.0 / 60.0
+		t["tw_k"] = 0.0
+
+
+## the bike's front, at tape height, while riding (null = no rider / crashed)
+var push_at = null
+
+
+func _stretch(s: Dictionary) -> String:
+	var A: Vector3 = s["pin"]
+	var B: Vector3 = s["pin2"]
+	var n: int = (s["P"] as PackedVector3Array).size()
+	if push_at == null:
+		return "release"
+	var pa: Vector3 = push_at
+	var ab := Vector2(B.x - A.x, B.z - A.z)
+	var L2 := ab.length_squared()
+	var t := clampf(Vector2(pa.x - A.x, pa.z - A.z).dot(ab) / L2, -1.0, 2.0)
+	var nrm: Vector2 = s["nrm"]
+	var d := Vector2(pa.x - A.x, pa.z - A.z).dot(nrm)
+	if t < 0.03 or t > 0.97 or d < -0.35:
+		return "release"   # backed off, or slid off its end
+	var rp: PackedVector3Array = (s["sp"] as Dictionary)["pts"]
+	var gi := clampi(roundi(t * (n - 1)), 1, n - 2)
+	var base := A.lerp(B, t)
+	var c := Vector3(base.x + nrm.x * maxf(d, 0.0), rp[gi].y, base.z + nrm.y * maxf(d, 0.0))
+	s["grab"] = gi
+	s["grab_at"] = c
+	var la := A.distance_to(c)
+	var lb := c.distance_to(B)
+	var rest: PackedFloat32Array = s["rest"]
+	var segs: PackedFloat32Array = s["segs"]
+	var ra := 0.0
+	for i in gi: ra += rest[i]
+	var rb: float = float(s["rest_len"]) - ra
+	s["strain"] = (la + lb) / float(s["rest_len"]) - 1.0
+	# each side stretches evenly once it's pulled straight (slack sag first)
+	var ka := maxf(1.0, la / ra) * 0.995
+	var kb := maxf(1.0, lb / rb) * 0.995
+	for i in n - 1:
+		segs[i] = rest[i] * (ka if i < gi else kb)
+	s["segs"] = segs
+	return "snap" if float(s["strain"]) > SNAP_STRAIN else ""
 
 
 func _add(P: PackedVector3Array, Q: PackedVector3Array, cols: Array, seg_len: float, pin) -> void:
 	while strips.size() >= MAX_STRIPS:
-		strips.pop_front()
+		var old: Dictionary = strips.pop_front()
+		if old.has("sp") and terrain: terrain.restore_tape(old["sp"])
 	var tw := PackedFloat32Array()
 	for i in P.size():
 		tw.append(randf() * 6.28)
@@ -97,11 +175,32 @@ func update(dt: float, px: float, pz: float, t: float, wdir: Vector3, ws: float)
 		s["age"] += dt
 		var P: PackedVector3Array = s["P"]
 		var far := Vector2(P[0].x - px, P[0].z - pz).length()
+		if far > 180 and s.get("state", "free") != "free":
+			strips.remove_at(si)
+			if terrain: terrain.restore_tape(s["sp"])
+			continue
 		if far > 180 or (s["pin"] == null and s["age"] > 40):
 			strips.remove_at(si)
 			continue
-		if far > 90:   # out of sight: freeze
+		var state: String = s.get("state", "free")
+		if state == "stretch":
+			match _stretch(s):
+				"snap":
+					strips.remove_at(si)
+					_snap(s)
+					continue
+				"release":
+					s["state"] = "settle"
+					s["age"] = 0.0
+					s["grab"] = -1
+					s["segs"] = (s["rest"] as PackedFloat32Array).duplicate()
+		elif state == "settle" and s["age"] > SETTLE:
+			strips.remove_at(si)
+			if terrain: terrain.restore_tape(s["sp"])
 			continue
+		elif far > 90:   # out of sight: freeze
+			continue
+		if state == "free": s["tw_k"] = minf(1.0, float(s.get("tw_k", 1.0)) + dt * 1.5)   # the foil starts twisting once torn
 		_step(s, h, t, wdir, ws)
 		_ribbon(s, t)
 	_draw()
@@ -117,6 +216,12 @@ func _step(s: Dictionary, h: float, t: float, wdir: Vector3, ws: float) -> void:
 	var seg_len: float = s["seg"]
 	var pinned: bool = s["pin"] != null
 	var pin: Vector3 = s["pin"] if pinned else Vector3.ZERO
+	var pinned2: bool = s.get("pin2") != null
+	var pin2: Vector3 = s["pin2"] if pinned2 else Vector3.ZERO
+	var segs: PackedFloat32Array = s.get("segs", PackedFloat32Array())
+	var gi: int = s.get("grab", -1)
+	var gat: Vector3 = s.get("grab_at", Vector3.ZERO)
+	var taut := pinned2   # a whole span: stiffer, the wind only ripples it
 	var G := PackedFloat32Array()
 	G.resize(n)
 	for i in n:   # once a frame (height() is costly)
@@ -135,13 +240,18 @@ func _step(s: Dictionary, h: float, t: float, wdir: Vector3, ws: float) -> void:
 			w.z += cos(tu * 2.9 - i) * ws * 0.35
 			var alt := clampf(1.0 - (p.y - G[i]) / 9.0, 0.0, 1.0)   # soars, but tops out ~9 m up
 			w.y = ws * (0.16 * alt + 0.3 * sin(tu * 1.3 + i * 0.7))   # lift: foil floats and soars
+			if taut: w *= 0.25
 			var v := (p - q) / h * r
 			var a := Vector3((w.x - v.x) * drag, (w.y - v.y) * drag - 9.81 * 0.35, (w.z - v.z) * drag)
 			Q[i] = p
 			P[i] = p + v * h + a * (h * h)
-		for it in ITER:
+		for it in ITER + (6 if taut else 0):
 			if pinned:
 				P[0] = pin
+			if pinned2:
+				P[n - 1] = pin2
+			if gi > 0:
+				P[gi] = gat
 			for i in n - 1:
 				var a := P[i]
 				var b := P[i + 1]
@@ -149,13 +259,21 @@ func _step(s: Dictionary, h: float, t: float, wdir: Vector3, ws: float) -> void:
 				var l := d.length()
 				if l == 0.0:
 					l = 1e-6
-				var diff := (l - seg_len) / l
-				var wa := 0.0 if pinned and i == 0 else 0.5
-				var wb := 1.0 if pinned and i == 0 else 0.5
+				var sl: float = segs[i] if segs.size() == n - 1 else seg_len
+				var diff := (l - sl) / l
+				# fixed points (stakes, the bike's grip) don't move: the other end takes it all
+				var fa := (pinned and i == 0) or (gi == i)
+				var fb := (pinned2 and i + 1 == n - 1) or (gi == i + 1)
+				var wa := 0.0 if fa else (1.0 if fb else 0.5)
+				var wb := 0.0 if fb else (1.0 if fa else 0.5)
 				P[i] = a + d * (diff * wa)
 				P[i + 1] = b - d * (diff * wb)
 		if pinned:
 			P[0] = pin
+		if pinned2:
+			P[n - 1] = pin2
+		if gi > 0:
+			P[gi] = gat
 		# the ground: rest on it with friction (it can still lift off when a gust gets under it)
 		for i in n:
 			var p := P[i]
@@ -172,10 +290,25 @@ func _step(s: Dictionary, h: float, t: float, wdir: Vector3, ws: float) -> void:
 	s["Q"] = Q
 
 
-# ribbon geometry: the width direction twists slowly along the strip, like real foil tape
+# ribbon geometry: the width direction twists slowly along the strip, like real foil tape. The sim's points
+# are drawn through a Catmull-Rom spline, SUBD pieces per segment, so a floating strip bends smoothly
 func _ribbon(s: Dictionary, t: float) -> void:
-	var P: PackedVector3Array = s["P"]
+	var P0: PackedVector3Array = s["P"]
 	var tw: PackedFloat32Array = s["tw"]
+	var n0 := P0.size()
+	var P := PackedVector3Array()
+	P.resize((n0 - 1) * SUBD + 1)
+	for i in n0 - 1:
+		var pa := P0[maxi(0, i - 1)]
+		var pb := P0[i]
+		var pc := P0[i + 1]
+		var pd := P0[mini(n0 - 1, i + 2)]
+		for j in SUBD:
+			var u := float(j) / SUBD
+			var u2 := u * u
+			var u3 := u2 * u
+			P[i * SUBD + j] = 0.5 * (2.0 * pb + (pc - pa) * u + (2.0 * pa - 5.0 * pb + 4.0 * pc - pd) * u2 + (3.0 * pb - pa - 3.0 * pc + pd) * u3)
+	P[P.size() - 1] = P0[n0 - 1]
 	var n := P.size()
 	var W := WIDTH / 2
 	var tr: float = s["tr"]
@@ -183,16 +316,18 @@ func _ribbon(s: Dictionary, t: float) -> void:
 	var ta: float = s["ta"]
 	var td: float = s["td"]
 	var tp: float = s["tp"]
+	var twk: float = s.get("tw_k", 1.0)
 	var E := PackedVector3Array()
 	E.resize(n)
 	for i in n:
+		var fi := float(i) / SUBD   # position along the strip in sim points
 		var d := (P[mini(n - 1, i + 1)] - P[maxi(0, i - 1)]).normalized()
 		var ax := d.cross(Vector3.UP)
 		if ax.length_squared() < 1e-4:
 			ax = Vector3(1, 0, 0)
 		ax = ax.normalized()
 		var bx := ax.cross(d)
-		var twa := sin(tp + t * tr - i * tk) * ta + sin(t * tr * 0.37 + i * tk * 2.3 + tw[i] * 0.15) * ta * 0.5 + i * td * 0.2 + t * td
+		var twa := (sin(tp + t * tr - fi * tk) * ta + sin(t * tr * 0.37 + fi * tk * 2.3 + tw[mini(n0 - 1, int(fi))] * 0.15) * ta * 0.5 + fi * td * 0.2 + t * td) * twk
 		E[i] = bx * (cos(twa) * W) + ax * (sin(twa) * W)
 	var V := PackedVector3Array()
 	var N := PackedVector3Array()
@@ -232,7 +367,7 @@ func _draw() -> void:
 		var N: PackedVector3Array = s["N"]
 		var cols: Array = s["cols"]
 		for k in V.size():
-			_imesh.surface_set_color(cols[k / 6])
+			_imesh.surface_set_color(cols[mini(cols.size() - 1, k / (6 * SUBD))])
 			_imesh.surface_set_normal(N[k])
 			_imesh.surface_add_vertex(V[k])
 	_imesh.surface_end()

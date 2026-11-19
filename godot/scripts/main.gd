@@ -8,7 +8,7 @@ var game: Game
 var state := MENU
 var ui := CanvasLayer.new()
 var menu: Control
-var pause_menu: Control
+var pause_menu                 # the pause leaflet (ui/pause_pamphlet.gd), a CanvasLayer
 var settings_open: Control
 var controls_open: Control
 var fade: ColorRect
@@ -17,6 +17,7 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	ui.layer = 20
 	add_child(ui)
+	add_child(load("res://scripts/ui/fullscreen_button.gd").new())   # bottom-right fullscreen toggle (F11)
 	fade = ColorRect.new()
 	fade.color = Color(0.66, 0.84, 0.92)
 	fade.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -27,7 +28,7 @@ func _ready() -> void:
 	if "--garage" not in OS.get_cmdline_user_args():   # straight to the garage: don't build the world first
 		_new_game()
 		_show_menu()
-	create_tween().tween_property(fade, "modulate:a", 0.0, 0.8)
+	create_tween().set_ignore_time_scale().tween_property(fade, "modulate:a", 0.0, 0.8)
 	# command-line: --ride skips the title screen; --autotest=N rides N seconds unattended then quits
 	for a in OS.get_cmdline_user_args():
 		if a == "--ride": _start_ride()
@@ -51,7 +52,7 @@ func restart_ride() -> void:
 	fade.modulate.a = 1.0
 	await _new_game()
 	_set_riding(state != MENU)
-	create_tween().tween_property(fade, "modulate:a", 0.0, 0.5)
+	create_tween().set_ignore_time_scale().tween_property(fade, "modulate:a", 0.0, 0.5)
 
 func _set_riding(riding: bool) -> void:
 	game.input_enabled = riding
@@ -69,82 +70,145 @@ func _show_menu() -> void:
 	_set_riding(false)
 	if menu: menu.queue_free()
 	menu = Control.new()
-	menu.theme = UITheme.get_theme()
+	menu.theme = UITheme.paper_theme()
 	menu.set_anchors_preset(Control.PRESET_FULL_RECT)
 	menu.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(menu)
 	ui.move_child(menu, 0)
-	# a soft dusk shade behind the menu that fades out into the view
-	var grad := Gradient.new()
-	grad.set_color(0, Color(0.05, 0.04, 0.07, 0.72))
-	grad.set_color(1, Color(0.05, 0.04, 0.07, 0.0))
-	grad.add_point(0.55, Color(0.05, 0.04, 0.07, 0.5))
-	var gt := GradientTexture2D.new()
-	gt.gradient = grad
-	gt.width = 256; gt.height = 4
-	var shade := TextureRect.new()
-	shade.texture = gt
-	shade.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	shade.stretch_mode = TextureRect.STRETCH_SCALE
-	shade.set_anchors_preset(Control.PRESET_LEFT_WIDE)
-	shade.custom_minimum_size.x = 720
-	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	menu.add_child(shade)
+	# one flat white card down the left (the garage and settings use the same cards), the view beside it
+	var card := PanelContainer.new()
+	card.add_theme_stylebox_override("panel", UITheme.card_style(Tokens.PAPER, Tokens.R_XL, Tokens.S7))
+	card.set_anchors_preset(Control.PRESET_LEFT_WIDE)
+	card.offset_left = MENU_EDGE; card.offset_right = MENU_EDGE + MENU_W
+	card.offset_top = MENU_EDGE; card.offset_bottom = -MENU_EDGE
+	menu.add_child(card)
+	var outer := VBoxContainer.new()
+	card.add_child(outer)
 	var vb := VBoxContainer.new()
-	vb.set_anchors_preset(Control.PRESET_LEFT_WIDE)
-	vb.offset_left = 64; vb.offset_right = 460; vb.offset_top = 90; vb.offset_bottom = -40
-	vb.add_theme_constant_override("separation", 12)
-	menu.add_child(vb)
-	vb.add_child(UITheme.label("MINI BMX", 64, UITheme.ACCENT, true))
-	vb.add_child(UITheme.label("Downhill & BMX on endless procedural trails", 17, UITheme.MUTED))
-	var sp := Control.new(); sp.custom_minimum_size.y = 28; vb.add_child(sp)
-	var ride := UITheme.button("RIDE", _start_ride, 24)
-	ride.custom_minimum_size.y = 58
+	vb.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	vb.add_theme_constant_override("separation", Tokens.S3)
+	outer.add_child(vb)
+	# title: big condensed italic in ink, a yellow mark and the tagline under it
+	var head := VBoxContainer.new()
+	head.add_theme_constant_override("separation", -Tokens.S4)
+	head.add_child(UITheme.display("MINI BMX", Tokens.T_DISPLAY, Tokens.INK, Tokens.SLANT_TITLE))
+	var tag_row := HBoxContainer.new()
+	tag_row.add_theme_constant_override("separation", Tokens.S4)
+	var slab := ColorRect.new()
+	slab.color = Tokens.ACCENT
+	slab.custom_minimum_size = Tokens.SLAB_WIDE
+	slab.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	tag_row.add_child(slab)
+	tag_row.add_child(UITheme.caption("DOWNHILL  &  BMX  ·  ENDLESS TRAILS", Tokens.INK_SOFT, Tokens.T_MD))
+	head.add_child(tag_row)
+	vb.add_child(head)
+	menu_col = vb
+	outer.add_child(UITheme.text("v1.0  ·  Godot %s" % Engine.get_version_info().string, Tokens.INK_SOFT, Tokens.T_XS))
+	_menu_page_main()
+	if OS.get_environment("BMX_MENU_PAGE") == "setup": _menu_page_setup()   # tests: the ride setup page
+
+const MENU_EDGE := Tokens.S8
+const MENU_W := Tokens.CARD_W + Tokens.S8 + Tokens.S2
+
+## the column under the title: everything after the title block (index 1 on) is the page
+var menu_col: VBoxContainer
+
+func _menu_clear() -> void:
+	for i in range(menu_col.get_child_count() - 1, 0, -1):
+		var c := menu_col.get_child(i)
+		menu_col.remove_child(c); c.queue_free()
+	menu_col.add_child(UITheme.spacer(Tokens.S7))
+
+func _menu_page_main() -> void:
+	_menu_clear()
+	var vb := menu_col
+	var ride := _menu_button("RIDE", "Pick a bike and the time of day", _menu_page_setup, true)
 	vb.add_child(ride)
-	var gar := UITheme.button("GARAGE  ·  customise your downhill bike", _open_garage, 18)
-	gar.custom_minimum_size.y = 50
-	vb.add_child(gar)
-	# bike picker
+	vb.add_child(_menu_button("GARAGE", "Paint, wheels, bars, shocks, gears", _open_garage))
+	vb.add_child(UITheme.spacer(Tokens.S2))
+	# world seed
+	vb.add_child(UITheme.caption("WORLD"))
+	var seed_row := HBoxContainer.new()
+	seed_row.add_theme_constant_override("separation", Tokens.S2)
+	var se := LineEdit.new()
+	se.text = str(GameState.seed)
+	se.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	se.custom_minimum_size.y = Tokens.H_CHIP
+	se.tooltip_text = "World seed: type a number and press Enter"
+	se.text_submitted.connect(func(t):
+		if t.is_valid_int():
+			GameState.seed = int(t); restart_ride())
+	seed_row.add_child(se)
+	seed_row.add_child(UITheme.make_button("NEW WORLD", func(): GameState.new_seed(); se.text = str(GameState.seed); restart_ride(), "chip", Tokens.T_LG))
+	vb.add_child(seed_row)
+	vb.add_child(UITheme.spacer(Tokens.S4))
+	# secondary: a quiet list
+	for it in [["SETTINGS", _open_settings], ["CONTROLS", _show_controls], ["QUIT", func(): get_tree().quit()]]:
+		vb.add_child(UITheme.make_button(it[0], it[1], "link", Tokens.T_XL))
+	ride.grab_focus.call_deferred()
+
+## RIDE -> choose the bike and the time of day, then GO
+func _menu_page_setup() -> void:
+	_menu_clear()
+	var vb := menu_col
+	vb.add_child(UITheme.caption("BIKE"))
 	var bikes := HBoxContainer.new()
-	bikes.add_theme_constant_override("separation", 8)
+	bikes.add_theme_constant_override("separation", Tokens.S2)
 	var group := ButtonGroup.new()
 	for id in GameState.BIKES:
-		var b := Button.new()
-		b.text = GameState.BIKES[id].label
+		var b := UITheme.make_button(String(GameState.BIKES[id].label).to_upper(), Callable(), "chip", Tokens.T_LG)
 		b.toggle_mode = true
 		b.button_group = group
 		b.button_pressed = id == GameState.bike_id
-		b.custom_minimum_size = Vector2(0, 44)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.pressed.connect(func():
 			if GameState.bike_id != id:
 				GameState.bike_id = id; GameState.save(); restart_ride())
 		bikes.add_child(b)
-	vb.add_child(UITheme.label("BIKE", 13, UITheme.MUTED))
 	vb.add_child(bikes)
-	# world seed
-	vb.add_child(UITheme.label("WORLD", 13, UITheme.MUTED))
-	var seed_row := HBoxContainer.new()
-	seed_row.add_theme_constant_override("separation", 8)
-	var se := LineEdit.new()
-	se.text = str(GameState.seed)
-	se.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	se.custom_minimum_size.y = 44
-	se.text_submitted.connect(func(t):
-		if t.is_valid_int():
-			GameState.seed = int(t); restart_ride())
-	seed_row.add_child(se)
-	seed_row.add_child(UITheme.button("ðŸŽ² Random", func(): GameState.new_seed(); se.text = str(GameState.seed); restart_ride(), 16))
-	vb.add_child(seed_row)
-	var sp2 := Control.new(); sp2.custom_minimum_size.y = 12; vb.add_child(sp2)
-	vb.add_child(UITheme.button("Settings", _open_settings))
-	vb.add_child(UITheme.button("Controls", _show_controls))
-	vb.add_child(UITheme.button("Quit", func(): get_tree().quit()))
-	var foot := UITheme.label("v1.0 · Godot %s" % Engine.get_version_info().string, 12, UITheme.MUTED)
-	foot.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	foot.position = Vector2(64, -36)
-	menu.add_child(foot)
-	ride.grab_focus.call_deferred()
+	vb.add_child(UITheme.spacer(Tokens.S2))
+	vb.add_child(UITheme.caption("TIME OF DAY"))
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", Tokens.S2)
+	grid.add_theme_constant_override("v_separation", Tokens.S2)
+	var tgroup := ButtonGroup.new()
+	var active := LightSettings.get_active()
+	for n in LightSettings.BUILTIN:
+		var p := LightSettings.preset(n)
+		var sub := "AUTO" if float(p.cycle) > 0.5 else LightSettings.clock(float(p.time))
+		var b := UITheme.make_button("%s   %s" % [String(n).to_upper(), sub], LightSettings.select.bind(n), "chip", Tokens.T_MD)
+		b.toggle_mode = true
+		b.button_group = tgroup
+		b.button_pressed = n == active
+		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		grid.add_child(b)
+	vb.add_child(grid)
+	vb.add_child(UITheme.spacer(Tokens.S4))
+	var go := _menu_button("GO", "", _start_ride, true)
+	vb.add_child(go)
+	vb.add_child(UITheme.make_button("BACK", _menu_page_main, "link", Tokens.T_XL))
+	go.grab_focus.call_deferred()
+
+## a big menu button: display-font title (+ optional small line under it); primary = the yellow one
+func _menu_button(text: String, sub: String, cb: Callable, primary := false) -> Button:
+	var b := UITheme.make_button("", cb, "primary" if primary else "chip")
+	b.custom_minimum_size.y = Tokens.H_HERO if primary else Tokens.H_SUB
+	var m := MarginContainer.new()
+	m.set_anchors_preset(Control.PRESET_FULL_RECT)
+	m.add_theme_constant_override("margin_left", Tokens.S5 + Tokens.S2)
+	m.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var col := VBoxContainer.new()
+	col.alignment = BoxContainer.ALIGNMENT_CENTER
+	col.add_theme_constant_override("separation", -Tokens.S2)
+	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	col.add_child(UITheme.display(text, Tokens.T_3XL if primary else Tokens.T_2XL + Tokens.S1))
+	if sub != "":
+		col.add_child(UITheme.text(sub, Tokens.INK if primary else Tokens.INK_SOFT, Tokens.T_SM))
+	m.add_child(col)
+	b.add_child(m)
+	return b
 
 var garage: Garage
 
@@ -159,7 +223,7 @@ func _open_garage() -> void:
 	garage = Garage.new()
 	add_child(garage)
 	garage.closed.connect(_close_garage)
-	create_tween().tween_property(fade, "modulate:a", 0.0, 0.5)
+	create_tween().set_ignore_time_scale().tween_property(fade, "modulate:a", 0.0, 0.5)
 
 func _close_garage(ride: bool) -> void:
 	fade.modulate.a = 1.0
@@ -169,7 +233,7 @@ func _close_garage(ride: bool) -> void:
 	await _new_game()
 	if ride: _start_ride()
 	else: _show_menu()
-	create_tween().tween_property(fade, "modulate:a", 0.0, 0.5)
+	create_tween().set_ignore_time_scale().tween_property(fade, "modulate:a", 0.0, 0.5)
 
 func _start_ride() -> void:
 	if menu: menu.queue_free(); menu = null
@@ -182,6 +246,10 @@ func _start_ride() -> void:
 func _unhandled_input(e: InputEvent) -> void:
 	if not e.is_action_pressed("pause") or e.is_echo(): return
 	if is_instance_valid(settings_open) or garage: return
+	if state == RIDING and game and game.photo:   # Esc leaves photo mode first
+		game.toggle_photo()
+		get_viewport().set_input_as_handled()
+		return
 	if is_instance_valid(controls_open):   # Esc closes the controls card, back to the pause menu
 		_close_controls()
 		get_viewport().set_input_as_handled()
@@ -197,28 +265,36 @@ func _notification(what: int) -> void:
 func _pause() -> void:
 	if game: game.exit_photo()
 	state = PAUSED
+	# the cover photo: the ride as it is now (the last frame drawn, before the leaflet is over it)
+	var shot := get_viewport().get_texture().get_image()
 	get_tree().paused = true
-	pause_menu = PanelContainer.new()
-	pause_menu.theme = UITheme.get_theme()
-	pause_menu.custom_minimum_size = Vector2(360, 0)
-	ui.add_child(pause_menu)
-	UITheme.centre(pause_menu)
-	var vb := VBoxContainer.new()
-	vb.add_theme_constant_override("separation", 10)
-	pause_menu.add_child(vb)
-	vb.add_child(UITheme.label("PAUSED", 30, UITheme.ACCENT, true))
-	var resume := UITheme.button("Resume", _resume)
-	vb.add_child(resume)
-	vb.add_child(UITheme.button("Back to start", func(): _resume(); game.respawn(false)))
-	vb.add_child(UITheme.button("New world", func(): _resume(); game.respawn(true)))
-	vb.add_child(UITheme.button("Settings", _open_settings))
-	vb.add_child(UITheme.button("Controls", _show_controls))
-	vb.add_child(UITheme.button("Main menu", func(): _close_pause(); GameState.save(); _show_menu()))
-	vb.add_child(UITheme.button("Quit to desktop", func(): GameState.save(); get_tree().quit()))
-	resume.grab_focus.call_deferred()
+	_close_pause(true)
+	var pm := PausePamphlet.new()
+	pm.photo = shot
+	if game:
+		pm.place = game.terrain.biome_name(game.phys.x, game.phys.z)
+		pm.sheet_no = GameState.seed
+	add_child(pm)
+	pm.close_requested.connect(func(): if state == PAUSED and pause_menu == pm: _resume())
+	pm.add_item("Resume", _resume)
+	pm.add_item("Back to start", func(): _resume(); game.respawn(false))
+	pm.add_item("New world", func(): _resume(); game.respawn(true))
+	pm.add_item("Settings", _open_settings)
+	pm.add_item("Controls", _show_controls)
+	pm.add_item("Main menu", func(): _close_pause(true); GameState.save(); _show_menu())
+	pm.add_item("Quit to desktop", func(): GameState.save(); get_tree().quit())
+	pause_menu = pm
+	pm.open()
+	pm.focus_first.call_deferred()
 
-func _close_pause() -> void:
-	if pause_menu: pause_menu.queue_free(); pause_menu = null
+## fold the leaflet away (now = gone at once: menus, a new ride)
+func _close_pause(now := false) -> void:
+	if not is_instance_valid(pause_menu): pause_menu = null; return
+	var pm = pause_menu
+	pause_menu = null
+	if pm.state == 0: pm.queue_free(); return
+	pm.closed.connect(pm.queue_free)
+	pm.close(now)
 
 func _resume() -> void:
 	_close_pause()
@@ -271,6 +347,17 @@ func _autotest(seconds: float) -> void:
 		await _new_game()
 	_start_ride()
 	if OS.get_environment("BMX_CAM") != "": game.cam.set_mode(OS.get_environment("BMX_CAM"))
+	if OS.get_environment("BMX_CAM_CYCLE") != "":   # tests: press C (next camera; Y on a pad) every 0.6 s, print each mode
+		var cyc := func() -> void:
+			for i in game.cam.PRESETS.size() + 1:
+				await get_tree().create_timer(0.6).timeout
+				for down in [true, false]:
+					var ev := InputEventKey.new()
+					ev.keycode = KEY_C; ev.physical_keycode = KEY_C; ev.pressed = down
+					Input.parse_input_event(ev)
+				await get_tree().process_frame
+				print("CAMCYCLE ", i, " ", game.cam.mode)
+		cyc.call()
 	if OS.get_environment("BMX_AT") != "":   # tests: start this many metres down the course
 		var cp: Array = game.terrain.field.course.at(float(OS.get_environment("BMX_AT")))
 		game.phys.reset_at(cp[0], cp[1], atan2(-float(cp[3]), float(cp[2])))
@@ -295,7 +382,26 @@ func _autotest(seconds: float) -> void:
 	var draws := 0.0
 	while (Time.get_ticks_msec() - t0) / 1000.0 < seconds:
 		var el := (Time.get_ticks_msec() - t0) / 1000.0
+		if OS.get_environment("BMX_MAP") != "" and el >= float(OS.get_environment("BMX_MAP")) and not _probe.get("map", false):   # tests: open the trail map
+			_probe.map = true; game.open_map()
+			if OS.get_environment("BMX_MAP_TILT") != "":   # tests: hold the right stick (body actions) while it's open
+				var tv := OS.get_environment("BMX_MAP_TILT").split(",")
+				Input.action_press("body_right" if float(tv[0]) > 0 else "body_left", absf(float(tv[0])))
+				Input.action_press("body_fwd" if float(tv[1]) > 0 else "body_back", absf(float(tv[1])))
+		if OS.get_environment("BMX_PHOTO") != "" and el >= float(OS.get_environment("BMX_PHOTO")) and not _probe.get("photo", false):   # tests: photo mode (BMX_PHOTO_SET / _FLY / _SNAP)
+			_probe.photo = true; game.toggle_photo()
+		if OS.get_environment("BMX_PHOTO_CLOSE") != "" and el >= float(OS.get_environment("BMX_PHOTO_CLOSE")) and not _probe.get("photo_x", false):   # tests: O again
+			_probe.photo_x = true
+			var ko := InputEventKey.new(); ko.keycode = KEY_O; ko.physical_keycode = KEY_O; ko.pressed = true
+			Input.parse_input_event(ko)
+		if OS.get_environment("BMX_MAP_CLOSE") != "" and el >= float(OS.get_environment("BMX_MAP_CLOSE")) and not _probe.get("map_x", false):   # tests: M again
+			_probe.map_x = true
+			var ke := InputEventKey.new(); ke.keycode = KEY_M; ke.physical_keycode = KEY_M; ke.pressed = true
+			Input.parse_input_event(ke)
 		if OS.get_environment("BMX_IDLE_FOR") != "": pedal = el >= float(OS.get_environment("BMX_IDLE_FOR"))   # tests: stand still, then ride off
+		if OS.get_environment("BMX_HOLD_BRAKE") != "" and el >= float(OS.get_environment("BMX_HOLD_BRAKE")):   # tests: brake held to the end
+			pedal = false; Input.action_press("brake")
+			if int(el * 4) % 2 == 0 and int(el * 40) % 20 == 0: print("HOLD t=%.1f v=%.3f pos=(%.2f, %.2f) slope=%.2f" % [el, game.phys.v, game.phys.x, game.phys.z, game.phys._g_pitch])
 		var stop_at := OS.get_environment("BMX_STOP_AT")   # tests: "a,b" = pedal, brake to a stop from a s, ride off again at b s
 		if stop_at != "":
 			var sa := stop_at.split(",")
@@ -305,6 +411,33 @@ func _autotest(seconds: float) -> void:
 			else: Input.action_release("brake")
 		if pedal and not (OS.get_environment("BMX_COAST") != "" and int(el) % 6 >= 3): Input.action_press("pedal")   # BMX_COAST: 3 s pedal / 3 s coast
 		else: Input.action_release("pedal")
+		if OS.get_environment("BMX_BRAKETURN") != "" and el > float(OS.get_environment("BMX_BRAKETURN")):   # tests: 2 s pedal up to speed, 1.5 s hard brake + full steer, repeat
+			var ph_bt = (el - float(OS.get_environment("BMX_BRAKETURN"))) 
+			var k_bt := fmod(ph_bt, 7.5)
+			var hard := k_bt > 6.0
+			game.jitter_on = hard
+			var jshot := OS.get_environment("BMX_JIT_SHOTS")   # tests: 8 frames in a row, 0.4 s into the first hard brake-turn
+			if jshot != "" and hard and k_bt > 6.4 and int(_probe.get("jit_n", 0)) < 8:
+				_probe.jit_n = int(_probe.get("jit_n", 0)) + 1
+				get_viewport().get_texture().get_image().save_png("%s_%d.png" % [jshot, _probe.jit_n])
+			if game.phys.crash_on:   # back up and on again after a crash (the probe skips crashed frames)
+				_probe.bt_crash = _probe.get("bt_crash", 0.0) + get_process_delta_time()
+				if _probe.bt_crash > 1.5:
+					_probe.bt_crash = 0.0
+					var crs_bt = game.terrain.field.course
+					var cp_bt: Array = crs_bt.at(maxf(0.0, crs_bt.nearest(game.phys.x, game.phys.z) if crs_bt.has_method("nearest") else 20.0))
+					game.get_up()
+					game.phys.reset_at(cp_bt[0], cp_bt[1], atan2(-float(cp_bt[3]), float(cp_bt[2])))
+					game._snap_prev()
+			if hard:
+				Input.action_release("pedal"); Input.action_press("brake")
+				Input.action_press("steer_left" if int(ph_bt / 7.5) % 2 == 0 else "steer_right")
+			else:
+				Input.action_release("brake"); Input.action_release("steer_left"); Input.action_release("steer_right"); Input.action_press("pedal"); Input.action_press("sprint")
+		if OS.get_environment("BMX_SAVELOG") != "" and el >= float(OS.get_environment("BMX_SAVELOG")) and not _probe.has("logged"):   # tests: press "save ride log"
+			_probe["logged"] = true
+			var ev := InputEventAction.new(); ev.action = "save_log"; ev.pressed = true
+			Input.parse_input_event(ev)
 		var body_t := OS.get_environment("BMX_BODY")   # tests: the body stick. manual / fwd / lean / flick (from 3 s)
 		if body_t != "" and el >= 3.0:
 			var ph2: BikePhysics = game.phys
@@ -321,6 +454,15 @@ func _autotest(seconds: float) -> void:
 				Input.action_press("body_left", 1.0) if on3 else Input.action_release("body_left")
 				if ph2.air and OS.get_environment("BMX_BODY_PRINT") != "" and int(el * 20) % 2 == 0:
 					print("YAW t=%.2f air=%.2f stick_yaw=%.2f edge=%.2f hold=%.2f spin=%.0fdeg slip=%.2f" % [el, ph2.air_time, ph2.stick_yaw, ph2.yaw_edge_s, ph2.yaw_hold, rad_to_deg(ph2.spin_acc), ph2.slip])
+			elif body_t.begins_with("air:"):   # tests: in the air hold the stick at x,y (+x left, +y forward), e.g. air:0,0.75
+				var xy := body_t.trim_prefix("air:").split(",")
+				var on4: bool = ph2.air and ph2.air_time > 0.08
+				var ax := float(xy[0]) if on4 else 0.0
+				var ay := float(xy[1]) if on4 else 0.0
+				Input.action_press("body_left", ax) if ax > 0.0 else Input.action_release("body_left")
+				Input.action_press("body_right", -ax) if ax < 0.0 else Input.action_release("body_right")
+				Input.action_press("body_fwd", ay) if ay > 0.0 else Input.action_release("body_fwd")
+				Input.action_press("body_back", -ay) if ay < 0.0 else Input.action_release("body_back")
 			elif body_t == "circle":   # in the air: circle the stick (0.8 deflection, ~1 turn / s); hands off on the ground
 				var ca := el * TAU * 1.0
 				var on := ph2.air and ph2.air_time > 0.08
@@ -333,6 +475,29 @@ func _autotest(seconds: float) -> void:
 				if on and OS.get_environment("BMX_BODY_PRINT") != "":
 					print("AIRSTICK t=%.2f stick=(%.2f,%.2f) pitch=%.2f g=%.2f bike_lean=%.2f air_tilt=%.2f" % [el, ph2.air_stick.x, ph2.air_stick.y, ph2.pitch, ph2._g_pitch, ph2.bike_lean, ph2.air_tilt])
 			elif body_t == "lean": Input.action_press("body_left", 1.0)
+			elif body_t == "both":   # both sticks: the right stick leans the way the left stick steers (+ hand wobble)
+				var s_l := Input.get_action_strength("steer_left") - Input.get_action_strength("steer_right")
+				var bl := clampf(s_l * 1.2 + sin(el * 7.3) * 0.12, -1.0, 1.0)
+				Input.action_press("body_left", bl) if bl > 0.0 else Input.action_release("body_left")
+				Input.action_press("body_right", -bl) if bl < 0.0 else Input.action_release("body_right")
+			elif body_t == "thumb":   # a real thumb on the right stick, leaning with the steer: never on the axis
+				# (+-0.35 fore / aft drift), re-grips (a jump to a new spot every ~0.4 s), small tremor
+				var s_l2 := Input.get_action_strength("steer_left") - Input.get_action_strength("steer_right")
+				var seg := floori(el / 0.4)
+				var rr := RandomNumberGenerator.new(); rr.seed = seg * 7919 + 13
+				var sx := clampf(s_l2 * rr.randf_range(0.7, 1.3) + rr.randf_range(-0.25, 0.25) + sin(el * 23.0) * 0.05, -1.0, 1.0)
+				var sy := rr.randf_range(-0.35, 0.35) + sin(el * 19.0) * 0.04
+				Input.action_press("body_left", sx) if sx > 0.0 else Input.action_release("body_left")
+				Input.action_press("body_right", -sx) if sx < 0.0 else Input.action_release("body_right")
+				Input.action_press("body_fwd", sy) if sy > 0.0 else Input.action_release("body_fwd")
+				Input.action_press("body_back", -sy) if sy < 0.0 else Input.action_release("body_back")
+				var ph3: BikePhysics = game.phys
+				if not ph3.air and not ph3.crash_on:
+					_probe.thumb_n = int(_probe.get("thumb_n", 0)) + 1
+					if ph3.manual_up > 0.05 or ph3.wheelie_up > 0.05: _probe.thumb_manual = int(_probe.get("thumb_manual", 0)) + 1
+					if absf(ph3.flick_kick) > 0.01: _probe.thumb_kick = int(_probe.get("thumb_kick", 0)) + 1
+					var dp: float = absf(ph3.body_in_s - float(_probe.get("thumb_bs", 0.0)))
+					_probe.thumb_bs = ph3.body_in_s; _probe.thumb_bsj = float(_probe.get("thumb_bsj", 0.0)) + dp
 			elif body_t == "flick":
 				var side := int(el * 1.5) % 2 == 0
 				Input.action_press("body_left", 1.0) if side else Input.action_release("body_left")
@@ -390,6 +555,11 @@ func _autotest(seconds: float) -> void:
 			if ls != "" and lt > 0.3 and lt - float(_probe.get("l_shot", -1.0)) > 0.4 and int(_probe.get("l_n", 0)) < 6:
 				_probe.l_shot = lt; _probe.l_n = int(_probe.get("l_n", 0)) + 1
 				get_viewport().get_texture().get_image().save_png("%s_%d.png" % [ls, _probe.l_n])
+		if OS.get_environment("BMX_GRIP_PROBE") != "" and el - float(_probe.get("grip_t", -1.0)) >= 0.25:   # tests: tyre grip sim
+			_probe.grip_t = el
+			var gp = game.phys
+			_probe.grip_max = maxf(float(_probe.get("grip_max", 0.0)), absf(gp.slip) if not gp.air else 0.0)
+			print("GRIP t=%.2f v=%.1f slip=%.1fdeg slip_w=%.2f grip_r=%.2f loose=%.2f squirm=%.1fdeg bars=%.1fdeg skid=%s air=%s" % [el, gp.v, rad_to_deg(gp.slip), gp.slip_w, gp.grip_r, gp.loose, rad_to_deg(gp._squirm), rad_to_deg(gp.bar_catch), gp.skid_fx, gp.air])
 		if OS.get_environment("BMX_VMAX") != "" and not game.phys.air: _probe.vmax_kmh = maxf(_probe.get("vmax_kmh", 0.0), game.phys.v * 3.6)   # tests
 		var airshot := OS.get_environment("BMX_AIRSHOT")   # tests: dir/prefix -> shots mid-air (up to 8)
 		if airshot != "" and game.phys.air and game.phys.air_time > 0.25 and _airshots < 8 and el - _airshot_t > 0.6:
@@ -438,6 +608,10 @@ func _autotest(seconds: float) -> void:
 				var dd: float = Vector2(cp[0] - ph.x, cp[1] - ph.z).length_squared()
 				if dd < best_d: best_d = dd; _probe.fs = s0 + k
 			var tp: Array = crs.at(float(_probe.fs) + 6.0 + absf(ph.v) * 0.5)
+			var wv := OS.get_environment("BMX_WEAVE")   # tests: weave this far (m) either side of the centreline, over berm / trail edges
+			if wv != "":
+				var off: float = float(wv) * sin(el * 1.3)
+				tp = [tp[0] - float(tp[3]) * off, tp[1] + float(tp[2]) * off, tp[2], tp[3]]
 			var err: float = BikePhysics.ang_diff(atan2(-(tp[1] - ph.z), tp[0] - ph.x), ph.heading)
 			var sv := clampf(err * 2.5, -1.0, 1.0)
 			Input.action_press("steer_left", sv) if sv > 0.05 else Input.action_release("steer_left")
@@ -465,27 +639,39 @@ func _autotest(seconds: float) -> void:
 			Input.action_press("steer_left", maxf(sv, 0.0)) if sv > 0 else Input.action_release("steer_left")
 			Input.action_press("steer_right", maxf(-sv, 0.0)) if sv < 0 else Input.action_release("steer_right")
 		elif pedal and not straight and int(el) % 6 == 3: Input.action_press("steer_left")
-		else: Input.action_release("steer_left")
+		elif not game.jitter_on: Input.action_release("steer_left")   # (BMX_BRAKETURN steers itself)
 		if pedal and not straight and int(el * 2) % 7 == 0: Input.action_press("hop")
 		elif OS.get_environment("BMX_AIRPULL") != "" and game.phys.air and game.phys.air_time > 0.1: Input.action_press("hop")   # tests: tuck in the air
 		else: Input.action_release("hop")
+		if OS.get_environment("BMX_RESPAWN") != "" and el > float(OS.get_environment("BMX_RESPAWN")) and not _probe.has("respawned"):   # tests: Backspace here
+			_probe["respawned"] = true
+			print("AUTOTEST respawn: ride_t before=%.1f" % game.hud.ride_t)
+			game.respawn(false)
 		if OS.get_environment("BMX_BAIL") != "" and el > float(OS.get_environment("BMX_BAIL")) and not _probe.has("bailed"):   # tests: bail (crash) here
 			_probe["bailed"] = true
 			game.phys.crash_pending = "BAIL!"
+		if OS.get_environment("BMX_GOPRO_PROBE") != "" and _probe.has("bailed") and not _probe.has("gotup") \
+				and el > float(OS.get_environment("BMX_BAIL")) + 2.5 and game.phys.crash_on:   # tests: get up (new GoPro on)
+			_probe["gotup"] = true
+			game.get_up()
 		if OS.get_environment("BMX_LAND_TEST") != "" and el > float(OS.get_environment("BMX_LAND_TEST")) and not _probe.has("landed"):   # tests: fake a hard landing
 			_probe["landed"] = true
 			game.on_landing(1.0, 8.0)
 		if OS.get_environment("BMX_SKID") != "" and el > float(OS.get_environment("BMX_SKID")):   # tests: lock the rear (skid) from this time on
 			Input.action_release("pedal"); Input.action_press("brake")
 		await get_tree().process_frame
-		if OS.get_environment("BMX_DUST_SHOTS") != "":   # tests: dir/prefix â€” a screenshot every 0.5 s after BMX_DUST_T0 (3 s)
+		if OS.get_environment("BMX_DUST_SHOTS") != "":   # tests: dir/prefix - a screenshot every 0.5 s after BMX_DUST_T0 (3 s)
 			var t0d := float(OS.get_environment("BMX_DUST_T0")) if OS.get_environment("BMX_DUST_T0") != "" else 3.0
 			var nk := int((el - t0d) * 2.0)
 			if el > t0d and nk != _probe.get("dust_k", -1) and nk < 8:
 				_probe["dust_k"] = nk
 				get_viewport().get_texture().get_image().save_png("%s_%d.png" % [OS.get_environment("BMX_DUST_SHOTS"), nk])
+		if OS.get_environment("BMX_TAPE") != "":   # tests: ride square into the nearest race tape, shots as it stretches / snaps
+			_tape_test(el)
 		if OS.get_environment("BMX_FENCE") != "":   # tests: ride straight into the nearest fence, shots around the hit
 			_fence_test(el)
+		if OS.get_environment("BMX_FENCE_ALL") != "":   # tests: smash every fence within 70 m, then check each piece
+			_fence_all(el)
 		if OS.get_environment("BMX_CACTUS_ROW") != "":   # tests: the five cactus kinds in a row in front of the camera
 			_cactus_row(el)
 		if OS.get_environment("BMX_BODY_PROBE") != "":   # tests: the rider's body vs the bike
@@ -509,6 +695,13 @@ func _autotest(seconds: float) -> void:
 			_show_controls()
 			if OS.get_environment("BMX_TAB") != "": controls_open.get_child(0).get_child(2).current_tab = int(OS.get_environment("BMX_TAB"))
 		for i in 10: await get_tree().process_frame
+		await get_tree().create_timer(1.0, true, false, true).timeout   # the pause leaflet comes up
+		if OS.get_environment("BMX_PAUSE_HOVER") != "" and is_instance_valid(pause_menu):   # tests: point at a menu line
+			var mv := InputEventMouseMotion.new()
+			mv.position = get_viewport().get_visible_rect().size * Vector2(0.5, float(OS.get_environment("BMX_PAUSE_HOVER")))
+			Input.parse_input_event(mv)
+			for i in 5: await get_tree().process_frame
+			print("HOVER at ", mv.position, " -> page ", pause_menu.page_point(pause_menu._screen_px(mv.position)), " win ", get_window().size)
 		if OS.get_environment("BMX_PAUSE") == "preset":   # pause > settings > a quality preset > Done > resume
 			_open_settings()
 			await get_tree().process_frame
@@ -537,7 +730,14 @@ func _autotest(seconds: float) -> void:
 			print("LIMB %s frames=%d turn_max=%.1fdeg jump_max=%.1fcm flips=%d jumps=%d" % [k, s.frames, s.turn_max, s.jump_max * 100, s.flips, s.jumps])
 			for w in s.worst: print("  LIMBW %s %s" % [k, w])
 	print("AUTOTEST avg triangles/frame=%dk draw calls=%d" % [tris / maxi(frames, 1) / 1000, draws / maxi(frames, 1)])
+	if OS.get_environment("BMX_PHOTO") != "": print("AUTOTEST photo: on=%s time_scale=%.2f hud=%s fov=%.1f" % [game.photo, Engine.time_scale, game.hud.visible, game.cam.fov])
+	if OS.get_environment("BMX_MAP") != "": print("AUTOTEST map: open=%s time_scale=%.2f hud=%s" % [game.paper_map.busy() if game.paper_map else "none", Engine.time_scale, game.hud.visible])
 	print("AUTOTEST frames=%d fps=%.1f pos=(%.1f, %.1f, %.1f) v=%.2f crash=%s sane=%s" % [frames, frames / seconds, st.x, st.y, st.z, st.v, st.crash_on, st.is_sane()])
+	if OS.get_environment("BMX_BRAKETURN") != "": game.jitter_report()
+	if OS.get_environment("BMX_BANK_PROBE") != "":
+		for k in game._base_bins:
+			var acc: Array = game._base_bins[k]
+			print("BASEBIN lean %.2f-%.2f rad: base below ground %.3f m avg, load %.2f g, %d frames" % [k * 0.25, k * 0.25 + 0.25, -acc[0] / acc[1], acc[2] / acc[1], acc[1]])
 	if rec != null:
 		rec.set_recording_active(false)
 		rec.get_recording().save_to_wav(OS.get_environment("BMX_REC"))
@@ -545,6 +745,46 @@ func _autotest(seconds: float) -> void:
 	if shot != "":
 		get_viewport().get_texture().get_image().save_png(shot)
 	get_tree().quit()
+
+## BMX_TAPE test (=dir/prefix, BMX_TAPE_SPEED m/s, default 7; BMX_TAPE_STOP=secs brakes after the hit):
+## at 2 s the bike is put 6 m from the middle of the nearest tape span, square on; prints TAPE lines
+## (state, strain, strips) and saves a shot every 0.2 s for 2.4 s
+var _tape := {}
+func _tape_test(el: float) -> void:
+	var ph = game.phys
+	var ts: TapeSim = game.terrain._tapes
+	if _tape.is_empty() and el > 2.0:
+		var best = null
+		var bd := INF
+		for key in game.terrain._col_grid:
+			for c in game.terrain._col_grid[key]:
+				if c.has("tape") and not c["tape"]["broken"] and (c["tape"]["len"] as float) > 5.0:
+					var d := Vector2(c.x - ph.x, c.z - ph.z).length()
+					if d < bd: bd = d; best = c["tape"]
+		if best == null: return
+		var pts: PackedVector3Array = best["pts"]
+		var mid := pts[pts.size() / 2]
+		var along := Vector2(pts[pts.size() - 1].x - pts[0].x, pts[pts.size() - 1].z - pts[0].z).normalized()
+		var rd := Vector2(-along.y, along.x)
+		var spd := float(OS.get_environment("BMX_TAPE_SPEED")) if OS.get_environment("BMX_TAPE_SPEED") != "" else 7.0
+		var start := Vector2(mid.x, mid.z) - rd * 6.0
+		ph.reset_at(start.x, start.y, atan2(-rd.y, rd.x))
+		ph.v = spd
+		_tape = {"sp": best, "t": el, "shot": 0, "next": el}
+		print("TAPE test: span len=%.1f m at (%.1f, %.1f) speed=%.1f" % [best["len"], mid.x, mid.z, spd])
+	elif not _tape.is_empty():
+		if OS.get_environment("BMX_TAPE_STOP") != "" and el > _tape.t + float(OS.get_environment("BMX_TAPE_STOP")):
+			Input.action_press("brake"); Input.action_release("pedal")
+		if el >= _tape.next and _tape.shot < 120:
+			_tape.next = el + 0.05
+			var st := "-"; var strain := 0.0
+			for s in ts.strips:
+				if s.has("state") and is_same(s["sp"], _tape.sp): st = s["state"]; strain = s.get("strain", 0.0)
+			print("TAPE t=%.2f v=%.1f broken=%s state=%s strain=%.3f strips=%d" % [el - _tape.t, ph.v, _tape.sp.broken, st, strain, ts.strips.size()])
+			if OS.get_environment("BMX_TAPE").contains("/") and _tape.shot in [16, 18, 20, 22, 26, 34]:
+				get_viewport().get_texture().get_image().save_png(OS.get_environment("BMX_TAPE") + "_%02d.png" % _tape.shot)
+			_tape.shot += 1
+
 
 ## BMX_FENCE test: at 2 s put the bike 6 m in front of the nearest fence panel, aimed at it; shots
 ## at the hit and after (BMX_FENCE=dir/prefix)
@@ -567,9 +807,13 @@ func _fence_test(el: float) -> void:
 		# the panel's own direction: from its first collider to its centre; ride across it
 		var along := Vector2(p.cx, p.cz) - Vector2(best.x, best.z)
 		var nrm := Vector2(-along.y, along.x).normalized() if along.length() > 0.1 else Vector2(1, 0)
-		var start := Vector2(p.cx, p.cz) - nrm * 6.0
-		ph.reset_at(start.x, start.y, atan2(-nrm.y, nrm.x))
-		ph.v = 7.0
+		# BMX_FENCE_SPEED (m/s, default 7) / BMX_FENCE_ANGLE (degrees off square-on, default 0)
+		var ang := deg_to_rad(float(OS.get_environment("BMX_FENCE_ANGLE"))) if OS.get_environment("BMX_FENCE_ANGLE") != "" else 0.0
+		var rd := nrm.rotated(ang)
+		var spd := float(OS.get_environment("BMX_FENCE_SPEED")) if OS.get_environment("BMX_FENCE_SPEED") != "" else 7.0
+		var start := Vector2(p.cx, p.cz) - rd * maxf(6.0, spd * 0.8)
+		ph.reset_at(start.x, start.y, atan2(-rd.y, rd.x))
+		ph.v = spd
 		_fence = {"panel": p, "t": el, "shot": 0}
 		print("FENCE test: panel at (%.1f, %.1f) style=%s parts=%d" % [p.cx, p.cz, p.style, p.parts.size()])
 	elif not _fence.is_empty():
@@ -623,6 +867,40 @@ func _cactus_row(el: float) -> void:
 			var o: Vector3 = c["rec"]["xform"].origin
 			tr._debris.smash_cactus(c["rec"], c["rt"] * 7.0, o + Vector3(0, 0.45, 0) - c["rt"] * 0.25)
 		print("CACTUS smashed %d in %.1f ms, debris moving=%d" % [_cacti.size(), (Time.get_ticks_usec() - t0) / 1000.0, tr._debris._items.size()])
+
+
+## BMX_FENCE_ALL=1: at 2 s smash every fence panel within 70 m (random 4-18 m/s), at 9 s report where every
+## piece is: buried under the drawn ground, far away, invisible, gone
+var _fall := {}
+func _fence_all(el: float) -> void:
+	var tr = game.terrain
+	var ph = game.phys
+	if _fall.is_empty() and el > 2.0:
+		var n := 0
+		var seen := {}
+		for k in tr._col_grid:
+			for c in tr._col_grid[k]:
+				if not c.has("fence") or c["fence"]["broken"] or seen.has(c["fence"]): continue
+				if Vector2(c.x - ph.x, c.z - ph.z).length() > 70.0: continue
+				seen[c["fence"]] = true
+				var a := randf() * TAU
+				var sp := 4.0 + randf() * 14.0
+				if tr.break_collider(c, Vector3(cos(a) * sp, 0, sin(a) * sp)): n += 1
+		_fall = {"t": el, "n": n, "pieces": tr._debris._items.size()}
+		print("FENCEALL smashed panels=%d pieces=%d" % [n, _fall.pieces])
+	elif not _fall.is_empty() and not _fall.has("done") and el > _fall.t + 7.0:
+		_fall.done = true
+		var d = tr._debris
+		var bad_under := 0; var bad_far := 0; var bad_vis := 0; var gone := 0
+		for w in d._wrecks:
+			var mi = w["node"]
+			if not is_instance_valid(mi): gone += 1; continue
+			if not mi.is_visible_in_tree(): bad_vis += 1
+			var ab: AABB = mi.global_transform * mi.get_aabb()
+			var top := ab.position.y + ab.size.y
+			var c := ab.get_center()
+			if top < tr.top_height(c.x, c.z) + 0.01: bad_under += 1; print("FENCEALL under at %s top=%.2f ground=%.2f" % [str(c), top, tr.top_height(c.x, c.z)])
+		print("FENCEALL after 7 s: moving=%d lying=%d (of %d) buried=%d invisible=%d freed=%d" % [d._items.size(), d._wrecks.size(), _fall.pieces, bad_under, bad_vis, gone])
 
 
 ## --shot=<png path>@<seconds>: save a screenshot after that long, then quit (testing / store shots)
