@@ -1396,6 +1396,10 @@ func _kit_page() -> void:
 	body.add_child(kits)
 	for g in RiderPanels.LOOK_ROWS:
 		_h(g[0].to_upper())
+		if g[0] == "Kit":
+			body.add_child(UITheme.text("Knee pads design", SUB, Tokens.T_XS))
+			body.add_child(RiderPanels.pad_style_picker(str(look.padStyle), func(id):
+				look.padStyle = id; _set_look(look); _set_tab("kit")))
 		for row in g[1]:
 			var key: String = row[0]
 			var hb := HBoxContainer.new()
