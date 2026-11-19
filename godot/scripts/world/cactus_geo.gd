@@ -57,11 +57,17 @@ static func _fracture_all(datas: Array) -> void:
 		_frac[k] = fracture(datas[k], CELLS[k], 9001 + k * 77, k)
 
 
-## the pieces of a smashed cactus of this kind: [{mesh, at, size, pts}] in the unscaled cactus space
-static func pieces(kind: int) -> Array:
+## wait for the background fracture. Must run before the game quits: a task still cutting cacti while
+## the engine tears down its scripts crashed every exit (access violation in ntdll)
+static func join() -> void:
 	if _task >= 0:
 		WorkerThreadPool.wait_for_task_completion(_task)
 		_task = -1
+
+
+## the pieces of a smashed cactus of this kind: [{mesh, at, size, pts}] in the unscaled cactus space
+static func pieces(kind: int) -> Array:
+	join()
 	if _frac_meshes[kind] == null:
 		var out := []
 		for p in _frac[kind]:

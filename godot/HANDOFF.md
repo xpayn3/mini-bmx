@@ -357,6 +357,9 @@ and other GPU apps open; uncapped ~430 fps on an RTX 3090 after the C# terrain.
 - Coplanar faces flicker (door rails vs wall): offset parts off shared faces.
 - `GPUParticles3D.emit_particle()` didn't draw in 4.7 tests → drive a continuously emitting node instead.
 - `Engine.time_scale = 0` (photo mode) must be undone when leaving to menus/pause.
+- Every `WorkerThreadPool` task must be waited for before quitting (`_exit_tree`), static ones too: the cactus
+  fracture task (`CactusGeo.join()`, called from `Terrain._exit_tree`) still running at exit crashed every quit
+  (0xC0000005 in ntdll, exit code 139 in bash, no Godot backtrace). Check test exit codes, not only the output.
 - PowerShell `Get-Content`/`WriteAllText` can change line endings — prefer the Edit tool for code edits.
 - Light through a doorway straight at the camera = glare; keep the sun high and to the side in the garage.
 

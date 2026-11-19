@@ -92,6 +92,7 @@ func _init(seed_in := 12345) -> void:
 
 func _exit_tree() -> void:
 	_join_all()
+	CactusGeo.join()   # the static cactus fracture task too (quitting while it ran crashed on exit)
 
 
 func _process(delta: float) -> void:
