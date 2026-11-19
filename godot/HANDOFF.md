@@ -38,6 +38,7 @@ repo, see above — never develop it).
 & "...mono_win64.exe" --path godot
 & "...mono_win64.exe" --path godot -- --ride
 & "...mono_win64.exe" --path godot -- --garage
+& "...mono_win64.exe" --path godot -- --rider    # the rider room
 # build C# after editing .cs files (the editor also builds on run)
 dotnet build   # in godot/
 ```
@@ -349,6 +350,11 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   rise 0–50 mm, alloy / carbon; reshapes the dh.glb steer mesh, grips + levers follow), Shocks, Gears
   (chainring, cassettes), Rider (rider on **training rollers**, preview situations, every bone slider),
   Kit (rider standing beside the bike).
+- **Split (2026-11-19)**: the garage (`Garage.mode = "bike"`, menu GARAGE / `--garage`) is bike only: Paint, Logos, Wheels,
+  Bars, Shocks, Gears; no rider, no rollers, the build card + Stock / Randomise / Save. The **rider room**
+  (`mode = "rider"`, menu RIDER / `--rider`, same room) has POSITION (rider always on the rollers, preview, presets, every
+  bone slider) and KIT (rider standing beside the bike); changes save as they're made, bottom bar = Back / Ride.
+  `BMX_GARAGE_TAB=rider|kit` or `BMX_GARAGE_RIDER` open the rider room.
 - Compact UI drawn at `UI_SCALE` 0.82 with a fixed-width card; long labels ellipsize. Racing-game shop look on
   flat white cards (tokens above): header card with the category bar (click or **Q / E**), every option list is a
   ◀ VALUE ▶ stepper with a dot per option (`_choice`), segmented stat meters (`StatBar`), key-hint pill at the bottom.
