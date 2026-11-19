@@ -22,6 +22,7 @@ const TABS := [
 		["Arms", ["P:Shoulders & arms"]],
 		["Legs", ["P:Legs & feet"]],
 		["Motion", ["P:Movement"]],
+		["Style", ["P:Style"]],
 		["Physics", ["T:Legs & body"]],
 	]],
 	["look", "Look", [

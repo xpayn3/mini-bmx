@@ -40,6 +40,10 @@ const DEFS := [
 		["flipRate", "Lip throw: max spin (W / S at the lip)", 6.5, 1, 12, 0.1, "rad/s"],
 		["flipAccel", "Lip throw: pull", 26, 2, 60, 0.5, "rad/s²"],
 		["airTilt", "Body shift tilts the bike (air W / S)", 0.45, 0, 0.9, 0.05, "rad"],
+		["airArcade", "Arcade air control (0 = real physics)", 1.0, 0, 1, 0.05, ""],
+		["airSpinRate", "Air tilt speed (W / S held)", 3.5, 0.5, 9, 0.1, "rad/s"],
+		["airSpinResp", "Air tilt response", 7, 1, 25, 0.5, "/s"],
+		["airSpinStop", "Air tilt stops when let go", 3, 0, 15, 0.25, "/s"],
 		["tuckSpin", "Tuck spins faster (Space)", 0.35, 0, 0.6, 0.05, ""],
 		["riderShare", "Rider's share of the spin", 0.85, 0.5, 0.95, 0.01, ""],
 		["airRoll", "Air lean left / right (A / D)", 0.6, 0, 1.2, 0.05, "rad"],
@@ -63,6 +67,7 @@ const DEFS := [
 		["leanDamp", "Lean damping", 1.0, 0.3, 1.6, 0.02, ""],
 		["bikeLeanMul", "Bike leans extra", 1.55, 0.7, 2.0, 0.01, "×"],
 		["bikeLeanCap", "Bike lean soft cap", 1.3, 0.3, 1.5, 0.01, "rad"],
+		["bodyLean", "Body leans with bike", 0.7, 0.3, 1.0, 0.01, "×"],
 	]],
 	["Legs & body", [
 		["legStiff", "Leg spring", 30, 4, 150, 1, ""],
@@ -80,7 +85,9 @@ const DEFS := [
 	["Jumping", [
 		["prepTime", "Spot lip ahead", 0.55, 0.1, 1.2, 0.05, "s"],
 		["prepDepth", "Crouch into lip", 0.16, 0, 0.3, 0.01, "m"],
-		["popKick", "Pump extension", 1.5, 0, 4, 0.1, "m/s"],
+		["popKick", "Pump extension", 2.2, 0, 5, 0.1, "m/s"],
+		["autoPump", "Pumps on his own (1 = no Space needed)", 0.4, 0, 1, 0.05, ""],
+		["airLift", "Lifts the bike after take-off", 0.6, 0, 1, 0.05, ""],
 		["landPrepTime", "Reach for landing", 0.35, 0.05, 1, 0.05, "s"],
 		["chargeTime", "Hop charge time", 2, 0.5, 4, 0.1, "s"],
 		["chargePop", "Full-charge extra pop", 0.6, 0, 4, 0.1, "m/s"],
@@ -102,9 +109,9 @@ const DEFS := [
 
 const PATH := "user://tune.cfg"
 ## bump VER when defaults are retuned: saved values of the RETUNED keys are dropped once
-const VER := 6
+const VER := 7
 const RETUNED := ["steerRate", "steerRelease", "steerCurve", "turnSlow", "turnFast", "turnFloor", "steerMax", "slowSteer",
-	"barSpeed", "grip", "slipRecover", "slipMax", "turnWeight", "leanMax", "leanIn", "leanOut", "leanDamp", "bikeLeanMul", "bikeLeanCap", "flipAccel", "flipRate", "airTwist", "landBack", "travel"]
+	"barSpeed", "grip", "slipRecover", "slipMax", "turnWeight", "leanMax", "leanIn", "leanOut", "leanDamp", "bikeLeanMul", "bikeLeanCap", "flipAccel", "flipRate", "airTwist", "landBack", "travel", "popKick"]
 var defaults := {}
 var base := {}       # the player's slider values (before the bike's ride multipliers)
 var ride := {}       # multipliers for the bike being ridden

@@ -60,6 +60,7 @@ var drawn_pos := Vector3.ZERO
 # tests (BMX_CLIP_PROBE): how deep the drawn tyres went into the ground before / after unclipping
 var clip_probe := OS.get_environment("BMX_CLIP_PROBE") != ""
 var _lean_max := 0.0; var _lean_shot_t := -9.0; var _lean_shots := 0   # tests (BMX_LEAN_SHOT)
+var _lip_t := -1.0; var _lip_shots := 0   # tests (BMX_LIP_SHOT)
 var clip_stats := {"frames": 0, "fixed": 0, "bad": 0, "before": 0.0, "after": 0.0}
 var _prev := {}
 var _last_good := {}
@@ -102,7 +103,11 @@ func _ready() -> void:
 	rider = load("res://scripts/rider/rider.gd").new()
 	rig.lean_g.add_child(rider)
 	rider.set_look(RiderPanels.load_look())
-	rider.set_style(RiderPanels.load_pose(GameState.bike_id, bike_cfg.pose))
+	var pose: Dictionary = RiderPanels.load_pose(GameState.bike_id, bike_cfg.pose)
+	for kv in OS.get_environment("BMX_POSE").split(",", false):   # tests: "bumpAbsorb=2,kneeOpen=0" (not saved)
+		var pr := kv.split("=")
+		if pr.size() == 2 and pose.has(pr[0]): pose[pr[0]] = float(pr[1])
+	rider.set_style(pose)
 	phys.bike_rock = float(rider.style.get("bikeRock", 1.0)) if rider.get("style") is Dictionary else 1.0
 	if rig.seat != null: rider.seat = rig.seat
 	var grip := rig.grip_mid()
@@ -828,6 +833,12 @@ func _process(dt: float) -> void:
 		clip_stats.frames += 1
 		clip_stats.before = maxf(clip_stats.before, d)
 		if d > 0.002: clip_stats.bad += 1
+	if OS.get_environment("BMX_LIP_SHOT") != "" and _lip_shots < 10:   # tests: 10 shots, 0.08 s apart, from a lip
+		if _lip_shots == 0 and st.prep > 0.2 and not st.air: _lip_t = t
+		if _lip_t >= 0.0 and t - _lip_t >= _lip_shots * 0.08:
+			get_viewport().get_texture().get_image().save_png("%s_%d.png" % [OS.get_environment("BMX_LIP_SHOT"), _lip_shots])
+			print("LIPSHOT %d prep=%.2f air=%s compress=%.2f absorb=%.2f vy=%.1f" % [_lip_shots, st.prep, st.air, st.compress, st.body_y - st.y, st.vy])
+			_lip_shots += 1
 	if OS.get_environment("BMX_LEAN_SHOT") != "" and not st.air and not st.crash_on:   # tests: shots in deep leans
 		var ln := absf(st.bike_lean)
 		_lean_max = maxf(_lean_max, ln)
@@ -854,7 +865,7 @@ func _process(dt: float) -> void:
 			"absorb": clampf(body_y - y_draw, -T.legComp, T.legExt), "pitch": p_draw, "bodyLevel": T.bodyLevel,
 			"attackDrop": T.attackDrop, "pedal": st.pedal, "sprint": st.sprint * st.pedal, "crank": st.crank,
 			"air": st.air_k, "compress": maxf(0.0, -st.compress), "hipShift": st.hip_shift, "t": t,
-			"airSpin": st.yaw_rate if st.air else 0.0, "turn": 0.0 if st.air else st.yaw_rate * clampf(absf(st.v) / 3.0, 0.3, 1.0)})
+			"airSpin": st.yaw_rate if st.air else 0.0, "wheelY": (rig.wheel_f.global_position.y + rig.wheel_r.global_position.y) * 0.5, "turn": 0.0 if st.air else st.yaw_rate * clampf(absf(st.v) / 3.0, 0.3, 1.0)})
 	var vd: float = Settings.get_v("view_distance")
 	terrain.update_stream(st.x, st.z, 4.0)
 	far_hills.follow(drawn_pos)

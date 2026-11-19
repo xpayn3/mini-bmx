@@ -49,6 +49,7 @@ var air_lock_a := false; var flip_in := 0.0; var spin_in := 0.0; var flip_acc :=
 # In the air nothing outside can turn rider + bike: their shared spin (air_w, rad/s at full stretch) is
 # conserved; tucking (Space) lowers the inertia so it spins faster. The rider can only tilt the bike
 # against their own body (air_tilt, limited) and twist it at the hips (air_tw).
+var pump_lift := 0.0   # a lip pump's leg drive still to come at take-off (m/s)
 var body_pw := 0.0; var throw_v := 0.0; var lock_tw := false; var lock_ts := false
 var air_w := 0.0; var air_inertia := 1.0; var air_tilt := 0.0; var air_tilt_v := 0.0
 var air_yaw := 0.0; var air_tw := 0.0; var air_tw_v := 0.0; var land_jolt := 0.0
@@ -291,6 +292,11 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	air_lean += (lean_in - air_lean) * minf(1.0, dt * 6)
 	# the rider tucks into a flip as well as when Space is held
 	var pull_t := maxf(1.0 if air and inp.hop and not air_lock_h else 0.0, 0.7 * absf(flip_in) if air else 0.0)
+	# right after take-off the rider lifts the bike up into the body (it moves about the shared centre of
+	# mass, the arc stays the same), then lets it down to reach for the landing (land_prep)
+	if air:
+		var lift_k: float = smooth01((air_time - 0.03) / 0.1) * (1.0 - smooth01((air_time - 0.3) / 0.3)) * (1.0 - land_prep)
+		pull_t = maxf(pull_t, T.airLift * lift_k)
 	air_pull += (pull_t - air_pull) * minf(1.0, dt * 8)
 	# the lip throw: W / S pressed fresh as the bike leaves a lip (a jump spotted just ahead, or one wheel
 	# already off) throw the rider back / forward, pushing against the bike and through it the ground. That
@@ -489,7 +495,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	# the bike leans under the rider: the body always stays a little more upright than the bike (never
 	# hangs inside it, or the inside leg cuts through the frame). The body leans ~70 % of the way the
 	# rider + bike lean, so in a fast turn the bike tips well under a fairly upright rider
-	counter = maxf(absf(bike_lean - lean * 0.7), absf(bike_lean) * 0.2) * signf(bike_lean)
+	counter = maxf(absf(bike_lean - lean * T.bodyLean), absf(bike_lean) * 0.2) * signf(bike_lean)
 	# side-to-side rock from pedalling out of the saddle: the bike swings ~6 deg each way under a steady
 	# body (~10 deg sprinting), most when pushing hard from slow, about a third of that spinning at speed
 	var rock_fade: float = 1.0 - 0.65 * smoothstep(5.0, 12.0, va)
@@ -684,6 +690,14 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 				# W / S tilt it on purpose, hands off the rider aims it at the landing slope
 				var I_new: float = 1.0 - T.riderShare * T.tuckSpin * air_pull
 				air_w *= air_inertia / I_new; air_inertia = I_new
+				# arcade air control (old side-on bike games): holding W / S spins the bike at a steady rate,
+				# letting go eases the spin out. The flight arc itself stays real; airArcade 0 = pure physics
+				var arc: float = T.airArcade
+				if arc > 0.0:
+					if absf(flip_in) > 0.05:
+						air_w += (flip_in * T.airSpinRate - air_w) * minf(1.0, T.airSpinResp * h) * arc
+					else:
+						air_w *= 1.0 - minf(1.0, T.airSpinStop * h) * arc
 				var tgt: float
 				if absf(flip_in) > 0.05:
 					tgt = flip_in * T.airTilt
@@ -774,6 +788,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			# while the body (on soft legs) lags behind doesn't launch the rider with it. In the air the
 			# two then move together (the legs only shift them about that centre)
 			if coupled and not is_nan(body_v): vy = PHI * body_v + mB * vy
+			if pump_lift > 0.0: vy += pump_lift; pump_lift = 0.0
 			# the speed along the lip splits into the horizontal part (v from now on) and the climb (vy)
 			v *= cos(_g_pitch)
 			# the spin rider + bike leave with: mostly the rider's (they're most of the inertia), plus the
@@ -879,8 +894,16 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	prep = maxf(0.0, prep - dt * 4) if air else prep + (prep_t - prep) * minf(1.0, dt * 8)
 	var popping := lip_t < 0.14
 	if popping and not pop_fired:
-		pop_fired = true; body_v = _or(body_v, 0) + T.popKick * prep; compress_v += 2.5 * prep
+		# the pump: the legs drive up off the lip (through the rider + bike centre of mass at take-off). Hold
+		# Space through the transition (pumping into it) for the full push; on his own the rider only gives
+		# autoPump of it
+		var pump: float = T.autoPump + (1.0 - T.autoPump) * clampf(load * 1.4, 0.0, 1.0)
+		pop_fired = true; body_v = _or(body_v, 0) + T.popKick * prep * pump * (1.0 + 0.4 * charge); compress_v += 2.5 * prep * pump
+		# the legs keep driving to the end of their stroke: the ground pushes back, lifting rider + bike
+		pump_lift = T.popKick * 0.9 * prep * pump * (1.0 + 0.4 * charge)
+		if OS.get_environment("BMX_TRICK") != "": print("POP prep=%.2f pump=%.2f load=%.2f lift=%.2f" % [prep, pump, load, pump_lift])   # tests
 	if not air and lip_t == INF: pop_fired = false
+	if not air: pump_lift *= exp(-dt * 1.2)   # the drive fades if the lip is still a while off
 	var lp := 0.0
 	var tuck := 0.0
 	if air:

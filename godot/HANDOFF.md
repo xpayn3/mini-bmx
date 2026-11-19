@@ -107,6 +107,16 @@ F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A 
   lies over; 3 points across the round casing, `tyre_hw`) against `Terrain.top_height` = max(exact mesh
   triangles `mesh_height`, `height` with domes / decks) and lifts / tilts the drawn bike until clear
   (the physics isn't touched). ~1–2 % frame time. Rock meshes are only as exact as their domes.
+- **Arcade air tilt** (`airArcade` 1 = on, 0 = pure physics): in the air W / S spin the bike at `airSpinRate`
+  (eased by `airSpinResp`, stops at `airSpinStop` when let go), like old side-on bike games; the flight arc stays real.
+- **Pump**: hold Space into a lip: the legs drive off it (`popKick` into body_v, and `pump_lift` added to the
+  take-off vy as the ground pushing back); alone the rider only gives `autoPump` of it. After take-off he lifts
+  the bike into the body (`airLift`, about the shared centre of mass), then reaches it down for the landing.
+- **Springy rider**: the body rides soft legs (~1.5 Hz up / down) and feels the frame + wheel motion
+  (`bumpAbsorb`, `bodyBounce` in Rider › Motion). `BMX_POSE=` now also works in a ride; `BMX_PUMP=1`,
+  `BMX_LIP_SHOT=prefix` for tests; `BOUNCE body_rms` in the `BMX_CLIP_PROBE` output.
+- **Rider › Style** sliders (pose keys): `hipSteady` (up / down leg spring), `standHeight`, `standBack`, `pedalChest`,
+  `turnLow`, `turnTwist`, `turnHips`, `slowWobble`, `airCrouch`; Motion has `bodyBob` (pedalling up / down).
 - Safety net: `is_sane()` / `reset_body()` — a non-finite step restores the last good state.
 
 ### Terrain

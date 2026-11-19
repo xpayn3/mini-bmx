@@ -68,6 +68,22 @@ const POSE_DEFS := [
 		["bikeRock", "Bike rock (sprint)", 0.0, 2.0, 0.05, "×"],
 		["upright", "Torso stays upright", 0.0, 1.0, 0.05, ""],
 		["hipSway", "Hip sway", 0.0, 0.12, 0.005, "m"],
+		["bodyBob", "Body bob (up / down)", 0.0, 4.0, 0.05, "×"],
+		["attackStand", "Stand when rolling", 0.0, 1.5, 0.05, "×"],
+		["kneeOpen", "Inside knee opens in turns", 0.0, 2.0, 0.05, "×"],
+		["bumpAbsorb", "Bump bounce (body soaks bumps)", 0.0, 3.0, 0.05, "×"],
+		["bodyBounce", "Body bounce damping (low = springy)", 0.15, 1.0, 0.01, ""],
+	]],
+	["Style", [
+		["hipSteady", "Hips steady (up / down)", 20.0, 400.0, 5.0, ""],
+		["standHeight", "Stand height", 0.0, 0.3, 0.005, "m"],
+		["standBack", "Hips back when standing", -0.1, 0.15, 0.005, "m"],
+		["pedalChest", "Chest up when pedalling", -0.2, 0.3, 0.01, "rad"],
+		["turnLow", "Get low in turns", 0.0, 3.0, 0.05, "×"],
+		["turnTwist", "Shoulders into turns", 0.0, 3.0, 0.05, "×"],
+		["turnHips", "Hips into turns", 0.0, 3.0, 0.05, "×"],
+		["slowWobble", "Balance wobble when slow", 0.0, 3.0, 0.05, "×"],
+		["airCrouch", "Crouch in the air", 0.0, 3.0, 0.05, "×"],
 	]],
 ]
 

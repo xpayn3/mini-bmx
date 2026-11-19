@@ -383,7 +383,8 @@ func _autotest(seconds: float) -> void:
 					game.get_up()
 					ph.reset_at(cp2[0], cp2[1], atan2(-float(cp2[3]), float(cp2[2])))
 					game._snap_prev()
-			Input.action_release("hop")
+			if OS.get_environment("BMX_PUMP") != "" and not ph.air and ph.prep > 0.15: Input.action_press("hop")   # tests: pump into lips
+			else: Input.action_release("hop")
 			await get_tree().process_frame
 			if OS.get_environment("BMX_DUST_SHOTS") != "":   # the timed screenshots work here too
 				var t0f := float(OS.get_environment("BMX_DUST_T0")) if OS.get_environment("BMX_DUST_T0") != "" else 3.0
@@ -451,6 +452,8 @@ func _autotest(seconds: float) -> void:
 	var st := game.phys
 	if not _probe.is_empty(): print("AUTOTEST body ", _probe)
 	if game.clip_probe:
+		var bs: Array = game.rider.bounce_stats
+		print("BOUNCE body_rms=%.1fcm body_max=%.1fcm legs_feel=%.2fg" % [sqrt(bs[0] / maxi(bs[1], 1)) * 100, bs[2] * 100, sqrt(bs[3] / maxi(bs[1], 1)) / 9.81])
 		var cs: Dictionary = game.clip_stats
 		print("RIDE bottom_outs=%d body=%.2fg ground=%.2fg" % [st.probe_bottom, sqrt(st.probe_acc2 / maxi(st.probe_n, 1)) / 9.81, sqrt(st.probe_g2 / maxi(st.probe_n, 1)) / 9.81])
 		print("CLIP frames=%d lifted=%d deepest_before=%.1fcm deepest_after=%.2fcm frames_inside=%d" % [cs.frames, cs.fixed, cs.before * 100, cs.after * 100, cs.bad])

@@ -9,7 +9,10 @@ const GEAR := preload("res://scripts/rider/rider_gear.gd")
 
 ## neutral riding style (posepanel.js NEUTRAL): BMX = all of these
 const NEUTRAL := {hipX = 0.0, hipY = 0.0, lean = 0.0, elbowsOut = 0.0, kneesOut = 0.0, stance = 0.0, seatFloor = false,
-	crouch = 1.0, standPedal = 1.0, aero = 1.0, sway = 1.0, bikeRock = 1.0, upright = 1.0, hipSway = 0.015, torso = 0.46,
+	crouch = 1.0, standPedal = 1.0, aero = 1.0, sway = 1.0, bikeRock = 1.0, upright = 1.0, hipSway = 0.015, torso = 0.46, attackStand = 1.0, kneeOpen = 1.0, bumpAbsorb = 2.0, bodyBounce = 0.4, bodyBob = 1.0,
+	# style (Rider > Style): the numbers the riding pose is built from
+	hipSteady = 90.0, standHeight = 0.15, standBack = 0.03, pedalChest = 0.05, turnLow = 1.0, turnTwist = 1.0,
+	turnHips = 1.0, slowWobble = 1.0, airCrouch = 1.0,
 	shoulders = 0.2, headTilt = 0.0, headTurn = 1.0, lookAhead = 0.0,
 	# per-bone controls (garage Rider tab / K panel); 0 = the riding pose as computed
 	hipZ = 0.0, pelvisTilt = 0.0, pelvisRoll = 0.0, pelvisYaw = 0.0,
@@ -661,6 +664,8 @@ static func _num(p: Dictionary, k: String, def := 0.0) -> float:
 ## headRoll, absorb, pitch, bodyLevel, attackDrop, pedal, sprint, crank, air, compress, hipShift, t
 var sm_turn := 0.0
 var sm_aero := 0.0
+var _fy_prev := NAN; var _fv_prev := NAN; var _facc := 0.0   # the frame's height / speed / acceleration (bump bounce)
+var bounce_stats := [0.0, 0, 0.0, 0.0]   # tests: sum of squared body offsets, samples, biggest offset
 func update_pose(dt: float, p: Dictionary) -> void:
 	var v := _num(p, "v")
 	var pedal := clampf(_num(p, "pedal"), 0, 1)
@@ -678,8 +683,9 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# hip sway / bob from pedalling: big when pushing off slowly, nearly still when spinning at speed
 	var hi_fade: float = 1.0 - 0.85 * smoothstep(5.0, 12.0, absf(v))
 	var sway: float = sin(crank) * pedal * sty.sway * (1 + 0.9 * spr) * hi_fade
-	var bob: float = sin(crank * 2) * pedal * sty.sway * (1 + 0.6 * spr) * lerpf(0.4, 1.0, hi_fade)
-	var wig: float = clampf(1 - absf(v) / 3, 0, 1) * sty.sway
+	# (Body bob: how far the body rises and drops with each pedal stroke)
+	var bob: float = sin(crank * 2) * pedal * sty.sway * float(sty.get("bodyBob", 1.0)) * (1 + 0.6 * spr) * lerpf(0.4, 1.0, hi_fade)
+	var wig: float = clampf(1 - absf(v) / 3, 0, 1) * sty.sway * float(sty.slowWobble)
 	var air := _num(p, "air")
 	var comp: float = _num(p, "compress") * sty.crouch
 	# speed tuck: from ~25 km/h the rider folds down over the bars for less drag (full by ~60 km/h):
@@ -691,19 +697,19 @@ func update_pose(dt: float, p: Dictionary) -> void:
 
 	# attack position: rolling, a downhill rider stands off the saddle (knees and elbows soft, ready),
 	# not only while pedalling
-	var stand: float = maxf(pedal, 0.85 * smoothstep(1.5, 5.0, absf(v)) * (1.0 - air))
+	var stand: float = maxf(pedal, clampf(0.85 * float(sty.attackStand), 0.0, 1.3) * smoothstep(1.5, 5.0, absf(v)) * (1.0 - air))
 
 	# pelvis
 	var pelvis := Vector3(
-		-0.16 - 0.07 * air + 0.06 * pedal * sty.standPedal - 0.03 * stand - comp * 0.25,
-		0.80 - 0.07 * air - comp + (0.15 * stand + 0.05 * spr) * sty.standPedal + 0.035 * bob - 0.07 * aero,
+		-0.16 - 0.07 * air * float(sty.airCrouch) + 0.06 * pedal * sty.standPedal - float(sty.standBack) * stand - comp * 0.25,
+		0.80 - 0.07 * air * float(sty.airCrouch) - comp + (float(sty.standHeight) * stand + 0.05 * spr) * sty.standPedal + 0.035 * bob - 0.07 * aero,
 		sway * sty.hipSway + shift * 0.3 + sin(t * 2.1) * 0.02 * wig) + fit
 	pelvis.x += sty.hipX * (1 - 0.5 * pedal) - 0.05 * aero
 	pelvis.y += sty.hipY * (1 - 0.6 * pedal)
 
 	# chest
 	# (pedalling out of the saddle the chest stays forward over the bars)
-	var ang: float = 0.72 - 0.05 * pedal + 0.12 * spr + 0.15 * (comp / 0.3) + 0.08 * air + sty.lean * (1 - 0.5 * pedal) + 0.42 * aero
+	var ang: float = 0.72 - float(sty.pedalChest) * pedal + 0.12 * spr + 0.15 * (comp / 0.3) + 0.08 * air + sty.lean * (1 - 0.5 * pedal) + 0.42 * aero
 	var L: float = sty.torso
 	var chest := Vector3(
 		pelvis.x + sin(ang) * L + 0.03 * pedal * (0.5 + 0.5 * bob),
@@ -763,7 +769,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		dz = chest.z
 		chest.y = y0 + dy * c - dz * sn
 		chest.z = dy * sn + dz * c
-		pelvis.y -= absf(cr) * 0.12
+		pelvis.y -= absf(cr) * 0.12 * float(sty.turnLow)
 		chest.x += absf(cr) * 0.05
 	# never sit INTO the saddle
 	if sty.seatFloor and seat != null:
@@ -779,13 +785,42 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		ch_s = chest
 		spring_init = true
 	var h := minf(dt, 0.05)
-	var dp := 2 * sqrt(260.0) * 0.85
+	# the body is a mass on springy legs and arms: when the bike is kicked up by a bump (or drops) the body
+	# lags behind and then springs back, so the knees and elbows soak it up. The frame's up / down
+	# acceleration pushes the body the other way (Bump bounce); Body bounce sets how long it rings on
+	var bump_k: float = float(sty.get("bumpAbsorb", 2.0)) * (1.0 - air)
+	# what the legs feel: half the frame's motion, half the wheels' (the bumps the suspension passes on)
+	var gy := (global_position.y if is_inside_tree() else 0.0) * 0.5 + _num(p, "wheelY") * 0.5
+	var acc := 0.0
+	if not is_nan(_fy_prev) and absf(gy - _fy_prev) > 1.0:
+		_fy_prev = NAN; _fv_prev = NAN   # teleports (respawn, a new ride) are not bumps
+	if h > 1e-4 and not is_nan(_fy_prev):
+		var vy_f := (gy - _fy_prev) / h
+		if not is_nan(_fv_prev):
+			acc = clampf((vy_f - _fv_prev) / h, -80.0, 80.0)
+		_fv_prev = vy_f
+	_fy_prev = gy
+	_facc += (acc - _facc) * (1.0 - exp(-40.0 * h))   # a touch of smoothing (frame-time jitter)
+	var zeta: float = clampf(float(sty.get("bodyBounce", 0.4)), 0.15, 1.0)
+	var dp := 2 * sqrt(260.0) * zeta
 	pel_v += ((pelvis - pel_s) * 260.0 - pel_v * dp) * h
+	# up / down the legs are a softer spring (~1.5 Hz): the body rides bumps and rebounds
+	var ky: float = clampf(float(sty.hipSteady), 20.0, 600.0)   # Hips steady: how stiffly the legs hold the hips
+	pel_v.y += ((pelvis.y - pel_s.y) * (ky - 260.0) - pel_v.y * 2.0 * (sqrt(ky) - sqrt(260.0)) * zeta) * h
+	pel_v.y -= _facc * bump_k * h
 	pel_s += pel_v * h
+	# the legs only bend / straighten so far
+	pel_s.y = clampf(pel_s.y, pelvis.y - 0.14, pelvis.y + 0.05)
+	if air < 0.5:   # tests (BMX_CLIP_PROBE): how far the body moves on its legs while riding
+		bounce_stats[0] += (pel_s.y - pelvis.y) * (pel_s.y - pelvis.y); bounce_stats[1] += 1
+		bounce_stats[2] = maxf(bounce_stats[2], absf(pel_s.y - pelvis.y)); bounce_stats[3] += _facc * _facc
 	pelvis = pel_s
-	var dc := 2 * sqrt(200.0) * 0.85
+	var dc := 2 * sqrt(200.0) * zeta
 	ch_v += ((chest - ch_s) * 200.0 - ch_v * dc) * h
+	ch_v.y += ((chest.y - ch_s.y) * (ky - 200.0) - ch_v.y * 2.0 * (sqrt(ky) - sqrt(200.0)) * zeta) * h
+	ch_v.y -= _facc * bump_k * 0.85 * h
 	ch_s += ch_v * h
+	ch_s.y = clampf(ch_s.y, chest.y - 0.14, chest.y + 0.06)
 	chest = ch_s
 	# pedalling rock: undo the bike's rock for hips and chest about the tyres' contact line
 	var rr: float = _num(p, "rockRoll") * sty.upright
@@ -837,9 +872,9 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# turning on the ground: shoulders and hips steer into the turn, the inside hip drops
 	var turn := clampf(_num(p, "turn"), -3.0, 3.0)
 	sm_turn += (turn - sm_turn) * (1.0 - exp(-8.0 * minf(dt, 0.1)))
-	var tw := Basis(tw_axis, float(sty.twist) + clampf(_num(p, "airSpin") * 0.07 + sm_turn * 0.13, -0.5, 0.5))
+	var tw := Basis(tw_axis, float(sty.twist) + clampf(_num(p, "airSpin") * 0.07 + sm_turn * 0.13 * float(sty.turnTwist), -0.5, 0.5))
 	# pelvis: turn (yaw about up), roll (one hip drops, about forward), tilt (about the hip line)
-	var pel_b := Basis(Vector3.UP, float(sty.pelvisYaw) + clampf(sm_turn * 0.07, -0.22, 0.22)) * Basis(Vector3.RIGHT, float(sty.pelvisRoll) - clampf(sm_turn * 0.04, -0.12, 0.12))
+	var pel_b := Basis(Vector3.UP, float(sty.pelvisYaw) + clampf(sm_turn * 0.07 * float(sty.turnHips), -0.4, 0.4)) * Basis(Vector3.RIGHT, float(sty.pelvisRoll) - clampf(sm_turn * 0.04 * float(sty.turnHips), -0.25, 0.25))
 	set_spine(hip, chest, pel_b * Vector3(0, 0, 1), tw * Vector3(0, 0, 1),
 		float(sty.spineCurve), float(sty.spineSide), float(sty.spineLow))
 	pelvis_mesh.transform = Transform3D(pel_b * Basis(Vector3.BACK, -(ang * 0.3) - float(sty.pelvisTilt)), pelvis)
@@ -866,7 +901,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		var hp: Vector3 = pelvis + pel_b * Vector3(0, -0.02, side * (0.11 + sty.stance))
 		var ankle := Vector3(foot.x - 0.04 + sty.heelFwd, foot.y + 0.12 + sty.heelUp, foot.z)
 		# turning: the inside knee opens out toward the turn, the outside leg drives down on its pedal
-		var inside: float = clampf(-side * _num(p, "lean") * 1.6, 0.0, 0.9) * (1.0 - air)
+		var inside: float = clampf(-side * _num(p, "lean") * 1.6, 0.0, 0.9) * float(sty.kneeOpen) * (1.0 - air)
 		var pole_l: Vector3 = (poles_leg[i] + Vector3(0, 0, side * inside)).normalized()
 		var ik := solve_ik(hp, ankle, L_THIGH, L_SHIN, pole_l)
 		var ik_raw: Vector3 = ik[0]
