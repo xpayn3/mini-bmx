@@ -196,6 +196,9 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   pedalling out of the saddle swings the bike ~±6° (±10° sprinting) under a steady body; elbows bend
   back and down, only a little out (the arm IK pole's sideways part scales with `elbowsOut`). Saved poses migrate once (`RiderPanels.POSE_VER` / `POSE_RETUNED`: only values still
   at the old default change). `BMX_LEAN_SHOT=prefix` saves shots of the first deep leans.
+- **Aerodynamics** (`aero_k` in `bike_physics.gd`): the air drag scales with the body: right stick forward on the ground = a race tuck
+  (chest folded over the bars, hips back, knees bent) cuts drag by `tuckDrag` (0.42; half that while pedalling), stick back = sat up,
+  `upDrag` more (an air brake). Straight test: 65.9 → 68.3 km/h in 20 s.
 - **Posture is the player's**: neutral (stick centred) is an upright attack position (torso ~30 deg from vertical);
   the right stick forward folds the rider down into the full tuck (`aero` in `rider.gd`, nothing tucks by itself at
   speed any more), back sits up tall and back.

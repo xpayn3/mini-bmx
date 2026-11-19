@@ -59,6 +59,7 @@ var pivot := 0.0; var pivot_acc := 0.0
 # rider body stick (gamepad right stick, any time): body_in = fore / aft (+ = forward over the bars),
 # flick_in = side lean (+ = left, like steer). flick = the smoothed side lean (the bike is thrown under
 # the body), manual_up = how far a pulled-back stick holds the front up (rad)
+var aero_k := 1.0   # air drag scale from the body position (tuck < 1, sat up > 1)
 var body_in := 0.0; var body_in_s := 0.0; var flick_in := 0.0; var flick := 0.0; var flick_prev := 0.0
 var wheelie_time := 0.0; var wheelie_pedal := false   # how long the current stick wheelie / manual has been held
 var manual_up := 0.0; var lock_sb := false; var lock_sf := false; var flick_kick := 0.0
@@ -493,7 +494,13 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			pump_acc = 0
 		var carry: float = 1 - T.flowCarry * flow / FLOW_MAX
 		var roll: float = (0.32 if surf == 0 else 0.42 if surf == 3 else 0.1) * T.rollRes * signf(v) * minf(1.0, absf(v) * 4)
-		a -= (roll + T.airDrag / (ts * ts) * v * absf(v)) * carry
+		# aerodynamics: the drag is the rider's frontal area. Folded down over the bars (right stick forward)
+		# it drops (~40 %: an upright downhill rider vs a race tuck), so the bike runs on and tops out faster;
+		# sat up tall (stick back) it catches the wind like an air brake. Pedalling hard spoils the tuck a bit
+		var tuck: float = clampf(body_in_s, 0.0, 1.0) * (1.0 - 0.5 * clampf(throttle, 0.0, 1.0))
+		var sit_up: float = clampf(-body_in_s, 0.0, 1.0)
+		aero_k = 1.0 - float(T.get("tuckDrag", 0.42)) * tuck + float(T.get("upDrag", 0.3)) * sit_up
+		a -= (roll + T.airDrag / (ts * ts) * v * absf(v) * aero_k) * carry
 		if in_water: a -= 0.7 * v
 		v = clampf(v + a * dt, -3, 24 * maxf(1.0, ts))
 		# braked to a stop the brake holds the bike where it is (no creeping, even on a slope) until it's let
