@@ -109,10 +109,14 @@ static func _short(action: String) -> String:
 func _actions_on(c: Array) -> Array:
 	var out := []
 	for a in Settings.ACTIONS:
-		for e in InputMap.action_get_events(a):
+		for e in _events(a):
 			if c[2] == "btn" and e is InputEventJoypadButton and e.button_index == c[3]: out.append(a)
 			elif c[2] == "trig" and e is InputEventJoypadMotion and e.axis == c[3]: out.append(a)
 	return out
+
+## the saved bindings (the source of truth; test runs leave pads out of the live InputMap)
+static func _events(a: String) -> Array:
+	return Settings.bindings.get(a, Settings.default_events(a))
 
 static func stick_axes(stick: int) -> Array:
 	return [JOY_AXIS_LEFT_X, JOY_AXIS_LEFT_Y] if stick == 0 else [JOY_AXIS_RIGHT_X, JOY_AXIS_RIGHT_Y]
@@ -123,7 +127,7 @@ static func role_of(stick: int) -> String:
 	for r in ROLE_NAMES:
 		if r == "Nothing": continue
 		var first: Array = ROLES[r][0]
-		for e in InputMap.action_get_events(first[0]):
+		for e in _events(first[0]):
 			if e is InputEventJoypadMotion and e.axis == ax[first[1]] and signf(e.axis_value) == first[2]: return r
 	return "Nothing"
 
