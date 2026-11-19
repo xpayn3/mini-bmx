@@ -4,6 +4,9 @@ extends Camera3D
 ## trackside... Orbit with Z / X or a mouse drag (or the right stick), zoom with the wheel or + / -.
 
 const PRESETS := {
+	# default: high drone-like view a little off to the side, turning with the trail AHEAD (not the bike)
+	# and aiming past the rider so the rider sits low in the frame and you see what's coming
+	"trail":     {"label": "Trail",      "dist": 18.0, "pitch": 34.0, "follow": true,  "fov": 38.0, "orbit": 0.34, "rate": 1.6, "ahead": true},
 	"diorama":   {"label": "Diorama",    "dist": 38.0, "pitch": 46.0, "follow": true,  "fov": 30.0},
 	"close":     {"label": "Close",      "dist": 16.0, "pitch": 40.0, "follow": true,  "fov": 30.0},
 	"chase":     {"label": "Chase",      "dist": 7.0,  "pitch": 16.0, "follow": true,  "fov": 42.0, "rate": 3.2},
@@ -20,7 +23,10 @@ const VISTA := {"label": "Lookout", "mode": "vista", "fov": 42.0, "back": 19.0, 
 var vista_yaw := 0.0
 
 var game
-var mode := "drone"
+var mode := "trail"
+var trail_i := -1            # nearest trail centreline point (search hint)
+var trail_dir := Vector3.ZERO  # smoothed direction to the trail ahead (Trail camera)
+var trail_course = null
 var dist := 22.0
 var orbit := 0.0
 var orbit_t := 0.0
@@ -69,6 +75,7 @@ func next_mode() -> String:
 func snap_to(p: Vector3) -> void:
 	target = p
 	pos_init = false
+	trail_i = -1; trail_dir = Vector3.ZERO
 
 func _unhandled_input(e: InputEvent) -> void:
 	if get_tree().paused: return
@@ -104,6 +111,11 @@ func update_cam(dt: float) -> void:
 	var want: Vector3
 	if st.crash_on and game.ragdoll:
 		want = (game.ragdoll.p[Ragdoll.PELVIS] as Vector3).lerp(Vector3(st.x, st.y, st.z), 0.3) + Vector3(0, 0.3, 0)
+	elif P.get("ahead", false):
+		# aim a few metres up the trail (more at speed): the rider sits in the lower part of the frame
+		var look := _look_dir(st, f, dt)
+		var lead := clampf(2.5 + absf(st.v) * 0.35, 2.5, 8.0)
+		want = Vector3(drawn.x, drawn.y + 0.4, drawn.z) + look * lead
 	else:
 		var k := 0.05 if P.get("mode", "") == "trackside" else (0.1 if P.get("drift", false) else 0.25)
 		want = Vector3(drawn.x, drawn.y + 0.5, drawn.z) + f * clampf(st.v, -1, 10) * k
@@ -132,6 +144,8 @@ func update_cam(dt: float) -> void:
 		if P.get("follow", false) and absf(st.v) > 0.5:
 			# in the air follow the travel direction, not the bike (it may be spinning a 360)
 			var dir_h: float = st.course if st.air and not is_nan(st.course) else st.heading
+			if P.get("ahead", false) and trail_dir.length_squared() > 0.01:
+				dir_h = atan2(-trail_dir.z, trail_dir.x)
 			cam_yaw += BikePhysics.ang_diff(dir_h, cam_yaw) * minf(1.0, dt * P.get("rate", 1.4) * minf(1.0, absf(st.v) / 4))
 		if P.has("spin"): orbit_t += P.spin * dt
 		orbit += (orbit_t - orbit) * minf(1.0, dt * 8)
@@ -148,14 +162,14 @@ func update_cam(dt: float) -> void:
 		pit = minf(84, pit + occ)
 		var pr := deg_to_rad(pit)
 		var want_pos := target - back * dist * cos(pr) + Vector3(0, dist * sin(pr), 0)
-		if P.get("drift", false):
+		if P.get("drift", false) or P.get("ahead", false):
 			# the drone floats on a spring, but on its OFFSET from the rider (pos_s), not its world
 			# position: a world-space spring trailed ~10 m behind at speed, and when zoomed in that lag
 			# crossed the snap-back limit, so the camera kept jumping
 			var off_want := want_pos - target
 			if not pos_init:
 				pos_s = off_want; pos_v = Vector3.ZERO; pos_init = true
-			var w := 2.4
+			var w := 3.2 if P.get("ahead", false) else 2.4
 			pos_v = (pos_v + (off_want - pos_s) * w * w * dt) * exp(-2 * w * dt)
 			pos_s += pos_v * dt
 			global_position = target + pos_s
@@ -164,7 +178,7 @@ func update_cam(dt: float) -> void:
 		var gh: float = terrain.height(global_position.x, global_position.z) + 0.35
 		if global_position.y < gh:
 			global_position.y = gh
-			if P.get("drift", false): pos_s.y = maxf(pos_s.y, gh - target.y); pos_v.y = maxf(pos_v.y, 0.0)
+			if P.get("drift", false) or P.get("ahead", false): pos_s.y = maxf(pos_s.y, gh - target.y); pos_v.y = maxf(pos_v.y, 0.0)
 	cam_fov += (fov_t - cam_fov) * minf(1.0, dt * (6.0 if P.get("mode", "") == "trackside" else 3.0))
 	fov = clampf(cam_fov * (1.0 + fov_boost / 34.0) + float(Settings.get_v("fov")), 5, 110)
 	var sk: float = st.shake * float(Settings.get_v("cam_shake"))
@@ -204,3 +218,50 @@ func _blocked(p_deg: float, back: Vector3, dy: float) -> bool:
 		if game.terrain.height(px, pz) + 0.6 > y0 + (target.y + hy - y0) * u:
 			return true
 	return false
+
+## Trail camera: smoothed horizontal direction from the rider to the trail ~10-25 m ahead (in the way
+## the rider is going), so the view turns INTO a bend before the bike does. Off the trail: the heading.
+func _look_dir(st: BikePhysics, f: Vector3, dt: float) -> Vector3:
+	var want := f
+	var c = null
+	if game.terrain and game.terrain.field:
+		c = game.terrain.field.course
+	if c != null and c.n > 2:
+		var n: int = c.n
+		if c != trail_course:
+			trail_course = c   # a grown course keeps every old point, so the hint stays good
+		var best := 1e18
+		if trail_i < 0 or trail_i >= n:
+			for i in range(0, n, 4):   # cold start: coarse scan of the whole course
+				var dx: float = c.X[i] - st.x
+				var dz: float = c.Z[i] - st.z
+				var d2 := dx * dx + dz * dz
+				if d2 < best: best = d2; trail_i = i
+		var lo := maxi(0, trail_i - 30)
+		var hi := mini(n - 1, trail_i + 30)
+		best = 1e18
+		for i in range(lo, hi + 1):
+			var dx: float = c.X[i] - st.x
+			var dz: float = c.Z[i] - st.z
+			var d2 := dx * dx + dz * dz
+			if d2 < best: best = d2; trail_i = i
+		var off := sqrt(best)
+		if off < 14.0:
+			var i0 := clampi(trail_i, 1, n - 2)
+			var tx: float = c.X[i0 + 1] - c.X[i0 - 1]
+			var tz: float = c.Z[i0 + 1] - c.Z[i0 - 1]
+			var sgn := 1 if tx * f.x + tz * f.z >= 0.0 else -1   # riding up or down the course
+			var steps := int(clampf(10.0 + absf(st.v) * 0.9, 10.0, 26.0) / TrailCourse.STEP)
+			var j := clampi(trail_i + sgn * steps, 0, n - 1)
+			var a := Vector3(c.X[j] - st.x, 0, c.Z[j] - st.z)
+			if a.length_squared() > 1.0:
+				a = a.normalized()
+				# fade back to the heading as the rider wanders off the trail
+				want = a.lerp(f, clampf((off - 6.0) / 8.0, 0.0, 1.0)).normalized()
+	else:
+		trail_i = -1
+	if trail_dir.length_squared() < 0.01:
+		trail_dir = want
+	else:
+		trail_dir = trail_dir.slerp(want, minf(1.0, dt * 2.0)).normalized()
+	return trail_dir
