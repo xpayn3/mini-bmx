@@ -80,6 +80,11 @@ var _lean_hist := []; var _bank_raw := 0.0   # the player is on a gamepad (Setti
 var wheel_f := 0.0; var wheel_r := 0.0; var crank := 0.0; var pedal := 0.0; var throttle_in := 0.0   # the raw gas key / trigger this step (pedal is its smoothed version)
 var yaw_rate := 0.0; var shake := 0.0
 var course := NAN; var slip := 0.0; var since_land := 1.0
+# riding backwards (fakie): landing turned ~180 deg from the travel doesn't crash, the bike just rolls on facing
+# backwards (v < 0, course = heading). Both sticks pushed towards the pad's centre (left stick right + right
+# stick left) swing it round to face forward (turn_off = the visual swing still to come, rad).
+var turn_off := 0.0; var rev_cap := 3.0; var _rev_land := false; var _land_fix := false; var _fakie_hold := 0.0
+const LAND_CONE := 1.05   # heading within ~60 deg of the travel at touch-down = a normal landing; past it the tyres grab the nearer axis
 # tyre grip sim (_grip_step): slip_w = how fast the bike is yawing against its travel (the rear stepping out /
 # coming back), grip_r = the rear tyre's sideways grip left (0 locked / spinning .. 1 full), loose = how loose
 # the patch of ground under the rear is (0..1), bar_catch = the rider's drawn countersteer into a slide
@@ -199,6 +204,7 @@ func reset_at(px: float, pz: float, hd: float) -> void:
 	v = 0; vy = 0; steer = 0; steer_in = 0; lean = 0; lean_v = 0; pitch = 0; air = false
 	bike_lean = 0; counter = 0; rock = 0; yaw_rate = 0; hop_nose = 0; hop_t = 0; air_time = 0; air_k = 0
 	load = 0; compress = 0; compress_v = 0; prep = 0; land_prep = 0; pop_fired = false; spun_out = false; shake = 0
+	turn_off = 0.0; rev_cap = 3.0; _fakie_hold = 0.0
 	course = hd; slip = 0; slip_w = 0.0; bar_catch = 0.0; w_init = false; front_air = false; rear_air = false; pump_acc = 0; since_land = 1
 	pitch_v = 0; c_f = true; c_r = true; wheelie_up = 0.0
 	g_pitch = NAN
@@ -217,7 +223,7 @@ func get_up() -> void:
 	v = 0; vy = 0; lean = 0; lean_v = 0; bike_lean = 0; counter = 0; steer = 0; steer_in = 0; yaw_rate = 0; air = false
 	pitch = 0; compress = 0; compress_v = 0; hop_nose = 0; hop_t = 0; load = 0
 	slip = 0; slip_w = 0.0; bar_catch = 0.0; w_init = false; front_air = false; rear_air = false; pump_acc = 0; pitch_v = 0; c_f = true; c_r = true; wheelie_up = 0.0
-	course = heading
+	course = heading; turn_off = 0.0; rev_cap = 3.0; _fakie_hold = 0.0
 	hop_block = true
 	y = host.terrain.height(x, z); body_y = y; body_v = 0
 	n_f = NAN; n_r = NAN; n_ref = NAN; lip_state = 0; hf_prev = NAN; hr_prev = NAN
@@ -472,7 +478,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		var p_mul: float = (1 + (T.sprintPower - 1 + kick) * sp_k) * ts
 		var cad: float = v / (gk * T.pedalTop * ts * 0.7)
 		var grind := 1.0 if gear < 0 else 0.35 + 0.65 * smooth01((cad - 0.15) / 0.7)
-		var drive: float = (throttle if rear_down else 0.0) * minf(T.pedalLaunch * p_mul / ts / gk, T.pedalPower * p_mul / vp) * grind * clampf((p_top - v) / 2.5, 0, 1)
+		var drive: float = (throttle if (rear_down and not (v < -0.3 and rev_cap > 3.0)) else 0.0) * minf(T.pedalLaunch * p_mul / ts / gk, T.pedalPower * p_mul / vp) * grind * clampf((p_top - v) / 2.5, 0, 1)
 		var drive_cap := mu * nR
 		if drive > drive_cap:
 			spin = minf(1.0, (drive - drive_cap) / 3); drive = drive_cap + (drive - drive_cap) * 0.15
@@ -482,6 +488,11 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			var b: float = minf(T.brakeForce * brake_k, 0.85 * mu * n_tot)
 			a -= b; a_long += b; drive -= b
 			brake_heat += b * v * dt / 45.0
+		elif brake and rear_down and v < -0.3 and rev_cap > 3.0:
+			# braking while rolling backwards after a fakie landing
+			var b: float = minf(T.brakeForce * brake_k, 0.85 * mu * n_tot)
+			a += b; a_long += b; drive += b
+			brake_heat += b * -v * dt / 45.0
 		a_drive = drive
 		var pump_ok := not front_air and not rear_air and not (hop_t > 0) and since_land > 0.25 and prep < 0.1 and v > 1
 		var a_pump: float = T.pumpGain * clampf(compress_v, -2, 2) * -sin(slope) if pump_ok else 0.0
@@ -502,7 +513,8 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		aero_k = 1.0 - float(T.get("tuckDrag", 0.42)) * tuck + float(T.get("upDrag", 0.3)) * sit_up
 		a -= (roll + T.airDrag / (ts * ts) * v * absf(v) * aero_k) * carry
 		if in_water: a -= 0.7 * v
-		v = clampf(v + a * dt, -3, 24 * maxf(1.0, ts))
+		v = clampf(v + a * dt, -maxf(3.0, rev_cap), 24 * maxf(1.0, ts))
+		rev_cap = maxf(3.0, minf(rev_cap, -v))   # the extra reverse room (fakie landing) only shrinks
 		# braked to a stop the brake holds the bike where it is (no creeping, even on a slope) until it's let
 		# go; pressing brake again from a standstill backs the bike up
 		if not brake:
@@ -640,7 +652,17 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			course += fk * 0.9; slip = clampf(slip + fk * 0.1, -T.slipMax * 0.8, T.slipMax * 0.8)
 		if absf(v) < 1.2:
 			var k := minf(1.0, dt * 6); course += slip * k; slip -= slip * k; slip_w -= slip_w * k
-		heading = course + slip
+		# fakie: both sticks towards the pad's centre (left stick right, right stick left) swing the bike round to
+		# face the way it travels: the travel flips at once, the drawn heading swings round (turn_off) in ~0.4 s
+		if v < -0.5 and steer_input < -0.6 and flick_in > 0.6: _fakie_hold += dt
+		else: _fakie_hold = 0.0
+		if _fakie_hold > 0.1:
+			_fakie_hold = 0.0
+			course += PI; v = -v; turn_off = -PI; rev_cap = 3.0
+			host.flash("SWITCH!")
+		turn_off -= turn_off * minf(1.0, dt * 7.0)
+		if absf(turn_off) < 0.01: turn_off = 0.0
+		heading = course + slip + turn_off
 		yaw_rate = course_rate + slip_rate
 		lat_a = a_lat
 		var scrub := mu * G * minf(load_k, 1.5) * absf(sin(slip)) * 0.9 + absf(excess) * (1 - share) * absf(v) * 0.15
@@ -670,7 +692,8 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		yaw_rate = wrapf(slip_new - slip, -PI, PI) / dt
 		spin_acc += yaw_rate * dt
 		slip = slip_new
-		heading = course + slip
+		turn_off -= turn_off * minf(1.0, dt * 7.0)
+		heading = course + slip + turn_off
 		lat_a = 0; lat_m = 0; flick_kick = 0.0
 		slip_w = 0.0; grip_r = 1.0; bar_catch += -bar_catch * minf(1.0, dt * 6)
 	if not air:
@@ -1101,7 +1124,20 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			var impact: float = maxf(0.0, v * sin(_g_pitch) - vy_in * cos(_g_pitch))
 			var at := air_time
 			var back_land: bool = cR and not cF and wrapf(pitch - _g_pitch, -PI, PI) > 0.4
+			_rev_land = false; _land_fix = false
 			_land_trick(at)
+			if _land_fix:
+				# the tyres grab the nearer axis: the bike keeps its heading, the travel is dragged round to within
+				# slipMax of it (what's left decays as a normal slide), speed lost by the angle dragged through.
+				# Past 90 deg that axis is backwards: speed runs negative (fakie)
+				var base: float = wrapf(slip - PI, -PI, PI) if _rev_land else wrapf(slip, -PI, PI)
+				var keep: float = minf(absf(base), 0.9 * T.slipMax)
+				var sl: float = signf(base) * keep
+				var drag_a: float = absf(base) - keep
+				v = (-v if _rev_land else v) * cos(minf(drag_a, 1.4))
+				course = heading - sl; slip = sl; slip_w = 0.0; turn_off = 0.0
+				if _rev_land: rev_cap = maxf(3.0, -v)
+				_rev_land = false; _land_fix = false
 			air = false; since_land = 0; land_jolt = 0.0
 			body_v = vy_in
 			body_pw = air_w
@@ -1273,9 +1309,14 @@ func _land_trick(at: float) -> void:
 		crash_pending = ("UNDER-ROTATED!" if absf(flip_acc) > 3.0 and signf(perr_s) != signf(flip_acc) else
 			"OVER-ROTATED!" if absf(flip_acc) > 3.0 else "LOOPED OUT!" if perr_s > 0 else "BAD LANDING!")
 		return
-	if absf(slip) > 2.2:
-		crash_pending = "BACKWARDS!"
-		return
+	# Graded landing zone instead of a hard cut: within ~60 deg of the travel it is a normal landing; past that
+	# the bike lands sideways-ish and the tyres grab the nearer axis (forward, or backwards = fakie past 90 deg),
+	# dragging the travel round and scrubbing speed by how far (applied at touch-down, see _ride_step)
+	var a_s := absf(slip)
+	if a_s > LAND_CONE:
+		_rev_land = a_s > PI * 0.5
+		_land_fix = true
+		host.flash("FAKIE!" if _rev_land else "SKETCHY!")
 	var flips := roundi(absf(flip_acc) / TAU)
 	var turns := int((absf(spin_acc) + 0.6) / TAU)   # flat spins landed facing forward again (within ~35 deg): 360, 720...
 	if flips >= 1 or turns >= 1:
