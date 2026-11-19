@@ -35,6 +35,7 @@ var x := 0.0; var z := 0.0; var y := 0.0; var vy := 0.0
 var heading := 0.0; var v := 0.0; var steer := 0.0; var steer_in := 0.0
 var lean := 0.0; var lean_v := 0.0; var bike_lean := 0.0; var counter := 0.0; var rock := 0.0
 var pitch := 0.0; var pitch_v := 0.0; var hop_nose := 0.0
+var wheelie_up := 0.0   # sprint wheelie: how far up (rad) the rider is holding the front
 var air := false; var air_time := 0.0; var air_k := 0.0
 var compress := 0.0; var compress_v := 0.0; var load := 0.0
 var body_y := NAN; var body_v := 0.0; var body_x := 0.0; var hip_shift := 0.0
@@ -120,13 +121,20 @@ static func start_gear(p_cogs: Array, p_ring_k: float) -> int:
 
 ## crank turn rate (rad/s) for a wheel spinning at w rad/s in gear gk; shared with the garage rollers
 static func crank_rate(w: float, gk: float, top_speed: float, p_sprint: float) -> float:
-	return maxf(w / (2.78 * gk * top_speed), 3.5) * (1 + 0.3 * p_sprint)
+	# a sprint from slow spins the legs up hard (~70 rpm at once), not just at the wheel's rate
+	return maxf(w / (2.78 * gk * top_speed), 3.5 + 4.0 * p_sprint * slowness(w * 0.37)) * (1 + 0.3 * p_sprint)
+
+## 1 standing still .. 0 by ~40 km/h (smooth): how hard a sprinting rider fights to get up to speed
+static func slowness(va: float) -> float:
+	return 1.0 - smooth01(absf(va) / 11.0)
 
 ## side-to-side rock from pedalling out of the saddle: the bike swings ~6 deg each way under a steady
 ## body (~10 deg sprinting), most when pushing hard from slow, about a third of that spinning at speed
 static func pedal_rock(p_crank: float, p_sprint: float, p_pedal: float, va: float, p_bike_rock: float) -> float:
 	var rock_fade: float = 1.0 - 0.65 * smoothstep(5.0, 12.0, va)
-	return sin(p_crank) * 0.105 * (1 + 0.65 * p_sprint) * p_pedal * minf(1.0, va / 2 + 0.3) * rock_fade * p_bike_rock
+	# sprinting from slow: the bike is thrown hard side to side under the rider (~15 deg each way)
+	var effort: float = p_sprint * slowness(va)
+	return sin(p_crank) * 0.105 * (1 + 0.65 * p_sprint + 0.75 * effort) * p_pedal * minf(1.0, va / 2 + 0.3) * rock_fade * p_bike_rock
 
 func gear_k() -> float:
 	if gear < 0: return ring_k * 16.0 / float(cogs[0]) if cogs.size() > 0 else 1.0
@@ -162,7 +170,7 @@ func reset_at(px: float, pz: float, hd: float) -> void:
 	bike_lean = 0; counter = 0; rock = 0; yaw_rate = 0; hop_nose = 0; hop_t = 0; air_time = 0; air_k = 0
 	load = 0; compress = 0; compress_v = 0; prep = 0; land_prep = 0; pop_fired = false; spun_out = false; shake = 0
 	course = hd; slip = 0; w_init = false; front_air = false; rear_air = false; pump_acc = 0; since_land = 1
-	pitch_v = 0; c_f = true; c_r = true
+	pitch_v = 0; c_f = true; c_r = true; wheelie_up = 0.0
 	g_pitch = NAN
 	y = host.terrain.height(x, z); body_y = y; body_v = 0
 	n_f = NAN; n_r = NAN; n_ref = NAN; lip_state = 0; hf_prev = NAN; hr_prev = NAN
@@ -178,7 +186,7 @@ func get_up() -> void:
 	crash_on = false; crash_hold = 0; crash_armed = false
 	v = 0; vy = 0; lean = 0; lean_v = 0; bike_lean = 0; counter = 0; steer = 0; steer_in = 0; yaw_rate = 0; air = false
 	pitch = 0; compress = 0; compress_v = 0; hop_nose = 0; hop_t = 0; load = 0
-	slip = 0; w_init = false; front_air = false; rear_air = false; pump_acc = 0; pitch_v = 0; c_f = true; c_r = true
+	slip = 0; w_init = false; front_air = false; rear_air = false; pump_acc = 0; pitch_v = 0; c_f = true; c_r = true; wheelie_up = 0.0
 	course = heading
 	hop_block = true
 	y = host.terrain.height(x, z); body_y = y; body_v = 0
@@ -339,7 +347,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	if is_nan(course):
 		course = heading; slip = 0
 	since_land += dt
-	var slope: float = _or(pitch_w, _g_pitch) if (not air and (front_air or rear_air)) else _g_pitch
+	var slope: float = _or(pitch_w, _g_pitch) if (not air and (front_air or rear_air) and wheelie_up <= 0.0) else _g_pitch   # a wheelie rolls on the ground's slope
 	var rear_down := not air and not rear_air
 	var skid := brake and v > 0.5 and rear_down
 	# --- sprint / stamina ---
@@ -367,7 +375,10 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		# to reach it and less drag holding it back (drag-limited top speed scales with it too)
 		var ts: float = T.topSpeed
 		var p_top: float = (T.pedalTop + T.sprintTop * sp_k) * gk * ts
-		var p_mul: float = (1 + (T.sprintPower - 1) * sp_k) * ts
+		# sprinting, the slower the rider is the harder they stamp on it (out of the saddle, full body):
+		# all of the extra push from a standstill, less and less as the speed comes back, none by ~40 km/h
+		var kick: float = float(T.get("sprintKick", 0.9)) * slowness(v)
+		var p_mul: float = (1 + (T.sprintPower - 1 + kick) * sp_k) * ts
 		var cad: float = v / (gk * T.pedalTop * ts * 0.7)
 		var grind := 1.0 if gear < 0 else 0.35 + 0.65 * smooth01((cad - 0.15) / 0.7)
 		var drive: float = (throttle if rear_down else 0.0) * minf(T.pedalLaunch * p_mul / ts / gk, T.pedalPower * p_mul / vp) * grind * clampf((p_top - v) / 2.5, 0, 1)
@@ -658,6 +669,22 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			hip_v += (kx * (clampf(hT, -R, R) - hip_shift) - cx * hip_v + push) * dt
 			hip_shift = clampf(hip_shift + hip_v * dt, -R * 1.6, R * 1.6)
 		var tq: float = a_drive * T.loadHeight
+		# sprint wheelie (like a motorbike): stamping on the pedals from slow, the rider hauls on the bars
+		# with every stroke and the front comes up. Once it's up they keep pulling as long as sprint is
+		# held (and stop balancing it), so it climbs on until it loops out; let go and it drops back down
+		var pulling: bool = sprint > 0.5 and not air and throttle > 0.1 and not brake
+		if pulling and not front_air:
+			var lift_k: float = sprint * minf(throttle, 1.0) * slowness(v)
+			tq += float(T.get("sprintLift", 11.0)) * lift_k * (0.55 + 0.45 * absf(sin(crank)))
+		# once the stamp has the front up: the rider pops it to ~23 deg and balances it there; holding
+		# sprint keeps pulling it higher (wheelieClimb rad/s) until it goes past the balance point and
+		# loops out. Let go and it is set back down
+		if pulling and (front_air or wheelie_up > 0.0):
+			wheelie_up = maxf(wheelie_up, 0.4) + float(T.get("wheelieClimb", 0.45)) * dt
+		else:
+			wheelie_up = maxf(0.0, wheelie_up - 1.6 * dt)
+		if wheelie_up > 0.0:
+			bal_max = maxf(bal_max, 30.0)   # the whole body holds a wheelie, not just the hands
 		var was_air := air
 		var vy_in := vy
 		var was_f := c_f
@@ -690,9 +717,10 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 				body_v += f_leg * h; body_y += body_v * h
 				leg_f = PHI * (G + f_leg)
 			var alpha := (FF * XF + FR * XR - leg_f * body_x) * cs / IK + (tq / IK if (cF or cR) else 0.0)
-			if cF != cR:
-				var ref := _or(nose_ref, _g_pitch)
-				alpha += clampf(30 * (ref - pitch) - 9 * pitch_v, -bal_max, bal_max)
+			if cF != cR or (wheelie_up > 0.0 and cR):
+				var ref := _or(nose_ref, _g_pitch) + (wheelie_up if cR else 0.0)
+				var wk := 4.0 if (wheelie_up > 0.0 and cR) else 1.0   # holding a wheelie: the whole body works it
+				alpha += clampf(30 * wk * (ref - pitch) - 9 * sqrt(wk) * pitch_v, -bal_max, bal_max)
 			vy += (FF + FR - (press if (cF or cR) else 0.0) - mB * G - leg_f) / mB * h
 			pitch_v += alpha * h
 			if not cF and not cR and was_air:

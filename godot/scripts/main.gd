@@ -336,6 +336,33 @@ func _autotest(seconds: float) -> void:
 					var tag := ("air" if game.phys.air else "ground") + ("_hip" if i == 2 else "")
 					if j > _probe.get("jump_" + tag, 0.0): _probe["jump_" + tag] = j
 				_probe[key] = kp
+		var launch := OS.get_environment("BMX_LAUNCH")   # tests: stop at 3 s, then pedal (sprint=1: sprint) away; prints 0-15 / 0-25 / 0-35 km/h times
+		if launch != "" and el > 3.0:
+			var ph = game.phys
+			if not _probe.has("l_t0"):
+				_probe.l_t0 = el; ph.v = 0.0
+			var hold := float(OS.get_environment("BMX_LAUNCH_HOLD")) if OS.get_environment("BMX_LAUNCH_HOLD") != "" else 99.0   # tests: let go of sprint after this long
+			if launch == "sprint" and el - float(_probe.l_t0) < hold: Input.action_press("sprint")
+			else: Input.action_release("sprint")
+			Input.action_press("pedal")
+			var lt: float = el - float(_probe.l_t0)
+			if ph.front_air: _probe.l_wh = float(_probe.get("l_wh", 0.0)) + get_process_delta_time()
+			_probe.l_pmax = maxf(float(_probe.get("l_pmax", 0.0)), ph.pitch - ph._g_pitch)
+			if (ph.crash_on or ph.crash_pending != "") and not _probe.has("l_crash"):
+				_probe.l_crash = true
+				print("LAUNCH crash %s at %.2f s v=%.1f" % [ph.crash_pending, lt, ph.v])
+			if OS.get_environment("BMX_LAUNCH_DBG") != "" and lt < 2.0: print("WH t=%.2f fa=%s ra=%s up=%.2f pitch=%.2f g=%.2f nref=%s spr=%.2f thr=%s" % [lt, ph.front_air, ph.rear_air, ph.wheelie_up, ph.pitch, ph._g_pitch, ph.nose_ref, ph.sprint, Input.get_action_strength("pedal")])
+			if int(lt * 2) != int(_probe.get("l_tick", -1)):
+				_probe.l_tick = int(lt * 2)
+				print("LAUNCH t=%.1f v=%.1f km/h nose_up=%.2f wheelie_s=%.2f max=%.2f" % [lt, ph.v * 3.6, ph.pitch - ph._g_pitch, float(_probe.get("l_wh", 0.0)), float(_probe.l_pmax)])
+			for kmh in [15, 25, 35]:
+				if ph.v * 3.6 >= kmh and not _probe.has("l_%d" % kmh):
+					_probe["l_%d" % kmh] = lt
+					print("LAUNCH %s 0-%d km/h in %.2f s (stamina %.2f)" % [launch, kmh, lt, ph.stamina])
+			var ls := OS.get_environment("BMX_LAUNCH_SHOTS")
+			if ls != "" and lt > 0.3 and lt - float(_probe.get("l_shot", -1.0)) > 0.4 and int(_probe.get("l_n", 0)) < 6:
+				_probe.l_shot = lt; _probe.l_n = int(_probe.get("l_n", 0)) + 1
+				get_viewport().get_texture().get_image().save_png("%s_%d.png" % [ls, _probe.l_n])
 		if OS.get_environment("BMX_VMAX") != "" and not game.phys.air: _probe.vmax_kmh = maxf(_probe.get("vmax_kmh", 0.0), game.phys.v * 3.6)   # tests
 		var airshot := OS.get_environment("BMX_AIRSHOT")   # tests: dir/prefix -> shots mid-air (up to 8)
 		if airshot != "" and game.phys.air and game.phys.air_time > 0.25 and _airshots < 8 and el - _airshot_t > 0.6:
