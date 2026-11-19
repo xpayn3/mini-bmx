@@ -9,6 +9,7 @@ render_mode cull_disabled;   // open shells: seen through a gap, the inside stil
 uniform vec3 base_col : source_color = vec3(0.1, 0.105, 0.12);
 uniform vec3 accent : source_color = vec3(1.0, 0.82, 0.12);
 uniform int mode = 0;
+uniform float gloss = 1.0;   // 1 = the glossy kneecap, 0 = matte (guards, inserts)
 uniform float sp = 2.4;   // the outline's superellipse power (as in knee_pad.gd)
 // the brand wordmark (KneePad bakes it): white lettering on clear, printed in logo_col into logo_rect
 // (centre xy, half size zw in the shell's -1..1 space); vertical = reading down the leg
@@ -140,8 +141,11 @@ void fragment() {
 	col = mix(col, logo_col, lg);
 	rough = mix(rough, 0.45, lg);
 	ALBEDO = col;
+	rough = mix(0.92, rough, gloss);
+	metal *= gloss;
 	ROUGHNESS = rough;
 	METALLIC = metal;
-	CLEARCOAT = 0.6 * coat;
+	SPECULAR = mix(0.15, 0.5, gloss);
+	CLEARCOAT = 0.6 * coat * gloss;
 	CLEARCOAT_ROUGHNESS = 0.18;
 }
