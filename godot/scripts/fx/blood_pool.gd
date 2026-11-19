@@ -30,7 +30,7 @@ var _seed := 0.0
 func _init(p_terrain, at: Vector3, radius: float, p_grow_t: float) -> void:
 	terrain = p_terrain
 	grow_t = p_grow_t
-	volume = 0.009 * pow(radius / 1.15, 2.0)
+	volume = 0.012 * pow(radius / 1.15, 2.0)
 	_seed = randf() * 100.0
 	_o = Vector3(at.x - N * CELL * 0.5, 0.0, at.z - N * CELL * 0.5)
 	var size := N * CELL

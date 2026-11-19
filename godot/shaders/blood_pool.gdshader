@@ -43,6 +43,9 @@ float depth_at(vec2 w, vec2 uv) {
 void fragment() {
 	vec2 w = v_world.xz;
 	float dep = depth_at(w, UV);
+	// fade out before the grid's border (it never should get there, but never as a straight cut)
+	vec2 eb = min(UV, 1.0 - UV);
+	dep *= smoothstep(0.01, 0.05, min(eb.x, eb.y));
 	float a = smoothstep(0.0009, 0.0014, dep + (bn(w * 25.0 + seed) - 0.5) * 0.0003);
 	// the liquid surface tilts where the depth changes (the meniscus at the edge, lumps inside)
 	float du = 0.02 / grid_m;          // 2 cm
@@ -50,8 +53,8 @@ void fragment() {
 	float gz = (depth_at(w, UV + vec2(0.0, du)) - depth_at(w, UV - vec2(0.0, du))) / 0.04;
 	vec3 nb = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);   // the ground's tilt
 	vec3 nw = normalize(nb - vec3(gx, 0.0, gz) * 1.2);
-	float rim = 1.0 - smoothstep(0.0013, 0.0035, dep);     // 1 at the thin edge, 0 where it's deep
-	float deep = smoothstep(0.002, 0.007, dep);
+	float rim = 1.0 - smoothstep(0.0015, 0.0045, dep);     // 1 at the thin edge, 0 where it's deep
+	float deep = smoothstep(0.003, 0.009, dep);
 	float since = pool_t;
 
 	// BUBBLES: maybe one per small cell, mostly near the fresh edge; each lives a while then pops

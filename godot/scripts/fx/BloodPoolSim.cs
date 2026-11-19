@@ -46,7 +46,7 @@ public partial class BloodPoolSim : RefCounted
 				// bumps: a few millimetres at 40 cm / 12 cm / 4 cm, so the edge fingers out unevenly
 				h += 0.003f * Vn(wx * 2.5f + seed, wz * 2.5f) + 0.0018f * Vn(wx * 8f - seed, wz * 8f) + 0.0008f * Vn(wx * 25f, wz * 25f + seed);
 				_g[x + z * n] = h;
-				_ret[x + z * n] = 0.0016f + 0.0014f * Vn(wx * 6f + seed * 2f, wz * 6f) + 0.0004f * (float)rng.NextDouble();
+				_ret[x + z * n] = 0.0028f + 0.0018f * Vn(wx * 6f + seed * 2f, wz * 6f) + 0.0005f * (float)rng.NextDouble();   // blood is thick: it holds a film of ~3-5 mm
 			}
 		}
 		_x0 = _z0 = n / 2;
@@ -132,8 +132,26 @@ public partial class BloodPoolSim : RefCounted
 					}
 				}
 			}
+			// 3) a thin film soaks into the dirt (the running front slows and stops, as on real soil; a
+			//    thick pool stays); whatever still reaches the border drains away (no pile-up line there)
+			for (int z = z0; z <= z1; z++)
+			{
+				for (int x = x0; x <= x1; x++)
+				{
+					int i = x + z * n;
+					float d = _d[i];
+					if (d > 0 && d < SOAK_BELOW) _d[i] = Math.Max(0f, d - SOAK);
+				}
+			}
+			for (int k = 0; k < n; k++)
+			{
+				_d[k] = 0; _d[k + (n - 1) * n] = 0; _d[k * n] = 0; _d[k * n + n - 1] = 0;
+			}
 		}
 	}
+
+	const float SOAK = 6e-7f;          // m per iteration (~0.2 mm/s at 6 iterations a frame)
+	const float SOAK_BELOW = 0.0045f;  // only a film thinner than this soaks in
 
 	void Grow(int x, int z)
 	{
