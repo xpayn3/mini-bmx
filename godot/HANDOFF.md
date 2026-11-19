@@ -133,6 +133,13 @@ F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A 
   Pose saved per bike in `rider.cfg`; edited in the garage Rider tab and the tuning card's Rider tab.
 - The torso is **skinned to 5 spine bones** (Skeleton3D "Spine", identity binds) so it bends; its
   `custom_aabb` follows the body (needed in crashes when the rider node sits at the world origin).
+- **Riding style** (matched to a reference clip of real downhill technique): rolling, the rider stands in
+  the attack position (`stand` in `update_pose`, not only while pedalling); in turns the bike lays over
+  well past the body (`bikeLeanMul` 1.55, cap 1.3 rad; the body leans ~70 % of the rider + bike lean,
+  `counter` in `bike_physics.gd`: bike ~45–60°, body ~20–25° more upright) and the inside knee opens;
+  pedalling out of the saddle swings the bike ~±6° (±10° sprinting) under a steady body; elbows bend
+  back and down, only a little out (the arm IK pole's sideways part scales with `elbowsOut`). Saved poses migrate once (`RiderPanels.POSE_VER` / `POSE_RETUNED`: only values still
+  at the old default change). `BMX_LEAN_SHOT=prefix` saves shots of the first deep leans.
 - Ragdoll on crashes (`ragdoll.gd`), then get up with Space.
 - Look: kits + a colour per part (helmet shell/peak, goggles, jersey, pants, gloves, shoes).
 

@@ -61,8 +61,8 @@ const DEFS := [
 		["leanIn", "Roll-in stiffness", 40, 8, 200, 1, ""],
 		["leanOut", "Roll-out stiffness", 30, 8, 200, 1, ""],
 		["leanDamp", "Lean damping", 1.0, 0.3, 1.6, 0.02, ""],
-		["bikeLeanMul", "Bike leans extra", 1.15, 0.7, 1.8, 0.01, "×"],
-		["bikeLeanCap", "Bike lean soft cap", 0.8, 0.3, 1.2, 0.01, "rad"],
+		["bikeLeanMul", "Bike leans extra", 1.55, 0.7, 2.0, 0.01, "×"],
+		["bikeLeanCap", "Bike lean soft cap", 1.3, 0.3, 1.5, 0.01, "rad"],
 	]],
 	["Legs & body", [
 		["legStiff", "Leg spring", 30, 4, 150, 1, ""],
@@ -102,7 +102,7 @@ const DEFS := [
 
 const PATH := "user://tune.cfg"
 ## bump VER when defaults are retuned: saved values of the RETUNED keys are dropped once
-const VER := 5
+const VER := 6
 const RETUNED := ["steerRate", "steerRelease", "steerCurve", "turnSlow", "turnFast", "turnFloor", "steerMax", "slowSteer",
 	"barSpeed", "grip", "slipRecover", "slipMax", "turnWeight", "leanMax", "leanIn", "leanOut", "leanDamp", "bikeLeanMul", "bikeLeanCap", "flipAccel", "flipRate", "airTwist", "landBack", "travel"]
 var defaults := {}

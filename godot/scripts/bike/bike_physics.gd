@@ -487,11 +487,13 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	var cap_b: float = T.bikeLeanCap + (0.0 if (air or signf(bk) != signf(bl)) else absf(bk))
 	bike_lean = cap_b * tanh(bl / cap_b)
 	# the bike leans under the rider: the body always stays a little more upright than the bike (never
-	# hangs inside it, or the inside leg cuts through the frame)
-	counter = maxf(absf(bike_lean - lean * 0.85), absf(bike_lean) * 0.2) * signf(bike_lean)
-	# side-to-side rock from pedalling: full when grinding up to speed, fades out once the rider is spinning fast
-	var rock_fade: float = 1.0 - 0.85 * smoothstep(5.0, 12.0, va)
-	rock = sin(crank) * 0.065 * (1 + 1.3 * sprint) * pedal * minf(1.0, va / 2 + 0.3) * rock_fade * bike_rock
+	# hangs inside it, or the inside leg cuts through the frame). The body leans ~70 % of the way the
+	# rider + bike lean, so in a fast turn the bike tips well under a fairly upright rider
+	counter = maxf(absf(bike_lean - lean * 0.7), absf(bike_lean) * 0.2) * signf(bike_lean)
+	# side-to-side rock from pedalling out of the saddle: the bike swings ~6 deg each way under a steady
+	# body (~10 deg sprinting), most when pushing hard from slow, about a third of that spinning at speed
+	var rock_fade: float = 1.0 - 0.65 * smoothstep(5.0, 12.0, va)
+	rock = sin(crank) * 0.105 * (1 + 0.65 * sprint) * pedal * minf(1.0, va / 2 + 0.3) * rock_fade * bike_rock
 
 	# --- move ---
 	f = fwd()

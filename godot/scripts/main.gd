@@ -385,6 +385,12 @@ func _autotest(seconds: float) -> void:
 					game._snap_prev()
 			Input.action_release("hop")
 			await get_tree().process_frame
+			if OS.get_environment("BMX_DUST_SHOTS") != "":   # the timed screenshots work here too
+				var t0f := float(OS.get_environment("BMX_DUST_T0")) if OS.get_environment("BMX_DUST_T0") != "" else 3.0
+				var nkf := int((el - t0f) * 2.0)
+				if el > t0f and nkf != _probe.get("dust_k", -1) and nkf < 8:
+					_probe["dust_k"] = nkf
+					get_viewport().get_texture().get_image().save_png("%s_%d.png" % [OS.get_environment("BMX_DUST_SHOTS"), nkf])
 			continue
 		if OS.get_environment("BMX_STEER") != "":   # tests: hold a steady turn (+ left, - right) after 2 s
 			var sv := float(OS.get_environment("BMX_STEER")) if el > 2.0 else 0.0

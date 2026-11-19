@@ -16,6 +16,7 @@ const NEUTRAL := {hipX = 0.0, hipY = 0.0, lean = 0.0, elbowsOut = 0.0, kneesOut 
 	spineCurve = 0.0, spineSide = 0.0, spineLow = 0.5, chestFwd = 0.0, chestUp = 0.0, chestSide = 0.0, twist = 0.0,
 	neck = 0.0, headYaw = 0.0, headRoll = 0.0,
 	shoulderFwd = 0.0, shoulderUp = 0.0, elbowsDown = 0.0, elbowOutL = 0.0, elbowOutR = 0.0, wristRoll = 0.0,
+	elbowsBack = 0.0, armBend = 0.0,
 	kneesFwd = 0.0, kneeOutL = 0.0, kneeOutR = 0.0, heelFwd = 0.0, heelUp = 0.0, footAngle = 0.0, footOut = 0.0}
 ## lookpanel.js DEFAULT_LOOK
 const DEFAULT_LOOK := {shell = "#16171a", peak = "#ececec", goggleFrame = "#f2f2ee", lens = "#ff7a2a", strap = "#ff6a4d",
@@ -410,7 +411,8 @@ func set_style(s: Dictionary) -> void:
 		var ko: float = kneesOut + float(style.kneeOutL if sd < 0 else style.kneeOutR)
 		var eo: float = elbowsOut + float(style.elbowOutL if sd < 0 else style.elbowOutR)
 		poles_leg.append(Vector3(1 + float(style.kneesFwd), 0.1 - 0.5 * float(style.kneesFwd), sd * (0.1 + 0.3 * ko)).normalized())
-		poles_arm.append(Vector3(-0.4 + 0.25 * eo, -0.5 + 0.4 * eo - float(style.elbowsDown), sd).normalized())
+		# elbows bend back and down, only a little out to the side (more with Elbows out)
+		poles_arm.append(Vector3(-0.4 + 0.25 * eo - float(style.elbowsBack), -0.5 + 0.4 * eo - float(style.elbowsDown), sd * clampf(0.35 + 0.65 * eo, 0.1, 1.2)).normalized())
 
 
 # ---------------- posing helpers ----------------
@@ -687,16 +689,21 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	sm_aero += (aero_t - sm_aero) * (1.0 - exp(-3.0 * minf(dt, 0.1)))
 	var aero: float = sm_aero
 
+	# attack position: rolling, a downhill rider stands off the saddle (knees and elbows soft, ready),
+	# not only while pedalling
+	var stand: float = maxf(pedal, 0.85 * smoothstep(1.5, 5.0, absf(v)) * (1.0 - air))
+
 	# pelvis
 	var pelvis := Vector3(
-		-0.16 - 0.07 * air + 0.06 * pedal * sty.standPedal - comp * 0.25,
-		0.80 - 0.07 * air - comp + (0.15 * pedal + 0.05 * spr) * sty.standPedal + 0.035 * bob - 0.07 * aero,
+		-0.16 - 0.07 * air + 0.06 * pedal * sty.standPedal - 0.03 * stand - comp * 0.25,
+		0.80 - 0.07 * air - comp + (0.15 * stand + 0.05 * spr) * sty.standPedal + 0.035 * bob - 0.07 * aero,
 		sway * sty.hipSway + shift * 0.3 + sin(t * 2.1) * 0.02 * wig) + fit
 	pelvis.x += sty.hipX * (1 - 0.5 * pedal) - 0.05 * aero
 	pelvis.y += sty.hipY * (1 - 0.6 * pedal)
 
 	# chest
-	var ang: float = 0.72 - 0.14 * pedal + 0.12 * spr + 0.15 * (comp / 0.3) + 0.08 * air + sty.lean * (1 - 0.5 * pedal) + 0.42 * aero
+	# (pedalling out of the saddle the chest stays forward over the bars)
+	var ang: float = 0.72 - 0.05 * pedal + 0.12 * spr + 0.15 * (comp / 0.3) + 0.08 * air + sty.lean * (1 - 0.5 * pedal) + 0.42 * aero
 	var L: float = sty.torso
 	var chest := Vector3(
 		pelvis.x + sin(ang) * L + 0.03 * pedal * (0.5 + 0.5 * bob),
@@ -797,7 +804,8 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var handL = p.get("handL")
 	var handR = p.get("handR")
 	if handL is Vector3 and handR is Vector3:
-		var reach := (L_UARM + L_FARM) * 0.9
+		# Arm bend: how far the arms may straighten (more bend = chest closer to the bars)
+		var reach := (L_UARM + L_FARM) * clampf(0.9 - 0.2 * float(sty.armBend), 0.55, 0.98)
 		var worst := 0.0
 		for sd in [[-1.0, handL], [1.0, handR]]:
 			var shp := Vector3(chest.x - 0.03, chest.y - 0.04, chest.z + sd[0] * sty.shoulders)
@@ -857,7 +865,10 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		# leg
 		var hp: Vector3 = pelvis + pel_b * Vector3(0, -0.02, side * (0.11 + sty.stance))
 		var ankle := Vector3(foot.x - 0.04 + sty.heelFwd, foot.y + 0.12 + sty.heelUp, foot.z)
-		var ik := solve_ik(hp, ankle, L_THIGH, L_SHIN, poles_leg[i])
+		# turning: the inside knee opens out toward the turn, the outside leg drives down on its pedal
+		var inside: float = clampf(-side * _num(p, "lean") * 1.6, 0.0, 0.9) * (1.0 - air)
+		var pole_l: Vector3 = (poles_leg[i] + Vector3(0, 0, side * inside)).normalized()
+		var ik := solve_ik(hp, ankle, L_THIGH, L_SHIN, pole_l)
 		var ik_raw: Vector3 = ik[0]
 		ik[0] = _knee_clear(hp, ankle, ik[0], side)
 		if knee_dbg.size() < 40 and OS.get_environment("BMX_KNEE_PROBE") != "" and knee[i].position.distance_to(ik[0]) > 0.08:
