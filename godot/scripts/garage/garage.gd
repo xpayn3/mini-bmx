@@ -6,6 +6,11 @@ extends Node3D
 
 signal closed(ride: bool)
 
+## "bike" = the garage (paint, logos, wheels, bars, shocks, gears; the bike stands on the floor);
+## "rider" = the rider room (riding position on the training rollers, kit beside the bike).
+## Set before adding to the tree.
+var mode := "bike"
+
 const SWATCHES := ["e8432e", "ff6a00", "ffb000", "ffd21f", "c6ff1a", "35d04a", "00a86b", "00c2c7", "2f7de1", "1d2b64",
 	"7b3fe4", "d22fbf", "ff4f9a", "f4f4f0", "b8bcc0", "6b6f75", "2b2d31", "111214", "c8a24a", "8a5a2b", "4a6b3a", "e0d3b8"]
 
@@ -40,7 +45,7 @@ var wheel_ang := 0.0
 # the rider standing next to the bike (Kit tab)
 var stand_rider: Rider = null
 var stand_on := false
-const STAND_AT := Vector3(1.75, 0.0, 0.55)
+const STAND_AT := Vector3(0.55, 0.0, 1.05)   # in front of the bike (camera side), the bike right behind them
 var preview_crank := 0.6
 const SLAT := 0.2
 const WALL_IN := -4.075   # z of the back wall's inside face (the wall is 0.25 thick, centred on z = -4.2)
@@ -81,19 +86,25 @@ const VIEWS := {
 	"suspension": [1.0, 10.0, 2.2, Vector3(0.05, 0.6, 0)],
 	"drive": [-1.3, 8.0, 1.5, Vector3(-0.3, 0.35, 0)],   # the drive side: chainring + cassette
 	"rider": [0.0, 7.0, 4.3, Vector3(-0.05, 1.0, 0)],
-	"kit": [0.25, 4.0, 3.2, Vector3(1.55, 1.0, 0.55)],
+	"kit": [0.2, 6.0, 4.2, Vector3(0.3, 0.85, 0.6)],
 }
 
 func _ready() -> void:
 	build = BikeBuild.load_build()
 	rider_pose = RiderPanels.load_pose("dh", GameState.BIKES.dh.pose)
+	var env_tab := OS.get_environment("BMX_GARAGE_TAB")
+	if OS.get_environment("BMX_GARAGE_RIDER") != "" or env_tab in ["rider", "kit"]:
+		mode = "rider"   # tests: the rider tabs live in the rider room
 	var rcf := ConfigFile.new()
 	if rcf.load(RiderPanels.PATH) == OK:
-		rider_on = rcf.get_value("garage", "rider_on", false)
 		rider_preview = rcf.get_value("garage", "preview", "pedal")
-		stand_on = rcf.get_value("garage", "stand_on", true)
-	if OS.get_environment("BMX_GARAGE_RIDER") != "":   # tests: rider on, a preview, Rider tab
-		rider_on = true; rider_preview = OS.get_environment("BMX_GARAGE_RIDER"); stand_on = true
+	# the garage is about the bike (no rider, no rollers); the rider room always has the rider on the
+	# rollers (Position) and standing beside the bike (Kit)
+	rider_on = mode == "rider"
+	stand_on = mode == "rider"
+	tab = "rider" if mode == "rider" else "paint"
+	if OS.get_environment("BMX_GARAGE_RIDER") != "":   # tests: a preview
+		rider_preview = OS.get_environment("BMX_GARAGE_RIDER")
 		for kv in OS.get_environment("BMX_POSE").split(",", false):   # tests: "spineCurve=0.2,pelvisRoll=0.1" (not saved)
 			var p := kv.split("=")
 			if p.size() == 2: rider_pose[p[0]] = float(p[1])
@@ -105,7 +116,9 @@ func _ready() -> void:
 	_rebuild_bike()
 	add_child(ui)
 	_build_ui()
-	_set_tab(OS.get_environment("BMX_GARAGE_TAB") if OS.get_environment("BMX_GARAGE_TAB") != "" else ("rider" if OS.get_environment("BMX_GARAGE_RIDER") != "" else "paint"))
+	var first := tab
+	tab = ""   # so _set_tab frames the camera on the first page
+	_set_tab(env_tab if env_tab != "" and _has_tab(env_tab) else first)
 	if OS.get_environment("BMX_TYRE_PROBE") != "":
 		_tyre_probe.call_deferred()
 	var cv := OS.get_environment("BMX_GARAGE_CAM").split(",", false)   # tests: "orbit_rad,pitch_deg,dist"
@@ -715,8 +728,14 @@ const UI_SCALE := 0.82
 const INK := Tokens.INK
 const SUB := Tokens.INK_SOFT
 const LINE := Tokens.LINE
-const TABS := [["paint", "PAINT"], ["logos", "LOGOS"], ["wheels", "WHEELS"], ["bars", "BARS"], ["suspension", "SHOCKS"],
-	["drive", "GEARS"], ["rider", "RIDER"], ["kit", "KIT"]]
+const BIKE_TABS := [["paint", "PAINT"], ["logos", "LOGOS"], ["wheels", "WHEELS"], ["bars", "BARS"], ["suspension", "SHOCKS"],
+	["drive", "GEARS"]]
+const RIDER_TABS := [["rider", "POSITION"], ["kit", "KIT"]]
+func _tabs() -> Array: return RIDER_TABS if mode == "rider" else BIKE_TABS
+func _has_tab(t: String) -> bool:
+	for x in _tabs():
+		if x[0] == t: return true
+	return false
 const EDGE := Tokens.S7          # gap between the cards and the screen edge
 const BUILD_W := 330             # the build card (top right)
 const STAT_LABEL_W := 112
@@ -743,7 +762,7 @@ func _build_ui() -> void:
 	var head := HBoxContainer.new()
 	head.add_theme_constant_override("separation", Tokens.S6)
 	head_card.add_child(head)
-	var title := UITheme.display("GARAGE", Tokens.T_3XL, INK, Tokens.SLANT_TITLE)
+	var title := UITheme.display("RIDER" if mode == "rider" else "GARAGE", Tokens.T_3XL, INK, Tokens.SLANT_TITLE)
 	title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	head.add_child(title)
 	var bar := HBoxContainer.new()
@@ -751,7 +770,7 @@ func _build_ui() -> void:
 	head.add_child(bar)
 	bar.add_child(UITheme.key_cap("Q"))
 	var grp := ButtonGroup.new()
-	for t in TABS:
+	for t in _tabs():
 		var b := UITheme.make_button(t[1], _set_tab.bind(t[0]), "tab", Tokens.T_XL)
 		b.toggle_mode = true; b.button_group = grp
 		b.button_pressed = t[0] == tab
@@ -772,7 +791,11 @@ func _build_ui() -> void:
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	body.add_theme_constant_override("separation", Tokens.S3)
 	sc.add_child(body)
-	# the build card, top right: name + performance meters
+	# the build card, top right: name + performance meters (the garage only)
+	if mode == "bike": _build_card(root)
+	_bottom_bar(root)
+
+func _build_card(root: Control) -> void:
 	var sp := PanelContainer.new()
 	sp.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	sp.offset_left = -(EDGE + BUILD_W); sp.offset_right = -EDGE; sp.offset_top = EDGE
@@ -805,7 +828,10 @@ func _build_ui() -> void:
 		stats_box.add_child(row)
 		_stat_bars[k] = sbar
 	_update_stats()
-	# bottom bar: back / stock / randomise left, hints in the middle, save + ride right
+
+## bottom bar: back / stock / randomise left, hints in the middle, save + ride right
+## (the rider room: back, hints, ride; its changes save as they're made)
+func _bottom_bar(root: Control) -> void:
 	var bot := HBoxContainer.new()
 	bot.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	bot.offset_left = EDGE; bot.offset_right = -EDGE; bot.offset_top = -(EDGE + Tokens.H_BTN); bot.offset_bottom = -EDGE
@@ -816,8 +842,9 @@ func _build_ui() -> void:
 		b.custom_minimum_size.y = Tokens.H_BTN
 		return b
 	bot.add_child(mk.call("BACK", func(): _close(false)))
-	bot.add_child(mk.call("STOCK", func(): build = BikeBuild.default_build(); _rebuild_bike(); _set_tab(tab); _update_stats()))
-	bot.add_child(mk.call("RANDOMISE", _randomise))
+	if mode == "bike":
+		bot.add_child(mk.call("STOCK", func(): build = BikeBuild.default_build(); _rebuild_bike(); _set_tab(tab); _update_stats()))
+		bot.add_child(mk.call("RANDOMISE", _randomise))
 	var spacer := Control.new(); spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL; bot.add_child(spacer)
 	var pill := PanelContainer.new()
 	var ps := UITheme.card_style(Tokens.PILL, Tokens.R_PILL, Tokens.S4); ps.content_margin_top = Tokens.S2; ps.content_margin_bottom = Tokens.S2
@@ -835,8 +862,9 @@ func _build_ui() -> void:
 		hints.add_child(UITheme.caption(h[1].to_upper(), INK))
 	bot.add_child(pill)
 	var spacer2 := Control.new(); spacer2.size_flags_horizontal = Control.SIZE_EXPAND_FILL; bot.add_child(spacer2)
-	bot.add_child(mk.call("SAVE", func(): BikeBuild.save_build(build); _toast("SAVED")))
-	var ride: Button = mk.call("SAVE & RIDE", func(): _close(true), "primary")
+	if mode == "bike":
+		bot.add_child(mk.call("SAVE", func(): BikeBuild.save_build(build); _toast("SAVED")))
+	var ride: Button = mk.call("SAVE & RIDE" if mode == "bike" else "RIDE", func(): _close(true), "primary")
 	ride.custom_minimum_size.x = RIDE_W
 	bot.add_child(ride)
 	_file_dialog = FileDialog.new()
@@ -850,9 +878,10 @@ func _build_ui() -> void:
 ## Q / E step through the categories
 func _step_tab(d: int) -> void:
 	var i := 0
-	for j in TABS.size():
-		if TABS[j][0] == tab: i = j
-	_set_tab(TABS[wrapi(i + d, 0, TABS.size())][0])
+	var tabs := _tabs()
+	for j in tabs.size():
+		if tabs[j][0] == tab: i = j
+	_set_tab(tabs[wrapi(i + d, 0, tabs.size())][0])
 
 func _close(ride: bool) -> void:
 	BikeBuild.save_build(build)
@@ -1316,25 +1345,12 @@ func _drive_page() -> void:
 
 func _save_rider_ui() -> void:
 	var cf := ConfigFile.new(); cf.load(RiderPanels.PATH)
-	cf.set_value("garage", "rider_on", rider_on)
 	cf.set_value("garage", "preview", rider_preview)
-	cf.set_value("garage", "stand_on", stand_on)
 	cf.save(RiderPanels.PATH)
 
+## Position (rider room): the rider pedals on the rollers in a chosen situation; every joint has a
+## slider, and the pose is the one used on the trail
 func _rider_page() -> void:
-	var on := CheckButton.new()
-	on.text = "  Rider on the bike (on rollers)"
-	on.button_pressed = rider_on
-	on.add_theme_font_size_override("font_size", Tokens.T_MD)
-	on.toggled.connect(func(v):
-		rider_on = v; _save_rider_ui()
-		_rebuild_bike()   # onto / off the rollers
-		_set_tab.call_deferred("rider"))
-	body.add_child(on)
-	if not rider_on:
-		body.add_child(UITheme.text("Turn the rider on to see and shape the riding position: every joint has a slider, and the pose is used on the trail.", SUB, Tokens.T_XS))
-		body.get_child(body.get_child_count() - 1).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		return
 	var items := []
 	for k in PREVIEWS: items.append([k, PREVIEWS[k].label])
 	_choice("Preview", items, rider_preview, func(v): rider_preview = v; _save_rider_ui())
@@ -1368,15 +1384,8 @@ func _rider_page() -> void:
 			hb.add_child(s); hb.add_child(vl)
 			_row(r[1], hb)
 
-## Kit: the rider stands beside the bike; kits and a colour for every part of their gear
+## Kit (rider room): the rider stands beside the bike; kits and a colour for every part of their gear
 func _kit_page() -> void:
-	var on := CheckButton.new()
-	on.text = "  Rider next to the bike"
-	on.button_pressed = stand_on
-	on.add_theme_font_size_override("font_size", Tokens.T_MD)
-	on.toggled.connect(func(v):
-		stand_on = v; _save_rider_ui(); _update_stand_rider(); _rider_visibility())
-	body.add_child(on)
 	var look := RiderPanels.load_look()
 	_h("KITS")
 	var kits := GridContainer.new(); kits.columns = 3

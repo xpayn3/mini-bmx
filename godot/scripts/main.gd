@@ -25,7 +25,7 @@ func _ready() -> void:
 	ui.add_child(fade)
 	if OS.get_environment("BMX_SEED") != "":   # tests: a fixed world behind the title screen too
 		GameState.seed = int(OS.get_environment("BMX_SEED"))
-	if "--garage" not in OS.get_cmdline_user_args():   # straight to the garage: don't build the world first
+	if "--garage" not in OS.get_cmdline_user_args() and "--rider" not in OS.get_cmdline_user_args():   # straight to the garage: don't build the world first
 		_new_game()
 		_show_menu()
 	create_tween().set_ignore_time_scale().tween_property(fade, "modulate:a", 0.0, 0.8)
@@ -34,6 +34,7 @@ func _ready() -> void:
 		if a == "--ride": _start_ride()
 		elif a.begins_with("--autotest"): _autotest(float(a.get_slice("=", 1)) if "=" in a else 10.0)
 		elif a == "--garage": _open_garage()
+		elif a == "--rider": _open_garage("rider")
 		elif a.begins_with("--shot="): _shot(a.get_slice("=", 1))
 		elif a.begins_with("--bench="): _bench(a.get_slice("=", 1))
 		elif a.begins_with("--showcase="): _showcase(a.get_slice("=", 1))
@@ -125,6 +126,7 @@ func _menu_page_main() -> void:
 	var ride := _menu_button("RIDE", "Pick a bike and the time of day", _menu_page_setup, true)
 	vb.add_child(ride)
 	vb.add_child(_menu_button("GARAGE", "Paint, wheels, bars, shocks, gears", _open_garage))
+	vb.add_child(_menu_button("RIDER", "Riding position on the rollers, kit", _open_garage.bind("rider")))
 	vb.add_child(UITheme.spacer(Tokens.S2))
 	# world seed
 	vb.add_child(UITheme.caption("WORLD"))
@@ -212,7 +214,8 @@ func _menu_button(text: String, sub: String, cb: Callable, primary := false) -> 
 
 var garage: Garage
 
-func _open_garage() -> void:
+## mode "bike" = the garage, "rider" = the rider room (same room: position on the rollers + kit)
+func _open_garage(mode := "bike") -> void:
 	if menu: menu.queue_free(); menu = null
 	fade.modulate.a = 1.0
 	if game:
@@ -221,6 +224,7 @@ func _open_garage() -> void:
 		game = null
 	GameState.bike_id = "dh"
 	garage = Garage.new()
+	garage.mode = mode
 	add_child(garage)
 	garage.closed.connect(_close_garage)
 	create_tween().set_ignore_time_scale().tween_property(fade, "modulate:a", 0.0, 0.5)
