@@ -46,7 +46,7 @@ const DEFAULTS := {
 	"cogs": [11, 12, 14, 16, 18, 21, 24],
 	"cas_cols": [],            # anodized colour per cog, small cog first (cycled); [] = plain silver
 	"cas_rough": 0.2,
-	"tyre_color": Color(0.14, 0.14, 0.14),
+	"tyre_color": Color(0.20, 0.20, 0.205),   # (white when the scanned rubber is used: see Rubber.use_scan)
 	"sidewall": "black",       # black | tan
 	"detail": 1.0,             # segment multiplier (0.5 = a cheaper wheel)
 }
@@ -416,7 +416,9 @@ static func _build(s: Dictionary) -> ArrayMesh:
 		_build_cassette(chrome, s, H, det)
 
 	var mesh := ArrayMesh.new()
-	tyre.commit(mesh, _mat("rubber", Color.WHITE, 0.0, 0.86, true), "rubber")
+	var rubber := _mat("rubber", Color.WHITE, 0.0, 0.92, true)
+	Rubber.apply(rubber)   # a real compound: grain, bloom, matte with a soft sheen
+	tyre.commit(mesh, rubber, "rubber")
 	rim.commit(mesh, _rim_mat(s), "rim")
 	spokes.commit(mesh, _mat("spokes", Color.WHITE, 0.6, 0.32, true), "spokes")
 	hub.commit(mesh, _mat("hub", s["hub_color"], 0.8, 0.26), "hub")
@@ -473,6 +475,7 @@ static func _build_tyre(s: Surf, sp: Dictionary, rb: float, R: float, rim_w: flo
 	var cas := func(t: float) -> Vector2:
 		return Vector2(rc + b * _spow(sin(t), e), a * _spow(cos(t), e))
 	var tcol: Color = sp["tyre_color"]
+	if Rubber.use_scan(): tcol = Color.WHITE   # the scan holds the colour
 	var tan_wall := String(sp["sidewall"]) == "tan"
 	var np := maxi(12, int(round(26.0 * float(sp["detail"]))))
 	var pts := PackedVector2Array()

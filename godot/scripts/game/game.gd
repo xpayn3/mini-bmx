@@ -422,6 +422,31 @@ func _apply_light(h: float, L: Dictionary) -> void:
 
 
 var _studio: Node3D
+var _look_yaw := 0.0
+var _look_pitch := 0.0
+
+## title screen: the rider's head follows the mouse. The bike points to the left of the frame, so the mouse
+## ahead of the rider = looking straight on, above / below = nodding, behind them = turning towards the camera.
+func _update_look(dt: float) -> void:
+	var yaw_t := 0.0
+	var pitch_t := 0.0
+	if scenic and cam and rider and rider.head:
+		var vp := get_viewport()
+		var m: Vector2 = vp.get_mouse_position()
+		if OS.get_environment("BMX_TITLE_MOUSE") != "":   # tests: a fixed mouse position (fractions of the screen)
+			var q := OS.get_environment("BMX_TITLE_MOUSE").split_floats(",")
+			m = Vector2(q[0], q[1]) * vp.get_visible_rect().size
+		var hp: Vector2 = cam.unproject_position(rider.head.global_position)
+		var span: float = vp.get_visible_rect().size.x * 0.35
+		var dx: float = m.x - hp.x          # + = behind the rider
+		var dy: float = hp.y - m.y          # + = above
+		pitch_t = clampf(atan2(dy, maxf(absf(dx), span * 0.5)) * 0.8, -0.45, 0.55)
+		yaw_t = LOOK_SIDE * clampf(dx / span, 0.0, 1.0) * 1.25
+	var k := 1.0 - exp(-dt * 7.0)
+	_look_yaw += (yaw_t - _look_yaw) * k
+	_look_pitch += (pitch_t - _look_pitch) * k
+
+const LOOK_SIDE := 1.0   # sign of the head yaw that turns towards the camera
 
 ## title screen: photo-shoot lighting round the bike - a warm key spot from the camera side to bring out the
 ## frame (welds, tube shapes, paint), a rim light from behind to cut it out of the backdrop, a soft fill
@@ -1174,6 +1199,7 @@ func _process(dt: float) -> void:
 	drawn_pos = Vector3(lerp_k.call("x"), lerp_k.call("y"), lerp_k.call("z"))
 	var body_y: float = lerp_k.call("body_y")
 	_update_dab(dt, st)
+	_update_look(dt)
 	var wobble := sin(t * 2.3) * 0.025 * maxf(0.0, 1 - absf(st.v) / 2) * (1.0 - dab_k)
 	var dab_lean := -dab_side * DAB_LEAN * dab_k   # bike_lean > 0 tips the top to the rider's left
 	if rig.chain and phys.geared and phys.gear >= 0: rig.chain.cog_teeth = float(phys.cogs[phys.gear])
@@ -1256,7 +1282,7 @@ func _process(dt: float) -> void:
 			"counter": st.counter, "rockRoll": st.rock, "headRoll": st.bike_lean * 0.85,
 			"absorb": clampf(body_y - y_draw, -T.legComp, T.legExt), "pitch": p_draw, "bodyLevel": T.bodyLevel,
 			"attackDrop": T.attackDrop, "pedal": st.pedal, "sprint": st.sprint * st.pedal, "crank": st.crank,
-			"air": st.air_k, "compress": maxf(0.0, -st.compress), "hipShift": st.hip_shift, "bodyStick": -0.55 if scenic else st.body_in_s, "relax": 1.0 if scenic else 0.0, "tall": 1.0 if scenic else 0.0, "slope": st._g_pitch, "airTilt": _atilt_s, "bodyLat": _blat_s, "wheelR": rider.to_local(rig.wheel_r.global_position), "wheelRR": rig.wheel_rr, "t": t,
+			"air": st.air_k, "compress": maxf(0.0, -st.compress), "hipShift": st.hip_shift, "bodyStick": -0.55 if scenic else st.body_in_s, "relax": 1.0 if scenic else 0.0, "tall": 1.0 if scenic else 0.0, "lookYaw": _look_yaw, "lookPitch": _look_pitch, "slope": st._g_pitch, "airTilt": _atilt_s, "bodyLat": _blat_s, "wheelR": rider.to_local(rig.wheel_r.global_position), "wheelRR": rig.wheel_rr, "t": t,
 			"airSpin": _aspin_s, "wheelY": (rig.wheel_f.global_position.y + rig.wheel_r.global_position.y) * 0.5, "turn": _turn_s})
 		if dab_probe: _dab_probe(st)
 		if st.crash_on: _jit_skip = 40
