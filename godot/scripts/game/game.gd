@@ -801,6 +801,7 @@ func _read_input() -> Dictionary:
 		var sq := minf(Vector2(bf, bl).length() / bm, 1.4142)
 		bf = clampf(bf * sq, -1, 1); bl = clampf(bl * sq, -1, 1)
 	return {
+		"pad": Settings.pad_active,
 		"body_fwd": bf,
 		"body_lean": bl,
 		"throttle": Input.get_action_strength("pedal"),

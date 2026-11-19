@@ -61,6 +61,7 @@ var pivot := 0.0; var pivot_acc := 0.0
 # the body), manual_up = how far a pulled-back stick holds the front up (rad)
 var body_in := 0.0; var body_in_s := 0.0; var flick_in := 0.0; var flick := 0.0; var flick_prev := 0.0
 var manual_up := 0.0; var lock_sb := false; var lock_sf := false; var flick_kick := 0.0
+var pad := false   # the player is on a gamepad (Settings.pad_active): triggers don't tilt / throw in the air
 var wheel_f := 0.0; var wheel_r := 0.0; var crank := 0.0; var pedal := 0.0
 var yaw_rate := 0.0; var shake := 0.0
 var course := NAN; var slip := 0.0; var since_land := 1.0
@@ -301,6 +302,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	var brake := brake_k > 0.1
 	var steer_input: float = inp.steer
 	# rider body stick (gamepad right stick): fore / aft weight, side lean. Works the whole ride
+	pad = bool(inp.get("pad", false))
 	body_in = clampf(float(inp.get("body_fwd", 0.0)), -1.0, 1.0)
 	flick_in = clampf(float(inp.get("body_lean", 0.0)), -1.0, 1.0)
 	body_in_s += (body_in - body_in_s) * minf(1.0, dt * 10)
@@ -317,7 +319,10 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		if absf(steer_input) <= 0.1: air_lock_a = false
 	var lean_in := 0.0
 	if air:   # W / S act straight away, even if held from the ground (the user wants no re-press)
-		lean_in = clampf(throttle - brake_k + body_in, -1.0, 1.0)   # + the body stick (forward = nose down)
+		# + the body stick (forward = nose down), with a dead band so a light lean held from the ground doesn't
+		# spin the bike. On a gamepad the triggers (held pedalling / braking into a jump) don't tilt it at all
+		var b_air := signf(body_in) * maxf(0.0, absf(body_in) - 0.3) / 0.7
+		lean_in = clampf((0.0 if pad else throttle - brake_k) + b_air, -1.0, 1.0)
 	flip_in = -lean_in                                          # + = nose up
 	spin_in = 0.0 if (not air or air_lock_a) else steer_input   # + = the steering direction
 	if air: spin_in = clampf(spin_in + flick_in, -1.0, 1.0)     # the body stick leans the bike too
@@ -334,7 +339,9 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	# already off) throw the rider back / forward, pushing against the bike and through it the ground. That
 	# is the only way to start a flip (keys held from before don't count; S there pulls back, it doesn't brake)
 	var lip_win := not air and (prep > 0.25 or front_air or rear_air)
-	if not lip_win:
+	if pad:   # gamepad: the triggers never throw a flip (the right stick does), so brake stays a brake
+		lock_tw = true; lock_ts = true
+	elif not lip_win:
 		lock_tw = throttle > 0.1; lock_ts = brake
 	else:
 		if throttle <= 0.1: lock_tw = false
@@ -344,13 +351,17 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		throw_in = (0.0 if lock_ts else brake_k) - (0.0 if lock_tw else throttle)   # + = back (nose up)
 		if not lock_ts:
 			brake_k = 0.0; brake = false
-	# the body stick throws too: yanked back / forward fresh at the lip (held from before = a manual, no throw)
+	# the body stick throws too, but only a real yank: pushed past half way, starting from the centre inside
+	# the lip window. Any lean held into the lip (riding in the attack position, a manual) never throws -
+	# a light forward lean used to throw a front flip at every lip and nose-dive the landing
 	if not lip_win:
-		lock_sb = body_in < -0.3; lock_sf = body_in > 0.3
+		lock_sb = body_in < -0.05; lock_sf = body_in > 0.05
 	else:
-		if body_in >= -0.3: lock_sb = false
-		if body_in <= 0.3: lock_sf = false
-		throw_in = clampf(throw_in + (0.0 if lock_sb else maxf(0.0, -body_in)) - (0.0 if lock_sf else maxf(0.0, body_in)), -1.0, 1.0)
+		if body_in >= -0.15: lock_sb = false
+		if body_in <= 0.15: lock_sf = false
+		var yb := 0.0 if lock_sb else clampf((-body_in - 0.5) / 0.4, 0.0, 1.0)
+		var yf := 0.0 if lock_sf else clampf((body_in - 0.5) / 0.4, 0.0, 1.0)
+		throw_in = clampf(throw_in + yb - yf, -1.0, 1.0)
 	if not air:
 		if absf(throw_in) > 0.05:
 			var room := 1.0 - clampf(throw_v * signf(throw_in) / T.flipRate, 0.0, 1.0)

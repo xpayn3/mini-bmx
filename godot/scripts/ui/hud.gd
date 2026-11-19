@@ -879,19 +879,35 @@ class GetUpPrompt extends Control:
 		a = move_toward(a, 1.0 if show else 0.0, dt * (7 if show else 5))
 		visible = a > 0.01
 		if not visible: return
-		key = Settings.binding_text("hop", false)
+		key = Settings.prompt("hop")   # "A" on a pad, "Space" on keys
 		modulate.a = a
 		queue_redraw()
 
 	func _draw() -> void:
 		# GTA-like and plain: one line of white text, a thin bar under it that fills while the key is held
 		var f := UITheme.font(true)
-		var line := "HOLD  %s  TO GET UP" % key.to_upper()
 		var fs := 18
-		var tw := f.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 		var y := size.y * 0.5
-		draw_string(f, Vector2((size.x - tw) * 0.5 + 1, y + 1), line, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0, 0, 0, 0.45))   # soft shadow
-		draw_string(f, Vector2((size.x - tw) * 0.5, y), line, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color.WHITE)
+		var glyph := Settings.pad_active and key in ["A", "B", "X", "Y"]
+		if glyph:   # an Xbox face button: "HOLD (A) TO GET UP" with the button drawn in its colour
+			var l1 := "HOLD  "
+			var l2 := "  TO GET UP"
+			var w1 := f.get_string_size(l1, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+			var w2 := f.get_string_size(l2, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+			var x0 := (size.x - (w1 + 24 + w2)) * 0.5
+			for sh in [Vector2(1, 1), Vector2.ZERO]:
+				var c := Color(0, 0, 0, 0.45) if sh != Vector2.ZERO else Color.WHITE
+				draw_string(f, Vector2(x0, y) + sh, l1, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, c)
+				draw_string(f, Vector2(x0 + w1 + 24, y) + sh, l2, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, c)
+			var gc := Vector2(x0 + w1 + 12, y - 6)
+			draw_circle(gc, 12, Color(0, 0, 0, 0.55))
+			draw_circle(gc, 10.5, PadMap.FACE[["A", "B", "X", "Y"].find(key)])
+			draw_string(f, gc + Vector2(-12, 5.5), key, HORIZONTAL_ALIGNMENT_CENTER, 24, 15, Color.WHITE)
+		else:
+			var line := "HOLD  %s  TO GET UP" % key.to_upper()
+			var tw := f.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+			draw_string(f, Vector2((size.x - tw) * 0.5 + 1, y + 1), line, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0, 0, 0, 0.45))   # soft shadow
+			draw_string(f, Vector2((size.x - tw) * 0.5, y), line, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color.WHITE)
 		var bar := Rect2((size.x - 240) * 0.5, y + 14, 240, 5)
 		draw_rect(bar, Color(0, 0, 0, 0.45))
 		if k > 0.0: draw_rect(Rect2(bar.position, Vector2(bar.size.x * k, bar.size.y)), Color.WHITE)

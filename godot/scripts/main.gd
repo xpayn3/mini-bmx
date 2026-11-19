@@ -101,7 +101,7 @@ func _show_menu() -> void:
 	var ride := UITheme.button("RIDE", _start_ride, 24)
 	ride.custom_minimum_size.y = 58
 	vb.add_child(ride)
-	var gar := UITheme.button("GARAGE  Â·  customise your downhill bike", _open_garage, 18)
+	var gar := UITheme.button("GARAGE  ·  customise your downhill bike", _open_garage, 18)
 	gar.custom_minimum_size.y = 50
 	vb.add_child(gar)
 	# bike picker
@@ -140,7 +140,7 @@ func _show_menu() -> void:
 	vb.add_child(UITheme.button("Settings", _open_settings))
 	vb.add_child(UITheme.button("Controls", _show_controls))
 	vb.add_child(UITheme.button("Quit", func(): get_tree().quit()))
-	var foot := UITheme.label("v1.0 Â· Godot %s" % Engine.get_version_info().string, 12, UITheme.MUTED)
+	var foot := UITheme.label("v1.0 · Godot %s" % Engine.get_version_info().string, 12, UITheme.MUTED)
 	foot.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
 	foot.position = Vector2(64, -36)
 	menu.add_child(foot)
@@ -260,12 +260,16 @@ func _show_controls() -> void:
 	var grid := GridContainer.new()
 	grid.columns = 3
 	grid.add_theme_constant_override("h_separation", 22)
+	var pad := Settings.pad_active   # on a controller: its buttons first (bright), the keys second
 	for a in Settings.ACTIONS:
-		grid.add_child(UITheme.label(Settings.binding_text(a, false), 15, UITheme.ACCENT, true))
-		grid.add_child(UITheme.label(Settings.binding_text(a, true), 15, UITheme.MUTED))
+		grid.add_child(UITheme.label(Settings.binding_text(a, pad), 15, UITheme.ACCENT, true))
+		grid.add_child(UITheme.label(Settings.binding_text(a, not pad), 15, UITheme.MUTED))
 		grid.add_child(UITheme.label(Settings.ACTIONS[a][0], 15))
 	vb.add_child(grid)
-	vb.add_child(UITheme.label("Mouse drag: orbit Â· wheel: zoom Â· hold hop at a lip to pop higher Â· press S / W as you leave a lip to throw a back / front flip Â· carve: hold a turn at speed", 13, UITheme.MUTED))
+	if pad:
+		vb.add_child(UITheme.label("Right stick = your body: back = manual, yank it at a lip = flip, left / right = throw the bike over to turn harder, flick it to whip round · hold A at a lip to pop higher · Settings › Controller to remap", 13, UITheme.MUTED))
+	else:
+		vb.add_child(UITheme.label("Mouse drag: orbit · wheel: zoom · hold hop at a lip to pop higher · press S / W as you leave a lip to throw a back / front flip · carve: hold a turn at speed", 13, UITheme.MUTED))
 	var close := UITheme.button("Close", _close_controls)
 	vb.add_child(close)
 	close.grab_focus.call_deferred()
@@ -317,6 +321,7 @@ func _autotest(seconds: float) -> void:
 			var ph2: BikePhysics = game.phys
 			if body_t == "manual": Input.action_press("body_back", 0.9 if int(el) % 4 < 3 else 0.0)
 			elif body_t == "fwd": Input.action_press("body_fwd", 1.0)
+			elif body_t == "lightfwd": Input.action_press("body_fwd", 0.25)   # resting the stick a little forward (attack position)
 			elif body_t == "lean": Input.action_press("body_left", 1.0)
 			elif body_t == "flick":
 				var side := int(el * 1.5) % 2 == 0
@@ -384,7 +389,8 @@ func _autotest(seconds: float) -> void:
 		if trick != "" and game.phys.air:
 			var ph = game.phys
 			if ph.air_time > 0.06 and trick == "side": trick = "left" if int(el / 2.0) % 2 == 0 else "right"
-			Input.action_release("pedal"); Input.action_release("brake"); Input.action_release("steer_left"); Input.action_release("steer_right")
+			if trick != "hold": Input.action_release("pedal")   # hold: keeps pedalling through the air, like a pad trigger held down
+			Input.action_release("brake"); Input.action_release("steer_left"); Input.action_release("steer_right")
 			if OS.get_environment("BMX_BIGAIR") != "" and ph.air_time < 0.03 and ph.vy < 7.0: ph.vy = 7.0   # tests: big air for full flips
 			if ph.air_time > 0.06:   # a fresh press after take-off (held keys are locked)
 				if trick == "back": Input.action_press("brake")

@@ -33,7 +33,7 @@ func _build(tab: int) -> void:
 	var tabs := TabContainer.new()
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vb.add_child(tabs)
-	for page in [_display(), _graphics(), _audio(), _gameplay(), _interface(), _controls()]:
+	for page in [_display(), _graphics(), _audio(), _gameplay(), _interface(), _controls(), _controller()]:
 		tabs.add_child(page.get_parent())   # the page's ScrollContainer
 	tabs.current_tab = tab
 
@@ -227,6 +227,28 @@ func _interface() -> Control:
 	_check(p, "Gear shifter", "hud_gear")
 	_check(p, "Jump card", "hud_jump")
 	_check(p, "Quick tune card", "hud_quick", "The pinned ride sliders, top right (its ✕ hides it)")
+	return p
+
+## Controller: the Xbox pad drawn with what every button does; click one to change it
+func _controller() -> Control:
+	var p := _page("Controller")
+	p.add_child(UITheme.label("XBOX CONTROLLER", 13, UITheme.MUTED))
+	_check(p, "Vibration", "rumble", "Rumble on landings and crashes")
+	_slider(p, "Vibration strength", "rumble_strength", 0.0, 1.5, 0.05, "%.2fx")
+	p.add_child(UITheme.label("Click a button, trigger or stick to change what it does. Buttons light up as you press them.", 13, UITheme.MUTED))
+	var m := PadMap.new()
+	m.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	p.add_child(m)
+	p.add_child(UITheme.label("RIGHT STICK: RIDER BODY", 13, UITheme.MUTED))
+	p.add_child(UITheme.label("Up / down: weight forward over the bars / back (pull it well back rolling = manual; yank it at a lip = flip)." +
+		"  Left / right: throw the bike over under you to turn harder; a quick flick whips the bike round.  In the air: tilt and lean the bike.", 13))
+	p.get_child(p.get_child_count() - 1).autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_slider(p, "Steering response (stick)", "steer_sens", 0.5, 2.0, 0.05, "%.2f", "Above 1: quicker off-centre; below 1: finer near centre")
+	_slider(p, "Stick deadzone", "deadzone", 0.05, 0.5, 0.01)
+	var hb := HBoxContainer.new()
+	hb.add_theme_constant_override("separation", 10)
+	hb.add_child(UITheme.button("Reset controller buttons", func(): Settings.reset_pad_bindings(); m.queue_redraw(), 15))
+	p.add_child(hb)
 	return p
 
 func _controls() -> Control:

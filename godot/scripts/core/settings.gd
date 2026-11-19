@@ -99,6 +99,7 @@ const DEFAULTS := {
 	# gameplay / controller
 	"pause_unfocused": true,
 	"rumble": true,
+	"rumble_strength": 1.0,  # × every controller vibration
 	"wasted": true,          # crash: slow motion + "WASTED" screen
 	"blood": true,           # crash: blood smears on the ground, torn-off limbs on very hard crashes
 	"steer_sens": 1.0,       # analog steering response (1 = linear)
@@ -155,6 +156,7 @@ var _had_quality := false
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	if OS.get_environment("BMX_PAD") != "": pad_active = true   # tests: as if the player were on a gamepad
 	load_settings()
 	if not FileAccess.file_exists(PATH) or not _had_quality: _sync_quality()
 	for a in OS.get_cmdline_user_args():
@@ -212,6 +214,47 @@ func rebind(action: String, ev: InputEvent, slot: int) -> void:
 			break
 	list.insert(0, ev)
 	bindings[action] = list
+	_install_bindings()
+	save()
+
+## does this gamepad event mean the same input (same button, or same axis + direction)?
+static func same_pad(a: InputEvent, b: InputEvent) -> bool:
+	if a is InputEventJoypadButton and b is InputEventJoypadButton: return a.button_index == b.button_index
+	if a is InputEventJoypadMotion and b is InputEventJoypadMotion:
+		return a.axis == b.axis and signf(a.axis_value) == signf(b.axis_value)
+	return false
+
+## the controller mapper: put a pad button / axis on an action. It replaces the action's pad binding of
+## the same kind (button or axis; a D-pad button and a stick can both steer) and takes that input off
+## every other action, so one button does one thing.
+func set_pad(action: String, ev: InputEvent) -> void:
+	for a in ACTIONS:
+		var list: Array = bindings.get(a, default_events(a)).duplicate()
+		var out := []
+		for e in list:
+			if a == action and e.get_class() == ev.get_class(): continue
+			if a != action and same_pad(e, ev): continue
+			out.append(e)
+		if a == action: out.append(ev)
+		if out.size() != list.size() or a == action: bindings[a] = out
+	_install_bindings()
+	save()
+
+## take every binding on these pad axes off all actions (a stick set to "Nothing")
+func clear_pad_axes(axes: Array) -> void:
+	for a in ACTIONS:
+		var list: Array = bindings.get(a, default_events(a))
+		var out := list.filter(func(e): return not (e is InputEventJoypadMotion and e.axis in axes))
+		if out.size() != list.size(): bindings[a] = out
+	_install_bindings()
+	save()
+
+## only the gamepad bindings back to the defaults (keys are kept)
+func reset_pad_bindings() -> void:
+	for a in bindings.keys():
+		var keys := (bindings[a] as Array).filter(func(e): return not (e is InputEventJoypadButton or e is InputEventJoypadMotion))
+		var pads := default_events(a).filter(func(e): return e is InputEventJoypadButton or e is InputEventJoypadMotion)
+		bindings[a] = keys + pads
 	_install_bindings()
 	save()
 
@@ -330,8 +373,29 @@ func _notification(what: int) -> void:
 	elif what == NOTIFICATION_APPLICATION_FOCUS_IN:
 		AudioServer.set_bus_mute(0, false)
 
-## controller rumble (weak / strong 0..1, seconds)
+## Which device the player is using right now: the last real input wins (a pad button / a stick or
+## trigger pushed well past the deadzone = pad, any key or mouse click = keyboard). Prompts show Xbox
+## button names while it is true, and the ride reads it (triggers don't tilt the bike in the air).
+signal input_device_changed(pad: bool)
+var pad_active := false
+
+func _input(e: InputEvent) -> void:
+	var pad := pad_active
+	if e is InputEventJoypadButton and e.pressed: pad = true
+	elif e is InputEventJoypadMotion and absf(e.axis_value) > 0.5: pad = true
+	elif (e is InputEventKey and e.pressed) or (e is InputEventMouseButton and e.pressed): pad = false
+	if pad != pad_active:
+		pad_active = pad
+		input_device_changed.emit(pad)
+
+## the name of an action's binding for the device in use: "A" / "RT" on a pad, "Space" / "W" on keys
+func prompt(action: String) -> String:
+	var t := binding_text(action, pad_active)
+	return binding_text(action, not pad_active) if t == "—" else t
+
+## controller rumble (weak / strong 0..1, seconds); off / scaled in Settings › Controller
 func rumble(weak: float, strong: float, secs: float) -> void:
-	if not get_v("rumble"): return
+	var k := float(get_v("rumble_strength"))
+	if not get_v("rumble") or k <= 0.0: return
 	for j in Input.get_connected_joypads():
-		Input.start_joy_vibration(j, clampf(weak, 0, 1), clampf(strong, 0, 1), secs)
+		Input.start_joy_vibration(j, clampf(weak * k, 0, 1), clampf(strong * k, 0, 1), secs)

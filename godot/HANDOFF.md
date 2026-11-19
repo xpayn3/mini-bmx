@@ -59,6 +59,11 @@ F12 screenshot · Esc pause. Gamepad (Xbox): triggers pedal/brake, left stick st
 rolling = a **manual**, yanked fresh at a lip = a flip throw, in the air = nose down / up), left / right throws the bike over under
 the body (leaning alone turns, leaning with the steer turns harder + grips more, a quick **flick** whips the bike round; in the
 air it leans the bike). Numpad 8/5/4/6 do the same on keys. The camera no longer uses the right stick.
+**Settings › Controller** (`ui/pad_map.gd`): the Xbox photo (`assets/ui/xbox_pad.png`, cut out by root `tools/cut_pad.py`;
+without it a drawn pad) with what every button does, click to remap (sticks pick Steer / Rider body / Camera / Nothing and
+swap), live button test, vibration on / off + strength. `Settings.pad_active` follows the last device used: prompts show
+Xbox names (`Settings.prompt(action)`), and on a pad the triggers don't tilt or throw the bike in the air (only a real
+right-stick yank from centre throws at a lip; a held lean never does).
 
 ## 4. Project layout (`godot/`)
 
@@ -347,7 +352,8 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `BMX_GETUP_K=0.6` | draws the get-up prompt as if the key were held that far (with `BMX_BAIL`) |
 | `BMX_AUDIO_PROBE=1` | prints the freewheel's click rate / volume / output peak and the gravel surface / level twice a second |
 | `-s res://tools/gravel_render.gd --headless -- out.wav [speed=8 tone=650 crack=0.3 …]` | renders the gravel synth alone to a WAV (compare with a recording) |
-| `BMX_BODY=manual/fwd/lean/flick` (+ `BMX_BODY_PRINT=1`) | autotest works the body stick from 3 s (right stick) and prints `BODY` lines: stick, flick, manual angle, pitch, bike lean, yaw |
+| `BMX_PAD=1` | as if the player were on a gamepad (`Settings.pad_active`: Xbox prompts, triggers don't tilt / throw in the air); `BMX_TRICK=hold` keeps pedalling through the air |
+| `BMX_BODY=manual/fwd/lightfwd/lean/flick` (+ `BMX_BODY_PRINT=1`) | autotest works the body stick from 3 s (right stick) and prints `BODY` lines: stick, flick, manual angle, pitch, bike lean, yaw |
 | `BMX_STOP_AT=a,b` / `BMX_IDLE_FOR=secs` | autotest brakes to a stop from a s and rides off at b s / stands still, then pedals |
 | `BMX_DAB_PROBE=1` | foot-down probe: `DAB` lines with dab level, foot side, shoe speed on the bike in / out of the dab vs pedalling, sole gap to the ground |
 | `BMX_WATER_SPAWN=1` | autotest starts 9 m from the nearest lake, facing it (water shots; seed 4242 → a desert lake) |
