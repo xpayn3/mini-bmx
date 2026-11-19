@@ -172,6 +172,22 @@ static func helmet_picker(current: String, on_pick: Callable, size := 13) -> Gri
 		grid.add_child(b)
 	return grid
 
+## which goggles go with a textured helmet (Look > Helmet): ours (colours below apply) or the model's own
+static func helmet_goggles_picker(current: String, on_pick: Callable, size := 13) -> GridContainer:
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 6)
+	grid.add_theme_constant_override("v_separation", 6)
+	for st in [["game", "Our goggles"], ["helmet", "Model's own"]]:
+		var gid: String = st[0]
+		var b := UITheme.button(st[1], func(): on_pick.call(gid), size)
+		b.toggle_mode = true
+		b.button_pressed = gid == current
+		b.focus_mode = Control.FOCUS_NONE
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		grid.add_child(b)
+	return grid
+
 ## the knee pad design picker (Kit > Knee pads): one toggle per design, on_pick(style id)
 static func pad_style_picker(current: String, on_pick: Callable, size := 13) -> GridContainer:
 	var grid := GridContainer.new()

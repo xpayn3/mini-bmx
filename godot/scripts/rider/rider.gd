@@ -23,10 +23,11 @@ const NEUTRAL := {hipX = 0.0, hipY = 0.0, lean = 0.0, elbowsOut = 0.0, kneesOut 
 	kneesFwd = 0.0, kneeOutL = 0.0, kneeOutR = 0.0, heelFwd = 0.0, heelUp = 0.0, footAngle = 0.0, footOut = 0.0}
 ## lookpanel.js DEFAULT_LOOK
 const DEFAULT_LOOK := {shell = "#16171a", peak = "#ececec", goggleFrame = "#f2f2ee", lens = "#ff7a2a", strap = "#ff6a4d",
-	jersey = "#ff6a4d", pants = "#1d2b64", gloves = "#ffd21f", shoes = "#26292f", shoeAccent = "#d8232a", pads = "#1b1c20", padStyle = "enduro", helmet = "glory"}
+	jersey = "#ff6a4d", pants = "#1d2b64", gloves = "#ffd21f", shoes = "#26292f", shoeAccent = "#d8232a", pads = "#1b1c20", padStyle = "enduro", helmet = "glory", helmetGoggles = "game"}
 ## where the helmet model sits on the head (head-local m / rad) and its scale
 ## helmet models picked in the Look tab (look.helmet): id -> [label, glb]. The glory one is the stock helmet (recolourable
-## shell / peak, our goggles); the others come with textures and their own goggles (tools/export_helmets.py)
+## shell / peak); the others are textured shells (tools/export_helmets.py) whose glb also holds the model's own goggles
+## ("helmet_goggles"): worn when look.helmetGoggles = "helmet", otherwise our goggles go on the shell
 const HELMETS := {
 	"glory": ["GLORY", "res://assets/helmet.glb"],
 	"6d_black": ["6D ATR-2 black", "res://assets/helmets/helmet_6d_black.glb"],
@@ -74,7 +75,7 @@ var goggle_mats := {}
 var hand_mats := {}
 var helmet_mats := {}
 var helmet_model: Node3D = null
-var helmet_id := ""   # which HELMETS entry is on (set by use_helmet)
+var helmet_id := ""   # which HELMETS entry + goggle source is on, "id/mode" (set by use_helmet)
 var goggles: Node3D = null
 var action_cam: Node3D = null   # helmet-top action camera (ActionCam); its "Lens" is the Helmet camera view
 var action_cam_at := Vector3.ZERO   # where it's mounted (head space)
@@ -340,9 +341,9 @@ static func _shell_top(tris: PackedVector3Array, x: float) -> float:
 
 ## Swap the built-in helmet for the model (helmet.glb's "helmet" MeshInstance3D: centred on its shell,
 ## +X = face, +Y up). Adds the moto goggles with the strap hugging the shell.
-func set_helmet(model: Node3D) -> void:
+func set_helmet(model: Node3D, own_goggles: Node3D = null) -> void:
 	var F := HELMET_FIT
-	var builtin: bool = bool((model.get_meta("extras", {}) as Dictionary).get("builtinGoggles", false))   # goggles are part of the model
+	var builtin := own_goggles != null   # the model's own goggles are worn: ours are not built
 	if helmet_model and is_instance_valid(helmet_model):   # swapping helmets: the old one goes
 		helmet_model.get_parent().remove_child(helmet_model)
 		helmet_model.queue_free()
@@ -361,10 +362,17 @@ func set_helmet(model: Node3D) -> void:
 	if model.get_parent():
 		model.get_parent().remove_child(model)
 	w.add_child(model)
+	if own_goggles:
+		own_goggles.owner = null
+		if own_goggles.get_parent():
+			own_goggles.get_parent().remove_child(own_goggles)
+		w.add_child(own_goggles)
 	helmet_mats = {}
 	var shell_tris := PackedVector3Array()   # shell triangles in head space, for the strap
 	var meshes: Array = [model]
 	meshes.append_array(model.find_children("*", "MeshInstance3D", true, false))
+	if own_goggles:
+		meshes.append(own_goggles)
 	for o in meshes:
 		if not (o is MeshInstance3D) or o.mesh == null:
 			continue
@@ -463,17 +471,22 @@ static func _hug(tris: PackedVector3Array, x: float, y: float, dx: float, dz: fl
 func use_helmet(id: String) -> void:
 	if not HELMETS.has(id):
 		id = "glory"
-	if id == helmet_id and helmet_model and is_instance_valid(helmet_model):
+	var own := str(look.get("helmetGoggles", "game")) == "helmet" and id != "glory"
+	var key := id + ("/own" if own else "/game")
+	if key == helmet_id and helmet_model and is_instance_valid(helmet_model):
 		return
 	var hs: Node3D = load(HELMETS[id][1]).instantiate()
 	var helmet := hs.find_child("helmet", true, false)
 	if helmet == null:
 		hs.free()
 		return
+	var gog: Node3D = hs.find_child("helmet_goggles", true, false) if own else null
 	helmet.get_parent().remove_child(helmet)
+	if gog:
+		gog.get_parent().remove_child(gog)
 	hs.free()
-	helmet_id = id
-	set_helmet(helmet)
+	helmet_id = key
+	set_helmet(helmet, gog)
 
 
 ## colours: {shell, peak, jersey, pants, gloves, shoes, shoeAccent, goggleFrame, lens, strap} as "#rrggbb"
@@ -481,7 +494,8 @@ func set_look(l: Dictionary) -> void:
 	look.merge(l, true)
 	var L := look
 	var want := str(L.get("helmet", "glory"))
-	if hel != null and want != helmet_id and HELMETS.has(want):   # another helmet model: mount it (set_helmet re-applies the look)
+	var want_key := want + ("/own" if str(L.get("helmetGoggles", "game")) == "helmet" and want != "glory" else "/game")
+	if hel != null and want_key != helmet_id and HELMETS.has(want):   # another helmet / goggle source: mount it (set_helmet re-applies the look)
 		use_helmet(want)
 		return
 	var c := func(m, k: String) -> void:

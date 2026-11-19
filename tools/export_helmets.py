@@ -4,8 +4,9 @@ First prep the maps:   python -I tools/prep_helmet_textures.py <unpacked maps> <
 Then (Blender 4.1+):   blender -b -P tools/export_helmets.py -- <6datr211goggles2.fbx> <tldse5goggles.fbx> <tex dir>
 
 Writes godot/assets/helmets/helmet_<id>.glb in the same convention as assets/helmet.glb: one node "helmet", centred on
-its shell, +X = the face, +Y up, sized like the stock shell. Two textured materials: "tex_shell" and "tex_goggles"
-(the goggles + strap are part of the model: the rider builds none of its own for these; the node extras say so).
+its shell, +X = the face, +Y up, sized like the stock shell. Two nodes: "helmet" (the shell, material "tex_shell") and
+"helmet_goggles" (the goggles + strap of the model, material "tex_goggles"), split by the FBX's material faces. The rider
+mounts the shell with its own goggles by default, or the model's goggles when look.helmetGoggles = "helmet".
 """
 import bpy, sys, os, json, struct, math
 import numpy as np
@@ -87,7 +88,7 @@ def write_glb(path, groups, slots, shell_maps, gog_maps, extras):
     for name, slot, maps in (("tex_shell", slots[0], shell_maps), ("tex_goggles", slots[1], gog_maps)):
         base, orm, nor = maps
         mat = {"name": name, "doubleSided": True,
-               "pbrMetallicRoughness": {"baseColorTexture": {"index": tex(base)}, "metallicFactor": 1.0 if orm else 0.0,
+               "pbrMetallicRoughness": {"baseColorTexture": {"index": tex(base)}, "metallicFactor": (0.45 if name == "tex_goggles" else 1.0) if orm else 0.0,   # the lens mask is a full mirror: it blew out to white
                                         "roughnessFactor": 1.0 if orm else 0.42}}
         if orm:
             mat["pbrMetallicRoughness"]["metallicRoughnessTexture"] = {"index": tex(orm)}
@@ -115,8 +116,9 @@ def write_glb(path, groups, slots, shell_maps, gog_maps, extras):
         prims.append({"attributes": {"POSITION": a0, "NORMAL": a0 + 1, "TEXCOORD_0": a0 + 2}, "indices": a0 + 3,
                       "material": len(materials) - 1})
         print("  ", name, len(ix) // 3, "tris")
-    doc = {"asset": {"version": "2.0", "generator": "gamecycling export_helmets.py"}, "scene": 0, "scenes": [{"nodes": [0]}],
-           "nodes": [{"name": "helmet", "mesh": 0, "extras": extras}], "meshes": [{"name": "helmet", "primitives": prims}],
+    doc = {"asset": {"version": "2.0", "generator": "gamecycling export_helmets.py"}, "scene": 0, "scenes": [{"nodes": [0, 1]}],
+           "nodes": [{"name": "helmet", "mesh": 0}, {"name": "helmet_goggles", "mesh": 1}],
+           "meshes": [{"name": "helmet", "primitives": [prims[0]]}, {"name": "helmet_goggles", "primitives": [prims[1]]}],
            "materials": materials, "textures": textures, "images": images, "samplers": [{"magFilter": 9729, "minFilter": 9987, "wrapS": 10497, "wrapT": 10497}],
            "accessors": accessors, "bufferViews": views, "buffers": [{"byteLength": off[0]}]}
     js = json.dumps(doc).encode(); js += b" " * ((-len(js)) % 4)
@@ -130,4 +132,4 @@ def write_glb(path, groups, slots, shell_maps, gog_maps, extras):
 
 for spec in SPECS:
     groups, slots, sm, gm = build(spec)
-    write_glb(os.path.join(OUT, "helmet_%s.glb" % spec[0]), groups, slots, sm, gm, {"builtinGoggles": True})
+    write_glb(os.path.join(OUT, "helmet_%s.glb" % spec[0]), groups, slots, sm, gm, None)
