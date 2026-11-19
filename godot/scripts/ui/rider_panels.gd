@@ -59,6 +59,7 @@ const POSE_DEFS := [
 		["heelUp", "Heels up / down", -0.06, 0.08, 0.005, "m"],
 		["footAngle", "Foot angle (toes down)", -0.5, 0.5, 0.01, "rad"],
 		["footOut", "Toes out", -0.4, 0.6, 0.01, "rad"],
+		["footSlide", "Feet out on pedals", -0.03, 0.06, 0.002, "m"],
 	]],
 	["Movement", [
 		["crouch", "Crouch depth", 0.0, 2.0, 0.05, "×"],

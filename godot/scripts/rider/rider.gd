@@ -20,7 +20,7 @@ const NEUTRAL := {hipX = 0.0, hipY = 0.0, lean = 0.0, elbowsOut = 0.0, kneesOut 
 	neck = 0.0, headYaw = 0.0, headRoll = 0.0,
 	shoulderFwd = 0.0, shoulderUp = 0.0, elbowsDown = 0.0, elbowOutL = 0.0, elbowOutR = 0.0, wristRoll = 0.0,
 	elbowsBack = 0.0, armBend = 0.0,
-	kneesFwd = 0.0, kneeOutL = 0.0, kneeOutR = 0.0, heelFwd = 0.0, heelUp = 0.0, footAngle = 0.0, footOut = 0.0}
+	kneesFwd = 0.0, kneeOutL = 0.0, kneeOutR = 0.0, heelFwd = 0.0, heelUp = 0.0, footAngle = 0.0, footOut = 0.0, footSlide = 0.025}
 ## lookpanel.js DEFAULT_LOOK
 const DEFAULT_LOOK := {shell = "#16171a", peak = "#ececec", goggleFrame = "#f2f2ee", lens = "#ff7a2a", strap = "#ff6a4d",
 	jersey = "#ff6a4d", pants = "#1d2b64", gloves = "#ffd21f", shoes = "#26292f", shoeAccent = "#d8232a", pads = "#1b1c20", padStyle = "enduro"}
@@ -1320,6 +1320,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	for i in 2:
 		var side := -1.0 if i == 0 else 1.0
 		var foot: Vector3 = p.get("footL" if i == 0 else "footR", Vector3.ZERO)
+		foot.z += side * float(sty.footSlide)   # slide the shoe outwards along the pedal axle
 		var hand: Vector3 = p.get("handL" if i == 0 else "handR", Vector3.ZERO)
 		# leg
 		var hp: Vector3 = pelvis + pel_b * Vector3(0, -0.02, side * (0.11 + sty.stance))
