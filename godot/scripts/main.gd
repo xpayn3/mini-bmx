@@ -26,7 +26,10 @@ func _ready() -> void:
 	if OS.get_environment("BMX_SEED") != "":   # tests: a fixed world behind the title screen too
 		GameState.seed = int(OS.get_environment("BMX_SEED"))
 	if "--garage" not in OS.get_cmdline_user_args() and "--rider" not in OS.get_cmdline_user_args():   # straight to the garage: don't build the world first
-		_new_game()
+		var plain := true   # only a plain launch (or a title screenshot) gets the title backdrop; tests ride the real world
+		for a in OS.get_cmdline_user_args():
+			if not a.begins_with("--shot="): plain = false
+		_new_game(plain)
 		_show_menu()
 	create_tween().set_ignore_time_scale().tween_property(fade, "modulate:a", 0.0, 0.8)
 	# command-line: --ride skips the title screen; --autotest=N rides N seconds unattended then quits
@@ -40,20 +43,25 @@ func _ready() -> void:
 		elif a.begins_with("--showcase="): _showcase(a.get_slice("=", 1))
 		elif a.begins_with("--hitch"): _hitch(float(a.get_slice("=", 1)) if "=" in a else 30.0)
 
-func _new_game() -> void:
+func _new_game(title := false) -> void:
 	if game:
 		game.queue_free()
 		await game.tree_exited
 	game = Game.new()
+	game.title_world = title   # the title screen's own backdrop world; a ride swaps it for the real one
 	game.process_mode = Node.PROCESS_MODE_PAUSABLE
 	add_child(game)
 	move_child(game, 0)
 
 func restart_ride() -> void:
 	fade.modulate.a = 1.0
-	await _new_game()
+	await _new_game(game != null and game.title_world and state == MENU)
 	_set_riding(state != MENU)
 	create_tween().set_ignore_time_scale().tween_property(fade, "modulate:a", 0.0, 0.5)
+
+## a new world seed: the title backdrop stays as it is, only a real ride world is rebuilt
+func _seed_changed() -> void:
+	if not (game and game.title_world): restart_ride()
 
 func _set_riding(riding: bool) -> void:
 	game.input_enabled = riding
@@ -247,9 +255,9 @@ func _menu_page_main() -> void:
 	se.tooltip_text = "World seed: type a number and press Enter"
 	se.text_submitted.connect(func(t):
 		if t.is_valid_int():
-			GameState.seed = int(t); restart_ride())
+			GameState.seed = int(t); _seed_changed())
 	seed_row.add_child(se)
-	seed_row.add_child(UITheme.make_button("NEW WORLD", func(): GameState.new_seed(); se.text = str(GameState.seed); restart_ride(), "chip", Tokens.T_LG))
+	seed_row.add_child(UITheme.make_button("NEW WORLD", func(): GameState.new_seed(); se.text = str(GameState.seed); _seed_changed(), "chip", Tokens.T_LG))
 	vb.add_child(seed_row)
 	vb.add_child(UITheme.spacer(Tokens.S4))
 	# secondary: a quiet list
@@ -747,7 +755,12 @@ func _close_garage(ride: bool) -> void:
 	create_tween().set_ignore_time_scale().tween_property(fade, "modulate:a", 0.0, 0.5)
 
 func _start_ride() -> void:
-	if bike_dirty:
+	if game and game.title_world:   # leave the title backdrop: build the player's own world first
+		bike_dirty = false
+		fade.modulate.a = 1.0
+		await _new_game(false)
+		create_tween().set_ignore_time_scale().tween_property(fade, "modulate:a", 0.0, 0.5)
+	elif bike_dirty:
 		bike_dirty = false
 		await restart_ride()
 	if menu: menu.queue_free(); menu = null

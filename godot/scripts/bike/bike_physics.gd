@@ -108,7 +108,8 @@ var lift_t := 0.0; var hop_block := false; var hop_held := false
 var prep := 0.0; var land_prep := 0.0; var pop_fired := false
 var lip_scan := 0; var lip_state := 0; var lip_last := 0.0   # lip_state: 0 unknown, 1 none in sight, 2 lip_last valid
 var y_prev := NAN; var pump_acc := 0.0; var brake_heat := 0.0
-var brake_stop := false   # braked to a standstill: held in place while the brake stays on
+var foot_down := false    # set by Game: the rider's foot is on the ground (the bike stays put)
+var brake_stop := false  # braked to a standstill: held in place while the brake stays on
 var brake_back := false   # brake pressed fresh from a standstill: backs the bike up
 var dust_acc := 0.0; var chunk_acc := 0.0
 var joint_rock = null
@@ -529,8 +530,8 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			brake_stop = false; brake_back = absf(v) < 0.3
 		elif v <= 0.3 and not brake_back:
 			brake_stop = true
-		if brake_stop:
-			v = 0.0
+		if brake_stop or (foot_down and throttle < 0.1 and not (brake and brake_back)):
+			v = 0.0   # a foot on the ground holds the bike still (no creeping on a slope)
 		elif brake and brake_back and v <= 0.3:
 			v += (-1.3 - v) * minf(1.0, dt * 3)
 		if throttle < 0.1 and not brake and absf(v) < 0.05 and absf(_g_pitch) < 0.03: v = 0

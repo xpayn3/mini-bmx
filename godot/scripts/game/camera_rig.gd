@@ -23,7 +23,7 @@ const PRESETS := {
 	"top":       {"label": "Top-down",   "dist": 34.0, "pitch": 84.0, "follow": false, "fov": 30.0},
 }
 ## title screen only (not in the C cycle): behind and above the rider, looking out over the landscape
-const VISTA := {"label": "Lookout", "mode": "vista", "fov": 42.0, "back": 19.0, "up": 5.0, "side": -4.4, "look": 160.0, "drop": 0.128}
+const VISTA := {"label": "Lookout", "mode": "vista", "fov": 42.0, "back": 6.0, "up": 0.6, "side": -1.9, "look": 160.0, "drop": -0.09, "yaw_off": -1.5708}
 var vista_yaw := 0.0
 
 var game
@@ -385,7 +385,8 @@ func _keep_rider_in_view(aim: Vector3, rider: Vector3) -> Vector3:
 ## lookout: a slow sway left/right over the view; a mouse drag turns it, the rider stays in the frame
 func _vista(dt: float, P: Dictionary) -> void:
 	orbit += (orbit_t - orbit) * minf(1.0, dt * 4)
-	var yaw := vista_yaw + orbit + sin(t * 0.05) * 0.22
+	# yaw_off turns the camera side-on: the bike points to the left of the frame, like a photo from a ridge
+	var yaw := vista_yaw + float(P.get("yaw_off", 0.0)) + orbit + sin(t * 0.05) * 0.03
 	var dir := Vector3(cos(yaw), 0, -sin(yaw))
 	var right := Vector3(-dir.z, 0, dir.x)
 	var base: Vector3 = game.drawn_pos

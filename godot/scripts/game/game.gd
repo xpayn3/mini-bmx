@@ -83,6 +83,12 @@ var takeoff := Vector3.ZERO
 var air_peak := 0.0
 var input_enabled := true
 var sky_mat: ShaderMaterial
+## The title screen's backdrop is its own hand-picked place (a fixed world and spot), not the player's world:
+## main builds the title Game with title_world = true and swaps to the real world when a ride starts.
+const TITLE_SEED := 37   # a desert summit with rolling hills far below, picked by hand
+const TITLE_SPOT := Vector3(30.0, -120.0, 1.4399)   # x, z, heading (rad) of the bike on that summit
+var title_world := false
+var _title_heading := NAN
 var scenic := false          # title screen: golden hour, a lookout camera, far hills to the horizon
 var far_hills: FarHills
 var sheep: SheepHerd
@@ -91,7 +97,7 @@ func _ready() -> void:
 	bike_cfg = GameState.bike_config()
 	Tune.set_ride(bike_cfg.ride)
 	_build_environment()
-	terrain = load("res://scripts/world/terrain.gd").new(GameState.seed)
+	terrain = load("res://scripts/world/terrain.gd").new((int(OS.get_environment("BMX_TITLE_SEED")) if OS.get_environment("BMX_TITLE_SEED") != "" else TITLE_SEED) if title_world else GameState.seed)
 	add_child(terrain)
 	terrain.view_scale = float(Settings.get_v("view_distance"))   # before the first chunks are built
 	terrain.update_stream(0, 0, INF)
@@ -281,7 +287,8 @@ func set_scenic(on: bool) -> void:
 	if on == scenic: return
 	scenic = on
 	if on:
-		var best := _best_view()
+		_to_hilltop()
+		var best := _title_heading
 		var sy := best - 0.62
 		var el := deg_to_rad(10.0)
 		sun.look_at_from_position(Vector3(cos(sy) * cos(el), sin(el), -sin(sy) * cos(el)), Vector3.ZERO, Vector3.UP)
@@ -307,7 +314,18 @@ func set_scenic(on: bool) -> void:
 		cam.far = 3500.0
 		cam.vista_yaw = best
 		cam.set_mode("vista")
+		# the rider sits on the bike on the hilltop, facing out over the view, not moving
+		phys.heading = best
+		phys.course = best   # the physics rebuilds the heading from the course, or it swings round slowly
+		phys.slip = 0.0
+		phys.v = 0.0
+		_snap_prev()
+		atmos.gain = 0.3   # a slight breeze
+		_title_lights(best)
 	else:
+		atmos.gain = 1.0
+		if is_instance_valid(_studio): _studio.queue_free()
+		_studio = null
 		sun.look_at_from_position(SUN_DIR.normalized(), Vector3.ZERO, Vector3.UP)
 		sun.light_color = RIDE_SUN_COL
 		sun.shadow_bias = 0.02
@@ -402,6 +420,55 @@ func _apply_light(h: float, L: Dictionary) -> void:
 		var zn := Color(0.424, 0.765, 0.925).lerp(Color(0.62, 0.62, 0.72), gw).lerp(Color(0.02, 0.03, 0.07), n)
 		terrain.water_light(dirv, sun.light_color * clampf(sun_energy / maxf(RIDE_SUN, 0.01), 0.0, 1.5), hz, zn)
 
+
+var _studio: Node3D
+
+## title screen: photo-shoot lighting round the bike - a warm key spot from the camera side to bring out the
+## frame (welds, tube shapes, paint), a rim light from behind to cut it out of the backdrop, a soft fill
+func _title_lights(heading: float) -> void:
+	if is_instance_valid(_studio): _studio.queue_free()
+	_studio = Node3D.new()
+	add_child(_studio)
+	var d := Vector3(cos(heading), 0.0, -sin(heading))        # the way the bike points
+	var f := Vector3(-d.z, 0.0, d.x)                          # the camera looks along this (side-on)
+	var c := Vector3(phys.x, phys.y + 0.7, phys.z)            # the middle of bike + rider
+	var key := SpotLight3D.new()
+	key.light_color = Color(1.0, 0.86, 0.7)
+	key.light_energy = 9.0
+	key.spot_range = 30.0
+	key.spot_angle = 24.0
+	key.spot_angle_attenuation = 0.6
+	key.shadow_enabled = true
+	key.shadow_bias = 0.05
+	_studio.add_child(key)
+	key.look_at_from_position(c - f * 7.0 + d * 3.0 + Vector3(0, 4.5, 0), c, Vector3.UP)
+	var rim := SpotLight3D.new()
+	rim.light_color = Color(1.0, 0.72, 0.5)
+	rim.light_energy = 7.0
+	rim.spot_range = 30.0
+	rim.spot_angle = 26.0
+	rim.shadow_enabled = false
+	_studio.add_child(rim)
+	rim.look_at_from_position(c + f * 5.0 - d * 4.0 + Vector3(0, 3.5, 0), c, Vector3.UP)
+	var fill := OmniLight3D.new()
+	fill.light_color = Color(0.75, 0.82, 1.0)
+	fill.light_energy = 0.7
+	fill.omni_range = 14.0
+	fill.shadow_enabled = false
+	_studio.add_child(fill)
+	fill.global_position = c - f * 5.0 + Vector3(0, 0.6, 0)
+
+## title screen: stand the bike on the hand-picked summit of the title world
+func _to_hilltop() -> void:
+	var sp := TITLE_SPOT
+	if OS.get_environment("BMX_TITLE_SPOT") != "":   # tests / picking a new spot: x,z,heading
+		var q := OS.get_environment("BMX_TITLE_SPOT").split_floats(",")
+		sp = Vector3(q[0], q[1], q[2])
+	terrain.update_stream(sp.x, sp.y, INF)
+	phys.reset_at(sp.x, sp.y, 0.0)
+	_snap_prev()
+	cam.snap_to(Vector3(sp.x, phys.y + 0.5, sp.y))
+	_title_heading = sp.z
 
 ## the heading with the best view from the rider: nothing close blocking the eye line (ground + room
 ## for trees) and hills rising far off. Seen from a few metres up, like the lookout camera.
@@ -534,7 +601,7 @@ func start_crash(reason: String) -> void:
 	rider.transform = Transform3D.IDENTITY
 	ragdoll.start(pts, body_vel, spin_v, 1.0 / 60)
 	if blood: blood.crash_start(Vector2(body_vel.x, body_vel.z).length())
-	grime.add_blood(clampf(0.12 + crash_v * 0.035, 0.0, 0.7))   # the rider + bike stay bloody until a death + revive
+	grime.add_blood(clampf((crash_v - 8.0) * 0.035, 0.0, 0.5))   # only a severe crash (> ~8 m/s) stains; the rider + bike stay bloody until a death + revive
 	rider.pose_ragdoll(ragdoll.p)
 	# (no dust right where the crash starts with the smoke sim: only where the body / bike hit and slide)
 	burst(Vector3(phys.x, phys.y + 0.05, phys.z), 30 if dust.sim == null else 2, terrain.surface(phys.x, phys.z), 1.5, dust.sim == null)
@@ -1048,7 +1115,7 @@ func _dab_probe(st: BikePhysics) -> void:
 ## pedal for the ground beside the bike (eased in over 0.5 s, back up over 0.4 s when riding off).
 func _update_dab(dt: float, st: BikePhysics) -> void:
 	if st.crash_on:
-		dab_lin = 0.0; dab_k = 0.0
+		dab_lin = 0.0; dab_k = 0.0; st.foot_down = false
 		return
 	var want: bool = not st.air and st.pedal < 0.05 and (st.v < 1.2 and st.v > -0.7 if dab_lin > 0.0 else absf(st.v) < 0.5)   # backing up (brake held) lifts it
 	if want and dab_lin <= 0.0:
@@ -1061,6 +1128,7 @@ func _update_dab(dt: float, st: BikePhysics) -> void:
 		else: dab_side = -1.0
 	dab_lin = move_toward(dab_lin, 1.0 if want else 0.0, dt / (0.5 if want else 0.4))
 	dab_k = smoothstep(0.0, 1.0, dab_lin)
+	st.foot_down = want and dab_lin >= 0.6
 
 ## Moves the dabbing foot's target (lean-node space) from its pedal to the ground beside the bike.
 func _dab_foot(lt: Dictionary) -> void:
@@ -1188,7 +1256,7 @@ func _process(dt: float) -> void:
 			"counter": st.counter, "rockRoll": st.rock, "headRoll": st.bike_lean * 0.85,
 			"absorb": clampf(body_y - y_draw, -T.legComp, T.legExt), "pitch": p_draw, "bodyLevel": T.bodyLevel,
 			"attackDrop": T.attackDrop, "pedal": st.pedal, "sprint": st.sprint * st.pedal, "crank": st.crank,
-			"air": st.air_k, "compress": maxf(0.0, -st.compress), "hipShift": st.hip_shift, "bodyStick": st.body_in_s, "slope": st._g_pitch, "airTilt": _atilt_s, "bodyLat": _blat_s, "wheelR": rider.to_local(rig.wheel_r.global_position), "wheelRR": rig.wheel_rr, "t": t,
+			"air": st.air_k, "compress": maxf(0.0, -st.compress), "hipShift": st.hip_shift, "bodyStick": -0.55 if scenic else st.body_in_s, "relax": 1.0 if scenic else 0.0, "tall": 1.0 if scenic else 0.0, "slope": st._g_pitch, "airTilt": _atilt_s, "bodyLat": _blat_s, "wheelR": rider.to_local(rig.wheel_r.global_position), "wheelRR": rig.wheel_rr, "t": t,
 			"airSpin": _aspin_s, "wheelY": (rig.wheel_f.global_position.y + rig.wheel_r.global_position.y) * 0.5, "turn": _turn_s})
 		if dab_probe: _dab_probe(st)
 		if st.crash_on: _jit_skip = 40
@@ -1255,8 +1323,8 @@ func _process(dt: float) -> void:
 		env.fog_depth_end = (cam.dist * 1.6 + 100) * vd
 		sun.directional_shadow_max_distance = clampf(cam.dist * 4.5, 80, 260) * (0.7 if int(Settings.get_v("shadows")) == 0 else 1.0)
 	if cam_attr.dof_blur_far_enabled and scenic:   # lookout: keep the view sharp, soften only the horizon
-		cam_attr.dof_blur_far_distance = 900.0
-		cam_attr.dof_blur_far_transition = 900.0
+		cam_attr.dof_blur_far_distance = 9.0     # the cyclist sharp, the landscape behind softly out of focus
+		cam_attr.dof_blur_far_transition = 140.0
 		cam_attr.dof_blur_near_distance = 2.0
 		cam_attr.dof_blur_near_transition = 1.0
 	elif cam_attr.dof_blur_far_enabled:
