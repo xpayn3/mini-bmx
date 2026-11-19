@@ -83,6 +83,7 @@ var input_enabled := true
 var sky_mat: ShaderMaterial
 var scenic := false          # title screen: golden hour, a lookout camera, far hills to the horizon
 var far_hills: FarHills
+var sheep: SheepHerd
 
 func _ready() -> void:
 	bike_cfg = GameState.bike_config()
@@ -95,6 +96,9 @@ func _ready() -> void:
 	far_hills = FarHills.new()   # the distant landscape behind the streamed chunks
 	far_hills.setup(terrain)
 	add_child(far_hills)
+	sheep = SheepHerd.new()   # woolly flocks that graze and run from the bike
+	sheep.setup(terrain)
+	add_child(sheep)
 	fx = load("res://scripts/fx/fx.gd").new()
 	add_child(fx)
 	if fx.has_method("setup"): fx.setup(terrain)
@@ -738,6 +742,7 @@ func respawn(new_world: bool) -> void:
 		far_hills = FarHills.new()
 		far_hills.setup(terrain)
 		add_child(far_hills)
+		sheep.reset()
 		flash("New world #%d" % GameState.seed)
 	if fx.has_method("clear_tracks"): fx.clear_tracks()
 	if new_world: grime.clean()
@@ -1043,6 +1048,7 @@ func _process(dt: float) -> void:
 	var vd: float = Settings.get_v("view_distance")
 	terrain.update_stream(st.x, st.z, 4.0)
 	far_hills.follow(drawn_pos)
+	sheep.follow(dt, drawn_pos, st.v, st.fwd())
 	biome_t -= dt
 	if biome_t <= 0:
 		biome_t = 0.5
