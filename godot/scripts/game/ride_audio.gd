@@ -112,6 +112,32 @@ func _update_chain(dt: float, va: float, on_ground: bool, pedal: float) -> void:
 
 func thud(power: float) -> void: shots.append(["thud", 0.0, clampf(power * 0.5, 0.2, 1.0)])
 func crunch() -> void: shots.append(["crunch", 0.0, 0.8])
+
+## wooden planks breaking: a sharp splintering crack, then the pieces knocking and bouncing on the ground.
+## Each hit is a plank ringing (free-free beam modes, ratio 1 : 2.76 : 5.40) with a tick of noise; the hits
+## come faster and quieter as the pieces settle, each with its own pitch. Built per call so no two sound alike.
+func wood_crash(power: float = 1.0) -> void:
+	var hits: Array = []
+	var t := 0.012
+	var g := 1.0
+	for k in 7 + int(power * 6.0):
+		hits.append([t, randf_range(170.0, 620.0) * (1.0 + 0.5 * randf() * randf()), g * randf_range(0.55, 1.0)])
+		t += randf_range(0.018, 0.05) * (1.0 + k * 0.28)
+		g *= 0.86
+	shots.append(["wood", 0.0, clampf(0.55 + 0.35 * power, 0.5, 1.0), hits])
+
+func _wood_sample(t: float, hits: Array) -> float:
+	# crack: noise with a fast-falling brightness, plus a short splintering burst
+	var v := (randf() * 2 - 1) * exp(-t * 260.0) * 0.8
+	if t < 0.09:
+		v += (randf() * 2 - 1) * exp(-t * 60.0) * (0.5 + 0.5 * sin(t * 1300.0)) * 0.22
+	for h in hits:
+		var dt: float = t - h[0]
+		if dt < 0.0 or dt > 0.45: continue
+		var f: float = h[1]
+		var m := sin(TAU * f * dt) * exp(-dt * 38.0) + 0.5 * sin(TAU * f * 2.76 * dt) * exp(-dt * 70.0) + 0.25 * sin(TAU * f * 5.4 * dt) * exp(-dt * 140.0)
+		v += (m + (randf() * 2 - 1) * exp(-dt * 600.0) * 0.5) * h[2] * 0.55
+	return v
 func crash() -> void: shots.append(["thud", 0.0, 1.0]); shots.append(["crunch", 0.0, 0.5])
 func shift() -> void: shots.append(["click", 0.0, 0.7])
 
@@ -230,6 +256,8 @@ func _fill() -> void:
 					v = sin(TAU * (70.0 - t * 60.0) * t) * exp(-t * 14.0) * amp + (randf() * 2 - 1) * exp(-t * 40.0) * amp * 0.4
 				"crunch":
 					v = (randf() * 2 - 1) * exp(-t * 9.0) * amp * (0.6 + 0.4 * sin(t * 900.0))
+				"wood":
+					v = _wood_sample(t, sh[3]) * amp
 				"click":
 					# shifter detent: a sharp snap (noise tick + bright metallic rings) then a softer
 					# lower "clack" as the lever seats ~34 ms later, over a small body thunk
@@ -243,7 +271,7 @@ func _fill() -> void:
 					v = (snap + clack + body) * amp
 			buf[i] += Vector2(v, v)
 		sh[1] = t0 + n / RATE
-	shots = shots.filter(func(sh): return sh[1] < 0.8)
+	shots = shots.filter(func(sh): return sh[1] < (1.6 if sh[0] == "wood" else 0.8))
 	for i in n:
 		buf[i] = buf[i].clamp(Vector2(-1, -1), Vector2(1, 1))
 	pb.push_buffer(buf)
