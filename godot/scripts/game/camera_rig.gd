@@ -103,10 +103,11 @@ func update_cam(dt: float) -> void:
 		RenderingServer.global_shader_parameter_set("cam_see", Vector4.ZERO)
 		_vista(dt, P)
 		return
-	# analog camera (gamepad right stick) + zoom keys
-	var ax := Input.get_joy_axis(0, JOY_AXIS_RIGHT_X)
-	var ay := Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y)
+	# analog camera from the rebindable cam_* actions (the gamepad right stick moves the rider's body now)
+	var ax := Input.get_axis("cam_left", "cam_right") if Input.get_connected_joypads().size() > 0 else 0.0
+	var ay := Input.get_axis("cam_up", "cam_down") if Input.get_connected_joypads().size() > 0 else 0.0
 	follow_k = float(Settings.get_v("cam_follow"))
+	if Input.is_key_pressed(KEY_Z) or Input.is_key_pressed(KEY_X): ax = 0.0   # keys turn in 45° steps (_unhandled_input)
 	if absf(ax) > 0.2 or absf(ay) > 0.2: pan_t = t
 	if absf(ax) > 0.2: orbit_t += ax * dt * 2.2
 	if absf(ay) > 0.2: cam_pitch_t = clampf(cam_pitch_t + ay * dt * 60 * (-1.0 if Settings.get_v("invert_y") else 1.0), 4, 85)

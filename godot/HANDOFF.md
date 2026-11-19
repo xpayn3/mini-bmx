@@ -54,7 +54,11 @@ W/↑ pedal · S/↓ brake · A/D steer · **Space** hop/pump (hold to charge; *
 **S/W pressed fresh as you leave a lip: throw a back/front flip** · **W/S in the air: tilt the bike nose down/up (limited, body shift)** · **A/D in the air: lean the bike left/right (no spins)** · **brake + A/D when slow: pivot (pirouette)** · Shift sprint (stamina) · Q/E shift gears · F bail · Backspace back to
 start · R new world · B next bike · C next camera · Z/X rotate camera · +/- zoom · mouse drag orbit ·
 H records · **P / K / L** the tuning card on its Ride / Rider / Look tab · O photo mode · F1 hide HUD ·
-F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A hop, X sprint, bumpers gears.
+F12 screenshot · Esc pause. Gamepad (Xbox): triggers pedal/brake, left stick steer, A hop, X sprint, bumpers gears, Y camera,
+**right stick = the rider's body, all the time**: up / down shifts the weight forward over the bars / back (pulled well back
+rolling = a **manual**, yanked fresh at a lip = a flip throw, in the air = nose down / up), left / right throws the bike over under
+the body (leaning alone turns, leaning with the steer turns harder + grips more, a quick **flick** whips the bike round; in the
+air it leans the bike). Numpad 8/5/4/6 do the same on keys. The camera no longer uses the right stick.
 
 ## 4. Project layout (`godot/`)
 
@@ -87,6 +91,11 @@ F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A 
   and landings throw the body forward, drive sits it back), **air control** (Space tucks the bike up about the
   shared centre of mass, W/S lean the nose; keys held at take-off count only once pressed again).
 - **Sprint from slow** (`sprintKick`, `BikePhysics.slowness`): the slower the rider, the harder a sprint pushes (0–25 km/h 1.5 s vs 2.7 s pedalling), legs spin up, the bike is thrown side to side and the rider stands tall over the bars (`effort` in `rider.gd`). Stamping from below ~12 km/h pulls a **wheelie** (`sprintLift`); held, it climbs (`wheelieClimb`) until it loops out (~2 s); let go of sprint and it is set down (`wheelie_up`).
+- **Body stick** (gamepad right stick, `body_fwd/back/left/right` actions → `inp.body_fwd`, `inp.body_lean`): fore / aft adds to
+  `body_x` / `hip_shift` (reach `stickShift` × `weightShift`); past `manualFrom` pulled back it holds a manual (`manual_up` feeds
+  `wheelie_up`, up to `manualAngle`); fresh at a lip it adds to `throw_in` (`lock_sb` / `lock_sf` like the keys); in the air it adds
+  to W / S. Side lean: `flick` adds to the bike lean (`flickLean`), to the steer (`flickSteer`), extra turn / grip when it agrees
+  with the steer (`flickTurn`, `flickGrip`), and an outward stick flick gives a yaw kick (`flick_kick`, `flickKick`). Sliders: Ride › Body.
 - Every tuning value lives in `Tune` (tuning card, Ride tab + Rider › Physics); bikes multiply them (`BIKES.*.ride` + garage mods).
 - **Air + landing are momentum physics, no scripted caps / assists**: on the ground `v` is the speed
   along the slope (it splits into horizontal `v` + climb `vy` at take-off and joins again at landing:
@@ -315,6 +324,7 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `BMX_GETUP_K=0.6` | draws the get-up prompt as if the key were held that far (with `BMX_BAIL`) |
 | `BMX_AUDIO_PROBE=1` | prints the freewheel's click rate / volume / output peak and the gravel surface / level twice a second |
 | `-s res://tools/gravel_render.gd --headless -- out.wav [speed=8 tone=650 crack=0.3 …]` | renders the gravel synth alone to a WAV (compare with a recording) |
+| `BMX_BODY=manual/fwd/lean/flick` (+ `BMX_BODY_PRINT=1`) | autotest works the body stick from 3 s (right stick) and prints `BODY` lines: stick, flick, manual angle, pitch, bike lean, yaw |
 | `BMX_STOP_AT=a,b` / `BMX_IDLE_FOR=secs` | autotest brakes to a stop from a s and rides off at b s / stands still, then pedals |
 | `BMX_DAB_PROBE=1` | foot-down probe: `DAB` lines with dab level, foot side, shoe speed on the bike in / out of the dab vs pedalling, sole gap to the ground |
 | `BMX_WATER_SPAWN=1` | autotest starts 9 m from the nearest lake, facing it (water shots; seed 4242 → a desert lake) |

@@ -312,6 +312,18 @@ func _autotest(seconds: float) -> void:
 			else: Input.action_release("brake")
 		if pedal and not (OS.get_environment("BMX_COAST") != "" and int(el) % 6 >= 3): Input.action_press("pedal")   # BMX_COAST: 3 s pedal / 3 s coast
 		else: Input.action_release("pedal")
+		var body_t := OS.get_environment("BMX_BODY")   # tests: the body stick. manual / fwd / lean / flick (from 3 s)
+		if body_t != "" and el >= 3.0:
+			var ph2: BikePhysics = game.phys
+			if body_t == "manual": Input.action_press("body_back", 0.9 if int(el) % 4 < 3 else 0.0)
+			elif body_t == "fwd": Input.action_press("body_fwd", 1.0)
+			elif body_t == "lean": Input.action_press("body_left", 1.0)
+			elif body_t == "flick":
+				var side := int(el * 1.5) % 2 == 0
+				Input.action_press("body_left", 1.0) if side else Input.action_release("body_left")
+				Input.action_press("body_right", 1.0) if not side else Input.action_release("body_right")
+			if OS.get_environment("BMX_BODY_PRINT") != "" and int(el * 10) % 5 == 0:
+				print("BODY t=%.1f v=%.1f in=%.2f flick=%.2f manual=%.2f pitch=%.2f g=%.2f bike_lean=%.2f lean=%.2f yaw=%.2f slip=%.2f hip=%.3f air=%s" % [el, ph2.v, ph2.body_in, ph2.flick, ph2.manual_up, ph2.pitch, ph2._g_pitch, ph2.bike_lean, ph2.lean, ph2.yaw_rate, ph2.slip, ph2.hip_shift, ph2.air])
 		if OS.get_environment("BMX_MUD") != "": game.grime.mud = float(OS.get_environment("BMX_MUD"))   # tests: hold the mud level
 		var straight := OS.get_environment("BMX_STRAIGHT") != ""   # tests: ride straight, no steering / hops
 		if OS.get_environment("BMX_CAM_ORBIT") != "": game.cam.orbit_t = float(OS.get_environment("BMX_CAM_ORBIT")); game.cam.pan_t = 1e9   # held: no re-centre

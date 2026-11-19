@@ -779,10 +779,19 @@ func _shift(d: int) -> void:
 
 func _read_input() -> Dictionary:
 	if not input_enabled:
-		return {"throttle": 0.0, "brake": 0.0, "steer": 0.0, "hop": false, "sprint": false}
+		return {"throttle": 0.0, "brake": 0.0, "steer": 0.0, "hop": false, "sprint": false, "body_fwd": 0.0, "body_lean": 0.0}
 	var steer := Input.get_action_strength("steer_left") - Input.get_action_strength("steer_right")
 	steer = signf(steer) * pow(absf(steer), 1.0 / maxf(0.3, float(Settings.get_v("steer_sens"))))
+	# the rider's body (gamepad right stick, numpad on keys): round stick gate -> square, so diagonals reach full
+	var bf := Input.get_action_strength("body_fwd") - Input.get_action_strength("body_back")
+	var bl := Input.get_action_strength("body_left") - Input.get_action_strength("body_right")
+	var bm := maxf(absf(bf), absf(bl))
+	if bm > 0.01:
+		var sq := minf(Vector2(bf, bl).length() / bm, 1.4142)
+		bf = clampf(bf * sq, -1, 1); bl = clampf(bl * sq, -1, 1)
 	return {
+		"body_fwd": bf,
+		"body_lean": bl,
 		"throttle": Input.get_action_strength("pedal"),
 		"brake": Input.get_action_strength("brake"),
 		"steer": clampf(steer, -1, 1),
@@ -960,7 +969,7 @@ func _process(dt: float) -> void:
 			"counter": st.counter, "rockRoll": st.rock, "headRoll": st.bike_lean * 0.85,
 			"absorb": clampf(body_y - y_draw, -T.legComp, T.legExt), "pitch": p_draw, "bodyLevel": T.bodyLevel,
 			"attackDrop": T.attackDrop, "pedal": st.pedal, "sprint": st.sprint * st.pedal, "crank": st.crank,
-			"air": st.air_k, "compress": maxf(0.0, -st.compress), "hipShift": st.hip_shift, "t": t,
+			"air": st.air_k, "compress": maxf(0.0, -st.compress), "hipShift": st.hip_shift, "bodyStick": st.body_in_s, "t": t,
 			"airSpin": st.yaw_rate if st.air else 0.0, "wheelY": (rig.wheel_f.global_position.y + rig.wheel_r.global_position.y) * 0.5, "turn": 0.0 if st.air else st.yaw_rate * clampf(absf(st.v) / 3.0, 0.3, 1.0)})
 		if dab_probe: _dab_probe(st)
 	var vd: float = Settings.get_v("view_distance")

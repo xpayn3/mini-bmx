@@ -13,6 +13,7 @@ const TABS := [
 		["Grip", ["T:Grip & slides", "T:Carving"]],
 		["Speed", ["T:Speed", "T:Momentum"]],
 		["Sprint", ["T:Sprint & wheelie"]],
+		["Body", ["T:Body stick"]],
 		["Suspension", ["T:Wheels & pump"]],
 		["Jumps", ["T:Jumping", "T:Air"]],
 	]],

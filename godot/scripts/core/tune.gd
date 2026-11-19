@@ -116,6 +116,17 @@ const DEFS := [
 		["wheelieClimb", "Wheelie climbs while held", 0.45, 0.0, 1.5, 0.05, "rad/s"],
 		["wheelieDrop", "Wheelie set-down speed", 1.6, 0.4, 4, 0.1, "rad/s"],
 	]],
+	["Body stick", [
+		["stickShift", "Fore / aft reach (× weight shift)", 1.7, 0, 3, 0.05, "×"],
+		["manualFrom", "Manual: stick pulled back past", 0.55, 0.2, 0.95, 0.05, ""],
+		["manualAngle", "Manual: front lifts to", 0.32, 0, 0.7, 0.01, "rad"],
+		["flickSteer", "Side lean turns the bars", 0.5, 0, 1, 0.05, ""],
+		["flickTurn", "Lean into a turn: extra turn", 4.0, 0, 10, 0.1, "m/s²"],
+		["flickGrip", "Lean into a turn: extra grip", 0.2, 0, 0.6, 0.02, "×"],
+		["flickLean", "Bike thrown under the body", 0.35, 0, 0.8, 0.01, "rad"],
+		["flickSpeed", "Bike flick speed", 14, 3, 30, 0.5, "/s"],
+		["flickKick", "Quick flick whips the bike round", 0.16, 0, 0.5, 0.01, "rad"],
+	]],
 ]
 
 const PATH := "user://tune.cfg"

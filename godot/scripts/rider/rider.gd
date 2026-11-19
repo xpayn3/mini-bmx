@@ -785,6 +785,15 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var hs := _num(p, "hipShift")
 	pelvis.x += hs
 	chest.x += hs * 0.6
+	# body stick (gamepad right stick): forward = chest low over the bars, back = hips dropped behind the
+	# saddle with the arms long (manuals)
+	var bs := clampf(_num(p, "bodyStick"), -1.0, 1.0)
+	if bs > 0.0:
+		chest += Vector3(0.07, -0.09, 0.0) * bs
+		pelvis.y -= 0.03 * bs
+	elif bs < 0.0:
+		pelvis += Vector3(0.04, 0.09, 0.0) * bs   # (bs < 0: back + down)
+		chest += Vector3(0.0, 0.03, 0.0) * bs
 	# keep the body level while the bike pitches (descents: almost fully; climbs: a little)
 	# only for slope-like angles: mid-flip (nose far up / down, upside down) the body stays on the bike
 	var pitch0 := wrapf(_num(p, "pitch"), -PI, PI)

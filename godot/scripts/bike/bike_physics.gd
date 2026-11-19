@@ -56,6 +56,11 @@ var air_w := 0.0; var air_inertia := 1.0; var air_tilt := 0.0; var air_tilt_v :=
 var air_yaw := 0.0; var air_tw := 0.0; var air_tw_v := 0.0; var land_jolt := 0.0
 # pivot: how far a slow-speed pivot (pirouette) has turned the bike
 var pivot := 0.0; var pivot_acc := 0.0
+# rider body stick (gamepad right stick, any time): body_in = fore / aft (+ = forward over the bars),
+# flick_in = side lean (+ = left, like steer). flick = the smoothed side lean (the bike is thrown under
+# the body), manual_up = how far a pulled-back stick holds the front up (rad)
+var body_in := 0.0; var body_in_s := 0.0; var flick_in := 0.0; var flick := 0.0; var flick_prev := 0.0
+var manual_up := 0.0; var lock_sb := false; var lock_sf := false; var flick_kick := 0.0
 var wheel_f := 0.0; var wheel_r := 0.0; var crank := 0.0; var pedal := 0.0
 var yaw_rate := 0.0; var shake := 0.0
 var course := NAN; var slip := 0.0; var since_land := 1.0
@@ -177,7 +182,7 @@ func reset_at(px: float, pz: float, hd: float) -> void:
 	bank = 0; body_x = 0; hip_shift = 0; spin = 0; a_drive = 0; charge = 0; hop_charge = 0; lift_t = 0
 	body_xv = 0; hip_v = 0; v_last = NAN; air_lean = 0; air_pull = 0; flip_acc = 0; spin_acc = 0; flip_in = 0; spin_in = 0
 	body_pw = 0; throw_v = 0; air_w = 0; air_inertia = 1; air_tilt = 0; air_tilt_v = 0; air_yaw = 0; air_tw = 0; air_tw_v = 0; land_jolt = 0
-	pivot = 0; pivot_acc = 0
+	pivot = 0; pivot_acc = 0; body_in_s = 0; flick = 0; flick_prev = 0; manual_up = 0; flick_kick = 0
 	sprint = 0; flow = 0; flow_t = 0; lat_m = 0; carve = 0; carve_acc = 0; carve_berm = false
 	y_draw = y; pitch_draw = 0; nose_ref = NAN; pitch_w = NAN; y_prev = NAN; kick_t = 0
 	w_f = y; w_r = y
@@ -194,7 +199,7 @@ func get_up() -> void:
 	bank = 0; body_x = 0; hip_shift = 0; spin = 0; a_drive = 0; charge = 0; hop_charge = 0; lift_t = 0
 	body_xv = 0; hip_v = 0; v_last = NAN; air_lean = 0; air_pull = 0; flip_acc = 0; spin_acc = 0; flip_in = 0; spin_in = 0
 	body_pw = 0; throw_v = 0; air_w = 0; air_inertia = 1; air_tilt = 0; air_tilt_v = 0; air_yaw = 0; air_tw = 0; air_tw_v = 0; land_jolt = 0
-	pivot = 0; pivot_acc = 0
+	pivot = 0; pivot_acc = 0; body_in_s = 0; flick = 0; flick_prev = 0; manual_up = 0; flick_kick = 0
 	sprint = 0; flow = 0; flow_t = 0; lat_m = 0; carve = 0; carve_acc = 0; carve_berm = false; y_draw = y; pitch_draw = 0
 
 func begin_crash() -> void:
@@ -295,6 +300,10 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	var brake_k: float = inp.brake
 	var brake := brake_k > 0.1
 	var steer_input: float = inp.steer
+	# rider body stick (gamepad right stick): fore / aft weight, side lean. Works the whole ride
+	body_in = clampf(float(inp.get("body_fwd", 0.0)), -1.0, 1.0)
+	flick_in = clampf(float(inp.get("body_lean", 0.0)), -1.0, 1.0)
+	body_in_s += (body_in - body_in_s) * minf(1.0, dt * 10)
 	# air control: W / S tilt the bike nose down / up against the rider's body (limited, see air_tilt; a
 	# flip has to be thrown at the lip), A / D lean it left / right, Space tucks (pulls the bike up into the
 	# body, spinning faster). W / S work at once; A / D and Space held at take-off count only once pressed
@@ -308,9 +317,10 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		if absf(steer_input) <= 0.1: air_lock_a = false
 	var lean_in := 0.0
 	if air:   # W / S act straight away, even if held from the ground (the user wants no re-press)
-		lean_in = throttle - brake_k
+		lean_in = clampf(throttle - brake_k + body_in, -1.0, 1.0)   # + the body stick (forward = nose down)
 	flip_in = -lean_in                                          # + = nose up
 	spin_in = 0.0 if (not air or air_lock_a) else steer_input   # + = the steering direction
+	if air: spin_in = clampf(spin_in + flick_in, -1.0, 1.0)     # the body stick leans the bike too
 	air_lean += (lean_in - air_lean) * minf(1.0, dt * 6)
 	# the rider tucks into a flip as well as when Space is held
 	var pull_t := maxf(1.0 if air and inp.hop and not air_lock_h else 0.0, 0.7 * absf(flip_in) if air else 0.0)
@@ -334,6 +344,13 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		throw_in = (0.0 if lock_ts else brake_k) - (0.0 if lock_tw else throttle)   # + = back (nose up)
 		if not lock_ts:
 			brake_k = 0.0; brake = false
+	# the body stick throws too: yanked back / forward fresh at the lip (held from before = a manual, no throw)
+	if not lip_win:
+		lock_sb = body_in < -0.3; lock_sf = body_in > 0.3
+	else:
+		if body_in >= -0.3: lock_sb = false
+		if body_in <= 0.3: lock_sf = false
+		throw_in = clampf(throw_in + (0.0 if lock_sb else maxf(0.0, -body_in)) - (0.0 if lock_sf else maxf(0.0, body_in)), -1.0, 1.0)
 	if not air:
 		if absf(throw_in) > 0.05:
 			var room := 1.0 - clampf(throw_v * signf(throw_in) / T.flipRate, 0.0, 1.0)
@@ -420,9 +437,20 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	# --- steering, countersteer and lean ---
 	var va := absf(v)
 	var spd_k := smooth01(va / 14.0)
-	var in_rate: float = T.steerRate * 1.5 if (steer_input != 0 and signf(steer_input) != signf(steer_in)) else T.steerRate
-	var rate: float = in_rate if absf(steer_input) > 0.01 else T.steerRelease
-	steer_in += clampf(steer_input - steer_in, -rate * dt, rate * dt)
+	# body stick side lean: the rider throws the bike under them. Leaning alone turns the bike (the bars
+	# follow the lean); leaning with the steer turns harder (more lean, more bite). A quick flick of the
+	# stick outwards whips the bike round (flick_kick: a yaw kick, the rear stepping out a little)
+	var flick_rate := (flick_in - flick_prev) / maxf(dt, 1e-4)
+	var flick_out := flick_rate * signf(flick_in) > 0.0 and absf(flick_in) > absf(flick_prev)
+	flick_prev = flick_in
+	flick += (flick_in - flick) * minf(1.0, dt * float(T.get("flickSpeed", 14.0)))
+	var steer_eff := clampf(steer_input + flick_in * float(T.get("flickSteer", 0.5)), -1.0, 1.0)
+	var agree := maxf(0.0, flick_in * signf(steer_eff)) if absf(steer_eff) > 0.01 else 0.0
+	if not air and flick_out and va > 2.0:
+		flick_kick += flick_rate * dt * float(T.get("flickKick", 0.16)) * smooth01((va - 2.0) / 5.0)
+	var in_rate: float = T.steerRate * 1.5 if (steer_eff != 0 and signf(steer_eff) != signf(steer_in)) else T.steerRate
+	var rate: float = in_rate if absf(steer_eff) > 0.01 else T.steerRelease
+	steer_in += clampf(steer_eff - steer_in, -rate * dt, rate * dt)
 	var s_in: float = steer_in * (1 - T.steerCurve + T.steerCurve * absf(steer_in))
 	if true:
 		var w := 0.35
@@ -433,22 +461,22 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		var b := 0.0 if air else atan((terrain.height(mx - lx, mz - lz) - terrain.height(mx + lx, mz + lz)) / (2 * w))
 		bank = _or(bank, b) + (clampf(b, -0.9, 0.9) - _or(bank, b)) * minf(1.0, dt * 20)
 	var bk := bank
-	var carving := not air and absf(steer_input) > 0.01 and va > 4 and not skid and absf(slip) < 0.3
+	var carving := not air and absf(steer_eff) > 0.01 and va > 4 and not skid and absf(slip) < 0.3
 	carve = minf(1.0, carve + dt * 2) if carving else maxf(0.0, carve - dt * 5)
 	var carve_f := carve * smooth01((va - 4) / 4)
-	var a_lat_lim: float = maxf(1.2, T.turnSlow + spd_k * (T.turnFast - T.turnSlow) + G * tan(bk) * signf(s_in) * spd_k + carve_f * T.carveBite)
+	var a_lat_lim: float = maxf(1.2, T.turnSlow + spd_k * (T.turnFast - T.turnSlow) + G * tan(bk) * signf(s_in) * spd_k + carve_f * T.carveBite + agree * float(T.get("flickTurn", 4.0)) * spd_k)
 	var lock: float = T.steerMax + maxf(0.0, T.slowSteer - T.steerMax) * (1 - smooth01(va / maxf(0.5, T.slowSteerFade)))
 	var d_max: float = minf(lock, maxf(atan(a_lat_lim * L / maxf(va * va, 0.01)), atan(T.turnFloor * L / maxf(va, 0.1))))
 	var cmd: float = s_in * d_max
 	var lean_need: float = clampf(atan(v * (v * tan(cmd) / L) / G), -T.leanMax + minf(0.0, bk), T.leanMax + maxf(0.0, bk))
-	var tipping_in := absf(steer_input) > 0.01 and absf(lean_need) > absf(lean) and signf(lean_need) == signf(steer_input)
+	var tipping_in := absf(steer_eff) > 0.01 and absf(lean_need) > absf(lean) and signf(lean_need) == signf(steer_eff)
 	var c_max: float = absf(cmd) * T.counter
 	var ctr: float = clampf((lean_need - lean) * T.counter, -c_max, c_max) * minf(1.0, va / 4) * (1 - spd_k) if tipping_in else 0.0
 	var steer_target := cmd - ctr
 	steer += (steer_target - steer) * (1 - exp(-dt * T.barSpeed))
 	var load_k := clampf(pow(maxf(0.0, n_tot / G), 0.7), 0.25, 1.5)
 	var mu_g := mu * G * load_k
-	var a_grip: float = mu_g * sqrt(maxf(0.05, 1 - pow(a_long / mu_g, 2))) * (0.75 if skid else 1.0) * (1 + T.carveGrip * carve_f)
+	var a_grip: float = mu_g * sqrt(maxf(0.05, 1 - pow(a_long / mu_g, 2))) * (0.75 if skid else 1.0) * (1 + T.carveGrip * carve_f + float(T.get("flickGrip", 0.2)) * agree)
 	if not air:
 		var yaw_cmd := 0.0 if front_air else v * tan(steer) / L
 		var gE := G * load_k
@@ -474,6 +502,10 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		var slip_rate := excess * share - slip * catch_k
 		slip = clampf(slip + slip_rate * dt, -1.5, 1.5)
 		course += course_rate * dt
+		if flick_kick != 0.0:   # a body flick whips the bike round: most of it turns the travel, a little steps the rear out
+			var fk := flick_kick * minf(1.0, dt * 10)
+			flick_kick -= fk
+			course += fk * 0.75; slip = clampf(slip + fk * 0.25, -T.slipMax * 0.8, T.slipMax * 0.8)
 		if absf(v) < 1.2:
 			var k := minf(1.0, dt * 6); course += slip * k; slip -= slip * k
 		heading = course + slip
@@ -507,14 +539,15 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		spin_acc += yaw_rate * dt
 		slip = slip_new
 		heading = course + slip
-		lat_a = 0; lat_m = 0
+		lat_a = 0; lat_m = 0; flick_kick = 0.0
 	if not air:
 		_pivot_step(dt, steer_input, brake_k)
 	var lean_t: float = (spin_in * T.airRoll if absf(spin_in) > 0.05 else lean * 0.98) if air else clampf(atan(lat_a / G), -T.leanMax + minf(0.0, bk), T.leanMax + maxf(0.0, bk))
-	var kL: float = T.leanIn if absf(steer_input) > 0.01 else T.leanOut
+	var kL: float = T.leanIn if absf(steer_eff) > 0.01 else T.leanOut
 	lean_v += ((lean_t - lean) * kL - lean_v * 2 * sqrt(kL) * T.leanDamp) * dt
 	lean += lean_v * dt
-	var bl: float = lean * T.bikeLeanMul
+	# the body stick throws the bike over under the rider (the body stays upright: counter grows)
+	var bl: float = lean * T.bikeLeanMul + (0.0 if air else flick * float(T.get("flickLean", 0.35)) * smooth01(va / 3.0))
 	var cap_b: float = T.bikeLeanCap + (0.0 if (air or signf(bk) != signf(bl)) else absf(bk))
 	bike_lean = cap_b * tanh(bl / cap_b)
 	# the bike leans under the rider: the body always stays a little more upright than the bike (never
@@ -655,6 +688,11 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			if air:
 				xT = air_lean * R
 			var hT: float = air_lean * R if air else x_brake
+			# the body stick moves the rider fore / aft on the ground too, further than the auto shift reaches
+			var reach: float = R * float(T.get("stickShift", 1.7))
+			var R2 := maxf(R, absf(body_in_s) * reach)   # stick idle: exactly the old limits
+			if not air:
+				xT = clampf(xT, -R, R) + body_in_s * reach; hT = clampf(hT, -R, R) + body_in_s * reach
 			# a damped spring to where the rider wants to be, pushed by the bike's own speed changes:
 			# the body carries on when the bike slows (braking, a landing, a root) and lags when it surges
 			var a_body := 0.0
@@ -664,10 +702,10 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			var kx: float = T.bodyStiff
 			var cx := 2 * sqrt(kx) * 0.75
 			var push: float = -a_body * T.bodyInertia
-			body_xv += (kx * (clampf(xT, -R, R) - body_x) - cx * body_xv + push) * dt
-			body_x = clampf(body_x + body_xv * dt, -R * 1.4, R * 1.4)
-			hip_v += (kx * (clampf(hT, -R, R) - hip_shift) - cx * hip_v + push) * dt
-			hip_shift = clampf(hip_shift + hip_v * dt, -R * 1.6, R * 1.6)
+			body_xv += (kx * (clampf(xT, -R2, R2) - body_x) - cx * body_xv + push) * dt
+			body_x = clampf(body_x + body_xv * dt, -R2 * 1.4, R2 * 1.4)
+			hip_v += (kx * (clampf(hT, -R2, R2) - hip_shift) - cx * hip_v + push) * dt
+			hip_shift = clampf(hip_shift + hip_v * dt, -R2 * 1.6, R2 * 1.6)
 		var tq: float = a_drive * T.loadHeight
 		# sprint wheelie (like a motorbike): stamping on the pedals from slow, the rider hauls on the bars
 		# with every stroke and the front comes up. Once it's up they keep pulling as long as sprint is
@@ -683,6 +721,14 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			wheelie_up = maxf(wheelie_up, float(T.get("wheelieAngle", 0.4))) + float(T.get("wheelieClimb", 0.45)) * dt
 		else:
 			wheelie_up = maxf(0.0, wheelie_up - float(T.get("wheelieDrop", 1.6)) * dt)
+		# manual: the body stick pulled well back on the ground lifts the front and balances it there (how
+		# far back = how high); let go and it's set down. Only rolling, not at a lip throw
+		var m_from: float = float(T.get("manualFrom", 0.55))
+		var m_t := 0.0
+		if not air and v > 1.5 and body_in < -m_from and throw_v <= 0.5:
+			m_t = float(T.get("manualAngle", 0.32)) * smooth01((-body_in - m_from) / maxf(0.05, 1.0 - m_from))
+		manual_up = m_t if m_t > manual_up else maxf(m_t, manual_up - float(T.get("wheelieDrop", 1.6)) * dt)
+		wheelie_up = maxf(wheelie_up, manual_up)
 		if wheelie_up > 0.0:
 			bal_max = maxf(bal_max, 30.0)   # the whole body holds a wheelie, not just the hands
 		var was_air := air
