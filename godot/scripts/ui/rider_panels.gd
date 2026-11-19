@@ -61,6 +61,7 @@ const POSE_DEFS := [
 	["Movement", [
 		["crouch", "Crouch depth", 0.0, 2.0, 0.05, "×"],
 		["standPedal", "Stand up to pedal", 0.0, 2.0, 0.05, "×"],
+		["aero", "Speed tuck (aero)", 0.0, 2.0, 0.05, "×"],
 		["sway", "Body sway", 0.0, 2.0, 0.05, "×"],
 		["bikeRock", "Bike rock (sprint)", 0.0, 2.0, 0.05, "×"],
 		["upright", "Torso stays upright", 0.0, 1.0, 0.05, ""],

@@ -9,7 +9,7 @@ const GEAR := preload("res://scripts/rider/rider_gear.gd")
 
 ## neutral riding style (posepanel.js NEUTRAL): BMX = all of these
 const NEUTRAL := {hipX = 0.0, hipY = 0.0, lean = 0.0, elbowsOut = 0.0, kneesOut = 0.0, stance = 0.0, seatFloor = false,
-	crouch = 1.0, standPedal = 1.0, sway = 1.0, bikeRock = 1.0, upright = 1.0, hipSway = 0.015, torso = 0.46,
+	crouch = 1.0, standPedal = 1.0, aero = 1.0, sway = 1.0, bikeRock = 1.0, upright = 1.0, hipSway = 0.015, torso = 0.46,
 	shoulders = 0.2, headTilt = 0.0, headTurn = 1.0, lookAhead = 0.0,
 	# per-bone controls (garage Rider tab / K panel); 0 = the riding pose as computed
 	hipZ = 0.0, pelvisTilt = 0.0, pelvisRoll = 0.0, pelvisYaw = 0.0,
@@ -658,6 +658,7 @@ static func _num(p: Dictionary, k: String, def := 0.0) -> float:
 ## p: footL, footR, handL, handR (Vector3, this node's space), v, lean, steer, yawRate, counter, rockRoll,
 ## headRoll, absorb, pitch, bodyLevel, attackDrop, pedal, sprint, crank, air, compress, hipShift, t
 var sm_turn := 0.0
+var sm_aero := 0.0
 func update_pose(dt: float, p: Dictionary) -> void:
 	var v := _num(p, "v")
 	var pedal := clampf(_num(p, "pedal"), 0, 1)
@@ -679,17 +680,23 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var wig: float = clampf(1 - absf(v) / 3, 0, 1) * sty.sway
 	var air := _num(p, "air")
 	var comp: float = _num(p, "compress") * sty.crouch
+	# speed tuck: from ~25 km/h the rider folds down over the bars for less drag (full by ~60 km/h):
+	# chest flatter and lower, hips back and down, elbows bend (the arm reach check pulls them in).
+	# Less while pedalling hard, none in the air (the jump / trick poses own that).
+	var aero_t: float = smoothstep(7.0, 17.0, absf(v)) * (1.0 - 0.5 * pedal) * (1.0 - air) * float(sty.get("aero", 1.0))
+	sm_aero += (aero_t - sm_aero) * (1.0 - exp(-3.0 * minf(dt, 0.1)))
+	var aero: float = sm_aero
 
 	# pelvis
 	var pelvis := Vector3(
 		-0.16 - 0.07 * air + 0.06 * pedal * sty.standPedal - comp * 0.25,
-		0.80 - 0.07 * air - comp + (0.15 * pedal + 0.05 * spr) * sty.standPedal + 0.035 * bob,
+		0.80 - 0.07 * air - comp + (0.15 * pedal + 0.05 * spr) * sty.standPedal + 0.035 * bob - 0.07 * aero,
 		sway * sty.hipSway + shift * 0.3 + sin(t * 2.1) * 0.02 * wig) + fit
-	pelvis.x += sty.hipX * (1 - 0.5 * pedal)
+	pelvis.x += sty.hipX * (1 - 0.5 * pedal) - 0.05 * aero
 	pelvis.y += sty.hipY * (1 - 0.6 * pedal)
 
 	# chest
-	var ang: float = 0.72 - 0.14 * pedal + 0.12 * spr + 0.15 * (comp / 0.3) + 0.08 * air + sty.lean * (1 - 0.5 * pedal)
+	var ang: float = 0.72 - 0.14 * pedal + 0.12 * spr + 0.15 * (comp / 0.3) + 0.08 * air + sty.lean * (1 - 0.5 * pedal) + 0.42 * aero
 	var L: float = sty.torso
 	var chest := Vector3(
 		pelvis.x + sin(ang) * L + 0.03 * pedal * (0.5 + 0.5 * bob),
