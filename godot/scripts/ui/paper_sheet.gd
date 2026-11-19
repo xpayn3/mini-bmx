@@ -26,6 +26,7 @@ signal close_requested               # one of close_actions was pressed
 @export var panel := Vector2(0.21, 0.2625)   # one panel (m)
 @export var open_t := 1.0            # by then it counts as open (the springs may still wobble)
 @export var close_t := 0.45
+@export var tempo := 1.0                      # < 1 = slower: every spring and the whole timeline (the map: 0.4)
 @export var fill := Vector2(0.86, 0.84)       # share of the screen the open sheet may take
 @export var tint := Color(1.02, 0.985, 0.92)  # the paper's colour (x the scan); kraft paper for menus etc.
 @export var live := false
@@ -57,6 +58,10 @@ var _dim: ColorRect
 var _mat: ShaderMaterial
 var _tex: Texture2D
 var _sound: AudioStreamPlayer
+var sound_stream: AudioStream        # set before add_child: a recording to play slices of (null = the synthesised rustle)
+var sound_db := -6.0
+var _snd_t := -1.0                   # seconds into the current slice (-1 = silent)
+var _snd_len := 0.0                  # how long this slice plays (it fades out over its last 40 %)
 var _last_us := 0
 var _idle := 0.0
 var _shot_i := 0
@@ -169,9 +174,9 @@ func setup(p_size: Vector2i, c_size := Vector2i.ZERO) -> void:
 	_view.texture = _vp.get_texture()
 	add_child(_view)
 	_sound = AudioStreamPlayer.new()
-	_sound.stream = rustle_sound()
+	_sound.stream = sound_stream if sound_stream else rustle_sound()
 	_sound.bus = "SFX" if AudioServer.get_bus_index("SFX") >= 0 else "Master"
-	_sound.volume_db = -6.0
+	_sound.volume_db = sound_db
 	add_child(_sound)
 	if live: _use_texture(page.get_texture())
 
@@ -204,14 +209,14 @@ func open() -> void:
 		for sp in _springs(): sp.x = 0.0; sp.v = 0.0
 	state = 1
 	_tl = 0.0
+	_reset_view()
 	visible = true
 	_fit_camera()
 	_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	if live: page.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	_last_us = Time.get_ticks_usec()
 	_shot_i = 0; _shot_next = _idle
-	_sound.pitch_scale = 1.15
-	_sound.play()
+	_play_slice(1.15, 1.1 / tempo)
 	_pose()
 
 
@@ -222,14 +227,38 @@ func close(now := false) -> void:
 	if state == 3: return
 	state = 3
 	_tl = 0.0
-	_sound.pitch_scale = 1.4
-	_sound.play(0.3)
+	_play_slice(1.4, 0.55 / tempo)
+
+
+## a slice of the sound: a recording plays from a random spot (no two unfolds sound the same), faded out
+## by the end; the synthesised rustle plays from its start
+func _play_slice(pitch: float, secs: float) -> void:
+	_sound.pitch_scale = pitch
+	var from := 0.0
+	var total := _sound.stream.get_length()
+	if sound_stream and total > secs * pitch + 0.2:
+		from = randf() * (total - secs * pitch - 0.1)
+	elif not sound_stream and secs < 1.0:
+		from = 0.3
+	_snd_len = secs
+	_snd_t = 0.0
+	_sound.volume_db = sound_db
+	_sound.play(from)
+
+
+func _sound_fade(dt: float) -> void:
+	if _snd_t < 0.0: return
+	_snd_t += dt
+	var tail := clampf((_snd_len - _snd_t) / (_snd_len * 0.4), 0.0, 1.0)
+	_sound.volume_db = sound_db + linear_to_db(maxf(tail, 0.001))
+	if _snd_t >= _snd_len:
+		_sound.stop(); _snd_t = -1.0
 
 
 func _put_away() -> void:
 	state = 0; k = 0.0
 	visible = false
-	_sound.stop()
+	_sound.stop(); _snd_t = -1.0
 	_vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	page.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	closed.emit()
@@ -266,21 +295,22 @@ func _springs() -> Array:
 ## outer panel in; closing: the other way round)
 func _drive() -> void:
 	_springs()
+	var tl := _tl * tempo
 	if (state == 1 or state == 2) and not unfold:
 		_lift.target = 1.0
 		_row.target = 1.0 if rows == 1 else 0.0
 	elif state == 1 or state == 2:
 		_lift.target = 1.0
-		_row.target = 1.0 if (rows == 1 or _tl > 0.1) else 0.0
+		_row.target = 1.0 if (rows == 1 or tl > 0.1) else 0.0
 		var t0 := 0.26 if rows == 2 else 0.12
 		for c in range(1, cols):
-			_acc[c].target = 1.0 if _tl > t0 + 0.085 * (cols - 1 - c) else 0.0
+			_acc[c].target = 1.0 if tl > t0 + 0.085 * (cols - 1 - c) else 0.0
 	else:
 		for c in range(1, cols):
-			_acc[c].target = 0.0 if _tl > 0.05 * (c - 1) else 1.0
+			_acc[c].target = 0.0 if tl > 0.05 * (c - 1) else 1.0
 		var tr := 0.05 * (cols - 1)
-		_row.target = 0.0 if (rows == 2 and _tl > tr) else 1.0
-		_lift.target = 0.0 if _tl > tr + (0.12 if rows == 2 else 0.0) else 1.0
+		_row.target = 0.0 if (rows == 2 and tl > tr) else 1.0
+		_lift.target = 0.0 if tl > tr + (0.12 if rows == 2 else 0.0) else 1.0
 
 
 func _process(_dt: float) -> void:
@@ -291,23 +321,25 @@ func _process(_dt: float) -> void:
 	if freeze_at >= 0.0 and _tl + dt > freeze_at: dt = maxf(0.0, freeze_at - _tl)   # tests: hold that moment
 	_idle += dt
 	_tl += dt
+	_sound_fade(dt)
 	_drive()
 	var opening := state != 3
 	# opening: lively (overshoot ~10 % = a flap swings ~20 deg past flat and back); closing: firmer
-	_lift.step(dt, 2.8 if opening else 3.4, 0.62 if opening else 0.85, false)
-	_row.step(dt, 3.6, 0.55 if opening else 0.75, not opening)
+	_lift.step(dt, (2.8 if opening else 3.4) * tempo, 0.62 if opening else 0.85, false)
+	_row.step(dt, 3.6 * tempo, 0.55 if opening else 0.75, not opening)
 	for c in range(1, cols):
-		_acc[c].step(dt, 3.3 + 0.2 * c, 0.52 if opening else 0.75, not opening)
+		_acc[c].step(dt, (3.3 + 0.2 * c) * tempo, 0.52 if opening else 0.75, not opening)
 	k = clampf(_lift.x, 0.0, 1.0)
-	if state == 1 and _tl > open_t:
+	if state == 1 and _tl * tempo > open_t:
 		state = 2; opened.emit()
-	elif state == 3 and _tl > close_t and _lift.x < 0.03:
+	elif state == 3 and _tl * tempo > close_t and _lift.x < 0.03:
 		_put_away(); return
 	if _vp.size != Vector2i(get_window().size): _fit_camera()
 	_pose()
-	if shots != "" and state != 3 and _idle >= _shot_next and _shot_i < 10:
+	if handheld: _hand_controls(dt)
+	if shots != "" and state != 3 and _idle >= _shot_next and _shot_i < 20:
 		_shot_next = _idle + 0.1
-		var im := _vp.get_texture().get_image(); im.flip_y(); im.save_png("%s_%d.png" % [shots, _shot_i])   # the sheet's own render (last frame)
+		get_viewport().get_texture().get_image().save_png("%s_%d.png" % [shots, _shot_i])   # the last frame on screen (BMX_OFFSCREEN: minimised windows draw late)
 		print("PAPERSHOT %s_%d.png t=%.2f lift=%.2f" % [shots, _shot_i, _tl, _lift.x])
 		_shot_i += 1
 
@@ -322,6 +354,8 @@ func _input(e: InputEvent) -> void:
 			close_requested.emit()
 			if auto_close: close()
 			return
+	if handheld and (state == 1 or state == 2) and e is InputEventMouse:
+		_hand_mouse(e)
 	if live and (state == 2 or (state == 1 and _lift.x > 0.85)):
 		if e is InputEventMouse:
 			var at := page_point(_screen_px(e.position))
@@ -380,8 +414,64 @@ func _fit_camera() -> void:
 	var sz := Vector2(cols * panel.x, rows * panel.y) if unfold else panel   # folded: one panel
 	var dw := (sz.x / fill.x) * 0.5 / (th * asp)
 	var dh := (sz.y / fill.y) * 0.5 / th
-	_cam.position = Vector3(0, 0, maxf(dw, dh))
+	_cam_d = maxf(dw, dh)
+	_cam.position = Vector3(_pan.x, _pan.y, _cam_d / _zoom)
 	_cam.rotation = Vector3.ZERO
+
+
+# ------------------------------------------------------------------ held in the hands (handheld = true)
+## pad: right stick tilts the sheet a little, RT / LT zoom in / out, left stick pans while zoomed;
+## keys: W / S zoom, A / D pan; mouse: wheel zooms, drag pans. All eased; reset each time it opens.
+@export var handheld := false
+const TILT_MAX := 0.3                # rad
+const ZOOM_MAX := 3.0
+var _cam_d := 1.0                    # camera distance that fits the sheet
+var _zoom := 1.0
+var _zoom_t := 1.0
+var _pan := Vector2.ZERO
+var _pan_t := Vector2.ZERO
+var _tilt := Vector2.ZERO
+var _drag := false
+
+func _reset_view() -> void:
+	_zoom = 1.0; _zoom_t = 1.0; _pan = Vector2.ZERO; _pan_t = Vector2.ZERO; _tilt = Vector2.ZERO; _drag = false
+
+
+func _hand_controls(dt: float) -> void:
+	var tilt_t := Vector2.ZERO
+	if state == 1 or state == 2:
+		tilt_t = Vector2(Input.get_action_strength("body_right") - Input.get_action_strength("body_left"),
+			Input.get_action_strength("body_fwd") - Input.get_action_strength("body_back")).limit_length(1.0) * TILT_MAX
+		var zin := Input.get_action_strength("pedal") - Input.get_action_strength("brake")
+		_zoom_t = clampf(_zoom_t * exp(zin * 1.5 * dt), 1.0, ZOOM_MAX)
+		var py := 0.0
+		if not Settings._test_run:
+			for d in Input.get_connected_joypads():
+				var ay := Input.get_joy_axis(d, JOY_AXIS_LEFT_Y)
+				if absf(ay) > 0.2: py -= ay
+		var pin := Vector2(Input.get_action_strength("steer_right") - Input.get_action_strength("steer_left"), clampf(py, -1, 1))
+		_pan_t += pin * dt * 0.4 / _zoom
+	else:   # folding away: back to the whole sheet
+		_zoom_t = 1.0; _pan_t = Vector2.ZERO
+	var lim := Vector2(cols * panel.x, rows * panel.y) * 0.5 * (1.0 - 1.0 / _zoom_t)
+	_pan_t = _pan_t.clamp(-lim, lim)
+	var e := 1.0 - exp(-dt * 9.0)
+	_tilt = _tilt.lerp(tilt_t, 1.0 - exp(-dt * 6.0))
+	_zoom = lerpf(_zoom, _zoom_t, e)
+	_pan = _pan.lerp(_pan_t, e)
+	_cam.position = Vector3(_pan.x, _pan.y, _cam_d / _zoom)
+	_sheet.transform.basis = Basis.from_euler(Vector3(-_tilt.y, _tilt.x, 0.0)) * _sheet.transform.basis
+
+
+func _hand_mouse(e: InputEvent) -> void:
+	if e is InputEventMouseButton:
+		if e.button_index == MOUSE_BUTTON_WHEEL_UP and e.pressed: _zoom_t = minf(_zoom_t * 1.15, ZOOM_MAX)
+		elif e.button_index == MOUSE_BUTTON_WHEEL_DOWN and e.pressed: _zoom_t = maxf(_zoom_t / 1.15, 1.0)
+		elif e.button_index == MOUSE_BUTTON_LEFT: _drag = e.pressed
+	elif e is InputEventMouseMotion and _drag:
+		# metres on the sheet per screen pixel at this zoom
+		var mpp := 2.0 * _cam.position.z * tan(deg_to_rad(_cam.fov) * 0.5) / get_viewport().get_visible_rect().size.y
+		_pan_t -= Vector2(e.relative.x, -e.relative.y) * mpp
 
 
 static func ease_in_out(a: float, b: float, x: float) -> float:
