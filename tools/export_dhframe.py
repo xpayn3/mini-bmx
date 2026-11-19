@@ -12,7 +12,7 @@ solver closes a rigid triangle; the shock's lower eye rides on the swingarm.
 import bpy, sys, os, json, struct, math
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from bike_glb import extract, write_glb
+from bike_glb import extract, write_glb, dh_rotors
 
 GLTF = sys.argv[-1]
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -32,11 +32,12 @@ def parts_of(o):
     n = len(mi); L = L.reshape(n, 3); N = N.reshape(n, 3, 3)
     return P[L].reshape(-1, 3), N.reshape(-1, 3), mi, names
 
+ROTORS = dh_rotors(DH)
 # ---------------------------------------------------------------- our parts from dh.glb (steer, fork lowers, crank)
 bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.ops.import_scene.gltf(filepath=DH)
 ours = {}; piv = {}
-for name in ("steer", "fork_lower", "crank"):
+for name in ("steer", "fork_lower", "crank", "frame"):
     o = bpy.data.objects[name]
     piv[name] = b2g(np.array(o.matrix_world.translation))[:2]
     P, N, mi, names = parts_of(o)
@@ -44,6 +45,7 @@ for name in ("steer", "fork_lower", "crank"):
     lst = []
     for k in sorted(set(mi.tolist())):
         sel = np.repeat(mi == k, 3)
+        if name == "frame" and names[k] != "plastic": continue   # only the saddle of the GLORY frame
         lst.append((P[sel], N[sel], names[k]))
     ours[name] = lst
 print("dh pivots", {k: v.round(4).tolist() for k, v in piv.items()})
@@ -115,6 +117,32 @@ print("tris", {k: sum(len(p[0]) // 3 for p in v) for k, v in groups.items()})
 # ---------------------------------------------------------------- pivots + linkage (game coords)
 G1 = G2 = T2(P2S); C1 = T2(AS); C2 = T2(P3S); A = T2(AS); D = T2(DS); FE = T2(FES)
 head = T2(HEADS)
+# our saddle on the seat tube (this frame has none): the top of the seat tube is the highest frame point near x of the tube
+fv = np.concatenate([p[0] for p in groups["frame"]])
+tx = T2((-1.80, 0.19))[0]
+near = fv[np.abs(fv[:, 0] - tx) < 0.05]
+top = near[:, 1].max()
+seat_c = near[near[:, 1] > top - 0.03][:, 0].mean()
+sad = np.concatenate([p[0] for p in ours["frame"]])
+sd = np.array([seat_c - (sad[:, 0].min() + sad[:, 0].max()) / 2, top + 0.02 - sad[:, 1].min(), 0.0])
+groups["frame"] += [(p + sd, n, m) for p, n, m in ours["frame"]]
+# a short seatpost from inside the tube up to the saddle rails
+def cylinder(cx, y0, y1, r, n=14):
+    ang = np.linspace(0, 2 * np.pi, n + 1)
+    P, N = [], []
+    for i in range(n):
+        a0, a1 = ang[i], ang[i + 1]
+        for (u, v, y) in ((a0, a1, y0), (a1, a1, y1), (a0, a0, y1)) if False else ():
+            pass
+        q = lambda a_, y: np.array([cx + r * np.cos(a_), y, r * np.sin(a_)])
+        nn = lambda a_: np.array([np.cos(a_), 0, np.sin(a_)])
+        for tri in ((q(a0, y0), q(a1, y0), q(a1, y1)), (q(a0, y0), q(a1, y1), q(a0, y1))):
+            P += list(tri)
+        for a_ in (a0, a1, a1, a0, a1, a0): N.append(nn(a_))
+    return np.array(P), np.array(N)
+pp, pn = cylinder(seat_c, top - 0.05, top + 0.035, 0.0155)
+groups["frame"].append((pp, pn, "black"))
+print("saddle on the seat tube at", round(seat_c, 3), round(top, 3))
 shift = head - piv["steer"]
 print("head tube moves %.3f, %.3f vs dh" % tuple(shift))
 shift = np.array([shift[0], 0.0])     # the height already matches; slide the fork along the new head tube
@@ -132,10 +160,10 @@ tri = [(np.array([[0, 0, 0], [0.01, 0, 0], [0, 0.01, 0]], float), np.tile([0, 0,
 rows = [("frame", None, np.zeros(3), groups["frame"]),
         ("steer", None, z3(SPn), moved(ours["steer"], shift)),
         ("fork_lower", "steer", z3(FAXn), moved(ours["fork_lower"], shift)),
-        ("wheel_front", "fork_lower", z3(FAXn), tri),
+        ("wheel_front", "fork_lower", z3(FAXn), tri + ROTORS["wheel_front"]),
         ("swing", None, z3(G1), []),
         ("seatstay", None, z3(C1), groups["seatstay"]),
-        ("wheel_rear", "seatstay", z3(A), tri),
+        ("wheel_rear", "seatstay", z3(A), tri + ROTORS["wheel_rear"]),
         ("shock_body", None, z3(FE), groups["shock_body"]),
         ("shock_spring", "shock_body", z3(seat0), groups["shock_spring"]),
         ("shock_shaft", None, z3(D), groups["shock_shaft"]),
@@ -143,7 +171,7 @@ rows = [("frame", None, np.zeros(3), groups["frame"]),
 pv = {r[0]: r[2] for r in rows}
 nodes = []
 for name, par, origin, parts in rows:
-    nd = {"name": name, "parent": par, "t": origin - (pv[par] if par else np.zeros(3)), "origin": origin, "parts": parts}
+    nd = {"local": name.startswith("wheel_"), "name": name, "parent": par, "t": origin - (pv[par] if par else np.zeros(3)), "origin": origin, "parts": parts}
     if name == "shock_spring": nd["rotz"] = ang
     nodes.append(nd)
 

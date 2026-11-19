@@ -17,13 +17,14 @@ FBX: forward = y, up = z, lateral = x  ->  game (x, y, z) = (fy - bb, fz, fx).
 import bpy, sys, os, json, struct, math
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from bike_glb import MATS, MI, extract, write_glb
+from bike_glb import MATS, MI, extract, write_glb, dh_rotors
 
 FBX = sys.argv[-1]
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "godot", "assets")
 os.makedirs(os.path.join(OUT, "parts"), exist_ok=True)
 
+ROTORS = dh_rotors(os.path.join(OUT, "dh.glb"))   # the game's own brake discs ride on the placeholder wheels
 # ---------------------------------------------------------------- load + split every mesh into loose parts
 bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.ops.import_scene.fbx(filepath=FBX)
@@ -173,7 +174,8 @@ for name in ("frame", "steer", "fork_lower", "wheel_front", "swing", "seatstay",
     par = PARENT.get(name)
     pp = PIV[par] if par else np.zeros(3)
     nodes.append({"name": name, "parent": par, "t": PIV[name] - pp, "origin": PIV[name],
-                  "parts": tri if name.startswith("wheel_") else parts.get(name, [])})
+                  "local": name.startswith("wheel_"),
+                  "parts": (tri + ROTORS[name]) if name.startswith("wheel_") else parts.get(name, [])})
 rear = {"travel": 0.2, "sag": 0.3, "G1": G1.tolist(), "G2": G2.tolist(), "C1": C1.tolist(), "C2": C2.tolist(),
         "A": A.tolist(), "D": D.tolist(), "FE": FE.tolist(), "springLen": 0.1}
 extras = {"steerAxis": [float(axis[0]), float(axis[1]), 0.0], "wheelRadius": float(FAX[1]), "wheelRadiusRear": float(A[1]),

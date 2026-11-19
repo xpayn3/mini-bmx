@@ -62,7 +62,7 @@ def write_glb(path, nodes, extras=None, root="dh"):
         for mi in range(len(MATS)):
             sel = [p for p in nd.get("parts", []) if MI[p[2]] == mi]
             if not sel: continue
-            pos = np.concatenate([p[0] for p in sel]) - np.array(nd["origin"])
+            pos = np.concatenate([p[0] for p in sel]) - (0 if nd.get("local") else np.array(nd["origin"]))   # local: already relative to the node
             nrm = np.concatenate([p[1] for p in sel])
             if "rotz" in nd:   # a part with its own frame (the shock spring: local +Y along the shock)
                 ang = nd["rotz"]; R = np.array([[math.cos(ang), -math.sin(ang), 0], [math.sin(ang), math.cos(ang), 0], [0, 0, 1]])
@@ -99,3 +99,27 @@ def write_glb(path, nodes, extras=None, root="dh"):
     print("wrote", path, os.path.getsize(path) // 1024, "KB", total, "tris")
 
 
+
+
+def dh_rotors(dh_path):
+    """the brake discs of dh.glb's stock wheels (the game finds them with BikeFX.find_rotor and heats them): wheel-local
+    triangles, so they can ride on the placeholder wheels of the other frames. Needs a clean scene."""
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    bpy.ops.import_scene.gltf(filepath=dh_path)
+    out = {}
+    for name in ("wheel_front", "wheel_rear"):
+        o = bpy.data.objects[name]; me = o.data
+        me.calc_loop_triangles()
+        V = np.empty(len(me.vertices) * 3); me.vertices.foreach_get("co", V); V = V.reshape(-1, 3)
+        V = np.stack([V[:, 0], V[:, 2], -V[:, 1]], 1)           # Blender -> game axes (wheel-local)
+        parts = {}
+        for t in me.loop_triangles:
+            p = V[list(t.vertices)]
+            r = np.hypot(p[:, 0], p[:, 1])
+            if r.min() < 0.05 or r.max() > 0.16 or p[:, 2].min() < -0.075 or p[:, 2].max() > -0.035: continue
+            n = np.cross(p[1] - p[0], p[2] - p[0]); n = n / max(np.linalg.norm(n), 1e-12)
+            m = me.materials[t.material_index].name if me.materials else "black"
+            parts.setdefault(m, []).append((p, np.tile(n, (3, 1))))
+        out[name] = [(np.concatenate([a for a, _ in v]), np.concatenate([b for _, b in v]), m) for m, v in parts.items()]
+        print("rotor", name, sum(len(a) // 3 for a, _, _ in out[name]), "tris")
+    return out
