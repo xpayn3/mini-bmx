@@ -1047,6 +1047,14 @@ func _swatches(cur: String, cb: Callable) -> void:
 
 # ---------------------------------------------------------------- pages
 func _paint_page() -> void:
+	_h("FRAME")
+	var frames := []
+	for id in GameState.BIKES:
+		if GameState.BIKES[id].get("garage", false): frames.append([id, GameState.BIKES[id].label])
+	body.add_child(_choice("Frame", frames, GameState.bike_id, func(v):
+		if v == GameState.bike_id: return
+		GameState.bike_id = v; GameState.save()
+		_rebuild_bike(); _set_tab("paint")))
 	_h("PART")
 	var g := GridContainer.new()
 	g.columns = 2

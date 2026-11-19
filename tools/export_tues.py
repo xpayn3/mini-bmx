@@ -165,7 +165,7 @@ print("at the game's travel limits (rise +0.14 / -0.06): stroke %.3f / %.3f" % (
 z3 = lambda v: np.array([v[0], v[1], 0.0])
 PIV = {"frame": np.zeros(3), "steer": z3(SP), "fork_lower": z3(FAX), "wheel_front": z3(FAX), "swing": z3(G1),
        "seatstay": z3(C1), "wheel_rear": z3(A), "rocker": z3(G2), "shock_body": z3(FE), "shock_shaft": z3(D),
-       "crank": np.zeros(3)}
+       "crank": z3(g2(*BBF))}   # the crank turns about the bottom bracket
 PARENT = {"fork_lower": "steer", "wheel_front": "fork_lower", "wheel_rear": "seatstay"}
 tri = [(np.array([[0, 0, 0], [0.01, 0, 0], [0, 0.01, 0]], float), np.tile([0, 0, 1.0], (3, 1)), "rubber")]   # wheel placeholder
 nodes = []
@@ -188,6 +188,6 @@ def lib_glb(fname, key, origin, root, nodename):
     write_glb(os.path.join(OUT, "parts", fname), [{"name": nodename, "parent": None, "t": [0, 0, 0], "origin": origin,
               "parts": [(e[1], e[2], e[3]) for e in es]}], {"source": "YT Tues FBX", "origin": "bike coordinates, BB at 0"}, root)
 lib_glb("tues_fork.glb", "fork", z3(FAX), "fork", "fork")
-lib_glb("tues_cranks.glb", "cranks", np.zeros(3), "cranks", "crank")
+lib_glb("tues_cranks.glb", "cranks", z3(g2(*BBF)), "cranks", "crank")
 lib_glb("tues_cockpit.glb", "cockpit", z3(SP), "cockpit", "cockpit")
 lib_glb("tues_brakes.glb", "brakes", np.zeros(3), "brakes", "brakes")
