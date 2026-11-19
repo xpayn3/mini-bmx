@@ -21,7 +21,8 @@ uniform vec4 content_rect = vec4(0.0, 0.0, 1.0, 1.0);   // the part of it on the
 uniform float use_content = 0.0;
 
 instance uniform vec2 cell;                   // this panel's column / row
-instance uniform float cover;                 // 1 = the cover is printed on this panel's back
+instance uniform float cover;                 // what's printed on this panel's back: 0 bare paper, 1 the cover, 2 the
+											  // next slot of the cover strip (the leaflet's back panel)
 instance uniform float pillow;                // a little sag between the creases (m)
 
 varying vec2 sheet_uv;
@@ -50,7 +51,8 @@ void fragment() {
 		col = paper * ink;
 	} else if (cover > 0.5 && has_cover > 0.5) {
 		vec2 cu = vec2(1.0 - UV.x, UV.y);   // seen from behind: mirror it back
-		col = paper * texture(print_tex, cover_rect.xy + cu * cover_rect.zw).rgb;
+		vec2 slot = vec2((cover > 1.5 ? 1.0 : 0.0) * cover_rect.z, 0.0);
+		col = paper * texture(print_tex, cover_rect.xy + slot + cu * cover_rect.zw).rgb;
 	} else {
 		col = paper * vec3(0.96, 0.95, 0.92);
 	}

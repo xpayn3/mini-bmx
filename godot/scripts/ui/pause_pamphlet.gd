@@ -45,11 +45,18 @@ func _ready() -> void:
 	_font_b = SystemFont.new()
 	_font_b.font_names = _font.font_names
 	_font_b.font_weight = 800
-	setup(Vector2i(CW * 3, CH), Vector2i(CW, CH))   # inside spread + the cover strip under it
+	back_col = 1                                    # the middle panel's back faces out behind: the tips
+	setup(Vector2i(CW * 3, CH), Vector2i(CW, CH))   # inside spread + the cover strip under it (cover, back)
 	_inside = Control.new()                         # the inside: a menu printed across the three panels
 	_inside.scale = Vector2.ONE * INSIDE_SCALE
 	_inside.size = Vector2(CW * 3, CH) / INSIDE_SCALE
 	content.add_child(_inside)
+	var tips := TipsBack.new()   # the back: hand-drawn ride tips (turn the leaflet over with the right stick)
+	tips.position = Vector2(CW, COVER_Y)
+	tips.size = Vector2(CW, CH)
+	tips.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	content.add_child(tips)
+	_tips = tips
 	var cover := Cover.new()
 	cover.owner_p = self
 	cover.position = Vector2(0, COVER_Y)
@@ -121,8 +128,35 @@ func fold_inside() -> void:
 
 func prompt_items() -> Array:
 	if Settings.pad_active:
-		return [[["A"], "Select"], [["B"], "Fold up" if is_unfolded() else "Resume"]]
-	return [[["K:Enter"], "Select"], [["MOUSE"], "Click"], [["K:Esc"], "Fold up" if is_unfolded() else "Resume"]]
+		var it := [[["A"], "Select"], [["B"], "Fold up" if is_unfolded() else "Resume"]]
+		if not is_unfolded(): it.insert(1, [["RS"], "Turn over"])
+		return it
+	var k := [[["K:Enter"], "Select"], [["MOUSE"], "Click"], [["K:Esc"], "Fold up" if is_unfolded() else "Resume"]]
+	if not is_unfolded(): k.insert(2, [[PadGlyph.glyph_for("body_left", false), PadGlyph.glyph_for("body_right", false)], "Turn over"])
+	return k
+
+
+# ---- turning it over (right stick / body keys): the stick turns it, let go and it settles face or back on
+var _tips: Control
+var _spin_t := 0.0
+var _spin_v := 0.0
+
+func _process(dt: float) -> void:
+	super._process(dt)
+	if state == 0: return
+	var rdt := minf(dt if dt > 0.0 else 0.016, 0.05)
+	if Engine.time_scale > 0.0: rdt = minf(dt / Engine.time_scale, 0.05)   # (the tree may be paused, not slowed)
+	var x := Input.get_action_strength("body_right") - Input.get_action_strength("body_left")
+	if OS.get_environment("BMX_LEAFLET_SPIN") != "": _spin_t = float(OS.get_environment("BMX_LEAFLET_SPIN")); x = 0.0   # tests: turned to this angle
+	if is_unfolded() or state != 2: x = 0.0
+	if absf(x) > 0.15:
+		_spin_t += x * 3.2 * rdt
+	elif OS.get_environment("BMX_LEAFLET_SPIN") == "":   # let go: settle on whichever side is nearer (face or back)
+		_spin_t = lerpf(_spin_t, roundf(_spin_t / PI) * PI, 1.0 - exp(-rdt * 6.0))
+	if is_unfolded(): _spin_t = roundf(_spin_t / TAU) * TAU   # opening: face on
+	# a soft spring follows the target (a sheet of paper has a little lag and overshoot)
+	_spin_v += ((_spin_t - spin) * 60.0 - _spin_v * 11.0) * rdt
+	spin += _spin_v * rdt
 
 
 func set_unfolded(on: bool) -> void:
@@ -173,3 +207,104 @@ class Cover extends Control:
 		draw_string(p._font, Vector2(48, H - 56), "Ride safe  ·  Wear a helmet", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(INK, 0.7))
 		draw_string(p._font, Vector2(48, H - 26), "Leave no trace", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(INK, 0.7))
 		draw_string(p._font_b, Vector2(0, H - 26), "No. %d" % p.sheet_no, HORIZONTAL_ALIGNMENT_RIGHT, W - 48, 22, RED)
+
+
+## the back of the leaflet: ride tips sketched by hand - wobbly pen lines, a handwriting font, the right button
+## icons for the device in use (redrawn when it changes)
+class TipsBack extends Control:
+	const PEN := Color("27313f")
+	const RED := Color("d22b25")
+	var _hand: Font
+	var _pad := false
+	var _rng := RandomNumberGenerator.new()
+
+	func _init() -> void:
+		var f := SystemFont.new()
+		f.font_names = PackedStringArray(["Ink Free", "Segoe Print", "Comic Sans MS", "Bahnschrift"])
+		f.font_weight = 600
+		_hand = f
+
+	func _process(_dt: float) -> void:
+		if _pad != Settings.pad_active:
+			_pad = Settings.pad_active; queue_redraw()
+
+	## a hand-drawn line: two slightly different wobbly strokes
+	func _pen(a: Vector2, b: Vector2, w := 4.0, c := PEN) -> void:
+		for k in 2:
+			var pts := PackedVector2Array()
+			var n := maxi(3, int(a.distance_to(b) / 18.0))
+			var nrm := (b - a).orthogonal().normalized()
+			for i in n + 1:
+				var t := float(i) / n
+				pts.append(a.lerp(b, t) + nrm * _rng.randf_range(-1.6, 1.6) + Vector2(k * 0.8, k * 0.6))
+			draw_polyline(pts, Color(c, 0.85 if k == 0 else 0.45), w * (1.0 if k == 0 else 0.6), true)
+
+	func _ring(c: Vector2, r: float, w := 4.0, col := PEN, a0 := 0.0, a1 := TAU) -> void:
+		for k in 2:
+			var pts := PackedVector2Array()
+			var n := maxi(10, int(r * absf(a1 - a0) / 9.0))
+			for i in n + 1:
+				var a := lerpf(a0, a1, float(i) / n)
+				pts.append(c + Vector2(cos(a), sin(a)) * (r + _rng.randf_range(-1.5, 1.5)) + Vector2(k * 0.8, k * 0.6))
+			draw_polyline(pts, Color(col, 0.85 if k == 0 else 0.45), w * (1.0 if k == 0 else 0.6), true)
+
+	func _arrow(a: Vector2, b: Vector2, col := RED) -> void:
+		_pen(a, b, 4.5, col)
+		var d := (b - a).normalized()
+		_pen(b, b - d.rotated(0.5) * 22.0, 4.5, col)
+		_pen(b, b - d.rotated(-0.5) * 22.0, 4.5, col)
+
+	## a sketched bike + rider: rear wheel at p, pitched `ang` (rad, nose up +), s = wheel radius
+	func _bike(p: Vector2, ang: float, s := 34.0, lean := 0.0) -> void:
+		var R := Transform2D(-ang, p)
+		var q := func(x: float, y: float) -> Vector2: return R * Vector2(x * s, y * s * (1.0 - absf(lean) * 0.3))
+		_ring(q.call(0, 0), s)
+		_ring(q.call(3.0, 0), s)
+		var bb: Vector2 = q.call(1.3, 0.25)
+		_pen(q.call(0, 0), bb); _pen(bb, q.call(2.2, -1.25)); _pen(q.call(0, 0), q.call(1.1, -1.2))
+		_pen(q.call(1.1, -1.2), q.call(2.2, -1.25)); _pen(q.call(2.2, -1.25), q.call(3.0, 0))
+		_pen(q.call(2.1, -1.5), q.call(2.5, -1.6))   # bars
+		# the rider: stick figure standing on the pedals, round head
+		var hip: Vector2 = q.call(1.1, -2.1)
+		var sh: Vector2 = q.call(1.9, -3.0)
+		_pen(bb, hip, 5.0); _pen(hip, sh, 5.0); _pen(sh, q.call(2.3, -1.6), 4.0)
+		_ring(q.call(2.25, -3.55), s * 0.38, 4.5)
+
+	func _tip(y: float, title: String, glyphs: Array, line: String, sketch: Callable) -> void:
+		var x0 := 46.0
+		draw_string(_hand, Vector2(x0, y), title, HORIZONTAL_ALIGNMENT_LEFT, -1, 40, RED)
+		sketch.call(Vector2(x0 + 20, y + 18))
+		var gx := x0
+		var ty := y + 212.0
+		for g in glyphs:
+			var gw := PadGlyph.width(g, 34.0)
+			PadGlyph.draw(self, g, Vector2(gx + gw * 0.5, ty - 10), 34.0)
+			gx += gw + 8
+		draw_string(_hand, Vector2(gx + 6, ty), line, HORIZONTAL_ALIGNMENT_LEFT, size.x - gx - 50, 27, PEN)
+
+	func _draw() -> void:
+		_rng.seed = 7
+		draw_rect(Rect2(Vector2.ZERO, size), Color.WHITE)
+		var W := size.x
+		draw_string(_hand, Vector2(46, 92), "Ride tips", HORIZONTAL_ALIGNMENT_LEFT, -1, 62, PEN)
+		_pen(Vector2(46, 110), Vector2(W - 70, 104), 5.0, RED)
+		var pad := Settings.pad_active
+		var g := func(a: String) -> String: return PadGlyph.glyph_for(a, pad)
+		_tip(180, "Pump & pop", [g.call("hop")], "hold it into the lip, let go on top", func(o: Vector2):
+			_pen(o + Vector2(0, 150), o + Vector2(250, 150)); _pen(o + Vector2(250, 150), o + Vector2(420, 60))
+			_bike(o + Vector2(250, 112), 0.42, 26.0)
+			_arrow(o + Vector2(470, 80), o + Vector2(500, 0)))
+		_tip(450, "Flips", [g.call("body_back"), g.call("body_fwd")], "yank it as you leave the lip", func(o: Vector2):
+			_bike(o + Vector2(160, 120), 0.0, 26.0)
+			_ring(o + Vector2(225, 78), 92, 4.5, RED, -2.6, 1.3)
+			_arrow(o + Vector2(250, 166), o + Vector2(205, 172)))
+		_tip(720, "Manual", [g.call("body_back")], "pull back while you roll", func(o: Vector2):
+			_pen(o + Vector2(0, 160), o + Vector2(470, 160))
+			_bike(o + Vector2(150, 126), 0.45, 28.0)
+			_arrow(o + Vector2(360, 30), o + Vector2(300, 70)))
+		_tip(985, "Carve", [g.call("steer_left"), g.call("body_left")], "lean the bike with the steer", func(o: Vector2):
+			_bike(o + Vector2(120, 120), 0.0, 26.0, 0.6)
+			for i in 3: _pen(o + Vector2(20 + i * 8, 170 + i * 6), o + Vector2(470, 120 - i * 10), 3.0, Color(PEN, 0.5))
+			_arrow(o + Vector2(330, 40), o + Vector2(450, 90)))
+		draw_string(_hand, Vector2(46, size.y - 22), "turn me back over to ride", HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color(PEN, 0.6))
+

@@ -6,7 +6,7 @@ extends MeshInstance3D
 ## double-sided ribbon in world space (rebuilt every frame), pinned to the goggles.
 
 const N := 9                    # points
-const SEG := 0.032              # m per segment (tail is ~0.26 m)
+const SEG := 0.016              # m per segment (tail is ~0.13 m: half what it was, the user's call)
 const SUB := 3
 const ITER := 4
 const DRAG := 7.0

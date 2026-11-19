@@ -145,6 +145,7 @@ func _print_world(centre: Vector2, sliced := true) -> void:
 			await get_tree().process_frame
 			if not is_inside_tree(): return
 			s0 = Time.get_ticks_usec()
+	if f.has_method("release_libm"): f.release_libm()   # (see TerrainFieldCs.release_libm: crashed the quit)
 	_task = WorkerThreadPool.add_task(job.run)
 	while not WorkerThreadPool.is_task_completed(_task):
 		await get_tree().process_frame

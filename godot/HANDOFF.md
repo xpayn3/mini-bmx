@@ -475,6 +475,24 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   fill-in-line fields, printed tab headings with a red rule, red-ink sliders) is printed live across the three inside
   panels (drawn ×1.3). "Fold up", Esc or B shuts it back to the cover (`fold_inside`); Esc / B on the cover resumes.
   `PaperSheet.set_unfolded()` opens / shuts any sheet while it's up; the camera eases between the shut and open fit.
+  **Turn it over** (right stick / numpad 4·6 while shut; `spin`, settles face or back when let go): the back of
+  the middle panel (`back_col`, the cover strip's second slot) carries hand-drawn **ride tips** (`TipsBack`: wobbly
+  pen sketches, Ink Free handwriting, the button icons for the device in use). Every sheet keeps a strip at the
+  bottom of the screen for its controls row (`HINT_RESERVE`): the paper is fitted above it, never over it; the row
+  has no pill. Tests: `BMX_LEAFLET_SPIN=3.14`.
+
+### Goggles, strap, quit
+- **Goggles = the user's ski-goggle model** (`assets/goggles/ski_goggle.obj` + textures, `SOURCE.txt`): the frame,
+  foam and lens only (its own strap was cut off: faces behind z -14 or on the strap's texture band); placed by
+  `RiderGear.build_goggles` when `goggle_mats.model_mesh` is set (scale 0.0082, quarter turn so its +z faces +X),
+  else the built goggles. Lens alpha baked into the albedo, floored at 0.6 so the mirrored tint shows. **Our strap**
+  goes round the helmet (GIANT print, thin white edge lines `_add_strap_edges`); its loose tail is ~13 cm.
+- **Quit crash** (exit 132 / 139, "Fatal error ... GodotObject.Finalize / DisposablesTracker"): C# objects left to
+  C#'s collector got finalized after the engine shut down. Happens when you quit soon after the game was frozen
+  (paper map / pause) - the collector didn't run meanwhile. Fixes so far: quit through **`GameState.quit()`**
+  (runs `CsGc.collect()` first; the window close does too), `TerrainFieldCs` disposes its feature wrappers +
+  Expressions on delete, the map samples the C# field in batches (`map_heights` / `map_colors`). Still seen in
+  ~1 of 3 map test runs with scrolling: **open**.
 
 ### Button icons (`scripts/ui/pad_glyph.gd`)
 - `PadGlyph.draw(ci, name, centre, h)` draws Xbox Series–style icons in code: glossy dark face buttons with the

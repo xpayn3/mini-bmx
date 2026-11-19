@@ -169,13 +169,14 @@ static func _grow_poly(pts: PackedVector2Array, c: Vector2, k: float) -> PackedV
 	return out
 
 
-## a row of [icons, label] items, centred: e.g. [[["LS"], "Travel"], [["RT", "LT"], "Zoom"]]. Drawn on a dark
-## translucent pill so it reads over anything.
+## a row of [icons, label] items, centred: e.g. [[["LS"], "Travel"], [["RT", "LT"], "Zoom"]]. Plain (labels
+## with a soft shadow); pill = true puts it on a dark translucent pill.
 class PromptBar extends Control:
 	var items := []
 	var h := 30.0
 	var label_size := 17
 	var a := 1.0
+	var pill := false
 
 	func _init() -> void:
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -198,12 +199,13 @@ class PromptBar extends Control:
 		var w := _measure()
 		var x := (size.x - w) * 0.5
 		var cy := size.y * 0.5
-		var bg := Rect2(x - 22, cy - h * 0.5 - 9, w + 44, h + 18)
-		var sb := StyleBoxFlat.new()
-		sb.bg_color = Color(0.05, 0.06, 0.08, 0.55 * a)
-		sb.set_corner_radius_all(int(bg.size.y * 0.5))
-		sb.anti_aliasing = true
-		draw_style_box(sb, bg)
+		if pill:
+			var bg := Rect2(x - 22, cy - h * 0.5 - 9, w + 44, h + 18)
+			var sb := StyleBoxFlat.new()
+			sb.bg_color = Color(0.05, 0.06, 0.08, 0.55 * a)
+			sb.set_corner_radius_all(int(bg.size.y * 0.5))
+			sb.anti_aliasing = true
+			draw_style_box(sb, bg)
 		for it in items:
 			for g in it[0]:
 				var gw := PadGlyph.width(g, h)
@@ -211,5 +213,7 @@ class PromptBar extends Control:
 				x += gw + 4
 			x += 8
 			var t := String(it[1]).to_upper()
-			draw_string(f, Vector2(x, cy + f.get_ascent(label_size) * 0.5 - 2), t, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, Color(1, 1, 1, 0.92 * a))
+			var tp := Vector2(x, cy + f.get_ascent(label_size) * 0.5 - 2)
+			draw_string(f, tp + Vector2(0, 2), t, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, Color(0, 0, 0, 0.45 * a))   # soft shadow
+			draw_string(f, tp, t, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size, Color(1, 1, 1, 0.95 * a))
 			x += f.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, label_size).x + 34

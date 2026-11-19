@@ -97,21 +97,50 @@ func _frame(node: Node3D, view: Vector3) -> void:
 		box = AABB(Vector3(box.position.x + box.size.x * 0.2, box.end.y - h, box.position.z), Vector3(box.size.x * 0.6, h, box.size.z))
 	var c := box.get_center()
 	var d := view.normalized()
-	# fit the box's corners to the picture: the distance each corner needs, horizontally and vertically
 	var basis := Basis.looking_at(-d, Vector3.UP)
 	var right := basis.x; var up := basis.y
 	var tv := tan(deg_to_rad(_cam.fov * 0.5))
 	var th := tv * float(SIZE.x) / float(SIZE.y)
+	# the part's own points (not its box: a part lying at an angle has a much bigger box than itself, so it came
+	# out small and off centre): centre on their extent across the view, then fit them as big as the picture lets
+	var pts := _points(mis, 600)
+	if node.has_meta("crop_top") or pts.is_empty():
+		for i in 8: pts.append(box.get_endpoint(i))
+	var lo := Vector2(INF, INF); var hi := -lo
+	for p in pts:
+		var q: Vector3 = p - c
+		var v := Vector2(q.dot(right), q.dot(up))
+		lo = lo.min(v); hi = hi.max(v)
+	c += right * (lo.x + hi.x) * 0.5 + up * (lo.y + hi.y) * 0.5
 	var dist := 0.0
-	for i in 8:
-		var q := box.get_endpoint(i) - c
+	for p in pts:
+		var q: Vector3 = p - c
 		var z := q.dot(d)
 		dist = maxf(dist, z + absf(q.dot(right)) / th)
 		dist = maxf(dist, z + absf(q.dot(up)) / tv)
-	dist *= 1.02
+	dist *= 1.03
 	var r := box.size.length()
 	_cam.near = maxf(dist - r, 0.01); _cam.far = dist + r
 	_cam.look_at_from_position(c + d * dist, c, Vector3.UP)
+
+
+## up to ~n world-space vertices of these meshes (every k-th), for framing
+static func _points(mis: Array, n: int) -> Array:
+	var out := []
+	var total := 0
+	for mi in mis:
+		var m: Mesh = (mi as MeshInstance3D).mesh
+		if m == null: continue
+		for si in m.get_surface_count(): total += (m.surface_get_arrays(si)[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
+	var step := maxi(1, total / maxi(n, 1))
+	for mi in mis:
+		var m: Mesh = (mi as MeshInstance3D).mesh
+		if m == null: continue
+		var xf: Transform3D = (mi as MeshInstance3D).global_transform
+		for si in m.get_surface_count():
+			var vs: PackedVector3Array = m.surface_get_arrays(si)[Mesh.ARRAY_VERTEX]
+			for i in range(0, vs.size(), step): out.append(xf * vs[i])
+	return out
 
 
 # ---------------------------------------------------------------- parts
@@ -232,7 +261,23 @@ static func make_fork(lowers: Dictionary, stanchions: Dictionary, crown_paint: D
 		if low.mesh.surface_get_material(i).resource_name == "black":
 			low.set_surface_override_material(i, BikeBuild.paint_material(lowers))
 	root.add_child(low)
-	root.rotation.z = deg_to_rad(64.0)   # laid down along the picture (crown left), like a product shot
+	# laid down level along its own length (the long axis of the legs, in the side view), crown on the left
+	var ax := Vector2.ZERO
+	var vs: PackedVector3Array = lp[0].surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+	var mean := Vector2.ZERO
+	for v in vs:
+		var w: Vector3 = lp[1] * v
+		mean += Vector2(w.x, w.y)
+	mean /= maxf(1.0, vs.size())
+	var sxx := 0.0; var syy := 0.0; var sxy := 0.0
+	for v in vs:
+		var w: Vector3 = lp[1] * v
+		var q := Vector2(w.x, w.y) - mean
+		sxx += q.x * q.x; syy += q.y * q.y; sxy += q.x * q.y
+	var ang := 0.5 * atan2(2.0 * sxy, sxx - syy)   # the principal axis
+	ax = Vector2(cos(ang), sin(ang))
+	if ax.y < 0.0: ax = -ax                          # pointing up the fork (to the crown)
+	root.rotation.z = PI - atan2(ax.y, ax.x)         # crown to the left, legs level
 	return root
 
 

@@ -27,7 +27,27 @@ const DEFAULT_LOOK := {shell = "#16171a", peak = "#ececec", goggleFrame = "#f2f2
 ## where the helmet model sits on the head (head-local m / rad) and its scale
 const HELMET_FIT := {x = 0.01, y = 0.0, tilt = 0.0, scale = 1.3}
 ## goggles (RiderGear.build_goggles): lens position / tilt / size, strap ellipse round the shell
-const GOGGLE_FIT := {x = 0.15, y = 0.025, tilt = 0.25, w = 0.2, h = 0.075, R = 0.12, strap = {cx = 0.01, ra = 0.236, rc = 0.162}}
+const SKI_GOGGLE_MESH := "res://assets/goggles/ski_goggle.obj"
+
+## the ski goggle model's material: its own textures (albedo with the lens alpha baked in, normal, roughness,
+## metal, AO); the lens is see-through where the alpha says so
+static func ski_goggle_material() -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.resource_name = "ski_goggle"
+	m.albedo_texture = load("res://assets/goggles/ski_goggle_albedo.png")
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_DEPTH_PRE_PASS
+	m.normal_enabled = true
+	m.normal_texture = load("res://assets/goggles/ski_goggle_normal.png")
+	m.roughness_texture = load("res://assets/goggles/ski_goggle_rough.png")
+	m.roughness = 1.0
+	m.metallic_texture = load("res://assets/goggles/ski_goggle_metal.png")
+	m.metallic = 1.0
+	m.ao_enabled = true
+	m.ao_texture = load("res://assets/goggles/ski_goggle_ao.png")
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	return m
+
+const GOGGLE_FIT := {x = 0.15, y = 0.025, tilt = 0.25, w = 0.23, h = 0.087, R = 0.12, strap = {cx = 0.01, ra = 0.236, rc = 0.162}}
 
 const L_THIGH := 0.44
 const L_SHIN := 0.44
@@ -167,6 +187,11 @@ func _init() -> void:
 	logo.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	logo.cull_mode = BaseMaterial3D.CULL_DISABLED
 	goggle_mats = {frame = mat("#f2f2ee", 0.45), foam = mat("#15171a", 1.0), strap = strap, lens = lens, logo = logo}
+	# the goggles themselves from the user's ski-goggle model (frame, foam, mirrored lens; its strap cut off - ours
+	# goes round the helmet); without the files, the built ones
+	if ResourceLoader.exists(SKI_GOGGLE_MESH):
+		goggle_mats.model_mesh = load(SKI_GOGGLE_MESH)
+		goggle_mats.model_mat = ski_goggle_material()
 	var baker := StrapLogo.new()
 	baker.mat = logo
 	baker.text = "GIANT"
