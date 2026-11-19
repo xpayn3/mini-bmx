@@ -320,7 +320,7 @@ static func ride_mods(b: Dictionary) -> Dictionary:
 	var spoke_w := 1.0 + (int(w.spokes) - 32) * 0.004 + (int(w.gauge) - 1) * 0.02 + (float(w.rim_depth) - 28) * 0.002
 	if w.rim_material == "carbon": spoke_w *= 0.97   # lighter, stiffer wheels
 	var ride := {
-		"travel": trav, "legComp": 0.9 + 0.1 * trav, "landSoak": trav,
+		"travel": trav, "legComp": 0.9 + 0.1 * trav,
 		"tyreHz": spring_k, "tyreDamp": reb,
 		"grip": tread_grip * width_grip, "rollRes": tread_roll * size_roll * (1.0 + (float(w.tyre_w) - 2.5) * 0.2),
 		# wider bars: slower, steadier steering (780 mm = 1)

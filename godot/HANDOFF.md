@@ -51,7 +51,7 @@ Player data: `%APPDATA%\Godot\app_userdata\Mini BMX\` — `settings.cfg`, `tune.
 ## 3. Controls (defaults, all rebindable in Settings → Controls)
 
 W/↑ pedal · S/↓ brake · A/D steer · **Space** hop/pump (hold to charge; **in the air: tuck the bike up**) ·
-**W/S in the air: lean back/forward (keep leaning → back/front flip)** · **A/D in the air: lean the bike left/right (no spins)** · **brake + A/D when slow: pivot (pirouette)** · Shift sprint (stamina) · Q/E shift gears · F bail · Backspace back to
+**S/W pressed fresh as you leave a lip: throw a back/front flip** · **W/S in the air: tilt the bike nose down/up (limited, body shift)** · **A/D in the air: lean the bike left/right (no spins)** · **brake + A/D when slow: pivot (pirouette)** · Shift sprint (stamina) · Q/E shift gears · F bail · Backspace back to
 start · R new world · B next bike · C next camera · Z/X rotate camera · +/- zoom · mouse drag orbit ·
 H records · **P / K / L** the tuning card on its Ride / Rider / Look tab · O photo mode · F1 hide HUD ·
 F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A hop, X sprint, bumpers gears.
@@ -87,6 +87,18 @@ F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A 
   and landings throw the body forward, drive sits it back), **air control** (Space tucks the bike up about the
   shared centre of mass, W/S lean the nose; keys held at take-off count only once pressed again).
 - Every tuning value lives in `Tune` (tuning card, Ride tab + Rider › Physics); bikes multiply them (`BIKES.*.ride` + garage mods).
+- **Air + landing are momentum physics, no scripted caps / assists**: on the ground `v` is the speed
+  along the slope (it splits into horizontal `v` + climb `vy` at take-off and joins again at landing:
+  the velocity into the slope is lost, along it kept). Take-off uses the rider + bike centre of mass
+  (`PHI*body_v + mB*vy`). In the air the shared spin `air_w` is conserved (tuck = less inertia = faster,
+  `tuckSpin`); the rider can only tilt the bike against their body (`air_tilt` ≤ `airTilt`, hands off it
+  aims at the landing) and twist it at the hips (`air_tw` ≤ `airTwist`); yaw carried off a lip keeps
+  turning. Flips start only from a **lip throw** (`throw_v`, `flipAccel`/`flipRate`: S/W pressed fresh
+  while a jump is spotted ahead or one wheel is off; S there doesn't brake). Landing crashes come from the
+  ground physics (nose-dive, loop-out, wash-out) plus **SLAM** when the legs bottom out with the body still
+  moving into the bike faster than `slamJolt × land` (legs brace for 0.35 s after touch-down); only a bike
+  turned > 83° from the slope (rider / bars hit first) or > 2.2 rad sideways is judged on contact.
+  Consequence: at 70+ km/h rollers and bumps really launch you (the old `crestCap` hid that).
 - Safety net: `is_sane()` / `reset_body()` — a non-finite step restores the last good state.
 
 ### Terrain
@@ -226,7 +238,8 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `BMX_GARAGE_CAM=orbit,pitch,dist`, `BMX_POSE=key=val,...` | garage camera / pose override |
 | `BMX_GARMIN_PAGE=0…5` | bike computer opens on that page (ride, trip, effort, air, elev, map) |
 | `BMX_ALERT_PROBE=1` | prints every Garmin trail alert along the first 2.4 km of trail |
-| `BMX_TRICK=back/front/side/manual` | autotest leans that way in every jump (side alternates A / D; manual holds the nose up at `BMX_MANUAL_PITCH` rad for back-wheel landings) and prints `TRICK` / `LAND` / `BOUNCE` / `CRASH` |
+| `BMX_TRICK=back/front/side/manual/none` | autotest throws back / front at every lip (fresh S / W press) and keeps leaning in the air; none = hands off (side alternates A / D; manual holds the nose up at `BMX_MANUAL_PITCH` rad for back-wheel landings) and prints `TRICK` / `LAND` / `BOUNCE` / `CRASH` |
+| `BMX_FOLLOW=1` (+ `BMX_TRICK=…`) | autotest steers along the trail centreline and gets up (back on the trail) 2 s after a crash; prints `TAKEOFF` / `JOLT` too — the way to get many jumps |
 | `BMX_STEER=1` / `-1` (+ `BMX_STRAIGHT=1`) | autotest holds a steady left / right turn after 2 s (lean / leg-clearance shots) |
 | `BMX_AIRSHOT=dir/prefix` | autotest saves up to 8 screenshots mid-air |
 | `BMX_KNEE_PROBE=1` | prints the biggest knee / hip move per frame and the torso stretch range, and logs (`KNEE …`) frames where a knee jumps |

@@ -36,16 +36,15 @@ const DEFS := [
 		["carveBoost", "Carve exit speed", 1.2, 0, 3, 0.1, "m/s"],
 	]],
 	["Air", [
-		["airTurn", "Air twist speed", 0.7, 0, 3, 0.05, "rad/s"],
-		["airTwist", "Max air twist", 0.45, 0, 1.4, 0.05, "rad"],
-		["flipRate", "Lean flip top speed (W / S held)", 6.5, 1, 12, 0.1, "rad/s"],
-		["flipAccel", "Lean flip pull", 16, 2, 40, 0.5, "rad/s²"],
-		["flipDamp", "Flip slows when let go", 0.8, 0, 6, 0.05, "/s"],
+		["airTwist", "Hip twist in the air", 0.45, 0, 1.4, 0.05, "rad"],
+		["flipRate", "Lip throw: max spin (W / S at the lip)", 6.5, 1, 12, 0.1, "rad/s"],
+		["flipAccel", "Lip throw: pull", 26, 2, 60, 0.5, "rad/s²"],
+		["airTilt", "Body shift tilts the bike (air W / S)", 0.45, 0, 0.9, 0.05, "rad"],
+		["tuckSpin", "Tuck spins faster (Space)", 0.35, 0, 0.6, 0.05, ""],
+		["riderShare", "Rider's share of the spin", 0.85, 0.5, 0.95, 0.01, ""],
 		["airRoll", "Air lean left / right (A / D)", 0.6, 0, 1.2, 0.05, "rad"],
-		["spinDamp", "Air twist dies out", 1.0, 0, 6, 0.05, "/s"],
-		["landPitch", "Landing angle allowed (nose down)", 0.8, 0.2, 1.4, 0.05, "rad"],
-		["landBack", "Back-wheel landing angle allowed", 1.3, 0.5, 1.5, 0.05, "rad"],
-		["landTwist", "Landing twist allowed", 0.75, 0.2, 1.4, 0.05, "rad"],
+		["landBack", "Back-wheel balance limit", 1.3, 0.5, 1.5, 0.05, "rad"],
+		["slamJolt", "Legs take a hit up to", 6.0, 2, 12, 0.1, "m/s"],
 		["pivotRate", "Pivot speed (brake + A / D, slow)", 5, 1, 10, 0.25, "rad/s"],
 	]],
 	["Wheels & pump", [
@@ -54,7 +53,6 @@ const DEFS := [
 		["travel", "Spring travel", 0.07, 0.02, 0.25, 0.005, "m"],
 		["legPress", "Legs press bike down", 0.5, 0, 2, 0.05, "g"],
 		["riderBalance", "Rider balance (1 wheel)", 0.7, 0, 1.5, 0.05, ""],
-		["crestCap", "Max throw off a crest", 2.0, 0.5, 5, 0.1, "m/s"],
 		["noseDive", "Nose-dive crash angle", 0.6, 0.3, 1.2, 0.05, "rad"],
 		["pumpGain", "Pump strength", 9, 0, 25, 0.5, ""],
 	]],
@@ -83,11 +81,9 @@ const DEFS := [
 		["prepTime", "Spot lip ahead", 0.55, 0.1, 1.2, 0.05, "s"],
 		["prepDepth", "Crouch into lip", 0.16, 0, 0.3, 0.01, "m"],
 		["popKick", "Pump extension", 1.5, 0, 4, 0.1, "m/s"],
-		["autoPop", "Lip pop height", 1.2, 0, 3, 0.05, "m/s"],
 		["landPrepTime", "Reach for landing", 0.35, 0.05, 1, 0.05, "s"],
 		["chargeTime", "Hop charge time", 2, 0.5, 4, 0.1, "s"],
 		["chargePop", "Full-charge extra pop", 0.6, 0, 4, 0.1, "m/s"],
-		["landSoak", "Landing absorb", 0.3, 0, 1.5, 0.05, ""],
 	]],
 	["Speed", [
 		["topSpeed", "Top speed", 1.2, 0.5, 2.0, 0.05, "×"],
@@ -106,9 +102,9 @@ const DEFS := [
 
 const PATH := "user://tune.cfg"
 ## bump VER when defaults are retuned: saved values of the RETUNED keys are dropped once
-const VER := 3
+const VER := 4
 const RETUNED := ["steerRate", "steerRelease", "steerCurve", "turnSlow", "turnFast", "turnFloor", "steerMax", "slowSteer",
-	"barSpeed", "grip", "slipRecover", "slipMax", "turnWeight", "leanMax", "leanIn", "leanOut", "leanDamp", "bikeLeanMul", "bikeLeanCap", "flipAccel", "flipRate", "landPitch", "landTwist"]
+	"barSpeed", "grip", "slipRecover", "slipMax", "turnWeight", "leanMax", "leanIn", "leanOut", "leanDamp", "bikeLeanMul", "bikeLeanCap", "flipAccel", "flipRate", "airTwist", "landBack"]
 var defaults := {}
 var base := {}       # the player's slider values (before the bike's ride multipliers)
 var ride := {}       # multipliers for the bike being ridden

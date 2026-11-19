@@ -44,6 +44,14 @@ var body_xv := 0.0; var hip_v := 0.0; var v_last := NAN
 var air_lean := 0.0; var air_pull := 0.0; var air_lock_w := false; var air_lock_s := false; var air_lock_h := false
 # air tricks: the rider's input this step, and how far the bike has turned since take-off (rad)
 var air_lock_a := false; var flip_in := 0.0; var spin_in := 0.0; var flip_acc := 0.0; var spin_acc := 0.0
+# rotation as real momentum. On the ground the rider's body turns with the bike, smoothed by the arms and
+# legs (body_pw), and W / S pressed at a lip throw the body back / forward against the ground (throw_v).
+# In the air nothing outside can turn rider + bike: their shared spin (air_w, rad/s at full stretch) is
+# conserved; tucking (Space) lowers the inertia so it spins faster. The rider can only tilt the bike
+# against their own body (air_tilt, limited) and twist it at the hips (air_tw).
+var body_pw := 0.0; var throw_v := 0.0; var lock_tw := false; var lock_ts := false
+var air_w := 0.0; var air_inertia := 1.0; var air_tilt := 0.0; var air_tilt_v := 0.0
+var air_yaw := 0.0; var air_tw := 0.0; var air_tw_v := 0.0; var land_jolt := 0.0
 # pivot: how far a slow-speed pivot (pirouette) has turned the bike
 var pivot := 0.0; var pivot_acc := 0.0
 var wheel_f := 0.0; var wheel_r := 0.0; var crank := 0.0; var pedal := 0.0
@@ -57,7 +65,7 @@ var flow := 0.0; var flow_t := 0.0
 var spun_out := false
 var bank := NAN; var carve := 0.0; var carve_acc := 0.0; var carve_berm := false
 var lat_m := NAN; var lat_a := 0.0
-var g_pitch := NAN; var face_max := 0.0
+var g_pitch := NAN
 var w_init := false; var hf_prev := NAN; var hr_prev := NAN
 var nose_ref := NAN
 var w_f := 0.0; var w_r := 0.0; var y_draw := 0.0; var pitch_draw := 0.0
@@ -142,9 +150,10 @@ func reset_at(px: float, pz: float, hd: float) -> void:
 	n_f = NAN; n_r = NAN; n_ref = NAN; lip_state = 0; hf_prev = NAN; hr_prev = NAN
 	bank = 0; body_x = 0; hip_shift = 0; spin = 0; a_drive = 0; charge = 0; hop_charge = 0; lift_t = 0
 	body_xv = 0; hip_v = 0; v_last = NAN; air_lean = 0; air_pull = 0; flip_acc = 0; spin_acc = 0; flip_in = 0; spin_in = 0
+	body_pw = 0; throw_v = 0; air_w = 0; air_inertia = 1; air_tilt = 0; air_tilt_v = 0; air_yaw = 0; air_tw = 0; air_tw_v = 0; land_jolt = 0
 	pivot = 0; pivot_acc = 0
 	sprint = 0; flow = 0; flow_t = 0; lat_m = 0; carve = 0; carve_acc = 0; carve_berm = false
-	y_draw = y; pitch_draw = 0; nose_ref = NAN; pitch_w = NAN; y_prev = NAN; face_max = 0; kick_t = 0
+	y_draw = y; pitch_draw = 0; nose_ref = NAN; pitch_w = NAN; y_prev = NAN; kick_t = 0
 	w_f = y; w_r = y
 
 func get_up() -> void:
@@ -158,6 +167,7 @@ func get_up() -> void:
 	n_f = NAN; n_r = NAN; n_ref = NAN; lip_state = 0; hf_prev = NAN; hr_prev = NAN
 	bank = 0; body_x = 0; hip_shift = 0; spin = 0; a_drive = 0; charge = 0; hop_charge = 0; lift_t = 0
 	body_xv = 0; hip_v = 0; v_last = NAN; air_lean = 0; air_pull = 0; flip_acc = 0; spin_acc = 0; flip_in = 0; spin_in = 0
+	body_pw = 0; throw_v = 0; air_w = 0; air_inertia = 1; air_tilt = 0; air_tilt_v = 0; air_yaw = 0; air_tw = 0; air_tw_v = 0; land_jolt = 0
 	pivot = 0; pivot_acc = 0
 	sprint = 0; flow = 0; flow_t = 0; lat_m = 0; carve = 0; carve_acc = 0; carve_berm = false; y_draw = y; pitch_draw = 0
 
@@ -259,9 +269,10 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	var brake_k: float = inp.brake
 	var brake := brake_k > 0.1
 	var steer_input: float = inp.steer
-	# air control: W throws the nose down (front flip if held), S pulls it up (backflip if held), A / D spin
-	# the bike (360s), Space pulls the bike up into the body. W / S work at once; A / D and Space held at
-	# take-off count only once pressed again in the air (carving into a jump mustn't spin you).
+	# air control: W / S tilt the bike nose down / up against the rider's body (limited, see air_tilt; a
+	# flip has to be thrown at the lip), A / D lean it left / right, Space tucks (pulls the bike up into the
+	# body, spinning faster). W / S work at once; A / D and Space held at take-off count only once pressed
+	# again in the air (carving into a jump mustn't lean you).
 	if not air:
 		air_lock_w = throttle > 0.1; air_lock_s = brake; air_lock_h = inp.hop; air_lock_a = absf(steer_input) > 0.1
 	else:
@@ -278,6 +289,26 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	# the rider tucks into a flip as well as when Space is held
 	var pull_t := maxf(1.0 if air and inp.hop and not air_lock_h else 0.0, 0.7 * absf(flip_in) if air else 0.0)
 	air_pull += (pull_t - air_pull) * minf(1.0, dt * 8)
+	# the lip throw: W / S pressed fresh as the bike leaves a lip (a jump spotted just ahead, or one wheel
+	# already off) throw the rider back / forward, pushing against the bike and through it the ground. That
+	# is the only way to start a flip (keys held from before don't count; S there pulls back, it doesn't brake)
+	var lip_win := not air and (prep > 0.25 or front_air or rear_air)
+	if not lip_win:
+		lock_tw = throttle > 0.1; lock_ts = brake
+	else:
+		if throttle <= 0.1: lock_tw = false
+		if not brake: lock_ts = false
+	var throw_in := 0.0
+	if lip_win:
+		throw_in = (0.0 if lock_ts else brake_k) - (0.0 if lock_tw else throttle)   # + = back (nose up)
+		if not lock_ts:
+			brake_k = 0.0; brake = false
+	if not air:
+		if absf(throw_in) > 0.05:
+			var room := 1.0 - clampf(throw_v * signf(throw_in) / T.flipRate, 0.0, 1.0)
+			throw_v += throw_in * T.flipAccel * room * dt
+		else:
+			throw_v *= exp(-dt * 6)   # a throw can't be held on the ground: the body settles back
 	var f := fwd()
 	_sample(f)
 	surf = terrain.surface(x, z)
@@ -428,14 +459,19 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 				if host.msg_idle(): host.flash("%s +%d km/h" % ["BERM" if carve_berm else "CARVE", roundi(gain * 3.6)])
 		carve_berm = (carve_berm or into_bank > 0.15) if carve > 0.6 else (carve_acc > 0 and carve_berm)
 	else:
-		# no spinning round in the air (A / D lean the bike left / right instead, see lean_t): a twist
-		# carried off the lip dies out and a small one straightens up along the travel direction
-		if absf(slip) < T.airTwist and absf(yaw_rate) < 1.5:
-			yaw_rate += (-slip * 2.5 - yaw_rate) * minf(1.0, dt * 4)
-		else:
-			yaw_rate *= exp(-dt * T.spinDamp)
+		# yaw in the air: a turn carried off the lip keeps turning rider + bike (nothing outside can stop
+		# it). The rider can only twist the bike at the hips, within airTwist, to keep it pointing where
+		# they fly; slip is the bike's heading against the travel direction
+		var sys_slip := wrapf(slip - air_tw, -PI, PI) + air_yaw * dt
+		var tw_t := clampf(-sys_slip, -T.airTwist, T.airTwist)
+		air_tw_v += (60.0 * (tw_t - air_tw) - 12.0 * air_tw_v) * dt
+		air_tw += air_tw_v * dt
+		if absf(air_tw) > T.airTwist:
+			air_tw = signf(air_tw) * T.airTwist; air_tw_v = 0.0
+		var slip_new := wrapf(sys_slip + air_tw, -PI, PI)
+		yaw_rate = wrapf(slip_new - slip, -PI, PI) / dt
 		spin_acc += yaw_rate * dt
-		slip = wrapf(slip + yaw_rate * dt, -PI, PI)
+		slip = slip_new
 		heading = course + slip
 		lat_a = 0; lat_m = 0
 	if not air:
@@ -459,7 +495,10 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	var px := x
 	var pz := z
 	var g_prev: float = terrain.deck_height(px, pz)   # (the JS meant this: its duplicate surface() shadowed it)
-	x += cos(course) * v * dt; z -= sin(course) * v * dt
+	# on the ground v is the speed along the slope (the tyres carry the bike up / down it, so only its
+	# horizontal part moves it across the map); in the air v is the horizontal speed
+	var v_h := v if air else v * cos(_g_pitch)
+	x += cos(course) * v_h * dt; z -= sin(course) * v_h * dt
 	distance += absf(v) * dt
 	if true:
 		var stp := maxf(absf(v) * dt, 1e-3)
@@ -543,9 +582,6 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		if not air and dP > 0.02 and v > 0: v *= cos(minf(dP, 1.2))
 		g_pitch = _g_pitch
 		natural = float(terrain.jump(x, z)[1]) < 0.05
-		face_max = maxf(tan(clampf(_g_pitch, -1.4, 1.4)), face_max * exp(-dt * 3))
-		var is_step := face_max > 0.75
-		var launch_cap: float = T.crestCap if natural else (2.0 if is_step else absf(v) * 0.62 + 0.3)
 		var climb_max := absf(v) * 0.9 + 0.3
 		var XF := L - BB_REAR
 		var XR := -BB_REAR
@@ -568,7 +604,10 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		var Kb: float = pow(2 * PI * T.tyreHz, 2)
 		var K := Kb * mB
 		var C: float = 2 * T.tyreDamp * sqrt(Kb) * mB
-		var kB: float = T.legStiff * (1 + 5 * prep)
+		# legs stiffen as the rider crouches into a lip, and brace (work hard against the fall) for the
+		# first moments after a landing
+		var brace := 1.0 - smooth01(since_land / 0.35)
+		var kB: float = T.legStiff * (1 + 5 * prep + 4 * brace)
 		var cB: float = 2 * sqrt(kB) * T.legDamp
 		var press: float = T.legPress * G if (natural and not (hop_t > 0) and not (lift_t > 0)) else 0.0
 		var s0 := (G + press) / K
@@ -632,24 +671,28 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			if cF != cR:
 				var ref := _or(nose_ref, _g_pitch)
 				alpha += clampf(30 * (ref - pitch) - 9 * pitch_v, -bal_max, bal_max)
-			elif not cF:
-				var flight := 0.6 * atan2(vy, maxf(v, 1))
-				var near := 1 - smooth01((y - _g_y) / 0.7)
-				if absf(flip_in) > 0.05:
-					# W / S: the rider leans back / forward and the bike rotates with the lean, building up
-					# slowly. Keep leaning and it goes all the way round (backflip / front flip)
-					var room := 1.0 - clampf(pitch_v * signf(flip_in) / T.flipRate, 0.0, 1.0)
-					alpha += flip_in * T.flipAccel * room
-				else:
-					# hands off: the rotation carries on, slowed by the rider. Only a bike that is already
-					# nearly lined up (within ~20 deg) gets helped to follow its arc / meet the landing
-					alpha -= pitch_v * T.flipDamp
-					var pT := flight + (_g_pitch - flight) * near * (1.0 if vy < 0 else 0.0)
-					var err := wrapf(pT - pitch, -PI, PI)
-					var assist := 1.0 - smooth01((absf(err) - 0.35) / 0.4)
-					alpha += (20 * err - 7 * pitch_v) * assist
 			vy += (FF + FR - (press if (cF or cR) else 0.0) - mB * G - leg_f) / mB * h
 			pitch_v += alpha * h
+			if not cF and not cR and was_air:
+				# in the air: no outside torque. The shared spin air_w only changes with the inertia (tuck),
+				# the bike turns with it plus whatever tilt the rider gives it against their own body:
+				# W / S tilt it on purpose, hands off the rider aims it at the landing slope
+				var I_new: float = 1.0 - T.riderShare * T.tuckSpin * air_pull
+				air_w *= air_inertia / I_new; air_inertia = I_new
+				var tgt: float
+				if absf(flip_in) > 0.05:
+					tgt = flip_in * T.airTilt
+				else:
+					var hh := maxf(0.0, y - _g_y)
+					var tg := (vy + sqrt(vy * vy + 2 * G * hh)) / G
+					tgt = wrapf(_g_pitch - (pitch - air_tilt + air_w * minf(tg, 1.0)), -PI, PI)
+				tgt = clampf(tgt, -T.airTilt, T.airTilt)
+				air_tilt_v += (70.0 * (tgt - air_tilt) - 13.0 * air_tilt_v) * h
+				air_tilt += air_tilt_v * h
+				if absf(air_tilt) > T.airTilt:
+					air_tilt = signf(air_tilt) * T.airTilt
+					if air_tilt_v * air_tilt > 0: air_tilt_v = 0.0
+				pitch_v = air_w + air_tilt_v
 			y += vy * h; pitch += pitch_v * h
 			if not cF and not cR:   # in the air the bike can go all the way round (flips)
 				flip_acc += pitch_v * h
@@ -676,6 +719,8 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 				var rel := body_y - y
 				if rel < -T.legComp:
 					body_y = y - T.legComp
+					# legs bottomed out: the speed the body still had into the bike is the hit the rider takes
+					if body_v < vy and since_land < 0.6 and land_jolt >= 0: land_jolt = maxf(land_jolt, vy - body_v)
 					if body_v < vy:
 						var vc := PHI * body_v + mB * vy if coupled else vy
 						body_v = vc; vy = vc
@@ -713,27 +758,41 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 				shake = maxf(shake, minf(0.25, slap * 0.05)); compress_v -= minf(1.5, slap * 0.25)
 				if slap > 3.5: host.burst(Vector3(x + f.x * XF, _g_hf + 0.03, z + f.z * XF), 10, surf, 0.8)
 		c_f = cF; c_r = cR
+		if not now_air:
+			# the rider's body turns with the bike, smoothed by the arms and legs
+			body_pw += (pitch_v - body_pw) * minf(1.0, dt * 4)
 		if now_air and not was_air:
 			if since_land < 0.5 and OS.get_environment("BMX_TRICK") != "": print("BOUNCE %.2fs after landing vy=%.2f pitch=%.2f" % [since_land, vy, pitch])   # tests
 			air = true; air_time = 0; flip_acc = 0.0; spin_acc = 0.0
-			if not (kick_t > 0): vy = minf(vy, launch_cap)
-			if not natural and not is_step: vy += T.autoPop * prep
+			# rider + bike fly off at the speed of their shared centre of mass: a bike kicked up by a roller
+			# while the body (on soft legs) lags behind doesn't launch the rider with it. In the air the
+			# two then move together (the legs only shift them about that centre)
+			if coupled and not is_nan(body_v): vy = PHI * body_v + mB * vy
+			# the speed along the lip splits into the horizontal part (v from now on) and the climb (vy)
+			v *= cos(_g_pitch)
+			# the spin rider + bike leave with: mostly the rider's (they're most of the inertia), plus the
+			# throw. Whatever the bike turns on its own beyond that is relative motion the arms and legs soak up
+			var sh: float = T.riderShare
+			air_w = (1 - sh) * pitch_v + sh * body_pw + throw_v
+			air_tilt = 0.0; air_tilt_v = sh * (pitch_v - body_pw)
+			air_inertia = 1.0
+			pitch_v = air_w + air_tilt_v
+			throw_v = 0.0
+			air_yaw = yaw_rate; air_tw = 0.0; air_tw_v = 0.0
+			if OS.get_environment("BMX_TRICK") != "": print("TAKEOFF v=%.1f vy=%.2f pitch_v=%.2f spin=%.2f natural=%s at=(%.0f,%.0f) slope=%.2f" % [v, vy, pitch_v, air_w, natural, x, z, _g_pitch])   # tests
 			host.on_takeoff()
 		elif not now_air and was_air:
-			var vy_surf := v * tan(_g_pitch)
-			var impact: float = maxf(0.0, vy_surf - vy_in) * cos(_g_pitch) / (LAND * (1 + T.landSoak * land_prep))
+			# how fast the bike comes down into the slope (the speed along it is kept: the tyres just roll on)
+			var impact: float = maxf(0.0, v * sin(_g_pitch) - vy_in * cos(_g_pitch))
 			var at := air_time
-			# back wheel first (nose up): the rear shock and the rider's legs take the hit over a longer
-			# stroke, so less of it reaches the rider as a slam
-			var back_land: bool = cR and not cF and wrapf(pitch - _g_pitch, -PI, PI) > T.landPitch * 0.5
-			if back_land: impact *= 0.7
-			if at > 0.3 and impact > 10.5: crash_pending = "SLAM!"
+			var back_land: bool = cR and not cF and wrapf(pitch - _g_pitch, -PI, PI) > 0.4
 			_land_trick(at)
-			air = false; since_land = 0
+			air = false; since_land = 0; land_jolt = 0.0
 			body_v = vy_in
+			body_pw = air_w
 			nose_ref = _g_pitch
-			if impact > 3: v *= 1 - minf(0.45, (impact - 3) * 0.08)
-			if impact > 5 and at > 0.3: host.flash("OOF!")
+			# the velocity into the slope is stopped by the tyres, suspension and legs; along the slope it carries on
+			v = v * cos(_g_pitch) + vy_in * sin(_g_pitch)
 			compress_v -= minf(2.2, impact * 0.35) + (minf(1.2, impact * 0.2 + 0.4) if back_land else 0.0)
 			if host.susp != null: host.susp.land(maxf(0.0, -vy_in) * cos(_g_pitch) * 0.5 + impact * (0.57 if back_land else 0.4), front_air, rear_air)
 			if OS.get_environment("BMX_TRICK") != "": print("LAND impact=%.1f back=%s v_after=%.1f" % [impact, back_land, v])   # tests
@@ -742,6 +801,12 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			if at > 0.45 and impact < 5: flow_up()
 			host.on_landing(at, impact)
 		if air: air_time += dt
+		elif land_jolt > 0 and since_land < 0.6:
+			# the legs bottomed out: a hit bigger than they can take throws the rider down
+			if land_jolt > T.slamJolt * LAND: crash_pending = "SLAM!"
+			elif land_jolt > T.slamJolt * LAND * 0.6: host.flash("OOF!")
+			if OS.get_environment("BMX_TRICK") != "" and land_jolt > 0.5: print("JOLT %.2f m/s" % land_jolt)   # tests
+			land_jolt = -1.0   # one verdict per landing
 		kick_t = maxf(0.0, kick_t - dt)
 
 	# --- hop / pump ---
@@ -865,19 +930,17 @@ func _land_trick(at: float) -> void:
 			rad_to_deg(spin_acc), rad_to_deg(absf(wrapf(pitch - _g_pitch, -PI, PI))), rad_to_deg(absf(slip))])
 	if at < 0.2:
 		return
+	# Everything else (nose-dive, loop-out, a slide that washes out, a hit the legs can't take) is decided
+	# by the ground physics after touch-down. Only geometry is checked here: turned so far that the
+	# wheels can't be what meets the ground, the rider or the bars hit first
 	var perr_s := wrapf(pitch - _g_pitch, -PI, PI)   # + = nose up (back wheel first)
-	var twist := absf(slip)
-	if perr_s < -T.landPitch or perr_s > T.landBack:
-		crash_pending = ("UNDER-ROTATED!" if absf(flip_acc) > 1.5 and perr_s < 0 else
-			"LOOPED OUT!" if perr_s > 0 else "BAD LANDING!")
+	if absf(perr_s) > 1.45:
+		# (a flip short of all the way round lands turned against the spin, one too far lands turned with it)
+		crash_pending = ("UNDER-ROTATED!" if absf(flip_acc) > 3.0 and signf(perr_s) != signf(flip_acc) else
+			"OVER-ROTATED!" if absf(flip_acc) > 3.0 else "LOOPED OUT!" if perr_s > 0 else "BAD LANDING!")
 		return
-	if perr_s > T.landPitch * 0.5:
-		# back-wheel landing: the rider soaks up the backward rotation with the arms and legs and
-		# lets the nose come down (balance torque on the rear wheel does the rest)
-		pitch_v = minf(pitch_v, 0.0) - perr_s * 0.8
-		body_x += 0.1; hip_shift += 0.08
-	if twist > T.landTwist:
-		crash_pending = "BACKWARDS!" if twist > 2.2 else "SIDEWAYS!"
+	if absf(slip) > 2.2:
+		crash_pending = "BACKWARDS!"
 		return
 	var flips := roundi(absf(flip_acc) / TAU)
 	if flips >= 1:

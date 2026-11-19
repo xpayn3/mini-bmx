@@ -265,7 +265,7 @@ func _show_controls() -> void:
 		grid.add_child(UITheme.label(Settings.binding_text(a, true), 15, UITheme.MUTED))
 		grid.add_child(UITheme.label(Settings.ACTIONS[a][0], 15))
 	vb.add_child(grid)
-	vb.add_child(UITheme.label("Mouse drag: orbit · wheel: zoom · hold hop at a lip to pop higher · carve: hold a turn at speed", 13, UITheme.MUTED))
+	vb.add_child(UITheme.label("Mouse drag: orbit · wheel: zoom · hold hop at a lip to pop higher · press S / W as you leave a lip to throw a back / front flip · carve: hold a turn at speed", 13, UITheme.MUTED))
 	var close := UITheme.button("Close", _close_controls)
 	vb.add_child(close)
 	close.grab_focus.call_deferred()
@@ -353,6 +353,39 @@ func _autotest(seconds: float) -> void:
 			continue
 		elif trick != "":
 			Input.action_release("brake"); Input.action_release("sprint")
+			var ph = game.phys
+			if (trick == "back" or trick == "front") and (ph.prep > 0.25 or ph.front_air or ph.rear_air):
+				# a fresh press at the lip throws the rider into the flip (a key held from before doesn't count)
+				if trick == "back": Input.action_press("brake")
+				elif _probe.get("lip_rel", false): Input.action_press("pedal")
+				else: Input.action_release("pedal"); _probe.lip_rel = true
+			else:
+				_probe.lip_rel = false
+		if OS.get_environment("BMX_FOLLOW") != "":   # tests: steer along the trail centreline, get up after a crash
+			var ph = game.phys
+			var crs = game.terrain.field.course
+			var best_d := 1e9
+			var s0: float = _probe.get("fs", 0.0)
+			for k in range(-40, 81):   # nearest centreline point near the last one (1 m steps)
+				var cp: Array = crs.at(s0 + k)
+				var dd: float = Vector2(cp[0] - ph.x, cp[1] - ph.z).length_squared()
+				if dd < best_d: best_d = dd; _probe.fs = s0 + k
+			var tp: Array = crs.at(float(_probe.fs) + 6.0 + absf(ph.v) * 0.5)
+			var err: float = BikePhysics.ang_diff(atan2(-(tp[1] - ph.z), tp[0] - ph.x), ph.heading)
+			var sv := clampf(err * 2.5, -1.0, 1.0)
+			Input.action_press("steer_left", sv) if sv > 0.05 else Input.action_release("steer_left")
+			Input.action_press("steer_right", -sv) if sv < -0.05 else Input.action_release("steer_right")
+			if ph.crash_on:
+				_probe.crash_t = _probe.get("crash_t", 0.0) + get_process_delta_time()
+				if _probe.crash_t > 2.0:
+					_probe.crash_t = 0.0
+					var cp2: Array = crs.at(float(_probe.fs) + 3.0)
+					game.get_up()
+					ph.reset_at(cp2[0], cp2[1], atan2(-float(cp2[3]), float(cp2[2])))
+					game._snap_prev()
+			Input.action_release("hop")
+			await get_tree().process_frame
+			continue
 		if OS.get_environment("BMX_STEER") != "":   # tests: hold a steady turn (+ left, - right) after 2 s
 			var sv := float(OS.get_environment("BMX_STEER")) if el > 2.0 else 0.0
 			Input.action_press("steer_left", maxf(sv, 0.0)) if sv > 0 else Input.action_release("steer_left")
