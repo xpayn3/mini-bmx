@@ -802,22 +802,26 @@ public partial class TerrainFieldCs : RefCounted
 		}
 	}
 
+	/// true while the paper map samples: near ties keep the x87 result instead of asking the engine (no Expression /
+	/// Array objects - made by the tens of thousands, some outlived the engine and crashed the quit). Off = exact.
+	private bool _approx;
+
 	private double gd_sin(double x)
 	{
 		double v = TfX87.Sin(x, out bool amb);
-		return amb ? _engine(0, x) : v;
+		return amb && !_approx ? _engine(0, x) : v;
 	}
 
 	private double gd_exp(double x)
 	{
 		double v = TfX87.Exp(x, out bool amb);
-		return amb ? _engine(1, x) : v;
+		return amb && !_approx ? _engine(1, x) : v;
 	}
 
 	private double gd_log(double x)
 	{
 		double v = TfX87.Log(x, out bool amb);
-		return amb ? _engine(2, x) : v;
+		return amb && !_approx ? _engine(2, x) : v;
 	}
 
 	/// GDScript's sin / exp / log (fn 0 / 1 / 2), for the tests
@@ -1584,12 +1588,17 @@ public partial class TerrainFieldCs : RefCounted
 	public float[] map_heights(double ox, double oz, double step, long nx, long row0, long rows)
 	{
 		var o = new float[nx * rows];
-		for (long r = 0; r < rows; r++)
+		_approx = true;
+		try
 		{
-			double z = oz + (row0 + r) * step;
-			for (long i = 0; i < nx; i++)
-				o[r * nx + i] = (float)ground(ox + i * step, z);
+			for (long r = 0; r < rows; r++)
+			{
+				double z = oz + (row0 + r) * step;
+				for (long i = 0; i < nx; i++)
+					o[r * nx + i] = (float)ground(ox + i * step, z);
+			}
 		}
+		finally { _approx = false; }
 		return o;
 	}
 
@@ -1597,16 +1606,21 @@ public partial class TerrainFieldCs : RefCounted
 	public Color[] map_colors(double ox, double oz, double step, long nx, long row0, long rows, double water)
 	{
 		var o = new Color[nx * rows];
-		for (long r = 0; r < rows; r++)
+		_approx = true;
+		try
 		{
-			double z = oz + (row0 + r) * step;
-			for (long i = 0; i < nx; i++)
+			for (long r = 0; r < rows; r++)
 			{
-				double x = ox + i * step;
-				double h = ground(x, z);
-				o[r * nx + i] = h < water ? new Color(0, 0, 0, 0) : color(x, z, h, 1.0);
+				double z = oz + (row0 + r) * step;
+				for (long i = 0; i < nx; i++)
+				{
+					double x = ox + i * step;
+					double h = ground(x, z);
+					o[r * nx + i] = h < water ? new Color(0, 0, 0, 0) : color(x, z, h, 1.0);
+				}
 			}
 		}
+		finally { _approx = false; }
 		return o;
 	}
 

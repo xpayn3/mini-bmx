@@ -393,6 +393,9 @@ func _autotest(seconds: float) -> void:
 	var draws := 0.0
 	while (Time.get_ticks_msec() - t0) / 1000.0 < seconds:
 		var el := (Time.get_ticks_msec() - t0) / 1000.0
+		if OS.get_environment("BMX_FREEZE") != "":   # tests: time frozen from a to b s (no map), as the map / photo mode do
+			var fz := OS.get_environment("BMX_FREEZE").split(",")
+			Engine.time_scale = 0.0 if (el >= float(fz[0]) and el < float(fz[1])) else 1.0
 		if OS.get_environment("BMX_MAP") != "" and el >= float(OS.get_environment("BMX_MAP")) and not _probe.get("map", false):   # tests: open the trail map
 			_probe.map = true; game.open_map()
 			if OS.get_environment("BMX_MAP_TILT") != "":   # tests: hold the right stick (body actions) while it's open

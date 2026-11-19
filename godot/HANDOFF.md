@@ -487,12 +487,14 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   `RiderGear.build_goggles` when `goggle_mats.model_mesh` is set (scale 0.0082, quarter turn so its +z faces +X),
   else the built goggles. Lens alpha baked into the albedo, floored at 0.6 so the mirrored tint shows. **Our strap**
   goes round the helmet (GIANT print, thin white edge lines `_add_strap_edges`); its loose tail is ~13 cm.
-- **Quit crash** (exit 132 / 139, "Fatal error ... GodotObject.Finalize / DisposablesTracker"): C# objects left to
-  C#'s collector got finalized after the engine shut down. Happens when you quit soon after the game was frozen
-  (paper map / pause) - the collector didn't run meanwhile. Fixes so far: quit through **`GameState.quit()`**
-  (runs `CsGc.collect()` first; the window close does too), `TerrainFieldCs` disposes its feature wrappers +
-  Expressions on delete, the map samples the C# field in batches (`map_heights` / `map_colors`). Still seen in
-  ~1 of 3 map test runs with scrolling: **open**.
+- **Quit crash after using the map** (exit 132 / 139, "Fatal error ... GodotObject.Finalize / DisposablesTracker"):
+  **fixed**. Cause: `TerrainFieldCs` reproduces GDScript's sin / exp / log exactly, and on rare near-ties asks the
+  engine through an `Expression` (+ a Godot Array per call). Sampling 125 000 map points hit those ties by the
+  thousands; some of those engine objects outlived the engine at quit. The map's batches (`map_heights` /
+  `map_colors`) now set `_approx` (keep the x87 result on a tie: the map doesn't need bit-exactness; physics and
+  chunks stay exact, `terrain_cs_cmp` still EXACT). Also kept: `GameState.quit()` (C# GC before quitting, `CsGc`),
+  `TerrainFieldCs` frees its feature wrappers / Expressions on delete. Hunted with `BMX_FREEZE=a,b` (time frozen,
+  no map: clean) vs the map with / without printing / C# sampling; 14 / 14 clean after the fix.
 
 ### Button icons (`scripts/ui/pad_glyph.gd`)
 - `PadGlyph.draw(ci, name, centre, h)` draws Xbox Series–style icons in code: glossy dark face buttons with the
