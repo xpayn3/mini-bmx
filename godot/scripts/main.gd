@@ -268,7 +268,7 @@ func _menu_page_main() -> void:
 	ride.grab_focus.call_deferred()
 
 ## RIDE -> choose the bike and the time of day, then GO
-const SETUP_STEPS := ["BIKE", "TUNE", "RIDER", "COMPUTER", "RACE"]
+const SETUP_STEPS := ["BIKE", "TUNE", "CHARACTER", "COMPUTER", "RACE"]
 const COMPUTER_STEP := 3
 var setup_step := 0
 var bike_dirty := false   # the bike was changed in the selection flow; the ride is rebuilt on RACE
@@ -318,7 +318,7 @@ func _menu_page_setup(step := 0) -> void:
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	scr.add_child(bg)
 	var split := setup_step != COMPUTER_STEP
-	var title: String = ["CHOOSE YOUR BIKE", "COLOURS & WHEELS", "CHOOSE YOUR RIDER", "BIKE COMPUTER", "READY TO RACE"][setup_step]
+	var title: String = ["CHOOSE YOUR BIKE", "COLOURS & WHEELS", "YOUR CHARACTER", "BIKE COMPUTER", "READY TO RACE"][setup_step]
 	var back_cb: Callable = (_menu_page_setup.bind(setup_step - 1) if setup_step > 0 else _menu_page_main)
 	var last := setup_step == SETUP_STEPS.size() - 1
 	var next_btn := _menu_button("RACE" if last else "NEXT", "" if last else SETUP_STEPS[setup_step + 1].capitalize(), _start_ride if last else _menu_page_setup.bind(setup_step + 1), true)
@@ -373,8 +373,8 @@ func _menu_page_setup(step := 0) -> void:
 		lv.add_child(hero_spec)
 		_hero_text(GameState.bike_id)
 		if setup_step == 2:
-			hero_name.text = "YOUR RIDER"
-			hero_spec.text = "PICK A KIT  ·  DRAG TO TURN"
+			hero_name.text = "YOUR CHARACTER"
+			hero_spec.text = "KIT  ·  HAIR  ·  FACE  ·  PLATE  ·  DRAG TO TURN"
 		var bl := HBoxContainer.new()
 		bl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		bl.add_child(UITheme.make_button("BACK", back_cb, "link", Tokens.T_XL))
@@ -582,14 +582,14 @@ func _tune_fill() -> void:
 			_tune_changed(false); _tune_fill()))
 
 ## a sleek colour grid: flat squares, the picked one lifted with an ink bar under it
-func _swatch_grid(cur: String, cb: Callable) -> Control:
+func _swatch_grid(cur: String, cb: Callable, palette: Array = TUNE_SWATCHES, cols := 11, size := 40) -> Control:
 	var g := GridContainer.new()
-	g.columns = 11
+	g.columns = cols
 	g.add_theme_constant_override("h_separation", Tokens.S2)
 	g.add_theme_constant_override("v_separation", Tokens.S2)
-	for hex in TUNE_SWATCHES:
+	for hex in palette:
 		var b := Button.new()
-		b.custom_minimum_size = Vector2(40, 40)
+		b.custom_minimum_size = Vector2(size, size)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.focus_mode = Control.FOCUS_NONE
 		b.tooltip_text = "#" + hex
@@ -602,19 +602,49 @@ func _swatch_grid(cur: String, cb: Callable) -> Control:
 		g.add_child(b)
 	return g
 
-## step 3: the kit presets as colour cards
+var char_tab := "kit"
+
+## step 3: the CHARACTER: everything about her in one place, in four tabs: KIT (clothes), HAIR (helmet or hair preset
+## + colour), FACE (skin tone, eyes) and PLATE (the race number). The turntable shows the standing rider.
 func _setup_rider(content: HBoxContainer) -> void:
+	var col := VBoxContainer.new()
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	col.add_theme_constant_override("separation", Tokens.S3)
+	content.add_child(col)
+	var tabs := HBoxContainer.new()
+	tabs.add_theme_constant_override("separation", Tokens.S2)
+	var body := VBoxContainer.new()
+	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	body.add_theme_constant_override("separation", Tokens.S3)
+	var grp := ButtonGroup.new()
+	var fill := func() -> void:
+		for c in body.get_children():
+			body.remove_child(c); c.queue_free()
+		match char_tab:
+			"kit": _char_kit(body)
+			"hair": _char_hair(body)
+			"face": _char_face(body)
+			"plate": _char_plate(body)
+	for t in [["kit", "KIT"], ["hair", "HAIR"], ["face", "FACE"], ["plate", "PLATE"]]:
+		var b := UITheme.make_button(t[1], Callable(), "chip", Tokens.T_MD)
+		b.toggle_mode = true; b.button_group = grp
+		b.button_pressed = t[0] == char_tab
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.pressed.connect(func(): char_tab = t[0]; fill.call())
+		tabs.add_child(b)
+	col.add_child(tabs)
+	col.add_child(body)
+	col.add_child(UITheme.make_button("MORE IN THE RIDER ROOM", _open_garage.bind("rider"), "link", Tokens.T_MD))
+	fill.call()
+
+func _char_kit(body: VBoxContainer) -> void:
 	var look := RiderPanels.load_look()
-	var col0 := VBoxContainer.new()
-	col0.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	col0.add_theme_constant_override("separation", Tokens.S3)
-	content.add_child(col0)
 	var grid := GridContainer.new()
 	grid.columns = 2
 	grid.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	grid.add_theme_constant_override("h_separation", Tokens.S3)
 	grid.add_theme_constant_override("v_separation", Tokens.S3)
-	col0.add_child(grid)
+	body.add_child(grid)
 	var group := ButtonGroup.new()
 	for k in RiderPanels.KITS:
 		var kit_look: Dictionary = Rider.DEFAULT_LOOK.duplicate()
@@ -626,6 +656,7 @@ func _setup_rider(content: HBoxContainer) -> void:
 		b.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		var same := true
 		for key in kit_look:
+			if key in RiderPanels.NON_KIT: continue
 			if str(look.get(key, "")) != str(kit_look[key]): same = false; break
 		b.button_pressed = same
 		var col := VBoxContainer.new()
@@ -646,12 +677,77 @@ func _setup_rider(content: HBoxContainer) -> void:
 		col.add_child(nm)
 		b.add_child(col)
 		b.pressed.connect(func():
-			RiderPanels.save_look(kit_look)
-			hero_view.set_look(kit_look)
-			hero_name.text = String(k[0]).to_upper()
-			if game and game.rider: game.rider.set_look(kit_look))
+			var cur := RiderPanels.load_look()
+			var merged := kit_look.duplicate()
+			for key in RiderPanels.NON_KIT: merged[key] = cur[key]   # a kit changes the clothes, not the head / plate
+			RiderPanels.save_look(merged)
+			hero_view.set_look(merged)
+			if game and game.rider: game.rider.set_look(merged))
 		grid.add_child(b)
-	col0.add_child(UITheme.make_button("FINE TUNE IN THE RIDER ROOM", _open_garage.bind("rider"), "link", Tokens.T_MD))
+
+## change some look keys (helmet / hair / face / plate) and show them at once
+func _look_set(d: Dictionary) -> void:
+	var lk := RiderPanels.load_look()
+	lk.merge(d, true)
+	RiderPanels.save_look(lk)
+	if is_instance_valid(hero_view): hero_view.set_look(lk)
+	if game and game.rider: game.rider.set_look(lk)
+
+const HAIR_COLOURS := ["16130f", "2a1a10", "4a3022", "7a4e2b", "b07a3c", "d9b36a", "e8d9a8", "8a8a8a", "d8d8d8", "8c2f1f", "c8452a", "3b5bd6", "d22fbf", "35a86a"]
+const SKIN_TONES := ["fbe3d0", "f3d0b4", "efc29f", "e0a982", "c98d68", "a96f4d", "7d4c33", "5a3624"]
+const EYE_COLOURS := ["4a6b8a", "2f7de1", "35a86a", "7a8f3b", "8a5a2b", "4a2f1c", "6b6f75", "7b3fe4"]
+
+func _char_hair(body: VBoxContainer) -> void:
+	var look := RiderPanels.load_look()
+	body.add_child(UITheme.caption("HEAD"))
+	var grid := GridContainer.new()
+	grid.columns = 3
+	grid.add_theme_constant_override("h_separation", Tokens.S2)
+	grid.add_theme_constant_override("v_separation", Tokens.S2)
+	var grp := ButtonGroup.new()
+	var opts := [["HELMET", "1", "long"]]
+	for k in Hair.STYLES:
+		opts.append([String(Hair.STYLES[k].label).to_upper() + " HAIR", "0", k])
+	for o in opts:
+		var b := UITheme.make_button(o[0], Callable(), "chip", Tokens.T_MD)
+		b.toggle_mode = true; b.button_group = grp
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.custom_minimum_size.y = 56
+		b.button_pressed = str(look.helmetOn) == o[1] and (o[1] == "1" or str(look.hairStyle) == o[2])
+		b.pressed.connect(func(): _look_set({"helmetOn": o[1], "hairStyle": o[2]}))
+		grid.add_child(b)
+	body.add_child(grid)
+	body.add_child(UITheme.caption("HAIR COLOUR"))
+	body.add_child(_swatch_grid(str(look.hair), func(h): _look_set({"hair": "#" + h}), HAIR_COLOURS, 7, 44))
+
+func _char_face(body: VBoxContainer) -> void:
+	var look := RiderPanels.load_look()
+	body.add_child(UITheme.caption("SKIN TONE"))
+	body.add_child(_swatch_grid(str(look.skin), func(h): _look_set({"skin": "#" + h}), SKIN_TONES, 8, 44))
+	var bd := UITheme.make_button("FACIAL HAIR", Callable(), "chip", Tokens.T_MD)
+	bd.toggle_mode = true
+	bd.button_pressed = str(look.beard) != "0"
+	bd.toggled.connect(func(v: bool): _look_set({"beard": "1" if v else "0"}))
+	body.add_child(bd)
+
+func _char_plate(body: VBoxContainer) -> void:
+	var look := RiderPanels.load_look()
+	body.add_child(UITheme.caption("RACE PLATE ON THE BACK"))
+	var on := UITheme.make_button("SHOW THE PLATE", Callable(), "chip", Tokens.T_MD)
+	on.toggle_mode = true
+	on.button_pressed = str(look.bibOn) != "0"
+	on.toggled.connect(func(v: bool): _look_set({"bibOn": "1" if v else "0"}))
+	body.add_child(on)
+	body.add_child(UITheme.caption("NUMBER"))
+	var num := LineEdit.new()
+	num.text = str(look.bibNumber); num.max_length = 3; num.custom_minimum_size.y = Tokens.H_CHIP
+	num.text_changed.connect(func(t: String): _look_set({"bibNumber": t}))
+	body.add_child(num)
+	body.add_child(UITheme.caption("HEADER LINE"))
+	var hdr := LineEdit.new()
+	hdr.text = str(look.bibText); hdr.max_length = 30; hdr.custom_minimum_size.y = Tokens.H_CHIP
+	hdr.text_changed.connect(func(t: String): _look_set({"bibText": t}))
+	body.add_child(hdr)
 
 ## step 3: the Garmin (bike computer) model: controls left, a big 3D close-up right
 func _setup_computer(content: HBoxContainer) -> void:

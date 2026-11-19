@@ -41,6 +41,7 @@ func _init() -> void:
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	env.ambient_light_energy = 1.0
+	env.tonemap_exposure = 0.9
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR   # keeps the backdrop exactly the eggshell colour
 	env.adjustment_enabled = true
@@ -58,7 +59,7 @@ func _init() -> void:
 	fl.position.y = -PODIUM_H
 	vp.add_child(fl)
 	var pod_m := StandardMaterial3D.new()
-	pod_m.albedo_color = Color(0.84, 0.82, 0.78)
+	pod_m.albedo_color = Color(0.93, 0.91, 0.88)
 	pod_m.roughness = 0.4
 	var pod := MeshInstance3D.new()
 	var cm := CylinderMesh.new()
@@ -95,19 +96,19 @@ static func _studio_hdri() -> ImageTexture:
 		var el := (0.5 - (y + 0.5) / h) * PI   # + up
 		for x in w:
 			var az := (x + 0.5) / w * TAU
-			var v := 0.06 + 0.06 * sin(el)   # a dark room: most of the shape comes from the lights
-			if el < -0.05: v = 0.02
-			# tall softboxes to the left, right and behind (nothing overhead): bright edges down the frame,
-			# forks and tyres, and long reflections along the paint
-			for ca in [PI * 0.5, PI * 1.5]:
-				var sa := absf(angle_difference(az, ca))
-				v += (1.0 - smoothstep(0.30, 0.42, sa)) * smoothstep(-0.12, 0.0, el) * (1.0 - smoothstep(0.75, 0.9, el)) * 7.0
+			var v := 0.16 + 0.14 * sin(el)   # a dim grey room: shadows stay readable instead of going black or blowing out
+			if el < -0.05: v = 0.07
+			# a wide soft key at the front left, for the face of the bike / rider
+			var ka := absf(angle_difference(az, 5.5))
+			v += (1.0 - smoothstep(0.35, 0.6, ka)) * smoothstep(-0.1, 0.1, el) * (1.0 - smoothstep(0.5, 0.8, el)) * 1.6
+			# tall strips right and behind: bright edges down the frame, forks and tyres, long reflections in the paint
+			var ra := absf(angle_difference(az, PI * 0.5))
+			v += (1.0 - smoothstep(0.12, 0.2, ra)) * smoothstep(-0.12, 0.0, el) * (1.0 - smoothstep(0.75, 0.9, el)) * 2.6
 			var ba := absf(angle_difference(az, PI))
-			v += (1.0 - smoothstep(0.10, 0.18, ba)) * smoothstep(-0.12, 0.0, el) * (1.0 - smoothstep(0.7, 0.85, el)) * 12.0
-			# a weak front fill so the camera side is not black
-			var fa := absf(angle_difference(az, 5.4))
-			v += (1.0 - smoothstep(0.3, 0.7, fa)) * smoothstep(-0.1, 0.1, el) * (1.0 - smoothstep(0.4, 0.7, el)) * 0.8
-			img.set_pixel(x, y, Color(v, v, v * 1.04))
+			v += (1.0 - smoothstep(0.08, 0.14, ba)) * smoothstep(-0.12, 0.0, el) * (1.0 - smoothstep(0.7, 0.85, el)) * 4.0
+			var la := absf(angle_difference(az, PI * 1.5))
+			v += (1.0 - smoothstep(0.08, 0.14, la)) * smoothstep(-0.12, 0.0, el) * (1.0 - smoothstep(0.7, 0.85, el)) * 1.8
+			img.set_pixel(x, y, Color(v, v, v * 1.02))
 	return ImageTexture.create_from_image(img)
 
 
@@ -181,7 +182,8 @@ func _fit() -> void:
 
 func _process(dt: float) -> void:
 	if not visible: return
-	if not _drag: pivot.rotation.y += SPIN * dt
+	if OS.get_environment("BMX_TURN_YAW") != "": pivot.rotation.y = float(OS.get_environment("BMX_TURN_YAW"))   # tests: hold the turntable at this angle
+	elif not _drag: pivot.rotation.y += SPIN * dt
 	if _rider != null and _rider.visible:
 		_hand_t += dt
 		var breathe := sin(_hand_t * 1.6) * 0.006
