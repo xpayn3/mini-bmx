@@ -54,7 +54,7 @@ W/↑ pedal · S/↓ brake · A/D steer · **Space** hop/pump (hold to charge; *
 **S/W pressed fresh as you leave a lip: throw a back/front flip** · **W/S in the air: tilt the bike nose down/up (limited, body shift)** · **A/D in the air: lean the bike left/right (no spins)** · **brake + A/D when slow: pivot (pirouette)** · Shift sprint (stamina) · Q/E shift gears · F bail · Backspace back to
 start · R new world · B next bike · C next camera · Z/X rotate camera · +/- zoom · mouse drag orbit ·
 H records · **P / K / L** the tuning card on its Ride / Rider / Look tab · O photo mode · F1 hide HUD ·
-F12 screenshot · Esc pause. Gamepad (Xbox): triggers pedal/brake, left stick steer, A hop, X sprint, bumpers gears, Y camera,
+F12 screenshot · Esc pause. Gamepad (Xbox): triggers pedal/brake, left stick steer, X hop (jump), A sprint, bumpers gears, Y camera, D-pad left / right rotate the camera,
 **right stick = the rider's body, all the time**: up / down shifts the weight forward over the bars / back (pulled well back
 rolling = a **manual**, yanked fresh at a lip = a flip throw, in the air = nose down / up), left / right throws the bike over under
 the body (leaning alone turns, leaning with the steer turns harder + grips more, a quick **flick** whips the bike round; in the
@@ -67,6 +67,13 @@ right-stick yank from centre throws at a lip; a held lean never does).
 In the air the right stick is a **360° attitude control** (`air_stick`): y tilts the nose on top of the landing aim
 (`stickAirTilt`), x lays the bike over (`stickAirRoll`); only the very edge (> 0.88) keeps it turning over (flips). Test:
 `BMX_BODY=circle` circles the stick mid-air (`AIRSTICK` lines). Test runs ignore real controllers (`Settings._test_run`).
+Arcade-style feel: the stick is eased (`stickAirEase`), the tilt / lean springs go soft while it's used, and held at
+an **edge** it spins: top / bottom = flips (`edge_s` → `flip_in`), left / right = **flat spins** (`stick_yaw` on top of
+`air_yaw`, `stickYawRate`). Both build up gently (`stickSpinBuild`) and get faster the longer they're held
+(`stickSpinGrow`, up to 1.5 s); let go and they ease out. Near the landing a spin within ~57° of straight is twisted
+the rest of the way. Landed tricks are named "360", "720", "360 BACKFLIP"... In the air the rider's body drives it:
+counter-leans against the bike (`stickBodyCounter`) and stays steady while the bike tilts under it (`stickBodyTilt`).
+Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 
 ## 4. Project layout (`godot/`)
 
@@ -154,6 +161,8 @@ In the air the right stick is a **360° attitude control** (`air_stick`): y tilt
   stored in course order). Chunks read rocks / stakes / fences from per-chunk buckets, route features are
   binary-searched — nothing scans the whole course. `tools/trail_grow_probe.gd` checks all of it.
 
+- **Sponsor props** (`TrailCourse.chunk_gates` / `chunk_boards`, fixed spacing by centreline index so growing never moves them): a huge steel gantry with a sponsor banner over the trail every 300 m (`TrailGate.build`, made-up brands in `TrailGate.SPONSORS`, no collision, skipped on jumps) and breakable wooden roadside billboards every ~80 m (fence-style panel in `TerrainChunkBuilder._boards`, so the bike smashes them; the Label3D text is freed on smash). Probe: `BMX_GATE_PROBE=1`.
+
 ### Rider
 - Procedural meshes posed every frame from the bike's grips/pedals with 2-bone IK; style dictionary
   (`Rider.NEUTRAL`) with a slider per bone: hips, **spine (hunch/arch, side curve, bend low/high, twist)**,
@@ -172,6 +181,26 @@ In the air the right stick is a **360° attitude control** (`air_stick`): y tilt
   pedalling out of the saddle swings the bike ~±6° (±10° sprinting) under a steady body; elbows bend
   back and down, only a little out (the arm IK pole's sideways part scales with `elbowsOut`). Saved poses migrate once (`RiderPanels.POSE_VER` / `POSE_RETUNED`: only values still
   at the old default change). `BMX_LEAN_SHOT=prefix` saves shots of the first deep leans.
+- **Posture is the player's**: neutral (stick centred) is an upright attack position (torso ~30 deg from vertical);
+  the right stick forward folds the rider down into the full tuck (`aero` in `rider.gd`, nothing tucks by itself at
+  speed any more), back sits up tall and back.
+- **Skeleton safety limits** (`rider.gd`, just before the torso length clamp): hips in a box over the bike, the
+  torso bends only -26..80 deg forward and +-34 deg sideways from the bike's up; body counter-roll capped at ~50 deg.
+  Whatever stacks up (tuck, spin, lean, landing, sliders) the body can't be mangled.
+- **Air spin pose**: spinning in the air the rider sits tall and compact (knees in), head + shoulders lead.
+- **Style points** (`bike_physics._style_points` -> `hud.StylePop`): air time, 360s, flips, tweak, x1.5 clean landing,
+  combos (landings within 4 s chain and multiply); banked after 0.7 s, a crash before that = BAILED.
+- **Stick wheelie**: right stick pulled back while pedalling = a wheelie from walking pace (`stickWheelie`, height by
+  how far back), coasting = a manual (`manualAngle`); held > 1 s scores style points (WHEELIE / MANUAL x s).
+- **Pad steering curve** (`Settings.pad_expo`, Settings › Controller): the left stick's first travel tips the bike in
+  gently, full lock at the edge (keys unaffected).
+- **Pose memory resets on get-up** (`Rider.reset_pose`: wheelie / tuck / effort / turn smoothing) - a crash left a
+  "wheelie" behind that snapped the body about; the torso limit treats a chest below the hips as folded forward
+  (no flip-flop). Test: `BMX_BRAKETURN=secs` (sprint, then hard brake + full lock) prints `JITTER` / `JUMP` lines.
+- **Tune migrations**: `Tune.RETUNED_AT` lists keys whose defaults changed per version (only those reset).
+- **Tests run minimised**: `BMX_MIN=1` (they still render, screenshots work).
+- **Brake to a stop holds** (`brake_stop`): no creeping, even on slopes; a fresh brake press from a standstill backs up
+  (`brake_back`). Rolling backwards the cranks turn back with the wheel. Test: `BMX_HOLD_BRAKE=secs` (`HOLD` lines).
 - **Wheelie / manual pose** (`rider.gd`, `slope` from the physics): the front up on the ground is not a climb; the
   rider sits back, upright, arms long (leaning into the raised bars mangled the arms). Climbs use the ground slope.
 - **Joint limits** (`Rider.limb_ik`): elbows / knees are hinges that bend between `ELBOW_MIN`–`ELBOW_MAX` (12–150°) / `KNEE_MIN`–`KNEE_MAX` (4–160°); where a limb lines up with its pole the bend blends to a second pole (elbows: out + down, knees: up) instead of flipping, and the bend may swing round the limb at most `BEND_RATE` (6 rad/s). The slope body-levelling follows the bike pitch at most `PITCH_LEVEL_RATE` (it used to whip the torso mid-flip).
@@ -340,7 +369,7 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `BMX_GARAGE_CAM=orbit,pitch,dist`, `BMX_POSE=key=val,...` | garage camera / pose override |
 | `BMX_GARMIN_PAGE=0…5` | bike computer opens on that page (ride, trip, effort, air, elev, map) |
 | `BMX_ALERT_PROBE=1` | prints every Garmin trail alert along the first 2.4 km of trail |
-| `BMX_TRICK=back/front/side/manual/none` | autotest throws back / front at every lip (fresh S / W press) and keeps leaning in the air; none = hands off (side alternates A / D; manual holds the nose up at `BMX_MANUAL_PITCH` rad for back-wheel landings) and prints `TRICK` / `LAND` / `BOUNCE` / `CRASH` |
+| `BMX_TRICK=back/front/side/manual/none/spin` | spin = a flat spin in every jump, prints `SPIN … cam_yaw` (must hold still); the others: autotest throws back / front at every lip (fresh S / W press) and keeps leaning in the air; none = hands off (side alternates A / D; manual holds the nose up at `BMX_MANUAL_PITCH` rad for back-wheel landings) and prints `TRICK` / `LAND` / `BOUNCE` / `CRASH` |
 | `BMX_FOLLOW=1` (+ `BMX_TRICK=…`) | autotest steers along the trail centreline and gets up (back on the trail) 2 s after a crash; prints `TAKEOFF` / `JOLT` too — the way to get many jumps |
 | `BMX_CLIP_PROBE=1` (+ `BMX_NOUNCLIP=1`, `BMX_CLIP_SHOT=file.png`) | measures how deep the drawn tyres go into the ground; prints `CLIP … frames_inside=` (must be 0). NOUNCLIP turns the fix off for comparison; CLIP_SHOT saves a screenshot when a tyre was 12+ cm in |
 | `BMX_STEER=1` / `-1` (+ `BMX_STRAIGHT=1`) | autotest holds a steady left / right turn after 2 s (lean / leg-clearance shots) |

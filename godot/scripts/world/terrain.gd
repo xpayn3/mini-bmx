@@ -639,6 +639,9 @@ func _finalize(k: Vector2i) -> void:
 		mms[name] = mm
 		if spec[3]:
 			small.append(node.get_child(node.get_child_count() - 1))
+	if o.has("gates"):
+		for g in o["gates"]:
+			node.add_child(TrailGate.build(g))
 	var sheds: Array = o["sheds"]
 	for i in sheds.size():
 		var buf: PackedFloat32Array = sheds[i]
@@ -646,6 +649,14 @@ func _finalize(k: Vector2i) -> void:
 			_multimesh(node, TerrainGeo.SHEDS[i], TerrainGeo.MAT["shed"], buf, buf.size() / 16, true)
 	for p in o["panels"]:
 		p["meshes"] = mms
+		if p.has("bb"):   # roadside billboard: its sponsor text (freed when it is smashed)
+			var bb: Dictionary = p["bb"]
+			p["labels"] = []
+			for s in [1.0, -1.0]:
+				var bas: Basis = bb["basis"] if s > 0 else Basis(Vector3.UP, PI) * bb["basis"]
+				var lb := TrailGate.label(bb["text"], bb["col"], bb["w"], bb["h"], bas, bb["at"] + bb["nrm"] * 0.045 * s)
+				node.add_child(lb)
+				p["labels"].append(lb)
 	fin_parts[3] += (Time.get_ticks_usec() - tp) / 1000.0; tp = Time.get_ticks_usec()
 	var colliders: Array = o["colliders"]
 	var rec := {"cx": k.x, "cz": k.y, "node": node, "colliders": colliders, "small": small, "rock_keys": [],
@@ -804,6 +815,9 @@ func break_collider(c: Dictionary, vel: Vector3, at = null) -> bool:
 			var mm: MultiMesh = panel["meshes"].get(part["kind"])
 			if mm:
 				mm.set_instance_transform(part["i"], zero)
+		for lb in panel.get("labels", []):
+			if is_instance_valid(lb):
+				lb.queue_free()
 		return true
 	if c.has("cactus"):
 		var rec: Dictionary = c["cactus"]

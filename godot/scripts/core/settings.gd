@@ -11,10 +11,10 @@ const PATH := "user://settings.cfg"
 const ACTIONS := {
 	"pedal":        ["Pedal",                    [KEY_W, KEY_UP],      [],                         [[JOY_AXIS_TRIGGER_RIGHT, 1]]],
 	"brake":        ["Brake / roll back",        [KEY_S, KEY_DOWN],    [],                         [[JOY_AXIS_TRIGGER_LEFT, 1]]],
-	"steer_left":   ["Steer left",               [KEY_A, KEY_LEFT],    [JOY_BUTTON_DPAD_LEFT],     [[JOY_AXIS_LEFT_X, -1]]],
-	"steer_right":  ["Steer right",              [KEY_D, KEY_RIGHT],   [JOY_BUTTON_DPAD_RIGHT],    [[JOY_AXIS_LEFT_X, 1]]],
-	"hop":          ["Hop / pump (hold to charge)", [KEY_SPACE],       [JOY_BUTTON_A],             []],
-	"sprint":       ["Sprint",                   [KEY_SHIFT],          [JOY_BUTTON_X],             []],
+	"steer_left":   ["Steer left",               [KEY_A, KEY_LEFT],    [],                         [[JOY_AXIS_LEFT_X, -1]]],
+	"steer_right":  ["Steer right",              [KEY_D, KEY_RIGHT],   [],                         [[JOY_AXIS_LEFT_X, 1]]],
+	"hop":          ["Hop / pump (hold to charge)", [KEY_SPACE],       [JOY_BUTTON_X],             []],
+	"sprint":       ["Sprint",                   [KEY_SHIFT],          [JOY_BUTTON_A],             []],
 	"gear_easier":  ["Shift easier",             [KEY_Q],              [JOY_BUTTON_LEFT_SHOULDER], []],
 	"gear_harder":  ["Shift harder",             [KEY_E],              [JOY_BUTTON_RIGHT_SHOULDER], []],
 	"bail":         ["Bail",                     [KEY_F],              [JOY_BUTTON_B],             []],
@@ -26,8 +26,8 @@ const ACTIONS := {
 	"body_back":    ["Body back (manual)",       [KEY_KP_5],           [],                         [[JOY_AXIS_RIGHT_Y, 1]]],
 	"body_left":    ["Body lean left (flick)",   [KEY_KP_4],           [],                         [[JOY_AXIS_RIGHT_X, -1]]],
 	"body_right":   ["Body lean right (flick)",  [KEY_KP_6],           [],                         [[JOY_AXIS_RIGHT_X, 1]]],
-	"cam_left":     ["Rotate camera left",       [KEY_Z],              [],                         []],
-	"cam_right":    ["Rotate camera right",      [KEY_X],              [],                         []],
+	"cam_left":     ["Rotate camera left",       [KEY_Z],              [JOY_BUTTON_DPAD_LEFT],     []],
+	"cam_right":    ["Rotate camera right",      [KEY_X],              [JOY_BUTTON_DPAD_RIGHT],    []],
 	"cam_up":       ["Tilt camera up",           [],                   [],                         []],
 	"cam_down":     ["Tilt camera down",         [],                   [],                         []],
 	"zoom_in":      ["Zoom in",                  [KEY_EQUAL],          [JOY_BUTTON_DPAD_UP],       []],
@@ -103,6 +103,7 @@ const DEFAULTS := {
 	"wasted": true,          # crash: slow motion + "WASTED" screen
 	"blood": true,           # crash: blood smears on the ground, torn-off limbs on very hard crashes
 	"steer_sens": 1.0,       # analog steering response (1 = linear)
+	"pad_expo": 1.8,         # gamepad steering curve: higher = gentler near the centre
 	# interface
 	"ui_scale": 1.0,
 	"hud_gauge": true,
@@ -333,6 +334,7 @@ func apply() -> void:
 	var want := DisplayServer.WINDOW_MODE_WINDOWED
 	if mode == 1: want = DisplayServer.WINDOW_MODE_FULLSCREEN
 	elif mode == 2: want = DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN
+	if _test_run and OS.get_environment("BMX_MIN") != "": want = DisplayServer.WINDOW_MODE_MINIMIZED   # tests: out of the user's way
 	if DisplayServer.get_name() != "headless" and DisplayServer.window_get_mode() != want:
 		DisplayServer.window_set_mode(want)
 	var res: String = get_v("resolution")

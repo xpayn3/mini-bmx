@@ -71,6 +71,7 @@ func _ready() -> void:
 	add_child(player)
 	player.play()
 	pb = player.get_stream_playback()
+	_setup_chain()
 	var gs = load("res://scripts/game/GravelSynth.cs")
 	if gs != null and gs.can_instantiate():
 		gravel = gs.new()
@@ -86,10 +87,33 @@ func _ready() -> void:
 		fw.play()
 		fw_pb = fw.get_stream_playback()
 
+# chain rub: the gravel recording looped very quietly under everything; louder with wheel speed and
+# when the chain is loaded (pedalling), silent when stopped or in the air
+const CHAIN_DB := -27.0
+var chain := AudioStreamPlayer.new()
+var chain_amp := 0.0
+
+func _setup_chain() -> void:
+	var s = load("res://assets/audio/chain_rub.mp3")
+	if s == null: return
+	if s is AudioStreamMP3: s.loop = true
+	chain.stream = s
+	chain.bus = player.bus
+	chain.volume_db = -80.0
+	add_child(chain)
+	chain.play()
+
+func _update_chain(dt: float, va: float, on_ground: bool, pedal: float) -> void:
+	if chain.stream == null: return
+	var t := clampf(va / 8.0, 0.0, 1.0) * (0.55 + 0.45 * clampf(pedal, 0.0, 1.0)) if on_ground else 0.0
+	chain_amp += (t - chain_amp) * minf(1.0, dt * 6.0)
+	chain.volume_db = CHAIN_DB + linear_to_db(maxf(chain_amp, 0.0001)) if chain_amp > 0.003 else -80.0
+	chain.pitch_scale = 0.8 + clampf(va / 20.0, 0.0, 1.0) * 0.5
+
 func thud(power: float) -> void: shots.append(["thud", 0.0, clampf(power * 0.5, 0.2, 1.0)])
 func crunch() -> void: shots.append(["crunch", 0.0, 0.8])
 func crash() -> void: shots.append(["thud", 0.0, 1.0]); shots.append(["crunch", 0.0, 0.5])
-func shift() -> void: shots.append(["click", 0.0, 0.6])
+func shift() -> void: shots.append(["click", 0.0, 0.7])
 
 func update_audio(dt: float) -> void:
 	if pb == null: return
@@ -132,6 +156,7 @@ func update_audio(dt: float) -> void:
 	var poe := FreewheelSound.get_value("poe")
 	fw_clicks = fs / st.RWR / TAU * poe if coasting else 0.0
 	fw_amp = 0.23 * FreewheelSound.get_value("vol") * smoothstep(0.1, 1.0, fs) 		* (1.0 - FreewheelSound.get_value("fade") * clampf((fs - 8.0) / 10.0, 0.0, 1.0))
+	_update_chain(dt, va, on_ground, st.pedal)
 	_fill()
 	_fill_fw()
 	if OS.get_environment("BMX_AUDIO_PROBE") != "" and Engine.get_process_frames() % 30 == 0:
@@ -206,7 +231,16 @@ func _fill() -> void:
 				"crunch":
 					v = (randf() * 2 - 1) * exp(-t * 9.0) * amp * (0.6 + 0.4 * sin(t * 900.0))
 				"click":
-					v = (randf() * 2 - 1) * exp(-t * 120.0) * amp + sin(TAU * 2400 * t) * exp(-t * 90.0) * amp * 0.3
+					# shifter detent: a sharp snap (noise tick + bright metallic rings) then a softer
+					# lower "clack" as the lever seats ~34 ms later, over a small body thunk
+					var snap := (randf() * 2 - 1) * exp(-t * 700.0) * 0.9
+					snap += (sin(TAU * 3150.0 * t) * 0.5 + sin(TAU * 4720.0 * t) * 0.3 + sin(TAU * 1980.0 * t) * 0.45) * exp(-t * 170.0)
+					var t2 := t - 0.034
+					var clack := 0.0
+					if t2 > 0.0:
+						clack = ((randf() * 2 - 1) * exp(-t2 * 900.0) * 0.5 + (sin(TAU * 1320.0 * t2) * 0.6 + sin(TAU * 2610.0 * t2) * 0.3) * exp(-t2 * 230.0)) * 0.7
+					var body := sin(TAU * 190.0 * t) * exp(-t * 60.0) * 0.35
+					v = (snap + clack + body) * amp
 			buf[i] += Vector2(v, v)
 		sh[1] = t0 + n / RATE
 	shots = shots.filter(func(sh): return sh[1] < 0.8)

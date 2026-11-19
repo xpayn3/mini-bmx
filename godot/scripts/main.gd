@@ -296,6 +296,9 @@ func _autotest(seconds: float) -> void:
 	while (Time.get_ticks_msec() - t0) / 1000.0 < seconds:
 		var el := (Time.get_ticks_msec() - t0) / 1000.0
 		if OS.get_environment("BMX_IDLE_FOR") != "": pedal = el >= float(OS.get_environment("BMX_IDLE_FOR"))   # tests: stand still, then ride off
+		if OS.get_environment("BMX_HOLD_BRAKE") != "" and el >= float(OS.get_environment("BMX_HOLD_BRAKE")):   # tests: brake held to the end
+			pedal = false; Input.action_press("brake")
+			if int(el * 4) % 2 == 0 and int(el * 40) % 20 == 0: print("HOLD t=%.1f v=%.3f pos=(%.2f, %.2f) slope=%.2f" % [el, game.phys.v, game.phys.x, game.phys.z, game.phys._g_pitch])
 		var stop_at := OS.get_environment("BMX_STOP_AT")   # tests: "a,b" = pedal, brake to a stop from a s, ride off again at b s
 		if stop_at != "":
 			var sa := stop_at.split(",")
@@ -305,12 +308,45 @@ func _autotest(seconds: float) -> void:
 			else: Input.action_release("brake")
 		if pedal and not (OS.get_environment("BMX_COAST") != "" and int(el) % 6 >= 3): Input.action_press("pedal")   # BMX_COAST: 3 s pedal / 3 s coast
 		else: Input.action_release("pedal")
+		if OS.get_environment("BMX_BRAKETURN") != "" and el > float(OS.get_environment("BMX_BRAKETURN")):   # tests: 2 s pedal up to speed, 1.5 s hard brake + full steer, repeat
+			var ph_bt = (el - float(OS.get_environment("BMX_BRAKETURN"))) 
+			var k_bt := fmod(ph_bt, 7.5)
+			var hard := k_bt > 6.0
+			game.jitter_on = hard
+			var jshot := OS.get_environment("BMX_JIT_SHOTS")   # tests: 8 frames in a row, 0.4 s into the first hard brake-turn
+			if jshot != "" and hard and k_bt > 6.4 and int(_probe.get("jit_n", 0)) < 8:
+				_probe.jit_n = int(_probe.get("jit_n", 0)) + 1
+				get_viewport().get_texture().get_image().save_png("%s_%d.png" % [jshot, _probe.jit_n])
+			if game.phys.crash_on:   # back up and on again after a crash (the probe skips crashed frames)
+				_probe.bt_crash = _probe.get("bt_crash", 0.0) + get_process_delta_time()
+				if _probe.bt_crash > 1.5:
+					_probe.bt_crash = 0.0
+					var crs_bt = game.terrain.field.course
+					var cp_bt: Array = crs_bt.at(maxf(0.0, crs_bt.nearest(game.phys.x, game.phys.z) if crs_bt.has_method("nearest") else 20.0))
+					game.get_up()
+					game.phys.reset_at(cp_bt[0], cp_bt[1], atan2(-float(cp_bt[3]), float(cp_bt[2])))
+					game._snap_prev()
+			if hard:
+				Input.action_release("pedal"); Input.action_press("brake")
+				Input.action_press("steer_left" if int(ph_bt / 7.5) % 2 == 0 else "steer_right")
+			else:
+				Input.action_release("brake"); Input.action_release("steer_left"); Input.action_release("steer_right"); Input.action_press("pedal"); Input.action_press("sprint")
 		var body_t := OS.get_environment("BMX_BODY")   # tests: the body stick. manual / fwd / lean / flick (from 3 s)
 		if body_t != "" and el >= 3.0:
 			var ph2: BikePhysics = game.phys
 			if body_t == "manual": Input.action_press("body_back", 0.9 if int(el) % 4 < 3 else 0.0)
 			elif body_t == "fwd": Input.action_press("body_fwd", 1.0)
 			elif body_t == "lightfwd": Input.action_press("body_fwd", 0.25)   # resting the stick a little forward (attack position)
+			elif body_t == "holdback":   # in the air: stick held fully back (wind up a back flip), hands off on the ground
+				var on2 := ph2.air and ph2.air_time > 0.08
+				Input.action_press("body_back", 1.0) if on2 else Input.action_release("body_back")
+				if on2 and OS.get_environment("BMX_BODY_PRINT") != "":
+					print("SPIN t=%.2f air=%.2f edge=%.2f hold=%.2f k=%.2f pitch_v=%.2f lean=%.2f" % [el, ph2.air_time, ph2.edge_s, ph2.spin_hold, ph2.spin_k, ph2.pitch_v, ph2.bike_lean])
+			elif body_t == "spin360":   # in the air: stick fully left until ~300° round, then let go (the landing twist finishes it)
+				var on3: bool = ph2.air and ph2.air_time > 0.08 and absf(ph2.spin_acc) < 5.3
+				Input.action_press("body_left", 1.0) if on3 else Input.action_release("body_left")
+				if ph2.air and OS.get_environment("BMX_BODY_PRINT") != "" and int(el * 20) % 2 == 0:
+					print("YAW t=%.2f air=%.2f stick_yaw=%.2f edge=%.2f hold=%.2f spin=%.0fdeg slip=%.2f" % [el, ph2.air_time, ph2.stick_yaw, ph2.yaw_edge_s, ph2.yaw_hold, rad_to_deg(ph2.spin_acc), ph2.slip])
 			elif body_t == "circle":   # in the air: circle the stick (0.8 deflection, ~1 turn / s); hands off on the ground
 				var ca := el * TAU * 1.0
 				var on := ph2.air and ph2.air_time > 0.08
@@ -402,6 +438,10 @@ func _autotest(seconds: float) -> void:
 				elif trick == "front": Input.action_press("pedal")
 				elif trick == "left": Input.action_press("steer_left")
 				elif trick == "right": Input.action_press("steer_right")
+				elif trick == "spin" and absf(ph.air_yaw) < 1.0:   # a flat spin (as the right stick gives)
+					ph.air_yaw = 7.0
+				if trick == "spin" and Engine.get_physics_frames() % 12 == 0:
+					print("SPIN t=%.2f cam_yaw=%.2f course=%.2f heading=%.2f" % [ph.air_time, game.cam.cam_yaw, ph.course, ph.heading])
 			await get_tree().process_frame
 			continue
 		elif trick != "":
@@ -451,7 +491,7 @@ func _autotest(seconds: float) -> void:
 			Input.action_press("steer_left", maxf(sv, 0.0)) if sv > 0 else Input.action_release("steer_left")
 			Input.action_press("steer_right", maxf(-sv, 0.0)) if sv < 0 else Input.action_release("steer_right")
 		elif pedal and not straight and int(el) % 6 == 3: Input.action_press("steer_left")
-		else: Input.action_release("steer_left")
+		elif not game.jitter_on: Input.action_release("steer_left")   # (BMX_BRAKETURN steers itself)
 		if pedal and not straight and int(el * 2) % 7 == 0: Input.action_press("hop")
 		elif OS.get_environment("BMX_AIRPULL") != "" and game.phys.air and game.phys.air_time > 0.1: Input.action_press("hop")   # tests: tuck in the air
 		else: Input.action_release("hop")
@@ -526,6 +566,7 @@ func _autotest(seconds: float) -> void:
 			for w in s.worst: print("  LIMBW %s %s" % [k, w])
 	print("AUTOTEST avg triangles/frame=%dk draw calls=%d" % [tris / maxi(frames, 1) / 1000, draws / maxi(frames, 1)])
 	print("AUTOTEST frames=%d fps=%.1f pos=(%.1f, %.1f, %.1f) v=%.2f crash=%s sane=%s" % [frames, frames / seconds, st.x, st.y, st.z, st.v, st.crash_on, st.is_sane()])
+	if OS.get_environment("BMX_BRAKETURN") != "": game.jitter_report()
 	if rec != null:
 		rec.set_recording_active(false)
 		rec.get_recording().save_to_wav(OS.get_environment("BMX_REC"))

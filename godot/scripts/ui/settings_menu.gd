@@ -82,6 +82,7 @@ func _gameplay() -> Control:
 	_option(p, "Speed units", "units", ["km/h", "mph"])
 	_slider(p, "Steering response (stick)", "steer_sens", 0.5, 2.0, 0.05, "%.2f", "Above 1: quicker off-centre; below 1: finer near centre")
 	_slider(p, "Stick deadzone", "deadzone", 0.05, 0.5, 0.01)
+	_slider(p, "Steering curve (stick)", "pad_expo", 1.0, 3.0, 0.05, "%.2f", "Higher = the first bit of stick leans the bike in more gently; full lock stays at the edge")
 	_check(p, "Controller vibration", "rumble")
 	_check(p, "Crash slow motion (WASTED)", "wasted", "Time slows down and the screen goes grey when you fall")
 	_check(p, "Blood", "blood", "Falls leave blood smears on the ground; very hard crashes can tear off an arm or a leg")

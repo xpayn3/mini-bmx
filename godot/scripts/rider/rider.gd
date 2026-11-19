@@ -145,7 +145,15 @@ func _init() -> void:
 	lens.emission_enabled = true
 	lens.emission = Color("#401a08")
 	lens.cull_mode = BaseMaterial3D.CULL_DISABLED
-	goggle_mats = {frame = mat("#f2f2ee", 0.45), foam = mat("#15171a", 1.0), strap = strap, lens = lens}
+	# the wordmark printed on the strap (white lettering texture, tinted black / white by the strap colour)
+	var logo := mat("#ffffff", 0.8)
+	logo.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	logo.cull_mode = BaseMaterial3D.CULL_DISABLED
+	goggle_mats = {frame = mat("#f2f2ee", 0.45), foam = mat("#15171a", 1.0), strap = strap, lens = lens, logo = logo}
+	var baker := StrapLogo.new()
+	baker.mat = logo
+	baker.text = "GIANT"
+	add_child(baker)
 	for i in 2:
 		var s := GEAR.build_shoe(shoe_mats)
 		add_child(s)
@@ -725,6 +733,9 @@ func reset_pose() -> void:
 	_bd_prev.fill(Vector3.ZERO)
 	pel_v = Vector3.ZERO
 	ch_v = Vector3.ZERO
+	# what the pose remembers from before (a crash tumbling the bike nose-up left a "wheelie" behind that
+	# shoved the body about after getting up)
+	sm_wheelie = 0.0; sm_aero = 0.0; sm_effort = 0.0; sm_turn = 0.0
 
 
 # ---------------- per-frame pose ----------------
@@ -743,7 +754,8 @@ static func _num(p: Dictionary, k: String, def := 0.0) -> float:
 var sm_turn := 0.0
 var sm_aero := 0.0
 var sm_effort := 0.0
-var sm_pitch0 := 0.0   # the slope the body levels against, rate-limited
+var sm_pitch0 := 0.0
+var sm_wheelie := 0.0   # the slope the body levels against, rate-limited
 const PITCH_LEVEL_RATE := 2.5   # rad/s
 var _fy_prev := NAN; var _fv_prev := NAN; var _facc := 0.0   # the frame's height / speed / acceleration (bump bounce)
 var bounce_stats := [0.0, 0, 0.0, 0.0]   # tests: sum of squared body offsets, samples, biggest offset
@@ -778,8 +790,11 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# speed tuck: from ~25 km/h the rider folds down over the bars for less drag (full by ~60 km/h):
 	# chest flatter and lower, hips back and down, elbows bend (the arm reach check pulls them in).
 	# Less while pedalling hard, none in the air (the jump / trick poses own that).
-	var aero_t: float = smoothstep(7.0, 17.0, absf(v)) * (1.0 - 0.5 * pedal) * (1.0 - air) * float(sty.get("aero", 1.0))
-	sm_aero += (aero_t - sm_aero) * (1.0 - exp(-3.0 * minf(dt, 0.1)))
+	# the tuck is the player's: the right stick pushed forward folds the rider down over the bars (full
+	# stick = the old full speed tuck). Neutral is an upright attack position; nothing tucks on its own
+	var bstick := clampf(_num(p, "bodyStick"), -1.0, 1.0)
+	var aero_t: float = clampf(bstick, 0.0, 1.0) * (1.0 - air) * float(sty.get("aero", 1.0))
+	sm_aero += (aero_t - sm_aero) * (1.0 - exp(-(3.0 + 12.0 * air) * minf(dt, 0.1)))   # off the ground the tuck goes at once
 	var aero: float = sm_aero
 
 	# attack position: rolling, a downhill rider stands off the saddle (knees and elbows soft, ready),
@@ -794,10 +809,14 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	pelvis.x += sty.hipX * (1 - 0.5 * pedal) - 0.05 * aero + 0.07 * eff   # forward over the cranks
 	pelvis.y += 0.04 * eff                                                   # up tall to stamp down
 	pelvis.y += sty.hipY * (1 - 0.6 * pedal)
+	pelvis.y -= 0.05 * smoothstep(0.8, 3.5, absf(_num(p, "airSpin"))) * air   # knees tucked up in a spin
 
 	# chest
 	# (pedalling out of the saddle the chest stays forward over the bars)
-	var ang: float = 0.72 - float(sty.pedalChest) * pedal + 0.12 * spr + 0.2 * eff + 0.15 * (comp / 0.3) + 0.08 * air + sty.lean * (1 - 0.5 * pedal) + 0.42 * aero
+	var ang: float = 0.52 - 0.2 * clampf(-bstick, 0.0, 1.0) - float(sty.pedalChest) * pedal + 0.12 * spr + 0.2 * eff + 0.15 * (comp / 0.3) + 0.08 * air + sty.lean * (1 - 0.5 * pedal) + 0.62 * aero
+	# spinning in the air: tall and compact over the bike (chest up, knees in), the head and shoulders lead
+	var spin_style: float = smoothstep(0.8, 3.5, absf(_num(p, "airSpin"))) * air
+	ang = lerpf(ang, 0.42, 0.7 * spin_style)
 	var L: float = sty.torso
 	var chest := Vector3(
 		pelvis.x + sin(ang) * L + 0.03 * pedal * (0.5 + 0.5 * bob),
@@ -816,10 +835,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# body stick (gamepad right stick): forward = chest low over the bars, back = hips dropped behind the
 	# saddle with the arms long (manuals)
 	var bs := clampf(_num(p, "bodyStick"), -1.0, 1.0)
-	if bs > 0.0:
-		chest += Vector3(0.07, -0.09, 0.0) * bs
-		pelvis.y -= 0.03 * bs
-	elif bs < 0.0:
+	if bs < 0.0:
 		pelvis += Vector3(0.04, 0.09, 0.0) * bs   # (bs < 0: back + down)
 		chest += Vector3(0.0, 0.03, 0.0) * bs
 	# keep the body level while the bike pitches (descents: almost fully; climbs: a little)
@@ -838,9 +854,22 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# they sit back with long arms and stay fairly upright (leaning into the bars crushed the arms and
 	# threw the elbows up). The garage has no slope: all of the pitch counts as slope there.
 	var slope0: float = clampf(_num(p, "slope", pitch0), -1.3, 1.3) if p.has("slope") else pitch0
-	var wheelie: float = clampf(pitch0 - slope0, 0.0, 1.1) * (1.0 - clampf(air * 3.0, 0.0, 1.0))
+	# (raw bike pitch vs raw slope: the smoothed pitch0 lags a slope that changes fast in a hard turn and gave
+	# false "wheelies" that shoved the body about) - and the result eases in / out
+	var raw_p := wrapf(_num(p, "pitch"), -PI, PI)
+	var wh_t: float = clampf(raw_p - slope0, 0.0, 1.1) * (1.0 - clampf(air * 3.0, 0.0, 1.0)) if p.has("slope") else 0.0
+	if wh_t < 0.08: wh_t = 0.0   # small pitch noise is not a wheelie
+	sm_wheelie = move_toward(sm_wheelie, wh_t, 2.5 * minf(dt, 0.1))
+	var wheelie: float = sm_wheelie
 	var base := pitch0 - wheelie   # the slope part of the bike's pitch
 	var pit := base * (0.2 if base > 0 else _num(p, "bodyLevel", 0.85)) + wheelie * 0.75   # most of a wheelie's tilt is taken back
+	# in the air, when the rider tilts the bike with the stick, the body stays and the bike rotates under
+	# it: nose down = arms push the bars away, hips back; nose up = bars pulled into the chest
+	var at := _num(p, "airTilt")
+	if at != 0.0:
+		pit += at
+		pelvis.x -= clampf(-at, 0.0, 0.6) * 0.12
+		chest.y -= absf(at) * 0.05
 	if pit != 0.0:
 		var c := cos(-pit)
 		var sn := sin(-pit)
@@ -872,7 +901,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		chest.x += climb * 0.42
 		chest.y -= climb * 0.24
 	# lean the BIKE, not the body: roll the body back toward upright about the pedals
-	var cr := _num(p, "counter")
+	var cr := clampf(_num(p, "counter"), -0.85, 0.85)   # past ~50 deg the hips swing off the bike and the legs cross the frame
 	if cr != 0.0:
 		var c := cos(cr)
 		var sn := sin(cr)
@@ -886,6 +915,9 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		chest.y = y0 + dy * c - dz * sn
 		chest.z = dy * sn + dz * c
 		pelvis.y -= absf(cr) * 0.12 * float(sty.turnLow)
+		# in the air a stick lean: the hips move out against the bike (the legs push it over)
+		var alx := _num(p, "airLeanX")
+		if alx != 0.0: pelvis.z += -signf(cr) * absf(alx) * 0.06
 		chest.x += absf(cr) * 0.05
 	# foot down at a stop: the bike leans onto the foot, the body stays nearly upright over it,
 	# hips a little lower and toward the foot (standing over the top tube)
@@ -991,6 +1023,19 @@ func update_pose(dt: float, p: Dictionary) -> void:
 				chest += d
 				pelvis += d * 0.35
 
+	# ---- safety limits. Whatever stacks up (tuck + spin + counter-lean + landing + style sliders), the
+	# skeleton stays humanly possible: hips in a box over the bike, the torso bends only so far from the
+	# bike's up (back / forward, sideways) and never folds below the hips
+	pelvis.x = clampf(pelvis.x, -0.6, 0.22)
+	pelvis.y = clampf(pelvis.y, 0.42, 1.08)
+	pelvis.z = clampf(pelvis.z, -0.22, 0.22)
+	var tv0 := chest - pelvis
+	var tl0 := maxf(tv0.length(), 1e-4)
+	# forward lean from upright. A chest at or below the hips counts as folded FORWARD whichever side of the
+	# hips it is (atan2 there flips between +-180 deg as it crosses over: the torso snapped back and forth)
+	var f_ang := 1.4 if tv0.y < 0.05 else clampf(atan2(tv0.x, tv0.y), -0.45, 1.4)
+	var s_ang := clampf(asin(clampf(tv0.z / tl0, -1.0, 1.0)), -0.6, 0.6)   # sideways
+	chest = pelvis + Vector3(sin(f_ang) * cos(s_ang), cos(f_ang) * cos(s_ang), sin(s_ang)) * tl0
 	# the torso never stretches or squashes: past its length range the hips follow the chest
 	var tv := chest - pelvis
 	var tl := tv.length()
@@ -1023,7 +1068,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	J[0] = head_p
 	J[1] = chest
 	J[2] = pelvis
-	var yaw: float = clampf((_num(p, "steer") * 1.2 + _num(p, "yawRate") * 0.15) * sty.headTurn, -1.0, 1.0) + sty.headYaw
+	var yaw: float = clampf((_num(p, "steer") * 1.2 + _num(p, "yawRate") * 0.15) * sty.headTurn, -0.8, 0.8) + sty.headYaw
 	var rx: float = (_num(p, "headRoll") if p.get("headRoll") != null else _num(p, "lean") * 0.6) + sty.headRoll
 	var rz: float = -0.12 * (ang - 0.72) + 0.04 * sin(t * 3.3) * wig - sty.headTilt
 	head.transform = Transform3D(GEAR.euler_xyz(rx, yaw, rz), head_p)
