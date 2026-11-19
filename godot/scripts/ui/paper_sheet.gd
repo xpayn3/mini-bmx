@@ -30,6 +30,7 @@ signal close_requested               # one of close_actions was pressed
 @export var fill := Vector2(0.86, 0.84)       # share of the screen the open sheet may take
 @export var tint := Color(1.02, 0.985, 0.92)  # the paper's colour (x the scan); kraft paper for menus etc.
 @export var live := false
+@export var page_alpha := false               # the page is printed over a content layer (set_content): keep its alpha
 @export var hold_roll := 0.0                  # held a little crooked (rad), for charm
 @export var unfold := true                    # false: it comes up and stays folded, showing the cover (a pamphlet)
 @export var auto_close := true                # close_actions fold it away (false: just close_requested)
@@ -93,7 +94,7 @@ func setup(p_size: Vector2i, c_size := Vector2i.ZERO) -> void:
 	page = SubViewport.new()
 	page.size = Vector2i(p_size.x, p_size.y + c_size.y)
 	page.disable_3d = true
-	page.transparent_bg = false
+	page.transparent_bg = page_alpha
 	page.gui_embed_subwindows = true
 	page.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	add_child(page)
@@ -190,6 +191,17 @@ func bake() -> void:
 	_use_texture(ImageTexture.create_from_image(img))
 
 
+## a second print under the page, seen through where the page is transparent, at rect (uv offset, uv size)
+## of its own texture - scrolling = moving rect (the map's world)
+func set_content(t: Texture2D, rect: Rect2) -> void:
+	_mat.set_shader_parameter("content_tex", t)
+	_mat.set_shader_parameter("use_content", 1.0)
+	set_content_rect(rect)
+
+func set_content_rect(rect: Rect2) -> void:
+	_mat.set_shader_parameter("content_rect", Vector4(rect.position.x, rect.position.y, rect.size.x, rect.size.y))
+
+
 func _use_texture(t: Texture2D) -> void:
 	_tex = t
 	_mat.set_shader_parameter("print_tex", t)
@@ -210,6 +222,7 @@ func open() -> void:
 	state = 1
 	_tl = 0.0
 	_reset_view()
+	if handheld: _show_hint()
 	visible = true
 	_fit_camera()
 	_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
@@ -415,63 +428,100 @@ func _fit_camera() -> void:
 	var dw := (sz.x / fill.x) * 0.5 / (th * asp)
 	var dh := (sz.y / fill.y) * 0.5 / th
 	_cam_d = maxf(dw, dh)
-	_cam.position = Vector3(_pan.x, _pan.y, _cam_d / _zoom)
+	_cam.position = Vector3(0, 0, _cam_d)
 	_cam.rotation = Vector3.ZERO
 
 
 # ------------------------------------------------------------------ held in the hands (handheld = true)
-## pad: right stick tilts the sheet a little, RT / LT zoom in / out, left stick pans while zoomed;
-## keys: W / S zoom, A / D pan; mouse: wheel zooms, drag pans. All eased; reset each time it opens.
+## pad: right stick tilts the sheet a little, RT / LT zoom in / out, left stick scrolls the print (_scroll);
+## keys: WASD / arrows scroll, Q / E zoom, numpad tilts; mouse: wheel zooms, drag scrolls. Reset on opening.
 @export var handheld := false
 const TILT_MAX := 0.3                # rad
-const ZOOM_MAX := 3.0
+const ZOOM_MAX := 2.5                # zoom = the print's scale (the sheet itself always stays fully in view)
+const ZOOM_MIN := 0.5
 var _cam_d := 1.0                    # camera distance that fits the sheet
 var _zoom := 1.0
 var _zoom_t := 1.0
-var _pan := Vector2.ZERO
-var _pan_t := Vector2.ZERO
 var _tilt := Vector2.ZERO
 var _drag := false
 
+var _hint: Label
+
+## the controls, small at the bottom of the screen (pad or keys, whichever is in use)
+func _show_hint() -> void:
+	if _hint == null:
+		_hint = Label.new()
+		_hint.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+		_hint.offset_top = -46; _hint.offset_bottom = -18
+		_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_hint.add_theme_font_override("font", UITheme.font())
+		_hint.add_theme_font_size_override("font_size", 17)
+		_hint.add_theme_color_override("font_color", Color(1, 1, 1, 0.85))
+		_hint.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
+		_hint.add_theme_constant_override("outline_size", 5)
+		add_child(_hint)
+	if Settings.pad_active:
+		_hint.text = "Left stick  travel      RT / LT  zoom      Right stick  tilt      %s  close" % Settings.prompt("map")
+	else:
+		_hint.text = "WASD / drag  travel      Q / E or wheel  zoom      Numpad  tilt      %s  close" % Settings.prompt("map")
+	_hint.modulate.a = 0.0
+
+
 func _reset_view() -> void:
-	_zoom = 1.0; _zoom_t = 1.0; _pan = Vector2.ZERO; _pan_t = Vector2.ZERO; _tilt = Vector2.ZERO; _drag = false
+	_zoom = 1.0; _zoom_t = 1.0; _tilt = Vector2.ZERO; _drag = false
 
 
 func _hand_controls(dt: float) -> void:
 	var tilt_t := Vector2.ZERO
+	var scroll := Vector2.ZERO
 	if state == 1 or state == 2:
 		tilt_t = Vector2(Input.get_action_strength("body_right") - Input.get_action_strength("body_left"),
 			Input.get_action_strength("body_fwd") - Input.get_action_strength("body_back")).limit_length(1.0) * TILT_MAX
-		var zin := Input.get_action_strength("pedal") - Input.get_action_strength("brake")
-		_zoom_t = clampf(_zoom_t * exp(zin * 1.5 * dt), 1.0, ZOOM_MAX)
-		var py := 0.0
+		# zoom: the pad's triggers (read straight, whatever pedal / brake are bound to), Q / E, the wheel
+		var zi := Input.get_action_strength("gear_harder") if not Settings.pad_active else 0.0
+		var zo := Input.get_action_strength("gear_easier") if not Settings.pad_active else 0.0
+		# scroll: the left stick, WASD / arrows (x = right, y = up the sheet)
+		if Input.is_physical_key_pressed(KEY_D) or Input.is_physical_key_pressed(KEY_RIGHT): scroll.x += 1
+		if Input.is_physical_key_pressed(KEY_A) or Input.is_physical_key_pressed(KEY_LEFT): scroll.x -= 1
+		if Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_UP): scroll.y += 1
+		if Input.is_physical_key_pressed(KEY_S) or Input.is_physical_key_pressed(KEY_DOWN): scroll.y -= 1
 		if not Settings._test_run:
 			for d in Input.get_connected_joypads():
-				var ay := Input.get_joy_axis(d, JOY_AXIS_LEFT_Y)
-				if absf(ay) > 0.2: py -= ay
-		var pin := Vector2(Input.get_action_strength("steer_right") - Input.get_action_strength("steer_left"), clampf(py, -1, 1))
-		_pan_t += pin * dt * 0.4 / _zoom
+				var st := Vector2(Input.get_joy_axis(d, JOY_AXIS_LEFT_X), -Input.get_joy_axis(d, JOY_AXIS_LEFT_Y))
+				if st.length() > 0.18: scroll += st * ((st.length() - 0.18) / 0.82) / st.length()
+				var rt := Input.get_joy_axis(d, JOY_AXIS_TRIGGER_RIGHT)
+				var lt := Input.get_joy_axis(d, JOY_AXIS_TRIGGER_LEFT)
+				if rt > 0.08: zi = maxf(zi, rt)
+				if lt > 0.08: zo = maxf(zo, lt)
+		scroll += test_scroll
+		_zoom_t = clampf(_zoom_t * exp((zi - zo) * 1.5 * dt), ZOOM_MIN, ZOOM_MAX)
 	else:   # folding away: back to the whole sheet
-		_zoom_t = 1.0; _pan_t = Vector2.ZERO
-	var lim := Vector2(cols * panel.x, rows * panel.y) * 0.5 * (1.0 - 1.0 / _zoom_t)
-	_pan_t = _pan_t.clamp(-lim, lim)
+		_zoom_t = 1.0
 	var e := 1.0 - exp(-dt * 9.0)
 	_tilt = _tilt.lerp(tilt_t, 1.0 - exp(-dt * 6.0))
+	if _hint: _hint.modulate.a = move_toward(_hint.modulate.a, 1.0 if state == 2 else 0.0, dt * 3.0)
 	_zoom = lerpf(_zoom, _zoom_t, e)
-	_pan = _pan.lerp(_pan_t, e)
-	_cam.position = Vector3(_pan.x, _pan.y, _cam_d / _zoom)
 	_sheet.transform.basis = Basis.from_euler(Vector3(-_tilt.y, _tilt.x, 0.0)) * _sheet.transform.basis
+	if scroll != Vector2.ZERO: _scroll(scroll.limit_length(1.0) * dt / _zoom, false)
+
+
+## the print scrolls under the paper (the map: travel the world on it). amount: stick / keys x seconds
+## (drag = false) or metres on the sheet (drag = true). Override; the base sheet doesn't scroll.
+func _scroll(_amount: Vector2, _drag_m: bool) -> void:
+	pass
+
+var test_scroll := Vector2.ZERO      # tests: as if the left stick were held
 
 
 func _hand_mouse(e: InputEvent) -> void:
 	if e is InputEventMouseButton:
 		if e.button_index == MOUSE_BUTTON_WHEEL_UP and e.pressed: _zoom_t = minf(_zoom_t * 1.15, ZOOM_MAX)
-		elif e.button_index == MOUSE_BUTTON_WHEEL_DOWN and e.pressed: _zoom_t = maxf(_zoom_t / 1.15, 1.0)
+		elif e.button_index == MOUSE_BUTTON_WHEEL_DOWN and e.pressed: _zoom_t = maxf(_zoom_t / 1.15, ZOOM_MIN)
 		elif e.button_index == MOUSE_BUTTON_LEFT: _drag = e.pressed
 	elif e is InputEventMouseMotion and _drag:
-		# metres on the sheet per screen pixel at this zoom
+		# metres on the sheet per screen pixel at this zoom; the print follows the hand
 		var mpp := 2.0 * _cam.position.z * tan(deg_to_rad(_cam.fov) * 0.5) / get_viewport().get_visible_rect().size.y
-		_pan_t -= Vector2(e.relative.x, -e.relative.y) * mpp
+		_scroll(Vector2(-e.relative.x, e.relative.y) * mpp, true)
 
 
 static func ease_in_out(a: float, b: float, x: float) -> float:

@@ -16,6 +16,9 @@ uniform float page_v = 0.6667;                // the front print's share of prin
 uniform float has_cover = 1.0;
 uniform vec3 tint = vec3(1.02, 0.985, 0.92);  // a warm, slightly aged white
 uniform float crumple = 0.7;                  // normal map strength
+uniform sampler2D content_tex : source_color, filter_linear_mipmap_anisotropic;   // a print under the page (the map's world)
+uniform vec4 content_rect = vec4(0.0, 0.0, 1.0, 1.0);   // the part of it on the sheet (uv offset, uv size)
+uniform float use_content = 0.0;
 
 instance uniform vec2 cell;                   // this panel's column / row
 instance uniform float cover;                 // 1 = the cover is printed on this panel's back
@@ -36,7 +39,15 @@ void fragment() {
 	paper = mix(paper, vec3(dot(paper, vec3(0.333))), 0.6) * tint;
 	vec3 col;
 	if (FRONT_FACING) {
-		col = paper * texture(print_tex, vec2(sheet_uv.x, sheet_uv.y * page_v)).rgb;
+		vec4 pg = texture(print_tex, vec2(sheet_uv.x, sheet_uv.y * page_v));
+		vec3 ink = pg.rgb;
+		if (use_content > 0.5) {
+			vec2 cu = content_rect.xy + sheet_uv * content_rect.zw;
+			bool inside = cu.x > 0.0 && cu.y > 0.0 && cu.x < 1.0 && cu.y < 1.0;
+			vec3 under = inside ? texture(content_tex, cu).rgb : vec3(1.0);
+			ink = mix(under, pg.rgb, pg.a);
+		}
+		col = paper * ink;
 	} else if (cover > 0.5 && has_cover > 0.5) {
 		vec2 cu = vec2(1.0 - UV.x, UV.y);   // seen from behind: mirror it back
 		col = paper * texture(print_tex, cover_rect.xy + cu * cover_rect.zw).rgb;
