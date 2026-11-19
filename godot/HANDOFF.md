@@ -134,6 +134,11 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   lies over; 3 points across the round casing, `tyre_hw`) against `Terrain.top_height` = max(exact mesh
   triangles `mesh_height`, `height` with domes / decks) and lifts / tilts the drawn bike until clear
   (the physics isn't touched). ~1–2 % frame time. Rock meshes are only as exact as their domes.
+- **Fakie (backward landing)**: landing > 2.2 rad off the travel no longer crashes ("FAKIE!"): `_land_trick` sets `_rev_land`, the touch-down
+  makes `course = heading`, `v = -v` (reverse speed may exceed 3 m/s via `rev_cap`, which shrinks back; braking works in reverse, pedalling
+  doesn't drive while `rev_cap > 3`). Rolling back (v < -0.5) with **both sticks towards the pad's centre** (left stick right + right stick
+  left, held 0.1 s) flips the travel (`course += PI`, `v = -v`, "SWITCH!") and the drawn heading swings round via `turn_off`. Test:
+  `BMX_FOLLOW=1 BMX_FAKIE=1` (`FAKIE` lines).
 - **Arcade air tilt** (`airArcade` 1 = on, 0 = pure physics): in the air W / S spin the bike at `airSpinRate`
   (eased by `airSpinResp`, stops at `airSpinStop` when let go), like old side-on bike games; the flight arc stays real.
 - **Pump**: hold Space into a lip: the legs drive off it (`popKick` into body_v, and `pump_lift` added to the

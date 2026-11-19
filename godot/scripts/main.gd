@@ -683,6 +683,18 @@ func _autotest(seconds: float) -> void:
 			_airshot_t = el
 			get_viewport().get_texture().get_image().save_png("%s_%d.png" % [airshot, _airshots])
 			_airshots += 1
+		if OS.get_environment("BMX_FAKIE") != "":   # tests: every jump lands backwards; 1 s later both sticks go towards the centre
+			var fp = game.phys
+			if fp.air and fp.air_time > 0.1 and fp.v > 0.0 and not _probe.has("fk_done"):
+				fp.slip = PI - 0.1; _probe.fk_land = el; _probe.fk_air = true
+			var since: float = el - float(_probe.get("fk_land", -99.0))
+			var go: bool = fp.v < -0.5 and not fp.air and since > 0.2 and since < 1.5
+			if _probe.has("fk_air") and since > 1.2 and fp.v > 0.5 and not fp.air: _probe.fk_done = true
+			if go: Input.action_press("steer_right"); Input.action_press("body_left")
+			else: Input.action_release("steer_right"); Input.action_release("body_left")
+			if int(el * 4) != int(_probe.get("fk_tick", -1)):
+				_probe.fk_tick = int(el * 4)
+				print("FAKIE t=%.2f v=%.1f air=%s crash=%s '%s' slip=%.2f head-course=%.2f turn_off=%.2f" % [el, fp.v, fp.air, fp.crash_on, fp.crash_pending, fp.slip, wrapf(fp.heading - fp.course, -PI, PI), fp.turn_off])
 		if trick != "" and game.phys.air:
 			var ph = game.phys
 			if ph.air_time > 0.06 and trick == "side": trick = "left" if int(el / 2.0) % 2 == 0 else "right"
