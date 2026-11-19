@@ -749,8 +749,11 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 	var on_ground := not st.air and not in_water and va > 0.2
 	var tc: Color = TRACK_DIRT if s == 1 else (dcol * 0.6 if sand else TRACK_GRASS)
 	var ta := 0.85 if s == 1 else (0.75 if sand else 0.45)
-	fx.track(0, front, f, ta if on_ground else 0.0, tc, 0.085)
-	fx.track(1, rear, f, (minf(1.0, ta + 0.2) if skid_fx else ta) if on_ground else 0.0, tc, 0.12 if skid_fx else 0.095, skid_fx)
+	# a tyre that rolled through blood prints red for a few metres (fx/blood.gd)
+	var tcf: Color = blood.tyre_color(0, front, tc) if blood and on_ground else tc
+	var tcr: Color = blood.tyre_color(1, rear, tc) if blood and on_ground else tc
+	fx.track(0, front, f, ta if on_ground else 0.0, tcf, 0.085)
+	fx.track(1, rear, f, (minf(1.0, ta + 0.2) if skid_fx else ta) if on_ground else 0.0, tcr, 0.12 if skid_fx else 0.095, skid_fx)
 
 # ---------------------------------------------------------------- ride control
 func respawn(new_world: bool) -> void:
