@@ -5,7 +5,8 @@ Then (Blender 4.1+):   blender -b -P tools/export_helmets.py -- <6datr211goggles
 
 Writes godot/assets/helmets/helmet_<id>.glb in the same convention as assets/helmet.glb: one node "helmet", centred on
 its shell, +X = the face, +Y up, sized like the stock shell. Two nodes: "helmet" (the shell, material "tex_shell") and
-"helmet_goggles" (the goggles + strap of the model, material "tex_goggles"), split by the FBX's material faces. The rider
+"helmet_goggles" (the goggles + strap of the model, material "tex_goggles": the Oakley Airbrake maps, which fit both models'
+goggle UVs), split by the FBX's material faces. The rider
 mounts the shell with its own goggles by default, or the model's goggles when look.helmetGoggles = "helmet".
 """
 import bpy, sys, os, json, struct, math
@@ -20,9 +21,9 @@ SHELL_LEN = 0.344    # the stock helmet's shell: 0.344 long, 0.272 high, 0.236 w
 
 SPECS = [
     # id, fbx, face direction, up (in the FBX's Blender world), shell material slot, goggle slot, shell maps, goggle maps
-    ("6d_black", FBX_6D, (-1, 0, 0), (0, 0, 1), 0, 5, ("6d_black_base.jpg", None, None), ("goggles_base.jpg", "goggles_orm.png", "goggles_normal.png")),
-    ("6d_silver", FBX_6D, (-1, 0, 0), (0, 0, 1), 0, 5, ("6d_silver_base.jpg", None, None), ("goggles_base.jpg", "goggles_orm.png", "goggles_normal.png")),
-    ("tld", FBX_TLD, (0, -1, 0), (0, 0, 1), 0, 1, ("tld_base.jpg", "tld_orm.png", "tld_normal.png"), ("goggles_base.jpg", "goggles_orm.png", "goggles_normal.png")),
+    ("6d_black", FBX_6D, (-1, 0, 0), (0, 0, 1), 0, 5, ("6d_black_base.jpg", None, None), ("oakley_base.jpg", "oakley_orm.png", "oakley_normal.png")),
+    ("6d_silver", FBX_6D, (-1, 0, 0), (0, 0, 1), 0, 5, ("6d_silver_base.jpg", None, None), ("oakley_base.jpg", "oakley_orm.png", "oakley_normal.png")),
+    ("tld", FBX_TLD, (0, -1, 0), (0, 0, 1), 0, 1, ("tld_base.jpg", "tld_orm.png", "tld_normal.png"), ("oakley_base.jpg", "oakley_orm.png", "oakley_normal.png")),
 ]
 
 

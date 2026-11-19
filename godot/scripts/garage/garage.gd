@@ -1433,20 +1433,21 @@ func _kit_page() -> void:
 		kits.add_child(b)
 	body.add_child(kits)
 	for g in RiderPanels.LOOK_ROWS:
+		var textured: bool = str(look.helmet) != "glory"   # the textured helmets carry their own paint + goggles: no colour rows
+		if textured and g[0] == "Goggles":
+			continue
 		_h(g[0].to_upper())
 		if g[0] == "Helmet":
-			body.add_child(UITheme.text("Model", SUB, Tokens.T_XS))
+			body.add_child(UITheme.text("Model (the textured ones come with their goggles)", SUB, Tokens.T_XS))
 			body.add_child(RiderPanels.helmet_picker(str(look.helmet), func(id):
 				look.helmet = id; _set_look(look); _set_tab("kit")))
-			if str(look.helmet) != "glory":
-				body.add_child(UITheme.text("Goggles", SUB, Tokens.T_XS))
-				body.add_child(RiderPanels.helmet_goggles_picker(str(look.helmetGoggles), func(id):
-					look.helmetGoggles = id; _set_look(look); _set_tab("kit")))
 		if g[0] == "Kit":
 			body.add_child(UITheme.text("Knee pads design", SUB, Tokens.T_XS))
 			body.add_child(RiderPanels.pad_style_picker(str(look.padStyle), func(id):
 				look.padStyle = id; _set_look(look); _set_tab("kit")))
 		for row in g[1]:
+			if textured and g[0] == "Helmet":
+				continue
 			var key: String = row[0]
 			var hb := HBoxContainer.new()
 			hb.add_theme_constant_override("separation", Tokens.S2)

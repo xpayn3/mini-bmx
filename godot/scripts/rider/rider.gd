@@ -23,16 +23,22 @@ const NEUTRAL := {hipX = 0.0, hipY = 0.0, lean = 0.0, elbowsOut = 0.0, kneesOut 
 	kneesFwd = 0.0, kneeOutL = 0.0, kneeOutR = 0.0, heelFwd = 0.0, heelUp = 0.0, footAngle = 0.0, footOut = 0.0}
 ## lookpanel.js DEFAULT_LOOK
 const DEFAULT_LOOK := {shell = "#16171a", peak = "#ececec", goggleFrame = "#f2f2ee", lens = "#ff7a2a", strap = "#ff6a4d",
-	jersey = "#ff6a4d", pants = "#1d2b64", gloves = "#ffd21f", shoes = "#26292f", shoeAccent = "#d8232a", pads = "#1b1c20", padStyle = "enduro", helmet = "glory", helmetGoggles = "game"}
+	jersey = "#ff6a4d", pants = "#1d2b64", gloves = "#ffd21f", shoes = "#26292f", shoeAccent = "#d8232a", pads = "#1b1c20", padStyle = "enduro", helmet = "glory"}
 ## where the helmet model sits on the head (head-local m / rad) and its scale
 ## helmet models picked in the Look tab (look.helmet): id -> [label, glb]. The glory one is the stock helmet (recolourable
-## shell / peak); the others are textured shells (tools/export_helmets.py) whose glb also holds the model's own goggles
-## ("helmet_goggles"): worn when look.helmetGoggles = "helmet", otherwise our goggles go on the shell
+## shell / peak, our goggles); the others are textured models (tools/export_helmets.py) that always wear their own goggles
+## + strap (the glb's "helmet_goggles" node: our goggles don't fit them)
 const HELMETS := {
 	"glory": ["GLORY", "res://assets/helmet.glb"],
 	"6d_black": ["6D ATR-2 black", "res://assets/helmets/helmet_6d_black.glb"],
 	"6d_silver": ["6D ATR-2 silver", "res://assets/helmets/helmet_6d_silver.glb"],
 	"tld": ["TLD SE5", "res://assets/helmets/helmet_tld.glb"],
+}
+## per helmet model: where it sits on the head, on top of HELMET_FIT (same keys)
+const HELMET_FITS := {
+	"6d_black": {x = -0.005, y = -0.02, tilt = 0.0, scale = 1.12},
+	"6d_silver": {x = -0.005, y = -0.02, tilt = 0.0, scale = 1.12},
+	"tld": {x = -0.005, y = -0.02, tilt = 0.0, scale = 1.12},
 }
 const HELMET_FIT := {x = 0.01, y = 0.0, tilt = 0.0, scale = 1.3}
 ## goggles (RiderGear.build_goggles): lens position / tilt / size, strap ellipse round the shell
@@ -342,7 +348,11 @@ static func _shell_top(tris: PackedVector3Array, x: float) -> float:
 ## Swap the built-in helmet for the model (helmet.glb's "helmet" MeshInstance3D: centred on its shell,
 ## +X = face, +Y up). Adds the moto goggles with the strap hugging the shell.
 func set_helmet(model: Node3D, own_goggles: Node3D = null) -> void:
-	var F := HELMET_FIT
+	var F: Dictionary = HELMET_FIT.duplicate()
+	F.merge(HELMET_FITS.get(helmet_id.get_slice("/", 0), {}), true)
+	var ev := OS.get_environment("BMX_HELMET_FIT").split(",", false)   # tests: "x,y,scale,tilt" for the model on
+	if ev.size() == 4 and helmet_id != "glory/game":
+		F = {x = float(ev[0]), y = float(ev[1]), scale = float(ev[2]), tilt = float(ev[3])}
 	var builtin := own_goggles != null   # the model's own goggles are worn: ours are not built
 	if helmet_model and is_instance_valid(helmet_model):   # swapping helmets: the old one goes
 		helmet_model.get_parent().remove_child(helmet_model)
@@ -403,6 +413,8 @@ func set_helmet(model: Node3D, own_goggles: Node3D = null) -> void:
 	face.mesh = fs
 	face.material_override = mat("#15181d", 0.9)
 	face.transform = Transform3D(Basis.from_scale(Vector3(1, 1.2, 0.95)), Vector3(0, -0.01, 0))
+	if builtin:   # the textured helmets sit a little smaller and lower: a smaller dark face so it never pokes out of the shell
+		face.transform = Transform3D(Basis.from_scale(Vector3(0.85, 0.95, 0.85)), Vector3(-0.01, -0.035, 0))
 	hel.add_child(face)
 	# strap hugging the shell: rays from outside looking back in (head space)
 	var hug := Callable()
@@ -471,7 +483,7 @@ static func _hug(tris: PackedVector3Array, x: float, y: float, dx: float, dz: fl
 func use_helmet(id: String) -> void:
 	if not HELMETS.has(id):
 		id = "glory"
-	var own := str(look.get("helmetGoggles", "game")) == "helmet" and id != "glory"
+	var own := id != "glory"
 	var key := id + ("/own" if own else "/game")
 	if key == helmet_id and helmet_model and is_instance_valid(helmet_model):
 		return
@@ -494,7 +506,7 @@ func set_look(l: Dictionary) -> void:
 	look.merge(l, true)
 	var L := look
 	var want := str(L.get("helmet", "glory"))
-	var want_key := want + ("/own" if str(L.get("helmetGoggles", "game")) == "helmet" and want != "glory" else "/game")
+	var want_key := want + ("/own" if want != "glory" else "/game")
 	if hel != null and want_key != helmet_id and HELMETS.has(want):   # another helmet / goggle source: mount it (set_helmet re-applies the look)
 		use_helmet(want)
 		return
