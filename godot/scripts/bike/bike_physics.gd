@@ -931,7 +931,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		if not was_air and not now_air and not was_f and cF:
 			var slap := maxf(0.0, vgF - (vy_in + XF * cos(pitch) * pitch_v))
 			if slap > 2:
-				shake = maxf(shake, minf(0.25, slap * 0.05)); compress_v -= minf(1.5, slap * 0.25)
+				compress_v -= minf(1.5, slap * 0.25)   # (no camera shake: at speed it rattled all the time)
 				if slap > 3.5: host.burst(Vector3(x + f.x * XF, _g_hf + 0.03, z + f.z * XF), 10, surf, 0.8)
 		c_f = cF; c_r = cR
 		if not now_air:
@@ -973,7 +973,8 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			compress_v -= minf(2.2, impact * 0.35) + (minf(1.2, impact * 0.2 + 0.4) if back_land else 0.0)
 			if host.susp != null: host.susp.land(maxf(0.0, -vy_in) * cos(_g_pitch) * 0.5 + impact * (0.57 if back_land else 0.4), front_air, rear_air)
 			if OS.get_environment("BMX_TRICK") != "": print("LAND impact=%.1f back=%s v_after=%.1f" % [impact, back_land, v])   # tests
-			if at > 0.15: shake = maxf(shake, minf(0.2, impact * 0.025))
+			# only a real landing shakes the camera (rollers at speed give lots of tiny hops)
+			if at > 0.4 and impact > 3.0: shake = maxf(shake, minf(0.2, (impact - 3.0) * 0.04))
 			if at > 0.15: host.burst(Vector3(x, y + 0.03, z), roundi(10 + minf(30, impact * 6)), surf, 0.8 + minf(1.5, impact * 0.25))
 			if at > 0.45 and impact < 5: flow_up()
 			host.on_landing(at, impact)

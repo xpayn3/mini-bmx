@@ -37,6 +37,9 @@ var cam_fov := 34.0
 var occ := 0.0
 var track_pos = null
 var target := Vector3.ZERO
+var _probe_on := OS.get_environment("BMX_CAM_PROBE") != ""
+var _pp1 := Vector3.ZERO; var _pp2 := Vector3.ZERO; var _pa1 := Vector3.ZERO; var _pa2 := Vector3.ZERO
+var _pn := 0; var _pj := 0.0; var _pk := 0; var _paj := 0.0; var _psh := 0
 var anchor := Vector3.ZERO   # what the camera is placed from (the rider); target = where it looks
 var pos_s := Vector3.ZERO
 var pos_v := Vector3.ZERO
@@ -223,6 +226,14 @@ func update_cam(dt: float) -> void:
 	if sk > 0:
 		global_position += Vector3(sin(t * 37) * sk * 0.12, sin(t * 29 + 1) * sk * 0.12, 0)
 	st.shake = maxf(0.0, st.shake - dt * 1.2)
+	if _probe_on:   # BMX_CAM_PROBE: how much the camera rattles (2nd difference per frame: position, aim)
+		var po: Vector3 = global_position - game.drawn_pos
+		var d2: Vector3 = po - 2.0 * _pp1 + _pp2
+		var a2: Vector3 = target - 2.0 * _pa1 + _pa2
+		if _pn > 2 and st.v > 8.0 and not st.air:
+			_pj += d2.length_squared(); _pk += 1; _paj += (a2 / maxf(1.0, global_position.distance_to(target))).length_squared()
+			if st.shake > 0.0: _psh += 1
+		_pp2 = _pp1; _pp1 = po; _pa2 = _pa1; _pa1 = target; _pn += 1
 	var aim := target
 	if bool(Settings.get_v("cam_keep")) and not (st.crash_on and game.ragdoll):
 		aim = _keep_rider_in_view(target, drawn + Vector3(0, 0.9, 0))
@@ -234,6 +245,7 @@ func update_cam(dt: float) -> void:
 	RenderingServer.global_shader_parameter_set("cam_eye", Vector4(global_position.x, global_position.y, global_position.z, 0.0))
 
 func _exit_tree() -> void:
+	if _probe_on and _pk > 0: print("CAMPROBE pos_jerk_mm=%.2f aim_jerk_mrad=%.2f shaking_frames=%d frames=%d" % [sqrt(_pj / _pk) * 1000.0, sqrt(_paj / _pk) * 1000.0, _psh, _pk])
 	RenderingServer.global_shader_parameter_set("cam_see", Vector4.ZERO)
 
 ## never lose the rider: if the look point would put them more than ~70% of the way to the frame edge

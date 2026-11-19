@@ -356,6 +356,7 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `BMX_KNEE_PROBE=1` | prints the biggest knee / hip move per frame and the torso stretch range, and logs (`KNEE …`) frames where a knee jumps |
 | `BMX_TUNE=topSpeed=1.6,grip=1.1` | overrides tuning values for a test run (not saved) |
 | `BMX_LAUNCH=pedal/sprint` (+ `BMX_LAUNCH_HOLD=secs`, `BMX_LAUNCH_SHOTS=dir/prefix`) | autotest stops at 3 s and pedals / sprints away: prints 0–15/25/35 km/h times, nose-up angle, wheelie time, loop-out; HOLD lets go of sprint after secs |
+| `BMX_CAM_PROBE=1` | prints `CAMPROBE` at the end: camera rattle (2nd difference of its offset from the rider, mm), aim jitter (mrad), frames with camera shake, all at > 29 km/h on the ground |
 | `BMX_VMAX=1` | autotest prints the top ground speed reached (`vmax_kmh`) |
 | `BMX_BIGAIR=1` (+ `BMX_TRICK=front/back`) | autotest launches every jump high (1.4 s air) so full flips happen |
 | `BMX_PITCH_POSE=rad` / `sweep` | draws the bike at a fixed pitch (or spinning through flips) for rider-pose shots |
