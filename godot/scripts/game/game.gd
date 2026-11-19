@@ -49,7 +49,8 @@ var light_ver := -1          # LightSettings.version last applied
 var light_t := 0.0
 var amb_base := 0.36         # flat ambient for the GI setting (SDFGI brings its own sky light)
 var speed_k := 0.0           # 0..1 speed feel (FOV boost, edge blur)
-var photo := false           # photo mode: time frozen, HUD hidden, focus on the rider
+var photo := false           # photo mode (O, game/photo_mode.gd): time frozen, free camera, lens / light / look card
+var photo_mode: PhotoMode    # built on first use
 var _photo_last := 0
 var _landed := 0.0           # landing impact to feed the mud next step
 var _cloud_t := 0.0
@@ -933,14 +934,21 @@ func _ragdoll_roots() -> Dictionary:
 	return out
 
 func toggle_photo() -> void:
+	if not photo and (phys == null or (paper_map and paper_map.busy())): return
 	photo = not photo
 	Engine.time_scale = 0.0 if photo else 1.0
 	hud.visible = input_enabled and not photo
 	_photo_last = Time.get_ticks_usec()
-	if not photo:
+	if photo_mode == null:
+		photo_mode = PhotoMode.new()
+		photo_mode.game = self
+		add_child(photo_mode)
+	if photo:
+		photo_mode.open()
+	else:
+		photo_mode.close()
 		cam_attr.dof_blur_amount = 0.06
-		_apply_settings()
-	flash("Photo mode  ·  drag to orbit, wheel to zoom, F12 to save, O to leave" if photo else "")
+		_apply_settings()   # also re-applies the level light (photo mode may have changed it)
 
 ## leave photo mode if it is on (pausing, the menu or a new ride must never inherit a frozen world)
 func exit_photo() -> void:
@@ -1034,15 +1042,7 @@ func _process(dt: float) -> void:
 		var now := Time.get_ticks_usec()
 		var rdt := minf((now - _photo_last) / 1e6, 0.1)
 		_photo_last = now
-		cam.update_cam(rdt)
-		var fd := cam.global_position.distance_to(drawn_pos + Vector3(0, 0.7, 0))
-		cam_attr.dof_blur_far_enabled = true; cam_attr.dof_blur_near_enabled = true
-		cam_attr.dof_blur_amount = 0.16
-		cam_attr.dof_blur_far_distance = fd + 1.0
-		cam_attr.dof_blur_far_transition = maxf(2.0, fd * 0.5)
-		cam_attr.dof_blur_near_distance = maxf(0.3, fd - 1.0)
-		cam_attr.dof_blur_near_transition = maxf(0.5, fd * 0.3)
-		(grade_rect.material as ShaderMaterial).set_shader_parameter("blur", 0.0)
+		photo_mode.update(rdt)
 		return
 	dt = minf(dt, 0.1)
 	t += dt

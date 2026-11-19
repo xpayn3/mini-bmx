@@ -182,6 +182,10 @@ func _start_ride() -> void:
 func _unhandled_input(e: InputEvent) -> void:
 	if not e.is_action_pressed("pause") or e.is_echo(): return
 	if is_instance_valid(settings_open) or garage: return
+	if state == RIDING and game and game.photo:   # Esc leaves photo mode first
+		game.toggle_photo()
+		get_viewport().set_input_as_handled()
+		return
 	if is_instance_valid(controls_open):   # Esc closes the controls card, back to the pause menu
 		_close_controls()
 		get_viewport().set_input_as_handled()
@@ -320,6 +324,12 @@ func _autotest(seconds: float) -> void:
 				var tv := OS.get_environment("BMX_MAP_TILT").split(",")
 				Input.action_press("body_right" if float(tv[0]) > 0 else "body_left", absf(float(tv[0])))
 				Input.action_press("body_fwd" if float(tv[1]) > 0 else "body_back", absf(float(tv[1])))
+		if OS.get_environment("BMX_PHOTO") != "" and el >= float(OS.get_environment("BMX_PHOTO")) and not _probe.get("photo", false):   # tests: photo mode (BMX_PHOTO_SET / _FLY / _SNAP)
+			_probe.photo = true; game.toggle_photo()
+		if OS.get_environment("BMX_PHOTO_CLOSE") != "" and el >= float(OS.get_environment("BMX_PHOTO_CLOSE")) and not _probe.get("photo_x", false):   # tests: O again
+			_probe.photo_x = true
+			var ko := InputEventKey.new(); ko.keycode = KEY_O; ko.physical_keycode = KEY_O; ko.pressed = true
+			Input.parse_input_event(ko)
 		if OS.get_environment("BMX_MAP_CLOSE") != "" and el >= float(OS.get_environment("BMX_MAP_CLOSE")) and not _probe.get("map_x", false):   # tests: M again
 			_probe.map_x = true
 			var ke := InputEventKey.new(); ke.keycode = KEY_M; ke.physical_keycode = KEY_M; ke.pressed = true
@@ -650,6 +660,7 @@ func _autotest(seconds: float) -> void:
 			print("LIMB %s frames=%d turn_max=%.1fdeg jump_max=%.1fcm flips=%d jumps=%d" % [k, s.frames, s.turn_max, s.jump_max * 100, s.flips, s.jumps])
 			for w in s.worst: print("  LIMBW %s %s" % [k, w])
 	print("AUTOTEST avg triangles/frame=%dk draw calls=%d" % [tris / maxi(frames, 1) / 1000, draws / maxi(frames, 1)])
+	if OS.get_environment("BMX_PHOTO") != "": print("AUTOTEST photo: on=%s time_scale=%.2f hud=%s fov=%.1f" % [game.photo, Engine.time_scale, game.hud.visible, game.cam.fov])
 	if OS.get_environment("BMX_MAP") != "": print("AUTOTEST map: open=%s time_scale=%.2f hud=%s" % [game.paper_map.busy() if game.paper_map else "none", Engine.time_scale, game.hud.visible])
 	print("AUTOTEST frames=%d fps=%.1f pos=(%.1f, %.1f, %.1f) v=%.2f crash=%s sane=%s" % [frames, frames / seconds, st.x, st.y, st.z, st.v, st.crash_on, st.is_sane()])
 	if OS.get_environment("BMX_BRAKETURN") != "": game.jitter_report()

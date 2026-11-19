@@ -201,7 +201,7 @@ func on_respawn() -> void:
 	air_card.bail()
 
 func _unhandled_input(e: InputEvent) -> void:
-	if get_tree().paused: return
+	if get_tree().paused or (game and game.photo): return   # photo mode has its own keys (and its own shot)
 	if e.is_action_pressed("records") and not e.is_echo():
 		_refresh_records(); records_panel.visible = not records_panel.visible
 	elif e.is_action_pressed("toggle_hud") and not e.is_echo():
