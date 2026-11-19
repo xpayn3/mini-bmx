@@ -142,6 +142,14 @@ func set_value(k: String, val: float) -> void:
 	base[k] = val
 	_rebuild()
 	save()
+	TunePresets.value_changed(k, val)
+
+## load a whole preset at once (TunePresets.select)
+func apply_values(d: Dictionary) -> void:
+	for k in d:
+		if defaults.has(k): base[k] = float(d[k])
+	_rebuild()
+	save()
 
 func reset_defaults() -> void:
 	base = defaults.duplicate()
