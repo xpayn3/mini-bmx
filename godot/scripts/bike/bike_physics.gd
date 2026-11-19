@@ -14,7 +14,7 @@ const G := 9.81
 const CLIMB := 1.2
 const HOP_PUSH := 0.09
 const FLOW_MAX := 5.0
-const GETUP_HOLD := 0.5
+const GETUP_HOLD := 0.25   # seconds holding hop to get up after a crash
 
 var host
 var T: Dictionary          # Tune.v (effective values)
