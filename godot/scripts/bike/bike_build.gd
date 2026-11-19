@@ -106,6 +106,37 @@ static func apply_rim_model(b: Dictionary, key: String) -> void:
 	b.wheels.rim_profile = m.profile; b.wheels.rim_material = m.material
 	b.wheels.rim_depth = m.depth; b.wheels.rim_width = m.width
 	b.logos.rims.logo = "text"; b.logos.rims.text = m.brand
+## DH forks (our approximation): travel, the lowers' paint and the stanchions' coating. Picking one sets
+## the fork travel and paints the Fork lowers / Stanchions parts; moving the travel slider makes it "custom".
+const FORK_MODELS := {
+	"fox40f":   {"brand": "FOX",        "label": "40 Factory",       "travel": 200, "spring": "Air",
+		"lowers": {"color": "1a1a1c", "color2": "ffffff", "finish": "gloss"}, "stanchions": {"color": "c8a24a", "color2": "ffffff", "finish": "anodized"}, "coat": "Kashima"},
+	"fox40p":   {"brand": "FOX",        "label": "40 Performance",   "travel": 200, "spring": "Air",
+		"lowers": {"color": "1a1a1c", "color2": "ffffff", "finish": "satin"}, "stanchions": {"color": "202024", "color2": "ffffff", "finish": "anodized"}, "coat": "Black"},
+	"boxxer_u": {"brand": "ROCKSHOX",   "label": "BoXXer Ultimate",  "travel": 200, "spring": "Air",
+		"lowers": {"color": "c4161c", "color2": "ffffff", "finish": "gloss"}, "stanchions": {"color": "c9cdd2", "color2": "ffffff", "finish": "chrome"}, "coat": "Silver"},
+	"boxxer_s": {"brand": "ROCKSHOX",   "label": "BoXXer Select",    "travel": 190, "spring": "Air",
+		"lowers": {"color": "1a1a1c", "color2": "ffffff", "finish": "matte"}, "stanchions": {"color": "202024", "color2": "ffffff", "finish": "anodized"}, "coat": "Black"},
+	"dh38":     {"brand": "ÖHLINS",     "label": "DH38 m.1",         "travel": 200, "spring": "Coil",
+		"lowers": {"color": "1a1a1c", "color2": "ffffff", "finish": "gloss"}, "stanchions": {"color": "d9b347", "color2": "ffffff", "finish": "anodized"}, "coat": "Gold"},
+	"bomber58": {"brand": "MARZOCCHI",  "label": "Bomber 58",        "travel": 200, "spring": "Coil",
+		"lowers": {"color": "d12b1f", "color2": "ffffff", "finish": "gloss"}, "stanchions": {"color": "202024", "color2": "ffffff", "finish": "anodized"}, "coat": "Black"},
+	"onyx":     {"brand": "DVO",        "label": "Onyx DH",          "travel": 200, "spring": "Coil",
+		"lowers": {"color": "5fbf3f", "color2": "ffffff", "finish": "gloss"}, "stanchions": {"color": "202024", "color2": "ffffff", "finish": "anodized"}, "coat": "Black"},
+	"dorado":   {"brand": "MANITOU",    "label": "Dorado Pro",       "travel": 200, "spring": "Air",
+		"lowers": {"color": "e9eaec", "color2": "ffffff", "finish": "gloss"}, "stanchions": {"color": "c9cdd2", "color2": "ffffff", "finish": "chrome"}, "coat": "Silver"},
+	"era":      {"brand": "EXT",        "label": "Era V2.1",         "travel": 180, "spring": "Coil",
+		"lowers": {"color": "1a1a1c", "color2": "ffffff", "finish": "satin"}, "stanchions": {"color": "e0b545", "color2": "ffffff", "finish": "anodized"}, "coat": "Gold"},
+}
+
+static func apply_fork_model(b: Dictionary, key: String) -> void:
+	b.suspension.fork_model = key
+	var m: Dictionary = FORK_MODELS.get(key, {})
+	if not m.has("brand"): return
+	b.suspension.fork_travel = m.travel
+	b.paint.fork = (m.lowers as Dictionary).duplicate()
+	b.paint.stanchions = (m.stanchions as Dictionary).duplicate()
+
 const CASSETTES := {
 	"dh7":   {"label": "7-speed DH 11–24", "cogs": [11, 12, 14, 16, 18, 21, 24]},
 	"dh7w":  {"label": "7-speed wide 11–28", "cogs": [11, 13, 15, 17, 20, 24, 28]},

@@ -299,6 +299,20 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - `FarHills` (`scripts/world/far_hills.gd`): coarse ground + far trees out to 2.6 km, built on a worker
   thread; past ~450 m it adds rolling ridges (title screen only) so every seed has a hilly skyline.
   Freed and the normal light restored when the ride starts. `BMX_SEED` now also fixes the menu world.
+- Menu (`main._show_menu`): two pages in one column under the title. Main: RIDE, GARAGE, world seed + NEW WORLD,
+  Settings / Controls / Quit. RIDE opens the **ride setup** page (`_menu_page_setup`): bike (Downhill / BMX) +
+  time of day (the `LightSettings.BUILTIN` presets), then GO. Test: `BMX_MENU_PAGE=setup`.
+- **Design tokens** (`scripts/ui/tokens.gd`, class `Tokens`): every colour, gap, corner, border and type size the
+  menus use. Look = flat, Metro-like: white paper cards, **no outlines, no drop shadows**, 1–3 px corners; the
+  selected / focused thing is shown by a fill or a coloured bar (`Tokens.MARK`), never an outline. Components in
+  `UITheme` are built only from tokens: `paper_theme()` (whole screens), `card_style()`, `marked()`, `btn_box()`,
+  `make_button(text, cb, kind)` / `style_button` (kinds primary / secondary / chip / link / tab), `display()`,
+  `caption()`, `text()`, `heading()`, `key_cap()`, `spacer()`. The title menu, the garage and the Settings / Controls
+  windows (`MenuBase`) use them; write new UI with them, no literal numbers or colours. The dark in-ride theme
+  (`get_theme()`, HUD) is not tokenised yet.
+- Display type: `UITheme.display_font(weight, slant)` = Bahnschrift (ships with Windows), condensed, optional
+  forward slant; used by the menu and the garage. Keep source files UTF-8: a 🎲 once got saved double-encoded
+  and showed as "ðŸŽ²" on the Random button.
 
 ### Garage (`--garage` or from the menu)
 - Brick room, painted-concrete floor, **open roller door straight behind the bike** with the real
@@ -314,7 +328,18 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   rise 0–50 mm, alloy / carbon; reshapes the dh.glb steer mesh, grips + levers follow), Shocks, Gears
   (chainring, cassettes), Rider (rider on **training rollers**, preview situations, every bone slider),
   Kit (rider standing beside the bike).
-- Compact UI drawn at `UI_SCALE` 0.82 with a fixed-width card; long labels ellipsize.
+- Compact UI drawn at `UI_SCALE` 0.82 with a fixed-width card; long labels ellipsize. Racing-game shop look on
+  flat white cards (tokens above): header card with the category bar (click or **Q / E**), every option list is a
+  ◀ VALUE ▶ stepper with a dot per option (`_choice`), segmented stat meters (`StatBar`), key-hint pill at the bottom.
+- **Part cards** (`_cards`): Bars (`Handlebar.MODELS`: Renthal, Race Face, Deity, Chromag, Spank, OneUp, ENVE…),
+  Shocks › Fork (`BikeBuild.FORK_MODELS`: Fox 40, BoXXer, Öhlins DH38, Bomber 58, DVO Onyx, Dorado, EXT Era; sets
+  travel + paints lowers / stanchions), Wheels › Tyres / Rims (the existing models). Each card shows a picture of the
+  part alone, rendered by `PartThumbs` (`scripts/garage/part_thumbs.gd`: an off-screen studio SubViewport, one part
+  per frame, cached by key; bars / forks are cut out of dh.glb's steer + fork_lower meshes, wheels from
+  `WheelGen`), brand, name and a spec line. Touching width / rise / material / travel makes the model "custom".
+- The **Coasting** rider preview is the showcase pose: sat on the saddle, sitting up (`relax` input to
+  `Rider.update_pose`: straighter back, chest up, chin up, whatever the saved riding pose).
+- Light: little volumetric haze (0.004), exposure 1.0, contrast 1.16 / saturation 1.18, depth fog from 90 m.
 - Bike height is placed from the **real tyre size and real axle positions** (no tyre clipping into the floor
   or the roller drums; verified with `BMX_TYRE_PROBE`).
 - Saved in `garage.json`; `GameState.bike_config()` applies it to the ride.

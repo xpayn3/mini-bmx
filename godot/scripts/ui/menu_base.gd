@@ -12,15 +12,11 @@ func _title() -> String: return ""
 func _pages() -> Array: return []   # ScrollContainers from _page()
 
 func _ready() -> void:
-	theme = UITheme.light_theme()
+	theme = UITheme.paper_theme()
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	var vp := get_viewport_rect().size
 	custom_minimum_size = Vector2(minf(880.0, vp.x - 60.0), minf(660.0, vp.y - 60.0))
-	var st := UITheme.box(Color.WHITE, 22, 22, INK, 3)
-	st.shadow_color = Color(0, 0, 0, 0.5)
-	st.shadow_size = 30
-	st.shadow_offset = Vector2(0, 10)
-	add_theme_stylebox_override("panel", st)
+	add_theme_stylebox_override("panel", UITheme.card_style(Tokens.PAPER, Tokens.R_XL, Tokens.S6))
 	UITheme.centre.call_deferred(self)
 	_build(0)
 
@@ -30,43 +26,23 @@ func _build(tab: int) -> void:
 	for c in get_children():
 		remove_child(c); c.queue_free()
 	var vb := VBoxContainer.new()
-	vb.add_theme_constant_override("separation", 14)
+	vb.add_theme_constant_override("separation", Tokens.S4)
 	add_child(vb)
 	var head := HBoxContainer.new()
-	head.add_theme_constant_override("separation", 12)
-	var slab := ColorRect.new()
-	slab.color = UITheme.ACCENT
-	slab.custom_minimum_size = Vector2(10, 36)
-	slab.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	head.add_child(slab)
-	var title := _lbl(_title(), 30, INK, true)
-	var slant := FontVariation.new()
-	slant.base_font = UITheme.font(true)
-	slant.variation_transform = Transform2D(Vector2(1, 0), Vector2(-0.22, 1), Vector2.ZERO)
-	title.add_theme_font_override("font", slant)
+	head.add_theme_constant_override("separation", Tokens.S4)
+	var title := UITheme.display(_title().to_upper(), Tokens.T_3XL, INK, Tokens.SLANT_TITLE)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(title)
-	var done := UITheme.button("Done", _close, 17)
-	done.custom_minimum_size = Vector2(110, 44)
-	done.add_theme_stylebox_override("normal", UITheme.box(INK, 12, 18))
-	done.add_theme_stylebox_override("hover", UITheme.box(Color("2d3647"), 12, 18))
-	done.add_theme_stylebox_override("pressed", UITheme.box(UITheme.ACCENT, 12, 18, INK, 2))
-	done.add_theme_stylebox_override("focus", UITheme.box(INK, 12, 18, UITheme.ACCENT, 3))
-	done.add_theme_color_override("font_color", Color.WHITE)
-	done.add_theme_color_override("font_hover_color", Color.WHITE)
-	done.add_theme_color_override("font_focus_color", Color.WHITE)
+	var done := UITheme.make_button("DONE", _close, "primary", Tokens.T_XL)
+	done.custom_minimum_size.y = Tokens.H_BTN
 	head.add_child(done)
 	vb.add_child(head)
-	var bar := ColorRect.new()
-	bar.color = UITheme.ACCENT
-	bar.custom_minimum_size.y = 4
-	vb.add_child(bar)
 	var tabs := TabContainer.new()
 	tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vb.add_child(tabs)
 	for page in _pages():
 		tabs.add_child(page.get_parent())   # the page's ScrollContainer
-	tabs.get_tab_bar().add_theme_constant_override("h_separation", 6)
+	tabs.get_tab_bar().add_theme_constant_override("h_separation", Tokens.S2)
 	tabs.current_tab = tab
 
 func _close() -> void:

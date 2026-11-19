@@ -907,6 +907,9 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# spinning in the air: tall and compact over the bike (chest up, knees in), the head and shoulders lead
 	var spin_style: float = smoothstep(0.8, 3.5, absf(_num(p, "airSpin"))) * air
 	ang = lerpf(ang, 0.42, 0.7 * spin_style)
+	# relaxed (garage showcase, `relax` 0..1): sat up tall, back straighter, chin up - whatever the saved riding pose
+	var relax := clampf(_num(p, "relax"), 0.0, 1.0)
+	ang = lerpf(ang, 0.22, 0.8 * relax)
 	var L: float = sty.torso
 	var chest := Vector3(
 		pelvis.x + sin(ang) * L + 0.03 * pedal * (0.5 + 0.5 * bob),
@@ -1171,7 +1174,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# pelvis: turn (yaw about up), roll (one hip drops, about forward), tilt (about the hip line)
 	var pel_b := Basis(Vector3.UP, float(sty.pelvisYaw) + clampf(sm_turn * 0.07 * float(sty.turnHips), -0.4, 0.4) + 0.3 * tab) * Basis(Vector3.RIGHT, float(sty.pelvisRoll) - clampf(sm_turn * 0.04 * float(sty.turnHips), -0.25, 0.25))
 	set_spine(hip, chest, pel_b * Vector3(0, 0, 1), tw * Vector3(0, 0, 1),
-		float(sty.spineCurve), float(sty.spineSide), float(sty.spineLow))
+		float(sty.spineCurve) * (1.0 - 0.7 * relax), float(sty.spineSide), float(sty.spineLow))
 	pelvis_mesh.transform = Transform3D(pel_b * Basis(Vector3.BACK, -(ang * 0.3) - float(sty.pelvisTilt)), pelvis)
 	set_limb(hood_hem, Vector3(pelvis.x, pelvis.y + 0.04, pelvis.z), hip.lerp(chest, 0.2))
 
@@ -1184,7 +1187,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	J[2] = pelvis
 	var yaw: float = clampf((_num(p, "steer") * 1.2 + _num(p, "yawRate") * 0.15) * sty.headTurn, -0.8, 0.8) + sty.headYaw
 	var rx: float = (_num(p, "headRoll") if p.get("headRoll") != null else _num(p, "lean") * 0.6) + sty.headRoll
-	var rz: float = -0.12 * (ang - 0.72) + 0.04 * sin(t * 3.3) * wig - sty.headTilt
+	var rz: float = -0.12 * (ang - 0.72) + 0.04 * sin(t * 3.3) * wig - sty.headTilt * (1.0 - 0.6 * relax)
 	head.transform = Transform3D(GEAR.euler_xyz(rx, yaw, rz), head_p)
 
 	var right := Vector3(0, 0, 1)

@@ -69,82 +69,145 @@ func _show_menu() -> void:
 	_set_riding(false)
 	if menu: menu.queue_free()
 	menu = Control.new()
-	menu.theme = UITheme.get_theme()
+	menu.theme = UITheme.paper_theme()
 	menu.set_anchors_preset(Control.PRESET_FULL_RECT)
 	menu.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(menu)
 	ui.move_child(menu, 0)
-	# a soft dusk shade behind the menu that fades out into the view
-	var grad := Gradient.new()
-	grad.set_color(0, Color(0.05, 0.04, 0.07, 0.72))
-	grad.set_color(1, Color(0.05, 0.04, 0.07, 0.0))
-	grad.add_point(0.55, Color(0.05, 0.04, 0.07, 0.5))
-	var gt := GradientTexture2D.new()
-	gt.gradient = grad
-	gt.width = 256; gt.height = 4
-	var shade := TextureRect.new()
-	shade.texture = gt
-	shade.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	shade.stretch_mode = TextureRect.STRETCH_SCALE
-	shade.set_anchors_preset(Control.PRESET_LEFT_WIDE)
-	shade.custom_minimum_size.x = 720
-	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	menu.add_child(shade)
+	# one flat white card down the left (the garage and settings use the same cards), the view beside it
+	var card := PanelContainer.new()
+	card.add_theme_stylebox_override("panel", UITheme.card_style(Tokens.PAPER, Tokens.R_XL, Tokens.S7))
+	card.set_anchors_preset(Control.PRESET_LEFT_WIDE)
+	card.offset_left = MENU_EDGE; card.offset_right = MENU_EDGE + MENU_W
+	card.offset_top = MENU_EDGE; card.offset_bottom = -MENU_EDGE
+	menu.add_child(card)
+	var outer := VBoxContainer.new()
+	card.add_child(outer)
 	var vb := VBoxContainer.new()
-	vb.set_anchors_preset(Control.PRESET_LEFT_WIDE)
-	vb.offset_left = 64; vb.offset_right = 460; vb.offset_top = 90; vb.offset_bottom = -40
-	vb.add_theme_constant_override("separation", 12)
-	menu.add_child(vb)
-	vb.add_child(UITheme.label("MINI BMX", 64, UITheme.ACCENT, true))
-	vb.add_child(UITheme.label("Downhill & BMX on endless procedural trails", 17, UITheme.MUTED))
-	var sp := Control.new(); sp.custom_minimum_size.y = 28; vb.add_child(sp)
-	var ride := UITheme.button("RIDE", _start_ride, 24)
-	ride.custom_minimum_size.y = 58
+	vb.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	vb.add_theme_constant_override("separation", Tokens.S3)
+	outer.add_child(vb)
+	# title: big condensed italic in ink, a yellow mark and the tagline under it
+	var head := VBoxContainer.new()
+	head.add_theme_constant_override("separation", -Tokens.S4)
+	head.add_child(UITheme.display("MINI BMX", Tokens.T_DISPLAY, Tokens.INK, Tokens.SLANT_TITLE))
+	var tag_row := HBoxContainer.new()
+	tag_row.add_theme_constant_override("separation", Tokens.S4)
+	var slab := ColorRect.new()
+	slab.color = Tokens.ACCENT
+	slab.custom_minimum_size = Tokens.SLAB_WIDE
+	slab.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	tag_row.add_child(slab)
+	tag_row.add_child(UITheme.caption("DOWNHILL  &  BMX  ·  ENDLESS TRAILS", Tokens.INK_SOFT, Tokens.T_MD))
+	head.add_child(tag_row)
+	vb.add_child(head)
+	menu_col = vb
+	outer.add_child(UITheme.text("v1.0  ·  Godot %s" % Engine.get_version_info().string, Tokens.INK_SOFT, Tokens.T_XS))
+	_menu_page_main()
+	if OS.get_environment("BMX_MENU_PAGE") == "setup": _menu_page_setup()   # tests: the ride setup page
+
+const MENU_EDGE := Tokens.S8
+const MENU_W := Tokens.CARD_W + Tokens.S8 + Tokens.S2
+
+## the column under the title: everything after the title block (index 1 on) is the page
+var menu_col: VBoxContainer
+
+func _menu_clear() -> void:
+	for i in range(menu_col.get_child_count() - 1, 0, -1):
+		var c := menu_col.get_child(i)
+		menu_col.remove_child(c); c.queue_free()
+	menu_col.add_child(UITheme.spacer(Tokens.S7))
+
+func _menu_page_main() -> void:
+	_menu_clear()
+	var vb := menu_col
+	var ride := _menu_button("RIDE", "Pick a bike and the time of day", _menu_page_setup, true)
 	vb.add_child(ride)
-	var gar := UITheme.button("GARAGE  ·  customise your downhill bike", _open_garage, 18)
-	gar.custom_minimum_size.y = 50
-	vb.add_child(gar)
-	# bike picker
+	vb.add_child(_menu_button("GARAGE", "Paint, wheels, bars, shocks, gears", _open_garage))
+	vb.add_child(UITheme.spacer(Tokens.S2))
+	# world seed
+	vb.add_child(UITheme.caption("WORLD"))
+	var seed_row := HBoxContainer.new()
+	seed_row.add_theme_constant_override("separation", Tokens.S2)
+	var se := LineEdit.new()
+	se.text = str(GameState.seed)
+	se.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	se.custom_minimum_size.y = Tokens.H_CHIP
+	se.tooltip_text = "World seed: type a number and press Enter"
+	se.text_submitted.connect(func(t):
+		if t.is_valid_int():
+			GameState.seed = int(t); restart_ride())
+	seed_row.add_child(se)
+	seed_row.add_child(UITheme.make_button("NEW WORLD", func(): GameState.new_seed(); se.text = str(GameState.seed); restart_ride(), "chip", Tokens.T_LG))
+	vb.add_child(seed_row)
+	vb.add_child(UITheme.spacer(Tokens.S4))
+	# secondary: a quiet list
+	for it in [["SETTINGS", _open_settings], ["CONTROLS", _show_controls], ["QUIT", func(): get_tree().quit()]]:
+		vb.add_child(UITheme.make_button(it[0], it[1], "link", Tokens.T_XL))
+	ride.grab_focus.call_deferred()
+
+## RIDE -> choose the bike and the time of day, then GO
+func _menu_page_setup() -> void:
+	_menu_clear()
+	var vb := menu_col
+	vb.add_child(UITheme.caption("BIKE"))
 	var bikes := HBoxContainer.new()
-	bikes.add_theme_constant_override("separation", 8)
+	bikes.add_theme_constant_override("separation", Tokens.S2)
 	var group := ButtonGroup.new()
 	for id in GameState.BIKES:
-		var b := Button.new()
-		b.text = GameState.BIKES[id].label
+		var b := UITheme.make_button(String(GameState.BIKES[id].label).to_upper(), Callable(), "chip", Tokens.T_LG)
 		b.toggle_mode = true
 		b.button_group = group
 		b.button_pressed = id == GameState.bike_id
-		b.custom_minimum_size = Vector2(0, 44)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.pressed.connect(func():
 			if GameState.bike_id != id:
 				GameState.bike_id = id; GameState.save(); restart_ride())
 		bikes.add_child(b)
-	vb.add_child(UITheme.label("BIKE", 13, UITheme.MUTED))
 	vb.add_child(bikes)
-	# world seed
-	vb.add_child(UITheme.label("WORLD", 13, UITheme.MUTED))
-	var seed_row := HBoxContainer.new()
-	seed_row.add_theme_constant_override("separation", 8)
-	var se := LineEdit.new()
-	se.text = str(GameState.seed)
-	se.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	se.custom_minimum_size.y = 44
-	se.text_submitted.connect(func(t):
-		if t.is_valid_int():
-			GameState.seed = int(t); restart_ride())
-	seed_row.add_child(se)
-	seed_row.add_child(UITheme.button("ðŸŽ² Random", func(): GameState.new_seed(); se.text = str(GameState.seed); restart_ride(), 16))
-	vb.add_child(seed_row)
-	var sp2 := Control.new(); sp2.custom_minimum_size.y = 12; vb.add_child(sp2)
-	vb.add_child(UITheme.button("Settings", _open_settings))
-	vb.add_child(UITheme.button("Controls", _show_controls))
-	vb.add_child(UITheme.button("Quit", func(): get_tree().quit()))
-	var foot := UITheme.label("v1.0 · Godot %s" % Engine.get_version_info().string, 12, UITheme.MUTED)
-	foot.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	foot.position = Vector2(64, -36)
-	menu.add_child(foot)
-	ride.grab_focus.call_deferred()
+	vb.add_child(UITheme.spacer(Tokens.S2))
+	vb.add_child(UITheme.caption("TIME OF DAY"))
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", Tokens.S2)
+	grid.add_theme_constant_override("v_separation", Tokens.S2)
+	var tgroup := ButtonGroup.new()
+	var active := LightSettings.get_active()
+	for n in LightSettings.BUILTIN:
+		var p := LightSettings.preset(n)
+		var sub := "AUTO" if float(p.cycle) > 0.5 else LightSettings.clock(float(p.time))
+		var b := UITheme.make_button("%s   %s" % [String(n).to_upper(), sub], LightSettings.select.bind(n), "chip", Tokens.T_MD)
+		b.toggle_mode = true
+		b.button_group = tgroup
+		b.button_pressed = n == active
+		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		grid.add_child(b)
+	vb.add_child(grid)
+	vb.add_child(UITheme.spacer(Tokens.S4))
+	var go := _menu_button("GO", "", _start_ride, true)
+	vb.add_child(go)
+	vb.add_child(UITheme.make_button("BACK", _menu_page_main, "link", Tokens.T_XL))
+	go.grab_focus.call_deferred()
+
+## a big menu button: display-font title (+ optional small line under it); primary = the yellow one
+func _menu_button(text: String, sub: String, cb: Callable, primary := false) -> Button:
+	var b := UITheme.make_button("", cb, "primary" if primary else "chip")
+	b.custom_minimum_size.y = Tokens.H_HERO if primary else Tokens.H_SUB
+	var m := MarginContainer.new()
+	m.set_anchors_preset(Control.PRESET_FULL_RECT)
+	m.add_theme_constant_override("margin_left", Tokens.S5 + Tokens.S2)
+	m.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var col := VBoxContainer.new()
+	col.alignment = BoxContainer.ALIGNMENT_CENTER
+	col.add_theme_constant_override("separation", -Tokens.S2)
+	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	col.add_child(UITheme.display(text, Tokens.T_3XL if primary else Tokens.T_2XL + Tokens.S1))
+	if sub != "":
+		col.add_child(UITheme.text(sub, Tokens.INK if primary else Tokens.INK_SOFT, Tokens.T_SM))
+	m.add_child(col)
+	b.add_child(m)
+	return b
 
 var garage: Garage
 
@@ -592,7 +655,7 @@ func _autotest(seconds: float) -> void:
 		if OS.get_environment("BMX_SKID") != "" and el > float(OS.get_environment("BMX_SKID")):   # tests: lock the rear (skid) from this time on
 			Input.action_release("pedal"); Input.action_press("brake")
 		await get_tree().process_frame
-		if OS.get_environment("BMX_DUST_SHOTS") != "":   # tests: dir/prefix â€” a screenshot every 0.5 s after BMX_DUST_T0 (3 s)
+		if OS.get_environment("BMX_DUST_SHOTS") != "":   # tests: dir/prefix - a screenshot every 0.5 s after BMX_DUST_T0 (3 s)
 			var t0d := float(OS.get_environment("BMX_DUST_T0")) if OS.get_environment("BMX_DUST_T0") != "" else 3.0
 			var nk := int((el - t0d) * 2.0)
 			if el > t0d and nk != _probe.get("dust_k", -1) and nk < 8:
