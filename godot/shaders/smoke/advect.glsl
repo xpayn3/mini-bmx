@@ -18,7 +18,7 @@ layout(set = 0, binding = 4, rgba16f) uniform restrict writeonly image3D cdst;
 layout(push_constant, std430) uniform Params {
 	vec4 a;   // dt, h (m per voxel), shift x, shift z (voxels)
 	vec4 b;   // wind x, wind z (m/s), source count, time
-	vec4 c;   // density fade /s, velocity relax /s, settle m/s, edge width (voxels)
+	vec4 c;   // density fade /s, velocity relax /s, dust rise m/s (through the air), edge width (voxels)
 	vec4 d;   // world x, z of the grid corner (m), turbulence strength, turbulence scale (1/m)
 	vec4 e;   // dispersal rate /s, dispersal reach (voxels), -, -
 } pc;
@@ -60,7 +60,10 @@ void main() {
 	vec3 mid = po - v * (0.5 * dt / h);
 	vec3 vm = texture(src, mid * inv).xyz;
 	vec4 s = texture(src, (po - vm * (dt / h)) * inv);
-	vec3 bd = po - (vm + vec3(0.0, -pc.c.z, 0.0)) * (dt / h);
+	// the dust rises through the air as it ages (stirred up by the wake): the trail starts low at the tyre
+	// and grows taller behind it, levelling off ~2.5 m up
+	float rise = pc.c.z * clamp(1.0 - p.y * h / 2.6, 0.0, 1.0);
+	vec3 bd = po - (vm + vec3(0.0, rise, 0.0)) * (dt / h);
 	float d = texture(src, bd * inv).w;
 	vec3 cm = texture(csrc, bd * inv).rgb;
 	// dispersal: the small eddies the grid can't hold mix the dust out into the air around it

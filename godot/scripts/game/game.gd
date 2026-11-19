@@ -361,7 +361,7 @@ func ground_dust(px: float, pz: float, s: int) -> Color:
 	var c: Color = terrain.ground_color(px, pz)
 	if dust != null and dust.sim != null:
 		if s == 0: return GRASS_SOIL_DUST
-		return c.lerp(Color.WHITE, 0.08)
+		return c.lerp(Color.WHITE, 0.16)   # the road's colour, a touch lighter (fine dust scatters more)
 	return c.lerp(Color.WHITE, 0.42 if s == 0 else 0.28)
 
 func burst(pos: Vector3, n: int, s: int, power: float, with_dust := true) -> void:
@@ -624,8 +624,8 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 		var dust_k := clampf((va - 5.0) / 9.0, 0.0, 1.0) if dust.sim != null else 0.0
 		var rate := 0.0
 		if in_water: rate = 0.0
-		elif dirt: rate = fast_k * 14 + dust_k * 150.0 + (clampf(va / 7.0, 0, 1) * 12.0 if dust.sim != null else 0.0) + (50.0 if skid_fx else 0.0) + carve_k * 60 + st.pedal * (6.0 if va < 3 else 0.0)
-		elif sand: rate = fast_k * 10 + dust_k * 130.0 + (clampf(va / 7.0, 0, 1) * 10.0 if dust.sim != null else 0.0) + (40.0 if skid_fx else 0.0) + carve_k * 45 + st.pedal * (4.0 if va < 3 else 0.0)
+		elif dirt: rate = fast_k * 14 + dust_k * 280.0 + (clampf(va / 7.0, 0, 1) * 12.0 if dust.sim != null else 0.0) + (50.0 if skid_fx else 0.0) + carve_k * 60 + st.pedal * (6.0 if va < 3 else 0.0)
+		elif sand: rate = fast_k * 10 + dust_k * 240.0 + (clampf(va / 7.0, 0, 1) * 10.0 if dust.sim != null else 0.0) + (40.0 if skid_fx else 0.0) + carve_k * 45 + st.pedal * (4.0 if va < 3 else 0.0)
 		else: rate = (14.0 if skid_fx else 0.0) + carve_k * 12
 		var fxd: float = Settings.get_v("fx_density")
 		# the dust trail: a GPU particle emitter at the rear tyre (fx/ride_dust.gd), thrown back and up,
