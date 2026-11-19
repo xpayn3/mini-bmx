@@ -32,7 +32,7 @@ var rig: BikeRig
 var phys: BikePhysics
 var cam: CameraRig
 var hud
-var wasted: Wasted          # crash slow-mo + "WASTED" look
+var wasted                  # crash slow-mo + "WASTED" look (fx/wasted.gd)
 var audio
 var sun: DirectionalLight3D
 var env: Environment
@@ -141,7 +141,7 @@ func _ready() -> void:
 	audio = load("res://scripts/game/ride_audio.gd").new()
 	audio.game = self
 	add_child(audio)
-	wasted = Wasted.new(self)
+	wasted = preload("res://scripts/fx/wasted.gd").new(self)
 	add_child(wasted)
 	Tune.changed.connect(func(): phys.T = Tune.v)
 	Settings.changed.connect(_apply_settings)
