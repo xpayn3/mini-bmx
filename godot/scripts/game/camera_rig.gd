@@ -109,7 +109,7 @@ func snap_to(p: Vector3) -> void:
 	trail_i = -1; trail_dir = Vector3.ZERO
 
 func _unhandled_input(e: InputEvent) -> void:
-	if get_tree().paused: return
+	if get_tree().paused or (game and game.photo): return   # photo mode drives the camera itself
 	var sens: float = Settings.get_v("mouse_sens")
 	var inv := -1.0 if Settings.get_v("invert_y") else 1.0
 	if e is InputEventMouseButton:

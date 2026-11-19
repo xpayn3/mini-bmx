@@ -53,7 +53,7 @@ Player data: `%APPDATA%\Godot\app_userdata\Mini BMX\` — `settings.cfg`, `tune.
 W/↑ pedal · S/↓ brake · A/D steer · **Space** hop/pump (hold to charge; **in the air: tuck the bike up**) ·
 **S/W pressed fresh as you leave a lip: throw a back/front flip** · **W/S in the air: tilt the bike nose down/up (limited, body shift)** · **A/D in the air: lean the bike left/right (no spins)** · **brake + A/D when slow: pivot (pirouette)** · Shift sprint (stamina) · Q/E shift gears · F bail · Backspace back to
 start · R new world · B next bike · C next camera · Z/X rotate camera · +/- zoom · mouse drag orbit ·
-H records · **M trail map** (pad: Share) · **P / K / L** the tuning card on its Ride / Rider / Look tab · O photo mode · F1 hide HUD ·
+H records · **M trail map** (pad: Share) · **P / K / L** the tuning card on its Ride / Rider / Look tab · **O photo mode** (free camera, see section 5) · F1 hide HUD ·
 F12 screenshot · Esc pause. Gamepad (Xbox): triggers pedal/brake, left stick steer, X hop (jump), A sprint, bumpers gears, Y camera, D-pad left / right rotate the camera,
 **right stick = the rider's body, all the time**: up / down shifts the weight forward over the bars / back (pulled well back
 rolling = a **manual**, yanked fresh at a lip = a flip throw, in the air = nose down / up), left / right throws the bike over under
@@ -359,6 +359,26 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   (every body / piece closed, piece volumes = whole, must say `PASS`).
 - Torn race tape as cloth-like ribbons, wind over the grass, drifting cloud shadows, speed blur / FOV.
 
+### Photo mode (O, `scripts/game/photo_mode.gd`)
+- Time freezes (`Engine.time_scale = 0`), HUD hidden, the camera comes loose: `Game._process` calls `PhotoMode.update(real dt)`
+  instead of the ride; `CameraRig` / `hud` ignore input while `game.photo`; Esc / O / pad B / the card's ✕ leave.
+- Camera: right drag look (mouse captured), left drag orbit the rider (`pivot()`: the bike +1 m, the ragdoll's centre
+  after a crash), middle / shift + left drag pan, wheel dolly, ctrl + wheel zoom; WASD fly, Q / E down / up, Shift ×4,
+  Alt ×¼, arrows look, Z / X roll, - / = zoom, R back to the start view. Pad: sticks fly / look, LT / RT down / up,
+  LB / RB roll, D-pad zoom, A shoot, X grid, Y hide the card. Kept within `RANGE` (70 m) of the rider and 15 cm above
+  `Terrain.top_height`.
+- Card (right, Tab / H hides it): **Camera** (fly speed, FOV, roll, look sensitivity, smoothing), **Focus** (DoF, auto focus
+  on the rider = yellow brackets, F = focus under the cursor, aperture, in-focus depth, foreground blur, bokeh shape;
+  DoF quality forced high while open), **Light** (time, sun direction / strength, exposure, haze: a copy of
+  `LightSettings.current` through `Game._apply_light`, never saved; the ride's light comes back on leaving), **Look**
+  (filters, saturation / contrast / brightness on the env, temperature, tint, fade, vignette, grain, lens fringing in
+  `grade.gdshader`'s `photo` / `p_*` uniforms), **Frame** (aspect bars, composition grid, hide rider / bike).
+- Enter / F12 / pad A / the button: UI hidden for two frames, the shot is cropped to the frame and saved as
+  `user://screenshots/photo_<date>.png`, shutter flash. Look / focus / frame prefs persist in `user://photo.cfg`
+  (not in test runs).
+- Tests: `BMX_PHOTO=secs` (+ `BMX_PHOTO_CLOSE=secs`, `BMX_PHOTO_SET=key=val,...`, `BMX_PHOTO_FLY=dx,dy,dz,yaw,pitch`,
+  `BMX_PHOTO_ORBIT=px`, `BMX_PHOTO_TAB=Look`, `BMX_PHOTO_SNAP=1` prints `PHOTO <path> WxH`).
+
 ### Paper: trail map (M) + pause leaflet (Esc) — and future paper menus
 - **`PaperSheet`** (`scripts/ui/paper_sheet.gd`, a CanvasLayer, layer 7): a folded sheet that comes up in front of the
   camera and unfolds like a real map (half fold first, then the accordion, outer panel first). Its own small 3D world
@@ -493,6 +513,7 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `BMX_PAPER_AT=secs` | freezes every paper sheet's animation at that time (pair with `BMX_SHOT` for a frame mid-unfold) |
 | `BMX_PAUSE=1` (+ `BMX_PAUSE_HOVER=0.62`) | pause leaflet at the end of an autotest; HOVER moves the mouse to that screen height and prints where it lands on the page |
 | `BMX_OFFSCREEN=1` | a normal window parked off the screens instead of `BMX_MIN`: **minimised windows draw late**, so timed screenshots of animations come out stale — use this for those |
+| `BMX_PHOTO=secs` (+ `BMX_PHOTO_CLOSE`, `_SET`, `_FLY`, `_ORBIT`, `_TAB`, `_SNAP`) | autotest opens photo mode, sets card values, moves the camera, saves a photo; prints `AUTOTEST photo:` |
 | `BMX_FENCE_ALL=1` | smashes every fence within 70 m at random 4–18 m/s, 7 s later counts pieces buried / invisible / freed (all must be 0) |
 
 Typical check after a change: build C# → `--autotest=10` with `BMX_SEED=4242` (sane=true, no SCRIPT ERROR)
