@@ -10,7 +10,7 @@ uniform sampler3D smoke : filter_linear, repeat_disable;
 uniform sampler2D hmap : filter_linear, repeat_disable;
 uniform sampler3D occ : filter_nearest, repeat_disable;     // dust near this 1.6 m brick? (empty-space skipping)
 uniform sampler3D detail : filter_linear, repeat_enable;   // tiling noise: billows the grid can't hold
-uniform float detail_amt = 0.85;
+uniform float detail_amt = 1.15;
 uniform vec3 drift = vec3(0.0);   // m: how far the detail has drifted (wind + slow rise)
 uniform sampler2D depth_tex : hint_depth_texture, filter_nearest;
 uniform vec3 origin;          // world x / z of the grid corner (y unused)
@@ -76,7 +76,7 @@ void fragment() {
 					if (cl < 0.0) cl = cloud_ratio(p);
 					float a = 1.0 - exp(-d * ext * ds);
 					// sun (self-shadowed through the dust, cloud shadows) + sky, a little ground bounce
-					vec3 L = dust_col * (sun_col * (s.g * phase * cl * (1.25 - n * 0.7)) + amb_col * (0.12 + 0.88 * s.b * s.b) + sun_col * 0.04);
+					vec3 L = dust_col * (sun_col * (s.g * phase * cl * (1.25 - n * 0.7)) + amb_col * (0.3 + 0.7 * s.b) + sun_col * 0.04);
 					col += T * a * L;
 					T *= 1.0 - a;
 					if (T < 0.01) break;

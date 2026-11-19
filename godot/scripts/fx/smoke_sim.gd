@@ -25,11 +25,11 @@ const PASSES := ["advect", "curl", "confine", "divergence", "pressure", "project
 const BRICK := 8                  # voxels per occupancy cell (empty-space skipping)
 
 ## tuning
-var density_fade := 0.1          # /s
+var density_fade := 0.2          # /s
 var vel_relax := 0.35             # /s back toward the wind
 var settle := 0.05                # m/s dust falling through the air
 var vorticity := 0.9
-var extinction := 5.5
+var extinction := 3.0
 var turbulence := 4.5             # curl-noise swirl force
 var turb_scale := 0.7             # 1/m: swirl size ~ 1.5 m
 var disperse := 2.2               # /s: how fast dust mixes out into the air (turbulent diffusion)

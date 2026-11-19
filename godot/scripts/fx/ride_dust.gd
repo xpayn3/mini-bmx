@@ -115,7 +115,7 @@ func attach(terrain, sun: DirectionalLight3D) -> void:
 ## per drawn frame: run the simulation around the rider
 func sim_step(dt: float, focus: Vector3, fwd: Vector3, wind: Vector2) -> void:
 	if sim == null: return
-	sim.wind = wind * 1.3
+	sim.wind = wind * 2.8   # m/s at gust strength 1
 	if _feed_on:
 		# roost comes out in gusts and clods, not a steady stream: pulse the amount, kick the air about
 		# (that jitter is what the sim turns into rolling, tearing billows)
@@ -211,7 +211,7 @@ func feed(rear: Vector3, throw_v: Vector3, rate: float, col: Color, alpha: float
 		if not _feed_on: return
 		_feed_p = rear + Vector3(0, 0.12, 0)
 		_feed_v = throw_v
-		_feed_rate = rate * alpha * alpha * 3.2   # grass (low alpha) barely dusts, dry dirt billows
+		_feed_rate = rate * alpha * alpha * 2.2   # grass (low alpha) barely dusts, dry dirt billows
 		_feed_r = 0.32 + clampf(rate / 120.0, 0.0, 1.0) * 0.3 + fan_deg / 70.0 * 0.15
 		sim.tint(col)
 		return

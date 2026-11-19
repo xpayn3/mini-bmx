@@ -68,8 +68,11 @@ void main() {
 	}
 	v = s.xyz;
 	// the still air around: drift with the wind, swirls die down slowly
-	vec3 wind = vec3(pc.b.x, 0.0, pc.b.y);
-	v = mix(v, wind, 1.0 - exp(-pc.c.y * dt));
+	// the wind is weaker near the ground (boundary layer); thin, spreading dust is carried off by it
+	// more readily than a fresh thick plume that still has its own momentum
+	vec3 wind = vec3(pc.b.x, 0.0, pc.b.y) * (0.45 + 0.55 * clamp(p.y * h / 2.0, 0.0, 1.0));
+	float thin = 1.0 - clamp(d * 1.5, 0.0, 1.0);
+	v = mix(v, wind, 1.0 - exp(-pc.c.y * (1.0 + 2.0 * thin) * dt));
 	if (id.y == 0) v.xz = mix(v.xz, wind.xz * 0.4, 1.0 - exp(-2.5 * dt));   // ground drag
 	d *= exp(-pc.c.x * dt);
 	// thin out toward the sides / top of the box so nothing ever ends in a hard wall
