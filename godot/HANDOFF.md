@@ -539,6 +539,14 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   trip (distance, avg, max), battery, GPS fix and power-on chime; test `BMX_RESPAWN=secs` presses Backspace then,
   backlight for 3 s on a button press or a new alert.
 
+### Bike computer models (ride setup page, right card)
+- `ComputerUnits` (`scripts/ui/computer_units.gd`): EDGE 840 (large, nav, 6 pages), CLASSIC 540 (medium, nav, 6), SPORT 130 (small, **no
+  navigation**, 5 pages), MINI 20 (tiny, no navigation, RIDE + TRIP). `scale` = HUD size, `nav` = trail alerts + MAP page, `order` = the pages.
+  The pick is `GameState.computer_id` (saved in save.cfg, used for every ride; `hud.set_computer()` mounts it, also live behind the menu).
+- RIDE → the right card shows a **3D close-up** (`ComputerPreview`, `scripts/ui/computer_preview.gd`) on a handlebar: drag to turn, wheel to
+  zoom, double click to reset; the screen is a live 2D face (RIDE / TRIP / MAP) in a texture. Test: `BMX_COMPUTER=mini` mounts a unit,
+  `BMX_MENU_PAGE=setup` + `--shot=..@12` (the menu needs ~10 s to load before the preview animates).
+
 ### Settings & tuning
 - Settings: display (mode, resolution, vsync, UI scale, FPS cap), graphics presets Low/Medium/High/Ultra
   + every option, audio buses, controls (rebind keys + pad), gameplay. Sliders apply on release.

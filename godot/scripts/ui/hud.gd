@@ -86,9 +86,11 @@ func _ready() -> void:
 	biome_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	root.add_child(biome_l)
 	gauge = GaugeView.new(); gauge.hud = self
-	gauge.page = clampi(int(OS.get_environment("BMX_GARMIN_PAGE")), 0, GaugeView.PAGES - 1)
 	gauge.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
 	gauge.size = Vector2(150, 224); gauge.position = Vector2(20, -244)   # +12 px top bezel for the flow LEDs
+	gauge.pivot_offset = Vector2(0, 224)   # smaller / larger models grow from the bottom left corner
+	set_computer()
+	gauge.page = clampi(int(OS.get_environment("BMX_GARMIN_PAGE")), 0, gauge.order.size() - 1)
 	root.add_child(gauge)
 	stamina = StaminaView.new(); stamina.hud = self
 	stamina.set_anchors_preset(Control.PRESET_TOP_RIGHT)
@@ -350,6 +352,15 @@ func _ride_stats(st: BikePhysics, dt: float) -> void:
 		+ 8.0 * clampf(absf(st.v) / 15.0, 0, 1) + (25.0 if st.crash_on else 0.0)
 	hr += (hr_t - hr) * minf(1.0, dt * 0.35)
 
+## mount the bike computer chosen on the ride setup page (size, pages, navigation)
+func set_computer() -> void:
+	gauge.unit = ComputerUnits.current()
+	gauge.order = gauge.unit.order
+	gauge.page = 0
+	gauge.scale = Vector2.ONE * float(gauge.unit.scale)
+	if not gauge.unit.nav: alert = {}
+	gauge.queue_redraw()
+
 ## where you are on the trail, and the next turn or feature ahead of you (the Garmin's alerts)
 func _trail_watch(st: BikePhysics) -> void:
 	if OS.get_environment("BMX_ALERT_PROBE") != "" and ride_t > 1.0 and not _probed:
@@ -373,6 +384,7 @@ func _probe_alerts() -> void:
 func _trail_scan(p: Vector2, fw: Vector2, crashed: bool) -> void:
 	var was: String = alert.get("text", "")
 	alert = {}
+	if not gauge.unit.nav: return   # a unit without navigation gives no turn / feature alerts
 	if OS.get_environment("BMX_ALERT_DEMO") != "":   # tests: a fixed alert to look at
 		alert = {"kind": OS.get_environment("BMX_ALERT_DEMO"), "text": "HAIRPIN RIGHT", "d": 22.0}
 		return
@@ -461,7 +473,9 @@ class GaugeView extends Control:
 	var map_v: MapView
 	var ov: Overlay
 	var hud
-	var page := 0
+	var unit := ComputerUnits.get_unit("classic")
+	var order: Array = [0, 1, 2, 3, 4, 5]   # the page ids this model has
+	var page := 0          # index into `order`
 	var bump := 0.0        # 1 on a shift, fades out: the gear digit flashes inverted
 	var show_gear := true  # Settings › HUD › Gear shifter
 	var press := [0.0, 0.0]   # bezel button press flash (left, right)
@@ -481,7 +495,7 @@ class GaugeView extends Control:
 		if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
 			for i in 2:
 				if _btn_rect(i).grow(4).has_point(e.position):
-					page = posmod(page + (-1 if i == 0 else 1), PAGES)
+					page = posmod(page + (-1 if i == 0 else 1), order.size())
 					hud.beep.key()
 					press[i] = 1.0
 					light = 3.0
@@ -494,7 +508,7 @@ class GaugeView extends Control:
 		light = maxf(0.0, light - get_process_delta_time())
 		var lk := clampf(light / 0.4, 0, 1)
 		lcd = LCD.lerp(LCD_LIT, lk)
-		draw_style_box(UITheme.box(Color("16181a"), 16, 0), Rect2(Vector2.ZERO, size))
+		draw_style_box(UITheme.box(unit.body, 16, 0), Rect2(Vector2.ZERO, size))
 		scr = Rect2(7, 20, size.x - 14, size.y - 50)
 		hud.flow_leds.draw(self, size, scr)
 		if lk > 0: draw_style_box(UITheme.box(Color(0.7, 0.88, 1.0, 0.22 * lk), 8, 0), scr.grow(2))
@@ -508,7 +522,7 @@ class GaugeView extends Control:
 		var hy := scr.position.y + 11
 		draw_string(f, Vector2(x0, hy), "%02d:%02d" % [tm.hour, tm.minute], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("f2f3ef"))
 		if st.air: draw_string(f, Vector2(x0, hy), "AIR", HORIZONTAL_ALIGNMENT_CENTER, w, 10, Color("ffd21f"))
-		else: draw_string(f, Vector2(x0, hy), TITLES[page], HORIZONTAL_ALIGNMENT_CENTER, w, 9, Color(0.95, 0.95, 0.94, 0.75))
+		else: draw_string(f, Vector2(x0, hy), TITLES[order[page]], HORIZONTAL_ALIGNMENT_CENTER, w, 9, Color(0.95, 0.95, 0.94, 0.75))
 		var bat := clampf(1.0 - hud.ride_t / BAT_LIFE, 0.0, 1.0)   # full to empty in 30 min of riding
 		if bat < 0.1 and fmod(hud.ride_t, 1.0) < 0.5: bat = -1.0   # nearly flat: the icon blinks
 		var br := Rect2(scr.end.x - 22, scr.position.y + 4, 14, 7)
@@ -516,8 +530,9 @@ class GaugeView extends Control:
 			draw_rect(br, Color(0.95, 0.95, 0.94, 0.8), false, 1.0)
 			draw_rect(Rect2(br.end.x, br.position.y + 2, 2, 3), Color(0.95, 0.95, 0.94, 0.8))
 			if bat > 0.0: draw_rect(Rect2(br.position.x + 1.5, br.position.y + 1.5, (br.size.x - 3) * bat, br.size.y - 3), Color("8be36a") if bat > 0.2 else Color("ff6a4d"))
-		map_v.visible = page == MAP_PAGE and hud.ride_t > FIX_T
-		match page:
+		var pid: int = order[page]
+		map_v.visible = pid == MAP_PAGE and hud.ride_t > FIX_T
+		match pid:
 			0: _page_ride(st, f, ink, scr, x0, w)
 			1: _page_trip(f, ink, scr, x0, w)
 			2: _page_effort(st, f, ink, scr, x0, w)
@@ -679,8 +694,9 @@ class GaugeView extends Control:
 			var s := 1.0 if i == 1 else -1.0
 			draw_colored_polygon(PackedVector2Array([c + Vector2(-3 * s, -4), c + Vector2(-3 * s, 4), c + Vector2(3 * s, 0)]), Color("b8bcc0"))
 			press[i] = maxf(0.0, k - dt * 5.0)
-		for j in PAGES:
-			draw_circle(Vector2(size.x / 2 + (j - (PAGES - 1) / 2.0) * 8, size.y - 16), 2.2, Color("d8dbd6") if j == page else Color("3a3d41"))
+		var np := order.size()
+		for j in np:
+			draw_circle(Vector2(size.x / 2 + (j - (np - 1) / 2.0) * 8, size.y - 16), 2.2, Color("d8dbd6") if j == page else Color("3a3d41"))
 	func _page_ride(st: BikePhysics, f: Font, ink: Color, scr: Rect2, x0: float, w: float) -> void:
 		var y := scr.position.y + 28
 		draw_string(f, Vector2(x0, y), "SPEED", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(ink, 0.6))
