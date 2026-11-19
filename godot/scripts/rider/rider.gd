@@ -9,7 +9,7 @@ const GEAR := preload("res://scripts/rider/rider_gear.gd")
 
 ## neutral riding style (posepanel.js NEUTRAL): BMX = all of these
 const NEUTRAL := {hipX = 0.0, hipY = 0.0, lean = 0.0, elbowsOut = 0.0, kneesOut = 0.0, stance = 0.0, seatFloor = false,
-	crouch = 1.0, standPedal = 1.0, aero = 1.0, sway = 1.0, bikeRock = 1.0, upright = 1.0, hipSway = 0.015, torso = 0.46, attackStand = 1.0, kneeOpen = 1.0, bumpAbsorb = 2.0, bodyBounce = 0.4, leanFollow = 1.0, leanSwing = 1.0, leanUnweight = 1.0, bodyBob = 1.0,
+	crouch = 1.0, standPedal = 1.0, aero = 1.0, sway = 1.0, bikeRock = 1.0, upright = 1.0, hipSway = 0.015, torso = 0.46, attackStand = 1.0, kneeOpen = 1.0, bumpAbsorb = 2.0, bodyBounce = 0.4, leanFollow = 1.0, leanSwing = 1.0, leanUnweight = 1.0, leanLively = 1.0, bodyBob = 1.0,
 	# style (Rider > Style): the numbers the riding pose is built from
 	hipSteady = 90.0, standHeight = 0.15, standBack = 0.03, pedalChest = 0.05, turnLow = 1.0, turnTwist = 1.0,
 	turnHips = 1.0, slowWobble = 1.0, airCrouch = 1.0,
@@ -877,7 +877,7 @@ func reset_pose() -> void:
 	# what the pose remembers from before (a crash tumbling the bike nose-up left a "wheelie" behind that
 	# shoved the body about after getting up)
 	sm_wheelie = 0.0; sm_aero = 0.0; sm_effort = 0.0; sm_turn = 0.0
-	roll_init = false; roll_pv = 0.0; roll_cv = 0.0
+	roll_init = false; roll_pv = 0.0; roll_cv = 0.0; lat_g_s = 0.0
 
 
 # ---------------- per-frame pose ----------------
@@ -904,9 +904,9 @@ var bounce_stats := [0.0, 0, 0.0, 0.0]   # tests: sum of squared body offsets, s
 # the body's own roll (world, rad): hips and chest follow the bike's lean on their own springs, so the bike
 # is thrown over first and the body follows through (hips lead, shoulders after, a little overshoot)
 var roll_init := false
-var roll_p := 0.0; var roll_pv := 0.0; var roll_c := 0.0; var roll_cv := 0.0; var knee_lean := 0.0
-const ROLL_HIP_W := 9.0; const ROLL_HIP_Z := 0.6     # hips: natural rate (rad/s), damping
-const ROLL_CHEST_W := 7.0; const ROLL_CHEST_Z := 0.5  # chest / shoulders: slower, rings on a touch
+var roll_p := 0.0; var roll_pv := 0.0; var roll_c := 0.0; var roll_cv := 0.0; var knee_lean := 0.0; var lat_g_s := 0.0
+const ROLL_HIP_W := 9.0; const ROLL_HIP_Z := 0.52     # hips: natural rate (rad/s), damping
+const ROLL_CHEST_W := 7.0; const ROLL_CHEST_Z := 0.44  # chest / shoulders: slower, rings on a touch
 const ROLL_UNWEIGHT := 0.045                          # m the legs extend through a side-to-side crossover
 func update_pose(dt: float, p: Dictionary) -> void:
 	var v := _num(p, "v")
@@ -1096,6 +1096,19 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	roll_cv += ((roll_t - roll_c) * cw * cw - 2.0 * cz * cw * roll_cv) * hr
 	roll_c += roll_cv * hr
 	knee_lean += (bl - knee_lean) * (1.0 - exp(-7.0 * hr))
+	# corner life (Rider › Movement › Corner life, subtle): leaned over, the rider keeps making small balance
+	# corrections (a slow, uneven sway of the body roll, ~1-2 deg), a bump under the leaned bike nudges the body's
+	# roll, and the turn's load presses them down into the attack position (knees and elbows soak it up, chest
+	# a touch lower and forward), rising again as the turn lets go
+	var live: float = clampf(float(sty.get("leanLively", 1.0)), 0.0, 3.0) * (1.0 - air)
+	var in_turn: float = smoothstep(0.08, 0.5, absf(bl)) * live
+	roll_pv += (0.022 * sin(t * 1.9 + 0.7) + 0.014 * sin(t * 3.3 + 2.1) + 0.008 * sin(t * 5.7)) * in_turn * hw * hw * 0.6 * hr
+	roll_pv -= _facc * sin(bl) * 0.15 * live * hr
+	lat_g_s += (clampf(absf(_num(p, "latG")), 0.0, 1.5) - lat_g_s) * (1.0 - exp(-5.0 * hr))
+	var sink: float = smoothstep(0.1, 1.0, lat_g_s) * live
+	pelvis.y -= 0.03 * sink
+	chest.y -= 0.035 * sink
+	chest.x += 0.02 * sink
 	var cr := clampf(bl - roll_p, -0.85, 0.85)   # past ~50 deg the hips swing off the bike and the legs cross the frame
 	var cr_c := clampf(bl - roll_c, -0.95, 0.95)
 	var unweight: float = ROLL_UNWEIGHT * float(sty.get("leanUnweight", 1.0)) * clampf(absf(roll_pv) / 1.6, 0.0, 1.0) * (1.0 - smoothstep(0.15, 0.6, absf(roll_p))) * (1.0 - air)

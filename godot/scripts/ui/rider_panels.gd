@@ -76,6 +76,7 @@ const POSE_DEFS := [
 		["leanFollow", "Body follows the bike's lean (low = loose)", 0.4, 2.0, 0.05, "×"],
 		["leanSwing", "Body swings past in lean changes", 0.0, 2.0, 0.05, "×"],
 		["leanUnweight", "Legs extend between turns", 0.0, 3.0, 0.05, "×"],
+		["leanLively", "Corner life (balance, load, bumps)", 0.0, 3.0, 0.05, "×"],
 	]],
 	["Style", [
 		["hipSteady", "Hips steady (up / down)", 20.0, 400.0, 5.0, ""],
