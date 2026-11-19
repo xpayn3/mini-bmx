@@ -125,6 +125,15 @@ func _init() -> void:
 	pelvis_mesh = G.inst(G.rounded_box(0.2, 0.15, 0.3, 3, 0.05), mNavy)
 	pelvis_mesh.name = "Pelvis"
 	add_child(pelvis_mesh)
+	# a belt round the waist: hides the step where the jersey's hem meets the trouser top. Its own shape
+	# follows the hips' rounded box (a superellipse just outside it), so no corner pokes through
+	var belt := G.inst(_belt_geo(0.118, 0.17, 0.045, 0.105, 0.014), mat("#151517", 0.55, 0.1))
+	belt.name = "Belt"
+	pelvis_mesh.add_child(belt)
+	var buckle := G.inst(G.rounded_box(0.008, 0.042, 0.056, 1, 0.003), mat("#9aa0a8", 0.3, 0.9))
+	buckle.name = "Buckle"
+	buckle.position = Vector3(0.134, 0.075, 0.0)
+	pelvis_mesh.add_child(buckle)
 	var bib := BackNumber.new()   # race number paper pinned to the back, flaps with speed
 	bib.name = "BackNumber"
 	add_child(bib)
@@ -437,6 +446,34 @@ func set_style(s: Dictionary) -> void:
 # ---------------- posing helpers ----------------
 
 ## unit-height (+Y) cylinder between a and b
+## a flat strap round a superellipse (|x/a|^4 + |z/b|^4 = 1) from y0 to y1, standing `t` out from it
+static func _belt_geo(a: float, b: float, y0: float, y1: float, t: float, n := 48) -> Dictionary:
+	var ring: Array[Vector3] = []
+	for i in n:
+		var u := TAU * i / n
+		var cu := cos(u)
+		var su := sin(u)
+		ring.append(Vector3(a * signf(cu) * sqrt(absf(cu)), 0.0, b * signf(su) * sqrt(absf(su))))
+	var pos := PackedVector3Array()
+	var idx := PackedInt32Array()
+	for i in n:
+		var pv: Vector3 = ring[(i - 1 + n) % n]
+		var nx: Vector3 = ring[(i + 1) % n]
+		var tang := (nx - pv).normalized()
+		var outv := Vector3(tang.z, 0.0, -tang.x)
+		if outv.dot(ring[i]) < 0.0: outv = -outv
+		var q: Vector3 = ring[i]
+		pos.append_array([q + Vector3(0, y0, 0) - outv * 0.004, q + outv * t + Vector3(0, y0, 0),
+			q + outv * t + Vector3(0, y1, 0), q + Vector3(0, y1, 0) - outv * 0.004])
+	for i in n:
+		var a0 := i * 4
+		var b0 := ((i + 1) % n) * 4
+		for f in [[1, 2], [2, 3], [0, 1]]:   # outside face, top edge, bottom edge
+			var c0: int = f[0]
+			var c1: int = f[1]
+			idx.append_array([a0 + c0, b0 + c1, b0 + c0, a0 + c0, a0 + c1, b0 + c1])
+	return {pos = pos, idx = idx}
+
 static func set_limb(n: Node3D, a: Vector3, b: Vector3) -> void:
 	var d := b - a
 	var l := d.length()

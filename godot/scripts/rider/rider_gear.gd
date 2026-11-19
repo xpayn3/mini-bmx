@@ -222,6 +222,14 @@ static func _upper_geo(n := 22, m := 12) -> Dictionary:
 				idx.append_array([c, k, k + 1])
 			else:
 				idx.append_array([c, k + 1, k])
+		# the fan only covers the arch: close the bottom too (centre to the two sole corners) - the heel
+		# had a triangular hole you could see the trouser leg through
+		var k0 := ci * row
+		var km := ci * row + m
+		if cap[1]:
+			idx.append_array([c, km, k0])
+		else:
+			idx.append_array([c, k0, km])
 	return {pos = pos, idx = idx}
 
 
