@@ -152,6 +152,14 @@ const DEFS := [
 		["tuckDrag", "Tuck: air drag cut (stick forward)", 0.42, 0, 0.8, 0.02, "×"],
 		["upDrag", "Sit up: extra air drag (stick back)", 0.3, 0, 1, 0.05, "×"],
 	]],
+	# the demo rider (F2, tuning card › Ride › Demo; not ride feel, so presets leave it alone)
+	["Demo rider", [
+		["demoPace", "Cornering pace (1 = safe pro)", 1.0, 0.4, 1.7, 0.05, "×"],
+		["demoMaxKmh", "Top speed it allows", 60, 15, 130, 1, "km/h"],
+		["demoLine", "Racing line (cut the corners)", 0.5, 0, 1, 0.05, ""],
+		["demoPump", "Pumps the lips", 1.0, 0, 1, 1, ""],
+		["demoSmooth", "Smooth hands (higher = softer)", 1.0, 0.3, 2.5, 0.05, "×"],
+	]],
 	# dust (tuning card › Dust tab; not part of the ride presets: TunePresets keeps their current values)
 	["Dust look", [
 		["dustOpacity", "Thickness", 0.6, 0.1, 3, 0.05, ""],
