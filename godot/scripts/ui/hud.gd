@@ -88,8 +88,8 @@ func _ready() -> void:
 	gauge.size = Vector2(150, 224); gauge.position = Vector2(20, -244)   # +12 px top bezel for the flow LEDs
 	root.add_child(gauge)
 	stamina = StaminaView.new(); stamina.hud = self
-	stamina.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	stamina.size = Vector2(196, 15); stamina.position = Vector2(-214, 20)
+	stamina.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	stamina.size = Vector2(240, 16); stamina.position = Vector2(-120, 14)   # top centre
 	root.add_child(stamina)
 	hop_bar = BarView.new()
 	hop_bar.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
@@ -103,7 +103,7 @@ func _ready() -> void:
 	root.add_child(getup)
 	air_card = AirCard.new(); air_card.hud = self
 	air_card.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	air_card.size = Vector2(230, 110); air_card.position = Vector2(-115, 14)
+	air_card.size = Vector2(230, 110); air_card.position = Vector2(-115, 40)   # under the stamina bar
 	root.add_child(air_card)
 	_build_records()
 	quick = load("res://scripts/ui/quick_tune.gd").new()
@@ -841,22 +841,54 @@ class Overlay extends Control:
 	func _draw() -> void: g.draw_over(self)
 
 class StaminaView extends Control:
-	## ten flat blocks, the last part-filled (sprint stamina)
+	## slim rounded capsule with a bolt icon: smooth gradient fill, a bright leading edge, tick marks,
+	## a glow while sprinting and a pulse when low (sprint stamina)
 	var hud
 	var shake := 0.0
+	var shown := 1.0   # eased fill so it glides instead of jumping
+
+	static func _pill(ci: CanvasItem, r: Rect2, c: Color) -> void:
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = c
+		sb.set_corner_radius_all(int(r.size.y * 0.5))
+		sb.anti_aliasing = true
+		ci.draw_style_box(sb, r)
+
 	func _draw() -> void:
 		var st: BikePhysics = hud.game.phys
 		var sprinting := st.sprint > 0.5
+		var low := st.stamina < 0.25 and not st.tired
 		var col := Color("4fd1ff")
 		if st.tired: col = Color("8d979c")
-		elif st.stamina < 0.25: col = Color("ff8a2a")
+		elif low: col = Color("ff8a2a")
 		elif sprinting: col = UITheme.ACCENT
-		draw_rect(Rect2(Vector2.ZERO, size), Color(0, 0, 0, 0.45))
-		for i in 10:
-			var r := Rect2(3 + i * 19, 3, 16, 9)
-			draw_rect(r, Color(1, 1, 1, 0.14))
-			var k := clampf(st.stamina * 10 - i, 0, 1)
-			if k > 0: draw_rect(Rect2(r.position, Vector2(16 * k, 9)), col)
+		shown = lerpf(shown, st.stamina, 0.25)
+		var pulse := 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.012) if low else 1.0
+		var h := size.y
+		# bolt icon on the left
+		var ix := 8.0
+		var cy := h * 0.5
+		var bolt := PackedVector2Array([Vector2(ix + 3, cy - 6), Vector2(ix - 3, cy + 1), Vector2(ix, cy + 1),
+			Vector2(ix - 2, cy + 6), Vector2(ix + 4, cy - 1.5), Vector2(ix + 1, cy - 1.5)])
+		draw_colored_polygon(bolt, Color(col, 0.55 + 0.45 * pulse))
+		# track
+		var tr := Rect2(22, 3, size.x - 22, h - 6)
+		_pill(self, Rect2(tr.position - Vector2(1, 1), tr.size + Vector2(2, 2)), Color(0, 0, 0, 0.55))
+		_pill(self, tr, Color(1, 1, 1, 0.10))
+		# fill
+		var fw := maxf(tr.size.y, tr.size.x * clampf(shown, 0, 1)) if shown > 0.01 else 0.0
+		if fw > 0.0:
+			if sprinting and not st.tired:
+				_pill(self, Rect2(tr.position - Vector2(2, 2), Vector2(fw + 4, tr.size.y + 4)), Color(col, 0.22))
+			_pill(self, Rect2(tr.position, Vector2(fw, tr.size.y)), Color(col, 0.55 + 0.45 * pulse))
+			# lighter top half for a soft gloss
+			_pill(self, Rect2(tr.position + Vector2(1, 1), Vector2(maxf(fw - 2, 2), tr.size.y * 0.4)), Color(1, 1, 1, 0.22))
+			# bright leading edge
+			draw_rect(Rect2(tr.position.x + fw - 2, tr.position.y + 1, 2, tr.size.y - 2), Color(1, 1, 1, 0.8))
+		# tick marks every 10 %
+		for i in range(1, 10):
+			var x := tr.position.x + tr.size.x * i / 10.0
+			draw_rect(Rect2(x - 0.5, tr.position.y + 1, 1, tr.size.y - 2), Color(0, 0, 0, 0.35))
 
 class GetUpPrompt extends Control:
 	## after a crash, bottom centre: "HOLD SPACE TO GET UP" and a thin bar that fills while the hop key
