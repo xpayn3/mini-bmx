@@ -449,6 +449,79 @@ func on_landing(air_time: float, impact: float) -> void:
 		dust.cloud(Vector3(phys.x, phys.y, phys.z), phys.fwd() * phys.v * 0.3, ground_dust(phys.x, phys.z, ls), 2.6 + impact * 0.15, 1.1)
 	if air_time > 0.2: Settings.rumble(clampf(impact / 8, 0.15, 1), clampf(impact / 12, 0, 1), 0.12 + minf(0.25, impact * 0.02))
 
+## how far each drawn tyre is inside the ground: [front, rear] (m, > 0 = sunk). The lowest point of each
+## tyre circle (in its own leaned / steered plane) against the real terrain height under it.
+func _tyre_pens() -> Array:
+	var out := []
+	for k in 2:
+		var w: Node3D = rig.wheel_f if k == 0 else rig.wheel_r
+		var R: float = rig.wheel_rf if k == 0 else rig.wheel_rr
+		var c := w.global_position
+		var n := w.global_basis.z.normalized()
+		var down := Vector3.DOWN - n * Vector3.DOWN.dot(n)
+		if down.length() < 1e-3:
+			out.append(-1.0)
+			continue
+		var lp := c + down.normalized() * R
+		out.append(terrain.height(lp.x, lp.z) - lp.y)
+	return out
+
+## Tyres never drawn inside the ground. The ride physics treats tyres as springs that can squash into
+## the terrain (and samples it at a few points), so on slopes, in dips and on landings the drawn bike
+## could sink up to ~20 cm. After posing, lift and tilt the DRAWN bike just enough that neither tyre is
+## below the real surface (the physics is untouched). Two poses per frame: one to see how pitch moves
+## each tyre, then the corrected one.
+const SEAT_EPS := 0.004
+func _seat_tyres(args: Array) -> void:
+	var p0 := _tyre_pens()
+	if maxf(p0[0], p0[1]) <= SEAT_EPS:
+		return
+	var y0: float = args[1]
+	var pt0: float = args[4]
+	var e := 0.02
+	args[4] = pt0 + e
+	rig.callv("pose", args)
+	var p1 := _tyre_pens()
+	var df: float = (p1[0] - p0[0]) / e
+	var dr: float = (p1[1] - p0[1]) / e
+	var dp := 0.0
+	# both tyres down near the ground: tilt so they sink the same, then lift both out together
+	if minf(p0[0], p0[1]) > -0.06 and absf(df - dr) > 0.05:
+		dp = clampf((p0[1] - p0[0]) / (df - dr), -0.3, 0.3)
+	var dy := maxf(0.0, maxf(p0[0] + df * dp, p0[1] + dr * dp)) + SEAT_EPS * 0.5
+	args[1] = y0 + dy
+	args[4] = pt0 + dp
+	rig.callv("pose", args)
+	# whatever is left (curved ground under a leaned tyre...): lift straight out
+	var p2 := _tyre_pens()
+	var rest := maxf(p2[0], p2[1])
+	if rest > SEAT_EPS * 0.5:
+		args[1] = y0 + dy + rest
+		rig.callv("pose", args)
+
+## tests (BMX_TYRE_CLIP=1): how far the drawn tyres sink into the ground (lowest point of each tyre
+## circle vs the terrain height under it); prints the worst every half second with the situation
+var _clip := {}
+func _tyre_clip_probe(dt: float, st) -> void:
+	if st.crash_on: return
+	for k in 2:
+		var w: Node3D = rig.wheel_f if k == 0 else rig.wheel_r
+		var R: float = rig.wheel_rf if k == 0 else rig.wheel_rr
+		var c := w.global_position
+		var n := w.global_basis.z.normalized()
+		var down := Vector3.DOWN - n * Vector3.DOWN.dot(n)
+		if down.length() < 1e-3: continue
+		var lp := c + down.normalized() * R
+		var pen: float = terrain.height(lp.x, lp.z) - lp.y
+		if pen > _clip.get("worst", -1e9):
+			_clip.worst = pen
+			_clip.what = "%s pen=%.3f air=%s v=%.1f lean=%.2f pitch=%.2f compress=%.2f y_draw-y=%.3f" % [
+				"front" if k == 0 else "rear", pen, st.air, st.v, st.bike_lean, st.pitch, st.compress, st.y_draw - st.y]
+	_clip.t = _clip.get("t", 0.0) + dt
+	if _clip.t > 0.5:
+		print("TYRECLIP ", _clip.get("what", ""))
+		_clip = {}
+
 ## the bike and rider as solid shapes the dust sim's air has to go round: two spinning wheels, the
 ## frame and the rider's body
 func _body_parts(st: BikePhysics) -> Array:
@@ -715,8 +788,12 @@ func _process(dt: float) -> void:
 	drawn_pos = Vector3(lerp_k.call("x"), lerp_k.call("y"), lerp_k.call("z"))
 	var body_y: float = lerp_k.call("body_y")
 	var wobble := sin(t * 2.3) * 0.025 * maxf(0.0, 1 - absf(st.v) / 2)
-	rig.pose(drawn_pos.x, y_draw + (1.5 if OS.get_environment("BMX_PITCH_POSE") != "" else 0.0), drawn_pos.z, hd, p_draw, st.hop_nose, st.bike_lean + st.rock + wobble,
-		st.steer - wobble * 1.5, st.wheel_f, st.wheel_r, st.crank)
+	var pose_y: float = y_draw + (1.5 if OS.get_environment("BMX_PITCH_POSE") != "" else 0.0)
+	var pose_args := [drawn_pos.x, pose_y, drawn_pos.z, hd, p_draw, st.hop_nose, st.bike_lean + st.rock + wobble,
+		st.steer - wobble * 1.5, st.wheel_f, st.wheel_r, st.crank]
+	rig.callv("pose", pose_args)
+	if not st.crash_on and OS.get_environment("BMX_TYRE_SINK") == "": _seat_tyres(pose_args)
+	if OS.get_environment("BMX_TYRE_CLIP") != "": _tyre_clip_probe(dt, st)
 	st.brake_heat *= exp(-dt / 3.5)
 	rig.set_brake_heat((st.brake_heat - 0.35) / 0.9)
 	if not st.crash_on:

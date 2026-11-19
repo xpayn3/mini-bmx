@@ -261,6 +261,8 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `BMX_REC=file.wav` | records the game's own sound output during an autotest |
 | `BMX_SKID=secs` / `BMX_DUST_SHOTS=dir/prefix` (+ `BMX_DUST_T0`) | autotest locks the rear wheel from secs / a screenshot every 0.5 s (dust tests; `BMX_CAM=side` avoids the tilt-shift blur) |
 | `BMX_LAND_TEST=secs` / `BMX_BAIL=secs` | autotest fakes a hard landing (landing dust) / bails (crash dust) at that time |
+| `BMX_TYRE_CLIP=1` (+ `BMX_TYRE_SINK=1` turns the fix off) | prints how far the drawn tyres sink into the ground (worst per 0.5 s); should stay ≤ ~4 mm |
+| `BMX_DEBRIS_PROBE=1` | fence / cactus debris: moving / resting counts and the lowest piece (none may fall through the ground) |
 | `BMX_SPRITE_DUST=1`, `BMX_SMOKE_PROBE=1` | old sprite dust for comparison / smoke-sim timing prints |
 | `BMX_FENCE=dir/prefix` (+ `BMX_FENCE_STYLE=ranch/picket`) | autotest rides into the nearest fence, screenshots before / after the smash |
 
@@ -286,6 +288,11 @@ and other GPU apps open; uncapped ~430 fps on an RTX 3090 after the C# terrain.
 - `Engine.time_scale = 0` (photo mode) must be undone when leaving to menus/pause.
 - PowerShell `Get-Content`/`WriteAllText` can change line endings — prefer the Edit tool for code edits.
 - Light through a doorway straight at the camera = glare; keep the sun high and to the side in the garage.
+
+- Tyres are seated on the ground when drawn (`Game._seat_tyres`): the ride physics lets tyres squash into
+  the terrain (springs), so the drawn bike is lifted / tilted after posing until neither tyre circle is
+  below the real terrain height. Smashed-fence / cactus debris is held above the terrain every physics
+  tick (thin pieces used to tunnel through the chunk collision and vanish).
 
 ## 8. Decisions & the user's preferences (follow these)
 
