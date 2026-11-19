@@ -314,7 +314,7 @@ func _autotest(seconds: float) -> void:
 		else: Input.action_release("pedal")
 		if OS.get_environment("BMX_MUD") != "": game.grime.mud = float(OS.get_environment("BMX_MUD"))   # tests: hold the mud level
 		var straight := OS.get_environment("BMX_STRAIGHT") != ""   # tests: ride straight, no steering / hops
-		if OS.get_environment("BMX_CAM_ORBIT") != "": game.cam.orbit_t = float(OS.get_environment("BMX_CAM_ORBIT"))
+		if OS.get_environment("BMX_CAM_ORBIT") != "": game.cam.orbit_t = float(OS.get_environment("BMX_CAM_ORBIT")); game.cam.pan_t = 1e9   # held: no re-centre
 		if OS.get_environment("BMX_CAM_DIST") != "": game.cam.dist = float(OS.get_environment("BMX_CAM_DIST"))
 		if OS.get_environment("BMX_CAM_PROBE") != "":   # tests: the camera's offset from the rider, frame to frame
 			var off: Vector3 = game.cam.global_position - game.drawn_pos

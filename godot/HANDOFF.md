@@ -231,6 +231,9 @@ F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A 
 ### Settings & tuning
 - Settings: display (mode, resolution, vsync, UI scale, FPS cap), graphics presets Low/Medium/High/Ultra
   + every option, audio buses, controls (rebind keys + pad), gameplay. Sliders apply on release.
+  Controls page starts with CAMERA: default camera, FOV, wider view at speed, distance, height, side offset,
+  look ahead, follow speed, shake, mouse, re-centre after a drag, keep the rider in view (`_keep_rider_in_view`),
+  see through trees (`deco.gdshader` dithers what is between camera and rider; globals `cam_see` / `cam_eye`).
 - One tuning card (`TuneCard`): tabs Ride (Steering, Lean, Grip, Speed, Suspension, Jumps), Rider (Body, Spine,
   Head, Arms, Legs, Motion, Physics) Look (Kits, Helmet, Clothes) and **Sound › Freewheel** (every `FreewheelSynth` knob: volume, engagement, pitch, ring, brightness, snap, detune, pawl unevenness, wobble…; built-in hub presets + the player's own named presets with Save as / Delete, saved in `user://freewheel.cfg` by `scripts/core/freewheel_sound.gd`; Preview spins the wheel while standing). Skids play the gravel synth louder and grittier (no separate hiss). P / K / L open it on Ride / Rider / Look,
   **Ride presets** sit on top of every Ride / Rider › Physics category (`scripts/core/tune_presets.gd`: built-ins Default, Flowy, Grippy, Drifty, Floaty air, Fast + the player's own via Save as / Delete, in `user://tune_presets.cfg`; an own preset follows its sliders). Reset puts the category back to the active preset's values. Quick tune card keeps the pinned (☆) sliders. Test: `BMX_PANEL=ride|rider|look|sound`
