@@ -1087,6 +1087,23 @@ func update_pose(dt: float, p: Dictionary) -> void:
 			pelvis.y += (floor_y - pelvis.y) * over
 		if chest.y < pelvis.y + 0.15:
 			chest.y = pelvis.y + 0.15
+	# standing on the floor (garage Kit tab, `stand` 1): no bike under them. Legs nearly straight with the
+	# hips right over the feet, the torso upright (a touch forward), arms hanging at the sides
+	var standing := _num(p, "stand") > 0.5
+	if standing:
+		var fl: Vector3 = p.get("footL", Vector3.ZERO)
+		var fr: Vector3 = p.get("footR", Vector3.ZERO)
+		var ank_x: float = (fl.x + fr.x) * 0.5 - 0.04 + float(sty.heelFwd)
+		var ank_y: float = (fl.y + fr.y) * 0.5 + 0.12 + float(sty.heelUp)
+		pelvis = Vector3(ank_x + 0.01, ank_y + (L_THIGH + L_SHIN) * 0.985 + 0.02 + absorb, (fl.z + fr.z) * 0.5)
+		chest = pelvis + Vector3(sin(0.05) * sty.torso, cos(0.05) * sty.torso, 0.0)
+		ang = 0.05
+		var arm := L_UARM + L_FARM
+		p = p.duplicate()
+		for sd in [-1.0, 1.0]:
+			var sh := chest + Vector3(-0.03, -0.04, sd * sty.shoulders)
+			# hands by the thighs, just in front of the hip line: elbows soft, pointing back
+			p["handL" if sd < 0 else "handR"] = sh + Vector3(0.07, -arm * 0.95, sd * 0.07)
 	# critically-damped-ish springs -> follow-through
 	if not spring_init:
 		pel_s = pelvis
@@ -1146,7 +1163,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# arms only reach so far: the torso follows the hands so the elbows keep a bend
 	var handL = p.get("handL")
 	var handR = p.get("handR")
-	if handL is Vector3 and handR is Vector3:
+	if handL is Vector3 and handR is Vector3 and not standing:
 		# Arm bend: how far the arms may straighten (more bend = chest closer to the bars)
 		var reach := (L_UARM + L_FARM) * clampf(0.9 - 0.2 * float(sty.armBend), 0.55, 0.98)
 		var worst := 0.0
@@ -1264,6 +1281,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		var pole_a: Vector3 = poles_arm[i]
 		if aero > 0.01: pole_a = pole_a.lerp(Vector3(-0.15, 0.15, side * 1.0).normalized(), 0.7 * aero).normalized()   # elbows up and out
 		if back_k > 0.01: pole_a = pole_a.lerp(Vector3(-0.35, -0.85, side * 0.3).normalized(), 0.5 * back_k).normalized()
+		if standing: pole_a = Vector3(-1.0, 0.0, side * 0.25).normalized()   # arms hanging: elbows point back
 		var ika := limb_ik(shp, hand, L_UARM, L_FARM, pole_a, Vector3(0, -0.5, side), ELBOW_MIN, ELBOW_MAX, _bd_prev[2 + i], max_turn)
 		_bd_prev[2 + i] = ika[2]
 		set_limb(upper_arm[i], shp, ika[0])
