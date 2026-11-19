@@ -76,7 +76,8 @@ void main() {
 		vec3 cavg = (texture(csrc, (bd + vec3(r, 0, 0)) * inv).rgb + texture(csrc, (bd - vec3(r, 0, 0)) * inv).rgb
 			+ texture(csrc, (bd + vec3(0, r, 0)) * inv).rgb + texture(csrc, (bd - vec3(0, r * 0.6, 0)) * inv).rgb
 			+ texture(csrc, (bd + vec3(0, 0, r)) * inv).rgb + texture(csrc, (bd - vec3(0, 0, r)) * inv).rgb) / 6.0;
-		float kd = 1.0 - exp(-pc.e.x * dt);
+		// fresh thick dust at the tyre holds together; it spreads as it thins out behind
+		float kd = (1.0 - exp(-pc.e.x * dt)) * mix(1.0, 0.25, clamp(d * 1.5, 0.0, 1.0));
 		d = mix(d, avg, kd);
 		cm = mix(cm, cavg, kd);
 	}
@@ -102,9 +103,18 @@ void main() {
 		vec3 dv = (p - q.pos_r.xyz) * h;
 		float r = q.pos_r.w;
 		float dl = length(dv);
-		if (dl >= r) continue;
-		float f = 1.0 - dl / r;
-		f = f * f * (3.0 - 2.0 * f);
+		float f;
+		if (r <= h * 1.05) {
+			// a source no bigger than a cell (tyre patches): split over the 8 cells around it (trilinear), so the
+			// same amount goes in wherever it sits between cell centres (a small sphere could miss every centre)
+			vec3 t = max(vec3(1.0) - abs(dv) / h, vec3(0.0));
+			f = t.x * t.y * t.z * 1.45;   // ~ what a 0.24 m sphere put in
+			if (f <= 0.0) continue;
+		} else {
+			if (dl >= r) continue;
+			f = 1.0 - dl / r;
+			f = f * f * (3.0 - 2.0 * f);
+		}
 		if (q.spin.w > 0.5) {   // a solid (bike / rider): no dust inside it
 			float keep = 1.0 - f;
 			d *= keep;
