@@ -55,13 +55,24 @@ static func _reach_down(basis: Basis, half: Vector3) -> float:
 	var b := basis.orthonormalized()
 	return absf(b.x.y) * half.x + absf(b.y.y) * half.y + absf(b.z.y) * half.z
 
+## the same for a piece with a convex hull: its lowest hull point
+static func _reach(it: Dictionary, basis: Basis) -> float:
+	var pts = it.get("pts")
+	if pts == null:
+		return _reach_down(basis, it["half"])
+	var b := basis.orthonormalized()
+	var lo := 0.0
+	for p in pts:
+		lo = maxf(lo, -(b * p).y)
+	return lo
+
 ## the ground guard: no piece ever ends up inside / under the terrain
 func _physics_process(_delta: float) -> void:
 	for it in _items:
 		var b: RigidBody3D = it["body"]
 		if not is_instance_valid(b): continue
 		var p := b.global_position
-		var low := p.y - _reach_down(b.global_basis, it["half"])
+		var low := p.y - _reach(it, b.global_basis)
 		var g := _ground(p.x, p.z)
 		if low < g - 0.005:
 			b.global_position = Vector3(p.x, p.y + (g - low), p.z)
@@ -82,7 +93,7 @@ func _lay_down(it: Dictionary) -> void:
 		var xf := mi.global_transform
 		# never left inside / under the ground
 		var g := _ground(xf.origin.x, xf.origin.z)
-		var low := b.global_position.y - _reach_down(b.global_basis, it["half"])
+		var low := b.global_position.y - _reach(it, b.global_basis)
 		if low < g: xf.origin.y += g - low
 		b.remove_child(mi)
 		add_child(mi)
@@ -135,14 +146,14 @@ func _material(c: Color) -> StandardMaterial3D:
 
 
 func spawn(mesh: Mesh, mesh_scale: Vector3, col: Color, xf: Transform3D, size: Vector3, v: Vector3, w: Vector3, mass: float = 1.0,
-		damp: float = 0.05, grav: float = 1.0) -> RigidBody3D:
+		damp: float = 0.05, grav: float = 1.0, shape: Shape3D = null, mat: Material = null, mask: int = MASK) -> RigidBody3D:
 	while _items.size() >= MAX:   # too many flying: the oldest lies down where it is (never just vanishes)
 		var old = _items.pop_front()
 		if is_instance_valid(old["body"]):
 			_lay_down(old)
 	var b := RigidBody3D.new()
 	b.collision_layer = LAYER
-	b.collision_mask = MASK
+	b.collision_mask = mask
 	b.mass = mass
 	b.linear_damp = damp
 	b.angular_damp = 0.3
@@ -151,18 +162,25 @@ func spawn(mesh: Mesh, mesh_scale: Vector3, col: Color, xf: Transform3D, size: V
 	var mi := MeshInstance3D.new()
 	mi.mesh = mesh
 	mi.scale = mesh_scale
-	mi.material_override = _material(col)
+	mi.material_override = mat if mat != null else _material(col)
 	b.add_child(mi)
 	var cs := CollisionShape3D.new()
-	var bs := BoxShape3D.new()
-	bs.size = Vector3(maxf(size.x, 0.02), maxf(size.y, 0.02), maxf(size.z, 0.02))
-	cs.shape = bs
+	if shape != null:
+		cs.shape = shape
+	else:
+		var bs := BoxShape3D.new()
+		bs.size = Vector3(maxf(size.x, 0.02), maxf(size.y, 0.02), maxf(size.z, 0.02))
+		cs.shape = bs
 	b.add_child(cs)
 	add_child(b)
 	b.global_transform = xf
 	b.linear_velocity = v
 	b.angular_velocity = w
-	_items.append({"body": b, "t": 0.0, "chunk": _tag, "half": cs.shape.size * 0.5})
+	var half := Vector3(maxf(size.x, 0.02), maxf(size.y, 0.02), maxf(size.z, 0.02)) * 0.5
+	var it := {"body": b, "t": 0.0, "chunk": _tag, "half": half}
+	if shape is ConvexPolygonShape3D:
+		it["pts"] = shape.points
+	_items.append(it)
 	return b
 
 
@@ -226,17 +244,47 @@ func smash_fence(panel: Dictionary, vel: Vector3, hit: Vector2, chunk = null) ->
 		spawn(TerrainGeo.MESH[kind], scl, part["col"], Transform3D(rot, mp), base_size * scl, v, w, 0.6)
 
 
-## cactus.js breakCactus: the base topples, the top and arms go flying
-func smash_cactus(rec: Dictionary, vel: Vector3, chunk = null) -> void:
+## a smashed cactus breaks along its precomputed Voronoi cells (CactusGeo): the chunks round the hit
+## are flung with the bike and burst outward, the ones above lose their support and topple / tumble
+## down; the chunks knock into each other (convex hulls), spines and flowers go with their chunk.
+func smash_cactus(rec: Dictionary, vel: Vector3, hit: Vector3, chunk = null) -> void:
 	_tag = chunk if chunk is Vector2i else Vector2i(1 << 30, 0)
 	var xf: Transform3D = rec["xform"]
 	var rot := xf.basis.orthonormalized()
 	var scl := xf.basis.get_scale()
 	var sp := Vector2(vel.x, vel.z).length()
-	for n in TerrainGeo.CACTUS_PIECES.size():
-		var pc: Dictionary = TerrainGeo.CACTUS_PIECES[n]
+	var dir := Vector3(vel.x, 0, vel.z) / sp if sp > 0.1 else Vector3.ZERO
+	var mat := _cactus_material(rec["col"])
+	for pc in CactusGeo.pieces(rec.get("kind", 0)):
 		var c: Vector3 = xf * pc["at"]
-		var up := 0.3 if n == 0 else 1.0
-		var v := Vector3(vel.x * (0.35 + 0.4 * up) + _rs() * 1.5, maxf(0, vel.y) * 0.3 + (0.8 + randf() * 1.8) * up, vel.z * (0.35 + 0.4 * up) + _rs() * 1.5)
-		var spin := 2 + sp * 0.7 * up
-		spawn(pc["mesh"], scl, rec["col"], Transform3D(rot, c), pc["size"] * scl, v, Vector3(_rs() * spin, _rs() * spin, _rs() * spin), 2.0)
+		var size: Vector3 = pc["size"] * scl
+		var rel := c - hit
+		var near := exp(-rel.length() / 0.45)       # 1 at the hit, ~0 a metre away
+		var out := Vector3(rel.x, 0, rel.z).normalized() if Vector2(rel.x, rel.z).length() > 0.01 else Vector3(_rs(), 0, _rs()).normalized()
+		var v := dir * sp * (0.12 + 0.62 * near) + out * (0.4 + sp * 0.22) * near 			+ Vector3(_rs() * 0.5, (0.3 + randf() * 1.6) * near + 0.15, _rs() * 0.5)
+		# the top falls the way the bike pushed the bottom out: a tip-over spin
+		var tip := Vector3.UP.cross(dir) * (-0.6 - sp * 0.08) * (1.0 - near) if dir != Vector3.ZERO else Vector3.ZERO
+		var spin := 1.0 + sp * 0.8 * near
+		var w := tip + Vector3(_rs(), _rs(), _rs()) * spin
+		var hull := ConvexPolygonShape3D.new()
+		var pts: PackedVector3Array = pc["pts"]
+		var sp_pts := PackedVector3Array()
+		sp_pts.resize(pts.size())
+		for k in pts.size():
+			sp_pts[k] = pts[k] * scl
+		hull.points = sp_pts
+		var m := clampf(size.x * size.y * size.z * 350.0, 0.08, 6.0)
+		spawn(pc["mesh"], scl, rec["col"], Transform3D(rot, c), size, v, w, m, 0.08, 1.0, hull, mat, MASK | LAYER)
+
+
+var _cmats := {}
+func _cactus_material(c: Color) -> ShaderMaterial:
+	var key := c.to_html()
+	if _cmats.has(key):
+		return _cmats[key]
+	var m: ShaderMaterial = TerrainGeo.MAT["cactus"].duplicate()
+	m.set_shader_parameter("use_instance", false)
+	m.set_shader_parameter("albedo", Vector3(c.r, c.g, c.b))
+	m.set_shader_parameter("sway", 0.0)
+	_cmats[key] = m
+	return m

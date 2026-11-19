@@ -1,4 +1,4 @@
-extends Node
+﻿extends Node
 ## Root: owns the ride (Game) and the menus. The world keeps running behind the title screen with a
 ## slow orbiting camera; Esc pauses a ride.
 
@@ -101,7 +101,7 @@ func _show_menu() -> void:
 	var ride := UITheme.button("RIDE", _start_ride, 24)
 	ride.custom_minimum_size.y = 58
 	vb.add_child(ride)
-	var gar := UITheme.button("GARAGE  ·  customise your downhill bike", _open_garage, 18)
+	var gar := UITheme.button("GARAGE  Â·  customise your downhill bike", _open_garage, 18)
 	gar.custom_minimum_size.y = 50
 	vb.add_child(gar)
 	# bike picker
@@ -134,13 +134,13 @@ func _show_menu() -> void:
 		if t.is_valid_int():
 			GameState.seed = int(t); restart_ride())
 	seed_row.add_child(se)
-	seed_row.add_child(UITheme.button("🎲 Random", func(): GameState.new_seed(); se.text = str(GameState.seed); restart_ride(), 16))
+	seed_row.add_child(UITheme.button("ðŸŽ² Random", func(): GameState.new_seed(); se.text = str(GameState.seed); restart_ride(), 16))
 	vb.add_child(seed_row)
 	var sp2 := Control.new(); sp2.custom_minimum_size.y = 12; vb.add_child(sp2)
 	vb.add_child(UITheme.button("Settings", _open_settings))
 	vb.add_child(UITheme.button("Controls", _show_controls))
 	vb.add_child(UITheme.button("Quit", func(): get_tree().quit()))
-	var foot := UITheme.label("v1.0 · Godot %s" % Engine.get_version_info().string, 12, UITheme.MUTED)
+	var foot := UITheme.label("v1.0 Â· Godot %s" % Engine.get_version_info().string, 12, UITheme.MUTED)
 	foot.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
 	foot.position = Vector2(64, -36)
 	menu.add_child(foot)
@@ -265,7 +265,7 @@ func _show_controls() -> void:
 		grid.add_child(UITheme.label(Settings.binding_text(a, true), 15, UITheme.MUTED))
 		grid.add_child(UITheme.label(Settings.ACTIONS[a][0], 15))
 	vb.add_child(grid)
-	vb.add_child(UITheme.label("Mouse drag: orbit · wheel: zoom · hold hop at a lip to pop higher · press S / W as you leave a lip to throw a back / front flip · carve: hold a turn at speed", 13, UITheme.MUTED))
+	vb.add_child(UITheme.label("Mouse drag: orbit Â· wheel: zoom Â· hold hop at a lip to pop higher Â· press S / W as you leave a lip to throw a back / front flip Â· carve: hold a turn at speed", 13, UITheme.MUTED))
 	var close := UITheme.button("Close", _close_controls)
 	vb.add_child(close)
 	close.grab_focus.call_deferred()
@@ -412,7 +412,7 @@ func _autotest(seconds: float) -> void:
 		if OS.get_environment("BMX_SKID") != "" and el > float(OS.get_environment("BMX_SKID")):   # tests: lock the rear (skid) from this time on
 			Input.action_release("pedal"); Input.action_press("brake")
 		await get_tree().process_frame
-		if OS.get_environment("BMX_DUST_SHOTS") != "":   # tests: dir/prefix — a screenshot every 0.5 s after BMX_DUST_T0 (3 s)
+		if OS.get_environment("BMX_DUST_SHOTS") != "":   # tests: dir/prefix â€” a screenshot every 0.5 s after BMX_DUST_T0 (3 s)
 			var t0d := float(OS.get_environment("BMX_DUST_T0")) if OS.get_environment("BMX_DUST_T0") != "" else 3.0
 			var nk := int((el - t0d) * 2.0)
 			if el > t0d and nk != _probe.get("dust_k", -1) and nk < 8:
@@ -420,6 +420,8 @@ func _autotest(seconds: float) -> void:
 				get_viewport().get_texture().get_image().save_png("%s_%d.png" % [OS.get_environment("BMX_DUST_SHOTS"), nk])
 		if OS.get_environment("BMX_FENCE") != "":   # tests: ride straight into the nearest fence, shots around the hit
 			_fence_test(el)
+		if OS.get_environment("BMX_CACTUS_ROW") != "":   # tests: the five cactus kinds in a row in front of the camera
+			_cactus_row(el)
 		if OS.get_environment("BMX_BODY_PROBE") != "":   # tests: the rider's body vs the bike
 			var ph = game.phys
 			_probe.hs_max = maxf(_probe.get("hs_max", 0.0), ph.hip_shift)
@@ -513,6 +515,38 @@ func _fence_test(el: float) -> void:
 		if _fence.shot >= 2 and _fence.shot < 7 and Engine.get_process_frames() >= _fence.hit + [0, 0, 2, 12, 30, 60, 720][_fence.shot]:
 			if _fence.shot == 6: print("FENCE after 12 s: moving=%d lying=%d" % [game.terrain._debris._items.size(), game.terrain._debris._wrecks.size()])
 			get_viewport().get_texture().get_image().save_png(pre + "_%d.png" % _fence.shot); _fence.shot += 1
+
+
+## BMX_CACTUS_ROW=1: at 1.5 s the five cactus kinds stand in a row in front of the camera (BMX_CACTUS_DIST m,
+## default 7); BMX_CACTUS_SMASH=secs smashes them all then (as if hit at bike height, 7 m/s across the view)
+var _cacti := []
+func _cactus_row(el: float) -> void:
+	var tr = game.terrain
+	if _cacti.is_empty() and el > 1.5:
+		var cam: Camera3D = get_viewport().get_camera_3d()
+		var fw := -cam.global_basis.z; fw.y = 0; fw = fw.normalized()
+		var rt := fw.cross(Vector3.UP)
+		var dist := float(OS.get_environment("BMX_CACTUS_DIST")) if OS.get_environment("BMX_CACTUS_DIST") != "" else 7.0
+		for k in CactusGeo.KINDS:
+			var side := float(OS.get_environment("BMX_CACTUS_SIDE")) if OS.get_environment("BMX_CACTUS_SIDE") != "" else 0.0
+			var p: Vector3 = cam.global_position + fw * dist + rt * ((k - 2) * 1.45 + side)
+			p.y = tr.height(p.x, p.z) - 0.03
+			var col := TerrainField.lin([0x4f8a3c, 0x5c9a45, 0x6b9e4a][k % 3])
+			var xf := Transform3D(Basis(Vector3.UP, k * 1.3), p)
+			var mi := MeshInstance3D.new()
+			mi.mesh = CactusGeo.MESHES[k]
+			mi.material_override = tr._debris._cactus_material(col)
+			tr.add_child(mi)
+			mi.global_transform = xf
+			_cacti.append({"mi": mi, "rec": {"xform": xf, "col": col, "kind": k}, "rt": rt})
+		print("CACTUS row placed")
+	if not _cacti.is_empty() and OS.get_environment("BMX_CACTUS_SMASH") != "" and el > float(OS.get_environment("BMX_CACTUS_SMASH")) and _cacti[0]["mi"].visible:
+		var t0 := Time.get_ticks_usec()
+		for c in _cacti:
+			c["mi"].visible = false
+			var o: Vector3 = c["rec"]["xform"].origin
+			tr._debris.smash_cactus(c["rec"], c["rt"] * 7.0, o + Vector3(0, 0.45, 0) - c["rt"] * 0.25)
+		print("CACTUS smashed %d in %.1f ms, debris moving=%d" % [_cacti.size(), (Time.get_ticks_usec() - t0) / 1000.0, tr._debris._items.size()])
 
 
 ## --shot=<png path>@<seconds>: save a screenshot after that long, then quit (testing / store shots)

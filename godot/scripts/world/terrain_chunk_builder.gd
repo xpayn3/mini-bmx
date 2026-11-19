@@ -11,7 +11,7 @@ const WATER := TerrainField.WATER
 const S := 48.0
 const JC := 34.0
 const SMALL := ["pebble", "grass", "daisy", "tulip", "spike", "stick", "fern", "mushroom"]
-const LIST_NAMES := ["trunk", "blob", "pine", "rock", "pebble", "grass", "daisy", "tulip", "spike", "cactus",
+const LIST_NAMES := ["trunk", "blob", "pine", "rock", "pebble", "grass", "daisy", "tulip", "spike", "cactus0", "cactus1", "cactus2", "cactus3", "cactus4",
 	"bush", "log", "stick", "fern", "mushroom", "weed", "plank", "beam", "post", "rail", "picket", "stake"]
 const SPAN := 2.4
 const TAPE_SEG := 30
@@ -671,11 +671,14 @@ func _trees(ox: float, oz: float) -> void:
 		var rug: float = f.b_rug
 		if rnd.next() < dry:
 			if rnd.next() < 0.35:
-				var cy := sc * (0.8 + rnd.next() * 0.6)
+				var kind := CactusGeo.pick(rnd.next())
+				var cs := 0.75 + (sc - 0.7) * 0.45          # 0.75 .. 1.11: cacti vary less than trees
+				var cy := cs * (0.85 + rnd.next() * 0.35)
 				var cc: Color = CACTI[int(rnd.next() * CACTI.size())]
-				var idx := put("cactus", x, h - 0.05, z, sc, cy, sc, yaw, cc, 0.15)
-				colliders.append({"x": x, "z": z, "r": 0.17 * sc, "ceil": h - 0.05 + 1.6 * cy,
-					"cactus": {"i": idx, "broken": false, "col": cc, "xform": _last_xform("cactus")}})
+				var nm := "cactus%d" % kind
+				var idx := put(nm, x, h - 0.03, z, cs, cy, cs, yaw, cc, 0.08)
+				colliders.append({"x": x, "z": z, "r": CactusGeo.HIT_R[kind] * cs, "ceil": h - 0.03 + CactusGeo.HEIGHT[kind] * cy,
+					"cactus": {"i": idx, "kind": kind, "broken": false, "col": cc, "xform": _last_xform(nm)}})
 			continue
 		var ceil_h := 0.0
 		if h > 4 or rnd.next() < 0.3 + rug * 0.6:

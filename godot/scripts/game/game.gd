@@ -469,7 +469,7 @@ func burst(pos: Vector3, n: int, s: int, power: float, with_dust := true) -> voi
 	# no thud sound on landings or knocks (the user found it annoying); smashing things still crunches
 
 func smash(c: Dictionary, vel: Vector3, pos: Vector3) -> bool:
-	if not terrain.break_collider(c, vel):
+	if not terrain.break_collider(c, vel, pos + Vector3(0, 0.45, 0)):
 		return false
 	var col := Color("c9a06a")
 	if c.get("cactus", false): col = Color("8fc25a")

@@ -209,6 +209,14 @@ F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A 
   `tyre_track.gdshader` — lit, knob-tread dimples bump-mapped, soft edges + soil lip, skid streaks, distance fade.
 - Grime: mud builds up (slow: `Grime.MUD_RATE` 0.25) and washes off in water; wet gloss + drips. Passes
   are removed from shared materials when a ride ends.
+- **Cacti** (`world/cactus_geo.gd`): five kinds (saguaro, tall saguaro with blossoms, barrel with a flower
+  crown, organ pipe, prickly pear with fruit), each its own MultiMesh list `cactus0..4`. Built from ribbed tubes
+  swept along splines (arms bend out of the trunk and up as one tube, flared at the root), spine clusters on
+  every rib, own-colour parts via `tint` (UV.x) + `deco.gdshader` `tint_own`. Smashing one breaks it along a
+  **Voronoi fracture** precomputed per kind on a worker thread (`CactusGeo.fracture`: closed-mesh plane clipping +
+  capped cuts in flesh colour, seeds denser at bike height); chunks get convex hulls, collide with each other,
+  and are flung by their distance from the hit (`TerrainDebris.smash_cactus`). Check: `tools/cactus_probe.gd`
+  (every body / piece closed, piece volumes = whole, must say `PASS`).
 - Torn race tape as cloth-like ribbons, wind over the grass, drifting cloud shadows, speed blur / FOV.
 
 ### HUD bike computer (`hud.gd` `GaugeView`)
@@ -274,6 +282,7 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `BMX_BUILD=wheels.rim_model=deemax;bars.width=820;logos.rims.count=4` | overrides the garage build for a test run (not saved unless you touch a control) |
 | `-s res://tools/terrain_cs_cmp.gd --headless` | C# vs GDScript terrain must be EXACT |
 | `-s res://tools/trail_grow_probe.gd --headless` | grows the endless trail 6×: old trail unchanged, C# = GDScript, timings; must say `PASS` |
+| `-s res://tools/cactus_probe.gd --headless` | cactus kinds + Voronoi fracture: closed pieces, volumes add up; must say `PASS` |
 | `-s res://tools/wood_edge_probe.gd --headless` | drives angled lines onto every wooden ramp; must report `walls=0` |
 | `BMX_FW_PRESET=<name>`, `BMX_FW=pitch=1.3,poe=60`, `BMX_FW_PREVIEW=<m/s>` | freewheel preset / values / Preview for a test run (not saved) |
 | `BMX_FLOW_DEMO=1` | HUD flow meter: adds a flow level every 0.9 s from 3 s up to MAX, then lets it drain (pair with `BMX_DUST_SHOTS` for screenshots) |

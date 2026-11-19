@@ -6,7 +6,6 @@ extends RefCounted
 static var MESH := {}        # name -> ArrayMesh
 static var MAT := {}         # name -> Material
 static var SHEDS: Array = [] # [{mesh, hw, hd, extra}] 8 designs (2 shapes x 4 palettes)
-static var CACTUS_PIECES: Array = []   # [{mesh, at: Vector3, r, h}]
 static var FENCE_SIZE := {}  # kind -> Vector3 (box extents of the unscaled piece, for debris shapes)
 
 const FENCE_STYLES := {
@@ -33,7 +32,9 @@ static func ensure() -> void:
 	MESH["rock"] = _boulder(3, 1).to_mesh()
 	MESH["pebble"] = _boulder(3, 0).to_mesh()
 	MESH["box"] = GeoBuf.box(1, 1, 1).to_mesh()
-	MESH["cactus"] = GeoBuf.merge(_cactus_parts()).to_mesh()
+	CactusGeo.ensure()
+	for k in CactusGeo.KINDS:
+		MESH["cactus%d" % k] = CactusGeo.MESHES[k]
 	var fl := _flowers()
 	for k in fl:
 		MESH[k] = fl[k].to_mesh()
@@ -55,7 +56,6 @@ static func ensure() -> void:
 	MESH["stake"] = GeoBuf.merge([GeoBuf.cylinder(0.018, 0.022, 1.15, 5).translate(0, 0.575 - 0.2, 0).paint(lin(0xe9e6dc)),
 		GeoBuf.cylinder(0.024, 0.024, 0.12, 5).translate(0, 0.9, 0).paint(lin(0xff6a1a))]).to_mesh()
 	_build_sheds()
-	_build_cactus_pieces()
 
 
 static func _mat(albedo: Color, rough: float, metal: float = 0.0) -> ShaderMaterial:
@@ -78,8 +78,10 @@ static func _build_materials() -> void:
 	MAT["shed"] = _mat(w, 0.85)
 	MAT["fence"] = _mat(w, 0.9)
 	MAT["stake"] = _mat(w, 0.6)
+	MAT["cactus"] = _mat(w, 0.7)
+	MAT["cactus"].set_shader_parameter("tint_own", true)
 	# what the wind moves (m of sway per m of height in a full gust) and how much sun shows through
-	for k in [["leaf", 0.02, 0.2], ["leafSoft", 0.035, 0.25], ["tuft", 0.12, 0.3]]:
+	for k in [["leaf", 0.02, 0.2], ["cactus", 0.004, 0.12], ["leafSoft", 0.035, 0.25], ["tuft", 0.12, 0.3]]:
 		MAT[k[0]].set_shader_parameter("sway", k[1])
 		MAT[k[0]].set_shader_parameter("backlight", k[2])
 	var f := ShaderMaterial.new()
@@ -184,34 +186,6 @@ static func _jitter(g: GeoBuf, amt: float, sd: int) -> GeoBuf:
 			m[key] = Vector3((r.next() - .5) * amt, (r.next() - .5) * amt, (r.next() - .5) * amt)
 		g.pos[i] = p + m[key]
 	return g
-
-
-static func _cactus_parts() -> Array:
-	return [
-		GeoBuf.cylinder(0.16, 0.18, 1.6, 6).translate(0, 0.8, 0),
-		GeoBuf.cylinder(0.1, 0.1, 0.5, 6).rot_z(PI / 2).translate(0.3, 0.75, 0),
-		GeoBuf.cylinder(0.1, 0.1, 0.55, 6).translate(0.5, 1.0, 0),
-		GeoBuf.cylinder(0.09, 0.09, 0.4, 6).rot_z(PI / 2).translate(-0.25, 1.05, 0),
-		GeoBuf.cylinder(0.09, 0.09, 0.45, 6).translate(-0.42, 1.25, 0),
-	]
-
-
-static func _build_cactus_pieces() -> void:
-	var sets := [
-		[GeoBuf.cylinder(0.17, 0.18, 0.8, 6).translate(0, 0.4, 0)],
-		[GeoBuf.cylinder(0.16, 0.17, 0.8, 6).translate(0, 1.2, 0)],
-		[GeoBuf.cylinder(0.1, 0.1, 0.5, 6).rot_z(PI / 2).translate(0.3, 0.75, 0), GeoBuf.cylinder(0.1, 0.1, 0.55, 6).translate(0.5, 1.0, 0)],
-		[GeoBuf.cylinder(0.09, 0.09, 0.4, 6).rot_z(PI / 2).translate(-0.25, 1.05, 0), GeoBuf.cylinder(0.09, 0.09, 0.45, 6).translate(-0.42, 1.25, 0)],
-	]
-	CACTUS_PIECES = []
-	for parts in sets:
-		var g := GeoBuf.merge(parts)
-		var a := AABB(g.pos[0], Vector3.ZERO)
-		for p in g.pos:
-			a = a.expand(p)
-		var c := a.get_center()
-		g.translate(-c.x, -c.y, -c.z)
-		CACTUS_PIECES.append({"mesh": g.to_mesh(), "at": c, "size": a.size})
 
 
 # ---------------- wildflowers, grass, ferns, mushrooms ----------------

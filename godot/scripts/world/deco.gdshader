@@ -11,6 +11,7 @@ uniform float metallic = 0.0;
 uniform bool use_instance = true;
 uniform float sway = 0.0;      // m of sway per m of height in a full gust
 uniform float backlight = 0.0;
+uniform bool tint_own = false;   // cacti: UV.x = 1 keeps the vertex colour (spines, flowers, cut flesh)
 varying vec3 v_col;
 varying vec3 v_world;
 // ride camera: anything between the camera and the rider dissolves (dither) so a tree never hides them.
@@ -21,6 +22,7 @@ global uniform vec4 cam_eye;
 void vertex() {
 	vec3 ic = use_instance ? INSTANCE_CUSTOM.rgb : vec3(1.0);
 	v_col = albedo * COLOR.rgb * ic;
+	if (tint_own) v_col = mix(v_col, COLOR.rgb, clamp(UV.x, 0.0, 1.0));
 	if (sway > 0.0) {
 		vec3 base = MODEL_MATRIX[3].xyz;
 		float h = max(VERTEX.y - base.y, 0.0);
