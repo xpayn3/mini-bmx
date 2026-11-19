@@ -7,8 +7,13 @@ layout(local_size_x = 8, local_size_y = 4, local_size_z = 8) in;
 
 layout(set = 0, binding = 0) uniform sampler3D src;
 layout(set = 0, binding = 1, rgba16f) uniform restrict writeonly image3D dst;
-struct Source { vec4 pos_r; vec4 vel_rate; vec4 misc; };   // grid pos + radius (m) | vel m/s + density/s | blend/s, radial m/s
+// grid pos + radius (m) | vel m/s + density/s | blend/s, radial m/s | dust colour (linear) | spin (rad/s)
+struct Source { vec4 pos_r; vec4 vel_rate; vec4 misc; vec4 col; vec4 spin; };
 layout(set = 0, binding = 2, std430) restrict readonly buffer Sources { Source s[]; } srcs;
+// dust colour carried with the dust: rgb = colour x density ("colour mass"), so clouds keep their own
+// colour and mix where they meet
+layout(set = 0, binding = 3) uniform sampler3D csrc;
+layout(set = 0, binding = 4, rgba16f) uniform restrict writeonly image3D cdst;
 
 layout(push_constant, std430) uniform Params {
 	vec4 a;   // dt, h (m per voxel), shift x, shift z (voxels)
@@ -57,6 +62,7 @@ void main() {
 	vec4 s = texture(src, (po - vm * (dt / h)) * inv);
 	vec3 bd = po - (vm + vec3(0.0, -pc.c.z, 0.0)) * (dt / h);
 	float d = texture(src, bd * inv).w;
+	vec3 cm = texture(csrc, bd * inv).rgb;
 	// dispersal: the small eddies the grid can't hold mix the dust out into the air around it
 	// (turbulent diffusion), so a fresh plume spreads and thins instead of staying a tube
 	if (pc.e.x > 0.0) {
@@ -64,7 +70,12 @@ void main() {
 		float avg = (texture(src, (bd + vec3(r, 0, 0)) * inv).w + texture(src, (bd - vec3(r, 0, 0)) * inv).w
 			+ texture(src, (bd + vec3(0, r, 0)) * inv).w + texture(src, (bd - vec3(0, r * 0.6, 0)) * inv).w
 			+ texture(src, (bd + vec3(0, 0, r)) * inv).w + texture(src, (bd - vec3(0, 0, r)) * inv).w) / 6.0;
-		d = mix(d, avg, 1.0 - exp(-pc.e.x * dt));
+		vec3 cavg = (texture(csrc, (bd + vec3(r, 0, 0)) * inv).rgb + texture(csrc, (bd - vec3(r, 0, 0)) * inv).rgb
+			+ texture(csrc, (bd + vec3(0, r, 0)) * inv).rgb + texture(csrc, (bd - vec3(0, r * 0.6, 0)) * inv).rgb
+			+ texture(csrc, (bd + vec3(0, 0, r)) * inv).rgb + texture(csrc, (bd - vec3(0, 0, r)) * inv).rgb) / 6.0;
+		float kd = 1.0 - exp(-pc.e.x * dt);
+		d = mix(d, avg, kd);
+		cm = mix(cm, cavg, kd);
 	}
 	v = s.xyz;
 	// the still air around: drift with the wind, swirls die down slowly
@@ -74,11 +85,13 @@ void main() {
 	float thin = 1.0 - clamp(d * 1.5, 0.0, 1.0);
 	v = mix(v, wind, 1.0 - exp(-pc.c.y * (1.0 + 2.0 * thin) * dt));
 	if (id.y == 0) v.xz = mix(v.xz, wind.xz * 0.4, 1.0 - exp(-2.5 * dt));   // ground drag
-	d *= exp(-pc.c.x * dt);
+	float fade = exp(-pc.c.x * dt);
 	// thin out toward the sides / top of the box so nothing ever ends in a hard wall
 	float e = min(min(float(id.x), float(N.x - 1 - id.x)), min(float(id.z), float(N.z - 1 - id.z)));
 	e = min(e, float(N.y - 1 - id.y) * 2.0);
-	d *= mix(1.0 - 4.0 * dt, 1.0, clamp(e / pc.c.w, 0.0, 1.0));
+	fade *= mix(1.0 - 4.0 * dt, 1.0, clamp(e / pc.c.w, 0.0, 1.0));
+	d *= fade;
+	cm *= fade;
 
 	int n = int(pc.b.z);
 	for (int i = 0; i < n; i++) {
@@ -89,8 +102,16 @@ void main() {
 		if (dl >= r) continue;
 		float f = 1.0 - dl / r;
 		f = f * f * (3.0 - 2.0 * f);
-		d += q.vel_rate.w * f * dt;
-		vec3 tv = q.vel_rate.xyz + (dl > 1e-4 ? dv / dl : vec3(0.0)) * q.misc.y;
+		if (q.spin.w > 0.5) {   // a solid (bike / rider): no dust inside it
+			float keep = 1.0 - f;
+			d *= keep;
+			cm *= keep;
+		}
+		float add = q.vel_rate.w * f * dt;
+		d += add;
+		cm += q.col.rgb * add;
+		// target air velocity: the source's own, pushed out radially, plus spin (a solid turning: a wheel)
+		vec3 tv = q.vel_rate.xyz + (dl > 1e-4 ? dv / dl : vec3(0.0)) * q.misc.y + cross(q.spin.xyz, dv);
 		v = mix(v, tv, 1.0 - exp(-q.misc.x * f * dt));
 	}
 	// turbulence: swirls stir wherever there is dust (strongest in fresh, thick dust)
@@ -103,5 +124,7 @@ void main() {
 		v += cn * pc.d.z * (0.6 + min(d, 1.0)) * dt;
 	}
 	if (id.y == 0) v.y = max(v.y, 0.0);
-	imageStore(dst, id, vec4(v, clamp(d, 0.0, 6.0)));
+	float dc = clamp(d, 0.0, 6.0);
+	imageStore(dst, id, vec4(v, dc));
+	imageStore(cdst, id, vec4(cm * (d > 1e-5 ? dc / d : 0.0), 0.0));
 }

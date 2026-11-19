@@ -442,6 +442,24 @@ func on_landing(air_time: float, impact: float) -> void:
 		dust.cloud(Vector3(phys.x, phys.y, phys.z), phys.fwd() * phys.v * 0.3, ground_dust(phys.x, phys.z, ls), 2.6 + impact * 0.15, 1.1)
 	if air_time > 0.2: Settings.rumble(clampf(impact / 8, 0.15, 1), clampf(impact / 12, 0, 1), 0.12 + minf(0.25, impact * 0.02))
 
+## the bike and rider as solid shapes the dust sim's air has to go round: two spinning wheels, the
+## frame and the rider's body
+func _body_parts(st: BikePhysics) -> Array:
+	var f: Vector3 = st.fwd()
+	var vel := f * st.v + Vector3(0, st.vy if st.air else 0.0, 0)
+	var axle := f.cross(Vector3.UP).normalized()
+	var base := drawn_pos
+	var rr: float = st.RWR
+	var rf: float = st.RWF
+	var rear := base - f * st.BB_REAR + Vector3(0, rr, 0)
+	var front := base + f * (st.L - st.BB_REAR) + Vector3(0, rf, 0)
+	return [
+		{p = rear, v = vel, r = rr * 1.05, spin = -axle * (st.v / rr)},
+		{p = front, v = vel, r = rf * 1.05, spin = -axle * (st.v / rf)},
+		{p = (rear + front) * 0.5 + Vector3(0, 0.08, 0), v = vel, r = 0.24, spin = Vector3.ZERO},
+		{p = base + Vector3(0, rr + 0.45, 0) - f * 0.05, v = vel, r = 0.3, spin = Vector3.ZERO},
+	]
+
 ## a crash kicks up dust where the ragdoll hits the ground: every time a body part slams down while
 ## tumbling it throws a puff (bigger the harder it hits), and a light dusting where it slides
 var _rd_air: PackedByteArray = PackedByteArray()
@@ -479,11 +497,12 @@ func _crash_dust() -> void:
 				if OS.get_environment("BMX_SMOKE_PROBE") != "": print("CRASHDUST impact i=%d t=%.2f hit=%.1f" % [i, phys.crash_t, hit])
 				dust.sim.burst(at, Vector3(v.x * 0.25, 0.6 + k * 0.8, v.z * 0.25), 0.3 + k * 0.25, (50.0 + 110.0 * k) * amt,
 					1.2 + k * 2.2, 0.08 + k * 0.05, ground_dust(pp.x, pp.z, s), 20.0)
+				dust.grit_burst(at, Vector3(v.x * 0.3, 0.8 + k * 1.6, v.z * 0.3), 1.0 + k * 2.5, 2000.0 * k * amt, 0.08, ground_dust(pp.x, pp.z, s))
 				made += 1
 		elif hs > 1.2 and made < 10:
 			# sliding / rolling along the ground
 			if OS.get_environment("BMX_SMOKE_PROBE") != "": print("CRASHDUST slide i=%d t=%.2f hs=%.1f" % [i, phys.crash_t, hs])
-			dust.sim.add_source(at, Vector3(v.x * 0.3, 0.4, v.z * 0.3), 0.25, minf(hs, 6.0) * 4.0 * amt, 6.0, 0.3)
+			dust.sim.add_source(at, Vector3(v.x * 0.3, 0.4, v.z * 0.3), 0.25, minf(hs, 6.0) * 4.0 * amt, 6.0, 0.3, ground_dust(pp.x, pp.z, s))
 			made += 1
 	# the bike sliding / tumbling along the ground
 	var bs: int = terrain.surface(phys.x, phys.z)
@@ -494,7 +513,7 @@ func _crash_dust() -> void:
 		if OS.get_environment("BMX_SMOKE_PROBE") != "": print("CRASHDUST bike t=%.2f v=%.1f" % [phys.crash_t, phys.v])
 		for e in [-0.5, 0.5]:   # both wheels / the frame scraping
 			dust.sim.add_source(Vector3(phys.x + f.x * e, g2 + 0.1, phys.z + f.z * e), f * phys.v * 0.3 + Vector3(0, 0.6, 0),
-				0.3, minf(absf(phys.v), 10.0) * 9.0 * ba, 8.0, 0.5)
+				0.3, minf(absf(phys.v), 10.0) * 9.0 * ba, 8.0, 0.5, ground_dust(phys.x, phys.z, bs))
 
 ## dust / roost / tyre tracks for one physics step (bottom of physics() in main.js)
 func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
@@ -721,6 +740,7 @@ func _process(dt: float) -> void:
 	sun.light_energy = sun_energy * atmos.shade
 	# the dust simulation around the rider (fx/smoke_sim.gd)
 	if st.crash_on and dust.sim != null: _crash_dust()
+	elif dust.sim != null: dust.sim.set_body(_body_parts(st))
 	elif _rd_air.size() > 0: _rd_air.resize(0)
 	dust.attach(terrain, sun)
 	dust.sim_step(dt, drawn_pos, st.fwd(), atmos.wind)

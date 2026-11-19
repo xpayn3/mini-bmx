@@ -8,7 +8,8 @@ render_mode unshaded, blend_mix, depth_draw_never, depth_test_disabled, cull_fro
 
 uniform sampler3D smoke : filter_linear, repeat_disable;
 uniform sampler2D hmap : filter_linear, repeat_disable;
-uniform sampler3D occ : filter_nearest, repeat_disable;     // dust near this 1.6 m brick? (empty-space skipping)
+uniform sampler3D occ : filter_nearest, repeat_disable;
+uniform sampler3D colv : filter_linear, repeat_disable;     // the dust's own colour (rgb), a: has dust     // dust near this 1.6 m brick? (empty-space skipping)
 uniform sampler3D detail : filter_linear, repeat_enable;   // tiling noise: billows the grid can't hold
 uniform float detail_amt = 1.15;
 uniform vec3 drift = vec3(0.0);   // m: how far the detail has drifted (wind + slow rise)
@@ -25,6 +26,7 @@ uniform vec3 dust_col = vec3(0.75, 0.62, 0.48);
 uniform float ext = 4.0;      // extinction per unit density per metre
 uniform float step_m = 0.08;
 uniform int max_steps = 160;
+uniform float shadow_k = 0.62;    // how much of the light on the ground / bike is direct sun (dust shades that)
 
 float hg(float c, float g) {
 	float g2 = g * g;
@@ -41,11 +43,23 @@ void fragment() {
 	float tb = min(min(tf.x, tf.y), tf.z);
 	float zd = textureLod(depth_tex, SCREEN_UV, 0.0).r;
 	vec4 vp = INV_PROJECTION_MATRIX * vec4(SCREEN_UV * 2.0 - 1.0, zd, 1.0);
-	tb = min(tb, length(vp.xyz / vp.w));
-	if (tb <= ta) discard;
+	float tsurf = length(vp.xyz / vp.w);
+	// dust shadow on whatever is behind (ground, bike, rider): the light volume already holds how much
+	// sunlight gets through the dust to every cell, so look it up just above that surface
+	float shf = 1.0;
+	if (tsurf < tb) {
+		vec3 sp = ro + rd * tsurf;
+		vec2 g = (sp.xz - origin.xz) / size_m.xz;
+		if (all(greaterThan(g, vec2(0.0))) && all(lessThan(g, vec2(1.0)))) {
+			float gr = texture(hmap, (g * hm_cells + 0.5) / (hm_cells + 1.0)).r;
+			float gy = clamp((sp.y + 0.06 - gr) / size_m.y, 0.5 / 32.0, 1.0);
+			if (gy < 1.0) shf = 1.0 - shadow_k * (1.0 - texture(smoke, vec3(g.x, gy, g.y)).g);
+		}
+	}
+	tb = min(tb, tsurf);
+	if (tb <= ta && shf > 0.995) discard;
 
 	float cth = dot(rd, sun_dir);
-	float phase = mix(hg(cth, 0.55), hg(cth, -0.2), 0.35);
 	vec3 col = vec3(0.0);
 	float T = 1.0;
 	float jit = fract(52.9829189 * fract(dot(FRAGCOORD.xy, vec2(0.06711056, 0.00583715))));
@@ -90,7 +104,18 @@ void fragment() {
 					// edges inside thick dust read as depth
 					float powder = mix(1.0, 1.0 - exp(-d * 3.0), 0.45);
 					// sun (self-shadowed through the dust, cloud shadows) + sky, a little ground bounce
-					vec3 L = dust_col * (sun_col * (s.g * phase * cl * occl * powder * 1.45 * (1.25 - n * 0.7)) + amb_col * (0.3 + 0.7 * s.b) + sun_col * 0.04);
+					vec4 cv = texture(colv, vec3(g.x, gy, g.y));
+					vec3 dcol = mix(dust_col, cv.rgb / max(cv.a, 1e-3), clamp(cv.a, 0.0, 1.0));
+					// multiple scattering (a few octaves of ever softer, ever less shadowed light): the bright,
+					// glowing look of real dust, especially with the sun behind it
+					float ts = s.g * occl;
+					float ms = 0.0;
+					float oa = 1.0, ob = 1.0, oc = 1.0;
+					for (int o = 0; o < 3; o++) {
+						ms += oa * pow(ts, ob) * mix(hg(cth, 0.55 * oc), hg(cth, -0.2 * oc), 0.35);
+						oa *= 0.38; ob *= 0.45; oc *= 0.5;
+					}
+					vec3 L = dcol * (sun_col * (ms * cl * powder * 1.0 * (1.25 - n * 0.7)) + amb_col * (0.3 + 0.7 * s.b) + sun_col * 0.04);
 					col += T * a * L;
 					T *= 1.0 - a;
 					if (T < 0.01) break;
@@ -99,7 +124,9 @@ void fragment() {
 		}
 		t += ds;
 	}
-	if (T > 0.995) discard;
-	ALBEDO = col / (1.0 - T);   // straight (un-premultiplied) colour for blend_mix
-	ALPHA = 1.0 - T;
+	// over the scene: dust in front, the scene behind it seen through the dust and darkened by its shadow
+	float keep = T * shf;
+	if (keep > 0.995) discard;
+	ALPHA = 1.0 - keep;
+	ALBEDO = col / ALPHA;   // straight (un-premultiplied) colour for blend_mix
 }

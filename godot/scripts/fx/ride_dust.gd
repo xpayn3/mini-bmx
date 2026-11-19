@@ -80,6 +80,8 @@ var _puff_vel: Array[Vector3] = []
 var _puff_next := 0
 var fog_on := false
 var sim: SmokeSim = null
+var grit: Grit = null
+var _grit_bursts: Array = []      # {p, v, spread, rate, col, t}
 var _feed_on := false
 var _feed_p := Vector3.ZERO
 var _feed_prev := Vector3.INF
@@ -87,6 +89,7 @@ var _feed_v := Vector3.ZERO
 var _feed_rate := 0.0
 var _feed_r := 0.3
 var _feed_fan := 30.0
+var _feed_col := Color(0.8, 0.68, 0.52)
 var _front_on := false
 var _feed_age := 0.0
 var _front_age := 0.0
@@ -108,6 +111,8 @@ func _init() -> void:
 		sim = SmokeSim.new()
 		if sim.ok:
 			add_child(sim)
+			grit = Grit.new(sim)
+			add_child(grit)
 			emitter.visible = false
 		else:
 			sim.free()
@@ -133,16 +138,23 @@ func sim_step(dt: float, focus: Vector3, fwd: Vector3, wind: Vector2) -> void:
 	if _front_age > 0.1: _front_on = false
 	_pulse_t += dt
 	var pulse := clampf(0.9 + _gust.get_noise_1d(_pulse_t * 60.0) * 2.6, 0.0, 2.6)   # gusts with gaps
-	_feed_prev = _patch(_feed_on, _feed_p, _feed_prev, _feed_v, _feed_rate * pulse, _feed_fan)
+	_feed_prev = _patch(_feed_on, _feed_p, _feed_prev, _feed_v, _feed_rate * pulse, _feed_fan, _feed_col)
 	# the front tyre kicks up a little too (its own gusts)
 	var fpulse := clampf(0.9 + _gust.get_noise_1d(_pulse_t * 60.0 + 500.0) * 2.6, 0.0, 2.6)
-	_front_prev = _patch(_front_on, _front_p, _front_prev, _front_v, _front_rate * fpulse, _feed_fan)
+	_front_prev = _patch(_front_on, _front_p, _front_prev, _front_v, _front_rate * fpulse, _feed_fan, _feed_col)
 	sim.step(dt, focus, fwd)
+	if grit != null:
+		for i in range(_grit_bursts.size() - 1, -1, -1):
+			var b: Dictionary = _grit_bursts[i]
+			grit.emit(b.p, b.v, b.spread, b.rate, b.col)
+			b.t -= dt
+			if b.t <= 0.0: _grit_bursts.remove_at(i)
+		grit.update(focus)
 
 ## dust comes only from a tyre's contact patch: small sources on the ground along the path the patch
 ## swept this frame, each spraying its own way (back / out / up, in gusts). The cloud is what the sim
 ## makes of that spray: it fans out, rolls and spreads from there. Returns the new "previous" point.
-func _patch(on: bool, p: Vector3, prev: Vector3, v: Vector3, rate: float, fan: float) -> Vector3:
+func _patch(on: bool, p: Vector3, prev: Vector3, v: Vector3, rate: float, fan: float, col: Color) -> Vector3:
 	if not on or rate <= 0.0: return Vector3.INF
 	var from := prev if prev != Vector3.INF and prev.distance_to(p) < 2.0 else p
 	var k := clampi(ceili(from.distance_to(p) / 0.15), 1, 5)
@@ -153,8 +165,16 @@ func _patch(on: bool, p: Vector3, prev: Vector3, v: Vector3, rate: float, fan: f
 		var jv := v.rotated(Vector3.UP, yaw) * (0.6 + randf() * 0.8) + Vector3(0, randf() * (0.8 + sp * 0.25), 0)
 		# faster riding flings the spray harder / wider: it grows into a cloud sooner
 		var fast := clampf((sim.speed - 3.0) / 9.0, 0.0, 1.0)
-		sim.add_source(at, jv * (1.0 + fast * 0.5), PATCH_R, rate * 14.0 / k, 10.0, 0.6 + randf() * 0.8 + fast * 1.6)
+		sim.add_source(at, jv * (1.0 + fast * 0.5), PATCH_R, rate * 14.0 / k, 10.0, 0.6 + randf() * 0.8 + fast * 1.6, col)
+	# grit: grains flicked off the tread with the dust (fewer but further than the dust)
+	if grit != null:
+		grit.emit(p, v * 1.4 + Vector3(0, 0.6 + sp * 0.15, 0), 0.8 + sp * 0.35, rate * 26.0, col)
 	return p
+
+## grains thrown for secs (landings, crash impacts)
+func grit_burst(p: Vector3, v: Vector3, spread: float, rate: float, secs: float, col: Color) -> void:
+	if grit == null or rate <= 0.0: return
+	_grit_bursts.append({p = p, v = v, spread = spread, rate = rate, col = col, t = secs})
 
 ## per physics step: the front tyre's patch (sim only; a lighter dusting than the rear)
 func feed_front(front: Vector3, throw_v: Vector3, rate: float, alpha: float) -> void:
@@ -175,6 +195,7 @@ func landing_dust(patches: Array, vel: Vector3, impact: float, col: Color, amoun
 		var at: Vector3 = p + Vector3(0, 0.08, 0)
 		sim.burst(at, vel * 0.25 + Vector3(0, 0.3 + k * 0.6, 0), 0.26 + k * 0.12, (40.0 + 120.0 * k) * amount,
 			0.8 + k * 2.4, 0.07 + k * 0.05, col, 18.0)
+		grit_burst(at, vel * 0.3 + Vector3(0, 0.8 + k * 1.2, 0), 1.0 + k * 2.5, 2400.0 * k * amount, 0.08, col)
 	sim.tint(col)
 
 ## a burst of dust (crash, smash, hard landing)
@@ -262,6 +283,7 @@ func feed(rear: Vector3, throw_v: Vector3, rate: float, col: Color, alpha: float
 		_feed_rate = rate * alpha * alpha * 2.2   # grass (low alpha) barely dusts, dry dirt billows
 		_feed_r = 0.32 + clampf(rate / 120.0, 0.0, 1.0) * 0.3 + fan_deg / 70.0 * 0.15
 		sim.tint(col)
+		_feed_col = col
 		return
 	emitter.global_position = rear
 	var sp := throw_v.length()

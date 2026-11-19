@@ -23,6 +23,7 @@ const PRESSURE_ITERS := 14
 const AHEAD := 7.0                # metres of box kept ahead of the rider
 const PASSES := ["advect", "curl", "confine", "divergence", "pressure", "project", "light", "occupancy"]
 const BRICK := 8                  # voxels per occupancy cell (empty-space skipping)
+const SRC_F := 20                 # floats per source: pos+r, vel+rate, blend/radial, colour, spin
 
 ## tuning
 var density_fade := 0.2          # /s
@@ -48,6 +49,11 @@ var _curl: RID
 var _div: RID
 var _pres: RID
 var _light: RID
+var _cm: Array[RID] = [RID(), RID()]   # dust colour mass, ping-pong with the state
+var _colr: RID                         # dust colour for drawing
+var _velr: RID                         # air velocity + density for the grit particles
+var _colr3d: Texture3DRD
+var vel3d: Texture3DRD
 var _occ: RID
 var _occ3d: Texture3DRD
 var _sampler: RID
@@ -76,23 +82,38 @@ var _idle := 1e9
 var _last_focus := Vector3.INF
 var _col_target := dust_col
 var _drift := Vector3.ZERO
+var _body: Array = []             # solid parts this frame: {p, v, r, spin}
+
+var _scol := Vector3(3, 2.8, 2.5)
+
+## what the grit (fx/grit.gd) needs to find the ground / the light / the air in the box
+func shading_inputs() -> Dictionary:
+	return {hmap = _hm_tex, size_m = Vector3(NX * H, NY * H, NZ * H), hm_cells = float(HM), light = _tex3d,
+		origin = Vector3(origin.x, 0, origin.y), sun_col = _scol, amb_col = Vector3(amb_col.r, amb_col.g, amb_col.b)}
+
+## the bike / rider as solid parts for this frame: [{p, v, r, spin}] (world space)
+func set_body(parts: Array) -> void:
+	_body = parts
 
 func _init() -> void:
 	name = "SmokeSim"
 	rd = RenderingServer.get_rendering_device()
 	if rd == null: return
-	_src.resize(MAX_SRC * 12)
+	_src.resize(MAX_SRC * SRC_F)
 	_hm.resize((HM + 1) * (HM + 1))
 	_hm_img = Image.create_empty(HM + 1, HM + 1, false, Image.FORMAT_RF)
 	_hm_tex = ImageTexture.create_from_image(_hm_img)
 	_tex3d = Texture3DRD.new()
 	_occ3d = Texture3DRD.new()
+	_colr3d = Texture3DRD.new()
+	vel3d = Texture3DRD.new()
 	_mat = ShaderMaterial.new()
 	_mat.shader = preload("res://shaders/smoke/smoke_render.gdshader")
 	_mat.render_priority = 3
 	_mat.set_shader_parameter("hmap", _hm_tex)
 	_mat.set_shader_parameter("smoke", _tex3d)
 	_mat.set_shader_parameter("occ", _occ3d)
+	_mat.set_shader_parameter("colv", _colr3d)
 	_mat.set_shader_parameter("size_m", Vector3(NX * H, NY * H, NZ * H))
 	_mat.set_shader_parameter("hm_cells", float(HM))
 	_mat.set_shader_parameter("detail", detail_texture())
@@ -128,19 +149,24 @@ static func detail_texture() -> ImageTexture3D:
 # ---------------------------------------------------------------- sources (world space, this frame)
 ## a dust / air source for this frame: dust density added per second inside radius r (m), the air
 ## inside pulled toward vel (blend /s) plus pushed out radially (m/s)
-func add_source(p: Vector3, vel: Vector3, r: float, rate: float, blend := 6.0, radial := 0.0) -> void:
+## col: the dust's colour (sRGB; alpha 0 = the current tint); spin: rad/s about its centre (a wheel)
+func add_source(p: Vector3, vel: Vector3, r: float, rate: float, blend := 6.0, radial := 0.0,
+		col := Color(0, 0, 0, 0), spin := Vector3.ZERO, solid := false) -> void:
 	if not ok or _n >= MAX_SRC: return
-	var o := _n * 12
+	var o := _n * SRC_F
+	var c := (col if col.a > 0.0 else _col_target).srgb_to_linear()
 	_src[o] = p.x; _src[o + 1] = p.y; _src[o + 2] = p.z; _src[o + 3] = r
 	_src[o + 4] = vel.x; _src[o + 5] = vel.y; _src[o + 6] = vel.z; _src[o + 7] = rate
 	_src[o + 8] = blend; _src[o + 9] = radial; _src[o + 10] = 0.0; _src[o + 11] = 0.0
+	_src[o + 12] = c.r; _src[o + 13] = c.g; _src[o + 14] = c.b; _src[o + 15] = 0.0
+	_src[o + 16] = spin.x; _src[o + 17] = spin.y; _src[o + 18] = spin.z; _src[o + 19] = 1.0 if solid else 0.0
 	_n += 1
 	if rate > 0.0: _idle = 0.0
 
 ## a source that keeps going for secs (a landing / crash cloud)
 func burst(p: Vector3, vel: Vector3, r: float, rate: float, radial: float, secs := 0.2, col := Color(0, 0, 0, 0), blend := 7.0) -> void:
 	if not ok: return
-	_emit.append({p = p, v = vel, r = r, rate = rate, radial = radial, t = secs, blend = blend})
+	_emit.append({p = p, v = vel, r = r, rate = rate, radial = radial, t = secs, blend = blend, col = col})
 	if col.a > 0.0: tint(col)
 	_idle = 0.0
 
@@ -162,17 +188,19 @@ func step(dt: float, focus: Vector3, fwd: Vector3) -> void:
 	dt = clampf(dt, 1.0 / 240.0, 1.0 / 30.0)
 	for i in range(_emit.size() - 1, -1, -1):
 		var e: Dictionary = _emit[i]
-		add_source(e.p, e.v, e.r, e.rate, e.blend, e.radial)
+		add_source(e.p, e.v, e.r, e.rate, e.blend, e.radial, e.col)
 		e.t -= dt
 		if e.t <= 0.0: _emit.remove_at(i)
-	# the bike pushes the air: its wake drags and swirls the dust behind it
 	if _last_focus != Vector3.INF:
 		var bv := (focus - _last_focus) / dt
 		if bv.length() < 40.0:
 			speed += (bv.length() - speed) * (1.0 - exp(-dt * 3.0))
-		if bv.length() < 40.0 and bv.length() > 0.5:
-			add_source(focus + Vector3(0, 0.55, 0), bv * 0.9, 0.75, 0.0, 5.0)
 	_last_focus = focus
+	# the bike and rider are solid in the air: air inside them moves with them (the pressure solve then
+	# sends the air round them), and the wheels spin it - dust gets dragged, split and stirred
+	for b in _body:
+		add_source(b.p, b.v, b.r, 0.0, 40.0, 0.0, Color(0, 0, 0, 0), b.spin, true)
+	_body = []
 	_idle += dt
 	if _idle > 14.0:   # nothing kicked up for a while: the air is clear, stop simulating
 		_n = 0
@@ -200,10 +228,10 @@ func step(dt: float, focus: Vector3, fwd: Vector3) -> void:
 		_rebuild_hmap()
 	# sources -> grid coordinates
 	var bytes := PackedFloat32Array()
-	bytes.resize(MAX_SRC * 12)
+	bytes.resize(MAX_SRC * SRC_F)
 	for i in _n:
-		var o := i * 12
-		for k in 12: bytes[o + k] = _src[o + k]
+		var o := i * SRC_F
+		for k in SRC_F: bytes[o + k] = _src[o + k]
 		var x := _src[o]; var y := _src[o + 1]; var z := _src[o + 2]
 		bytes[o] = (x - origin.x) / H
 		bytes[o + 1] = (y - _ground(x, z)) / H
@@ -231,6 +259,7 @@ func step(dt: float, focus: Vector3, fwd: Vector3) -> void:
 	_mat.set_shader_parameter("box_max", bmax)
 	_mat.set_shader_parameter("sun_dir", sdir)
 	_mat.set_shader_parameter("sun_col", scol)
+	_scol = scol
 	_mat.set_shader_parameter("amb_col", Vector3(amb_col.r, amb_col.g, amb_col.b))
 	var dc := dust_col.srgb_to_linear()
 	_mat.set_shader_parameter("dust_col", Vector3(dc.r, dc.g, dc.b))
@@ -296,6 +325,8 @@ func _gpu_create() -> void:
 	_st[0] = _tex(F16); _st[1] = _tex(F16)
 	_curl = _tex(F16); _light = _tex(F16)
 	_div = _tex(F32); _pres = _tex(F32)
+	_cm[0] = _tex(F16); _cm[1] = _tex(F16)
+	_colr = _tex(F16); _velr = _tex(F16)
 	_occ = _tex(RenderingDevice.DATA_FORMAT_R16_SFLOAT, Vector3i(NX / BRICK, NY / BRICK, NZ / BRICK))
 	var ss := RDSamplerState.new()
 	ss.mag_filter = RenderingDevice.SAMPLER_FILTER_LINEAR
@@ -305,7 +336,7 @@ func _gpu_create() -> void:
 	ss.repeat_w = RenderingDevice.SAMPLER_REPEAT_MODE_CLAMP_TO_BORDER
 	ss.border_color = RenderingDevice.SAMPLER_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK
 	_sampler = rd.sampler_create(ss)
-	_buf = rd.storage_buffer_create(MAX_SRC * 48)
+	_buf = rd.storage_buffer_create(MAX_SRC * SRC_F * 4)
 	for p in PASSES:
 		var sf: RDShaderFile = load("res://shaders/smoke/%s.glsl" % p)
 		var spirv := sf.get_spirv()
@@ -318,16 +349,19 @@ func _gpu_create() -> void:
 	for q in 2:
 		var o := 1 - q
 		_sets["advect%d" % q] = rd.uniform_set_create([_smp(0, _st[q]), _img(1, _st[o]),
-			_u(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, 2, [_buf])], _shader.advect, 0)
+			_u(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, 2, [_buf]), _smp(3, _cm[q]), _img(4, _cm[o])], _shader.advect, 0)
 		_sets["curl%d" % q] = rd.uniform_set_create([_img(0, _st[q]), _img(1, _curl)], _shader.curl, 0)
 		_sets["confine%d" % q] = rd.uniform_set_create([_img(0, _st[q]), _img(1, _curl)], _shader.confine, 0)
 		_sets["divergence%d" % q] = rd.uniform_set_create([_img(0, _st[q]), _img(1, _div), _img(2, _pres)], _shader.divergence, 0)
 		_sets["project%d" % q] = rd.uniform_set_create([_img(0, _st[q]), _img(1, _pres)], _shader.project, 0)
-		_sets["light%d" % q] = rd.uniform_set_create([_smp(0, _st[q]), _img(1, _light)], _shader.light, 0)
+		_sets["light%d" % q] = rd.uniform_set_create([_smp(0, _st[q]), _img(1, _light), _smp(2, _cm[q]),
+			_img(3, _colr), _img(4, _velr)], _shader.light, 0)
 		_sets["occupancy%d" % q] = rd.uniform_set_create([_smp(0, _st[q]), _img(1, _occ)], _shader.occupancy, 0)
 	_sets["pressure"] = rd.uniform_set_create([_img(0, _pres), _img(1, _div)], _shader.pressure, 0)
 	_tex3d.texture_rd_rid = _light
 	_occ3d.texture_rd_rid = _occ
+	_colr3d.texture_rd_rid = _colr
+	vel3d.texture_rd_rid = _velr
 
 func _disp(cl: int, pass_name: String, set_rid: RID, pcv: PackedFloat32Array, groups := Vector3i(NX / 8, NY / 4, NZ / 8)) -> void:
 	rd.compute_list_bind_compute_pipeline(cl, _pipe[pass_name])
@@ -343,7 +377,10 @@ func _gpu_step(dt: float, shift: Vector2i, clear: bool, src: PackedByteArray, n:
 	if clear:
 		rd.texture_clear(_st[0], Color(0, 0, 0, 0), 0, 1, 0, 1)
 		rd.texture_clear(_st[1], Color(0, 0, 0, 0), 0, 1, 0, 1)
-	if n > 0: rd.buffer_update(_buf, 0, n * 48, src.slice(0, n * 48))
+		rd.texture_clear(_cm[0], Color(0, 0, 0, 0), 0, 1, 0, 1)
+		rd.texture_clear(_cm[1], Color(0, 0, 0, 0), 0, 1, 0, 1)
+	var nb := n * SRC_F * 4
+	if n > 0: rd.buffer_update(_buf, 0, nb, src.slice(0, nb))
 	_sim_t += dt
 	var _fast := clampf((speed - 3.0) / 9.0, 0.0, 1.0)   # 0 below ~11 km/h .. 1 at ~43 km/h
 	var p := _cur
@@ -370,8 +407,12 @@ func _notification(what: int) -> void:
 		ok = false
 		_tex3d.texture_rd_rid = RID()
 		_occ3d.texture_rd_rid = RID()
+		_colr3d.texture_rd_rid = RID()
+		vel3d.texture_rd_rid = RID()
 		var rids: Array[RID] = []
 		rids.append_array(_st)
+		rids.append_array(_cm)
+		rids.append_array([_colr, _velr])
 		rids.append_array([_curl, _div, _pres, _light, _occ, _sampler, _buf])
 		for s in _shader.values(): rids.append(s)   # frees its pipelines + uniform sets too
 		var dev := rd

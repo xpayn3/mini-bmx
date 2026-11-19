@@ -161,7 +161,12 @@ F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A 
   out from under both tyres (`landing_dust`), crash dust under the ragdoll and the sliding bike (`Game._crash_dust`), skid
   clouds (`cloud`), `burst()` / smashes (`puff_burst`), the bike's wake; faster riding = more turbulence
   and quicker spreading. Stops when
-  the air is clear. `.glsl` files need an import (`--headless --import`) after editing. Falls back to the
+  the air is clear. Dust carries its own colour (colour-mass textures, sources pass their ground
+  colour); the bike's wheels (spinning), frame and rider are solids the air flows round (`Game._body_parts`);
+  the render darkens the ground / bike under the dust with the light volume (dust shadows) and uses a
+  3-octave multiple-scattering approximation. **Grit** (`fx/grit.gd`, `shaders/smoke/grit*.gdshader`):
+  GPU particles (grains 5 mm–3 cm) carried by the sim's air velocity texture, sunlit + glints, land and fade.
+  `.glsl` files need an import (`--headless --import`) after editing. Falls back to the
   old sprites / FogVolumes without a RenderingDevice; `BMX_SPRITE_DUST=1` forces the sprites.
 - Dirt chunks, **tyre tracks**: one ring-buffer ArrayMesh
   (14 000 segments ≈ 1 km/wheel, one draw call, each segment uploads only its own bytes) drawn by

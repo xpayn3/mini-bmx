@@ -6,6 +6,9 @@ layout(local_size_x = 8, local_size_y = 4, local_size_z = 8) in;
 
 layout(set = 0, binding = 0) uniform sampler3D src;
 layout(set = 0, binding = 1, rgba16f) uniform restrict writeonly image3D outv;
+layout(set = 0, binding = 2) uniform sampler3D csrc;                          // colour mass
+layout(set = 0, binding = 3, rgba16f) uniform restrict writeonly image3D colv;   // rgb colour, a: has dust
+layout(set = 0, binding = 4, rgba16f) uniform restrict writeonly image3D velv;   // air velocity + density (grit)
 layout(push_constant, std430) uniform Params {
 	vec4 sun;   // xyz = toward the sun (grid axes), w = extinction per density per metre
 	vec4 a;     // h, -, -, -
@@ -17,7 +20,12 @@ void main() {
 	if (any(greaterThanEqual(id, N))) return;
 	vec3 inv = 1.0 / vec3(N);
 	vec3 p = vec3(id) + 0.5;
-	float d = texture(src, p * inv).w;
+	vec4 s0 = texture(src, p * inv);
+	float d = s0.w;
+	vec3 cm = texture(csrc, p * inv).rgb;
+	float has = clamp(d * 40.0, 0.0, 1.0);   // premultiplied by "has dust" so filtering at the edges stays right
+	imageStore(colv, id, vec4((d > 1e-4 ? cm / d : vec3(0.0)) * has, has));
+	imageStore(velv, id, s0);
 	float h = pc.a.x;
 	// toward the sun: 14 steps growing from half a voxel to ~2.5 voxels (~5 m)
 	float acc = 0.0;
