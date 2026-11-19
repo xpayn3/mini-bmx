@@ -891,8 +891,9 @@ var _base_bins := {}
 var _v_prev_fx := 0.0; var _surge := 0.0   # speed feel: last speed, acceleration surge
 var ride_log := RideLog.new()   # the last 60 s, saved with R3 / F8 (save_log)
 var _log_lift := 0.0
-var jitter_on := false
+var jitter_on := OS.get_environment("BMX_JITTER_ALL") != ""
 var _jit_skip := 0
+var _yaw_s := 0.0; var _turn_s := 0.0; var _aspin_s := 0.0; var _atilt_s := 0.0; var _blat_s := 0.0
 var _jit_head := Vector3.INF
 var _jit := {}
 func _jitter_sample(key: String, val: float, thr: float) -> void:
@@ -1136,14 +1137,22 @@ func _process(dt: float) -> void:
 		var lt := rig.limb_targets()
 		if dab_k > 0.0: _dab_foot(lt)
 		var T: Dictionary = Tune.v
+		# the pose inputs that switch on / off with the bike leaving / touching the ground are eased, never stepped
+		# (a corner's turn pose used to snap to zero on the first air frame, a stick tilt off on landing)
+		var ek := 1.0 - exp(-dt * 8.0)
+		_yaw_s += (st.yaw_rate - _yaw_s) * (1.0 - exp(-dt * 14.0))   # (the tyre sim's bump nudges are not the rider's business)
+		_turn_s += ((0.0 if st.air else st.yaw_rate * clampf(absf(st.v) / 3.0, 0.3, 1.0)) - _turn_s) * (1.0 - exp(-dt * 5.0))
+		_aspin_s += ((st.yaw_rate if st.air else 0.0) - _aspin_s) * ek
+		_atilt_s += ((st.air_tilt * float(T.get("stickBodyTilt", 0.6)) * clampf(st.air_stick.length() * 3.0 + absf(st.edge_s) * 2.0, 0.0, 1.0) if st.air else 0.0) - _atilt_s) * ek
+		_blat_s += ((st.air_stick.x if st.air else st.flick) - _blat_s) * ek
 		rider.update_pose(dt, {"footL": lt.footL, "footR": lt.footR, "handL": lt.handL, "handR": lt.handR,
 			"dab": dab_k, "dabSide": dab_side, "dabLean": DAB_LEAN,
-			"v": st.v, "lean": st.bike_lean + st.rock, "steer": st.steer, "yawRate": st.yaw_rate,
+			"v": st.v, "lean": st.bike_lean + st.rock, "steer": st.steer, "yawRate": _yaw_s,
 			"counter": st.counter, "rockRoll": st.rock, "headRoll": st.bike_lean * 0.85,
 			"absorb": clampf(body_y - y_draw, -T.legComp, T.legExt), "pitch": p_draw, "bodyLevel": T.bodyLevel,
 			"attackDrop": T.attackDrop, "pedal": st.pedal, "sprint": st.sprint * st.pedal, "crank": st.crank,
-			"air": st.air_k, "compress": maxf(0.0, -st.compress), "hipShift": st.hip_shift, "bodyStick": st.body_in_s, "slope": st._g_pitch, "airTilt": st.air_tilt * float(Tune.v.get("stickBodyTilt", 0.6)) * clampf(st.air_stick.length() * 3.0 + absf(st.edge_s) * 2.0, 0.0, 1.0) if st.air else 0.0, "bodyLat": st.air_stick.x if st.air else st.flick, "wheelR": rider.to_local(rig.wheel_r.global_position), "wheelRR": rig.wheel_rr, "t": t,
-			"airSpin": st.yaw_rate if st.air else 0.0, "wheelY": (rig.wheel_f.global_position.y + rig.wheel_r.global_position.y) * 0.5, "turn": 0.0 if st.air else st.yaw_rate * clampf(absf(st.v) / 3.0, 0.3, 1.0)})
+			"air": st.air_k, "compress": maxf(0.0, -st.compress), "hipShift": st.hip_shift, "bodyStick": st.body_in_s, "slope": st._g_pitch, "airTilt": _atilt_s, "bodyLat": _blat_s, "wheelR": rider.to_local(rig.wheel_r.global_position), "wheelRR": rig.wheel_rr, "t": t,
+			"airSpin": _aspin_s, "wheelY": (rig.wheel_f.global_position.y + rig.wheel_r.global_position.y) * 0.5, "turn": _turn_s})
 		if dab_probe: _dab_probe(st)
 		if st.crash_on: _jit_skip = 40
 		elif _jit_skip > 0: _jit_skip -= 1

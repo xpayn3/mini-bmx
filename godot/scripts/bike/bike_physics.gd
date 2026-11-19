@@ -36,7 +36,7 @@ var heading := 0.0; var v := 0.0; var steer := 0.0; var steer_in := 0.0
 var lean := 0.0; var lean_v := 0.0; var bike_lean := 0.0; var counter := 0.0; var rock := 0.0
 var pitch := 0.0; var pitch_v := 0.0; var hop_nose := 0.0
 var wheelie_up := 0.0   # sprint wheelie: how far up (rad) the rider is holding the front
-var air := false; var air_time := 0.0; var air_k := 0.0; var cap_bank := 0.0
+var air := false; var air_time := 0.0; var air_k := 0.0; var cap_bank := 0.0; var lean_lim := 9.0
 var compress := 0.0; var compress_v := 0.0; var load := 0.0
 var body_y := NAN; var body_v := 0.0; var body_x := 0.0; var hip_shift := 0.0
 # the rider's body as its own mass fore / aft: it lags the bike (braking and landings throw it forward,
@@ -692,6 +692,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		cap_bank = maxf(0.0, cap_bank - dt * 0.5)
 	var cap_b: float = T.bikeLeanCap + cap_bank
 	bike_lean = cap_b * tanh(bl / cap_b)
+	var lim_t := 9.0
 	if not air and absf(bike_lean) > 0.05:
 		# what matters for the tyre is its lean against the ground WHERE IT SWINGS TO, not gravity: leaned deep
 		# toward ground that rises beside the bike (a trail's edge, the hillside, a berm's lip) the tyre went
@@ -711,8 +712,17 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 				phi = maxf(phi, atan((terrain.deck_height(wx + lx * d, wz + lz * d) - h0) / d))
 		lean_room = _or(lean_room, phi)
 		lean_room += clampf(phi - lean_room, -3.0 * dt, 3.0 * dt)
-		var lim: float = maxf(0.25, float(T.get("groundLeanMax", 1.05)) - maxf(lean_room, -0.3))
-		bike_lean = sg * minf(absf(bike_lean), lim)
+		lim_t = maxf(0.25, float(T.get("groundLeanMax", 1.05)) - maxf(lean_room, -0.3))
+	# the ground's limit on the lean opens / closes over a moment when the bike leaves / meets the ground: it used
+	# to switch on and off in a single step (a 0.5-0.8 rad jump of the bike and the rider at take-off and landing)
+	if air:
+		lean_lim = minf(9.0, lean_lim + 2.5 * dt)
+	elif since_land < 0.4:
+		lean_lim = maxf(lim_t, lean_lim - 4.0 * dt)
+	else:
+		lean_lim = lim_t
+	if lean_lim < 8.0:
+		bike_lean = signf(bike_lean) * minf(absf(bike_lean), lean_lim)
 	# the bike leans under the rider: the body always stays a little more upright than the bike (never
 	# hangs inside it, or the inside leg cuts through the frame). The body leans ~70 % of the way the
 	# rider + bike lean, so in a fast turn the bike tips well under a fairly upright rider
