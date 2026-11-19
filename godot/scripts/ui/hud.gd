@@ -96,8 +96,8 @@ func _ready() -> void:
 	hop_bar.size = Vector2(180, 12); hop_bar.position = Vector2(-90, -100)
 	root.add_child(hop_bar)
 	getup = GetUpPrompt.new(); getup.hud = self
-	getup.set_anchors_preset(Control.PRESET_CENTER)
-	getup.size = Vector2(280, 84); getup.position = Vector2(-140, -190)   # above the crashed rider
+	getup.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	getup.size = Vector2(280, 84); getup.position = Vector2(-140, -160)   # bottom centre (the crash caption sits under it)
 	getup.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	getup.visible = false
 	root.add_child(getup)
@@ -859,8 +859,8 @@ class StaminaView extends Control:
 			if k > 0: draw_rect(Rect2(r.position, Vector2(16 * k, 9)), col)
 
 class GetUpPrompt extends Control:
-	## after a crash, centre screen: a round key cap with a ring that fills while the hop key is held,
-	## "GET UP" beside it. Breathes while waiting, the cap sinks and lights while held, pops in / out.
+	## after a crash, bottom centre: "HOLD SPACE TO GET UP" and a thin bar that fills while the hop key
+	## is held. Fades in / out.
 	var hud
 	var a := 0.0
 	var k := 0.0
@@ -881,34 +881,20 @@ class GetUpPrompt extends Control:
 		if not visible: return
 		key = Settings.binding_text("hop", false)
 		modulate.a = a
-		pivot_offset = size / 2
-		scale = Vector2.ONE * (0.85 + 0.15 * (1.0 - pow(1.0 - a, 3.0)))
 		queue_redraw()
 
 	func _draw() -> void:
+		# GTA-like and plain: one line of white text, a thin bar under it that fills while the key is held
 		var f := UITheme.font(true)
-		var acc := UITheme.ACCENT
-		var breathe := 0.5 + 0.5 * sin(t * 4.0)
-		draw_style_box(UITheme.box(Color(0.055, 0.094, 0.12, 0.82), 22, 0, Color(1, 1, 1, 0.10 + 0.25 * k), 2), Rect2(Vector2.ZERO, size))
-		# key cap with a progress ring
-		var c := Vector2(48, size.y / 2)
-		var r := 28.0
-		draw_arc(c, r, 0, TAU, 48, Color(1, 1, 1, 0.12 + 0.10 * breathe * (1.0 - held)), 5, true)
-		if k > 0.0:
-			draw_arc(c, r, -PI / 2, -PI / 2 + TAU * k, 48, acc, 5, true)
-			var g := acc; g.a = 0.25
-			draw_arc(c, r + 4, -PI / 2, -PI / 2 + TAU * k, 48, g, 3, true)
-		var cr := 20.0 - 2.0 * held
-		var cap := Color(0.16, 0.22, 0.27).lerp(acc, held * 0.85)
-		draw_circle(c + Vector2(0, 2.5 - 2.0 * held), cr, Color(0, 0, 0, 0.35))   # cap shadow
-		draw_circle(c + Vector2(0, held), cr, cap)
-		var kt := key if key.length() <= 5 else key.substr(0, 5)
-		var ks := 12 if kt.length() > 2 else 16
-		draw_string(f, Vector2(c.x - 30, c.y + ks * 0.36 + held), kt.to_upper(), HORIZONTAL_ALIGNMENT_CENTER, 60, ks, Color(0.1, 0.08, 0.0) if held > 0.5 else Color.WHITE)
-		# text
-		var tx := 92.0
-		draw_string(f, Vector2(tx, size.y / 2 - 2), "GET UP", HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color.WHITE.lerp(acc, k))
-		draw_string(f, Vector2(tx, size.y / 2 + 20), "hold %s" % key, HORIZONTAL_ALIGNMENT_LEFT, size.x - tx - 12, 13, UITheme.MUTED)
+		var line := "HOLD  %s  TO GET UP" % key.to_upper()
+		var fs := 18
+		var tw := f.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		var y := size.y * 0.5
+		draw_string(f, Vector2((size.x - tw) * 0.5 + 1, y + 1), line, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(0, 0, 0, 0.45))   # soft shadow
+		draw_string(f, Vector2((size.x - tw) * 0.5, y), line, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color.WHITE)
+		var bar := Rect2((size.x - 240) * 0.5, y + 14, 240, 5)
+		draw_rect(bar, Color(0, 0, 0, 0.45))
+		if k > 0.0: draw_rect(Rect2(bar.position, Vector2(bar.size.x * k, bar.size.y)), Color.WHITE)
 
 class FlowLeds extends RefCounted:
 	## flow on the bike computer's LEDs, kept like real hardware (Wahoo-style): small pinhole LEDs in a

@@ -158,7 +158,7 @@ F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A 
 - Ragdoll on crashes (`ragdoll.gd`), then get up with Space.
 - **WASTED** (`fx/wasted.gd`, Settings › Gameplay › Crash slow motion): on a crash time drops to 0.22× (sound pitched down via
   `AudioServer.playback_speed_scale`) for ~2.4 s real time, then eases back; the screen goes grey + vignette, the word
-  WASTED punches in, flat red, squeezed narrow to fill the screen (no band, no stroke), the crash reason small below. Fades on getting up or after 5 s. Off in autotests unless `BMX_WASTED=1`.
+  WASTED shows at once for 1.5 s then fades (the rider + bike drawn in front of it via a silhouette mask), flat red, squeezed narrow to fill the screen (no band, no stroke), the crash reason small below. Fades on getting up or after 5 s. Off in autotests unless `BMX_WASTED=1`.
 - Look: kits + a colour per part (helmet shell/peak, goggles, jersey, pants, gloves, shoes).
 
 ### Ride light (time of day)
