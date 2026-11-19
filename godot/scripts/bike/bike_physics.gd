@@ -62,6 +62,9 @@ var pivot := 0.0; var pivot_acc := 0.0
 var body_in := 0.0; var body_in_s := 0.0; var flick_in := 0.0; var flick := 0.0; var flick_prev := 0.0
 var wheelie_time := 0.0; var wheelie_pedal := false   # how long the current stick wheelie / manual has been held
 var manual_up := 0.0; var lock_sb := false; var lock_sf := false; var flick_kick := 0.0
+var flick_v := 0.0; var _flick_arm := 0.0; var _flick_side := 0.0   # flick spring speed, deliberate-flick detector
+const FLICK_VMAX := 6.0      # the bike can be thrown over at most this fast (stick units / s)
+const FLICK_WINDOW := 0.18   # centre -> edge within this long = a deliberate flick
 var air_stick := Vector2.ZERO   # right stick in the air, eased: x lean (+ left), y nose (+ up)
 var edge_s := 0.0   # right stick held at its top / bottom edge in the air: the flip spin, built up gently
 var spin_hold := 0.0; var spin_k := 1.0
@@ -81,7 +84,7 @@ var course := NAN; var slip := 0.0; var since_land := 1.0
 # the patch of ground under the rear is (0..1), bar_catch = the rider's drawn countersteer into a slide
 var slip_w := 0.0; var grip_r := 1.0; var loose := 0.0; var bar_catch := 0.0
 var _grip_noise: FastNoiseLite = null; var _grip_rng := RandomNumberGenerator.new(); var _grip_cv := 0.0
-var _squirm := 0.0
+var _squirm := 0.0; var _grip_rough := 0.0
 var front_air := false; var rear_air := false; var c_f := true; var c_r := true
 var pitch_w := NAN; var stamina := 1.0; var tired := false; var sprint := 0.0
 var spin := 0.0; var a_drive := 0.0
@@ -202,7 +205,7 @@ func reset_at(px: float, pz: float, hd: float) -> void:
 	bank = 0; body_x = 0; hip_shift = 0; spin = 0; a_drive = 0; charge = 0; hop_charge = 0; lift_t = 0
 	body_xv = 0; hip_v = 0; v_last = NAN; air_lean = 0; air_pull = 0; flip_acc = 0; spin_acc = 0; flip_in = 0; spin_in = 0
 	body_pw = 0; throw_v = 0; air_w = 0; air_inertia = 1; air_tilt = 0; air_tilt_v = 0; air_yaw = 0; air_tw = 0; air_tw_v = 0; land_jolt = 0
-	pivot = 0; pivot_acc = 0; body_in_s = 0; flick = 0; flick_prev = 0; manual_up = 0; flick_kick = 0
+	pivot = 0; pivot_acc = 0; body_in_s = 0; flick = 0; flick_v = 0; _flick_arm = 0; _flick_side = 0; flick_prev = 0; manual_up = 0; flick_kick = 0
 	sprint = 0; flow = 0; flow_t = 0; lat_m = 0; carve = 0; carve_acc = 0; carve_berm = false
 	y_draw = y; pitch_draw = 0; nose_ref = NAN; pitch_w = NAN; y_prev = NAN; kick_t = 0
 	w_f = y; w_r = y
@@ -219,7 +222,7 @@ func get_up() -> void:
 	bank = 0; body_x = 0; hip_shift = 0; spin = 0; a_drive = 0; charge = 0; hop_charge = 0; lift_t = 0
 	body_xv = 0; hip_v = 0; v_last = NAN; air_lean = 0; air_pull = 0; flip_acc = 0; spin_acc = 0; flip_in = 0; spin_in = 0
 	body_pw = 0; throw_v = 0; air_w = 0; air_inertia = 1; air_tilt = 0; air_tilt_v = 0; air_yaw = 0; air_tw = 0; air_tw_v = 0; land_jolt = 0
-	pivot = 0; pivot_acc = 0; body_in_s = 0; flick = 0; flick_prev = 0; manual_up = 0; flick_kick = 0
+	pivot = 0; pivot_acc = 0; body_in_s = 0; flick = 0; flick_v = 0; _flick_arm = 0; _flick_side = 0; flick_prev = 0; manual_up = 0; flick_kick = 0
 	sprint = 0; flow = 0; flow_t = 0; lat_m = 0; carve = 0; carve_acc = 0; carve_berm = false; y_draw = y; pitch_draw = 0
 
 func begin_crash() -> void:
@@ -518,25 +521,47 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	# body stick side lean: the rider throws the bike under them. Leaning alone turns the bike (the bars
 	# follow the lean); leaning with the steer turns harder (more lean, more bite). A quick flick of the
 	# stick outwards whips the bike round (flick_kick: a yaw kick, the rear stepping out a little)
-	var flick_rate := (flick_in - flick_prev) / maxf(dt, 1e-4)
-	var flick_out := flick_rate * signf(flick_in) > 0.0 and absf(flick_in) > absf(flick_prev)
+	# the bike follows the stick on a critically damped spring (flickSpeed = its natural rate) with a top
+	# speed, so a thumb throw left -> right swings the bike over smoothly instead of snapping it
+	var fw: float = float(T.get("flickSpeed", 14.0))
+	flick_v += ((flick_in - flick) * fw * fw - 2.0 * fw * flick_v) * dt
+	flick_v = clampf(flick_v, -FLICK_VMAX, FLICK_VMAX)
+	flick = clampf(flick + flick_v * dt, -1.0, 1.0)
+	# a deliberate flick (stick thrown from near the centre to the edge within FLICK_WINDOW) whips the bike
+	# round once; thumb wobble / holding a lean never does (it used to fire on every outward twitch)
+	if absf(flick_in) < 0.35:
+		_flick_arm = 0.0; _flick_side = 0.0
+	elif _flick_side == 0.0:
+		_flick_side = signf(flick_in)
+	if _flick_side != 0.0 and _flick_arm >= 0.0:
+		_flick_arm += dt
+		if absf(flick_in) > 0.85 and signf(flick_in) == _flick_side:
+			if _flick_arm < FLICK_WINDOW and not air and va > 2.0:
+				flick_kick += _flick_side * float(T.get("flickKick", 0.16)) * smooth01((va - 2.0) / 5.0)
+			_flick_arm = -1.0   # spent until the stick comes back towards the centre
 	flick_prev = flick_in
-	flick += (flick_in - flick) * minf(1.0, dt * float(T.get("flickSpeed", 14.0)))
-	var steer_eff := clampf(steer_input + flick_in * float(T.get("flickSteer", 0.5)), -1.0, 1.0)
-	var agree := maxf(0.0, flick_in * signf(steer_eff)) if absf(steer_eff) > 0.01 else 0.0
-	if not air and flick_out and va > 2.0:
-		flick_kick += flick_rate * dt * float(T.get("flickKick", 0.16)) * smooth01((va - 2.0) / 5.0)
+	var steer_eff := clampf(steer_input + flick * float(T.get("flickSteer", 0.5)), -1.0, 1.0)
+	# leaning with the steer: how much the two agree, smooth through zero (no on / off as the steer crosses)
+	var agree := clampf(flick * steer_eff * 2.0, 0.0, 1.0) * absf(flick)
 	var in_rate: float = T.steerRate * 1.5 if (steer_eff != 0 and signf(steer_eff) != signf(steer_in)) else T.steerRate
 	var rate: float = in_rate if absf(steer_eff) > 0.01 else T.steerRelease
 	steer_in += clampf(steer_eff - steer_in, -rate * dt, rate * dt)
 	var s_in: float = steer_in * (1 - T.steerCurve + T.steerCurve * absf(steer_in))
 	if true:
-		var w := 0.35
+		var w := 0.5
 		var lx := f.z * w
 		var lz := -f.x * w
-		var mx := x + f.x * (L / 2 - BB_REAR)
-		var mz := z + f.z * (L / 2 - BB_REAR)
-		var b := 0.0 if air else atan((terrain.height(mx - lx, mz - lz) - terrain.height(mx + lx, mz + lz)) / (2 * w))
+		# the lay of the land (berms, cambers, wooden decks) WITHOUT the rock / log domes: a rock under one
+		# side read as a 30 deg berm and threw the lean about (the wheels still ride over the rock). Read
+		# across both axles, +-0.5 m, so a sharp trail edge isn't a sudden berm either
+		var b := 0.0
+		if not air:
+			var dh := 0.0
+			for wo in [L - BB_REAR, -BB_REAR]:
+				var mx: float = x + f.x * wo
+				var mz: float = z + f.z * wo
+				dh += terrain.deck_height(mx - lx, mz - lz) - terrain.deck_height(mx + lx, mz + lz)
+			b = atan(dh * 0.5 / (2 * w))
 		_bank_raw = b
 		# a sharp edge (berm lip, trail edge) gives a one-frame spike across the 0.7 m: the bank the bike
 		# feels changes at most 3 rad/s
@@ -603,7 +628,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		if flick_kick != 0.0:   # a body flick whips the bike round: most of it turns the travel, a little steps the rear out
 			var fk := flick_kick * minf(1.0, dt * 10)
 			flick_kick -= fk
-			course += fk * 0.75; slip = clampf(slip + fk * 0.25, -T.slipMax * 0.8, T.slipMax * 0.8)
+			course += fk * 0.9; slip = clampf(slip + fk * 0.1, -T.slipMax * 0.8, T.slipMax * 0.8)
 		if absf(v) < 1.2:
 			var k := minf(1.0, dt * 6); course += slip * k; slip -= slip * k; slip_w -= slip_w * k
 		heading = course + slip
@@ -667,9 +692,11 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		for wo in [L - BB_REAR, -BB_REAR]:
 			var wx: float = x + f.x * wo
 			var wz: float = z + f.z * wo
-			var h0: float = terrain.height(wx, wz)
+			# the land itself (deck_height: no rock / log domes): passing a rock beside the wheel used to clamp
+			# the lean down for a moment ("going over something resets the angle")
+			var h0: float = terrain.deck_height(wx, wz)
 			for d in [0.3, 0.5]:
-				phi = maxf(phi, atan((terrain.height(wx + lx * d, wz + lz * d) - h0) / d))
+				phi = maxf(phi, atan((terrain.deck_height(wx + lx * d, wz + lz * d) - h0) / d))
 		lean_room = _or(lean_room, phi)
 		lean_room += clampf(phi - lean_room, -3.0 * dt, 3.0 * dt)
 		var lim: float = maxf(0.25, float(T.get("groundLeanMax", 1.05)) - maxf(lean_room, -0.3))
@@ -1317,15 +1344,17 @@ func _grip_step(dt: float, va: float, skid: bool, brake_k: float, mu: float, nR:
 	# pedal strokes on loose ground: each stamp nudges the rear (alternating sides)
 	acc += pw * sin(crank * 2.0) * clampf(a_drive / r_cap, 0.0, 1.0) * (1.25 - minf(1.0, g)) * 3.0 * spd
 	slip_w += acc * dt
-	# bumps: a jolt in the suspension skips the rear sideways, out of the turn when cornering
+	# bumps: rough ground (suspension working hard, smoothed over ~0.2 s) makes a rear that's cornering near
+	# its limit drift out of the turn - a gentle push, never a kick (instant kicks per rock made the bike
+	# twitch about on rocky ground). The bump's real effect is already in load_r: an unloaded rear grips less
 	var bmp: float = float(T.get("gripBumps", 1.0))
-	var jolt := minf(absf(compress_v - _grip_cv), 1.5)
+	var jolt := minf(absf(compress_v - _grip_cv) / maxf(dt, 1e-4), 60.0)
 	_grip_cv = compress_v
-	if jolt > 0.05:
-		var side := signf(a_lat) * (0.3 + absf(u_lat)) + _grip_rng.randf_range(-0.6, 0.6) * (1.3 - minf(1.0, g))
-		slip_w += bmp * jolt * side * 0.45 * spd
-	# chatter: pebbles, roots, ruts - a constant small random nudge, bigger loose / sliding
-	slip_w += bmp * _grip_rng.randfn(0.0, 1.0) * sqrt(dt) * spd * (0.3 + 1.1 * loose + 1.6 * (1.0 - minf(1.0, g)))
+	_grip_rough += (jolt - _grip_rough) * minf(1.0, dt * 5.0)
+	var lim_k := smooth01((absf(u_lat) - 0.5) / 0.5)   # only near the grip limit
+	slip_w += bmp * signf(a_lat) * lim_k * minf(_grip_rough / 30.0, 1.0) * 1.2 * spd * dt
+	# chatter: pebbles, ruts - a small smooth random wander, bigger on loose ground / sliding
+	slip_w += bmp * _grip_rng.randfn(0.0, 1.0) * sqrt(dt) * spd * (0.1 + 0.45 * loose + 0.8 * (1.0 - minf(1.0, g)))
 	slip_w = clampf(slip_w, -4.0, 4.0)
 	# drawn: the rider steers into the slide (front pointing along the travel) - catch strength sets how much
 	var bc := clampf(-(slip - _squirm) * (0.5 + 0.4 * catch_r) - slip_w * 0.06, -0.55, 0.55) * spd

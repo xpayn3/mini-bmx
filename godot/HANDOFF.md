@@ -148,6 +148,15 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   (`gripCatch`, drawn countersteer `bar_catch`). Locked rear = fishtail (`gripRearLock`), wheelspin in a turn steps out
   (`gripPower`), pedal stamps / bumps (`gripBumps`) / chatter nudge it, tyres run a few degrees of slip angle in turns
   (`gripSquirm`), the rear swings round the front (`gripPivot`). Probe: `BMX_GRIP_PROBE=1` (`GRIP` lines).
+- **Right-stick lean is filtered** (so both sticks together don't glitch): `Game._read_input` fades the off axis near an axis
+  (a side lean within ~15-35 deg of sideways carries no fore / aft: no accidental manual / tuck) + a 0.1 round deadzone; the
+  physics follows the stick on a critically damped spring (`flickSpeed`, top speed `FLICK_VMAX`); the lean-with-steer bonus
+  (`agree`) is continuous; the flick yaw kick fires only for a deliberate throw centre -> edge within `FLICK_WINDOW`, once.
+  (The old raw-derivative kick fired on ~47 % of frames with a real thumb.) Test: `BMX_PAD=1 BMX_BODY=thumb` (+ `BMX_FOLLOW`).
+- **Bank and lean room ignore rocks / logs** (`terrain.deck_height`): a rock under or beside a wheel used to read as a 30 deg
+  berm / a wall and snap the lean. Bank is read across both axles, +-0.5 m. The wheels still ride over the rocks.
+- **Physics overlay** (F3, `BMX_DEBUG_DRAW=1`, `scripts/game/debug_overlay.gd`, addon `addons/debug_draw_3d` = Debug Draw 3D
+  1.7.3, MIT, Windows libs only): travel vs heading, front wheel aim, turn force, rear grip bar, loose ground, flight path.
 - Safety net: `is_sane()` / `reset_body()` — a non-finite step restores the last good state.
 
 ### Terrain
@@ -260,7 +269,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   `SEVER_HIT` too, at most `SEVER_MAX` (2) per crash; hand / foot hit = at the elbow / knee, elbow / knee hit = at the
   shoulder / hip. `Ragdoll.sever(a)` drops bone a-b and gives the free piece its own root point (appended to `p`,
   `cut[b]` = its index); `Rider.pose_ragdoll(P, roots)` draws that segment from the root. Dark red caps on both
-  ends; the stump pumps an **arterial jet** with every heartbeat (`JET_T` 9 s, `HEART_HZ` 2, `JET_SPEED`; drops in their own MultiMesh drawn stretched along their flight by `shaders/blood_jet.gdshader` so they join into one stream, pooling where they land), the torn-off piece pours out of its end. The head never comes off (the user didn't want it). Getting up
+  ends; the stump pumps an **arterial jet** with every heartbeat (`JET_T` 9 s, `HEART_HZ` 2, `JET_SPEED`; drops in their own MultiMesh drawn stretched along their flight by `shaders/blood_jet.gdshader` so they join into one stream, pooling where they land), the torn-off piece pours out of its end. Smears start as a faint narrow trace and build up over the first metre of a slide (`_slid`), fade in as they're laid (shader `soak`), drawn as a thin see-through film with drag streaks (pooled = deep red, dried = brown). **Fatal crash** (> `FATAL_SPEED` 12 m/s or a limb torn off; `BMX_FATAL=1` forces it): once the body lies still a pool spreads from under the chest (+ each stump) to `POOL_R` over ~`POOL_T` s (own MultiMesh, shader kind 2); it stays until a respawn. The head never comes off (the user didn't want it). Getting up
   restores the body. Tests: `BMX_BLOOD_PROBE=1` (hits / smears / severs), `BMX_SEVER=1` forces one.
 - **WASTED** (`fx/wasted.gd`, Settings › Gameplay › Crash slow motion): on a crash time drops to 0.22× (sound pitched down via
   `AudioServer.playback_speed_scale`) for ~2.4 s real time, then eases back; the screen goes grey + vignette, the word
