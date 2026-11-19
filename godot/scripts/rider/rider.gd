@@ -758,6 +758,26 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		chest.z = dy * sn + dz * c
 		pelvis.y -= absf(cr) * 0.12
 		chest.x += absf(cr) * 0.05
+	# foot down at a stop: the bike leans onto the foot, the body stays nearly upright over it,
+	# hips a little lower and toward the foot (standing over the top tube)
+	var dab := clampf(_num(p, "dab"), 0, 1)
+	if dab > 0.0:
+		var ds := signf(_num(p, "dabSide", -1.0))
+		var a := -ds * _num(p, "dabLean") * 0.8 * dab
+		var c := cos(a)
+		var sn := sin(a)
+		var y0 := 0.3
+		var dy := pelvis.y - y0
+		var dz := pelvis.z
+		pelvis.y = y0 + dy * c - dz * sn
+		pelvis.z = dy * sn + dz * c
+		dy = chest.y - y0
+		dz = chest.z
+		chest.y = y0 + dy * c - dz * sn
+		chest.z = dy * sn + dz * c
+		pelvis.z += ds * 0.04 * dab
+		pelvis.y -= 0.05 * dab
+		chest.y -= 0.03 * dab
 	# never sit INTO the saddle
 	if sty.seatFloor and seat != null:
 		var over := clampf((pelvis.x - (float(seat.rear) - 0.18)) / 0.08, 0, 1)

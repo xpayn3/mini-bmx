@@ -62,6 +62,12 @@ var clip_probe := OS.get_environment("BMX_CLIP_PROBE") != ""
 var clip_stats := {"frames": 0, "fixed": 0, "bad": 0, "before": 0.0, "after": 0.0}
 var _prev := {}
 var _last_good := {}
+# foot down at a stop (drawn only, the physics doesn't know): 0..1 eased, which foot (-1 left, +1 right)
+var dab_lin := 0.0
+var dab_k := 0.0
+var dab_side := -1.0
+const DAB_LEAN := 0.11       # rad the bike leans onto the foot
+const DAB_OUT := 0.33        # m from the bike's centre line to the foot on the ground
 var msg_t := 0.0
 var biome_t := 0.0
 var biome_cur := "Green Hills"
@@ -777,6 +783,59 @@ func exit_photo() -> void:
 func _exit_tree() -> void:
 	Engine.time_scale = 1.0
 
+# tests (BMX_DAB_PROBE): per-frame shoe moves on the bike, the sole's lowest point vs the ground
+var dab_probe := OS.get_environment("BMX_DAB_PROBE") != ""
+var _dab_last := []
+var _dab_stats := {"jump_dab": 0.0, "jump_ride": 0.0, "sole_min": 1e9, "t_print": 0.0}
+func _dab_probe(st: BikePhysics) -> void:
+	for i in 2:
+		var lp: Vector3 = rider.shoe[i].position
+		if _dab_last.size() == 2:
+			var j: float = lp.distance_to(_dab_last[i]) / maxf(get_process_delta_time(), 1e-3)   # m/s on the bike
+			var key := "jump_dab" if dab_k > 0.0 and dab_k < 1.0 else "jump_ride"
+			if t > 0.3: _dab_stats[key] = maxf(_dab_stats[key], j)
+		if dab_k > 0.99 and (dab_side < 0.0) == (i == 0):
+			var sp: Vector3 = rider.shoe[i].global_position
+			_dab_stats.sole_min = minf(_dab_stats.sole_min, sp.y - terrain.top_height(sp.x, sp.z))
+	_dab_last = [rider.shoe[0].position, rider.shoe[1].position]
+	if t >= _dab_stats.t_print:
+		_dab_stats.t_print = t + 0.25
+		print("DAB t=%.2f v=%.2f pedal=%.2f k=%.2f side=%d jump_dab=%.3f jump_ride=%.3f sole_gap=%.3f" % [t, st.v, st.pedal, dab_k, dab_side, _dab_stats.jump_dab, _dab_stats.jump_ride, _dab_stats.sole_min])
+
+## Foot down at a stop: nearly stopped, not pedalling, on the ground, not crashed -> one foot leaves its
+## pedal for the ground beside the bike (eased in over 0.5 s, back up over 0.4 s when riding off).
+func _update_dab(dt: float, st: BikePhysics) -> void:
+	if st.crash_on:
+		dab_lin = 0.0; dab_k = 0.0
+		return
+	var want: bool = not st.air and st.pedal < 0.05 and (st.v < 1.2 and st.v > -0.7 if dab_lin > 0.0 else absf(st.v) < 0.5)   # backing up (brake held) lifts it
+	if want and dab_lin <= 0.0:
+		# which foot: the one on the lower pedal; level cranks -> the side the bike already leans to, else left
+		var dy := 0.0
+		if rig.pedal_pivots.size() == 2:
+			dy = rig.pedal_pivots[0].global_position.y - rig.pedal_pivots[1].global_position.y
+		if absf(dy) > 0.03: dab_side = -1.0 if dy < 0.0 else 1.0
+		elif absf(st.bike_lean) > 0.02: dab_side = -signf(st.bike_lean)
+		else: dab_side = -1.0
+	dab_lin = move_toward(dab_lin, 1.0 if want else 0.0, dt / (0.5 if want else 0.4))
+	dab_k = smoothstep(0.0, 1.0, dab_lin)
+
+## Moves the dabbing foot's target (lean-node space) from its pedal to the ground beside the bike.
+func _dab_foot(lt: Dictionary) -> void:
+	var key := "footL" if dab_side < 0.0 else "footR"
+	var hb := rig.global_transform.basis   # heading only: x forward, z to the rider's right
+	var fwd := Vector3(hb.x.x, 0.0, hb.x.z).normalized()
+	var rgt := Vector3(hb.z.x, 0.0, hb.z.z).normalized()
+	var bb: Vector3 = rig.crank_n.global_position
+	var g := bb + rgt * dab_side * DAB_OUT + fwd * 0.04
+	g.y = terrain.top_height(g.x, g.z) + 0.012   # sole just on the drawn ground (rocks, decks too)
+	var tl: Vector3 = rig.lean_g.to_local(g)
+	tl.y -= 0.03   # the rider draws the shoe 3 cm above its foot point
+	var pedal_p: Vector3 = lt[key]
+	var f := pedal_p.lerp(tl, dab_k)
+	f.y += sin(PI * dab_k) * 0.07   # lifts off the pedal on the way out / back
+	lt[key] = f
+
 func _process(dt: float) -> void:
 	if photo:
 		# time stands still; the camera moves on real time
@@ -807,8 +866,10 @@ func _process(dt: float) -> void:
 	var hd: float = _prev.heading + BikePhysics.ang_diff(st.heading, _prev.heading) * a
 	drawn_pos = Vector3(lerp_k.call("x"), lerp_k.call("y"), lerp_k.call("z"))
 	var body_y: float = lerp_k.call("body_y")
-	var wobble := sin(t * 2.3) * 0.025 * maxf(0.0, 1 - absf(st.v) / 2)
-	rig.pose(drawn_pos.x, y_draw + (1.5 if OS.get_environment("BMX_PITCH_POSE") != "" else 0.0), drawn_pos.z, hd, p_draw, st.hop_nose, st.bike_lean + st.rock + wobble,
+	_update_dab(dt, st)
+	var wobble := sin(t * 2.3) * 0.025 * maxf(0.0, 1 - absf(st.v) / 2) * (1.0 - dab_k)
+	var dab_lean := -dab_side * DAB_LEAN * dab_k   # bike_lean > 0 tips the top to the rider's left
+	rig.pose(drawn_pos.x, y_draw + (1.5 if OS.get_environment("BMX_PITCH_POSE") != "" else 0.0), drawn_pos.z, hd, p_draw, st.hop_nose, st.bike_lean + st.rock + wobble + dab_lean,
 		st.steer - wobble * 1.5, st.wheel_f, st.wheel_r, st.crank)
 	# the physics' tyres are soft and follow the smooth height field; the drawn ground is a triangle mesh
 	# (higher in hollows) with rocks and decks on it. Lift / tilt the drawn bike so no tyre is ever inside it
@@ -838,14 +899,17 @@ func _process(dt: float) -> void:
 	rig.set_brake_heat((st.brake_heat - 0.35) / 0.9)
 	if not st.crash_on:
 		var lt := rig.limb_targets()
+		if dab_k > 0.0: _dab_foot(lt)
 		var T: Dictionary = Tune.v
 		rider.update_pose(dt, {"footL": lt.footL, "footR": lt.footR, "handL": lt.handL, "handR": lt.handR,
+			"dab": dab_k, "dabSide": dab_side, "dabLean": DAB_LEAN,
 			"v": st.v, "lean": st.bike_lean + st.rock, "steer": st.steer, "yawRate": st.yaw_rate,
 			"counter": st.counter, "rockRoll": st.rock, "headRoll": st.bike_lean * 0.85,
 			"absorb": clampf(body_y - y_draw, -T.legComp, T.legExt), "pitch": p_draw, "bodyLevel": T.bodyLevel,
 			"attackDrop": T.attackDrop, "pedal": st.pedal, "sprint": st.sprint * st.pedal, "crank": st.crank,
 			"air": st.air_k, "compress": maxf(0.0, -st.compress), "hipShift": st.hip_shift, "t": t,
 			"airSpin": st.yaw_rate if st.air else 0.0, "turn": 0.0 if st.air else st.yaw_rate * clampf(absf(st.v) / 3.0, 0.3, 1.0)})
+		if dab_probe: _dab_probe(st)
 	var vd: float = Settings.get_v("view_distance")
 	terrain.update_stream(st.x, st.z, 4.0)
 	far_hills.follow(drawn_pos)

@@ -302,6 +302,14 @@ func _autotest(seconds: float) -> void:
 	var draws := 0.0
 	while (Time.get_ticks_msec() - t0) / 1000.0 < seconds:
 		var el := (Time.get_ticks_msec() - t0) / 1000.0
+		if OS.get_environment("BMX_IDLE_FOR") != "": pedal = el >= float(OS.get_environment("BMX_IDLE_FOR"))   # tests: stand still, then ride off
+		var stop_at := OS.get_environment("BMX_STOP_AT")   # tests: "a,b" = pedal, brake to a stop from a s, ride off again at b s
+		if stop_at != "":
+			var sa := stop_at.split(",")
+			var braking := el >= float(sa[0]) and (sa.size() < 2 or el < float(sa[1]))
+			pedal = not braking
+			if braking and game.phys.v > 0.3: Input.action_press("brake")   # off once stopped (held brake backs up)
+			else: Input.action_release("brake")
 		if pedal and not (OS.get_environment("BMX_COAST") != "" and int(el) % 6 >= 3): Input.action_press("pedal")   # BMX_COAST: 3 s pedal / 3 s coast
 		else: Input.action_release("pedal")
 		if OS.get_environment("BMX_MUD") != "": game.grime.mud = float(OS.get_environment("BMX_MUD"))   # tests: hold the mud level

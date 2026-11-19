@@ -133,6 +133,10 @@ F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A 
   Pose saved per bike in `rider.cfg`; edited in the garage Rider tab and the tuning card's Rider tab.
 - The torso is **skinned to 5 spine bones** (Skeleton3D "Spine", identity binds) so it bends; its
   `custom_aabb` follows the body (needed in crashes when the rider node sits at the world origin).
+- **Foot down at a stop** (`Game._update_dab` / `_dab_foot`, drawn only): nearly stopped, not pedalling, on the ground
+  -> the foot on the lower pedal (level cranks: the side the bike leans to, else left) goes to `Terrain.top_height`
+  beside the bike, the bike leans `DAB_LEAN` onto it, the body stays upright (rider `dab` input). Eases in 0.5 s, out
+  0.4 s on pedalling or backing up (held brake). The physics is untouched (on a slope the bike may still creep).
 - Ragdoll on crashes (`ragdoll.gd`), then get up with Space.
 - Look: kits + a colour per part (helmet shell/peak, goggles, jersey, pants, gloves, shoes).
 
@@ -273,6 +277,8 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `BMX_GETUP_K=0.6` | draws the get-up prompt as if the key were held that far (with `BMX_BAIL`) |
 | `BMX_AUDIO_PROBE=1` | prints the freewheel's click rate / volume / output peak and the gravel surface / level twice a second |
 | `-s res://tools/gravel_render.gd --headless -- out.wav [speed=8 tone=650 crack=0.3 …]` | renders the gravel synth alone to a WAV (compare with a recording) |
+| `BMX_STOP_AT=a,b` / `BMX_IDLE_FOR=secs` | autotest brakes to a stop from a s and rides off at b s / stands still, then pedals |
+| `BMX_DAB_PROBE=1` | foot-down probe: `DAB` lines with dab level, foot side, shoe speed on the bike in / out of the dab vs pedalling, sole gap to the ground |
 | `BMX_COAST=1` | autotest alternates 3 s pedalling / 3 s coasting (freewheel tests) |
 | `BMX_REC=file.wav` | records the game's own sound output during an autotest |
 | `BMX_SKID=secs` / `BMX_DUST_SHOTS=dir/prefix` (+ `BMX_DUST_T0`) | autotest locks the rear wheel from secs / a screenshot every 0.5 s (dust tests; `BMX_CAM=side` avoids the tilt-shift blur) |
