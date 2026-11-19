@@ -76,6 +76,12 @@ var _lean_hist := []; var _bank_raw := 0.0   # the player is on a gamepad (Setti
 var wheel_f := 0.0; var wheel_r := 0.0; var crank := 0.0; var pedal := 0.0
 var yaw_rate := 0.0; var shake := 0.0
 var course := NAN; var slip := 0.0; var since_land := 1.0
+# tyre grip sim (_grip_step): slip_w = how fast the bike is yawing against its travel (the rear stepping out /
+# coming back), grip_r = the rear tyre's sideways grip left (0 locked / spinning .. 1 full), loose = how loose
+# the patch of ground under the rear is (0..1), bar_catch = the rider's drawn countersteer into a slide
+var slip_w := 0.0; var grip_r := 1.0; var loose := 0.0; var bar_catch := 0.0
+var _grip_noise: FastNoiseLite = null; var _grip_rng := RandomNumberGenerator.new(); var _grip_cv := 0.0
+var _squirm := 0.0
 var front_air := false; var rear_air := false; var c_f := true; var c_r := true
 var pitch_w := NAN; var stamina := 1.0; var tired := false; var sprint := 0.0
 var spin := 0.0; var a_drive := 0.0
@@ -188,7 +194,7 @@ func reset_at(px: float, pz: float, hd: float) -> void:
 	v = 0; vy = 0; steer = 0; steer_in = 0; lean = 0; lean_v = 0; pitch = 0; air = false
 	bike_lean = 0; counter = 0; rock = 0; yaw_rate = 0; hop_nose = 0; hop_t = 0; air_time = 0; air_k = 0
 	load = 0; compress = 0; compress_v = 0; prep = 0; land_prep = 0; pop_fired = false; spun_out = false; shake = 0
-	course = hd; slip = 0; w_init = false; front_air = false; rear_air = false; pump_acc = 0; since_land = 1
+	course = hd; slip = 0; slip_w = 0.0; bar_catch = 0.0; w_init = false; front_air = false; rear_air = false; pump_acc = 0; since_land = 1
 	pitch_v = 0; c_f = true; c_r = true; wheelie_up = 0.0
 	g_pitch = NAN
 	y = host.terrain.height(x, z); body_y = y; body_v = 0
@@ -205,7 +211,7 @@ func get_up() -> void:
 	crash_on = false; crash_hold = 0; crash_armed = false
 	v = 0; vy = 0; lean = 0; lean_v = 0; bike_lean = 0; counter = 0; steer = 0; steer_in = 0; yaw_rate = 0; air = false
 	pitch = 0; compress = 0; compress_v = 0; hop_nose = 0; hop_t = 0; load = 0
-	slip = 0; w_init = false; front_air = false; rear_air = false; pump_acc = 0; pitch_v = 0; c_f = true; c_r = true; wheelie_up = 0.0
+	slip = 0; slip_w = 0.0; bar_catch = 0.0; w_init = false; front_air = false; rear_air = false; pump_acc = 0; pitch_v = 0; c_f = true; c_r = true; wheelie_up = 0.0
 	course = heading
 	hop_block = true
 	y = host.terrain.height(x, z); body_y = y; body_v = 0
@@ -580,16 +586,26 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		var excess := yaw_use - course_rate
 		var share: float = 1.0 if skid else T.oversteer
 		var margin := 1 - minf(1.0, absf(a_lat) / maxf(0.1, a_max if a_lat >= 0 else -a_min))
-		var catch_k: float = T.slipRecover * (0.25 + margin) + maxf(0.0, -signf(slip) * steer) * 8
-		var slip_rate := excess * share - slip * catch_k
+		var gr := _grip_step(dt, va, skid, brake_k, mu, nR, a_lat, a_max, a_min)
+		# the plain catch (tyre pulling back in line) only works with grip to pull with: a locked / spinning /
+		# loose rear barely pulls, so the slide lives on in slip_w (the grip sim) instead of being snapped out
+		var catch_k: float = (T.slipRecover * (0.25 + margin) + maxf(0.0, -signf(slip) * steer) * 8) * gr * gr
+		var slip_rate := excess * share - (slip - _squirm) * catch_k + slip_w
+		var slip_was := slip
 		slip = clampf(slip + slip_rate * dt, -1.5, 1.5)
 		course += course_rate * dt
+		# the rear swings round the front: the front tyre holds its line, so the bike's BB moves sideways as
+		# the heading turns against the travel (pivot gripPivot of the way from the BB to the front axle)
+		var ds := slip - slip_was
+		var pv: float = float(T.get("gripPivot", 0.7)) * (L - BB_REAR) * ds
+		var hh := course + slip
+		x += pv * sin(hh); z += pv * cos(hh)
 		if flick_kick != 0.0:   # a body flick whips the bike round: most of it turns the travel, a little steps the rear out
 			var fk := flick_kick * minf(1.0, dt * 10)
 			flick_kick -= fk
 			course += fk * 0.75; slip = clampf(slip + fk * 0.25, -T.slipMax * 0.8, T.slipMax * 0.8)
 		if absf(v) < 1.2:
-			var k := minf(1.0, dt * 6); course += slip * k; slip -= slip * k
+			var k := minf(1.0, dt * 6); course += slip * k; slip -= slip * k; slip_w -= slip_w * k
 		heading = course + slip
 		yaw_rate = course_rate + slip_rate
 		lat_a = a_lat
@@ -622,6 +638,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		slip = slip_new
 		heading = course + slip
 		lat_a = 0; lat_m = 0; flick_kick = 0.0
+		slip_w = 0.0; grip_r = 1.0; bar_catch += -bar_catch * minf(1.0, dt * 6)
 	if not air:
 		_pivot_step(dt, steer_input, brake_k)
 	var roll_t: float = roll_keys * T.airRoll + air_stick.x * float(T.get("stickAirRoll", 0.75))
@@ -1175,7 +1192,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		body_y = y + nrel; body_v = vy
 	y_prev = y
 
-	skid_fx = skid or spin > 0.3 or (not air and absf(slip) > 0.1 and va > 1.5)
+	skid_fx = skid or spin > 0.3 or (not air and va > 1.5 and (absf(slip - _squirm) > 0.1 or (grip_r < 0.45 and absf(slip_w) > 0.3)))
 	host.ride_fx(dt, f, va, in_water)
 
 ## touch-down after a jump: the bike must meet the slope roughly lined up and facing down the trail,
@@ -1251,6 +1268,70 @@ func _pivot_step(dt: float, steer_input: float, brake_k: float) -> void:
 		host.flash("%d PIVOT!" % (n1 * 180))
 		if n1 % 2 == 0: flow_up()
 
+## Tyre grip sim (ground only). The bike's yaw against its travel (slip) is a real second-order motion:
+## the rear tyre's sideways grip pulls it back in line, the front tyre (ahead of the centre of mass) pushes
+## it further round, the rider catches it (countersteer + weight). The rear's sideways grip is what's left
+## of its friction circle after braking / driving, times the load on it and the patch of ground under it:
+## lock the rear and the front wins -> the rear swings out and fishtails until let go / caught; wheelspin
+## steps it out in a turn; loose patches, bumps and pedal strokes keep nudging it so the bike never runs
+## dead straight. Sets slip_w, grip_r, loose, _squirm, bar_catch; returns grip_r (0..~1.2).
+func _grip_step(dt: float, va: float, skid: bool, brake_k: float, mu: float, nR: float, a_lat: float, a_max: float, a_min: float) -> float:
+	if _grip_noise == null:
+		_grip_noise = FastNoiseLite.new()
+		_grip_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+		_grip_noise.frequency = 0.22; _grip_noise.fractal_octaves = 2; _grip_noise.seed = 913
+		_grip_rng.seed = 4711
+	var spd := smooth01((va - 1.0) / 5.0)
+	# the ground under the rear tyre: loose patches a few metres across (gravel, dust over hardpack)
+	var rx := x - cos(heading) * BB_REAR
+	var rz := z + sin(heading) * BB_REAR
+	var s_loose: float = 1.0 if surf == 0 else 0.2 if surf == 1 else 0.7 if surf == 2 else 1.4
+	var n := 0.5 + 0.5 * _grip_noise.get_noise_2d(rx, rz)
+	loose = smooth01((n - 0.4) / 0.45) * s_loose
+	var patch: float = 1.0 - float(T.get("gripLoose", 0.5)) * 0.4 * loose
+	# the rear tyre's friction circle: what braking / driving uses along the bike isn't there sideways
+	var lock: float = clampf(brake_k * 1.4 - 0.4, 0.0, 1.0) if skid else 0.0
+	var r_cap := maxf(0.3, mu * nR)
+	var use := clampf(absf(a_drive) / r_cap, 0.0, 1.0)
+	use = maxf(use, lock)
+	if spin > 0.0: use = maxf(use, 0.85 + 0.15 * spin)
+	var lat_k := sqrt(maxf(0.0, 1.0 - use * use))
+	lat_k = lerpf(lat_k, 0.12, lock)   # a sliding tyre still drags a little sideways
+	var load_r := clampf(nR / (G * SH_R), 0.0, 1.4)   # a light rear (bumps, nose-heavy braking) grips less
+	var g := clampf(lat_k * patch * sqrt(load_r), 0.0, 1.2)
+	grip_r = g
+	# tyre squirm: in a turn the tyres run a few degrees of slip angle, more as they near the limit
+	var lim := a_max if a_lat >= 0.0 else -a_min
+	var u_lat := clampf(a_lat / maxf(0.1, lim), -1.0, 1.0)
+	_squirm = float(T.get("gripSquirm", 1.0)) * (0.025 * u_lat + 0.07 * u_lat * u_lat * u_lat) * spd * (1.0 + 0.5 * loose)
+	# yaw against the travel: rear tyre stiffness vs the front pushing it round, the rider catching it
+	var catch_r: float = float(T.get("gripCatch", 0.6))
+	var k_r := 15.0 * g
+	var k_f: float = 18.0 * float(T.get("gripRearLock", 1.0)) * spd
+	var k := k_r - k_f + 4.0 * catch_r
+	var c := 2.2 + 3.0 * g + 1.5 * catch_r
+	var acc := -k * (sin(slip) - _squirm) - c * slip_w
+	# wheelspin in a turn: the spinning rear is thrown out of the turn
+	var pw: float = float(T.get("gripPower", 1.0))
+	acc += pw * spin * signf(a_lat) * 6.0 * spd
+	# pedal strokes on loose ground: each stamp nudges the rear (alternating sides)
+	acc += pw * sin(crank * 2.0) * clampf(a_drive / r_cap, 0.0, 1.0) * (1.25 - minf(1.0, g)) * 3.0 * spd
+	slip_w += acc * dt
+	# bumps: a jolt in the suspension skips the rear sideways, out of the turn when cornering
+	var bmp: float = float(T.get("gripBumps", 1.0))
+	var jolt := minf(absf(compress_v - _grip_cv), 1.5)
+	_grip_cv = compress_v
+	if jolt > 0.05:
+		var side := signf(a_lat) * (0.3 + absf(u_lat)) + _grip_rng.randf_range(-0.6, 0.6) * (1.3 - minf(1.0, g))
+		slip_w += bmp * jolt * side * 0.45 * spd
+	# chatter: pebbles, roots, ruts - a constant small random nudge, bigger loose / sliding
+	slip_w += bmp * _grip_rng.randfn(0.0, 1.0) * sqrt(dt) * spd * (0.3 + 1.1 * loose + 1.6 * (1.0 - minf(1.0, g)))
+	slip_w = clampf(slip_w, -4.0, 4.0)
+	# drawn: the rider steers into the slide (front pointing along the travel) - catch strength sets how much
+	var bc := clampf(-(slip - _squirm) * (0.5 + 0.4 * catch_r) - slip_w * 0.06, -0.55, 0.55) * spd
+	bar_catch += (bc - bar_catch) * minf(1.0, dt * 14.0)
+	return g
+
 func _local_slope(f: Vector3, xx: float, R: float, cp0: float) -> float:
 	return atan((_wheel_ground(f, xx + 0.05 / cp0, R, cp0) - _wheel_ground(f, xx - 0.05 / cp0, R, cp0)) / 0.1)
 
@@ -1259,7 +1340,7 @@ func flow_up() -> void:
 
 ## Every float field finite? (the frame loop's safety net)
 func is_sane() -> bool:
-	for k in ["x", "z", "y", "vy", "v", "heading", "pitch", "pitch_v", "lean", "lean_v", "steer", "slip", "course", "compress", "compress_v",
+	for k in ["x", "z", "y", "vy", "v", "heading", "pitch", "pitch_v", "lean", "lean_v", "steer", "slip", "slip_w", "course", "compress", "compress_v",
 			"body_x", "body_xv", "hip_shift", "hip_v", "air_lean", "air_pull", "a_drive"]:
 		if not is_finite(get(k)):
 			return false

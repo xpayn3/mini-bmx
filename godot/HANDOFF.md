@@ -142,6 +142,12 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   `BMX_LIP_SHOT=prefix` for tests; `BOUNCE body_rms` in the `BMX_CLIP_PROBE` output.
 - **Rider › Style** sliders (pose keys): `hipSteady` (up / down leg spring), `standHeight`, `standBack`, `pedalChest`,
   `turnLow`, `turnTwist`, `turnHips`, `slowWobble`, `airCrouch`; Motion has `bodyBob` (pedalling up / down).
+- **Tyre grip sim** (`BikePhysics._grip_step`, Ride › Grip › *Tyre grip sim*): the slip (heading vs travel) is a second-order
+  motion `slip_w`: the rear tyre's sideways grip `grip_r` (friction circle after braking / driving × rear load × the loose patch
+  under it, `loose` from a noise field per surface) pulls it back, the front tyre pushes it round, the rider catches it
+  (`gripCatch`, drawn countersteer `bar_catch`). Locked rear = fishtail (`gripRearLock`), wheelspin in a turn steps out
+  (`gripPower`), pedal stamps / bumps (`gripBumps`) / chatter nudge it, tyres run a few degrees of slip angle in turns
+  (`gripSquirm`), the rear swings round the front (`gripPivot`). Probe: `BMX_GRIP_PROBE=1` (`GRIP` lines).
 - Safety net: `is_sane()` / `reset_body()` — a non-finite step restores the last good state.
 
 ### Terrain
@@ -401,6 +407,7 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `BMX_KNEE_PROBE=1` | prints the biggest knee / hip move per frame and the torso stretch range, and logs (`KNEE …`) frames where a knee jumps |
 | `BMX_TUNE=topSpeed=1.6,grip=1.1` | overrides tuning values for a test run (not saved) |
 | `BMX_LAUNCH=pedal/sprint` (+ `BMX_LAUNCH_HOLD=secs`, `BMX_LAUNCH_SHOTS=dir/prefix`) | autotest stops at 3 s and pedals / sprints away: prints 0–15/25/35 km/h times, nose-up angle, wheelie time, loop-out; HOLD lets go of sprint after secs |
+| `BMX_GRIP_PROBE=1` | tyre grip sim: `GRIP` lines 4× / s (slip, slip_w, rear grip, loose, squirm, drawn countersteer); try with `BMX_SKID=11 BMX_STRAIGHT=1` |
 | `BMX_VMAX=1` | autotest prints the top ground speed reached (`vmax_kmh`) |
 | `BMX_BIGAIR=1` (+ `BMX_TRICK=front/back`) | autotest launches every jump high (1.4 s air) so full flips happen |
 | `BMX_PITCH_POSE=rad` / `sweep` | draws the bike at a fixed pitch (or spinning through flips) for rider-pose shots |
