@@ -29,6 +29,8 @@ const BIKES := {
 	"tues": {"label": "YT Tues", "file": "res://assets/tues.glb", "root": "dh", "pose": DH_POSE, "ride": DH_RIDE, "land": 1.45, "geared": true, "garage": true},
 	# the Sketchfab "DH bike frame" (CC-BY, assets/dhframe_LICENSE.txt) on our fork / bars / cranks (tools/export_dhframe.py)
 	"goat": {"label": "Goat DH", "file": "res://assets/dhframe.glb", "root": "dh", "pose": DH_POSE, "ride": DH_RIDE, "land": 1.45, "geared": true, "garage": true},
+	# the NS Bikes Fuzz frame with its own fork, bars, brakes, cranks and derailleur (tools/export_fuzz.py)
+	"fuzz": {"label": "NS Fuzz", "file": "res://assets/fuzz.glb", "root": "dh", "pose": DH_POSE, "ride": DH_RIDE, "land": 1.45, "geared": true, "garage": true},
 	"bmx": {"label": "BMX", "file": "res://assets/bmx.glb", "root": "bmx", "pose": {}, "ride": {}, "land": 1.0, "geared": false},
 }
 

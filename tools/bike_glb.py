@@ -12,7 +12,7 @@ MI = {m[0]: i for i, m in enumerate(MATS)}
 
 
 def reduce_ratio(f):
-    return 0.1 if f > 12000 else 0.15 if f > 5000 else 0.3 if f > 2000 else 0.5 if f > 800 else 1.0
+    return max(0.02, min(0.1, 8000.0 / f)) if f > 12000 else 0.15 if f > 5000 else 0.3 if f > 2000 else 0.5 if f > 800 else 1.0
 
 
 def extract(o):

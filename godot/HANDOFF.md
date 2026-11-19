@@ -29,7 +29,10 @@ repo, see above — never develop it).
   the solver gets G1 = G2 so the swingarm turns rigidly about its pivot; its link bars stay on the frame). Both ride the normal pipeline; the Tues
   carries `noBarMod` / `noDecals` in its extras (own bars, logo slots are placed for GLORY). Extracted Tues parts for reuse:
   `assets/parts/tues_fork.glb`, `tues_cranks.glb`, `tues_cockpit.glb`, `tues_brakes.glb` (not wired into the garage yet). Test: `BMX_BIKE=tues|goat|dh`.
-  Not done: chain (neither frame has one in the game), swapping the Tues fork onto the GLORY as a fork model.
+  **NS Fuzz** (`assets/fuzz.glb`, `tools/export_fuzz.py`, same recipe as the Tues: own fork / bars / brakes / cranks / derailleur, coil shock with a
+  `shock_spring` node, parts in `assets/parts/fuzz_*.glb`). Both the Tues and Fuzz (and Goat) draw the chain + derailleur pulleys with `BikeChain`
+  (`scripts/bike/bike_chain.gd`, enabled by `chain` in the glb extras; the Goat uses the Tues derailleur and pedals). `tools/bike_glb.py` = shared glb writer.
+  Not done: swapping the Tues fork onto the GLORY as a fork model.
 
 ## 2. Install / run
 
