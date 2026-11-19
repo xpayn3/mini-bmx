@@ -77,6 +77,8 @@ var y_prev := NAN; var pump_acc := 0.0; var brake_heat := 0.0
 var dust_acc := 0.0; var chunk_acc := 0.0
 var joint_rock = null
 var distance := 0.0
+# tests (BMX_CLIP_PROBE): suspension bottom-outs (steps) and how rough the ride is on the ground
+var probe_bottom := 0; var probe_acc2 := 0.0; var probe_n := 0; var probe_vy := NAN
 # what the HUD reads
 var skid_fx := false; var surf := 0; var hop_bar := 0.0; var hop_bar_show := false
 
@@ -705,6 +707,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 				var c2 := cos(pitch)
 				var dd := gg - (y + xx * sin(pitch)) - TRAVEL
 				if dd <= 0: continue
+				probe_bottom += 1
 				var lx := xx * c2
 				var m_inv := 1 / mB + lx * lx / IK
 				var dq := dd / m_inv
@@ -800,6 +803,10 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			if at > 0.15: host.burst(Vector3(x, y + 0.03, z), roundi(10 + minf(30, impact * 6)), surf, 0.8 + minf(1.5, impact * 0.25))
 			if at > 0.45 and impact < 5: flow_up()
 			host.on_landing(at, impact)
+		if not air and not was_air and not is_nan(probe_vy):
+			var ay := (vy - probe_vy) / dt
+			probe_acc2 += ay * ay; probe_n += 1
+		probe_vy = vy
 		if air: air_time += dt
 		elif land_jolt > 0 and since_land < 0.6:
 			# the legs bottomed out: a hit bigger than they can take throws the rider down

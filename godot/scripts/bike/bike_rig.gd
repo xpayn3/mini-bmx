@@ -29,6 +29,7 @@ func _init() -> void:
 var fit_g := Node3D.new()   # lifts / tilts the model when the wheels are bigger or smaller than stock
 var wheel_rf := 0.374
 var wheel_rr := 0.355
+var tyre_hw := 0.03   # half the tyre's width (m): the casing is round, about as tall as it is wide
 
 ## build: a BikeBuild dictionary (paint, logos, wheels, suspension) or {} for the stock bike
 func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
@@ -93,6 +94,7 @@ func _swap_wheels(build: Dictionary, mods: Dictionary) -> void:
 		wheel_f.scale = Vector3(sf, sf, 1); wheel_r.scale = Vector3(sr, sr, 1)
 	extras.wheelRadius = wheel_rf
 	extras.wheelRadiusRear = wheel_rr
+	tyre_hw = float(build.wheels.get("tyre_w", 2.4)) * 0.0254 * 0.5
 	var L := float(extras.get("wheelbase", 1.0))
 	var bb := float(extras.get("bbToRearAxle", 0.44))
 	var df := wheel_rf - rf0
@@ -232,6 +234,73 @@ func pose(px: float, py: float, pz: float, heading: float, pitch: float, hop_nos
 		p.rotation.z = crank
 	if susp:
 		susp.apply()
+
+## How deep the tyre on `wheel` (radius R) sits inside the ground (m, > 0 = inside), the ground given as
+## top(x, z) -> height. Samples round the tyre (the lower half when it stands, all the way round when it
+## lies over) and across the round casing.
+func tyre_depth(wheel: Node3D, R: float, top: Callable) -> float:
+	var xf := wheel.global_transform
+	var c := xf.origin
+	var ax := xf.basis.z.normalized()
+	var down := Vector3.DOWN - ax * ax.dot(Vector3.DOWN)
+	var dl := down.length()
+	var d0 := down / dl if dl > 1e-3 else xf.basis.x.normalized()
+	var side := ax.cross(d0)
+	var full := dl < 0.6
+	var n := 16 if full else 11
+	var hw := tyre_hw
+	var worst := -INF
+	for i in n:
+		var a := TAU * i / n if full else -1.4 + 2.8 * i / (n - 1)
+		var dir := d0 * cos(a) + side * sin(a)
+		for wo in [-0.8, 0.0, 0.8]:
+			var off: float = wo * hw
+			var r := R - hw + sqrt(hw * hw - off * off)
+			var p := c + dir * r + ax * off
+			worst = maxf(worst, float(top.call(p.x, p.z)) - p.y)
+	return worst
+
+## Riding: put each wheel on the ground with the suspension (the frame stays where the physics put the
+## body): the fork slides and the swingarm swings until the tyre just touches, within the travel; topped
+## out when the ground is further away (in the air). What the travel can't take, unclip_tyres() lifts.
+func fit_wheels(top: Callable) -> void:
+	if susp == null or not susp.wheels_follow:
+		return
+	var mb := model.global_transform.basis
+	var up_f: float = maxf(0.4, (mb * susp.axis).normalized().y)   # world rise per metre of fork travel
+	var up_r: float = maxf(0.4, mb.y.normalized().y)                 # ... per metre of rear axle rise
+	for it in 3:
+		var dF := tyre_depth(wheel_f, wheel_rf, top)
+		var dR := tyre_depth(wheel_r, wheel_rr, top)
+		var nF := clampf(susp.xF + dF / up_f, susp.F["min"], susp.F["max"]) if susp.has_f else 0.0
+		var nR := clampf(susp.xR + dR / up_r, susp.R["min"], susp.R["max"]) if susp.has_r else 0.0
+		if absf(nF - susp.xF) < 5e-4 and absf(nR - susp.xR) < 5e-4:
+			break
+		susp.xF = nF; susp.xR = nR
+		susp.apply()
+
+## Lift / tilt the drawn bike (not the physics) until no tyre is inside the ground, leaving `gap` m.
+## Returns how deep the deepest tyre was before (for probes).
+func unclip_tyres(top: Callable, gap: float = 0.003) -> float:
+	var first := -INF
+	for it in 5:
+		var pf := tyre_depth(wheel_f, wheel_rf, top) + gap
+		var pr := tyre_depth(wheel_r, wheel_rr, top) + gap
+		if it == 0: first = maxf(pf, pr) - gap
+		if pf <= 1e-4 and pr <= 1e-4:
+			break
+		pf = maxf(pf, 0.0); pr = maxf(pr, 0.0)
+		# rotate about the pitch pivot (the rig's origin) + lift, so each wheel rises by what it needs
+		var fw := global_transform.basis.x.normalized()
+		var aF := (wheel_f.global_position - global_position).dot(fw)
+		var aR := (wheel_r.global_position - global_position).dot(fw)
+		var dth := 0.0
+		if aF - aR > 0.3 and it < 4:
+			dth = clampf((pf - pr) / (aF - aR), -0.25, 0.25)
+		var dy := maxf(pf - aF * dth, pr - aR * dth)
+		pitch_g.rotation.z += dth
+		position.y += dy
+	return first
 
 ## Hands / feet in lean-node space for the rider IK.
 func limb_targets() -> Dictionary:

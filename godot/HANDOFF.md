@@ -99,6 +99,12 @@ F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A 
   moving into the bike faster than `slamJolt × land` (legs brace for 0.35 s after touch-down); only a bike
   turned > 83° from the slope (rider / bars hit first) or > 2.2 rad sideways is judged on contact.
   Consequence: at 70+ km/h rollers and bumps really launch you (the old `crestCap` hid that).
+- **Tyres never go into the ground (drawn)**: the physics tyres are soft and follow the smooth field,
+  the drawn ground is a 0.5 m triangle mesh (higher in hollows) with rocks / decks. After posing, every
+  frame `BikeRig.unclip_tyres(terrain.top_height)` samples each tyre (lower half, or all round when it
+  lies over; 3 points across the round casing, `tyre_hw`) against `Terrain.top_height` = max(exact mesh
+  triangles `mesh_height`, `height` with domes / decks) and lifts / tilts the drawn bike until clear
+  (the physics isn't touched). ~1–2 % frame time. Rock meshes are only as exact as their domes.
 - Safety net: `is_sane()` / `reset_body()` — a non-finite step restores the last good state.
 
 ### Terrain
@@ -240,6 +246,7 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `BMX_ALERT_PROBE=1` | prints every Garmin trail alert along the first 2.4 km of trail |
 | `BMX_TRICK=back/front/side/manual/none` | autotest throws back / front at every lip (fresh S / W press) and keeps leaning in the air; none = hands off (side alternates A / D; manual holds the nose up at `BMX_MANUAL_PITCH` rad for back-wheel landings) and prints `TRICK` / `LAND` / `BOUNCE` / `CRASH` |
 | `BMX_FOLLOW=1` (+ `BMX_TRICK=…`) | autotest steers along the trail centreline and gets up (back on the trail) 2 s after a crash; prints `TAKEOFF` / `JOLT` too — the way to get many jumps |
+| `BMX_CLIP_PROBE=1` (+ `BMX_NOUNCLIP=1`, `BMX_CLIP_SHOT=file.png`) | measures how deep the drawn tyres go into the ground; prints `CLIP … frames_inside=` (must be 0). NOUNCLIP turns the fix off for comparison; CLIP_SHOT saves a screenshot when a tyre was 12+ cm in |
 | `BMX_STEER=1` / `-1` (+ `BMX_STRAIGHT=1`) | autotest holds a steady left / right turn after 2 s (lean / leg-clearance shots) |
 | `BMX_AIRSHOT=dir/prefix` | autotest saves up to 8 screenshots mid-air |
 | `BMX_KNEE_PROBE=1` | prints the biggest knee / hip move per frame and the torso stretch range, and logs (`KNEE …`) frames where a knee jumps |

@@ -721,6 +721,39 @@ func _rebuild_tape(rec: Dictionary) -> void:
 	(rec["tape_mi"] as MeshInstance3D).mesh = m
 
 
+## the ground exactly as drawn: the full-detail chunk mesh's own triangles (0.5 m grid, split along
+## the (x+1, z) - (x, z+1) diagonal like _grid_lod_indices). In hollows it sits above height(), which
+## is the smooth field. -INF where no chunk is loaded.
+func mesh_height(x: float, z: float) -> float:
+	var k := Vector2i(WorldRng.jround(x / SIZE), WorldRng.jround(z / SIZE))
+	var c = chunks.get(k)
+	if c == null:
+		return -INF
+	var N: int = c["N"]
+	var d := SIZE / N
+	var W := N + 3
+	var G: PackedFloat32Array = c["G"]
+	var gx := (x - (k.x * SIZE - SIZE / 2)) / d
+	var gz := (z - (k.y * SIZE - SIZE / 2)) / d
+	var ix := clampi(floori(gx), 0, N - 1)
+	var iz := clampi(floori(gz), 0, N - 1)
+	var tx := gx - ix
+	var tz := gz - iz
+	var b := (iz + 1) * W + ix + 1
+	var h00 := G[b]
+	var h10 := G[b + 1]
+	var h01 := G[b + W]
+	var h11 := G[b + W + 1]
+	if tx + tz <= 1.0:
+		return h00 + (h10 - h00) * tx + (h01 - h00) * tz
+	return h11 + (h01 - h11) * (1.0 - tx) + (h10 - h11) * (1.0 - tz)
+
+
+## the highest solid thing drawn here: the ground mesh, a wooden deck, or a rock / log / stump dome
+func top_height(x: float, z: float) -> float:
+	return maxf(height(x, z), mesh_height(x, z))
+
+
 ## ground height from the loaded chunk grids (bilinear, no domes / wood); NAN where nothing is loaded
 func grid_height(x: float, z: float) -> float:
 	var k := Vector2i(WorldRng.jround(x / SIZE), WorldRng.jround(z / SIZE))

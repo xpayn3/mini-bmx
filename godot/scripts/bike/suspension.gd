@@ -28,6 +28,9 @@ var spring_len := 0.1
 var table: Array = []            # [[phi, rise], ...] sorted by rise
 var prev_c2 := Vector2.ZERO
 var last_stroke := 0.0           # shock stroke (m, + = compressed) of the last apply()
+# riding: the frame stays where the ride physics put the bike's body and the wheels move (the travel is
+# set from where the ground is, BikeRig.fit_wheels). Off (the garage): the frame moves, the tyres stay
+var wheels_follow := false
 
 # four-bar rest pose
 var G1 := Vector2.ZERO
@@ -163,7 +166,7 @@ func phi_for(rise: float) -> float:   # invert the table (monotonic in the worki
 
 ## landing: v = how fast the bike came down (m/s), shared between the ends by which one touched
 func land(v: float, front_air: bool, rear_air: bool) -> void:
-	if not is_finite(v):
+	if not is_finite(v) or wheels_follow:
 		return
 	var kF := 1.2 if rear_air else (0.3 if front_air else 0.9)
 	var kR := 1.2 if front_air else (0.3 if rear_air else 1.0)
@@ -194,6 +197,8 @@ static func _step(dt: float, x: float, v: float, lim: Dictionary, tgt: float, hz
 ## inp: air (bool), load (0..1 crouch / pump), brake (0/1), bumpF / bumpR (m the ground under each
 ## tyre sits above where the bike body expects it)
 func update(dt: float, inp: Dictionary) -> void:
+	if wheels_follow:
+		return
 	if not is_finite(xF + vF + xR + vR):
 		xF = 0.0; vF = 0.0; xR = 0.0; vR = 0.0
 	var tF: float
@@ -216,6 +221,10 @@ func apply() -> void:
 	if has_f:
 		(n["fork_lower"] as Node3D).position = lower0 + axis * xF
 	var pA: Vector2 = pose_rear()["A"] if has_r else A
+	if wheels_follow:
+		bike.rotation.z = 0.0
+		bike.position = Vector3.ZERO
+		return
 	# keep both tyres where they were: rotate + shift the whole bike so its axles land back on
 	# their rest heights (the wheels then sit on the ground the physics put them on)
 	var pF := Vector2(fax0.x + axis.x * xF, fax0.y + axis.y * xF)

@@ -444,6 +444,10 @@ func _autotest(seconds: float) -> void:
 			print("AUTOTEST resumed: paused=%s state_riding=%s" % [get_tree().paused, state == RIDING])
 	var st := game.phys
 	if not _probe.is_empty(): print("AUTOTEST body ", _probe)
+	if game.clip_probe:
+		var cs: Dictionary = game.clip_stats
+		print("RIDE bottom_outs=%d rough=%.2fg" % [st.probe_bottom, sqrt(st.probe_acc2 / maxi(st.probe_n, 1)) / 9.81])
+		print("CLIP frames=%d lifted=%d deepest_before=%.1fcm deepest_after=%.2fcm frames_inside=%d" % [cs.frames, cs.fixed, cs.before * 100, cs.after * 100, cs.bad])
 	if OS.get_environment("BMX_KNEE_PROBE") != "":
 		for row in game.rider.knee_dbg: print("KNEE ", row)
 	print("AUTOTEST avg triangles/frame=%dk draw calls=%d" % [tris / maxi(frames, 1) / 1000, draws / maxi(frames, 1)])

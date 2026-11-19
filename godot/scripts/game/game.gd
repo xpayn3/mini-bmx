@@ -52,6 +52,9 @@ var pedal_a0 := [0.0, PI]
 var bike_cfg: Dictionary
 var t := 0.0
 var drawn_pos := Vector3.ZERO
+# tests (BMX_CLIP_PROBE): how deep the drawn tyres went into the ground before / after unclipping
+var clip_probe := OS.get_environment("BMX_CLIP_PROBE") != ""
+var clip_stats := {"frames": 0, "fixed": 0, "bad": 0, "before": 0.0, "after": 0.0}
 var _prev := {}
 var _last_good := {}
 var msg_t := 0.0
@@ -84,6 +87,7 @@ func _ready() -> void:
 	add_child(rig)
 	rig.load_bike(bike_cfg, bike_cfg.get("build", {}))
 	susp = rig.susp
+	if susp != null and OS.get_environment("BMX_NOUNCLIP") == "": susp.wheels_follow = true   # the wheels track the ground, the frame floats
 	pedal_a0 = rig.pedal_a0
 	phys = BikePhysics.new(self)
 	phys.T = Tune.v
@@ -717,6 +721,30 @@ func _process(dt: float) -> void:
 	var wobble := sin(t * 2.3) * 0.025 * maxf(0.0, 1 - absf(st.v) / 2)
 	rig.pose(drawn_pos.x, y_draw + (1.5 if OS.get_environment("BMX_PITCH_POSE") != "" else 0.0), drawn_pos.z, hd, p_draw, st.hop_nose, st.bike_lean + st.rock + wobble,
 		st.steer - wobble * 1.5, st.wheel_f, st.wheel_r, st.crank)
+	# the physics' tyres are soft and follow the smooth height field; the drawn ground is a triangle mesh
+	# (higher in hollows) with rocks and decks on it. Lift / tilt the drawn bike so no tyre is ever inside it
+	if OS.get_environment("BMX_NOUNCLIP") == "":
+		rig.fit_wheels(terrain.top_height)
+		var was: float = rig.unclip_tyres(terrain.top_height)
+		if clip_probe:
+			clip_stats.frames += 1
+			if was > 0.002: clip_stats.fixed += 1
+			clip_stats.before = maxf(clip_stats.before, was)
+			var left: float = maxf(rig.tyre_depth(rig.wheel_f, rig.wheel_rf, terrain.top_height), rig.tyre_depth(rig.wheel_r, rig.wheel_rr, terrain.top_height))
+			clip_stats.after = maxf(clip_stats.after, left)
+			if left > 0.0005: clip_stats.bad += 1
+	elif clip_probe:
+		var d: float = maxf(rig.tyre_depth(rig.wheel_f, rig.wheel_rf, terrain.top_height), rig.tyre_depth(rig.wheel_r, rig.wheel_rr, terrain.top_height))
+		clip_stats.frames += 1
+		clip_stats.before = maxf(clip_stats.before, d)
+		if d > 0.002: clip_stats.bad += 1
+	if clip_probe and OS.get_environment("BMX_CLIP_SHOT") != "":   # tests: a screenshot when a tyre was 12+ cm in
+		var deep: float = clip_stats.before
+		if clip_stats.get("shot", 0) == 1:
+			get_viewport().get_texture().get_image().save_png(OS.get_environment("BMX_CLIP_SHOT"))
+			clip_stats.shot = 2
+		elif clip_stats.get("shot", 0) == 0 and deep > 0.12 and not st.crash_on and not st.air:
+			clip_stats.shot = 1
 	st.brake_heat *= exp(-dt / 3.5)
 	rig.set_brake_heat((st.brake_heat - 0.35) / 0.9)
 	if not st.crash_on:
