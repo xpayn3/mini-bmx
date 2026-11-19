@@ -171,7 +171,7 @@ func _unhandled_input(e: InputEvent) -> void:
 
 var card: TuneCard   # the tuning card (P Ride, K Rider, L Look): built on first use
 
-const SIDE_TABS := {"tune": "ride", "pose": "rider", "look": "look", "ride": "ride", "rider": "rider", "sound": "sound"}
+const SIDE_TABS := {"tune": "ride", "pose": "rider", "look": "look", "ride": "ride", "rider": "rider", "sound": "sound", "light": "light"}
 
 func toggle_tune() -> void:
 	_toggle_side("tune")
