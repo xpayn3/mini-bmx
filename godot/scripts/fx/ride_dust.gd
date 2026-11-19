@@ -86,6 +86,8 @@ var _feed_prev := Vector3.INF
 var _feed_v := Vector3.ZERO
 var _feed_rate := 0.0
 var _feed_r := 0.3
+var _feed_fan := 30.0
+const PATCH_R := 0.24   # m: the contact patch, as small as the sim's 0.2 m cells allow
 var _pulse_t := 0.0
 var _gust := FastNoiseLite.new()
 static var _dust_mat: ShaderMaterial
@@ -117,15 +119,19 @@ func sim_step(dt: float, focus: Vector3, fwd: Vector3, wind: Vector2) -> void:
 	if sim == null: return
 	sim.wind = wind * 2.8   # m/s at gust strength 1
 	if _feed_on:
-		# roost comes out in gusts and clods, not a steady stream: pulse the amount, kick the air about
-		# (that jitter is what the sim turns into rolling, tearing billows)
+		# dust comes only from the tyre's contact patch: small sources on the ground along the path the
+		# patch swept this frame, each spraying its own way (back / out / up, in gusts). The cloud is what
+		# the sim makes of that spray: it fans out, rolls and spreads from there.
 		_pulse_t += dt
-		var pulse := clampf(0.35 + 0.9 * _gust.get_noise_1d(_pulse_t * 60.0) * 2.0 + 0.5, 0.15, 1.9)
-		var jv := Vector3(randf() - 0.5, randf() * 0.8, randf() - 0.5) * (1.2 + _feed_v.length() * 0.35)
-		var rr := _feed_r * (0.8 + randf() * 0.45)
-		sim.add_source(_feed_p, _feed_v + jv, rr, _feed_rate * pulse, 7.0, 0.35 + randf() * 0.6)
-		if _feed_prev != Vector3.INF and _feed_prev.distance_to(_feed_p) < 2.0:
-			sim.add_source((_feed_p + _feed_prev) * 0.5, _feed_v - jv * 0.5, rr, _feed_rate * pulse, 7.0, 0.3)
+		var pulse := clampf(1.0 + 0.9 * _gust.get_noise_1d(_pulse_t * 60.0) * 2.0, 0.2, 2.2)
+		var from := _feed_prev if _feed_prev != Vector3.INF and _feed_prev.distance_to(_feed_p) < 2.0 else _feed_p
+		var k := clampi(ceili(from.distance_to(_feed_p) / 0.15), 1, 5)
+		var sp := _feed_v.length()
+		for i in k:
+			var at := from.lerp(_feed_p, (i + 1.0) / k)
+			var yaw := (randf() - 0.5) * deg_to_rad(_feed_fan) * 1.6
+			var jv := _feed_v.rotated(Vector3.UP, yaw) * (0.6 + randf() * 0.8) + Vector3(0, randf() * (0.8 + sp * 0.25), 0)
+			sim.add_source(at, jv, PATCH_R, _feed_rate * pulse * 14.0 / k, 10.0, 0.6 + randf() * 0.8)
 		_feed_prev = _feed_p
 	else:
 		_feed_prev = Vector3.INF
@@ -209,7 +215,8 @@ func feed(rear: Vector3, throw_v: Vector3, rate: float, col: Color, alpha: float
 	if sim != null:
 		_feed_on = rate > 0.5 and alpha > 0.0
 		if not _feed_on: return
-		_feed_p = rear + Vector3(0, 0.12, 0)
+		_feed_p = rear + Vector3(0, 0.08, 0)   # the first cell above the ground
+		_feed_fan = fan_deg
 		_feed_v = throw_v
 		_feed_rate = rate * alpha * alpha * 2.2   # grass (low alpha) barely dusts, dry dirt billows
 		_feed_r = 0.32 + clampf(rate / 120.0, 0.0, 1.0) * 0.3 + fan_deg / 70.0 * 0.15
