@@ -14,7 +14,7 @@ const LABEL_W := 196.0
 const C_BODY := Color(0.86, 0.87, 0.89)
 const C_EDGE := Color(0.55, 0.57, 0.6)
 const C_DARK := Color(0.2, 0.21, 0.23)
-const C_HOT := Color(0.45, 0.85, 1.0)
+const C_HOT := Color(0.12, 0.52, 1.0)
 const FACE := {0: Color(0.33, 0.75, 0.3), 1: Color(0.86, 0.26, 0.24), 2: Color(0.25, 0.5, 0.92), 3: Color(0.95, 0.75, 0.16)}
 
 ## stick roles: [action, axis (0 = x, 1 = y), direction]
@@ -71,7 +71,7 @@ func _ready() -> void:
 			c[4] = PHOTO_AT[c[0]] * sz
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	_popup = PopupMenu.new()
-	_popup.theme = UITheme.get_theme()
+	_popup.theme = UITheme.light_theme()
 	add_child(_popup)
 	_popup.id_pressed.connect(_picked)
 
@@ -168,6 +168,7 @@ func _stick_off(stick: int) -> Vector2:
 # ------------------------------------------------------------------ drawing
 func _draw() -> void:
 	var o := _pad_origin()
+	draw_style_box(_box(Color("e9edf4"), UITheme.L_LINE), Rect2(Vector2.ZERO, size))   # soft backdrop so the white pad stands out
 	var f := UITheme.font(true)
 	var fr := UITheme.font(false)
 	# callout lines first: the controller is drawn over them, only their ends show
@@ -178,25 +179,25 @@ func _draw() -> void:
 		var edge := Vector2(r.end.x, r.get_center().y) if c[5] == 0 else Vector2(r.position.x, r.get_center().y)
 		var mid := Vector2(anchor.x + (-26.0 if c[5] == 0 else 26.0), edge.y)
 		if c[2] == "trig" or c[0] in ["lb", "rb"]: mid.x = anchor.x
-		draw_polyline(PackedVector2Array([edge, mid, anchor]), C_HOT if on else Color(1, 1, 1, 0.28), 1.5 if on else 1.0, true)
+		draw_polyline(PackedVector2Array([edge, mid, anchor]), C_HOT if on else Color(0.2, 0.25, 0.35, 0.3), 2.0 if on else 1.2, true)
 	_draw_pad(o)
 	for c in controls:
 		var r := _label_rect(c)
 		var hot: bool = _hover == c[0]
 		var lit: bool = _pressed(c)
-		var col := C_HOT if (hot or lit) else Color(1, 1, 1, 0.28)
-		var bg := Color(1, 1, 1, 0.1 if hot else 0.04)
-		if lit: bg = Color(C_HOT.r, C_HOT.g, C_HOT.b, 0.22)
-		draw_style_box(_box(bg, col if hot else Color(1, 1, 1, 0.08)), r)
+		var col := C_HOT if (hot or lit) else UITheme.L_LINE
+		var bg := Color(1, 1, 1, 1.0 if hot else 0.85)
+		if lit: bg = Color(0.85, 0.92, 1.0)
+		draw_style_box(_box(bg, col), r)
 		var al := HORIZONTAL_ALIGNMENT_RIGHT if c[5] == 0 else HORIZONTAL_ALIGNMENT_LEFT
 		var tx := r.position.x + 10
 		var tw := r.size.x - 20
-		draw_string(f, Vector2(tx, r.position.y + 15), c[1].to_upper(), al, tw, 11, UITheme.MUTED)
-		draw_string(fr, Vector2(tx, r.position.y + 33), _text_of(c), al, tw, 15, Color.WHITE if _text_of(c) != "—" else UITheme.MUTED)
+		draw_string(f, Vector2(tx, r.position.y + 15), c[1].to_upper(), al, tw, 11, UITheme.L_MUTED)
+		draw_string(fr, Vector2(tx, r.position.y + 33), _text_of(c), al, tw, 15, UITheme.L_INK if _text_of(c) != "—" else UITheme.L_MUTED)
 	if Input.get_connected_joypads().is_empty():
-		draw_string(fr, Vector2(0, size.y - 4), "No controller connected — plug one in to test the buttons live", HORIZONTAL_ALIGNMENT_CENTER, size.x, 13, UITheme.MUTED)
+		draw_string(fr, Vector2(0, size.y - 4), "No controller connected — plug one in to test the buttons live", HORIZONTAL_ALIGNMENT_CENTER, size.x, 13, UITheme.L_MUTED)
 	else:
-		draw_string(fr, Vector2(0, size.y - 4), Input.get_joy_name(Input.get_connected_joypads()[0]), HORIZONTAL_ALIGNMENT_CENTER, size.x, 13, UITheme.MUTED)
+		draw_string(fr, Vector2(0, size.y - 4), Input.get_joy_name(Input.get_connected_joypads()[0]), HORIZONTAL_ALIGNMENT_CENTER, size.x, 13, UITheme.L_MUTED)
 
 func _box(bg: Color, border: Color) -> StyleBoxFlat:
 	var s := StyleBoxFlat.new()

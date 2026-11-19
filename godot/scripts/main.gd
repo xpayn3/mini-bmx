@@ -247,32 +247,21 @@ func _close_controls() -> void:
 		controls_open.queue_free()
 	controls_open = null
 
+## the Controls window (bindings + camera): its own screen, not part of Settings
 func _show_controls() -> void:
-	if is_instance_valid(controls_open): return
-	var p := PanelContainer.new()
-	controls_open = p
-	p.theme = UITheme.get_theme()
-	ui.add_child(p)
-	UITheme.centre(p)
-	var vb := VBoxContainer.new()
-	p.add_child(vb)
-	vb.add_child(UITheme.label("CONTROLS", 24, UITheme.ACCENT, true))
-	var grid := GridContainer.new()
-	grid.columns = 3
-	grid.add_theme_constant_override("h_separation", 22)
-	var pad := Settings.pad_active   # on a controller: its buttons first (bright), the keys second
-	for a in Settings.ACTIONS:
-		grid.add_child(UITheme.label(Settings.binding_text(a, pad), 15, UITheme.ACCENT, true))
-		grid.add_child(UITheme.label(Settings.binding_text(a, not pad), 15, UITheme.MUTED))
-		grid.add_child(UITheme.label(Settings.ACTIONS[a][0], 15))
-	vb.add_child(grid)
-	if pad:
-		vb.add_child(UITheme.label("Right stick = your body: back = manual, yank it at a lip = flip, left / right = throw the bike over to turn harder, flick it to whip round · hold A at a lip to pop higher · Settings › Controller to remap", 13, UITheme.MUTED))
-	else:
-		vb.add_child(UITheme.label("Mouse drag: orbit · wheel: zoom · hold hop at a lip to pop higher · press S / W as you leave a lip to throw a back / front flip · carve: hold a turn at speed", 13, UITheme.MUTED))
-	var close := UITheme.button("Close", _close_controls)
-	vb.add_child(close)
-	close.grab_focus.call_deferred()
+	if is_instance_valid(controls_open) or is_instance_valid(settings_open): return
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.35)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	ui.add_child(dim)
+	var w: Control = load("res://scripts/ui/controls_menu.gd").new()
+	controls_open = w
+	if pause_menu: pause_menu.visible = false
+	w.tree_exiting.connect(func():
+		if is_instance_valid(dim): dim.queue_free()
+		if controls_open == w: controls_open = null
+		if is_instance_valid(pause_menu): pause_menu.visible = true)
+	ui.add_child(w)
 
 # ---------------------------------------------------------------- unattended smoke test
 var _probe := {}
@@ -490,7 +479,10 @@ func _autotest(seconds: float) -> void:
 		_pause()
 		if OS.get_environment("BMX_PAUSE") == "settings":
 			_open_settings()
-			if OS.get_environment("BMX_TAB") != "": settings_open.get_child(0).get_child(1).current_tab = int(OS.get_environment("BMX_TAB"))
+			if OS.get_environment("BMX_TAB") != "": settings_open.get_child(0).get_child(2).current_tab = int(OS.get_environment("BMX_TAB"))
+		if OS.get_environment("BMX_PAUSE") == "controls":
+			_show_controls()
+			if OS.get_environment("BMX_TAB") != "": controls_open.get_child(0).get_child(2).current_tab = int(OS.get_environment("BMX_TAB"))
 		for i in 10: await get_tree().process_frame
 		if OS.get_environment("BMX_PAUSE") == "preset":   # pause > settings > a quality preset > Done > resume
 			_open_settings()
