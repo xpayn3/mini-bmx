@@ -43,6 +43,8 @@ const POSE_DEFS := [
 		["shoulderFwd", "Shoulders forward / back", -0.1, 0.1, 0.005, "m"],
 		["shoulderUp", "Shoulders up / down", -0.1, 0.1, 0.005, "m"],
 		["elbowsDown", "Elbows down / up", -1.0, 1.0, 0.05, ""],
+		["elbowsBack", "Elbows back / forward", -1.0, 1.0, 0.05, ""],
+		["armBend", "Arm bend (chest to bars)", -0.4, 1.5, 0.05, ""],
 		["elbowOutL", "Left elbow out", -1.0, 1.0, 0.05, ""],
 		["elbowOutR", "Right elbow out", -1.0, 1.0, 0.05, ""],
 		["wristRoll", "Wrist roll", -0.8, 0.8, 0.02, "rad"],
@@ -92,20 +94,32 @@ const LOOK_ROWS := [
 ]
 
 # ---------------------------------------------------------------- persistence
+## bump POSE_VER when a bike's default pose is retuned: a pose saved before keeps every value except the
+## RETUNED ones that still hold the OLD default (a slider the player moved stays theirs)
+const POSE_VER := 2
+const POSE_RETUNED := {"elbowsOut": -0.25, "elbowOutR": -0.05, "hipSway": 0.015}
+
 static func load_pose(bike_id: String, bike_pose: Dictionary) -> Dictionary:
 	var p: Dictionary = Rider.NEUTRAL.duplicate()
 	p.merge(bike_pose, true)
 	var cf := ConfigFile.new()
-	if cf.load(PATH) == OK and cf.has_section("pose_" + bike_id):
-		for k in cf.get_section_keys("pose_" + bike_id):
-			if p.has(k) and typeof(cf.get_value("pose_" + bike_id, k)) in [TYPE_FLOAT, TYPE_INT, TYPE_BOOL]:
-				p[k] = cf.get_value("pose_" + bike_id, k)
+	var sec := "pose_" + bike_id
+	if cf.load(PATH) == OK and cf.has_section(sec):
+		var old := int(cf.get_value(sec, "_ver", 1)) < POSE_VER
+		for k in cf.get_section_keys(sec):
+			var val = cf.get_value(sec, k)
+			if not p.has(k) or not typeof(val) in [TYPE_FLOAT, TYPE_INT, TYPE_BOOL]:
+				continue
+			if old and POSE_RETUNED.has(k) and absf(float(val) - float(POSE_RETUNED[k])) < 1e-3:
+				continue   # still the old default: take the new one
+			p[k] = val
 	return p
 
 static func save_pose(bike_id: String, p: Dictionary) -> void:
 	var cf := ConfigFile.new(); cf.load(PATH)
 	if cf.has_section("pose_" + bike_id): cf.erase_section("pose_" + bike_id)
 	for k in p: cf.set_value("pose_" + bike_id, k, p[k])
+	cf.set_value("pose_" + bike_id, "_ver", POSE_VER)
 	cf.save(PATH)
 
 static func load_look() -> Dictionary:

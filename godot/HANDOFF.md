@@ -137,6 +137,13 @@ F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A 
   -> the foot on the lower pedal (level cranks: the side the bike leans to, else left) goes to `Terrain.top_height`
   beside the bike, the bike leans `DAB_LEAN` onto it, the body stays upright (rider `dab` input). Eases in 0.5 s, out
   0.4 s on pedalling or backing up (held brake). The physics is untouched (on a slope the bike may still creep).
+- **Riding style** (matched to a reference clip of real downhill technique): rolling, the rider stands in
+  the attack position (`stand` in `update_pose`, not only while pedalling); in turns the bike lays over
+  well past the body (`bikeLeanMul` 1.55, cap 1.3 rad; the body leans ~70 % of the rider + bike lean,
+  `counter` in `bike_physics.gd`: bike ~45–60°, body ~20–25° more upright) and the inside knee opens;
+  pedalling out of the saddle swings the bike ~±6° (±10° sprinting) under a steady body; elbows bend
+  back and down, only a little out (the arm IK pole's sideways part scales with `elbowsOut`). Saved poses migrate once (`RiderPanels.POSE_VER` / `POSE_RETUNED`: only values still
+  at the old default change). `BMX_LEAN_SHOT=prefix` saves shots of the first deep leans.
 - Ragdoll on crashes (`ragdoll.gd`), then get up with Space.
 - Look: kits + a colour per part (helmet shell/peak, goggles, jersey, pants, gloves, shoes).
 

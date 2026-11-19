@@ -59,6 +59,7 @@ var t := 0.0
 var drawn_pos := Vector3.ZERO
 # tests (BMX_CLIP_PROBE): how deep the drawn tyres went into the ground before / after unclipping
 var clip_probe := OS.get_environment("BMX_CLIP_PROBE") != ""
+var _lean_max := 0.0; var _lean_shot_t := -9.0; var _lean_shots := 0   # tests (BMX_LEAN_SHOT)
 var clip_stats := {"frames": 0, "fixed": 0, "bad": 0, "before": 0.0, "after": 0.0}
 var _prev := {}
 var _last_good := {}
@@ -888,6 +889,14 @@ func _process(dt: float) -> void:
 		clip_stats.frames += 1
 		clip_stats.before = maxf(clip_stats.before, d)
 		if d > 0.002: clip_stats.bad += 1
+	if OS.get_environment("BMX_LEAN_SHOT") != "" and not st.air and not st.crash_on:   # tests: shots in deep leans
+		var ln := absf(st.bike_lean)
+		_lean_max = maxf(_lean_max, ln)
+		if ln > 0.7 and t - _lean_shot_t > 1.5 and _lean_shots < 4:
+			_lean_shot_t = t
+			get_viewport().get_texture().get_image().save_png("%s_%d.png" % [OS.get_environment("BMX_LEAN_SHOT"), _lean_shots])
+			print("LEANSHOT %d bike=%.0fdeg body=%.0fdeg v=%.1f" % [_lean_shots, rad_to_deg(st.bike_lean), rad_to_deg(st.bike_lean - st.counter), st.v])
+			_lean_shots += 1
 	if clip_probe and OS.get_environment("BMX_CLIP_SHOT") != "":   # tests: a screenshot when a tyre was 12+ cm in
 		var deep: float = clip_stats.before
 		if clip_stats.get("shot", 0) == 1:
