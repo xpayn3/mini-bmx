@@ -521,6 +521,7 @@ func start_crash(reason: String) -> void:
 	var body_vel := f * phys.v + Vector3(0, minf(maxf(phys.vy, 0), 6.0 if phys.air else 0.3) + 0.2, 0)
 	var spin_v := f * (1.0 + absf(phys.v) * 0.08)   # the top of the body keeps going a little as the bike stops
 	phys.begin_crash()
+	_break_action_cam(body_vel)
 	# detach the rider into world space
 	rider.get_parent().remove_child(rider)
 	add_child(rider)
@@ -539,6 +540,21 @@ func start_crash(reason: String) -> void:
 	if audio: audio.crash()
 	Settings.rumble(1.0, 1.0, 0.45)
 
+## the helmet action cam snaps off its hinge and tumbles away (FlyingCam); a new one is on the helmet
+## after getting up. The old one lies where it landed until a respawn or FlyingCam.LIFE.
+var flying_cam: FlyingCam = null
+func _break_action_cam(body_vel: Vector3) -> void:
+	var r: Dictionary = rider.break_action_cam()
+	if r.is_empty(): return
+	if flying_cam and is_instance_valid(flying_cam): flying_cam.queue_free()
+	var xf: Transform3D = r.xform
+	var side := xf.basis.z.normalized()
+	var vel := body_vel * 1.05 + Vector3(0, 2.0 + randf() * 2.5, 0) + side * (randf() - 0.5) * 3.0
+	var spin := Vector3(randf() - 0.5, randf() - 0.5, randf() - 0.5).normalized() * (12.0 + randf() * 14.0)
+	flying_cam = FlyingCam.launch(self, r.body, xf, terrain, vel, spin)
+	if OS.get_environment("BMX_CAM_PROBE") != "" or OS.get_environment("BMX_GOPRO_PROBE") != "":
+		print("GOPRO off at %s v=%s" % [str(xf.origin), str(vel)])
+
 ## the crash slow-mo is on (Settings › Gameplay; autotests keep normal time unless BMX_WASTED=1)
 func _wasted_on() -> bool:
 	if OS.get_environment("BMX_WASTED") != "": return true
@@ -556,6 +572,8 @@ func get_up() -> void:
 		rig.lean_g.add_child(rider)
 	rider.transform = Transform3D.IDENTITY
 	rider.reset_pose()
+	rider.remount_action_cam()
+	if OS.get_environment("BMX_GOPRO_PROBE") != "": print("GOPRO remounted: ", rider.action_cam.get_node_or_null("Body") != null)
 	_snap_prev()
 
 func on_trick(trick: String) -> void:
@@ -749,6 +767,8 @@ func respawn(new_world: bool) -> void:
 	if fx.has_method("clear_tracks"): fx.clear_tracks()
 	if new_world: grime.clean()
 	if blood: blood.clear()
+	if flying_cam and is_instance_valid(flying_cam): flying_cam.queue_free()
+	flying_cam = null
 	var sp := _water_spawn() if OS.get_environment("BMX_WATER_SPAWN") != "" else Vector3.ZERO
 	phys.reset_at(sp.x, sp.z, sp.y)
 	if sp != Vector3.ZERO: terrain.update_stream(sp.x, sp.z, INF)

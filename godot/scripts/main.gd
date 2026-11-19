@@ -531,6 +531,10 @@ func _autotest(seconds: float) -> void:
 		if OS.get_environment("BMX_BAIL") != "" and el > float(OS.get_environment("BMX_BAIL")) and not _probe.has("bailed"):   # tests: bail (crash) here
 			_probe["bailed"] = true
 			game.phys.crash_pending = "BAIL!"
+		if OS.get_environment("BMX_GOPRO_PROBE") != "" and _probe.has("bailed") and not _probe.has("gotup") \
+				and el > float(OS.get_environment("BMX_BAIL")) + 2.5 and game.phys.crash_on:   # tests: get up (new GoPro on)
+			_probe["gotup"] = true
+			game.get_up()
 		if OS.get_environment("BMX_LAND_TEST") != "" and el > float(OS.get_environment("BMX_LAND_TEST")) and not _probe.has("landed"):   # tests: fake a hard landing
 			_probe["landed"] = true
 			game.on_landing(1.0, 8.0)

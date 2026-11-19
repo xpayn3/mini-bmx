@@ -48,6 +48,7 @@ var helmet_mats := {}
 var helmet_model: Node3D = null
 var goggles: Node3D = null
 var action_cam: Node3D = null   # helmet-top action camera (ActionCam); its "Lens" is the Helmet camera view
+var action_cam_at := Vector3.ZERO   # where it's mounted (head space)
 
 var torso: MeshInstance3D
 var hood_hem: MeshInstance3D
@@ -261,7 +262,28 @@ func _mount_action_cam(at: Vector3) -> void:
 		action_cam.queue_free()
 	action_cam = ActionCam.build()
 	action_cam.position = at
+	action_cam_at = at
 	head.add_child(action_cam)
+
+
+## crash: the camera body snaps off its hinge (the base + buckle stay on the helmet). Returns the body
+## (taken out of the tree) and its world transform, or {} when it's already gone.
+func break_action_cam() -> Dictionary:
+	if action_cam == null or not is_instance_valid(action_cam):
+		return {}
+	var b := action_cam.get_node_or_null("Body") as Node3D
+	if b == null or not b.is_inside_tree():
+		return {}
+	var xf := b.global_transform
+	action_cam.remove_child(b)
+	return {body = b, xform = xf}
+
+
+## a fresh camera on the helmet (get-up / respawn), if the old one broke off
+func remount_action_cam() -> void:
+	if action_cam and is_instance_valid(action_cam) and action_cam.get_node_or_null("Body") != null:
+		return
+	_mount_action_cam(action_cam_at)
 
 
 ## highest point of the shell near (x, z=0), head space (the action cam sits there)
