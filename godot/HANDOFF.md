@@ -158,9 +158,12 @@ F12 screenshot · Esc pause. Gamepad: triggers pedal/brake, left stick steer, A 
 - Torn race tape as cloth-like ribbons, wind over the grass, drifting cloud shadows, speed blur / FOV.
 
 ### HUD bike computer (`hud.gd` `GaugeView`)
-- Garmin-style computer bottom-left, two pages flipped with the ◀ ▶ bezel buttons under the screen:
+- Garmin-style computer bottom-left, three pages flipped with the ◀ ▶ bezel buttons under the screen:
   page 1 speed, slope / grade, **gear** (the shifter: gear n/N, side-on cassette, teeth; digit flashes on a shift;
   Settings › Gear shifter hides the row); page 2 elevation (`st.y`), ascent / descent this ride, 30 s profile.
+  Page 3 **map** (`MapView`): heading-up 2D topo, 170 m across: contour lines (5 m, every 25 m bolder; marching
+  squares over a 6 m height grid, 4 rows sampled per frame, rebuilt after 40 m), the trail centreline, the last 90 s
+  ridden in magenta, north dial, 50 m scale bar.
 
 ### Settings & tuning
 - Settings: display (mode, resolution, vsync, UI scale, FPS cap), graphics presets Low/Medium/High/Ultra
@@ -189,7 +192,7 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `BMX_BODY_PROBE=1`, `BMX_AIRPULL=1` | prints the rider-body numbers / tucks in every jump |
 | `BMX_GARAGE_TAB=paint…kit`, `BMX_GARAGE_RIDER=coast/pedal/sprint/descend/air` | garage tab / rider preview |
 | `BMX_GARAGE_CAM=orbit,pitch,dist`, `BMX_POSE=key=val,...` | garage camera / pose override |
-| `BMX_GARMIN_PAGE=0/1` | bike computer opens on page 1 (speed / slope / gear) or 2 (elevation) |
+| `BMX_GARMIN_PAGE=0/1/2` | bike computer opens on page 1 (speed / slope / gear), 2 (elevation) or 3 (map) |
 | `BMX_TRICK=back/front/spin/whip` | autotest throws that trick in every jump and prints `TRICK …` / `CRASH …` |
 | `BMX_STEER=1` / `-1` (+ `BMX_STRAIGHT=1`) | autotest holds a steady left / right turn after 2 s (lean / leg-clearance shots) |
 | `BMX_WHIP_POSE=rad` | draws the frame at a fixed tailwhip angle (test shots) |

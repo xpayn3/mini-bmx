@@ -29,6 +29,8 @@ var elev_hist := PackedFloat32Array()
 var elev_t := 0.0
 var elev_up := 0.0     # metres climbed / descended this ride (bike computer page 2)
 var elev_down := 0.0
+var track_hist := PackedVector2Array()   # ridden path (x, z) for the map page, same sampling
+const TRACK := 360
 var hidden := false
 
 func _ready() -> void:
@@ -241,6 +243,11 @@ func update_hud(dt: float) -> void:
 				if dy > 0: elev_up += dy
 				else: elev_down -= dy
 		elev_hist.append(st.y)
+		var tp := Vector2(st.x, st.z)
+		if track_hist.size() > 0 and track_hist[track_hist.size() - 1].distance_to(tp) > 30.0:
+			track_hist.clear()   # teleported (Backspace / new world)
+		track_hist.append(tp)
+		if track_hist.size() > TRACK: track_hist.remove_at(0)
 		if elev_hist.size() > HIST: elev_hist.remove_at(0)
 	gauge.queue_redraw()
 	air_card.tick(dt)
@@ -251,12 +258,18 @@ func update_hud(dt: float) -> void:
 class GaugeView extends Control:
 	## a compact GPS bike computer: black body, pale LCD, two pages flipped with the bezel
 	## buttons under the screen. Page 1: speed, slope / grade, gear (the shifter). Page 2: elevation.
-	const PAGES := 2
+	## Page 3: map (the trail, heading-up, your ridden path on top).
+	const PAGES := 3
+	var map_v: MapView
 	var hud
 	var page := 0
 	var bump := 0.0        # 1 on a shift, fades out: the gear digit flashes inverted
 	var show_gear := true  # Settings › HUD › Gear shifter
 	var press := [0.0, 0.0]   # bezel button press flash (left, right)
+	func _ready() -> void:
+		map_v = MapView.new(); map_v.hud = hud
+		map_v.visible = false
+		add_child(map_v)
 	func _btn_rect(i: int) -> Rect2:
 		return Rect2(12 if i == 0 else size.x - 52, size.y - 23, 40, 14)
 	func _gui_input(e: InputEvent) -> void:
@@ -285,8 +298,10 @@ class GaugeView extends Control:
 			draw_string(f, Vector2(x0, scr.position.y + 11), "AIR", HORIZONTAL_ALIGNMENT_RIGHT, w, 10, Color("ffd21f"))
 		else:
 			draw_string(f, Vector2(x0, scr.position.y + 11), "%d/%d" % [page + 1, PAGES], HORIZONTAL_ALIGNMENT_RIGHT, w, 10, Color(0.95, 0.95, 0.94, 0.6))
+		map_v.visible = page == 2
 		if page == 0: _page_ride(st, f, ink, scr, x0, w)
-		else: _page_elev(st, f, ink, scr, x0, w)
+		elif page == 1: _page_elev(st, f, ink, scr, x0, w)
+		else: _page_map(st, f, ink, scr, x0, w)
 		_bezel()
 	## bezel under the screen: a page button left and right, page dots between them
 	func _bezel() -> void:
@@ -321,6 +336,12 @@ class GaugeView extends Control:
 		if show_gear:
 			draw_line(Vector2(scr.position.x, y), Vector2(scr.end.x, y), Color(ink, 0.22))
 			_gear_row(st, f, ink, x0, y, w)
+	## page 3: the map screen is its own clipped control (MapView) laid over the LCD
+	func _page_map(_st: BikePhysics, _f: Font, _ink: Color, scr: Rect2, _x0: float, _w: float) -> void:
+		var area := Rect2(scr.position.x, scr.position.y + 14, scr.size.x, scr.size.y - 14)
+		if map_v.position != area.position or map_v.size != area.size:
+			map_v.position = area.position; map_v.size = area.size
+		map_v.queue_redraw()
 	## elevation now, climbed / descended this ride, and the last 30 s profile
 	func _page_elev(st: BikePhysics, f: Font, ink: Color, scr: Rect2, x0: float, w: float) -> void:
 		var y := scr.position.y + 28
@@ -384,6 +405,119 @@ class GaugeView extends Control:
 				var px := cx + j * step + bw / 2
 				draw_colored_polygon(PackedVector2Array([Vector2(px - 3, mid - hgt / 2 - 6), Vector2(px + 3, mid - hgt / 2 - 6), Vector2(px, mid - hgt / 2 - 2)]), ink)
 		draw_string(f, Vector2(x0, y + 33), "%dT" % st.cogs[st.gear], HORIZONTAL_ALIGNMENT_RIGHT, w, 12, ink)
+
+class MapView extends Control:
+	## Garmin-style 2D topo map, heading-up: contour lines (5 m, every 25 m bolder), the trail,
+	## the path you rode, you as an arrow. Drawn in world (x, z) through one transform, clipped here.
+	const MAP_M := 170.0     # metres across the screen
+	const R := 180.0         # contour grid radius (covers the rotated screen)
+	const STEP := 6.0        # contour grid spacing (m)
+	const N := int(2 * R / STEP) + 1
+	const CI := 5.0          # contour interval (m)
+	const ROWS := 4          # grid rows sampled per frame
+	var hud
+	var _ci := -1            # nearest trail point, searched near the last one
+	var _minor := PackedVector2Array()   # finished contour segments (world x, z pairs)
+	var _major := PackedVector2Array()
+	var _at := Vector2(INF, INF)         # centre of the finished contours
+	var _bc := Vector2.ZERO              # building: centre, heights, next row
+	var _bh := PackedFloat32Array()
+	var _row := -1
+	func _ready() -> void:
+		clip_contents = true
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+	func _process(_dt: float) -> void:
+		if not visible: return
+		var st: BikePhysics = hud.game.phys
+		var p := Vector2(st.x, st.z)
+		if _row < 0 and p.distance_to(_at) > 40.0:
+			_bc = p.snapped(Vector2(STEP, STEP)); _bh.resize(N * N); _row = 0
+		if _row >= 0:
+			var t = hud.game.terrain
+			for r in ROWS:
+				if _row >= N: break
+				var z := _bc.y - R + _row * STEP
+				for c in N:
+					_bh[_row * N + c] = t.height(_bc.x - R + c * STEP, z)
+				_row += 1
+			if _row >= N:
+				_contours(); _at = _bc; _row = -1
+	## marching squares over the finished height grid
+	func _contours() -> void:
+		_minor = PackedVector2Array(); _major = PackedVector2Array()
+		var ox := _bc.x - R; var oz := _bc.y - R
+		for j in N - 1:
+			for i in N - 1:
+				var h0 := _bh[j * N + i]; var h1 := _bh[j * N + i + 1]
+				var h2 := _bh[(j + 1) * N + i + 1]; var h3 := _bh[(j + 1) * N + i]
+				var lo := minf(minf(h0, h1), minf(h2, h3)); var hi := maxf(maxf(h0, h1), maxf(h2, h3))
+				var lv := ceilf(lo / CI) * CI
+				while lv < hi:
+					var pts := PackedVector2Array()
+					var x := ox + i * STEP; var z := oz + j * STEP
+					if (h0 < lv) != (h1 < lv): pts.append(Vector2(x + STEP * (lv - h0) / (h1 - h0), z))
+					if (h1 < lv) != (h2 < lv): pts.append(Vector2(x + STEP, z + STEP * (lv - h1) / (h2 - h1)))
+					if (h3 < lv) != (h2 < lv): pts.append(Vector2(x + STEP * (lv - h3) / (h2 - h3), z + STEP))
+					if (h0 < lv) != (h3 < lv): pts.append(Vector2(x, z + STEP * (lv - h0) / (h3 - h0)))
+					var dst := _major if is_equal_approx(fposmod(lv, CI * 5), 0.0) else _minor
+					for q in range(0, pts.size() - 1, 2):
+						dst.append(pts[q]); dst.append(pts[q + 1])
+					lv += CI
+	func _draw() -> void:
+		var st: BikePhysics = hud.game.phys
+		var ink := Color("111417")
+		var k := size.x / MAP_M
+		var me := Vector2(size.x * 0.5, size.y * 0.66)
+		var fw := Vector2(cos(st.heading), -sin(st.heading))   # forward in (x, z)
+		var rt := Vector2(-fw.y, fw.x)                         # right in (x, z)
+		var org := Vector2(st.x, st.z)
+		# world (x, z) -> screen: right = +x on screen, forward = up
+		var xa := Vector2(rt.x, -fw.x) * k
+		var ya := Vector2(rt.y, -fw.y) * k
+		draw_set_transform_matrix(Transform2D(xa, ya, me - (xa * org.x + ya * org.y)))
+		var u := 1.0 / k   # one screen pixel in metres
+		if _minor.size() > 1: draw_multiline(_minor, Color(0.55, 0.38, 0.2, 0.32), 1.0 * u)
+		if _major.size() > 1: draw_multiline(_major, Color(0.55, 0.38, 0.2, 0.6), 1.4 * u)
+		var tc = hud.game.terrain.field.course if hud.game.terrain and hud.game.terrain.field else null
+		if tc and tc.n > 1:
+			if _ci < 0 or _ci >= tc.n: _ci = _nearest(tc, org, 0, tc.n)
+			else: _ci = _nearest(tc, org, maxi(0, _ci - 60), mini(tc.n, _ci + 60))
+			var reach := int(MAP_M * 1.2 / TrailCourse.STEP)
+			var line := PackedVector2Array()
+			for i in range(maxi(0, _ci - reach), mini(tc.n, _ci + reach), 2):
+				line.append(Vector2(tc.X[i], tc.Z[i]))
+			if line.size() > 1:
+				draw_polyline(line, Color(1, 1, 1, 0.9), 6.0 * u)
+				draw_polyline(line, Color(ink, 0.55), 3.5 * u)
+		var th: PackedVector2Array = hud.track_hist
+		if th.size() > 1: draw_polyline(th, Color("c2187a"), 2.0 * u)
+		draw_set_transform_matrix(Transform2D.IDENTITY)
+		# you
+		draw_colored_polygon(PackedVector2Array([me + Vector2(0, -8), me + Vector2(6, 6), me + Vector2(0, 2), me + Vector2(-6, 6)]), ink)
+		# north (rotates with the map), the scale bar, elevation
+		var f := UITheme.lcd_font()
+		var nc := Vector2(size.x - 13, 13)
+		var nd := Vector2(-rt.y, fw.y).normalized()   # screen direction of world north (-z)
+		draw_circle(nc, 9, Color(0.93, 0.93, 0.91, 0.85))
+		draw_line(nc - nd * 6, nc + nd * 6, Color(ink, 0.35), 1.5)
+		draw_circle(nc + nd * 5, 2.2, Color("e8452c"))
+		draw_string(f, nc - nd * 1 + Vector2(-3, 4), "N", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, ink)
+		var sb := 50.0 * k
+		var sy := size.y - 7
+		var x0 := 7.0
+		draw_rect(Rect2(x0 - 3, sy - 12, sb + 36, 16), Color(0.93, 0.93, 0.91, 0.75))
+		draw_line(Vector2(x0, sy), Vector2(x0 + sb, sy), ink, 1.5)
+		draw_line(Vector2(x0, sy - 3), Vector2(x0, sy), ink, 1.5)
+		draw_line(Vector2(x0 + sb, sy - 3), Vector2(x0 + sb, sy), ink, 1.5)
+		draw_string(f, Vector2(x0 + sb + 4, sy + 1), "50m", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, ink)
+		draw_string(f, Vector2(0, sy + 1), "%dm" % roundi(st.y), HORIZONTAL_ALIGNMENT_RIGHT, size.x - 6, 9, ink)
+	func _nearest(tc, p: Vector2, a: int, b: int) -> int:
+		var best := a
+		var bd := INF
+		for i in range(a, b):
+			var d: float = (tc.X[i] - p.x) * (tc.X[i] - p.x) + (tc.Z[i] - p.y) * (tc.Z[i] - p.y)
+			if d < bd: bd = d; best = i
+		return best
 
 class StaminaView extends Control:
 	## ten flat blocks, the last part-filled (sprint stamina)
