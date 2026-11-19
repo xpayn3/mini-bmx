@@ -60,6 +60,15 @@ const DEFAULTS := {
 	"mouse_sens": 1.0,
 	"invert_y": false,
 	"cam_shake": 1.0,
+	"cam_dist": 1.0,         # × every camera's distance
+	"cam_height": 0.0,       # degrees added to every camera's pitch (higher = more from above)
+	"cam_side": 0.0,         # degrees the camera sits round to the side (+ = right of the rider)
+	"cam_ahead": 1.0,        # × how far ahead the Trail camera looks
+	"cam_follow": 1.0,       # × how quickly the camera turns / catches up after the rider
+	"cam_speed_fov": 1.0,    # × the wider view at speed
+	"cam_recenter": true,    # the camera swings back behind the rider a moment after you turn it
+	"cam_keep": true,        # never let the rider leave the frame
+	"cam_fade": true,        # trees / rocks between the camera and the rider dissolve
 	"deadzone": 0.15,
 	"volume": 0.8,
 	# display
@@ -86,6 +95,7 @@ const DEFAULTS := {
 	# gameplay / controller
 	"pause_unfocused": true,
 	"rumble": true,
+	"wasted": true,          # crash: slow motion + "WASTED" screen
 	"steer_sens": 1.0,       # analog steering response (1 = linear)
 	# interface
 	"ui_scale": 1.0,

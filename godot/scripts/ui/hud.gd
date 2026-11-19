@@ -31,6 +31,8 @@ var track_hist := PackedVector2Array()   # ridden path (x, z) for the map page, 
 const TRACK := 360
 # ride stats for the bike computer pages
 var ride_t := 0.0
+var beep                # GarminBeep: the bike computer's piezo (power-on chime, key beeps)
+var _power_t := -1.0    # seconds the HUD has been showing (the computer switches on at 0.35 s)
 var moving_t := 0.0
 var ride_dist := 0.0
 var max_v := 0.0
@@ -54,6 +56,8 @@ var hidden := false
 func _ready() -> void:
 	add_to_group("hud")
 	layer = 5
+	beep = preload("res://scripts/ui/garmin_beep.gd").new()
+	add_child(beep)
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.theme = UITheme.get_theme()
@@ -229,6 +233,12 @@ func _refresh_records() -> void:
 	vb.add_child(UITheme.label("H or ✕ to close", 12, UITheme.MUTED))
 
 func update_hud(dt: float) -> void:
+	# the bike computer switches on when the ride starts (the HUD shows): its power-on chime
+	if not visible: _power_t = -1.0
+	elif _power_t < 0.35:
+		var was := _power_t
+		_power_t = maxf(_power_t, 0.0) + dt
+		if was < 0.35 and _power_t >= 0.35: beep.power_on()
 	var st: BikePhysics = game.phys
 	fps_frames += 1; fps_acc += dt
 	if fps_acc > 0.5:
@@ -419,6 +429,7 @@ class GaugeView extends Control:
 			for i in 2:
 				if _btn_rect(i).grow(4).has_point(e.position):
 					page = posmod(page + (-1 if i == 0 else 1), PAGES)
+					hud.beep.key()
 					press[i] = 1.0
 					light = 3.0
 					queue_redraw()

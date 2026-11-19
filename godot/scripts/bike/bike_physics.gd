@@ -108,11 +108,25 @@ func setup(extras: Dictionary, bike_cfg: Dictionary) -> void:
 		cogs = [16]; ring_k = 1.0
 	if cogs.size() <= 1: geared = false
 	# start in the cog nearest the old 16T reference
-	gear = -1
-	if geared:
-		var best := 1e9
-		for i in cogs.size():
-			if absf(cogs[i] * 1.0 / ring_k - 16.0) < best: best = absf(cogs[i] * 1.0 / ring_k - 16.0); gear = i
+	gear = start_gear(cogs, ring_k) if geared else -1
+
+## the cog a ride starts in: nearest the old 16T reference (the garage rollers use it too)
+static func start_gear(p_cogs: Array, p_ring_k: float) -> int:
+	var g := -1
+	var best := 1e9
+	for i in p_cogs.size():
+		if absf(p_cogs[i] * 1.0 / p_ring_k - 16.0) < best: best = absf(p_cogs[i] * 1.0 / p_ring_k - 16.0); g = i
+	return g
+
+## crank turn rate (rad/s) for a wheel spinning at w rad/s in gear gk; shared with the garage rollers
+static func crank_rate(w: float, gk: float, top_speed: float, p_sprint: float) -> float:
+	return maxf(w / (2.78 * gk * top_speed), 3.5) * (1 + 0.3 * p_sprint)
+
+## side-to-side rock from pedalling out of the saddle: the bike swings ~6 deg each way under a steady
+## body (~10 deg sprinting), most when pushing hard from slow, about a third of that spinning at speed
+static func pedal_rock(p_crank: float, p_sprint: float, p_pedal: float, va: float, p_bike_rock: float) -> float:
+	var rock_fade: float = 1.0 - 0.65 * smoothstep(5.0, 12.0, va)
+	return sin(p_crank) * 0.105 * (1 + 0.65 * p_sprint) * p_pedal * minf(1.0, va / 2 + 0.3) * rock_fade * p_bike_rock
 
 func gear_k() -> float:
 	if gear < 0: return ring_k * 16.0 / float(cogs[0]) if cogs.size() > 0 else 1.0
@@ -496,10 +510,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	# hangs inside it, or the inside leg cuts through the frame). The body leans ~70 % of the way the
 	# rider + bike lean, so in a fast turn the bike tips well under a fairly upright rider
 	counter = maxf(absf(bike_lean - lean * T.bodyLean), absf(bike_lean) * 0.2) * signf(bike_lean)
-	# side-to-side rock from pedalling out of the saddle: the bike swings ~6 deg each way under a steady
-	# body (~10 deg sprinting), most when pushing hard from slow, about a third of that spinning at speed
-	var rock_fade: float = 1.0 - 0.65 * smoothstep(5.0, 12.0, va)
-	rock = sin(crank) * 0.105 * (1 + 0.65 * sprint) * pedal * minf(1.0, va / 2 + 0.3) * rock_fade * bike_rock
+	rock = pedal_rock(crank, sprint, pedal, va, bike_rock)
 
 	# --- move ---
 	f = fwd()
@@ -929,7 +940,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	wheel_f += w * dt
 	if not skid: wheel_r += v / RWR * dt
 	if pedal > 0.05:
-		crank += maxf(w / (2.78 * gear_k() * T.topSpeed), 3.5) * (1 + 0.3 * sprint) * pedal * dt
+		crank += crank_rate(w, gear_k(), T.topSpeed, sprint) * pedal * dt
 	elif not air:
 		var aL: float = host.pedal_a0[0]
 		var aR: float = host.pedal_a0[1]
