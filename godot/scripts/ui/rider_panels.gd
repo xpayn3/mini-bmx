@@ -90,16 +90,18 @@ const POSE_DEFS := [
 const KITS := [
 	["Classic", {}],   # = Rider.DEFAULT_LOOK
 	["Stealth", {"shell": "#0c0d0f", "peak": "#1a1b1e", "goggleFrame": "#18191c", "lens": "#8a96a8", "strap": "#2a2c30",
-		"jersey": "#2b2e33", "pants": "#111215", "gloves": "#3a3d42", "shoes": "#141518", "shoeAccent": "#3a3d42", "pads": "#16171a"}],
+		"jersey": "#2b2e33", "pants": "#111215", "gloves": "#3a3d42", "shoes": "#141518", "shoeAccent": "#3a3d42", "pads": "#16171a", "padStyle": "trail"}],
 	["Race white", {"shell": "#f4f4f0", "peak": "#e8231f", "goggleFrame": "#e8231f", "lens": "#3fb6ff", "strap": "#e8231f",
-		"jersey": "#f4f4f0", "pants": "#202227", "gloves": "#e8231f", "shoes": "#f4f4f0", "shoeAccent": "#e8231f", "pads": "#f4f4f0"}],
+		"jersey": "#f4f4f0", "pants": "#202227", "gloves": "#e8231f", "shoes": "#f4f4f0", "shoeAccent": "#e8231f", "pads": "#f4f4f0", "padStyle": "race"}],
 	["Monster", {"shell": "#7ed321", "peak": "#111214", "goggleFrame": "#111214", "lens": "#7ed321", "strap": "#7ed321",
-		"jersey": "#111214", "pants": "#2c2f33", "gloves": "#7ed321", "shoes": "#111214", "shoeAccent": "#7ed321", "pads": "#111214"}],
+		"jersey": "#111214", "pants": "#2c2f33", "gloves": "#7ed321", "shoes": "#111214", "shoeAccent": "#7ed321", "pads": "#111214", "padStyle": "race"}],
 	["Ocean", {"shell": "#1478d4", "peak": "#f4f4f0", "goggleFrame": "#f4f4f0", "lens": "#ff9f2e", "strap": "#1478d4",
-		"jersey": "#11b3c9", "pants": "#0d2847", "gloves": "#f4f4f0", "shoes": "#0d2847", "shoeAccent": "#11b3c9", "pads": "#0d2847"}],
+		"jersey": "#11b3c9", "pants": "#0d2847", "gloves": "#f4f4f0", "shoes": "#0d2847", "shoeAccent": "#11b3c9", "pads": "#0d2847", "padStyle": "enduro"}],
 	["Sunset", {"shell": "#ff7a1a", "peak": "#6a1b9a", "goggleFrame": "#6a1b9a", "lens": "#ffd21f", "strap": "#ff7a1a",
-		"jersey": "#6a1b9a", "pants": "#2a2140", "gloves": "#ff7a1a", "shoes": "#2a2140", "shoeAccent": "#ff7a1a", "pads": "#2a2140"}],
+		"jersey": "#6a1b9a", "pants": "#2a2140", "gloves": "#ff7a1a", "shoes": "#2a2140", "shoeAccent": "#ff7a1a", "pads": "#2a2140", "padStyle": "trail"}],
 ]
+## knee pad designs (KneePad.DESIGNS): look.padStyle, picked in Kit > Knee pads
+const PAD_STYLES := [["enduro", "Enduro"], ["race", "Race brace"], ["trail", "Trail soft"], ["none", "None"]]
 const SW := ["#f4f4f0", "#16171a", "#e8231f", "#ff7a1a", "#ffd21f", "#7ed321", "#11b3c9", "#1478d4", "#6a1b9a", "#ff5fa2"]
 const LENS := ["#ff7a2a", "#ffd21f", "#3fb6ff", "#7ed321", "#ff5fa2", "#8a96a8", "#d0d4da"]
 const LOOK_ROWS := [
@@ -144,9 +146,28 @@ static func load_look() -> Dictionary:
 	if cf.load(PATH) == OK and cf.has_section("look"):
 		for k in cf.get_section_keys("look"):
 			if l.has(k): l[k] = str(cf.get_value("look", k))
+	for kv in OS.get_environment("BMX_LOOK").split(",", false):   # tests: BMX_LOOK=padStyle=race,pads=#f4f4f0
+		var p := kv.split("=")
+		if p.size() == 2 and l.has(p[0]): l[p[0]] = p[1]
 	return l
 
 static func save_look(l: Dictionary) -> void:
 	var cf := ConfigFile.new(); cf.load(PATH)
 	for k in l: cf.set_value("look", k, l[k])
 	cf.save(PATH)
+
+## the knee pad design picker (Kit > Knee pads): one toggle per design, on_pick(style id)
+static func pad_style_picker(current: String, on_pick: Callable, size := 13) -> GridContainer:
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 6)
+	grid.add_theme_constant_override("v_separation", 6)
+	for st in PAD_STYLES:
+		var id: String = st[0]
+		var b := UITheme.button(st[1], func(): on_pick.call(id), size)
+		b.toggle_mode = true
+		b.button_pressed = id == current
+		b.focus_mode = Control.FOCUS_NONE
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		grid.add_child(b)
+	return grid

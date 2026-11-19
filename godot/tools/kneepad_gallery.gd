@@ -1,18 +1,21 @@
 extends SceneTree
 ## Knee pad check: legs bent 0..165 deg (row 1 from the side, row 2 from the front at an angle, row 3 twisted /
 ## bent sideways / backwards), saved as a PNG. Run (not headless):
-##   ..._console.exe --path godot -s res://tools/kneepad_gallery.gd -- out.png [cam=side|front|close]
+##   ..._console.exe --path godot -s res://tools/kneepad_gallery.gd -- out.png [cam=all|front|close] [yaw=rad]
+##   [design=enduro|race|trail|none]
 
 var frames := 0
 var out := "user://kneepad_gallery.png"
 var cam_mode := "all"
 var yaw := 0.7
+var design := "enduro"
 
 
 func _init() -> void:
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("cam="): cam_mode = a.substr(4)
 		elif a.begins_with("yaw="): yaw = float(a.substr(4))
+		elif a.begins_with("design="): design = a.substr(7)
 		elif a.ends_with(".png"): out = a
 	root.size = Vector2i(1600, 900)
 	var w := Node3D.new()
@@ -76,6 +79,7 @@ func _init() -> void:
 		_cyl(leg, knee, ankle, 0.05, 0.062, pants)
 		var pad := KneePad.new()
 		leg.add_child(pad)
+		pad.set_design(design)
 		pad.set_colors(Color("#1b1c20"), Color("#ffd21f"))
 		pad.pose(hip, knee, knee, ankle, hint)
 	if cam_mode == "close":

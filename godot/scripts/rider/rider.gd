@@ -23,7 +23,7 @@ const NEUTRAL := {hipX = 0.0, hipY = 0.0, lean = 0.0, elbowsOut = 0.0, kneesOut 
 	kneesFwd = 0.0, kneeOutL = 0.0, kneeOutR = 0.0, heelFwd = 0.0, heelUp = 0.0, footAngle = 0.0, footOut = 0.0}
 ## lookpanel.js DEFAULT_LOOK
 const DEFAULT_LOOK := {shell = "#16171a", peak = "#ececec", goggleFrame = "#f2f2ee", lens = "#ff7a2a", strap = "#ff6a4d",
-	jersey = "#ff6a4d", pants = "#1d2b64", gloves = "#ffd21f", shoes = "#26292f", shoeAccent = "#d8232a", pads = "#1b1c20"}
+	jersey = "#ff6a4d", pants = "#1d2b64", gloves = "#ffd21f", shoes = "#26292f", shoeAccent = "#d8232a", pads = "#1b1c20", padStyle = "enduro"}
 ## where the helmet model sits on the head (head-local m / rad) and its scale
 const HELMET_FIT := {x = 0.01, y = 0.0, tilt = 0.0, scale = 1.3}
 ## goggles (RiderGear.build_goggles): lens position / tilt / size, strap ellipse round the shell
@@ -149,7 +149,7 @@ func _init() -> void:
 	knee.assign([sph.call(0.07, mNavyLight), sph.call(0.07, mNavyLight)])
 	for i in 2:   # downhill knee pads over the knees (articulated: cap on the bend, plates on thigh + shin)
 		knee[i].visible = false
-		var kp := KneePad.new()
+		var kp := KneePad.new(-1.0 if i == 0 else 1.0)   # 0 = left leg: its outside is -Z
 		add_child(kp)
 		knee_pad.append(kp)
 	shoe_mats = {upper = mat("#26292f"), accent = mat("#d8232a"), sole = mat("#111214", 0.95), mid = mat("#f2f2ee"), laces = mat("#f2f2ee")}
@@ -434,8 +434,11 @@ func set_look(l: Dictionary) -> void:
 	c.call(kit.pants[0], "pants")
 	shade.call(kit.pants[1], "pants", 0.1)
 	c.call(kit.gloves[0], "gloves")
-	for kp in knee_pad:   # knee pad shell; the accent (chevron, stripe) takes the gloves' colour
+	for i in knee_pad.size():   # knee pad design + shell colour; the accent (chevron, stripes) takes the gloves' colour
+		var kp := knee_pad[i]
+		kp.set_design(str(L.get("padStyle", DEFAULT_LOOK.padStyle)))
 		kp.set_colors(Color(L.get("pads", DEFAULT_LOOK.pads)), Color(L.get("gloves", DEFAULT_LOOK.gloves)))
+		knee[i].visible = kp.design == "none"   # no pads: the plain knee
 	c.call(shoe_mats.upper, "shoes")
 	c.call(shoe_mats.accent, "shoeAccent")
 	c.call(goggle_mats.frame, "goggleFrame")

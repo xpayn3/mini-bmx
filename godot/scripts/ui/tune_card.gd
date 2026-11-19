@@ -296,6 +296,10 @@ func _look_group(group: String) -> void:
 	for g in RiderPanels.LOOK_ROWS:
 		if g[0] != group: continue
 		_header(group)
+		if group == "Kit":
+			list.add_child(UITheme.label("Knee pads design", 13))
+			list.add_child(RiderPanels.pad_style_picker(str(look.get("padStyle", "enduro")), func(id):
+				look.padStyle = id; _apply_look(); _fill()))
 		for row in g[1]:
 			var key: String = row[0]
 			list.add_child(UITheme.label(row[1], 13))
@@ -491,6 +495,7 @@ func _reset_category() -> void:
 			for g in RiderPanels.LOOK_ROWS:
 				if g[0] == name:
 					for row in g[1]: look[row[0]] = Rider.DEFAULT_LOOK[row[0]]
+					if name == "Kit": look.padStyle = Rider.DEFAULT_LOOK.padStyle
 			look_touched = true
 	if pose_touched: _apply_pose()
 	if look_touched: _apply_look()

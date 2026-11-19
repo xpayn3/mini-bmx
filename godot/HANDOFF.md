@@ -283,14 +283,22 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   Letters stamp down one after another from 2.4x with an overshoot, white-hot cooling to red; a red rule draws out from
   the middle; out they drift apart and fade (~4 s). Real time; hidden with the HUD. Test: `BMX_AREA_AT=secs` freezes it.
 - Look: kits + a colour per part (helmet shell/peak, goggles, jersey, pants, gloves, shoes, knee pads).
-- **Knee pads** (`rider/knee_pad.gd` + `shaders/knee_cap.gdshader`, one `KneePad` per leg, posed in `update_pose` and
-  `pose_ragdoll`): articulated so no part ever spans the bend: the hard cap (glossy shell with chevron, vent slots,
-  rivets, pin line, on a foam bumper) sits on the bisector of thigh / shin, facing out of the bend, and wraps the knee as a
-  sphere shell; quilted foam plates + fabric sleeves are rigid to the thigh and to the shin (hard insert on the shin);
-  a fabric ball closes the joint. Near straight the front eases onto the IK pole (ride) / body forward (ragdoll), and
-  stays on the anatomical front when a broken knee bends backwards; a shin torn off at the knee takes its half, the cap
-  goes. Colours: Kit › Knee pads (`look.pads`), accent = the gloves colour. Check every bend (0–165°, sideways,
-  backwards) without the game: `..._console.exe --path godot -s res://tools/kneepad_gallery.gd -- out.png [cam=close yaw=-0.6]`.
+- **Knee pads** (`rider/knee_pad.gd` + `shaders/knee_cap.gdshader`, one `KneePad` per leg (`KneePad.new(side)`, -1 =
+  left), posed in `update_pose` and `pose_ragdoll`): articulated so no part ever spans the bend: the cap sits on the
+  bisector of thigh / shin, facing out of the bend, and wraps the knee as a sphere shell; plates / guards + fabric sleeves
+  are rigid to the thigh and to the shin; a fabric ball closes the joint. Near straight the front eases onto the IK pole
+  (ride) / body forward (ragdoll), and stays on the anatomical front when a broken knee bends backwards; a shin torn off
+  at the knee takes its half, the cap goes. All pad materials are double sided (open shells: no see-through gaps).
+  **Designs** (`look.padStyle`, Kit › Knee pads design in the garage + tuning card Look › Clothes, `RiderPanels.PAD_STYLES`):
+  `enduro` (hard cap with chevron / vents / rivets, quilted foam plates, shin insert), `race` (hinged brace: striped cap,
+  ribbed hard guards, side bars + metal hinge discs on the bend axis), `trail` (soft honeycomb foam cap, slim sleeve with
+  accent bands), `none` (plain knee). **Straps**: velcro bands round the back of the leg with a buckle tab on the outer
+  back (`STRAPS`); the loose end flaps like the goggle strap (`rider/strap_tail.gd`, streams back with speed, hangs when
+  slow, kept out of the leg). **Logos**: a made-up brand per design (`LOGOS`: DIRTLAB / NITRO / TERRA) baked once into
+  a texture (`KneePad.LogoBaker`) and printed by the shell shader (`logo_*`). Colours: Kit › Knee pads (`look.pads`),
+  accent (chevron, stripes, straps) = the gloves colour. Tests: `BMX_LOOK=padStyle=race,pads=#f4f4f0` overrides the
+  look for a run (not saved); every bend without the game: `..._console.exe --path godot -s res://tools/kneepad_gallery.gd
+  -- out.png [cam=close yaw=-0.6] [design=race]`.
 
 ### Ride light (time of day)
 - **Default: golden hour** (19:20, sun ~10° up). Everything comes from the clock: `Game._apply_light(hour, LightSettings.current)`
