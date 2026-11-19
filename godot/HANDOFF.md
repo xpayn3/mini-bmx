@@ -361,12 +361,17 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   `sound_stream` (a recording played in random faded slices; the map: `assets/audio/map_unfold_gravel.ogg`). Paper = ambientCG **Paper003** (CC0) scan in
   `assets/textures/paper/` × the print, creases worn (`shaders/paper_sheet.gdshader`). Rustle sound synthesised.
 - **Trail map** (`PaperMap`, `scripts/ui/paper_map.gd`; `Game.open_map` / `exit_map`): 4×2 panels (0.84 × 0.525 m),
-  north-up topo 800 × 500 m around you: real ground colours washed out + hill shade, 5 m / 25 m contours, shore, trail in
-  red dashes, route features, the last 90 s ridden, 100 m grid, title block, legend, scale bar, north arrow, YOU ARE
-  HERE, a cover. Printed ~0.2 s, again only after 60 m / a new world. Ride frozen + HUD hidden while it's up; M / Esc /
-  bail fold it away. Unfolds at `tempo` 0.4 (~1.6 s), with the user's gravel-crunch recording. Held in the hands
-  (`handheld`): right stick tilts it (±0.3 rad), RT / LT (W / S) zoom 1–3×, left stick (A / D) pans when zoomed,
-  mouse wheel zooms, drag pans. The screen fades (`main.fade`) run on real time, or a map opened during one froze it.
+  two layers. **World** (`World`, `set_content`): a 1.6 × 1 km print around where it was made (2.56 px/m): real ground
+  colours washed out (sampled every 10 m) × hill shade (5 m), 5 m / 25 m contours, shore, 100 m grid with numbers,
+  trail in red dashes, route features, the last 90 s ridden, YOU ARE HERE. **Frame** (`Frame`, the page, printed with
+  alpha over it): white margin, neat lines, title block with the scale, legend, scale bar, north arrow, the cover.
+  Controls (`handheld`, hint at the bottom): **left stick / WASD / drag = travel** (the world scrolls under the paper,
+  `TRAVEL` m/s), **RT / LT / Q / E / wheel = zoom the print** 0.5–2.5× (the paper always stays fully in view; the frame
+  is reprinted when the zoom settles so scale bar + "1 : n" follow), right stick / numpad = tilt the sheet ±0.3 rad.
+  Scroll / zoom off the world print and it's printed again around the view (~0.3 s, a short stop). First print on
+  opening ~0.6 s; reused if you're within 60 m. Ride frozen + HUD hidden while it's up; M / Esc / bail fold it away.
+  Unfolds at `tempo` 0.4 with the user's gravel-crunch recording. The screen fades (`main.fade`) run on real time, or
+  a map opened during one froze it as a haze.
 - **Pause leaflet** (`PausePamphlet`, `scripts/ui/pause_pamphlet.gd`, built in `main._pause`): a DL tri-fold (3 × 99 ×
   210 mm, Z-folded, stays folded). Cover photo = the ride's last frame grabbed at the moment of pausing (centre crop,
   away from the HUD corners), "DOWNHILL PARK / MINI BMX / <biome> · TRAIL GUIDE", the menu printed below as live
@@ -460,7 +465,7 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `BMX_DEBRIS_PROBE=1` | fence / cactus debris: moving / resting counts and the lowest piece (none may fall through the ground) |
 | `BMX_SPRITE_DUST=1`, `BMX_SMOKE_PROBE=1` | old sprite dust for comparison / smoke-sim timing prints |
 | `BMX_FENCE=dir/prefix` (+ `BMX_FENCE_STYLE=ranch/picket`, `BMX_FENCE_SPEED=m/s`, `BMX_FENCE_ANGLE=deg`) | autotest rides into the nearest fence, screenshots before / after the smash; with `BMX_DEBRIS_PROBE=1` every piece prints how far it landed from the hit and its gap to the drawn ground |
-| `BMX_MAP=secs` (+ `BMX_MAP_CLOSE=secs`, `BMX_MAP_TILT=x,y` holds the right stick; the autotest's held pedal = RT zooms in, `BMX_IDLE=1` for none) | autotest opens the trail map (presses M again); prints `AUTOTEST map: open= time_scale= hud=` |
+| `BMX_MAP=secs` (+ `BMX_MAP_CLOSE=secs`, `BMX_MAP_TILT=x,y` holds the right stick, `BMX_MAP_SCROLL=x,y` the left stick, `BMX_MAP_ZOOM=z`) | autotest opens the trail map (presses M again); prints `AUTOTEST map: open= time_scale= hud=` |
 | `BMX_MAP_SHOTS=dir/prefix` | saves the paper sheet's own render every 0.1 s while it unfolds (`PAPERSHOT`) |
 | `BMX_PAPER_AT=secs` | freezes every paper sheet's animation at that time (pair with `BMX_SHOT` for a frame mid-unfold) |
 | `BMX_PAUSE=1` (+ `BMX_PAUSE_HOVER=0.62`) | pause leaflet at the end of an autotest; HOVER moves the mouse to that screen height and prints where it lands on the page |
