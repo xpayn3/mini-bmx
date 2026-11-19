@@ -40,6 +40,7 @@ const SLOTS := {
 	"toptube":   {"label": "Top tube",   "tmpl": {"mesh": "frame", "surface": "paint", "from": [0.05, 0.74], "to": [0.30, 0.86], "length": 0.19, "height": 0.032}},
 	"chainstay": {"label": "Chainstays", "tmpl": {"mesh": "swing", "surface": "paint", "from": [-0.44, -0.025], "to": [-0.25, 0.03], "length": 0.09, "height": 0.0282, "z": 0.075, "depth": 0.06}},
 	"forklegs":  {"label": "Fork legs",  "tmpl": {"mesh": "fork_lower", "surface": "black", "from": [-0.03, 0.07], "to": [-0.165, 0.335], "upright": true, "length": 0.078, "height": 0.15, "z": 0.085, "depth": 0.05}},   # Fox 40 size: ~15 cm, wrapped round the leg
+	"bars":      {"label": "Handlebar",  "tmpl": {"mesh": "steer", "surface": "bar", "bar": true, "length": 0.07, "height": 0.04, "depth": 0.05}},   # a sticker on each side of the stem
 }
 
 ## the logo library. Images that come with the game, plus text logos (our own wordmarks)
@@ -196,12 +197,13 @@ static func default_build() -> Dictionary:
 			"crank": {"color": "1a1a1c", "color2": "ffffff", "finish": "anodized"},
 		},
 		"logos": {
-			"downtube": {"logo": "cinelli", "text": "", "fill": "f4f4f0", "stroke": "141418"},
-			"toptube": {"logo": "glory", "text": "", "fill": "f4f4f0", "stroke": "141418"},
-			"chainstay": {"logo": "cinelli", "text": "", "fill": "f4f4f0", "stroke": "141418"},
-			"forklegs": {"logo": "fox", "text": "", "fill": "f4f4f0", "stroke": "141418"},
-			"tyres": {"logo": "text", "text": "MAXXIS", "fill": "f4f4f0", "stroke": "141418"},
-			"rims": {"logo": "text", "text": "GRAVITY", "fill": "f4f4f0", "stroke": "141418", "count": 2},
+			"downtube": {"logo": "cinelli", "text": "", "fill": "f4f4f0", "stroke": "141418", "pos": 0.5, "scale": 1.0, "rot": 0.0},
+			"toptube": {"logo": "glory", "text": "", "fill": "f4f4f0", "stroke": "141418", "pos": 0.5, "scale": 1.0, "rot": 0.0},
+			"chainstay": {"logo": "cinelli", "text": "", "fill": "f4f4f0", "stroke": "141418", "pos": 0.5, "scale": 1.0, "rot": 0.0},
+			"forklegs": {"logo": "fox", "text": "", "fill": "f4f4f0", "stroke": "141418", "pos": 0.5, "scale": 1.0, "rot": 0.0},
+			"bars": {"logo": "none", "text": "", "fill": "f4f4f0", "stroke": "141418", "pos": 0.5, "scale": 1.0, "rot": 0.0},
+			"tyres": {"logo": "text", "text": "MAXXIS", "fill": "f4f4f0", "stroke": "141418", "pos": 0.5, "scale": 1.0, "rot": 0.0},
+			"rims": {"logo": "text", "text": "GRAVITY", "fill": "f4f4f0", "stroke": "141418", "count": 2, "pos": 0.5, "scale": 1.0, "rot": 0.0},
 		},
 		"wheels": {
 			"front": "29", "rear": "27.5", "tyre_w": 2.5, "tread": "knobby", "sidewall": "black",
@@ -327,13 +329,16 @@ static func decal_config(b: Dictionary) -> Dictionary:
 		if e.get("upright", false) and not e.has("image"):
 			continue   # fork legs take artwork only
 		e.fill = Color(L.fill); e.stroke = Color(L.stroke, 0.85)
+		e.pos = float(L.get("pos", 0.5)); e.scale = float(L.get("scale", 1.0)); e.rot = float(L.get("rot", 0.0))
+		if e.get("bar", false):   # the bar's grip end moves with its width
+			e.grip_z = Handlebar.GRIP + (float(b.bars.width) - Handlebar.STOCK_WIDTH) / 2000.0
 		labels.append(e)
 	var cfg := {"labels": labels}
 	var tl: Dictionary = b.logos.tyres
 	if tl.logo != "none" and tl.text.strip_edges() != "":
-		cfg.tyres = {"text": tl.text, "meshes": [["wheel_front", "rubber"], ["wheel_rear", "rubber"]]}
+		cfg.tyres = {"text": tl.text, "scale": float(tl.get("scale", 1.0)), "rot": float(tl.get("rot", 0.0)), "meshes": [["wheel_front", "rubber"], ["wheel_rear", "rubber"]]}
 	var rl: Dictionary = b.logos.rims
-	var rim := {"fill": Color(rl.fill), "depth": float(b.wheels.rim_depth) / 1000.0, "count": int(rl.get("count", 2)),
+	var rim := {"fill": Color(rl.fill), "depth": float(b.wheels.rim_depth) / 1000.0, "count": int(rl.get("count", 2)), "scale": float(rl.get("scale", 1.0)), "rot": float(rl.get("rot", 0.0)),
 		"meshes": [["wheel_front", "rim"], ["wheel_rear", "rim"]]}
 	var rlogo: String = rl.logo
 	if rlogo.begins_with("file:"):

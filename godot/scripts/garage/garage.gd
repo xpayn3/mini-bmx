@@ -968,8 +968,7 @@ func _choice(t: String, items: Array, current, cb: Callable) -> Control:
 		var b := UITheme.make_button(a, Callable(), "chip", Tokens.T_SM)
 		b.custom_minimum_size = Tokens.STEP_ARROW
 		b.focus_mode = Control.FOCUS_NONE
-		b.add_theme_stylebox_override("hover", UITheme.btn_box(Tokens.ACCENT))
-		b.add_theme_stylebox_override("pressed", UITheme.btn_box(Tokens.ACCENT_DOWN))
+		# colours come from the chip style: grey, light wash on hover, yellow only while pressed
 		return b
 	var prev: Button = arrow.call("◀")
 	var next: Button = arrow.call("▶")
@@ -1012,7 +1011,8 @@ func _slide(text: String, lo: float, hi: float, stp: float, cur: float, unit: St
 	s.min_value = lo; s.max_value = hi; s.step = stp; s.value = cur
 	s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	s.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	var fmt := "%d " + unit if stp >= 1 else "%.1f " + unit
+	var u := unit.replace("%", "%%")
+	var fmt := "%d " + u if stp >= 1 else "%.1f " + u
 	var vl := UITheme.text(fmt % cur, SUB, Tokens.T_SM)
 	vl.custom_minimum_size.x = Tokens.S8 + Tokens.S5
 	s.value_changed.connect(func(v): vl.text = fmt % v; cb.call(v); _changed())
@@ -1106,6 +1106,8 @@ func _logos_page() -> void:
 		g.add_child(b)
 	body.add_child(g)
 	var L: Dictionary = build.logos[logo_slot]
+	if L.logo != "none":
+		_placement(L)
 	if logo_slot == "rims":
 		_h("RIM DECALS")
 		var items := [["text", "Lettering"], ["none", "None"]]
@@ -1161,6 +1163,24 @@ func _logos_page() -> void:
 		_swatches(L.fill, func(h): L.fill = h)
 		_color("Fill", L.fill, func(h): L.fill = h)
 		_color("Outline", L.stroke, func(h): L.stroke = h)
+
+## slide the sticker along the tube it sits on, make it bigger / smaller, turn it
+func _placement(L: Dictionary) -> void:
+	_h("PLACEMENT")
+	var round_it := logo_slot == "tyres" or logo_slot == "rims"
+	if round_it:
+		_slide("Turn round wheel", -180.0, 180.0, 1.0, float(L.get("rot", 0.0)), "°", func(v): L.rot = v)
+	else:
+		_slide("Slide along tube", 0.0, 100.0, 1.0, float(L.get("pos", 0.5)) * 100.0, "%", func(v): L.pos = v / 100.0)
+	_slide("Size", 40.0, 220.0, 1.0, float(L.get("scale", 1.0)) * 100.0, "%", func(v): L.scale = v / 100.0)
+	if not round_it:
+		_slide("Rotate", -90.0, 90.0, 1.0, float(L.get("rot", 0.0)), "°", func(v): L.rot = v)
+	body.add_child(UITheme.make_button("Reset placement", func():
+		L.pos = 0.5; L.scale = 1.0; L.rot = 0.0
+		_changed()
+		_set_tab.call_deferred("logos"), "chip", Tokens.T_MD))
+	if logo_slot == "bars":
+		_note("One sticker on each side of the stem.")
 
 func _on_logo_file(path: String) -> void:
 	var p := BikeBuild.import_logo(path)
