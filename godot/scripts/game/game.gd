@@ -37,7 +37,11 @@ var area_title              # new area banner in the WASTED type (fx/area_title.
 var audio
 var sun: DirectionalLight3D
 var env: Environment
+const VOL_DENSITY := 0.0035   # haze thick enough that the sun shows as shafts past trees and fences
 var cam_attr: CameraAttributesPractical
+var refl_probe: ReflectionProbe   # scene reflections (trees, hills) for the bike paint / chrome / wet; follows the rider
+var _probe_pos := Vector3(1e9, 0, 0)
+var _probe_t := 0.0
 var grade_rect: ColorRect
 var atmos := Atmos.new()
 var grime: Grime
@@ -235,10 +239,10 @@ func _build_environment() -> void:
 	env.set_glow_level(3, 0.6); env.set_glow_level(4, 0.3)
 	# volumetric fog: a light haze the sun shines through (shafts past trees, lit dust clouds); the
 	# depth fog above still does the far fade, so this stays thin
-	env.volumetric_fog_density = 0.0012
+	env.volumetric_fog_density = VOL_DENSITY
 	env.volumetric_fog_albedo = Color(0.86, 0.9, 0.95)
-	env.volumetric_fog_anisotropy = 0.55
-	env.volumetric_fog_length = 72.0
+	env.volumetric_fog_anisotropy = 0.78
+	env.volumetric_fog_length = 90.0
 	env.volumetric_fog_detail_spread = 1.6
 	env.volumetric_fog_ambient_inject = 0.12   # haze lit by the sun (shafts), not a milky veil
 	env.volumetric_fog_sky_affect = 0.0
@@ -250,7 +254,13 @@ func _build_environment() -> void:
 	we.environment = env
 	cam_attr = CameraAttributesPractical.new()
 	cam_attr.dof_blur_amount = 0.06
-	cam_attr.auto_exposure_enabled = false
+	# auto exposure: the eye adapts between shade and open sun / the night; kept to a narrow range on top of the
+	# time-of-day exposure so the look stays as graded (CameraAttributesPractical keeps the DoF + photo mode as is)
+	cam_attr.auto_exposure_enabled = true
+	cam_attr.auto_exposure_scale = 0.4
+	cam_attr.auto_exposure_speed = 0.7
+	cam_attr.auto_exposure_min_sensitivity = 80.0
+	cam_attr.auto_exposure_max_sensitivity = 140.0
 	we.camera_attributes = cam_attr
 	add_child(we)
 	sun = DirectionalLight3D.new()
@@ -267,9 +277,18 @@ func _build_environment() -> void:
 	sun.directional_shadow_pancake_size = 30.0
 	sun.shadow_bias = 0.02
 	sun.shadow_normal_bias = 1.2
-	sun.light_volumetric_fog_energy = 1.4
+	sun.light_volumetric_fog_energy = 2.6
 	add_child(sun)
 	sun.look_at_from_position(SUN_DIR.normalized(), Vector3.ZERO, Vector3.UP)
+	refl_probe = ReflectionProbe.new()
+	refl_probe.size = Vector3(160, 60, 160)
+	refl_probe.max_distance = 260.0
+	refl_probe.box_projection = false
+	refl_probe.interior = false
+	refl_probe.ambient_mode = ReflectionProbe.AMBIENT_DISABLED   # reflections only: the ambient stays as graded
+	refl_probe.update_mode = ReflectionProbe.UPDATE_ONCE
+	refl_probe.intensity = 1.0
+	add_child(refl_probe)
 	# colour grade (split tone) + vignette, drawn over the 3D view
 	var cl := CanvasLayer.new(); cl.layer = -1
 	grade_rect = ColorRect.new()
@@ -309,7 +328,7 @@ func set_scenic(on: bool) -> void:
 		env.fog_depth_curve = 1.25
 		env.fog_density = 0.7
 		env.volumetric_fog_albedo = Color(1.0, 0.82, 0.62)
-		env.volumetric_fog_density = 0.0012
+		env.volumetric_fog_density = VOL_DENSITY
 		env.tonemap_exposure = 0.95
 		cam.far = 3500.0
 		cam.vista_yaw = best
@@ -339,7 +358,7 @@ func set_scenic(on: bool) -> void:
 		env.fog_sun_scatter = 0.0
 		_ride_fog()
 		env.volumetric_fog_albedo = Color(0.86, 0.9, 0.95)
-		env.volumetric_fog_density = 0.0012
+		env.volumetric_fog_density = VOL_DENSITY
 		env.tonemap_exposure = 0.8
 		cam.far = RIDE_FAR
 		light_ver = -1   # the level light (time of day) takes over on the next frame
@@ -410,7 +429,7 @@ func _apply_light(h: float, L: Dictionary) -> void:
 	env.fog_sun_scatter = 0.3 * g * day
 	env.fog_aerial_perspective = 0.75 * (1.0 - n)
 	env.volumetric_fog_albedo = Color(0.86, 0.9, 0.95).lerp(Color(1.0, 0.84, 0.66), g * day).lerp(Color(0.45, 0.55, 0.8), n)
-	env.volumetric_fog_density = 0.0012 * float(L.haze)
+	env.volumetric_fog_density = VOL_DENSITY * float(L.haze)
 	env.tonemap_exposure = lerpf(lerpf(0.8, 0.95, g), 1.6, n) * float(L.exposure)
 	env.adjustment_saturation = float(L.saturation) * lerpf(1.0, 0.8, n)
 	env.adjustment_contrast = float(L.contrast)
@@ -517,6 +536,8 @@ func _apply_settings() -> void:
 	if blood: blood.enabled = Settings.get_v("blood")
 	dust.emitter.amount = int(RideDust.MAX_RATE * 3.2 * clampf(float(Settings.get_v("fx_density")), 0.2, 1.5))
 	env.ssr_enabled = Settings.get_v("ssr")
+	refl_probe.visible = gi >= 1   # High and up
+	_probe_pos = Vector3(1e9, 0, 0)
 	env.adjustment_brightness = float(Settings.get_v("brightness"))
 	env.glow_enabled = Settings.get_v("bloom")
 	(grade_rect.material as ShaderMaterial).set_shader_parameter("grade_amt", 1.0 if Settings.get_v("grade") else 0.0)
@@ -1288,6 +1309,7 @@ func _process(dt: float) -> void:
 	atmos.update(t, dt, drawn_pos, 0.0 if st.air or st.crash_on else clampf(absf(st.v) / 2.0, 0.0, 1.0))
 	_update_light(dt)
 	sun.light_energy = sun_energy * atmos.shade
+	_update_probe(dt, drawn_pos)
 	# the dust simulation around the rider (fx/smoke_sim.gd)
 	if st.crash_on and ragdoll.active: blood.crash_step(ragdoll.p, ragdoll.q, ragdoll.last_h, ragdoll.rad)
 	if st.crash_on and dust.sim != null: _crash_dust()
@@ -1340,6 +1362,17 @@ func _process(dt: float) -> void:
 	if absf(st.v) * 3.6 > float(GameState.records.top_speed) + 0.5 and not st.crash_on:
 		GameState.records.top_speed = absf(st.v) * 3.6
 
+
+## reflection probe: sits above the rider and re-captures the surroundings (UPDATE_ONCE, re-armed) after
+## 30 m of travel or 6 s, so it costs a single cube render now and then instead of one every frame
+func _update_probe(dt: float, at: Vector3) -> void:
+	if refl_probe == null or not refl_probe.visible: return
+	_probe_t += dt
+	refl_probe.global_position = at + Vector3(0, 4.0, 0)
+	if _probe_t > 6.0 or at.distance_to(_probe_pos) > 30.0:
+		_probe_t = 0.0
+		_probe_pos = at
+		refl_probe.update_mode = ReflectionProbe.UPDATE_ONCE
 
 ## ride fog: a light, sunny distance haze that takes the sky's own colour (no grey wall at the horizon)
 ## and leaves the sky itself clear
