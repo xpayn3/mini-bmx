@@ -375,7 +375,8 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `BMX_LAND_TEST=secs` / `BMX_BAIL=secs` | autotest fakes a hard landing (landing dust) / bails (crash dust) at that time |
 | `BMX_DEBRIS_PROBE=1` | fence / cactus debris: moving / resting counts and the lowest piece (none may fall through the ground) |
 | `BMX_SPRITE_DUST=1`, `BMX_SMOKE_PROBE=1` | old sprite dust for comparison / smoke-sim timing prints |
-| `BMX_FENCE=dir/prefix` (+ `BMX_FENCE_STYLE=ranch/picket`) | autotest rides into the nearest fence, screenshots before / after the smash |
+| `BMX_FENCE=dir/prefix` (+ `BMX_FENCE_STYLE=ranch/picket`, `BMX_FENCE_SPEED=m/s`, `BMX_FENCE_ANGLE=deg`) | autotest rides into the nearest fence, screenshots before / after the smash; with `BMX_DEBRIS_PROBE=1` every piece prints how far it landed from the hit and its gap to the drawn ground |
+| `BMX_FENCE_ALL=1` | smashes every fence within 70 m at random 4–18 m/s, 7 s later counts pieces buried / invisible / freed (all must be 0) |
 
 Typical check after a change: build C# → `--autotest=10` with `BMX_SEED=4242` (sane=true, no SCRIPT ERROR)
 → a `--shot` of what changed → look at the PNG. Frame rate reference: ~46–58 fps at 1600×900 with vsync

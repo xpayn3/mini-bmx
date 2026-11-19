@@ -472,6 +472,8 @@ func _autotest(seconds: float) -> void:
 				get_viewport().get_texture().get_image().save_png("%s_%d.png" % [OS.get_environment("BMX_DUST_SHOTS"), nk])
 		if OS.get_environment("BMX_FENCE") != "":   # tests: ride straight into the nearest fence, shots around the hit
 			_fence_test(el)
+		if OS.get_environment("BMX_FENCE_ALL") != "":   # tests: smash every fence within 70 m, then check each piece
+			_fence_all(el)
 		if OS.get_environment("BMX_CACTUS_ROW") != "":   # tests: the five cactus kinds in a row in front of the camera
 			_cactus_row(el)
 		if OS.get_environment("BMX_BODY_PROBE") != "":   # tests: the rider's body vs the bike
@@ -553,9 +555,13 @@ func _fence_test(el: float) -> void:
 		# the panel's own direction: from its first collider to its centre; ride across it
 		var along := Vector2(p.cx, p.cz) - Vector2(best.x, best.z)
 		var nrm := Vector2(-along.y, along.x).normalized() if along.length() > 0.1 else Vector2(1, 0)
-		var start := Vector2(p.cx, p.cz) - nrm * 6.0
-		ph.reset_at(start.x, start.y, atan2(-nrm.y, nrm.x))
-		ph.v = 7.0
+		# BMX_FENCE_SPEED (m/s, default 7) / BMX_FENCE_ANGLE (degrees off square-on, default 0)
+		var ang := deg_to_rad(float(OS.get_environment("BMX_FENCE_ANGLE"))) if OS.get_environment("BMX_FENCE_ANGLE") != "" else 0.0
+		var rd := nrm.rotated(ang)
+		var spd := float(OS.get_environment("BMX_FENCE_SPEED")) if OS.get_environment("BMX_FENCE_SPEED") != "" else 7.0
+		var start := Vector2(p.cx, p.cz) - rd * maxf(6.0, spd * 0.8)
+		ph.reset_at(start.x, start.y, atan2(-rd.y, rd.x))
+		ph.v = spd
 		_fence = {"panel": p, "t": el, "shot": 0}
 		print("FENCE test: panel at (%.1f, %.1f) style=%s parts=%d" % [p.cx, p.cz, p.style, p.parts.size()])
 	elif not _fence.is_empty():
@@ -609,6 +615,40 @@ func _cactus_row(el: float) -> void:
 			var o: Vector3 = c["rec"]["xform"].origin
 			tr._debris.smash_cactus(c["rec"], c["rt"] * 7.0, o + Vector3(0, 0.45, 0) - c["rt"] * 0.25)
 		print("CACTUS smashed %d in %.1f ms, debris moving=%d" % [_cacti.size(), (Time.get_ticks_usec() - t0) / 1000.0, tr._debris._items.size()])
+
+
+## BMX_FENCE_ALL=1: at 2 s smash every fence panel within 70 m (random 4-18 m/s), at 9 s report where every
+## piece is: buried under the drawn ground, far away, invisible, gone
+var _fall := {}
+func _fence_all(el: float) -> void:
+	var tr = game.terrain
+	var ph = game.phys
+	if _fall.is_empty() and el > 2.0:
+		var n := 0
+		var seen := {}
+		for k in tr._col_grid:
+			for c in tr._col_grid[k]:
+				if not c.has("fence") or c["fence"]["broken"] or seen.has(c["fence"]): continue
+				if Vector2(c.x - ph.x, c.z - ph.z).length() > 70.0: continue
+				seen[c["fence"]] = true
+				var a := randf() * TAU
+				var sp := 4.0 + randf() * 14.0
+				if tr.break_collider(c, Vector3(cos(a) * sp, 0, sin(a) * sp)): n += 1
+		_fall = {"t": el, "n": n, "pieces": tr._debris._items.size()}
+		print("FENCEALL smashed panels=%d pieces=%d" % [n, _fall.pieces])
+	elif not _fall.is_empty() and not _fall.has("done") and el > _fall.t + 7.0:
+		_fall.done = true
+		var d = tr._debris
+		var bad_under := 0; var bad_far := 0; var bad_vis := 0; var gone := 0
+		for w in d._wrecks:
+			var mi = w["node"]
+			if not is_instance_valid(mi): gone += 1; continue
+			if not mi.is_visible_in_tree(): bad_vis += 1
+			var ab: AABB = mi.global_transform * mi.get_aabb()
+			var top := ab.position.y + ab.size.y
+			var c := ab.get_center()
+			if top < tr.top_height(c.x, c.z) + 0.01: bad_under += 1; print("FENCEALL under at %s top=%.2f ground=%.2f" % [str(c), top, tr.top_height(c.x, c.z)])
+		print("FENCEALL after 7 s: moving=%d lying=%d (of %d) buried=%d invisible=%d freed=%d" % [d._items.size(), d._wrecks.size(), _fall.pieces, bad_under, bad_vis, gone])
 
 
 ## --shot=<png path>@<seconds>: save a screenshot after that long, then quit (testing / store shots)

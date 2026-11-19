@@ -792,13 +792,18 @@ func break_collider(c: Dictionary, vel: Vector3, at = null) -> bool:
 		_broken.append({"kind": "fence", "rec": panel})
 		var zero := Transform3D(Basis.from_scale(Vector3.ZERO), Vector3.ZERO)
 		var hit := Vector2(c["x"], c["z"])
+		# throw the debris first, only then hide the fence parts: a part is never hidden without its piece
+		var made: int = _debris.smash_fence(panel, vel, hit, c.get("chunk"))
+		if made <= 0:
+			panel["broken"] = false   # nothing came off: leave the fence standing
+			_broken.pop_back()
+			return false
 		for part in panel["parts"]:
 			if not TerrainDebris.fence_part_goes(part, hit):
 				continue   # a post you didn't hit stays standing
 			var mm: MultiMesh = panel["meshes"].get(part["kind"])
 			if mm:
 				mm.set_instance_transform(part["i"], zero)
-		_debris.smash_fence(panel, vel, hit, c.get("chunk"))
 		return true
 	if c.has("cactus"):
 		var rec: Dictionary = c["cactus"]
