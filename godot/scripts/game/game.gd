@@ -400,9 +400,10 @@ func start_crash(reason: String) -> void:
 	rider.transform = Transform3D.IDENTITY
 	ragdoll.start(pts, body_vel, spin_v, 1.0 / 60)
 	rider.pose_ragdoll(ragdoll.p)
-	burst(Vector3(phys.x, phys.y + 0.05, phys.z), 30, terrain.surface(phys.x, phys.z), 1.5)
+	burst(Vector3(phys.x, phys.y + 0.05, phys.z), 30 if dust.sim == null else 10, terrain.surface(phys.x, phys.z), 1.5)
 	var cs: int = terrain.surface(phys.x, phys.z)
-	if cs != 2: dust.cloud(Vector3(phys.x, phys.y, phys.z), f * phys.v * 0.3, ground_dust(phys.x, phys.z, cs), 3.2, 1.2)
+	# (with the smoke sim the ragdoll's own impacts throw the dust: _crash_dust)
+	if cs != 2 and dust.sim == null: dust.cloud(Vector3(phys.x, phys.y, phys.z), f * phys.v * 0.3, ground_dust(phys.x, phys.z, cs), 3.2, 1.2)
 	flash(reason)
 	if hud: hud.on_crash()
 	if audio: audio.crash()
@@ -436,28 +437,44 @@ func on_landing(air_time: float, impact: float) -> void:
 		dust.cloud(Vector3(phys.x, phys.y, phys.z), phys.fwd() * phys.v * 0.3, ground_dust(phys.x, phys.z, ls), 2.6 + impact * 0.15, 1.1)
 	if air_time > 0.2: Settings.rumble(clampf(impact / 8, 0.15, 1), clampf(impact / 12, 0, 1), 0.12 + minf(0.25, impact * 0.02))
 
-## a crash kicks up dust wherever the ragdoll and the bike hit and slide along the ground
+## a crash kicks up dust where the ragdoll hits the ground: every time a body part slams down while
+## tumbling it throws a puff (bigger the harder it hits), and a light dusting where it slides
+var _rd_air: PackedByteArray = PackedByteArray()
 func _crash_dust() -> void:
 	var pts: Array = ragdoll.p
 	var prv: Array = ragdoll.q
 	var h: float = maxf(ragdoll.last_h, 1e-4)
+	if _rd_air.size() != pts.size():
+		_rd_air.resize(pts.size())
+		_rd_air.fill(1)
 	var made := 0
 	for i in pts.size():
 		var pp: Vector3 = pts[i]
 		var g: float = terrain.height(pp.x, pp.z)
-		if pp.y - g > 0.25: continue
+		var above := pp.y - g
+		if above > 0.3:
+			_rd_air[i] = 1   # off the ground: the next touch-down is an impact
+			continue
+		if above > 0.2: continue
 		var v: Vector3 = (pp - (prv[i] as Vector3)) / h
-		var hit := maxf(0.0, -v.y)
-		var k := Vector2(v.x, v.z).length() + hit * 1.5
-		if k < 0.7: continue
 		var s: int = terrain.surface(pp.x, pp.z)
 		if s == 2: continue
 		var amt := 1.0 if s == 1 else (0.85 if s == 3 else 0.3)
-		dust.sim.add_source(Vector3(pp.x, g + 0.1, pp.z), Vector3(v.x * 0.35, 0.5 + hit * 0.25, v.z * 0.35), 0.28,
-			minf(k, 8.0) * 10.0 * amt, 8.0, 0.4 + hit * 0.2)
-		if made == 0: dust.sim.tint(ground_dust(pp.x, pp.z, s))
-		made += 1
-		if made >= 10: break
+		var hs := Vector2(v.x, v.z).length()
+		var at := Vector3(pp.x, g + 0.1, pp.z)
+		if _rd_air[i] == 1:
+			_rd_air[i] = 0
+			var hit := maxf(0.0, -v.y) + hs * 0.35
+			if hit > 1.5 and made < 6:
+				# the slam: a puff blown out round the impact, carried on a little the way it was going
+				var k := clampf((hit - 1.5) / 6.0, 0.15, 1.0)
+				dust.sim.burst(at, Vector3(v.x * 0.25, 0.6 + k * 0.8, v.z * 0.25), 0.3 + k * 0.25, (50.0 + 110.0 * k) * amt,
+					1.2 + k * 2.2, 0.08 + k * 0.05, ground_dust(pp.x, pp.z, s), 20.0)
+				made += 1
+		elif hs > 1.2 and made < 10:
+			# sliding / rolling along the ground
+			dust.sim.add_source(at, Vector3(v.x * 0.3, 0.4, v.z * 0.3), 0.25, minf(hs, 6.0) * 4.0 * amt, 6.0, 0.3)
+			made += 1
 	# the bike sliding / tumbling along the ground
 	var bs: int = terrain.surface(phys.x, phys.z)
 	if absf(phys.v) > 0.6 and bs != 2:
@@ -693,6 +710,7 @@ func _process(dt: float) -> void:
 	sun.light_energy = sun_energy * atmos.shade
 	# the dust simulation around the rider (fx/smoke_sim.gd)
 	if st.crash_on and dust.sim != null: _crash_dust()
+	elif _rd_air.size() > 0: _rd_air.fill(1)
 	dust.attach(terrain, sun)
 	dust.sim_step(dt, drawn_pos, st.fwd(), atmos.wind)
 	grime.update(dt, rig)
