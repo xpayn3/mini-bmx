@@ -523,7 +523,7 @@ func start_crash(reason: String) -> void:
 	if blood: blood.crash_start(Vector2(body_vel.x, body_vel.z).length())
 	rider.pose_ragdoll(ragdoll.p)
 	# (no dust right where the crash starts with the smoke sim: only where the body / bike hit and slide)
-	burst(Vector3(phys.x, phys.y + 0.05, phys.z), 30 if dust.sim == null else 10, terrain.surface(phys.x, phys.z), 1.5, dust.sim == null)
+	burst(Vector3(phys.x, phys.y + 0.05, phys.z), 30 if dust.sim == null else 2, terrain.surface(phys.x, phys.z), 1.5, dust.sim == null)
 	var cs: int = terrain.surface(phys.x, phys.z)
 	# (with the smoke sim the ragdoll's own impacts throw the dust: _crash_dust)
 	if cs != 2 and dust.sim == null: dust.cloud(Vector3(phys.x, phys.y, phys.z), f * phys.v * 0.3, ground_dust(phys.x, phys.z, cs), 3.2, 1.2)
@@ -601,6 +601,8 @@ var _rd_air: PackedByteArray = PackedByteArray()
 ## how much dust a crash throws (kept low so the blood on the ground shows: fx/blood.gd)
 const CRASH_DUST_BODY := 0.08
 const CRASH_DUST_BIKE := 0.15
+## how much grit / dirt chunks fly off the body when it hits (1 = the old amount): kept low so the rider stays readable
+const CRASH_DEBRIS := 0.2
 func _crash_dust() -> void:
 	var pts: Array = ragdoll.p
 	var prv: Array = ragdoll.q
@@ -635,7 +637,7 @@ func _crash_dust() -> void:
 				if OS.get_environment("BMX_SMOKE_PROBE") != "": print("CRASHDUST impact i=%d t=%.2f hit=%.1f" % [i, phys.crash_t, hit])
 				dust.sim.burst(at, Vector3(v.x * 0.25, 0.6 + k * 0.8, v.z * 0.25), 0.3 + k * 0.25, (50.0 + 110.0 * k) * amt * CRASH_DUST_BODY,
 					1.2 + k * 2.2, 0.08 + k * 0.05, ground_dust(pp.x, pp.z, s), 20.0)
-				dust.grit_burst(at, Vector3(v.x * 0.3, 0.8 + k * 1.6, v.z * 0.3), 1.0 + k * 2.5, 600.0 * k * amt * 0.2, 0.06, ground_dust(pp.x, pp.z, s))
+				dust.grit_burst(at, Vector3(v.x * 0.3, 0.8 + k * 1.6, v.z * 0.3), 1.0 + k * 2.5, 600.0 * k * amt * 0.2 * CRASH_DEBRIS, 0.06, ground_dust(pp.x, pp.z, s))
 				made += 1
 		elif hs > 1.2 and made < 10:
 			# sliding / rolling along the ground

@@ -61,8 +61,12 @@ void vertex() {
 	VERTEX += (inverse(MODEL_MATRIX) * vec4(push, 0.0)).xyz;
 }
 void fragment() {
-	ALBEDO = texture(tex, UV).rgb;
-	ROUGHNESS = 0.85;
+	// slightly negative LOD bias keeps the number sharp from far away; some self-light keeps the white paper
+	// white under the warm low sun instead of turning brown
+	vec3 c = texture(tex, UV, -0.8).rgb;
+	ALBEDO = c;
+	EMISSION = c * 0.5;
+	ROUGHNESS = 0.9;
 }
 """
 
