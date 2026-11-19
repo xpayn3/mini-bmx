@@ -404,7 +404,7 @@ func _input(e: InputEvent) -> void:
 	if _test_run: return   # tests: only BMX_PAD decides
 	var pad := pad_active
 	if e is InputEventJoypadButton and e.pressed: pad = true
-	elif e is InputEventJoypadMotion and absf(e.axis_value) > 0.5: pad = true
+	elif e is InputEventJoypadMotion and absf(e.axis_value) > 0.3: pad = true   # (a gentle stick push counts: the map is panned with light touches)
 	elif (e is InputEventKey and e.pressed) or (e is InputEventMouseButton and e.pressed): pad = false
 	if pad != pad_active:
 		pad_active = pad

@@ -46,7 +46,7 @@ func _ready() -> void:
 	cols = 4; rows = 2
 	panel = Vector2(0.21, 0.2625)    # 0.84 x 0.525 m, the aspect of the print
 	shots = OS.get_environment("BMX_MAP_SHOTS")
-	sound_stream = load("res://assets/audio/map_unfold_gravel.ogg")   # the user's pick: gravel crunch for the unfold
+	sound_stream = load("res://assets/audio/paper_unfold.mp3")   # the user's crumpling paper recording
 	sound_db = -4.0
 	tempo = 0.36                      # unfolds at an easy pace (~2 s), still springy
 	zoom_min = 0.25                   # zoomed right out: the whole printed area

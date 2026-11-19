@@ -65,7 +65,7 @@ var _dim: ColorRect
 var _mat: ShaderMaterial
 var _tex: Texture2D
 var _sound: AudioStreamPlayer
-var sound_stream: AudioStream        # set before add_child: a recording to play slices of (null = the synthesised rustle)
+var sound_stream: AudioStream        # set before add_child: a recording to play slices of (null = the default unfold recording)
 var sound_db := -6.0
 var _snd_t := -1.0                   # seconds into the current slice (-1 = silent)
 var _snd_len := 0.0                  # how long this slice plays (it fades out over its last 40 %)
@@ -190,7 +190,8 @@ func setup(p_size: Vector2i, c_size := Vector2i.ZERO) -> void:
 	_view.texture = _vp.get_texture()
 	add_child(_view)
 	_sound = AudioStreamPlayer.new()
-	_sound.stream = sound_stream if sound_stream else rustle_sound()
+	if not sound_stream: sound_stream = load("res://assets/audio/paper_unfold.mp3")   # the user's recording; no synthesised stand-in
+	_sound.stream = sound_stream
 	_sound.bus = "SFX" if AudioServer.get_bus_index("SFX") >= 0 else "Master"
 	_sound.volume_db = sound_db
 	add_child(_sound)
@@ -271,15 +272,13 @@ func close(now := false) -> void:
 
 
 ## a slice of the sound: a recording plays from a random spot (no two unfolds sound the same), faded out
-## by the end; the synthesised rustle plays from its start
+## by the end
 func _play_slice(pitch: float, secs: float) -> void:
 	_sound.pitch_scale = pitch
 	var from := 0.0
 	var total := _sound.stream.get_length()
-	if sound_stream and total > secs * pitch + 0.2:
+	if total > secs * pitch + 0.2:
 		from = randf() * (total - secs * pitch - 0.1)
-	elif not sound_stream and secs < 1.0:
-		from = 0.3
 	_snd_len = secs
 	_snd_t = 0.0
 	_sound.volume_db = sound_db
@@ -735,29 +734,3 @@ void fragment() {
 }
 """
 	return s
-
-
-## paper being unfolded: filtered noise in crackly bursts (rendered once, shared)
-static var _rustle: AudioStreamWAV
-static func rustle_sound() -> AudioStreamWAV:
-	if _rustle: return _rustle
-	var rate := 22050
-	var n := int(rate * 1.1)
-	var data := PackedByteArray(); data.resize(n * 2)
-	var rng := RandomNumberGenerator.new(); rng.seed = 77
-	var lp := 0.0; var prev := 0.0
-	var burst := 0.0
-	for i in n:
-		var t := float(i) / rate
-		if rng.randf() < 0.0035: burst = rng.randf_range(0.4, 1.0)   # a crinkle
-		burst *= 0.9975
-		var env := minf(1.0, t / 0.05) * clampf((1.1 - t) / 0.4, 0.0, 1.0)
-		lp += (rng.randf_range(-1.0, 1.0) - lp) * 0.55
-		var hp := lp - prev; prev = lp
-		data.encode_s16(i * 2, clampi(int(hp * (0.12 + burst) * env * 0.7 * 32767.0), -32768, 32767))
-	_rustle = AudioStreamWAV.new()
-	_rustle.format = AudioStreamWAV.FORMAT_16_BITS
-	_rustle.mix_rate = rate
-	_rustle.stereo = false
-	_rustle.data = data
-	return _rustle
