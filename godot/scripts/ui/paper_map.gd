@@ -48,7 +48,7 @@ func _ready() -> void:
 	shots = OS.get_environment("BMX_MAP_SHOTS")
 	sound_stream = load("res://assets/audio/map_unfold_gravel.ogg")   # the user's pick: gravel crunch for the unfold
 	sound_db = -4.0
-	tempo = 0.4                       # unfolds at an easy pace (~1.6 s), still springy
+	tempo = 0.36                      # unfolds at an easy pace (~2 s), still springy
 	handheld = true                   # right stick tilts it, triggers zoom the print, left stick travels
 	page_alpha = true                 # the frame is printed over the world
 	setup(Vector2i(IW, IH), Vector2i(CW, CH))
@@ -78,7 +78,7 @@ func show_map() -> void:
 	view_c = here; _shown_c = here
 	var t0 := Time.get_ticks_usec()
 	if _world_seed != GameState.seed or not _view_inside(here, 1.0) or here.distance_to(_world_o + Vector2(C_W, C_H) * 0.5) > 60.0:
-		await _print_world(here)
+		await _print_world(here, false)   # the ride is frozen: all at once
 	_frame.setup_from(game, 1.0)
 	await bake()
 	_frame_zoom = 1.0
@@ -89,17 +89,61 @@ func show_map() -> void:
 	_update_rect()
 
 
-func _print_world(centre: Vector2) -> void:
+var _task := -1
+## the world print. The terrain is sampled on the main thread with the game's own field (C# = fast), a few ms per
+## frame while you travel (all at once when the map opens: the ride is frozen anyway); the land image, contours
+## and mipmaps are built on a worker thread from that plain data. (C# terrain forks on a worker were left to C#'s
+## garbage collector and crashed the quit.)
+func _print_world(centre: Vector2, sliced := true) -> void:
 	var t0 := Time.get_ticks_usec()
-	_world_o = centre - Vector2(C_W, C_H) * 0.5
-	_world.build(game, _world_o)
+	var o := centre - Vector2(C_W, C_H) * 0.5
+	var f = game.terrain.query_field()
+	var job := PrintJob.new()
+	job.o = o
+	job.nx = int(C_W / GRID) + 1; job.nz = int(C_H / GRID) + 1
+	job.cx = (job.nx + 1) / 2; job.cz = (job.nz + 1) / 2
+	job.h.resize(job.nx * job.nz)
+	job.c.resize(job.cx * job.cz)
+	var budget := 4000 if sliced else 1000000000
+	var s0 := Time.get_ticks_usec()
+	for j in job.nz:
+		var z := o.y + j * GRID
+		for i in job.nx:
+			job.h[j * job.nx + i] = f.ground(o.x + i * GRID, z)
+		if Time.get_ticks_usec() - s0 > budget:
+			await get_tree().process_frame
+			if not is_inside_tree(): return
+			s0 = Time.get_ticks_usec()
+	for j in job.cz:
+		for i in job.cx:
+			var hc := job.h[mini(j * 2, job.nz - 1) * job.nx + mini(i * 2, job.nx - 1)]
+			job.c[j * job.cx + i] = Color(0, 0, 0, 0) if hc < Terrain.WATER - 0.05 else f.color(o.x + i * 2 * GRID, o.y + j * 2 * GRID, hc, 1.0)
+		if Time.get_ticks_usec() - s0 > budget:
+			await get_tree().process_frame
+			if not is_inside_tree(): return
+			s0 = Time.get_ticks_usec()
+	_task = WorkerThreadPool.add_task(job.run)
+	while not WorkerThreadPool.is_task_completed(_task):
+		await get_tree().process_frame
+	WorkerThreadPool.wait_for_task_completion(_task)
+	_task = -1
+	if not is_inside_tree(): return
+	_world.finish(game, o, job.out)
 	_world_vp.render_target_update_mode = SubViewport.UPDATE_ONCE
 	await RenderingServer.frame_post_draw
-	var img := _world_vp.get_texture().get_image()
-	img.convert(Image.FORMAT_RGB8)
-	img.generate_mipmaps()
+	var mj := MipJob.new()
+	mj.img = _world_vp.get_texture().get_image()
+	_task = WorkerThreadPool.add_task(mj.run)   # the slow part, off the main thread
+	while not WorkerThreadPool.is_task_completed(_task):
+		await get_tree().process_frame
+	WorkerThreadPool.wait_for_task_completion(_task)
+	_task = -1
+	if not is_inside_tree(): return
+	var img: Image = mj.img
+	_world_o = o                     # the new print and where it lies change together: no jump
 	set_content(ImageTexture.create_from_image(img), Rect2(0, 0, 1, 1))
 	_world_seed = GameState.seed
+	_update_rect()
 	print("PAPERMAP world printed in %.0f ms" % ((Time.get_ticks_usec() - t0) / 1000.0))
 
 
@@ -118,8 +162,14 @@ func _scroll(amount: Vector2, drag_m: bool) -> void:
 	view_c += Vector2(amount.x, -amount.y)   # up the sheet = north = -z
 
 
+var _probe_us := 0
+var _probe_max := 0.0
 func _process(dt: float) -> void:
 	super._process(dt)
+	if test_scroll != Vector2.ZERO and state != 0:   # tests: the worst frame while travelling
+		var now := Time.get_ticks_usec()
+		if _probe_us > 0: _probe_max = maxf(_probe_max, (now - _probe_us) / 1000.0)
+		_probe_us = now
 	if state == 0: return
 	_update_rect()
 	# the scale bar / title follow the zoom: reprint the frame when it has settled somewhere new
@@ -137,25 +187,51 @@ func _rebake_frame() -> void:
 	_frame_busy = false
 
 
-## where the world print sits on the sheet; scrolled off it -> print the world again around the view
+## where the world print sits on the sheet. The view never runs past the print (no catching up = no jump);
+## coming within PREFETCH of its edge prints the next one around the view early, and they swap seamlessly.
+const PREFETCH := 200.0
 func _update_rect() -> void:
 	if _world_o.x == INF: return
 	var half := Vector2(SHEET_W_M, SHEET_H_M) / _zoom * 0.5
 	var lo := _world_o + half
 	var hi := _world_o + Vector2(C_W, C_H) - half
-	_shown_c = Vector2(clampf(view_c.x, lo.x, maxf(lo.x, hi.x)), clampf(view_c.y, lo.y, maxf(lo.y, hi.y)))
-	if lo.x > hi.x: _shown_c.x = _world_o.x + C_W * 0.5
-	if lo.y > hi.y: _shown_c.y = _world_o.y + C_H * 0.5
-	if _shown_c.distance_to(view_c) > 1.0 and not _printing and state != 3:   # the view keeps the wish; print around it
+	view_c = Vector2(clampf(view_c.x, lo.x, maxf(lo.x, hi.x)), clampf(view_c.y, lo.y, maxf(lo.y, hi.y)))
+	if lo.x > hi.x: view_c.x = _world_o.x + C_W * 0.5
+	if lo.y > hi.y: view_c.y = _world_o.y + C_H * 0.5
+	_shown_c = view_c
+	var room := minf(minf(view_c.x - lo.x, hi.x - view_c.x), minf(view_c.y - lo.y, hi.y - view_c.y))
+	var centred := view_c.distance_to(_world_o + Vector2(C_W, C_H) * 0.5) < 20.0
+	if room < PREFETCH and not centred and not _printing and state != 3:
 		_reprint_world(view_c)
 	var tl := _shown_c - half
 	set_content_rect(Rect2((tl - _world_o) / Vector2(C_W, C_H), half * 2.0 / Vector2(C_W, C_H)))
+
+
+func _exit_tree() -> void:
+	if _probe_max > 0.0: print("PAPERMAP worst frame while travelling %.0f ms" % _probe_max)
+	if _task >= 0: WorkerThreadPool.wait_for_task_completion(_task)   # never leave a task running at exit
 
 
 func _reprint_world(c: Vector2) -> void:
 	_printing = true
 	await _print_world(c)
 	_printing = false
+
+
+class PrintJob extends RefCounted:
+	## plain data only (no engine objects): heights every GRID m, ground colours (linear) every 2 GRID m
+	var o := Vector2.ZERO
+	var nx := 0; var nz := 0; var cx := 0; var cz := 0
+	var h := PackedFloat32Array()
+	var c := PackedColorArray()
+	var out := {}
+	func run() -> void: out = World.make(self)
+
+class MipJob extends RefCounted:
+	var img: Image
+	func run() -> void:
+		img.convert(Image.FORMAT_RGB8)
+		img.generate_mipmaps()
 
 
 class Ink extends Control:
@@ -337,29 +413,21 @@ class World extends Ink:
 	func px(x: float, z: float) -> Vector2:
 		return Vector2((x - origin.x) * C_IW / C_W, (z - origin.y) * C_IH / C_H)
 
-	func build(game, o: Vector2) -> void:
-		var terrain = game.terrain
-		var st = game.phys
-		origin = o
-		var nx := int(C_W / GRID) + 1
-		var nz := int(C_H / GRID) + 1
-		var h := PackedFloat32Array(); h.resize(nx * nz)
-		for j in nz:
-			var z := origin.y + j * GRID
-			for i in nx:
-				h[j * nx + i] = terrain.height(origin.x + i * GRID, z)
+	## worker thread: the land image + contours from the sampled heights / colours (PrintJob)
+	static func make(job) -> Dictionary:
+		var nx: int = job.nx; var nz: int = job.nz
+		var h: PackedFloat32Array = job.h
 		# land: the real ground colour (every 10 m, smoothed), washed out towards the paper, times a hill shade
 		# from the north-west (every 5 m); water flat blue
 		var paper := Color(0.97, 0.96, 0.9)
 		var light := Vector3(-0.55, 0.62, -0.55).normalized()
 		var wl := Terrain.WATER
-		var cx := (nx + 1) / 2; var cz := (nz + 1) / 2
+		var cx: int = job.cx; var cz: int = job.cz
 		var cimg := Image.create(cx, cz, false, Image.FORMAT_RGB8)
 		for j in cz:
 			for i in cx:
-				var hc := h[mini(j * 2, nz - 1) * nx + mini(i * 2, nx - 1)]
-				var g: Color = WATER.lerp(paper, 0.15) if hc < wl - 0.05 else terrain.ground_color(origin.x + i * 2 * GRID, origin.y + j * 2 * GRID).lerp(paper, 0.5)
-				cimg.set_pixel(i, j, g)
+				var lc: Color = job.c[j * cx + i]
+				cimg.set_pixel(i, j, WATER.lerp(paper, 0.15) if lc.a == 0.0 else lc.linear_to_srgb().lerp(paper, 0.5))
 		cimg.resize(nx, nz, Image.INTERPOLATE_BILINEAR)
 		var img := Image.create(nx, nz, false, Image.FORMAT_RGB8)
 		for j in nz:
@@ -373,9 +441,8 @@ class World extends Ink:
 				var sh := clampf(n.dot(light), 0.0, 1.0)
 				var c := cimg.get_pixel(i, j)
 				img.set_pixel(i, j, (Color(c.r, c.g, c.b) * (0.62 + 0.5 * sh)).clamp())
-		land = ImageTexture.create_from_image(img)
 		# contours + the shore (marching squares)
-		minor = PackedVector2Array(); major = PackedVector2Array(); water_lines = PackedVector2Array()
+		var mi := PackedVector2Array(); var ma := PackedVector2Array(); var wa := PackedVector2Array()
 		var sx := float(C_IW) / (nx - 1)
 		var sz := float(C_IH) / (nz - 1)
 		for j in nz - 1:
@@ -396,11 +463,19 @@ class World extends Ink:
 					if (h3 < L) != (h2 < L): pts.append(Vector2(x + sx * (L - h3) / (h2 - h3), z + sz))
 					if (h0 < L) != (h3 < L): pts.append(Vector2(x, z + sz * (L - h0) / (h3 - h0)))
 					if pts.size() < 2: continue
-					if L == wl - 0.05: water_lines.append_array(pts)   # (packed arrays copy on assignment:
-					elif L < wl: continue                               #  append to the members themselves)
-					elif is_equal_approx(fposmod(L, CI * 5), 0.0): major.append_array(pts)
-					else: minor.append_array(pts)
-		# the trail, the jumps on it, the bit you rode, you
+					if L == wl - 0.05: wa.append_array(pts)   # (packed arrays copy on assignment: append to each)
+					elif L < wl: continue
+					elif is_equal_approx(fposmod(L, CI * 5), 0.0): ma.append_array(pts)
+					else: mi.append_array(pts)
+		return {"land": img, "minor": mi, "major": ma, "water": wa}
+
+	## main thread: the trail, the jumps on it, the bit you rode, you; then draw
+	func finish(game, o: Vector2, d: Dictionary) -> void:
+		var terrain = game.terrain
+		var st = game.phys
+		origin = o
+		land = ImageTexture.create_from_image(d.land)
+		minor = d.minor; major = d.major; water_lines = d.water
 		trail = []
 		jumps = []
 		var tc = terrain.field.course if terrain.field else null
@@ -433,6 +508,7 @@ class World extends Ink:
 		queue_redraw()
 
 	func _draw() -> void:
+		if land == null: return   # not printed yet
 		draw_rect(Rect2(0, 0, C_IW, C_IH), Color.WHITE)
 		draw_texture_rect(land, Rect2(0, 0, C_IW, C_IH), false)
 		if minor.size() > 1: draw_multiline(minor, Color(CONTOUR, 0.5), 1.4, true)

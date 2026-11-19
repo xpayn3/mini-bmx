@@ -54,7 +54,8 @@ W/↑ pedal · S/↓ brake · A/D steer · **Space** hop/pump (hold to charge; *
 **S/W pressed fresh as you leave a lip: throw a back/front flip** · **W/S in the air: tilt the bike nose down/up (limited, body shift)** · **A/D in the air: lean the bike left/right (no spins)** · **brake + A/D when slow: pivot (pirouette)** · Shift sprint (stamina) · Q/E shift gears · F bail · Backspace back to
 start · R new world · B next bike · C next camera · Z/X rotate camera · +/- zoom · mouse drag orbit ·
 H records · **M trail map** (pad: Share) · **P / K / L** the tuning card on its Ride / Rider / Look tab · **O photo mode** (free camera, see section 5) · F1 hide HUD ·
-F12 screenshot · Esc pause. Gamepad (Xbox): triggers pedal/brake, left stick steer, X hop (jump), A sprint, bumpers gears, Y camera, D-pad left / right rotate the camera,
+F12 screenshot · **F11 / the small button bottom right: fullscreen on / off** (`ui/fullscreen_button.gd`, on every screen,
+saves Settings › window mode; in the garage it sits above Save / Save & ride) · Esc pause. Gamepad (Xbox): triggers pedal/brake, left stick steer, X hop (jump), A sprint, bumpers gears, Y camera, D-pad left / right rotate the camera,
 **right stick = the rider's body, all the time**: up / down shifts the weight forward over the bars / back (pulled well back
 rolling = a **manual**, yanked fresh at a lip = a flip throw, in the air = nose down / up), left / right throws the bike over under
 the body (leaning alone turns, leaning with the steer turns harder + grips more, a quick **flick** whips the bike round; in the
@@ -387,7 +388,10 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 
 ### Paper: trail map (M) + pause leaflet (Esc) — and future paper menus
 - **`PaperSheet`** (`scripts/ui/paper_sheet.gd`, a CanvasLayer, layer 7): a folded sheet that comes up in front of the
-  camera and unfolds like a real map (half fold first, then the accordion, outer panel first). Its own small 3D world
+  camera and unfolds like a real map: up it comes cover first, the accordion is pulled open one panel after another
+  from the outside, then (rows = 2) the bottom half - folded up over the map face in every column - flips down once
+  every panel has come to rest; the creases relax into their few degrees only after that (bent creases opened
+  slits while it swung). Folding away runs it backwards. The held point follows the paper's middle smoothly. Its own small 3D world
   (SubViewport: own light + shadows in the folds, no fog / DOF / time of day) drawn over the game, which is blurred +
   darkened behind it. Every move is an underdamped **spring** (`Spring`: lift, half fold, one per crease) fired on a
   timeline (`_drive`): quick, overshoots ~10 % and wobbles to rest; closing is firmer and bounces shut. Real time
@@ -406,9 +410,13 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   Controls (`handheld`, hint at the bottom): **left stick / WASD / drag = travel** (the world scrolls under the paper,
   `TRAVEL` m/s), **RT / LT / Q / E / wheel = zoom the print** 0.5–2.5× (the paper always stays fully in view; the frame
   is reprinted when the zoom settles so scale bar + "1 : n" follow), right stick / numpad = tilt the sheet ±0.3 rad.
-  Scroll / zoom off the world print and it's printed again around the view (~0.3 s, a short stop). First print on
-  opening ~0.6 s; reused if you're within 60 m. Ride frozen + HUD hidden while it's up; M / Esc / bail fold it away.
-  Unfolds at `tempo` 0.4 with the user's gravel-crunch recording. The screen fades (`main.fade`) run on real time, or
+  The view never runs past the world print; within `PREFETCH` (200 m) of its edge the next one is printed around
+  the view in the background and swapped in with no jump: the terrain is sampled on the main thread with the
+  game's own field, ≤ 4 ms a frame; land image, contours and mipmaps are built on a WorkerThreadPool task from that
+  plain data (waited for in `_exit_tree`); ~40 ms hitch for the GPU read-back + upload. **Don't hand C# terrain forks
+  to a worker from GDScript here**: their engine objects were finalized by C#'s GC after shutdown and crashed the quit. First print on opening ~0.6 s; reused if you're within 60 m. `BMX_MAP_SCROLL` prints the worst
+  frame while travelling. Ride frozen + HUD hidden while it's up; M / Esc / bail fold it away.
+  Unfolds at `tempo` 0.36 (~2.5 s) with the user's gravel-crunch recording. The screen fades (`main.fade`) run on real time, or
   a map opened during one froze it as a haze.
 - **Pause leaflet** (`PausePamphlet`, `scripts/ui/pause_pamphlet.gd`, built in `main._pause`): a DL tri-fold (3 × 99 ×
   210 mm, Z-folded, stays folded). Cover photo = the ride's last frame grabbed at the moment of pausing (centre crop,
@@ -432,14 +440,16 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - **Screen layout** (`hud.gd`): top left FPS / ride info / biome name / `StylePop` (STYLE total, trick + points: points
   roll up, the banked "+N" flies into the total, which counts up gold with sparks + a ring, combo "xN" punches in);
   top centre the jump card (`AirCard`, same dark LCD look as the alert); top right the **life bar** (red, heart) over
-  stamina; bottom centre the trail alert banner (`AlertBanner`, big) under the hop bar.
+  stamina. The trail alert fills the bike computer's lower screen under the speed (`GaugeView.draw_alert`: icon,
+  distance big in yellow, name below); `BMX_ALERT_DEMO=HR|SR|J|K` forces one for screenshots.
 - **Life** (`hud.life`): a crash takes 12–95 % by body speed (`on_crash(speed)`), heals 1.2 %/s from 4 s after it.
   At zero the get-up prompt says KNOCKED OUT / hold hop 1.2 s to **revive** (`REVIVE_HOLD`, back with 50 %) or
   Backspace back to start (full life, `on_respawn`). `BikePhysics.getup_need` is the hold time. Tests: `BMX_LIFE=0.1`
   (start life), `BMX_LIFE_PROBE=1` (`LIFE` lines).
 - Piezo sounds (`ui/garmin_beep.gd`, rendered once into AudioStreamWAVs): a rising power-on chime 0.35 s after the
   HUD shows (ride start), a short key beep on the ◀ ▶ bezel buttons.
-- Small touches: "acquiring satellites" for the first 3 s of a ride, battery icon (drains 60 %/h of riding),
+- Small touches: "acquiring satellites" for the first 3 s of a ride, battery icon (full to empty in 30 min of riding, `BAT_LIFE`; blinks under 10 %). Back to start / new world (`hud.on_respawn`) restarts the computer: ride timer,
+  trip (distance, avg, max), battery, GPS fix and power-on chime; test `BMX_RESPAWN=secs` presses Backspace then,
   backlight for 3 s on a button press or a new alert.
 
 ### Settings & tuning

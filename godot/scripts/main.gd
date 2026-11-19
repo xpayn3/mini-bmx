@@ -17,6 +17,7 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	ui.layer = 20
 	add_child(ui)
+	add_child(load("res://scripts/ui/fullscreen_button.gd").new())   # bottom-right fullscreen toggle (F11)
 	fade = ColorRect.new()
 	fade.color = Color(0.66, 0.84, 0.92)
 	fade.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -579,6 +580,10 @@ func _autotest(seconds: float) -> void:
 		if pedal and not straight and int(el * 2) % 7 == 0: Input.action_press("hop")
 		elif OS.get_environment("BMX_AIRPULL") != "" and game.phys.air and game.phys.air_time > 0.1: Input.action_press("hop")   # tests: tuck in the air
 		else: Input.action_release("hop")
+		if OS.get_environment("BMX_RESPAWN") != "" and el > float(OS.get_environment("BMX_RESPAWN")) and not _probe.has("respawned"):   # tests: Backspace here
+			_probe["respawned"] = true
+			print("AUTOTEST respawn: ride_t before=%.1f" % game.hud.ride_t)
+			game.respawn(false)
 		if OS.get_environment("BMX_BAIL") != "" and el > float(OS.get_environment("BMX_BAIL")) and not _probe.has("bailed"):   # tests: bail (crash) here
 			_probe["bailed"] = true
 			game.phys.crash_pending = "BAIL!"
