@@ -31,7 +31,7 @@ const DEFAULTS := {
 	"rim_depth_mm": 25.0,
 	"rim_width_mm": 36.5,
 	"rim_color": Color(0.17, 0.17, 0.18),
-	"rim_finish": "matte",     # matte | gloss | chrome
+	"rim_finish": "matte",     # matte | gloss | chrome (alloy); matte | gloss | metallic | candy (carbon)
 	"rim_profile": "hooked",   # hooked | hookless | box | vee | round (see RIM_PROFILES)
 	"rim_material": "alloy",   # alloy | carbon
 	"pattern": "",             # tread pattern (PATTERNS); "" -> the tread's default
@@ -367,11 +367,34 @@ static func carbon_material(name: String, gloss: bool, uv_scale: Vector3, tint :
 	return m
 
 
+## The carbon weave in any colour and finish. The weave texture's mean is ~0.1, so the colour is lifted by
+## 1 / 0.145 to show at full strength through the tows (a near-black colour stays raw carbon):
+##   matte    dull coloured carbon         gloss    clear-coated
+##   metallic metal-flake / pearl: the weave glints through it       candy   deep tinted lacquer over the weave
+static func carbon_rim_material(col: Color, finish: String) -> StandardMaterial3D:
+	var k := 6.9
+	var m := carbon_material("rim", finish != "matte", Vector3(150, 8, 1), Color(col.r * k, col.g * k, col.b * k))
+	match finish:
+		"metallic":
+			m.metallic = 0.88
+			m.roughness = 0.3
+			m.clearcoat_enabled = true
+			m.clearcoat = 1.0
+			m.clearcoat_roughness = 0.06
+		"candy":
+			m.albedo_color = Color(col.r * k * 0.8, col.g * k * 0.8, col.b * k * 0.8)
+			m.metallic = 0.5
+			m.roughness = 0.2
+			m.clearcoat_enabled = true
+			m.clearcoat = 1.0
+			m.clearcoat_roughness = 0.02
+	return m
+
+
 static func _rim_mat(s: Dictionary) -> StandardMaterial3D:
 	var col: Color = s["rim_color"]
 	if s["rim_material"] == "carbon":
-		# rim colour tints the weave a little (raw carbon stays near black)
-		return carbon_material("rim", s["rim_finish"] != "matte", Vector3(150, 8, 1), Color.WHITE.lerp(Color(col.r * 3.0, col.g * 3.0, col.b * 3.0), 0.25))
+		return carbon_rim_material(col, String(s["rim_finish"]))
 	match String(s["rim_finish"]):
 		"chrome":
 			return _mat("rim", col, 1.0, 0.12)
