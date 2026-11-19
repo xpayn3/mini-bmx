@@ -10,12 +10,15 @@ extends Node3D
 
 const MUD_SHADER := preload("res://shaders/grime_mud.gdshader")
 const WET_SHADER := preload("res://shaders/grime_wet.gdshader")
+const BLOOD_SHADER := preload("res://shaders/grime_blood.gdshader")
 ## how fast mud builds up (1 = the web version: fully caked after ~40 s of fast dirt riding; 0.25 = ~2.5 min)
 const MUD_RATE := 0.25
 
 var roots: Array[Node] = []       # the bike rig + the rider (the rider leaves the rig in a crash)
 var mud := 0.0
 var wet := 0.0
+var blood := 0.0                  # blood stains on the rider + bike: builds with every crash, stays until a death + revive
+var _blood_on := false
 var enabled := true
 var mud_col := Color(0.35, 0.235, 0.133)
 var _mats := {}                   # base material -> mud pass material (by bias)
@@ -29,6 +32,7 @@ var warm_frames := 0              # > 0: passes attached (but invisible) so thei
 
 func _init() -> void:
 	name = "Grime"
+	if OS.get_environment("BMX_BLOOD_COAT") != "": blood = float(OS.get_environment("BMX_BLOOD_COAT"))   # tests: start bloody
 	_wet_mat = ShaderMaterial.new()
 	_wet_mat.shader = WET_SHADER
 	_wet_mat.render_priority = 1
@@ -84,6 +88,10 @@ func _pin() -> void:
 func clean() -> void:
 	mud = 0.0; wet = 0.0
 
+## a crash leaves blood on the rider and the bike (more for a harder one); only a death + revive washes it off
+func add_blood(amount: float) -> void:
+	blood = minf(1.0, blood + amount)
+
 ## how readily a part collects mud (tyres soak it up, the helmet hardly any)
 static func _bias_for(mat: Material, mi: Node) -> float:
 	var n := ("%s %s %s" % [mat.resource_name, mi.name, mi.get_parent().name if mi.get_parent() else ""]).to_lower()
@@ -115,6 +123,11 @@ func _mud_mat(bias: float, tyre := false) -> ShaderMaterial:
 		m.shader = MUD_SHADER
 		m.set_shader_parameter("bias", bias)
 		m.set_shader_parameter("tyre", tyre)
+		var bm := ShaderMaterial.new()   # the blood pass that follows this mud pass
+		bm.shader = BLOOD_SHADER
+		bm.set_shader_parameter("bias", clampf(bias, 0.4, 1.0))
+		bm.set_shader_parameter("tyre", tyre)
+		m.set_meta("blood", bm)
 		_mud_by_bias[key] = m
 	return _mud_by_bias[key]
 
@@ -179,18 +192,24 @@ func update(dt: float, bike_root: Node3D) -> void:
 		_pin()   # once the rider is posed on the bike; new parts (helmet, kit) get pinned as they appear
 	var m := mud if enabled else 0.0
 	var w := wet if enabled else 0.0
+	var b := blood if enabled else 0.0
 	var state := 0
-	if m > 0.002 or w > 0.01: state = 1
+	if m > 0.002 or w > 0.01 or b > 0.002: state = 1
 	if w > 0.01 or warm_frames > 0: state = 2
+	var bon := b > 0.002 or warm_frames > 0
 	if warm_frames > 0:
 		warm_frames -= 1
 		drips.emitting = true
-	if state != _attached:
+	if state != _attached or bon != _blood_on:
 		_attached = state
-		for b in _mud_by_bias.values():
-			b.next_pass = _wet_mat if state == 2 else null
+		_blood_on = bon
+		var tail: Material = _wet_mat if state == 2 else null
+		for mm in _mud_by_bias.values():   # base -> mud -> blood -> wet
+			var bm: Material = mm.get_meta("blood")
+			bm.next_pass = tail
+			mm.next_pass = bm if bon else tail
 		for mat in _mats: _set_pass(mat, state)
-	RenderingServer.global_shader_parameter_set("grime", Vector4(m, w, _t, 0))
+	RenderingServer.global_shader_parameter_set("grime", Vector4(m, w, _t, b))
 	RenderingServer.global_shader_parameter_set("mud_col", mud_col)
 	RenderingServer.global_shader_parameter_set("grime_root", Projection(bike_root.global_transform.affine_inverse()))
 	# drips off the bike while it is still wet
