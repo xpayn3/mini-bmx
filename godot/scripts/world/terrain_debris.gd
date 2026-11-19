@@ -4,6 +4,10 @@ extends Node3D
 ## Godot physics bodies on layer 4 that only collide with the chunk ground (layer 2). Once a piece has
 ## come to rest it becomes a plain mesh lying where it fell (the broken fence stays broken), freed
 ## with its chunk (a reloaded chunk builds the fence whole again) or on respawn / new world.
+## Bulletproof against vanishing: thin pieces used to tunnel through the chunk collision and fall for
+## ever (then got "laid to rest" 100 m underground). Now every physics tick each piece is held above the
+## real terrain height (its rotated box's lowest corner), it never rests below the ground, and when
+## too many fly at once the oldest is laid down where it is instead of deleted.
 
 const LAYER := 1 << 3
 const MASK := 1 << 1
@@ -12,13 +16,22 @@ const SETTLE := 1.2       # pieces can come to rest after this long
 const MAX := 160          # moving pieces
 const MAX_WRECK := 2500   # pieces lying on the ground
 
-var _items: Array = []   # [{body, t, chunk}]
+var _items: Array = []   # [{body, t, chunk, half}]
 var _wrecks: Array = []  # [{node, chunk}] pieces at rest (no physics)
 var _mats := {}
 var _tag := Vector2i(1 << 30, 0)   # chunk of the thing being smashed (set by smash_*)
 
 
+var _probe_t := 0.0
 func _process(delta: float) -> void:
+	if OS.get_environment("BMX_DEBRIS_PROBE") != "":
+		_probe_t += delta
+		if _probe_t > 0.25 and (_items.size() > 0 or _wrecks.size() > 0):
+			_probe_t = 0.0
+			var lo := 1e9
+			for it in _items:
+				if is_instance_valid(it["body"]): lo = minf(lo, it["body"].global_position.y)
+			print("DEBRIS moving=%d resting=%d lowest_y=%.1f" % [_items.size(), _wrecks.size(), lo])
 	var keep := []
 	for it in _items:
 		it["t"] += delta
@@ -33,14 +46,44 @@ func _process(delta: float) -> void:
 	_items = keep
 
 
+func _ground(x: float, z: float) -> float:
+	var t = get_parent()
+	return t.height(x, z) if t != null and t.has_method("height") else -1e9
+
+## how far the rotated box reaches below its centre
+static func _reach_down(basis: Basis, half: Vector3) -> float:
+	var b := basis.orthonormalized()
+	return absf(b.x.y) * half.x + absf(b.y.y) * half.y + absf(b.z.y) * half.z
+
+## the ground guard: no piece ever ends up inside / under the terrain
+func _physics_process(_delta: float) -> void:
+	for it in _items:
+		var b: RigidBody3D = it["body"]
+		if not is_instance_valid(b): continue
+		var p := b.global_position
+		var low := p.y - _reach_down(b.global_basis, it["half"])
+		var g := _ground(p.x, p.z)
+		if low < g - 0.005:
+			b.global_position = Vector3(p.x, p.y + (g - low), p.z)
+			var v := b.linear_velocity
+			if v.y < 0.0: v.y = -v.y * 0.2
+			v.x *= 0.85; v.z *= 0.85
+			b.linear_velocity = v
+			b.angular_velocity *= 0.9
+
 ## a piece at rest: keep its mesh where it lies, drop the physics body
 func _lay_down(it: Dictionary) -> void:
 	var b: RigidBody3D = it["body"]
 	var mi: MeshInstance3D = null
 	for ch in b.get_children():
 		if ch is MeshInstance3D: mi = ch
-	if mi != null and b.global_position.y > -500.0:
+	if OS.get_environment("BMX_DEBRIS_PROBE") != "": print("DEBRIS lay_down y=%.2f t=%.1f sleeping=%s" % [b.global_position.y, it["t"], b.sleeping])
+	if mi != null:
 		var xf := mi.global_transform
+		# never left inside / under the ground
+		var g := _ground(xf.origin.x, xf.origin.z)
+		var low := b.global_position.y - _reach_down(b.global_basis, it["half"])
+		if low < g: xf.origin.y += g - low
 		b.remove_child(mi)
 		add_child(mi)
 		mi.global_transform = xf
@@ -93,10 +136,10 @@ func _material(c: Color) -> StandardMaterial3D:
 
 func spawn(mesh: Mesh, mesh_scale: Vector3, col: Color, xf: Transform3D, size: Vector3, v: Vector3, w: Vector3, mass: float = 1.0,
 		damp: float = 0.05, grav: float = 1.0) -> RigidBody3D:
-	while _items.size() >= MAX:
+	while _items.size() >= MAX:   # too many flying: the oldest lies down where it is (never just vanishes)
 		var old = _items.pop_front()
 		if is_instance_valid(old["body"]):
-			old["body"].queue_free()
+			_lay_down(old)
 	var b := RigidBody3D.new()
 	b.collision_layer = LAYER
 	b.collision_mask = MASK
@@ -104,7 +147,7 @@ func spawn(mesh: Mesh, mesh_scale: Vector3, col: Color, xf: Transform3D, size: V
 	b.linear_damp = damp
 	b.angular_damp = 0.3
 	b.gravity_scale = grav
-	b.continuous_cd = false
+	b.continuous_cd = true
 	var mi := MeshInstance3D.new()
 	mi.mesh = mesh
 	mi.scale = mesh_scale
@@ -119,7 +162,7 @@ func spawn(mesh: Mesh, mesh_scale: Vector3, col: Color, xf: Transform3D, size: V
 	b.global_transform = xf
 	b.linear_velocity = v
 	b.angular_velocity = w
-	_items.append({"body": b, "t": 0.0, "chunk": _tag})
+	_items.append({"body": b, "t": 0.0, "chunk": _tag, "half": cs.shape.size * 0.5})
 	return b
 
 

@@ -50,7 +50,7 @@ const DEFS := [
 	["Wheels & pump", [
 		["tyreHz", "Bounce frequency", 3.2, 1.2, 7, 0.1, "Hz"],
 		["tyreDamp", "Bounce damping", 0.3, 0.05, 1, 0.01, ""],
-		["travel", "Spring travel", 0.07, 0.02, 0.25, 0.005, "m"],
+		["travel", "Suspension travel", 0.14, 0.02, 0.25, 0.005, "m"],
 		["legPress", "Legs press bike down", 0.5, 0, 2, 0.05, "g"],
 		["riderBalance", "Rider balance (1 wheel)", 0.7, 0, 1.5, 0.05, ""],
 		["noseDive", "Nose-dive crash angle", 0.6, 0.3, 1.2, 0.05, "rad"],
@@ -102,9 +102,9 @@ const DEFS := [
 
 const PATH := "user://tune.cfg"
 ## bump VER when defaults are retuned: saved values of the RETUNED keys are dropped once
-const VER := 4
+const VER := 5
 const RETUNED := ["steerRate", "steerRelease", "steerCurve", "turnSlow", "turnFast", "turnFloor", "steerMax", "slowSteer",
-	"barSpeed", "grip", "slipRecover", "slipMax", "turnWeight", "leanMax", "leanIn", "leanOut", "leanDamp", "bikeLeanMul", "bikeLeanCap", "flipAccel", "flipRate", "airTwist", "landBack"]
+	"barSpeed", "grip", "slipRecover", "slipMax", "turnWeight", "leanMax", "leanIn", "leanOut", "leanDamp", "bikeLeanMul", "bikeLeanCap", "flipAccel", "flipRate", "airTwist", "landBack", "travel"]
 var defaults := {}
 var base := {}       # the player's slider values (before the bike's ride multipliers)
 var ride := {}       # multipliers for the bike being ridden
@@ -140,6 +140,14 @@ func set_ride(mult: Dictionary) -> void:
 
 func set_value(k: String, val: float) -> void:
 	base[k] = val
+	_rebuild()
+	save()
+	TunePresets.value_changed(k, val)
+
+## load a whole preset at once (TunePresets.select)
+func apply_values(d: Dictionary) -> void:
+	for k in d:
+		if defaults.has(k): base[k] = float(d[k])
 	_rebuild()
 	save()
 

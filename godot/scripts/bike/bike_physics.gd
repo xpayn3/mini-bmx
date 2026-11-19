@@ -14,7 +14,7 @@ const G := 9.81
 const CLIMB := 1.2
 const HOP_PUSH := 0.09
 const FLOW_MAX := 5.0
-const GETUP_HOLD := 0.5
+const GETUP_HOLD := 0.25   # seconds holding hop to get up after a crash
 
 var host
 var T: Dictionary          # Tune.v (effective values)
@@ -79,6 +79,7 @@ var joint_rock = null
 var distance := 0.0
 # tests (BMX_CLIP_PROBE): suspension bottom-outs (steps) and how rough the ride is on the ground
 var probe_bottom := 0; var probe_acc2 := 0.0; var probe_n := 0; var probe_vy := NAN
+var probe_g2 := 0.0; var probe_gy := [NAN, NAN]
 # what the HUD reads
 var skid_fx := false; var surf := 0; var hop_bar := 0.0; var hop_bar_show := false
 
@@ -803,10 +804,13 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			if at > 0.15: host.burst(Vector3(x, y + 0.03, z), roundi(10 + minf(30, impact * 6)), surf, 0.8 + minf(1.5, impact * 0.25))
 			if at > 0.45 and impact < 5: flow_up()
 			host.on_landing(at, impact)
-		if not air and not was_air and not is_nan(probe_vy):
+		# ride roughness: the body's vertical acceleration vs the ground's under it (riding, not landing)
+		var gy_now := hrC + (hfC - hrC) * (BB_REAR / L)
+		if not air and not was_air and since_land > 0.6 and not is_nan(probe_vy) and not is_nan(probe_gy[1]):
 			var ay := (vy - probe_vy) / dt
-			probe_acc2 += ay * ay; probe_n += 1
-		probe_vy = vy
+			var ag: float = (gy_now - 2.0 * probe_gy[0] + probe_gy[1]) / (dt * dt)
+			probe_acc2 += ay * ay; probe_g2 += ag * ag; probe_n += 1
+		probe_vy = vy; probe_gy = [gy_now, probe_gy[0]]
 		if air: air_time += dt
 		elif land_jolt > 0 and since_land < 0.6:
 			# the legs bottomed out: a hit bigger than they can take throws the rider down

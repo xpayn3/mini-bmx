@@ -1,11 +1,11 @@
 class_name TuneCard
 extends PanelContainer
 ## One card for every slider (right-hand side): RIDE (how the bike handles), RIDER (pose, movement and
-## body physics) and LOOK (kit colours), each split into category tabs so only one group shows at a
+## body physics), LOOK (kit colours) and SOUND (the freewheel's clicking + presets), each split into category tabs so only one group shows at a
 ## time. P / K / L open it on Ride / Rider / Look; the same key again closes it. Values save as they move.
 
 ## [id, tab label, [[category, [sources...]], ...]]. A source is "T:<Tune.DEFS group>",
-## "P:<RiderPanels.POSE_DEFS group>", "L:<RiderPanels.LOOK_ROWS group>", "L:kits" or "seat".
+## "P:<RiderPanels.POSE_DEFS group>", "L:<RiderPanels.LOOK_ROWS group>", "L:kits", "seat" or "F:freewheel".
 const TABS := [
 	["ride", "Ride", [
 		["Steering", ["T:Steering"]],
@@ -29,9 +29,12 @@ const TABS := [
 		["Helmet", ["L:Helmet", "L:Goggles"]],
 		["Clothes", ["L:Kit", "L:Shoes"]],
 	]],
+	["sound", "Sound", [
+		["Freewheel", ["F:freewheel"]],
+	]],
 ]
 
-static var last_cat := {"ride": 0, "rider": 0, "look": 0}   # remembered for the session
+static var last_cat := {"ride": 0, "rider": 0, "look": 0, "sound": 0}   # remembered for the session
 
 var game
 var tab := "ride"
@@ -84,6 +87,7 @@ func _ready() -> void:
 	list = VBoxContainer.new()
 	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(list)
+	visibility_changed.connect(func(): if not visible: FreewheelSound.preview_speed = 0.0)
 	var grp := ButtonGroup.new()
 	for d in TABS:
 		var b := _tab_button(d[1], grp, 14)
@@ -114,6 +118,8 @@ func show_tab(id: String) -> void:
 		"ride": sub.text = "Scaled by the bike · ☆ pins to Quick tune"
 		"rider": sub.text = "%s · saved per bike" % GameState.BIKES[GameState.bike_id].label
 		"look": sub.text = "Helmet, goggles, kit and shoes"
+		"sound": sub.text = "Coast (or Preview) to hear it · presets save as you go"
+	if id != "sound": FreewheelSound.preview_speed = 0.0
 	_fill()
 
 
@@ -132,6 +138,10 @@ func _fill() -> void:
 		sv.custom_minimum_size = Vector2(0, 28); sv.focus_mode = Control.FOCUS_NONE
 		list.add_child(sv)
 	for src: String in cat[1]:
+		if src.begins_with("T:"):
+			_preset_bar(TunePresets, "Ride preset")
+			break
+	for src: String in cat[1]:
 		var kind := src.substr(0, src.find(":")) if ":" in src else src
 		var name := src.substr(src.find(":") + 1)
 		match kind:
@@ -139,6 +149,7 @@ func _fill() -> void:
 			"P": _pose_group(name)
 			"seat": _seat_toggle()
 			"L": _look_group(name)
+			"F": _freewheel_group()
 	scroll.scroll_vertical = 0
 
 
@@ -204,8 +215,8 @@ func _tune_group(group: String) -> void:
 			pin.add_theme_color_override("font_color", UITheme.ACCENT if key in Tune.pins else UITheme.MUTED)
 			pin.pressed.connect(func(): Tune.toggle_pin(key); _fill())
 			var stp: float = row[5]
-			_slider(row[1], row[3], row[4], stp, Tune.base[key], float(Tune.defaults.get(key, Tune.base[key])),
-				func(v): return _fmt_step(v, stp, row[6]), func(v): Tune.set_value(key, v), pin)
+			_slider(row[1], row[3], row[4], stp, Tune.base[key], TunePresets.value_of(key),
+				func(v): return _fmt_step(v, stp, row[6]), func(v): Tune.set_value(key, v); _refresh_mod(TunePresets), pin)
 
 
 # ---------------------------------------------------------------- RIDER pose
@@ -283,6 +294,92 @@ func _apply_look() -> void:
 	RiderPanels.save_look(look)
 
 
+# ---------------------------------------------------------------- presets (shared by Ride and Sound)
+var _preset_mod: Label
+
+## preset picker + Delete (own presets) + "changed" note + Save as. store: TunePresets or FreewheelSound
+## (same static API: names / is_builtin / get_active / builtin_count / select / save_as / delete / modified)
+func _preset_bar(store, title := "Preset") -> void:
+	_header(title)
+	var hb := HBoxContainer.new()
+	hb.add_theme_constant_override("separation", 4)
+	var ob := OptionButton.new()
+	ob.size_flags_horizontal = Control.SIZE_EXPAND_FILL; ob.focus_mode = Control.FOCUS_NONE
+	ob.add_theme_font_size_override("font_size", 13)
+	var names: Array = store.names()
+	var act: String = store.get_active()
+	for i in names.size():
+		var n: String = names[i]
+		if i == store.builtin_count(): ob.add_separator("Yours")
+		ob.add_item(n if store.is_builtin(n) else "★ " + n, i)
+		if n == act: ob.select(ob.get_item_index(i))
+	ob.item_selected.connect(func(idx):
+		var n: String = names[ob.get_item_id(idx)]
+		store.select(n); game.flash(n); _fill())
+	hb.add_child(ob)
+	if not store.is_builtin(act):
+		var del := UITheme.button("Delete", func():
+			store.delete(act); game.flash("Deleted \"%s\"" % act); _fill(), 12)
+		del.custom_minimum_size = Vector2(0, 28); del.focus_mode = Control.FOCUS_NONE
+		del.tooltip_text = "Delete this preset of yours"
+		hb.add_child(del)
+	list.add_child(hb)
+	_preset_mod = UITheme.label("Changed from \"%s\" — Save as to keep it" % act, 12, UITheme.MUTED)
+	_preset_mod.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	list.add_child(_preset_mod)
+	_refresh_mod(store)
+	var sv := HBoxContainer.new()
+	sv.add_theme_constant_override("separation", 4)
+	var le := LineEdit.new()
+	le.placeholder_text = "New preset name"
+	le.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	le.add_theme_font_size_override("font_size", 13)
+	var save := func():
+		var n: String = store.save_as(le.text)
+		game.flash("Saved \"%s\"" % n)
+		_fill.call_deferred()
+	le.text_submitted.connect(func(_t): save.call())
+	sv.add_child(le)
+	var sb := UITheme.button("Save as", save, 12)
+	sb.custom_minimum_size = Vector2(0, 28); sb.focus_mode = Control.FOCUS_NONE
+	sb.tooltip_text = "Save these sliders as your own preset"
+	sv.add_child(sb)
+	list.add_child(sv)
+
+
+func _refresh_mod(store) -> void:
+	if is_instance_valid(_preset_mod):
+		_preset_mod.visible = store.is_builtin(store.get_active()) and store.modified()
+
+
+# ---------------------------------------------------------------- SOUND: freewheel
+func _freewheel_group() -> void:
+	FreewheelSound.ensure_loaded()
+	_preset_bar(FreewheelSound)
+	var pv := CheckButton.new()
+	pv.text = "Preview (spin the wheel while standing)"
+	pv.button_pressed = FreewheelSound.preview_speed > 0.0
+	pv.focus_mode = Control.FOCUS_NONE
+	pv.add_theme_font_size_override("font_size", 13)
+	list.add_child(pv)
+	var pspeed := [FreewheelSound.preview_speed if FreewheelSound.preview_speed > 0.0 else 4.0]
+	pv.toggled.connect(func(on): FreewheelSound.preview_speed = pspeed[0] if on else 0.0)
+	_slider("Preview speed", 0.5, 15.0, 0.5, pspeed[0], 4.0, func(v): return "%.0f km/h" % (v * 3.6),
+		func(v):
+			pspeed[0] = v
+			if FreewheelSound.preview_speed > 0.0: FreewheelSound.preview_speed = v)
+	_header("Freewheel sound")
+	var base := FreewheelSound.preset(FreewheelSound.active)
+	for row in FreewheelSound.PARAMS:
+		var key: String = row[0]
+		var stp: float = row[5]
+		_slider(row[1], row[3], row[4], stp, FreewheelSound.get_value(key), float(base[key]),
+			func(v): return _fmt_step(v, stp, row[6]),
+			func(v):
+				FreewheelSound.set_value(key, v)
+				_refresh_mod(FreewheelSound))
+
+
 # ---------------------------------------------------------------- reset this category
 func _reset_category() -> void:
 	var cat: Array = _cats()[clampi(last_cat[tab], 0, _cats().size() - 1)]
@@ -293,7 +390,7 @@ func _reset_category() -> void:
 		if src.begins_with("T:"):
 			for g in Tune.DEFS:
 				if g[0] == name:
-					for row in g[1]: Tune.set_value(row[0], float(Tune.defaults[row[0]]))
+					for row in g[1]: Tune.set_value(row[0], TunePresets.value_of(row[0]))   # back to the preset's value
 		elif src.begins_with("P:"):
 			for g in RiderPanels.POSE_DEFS:
 				if g[0] == name:
@@ -303,6 +400,8 @@ func _reset_category() -> void:
 			pose.seatFloor = pose_defaults.get("seatFloor", false); pose_touched = true
 		elif src == "L:kits":
 			look = Rider.DEFAULT_LOOK.duplicate(); look_touched = true
+		elif src == "F:freewheel":
+			FreewheelSound.reset()
 		elif src.begins_with("L:"):
 			for g in RiderPanels.LOOK_ROWS:
 				if g[0] == name:
