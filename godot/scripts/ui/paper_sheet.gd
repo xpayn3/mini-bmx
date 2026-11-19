@@ -342,8 +342,10 @@ func _drive() -> void:
 		var open := (state == 1 or state == 2) and unfold
 		_row.target = 1.0
 		_acc[1].target = 1.0
-		_acc[0].target = 1.0 if open else (0.0 if _acc[2].x < 0.45 else 1.0)
-		_acc[2].target = 1.0 if (open and _acc[0].x > 0.55) else (_acc[2].target if open else 0.0)
+		# strict order so the two flaps never pass through each other: opening = cover flap swings clear first,
+		# only then the inner flap; closing = inner flap lies down fully first, only then the cover flap over it
+		_acc[0].target = 1.0 if open else (0.0 if _acc[2].x < 0.06 and _acc[2].v > -0.5 else 1.0)
+		_acc[2].target = 1.0 if (open and _acc[0].x > 0.92) else (_acc[2].target if open else 0.0)
 		_lift.target = 1.0 if state != 3 else (0.0 if _acc[0].x < 0.1 else 1.0)
 	elif (state == 1 or state == 2) and not unfold:
 		_lift.target = 1.0
@@ -688,9 +690,9 @@ func _pose_letter(lift: float, acc: Array, breathe: float) -> void:
 	# shut, the flaps lie almost flat on each other (a real leaflet is a few tenths of a mm thick)
 	var a0: float = lerpf(PI - 0.005, cup, o0)
 	var a2: float = lerpf(PI - 0.0025, cup, o2)
-	var t0 := Transform3D(Basis(), Vector3(0, 0, 0.0009 * clampf(1.0 - o0, 0.0, 1.0))) * Transform3D(Basis(Vector3.UP, a0), Vector3.ZERO)
+	var t0 := Transform3D(Basis(), Vector3(0, 0, 0.0018 * clampf(1.0 - o0, 0.0, 1.0))) * Transform3D(Basis(Vector3.UP, a0), Vector3.ZERO)
 	var t1 := Transform3D.IDENTITY
-	var t2 := Transform3D(Basis(), Vector3(PW, 0, 0.00045 * clampf(1.0 - o2, 0.0, 1.0))) * Transform3D(Basis(Vector3.UP, -a2), Vector3.ZERO)
+	var t2 := Transform3D(Basis(), Vector3(PW, 0, 0.0009 * clampf(1.0 - o2, 0.0, 1.0))) * Transform3D(Basis(Vector3.UP, -a2), Vector3.ZERO)
 	var xs := [t0, t1, t2]
 	var lo := Vector3(INF, INF, INF); var hi := -lo
 	for c in 3:
