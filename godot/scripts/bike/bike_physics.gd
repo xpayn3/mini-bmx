@@ -460,6 +460,14 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	var nR := 0.0 if air else _or(n_r, G * SH_R) * n_sc
 	var nF := 0.0 if air else _or(n_f, G * (1 - SH_R)) * n_sc
 	var n_tot := nR + nF
+	# rider weight fore / aft moves load between the tyres (total unchanged): leaning back puts it on the rear
+	# (drive + rear sideways grip up, front light and washy), leaning forward does the opposite (rear lets go)
+	var lean_fb := 0.0
+	if not air:
+		lean_fb = clampf(body_in_s + (body_x + hip_shift) * 0.5 / maxf(0.05, T.weightShift), -1.0, 1.0)
+		var dN: float = -lean_fb * float(T.get("leanTraction", 0.45)) * G
+		dN = clampf(dN, -nR + 0.08 * G, nF - 0.08 * G)
+		nR += dN; nF -= dN
 	n_load = n_tot
 	var mu: float = (0.95 if surf == 1 else 0.5 if surf == 3 else 0.45 if surf == 2 else 0.72) * T.grip
 	spin = 0; a_drive = 0
@@ -604,7 +612,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	steer += (steer_target - steer) * (1 - exp(-dt * T.barSpeed))
 	var load_k := clampf(pow(maxf(0.0, n_tot / G), 0.7), 0.25, 1.5)
 	var mu_g := mu * G * load_k
-	var a_grip: float = mu_g * sqrt(maxf(0.05, 1 - pow(a_long / mu_g, 2))) * (0.75 if skid else 1.0) * (1 + T.carveGrip * carve_f + float(T.get("flickGrip", 0.2)) * agree)
+	var a_grip: float = mu_g * sqrt(maxf(0.05, 1 - pow(a_long / mu_g, 2))) * (0.75 if skid else 1.0) * (1 + T.carveGrip * carve_f + float(T.get("flickGrip", 0.2)) * agree) * (0.65 + 0.35 * clampf(nF / maxf(0.1, G * (1.0 - SH_R)), 0.0, 1.2) if not air else 1.0)
 	if not air:
 		var yaw_cmd := 0.0 if front_air else v * tan(steer) / L
 		var gE := G * load_k

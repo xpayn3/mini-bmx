@@ -32,6 +32,7 @@ const DEFS := [
 		["gripPower", "Power slides / wheelspin", 1.0, 0, 3, 0.05, "×"],
 		["gripSquirm", "Tyres squirm in turns", 1.0, 0, 3, 0.05, "×"],
 		["gripPivot", "Rear swings round the front", 0.7, 0, 1, 0.05, ""],
+		["leanTraction", "Lean fore/aft shifts grip", 0.45, 0, 1, 0.05, "×"],
 	]],
 	["Momentum", [
 		["turnWeight", "Turn weight", 0.09, 0, 0.5, 0.01, "s"],
