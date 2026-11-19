@@ -16,6 +16,7 @@ const TABS := [
 		["Body", ["T:Body stick"]],
 		["Suspension", ["T:Wheels & pump"]],
 		["Jumps", ["T:Jumping", "T:Air"]],
+		["Demo", ["T:Demo rider"]],
 	]],
 	["rider", "Rider", [
 		["Body", ["P:Body position", "seat", "P:Pelvis"]],

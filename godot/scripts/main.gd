@@ -35,6 +35,7 @@ func _ready() -> void:
 	# command-line: --ride skips the title screen; --autotest=N rides N seconds unattended then quits
 	for a in OS.get_cmdline_user_args():
 		if a == "--ride": _start_ride()
+		elif a == "--demo": _start_demo()
 		elif a.begins_with("--autotest"): _autotest(float(a.get_slice("=", 1)) if "=" in a else 10.0)
 		elif a == "--garage": _open_garage()
 		elif a == "--rider": _open_garage("rider")
@@ -241,6 +242,7 @@ func _menu_page_main() -> void:
 	var vb := menu_col
 	var ride := _menu_button("RIDE", "Pick a bike and the time of day", _menu_page_setup, true)
 	vb.add_child(ride)
+	vb.add_child(_menu_button("DEMO", "An AI rider rides; tune everything live", _start_demo))
 	vb.add_child(_menu_button("GARAGE", "Paint, wheels, bars, shocks, gears", _open_garage))
 	vb.add_child(_menu_button("RIDER", "Riding position on the rollers, kit", _open_garage.bind("rider")))
 	vb.add_child(UITheme.spacer(Tokens.S2))
@@ -769,6 +771,14 @@ func _start_ride() -> void:
 	game.respawn(false)
 	_set_riding(true)
 
+## DEMO: the same ride, an AI rider at the bars (F2 hands it back); the tuning card opens on the Demo tab
+func _start_demo() -> void:
+	await _start_ride()
+	game.set_demo(true)
+	if game.hud:
+		TuneCard.last_cat["ride"] = 8
+		game.hud._toggle_side("tune")
+
 # ---------------------------------------------------------------- pause
 func _unhandled_input(e: InputEvent) -> void:
 	if not e.is_action_pressed("pause") or e.is_echo(): return
@@ -902,6 +912,7 @@ func _autotest(seconds: float) -> void:
 		game._snap_prev()
 		game.cam.snap_to(Vector3(cp[0], game.phys.y + 0.5, cp[1]))
 	var pedal := OS.get_environment("BMX_IDLE") == ""
+	if OS.get_environment("BMX_DEMO") != "": game.set_demo(true)   # tests: the AI rider rides (DEMO lines every 5 s)
 	if OS.get_environment("BMX_PANEL") != "":   # tests: open the tuning card (ride/rider/look), BMX_PANEL_CAT = category tab
 		var pt: String = game.hud.SIDE_TABS.get(OS.get_environment("BMX_PANEL"), "ride")
 		if OS.get_environment("BMX_PANEL_CAT") != "": TuneCard.last_cat[pt] = int(OS.get_environment("BMX_PANEL_CAT"))
@@ -920,6 +931,14 @@ func _autotest(seconds: float) -> void:
 	var draws := 0.0
 	while (Time.get_ticks_msec() - t0) / 1000.0 < seconds:
 		var el := (Time.get_ticks_msec() - t0) / 1000.0
+		if game.demo != null and int(el * 2) != int(_probe.get("demo_k", -1)):
+			_probe["demo_k"] = int(el * 2)
+			var dp: DemoPilot = game.demo
+			var dph = game.phys
+			_probe["demo_vmax"] = maxf(float(_probe.get("demo_vmax", 0.0)), dph.v * 3.6)
+			_probe["demo_xmax"] = maxf(float(_probe.get("demo_xmax", 0.0)), dp.cross)
+			_probe["demo_slip"] = maxf(float(_probe.get("demo_slip", 0.0)), absf(dph.slip))
+			if int(el * 2) % 4 == 0: print("DEMO max=%s/%s t=%.1f s=%.0f v=%.1f/%.1f km/h cross=%.2f slip=%.2f air=%s resets=%d crash=%s" % [str(Tune.base.get("demoMaxKmh")), str(Tune.ride.get("demoMaxKmh")), el, dp.s_here, dph.v * 3.6, dp.target_v * 3.6, dp.cross, dph.slip, dph.air, dp.resets, dph.crash_on])
 		if OS.get_environment("BMX_FREEZE") != "":   # tests: time frozen from a to b s (no map), as the map / photo mode do
 			var fz := OS.get_environment("BMX_FREEZE").split(",")
 			Engine.time_scale = 0.0 if (el >= float(fz[0]) and el < float(fz[1])) else 1.0

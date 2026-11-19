@@ -940,6 +940,7 @@ func _unhandled_input(e: InputEvent) -> void:
 		else: flash("Debug Draw 3D addon not loaded")
 		return
 	if photo: return
+	if e.is_action_pressed("demo") and not e.is_echo(): set_demo(demo == null); return
 	if e.is_action_pressed("map") and not e.is_echo(): open_map(); return
 	if e.is_action_pressed("new_world") and not e.is_echo(): respawn(true)
 	elif e.is_action_pressed("respawn") and not e.is_echo(): respawn(false)
@@ -968,9 +969,21 @@ func _shift(d: int) -> void:
 		hud.gear_changed()
 		if audio: audio.shift()
 
+## demo mode: an AI rider (game/demo_pilot.gd) supplies the input instead of the keys / pad, F2 hands it back
+var demo: DemoPilot = null
+
+func set_demo(on: bool) -> void:
+	if on == (demo != null): return
+	demo = DemoPilot.new() if on else null
+	if not on:
+		for a in ["pedal", "brake", "steer_left", "steer_right", "hop", "sprint"]: Input.action_release(a)
+	flash("DEMO RIDER on  -  P: tune it live  ·  F2: ride yourself" if on else "You ride")
+
 func _read_input() -> Dictionary:
 	if not input_enabled:
 		return {"throttle": 0.0, "brake": 0.0, "steer": 0.0, "hop": false, "sprint": false, "body_fwd": 0.0, "body_lean": 0.0}
+	if demo != null and not photo:
+		return demo.tick(self, get_physics_process_delta_time())
 	var steer := Input.get_action_strength("steer_left") - Input.get_action_strength("steer_right")
 	# a thumbstick needs a curve: fine near the centre (the first bit of stick only tips the bike in a little),
 	# full lock at the edge. Keys (all or nothing) are unaffected. Steering response (Settings) scales it
