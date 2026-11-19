@@ -882,7 +882,9 @@ func _land_trick(at: float) -> void:
 	var flips := roundi(absf(flip_acc) / TAU)
 	if flips >= 1:
 		var kind := "BACKFLIP" if flip_acc > 0 else "FRONTFLIP"
-		host.flash((["", "", "DOUBLE ", "TRIPLE "][mini(flips, 3)] if flips > 1 else "") + kind + "!")
+		var trick: String = (["", "", "DOUBLE ", "TRIPLE "][mini(flips, 3)] if flips > 1 else "") + kind
+		host.flash(trick + "!")
+		if host.has_method("on_trick"): host.on_trick(trick)
 		flow_up()
 
 ## Pivot (pirouette): slow, brake held and steering -> the rear swings round the front wheel, as far as you like

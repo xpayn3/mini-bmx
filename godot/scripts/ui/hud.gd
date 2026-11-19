@@ -31,6 +31,26 @@ var elev_up := 0.0     # metres climbed / descended this ride (bike computer pag
 var elev_down := 0.0
 var track_hist := PackedVector2Array()   # ridden path (x, z) for the map page, same sampling
 const TRACK := 360
+# ride stats for the bike computer pages
+var ride_t := 0.0
+var moving_t := 0.0
+var ride_dist := 0.0
+var max_v := 0.0
+var cad := 0.0          # rpm, from the crank
+var power := 0.0        # W, from the drive force
+var hr := 72.0          # bpm, made up from effort, sprint, stamina
+var _crank_last := NAN
+var jump_last := Vector3.ZERO   # air time, distance, height of the last landed jump
+var jump_best := Vector3.ZERO
+var jumps := 0
+var tricks := 0
+var trick_last := ""
+var trail_i := -1       # nearest trail centreline point
+var trail_d := INF      # how far off the trail centreline (m)
+var alert := {}         # the next turn / feature on the trail: {kind, text, d}, or empty
+var alert_new := 0.0    # seconds left to show a just-appeared alert while it is still far off
+const FEAT_NAMES := {"table": "TABLETOP", "tableLine": "JUMP LINE", "kicker": "KICKER", "rhythm": "ROLLERS",
+	"flow": "FLOW LINE", "woodKicker": "WOOD KICKER", "bridge": "BRIDGE"}
 var hidden := false
 
 func _ready() -> void:
@@ -128,6 +148,14 @@ func on_takeoff() -> void:
 
 func on_landing(air_time: float, dist: float, height: float, impact: float) -> void:
 	air_card.land(air_time, dist, height, impact)
+	if air_time > 0.25 and not game.phys.crash_on:
+		jumps += 1
+		jump_last = Vector3(air_time, dist, height)
+		jump_best = Vector3(maxf(jump_best.x, air_time), maxf(jump_best.y, dist), maxf(jump_best.z, height))
+
+func on_trick(trick: String) -> void:
+	tricks += 1
+	trick_last = trick
 
 func on_crash() -> void:
 	air_card.bail()
@@ -249,60 +277,338 @@ func update_hud(dt: float) -> void:
 		track_hist.append(tp)
 		if track_hist.size() > TRACK: track_hist.remove_at(0)
 		if elev_hist.size() > HIST: elev_hist.remove_at(0)
+	_ride_stats(st, dt)
+	alert_new = maxf(0.0, alert_new - dt)
+	_trail_watch(st)
 	gauge.queue_redraw()
 	air_card.tick(dt)
 	biome_l.text = game.biome_cur
 	if st.crash_on: GameState.records.distance = GameState.records.distance   # (kept: saved on landing / menu)
 
+func _ride_stats(st: BikePhysics, dt: float) -> void:
+	ride_t += dt
+	if not st.crash_on:
+		var ds := absf(st.v) * dt
+		ride_dist += ds
+		GameState.records.distance += ds
+		if absf(st.v) > 0.5: moving_t += dt
+		max_v = maxf(max_v, absf(st.v))
+	if is_nan(_crank_last): _crank_last = st.crank
+	var dc := st.crank - _crank_last
+	_crank_last = st.crank
+	var rpm := absf(dc) / maxf(dt, 1e-4) / TAU * 60.0 if (st.pedal > 0.15 and not st.air) else 0.0
+	cad += (minf(rpm, 150.0) - cad) * minf(1.0, dt * 3.0)
+	var pw := 0.0
+	if not st.air and not st.crash_on and st.pedal > 0.05:
+		pw = 32.0 * maxf(0.0, st.a_drive) * absf(st.v) + st.pedal * (30.0 + 5.0 * absf(st.v))
+	power += (minf(pw, 1100.0) - power) * minf(1.0, dt * 2.0)
+	var hr_t := 68.0 + 95.0 * clampf(power / 650.0, 0, 1) + 22.0 * st.sprint + 18.0 * (1.0 - st.stamina) \
+		+ 8.0 * clampf(absf(st.v) / 15.0, 0, 1) + (25.0 if st.crash_on else 0.0)
+	hr += (hr_t - hr) * minf(1.0, dt * 0.35)
+
+## where you are on the trail, and the next turn or feature ahead of you (the Garmin's alerts)
+func _trail_watch(st: BikePhysics) -> void:
+	if OS.get_environment("BMX_ALERT_PROBE") != "" and ride_t > 1.0 and not _probed:
+		_probed = true
+		_probe_alerts()
+	_trail_scan(Vector2(st.x, st.z), Vector2(cos(st.heading), -sin(st.heading)), st.crash_on)
+
+var _probed := false
+## test: ride the trail centreline in thought and print every alert the Garmin would give
+func _probe_alerts() -> void:
+	var tc: TrailCourse = game.terrain.field.course
+	var last := ""
+	for i in range(0, mini(tc.n - 1, 1200), 2):
+		_trail_scan(Vector2(tc.X[i], tc.Z[i]), Vector2(tc.TX[i], tc.TZ[i]), false)
+		var t: String = alert.get("text", "")
+		if t != last and t != "":
+			print("ALERT at trail %4.0f m: %s in %.0f m" % [i * TrailCourse.STEP, t, alert.d])
+		last = t
+	trail_i = -1
+
+func _trail_scan(p: Vector2, fw: Vector2, crashed: bool) -> void:
+	var was: String = alert.get("text", "")
+	alert = {}
+	var t = game.terrain
+	if t == null or t.field == null or t.field.course == null: return
+	var tc: TrailCourse = t.field.course
+	if tc.n < 2: return
+	if trail_i < 0 or trail_i >= tc.n:
+		trail_i = _nearest(tc, p, 0, tc.n)
+	else:
+		trail_i = _nearest(tc, p, maxi(0, trail_i - 60), mini(tc.n, trail_i + 60))
+		if Vector2(tc.X[trail_i], tc.Z[trail_i]).distance_to(p) > 40.0:   # teleported
+			trail_i = _nearest(tc, p, 0, tc.n)
+	trail_d = Vector2(tc.X[trail_i], tc.Z[trail_i]).distance_to(p)
+	if trail_d > 15.0 or crashed: return
+	if fw.dot(Vector2(tc.TX[trail_i], tc.TZ[trail_i])) < 0.3: return   # riding the trail backwards
+	var S := TrailCourse.STEP
+	var best_d := 120.0
+	# the next bend worth calling out (KAP > 0 turns right)
+	var i := trail_i + 2
+	var end := mini(tc.n - 2, trail_i + int(best_d / S))
+	while i < end:
+		if absf(tc.KAP[i]) > 1.0 / 22.0:
+			var sg := signf(tc.KAP[i])
+			var j := i
+			while j > trail_i and absf(tc.KAP[j - 1]) > 1.0 / 60.0 and signf(tc.KAP[j - 1]) == sg: j -= 1
+			var k := i
+			var ang := 0.0
+			while k < tc.n - 1 and absf(tc.KAP[k]) > 1.0 / 60.0 and signf(tc.KAP[k]) == sg:
+				ang += tc.KAP[k] * S; k += 1
+			var d := (j - trail_i) * S
+			if d < 4.0 or absf(ang) < 0.6:
+				i = k + 1; continue
+			var side := "RIGHT" if sg > 0 else "LEFT"
+			var kind := ("H" if absf(ang) > 2.3 else "S" if absf(ang) > 1.2 else "") + side[0]
+			var txt := ("HAIRPIN " if absf(ang) > 2.3 else "SHARP " if absf(ang) > 1.2 else "") + side
+			if d < best_d:
+				best_d = d; alert = {"kind": kind, "text": txt, "d": d}
+			break
+		i += 1
+	# the next route feature (jumps, rollers, wood)
+	var s_here := trail_i * S
+	var rf: Array = t.field.route_feats
+	var lo := 0
+	var hi := rf.size()
+	while lo < hi:
+		var mid := (lo + hi) >> 1
+		if rf[mid].s + rf[mid].len > s_here: hi = mid
+		else: lo = mid + 1
+	for q in range(lo, mini(lo + 3, rf.size())):
+		var d: float = rf[q].s - s_here
+		if d >= 4.0:
+			if d < best_d:
+				best_d = d; alert = {"kind": "J", "text": FEAT_NAMES.get(rf[q].type, String(rf[q].type).to_upper()), "d": d}
+			break
+	# rock gardens
+	for q in range(trail_i + 2, mini(tc.n, trail_i + int(best_d / S))):
+		if tc.KD[q] == TrailCourse.ROCKS and tc.KD[q - 1] != TrailCourse.ROCKS:
+			var d := (q - trail_i) * S
+			if d >= 4.0 and d < best_d:
+				best_d = d; alert = {"kind": "K", "text": "ROCKS", "d": d}
+			break
+	if alert.get("text", "") != "" and alert.text != was:
+		gauge.light = 3.0   # the screen lights up for a new alert
+		alert_new = 3.5
+
+func _nearest(tc: TrailCourse, p: Vector2, a: int, b: int) -> int:
+	var best := a
+	var bd := INF
+	for i in range(a, b):
+		var d: float = (tc.X[i] - p.x) * (tc.X[i] - p.x) + (tc.Z[i] - p.y) * (tc.Z[i] - p.y)
+		if d < bd: bd = d; best = i
+	return best
+
 # ======================================================================
 class GaugeView extends Control:
-	## a compact GPS bike computer: black body, pale LCD, two pages flipped with the bezel
-	## buttons under the screen. Page 1: speed, slope / grade, gear (the shifter). Page 2: elevation.
-	## Page 3: map (the trail, heading-up, your ridden path on top).
-	const PAGES := 3
+	## a compact GPS bike computer: black body, pale LCD, pages flipped with the bezel buttons under the
+	## screen; a turn / feature alert drops over any page; GPS fix at the start, battery, backlight.
+	const TITLES := ["RIDE", "TRIP", "EFFORT", "AIR", "ELEV", "MAP"]
+	const PAGES := 6
+	const MAP_PAGE := 5
+	const LCD := Color("eceee8")
+	const LCD_LIT := Color("f2fbff")
+	const FIX_T := 3.0     # seconds to "find satellites" at the start of a ride
 	var map_v: MapView
+	var ov: Overlay
 	var hud
 	var page := 0
 	var bump := 0.0        # 1 on a shift, fades out: the gear digit flashes inverted
 	var show_gear := true  # Settings › HUD › Gear shifter
 	var press := [0.0, 0.0]   # bezel button press flash (left, right)
+	var light := 0.0       # backlight seconds left (a button press or a new alert)
+	var scr := Rect2()
+	var lcd := LCD
 	func _ready() -> void:
 		map_v = MapView.new(); map_v.hud = hud
 		map_v.visible = false
 		add_child(map_v)
+		ov = Overlay.new(); ov.g = self
+		ov.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(ov)
 	func _btn_rect(i: int) -> Rect2:
-		return Rect2(12 if i == 0 else size.x - 52, size.y - 23, 40, 14)
+		return Rect2(12 if i == 0 else size.x - 46, size.y - 23, 34, 14)
 	func _gui_input(e: InputEvent) -> void:
 		if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
 			for i in 2:
 				if _btn_rect(i).grow(4).has_point(e.position):
 					page = posmod(page + (-1 if i == 0 else 1), PAGES)
 					press[i] = 1.0
+					light = 3.0
 					queue_redraw()
 					accept_event()
 					return
 	func _draw() -> void:
 		var st: BikePhysics = hud.game.phys
 		var f := UITheme.lcd_font()
-		var r := Rect2(Vector2.ZERO, size)
-		draw_style_box(UITheme.box(Color("16181a"), 16, 0), r)
-		var scr := Rect2(7, 8, size.x - 14, size.y - 38)
-		draw_style_box(UITheme.box(Color("eceee8"), 6, 0), scr)
+		light = maxf(0.0, light - get_process_delta_time())
+		var lk := clampf(light / 0.4, 0, 1)
+		lcd = LCD.lerp(LCD_LIT, lk)
+		draw_style_box(UITheme.box(Color("16181a"), 16, 0), Rect2(Vector2.ZERO, size))
+		scr = Rect2(7, 8, size.x - 14, size.y - 38)
+		if lk > 0: draw_style_box(UITheme.box(Color(0.7, 0.88, 1.0, 0.22 * lk), 8, 0), scr.grow(2))
+		draw_style_box(UITheme.box(lcd, 6, 0), scr)
 		var ink := Color("111417")
 		var x0 := scr.position.x + 6
 		var w := scr.size.x - 12
+		# status bar: clock | page title (AIR when airborne) | battery
 		draw_rect(Rect2(scr.position.x, scr.position.y, scr.size.x, 14), ink)
 		var tm := Time.get_time_dict_from_system()
-		draw_string(f, Vector2(x0, scr.position.y + 11), "%02d:%02d" % [tm.hour, tm.minute], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("f2f3ef"))
-		if st.air:
-			draw_string(f, Vector2(x0, scr.position.y + 11), "AIR", HORIZONTAL_ALIGNMENT_RIGHT, w, 10, Color("ffd21f"))
-		else:
-			draw_string(f, Vector2(x0, scr.position.y + 11), "%d/%d" % [page + 1, PAGES], HORIZONTAL_ALIGNMENT_RIGHT, w, 10, Color(0.95, 0.95, 0.94, 0.6))
-		map_v.visible = page == 2
-		if page == 0: _page_ride(st, f, ink, scr, x0, w)
-		elif page == 1: _page_elev(st, f, ink, scr, x0, w)
-		else: _page_map(st, f, ink, scr, x0, w)
+		var hy := scr.position.y + 11
+		draw_string(f, Vector2(x0, hy), "%02d:%02d" % [tm.hour, tm.minute], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("f2f3ef"))
+		if st.air: draw_string(f, Vector2(x0, hy), "AIR", HORIZONTAL_ALIGNMENT_CENTER, w, 10, Color("ffd21f"))
+		else: draw_string(f, Vector2(x0, hy), TITLES[page], HORIZONTAL_ALIGNMENT_CENTER, w, 9, Color(0.95, 0.95, 0.94, 0.75))
+		var bat := clampf(1.0 - hud.ride_t / 3600.0 * 0.6, 0.05, 1.0)   # drains 60 % an hour
+		var br := Rect2(scr.end.x - 22, scr.position.y + 4, 14, 7)
+		draw_rect(br, Color(0.95, 0.95, 0.94, 0.8), false, 1.0)
+		draw_rect(Rect2(br.end.x, br.position.y + 2, 2, 3), Color(0.95, 0.95, 0.94, 0.8))
+		draw_rect(Rect2(br.position.x + 1.5, br.position.y + 1.5, (br.size.x - 3) * bat, br.size.y - 3), Color("8be36a") if bat > 0.2 else Color("ff6a4d"))
+		map_v.visible = page == MAP_PAGE and hud.ride_t > FIX_T
+		match page:
+			0: _page_ride(st, f, ink, scr, x0, w)
+			1: _page_trip(f, ink, scr, x0, w)
+			2: _page_effort(st, f, ink, scr, x0, w)
+			3: _page_air(f, ink, scr, x0, w)
+			4: _page_elev(st, f, ink, scr, x0, w)
+			_: _page_map(st, f, ink, scr, x0, w)
 		_bezel()
+		ov.size = size
+		ov.queue_redraw()
+	## a label (left) + unit (right) over a big value
+	func _big(f: Font, ink: Color, x0: float, w: float, y: float, label: String, unit: String, val: String) -> void:
+		draw_string(f, Vector2(x0, y), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(ink, 0.6))
+		draw_string(f, Vector2(x0, y), unit, HORIZONTAL_ALIGNMENT_RIGHT, w, 9, Color(ink, 0.7))
+		draw_string(f, Vector2(x0, y + 36), val, HORIZONTAL_ALIGNMENT_RIGHT, w, 38 if val.length() <= 4 else 30, ink)
+	## two fields side by side in a 40 px row
+	func _pair(f: Font, ink: Color, scr_: Rect2, x0: float, w: float, y: float, la: String, va: String, lb: String, vb: String) -> void:
+		draw_line(Vector2(scr_.position.x, y), Vector2(scr_.end.x, y), Color(ink, 0.22))
+		draw_string(f, Vector2(x0, y + 12), la, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(ink, 0.6))
+		draw_string(f, Vector2(x0 + w * 0.5 + 4, y + 12), lb, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(ink, 0.6))
+		draw_string(f, Vector2(x0, y + 32), va, HORIZONTAL_ALIGNMENT_RIGHT, w * 0.5 - 4, 18, ink)
+		draw_string(f, Vector2(x0 + w * 0.5 + 4, y + 32), vb, HORIZONTAL_ALIGNMENT_RIGHT, w * 0.5 - 4, 18, ink)
+		draw_line(Vector2(scr_.position.x + scr_.size.x * 0.5, y), Vector2(scr_.position.x + scr_.size.x * 0.5, y + 40), Color(ink, 0.22))
+	static func _clock(t: float) -> String:
+		var si := int(t)
+		return "%d:%02d:%02d" % [si / 3600, (si / 60) % 60, si % 60] if si >= 3600 else "%d:%02d" % [si / 60, si % 60]
+	## TRIP: ride time, distance, average / max speed, odometer (every ride, saved)
+	func _page_trip(f: Font, ink: Color, scr_: Rect2, x0: float, w: float) -> void:
+		var y := scr_.position.y + 28
+		_big(f, ink, x0, w, y, "RIDE TIME", "", _clock(hud.ride_t))
+		y += 46
+		var km: bool = Settings.get_v("units") != 1
+		var dk := 1000.0 if km else 1609.34
+		var du := "km" if km else "mi"
+		var avg: float = hud.ride_dist / maxf(1.0, hud.moving_t)
+		_pair(f, ink, scr_, x0, w, y, "DIST " + du, "%.2f" % (hud.ride_dist / dk), "AVG", hud.speed_text(avg))
+		y += 40
+		_pair(f, ink, scr_, x0, w, y, "MAX", hud.speed_text(hud.max_v), "ODO " + du, "%.1f" % (float(GameState.records.distance) / dk))
+	## EFFORT: heart rate (beating heart, zone), cadence, power, stamina, gear ratio
+	func _page_effort(st: BikePhysics, f: Font, ink: Color, scr_: Rect2, x0: float, w: float) -> void:
+		var y := scr_.position.y + 28
+		_big(f, ink, x0, w, y, "HEART", "bpm", "%d" % roundi(hud.hr))
+		var beat := pow(maxf(0.0, sin(hud.ride_t * hud.hr / 60.0 * TAU)), 8.0)
+		var hc := Vector2(x0 + 10, y + 20)
+		var hs := 5.0 * (1.0 + 0.18 * beat)
+		draw_circle(hc + Vector2(-hs * 0.5, 0), hs * 0.58, Color("d8344a"))
+		draw_circle(hc + Vector2(hs * 0.5, 0), hs * 0.58, Color("d8344a"))
+		draw_colored_polygon(PackedVector2Array([hc + Vector2(-hs * 1.05, hs * 0.2), hc + Vector2(hs * 1.05, hs * 0.2), hc + Vector2(0, hs * 1.4)]), Color("d8344a"))
+		var zone := clampi(int((hud.hr - 95.0) / 18.0) + 1, 1, 5)
+		for z in 5:
+			draw_rect(Rect2(x0 + z * 6, y + 34, 5, 4), ink if z < zone else Color(ink, 0.18))
+		draw_string(f, Vector2(x0 + 32, y + 39), "Z%d" % zone, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(ink, 0.7))
+		y += 46
+		_pair(f, ink, scr_, x0, w, y, "CADENCE", "%d" % roundi(hud.cad), "POWER W", "%d" % roundi(hud.power))
+		y += 40
+		draw_line(Vector2(scr_.position.x, y), Vector2(scr_.end.x, y), Color(ink, 0.22))
+		draw_line(Vector2(scr_.position.x + scr_.size.x * 0.5, y), Vector2(scr_.position.x + scr_.size.x * 0.5, y + 40), Color(ink, 0.22))
+		draw_string(f, Vector2(x0, y + 12), "STAMINA", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(ink, 0.6))
+		var bw := w * 0.5 - 6
+		draw_rect(Rect2(x0, y + 20, bw, 10), Color(ink, 0.8), false, 1.0)
+		draw_rect(Rect2(x0 + 2, y + 22, (bw - 4) * clampf(st.stamina, 0, 1), 6), ink if not st.tired else Color("d8344a"))
+		var ring := roundi(34.0 * st.ring_k)
+		var cog: int = st.cogs[maxi(st.gear, 0)] if st.cogs.size() > 0 else 16
+		draw_string(f, Vector2(x0 + w * 0.5 + 4, y + 12), "%dx%d" % [ring, cog], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(ink, 0.6))
+		draw_string(f, Vector2(x0 + w * 0.5 + 4, y + 32), "%.2f" % (float(ring) / cog), HORIZONTAL_ALIGNMENT_RIGHT, w * 0.5 - 4, 18, ink)
+	## AIR: the last jump, today's best, jumps and tricks landed
+	func _page_air(f: Font, ink: Color, scr_: Rect2, x0: float, w: float) -> void:
+		var y := scr_.position.y + 28
+		var lj: Vector3 = hud.jump_last
+		var bj: Vector3 = hud.jump_best
+		_big(f, ink, x0, w, y, "LAST JUMP", "m", "%.1f" % lj.y if hud.jumps > 0 else "--")
+		y += 46
+		_pair(f, ink, scr_, x0, w, y, "HEIGHT m", "%.1f" % lj.z, "AIR s", "%.2f" % lj.x)
+		y += 40
+		_pair(f, ink, scr_, x0, w, y, "BEST m", "%.1f" % bj.y, "JUMPS", "%d" % hud.jumps)
+		y += 40
+		draw_line(Vector2(scr_.position.x, y), Vector2(scr_.end.x, y), Color(ink, 0.22))
+		var tl: String = hud.trick_last
+		draw_string(f, Vector2(x0, y + 13), "TRICKS %d" % hud.tricks + ("  " + tl if tl != "" else ""), HORIZONTAL_ALIGNMENT_LEFT, w, 9, ink)
+	## drawn over everything (the map included): the GPS fix screen, then turn / feature alerts
+	func draw_over(c: Control) -> void:
+		var f := UITheme.lcd_font()
+		var ink := Color("111417")
+		var t: float = hud.ride_t
+		var inner := Rect2(scr.position.x, scr.position.y + 14, scr.size.x, scr.size.y - 14)
+		if t < FIX_T + 0.8:
+			c.draw_style_box(UITheme.box(lcd, 6, 0), inner)
+			var cx := inner.get_center()
+			if t < FIX_T:
+				# satellite dish: an arc that sweeps, and signal bars filling as satellites lock on
+				var a := t * 4.0
+				c.draw_arc(cx + Vector2(0, -16), 14, a, a + 1.6, 12, ink, 2.0)
+				c.draw_arc(cx + Vector2(0, -16), 8, a + PI, a + PI + 1.6, 10, Color(ink, 0.6), 2.0)
+				c.draw_circle(cx + Vector2(0, -16), 2.5, ink)
+				c.draw_string(f, Vector2(inner.position.x, cx.y + 14), "ACQUIRING", HORIZONTAL_ALIGNMENT_CENTER, inner.size.x, 10, ink)
+				c.draw_string(f, Vector2(inner.position.x, cx.y + 26), "SATELLITES", HORIZONTAL_ALIGNMENT_CENTER, inner.size.x, 10, ink)
+				var nb := int(t / FIX_T * 6.0)
+				for b in 6:
+					var bh := 4.0 + b * 3.0
+					c.draw_rect(Rect2(cx.x - 22 + b * 8, cx.y + 50 - bh, 5, bh), ink if b < nb else Color(ink, 0.15))
+			else:
+				c.draw_string(f, Vector2(inner.position.x, cx.y - 2), "GPS READY", HORIZONTAL_ALIGNMENT_CENTER, inner.size.x, 12, ink)
+				c.draw_polyline(PackedVector2Array([cx + Vector2(-8, 12), cx + Vector2(-2, 18), cx + Vector2(9, 6)]), ink, 2.5)
+			return
+		var al: Dictionary = hud.alert
+		# pops up when it first appears, then stays from 40 m in (the page shows the rest of the time)
+		if al.is_empty() or al.d > 100.0 or (al.d > 40.0 and hud.alert_new <= 0.0): return
+		var bx := Rect2(inner.position.x + 3, inner.position.y + 2, inner.size.x - 6, 26)
+		c.draw_style_box(UITheme.box(ink, 5, 0), bx)
+		var yel := Color("ffd21f")
+		var ic := bx.position + Vector2(15, 13)
+		var sc := 0.72
+		var kind: String = al.kind
+		c.draw_set_transform(ic * (1.0 - sc), 0.0, Vector2(sc, sc))
+		if kind.ends_with("L") or kind.ends_with("R"):
+			var sx := -1.0 if kind.ends_with("L") else 1.0
+			var pts := PackedVector2Array()
+			if kind.begins_with("H"):   # hairpin: a U
+				pts.append(ic + Vector2(-5 * sx, 11))
+				for q in 9:
+					var an := PI * q / 8.0
+					pts.append(ic + Vector2(-5 * sx * cos(an), -2 - 7 * sin(an)))
+				pts.append(ic + Vector2(5 * sx, 4))
+			else:
+				var bend := 9.0 if kind.begins_with("S") else 6.0
+				pts.append(ic + Vector2(-2 * sx, 11)); pts.append(ic + Vector2(-2 * sx, 0))
+				pts.append(ic + Vector2(0, -bend * 0.6)); pts.append(ic + Vector2(bend * sx * 0.7, -bend * 0.9))
+			c.draw_polyline(pts, Color.WHITE, 3.0)
+			var tip := pts[pts.size() - 1]
+			var dv := (tip - pts[pts.size() - 2]).normalized()
+			var nv := Vector2(-dv.y, dv.x)
+			c.draw_colored_polygon(PackedVector2Array([tip + dv * 5, tip + nv * 4.5, tip - nv * 4.5]), Color.WHITE)
+		elif kind == "J":   # a ramp
+			c.draw_colored_polygon(PackedVector2Array([ic + Vector2(-11, 8), ic + Vector2(6, 8), ic + Vector2(6, -6)]), Color.WHITE)
+			c.draw_arc(ic + Vector2(0, -2), 9, -PI * 0.95, -PI * 0.45, 8, yel, 1.5)
+		else:   # rocks
+			c.draw_circle(ic + Vector2(-5, 5), 5, Color.WHITE)
+			c.draw_circle(ic + Vector2(5, 6), 4, Color.WHITE)
+			c.draw_circle(ic + Vector2(1, -3), 4, Color(1, 1, 1, 0.8))
+		c.draw_set_transform(Vector2.ZERO)
+		var dm: float = al.d
+		var dtx := "%dm" % (roundi(dm / 10.0) * 10 if dm > 50.0 else roundi(dm))
+		c.draw_string(f, Vector2(bx.position.x + 28, bx.position.y + 11), al.text, HORIZONTAL_ALIGNMENT_LEFT, bx.size.x - 32, 8, Color.WHITE)
+		c.draw_string(f, Vector2(bx.position.x + 28, bx.position.y + 23), dtx, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, yel)
 	## bezel under the screen: a page button left and right, page dots between them
 	func _bezel() -> void:
 		var dt := get_process_delta_time()
@@ -315,7 +621,7 @@ class GaugeView extends Control:
 			draw_colored_polygon(PackedVector2Array([c + Vector2(-3 * s, -4), c + Vector2(-3 * s, 4), c + Vector2(3 * s, 0)]), Color("b8bcc0"))
 			press[i] = maxf(0.0, k - dt * 5.0)
 		for j in PAGES:
-			draw_circle(Vector2(size.x / 2 + (j - (PAGES - 1) / 2.0) * 9, size.y - 16), 2.5, Color("d8dbd6") if j == page else Color("3a3d41"))
+			draw_circle(Vector2(size.x / 2 + (j - (PAGES - 1) / 2.0) * 8, size.y - 16), 2.2, Color("d8dbd6") if j == page else Color("3a3d41"))
 	func _page_ride(st: BikePhysics, f: Font, ink: Color, scr: Rect2, x0: float, w: float) -> void:
 		var y := scr.position.y + 28
 		draw_string(f, Vector2(x0, y), "SPEED", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(ink, 0.6))
@@ -342,35 +648,52 @@ class GaugeView extends Control:
 		if map_v.position != area.position or map_v.size != area.size:
 			map_v.position = area.position; map_v.size = area.size
 		map_v.queue_redraw()
-	## elevation now, climbed / descended this ride, and the last 30 s profile
-	func _page_elev(st: BikePhysics, f: Font, ink: Color, scr: Rect2, x0: float, w: float) -> void:
-		var y := scr.position.y + 28
-		draw_string(f, Vector2(x0, y), "ELEV", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(ink, 0.6))
-		draw_string(f, Vector2(x0, y), "m", HORIZONTAL_ALIGNMENT_RIGHT, w, 9, Color(ink, 0.7))
-		draw_string(f, Vector2(x0, y + 36), "%d" % roundi(st.y), HORIZONTAL_ALIGNMENT_RIGHT, w, 38, ink)
+	## elevation now, climbed / descended this ride; the profile: the last 30 s, then the trail ahead
+	## (next 400 m, coloured by how steep it is, like ClimbPro)
+	func _page_elev(st: BikePhysics, f: Font, ink: Color, scr_: Rect2, x0: float, w: float) -> void:
+		var y := scr_.position.y + 28
+		_big(f, ink, x0, w, y, "ELEV", "m", "%d" % roundi(st.y))
 		y += 46
-		draw_line(Vector2(scr.position.x, y), Vector2(scr.end.x, y), Color(ink, 0.22))
-		draw_string(f, Vector2(x0, y + 12), "ASC", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(ink, 0.6))
-		draw_string(f, Vector2(x0 + w * 0.5 + 4, y + 12), "DESC", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(ink, 0.6))
-		draw_string(f, Vector2(x0, y + 32), "%d" % roundi(hud.elev_up), HORIZONTAL_ALIGNMENT_RIGHT, w * 0.5 - 4, 18, ink)
-		draw_string(f, Vector2(x0 + w * 0.5 + 4, y + 32), "%d" % roundi(hud.elev_down), HORIZONTAL_ALIGNMENT_RIGHT, w * 0.5 - 4, 18, ink)
-		draw_line(Vector2(scr.position.x + scr.size.x * 0.5, y), Vector2(scr.position.x + scr.size.x * 0.5, y + 40), Color(ink, 0.22))
+		_pair(f, ink, scr_, x0, w, y, "ASC", "%d" % roundi(hud.elev_up), "DESC", "%d" % roundi(hud.elev_down))
 		y += 40
-		draw_line(Vector2(scr.position.x, y), Vector2(scr.end.x, y), Color(ink, 0.22))
+		draw_line(Vector2(scr_.position.x, y), Vector2(scr_.end.x, y), Color(ink, 0.22))
 		var hist: PackedFloat32Array = hud.elev_hist
+		var ahead := PackedFloat32Array()
+		var tc = hud.game.terrain.field.course if hud.game.terrain and hud.game.terrain.field else null
+		var ti: int = hud.trail_i
+		if tc and ti >= 0 and ti < tc.n and hud.trail_d < 15.0:
+			var off: float = st.y - tc.E[ti]
+			for m in range(0, 404, 4):
+				var q := mini(tc.n - 1, ti + m / 2)
+				ahead.append(tc.E[q] + off)
+		var lo := st.y
+		var hi := st.y
+		for e in hist: lo = minf(lo, e); hi = maxf(hi, e)
+		for e in ahead: lo = minf(lo, e); hi = maxf(hi, e)
+		hi = maxf(hi, lo + 4)
+		var gt := y + 12
+		var gb := scr_.end.y - 4
+		var gh := gb - gt
+		var split := x0 + w * (0.35 if ahead.size() > 0 else 1.0)
+		var ey := func(e: float) -> float: return gb - (e - lo) / (hi - lo) * gh
 		if hist.size() > 1:
-			var lo: float = hist[0]
-			var hi: float = hist[0]
-			for e in hist:
-				lo = minf(lo, e); hi = maxf(hi, e)
-			hi = maxf(hi, lo + 2)
-			var gh := scr.end.y - y - 10
-			var pts := PackedVector2Array()
-			pts.append(Vector2(x0, scr.end.y - 4))
+			var pts := PackedVector2Array([Vector2(x0, gb)])
 			for i in hist.size():
-				pts.append(Vector2(x0 + w * i / float(HIST - 1), scr.end.y - 4 - (hist[i] - lo) / (hi - lo) * gh))
-			pts.append(Vector2(x0 + w * (hist.size() - 1) / float(HIST - 1), scr.end.y - 4))
-			draw_colored_polygon(pts, Color(0.18, 0.7, 0.29, 0.55))
+				pts.append(Vector2(x0 + (split - x0) * i / float(hist.size() - 1), ey.call(hist[i])))
+			pts.append(Vector2(split, gb))
+			draw_colored_polygon(pts, Color(ink, 0.22))
+		if ahead.size() > 1:
+			var cw := (x0 + w - split) / float(ahead.size() - 1)
+			for i in ahead.size() - 1:
+				var g := absf(ahead[i + 1] - ahead[i]) / 4.0
+				var col := Color("3fae49") if g < 0.04 else Color("e2c21c") if g < 0.08 else Color("ec7a1c") if g < 0.13 else Color("d8344a")
+				var xa := split + i * cw
+				draw_colored_polygon(PackedVector2Array([Vector2(xa, gb), Vector2(xa, ey.call(ahead[i])),
+					Vector2(xa + cw, ey.call(ahead[i + 1])), Vector2(xa + cw, gb)]), col)
+			var gr: float = (ahead[mini(25, ahead.size() - 1)] - ahead[0]) / (mini(25, ahead.size() - 1) * 4.0)
+			draw_string(f, Vector2(x0, y + 10), "NEXT 400m  %+d%%" % roundi(gr * 100.0), HORIZONTAL_ALIGNMENT_RIGHT, w, 8, Color(ink, 0.75))
+			draw_line(Vector2(split, gt - 2), Vector2(split, gb), ink, 1.0)
+			draw_colored_polygon(PackedVector2Array([Vector2(split - 3, gt - 4), Vector2(split + 3, gt - 4), Vector2(split, gt)]), ink)
 	## GEAR n | the cassette side-on, chain on the dark cog | teeth (LCD ink, no colour)
 	func _gear_row(st: BikePhysics, f: Font, ink: Color, x0: float, y: float, w: float) -> void:
 		draw_string(f, Vector2(x0, y + 12), "GEAR", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(ink, 0.6))
@@ -416,7 +739,6 @@ class MapView extends Control:
 	const CI := 5.0          # contour interval (m)
 	const ROWS := 4          # grid rows sampled per frame
 	var hud
-	var _ci := -1            # nearest trail point, searched near the last one
 	var _minor := PackedVector2Array()   # finished contour segments (world x, z pairs)
 	var _major := PackedVector2Array()
 	var _at := Vector2(INF, INF)         # centre of the finished contours
@@ -479,9 +801,8 @@ class MapView extends Control:
 		if _minor.size() > 1: draw_multiline(_minor, Color(0.55, 0.38, 0.2, 0.32), 1.0 * u)
 		if _major.size() > 1: draw_multiline(_major, Color(0.55, 0.38, 0.2, 0.6), 1.4 * u)
 		var tc = hud.game.terrain.field.course if hud.game.terrain and hud.game.terrain.field else null
-		if tc and tc.n > 1:
-			if _ci < 0 or _ci >= tc.n: _ci = _nearest(tc, org, 0, tc.n)
-			else: _ci = _nearest(tc, org, maxi(0, _ci - 60), mini(tc.n, _ci + 60))
+		var _ci: int = hud.trail_i
+		if tc and tc.n > 1 and _ci >= 0 and _ci < tc.n:
 			var reach := int(MAP_M * 1.2 / TrailCourse.STEP)
 			var line := PackedVector2Array()
 			for i in range(maxi(0, _ci - reach), mini(tc.n, _ci + reach), 2):
@@ -511,13 +832,11 @@ class MapView extends Control:
 		draw_line(Vector2(x0 + sb, sy - 3), Vector2(x0 + sb, sy), ink, 1.5)
 		draw_string(f, Vector2(x0 + sb + 4, sy + 1), "50m", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, ink)
 		draw_string(f, Vector2(0, sy + 1), "%dm" % roundi(st.y), HORIZONTAL_ALIGNMENT_RIGHT, size.x - 6, 9, ink)
-	func _nearest(tc, p: Vector2, a: int, b: int) -> int:
-		var best := a
-		var bd := INF
-		for i in range(a, b):
-			var d: float = (tc.X[i] - p.x) * (tc.X[i] - p.x) + (tc.Z[i] - p.y) * (tc.Z[i] - p.y)
-			if d < bd: bd = d; best = i
-		return best
+
+class Overlay extends Control:
+	## draws GaugeView.draw_over() on top of the map
+	var g
+	func _draw() -> void: g.draw_over(self)
 
 class StaminaView extends Control:
 	## ten flat blocks, the last part-filled (sprint stamina)
