@@ -836,6 +836,7 @@ func _read_input() -> Dictionary:
 ## tests (BMX_BRAKETURN): which values vibrate - per value, how often its step-to-step change flips sign
 ## with a real size (a vibration), and the biggest such flip
 var _base_bins := {}
+var _v_prev_fx := 0.0; var _surge := 0.0   # speed feel: last speed, acceleration surge
 var ride_log := RideLog.new()   # the last 60 s, saved with R3 / F8 (save_log)
 var _log_lift := 0.0
 var jitter_on := false
@@ -1104,10 +1105,19 @@ func _process(dt: float) -> void:
 	dust.sim_step(dt, drawn_pos, st.fwd(), atmos.wind)
 	grime.update(dt, rig)
 	# speed feel: wider FOV and streaky screen edges when fast
-	var sk := clampf((absf(st.v) - 8.0) / 14.0, 0.0, 1.0) if Settings.get_v("speed_fx") and not st.crash_on else 0.0
+	# from ~25 km/h, full by ~75 km/h: wider FOV with the camera pulled in (dolly zoom), a surge of extra FOV
+	# while accelerating hard, rumble, bank, streaks and speed lines at the edges, tighter vignette
+	var fx_on: bool = Settings.get_v("speed_fx") and not st.crash_on
+	var sk := smoothstep(7.0, 21.0, absf(st.v)) if fx_on else 0.0
 	speed_k += (sk - speed_k) * minf(1.0, dt * (2.5 if sk > speed_k else 1.2))
-	cam.fov_boost = speed_k * 9.0
-	(grade_rect.material as ShaderMaterial).set_shader_parameter("blur", speed_k * speed_k)
+	var acc_now := (absf(st.v) - _v_prev_fx) / maxf(dt, 1e-3)
+	_v_prev_fx = absf(st.v)
+	_surge += ((clampf(acc_now / 5.0, 0.0, 1.0) * smoothstep(4.0, 12.0, absf(st.v)) if fx_on else 0.0) - _surge) * minf(1.0, dt * 2.0)
+	cam.fov_boost = speed_k * 14.0 + _surge * 5.0
+	cam.speed_feel = speed_k
+	var gm := grade_rect.material as ShaderMaterial
+	gm.set_shader_parameter("blur", speed_k * speed_k)
+	gm.set_shader_parameter("speed", speed_k)
 	cam.update_cam(dt)
 	# fog + shadows sized to the zoom level, sun follows the rider
 	if scenic:

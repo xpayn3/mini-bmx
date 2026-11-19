@@ -148,10 +148,11 @@ func update_audio(dt: float) -> void:
 	var on_ground := not st.air and not st.crash_on
 	var k := minf(1.0, dt * 8)
 	# wind: louder AND brighter the faster you go, a touch more in the air (nothing else masks it)
-	var wt := clampf(va * va / 260.0, 0, 1) * (0.62 if st.air else 0.55)
+	# (keeps building past ~60 km/h: the roar is a big part of feeling fast)
+	var wt := clampf(va * va / 340.0, 0, 1.3) * (0.62 if st.air else 0.55)
 	wind += (wt - wind) * minf(1.0, dt * 4)
-	wind_tone += ((0.018 + clampf(va / 22.0, 0, 1) * 0.09) - wind_tone) * k
-	whistle += ((clampf((va - 9.0) / 10.0, 0, 1) * 0.12) - whistle) * k
+	wind_tone += ((0.018 + clampf(va / 24.0, 0, 1.15) * 0.09) - wind_tone) * k
+	whistle += ((clampf((va - 9.0) / 14.0, 0, 1) * 0.15) - whistle) * k
 	var surf_amp: float = [0.32, 0.22, 0.0, 0.42][st.surf]
 	roll += ((clampf(va / 12.0, 0, 1) * surf_amp if on_ground else 0.0) - roll) * k
 	roll_tone += (([0.12, 0.2, 0.1, 0.06][st.surf]) - roll_tone) * k
