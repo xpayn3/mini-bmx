@@ -9,7 +9,8 @@ const SLOW := 0.22          # time scale at the bottom of the slow-mo
 const T_IN := 0.18          # s (real) to drop into slow motion
 const T_HOLD := 2.4         # s (real) held slow
 const T_OUT := 0.9          # s (real) back to normal speed
-const T_TEXT := 0.75        # s (real) after the crash the letters punch in
+const T_TEXT := 1.5         # s (real) the letters stay up (they show at once), then fade
+const T_TEXT_FADE := 0.4    # s (real) the letters take to fade out
 const T_FADE := 5.0         # s (real) the look starts fading if the rider is still down
 const SHADER := """
 shader_type canvas_item;
@@ -127,7 +128,7 @@ func _process(_dt: float) -> void:
 	# look
 	var k := smoothstep(0.0, 0.6, t) * (1.0 - fade)
 	var blur := clampf(1.0 - t / 0.35, 0.0, 1.0) * (1.0 - fade)
-	var tk := clampf((t - T_TEXT) / 0.22, 0.0, 1.0) * (1.0 - fade)
+	var tk := (1.0 - clampf((t - T_TEXT) / T_TEXT_FADE, 0.0, 1.0)) * (1.0 - fade)   # on at once, off after T_TEXT
 	_show(k, blur, tk)
 	_mask_follow()
 	if fading and fade >= 1.0:
@@ -140,11 +141,11 @@ func _show(k: float, blur: float, tk: float) -> void:
 	var m := rect.material as ShaderMaterial
 	m.set_shader_parameter("k", k)
 	m.set_shader_parameter("blur", blur)
-	# letters: punch in from bigger, settle with a tiny overshoot
-	title.zoom = 1.0 + 0.25 * pow(1.0 - tk, 3.0) - 0.015 * sin(tk * PI)
+	# letters: full size at once
+	title.zoom = 1.0
 	title.modulate.a = tk
 	title.queue_redraw()
-	sub.modulate.a = clampf(tk * 2.0 - 1.0, 0.0, 1.0)
+	sub.modulate.a = tk
 
 func _mask_on() -> void:
 	if game == null or game.cam == null: return
