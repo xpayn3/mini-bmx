@@ -140,6 +140,7 @@ func prompt_items() -> Array:
 var _tips: Control
 var _spin_t := 0.0
 var _spin_v := 0.0
+var _spin_side := 0            # which face is toward you (roundf(_spin_t / PI)): a change = turned over
 
 func _process(dt: float) -> void:
 	super._process(dt)
@@ -154,6 +155,11 @@ func _process(dt: float) -> void:
 	elif OS.get_environment("BMX_LEAFLET_SPIN") == "":   # let go: settle on whichever side is nearer (face or back)
 		_spin_t = lerpf(_spin_t, roundf(_spin_t / PI) * PI, 1.0 - exp(-rdt * 6.0))
 	if is_unfolded(): _spin_t = roundf(_spin_t / TAU) * TAU   # opening: face on
+	# turning it over (face <-> back) rustles like any paper move: the same recording, a short slice
+	var side := int(roundf(_spin_t / PI))
+	if side != _spin_side:
+		_spin_side = side
+		if state == 2 and not is_unfolded() and OS.get_environment("BMX_LEAFLET_SPIN") == "": _play_slice(1.25, 0.5)
 	# a soft spring follows the target (a sheet of paper has a little lag and overshoot)
 	_spin_v += ((_spin_t - spin) * 60.0 - _spin_v * 11.0) * rdt
 	spin += _spin_v * rdt
