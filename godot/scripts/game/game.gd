@@ -784,6 +784,7 @@ func _unhandled_input(e: InputEvent) -> void:
 		if lp != "": print("RIDELOG ", lp)
 		return
 	if photo: return
+	if e.is_action_pressed("map") and not e.is_echo(): open_map(); return
 	if e.is_action_pressed("new_world") and not e.is_echo(): respawn(true)
 	elif e.is_action_pressed("respawn") and not e.is_echo(): respawn(false)
 	elif e.is_action_pressed("bail") and not phys.crash_on: phys.crash_pending = "BAIL!"
@@ -902,6 +903,31 @@ func toggle_photo() -> void:
 func exit_photo() -> void:
 	if photo:
 		toggle_photo()
+	exit_map()
+
+## the paper trail map (M, ui/paper_map.gd): the ride freezes, a folded map comes up and unfolds. Built on
+## first use. It takes all input while it's up; M / Esc / bail fold it away again.
+var paper_map: PaperMap
+func open_map() -> void:
+	if photo or phys.crash_on or (paper_map and paper_map.busy()): return
+	if paper_map == null:
+		paper_map = PaperMap.new()
+		paper_map.game = self
+		paper_map.close_actions = [&"map", &"pause", &"bail"]
+		add_child(paper_map)
+		paper_map.closed.connect(_map_closed)
+	Engine.time_scale = 0.0
+	hud.visible = false
+	paper_map.show_map()
+
+func _map_closed() -> void:
+	Engine.time_scale = 1.0
+	hud.visible = input_enabled and not photo
+
+## put the map away at once (pause, menus, a new ride)
+func exit_map() -> void:
+	if paper_map and paper_map.busy():
+		paper_map.close(true)
 
 func _exit_tree() -> void:
 	Engine.time_scale = 1.0
