@@ -60,10 +60,12 @@ func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
 			extras.suspension.fork.travel = mods.fork_travel
 			extras.suspension.rear.travel = mods.shock_travel
 		BikeBuild.apply_paint(model, build)
-		if build.has("bars"):
+		if build.has("bars") and not extras.get("noBarMod", false):   # a frame with its own cockpit keeps its bars
 			Handlebar.apply(steer_n as MeshInstance3D, build.bars)
 			_grips()   # the grips moved with the bar
 		decal_cfg = BikeBuild.decal_config(build)
+		if extras.get("noDecals", false):   # the logo slots are placed for the GLORY frame; keep the tyre / rim ones
+			decal_cfg.erase("labels")
 	if extras.has("suspension"):
 		susp = Suspension.new(model, extras)
 	if not decal_cfg.is_empty():

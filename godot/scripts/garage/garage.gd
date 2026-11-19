@@ -413,7 +413,7 @@ func _rebuild_bike() -> void:
 		rig.queue_free()
 	rig = BikeRig.new()
 	add_child(rig)
-	var cfg: Dictionary = GameState.BIKES.dh
+	var cfg: Dictionary = GameState.BIKES[GameState.bike_id] if GameState.BIKES[GameState.bike_id].get("garage", false) else GameState.BIKES.dh
 	rig.load_bike(cfg, build)
 	var L := float(rig.extras.get("wheelbase", 1.25))
 	var bb := float(rig.extras.get("bbToRearAxle", 0.44))
