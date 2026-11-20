@@ -327,7 +327,7 @@ static var _carbon: ImageTexture
 static func carbon_texture() -> ImageTexture:
 	if _carbon != null:
 		return _carbon
-	var N := 128
+	var N := 512
 	var img := Image.create(N, N, false, Image.FORMAT_RGB8)
 	var cell := N / 4
 	for y in N:

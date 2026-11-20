@@ -103,6 +103,9 @@ func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
 			decal_cfg["labels"] = fitted
 		if fork_id != "" and decal_cfg.has("labels"):   # the fork leg logo slot is cut for the stock fork
 			decal_cfg.labels = (decal_cfg.labels as Array).filter(func(l): return str(l.get("mesh", "")) != "fork_lower")
+	MetalFinish.apply(model)   # bare metal parts get the brushed-metal scan (paint stays as it is)
+	for r in rotors:
+		MetalFinish.dress_rotor(r.material)
 	if extras.has("suspension"):
 		susp = Suspension.new(model, extras)
 	if extras.has("chain"):

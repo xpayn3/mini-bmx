@@ -492,6 +492,12 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - Bike height is placed from the **real tyre size and real axle positions** (no tyre clipping into the floor
   or the roller drums; verified with `BMX_TYRE_PROBE`).
 - Saved in `garage.json`; `GameState.bike_config()` applies it to the ride.
+- **Materials at photo quality** (2026-11-20): car paint (`BikeFX.CAR_PAINT_SHADER`) = round metal flakes 0.15–0.3 mm (per finish,
+  `FINISHES.*.flake`), in metres whatever the model scale; LOD keeps every flake ≥ ~2 px and turns the ones that can't be resolved
+  into gloss spread (no pixel mosaic, no shimmer). Bare metal (`chrome`, `black`, `chain`, `gold`, wheel `hub` / `spokes`) gets the
+  ambientCG **Metal009** brushed scan (`MetalFinish`, `assets/textures/brushed_metal`, CC0) triplanar, 16 cm a tile, normalised so each
+  part keeps its tuned colour / roughness; rotors get it as grinding rings. Every 3D texture import must have mipmaps (rubber / goggles
+  had none); logo PNGs are 4x upscaled, text decals bake at 2048 px, carbon weave 512 px.
 
 ### Effects
 - **Dust = a real 3D smoke simulation** (`fx/smoke_sim.gd` + compute shaders `shaders/smoke/*.glsl`): a

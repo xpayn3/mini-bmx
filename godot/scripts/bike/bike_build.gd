@@ -10,13 +10,13 @@ const LOGO_DIR := "user://logos"
 
 const FINISHES := {
 	"gloss":    {"label": "Gloss",    "metallic": 0.0,  "roughness": 0.32, "clearcoat": 1.0, "cc_rough": 0.03, "sparkle": 0.0,  "flip": 0.0},
-	"metallic": {"label": "Metallic", "metallic": 0.55, "roughness": 0.34, "clearcoat": 1.0, "cc_rough": 0.03, "sparkle": 0.22, "flip": 0.0},
-	"pearl":    {"label": "Pearl shift", "metallic": 0.45, "roughness": 0.3, "clearcoat": 1.0, "cc_rough": 0.03, "sparkle": 0.12, "flip": 0.85},
-	"candy":    {"label": "Candy",    "metallic": 0.85, "roughness": 0.18, "clearcoat": 1.0, "cc_rough": 0.02, "sparkle": 0.3,  "flip": 0.0, "deep": 0.55},
-	"satin":    {"label": "Satin",    "metallic": 0.2,  "roughness": 0.55, "clearcoat": 0.3, "cc_rough": 0.4,  "sparkle": 0.05, "flip": 0.0},
+	"metallic": {"label": "Metallic", "metallic": 0.55, "roughness": 0.34, "clearcoat": 1.0, "cc_rough": 0.03, "sparkle": 0.22, "flip": 0.0, "flake": 0.00025},
+	"pearl":    {"label": "Pearl shift", "metallic": 0.45, "roughness": 0.3, "clearcoat": 1.0, "cc_rough": 0.03, "sparkle": 0.12, "flip": 0.85, "flake": 0.00015},
+	"candy":    {"label": "Candy",    "metallic": 0.85, "roughness": 0.18, "clearcoat": 1.0, "cc_rough": 0.02, "sparkle": 0.3,  "flip": 0.0, "deep": 0.55, "flake": 0.0003},
+	"satin":    {"label": "Satin",    "metallic": 0.2,  "roughness": 0.55, "clearcoat": 0.3, "cc_rough": 0.4,  "sparkle": 0.05, "flip": 0.0, "flake": 0.0002},
 	"matte":    {"label": "Matte",    "metallic": 0.0,  "roughness": 0.88, "clearcoat": 0.0, "cc_rough": 1.0,  "sparkle": 0.0,  "flip": 0.0},
 	"chrome":   {"label": "Chrome",   "metallic": 1.0,  "roughness": 0.06, "clearcoat": 0.0, "cc_rough": 0.0,  "sparkle": 0.0,  "flip": 0.0},
-	"anodized": {"label": "Anodized", "metallic": 0.9,  "roughness": 0.3,  "clearcoat": 0.0, "cc_rough": 0.0,  "sparkle": 0.06, "flip": 0.0},
+	"anodized": {"label": "Anodized", "metallic": 0.9,  "roughness": 0.3,  "clearcoat": 0.0, "cc_rough": 0.0,  "sparkle": 0.06, "flip": 0.0, "flake": 0.00015},
 }
 
 ## paintable parts: [label, [[node, surface material name], ...]]
@@ -312,7 +312,7 @@ static func paint_material(p: Dictionary) -> ShaderMaterial:
 	var col := Color(p.color)
 	if F.has("deep"): col = col.darkened(0.15)
 	var m := BikeFX.car_paint(null, {"color": col, "metallic": F.metallic, "roughness": F.roughness,
-		"sparkle": F.sparkle, "clearcoat_roughness": F.cc_rough})
+		"sparkle": F.sparkle, "clearcoat_roughness": F.cc_rough, "flake": F.get("flake", 0.00025)})
 	m.set_shader_parameter("clearcoat", F.clearcoat)
 	m.set_shader_parameter("color2", Color(p.color2))
 	m.set_shader_parameter("flip", F.flip)
