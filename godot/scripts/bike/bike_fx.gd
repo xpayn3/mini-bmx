@@ -262,6 +262,7 @@ class RotorGlow:
 		# the disc: same vertex arrays, only its triangles
 		var da := arr.duplicate()
 		da[Mesh.ARRAY_INDEX] = disc
+		da = flat_arrays(da)
 		var dm := ArrayMesh.new()
 		dm.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, da)
 		if BikeFX._rotor_shader == null:
@@ -288,6 +289,33 @@ class RotorGlow:
 		mesh_instance.mesh = dm
 		mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 		wheel.add_child(mesh_instance)
+
+	## the arrays of a triangle surface with every triangle on its own vertices and its own flat normal (faceted shading:
+	## smoothed normals made the rotor's flat plate and slot edges look pillowy)
+	static func flat_arrays(arr: Array) -> Array:
+		var idx: PackedInt32Array = arr[Mesh.ARRAY_INDEX] if arr[Mesh.ARRAY_INDEX] != null else PackedInt32Array()
+		var v: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+		if idx.is_empty():
+			idx = PackedInt32Array(range(v.size()))
+		var col = arr[Mesh.ARRAY_COLOR]
+		var uv = arr[Mesh.ARRAY_TEX_UV]
+		var nv := PackedVector3Array(); var nn := PackedVector3Array()
+		var nc := PackedColorArray(); var nu := PackedVector2Array()
+		for t in range(0, idx.size() - 2, 3):
+			var a := v[idx[t]]; var b := v[idx[t + 1]]; var c := v[idx[t + 2]]
+			var n := (b - a).cross(c - a).normalized()
+			for k in 3:
+				var i := idx[t + k]
+				nv.append(v[i]); nn.append(n)
+				if col != null and (col as PackedColorArray).size() > i: nc.append((col as PackedColorArray)[i])
+				if uv != null and (uv as PackedVector2Array).size() > i: nu.append((uv as PackedVector2Array)[i])
+		var out := []
+		out.resize(Mesh.ARRAY_MAX)
+		out[Mesh.ARRAY_VERTEX] = nv
+		out[Mesh.ARRAY_NORMAL] = nn
+		if not nc.is_empty(): out[Mesh.ARRAY_COLOR] = nc
+		if not nu.is_empty(): out[Mesh.ARRAY_TEX_UV] = nu
+		return out
 
 	## heat: 0 cold .. 1 glowing hot
 	func set_heat(k: float) -> void:
