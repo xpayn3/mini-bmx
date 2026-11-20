@@ -21,13 +21,13 @@ const G := preload("res://scripts/rider/rider_geo.gd")
 ## it in the rider look (GEAR_LOOK keys), the bike camera in build.camera. Shapes are procedural, after the real
 ## cameras (no logos). W / H / D = width (Z), height (Y), depth (X) in m; fov = the POV view's vertical FOV.
 const MODELS := {
-	"hero": {label = "GoPro HERO13 Black", W = 0.071, H = 0.051, D = 0.034, body = "#17181b", trim = "#3b3e44", lens = "square", screen = "front", fov = 88.0},
-	"max":  {label = "GoPro MAX", W = 0.0695, H = 0.064, D = 0.025, body = "#1b1c1f", trim = "#44474d", lens = "dual", screen = "back", fov = 96.0},
-	"osmo": {label = "DJI Osmo Action 5 Pro", W = 0.070, H = 0.044, D = 0.033, body = "#2b2d31", trim = "#6b6f77", lens = "round", screen = "front_big", fov = 90.0},
-	"x4":   {label = "Insta360 X4", W = 0.046, H = 0.124, D = 0.038, body = "#141516", trim = "#3a3c40", lens = "dual_top", screen = "back", fov = 96.0},
-	"go":   {label = "Insta360 GO 3S", W = 0.026, H = 0.054, D = 0.025, body = "#ecece6", trim = "#c9ccd1", lens = "pill", screen = "", fov = 82.0},
+	"hero": {label = "VANTA Act 13 Black", W = 0.071, H = 0.051, D = 0.034, body = "#17181b", trim = "#3b3e44", lens = "square", screen = "front", fov = 88.0},
+	"max":  {label = "VANTA Orbit 360", W = 0.0695, H = 0.064, D = 0.025, body = "#1b1c1f", trim = "#44474d", lens = "dual", screen = "back", fov = 96.0},
+	"osmo": {label = "KESTREL Action 5 Pro", W = 0.070, H = 0.044, D = 0.033, body = "#2b2d31", trim = "#6b6f77", lens = "round", screen = "front_big", fov = 90.0},
+	"x4":   {label = "OMNIEYE X4", W = 0.046, H = 0.124, D = 0.038, body = "#141516", trim = "#3a3c40", lens = "dual_top", screen = "back", fov = 96.0},
+	"go":   {label = "OMNIEYE Pocket 3S", W = 0.026, H = 0.054, D = 0.025, body = "#ecece6", trim = "#c9ccd1", lens = "pill", screen = "", fov = 82.0},
 }
-const MODEL_LIST := [["hero", "GoPro HERO13"], ["max", "GoPro MAX"], ["osmo", "DJI Osmo Action 5"], ["x4", "Insta360 X4"], ["go", "Insta360 GO 3S"]]
+const MODEL_LIST := [["hero", "VANTA Act 13"], ["max", "VANTA Orbit 360"], ["osmo", "KESTREL Action 5"], ["x4", "OMNIEYE X4"], ["go", "OMNIEYE Pocket 3S"]]
 const LENSES := [["stock", "Stock"], ["ultra", "Max Lens Mod"], ["nd", "ND filter"], ["guard", "Clear guard"]]
 const HOUSINGS := [["none", "None"], ["frame", "Frame"], ["sleeve", "Silicone sleeve"], ["dive", "Dive housing"]]
 const MICS := [["none", "None"], ["mediamod", "Media Mod"], ["shotgun", "Shotgun mic"], ["deadcat", "Furry windshield"]]

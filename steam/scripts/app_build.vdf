@@ -1,0 +1,12 @@
+"AppBuild"
+{
+	"AppID" "480"                  // <- your App ID (Steamworks > App Admin)
+	"Desc" "Runout build"          // shows in Steamworks > SteamPipe > Builds
+	"ContentRoot" "..\..\build\steam\windows\"
+	"BuildOutput" "..\..\build\steam\output\"
+	"SetLive" ""                   // e.g. "beta" to put the build on a branch straight away (never "default")
+	"Depots"
+	{
+		"481" "depot_build.vdf"    // <- your Windows depot ID (usually App ID + 1)
+	}
+}

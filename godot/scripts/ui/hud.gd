@@ -188,6 +188,7 @@ func on_style(points: int, label: String) -> void:
 func on_trick(trick: String) -> void:
 	tricks += 1
 	trick_last = trick
+	Steam.trick(trick)
 
 ## a crash hurts by how fast the body was going: a slow tip-over ~15 %, 12 m/s+ ~70 %+
 const LIFE_REGEN := 0.012   # per second while riding, from LIFE_WAIT s after a crash
@@ -198,6 +199,7 @@ func on_crash(speed := 0.0) -> void:
 	life = maxf(0.0, life - clampf(0.12 + speed / 12.0 * 0.6, 0.12, 0.95))
 	hurt_t = 0.0
 	life_bar.shake = 1.0
+	if speed >= 9.0: Steam.event("WASTED")
 	# knocked out: the computer's incident detection sounds its alarm (once the crash slow motion is over)
 	if life <= 0.0 and is_inside_tree():
 		get_tree().create_timer(2.6, true, false, true).timeout.connect(_incident_alarm)
@@ -213,6 +215,7 @@ func on_health_pack(amount: float) -> void:
 	life = minf(1.0, life + amount)
 	life_bar.heal = 1.0
 	flash("HEALTH +%d%%" % roundi(amount * 100.0))
+	Steam.event("HEALTH_PACK")
 	if Env.s("BMX_LIFE_PROBE") != "": print("LIFE health pack life=%.2f" % life)
 
 ## back on the bike: at zero life that was a revive (half life back, the bar glows green)
@@ -222,6 +225,7 @@ func on_get_up() -> void:
 		hurt_t = LIFE_WAIT
 		life_bar.heal = 1.0
 		flash("REVIVED")
+		Steam.event("REVIVE")
 		if game and game.grime: game.grime.blood = 0.0   # the blood on the rider washes off with a revive
 		if Env.s("BMX_LIFE_PROBE") != "": print("LIFE revived life=%.2f" % life)
 

@@ -6,7 +6,7 @@ extends RefCounted
 ## `nav` = trail alerts (turns / features) and the map page. `scale` = drawn size of the HUD unit.
 
 const UNITS := {
-	"edge": {"name": "EDGE 840", "size": "LARGE", "scale": 1.22, "nav": true, "order": [0, 1, 2, 3, 4, 5, 6],
+	"edge": {"name": "VISTA 840", "size": "LARGE", "scale": 1.22, "nav": true, "order": [0, 1, 2, 3, 4, 5, 6],
 		"body": Color("16181a"), "accent": Color("ffd21f"), "blurb": "Full navigation, every page"},
 	"classic": {"name": "CLASSIC 540", "size": "MEDIUM", "scale": 1.0, "nav": true, "order": [0, 1, 2, 3, 4, 5, 6],
 		"body": Color("16181a"), "accent": Color("8be36a"), "blurb": "Navigation, map and alerts"},

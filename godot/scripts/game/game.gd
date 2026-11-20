@@ -1472,6 +1472,7 @@ func _process(dt: float) -> void:
 			if biome_hold >= 3:
 				biome_cur = b
 				area_title.show_area(b)
+				Steam.presence("Riding · " + b)
 	# weather: wind, the bike parting the grass, cloud shadows (the sun dims with the shade at the rider)
 	atmos.update(t, dt, drawn_pos, 0.0 if st.air or st.crash_on else clampf(absf(st.v) / 2.0, 0.0, 1.0))
 	_update_light(dt)

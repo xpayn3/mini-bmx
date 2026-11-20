@@ -1255,10 +1255,8 @@ func _logos_page() -> void:
 		return
 	_h("LOGO")
 	var items := []
-	var upright: bool = BikeBuild.SLOTS[logo_slot].tmpl.get("upright", false)
 	for k in BikeBuild.LOGOS:
 		var lg: Dictionary = BikeBuild.LOGOS[k]
-		if upright and (lg.has("text") or k == "text"): continue
 		items.append([k, lg.label])
 	for f in BikeBuild.imported_logos():
 		items.append(["file:" + f, "Imported · " + f.get_file().get_basename()])
@@ -1438,14 +1436,14 @@ func _bars_page() -> void:
 	for r in ActionCam.GEAR_ROWS:
 		var gk: String = r[0]
 		_choice(r[1], r[2], str(build.camera.get(gk, ActionCam.GEAR_DEFAULT[gk])), func(v): build.camera[gk] = v)
-	_note("A GoPro-style camera on the bike: the Bike cam view (C) looks out of it. The helmet camera is picked in the Rider room's Kit tab.")
+	_note("An action camera on the bike: the Bike cam view (C) looks out of it. The helmet camera is picked in the Rider room's Kit tab.")
 
 func _brakes_page() -> void:
 	var S: Dictionary = build.suspension
 	_h("DISC BRAKES")
 	_choice("Rotors", BikeBuild.ROTORS, str(S.get("rotor", "stock")), func(v): S.rotor = v)
 	_choice("Rear caliper", BikeBuild.REAR_CALIPERS, str(S.get("rear_caliper", "stock")), func(v): S.rear_caliper = v)
-	_note("Rotors fit every frame. The front caliper comes with the fork (Shocks tab); the Tues and Fuzz rear calipers fit the GLORY's rear triangle, the new frames keep their own.")
+	_note("Rotors fit every frame. The front caliper comes with the fork (Shocks tab); the Tusk and Fizz rear calipers fit the RUNOUT's rear triangle, the new frames keep their own.")
 	_h("LEVERS")
 	var B: Dictionary = build.bars
 	_choice("Brake levers", BikeBuild.LEVERS, str(B.get("levers", "stock")), func(v): B.levers = v)
@@ -1471,7 +1469,7 @@ func _susp_page() -> void:
 	_choice("Rebound", [[0, "Slow (planted)"], [1, "Medium"], [2, "Fast (poppy)"]], S.rebound, func(v): S.rebound = v)
 	_note("More travel soaks bigger drops; firmer springs pop and pump harder but kick on rough ground. Fork colours can be changed in Paint.")
 
-## "Maxxis Minion DHF" + MAXXIS -> "Minion DHF" (the card shows the brand above the name)
+## "Gripwell Raptor DHF" + GRIPWELL -> "Raptor DHF" (the card shows the brand above the name)
 static func _model_name(label: String, brand: String) -> String:
 	if label.to_upper().begins_with(brand): return label.substr(brand.length()).strip_edges()
 	var w := label.split(" ", false, 1)

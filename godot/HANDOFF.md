@@ -779,6 +779,22 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   **Ride presets** sit on top of every Ride / Rider › Physics category (`scripts/core/tune_presets.gd`: built-ins Default, Flowy, Grippy, Drifty, Floaty air, Fast + the player's own via Save as / Delete, in `user://tune_presets.cfg`; an own preset follows its sliders). Reset puts the category back to the active preset's values. Quick tune card keeps the pinned (☆) sliders. Test: `BMX_PANEL=ride|rider|look|sound`
   + `BMX_PANEL_CAT=<n>`.
 
+### Steam release (2026-11-20)
+- **Release kit + checklist: repo root `steam/README.md`** (App ID steps, achievements to create, Steam Cloud paths, store
+  art sizes, assets still to fix). `steam/upload.ps1` exports to `build/steam/windows/Runout.exe` and uploads with steamcmd.
+- `Steam` autoload (`scripts/core/steam.gd` + `SteamService.cs`, Steamworks.NET 2024.8.0 NuGet, native DLL in
+  `addons/steamworks/`, copied next to the assemblies by the csproj and found by a DllImport resolver). `APP_ID` is 480
+  (Spacewar) until the real one exists. Off in test runs (`BMX_STEAM=1` forces it), headless and `-s` runs; without Steam
+  every call is a no-op. `Steam.ACHIEVEMENTS` (records polled 1x/s, `Steam.trick()` from `hud.on_trick`, `Steam.event()`
+  from crash / revive / health pack / garage save / photo / ride start), `Steam.presence()`.
+- **No real brands in anything a player sees** (user decision for the paid release): every bike, part, tyre, rim, fork,
+  helmet, sponsor, computer name is made up (GLORY DH -> RUNOUT DH, Maxxis -> GRIPWELL, YT Tues -> Yonder Tusk, NS Fuzz
+  -> Nexo Fizz...). Internal ids / save keys unchanged; `BikeBuild.rebrand()` converts old saved lettering. New content
+  must use made-up names too. The TV texture's logos were painted out (front says VIDAVOX).
+- Title menu CREDITS (`ui/credits_menu.gd`): credits, licence texts, Godot + its components. Add attribution there for new
+  CC-BY / MIT / OFL assets. Version: `application/config/version` (shown under the menu). Exe icon `icon.ico`
+  (`tools/make_icon.gd` renders `icon.svg`).
+
 ## 6. Testing (the game drives itself — use these, don't ask the user to check)
 
 Run with the **console** exe so prints show. Every test run quits by itself.

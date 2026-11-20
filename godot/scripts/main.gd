@@ -245,6 +245,7 @@ func _take_prebuilt() -> bool:
 func _show_menu() -> void:
 	state = MENU
 	GameState.end_ride()
+	Steam.presence("In the menus")
 	get_tree().paused = false
 	if game: game.exit_photo()
 	_close_controls()
@@ -306,7 +307,7 @@ func _show_menu() -> void:
 	menu_settings.add_child(gear)
 	menu.add_child(menu_settings)
 	# version: small, bottom right of the screen, just left of the fullscreen button and centred on it
-	menu_version = UITheme.text("v1.0  ·  Godot %s" % Engine.get_version_info().string, Color(1, 1, 1, 0.8), Tokens.T_XS)
+	menu_version = UITheme.text("v%s  ·  Godot %s" % [ProjectSettings.get_setting("application/config/version", "1.0.0"), Engine.get_version_info().string], Color(1, 1, 1, 0.8), Tokens.T_XS)
 	menu_version.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
 	menu_version.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	menu_version.grow_vertical = Control.GROW_DIRECTION_BEGIN
@@ -319,6 +320,7 @@ func _show_menu() -> void:
 	menu.add_child(menu_version)
 	_menu_page_main()
 	if Env.s("BMX_MENU_PAGE") == "setup": _menu_page_setup(int(Env.s("BMX_SETUP_STEP")))   # tests: the ride setup page (BMX_SETUP_STEP=0..3)
+	if Env.s("BMX_MENU_PAGE") == "credits": _show_credits()   # tests: the credits window
 
 var menu_quit: Button
 var menu_settings: Button
@@ -524,19 +526,22 @@ func _menu_page_main() -> void:
 	var fill := func() -> void:   # equal stretch above and below: the menu sits centred under the logo
 		var c := Control.new(); c.size_flags_vertical = Control.SIZE_EXPAND_FILL; vb.add_child(c)
 	fill.call()
-	var ride := _menu_button("RIDE", "Pick a bike and the time of day", _menu_page_setup, true)
+	var ride := _menu_button("RIDE", "Pick a bike and the time of day", _menu_page_setup, true, true)
 	vb.add_child(ride)
-	vb.add_child(_menu_button("DEMO", "An AI rider rides; tune everything live", _start_demo))
-	vb.add_child(_menu_button("GARAGE", "Paint, wheels, bars, shocks, gears", _open_garage))
-	vb.add_child(_menu_button("RIDER", "Riding position on the rollers, kit", _open_garage.bind("rider")))
+	vb.add_child(_menu_button("DEMO", "An AI rider rides; tune everything live", _start_demo, false, true))
+	vb.add_child(_menu_button("GARAGE", "Paint, wheels, bars, shocks, gears", _open_garage, false, true))
+	vb.add_child(_menu_button("RIDER", "Riding position on the rollers, kit", _open_garage.bind("rider"), false, true))
 	vb.add_child(UITheme.spacer(Tokens.S2))
 	# world seed
-	vb.add_child(UITheme.caption("WORLD"))
+	var world_cap := UITheme.caption("WORLD")
+	world_cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(world_cap)
 	var seed_row := HBoxContainer.new()
 	seed_row.add_theme_constant_override("separation", Tokens.S2)
 	var se := LineEdit.new()
 	se.text = str(GameState.seed)
 	se.placeholder_text = "World seed"
+	se.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	se.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	se.custom_minimum_size.y = Tokens.H_CHIP
 	se.tooltip_text = "World seed: type a number and press Enter"
@@ -546,6 +551,9 @@ func _menu_page_main() -> void:
 	seed_row.add_child(se)
 	seed_row.add_child(UITheme.make_button("NEW WORLD", func(): GameState.new_seed(); se.text = str(GameState.seed); _seed_changed(), "chip", Tokens.T_LG))
 	vb.add_child(seed_row)
+	var cred := UITheme.make_button("CREDITS", _show_credits, "link", Tokens.T_XL)
+	cred.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(cred)
 	fill.call()
 	if is_instance_valid(menu_quit): menu_quit.visible = true
 	if is_instance_valid(menu_settings): menu_settings.visible = true
@@ -1134,7 +1142,7 @@ func _setup_next() -> void:
 	else: _start_ride()
 
 ## a big menu button: display-font title (+ optional small line under it); primary = the yellow one
-func _menu_button(text: String, sub: String, cb: Callable, primary := false) -> Button:
+func _menu_button(text: String, sub: String, cb: Callable, primary := false, centred := false) -> Button:
 	var b := UITheme.make_button("", cb, "menu")   # one look for every line: the focused one is yellow (console cursor)
 	# room above the name and below the second line (they used to touch the box's edges)
 	b.custom_minimum_size.y = (Tokens.H_HERO if primary else Tokens.H_SUB) + Tokens.S3
@@ -1152,6 +1160,8 @@ func _menu_button(text: String, sub: String, cb: Callable, primary := false) -> 
 	col.add_child(UITheme.display(text, Tokens.T_3XL if primary else Tokens.T_2XL + Tokens.S1))
 	if sub != "":
 		col.add_child(UITheme.text(sub, Tokens.INK if primary else Tokens.INK_SOFT, Tokens.T_SM))
+	if centred:
+		for l in col.get_children(): (l as Label).horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	m.add_child(col)
 	b.add_child(m)
 	return b
@@ -1160,6 +1170,7 @@ var garage: Garage
 
 ## mode "bike" = the garage, "rider" = the rider room (same room: position on the rollers + kit)
 func _open_garage(mode := "bike") -> void:
+	Steam.presence("In the garage" if mode == "bike" else "Setting up the rider")
 	if menu: menu.queue_free(); menu = null
 	fade.modulate.a = 1.0
 	if game:
@@ -1202,6 +1213,8 @@ func _start_ride() -> void:
 	game.respawn(false)
 	_set_riding(true)
 	GameState.begin_ride()   # counts as an activity once it has covered GameState.ACTIVITY_M
+	Steam.event("FIRST_DROP")
+	Steam.presence("Riding · " + game.biome_cur)
 
 ## DEMO: the same ride, an AI rider at the bars (F2 hands it back); the tuning card opens on the Demo tab
 func _start_demo() -> void:
@@ -1341,6 +1354,20 @@ func _show_controls() -> void:
 		if is_instance_valid(dim): dim.queue_free()
 		if controls_open == w: controls_open = null
 		if is_instance_valid(pause_menu): pause_menu.visible = true)
+	ui.add_child(w)
+
+## credits + licences (title menu)
+func _show_credits() -> void:
+	if is_instance_valid(controls_open) or is_instance_valid(settings_open): return
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.35)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	ui.add_child(dim)
+	var w: Control = load("res://scripts/ui/credits_menu.gd").new()
+	controls_open = w   # (one window at a time: shares the Controls slot)
+	w.tree_exiting.connect(func():
+		if is_instance_valid(dim): dim.queue_free()
+		if controls_open == w: controls_open = null)
 	ui.add_child(w)
 
 # ---------------------------------------------------------------- unattended smoke test

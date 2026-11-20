@@ -176,7 +176,7 @@ static func pedal_rock(p_crank: float, p_sprint: float, p_pedal: float, va: floa
 	var rock_fade: float = 1.0 - 0.65 * smoothstep(5.0, 12.0, va)
 	# sprinting from slow: the bike is thrown hard side to side under the rider (~15 deg each way)
 	var effort: float = p_sprint * slowness(va)
-	return sin(p_crank) * 0.105 * (1 + 0.65 * p_sprint + float(Tune.v.get("sprintRock", 0.75)) * effort) * p_pedal * minf(1.0, va / 2 + 0.3) * rock_fade * p_bike_rock
+	return sin(p_crank) * 0.105 * (1 + 0.65 * p_sprint + float(Tune.v.get("sprintRock", 0.3)) * effort) * p_pedal * minf(1.0, va / 2 + 0.3) * rock_fade * p_bike_rock
 
 func gear_k() -> float:
 	if gear < 0: return ring_k * 16.0 / float(cogs[0]) if cogs.size() > 0 else 1.0

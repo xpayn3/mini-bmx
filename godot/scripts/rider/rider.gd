@@ -32,10 +32,10 @@ const DEFAULT_LOOK := {shell = "#16171a", peak = "#ececec", goggleFrame = "#f2f2
 ## shell / peak, our goggles); the others are textured models (tools/export_helmets.py) that always wear their own goggles
 ## + strap (the glb's "helmet_goggles" node: our goggles don't fit them)
 const HELMETS := {
-	"glory": ["GLORY", "res://assets/helmet.glb"],
-	"6d_black": ["6D ATR-2 black", "res://assets/helmets/helmet_6d_black.glb"],
-	"6d_silver": ["6D ATR-2 silver", "res://assets/helmets/helmet_6d_silver.glb"],
-	"tld": ["TLD SE5", "res://assets/helmets/helmet_tld.glb"],
+	"glory": ["RUNOUT", "res://assets/helmet.glb"],
+	"6d_black": ["HEX6 AT-2 black", "res://assets/helmets/helmet_6d_black.glb"],
+	"6d_silver": ["HEX6 AT-2 silver", "res://assets/helmets/helmet_6d_silver.glb"],
+	"tld": ["TOPLINE S5", "res://assets/helmets/helmet_tld.glb"],
 }
 ## per helmet model: where it sits on the head, on top of HELMET_FIT (same keys)
 const HELMET_FITS := {
@@ -233,7 +233,7 @@ func _init() -> void:
 		goggle_mats.model_mat = ski_goggle_material()
 	var baker := StrapLogo.new()
 	baker.mat = logo
-	baker.text = "GIANT"
+	baker.text = "COLOSSUS"
 	add_child(baker)
 	for i in 2:
 		var s := GEAR.build_shoe(shoe_mats)
@@ -1081,10 +1081,11 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var effort: float = spr * pedal * BikePhysics.slowness(v) * float(Tune.v.get("sprintEffort", 1.0))   # the slower, the harder they fight
 	sm_effort += (effort - sm_effort) * (1.0 - exp(-6.0 * minf(dt, 0.1)))
 	var eff: float = sm_effort
-	var sway: float = sin(crank) * pedal * sty.sway * (1 + 0.9 * spr + 1.3 * eff) * hi_fade
+	var sway: float = sin(crank) * pedal * sty.sway * (1 + 0.6 * spr + 0.45 * eff) * hi_fade   # a real sprinter's hips stay fairly still: the bike rocks under them
 	# (Body bob: how far the body rises and drops with each pedal stroke)
-	var bob: float = sin(crank * 2) * pedal * sty.sway * float(sty.get("bodyBob", 1.0)) * (1 + 0.6 * spr + 1.0 * eff) * lerpf(0.4, 1.0, hi_fade)
-	var wig: float = clampf(1 - absf(v) / 3, 0, 1) * sty.sway * float(sty.slowWobble)
+	var bob: float = sin(crank * 2) * pedal * sty.sway * float(sty.get("bodyBob", 1.0)) * (1 + 0.4 * spr + 0.35 * eff) * lerpf(0.4, 1.0, hi_fade)
+	# (the idle balance wobble is gone once the rider commits to a sprint: no random drifting)
+	var wig: float = clampf(1 - absf(v) / 3, 0, 1) * sty.sway * float(sty.slowWobble) * (1.0 - 0.9 * clampf(eff * 1.5, 0.0, 1.0))
 	var air := _num(p, "air")
 	var comp: float = _num(p, "compress") * sty.crouch
 	# speed tuck: from ~25 km/h the rider folds down over the bars for less drag (full by ~60 km/h):
@@ -1111,15 +1112,15 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		-0.16 - 0.07 * air * float(sty.airCrouch) + 0.06 * pedal * sty.standPedal - float(sty.standBack) * stand - comp * 0.25,
 		0.80 - 0.07 * air * float(sty.airCrouch) - comp + (float(sty.standHeight) * stand + 0.05 * spr) * sty.standPedal + 0.035 * bob + 0.14 * aero_a - 0.07 * aero_g,   # (forward: in the air legs extend; on the ground knees bend into the tuck)
 		sway * sty.hipSway + shift * 0.3 + sin(t * 2.1) * 0.02 * wig) + fit
-	pelvis.x += sty.hipX * (1 - 0.5 * pedal) + 0.10 * aero_a - 0.05 * aero_g + 0.07 * eff   # forward over the cranks (air stick: hips forward; ground tuck: a touch back)
-	pelvis.y += 0.04 * eff                                                   # up tall to stamp down
+	pelvis.x += sty.hipX * (1 - 0.5 * pedal) + 0.10 * aero_a - 0.05 * aero_g - 0.03 * eff   # sprint start: hips stay back over the saddle nose, the chest goes forward instead; forward over the cranks (air stick: hips forward; ground tuck: a touch back)
+	pelvis.y += 0.02 * eff                                               # up tall to stamp down
 	pelvis.y += sty.hipY * (1 - 0.6 * pedal)
 	pelvis.y -= 0.05 * smoothstep(0.8, 3.5, absf(_num(p, "airSpin"))) * air   # knees tucked up in a spin
 	pelvis.y += 0.07 * air * float(sty.airCrouch) * aero   # forward in the air: no crouch, legs pushed out
 
 	# chest
 	# (pedalling out of the saddle the chest stays forward over the bars)
-	var ang: float = 0.52 - 0.2 * clampf(-bstick, 0.0, 1.0) - float(sty.pedalChest) * pedal + 0.12 * spr + 0.2 * eff + 0.15 * (comp / 0.3) + 0.08 * air + sty.lean * (1 - 0.5 * pedal) + 0.32 * aero_a + 0.6 * aero_g
+	var ang: float = 0.52 - 0.2 * clampf(-bstick, 0.0, 1.0) - float(sty.pedalChest) * pedal + 0.12 * spr + 0.3 * eff + 0.15 * (comp / 0.3) + 0.08 * air + sty.lean * (1 - 0.5 * pedal) + 0.32 * aero_a + 0.6 * aero_g
 	# spinning in the air: tall and compact over the bike (chest up, knees in), the head and shoulders lead
 	var spin_style: float = smoothstep(0.8, 3.5, absf(_num(p, "airSpin"))) * air
 	ang = lerpf(ang, 0.42, 0.7 * spin_style)

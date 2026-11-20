@@ -7,4 +7,11 @@
     <!-- the terrain math is hot: JIT-optimise every configuration (Godot runs the Debug build from the editor) -->
     <Optimize>true</Optimize>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Steamworks.NET" Version="2024.8.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Steam's native library next to the game's assemblies (editor runs + the exported data_ folder) -->
+    <None Include="addons/steamworks/steam_api64.dll" Link="steam_api64.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

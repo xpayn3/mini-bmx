@@ -107,7 +107,7 @@ func _interface() -> Control:
 ## Controller: the Xbox pad drawn with what every button does; click one to change it
 func _controller() -> Control:
 	var p := _page("Controller")
-	_section(p, "XBOX CONTROLLER")
+	_section(p, "CONTROLLER")
 	_hint(p, "Click a button, trigger or stick to change what it does. Buttons light up as you press them.")
 	var m := PadMap.new()
 	m.size_flags_horizontal = Control.SIZE_EXPAND_FILL
