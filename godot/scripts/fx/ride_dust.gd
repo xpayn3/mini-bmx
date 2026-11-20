@@ -155,28 +155,33 @@ func sim_step(dt: float, focus: Vector3, fwd: Vector3, wind: Vector2) -> void:
 ## dust comes only from a tyre's contact patch: small sources on the ground along the path the patch
 ## swept this frame, each spraying its own way (back / out / up, in gusts). The cloud is what the sim
 ## makes of that spray: it fans out, rolls and spreads from there. Returns the new "previous" point.
-func _patch(on: bool, p: Vector3, prev: Vector3, v: Vector3, rate: float, fan: float, col: Color) -> Vector3:
+func _patch(on: bool, p: Vector3, prev: Vector3, v: Vector3, rate: float, _fan: float, col: Color) -> Vector3:
 	if not on or rate <= 0.0: return Vector3.INF
 	var from := prev if prev != Vector3.INF and prev.distance_to(p) < 2.0 else p
 	var k := clampi(ceili(from.distance_to(p) / 0.15), 1, 5)
 	var sp := v.length()
 	var t: Dictionary = Tune.v
-	var width := float(t.get("dustWidth", 0.8))
+	var cone := deg_to_rad(float(t.get("dustWidth", 8.0)))   # the spray's cone at the tyre (Dust › Spray)
 	var throw_k := float(t.get("dustThrow", 1.0))
 	var up_k := float(t.get("dustKickUp", 1.0))
 	var out_k := float(t.get("dustPushOut", 1.0))
 	for i in k:
 		var at := from.lerp(p, (i + 1.0) / k)
-		var yaw := (randf() - 0.5) * deg_to_rad(fan) * width   # thrown mostly straight back: a narrow start
+		# thrown straight back off the tread: the patch is a tyre wide, so only a few degrees of scatter here
+		# (the sim's swirls widen it behind)
+		var yaw := (randf() - 0.5) * cone
 		var jv := v.rotated(Vector3.UP, yaw) * (0.6 + randf() * 0.8) * throw_k + Vector3(0, randf() * (0.45 + sp * 0.12) * up_k, 0)
 		# faster riding flings the spray harder / wider: it grows into a cloud sooner
 		var fast := clampf((sim.speed - 3.0) / 9.0, 0.0, 1.0)
-		# a gentle sideways push only: it starts as narrow as the tyre and widens behind, not at the patch
-		sim.add_source(at, jv * (1.0 + fast * 0.5), PATCH_R, rate * 14.0 / k, 10.0, (0.15 + randf() * 0.25 + fast * 0.5) * out_k, col)
-	# grit: grains flicked off the tread - only when going fast (none below ~30 km/h, a light spray at speed)
-	var gk := clampf((sim.speed - 8.3) / 5.0, 0.0, 1.0)
+		# barely any outward push (it shoves the air sideways in every direction = a wide start): it starts
+		# as narrow as the tyre and widens behind, not at the patch
+		sim.add_source(at, jv * (1.0 + fast * 0.5), PATCH_R, rate * 14.0 / k, 10.0, (0.03 + randf() * 0.05 + fast * 0.08) * out_k, col)
+	# grit: grains flicked off the tread - only when going fast (Dust › Grit: from what speed, how many, which way)
+	var gk := clampf((sim.speed - float(t.get("dustGritFrom", 30.0)) / 3.6) / 5.0, 0.0, 1.0)
 	if grit != null and gk > 0.0:
-		grit.emit(p, v * 1.4 + Vector3(0, 0.6 + sp * 0.15, 0), 0.8 + sp * 0.35, rate * 4.0 * gk * float(t.get("dustGrit", 1.0)), col)
+		var g_up := (0.6 + sp * 0.15) * float(t.get("dustGritUp", 1.0))
+		var g_spread := (0.3 + sp * 0.1) * float(t.get("dustGritWidth", 1.0))
+		grit.emit(p, v * float(t.get("dustGritThrow", 1.4)) + Vector3(0, g_up, 0), g_spread, rate * 4.0 * gk * float(t.get("dustGrit", 1.0)), col)
 	return p
 
 ## grains thrown for secs (landings, crash impacts)

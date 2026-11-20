@@ -16,6 +16,7 @@ const NX := 128
 const NY := 32
 const NZ := 128
 const H := 0.2                    # metres per voxel -> 25.6 x 6.4 x 25.6 m
+const SHADOW_K := 0.0               # dust shadow on the ground / bike behind it: off (light dust; it showed as a dark patch ahead of the bike)
 const HM := 32                    # heightmap cells across the box
 const HM_CELL := H * NX / HM      # 0.8 m; the box moves in whole heightmap cells
 const MAX_SRC := 64
@@ -283,6 +284,7 @@ func step(dt: float, focus: Vector3, fwd: Vector3) -> void:
 	_mat.set_shader_parameter("origin", Vector3(origin.x, 0, origin.y))
 	_mat.set_shader_parameter("box_min", bmin)
 	_mat.set_shader_parameter("box_max", bmax)
+	_mat.set_shader_parameter("shadow_k", SHADOW_K)
 	_mat.set_shader_parameter("sun_dir", sdir)
 	_mat.set_shader_parameter("sun_col", scol)
 	_scol = scol
@@ -296,7 +298,7 @@ func step(dt: float, focus: Vector3, fwd: Vector3) -> void:
 		compositor.active = true
 		compositor.params = {light = _tex3d, colv = _colr3d, occ = _occ3d, hmap = _hm_tex, detail = detail_texture(),
 			origin = Vector3(origin.x, 0, origin.y), hm_cells = float(HM), size_m = Vector3(NX * H, NY * H, NZ * H),
-			step = 0.08, ext = extinction, box_min = bmin, box_max = bmax, shadow_k = 0.62, sun_dir = sdir,
+			step = 0.08, ext = extinction, box_min = bmin, box_max = bmax, shadow_k = SHADOW_K, sun_dir = sdir,
 			detail_amt = wisps, sun_col = scol, max_steps = 160.0, amb_col = Vector3(amb_col.r, amb_col.g, amb_col.b),
 			dust_col = Vector3(dc.r, dc.g, dc.b), drift = _drift, cloud = cloud}
 	RenderingServer.call_on_render_thread(_gpu_step.bind(dt, shift, clear, bytes.to_byte_array(), n, sdir))
