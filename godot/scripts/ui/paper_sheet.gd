@@ -274,6 +274,7 @@ func close(now := false) -> void:
 ## a slice of the sound: a recording plays from a random spot (no two unfolds sound the same), faded out
 ## by the end
 func _play_slice(pitch: float, secs: float) -> void:
+	if not sound_stream or not _sound: return
 	_sound.pitch_scale = pitch
 	var from := 0.0
 	var total := _sound.stream.get_length()
@@ -407,7 +408,7 @@ func _process(_dt: float) -> void:
 
 func _input(e: InputEvent) -> void:
 	if state == 0 or state == 3 or not visible: return   # folding away: the game has its input back
-	for a in close_actions:
+	for a in ([] if _page_busy() else close_actions):   # an open dropdown / a rebind waiting takes B itself
 		if e.is_action_pressed(a) and not e.is_echo():
 			get_viewport().set_input_as_handled()
 			close_requested.emit()
@@ -425,6 +426,16 @@ func _input(e: InputEvent) -> void:
 		else:
 			page.push_input(e)
 	get_viewport().set_input_as_handled()   # nothing reaches the game while the paper is up
+
+
+## the live page has a dropdown open, or something waiting for a key / button (group "nav_modal")
+func _page_busy() -> bool:
+	if not live or not page: return false
+	for w in page.get_embedded_subwindows():
+		if w.visible: return true
+	for n in get_tree().get_nodes_in_group(&"nav_modal"):
+		if page.is_ancestor_of(n): return true
+	return false
 
 
 ## the root viewport's (stretched) coordinates -> window pixels (= the 3D view's)
@@ -514,7 +525,7 @@ var _hint_pad := false
 func prompt_items() -> Array:
 	if not handheld: return []
 	if Settings.pad_active:
-		return [[["LS"], "Travel"], [["RT", "LT"], "Zoom"], [["RS"], "Tilt"], [[PadGlyph.glyph_for("map")], "Close"]]
+		return [[["LS"], "Travel"], [["RT", "LT"], "Zoom"], [["RS"], "Tilt"], [["B"], "Close"]]
 	return [[["K:W", "K:A", "K:S", "K:D"], "Travel"], [["K:Q", "K:E", "WHEEL"], "Zoom"], [["MOUSE"], "Drag"], [[PadGlyph.glyph_for("map")], "Close"]]
 
 ## the controls at the bottom of the screen, as button icons (pad or keys, whichever is in use)

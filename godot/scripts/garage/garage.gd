@@ -626,6 +626,14 @@ func _process(dt: float) -> void:
 		_dirty -= dt
 		if _dirty <= 0: _rebuild_bike()
 	if auto_spin and not dragging: orbit_t += dt * 0.12
+	# Xbox: right stick orbits the camera, LT / RT zoom (raw axes: menus own the D-pad / left stick)
+	var rs := Vector2(Input.get_joy_axis(0, JOY_AXIS_RIGHT_X), Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y))
+	if rs.length() > 0.2:
+		orbit_t -= rs.x * dt * 2.2
+		pitch_t = clampf(pitch_t + rs.y * dt * 60.0, -2, 70)
+		auto_spin = false
+	var zt := Input.get_joy_axis(0, JOY_AXIS_TRIGGER_RIGHT) - Input.get_joy_axis(0, JOY_AXIS_TRIGGER_LEFT)
+	if absf(zt) > 0.15: dist_t = clampf(dist_t * (1.0 - zt * dt * 1.2), 1.2, 7)
 	orbit = lerpf(orbit, orbit_t, minf(1.0, dt * 4))
 	pitch = lerpf(pitch, pitch_t, minf(1.0, dt * 4))
 	dist = lerpf(dist, dist_t, minf(1.0, dt * 4))
@@ -760,7 +768,7 @@ func _build_ui() -> void:
 	var bar := HBoxContainer.new()
 	bar.add_theme_constant_override("separation", Tokens.S1)
 	head.add_child(bar)
-	bar.add_child(UITheme.key_cap("Q"))
+	bar.add_child(UITheme.key_cap("LB" if Settings.pad_active else "Q"))
 	var grp := ButtonGroup.new()
 	for t in _tabs():
 		var b := UITheme.make_button(t[1], _set_tab.bind(t[0]), "tab", Tokens.T_XL)
@@ -769,7 +777,7 @@ func _build_ui() -> void:
 		b.focus_mode = Control.FOCUS_NONE
 		bar.add_child(b)
 		tab_buttons[t[0]] = b
-	bar.add_child(UITheme.key_cap("E"))
+	bar.add_child(UITheme.key_cap("RB" if Settings.pad_active else "E"))
 	# the options card under it
 	panel = PanelContainer.new()
 	panel.set_anchors_preset(Control.PRESET_LEFT_WIDE)
@@ -786,6 +794,8 @@ func _build_ui() -> void:
 	# the build card, top right: name + performance meters (the garage only)
 	if mode == "bike": _build_card(root)
 	_bottom_bar(root)
+	# Xbox: D-pad / stick between rows, left / right change a value, A press, B back, LB / RB categories
+	PadNav.attach(root, {"tabs": _step_tab, "back": _close.bind(false)})
 
 func _build_card(root: Control) -> void:
 	var sp := PanelContainer.new()
@@ -846,7 +856,9 @@ func _bottom_bar(root: Control) -> void:
 	hints.add_theme_constant_override("separation", Tokens.S2)
 	pill.add_child(hints)
 	var first := true
-	for h in [["DRAG", "rotate"], ["WHEEL", "zoom"], ["Q E", "category"], ["ESC", "back"]]:
+	var hint_list := [["DRAG", "rotate"], ["WHEEL", "zoom"], ["Q E", "category"], ["ESC", "back"]]
+	if Settings.pad_active: hint_list = [["RS", "rotate"], ["LT RT", "zoom"], ["LB RB", "category"], ["B", "back"]]
+	for h in hint_list:
 		if not first:
 			var gap := Control.new(); gap.custom_minimum_size.x = Tokens.S3; hints.add_child(gap)
 		first = false
@@ -942,6 +954,7 @@ func _row(t: String, ctl: Control) -> void:
 	hb.add_child(l)
 	ctl.custom_minimum_size.x = maxf(ctl.custom_minimum_size.x, Tokens.H_ROW_CTL)
 	hb.add_child(ctl)
+	hb.set_meta("nav_row", true)   # PadNav marks the row its control has focus in
 	body.add_child(hb)
 
 ## a part / option picker like a racing game's tuning shop: ◀ VALUE ▶ with a dot per option
@@ -992,6 +1005,8 @@ func _choice(t: String, items: Array, current, cb: Callable) -> Control:
 		cb.call(items[sel][0]); _changed()
 	prev.pressed.connect(step.bind(-1))
 	next.pressed.connect(step.bind(1))
+	box.focus_mode = Control.FOCUS_ALL   # the pad lands on the stepper: left / right (or A) step it
+	box.set_meta(&"nav_step", step)
 	_row(t, box)
 	return box
 
@@ -1014,6 +1029,7 @@ func _color(text: String, cur: String, cb: Callable) -> void:
 	cp.color = Color(cur)
 	cp.edit_alpha = false
 	cp.custom_minimum_size = Vector2(200, 34)
+	cp.focus_mode = Control.FOCUS_NONE   # the pad uses the swatches (the picker is a mouse tool)
 	cp.color_changed.connect(func(c): cb.call(c.to_html(false)); _changed())
 	_row(text, cp)
 
@@ -1030,7 +1046,7 @@ func _swatches(cur: String, cb: Callable) -> void:
 		b.add_theme_stylebox_override("normal", UITheme.marked(Color(hex), INK, SIDE_BOTTOM, Tokens.R_SM, 0) if on else UITheme.box(Color(hex), Tokens.R_SM, 0))
 		b.add_theme_stylebox_override("hover", UITheme.marked(Color(hex).lightened(0.15), Tokens.ACCENT, SIDE_BOTTOM, Tokens.R_SM, 0))
 		b.add_theme_stylebox_override("pressed", UITheme.marked(Color(hex), Tokens.ACCENT, SIDE_BOTTOM, Tokens.R_SM, 0))
-		b.add_theme_stylebox_override("focus", UITheme.box(Tokens.CLEAR, Tokens.R_SM, 0))
+		b.add_theme_stylebox_override("focus", UITheme.marked(Tokens.CLEAR, Tokens.INK, SIDE_TOP, Tokens.R_SM, 0))
 		b.pressed.connect(func(): cb.call(hex); _changed(); _set_tab(tab))
 		g.add_child(b)
 	body.add_child(g)
@@ -1249,7 +1265,7 @@ func _cards(items: Array, current: String, cb: Callable) -> void:
 		b.add_theme_stylebox_override("normal", rest)
 		b.add_theme_stylebox_override("hover", UITheme.marked(Tokens.ACCENT_TINT if on else Tokens.FILL, Tokens.ACCENT if on else Tokens.LINE, SIDE_BOTTOM, Tokens.R_LG, 0))
 		b.add_theme_stylebox_override("pressed", UITheme.marked(Tokens.ACCENT_TINT, Tokens.ACCENT, SIDE_BOTTOM, Tokens.R_LG, 0))
-		b.add_theme_stylebox_override("focus", UITheme.box(Tokens.CLEAR, Tokens.R_LG, 0))
+		b.add_theme_stylebox_override("focus", UITheme.marked(Color(Tokens.INK, 0.06), Tokens.INK, SIDE_BOTTOM, Tokens.R_LG, 0))
 		var col := VBoxContainer.new()
 		col.set_anchors_preset(Control.PRESET_FULL_RECT)
 		col.offset_left = Tokens.S3; col.offset_right = -Tokens.S3; col.offset_top = Tokens.S2; col.offset_bottom = -Tokens.S3
@@ -1261,8 +1277,10 @@ func _cards(items: Array, current: String, cb: Callable) -> void:
 		pic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		col.add_child(pic)
+		var pic_ref: WeakRef = weakref(pic)   # (a lambda capturing a freed node errors when called: the page may be gone)
 		thumbs.request(it.thumb, it.make, it.view, func(t):
-			if is_instance_valid(pic): pic.texture = t)
+			var pr = pic_ref.get_ref()
+			if pr: pr.texture = t)
 		col.add_child(UITheme.caption(String(it.brand), SUB, Tokens.T_XS))
 		var nm := UITheme.display(String(it.name).to_upper(), Tokens.T_LG)
 		nm.clip_text = true
@@ -1398,7 +1416,6 @@ func _rider_page() -> void:
 			s.min_value = r[2]; s.max_value = r[3]; s.step = stp; s.value = float(rider_pose.get(key, 0.0))
 			s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			s.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-			s.focus_mode = Control.FOCUS_NONE
 			var dec := clampi(ceili(-log(stp) / log(10.0)), 0, 3)
 			var fmt := "%." + str(dec) + "f " + unit
 			var vl := UITheme.text(fmt % s.value, SUB, Tokens.T_XS)
@@ -1470,12 +1487,13 @@ func _kit_page() -> void:
 				b.add_theme_stylebox_override("normal", UITheme.marked(Color(hex), INK, SIDE_BOTTOM, Tokens.R_SM, 0) if sel else UITheme.box(Color(hex), Tokens.R_SM, 0))
 				b.add_theme_stylebox_override("hover", UITheme.marked(Color(hex), Tokens.ACCENT, SIDE_BOTTOM, Tokens.R_SM, 0))
 				b.add_theme_stylebox_override("pressed", UITheme.marked(Color(hex), Tokens.ACCENT, SIDE_BOTTOM, Tokens.R_SM, 0))
-				b.focus_mode = Control.FOCUS_NONE
+				b.add_theme_stylebox_override("focus", UITheme.marked(Tokens.CLEAR, Tokens.INK, SIDE_TOP, Tokens.R_SM, 0))
 				b.pressed.connect(func(): look[key] = hex; _set_look(look); _set_tab("kit"))
 				hb.add_child(b)
 			var cp := ColorPickerButton.new()
 			cp.color = Color(look[key]); cp.edit_alpha = false
 			cp.custom_minimum_size = Vector2(Tokens.S7, Tokens.S6)
+			cp.focus_mode = Control.FOCUS_NONE
 			cp.color_changed.connect(func(c): look[key] = "#" + c.to_html(false); _set_look(look))
 			hb.add_child(cp)
 			body.add_child(hb)
@@ -1502,7 +1520,7 @@ func _pose_presets() -> void:
 	var hb := HBoxContainer.new()
 	hb.add_theme_constant_override("separation", Tokens.S2)
 	var ob := OptionButton.new()
-	ob.size_flags_horizontal = Control.SIZE_EXPAND_FILL; ob.focus_mode = Control.FOCUS_NONE
+	ob.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	for i in names.size():
 		var n: String = names[i]
 		if i == PosePresets.builtin_count(): ob.add_separator("Yours")
@@ -1516,7 +1534,6 @@ func _pose_presets() -> void:
 	hb.add_child(ob)
 	if not PosePresets.is_builtin(act):
 		var del := UITheme.make_button("Delete", func(): PosePresets.delete(act); _set_tab.call_deferred("rider"), "chip", Tokens.T_SM)
-		del.focus_mode = Control.FOCUS_NONE
 		hb.add_child(del)
 	_row("Position", hb)
 	_pose_mod = UITheme.text("Changed from \"%s\" — Save as to keep it" % act, SUB, Tokens.T_XS)
@@ -1531,7 +1548,6 @@ func _pose_presets() -> void:
 	le.text_submitted.connect(func(_t): save.call())
 	sv.add_child(le)
 	var sb := UITheme.make_button("Save as", save, "chip", Tokens.T_SM)
-	sb.focus_mode = Control.FOCUS_NONE
 	sv.add_child(sb)
 	body.add_child(sv)
 

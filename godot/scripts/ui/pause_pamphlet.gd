@@ -27,6 +27,7 @@ var _font_b: Font
 
 
 func _ready() -> void:
+	sound_stream = load("res://assets/audio/map_unfold_gravel.ogg")   # the user's paper sound (the map's): opening, unfolding, folding
 	super._ready()
 	cols = 3; rows = 1
 	panel = Vector2(0.099, 0.21)
@@ -77,10 +78,10 @@ func add_item(text: String, cb: Callable) -> Button:
 	b.text = "%02d   %s" % [_items, text.to_upper()]
 	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	b.focus_mode = Control.FOCUS_ALL
-	b.custom_minimum_size = Vector2(0, 62)
+	b.custom_minimum_size = Vector2(0, 55)   # nine lines fit the list
 	b.clip_text = true
 	b.add_theme_font_override("font", _font_b)
-	b.add_theme_font_size_override("font_size", 33)
+	b.add_theme_font_size_override("font_size", 31)
 	b.add_theme_color_override("font_color", INK)
 	b.add_theme_color_override("font_hover_color", INK)
 	b.add_theme_color_override("font_focus_color", INK)
@@ -98,7 +99,7 @@ func add_item(text: String, cb: Callable) -> Button:
 	for st in ["normal", "disabled"]: b.add_theme_stylebox_override(st, none)
 	for st in ["hover", "focus", "pressed", "hover_pressed"]: b.add_theme_stylebox_override(st, hi)
 	b.pressed.connect(cb)
-	b.mouse_entered.connect(func(): b.grab_focus())   # mouse and pad share one highlight
+	b.mouse_entered.connect(func(): if b.focus_mode != Control.FOCUS_NONE: b.grab_focus())   # mouse and pad share one highlight
 	_list.add_child(b)
 	return b
 
@@ -115,9 +116,19 @@ func open_inside(menu: Control) -> void:
 	menu.position = Vector2(m, m)
 	_inside.add_child(menu)
 	_inside_menu = menu
-	menu.tree_exiting.connect(func(): if _inside_menu == menu: _inside_menu = null; set_unfolded(false); focus_first.call_deferred())
+	menu.tree_exiting.connect(func():
+		if _inside_menu == menu:
+			_inside_menu = null; _cover_focus(true); set_unfolded(false); focus_first.call_deferred())
+	_cover_focus(false)   # the cover's lines sit under the spread: the D-pad must not wander onto them
 	set_unfolded(true)
 	_show_hint()
+
+
+func _cover_focus(on: bool) -> void:
+	for c in _list.get_children():
+		(c as Control).focus_mode = Control.FOCUS_ALL if on else Control.FOCUS_NONE
+	var f := page.gui_get_focus_owner()
+	if not on and f and _list.is_ancestor_of(f): page.gui_release_focus()
 
 
 ## shut the leaflet again (back to the cover)
@@ -130,6 +141,7 @@ func prompt_items() -> Array:
 	if Settings.pad_active:
 		var it := [[["A"], "Select"], [["B"], "Fold up" if is_unfolded() else "Resume"]]
 		if not is_unfolded(): it.insert(1, [["RS"], "Turn over"])
+		else: it.insert(1, [["LB", "RB"], "Tabs"])
 		return it
 	var k := [[["K:Enter"], "Select"], [["MOUSE"], "Click"], [["K:Esc"], "Fold up" if is_unfolded() else "Resume"]]
 	if not is_unfolded(): k.insert(2, [[PadGlyph.glyph_for("body_left", false), PadGlyph.glyph_for("body_right", false)], "Turn over"])

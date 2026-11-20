@@ -158,7 +158,7 @@ const RESOLUTIONS := ["1280x720", "1366x768", "1600x900", "1920x1080", "2560x144
 var data := DEFAULTS.duplicate()
 var bindings := {}   # action -> Array[InputEvent]
 var _had_quality := false
-var _test_run: bool = Array(OS.get_cmdline_user_args()).any(func(a): return a.begins_with("--autotest") or a.begins_with("--bench") or a.begins_with("--hitch") or a.begins_with("--showcase"))
+var _test_run: bool = OS.get_environment("BMX_PADSEQ") != "" or Array(OS.get_cmdline_user_args()).any(func(a): return a.begins_with("--autotest") or a.begins_with("--bench") or a.begins_with("--hitch") or a.begins_with("--showcase"))
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -331,6 +331,7 @@ func load_settings() -> void:
 	_install_bindings()
 
 func save() -> void:
+	if OS.get_environment("BMX_PADSEQ") != "": return   # menu tests flip settings: never into the player's file
 	var cf := ConfigFile.new()
 	for k in data:
 		cf.set_value("settings", k, data[k])

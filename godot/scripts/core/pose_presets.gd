@@ -37,6 +37,7 @@ static func ensure_loaded() -> void:
 
 
 static func save() -> void:
+	if OS.get_environment("BMX_PADSEQ") != "": return   # menu tests: never into the player\'s files
 	var cf := ConfigFile.new()
 	cf.set_value("presets", "active", active)
 	cf.set_value("presets", "customs", customs)

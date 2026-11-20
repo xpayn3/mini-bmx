@@ -268,6 +268,7 @@ static func _merge(dst: Dictionary, src: Dictionary) -> void:
 			dst[k] = src[k]
 
 static func save_build(b: Dictionary) -> void:
+	if OS.get_environment("BMX_PADSEQ") != "": return   # menu tests: never into the player\'s files
 	var f := FileAccess.open(PATH, FileAccess.WRITE)
 	if f: f.store_string(JSON.stringify(b, "\t"))
 
