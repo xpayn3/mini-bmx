@@ -804,8 +804,8 @@ func _unhandled_input(e: InputEvent) -> void:
 		pitch_t = clampf(pitch_t + e.relative.y * 0.2, -2, 70)
 	elif e.is_action_pressed("pause"):
 		_back()
-	elif editing and e is InputEventKey and e.pressed and not e.echo and (e.keycode == KEY_Q or e.keycode == KEY_E):
-		_step_tab(-1 if e.keycode == KEY_Q else 1)
+	elif editing and e is InputEventKey and e.pressed and not e.echo and (e.physical_keycode == KEY_Q or e.physical_keycode == KEY_E):
+		_step_tab(-1 if e.physical_keycode == KEY_Q else 1)   # key position (AZERTY etc.), like every ride key
 
 # ================================================================ UI
 ## tests (BMX_TYRE_PROBE=1): every wheel-size / tyre-width combination, rider off and on: how far the
