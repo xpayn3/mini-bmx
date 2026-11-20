@@ -84,8 +84,16 @@ var _last_good := {}
 var dab_lin := 0.0
 var dab_k := 0.0
 var dab_side := -1.0
-const DAB_LEAN := 0.11       # rad the bike leans onto the foot
-const DAB_OUT := 0.33        # m from the bike's centre line to the foot on the ground
+const DAB_LEAN := 0.24       # rad (~14 deg) the bike leans onto the foot: a relaxed, stylish lean, the body stays upright
+const DAB_OUT := 0.36        # m from the bike's centre line to the foot on the ground
+const DAB_FWD := 0.10        # m ahead of the bottom bracket the foot goes down (a little forward, braced)
+var _dab_vprev := 0.0
+var _dab_dec := 0.0          # smoothed deceleration (m/s^2): slowing to a stop brings the foot out early
+var _dab_gap := 0.0          # foot side's ground height minus the other side's (side slope)
+var _dab_lean_s := 0.0       # the bike's lean onto the foot, eased
+var _dab_hold := 0.0         # s the foot has been fully down
+var _idle_tgt := Vector2.ZERO   # idle look-round target (yaw, pitch)
+var _idle_next := 0.0
 var msg_t := 0.0
 var biome_t := 0.0
 var biome_cur := "Green Hills"
@@ -604,6 +612,11 @@ func _update_look(dt: float) -> void:
 			# past straight behind the yaw wraps: keep turning the way he already is instead of snapping round
 			if absf(yaw_t - _look_yaw) > PI: yaw_t = signf(_look_yaw) * LOOK_YAW_MAX
 	var k := 1.0 - exp(-dt * 9.0)
+	if not scenic:   # riding: the calm look-round with a foot down (slow, unhurried head turns)
+		_idle_look(dt)
+		yaw_t = _idle_tgt.x * dab_k
+		pitch_t = _idle_tgt.y * dab_k
+		k = 1.0 - exp(-dt * 3.2)
 	_look_yaw += (yaw_t - _look_yaw) * k
 	_look_pitch += (pitch_t - _look_pitch) * k
 	if scenic and Env.s("BMX_LOOK_PROBE") != "" and Engine.get_process_frames() % 30 == 0:
@@ -1704,18 +1717,61 @@ func _update_dab(dt: float, st: BikePhysics) -> void:
 	if st.crash_on:
 		dab_lin = 0.0; dab_k = 0.0; st.foot_down = false
 		return
-	var want: bool = not st.air and st.pedal < 0.05 and (st.v < 1.2 and st.v > -0.7 if dab_lin > 0.0 else absf(st.v) < 0.5)   # backing up (brake held) lifts it
+	# slowing down to a stop: the foot comes off the pedal a moment before the bike stands (like a real rider
+	# reaching for the ground), not only once it's already stopped
+	var decel := (_dab_vprev - st.v) / maxf(dt, 1e-3)
+	_dab_vprev = st.v
+	_dab_dec += (decel - _dab_dec) * (1.0 - exp(-dt * 6.0))
+	var coming := st.v < 1.8 and st.v > 0.0 and _dab_dec > 0.8
+	var want: bool = not st.air and st.pedal < 0.05 and (st.v < 1.2 and st.v > -0.7 if dab_lin > 0.0 else (absf(st.v) < 0.5 or coming))   # backing up (brake held) lifts it
 	if want and dab_lin <= 0.0:
-		# which foot: the one on the lower pedal; level cranks -> the side the bike already leans to, else left
-		var dy := 0.0
-		if rig.pedal_pivots.size() == 2:
-			dy = rig.pedal_pivots[0].global_position.y - rig.pedal_pivots[1].global_position.y
-		if absf(dy) > 0.03: dab_side = -1.0 if dy < 0.0 else 1.0
-		elif absf(st.bike_lean) > 0.02: dab_side = -signf(st.bike_lean)
-		else: dab_side = -1.0
-	dab_lin = move_toward(dab_lin, 1.0 if want else 0.0, dt / (0.5 if want else 0.4))
+		_pick_dab_side(st)
+	dab_lin = move_toward(dab_lin, 1.0 if want else 0.0, dt / (0.45 if want else 0.4))
 	dab_k = smoothstep(0.0, 1.0, dab_lin)
 	st.foot_down = want and dab_lin >= 0.6
+	# the bike settles onto the foot: a cool, deliberate lean (more when the foot's ground is lower than the
+	# other side's: the bike has to go further over to reach it), with a slow small breathing sway once settled
+	var lean_t := DAB_LEAN + clampf(-_dab_gap * 0.9, -0.08, 0.1) + 0.02 * sin(t * 0.8) * clampf(_dab_hold - 0.5, 0.0, 1.0)
+	_dab_lean_s += (lean_t - _dab_lean_s) * (1.0 - exp(-dt * 3.0))
+	_dab_hold = _dab_hold + dt if dab_k > 0.99 else 0.0
+
+## Which foot goes down: the one on the uphill side of a side slope (the ground is closer: a short, easy
+## reach), never onto a rock / bank much higher than the other side (that's a wall, step to the open side);
+## on flat ground the foot on the lower pedal, level cranks -> the side the bike leans to, else left.
+func _pick_dab_side(st: BikePhysics) -> void:
+	var hb := rig.global_transform.basis
+	var fwd := Vector3(hb.x.x, 0.0, hb.x.z).normalized()
+	var rgt := Vector3(hb.z.x, 0.0, hb.z.z).normalized()
+	var bb: Vector3 = rig.crank_n.global_position + fwd * DAB_FWD
+	var gl: float = terrain.top_height((bb - rgt * DAB_OUT).x, (bb - rgt * DAB_OUT).z)
+	var gr: float = terrain.top_height((bb + rgt * DAB_OUT).x, (bb + rgt * DAB_OUT).z)
+	var dg: float = gr - gl   # > 0: the ground on the right is higher
+	var dy := 0.0
+	if rig.pedal_pivots.size() == 2:
+		dy = rig.pedal_pivots[0].global_position.y - rig.pedal_pivots[1].global_position.y
+	if absf(dg) > 0.35: dab_side = -signf(dg)            # a rock / bank right beside: step to the open side
+	elif absf(dg) > 0.04: dab_side = signf(dg)           # side slope: the uphill foot
+	elif absf(dy) > 0.03: dab_side = -1.0 if dy < 0.0 else 1.0
+	elif absf(st.bike_lean) > 0.02: dab_side = -signf(st.bike_lean)
+	else: dab_side = -1.0
+	_dab_gap = (gr - gl) * dab_side   # > 0: the foot's ground is higher than the other side's
+
+## Stopped with a foot down the rider is calm: now and then he looks round (off to the side, back up the
+## trail over a shoulder, down at the foot, out ahead), holding each glance a while. Feeds lookYaw / lookPitch.
+func _idle_look(dt: float) -> void:
+	if dab_k < 0.5 or _dab_hold < 0.6:
+		_idle_tgt = Vector2.ZERO
+		_idle_next = 0.0
+		return
+	_idle_next -= dt
+	if _idle_next <= 0.0:
+		var r := randf()
+		if r < 0.25: _idle_tgt = Vector2(0.0, 0.0)                                       # ahead, down the trail
+		elif r < 0.55: _idle_tgt = Vector2(randf_range(0.6, 1.25) * (1.0 if randf() < 0.5 else -1.0), randf_range(-0.05, 0.2))   # off to a side
+		elif r < 0.75: _idle_tgt = Vector2(dab_side * randf_range(1.4, 1.8), 0.1)        # back up the trail, over the shoulder away from the foot (yaw > 0 = left)
+		elif r < 0.88: _idle_tgt = Vector2(-dab_side * 0.35, -0.45)                       # down at the foot
+		else: _idle_tgt = Vector2(randf_range(-0.4, 0.4), randf_range(0.25, 0.4))          # up at the sky / the hills
+		_idle_next = randf_range(1.4, 3.6)
 
 ## Moves the dabbing foot's target (lean-node space) from its pedal to the ground beside the bike.
 var _pose_in := {}   # the rider's pose inputs, reused (see _process)
@@ -1726,7 +1782,7 @@ func _dab_foot(lt: Dictionary) -> void:
 	var fwd := Vector3(hb.x.x, 0.0, hb.x.z).normalized()
 	var rgt := Vector3(hb.z.x, 0.0, hb.z.z).normalized()
 	var bb: Vector3 = rig.crank_n.global_position
-	var g := bb + rgt * dab_side * DAB_OUT + fwd * 0.04
+	var g := bb + rgt * dab_side * DAB_OUT + fwd * DAB_FWD
 	g.y = terrain.top_height(g.x, g.z) + 0.012   # sole just on the drawn ground (rocks, decks too)
 	var tl: Vector3 = rig.lean_g.to_local(g)
 	tl.y -= 0.03   # the rider draws the shoe 3 cm above its foot point
@@ -1776,7 +1832,7 @@ func _process(dt: float) -> void:
 	_update_dab(dt, st)
 	_update_look(dt)
 	var wobble := sin(t * 2.3) * 0.025 * maxf(0.0, 1 - absf(st.v) / 2) * (1.0 - dab_k)
-	var dab_lean := -dab_side * DAB_LEAN * dab_k   # bike_lean > 0 tips the top to the rider's left
+	var dab_lean := -dab_side * _dab_lean_s * dab_k   # bike_lean > 0 tips the top to the rider's left
 	if rig.chain and phys.geared and phys.gear >= 0: rig.chain.set_gear(phys.gear, phys.cogs)
 	if st.crash_on: _mc.clear()   # (the motion cap starts fresh after a crash / get-up)
 	var mdt := minf(get_process_delta_time(), 0.05)
@@ -1882,7 +1938,7 @@ func _process(dt: float) -> void:
 		pi["handR"] = lt.handR
 		pi["dab"] = dab_k
 		pi["dabSide"] = dab_side
-		pi["dabLean"] = DAB_LEAN
+		pi["dabLean"] = _dab_lean_s
 		pi["v"] = st.v
 		# (through the motion cap, MCAP: the torso, head and hips can't move faster than a body can)
 		var pdt := minf(dt, 0.05)
@@ -1903,7 +1959,7 @@ func _process(dt: float) -> void:
 		pi["compress"] = maxf(0.0, -st.compress)
 		pi["hipShift"] = _mcap("hip_shift", st.hip_shift, pdt)
 		pi["bodyStick"] = -0.55 if scenic else _mcap("body_stick", st.body_in_s, pdt)
-		pi["relax"] = 1.0 if scenic else 0.0
+		pi["relax"] = 1.0 if scenic else 0.85 * dab_k   # foot down = calm: sat up, back straight, chin up
 		pi["tall"] = 1.0 if scenic else 0.0
 		pi["lookYaw"] = _look_yaw
 		pi["lookPitch"] = _look_pitch
