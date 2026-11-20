@@ -98,7 +98,8 @@ func _swap_fork(id: String, build: Dictionary) -> void:
 	var cock := cs.find_child("steer", true, false) as MeshInstance3D
 	var fl := model.find_child("fork_lower", true, false) as MeshInstance3D
 	if crown and lowers and cock and fl and steer_n is MeshInstance3D:
-		var fx: Dictionary = fs.get_meta("extras", {}) if fs.has_meta("extras") else {}
+		var fnode := fs.find_child("fork", true, false)   # the glb's root node carries the placement (extras)
+		var fx: Dictionary = fnode.get_meta("extras", {}) if fnode and fnode.has_meta("extras") else {}
 		(steer_n as MeshInstance3D).mesh = cock.mesh
 		crown.get_parent().remove_child(crown)
 		crown.name = "fork_crown"
