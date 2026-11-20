@@ -869,6 +869,7 @@ func _build_ui() -> void:
 	root.add_child(panel)
 	var sc := ScrollContainer.new()
 	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	SmoothScroll.attach(sc)
 	panel.add_child(sc)
 	body = VBoxContainer.new()
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL

@@ -68,7 +68,7 @@ func _ready() -> void:
 
 ## tests: drive the menus with a synthetic Xbox pad (use with BMX_PAD=1), then quit. Comma-separated steps:
 ## u d l r (D-pad) a b x y lb rb start, `D700` = hold D-pad down 700 ms (U / L / R too), `lsd` / `lsr` = a flick
-## of the left stick, esc / enter = keys, w500 = wait 500 ms, shot:<file.png>, at:<secs> = wait until then.
+## of the left stick, esc / enter = keys, w500 = wait 500 ms, shot:<file.png>, at:<secs> = wait until then, mw:x:y:n = n mouse-wheel notches at x, y (n < 0 = up).
 ## Prints PADSEQ <step> focus=<the focused control> after each.
 func _pad_seq(seq: String) -> void:
 	var t0 := Time.get_ticks_msec()
@@ -93,6 +93,17 @@ func _pad_seq(seq: String) -> void:
 				var k := InputEventKey.new(); k.keycode = OS.find_keycode_from_string(step.substr(2))
 				k.physical_keycode = k.keycode; k.pressed = down
 				Input.parse_input_event(k); await wait.call(60)
+		elif step.begins_with("mw:"):   # mw:x:y:n = n mouse-wheel notches at screen x, y (n < 0 = up), 40 ms apart
+			var pr := step.substr(3).split(":")
+			var at := Vector2(float(pr[0]), float(pr[1]))
+			Input.warp_mouse(at)
+			for i in absi(int(pr[2])):
+				for down in [true, false]:
+					var mb := InputEventMouseButton.new(); mb.position = at; mb.global_position = at
+					mb.button_index = MOUSE_BUTTON_WHEEL_UP if int(pr[2]) < 0 else MOUSE_BUTTON_WHEEL_DOWN
+					mb.pressed = down; mb.factor = 1.0
+					Input.parse_input_event(mb)
+				await wait.call(40)
 		elif step in ["esc", "enter"]:
 			for down in [true, false]:
 				var k := InputEventKey.new(); k.keycode = KEY_ESCAPE if step == "esc" else KEY_ENTER
@@ -666,6 +677,7 @@ func _setup_tune(content: HBoxContainer) -> void:
 	var sc := ScrollContainer.new()
 	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	SmoothScroll.attach(sc)
 	col.add_child(sc)
 	tune_body = VBoxContainer.new()
 	tune_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL

@@ -109,6 +109,7 @@ func _page(name_: String) -> VBoxContainer:
 	var sc := ScrollContainer.new()
 	sc.name = name_
 	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	SmoothScroll.attach(sc)
 	var vb := VBoxContainer.new()
 	vb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	vb.add_theme_constant_override("separation", _f(10))
