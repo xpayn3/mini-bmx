@@ -100,6 +100,15 @@ for fid in ("tues", "fuzz"):
     A_new = R[:2, :2] @ (A_s - C_s) + C_d                       # where the fork's own axle would be in steer space
     compress = t_dh - float(A_new @ ax_d)                         # < 0: the fork is longer than dh's by -compress
     A_pl = A_new + ax_d * (t_dh - float(A_new @ ax_d))            # axle: dh's place along the fork, the fork's own offset across it
+    # the lowers' legs must slide over the stanchions: centre the top part of one lowers leg (below the seal, before the dropout /
+    # caliper bulge) on the stanchion line by moving the lowers across the fork (the axle goes with them)
+    perp = lambda P: P[:, 0] * ax_d[1] - P[:, 1] * ax_d[0]
+    gold = np.concatenate([p for p, _, m in parts_c if m == "gold"]); gold = gold[gold[:, 2] > 0.01]
+    lw = np.concatenate([p for p, _, _ in parts_l]) + np.array([A_pl[0], A_pl[1], 0.0]); lw = lw[lw[:, 2] > 0.01]
+    tl = lw[:, :2] @ ax_d; top = tl.max(); band = (tl < top - 0.03) & (tl > top - 0.14)
+    d_perp = float(perp(gold[:, :2]).mean() - perp(lw[band][:, :2]).mean())
+    A_pl = A_pl + np.array([ax_d[1], -ax_d[0]]) * d_perp
+    print("   lowers moved %.1f mm across the fork to sit on the stanchions" % (d_perp * 1000))
     offs = float(A_pl[0] * ax_d[1] - A_pl[1] * ax_d[0])
     lt = np.concatenate([p for p, _, _ in parts_l]); top_t = float(A_pl @ ax_d) + float((lt[:, :2] @ ax_d).max())
     gap = crown_t_min - top_t
