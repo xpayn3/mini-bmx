@@ -654,6 +654,9 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   **Showroom editions** (`BikeBuild.EDITIONS`, fun made-up names, each a frame + colours + parts + a riding style,
   `STYLES`: park / freeride / all-round / race / speed = wheels, travel, springs, gearing); cards: your builds first, then
   the editions, slow -> fast, with stars / class / weight. Picking one loads it as the build (saved on SAVE).
+  **Factory colours**: each frame keeps its own paint (garage.json `paints`); a frame never painted gets a random plain
+  colourway each session (`BikeBuild._factory_look`: `FACTORY_COLORS` / `FINISHES` / `ACCENTS`, no two frames alike) and
+  black or tan-wall tyres. An old file's untouched stock red counts as unpainted. Some editions ride tan walls.
   **Pedals** (`build.drive.pedals`, `BikeBuild.PEDALS`, Gears tab cards): any model's pedal pair (`BikeRig.pedal_set`, cut
   out of its crank's "plastic" surface) on any frame's own pedal spots, in this frame's pedal material.
 - **Materials at photo quality** (2026-11-20): car paint (`BikeFX.CAR_PAINT_SHADER`) = round metal flakes 0.15–0.3 mm (per finish,

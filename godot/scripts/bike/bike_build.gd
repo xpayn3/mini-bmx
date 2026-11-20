@@ -256,7 +256,7 @@ const EDITIONS := {
 		"set": {"paint": {"frame": {"color": "111214", "finish": "matte"}, "rear": {"color": "111214", "finish": "matte"},
 			"linkage": {"color": "e8432e", "finish": "anodized"}, "spring": {"color": "e8432e", "finish": "gloss"},
 			"grips": {"color": "e8432e", "finish": "matte"}, "crank": {"color": "111214", "finish": "anodized"}},
-			"wheels": {"rim_color": "111214", "nipple_color": "e8432e", "hub_color": "e8432e"},
+			"wheels": {"rim_color": "111214", "nipple_color": "e8432e", "hub_color": "e8432e", "sidewall": "tan"},
 			"logos": {"downtube": {"fill": "e8432e"}, "toptube": {"fill": "e8432e"}},
 			"drive": {"cassette": "helix"}, "suspension": {"rotor": "tues"}}},
 	"lime_slime": {"label": "Lime Slime", "style": "speed", "frame": "tues", "fork": "dorado", "tyre": "kryptotal", "rim": "fr560",
@@ -266,11 +266,11 @@ const EDITIONS := {
 	"mango_tango": {"label": "Mango Tango", "style": "freeride", "frame": "goat", "fork": "bomber58", "tyre": "dh22", "rim": "arc30",
 		"set": {"paint": {"frame": {"color": "ff6a00", "color2": "ffd21f", "finish": "pearl"}, "rear": {"color": "ff6a00", "color2": "ffd21f", "finish": "pearl"},
 			"spring": {"color": "ffd21f", "finish": "gloss"}, "grips": {"color": "ff6a00", "finish": "matte"}},
-			"wheels": {"rim_color": "2b2d31", "nipple_color": "ffb000"}, "drive": {"cassette": "summit"}}},
+			"wheels": {"rim_color": "2b2d31", "nipple_color": "ffb000", "sidewall": "tan"}, "drive": {"cassette": "summit"}}},
 	"midnight_owl": {"label": "Midnight Owl", "style": "freeride", "frame": "fuzz", "fork": "fuzz_fork", "tyre": "magic_mary", "rim": "flow",
 		"set": {"paint": {"frame": {"color": "1d2b64", "finish": "candy"}, "rear": {"color": "1d2b64", "finish": "candy"},
 			"spring": {"color": "c8a24a", "finish": "gloss"}, "grips": {"color": "111214", "finish": "matte"}},
-			"wheels": {"rim_color": "c8a24a", "rim_finish": "gloss", "nipple_color": "c8a24a"},
+			"wheels": {"rim_color": "c8a24a", "rim_finish": "gloss", "nipple_color": "c8a24a", "sidewall": "tan"},
 			"drive": {"cassette": "eagle"}, "suspension": {"rotor": "fuzz"}}},
 	"bubblegum_bandit": {"label": "Bubblegum Bandit", "style": "park", "frame": "dh", "fork": "dorado", "tyre": "minion_dhf", "rim": "lg1", "bar": "atlas",
 		"set": {"paint": {"frame": {"color": "ff4f9a", "finish": "gloss"}, "rear": {"color": "ff4f9a", "finish": "gloss"},
@@ -281,7 +281,7 @@ const EDITIONS := {
 	"rusty_nail": {"label": "Rusty Nail", "style": "allround", "frame": "goat", "fork": "era", "tyre": "butcher", "rim": "reserve30",
 		"set": {"paint": {"frame": {"color": "8a5a2b", "finish": "satin"}, "rear": {"color": "8a5a2b", "finish": "satin"},
 			"spring": {"color": "e0d3b8", "finish": "gloss"}, "grips": {"color": "e0d3b8", "finish": "matte"}},
-			"wheels": {"rim_color": "6b6f75", "nipple_color": "c8a24a"}, "drive": {"cassette": "dh7w"}}},
+			"wheels": {"rim_color": "6b6f75", "nipple_color": "c8a24a", "sidewall": "tan"}, "drive": {"cassette": "dh7w"}}},
 	"frosty_gnar": {"label": "Frosty Gnar", "style": "race", "frame": "tues", "fork": "fox40f", "tyre": "minion_dhr", "rim": "synthesis",
 		"set": {"paint": {"frame": {"color": "f4f4f0", "finish": "gloss"}, "rear": {"color": "f4f4f0", "finish": "gloss"},
 			"spring": {"color": "2f7de1", "finish": "gloss"}, "grips": {"color": "2f7de1", "finish": "matte"}},
@@ -349,35 +349,59 @@ static func bmx_build(tyre_key: String) -> Dictionary:
 
 ## each frame's own factory colours (paint parts laid over default_build's), so the frames don't all come out alike.
 ## The parts of a build are shared by every frame; the paint is kept per frame (garage.json "paints": {frame: paint}).
-const FRAME_PAINT := {
-	"dh": {},
-	"tues": {"frame": {"color": "1e9bd7", "color2": "7fe3ff", "finish": "pearl"}, "rear": {"color": "1e9bd7", "color2": "7fe3ff", "finish": "pearl"},
-		"spring": {"color": "f4f4f0", "finish": "gloss"}, "linkage": {"color": "111214", "finish": "anodized"}},
-	"goat": {"frame": {"color": "1a1c1f", "finish": "matte"}, "rear": {"color": "1a1c1f", "finish": "matte"},
-		"spring": {"color": "c6ff1a", "finish": "gloss"}, "linkage": {"color": "c6ff1a", "finish": "anodized"}, "grips": {"color": "c6ff1a", "finish": "matte"}},
-	"fuzz": {"frame": {"color": "7b3fe4", "color2": "ff4f9a", "finish": "pearl"}, "rear": {"color": "7b3fe4", "color2": "ff4f9a", "finish": "pearl"},
-		"spring": {"color": "ffd21f", "finish": "gloss"}, "linkage": {"color": "c8ccd0", "finish": "chrome"}},
-}
+## A frame not painted yet gets a random factory colourway (picked once a session): a plain frame colour from a list
+## of real-looking bike paints, a matching spring / linkage / grips, black or tan-wall tyres.
+const FACTORY_COLORS := ["1e9bd7", "1d2b64", "2f7de1", "1a1c1f", "2b2d31", "f4f4f0", "6b6f75", "c8ccd0",
+	"2e7d32", "4a5d3a", "8a5a2b", "ff6a00", "ffd21f", "7b3fe4", "0f8f8a", "b3122e", "e8432e", "3a3f47"]
+const FACTORY_FINISHES := ["gloss", "gloss", "metallic", "metallic", "matte", "satin", "pearl"]
+const FACTORY_ACCENTS := ["111214", "f4f4f0", "e8b030", "c8ccd0", "e8432e", "ff6a00"]
+static var _factory := {}   # frame -> {"paint", "sidewall"} for this session
+
+static func _factory_look(frame: String) -> Dictionary:
+	if _factory.has(frame): return _factory[frame]
+	var used := []   # no two frames the same colour
+	for f in _factory: used.append(_factory[f].paint.frame.color)
+	var cols := FACTORY_COLORS.filter(func(c): return not used.has(c))
+	var col: String = cols[randi() % cols.size()]
+	var fin: String = FACTORY_FINISHES[randi() % FACTORY_FINISHES.size()]
+	var acc: String = FACTORY_ACCENTS[randi() % FACTORY_ACCENTS.size()]
+	if acc == col: acc = "111214" if col != "111214" else "f4f4f0"
+	var p: Dictionary = default_build().paint
+	_merge(p, {"frame": {"color": col, "color2": col, "finish": fin}, "rear": {"color": col, "color2": col, "finish": fin},
+		"spring": {"color": acc, "finish": "gloss"},
+		"linkage": {"color": ["111214", "c8ccd0", col][randi() % 3], "finish": ["anodized", "chrome", fin][randi() % 3]},
+		"grips": {"color": acc if randf() < 0.4 else "1c1c1c", "finish": "matte"}})
+	_factory[frame] = {"paint": p, "sidewall": "tan" if randf() < 0.45 else "black"}
+	return _factory[frame]
+
+## an old file's paint that is just the stock red default (never painted)
+static func _is_stock_paint(p) -> bool:
+	if not (p is Dictionary): return false
+	var d: Dictionary = default_build().paint
+	for k in ["frame", "rear"]:
+		if not (p.get(k) is Dictionary) or String(p[k].get("color", "")) != String(d[k].color): return false
+	return true
 
 ## the factory paint of a frame
 static func frame_paint(frame: String) -> Dictionary:
-	var p: Dictionary = default_build().paint
-	_merge(p, FRAME_PAINT.get(frame, {}))
-	return p
+	return _factory_look(frame).paint.duplicate(true)
 
 ## the saved build with `frame`'s paint on it ("" = the frame in use)
 static func load_build(frame := "") -> Dictionary:
 	if frame == "": frame = GameState.bike_id
 	var b := default_build()
 	b.paint = frame_paint(frame)
+	var painted := false   # this frame has a paint of the player's (else its factory look, tyres too)
 	if FileAccess.file_exists(PATH):
 		var j = JSON.parse_string(FileAccess.get_file_as_string(PATH))
 		if j is Dictionary:
 			var paints = j.get("paints", {})
-			if paints is Dictionary and paints.get(frame) is Dictionary: j.paint = paints[frame]
-			elif paints is Dictionary and not paints.is_empty() or frame != "dh": j.erase("paint")   # (an old file's one paint = the stock frame's)
+			if paints is Dictionary and paints.get(frame) is Dictionary: j.paint = paints[frame]; painted = true
+			elif paints is Dictionary and not paints.is_empty() or frame != "dh" or _is_stock_paint(j.get("paint")): j.erase("paint")   # (an old file's one paint = the stock frame's; the untouched stock red counts as none)
+			else: painted = true
 			_merge(b, j)
 			rebrand(b)
+	if not painted: b.wheels.sidewall = _factory_look(frame).sidewall
 	# tests: BMX_BUILD="wheels.rim_model=deemax;bars.width=820;..." (models applied through their presets)
 	for kv in OS.get_environment("BMX_BUILD").split(";", false):
 		var p := kv.split("=")
