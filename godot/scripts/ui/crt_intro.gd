@@ -10,7 +10,7 @@ extends CanvasLayer
 
 signal finished
 
-const T_ON := 1.8        # TV switches on
+const T_ON := 1.2        # TV switches on
 const T_GLITCH := 7.0    # the first big tear (the figure in the doorway is gone after it)
 const T_LOSS := 10.6     # the signal drops out: snow over everything
 const T_GLITCH2 := 13.2  # second tear: for a moment the figure stands inside the room
@@ -75,8 +75,8 @@ func _ready() -> void:
 	root.add_child(svc)
 	vp = SubViewport.new()
 	vp.own_world_3d = true
-	vp.msaa_3d = Viewport.MSAA_4X
-	vp.positional_shadow_atlas_size = 4096
+	vp.msaa_3d = Viewport.MSAA_2X   # light: this is a dark, soft scene, 2x is plenty
+	vp.positional_shadow_atlas_size = 1024
 	svc.add_child(vp)
 	_build_room()
 	overlay = ColorRect.new()
@@ -105,8 +105,8 @@ func _process(delta: float) -> void:
 	var dt := minf(delta / maxf(Engine.time_scale, 0.001), 0.05)
 	if _freeze >= 0.0:
 		t = _freeze
-	elif not hold:
-		t += dt
+	else:   # (while main builds the ride behind it the clock waits just before the TV comes on: no dead black time on top of the build)
+		t = minf(t + dt, T_ON - 0.05) if hold else t + dt
 	if _skip >= 0.0: _skip += dt
 	if _shots != "" and (t >= _next_shot or (still and _still_frames == 12)) and t < T_END:
 		_next_shot += float(OS.get_environment("BMX_INTRO_SHOT_STEP")) if OS.get_environment("BMX_INTRO_SHOT_STEP") != "" else 0.5
