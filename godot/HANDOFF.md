@@ -865,7 +865,12 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   SurfaceImperfections008, CC0, `assets/textures/grime`: its map baked into a soft grey multiply map `grime_dirt.jpg` + its normals;
   each slat samples its own patch, lower slats a touch dustier), closed box hood with a rounded nose + brushed
   aluminium end plates, guide channels with black brush seals, brushed aluminium bottom bar + rubber bulb seal, wall key
-  switch (green LED) with conduit into the hood. Metal parts use the ambientCG Metal009 / Rubber004 scans. `RollerDoor.extrude` = a reusable profile-along-x mesh builder. Test:
+  switch (green LED) with conduit into the hood. Metal parts use the ambientCG Metal009 / Rubber004 scans.
+  Sound: the user's recording `assets/audio/garage_door_open.mp3` (Pixabay, ~12 s motor then a stop clunk): the motor plays from
+  the hood as the door starts, fades out when it is up and the clunk (`DOOR_CLUNK_AT` 12.3 s) plays (`Garage._door_sound` / `_door_stop`).
+  **Showroom bike switch**: the bike on show rolls off forward, the new one rolls in from behind and brakes to a stop, wheels
+  turning (`Garage._swap_step`, `SWAP_*`). Bike cards: gold stars a size up; card pictures get soft contact shadows
+  (`PartThumbs._ground_shadow`) and an AgX studio light (bump `PartThumbs.THUMB_VER` when it changes). `RollerDoor.extrude` = a reusable profile-along-x mesh builder. Test:
   `BMX_GARAGE_DOOR=0.45` holds the door that far open (+ `BMX_GARAGE_CAM=0,4,5.5 BMX_GARAGE_AIM=0,1.9,-4`).
 - Bike height is placed from the **real tyre size and real axle positions** (no tyre clipping into the floor
   or the roller drums; verified with `BMX_TYRE_PROBE`).

@@ -35,14 +35,20 @@ func _ready() -> void:
 	sky.sky_material = sm
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_energy = 0.7
+	# a product-shot studio: AgX keeps white paint and chrome from clipping, a big key from above-front,
+	# a weak cool fill so the shadow side keeps its shape, a strong rim from behind to draw the tubes'
+	# edges, little flat ambient (it washed everything out)
+	env.ambient_light_energy = 0.4
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
-	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	env.tonemap_mode = Environment.TONE_MAPPER_AGX
 	env.tonemap_exposure = 1.0
+	env.adjustment_enabled = true
+	env.adjustment_contrast = 1.08
+	env.adjustment_saturation = 1.08
 	var we := WorldEnvironment.new(); we.environment = env
 	add_child(we)
-	for l in [[Vector3(-0.6, -0.8, -0.5), 1.7, Color(1, 0.97, 0.92)], [Vector3(0.7, -0.3, 0.4), 0.55, Color(0.85, 0.9, 1)],
-			[Vector3(0.2, -0.4, 0.9), 0.9, Color(1, 1, 1)]]:
+	for l in [[Vector3(-0.5, -0.85, -0.45), 1.15, Color(1, 0.97, 0.93)], [Vector3(0.8, -0.25, -0.3), 0.3, Color(0.82, 0.88, 1)],
+			[Vector3(0.25, -0.35, 0.9), 1.3, Color(1, 1, 1)]]:
 		var d := DirectionalLight3D.new()
 		d.light_energy = l[1]; d.light_color = l[2]
 		add_child(d)
@@ -102,6 +108,7 @@ func _frame(node: Node3D, view: Vector3) -> void:
 	var first := true
 	var mis: Array = node.find_children("*", "MeshInstance3D", true, false)
 	if node is MeshInstance3D: mis.append(node)
+	mis = mis.filter(func(m): return not m.has_meta("no_frame"))
 	for mi in mis:
 		var bb: AABB = (mi as MeshInstance3D).global_transform * (mi as MeshInstance3D).get_aabb()
 		box = bb if first else box.merge(bb)
@@ -236,7 +243,7 @@ static var _bar_stock: ArrayMesh = null
 ## build), so a changed build gets a new picture; THUMB_VER: bump when how bikes look changes (models,
 ## materials, decals, this studio).
 const DISK_DIR := "user://cache/thumbs"
-const THUMB_VER := 1
+const THUMB_VER := 2
 static func bike_key(id: String) -> String:
 	var sig := var_to_str([THUMB_VER, ProjectSettings.get_setting("application/config/version", ""), SIZE, GameState.bike_config_for(id)])
 	return "bike|%s|%s" % [id, sig.md5_text()]
@@ -250,6 +257,7 @@ static func make_bike(id: String) -> Node3D:
 	var cfg := GameState.bike_config_for(id)
 	var rig := BikeRig.new()
 	rig.load_bike(cfg, cfg.get("build", {}))
+	rig.set_meta("setup", _ground_shadow.bind(rig))
 	return rig
 
 ## the picture key (disk cached, see bike_key) of a frame with a given build on it
@@ -262,7 +270,46 @@ static func make_bike_build(id: String, build: Dictionary) -> Node3D:
 	var cfg: Dictionary = GameState.BIKES[id].duplicate(true)
 	var rig := BikeRig.new()
 	rig.load_bike(cfg, build)
+	rig.set_meta("setup", _ground_shadow.bind(rig))
 	return rig
+
+## soft contact shadows on the (invisible) floor: a tight dark blob where each tyre touches, a wide faint
+## pool under the whole bike, so the bike stands on something instead of floating on the card
+const SHADOW_SHADER := "shader_type spatial;
+render_mode unshaded, blend_mix, depth_draw_never, cull_disabled, shadows_disabled;
+uniform float strength = 0.5;
+uniform float softness = 2.0;
+void fragment() {
+	float r = length(UV * 2.0 - 1.0);
+	ALBEDO = vec3(0.0);
+	ALPHA = strength * pow(clamp(1.0 - r, 0.0, 1.0), softness);
+}"
+static var _shadow_shader: Shader = null
+
+static func _ground_shadow(rig: BikeRig) -> void:
+	if rig.wheel_f == null or rig.wheel_r == null: return
+	if _shadow_shader == null:
+		_shadow_shader = Shader.new(); _shadow_shader.code = SHADOW_SHADER
+	var up := rig.global_basis.y.normalized()
+	var pf := rig.wheel_f.global_position - up * rig.wheel_rf
+	var pr := rig.wheel_r.global_position - up * rig.wheel_rr
+	var fwd := (pf - pr).normalized()
+	var side := fwd.cross(up).normalized()
+	var mid := (pf + pr) * 0.5
+	var wb := pf.distance_to(pr)
+	# [centre, length along the bike, width, strength, softness]
+	for s in [[mid, wb + 2.2 * rig.wheel_rf, 0.55, 0.22, 1.6],
+			[pf, 0.55, 0.16, 0.55, 1.8], [pr, 0.55, 0.16, 0.55, 1.8]]:
+		var mi := MeshInstance3D.new()
+		var pm := PlaneMesh.new(); pm.size = Vector2(1, 1)
+		mi.mesh = pm
+		var mat := ShaderMaterial.new(); mat.shader = _shadow_shader
+		mat.set_shader_parameter("strength", s[3]); mat.set_shader_parameter("softness", s[4])
+		mi.material_override = mat
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mi.set_meta("no_frame", true)   # not counted when the picture is framed
+		rig.add_child(mi)
+		mi.global_transform = Transform3D(Basis(fwd * s[1], up, side * s[2]), s[0] + up * 0.002)
 
 ## drop the cached bike pictures (after a part changed)
 func forget_bikes() -> void:
