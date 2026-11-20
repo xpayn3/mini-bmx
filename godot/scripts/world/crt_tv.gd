@@ -41,6 +41,10 @@ static var mute_world := false   # the boot intro is playing: the world's TVs ke
 var _on_t := -1.0          # seconds since power_on (-1 = off)
 var _on_delay := 0.0
 var _off_t := -1.0         # seconds since power_off
+var _off_anim := false     # power_off(animate): the old squeeze to a line, then a dot, then the afterglow dies away
+const OFF_LINE := 0.22     # s: the picture squeezes down to a line
+const OFF_DOT := 0.2       # s: the line shrinks to a dot
+const OFF_GLOW := 1.4      # s: the dot's afterglow fades
 var _glitch := 0.0
 var _glitch_snow := 0.0
 var _next_blip := 3.0
@@ -110,9 +114,10 @@ func power_on(delay := 0.0) -> void:
 	_powered_sound = false
 
 ## off: the picture cuts out at once (a burst of static with it), the LED goes back to standby red
-func power_off(quiet := false) -> void:
+func power_off(quiet := false, animate := false) -> void:
 	if _on_t >= 0.0:
 		_off_t = 0.0
+		_off_anim = animate
 		if not quiet: _burst(0.22, 0.8)
 
 ## a hard tear + snow burst for `secs`
@@ -153,7 +158,20 @@ func _process(delta: float) -> void:
 		if _next_blip <= 0.0:
 			_next_blip = _rng.randf_range(1.6, 4.5)
 			glitch(_rng.randf_range(0.05, 0.14), _rng.randf_range(0.25, 0.6))
-	if _off_t >= 0.0:   # switched off: the picture just goes (no squeeze to a line / dot)
+	if _off_t >= 0.0 and _off_anim:   # switched off with the old animation: line, dot, fading glow
+		_off_t += dt
+		var o := _off_t
+		var k1 := clampf(o / OFF_LINE, 0.0, 1.0)
+		var k2 := clampf((o - OFF_LINE) / OFF_DOT, 0.0, 1.0)
+		vopen = lerpf(1.0, 0.006, k1 * k1)
+		hopen = lerpf(1.0, 0.0, k2 * k2)
+		bright = (1.0 - 0.7 * k1) * (1.0 - k2)
+		flash = 0.6 * k1 * (1.0 - k2)
+		snow = lerpf(snow, 0.0, k1); gl = 0.0; roll = 0.0
+		after = exp(-maxf(o - OFF_LINE, 0.0) * 3.2) * smoothstep(0.0, 0.5, o / OFF_LINE) if o < OFF_LINE + OFF_DOT + OFF_GLOW else 0.0
+		if o >= OFF_LINE + OFF_DOT + OFF_GLOW:
+			_off_t = -1.0; _on_t = -1.0; _off_anim = false; vopen = 0.0; bright = 0.0; after = 0.0; hopen = 1.0
+	elif _off_t >= 0.0:   # switched off: the picture just goes (no squeeze to a line / dot)
 		_off_t = -1.0
 		_on_t = -1.0
 		vopen = 0.0; flash = 0.0; bright = 0.0; snow = 0.0; gl = 0.0; roll = 0.0
