@@ -655,6 +655,7 @@ func grip_mid() -> Vector3:
 ## Pose from the physics state (already interpolated by the caller).
 func pose(px: float, py: float, pz: float, heading: float, pitch: float, hop_nose: float, lean: float,
 		steer: float, wf: float, wr: float, crank: float) -> void:
+	_ground_cache.clear()
 	position = Vector3(px, py, pz)
 	rotation = Vector3(0, heading, 0)
 	pitch_g.rotation = Vector3(0, 0, pitch + hop_nose)
@@ -691,8 +692,17 @@ func tyre_depth(wheel: Node3D, R: float, top: Callable) -> float:
 			var off: float = wo * hw
 			var r := R - hw + sqrt(hw * hw - off * off)
 			var p := c + dir * r + ax * off
-			worst = maxf(worst, float(top.call(p.x, p.z)) - p.y)
+			# ground heights cached for this frame on a 1 mm grid: fit_wheels' last pass and unclip_tyres'
+			# first ask for the very same points, and lifting the bike doesn't move them sideways
+			var key := (roundi(p.x * 1000.0) << 32) ^ (roundi(p.z * 1000.0) & 0xffffffff)
+			var h = _ground_cache.get(key)
+			if h == null:
+				h = float(top.call(p.x, p.z))
+				_ground_cache[key] = h
+			worst = maxf(worst, h - p.y)
 	return worst
+
+var _ground_cache := {}   # tyre_depth's ground samples, cleared every pose()
 
 ## Riding: put each wheel on the ground with the suspension (the frame stays where the physics put the
 ## body): the fork slides and the swingarm swings until the tyre just touches, within the travel; topped

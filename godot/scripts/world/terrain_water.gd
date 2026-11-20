@@ -66,7 +66,26 @@ func _depth(x: float, z: float) -> float:
 	return 0.35 + (bed - h) / 0.08 if h < bed else Terrain.WATER - h
 
 
+## no ground below the water level anywhere the sheet reaches: not drawn, nothing baked (it was a 51k
+## triangle sheet drawn + a depth bake re-run every few metres on dry land). Re-checked twice a second.
+var _check_t := 0.0
+var _wet := true
+var _show_after := false
 func follow(px: float, pz: float, t: float) -> void:
+	_check_t -= get_process_delta_time()
+	if _check_t <= 0.0:
+		_check_t = 0.5
+		var wet := terrain.water_near(px, pz, MESH_SIZE / 2)
+		if wet and not _wet and is_finite(_center.x):
+			# the old bake is from somewhere else: bake it again a few rows a frame, shown once it's done
+			_start(Vector2(roundf(px / BAKE_SNAP) * BAKE_SNAP, roundf(pz / BAKE_SNAP) * BAKE_SNAP))
+			_show_after = true
+		elif not wet:
+			_show_after = false
+		_wet = wet
+		visible = wet and not _show_after
+	if not _wet:
+		return
 	_mat.set_shader_parameter("u_time", t)
 	position = Vector3(roundf(px / MESH_SNAP) * MESH_SNAP, Terrain.WATER, roundf(pz / MESH_SNAP) * MESH_SNAP)
 	var c := Vector2(roundf(px / BAKE_SNAP) * BAKE_SNAP, roundf(pz / BAKE_SNAP) * BAKE_SNAP)
@@ -110,3 +129,6 @@ func _bake(ms: float) -> void:
 		_center = _job_center
 		_mat.set_shader_parameter("u_center", _center)
 		_job_row = -1
+		if _show_after:
+			_show_after = false
+			visible = _wet

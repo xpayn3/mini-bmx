@@ -527,10 +527,35 @@ func set_helmet(model: Node3D, own_goggles: Node3D = null) -> void:
 		var ylo := 1e9; var yhi := -1e9; var xhi := -1e9
 		for p in shell_tris: ylo = minf(ylo, p.y); yhi = maxf(yhi, p.y); xhi = maxf(xhi, p.x)
 		print("CAMMOUNT helmet %s spots=%s low=%.3f shell y %.3f..%.3f xmax %.3f" % [helmet_id, cam_spots, low, ylo, yhi, xhi])
+	_fit_fill(_goggle_front(own_goggles, w) if own_goggles else INF)
+	if Env.s("BMX_CAMMOUNT_PROBE") != "":
+		print("GOGGLE lens front x %.3f  fill front x %.3f" % [_goggle_front(own_goggles, w) if own_goggles else 0.0, helmet_fill.transform.basis.x.x * FILL_R])
 	_mount_action_cam()
 	if not look.is_empty():
 		set_look(look)
 
+
+## the model goggles' lens front on the centreline, head space (x of the most forward point near z = 0)
+static func _goggle_front(gog: Node3D, w: Node3D) -> float:
+	var front := -INF
+	for o in [gog] + gog.find_children("*", "MeshInstance3D", true, false):
+		if not (o is MeshInstance3D) or o.mesh == null: continue
+		var t: Transform3D = w.transform * _rel_xform(o, w)
+		for si in o.mesh.get_surface_count():
+			for p in _surface_tris(o.mesh, si, t):
+				if absf(p.z) < 0.03: front = maxf(front, p.x)
+	return front
+
+## The dark inside of the helmet (helmet_fill, so the face opening isn't see-through): its front stays
+## FILL_GAP behind the goggle lens, or it shows through the lens (model goggles sit closer to the head than ours)
+const FILL_R := 0.1
+const FILL_GAP := 0.03
+func _fit_fill(lens_front: float) -> void:
+	if helmet_fill == null: return
+	var sx := 1.0
+	if lens_front < INF:
+		sx = clampf((lens_front - FILL_GAP) / FILL_R, 0.4, 1.0)
+	helmet_fill.transform = Transform3D(Basis.from_scale(Vector3(sx, 1.2, 0.95)), Vector3(0, -0.01, 0))
 
 static func _rel_xform(n: Node3D, root: Node3D) -> Transform3D:
 	var t := Transform3D()
