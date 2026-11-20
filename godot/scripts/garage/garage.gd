@@ -604,6 +604,21 @@ func _rebuild_bike() -> void:
 	rig.set_meta("ride_y", ride_y)
 	if not rider_on:   # parked: leaning over onto its stand, bars turned
 		_show_pose(rig, bike_x, PARK_LEAN, PARK_STEER, 0.0, 0.0)
+		# leaned over, the tyres no longer sit where the upright fit put them: measure round the casing and
+		# drop (or lift) the bike until the lower tyre just touches the floor
+		var floor0 := func(_x: float, _z: float) -> float: return 0.0
+		var d := maxf(rig.tyre_depth(rig.wheel_f, tf.r, floor0), rig.tyre_depth(rig.wheel_r, tr.r, floor0))
+		ride_y += d + 0.0005
+		rig.set_meta("ride_y", ride_y)
+		_show_pose(rig, bike_x, PARK_LEAN, PARK_STEER, 0.0, 0.0)
+		# soft contact shadows where the tyres touch (they ride along when the bike rolls off / in)
+		PartThumbs._ground_shadow(rig, 0.8)
+		if Env.s("BMX_TYRE_PROBE") != "" or Env.s("BMX_GARAGE_PROBE") != "":
+			var sh := []
+			for c in rig.get_children():
+				if c.has_meta("no_frame"): sh.append("%.3f,%.3f,%.3f" % [c.global_position.x, c.global_position.y, c.global_position.z])
+			print("GARAGE park tyre depth f=%.4f r=%.4f (was %.4f) shadows=%s" % [rig.tyre_depth(rig.wheel_f, tf.r, floor0),
+				rig.tyre_depth(rig.wheel_r, tr.r, floor0), d, sh])
 	rider = null
 	_build_rollers(tr.c.x, tf.c.x, tf.c.y - tf.r)
 	if rider_on:
@@ -611,6 +626,7 @@ func _rebuild_bike() -> void:
 	_update_stand_rider()
 	_rider_visibility()
 	for mi in rig.find_children("*", "MeshInstance3D", true, false):
+		if mi.has_meta("no_frame"): continue   # the contact shadow quads cast nothing
 		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	if swap:
 		_arrive_t = -SWAP_DELAY

@@ -325,7 +325,7 @@ void fragment() {
 }"
 static var _shadow_shader: Shader = null
 
-static func _ground_shadow(rig: BikeRig) -> void:
+static func _ground_shadow(rig: BikeRig, k := 1.0) -> void:
 	if rig.wheel_f == null or rig.wheel_r == null: return
 	if _shadow_shader == null:
 		_shadow_shader = Shader.new(); _shadow_shader.code = SHADOW_SHADER
@@ -343,7 +343,7 @@ static func _ground_shadow(rig: BikeRig) -> void:
 		var pm := PlaneMesh.new(); pm.size = Vector2(1, 1)
 		mi.mesh = pm
 		var mat := ShaderMaterial.new(); mat.shader = _shadow_shader
-		mat.set_shader_parameter("strength", s[3]); mat.set_shader_parameter("softness", s[4])
+		mat.set_shader_parameter("strength", s[3] * k); mat.set_shader_parameter("softness", s[4])
 		mi.material_override = mat
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		mi.set_meta("no_frame", true)   # not counted when the picture is framed
