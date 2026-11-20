@@ -131,6 +131,8 @@ var scenic := false          # title screen: golden hour, a lookout camera, far 
 var far_hills: FarHills
 var grass: GrassField
 var sheep: SheepHerd
+var tumbleweeds: Tumbleweeds
+var title_life: TitleLife     # title screen only: birds, blowing dust, dust round the bushes
 
 func _ready() -> void:
 	bike_cfg = GameState.bike_config()
@@ -158,6 +160,8 @@ func _ready() -> void:
 	sheep = SheepHerd.new()   # woolly flocks that graze and run from the bike
 	sheep.setup(terrain)
 	add_child(sheep)
+	tumbleweeds = Tumbleweeds.new()   # dry bushes that roll over the desert before the wind
+	add_child(tumbleweeds)
 	fx = load("res://scripts/fx/fx.gd").new()
 	add_child(fx)
 	if fx.has_method("setup"): fx.setup(terrain)
@@ -419,8 +423,15 @@ func set_scenic(on: bool) -> void:
 		_snap_prev()
 		atmos.gain = 0.3   # a slight breeze
 		_title_lights(best)
+		if title_life == null:
+			title_life = TitleLife.new()
+			add_child(title_life)
 	else:
 		atmos.gain = 1.0
+		if title_life != null:
+			title_life.queue_free()
+			title_life = null
+		tumbleweeds.clear()
 		if is_instance_valid(_studio): _studio.queue_free()
 		_studio = null
 		sun.look_at_from_position(SUN_DIR.normalized(), Vector3.ZERO, Vector3.UP)
@@ -768,6 +779,31 @@ func _title_lights(heading: float) -> void:
 	_studio.add_child(fill)
 	fill.global_position = c - f * 5.0 - d * 2.5 + Vector3(0, 0.4, 0)
 
+## how far rocks / logs rise above the bare ground under and round (x, z), over the bike's footprint
+func _rock_rise(x: float, z: float) -> float:
+	var worst: float = terrain.top_height(x, z) - terrain.deck_height(x, z)
+	for i in 8:
+		var a := i * TAU / 8.0
+		var px := x + cos(a) * 1.7
+		var pz := z + sin(a) * 1.7
+		worst = maxf(worst, terrain.top_height(px, pz) - terrain.deck_height(px, pz))
+	return worst
+
+## the spot nearest to (x, z) with no rock under the bike (a spiral out to ~16 m; the spot itself if it is bare)
+func _clear_spot(x: float, z: float) -> Vector2:
+	if _rock_rise(x, z) < 0.06:
+		return Vector2(x, z)
+	for ring in range(1, 22):
+		var rad := ring * 0.75
+		var n := maxi(8, ring * 6)
+		for i in n:
+			var a := i * TAU / n
+			var px := x + cos(a) * rad
+			var pz := z + sin(a) * rad
+			if _rock_rise(px, pz) < 0.06:
+				return Vector2(px, pz)
+	return Vector2(x, z)
+
 ## title screen: stand the bike on the hand-picked summit of the title world
 func _to_hilltop() -> void:
 	var sp := TITLE_SPOT
@@ -775,6 +811,8 @@ func _to_hilltop() -> void:
 		var q := Env.s("BMX_TITLE_SPOT").split_floats(",")
 		sp = Vector3(q[0], q[1], q[2])
 	terrain.update_stream(sp.x, sp.y, INF)
+	var clear := _clear_spot(sp.x, sp.y)   # never on a rock: the nearest bare ground to the picked spot
+	sp = Vector3(clear.x, clear.y, sp.z)
 	phys.reset_at(sp.x, sp.y, 0.0)
 	_snap_prev()
 	cam.snap_to(Vector3(sp.x, phys.y + 0.5, sp.y))
@@ -1221,6 +1259,7 @@ func respawn(new_world: bool) -> void:
 		far_hills.setup(terrain)
 		add_child(far_hills)
 		sheep.reset()
+		tumbleweeds.clear()
 		flash("New world #%d" % GameState.seed)
 	if fx.has_method("clear_tracks"): fx.clear_tracks()
 	if new_world: grime.clean()
@@ -2159,6 +2198,10 @@ func _process(dt: float) -> void:
 	_pk = _perf("biome", _pk)
 	# weather: wind, the bike parting the grass, cloud shadows (the sun dims with the shade at the rider)
 	atmos.update(t, dt, drawn_pos, 0.0 if st.air or st.crash_on else clampf(absf(st.v) / 2.0, 0.0, 1.0))
+	var vcam := get_viewport().get_camera_3d()
+	tumbleweeds.update(dt, terrain, vcam, atmos.wind, drawn_pos, st.v, float(Settings.get_v("fx_density")))
+	if title_life != null:
+		title_life.update(dt, vcam, atmos.wind, drawn_pos, terrain)
 	_update_light(dt)
 	_glare_guard(dt)
 	_rim_update(dt)
