@@ -44,6 +44,7 @@ static func build_async(garage: Node3D) -> void:
 	var root := Node3D.new()
 	root.name = "Workshop"
 	garage.add_child(root)
+	_neon(root)
 	_pegboard_tools(root)
 	await tree.process_frame
 	if not is_instance_valid(root): return
@@ -205,6 +206,95 @@ static func _holes_mat() -> StandardMaterial3D:
 	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
 	m.roughness = 1.0
 	return m
+
+# ---------------------------------------------------------------- the shop's neon sign
+## GNARWHAL CYCLES (a made-up shop), all bent glass tube: a neon wheel (rim, hub, eight spokes) as the
+## logo, the name in blue tube capitals (NeonText), "cycles . est. 2026" in a pink tube line under it,
+## dark electrode caps where the tubes go back into the sign, on clear acrylic on standoffs, on the brick
+## right of the door. Glows through the garage's HDR glow, washes the wall blue, and now and then
+## flickers like an old transformer.
+const NEON_AT := Vector3(3.55, 3.4, WALL)
+const NEON_BLUE := Color(0.2, 0.62, 1.0)
+const NEON_PINK := Color(1.0, 0.3, 0.75)
+
+static func _neon_mat(core: Color, glow: Color) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()   # glass tube: near-white core, coloured glow
+	m.albedo_color = core
+	m.emission_enabled = true
+	m.emission = glow
+	m.emission_energy_multiplier = 7.0
+	m.roughness = 0.2
+	return m
+
+static func _neon(root: Node3D) -> void:
+	var neon := Node3D.new()
+	neon.name = "NeonSign"
+	neon.position = NEON_AT + Vector3(0, 0, 0.05)
+	root.add_child(neon)
+	var blue := _neon_mat(Color(0.75, 0.92, 1.0), NEON_BLUE)
+	var pink := _neon_mat(Color(1.0, 0.8, 0.95), NEON_PINK)
+	var cap_mat := _mat(Color(0.05, 0.05, 0.06), 0.4, 0.3)
+	# the logo: a wheel, rim + hub + eight spokes
+	var icon := Node3D.new()
+	icon.position = Vector3(-1.0, 0.0, 0)
+	neon.add_child(icon)
+	var rim := TorusMesh.new(); rim.inner_radius = 0.17; rim.outer_radius = 0.19; rim.rings = 64; rim.ring_segments = 10
+	var rmi := MeshInstance3D.new(); rmi.mesh = rim; rmi.material_override = blue; rmi.rotation.x = PI / 2
+	icon.add_child(rmi)
+	var hub := TorusMesh.new(); hub.inner_radius = 0.018; hub.outer_radius = 0.036; hub.rings = 24; hub.ring_segments = 8
+	var hmi := MeshInstance3D.new(); hmi.mesh = hub; hmi.material_override = blue; hmi.rotation.x = PI / 2
+	icon.add_child(hmi)
+	for i in 8:
+		var a := i * TAU / 8.0 + 0.2
+		var sp := CylinderMesh.new(); sp.top_radius = 0.006; sp.bottom_radius = 0.006; sp.height = 0.14
+		var smi := MeshInstance3D.new(); smi.mesh = sp; smi.material_override = blue
+		smi.position = Vector3(cos(a), sin(a), 0) * 0.105
+		smi.rotation.z = a - PI / 2
+		icon.add_child(smi)
+	# the name and the line under it, bent from tube
+	var t1 := NeonText.build("GNARWHAL", 0.3, 0.011)
+	var t2 := NeonText.build("cycles · est. 2026", 0.13, 0.008, 0.16)
+	var x0 := -0.7
+	for part in [[t1, blue, Vector3(x0, -0.02, 0)], [t2, pink, Vector3(x0 + 0.05, -0.27, 0)]]:
+		var g := MeshInstance3D.new(); g.mesh = part[0].mesh; g.material_override = part[1]; g.position = part[2]
+		g.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		neon.add_child(g)
+		var c := MeshInstance3D.new(); c.mesh = part[0].caps; c.material_override = cap_mat; c.position = part[2]
+		neon.add_child(c)
+	var right: float = x0 + maxf(t1.width, t2.width)
+	# clear acrylic backing on four steel standoffs
+	var acr := StandardMaterial3D.new()
+	acr.albedo_color = Color(0.8, 0.9, 1.0, 0.08)
+	acr.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	acr.roughness = 0.05
+	var left := -1.27
+	var back := BoxMesh.new(); back.size = Vector3(right - left + 0.12, 0.8, 0.008)
+	var bmi := MeshInstance3D.new(); bmi.mesh = back; bmi.material_override = acr
+	bmi.position = Vector3((left + right) * 0.5, -0.03, -0.05)
+	bmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	neon.add_child(bmi)
+	var steel := _mat(Color(0.7, 0.72, 0.75), 0.25, 1.0)
+	for sx in [left, right + 0.04]:
+		for sy in [-0.38, 0.32]:
+			_cyl(neon, 0.008, 0.05, Vector3(sx, sy, -0.075), steel, Vector3(PI / 2, 0, 0))
+	# the light it throws on the brick and round the corner of the door
+	var glow := OmniLight3D.new()
+	glow.light_color = NEON_BLUE
+	glow.light_energy = 1.6
+	glow.omni_range = 3.2
+	glow.omni_attenuation = 1.6
+	glow.light_volumetric_fog_energy = 0.4
+	glow.position = Vector3((left + right) * 0.5, 0.0, 0.35)
+	neon.add_child(glow)
+	# now and then a flicker, like an old neon transformer (the blue tubes)
+	var tw := neon.create_tween().set_loops()
+	tw.tween_interval(6.5)
+	for step in [[0.25, 0.05], [1.0, 0.06], [0.15, 0.04], [1.0, 0.0]]:
+		tw.tween_callback(func():
+			if not is_instance_valid(neon): return
+			blue.emission_energy_multiplier = 7.0 * step[0]
+			glow.light_energy = 1.6 * step[0])
+		if step[1] > 0.0: tw.tween_interval(step[1])
 
 # ---------------------------------------------------------------- wheels by the door
 static func _wheels(root: Node3D) -> void:

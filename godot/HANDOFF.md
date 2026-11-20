@@ -645,7 +645,10 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   **Spare parts wall** (`garage/workshop_props.gd`, `WorkshopProps.build_async`, built a piece a frame after the garage
   shows, glbs loaded on a thread): hand tools on the pegboard (holes texture), chainrings, cassette, rotor, tubes, chain; our
   parts on the bench (fork, cranks, saddle, derailleur, rotor); painted framesets hung beside the door + one right of it;
-  three wheels above the pegboard.
+  three wheels above the pegboard. **Neon sign** right of the door: the made-up shop **GNARWHAL CYCLES**, all bent tube
+  (`WorkshopProps._neon`): a wheel logo, the name in blue + "cycles · est. 2026" in pink, built by `garage/neon_text.gd`
+  (`NeonText.build`: a stroke font, each stroke smoothed + swept as a round tube, dark electrode caps at the ends; add
+  glyphs to `_glyph` for new text), blue wall light, an occasional flicker.
   **Showcase quality** (`Garage._showcase_quality`): the garage renders at top quality whatever the preset (4x MSAA + TAA,
   full res, 16x aniso, full LOD, 8K soft-ultra shadows, ultra SSAO / SSIL, 128 GI rays); leaving restores Settings.
   **Garage speed**: the customizer page is built on EDIT, not in the showroom; every part picture is saved to disk once
