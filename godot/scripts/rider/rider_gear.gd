@@ -349,14 +349,14 @@ static func build_hand(m: Dictionary, side: int) -> Node3D:
 	var inner := -side
 	# the palm rises from the wrist (on the forearm's line) to sit on top of the grip at the knuckles
 	var tilt := Basis(Vector3.BACK, 0.30)
-	var palm_blk := _add(h, G.rounded_box(0.098, 0.034, 0.086, 1, 0.009), m.glove)
-	palm_blk.transform = Transform3D(tilt, Vector3(-0.026, 0.020, 0))
+	var palm_blk := _add(h, G.rounded_box(0.098, 0.038, 0.094, 1, 0.010), m.glove)
+	palm_blk.transform = Transform3D(tilt, Vector3(-0.026, 0.023, 0))
 	# the heel of the thumb (the thenar pad) bulging on the inside
 	var heel := _add(h, G.rounded_box(0.05, 0.03, 0.026, 1, 0.009), m.glove)
 	heel.transform = Transform3D(Basis(Vector3.UP, inner * 0.35) * tilt, Vector3(-0.040, 0.010, inner * 0.030))
 	# knuckle guard: a moulded strip across the knuckles
-	var pad := _add(h, G.rounded_box(0.022, 0.010, 0.07, 1, 0.004), m.knuckle)
-	pad.transform = Transform3D(Basis(Vector3.BACK, 0.6), Vector3(0.012, 0.041, 0))
+	var pad := _add(h, G.rounded_box(0.022, 0.010, 0.078, 1, 0.004), m.knuckle)
+	pad.transform = Transform3D(Basis(Vector3.BACK, 0.6), Vector3(0.014, 0.046, 0))
 	var palm := _add(h, G.rounded_box(0.06, 0.008, 0.07, 1, 0.003), m.palm)
 	palm.transform = Transform3D(tilt, Vector3(-0.032, 0.002, 0))
 	var cyl := CylinderMesh.new()

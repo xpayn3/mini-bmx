@@ -10,24 +10,27 @@ extends RefCounted
 ## finger's joints lie on a circle round the grip (GRIP_R), the thumb wrapping the other way under it; in between
 ## each phalanx's angle is blended. ~0.4 = a relaxed hand (standing, crash, animation clips).
 
-const GRIP_R := 0.0275         # finger centre line round the bar (bar radius ~0.016 + a gloved finger)
+const GRIP_R := 0.0305         # finger centre line round the bar (bar radius ~0.016 + a gloved finger)
 const KNUCKLE_ANG := 0.96      # where the fingers leave the palm on that circle (rad from +X toward +Y)
 const OPEN_ANG := -0.12        # every phalanx's direction with the hand open (a slight droop)
-const SIDES := 6               # low poly: hexagonal fingers, flat shaded
+const SIDES := 8               # low poly: octagonal fingers, flat shaded
 const RELAXED := 0.4
 
 ## [name, z across the hand (+ = toward the thumb), lengths, radii, knuckle angle offset]
 const FINGERS := [
-	["Index",  0.0315, [0.040, 0.025, 0.021], [0.0118, 0.0110, 0.0102], 0.00],
-	["Middle", 0.0105, [0.044, 0.028, 0.022], [0.0120, 0.0112, 0.0104], 0.04],
-	["Ring",  -0.0105, [0.041, 0.026, 0.021], [0.0115, 0.0107, 0.0099], 0.00],
-	["Little", -0.0305, [0.033, 0.020, 0.018], [0.0104, 0.0097, 0.0090], -0.10],
+	["Index",  0.0345, [0.034, 0.021, 0.018], [0.0146, 0.0141, 0.0136], 0.00],
+	["Middle", 0.0115, [0.037, 0.023, 0.019], [0.0150, 0.0145, 0.0139], 0.04],
+	["Ring",  -0.0115, [0.035, 0.022, 0.018], [0.0144, 0.0139, 0.0133], 0.00],
+	["Little", -0.0335, [0.028, 0.017, 0.015], [0.0130, 0.0125, 0.0120], -0.10],
 ]
-const THUMB_BASE := Vector3(-0.046, 0.010, 0.024)   # z: toward the thumb side
-const THUMB_Z := 0.049
+## how early each phalanx follows the curl (exponent on it): the knuckle bends first, the tips last, so a
+## half-curled hand is softly bent from the knuckles, not hooked at the fingertips like a claw
+const CURL_EXP := [0.7, 1.15, 1.7]
+const THUMB_BASE := Vector3(-0.046, 0.010, 0.026)   # z: toward the thumb side
+const THUMB_Z := 0.056
 const THUMB_START := 2.75      # rad round the grip where the thumb meets it (behind, a little up)
-const THUMB_L := [0.032, 0.027]
-const THUMB_R := [0.0130, 0.0122, 0.0112]   # metacarpal, proximal, distal
+const THUMB_L := [0.029, 0.024]
+const THUMB_R := [0.0160, 0.0152, 0.0142]   # metacarpal, proximal, distal
 const THUMB_OPEN := -0.5       # the open thumb's direction in its plane
 
 
@@ -53,7 +56,7 @@ static func pose(i: int, curl: float) -> Array:
 			var th := 2.0 * asin(clampf(L / (2.0 * GRIP_R), 0.0, 1.0))
 			var grip_dir := ang - th * 0.5 - PI * 0.5
 			ang -= th
-			var d := lerp_angle(OPEN_ANG, grip_dir, curl)
+			var d := lerp_angle(OPEN_ANG, grip_dir, pow(clampf(curl, 0.0, 1.0), CURL_EXP[k]))
 			out.append([pre + f[0] + names[k], _seg(p, d)])
 			p += Vector3(cos(d), sin(d), 0.0) * L
 	# thumb: the metacarpal from the heel of the palm to the grip circle, then two phalanges round the other way
@@ -68,7 +71,7 @@ static func pose(i: int, curl: float) -> Array:
 		var th := 2.0 * asin(clampf(L / (2.0 * (GRIP_R + 0.002)), 0.0, 1.0))
 		var grip_dir := ang + th * 0.5 + PI * 0.5
 		ang += th
-		var d := lerp_angle(THUMB_OPEN, grip_dir, curl)
+		var d := lerp_angle(THUMB_OPEN, grip_dir, pow(clampf(curl, 0.0, 1.0), CURL_EXP[k + 1]))
 		out.append([pre + tn[k], _seg(p, d)])
 		p += Vector3(cos(d), sin(d), 0.0) * L
 	return out
@@ -100,7 +103,7 @@ static func build(skel: Skeleton3D, i: int, mat: Material) -> MeshInstance3D:
 			var r1: float = r0 * 0.93
 			_phalanx(st, bind, f[2][k], r0, r1, k == 2)
 			bind += 1
-	var tl := [0.034, THUMB_L[0], THUMB_L[1]]
+	var tl := [0.036, THUMB_L[0], THUMB_L[1]]
 	var tnames := ["ThumbMetacarpal", "ThumbProximal", "ThumbDistal"]
 	for k in 3:
 		skin.add_bind(skel.find_bone(pre + tnames[k]), Transform3D.IDENTITY)
@@ -119,13 +122,13 @@ static func build(skel: Skeleton3D, i: int, mat: Material) -> MeshInstance3D:
 ## running back into the joint behind it (no gaps when bent); the last one ends in a low-poly fingertip
 static func _phalanx(st: SurfaceTool, bone: int, L: float, r0: float, r1: float, tip: bool) -> void:
 	var y0 := -r0 * 0.75
-	var y1 := L + (r1 * 0.15 if not tip else 0.0)
-	_mid = (y0 + y1) * 0.5
+	var y1 := L - r1 * 0.1
+	_mid = (y0 + L) * 0.5
 	var ring := func(y: float, r: float) -> Array:
 		var pts := []
 		for s in SIDES:
 			var a := TAU * (s + 0.5) / SIDES
-			pts.append(Vector3(cos(a) * r * 0.86, y, sin(a) * r * 1.08))
+			pts.append(Vector3(cos(a) * r * 0.92, y, sin(a) * r))
 		return pts
 	var A: Array = ring.call(y0, r0 * 0.92)
 	var B: Array = ring.call(y1, r1)
@@ -145,8 +148,13 @@ static func _phalanx(st: SurfaceTool, bone: int, L: float, r0: float, r1: float,
 		for s in SIDES:
 			_tri(st, bone, C[s], C[(s + 1) % SIDES], apex)
 	else:
+		# a rounded knuckle running into the next phalanx (no step at the joint when it bends)
+		var C: Array = ring.call(L + r1 * 0.5, r1 * 0.72)
+		for s in SIDES:
+			var s2 := (s + 1) % SIDES
+			_quad(st, bone, B[s], B[s2], C[s2], C[s])
 		for s in range(1, SIDES - 1):
-			_tri(st, bone, B[0], B[s], B[s + 1])
+			_tri(st, bone, C[0], C[s], C[s + 1])
 
 
 static var _mid := 0.0   # the phalanx's middle on its axis: every face points away from it (convex shape)
