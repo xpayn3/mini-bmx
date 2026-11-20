@@ -72,11 +72,11 @@ void fragment() {
 
 	vec3 ground = pow(COLOR.rgb, vec3(2.2));           // sRGB -> linear
 	// pressed soil is darker; the bottoms of the dimples darker still; the pushed-out lip a bit lighter
-	vec3 col = ground * (0.9 - 0.27 * h) + ground * 0.4 * lip;   // (was 0.78 - 0.42 h: too dark; a smidget darker than 0.92 - 0.2 h)
+	vec3 col = ground * (0.9 - 0.27 * h) + ground * 0.12 * lip;   // (was 0.78 - 0.42 h: too dark; a smidget darker than 0.92 - 0.2 h)
 	ALBEDO = col;
 	ROUGHNESS = 0.92 - 0.12 * h;
 	SPECULAR = 0.25;
 	float dist = length(VERTEX);
 	float fade = 1.0 - smoothstep(fade_near, fade_far, dist);
-	ALPHA = COLOR.a * max(band, lip) * fade * (0.72 + 0.2 * h);
+	ALPHA = COLOR.a * band * fade * (0.72 + 0.2 * h);
 }
