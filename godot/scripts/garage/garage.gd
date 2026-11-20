@@ -962,9 +962,9 @@ var _show_pick := ""   # the showroom card in use: a frame id (your build on it)
 func _fill_showroom() -> void:
 	for c in _show_strip.row.get_children(): c.queue_free()
 	var own := []
-	var saved := BikeBuild.load_build()   # the frame cards show your saved build, whatever edition is up
 	for id in GameState.BIKES:
 		if not GameState.BIKES[id].get("garage", false): continue
+		var saved := BikeBuild.load_build(id)   # the frame cards show your saved build (with this frame's paint), whatever edition is up
 		own.append({"key": id, "brand": "YOUR BUILD", "name": String(GameState.BIKES[id].label), "spec": _bike_line(id, saved),
 			"thumb": PartThumbs.build_key(id, saved), "make": PartThumbs.make_bike_build.bind(id, saved),
 			"view": Vector3(0.45, 0.2, 1.0), "speed": BikeBuild.stats(saved, id)["Top speed"]})
@@ -993,8 +993,8 @@ func _fill_showroom() -> void:
 			GameState.bike_id = BikeBuild.EDITIONS[e].frame
 		else:
 			if not _show_pick.begins_with("ed:"): BikeBuild.save_build(build)
-			else: build = BikeBuild.load_build()   # back from an edition: your own build again
 			GameState.bike_id = v
+			build = BikeBuild.load_build(v)   # your build, in this frame's own paint
 		_show_pick = v
 		GameState.save()
 		_rebuild_bike()

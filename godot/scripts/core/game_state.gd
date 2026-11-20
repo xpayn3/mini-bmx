@@ -70,7 +70,7 @@ func bike_config() -> Dictionary:
 func bike_config_for(id: String) -> Dictionary:
 	var cfg: Dictionary = BIKES[id].duplicate(true)
 	if cfg.get("garage", false):
-		var b := BikeBuild.load_build()
+		var b := BikeBuild.load_build(id)
 		var mods := BikeBuild.ride_mods(b)
 		cfg.build = b
 		cfg.mods = mods

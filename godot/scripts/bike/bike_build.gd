@@ -347,11 +347,35 @@ static func bmx_build(tyre_key: String) -> Dictionary:
 	apply_tyre_model(b, tyre_key)
 	return b
 
-static func load_build() -> Dictionary:
+## each frame's own factory colours (paint parts laid over default_build's), so the frames don't all come out alike.
+## The parts of a build are shared by every frame; the paint is kept per frame (garage.json "paints": {frame: paint}).
+const FRAME_PAINT := {
+	"dh": {},
+	"tues": {"frame": {"color": "1e9bd7", "color2": "7fe3ff", "finish": "pearl"}, "rear": {"color": "1e9bd7", "color2": "7fe3ff", "finish": "pearl"},
+		"spring": {"color": "f4f4f0", "finish": "gloss"}, "linkage": {"color": "111214", "finish": "anodized"}},
+	"goat": {"frame": {"color": "1a1c1f", "finish": "matte"}, "rear": {"color": "1a1c1f", "finish": "matte"},
+		"spring": {"color": "c6ff1a", "finish": "gloss"}, "linkage": {"color": "c6ff1a", "finish": "anodized"}, "grips": {"color": "c6ff1a", "finish": "matte"}},
+	"fuzz": {"frame": {"color": "7b3fe4", "color2": "ff4f9a", "finish": "pearl"}, "rear": {"color": "7b3fe4", "color2": "ff4f9a", "finish": "pearl"},
+		"spring": {"color": "ffd21f", "finish": "gloss"}, "linkage": {"color": "c8ccd0", "finish": "chrome"}},
+}
+
+## the factory paint of a frame
+static func frame_paint(frame: String) -> Dictionary:
+	var p: Dictionary = default_build().paint
+	_merge(p, FRAME_PAINT.get(frame, {}))
+	return p
+
+## the saved build with `frame`'s paint on it ("" = the frame in use)
+static func load_build(frame := "") -> Dictionary:
+	if frame == "": frame = GameState.bike_id
 	var b := default_build()
+	b.paint = frame_paint(frame)
 	if FileAccess.file_exists(PATH):
 		var j = JSON.parse_string(FileAccess.get_file_as_string(PATH))
 		if j is Dictionary:
+			var paints = j.get("paints", {})
+			if paints is Dictionary and paints.get(frame) is Dictionary: j.paint = paints[frame]
+			elif paints is Dictionary and not paints.is_empty() or frame != "dh": j.erase("paint")   # (an old file's one paint = the stock frame's)
 			_merge(b, j)
 			rebrand(b)
 	# tests: BMX_BUILD="wheels.rim_model=deemax;bars.width=820;..." (models applied through their presets)
@@ -397,10 +421,21 @@ static func _merge(dst: Dictionary, src: Dictionary) -> void:
 		elif dst.has(k) and typeof(dst[k]) == typeof(src[k]):
 			dst[k] = src[k]
 
-static func save_build(b: Dictionary) -> void:
+## save a build; its paint is kept as `frame`'s ("" = the frame in use), the other frames' paints stay
+static func save_build(b: Dictionary, frame := "") -> void:
 	if OS.get_environment("BMX_PADSEQ") != "": return   # menu tests: never into the player\'s files
+	if frame == "": frame = GameState.bike_id
+	var paints := {}
+	if FileAccess.file_exists(PATH):
+		var j = JSON.parse_string(FileAccess.get_file_as_string(PATH))
+		if j is Dictionary and j.get("paints") is Dictionary: paints = j.paints
+		elif j is Dictionary and j.get("paint") is Dictionary: paints = {"dh": j.paint}   # an old file: its paint was the stock frame's
+	var out := b.duplicate(true)
+	out.erase("paints")
+	paints[frame] = b.paint.duplicate(true)
+	out.paints = paints
 	var f := FileAccess.open(PATH, FileAccess.WRITE)
-	if f: f.store_string(JSON.stringify(b, "\t"))
+	if f: f.store_string(JSON.stringify(out, "\t"))
 	Steam.event("GARAGE")
 
 ## copy a PNG the player picked into user://logos and return its new path

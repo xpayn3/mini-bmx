@@ -130,7 +130,6 @@ func show_rider(look: Dictionary) -> void:
 	else:
 		_rider.set_look(look)
 	_rider.visible = true
-	pivot.rotation = Vector3.ZERO
 	_r = 0.55; _h = 1.85
 	_fit()
 
@@ -154,7 +153,6 @@ func set_bike(id: String, force := false) -> void:
 		(_built[id][0] as Node).queue_free()
 		_built.erase(id)
 	_bike_id = id
-	pivot.rotation = Vector3.ZERO
 	if _built.has(id):   # shown before: just bring it back
 		_rig = _built[id][0]
 		_rig.visible = true
