@@ -239,7 +239,7 @@ func _process(dt: float) -> void:
 				_vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
 			_vp_frames = -1
 	var rider := get_parent() as Rider
-	if rider == null or rider.spine_skel == null or not rider.is_visible_in_tree() or dt <= 0.0:
+	if rider == null or rider.spine_skel == null or not rider.is_visible_in_tree() or not is_visible_in_tree() or dt <= 0.0:   # bib off = no cloth sim
 		return
 	dt = minf(dt, 1.0 / 30.0)
 	_t += dt

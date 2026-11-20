@@ -100,13 +100,14 @@ static func _put4(a: PackedFloat32Array, o: int, v: Vector3, w: float) -> void:
 	a[o] = v.x; a[o + 1] = v.y; a[o + 2] = v.z; a[o + 3] = w
 
 var _dbg := 0
+var _probe := OS.get_environment("BMX_SMOKE_PROBE") != ""   # read once: the callback runs every frame on the render thread
 func _dbgp(m: String) -> void:
-	if OS.get_environment("BMX_SMOKE_PROBE") != "" and _dbg < 40:
+	if _probe and _dbg < 40:
 		_dbg += 1
 		print("SMOKECOMP ", m)
 
 func _render_callback(_type: int, rdata: RenderData) -> void:
-	_dbgp("cb ok=%s active=%s params=%d" % [ok, active, params.size()])
+	if _probe: _dbgp("cb ok=%s active=%s params=%d" % [ok, active, params.size()])
 	if not ok or not active or params.is_empty():
 		_has_prev = false
 		return
@@ -128,7 +129,7 @@ func _render_callback(_type: int, rdata: RenderData) -> void:
 	var detail := RenderingServer.texture_get_rd_texture((params.detail as Texture).get_rid())
 	if not (hmap.is_valid() and detail.is_valid()):
 		_dbgp("hmap/detail not valid %s %s" % [hmap, detail]); return
-	_dbgp("draw size=%s color=%s depth=%s" % [size, color, depth])
+	if _probe: _dbgp("draw size=%s color=%s depth=%s" % [size, color, depth])
 
 	# already Godot's RD projection (depth 0..1 reversed, y flipped)
 	var proj := sd.get_cam_projection()

@@ -31,7 +31,7 @@ var fps_now := 0.0
 var _frame_us := 0
 var _sys_overlay := false        # the SYSTEM page turned the 3D physics overlay on
 var _overlay_was := false        # ...and it was off before
-var _demo_t := 0.0 if OS.get_environment("BMX_FLASH") != "" else -1.0
+var _demo_t := 0.0 if Env.s("BMX_FLASH") != "" else -1.0
 var elev_hist := PackedFloat32Array()
 var elev_t := 0.0
 var elev_up := 0.0     # metres climbed / descended this ride (bike computer page 2)
@@ -85,7 +85,7 @@ func _ready() -> void:
 	gauge.size = Vector2(150, 224); gauge.position = Vector2(20, -244)   # +12 px top bezel for the flow LEDs
 	gauge.pivot_offset = Vector2(0, 224)   # smaller / larger models grow from the bottom left corner
 	set_computer()
-	gauge.page = clampi(int(OS.get_environment("BMX_GARMIN_PAGE")), 0, gauge.order.size() - 1)
+	gauge.page = clampi(int(Env.s("BMX_GARMIN_PAGE")), 0, gauge.order.size() - 1)
 	root.add_child(gauge)
 	stamina = StaminaView.new(); stamina.hud = self
 	stamina.set_anchors_preset(Control.PRESET_TOP_RIGHT)
@@ -182,7 +182,7 @@ func on_crash(speed := 0.0) -> void:
 	life = maxf(0.0, life - clampf(0.12 + speed / 12.0 * 0.6, 0.12, 0.95))
 	hurt_t = 0.0
 	life_bar.shake = 1.0
-	if OS.get_environment("BMX_LIFE_PROBE") != "": print("LIFE crash v=%.1f life=%.2f" % [speed, life])
+	if Env.s("BMX_LIFE_PROBE") != "": print("LIFE crash v=%.1f life=%.2f" % [speed, life])
 
 ## rolled through a health pack (the backpacks beside the roadside sheds): life back, the bar glows green
 func on_health_pack(amount: float) -> void:
@@ -191,7 +191,7 @@ func on_health_pack(amount: float) -> void:
 	life = minf(1.0, life + amount)
 	life_bar.heal = 1.0
 	flash("HEALTH +%d%%" % roundi(amount * 100.0))
-	if OS.get_environment("BMX_LIFE_PROBE") != "": print("LIFE health pack life=%.2f" % life)
+	if Env.s("BMX_LIFE_PROBE") != "": print("LIFE health pack life=%.2f" % life)
 
 ## back on the bike: at zero life that was a revive (half life back, the bar glows green)
 func on_get_up() -> void:
@@ -201,7 +201,7 @@ func on_get_up() -> void:
 		life_bar.heal = 1.0
 		flash("REVIVED")
 		if game and game.grime: game.grime.blood = 0.0   # the blood on the rider washes off with a revive
-		if OS.get_environment("BMX_LIFE_PROBE") != "": print("LIFE revived life=%.2f" % life)
+		if Env.s("BMX_LIFE_PROBE") != "": print("LIFE revived life=%.2f" % life)
 
 ## back to start / new world: full life, and the bike computer restarts (ride timer, trip, a full battery,
 ## the GPS fix and the power-on chime again)
@@ -210,7 +210,7 @@ func on_respawn() -> void:
 	life = 1.0; hurt_t = 99.0
 	ride_t = 0.0; ride_dist = 0.0; moving_t = 0.0; max_v = 0.0
 	if visible: _power_t = 0.0
-	if OS.get_environment("BMX_LIFE") != "": life = float(OS.get_environment("BMX_LIFE"))   # tests: start with this much life
+	if Env.s("BMX_LIFE") != "": life = float(Env.s("BMX_LIFE"))   # tests: start with this much life
 	if style_pop: style_pop.bail()
 	air_card.bail()
 
@@ -327,10 +327,10 @@ func update_hud(dt: float) -> void:
 		_demo_t += dt
 		if _demo_t >= 3.0:
 			_demo_t = -1.0
-			flash(OS.get_environment("BMX_FLASH"))
+			flash(Env.s("BMX_FLASH"))
 			if style_pop: style_pop.add(1250, "BACKFLIP")
-	if OS.get_environment("BMX_MSG_AT") != "" and _demo_t < 0.0:
-		msg_l.t = float(OS.get_environment("BMX_MSG_AT")); msg_l.queue_redraw()
+	if Env.s("BMX_MSG_AT") != "" and _demo_t < 0.0:
+		msg_l.t = float(Env.s("BMX_MSG_AT")); msg_l.queue_redraw()
 	flow_leds.tick(st, dt)
 	hop_bar.visible = st.hop_bar_show
 	hop_bar.k = st.hop_bar
@@ -399,7 +399,7 @@ func set_computer() -> void:
 
 ## where you are on the trail, and the next turn or feature ahead of you (the Garmin's alerts)
 func _trail_watch(st: BikePhysics) -> void:
-	if OS.get_environment("BMX_ALERT_PROBE") != "" and ride_t > 1.0 and not _probed:
+	if Env.s("BMX_ALERT_PROBE") != "" and ride_t > 1.0 and not _probed:
 		_probed = true
 		_probe_alerts()
 	_trail_scan(Vector2(st.x, st.z), Vector2(cos(st.heading), -sin(st.heading)), st.crash_on)
@@ -421,8 +421,8 @@ func _trail_scan(p: Vector2, fw: Vector2, crashed: bool) -> void:
 	var was: String = alert.get("text", "")
 	alert = {}
 	if not gauge.unit.nav or not ComputerUnits.opt(GameState.computer_id, "alerts"): return   # no navigation, or alerts off: no turn / feature alerts
-	if OS.get_environment("BMX_ALERT_DEMO") != "":   # tests: a fixed alert to look at
-		alert = {"kind": OS.get_environment("BMX_ALERT_DEMO"), "text": "HAIRPIN RIGHT", "d": 22.0}
+	if Env.s("BMX_ALERT_DEMO") != "":   # tests: a fixed alert to look at
+		alert = {"kind": Env.s("BMX_ALERT_DEMO"), "text": "HAIRPIN RIGHT", "d": 22.0}
 		return
 	var t = game.terrain
 	if t == null or t.field == null or t.field.course == null: return
@@ -548,11 +548,11 @@ class GaugeView extends Control:
 		if int(ComputerUnits.opt(GameState.computer_id, "light")) == 1: light = 3.0   # backlight: always on
 		var lk := clampf(light / 0.4, 0, 1)
 		lcd = LCD.lerp(LCD_LIT, lk)
-		draw_style_box(UITheme.box(unit.body, 16, 0), Rect2(Vector2.ZERO, size))
+		UITheme.draw_box(self, Rect2(Vector2.ZERO, size), unit.body, 16)
 		scr = Rect2(7, 20, size.x - 14, size.y - 50)
 		hud.flow_leds.draw(self, size, scr)
-		if lk > 0: draw_style_box(UITheme.box(Color(0.7, 0.88, 1.0, 0.22 * lk), 8, 0), scr.grow(2))
-		draw_style_box(UITheme.box(lcd, 6, 0), scr)
+		if lk > 0: UITheme.draw_box(self, scr.grow(2), Color(0.7, 0.88, 1.0, 0.22 * lk), 8)
+		UITheme.draw_box(self, scr, lcd, 6)
 		var ink := Color("111417")
 		var x0 := scr.position.x + 6
 		var w := scr.size.x - 12
@@ -690,7 +690,7 @@ class GaugeView extends Control:
 		var t: float = hud.ride_t
 		var inner := Rect2(scr.position.x, scr.position.y + 14, scr.size.x, scr.size.y - 14)
 		if t < FIX_T + 0.8:
-			c.draw_style_box(UITheme.box(lcd, 6, 0), inner)
+			UITheme.draw_box(c, inner, lcd, 6)
 			var cx := inner.get_center()
 			if t < FIX_T:
 				# satellite dish: an arc that sweeps, and signal bars filling as satellites lock on
@@ -721,7 +721,7 @@ class GaugeView extends Control:
 	## the trail alert in a box: icon top left, distance big on the right, the name along the bottom
 	static func draw_alert(c: CanvasItem, bx: Rect2, al: Dictionary, f: Font) -> void:
 		var yel := Color("ffd21f")
-		c.draw_style_box(UITheme.box(Color("111417"), 6, 0), bx)
+		UITheme.draw_box(c, bx, Color("111417"), 6)
 		var wide := bx.size.y < 64.0   # a short card (a third of the screen): icon left, distance + name stacked on the right
 		var row := bx.size.y - 10.0 if wide else bx.size.y * 0.62
 		var ic := bx.position + Vector2(row * 0.5 + 2, bx.size.y * 0.5 if wide else row * 0.5 + 3)
@@ -769,7 +769,7 @@ class GaugeView extends Control:
 		for i in 2:
 			var br := _btn_rect(i)
 			var k: float = press[i]
-			draw_style_box(UITheme.box(Color("2b2e32").lerp(Color("55595e"), k), 7, 0, Color(1, 1, 1, 0.1), 1), br)
+			UITheme.draw_box(self, br, Color("2b2e32").lerp(Color("55595e"), k), 7, Color(1, 1, 1, 0.1), 1)
 			var c := br.get_center() + Vector2(0, k)
 			var s := 1.0 if i == 1 else -1.0
 			draw_colored_polygon(PackedVector2Array([c + Vector2(-3 * s, -4), c + Vector2(-3 * s, 4), c + Vector2(3 * s, 0)]), Color("b8bcc0"))
@@ -834,7 +834,7 @@ class GaugeView extends Control:
 		if tc and ti >= 0 and ti < tc.n and hud.trail_d < 15.0:
 			var off: float = st.y - tc.E[ti]
 			for m in range(0, 404, 4):
-				var q := mini(tc.n - 1, ti + m / 2)
+				var q := mini(tc.n - 1, ti + int(m / TrailCourse.STEP))
 				ahead.append(tc.E[q] + off)
 		var lo := st.y
 		var hi := st.y
@@ -1024,14 +1024,7 @@ class StaminaView extends Control:
 	var shown := 1.0   # eased fill so it glides instead of jumping
 
 	static func _pill(ci: CanvasItem, r: Rect2, c: Color, square_end := false) -> void:
-		var sb := StyleBoxFlat.new()
-		sb.bg_color = c
-		sb.set_corner_radius_all(int(r.size.y * 0.5))
-		if square_end:   # a fill: rounded where it starts, cut straight where it ends
-			sb.corner_radius_top_right = 0
-			sb.corner_radius_bottom_right = 0
-		sb.anti_aliasing = true
-		ci.draw_style_box(sb, r)
+		UITheme.draw_box(ci, r, c, int(r.size.y * 0.5), Tokens.CLEAR, 0, square_end)
 
 	func _draw() -> void:
 		var st: BikePhysics = hud.game.phys
@@ -1094,8 +1087,8 @@ class GetUpPrompt extends Control:
 		var show: bool = st.crash_on and st.crash_t > 0.6
 		k = clampf(st.crash_hold / st.getup_need, 0.0, 1.0) if show else k
 		held = move_toward(held, 1.0 if (show and st.crash_hold > 0.0) else 0.0, dt * 12)
-		if OS.get_environment("BMX_GETUP_K") != "" and show:   # tests: draw it as if held this far
-			k = float(OS.get_environment("BMX_GETUP_K")); held = 1.0
+		if Env.s("BMX_GETUP_K") != "" and show:   # tests: draw it as if held this far
+			k = float(Env.s("BMX_GETUP_K")); held = 1.0
 		a = move_toward(a, 1.0 if show else 0.0, dt * (7 if show else 5))
 		visible = a > 0.01
 		if not visible: return
@@ -1163,7 +1156,7 @@ class FlowLeds extends RefCounted:
 		t += dt
 		new_t += dt
 		# tests: BMX_FLOW_DEMO=1 adds a flow level every 0.9 s from 3 s until MAX, then lets it drain
-		if OS.get_environment("BMX_FLOW_DEMO") != "" and t > 3.0 and fmod(t - 3.0, 0.9) < dt and t < 3.0 + 0.9 * BikePhysics.FLOW_MAX:
+		if Env.s("BMX_FLOW_DEMO") != "" and t > 3.0 and fmod(t - 3.0, 0.9) < dt and t < 3.0 + 0.9 * BikePhysics.FLOW_MAX:
 			st.flow_up()
 		var n := ceili(st.flow - 0.01)
 		if n > level and n > 0: new_t = 0.0
@@ -1195,17 +1188,17 @@ class FlowLeds extends RefCounted:
 
 	## a dark recessed slit in the bezel
 	static func _slit(ci: CanvasItem, r: Rect2) -> void:
-		ci.draw_style_box(UITheme.box(Color("060707"), int(minf(r.size.x, r.size.y) / 2), 0), r)
+		UITheme.draw_box(ci, r, Color("060707"), int(minf(r.size.x, r.size.y) / 2))
 		ci.draw_line(Vector2(r.position.x + 2, r.end.y + 0.5), Vector2(r.end.x - 2, r.end.y + 0.5), Color(1, 1, 1, 0.07), 1.0)   # lower lip catching light
 
 	## one small LED: a dim lens when off; lit = hot core, coloured lens, soft bleed on the plastic
 	static func _led(ci: CanvasItem, c: Vector2, sz: Vector2, col: Color, k: float) -> void:
 		var r := Rect2(c - sz / 2, sz)
-		ci.draw_style_box(UITheme.box(Color(0.10, 0.105, 0.11), 1, 0), r)
+		UITheme.draw_box(ci, r, Color(0.10, 0.105, 0.11), 1)
 		if k <= 0.01: return
 		for g in [[9.0, 0.05], [6.0, 0.09], [3.8, 0.16]]:
 			ci.draw_circle(c, g[0], Color(col, g[1] * k))
-		ci.draw_style_box(UITheme.box(Color(col, k), 1, 0), r)
+		UITheme.draw_box(ci, r, Color(col, k), 1)
 		ci.draw_rect(Rect2(c - Vector2(sz.x * 0.25, 0.5), Vector2(sz.x * 0.5, 1.0)), Color(col.lerp(Color.WHITE, 0.6), k * 0.9))   # hot core
 
 	func draw(ci: CanvasItem, size: Vector2, scr: Rect2) -> void:
@@ -1235,9 +1228,9 @@ class BarView extends Control:
 	func _process(_dt: float) -> void: queue_redraw()
 	func _draw() -> void:
 		var full := k >= 1
-		draw_style_box(UITheme.box(Color(0.08, 0.16, 0.2, 0.55), int(size.y / 2), 0, UITheme.ACCENT if full else Color(1, 1, 1, 0.7), 2), Rect2(Vector2.ZERO, size))
+		UITheme.draw_box(self, Rect2(Vector2.ZERO, size), Color(0.08, 0.16, 0.2, 0.55), int(size.y / 2), UITheme.ACCENT if full else Color(1, 1, 1, 0.7), 2)
 		if k > 0:
-			draw_style_box(UITheme.box(UITheme.ACCENT, int(size.y / 2), 0), Rect2(Vector2(2, 2), Vector2((size.x - 4) * minf(1, k), size.y - 4)))
+			UITheme.draw_box(self, Rect2(Vector2(2, 2), Vector2((size.x - 4) * minf(1, k), size.y - 4)), UITheme.ACCENT, int(size.y / 2))
 
 class AirCard extends Control:
 	## live jump counter: distance from the take-off point, height and air time; the result holds for a
@@ -1301,7 +1294,7 @@ class AirCard extends Control:
 		var border := Color(1, 1, 1, 0.12)
 		if record != "": border = yel
 		elif bailed: bg = Color(0.25, 0.04, 0.04, 0.92); border = Color(1, 0.31, 0.27, 0.8)
-		draw_style_box(UITheme.box(bg, 12, 0, border, 2), Rect2(Vector2.ZERO, size))
+		UITheme.draw_box(self, Rect2(Vector2.ZERO, size), bg, 12, border, 2)
 		var tag := "BAILED" if bailed else ("AIR" if flying else "LANDED")
 		draw_string(f, Vector2(14, 22), tag, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color.WHITE)
 		var best := "BEST %.1fm" % float(GameState.records.longest)
@@ -1319,7 +1312,7 @@ class AirCard extends Control:
 		draw_string(f, Vector2(14, 102), "%.2fs" % air, HORIZONTAL_ALIGNMENT_RIGHT, size.x - 28, 16, Color.WHITE)
 		if record != "":
 			var rw := f.get_string_size(record, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 24
-			draw_style_box(UITheme.box(yel, 8, 0), Rect2(size.x / 2 - rw / 2, -11, rw, 22))
+			UITheme.draw_box(self, Rect2(size.x / 2 - rw / 2, -11, rw, 22), yel, 8)
 			draw_string(f, Vector2(size.x / 2 - rw / 2, 5), record, HORIZONTAL_ALIGNMENT_CENTER, rw, 12, Color("111417"))
 
 
