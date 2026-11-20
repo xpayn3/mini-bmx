@@ -6,6 +6,7 @@ render_mode blend_mul, unshaded, depth_draw_never, cull_disabled, shadows_disabl
 
 uniform sampler2D depth_tex : filter_linear, repeat_disable;
 uniform float pool_t = 0.0;
+uniform float age_add = 0.0;       // tests: seconds added to the drying clock
 uniform float seed = 0.0;
 uniform float grid_m = 6.4;
 uniform float wipe_at = 1e9;
@@ -45,6 +46,7 @@ void fragment() {
 	vec2 eb = min(UV, 1.0 - UV);
 	halo *= smoothstep(0.01, 0.05, min(eb.x, eb.y));
 	halo *= 1.0 - smoothstep(0.0, wipe_len, pool_t - wipe_at);
-	// damp dirt: darker, a touch of red-brown
-	ALBEDO = mix(vec3(1.0), vec3(0.58, 0.46, 0.43), halo);
+	// damp dirt: darker, a touch of red-brown; as it dries out the dirt lightens again but stays stained
+	float dried = smoothstep(40.0, 150.0, pool_t + age_add);
+	ALBEDO = mix(vec3(1.0), mix(vec3(0.58, 0.46, 0.43), vec3(0.76, 0.6, 0.53), dried), halo);
 }

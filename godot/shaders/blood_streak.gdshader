@@ -107,15 +107,21 @@ void fragment() {
 		thick = 1.0 - smoothstep(edge - 0.18, edge, r) * 0.8;
 		fresh_in = 0.3;
 	}
-	float age = clamp((now - v_c.y) / DRY, 0.0, 1.0);
-	// thin film: a brighter red; pooled: deep, nearly black red; dried: brown
+	// drying goes by thickness: a thin film is dry in ~20 s, a pooled blob takes over a minute.
+	// First it clots (darker maroon, the gloss dulls), then dries: a film to matt rust brown, a thick blob
+	// to a near-black crust with a dull sheen
+	float t_dry = mix(DRY * 0.45, DRY * 1.8, thick);
+	float x = (now - v_c.y) / t_dry;
+	float clot = smoothstep(0.08, 0.5, x);
+	float age = smoothstep(0.5, 1.0, x);
+	// thin film: a brighter red; pooled: deep, nearly black red
 	vec3 film = vec3(0.30, 0.018, 0.008);
 	vec3 pool = vec3(0.085, 0.002, 0.002);
-	vec3 dried = vec3(0.06, 0.016, 0.008);
-	vec3 col = mix(mix(film, pool, thick), dried, age);
-	ALBEDO = col;
-	ROUGHNESS = mix(mix(0.32, 0.14, thick), 0.75, age);
-	SPECULAR = 0.55;
+	vec3 dried = mix(vec3(0.095, 0.03, 0.014), vec3(0.026, 0.008, 0.005), thick);
+	vec3 col = mix(film, pool, thick) * mix(1.0, mix(0.55, 0.8, thick), clot);
+	ALBEDO = mix(col, dried, age);
+	ROUGHNESS = mix(mix(mix(0.32, 0.14, thick), 0.4, clot), mix(0.88, 0.55, thick), age);
+	SPECULAR = mix(0.55, 0.3, age);
 	float dist = length(VERTEX);
 	float wipe = v_c.y < wipe_t ? 1.0 - smoothstep(0.0, wipe_len, now - wipe_t) : 1.0;
 	float soak = smoothstep(0.0, fresh_in, now - v_c.y);   // fades in as it's laid

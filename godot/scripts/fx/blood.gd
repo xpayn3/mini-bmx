@@ -366,7 +366,9 @@ func _decal(at: Vector3, n: Vector3, along: Vector3, width: float, length: float
 	d.modulate = Color(1, 1, 1, 0.0)
 	var tw := d.create_tween()
 	tw.tween_property(d, "modulate", Color(1, 1, 1, a), 0.15)            # soaks in
-	tw.tween_property(d, "modulate", Color(0.55, 0.42, 0.36, a), DRY_T)  # dries darker / browner
+	# clots first (quickly darker), then slowly dries browner
+	tw.tween_property(d, "modulate", Color(0.72, 0.6, 0.56, a), DRY_T * 0.3).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tw.tween_property(d, "modulate", Color(0.46, 0.34, 0.27, a), DRY_T * 1.2).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	_decals.append(d)
 	laid += 1
 	while _decals.size() > SPLAT_MAX:
