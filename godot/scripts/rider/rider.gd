@@ -120,6 +120,7 @@ var elbow: Array[MeshInstance3D] = []
 var glove: Array[Node3D] = []
 var head: Node3D
 var hel: Node3D
+var skeleton: RiderSkeleton   # Godot humanoid bones that follow the drawn rider (rider_skeleton.gd)
 
 var poles_leg: Array[Vector3] = []
 var poles_arm: Array[Vector3] = []
@@ -261,6 +262,9 @@ func _init() -> void:
 	set_style({})
 	J.resize(15)
 	J.fill(Vector3.ZERO)
+	# the humanoid skeleton (Godot's profile names): follows the parts every frame, for attachments / animation
+	skeleton = RiderSkeleton.new()
+	add_child(skeleton)
 
 
 ## the bare head and the hair that replaces the helmet (look.helmetOn = "0"). A friendly, slightly cartoon face:
@@ -999,6 +1003,30 @@ func joints_world() -> Array:
 ## roots: torn-off limbs (Ragdoll.cut): joint index -> the free piece's root point, so the segment that
 ## ends at that joint is drawn from the root instead of stretching back to the body
 func pose_ragdoll(P: Array, roots: Dictionary = {}) -> void:
+	_pose_from_points(P, roots, {})
+
+
+var anim: RiderAnim = null   # animation clips played in the menus (animate)
+var _anim_tried := false
+
+## menus: play the animation clips in RiderAnim.DIR (Mixamo downloads) on the rider. False = there are none:
+## pose the rider yourself (update_pose)
+func animate(dt: float) -> bool:
+	if not _anim_tried:
+		_anim_tried = true
+		if RiderAnim.available(): anim = RiderAnim.new(self)
+	return anim != null and anim.step(dt)
+
+
+## stand the rider in a pose given as the 15 joint points (Ragdoll order) in this node's space, e.g. from an
+## animation clip (RiderAnim). orient (optional): "head" Basis (x forward, y up), "hand0" / "hand1" (x along the
+## forearm, y the back of the hand), "foot0" / "foot1" (x toward the toes, y up); left = 0
+func pose_points(P: Array, orient: Dictionary = {}) -> void:
+	for k in 15: J[k] = P[k]
+	_pose_from_points(P, {}, orient)
+
+
+func _pose_from_points(P: Array, roots: Dictionary, orient: Dictionary) -> void:
 	var hd: Vector3 = P[0]
 	var ch: Vector3 = P[1]
 	var pe: Vector3 = P[2]
@@ -1015,7 +1043,7 @@ func pose_ragdoll(P: Array, roots: Dictionary = {}) -> void:
 	set_spine(hip, ch, body_r.normalized(), (sh[1] - sh[0]).normalized(), 0.0, 0.0, 0.5, bb)
 	set_limb(hood_hem, hip, hip.lerp(ch, 0.2))
 	var sh_r: Vector3 = sh[1] - sh[0]
-	head.transform = Transform3D(_basis_from(hd - ch, sh_r), hd)
+	head.transform = Transform3D(orient.get("head", _basis_from(hd - ch, sh_r)), hd)
 	_pose_neck()
 	for i in 2:
 		var ei: int = 4 if i == 0 else 7    # elbow / hand / knee / foot point of this side
@@ -1031,13 +1059,24 @@ func pose_ragdoll(P: Array, roots: Dictionary = {}) -> void:
 		set_limb(fore_arm[i], ha_from, ha[i])
 		elbow[i].position = el[i]
 		glove[i].position = ha[i]
-		orient_hand(glove[i], ha_from, ha[i], sh_r)
+		if orient.has("hand%d" % i): glove[i].basis = orient["hand%d" % i]
+		else: orient_hand(glove[i], ha_from, ha[i], sh_r)
 		set_limb(thigh[i], kn_from, kn[i])
 		set_limb(shin[i], ft_from, ft[i])
 		knee[i].position = kn[i]
 		knee_pad[i].pose(kn_from, kn[i], ft_from, ft[i], bb.x)
 		var up: Vector3 = ft_from - ft[i]
-		shoe[i].transform = Transform3D(_basis_from(up, body_r), ft[i] - up.normalized() * 0.08)
+		var sb: Basis = orient.get("foot%d" % i, _basis_from(up, body_r))
+		shoe[i].transform = Transform3D(sb, ft[i] - sb.y.normalized() * float(orient.get("shoe_drop", 0.08)))
+	_sync_skeleton(P)
+
+
+## the humanoid skeleton follows whatever was just drawn (P = the joint points in this node's space)
+func _sync_skeleton(P: Array) -> void:
+	if skeleton == null: return
+	var sp := []
+	for k in SPINE_BONES: sp.append(spine_skel.get_bone_pose(k))
+	skeleton.follow(P, sp, head.transform, [glove[0].transform, glove[1].transform], [shoe[0].transform, shoe[1].transform])
 
 
 ## back on the bike: clear the ragdoll orientations the normal update doesn't set
@@ -1549,3 +1588,4 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		if limb_probe:
 			_probe_limb("elbow%d" % i, shp, ika[0], hand, dt, air)
 			_probe_limb("knee%d" % i, hp, ik[0], ik[1], dt, air)
+	_sync_skeleton(J)
