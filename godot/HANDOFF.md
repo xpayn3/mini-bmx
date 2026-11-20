@@ -502,6 +502,12 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - The **Coasting** rider preview is the showcase pose: sat on the saddle, sitting up (`relax` input to
   `Rider.update_pose`: straighter back, chest up, chin up, whatever the saved riding pose).
 - Light: little volumetric haze (0.004), exposure 1.0, contrast 1.16 / saturation 1.18, depth fog from 90 m.
+  **Homely sun shaft** (2026-11-20): the sun (`SUN`) is late-afternoon gold, ~30 deg up behind the door and 45 deg to the left, so a
+  slanted shaft comes through the doorway and lands on the floor right of the bike (clear of the menu card; above the door top from
+  the camera, no glare). An indoor-only `FogVolume` (density 0.02) makes the shaft show (sun `light_volumetric_fog_energy` 12; the
+  room lights barely light the fog); `_build_sun_shaft` also adds ~7000 fine dust motes (GPUParticles3D, turbulence drift) drawn by
+  `shaders/sun_motes.gdshader`, which lights only the motes whose line to the sun passes through the open part of the door
+  (`_place_slats` updates it as the door rolls up). Room lights (tubes, bench strip, key, rim, ambient) are warm white.
 - Bike height is placed from the **real tyre size and real axle positions** (no tyre clipping into the floor
   or the roller drums; verified with `BMX_TYRE_PROBE`).
 - Saved in `garage.json`; `GameState.bike_config()` applies it to the ride.

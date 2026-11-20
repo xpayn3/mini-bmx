@@ -19,9 +19,10 @@ const DOOR_H := 3.2
 const DOOR_X := 0.0   # the door is straight behind the bike
 ## the garage's sun: low, behind the open door (toward -Z), a little to the left, so daylight falls
 ## in through the doorway across the floor
-## where the sun is (towards it): high and off to the side behind the door, so its patch lands just
-## inside the doorway to one side, not under the bike, and it never shines into the camera
-const SUN := Vector3(0.5, 0.82, -0.28)
+## where the sun is (towards it): late afternoon, ~30 deg up behind the door and 45 deg to the left, so a
+## slanted shaft comes in through the doorway (seen in the dusty air, motes drifting in it) and lays a
+## warm patch across the floor right of the bike (clear of the menu card). Above the door's top edge from the camera: no glare.
+const SUN := Vector3(-0.6, 0.5, -0.6)
 
 var build: Dictionary
 var rig: BikeRig
@@ -53,6 +54,7 @@ const DOOR_DELAY := 1.0     # s (after the garage is on screen) before the door 
 const DOOR_TIME := 3.2      # s to roll it all the way up
 static var _door_opened_once := false   # the door rolls up on the first visit; it stays open after
 var door_slats: Node3D
+var _mote_mat: ShaderMaterial = null   # sun-shaft dust motes (lit up to the door's open height)
 var door_open := 1.0
 var door_t := 0.0
 var cam := Camera3D.new()
@@ -181,7 +183,7 @@ func _build_room() -> void:
 	env.fog_depth_end = 420.0
 	env.fog_sky_affect = 0.0
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.52, 0.5, 0.47)   # a lit workshop: walls and the bike's sides never go black
+	env.ambient_light_color = Color(0.56, 0.49, 0.41)   # a warm, lived-in workshop: walls and the bike's sides never go black
 	env.ambient_light_energy = 0.32
 	# real light bounce: daylight off the floor and brick fills the shed (SDFGI)
 	env.sdfgi_enabled = true
@@ -204,7 +206,8 @@ func _build_room() -> void:
 	env.volumetric_fog_enabled = true
 	env.volumetric_fog_density = 0.004          # a little dust in the air: the beams show, the room stays clear
 	env.volumetric_fog_albedo = Color(0.95, 0.9, 0.82)
-	env.volumetric_fog_gi_inject = 0.3
+	env.volumetric_fog_gi_inject = 0.1
+	env.volumetric_fog_anisotropy = -0.1   # no glare haze looking down the shaft towards the door
 	env.volumetric_fog_length = 14.0
 	env.adjustment_enabled = true
 	env.adjustment_contrast = 1.16
@@ -325,48 +328,48 @@ func _build_room() -> void:
 	spot.spot_angle_attenuation = 1.4
 	spot.light_energy = 7.0
 	spot.light_color = Color(1.0, 0.8, 0.58)
-	spot.light_volumetric_fog_energy = 1.0
+	spot.light_volumetric_fog_energy = 0.35
 	spot.shadow_enabled = true
 	spot.shadow_blur = 1.5
 	add_child(spot)
 	# the bulb's own glow round the room (the shade only throws light down)
 	var bulb := OmniLight3D.new()
 	bulb.position = Vector3(0, 3.3, 0); bulb.light_color = Color(1.0, 0.78, 0.52)
-	bulb.light_energy = 0.7; bulb.omni_range = 7.0; bulb.light_volumetric_fog_energy = 0.2
+	bulb.light_energy = 0.7; bulb.omni_range = 7.0; bulb.light_volumetric_fog_energy = 0.08
 	add_child(bulb)
 	# fluorescent strip over the bench
 	var strip := StandardMaterial3D.new()
-	strip.emission_enabled = true; strip.emission = Color(0.92, 0.95, 1.0); strip.emission_energy_multiplier = 2.5
+	strip.emission_enabled = true; strip.emission = Color(1.0, 0.9, 0.75); strip.emission_energy_multiplier = 2.5
 	_box(Vector3(1.6, 0.04, 0.08), Vector3(-5.0, 3.0, -3.7), strip)
 	var fl_l := OmniLight3D.new()
-	fl_l.position = Vector3(-5.0, 2.8, -3.4); fl_l.light_color = Color(0.92, 0.95, 1.0); fl_l.light_energy = 0.6; fl_l.omni_range = 4.0
+	fl_l.position = Vector3(-5.0, 2.8, -3.4); fl_l.light_color = Color(1.0, 0.88, 0.7); fl_l.light_energy = 0.6; fl_l.omni_range = 4.0
 	add_child(fl_l)
 	# workshop lighting so the bike reads from every side (it went black once orbited off the doorway):
 	# two cool-white ceiling tubes over the work area, a soft key from the front-right (true paint colour)
 	# and a rim from behind that lifts the bike off the background
 	var tube := StandardMaterial3D.new()
-	tube.emission_enabled = true; tube.emission = Color(0.94, 0.96, 1.0); tube.emission_energy_multiplier = 3.0
+	tube.emission_enabled = true; tube.emission = Color(1.0, 0.9, 0.76); tube.emission_energy_multiplier = 3.0
 	for tx in [-2.6, 2.6]:
 		_box(Vector3(0.12, 0.05, 2.4), Vector3(tx, 4.55, 1.2), tube)
 		_box(Vector3(0.2, 0.04, 2.5), Vector3(tx, 4.6, 1.2), steel)
 		var tl := OmniLight3D.new()
-		tl.position = Vector3(tx, 4.3, 1.2); tl.light_color = Color(0.93, 0.95, 1.0)
-		tl.light_energy = 1.6; tl.omni_range = 8.0; tl.omni_attenuation = 0.8
-		tl.light_volumetric_fog_energy = 0.1
+		tl.position = Vector3(tx, 4.3, 1.2); tl.light_color = Color(1.0, 0.88, 0.72)
+		tl.light_energy = 1.3; tl.omni_range = 8.0; tl.omni_attenuation = 0.8
+		tl.light_volumetric_fog_energy = 0.03
 		add_child(tl)
 	var key := SpotLight3D.new()
 	add_child(key)
 	key.look_at_from_position(Vector3(2.8, 2.6, 3.2), Vector3(0, 0.8, 0), Vector3.UP)
 	key.spot_range = 9.0; key.spot_angle = 38.0; key.spot_angle_attenuation = 1.2
-	key.light_energy = 5.0; key.light_color = Color(1.0, 0.97, 0.92)
+	key.light_energy = 4.5; key.light_color = Color(1.0, 0.92, 0.82)
 	key.shadow_enabled = true; key.shadow_blur = 2.5
-	key.light_volumetric_fog_energy = 0.2
+	key.light_volumetric_fog_energy = 0.05
 	var rim := SpotLight3D.new()
 	add_child(rim)
 	rim.look_at_from_position(Vector3(-2.6, 2.4, -3.2), Vector3(0, 1.0, 0), Vector3.UP)
 	rim.spot_range = 8.0; rim.spot_angle = 35.0; rim.spot_angle_attenuation = 1.0
-	rim.light_energy = 4.0; rim.light_color = Color(0.85, 0.9, 1.0)
-	rim.light_volumetric_fog_energy = 0.1
+	rim.light_energy = 3.5; rim.light_color = Color(1.0, 0.86, 0.68)
+	rim.light_volumetric_fog_energy = 0.03
 
 ## The real procedural world outside the door: the world seed you ride, turned so you look down the
 ## start of the trail (+X in the world) through the doorway (-Z here), with the spawn point just
@@ -393,14 +396,86 @@ func _build_outside() -> void:
 			h_top = maxf(h_top, t.height(w.x, w.y))
 	outside.position = Vector3(DOOR_X, -h_top - 0.05, -4.35) - Basis(Vector3.UP, PI / 2) * Vector3(spot.x, 0, spot.y)
 	var sun := DirectionalLight3D.new()
-	sun.light_color = Color("ffe2bd")
-	sun.light_energy = 1.5
+	sun.light_color = Color(1.0, 0.8, 0.56)   # late-afternoon gold
+	sun.light_energy = 2.2
 	sun.shadow_enabled = true
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
 	sun.directional_shadow_max_distance = 120.0
-	sun.light_volumetric_fog_energy = 0.5
+	sun.light_volumetric_fog_energy = 12.0   # the shaft through the door
 	add_child(sun)
 	sun.look_at_from_position(SUN.normalized(), Vector3.ZERO, Vector3.UP)
+	_build_sun_shaft()
+
+## Dusty air inside the shed (a FogVolume only indoors, so the view out of the door stays clear): the
+## sun through the doorway shows as a slanted shaft, and dust motes drift in it (`sun_motes.gdshader`
+## lights only the ones the sun can reach through the door).
+func _build_sun_shaft() -> void:
+	var fog := FogVolume.new()
+	fog.shape = RenderingServer.FOG_VOLUME_SHAPE_BOX
+	fog.size = Vector3(13.8, 4.9, 11.8)
+	fog.position = Vector3(0, 2.45, 1.8)
+	var fm := FogMaterial.new()
+	fm.density = 0.02
+	fm.albedo = Color(1.0, 0.97, 0.92)
+	fm.edge_fade = 0.05
+	fog.material = fm
+	add_child(fog)
+	var sd := SUN.normalized()
+	# the box the shaft passes through inside the room: from the doorway down to where it meets the floor
+	var lo := Vector3(INF, 0.05, WALL_IN + 0.05)
+	var hi := Vector3(-INF, DOOR_H + 0.1, -INF)
+	for cx in [DOOR_X - DOOR_W / 2.0, DOOR_X + DOOR_W / 2.0]:
+		for cy in [0.0, DOOR_H]:
+			var p := Vector3(cx, cy, -4.2)
+			var q: Vector3 = p - sd * (cy / sd.y)   # down the shaft to the floor
+			lo.x = minf(lo.x, minf(p.x, q.x)); hi.x = maxf(hi.x, maxf(p.x, q.x))
+			hi.z = maxf(hi.z, q.z)
+	var mid := (lo + hi) / 2.0
+	var ext := (hi - lo) / 2.0 + Vector3(0.2, 0, 0.2)
+	var motes := GPUParticles3D.new()
+	motes.name = "SunMotes"
+	motes.amount = 7000
+	motes.lifetime = 16.0
+	motes.preprocess = 16.0
+	motes.local_coords = false
+	motes.position = mid
+	motes.visibility_aabb = AABB(-ext - Vector3.ONE, (ext + Vector3.ONE) * 2.0)
+	motes.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var pm := ParticleProcessMaterial.new()
+	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+	pm.emission_box_extents = ext
+	pm.direction = Vector3(0, 1, 0)
+	pm.spread = 180.0
+	pm.initial_velocity_min = 0.0
+	pm.initial_velocity_max = 0.025
+	pm.gravity = Vector3(0, -0.003, 0)
+	pm.damping_min = 0.0; pm.damping_max = 0.01
+	pm.turbulence_enabled = true
+	pm.turbulence_noise_strength = 1.0
+	pm.turbulence_noise_scale = 3.0
+	pm.turbulence_noise_speed = Vector3(0.02, 0.01, 0.015)
+	pm.turbulence_noise_speed_random = 0.3
+	pm.turbulence_influence_min = 0.01
+	pm.turbulence_influence_max = 0.035
+	pm.scale_min = 0.4
+	pm.scale_max = 1.2
+	var fade := Gradient.new()   # fade in and out over the life, no popping
+	fade.offsets = PackedFloat32Array([0.0, 0.15, 0.85, 1.0])
+	fade.colors = PackedColorArray([Color(1, 1, 1, 0), Color.WHITE, Color.WHITE, Color(1, 1, 1, 0)])
+	var ramp := GradientTexture1D.new(); ramp.gradient = fade
+	pm.color_ramp = ramp
+	motes.process_material = pm
+	var quad := QuadMesh.new()
+	quad.size = Vector2(0.0045, 0.0045)
+	var sm := ShaderMaterial.new()
+	sm.shader = load("res://shaders/sun_motes.gdshader")
+	sm.set_shader_parameter("sun_dir", sd)
+	sm.set_shader_parameter("wall_z", -4.2)
+	quad.material = sm
+	_mote_mat = sm
+	_place_slats()
+	motes.draw_pass_1 = quad
+	add_child(motes)
 
 # ================================================================ bike
 func _rebuild_bike() -> void:
@@ -607,6 +682,8 @@ func _changed() -> void:
 ## slats ride up by door_open * DOOR_H; any that reach the drum disappear into it
 func _place_slats() -> void:
 	var lift := DOOR_H * door_open
+	if _mote_mat:   # the motes light up only as far as the door has opened
+		_mote_mat.set_shader_parameter("door", Vector4(DOOR_X - DOOR_W / 2.0, DOOR_X + DOOR_W / 2.0, -1.0, lift))
 	for mi in door_slats.get_children():
 		var y: float = mi.get_meta("y0") + lift
 		mi.position.y = y
