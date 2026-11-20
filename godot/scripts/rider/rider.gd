@@ -24,7 +24,7 @@ const NEUTRAL := {hipX = 0.0, hipY = 0.0, lean = 0.0, elbowsOut = 0.0, kneesOut 
 	kneesFwd = 0.0, kneeOutL = 0.0, kneeOutR = 0.0, heelFwd = 0.0, heelUp = 0.0, footAngle = 0.0, footOut = 0.0, footSlide = 0.025}
 ## lookpanel.js DEFAULT_LOOK
 const DEFAULT_LOOK := {shell = "#16171a", peak = "#ececec", goggleFrame = "#f2f2ee", lens = "#ff7a2a", strap = "#ff6a4d",
-	jersey = "#ff6a4d", pants = "#1d2b64", gloves = "#ffd21f", shoes = "#26292f", shoeAccent = "#d8232a", pads = "#1b1c20", padStyle = "enduro",
+	jersey = "#ff6a4d", pants = "#1d2b64", pantsFabric = "denim", pantsPattern = "none", pantsPrint = "#ff7a1a", gloves = "#ffd21f", shoes = "#26292f", shoeAccent = "#d8232a", pads = "#1b1c20", padStyle = "enduro",
 	beltStyle = "webbing", belt = "#16171a", buckle = "#9aa0a8", helmet = "glory",
 	helmetOn = "1", hairStyle = "long", beard = "1", hair = "#4a3022", skin = "#efc29f", eyes = "#4a6b8a", bibOn = "1", bibNumber = "27", bibText = "RUNOUT  •  DOWNHILL CUP",
 	camMount = "top", camModel = "hero", camLens = "stock", camHousing = "none", camMic = "none", camAcc = "none"}
@@ -147,8 +147,8 @@ func _init() -> void:
 	name = "Rider"
 	var mCoral := mat("#ff6a4d", 0.8)
 	var mCoralDark := mat("#e04e34", 0.8)
-	var mNavy := mat("#1d2b64", 0.8)
-	var mNavyLight := mat("#3a4c9a", 0.8)
+	var mNavy := PantsLook.make()        # fabric + printed pattern (rider/pants_look.gd), coloured by set_look
+	var mNavyLight := PantsLook.make()   # the knee (a shade lighter), shown when there are no pads
 	var mYellow := mat("#ffd21f", 0.7)
 	kit = {jersey = [mCoral, mCoralDark], pants = [mNavy, mNavyLight], gloves = [mYellow]}
 
@@ -652,8 +652,9 @@ func set_look(l: Dictionary) -> void:
 			sh.metallic = 0.25
 	c.call(kit.jersey[0], "jersey")
 	shade.call(kit.jersey[1], "jersey", -0.08)
-	c.call(kit.pants[0], "pants")
-	shade.call(kit.pants[1], "pants", 0.1)
+	var pc := Color(str(L.get("pants", DEFAULT_LOOK.pants)))
+	PantsLook.apply(kit.pants[0], pc, L)
+	PantsLook.apply(kit.pants[1], _offset_l(pc, 0.1), L)
 	c.call(kit.gloves[0], "gloves")
 	for i in knee_pad.size():   # knee pad design + shell colour; the accent (chevron, stripes) takes the gloves' colour
 		var kp := knee_pad[i]

@@ -99,7 +99,7 @@ const POSE_DEFS := [
 ]
 
 ## look keys that belong to the person, not to a kit: picking a kit leaves them alone
-const NON_KIT := ["camMount", "camModel", "camLens", "camHousing", "camMic", "camAcc", "helmet", "helmetOn", "hairStyle", "hair", "skin", "eyes", "beard", "bibOn", "bibNumber", "bibText"]
+const NON_KIT := ["camMount", "camModel", "camLens", "camHousing", "camMic", "camAcc", "helmet", "helmetOn", "hairStyle", "hair", "skin", "eyes", "beard", "bibOn", "bibNumber", "bibText", "pantsFabric", "pantsPattern", "pantsPrint"]
 
 const KITS := [
 	["Classic", {}],   # = Rider.DEFAULT_LOOK
@@ -121,7 +121,7 @@ const LENS := ["#ff7a2a", "#ffd21f", "#3fb6ff", "#7ed321", "#ff5fa2", "#8a96a8",
 const LOOK_ROWS := [
 	["Helmet", [["shell", "Shell", SW], ["peak", "Peak", SW], ["hair", "Hair colour", HAIR_SW]]],
 	["Goggles", [["lens", "Lens tint", LENS], ["goggleFrame", "Frame", SW], ["strap", "Strap", SW]]],
-	["Kit", [["jersey", "Jersey", SW], ["pants", "Pants", SW], ["gloves", "Gloves", SW], ["pads", "Knee pads", SW]]],
+	["Kit", [["jersey", "Jersey", SW], ["pants", "Pants", SW], ["pantsPrint", "Pants print", SW], ["gloves", "Gloves", SW], ["pads", "Knee pads", SW]]],
 	["Belt", [["belt", "Strap", SW], ["buckle", "Buckle / stripe", BUCKLE_SW]]],
 	["Shoes", [["shoes", "Upper", SW], ["shoeAccent", "Toe & collar", SW]]],
 ]

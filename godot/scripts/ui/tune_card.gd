@@ -428,6 +428,12 @@ func _look_group(group: String) -> void:
 			list.add_child(UITheme.label("Knee pads design", 13))
 			list.add_child(RiderPanels.pad_style_picker(str(look.get("padStyle", "enduro")), func(id):
 				look.padStyle = id; _apply_look(); _fill()))
+			list.add_child(UITheme.label("Pants fabric", 13))
+			list.add_child(RiderPanels.choice_picker(PantsLook.FABRICS, str(look.get("pantsFabric", PantsLook.DEFAULT_FABRIC)), func(id):
+				look.pantsFabric = id; _apply_look(); _fill(), 13, 3))
+			list.add_child(UITheme.label("Pants pattern", 13))
+			list.add_child(RiderPanels.choice_picker(PantsLook.PATTERNS, str(look.get("pantsPattern", PantsLook.DEFAULT_PATTERN)), func(id):
+				look.pantsPattern = id; _apply_look(); _fill(), 13, 3))
 		if group == "Belt":
 			list.add_child(UITheme.label("Belt style", 13))
 			list.add_child(RiderPanels.belt_style_picker(str(look.get("beltStyle", "webbing")), func(id):

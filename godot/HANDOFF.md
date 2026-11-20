@@ -877,6 +877,22 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   shadow off the tyres, so the bike looked like it floated. Three soft black Decals on `Terrain.GROUND_LAYER` only: a tight
   one under each tyre + a faint wide one under the bike (the ragdoll's pelvis in a crash), lying on the ground's slope,
   fading as the tyre / bike lifts off. Kept subtle (the user found a strong one a "black splotch"). `BMX_NO_CONTACT=1` = off.
+- **Baked bike AO** (`bike/bike_ao.gd` + C# `bike/AoBake.cs`, called at the end of `BikeRig.load_bike` before decals /
+  cam / lights): per-vertex AO from nearby surface (discs, Bunnell-style, `RADIUS` 5 cm) in three groups (front wheel, rear
+  wheel, the rest); long edges are split to 2 cm first (`AoBake.Subdivide`, frame group only) or a low-poly tube smeared a
+  joint's darkness half way along. Stored in the vertex colour: BaseMaterial3D surfaces get a copy with
+  `vertex_color_use_as_albedo` (wheels already use vertex colour: multiplied in), the car paint + rotor shaders read `COLOR`
+  (+ `AO`). Cached by mesh content (memory + `user://cache/ao`, bump `VER`): first bake of a bike ~0.6 s, then ~60-200 ms.
+  `BMX_NO_AO=1` off, `BMX_AO_PROBE=1` timings + histogram, `BMX_AO_SHOW=1` draws the AO alone. The rider is not baked
+  (procedural, posed every frame): it gets SSAO only.
+- **Pants fabric + patterns** (`rider/pants_look.gd` `PantsLook`, `shaders/pants_fabric.gdshader`): pelvis / thighs /
+  shins / knees use one ShaderMaterial: a Poly Haven fabric scan (CC0, `assets/textures/<id>/`: the colour map turned into a
+  grey weave normalised to mean 0.88 (`*_grey_2k.jpg`, made with PIL from `*_diff_2k.jpg`), normal, roughness, AO) at
+  about its real size, wrapped round each tube (whole tiles round = no seam) and dyed the pants colour; then a procedural
+  print in a second colour (3D noise in the mesh's metric object space: camo, digital camo, tiger, zebra, leopard, checker,
+  tie-dye, flames, lightning). Look keys `pantsFabric` / `pantsPattern` / `pantsPrint` (kept when a kit is picked:
+  `RiderPanels.NON_KIT`). Picked in the ride setup CHARACTER step's PANTS tab, the rider room Kit tab and the tuning
+  card Look > Kit. Test: `BMX_LOOK=pantsFabric=corduroy,pantsPattern=tiger,pantsPrint=#111215`, `BMX_CHAR_TAB=pants`.
 - Dirt chunks, **tyre tracks**: one ring-buffer ArrayMesh
   (14 000 segments ≈ 1 km/wheel, one draw call, each segment uploads only its own bytes) drawn by
   `tyre_track.gdshader` — lit, knob-tread dimples bump-mapped, soft edges + soil lip, skid streaks, distance fade.

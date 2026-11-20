@@ -2059,6 +2059,12 @@ func _kit_page() -> void:
 			body.add_child(UITheme.text("Knee pads design", SUB, Tokens.T_XS))
 			body.add_child(RiderPanels.pad_style_picker(str(look.padStyle), func(id):
 				look.padStyle = id; _set_look(look); _set_tab("kit")))
+			body.add_child(UITheme.text("Pants fabric", SUB, Tokens.T_XS))
+			body.add_child(RiderPanels.choice_picker(PantsLook.FABRICS, str(look.get("pantsFabric", PantsLook.DEFAULT_FABRIC)), func(id):
+				look.pantsFabric = id; _set_look(look); _set_tab("kit"), 13, 3))
+			body.add_child(UITheme.text("Pants pattern", SUB, Tokens.T_XS))
+			body.add_child(RiderPanels.choice_picker(PantsLook.PATTERNS, str(look.get("pantsPattern", PantsLook.DEFAULT_PATTERN)), func(id):
+				look.pantsPattern = id; _set_look(look); _set_tab("kit"), 13, 3))
 		if g[0] == "Belt":
 			body.add_child(UITheme.text("Style", SUB, Tokens.T_XS))
 			body.add_child(RiderPanels.belt_style_picker(str(look.beltStyle), func(id):
