@@ -19,16 +19,11 @@ const DEFS := [
 	]],
 	["Steering", [
 		["steerEase", "Steer eases in (higher = snappier)", 30, 2, 40, 0.5, "/s"],
-		["steerRate", "Steer build-up", 15, 1, 25, 0.5, "/s"],
-		["steerRelease", "Steer release", 10, 1, 25, 0.5, "/s"],
 		["steerCurve", "Soft centre", 0.1, 0, 1, 0.05, ""],
-		["turnSlow", "Turn force (slow)", 9, 1, 12, 0.1, "m/s²"],
-		["turnFast", "Turn force (fast)", 13, 1, 14, 0.1, "m/s²"],
 		["turnFloor", "Min turn rate", 2.6, 0.3, 3.5, 0.05, "rad/s"],
 		["steerMax", "Max bar angle", 0.7, 0.2, 0.9, 0.01, "rad"],
 		["slowSteer", "Bar angle when slow", 1.2, 0.4, 1.4, 0.02, "rad"],
 		["slowSteerFade", "Slow steering fades by", 4, 1, 10, 0.5, "m/s"],
-		["barSpeed", "Bar speed", 28, 3, 40, 1, "/s"],
 		["counter", "Countersteer flick", 0.2, 0, 0.8, 0.02, ""],
 	]],
 	["Grip & slides", [
@@ -39,7 +34,6 @@ const DEFS := [
 	]],
 	["Tyre grip sim", [
 		["gripRearLock", "Locked rear swings out (fishtail)", 1.0, 0, 2.5, 0.05, "×"],
-		["gripCatch", "Rider catches slides", 0.6, 0, 2, 0.05, "×"],
 		["gripLoose", "Loose patches (grip varies)", 0.5, 0, 1.5, 0.05, "×"],
 		["gripBumps", "Bumps knock the rear loose", 1.0, 0, 3, 0.05, "×"],
 		["gripPower", "Power slides / wheelspin", 1.0, 0, 3, 0.05, "×"],
@@ -52,16 +46,12 @@ const DEFS := [
 		["balanceSim", "Balanced bike (turn follows the lean)", 0.4, 0, 1, 0.05, ""],
 		["balanceFall", "Falls in when the grip goes", 0.5, 0, 1.5, 0.05, "×"],
 		["lowsideAngle", "Lowside: lean past the grip by", 0.3, 0.1, 0.8, 0.01, "rad"],
-		["gyroStable", "Fast = steadier (rolls slower)", 0.25, 0, 1, 0.05, "×"],
 	]],
 	["Crashing", [
 		["crashTime", "Losing it takes (at 1x past the limit)", 0.4, 0.05, 1.5, 0.05, "s"],
 		["riderSave", "Rider fights back (meter drains)", 1.2, 0.2, 4, 0.05, "/s"],
 		["riderSkill", "Rider reflexes in trouble", 1.0, 0, 2, 0.05, "×"],
 		["crashHard", "Down at once when this far past the limit", 3.0, 1.0, 8.0, 0.1, "×"],
-		["reflexBrake", "Reflex: eases off the brakes", 0.6, 0, 1, 0.05, ""],
-		["reflexStandUp", "Reflex: stands the bike up", 0.3, 0, 0.8, 0.05, ""],
-		["reflexCatch", "Reflex: fights the slide harder", 1.5, 0, 4, 0.1, "×"],
 		["frontWeight", "Weights the front in turns", 0.12, 0, 0.35, 0.01, "g"],
 		["bonkBoulder", "Over the bars: a boulder throws you from", 6.0, 3, 15, 0.5, "m/s"],
 		["bonkSmall", "Over the bars: a small rock throws you from", 12.0, 5, 25, 0.5, "m/s"],
@@ -104,7 +94,6 @@ const DEFS := [
 		["flowTime", "Flow lasts", 4, 1, 10, 0.5, "s"],
 	]],
 	["Carving", [
-		["carveBite", "Carve extra turn", 2.0, 0, 5, 0.1, "m/s²"],
 		["carveGrip", "Carve extra grip", 0.12, 0, 0.3, 0.01, "×"],
 		["carveBoost", "Carve exit speed", 1.2, 0, 3, 0.1, "m/s"],
 	]],
@@ -115,8 +104,6 @@ const DEFS := [
 		["airTilt", "Body shift tilts the bike (air W / S)", 0.45, 0, 0.9, 0.05, "rad"],
 		["airArcade", "Arcade air control (0 = real physics)", 1.0, 0, 1, 0.05, ""],
 		["airSpinRate", "Air tilt speed (W / S held)", 3.5, 0.5, 9, 0.1, "rad/s"],
-		["airSpinResp", "Air tilt response", 7, 1, 25, 0.5, "/s"],
-		["airSpinStop", "Air tilt stops when let go", 3, 0, 15, 0.25, "/s"],
 		["tuckSpin", "Tuck spins faster (Space)", 0.35, 0, 0.6, 0.05, ""],
 		["riderShare", "Rider's share of the spin", 0.85, 0.5, 0.95, 0.01, ""],
 		["airRoll", "Air lean left / right (A / D)", 0.6, 0, 1.2, 0.05, "rad"],
@@ -139,8 +126,6 @@ const DEFS := [
 	]],
 	["Lean", [
 		["leanMax", "Max lean", 0.95, 0.15, 1.3, 0.01, "rad"],
-		["leanIn", "Roll-in stiffness", 40, 8, 200, 1, ""],
-		["leanOut", "Roll-out stiffness", 30, 8, 200, 1, ""],
 		["leanDamp", "Lean damping", 1.0, 0.3, 1.6, 0.02, ""],
 		["leanRate", "Fastest roll (side to side)", 6.0, 0.5, 8, 0.1, "rad/s"],
 		["leanLead", "Slow: lean goes with the steer", 0.5, 0, 1, 0.05, ""],
@@ -183,8 +168,6 @@ const DEFS := [
 		["pedalPower", "Pedal power", 21, 5, 50, 1, ""],
 		["pedalTop", "Pedal top speed", 11.8, 4, 22, 0.2, "m/s"],
 		["airDrag", "Air drag", 0.0036, 0, 0.012, 0.0002, ""],
-		["brakeForce", "Brake", 7.5, 2, 15, 0.5, "m/s²"],
-		["popPower", "Pump pop", 2.4, 0.5, 6, 0.1, "m/s"],
 	]],
 	["Sprint & wheelie", [
 		["sprintPower", "Sprint power", 1.5, 1, 2.5, 0.05, "×"],
@@ -196,37 +179,23 @@ const DEFS := [
 		["sprintSpin", "Legs spin-up from slow", 4.0, 0, 8, 0.25, "rad/s"],
 		["sprintEffort", "Body effort (look)", 1.0, 0, 2, 0.05, "×"],
 		["sprintRock", "Bike thrown side to side", 0.3, 0, 2, 0.05, "×"],
-		["sprintLift", "Wheelie pull", 11.0, 0, 20, 0.5, ""],
-		["wheelieAngle", "Wheelie pop angle", 0.4, 0.15, 0.9, 0.01, "rad"],
-		["wheelieClimb", "Wheelie climbs while held", 0.45, 0.0, 1.5, 0.05, "rad/s"],
 		["wheelieDrop", "Wheelie set-down speed", 1.6, 0.4, 4, 0.1, "rad/s"],
 	]],
 	["Body stick", [
 		["stickShift", "Fore / aft reach (× weight shift)", 1.7, 0, 3, 0.05, "×"],
 		["manualFrom", "Manual / wheelie: stick pulled back past", 0.4, 0.1, 0.95, 0.05, ""],
-		["stickWheelie", "Wheelie (pedalling + stick back): front lifts to", 0.6, 0.1, 1.0, 0.01, "rad"],
-		["manualAngle", "Manual: front lifts to", 0.32, 0, 0.7, 0.01, "rad"],
 		["flickSteer", "Side lean turns the bars", 0.5, 0, 1, 0.05, ""],
-		["flickTurn", "Lean into a turn: extra turn", 4.0, 0, 10, 0.1, "m/s²"],
 		["flickGrip", "Lean into a turn: extra grip", 0.2, 0, 0.6, 0.02, "×"],
 		["flickLean", "Bike thrown under the body", 0.35, 0, 0.8, 0.01, "rad"],
 		["flickSpeed", "Bike flick speed", 14, 3, 30, 0.5, "/s"],
 		["flickKick", "Quick flick whips the bike round", 0.16, 0, 0.5, 0.01, "rad"],
 		["whipDrift", "Corner whip (both sticks one way): drift angle", 0.42, 0, 0.8, 0.01, "rad"],
-		["whipSnap", "Corner whip: how fast the rear swings out", 5.0, 1, 15, 0.5, "/s"],
-		["whipLean", "Corner whip: bike thrown over", 0.22, 0, 0.5, 0.01, "rad"],
-		["whipCarry", "Corner whip: drift keeps its speed", 0.6, 0, 1, 0.05, ""],
-		["whipMinSpeed", "Corner whip: from speed", 4.0, 1, 10, 0.5, "m/s"],
 		["whipTrigger", "Corner whip: how far both sticks must go", 0.6, 0.2, 0.95, 0.05, ""],
-		["whipCatch", "Corner whip: drift caught over (after letting go)", 0.9, 0.2, 3, 0.05, "s"],
 		["stickAirTilt", "Air: stick tilts the nose", 0.55, 0, 1.2, 0.05, "rad"],
 		["stickAirRoll", "Air: stick lays the bike over", 0.75, 0, 1.2, 0.05, "rad"],
 		["airWhip", "Air: whip (stick to the side kicks the bike out)", 1.1, 0, 1.5, 0.05, "rad"],
 		["whipReturn", "Air: whip straightened for the landing", 0.7, 0, 1, 0.05, ""],
 		["stickAirEase", "Air: bike follows the stick (higher = snappier)", 3.5, 1, 12, 0.25, "/s"],
-		["stickSpinBuild", "Air: spin builds up (stick at the edge)", 2.5, 0.3, 5, 0.1, "/s"],
-		["stickSpinMax", "Air: flip spin strength (stick at the edge)", 0.7, 0.2, 1, 0.05, "×"],
-		["stickSpinGrow", "Air: spin speeds up the longer it is held", 0.8, 0, 2, 0.05, "×/s"],
 		["stickYawRate", "Air: flat spin speed (stick at left / right edge)", 5.0, 1, 9, 0.1, "rad/s"],
 		["stickBodyCounter", "Air: body leans against the bike", 0.25, 0, 0.6, 0.05, "×"],
 		["stickBodyTilt", "Air: body stays as the bike tilts", 0.6, 0, 1, 0.05, "×"],
@@ -236,7 +205,6 @@ const DEFS := [
 	# side-on BMX game feel: the manual / wheelie is a balance you work, holding hop on the downhills pumps speed,
 	# a landing in line with the ground gives speed back
 	["Balance & pump", [
-		["manBalanceOn", "Manual / wheelie: you balance it (0 = holds itself)", 1, 0, 1, 1, ""],
 		["manBalance", "Balance point (front up)", 0.55, 0.3, 0.9, 0.01, "rad"],
 		["manGravity", "Falls away from the balance point", 7.0, 2, 16, 0.25, "rad/s²"],
 		["manLift", "Pull on the bars (stick back)", 9.0, 3, 20, 0.25, "rad/s²"],
@@ -251,11 +219,7 @@ const DEFS := [
 		["manSlideCatch", "Front set down when the rear slides past (× slide limit)", 0.7, 0.3, 1, 0.05, "×"],
 		["manSprintLift", "Sprint stamp from slow lifts the front", 1.1, 0, 2.5, 0.05, "×"],
 		["pumpHold", "Hop held downhill: pump push (× slope)", 0.45, 0, 1.5, 0.05, "×g"],
-		["pumpHoldUp", "Hop held uphill: pump cost (× slope)", 0.4, 0, 1.5, 0.05, "×g"],
-		["pumpMinSpeed", "Pump works from", 2.0, 0, 8, 0.25, "m/s"],
 		["pumpStick", "Body stick forward: pump strength (× the button)", 1.2, 0, 2, 0.05, "×"],
-		["pumpUnweight", "Body stick eased back up a face: speed carried (× slope)", 0.15, 0, 0.6, 0.01, "×g"],
-		["pumpCentred", "Stick pumping keeps the weight centred (rear keeps grip)", 0.75, 0, 1, 0.05, "×"],
 		["landPerfect", "Perfect landing within", 0.14, 0.03, 0.4, 0.01, "rad"],
 		["landBoost", "Perfect landing speed boost", 1.6, 0, 5, 0.1, "m/s"],
 		["landPerfectAir", "Perfect landing: from air time", 0.45, 0.1, 1.5, 0.05, "s"],
@@ -309,7 +273,7 @@ const VER := 16
 ## later retunes, per version: only these keys are dropped for saves older than that version (bumping VER
 ## with one shared list would reset every earlier retuned key again)
 const RETUNED_AT := {8: ["manualFrom", "stickAirRoll", "stickSpinBuild", "stickYawRate"], 9: ["leanMax"], 11: ["leanIn", "leanOut", "flickSpeed"], 12: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 13: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 14: ["sprintRock"], 15: ["dustWidth"], 16: ["bodyLean"]}
-const RETUNED := ["steerRate", "steerRelease", "steerCurve", "turnSlow", "turnFast", "turnFloor", "steerMax", "slowSteer",
+const RETUNED := ["steerRate", "steerRelease", "steerCurve", "turnFloor", "steerMax", "slowSteer",
 	"barSpeed", "grip", "slipRecover", "slipMax", "turnWeight", "leanMax", "leanIn", "leanOut", "leanDamp", "bikeLeanMul", "bikeLeanCap", "flipAccel", "flipRate", "airTwist", "landBack", "travel", "popKick"]
 var defaults := {}
 var base := {}       # the player's slider values (before the bike's ride multipliers)
@@ -388,6 +352,24 @@ func row(k: String) -> Array:
 			if r[0] == k: return r
 	return []
 
+## Followers (2026-11-20 slider merge): values that used to be sliders of their own and overlapped another one.
+## They are no slider now; each follows its LEADER slider: value = default x (leader / leader's default)^exp x the
+## bike's multiplier (BIKES / frame_mods still shape them) x the Feel sliders. exp 0 = a fixed value. So the ride
+## is unchanged at the defaults and one slider moves the whole group. The physics reads them as before (T.key)
+const FOLLOW := {
+	"brakeForce": [7.5, "", 0.0],                                         # brake power: the front / rear levers set it
+	"steerRate": [15.0, "steerEase", 1.0], "steerRelease": [10.0, "steerEase", 1.0], "barSpeed": [28.0, "steerEase", 1.0],
+	"gripCatch": [0.6, "slipRecover", 1.0],                              # slide catch: one slider
+	"reflexBrake": [0.6, "", 0.0], "reflexStandUp": [0.3, "", 0.0], "reflexCatch": [1.5, "", 0.0],   # riderSkill scales them all
+	"leanIn": [40.0, "leanRate", 1.0], "leanOut": [30.0, "leanRate", 1.0], "gyroStable": [0.25, "", 0.0],
+	"popPower": [2.4, "popKick", 1.0],                                   # pop off a lip: one slider
+	"pumpHoldUp": [0.4, "pumpHold", 1.0], "pumpUnweight": [0.15, "pumpStick", 1.0], "pumpCentred": [0.75, "", 0.0], "pumpMinSpeed": [2.0, "", 0.0],
+	"airSpinResp": [7.0, "airSpinRate", 1.0], "airSpinStop": [3.0, "airSpinRate", 1.0],
+	"stickSpinBuild": [2.5, "stickAirEase", 1.0], "stickSpinGrow": [0.8, "", 0.0], "stickSpinMax": [0.7, "", 0.0],
+	"whipSnap": [5.0, "whipDrift", 1.0], "whipLean": [0.22, "whipDrift", 1.0], "whipCarry": [0.6, "", 0.0],
+	"whipCatch": [0.9, "", 0.0], "whipMinSpeed": [4.0, "", 0.0],
+}
+
 ## the Feel sliders: macro key -> {detail key: exponent}. The detail value is x m^exp (m 0.5..1.5); a minus
 ## exponent works the other way (more Realism = less arcade air control)
 const MACROS := {
@@ -428,4 +410,11 @@ func _rebuild() -> void:
 			if r.size() > 4: val = clampf(val, minf(raw, float(r[3])), maxf(raw, float(r[4])))
 			raw = val
 		v[k] = raw
+	# followers (FOLLOW): their leader slider's move, the bike's multiplier and the Feel sliders
+	for k in FOLLOW:
+		var fw: Array = FOLLOW[k]
+		var lead: float = 1.0
+		if str(fw[1]) != "" and defaults.has(fw[1]):
+			lead = pow(maxf(1e-4, float(base.get(fw[1], defaults[fw[1]])) / maxf(1e-4, float(defaults[fw[1]]))), float(fw[2]))
+		v[k] = float(fw[0]) * lead * float(ride.get(k, 1.0)) * macro_k(k)
 	changed.emit()

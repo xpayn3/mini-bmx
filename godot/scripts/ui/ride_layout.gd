@@ -9,7 +9,7 @@ const LABELS := {
 	"grip": "Tyre grip", "frontGrip": "Front tyre grip", "brakeForce": "Brake power",
 	"turnWeight": "Turn weight", "leanRate": "Roll speed", "steerEase": "Steer response",
 	"bikeLeanMul": "Bike under the body", "legStiff": "Leg spring", "steerCurve": "Soft centre",
-	"flickTurn": "Lean in: turns harder", "flickGrip": "Lean in: grips harder", "weightInside": "Hanging inside",
+	"flickGrip": "Lean in: grips harder", "weightInside": "Hanging inside",
 	"weightSteady": "Outside pedal", "flickSteer": "Side lean steers", "flickLean": "Bike thrown under",
 	"flickSpeed": "Bike follows the stick", "flickKick": "Flick whips round",
 	"whipDrift": "Whip: drift angle", "whipSnap": "Whip: swing-out speed", "whipLean": "Whip: bike thrown over",
@@ -44,17 +44,12 @@ const FEEL := [
 const PAGES := [
 	["steer", "Steering", "How the bike turns, leans and balances", [
 		["How it turns", [
-			["*steerEase", "How fast the bars follow your input.", "Gentle", "Snappy"],
-			["*turnSlow", "Turning force at low speed.", "Wide", "Tight"],
-			["*turnFast", "Turning force at speed.", "Wide", "Tight"],
+			["*steerEase", "How fast the bars follow you: the build-up, the release and the bars themselves.", "Gentle", "Snappy"],
 			["*slowSteer", "How far the bars turn when you're slow (tight hairpins).", "Little", "Full lock"],
 			["slowSteerFade", "Speed by which that slow-speed lock is gone.", "Early", "Late"],
 			["steerMax", "Most the bars turn at speed.", "Little", "Lots"],
-			["steerRate", "How fast a turn builds up.", "Slow", "Fast"],
-			["steerRelease", "How fast the bars come back straight.", "Slow", "Fast"],
 			["steerCurve", "Soft centre: small inputs do less (fine control).", "Linear", "Soft centre"],
 			["turnFloor", "The least turn you always get, even at speed.", "Little", "Lots"],
-			["barSpeed", "How fast the drawn bars move.", "Slow", "Fast"],
 			["turnWeight", "Heavy = the turn settles in over a moment, light = instant.", "Light", "Heavy"],
 		]],
 		["Balance", [
@@ -62,14 +57,11 @@ const PAGES := [
 			["counter", "The short push the other way that starts a lean (countersteer).", "None", "Strong"],
 			["balanceFall", "Leaned past what the tyres hold, the bike falls on in.", "Never", "Falls"],
 			["lowsideAngle", "How far past the grip before it's a LOWSIDE crash.", "Strict", "Forgiving"],
-			["gyroStable", "Fast, the spinning wheels hold the bike up (it rolls a little slower).", "Twitchy", "Steady"],
 		]],
 		["Lean", [
-			["*leanRate", "Top roll speed from one side to the other.", "Lazy", "Quick"],
+			["*leanRate", "How fast the bike rolls over and back up, side to side.", "Lazy", "Quick"],
 			["*bikeLeanMul", "How far the bike goes over under the rider in turns.", "With the body", "Way under"],
 			["*bikeLead", "Two masses: the light bike goes over first, the heavy body follows.", "As one", "Bike first"],
-			["leanIn", "How firmly it rolls into a turn.", "Soft", "Firm"],
-			["leanOut", "How firmly it comes back up.", "Soft", "Firm"],
 			["leanDamp", "Settles without wobble.", "Bouncy", "Damped"],
 			["leanMax", "Deepest lean.", "Shallow", "Deep"],
 			["bikeLeanCap", "Bike lean soft limit.", "Low", "High"],
@@ -88,15 +80,13 @@ const PAGES := [
 			["*grip", "Both tyres: how much they hold before sliding.", "Loose", "Grippy"],
 			["*frontGrip", "The front alone: pushes wide earlier or later.", "Washy", "Planted"],
 			["carveGrip", "Extra bite while carving a clean turn.", "None", "Lots"],
-			["carveBite", "Extra turn while carving.", "None", "Lots"],
 			["gripLoose", "Loose patches: grip changes under the tyres.", "Even", "Patchy"],
 		]],
 		["Slides", [
 			["*oversteer", "How much the rear steps out when you ask too much.", "Planted", "Steps out"],
-			["*slipRecover", "How quickly a slide straightens itself.", "Slow", "Quick"],
+			["*slipRecover", "How quickly a slide straightens itself, and how hard the rider catches it.", "Slow", "Quick"],
 			["slipMax", "Slide angle that's a WASHED OUT crash.", "Small", "Huge"],
 			["gripRearLock", "Locked rear swings round (fishtail).", "Straight", "Fishtails"],
-			["gripCatch", "The rider catches slides.", "Lets go", "Catches"],
 			["gripPower", "Power slides / wheelspin step the rear out.", "Never", "Lots"],
 			["gripBumps", "Bumps knock the rear loose near the limit.", "Never", "Lots"],
 			["gripSquirm", "Tyres squirm a few degrees in turns.", "None", "Lots"],
@@ -107,9 +97,6 @@ const PAGES := [
 			["*riderSave", "How fast the trouble drains once you're back under the limit.", "Slow", "Fast"],
 			["*riderSkill", "In trouble the rider eases the brakes, stands the bike up and fights the slide.", "None", "Pro"],
 			["crashHard", "This far past the limit there's no saving it: down at once.", "Strict", "Forgiving"],
-			["reflexBrake", "In trouble: how much he lets off the brakes (the front most).", "Keeps braking", "Lets go"],
-			["reflexStandUp", "In trouble: how much he stands the bike up.", "Stays leaned", "Stands up"],
-			["reflexCatch", "In trouble: how much harder he fights a slide.", "Same", "Much harder"],
 			["*frontWeight", "Leaned over he presses the front into the ground (keeps it from washing out).", "None", "Lots"],
 			["bonkBoulder", "Hitting a boulder head-on throws you over the bars from this speed.", "Slow", "Fast"],
 			["bonkSmall", "A rock just too tall to roll over needs this speed to throw you.", "Slow", "Fast"],
@@ -136,7 +123,6 @@ const PAGES := [
 	]],
 	["brakes", "Brakes", "Two levers, each with its own tyre", [
 		["Levers", [
-			["*brakeForce", "Overall brake power.", "Weak", "Strong"],
 			["*brakeFront", "Front lever: does most of the stopping, washes out if grabbed leaned over.", "Weak", "Strong"],
 			["*brakeRear", "Rear lever: the rear goes light and locks easily (skids).", "Weak", "Strong"],
 			["brakeFrontMix", "The brake key (S / LT): how much front it squeezes with the rear.", "Rear only", "Both"],
@@ -167,7 +153,6 @@ const PAGES := [
 	]],
 	["body", "Body", "The right stick: weight in turns, fore / aft, manuals, the whip", [
 		["Weight in turns", [
-			["*flickTurn", "Stick into the turn (bike under you): turns harder.", "None", "Lots"],
 			["*flickGrip", "...and grips harder (weight on the outside pedal).", "None", "Lots"],
 			["*weightInside", "Stick against the turn (hanging inside): the tyres lose bite.", "No cost", "Costly"],
 			["weightSteady", "Weight on the outside pedal keeps the rear planted over bumps.", "None", "Planted"],
@@ -186,21 +171,11 @@ const PAGES := [
 		]],
 		["Manual & wheelie", [
 			["*manualFrom", "Stick pulled back past this = manual / wheelie.", "Light pull", "Full pull"],
-			["manualAngle", "Manual: front lifts to.", "Low", "High"],
-			["stickWheelie", "Pedalling wheelie: front lifts to.", "Low", "High"],
-			["sprintLift", "Sprint wheelie pull.", "None", "Strong"],
-			["wheelieAngle", "Wheelie pop angle.", "Low", "High"],
-			["wheelieClimb", "Held, the wheelie climbs.", "Holds", "Climbs"],
 			["wheelieDrop", "Set-down speed.", "Slow", "Fast"],
 		]],
 		["Corner whip (flick the stick with the steer)", [
-			["*whipDrift", "Drift angle the rear swings out to.", "Small", "Big"],
-			["whipSnap", "How fast it swings out.", "Slow", "Fast"],
-			["whipLean", "Bike thrown over.", "Little", "Lots"],
-			["whipCarry", "The drift keeps its speed.", "Scrubs", "Keeps"],
-			["whipMinSpeed", "From this speed.", "Slow", "Fast"],
+			["*whipDrift", "How far the rear swings out, how fast, and how far the bike is thrown over.", "Small", "Big"],
 			["whipTrigger", "How far both sticks must go.", "A little", "All the way"],
-			["whipCatch", "Drift caught over (after letting go).", "Quick", "Slow"],
 		]],
 		["Legs", [
 			["*legStiff", "How hard the legs hold the body up.", "Soft", "Stiff"],
@@ -214,7 +189,6 @@ const PAGES := [
 	]],
 	["manual", "Manual & pump", "Manuals / wheelies you balance yourself, pumping for speed, perfect landings", [
 		["Manual & wheelie", [
-			["*manBalanceOn", "1 = you balance it (stick back lifts, brake / lean forward drops). 0 = it holds itself.", "Holds itself", "You balance"],
 			["*manBalance", "The balance point: how high the front sits when it's balanced.", "Low", "High"],
 			["*manGravity", "How fast it falls away from the balance point.", "Lazy", "Twitchy"],
 			["manLift", "How hard pulling the stick back lifts the front.", "Gentle", "Strong"],
@@ -230,12 +204,8 @@ const PAGES := [
 			["manSprintLift", "A sprint stamp from slow lifts the front.", "No", "Lots"],
 		]],
 		["Pumping", [
-			["*pumpHold", "Hop held going down a slope pushes you along.", "None", "Strong"],
-			["pumpHoldUp", "Hop held going up a slope costs speed.", "None", "Lots"],
-			["pumpMinSpeed", "Pumping works from this speed.", "Slow", "Fast"],
-			["*pumpStick", "Right stick forward pumps (x the hop button's strength).", "None", "Strong"],
-			["pumpUnweight", "Stick eased back up a face carries speed.", "None", "Lots"],
-			["pumpCentred", "Stick pumping keeps the weight centred (the rear keeps grip).", "Shifts", "Centred"],
+			["*pumpHold", "Hop held down a slope pushes you along (and costs speed going up).", "None", "Strong"],
+			["*pumpStick", "Right stick forward pumps; eased back up a face it carries speed.", "None", "Strong"],
 		]],
 		["Perfect landings", [
 			["*landBoost", "Speed boost for a landing matched to the slope.", "None", "Big"],
@@ -262,8 +232,7 @@ const PAGES := [
 	]],
 	["jumps", "Jumps", "Take-off, the air, the right stick up there, landing", [
 		["Take-off", [
-			["*popKick", "Legs pop off a lip (hold Space into it).", "Weak", "Strong"],
-			["popPower", "Pump pop.", "Weak", "Strong"],
+			["*popKick", "Pop off a lip: the legs and the pump (hold Space into it).", "Weak", "Strong"],
 			["autoPump", "Pops on his own (1 = no Space needed).", "You do it", "Auto"],
 			["prepTime", "Spots the lip ahead.", "Late", "Early"],
 			["prepDepth", "Crouch into the lip.", "Little", "Deep"],
@@ -273,9 +242,7 @@ const PAGES := [
 		]],
 		["In the air", [
 			["*airArcade", "Arcade air control (0 = real momentum physics).", "Physics", "Arcade"],
-			["*airSpinRate", "Air tilt speed (W / S held).", "Slow", "Fast"],
-			["airSpinResp", "Air tilt response.", "Soft", "Snappy"],
-			["airSpinStop", "Air tilt stops when let go.", "Drifts", "Stops"],
+			["*airSpinRate", "Air tilt speed (W / S held), and how quickly it starts and stops.", "Slow", "Fast"],
 			["airTilt", "Body shift tilts the bike.", "Little", "Lots"],
 			["airTwist", "Hip twist in the air.", "Little", "Lots"],
 			["airRoll", "Air lean left / right (A / D).", "Little", "Lots"],
@@ -287,12 +254,9 @@ const PAGES := [
 		["Right stick in the air", [
 			["*airWhip", "Whip: stick to the side kicks the bike out sideways under the body (the edge still spins).", "None", "Huge"],
 			["whipReturn", "How much of the whip the rider straightens himself as the landing comes.", "You do it", "He does it"],
-			["*stickAirEase", "The bike follows the stick.", "Smooth", "Snappy"],
+			["*stickAirEase", "How quickly the bike follows the stick in the air, and how fast a spin builds.", "Smooth", "Snappy"],
 			["stickAirTilt", "Stick tilts the nose.", "Little", "Lots"],
 			["stickAirRoll", "Stick lays the bike over.", "Little", "Lots"],
-			["stickSpinBuild", "Spin builds up (stick at the edge).", "Slow", "Fast"],
-			["stickSpinMax", "Flip spin strength.", "Weak", "Strong"],
-			["stickSpinGrow", "Spin speeds up the longer it's held.", "Steady", "Grows"],
 			["stickYawRate", "Flat spin speed.", "Slow", "Fast"],
 			["stickBodyCounter", "Body leans against the bike.", "Little", "Lots"],
 			["stickBodyTilt", "Body stays as the bike tilts.", "Follows", "Stays"],

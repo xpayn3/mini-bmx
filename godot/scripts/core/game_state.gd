@@ -12,7 +12,6 @@ const DH_POSE := {"hipX": -0.07, "hipY": 0.075, "lean": 0.22, "elbowsOut": 0.0, 
 	"wristRoll": 0.02, "kneesFwd": 0.05, "footAngle": 0.01}
 const DH_RIDE := {
 	"steerRate": 0.9, "steerRelease": 0.9, "barSpeed": 0.9, "steerMax": 0.9, "counter": 0.6,
-	"turnSlow": 1.0, "turnFast": 1.1,
 	"leanMax": 1.1, "leanIn": 0.8, "leanOut": 0.8, "leanDamp": 1.2,
 	"legStiff": 0.6, "legDamp": 1.2, "legComp": 1.3, "legExt": 1.3, "attackDrop": 1.3,
 	"pedalLaunch": 0.75, "pedalPower": 0.85, "pedalTop": 1.35, "airDrag": 0.85, "brakeForce": 1.3, "popPower": 0.7,

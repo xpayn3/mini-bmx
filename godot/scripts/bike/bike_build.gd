@@ -663,7 +663,7 @@ const FRAMES := {
 ## the frame classes, slow -> fast. top = gear-limited top speed (topSpeed, pedalTop); the rest multiply on top of
 ## the geometry (a park bike flips and spins a little quicker, a speed bike a little slower)
 const CLASSES := {
-	"freeride": {"label": "Freeride", "top": 0.93, "extra": {"flipRate": 1.06, "stickSpinMax": 1.06, "flickSpeed": 1.05, "leanRate": 1.08, "turnFast": 1.05}},
+	"freeride": {"label": "Freeride", "top": 0.93, "extra": {"flipRate": 1.06, "stickSpinMax": 1.06, "flickSpeed": 1.05, "leanRate": 1.08}},
 	"allround": {"label": "All-round", "top": 1.0, "extra": {}},
 	"race":     {"label": "Race", "top": 1.06, "extra": {"flipRate": 0.97}},
 	"speed":    {"label": "Speed", "top": 1.12, "extra": {"flipRate": 0.94, "stickSpinMax": 0.94, "flickSpeed": 0.95, "leanRate": 0.94}},
@@ -758,8 +758,6 @@ static func frame_mods(frame: String, b: Dictionary) -> Dictionary:
 	mul.call("flickSpeed", 1.0 / sqrt(kb))
 	# wheelbase
 	mul.call("leanRate", 1.0 - 3.0 * d)
-	mul.call("turnFast", 1.0 - 1.5 * d)   # a long bike needs more room to turn at speed
-	mul.call("turnSlow", 1.0 - 1.0 * d)
 	mul.call("flickKick", 1.0 - 3.0 * d)
 	mul.call("whipSnap", 1.0 - 2.0 * d)
 	mul.call("counter", 1.0 - 2.0 * d)
@@ -770,12 +768,12 @@ static func frame_mods(frame: String, b: Dictionary) -> Dictionary:
 	mul.call("noseDive", 1.0 + 0.06 * h)
 	mul.call("steerRate", 1.0 - 0.04 * h)
 	mul.call("slowSteer", 1.0 - 0.04 * h)
-	mul.call("turnSlow", 1.0 - 0.04 * h)
 	mul.call("counter", 1.0 - 0.04 * h)
 	# chainstay
-	mul.call("manualAngle", 1.0 - 3.0 * c)
-	mul.call("wheelieClimb", 1.0 - 4.0 * c)
-	mul.call("sprintLift", 1.0 - 3.0 * c)
+	# (the balance manual: a short back end lifts easily, tips over sooner, pops a sprint wheelie more easily)
+	mul.call("manLift", 1.0 - 3.0 * c)
+	mul.call("manGravity", 1.0 - 3.0 * c)
+	mul.call("manSprintLift", 1.0 - 3.0 * c)
 	mul.call("whipSnap", 1.0 - 3.0 * c)
 	mul.call("gripPower", 1.0 - 4.0 * c)
 	mul.call("popPower", 1.0 - 2.0 * c)
@@ -812,7 +810,7 @@ static func stats(b: Dictionary, frame := "dh") -> Dictionary:
 			+ (g.call("steerRate") - 1.0) * 1.5, 0, 1),
 		"Grip": clampf(0.55 + (r.grip - 1.0) * 1.8 + (g.call("grip") - 1.0) * 1.8 + (g.call("carveGrip") - 1.0) * 0.5, 0, 1),
 		"Landing": clampf(0.3 + (r.travel - 0.8) * 1.2 + (r.tyreDamp - 1.0) * 0.4 + (g.call("slamJolt") - 1.0) * 1.5, 0, 1),
-		"Pop": clampf(0.5 + (g.call("popPower") - 1.0) * 2.5 + (g.call("manualAngle") - 1.0) * 1.0 + (r.travel - 1.0) * -0.4, 0, 1),
+		"Pop": clampf(0.5 + (g.call("popPower") - 1.0) * 2.5 + (g.call("manLift") - 1.0) * 1.0 + (r.travel - 1.0) * -0.4, 0, 1),
 	}
 
 ## speed class in stars, 1 (slow) .. 5 (fast): the top-speed bar of this build on this frame

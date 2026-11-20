@@ -66,7 +66,7 @@ var aero_k := 1.0   # air drag scale from the body position (tuck < 1, sat up > 
 var body_in := 0.0; var body_in_s := 0.0; var flick_in := 0.0; var flick := 0.0; var flick_prev := 0.0
 var wheelie_time := 0.0; var wheelie_pedal := false   # how long the current stick wheelie / manual has been held
 var manual_up := 0.0; var lock_sb := false; var lock_sf := false; var flick_kick := 0.0
-# balance manual (Tune manBalanceOn): man_a = how far the front is up (rad above the ground), man_w its rate. It is
+# balance manual (the only manual / wheelie): man_a = how far the front is up (rad above the ground), man_w its rate. It is
 # a tipping balance: below manBalance the front falls back down, past it the bike tips over backwards faster and
 # faster (loops out past manLoop). The bar pull / pedal strokes lift it, the rear brake / leaning forward drop it.
 # man_zone = in the sweet spot round the balance point (a little speed push, the HUD meter glows)
@@ -819,7 +819,10 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	weight_in = 0.0 if air else clampf(flick * turn_dir, -1.0, 1.0)
 	var w_grip: float = 1.0 + float(T.get("flickGrip", 0.2)) * agree - float(T.get("weightInside", 0.2)) * maxf(0.0, -weight_in)
 	# a berm helps the turn at any speed (it used to fade out below ~30 km/h with spd_k)
-	var a_lat_lim: float = maxf(1.2, T.turnSlow + spd_k * (T.turnFast - T.turnSlow) + G * tan(bk) * signf(s_in) * smooth01(va / 3.0) + carve_f * T.carveBite + agree * float(T.get("flickTurn", 4.0)) * spd_k)
+	# (the turn-force limit: in practice turnFloor below always wins and the grip decides how tight it turns - a
+	# slider sweep, 2026-11-20, found its old sliders turnSlow / turnFast / carveBite / flickTurn moved nothing, so
+	# they're fixed numbers now)
+	var a_lat_lim: float = maxf(1.2, 9.0 + spd_k * 4.0 + G * tan(bk) * signf(s_in) * smooth01(va / 3.0) + carve_f * 2.0 + agree * 4.0 * spd_k)
 	var lock: float = T.steerMax + maxf(0.0, T.slowSteer - T.steerMax) * (1 - smooth01(va / maxf(0.5, T.slowSteerFade)))
 	var d_max: float = minf(lock, maxf(atan(a_lat_lim * L / maxf(va * va, 0.01)), atan(T.turnFloor * L / maxf(va, 0.1))))
 	var cmd: float = s_in * d_max
@@ -1368,34 +1371,16 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		# sprint wheelie (like a motorbike): stamping on the pedals from slow, the rider hauls on the bars
 		# with every stroke and the front comes up. Once it's up they keep pulling as long as sprint is
 		# held (and stop balancing it), so it climbs on until it loops out; let go and it drops back down
+		# sprint wheelie: stamping on the pedals from slow lifts the front into the balance manual (manSprintLift);
+		# the rider balances it from there like any manual (the old self-holding wheelie / manual is gone)
 		var pulling: bool = sprint > 0.5 and not air and throttle > 0.1 and not brake
-		var bal_on: bool = float(T.get("manBalanceOn", 1)) > 0.5
-		_sprint_lift = sprint * minf(throttle, 1.0) * slowness(v) if (pulling and bal_on) else 0.0
-		if pulling and not front_air and not bal_on:
-			var lift_k: float = sprint * minf(throttle, 1.0) * slowness(v)
-			tq += float(T.get("sprintLift", 11.0)) * lift_k * (0.55 + 0.45 * absf(sin(crank)))
-		# once the stamp has the front up: the rider pops it to ~23 deg and balances it there; holding
-		# sprint keeps pulling it higher (wheelieClimb rad/s) until it goes past the balance point and
-		# loops out. Let go and it is set back down
-		if pulling and not bal_on and (front_air or wheelie_up > 0.0):
-			wheelie_up = maxf(wheelie_up, float(T.get("wheelieAngle", 0.4))) + float(T.get("wheelieClimb", 0.45)) * dt
-		else:
-			wheelie_up = maxf(0.0, wheelie_up - float(T.get("wheelieDrop", 1.6)) * dt)
-		# manual: the body stick pulled well back on the ground lifts the front and balances it there (how
-		# far back = how high); let go and it's set down. Only rolling, not at a lip throw
-		# Pedalling it's a WHEELIE: from walking pace, higher (stickWheelie at full stick), the legs keep it up.
+		_sprint_lift = sprint * minf(throttle, 1.0) * slowness(v) if pulling else 0.0
+		wheelie_up = maxf(0.0, wheelie_up - float(T.get("wheelieDrop", 1.6)) * dt)
+		# manual / wheelie: the balance manual (_balance_step): the body stick pulled back past manualFrom lifts the
+		# front, the rider keeps it at its tipping point (pedalling = a wheelie)
 		var m_from: float = float(T.get("manualFrom", 0.4))
-		var m_t := 0.0
 		var pedalling := throttle > 0.1 and not brake
-		if float(T.get("manBalanceOn", 1)) > 0.5:
-			_balance_step(dt, pedalling, m_from, throttle, brake)
-		else:
-			man_zone = false; man_a = 0.0; man_w = 0.0
-			if not air and v > (0.6 if pedalling else 1.5) and body_in < -m_from and throw_v <= 0.5:
-				var top: float = float(T.get("stickWheelie", 0.6)) if pedalling else float(T.get("manualAngle", 0.32))
-				m_t = top * smooth01((-body_in - m_from) / maxf(0.05, 1.0 - m_from))
-			# up quick-ish (a pull on the bars + a pedal stroke), down at the set-down speed
-			manual_up = move_toward(manual_up, m_t, (2.5 if m_t > manual_up else float(T.get("wheelieDrop", 1.6))) * dt)
+		_balance_step(dt, pedalling, m_from, throttle, brake)
 		# style: a wheelie / manual held a while scores when it comes down
 		if manual_up > 0.12 and front_air and not rear_air:
 			wheelie_time += dt; wheelie_pedal = wheelie_pedal or pedalling
@@ -1824,7 +1809,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 ## so it has to be feathered); the bar pull (body stick back), pedal strokes, the rear brake and leaning forward
 ## are the controls. Too far = LOOPED OUT (a rear tap: speed lost, front slams down; no crash). Sets manual_up
 func _balancing() -> bool:
-	return man_a > 0.05 and float(T.get("manBalanceOn", 1)) > 0.5
+	return man_a > 0.05
 
 ## the front is set down (a slide caught in a manual, the rider bailing out of it)
 func _man_drop() -> void:

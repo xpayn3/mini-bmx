@@ -120,7 +120,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   (crouch before a lip, pop, reach for the landing), **fore/aft body spring** (`body_x`, `hip_shift`: braking
   and landings throw the body forward, drive sits it back), **air control** (Space tucks the bike up about the
   shared centre of mass, W/S lean the nose; keys held at take-off count only once pressed again).
-- **Sprint from slow** (`sprintKick`, `BikePhysics.slowness`): the slower the rider, the harder a sprint pushes (0–25 km/h 1.5 s vs 2.7 s pedalling), legs spin up, the bike is thrown side to side and the rider stands tall over the bars (`effort` in `rider.gd`). Stamping from below ~12 km/h pulls a **wheelie** (`sprintLift`); held, it climbs (`wheelieClimb`) until it loops out (~2 s); let go of sprint and it is set down (`wheelie_up`).
+- **Sprint from slow** (`sprintKick`, `BikePhysics.slowness`): the slower the rider, the harder a sprint pushes (0–25 km/h 1.5 s vs 2.7 s pedalling), legs spin up, the bike is thrown side to side and the rider stands tall over the bars (`effort` in `rider.gd`). Stamping from below ~12 km/h lifts the front into the balance manual (`manSprintLift`), balanced from there like any manual.
 - **Body stick** (gamepad right stick, `body_fwd/back/left/right` actions → `inp.body_fwd`, `inp.body_lean`): fore / aft adds to
   `body_x` / `hip_shift` (reach `stickShift` × `weightShift`); past `manualFrom` pulled back it holds a manual (`manual_up` feeds
   `wheelie_up`, up to `manualAngle`); fresh at a lip it adds to `throw_in` (`lock_sb` / `lock_sf` like the keys); in the air it adds
@@ -405,7 +405,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   below `manBalance` the front falls, past it the bike tips over backwards faster and faster; the body stick back pulls it up
   (`manLift`), pedalling while pulling helps (`manPedal`), the rear brake (`manBrake`) / leaning forward drop it. Past
   `manBalance + manLoop` = LOOPED OUT (speed x0.72, front thrown down, no crash). In the sweet spot (`manZone`) a small speed
-  push (`manBoost`). `manBalanceOn = 0` = the old self-holding manual. While a balance manual is held (`_balancing()`, +
+  push (`manBoost`). The old self-holding manual and its sliders (`manBalanceOn`, `manualAngle`, `stickWheelie`, `sprintLift`, `wheelieAngle`, `wheelieClimb`) were removed 2026-11-20; frame character (`BikeBuild.frame_mods`, chainstay) now scales `manLift` / `manGravity` / `manSprintLift`. While a balance manual is held (`_balancing()`, +
   0.5 s `_man_grace` after) nothing judges it as a crash: the ground LOOPED OUT / NOSE DIVE checks skip, a slide sets the
   front down instead of WASHED OUT (`manSlideCatch`), feathering into a lip never throws a flip, the take-off doesn't carry
   the hold's swing into the air spin; it steers on the back wheel (`manTurn`; with the front up the steer used to be 0, so a
@@ -442,8 +442,8 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - **Air spin pose**: spinning in the air the rider sits tall and compact (knees in), head + shoulders lead.
 - **Style points** (`bike_physics._style_points` -> `hud.StylePop`): air time, 360s, flips, tweak, x1.5 clean landing,
   combos (landings within 4 s chain and multiply); banked after 0.7 s, a crash before that = BAILED.
-- **Stick wheelie**: right stick pulled back while pedalling = a wheelie from walking pace (`stickWheelie`, height by
-  how far back), coasting = a manual (`manualAngle`); held > 1 s scores style points (WHEELIE / MANUAL x s).
+- **Stick wheelie / manual**: right stick pulled back past `manualFrom` = the balance manual (pedalling = a wheelie);
+  held > 1 s scores style points (WHEELIE / MANUAL x s).
 - **Pad steering curve** (`Settings.pad_expo`, Settings › Controller): the left stick's first travel tips the bike in
   gently, full lock at the edge (keys unaffected).
 - **Pose memory resets on get-up** (`Rider.reset_pose`: wheelie / tuck / effort / turn smoothing) - a crash left a
@@ -1163,6 +1163,8 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `-s res://tools/far_hills_probe.gd --headless [-- seed]` | the title / ride backdrop grid: C# batch vs GDScript per point (must match), far tree count; must say `PASS` |
 | `-s res://tools/wood_edge_probe.gd --headless` | drives angled lines onto every wooden ramp; must report `walls=0` |
 | `--headless res://tools/slope_stress.tscn [-- verbose=1 trace=1 only=<substr> bike=dh]` | ride physics on synthetic ground (no world): coast speed vs the closed form on -45..+15 deg grades (within 3 %), braking / holding vs the friction angle, climbs, cambers to 45 deg, crests (air only past v^2 = g R), rollers, washboard, curbs / ledges / drops, chute compressions, full-lock turns on grades, 4 x 60 s random rides; must say `SLOPE_STRESS PASS` (exit code = failures). A scene, not `-s`: the physics needs the Tune autoload |
+| `--headless res://tools/slope_stress.tscn -- sweep=1` | slider audit: every ride slider (not Dust / Demo) at its min and max, from the defaults, through 33 short standard rides (turns at full / half lock, swaps, braking, a side slope, a berm, landings, a manual, pumping, a rock garden...); `SWEEP key group max change % (metric)`. ~10 min. 0 % = dead OR only acts where the rides don't go (air tricks, whips, crashes, drawing): check the code before removing. 2026-11-20 it found `turnSlow` / `turnFast` / `carveBite` / `flickTurn` dead (`turnFloor` always wins the bar limit, the grip decides) - removed, their old defaults are constants in `a_lat_lim` |
+| (slider merge, 2026-11-20) | overlapping groups folded: 26 sliders became **followers** (`Tune.FOLLOW`: default x (leader / its default)^exp x the bike's multiplier x Feel; no slider, the physics reads `T.key` as before): `steerRate` / `steerRelease` / `barSpeed` follow `steerEase`; `gripCatch` follows `slipRecover`; `leanIn` / `leanOut` follow `leanRate`; `popPower` follows `popKick`; `pumpHoldUp` follows `pumpHold`; `pumpUnweight` follows `pumpStick`; `airSpinResp` / `airSpinStop` follow `airSpinRate`; `stickSpinBuild` follows `stickAirEase`; `whipSnap` / `whipLean` follow `whipDrift`; fixed: `brakeForce`, `reflexBrake` / `reflexStandUp` / `reflexCatch` (riderSkill scales them), `gyroStable`, `pumpCentred`, `pumpMinSpeed`, `stickSpinGrow`, `stickSpinMax`, `whipCarry`, `whipCatch`, `whipMinSpeed`. Ride unchanged at the defaults (feel / sim / stress identical). 171 ride sliders left |
 | `--headless res://tools/slope_stress.tscn -- sim=1` | the ground sim in numbers: `SIM CAMBER` (hands-off drift across 5-30 deg), `SIM TURN` flat vs berm, `SIM BRAKE` front / rear / both from 40 km/h, `SIM TURNBRAKE`, `SIM KNOCK` |
 | `--headless res://tools/slope_stress.tscn -- feel=1 [tune=k=v,k=v]` | steering feel on synthetic ground: `FEEL STEER` (time to 63 % yaw / lean, radius, left-right swap) per speed, `FEEL LEAN` (steer / right stick / both / thrown: slip, whip, speed kept) on flat + bumpy ground; `tune=` overrides values (works for every slope_stress mode) |
 | `BMX_FW_PRESET=<name>`, `BMX_FW=pitch=1.3,poe=60`, `BMX_FW_PREVIEW=<m/s>` | freewheel preset / values / Preview for a test run (not saved) |

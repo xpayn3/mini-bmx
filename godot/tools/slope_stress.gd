@@ -124,6 +124,10 @@ func _ready() -> void:
 		_sim(cfg)
 		get_tree().quit(0)
 		return
+	if "sweep=1" in OS.get_cmdline_user_args():
+		_sweep(cfg)
+		get_tree().quit(0)
+		return
 	_run_all(cfg)
 	print("SLOPE_STRESS %s: %d / %d checks passed, physics step %.1f us avg over %d steps" % [
 		"PASS" if fails == 0 else "FAIL", checks - fails, checks, step_us / maxf(1.0, step_n), step_n])
@@ -378,6 +382,148 @@ func _sim(cfg: Dictionary) -> void:
 			if r[1].crash != "": break
 		print("SIM KNOCK groundKnock=%.1f  yaw_rms=%.3f rad/s  heading_end=%+.0fdeg crash=%s" % [kn, sqrt(hs / maxf(1, n)), rad_to_deg(p.heading), r[1].crash])
 	tune.v["groundKnock"] = 0.6
+
+## sweep=1: every ride slider set to its min and its max (one at a time, the rest default) through a battery of short
+## standard rides; SWEEP lines = how much each metric moved. A slider that moves nothing here is either dead or only
+## matters somewhere the battery doesn't go (the drawing, sound, the demo rider...). Ends with SWEEPQUIET (< 2 %)
+func _battery(cfg: Dictionary) -> Dictionary:
+	var m := {}
+	var hold := func(pp, tv: float, st := 0.0) -> Dictionary: return _inp(clampf((tv - pp.v) * 2.0, 0.0, 1.0), clampf((pp.v - tv) * 0.5, 0.0, 1.0), st)
+	var r := _make(cfg, "grade", deg_to_rad(-12)); r[1].terrain.x0 = 2.0; r[0].v = 6.0
+	_ride(r[0], r[1], 8.0, func(_t, _p): return _inp()); m.coast = r[0].v
+	r = _make(cfg, "flat"); var t25 := 8.0
+	for i in int(8.0 / DT):
+		r[0].step(DT, _inp(1.0, 0.0, 0.0, i * DT < 3.0))
+		if r[0].v * 3.6 >= 25.0: t25 = i * DT; break
+	m.accel = t25
+	r = _make(cfg, "flat"); r[0].v = 40.0 / 3.6
+	var xb: float = r[0].x
+	_ride(r[0], r[1], 6.0, func(_t, _p): return _inp(0.0, 1.0)); m.brake = r[0].x - xb
+	for kmh in [20, 40]:
+		r = _make(cfg, "flat"); r[0].v = kmh / 3.6; var p: BikePhysics = r[0]
+		var lmax := 0.0; var cg := 0.0; var ctr := 0.0
+		for i in int(3.0 / DT):
+			p.step(DT, hold.call(p, kmh / 3.6, 1.0))
+			if i * DT > 2.0: lmax = maxf(lmax, absf(p.bike_lean)); cg = maxf(cg, p.corner_g); ctr = maxf(ctr, absf(p.counter))
+		m["R%d" % kmh] = p.v / maxf(absf(p.yaw_rate), 0.001); m["lean%d" % kmh] = lmax; m["cg%d" % kmh] = cg; m["counter%d" % kmh] = ctr
+	# yaw response + a left / right swap at 25 km/h
+	r = _make(cfg, "flat"); r[0].v = 25.0 / 3.6; var p2: BikePhysics = r[0]
+	var y63 := 2.0; var ys: Array = []
+	for i in int(1.5 / DT):
+		p2.step(DT, hold.call(p2, 25.0 / 3.6, 1.0)); ys.append(absf(p2.yaw_rate))
+	for i in ys.size():
+		if ys[i] >= 0.63 * ys[-1]: y63 = i * DT; break
+	m.yaw63 = y63
+	var sw := 3.0; var l0: float = p2.bike_lean
+	for i in int(3.0 / DT):
+		p2.step(DT, hold.call(p2, 25.0 / 3.6, -1.0))
+		if signf(p2.bike_lean) != signf(l0) and absf(p2.bike_lean) > absf(l0) * 0.6: sw = i * DT; break
+	m.swap = sw
+	r = _make(cfg, "crest", 0.5, 4.0); r[1].terrain.x0 = 12.0; r[0].v = 25.0 / 3.6
+	var st := _ride(r[0], r[1], 4.0, func(_t, pp): return _inp(0.0, 0.0, 0.0, false, pp.x > 8.0 and pp.x < 12.0)); m.air = st.air_t
+	r = _make(cfg, "washboard", 0.05, 0.9); r[1].terrain.x0 = 2.0; r[0].v = 40.0 / 3.6
+	var smax := 0.0
+	for i in int(4.0 / DT): r[0].step(DT, _inp()); smax = maxf(smax, absf(r[0].slip))
+	m.wash_slip = smax; m.wash_v = r[0].v
+	r = _make(cfg, "camber", deg_to_rad(10)); r[0].reset_at(0.0, 0.0, 0.0); r[0].v = 6.0
+	_ride(r[0], r[1], 4.0, func(_t, pp): return _inp(clampf((6.0 - pp.v) * 2.0, 0.0, 1.0))); m.camber = r[0].z
+	r = _make(cfg, "camber", deg_to_rad(-20)); r[0].reset_at(0.0, 0.0, 0.0); r[0].v = 25.0 / 3.6
+	for i in int(1.0 / DT): r[0].step(DT, hold.call(r[0], 25.0 / 3.6, 0.3))
+	m.berm_lean = r[0].bike_lean; m.berm_yaw = r[0].yaw_rate
+	r = _make(cfg, "dropcamber", deg_to_rad(15), -1.5); r[1].terrain.x0 = 8.0; r[0].reset_at(0.0, 0.0, 0.0); r[0].v = 25.0 / 3.6
+	var ls := 0.0; var tw := 0.0
+	for i in int(3.0 / DT):
+		var d := _inp(0.4); if r[0].air: d.body_lean = 0.7
+		r[0].step(DT, d); ls = maxf(ls, absf(r[0].slip) if not r[0].air else 0.0); tw = maxf(tw, absf(r[0].air_tw))
+	m.land_slip = ls; m.whip = tw
+	r = _make(cfg, "flat"); r[0].v = 15.0 / 3.6; var pm := 0.0
+	for i in int(3.0 / DT):
+		var d2 := hold.call(r[0], 15.0 / 3.6) as Dictionary; d2.body_fwd = -0.9
+		r[0].step(DT, d2); if i * DT > 1.0: pm += r[0].pitch * DT
+	m.manual = pm
+	r = _make(cfg, "noise", 0.15); r[1].terrain.noise.frequency = 0.35; r[0].v = 30.0 / 3.6
+	var s2 := 0.0; var n := 0
+	for i in int(4.0 / DT):
+		r[0].step(DT, hold.call(r[0], 30.0 / 3.6, sin(i * DT * 2.5)))
+		s2 += r[0].slip * r[0].slip; n += 1
+	m.loose_slip = sqrt(s2 / maxf(1, n)); m.loose_v = r[0].v
+	# half-lock turns (the bars' turn limits matter here, not at full lock where the grip decides)
+	for kmh in [20, 40]:
+		r = _make(cfg, "flat"); r[0].v = kmh / 3.6
+		for i in int(2.5 / DT): r[0].step(DT, hold.call(r[0], kmh / 3.6, 0.5))
+		m["Rhalf%d" % kmh] = r[0].v / maxf(absf(r[0].yaw_rate), 0.001)
+	# crawling-speed full-lock turn (slow bar lock, pivots) and a brake-held pivot
+	r = _make(cfg, "flat"); r[0].v = 2.2
+	for i in int(2.0 / DT): r[0].step(DT, hold.call(r[0], 2.2, 1.0))
+	m.R8 = r[0].v / maxf(absf(r[0].yaw_rate), 0.001)
+	r = _make(cfg, "flat"); r[0].v = 1.2; var h0: float = r[0].heading
+	for i in int(1.5 / DT): r[0].step(DT, _inp(0.0, 1.0, 1.0))
+	m.pivot = absf(wrapf(r[0].heading - h0, -PI, PI))
+	# body stick into the turn / against it at 25 km/h, 60 % steer
+	for bl in [1.0, -1.0]:
+		r = _make(cfg, "noise", 0.08); r[1].terrain.noise.frequency = 0.5; r[0].v = 25.0 / 3.6
+		var sl := 0.0
+		for i in int(2.5 / DT):
+			var d3 := hold.call(r[0], 25.0 / 3.6, 0.6) as Dictionary; d3.body_lean = bl * clampf(i * DT / 0.4, 0.0, 1.0)
+			r[0].step(DT, d3); sl = maxf(sl, absf(r[0].slip))
+		m["stick%+d_yaw" % int(bl)] = absf(r[0].yaw_rate); m["stick%+d_slip" % int(bl)] = sl
+	# hop held down an 8 deg slope for 4 s (pumping) and the body stick pumping forward
+	for mode in ["hop", "stick"]:
+		r = _make(cfg, "grade", deg_to_rad(-8)); r[1].terrain.x0 = 1.0; r[0].v = 6.0
+		for i in int(4.0 / DT):
+			var d4 := _inp(0.0, 0.0, 0.0, false, mode == "hop")
+			if mode == "stick": d4.body_fwd = 0.9 * (0.5 + 0.5 * sin(i * DT * 6.0))
+			r[0].step(DT, d4)
+		m["pump_" + mode] = r[0].v
+	# a hop off a roller at 25 km/h (charged pop) and a perfectly matched landing off a 1.2 m drop onto a down-slope
+	r = _make(cfg, "rollers", 0.6, 7.0); r[1].terrain.x0 = 4.0; r[0].v = 25.0 / 3.6
+	var st2 := _ride(r[0], r[1], 4.0, func(t, pp): return _inp(0.3, 0.0, 0.0, false, t < 0.6 or (pp.prep > 0.2)))
+	m.hop_air = st2.air_t; m.hop_v = r[0].v
+	r = _make(cfg, "kink", deg_to_rad(20)); r[1].terrain.x0 = 10.0; r[0].v = 9.0
+	_ride(r[0], r[1], 3.0, func(_t, _p): return _inp()); m.land_v = r[0].v
+	# a rock garden (sharp noise) at 30 km/h: knocks, bumps, the crash meters
+	r = _make(cfg, "noise", 0.25); r[1].terrain.noise.frequency = 2.5; r[0].v = 30.0 / 3.6
+	var ks := 0.0; var rk := 0.0
+	for i in int(4.0 / DT):
+		r[0].step(DT, hold.call(r[0], 30.0 / 3.6, 0.3 * sin(i * DT * 2.0))); ks += absf(r[0].knock) * DT; rk = maxf(rk, r[0].risk)
+		if r[1].crash != "": break
+	m.rocks_knock = ks; m.rocks_risk = rk; m.rocks_v = r[0].v
+	# a long 6 deg descent coasting 10 s (drag, rolling, flow)
+	r = _make(cfg, "grade", deg_to_rad(-6)); r[1].terrain.x0 = 2.0; r[0].v = 8.0
+	_ride(r[0], r[1], 10.0, func(_t, _p): return _inp()); m.descent = r[0].v
+	return m
+
+func _sweep(cfg: Dictionary) -> void:
+	# from the defaults (the Tune autoload starts from the player's saved sliders: resetting each tested slider to
+	# its default afterwards drifted every later test away from that baseline - the "10.7 %" on every slider)
+	tune.base = tune.defaults.duplicate()
+	tune._rebuild()
+	var base_v: Dictionary = tune.v.duplicate()
+	_battery(cfg)   # warm-up: the very first run after start differs (first-use setup), it was every slider's "10.7 %"
+	var base := _battery(cfg)
+	var again := _battery(cfg)
+	var noise := {}   # how much a metric wobbles between two identical runs: changes inside 3x that don't count
+	for mk in base: noise[mk] = absf(float(again[mk]) - float(base[mk])) / maxf(absf(float(base[mk])), 0.05)
+	print("SWEEPNOISE ", noise)
+	var quiet: Array = []
+	for g in tune.DEFS:
+		if str(g[0]).begins_with("Dust") or g[0] == "Demo rider": continue
+		for row in g[1]:
+			var k: String = row[0]
+			var worst := 0.0; var worst_m := ""
+			for val in [float(row[3]), float(row[4])]:
+				tune.v = base_v.duplicate(); tune.base[k] = val; tune._rebuild()
+				var mm := _battery(cfg)
+				for mk in base:
+					var d: float = absf(float(mm[mk]) - float(base[mk])) / maxf(absf(float(base[mk])), 0.05)
+					d = maxf(0.0, d - 3.0 * float(noise[mk]))
+					if d > worst: worst = d; worst_m = mk
+				tune.base[k] = tune.defaults[k]
+			tune.v = base_v.duplicate()
+			print("SWEEP %-18s %-8s max change %5.1f %% (%s)" % [k, g[0].substr(0, 8), worst * 100.0, worst_m])
+			if worst < 0.02: quiet.append(k)
+	tune._rebuild()
+	print("SWEEPQUIET ", ", ".join(quiet))
 
 func _run_all(cfg: Dictionary) -> void:
 	var nothing := func(_t, _p): return _inp()
