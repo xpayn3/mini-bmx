@@ -1443,9 +1443,9 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	J[0] = head_p
 	J[1] = chest
 	J[2] = pelvis
-	var yaw: float = clampf((_num(p, "steer") * 1.2 + _num(p, "yawRate") * 0.15) * sty.headTurn, -0.8, 0.8) + sty.headYaw
+	var yaw: float = clampf((_num(p, "steer") * 1.2 + _num(p, "yawRate") * 0.15) * sty.headTurn, -0.8, 0.8) + sty.headYaw + _num(p, "lookYaw")
 	var rx: float = (_num(p, "headRoll") if p.get("headRoll") != null else _num(p, "lean") * 0.6) + sty.headRoll
-	var rz: float = -0.12 * (ang - 0.72) + 0.04 * sin(t * 3.3) * wig - sty.headTilt * (1.0 - 0.6 * relax) + 0.12 * tall
+	var rz: float = -0.12 * (ang - 0.72) + 0.04 * sin(t * 3.3) * wig - sty.headTilt * (1.0 - 0.6 * relax) + 0.12 * tall + _num(p, "lookPitch")
 	head.transform = Transform3D(GEAR.euler_xyz(rx, yaw, rz), head_p)
 	_pose_neck()
 

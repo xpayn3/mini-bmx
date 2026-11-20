@@ -1216,7 +1216,10 @@ func _wheels_page() -> void:
 	_choice("Profile", BikeBuild.RIM_PROFILE_NAMES, W.rim_profile, func(v): W.rim_profile = v; rim_custom.call())
 	_choice("Material", [["alloy", "Alloy"], ["carbon", "Carbon"]], W.rim_material, func(v): W.rim_material = v; rim_custom.call())
 	_swatches(W.rim_color, func(h): W.rim_color = h)
-	_choice("Finish", [["matte", "Matte"], ["gloss", "Gloss"], ["chrome", "Polished"]], W.rim_finish, func(v): W.rim_finish = v)
+	if W.rim_material == "carbon":   # carbon takes any colour: raw, clear-coated, metallic flake or candy lacquer
+		_choice("Finish", [["matte", "Matte"], ["gloss", "Gloss"], ["metallic", "Metallic"], ["candy", "Candy"]], W.rim_finish if W.rim_finish in ["matte", "gloss", "metallic", "candy"] else "gloss", func(v): W.rim_finish = v)
+	else:
+		_choice("Finish", [["matte", "Matte"], ["gloss", "Gloss"], ["chrome", "Polished"]], W.rim_finish if W.rim_finish in ["matte", "gloss", "chrome"] else "gloss", func(v): W.rim_finish = v)
 	_slide("Rim depth", 20, 40, 1, W.rim_depth, "mm", func(v): W.rim_depth = v; rim_custom.call())
 	_slide("Rim width", 25, 40, 1, W.rim_width, "mm", func(v): W.rim_width = v; rim_custom.call())
 	_note("Rim and tyre lettering: Logos tab → Rims / Tyre walls.")
