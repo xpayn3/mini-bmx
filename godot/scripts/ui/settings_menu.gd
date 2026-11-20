@@ -21,7 +21,7 @@ func _display() -> Control:
 	for i in DisplayServer.get_screen_count():
 		var sz := DisplayServer.screen_get_size(i)
 		mon.add_item("Screen %d  (%d × %d)" % [i + 1, sz.x, sz.y])
-	mon.selected = int(Settings.get_v("monitor")) + 1
+	mon.selected = clampi(int(Settings.get_v("monitor")) + 1, 0, mon.item_count - 1)   # a saved screen that is gone now
 	mon.item_selected.connect(func(i): Settings.set_v("monitor", i - 1))
 	_row(p, "Monitor", mon)
 	_check(p, "V-Sync", "vsync")
@@ -80,10 +80,6 @@ func _preset(level: int) -> void:
 func _gameplay() -> Control:
 	var p := _page("Gameplay")
 	_option(p, "Speed units", "units", ["km/h", "mph"])
-	_slider(p, "Steering response (stick)", "steer_sens", 0.5, 2.0, 0.05, "%.2f", "Above 1: quicker off-centre; below 1: finer near centre")
-	_slider(p, "Stick deadzone", "deadzone", 0.05, 0.5, 0.01)
-	_slider(p, "Steering curve (stick)", "pad_expo", 1.0, 3.0, 0.05, "%.2f", "Higher = the first bit of stick leans the bike in more gently; full lock stays at the edge")
-	_check(p, "Controller vibration", "rumble")
 	_check(p, "Crash slow motion (WASTED)", "wasted", "Time slows down and the screen goes grey when you fall")
 	_check(p, "Blood", "blood", "Falls leave blood smears on the ground; very hard crashes can tear off an arm or a leg")
 	_check(p, "Pause when the window loses focus", "pause_unfocused")
@@ -101,7 +97,6 @@ func _audio() -> Control:
 func _interface() -> Control:
 	var p := _page("Interface")
 	_slider(p, "UI scale", "ui_scale", 0.75, 1.5, 0.05, "%.2fx")
-	_check(p, "Show FPS", "show_fps")
 	_check(p, "Bike computer (speed / slope)", "hud_gauge")
 	_check(p, "Gear shifter", "hud_gear")
 	_check(p, "Jump card", "hud_jump")
@@ -123,6 +118,7 @@ func _controller() -> Control:
 		"  Left / right: throw the bike over under you to turn harder; a quick flick whips the bike round.  In the air: tilt and lean the bike.")
 	_slider(p, "Steering response (stick)", "steer_sens", 0.5, 2.0, 0.05, "%.2f", "Above 1: quicker off-centre; below 1: finer near centre")
 	_slider(p, "Stick deadzone", "deadzone", 0.05, 0.5, 0.01)
+	_slider(p, "Steering curve (stick)", "pad_expo", 1.0, 3.0, 0.05, "%.2f", "Higher = the first bit of stick leans the bike in more gently; full lock stays at the edge")
 	var hb := HBoxContainer.new()
 	hb.add_theme_constant_override("separation", 10)
 	hb.add_child(UITheme.button("Reset controller buttons", func(): Settings.reset_pad_bindings(); m.queue_redraw(), _f(15)))

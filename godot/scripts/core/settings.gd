@@ -61,7 +61,6 @@ const DEFAULTS := {
 	"tilt_shift": true,      # the miniature-diorama depth of field
 	"grade": true,           # colour grade + vignette
 	"view_distance": 1.0,    # fog / streaming multiplier
-	"show_fps": true,
 	"units": 0,              # 0 km/h, 1 mph
 	"camera": "trail",
 	"cam_rev": 0,            # 1 = the Trail camera became the default (old saved "drone" moves over once)
@@ -171,6 +170,7 @@ func _ready() -> void:
 			data[kv.get_slice("=", 0)] = str_to_var(kv.get_slice("=", 1))
 		if a.begins_with("--quality="):
 			var lvl := int(a.get_slice("=", 1))
+			if not PRESETS.has(lvl): continue
 			for k in PRESETS[lvl]: data[k] = PRESETS[lvl][k]
 			data["quality"] = lvl
 	apply()
@@ -204,7 +204,7 @@ func _install_bindings() -> void:
 		else:
 			InputMap.add_action(action)
 		InputMap.action_set_deadzone(action, dz)
-		for e in bindings.get(action, default_events(action)):
+		for e in (bindings[action] if bindings.has(action) else default_events(action)):
 			# test runs ignore real controllers: a pad in use in another game window drives every
 			# window (Godot reads joypads unfocused) and paused / steered the autotests
 			if _test_run and (e is InputEventJoypadButton or e is InputEventJoypadMotion): continue
@@ -222,7 +222,7 @@ func _install_bindings() -> void:
 
 func rebind(action: String, ev: InputEvent, slot: int) -> void:
 	## Replace the keyboard (slot 0) or gamepad (slot 1) binding of an action.
-	var list: Array = bindings.get(action, default_events(action)).duplicate()
+	var list: Array = (bindings[action] if bindings.has(action) else default_events(action)).duplicate()
 	var is_pad := ev is InputEventJoypadButton or ev is InputEventJoypadMotion
 	# drop the existing primary binding of the same kind
 	for i in list.size():
@@ -248,7 +248,7 @@ static func same_pad(a: InputEvent, b: InputEvent) -> bool:
 ## every other action, so one button does one thing.
 func set_pad(action: String, ev: InputEvent) -> void:
 	for a in ACTIONS:
-		var list: Array = bindings.get(a, default_events(a)).duplicate()
+		var list: Array = (bindings[a] if bindings.has(a) else default_events(a)).duplicate()
 		var out := []
 		for e in list:
 			if a == action and e.get_class() == ev.get_class(): continue
@@ -262,7 +262,7 @@ func set_pad(action: String, ev: InputEvent) -> void:
 ## take every binding on these pad axes off all actions (a stick set to "Nothing")
 func clear_pad_axes(axes: Array) -> void:
 	for a in ACTIONS:
-		var list: Array = bindings.get(a, default_events(a))
+		var list: Array = (bindings[a] if bindings.has(a) else default_events(a))
 		var out := list.filter(func(e): return not (e is InputEventJoypadMotion and e.axis in axes))
 		if out.size() != list.size(): bindings[a] = out
 	_install_bindings()

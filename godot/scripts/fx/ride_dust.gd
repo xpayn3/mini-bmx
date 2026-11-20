@@ -107,7 +107,7 @@ func _init() -> void:
 	name = "RideDust"
 	_build_emitter()
 	_build_fog_puffs()
-	if RenderingServer.get_rendering_device() != null and OS.get_environment("BMX_SPRITE_DUST") == "":
+	if RenderingServer.get_rendering_device() != null and Env.s("BMX_SPRITE_DUST") == "":
 		sim = SmokeSim.new()
 		if sim.ok:
 			add_child(sim)
@@ -294,6 +294,7 @@ func feed(rear: Vector3, throw_v: Vector3, rate: float, col: Color, alpha: float
 		_feed_r = 0.32 + clampf(rate / 120.0, 0.0, 1.0) * 0.3 + fan_deg / 70.0 * 0.15
 		sim.tint(col)
 		_feed_col = col
+		emitter.amount_ratio = 0.0   # warm_up left the hidden sprite emitter running
 		return
 	emitter.global_position = rear
 	var sp := throw_v.length()

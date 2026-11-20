@@ -62,6 +62,7 @@ void fragment() {
 		c.r = texture(screen_tex, uv + off).r;
 		c.b = texture(screen_tex, uv - off).b;
 	}
+	float kb = 0.0;   // how much the speed blur smeared this pixel (the fringing below keeps it)
 	if (blur > 0.001) {
 		vec2 d = uv - focus;
 		float edge = smoothstep(0.12, 0.62, length(d * vec2(1.6, 1.0)));
@@ -74,6 +75,7 @@ void fragment() {
 				acc += textureLod(screen_tex, uv - d * s * k * 0.09, k * 1.5).rgb;
 			}
 			c.rgb = acc / 9.0;
+			kb = k;
 		}
 	}
 	if (speed > 0.01) {
@@ -82,8 +84,11 @@ void fragment() {
 		float edge2 = smoothstep(0.25, 0.75, r2);
 		// colour fringing toward the corners (red out, blue in), like a lens pushed hard
 		vec2 ca = d2 * 0.0025 * speed * edge2 * edge2;
-		c.r = texture(screen_tex, uv + ca).r;
-		c.b = texture(screen_tex, uv - ca).b;
+		// added as the shifted-minus-centre difference so the blur above isn't thrown away on red / blue
+		float lod = kb * 1.5;
+		vec2 cc = textureLod(screen_tex, uv, lod).rb;
+		c.r += textureLod(screen_tex, uv + ca, lod).r - cc.x;
+		c.b += textureLod(screen_tex, uv - ca, lod).b - cc.y;
 		// speed lines: thin streaks rushing outward from the rider, only in the outer ring of the frame
 		float ang = atan(d2.y, d2.x);
 		float lanes = 140.0;

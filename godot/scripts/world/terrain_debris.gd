@@ -26,7 +26,7 @@ var _spawned := 0                  # pieces made so far (smash_fence reports how
 
 var _probe_t := 0.0
 func _process(delta: float) -> void:
-	if OS.get_environment("BMX_DEBRIS_PROBE") != "":
+	if Env.s("BMX_DEBRIS_PROBE") != "":
 		_probe_t += delta
 		if _probe_t > 0.25 and (_items.size() > 0 or _wrecks.size() > 0):
 			_probe_t = 0.0
@@ -90,7 +90,7 @@ func _lay_down(it: Dictionary) -> void:
 	var mi: MeshInstance3D = null
 	for ch in b.get_children():
 		if ch is MeshInstance3D: mi = ch
-	if OS.get_environment("BMX_DEBRIS_PROBE") != "":
+	if Env.s("BMX_DEBRIS_PROBE") != "":
 		var pp := b.global_position
 		var tr = get_parent()
 		var lo := pp.y - _reach(it, b.global_basis)

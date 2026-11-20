@@ -28,7 +28,7 @@ const SRC_F := 20                 # floats per source: pos+r, vel+rate, blend/ra
 ## tuning
 var density_fade := 0.07          # /s (low: the trail hangs in the air a long way back)
 var vel_relax := 0.35             # /s back toward the wind
-var rise := float(OS.get_environment("BMX_SMOKE_RISE")) if OS.get_environment("BMX_SMOKE_RISE") != "" else 0.55   # m/s the dust rises through the air (more when riding fast)
+var rise := float(Env.s("BMX_SMOKE_RISE")) if Env.s("BMX_SMOKE_RISE") != "" else 0.55   # m/s the dust rises through the air (more when riding fast)
 var vorticity := 0.9
 var extinction := 0.6      # light, see-through dust: the ground shows through (was 3.0, then 0.9)
 var turbulence := 6.5             # curl-noise swirl force
@@ -36,7 +36,7 @@ var turb_scale := 0.7             # 1/m: swirl size ~ 1.5 m
 var disperse := 1.3               # /s: how fast dust mixes out into the air (turbulent diffusion)
 var disperse_reach := 1.6         # voxels
 var wisps := 1.15                 # noise erosion of the edges (render)
-var _rise_env := OS.get_environment("BMX_SMOKE_RISE") != ""
+var _rise_env := Env.s("BMX_SMOKE_RISE") != ""
 
 var ok := false
 var terrain = null
@@ -72,6 +72,7 @@ var _has_origin := false
 var _dir := Vector2(0, -1)
 var _hcache := {}
 var _hm := PackedFloat32Array()
+var _hm_min := 0.0; var _hm_max := 0.0   # height range of _hm (set by _rebuild_hmap)
 var _hm_img: Image
 var _hm_tex: ImageTexture
 var _tex3d: Texture3DRD
@@ -134,7 +135,7 @@ func _init() -> void:
 	add_child(_box)
 	ok = true
 	RenderingServer.call_on_render_thread(_gpu_create)
-	if OS.get_environment("BMX_SMOKE_BOX") == "":
+	if Env.s("BMX_SMOKE_BOX") == "":
 		compositor = SmokeCompositor.new()
 
 static var _detail: ImageTexture3D
@@ -151,7 +152,7 @@ static func detail_texture() -> ImageTexture3D:
 	var imgs := nz.get_seamless_image_3d(64, 64, 64, false, 0.1, true)
 	_detail = ImageTexture3D.new()
 	_detail.create(imgs[0].get_format(), 64, 64, 64, false, imgs)
-	if OS.get_environment("BMX_SMOKE_PROBE") != "": print("SMOKE detail noise %d ms" % (Time.get_ticks_msec() - t0))
+	if Env.s("BMX_SMOKE_PROBE") != "": print("SMOKE detail noise %d ms" % (Time.get_ticks_msec() - t0))
 	return _detail
 
 # ---------------------------------------------------------------- sources (world space, this frame)
@@ -271,10 +272,8 @@ func step(dt: float, focus: Vector3, fwd: Vector3) -> void:
 		sdir = sun.global_basis.z.normalized()
 		var c := sun.light_color.srgb_to_linear() * sun.light_energy
 		scol = Vector3(c.r, c.g, c.b)
-	var mn := 1e9
-	var mx := -1e9
-	for hv in _hm:
-		mn = minf(mn, hv); mx = maxf(mx, hv)
+	var mn := _hm_min
+	var mx := _hm_max
 	var bmin := Vector3(origin.x, mn - 0.3, origin.y)
 	var bmax := Vector3(origin.x + ext.x, mx + NY * H + 0.3, origin.y + ext.y)
 	_box.global_transform = Transform3D(Basis.from_scale(bmax - bmin), (bmin + bmax) * 0.5)
@@ -327,6 +326,9 @@ func _rebuild_hmap() -> void:
 			used[key] = hv
 			_hm[k * (HM + 1) + i] = hv
 	if _hcache.size() > 6000: _hcache = used
+	_hm_min = 1e9; _hm_max = -1e9
+	for hv in _hm:
+		_hm_min = minf(_hm_min, hv); _hm_max = maxf(_hm_max, hv)
 	_hm_img.set_data(HM + 1, HM + 1, false, Image.FORMAT_RF, _hm.to_byte_array())
 	_hm_tex.update(_hm_img)
 

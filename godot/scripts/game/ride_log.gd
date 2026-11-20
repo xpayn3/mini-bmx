@@ -31,15 +31,14 @@ func record(dt: float, st: BikePhysics, inp: Dictionary, lift: float, drawn_y: f
 	var pel: Vector3 = J[2] if J.size() > 2 and J[2] is Vector3 else Vector3.ZERO
 	var ch: Vector3 = J[1] if J.size() > 1 and J[1] is Vector3 else Vector3.ZERO
 	var hd: Vector3 = J[0] if J.size() > 0 and J[0] is Vector3 else Vector3.ZERO
-	var b := func(x) -> float: return 1.0 if x else 0.0
 	var r := PackedFloat32Array([
 		_t, st.x, st.y, st.z, st.v, st.vy, st.heading, st.course, st.slip, st.pitch, st._g_pitch,
 		st.lean, st.bike_lean, st.counter, st.rock, st.bank, st._bank_raw, st.lat_a, st.n_load / BikePhysics.G, st.steer, st.steer_in,
-		b.call(st.air), st.air_time, b.call(st.front_air), b.call(st.rear_air), st.compress, st.body_y - st.y, st.body_x, st.hip_shift,
+		float(st.air), st.air_time, float(st.front_air), float(st.rear_air), st.compress, st.body_y - st.y, st.body_x, st.hip_shift,
 		st.flick, st.body_in, st.air_stick.x, st.air_stick.y, st.manual_up, st.wheelie_up, st.edge_s, st.stick_yaw,
-		st.sprint, st.stamina, b.call(st.crash_on), b.call(st.brake_stop),
+		st.sprint, st.stamina, float(st.crash_on), float(st.brake_stop),
 		float(inp.get("throttle", 0.0)), float(inp.get("brake", 0.0)), float(inp.get("steer", 0.0)),
-		float(inp.get("body_fwd", 0.0)), float(inp.get("body_lean", 0.0)), b.call(inp.get("hop", false)), b.call(inp.get("sprint", false)), b.call(inp.get("pad", false)),
+		float(inp.get("body_fwd", 0.0)), float(inp.get("body_lean", 0.0)), float(inp.get("hop", false)), float(inp.get("sprint", false)), float(inp.get("pad", false)),
 		lift, drawn_y, pel.x, pel.y, pel.z, ch.x, ch.y, ch.z, hd.x, hd.y, hd.z,
 		st.whip, st.whip_hold, st.flick_kick, Input.get_action_strength("body_right") - Input.get_action_strength("body_left"),
 		Input.get_action_strength("steer_right") - Input.get_action_strength("steer_left"),

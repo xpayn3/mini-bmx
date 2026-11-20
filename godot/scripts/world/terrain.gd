@@ -42,8 +42,6 @@ var _gen: int = 0
 var _rock_grid := {}             # int key -> Array[collider]
 var _col_grid := {}              # 4 m cell key -> Array[collider] (by collider centre)
 const COL_CELL := 4.0
-var _indices := PackedInt32Array()
-var _indices_n: int = -1
 var _ground_shader: Shader = preload("res://scripts/world/ground.gdshader")
 var _tape_mat: ShaderMaterial
 var _debris: TerrainDebris
@@ -429,7 +427,7 @@ func _update_grow(px: float) -> void:
 			field.adopt_course(_grow_box[0])
 			if fcs != null:
 				fcs.rebind_course(field)
-			print("TRAIL grown to x=%.0f (%d points), adopted in %.1f ms" % [field.course.end_x(), field.course.n,
+			print_verbose("TRAIL grown to x=%.0f (%d points), adopted in %.1f ms" % [field.course.end_x(), field.course.n,
 				(Time.get_ticks_usec() - t0) / 1000.0])
 		_grow_box = []
 		return
@@ -446,7 +444,7 @@ func _update_grow(px: float) -> void:
 		var g := src.fork()
 		g.grow_course(to)
 		box.append(g)
-		print("TRAIL grow on worker: %.0f ms" % ((Time.get_ticks_usec() - t0) / 1000.0)), false, "trail grow")
+		print_verbose("TRAIL grow on worker: %.0f ms" % ((Time.get_ticks_usec() - t0) / 1000.0)), false, "trail grow")
 
 
 func _reap_stale(block: bool) -> void:
@@ -498,33 +496,13 @@ func _unload(k: Vector2i) -> void:
 			_col_grid[key] = nl
 	for pkey in c.get("packs", []):
 		_packs.erase(pkey)
+	for i in range(_broken.size() - 1, -1, -1):   # its smashed things go with it (they held its MultiMeshes alive)
+		if _broken[i].get("chunk") == k: _broken.remove_at(i)
 	(c["node"] as Node).queue_free()
 	if _debris: _debris.drop_chunk(k)
 	chunks.erase(k)
 	if _water:
 		_water.mark_dirty(Vector2(k) * SIZE, SIZE)
-
-
-func _grid_indices(n: int) -> PackedInt32Array:
-	if _indices_n == n:
-		return _indices
-	var nv := n + 1
-	var idx := PackedInt32Array()
-	idx.resize(n * n * 6)
-	var o := 0
-	for iz in n:
-		for ix in n:
-			var v00 := iz * nv + ix
-			var v10 := v00 + 1
-			var v01 := v00 + nv
-			var v11 := v01 + 1
-			# clockwise seen from above (Godot front faces)
-			idx[o] = v00; idx[o + 1] = v10; idx[o + 2] = v01
-			idx[o + 3] = v10; idx[o + 4] = v11; idx[o + 5] = v01
-			o += 6
-	_indices = idx
-	_indices_n = n
-	return idx
 
 
 const LIST_SPEC := {
@@ -854,7 +832,7 @@ func break_collider(c: Dictionary, vel: Vector3, at = null) -> bool:
 		if panel["broken"]:
 			return false
 		panel["broken"] = true
-		_broken.append({"kind": "fence", "rec": panel})
+		_broken.append({"kind": "fence", "rec": panel, "chunk": c.get("chunk")})
 		var zero := Transform3D(Basis.from_scale(Vector3.ZERO), Vector3.ZERO)
 		var hit := Vector2(c["x"], c["z"])
 		# throw the debris first, only then hide the fence parts: a part is never hidden without its piece
@@ -878,7 +856,7 @@ func break_collider(c: Dictionary, vel: Vector3, at = null) -> bool:
 		if rec["broken"]:
 			return false
 		rec["broken"] = true
-		_broken.append({"kind": "cactus", "rec": rec})
+		_broken.append({"kind": "cactus", "rec": rec, "chunk": c.get("chunk")})
 		var mm: MultiMesh = rec.get("mm")
 		if mm:
 			mm.set_instance_transform(rec["i"], Transform3D(Basis.from_scale(Vector3.ZERO), Vector3.ZERO))
@@ -889,7 +867,7 @@ func break_collider(c: Dictionary, vel: Vector3, at = null) -> bool:
 		if sp["broken"]:
 			return false
 		sp["broken"] = true
-		_broken.append({"kind": "tape", "rec": sp})
+		_broken.append({"kind": "tape", "rec": sp, "chunk": sp.get("chunk", c.get("chunk"))})
 		var ch = chunks.get(sp.get("chunk"))
 		if ch != null:
 			_rebuild_tape(ch)
