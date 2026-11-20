@@ -184,7 +184,8 @@ func quit(code := 0) -> void:
 
 
 static func cs_gc() -> void:
-	if ClassDB.class_exists("CsGc"): ClassDB.instantiate("CsGc").collect()
+	var gc = CrashLog.cs_new("res://scripts/core/CsGc.cs")   # (ClassDB never finds C# classes: this never ran before)
+	if gc: gc.collect()
 
 
 func _notification(what: int) -> void:

@@ -293,6 +293,7 @@ func _show_menu() -> void:
 	card.add_theme_stylebox_override("panel", UITheme.card_style(Tokens.PAPER, Tokens.R_XL, Tokens.S6))
 	card.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	stack.add_child(card)
+	CrashLog.notice(menu)   # "the game closed unexpectedly last time" once per launch
 	menu_stats = _stats_card()
 	stack.add_child(menu_stats)
 	var outer := VBoxContainer.new()

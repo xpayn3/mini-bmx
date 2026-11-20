@@ -59,7 +59,7 @@ dotnet build   # in godot/
 Standalone export: install export templates once (Editor → Manage Export Templates), then
 `..._console.exe --headless --path godot --export-release "Windows Desktop" build/windows/MiniBMX.exe`.
 
-Player data: `%APPDATA%\Godot\app_userdata\Mini BMX\` — `settings.cfg`, `tune.cfg`, `save.cfg`,
+Player data: `%APPDATA%\Mini BMX\` (custom user dir) — `crashlogs/` (see Crash logs), `settings.cfg`, `tune.cfg`, `save.cfg`,
 `rider.cfg`, `garage.json`, `logos/`, `screenshots/` (F12).
 
 ## 3. Controls (defaults, all rebindable in Settings → Controls)
@@ -317,7 +317,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - **Tests run minimised**: `BMX_MIN=1` (they still render, screenshots work).
 - **Ride log** (`game/ride_log.gd`): the last 60 s of every physics step (bike physics, body, drawn-bike lift,
   rider joints, all inputs) kept in a ring buffer; **R3 / F8** (`save_log`) writes it to
-  `%APPDATA%/Godot/app_userdata/Mini BMX/ridelogs/ride_<date>.csv` (last row = the press, `before_press` column).
+  a `crashlogs/manual_<date>/` report (`ride_log.csv` + the recent log + context, via `CrashLog.report`; last row = the press, `before_press` column).
   The way to find a glitch the player saw. Test: `BMX_SAVELOG=secs`.
 - **Lean vs terrain**: the lean only changes as fast as the tyres are loaded (`kL *= load`): over a crest / edge the
   bike carries its lean instead of snapping upright. The bank the bike feels changes at most 3 rad/s. The lean is
@@ -896,6 +896,23 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   **Ride presets** sit on top of every Ride / Rider › Physics category (`scripts/core/tune_presets.gd`: built-ins Default, Flowy, Grippy, Drifty, Floaty air, Fast + the player's own via Save as / Delete, in `user://tune_presets.cfg`; an own preset follows its sliders). Reset puts the category back to the active preset's values. Quick tune card keeps the pinned (☆) sliders. Test: `BMX_PANEL=ride|rider|look|sound`
   + `BMX_PANEL_CAT=<n>`.
 
+### Crash logs (`core/crash_log.gd`, autoload `CrashLog`, loaded first; + C# `core/CrashHook.cs`)
+- Everything the session prints / warns / errors goes to `user://crashlogs/run_<pid>.log` (a Godot `Logger` via `OS.add_logger`,
+  flushed on errors + twice a second) beside `run_<pid>.lock`, which only a clean quit removes (autoload PREDELETE).
+- **Next launch finds a lock whose process is gone** -> `crashlogs/crash_<date>/`: `report.txt`, `session.log`, `godot.log` (Godot's own
+  rotated log of that run: native + GDScript backtrace of an engine crash), `csharp.txt` (an unhandled C# exception on any thread,
+  written straight to disk by `CrashHook`). The title menu shows "The game closed unexpectedly last time" + OPEN FOLDER (`CrashLog.notice`).
+- **Script / engine error while running** -> `crashlogs/error_<date>/` (`report.txt`: the error + its script backtrace, seed, bike, ride
+  state, the last 400 log lines; `ride_log.csv` = last 60 s). Max 3 per session, one per file:line.
+- **F8 / R3** -> `crashlogs/manual_<date>/` (same contents). A watchdog thread writes `HANG?` into the log when the main thread hasn't
+  finished a frame for 10 s. `crashlogs/sessions/` keeps the last 20 clean sessions; 20 of each report kind are kept.
+- Test runs (autotest, shots, PADSEQ, BMX_MIN / OFFSCREEN, headless, `-s`) use `crashlogs/tests/` so they never push out the player's.
+- **When the user says "it crashed"**: read the newest `%APPDATA%\Mini BMX\crashlogs\crash_*` / `error_*` folder.
+- `CrashLog.note(s)` adds a line to the log; `CrashLog.cs_new(path)` makes a C# object (null without C#). **C# `[GlobalClass]`es are
+  script classes: `ClassDB.class_exists("X")` never finds them** (that is why `GameState.cs_gc()` never ran before 2026-11-20).
+- Tests: `BMX_CRASHTEST=error|hard|cs|hang[@secs]` (a script error / `OS.crash` / a C# thread exception / a 12 s freeze), then any run
+  prints `CRASHLOG previous session crashed: <dir>`; `BMX_CRASH_NOTICE=1` shows the title notice in a test run.
+
 ### Steam release (2026-11-20)
 - **Release kit + checklist: repo root `steam/README.md`** (App ID steps, achievements to create, Steam Cloud paths, store
   art sizes, assets still to fix). `steam/upload.ps1` exports to `build/steam/windows/Runout.exe` and uploads with steamcmd.
@@ -984,6 +1001,7 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `BMX_PAUSE=1` (+ `BMX_PAUSE_HOVER=0.62`) | pause leaflet at the end of an autotest; HOVER moves the mouse to that screen height and prints where it lands on the page; `BMX_PAUSE=settings` / `controls` opens the leaflet on that menu |
 | `BMX_OFFSCREEN=1` | a normal window parked off the screens instead of `BMX_MIN`: **minimised windows draw late**, so timed screenshots of animations come out stale — use this for those |
 | `BMX_PHOTO=secs` (+ `BMX_PHOTO_CLOSE`, `_SET`, `_FLY`, `_ORBIT`, `_TAB`, `_SNAP`) | autotest opens photo mode, sets card values, moves the camera, saves a photo; prints `AUTOTEST photo:` |
+| `BMX_CRASHTEST=error\|hard\|cs\|hang[@secs]` | forces a script error / hard crash / C# crash / 12 s freeze; reports land in `%APPDATA%\Mini BMX\crashlogs\tests\` (see Crash logs) |
 | `BMX_FENCE_ALL=1` | smashes every fence within 70 m at random 4–18 m/s, 7 s later counts pieces buried / invisible / freed (all must be 0) |
 
 Typical check after a change: build C# → `--autotest=10` with `BMX_SEED=4242` (sane=true, no SCRIPT ERROR)
@@ -1059,8 +1077,8 @@ Known, not fixed (lower priority from the code review):
 - HUD hotkeys (P/K/L/H) work on the title screen.
 - Rebinding: no conflict detection; pad rebind can't be cancelled.
 - Garage: test env `BMX_POSE` values get saved if you then touch a slider; config written on every slider tick.
-- Stale code: `hood_hem`, `_time`, some one-off `tools/*.gd`
-  (`fork_measure`, `wheel_measure(2)`, `inspect_glb`, `hdri_sun`).
+- Stale code: `_time`. (`hood_hem` and the one-off `fork_measure`, `wheel_measure(2)`, `inspect_glb` tools were removed 2026-11-20;
+  `tools/hdri_sun.gd` stays: it measured `Game.HDRI_SUN_U`.)
 - Perf (done 2026-11-20): ragdoll ground sampled once per substep, HUD boxes cached (`UITheme.draw_box`), fx dust /
   chunk buffers skip work when idle, `jump_mask` instead of `jump()` per step, wind / splash bed in C# (`RideBedSynth.cs`),
   test flags cached (`Env.s`), torn tape drawn from packed arrays, rider pose inputs in one reused dictionary
