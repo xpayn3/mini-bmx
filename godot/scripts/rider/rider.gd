@@ -1320,7 +1320,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# acceleration pushes the body the other way (Bump bounce); Body bounce sets how long it rings on
 	var bump_k: float = float(sty.get("bumpAbsorb", 2.0)) * (1.0 - air)
 	# what the legs feel: half the frame's motion, half the wheels' (the bumps the suspension passes on)
-	var gy := (global_position.y if is_inside_tree() else 0.0) * 0.5 + _num(p, "wheelY") * 0.5
+	var gy := (global_position.y if is_inside_tree() else 0.0) * 0.85 + _num(p, "wheelY") * 0.15
 	var acc := 0.0
 	if not is_nan(_fy_prev) and absf(gy - _fy_prev) > 1.0:
 		_fy_prev = NAN; _fv_prev = NAN   # teleports (respawn, a new ride) are not bumps
