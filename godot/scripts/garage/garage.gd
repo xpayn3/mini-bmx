@@ -1312,7 +1312,7 @@ func _susp_page() -> void:
 		items.append({"key": k, "brand": m.brand, "name": m.label,
 			"spec": "%d mm  ·  %s  ·  %s stanchions" % [m.travel, m.spring, m.coat],
 			"thumb": "fork|%s|%s" % [k, JSON.stringify(build.paint.crown)],
-			"make": PartThumbs.make_fork.bind(m.lowers, m.stanchions, build.paint.crown), "view": Vector3(0.35, 0.22, 1.0)})
+			"make": PartThumbs.make_fork.bind(m.lowers, m.stanchions, build.paint.crown, str(m.get("glb", ""))), "view": Vector3(0.35, 0.22, 1.0)})
 	_cards(items, S.get("fork_model", "custom"), func(k): BikeBuild.apply_fork_model(build, k))
 	_slide("Travel", 160, 220, 10, S.fork_travel, "mm", func(v): S.fork_travel = int(v); S.fork_model = "custom")
 	_choice("Spring", rate, S.fork_spring, func(v): S.fork_spring = v)

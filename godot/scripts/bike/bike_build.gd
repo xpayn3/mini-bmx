@@ -128,6 +128,12 @@ const FORK_MODELS := {
 		"lowers": {"color": "e9eaec", "color2": "ffffff", "finish": "gloss"}, "stanchions": {"color": "c9cdd2", "color2": "ffffff", "finish": "chrome"}, "coat": "Silver"},
 	"era":      {"brand": "EXT",        "label": "Era V2.1",         "travel": 180, "spring": "Coil",
 		"lowers": {"color": "1a1a1c", "color2": "ffffff", "finish": "satin"}, "stanchions": {"color": "e0b545", "color2": "ffffff", "finish": "anodized"}, "coat": "Gold"},
+	# the forks of the YT Tues / NS Fuzz models (assets/forks/<glb>.glb, tools/make_forks.py): their own crowns, stanchions,
+	# lowers and front caliper, fitted to the stock frame. The glb limits the travel (the lowers stop at the crown).
+	"tues_fork": {"brand": "YT",         "label": "Tues fork",        "travel": 180, "spring": "Air", "glb": "tues",
+		"lowers": {"color": "1a1a1c", "color2": "ffffff", "finish": "gloss"}, "stanchions": {"color": "c8a24a", "color2": "ffffff", "finish": "anodized"}, "coat": "Gold"},
+	"fuzz_fork": {"brand": "NS",         "label": "Fuzz fork",        "travel": 170, "spring": "Air", "glb": "fuzz",
+		"lowers": {"color": "1a1a1c", "color2": "ffffff", "finish": "satin"}, "stanchions": {"color": "d9b347", "color2": "ffffff", "finish": "anodized"}, "coat": "Gold"},
 }
 
 static func apply_fork_model(b: Dictionary, key: String) -> void:
@@ -137,6 +143,11 @@ static func apply_fork_model(b: Dictionary, key: String) -> void:
 	b.suspension.fork_travel = m.travel
 	b.paint.fork = (m.lowers as Dictionary).duplicate()
 	b.paint.stanchions = (m.stanchions as Dictionary).duplicate()
+
+## the fork model's glb id (FORK_MODELS.*.glb) of a build, or "" for the frame's own fork
+static func fork_glb(b: Dictionary) -> String:
+	var m: Dictionary = FORK_MODELS.get(str(b.get("suspension", {}).get("fork_model", "")), {})
+	return str(m.get("glb", ""))
 
 ## cassettes: brand / name for the part cards, cogs (teeth, small to big), finish: "cols" = anodized colour per
 ## cog (cycled; "rainbow" = oil-slick fade small -> big cog), "rough" = how matte. The big-range ones
@@ -240,6 +251,7 @@ static func load_build() -> Dictionary:
 		for i in path.size() - 1:
 			d = d.get(path[i]) if d is Dictionary else null
 		var key: String = path[path.size() - 1]
+		if key == "fork_model" and d is Dictionary: apply_fork_model(b, p[1]); continue
 		if not (d is Dictionary) or not d.has(key) or d[key] is Dictionary: continue
 		if key == "tyre_model": apply_tyre_model(b, p[1]); continue
 		if key == "rim_model": apply_rim_model(b, p[1]); continue
@@ -313,6 +325,13 @@ static func apply_paint(model: Node3D, b: Dictionary) -> void:
 		for pivot in crank.get_children():
 			for c in pivot.get_children():
 				if c is MeshInstance3D and c.name != "rotor": c.material_override = pm
+	# a fork model's crowns + stanchions are their own mesh on the steer node (BikeRig._swap_fork)
+	var fc := model.find_child("fork_crown", true, false) as MeshInstance3D
+	if fc and fc.mesh:
+		for i in fc.mesh.get_surface_count():
+			var nm := fc.mesh.surface_get_material(i).resource_name
+			if nm == "gold": fc.set_surface_override_material(i, paint_material(b.paint.stanchions))
+			elif nm == "black": fc.set_surface_override_material(i, paint_material(b.paint.crown))
 
 ## decals.gd config from the logo slots
 static func decal_config(b: Dictionary) -> Dictionary:

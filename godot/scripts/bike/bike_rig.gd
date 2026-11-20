@@ -50,6 +50,9 @@ func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
 	wheel_r = model.find_child("wheel_rear", true, false)
 	crank_n = model.find_child("crank", true, false)
 	wheel_rf = float(extras.get("wheelRadius", 0.261)); wheel_rr = float(extras.get("wheelRadiusRear", wheel_rf))
+	var fork_id := BikeBuild.fork_glb(build)
+	if fork_id != "" and not extras.get("noBarMod", false):   # frames with their own cockpit + fork keep them
+		_swap_fork(fork_id, build)
 	_materials(cfg)
 	_grips()
 	_pedals()
@@ -61,7 +64,7 @@ func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
 		var mods := BikeBuild.ride_mods(build)
 		_swap_wheels(build, mods)
 		if extras.has("suspension"):
-			extras.suspension.fork.travel = mods.fork_travel
+			extras.suspension.fork.travel = minf(float(mods.fork_travel), float(extras.suspension.fork.get("maxTravel", 9.0)) * 1.0)
 			extras.suspension.rear.travel = mods.shock_travel
 		BikeBuild.apply_paint(model, build)
 		if build.has("bars") and not extras.get("noBarMod", false):   # a frame with its own cockpit keeps its bars
@@ -70,6 +73,8 @@ func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
 		decal_cfg = BikeBuild.decal_config(build)
 		if extras.get("noDecals", false):   # the logo slots are placed for the GLORY frame; keep the tyre / rim ones
 			decal_cfg.erase("labels")
+		elif fork_id != "" and decal_cfg.has("labels"):   # the fork leg logo slot is cut for the stock fork
+			decal_cfg.labels = (decal_cfg.labels as Array).filter(func(l): return str(l.get("mesh", "")) != "fork_lower")
 	if extras.has("suspension"):
 		susp = Suspension.new(model, extras)
 	if extras.has("chain"):
@@ -81,6 +86,35 @@ func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
 	if extras.has("suspension") and model.find_child("rocker", true, false):
 		var r: Dictionary = extras.suspension.rear
 		BikeDecals.add_pivot_bolts(model, [{"node": "rocker", "at": r.G2, "z": 0.029}, {"node": "rocker", "at": r.C2, "z": 0.029}, {"node": "rocker", "at": r.D, "z": 0.031, "r": 0.005}])
+
+## a fork model for the stock frame (assets/forks/<id>.glb, made by tools/make_forks.py): the steer mesh loses its own crowns
+## and stanchions (assets/forks/dh_cockpit.glb is the rest: stem, bars, grips), the new crowns + stanchions ride on the steer
+## node, the lowers (+ caliper) replace the fork_lower mesh, and the lowers' node sits where the axle belongs (the fork's own offset).
+func _swap_fork(id: String, build: Dictionary) -> void:
+	var fs: Node = load("res://assets/forks/%s.glb" % id).instantiate()
+	var cs: Node = load("res://assets/forks/dh_cockpit.glb").instantiate()
+	var crown := fs.find_child("fork_crown", true, false) as MeshInstance3D
+	var lowers := fs.find_child("fork_lower", true, false) as MeshInstance3D
+	var cock := cs.find_child("steer", true, false) as MeshInstance3D
+	var fl := model.find_child("fork_lower", true, false) as MeshInstance3D
+	if crown and lowers and cock and fl and steer_n is MeshInstance3D:
+		var fx: Dictionary = fs.get_meta("extras", {}) if fs.has_meta("extras") else {}
+		(steer_n as MeshInstance3D).mesh = cock.mesh
+		crown.get_parent().remove_child(crown)
+		crown.name = "fork_crown"
+		crown.transform = Transform3D.IDENTITY
+		steer_n.add_child(crown)
+		fl.mesh = lowers.mesh
+		var ax: Array = fx.get("axle", [])
+		if ax.size() == 2:
+			var old := fl.position
+			fl.position = Vector3(float(ax[0]), float(ax[1]), 0.0)
+			extras.wheelbase = float(extras.get("wheelbase", 1.25)) + (fl.position.x - old.x)   # the axle moved with the fork's offset
+		if extras.has("suspension"):   # the lowers stop at the crown: never more travel than fits
+			var f: Dictionary = extras.suspension.fork
+			f.maxTravel = float(fx.get("travel", 0.18))
+	fs.free()
+	cs.free()
 
 ## generated wheels (size, tyres, rims, spokes, hubs, cassette); the brake rotors split off the stock
 ## wheels stay. The frame is lifted / tilted so the new tyres sit on the ground.

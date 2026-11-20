@@ -319,6 +319,13 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   top centre (the jump card is top left) in the WASTED type (same red condensed face, same squeeze, ~8.5 % of the screen tall), small "ENTERING" above.
   Letters stamp down one after another from 2.4x with an overshoot, white-hot cooling to red; a red rule draws out from
   the middle; out they drift apart and fade (~4 s). Real time; hidden with the HUD. Test: `BMX_AREA_AT=secs` freezes it.
+- **Fork models for the stock frame** (garage Shocks tab: "Tues fork", "Fuzz fork", `BikeBuild.FORK_MODELS.*.glb`): the Tues / Fuzz forks fitted to dh.glb by
+  `tools/make_forks.py` (reads `assets/parts/<id>_fork.glb` from the frame exporters, writes `assets/forks/<id>.glb` + `forks/dh_cockpit.glb` = dh's steer mesh without
+  its crowns / stanchions, found as connected components). `BikeRig._swap_fork` swaps the steer mesh, adds the crowns + stanchions as a `fork_crown` child of the steer node,
+  replaces the `fork_lower` mesh (lowers + the model's front brake caliper) and moves its node to the fork's own axle offset (extras.wheelbase follows; physics reads it). The
+  fork starts at dh's axle position, so the glb's `travel` (room before the lowers hit the crown, 0.18 / 0.17 m) caps the fork travel; the stock fork-leg decal slot is dropped.
+  Frames with their own cockpit + fork (Tues, Fuzz) ignore the fork pick; the Goat (dh steer + fork) takes it. Test: `BMX_BUILD="suspension.fork_model=tues_fork"`.
+  Not done: swapping the REAR caliper (it is merged into dh's seatstay mesh); the new frames' own rear calipers are in `assets/parts/*_brakes.glb`.
 - **Helmet models** (`look.helmet`, `Rider.HELMETS`, picked in the garage Kit tab and the tuning card Look > Helmet; `Rider.use_helmet(id)`):
   GLORY = the stock recolourable helmet + our goggles; **6D ATR-2** (black / silver skin) and **TLD SE5** (`assets/helmets/helmet_*.glb`, from the user's FBXs by
   `tools/export_helmets.py` + `tools/prep_helmet_textures.py`) are textured models that always wear their own goggles + strap (our goggles don't fit them):

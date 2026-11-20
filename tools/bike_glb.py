@@ -1,6 +1,10 @@
 """Shared helpers for the Blender bike exporters (export_tues.py, export_dhframe.py): the game's material
 list, decimating + extracting a part as world-space triangles, and the glb writer (dh.glb node layout)."""
-import bpy, os, json, struct, math
+import os, json, struct, math
+try:
+    import bpy   # only the Blender exporters need it; make_forks.py imports write_glb from plain Python
+except ImportError:
+    bpy = None
 import numpy as np
 
 MATS = [("paint", [0.62, 0.035, 0.03, 1.0], 0.35, 0.22), ("chrome", [0.80, 0.80, 0.82, 1.0], 1.0, 0.16),
