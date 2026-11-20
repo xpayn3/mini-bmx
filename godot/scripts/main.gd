@@ -602,7 +602,7 @@ func _swatch_grid(cur: String, cb: Callable, palette: Array = TUNE_SWATCHES, col
 		g.add_child(b)
 	return g
 
-var char_tab := "kit"
+var char_tab := OS.get_environment("BMX_CHAR_TAB") if OS.get_environment("BMX_CHAR_TAB") != "" else "kit"   # tests: BMX_CHAR_TAB=hair
 
 ## step 3: the CHARACTER: everything about her in one place, in four tabs: KIT (clothes), HAIR (helmet or hair preset
 ## + colour), FACE (skin tone, eyes) and PLATE (the race number). The turntable shows the standing rider.
@@ -624,7 +624,7 @@ func _setup_rider(content: HBoxContainer) -> void:
 			"kit": _char_kit(body)
 			"hair": _char_hair(body)
 			"plate": _char_plate(body)
-	for t in [["kit", "KIT"], ["hair", "HAIR"],["plate", "PLATE"]]:
+	for t in [["kit", "KIT"], ["hair", "HELMET"], ["plate", "PLATE"]]:
 		var b := UITheme.make_button(t[1], Callable(), "chip", Tokens.T_MD)
 		b.toggle_mode = true; b.button_group = grp
 		b.button_pressed = t[0] == char_tab
@@ -704,19 +704,32 @@ func _char_hair(body: VBoxContainer) -> void:
 	grid.add_theme_constant_override("h_separation", Tokens.S2)
 	grid.add_theme_constant_override("v_separation", Tokens.S2)
 	var grp := ButtonGroup.new()
-	# the helmet always stays on: a hair style only changes what pokes out under it (short / crop = nothing)
-	var opts := []
-	for k in Hair.STYLES:
-		opts.append([String(Hair.STYLES[k].label).to_upper() + " HAIR", "1", k])
-	for o in opts:
-		var b := UITheme.make_button(o[0], Callable(), "chip", Tokens.T_MD)
+	for id in Rider.HELMETS:   # the rider always wears a helmet: pick the model
+		var hid: String = id
+		var b := UITheme.make_button(String(Rider.HELMETS[hid][0]).to_upper(), Callable(), "chip", Tokens.T_MD)
 		b.toggle_mode = true; b.button_group = grp
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.custom_minimum_size.y = 56
-		b.button_pressed = str(look.hairStyle) == o[2]
-		b.pressed.connect(func(): _look_set({"helmetOn": o[1], "hairStyle": o[2]}))
+		b.button_pressed = str(look.helmet) == hid
+		b.pressed.connect(func(): _look_set({"helmetOn": "1", "helmet": hid}))
 		grid.add_child(b)
 	body.add_child(grid)
+	body.add_child(UITheme.caption("HAIR STYLE"))
+	var hgrid := GridContainer.new()
+	hgrid.columns = 4
+	hgrid.add_theme_constant_override("h_separation", Tokens.S2)
+	hgrid.add_theme_constant_override("v_separation", Tokens.S2)
+	var hgrp := ButtonGroup.new()
+	for st in Hair.HELMET_STYLES:   # what comes out under the back of the helmet
+		var sid: String = st[0]
+		var hb := UITheme.make_button(String(st[1]).to_upper(), Callable(), "chip", Tokens.T_MD)
+		hb.toggle_mode = true; hb.button_group = hgrp
+		hb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		hb.custom_minimum_size.y = 56
+		hb.button_pressed = str(look.hairStyle) == sid
+		hb.pressed.connect(func(): _look_set({"hairStyle": sid}))
+		hgrid.add_child(hb)
+	body.add_child(hgrid)
 	body.add_child(UITheme.caption("HAIR COLOUR"))
 	body.add_child(_swatch_grid(str(look.hair), func(h): _look_set({"hair": "#" + h}), HAIR_COLOURS, 7, 44))
 

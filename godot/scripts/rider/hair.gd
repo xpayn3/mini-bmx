@@ -23,7 +23,12 @@ const STYLES := {
 	"crop":  {"label": "Crop",  "len": 0.04, "grav": 3.0, "flutter": 0.1, "bend": 0.4, "hold": 1.0, "hold_n": 99, "short": true},
 	# gathered at one tie point on the back of the head and hanging from it: a rope of locks that swings (it comes out under a helmet too)
 	"ponytail": {"label": "Ponytail", "len": 0.3, "grav": 9.0, "flutter": 0.6, "bend": 0.1, "hold": 0.15, "hold_n": 2, "short": false, "tie": true},
+	# the same tie point, but plaited: stiffer and heavier, it hangs like a rope and swings less
+	"braid": {"label": "Braid", "len": 0.34, "grav": 10.0, "flutter": 0.2, "bend": 0.4, "hold": 0.2, "hold_n": 3, "short": false, "tie": true},
 }
+## the styles the rider menus offer: the rider always wears a helmet, so these are what comes out under the back of it
+## ("short" = nothing shows)
+const HELMET_STYLES := [["short", "None"], ["long", "Long"], ["ponytail", "Ponytail"], ["braid", "Braid"]]
 
 var head: Node3D                # the rider's Head: roots and the shape of the hair follow it
 var rider: Rider                # the body the hair rests on (spine, shoulders)

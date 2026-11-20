@@ -605,7 +605,7 @@ func set_look(l: Dictionary) -> void:
 		eye_mat.albedo_color = Color(str(L.get("eyes", DEFAULT_LOOK.eyes)))
 		hair.set_color(hair_mat.albedo_color)
 		var hs := str(L.get("hairStyle", "long"))
-		var helmet_on := true   # the bare head is never shown: hair only pokes out under the helmet
+		var helmet_on := true   # the rider always wears a helmet: hair only shows coming out under the back of it
 		hair_tail = helmet_on and Hair.STYLES.get(hs, {}).get("short", true) == false   # long / bob under a helmet
 		hair.set_style(hs, helmet_on)
 		_apply_head_gear(true)

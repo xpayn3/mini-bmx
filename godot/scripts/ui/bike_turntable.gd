@@ -120,12 +120,7 @@ func show_rider(look: Dictionary) -> void:
 		pivot.add_child(_rider)
 		_rider.set_look(look)
 		_rider.set_style(Garage.STAND_POSE)
-		var hs: Node3D = load("res://assets/helmet.glb").instantiate()
-		var helmet := hs.find_child("helmet", true, false)
-		if helmet:
-			helmet.get_parent().remove_child(helmet)
-			_rider.set_helmet(helmet)
-		hs.free()
+		_rider.use_helmet(str(look.get("helmet", "glory")))
 	else:
 		_rider.set_look(look)
 	_rider.visible = true
