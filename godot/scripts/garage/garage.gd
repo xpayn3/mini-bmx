@@ -1035,8 +1035,18 @@ func _color(text: String, cur: String, cb: Callable) -> void:
 	cp.color = Color(cur)
 	cp.edit_alpha = false
 	cp.custom_minimum_size = Vector2(200, 34)
-	cp.focus_mode = Control.FOCUS_NONE   # the pad uses the swatches (the picker is a mouse tool)
 	cp.color_changed.connect(func(c): cb.call(c.to_html(false)); _changed())
+	# on a pad the picker is a stepper: left / right (or A) walk through the swatch palette from the nearest colour
+	cp.set_meta(&"nav_step", func(dir: int) -> void:
+		var best := 0
+		var bd := INF
+		for i in SWATCHES.size():
+			var c := Color(SWATCHES[i])
+			var d := Vector3(c.r - cp.color.r, c.g - cp.color.g, c.b - cp.color.b).length_squared()
+			if d < bd: bd = d; best = i
+		var hex: String = SWATCHES[wrapi(best + dir if bd < 1e-4 else best, 0, SWATCHES.size())]
+		cp.color = Color(hex)
+		cb.call(Color(hex).to_html(false)); _changed())
 	_row(text, cp)
 
 func _swatches(cur: String, cb: Callable) -> void:

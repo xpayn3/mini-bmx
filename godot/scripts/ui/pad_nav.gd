@@ -193,6 +193,10 @@ func _input(e: InputEvent) -> void:
 		return
 	if e.is_action_pressed(&"ui_accept") and not e.is_echo() and _owns_focus():
 		var f := get_viewport().gui_get_focus_owner()
+		if f is LineEdit and e is InputEventJoypadButton and (f as LineEdit).editable:   # A on a text box = the on-screen keyboard
+			PadKeyboard.open(f)
+			get_viewport().set_input_as_handled()
+			return
 		if f.has_meta(&"nav_step"):   # A on a stepper = the next option
 			(f.get_meta(&"nav_step") as Callable).call(1)
 			get_viewport().set_input_as_handled()

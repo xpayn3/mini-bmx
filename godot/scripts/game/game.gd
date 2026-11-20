@@ -1014,6 +1014,12 @@ func _unhandled_input(e: InputEvent) -> void:
 		else: flash("Debug Draw 3D addon not loaded")
 		return
 	if photo: return
+	# pad B with a side card up (P / K / L, demo tuning) closes it, like a console back, instead of a bail tap
+	if e is InputEventJoypadButton and e.is_action_pressed("ui_cancel") and hud and hud.card and hud.card.visible:
+		hud.close_sides()
+		_bail_down = -1
+		get_viewport().set_input_as_handled()
+		return
 	if e.is_action_pressed("demo") and not e.is_echo(): set_demo(demo == null); return
 	if e.is_action_pressed("map") and not e.is_echo(): open_map(); return
 	if e.is_action_pressed("new_world") and not e.is_echo(): respawn(true)
@@ -1089,9 +1095,23 @@ func _read_input() -> Dictionary:
 		"throttle": Input.get_action_strength("pedal"),
 		"brake": Input.get_action_strength("brake"),
 		"steer": clampf(steer, -1, 1),
-		"hop": Input.is_action_pressed("hop"),
-		"sprint": Input.is_action_pressed("sprint"),
+		"hop": _held_ok("hop"),
+		"sprint": _held_ok("sprint"),
 	}
+
+## a menu button that is also a ride action (A = sprint, X = hop) and was still held when the ride went on
+## (resume, RACE, a closed menu) does nothing until it is let go
+var _swallowed := {}
+func swallow_held() -> void:
+	for a in ["sprint", "hop"]:
+		if Input.is_action_pressed(a): _swallowed[a] = true
+
+func _held_ok(a: String) -> bool:
+	var down := Input.is_action_pressed(a)
+	if _swallowed.has(a):
+		if down: return false
+		_swallowed.erase(a)
+	return down
 
 ## tests (BMX_BRAKETURN): which values vibrate - per value, how often its step-to-step change flips sign
 ## with a real size (a vibration), and the biggest such flip

@@ -414,6 +414,7 @@ func _menu_page_main() -> void:
 	seed_row.add_theme_constant_override("separation", Tokens.S2)
 	var se := LineEdit.new()
 	se.text = str(GameState.seed)
+	se.placeholder_text = "World seed"
 	se.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	se.custom_minimum_size.y = Tokens.H_CHIP
 	se.tooltip_text = "World seed: type a number and press Enter"
@@ -928,12 +929,12 @@ func _char_plate(body: VBoxContainer) -> void:
 	body.add_child(on)
 	body.add_child(UITheme.caption("NUMBER"))
 	var num := LineEdit.new()
-	num.text = str(look.bibNumber); num.max_length = 3; num.custom_minimum_size.y = Tokens.H_CHIP
+	num.text = str(look.bibNumber); num.max_length = 3; num.placeholder_text = "Race number"; num.custom_minimum_size.y = Tokens.H_CHIP
 	num.text_changed.connect(func(t: String): _look_set({"bibNumber": t}))
 	body.add_child(num)
 	body.add_child(UITheme.caption("HEADER LINE"))
 	var hdr := LineEdit.new()
-	hdr.text = str(look.bibText); hdr.max_length = 30; hdr.custom_minimum_size.y = Tokens.H_CHIP
+	hdr.text = str(look.bibText); hdr.max_length = 30; hdr.placeholder_text = "Header line"; hdr.custom_minimum_size.y = Tokens.H_CHIP
 	hdr.text_changed.connect(func(t: String): _look_set({"bibText": t}))
 	body.add_child(hdr)
 
@@ -1065,6 +1066,7 @@ func _start_ride() -> void:
 	if menu: menu.queue_free(); menu = null
 	if game: game.exit_photo()
 	state = RIDING
+	game.swallow_held()   # the A that pressed RACE is not a sprint
 	game.respawn(false)
 	_set_riding(true)
 
@@ -1161,6 +1163,7 @@ func _resume() -> void:
 	_close_controls()
 	state = RIDING
 	get_tree().paused = false
+	if game: game.swallow_held()   # the A that resumed is not a sprint
 
 func _open_settings() -> void:
 	if is_instance_valid(settings_open): return
