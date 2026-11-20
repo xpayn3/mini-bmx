@@ -438,6 +438,7 @@ func _apply_light(h: float, L: Dictionary) -> void:
 var _studio: Node3D
 var _look_yaw := 0.0
 var _look_pitch := 0.0
+const LOOK_SIDE := 1.0   # sign of the head yaw that turns towards the camera
 
 ## title screen: the rider's head follows the mouse. The bike points to the left of the frame, so the mouse
 ## ahead of the rider = looking straight on, above / below = nodding, behind them = turning towards the camera.
