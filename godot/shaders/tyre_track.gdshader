@@ -7,7 +7,7 @@ render_mode blend_mix, depth_draw_never, cull_disabled, specular_schlick_ggx;
 
 const float ROW = 0.024;     // metres between knob rows (fx.gd wraps the distance on 2 rows)
 
-uniform float bump = 3.0;   // x the real dimple depth (4 mm), to read at riding distance
+uniform float bump = 9.0;   // x the real dimple depth (4 mm), to read at riding distance
 uniform float fade_near = 55.0;
 uniform float fade_far = 110.0;
 
@@ -51,7 +51,7 @@ void fragment() {
 	float v = UV.y;
 	float au = abs(u);
 	// the band: soft sides, and a lip where the tyre pushed soil out
-	float band = 1.0 - smoothstep(0.7, 1.0, au);
+	float band = 1.0 - smoothstep(0.3, 1.0, au);   // fades out gently towards the sides
 	float lip = smoothstep(0.75, 0.92, au) * (1.0 - smoothstep(0.92, 1.0, au));
 	float h;
 	if (v_smear > 0.5) {
@@ -72,11 +72,11 @@ void fragment() {
 
 	vec3 ground = pow(COLOR.rgb, vec3(2.2));           // sRGB -> linear
 	// pressed soil is darker; the bottoms of the dimples darker still; the pushed-out lip a bit lighter
-	vec3 col = ground * (0.78 - 0.42 * h) + ground * 0.4 * lip;
+	vec3 col = ground * (0.9 - 0.27 * h) + ground * 0.4 * lip;   // (was 0.78 - 0.42 h: too dark; a smidget darker than 0.92 - 0.2 h)
 	ALBEDO = col;
 	ROUGHNESS = 0.92 - 0.12 * h;
 	SPECULAR = 0.25;
 	float dist = length(VERTEX);
 	float fade = 1.0 - smoothstep(fade_near, fade_far, dist);
-	ALPHA = COLOR.a * max(band, lip) * fade * (0.8 + 0.2 * h);
+	ALPHA = COLOR.a * max(band, lip) * fade * (0.72 + 0.2 * h);
 }
