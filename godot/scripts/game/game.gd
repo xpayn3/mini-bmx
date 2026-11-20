@@ -109,6 +109,9 @@ var sheep: SheepHerd
 
 func _ready() -> void:
 	bike_cfg = GameState.bike_config()
+	if not title_world:
+		CrashLog.game = weakref(self)
+		CrashLog.note("ride start: seed %d, bike %s" % [GameState.seed, GameState.bike_id])
 	Tune.set_ride(bike_cfg.ride)
 	_build_environment()
 	if reuse.has("terrain"):   # the title world's own, kept while the garage was open (it is always the same place)
@@ -1155,9 +1158,8 @@ func _unhandled_input(e: InputEvent) -> void:
 	if get_tree().paused or not input_enabled: return
 	if e.is_action_pressed("photo") and not e.is_echo(): toggle_photo(); return
 	if e.is_action_pressed("save_log") and not e.is_echo():   # the last 60 s of physics + inputs to a CSV
-		var lp := ride_log.save()
-		flash("Ride log saved (last 60 s)" if lp != "" else "Couldn't save the ride log")
-		if lp != "": print("RIDELOG ", lp)
+		var lp := CrashLog.report("manual", "saved with the save-log button")   # report + ride log + recent log lines
+		flash("Report saved (last 60 s + log)" if lp != "" else "Couldn't save the report")
 		return
 	if e.is_action_pressed("debug_draw") and not e.is_echo():
 		if DebugOverlay.available(): flash("Physics overlay " + ("on" if DebugOverlay.toggle() else "off"))

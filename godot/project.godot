@@ -18,10 +18,15 @@ boot_splash/use_filter=true
 
 [autoload]
 
+CrashLog="*res://scripts/core/crash_log.gd"
 Settings="*res://scripts/core/settings.gd"
 Tune="*res://scripts/core/tune.gd"
 GameState="*res://scripts/core/game_state.gd"
 Steam="*res://scripts/core/steam.gd"
+
+[debug]
+
+file_logging/max_log_files=20
 
 [display]
 window/size/viewport_width=1600

@@ -93,7 +93,6 @@ var cam_gear := ""                  # ActionCam.gear_sig of the camera + add-ons
 var cam_spots := {}                 # mount kind -> where it touches the shell (head space), set when a helmet goes on
 
 var torso: MeshInstance3D
-var hood_hem: MeshInstance3D
 var belt_node: Belt
 var pelvis_mesh: MeshInstance3D
 var neck_mesh: MeshInstance3D
@@ -181,8 +180,6 @@ func _init() -> void:
 	torso.name = "Torso"
 	_skin_torso()
 	add_child(torso)
-	hood_hem = cyl.call(0.15, 0.15, mCoralDark, 22)
-	hood_hem.visible = false
 	pelvis_mesh = G.inst(G.rounded_box(0.2, 0.15, 0.3, 3, 0.05), mNavy)
 	pelvis_mesh.name = "Pelvis"
 	add_child(pelvis_mesh)
@@ -1041,7 +1038,6 @@ func _pose_from_points(P: Array, roots: Dictionary, orient: Dictionary) -> void:
 	pelvis_mesh.transform = Transform3D(bb, pe)
 	var hip: Vector3 = pe + (ch - pe).normalized() * Belt.HEM_Y
 	set_spine(hip, ch, body_r.normalized(), (sh[1] - sh[0]).normalized(), 0.0, 0.0, 0.5, bb)
-	set_limb(hood_hem, hip, hip.lerp(ch, 0.2))
 	var sh_r: Vector3 = sh[1] - sh[0]
 	head.transform = Transform3D(orient.get("head", _basis_from(hd - ch, sh_r)), hd)
 	_pose_neck()
@@ -1519,7 +1515,6 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	set_spine(hip, chest, pel_b * Vector3(0, 0, 1), tw * Vector3(0, 0, 1),
 		float(sty.spineCurve) * (1.0 - 0.7 * relax), float(sty.spineSide), float(sty.spineLow), pel_full)
 	pelvis_mesh.transform = Transform3D(pel_full, pelvis)
-	set_limb(hood_hem, Vector3(pelvis.x, pelvis.y + 0.04, pelvis.z), hip.lerp(chest, 0.2))
 
 	# neck / head
 	var neck := chest
