@@ -1681,6 +1681,7 @@ func _autotest(seconds: float) -> void:
 			for w in s.worst: print("  LIMBW %s %s" % [k, w])
 	print("AUTOTEST avg triangles/frame=%dk draw calls=%d" % [tris / maxi(frames, 1) / 1000, draws / maxi(frames, 1)])
 	if Env.s("BMX_PHOTO") != "": print("AUTOTEST photo: on=%s time_scale=%.2f hud=%s fov=%.1f" % [game.photo, Engine.time_scale, game.hud.visible, game.cam.fov])
+	if game.rumble and game.rumble.probe: print(game.rumble.probe_summary())
 	if Env.s("BMX_MAP") != "": print("AUTOTEST map: open=%s time_scale=%.2f hud=%s" % [game.paper_map.busy() if game.paper_map else "none", Engine.time_scale, game.hud.visible])
 	print("AUTOTEST frames=%d fps=%.1f pos=(%.1f, %.1f, %.1f) v=%.2f crash=%s sane=%s" % [frames, frames / seconds, st.x, st.y, st.z, st.v, st.crash_on, st.is_sane()])
 	if Env.s("BMX_BRAKETURN") != "" or Env.s("BMX_JITTER_ALL") != "": game.jitter_report()

@@ -30,6 +30,7 @@ var ragdoll
 var rider
 var rig: BikeRig
 var phys: BikePhysics
+var rumble: PadRumble   # layered controller vibration (game/pad_rumble.gd)
 var cam: CameraRig
 var hud
 var wasted                  # crash slow-mo + "WASTED" look (fx/wasted.gd)
@@ -122,6 +123,7 @@ func _ready() -> void:
 	pedal_a0 = rig.pedal_a0
 	phys = BikePhysics.new(self)
 	phys.T = Tune.v
+	rumble = PadRumble.new(self)
 	phys.setup(rig.extras, bike_cfg)
 	ragdoll = Ragdoll.new(terrain)
 	rider = load("res://scripts/rider/rider.gd").new()
@@ -639,7 +641,6 @@ func start_crash(reason: String) -> void:
 	else: flash(reason)
 	if hud: hud.on_crash(crash_v)
 	if audio: audio.crash()
-	Settings.rumble(1.0, 1.0, 0.45)
 
 ## the helmet action cam snaps off its hinge and tumbles away (FlyingCam); a new one is on the helmet
 ## after getting up. The old one lies where it landed until a respawn or FlyingCam.LIFE.
@@ -705,7 +706,7 @@ func on_landing(air_time: float, impact: float) -> void:
 			(1.0 if ls == 1 else 0.85 if ls == 3 else 0.3) * clampf(air_time / 0.8, 0.4, 1.3))
 	elif air_time > 0.45 and (ls == 1 or ls == 3):
 		dust.cloud(Vector3(phys.x, phys.y, phys.z), phys.fwd() * phys.v * 0.3, ground_dust(phys.x, phys.z, ls), 2.6 + impact * 0.15, 1.1)
-	if air_time > 0.2: Settings.rumble(clampf(impact / 8, 0.15, 1), clampf(impact / 12, 0, 1), 0.12 + minf(0.25, impact * 0.02))
+	if rumble: rumble.landing(air_time, impact)
 
 ## the bike and rider as solid shapes the dust sim's air has to go round: two spinning wheels, the
 ## frame and the rider's body
@@ -1145,6 +1146,9 @@ func _physics_process(dt: float) -> void:
 	_snap_prev()
 	var inp := _read_input()
 	phys.step(dt, inp)
+	if rumble:
+		if input_enabled and not photo and not (paper_map and paper_map.busy()): rumble.update(dt, inp)
+		else: rumble.stop()
 	ride_log.record(dt, phys, inp, _log_lift, rig.position.y if rig else 0.0, rider.J if rider else [])
 	if jitter_on and not phys.crash_on:
 		for kv in [["slip", phys.slip, 0.002], ["yaw_rate", phys.yaw_rate, 0.02], ["lean", phys.lean, 0.002], ["bike_lean", phys.bike_lean, 0.003],
@@ -1219,6 +1223,7 @@ func exit_map() -> void:
 
 func _exit_tree() -> void:
 	Engine.time_scale = 1.0
+	if rumble: rumble.stop()
 
 # tests (BMX_DAB_PROBE): per-frame shoe moves on the bike, the sole's lowest point vs the ground
 var dab_probe := Env.s("BMX_DAB_PROBE") != ""
