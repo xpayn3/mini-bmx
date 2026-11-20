@@ -29,40 +29,71 @@ var _poured := 0.0
 var _upl := 0.0
 var _seed := 0.0
 
+## Set up over a few frames (_setup_step), not all at once: the ground samples (4225 top_height calls), the C#
+## sim, the depth texture and the draped mesh cost ~25 ms a pool, and a fatal crash starts up to 3 at once:
+## each stage is a few ms, and only one pool works per frame (~20 frames to start, unnoticeable under the body).
+var _gr := PackedFloat32Array()
+var _row := 0
+var _stage := 0                    # 0 ground rows, 1 sim rows + texture, 3 mesh + material, 4 running
+const ROWS_PER_FRAME := 8
+const SIM_ROWS_PER_FRAME := 48     # of N: ~2 ms a frame
+var _srow := 0
+static var _busy_frame := -1       # one pool does setup work per frame (a fatal crash starts up to 3 at once)
+
 func _init(p_terrain, at: Vector3, radius: float, p_grow_t: float) -> void:
-	var t0 := Time.get_ticks_usec()
 	terrain = p_terrain
 	grow_t = p_grow_t
 	volume = 0.012 * pow(radius / 1.15, 2.0)
 	_seed = randf() * 100.0
 	_o = Vector3(at.x - N * CELL * 0.5, 0.0, at.z - N * CELL * 0.5)
-	var size := N * CELL
-	var gr := PackedFloat32Array()
-	gr.resize(GROUND_N * GROUND_N)
-	for j in GROUND_N:
-		for i in GROUND_N:
-			gr[i + j * GROUND_N] = terrain.top_height(_o.x + size * i / (GROUND_N - 1), _o.z + size * j / (GROUND_N - 1))
-	_sim = load(SIM).new()
-	_sim.Setup(N, CELL, gr, GROUND_N, _seed)
-	_tex = ImageTexture.create_from_image(_sim.MakeImage())
+	_gr.resize(GROUND_N * GROUND_N)
 	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_build_mesh(gr)
-	var m := ShaderMaterial.new()
-	m.shader = SHADER
-	m.render_priority = 2
-	m.set_shader_parameter("depth_tex", _tex)
-	m.set_shader_parameter("seed", _seed)
-	m.set_shader_parameter("grid_m", size)
-	material_override = m
-	# the WET HALO: a second pass that darkens the dirt round the pool where blood has soaked in
-	_halo = ShaderMaterial.new()
-	_halo.shader = HALO
-	_halo.render_priority = 1
-	_halo.set_shader_parameter("depth_tex", _tex)
-	_halo.set_shader_parameter("seed", _seed)
-	_halo.set_shader_parameter("grid_m", size)
-	m.next_pass = _halo
-	if OS.get_environment("BMX_BLOOD_PROBE") != "": print("BLOOD pool setup %.1f ms" % ((Time.get_ticks_usec() - t0) / 1000.0))
+
+## one stage of the setup a frame
+func _setup_step() -> void:
+	var t0 := Time.get_ticks_usec()
+	var size := N * CELL
+	match _stage:
+		0:
+			var j1 := mini(_row + ROWS_PER_FRAME, GROUND_N)
+			for j in range(_row, j1):
+				for i in GROUND_N:
+					_gr[i + j * GROUND_N] = terrain.top_height(_o.x + size * i / (GROUND_N - 1), _o.z + size * j / (GROUND_N - 1))
+			_row = j1
+			if _row >= GROUND_N: _stage = 1
+		1:
+			if _sim == null:
+				_sim = load(SIM).new()
+				_sim.SetupBegin(N, CELL, _gr, GROUND_N, _seed)
+				_srow = 0
+			else:
+				_sim.SetupRows(_srow, _srow + SIM_ROWS_PER_FRAME)
+				_srow += SIM_ROWS_PER_FRAME
+				if _srow >= N:
+					_tex = ImageTexture.create_from_image(_sim.MakeImage())
+					_stage = 2
+		2:
+			_stage = 3   # (the mesh: its own frame)
+		3:
+			_build_mesh(_gr)
+			var m := ShaderMaterial.new()
+			m.shader = SHADER
+			m.render_priority = 2
+			m.set_shader_parameter("depth_tex", _tex)
+			m.set_shader_parameter("seed", _seed)
+			m.set_shader_parameter("grid_m", size)
+			material_override = m
+			# the WET HALO: a second pass that darkens the dirt round the pool where blood has soaked in
+			_halo = ShaderMaterial.new()
+			_halo.shader = HALO
+			_halo.render_priority = 1
+			_halo.set_shader_parameter("depth_tex", _tex)
+			_halo.set_shader_parameter("seed", _seed)
+			_halo.set_shader_parameter("grid_m", size)
+			m.next_pass = _halo
+			_stage = 4
+			if _wiped: _apply_wipe()
+	if OS.get_environment("BMX_BLOOD_PROBE") != "": print("BLOOD pool setup stage %d %.1f ms" % [_stage, (Time.get_ticks_usec() - t0) / 1000.0])
 
 ## the ground under the grid, draped (+1.6 cm so it never flickers into it)
 func _build_mesh(gr: PackedFloat32Array) -> void:
@@ -90,6 +121,11 @@ func _build_mesh(gr: PackedFloat32Array) -> void:
 	mesh = st.commit()
 
 func _process(dt: float) -> void:
+	if _stage < 4:
+		if _busy_frame != Engine.get_process_frames():
+			_busy_frame = Engine.get_process_frames()
+			_setup_step()
+		return
 	if dt <= 0.0: return
 	t += dt
 	(material_override as ShaderMaterial).set_shader_parameter("pool_t", t)
@@ -112,15 +148,20 @@ func _process(dt: float) -> void:
 
 ## blood depth (m) under a world point (0 off the pool)
 func depth_at(x: float, z: float) -> float:
-	if _wiped: return 0.0
+	if _wiped or _stage < 4: return 0.0
 	return _sim.DepthAt(int((x - _o.x) / CELL), int((z - _o.z) / CELL))
 
 var _wiped := false
+var _wipe_len := 0.0
 func wipe(_now_t: float, len: float) -> void:
 	_wiped = true
+	_wipe_len = len
+	growing = false
+	if _stage >= 4: _apply_wipe()
+
+func _apply_wipe() -> void:
 	if _halo: _halo.set_shader_parameter("wipe_at", t)
-	if _halo: _halo.set_shader_parameter("wipe_len", len)
+	if _halo: _halo.set_shader_parameter("wipe_len", _wipe_len)
 	var m := material_override as ShaderMaterial
 	m.set_shader_parameter("wipe_at", t)
-	m.set_shader_parameter("wipe_len", len)
-	growing = false
+	m.set_shader_parameter("wipe_len", _wipe_len)

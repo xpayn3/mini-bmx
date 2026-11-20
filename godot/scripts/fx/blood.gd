@@ -165,10 +165,71 @@ func _init(p_terrain, p_fx) -> void:
 	add_child(jmi)
 	_jp.resize(JET_MAX); _jv.resize(JET_MAX); _jw.resize(JET_MAX)
 
+## Draw every blood piece once, sub-pixel in front of `cam`, for a few frames while the ride fades in: their
+## shaders / pipelines compile on first draw (the renderer waited ~50 ms for them in the first crash frame),
+## and the splat textures go into the decal atlas now. The 8 splat decals stay (hidden): a texture leaves the
+## atlas when no decal uses it, and adding it back rebuilds the atlas.
+var _warm_nodes: Array = []
+var _warm_left := 0
+func warm_draw(cam: Node3D) -> void:
+	if not enabled or not HAS_CS or cam == null: return
+	_make_splats()
+	var root := Node3D.new()
+	root.name = "blood_warm"
+	cam.add_child(root)
+	root.position = Vector3(0, 0, -0.6)
+	var s := 0.0002   # well under a pixel at 0.6 m: drawn (so compiled) but never seen
+	var pool := MeshInstance3D.new()
+	var q := QuadMesh.new(); q.size = Vector2(s, s)
+	pool.mesh = q
+	pool.material_override = _warm_mat
+	pool.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	root.add_child(pool)
+	for m in [_stump_mesh, _bone_m()]:
+		var mi := MeshInstance3D.new()
+		mi.mesh = m
+		mi.scale = Vector3.ONE * 0.002
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		root.add_child(mi)
+	for i in SPLAT_KINDS:
+		var d := Decal.new()
+		d.texture_albedo = _splat_tex[i]
+		d.texture_orm = _splat_orm
+		d.cull_mask = terrain.GROUND_LAYER
+		d.size = Vector3(s, s, s)
+		root.add_child(d)
+	_warm_nodes = [root]
+	# one streak quad + one jet drop in the MultiMeshes (the instanced pipelines differ from a plain mesh)
+	var at: Transform3D = root.global_transform.scaled_local(Vector3.ONE * s)
+	mm.set_instance_transform(0, at)
+	mm.set_instance_custom_data(0, Color(0, 0, 0, 0))
+	mm.visible_instance_count = maxi(mm.visible_instance_count, 1)
+	_jet_mm.set_instance_transform(0, at)
+	_jet_mm.visible_instance_count = maxi(_jet_mm.visible_instance_count, 1)
+	_warm_left = 4
+	_make_crunch()   # the broken-bone sound is built sample by sample: not mid-crash
+
+func _warm_end() -> void:
+	if mm.visible_instance_count == 1 and _count == 0: mm.visible_instance_count = 0
+	if _jn == 0: _jet_mm.visible_instance_count = 0
+	for r in _warm_nodes:
+		if not is_instance_valid(r): continue
+		for c in r.get_children():
+			if c is Decal:   # keep them (hidden) so their textures stay in the decal atlas
+				c.visible = false
+				c.reparent(self, false)
+			else:
+				c.queue_free()
+		r.queue_free()
+	_warm_nodes.clear()
+
 func _process(dt: float) -> void:
 	_t += dt
 	mat.set_shader_parameter("now", _t)
 	if _jn > 0: _jet_step(minf(dt, 0.05))
+	if _warm_left > 0:
+		_warm_left -= 1
+		if _warm_left == 0: _warm_end()
 
 ## one drop of the jet: at p going v (already moved `ahead` seconds along, so drops born within one
 ## frame spread out along the stream instead of bunching)
@@ -540,28 +601,7 @@ func _capsule(radius: float, height: float) -> Mesh:
 	c.material = m
 	return c
 
-func _bone(m: Mesh) -> MeshInstance3D:
-	var mi := MeshInstance3D.new()
-	mi.mesh = m
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(mi)
-	return mi
-
-func _ring() -> MeshInstance3D:
-	if _ring_mesh == null:
-		_ring_mesh = SphereMesh.new()
-		_ring_mesh.radius = 0.034
-		_ring_mesh.height = 0.024
-		_ring_mesh.radial_segments = 10
-		_ring_mesh.rings = 4
-		_ring_mesh.material = _stump_mesh.material
-	var mi := MeshInstance3D.new()
-	mi.mesh = _ring_mesh
-	add_child(mi)
-	return mi
-
-## a bone crunch: a few sharp cracks + a dull thud, made once
-func _play_crunch(at: Vector3) -> void:
+func _make_crunch() -> void:
 	if _crunch == null:
 		var rate := 44100
 		var n := int(rate * 0.32)
@@ -587,6 +627,30 @@ func _play_crunch(at: Vector3) -> void:
 		_crunch.format = AudioStreamWAV.FORMAT_16_BITS
 		_crunch.mix_rate = rate
 		_crunch.data = data
+
+func _bone(m: Mesh) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	mi.mesh = m
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(mi)
+	return mi
+
+func _ring() -> MeshInstance3D:
+	if _ring_mesh == null:
+		_ring_mesh = SphereMesh.new()
+		_ring_mesh.radius = 0.034
+		_ring_mesh.height = 0.024
+		_ring_mesh.radial_segments = 10
+		_ring_mesh.rings = 4
+		_ring_mesh.material = _stump_mesh.material
+	var mi := MeshInstance3D.new()
+	mi.mesh = _ring_mesh
+	add_child(mi)
+	return mi
+
+## a bone crunch: a few sharp cracks + a dull thud, made once
+func _play_crunch(at: Vector3) -> void:
+	_make_crunch()
 	var pl := AudioStreamPlayer3D.new()
 	pl.stream = _crunch
 	pl.bus = "SFX" if AudioServer.get_bus_index("SFX") >= 0 else "Master"

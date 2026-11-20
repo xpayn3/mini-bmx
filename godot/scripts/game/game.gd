@@ -183,6 +183,8 @@ func _ready() -> void:
 	dust.warm_up(Vector3(0, phys.y + 0.5, 0))
 	fx.puff(Vector3(0, phys.y + 0.4, 0), Vector3.ZERO, Color.WHITE, 0.3, 0.2, 0.0)
 	fx.chunk(Vector3(0, phys.y + 0.4, 0), Vector3.ZERO, Color.WHITE, 0.01, 0.2)
+	if blood: blood.warm_draw(cam)   # crash-only blood shaders + splat decals, so the first crash doesn't wait on them
+	if wasted and _wasted_on(): wasted.warm()   # and the WASTED silhouette mask's pipelines
 
 # ---------------------------------------------------------------- environment
 func _build_environment() -> void:
@@ -978,7 +980,21 @@ func place_start_tv() -> void:
 	b = b * Basis(Vector3.RIGHT, pitch) * Basis(Vector3.BACK, -roll) * Basis.from_scale(Vector3.ONE * START_TV_SCALE)
 	at.y = (hs[0] + hs[1] + hs[2] + hs[3]) * 0.25 - 0.04
 	start_tv.transform = Transform3D(b, at)
+	_start_tv_on(true)
 	start_tv.power_on(1.4)
+
+## the start TV (shadowed glow light, live screen, 6 static voices) cost ~1.5 ms of GPU a frame for the whole
+## ride; ridden past START_TV_CULL it is hidden and frozen, and comes back on if the rider returns
+const START_TV_CULL := 80.0
+func _start_tv_on(on: bool) -> void:
+	if start_tv == null or start_tv.visible == on: return
+	start_tv.visible = on
+	start_tv.process_mode = Node.PROCESS_MODE_INHERIT if on else Node.PROCESS_MODE_DISABLED
+
+func _cull_start_tv(at: Vector3) -> void:
+	if start_tv == null: return
+	var p := start_tv.global_position
+	_start_tv_on(Vector2(at.x - p.x, at.z - p.z).length() < START_TV_CULL)
 
 const BAIL_HOLD_MS := 350   # holding bail this long throws the rider off; a shorter tap resets to the trail
 var _bail_down := -1        # tick (ms) the bail key went down, -1 = not held
@@ -1335,6 +1351,17 @@ func _dab_foot(lt: Dictionary) -> void:
 	f.y += sin(PI * dab_k) * 0.07   # lifts off the pedal on the way out / back
 	lt[key] = f
 
+## the drawn ground for the tyre fit + unclip, cached for one frame on a 0.25 mm grid: their passes sample
+## ~230 points round both tyres, mostly the same ones again as the wheel only moves up (96 real samples left)
+var _top_memo := {}
+func _top_cached(x: float, z: float) -> float:
+	var k := Vector2i(roundi(x * 4000.0), roundi(z * 4000.0))
+	var h = _top_memo.get(k)
+	if h == null:
+		h = terrain.top_height(x, z)
+		_top_memo[k] = h
+	return h
+
 func _process(dt: float) -> void:
 	if photo:
 		# time stands still; the camera moves on real time
@@ -1375,7 +1402,8 @@ func _process(dt: float) -> void:
 	# the physics' tyres are soft and follow the smooth height field; the drawn ground is a triangle mesh
 	# (higher in hollows) with rocks and decks on it. Lift / tilt the drawn bike so no tyre is ever inside it
 	if Env.s("BMX_NOUNCLIP") == "":
-		rig.fit_wheels(terrain.top_height)
+		_top_memo.clear()
+		rig.fit_wheels(_top_cached)
 		var _pre_y := rig.position.y
 		var _dF0 := rig.tyre_depth(rig.wheel_f, rig.wheel_rf, terrain.top_height) if st.bank_probe else 0.0
 		var _dR0 := rig.tyre_depth(rig.wheel_r, rig.wheel_rr, terrain.top_height) if st.bank_probe else 0.0
@@ -1388,7 +1416,7 @@ func _process(dt: float) -> void:
 			_base_bins[bin_k] = acc
 		var _axF: Vector3 = rig.wheel_f.global_position
 		var _axR: Vector3 = rig.wheel_r.global_position
-		var was: float = rig.unclip_tyres(terrain.top_height)
+		var was: float = rig.unclip_tyres(_top_cached)
 		_log_lift = maxf(was, 0.0)
 		if st.bank_probe and was > 0.05 and not st.air:   # tests: the drawn bike lifted a lot (it "shoots up")
 			print("BASE over ground=%.3f  axleF over base=%.3f  susp xF=%.3f xR=%.3f  y_draw-y=%.3f" % [_base_over, _axF_over_base, rig.susp.xF if rig.susp else 0.0, rig.susp.xR if rig.susp else 0.0, y_draw - st.y])
@@ -1503,6 +1531,7 @@ func _process(dt: float) -> void:
 	terrain.tape_push(null if phys.crash_on else rig.wheel_f.global_position + Vector3(cos(hd), 0.0, -sin(hd)) * rig.wheel_rf)
 	far_hills.follow(drawn_pos)
 	sheep.follow(dt, drawn_pos, st.v, st.fwd())
+	_cull_start_tv(drawn_pos)
 	biome_t -= dt
 	if biome_t <= 0:
 		biome_t = 0.5

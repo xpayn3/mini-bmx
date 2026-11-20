@@ -114,7 +114,22 @@ func stop() -> void:
 	visible = false
 	_mask_off()
 
+## The mask draws every rider / bike surface unshaded into its own target (no MSAA, transparent): ~40 render
+## pipelines the ride never uses otherwise, all compiled in the first crash's frame (a ~55 ms hitch). warm()
+## renders it for a few frames shortly after the ride starts instead (nothing shows: the title stays hidden).
+var _warm := 0
+func warm() -> void:
+	_warm = 12
+
+func _warm_step() -> void:
+	_warm -= 1
+	if active: _warm = 0; return
+	if _warm == 4: _mask_on()       # a few frames in: the camera is on the rider by now
+	elif _warm < 4: _mask_follow()
+	if _warm == 0: _mask_off()
+
 func _process(_dt: float) -> void:
+	if _warm > 0: _warm_step()
 	if not active: return
 	var now := Time.get_ticks_usec()
 	var rdt := minf((now - _last) / 1e6, 0.1)   # real time; clamped (after a pause)
@@ -222,10 +237,7 @@ class WordView extends Control:
 	var zoom := 1.0
 	var font: SystemFont
 	func _init() -> void:
-		font = SystemFont.new()
-		font.font_names = PackedStringArray(["Haettenschweiler", "Impact", "Bahnschrift", "Arial Black"])
-		font.font_weight = 900
-		font.multichannel_signed_distance_field = true   # stays sharp scaled up this much
+		font = UITheme.punch_font()   # MSDF: stays sharp scaled up this much
 	func _draw() -> void:
 		if modulate.a <= 0.0: return
 		var fs := 200

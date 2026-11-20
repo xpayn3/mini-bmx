@@ -320,6 +320,7 @@ func _refresh_records() -> void:
 	vb.add_child(UITheme.label("H or ✕ to close", 12, UITheme.MUTED))
 
 func update_hud(dt: float) -> void:
+	UITheme.warm_punch_step()   # the big display letters, one a frame, before the first pop / banner needs them
 	# the bike computer switches on when the ride starts (the HUD shows): its power-on chime
 	if not visible: _power_t = -1.0
 	elif _power_t < 0.35:
@@ -1567,11 +1568,7 @@ class MsgView extends Control:
 	var font: SystemFont
 
 	func _init() -> void:
-		font = SystemFont.new()
-		font.font_names = PackedStringArray(["Haettenschweiler", "Impact", "Bahnschrift", "Arial Black"])
-		font.font_weight = 900
-		font.multichannel_signed_distance_field = true
-		font.msdf_pixel_range = 48   # room for the dark outline
+		font = UITheme.punch_font(48)   # range 48: room for the dark outline
 
 	func show_msg(text: String) -> void:
 		var i := text.find(" +")
