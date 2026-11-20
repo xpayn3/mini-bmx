@@ -374,7 +374,7 @@ func _menu_page_setup(step := 0) -> void:
 		_hero_text(GameState.bike_id)
 		if setup_step == 2:
 			hero_name.text = "YOUR CHARACTER"
-			hero_spec.text = "KIT  ·  HAIR  ·  FACE  ·  PLATE  ·  DRAG TO TURN"
+			hero_spec.text = "KIT  ·  HAIR  ·  PLATE  ·  DRAG TO TURN"
 		var bl := HBoxContainer.new()
 		bl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		bl.add_child(UITheme.make_button("BACK", back_cb, "link", Tokens.T_XL))
@@ -623,9 +623,8 @@ func _setup_rider(content: HBoxContainer) -> void:
 		match char_tab:
 			"kit": _char_kit(body)
 			"hair": _char_hair(body)
-			"face": _char_face(body)
 			"plate": _char_plate(body)
-	for t in [["kit", "KIT"], ["hair", "HAIR"], ["face", "FACE"], ["plate", "PLATE"]]:
+	for t in [["kit", "KIT"], ["hair", "HAIR"],["plate", "PLATE"]]:
 		var b := UITheme.make_button(t[1], Callable(), "chip", Tokens.T_MD)
 		b.toggle_mode = true; b.button_group = grp
 		b.button_pressed = t[0] == char_tab
@@ -705,30 +704,21 @@ func _char_hair(body: VBoxContainer) -> void:
 	grid.add_theme_constant_override("h_separation", Tokens.S2)
 	grid.add_theme_constant_override("v_separation", Tokens.S2)
 	var grp := ButtonGroup.new()
-	var opts := [["HELMET", "1", "long"]]
+	# the helmet always stays on: a hair style only changes what pokes out under it (short / crop = nothing)
+	var opts := []
 	for k in Hair.STYLES:
-		opts.append([String(Hair.STYLES[k].label).to_upper() + " HAIR", "0", k])
+		opts.append([String(Hair.STYLES[k].label).to_upper() + " HAIR", "1", k])
 	for o in opts:
 		var b := UITheme.make_button(o[0], Callable(), "chip", Tokens.T_MD)
 		b.toggle_mode = true; b.button_group = grp
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.custom_minimum_size.y = 56
-		b.button_pressed = str(look.helmetOn) == o[1] and (o[1] == "1" or str(look.hairStyle) == o[2])
+		b.button_pressed = str(look.hairStyle) == o[2]
 		b.pressed.connect(func(): _look_set({"helmetOn": o[1], "hairStyle": o[2]}))
 		grid.add_child(b)
 	body.add_child(grid)
 	body.add_child(UITheme.caption("HAIR COLOUR"))
 	body.add_child(_swatch_grid(str(look.hair), func(h): _look_set({"hair": "#" + h}), HAIR_COLOURS, 7, 44))
-
-func _char_face(body: VBoxContainer) -> void:
-	var look := RiderPanels.load_look()
-	body.add_child(UITheme.caption("SKIN TONE"))
-	body.add_child(_swatch_grid(str(look.skin), func(h): _look_set({"skin": "#" + h}), SKIN_TONES, 8, 44))
-	var bd := UITheme.make_button("FACIAL HAIR", Callable(), "chip", Tokens.T_MD)
-	bd.toggle_mode = true
-	bd.button_pressed = str(look.beard) != "0"
-	bd.toggled.connect(func(v: bool): _look_set({"beard": "1" if v else "0"}))
-	body.add_child(bd)
 
 func _char_plate(body: VBoxContainer) -> void:
 	var look := RiderPanels.load_look()
