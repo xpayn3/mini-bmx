@@ -6,6 +6,10 @@ extends Node
 ## focused row (a container with meta "nav_row", see MenuBase._row) gets a marker in the flat style:
 ## a wash + a bar on its left (`style` "paper" = highlighter + red ink, "card" = yellow tokens).
 ## Works inside a SubViewport (the paper sheets push pad / keys into their page).
+## One cursor, console style: hovering a button with the mouse moves the focus there (the button's own hover
+## look is turned off, so a mouse resting somewhere never leaves a second highlight); moving onto a pick in a
+## ButtonGroup (bike, kit, time of day...) with the D-pad / stick / arrows picks it at once; a control with meta
+## "nav_accept" (Callable) runs it on A (setup screens: A on the picked bike = next step).
 ##   PadNav.attach(menu, {"tabs": tab_container, "back": _close, "style": "paper"})
 
 const REPEAT_DELAY := 0.38
@@ -72,6 +76,33 @@ func _prep(n: Node) -> void:
 	if not is_instance_valid(root) or not (n == root or root.is_ancestor_of(n)): return
 	if n is ScrollContainer:
 		(n as ScrollContainer).follow_focus = true
+	elif n is BaseButton and not n.has_meta(&"nav_prepped"):
+		n.set_meta(&"nav_prepped", true)
+		_prep_button.call_deferred(n)   # deferred: the button's own style overrides are set by then
+
+## the mouse moves the one cursor: hover = focus, so the hover look goes (it would be a second highlight)
+func _prep_button(b: BaseButton) -> void:
+	if not is_instance_valid(b) or b.focus_mode != Control.FOCUS_ALL: return
+	if b is Button:
+		b.add_theme_stylebox_override(&"hover", b.get_theme_stylebox(&"normal"))
+		b.add_theme_stylebox_override(&"hover_pressed", b.get_theme_stylebox(&"pressed"))
+		b.add_theme_color_override(&"font_hover_color", b.get_theme_color(&"font_color"))
+		b.add_theme_color_override(&"font_hover_pressed_color", b.get_theme_color(&"font_pressed_color"))
+	b.mouse_entered.connect(_hover.bind(b))
+
+func _hover(b: BaseButton) -> void:
+	if not _active() or _popup_up() or not is_instance_valid(b) or b.has_focus() or b.disabled: return
+	if not b.is_visible_in_tree(): return
+	var sc := _scroll_of(b)
+	var follow := sc != null and sc.follow_focus
+	if follow: sc.follow_focus = false   # hovering a half-hidden row must not scroll the list under the mouse
+	_hovering = true
+	b.grab_focus()
+	_hovering = false
+	if follow: sc.follow_focus = true
+
+var _hovering := false
+var _dir_ms := -10000   # when a D-pad / stick / arrow move came in (focus changes right after it = a pad move)
 
 
 ## focus the first control on the current page (or `first`)
@@ -114,8 +145,12 @@ func _owns_focus() -> bool:
 
 func _popup_up() -> bool:
 	for w in get_viewport().get_embedded_subwindows():
-		if w.visible: return true
+		if is_real_popup(w): return true
 	return false
+
+## an open dropdown / picker takes the pad itself; a mouse tooltip (also an embedded window) must not
+static func is_real_popup(w: Window) -> bool:
+	return w.visible and not w.get_flag(Window.FLAG_NO_FOCUS)   # (tooltips are no-focus windows)
 
 
 ## only the newest menu that's up in this viewport navigates (a Settings window over the title menu)
@@ -151,17 +186,30 @@ func _input(e: InputEvent) -> void:
 				_held = &"ui_left" if e.is_action_pressed(&"ui_left", true) else &"ui_right"; _held_t = 0.0
 			get_viewport().set_input_as_handled()
 			return
+	if e.is_action_pressed(&"ui_accept") and not e.is_echo() and not _owns_focus() and get_viewport().gui_get_focus_owner() == null:
+		_dir_ms = -10000
+		focus_first()   # nothing focused yet (opened with the mouse): the first A lands the cursor
+		get_viewport().set_input_as_handled()
+		return
 	if e.is_action_pressed(&"ui_accept") and not e.is_echo() and _owns_focus():
 		var f := get_viewport().gui_get_focus_owner()
 		if f.has_meta(&"nav_step"):   # A on a stepper = the next option
 			(f.get_meta(&"nav_step") as Callable).call(1)
 			get_viewport().set_input_as_handled()
 			return
+		if f.has_meta(&"nav_accept"):   # A on a pick that follows the cursor = confirm (next step)
+			if f is BaseButton and (f as BaseButton).toggle_mode and not (f as BaseButton).button_pressed:
+				(f as BaseButton).button_pressed = true; (f as BaseButton).pressed.emit()
+			(f.get_meta(&"nav_accept") as Callable).call()
+			get_viewport().set_input_as_handled()
+			return
 	for a in DIRS:
 		if e.is_action_pressed(a, true):
+			_dir_ms = Time.get_ticks_msec()
 			if (e is InputEventJoypadButton or e is InputEventJoypadMotion) and not e.is_echo():
 				_held = a; _held_t = 0.0
 			if not _owns_focus():   # nothing focused yet (mouse user, page just built): land first, don't move
+				_dir_ms = -10000   # (landing is not a move: it picks nothing)
 				focus_first()
 				get_viewport().set_input_as_handled()
 			return
@@ -263,12 +311,23 @@ func _on_focus(c: Control) -> void:
 			if p is Control and p.has_meta("nav_row"): r = p; break
 			p = p.get_parent()
 		if r == null and (c is Slider or c is PadMap): r = c
+		_follow_pick(c)
 	if r == _row: return
 	if is_instance_valid(_row): _row.queue_redraw()
 	_row = r
 	if r:
 		if not r.draw.is_connected(_draw_mark.bind(r)): r.draw.connect(_draw_mark.bind(r))
 		r.queue_redraw()
+
+
+## the cursor moved onto an unpicked option of a ButtonGroup with the D-pad / stick: pick it (console carousel)
+func _follow_pick(c: Control) -> void:
+	if _hovering or not (c is BaseButton) or c.has_meta(&"nav_no_follow"): return
+	var b := c as BaseButton
+	if not b.toggle_mode or b.button_group == null or b.button_pressed or b.disabled: return
+	if Time.get_ticks_msec() - _dir_ms > 120: return   # not a pad move (page built, tab switched, mouse)
+	b.button_pressed = true
+	b.pressed.emit()   # (setting button_pressed only emits toggled; the picks listen to pressed)
 
 
 func _draw_mark(r: Control) -> void:
