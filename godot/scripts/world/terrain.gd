@@ -47,6 +47,8 @@ var _tape_mat: ShaderMaterial
 var _debris: TerrainDebris
 var _tapes: TapeSim              # torn tape ribbons (tape.js TapeSim)
 var _focus := Vector2.ZERO       # last update_stream() position: the torn tape simulates near it
+var _clutter_cc := Vector2i(1 << 30, 0)   # the chunk the clutter visibility was last set for
+var _clutter_dirty := true                # a chunk came / went since
 var _water: TerrainWater
 var _broken: Array = []          # [{kind, rec}] for clear_dynamic()
 var _time: float = 0.0
@@ -334,11 +336,16 @@ func update_stream(px: float, pz: float, budget_ms: float = 4.0) -> void:
 			_stale_tasks.append(_jobs[k]["task"])
 			_jobs.erase(k)
 	_reap_stale(false)
-	# ground clutter only in the 3x3 chunks round the rider
-	for k in chunks:
-		var near: bool = absi(k.x - ccx) <= 1 and absi(k.y - ccz) <= 1
-		for o in chunks[k]["small"]:
-			o.visible = near
+	# ground clutter only in the 3x3 chunks round the rider (redone only when the rider changes chunk or a
+	# chunk was added / dropped: walking every chunk's clutter every frame cost ~0.1 ms for nothing)
+	var cc := Vector2i(ccx, ccz)
+	if cc != _clutter_cc or _clutter_dirty:
+		_clutter_cc = cc
+		_clutter_dirty = false
+		for k in chunks:
+			var near: bool = absi(k.x - ccx) <= 1 and absi(k.y - ccz) <= 1
+			for o in chunks[k]["small"]:
+				o.visible = near
 	if is_inf(budget_ms):
 		var queue := _missing(ccx, ccz)
 		var lim := maxi(spawn_jobs, _max_jobs())
@@ -402,6 +409,18 @@ func _missing(ccx: int, ccz: int) -> Array:
 
 func _dispatch_missing(ccx: int, ccz: int) -> void:
 	if _jobs.size() >= _max_jobs():
+		return
+	# quick look first: usually every chunk is there or already being built, and building + sorting the
+	# missing list (a GDScript lambda per compare) twice a frame was most of update_stream's idle cost
+	var any := false
+	for dz in range(-RADIUS, RADIUS + 1):
+		for dx in range(-RADIUS, RADIUS + 1):
+			var k := Vector2i(ccx + dx, ccz + dz)
+			if not chunks.has(k) and not _jobs.has(k):
+				any = true
+				break
+		if any: break
+	if not any:
 		return
 	for k in _missing(ccx, ccz):
 		if _jobs.size() >= _max_jobs():
@@ -468,6 +487,7 @@ func _unload(k: Vector2i) -> void:
 	var c = chunks.get(k)
 	if c == null:
 		return
+	_clutter_dirty = true
 	if fcs != null:
 		fcs.domes_remove(_chunk_id(k))
 	for key in c["rock_keys"]:
@@ -562,6 +582,7 @@ func _multimesh(parent: Node3D, mesh: Mesh, mat: Material, buf: PackedFloat32Arr
 func _finalize(k: Vector2i) -> void:
 	var job: Dictionary = _jobs[k]
 	_jobs.erase(k)
+	_clutter_dirty = true
 	var b: TerrainChunkBuilder = job["builder"]
 	if b.gen != _gen:
 		return
@@ -784,6 +805,25 @@ func mesh_height(x: float, z: float) -> float:
 func top_height(x: float, z: float) -> float:
 	return maxf(height(x, z), mesh_height(x, z))
 
+
+## true when a loaded chunk within `reach` (square) of (px, pz) has ground below the water level (chunks
+## not loaded are skipped: no ground is drawn there to show water against). The water sheet is only drawn /
+## baked then (TerrainWater); each chunk's lowest grid point is worked out once and kept in its record.
+func water_near(px: float, pz: float, reach: float) -> bool:
+	var k0 := Vector2i(WorldRng.jround((px - reach) / SIZE), WorldRng.jround((pz - reach) / SIZE))
+	var k1 := Vector2i(WorldRng.jround((px + reach) / SIZE), WorldRng.jround((pz + reach) / SIZE))
+	for kz in range(k0.y, k1.y + 1):
+		for kx in range(k0.x, k1.x + 1):
+			var c = chunks.get(Vector2i(kx, kz))
+			if c == null or not c.has("G"):
+				continue   # not streamed in (far / still building): nothing drawn there to show water against
+			if not c.has("gmin"):
+				var m := INF
+				for h in (c["G"] as PackedFloat32Array): m = minf(m, h)
+				c["gmin"] = m
+			if c["gmin"] < WATER + 0.05:
+				return true
+	return false
 
 ## ground height from the loaded chunk grids (bilinear, no domes / wood); NAN where nothing is loaded
 func grid_height(x: float, z: float) -> float:
