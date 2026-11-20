@@ -636,9 +636,17 @@ static func add_bike_decals(bike: Node3D, cfg: Dictionary) -> Array:
 			if rim_s < 0: rim_s = _surface_by_name(mi, "black")
 			if rim_s >= 0 and rim_s != si:
 				rim_r = minf(R * 0.9, _surface_aabb(mi, rim_s).size.y / 2.0)
-			var r0 := rim_r + (R - rim_r) * 0.12
-			var r1 := rim_r + (R - rim_r) * 0.72
-			var rtex := ring_texture(bike, ty["text"], R, r0, r1)
+			# the lettering band on the sidewall: `lift` 0 = right at the rim .. 1 = up against the shoulder knobs,
+			# `scale` its height (garage Logos > Tyre walls > Placement)
+			var sd := R - rim_r
+			var hb := sd * 0.5 * clampf(float(ty.get("scale", 1.0)), 0.4, 1.6)
+			hb = minf(hb, sd * 0.85)
+			var lo := rim_r + sd * 0.02 + hb / 2.0
+			var hi := maxf(lo, R - sd * 0.12 - hb / 2.0)
+			var cm := lerpf(lo, hi, clampf(float(ty.get("lift", 0.1)), 0.0, 1.0))
+			var r0 := cm - hb / 2.0
+			var r1 := cm + hb / 2.0
+			var rtex := ring_texture(bike, ty["text"], R, r0, r1, ty.get("fill", Color8(0xf4, 0xf4, 0xf0)), 2, deg_to_rad(float(ty.get("rot", 0.0))))
 			var mat := decal_material(rtex, 0.75)
 			_bind_text(rtex, mat)
 			var size := Vector3(2.0 * R, 2.0 * R, 0.2)

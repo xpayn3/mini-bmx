@@ -1062,8 +1062,17 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 	if st.air or va <= 0.6 or bare:
 		dust.feed(rear, Vector3.ZERO, 0.0, dcol, 0.0, 20.0)
 		dust.feed_front(front, Vector3.ZERO, 0.0, 0.0)
-	grime.feed(dt, 2 if in_water else s, va, skid_fx, st.air, _landed, terrain.ground_color(rear.x, rear.z))
+	grime.feed(dt, 2 if in_water else s, va, skid_fx, st.air, _landed, terrain.ground_color(rear.x, rear.z), Vector2(st.vw_f, st.vw_r))
 	_landed = 0.0
+	# dry mud knocked off the bike flies off as chunks (low on the bike, carried along with it)
+	var shed := mini(grime.take_shed(), 12)
+	if shed > 0 and fx:
+		var bt := rig.global_transform
+		var dc := grime.dry_color()
+		for i in shed:
+			var lp := Vector3(randf_range(-0.45, 0.75), randf_range(0.15, 0.75), randf_range(-0.12, 0.12))
+			var ev := f * va * 0.85 + Vector3((randf() - 0.5) * 1.6, randf() * 1.4, (randf() - 0.5) * 1.6)
+			fx.chunk(bt * lp, ev, dc, randf_range(0.008, 0.02), 1.6)
 	var on_ground := not st.air and not bare and va > 0.2
 	var tc: Color = TRACK_DIRT if s == 1 else (dcol * 0.6 if sand else TRACK_GRASS)
 	var ta := 0.85 if s == 1 else (0.75 if sand else 0.45)

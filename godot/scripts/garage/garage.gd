@@ -1675,6 +1675,8 @@ func _placement(L: Dictionary) -> void:
 	var round_it := logo_slot == "tyres" or logo_slot == "rims"
 	if round_it:
 		_slide("Turn round wheel", -180.0, 180.0, 1.0, float(L.get("rot", 0.0)), "°", func(v): L.rot = v)
+	if logo_slot == "tyres":
+		_slide("Height on sidewall", 0.0, 100.0, 1.0, float(L.get("lift", 0.1)) * 100.0, "%", func(v): L.lift = v / 100.0)
 	else:
 		_slide("Slide along tube", 0.0, 100.0, 1.0, float(L.get("pos", 0.5)) * 100.0, "%", func(v): L.pos = v / 100.0)
 	_slide("Size", 40.0, 220.0, 1.0, float(L.get("scale", 1.0)) * 100.0, "%", func(v): L.scale = v / 100.0)
@@ -1682,6 +1684,7 @@ func _placement(L: Dictionary) -> void:
 		_slide("Rotate", -90.0, 90.0, 1.0, float(L.get("rot", 0.0)), "°", func(v): L.rot = v)
 	body.add_child(UITheme.make_button("Reset placement", func():
 		L.pos = 0.5; L.scale = 1.0; L.rot = 0.0
+		if logo_slot == "tyres": L.lift = 0.1
 		_changed()
 		_set_tab.call_deferred("logos"), "chip", Tokens.T_MD))
 	if logo_slot == "bars":
