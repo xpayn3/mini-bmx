@@ -59,10 +59,7 @@ static func assets_ok() -> bool:
 		if not ResourceLoader.exists(p) or load(p) == null:
 			ok = false
 			push_warning("CrtTv: cannot load " + p + ", the TV is left out")
-	if ok:
-		var m: Node = (load(ASSETS[0]) as PackedScene).instantiate()
-		ok = m != null and not m.find_children("*", "MeshInstance3D", true, false).is_empty()
-		if m: m.free()
+	if ok: ok = load(ASSETS[0]) is PackedScene
 	_assets_ok = 1 if ok else 0
 	return ok
 
