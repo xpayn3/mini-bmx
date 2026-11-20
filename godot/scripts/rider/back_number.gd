@@ -32,14 +32,13 @@ var _P := PackedVector3Array()
 var _Q := PackedVector3Array()
 var _ph := PackedFloat32Array()
 var _have := false
-var _last := Vector3.ZERO
 var _vs := Vector3.ZERO
 var _t := 0.0
 
 
 func _init() -> void:
 	mesh = _imesh
-	top_level = true
+	top_level = false             # drawn in rider space: the renderer carries it with the rider
 	process_priority = 100        # after the rider has been posed this frame
 	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	extra_cull_margin = 16384.0
@@ -201,28 +200,70 @@ func _build_face() -> SubViewport:
 
 
 # ---------------- the cloth ----------------
+# Bulletproof: the cloth lives in the back's own frame (built every frame from the four pin spots), not in world
+# space. So the paper is carried rigidly with the back however fast the rider goes, turns, crashes or teleports:
+# the pins are exact and nothing trails behind. The ride's motion only comes in as a bounded inertial push
+# (-acceleration) plus the speed-driven flap. Drawn in the rider's space as a normal child (not top_level), so
+# the renderer moves it with the rider even if the rider is moved after this ran.
 
-func _anchors(rider: Rider) -> PackedVector3Array:
-	# the four corners on the jersey, world space: top-left, top-right, bottom-left, bottom-right
-	var out := PackedVector3Array()
+# per sample on the back: [bone k, weight w, torso-local point m]; points 0..C*R-1 = the grid, then the
+# 4 corners (TL, TR, BL, BR) and one point inside the chest (to tell out from in)
+var _bk := PackedInt32Array()
+var _bw := PackedFloat32Array()
+var _bm := PackedVector3Array()
+var _Bp: Array[Transform3D] = []
+var _prev_o := Vector3.INF      # last world position of the back frame
+var _acc := Vector3.ZERO        # smoothed world acceleration of the back
+var _N := PackedVector3Array()
+var _UV := PackedVector2Array()
+
+
+func _sample(t: float, z: float, off: float) -> void:
+	var m := Vector3(-RiderGear.torso_back_x(t, z) - off, t - 0.5, z)
+	var u := clampf(t, 0.0, 1.0) * (Rider.SPINE_BONES - 1)
+	var k := mini(int(u), Rider.SPINE_BONES - 2)
+	_bk.append(k)
+	_bw.append(u - k)
+	_bm.append(m)
+
+
+func _setup_samples() -> void:
+	for r in R:
+		for c in C:
+			_sample(lerpf(T_TOP, T_BOT, float(r) / (R - 1)), lerpf(-W / 2, W / 2, float(c) / (C - 1)), 0.0)
 	for tz in [[T_TOP, -W / 2], [T_TOP, W / 2], [T_BOT, -W / 2], [T_BOT, W / 2]]:
-		out.append(rider.global_transform * rider.back_point(tz[0], tz[1], STAND))
+		_sample(tz[0], tz[1], STAND)
+	_sample(0.55, 0.0, -0.1)
+	_N.resize(C * R)
+	for r in R:
+		for c in C:
+			_UV.append(Vector2(float(c) / (C - 1), float(r) / (R - 1)))
+
+
+## every sample point in rider space, 5 bone reads a frame (back_point did 2 per point)
+func _surface(rider: Rider) -> PackedVector3Array:
+	if _bk.is_empty():
+		_setup_samples()
+	_Bp.resize(Rider.SPINE_BONES)
+	for k in Rider.SPINE_BONES:
+		_Bp[k] = rider.spine_skel.get_bone_pose(k)
+	var out := PackedVector3Array()
+	out.resize(_bk.size())
+	for i in _bk.size():
+		var k := _bk[i]
+		var w := _bw[i]
+		out[i] = (_Bp[k] * _bm[i]) * (1.0 - w) + (_Bp[k + 1] * _bm[i]) * w
 	return out
 
 
-func _reset(A: PackedVector3Array) -> void:
+func _reset() -> void:
+	# flat paper between the pins, in the frame: pins at (0,0,0) and (pw,0,0); rows go down +y
 	_P.resize(C * R)
 	_Q.resize(C * R)
-	for r in R:
-		for c in C:
-			var u := float(c) / (C - 1)
-			var v := float(r) / (R - 1)
-			var p := A[0].lerp(A[1], u).lerp(A[2].lerp(A[3], u), v)
-			_P[r * C + c] = p
-			_Q[r * C + c] = p
-	_vs = Vector3.ZERO
-	_last = A[0]
 	_have = true
+	_prev_o = Vector3.INF
+	_acc = Vector3.ZERO
+	_vs = Vector3.ZERO
 
 
 func _process(dt: float) -> void:
@@ -243,30 +284,63 @@ func _process(dt: float) -> void:
 		return
 	dt = minf(dt, 1.0 / 30.0)
 	_t += dt
-	var A := _anchors(rider)
-	if not _have or A[0].distance_to(_last) > 4.0:
-		_reset(A)
-	var vi := (A[0] - _last) / dt
-	_last = A[0]
-	_vs += (vi - _vs) * (1.0 - exp(-dt / 0.12))
-	var speed := _vs.length()
-	# outward normal of the paper's plane (the back faces -x of the torso)
-	var ctr := (A[0] + A[1] + A[2] + A[3]) * 0.25
-	var nrm := (A[1] - A[0]).cross(A[2] - A[0]).normalized()
-	if nrm.dot(ctr - (rider.global_transform * rider.back_point(0.55, 0.0, -0.1))) < 0.0:
-		nrm = -nrm
-	var S := PackedVector3Array()   # the jersey surface under every paper point
-	S.resize(C * R)
-	for r in R:
-		for c in C:
-			S[r * C + c] = rider.global_transform * rider.back_point(
-				lerpf(T_TOP, T_BOT, float(r) / (R - 1)), lerpf(-W / 2, W / 2, float(c) / (C - 1)))
-	var cw := (A[1] - A[0]).length() / (C - 1) * SAG
-	var ch := (A[2] - A[0]).length() / (R - 1) * SAG
+	var Sl := _surface(rider)           # rider space
+	var n0 := C * R
+	var a0 := Sl[n0]; var a1 := Sl[n0 + 1]; var a2 := Sl[n0 + 2]; var a3 := Sl[n0 + 3]
+	# the back frame: x across the pins, y down the back, z out of the back
+	var ex := a1 - a0
+	var pw := ex.length()
+	if pw < 1e-4 or not pw == pw:
+		return
+	ex /= pw
+	var ey := (a2 - a0) - ex * (a2 - a0).dot(ex)
+	if ey.length_squared() < 1e-8:
+		return
+	ey = ey.normalized()
+	var ez := ex.cross(ey)
+	if ez.dot((a0 + a1 + a2 + a3) * 0.25 - Sl[n0 + 4]) < 0.0:
+		ez = -ez
+	var F := Transform3D(Basis(ex, ey, ez), a0)      # back frame -> rider space
+	var Fi := F.affine_inverse()
+	var Fw := rider.global_transform * F             # back frame -> world
+	var to_f := Fw.basis.inverse()                   # world vectors into the frame
+	# the back's world motion: speed for the flap, acceleration for a bounded inertial push
+	var o := Fw.origin
+	if _prev_o == Vector3.INF or o.distance_to(_prev_o) > 2.0 or not o.is_finite():   # first frame / respawn / crash switch
+		_vs = Vector3.ZERO
+		_acc = Vector3.ZERO
+	else:
+		var vi := (o - _prev_o) / dt
+		var nv := _vs + (vi - _vs) * (1.0 - exp(-dt / 0.08))
+		var ai := (nv - _vs) / dt
+		_acc += (ai - _acc) * (1.0 - exp(-dt / 0.06))
+		_vs = nv
+	_prev_o = o
+	if _acc.length() > 40.0:
+		_acc = _acc.normalized() * 40.0
+	var speed := minf(_vs.length(), 30.0)
+	var push := to_f * (-_acc * 0.35 + Vector3(0, -9.81 * 0.5, 0))   # inertia + a little paper weight, in the frame
+	# frame-space pins and the jersey under every point
+	var A := [Vector3.ZERO, Fi * a1, Fi * a2, Fi * a3]
+	var S := PackedVector3Array()
+	S.resize(n0)
+	for i in n0:
+		S[i] = Fi * Sl[i]
+	if not _have or _P.size() != n0:
+		_reset()
+		for r in R:
+			for c in C:
+				var u := float(c) / (C - 1)
+				var v := float(r) / (R - 1)
+				var p: Vector3 = (A[0] as Vector3).lerp(A[1], u).lerp((A[2] as Vector3).lerp(A[3], u), v)
+				_P[r * C + c] = p
+				_Q[r * C + c] = p
+	var cw := pw / (C - 1) * SAG
+	var ch := (A[2] as Vector3).length() / (R - 1) * SAG
 	var dg := sqrt(cw * cw + ch * ch)
-	var side := nrm.cross(Vector3.UP).normalized()
 	var h := dt / SUB
 	var gust := clampf(speed / 4.0, 0.0, 1.0)   # nothing much at a walk, full flap from ~20 km/h
+	var flap := minf(speed, 14.0)               # flap strength stops growing past ~50 km/h
 	for sub in SUB:
 		for r in R:
 			var low := 0.25 + 0.75 * float(r) / (R - 1)   # the loose lower half flaps most
@@ -275,12 +349,12 @@ func _process(dt: float) -> void:
 				if i == 0 or i == C - 1:
 					continue
 				var tu := _t * 19.0 + _ph[i] + r * 0.9 + c * 1.3
-				# air in the rider's wake travels with him; the paper is pumped in and out and rattled sideways
+				# the wake pumps the paper in and out (z) and rattles it sideways (x)
 				var pump := 0.4 + 0.9 * sin(tu) + 0.5 * sin(tu * 1.9 + 2.0) + 0.3 * sin(_t * 52.0 + _ph[i] * 3.0)
-				var w := _vs * 0.4 + nrm * (speed * pump * low * gust) + side * (sin(tu * 1.4 + 1.0) * speed * 0.25 * low * gust)
+				var w := Vector3(sin(tu * 1.4 + 1.0) * flap * 0.25 * low * gust, 0.0, flap * pump * low * gust * 0.8)
 				var p := _P[i]
 				var v := (p - _Q[i]) / h
-				var acc := (w - v) * DRAG + Vector3(0, -9.81 * 0.5, 0)
+				var acc := (w - v) * DRAG + push
 				_Q[i] = p
 				_P[i] = p + v * h + acc * (h * h)
 		for it in ITER:
@@ -300,20 +374,26 @@ func _process(dt: float) -> void:
 		_P[0] = A[0]
 		_P[C - 1] = A[1]
 		# the bottom corners are only loosely pinned
-		for k in [[(R - 1) * C, 2], [R * C - 1, 3]]:
-			var d: Vector3 = _P[k[0]] - A[k[1]]
+		for k in 2:
+			var j := (R - 1) * C if k == 0 else R * C - 1
+			var d: Vector3 = _P[j] - A[2 + k]
 			if d.length() > TETHER:
-				_P[k[0]] = A[k[1]] + d.normalized() * TETHER
-		for i in C * R:   # never through the body: stay outside the (curved) back surface under each point
-			var d := (_P[i] - S[i]).dot(nrm)
+				_P[j] = A[2 + k] + d.normalized() * TETHER
+		for i in n0:   # never through the body: stay outside the (curved) back surface under each point
+			var d := _P[i].z - S[i].z
 			if d < STAND:
-				_P[i] += nrm * (STAND - d)
+				_P[i].z += STAND - d
 			elif d > MAX_STAND:
-				_P[i] -= nrm * (d - MAX_STAND)
+				_P[i].z -= d - MAX_STAND
 			var away := _P[i] - S[i]
 			if away.length() > MAX_AWAY:
 				_P[i] = S[i] + away.normalized() * MAX_AWAY
-	_draw(nrm)
+	# anything gone bad (NaN from a broken pose): start flat again next frame
+	for i in n0:
+		if not _P[i].is_finite():
+			_have = false
+			return
+	_draw(F)
 
 
 func _link(a: int, b: int, rest: float) -> void:
@@ -328,10 +408,9 @@ func _link(a: int, b: int, rest: float) -> void:
 	_P[b] -= d * (diff * wb)
 
 
-func _draw(nrm: Vector3) -> void:
+## drawn in rider space (frame F), so the mesh moves with the rider node itself
+func _draw(F: Transform3D) -> void:
 	_imesh.clear_surfaces()
-	var N := PackedVector3Array()
-	N.resize(C * R)
 	for r in R:
 		for c in C:
 			var l := _P[r * C + maxi(c - 1, 0)]
@@ -339,15 +418,15 @@ func _draw(nrm: Vector3) -> void:
 			var up := _P[maxi(r - 1, 0) * C + c]
 			var dn := _P[mini(r + 1, R - 1) * C + c]
 			var n := (rt - l).cross(dn - up).normalized()
-			if n.dot(nrm) < 0.0:
+			if n.z < 0.0:
 				n = -n
-			N[r * C + c] = n
+			_N[r * C + c] = F.basis * n
 	_imesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
 	for r in R - 1:
 		for c in C - 1:
 			var i0 := r * C + c
 			for k in [i0, i0 + 1, i0 + C, i0 + 1, i0 + C + 1, i0 + C]:
-				_imesh.surface_set_normal(N[k])
-				_imesh.surface_set_uv(Vector2(float(k % C) / (C - 1), float(k / C) / (R - 1)))
-				_imesh.surface_add_vertex(_P[k])
+				_imesh.surface_set_normal(_N[k])
+				_imesh.surface_set_uv(_UV[k])
+				_imesh.surface_add_vertex(F * _P[k])
 	_imesh.surface_end()
