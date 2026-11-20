@@ -130,7 +130,10 @@ void vertex() {
 void fragment() {
 	float r = length(UV - 0.5) * 2.0;
 	float a = pow(max(1.0 - r, 0.0), 2.5) * blink();
-	ALBEDO = vec3(1.0, 0.1, 0.05) * a * 1.6;
+	// colour weighted by ALPHA (not baked into ALBEDO): with no ALPHA the quad wrote alpha 1 over its
+	// whole square, which showed as a black square on transparent part pictures (garage cam cards)
+	ALBEDO = vec3(1.0, 0.1, 0.05) * 1.6;
+	ALPHA = a;
 }
 """
 	return _glow_sh
@@ -181,17 +184,18 @@ static func _mats() -> Dictionary:
 	fur.shader = _fur_shader()
 	return {
 		clear = clear, nd = nd, lamp = lamp, fur = fur,
-		sleeve = _mat("#ff6a1a", 0.8),
+		# real plastic scans (PlasticFinish): pebbled body, grainy mounts / sleeve, glossy trim / bezel / button
+		sleeve = PlasticFinish.dress(_mat("#ff6a1a", 0.8), "silicone"),
 		grill = _mat("#3a3c40", 0.6, 0.5),
 		foam = _mat("#2a2b2e", 1.0),
-		body = _mat("#17181b", 0.55),        # rubbery black body
-		plast = _mat("#232529", 0.4),        # mount plastic
-		trim = _mat("#3b3e44", 0.35, 0.3),
+		body = PlasticFinish.dress(_mat("#17181b", 0.55), "textured"),   # rubbery black body
+		plast = PlasticFinish.dress(_mat("#232529", 0.4), "mount"),      # mount plastic
+		trim = PlasticFinish.dress(_mat("#3b3e44", 0.35, 0.3), "gloss"),
 		screw = _mat("#9aa0a8", 0.3, 0.9),
 		glass = glass,
-		ring = _mat("#2b2d31", 0.25, 0.6),
+		ring = PlasticFinish.dress(_mat("#2b2d31", 0.25, 0.6), "gloss"),
 		screen = screen, led = led, glow = glow,
-		btn = _mat("#c8352b", 0.45),
+		btn = PlasticFinish.dress(_mat("#c8352b", 0.45), "gloss"),
 	}
 
 ## the adhesive pad + quick-release buckle, built with +Y = out of the surface (root origin = the surface)

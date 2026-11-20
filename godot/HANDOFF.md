@@ -584,6 +584,9 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   Helmet cam: look keys `camModel camLens camHousing camMic camAcc` (`ActionCam.GEAR_LOOK`, not touched by kits), picked in the rider room
   Kit tab › ACTION CAM and tuning card Look › Action cam; bike cam: `build.camera.{model,lens,housing,mic,acc}`, garage Bars › ACTION CAM.
   Tests: `BMX_LOOK=camModel=x4,camMic=deadcat`, `BMX_BUILD="camera.mount=bars;camera.model=osmo;camera.acc=light"`.
+  Camera plastics are real scans (`bike/plastic_finish.gd` `PlasticFinish.dress(mat, kind)`, ambientCG Plastic012A / 018A / 006, CC0,
+  4K in `assets/textures/plastic`, triplanar like `MetalFinish`, colour / roughness kept on average): body `textured`, mounts `mount`,
+  sleeve `silicone`, bezel / trim / button `gloss`.
   Every camera is "recording": red LEDs (front corner + top) blink 0.3 s of every second with a soft halo (shader, `ActionCam._led_shader` /
   `_glow_shader`, all cameras in step); the front LCD shows a red "● REC" over the recording time in the bike computer's Doto font
   (`UITheme.lcd_font()`, `rider/cam_rec_label.gd`: game time since the camera was built, so a new camera after a crash starts at 0:00).
@@ -870,7 +873,8 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   the hood as the door starts, fades out when it is up and the clunk (`DOOR_CLUNK_AT` 12.3 s) plays (`Garage._door_sound` / `_door_stop`).
   **Showroom bike switch**: the bike on show rolls off forward, the new one rolls in from behind and brakes to a stop, wheels
   turning (`Garage._swap_step`, `SWAP_*`). Bike cards: gold stars a size up; card pictures get soft contact shadows
-  (`PartThumbs._ground_shadow`) and an AgX studio light (bump `PartThumbs.THUMB_VER` when it changes). `RollerDoor.extrude` = a reusable profile-along-x mesh builder. Test:
+  (`PartThumbs._ground_shadow`) and an AgX studio light; every part picture sits on an invisible tabletop (`_place_table`:
+  a shadow catcher on render layer 20 that only the soft-shadowed key light reaches + a contact blob under its footprint) (bump `PartThumbs.THUMB_VER` when it changes). `RollerDoor.extrude` = a reusable profile-along-x mesh builder. Test:
   `BMX_GARAGE_DOOR=0.45` holds the door that far open (+ `BMX_GARAGE_CAM=0,4,5.5 BMX_GARAGE_AIM=0,1.9,-4`).
 - Bike height is placed from the **real tyre size and real axle positions** (no tyre clipping into the floor
   or the roller drums; verified with `BMX_TYRE_PROBE`).
