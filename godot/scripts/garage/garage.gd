@@ -1195,7 +1195,7 @@ func _fill_showroom() -> void:
 		if not GameState.BIKES[id].get("garage", false): continue
 		var saved := BikeBuild.load_build(id)   # the frame cards show your saved build (with this frame's paint), whatever edition is up
 		own.append({"key": id, "brand": "YOUR BUILD", "name": String(GameState.BIKES[id].label), "spec": _bike_line(id, saved),
-			"thumb": PartThumbs.build_key(id, saved), "make": PartThumbs.make_bike_build.bind(id, saved),
+			"thumb": PartThumbs.build_key(id, saved), "kind": "frame", "make": PartThumbs.make_bike_build.bind(id, saved),
 			"view": Vector3(0.45, 0.2, 1.0), "speed": BikeBuild.stats(saved, id)["Top speed"]})
 	# the editions: the same frames, factory colourways + part mixes, each set up for a riding style
 	var eds := []
@@ -1205,7 +1205,7 @@ func _fill_showroom() -> void:
 		var style := String(BikeBuild.STYLES[ed.get("style", "allround")].label).to_upper()
 		eds.append({"key": "ed:" + e, "brand": "%s  ·  %s" % [style, String(GameState.BIKES[ed.frame].label).to_upper()],
 			"name": String(ed.label), "spec": _bike_line(ed.frame, eb),
-			"thumb": PartThumbs.build_key(ed.frame, eb), "make": PartThumbs.make_bike_build.bind(ed.frame, eb),
+			"thumb": PartThumbs.build_key(ed.frame, eb), "kind": "edition", "make": PartThumbs.make_bike_build.bind(ed.frame, eb),
 			"view": Vector3(0.45, 0.2, 1.0), "speed": BikeBuild.stats(eb, ed.frame)["Top speed"]})
 	# slow -> fast: your bikes first, then the editions
 	var by_speed := func(a: Dictionary, b: Dictionary) -> bool: return float(a.speed) < float(b.speed)
@@ -1507,7 +1507,7 @@ func _part_preview_end() -> void:
 static func _bike_line(frame: String, b: Dictionary) -> String:
 	var F: Dictionary = BikeBuild.FRAMES.get(frame, {})
 	var cls := String(BikeBuild.CLASSES[F["class"]].label).to_upper() if F.has("class") else ""
-	return "%s  ·  %s  ·  %.1f KG" % [BikeBuild.star_text(BikeBuild.stars(b, frame)), cls, BikeBuild.bike_kg(frame, b)]
+	return "%s  ·  %s  ·  %.1f KG  ·  %s" % [BikeBuild.star_text(BikeBuild.stars(b, frame)), cls, BikeBuild.bike_kg(frame, b), Shop.fmt(Shop.build_price(b, frame))]
 
 func _set_tab(t: String) -> void:
 	_part_preview_end()   # the page (and the card under the cursor) is rebuilt
@@ -2034,7 +2034,22 @@ func _cards(items: Array, current: String, cb: Callable, bike := true, into: Pic
 			tag.add_theme_stylebox_override("normal", ts)
 			tag.position = Vector2(Tokens.S3, Tokens.S3)
 			b.add_child(tag)
+		var kind := String(it.get("kind", ""))
+		var pid := String(it.key).trim_prefix("ed:")
+		var cost := Shop.price(kind, pid) if kind != "" else 0
+		if cost > 0:   # price tag, top right (everything is unlocked while Shop.UNLOCK_ALL)
+			var pt := UITheme.display(Shop.fmt(cost), Tokens.T_XS, INK, 0.0)
+			var ps := UITheme.btn_box(Tokens.FILL, Tokens.CLEAR, 0, Tokens.R_SM, Tokens.S2)
+			ps.content_margin_top = 0; ps.content_margin_bottom = 0
+			pt.add_theme_stylebox_override("normal", ps)
+			pt.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			pt.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+			pt.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+			pt.offset_top = Tokens.S3; pt.offset_right = -Tokens.S3
+			b.add_child(pt)
+			b.tooltip_text += "  ·  " + Shop.fmt(cost)
 		b.pressed.connect(g.guard(func():
+			if kind != "" and not Shop.unlocked(kind, pid): return
 			cb.call(it.key)
 			if bike: _changed()
 			if into == null: _set_tab(tab)))
@@ -2052,7 +2067,7 @@ func _pic_cards(opts: Array, current: String, tag: String, make: Callable, view,
 	var items := []
 	for o in opts:
 		var id := str(o[0])
-		items.append({"key": id, "brand": "", "name": String(o[1]), "spec": "", "thumb": tag + "|" + id,
+		items.append({"key": id, "brand": "", "name": String(o[1]), "spec": "", "thumb": tag + "|" + id, "kind": tag.get_slice("|", 0),
 			"make": make.bind(id), "view": view.get(id, view.get("", Vector3.ONE)) if view is Dictionary else view})
 	_cards(items, current, cb, bike)
 
@@ -2094,7 +2109,7 @@ func _bars_page() -> void:
 		var m: Dictionary = Handlebar.MODELS[k]
 		items.append({"key": k, "brand": m.brand, "name": m.label,
 			"spec": "%d mm  ·  %s  ·  %s" % [m.width, ("%d mm rise" % m.rise) if m.rise > 0 else "flat", Handlebar.MATERIAL_SHORT[m.material]],
-			"thumb": "bar|%s|%s" % [k, PRODUCT],
+			"thumb": "bar|%s|%s" % [k, PRODUCT], "kind": "bar",
 			"make": PartThumbs.make_bars.bind(m, _product_paint("crown"), _product_paint("grips")), "view": Vector3(1.0, 0.75, 0.55)})
 	_cards(items, cur, func(k):
 		var m: Dictionary = Handlebar.MODELS[k]
@@ -2137,7 +2152,7 @@ func _bars_page() -> void:
 	var litems := []
 	for id in BikeLight.ORDER:
 		var lm: Dictionary = BikeLight.MODELS[id]
-		litems.append({"key": id, "brand": lm.brand, "name": lm.label, "spec": BikeLight.spec_line(id),
+		litems.append({"key": id, "brand": lm.brand, "name": lm.label, "kind": "light", "spec": BikeLight.spec_line(id),
 			"thumb": "light|%s|%s" % [id, sig], "make": _spot_make.bind(id, "lights.model", "light"),
 			"view": Vector3(0.9, 0.55, -0.7)})
 	_cards(litems, str(build.lights.get("model", "luma")), func(v): build.lights.model = v)
@@ -2165,8 +2180,8 @@ func _susp_page() -> void:
 	for k in BikeBuild.FORK_MODELS:
 		var m: Dictionary = BikeBuild.FORK_MODELS[k]
 		items.append({"key": k, "brand": m.brand, "name": m.label,
-			"spec": "%d mm  ·  %s  ·  %s stanchions" % [m.travel, m.spring, m.coat],
-			"thumb": "fork|%s|%s" % [k, PRODUCT],
+			"spec": "%s  ·  %d mm  ·  %s  ·  %s stanchions" % [BikeBuild.star_text(BikeBuild.part_stars("fork", k)), m.travel, m.spring, m.coat],
+			"thumb": "fork|%s|%s" % [k, PRODUCT], "kind": "fork",
 			"make": PartThumbs.make_fork.bind(m.lowers, m.stanchions, _product_paint("crown"), str(m.get("glb", ""))), "view": Vector3(0.35, 0.22, 1.0)})
 	_cards(items, S.get("fork_model", "custom"), func(k): BikeBuild.apply_fork_model(build, k))
 	_slide("Travel", 160, 220, 10, S.fork_travel, "mm", func(v): S.fork_travel = int(v); S.fork_model = "custom")
@@ -2195,7 +2210,8 @@ func _wheel_cards(models: Dictionary, current: String, apply: Callable, spec_lin
 		apply.call(tmp, k)
 		var spec := BikeBuild.wheel_spec(tmp, false)
 		items.append({"key": k, "brand": m.brand, "name": _model_name(m.label, m.brand),
-			"spec": spec_line.call(m), "thumb": "%s|%s|%s" % [kind, k, JSON.stringify(spec)],
+			"spec": BikeBuild.star_text(BikeBuild.part_stars(kind, k)) + "  ·  " + String(spec_line.call(m)),
+			"thumb": "%s|%s|%s" % [kind, k, JSON.stringify(spec)], "kind": kind,
 			"make": PartThumbs.make_wheel.bind(spec, 0.3) if kind == "tyre" else PartThumbs.make_wheelset.bind(spec),
 			"view": Vector3(0.25, 0.75, 1.0) if kind == "tyre" else Vector3(0.05, 0.12, 1.0)})
 	_cards(items, current, func(k): apply.call(build, k))
@@ -2212,7 +2228,7 @@ func _drive_page() -> void:
 		var spec := "%d-speed  ·  %d–%dT" % [cg.size(), cg[0], cg[cg.size() - 1]] if cg.size() > 1 else "Single speed  ·  %dT" % cg[0]
 		if cg[cg.size() - 1] >= 50: spec = "▲ " + spec   # a granny gear for climbing
 		items.append({"key": k, "brand": m.brand, "name": m.name, "spec": spec,
-			"thumb": "cassette|%s" % k, "make": PartThumbs.make_cassette.bind(k), "view": Vector3(0.45, 0.35, 1.0)})
+			"thumb": "cassette|%s" % k, "kind": "cassette", "make": PartThumbs.make_cassette.bind(k), "view": Vector3(0.45, 0.35, 1.0)})
 	_cards(items, D.cassette, func(k): D.cassette = k)
 	var cogs: Array = BikeBuild.CASSETTES[D.cassette].cogs
 	var lo := float(D.ring) / float(cogs[cogs.size() - 1])

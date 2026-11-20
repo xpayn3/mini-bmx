@@ -820,3 +820,44 @@ static func stars(b: Dictionary, frame := "dh") -> int:
 ## "★★★☆☆" for a star count
 static func star_text(n: int) -> String:
 	return "★".repeat(n) + "☆".repeat(5 - n)
+
+## Part stars (tyres, rims, forks): the same stats as the frames' (stats()), measured with this part
+## fitted on the stock build. Each kind is scored on the bars it really changes, then ranked against
+## its own models so a kind uses the whole 1..5 range (the best tyre is 5, the weakest 1).
+const PART_FOCUS := {
+	"tyre": ["Grip", "Handling", "Top speed"],
+	"rim":  ["Top speed", "Acceleration", "Handling"],
+	"fork": ["Landing", "Grip", "Handling"],
+}
+static var _part_stars := {}
+
+static func _part_models(kind: String) -> Dictionary:
+	return {"tyre": TYRE_MODELS, "rim": RIM_MODELS, "fork": FORK_MODELS}.get(kind, {})
+
+static func _part_score(kind: String, key: String) -> float:
+	var b := default_build()
+	match kind:
+		"tyre": apply_tyre_model(b, key)
+		"rim": apply_rim_model(b, key)
+		"fork": apply_fork_model(b, key)
+	var s := stats(b, "dh")
+	var t := 0.0
+	for k in PART_FOCUS[kind]: t += float(s[k])
+	return t / float(PART_FOCUS[kind].size())
+
+## 1..5 stars for a tyre / rim / fork model key (0 = unknown or "custom")
+static func part_stars(kind: String, key: String) -> int:
+	if not PART_FOCUS.has(kind): return 0
+	if not _part_stars.has(kind):
+		var scores := {}
+		var lo := INF
+		var hi := -INF
+		for k in _part_models(kind):
+			if not _part_models(kind)[k].has("brand"): continue
+			var sc := _part_score(kind, k)
+			scores[k] = sc; lo = minf(lo, sc); hi = maxf(hi, sc)
+		var out := {}
+		for k in scores:
+			out[k] = 3 if hi - lo < 0.001 else clampi(1 + roundi((scores[k] - lo) / (hi - lo) * 4.0), 1, 5)
+		_part_stars[kind] = out
+	return int(_part_stars[kind].get(key, 0))
