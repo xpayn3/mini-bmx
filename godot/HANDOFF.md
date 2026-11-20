@@ -868,9 +868,23 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   switch (green LED) with conduit into the hood. Metal parts use the ambientCG Metal009 / Rubber004 scans.
   Sound: the user's recording `assets/audio/garage_door_open.mp3` (Pixabay, ~12 s motor then a stop clunk): the motor plays from
   the hood as the door starts, fades out when it is up and the clunk (`DOOR_CLUNK_AT` 12.3 s) plays (`Garage._door_sound` / `_door_stop`).
-  **Showroom bike switch**: the bike on show rolls off forward, the new one rolls in from behind and brakes to a stop, wheels
-  turning (`Garage._swap_step`, `SWAP_*`). Bike cards: gold stars a size up; card pictures get soft contact shadows
-  (`PartThumbs._ground_shadow`) and an AgX studio light (bump `PartThumbs.THUMB_VER` when it changes). `RollerDoor.extrude` = a reusable profile-along-x mesh builder. Test:
+  The door rolls up in `DOOR_TIME` 8 s.
+  **Showroom bike switch** (`Garage._swap_step`): parked bikes lean `PARK_LEAN` with the bars at `PARK_STEER`; the one on show
+  stands up, straightens its bars and pedals off (cranks turn through `SWAP_GEAR`), the new one rolls in straight, brakes with
+  a nose dip + rebound, then leans over and swings its bars (small overshoot). Bike cards: gold stars a size up; card
+  pictures get soft contact shadows (`PartThumbs._ground_shadow`) and an AgX studio light (bump `PartThumbs.THUMB_VER`).
+  **Spare parts wall** (`garage/workshop_props.gd`, `WorkshopProps.build_async`, built a piece a frame after the garage
+  shows, glbs loaded on a thread): hand tools on the pegboard (holes texture), chainrings, cassette, rotor, tubes, chain; our
+  parts on the bench (fork, cranks, saddle, derailleur, rotor); painted framesets hung beside the door + one right of it;
+  three wheels above the pegboard. **Neon sign** right of the door: the made-up shop **GNARWHAL CYCLES**, all bent tube
+  (`WorkshopProps._neon`): a wheel logo, the name in blue + "cycles · est. 2026" in pink, built by `garage/neon_text.gd`
+  (`NeonText.build`: a stroke font, each stroke smoothed + swept as a round tube, dark electrode caps at the ends; add
+  glyphs to `_glyph` for new text), blue wall light, an occasional flicker.
+  **Showcase quality** (`Garage._showcase_quality`): the garage renders at top quality whatever the preset (4x MSAA + TAA,
+  full res, 16x aniso, full LOD, 8K soft-ultra shadows, ultra SSAO / SSIL, 128 GI rays); leaving restores Settings.
+  **Garage speed**: the customizer page is built on EDIT, not in the showroom; every part picture is saved to disk once
+  (`PartThumbs._disk_path`, `DISK_MAX` 3000, keys carry THUMB_VER + game version) and saved ones decode ~4 ms a frame
+  (`_disk_queue`). `BMX_GARAGE_PROBE=1` also prints `GARAGESLOW` frames > 40 ms with the tab. `RollerDoor.extrude` = a reusable profile-along-x mesh builder. Test:
   `BMX_GARAGE_DOOR=0.45` holds the door that far open (+ `BMX_GARAGE_CAM=0,4,5.5 BMX_GARAGE_AIM=0,1.9,-4`).
 - Bike height is placed from the **real tyre size and real axle positions** (no tyre clipping into the floor
   or the roller drums; verified with `BMX_TYRE_PROBE`).

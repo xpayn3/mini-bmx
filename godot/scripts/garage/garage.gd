@@ -55,7 +55,7 @@ const STAND_AT := Vector3(0.55, 0.0, 1.05)   # in front of the bike (camera side
 var preview_crank := 0.6
 const WALL_IN := -4.075   # z of the back wall's inside face (the wall is 0.25 thick, centred on z = -4.2)
 const DOOR_DELAY := 1.0     # s (after the garage is on screen) before the door starts to roll up
-const DOOR_TIME := 3.2      # s to roll it all the way up
+const DOOR_TIME := 8.0      # s to roll it all the way up (the motor recording runs ~12 s)
 static var _door_opened_once := false   # the door rolls up on the first visit; it stays open after
 var door_slats: Node3D
 var _mote_mat: ShaderMaterial = null   # sun-shaft dust motes (lit up to the door's open height)
@@ -78,6 +78,8 @@ var dist_t := 4.4
 var focus := Vector3(0, 0.85, 0)
 var focus_t := Vector3(0, 0.85, 0)
 var hand_t := 0.0   # handheld-camera clock
+const HANDHELD := 0.2          # how much of the original handheld sway is left (1 = the old, too-strong one)
+const HANDHELD_SPEED := 0.6    # and how fast it drifts
 var auto_spin := false   # the camera stays put unless you drag it
 var dragging := false
 var ui := CanvasLayer.new()
@@ -133,6 +135,7 @@ func _ready() -> void:
 	if not PREVIEWS.has(rider_preview): rider_preview = "pedal"
 	_probe_t = Time.get_ticks_usec()
 	_open_t = _probe_t
+	_showcase_quality(true)
 	_build_room()
 	_probe("room")
 	add_child(cam)
@@ -145,7 +148,13 @@ func _ready() -> void:
 	_probe("ui")
 	var first := tab
 	tab = ""   # so _set_tab frames the camera on the first page
-	_set_tab(env_tab if env_tab != "" and _has_tab(env_tab) else first)
+	if mode == "bike" and env_tab == "":
+		# the showroom: the customizer's first page is built when EDIT is pressed (_set_edit), not now. Built
+		# out of sight it rendered a picture of every paintable part (a whole bike each, ~100 ms a frame)
+		# and the garage stuttered for its first ~1.2 s
+		tab = first
+	else:
+		_set_tab(env_tab if env_tab != "" and _has_tab(env_tab) else first)
 	if mode == "bike": _set_edit(env_tab != "", false)   # tests that name a tab go straight to the customizer
 	_probe("page")
 	if Env.s("BMX_TYRE_PROBE") != "":
@@ -154,6 +163,42 @@ func _ready() -> void:
 	if cv.size() == 3:
 		orbit_t = float(cv[0]); pitch_t = float(cv[1]); dist_t = float(cv[2])
 		orbit = orbit_t; pitch = pitch_t; dist = dist_t
+
+## The garage is the showcase: whatever the graphics preset, it renders at the top quality (4x MSAA + TAA,
+## full resolution, 16x anisotropic, full mesh detail, 8K soft-ultra shadows, ultra SSAO / SSIL, more GI
+## rays, sharp glossy reflections). Leaving it puts the player's settings back (Settings.apply + the
+## project's own defaults for the global qualities).
+func _showcase_quality(on: bool) -> void:
+	var vp := get_viewport()
+	if vp == null: return
+	if not on:
+		Settings.apply()
+		RenderingServer.environment_set_ssao_quality(ProjectSettings.get_setting("rendering/environment/ssao/quality", 2),
+			true, 0.5, 2, 50.0, 300.0)
+		RenderingServer.environment_set_ssil_quality(ProjectSettings.get_setting("rendering/environment/ssil/quality", 2),
+			true, 0.5, 4, 50.0, 300.0)
+		RenderingServer.environment_set_sdfgi_ray_count(ProjectSettings.get_setting("rendering/global_illumination/sdfgi/probe_ray_count", 1))
+		RenderingServer.environment_set_ssr_roughness_quality(ProjectSettings.get_setting("rendering/environment/screen_space_reflection/roughness_quality", 1))
+		RenderingServer.positional_soft_shadow_filter_set_quality(ProjectSettings.get_setting("rendering/lights_and_shadows/positional_shadow/soft_shadow_filter_quality", 2))
+		return
+	vp.scaling_3d_scale = 1.0
+	vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
+	vp.msaa_3d = Viewport.MSAA_4X
+	vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_DISABLED
+	vp.use_taa = true
+	vp.mesh_lod_threshold = 0.0
+	vp.anisotropic_filtering_level = Viewport.ANISOTROPY_16X
+	vp.positional_shadow_atlas_size = 8192
+	RenderingServer.directional_shadow_atlas_set_size(8192, true)
+	RenderingServer.directional_soft_shadow_filter_set_quality(RenderingServer.SHADOW_QUALITY_SOFT_ULTRA)
+	RenderingServer.positional_soft_shadow_filter_set_quality(RenderingServer.SHADOW_QUALITY_SOFT_ULTRA)
+	RenderingServer.environment_set_ssao_quality(RenderingServer.ENV_SSAO_QUALITY_ULTRA, false, 0.5, 2, 50.0, 300.0)
+	RenderingServer.environment_set_ssil_quality(RenderingServer.ENV_SSIL_QUALITY_ULTRA, false, 0.5, 4, 50.0, 300.0)
+	RenderingServer.environment_set_sdfgi_ray_count(RenderingServer.ENV_SDFGI_RAY_COUNT_128)
+	RenderingServer.environment_set_ssr_roughness_quality(RenderingServer.ENV_SSR_ROUGHNESS_QUALITY_HIGH)
+
+func _exit_tree() -> void:
+	_showcase_quality(false)
 
 ## tests (BMX_GARAGE_PROBE=1): how long each part of opening the garage takes (`GARAGE <step> ms=`)
 ## and the first frames after it (`GARAGEFRAME`)
@@ -236,8 +281,11 @@ func _build_room() -> void:
 	env.ssao_enabled = true
 	env.ssao_radius = 0.5
 	env.ssao_intensity = 2.0
+	env.ssil_enabled = true          # light bouncing between close surfaces (bike, floor, bench) on top of SDFGI
+	env.ssil_radius = 3.0
+	env.ssil_intensity = 0.8
 	env.ssr_enabled = true
-	env.ssr_max_steps = 48
+	env.ssr_max_steps = 96
 	env.glow_enabled = true
 	env.glow_intensity = 0.3
 	env.glow_hdr_threshold = 1.2
@@ -324,12 +372,10 @@ func _build_room() -> void:
 		_box(Vector3(0.06, 0.9, 0.7), Vector3(x, 0.45, -3.6), steel)
 	var peg := _mat(Color("a67c52"), 0.9)
 	_box(Vector3(2.6, 1.3, 0.04), Vector3(-5.0, 1.8, -4.06), peg)
-	var tool := _mat(Color("c0392b"), 0.4, 0.5)
 	var chrome := _mat(Color(0.8, 0.82, 0.85), 0.15, 1.0)
-	for i in 7:
-		var x := -6.1 + i * 0.36
-		_box(Vector3(0.04, 0.32 + (i % 3) * 0.08, 0.02), Vector3(x, 1.85, -4.02), chrome if i % 2 else tool)
-	_cyl(0.18, 0.04, Vector3(-4.1, 2.25, -4.01), chrome, Vector3(PI / 2, 0, 0))   # a chainring on the wall
+	# the tools on it, our parts on the bench, framesets + wheels on the wall: WorkshopProps, built after
+	# the garage is on screen (a piece a frame)
+	WorkshopProps.build_async.call_deferred(self)
 	# red tool cabinet + a stack of tyres on the right
 	var red := _mat(Color("b3261e"), 0.35, 0.3)
 	_box(Vector3(1.0, 1.1, 0.55), Vector3(3.4, 0.55, -3.75), red)
@@ -372,9 +418,9 @@ func _build_room() -> void:
 	# fluorescent strip over the bench
 	var strip := StandardMaterial3D.new()
 	strip.emission_enabled = true; strip.emission = Color(1.0, 0.9, 0.75); strip.emission_energy_multiplier = 2.5
-	_box(Vector3(1.6, 0.04, 0.08), Vector3(-5.0, 3.0, -3.7), strip)
+	_box(Vector3(1.6, 0.04, 0.08), Vector3(-5.0, 2.6, -3.7), strip)   # just over the pegboard, under the wheels
 	var fl_l := OmniLight3D.new()
-	fl_l.position = Vector3(-5.0, 2.8, -3.4); fl_l.light_color = Color(1.0, 0.88, 0.7); fl_l.light_energy = 0.6; fl_l.omni_range = 4.0
+	fl_l.position = Vector3(-5.0, 2.45, -3.4); fl_l.light_color = Color(1.0, 0.88, 0.7); fl_l.light_energy = 0.6; fl_l.omni_range = 4.0
 	add_child(fl_l)
 	# workshop lighting so the bike reads from every side (it went black once orbited off the doorway):
 	# two cool-white ceiling tubes over the work area, a soft key from the front-right (true paint colour)
@@ -557,6 +603,24 @@ func _rebuild_bike() -> void:
 	rig.pose(bike_x, ride_y, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 if rider_on else -0.25, 0.0, 0.0, 0.6)
 	tf = _tyre_circle(rig.wheel_f)
 	tr = _tyre_circle(rig.wheel_r)
+	rig.set_meta("ride_y", ride_y)
+	if not rider_on:   # parked: leaning over onto its stand, bars turned
+		_show_pose(rig, bike_x, PARK_LEAN, PARK_STEER, 0.0, 0.0)
+		# leaned over, the tyres no longer sit where the upright fit put them: measure round the casing and
+		# drop (or lift) the bike until the lower tyre just touches the floor
+		var floor0 := func(_x: float, _z: float) -> float: return 0.0
+		var d := maxf(rig.tyre_depth(rig.wheel_f, tf.r, floor0), rig.tyre_depth(rig.wheel_r, tr.r, floor0))
+		ride_y += d + 0.0005
+		rig.set_meta("ride_y", ride_y)
+		_show_pose(rig, bike_x, PARK_LEAN, PARK_STEER, 0.0, 0.0)
+		# soft contact shadows where the tyres touch (they ride along when the bike rolls off / in)
+		PartThumbs._ground_shadow(rig, 0.8)
+		if Env.s("BMX_TYRE_PROBE") != "" or Env.s("BMX_GARAGE_PROBE") != "":
+			var sh := []
+			for c in rig.get_children():
+				if c.has_meta("no_frame"): sh.append("%.3f,%.3f,%.3f" % [c.global_position.x, c.global_position.y, c.global_position.z])
+			print("GARAGE park tyre depth f=%.4f r=%.4f (was %.4f) shadows=%s" % [rig.tyre_depth(rig.wheel_f, tf.r, floor0),
+				rig.tyre_depth(rig.wheel_r, tr.r, floor0), d, sh])
 	rider = null
 	_build_rollers(tr.c.x, tf.c.x, tf.c.y - tf.r)
 	if rider_on:
@@ -564,6 +628,7 @@ func _rebuild_bike() -> void:
 	_update_stand_rider()
 	_rider_visibility()
 	for mi in rig.find_children("*", "MeshInstance3D", true, false):
+		if mi.has_meta("no_frame"): continue   # the contact shadow quads cast nothing
 		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	if swap:
 		_arrive_t = -SWAP_DELAY
@@ -594,11 +659,18 @@ func _door_stop() -> void:
 	_door_sound(DOOR_CLUNK_AT)
 
 # ---------------------------------------------------------------- showroom: bikes roll out / in
-## Picking another bike in the showroom: the one on show rolls off forward (speeding up), the new one
-## rolls in from behind and brakes to a stop in the middle, wheels turning with the distance.
-const SWAP_OUT_T := 0.8     # s to roll off
-const SWAP_IN_T := 1.0      # s to roll in
-const SWAP_DELAY := 0.25    # the new one starts this long after the old one
+## Picking another bike in the showroom, like a film cut: the parked bike stands itself up off its lean
+## and straightens its bars, then rolls off forward, speeding up (the rear squats a touch as it pulls
+## away). The new one rolls in from behind dead straight, brakes (the nose dips and springs back), and
+## only once it has stopped settles over onto its lean while the bars swing round, with a small overshoot.
+const PARK_LEAN := 0.085    # rad the parked bike leans over (away from the camera, onto its stand)
+const PARK_STEER := -0.25   # rad the parked bars are turned
+const OUT_UP_T := 0.45      # s: standing up + bars straight
+const OUT_ROLL_T := 1.15    # s: rolling off (starts while it is still finishing standing up)
+const OUT_ROLL_AT := 0.32
+const IN_ROLL_T := 1.35     # s: rolling in and braking to a stop
+const IN_PARK_T := 0.6      # s: leaning over + bars round
+const SWAP_DELAY := 0.55    # the new one starts this long after the old one
 const SWAP_D := 4.5         # m rolled (off screen at the showroom lens)
 var _swap_next := false
 var _leaving: BikeRig = null
@@ -606,25 +678,48 @@ var _leave_x0 := 0.0
 var _leave_t := 0.0
 var _arrive_t := INF
 
+## a showroom bike drawn at x with this lean / bar angle, wheels turned by `roll` m, frame pitched
+func _show_pose(r: BikeRig, x: float, lean: float, steer: float, roll: float, pitch: float, crank := 0.6) -> void:
+	r.pose(x, float(r.get_meta("ride_y", ride_y)), 0.0, 0.0, pitch, 0.0, lean, steer,
+		roll / r.wheel_rf, roll / r.wheel_rr, crank)
+
+const SWAP_GEAR := 2.3   # wheel turns per crank turn riding away (a low gear: the pedals visibly go round)
+
+static func _smooth(k: float) -> float:
+	k = clampf(k, 0.0, 1.0)
+	return k * k * k * (k * (k * 6.0 - 15.0) + 10.0)   # smootherstep
+
+static func _back_out(k: float) -> float:   # eases out past 1 and back (a little overshoot)
+	k = clampf(k, 0.0, 1.0) - 1.0
+	return 1.0 + k * k * (2.7 * k + 1.7)
+
 func _swap_step(dt: float) -> void:
 	if is_instance_valid(_leaving):
 		_leave_t += dt
-		var k := clampf(_leave_t / SWAP_OUT_T, 0.0, 1.0)
-		var d := SWAP_D * k * k   # speeding up
-		_leaving.position.x = _leave_x0 + d
-		_leaving.wheel_r.rotation.z = -d / _leaving.wheel_rr
-		_leaving.wheel_f.rotation.z = -d / _leaving.wheel_rf
+		var up := _smooth(_leave_t / OUT_UP_T)                       # 0 parked -> 1 upright, bars straight
+		var k := clampf((_leave_t - OUT_ROLL_AT) / OUT_ROLL_T, 0.0, 1.0)
+		var d := SWAP_D * pow(k, 2.3)                                # pulling away, faster and faster
+		var squat := 0.018 * sin(PI * minf(k * 2.2, 1.0))            # the rear sits down as it accelerates
+		# pedalled away: the cranks go round with the back wheel through the gear
+		_show_pose(_leaving, _leave_x0 + d, PARK_LEAN * (1.0 - up), PARK_STEER * (1.0 - up), d, squat,
+			0.6 + d / _leaving.wheel_rr / SWAP_GEAR)
 		if k >= 1.0:
 			_leaving.queue_free()
 			_leaving = null
 	if _arrive_t < INF and rig:
 		_arrive_t += dt
-		var k := clampf(_arrive_t / SWAP_IN_T, 0.0, 1.0)
-		var rest := SWAP_D * (1.0 - k) * (1.0 - k)   # braking to a stop
-		rig.position.x = bike_x - rest
-		rig.wheel_r.rotation.z = rest / rig.wheel_rr   # turns forward, ending where it was posed
-		rig.wheel_f.rotation.z = rest / rig.wheel_rf
-		if k >= 1.0:
+		var k := clampf(_arrive_t / IN_ROLL_T, 0.0, 1.0)
+		var e := 1.0 - pow(1.0 - k, 3.0)                             # braking: fast in, slow to a stop
+		var rest := SWAP_D * (1.0 - e)
+		# the nose dips under the brakes near the end and springs back once stopped
+		var dive := -0.022 * sin(PI * clampf((k - 0.55) / 0.45, 0.0, 1.0))
+		var t2 := (_arrive_t - IN_ROLL_T) / IN_PARK_T
+		if t2 > 0.0:
+			dive = 0.012 * sin(t2 * 9.0) * exp(-t2 * 5.0)              # rebound, dying out
+		var park := _back_out(t2) if t2 > 0.0 else 0.0
+		_show_pose(rig, bike_x - rest, PARK_LEAN * minf(park, 1.08), PARK_STEER * park, -rest, dive)
+		if t2 >= 1.0:
+			_show_pose(rig, bike_x, PARK_LEAN, PARK_STEER, 0.0, 0.0)
 			_arrive_t = INF
 
 # ---------------------------------------------------------------- the rider on the bike
@@ -801,11 +896,17 @@ func _place_slats() -> void:
 
 func _process(dt: float) -> void:
 	_swap_step(dt)
-	if _probe_frames < 12 and Env.s("BMX_GARAGE_PROBE") != "":
+	if dt > 0.04 and _probe_frames >= 60 and Env.s("BMX_GARAGE_PROBE") != "":
+		print("GARAGESLOW dt_ms=%.0f tab=%s thumbs_busy=%s" % [dt * 1000.0, tab, thumbs._busy if thumbs else false])
+	var probe := _probe_frames < 60 and Env.s("BMX_GARAGE_PROBE") != ""
+	if probe:
 		_probe_frames += 1
-		print("GARAGEFRAME %d dt_ms=%.1f" % [_probe_frames, dt * 1000.0])
+		print("GARAGEFRAME %d dt_ms=%.1f pipelines=%d thumbs_busy=%s" % [_probe_frames, dt * 1000.0,
+			RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_DRAW), thumbs._busy if thumbs else false])
 	if _outside_terrain != null:   # the far chunks out of the door, a few ms a frame
+		var t0 := Time.get_ticks_usec()
 		_outside_terrain.update_stream(_outside_spot.x, _outside_spot.y, 3.0)
+		if probe: print("  stream_ms=%.1f" % ((Time.get_ticks_usec() - t0) / 1000.0))
 		if _outside_terrain.stream_complete():
 			_outside_terrain = null
 			if Env.s("BMX_GARAGE_PROBE") != "":
@@ -861,14 +962,16 @@ func _process(dt: float) -> void:
 	hand_t += dt
 	_pose_rider(dt)
 	_pose_stand_rider(dt)
-	var t := hand_t
+	# kept very small and slow (HANDHELD, HANDHELD_SPEED): the stronger sway made the player motion sick
+	var t := hand_t * HANDHELD_SPEED
+	var k := HANDHELD
 	cam.position += cam.basis * Vector3(
-		(sin(t * 0.53) + 0.6 * sin(t * 1.31 + 1.7)) * 0.018,
-		(sin(t * 0.71 + 0.4) + 0.5 * sin(t * 1.77 + 2.9)) * 0.012,
-		sin(t * 0.37 + 2.2) * 0.02)
-	cam.rotate_object_local(Vector3.RIGHT, (sin(t * 0.83 + 0.9) + 0.4 * sin(t * 2.1)) * 0.0022)
-	cam.rotate_object_local(Vector3.UP, (sin(t * 0.61 + 3.1) + 0.4 * sin(t * 1.9 + 0.5)) * 0.0028)
-	cam.rotate_object_local(Vector3.FORWARD, sin(t * 0.47 + 1.3) * 0.004)
+		(sin(t * 0.53) + 0.6 * sin(t * 1.31 + 1.7)) * 0.018 * k,
+		(sin(t * 0.71 + 0.4) + 0.5 * sin(t * 1.77 + 2.9)) * 0.012 * k,
+		sin(t * 0.37 + 2.2) * 0.02 * k)
+	cam.rotate_object_local(Vector3.RIGHT, (sin(t * 0.83 + 0.9) + 0.4 * sin(t * 2.1)) * 0.0022 * k)
+	cam.rotate_object_local(Vector3.UP, (sin(t * 0.61 + 3.1) + 0.4 * sin(t * 1.9 + 0.5)) * 0.0028 * k)
+	# (no roll: a tilting horizon is the worst for motion sickness)
 	cam.h_offset = 0.0   # the bike sits in the middle of the frame
 
 func _unhandled_input(e: InputEvent) -> void:
