@@ -346,6 +346,9 @@ func set_scenic(on: bool) -> void:
 		sun.shadow_blur = 2.0
 		sun_energy = 2.3
 		sky_mat.set_shader_parameter("golden", 1.0)
+		sky_mat.set_shader_parameter("sun_vec", Vector3.ZERO)   # the sky's sun = the light here
+		sky_mat.set_shader_parameter("night", 0.0)
+		sky_mat.set_shader_parameter("energy", 1.0)
 		sky_mat.set_shader_parameter("sunny", 0.0)
 		sky_mat.set_shader_parameter("light_energy", 0.85)
 		env.fog_light_color = Color(0.93, 0.70, 0.52)
@@ -449,14 +452,16 @@ func _apply_light(h: float, L: Dictionary) -> void:
 	# the sun swings ~200 deg across the day; 16:00 = the old afternoon sun (SUN_AZ)
 	var yaw := deg_to_rad(rad_to_deg(atan2(SUN_AZ.y, SUN_AZ.x)) + float(L.sun_turn) + (x - 10.0) * (100.0 / 7.0))
 	var g := 1.0 - smoothstep(8.0, 30.0, el_deg)        # how golden (low sun)
-	var n := 1.0 - smoothstep(-9.0, 0.5, el_deg)        # how much night
+	var n := 1.0 - smoothstep(-11.0, -3.5, el_deg)      # how much night (after the afterglow has faded)
 	var day := 1.0 - n
 	var gw := clampf(g * day * float(L.warmth), 0.0, 1.0)
+	var tw := smoothstep(1.0, -4.0, el_deg) * day        # twilight: the sun just under the horizon, the sky still glowing
+	var low := 1.0 - smoothstep(1.0, 12.0, el_deg)      # the sun touching the horizon: deep orange, long rays
 	var dirv: Vector3
 	if el_deg > -3.0:
 		var e := deg_to_rad(maxf(el_deg, 2.5))   # never light from below the ground
 		dirv = Vector3(cos(yaw) * cos(e), sin(e), sin(yaw) * cos(e))
-		sun.light_color = Color(1.0, 0.95, 0.87).lerp(Color(1.0, 0.6, 0.34), gw)
+		sun.light_color = Color(1.0, 0.95, 0.87).lerp(Color(1.0, 0.62, 0.36), gw).lerp(Color(1.0, 0.5, 0.26), low * gw)
 		sun_energy = lerpf(RIDE_SUN, 2.2, g) * smoothstep(-3.0, 5.0, el_deg) * float(L.sun)
 	else:
 		var e := deg_to_rad(15.0)   # the moon, opposite the sun (low enough to show in the sky ahead)
@@ -471,39 +476,47 @@ func _apply_light(h: float, L: Dictionary) -> void:
 	sun.shadow_bias = lerpf(0.02, 0.08, g)
 	sun.shadow_normal_bias = lerpf(1.2, 3.0, g)
 	sun.shadow_blur = lerpf(lerpf(1.0, 2.0, g), 2.6, n) * float(L.shadow_soft)
-	sun.light_volumetric_fog_energy = lerpf(2.6, 0.12, n)
+	sun.light_volumetric_fog_energy = lerpf(lerpf(2.6, 3.0, gw), 0.12, n)   # god rays through the haze at golden hour
 	# sky: blue + white clouds by day, golden low, stars at night; its photographed sun follows ours
 	_pick_sky_hdri(el_deg, atan2(dirv.x, -dirv.z))
 	sky_mat.set_shader_parameter("golden", gw)
+	var se := deg_to_rad(el_deg)   # the true sun for the sky (also under the horizon: dusk / dawn glow)
+	sky_mat.set_shader_parameter("sun_vec", Vector3(cos(yaw) * cos(se), sin(se), sin(yaw) * cos(se)))
 	sky_mat.set_shader_parameter("sunny", day * (1.0 - gw))
 	sky_mat.set_shader_parameter("night", n)
 	sky_mat.set_shader_parameter("energy", lerpf(1.0, 0.55, n))   # the night exposure is high: keep the sky a deep blue
 	sky_mat.set_shader_parameter("light_energy", lerpf(lerpf(0.55, 0.85, g), 0.2, n) * float(L.sky))
 	# night: the sky barely lights anything; what's in shadow of the moon goes close to black
-	env.ambient_light_energy = amb_base * float(L.sky) * lerpf(1.0, 0.3, n)
-	env.ambient_light_color = Color(0.55, 0.68, 0.9).lerp(Color(0.16, 0.22, 0.42), n)
+	# twilight: the glowing sky is the only light; the shade goes lavender
+	env.ambient_light_energy = amb_base * float(L.sky) * lerpf(1.0, 0.3, n) * (1.0 + 0.6 * tw)
+	env.ambient_light_color = Color(0.55, 0.68, 0.9).lerp(Color(0.62, 0.55, 0.78), gw * 0.6).lerp(Color(0.55, 0.45, 0.72), tw).lerp(Color(0.16, 0.22, 0.42), n)
 	env.ambient_light_sky_contribution = lerpf(0.8, 0.5, n)
 	# fog / haze: at night a black-blue distance that swallows the land, a thin cold haze the lamp beam shows in
 	_ride_fog()
-	env.fog_density *= float(L.haze) * lerpf(1.0, 1.35, n)
-	env.fog_light_color = RIDE_FOG.lerp(Color(0.93, 0.72, 0.55), g * day).lerp(Color(0.012, 0.016, 0.03), n)
-	env.fog_sun_scatter = 0.3 * g * day
+	env.fog_density *= float(L.haze) * lerpf(1.0, 1.35, n) * lerpf(1.0, 0.6, gw)   # golden: clear air, not milk
+	env.fog_light_color = RIDE_FOG.lerp(Color(0.95, 0.64, 0.46), g * day).lerp(Color(0.4, 0.3, 0.46), tw).lerp(Color(0.012, 0.016, 0.03), n)
+	env.fog_sun_scatter = 0.1 * gw * (1.0 - tw) * (1.0 - 0.6 * low)
+	# into a low sun the haze scattered it straight at the lens and the screen went white: less forward glare
+	env.volumetric_fog_anisotropy = lerpf(0.78, 0.6, g * day)
 	env.fog_aerial_perspective = 0.75 * (1.0 - n)
-	env.volumetric_fog_albedo = Color(0.86, 0.9, 0.95).lerp(Color(1.0, 0.84, 0.66), g * day).lerp(Color(0.7, 0.75, 0.85), n)
-	env.volumetric_fog_density = VOL_DENSITY * float(L.haze) * lerpf(1.0, 2.2, n)
-	env.volumetric_fog_ambient_inject = lerpf(0.12, 0.0, n)   # no milky veil at night: only the lamp lights the haze
-	env.tonemap_exposure = lerpf(lerpf(0.8, 0.95, g), 1.9, n) * float(L.exposure)
+	env.volumetric_fog_albedo = Color(0.86, 0.9, 0.95).lerp(Color(1.0, 0.8, 0.6), g * day).lerp(Color(0.7, 0.75, 0.85), n)
+	env.volumetric_fog_density = VOL_DENSITY * float(L.haze) * lerpf(1.0, 0.25, g * day) * lerpf(1.0, 2.2, n)   # a low sun lit the haze into a white veil
+	env.volumetric_fog_ambient_inject = lerpf(lerpf(0.12, 0.03, gw), 0.0, n)   # dark air between the sun's rays   # no milky veil at night: only the lamp lights the haze
+	env.tonemap_exposure = lerpf(lerpf(0.8, 0.78, g) + 0.75 * tw, 1.9, n) * float(L.exposure)
 	# night vision: colour fades (rods), shadows stay deep
-	env.adjustment_saturation = float(L.saturation) * lerpf(1.0, 0.42, n)
-	env.adjustment_contrast = float(L.contrast) * lerpf(1.0, 1.08, n)
+	env.adjustment_saturation = float(L.saturation) * lerpf(1.0, 1.06, gw) * lerpf(1.0, 0.42, n)
+	env.adjustment_contrast = float(L.contrast) * lerpf(1.0, 1.07, gw) * lerpf(1.0, 1.08, n)
 	env.adjustment_brightness = lerpf(1.0, 0.94, n)
 	# lamps bloom at night
-	env.glow_hdr_threshold = lerpf(0.92, 0.7, n)
+	env.glow_hdr_threshold = lerpf(lerpf(0.92, 0.85, gw), 0.7, n)   # the low sun blooms
 	if cam_attr:   # auto exposure lifted the night ~5x into a grey day: off in the dark, the exposure above sets it
 		cam_attr.auto_exposure_enabled = n < 0.5
+		cam_attr.auto_exposure_min_sensitivity = lerpf(80.0, 40.0, gw)   # facing the low sun the eye stops down
+		cam_attr.auto_exposure_max_sensitivity = lerpf(140.0, 95.0, gw)  # and doesn't lift the warm light into a wash
 	night_k = n
 	if dust and dust.sim != null:   # the dust's sky light: dim and cold at night (it glowed white in the dark)
-		dust.sim.amb_col = Color(0.5, 0.6, 0.78).lerp(Color(0.025, 0.032, 0.05), n)
+		dust.sim.sun_gain = lerpf(1.0, 0.2, g * day)
+		dust.sim.amb_col = Color(0.5, 0.6, 0.78).lerp(Color(0.62, 0.5, 0.52), gw).lerp(Color(0.025, 0.032, 0.05), n)
 	# water: reflect this sky and glint where this sun is (it used to keep a fixed noon sky + sun)
 	if terrain and terrain.has_method("water_light"):
 		var hz := Color(0.784, 0.933, 0.969).lerp(Color(1.0, 0.78, 0.6), gw).lerp(Color(0.07, 0.09, 0.15), n)

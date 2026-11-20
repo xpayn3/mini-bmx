@@ -85,27 +85,54 @@ vec3 night_sky(vec3 d, vec3 hd) {
 	return sky;
 }
 
+// the true sun (it may be under the horizon: dusk / dawn); zero = use the light (title screen)
+uniform vec3 sun_vec = vec3(0.0);
+vec3 sun_true() {
+	return length(sun_vec) > 0.5 ? normalize(sun_vec) : normalize(LIGHT0_DIRECTION);
+}
+
+// golden hour + twilight: a deep blue -> indigo zenith, a peach / magenta band, a horizon burning orange-red
+// under the sun and pink opposite it (the "belt of Venus" over the blue earth shadow), a big soft aureole round
+// the sun, clouds lit from below (gold on the sun's side, pink / lavender away, a silver lining at the sun).
+// The sun under the horizon (dusk / dawn): colours deepen, the sky dims, high clouds keep glowing pink-red.
 vec3 golden_sky(vec3 d, vec3 hd) {
-	vec3 sd = normalize(LIGHT0_DIRECTION);
+	vec3 sd = sun_true();
+	float sh = sd.y;
+	float below = smoothstep(0.03, -0.13, sh);          // 0 sun up .. 1 deep twilight
 	float mu = dot(d, sd);
+	float m = max(mu, 0.0);
 	float up = clamp(d.y, 0.0, 1.0);
-	float hz = pow(1.0 - up, 5.0);
-	// side of the sky the sun is on: warmer, brighter
+	float hz = pow(1.0 - up, 4.0);
 	float toward = clamp(dot(normalize(d.xz + vec2(1e-4)), normalize(sd.xz + vec2(1e-4))) * 0.5 + 0.5, 0.0, 1.0);
-	vec3 horizon = mix(vec3(0.86, 0.58, 0.55), gold_horizon, toward * toward);
-	vec3 sky = mix(gold_zenith, horizon, hz);
-	sky += gold_sun * (pow(max(mu, 0.0), 8.0) * 0.55 + pow(max(mu, 0.0), 90.0) * 1.6) * (0.4 + hz);
-	// clouds from the HDRI: clear sky is blue, clouds are grey/white
+	vec3 zen = mix(gold_zenith, vec3(0.07, 0.08, 0.24), below);
+	vec3 mid = mix(vec3(0.98, 0.62, 0.58), vec3(0.62, 0.3, 0.52), below);
+	vec3 hor_sun = mix(gold_horizon * vec3(1.0, 0.95, 0.85), vec3(1.0, 0.3, 0.1), below);
+	vec3 hor_away = mix(vec3(0.95, 0.6, 0.68), vec3(0.7, 0.4, 0.62), below);
+	vec3 horizon = mix(hor_away, hor_sun, pow(toward, 1.6));
+	vec3 sky = mix(zen, mid, pow(1.0 - up, 2.4) * 0.75);
+	sky = mix(sky, horizon, hz);
+	// the earth's shadow: a blue-grey band low in the sky opposite the sun, the pink belt just above it
+	float away = smoothstep(0.55, 1.0, 1.0 - toward);
+	float band = step(0.0, d.y);
+	sky = mix(sky, vec3(0.26, 0.3, 0.52), away * smoothstep(0.1, 0.0, d.y) * (0.25 + 0.55 * below) * band);
+	sky += vec3(0.5, 0.22, 0.3) * away * smoothstep(0.03, 0.1, d.y) * smoothstep(0.26, 0.1, d.y) * 0.6 * band;
+	// the sun's glow: a wide warm aureole, a hot core; under the horizon a red glow along it
+	float vis = 1.0 - below * 0.55;
+	sky += gold_sun * (pow(m, 5.0) * 0.55 + pow(m, 32.0) * 1.1 + pow(m, 350.0) * 3.0) * vis;
+	sky += vec3(1.0, 0.32, 0.1) * pow(toward, 6.0) * hz * below * 0.9;
+	// clouds from the HDRI (clear sky is blue, clouds are grey / white), lit from below
 	float lum = dot(hd, vec3(0.3, 0.59, 0.11));
 	float blue = clamp((hd.b - hd.r) / max(hd.b, 1e-3), 0.0, 1.0);
 	float cloud = (1.0 - smoothstep(0.06, 0.3, blue)) * smoothstep(0.0, 0.06, d.y);
 	float lit = clamp(lum / (lum + 0.9), 0.0, 1.0);
-	vec3 cloud_c = mix(vec3(0.42, 0.33, 0.42), mix(vec3(0.98, 0.62, 0.48), vec3(1.0, 0.78, 0.5), toward), lit);
-	cloud_c *= 0.55 + 0.9 * lit + pow(max(mu, 0.0), 6.0) * 1.2;
-	sky = mix(sky, cloud_c, cloud * 0.85);
-	// below the horizon: a warm haze (seen only past the far hills)
-	sky = mix(sky, horizon * 0.8, smoothstep(0.0, -0.08, d.y));
-	return sky;
+	vec3 c_sun = mix(vec3(1.0, 0.55, 0.32), vec3(1.0, 0.36, 0.2), below);
+	vec3 c_away = mix(vec3(0.85, 0.5, 0.62), vec3(0.45, 0.26, 0.45), below);
+	vec3 cloud_c = mix(vec3(0.3, 0.24, 0.38), mix(c_away, c_sun, pow(toward, 1.5)), 0.35 + 0.65 * lit);
+	cloud_c *= 0.6 + 0.8 * lit + pow(m, 4.0) * 1.6 + pow(m, 60.0) * 3.0;   // silver lining round the sun
+	sky = mix(sky, cloud_c, cloud * 0.88);
+	// the land's haze below the horizon (seen past the far hills)
+	sky = mix(sky, horizon * 0.75, smoothstep(0.0, -0.08, d.y));
+	return sky * 0.62 * mix(1.0, 0.4, smoothstep(-0.02, -0.15, sh));
 }
 
 void sky() {
@@ -123,8 +150,14 @@ void sky() {
 		vec3 g = golden_sky(d, min(hd, vec3(3.0)));
 		if (!AT_CUBEMAP_PASS) {
 			// the sun disc itself
-			float mu = dot(d, normalize(LIGHT0_DIRECTION));
-			g += vec3(1.0, 0.8, 0.55) * smoothstep(0.99955, 0.9998, mu) * 14.0;
+			// the sun's disc: big, hot white-gold, a little flattened and redder as it touches the horizon
+			vec3 sd = sun_true();
+			vec3 dd = d - sd;
+			dd.y *= 1.0 + 0.35 * smoothstep(0.08, 0.0, sd.y);
+			float r = length(dd) / 0.0105;
+			float disc = 1.0 - smoothstep(0.88, 1.0, r);
+			vec3 sc = mix(vec3(1.0, 0.93, 0.78), vec3(1.0, 0.5, 0.22), smoothstep(0.1, 0.0, sd.y));
+			g += sc * disc * (9.0 + 5.0 * sqrt(max(1.0 - r * r, 0.0))) * step(-0.012, d.y);
 		}
 		c = mix(c, g, golden);
 	}

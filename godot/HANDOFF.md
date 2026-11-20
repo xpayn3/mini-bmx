@@ -493,6 +493,12 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   saturation x0.42 (night vision), no ambient haze inject (only lamps light the fog), dark blue-black distance fog, the smoke
   sim's sky light dimmed (`dust.sim.amb_col`). A real moon in `sky_hdri.gdshader` (`moon_disc`: maria, craters, limb
   darkening, halo; clouds pass over it) where the moon light is. `BMX_MOON_PROBE=1` prints its direction.
+- **Sunrise / sunset (2026-11-20)**: `golden_sky` in `sky_hdri.gdshader` is a full twilight sky from the true sun (`sun_vec`, also
+  under the horizon): blue -> indigo zenith, peach / magenta band, horizon orange-red under the sun and pink opposite (belt of Venus
+  over the earth shadow), a big aureole + a flattened disc, clouds lit from below with a silver lining; night (`n`) now starts at
+  -3.5..-11 deg so the afterglow shows (`tw` = twilight: lavender ambient, exposure up). A low sun lit the volumetric haze (and the
+  dust) into a white veil when facing it: haze density x0.25 and dust `sun_gain` 0.2 at golden (`g`), auto exposure can't lift
+  warm light. Presets: Sunrise 6.55 haze 0.85, Dusk 20.1 haze 1.1.
 - **Bike lights** (`bike/bike_light.gd`, `BikeLight`; `build.lights.model`, garage Bars tab › LIGHTS, cards with lumens):
   Glint 150 (pod) / Luma 800 (can, default incl. old saves) / Nocta 1800 (finned) / Duskbane 4000 (twin) / Sundowner 6500 (LED bar
   over the stem) + a red tail light under the saddle. `BikeRig.mount_lights` puts the lamp on the left third of the bar (`_tube_at`,
