@@ -275,6 +275,13 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   -> the foot on the lower pedal (level cranks: the side the bike leans to, else left) goes to `Terrain.top_height`
   beside the bike, the bike leans `DAB_LEAN` onto it, the body stays upright (rider `dab` input). Eases in 0.5 s, out
   0.4 s on pedalling or backing up (held brake). The physics is untouched (on a slope the bike may still creep).
+  **Smarter + calmer (2026-11-20)**: slowing to a stop (< 1.8 m/s, decelerating) brings the foot out early; which foot
+  (`_pick_dab_side`): on a side slope the uphill foot (shorter reach), never onto a rock / bank > 35 cm higher (steps to
+  the open side), else the lower pedal. Foot goes down `DAB_FWD` 10 cm ahead of the BB, `DAB_OUT` 36 cm out. The bike
+  settles onto it with a stylish `DAB_LEAN` 0.24 rad (~14 deg, more when the foot's ground is lower) plus a slow breathing
+  sway (`_dab_lean_s`); the body sits up relaxed (`relax` = 0.85 x dab) and, after 0.6 s, looks round (`_idle_look`:
+  ahead, off to a side, back up the trail over the shoulder, down at the foot, up at the hills, 1.4-3.6 s each, through
+  `lookYaw` / `lookPitch`). Test: `BMX_STRAIGHT=1 BMX_STOP_AT=3,30 BMX_CAM=chase BMX_CAM_ORBIT=3.0 BMX_DUST_SHOTS=…`.
 - **Riding style** (matched to a reference clip of real downhill technique): rolling, the rider stands in
   the attack position (`stand` in `update_pose`, not only while pedalling); in turns the bike lays over
   well past the body (`bikeLeanMul` 1.55, cap 1.3 rad; the body leans ~70 % of the rider + bike lean,
@@ -866,10 +873,38 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   `.glsl` files need an import (`--headless --import`) after editing. Falls back to the
   old sprites / FogVolumes without a RenderingDevice; `BMX_SPRITE_DUST=1` forces the sprites.
 - **Dust tab** in the tuning card (Tune groups `Dust look` / `Dust trail` / `Dust spray`, keys `dust*`, read live every frame by `SmokeSim._read_tune` and `RideDust`): thickness, wispy edges, rise, swirl, curls, grit; fade speed, spread, wind, room ahead of the rider (the sim box trails behind: `ahead` 3 m = ~22 m of trail); rear / front amount, spray cone at the tyre (`dustWidth`, degrees: the spray starts tyre-wide and widens behind like a funnel), sideways, kick-up, throw, gusts, landing clouds; **Grit** (`dustGrit*`): amount, grain size (2 mm-1.2 cm at 1x, shader `grain_k`), scatter, thrown back, kicked up, speed it starts at. Dust casts no shadow (`SmokeSim.SHADOW_K` 0). Ride presets leave `dust*` alone; Reset puts them back to the defaults. Test: `BMX_PANEL=dust`, `BMX_TUNE=dustOpacity=2`.
+- **Contact shadows** (`fx/contact_shadow.gd`, `Game.contact`): the sun's shadow bias (big at golden hour) lifts the
+  shadow off the tyres, so the bike looked like it floated. Three soft black Decals on `Terrain.GROUND_LAYER` only: a tight
+  one under each tyre + a faint wide one under the bike (the ragdoll's pelvis in a crash), lying on the ground's slope,
+  fading as the tyre / bike lifts off. Kept subtle (the user found a strong one a "black splotch"). `BMX_NO_CONTACT=1` = off.
 - Dirt chunks, **tyre tracks**: one ring-buffer ArrayMesh
   (14 000 segments ≈ 1 km/wheel, one draw call, each segment uploads only its own bytes) drawn by
   `tyre_track.gdshader` — lit, knob-tread dimples bump-mapped, soft edges + soil lip, skid streaks, distance fade.
-- Grime: mud builds up (slow: `Grime.MUD_RATE` 0.25) and washes off in water; wet gloss + drips. Passes
+- Grime: mud builds up (slow: `Grime.MUD_RATE` 0.25) and washes off in water; wet gloss + drips. **Dust first** (2026-11-20): riding dirt / sand
+  lays a see-through film of the ground's colour (`Grime.dust`, global `grime_dust`, ~30 s to full, thickest low down, drawn by the
+  same `grime_mud` pass, now a transparent pass); mud only piles up once the bike is dusty (`smoothstep(0.4, 0.95, dust)`) or
+  wet. Mud is much darker than the dust and raised (screen-space bump from a lumpy height field in the pass: no UVs
+  needed); thick middles dark, edges drying lighter. **Dirt map** (where it gathers, `grime_mud.gdshader`): low down;
+  the spray band round each tyre (globals `grime_wf` / `grime_wr` = axle + radius in bike-root space; fork arch / lowers,
+  down tube, stays, shins); crevices from a baked 3D map of the bike (`Grime._cav_work` on a worker, ~250 ms, 2.5 cm
+  occupancy grid box-blurred, sampled 7 cm off the surface so only *other* geometry nearby counts; spokes left out);
+  undersides + forward faces (mud), top faces (dust). Every bike part is pinned like the rider's (`_pin_rows`: its rest
+  transform as `grime_r0` / `grime_hrow` / `grime_r2`), so nothing slides with steering / suspension / a spinning rim.
+  `BMX_GRIME_MAP=1` shows the map (r spray, g crevice, b under / front), `BMX_GRIME_PROBE=1` prints the bake.
+  Wheel parts (rim / hub / spokes / rotor, `wheel` flag) skip the map: mud in clumps by angle, heavier toward the bead;
+  tyre sidewalls get the same clumps, the tread fills first. **Stickers get dirty too**: each decal material gets its
+  own mud + blood pass (`Grime._decal_mud`, masked by the sticker's alpha, render priority 2 / 3 after the decal's 1;
+  wet 4); blood is now drawn see-through for that. Tyre lettering: `logos.tyres.lift` (0 at the rim .. 1 at the knobs,
+  default 0.1), scale, turn and colour are now used (garage Logos > Tyre walls > Placement: "Height on sidewall").
+  **Drying + flaking**: `Grime.dry` (0 fresh .. 1 crust, `DRY_T` 90 s without fresh mud, not while wet; fresh mud
+  and water make it wet again) and `Grime.flake` (crust knocked off: landings, wheel rattle from `vw_f` / `vw_r`, speed;
+  fresh mud fills it back) go to the shader as global `grime_age`. Per splotch: thin edges and random plates dry first,
+  dried = pale / matte, thick crust cracks into ~2 cm Voronoi plates (`gr_cells`), flaked plates vanish along the cracks
+  leaving a stain. Knocked-off crust flies as `fx.chunk`s (`Grime.take_shed`, spawned in `Game.ride_fx`).
+  Tests: `BMX_MUD_COAT` (start, not held), `BMX_MUD_DRY`, `BMX_MUD_FLAKE`; `BMX_GRIME_PROBE=1` prints `GRIME t=` lines.
+  Test: `BMX_DUST_COAT=0.8` (+ `BMX_MUD`, `BMX_BLOOD_COAT`). Mud / blood on rider limbs stay put: `Rider.set_limb` takes the
+  limb's twist from the sideways axis (the shortest turn from +Y spun shins / forearms round as they pointed down, so the
+  pattern slid round the leg); glove fingers carry their bone-space shape in CUSTOM0 (`grime_pin` 2). Passes
   are removed from shared materials when a ride ends.
 - **Cacti** (`world/cactus_geo.gd`): five kinds (saguaro, tall saguaro with blossoms, barrel with a flower
   crown, organ pipe, prickly pear with fruit), each its own MultiMesh list `cactus0..4`. Built from ribbed tubes

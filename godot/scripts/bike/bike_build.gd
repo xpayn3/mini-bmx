@@ -566,7 +566,7 @@ static func decal_config(b: Dictionary) -> Dictionary:
 	var cfg := {"labels": labels}
 	var tl: Dictionary = b.logos.tyres
 	if tl.logo != "none" and tl.text.strip_edges() != "":
-		cfg.tyres = {"text": tl.text, "scale": float(tl.get("scale", 1.0)), "rot": float(tl.get("rot", 0.0)), "meshes": [["wheel_front", "rubber"], ["wheel_rear", "rubber"]]}
+		cfg.tyres = {"text": tl.text, "scale": float(tl.get("scale", 1.0)), "rot": float(tl.get("rot", 0.0)), "lift": float(tl.get("lift", 0.1)), "fill": Color(String(tl.get("fill", "f4f4f0"))), "meshes": [["wheel_front", "rubber"], ["wheel_rear", "rubber"]]}
 	var rl: Dictionary = b.logos.rims
 	var rim := {"fill": Color(rl.fill), "depth": float(b.wheels.rim_depth) / 1000.0, "count": int(rl.get("count", 2)), "scale": float(rl.get("scale", 1.0)), "rot": float(rl.get("rot", 0.0)),
 		"meshes": [["wheel_front", "rim"], ["wheel_rear", "rim"]]}

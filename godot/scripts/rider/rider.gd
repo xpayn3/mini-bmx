@@ -748,8 +748,14 @@ static func set_limb(n: Node3D, a: Vector3, b: Vector3) -> void:
 	if l < 1e-5:
 		n.transform = Transform3D(Basis.from_scale(Vector3(1, 1e-4, 1)), a + d * 0.5)
 		return
-	var q := Quaternion(Vector3.UP, d / l)
-	n.transform = Transform3D(Basis(q).scaled_local(Vector3(1, l, 1)), a + d * 0.5)
+	# the twist about the limb comes from the rider's sideways axis, not the shortest turn from +Y: that one
+	# spun the cylinder round its axis whenever a shin / forearm pointed down, and the mud / blood (drawn in
+	# the part's own space, shaders/grime_*) slid round the leg as it pedalled. Same as before for an upright limb.
+	var y := d / l
+	var w := smoothstep(0.8, 0.95, absf(y.z))   # limb along the sideways axis: take the forward one instead
+	var ref := Vector3.BACK * (1.0 - w) + Vector3.RIGHT * w
+	var z := (ref - y * ref.dot(y)).normalized()
+	n.transform = Transform3D(Basis(y.cross(z), y, z).scaled_local(Vector3(1, l, 1)), a + d * 0.5)
 
 
 ## torso: like set_limb, but keeps its width across the body (`right`) so the section doesn't twist

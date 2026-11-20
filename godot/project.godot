@@ -92,6 +92,22 @@ mud_col={
 "type": "color",
 "value": Color(0.35, 0.235, 0.133, 1)
 }
+grime_dust={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+grime_age={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+grime_wf={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+grime_wr={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
 grime_root={
 "type": "mat4",
 "value": Projection(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
