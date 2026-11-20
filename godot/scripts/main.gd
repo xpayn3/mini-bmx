@@ -2145,7 +2145,7 @@ func _bench(dir: String) -> void:
 	for i in 90: await get_tree().process_frame   # let the world stream in, shaders compile
 	var q: int = Settings.get_v("quality")
 	var line := "BENCH quality=%s" % Settings.QUALITY_NAMES[q]
-	for cam in ["drone", "chase", "diorama"]:
+	for cam in ["trail", "chase", "drone"]:
 		game.cam.set_mode(cam)
 		var ft := PackedFloat32Array()
 		var gpu := 0.0
@@ -2293,7 +2293,7 @@ func _showcase(dir: String) -> void:
 	await ride.call(0.6)
 	await shot.call("wet")
 	game.grime.clean()
-	game.cam.set_mode("close")
+	game.cam.set_mode("drone")
 	for i in 3:
 		game.dust.cloud(game.drawn_pos, Vector3.ZERO, game.ground_dust(game.phys.x, game.phys.z, 1), 3.0, 1.2)
 		await ride.call(0.25)
@@ -2304,7 +2304,7 @@ func _showcase(dir: String) -> void:
 	await ride.call(0.15)
 	(game.grade_rect.material as ShaderMaterial).set_shader_parameter("blur", 1.0)
 	await shot.call("speedblur")
-	game.cam.set_mode("dolly")
+	game.cam.set_mode("side")
 	await ride.call(1.5)
 	game.toggle_photo()
 	for i in 20: await get_tree().process_frame

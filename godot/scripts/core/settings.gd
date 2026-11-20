@@ -365,6 +365,7 @@ func load_settings() -> void:
 	if int(data.cam_rev) < 1:
 		if data.camera == "drone": data.camera = "trail"
 		data.cam_rev = 1
+	if not CameraRig.PRESETS.has(str(data.camera)): data.camera = "trail"   # a view that was removed
 	_install_bindings()
 
 func save() -> void:

@@ -1,6 +1,6 @@
 class_name CameraRig
 extends Camera3D
-## Port of updateCamera() + the camera presets from src/main.js: diorama / chase / side / drone /
+## The ride cameras: trail (default) / helmet + bike POV / chase / drone / side /
 ## trackside... Orbit with Z / X or a mouse drag (or the right stick), zoom with the wheel or + / -.
 
 ## C / pad Y cycle in this order (the most used first, so the default is never far away)
@@ -16,13 +16,7 @@ const PRESETS := {
 	# a camera drone: slow + floaty, banks into turns, pitches with speed, hovers in the wind, OSD overlay
 	"drone":     {"label": "Drone",      "dist": 22.0, "pitch": 36.0, "follow": true,  "fov": 34.0, "rate": 0.55, "lag": 1.4, "drift": true, "drone": true},
 	"side":      {"label": "Side",       "dist": 14.0, "pitch": 10.0, "follow": true,  "fov": 28.0, "orbit": PI / 2, "rate": 2.5},
-	"dolly":     {"label": "Low dolly",  "dist": 5.0,  "pitch": 5.0,  "follow": true,  "fov": 24.0, "orbit": PI * 0.42, "rate": 2.8},
-	"close":     {"label": "Close",      "dist": 16.0, "pitch": 40.0, "follow": true,  "fov": 30.0},
-	"diorama":   {"label": "Diorama",    "dist": 38.0, "pitch": 46.0, "follow": true,  "fov": 30.0},
 	"trackside": {"label": "Trackside",  "mode": "trackside", "fov": 14.0},
-	"orbitcam":  {"label": "Slow orbit", "dist": 12.0, "pitch": 20.0, "follow": true,  "fov": 32.0, "spin": 0.2},
-	"iso":       {"label": "Isometric",  "dist": 34.0, "pitch": 35.0, "follow": false, "fov": 28.0, "orbit": PI / 4},
-	"top":       {"label": "Top-down",   "dist": 34.0, "pitch": 84.0, "follow": false, "fov": 30.0},
 }
 ## title screen only (not in the C cycle): behind and above the rider, looking out over the landscape
 const VISTA := {"label": "Lookout", "mode": "vista", "fov": 42.0, "back": 6.0, "up": 0.6, "side": -1.9, "look": 160.0, "drop": -0.09, "yaw_off": -1.5708}
@@ -238,7 +232,6 @@ func update_cam(dt: float) -> void:
 			if P.get("ahead", false) and trail_dir.length_squared() > 0.01:
 				dir_h = atan2(-trail_dir.z, trail_dir.x)
 			cam_yaw += BikePhysics.ang_diff(dir_h, cam_yaw) * minf(1.0, dt * P.get("rate", 1.4) * follow_k * minf(1.0, absf(st.v) / 4))
-		if P.has("spin"): orbit_t += P.spin * dt
 		elif bool(Settings.get_v("cam_recenter")) and t - pan_t > 2.5 and not dragging:
 			# swing back to the preset angle a moment after the last drag / Z X / stick turn
 			var k := minf(1.0, dt * 1.2)
