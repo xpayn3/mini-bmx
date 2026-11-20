@@ -301,14 +301,17 @@ func _look_group(group: String) -> void:
 		_header(group)
 		if group == "Helmet":
 			list.add_child(UITheme.label("Model (textured ones come with their goggles)", 13))
-			list.add_child(RiderPanels.helmet_picker(str(look.get("helmet", "glory")), func(id):
-				look.helmet = id; _apply_look(); _fill()))
+			list.add_child(RiderPanels.helmet_picker(RiderPanels.helmet_choice(look), func(id):
+				RiderPanels.helmet_set(look, id); _apply_look(); _fill()))
+			list.add_child(UITheme.label("Hair style", 13))
+			list.add_child(RiderPanels.hair_style_picker(str(look.get("hairStyle", "long")), func(id):
+				look.hairStyle = id; _apply_look(); _fill()))
 		if group == "Kit":
 			list.add_child(UITheme.label("Knee pads design", 13))
 			list.add_child(RiderPanels.pad_style_picker(str(look.get("padStyle", "enduro")), func(id):
 				look.padStyle = id; _apply_look(); _fill()))
 		for row in g[1]:
-			if textured and group == "Helmet": continue
+			if textured and group == "Helmet" and row[0] != "hair": continue
 			var key: String = row[0]
 			list.add_child(UITheme.label(row[1], 13))
 			var hb := HFlowContainer.new()
@@ -504,7 +507,8 @@ func _reset_category() -> void:
 				if g[0] == name:
 					for row in g[1]: look[row[0]] = Rider.DEFAULT_LOOK[row[0]]
 					if name == "Kit": look.padStyle = Rider.DEFAULT_LOOK.padStyle
-					if name == "Helmet": look.helmet = Rider.DEFAULT_LOOK.helmet
+					if name == "Helmet":
+						look.helmet = Rider.DEFAULT_LOOK.helmet; look.hairStyle = Rider.DEFAULT_LOOK.hairStyle
 			look_touched = true
 	if pose_touched: _apply_pose()
 	if look_touched: _apply_look()

@@ -252,7 +252,9 @@ static func make_bars(m: Dictionary, crown_paint: Dictionary, grip_paint: Dictio
 static var _crown: ArrayMesh = null
 
 ## the fork alone: lowers + stanchions + crown / steerer, in the model's colours
-static func make_fork(lowers: Dictionary, stanchions: Dictionary, crown_paint: Dictionary) -> Node3D:
+static func make_fork(lowers: Dictionary, stanchions: Dictionary, crown_paint: Dictionary, glb := "") -> Node3D:
+	if glb != "":
+		return _make_fork_glb(glb, lowers, stanchions, crown_paint)
 	if _crown == null:
 		_crown = _filter(glb_part("steer")[0], func(a, b, c): return a.y < BAR_CUT or b.y < BAR_CUT or c.y < BAR_CUT,
 			["black", "gold", "chrome"])
@@ -290,6 +292,29 @@ static func make_fork(lowers: Dictionary, stanchions: Dictionary, crown_paint: D
 	ax = Vector2(cos(ang), sin(ang))
 	if ax.y < 0.0: ax = -ax                          # pointing up the fork (to the crown)
 	root.rotation.z = PI - atan2(ax.y, ax.x)         # crown to the left, legs level
+	return root
+
+
+## a fork model from assets/forks/<glb>.glb (crowns + stanchions, lowers + caliper) in the model's colours, laid level
+static func _make_fork_glb(glb: String, lowers: Dictionary, stanchions: Dictionary, crown_paint: Dictionary) -> Node3D:
+	var fs: Node = load("res://assets/forks/%s.glb" % glb).instantiate()
+	var root := Node3D.new()
+	var crown := fs.find_child("fork_crown", true, false) as MeshInstance3D
+	var low := fs.find_child("fork_lower", true, false) as MeshInstance3D
+	var ax := Vector2(-0.457, 0.889)   # the steer axis of the stock frame the fork is fitted to
+	for pair in [[crown, true], [low, false]]:
+		var mi: MeshInstance3D = pair[0]
+		mi.get_parent().remove_child(mi)
+		for i in mi.mesh.get_surface_count():
+			var nm: String = mi.mesh.surface_get_material(i).resource_name
+			if pair[1]:
+				if nm == "gold": mi.set_surface_override_material(i, BikeBuild.paint_material(stanchions))
+				elif nm == "black": mi.set_surface_override_material(i, BikeBuild.paint_material(crown_paint))
+			elif nm == "black":
+				mi.set_surface_override_material(i, BikeBuild.paint_material(lowers))
+		root.add_child(mi)
+	fs.free()
+	root.rotation.z = PI - atan2(ax.y, ax.x)   # crown to the left, legs level
 	return root
 
 

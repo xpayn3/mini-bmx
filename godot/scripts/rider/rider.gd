@@ -686,10 +686,10 @@ func set_look(l: Dictionary) -> void:
 			if beard_node: beard_node.visible = str(L.get("beard", "1")) != "0"
 		hair.set_color(hair_mat.albedo_color)
 		var hs := str(L.get("hairStyle", "long"))
-		var helmet_on := str(L.get("helmetOn", "1")) != "0"
+		var helmet_on := true   # the rider always wears a helmet: hair only shows coming out under the back of it
 		hair_tail = helmet_on and Hair.STYLES.get(hs, {}).get("short", true) == false   # long / bob under a helmet
 		hair.set_style(hs, helmet_on)
-		_apply_head_gear(str(L.get("helmetOn", "1")) != "0")
+		_apply_head_gear(true)
 	if bib_node:
 		bib_node.visible = str(L.get("bibOn", "1")) != "0"
 		bib_node.set_content(str(L.get("bibNumber", "27")).substr(0, 3), str(L.get("bibText", DEFAULT_LOOK.bibText)).substr(0, 30))

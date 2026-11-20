@@ -98,6 +98,7 @@ def to_game(p):   # (fx, fy, fz) -> game, BB at the origin
 
 
 parts = {}   # node -> list of (pos(tri*3,3), nrm, matname)
+CROWN_CENTERS = []   # the two crowns (Forks.001 lower, .003 upper): where the fork clamps the steerer
 lib = {"fork": [], "cranks": [], "cockpit": [], "brakes": [], "derail": []}
 for o in list(bpy.data.objects):
     if o.type != 'MESH' or len(o.data.polygons) == 0: continue
@@ -122,6 +123,8 @@ for o in list(bpy.data.objects):
         parts.setdefault(node, []).append((pos[sel], nrm[sel], mn))
         entry = (node, pos[sel], nrm[sel], mn)
         if base == "Forks": lib["fork"].append(entry)
+        if base == "Brakes" and node == "fork_lower": lib["fork"].append(entry)
+        if base == "Forks" and i in (1, 3) and mn == "black" and len(CROWN_CENTERS) < 2: CROWN_CENTERS.append(((pos[:, :2].min(0) + pos[:, :2].max(0)) / 2))
         if base == "Drivetrain" and node == "crank": lib["cranks"].append(entry)
         if base == "Drivetrain" and node == "seatstay": lib["derail"].append(entry)
         if base == "Headset" or (base == "Brakes" and node == "steer"): lib["cockpit"].append(entry)
@@ -193,7 +196,16 @@ def lib_glb(fname, key, origin, root, nodename):
     if not es: return
     write_glb(os.path.join(OUT, "parts", fname), [{"name": nodename, "parent": None, "t": [0, 0, 0], "origin": origin,
               "parts": [(e[1], e[2], e[3]) for e in es]}], {"source": "YT Tues FBX", "origin": "bike coordinates, BB at 0"}, root)
-lib_glb("tues_fork.glb", "fork", z3(FAX), "fork", "fork")
+
+# the fork alone (crown + stanchions, lowers + front caliper) for tools/make_forks.py, which fits it to the stock frame
+crown_c = np.mean(CROWN_CENTERS, axis=0)
+fork_nodes = [{"name": "fork_crown", "parent": None, "t": [0, 0, 0], "origin": z3(SP),
+               "parts": [(e[1], e[2], e[3]) for e in lib["fork"] if e[0] == "steer"]},
+              {"name": "fork_lower", "parent": None, "t": (z3(FAX) - z3(SP)).tolist(), "origin": z3(FAX),
+               "parts": [(e[1], e[2], e[3]) for e in lib["fork"] if e[0] == "fork_lower"]}]
+write_glb(os.path.join(OUT, "parts", "tues_fork.glb"), fork_nodes,
+          {"steerAxis": [float(axis[0]), float(axis[1])], "crownMid": (crown_c - SP).tolist(), "axle": (FAX - SP).tolist()}, "fork")
+
 lib_glb("tues_cranks.glb", "cranks", z3(g2(*BBF)), "cranks", "crank")
 lib_glb("tues_cockpit.glb", "cockpit", z3(SP), "cockpit", "cockpit")
 lib_glb("tues_derailleur.glb", "derail", z3(A), "derailleur", "derailleur")
