@@ -570,29 +570,28 @@ func _rock_gardens() -> void:
 			colliders.append({"x": x, "z": z, "r": (sx + sc) * 0.45, "top": h - sc * 0.3 + sy * 0.9, "base": f.ground(x, z)})
 
 
-# ---------------- distance gates ----------------
-## a distance marker over the trail: two lattice towers of small wooden cross beams either side of the trail
-## with a cloth flag hanging between them that says how far down the trail you are. Fence-style panel, so
-## riding into a tower smashes it (Terrain adds the flag node and frees it when the panel breaks).
+# ---------------- sponsor gates ----------------
+## big gantries over the trail with a banner on top (data only; Terrain builds the nodes)
 func _gates() -> void:
 	var C: TrailCourse = f.course
 	var list := []
 	for i in C.chunk_gates.get(TrailCourse.chunk_key(cx, cz), PackedInt32Array()):
 		var tx: float = C.TX[i]
 		var tz: float = C.TZ[i]
-		var half: float = C.W[i] + 1.5
+		var half: float = C.W[i] + 1.3
 		var nx := -tz
 		var nz := tx
 		var cxp: float = C.X[i]
 		var czp: float = C.Z[i]
 		if sqrt(cxp * cxp + czp * czp) < 14:
 			continue
+		var ok := true
 		var hl := height(cxp - nx * half, czp - nz * half)
 		var hr := height(cxp + nx * half, czp + nz * half)
+		var hc := height(cxp, czp)
 		if hl < WATER + 0.2 or hr < WATER + 0.2 or absf(hl - hr) > 3.0:
 			continue
-		# not on a jump / ramp / bridge (check the towers and the track between)
-		var ok := true
+		# not on a jump / ramp / bridge (check the posts and the track either side)
 		for s in [-1.0, 0.0, 1.0]:
 			for off in [-half, 0.0, half]:
 				f.jump_eval(cxp + tx * s * 3.0 + nx * off, czp + tz * s * 3.0 + nz * off)
@@ -692,51 +691,29 @@ func _boards() -> void:
 			var bs := _scaled(b, scl.x, scl.y, scl.z)
 			var k := _push(kind, bs, pos, c)
 			panel["parts"].append({"kind": kind, "i": k, "col": c, "xform": Transform3D(bs, pos), "scale": scl})
-		var stick := TerrainField.lin(0x7a5a3a)
-		var lash := TerrainField.lin(0x5c452e)
-		var along := Basis(Vector3.UP, atan2(-tz, tx))    # a beam running along the trail
-		var across := Basis(Vector3.UP, atan2(-nz, nx))   # a beam running across it
-		var T := Vector3(tx, 0, tz)
-		var BAYS := 4
+		var yaw := atan2(-dz, dx)
+		var rb := Basis(Vector3.UP, yaw)
+		var postc := TerrainField.lin(0x6b4a30)
 		for s in [-1.0, 1.0]:
-			var mx: float = cxp + nx * half * s
-			var mz: float = czp + nz * half * s
-			var g0 := minf(height(mx - tx * 0.55, mz - tz * 0.55), height(mx + tx * 0.55, mz + tz * 0.55))
-			# the two uprights, a little thicker than a fence post
-			for q in [-1.0, 1.0]:
-				var px: float = mx + tx * 0.55 * q
-				var pz: float = mz + tz * 0.55 * q
-				var gh := height(px, pz)
-				var ph := top - gh + 0.2
-				add.call("post", Vector3(px, gh + ph / 2 - 0.18, pz), Basis.IDENTITY, Vector3(1.4, ph, 1.4), stick)
-				colliders.append({"x": px, "z": pz, "r": 0.3, "fence": panel, "fence_style": "gate"})
-				blocked.append([px, pz, 1.0])
-			# small cross beams every bay + an X brace in every other bay
-			var y0 := g0 + 0.5
-			var dy := (top - y0) / BAYS
-			for k in BAYS + 1:
-				add.call("rail", Vector3(mx, y0 + dy * k, mz), along, Vector3(1.2, 0.07, 0.07), lash)
-			for k in BAYS:
-				if k % 2 == 1:
-					continue
-				var dir := 1.0 if (int(s) + k) % 4 == 0 else -1.0
-				var d := Vector3(T.x * 1.1 * dir, dy, T.z * 1.1 * dir)
-				var bx := d.normalized()
-				var bz := bx.cross(Vector3.UP).normalized()
-				add.call("rail", Vector3(mx, y0 + dy * (k + 0.5), mz), Basis(bx, bz.cross(bx), bz), Vector3(d.length(), 0.06, 0.06), lash)
-		# the crossbar the flag hangs from, a second above it, and a stick weighting the flag's bottom edge
-		var span := half * 2.0 + 0.9
-		add.call("rail", Vector3(cxp, top + 0.05, czp), across, Vector3(span, 0.09, 0.09), stick)
-		add.call("rail", Vector3(cxp, top - 0.35, czp), across, Vector3(span, 0.07, 0.07), lash)
-		var fh := 1.7
-		var fw := half * 2.0 - 0.4
-		add.call("rail", Vector3(cxp, top - 0.45 - fh, czp), across, Vector3(fw, 0.06, 0.06), lash)
-		panel["flag"] = {"at": Vector3(cxp, top - 0.4 - fh / 2, czp), "w": fw, "h": fh,
-			"basis": Basis(Vector3(nx, 0, nz), Vector3.UP, Vector3(-tx, 0, -tz)), "dist": i * TrailCourse.STEP, "i": i}
+			var ppx: float = bx + dx * s * (W / 2 - 0.2) - px * 0.12
+			var ppz: float = bz + dz * s * (W / 2 - 0.2) - pz * 0.12
+			var gh := height(ppx, ppz)
+			add.call("post", Vector3(ppx, gh + 2.5 / 2 - 0.18, ppz), euler_xyz(0, yaw, 0), Vector3(1, 2.5, 1), postc)
+		var y0: float = h + 0.55
+		for r in 3:
+			var cc := wood * (0.94 + 0.06 * r)
+			cc.a = 1.0
+			add.call("rail", Vector3(bx, y0 + 0.25 + r * 0.5, bz), rb, Vector3(W, 0.47, 0.06), cc)
+		var m := ceili(W / 0.45)
+		for k in m + 1:
+			var t := float(k) / m - 0.5
+			colliders.append({"x": bx + dx * W * t, "z": bz + dz * W * t, "r": 0.3, "fence": panel, "fence_style": "billboard"})
+		panel["cx"] = bx
+		panel["cz"] = bz
+		panel["bb"] = {"text": spn[0], "col": Color.html("#%06x" % spn[2]), "w": W, "h": 1.5,
+			"basis": Basis(Vector3(pz, 0, -px), Vector3.UP, Vector3(px, 0, pz)),
+			"at": Vector3(bx, y0 + 0.75, bz), "nrm": Vector3(px, 0, pz)}
 		panels.append(panel)
-		list.append(i)
-	if OS.get_environment("BMX_GATE_PROBE") != "":
-		print("GATES chunk=", cx, ",", cz, " cand=", C.chunk_gates.get(TrailCourse.chunk_key(cx, cz), PackedInt32Array()).size(), " placed=", list.size())
 
 
 # ---------------- race tape ----------------
