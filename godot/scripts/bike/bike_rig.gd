@@ -468,8 +468,9 @@ func _swap_rotors(id: String) -> void:
 		var src := rs.find_child("rotor_front" if front else "rotor_rear", true, false) as MeshInstance3D
 		if src == null or src.mesh == null:
 			continue
-		var m: ArrayMesh = src.mesh.duplicate()
-		for i in m.get_surface_count():
+		var m := ArrayMesh.new()
+		for i in src.mesh.get_surface_count():
+			m.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, BikeFX.RotorGlow.flat_arrays(src.mesh.surface_get_arrays(i)))
 			m.surface_set_material(i, r.material)
 		mi.mesh = m
 	rs.free()

@@ -362,7 +362,7 @@ static var _bar_stock: ArrayMesh = null
 ## (models, materials, decals, this studio), then re-run the bake (tools/bake_thumbs.ps1) so the shipped
 ## pictures match. The game version is not in the keys: the shipped set stays valid until THUMB_VER moves.
 const DISK_DIR := "user://cache/thumbs"
-const THUMB_VER := 4
+const THUMB_VER := 5
 static func bike_key(id: String) -> String:
 	var sig := var_to_str([THUMB_VER, SIZE, GameState.bike_config_for(id)])
 	return "bike|%s|%s" % [id, sig.md5_text()]
