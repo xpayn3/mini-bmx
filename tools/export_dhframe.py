@@ -108,6 +108,8 @@ def Tpts(P):  # Blender world points -> game
     gx = c * v[:, 0] - sn * v[:, 1] + BBD[0]; gy = sn * v[:, 0] + c * v[:, 1] + BBD[1]
     return np.stack([gx, gy, -P[:, 1] * s], 1)
 
+Z_OFF = 0.021   # sideways offset of the front triangle in the source model (game units, after scaling)
+
 def Tnrm(N):
     nx = c * N[:, 0] - sn * N[:, 2]; ny = sn * N[:, 0] + c * N[:, 2]
     return np.stack([nx, ny, -N[:, 1]], 1)
@@ -129,6 +131,11 @@ for o in list(bpy.data.objects):
     else: continue
     P, N, mi, names = parts_of(o)
     G = Tpts(P); GN = Tnrm(N)
+    if node == "frame":
+        # the model's front triangle sits ~2.1 cm to one side of the bottom bracket / seat tube (head tube centre z = +0.021, BB shell
+        # centre z = 0), so the fork (centred on the bike) stood beside the head tube: bring the main beam back onto the centre line,
+        # blending in over the bottom bracket region
+        G[:, 2] -= Z_OFF * np.clip((G[:, 0] + 0.12) / 0.12, 0.0, 1.0)
     for k in sorted(set(mi.tolist())):
         sel = np.repeat(mi == k, 3)
         groups[node].append((G[sel], GN[sel], MAT.get(names[k], "black")))
