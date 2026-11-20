@@ -23,18 +23,18 @@ const MATERIALS := [["alloy", "Alloy (crown paint)"], ["carbon", "Carbon gloss"]
 ## popular DH bars (our approximation: width / rise snapped to the sizes above). Picking one sets the
 ## width, rise and material; touching any of those turns the model back to "custom".
 const MODELS := {
-	"stock":        {"brand": "GLORY",      "label": "Stock riser",       "width": 780, "rise": 30, "material": "alloy"},
-	"fatbar":       {"brand": "RENTHAL",    "label": "Fatbar 35",         "width": 800, "rise": 30, "material": "alloy"},
-	"fatbar_c":     {"brand": "RENTHAL",    "label": "Fatbar Carbon 35",  "width": 800, "rise": 30, "material": "carbon_matte"},
-	"atlas":        {"brand": "RACE FACE",  "label": "Atlas 35",          "width": 820, "rise": 20, "material": "alloy"},
-	"sixc":         {"brand": "RACE FACE",  "label": "SixC 35",           "width": 820, "rise": 20, "material": "carbon"},
-	"skywire":      {"brand": "DEITY",      "label": "Skywire Carbon",    "width": 800, "rise": 20, "material": "carbon"},
-	"blacklabel":   {"brand": "DEITY",      "label": "Blacklabel 800",    "width": 800, "rise": 40, "material": "alloy"},
-	"bza":          {"brand": "CHROMAG",    "label": "BZA 35",            "width": 800, "rise": 50, "material": "alloy"},
-	"spike":        {"brand": "SPANK",      "label": "Spike 800 Vibrocore", "width": 800, "rise": 30, "material": "alloy"},
-	"oneup":        {"brand": "ONEUP",      "label": "Carbon Bar 35",     "width": 800, "rise": 40, "material": "carbon_matte"},
-	"m9":           {"brand": "ENVE",       "label": "M9 DH",             "width": 800, "rise": 10, "material": "carbon"},
-	"flat":         {"brand": "SPANK",      "label": "Oozy Flat 760",     "width": 760, "rise": 0,  "material": "alloy"},
+	"stock":        {"brand": "RUNOUT",     "label": "Stock riser",       "width": 780, "rise": 30, "material": "alloy"},
+	"fatbar":       {"brand": "BARWERX",    "label": "Fatty 35",          "width": 800, "rise": 30, "material": "alloy"},
+	"fatbar_c":     {"brand": "BARWERX",    "label": "Fatty Carbon 35",   "width": 800, "rise": 30, "material": "carbon_matte"},
+	"atlas":        {"brand": "RAW EDGE",   "label": "Summit 35",         "width": 820, "rise": 20, "material": "alloy"},
+	"sixc":         {"brand": "RAW EDGE",   "label": "HexC 35",           "width": 820, "rise": 20, "material": "carbon"},
+	"skywire":      {"brand": "IDOL",       "label": "Highwire Carbon",    "width": 800, "rise": 20, "material": "carbon"},
+	"blacklabel":   {"brand": "IDOL",       "label": "Darkline 800",      "width": 800, "rise": 40, "material": "alloy"},
+	"bza":          {"brand": "IRONCLAD",   "label": "BZR 35",            "width": 800, "rise": 50, "material": "alloy"},
+	"spike":        {"brand": "SMACK",      "label": "Spine 800 Dampcore", "width": 800, "rise": 30, "material": "alloy"},
+	"oneup":        {"brand": "UPSHOT",     "label": "Carbon Bar 35",     "width": 800, "rise": 40, "material": "carbon_matte"},
+	"m9":           {"brand": "ARCUS",      "label": "A9 DH",             "width": 800, "rise": 10, "material": "carbon"},
+	"flat":         {"brand": "SMACK",      "label": "Goopy Flat 760",     "width": 760, "rise": 0,  "material": "alloy"},
 }
 const MATERIAL_SHORT := {"alloy": "Alloy", "carbon": "Carbon", "carbon_matte": "Carbon matte"}
 

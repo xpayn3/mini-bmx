@@ -5,10 +5,10 @@ extends RefCounted
 
 # made-up brands: [name, background hex, text hex]
 const SPONSORS := [
-	["REDLINE", 0xd8262b, 0xffffff], ["NITRO", 0xf5c518, 0x1a1a1a], ["APEX BIKES", 0x1f5fbf, 0xffffff],
+	["REDSHIFT", 0xd8262b, 0xffffff], ["NITRO", 0xf5c518, 0x1a1a1a], ["APEX BIKES", 0x1f5fbf, 0xffffff],
 	["TERRA", 0x2e7d4a, 0xffffff], ["FOXTAIL", 0xf07a1c, 0x1a1a1a], ["GRIPZONE", 0x18181c, 0xf5c518],
 	["SUMMIT", 0xf2efe6, 0x1f3a6e], ["VOLT", 0x7b3fc4, 0xffffff], ["DIRTLAB", 0x3a3a40, 0xff6a1a],
-	["HYDRA", 0x13a3b5, 0xffffff], ["IRONHORSE", 0x8c1d1d, 0xf2efe6], ["SPRINT", 0xe8e8e8, 0xd8262b]]
+	["HYDRA", 0x13a3b5, 0xffffff], ["IRONHOOF", 0x8c1d1d, 0xf2efe6], ["SPRINT", 0xe8e8e8, 0xd8262b]]
 
 static var _steel: StandardMaterial3D
 static var _font: FontVariation

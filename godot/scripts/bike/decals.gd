@@ -9,7 +9,7 @@ extends RefCounted
 ## material ("frame_1" = the frame's 1st primitive). Labels therefore name the node AND the surface
 ## (by material name, or index); three.js style names like "frame_1" are still understood.
 ##
-## Lettering ("GLORY", "MAXXIS" round the tyres) is drawn by a 2D node into a SubViewport that renders
+## Lettering ("RUNOUT", "GRIPWELL" round the tyres) is drawn by a 2D node into a SubViewport that renders
 ## once; its ViewportTexture is the decal's albedo. The SubViewports are parented under the bike.
 
 ## the `decals` block of BIKES.dh in src/main.js
@@ -17,19 +17,19 @@ const DH_DECALS := {
 	"labels": [
 		# down tube
 		{"mesh": "frame", "surface": "paint", "from": [0.168, 0.486], "to": [0.404, 0.809],
-			"image": "res://assets/decals/cinelli.png", "length": 0.2, "height": 0.0627},
+			"text": "MONTELLI", "length": 0.2, "height": 0.0627},
 		# top tube: model name
 		{"mesh": "frame", "surface": "paint", "from": [0.05, 0.74], "to": [0.30, 0.86],
-			"text": "GLORY", "length": 0.19, "height": 0.032},
+			"text": "RUNOUT", "length": 0.19, "height": 0.032},
 		# chainstays
 		{"mesh": "swing", "surface": "paint", "from": [-0.44, -0.025], "to": [-0.25, 0.03],
-			"image": "res://assets/decals/cinelli.png", "length": 0.09, "height": 0.0282, "z": 0.075, "depth": 0.06},
-		# both fork legs: the Fox stickers
+			"text": "MONTELLI", "length": 0.09, "height": 0.0282, "z": 0.075, "depth": 0.06},
+		# both fork legs: the fork brand's lettering
 		{"mesh": "fork_lower", "surface": "black", "from": [-0.03, 0.07], "to": [-0.165, 0.335], "upright": true,
 			"length": 0.062, "height": 0.1, "z": 0.085, "depth": 0.05,
-			"image": "res://assets/decals/fox_right.png", "imageMinus": "res://assets/decals/fox_left.png"},
+			"text": "KOMODO"},
 	],
-	"tyres": {"text": "MAXXIS", "meshes": [["wheel_front", "rubber"], ["wheel_rear", "rubber"]]},
+	"tyres": {"text": "GRIPWELL", "meshes": [["wheel_front", "rubber"], ["wheel_rear", "rubber"]]},
 }
 
 const SURFACE_LIFT := 0.0006   # decal pushed out along the normal (stands in for polygonOffset)
@@ -560,6 +560,18 @@ static func add_bike_decals(bike: Node3D, cfg: Dictionary) -> Array:
 		# the far side is seen from the other way, so it turns the opposite way round the part's axis
 		var dir_a := dir.rotated(Z, rot)
 		var dir_b := dir.rotated(Z, -rot)
+		if L.get("upright", false) and not L.has("image"):
+			# lettering standing along the part (fork legs): the word reads along from -> to, a band
+			# about half the sticker's width across the part
+			var usize := Vector3(size.y, size.x * 0.45, size.z)
+			var utex := word_texture(bike, L["text"], usize.x / usize.y, L)
+			if utex == null:
+				continue
+			var umat := decal_material(utex, 0.35)
+			_bind_text(utex, umat)
+			made.append(project(mi, si, Vector3(mid.x, mid.y, z), dir_a, Z, usize, umat))
+			made.append(project(mi, si, Vector3(mid.x, mid.y, -z), -dir_b, NZ, usize, umat))
+			continue
 		if L.get("upright", false):
 			# a sticker standing along the part (fork legs): the image's up runs from -> to, `length` is its
 			# width across the part; image / imageMinus are the drive-side and other-side artwork

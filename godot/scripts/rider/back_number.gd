@@ -177,17 +177,17 @@ func _build_face() -> SubViewport:
 	_box(root, Rect2(12, 240, PX_W - 24, 2), ink, ink, 0, 0)
 	var sx := [12.0, 102.0, 192.0, 282.0]
 	var logos := [
-		["GLORY", Color("#d8232a"), Color.WHITE, Color("#d8232a"), 24],
-		["FOX", Color.WHITE, ink, ink, 36],
-		["MAXXIS", ink, Color.WHITE, ink, 21],
-		["CINELLI", Color.WHITE, red, red, 20],
+		["RUNOUT", Color("#d8232a"), Color.WHITE, Color("#d8232a"), 20],
+		["KOMODO", Color.WHITE, ink, ink, 20],
+		["GRIPWELL", ink, Color.WHITE, ink, 16],
+		["MONTELLI", Color.WHITE, red, red, 16],
 	]
 	for i in 4:
 		var L: Array = logos[i]
 		var r := Rect2(sx[i], 250, 90.0 if i < 3 else 90.0, 44)
 		_box(root, r, L[1], L[3], 3, 6)
 		_label(root, L[0], r, L[4], L[2])
-	# the FOX mark gets an orange underline
+	# the KOMODO mark gets an orange underline
 	_box(root, Rect2(sx[1] + 18, 282, 54, 5), Color("#ff7a1a"), Color("#ff7a1a"), 0, 2)
 	# safety-pin holes at the corners
 	var holes := Control.new()

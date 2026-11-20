@@ -440,6 +440,7 @@ func capture() -> void:
 	if FileAccess.file_exists(p): p = p.replace(".png", "_%d.png" % _shots)
 	var err := img.save_png(p)
 	_shots += 1
+	if err == OK: Steam.event("PHOTO")
 	print("PHOTO ", ProjectSettings.globalize_path(p), " ", img.get_width(), "x", img.get_height(), " err=", err)
 	_ui.visible = true
 	_set_ui_hidden(was_hidden)

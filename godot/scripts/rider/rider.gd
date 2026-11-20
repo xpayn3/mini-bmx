@@ -32,10 +32,10 @@ const DEFAULT_LOOK := {shell = "#16171a", peak = "#ececec", goggleFrame = "#f2f2
 ## shell / peak, our goggles); the others are textured models (tools/export_helmets.py) that always wear their own goggles
 ## + strap (the glb's "helmet_goggles" node: our goggles don't fit them)
 const HELMETS := {
-	"glory": ["GLORY", "res://assets/helmet.glb"],
-	"6d_black": ["6D ATR-2 black", "res://assets/helmets/helmet_6d_black.glb"],
-	"6d_silver": ["6D ATR-2 silver", "res://assets/helmets/helmet_6d_silver.glb"],
-	"tld": ["TLD SE5", "res://assets/helmets/helmet_tld.glb"],
+	"glory": ["RUNOUT", "res://assets/helmet.glb"],
+	"6d_black": ["HEX6 AT-2 black", "res://assets/helmets/helmet_6d_black.glb"],
+	"6d_silver": ["HEX6 AT-2 silver", "res://assets/helmets/helmet_6d_silver.glb"],
+	"tld": ["TOPLINE S5", "res://assets/helmets/helmet_tld.glb"],
 }
 ## per helmet model: where it sits on the head, on top of HELMET_FIT (same keys)
 const HELMET_FITS := {
@@ -232,7 +232,7 @@ func _init() -> void:
 		goggle_mats.model_mat = ski_goggle_material()
 	var baker := StrapLogo.new()
 	baker.mat = logo
-	baker.text = "GIANT"
+	baker.text = "COLOSSUS"
 	add_child(baker)
 	for i in 2:
 		var s := GEAR.build_shoe(shoe_mats)

@@ -104,7 +104,7 @@ const KITS := [
 		"jersey": "#2b2e33", "pants": "#111215", "gloves": "#3a3d42", "shoes": "#141518", "shoeAccent": "#3a3d42", "pads": "#16171a", "padStyle": "trail"}],
 	["Race white", {"shell": "#f4f4f0", "peak": "#e8231f", "goggleFrame": "#e8231f", "lens": "#3fb6ff", "strap": "#e8231f",
 		"jersey": "#f4f4f0", "pants": "#202227", "gloves": "#e8231f", "shoes": "#f4f4f0", "shoeAccent": "#e8231f", "pads": "#f4f4f0", "padStyle": "race"}],
-	["Monster", {"shell": "#7ed321", "peak": "#111214", "goggleFrame": "#111214", "lens": "#7ed321", "strap": "#7ed321",
+	["Toxic", {"shell": "#7ed321", "peak": "#111214", "goggleFrame": "#111214", "lens": "#7ed321", "strap": "#7ed321",
 		"jersey": "#111214", "pants": "#2c2f33", "gloves": "#7ed321", "shoes": "#111214", "shoeAccent": "#7ed321", "pads": "#111214", "padStyle": "race"}],
 	["Ocean", {"shell": "#1478d4", "peak": "#f4f4f0", "goggleFrame": "#f4f4f0", "lens": "#ff9f2e", "strap": "#1478d4",
 		"jersey": "#11b3c9", "pants": "#0d2847", "gloves": "#f4f4f0", "shoes": "#0d2847", "shoeAccent": "#11b3c9", "pads": "#0d2847", "padStyle": "enduro"}],

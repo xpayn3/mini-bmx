@@ -8,7 +8,7 @@ const PX_W := 700               # texture size: matches the printed stretch of s
 const PX_H := 100
 
 var mat: StandardMaterial3D
-var text := "GIANT"
+var text := "COLOSSUS"
 var _vp: SubViewport
 var _frames := 0
 

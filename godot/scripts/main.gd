@@ -222,6 +222,7 @@ func _take_prebuilt() -> bool:
 # ---------------------------------------------------------------- title screen
 func _show_menu() -> void:
 	state = MENU
+	Steam.presence("In the menus")
 	get_tree().paused = false
 	if game: game.exit_photo()
 	_close_controls()
@@ -263,9 +264,10 @@ func _show_menu() -> void:
 	head.add_child(tag_row)
 	vb.add_child(head)
 	menu_col = vb
-	outer.add_child(UITheme.text("v1.0  ·  Godot %s" % Engine.get_version_info().string, Tokens.INK_SOFT, Tokens.T_XS))
+	outer.add_child(UITheme.text("v%s  ·  Godot %s" % [ProjectSettings.get_setting("application/config/version", "1.0.0"), Engine.get_version_info().string], Tokens.INK_SOFT, Tokens.T_XS))
 	_menu_page_main()
 	if Env.s("BMX_MENU_PAGE") == "setup": _menu_page_setup(int(Env.s("BMX_SETUP_STEP")))   # tests: the ride setup page (BMX_SETUP_STEP=0..3)
+	if Env.s("BMX_MENU_PAGE") == "credits": _show_credits()   # tests: the credits window
 
 const MENU_EDGE := Tokens.S8
 const MENU_W := Tokens.CARD_W + Tokens.S8 + Tokens.S2
@@ -426,7 +428,7 @@ func _menu_page_main() -> void:
 	vb.add_child(seed_row)
 	vb.add_child(UITheme.spacer(Tokens.S4))
 	# secondary: a quiet list
-	for it in [["SETTINGS", _open_settings], ["CONTROLS", _show_controls], ["QUIT", func(): GameState.quit()]]:
+	for it in [["SETTINGS", _open_settings], ["CONTROLS", _show_controls], ["CREDITS", _show_credits], ["QUIT", func(): GameState.quit()]]:
 		vb.add_child(UITheme.make_button(it[0], it[1], "link", Tokens.T_XL))
 	menu_focus = ride
 	ride.grab_focus.call_deferred()
@@ -1028,6 +1030,7 @@ var garage: Garage
 
 ## mode "bike" = the garage, "rider" = the rider room (same room: position on the rollers + kit)
 func _open_garage(mode := "bike") -> void:
+	Steam.presence("In the garage" if mode == "bike" else "Setting up the rider")
 	if menu: menu.queue_free(); menu = null
 	fade.modulate.a = 1.0
 	if game:
@@ -1069,6 +1072,8 @@ func _start_ride() -> void:
 	game.swallow_held()   # the A that pressed RACE is not a sprint
 	game.respawn(false)
 	_set_riding(true)
+	Steam.event("FIRST_DROP")
+	Steam.presence("Riding · " + game.biome_cur)
 
 ## DEMO: the same ride, an AI rider at the bars (F2 hands it back); the tuning card opens on the Demo tab
 func _start_demo() -> void:
@@ -1208,6 +1213,20 @@ func _show_controls() -> void:
 		if is_instance_valid(dim): dim.queue_free()
 		if controls_open == w: controls_open = null
 		if is_instance_valid(pause_menu): pause_menu.visible = true)
+	ui.add_child(w)
+
+## credits + licences (title menu)
+func _show_credits() -> void:
+	if is_instance_valid(controls_open) or is_instance_valid(settings_open): return
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.35)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	ui.add_child(dim)
+	var w: Control = load("res://scripts/ui/credits_menu.gd").new()
+	controls_open = w   # (one window at a time: shares the Controls slot)
+	w.tree_exiting.connect(func():
+		if is_instance_valid(dim): dim.queue_free()
+		if controls_open == w: controls_open = null)
 	ui.add_child(w)
 
 # ---------------------------------------------------------------- unattended smoke test

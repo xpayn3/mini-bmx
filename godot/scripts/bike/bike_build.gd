@@ -46,11 +46,11 @@ const SLOTS := {
 ## the logo library. Images that come with the game, plus text logos (our own wordmarks)
 const LOGOS := {
 	"none":    {"label": "None"},
-	"cinelli": {"label": "Cinelli", "image": "res://assets/decals/cinelli.png"},
-	"fox":     {"label": "Fox", "image": "res://assets/decals/fox_right.png", "imageMinus": "res://assets/decals/fox_left.png"},
-	"glory":   {"label": "GLORY", "text": "GLORY"},
+	"cinelli": {"label": "MONTELLI", "text": "MONTELLI"},   # key kept for saves (was the Cinelli PNG, assets/decals/cinelli.png, now unused)
+	"fox":     {"label": "KOMODO", "text": "KOMODO"},   # key kept for saves (was the Fox PNGs, assets/decals/fox_*.png, now unused)
+	"glory":   {"label": "RUNOUT", "text": "RUNOUT"},
 	"minibmx": {"label": "MINI BMX", "text": "MINI BMX"},
-	"gravity": {"label": "GRAVITY", "text": "GRAVITY"},
+	"gravity": {"label": "FREEFALL", "text": "FREEFALL"},
 	"text":    {"label": "Custom text…"},
 }
 
@@ -60,17 +60,17 @@ const WHEEL_SIZES := {"20": 406, "26": 559, "27.5": 584, "29": 622}
 ## casing, width and the sidewall lettering; touching any of those turns the model back to "custom".
 const TYRE_MODELS := {
 	"custom":          {"label": "Custom"},
-	"minion_dhf":      {"label": "Maxxis Minion DHF",     "brand": "MAXXIS",      "tread": "knobby", "pattern": "knobby",  "casing": "round",  "tyre_w": 2.5},
-	"minion_dhr":      {"label": "Maxxis Minion DHR II",  "brand": "MAXXIS",      "tread": "knobby", "pattern": "paddle",  "casing": "square", "tyre_w": 2.4},
-	"assegai":         {"label": "Maxxis Assegai",        "brand": "MAXXIS",      "tread": "knobby", "pattern": "dense",   "casing": "square", "tyre_w": 2.5},
-	"shorty":          {"label": "Maxxis Shorty (mud)",   "brand": "MAXXIS",      "tread": "knobby", "pattern": "spike",   "casing": "round",  "tyre_w": 2.4},
-	"minion_ss":       {"label": "Maxxis Minion SS",      "brand": "MAXXIS",      "tread": "semi",   "pattern": "semi",    "casing": "square", "tyre_w": 2.3},
-	"magic_mary":      {"label": "Schwalbe Magic Mary",   "brand": "SCHWALBE",    "tread": "knobby", "pattern": "stagger", "casing": "round",  "tyre_w": 2.4},
-	"big_betty":       {"label": "Schwalbe Big Betty",    "brand": "SCHWALBE",    "tread": "knobby", "pattern": "block",   "casing": "round",  "tyre_w": 2.4},
-	"dh22":            {"label": "Michelin DH22",         "brand": "MICHELIN",    "tread": "knobby", "pattern": "dense",   "casing": "square", "tyre_w": 2.4},
-	"dh_slick":        {"label": "Michelin DH Slick",     "brand": "MICHELIN",    "tread": "slick",  "pattern": "slick",   "casing": "round",  "tyre_w": 2.4},
-	"kryptotal":       {"label": "Continental Kryptotal", "brand": "CONTINENTAL", "tread": "knobby", "pattern": "block",   "casing": "square", "tyre_w": 2.4},
-	"butcher":         {"label": "Specialized Butcher",   "brand": "SPECIALIZED", "tread": "knobby", "pattern": "paddle",  "casing": "round",  "tyre_w": 2.6},
+	"minion_dhf":      {"label": "Gripwell Raptor DHF",  "brand": "GRIPWELL",    "tread": "knobby", "pattern": "knobby",  "casing": "round",  "tyre_w": 2.5},
+	"minion_dhr":      {"label": "Gripwell Raptor DHR II","brand": "GRIPWELL",   "tread": "knobby", "pattern": "paddle",  "casing": "square", "tyre_w": 2.4},
+	"assegai":         {"label": "Gripwell Kraken",      "brand": "GRIPWELL",    "tread": "knobby", "pattern": "dense",   "casing": "square", "tyre_w": 2.5},
+	"shorty":          {"label": "Gripwell Stubby (mud)","brand": "GRIPWELL",    "tread": "knobby", "pattern": "spike",   "casing": "round",  "tyre_w": 2.4},
+	"minion_ss":       {"label": "Gripwell Raptor SS",   "brand": "GRIPWELL",    "tread": "semi",   "pattern": "semi",    "casing": "square", "tyre_w": 2.3},
+	"magic_mary":      {"label": "Trakka Mad Molly",     "brand": "TRAKKA",      "tread": "knobby", "pattern": "stagger", "casing": "round",  "tyre_w": 2.4},
+	"big_betty":       {"label": "Trakka Big Brenda",    "brand": "TRAKKA",      "tread": "knobby", "pattern": "block",   "casing": "round",  "tyre_w": 2.4},
+	"dh22":            {"label": "Morvan GR22",          "brand": "MORVAN",      "tread": "knobby", "pattern": "dense",   "casing": "square", "tyre_w": 2.4},
+	"dh_slick":        {"label": "Morvan GR Slick",      "brand": "MORVAN",      "tread": "slick",  "pattern": "slick",   "casing": "round",  "tyre_w": 2.4},
+	"kryptotal":       {"label": "Kontour Terratrax",    "brand": "KONTOUR",     "tread": "knobby", "pattern": "block",   "casing": "square", "tyre_w": 2.4},
+	"butcher":         {"label": "Ridgeform Cleaver",    "brand": "RIDGEFORM",   "tread": "knobby", "pattern": "paddle",  "casing": "round",  "tyre_w": 2.6},
 }
 const PATTERN_NAMES := [["knobby", "Classic knobs"], ["paddle", "Paddle centre"], ["dense", "Dense 3-across"],
 	["stagger", "Open stagger"], ["block", "Square blocks"], ["spike", "Mud spikes"], ["semi", "Semi-slick"], ["slick", "Slick"]]
@@ -78,16 +78,16 @@ const PATTERN_NAMES := [["knobby", "Classic knobs"], ["paddle", "Paddle centre"]
 ## rim models (popular DH rims: profile shape, material, depth / outer width in mm, rim lettering)
 const RIM_MODELS := {
 	"custom":       {"label": "Custom"},
-	"fr560":        {"label": "DT Swiss FR 560",       "brand": "DT SWISS",      "profile": "hooked",   "material": "alloy",  "depth": 24, "width": 36},
-	"deemax":       {"label": "Mavic Deemax",          "brand": "MAVIC",         "profile": "vee",      "material": "alloy",  "depth": 28, "width": 35},
-	"arc30":        {"label": "Race Face ARC 30",      "brand": "RACE FACE",     "profile": "hooked",   "material": "alloy",  "depth": 21, "width": 35},
-	"oozy":         {"label": "Spank Oozy 350",        "brand": "SPANK",         "profile": "box",      "material": "alloy",  "depth": 26, "width": 35},
-	"flow":         {"label": "Stan's Flow MK4",       "brand": "STAN'S NOTUBES","profile": "hookless", "material": "alloy",  "depth": 21, "width": 35},
-	"lg1":          {"label": "e*thirteen LG1",        "brand": "E*THIRTEEN",    "profile": "hooked",   "material": "alloy",  "depth": 24, "width": 35},
-	"fuse":         {"label": "We Are One Fuse",       "brand": "WE ARE ONE",    "profile": "round",    "material": "carbon", "depth": 25, "width": 36},
-	"reserve30":    {"label": "Reserve 30 HD",         "brand": "RESERVE",       "profile": "hookless", "material": "carbon", "depth": 28, "width": 37},
-	"synthesis":    {"label": "Crankbrothers Synthesis","brand": "CRANKBROTHERS","profile": "vee",      "material": "carbon", "depth": 26, "width": 36},
-	"moto":         {"label": "Zipp 3Zero Moto",       "brand": "ZIPP",          "profile": "round",    "material": "carbon", "depth": 20, "width": 36},
+	"fr560":        {"label": "Alpwerk AR 560",       "brand": "ALPWERK",       "profile": "hooked",   "material": "alloy",  "depth": 24, "width": 36},
+	"deemax":       {"label": "Castel Dropmax",       "brand": "CASTEL",        "profile": "vee",      "material": "alloy",  "depth": 28, "width": 35},
+	"arc30":        {"label": "Raw Edge Ridge 30",    "brand": "RAW EDGE",      "profile": "hooked",   "material": "alloy",  "depth": 21, "width": 35},
+	"oozy":         {"label": "Smack Goopy 350",      "brand": "SMACK",         "profile": "box",      "material": "alloy",  "depth": 26, "width": 35},
+	"flow":         {"label": "Sealco Glide MK4",     "brand": "SEALCO",       "profile": "hookless", "material": "alloy",  "depth": 21, "width": 35},
+	"lg1":          {"label": "Q*seven QG1",          "brand": "Q*SEVEN",       "profile": "hooked",   "material": "alloy",  "depth": 24, "width": 35},
+	"fuse":         {"label": "Hivemind Weld",        "brand": "HIVEMIND",      "profile": "round",    "material": "carbon", "depth": 25, "width": 36},
+	"reserve30":    {"label": "Stockpile 30 HD",      "brand": "STOCKPILE",     "profile": "hookless", "material": "carbon", "depth": 28, "width": 37},
+	"synthesis":    {"label": "Cogsmith Synapse",     "brand": "COGSMITH",     "profile": "vee",      "material": "carbon", "depth": 26, "width": 36},
+	"moto":         {"label": "Whizz Zero-G Moto",    "brand": "WHIZZ",         "profile": "round",    "material": "carbon", "depth": 20, "width": 36},
 }
 const RIM_PROFILE_NAMES := [["hooked", "Hooked (classic)"], ["hookless", "Hookless"], ["box", "Box section"],
 	["vee", "Deep V"], ["round", "Round tube"]]
@@ -110,29 +110,29 @@ static func apply_rim_model(b: Dictionary, key: String) -> void:
 ## DH forks (our approximation): travel, the lowers' paint and the stanchions' coating. Picking one sets
 ## the fork travel and paints the Fork lowers / Stanchions parts; moving the travel slider makes it "custom".
 const FORK_MODELS := {
-	"fox40f":   {"brand": "FOX",        "label": "40 Factory",       "travel": 200, "spring": "Air",
-		"lowers": {"color": "1a1a1c", "color2": "ffffff", "finish": "gloss"}, "stanchions": {"color": "c8a24a", "color2": "ffffff", "finish": "anodized"}, "coat": "Kashima"},
-	"fox40p":   {"brand": "FOX",        "label": "40 Performance",   "travel": 200, "spring": "Air",
+	"fox40f":   {"brand": "KOMODO",     "label": "K40 Factory",      "travel": 200, "spring": "Air",
+		"lowers": {"color": "1a1a1c", "color2": "ffffff", "finish": "gloss"}, "stanchions": {"color": "c8a24a", "color2": "ffffff", "finish": "anodized"}, "coat": "Gold"},
+	"fox40p":   {"brand": "KOMODO",     "label": "K40 Performance",   "travel": 200, "spring": "Air",
 		"lowers": {"color": "1a1a1c", "color2": "ffffff", "finish": "satin"}, "stanchions": {"color": "202024", "color2": "ffffff", "finish": "anodized"}, "coat": "Black"},
-	"boxxer_u": {"brand": "ROCKSHOX",   "label": "BoXXer Ultimate",  "travel": 200, "spring": "Air",
+	"boxxer_u": {"brand": "STONEWALL",  "label": "Brawler Ultimate",  "travel": 200, "spring": "Air",
 		"lowers": {"color": "c4161c", "color2": "ffffff", "finish": "gloss"}, "stanchions": {"color": "c9cdd2", "color2": "ffffff", "finish": "chrome"}, "coat": "Silver"},
-	"boxxer_s": {"brand": "ROCKSHOX",   "label": "BoXXer Select",    "travel": 190, "spring": "Air",
+	"boxxer_s": {"brand": "STONEWALL",  "label": "Brawler Select",   "travel": 190, "spring": "Air",
 		"lowers": {"color": "1a1a1c", "color2": "ffffff", "finish": "matte"}, "stanchions": {"color": "202024", "color2": "ffffff", "finish": "anodized"}, "coat": "Black"},
-	"dh38":     {"brand": "ÖHLINS",     "label": "DH38 m.1",         "travel": 200, "spring": "Coil",
+	"dh38":     {"brand": "NORDLUND",   "label": "NL38 m.1",         "travel": 200, "spring": "Coil",
 		"lowers": {"color": "1a1a1c", "color2": "ffffff", "finish": "gloss"}, "stanchions": {"color": "d9b347", "color2": "ffffff", "finish": "anodized"}, "coat": "Gold"},
-	"bomber58": {"brand": "MARZOCCHI",  "label": "Bomber 58",        "travel": 200, "spring": "Coil",
+	"bomber58": {"brand": "VERDELLI",   "label": "Bruiser 58",       "travel": 200, "spring": "Coil",
 		"lowers": {"color": "d12b1f", "color2": "ffffff", "finish": "gloss"}, "stanchions": {"color": "202024", "color2": "ffffff", "finish": "anodized"}, "coat": "Black"},
-	"onyx":     {"brand": "DVO",        "label": "Onyx DH",          "travel": 200, "spring": "Coil",
+	"onyx":     {"brand": "QVX",        "label": "Obsidian DH",       "travel": 200, "spring": "Coil",
 		"lowers": {"color": "5fbf3f", "color2": "ffffff", "finish": "gloss"}, "stanchions": {"color": "202024", "color2": "ffffff", "finish": "anodized"}, "coat": "Black"},
-	"dorado":   {"brand": "MANITOU",    "label": "Dorado Pro",       "travel": 200, "spring": "Air",
+	"dorado":   {"brand": "MIRAGE",     "label": "Gilded Pro",       "travel": 200, "spring": "Air",
 		"lowers": {"color": "e9eaec", "color2": "ffffff", "finish": "gloss"}, "stanchions": {"color": "c9cdd2", "color2": "ffffff", "finish": "chrome"}, "coat": "Silver"},
-	"era":      {"brand": "EXT",        "label": "Era V2.1",         "travel": 180, "spring": "Coil",
+	"era":      {"brand": "AXT",        "label": "Epoch V2.1",       "travel": 180, "spring": "Coil",
 		"lowers": {"color": "1a1a1c", "color2": "ffffff", "finish": "satin"}, "stanchions": {"color": "e0b545", "color2": "ffffff", "finish": "anodized"}, "coat": "Gold"},
 	# the forks of the YT Tues / NS Fuzz models (assets/forks/<glb>.glb, tools/make_forks.py): their own crowns, stanchions,
 	# lowers and front caliper, fitted to the stock frame. The glb limits the travel (the lowers stop at the crown).
-	"tues_fork": {"brand": "YT",         "label": "Tues fork",        "travel": 180, "spring": "Air", "glb": "tues",
+	"tues_fork": {"brand": "YONDER",     "label": "Tusk fork",        "travel": 180, "spring": "Air", "glb": "tues",
 		"lowers": {"color": "1a1a1c", "color2": "ffffff", "finish": "gloss"}, "stanchions": {"color": "c8a24a", "color2": "ffffff", "finish": "anodized"}, "coat": "Gold"},
-	"fuzz_fork": {"brand": "NS",         "label": "Fuzz fork",        "travel": 170, "spring": "Air", "glb": "fuzz",
+	"fuzz_fork": {"brand": "NEXO",       "label": "Fizz fork",        "travel": 170, "spring": "Air", "glb": "fuzz",
 		"lowers": {"color": "1a1a1c", "color2": "ffffff", "finish": "satin"}, "stanchions": {"color": "d9b347", "color2": "ffffff", "finish": "anodized"}, "coat": "Gold"},
 }
 
@@ -145,14 +145,14 @@ static func apply_fork_model(b: Dictionary, key: String) -> void:
 	b.paint.stanchions = (m.stanchions as Dictionary).duplicate()
 
 ## brake rotors (assets/forks/rotor_<id>.glb, tools/export_rotors.py); "stock" = the generated wheels' own
-const ROTORS := [["stock", "GLORY stock"], ["tues", "YT Tues 203 mm"], ["fuzz", "NS Fuzz 190 mm"]]
+const ROTORS := [["stock", "RUNOUT stock"], ["tues", "Yonder Tusk 203 mm"], ["fuzz", "Nexo Fizz 190 mm"]]
 ## saddles (assets/seats/saddle_dh.glb + parts/<id>_saddle.glb) and seat post: "stock" = the stock frame's slammed post; "dropper" = a post
 ## that stands up to build.seat.post_h metres (0 - 0.2) along the seat tube (BikeRig._swap_seat)
-const SADDLES := [["stock", "GLORY stock"], ["tues", "YT Tues"], ["fuzz", "NS Fuzz"]]
-const LEVERS := [["stock", "GLORY stock"], ["tues", "YT Tues"], ["fuzz", "NS Fuzz"]]
+const SADDLES := [["stock", "RUNOUT stock"], ["tues", "Yonder Tusk"], ["fuzz", "Nexo Fizz"]]
+const LEVERS := [["stock", "RUNOUT stock"], ["tues", "Yonder Tusk"], ["fuzz", "Nexo Fizz"]]
 const POSTS := [["stock", "Slammed (stock)"], ["dropper", "Dropper"]]
 ## rear brake calipers for the stock frame (assets/forks/caliper_<id>.glb, tools/make_forks.py); "stock" = the GLORY's own
-const REAR_CALIPERS := [["stock", "GLORY stock"], ["tues", "YT Tues"], ["fuzz", "NS Fuzz"]]
+const REAR_CALIPERS := [["stock", "RUNOUT stock"], ["tues", "Yonder Tusk"], ["fuzz", "Nexo Fizz"]]
 
 ## the fork model's glb id (FORK_MODELS.*.glb) of a build, or "" for the frame's own fork
 static func fork_glb(b: Dictionary) -> String:
@@ -163,23 +163,23 @@ static func fork_glb(b: Dictionary) -> String:
 ## cog (cycled; "rainbow" = oil-slick fade small -> big cog), "rough" = how matte. The big-range ones
 ## (52T+) are granny gears for climbing: the biggest cog gives the most push at walking pace.
 const CASSETTES := {
-	"dh7":    {"label": "7-speed DH 11–24", "brand": "SRAM", "name": "X01 DH", "cogs": [11, 12, 14, 16, 18, 21, 24],
+	"dh7":    {"label": "7-speed DH 11–24", "brand": "SPROKK", "name": "SK1 DH", "cogs": [11, 12, 14, 16, 18, 21, 24],
 		"cols": ["c9ccd1"], "rough": 0.18},
-	"dh7w":   {"label": "7-speed wide 11–28", "brand": "BOX", "name": "Prime 7 Wide", "cogs": [11, 13, 15, 17, 20, 24, 28],
+	"dh7w":   {"label": "7-speed wide 11–28", "brand": "CRATE", "name": "Seven Wide", "cogs": [11, 13, 15, 17, 20, 24, 28],
 		"cols": ["202124"], "rough": 0.38},
-	"mtb9":   {"label": "9-speed 11–32", "brand": "SHIMANO", "name": "Deore 9", "cogs": [11, 12, 14, 16, 18, 21, 24, 28, 32],
+	"mtb9":   {"label": "9-speed 11–32", "brand": "HIKARI", "name": "Trail 9", "cogs": [11, 12, 14, 16, 18, 21, 24, 28, 32],
 		"cols": ["aeb2b8"], "rough": 0.3},
-	"mtb11":  {"label": "11-speed 10–42", "brand": "SHIMANO", "name": "XT 11", "cogs": [10, 12, 14, 16, 18, 21, 24, 28, 32, 36, 42],
+	"mtb11":  {"label": "11-speed 10–42", "brand": "HIKARI", "name": "Pro 11", "cogs": [10, 12, 14, 16, 18, 21, 24, 28, 32, 36, 42],
 		"cols": ["d4d6da", "34363a"], "rough": 0.22},
-	"single": {"label": "Single speed 16T", "brand": "DMR", "name": "Single cog 16T", "cogs": [16],
+	"single": {"label": "Single speed 16T", "brand": "KOG", "name": "Single cog 16T", "cogs": [16],
 		"cols": ["c8202a"], "rough": 0.3},
-	"eagle":  {"label": "12-speed 10–52", "brand": "SRAM", "name": "XX1 Eagle Gold", "cogs": [10, 12, 14, 16, 18, 21, 24, 28, 32, 36, 42, 52],
+	"eagle":  {"label": "12-speed 10–52", "brand": "SPROKK", "name": "SK2 Condor Gold", "cogs": [10, 12, 14, 16, 18, 21, 24, 28, 32, 36, 42, 52],
 		"cols": ["d9a43c"], "rough": 0.16},
-	"rainbow":{"label": "12-speed 10–52 rainbow", "brand": "SRAM", "name": "XX1 Eagle Rainbow", "cogs": [10, 12, 14, 16, 18, 21, 24, 28, 32, 36, 42, 52],
+	"rainbow":{"label": "12-speed 10–52 rainbow", "brand": "SPROKK", "name": "SK2 Condor Rainbow", "cogs": [10, 12, 14, 16, 18, 21, 24, 28, 32, 36, 42, 52],
 		"cols": ["rainbow"], "rough": 0.12},
-	"xtr":    {"label": "12-speed 10–51", "brand": "SHIMANO", "name": "XTR 12", "cogs": [10, 12, 14, 16, 18, 21, 24, 28, 33, 39, 45, 51],
+	"xtr":    {"label": "12-speed 10–51", "brand": "HIKARI", "name": "Elite 12", "cogs": [10, 12, 14, 16, 18, 21, 24, 28, 33, 39, 45, 51],
 		"cols": ["dfe1e4", "5a5d63"], "rough": 0.2},
-	"helix":  {"label": "12-speed 9–50", "brand": "E*THIRTEEN", "name": "Helix Race", "cogs": [9, 10, 12, 14, 16, 19, 22, 26, 30, 35, 42, 50],
+	"helix":  {"label": "12-speed 9–50", "brand": "Q*SEVEN", "name": "Spiral Race", "cogs": [9, 10, 12, 14, 16, 19, 22, 26, 30, 35, 42, 50],
 		"cols": ["1f6fe0", "16171a"], "rough": 0.28},
 	"summit": {"label": "12-speed 11–56", "brand": "GOATWORKS", "name": "Summit 56", "cogs": [11, 13, 15, 17, 19, 22, 25, 29, 34, 40, 47, 56],
 		"cols": ["ff6a13", "1a1a1c"], "rough": 0.26},
@@ -203,7 +203,7 @@ static func cassette_cols(k: String) -> Array:
 
 static func default_build() -> Dictionary:
 	return {
-		"name": "GLORY DH",
+		"name": "RUNOUT DH",
 		"paint": {
 			"frame": {"color": "e8432e", "color2": "ffb000", "finish": "metallic"},
 			"rear": {"color": "e8432e", "color2": "ffb000", "finish": "metallic"},
@@ -223,8 +223,8 @@ static func default_build() -> Dictionary:
 			"chainstay": {"logo": "cinelli", "text": "", "fill": "f4f4f0", "stroke": "141418", "pos": 0.5, "scale": 1.0, "rot": 0.0},
 			"forklegs": {"logo": "fox", "text": "", "fill": "f4f4f0", "stroke": "141418", "pos": 0.5, "scale": 1.0, "rot": 0.0},
 			"bars": {"logo": "none", "text": "", "fill": "f4f4f0", "stroke": "141418", "pos": 0.5, "scale": 1.0, "rot": 0.0},
-			"tyres": {"logo": "text", "text": "MAXXIS", "fill": "f4f4f0", "stroke": "141418", "pos": 0.5, "scale": 1.0, "rot": 0.0},
-			"rims": {"logo": "text", "text": "GRAVITY", "fill": "f4f4f0", "stroke": "141418", "count": 2, "pos": 0.5, "scale": 1.0, "rot": 0.0},
+			"tyres": {"logo": "text", "text": "GRIPWELL", "fill": "f4f4f0", "stroke": "141418", "pos": 0.5, "scale": 1.0, "rot": 0.0},
+			"rims": {"logo": "text", "text": "FREEFALL", "fill": "f4f4f0", "stroke": "141418", "count": 2, "pos": 0.5, "scale": 1.0, "rot": 0.0},
 		},
 		"wheels": {
 			"front": "29", "rear": "27.5", "tyre_w": 2.5, "tread": "knobby", "sidewall": "black",
@@ -254,6 +254,7 @@ static func load_build() -> Dictionary:
 		var j = JSON.parse_string(FileAccess.get_file_as_string(PATH))
 		if j is Dictionary:
 			_merge(b, j)
+			rebrand(b)
 	# tests: BMX_BUILD="wheels.rim_model=deemax;bars.width=820;..." (models applied through their presets)
 	for kv in OS.get_environment("BMX_BUILD").split(";", false):
 		var p := kv.split("=")
@@ -270,6 +271,24 @@ static func load_build() -> Dictionary:
 		d[key] = float(p[1]) if typeof(d[key]) in [TYPE_INT, TYPE_FLOAT] else p[1]
 	return b
 
+## lettering saved by older versions (real brand names) -> the game's own made-up brands
+const OLD_BRANDS := {
+	"MAXXIS": "GRIPWELL", "SCHWALBE": "TRAKKA", "MICHELIN": "MORVAN", "CONTINENTAL": "KONTOUR", "SPECIALIZED": "RIDGEFORM",
+	"DT SWISS": "ALPWERK", "MAVIC": "CASTEL", "RACE FACE": "RAW EDGE", "SPANK": "SMACK", "STAN'S NOTUBES": "SEALCO",
+	"E*THIRTEEN": "Q*SEVEN", "WE ARE ONE": "HIVEMIND", "RESERVE": "STOCKPILE", "CRANKBROTHERS": "COGSMITH", "ZIPP": "WHIZZ",
+	"GRAVITY": "FREEFALL", "GLORY": "RUNOUT", "GLORY DH": "RUNOUT DH", "FOX": "KOMODO", "CINELLI": "MONTELLI",
+}
+
+## a loaded build: real brand names it still carries (tyre / rim lettering, the bike's name) -> ours
+static func rebrand(b: Dictionary) -> void:
+	if OLD_BRANDS.has(str(b.get("name", "")).to_upper()):
+		b.name = OLD_BRANDS[str(b.name).to_upper()]
+	var logos: Dictionary = b.get("logos", {})
+	for slot in logos:
+		var L = logos[slot]
+		if L is Dictionary and OLD_BRANDS.has(str(L.get("text", "")).to_upper()):
+			L.text = OLD_BRANDS[str(L.text).to_upper()]
+
 static func _merge(dst: Dictionary, src: Dictionary) -> void:
 	for k in src:
 		if dst.has(k) and dst[k] is Dictionary and src[k] is Dictionary:
@@ -283,6 +302,7 @@ static func save_build(b: Dictionary) -> void:
 	if OS.get_environment("BMX_PADSEQ") != "": return   # menu tests: never into the player\'s files
 	var f := FileAccess.open(PATH, FileAccess.WRITE)
 	if f: f.store_string(JSON.stringify(b, "\t"))
+	Steam.event("GARAGE")
 
 ## copy a PNG the player picked into user://logos and return its new path
 static func import_logo(src: String) -> String:
@@ -366,8 +386,6 @@ static func decal_config(b: Dictionary) -> Dictionary:
 			if lg.has("text"): e.text = lg.text
 		else:
 			continue
-		if e.get("upright", false) and not e.has("image"):
-			continue   # fork legs take artwork only
 		e.fill = Color(L.fill); e.stroke = Color(L.stroke, 0.85)
 		e.pos = float(L.get("pos", 0.5)); e.scale = float(L.get("scale", 1.0)); e.rot = float(L.get("rot", 0.0))
 		if e.get("bar", false):   # the bar's grip end moves with its width
