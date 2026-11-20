@@ -1760,6 +1760,10 @@ func _autotest(seconds: float) -> void:
 		if Env.s("BMX_FOLLOW") != "":   # tests: steer along the trail centreline, get up after a crash
 			var ph = game.phys
 			var crs = game.terrain.field.course
+			if Env.s("BMX_RESPAWN") != "" and el > float(Env.s("BMX_RESPAWN")) and not _probe.has("respawned"):   # tests: Backspace here
+				_probe["respawned"] = true; _probe.fs = 0.0
+				print("AUTOTEST respawn: ride_t before=%.1f" % game.hud.ride_t)
+				game.respawn(false)
 			var best_d := 1e9
 			var s0: float = _probe.get("fs", 0.0)
 			for k in range(-40, 81):   # nearest centreline point near the last one (1 m steps)
