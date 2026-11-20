@@ -2,8 +2,9 @@ extends Node
 ## Procedural ride sound (the web version was silent): wind that rises with speed, tyre roll on gravel
 ## (GravelSynth.cs, fitted to a real tyres-on-gravel recording; its tone follows the surface; skids play it louder),
 ## splashes, and one-shot
-## crunches / gear clicks, synthesised into one AudioStreamGenerator; plus the freewheel, synthesised
-## in C# (FreewheelSynth.cs, modelled on a real hub) on its own 44.1 kHz generator for a crisp top end.
+## crunches, synthesised into one AudioStreamGenerator; plus the freewheel, synthesised
+## in C# (FreewheelSynth.cs, modelled on a real hub) on its own 44.1 kHz generator for a crisp top end;
+## gear shifts are game/shift_sound.gd (the user's shifter recording).
 
 const RATE := 22050.0
 
@@ -54,6 +55,7 @@ var g_rumble := 1.0
 const GRAVEL_SURF := [[0.09, 420.0, 0.04, 1.2], [0.15, 600.0, 0.12, 0.9], [0.0, 500.0, 0.05, 0.5], [0.13, 520.0, 0.08, 0.7]]   # subtle: ~half the level, little crack (clicks)
 # one-shots: [kind, t, amp]
 var shots: Array = []
+var shift_snd: ShiftSound
 
 ## drop the C# synths while the engine is still up: if their .NET finalizers run during shutdown
 ## instead, Godot can crash on exit ("Leaked unsafe reference" -> SEHException)
@@ -72,6 +74,8 @@ func _ready() -> void:
 	player.play()
 	pb = player.get_stream_playback()
 	_setup_chain()
+	shift_snd = ShiftSound.new()
+	add_child(shift_snd)
 	var gs = load("res://scripts/game/GravelSynth.cs")
 	if gs != null and gs.can_instantiate():
 		gravel = gs.new()
@@ -139,7 +143,8 @@ func _wood_sample(t: float, hits: Array) -> float:
 		v += (m + (randf() * 2 - 1) * exp(-dt * 600.0) * 0.5) * h[2] * 0.55
 	return v
 func crash() -> void: shots.append(["thud", 0.0, 1.0]); shots.append(["crunch", 0.0, 0.5])
-func shift() -> void: shots.append(["click", 0.0, 0.7])
+## a gear change: the user's shifter recording (game/shift_sound.gd)
+func shift(d: int = 1) -> void: if shift_snd: shift_snd.shift(d)
 
 func update_audio(dt: float) -> void:
 	if pb == null: return
@@ -264,17 +269,6 @@ func _fill() -> void:
 					v = (randf() * 2 - 1) * exp(-t * 9.0) * amp * (0.6 + 0.4 * sin(t * 900.0))
 				"wood":
 					v = _wood_sample(t, sh[3]) * amp
-				"click":
-					# shifter detent: a sharp snap (noise tick + bright metallic rings) then a softer
-					# lower "clack" as the lever seats ~34 ms later, over a small body thunk
-					var snap := (randf() * 2 - 1) * exp(-t * 700.0) * 0.9
-					snap += (sin(TAU * 3150.0 * t) * 0.5 + sin(TAU * 4720.0 * t) * 0.3 + sin(TAU * 1980.0 * t) * 0.45) * exp(-t * 170.0)
-					var t2 := t - 0.034
-					var clack := 0.0
-					if t2 > 0.0:
-						clack = ((randf() * 2 - 1) * exp(-t2 * 900.0) * 0.5 + (sin(TAU * 1320.0 * t2) * 0.6 + sin(TAU * 2610.0 * t2) * 0.3) * exp(-t2 * 230.0)) * 0.7
-					var body := sin(TAU * 190.0 * t) * exp(-t * 60.0) * 0.35
-					v = (snap + clack + body) * amp
 			buf[i] += Vector2(v, v)
 		sh[1] = t0 + n / RATE
 	shots = shots.filter(func(sh): return sh[1] < (1.6 if sh[0] == "wood" else 0.8))

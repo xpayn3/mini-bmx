@@ -42,6 +42,16 @@ const TRACK := 360
 var ride_t := 0.0
 var beep                # GarminBeep: the bike computer's piezo (power-on chime, key beeps)
 var _power_t := -1.0    # seconds the HUD has been showing (the computer switches on at 0.35 s)
+# bike computer tones (garmin_beep.gd): what has already beeped this ride
+var _gps_beeped := false
+var _paused := false    # auto-pause: stood still > AUTO_PAUSE s
+var _still_t := 0.0
+var _lap := 0           # auto lap every LAP_M of trip distance
+var _bat_warned := false
+var _alert_beep_t := 0.0
+var _alert_key := -99   # where on the trail the last prompted turn / feature is (12 m bins)
+const AUTO_PAUSE := 2.0
+const LAP_M := 1000.0
 var moving_t := 0.0
 var ride_dist := 0.0
 var max_v := 0.0
@@ -163,6 +173,7 @@ func on_landing(air_time: float, dist: float, height: float, impact: float) -> v
 	if air_time > 0.25 and not game.phys.crash_on:
 		jumps += 1
 		jump_last = Vector3(air_time, dist, height)
+		if jumps > 2 and air_time > 0.7 and air_time > jump_best.x: beep.tone("record")   # a new best jump today
 		jump_best = Vector3(maxf(jump_best.x, air_time), maxf(jump_best.y, dist), maxf(jump_best.z, height))
 
 ## style points for a landed jump (bike_physics._style_points): the popup chains them into a combo
@@ -182,7 +193,13 @@ func on_crash(speed := 0.0) -> void:
 	life = maxf(0.0, life - clampf(0.12 + speed / 12.0 * 0.6, 0.12, 0.95))
 	hurt_t = 0.0
 	life_bar.shake = 1.0
+	# knocked out: the computer's incident detection sounds its alarm (once the crash slow motion is over)
+	if life <= 0.0 and is_inside_tree():
+		get_tree().create_timer(2.6, true, false, true).timeout.connect(_incident_alarm)
 	if OS.get_environment("BMX_LIFE_PROBE") != "": print("LIFE crash v=%.1f life=%.2f" % [speed, life])
+
+func _incident_alarm() -> void:
+	if life <= 0.0: beep.tone("incident")
 
 ## rolled through a health pack (the backpacks beside the roadside sheds): life back, the bar glows green
 func on_health_pack(amount: float) -> void:
@@ -210,6 +227,7 @@ func on_respawn() -> void:
 	life = 1.0; hurt_t = 99.0
 	ride_t = 0.0; ride_dist = 0.0; moving_t = 0.0; max_v = 0.0
 	if visible: _power_t = 0.0
+	_gps_beeped = false; _paused = false; _still_t = 0.0; _lap = 0; _bat_warned = false
 	if OS.get_environment("BMX_LIFE") != "": life = float(OS.get_environment("BMX_LIFE"))   # tests: start with this much life
 	if style_pop: style_pop.bail()
 	air_card.bail()
@@ -360,6 +378,7 @@ func update_hud(dt: float) -> void:
 		if track_hist.size() > TRACK: track_hist.remove_at(0)
 		if elev_hist.size() > HIST: elev_hist.remove_at(0)
 	_ride_stats(st, dt)
+	_computer_tones(st, dt)
 	alert_new = maxf(0.0, alert_new - dt)
 	_trail_watch(st)
 	gauge.queue_redraw()
@@ -387,6 +406,31 @@ func _ride_stats(st: BikePhysics, dt: float) -> void:
 	var hr_t := 68.0 + 95.0 * clampf(power / 650.0, 0, 1) + 22.0 * st.sprint + 18.0 * (1.0 - st.stamina) \
 		+ 8.0 * clampf(absf(st.v) / 15.0, 0, 1) + (25.0 if st.crash_on else 0.0)
 	hr += (hr_t - hr) * minf(1.0, dt * 0.35)
+
+## the bike computer's own beeps: satellites found, auto-pause / resume, auto lap, low battery
+func _computer_tones(st: BikePhysics, dt: float) -> void:
+	_alert_beep_t = maxf(0.0, _alert_beep_t - dt)
+	if not visible or _power_t < 0.35: return
+	if not _gps_beeped and ride_t >= GaugeView.FIX_T:
+		_gps_beeped = true
+		beep.tone("gps")
+	if ride_t < GaugeView.FIX_T + 1.0: return
+	var va := absf(st.v)
+	if not _paused:
+		_still_t = _still_t + dt if (va < 0.4 and not st.crash_on) else 0.0
+		if _still_t > AUTO_PAUSE:
+			_paused = true
+			beep.tone("pause")
+	elif va > 1.0 and not st.crash_on:
+		_paused = false; _still_t = 0.0
+		beep.tone("resume")
+	var lap := int(ride_dist / LAP_M)
+	if lap > _lap:
+		_lap = lap
+		beep.tone("lap")
+	if not _bat_warned and ride_t > GaugeView.BAT_LIFE * 0.9:
+		_bat_warned = true
+		beep.tone("battery")
 
 ## mount the bike computer chosen on the ride setup page (size, pages, navigation)
 func set_computer() -> void:
@@ -486,6 +530,15 @@ func _trail_scan(p: Vector2, fw: Vector2, crashed: bool) -> void:
 	if alert.get("text", "") != "" and alert.text != was:
 		if int(gauge.order[gauge.page]) == GaugeView.MAP_PAGE: gauge.light = 3.0   # the screen lights up for a new alert (map page only)
 		alert_new = 3.5
+	# the navigation prompt, once per turn / feature as it comes within 100 m: a turn tune for bends,
+	# a double beep for a feature / rocks (keyed by where it is on the trail, so two LEFTs in a row both beep)
+	if not alert.is_empty() and alert.d < 100.0:
+		var key := int((trail_i * S + alert.d) / 12.0)
+		if absi(key - _alert_key) > 1:
+			_alert_key = key
+			if _alert_beep_t <= 0.0 and ride_t > GaugeView.FIX_T + 1.0:
+				_alert_beep_t = 2.5
+				beep.tone("turn" if (alert.kind as String).right(1) in ["L", "R"] else "feature")
 
 func _nearest(tc: TrailCourse, p: Vector2, a: int, b: int) -> int:
 	var best := a

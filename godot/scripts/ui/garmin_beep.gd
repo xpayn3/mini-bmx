@@ -1,33 +1,50 @@
-## The bike computer's piezo buzzer: a power-on chime when the ride starts and a short key beep on the
-## bezel buttons. A piezo disc is a square-ish tone with a strong resonance around 3–4 kHz, a hard
+## The bike computer's piezo buzzer, with the tones a real GPS bike computer makes: power-on chime,
+## key beep, satellites found, timer auto-pause (falling two-note) / resume (rising two-note), auto lap
+## (three even beeps every km), navigation turn prompt, feature-ahead double beep, low battery (falling
+## three-note), a new best jump (a short fanfare) and the incident-detection alarm (knocked out). A piezo disc is a square-ish tone with a strong resonance around 3–4 kHz, a hard
 ## start and a tiny ring-out; rendered once into AudioStreamWAVs and played on the SFX bus.
 extends AudioStreamPlayer
 
 const RATE := 44100
 const RES := 3600.0      # Hz, the disc's resonance: tones near it are loudest
 
-static var _power: AudioStreamWAV
-static var _key: AudioStreamWAV
+static var _tones := {}   # name -> AudioStreamWAV
+
+# notes: [hz (0 = rest), seconds]. Piezo-friendly pitches (C7 2093, E7 2637, F7 2794, G7 3136, A7 3520,
+# A#7 3729, C8 4186): a real unit plays its prompts high up near the disc's resonance, short and square.
+const TONES := {
+	# power on: three quick rising notes and a held top note (C7 E7 G7 C8)
+	"power": [[2093.0, 0.075], [0.0, 0.025], [2637.0, 0.075], [0.0, 0.025], [3136.0, 0.075], [0.0, 0.025], [4186.0, 0.22]],
+	"key": [[3520.0, 0.04]],
+	"gps": [[2637.0, 0.06], [0.0, 0.03], [3520.0, 0.12]],
+	"resume": [[2794.0, 0.09], [0.0, 0.025], [3729.0, 0.15]],
+	"pause": [[3729.0, 0.09], [0.0, 0.025], [2794.0, 0.17]],
+	"lap": [[3520.0, 0.07], [0.0, 0.07], [3520.0, 0.07], [0.0, 0.07], [3520.0, 0.07]],
+	"turn": [[3136.0, 0.07], [0.0, 0.02], [4186.0, 0.07], [0.0, 0.02], [3136.0, 0.14]],
+	"feature": [[3729.0, 0.05], [0.0, 0.05], [3729.0, 0.05]],
+	"battery": [[3136.0, 0.12], [0.0, 0.04], [2637.0, 0.12], [0.0, 0.04], [2093.0, 0.24]],
+	"record": [[2093.0, 0.07], [0.0, 0.02], [2637.0, 0.07], [0.0, 0.02], [3136.0, 0.07], [0.0, 0.02],
+		[4186.0, 0.1], [0.0, 0.05], [3136.0, 0.07], [0.0, 0.02], [4186.0, 0.28]],
+	"incident": [[4186.0, 0.11], [2794.0, 0.11], [4186.0, 0.11], [2794.0, 0.11], [4186.0, 0.11], [2794.0, 0.11],
+		[0.0, 0.18], [4186.0, 0.11], [2794.0, 0.11], [4186.0, 0.11], [2794.0, 0.11], [4186.0, 0.11], [2794.0, 0.11]],
+}
 
 func _ready() -> void:
 	bus = "SFX" if AudioServer.get_bus_index("SFX") >= 0 else "Master"
 	volume_db = -9.0
 	max_polyphony = 3
-	if _power == null:
-		# power on: three quick rising notes and a held top note (C7 E7 G7 C8)
-		_power = _render([[2093.0, 0.075], [0.0, 0.025], [2637.0, 0.075], [0.0, 0.025],
-			[3136.0, 0.075], [0.0, 0.025], [4186.0, 0.22]])
-		_key = _render([[3520.0, 0.04]])
+	if _tones.is_empty():
+		for k in TONES: _tones[k] = _render(TONES[k])
 
-func power_on() -> void:
-	if not ComputerUnits.opt(GameState.computer_id, "beep"): return
-	stream = _power
+## play a tone by name (TONES), if this unit's beeper is on
+func tone(name: String) -> void:
+	if not ComputerUnits.opt(GameState.computer_id, "beep") or not _tones.has(name): return
+	if OS.get_environment("BMX_BEEP_PROBE") != "": print("BEEP ", name)
+	stream = _tones[name]
 	play()
 
-func key() -> void:
-	if not ComputerUnits.opt(GameState.computer_id, "beep"): return
-	stream = _key
-	play()
+func power_on() -> void: tone("power")
+func key() -> void: tone("key")
 
 ## notes = [[hz (0 = silence), seconds], ...]
 static func _render(notes: Array) -> AudioStreamWAV:

@@ -1167,6 +1167,12 @@ func _autotest(seconds: float) -> void:
 			pedal = not braking
 			if braking and game.phys.v > 0.3: Input.action_press("brake")   # off once stopped (held brake backs up)
 			else: Input.action_release("brake")
+		if OS.get_environment("BMX_SHIFT") != "" and el >= float(OS.get_environment("BMX_SHIFT")):   # tests: shift every 0.7 s (3 easier, 3 harder...)
+			var si := int((el - float(OS.get_environment("BMX_SHIFT"))) / 0.7)
+			if si != _probe.get("shift_i", -1):
+				_probe.shift_i = si
+				game._shift(1 if (si / 3) % 2 == 0 else -1)
+				print("SHIFT t=%.2f d=%d gear=%d" % [el, 1 if (si / 3) % 2 == 0 else -1, game.phys.gear])
 		if pedal and not (OS.get_environment("BMX_COAST") != "" and int(el) % 6 >= 3): Input.action_press("pedal")   # BMX_COAST: 3 s pedal / 3 s coast
 		else: Input.action_release("pedal")
 		if OS.get_environment("BMX_BRAKETURN") != "" and el > float(OS.get_environment("BMX_BRAKETURN")):   # tests: 2 s pedal up to speed, 1.5 s hard brake + full steer, repeat

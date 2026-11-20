@@ -1029,7 +1029,7 @@ func _shift(d: int) -> void:
 		flash("Single speed"); return
 	if phys.shift(d):
 		hud.gear_changed()
-		if audio: audio.shift()
+		if audio: audio.shift(d)
 
 ## demo mode: an AI rider (game/demo_pilot.gd) supplies the input instead of the keys / pad, F2 hands it back
 var demo: DemoPilot = null
