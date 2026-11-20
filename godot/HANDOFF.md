@@ -557,6 +557,13 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   `[game] lens`), `BMX_LENS=<id>` for tests; `Game._update_light` follows a change. Probe: `-s res://tools/lens_lut_probe.gd -- <dir>`.
   Lens cards show the newest helmets' own goggle model (`GoggleLens.make_goggles`: `helmet_goggles` of helmet_tld.glb, its
   magenta lens texels recoloured by `shaders/goggle_lens.gdshader`), rendered by `bike_thumbs`; `BMX_GOG_VIEW=x,y,z` turns the view.
+- **RACE step preview** (`ui/lens_scene.gd`, preloaded, a SubViewportContainer with its own World3D on the left of the RACE
+  step instead of the bike): a made-up vista from riding height on a ridge-top trail (ruts, roots, a puddle, white rocks, grass),
+  the land dropping ~260 m into a valley with a lake, ~9000 pines, valley walls, snowy peaks 3-5 km out (`G(x, z)`). Lit by the
+  slider's hour with the ride's own environment + formulas (condensed `Game._apply_light`, AgX, grade.gdshader, bloom levels,
+  auto exposure, haze, a bike lamp at night, the glare guard) and graded by the picked lens. The land + tree buffers are worked out
+  on a WorkerThreadPool task once per session (`LensScene.prewarm()` from `main._prebuild_behind`, `join()` on quit / exit), ~0.75 s
+  off the main thread; making the nodes ~3 ms (first time ~90 ms: GPU upload / shaders). Probe: `BMX_SETUP_PROBE=1` (`LENSSCENE`).
 - **Time-of-day slider** (`ui/time_slider.gd`, preloaded, RACE step): the day as a sky strip with the sun's arc (`elev()` =
   `Game.sun_elev_deg`), sunrise / sunset marks, golden-hour bands, sun / moon handle with the time + part of day; drag / click /
   wheel, pad left / right = 15 min (`nav_step`), snaps to 5 min; saves `LightSettings` "time" on release. Quick chips + a

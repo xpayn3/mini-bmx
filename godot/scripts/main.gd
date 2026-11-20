@@ -186,6 +186,7 @@ func _free_title_keep() -> void:
 	_title_keep = {}
 
 func _exit_tree() -> void:
+	LensScene.join()
 	_free_title_keep()
 
 func restart_ride() -> void:
@@ -243,6 +244,7 @@ func _prebuild_behind(intro: CrtIntro) -> void:
 	hero_view.show_rider(RiderPanels.load_look())   # the Character step's standing rider too
 	hero_view.set_bike(GameState.bike_id)
 	print("PREBUILD turntable ms=", Time.get_ticks_msec() - t0)
+	LensScene.prewarm()   # the RACE step's trail preview: its land is worked out on a worker meanwhile
 	if is_instance_valid(intro): intro.hold = false
 
 func _take_prebuilt() -> bool:
@@ -589,6 +591,8 @@ func _menu_page_main() -> void:
 ## RIDE -> choose the bike and the time of day, then GO
 const GoggleLens = preload("res://scripts/rider/goggle_lens.gd")   # goggle lens = the ride's colour grade (RACE step)
 const TimeSlider = preload("res://scripts/ui/time_slider.gd")
+const LensScene = preload("res://scripts/ui/lens_scene.gd")
+var lens_view: SubViewportContainer   # the RACE step's trail preview (LensScene)
 var GOGGLE_VIEW: Vector3 = Vector3(1.0, 0.12, 0.16) if Env.s("BMX_GOG_VIEW") == "" else str_to_var("Vector3(" + Env.s("BMX_GOG_VIEW") + ")")   # lens cards: the camera looks from here
 const LensIcon = preload("res://scripts/ui/lens_icon.gd")
 const SETUP_STEPS := ["BIKE", "TUNE", "CHARACTER", "COMPUTER", "RACE"]
@@ -696,12 +700,21 @@ func _menu_page_setup_build(step := 0) -> void:
 		var left := Control.new()
 		left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(left)
-		hero_view = keep_view if keep_view else BikeTurntable.new()
-		keep_view = null
-		hero_view.set_anchors_preset(Control.PRESET_FULL_RECT)
-		left.add_child(hero_view)
-		if setup_step == 2: hero_view.show_rider(RiderPanels.load_look())   # the rider step shows the rider standing
-		else: hero_view.set_bike(GameState.bike_id)
+		var race := setup_step == SETUP_STEPS.size() - 1
+		if race:   # RACE: a little trail seen from riding height, lit by the picked time, through the picked lens (LensScene)
+			if not is_instance_valid(keep_view): keep_view = hero_view if is_instance_valid(hero_view) else null
+			lens_view = LensScene.new()
+			lens_view.set_anchors_preset(Control.PRESET_FULL_RECT)
+			left.add_child(lens_view)
+			lens_view.set_hour(LightSettings.get_value("time"))
+			lens_view.set_lens(GameState.goggle_lens)
+		else:
+			hero_view = keep_view if keep_view else BikeTurntable.new()
+			keep_view = null
+			hero_view.set_anchors_preset(Control.PRESET_FULL_RECT)
+			left.add_child(hero_view)
+			if setup_step == 2: hero_view.show_rider(RiderPanels.load_look())   # the rider step shows the rider standing
+			else: hero_view.set_bike(GameState.bike_id)
 		var ov := MarginContainer.new()
 		ov.set_anchors_preset(Control.PRESET_FULL_RECT)
 		ov.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -727,6 +740,13 @@ func _menu_page_setup_build(step := 0) -> void:
 		hero_spec.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		lv.add_child(hero_spec)
 		_hero_text(GameState.bike_id)
+		if race:   # over the trail scene: white type with a soft shadow
+			for lb in [tcol.get_child(0), tcol.get_child(1), hero_name, hero_spec]:
+				(lb as Control).add_theme_color_override("font_color", Color.WHITE)
+				(lb as Control).add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.45))
+				(lb as Control).add_theme_constant_override("shadow_offset_y", 2)
+				(lb as Control).add_theme_constant_override("shadow_outline_size", 6)
+			hero_spec.text = "THE TRAIL AT THIS TIME OF DAY  ·  THROUGH YOUR LENS"
 		if setup_step == 2:
 			hero_name.text = "YOUR CHARACTER"
 			hero_spec.text = "KIT  ·  HAIR  ·  PLATE  ·  DRAG TO TURN"
@@ -735,6 +755,10 @@ func _menu_page_setup_build(step := 0) -> void:
 		bl.add_child(UITheme.make_button("BACK", back_cb, "link", Tokens.T_XL))
 		bl.add_child(UITheme.make_button("TUNE IN GARAGE", _open_garage, "link", Tokens.T_MD))
 		lv.add_child(bl)
+		if race:   # the links read on the dark trail scene too
+			for lk in bl.get_children():
+				for st in ["font_color", "font_hover_color", "font_focus_color", "font_pressed_color"]:
+					(lk as Control).add_theme_color_override(st, Color.WHITE if st == "font_color" else Tokens.ACCENT)
 		# right: the steps, this step's picks, next
 		var rm := MarginContainer.new()
 		rm.custom_minimum_size.x = 600
@@ -1187,6 +1211,7 @@ func _setup_race(content: HBoxContainer) -> void:
 	ts.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	ts.set_meta(&"nav_accept", _setup_next)
 	ts.committed.connect(func(h: float): LightSettings.set_value("time", h))
+	ts.changed.connect(func(h: float): if is_instance_valid(lens_view): lens_view.set_hour(h))
 	side.add_child(ts)
 	menu_focus = ts
 	# quick picks under it + the day / night cycle
@@ -1267,6 +1292,7 @@ func _setup_lenses(side: VBoxContainer) -> void:
 ## grades the setup page's bike view with a lens ("" / "neutral" = none); the turntable is kept across steps,
 ## so every other step sets it back to none
 func _lens_preview(id: String) -> void:
+	if is_instance_valid(lens_view) and id != "": lens_view.set_lens(id)
 	if not is_instance_valid(hero_view): return
 	for we in hero_view.find_children("*", "WorldEnvironment", true, false):
 		var env: Environment = (we as WorldEnvironment).environment
