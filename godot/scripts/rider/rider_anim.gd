@@ -15,6 +15,7 @@ extends RefCounted
 const DIR := "res://assets/anim/mixamo/"
 const CLIP_SECS := 7.0
 const FADE := 0.45
+const ANKLE_H := 0.09   # m: the ankle over the sole of a flat shoe (as the riding pose has it)
 const TO_RIDER := Basis(Vector3(0, 0, -1), Vector3(0, 1, 0), Vector3(1, 0, 0))   # Mixamo (+Z forward, left +X) -> rider
 const NEED := ["Hips", "Spine2", "Neck", "Head", "LeftArm", "LeftForeArm", "LeftHand", "RightArm", "RightForeArm",
 	"RightHand", "LeftUpLeg", "LeftLeg", "LeftFoot", "RightUpLeg", "RightLeg", "RightFoot"]
@@ -135,6 +136,16 @@ func _load_clip(path: String) -> Dictionary:
 	var rest := {}
 	for k in bones: rest[k] = (c.chain * skel.get_bone_global_rest(bones[k])).basis.orthonormalized()
 	c.rest = rest
+	# each foot's "toes ahead, level" direction in the foot bone's own frame. Mixamo's Foot bone runs from the
+	# ankle down to the ball of the foot (~45 deg), so aiming the shoe along it stood the rider on tiptoe
+	var toe_l := {}
+	for s in ["Left", "Right"]:
+		var f0: Vector3 = (c.chain * skel.get_bone_global_rest(bones[s + "Foot"])).origin
+		var t0: Vector3 = (c.chain * skel.get_bone_global_rest(bones[s + "ToeBase"])).origin if bones.has(s + "ToeBase") else f0 + Vector3.RIGHT
+		var flat := Vector3(t0.x - f0.x, 0.0, t0.z - f0.z)
+		flat = flat.normalized() if flat.length_squared() > 1e-10 else Vector3.RIGHT
+		toe_l[s] = (rest[s + "Foot"] as Basis).inverse() * flat
+	c.toe_l = toe_l
 	_seek(c, 0.0)
 	var g := _globals(c)
 	var leg := 0.0
@@ -274,17 +285,19 @@ func _retarget(c: Dictionary, on_floor := false) -> Dictionary:
 		o["hand%d" % i] = Basis(fa, back, fa.cross(back))
 		# foot: toward the toes, sole down
 		var df := _delta(c, g, s + "Foot")
-		var toe: Vector3 = dir.call(s + "Foot", s + "ToeBase") if c.b.has(s + "ToeBase") else df * Vector3.RIGHT
-		var fup := df * Vector3.UP
+		# toward the toes: the level rest direction turned as the clip turns the foot bone (not along the bone itself)
+		var toe: Vector3 = ((g[s + "Foot"] as Transform3D).basis.orthonormalized() * (c.toe_l[s] as Vector3)).normalized()
+		var fup := df * Vector3.UP if c.tpose else Vector3.UP
 		fup = fup - toe * fup.dot(toe)
 		if fup.length_squared() < 1e-6: fup = Vector3.UP - toe * toe.y
 		fup = fup.normalized()
 		o["foot%d" % i] = Basis(toe, fup, toe.cross(fup))
-	# on the floor: the lower ankle as high over it as the clip's (its flat-foot ankle height = our 0.08)
+	# on the floor: the lower ankle as high over it as the clip's (its flat-foot ankle height = our ANKLE_H)
 	var low := 0 if q.call("LeftFoot").y <= q.call("RightFoot").y else 1
 	var clip_y: float = q.call("LeftFoot" if low == 0 else "RightFoot").y - float(c.ankle)
-	var lift: float = clip_y + 0.08 - (P[11 + low * 3] as Vector3).y
-	if on_floor: lift = 0.08 - float(c.ankle)   # the clip's own heights; its flat-foot ankle = our 0.08
+	var lift: float = clip_y + ANKLE_H - (P[11 + low * 3] as Vector3).y
+	if on_floor: lift = ANKLE_H - float(c.ankle)   # the clip's own heights; its flat-foot ankle = our ANKLE_H
 	for i in 15: P[i] = (P[i] as Vector3) + Vector3(0, lift, 0)
-	o["shoe_drop"] = 0.05
+	o["shoe_drop"] = ANKLE_H
+	o["shoe_fwd"] = 0.04
 	return {P = P, o = o}
