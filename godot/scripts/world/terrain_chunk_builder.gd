@@ -98,6 +98,7 @@ func run() -> void:
 # ---------------- instance lists ----------------
 func _push(name: String, b: Basis, p: Vector3, c: Color) -> int:
 	var arr: PackedFloat32Array = lists[name]
+	lists[name] = PackedFloat32Array()   # drop the dict's reference so the append grows arr in place (no copy of the whole list)
 	arr.append_array([b.x.x, b.y.x, b.z.x, p.x, b.x.y, b.y.y, b.z.y, p.y, b.x.z, b.y.z, b.z.z, p.z, c.r, c.g, c.b, 1.0])
 	lists[name] = arr
 	counts[name] += 1
@@ -370,6 +371,7 @@ func _sheds(rs: WorldRng, ox: float, oz: float) -> void:
 			continue
 		var b := Basis(Vector3.UP, yaw)
 		var arr: PackedFloat32Array = shed_lists[di]
+		shed_lists[di] = PackedFloat32Array()   # no copy-on-write of the whole list
 		var p := Vector3(x, lo - 0.05, z)
 		arr.append_array([b.x.x, b.y.x, b.z.x, p.x, b.x.y, b.y.y, b.z.y, p.y, b.x.z, b.y.z, b.z.z, p.z, 1, 1, 1, 1])
 		shed_lists[di] = arr
@@ -1061,8 +1063,9 @@ func _wood(ox: float, oz: float) -> void:
 	var x0 := ox - S / 2
 	var z0 := oz - S / 2
 	var feats := []
-	for gz in range(floori(z0 / JC) - 1, floori((z0 + S) / JC) + 1):
-		for gx in range(floori(x0 / JC) - 1, floori((x0 + S) / JC) + 1):
+	# a feature starts up to len / 2 before its cell centre, so the cell past the far edge can still start here
+	for gz in range(floori(z0 / JC) - 1, floori((z0 + S) / JC) + 2):
+		for gx in range(floori(x0 / JC) - 1, floori((x0 + S) / JC) + 2):
 			var j = f.jump_at(gx, gz)
 			if j != null and j.wood != null:
 				feats.append(j)

@@ -224,7 +224,7 @@ static func default_build() -> Dictionary:
 			"spokes": 32, "lacing": 3, "gauge": 1, "spoke_color": "b8bcc0", "nipple_color": "e8432e", "hub_color": "1a1a1c",
 		},
 		"bars": {"width": 780, "rise": 30, "material": "alloy"},
-		"suspension": {"fork_travel": 200, "shock_travel": 200, "fork_spring": 1, "shock_spring": 1, "rebound": 1},
+		"suspension": {"fork_model": "custom", "fork_travel": 200, "shock_travel": 200, "fork_spring": 1, "shock_spring": 1, "rebound": 1},
 		"drive": {"ring": 34, "cassette": "dh7"},
 	}
 

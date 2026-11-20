@@ -309,7 +309,7 @@ func _update_flock(f: Flock, dt: float, rider: Vector2, vabs: float, scare: floa
 	mean /= float(f.lambs.size())
 	var on_road := false
 	for l in f.lambs:
-		if terrain.field.trail(l.p.x, l.p.y) > 0.05:
+		if terrain.trail(l.p.x, l.p.y) > 0.05:
 			on_road = true
 			break
 	if on_road:
@@ -352,10 +352,10 @@ func _update_lamb(l: Lamb, f: Flock, dt: float, rider: Vector2, fleeing: bool) -
 		if away.length() < 0.5:
 			away = Vector2(cos(l.theta), sin(l.theta))
 		away = away.normalized()
-		if terrain.field.trail(l.p.x, l.p.y) > 0.02:
+		if terrain.trail(l.p.x, l.p.y) > 0.02:
 			# on the road: dash sideways off it (down the trail gradient), a little away from the bike
-			var tx: float = terrain.field.trail(l.p.x + 1.5, l.p.y) - terrain.field.trail(l.p.x - 1.5, l.p.y)
-			var tz: float = terrain.field.trail(l.p.x, l.p.y + 1.5) - terrain.field.trail(l.p.x, l.p.y - 1.5)
+			var tx: float = terrain.trail(l.p.x + 1.5, l.p.y) - terrain.trail(l.p.x - 1.5, l.p.y)
+			var tz: float = terrain.trail(l.p.x, l.p.y + 1.5) - terrain.trail(l.p.x, l.p.y - 1.5)
 			var g := Vector2(-tx, -tz)
 			if g.length() < 0.01:
 				g = away.rotated(PI * 0.5 * l.turn_dir)

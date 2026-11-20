@@ -372,7 +372,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 ### Title screen (golden hour lookout)
 - `Game.set_scenic(true)` while the menu is up: a low warm sun ahead-right of the view, golden sky mode in
   `sky_hdri.gdshader` (`golden`: warm gradient + sun glow, the HDRI's clouds re-lit), warm long fog.
-- Camera `vista` mode (`CameraRig.VISTA`, not in the C cycle): behind/above the rider facing `_best_view()`
+- Camera `vista` mode (`CameraRig.VISTA`, not in the C cycle): behind/above the rider facing `_title_heading` (the hand-picked `TITLE_SPOT`)
   (clear near eye line + hills far off), slow sway, drag turns it.
 - `FarHills` (`scripts/world/far_hills.gd`): coarse ground + far trees out to 2.6 km, built on a worker
   thread; past ~450 m it adds rolling ridges (title screen only) so every seed has a hilly skyline.
@@ -783,10 +783,12 @@ Known, not fixed (lower priority from the code review):
 - HUD hotkeys (P/K/L/H) work on the title screen.
 - Rebinding: no conflict detection; pad rebind can't be cancelled.
 - Garage: test env `BMX_POSE` values get saved if you then touch a slider; config written on every slider tick.
-- Stale code: `set_torso` (unused), `hood_hem`, `_grid_indices`, `_time`, some one-off `tools/*.gd`
+- Stale code: `hood_hem`, `_time`, some one-off `tools/*.gd`
   (`fork_measure`, `wheel_measure(2)`, `inspect_glb`, `hdri_sun`).
-- Perf ideas: ragdoll terrain sampling, HUD stylebox allocations per frame, fx dust buffer upload when idle,
-  `terrain.jump()` array allocation per physics step.
+- Perf ideas (done 2026-11-20: ragdoll ground sampled once per substep, HUD boxes cached (`UITheme.draw_box`), fx dust /
+  chunk buffers skip work when idle, `jump_mask` instead of `jump()` per step, wind / splash bed in C# (`RideBedSynth.cs`),
+  test flags cached (`Env.s`), torn tape drawn from packed arrays): still open: `rider.update_pose` gets a new ~45-key
+  dictionary every frame, the ride log builds a 65-value array 120x / s, FarHills samples C# per point on a worker.
 
 Ideas offered, not started:
 - Tyre tracks option **B**: a painted top-down "track map" the ground shader reads → real ruts in mud/sand.

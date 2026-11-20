@@ -42,8 +42,8 @@ func _process(_dt: float) -> void:
 	var now := Time.get_ticks_usec()
 	var rdt := minf((now - _last) / 1e6, 0.1)
 	_last = now
-	if OS.get_environment("BMX_AREA_AT") != "":   # tests: freeze the animation at that time
-		view.t = float(OS.get_environment("BMX_AREA_AT"))
+	if Env.s("BMX_AREA_AT") != "":   # tests: freeze the animation at that time
+		view.t = float(Env.s("BMX_AREA_AT"))
 	else:
 		view.t += rdt
 	if view.t > view.total(): visible = false

@@ -120,7 +120,7 @@ func _actions_on(c: Array) -> Array:
 
 ## the saved bindings (the source of truth; test runs leave pads out of the live InputMap)
 static func _events(a: String) -> Array:
-	return Settings.bindings.get(a, Settings.default_events(a))
+	return (Settings.bindings[a] if Settings.bindings.has(a) else Settings.default_events(a))
 
 static func stick_axes(stick: int) -> Array:
 	return [JOY_AXIS_LEFT_X, JOY_AXIS_LEFT_Y] if stick == 0 else [JOY_AXIS_RIGHT_X, JOY_AXIS_RIGHT_Y]

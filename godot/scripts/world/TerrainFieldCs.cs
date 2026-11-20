@@ -764,6 +764,7 @@ public partial class TerrainFieldCs : RefCounted
 	// GDScript's sin / exp / log: the x87 emulation, and for the rare near-tie the engine's own function
 	// (Expression calls the same Math::sin / exp / log as GDScript; one per instance = per thread)
 	private Expression[] _libm;
+	private Godot.Collections.Array _libm_args;
 	public long libm_engine_calls;
 
 	private double _engine(int fn, double x)
@@ -775,7 +776,9 @@ public partial class TerrainFieldCs : RefCounted
 			_libm[fn] = new Expression();
 			_libm[fn].Parse(fn == 0 ? "sin(x)" : (fn == 1 ? "exp(x)" : "log(x)"), new[] { "x" });
 		}
-		return _libm[fn].Execute(new Godot.Collections.Array { x }).AsDouble();
+		_libm_args ??= new Godot.Collections.Array { 0.0 };   // one reused engine Array (disposed in release_libm), not one per call
+		_libm_args[0] = x;
+		return _libm[fn].Execute(_libm_args).AsDouble();
 	}
 
 	/// dispose the engine Expressions made for near-tie sin / exp / log now (made again if needed): the paper
@@ -783,6 +786,8 @@ public partial class TerrainFieldCs : RefCounted
 	/// the engine shut down, which crashed the quit
 	public void release_libm()
 	{
+		_libm_args?.Dispose();
+		_libm_args = null;
 		if (_libm == null) return;
 		foreach (var e in _libm) e?.Dispose();
 		_libm = null;

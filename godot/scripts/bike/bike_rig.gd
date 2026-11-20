@@ -31,6 +31,7 @@ func _init() -> void:
 var fit_g := Node3D.new()   # lifts / tilts the model when the wheels are bigger or smaller than stock
 var wheel_rf := 0.374
 var wheel_rr := 0.355
+const TYRE_ACROSS := [-0.8, 0.0, 0.8]   # where across the casing tyre_depth samples (x tyre_hw); one array, not one per call
 var tyre_hw := 0.03   # half the tyre's width (m): the casing is round, about as tall as it is wide
 
 ## build: a BikeBuild dictionary (paint, logos, wheels, suspension) or {} for the stock bike
@@ -155,12 +156,6 @@ func _swap_wheels(build: Dictionary, mods: Dictionary) -> void:
 	var dr := wheel_rr - rr0
 	fit_g.position.y = dr + (df - dr) * (bb / L)
 	fit_g.rotation.z = atan2(df - dr, L)
-
-static func _has_class(n: String) -> bool:
-	for c in ProjectSettings.get_global_class_list():
-		if c["class"] == n:
-			return true
-	return false
 
 func _meshes(root: Node) -> Array:
 	var out := []
@@ -308,7 +303,7 @@ func tyre_depth(wheel: Node3D, R: float, top: Callable) -> float:
 	for i in n:
 		var a := TAU * i / n if full else -1.4 + 2.8 * i / (n - 1)
 		var dir := d0 * cos(a) + side * sin(a)
-		for wo in [-0.8, 0.0, 0.8]:
+		for wo in TYRE_ACROSS:
 			var off: float = wo * hw
 			var r := R - hw + sqrt(hw * hw - off * off)
 			var p := c + dir * r + ax * off
