@@ -164,6 +164,7 @@ static func make_set() -> Dictionary:
 		"skinny": Flat.new(19.0),
 		"bridge": Flat.new(15.0),
 		"gorge": Flat.new(36.0),
+		"rope": Flat.new(46.0),
 	}
 	var kick := Hermite.new([[0, 0, 0.1], [3.8, 0.95, 0.4]])
 	var skin := Hermite.new([[0, 0.02, 0.05], [2, 0.42, 0.3], [4, 0.85, 0]])

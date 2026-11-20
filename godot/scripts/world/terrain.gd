@@ -47,6 +47,8 @@ var _tape_mat: ShaderMaterial
 var _debris: TerrainDebris
 var _tapes: TapeSim              # torn tape ribbons (tape.js TapeSim)
 var _focus := Vector2.ZERO       # last update_stream() position: the torn tape simulates near it
+var _clutter_cc := Vector2i(1 << 30, 0)   # the chunk the clutter visibility was last set for
+var _clutter_dirty := true                # a chunk came / went since
 var _water: TerrainWater
 var _broken: Array = []          # [{kind, rec}] for clear_dynamic()
 var _time: float = 0.0
@@ -71,6 +73,12 @@ var fin_parts := PackedFloat64Array([0, 0, 0, 0, 0])
 ## health packs beside the sheds: key (position in 25 cm cells) -> {node, pos, chunk}; taken ones stay gone
 var _packs := {}
 var _pack_taken := {}
+## rope bridges (RopeBridge) within reach of the rider: their swinging decks are part of height() / deck_height()
+var ropes: Array = []
+## the bike's height (set by Game each tick): a deck well above it (rider down in the crevasse) doesn't count
+var rope_ref_y := INF
+var _rope_ok := false
+var _rope_t := 0.0
 
 
 ## seed_in: the world to build (pass it here rather than calling set_seed afterwards, which would
@@ -102,6 +110,10 @@ func _exit_tree() -> void:
 func _process(delta: float) -> void:
 	_time += delta
 	_update_wind(delta)
+	_rope_t -= delta
+	if _rope_t <= 0.0:
+		_rope_t = 0.5
+		_update_ropes()
 	_tapes.update(delta, _focus.x, _focus.y, _wind_t, _wind_dir, _wind_ws)
 	for key in _packs:
 		var pk: Dictionary = _packs[key]
@@ -147,6 +159,10 @@ func set_seed(seed_in: int) -> void:
 		_debris.clear()
 	if _tapes:
 		_tapes.clear()
+	for rb in ropes:
+		(rb as Node).queue_free()
+	ropes.clear()
+	_rope_t = 0.0
 	field = TerrainField.new()
 	field.setup(seed_in)
 	fcs = _make_cs() if use_cs else null
@@ -205,8 +221,64 @@ static func _rock_key(gx: int, gz: int) -> int:
 	return WorldRng.i32(gx * 73856093) ^ WorldRng.i32(gz * 19349663)
 
 
-## what you ride on: ground, a wooden deck, and a dome over every rock / log / stump of loaded chunks
+## what you ride on: ground, a wooden deck, a rope bridge's deck, and a dome over every rock / log / stump of loaded chunks
 func height(x: float, z: float) -> float:
+	var g := _height0(x, z)
+	if not ropes.is_empty():
+		g = maxf(g, _rope_deck(x, z))
+	return g
+
+
+func _rope_deck(x: float, z: float) -> float:
+	var best := -INF
+	for rb in ropes:
+		var d: float = rb.deck_at(x, z)
+		if d > best and d < rope_ref_y + 1.5:
+			best = d
+	return best
+
+
+## the rope bridge whose deck is under (x, z) at about height y, or null
+func rope_under(x: float, z: float, y: float):
+	for rb in ropes:
+		var d: float = rb.deck_at(x, z)
+		if d > -INF and absf(d - y) < 0.35:
+			return rb
+	return null
+
+
+## keep a RopeBridge for every rope-bridge route feature within ~220 m of the rider (C# needed)
+func _update_ropes() -> void:
+	if not _rope_ok:
+		_rope_ok = RopeBridge.available() and use_cs and fcs != null
+		if not _rope_ok:
+			return
+	var keep := {}
+	for rb in ropes:
+		keep[rb.feat_s] = rb
+	for j in field.route_feats:
+		if j.type != "rope":
+			continue
+		var d := Vector2(j.x + j.dx * j.len * 0.5 - _focus.x, j.z + j.dz * j.len * 0.5 - _focus.y).length()
+		var rb = keep.get(j.s)
+		if rb == null and d < 220.0:
+			rb = RopeBridge.new()
+			rb.name = "RopeBridge"
+			add_child(rb)
+			rb.setup(j, self)
+			ropes.append(rb)
+		elif rb != null and d > 300.0:
+			ropes.erase(rb)
+			rb.queue_free()
+
+
+## one physics tick of every rope bridge near the rider (Game, after the bike's step)
+func ropes_step(dt: float) -> void:
+	for rb in ropes:
+		rb.step(dt, _wind_dir * _wind_ws * 1.6)   # the crevasse funnels the wind: stronger up there
+
+
+func _height0(x: float, z: float) -> float:
 	if fcs != null:
 		return fcs.height(x, z)   # the same, domes included (mirrored by _finalize / _unload)
 	var f := field
@@ -230,9 +302,10 @@ func height(x: float, z: float) -> float:
 
 ## the ground or a wooden deck WITHOUT the rock / log domes (JS's shadowed surface(): cliff-wall test)
 func deck_height(x: float, z: float) -> float:
-	if fcs != null:
-		return fcs.deck(x, z)
-	return field.deck(x, z)
+	var g: float = fcs.deck(x, z) if fcs != null else field.deck(x, z)
+	if not ropes.is_empty():
+		g = maxf(g, _rope_deck(x, z))
+	return g
 
 
 ## 0 grass, 1 trail, 2 water, 3 sand (beaches, dunes)
@@ -341,11 +414,16 @@ func update_stream(px: float, pz: float, budget_ms: float = 4.0, sync_r := -1) -
 			_stale_tasks.append(_jobs[k]["task"])
 			_jobs.erase(k)
 	_reap_stale(false)
-	# ground clutter only in the 3x3 chunks round the rider
-	for k in chunks:
-		var near: bool = absi(k.x - ccx) <= 1 and absi(k.y - ccz) <= 1
-		for o in chunks[k]["small"]:
-			o.visible = near
+	# ground clutter only in the 3x3 chunks round the rider (redone only when the rider changes chunk or a
+	# chunk was added / dropped: walking every chunk's clutter every frame cost ~0.1 ms for nothing)
+	var cc := Vector2i(ccx, ccz)
+	if cc != _clutter_cc or _clutter_dirty:
+		_clutter_cc = cc
+		_clutter_dirty = false
+		for k in chunks:
+			var near: bool = absi(k.x - ccx) <= 1 and absi(k.y - ccz) <= 1
+			for o in chunks[k]["small"]:
+				o.visible = near
 	if is_inf(budget_ms):
 		var queue := _missing(ccx, ccz)
 		if sync_r >= 0:
@@ -412,6 +490,18 @@ func _missing(ccx: int, ccz: int) -> Array:
 func _dispatch_missing(ccx: int, ccz: int) -> void:
 	if _jobs.size() >= _max_jobs():
 		return
+	# quick look first: usually every chunk is there or already being built, and building + sorting the
+	# missing list (a GDScript lambda per compare) twice a frame was most of update_stream's idle cost
+	var any := false
+	for dz in range(-RADIUS, RADIUS + 1):
+		for dx in range(-RADIUS, RADIUS + 1):
+			var k := Vector2i(ccx + dx, ccz + dz)
+			if not chunks.has(k) and not _jobs.has(k):
+				any = true
+				break
+		if any: break
+	if not any:
+		return
 	for k in _missing(ccx, ccz):
 		if _jobs.size() >= _max_jobs():
 			break
@@ -477,6 +567,7 @@ func _unload(k: Vector2i) -> void:
 	var c = chunks.get(k)
 	if c == null:
 		return
+	_clutter_dirty = true
 	if fcs != null:
 		fcs.domes_remove(_chunk_id(k))
 	for key in c["rock_keys"]:
@@ -571,6 +662,7 @@ func _multimesh(parent: Node3D, mesh: Mesh, mat: Material, buf: PackedFloat32Arr
 func _finalize(k: Vector2i) -> void:
 	var job: Dictionary = _jobs[k]
 	_jobs.erase(k)
+	_clutter_dirty = true
 	var b: TerrainChunkBuilder = job["builder"]
 	if b.gen != _gen:
 		return
@@ -793,6 +885,25 @@ func mesh_height(x: float, z: float) -> float:
 func top_height(x: float, z: float) -> float:
 	return maxf(height(x, z), mesh_height(x, z))
 
+
+## true when a loaded chunk within `reach` (square) of (px, pz) has ground below the water level (chunks
+## not loaded are skipped: no ground is drawn there to show water against). The water sheet is only drawn /
+## baked then (TerrainWater); each chunk's lowest grid point is worked out once and kept in its record.
+func water_near(px: float, pz: float, reach: float) -> bool:
+	var k0 := Vector2i(WorldRng.jround((px - reach) / SIZE), WorldRng.jround((pz - reach) / SIZE))
+	var k1 := Vector2i(WorldRng.jround((px + reach) / SIZE), WorldRng.jround((pz + reach) / SIZE))
+	for kz in range(k0.y, k1.y + 1):
+		for kx in range(k0.x, k1.x + 1):
+			var c = chunks.get(Vector2i(kx, kz))
+			if c == null or not c.has("G"):
+				continue   # not streamed in (far / still building): nothing drawn there to show water against
+			if not c.has("gmin"):
+				var m := INF
+				for h in (c["G"] as PackedFloat32Array): m = minf(m, h)
+				c["gmin"] = m
+			if c["gmin"] < WATER + 0.05:
+				return true
+	return false
 
 ## ground height from the loaded chunk grids (bilinear, no domes / wood); NAN where nothing is loaded
 func grid_height(x: float, z: float) -> float:

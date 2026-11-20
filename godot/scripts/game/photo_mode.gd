@@ -759,6 +759,14 @@ func _test_hooks() -> void:
 		if f.size() > 3: yaw += deg_to_rad(float(f[3]))
 		if f.size() > 4: pitch = clampf(pitch + deg_to_rad(float(f[4])), -1.55, 1.55)
 		_limit(); _place()
+	var at := Env.s("BMX_PHOTO_AT")   # tests: "x,y,z,lx,ly,lz" camera at a world point looking at another
+	if at != "":
+		var a := at.split(",")
+		pos = Vector3(float(a[0]), float(a[1]), float(a[2]))
+		var d := (Vector3(float(a[3]), float(a[4]), float(a[5])) - pos).normalized()
+		yaw = atan2(-d.x, -d.z)
+		pitch = asin(d.y)
+		_place()
 	if Env.s("BMX_PHOTO_ORBIT") != "":   # tests: swing round the rider like a left drag
 		_orbit(Vector2(float(Env.s("BMX_PHOTO_ORBIT")), 0.0)); _limit(); _place()
 	if Env.s("BMX_PHOTO_TAB") != "":

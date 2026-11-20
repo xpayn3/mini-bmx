@@ -223,6 +223,31 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 
 - **Livelier trail** (`TrailCourse._shape_profile`, `trail_arch.gd`): roads bend more often and tighter; past the mountain the trail height gets rolling dips (~60 m); **ridge-and-cliff drops** (`drops`, ~1 per 3 km: the trail climbs ~4 % onto a ridge above the land, a short level run, then falls 3-6 m, and 2 % of slots 12-22 m: rare "gem" cliffs; route features skip them) and **rock tunnels / overhangs** (`chunk_arches`, merged blob-rock mesh, visual only, no collision). All deterministic by slot hash + seed, nothing near the laid-out end changes when the trail grows. **Gorge bridges** (route feature `gorge`, rare on straight road: a 36 m wooden bridge, deck on stilts, over a 9 m deep crevasse ~6.4 m wide; Wood kind 2 now takes its end from `u1`; mirrored in `TerrainFieldCs.cs`, `terrain_cs_cmp` must stay EXACT; HUD alert GORGE BRIDGE). Test: `BMX_TRAIL_FEAT=gorge` (try `BMX_SEED=5`), `BMX_TRAIL_FEAT=arch|<n>` spawns 80 m before the first arch / the n-th drop; `BMX_GATE_PROBE=1` prints `ARCHES` lines; `trail_grow_probe` prints `STATS`.
 
+- **Rope bridges** (route feature `rope`, `world/rope_bridge.gd` + C# `world/RopeBridgeSim.cs`): a 46 m feature, a swinging rope
+  bridge tied round four big pines (two each end, 2.3 m apart: ride between them) over a **canyon cut across the land**
+  (`TerrainField.canyon_rims` / `canyon_dig`, mirrored in `TerrainFieldCs._canyon_dig`: polynomials + integer hashes only, exact):
+  16 m deep where the trail crosses (rims exactly at 4.2 / len - 4.2 within 4 m of the trail), the rims wandering (value noise along w),
+  the canyon narrowing, shallowing and ending `CANYON_W` (42 m) to each side. It is looked up by place, not by the nearest trail
+  (`_canyons`: 64 m cells, `_index_canyons()` whenever `route_feats` changes; per nearest-trail it ended in a vertical seam wherever
+  another trail bend was closer). `_canyon_clear` only places one where the trail within 300 m never runs into it. The walls are faced
+  with flattened boulders stacked down them in sandstone bands (`RopeBridge._build_cliffs`, one merged mesh, visual only) plus fallen
+  rocks on the floor. About one per 2-3 km of road (`_build_route`: a hash of the slot, < 0.12, not in the first 400 m). The deck
+  is not in the height field: `Terrain` keeps a `RopeBridge` for every rope feature within 220 m (`_update_ropes`, needs C#) and its
+  live deck is part of `height()` / `deck_height()` (`_rope_deck`; a deck more than 1.5 m above `rope_ref_y` = the bike's y is
+  ignored, so down in the crevasse you stay down there). Sim: 4 ropes x 40 segments (2 deck ropes 1.1 m apart, 2 hand ropes),
+  plank ties, soft pull-only hangers, Verlet + PBD (4 substeps x 10 iterations at 120 Hz), no plank diagonals (they made it rigid
+  sideways). `Game._rope_tick` each physics step: the rider's weight (95 kg x `n_load`, so landings bounce it) + sideways push
+  (the turn's `lat_a` + every pedal stroke, `ROPE_STROKE`) go into the deck, then the deck steps (wind x 1.6, gusts), then its
+  sideways move under the bike carries the bike (`RopeBridge.carry`). ~0.4 m sway in a 10 m/s crosswind, ~0.4 m dip under the rider.
+  Fall off the side = crash into the crevasse; getting up (or the bail tap) puts you back on the nearer rim (`Game._out_of_crevasse`).
+  Planks drawn by a MultiMesh, ropes / hangers as tubes rebuilt every frame in C#, both interpolated between physics ticks. A few
+  planks missing / snapped in half (visual: a tyre rolls over a one-plank gap). HUD alert ROPE BRIDGE. No C# = no rope bridges.
+  Tests: `BMX_TRAIL_FEAT=rope` (6 m before the trees, on its axis; seed 4242 has one at 3.2 km) + `BMX_START_V=3 BMX_STRAIGHT=1`,
+  `BMX_ROPE_PROBE=1` (`ROPE` lines 4x/s: u, w, on deck, deck height, mid point, crash reason), `BMX_FEAT_BACK=n` (n trail steps back
+  instead), `-s res://tools/rope_sim_probe.gd` (sim alone: sag, wind sway, a walk across), `-s res://tools/rope_find.gd` (rope /
+  gorge features of a few seeds + every rope canyon C# vs GDScript and trail clearance; must say `PASS`). Photo tests:
+  `BMX_PHOTO_AT=x,y,z,lx,ly,lz` puts the photo camera at a world point looking at another (FEATSPAWN prints the feature's `at` / `dir`).
+
 - **Sponsor props** (`TrailCourse.chunk_gates` / `chunk_boards`, fixed spacing by centreline index so growing never moves them): a huge steel gantry with a sponsor banner over the trail every 300 m (`TrailGate.build`, made-up brands in `TrailGate.SPONSORS`, no collision, skipped on jumps) and breakable wooden roadside billboards every ~80 m (fence-style panel in `TerrainChunkBuilder._boards`, so the bike smashes them; the Label3D text is freed on smash). Probe: `BMX_GATE_PROBE=1`.
 
 - **Health packs** (`world/health_pack.gd`): a GTA-style floating, spinning red backpack with a white cross and a glow ring, one outside the door of each roadside shed (`TerrainChunkBuilder._sheds` -> `out["packs"]`, made in `Terrain._finalize`). Ride within 1.6 m (`Terrain.take_pack`, called from `Game._process`) and `hud.on_health_pack` gives back `HealthPack.HEAL` (45 %); full-health riders leave it. Taken ones stay gone until a new seed. Tests: `BMX_PACK_PROBE=1` (`PACK at` lines), `BMX_PACK_SPAWN=x,z` (start 9 m before a pack), `BMX_LIFE=0.3 BMX_LIFE_PROBE=1`.
@@ -369,10 +394,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   relative to the bar's middle) from the cockpit glbs. `_swap_cockpit(stem, bar)` (one pass, stem + bar together) cuts dh's bar + grips (`barcut`), puts the model's at
   `dhMid` + the stem's shift (the tube as surface "bar": the Material pick still works, `Handlebar.apply` skips the width / rise reshape for them) and moves the levers
   (dh's or a model's) by `leverShift[side]` so they sit against the new grips. Width / rise rows are hidden for these bars. Test: `BMX_BUILD="bars.model=tues_bar;bars.stem=tues"`.
-  **Disc brakes** (garage BRAKES tab, `_brakes_page`: ROTORS, REAR CALIPER, LEVERS as picture cards, `_brake_cards`;
-  pictures `PartThumbs.make_rotor / make_caliper / make_levers`: model parts from their glbs; the stock caliper and levers are
-  cut out of dh.glb's seatstay / steer meshes by `PartThumbs._diff` against `dh_seatstay.glb` / `dh_steer_nl.glb`; caliper cards
-  sit on the build's rear rotor, framed on the caliper (`frame_on` / `frame_pad` metas)): `suspension.rotor` ("stock" / "tues" / "fuzz", `BikeBuild.ROTORS`; `assets/forks/rotor_<id>.glb` from
+  **Disc brakes** (garage BRAKES tab, `_brakes_page`: DISC BRAKES + LEVERS): `suspension.rotor` ("stock" / "tues" / "fuzz", `BikeBuild.ROTORS`; `assets/forks/rotor_<id>.glb` from
   `tools/export_rotors.py`: disc + carrier + bolts, relative to the axle, moved onto the stock rotors' planes) replaces the mesh of the wheels' split-off "rotor"
   (`BikeRig._swap_rotors`, keeps the heat-glow material; works on every frame). `suspension.rear_caliper` ("stock" / "tues" / "fuzz", `BikeBuild.REAR_CALIPERS`): on the stock frame
   `_swap_rear_caliper` uses `forks/dh_seatstay.glb` (seatstay without its caliper, cut by `make_forks.py` as components) + `forks/caliper_<id>.glb` (the frame's rear caliper
@@ -380,6 +402,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - **Helmet models** (`look.helmet`, `Rider.HELMETS`, picked in the garage Kit tab and the tuning card Look > Helmet; `Rider.use_helmet(id)`):
   GLORY = the stock recolourable helmet + our goggles; **6D ATR-2** (black / silver skin) and **TLD SE5** (`assets/helmets/helmet_*.glb`, from the user's FBXs by
   `tools/export_helmets.py` + `tools/prep_helmet_textures.py`) are textured models that always wear their own goggles + strap (our goggles don't fit them):
+  the dark inside sphere (`helmet_fill`) is squashed so its front stays `FILL_GAP` behind the model goggles' lens (`Rider._fit_fill`; it showed through the lens);
   each glb has two nodes, `helmet` (shell, material `tex_shell`) and `helmet_goggles` (`tex_goggles`, the Oakley Airbrake maps: they fit both models' goggle UVs; the
   "6dgoggles" maps from the download are not used). Neither is recoloured: the Shell / Peak / Goggles colour rows are hidden for them. `Rider.HELMET_FITS` = where each sits
   (scale 1.12, a little back + low; the dark face sphere is smaller for them); test override `BMX_HELMET_FIT=x,y,scale,tilt`. Real brand logos on the textures (6D, TLD,
@@ -556,6 +579,20 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   part alone, rendered by `PartThumbs` (`scripts/garage/part_thumbs.gd`: an off-screen studio SubViewport, one part
   per frame, cached by key; bars / forks are cut out of dh.glb's steer + fork_lower meshes, wheels from
   `WheelGen`), brand, name and a spec line. Touching width / rise / material / travel makes the model "custom".
+- **Paint tab** (2026-11-20): a big material ball of the picked part (`PartThumbs.make_ball`: sphere + `BikeBuild.paint_material`
+  + a close key light so finishes read apart), parts as a strip of pictures of each part alone (`PartThumbs.make_paint_part`: the bike with every other surface
+  hidden), an 8-column grid of colour squares (picked = a dot), custom colour, finishes as a 4 x 2 grid of balls in the current colour. "Apply to whole frame" on the front / rear triangle.
+- **Showroom first** (2026-11-20): the garage opens minimal: GARAGE, the bike turning slowly (`VIEWS.show`), a strip of big frame
+  pictures (pick = switch frame) and BACK / EDIT / SAVE & RIDE. EDIT (`_set_edit(true)`) shows the customizer (tabs, options card,
+  build card, Stock / Randomise / Save); its BACK / Esc / pad B returns to the showroom (`_back`). The frame row left the Paint tab.
+  `BMX_GARAGE_TAB=<tab>` opens straight in the customizer.
+- **Picture strips everywhere** (2026-11-20): every part / look option is a big picture card in one slidable row (`ui/pic_strip.gd`
+  `PicStrip`: drag, wheel, pad focus; `guard(cb)` so a drag never picks). Garage `_cards` / `_pic_cards`, title menu `_pic_chip`.
+  `PartThumbs` also renders close-ups on the whole bike (`make_bike_spot`: stem, levers, rotor, caliper, bike cam mounts), saddles,
+  action cams with their gear (`make_cam`), wheelsets as a product shot (`make_wheelset`) and the rider's head (`make_head`: helmet,
+  helmet cam, hair; a Rider posed until the hair settles). Tests: `BMX_TUNE_CAT=wheels` opens the ride setup's Wheels & tyres.
+- **Braid** = its own low-poly plait mesh (`Hair._plait_mesh`, rebuilt each frame along the tail guides' mean line, so it swings
+  like the ponytail): alternating tilted lobes, a band at the tie, a flared tuft at the end.
 - The **Coasting** rider preview is the showcase pose: sat on the saddle, sitting up (`relax` input to
   `Rider.update_pose`: straighter back, chest up, chin up, whatever the saved riding pose).
 - Light: little volumetric haze (0.004), exposure 1.0, contrast 1.16 / saturation 1.18, depth fog from 90 m.
@@ -565,6 +602,13 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   room lights barely light the fog); `_build_sun_shaft` also adds ~7000 fine dust motes (GPUParticles3D, turbulence drift) drawn by
   `shaders/sun_motes.gdshader`, which lights only the motes whose line to the sun passes through the open part of the door
   (`_place_slats` updates it as the door rolls up). Room lights (tubes, bench strip, key, rim, ambient) are warm white.
+- **Roller door** (`scripts/garage/roller_door.gd`, `RollerDoor.build`, 2026-11-20): 10 cm insulated slats (extruded profile, domed
+  face, V groove at each joint) in white powder coat (RAL 9016 look) with clear coat and light real grime (ambientCG
+  SurfaceImperfections008, CC0, `assets/textures/grime`: its map baked into a soft grey multiply map `grime_dirt.jpg` + its normals;
+  each slat samples its own patch, lower slats a touch dustier), closed box hood with a rounded nose + brushed
+  aluminium end plates, guide channels with black brush seals, brushed aluminium bottom bar + rubber bulb seal, wall key
+  switch (green LED) with conduit into the hood. Metal parts use the ambientCG Metal009 / Rubber004 scans. `RollerDoor.extrude` = a reusable profile-along-x mesh builder. Test:
+  `BMX_GARAGE_DOOR=0.45` holds the door that far open (+ `BMX_GARAGE_CAM=0,4,5.5 BMX_GARAGE_AIM=0,1.9,-4`).
 - Bike height is placed from the **real tyre size and real axle positions** (no tyre clipping into the floor
   or the roller drums; verified with `BMX_TYRE_PROBE`).
 - Saved in `garage.json`; `GameState.bike_config()` applies it to the ride.
@@ -837,6 +881,7 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `--showcase=<dir>` | forces each effect on and saves screenshots |
 | `--hitch=<secs>` (+ `BMX_HITCH_CSV`) | hunts frame spikes and explains them |
 | `BMX_SEED=4242` | fixed world (4242 is the usual test seed) |
+| `BMX_PERF=1` (+ `--autotest=N`, `BMX_NOVSYNC=1`) | main-thread ms per frame for every part of `Game._process` / `_physics_process` (`PERF` lines every 5 s, biggest first) — the way to find what to make lighter |
 | `BMX_CAM=chase` / `BMX_CAM_ORBIT=rad` | camera mode / angle for autotest shots |
 | `BMX_GOPRO_PROBE=1` (+ `BMX_BAIL=secs`) | prints the torn-off GoPro's flight (`GOPRO` lines), gets up 2.5 s after the bail and checks a new one is mounted |
 | `BMX_CAM_CYCLE=1` | autotest presses C (next camera) every 0.6 s and prints `CAMCYCLE i mode` |
@@ -977,6 +1022,11 @@ Known, not fixed (lower priority from the code review):
   test flags cached (`Env.s`), torn tape drawn from packed arrays, rider pose inputs in one reused dictionary
   (`Game._pose_in`), ride log = one flat buffer, FarHills grid via batched C# (`far_ground` / `far_colors`), sticker
   fits cached per frame + label (`BikeRig._fit_cache`), chain draws only its links in use.
+- Perf (2026-11-20, measured with `BMX_PERF`): the water sheet is hidden and not baked when no loaded chunk dips below
+  the water level (`Terrain.water_near`, chunk `gmin`); terrain streaming does nothing when no chunk is missing and sets
+  clutter visibility only on a chunk change; tyre unclip caches ground heights per frame on a 1 mm grid
+  (`BikeRig._ground_cache`); standing sheep reuse their ground reading. Game scripts ~3.9 -> ~2.7 ms a frame. Still the
+  biggest cost: rendering (~5.6M triangles, ~2000 draw calls a frame).
 
 Ideas offered, not started:
 - Tyre tracks option **B**: a painted top-down "track map" the ground shader reads → real ruts in mud/sand.

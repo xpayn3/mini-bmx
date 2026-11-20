@@ -673,7 +673,8 @@ func _menu_page_setup_build(step := 0) -> void:
 	var bar := HBoxContainer.new()
 	bar.add_theme_constant_override("separation", Tokens.S2)
 	for i in SETUP_STEPS.size():
-		var sb := UITheme.make_button("%d  %s" % [i + 1, SETUP_STEPS[i]], _menu_page_setup.bind(i), "tab", Tokens.T_SM if split else Tokens.T_LG)
+		var sb := UITheme.make_button("%d  %s" % [i + 1, SETUP_STEPS[i]], _menu_page_setup.bind(i), "tab", Tokens.T_LG)
+		sb.custom_minimum_size.y = 52
 		sb.toggle_mode = true
 		sb.button_pressed = i == setup_step
 		sb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -824,7 +825,7 @@ func _setup_bike(content: HBoxContainer) -> void:
 				GameState.bike_id = id; GameState.save(); bike_dirty = true)
 		list.add_child(b)
 
-var tune_cat := "colour"
+var tune_cat := Env.s("BMX_TUNE_CAT") if Env.s("BMX_TUNE_CAT") != "" else "colour"   # tests: BMX_TUNE_CAT=wheels
 var tune_body: VBoxContainer
 var tune_build := {}
 const TUNE_SWATCHES := ["e8432e", "ff6a00", "ffb000", "ffd21f", "c6ff1a", "35d04a", "00a86b", "00c2c7", "2f7de1", "1d2b64",
@@ -858,6 +859,7 @@ func _setup_tune(content: HBoxContainer) -> void:
 	col.add_child(sc)
 	tune_body = VBoxContainer.new()
 	tune_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	tune_body.size_flags_vertical = Control.SIZE_EXPAND_FILL   # the picture strip grows into the free height
 	tune_body.add_theme_constant_override("separation", Tokens.S3)
 	sc.add_child(tune_body)
 	col.add_child(UITheme.make_button("MORE PARTS IN THE GARAGE", _open_garage, "link", Tokens.T_MD))
@@ -893,6 +895,10 @@ func _tune_fill() -> void:
 	tune_body.add_child(UITheme.caption("TYRES"))
 	var cur: String = String(tune_build.wheels.get("tyre_model", "")) if garage_bike else GameState.bmx_tyre
 	var group := ButtonGroup.new()
+	var strip := PicStrip.new(Tokens.S2)   # big picture tiles in one slidable row, as tall as the page lets them
+	strip.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	strip.square = 0.95
+	tune_body.add_child(strip)
 	for k in BikeBuild.TYRE_MODELS:
 		var tm: Dictionary = BikeBuild.TYRE_MODELS[k]
 		if not tm.has("brand"): continue
@@ -902,22 +908,22 @@ func _tune_fill() -> void:
 		var b := UITheme.make_button("", Callable(), "chip")
 		b.toggle_mode = true; b.button_group = group
 		b.button_pressed = k == cur
-		b.custom_minimum_size.y = 96
-		var row := HBoxContainer.new()
+		b.custom_minimum_size = Vector2(236, 232)
+		var row := VBoxContainer.new()
 		row.set_anchors_preset(Control.PRESET_FULL_RECT)
-		row.offset_left = Tokens.S3; row.offset_right = -Tokens.S3
+		row.offset_left = Tokens.S3; row.offset_right = -Tokens.S3; row.offset_top = Tokens.S2; row.offset_bottom = -Tokens.S3
+		row.add_theme_constant_override("separation", 0)
 		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		var pic := TextureRect.new()
 		pic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		pic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		pic.custom_minimum_size = Vector2(150, 0)
+		pic.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		bike_thumbs.request("tyre|%s|%s" % [k, JSON.stringify(spec)], PartThumbs.make_wheel.bind(spec, 0.3), Vector3(0.25, 0.75, 1.0),
+		bike_thumbs.request("wheelset|%s|%s" % [k, JSON.stringify(spec)], PartThumbs.make_wheelset.bind(spec), Vector3(0.05, 0.12, 1.0),
 			func(t): if is_instance_valid(pic): pic.texture = t)
 		row.add_child(pic)
 		var tc := VBoxContainer.new()
-		tc.alignment = BoxContainer.ALIGNMENT_CENTER
-		tc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		tc.add_theme_constant_override("separation", 0)
 		tc.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		for pair in [[UITheme.caption(String(tm.brand), Tokens.INK_SOFT, Tokens.T_XS), 0], [UITheme.display(String(tm.label).replace(String(tm.brand).capitalize() + " ", ""), Tokens.T_XL, Tokens.INK, Tokens.SLANT_TITLE), 0],
 				[UITheme.caption("%s  ·  %.1f in  ·  %s" % [String(tm.tread).to_upper(), float(tm.tyre_w), String(tm.casing).to_upper()], Tokens.INK_SOFT, Tokens.T_XS), 0]]:
@@ -925,12 +931,12 @@ func _tune_fill() -> void:
 			tc.add_child(pair[0])
 		row.add_child(tc)
 		b.add_child(row)
-		b.pressed.connect(func():
+		b.pressed.connect(strip.guard(func():
 			if garage_bike: BikeBuild.apply_tyre_model(tune_build, k)
 			else:
 				GameState.bmx_tyre = k; GameState.save()
-			_tune_changed(false))
-		tune_body.add_child(b)
+			_tune_changed(false)))
+		strip.add(b, k == cur)
 	if garage_bike:
 		tune_body.add_child(UITheme.caption("RIM COLOUR"))
 		tune_body.add_child(_swatch_grid(tune_build.wheels.rim_color, func(h):
@@ -1057,56 +1063,83 @@ const EYE_COLOURS := ["4a6b8a", "2f7de1", "35a86a", "7a8f3b", "8a5a2b", "4a2f1c"
 
 func _char_hair(body: VBoxContainer) -> void:
 	var look := RiderPanels.load_look()
+	_ensure_thumbs()
 	body.add_child(UITheme.caption("HEAD"))
-	var grid := GridContainer.new()
-	grid.columns = 3
-	grid.add_theme_constant_override("h_separation", Tokens.S2)
-	grid.add_theme_constant_override("v_separation", Tokens.S2)
+	var grid := _pic_grid(4)
 	var grp := ButtonGroup.new()
 	for id in Rider.HELMETS:   # the rider always wears a helmet: pick the model
 		var hid: String = id
-		var b := UITheme.make_button(String(Rider.HELMETS[hid][0]).to_upper(), Callable(), "chip", Tokens.T_MD)
-		b.toggle_mode = true; b.button_group = grp
-		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.custom_minimum_size.y = 56
-		b.button_pressed = str(look.helmet) == hid
-		b.pressed.connect(func(): _look_set({"helmetOn": "1", "helmet": hid}))
-		grid.add_child(b)
+		var lk := _look_with(look, {"helmet": hid, "camMount": "none", "hairStyle": "short"})
+		grid.add(_pic_chip(grid, String(Rider.HELMETS[hid][0]).to_upper(), "head|helm|%s|%s|%s" % [hid, look.shell, look.peak],
+			PartThumbs.make_head.bind(lk), Vector3(1.0, 0.25, 0.75), grp, str(look.helmet) == hid,
+			func(): _look_set({"helmetOn": "1", "helmet": hid})))
 	body.add_child(grid)
 	body.add_child(UITheme.caption("ACTION CAM"))
-	var cgrid := GridContainer.new()
-	cgrid.columns = 4
-	cgrid.add_theme_constant_override("h_separation", Tokens.S2)
-	cgrid.add_theme_constant_override("v_separation", Tokens.S2)
+	var cgrid := _pic_grid(4)
 	var cgrp := ButtonGroup.new()
 	for m in ActionCam.HELMET_MOUNTS:   # where the helmet camera sits (the Helmet view looks out of it)
 		var mid: String = m[0]
-		var cb := UITheme.make_button(String(m[1]).to_upper(), Callable(), "chip", Tokens.T_MD)
-		cb.toggle_mode = true; cb.button_group = cgrp
-		cb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		cb.custom_minimum_size.y = 56
-		cb.button_pressed = str(look.get("camMount", "top")) == mid
-		cb.pressed.connect(func(): _look_set({"camMount": mid}))
-		cgrid.add_child(cb)
+		var lk := _look_with(look, {"camMount": mid, "hairStyle": "short"})
+		cgrid.add(_pic_chip(cgrid, String(m[1]).to_upper(), "head|cam|%s|%s|%s" % [mid, look.helmet, ActionCam.gear_sig(ActionCam.gear_from_look(look))],
+			PartThumbs.make_head.bind(lk), Vector3(0.75, 0.45, -1.0), cgrp, str(look.get("camMount", "top")) == mid,
+			func(): _look_set({"camMount": mid})))
 	body.add_child(cgrid)
 	body.add_child(UITheme.caption("HAIR STYLE"))
-	var hgrid := GridContainer.new()
-	hgrid.columns = 4
-	hgrid.add_theme_constant_override("h_separation", Tokens.S2)
-	hgrid.add_theme_constant_override("v_separation", Tokens.S2)
+	var hgrid := _pic_grid(4)
 	var hgrp := ButtonGroup.new()
 	for st in Hair.HELMET_STYLES:   # what comes out under the back of the helmet
 		var sid: String = st[0]
-		var hb := UITheme.make_button(String(st[1]).to_upper(), Callable(), "chip", Tokens.T_MD)
-		hb.toggle_mode = true; hb.button_group = hgrp
-		hb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		hb.custom_minimum_size.y = 56
-		hb.button_pressed = str(look.hairStyle) == sid
-		hb.pressed.connect(func(): _look_set({"hairStyle": sid}))
-		hgrid.add_child(hb)
+		var lk := _look_with(look, {"hairStyle": sid, "camMount": "none"})
+		hgrid.add(_pic_chip(hgrid, String(st[1]).to_upper(), "head|hair|%s|%s|%s" % [sid, look.helmet, look.hair],
+			PartThumbs.make_head.bind(lk, 0.22), Vector3(-1.0, 0.2, 0.55), hgrp, str(look.hairStyle) == sid,
+			func(): _look_set({"hairStyle": sid})))
 	body.add_child(hgrid)
 	body.add_child(UITheme.caption("HAIR COLOUR"))
 	body.add_child(_swatch_grid(str(look.hair), func(h): _look_set({"hair": "#" + h}), HAIR_COLOURS, 7, 44))
+
+## the look with some keys changed (a picture's rider)
+func _look_with(look: Dictionary, d: Dictionary) -> Dictionary:
+	var lk := look.duplicate()
+	lk.merge(d, true)
+	lk.helmetOn = "1"
+	return lk
+
+## a slidable row of picture tiles (cols: unused)
+func _pic_grid(_cols: int) -> PicStrip:
+	return PicStrip.new(Tokens.S2)
+
+## a picked-or-not tile: a rendered picture (PartThumbs) with the name under it
+func _pic_chip(strip: PicStrip, label: String, key: String, make: Callable, view: Vector3, grp: ButtonGroup, on: bool, cb: Callable) -> Button:
+	var b := UITheme.make_button("", Callable(), "chip")
+	b.toggle_mode = true; b.button_group = grp
+	b.button_pressed = on
+	b.custom_minimum_size = Vector2(264, 236)   # big enough to see the part; the strip slides
+	b.tooltip_text = label
+	var col := VBoxContainer.new()
+	col.set_anchors_preset(Control.PRESET_FULL_RECT)
+	col.offset_left = Tokens.S1; col.offset_right = -Tokens.S1; col.offset_top = Tokens.S1; col.offset_bottom = -Tokens.S1
+	col.add_theme_constant_override("separation", 0)
+	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var pic := TextureRect.new()
+	pic.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	pic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	pic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	col.add_child(pic)
+	var ref: WeakRef = weakref(pic)
+	bike_thumbs.request(key, make, view, func(t):
+		var pr = ref.get_ref()
+		if pr: pr.texture = t)
+	var nm := UITheme.display(label, Tokens.T_SM, Tokens.INK, 0.0)
+	nm.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	nm.clip_text = true
+	nm.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	nm.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	col.add_child(nm)
+	b.add_child(col)
+	b.pressed.connect(strip.guard(cb))
+	if on: strip._reveal.call_deferred(b)
+	return b
 
 func _char_plate(body: VBoxContainer) -> void:
 	var look := RiderPanels.load_look()

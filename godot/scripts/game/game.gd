@@ -684,6 +684,7 @@ func rock_chips(c: Dictionary) -> void:
 func start_crash(reason: String) -> void:
 	phys.crash_pending = ""
 	if phys.crash_on: return
+	if rope_probe: print("ROPE CRASH ", reason, " at ", Vector3(phys.x, phys.y, phys.z))
 	_rd_air.resize(0)   # crash dust: per-part "was in the air" flags start fresh
 	if Env.s("BMX_TRICK") != "": print("CRASH ", reason, " v=%.1f air=%s" % [phys.v, phys.air])   # tests
 	var pts: Array = rider.joints_world()
@@ -736,6 +737,7 @@ func _wasted_on() -> bool:
 
 func get_up() -> void:
 	phys.get_up()
+	_out_of_crevasse()
 	if wasted: wasted.finish()
 	ragdoll.active = false
 	if blood: blood.crash_end()
@@ -955,6 +957,7 @@ func respawn(new_world: bool) -> void:
 		sp = Vector3(float(pxz[0]) - 9.0, 0.0, float(pxz[1]))
 		phys.reset_at(sp.x, sp.z, sp.y)
 	if sp != Vector3.ZERO: terrain.update_stream(sp.x, sp.z, INF)
+	if Env.s("BMX_START_V") != "": phys.v = float(Env.s("BMX_START_V"))   # tests: roll in at this speed
 	rider.reset_pose()
 	_snap_prev()
 	cam.snap_to(Vector3(phys.x, phys.y + 0.5, phys.z))
@@ -1001,6 +1004,24 @@ func place_start_tv() -> void:
 const BAIL_HOLD_MS := 350   # holding bail this long throws the rider off; a shorter tap resets to the trail
 var _bail_down := -1        # tick (ms) the bail key went down, -1 = not held
 
+## fallen off a rope bridge into its crevasse (no way out down there): stand up again on the nearer rim,
+## facing the bridge
+func _out_of_crevasse() -> void:
+	for rb in terrain.ropes:
+		var l: Vector2 = rb.local(phys.x, phys.z)
+		if l.x < 0.0 or l.x > rb.length or absf(l.y) > 8.0:
+			continue
+		var near_start: bool = l.x < rb.length * 0.5
+		var rim: Vector2 = rb.world(-2.5 if near_start else rb.length + 2.5, 0.0)
+		if phys.y > terrain.height(rim.x, rim.y) - 3.0:
+			continue
+		terrain.rope_ref_y = INF
+		phys.reset_at(rim.x, rim.y, atan2(-rb._dz, rb._dx) if near_start else atan2(rb._dz, -rb._dx))
+		_snap_prev()
+		cam.snap_to(Vector3(phys.x, phys.y + 0.5, phys.z))
+		flash("Back on the rim")
+		return
+
 ## a tap on bail: stand the rider back up on the nearest point of the trail, facing along it (not a new ride:
 ## the computer, trip and world stay)
 func reset_to_trail() -> void:
@@ -1020,6 +1041,7 @@ func reset_to_trail() -> void:
 	if fx.has_method("clear_tracks"): fx.clear_tracks()
 	if bd > 40.0 * 40.0: terrain.update_stream(tx, tz, INF)   # a long way: load it first
 	phys.reset_at(tx, tz, atan2(-tc.TZ[best], tc.TX[best]))
+	_out_of_crevasse()
 	rider.reset_pose()
 	_snap_prev()
 	cam.snap_to(Vector3(tx, phys.y + 0.5, tz))
@@ -1029,12 +1051,14 @@ func reset_to_trail() -> void:
 func _feature_spawn(what: String) -> Vector3:
 	var C: TrailCourse = terrain.field.course
 	var idx := -1
-	if what == "gorge":
+	if what == "gorge" or what == "rope":
 		for rf in terrain.field.route_feats:
-			if rf.type == "gorge":
+			if rf.type == what:
 				var gi := int(rf.s / TrailCourse.STEP)
-				print("FEATSPAWN gorge s=", rf.s)
-				var gj := maxi(2, gi - 30)
+				print("FEATSPAWN ", what, " s=", rf.s, " at=%.2f,%.2f dir=%.4f,%.4f" % [rf.x, rf.z, rf.dx, rf.dz])
+				if what == "rope" and Env.s("BMX_FEAT_BACK") == "":   # rope: 6 m before the trees, on its axis
+					return Vector3(rf.x - rf.dx * 6.0, -atan2(rf.dz, rf.dx), rf.z - rf.dz * 6.0)
+				var gj := maxi(2, gi - (int(Env.s("BMX_FEAT_BACK")) if Env.s("BMX_FEAT_BACK") != "" else 30))
 				return Vector3(C.X[gj], -atan2(C.TZ[gj], C.TX[gj]), C.Z[gj])
 		return Vector3.ZERO
 	if what == "arch":
@@ -1214,14 +1238,41 @@ func jitter_report() -> void:
 		var j: Array = _jit[k]
 		print("JITTER %-12s flips=%4d / %d samples  biggest=%.4f" % [k, j[2], j[4], j[3]])
 
+## tests (BMX_PERF=1): main-thread microseconds per section, averaged per drawn frame, printed every 5 s
+var perf_on := Env.s("BMX_PERF") != ""
+var _perf_acc := {}
+var _perf_frames := 0
+var _perf_print := 5.0
+var _perf_last := 0
+func _perf(key: String, t0: int) -> int:
+	var now := Time.get_ticks_usec()
+	if perf_on: _perf_acc[key] = _perf_acc.get(key, 0) + (now - t0)
+	return now
+
+func _perf_report() -> void:
+	var keys := _perf_acc.keys()
+	keys.sort_custom(func(a, b): return _perf_acc[a] > _perf_acc[b])
+	var line := "PERF t=%.0f frames=%d (ms per frame):" % [t, _perf_frames]
+	for k in keys: line += " %s=%.3f" % [k, _perf_acc[k] / 1000.0 / maxi(_perf_frames, 1)]
+	print(line)
+	_perf_acc.clear(); _perf_frames = 0
+
 func _physics_process(dt: float) -> void:
+	var _pk := Time.get_ticks_usec()
 	_snap_prev()
 	var inp := _read_input()
+	_pk = _perf("p_input", _pk)
+	terrain.rope_ref_y = phys.y
 	phys.step(dt, inp)
+	_pk = _perf("p_bike_step", _pk)
+	_rope_tick(dt)
+	_pk = _perf("p_rope", _pk)
 	if rumble:
 		if input_enabled and not photo and not (paper_map and paper_map.busy()): rumble.update(dt, inp)
 		else: rumble.stop()
+	_pk = _perf("p_rumble", _pk)
 	ride_log.record(dt, phys, inp, _log_lift, rig.position.y if rig else 0.0, rider.J if rider else [])
+	_pk = _perf("p_ride_log", _pk)
 	if jitter_on and not phys.crash_on:
 		for kv in [["slip", phys.slip, 0.002], ["yaw_rate", phys.yaw_rate, 0.02], ["lean", phys.lean, 0.002], ["bike_lean", phys.bike_lean, 0.003],
 				["counter", phys.counter, 0.003], ["steer", phys.steer, 0.003], ["hip_shift", phys.hip_shift, 0.001], ["body_x", phys.body_x, 0.001],
@@ -1229,6 +1280,7 @@ func _physics_process(dt: float) -> void:
 			_jitter_sample(kv[0], kv[1], kv[2])
 	if phys.crash_on:
 		rider.pose_ragdoll(ragdoll.p, _ragdoll_roots())
+	_pk = _perf("p_ragdoll_pose", _pk)
 	if not phys.is_sane():
 		push_warning("physics went non-finite; restoring last good state")
 		for k in _last_good: phys.set(k, _last_good[k])
@@ -1237,6 +1289,39 @@ func _physics_process(dt: float) -> void:
 	else:
 		for k in ["x", "z", "y", "heading", "course", "pitch", "lean", "steer", "slip", "compress"]:
 			_last_good[k] = phys.get(k)
+
+## rope bridges: the rider's weight (with every bump / landing: the ground's push n_load) and sideways push
+## (the turn's reaction) go into the deck, the decks step, then the deck's sideways swing carries the bike
+const RIDER_KG := 95.0
+const ROPE_STROKE := 4.0   # m/s² sideways per pedal stroke
+var rope_probe := Env.s("BMX_ROPE_PROBE") != ""
+var _rope_pt := 0.0
+func _rope_tick(dt: float) -> void:
+	if terrain.ropes.is_empty():
+		return
+	var rb = null
+	if not phys.crash_on and not phys.air:
+		rb = terrain.rope_under(phys.x, phys.z, phys.y)
+	if rb != null:
+		var h := phys.heading
+		# sideways: the turn's reaction + each pedal stroke shoving the deck (like footsteps set a rope bridge swinging)
+		var side := phys.lat_a + ROPE_STROKE * phys.pedal * sin(phys.crank)
+		rb.push(phys.x, phys.z, -RIDER_KG * clampf(phys.n_load, 0.0, 40.0), Vector3(sin(h), 0, cos(h)) * RIDER_KG * side)
+	terrain.ropes_step(dt)
+	if rb != null:
+		var c: Vector2 = rb.carry(phys.x, phys.z)
+		phys.x += c.x
+		phys.z += c.y
+	if rope_probe:
+		_rope_pt -= dt
+		if _rope_pt <= 0.0:
+			_rope_pt = 0.25
+			for b in terrain.ropes:
+				var l: Vector2 = b.local(phys.x, phys.z)
+				var mid: Vector3 = b.sim.Centre(0.5)
+				print("ROPE u=%.1f w=%.2f on=%s y=%.2f deck=%.2f mid=(%.2f %.2f) v=%.1f air=%s crash=%s n_load=%.1f" % [
+					l.x, l.y, rb != null, phys.y, b.deck_at(phys.x, phys.z), mid.y, mid.z, phys.v, phys.air, phys.crash_on, phys.n_load])
+
 
 ## torn-off limbs: joint -> where its free piece's root point is now (Rider.pose_ragdoll)
 func _ragdoll_roots() -> Dictionary:
@@ -1363,6 +1448,15 @@ func _process(dt: float) -> void:
 		if area_title: area_title.view.visible = false
 		return
 	if area_title: area_title.view.visible = hud.visible
+	var _pk := Time.get_ticks_usec()
+	if perf_on:
+		if _perf_last > 0: _perf_acc["FRAME_wall"] = _perf_acc.get("FRAME_wall", 0) + (_pk - _perf_last)
+		_perf_last = _pk
+		_perf_frames += 1
+		_perf_print -= dt
+		if _perf_print <= 0.0:
+			_perf_print = 5.0
+			_perf_report()
 	if _bail_down >= 0 and not Input.is_action_pressed("bail"):   # let go while photo mode / pause ate the release
 		_bail_down = -1
 	if _bail_down >= 0 and Time.get_ticks_msec() - _bail_down >= BAIL_HOLD_MS:   # held: the real bail
@@ -1389,6 +1483,7 @@ func _process(dt: float) -> void:
 	if rig.chain and phys.geared and phys.gear >= 0: rig.chain.cog_teeth = float(phys.cogs[phys.gear])
 	rig.pose(drawn_pos.x, y_draw + (1.5 if Env.s("BMX_PITCH_POSE") != "" else 0.0), drawn_pos.z, hd, p_draw, st.hop_nose, st.bike_lean + st.rock + wobble + dab_lean,
 		st.steer + st.bar_catch - wobble * 1.5, st.wheel_f, st.wheel_r, st.crank)
+	_pk = _perf("bike_pose", _pk)
 	DebugOverlay.draw(self, st, drawn_pos, hd)
 	# the physics' tyres are soft and follow the smooth height field; the drawn ground is a triangle mesh
 	# (higher in hollows) with rocks and decks on it. Lift / tilt the drawn bike so no tyre is ever inside it
@@ -1446,6 +1541,7 @@ func _process(dt: float) -> void:
 			clip_stats.shot = 2
 		elif clip_stats.get("shot", 0) == 0 and deep > 0.12 and not st.crash_on and not st.air:
 			clip_stats.shot = 1
+	_pk = _perf("tyre_unclip", _pk)
 	st.brake_heat *= exp(-dt / 3.5)
 	rig.set_brake_heat((st.brake_heat - 0.35) / 0.9)
 	if not st.crash_on:
@@ -1511,16 +1607,21 @@ func _process(dt: float) -> void:
 			for ji in [[0, "j_head"], [1, "j_chest"], [2, "j_pelvis"], [4, "j_elbowL"], [10, "j_kneeL"]]:
 				var jp: Vector3 = rider.J[ji[0]]
 				_jitter_sample(ji[1] + "x", jp.x, 0.002); _jitter_sample(ji[1] + "y", jp.y, 0.002); _jitter_sample(ji[1] + "z", jp.z, 0.002)
+	_pk = _perf("rider_pose", _pk)
 	var vd: float = Settings.get_v("view_distance")
 	terrain.update_stream(st.x, st.z, 4.0)
+	_pk = _perf("terrain_stream", _pk)
 	if not phys.crash_on and hud and hud.life < 1.0:   # a full-health rider rolls past a pack and leaves it
 		if terrain.take_pack(st.x, st.y, st.z) != null:
 			hud.on_health_pack(HealthPack.HEAL)
 	# what a caught tape stretches over: the drawn front tyre's leading edge (the drawn bike, not the physics
 	# state a step ahead of it, so the tape sits on the tyre you see)
 	terrain.tape_push(null if phys.crash_on else rig.wheel_f.global_position + Vector3(cos(hd), 0.0, -sin(hd)) * rig.wheel_rf)
+	_pk = _perf("packs_tape", _pk)
 	far_hills.follow(drawn_pos)
+	_pk = _perf("far_hills", _pk)
 	sheep.follow(dt, drawn_pos, st.v, st.fwd())
+	_pk = _perf("sheep", _pk)
 	biome_t -= dt
 	if biome_t <= 0:
 		biome_t = 0.5
@@ -1532,13 +1633,16 @@ func _process(dt: float) -> void:
 				biome_cur = b
 				area_title.show_area(b)
 				Steam.presence("Riding · " + b)
+	_pk = _perf("biome", _pk)
 	# weather: wind, the bike parting the grass, cloud shadows (the sun dims with the shade at the rider)
 	atmos.update(t, dt, drawn_pos, 0.0 if st.air or st.crash_on else clampf(absf(st.v) / 2.0, 0.0, 1.0))
 	_update_light(dt)
 	sun.light_energy = sun_energy * atmos.shade
 	_update_probe(dt, drawn_pos)
+	_pk = _perf("atmos_light_probe", _pk)
 	# the dust simulation around the rider (fx/smoke_sim.gd)
 	if st.crash_on and ragdoll.active: blood.crash_step(ragdoll.p, ragdoll.q, ragdoll.last_h, ragdoll.rad)
+	_pk = _perf("blood", _pk)
 	if st.crash_on and dust.sim != null: _crash_dust()
 	elif dust.sim != null: dust.sim.set_body(_body_parts(st))
 	elif _rd_air.size() > 0: _rd_air.resize(0)
@@ -1546,6 +1650,7 @@ func _process(dt: float) -> void:
 	if dust.sim != null:
 		dust.sim.cloud = Vector4(atmos.cloud_off.x, atmos.cloud_off.y, Atmos.CLOUD_DEPTH if atmos.clouds_on else 0.0, atmos.shade)
 	dust.sim_step(dt, drawn_pos, st.fwd(), atmos.wind)
+	_pk = _perf("dust_sim", _pk)
 	grime.update(dt, rig)
 	# speed feel: wider FOV and streaky screen edges when fast
 	# from ~25 km/h, full by ~75 km/h: wider FOV with the camera pulled in (dolly zoom), a surge of extra FOV
@@ -1561,7 +1666,9 @@ func _process(dt: float) -> void:
 	var gm := grade_rect.material as ShaderMaterial
 	gm.set_shader_parameter("blur", speed_k * speed_k)
 	gm.set_shader_parameter("speed", speed_k)
+	_pk = _perf("grime_speedfx", _pk)
 	cam.update_cam(dt)
+	_pk = _perf("camera", _pk)
 	# fog + shadows sized to the zoom level, sun follows the rider
 	if scenic:
 		env.fog_depth_begin = 250.0
@@ -1581,11 +1688,16 @@ func _process(dt: float) -> void:
 		cam_attr.dof_blur_far_transition = cam.dist * 0.9 + 6
 		cam_attr.dof_blur_near_distance = maxf(0.5, cam.dist * 0.6)
 		cam_attr.dof_blur_near_transition = maxf(0.5, cam.dist * 0.4)
+	_pk = _perf("fog_dof", _pk)
 	if terrain.has_method("update_water"): terrain.update_water(st.x, st.z, t)
+	_pk = _perf("water", _pk)
 	if fx.has_method("update"): fx.update(dt, cam)
+	_pk = _perf("fx_tracks", _pk)
 	if msg_t > 0: msg_t -= dt
 	hud.update_hud(dt)
+	_pk = _perf("hud", _pk)
 	if audio: audio.update_audio(dt)
+	_pk = _perf("audio", _pk)
 	if absf(st.v) * 3.6 > float(GameState.records.top_speed) + 0.5 and not st.crash_on:
 		GameState.records.top_speed = absf(st.v) * 3.6
 

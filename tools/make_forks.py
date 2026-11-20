@@ -104,6 +104,32 @@ def crown_top(parts):
     return max(tops)
 
 
+# ---------------------------------------------------------------- where each model's crowns go: its steerer in dh's head tube
+# Lining up the crowns' bounding-box middles is not enough: a model's crowns hold the stanchions at their own offset from the
+# steerer, so its steerer ended up 1.7 (tues) / 3.2 (fuzz) cm in front of the head tube and the crowns hung off the front of it.
+# The steerer = a round piece on the centre line (|z| < 3 cm, 2.5-5 cm across, 4+ cm long along the axis) in the fork's crown
+# node or its cockpit (the fuzz has only a stub under its direct-mount stem); dh's steerer runs through the steer origin.
+NRM = np.array([-ax_d[1], ax_d[0]])   # across the steering axis, in the bike's side plane
+C_fit = {}
+for fid in ("tues", "fuzz"):
+    g, b = load(os.path.join(A, "parts", "%s_fork.glb" % fid)); ex = g["nodes"][0]["extras"]
+    ax_s = np.array(ex["steerAxis"]); ax_s /= np.linalg.norm(ax_s)
+    R = rot(math.atan2(ax_d[1], ax_d[0]) - math.atan2(ax_s[1], ax_s[0])); C_s = np.array(ex["crownMid"])
+    T = lambda p: np.concatenate([(p[..., :2] - C_s) @ R[:2, :2].T + C_d, p[..., 2:3]], -1)
+    gc, bc = load(os.path.join(A, "parts", "%s_cockpit.glb" % fid))
+    best = None
+    for p3 in (np.concatenate([p.reshape(-1, 3, 3) for p, _, _ in node_tris(g, b, "fork_crown")]),
+               np.concatenate([p.reshape(-1, 3, 3) for p, _, _ in node_tris(gc, bc, "cockpit")])):
+        p3 = T(p3)
+        for c in comps_of(p3):
+            Q = p3[c].reshape(-1, 3); tt = Q[:, :2] @ ax_d; aa = Q[:, :2] @ NRM
+            if np.abs(Q[:, 2]).max() < 0.03 and 0.025 < aa.max() - aa.min() < 0.05 and tt.max() - tt.min() > 0.04:
+                if best is None or tt.max() - tt.min() > best[0]: best = (tt.max() - tt.min(), (aa.max() + aa.min()) / 2)
+    off = best[1] if best else 0.0
+    C_fit[fid] = C_d - NRM * off
+    print("%s steerer %.1f mm %s of dh's steering axis: moved onto it" % (fid, abs(off) * 1000, "in front" if off < 0 else "behind"))
+
+
 # ---------------------------------------------------------------- each exported fork, fitted
 for fid in ("tues", "fuzz"):
     g, b = load(os.path.join(A, "parts", "%s_fork.glb" % fid))
@@ -111,13 +137,13 @@ for fid in ("tues", "fuzz"):
     ax_s = np.array(ex["steerAxis"]); ax_s /= np.linalg.norm(ax_s)
     th = math.atan2(ax_d[1], ax_d[0]) - math.atan2(ax_s[1], ax_s[0])
     R = rot(th)
-    C_s = np.array(ex["crownMid"]); A_s = np.array(ex["axle"])
+    C_s = np.array(ex["crownMid"]); A_s = np.array(ex["axle"]); C_f = C_fit[fid]
     crown = node_tris(g, b, "fork_crown"); lower = node_tris(g, b, "fork_lower")
-    def tcrown(p): return (np.concatenate([(p[:, :2] - C_s) @ R[:2, :2].T + C_d, p[:, 2:3]], 1))
+    def tcrown(p): return (np.concatenate([(p[:, :2] - C_s) @ R[:2, :2].T + C_f, p[:, 2:3]], 1))
     def rnor(n): return n @ R.T
     parts_c = [(tcrown(p), rnor(n), m) for p, n, m in crown]
     parts_l = [(p @ R.T, rnor(n), m) for p, n, m in lower]
-    A_new = R[:2, :2] @ (A_s - C_s) + C_d                       # where the fork's own axle would be in steer space
+    A_new = R[:2, :2] @ (A_s - C_s) + C_f                       # where the fork's own axle would be in steer space
     compress = t_dh - float(A_new @ ax_d)                         # < 0: the fork is longer than dh's by -compress
     A_pl = A_new + ax_d * (t_dh - float(A_new @ ax_d))            # axle: dh's place along the fork, the fork's own offset across it
     # no re-centring: the authored fork is one coaxial unit (checked by ray casting the FBX: stanchion and lowers share their centre line
@@ -328,7 +354,7 @@ for fid in ("tues", "fuzz"):
     g, b = load(os.path.join(A, "parts", "%s_fork.glb" % fid)); ex = g["nodes"][0]["extras"]
     ax_s = np.array(ex["steerAxis"]); ax_s /= np.linalg.norm(ax_s)
     R = rot(math.atan2(ax_d[1], ax_d[0]) - math.atan2(ax_s[1], ax_s[0])); C_s = np.array(ex["crownMid"])
-    T = lambda p: np.concatenate([(p[..., :2] - C_s) @ R[:2, :2].T + C_d, p[..., 2:3]], -1)
+    T = lambda p: np.concatenate([(p[..., :2] - C_s) @ R[:2, :2].T + C_fit[fid], p[..., 2:3]], -1)
     own_top = crown_top([(T(p), None, m) for p, _, m in node_tris(g, b, "fork_crown")])
     gc, bc = load(os.path.join(A, "parts", "%s_cockpit.glb" % fid)); cp = node_tris(gc, bc, "cockpit")
     ct = np.concatenate([p.reshape(-1, 3, 3) for p, _, _ in cp]); cn = np.concatenate([n.reshape(-1, 3, 3) for _, n, _ in cp])
@@ -372,7 +398,7 @@ for fid in ("tues", "fuzz"):
     g, b = load(os.path.join(A, "parts", "%s_fork.glb" % fid)); ex = g["nodes"][0]["extras"]
     ax_s = np.array(ex["steerAxis"]); ax_s /= np.linalg.norm(ax_s)
     R = rot(math.atan2(ax_d[1], ax_d[0]) - math.atan2(ax_s[1], ax_s[0])); C_s = np.array(ex["crownMid"])
-    T = lambda p: np.concatenate([(p[..., :2] - C_s) @ R[:2, :2].T + C_d, p[..., 2:3]], -1)
+    T = lambda p: np.concatenate([(p[..., :2] - C_s) @ R[:2, :2].T + C_fit[fid], p[..., 2:3]], -1)
     gc, bc = load(os.path.join(A, "parts", "%s_cockpit.glb" % fid)); cp = node_tris(gc, bc, "cockpit")
     ct = T(np.concatenate([p.reshape(-1, 3, 3) for p, _, _ in cp])); cn = np.concatenate([n.reshape(-1, 3, 3) for _, n, _ in cp]) @ R.T
     cm = np.array([m for p, _, m in cp for _ in range(len(p) // 3)])
