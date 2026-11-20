@@ -155,8 +155,9 @@ func update_cam(dt: float) -> void:
 		P = PRESETS.chase   # crashed (or no rider yet): watch from behind
 		helm_init = false
 	# analog camera from the rebindable cam_* actions (the gamepad right stick moves the rider's body now)
-	var ax := Input.get_axis("cam_left", "cam_right") if Input.get_connected_joypads().size() > 0 else 0.0
-	var ay := Input.get_axis("cam_up", "cam_down") if Input.get_connected_joypads().size() > 0 else 0.0
+	var pads := not Input.get_connected_joypads().is_empty()   # (allocates an array: once a frame)
+	var ax := Input.get_axis("cam_left", "cam_right") if pads else 0.0
+	var ay := Input.get_axis("cam_up", "cam_down") if pads else 0.0
 	follow_k = float(Settings.get_v("cam_follow"))
 	if Input.is_key_pressed(KEY_Z) or Input.is_key_pressed(KEY_X): ax = 0.0   # keys turn in 45° steps (_unhandled_input)
 	if absf(ax) > 0.2 or absf(ay) > 0.2: pan_t = t

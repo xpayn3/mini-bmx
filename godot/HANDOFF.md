@@ -752,6 +752,7 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `-s res://tools/terrain_cs_cmp.gd --headless` | C# vs GDScript terrain must be EXACT |
 | `-s res://tools/trail_grow_probe.gd --headless` | grows the endless trail 6×: old trail unchanged, C# = GDScript, timings; must say `PASS` |
 | `-s res://tools/cactus_probe.gd --headless` | cactus kinds + Voronoi fracture: closed pieces, volumes add up; must say `PASS` |
+| `-s res://tools/far_hills_probe.gd --headless [-- seed]` | the title / ride backdrop grid: C# batch vs GDScript per point (must match), far tree count; must say `PASS` |
 | `-s res://tools/wood_edge_probe.gd --headless` | drives angled lines onto every wooden ramp; must report `walls=0` |
 | `BMX_FW_PRESET=<name>`, `BMX_FW=pitch=1.3,poe=60`, `BMX_FW_PREVIEW=<m/s>` | freewheel preset / values / Preview for a test run (not saved) |
 | `BMX_FLOW_DEMO=1` | HUD flow meter: adds a flow level every 0.9 s from 3 s up to MAX, then lets it drain (pair with `BMX_DUST_SHOTS` for screenshots) |
@@ -850,10 +851,11 @@ Known, not fixed (lower priority from the code review):
 - Garage: test env `BMX_POSE` values get saved if you then touch a slider; config written on every slider tick.
 - Stale code: `hood_hem`, `_time`, some one-off `tools/*.gd`
   (`fork_measure`, `wheel_measure(2)`, `inspect_glb`, `hdri_sun`).
-- Perf ideas (done 2026-11-20: ragdoll ground sampled once per substep, HUD boxes cached (`UITheme.draw_box`), fx dust /
+- Perf (done 2026-11-20): ragdoll ground sampled once per substep, HUD boxes cached (`UITheme.draw_box`), fx dust /
   chunk buffers skip work when idle, `jump_mask` instead of `jump()` per step, wind / splash bed in C# (`RideBedSynth.cs`),
-  test flags cached (`Env.s`), torn tape drawn from packed arrays): still open: `rider.update_pose` gets a new ~45-key
-  dictionary every frame, the ride log builds a 65-value array 120x / s, FarHills samples C# per point on a worker.
+  test flags cached (`Env.s`), torn tape drawn from packed arrays, rider pose inputs in one reused dictionary
+  (`Game._pose_in`), ride log = one flat buffer, FarHills grid via batched C# (`far_ground` / `far_colors`), sticker
+  fits cached per frame + label (`BikeRig._fit_cache`), chain draws only its links in use.
 
 Ideas offered, not started:
 - Tyre tracks option **B**: a painted top-down "track map" the ground shader reads → real ruts in mud/sand.
