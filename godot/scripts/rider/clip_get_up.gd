@@ -17,8 +17,8 @@ const SPEED := 1.4      # get-up clips play this much faster (Mixamo's run 5-11 
 ## after the dizzy loop (hop pressed) the rider limps to the fallen bike with the clip in WALK_DIR (turning towards it,
 ## the stride following the speed) and Game puts them on it when they arrive
 const WALK_DIR := "res://assets/anim/walk/"
-const ARRIVE := 0.45        # m from the bike's origin: close enough to climb on
-const WALK_MAX := 25.0      # m: further than this (a long slide) they just get on
+const STAND_OFF := 1.0      # m from the bike's origin: where he stops and waits (beside it, not inside it)
+const WALK_MAX := 25.0      # m: further than this (a long slide) he waits where he stands
 const WALK_TIMEOUT := 14.0  # s
 const WALK_TURN := 3.0      # rad/s the body turns towards the bike
 
@@ -34,8 +34,18 @@ var rider: Rider
 var terrain
 var up: RiderAnim
 var dz: RiderAnim = null
-var dzi := 0               # which dizzy clip (random each crash)
 var wk: RiderAnim = null
+# waiting beside the bike: idle clips from DIZZY_DIR in turn. First he stares at the bike and shakes his head
+# (disappointed), then looks around (did anyone see?), then whatever else, each ~3-6 s, crossfaded.
+var _seg := 0              # clip index of the current idle
+var _seg_name := ""
+var _seg_t := 0.0
+var _seg_len := 4.0
+var _seg_xf := Transform3D()
+var _seg_from := {}        # the pose we are fading out of
+var _seg_fade := 1.0
+var _wait_n := 0           # idles played so far
+var _forced := ""          # tests: BMX_DIZZY_CLIP = only this idle
 var target := Vector3.ZERO # the bike (world): where the walk ends
 var has_target := false
 var skipped := false
@@ -51,7 +61,6 @@ var released := false
 var last_world: Array = []
 var _rag: Array = []       # the ragdoll's points (world) at the start
 var _xf := Transform3D()   # get-up clip frame -> world (heights then over the ground)
-var _dz_xf := Transform3D()
 var _fade_from := {}
 var _fade_t := 1.0
 var name := ""
@@ -66,12 +75,7 @@ func _init(r: Rider, terr, P: Array) -> void:
 	if not RiderAnim.clip_files(DIZZY_DIR).is_empty():
 		dz = RiderAnim.new(r, DIZZY_DIR)
 		if not dz.ok(): dz = null
-	if dz != null:
-		dzi = randi() % dz.clips.size()
-		var fd := Env.s("BMX_DIZZY_CLIP")   # tests: this dizzy clip (part of its name)
-		if fd != "":
-			for i in dz.clips.size():
-				if str(dz.clips[i].name).contains(fd): dzi = i
+	_forced = Env.s("BMX_DIZZY_CLIP")
 	if not RiderAnim.clip_files(WALK_DIR).is_empty():
 		wk = RiderAnim.new(r, WALK_DIR)
 		if not wk.ok(): wk = null
@@ -147,8 +151,9 @@ func release() -> void:
 	released = true
 
 
+## standing beside the bike, waiting for a hop press (the HUD's "PRESS ... TO RIDE ON")
 func dizzy() -> bool:
-	return phase == "dizzy"
+	return phase == "wait"
 
 
 func walking() -> bool:
@@ -166,15 +171,15 @@ static func _heading(P: Array) -> float:
 	return atan2(-d.z, d.x)
 
 
-## the dizzy loop ended and the bike is some way off: start the walk (false = just get on)
+## standing again and the bike is some way off: start the walk (false = wait where he is)
 func _start_walk(pose: Dictionary) -> bool:
-	if wk == null or not has_target: return false
 	var p: Vector3 = pose.P[2]
-	var d := Vector2(target.x - p.x, target.z - p.z).length()
-	if d < ARRIVE + 0.35 or d > WALK_MAX: return false
-	phase = "walk"; t = 0.0; _wt = 0.0
 	_wpos = Vector2(p.x, p.z)
 	_wyaw = _heading(pose.P)
+	if wk == null or not has_target: return false
+	var d := Vector2(target.x - p.x, target.z - p.z).length()
+	if d < STAND_OFF + 0.35 or d > WALK_MAX: return false
+	phase = "walk"; t = 0.0; _wt = 0.0
 	var c0: Dictionary = wk.pose_at(0, 0.0, false)
 	_whc = _heading(c0.P)
 	# the stride's speed from the clip's own travel (in-place clips: a slow walk)
@@ -193,13 +198,61 @@ func _walk_pose(dt: float) -> Dictionary:
 	var to := Vector2(target.x, target.z) - _wpos
 	var dist := to.length()
 	_wyaw += clampf(angle_difference(_wyaw, atan2(-to.y, to.x)), -WALK_TURN * dt, WALK_TURN * dt)
-	var v := _wv * smoothstep(0.0, 1.0, t / 0.6) * clampf(dist, 0.35, 1.0)   # eases in, slows into the bike
+	var v := _wv * smoothstep(0.0, 1.0, t / 0.6) * clampf(dist - STAND_OFF, 0.3, 1.0)   # eases in, slows towards his spot
 	if dist > 1e-4: _wpos += to / dist * minf(v * dt, dist)
 	_wt += dt * v / _wv
 	var raw: Dictionary = wk.pose_at(0, _wt, false)
 	var pel: Vector3 = raw.P[2]
 	var bas := Basis(Vector3.UP, _wyaw - _whc)
 	return _place(raw, Transform3D(bas, Vector3(_wpos.x, 0, _wpos.y) - bas * Vector3(pel.x, 0, pel.z)))
+
+
+## the next idle beside the bike: the first stares at the bike, the second looks around, then any other
+func _start_seg(pose: Dictionary) -> void:
+	var names: Array = dz.clips.map(func(c): return str(c.name))
+	var want := ""
+	if _forced != "": want = _forced
+	elif _wait_n == 0: want = "hurting"
+	elif _wait_n == 1: want = "look_around"
+	var idx := -1
+	for i in names.size():
+		if want != "" and names[i].contains(want): idx = i
+	if idx < 0:   # anything but the one just played
+		var pool := []
+		for i in names.size():
+			if i != _seg or names.size() == 1: pool.append(i)
+		idx = pool[randi() % pool.size()]
+	_seg = idx; _seg_name = names[idx]; _seg_t = 0.0
+	_seg_len = 4.2 if _seg_name.contains("hurting") else clampf(float(dz.clips[idx].len), 3.0, 6.0)
+	# the clip's first frame at his spot, facing the way he faces now
+	var c0: Dictionary = dz.pose_at(idx, 0.0, false)
+	var bas := Basis(Vector3.UP, _wyaw - _heading(c0.P))
+	var pel: Vector3 = c0.P[2]
+	_seg_xf = Transform3D(bas, Vector3(_wpos.x, 0, _wpos.y) - bas * Vector3(pel.x, 0, pel.z))
+	_seg_from = pose; _seg_fade = 0.0
+	_wait_n += 1
+
+
+## the head turned to the bike for `w` (0..1), shaking "no" once it has sunk in
+func _aim_head(pose: Dictionary, w: float) -> void:
+	if w <= 0.001 or not pose.o.has("head"): return
+	var hp: Vector3 = pose.P[0]
+	var f: Vector3 = (target + Vector3(0, 0.25, 0)) - hp
+	f.y = maxf(f.y, -0.8 * f.length())
+	var x := f.normalized()
+	x = x.rotated(Vector3.UP, sin(_seg_t * 6.5) * 0.3 * smoothstep(1.2, 1.8, _seg_t))   # the head shake
+	var z := x.cross(Vector3.UP).normalized()
+	var b := Basis(x, z.cross(x), z)
+	pose.o["head"] = (pose.o.head as Basis).orthonormalized().slerp(b, w)
+
+
+## beside the bike: start the idles (false = nothing to play, just get on)
+func _begin_wait(pose: Dictionary) -> bool:
+	if dz == null: return false
+	phase = "wait"; t = 0.0; _wait_n = 0
+	_seg = -1
+	_start_seg(pose)
+	return true
 
 
 ## advance and draw; true while it's still going
@@ -214,32 +267,30 @@ func step(dt: float) -> bool:
 			for k in 15: pose.P[k] = (_rag[k] as Vector3).lerp(pose.P[k], w)
 			if w < 0.5: pose.o = {"shoe_drop": 0.05}
 		if t >= ln:
-			if dz == null: return _finish(pose)
-			# standing: on into the dizzy loop, turned / placed where the get-up ended
-			phase = "dizzy"; t = 0.0
-			_dz_xf = _align_dz(pose.P)
+			# standing: walk to the bike by himself, or wait where he is when it is right there / out of reach
 			_fade_from = pose; _fade_t = 0.0
-	if phase == "dizzy":
-		pose = _place(dz.pose_at(dzi, t, false), _dz_xf)
-		if _fade_t < 1.0:
-			_fade_t = minf(_fade_t + dt / FADE, 1.0)
-			pose = RiderAnim._blend(_fade_from, pose, smoothstep(0.0, 1.0, _fade_t))
-		if released and _fade_t >= 1.0 and not _start_walk(pose): return _finish(pose)
+			if not _start_walk(pose) and not _begin_wait(pose): return _finish(pose)
 	if phase == "walk":
 		pose = _walk_pose(dt)
-		if _fade_t < 1.0:   # out of the dizzy pose into the walk
+		if _fade_t < 1.0:   # out of the get-up's last pose into the walk
 			_fade_t = minf(_fade_t + dt / FADE, 1.0)
 			pose = RiderAnim._blend(_fade_from, pose, smoothstep(0.0, 1.0, _fade_t))
-		if skipped or t > WALK_TIMEOUT or Vector2(target.x - _wpos.x, target.z - _wpos.y).length() <= ARRIVE:
-			return _finish(pose)
+		if skipped or t > WALK_TIMEOUT: return _finish(pose)
+		if Vector2(target.x - _wpos.x, target.z - _wpos.y).length() <= STAND_OFF + 0.05:
+			if not _begin_wait(pose): return _finish(pose)
+	if phase == "wait":
+		_seg_t += dt
+		pose = _place(dz.pose_at(_seg, _seg_t, false), _seg_xf)
+		if _seg_name.contains("hurting") and has_target:   # eyes on the bike: in, held, out
+			_aim_head(pose, smoothstep(0.0, 0.7, _seg_t) * (1.0 - smoothstep(_seg_len - 0.7, _seg_len, _seg_t)))
+		if _seg_fade < 1.0:
+			_seg_fade = minf(_seg_fade + dt / FADE, 1.0)
+			pose = RiderAnim._blend(_seg_from, pose, smoothstep(0.0, 1.0, _seg_fade))
+		if released and _seg_fade >= 1.0: return _finish(pose)
+		if _seg_t >= _seg_len: _start_seg(pose)
 	last_world = pose.P
 	rider.pose_points(pose.P, pose.o)
 	return true
-
-
-func _align_dz(stand_P: Array) -> Transform3D:
-	var a: Array = dz.pose_at(dzi, 0.0, false).P
-	return _align(a, stand_P)
 
 
 func _finish(pose: Dictionary) -> bool:
