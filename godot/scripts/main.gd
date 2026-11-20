@@ -1593,6 +1593,7 @@ func _autotest(seconds: float) -> void:
 				var mf: float = float(Tune.v.get("manualFrom", 0.4))
 				var need: float = float(Tune.v.get("manGravity", 7.0)) * sin(maxf(0.0, float(Tune.v.get("manBalance", 0.55)) - ph2.man_a)) / float(Tune.v.get("manLift", 9.0))
 				var pull: float = clampf(need + 3.0 * (bp - ph2.man_a) - 0.8 * ph2.man_w, 0.0, 1.0) if body_t == "balance" else (1.0 if ph2.man_a < bp else 0.0)
+				if ph2.air: pull = 0.0   # a player lets the manual go off a lip
 				Input.action_press("body_back", mf + pull * (1.0 - mf)) if pull > 0.0 else Input.action_release("body_back")
 			elif body_t == "fwd": Input.action_press("body_fwd", 1.0)
 			elif body_t == "lightfwd": Input.action_press("body_fwd", 0.25)   # resting the stick a little forward (attack position)
@@ -1798,7 +1799,13 @@ func _autotest(seconds: float) -> void:
 					game._snap_prev()
 			var pr := Env.s("BMX_PUMPRIDE")   # tests: hold hop on every downhill (down) / all the time (all) / never (off)
 			if Env.s("BMX_PUMP") != "" and not ph.air and ph.prep > 0.15: Input.action_press("hop")   # tests: pump into lips
-			elif pr != "" and pr != "off" and el > 3.0 and not ph.air and (pr == "all" or ph._g_pitch < -0.02): Input.action_press("hop")
+			elif pr == "stick" and el > 3.0 and not ph.air:   # the pro way: stick forward on the downs, eased back on the ups
+				Input.action_release("hop")
+				if Input.is_action_pressed("brake"): Input.action_release("body_fwd"); Input.action_release("body_back")   # no pumping into the brakes
+				elif ph._g_pitch < -0.02: Input.action_release("body_back"); Input.action_press("body_fwd", 0.75)
+				elif ph._g_pitch > 0.02: Input.action_release("body_fwd"); Input.action_press("body_back", 0.25)
+				else: Input.action_release("body_fwd"); Input.action_release("body_back")
+			elif pr != "" and pr != "off" and pr != "stick" and el > 3.0 and not ph.air and (pr == "all" or ph._g_pitch < -0.02): Input.action_press("hop")
 			else: Input.action_release("hop")
 			if pr != "" and int(el * 2.0) != int(_probe.get("pr_k", -1)):
 				_probe["pr_k"] = int(el * 2.0)
