@@ -15,7 +15,7 @@ const T_GLITCH := 7.0    # the first big tear (the figure in the doorway is gone
 const T_LOSS := 10.6     # the signal drops out: snow over everything
 const T_GLITCH2 := 13.2  # second tear: for a moment the figure stands inside the room
 const T_OFF := 16.5      # TV switches off
-const T_END := 18.9      # all black -> finished (no long dark grain at the end: straight into the game)
+const T_END := 17.6      # all black -> finished (no long dark grain at the end: straight into the game)
 # dolly zoom: distance from the glass and the frame height kept there (start wide / far, end close / wide lens)
 const D0 := 5.2
 const D1 := 0.62
@@ -155,9 +155,9 @@ func _update(_dt: float) -> void:
 	figure2.visible = t > T_GLITCH2 + 0.05 and t < T_GLITCH2 + 0.38
 	# moonlight: the eyes adjust after the TV comes on; when the TV goes off every light goes with it (pitch dark,
 	# only the standby LED)
-	var moon_k := smoothstep(T_ON + 0.2, T_ON + 2.6, t) * (1.0 - smoothstep(T_OFF, T_OFF + 1.1, t))   # the room dims away after the TV
+	var moon_k := smoothstep(T_ON + 0.2, T_ON + 2.6, t) * (1.0 - smoothstep(T_OFF, T_OFF + 0.6, t))   # the room dims away after the TV
 	# the haze goes too: its temporal blend kept the TV's red glow hanging in the air for ~0.7 s after the cut
-	env.volumetric_fog_enabled = t < T_OFF + 1.2
+	env.volumetric_fog_enabled = t < T_OFF + 0.7
 	moon.light_energy = 7.0 * moon_k
 	moon_fill.light_energy = 0.08 * moon_k
 	# Vertigo: dolly in, lens widens so the frame height at the TV goes H0 -> H1 (the TV grows a little)
@@ -172,7 +172,7 @@ func _update(_dt: float) -> void:
 	# fade: in from black at the start is the TV itself; out on skip / at the end
 	var k := 0.0
 	if _skip >= 0.0: k = clampf(_skip / 0.3, 0.0, 1.0)
-	k = maxf(k, smoothstep(T_OFF + 1.0, T_END - 0.1, t))   # then slowly to black
+	k = maxf(k, smoothstep(T_OFF + 0.4, T_END - 0.05, t))   # then slowly to black
 	(overlay.material as ShaderMaterial).set_shader_parameter("black", k)
 	(overlay.material as ShaderMaterial).set_shader_parameter("grain", 0.0 if t >= T_OFF else 1.0)   # TV off: no film noise left in the dark
 

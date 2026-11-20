@@ -41,10 +41,12 @@ static var mute_world := false   # the boot intro is playing: the world's TVs ke
 var _on_t := -1.0          # seconds since power_on (-1 = off)
 var _on_delay := 0.0
 var _off_t := -1.0         # seconds since power_off
+var _lamp := 0.0           # the glow light's level: follows `level` up at once, down slowly
+var _dtm := 0.016
 var _off_anim := false     # power_off(animate): the old squeeze to a line, then a dot, then the afterglow dies away
-const OFF_LINE := 0.22     # s: the picture squeezes down to a line
-const OFF_DOT := 0.2       # s: the line shrinks to a dot
-const OFF_GLOW := 1.4      # s: the dot's afterglow fades
+const OFF_LINE := 0.14     # s: the picture squeezes down to a line
+const OFF_DOT := 0.13       # s: the line shrinks to a dot
+const OFF_GLOW := 0.7      # s: the dot's afterglow fades
 var _glitch := 0.0
 var _glitch_snow := 0.0
 var _next_blip := 3.0
@@ -134,8 +136,13 @@ func _process(delta: float) -> void:
 	var dt := minf(delta, 0.05) / maxf(Engine.time_scale, 0.001)   # real time (photo mode / slow motion freeze nothing here)
 	dt = minf(dt, 0.05)
 	_sound(dt)
+	_dtm = dt
 	if _on_t < 0.0:
 		_led(0.0)
+		if _lamp > 0.0:   # (switched off at once: let the light die away)
+			_lamp = maxf(0.0, _lamp - dt * 1.8)
+			light.light_energy = light_energy * _lamp
+			light.visible = _lamp > 0.002
 		return
 	if _on_delay > 0.0:
 		_on_delay -= dt
@@ -168,7 +175,7 @@ func _process(delta: float) -> void:
 		bright = (1.0 - 0.7 * k1) * (1.0 - k2)
 		flash = 0.6 * k1 * (1.0 - k2)
 		snow = lerpf(snow, 0.0, k1); gl = 0.0; roll = 0.0
-		after = exp(-maxf(o - OFF_LINE, 0.0) * 3.2) * smoothstep(0.0, 0.5, o / OFF_LINE) if o < OFF_LINE + OFF_DOT + OFF_GLOW else 0.0
+		after = exp(-maxf(o - OFF_LINE, 0.0) * 6.0) * smoothstep(0.0, 0.5, o / OFF_LINE) if o < OFF_LINE + OFF_DOT + OFF_GLOW else 0.0
 		if o >= OFF_LINE + OFF_DOT + OFF_GLOW:
 			_off_t = -1.0; _on_t = -1.0; _off_anim = false; vopen = 0.0; bright = 0.0; after = 0.0; hopen = 1.0
 	elif _off_t >= 0.0:   # switched off: the picture just goes (no squeeze to a line / dot)
@@ -189,11 +196,12 @@ func _apply(vopen: float, hopen: float, bright: float, flash: float, snow: float
 	_led(bright)
 	_hiss = clampf(bright * hopen * (0.55 + snow * 0.9) + flash * vopen * 0.6, 0.0, 1.0)
 	level = bright * 0.6 * hopen + flash * 1.4 * vopen + after * 0.15 + snow * bright * 0.3
+	_lamp = maxf(level, _lamp - _dtm * 1.8)   # the light in front of the glass dies away over ~0.5 s instead of cutting out with the picture
 	if light:
 		var flicker := 0.92 + 0.08 * sin(Time.get_ticks_msec() * 0.031) * sin(Time.get_ticks_msec() * 0.017)
-		light.light_energy = light_energy * level * flicker
+		light.light_energy = light_energy * _lamp * flicker
 		light.omni_range = light_range
-		light.visible = level > 0.002
+		light.visible = _lamp > 0.002
 		light.light_color = Color(1.0, 0.52, 0.42).lerp(Color(0.8, 0.88, 1.0), clampf(flash + snow, 0.0, 1.0))
 
 var _powered_sound := false
