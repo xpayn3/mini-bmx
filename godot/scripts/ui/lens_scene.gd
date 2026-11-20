@@ -162,22 +162,23 @@ const LAKE_Y := -262.0
 static func _hash(x: float, z: float) -> float:
 	return fposmod(sin(x * 127.1 + z * 311.7) * 43758.5453, 1.0)
 
-## the ground's colour: trail dirt (with ruts), grass / dry grass, forest floor, rock on steep or high ground, snow up top
-static func _ground_col(x: float, z: float, y: float, slope: float) -> Color:
+## the ground at a point for vista_ground.gdshader: [land colour (linear), trail dirt weight, rut, rock-face weight]
+## land = grass / dry grass, forest floor, bare rock high up, snow on the peaks, sand at the lake
+static func _ground_attr(x: float, z: float, y: float, slope: float) -> Array:
 	var d := -z
 	var forest := smoothstep(0.1, 0.45, _fbm(x * 2.3 + 900.0, z * 2.3 - 400.0))
-	var c := Color(0.36, 0.55, 0.22).lerp(Color(0.6, 0.6, 0.3), smoothstep(0.2, 0.7, _fbm(x * 3.0, z * 3.0) + 0.3))
+	var c := Color(0.3, 0.5, 0.18).lerp(Color(0.52, 0.56, 0.26), smoothstep(0.35, 0.9, _fbm(x * 3.0, z * 3.0) + 0.3) * 0.7)
 	c = c.lerp(Color(0.2, 0.32, 0.15), forest * (1.0 - smoothstep(140.0, 200.0, y)))
-	c = c.lerp(Color(0.5, 0.48, 0.44), smoothstep(0.55, 0.85, slope))
+	var rock := smoothstep(0.55, 0.85, slope)
+	c = c.lerp(Color(0.5, 0.48, 0.44), rock)
 	c = c.lerp(Color(0.52, 0.5, 0.46), smoothstep(200.0, 270.0, y))
 	c = c.lerp(Color(0.95, 0.96, 0.98), smoothstep(330.0, 370.0, y + _fbm(x * 4.0, z * 4.0) * 35.0))
 	c = c.lerp(Color(0.72, 0.64, 0.46), (1.0 - smoothstep(LAKE_Y + 0.5, LAKE_Y + 3.0, y)))   # sandy shore
 	var off := absf(x - _cx(z))
 	var tw := lerpf(1.2, 3.5, smoothstep(30.0, 600.0, d))   # the trail stays visible further away
-	var trail := 1.0 - smoothstep(tw * 0.9, tw * 1.4, off + (_hash(x, z) - 0.5) * 0.3)
+	var trail := 1.0 - smoothstep(tw * 0.85, tw * 1.35, off)
 	var rut := exp(-pow((off - 0.38) / 0.14, 2.0)) * (1.0 - smoothstep(1.0, 1.3, off)) * (1.0 - smoothstep(40.0, 80.0, d))
-	var dirt := Color(0.5, 0.36, 0.24).lerp(Color(0.3, 0.21, 0.14), rut * 0.8 + _hash(x * 3.0, z * 3.0) * 0.15)
-	return c.lerp(dirt, trail).srgb_to_linear()
+	return [c.srgb_to_linear(), trail, rut, maxf(rock, smoothstep(200.0, 270.0, y)) * 0.8]
 
 static func _compute_ground() -> Array:
 	var st := SurfaceTool.new()
@@ -210,18 +211,10 @@ static func _compute_ground() -> Array:
 	st.generate_normals()
 	return st.commit_to_arrays()
 
-static func _ground_mat() -> StandardMaterial3D:
-	var m := StandardMaterial3D.new()
-	m.vertex_color_use_as_albedo = true
-	m.roughness = 0.95
-	var nt := NoiseTexture2D.new()   # fine soil / grass grain so contrast differences show
-	nt.width = 256; nt.height = 256; nt.seamless = true
-	var fn := FastNoiseLite.new(); fn.frequency = 0.08; nt.noise = fn
-	m.detail_enabled = true
-	m.detail_albedo = nt
-	m.detail_blend_mode = BaseMaterial3D.BLEND_MODE_MUL
-	m.uv1_triplanar = true
-	m.uv1_scale = Vector3(0.6, 0.6, 0.6)
+static func _ground_mat() -> ShaderMaterial:
+	var m := ShaderMaterial.new()
+	m.shader = load("res://shaders/vista_ground.gdshader")
+	m.set_shader_parameter("dirt_col", Color(0.5, 0.36, 0.24))
 	return m
 
 func _make_water() -> void:
@@ -253,7 +246,7 @@ func _make_water() -> void:
 	pd.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_root.add_child(pd)
 
-## triangles over rows of points (each row the same number of points), coloured by _ground_col, flat-shaded
+## triangles over rows of points (each row the same number of points), coloured by _ground_attr
 static func _grid(st: SurfaceTool, rows: Array) -> void:
 	# a colour per point (slope from the height field), triangles share points: smooth shading
 	var base := 0
@@ -264,13 +257,17 @@ static func _grid(st: SurfaceTool, rows: Array) -> void:
 			var e := 1.5
 			var gx := (G(v.x + e, v.z) - G(v.x - e, v.z)) / (2.0 * e)
 			var gz := (G(v.x, v.z + e) - G(v.x, v.z - e)) / (2.0 * e)
-			cr.append(_ground_col(v.x, v.z, v.y, sqrt(gx * gx + gz * gz) * 1.3))
+			cr.append(_ground_attr(v.x, v.z, v.y, sqrt(gx * gx + gz * gz) * 1.3))
 		cols.append(cr)
 	var verts := 0
 	for j in rows.size():
 		var row: Array = rows[j]
 		for i in row.size():
-			st.set_color(cols[j][i]); st.add_vertex(row[i])
+			var ga: Array = cols[j][i]
+			var lc: Color = ga[0]
+			st.set_color(Color(lc.r, lc.g, lc.b, float(ga[1])))
+			st.set_uv(Vector2(float(ga[2]), float(ga[3])))
+			st.add_vertex(row[i])
 	# (the vertex index of the first point of this grid = what was added before it)
 	base = st.get_meta(&"count", 0) if st.has_meta(&"count") else 0
 	var w: int = (rows[0] as Array).size()
