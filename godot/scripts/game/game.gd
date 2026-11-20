@@ -666,6 +666,7 @@ func rock_chips(c: Dictionary) -> void:
 func start_crash(reason: String) -> void:
 	phys.crash_pending = ""
 	if phys.crash_on: return
+	if rope_probe: print("ROPE CRASH ", reason, " at ", Vector3(phys.x, phys.y, phys.z))
 	_rd_air.resize(0)   # crash dust: per-part "was in the air" flags start fresh
 	if Env.s("BMX_TRICK") != "": print("CRASH ", reason, " v=%.1f air=%s" % [phys.v, phys.air])   # tests
 	var pts: Array = rider.joints_world()
@@ -718,6 +719,7 @@ func _wasted_on() -> bool:
 
 func get_up() -> void:
 	phys.get_up()
+	_out_of_crevasse()
 	if wasted: wasted.finish()
 	ragdoll.active = false
 	if blood: blood.crash_end()
@@ -937,6 +939,7 @@ func respawn(new_world: bool) -> void:
 		sp = Vector3(float(pxz[0]) - 9.0, 0.0, float(pxz[1]))
 		phys.reset_at(sp.x, sp.z, sp.y)
 	if sp != Vector3.ZERO: terrain.update_stream(sp.x, sp.z, INF)
+	if Env.s("BMX_START_V") != "": phys.v = float(Env.s("BMX_START_V"))   # tests: roll in at this speed
 	rider.reset_pose()
 	_snap_prev()
 	cam.snap_to(Vector3(phys.x, phys.y + 0.5, phys.z))
@@ -983,6 +986,24 @@ func place_start_tv() -> void:
 const BAIL_HOLD_MS := 350   # holding bail this long throws the rider off; a shorter tap resets to the trail
 var _bail_down := -1        # tick (ms) the bail key went down, -1 = not held
 
+## fallen off a rope bridge into its crevasse (no way out down there): stand up again on the nearer rim,
+## facing the bridge
+func _out_of_crevasse() -> void:
+	for rb in terrain.ropes:
+		var l: Vector2 = rb.local(phys.x, phys.z)
+		if l.x < 0.0 or l.x > rb.length or absf(l.y) > 8.0:
+			continue
+		var near_start: bool = l.x < rb.length * 0.5
+		var rim: Vector2 = rb.world(-2.5 if near_start else rb.length + 2.5, 0.0)
+		if phys.y > terrain.height(rim.x, rim.y) - 3.0:
+			continue
+		terrain.rope_ref_y = INF
+		phys.reset_at(rim.x, rim.y, atan2(-rb._dz, rb._dx) if near_start else atan2(rb._dz, -rb._dx))
+		_snap_prev()
+		cam.snap_to(Vector3(phys.x, phys.y + 0.5, phys.z))
+		flash("Back on the rim")
+		return
+
 ## a tap on bail: stand the rider back up on the nearest point of the trail, facing along it (not a new ride:
 ## the computer, trip and world stay)
 func reset_to_trail() -> void:
@@ -1002,6 +1023,7 @@ func reset_to_trail() -> void:
 	if fx.has_method("clear_tracks"): fx.clear_tracks()
 	if bd > 40.0 * 40.0: terrain.update_stream(tx, tz, INF)   # a long way: load it first
 	phys.reset_at(tx, tz, atan2(-tc.TZ[best], tc.TX[best]))
+	_out_of_crevasse()
 	rider.reset_pose()
 	_snap_prev()
 	cam.snap_to(Vector3(tx, phys.y + 0.5, tz))
@@ -1011,12 +1033,14 @@ func reset_to_trail() -> void:
 func _feature_spawn(what: String) -> Vector3:
 	var C: TrailCourse = terrain.field.course
 	var idx := -1
-	if what == "gorge":
+	if what == "gorge" or what == "rope":
 		for rf in terrain.field.route_feats:
-			if rf.type == "gorge":
+			if rf.type == what:
 				var gi := int(rf.s / TrailCourse.STEP)
-				print("FEATSPAWN gorge s=", rf.s)
-				var gj := maxi(2, gi - 30)
+				print("FEATSPAWN ", what, " s=", rf.s, " at=%.2f,%.2f dir=%.4f,%.4f" % [rf.x, rf.z, rf.dx, rf.dz])
+				if what == "rope" and Env.s("BMX_FEAT_BACK") == "":   # rope: 6 m before the trees, on its axis
+					return Vector3(rf.x - rf.dx * 6.0, -atan2(rf.dz, rf.dx), rf.z - rf.dz * 6.0)
+				var gj := maxi(2, gi - (int(Env.s("BMX_FEAT_BACK")) if Env.s("BMX_FEAT_BACK") != "" else 30))
 				return Vector3(C.X[gj], -atan2(C.TZ[gj], C.TX[gj]), C.Z[gj])
 		return Vector3.ZERO
 	if what == "arch":
@@ -1199,7 +1223,9 @@ func jitter_report() -> void:
 func _physics_process(dt: float) -> void:
 	_snap_prev()
 	var inp := _read_input()
+	terrain.rope_ref_y = phys.y
 	phys.step(dt, inp)
+	_rope_tick(dt)
 	if rumble:
 		if input_enabled and not photo and not (paper_map and paper_map.busy()): rumble.update(dt, inp)
 		else: rumble.stop()
@@ -1219,6 +1245,39 @@ func _physics_process(dt: float) -> void:
 	else:
 		for k in ["x", "z", "y", "heading", "course", "pitch", "lean", "steer", "slip", "compress"]:
 			_last_good[k] = phys.get(k)
+
+## rope bridges: the rider's weight (with every bump / landing: the ground's push n_load) and sideways push
+## (the turn's reaction) go into the deck, the decks step, then the deck's sideways swing carries the bike
+const RIDER_KG := 95.0
+const ROPE_STROKE := 4.0   # m/s² sideways per pedal stroke
+var rope_probe := Env.s("BMX_ROPE_PROBE") != ""
+var _rope_pt := 0.0
+func _rope_tick(dt: float) -> void:
+	if terrain.ropes.is_empty():
+		return
+	var rb = null
+	if not phys.crash_on and not phys.air:
+		rb = terrain.rope_under(phys.x, phys.z, phys.y)
+	if rb != null:
+		var h := phys.heading
+		# sideways: the turn's reaction + each pedal stroke shoving the deck (like footsteps set a rope bridge swinging)
+		var side := phys.lat_a + ROPE_STROKE * phys.pedal * sin(phys.crank)
+		rb.push(phys.x, phys.z, -RIDER_KG * clampf(phys.n_load, 0.0, 40.0), Vector3(sin(h), 0, cos(h)) * RIDER_KG * side)
+	terrain.ropes_step(dt)
+	if rb != null:
+		var c: Vector2 = rb.carry(phys.x, phys.z)
+		phys.x += c.x
+		phys.z += c.y
+	if rope_probe:
+		_rope_pt -= dt
+		if _rope_pt <= 0.0:
+			_rope_pt = 0.25
+			for b in terrain.ropes:
+				var l: Vector2 = b.local(phys.x, phys.z)
+				var mid: Vector3 = b.sim.Centre(0.5)
+				print("ROPE u=%.1f w=%.2f on=%s y=%.2f deck=%.2f mid=(%.2f %.2f) v=%.1f air=%s crash=%s n_load=%.1f" % [
+					l.x, l.y, rb != null, phys.y, b.deck_at(phys.x, phys.z), mid.y, mid.z, phys.v, phys.air, phys.crash_on, phys.n_load])
+
 
 ## torn-off limbs: joint -> where its free piece's root point is now (Rider.pose_ragdoll)
 func _ragdoll_roots() -> Dictionary:

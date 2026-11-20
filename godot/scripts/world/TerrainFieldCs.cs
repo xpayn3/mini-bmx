@@ -205,6 +205,7 @@ internal static class TfSet
 			["skinny"] = new TfFlat(19.0),
 			["bridge"] = new TfFlat(15.0),
 			["gorge"] = new TfFlat(36.0),
+			["rope"] = new TfFlat(46.0),
 		};
 		var kick = new TfHermite(new[] { new[] { 0.0, 0, 0.1 }, new[] { 3.8, 0.95, 0.4 } });
 		var skin = new TfHermite(new[] { new[] { 0.0, 0.02, 0.05 }, new[] { 2.0, 0.42, 0.3 }, new[] { 4.0, 0.85, 0 } });
@@ -227,6 +228,7 @@ internal static class TfSet
 internal sealed class TfFeat
 {
 	public double x, z, dx, dz, len, b0, b1, half, s;
+	public bool canyon;   // rope bridge: a canyon across the land (TerrainField.canyon_rims)
 	public TfProfile prof;
 	public string type;
 	public TfWood wood;
@@ -713,6 +715,7 @@ public partial class TerrainFieldCs : RefCounted
 		c_gx0 = sh.c_gx0; c_gz0 = sh.c_gz0; c_gnx = sh.c_gnx; c_gnz = sh.c_gnz;
 		c_seg = sh.c_seg; c_run_start = sh.c_run_start; c_runs = sh.c_runs;
 		_route = sh.route_feats;
+		_index_canyons();
 		_col = sh.col.Duplicate();
 		_route_wrap = null;
 		_reset_caches();
@@ -1159,12 +1162,15 @@ public partial class TerrainFieldCs : RefCounted
 		var f = new TfFeat { x = x, z = z, dx = dx, dz = dz, len = prof.length, prof = prof, b0 = b0, b1 = b1, type = type };
 		TfSet.WOOD.TryGetValue(type, out f.wood);
 		TfSet.DIG.TryGetValue(type, out f.dig);
+		f.canyon = type == "rope";
 		if (type == "rhythm" || type == "flow")
 			f.half = 2.3;
 		else if (type == "bridge")
 			f.half = 2.4;
 		else if (type == "gorge")
 			f.half = 3.2;
+		else if (type == "rope")
+			f.half = 3.0;
 		else if (type == "skinny")
 			f.half = 1.4;
 		else
@@ -1247,6 +1253,57 @@ public partial class TerrainFieldCs : RefCounted
 		if (f == null)
 			return null;
 		return new TerrainFeatCs(f);
+	}
+
+	// ---------------- rope bridge canyons (TerrainField.canyon_rims: same arithmetic, same order) ----------------
+	const double CANYON_W = 42.0, CANYON_D = 16.0, CANYON_RIM = 4.2, CANYON_CELL = 64.0;
+	private System.Collections.Generic.Dictionary<long, System.Collections.Generic.List<TfFeat>> _canyons = new();
+
+	private void _index_canyons()
+	{
+		_canyons = new();
+		foreach (var j in _route)
+		{
+			if (!j.canyon)
+				continue;
+			double mx = j.x + j.dx * j.len * 0.5, mz = j.z + j.dz * j.len * 0.5;
+			double r = j.len * 0.5 + CANYON_W + 8.0;
+			for (long cx = floori((mx - r) / CANYON_CELL); cx <= floori((mx + r) / CANYON_CELL); cx++)
+				for (long cz = floori((mz - r) / CANYON_CELL); cz <= floori((mz + r) / CANYON_CELL); cz++)
+				{
+					long key = cx * 1048576 + cz;
+					if (!_canyons.TryGetValue(key, out var l))
+						_canyons[key] = l = new();
+					l.Add(j);
+				}
+		}
+	}
+
+	private double _canyon_n(long k, long ch, double t)
+	{
+		long i = floori(t);
+		double f = t - i;
+		double h0 = (double)(((k * 73856093) ^ (ch * 19349663) ^ (i * 83492791) ^ (seed_value * 2654435761)) & 0xffff) / 32768.0 - 1.0;
+		double h1 = (double)(((k * 73856093) ^ (ch * 19349663) ^ ((i + 1) * 83492791) ^ (seed_value * 2654435761)) & 0xffff) / 32768.0 - 1.0;
+		return h0 + (h1 - h0) * (f * f * (3.0 - 2.0 * f));
+	}
+
+	private double _canyon_dig(double s, double len, double u, double ws)
+	{
+		double aw = Math.Abs(ws);
+		if (aw >= CANYON_W)
+			return 0.0;
+		long k = (long)(s * 8.0);
+		long sd = ws < 0.0 ? 0 : 3;
+		double amp = sm(4.0, 22.0, aw);
+		double cen = len * 0.5 + amp * 6.0 * _canyon_n(k, sd, aw / 16.0);
+		double hw = (len * 0.5 - CANYON_RIM) * (1.0 - 0.6 * sm(8.0, CANYON_W, aw));
+		double a = cen - hw + amp * 3.0 * _canyon_n(k, sd + 1, aw / 7.0);
+		double b = cen + hw - amp * 3.0 * _canyon_n(k, sd + 2, aw / 7.0);
+		double ww = 1.8 + amp * 1.6;
+		double dep = CANYON_D * (1.0 - sm(CANYON_W - 18.0, CANYON_W, aw)) * (1.0 + 0.2 * amp * _canyon_n(k, 6, aw / 11.0));
+		double v = Math.Min(sm(a, a + ww, u), 1.0 - sm(b - ww, b, u));
+		return v > 0.0 ? -dep * v : 0.0;
 	}
 
 	private void _feat_at(TfFeat j, double x, double z)
@@ -1342,6 +1399,20 @@ public partial class TerrainFieldCs : RefCounted
 					break;
 				if (s > f.s - 10 && s < f.s + f.len + 10)
 					_feat_at(f, x, z);
+			}
+		}
+		// rope canyons: looked up by place (TerrainField._canyons)
+		if (_canyons.Count > 0 && _canyons.TryGetValue(floori(x / CANYON_CELL) * 1048576 + floori(z / CANYON_CELL), out var cl))
+		{
+			foreach (var j in cl)
+			{
+				double u = (x - j.x) * j.dx + (z - j.z) * j.dz;
+				if (u > -6.0 && u < j.len + 6.0)
+				{
+					double cd = _canyon_dig(j.s, j.len, u, -(x - j.x) * j.dz + (z - j.z) * j.dx);
+					if (cd < fo_dig)
+						fo_dig = cd;
+				}
 			}
 		}
 		_fo_x = x; _fo_z = z;

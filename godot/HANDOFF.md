@@ -213,6 +213,31 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 
 - **Livelier trail** (`TrailCourse._shape_profile`, `trail_arch.gd`): roads bend more often and tighter; past the mountain the trail height gets rolling dips (~60 m); **ridge-and-cliff drops** (`drops`, ~1 per 3 km: the trail climbs ~4 % onto a ridge above the land, a short level run, then falls 3-6 m, and 2 % of slots 12-22 m: rare "gem" cliffs; route features skip them) and **rock tunnels / overhangs** (`chunk_arches`, merged blob-rock mesh, visual only, no collision). All deterministic by slot hash + seed, nothing near the laid-out end changes when the trail grows. **Gorge bridges** (route feature `gorge`, rare on straight road: a 36 m wooden bridge, deck on stilts, over a 9 m deep crevasse ~6.4 m wide; Wood kind 2 now takes its end from `u1`; mirrored in `TerrainFieldCs.cs`, `terrain_cs_cmp` must stay EXACT; HUD alert GORGE BRIDGE). Test: `BMX_TRAIL_FEAT=gorge` (try `BMX_SEED=5`), `BMX_TRAIL_FEAT=arch|<n>` spawns 80 m before the first arch / the n-th drop; `BMX_GATE_PROBE=1` prints `ARCHES` lines; `trail_grow_probe` prints `STATS`.
 
+- **Rope bridges** (route feature `rope`, `world/rope_bridge.gd` + C# `world/RopeBridgeSim.cs`): a 46 m feature, a swinging rope
+  bridge tied round four big pines (two each end, 2.3 m apart: ride between them) over a **canyon cut across the land**
+  (`TerrainField.canyon_rims` / `canyon_dig`, mirrored in `TerrainFieldCs._canyon_dig`: polynomials + integer hashes only, exact):
+  16 m deep where the trail crosses (rims exactly at 4.2 / len - 4.2 within 4 m of the trail), the rims wandering (value noise along w),
+  the canyon narrowing, shallowing and ending `CANYON_W` (42 m) to each side. It is looked up by place, not by the nearest trail
+  (`_canyons`: 64 m cells, `_index_canyons()` whenever `route_feats` changes; per nearest-trail it ended in a vertical seam wherever
+  another trail bend was closer). `_canyon_clear` only places one where the trail within 300 m never runs into it. The walls are faced
+  with flattened boulders stacked down them in sandstone bands (`RopeBridge._build_cliffs`, one merged mesh, visual only) plus fallen
+  rocks on the floor. About one per 2-3 km of road (`_build_route`: a hash of the slot, < 0.12, not in the first 400 m). The deck
+  is not in the height field: `Terrain` keeps a `RopeBridge` for every rope feature within 220 m (`_update_ropes`, needs C#) and its
+  live deck is part of `height()` / `deck_height()` (`_rope_deck`; a deck more than 1.5 m above `rope_ref_y` = the bike's y is
+  ignored, so down in the crevasse you stay down there). Sim: 4 ropes x 40 segments (2 deck ropes 1.1 m apart, 2 hand ropes),
+  plank ties, soft pull-only hangers, Verlet + PBD (4 substeps x 10 iterations at 120 Hz), no plank diagonals (they made it rigid
+  sideways). `Game._rope_tick` each physics step: the rider's weight (95 kg x `n_load`, so landings bounce it) + sideways push
+  (the turn's `lat_a` + every pedal stroke, `ROPE_STROKE`) go into the deck, then the deck steps (wind x 1.6, gusts), then its
+  sideways move under the bike carries the bike (`RopeBridge.carry`). ~0.4 m sway in a 10 m/s crosswind, ~0.4 m dip under the rider.
+  Fall off the side = crash into the crevasse; getting up (or the bail tap) puts you back on the nearer rim (`Game._out_of_crevasse`).
+  Planks drawn by a MultiMesh, ropes / hangers as tubes rebuilt every frame in C#, both interpolated between physics ticks. A few
+  planks missing / snapped in half (visual: a tyre rolls over a one-plank gap). HUD alert ROPE BRIDGE. No C# = no rope bridges.
+  Tests: `BMX_TRAIL_FEAT=rope` (6 m before the trees, on its axis; seed 4242 has one at 3.2 km) + `BMX_START_V=3 BMX_STRAIGHT=1`,
+  `BMX_ROPE_PROBE=1` (`ROPE` lines 4x/s: u, w, on deck, deck height, mid point, crash reason), `BMX_FEAT_BACK=n` (n trail steps back
+  instead), `-s res://tools/rope_sim_probe.gd` (sim alone: sag, wind sway, a walk across), `-s res://tools/rope_find.gd` (rope /
+  gorge features of a few seeds + every rope canyon C# vs GDScript and trail clearance; must say `PASS`). Photo tests:
+  `BMX_PHOTO_AT=x,y,z,lx,ly,lz` puts the photo camera at a world point looking at another (FEATSPAWN prints the feature's `at` / `dir`).
+
 - **Sponsor props** (`TrailCourse.chunk_gates` / `chunk_boards`, fixed spacing by centreline index so growing never moves them): a huge steel gantry with a sponsor banner over the trail every 300 m (`TrailGate.build`, made-up brands in `TrailGate.SPONSORS`, no collision, skipped on jumps) and breakable wooden roadside billboards every ~80 m (fence-style panel in `TerrainChunkBuilder._boards`, so the bike smashes them; the Label3D text is freed on smash). Probe: `BMX_GATE_PROBE=1`.
 
 - **Health packs** (`world/health_pack.gd`): a GTA-style floating, spinning red backpack with a white cross and a glow ring, one outside the door of each roadside shed (`TerrainChunkBuilder._sheds` -> `out["packs"]`, made in `Terrain._finalize`). Ride within 1.6 m (`Terrain.take_pack`, called from `Game._process`) and `hud.on_health_pack` gives back `HealthPack.HEAL` (45 %); full-health riders leave it. Taken ones stay gone until a new seed. Tests: `BMX_PACK_PROBE=1` (`PACK at` lines), `BMX_PACK_SPAWN=x,z` (start 9 m before a pack), `BMX_LIFE=0.3 BMX_LIFE_PROBE=1`.

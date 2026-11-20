@@ -75,6 +75,7 @@ class Feat:
 	var dig: TrailFeatures.Profile
 	var half: float
 	var s: float = 0.0
+	var canyon := false   # rope bridge: a canyon cut across the land (canyon_rims), not a dig along the trail
 
 
 # ---------------- shared seed data ----------------
@@ -261,6 +262,7 @@ func adopt_course(g: TerrainField) -> void:
 	c_gx0 = g.c_gx0; c_gz0 = g.c_gz0; c_gnx = g.c_gnx; c_gnz = g.c_gnz; c_start = g.c_start; c_items = g.c_items
 	c_seg = g.c_seg; c_run_start = g.c_run_start; c_runs = g.c_runs
 	route_feats = g.route_feats
+	_index_canyons()
 	_reset_caches()
 
 
@@ -284,6 +286,7 @@ func fork() -> TerrainField:
 		var c: Feat = f.make_feat(j.x, j.z, j.dx, j.dz, j.type, j.b0, j.b1)
 		c.s = j.s
 		f.route_feats.append(c)
+	f._index_canyons()
 	return f
 
 
@@ -688,12 +691,15 @@ func make_feat(x: float, z: float, dx: float, dz: float, type: String, b0: float
 	f.x = x; f.z = z; f.dx = dx; f.dz = dz; f.len = prof.length; f.prof = prof; f.b0 = b0; f.b1 = b1; f.type = type
 	f.wood = woods.get(type)
 	f.dig = digs.get(type)
+	f.canyon = type == "rope"
 	if type == "rhythm" or type == "flow":
 		f.half = 2.3
 	elif type == "bridge":
 		f.half = 2.4
 	elif type == "gorge":
 		f.half = 3.2
+	elif type == "rope":
+		f.half = 3.0
 	elif type == "skinny":
 		f.half = 1.4
 	else:
@@ -730,6 +736,9 @@ func _build_route() -> void:
 			# now and then (rare) a gorge: a deep crevasse crossed by a long wooden bridge
 			if not jmp and r.next() < 0.06:
 				type = "gorge"
+			# or (by a hash of the slot: no extra draw from r) a swinging rope bridge high over a deeper crevasse
+			elif not jmp and s > 400.0 and float(((int(s * 8.0) * 73856093) ^ (seed_value * 19349663)) & 0xffff) / 65536.0 < 0.12:
+				type = "rope"
 			var len: float = profiles[type].length
 			if s + len > s_end:
 				break
@@ -745,11 +754,15 @@ func _build_route() -> void:
 				continue
 			var dx := ddx / l
 			var dz := ddz / l
+			if type == "rope" and not _canyon_clear(x, z, dx, dz, s, len):
+				s += 8   # its canyon would cut the trail elsewhere (a bend, a switchback): not here
+				continue
 			var f := make_feat(x, z, dx, dz, type, base(x, z), base(x + dx * len, z + dz * len))
 			f.s = s
 			list.append(f)
 			s += len + ((5 + r.next() * 8) if jmp else (70 + r.next() * 90))
 	route_feats = list
+	_index_canyons()
 
 
 func jump_at(cx: int, cz: int) -> Feat:
@@ -805,6 +818,90 @@ func jump_at(cx: int, cz: int) -> Feat:
 				best = make_feat(sx, szz, dx, dz, type, b0, b1)
 	_jc[key] = best
 	return best
+
+
+# ---------------- rope bridge canyons ----------------
+## A canyon across the land under a rope bridge: two rock walls CANYON_D deep where the trail crosses, the
+## rims wandering (value noise along w) and the canyon narrowing, shallowing and ending CANYON_W m to each side.
+## Within 4 m of the trail the rims sit exactly at CANYON_RIM / len - CANYON_RIM (the bridge's anchors).
+## Mirrored exactly in TerrainFieldCs.cs (polynomials + integer hashes only: no sin / exp).
+const CANYON_W := 42.0
+const CANYON_CELL := 64.0
+var _canyons := {}   # 64 m cell key -> the rope canyons reaching into it
+
+
+## index the rope canyons by place (call whenever route_feats changes)
+func _index_canyons() -> void:
+	_canyons = {}
+	for j in route_feats:
+		if not j.canyon:
+			continue
+		var mx: float = j.x + j.dx * j.len * 0.5
+		var mz: float = j.z + j.dz * j.len * 0.5
+		var r: float = j.len * 0.5 + CANYON_W + 8.0
+		for cx in range(floori((mx - r) / CANYON_CELL), floori((mx + r) / CANYON_CELL) + 1):
+			for cz in range(floori((mz - r) / CANYON_CELL), floori((mz + r) / CANYON_CELL) + 1):
+				var key := cx * 1048576 + cz
+				if not _canyons.has(key):
+					_canyons[key] = []
+				_canyons[key].append(j)
+const CANYON_D := 16.0
+const CANYON_RIM := 4.2
+
+
+## value noise in -1..1 along t, channel ch, for feature key k
+func _canyon_n(k: int, ch: int, t: float) -> float:
+	var i := floori(t)
+	var f := t - i
+	var h0 := float(((k * 73856093) ^ (ch * 19349663) ^ (i * 83492791) ^ (seed_value * 2654435761)) & 0xffff) / 32768.0 - 1.0
+	var h1 := float(((k * 73856093) ^ (ch * 19349663) ^ ((i + 1) * 83492791) ^ (seed_value * 2654435761)) & 0xffff) / 32768.0 - 1.0
+	return h0 + (h1 - h0) * (f * f * (3.0 - 2.0 * f))
+
+
+## at signed w across: [near rim u, far rim u, wall width, depth] of the canyon of a feature at course s, length len
+func canyon_rims(s: float, len: float, ws: float) -> PackedFloat64Array:
+	var k := int(s * 8.0)
+	var aw := absf(ws)
+	var sd := 0 if ws < 0.0 else 3
+	var amp := sm(4.0, 22.0, aw)
+	var cen := len * 0.5 + amp * 6.0 * _canyon_n(k, sd, aw / 16.0)
+	var hw := (len * 0.5 - CANYON_RIM) * (1.0 - 0.6 * sm(8.0, CANYON_W, aw))
+	var a := cen - hw + amp * 3.0 * _canyon_n(k, sd + 1, aw / 7.0)
+	var b := cen + hw - amp * 3.0 * _canyon_n(k, sd + 2, aw / 7.0)
+	var ww := 1.8 + amp * 1.6
+	var dep := CANYON_D * (1.0 - sm(CANYON_W - 18.0, CANYON_W, aw)) * (1.0 + 0.2 * amp * _canyon_n(k, 6, aw / 11.0))
+	return PackedFloat64Array([a, b, ww, dep])
+
+
+## the canyon's dig (<= 0) at (u, signed w) of feature j
+func canyon_dig(s: float, len: float, u: float, ws: float) -> float:
+	if absf(ws) >= CANYON_W:
+		return 0.0
+	var r := canyon_rims(s, len, ws)
+	var v := minf(sm(r[0], r[0] + r[2], u), 1.0 - sm(r[1] - r[2], r[1], u))
+	return -r[3] * v if v > 0.0 else 0.0
+
+
+## a rope canyon here would cut no other part of the trail (the trail within 300 m of it, but not over it)
+func _canyon_clear(x: float, z: float, dx: float, dz: float, s: float, len: float) -> bool:
+	var C := course
+	var i0 := maxi(0, int((s - 300.0) / CSTEP))
+	var i1 := mini(C.n - 1, int((s + len + 300.0) / CSTEP))
+	for i in range(i0, i1 + 1):
+		var si := i * CSTEP
+		if si > s - 2.0 and si < s + len + 2.0:
+			continue
+		var rx: float = C.X[i] - x
+		var rz: float = C.Z[i] - z
+		var u := rx * dx + rz * dz
+		var ws := -rx * dz + rz * dx
+		if u < -8.0 or u > len + 8.0 or absf(ws) > CANYON_W + 6.0:
+			continue
+		# the trail's own width too: its edges must stay out of the canyon
+		for o in [-4.0, 0.0, 4.0]:
+			if canyon_dig(s, len, u, ws + o) < -0.2:
+				return false
+	return true
 
 
 func _feat_at(j: Feat, x: float, z: float) -> void:
@@ -886,6 +983,16 @@ func jump_eval(x: float, z: float) -> void:
 				break
 			if s > f.s - 10 and s < f.s + f.len + 10:
 				_feat_at(f, x, z)
+	# rope canyons: looked up by place (their arms reach far from the trail, wherever the nearest trail is)
+	if not _canyons.is_empty():
+		var cl = _canyons.get(floori(x / CANYON_CELL) * 1048576 + floori(z / CANYON_CELL))
+		if cl != null:
+			for j in cl:
+				var u: float = (x - j.x) * j.dx + (z - j.z) * j.dz
+				if u > -6.0 and u < j.len + 6.0:
+					var cd := canyon_dig(j.s, j.len, u, -(x - j.x) * j.dz + (z - j.z) * j.dx)
+					if cd < fo_dig:
+						fo_dig = cd
 	_fo_x = x; _fo_z = z
 
 

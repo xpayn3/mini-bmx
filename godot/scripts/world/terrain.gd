@@ -71,6 +71,12 @@ var fin_parts := PackedFloat64Array([0, 0, 0, 0, 0])
 ## health packs beside the sheds: key (position in 25 cm cells) -> {node, pos, chunk}; taken ones stay gone
 var _packs := {}
 var _pack_taken := {}
+## rope bridges (RopeBridge) within reach of the rider: their swinging decks are part of height() / deck_height()
+var ropes: Array = []
+## the bike's height (set by Game each tick): a deck well above it (rider down in the crevasse) doesn't count
+var rope_ref_y := INF
+var _rope_ok := false
+var _rope_t := 0.0
 
 
 ## seed_in: the world to build (pass it here rather than calling set_seed afterwards, which would
@@ -102,6 +108,10 @@ func _exit_tree() -> void:
 func _process(delta: float) -> void:
 	_time += delta
 	_update_wind(delta)
+	_rope_t -= delta
+	if _rope_t <= 0.0:
+		_rope_t = 0.5
+		_update_ropes()
 	_tapes.update(delta, _focus.x, _focus.y, _wind_t, _wind_dir, _wind_ws)
 	for key in _packs:
 		var pk: Dictionary = _packs[key]
@@ -147,6 +157,10 @@ func set_seed(seed_in: int) -> void:
 		_debris.clear()
 	if _tapes:
 		_tapes.clear()
+	for rb in ropes:
+		(rb as Node).queue_free()
+	ropes.clear()
+	_rope_t = 0.0
 	field = TerrainField.new()
 	field.setup(seed_in)
 	fcs = _make_cs() if use_cs else null
@@ -205,8 +219,64 @@ static func _rock_key(gx: int, gz: int) -> int:
 	return WorldRng.i32(gx * 73856093) ^ WorldRng.i32(gz * 19349663)
 
 
-## what you ride on: ground, a wooden deck, and a dome over every rock / log / stump of loaded chunks
+## what you ride on: ground, a wooden deck, a rope bridge's deck, and a dome over every rock / log / stump of loaded chunks
 func height(x: float, z: float) -> float:
+	var g := _height0(x, z)
+	if not ropes.is_empty():
+		g = maxf(g, _rope_deck(x, z))
+	return g
+
+
+func _rope_deck(x: float, z: float) -> float:
+	var best := -INF
+	for rb in ropes:
+		var d: float = rb.deck_at(x, z)
+		if d > best and d < rope_ref_y + 1.5:
+			best = d
+	return best
+
+
+## the rope bridge whose deck is under (x, z) at about height y, or null
+func rope_under(x: float, z: float, y: float):
+	for rb in ropes:
+		var d: float = rb.deck_at(x, z)
+		if d > -INF and absf(d - y) < 0.35:
+			return rb
+	return null
+
+
+## keep a RopeBridge for every rope-bridge route feature within ~220 m of the rider (C# needed)
+func _update_ropes() -> void:
+	if not _rope_ok:
+		_rope_ok = RopeBridge.available() and use_cs and fcs != null
+		if not _rope_ok:
+			return
+	var keep := {}
+	for rb in ropes:
+		keep[rb.feat_s] = rb
+	for j in field.route_feats:
+		if j.type != "rope":
+			continue
+		var d := Vector2(j.x + j.dx * j.len * 0.5 - _focus.x, j.z + j.dz * j.len * 0.5 - _focus.y).length()
+		var rb = keep.get(j.s)
+		if rb == null and d < 220.0:
+			rb = RopeBridge.new()
+			rb.name = "RopeBridge"
+			add_child(rb)
+			rb.setup(j, self)
+			ropes.append(rb)
+		elif rb != null and d > 300.0:
+			ropes.erase(rb)
+			rb.queue_free()
+
+
+## one physics tick of every rope bridge near the rider (Game, after the bike's step)
+func ropes_step(dt: float) -> void:
+	for rb in ropes:
+		rb.step(dt, _wind_dir * _wind_ws * 1.6)   # the crevasse funnels the wind: stronger up there
+
+
+func _height0(x: float, z: float) -> float:
 	if fcs != null:
 		return fcs.height(x, z)   # the same, domes included (mirrored by _finalize / _unload)
 	var f := field
@@ -230,9 +300,10 @@ func height(x: float, z: float) -> float:
 
 ## the ground or a wooden deck WITHOUT the rock / log domes (JS's shadowed surface(): cliff-wall test)
 func deck_height(x: float, z: float) -> float:
-	if fcs != null:
-		return fcs.deck(x, z)
-	return field.deck(x, z)
+	var g: float = fcs.deck(x, z) if fcs != null else field.deck(x, z)
+	if not ropes.is_empty():
+		g = maxf(g, _rope_deck(x, z))
+	return g
 
 
 ## 0 grass, 1 trail, 2 water, 3 sand (beaches, dunes)
