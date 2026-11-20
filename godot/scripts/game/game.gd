@@ -121,6 +121,9 @@ var sky_mat: ShaderMaterial
 ## The title screen's backdrop is its own hand-picked place (a fixed world and spot), not the player's world:
 ## main builds the title Game with title_world = true and swaps to the real world when a ride starts.
 const TITLE_SEED := 37   # a desert summit with rolling hills far below, picked by hand
+## the bike is turned this far from the hand-picked heading: the camera (yaw_off -1.95 from it: the bike faces three-quarters towards the camera) then looks ~0.5 rad round
+## from the original view, across the valley the hill falls into, instead of into the sun
+const TITLE_TURN := 2.45
 const TITLE_SPOT := Vector3(30.0, -120.0, 1.4399)   # x, z, heading (rad) of the bike on that summit
 var title_world := false
 ## parts of an earlier Game of the same world to use instead of building them ({terrain, far_hills}; main sets it
@@ -131,6 +134,8 @@ var scenic := false          # title screen: golden hour, a lookout camera, far 
 var far_hills: FarHills
 var grass: GrassField
 var sheep: SheepHerd
+var tumbleweeds: Tumbleweeds
+var title_life: TitleLife     # title screen only: birds, blowing dust, dust round the bushes
 
 func _ready() -> void:
 	bike_cfg = GameState.bike_config()
@@ -150,6 +155,7 @@ func _ready() -> void:
 		far_hills = reuse.far_hills
 	else:
 		far_hills = FarHills.new()   # the distant landscape behind the streamed chunks
+		if title_world: far_hills.ridge_gain = 1.4   # the title view: real mountains on the horizon
 		far_hills.setup(terrain)
 	add_child(far_hills)
 	reuse = {}
@@ -158,6 +164,8 @@ func _ready() -> void:
 	sheep = SheepHerd.new()   # woolly flocks that graze and run from the bike
 	sheep.setup(terrain)
 	add_child(sheep)
+	tumbleweeds = Tumbleweeds.new()   # dry bushes that roll over the desert before the wind
+	add_child(tumbleweeds)
 	fx = load("res://scripts/fx/fx.gd").new()
 	add_child(fx)
 	if fx.has_method("setup"): fx.setup(terrain)
@@ -383,7 +391,7 @@ func set_scenic(on: bool) -> void:
 	if on:
 		_to_hilltop()
 		var best := _title_heading
-		var sy := best - 0.62
+		var sy := best - 1.05   # low sun ahead-right of the bike, out of the frame
 		var el := deg_to_rad(10.0)
 		sun.look_at_from_position(Vector3(cos(sy) * cos(el), sin(el), -sin(sy) * cos(el)), Vector3.ZERO, Vector3.UP)
 		sun.light_color = Color(1.0, 0.62, 0.34)
@@ -419,8 +427,15 @@ func set_scenic(on: bool) -> void:
 		_snap_prev()
 		atmos.gain = 0.3   # a slight breeze
 		_title_lights(best)
+		if title_life == null:
+			title_life = TitleLife.new()
+			add_child(title_life)
 	else:
 		atmos.gain = 1.0
+		if title_life != null:
+			title_life.queue_free()
+			title_life = null
+		tumbleweeds.clear()
 		if is_instance_valid(_studio): _studio.queue_free()
 		_studio = null
 		sun.look_at_from_position(SUN_DIR.normalized(), Vector3.ZERO, Vector3.UP)
@@ -768,6 +783,81 @@ func _title_lights(heading: float) -> void:
 	_studio.add_child(fill)
 	fill.global_position = c - f * 5.0 - d * 2.5 + Vector3(0, 0.4, 0)
 
+## how far rocks / logs rise above the bare ground under and round (x, z), over the bike's footprint
+func _rock_rise(x: float, z: float) -> float:
+	var worst: float = terrain.top_height(x, z) - terrain.deck_height(x, z)
+	for i in 8:
+		var a := i * TAU / 8.0
+		var px := x + cos(a) * 1.7
+		var pz := z + sin(a) * 1.7
+		worst = maxf(worst, terrain.top_height(px, pz) - terrain.deck_height(px, pz))
+	return worst
+
+## every rock drawn near (x, z): [x, z, radius] from the rock MultiMeshes of the loaded chunks (the visible meshes,
+## which can stick out past the ground's dome that height() knows about)
+func _rocks_near(x: float, z: float, reach: float) -> Array:
+	var out: Array = []
+	if not TerrainGeo.MESH.has("rock"):
+		return out
+	var rock: Mesh = TerrainGeo.MESH["rock"]
+	var rr := maxf(rock.get_aabb().size.x, rock.get_aabb().size.z) * 0.5
+	var cacti: Array = []   # cacti too: one standing right behind the bike spoils the picture
+	for c in 5:
+		if TerrainGeo.MESH.has("cactus%d" % c):
+			cacti.append(TerrainGeo.MESH["cactus%d" % c])
+	for k in terrain.chunks:
+		var n = terrain.chunks[k].get("node")
+		if not is_instance_valid(n):
+			continue
+		for mi in (n as Node).get_children():
+			if not (mi is MultiMeshInstance3D):
+				continue
+			var mm: MultiMesh = (mi as MultiMeshInstance3D).multimesh
+			if mm == null:
+				continue
+			var is_cactus := mm.mesh in cacti
+			if mm.mesh != rock and not is_cactus:
+				continue
+			for i in mm.instance_count:
+				var xf: Transform3D = mm.get_instance_transform(i)
+				var s := xf.basis.get_scale()
+				var r := 1.5 if is_cactus else rr * maxf(s.x, s.z)
+				if Vector2(xf.origin.x - x, xf.origin.z - z).length() < reach + r:
+					out.append([xf.origin.x, xf.origin.z, r])
+	return out
+
+## the spot nearest to (x, z) with no rock under or beside the bike (a spiral out to ~22 m; the spot itself if bare)
+func _clear_spot(x: float, z: float, head: float) -> Vector2:
+	var rocks := _rocks_near(x, z, 30.0)
+	var V: Dictionary = CameraRig.VISTA   # where the title camera will stand: the view of the bike must be clear too
+	var cyaw := head + float(V.yaw_off)
+	var cdir := Vector2(cos(cyaw), -sin(cyaw))
+	var cright := Vector2(-cdir.y, cdir.x)
+	var free := func(px: float, pz: float) -> bool:
+		if _rock_rise(px, pz) >= 0.04:
+			return false
+		var cam2 := Vector2(px, pz) - cdir * float(V.back) + cright * float(V.side)
+		for r in rocks:
+			var rp := Vector2(r[0], r[1])
+			if rp.distance_to(Vector2(px, pz)) < r[2] + 2.6:   # the bike is ~2 m long: keep it well clear
+				return false
+			for k in 7:   # nothing in the line from the camera to the bike (a low lens sees every rock)
+				if rp.distance_to(cam2.lerp(Vector2(px, pz), k / 6.0)) < r[2] + 1.2:
+					return false
+		return true
+	if free.call(x, z):
+		return Vector2(x, z)
+	for ring in range(1, 30):
+		var rad := ring * 0.75
+		var n := maxi(8, ring * 6)
+		for i in n:
+			var a := i * TAU / n
+			var px := x + cos(a) * rad
+			var pz := z + sin(a) * rad
+			if free.call(px, pz):
+				return Vector2(px, pz)
+	return Vector2(x, z)
+
 ## title screen: stand the bike on the hand-picked summit of the title world
 func _to_hilltop() -> void:
 	var sp := TITLE_SPOT
@@ -775,10 +865,12 @@ func _to_hilltop() -> void:
 		var q := Env.s("BMX_TITLE_SPOT").split_floats(",")
 		sp = Vector3(q[0], q[1], q[2])
 	terrain.update_stream(sp.x, sp.y, INF)
+	var clear := _clear_spot(sp.x, sp.y, sp.z + TITLE_TURN)   # never on a rock: the nearest bare ground to the picked spot
+	sp = Vector3(clear.x, clear.y, sp.z)
 	phys.reset_at(sp.x, sp.y, 0.0)
 	_snap_prev()
 	cam.snap_to(Vector3(sp.x, phys.y + 0.5, sp.y))
-	_title_heading = sp.z
+	_title_heading = sp.z + TITLE_TURN   # the bike turned so the camera looks out over the long drop, away from the sun
 
 func _apply_settings() -> void:
 	terrain.set_view_scale(float(Settings.get_v("view_distance")))
@@ -1221,6 +1313,7 @@ func respawn(new_world: bool) -> void:
 		far_hills.setup(terrain)
 		add_child(far_hills)
 		sheep.reset()
+		tumbleweeds.clear()
 		flash("New world #%d" % GameState.seed)
 	if fx.has_method("clear_tracks"): fx.clear_tracks()
 	if new_world: grime.clean()
@@ -2159,6 +2252,10 @@ func _process(dt: float) -> void:
 	_pk = _perf("biome", _pk)
 	# weather: wind, the bike parting the grass, cloud shadows (the sun dims with the shade at the rider)
 	atmos.update(t, dt, drawn_pos, 0.0 if st.air or st.crash_on else clampf(absf(st.v) / 2.0, 0.0, 1.0))
+	var vcam := get_viewport().get_camera_3d()
+	tumbleweeds.update(dt, terrain, vcam, atmos.wind, drawn_pos, st.v, float(Settings.get_v("fx_density")))
+	if title_life != null:
+		title_life.update(dt, vcam, atmos.wind, drawn_pos, terrain)
 	_update_light(dt)
 	_glare_guard(dt)
 	_rim_update(dt)
