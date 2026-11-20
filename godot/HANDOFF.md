@@ -715,12 +715,12 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   power-on chime 0.35 s after the HUD shows, key beep on the ◀ ▶ buttons, **gps** (satellites found, at `FIX_T`), **pause / resume**
   (auto-pause after `AUTO_PAUSE` 2 s standing still: falling / rising two-note), **lap** (three even beeps every `LAP_M` 1 km),
   **turn** (nav prompt, once per bend as it comes within 100 m) / **feature** (double beep: jump, rocks), **battery** (90 % of
-  `BAT_LIFE`), **record** (a new best air time today, fanfare), **incident** (knocked out: alarm after the slow motion).
+  `BAT_LIFE`), **record** (a new best air time today, fanfare), **gear_end** (shifted into the easiest / hardest cog: high double blip), **gear_none** (a shift with no gear left that way, or a single speed: low buzz; `Game._shift` -> `hud.gear_changed(at_end)` / `gear_blocked`), **incident** (knocked out: alarm after the slow motion).
   All driven from `hud._computer_tones` / `_trail_scan`. Test: `BMX_BEEP_PROBE=1` prints `BEEP <name>`.
 - **Gear shift sound** (`game/shift_sound.gd`, `ShiftSound`): the user's own shifter recording, cut into six shifts
   (`assets/audio/shifter/shift_0..5.ogg`, lever in + spring back), one at random per shift (not the same twice in a row).
   Three synthesised versions were rejected ("an empty bottle", "clipped on high pitch"): use the recording.
-  Test: `BMX_SHIFT=secs` (shifts every 0.7 s, `SHIFT` lines; add `BMX_REC=file.wav`).
+  Test: `BMX_SHIFT=secs` (shifts every 0.7 s, `SHIFT` lines; `BMX_SHIFT_RUN=12` = 12 each way, runs into both ends; add `BMX_REC=file.wav`).
 - Small touches: "acquiring satellites" for the first 3 s of a ride, battery icon (full to empty in 30 min of riding, `BAT_LIFE`; blinks under 10 %). Back to start / new world (`hud.on_respawn`) restarts the computer: ride timer,
   trip (distance, avg, max), battery, GPS fix and power-on chime; test `BMX_RESPAWN=secs` presses Backspace then,
   backlight for 3 s on a button press or a new alert.

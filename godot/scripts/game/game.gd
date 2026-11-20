@@ -1056,10 +1056,12 @@ func _unhandled_input(e: InputEvent) -> void:
 
 func _shift(d: int) -> void:
 	if not phys.geared:
-		flash("Single speed"); return
+		flash("Single speed"); hud.gear_blocked(); return
 	if phys.shift(d):
-		hud.gear_changed()
+		hud.gear_changed(phys.gear == 0 or phys.gear == phys.cogs.size() - 1)
 		if audio: audio.shift(d)
+	else:
+		hud.gear_blocked()
 
 ## demo mode: an AI rider (game/demo_pilot.gd) supplies the input instead of the keys / pad, F2 hands it back
 var demo: DemoPilot = null
