@@ -797,6 +797,10 @@ func _rocks_near(x: float, z: float, reach: float) -> Array:
 		return out
 	var rock: Mesh = TerrainGeo.MESH["rock"]
 	var rr := maxf(rock.get_aabb().size.x, rock.get_aabb().size.z) * 0.5
+	var cacti: Array = []   # cacti too: one standing right behind the bike spoils the picture
+	for c in 5:
+		if TerrainGeo.MESH.has("cactus%d" % c):
+			cacti.append(TerrainGeo.MESH["cactus%d" % c])
 	for k in terrain.chunks:
 		var n = terrain.chunks[k].get("node")
 		if not is_instance_valid(n):
@@ -805,12 +809,15 @@ func _rocks_near(x: float, z: float, reach: float) -> Array:
 			if not (mi is MultiMeshInstance3D):
 				continue
 			var mm: MultiMesh = (mi as MultiMeshInstance3D).multimesh
-			if mm == null or mm.mesh != rock:
+			if mm == null:
+				continue
+			var is_cactus := mm.mesh in cacti
+			if mm.mesh != rock and not is_cactus:
 				continue
 			for i in mm.instance_count:
 				var xf: Transform3D = mm.get_instance_transform(i)
 				var s := xf.basis.get_scale()
-				var r := rr * maxf(s.x, s.z)
+				var r := 1.5 if is_cactus else rr * maxf(s.x, s.z)
 				if Vector2(xf.origin.x - x, xf.origin.z - z).length() < reach + r:
 					out.append([xf.origin.x, xf.origin.z, r])
 	return out
