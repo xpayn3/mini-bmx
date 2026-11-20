@@ -396,6 +396,127 @@ static func _bar_stickers(mi: MeshInstance3D, si: int, L: Dictionary, size: Vect
 	return out
 
 
+# ---------------------------------------------------------------- auto placement (any frame)
+
+## mean of the vertices within `r` of `p` (side view), a few rounds: a point near a tube settles on its
+## centre line. Vertices on the +z side only (the frame is mirrored). Returns p unchanged when nothing is near.
+static func _snap(P: PackedVector3Array, p: Vector2, r: float, rounds: int = 3) -> Vector2:
+	for _i in rounds:
+		var s := Vector2.ZERO
+		var n := 0
+		for v in P:
+			if v.z > 0.005 and Vector2(v.x, v.y).distance_to(p) <= r:
+				s += Vector2(v.x, v.y)
+				n += 1
+		if n < 4:
+			return p
+		p = s / n
+	return p
+
+
+## outermost |z| of the +z vertices within `r` of `p` in the side view
+static func _outer_z(P: PackedVector3Array, p: Vector2, r: float) -> float:
+	var zm := 0.0
+	for v in P:
+		if v.z > 0.005 and Vector2(v.x, v.y).distance_to(p) <= r:
+			zm = maxf(zm, v.z)
+	return zm
+
+
+## Places a sticker slot on ANY frame by looking at the model itself instead of fixed numbers: the label's
+## `slot` (downtube / toptube / chainstay / forklegs) says which part, the part's own vertices say where.
+## The bottom bracket is the crank node, the head tube the steer node. Returns the label with `from`, `to`,
+## `z`, `depth` filled in, or {} when the part is not on this bike.
+static func fit_label(bike: Node3D, L: Dictionary) -> Dictionary:
+	var slot := str(L.get("slot", ""))
+	var hit := _resolve(bike, L["mesh"], L.get("surface"))
+	if hit.is_empty() and slot == "chainstay":   # a single-pivot frame names its swingarm "seatstay"
+		hit = _resolve(bike, "seatstay", L.get("surface"))
+	if hit.is_empty():
+		return {}
+	var mi: MeshInstance3D = hit[0]
+	var P: PackedVector3Array = mi.mesh.surface_get_arrays(hit[1])[Mesh.ARRAY_VERTEX]
+	if P.size() < 8:
+		return {}
+	var out := L.duplicate(true)
+	out["mesh"] = mi.name
+	var crank := bike.find_child("crank", true, false) as Node3D
+	var steer := bike.find_child("steer", true, false) as Node3D
+	var bb := Vector2(0.0, crank.position.y if crank else 0.34)
+	var hd := Vector2(steer.position.x, steer.position.y) if steer else Vector2(0.47, 0.92)
+	var a := Vector2.ZERO
+	var b := Vector2.ZERO
+	match slot:
+		"downtube":
+			a = _snap(P, bb.lerp(hd, 0.30), 0.05)
+			b = _snap(P, bb.lerp(hd, 0.78), 0.05)
+		"toptube":
+			# from the head tube backwards: the direction (0-40 deg down) along which the frame has most material
+			var p0 := hd + Vector2(-0.07, -0.03)
+			var best := -1
+			var best_d := Vector2(-1, 0)
+			for deg in range(0, 41):
+				var ang := deg_to_rad(float(deg))
+				var d := Vector2(-cos(ang), -sin(ang))
+				var cnt := 0
+				for t in [0.10, 0.16, 0.22, 0.28, 0.34, 0.40]:
+					var q: Vector2 = p0 + d * t
+					for v in P:
+						if v.z > 0.005 and Vector2(v.x, v.y).distance_to(q) <= 0.03:
+							cnt += 1
+				if cnt > best:
+					best = cnt
+					best_d = d
+			a = _snap(P, p0 + best_d * 0.34, 0.04)
+			b = _snap(P, p0 + best_d * 0.12, 0.04)
+		"chainstay":
+			var bb3 := mi.mesh.get_aabb()
+			var y0 := bb3.position.y + bb3.size.y * 0.7
+			a = _snap(P, Vector2(bb3.position.x + bb3.size.x * 0.20, y0), 0.04)
+			b = _snap(P, Vector2(bb3.position.x + bb3.size.x * 0.56, y0 - 0.01), 0.04)
+			var zo := _outer_z(P, a.lerp(b, 0.5), 0.07)
+			if zo < 0.02:
+				return {}
+			out["z"] = zo * 0.9
+			out["depth"] = zo * 0.7
+		"forklegs":
+			var f3 := mi.mesh.get_aabb()
+			var y0 := f3.position.y + f3.size.y * 0.24
+			var y1 := f3.position.y + f3.size.y * 0.78
+			# the leg's centre line: x as a straight function of y over the +z leg's lower part (least squares)
+			var sn := 0.0
+			var sy := 0.0
+			var sx := 0.0
+			var syy := 0.0
+			var sxy := 0.0
+			for v in P:
+				if v.z > f3.end.z * 0.55 and v.y > y0 - 0.05 and v.y < y1 + 0.05:   # the outer leg only, not the arch or the axle
+					sn += 1.0; sy += v.y; sx += v.x; syy += v.y * v.y; sxy += v.x * v.y
+			var den := sn * syy - sy * sy
+			if sn < 8.0 or absf(den) < 1e-9:
+				return {}
+			var k := (sn * sxy - sy * sx) / den
+			var c0 := (sx - k * sy) / sn
+			a = Vector2(c0 + k * y0, y0)
+			b = Vector2(c0 + k * y1, y1)
+			var zo2 := 0.0   # outer face of the leg: the furthest +z vertex close to its centre line
+			for v in P:
+				var q := Vector2(v.x, v.y)
+				if v.z > zo2 and q.distance_to(Geometry2D.get_closest_point_to_segment(q, a, b)) < 0.07:
+					zo2 = v.z
+			if zo2 < 0.02:
+				return {}
+			out["z"] = zo2 * 0.92
+			out["depth"] = 0.05
+		_:
+			return {}
+	if a.distance_to(b) < 0.05:
+		return {}
+	out["from"] = [a.x, a.y]
+	out["to"] = [b.x, b.y]
+	return out
+
+
 ## bike: the "dh" node; cfg: DH_DECALS (or the same shape). Returns the decal MeshInstance3Ds.
 ## labels: { mesh, surface, from: [x, y], to: [x, y], text | image, length, height, z = 0, depth = 0.2,
 ##   fill, stroke, upright, imageMinus } -- from -> to is the tube's centre line in the mesh's space. A
