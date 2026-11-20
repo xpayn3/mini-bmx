@@ -513,8 +513,8 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   it** (clicks are ray-traced onto the panels as they lie, `page_point`). `unfold = false` keeps it folded (a
   leaflet). cols even for unfolding (the outer panel's back = the cover, a strip under the page); odd cols only folded.
   `close_actions` / `close_requested` / `auto_close`, `opened` / `closed`, `tempo` (< 1 slower; the map 0.4),
-  `sound_stream` (a recording played in random faded slices; the map: `assets/audio/map_unfold_gravel.ogg`). Paper = ambientCG **Paper003** (CC0) scan in
-  `assets/textures/paper/` × the print, creases worn (`shaders/paper_sheet.gdshader`). Sound: only the user's recording (`sound_stream`; the map and the pause leaflet use `map_unfold_gravel.ogg`), no stream = silent - never synthesised paper sounds.
+  `sound_stream` (a recording played in random faded slices; the map: `assets/audio/paper_unfold.mp3`). Paper = ambientCG **Paper003** (CC0) scan in
+  `assets/textures/paper/` × the print, creases worn (`shaders/paper_sheet.gdshader`). Sound: only the user's recording (`sound_stream`; the map and the pause leaflet use `paper_unfold.mp3`, the user's crumpling paper recording), no stream = silent - never synthesised paper sounds.
 - **Trail map** (`PaperMap`, `scripts/ui/paper_map.gd`; `Game.open_map` / `exit_map`): 4×2 panels (0.84 × 0.525 m),
   two layers. **World** (`World`, `set_content`): one 3.2 × 2 km print around you (2 px/m, heights every 10 m,
   colours every 20 m, hill shade, 5 m / 25 m contours, shore, 100 m grid with numbers, trail in red dashes, route
