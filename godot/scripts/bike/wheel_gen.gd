@@ -715,6 +715,20 @@ static func _build_spokes(s: Surf, sp: Dictionary, H: Dictionary, r_bed: float, 
 
 # ---------------------------------------------------------------- cassette
 
+## the middle plane (wheel-local z) of cog `idx` (0 = smallest) of an n-cog cassette, as _build_cassette lays them
+## out (BikeChain puts the chain on it)
+static func cog_z(idx: int, n: int) -> float:
+	var z0: float = HUB_REAR["cas0"]
+	var z1: float = HUB_REAR["cas1"] - 0.0018
+	var t := 0.0019
+	var pitch := 0.0039
+	if n > 1:
+		pitch = minf(0.0039, (z1 - z0 - t) / float(n - 1))
+		t = minf(t, pitch * 0.6)
+	var ci := clampi(n - 1 - idx, 0, maxi(n - 1, 0))   # biggest cog inboard
+	return z0 + pitch * float(ci) + t * 0.5
+
+
 static func _build_cassette(s: Surf, sp: Dictionary, H: Dictionary, det: float) -> void:
 	var cogs: Array = (sp["cogs"] as Array).duplicate()
 	cogs.sort()

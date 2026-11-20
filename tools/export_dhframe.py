@@ -211,6 +211,6 @@ rear.update({"G1": G1.tolist(), "G2": G2.tolist(), "C1": C1.tolist(), "C2": C2.t
              "FE": FE.tolist(), "springLen": spring_len})
 extras["wheelbase"] = float(FAXn[0] - A[0]); extras["bbToRearAxle"] = float(-A[0])   # this frame has longer stays than the GLORY
 extras["noDecals"] = True
-extras["chain"] = {"ring_r": 0.092, "ring_z": 0.055, "cog_z": 0.060, "pulley_r": 0.0235, "pulley_z": 0.085}
+extras["chain"] = {"ring_r": 0.0688, "ring_teeth": 34, "follow": True, "ring_z": 0.056, "cog_z": 0.060, "pulley_r": 0.0235, "pulley_z": 0.085}
 write_glb(OUT, nodes, extras)
 print("axle", A.round(3), "fork axle", FAXn.round(3), "shock L", np.linalg.norm(D - FE).round(3), "spring", round(spring_len, 3))

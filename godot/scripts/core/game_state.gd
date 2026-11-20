@@ -28,7 +28,9 @@ const BIKES := {
 	# the YT Tues frame with its own fork, bars, brakes and cranks (tools/export_tues.py)
 	"tues": {"label": "Yonder Tusk", "file": "res://assets/tues.glb", "root": "dh", "pose": DH_POSE, "ride": DH_RIDE, "land": 1.45, "geared": true, "garage": true},
 	# the Sketchfab "DH bike frame" (CC-BY, assets/dhframe_LICENSE.txt) on our fork / bars / cranks (tools/export_dhframe.py)
-	"goat": {"label": "Goat DH", "file": "res://assets/dhframe.glb", "root": "dh", "pose": DH_POSE, "ride": DH_RIDE, "land": 1.45, "geared": true, "garage": true},
+	"goat": {"label": "Goat DH", "file": "res://assets/dhframe.glb", "root": "dh", "pose": DH_POSE, "ride": DH_RIDE, "land": 1.45, "geared": true, "garage": true,
+		"chain": {"ring_r": 0.0688, "ring_teeth": 34, "ring_z": 0.056, "follow": true},   # our crank (34T ring), not the glb's 92 mm
+		"head": {"top": [0.4804, 0.9279], "bottom": [0.5261, 0.8191]}},   # its head tube (67.3 deg, measured off the mesh): our fork sits on it
 	# the NS Bikes Fuzz frame with its own fork, bars, brakes, cranks and derailleur (tools/export_fuzz.py)
 	"fuzz": {"label": "Nexo Fizz", "file": "res://assets/fuzz.glb", "root": "dh", "pose": DH_POSE, "ride": DH_RIDE, "land": 1.45, "geared": true, "garage": true},
 	"bmx": {"label": "BMX", "file": "res://assets/bmx.glb", "root": "bmx", "pose": {}, "ride": {}, "land": 1.0, "geared": false},
