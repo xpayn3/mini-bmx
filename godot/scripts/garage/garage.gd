@@ -666,6 +666,7 @@ func _rider_visibility() -> void:
 
 func _pose_stand_rider(dt: float) -> void:
 	if stand_rider == null: return
+	if stand_rider.animate(dt): return   # Mixamo clips (RiderAnim), if there are any
 	var breathe := sin(hand_t * 1.6) * 0.006
 	stand_rider.update_pose(dt, {"footL": Vector3(0.0, 0.0, -0.13), "footR": Vector3(0.02, 0.0, 0.13),
 		"handL": Vector3(0.02, 0.83 + breathe, -0.29), "handR": Vector3(0.04, 0.83 + breathe, 0.29),

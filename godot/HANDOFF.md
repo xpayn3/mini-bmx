@@ -431,6 +431,23 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   (`UITheme.lcd_font()`, `rider/cam_rec_label.gd`: game time since the camera was built, so a new camera after a crash starts at 0:00).
   Camera views: Helmet (`helmet`) and **Bike** (`bikecam`, `src: bike`) look out of the lens; C skips whichever has no camera.
   Probe: `BMX_CAMMOUNT_PROBE=1` (`CAMMOUNT` lines); tests `BMX_LOOK=camMount=side`, `BMX_BUILD="camera.mount=fork" BMX_CAM=bikecam`.
+- **Skeleton** (`rider/rider_skeleton.gd`, `RiderSkeleton`, `Rider.skeleton`): a real `Skeleton3D` with **Godot's humanoid
+  profile** (`SkeletonProfileHumanoid`: Root, Hips, Spine, Chest, UpperChest, Neck, Head, Left/RightShoulder / UpperArm /
+  LowerArm / Hand + all fingers, UpperLeg / LowerLeg / Foot / Toes, eyes, jaw; same names, parents and rest axes, the
+  node turned a quarter so the profile's +Z forward = the rider's +X). The rider is still drawn by its procedural parts;
+  after every pose (`update_pose`, `pose_ragdoll`, `pose_points`) `Rider._sync_skeleton` sets the body bones from them
+  (`follow`: joints + spine bones + head / glove / shoe transforms; fingers / eyes / jaw keep their rest under the hand /
+  head). So `BoneAttachment3D`, retargeted animations, an imported humanoid mesh skinned to it etc. all work, riding
+  and in a crash. `bone_rider(name)` = a bone in rider space. Tests: `BMX_SKEL_DRAW=1` draws the bones on top (yellow
+  to the parent, rgb axes), `BMX_SKEL_PROBE=1` prints `SKEL worst_m=` (bone vs joint, must be ~0) 1x / s.
+- **Animation clips / Mixamo** (`rider/rider_anim.gd`, `RiderAnim`, `Rider.animate(dt)`): FBX / glb clips with Mixamo bone
+  names in `assets/anim/mixamo/` (README there: FBX, "Without Skin") play on the menus' standing rider (garage rider
+  room KIT tab `_pose_stand_rider`, ride setup turntable `BikeTurntable._process`); none = the old procedural stand.
+  Each clip plays on its own hidden skeleton; its joints are retargeted **by direction** (the clip says where each limb
+  points, the rider keeps its bone lengths / torso / shoulders; hands, feet, head take the clip's turn from its T-pose;
+  the lower ankle is kept as high over the floor as the clip's), then `Rider.pose_points(P, orient)` draws it. Clips
+  play in turn (~7 s, whole loops, 0.45 s crossfade), one named "idle" between the others. Tests: `BMX_ANIM_DIR=res://tools/anim_test/`
+  (a fake waving clip made by `-s res://tools/make_test_clip.gd`), `BMX_ANIM=<part of a name>`, `BMX_ANIM_PROBE=1` (`ANIM clips=`).
 - Look: kits + a colour per part (helmet shell/peak, goggles, jersey, pants, gloves, shoes, knee pads).
 - **Belt** (`rider/belt.gd`, class `Belt`, a child of the pelvis mesh): hides where the jersey meets the trousers. The torso's bottom spine bone is locked to the hips (`Rider.set_spine(..., base)`) and the hem sits at `Belt.HEM_Y` inside the band, so leaning / tucking never makes jersey and trousers cross (they used to poke out one under the other). Styles (`look.beltStyle`, Kit › Belt in the rider room and tuning card Look › Clothes): webbing (cam buckle), leather (stitched, frame buckle, keeper, holes), ratchet (teeth, plastic buckle), elastic waistband (two stripes, label at the back); colours `look.belt` + `look.buckle` (buckle / stripe). Band textures (albedo + normal) are baked per style + colours and cached. Test: `BMX_LOOK=beltStyle=leather`, `BMX_GARAGE_HEAD=waist` frames the waist in the garage / rider room.
 - **Knee pads** (`rider/knee_pad.gd` + `shaders/knee_cap.gdshader`, one `KneePad` per leg (`KneePad.new(side)`, -1 =

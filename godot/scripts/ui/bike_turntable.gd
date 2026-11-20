@@ -197,6 +197,7 @@ func _process(dt: float) -> void:
 	elif not _drag: pivot.rotation.y += SPIN * dt
 	if _rider != null and _rider.visible:
 		_hand_t += dt
+		if _rider.animate(dt): return   # Mixamo clips (RiderAnim), if there are any
 		var breathe := sin(_hand_t * 1.6) * 0.006
 		_rider.update_pose(dt, {"footL": Vector3(0.0, 0.0, -0.13), "footR": Vector3(0.02, 0.0, 0.13),
 			"handL": Vector3(0.02, 0.83 + breathe, -0.29), "handR": Vector3(0.04, 0.83 + breathe, 0.29),
