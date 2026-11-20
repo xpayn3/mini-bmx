@@ -95,7 +95,7 @@ const VIEWS := {
 	"drive": [-1.3, 8.0, 1.5, Vector3(-0.3, 0.35, 0)],   # the drive side: chainring + cassette
 	"rider": [0.0, 7.0, 4.3, Vector3(-0.05, 1.0, 0)],
 	"kit": [0.2, 6.0, 4.2, Vector3(0.3, 0.85, 0.6)],
-	"show": [0.3, 5.0, 4.6, Vector3(0, 0.15, 0)],   # the showroom: the whole bike above the frame strip
+	"show": [0.5, 6.0, 6.4, Vector3(0, 0.12, 0)],   # the showroom: still camera, the bike a little turned (3/4 side), centred above the frame strip
 }
 
 ## the garage opens as a showroom: the bike, a strip of frames, BACK / EDIT / RIDE. EDIT opens the customizer
@@ -757,6 +757,7 @@ func _process(dt: float) -> void:
 	var zt := Input.get_joy_axis(0, JOY_AXIS_TRIGGER_RIGHT) - Input.get_joy_axis(0, JOY_AXIS_TRIGGER_LEFT)
 	if absf(zt) > 0.15: dist_t = clampf(dist_t * (1.0 - zt * dt * 1.2), 1.2, 7)
 	orbit = lerpf(orbit, orbit_t, minf(1.0, dt * 4))
+	cam.fov = lerpf(cam.fov, SHOW_FOV if not editing and mode == "bike" else 38.0, minf(1.0, dt * 4))
 	pitch = lerpf(pitch, pitch_t, minf(1.0, dt * 4))
 	dist = lerpf(dist, dist_t, minf(1.0, dt * 4))
 	var head_env := Env.s("BMX_GARAGE_HEAD")
@@ -954,6 +955,7 @@ func _showroom(root: Control) -> void:
 	col.add_child(_show_strip)
 	_fill_showroom()
 
+const SHOW_FOV := 30.0   # the showroom: a longer lens, flatter product-shot look
 const SHOW_H := 250.0
 const SHOW_CARD := Vector2(330, 236)
 
@@ -1013,7 +1015,7 @@ func _set_edit(on: bool, open_page := true) -> void:
 		var v: Array = VIEWS["show"]
 		orbit_t = v[0] + round((orbit_t - v[0]) / TAU) * TAU
 		pitch_t = v[1]; dist_t = v[2]; focus_t = v[3]
-		auto_spin = true
+		auto_spin = false   # the showroom camera stands still
 
 ## BACK / Esc / pad B: the customizer goes back to the showroom, the showroom leaves the garage
 func _back() -> void:

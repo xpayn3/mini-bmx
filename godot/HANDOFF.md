@@ -609,7 +609,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - **Paint tab** (2026-11-20): a big material ball of the picked part (`PartThumbs.make_ball`: sphere + `BikeBuild.paint_material`
   + a close key light so finishes read apart), parts as a strip of pictures of each part alone (`PartThumbs.make_paint_part`: the bike with every other surface
   hidden), an 8-column grid of colour squares (picked = a dot), custom colour, finishes as a 4 x 2 grid of balls in the current colour. "Apply to whole frame" on the front / rear triangle.
-- **Showroom first** (2026-11-20): the garage opens minimal: GARAGE, the bike turning slowly (`VIEWS.show`), a strip of big frame
+- **Showroom first** (2026-11-20): the garage opens minimal: GARAGE, the bike centred and turned a little (still camera, `VIEWS.show`, longer lens `SHOW_FOV`), a strip of big frame
   pictures (pick = switch frame) and BACK / EDIT / SAVE & RIDE. EDIT (`_set_edit(true)`) shows the customizer (tabs, options card,
   build card, Stock / Randomise / Save); its BACK / Esc / pad B returns to the showroom (`_back`). The frame row left the Paint tab.
   `BMX_GARAGE_TAB=<tab>` opens straight in the customizer.
