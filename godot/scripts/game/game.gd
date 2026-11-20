@@ -651,8 +651,12 @@ func ground_dust(px: float, pz: float, s: int) -> Color:
 		return c.lerp(Color.WHITE, 0.16)   # the road's colour, a touch lighter (fine dust scatters more)
 	return c.lerp(Color.WHITE, 0.42 if s == 0 else 0.28)
 
+## the point is on a rope bridge's deck (planks: no dust, dirt or tracks)
+func _on_rope_deck(x: float, z: float, y: float) -> bool:
+	return terrain != null and not terrain.ropes.is_empty() and terrain.rope_under(x, z, y) != null
+
 func burst(pos: Vector3, n: int, s: int, power: float, with_dust := true) -> void:
-	if s == 2: return
+	if s == 2 or _on_rope_deck(pos.x, pos.z, pos.y): return
 	var dc := ground_dust(pos.x, pos.z, s)
 	if dust.sim != null and with_dust:   # real smoke sim: one dust burst instead of sprite puffs
 		dust.puff_burst(pos, power, dc, (1.0 if s == 1 else 0.8 if s == 3 else 0.45) * clampf(float(n) / 20.0, 0.4, 2.0))
@@ -913,7 +917,10 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 	var sand := s == 3
 	var skid_fx := st.skid_fx
 	if st.air: air_peak = maxf(air_peak, st.y)
-	if not st.air and va > 0.6:
+	# on a rope bridge's planks: no dirt to throw, and no tyre tracks (they're drawn fixed in the world: on a deck
+	# that swings and sags they hung in the air / sank into the planks)
+	var bare := in_water or _on_rope_deck(st.x, st.z, st.y)
+	if not st.air and va > 0.6 and not bare:
 		var dirt := s == 1
 		var side := Vector3(-f.z, 0, f.x)
 		var lat_a := absf(st.v * st.yaw_rate)
@@ -958,12 +965,12 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 				var ev := Vector3(-f.x * back + side.x * out, 1 + randf() * 2.2, -f.z * back + side.z * out)
 				var cc: Color = (DIRT_CHUNK if randf() < 0.7 else ROCK_CHUNK) if dirt else (dcol * 0.8 if sand else GRASS_CHUNK)
 				fx.chunk(rear, ev, cc, 0.022)
-	if st.air or va <= 0.6 or in_water:
+	if st.air or va <= 0.6 or bare:
 		dust.feed(rear, Vector3.ZERO, 0.0, dcol, 0.0, 20.0)
 		dust.feed_front(front, Vector3.ZERO, 0.0, 0.0)
 	grime.feed(dt, 2 if in_water else s, va, skid_fx, st.air, _landed, terrain.ground_color(rear.x, rear.z))
 	_landed = 0.0
-	var on_ground := not st.air and not in_water and va > 0.2
+	var on_ground := not st.air and not bare and va > 0.2
 	var tc: Color = TRACK_DIRT if s == 1 else (dcol * 0.6 if sand else TRACK_GRASS)
 	var ta := 0.85 if s == 1 else (0.75 if sand else 0.45)
 	# a tyre that rolled through blood prints red for a few metres (fx/blood.gd)
@@ -1069,6 +1076,18 @@ func _out_of_crevasse() -> void:
 		var l: Vector2 = rb.local(phys.x, phys.z)
 		if l.x < 0.0 or l.x > rb.length or absf(l.y) > 8.0:
 			continue
+		# got up on (or right beside, at its height) the deck: back in the middle of the planks, lined up with the
+		# bridge whichever way is nearer the bike's heading. Stood up as it fell, crosswise on a 1.1 m deck, the
+		# first pedal stroke rode off the side
+		var mid: float = rb.sim.Height(l.x, 0.0, 0.0)
+		if l.x > rb._u0 and l.x < rb._u1 and not is_nan(mid) and absf(mid - phys.y) < 1.0:
+			var c: Vector2 = rb.world(l.x, 0.0)
+			var fwd_h := atan2(-rb._dz, rb._dx)
+			var hd := fwd_h if absf(BikePhysics.ang_diff(fwd_h, phys.heading)) < PI / 2 else fwd_h + PI
+			terrain.rope_ref_y = mid
+			phys.reset_at(c.x, c.y, hd)
+			_snap_prev()
+			return
 		var near_start: bool = l.x < rb.length * 0.5
 		var rim: Vector2 = rb.world(-2.5 if near_start else rb.length + 2.5, 0.0)
 		if phys.y > terrain.height(rim.x, rim.y) - 3.0:
@@ -1318,6 +1337,10 @@ func _physics_process(dt: float) -> void:
 	var _pk := Time.get_ticks_usec()
 	_snap_prev()
 	var inp := _read_input()
+	if _rope_hold > 0.0:   # tests (BMX_ROPE_STOP): brake to a stop on the bridge and stand there
+		_rope_hold -= dt
+		inp.throttle = 0.0; inp.sprint = false
+		inp.brake = 1.0 if phys.v > 0.3 else 0.0
 	_pk = _perf("p_input", _pk)
 	terrain.rope_ref_y = phys.y
 	phys.step(dt, inp)
@@ -1355,23 +1378,101 @@ const RIDER_KG := 95.0
 const ROPE_STROKE := 4.0   # m/s² sideways per pedal stroke
 var rope_probe := Env.s("BMX_ROPE_PROBE") != ""
 var _rope_pt := 0.0
+var _rope_shot := Env.s("BMX_ROPE_SHOT")
+var _rope_shot_i := 0
+var _rope_hold := 0.0
+var _rope_test_done := {}
+const ROPE_SHOT_U := [3.0, 5.0, 8.0, 15.0, 23.0, 32.0, 40.0, 42.5, 45.0]
+func _save_rope_shot(path: String) -> void:
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(path)
+	print("ROPESHOT ", path)
 func _rope_tick(dt: float) -> void:
 	if terrain.ropes.is_empty():
 		return
 	var rb = null
-	if not phys.crash_on and not phys.air:
+	if not phys.crash_on:
 		rb = terrain.rope_under(phys.x, phys.z, phys.y)
-	if rb != null:
+		if not phys.air:
+			# a wheel rolled off the side of a deck: down you go. Left to the ride physics, the bike hung on the plank
+			# edge with one axle on the deck and one over the drop: an ~85 deg "slope" it sped up on without moving,
+			# sunk into the planks, until it washed out a second later
+			var fw := phys.fwd()
+			for d in [0.0, phys.L - phys.BB_REAR, -phys.BB_REAR]:
+				var px: float = phys.x + fw.x * d
+				var pz: float = phys.z + fw.z * d
+				var hit := false
+				for b in terrain.ropes:
+					if b.off_side(px, pz, phys.y) and terrain._height0(px, pz) < phys.y - 1.5:
+						hit = true
+						break
+				if hit:
+					phys.crash_pending = "OFF THE BRIDGE!"
+					if rope_probe: print("ROPE off the side at d=%.2f" % d)
+					break
+	if rb != null and not phys.air:
 		var h := phys.heading
 		# sideways: the turn's reaction + each pedal stroke shoving the deck (like footsteps set a rope bridge swinging)
 		var side := phys.lat_a + ROPE_STROKE * phys.pedal * sin(phys.crank)
-		rb.push(phys.x, phys.z, -RIDER_KG * clampf(phys.n_load, 0.0, 40.0), Vector3(sin(h), 0, cos(h)) * RIDER_KG * side)
+		# the weight goes down through the two tyres (split as the physics loads them), not one point under the
+		# cranks: one point folded the deck into a V the bike pitched about in. A wheel still on the rim or off
+		# the end pushes on nothing (AddLoad ignores points off the deck), as it should
+		var nf: float = phys.n_f if is_finite(phys.n_f) else 0.4
+		var nr: float = phys.n_r if is_finite(phys.n_r) else 0.6
+		var kf := clampf(nf / maxf(nf + nr, 1e-3), 0.0, 1.0)
+		if phys.front_air: kf = 0.0
+		elif phys.rear_air: kf = 1.0
+		var fy := -RIDER_KG * clampf(phys.n_load, 0.0, 40.0)
+		var fs := Vector3(sin(h), 0, cos(h)) * RIDER_KG * side
+		var fw := phys.fwd()
+		var df: float = phys.L - phys.BB_REAR
+		var dr: float = -phys.BB_REAR
+		rb.push(phys.x + fw.x * df, phys.z + fw.z * df, fy * kf, fs * kf)
+		rb.push(phys.x + fw.x * dr, phys.z + fw.z * dr, fy * (1.0 - kf), fs * (1.0 - kf))
 	terrain.ropes_step(dt)
-	if rb != null:
+	if rb != null and not phys.air:
 		var c: Vector2 = rb.carry(phys.x, phys.z)
 		phys.x += c.x
 		phys.z += c.y
-	if rope_probe:
+	if _rope_shot != "":   # tests: a screenshot as the rider passes each mark on a bridge (by place, not time)
+		for b in terrain.ropes:
+			var u: float = b.local(phys.x, phys.z).x
+			while _rope_shot_i < ROPE_SHOT_U.size() and u > ROPE_SHOT_U[_rope_shot_i] and u < b.length + 8.0:
+				_save_rope_shot.call_deferred("%s_u%02d.png" % [_rope_shot, int(ROPE_SHOT_U[_rope_shot_i])])
+				_rope_shot_i += 1
+	# tests by place on the first bridge: BMX_ROPE_STOP=u,secs brakes to a stop at u and stands secs (game time);
+	# BMX_ROPE_BAIL=u bails at u (wall-clock test timers fire in the wrong place when the frame rate drops)
+	if (Env.s("BMX_ROPE_STOP") != "" or Env.s("BMX_ROPE_BAIL") != "") and not phys.crash_on:
+		var u0: float = terrain.ropes[0].local(phys.x, phys.z).x
+		var st := Env.s("BMX_ROPE_STOP").split(",")
+		if Env.s("BMX_ROPE_STOP") != "" and not _rope_test_done.has("stop") and u0 > float(st[0]) and u0 < terrain.ropes[0].length:
+			_rope_test_done["stop"] = true
+			_rope_hold = float(st[1]) if st.size() > 1 else 3.0
+			print("ROPETEST stop at u=%.2f" % u0)
+		if Env.s("BMX_ROPE_BAIL") != "" and not _rope_test_done.has("bail") and u0 > float(Env.s("BMX_ROPE_BAIL")) and u0 < terrain.ropes[0].length:
+			_rope_test_done["bail"] = true
+			phys.crash_pending = "BAIL!"
+			print("ROPETEST bail at u=%.2f" % u0)
+	if _rope_test_done.has("bail") and not _rope_test_done.has("getup") and phys.crash_on and getup_anim == null:
+		_rope_test_done["bail_t"] = float(_rope_test_done.get("bail_t", 0.0)) + dt
+		if _rope_test_done["bail_t"] > 2.5:   # the real get-up (animated), as a held hop does
+			_rope_test_done["getup"] = true
+			begin_getup()
+			print("ROPETEST getup from (%.2f, %.2f, %.2f)" % [phys.x, phys.y, phys.z])
+	if _rope_test_done.has("getup") and not _rope_test_done.has("upped") and not phys.crash_on:
+		_rope_test_done["upped"] = true
+		var lb: Vector2 = terrain.ropes[0].local(phys.x, phys.z)
+		print("ROPETEST up at u=%.2f w=%.2f y=%.2f heading_off_axis=%.2f" % [lb.x, lb.y, phys.y,
+			absf(BikePhysics.ang_diff(phys.heading, atan2(-terrain.ropes[0]._dz, terrain.ropes[0]._dx)))])
+	if rope_probe and Env.s("BMX_ROPE_PROBE") == "tick":
+		for b in terrain.ropes:
+			var l: Vector2 = b.local(phys.x, phys.z)
+			if l.x < -2.0 or l.x > b.length + 2.0: continue
+			var f := Vector3(sin(phys.heading), 0, cos(phys.heading))
+			print("RTICK t=%.3f u=%.2f w=%.2f on=%s g=%.3f y=%.3f vy=%.2f deck=%.3f wf=%.3f wr=%.3f n=%.1f cmp=%.3f p=%.3f air=%s fa=%s ra=%s v=%.1f" % [
+				t, l.x, l.y, rb != null, terrain._height0(phys.x, phys.z), phys.y, phys.vy, b.deck_at(phys.x, phys.z), phys.w_f, phys.w_r, phys.n_load, phys.compress, phys.pitch,
+				phys.air, phys.front_air, phys.rear_air, phys.v])
+	elif rope_probe:
 		_rope_pt -= dt
 		if _rope_pt <= 0.0:
 			_rope_pt = 0.25

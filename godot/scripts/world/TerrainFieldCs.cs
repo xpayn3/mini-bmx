@@ -229,6 +229,7 @@ internal sealed class TfFeat
 {
 	public double x, z, dx, dz, len, b0, b1, half, s;
 	public bool canyon;   // rope bridge: a canyon across the land (TerrainField.canyon_rims)
+	public double ramp = 6.0;   // TerrainField.Feat.ramp: the trail eased onto the feature's plane over this
 	public TfProfile prof;
 	public string type;
 	public TfWood wood;
@@ -1163,6 +1164,7 @@ public partial class TerrainFieldCs : RefCounted
 		TfSet.WOOD.TryGetValue(type, out f.wood);
 		TfSet.DIG.TryGetValue(type, out f.dig);
 		f.canyon = type == "rope";
+		f.ramp = type == "rope" ? ROPE_RAMP : 6.0;
 		if (type == "rhythm" || type == "flow")
 			f.half = 2.3;
 		else if (type == "bridge")
@@ -1256,7 +1258,7 @@ public partial class TerrainFieldCs : RefCounted
 	}
 
 	// ---------------- rope bridge canyons (TerrainField.canyon_rims: same arithmetic, same order) ----------------
-	const double CANYON_W = 42.0, CANYON_D = 16.0, CANYON_RIM = 4.2, CANYON_CELL = 64.0;
+	const double CANYON_W = 42.0, CANYON_D = 16.0, CANYON_RIM = 4.2, CANYON_CELL = 64.0, ROPE_RAMP = 22.0;
 	private System.Collections.Generic.Dictionary<long, System.Collections.Generic.List<TfFeat>> _canyons = new();
 
 	private void _index_canyons()
@@ -1311,7 +1313,7 @@ public partial class TerrainFieldCs : RefCounted
 		double rx = x - j.x;
 		double rz = z - j.z;
 		double u = rx * j.dx + rz * j.dz;
-		if (u < -6.0 || u > j.len + 6.0)
+		if (u < -j.ramp || u > j.len + j.ramp)
 			return;
 		double w = Math.Abs(-rx * j.dz + rz * j.dx);
 		if (w > j.half + 2.5)
@@ -1329,7 +1331,7 @@ public partial class TerrainFieldCs : RefCounted
 		double cu = u / j.len;
 		cu = cu < 0.0 ? 0.0 : (cu > 1.0 ? 1.0 : cu);
 		double pl = j.b0 + (j.b1 - j.b0) * cu;
-		double mk = (1.0 - sm(j.half + 0.6, j.half + 2.5, w)) * sm(-6, -1, u) * (1.0 - sm(j.len + 1, j.len + 6, u));
+		double mk = (1.0 - sm(j.half + 0.6, j.half + 2.5, w)) * sm(-j.ramp, -1, u) * (1.0 - sm(j.len + 1, j.len + j.ramp, u));
 		if (mk > fo_m)
 		{
 			fo_m = mk;
@@ -1372,7 +1374,7 @@ public partial class TerrainFieldCs : RefCounted
 				double rx = x - j.x;
 				double rz = z - j.z;
 				double u = rx * j.dx + rz * j.dz;
-				if (u < -6.0 || u > j.len + 6.0)
+				if (u < -j.ramp || u > j.len + j.ramp)
 					continue;
 				_feat_at(j, x, z);
 			}
@@ -1387,7 +1389,7 @@ public partial class TerrainFieldCs : RefCounted
 			{
 				int mid = (lo + hi) >> 1;
 				var fm = _route[mid];
-				if (fm.s + fm.len + 10 > s)
+				if (fm.s + fm.len + fm.ramp + 4.0 > s)
 					hi = mid;
 				else
 					lo = mid + 1;
@@ -1395,9 +1397,9 @@ public partial class TerrainFieldCs : RefCounted
 			for (int k = lo; k < _route.Length; k++)
 			{
 				var f = _route[k];
-				if (f.s - 10 >= s)
+				if (f.s - f.ramp - 4.0 >= s)
 					break;
-				if (s > f.s - 10 && s < f.s + f.len + 10)
+				if (s > f.s - f.ramp - 4.0 && s < f.s + f.len + f.ramp + 4.0)
 					_feat_at(f, x, z);
 			}
 		}

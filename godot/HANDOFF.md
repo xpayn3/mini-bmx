@@ -245,7 +245,19 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   Tests: `BMX_TRAIL_FEAT=rope` (6 m before the trees, on its axis; seed 4242 has one at 3.2 km) + `BMX_START_V=3 BMX_STRAIGHT=1`,
   `BMX_ROPE_PROBE=1` (`ROPE` lines 4x/s: u, w, on deck, deck height, mid point, crash reason), `BMX_FEAT_BACK=n` (n trail steps back
   instead), `-s res://tools/rope_sim_probe.gd` (sim alone: sag, wind sway, a walk across), `-s res://tools/rope_find.gd` (rope /
-  gorge features of a few seeds + every rope canyon C# vs GDScript and trail clearance; must say `PASS`). Photo tests:
+  gorge features of a few seeds + every rope canyon C# vs GDScript and trail clearance; must say `PASS`).
+  **Riding fixes (2026-11-20)**: deck pinned at the canyon lip (`DECK_IN` = `CANYON_RIM` - 0.05; it used to start 1.1 m
+  early, sag under the rim's ground and drop / kick the bike); `LANDING` 6 segments at each end pinned on a Hermite ramp
+  from the ground's slope (`EndSlope0/1`) into the hanging curve; `SAG` 0.8; deck bending stiffness (`BendK`) + Catmull-Rom
+  deck surface (no corner per node); the rider's weight goes in through both tyre contacts; trail eased onto the bridge's
+  plane over `Feat.ramp` = `ROPE_RAMP` 22 m (was 6: a 17 deg kicker at the rim; mirrored in C#, `rope_find` now compares
+  the ramps too); a wheel off the plank edge = "OFF THE BRIDGE!" at once (it hung on the edge at an ~85 deg "slope");
+  get-up on a deck = middle of the planks, lined up with the bridge; no dust / tracks on planks; `Terrain.rope_aim` =
+  the bridge's own line for the demo pilot / `BMX_FOLLOW` (the trail centreline bows ~2 m off it). Bridges build in
+  slices (`Terrain._build_ropes`, 3 ms a frame, finished at once within 90 m; materials pre-made by `RopeBridge.warm`):
+  was a 0.24 s freeze. Tests: `BMX_ROPE_PROBE=tick` (`RTICK` every physics step), `BMX_ROPE_SHOT=prefix` (shots by place
+  on the deck), `BMX_ROPE_STOP=u,secs`, `BMX_ROPE_BAIL=u` (by place: wall-clock test timers misfire at low fps),
+  `BMX_ROPE_SAG/LAND/BEND/ANCHOR` overrides. Photo tests:
   `BMX_PHOTO_AT=x,y,z,lx,ly,lz` puts the photo camera at a world point looking at another (FEATSPAWN prints the feature's `at` / `dir`).
 
 - **Sponsor props** (`TrailCourse.chunk_gates` / `chunk_boards`, fixed spacing by centreline index so growing never moves them): a huge steel gantry with a sponsor banner over the trail every 300 m (`TrailGate.build`, made-up brands in `TrailGate.SPONSORS`, no collision, skipped on jumps) and breakable wooden roadside billboards every ~80 m (fence-style panel in `TerrainChunkBuilder._boards`, so the bike smashes them; the Label3D text is freed on smash). Probe: `BMX_GATE_PROBE=1`.

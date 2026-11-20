@@ -138,6 +138,9 @@ func tick(game, dt: float) -> Dictionary:
 			var bend := smoothstep(0.012, 0.05, absf(tc.KAP[li]))
 			var off := minf(tc.W[li] * 0.4, 1.3) * line * bend
 			lx += nx / nl * off; lz += nz / nl * off
+	var ra = game.terrain.rope_aim(px, pz, look)   # a rope bridge: its own straight line, not the trail's
+	if ra != null:
+		lx = ra.x; lz = ra.y
 	var err: float = BikePhysics.ang_diff(atan2(-(lz - pz), lx - px), ph.heading)
 	var want := clampf(err * 2.4, -1.0, 1.0)
 	if in_air: want = 0.0

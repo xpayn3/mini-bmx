@@ -76,6 +76,9 @@ class Feat:
 	var half: float
 	var s: float = 0.0
 	var canyon := false   # rope bridge: a canyon cut across the land (canyon_rims), not a dig along the trail
+	## how far before / after the feature the trail is eased onto its plane (b0 .. b1). A rope bridge's plane can sit
+	## a metre or two off the trail: eased in over 5 m that was a kicker right before the rim (launched into the deck)
+	var ramp := 6.0
 
 
 # ---------------- shared seed data ----------------
@@ -692,6 +695,7 @@ func make_feat(x: float, z: float, dx: float, dz: float, type: String, b0: float
 	f.wood = woods.get(type)
 	f.dig = digs.get(type)
 	f.canyon = type == "rope"
+	f.ramp = ROPE_RAMP if type == "rope" else 6.0
 	if type == "rhythm" or type == "flow":
 		f.half = 2.3
 	elif type == "bridge":
@@ -847,6 +851,7 @@ func _index_canyons() -> void:
 				_canyons[key].append(j)
 const CANYON_D := 16.0
 const CANYON_RIM := 4.2
+const ROPE_RAMP := 22.0   # Feat.ramp of a rope bridge (mirrored in TerrainFieldCs)
 
 
 ## value noise in -1..1 along t, channel ch, for feature key k
@@ -908,7 +913,7 @@ func _feat_at(j: Feat, x: float, z: float) -> void:
 	var rx := x - j.x
 	var rz := z - j.z
 	var u := rx * j.dx + rz * j.dz
-	if u < -6.0 or u > j.len + 6.0:
+	if u < -j.ramp or u > j.len + j.ramp:
 		return
 	var w := absf(-rx * j.dz + rz * j.dx)
 	if w > j.half + 2.5:
@@ -924,7 +929,7 @@ func _feat_at(j: Feat, x: float, z: float) -> void:
 	var cu := u / j.len
 	cu = 0.0 if cu < 0.0 else (1.0 if cu > 1.0 else cu)
 	var pl := j.b0 + (j.b1 - j.b0) * cu
-	var mk := (1.0 - sm(j.half + 0.6, j.half + 2.5, w)) * sm(-6, -1, u) * (1.0 - sm(j.len + 1, j.len + 6, u))
+	var mk := (1.0 - sm(j.half + 0.6, j.half + 2.5, w)) * sm(-j.ramp, -1, u) * (1.0 - sm(j.len + 1, j.len + j.ramp, u))
 	if mk > fo_m:
 		fo_m = mk
 		fo_plane = pl
@@ -961,7 +966,7 @@ func jump_eval(x: float, z: float) -> void:
 			var rx := x - j.x
 			var rz := z - j.z
 			var u := rx * j.dx + rz * j.dz
-			if u < -6.0 or u > j.len + 6.0:
+			if u < -j.ramp or u > j.len + j.ramp:
 				continue
 			_feat_at(j, x, z)
 	query(x, z)
@@ -973,15 +978,15 @@ func jump_eval(x: float, z: float) -> void:
 		while lo < hi:
 			var mid := (lo + hi) >> 1
 			var fm: Feat = route_feats[mid]
-			if fm.s + fm.len + 10 > s:
+			if fm.s + fm.len + fm.ramp + 4.0 > s:
 				hi = mid
 			else:
 				lo = mid + 1
 		for k in range(lo, route_feats.size()):
 			var f: Feat = route_feats[k]
-			if f.s - 10 >= s:
+			if f.s - f.ramp - 4.0 >= s:
 				break
-			if s > f.s - 10 and s < f.s + f.len + 10:
+			if s > f.s - f.ramp - 4.0 and s < f.s + f.len + f.ramp + 4.0:
 				_feat_at(f, x, z)
 	# rope canyons: looked up by place (their arms reach far from the trail, wherever the nearest trail is)
 	if not _canyons.is_empty():
