@@ -23,7 +23,8 @@ const NEUTRAL := {hipX = 0.0, hipY = 0.0, lean = 0.0, elbowsOut = 0.0, kneesOut 
 	kneesFwd = 0.0, kneeOutL = 0.0, kneeOutR = 0.0, heelFwd = 0.0, heelUp = 0.0, footAngle = 0.0, footOut = 0.0, footSlide = 0.025}
 ## lookpanel.js DEFAULT_LOOK
 const DEFAULT_LOOK := {shell = "#16171a", peak = "#ececec", goggleFrame = "#f2f2ee", lens = "#ff7a2a", strap = "#ff6a4d",
-	jersey = "#ff6a4d", pants = "#1d2b64", gloves = "#ffd21f", shoes = "#26292f", shoeAccent = "#d8232a", pads = "#1b1c20", padStyle = "enduro", helmet = "glory",
+	jersey = "#ff6a4d", pants = "#1d2b64", gloves = "#ffd21f", shoes = "#26292f", shoeAccent = "#d8232a", pads = "#1b1c20", padStyle = "enduro",
+	beltStyle = "webbing", belt = "#16171a", buckle = "#9aa0a8", helmet = "glory",
 	helmetOn = "1", hairStyle = "long", beard = "1", hair = "#4a3022", skin = "#efc29f", eyes = "#4a6b8a", bibOn = "1", bibNumber = "27", bibText = "RUNOUT  •  DOWNHILL CUP",
 	camMount = "top"}
 ## where the helmet model sits on the head (head-local m / rad) and its scale
@@ -92,6 +93,7 @@ var cam_spots := {}                 # mount kind -> where it touches the shell (
 
 var torso: MeshInstance3D
 var hood_hem: MeshInstance3D
+var belt_node: Belt
 var pelvis_mesh: MeshInstance3D
 var neck_mesh: MeshInstance3D
 var bib_node: BackNumber
@@ -182,15 +184,11 @@ func _init() -> void:
 	pelvis_mesh = G.inst(G.rounded_box(0.2, 0.15, 0.3, 3, 0.05), mNavy)
 	pelvis_mesh.name = "Pelvis"
 	add_child(pelvis_mesh)
-	# a belt round the waist: hides the step where the jersey's hem meets the trouser top. Its own shape
-	# follows the hips' rounded box (a superellipse just outside it), so no corner pokes through
-	var belt := G.inst(_belt_geo(0.106, 0.156, 0.035, 0.08, 0.006), mat("#151517", 0.55, 0.1))
-	belt.name = "Belt"
-	pelvis_mesh.add_child(belt)
-	var buckle := G.inst(G.rounded_box(0.008, 0.042, 0.056, 1, 0.003), mat("#9aa0a8", 0.3, 0.9))
-	buckle.name = "Buckle"
-	buckle.position = Vector3(0.113, 0.058, 0.0)
-	pelvis_mesh.add_child(buckle)
+	# a belt round the waist (style + colours in the look): hides where the jersey's hem meets the trouser top.
+	# Its shape follows the hips' rounded box (a superellipse just outside it), so no corner pokes through
+	belt_node = Belt.new()
+	pelvis_mesh.add_child(belt_node)
+	belt_node.set_look(DEFAULT_LOOK.beltStyle, Color(DEFAULT_LOOK.belt), Color(DEFAULT_LOOK.buckle))
 	var bib := BackNumber.new()   # race number paper pinned to the back, flaps with speed
 	bib.name = "BackNumber"
 	bib_node = bib
@@ -631,6 +629,9 @@ func set_look(l: Dictionary) -> void:
 		kp.set_design(str(L.get("padStyle", DEFAULT_LOOK.padStyle)))
 		kp.set_colors(Color(L.get("pads", DEFAULT_LOOK.pads)), Color(L.get("gloves", DEFAULT_LOOK.gloves)))
 		knee[i].visible = kp.design == "none"   # no pads: the plain knee
+	if belt_node:
+		belt_node.set_look(str(L.get("beltStyle", DEFAULT_LOOK.beltStyle)), Color(str(L.get("belt", DEFAULT_LOOK.belt))),
+			Color(str(L.get("buckle", DEFAULT_LOOK.buckle))))
 	c.call(shoe_mats.upper, "shoes")
 	c.call(shoe_mats.accent, "shoeAccent")
 	c.call(goggle_mats.frame, "goggleFrame")
@@ -710,34 +711,6 @@ func set_style(s: Dictionary) -> void:
 # ---------------- posing helpers ----------------
 
 ## unit-height (+Y) cylinder between a and b
-## a flat strap round a superellipse (|x/a|^4 + |z/b|^4 = 1) from y0 to y1, standing `t` out from it
-static func _belt_geo(a: float, b: float, y0: float, y1: float, t: float, n := 48) -> Dictionary:
-	var ring: Array[Vector3] = []
-	for i in n:
-		var u := TAU * i / n
-		var cu := cos(u)
-		var su := sin(u)
-		ring.append(Vector3(a * signf(cu) * sqrt(absf(cu)), 0.0, b * signf(su) * sqrt(absf(su))))
-	var pos := PackedVector3Array()
-	var idx := PackedInt32Array()
-	for i in n:
-		var pv: Vector3 = ring[(i - 1 + n) % n]
-		var nx: Vector3 = ring[(i + 1) % n]
-		var tang := (nx - pv).normalized()
-		var outv := Vector3(tang.z, 0.0, -tang.x)
-		if outv.dot(ring[i]) < 0.0: outv = -outv
-		var q: Vector3 = ring[i]
-		pos.append_array([q + Vector3(0, y0, 0) - outv * 0.004, q + outv * t + Vector3(0, y0, 0),
-			q + outv * t + Vector3(0, y1, 0), q + Vector3(0, y1, 0) - outv * 0.004])
-	for i in n:
-		var a0 := i * 4
-		var b0 := ((i + 1) % n) * 4
-		for f in [[1, 2], [2, 3], [0, 1]]:   # outside face, top edge, bottom edge
-			var c0: int = f[0]
-			var c1: int = f[1]
-			idx.append_array([a0 + c0, b0 + c1, b0 + c0, a0 + c0, a0 + c1, b0 + c1])
-	return {pos = pos, idx = idx}
-
 static func set_limb(n: Node3D, a: Vector3, b: Vector3) -> void:
 	var d := b - a
 	var l := d.length()
@@ -845,7 +818,11 @@ func back_point(t: float, z: float, off := 0.0) -> Vector3:
 ## the torso from hip `a` to chest `b` as a curve: `curve` bows the back out (+, hunched) or in (-, arched),
 ## `side` bows it sideways; `low` (0..1) moves the bend toward the hips (0) or the shoulders (1).
 ## The cross-section turns from `right_lo` at the hips to `right_hi` at the chest (twist).
-func set_spine(a: Vector3, b: Vector3, right_lo: Vector3, right_hi: Vector3, curve := 0.0, side := 0.0, low := 0.5) -> void:
+## `base` (optional): the hips' basis. The bottom bone then takes the hips' up / sideways, so the jersey's hem
+## stays level inside the belt however far the chest leans (it used to tilt with the spine and cross the trousers'
+## top: one poked out under the other at the front, the other at the back)
+func set_spine(a: Vector3, b: Vector3, right_lo: Vector3, right_hi: Vector3, curve := 0.0, side := 0.0, low := 0.5, base := Basis()) -> void:
+	var lock_base := base != Basis()
 	var d := b - a
 	var l := maxf(d.length(), 1e-4)
 	var dn := d / l
@@ -858,7 +835,11 @@ func set_spine(a: Vector3, b: Vector3, right_lo: Vector3, right_hi: Vector3, cur
 		var tg := (ctrl - a) * 2 * (1 - t) + (b - ctrl) * 2 * t
 		var tl := maxf(tg.length(), 1e-4)
 		var tn := tg / tl
+		if k == 0 and lock_base:
+			tn = base.y.normalized()
 		var rr := right_lo.lerp(right_hi, t)
+		if k == 0 and lock_base:
+			rr = base.z
 		rr = rr - tn * rr.dot(tn)
 		if rr.length_squared() < 1e-6:   # hips and shoulders turned opposite ways (a tangled ragdoll)
 			rr = r0 - tn * r0.dot(tn)
@@ -1002,8 +983,8 @@ func pose_ragdoll(P: Array, roots: Dictionary = {}) -> void:
 	var body_r: Vector3 = hp[1] - hp[0]
 	var bb := _basis_from(ch - pe, body_r)
 	pelvis_mesh.transform = Transform3D(bb, pe)
-	var hip: Vector3 = pe + (ch - pe).normalized() * 0.02
-	set_spine(hip, ch, body_r.normalized(), (sh[1] - sh[0]).normalized())
+	var hip: Vector3 = pe + (ch - pe).normalized() * Belt.HEM_Y
+	set_spine(hip, ch, body_r.normalized(), (sh[1] - sh[0]).normalized(), 0.0, 0.0, 0.5, bb)
 	set_limb(hood_hem, hip, hip.lerp(ch, 0.2))
 	var sh_r: Vector3 = sh[1] - sh[0]
 	head.transform = Transform3D(_basis_from(hd - ch, sh_r), hd)
@@ -1465,9 +1446,11 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var tw := Basis(tw_axis, float(sty.twist) + clampf(_num(p, "airSpin") * 0.07 + sm_turn * 0.13 * float(sty.turnTwist), -0.5, 0.5) - 0.22 * tab)
 	# pelvis: turn (yaw about up), roll (one hip drops, about forward), tilt (about the hip line)
 	var pel_b := Basis(Vector3.UP, float(sty.pelvisYaw) + clampf(sm_turn * 0.07 * float(sty.turnHips), -0.4, 0.4) + 0.3 * tab) * Basis(Vector3.RIGHT, float(sty.pelvisRoll) - clampf(sm_turn * 0.04 * float(sty.turnHips), -0.25, 0.25))
+	var pel_full := pel_b * Basis(Vector3.BACK, -(ang * 0.3) - float(sty.pelvisTilt))
+	hip = pelvis + pel_full.y * Belt.HEM_Y   # the jersey's hem: inside the belt, level with it
 	set_spine(hip, chest, pel_b * Vector3(0, 0, 1), tw * Vector3(0, 0, 1),
-		float(sty.spineCurve) * (1.0 - 0.7 * relax), float(sty.spineSide), float(sty.spineLow))
-	pelvis_mesh.transform = Transform3D(pel_b * Basis(Vector3.BACK, -(ang * 0.3) - float(sty.pelvisTilt)), pelvis)
+		float(sty.spineCurve) * (1.0 - 0.7 * relax), float(sty.spineSide), float(sty.spineLow), pel_full)
+	pelvis_mesh.transform = Transform3D(pel_full, pelvis)
 	set_limb(hood_hem, Vector3(pelvis.x, pelvis.y + 0.04, pelvis.z), hip.lerp(chest, 0.2))
 
 	# neck / head

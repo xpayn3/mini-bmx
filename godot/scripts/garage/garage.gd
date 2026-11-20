@@ -640,6 +640,10 @@ func _process(dt: float) -> void:
 	var head_env := Env.s("BMX_GARAGE_HEAD")
 	if head_env == "bike" and rider and rider_on:   # tests: frame the head + neck of the rider on the bike
 		focus_t = rider.head.global_position + Vector3(0, -0.05, 0)
+	elif head_env == "waist" and stand_rider and stand_rider.is_visible_in_tree():   # tests: the belt / jersey hem (standing rider, else the one on the bike)
+		focus_t = stand_rider.pelvis_mesh.global_position + Vector3(0, 0.05, 0)
+	elif head_env == "waist" and rider and rider_on:
+		focus_t = rider.pelvis_mesh.global_position + Vector3(0, 0.05, 0)
 	elif stand_rider and head_env == "neck":   # tests: the standing rider's neck, collar + goggle strap
 		focus_t = stand_rider.head.global_position + Vector3(0, -0.1, 0)
 	elif stand_rider and head_env != "":   # tests: frame the standing rider's helmet
@@ -1493,6 +1497,10 @@ func _kit_page() -> void:
 			body.add_child(UITheme.text("Knee pads design", SUB, Tokens.T_XS))
 			body.add_child(RiderPanels.pad_style_picker(str(look.padStyle), func(id):
 				look.padStyle = id; _set_look(look); _set_tab("kit")))
+		if g[0] == "Belt":
+			body.add_child(UITheme.text("Style", SUB, Tokens.T_XS))
+			body.add_child(RiderPanels.belt_style_picker(str(look.beltStyle), func(id):
+				look.beltStyle = id; _set_look(look); _set_tab("kit")))
 		for row in g[1]:
 			if textured and g[0] == "Helmet" and row[0] != "hair":
 				continue
