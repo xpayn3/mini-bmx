@@ -78,6 +78,8 @@ var dist_t := 4.4
 var focus := Vector3(0, 0.85, 0)
 var focus_t := Vector3(0, 0.85, 0)
 var hand_t := 0.0   # handheld-camera clock
+const HANDHELD := 0.2          # how much of the original handheld sway is left (1 = the old, too-strong one)
+const HANDHELD_SPEED := 0.6    # and how fast it drifts
 var auto_spin := false   # the camera stays put unless you drag it
 var dragging := false
 var ui := CanvasLayer.new()
@@ -960,14 +962,16 @@ func _process(dt: float) -> void:
 	hand_t += dt
 	_pose_rider(dt)
 	_pose_stand_rider(dt)
-	var t := hand_t
+	# kept very small and slow (HANDHELD, HANDHELD_SPEED): the stronger sway made the player motion sick
+	var t := hand_t * HANDHELD_SPEED
+	var k := HANDHELD
 	cam.position += cam.basis * Vector3(
-		(sin(t * 0.53) + 0.6 * sin(t * 1.31 + 1.7)) * 0.018,
-		(sin(t * 0.71 + 0.4) + 0.5 * sin(t * 1.77 + 2.9)) * 0.012,
-		sin(t * 0.37 + 2.2) * 0.02)
-	cam.rotate_object_local(Vector3.RIGHT, (sin(t * 0.83 + 0.9) + 0.4 * sin(t * 2.1)) * 0.0022)
-	cam.rotate_object_local(Vector3.UP, (sin(t * 0.61 + 3.1) + 0.4 * sin(t * 1.9 + 0.5)) * 0.0028)
-	cam.rotate_object_local(Vector3.FORWARD, sin(t * 0.47 + 1.3) * 0.004)
+		(sin(t * 0.53) + 0.6 * sin(t * 1.31 + 1.7)) * 0.018 * k,
+		(sin(t * 0.71 + 0.4) + 0.5 * sin(t * 1.77 + 2.9)) * 0.012 * k,
+		sin(t * 0.37 + 2.2) * 0.02 * k)
+	cam.rotate_object_local(Vector3.RIGHT, (sin(t * 0.83 + 0.9) + 0.4 * sin(t * 2.1)) * 0.0022 * k)
+	cam.rotate_object_local(Vector3.UP, (sin(t * 0.61 + 3.1) + 0.4 * sin(t * 1.9 + 0.5)) * 0.0028 * k)
+	# (no roll: a tilting horizon is the worst for motion sickness)
 	cam.h_offset = 0.0   # the bike sits in the middle of the frame
 
 func _unhandled_input(e: InputEvent) -> void:
