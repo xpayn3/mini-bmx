@@ -108,8 +108,11 @@ func _interface() -> Control:
 func _controller() -> Control:
 	var p := _page("Controller")
 	_section(p, "XBOX CONTROLLER")
-	_check(p, "Vibration", "rumble", "Rumble on landings and crashes")
+	_check(p, "Vibration", "rumble", "Feel the ground, bumps, sliding tyres, landings and crashes")
 	_slider(p, "Vibration strength", "rumble_strength", 0.0, 1.5, 0.05, "%.2fx")
+	_slider(p, "  Ground + bumps", "rumble_road", 0.0, 2.0, 0.05, "%.2fx", "The buzz of the surface under the tyres, rocks and roots")
+	_slider(p, "  Slipping + skids", "rumble_slip", 0.0, 2.0, 0.05, "%.2fx", "Tyres scrubbing sideways, the rear stepping out, locked-wheel skids, wheelspin")
+	_slider(p, "  Landings + hits", "rumble_hits", 0.0, 2.0, 0.05, "%.2fx", "Take-offs, landings, bottoming out, smashing things, crashes")
 	_hint(p, "Click a button, trigger or stick to change what it does. Buttons light up as you press them.")
 	var m := PadMap.new()
 	m.size_flags_horizontal = Control.SIZE_EXPAND_FILL

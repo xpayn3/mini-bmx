@@ -104,6 +104,9 @@ const DEFAULTS := {
 	"boot_intro": true,      # launch: the CRT TV intro (off = a still frame of it while the game loads)
 	"rumble": true,
 	"rumble_strength": 1.0,  # × every controller vibration
+	"rumble_road": 1.0,      # × ground texture + bumps (game/pad_rumble.gd)
+	"rumble_slip": 1.0,      # × tyre slip / skid / brake chatter
+	"rumble_hits": 1.0,      # × landings, smashes, crashes
 	"wasted": true,          # crash: slow motion + "WASTED" screen
 	"blood": true,           # crash: blood smears on the ground, torn-off limbs on very hard crashes
 	"steer_sens": 1.0,       # analog steering response (1 = linear)
