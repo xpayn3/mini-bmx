@@ -118,6 +118,7 @@ func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
 		susp = Suspension.new(model, extras)
 	if not extras.has("chain"):
 		BikeChain.adopt_stock(model, extras)   # the stock frame: its fixed chain mesh -> a drawn chain
+	BikeAO.apply(model, wheel_f, wheel_r)   # baked AO in the vertex colours (before decals / cam / lights)
 	if extras.has("chain") and cfg.get("chain", null) is Dictionary:   # GameState.BIKES fixes to a glb's chain data
 		(extras.chain as Dictionary).merge(cfg.chain, true)
 	if extras.has("chain"):

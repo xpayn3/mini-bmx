@@ -967,6 +967,7 @@ func _swatch_grid(cur: String, cb: Callable, palette: Array = TUNE_SWATCHES, col
 		g.add_child(b)
 	return g
 
+var _setup_fill := Callable()   # the CHARACTER step's tab filler (refilled when a pick adds / removes rows)
 var char_tab := Env.s("BMX_CHAR_TAB") if Env.s("BMX_CHAR_TAB") != "" else "kit"   # tests: BMX_CHAR_TAB=hair
 
 ## step 3: the CHARACTER: everything about her in one place, in four tabs: KIT (clothes), HAIR (helmet or hair preset
@@ -987,9 +988,10 @@ func _setup_rider(content: HBoxContainer) -> void:
 			body.remove_child(c); c.queue_free()
 		match char_tab:
 			"kit": _char_kit(body)
+			"pants": _char_pants(body)
 			"hair": _char_hair(body)
 			"plate": _char_plate(body)
-	for t in [["kit", "KIT"], ["hair", "HELMET"], ["plate", "PLATE"]]:
+	for t in [["kit", "KIT"], ["pants", "PANTS"], ["hair", "HELMET"], ["plate", "PLATE"]]:
 		var b := UITheme.make_button(t[1], Callable(), "chip", Tokens.T_MD)
 		b.toggle_mode = true; b.button_group = grp
 		b.button_pressed = t[0] == char_tab
@@ -999,6 +1001,7 @@ func _setup_rider(content: HBoxContainer) -> void:
 	col.add_child(tabs)
 	col.add_child(body)
 	col.add_child(UITheme.make_button("MORE IN THE RIDER ROOM", _open_garage.bind("rider"), "link", Tokens.T_MD))
+	_setup_fill = fill
 	fill.call()
 
 func _char_kit(body: VBoxContainer) -> void:
@@ -1049,6 +1052,41 @@ func _char_kit(body: VBoxContainer) -> void:
 			hero_view.set_look(merged)
 			if game and game.rider: game.rider.set_look(merged))
 		grid.add_child(b)
+
+## the PANTS tab: colour, fabric (Poly Haven scans), printed pattern + its colour (rider/pants_look.gd)
+func _char_pants(body: VBoxContainer) -> void:
+	var look := RiderPanels.load_look()
+	var chips := func(items: Array, current: String, key: String) -> GridContainer:
+		var g := GridContainer.new()
+		g.columns = 3
+		g.add_theme_constant_override("h_separation", Tokens.S2)
+		g.add_theme_constant_override("v_separation", Tokens.S2)
+		var grp := ButtonGroup.new()
+		for it in items:
+			var id: String = it[0]
+			var b := UITheme.make_button(String(it[1]).to_upper(), Callable(), "chip", Tokens.T_SM)
+			b.toggle_mode = true; b.button_group = grp
+			b.button_pressed = id == current
+			b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			b.pressed.connect(func(): _look_set({key: id}); _refresh_char())
+			g.add_child(b)
+		return g
+	body.add_child(UITheme.caption("COLOUR"))
+	body.add_child(_swatch_grid(str(look.get("pants", Rider.DEFAULT_LOOK.pants)).trim_prefix("#"), func(h): _look_set({"pants": "#" + h}); _refresh_char(), PANTS_COLOURS, 9, 36))
+	body.add_child(UITheme.caption("FABRIC"))
+	body.add_child(chips.call(PantsLook.FABRICS, str(look.get("pantsFabric", PantsLook.DEFAULT_FABRIC)), "pantsFabric"))
+	body.add_child(UITheme.caption("PATTERN"))
+	body.add_child(chips.call(PantsLook.PATTERNS, str(look.get("pantsPattern", PantsLook.DEFAULT_PATTERN)), "pantsPattern"))
+	if str(look.get("pantsPattern", "none")) != "none":
+		body.add_child(UITheme.caption("PATTERN COLOUR"))
+		body.add_child(_swatch_grid(str(look.get("pantsPrint", PantsLook.DEFAULT_PRINT)).trim_prefix("#"), func(h): _look_set({"pantsPrint": "#" + h}); _refresh_char(), PANTS_COLOURS, 9, 36))
+
+const PANTS_COLOURS := ["111215", "2c2f33", "6b6f75", "d8d8d8", "1d2b64", "0d2847", "1478d4", "3a4c9a", "2e7d32",
+	"4a5d3a", "8a7a52", "6b4a2b", "8c2f1f", "e8231f", "ff7a1a", "ffd21f", "7ed321", "d22fbf"]
+
+## the CHARACTER step's tab again (a pick that adds / removes rows)
+func _refresh_char() -> void:
+	if _setup_fill.is_valid(): _setup_fill.call()
 
 ## change some look keys (helmet / hair / face / plate) and show them at once
 func _look_set(d: Dictionary) -> void:
