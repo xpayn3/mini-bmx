@@ -265,7 +265,8 @@ func _process(dt: float) -> void:
 
 
 # ---------------------------------------------------------------- the braid
-const PLAIT_LOBES := 13      # lobes down the braid (each one a strand crossing over)
+const PLAIT_PERIODS := 4     # full weaves of the three strands down the braid
+const PLAIT_STEPS := 8       # tube rings per weave
 const PLAIT_SIDES := 6       # low poly: six faces round
 const PLAIT_R := [0.032, 0.017]   # half thickness at the tie / the end (m)
 
@@ -330,23 +331,25 @@ func _plait_mesh(ht: Transform3D) -> ArrayMesh:
 	tube.call([ring.call(f0[0] - f0[1] * 0.004, f0[1], f0[2], r0 * 0.75, r0 * 0.75, band, 0.0),
 		ring.call(f0[0] + f0[1] * 0.012, f0[1], f0[2], r0 * 0.75, r0 * 0.75, band, 0.0)])
 	# the lobes: each spans a bit more than its step so they overlap like crossing strands
+	# three strands, each a low-poly tube that swings across the plait and passes over / under the others
+	# (lateral = cos, depth = sin, the strands a third of a turn apart): a real 3-strand braid
 	var end_f := 0.9
-	for L in PLAIT_LOBES:
-		var fa := 0.03 + end_f * float(L) / PLAIT_LOBES
-		var fb := 0.03 + end_f * float(L + 1) / PLAIT_LOBES
-		var fm := (fa + fb) * 0.5
-		var s := 1.0 if L % 2 == 0 else -1.0
-		var FA: Array = frame.call(fa - 0.02); var FB: Array = frame.call(fb + 0.02); var FM: Array = frame.call(fm)
-		var r: float = lerpf(PLAIT_R[0], PLAIT_R[1], fm)
-		var w: Vector3 = FM[2]
-		var off: Vector3 = w * s * r * 0.45                     # this strand crosses from one side...
-		var lean: Vector3 = (FM[1] + w * s * 0.55).normalized()  # ...tilted: the chevron of a plait
-		var shade := base.lightened(0.08) if L % 2 == 0 else base.darkened(0.08)
-		var lw := w - lean * w.dot(lean)
-		lw = lw.normalized()
-		tube.call([ring.call(FA[0] + off * 0.3, lean, lw, r * 0.45, r * 0.35, shade, 0.0),
-			ring.call(FM[0] + off, lean, lw, r * 1.0, r * 0.72, shade, 0.0),
-			ring.call(FB[0] + off * 0.3, lean, lw, r * 0.45, r * 0.35, shade, 0.0)])
+	var samples := PLAIT_PERIODS * PLAIT_STEPS
+	for s in 3:
+		var shade := base.lightened(0.1) if s == 0 else (base if s == 1 else base.darkened(0.12))
+		var rings := []
+		for m in samples + 1:
+			var u := float(m) / samples
+			var f := 0.03 + end_f * u
+			var F: Array = frame.call(f)
+			var w: Vector3 = F[2]
+			var h: Vector3 = (F[1] as Vector3).cross(w).normalized()
+			var r: float = lerpf(PLAIT_R[0], PLAIT_R[1], f)
+			var ph := TAU * PLAIT_PERIODS * u + TAU * s / 3.0
+			var grow := minf(1.0, u * 8.0)   # the strands gather into the tie
+			var c: Vector3 = F[0] + (w * cos(ph) + h * sin(ph) * 0.8) * r * 0.62 * grow
+			rings.append(ring.call(c, F[1], w, r * 0.38, r * 0.38, shade, 0.0))
+		tube.call(rings)
 	# the end: a small band, then a flared tuft to a point
 	var fe: Array = frame.call(end_f + 0.03)
 	var r1: float = PLAIT_R[1]
@@ -415,7 +418,8 @@ func _step(ht: Transform3D, spheres: Array) -> void:
 				var l := d.length()
 				if l > 1e-6: _P[b + j] = a + d * (L / l)
 		for j in range(1, SEG + 1):
-			var lp := hinv * _P[b + j] - HEAD_C                       # head space, centred on the head
+			var f_j := float(j) / SEG
+			var lp := hinv * _P[b + j] - HEAD_C                      # head space, centred on the head
 			var q := Vector3(lp.x / HEAD_R.x, lp.y / HEAD_R.y, lp.z / HEAD_R.z)
 			var ql := q.length()
 			if ql < 1.07 and ql > 1e-4:                                # push out to just above the scalp
@@ -425,7 +429,9 @@ func _step(ht: Transform3D, spheres: Array) -> void:
 			elif _P[b + j].y < ht.origin.y - 0.1:                       # below the head: the body
 				for s in spheres:
 					var dd: Vector3 = _P[b + j] - (s[0] as Vector3)
-					var r: float = float(s[1]) + 0.006
+					# a plait is thick: its drawn tubes reach PLAIT_R from the line, so keep that much clear of the body
+					var thick := lerpf(PLAIT_R[0], PLAIT_R[1], f_j) + 0.004 if _plait else 0.006
+					var r: float = float(s[1]) + thick
 					var l2 := dd.length_squared()
 					if l2 < r * r and l2 > 1e-9:
 						_P[b + j] = (s[0] as Vector3) + dd / sqrt(l2) * r
