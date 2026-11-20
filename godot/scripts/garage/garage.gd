@@ -159,6 +159,8 @@ func _ready() -> void:
 	_probe("page")
 	if Env.s("BMX_TYRE_PROBE") != "":
 		_tyre_probe.call_deferred()
+	if PartThumbs.BAKE != "":
+		_bake_thumbs.call_deferred()
 	var cv := Env.s("BMX_GARAGE_CAM").split(",", false)   # tests: "orbit_rad,pitch_deg,dist"
 	if cv.size() == 3:
 		orbit_t = float(cv[0]); pitch_t = float(cv[1]); dist_t = float(cv[2])
@@ -199,6 +201,37 @@ func _showcase_quality(on: bool) -> void:
 
 func _exit_tree() -> void:
 	_showcase_quality(false)
+
+## The release bake (BMX_BAKE_THUMBS=<dir>, run by tools/bake_thumbs.ps1 on a fresh user folder): every
+## picture a new player can see here, made and written out to ship with the game. Bike garage: every frame
+## with its stock build in the showroom and on every customizer tab; rider room: its tabs. Then quits.
+func _bake_thumbs() -> void:
+	var settle := func() -> void:   # until the picture maker has had nothing to do for a few frames
+		var quiet := 0
+		while quiet < 4:
+			await get_tree().process_frame
+			quiet = quiet + 1 if thumbs.idle() else 0
+	if mode == "bike":
+		for id in GameState.BIKES:
+			if not GameState.BIKES[id].get("garage", false): continue
+			GameState.bike_id = id
+			build = BikeBuild.load_build(id)
+			_show_pick = id
+			_rebuild_bike()
+			_set_edit(false)
+			_fill_showroom()
+			await settle.call()
+			_set_edit(true)
+			for t in _tabs():
+				_set_tab(t[0])
+				await settle.call()
+			print("BAKE frame=%s pictures=%d" % [id, PartThumbs.baked_count()])
+	else:
+		for t in _tabs():
+			_set_tab(t[0])
+			await settle.call()
+	print("BAKE done mode=%s pictures=%d" % [mode, PartThumbs.baked_count()])
+	GameState.quit()
 
 ## tests (BMX_GARAGE_PROBE=1): how long each part of opening the garage takes (`GARAGE <step> ms=`)
 ## and the first frames after it (`GARAGEFRAME`)
@@ -2012,7 +2045,7 @@ func _pic_cards(opts: Array, current: String, tag: String, make: Callable, view,
 
 ## the stock bike with `path` (e.g. "bars.stem") set to id, as a close-up of `spot` (PartThumbs.make_bike_spot)
 func _spot_make(id: String, path: String, spot: String) -> Node3D:
-	var tmp: Dictionary = build.duplicate(true)
+	var tmp: Dictionary = BikeBuild.default_build()   # a product shot: on the stock bike, not the player's (see PRODUCT)
 	var k := path.split(".")
 	if not tmp.has(k[0]): tmp[k[0]] = {}
 	tmp[k[0]][k[1]] = id
@@ -2022,6 +2055,16 @@ func _spot_make(id: String, path: String, spot: String) -> Node3D:
 ## the cache key part for pictures of the whole bike: they change with the build
 func _build_sig() -> String:
 	return str(JSON.stringify(build).hash())
+
+## Product cards (bars, stems, forks, tyres, rims, rotors, calipers, levers, pedals, cassettes, saddles, action
+## cams) show the product as it comes: on / in the stock bike's parts and paint, the camera with its default
+## gear, never the player's build. So they never change, and all of them ship with the game (the bake).
+## Only the Paint tab and the rider's own look are pictured as the player has them.
+const PRODUCT := "product"
+static func _product_paint(part: String) -> Dictionary:
+	return BikeBuild.default_build().paint[part]
+static func _product_gear() -> Dictionary:
+	return ActionCam.gear_of(ActionCam.GEAR_DEFAULT.duplicate())
 
 ## the action cam with its gear row `gk` set to id (the rest as in `gear`)
 static func _cam_make(id: String, gk: String, gear: Dictionary) -> Node3D:
@@ -2038,8 +2081,8 @@ func _bars_page() -> void:
 		var m: Dictionary = Handlebar.MODELS[k]
 		items.append({"key": k, "brand": m.brand, "name": m.label,
 			"spec": "%d mm  ·  %s  ·  %s" % [m.width, ("%d mm rise" % m.rise) if m.rise > 0 else "flat", Handlebar.MATERIAL_SHORT[m.material]],
-			"thumb": "bar|%s|%s|%s" % [k, JSON.stringify(build.paint.crown), JSON.stringify(build.paint.grips)],
-			"make": PartThumbs.make_bars.bind(m, build.paint.crown, build.paint.grips), "view": Vector3(1.0, 0.75, 0.55)})
+			"thumb": "bar|%s|%s" % [k, PRODUCT],
+			"make": PartThumbs.make_bars.bind(m, _product_paint("crown"), _product_paint("grips")), "view": Vector3(1.0, 0.75, 0.55)})
 	_cards(items, cur, func(k):
 		var m: Dictionary = Handlebar.MODELS[k]
 		B.model = k; B.width = m.width; B.rise = m.rise; B.material = m.material)
@@ -2054,7 +2097,7 @@ func _bars_page() -> void:
 		_choice("Material", Handlebar.MATERIALS, B.material, func(v): B.material = v; custom.call())
 	_note("Wide bars steer slower but steadier; narrow bars turn quicker. Alloy bars take the bars / stem colour from Paint.")
 	_h("STEM")
-	_pic_cards(BikeBuild.STEMS, str(B.get("stem", "stock")), "stem|" + _build_sig(), _spot_make.bind("bars.stem", "stem"),
+	_pic_cards(BikeBuild.STEMS, str(B.get("stem", "stock")), "stem|" + PRODUCT, _spot_make.bind("bars.stem", "stem"),
 		Vector3(0.55, 0.85, 0.75), func(v): B.stem = v)
 	_h("SEAT")
 	var SE: Dictionary = build.seat
@@ -2066,15 +2109,14 @@ func _bars_page() -> void:
 	_note("The dropper stands the saddle up along the seat tube (the rider follows). Saddle colour is in Paint > Saddle & pedals.")
 	_h("ACTION CAM")
 	if not build.has("camera"): build.camera = {"mount": "none"}.merged(ActionCam.GEAR_DEFAULT)
-	_pic_cards(ActionCam.BIKE_MOUNTS, str(build.camera.get("mount", "none")), "bikecam|" + _build_sig(),
+	_pic_cards(ActionCam.BIKE_MOUNTS, str(build.camera.get("mount", "none")), "bikecam|" + PRODUCT,
 		_spot_make.bind("camera.mount", "bars"), {"": Vector3(0.75, 0.6, 0.75), "fork": Vector3(0.7, 0.15, 1.0)},
 		func(v): build.camera.mount = v)
-	var gear: Dictionary = ActionCam.gear_of(build.camera)
 	for r in ActionCam.GEAR_ROWS:
 		var gk: String = r[0]
 		_h(String(r[1]).to_upper())
-		_pic_cards(r[2], str(build.camera.get(gk, ActionCam.GEAR_DEFAULT[gk])), "cam|%s|%s" % [gk, ActionCam.gear_sig(gear)],
-			_cam_make.bind(gk, gear), Vector3(1.0, 0.45, 0.75), func(v): build.camera[gk] = v)
+		_pic_cards(r[2], str(build.camera.get(gk, ActionCam.GEAR_DEFAULT[gk])), "cam|%s|%s" % [gk, PRODUCT],
+			_cam_make.bind(gk, _product_gear()), Vector3(1.0, 0.45, 0.75), func(v): build.camera[gk] = v)
 	_note("An action camera on the bike: the Bike cam view (C) looks out of it. The helmet camera is picked in the Rider room's Kit tab.")
 	_h("LIGHTS")
 	if not build.has("lights"): build.lights = {"model": "luma"}
@@ -2091,15 +2133,15 @@ func _bars_page() -> void:
 func _brakes_page() -> void:
 	var S: Dictionary = build.suspension
 	_h("DISC BRAKES")
-	_pic_cards(BikeBuild.ROTORS, str(S.get("rotor", "stock")), "rotor|" + _build_sig(), _spot_make.bind("suspension.rotor", "rotor"),
+	_pic_cards(BikeBuild.ROTORS, str(S.get("rotor", "stock")), "rotor|" + PRODUCT, _spot_make.bind("suspension.rotor", "rotor"),
 		Vector3(0.15, 0.2, -1.0), func(v): S.rotor = v)
 	_h("REAR CALIPER")
-	_pic_cards(BikeBuild.REAR_CALIPERS, str(S.get("rear_caliper", "stock")), "caliper|" + _build_sig(),
+	_pic_cards(BikeBuild.REAR_CALIPERS, str(S.get("rear_caliper", "stock")), "caliper|" + PRODUCT,
 		_spot_make.bind("suspension.rear_caliper", "caliper"), Vector3(-0.15, 0.3, -1.0), func(v): S.rear_caliper = v)
 	_note("Rotors fit every frame. The front caliper comes with the fork (Shocks tab); the Tusk and Fizz rear calipers fit the RUNOUT's rear triangle, the new frames keep their own.")
 	_h("LEVERS")
 	var B: Dictionary = build.bars
-	_pic_cards(BikeBuild.LEVERS, str(B.get("levers", "stock")), "levers|" + _build_sig(), _spot_make.bind("bars.levers", "levers"),
+	_pic_cards(BikeBuild.LEVERS, str(B.get("levers", "stock")), "levers|" + PRODUCT, _spot_make.bind("bars.levers", "levers"),
 		Vector3(0.65, 0.85, -0.55), func(v): B.levers = v)
 
 func _susp_page() -> void:
@@ -2111,8 +2153,8 @@ func _susp_page() -> void:
 		var m: Dictionary = BikeBuild.FORK_MODELS[k]
 		items.append({"key": k, "brand": m.brand, "name": m.label,
 			"spec": "%d mm  ·  %s  ·  %s stanchions" % [m.travel, m.spring, m.coat],
-			"thumb": "fork|%s|%s" % [k, JSON.stringify(build.paint.crown)],
-			"make": PartThumbs.make_fork.bind(m.lowers, m.stanchions, build.paint.crown, str(m.get("glb", ""))), "view": Vector3(0.35, 0.22, 1.0)})
+			"thumb": "fork|%s|%s" % [k, PRODUCT],
+			"make": PartThumbs.make_fork.bind(m.lowers, m.stanchions, _product_paint("crown"), str(m.get("glb", ""))), "view": Vector3(0.35, 0.22, 1.0)})
 	_cards(items, S.get("fork_model", "custom"), func(k): BikeBuild.apply_fork_model(build, k))
 	_slide("Travel", 160, 220, 10, S.fork_travel, "mm", func(v): S.fork_travel = int(v); S.fork_model = "custom")
 	_choice("Spring", rate, S.fork_spring, func(v): S.fork_spring = v)
@@ -2136,7 +2178,7 @@ func _wheel_cards(models: Dictionary, current: String, apply: Callable, spec_lin
 	for k in models:
 		var m: Dictionary = models[k]
 		if not m.has("brand"): continue
-		var tmp: Dictionary = build.duplicate(true)
+		var tmp: Dictionary = BikeBuild.default_build()   # the product on the stock wheel (PRODUCT)
 		apply.call(tmp, k)
 		var spec := BikeBuild.wheel_spec(tmp, false)
 		items.append({"key": k, "brand": m.brand, "name": _model_name(m.label, m.brand),
@@ -2302,13 +2344,12 @@ func _kit_page() -> void:
 	_pic_cards(ActionCam.HELMET_MOUNTS, str(look.get("camMount", "top")), "head|cam|%s|%s" % [look.helmet, ActionCam.gear_sig(ActionCam.gear_from_look(look))],
 		_head_make.bind(look, "camMount", 0.0, {"hairStyle": "short"}), Vector3(0.75, 0.45, -1.0), func(id):
 		look.camMount = id; _set_look(look), false)
-	var hgear := ActionCam.gear_from_look(look)
 	for r in ActionCam.GEAR_ROWS:
 		var gk: String = r[0]
 		var lk: String = ActionCam.GEAR_LOOK[gk]
 		body.add_child(UITheme.text(r[1], SUB, Tokens.T_XS))
-		_pic_cards(r[2], str(look.get(lk, ActionCam.GEAR_DEFAULT[gk])), "cam|%s|%s" % [gk, ActionCam.gear_sig(hgear)],
-			_cam_make.bind(gk, hgear), Vector3(1.0, 0.45, 0.75), func(v): look[lk] = v; _set_look(look), false)
+		_pic_cards(r[2], str(look.get(lk, ActionCam.GEAR_DEFAULT[gk])), "cam|%s|%s" % [gk, PRODUCT],   # the product (same pictures as the bike cam's)
+			_cam_make.bind(gk, _product_gear()), Vector3(1.0, 0.45, 0.75), func(v): look[lk] = v; _set_look(look), false)
 	_note("Lens mods change the Helmet view: the Max Lens Mod is wider. The Light Mod lights the trail at night.")
 	body.add_child(UITheme.make_button("Reset kit", func(): _set_look(Rider.DEFAULT_LOOK.duplicate()); _set_tab("kit"), "chip", Tokens.T_MD))
 

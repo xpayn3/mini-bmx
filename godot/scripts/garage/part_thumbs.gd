@@ -68,11 +68,36 @@ func request(key: String, make: Callable, view: Vector3, cb: Callable) -> void:
 	if _waiting.has(key):
 		_waiting[key].append(cb); return
 	_waiting[key] = [cb]
-	if FileAccess.file_exists(_disk_path(key)):   # pictured in an earlier session: decoded a few per frame (_process)
-		_disk_queue.append([key, make, view])
+	if BAKE == "" and (FileAccess.file_exists(_ship_path(key)) or FileAccess.file_exists(_disk_path(key))):
+		_disk_queue.append([key, make, view])   # shipped with the game / pictured in an earlier session: decoded a few per frame
 		return
 	_queue.append([key, make, view])
 	if not _busy: _run()
+
+## nothing waiting to be made or decoded (the bake waits for this)
+func idle() -> bool:
+	return not _busy and _queue.is_empty() and _disk_queue.is_empty()
+
+## Pictures that ship with the game: every picture a fresh install shows (stock builds, factory paint, the
+## default rider) is made at release time by the bake (tools/bake_thumbs.ps1: BMX_BAKE_THUMBS=<dir> renders
+## everything fresh and writes <md5>.thumb = PNG bytes there; .thumb so Godot doesn't import them, the
+## export preset includes assets/thumbs/*.thumb). Only pictures of the player's own changes are made on
+## their machine, then cached in user://cache/thumbs for the next time.
+const SHIP_DIR := "res://assets/thumbs"
+static var BAKE := Env.s("BMX_BAKE_THUMBS")
+static var _baked := 0
+static func _ship_path(key: String) -> String:
+	return _disk_path(key).replace(DISK_DIR, SHIP_DIR).replace(".png", ".thumb")
+
+static func _load_pic(key: String) -> Image:
+	for p in [_ship_path(key), _disk_path(key)]:
+		if not FileAccess.file_exists(p): continue
+		var img := Image.new()
+		if img.load_png_from_buffer(FileAccess.get_file_as_bytes(p)) == OK and not img.is_empty(): return img
+	return null
+
+static func baked_count() -> int:
+	return _baked
 
 ## saved pictures waiting to be decoded: a page full of cards decoded at once was a ~70 ms hitch
 var _disk_queue: Array = []
@@ -82,8 +107,8 @@ func _process(_dt: float) -> void:
 	var t0 := Time.get_ticks_usec()
 	while not _disk_queue.is_empty() and Time.get_ticks_usec() - t0 < DISK_BUDGET_US:
 		var job: Array = _disk_queue.pop_front()
-		var img := Image.load_from_file(_disk_path(job[0]))
-		if img == null or img.is_empty():   # unreadable: make it again
+		var img := _load_pic(job[0])
+		if img == null:   # unreadable: make it again
 			_queue.append(job)
 			if not _busy: _run()
 			continue
@@ -112,7 +137,13 @@ func _run() -> void:
 		var img := get_texture().get_image()
 		var tex := ImageTexture.create_from_image(img)
 		_cache[job[0]] = tex
-		if _disk_path(job[0]) != "":
+		if BAKE != "":   # the release bake: into the game's own folder
+			DirAccess.make_dir_recursive_absolute(BAKE)
+			var f := FileAccess.open(_ship_path(job[0]).replace(SHIP_DIR, BAKE), FileAccess.WRITE)
+			if f:
+				f.store_buffer(img.save_png_to_buffer()); f.close()
+				_baked += 1
+		else:
 			DirAccess.make_dir_recursive_absolute(DISK_DIR)
 			img.save_png(_disk_path(job[0]))
 		_stage.remove_child(node); node.queue_free()
@@ -259,24 +290,25 @@ static var _bar_stock: ArrayMesh = null
 
 ## Whole-bike pictures (ride setup cards) are kept on disk: building a bike takes ~0.2-0.4 s, and the setup
 ## page wants one per frame. The key holds a hash of everything the bike is built from (frame, garage
-## build), so a changed build gets a new picture; THUMB_VER: bump when how bikes look changes (models,
-## materials, decals, this studio).
+## build), so a changed build gets a new picture; THUMB_VER: bump when how anything pictured looks changes
+## (models, materials, decals, this studio), then re-run the bake (tools/bake_thumbs.ps1) so the shipped
+## pictures match. The game version is not in the keys: the shipped set stays valid until THUMB_VER moves.
 const DISK_DIR := "user://cache/thumbs"
-const THUMB_VER := 2
+const THUMB_VER := 3
 static func bike_key(id: String) -> String:
-	var sig := var_to_str([THUMB_VER, ProjectSettings.get_setting("application/config/version", ""), SIZE, GameState.bike_config_for(id)])
+	var sig := var_to_str([THUMB_VER, SIZE, GameState.bike_config_for(id)])
 	return "bike|%s|%s" % [id, sig.md5_text()]
 
 ## Every picture is saved to disk and made once, ever: each one builds a whole bike / part / rider and
 ## costs ~30-120 ms, and making them while you click through the garage tabs was the stutter. Their keys
-## hold everything that changes how they look (the memory cache relied on that already); the studio
-## version + game version are added here, so a studio or game change makes new ones. Kept to DISK_MAX
-## files (the oldest go, once a session).
+## hold everything that changes how they look (the memory cache relied on that already); THUMB_VER is
+## added here, so a studio / look change makes new ones. Kept to DISK_MAX files (the oldest go, once a
+## session). Looked up after the pictures shipped with the game (SHIP_DIR).
 const DISK_MAX := 3000
 static var _pruned := false
 static func _disk_path(key: String) -> String:
 	if not key.begins_with("bike|"):
-		key = "v%d|%s|%s" % [THUMB_VER, ProjectSettings.get_setting("application/config/version", ""), key]
+		key = "v%d|%s" % [THUMB_VER, key]
 	return "%s/%s.png" % [DISK_DIR, key.md5_text()]
 
 static func _prune_disk() -> void:
@@ -301,7 +333,7 @@ static func make_bike(id: String) -> Node3D:
 
 ## the picture key (disk cached, see bike_key) of a frame with a given build on it
 static func build_key(id: String, build: Dictionary) -> String:
-	var sig := var_to_str([THUMB_VER, ProjectSettings.get_setting("application/config/version", ""), SIZE, id, build])
+	var sig := var_to_str([THUMB_VER, SIZE, id, build])
 	return "bike|%s|b%s" % [id, sig.md5_text()]
 
 ## a frame (GameState.BIKES id) with a given build on it (garage showroom: your build, the editions)

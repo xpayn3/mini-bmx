@@ -346,6 +346,35 @@ func _show_menu() -> void:
 	_menu_page_main()
 	if Env.s("BMX_MENU_PAGE") == "setup": _menu_page_setup(int(Env.s("BMX_SETUP_STEP")))   # tests: the ride setup page (BMX_SETUP_STEP=0..3)
 	if Env.s("BMX_MENU_PAGE") == "credits": _show_credits()   # tests: the credits window
+	if PartThumbs.BAKE != "" and not _baking:
+		_baking = true
+		_bake_menu_thumbs.call_deferred()
+
+## The release bake's menu pass (tools/bake_thumbs.ps1): every ride setup step for every bike, with each
+## of their tabs (bike colours / wheels, character kit / helmet / plate), so every picture a fresh install
+## shows there ships with the game. Then quits. (The garage and rider room have their own pass.)
+var _baking := false
+func _bake_menu_thumbs() -> void:
+	var settle := func() -> void:
+		var quiet := 0
+		while quiet < 4:
+			await get_tree().process_frame
+			quiet = quiet + 1 if (not is_instance_valid(bike_thumbs) or bike_thumbs.idle()) else 0
+	await get_tree().create_timer(2.0).timeout
+	for id in GameState.BIKES:
+		GameState.bike_id = id
+		for step in SETUP_STEPS.size():
+			var tabs := [""]
+			if step == 1: tabs = ["colour", "wheels"]
+			if step == 2: tabs = ["kit", "hair", "plate"]
+			for tb in tabs:
+				if step == 1: tune_cat = tb
+				if step == 2: char_tab = tb
+				_menu_page_setup(step)
+				await settle.call()
+		print("BAKE menu bike=%s pictures=%d" % [id, PartThumbs.baked_count()])
+	print("BAKE done mode=menu pictures=%d" % PartThumbs.baked_count())
+	GameState.quit()
 
 var menu_quit: Button
 var menu_settings: Button

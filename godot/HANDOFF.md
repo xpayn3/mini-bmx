@@ -882,9 +882,14 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   glyphs to `_glyph` for new text), blue wall light, an occasional flicker.
   **Showcase quality** (`Garage._showcase_quality`): the garage renders at top quality whatever the preset (4x MSAA + TAA,
   full res, 16x aniso, full LOD, 8K soft-ultra shadows, ultra SSAO / SSIL, 128 GI rays); leaving restores Settings.
-  **Garage speed**: the customizer page is built on EDIT, not in the showroom; every part picture is saved to disk once
-  (`PartThumbs._disk_path`, `DISK_MAX` 3000, keys carry THUMB_VER + game version) and saved ones decode ~4 ms a frame
-  (`_disk_queue`). `BMX_GARAGE_PROBE=1` also prints `GARAGESLOW` frames > 40 ms with the tab. `RollerDoor.extrude` = a reusable profile-along-x mesh builder. Test:
+  **Garage speed**: the customizer page is built on EDIT, not in the showroom; saved pictures decode ~4 ms a frame (`_disk_queue`).
+  **Card pictures ship with the game**: every picture a fresh install shows (ride setup, garage, rider room: stock builds,
+  factory paint, default rider) is baked by `godot/tools/bake_thumbs.ps1` (runs the game 3x with `BMX_BAKE_THUMBS=<dir>` on an
+  empty temp APPDATA; menu pass `main._bake_menu_thumbs`, garage / rider room `Garage._bake_thumbs`) into `assets/thumbs/<md5>.thumb`
+  (PNG bytes; `.thumb` so Godot doesn't import them; the export preset includes `assets/thumbs/*.thumb`). Lookup: memory ->
+  shipped -> `user://cache/thumbs` -> render (then cached there, `DISK_MAX` 3000). Keys carry `THUMB_VER`, not the game version:
+  **bump `PartThumbs.THUMB_VER` and re-run the bake whenever anything pictured looks different.** `steam/upload.ps1` bakes before
+  every export. `BMX_GARAGE_PROBE=1` also prints `GARAGESLOW` frames > 40 ms with the tab. `RollerDoor.extrude` = a reusable profile-along-x mesh builder. Test:
   `BMX_GARAGE_DOOR=0.45` holds the door that far open (+ `BMX_GARAGE_CAM=0,4,5.5 BMX_GARAGE_AIM=0,1.9,-4`).
 - Bike height is placed from the **real tyre size and real axle positions** (no tyre clipping into the floor
   or the roller drums; verified with `BMX_TYRE_PROBE`).
