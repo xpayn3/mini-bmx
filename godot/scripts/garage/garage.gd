@@ -55,7 +55,7 @@ const STAND_AT := Vector3(0.55, 0.0, 1.05)   # in front of the bike (camera side
 var preview_crank := 0.6
 const WALL_IN := -4.075   # z of the back wall's inside face (the wall is 0.25 thick, centred on z = -4.2)
 const DOOR_DELAY := 1.0     # s (after the garage is on screen) before the door starts to roll up
-const DOOR_TIME := 3.2      # s to roll it all the way up
+const DOOR_TIME := 8.0      # s to roll it all the way up (the motor recording runs ~12 s)
 static var _door_opened_once := false   # the door rolls up on the first visit; it stays open after
 var door_slats: Node3D
 var _mote_mat: ShaderMaterial = null   # sun-shaft dust motes (lit up to the door's open height)
