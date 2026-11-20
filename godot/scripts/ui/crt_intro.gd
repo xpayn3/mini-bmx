@@ -15,7 +15,8 @@ const T_GLITCH := 7.0    # the first big tear (the figure in the doorway is gone
 const T_LOSS := 10.6     # the signal drops out: snow over everything
 const T_GLITCH2 := 13.2  # second tear: for a moment the figure stands inside the room
 const T_OFF := 16.5      # TV switches off
-const T_END := 17.0      # all black -> finished (no long dark grain at the end: straight into the game)
+const T_FADE := 1.3      # the picture and its hiss fade out together before the TV goes off
+const T_END := 16.8      # all black -> finished (no long dark grain at the end: straight into the game)
 # dolly zoom: distance from the glass and the frame height kept there (start wide / far, end close / wide lens)
 const D0 := 5.2
 const D1 := 0.62
@@ -149,7 +150,7 @@ func _update(_dt: float) -> void:
 		tv.glitch(0.4, 1.2)
 	if t >= T_OFF and not _offed:
 		_offed = true
-		tv.power_off()
+		tv.power_off(true)   # (already faded to black and silent: no burst)
 	# the figure in the doorway is only there until the tear
 	figure.visible = t < T_GLITCH + 0.36
 	figure2.visible = t > T_GLITCH2 + 0.05 and t < T_GLITCH2 + 0.38
@@ -172,8 +173,10 @@ func _update(_dt: float) -> void:
 	# fade: in from black at the start is the TV itself; out on skip / at the end
 	var k := 0.0
 	if _skip >= 0.0: k = clampf(_skip / 0.3, 0.0, 1.0)
-	k = maxf(k, smoothstep(T_OFF, T_END - 0.05, t))
+	k = maxf(k, smoothstep(T_OFF - T_FADE, T_OFF, t))
+	tv.sound_db = -60.0 * k   # the hiss goes down with the picture
 	(overlay.material as ShaderMaterial).set_shader_parameter("black", k)
+	(overlay.material as ShaderMaterial).set_shader_parameter("grain", 1.0 - k)   # the film noise goes with the fade
 
 static func _smoother(x: float) -> float:
 	return x * x * x * (x * (x * 6.0 - 15.0) + 10.0)
@@ -391,6 +394,7 @@ void fragment() {
 const OVERLAY := """
 shader_type canvas_item;
 uniform float black = 0.0;
+uniform float grain = 1.0;
 uniform float bars = 0.085;
 void fragment() {
 	vec2 uv = UV;
@@ -399,8 +403,8 @@ void fragment() {
 	float a = vig * 0.72 * (1.0 - black);
 	vec3 col = vec3(0.0);
 	// grain: dark and light specks at low opacity
-	col = mix(col, vec3(g), 0.06 / max(a + 0.06, 0.001));
-	a = max(a, 0.06 * (1.0 - black));
+	col = mix(col, vec3(g), grain * 0.06 / max(a + 0.06, 0.001));
+	a = max(a, 0.06 * grain * (1.0 - black));
 	if (uv.y < bars || uv.y > 1.0 - bars) { col = vec3(0.0); a = 1.0; }
 	col = mix(col, vec3(0.0), black); a = mix(a, 1.0, black);
 	COLOR = vec4(col, a);

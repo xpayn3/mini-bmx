@@ -110,10 +110,10 @@ func power_on(delay := 0.0) -> void:
 	_powered_sound = false
 
 ## off: the picture cuts out at once (a burst of static with it), the LED goes back to standby red
-func power_off() -> void:
+func power_off(quiet := false) -> void:
 	if _on_t >= 0.0:
 		_off_t = 0.0
-		_burst(0.22, 0.8)
+		if not quiet: _burst(0.22, 0.8)
 
 ## a hard tear + snow burst for `secs`
 func glitch(secs := 0.3, amount := 1.0) -> void:
