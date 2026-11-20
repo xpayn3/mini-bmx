@@ -433,7 +433,7 @@ static func _shell_top(tris: PackedVector3Array, x: float) -> float:
 func set_helmet(model: Node3D, own_goggles: Node3D = null) -> void:
 	var F: Dictionary = HELMET_FIT.duplicate()
 	F.merge(HELMET_FITS.get(helmet_id.get_slice("/", 0), {}), true)
-	var ev := OS.get_environment("BMX_HELMET_FIT").split(",", false)   # tests: "x,y,scale,tilt" for the model on
+	var ev := Env.s("BMX_HELMET_FIT").split(",", false)   # tests: "x,y,scale,tilt" for the model on
 	if ev.size() == 4 and helmet_id != "glory/game":
 		F = {x = float(ev[0]), y = float(ev[1]), scale = float(ev[2]), tilt = float(ev[3])}
 	var builtin := own_goggles != null   # the model's own goggles are worn: ours are not built
@@ -522,7 +522,7 @@ func set_helmet(model: Node3D, own_goggles: Node3D = null) -> void:
 			cam_spots.chin = Vector3(fx - 0.004, low + 0.045, 0)
 	if not cam_spots.has("chin"):
 		cam_spots.chin = Vector3(0.24, top - 0.27, 0)
-	if OS.get_environment("BMX_CAMMOUNT_PROBE") != "":
+	if Env.s("BMX_CAMMOUNT_PROBE") != "":
 		var ylo := 1e9; var yhi := -1e9; var xhi := -1e9
 		for p in shell_tris: ylo = minf(ylo, p.y); yhi = maxf(yhi, p.y); xhi = maxf(xhi, p.x)
 		print("CAMMOUNT helmet %s spots=%s low=%.3f shell y %.3f..%.3f xmax %.3f" % [helmet_id, cam_spots, low, ylo, yhi, xhi])
@@ -583,8 +583,10 @@ func use_helmet(id: String) -> void:
 		return
 	var hs: Node3D = load(HELMETS[id][1]).instantiate()
 	var helmet := hs.find_child("helmet", true, false)
-	if helmet == null:
+	if helmet == null:   # a broken model: keep the current helmet, and don't retry the load on every set_look
 		hs.free()
+		push_warning("helmet model %s has no 'helmet' node" % HELMETS[id][1])
+		helmet_id = key
 		return
 	var gog: Node3D = hs.find_child("helmet_goggles", true, false) if own else null
 	helmet.get_parent().remove_child(helmet)
@@ -603,7 +605,7 @@ func set_look(l: Dictionary) -> void:
 	var want_key := want + ("/own" if want != "glory" else "/game")
 	if hel != null and want_key != helmet_id and HELMETS.has(want):   # another helmet / goggle source: mount it (set_helmet re-applies the look)
 		use_helmet(want)
-		return
+		if helmet_id == want_key and helmet_model and is_instance_valid(helmet_model): return   # set_helmet re-applied the look
 	if not cam_spots.is_empty() and str(L.get("camMount", DEFAULT_LOOK.camMount)) != cam_mount:
 		_mount_action_cam()
 	var c := func(m, k: String) -> void:
@@ -747,23 +749,15 @@ static func set_limb(n: Node3D, a: Vector3, b: Vector3) -> void:
 
 
 ## torso: like set_limb, but keeps its width across the body (`right`) so the section doesn't twist
-static func set_torso(n: Node3D, a: Vector3, b: Vector3, right: Vector3) -> void:
-	var d := b - a
-	var l := maxf(d.length(), 1e-4)
-	d /= l
-	var r := (right - d * right.dot(d)).normalized()
-	var f := d.cross(r)
-	n.transform = Transform3D(Basis(f, d * l, r), a + (b - a) * 0.5)
-
-
 # ---------------- the spine: the torso mesh is skinned to SPINE_BONES bones along its length so it can bend
 
 const SPINE_BONES := 5
+static var _KNEE_PROBE := Env.s("BMX_KNEE_PROBE") != ""
 var knee_dbg: Array = []   # tests: frames where a knee bends against its pole
 var torso_ratio := 1.0   # tests: torso length / its rest length before the limit
 ## tests (BMX_LIMB_PROBE): per joint, how fast its bend direction turns (deg/s) and how far it moves
 ## relative to its limb root per frame; frames over the limits are counted
-var limb_probe := OS.get_environment("BMX_LIMB_PROBE") != ""
+var limb_probe := Env.s("BMX_LIMB_PROBE") != ""
 var limb_stats := {}
 var _limb_prev := {}
 var _probe_pitch := 0.0
@@ -1505,7 +1499,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		_bd_prev[i] = ik[2]
 		var ik_raw: Vector3 = ik[0]
 		ik[0] = _knee_clear(hp, ankle, ik[0], side)
-		if knee_dbg.size() < 40 and OS.get_environment("BMX_KNEE_PROBE") != "" and knee[i].position.distance_to(ik[0]) > 0.08:
+		if knee_dbg.size() < 40 and _KNEE_PROBE and knee[i].position.distance_to(ik[0]) > 0.08:
 			knee_dbg.append([i, snappedf(_num(p, "pitch"), 0.01), knee[i].position.snapped(Vector3.ONE * 0.01), hp.snapped(Vector3.ONE * 0.01), ankle.snapped(Vector3.ONE * 0.01), ik_raw.snapped(Vector3.ONE * 0.01), (ik[0] as Vector3).snapped(Vector3.ONE * 0.01)])
 		set_limb(thigh[i], hp, ik[0])
 		set_limb(shin[i], ik[0], ik[1])

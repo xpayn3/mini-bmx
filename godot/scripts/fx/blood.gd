@@ -45,6 +45,7 @@ const POOL_MAX := 8
 var _fatal := false
 var _rest_t := 0.0
 const POOL := preload("res://scripts/fx/blood_pool.gd")
+static var HAS_CS := ClassDB.class_exists("CSharpScript")   # the plain Godot build has no C#: no splats / pools there
 var _pools: Array = []          # blood_pool.gd nodes still spreading (this crash)
 var _all_pools: Array = []      # every pool on the ground (freed after a respawn wipe)
 var _warm_mat: ShaderMaterial   # keeps the warmed-up pool shaders alive
@@ -104,7 +105,7 @@ func _init(p_terrain, p_fx) -> void:
 	name = "Blood"
 	terrain = p_terrain
 	fx = p_fx
-	probe = OS.get_environment("BMX_BLOOD_PROBE") != ""
+	probe = Env.s("BMX_BLOOD_PROBE") != ""
 	var q := PlaneMesh.new()
 	q.size = Vector2.ONE
 	mat = ShaderMaterial.new()
@@ -132,7 +133,8 @@ func _init(p_terrain, p_fx) -> void:
 	smat.roughness = 0.2
 	_stump_mesh.material = smat
 	# warm the C# blood code up now (its first call compiles: a ~0.1 s hitch mid-crash otherwise)
-	if ResourceLoader.exists("res://scripts/fx/BloodPoolSim.cs"):
+	if HAS_CS:   # the .cs file also exists in the plain (no-C#) Godot, so test for C# itself
+		_make_splats()   # the splat textures too (built by C#, ~0.1 s): not mid-crash
 		var warm = load("res://scripts/fx/BloodPoolSim.cs").new()
 		warm.Setup(8, 0.04, PackedFloat32Array([0.0, 0.0, 0.0, 0.0]), 2, 1.0)
 		warm.Step(1e-6, 4, 4, 2)
@@ -271,7 +273,7 @@ func splat(at: Vector3, size: float, strength: float, vel := Vector3.ZERO, drops
 			fx.chunk(p + Vector3(0, 0.08, 0), dv, Color(0.2, 0.01, 0.01), 0.012, 0.9)
 
 ## a splat as a Decal: projected down onto the ground (layer GROUND_LAYER only, so never the rider / bike)
-func _decal(at: Vector3, n: Vector3, along: Vector3, width: float, length: float, strength: float) -> void:
+func _make_splats() -> void:
 	if _splat_tex.is_empty():
 		var gen = load("res://scripts/fx/BloodSplatTex.cs").new()
 		for i in SPLAT_KINDS:
@@ -279,6 +281,10 @@ func _decal(at: Vector3, n: Vector3, along: Vector3, width: float, length: float
 		var orm := Image.create_empty(4, 4, false, Image.FORMAT_RGB8)
 		orm.fill(Color(1.0, 0.16, 0.0))   # AO, roughness (wet: glossy), metal
 		_splat_orm = ImageTexture.create_from_image(orm)
+
+func _decal(at: Vector3, n: Vector3, along: Vector3, width: float, length: float, strength: float) -> void:
+	if not HAS_CS: return   # the splat textures and the pool sim are C#
+	_make_splats()
 	var d := Decal.new()
 	d.texture_albedo = _splat_tex[randi() % SPLAT_KINDS]
 	d.texture_orm = _splat_orm
@@ -312,14 +318,14 @@ func crash_start(speed: float) -> void:
 	laid = 0
 	smears = 0
 	if not enabled: return
-	_sever_ready = speed > SEVER_SPEED or OS.get_environment("BMX_SEVER") != ""
-	_fatal = speed > FATAL_SPEED or OS.get_environment("BMX_FATAL") != ""
+	_sever_ready = speed > SEVER_SPEED or Env.s("BMX_SEVER") != ""
+	_fatal = speed > FATAL_SPEED or Env.s("BMX_FATAL") != ""
 	_rest_t = 0.0
 	_pools.clear()
 	_pools_started = false
 	_severed = 0
 	_broken = 0
-	_break_ready = speed > BREAK_SPEED or OS.get_environment("BMX_BREAK") != ""
+	_break_ready = speed > BREAK_SPEED or Env.s("BMX_BREAK") != ""
 	var base := clampf((speed - 4.0) / 12.0, 0.0, 1.0)
 	_bleed.resize(BLEED_K.size())
 	for i in BLEED_K.size():
@@ -349,7 +355,7 @@ func crash_step(pts: Array, prv: Array, h: float, rad: Array) -> void:
 	if not _fractures.is_empty(): _place_fractures(pts)
 	if _spin_probe: _probe_spin(pts)
 	if _fatal and _pools_started == false: _check_rest(pts, prv, h)
-	if ragdoll != null and OS.get_environment("BMX_RAGDOLL_PROBE") != "" and Engine.get_process_frames() % 15 == 0:
+	if ragdoll != null and Env.s("BMX_RAGDOLL_PROBE") != "" and Engine.get_process_frames() % 15 == 0:
 		var pel: Vector3 = pts[2]
 		print("RAGDOLL neutral_off=%.2f pelvis_up=%.2f rise=%.2f vup=%.1f t=%.2f" % [ragdoll.nb_off / maxf(1.0, 9.0 * 3.0 * 15.0), pel.y - terrain.height(pel.x, pel.z), ragdoll.probe_rise, ragdoll.probe_vup, ragdoll.t_fall])
 		ragdoll.nb_off = 0.0
@@ -421,6 +427,7 @@ func _check_rest(pts: Array, prv: Array, h: float) -> void:
 	if probe: print("BLOOD pool start at=%s pools=%d" % [c, _pools.size()])
 
 func _add_pool(at: Vector3, r: float) -> void:
+	if not HAS_CS: return
 	if terrain.surface(at.x, at.z) == 2: return   # in water: it washes away
 	var pl = POOL.new(terrain, at, r, POOL_T)
 	add_child(pl)
@@ -430,7 +437,7 @@ func _add_pool(at: Vector3, r: float) -> void:
 		(_all_pools.pop_front() as Node).queue_free()
 
 ## tests (BMX_SPIN_PROBE): how fast / how far the torso turns while crashed (per game second)
-var _spin_probe := OS.get_environment("BMX_SPIN_PROBE") != ""
+var _spin_probe := Env.s("BMX_SPIN_PROBE") != ""
 var _sp_last = null
 var spin_total := 0.0
 var spin_max := 0.0
@@ -504,7 +511,7 @@ func _place_fractures(pts: Array) -> void:
 		# the skin on the outside of the bend, angled (not a spike straight out): mostly inside the limb
 		var dir := (-a * 0.75 + d * 0.65).normalized()
 		var r: float = ragdoll.rad[j] if j < ragdoll.rad.size() else 0.045
-		var bs := 3.0 if OS.get_environment("BMX_BONE_BIG") != "" else 1.0   # tests: see where it is
+		var bs := 3.0 if Env.s("BMX_BONE_BIG") != "" else 1.0   # tests: see where it is
 		var bb := Basis(Quaternion(Vector3.UP, dir)).rotated(dir, float(fr.get("spin", 0.0)))
 		(fr.bone as MeshInstance3D).global_transform = Transform3D(bb.scaled(Vector3.ONE * bs), pj + dir * 0.015 * bs + d * r * 0.25)
 		# the torn wound where it comes through, flat on the skin
@@ -698,7 +705,7 @@ func crash_end() -> void:
 	if _spin_probe: print("SPINEND turns=%.2f wmax=%.1f" % [spin_total / TAU, spin_max])
 	_sp_last = null; spin_total = 0.0; spin_max = 0.0; _sp_t = 0.0
 	if probe: print("BLOOD end laid=%d smears=%d severed=%d jet_drops=%d" % [laid, smears, _severed, jet_drops])
-	if ragdoll != null and OS.get_environment("BMX_RAGDOLL_PROBE") != "": print("EJECT rise=%.2f vup=%.1f" % [ragdoll.probe_rise, ragdoll.probe_vup])
+	if ragdoll != null and Env.s("BMX_RAGDOLL_PROBE") != "": print("EJECT rise=%.2f vup=%.1f" % [ragdoll.probe_rise, ragdoll.probe_vup])
 
 ## respawn: everything laid so far fades away over WIPE seconds (the shader: born before wipe_t)
 func clear() -> void:

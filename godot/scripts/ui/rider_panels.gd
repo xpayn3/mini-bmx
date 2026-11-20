@@ -96,7 +96,7 @@ const POSE_DEFS := [
 ]
 
 ## look keys that belong to the person, not to a kit: picking a kit leaves them alone
-const NON_KIT := ["camMount", "helmetOn", "hairStyle", "hair", "skin", "eyes", "beard", "bibOn", "bibNumber", "bibText"]
+const NON_KIT := ["camMount", "helmet", "helmetOn", "hairStyle", "hair", "skin", "eyes", "beard", "bibOn", "bibNumber", "bibText"]
 
 const KITS := [
 	["Classic", {}],   # = Rider.DEFAULT_LOOK
@@ -191,7 +191,6 @@ static func helmet_picker(current: String, on_pick: Callable, size := 13) -> Gri
 		var b := UITheme.button(Rider.HELMETS[hid][0], func(): on_pick.call(hid), size)
 		b.toggle_mode = true
 		b.button_pressed = hid == current
-		b.focus_mode = Control.FOCUS_NONE
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		grid.add_child(b)
 	return grid
@@ -207,7 +206,6 @@ static func hair_style_picker(current: String, on_pick: Callable, size := 13) ->
 		var b := UITheme.button(st[1], func(): on_pick.call(sid), size)
 		b.toggle_mode = true
 		b.button_pressed = sid == current
-		b.focus_mode = Control.FOCUS_NONE
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		grid.add_child(b)
 	return grid

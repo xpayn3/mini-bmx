@@ -143,7 +143,7 @@ func close() -> void:
 	_drag = 0
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	game.rider.visible = true
-	game.rig.visible = true
+	game.rig.fit_g.visible = true
 	var gm := game.grade_rect.material as ShaderMaterial
 	gm.set_shader_parameter("photo", 0.0)
 	RenderingServer.camera_attributes_set_dof_blur_bokeh_shape(int(_saved_dof.get("shape", 1)))
@@ -256,7 +256,7 @@ func _apply_dof() -> void:
 
 func _apply_all() -> void:
 	game.rider.visible = V.show_rider > 0.5
-	game.rig.visible = V.show_bike > 0.5
+	game.rig.fit_g.visible = V.show_bike > 0.5   # the bike model only: the riding rider is a child of the rig too
 	RenderingServer.camera_attributes_set_dof_blur_bokeh_shape([RenderingServer.DOF_BOKEH_CIRCLE, RenderingServer.DOF_BOKEH_HEXAGON, RenderingServer.DOF_BOKEH_BOX][int(V.bokeh)])
 	RenderingServer.camera_attributes_set_dof_blur_quality(RenderingServer.DOF_BLUR_QUALITY_HIGH, true)
 	if _light_dirty:
@@ -314,7 +314,7 @@ func _unhandled_input(e: InputEvent) -> void:
 			_: handled = false
 	elif e is InputEventKey:
 		handled = false
-	elif e is InputEventJoypadButton and e.pressed and (not Settings._test_run or OS.get_environment("BMX_PAD") != ""):
+	elif e is InputEventJoypadButton and e.pressed and (not Settings._test_run or Env.s("BMX_PAD") != ""):
 		var bi := (e as InputEventJoypadButton).button_index
 		if bi == JOY_BUTTON_START: _set_edit(not _edit)
 		elif _edit: handled = false   # the card has the pad (PadNav: B = back to the camera)
@@ -745,24 +745,24 @@ func _add_row(parent: VBoxContainer, d: Array) -> void:
 # ---------------------------------------------------------------- tests
 
 func _test_hooks() -> void:
-	var set_s := OS.get_environment("BMX_PHOTO_SET")
+	var set_s := Env.s("BMX_PHOTO_SET")
 	if set_s != "":
 		for kv in set_s.split(","):
 			var p := kv.split("=")
 			if p.size() == 2 and V.has(p[0]): _set_value(p[0], float(p[1]))
-	var fly := OS.get_environment("BMX_PHOTO_FLY")
+	var fly := Env.s("BMX_PHOTO_FLY")
 	if fly != "":
 		var f := fly.split(",")
 		pos += Vector3(float(f[0]), float(f[1]), float(f[2]))
 		if f.size() > 3: yaw += deg_to_rad(float(f[3]))
 		if f.size() > 4: pitch = clampf(pitch + deg_to_rad(float(f[4])), -1.55, 1.55)
 		_limit(); _place()
-	if OS.get_environment("BMX_PHOTO_ORBIT") != "":   # tests: swing round the rider like a left drag
-		_orbit(Vector2(float(OS.get_environment("BMX_PHOTO_ORBIT")), 0.0)); _limit(); _place()
-	if OS.get_environment("BMX_PHOTO_TAB") != "":
-		(_tab_btns[OS.get_environment("BMX_PHOTO_TAB")] as Button).button_pressed = true
-		_show_tab(OS.get_environment("BMX_PHOTO_TAB"))
-	if OS.get_environment("BMX_PHOTO_SNAP") != "":
+	if Env.s("BMX_PHOTO_ORBIT") != "":   # tests: swing round the rider like a left drag
+		_orbit(Vector2(float(Env.s("BMX_PHOTO_ORBIT")), 0.0)); _limit(); _place()
+	if Env.s("BMX_PHOTO_TAB") != "":
+		(_tab_btns[Env.s("BMX_PHOTO_TAB")] as Button).button_pressed = true
+		_show_tab(Env.s("BMX_PHOTO_TAB"))
+	if Env.s("BMX_PHOTO_SNAP") != "":
 		await get_tree().create_timer(0.6, true, false, true).timeout
 		capture()
 

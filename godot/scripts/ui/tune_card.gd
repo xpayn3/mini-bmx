@@ -317,7 +317,11 @@ func _look_group(group: String) -> void:
 		kits.add_theme_constant_override("h_separation", 6); kits.add_theme_constant_override("v_separation", 6)
 		for k in RiderPanels.KITS:
 			var b := UITheme.button(k[0], func():
-				look = Rider.DEFAULT_LOOK.duplicate(); look.merge(k[1], true); _apply_look(); _fill(), 13)
+				var cur := look
+				look = Rider.DEFAULT_LOOK.duplicate(); look.merge(k[1], true)
+				for key in RiderPanels.NON_KIT:   # a kit changes the clothes, not the head / plate
+					if cur.has(key): look[key] = cur[key]
+				_apply_look(); _fill(), 13)
 			b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			kits.add_child(b)
 		list.add_child(kits)

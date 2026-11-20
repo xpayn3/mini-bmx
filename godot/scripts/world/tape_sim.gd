@@ -16,7 +16,7 @@ const SETTLE := 1.3              # a released (not torn) tape springs back this 
 
 var terrain: Terrain
 var strips: Array = []           # [{P, Q, seg, pin, cols, age, tw, last, tr, tk, ta, td, tp, G, V, N}]
-var _imesh := ImmediateMesh.new()
+var _imesh := ArrayMesh.new()   # rebuilt each frame from packed arrays (ImmediateMesh took 3 calls per vertex)
 var _dirty := false
 
 
@@ -170,6 +170,7 @@ func update(dt: float, px: float, pz: float, t: float, wdir: Vector3, ws: float)
 	var h := dt / SUB
 	if h <= 0.0:
 		return
+	var snapped: Array = []   # torn this frame: _snap adds strips (and may drop the oldest), so after the loop
 	for si in range(strips.size() - 1, -1, -1):
 		var s: Dictionary = strips[si]
 		s["age"] += dt
@@ -187,7 +188,7 @@ func update(dt: float, px: float, pz: float, t: float, wdir: Vector3, ws: float)
 			match _stretch(s):
 				"snap":
 					strips.remove_at(si)
-					_snap(s)
+					snapped.append(s)
 					continue
 				"release":
 					s["state"] = "settle"
@@ -203,6 +204,7 @@ func update(dt: float, px: float, pz: float, t: float, wdir: Vector3, ws: float)
 		if state == "free": s["tw_k"] = minf(1.0, float(s.get("tw_k", 1.0)) + dt * 1.5)   # the foil starts twisting once torn
 		_step(s, h, t, wdir, ws)
 		_ribbon(s, t)
+	for s in snapped: _snap(s)
 	_draw()
 
 
@@ -361,13 +363,25 @@ func _draw() -> void:
 	_dirty = any
 	if not any:
 		return
-	_imesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+	var AV := PackedVector3Array()
+	var AN := PackedVector3Array()
+	var AC := PackedColorArray()
 	for s in strips:
 		var V: PackedVector3Array = s["V"]
-		var N: PackedVector3Array = s["N"]
+		if V.is_empty(): continue
 		var cols: Array = s["cols"]
-		for k in V.size():
-			_imesh.surface_set_color(cols[mini(cols.size() - 1, k / (6 * SUBD))])
-			_imesh.surface_set_normal(N[k])
-			_imesh.surface_add_vertex(V[k])
-	_imesh.surface_end()
+		var o := AC.size()
+		AV.append_array(V)
+		AN.append_array(s["N"])
+		AC.resize(o + V.size())
+		var per := 6 * SUBD   # one colour per sim segment
+		for k0 in range(0, V.size(), per):
+			var c: Color = cols[mini(cols.size() - 1, k0 / per)]
+			for k in range(k0, mini(k0 + per, V.size())):
+				AC[o + k] = c
+	var arr := []
+	arr.resize(Mesh.ARRAY_MAX)
+	arr[Mesh.ARRAY_VERTEX] = AV
+	arr[Mesh.ARRAY_NORMAL] = AN
+	arr[Mesh.ARRAY_COLOR] = AC
+	_imesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)

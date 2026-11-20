@@ -27,7 +27,7 @@ var _font_b: Font
 
 
 func _ready() -> void:
-	sound_stream = load("res://assets/audio/map_unfold_gravel.ogg")   # the user's paper sound (the map's): opening, unfolding, folding
+	sound_stream = load("res://assets/audio/paper_unfold.mp3")   # the user's crumpling paper recording (same as the map): opening, unfolding, folding, turning over
 	super._ready()
 	cols = 3; rows = 1
 	panel = Vector2(0.099, 0.21)
@@ -160,18 +160,18 @@ func _process(dt: float) -> void:
 	var rdt := minf(dt if dt > 0.0 else 0.016, 0.05)
 	if Engine.time_scale > 0.0: rdt = minf(dt / Engine.time_scale, 0.05)   # (the tree may be paused, not slowed)
 	var x := Input.get_action_strength("body_right") - Input.get_action_strength("body_left")
-	if OS.get_environment("BMX_LEAFLET_SPIN") != "": _spin_t = float(OS.get_environment("BMX_LEAFLET_SPIN")); x = 0.0   # tests: turned to this angle
+	if Env.s("BMX_LEAFLET_SPIN") != "": _spin_t = float(Env.s("BMX_LEAFLET_SPIN")); x = 0.0   # tests: turned to this angle
 	if is_unfolded() or state != 2: x = 0.0
 	if absf(x) > 0.15:
 		_spin_t += x * 3.2 * rdt
-	elif OS.get_environment("BMX_LEAFLET_SPIN") == "":   # let go: settle on whichever side is nearer (face or back)
+	elif Env.s("BMX_LEAFLET_SPIN") == "":   # let go: settle on whichever side is nearer (face or back)
 		_spin_t = lerpf(_spin_t, roundf(_spin_t / PI) * PI, 1.0 - exp(-rdt * 6.0))
 	if is_unfolded(): _spin_t = roundf(_spin_t / TAU) * TAU   # opening: face on
 	# turning it over (face <-> back) rustles like any paper move: the same recording, a short slice
 	var side := int(roundf(_spin_t / PI))
 	if side != _spin_side:
 		_spin_side = side
-		if state == 2 and not is_unfolded() and OS.get_environment("BMX_LEAFLET_SPIN") == "": _play_slice(1.25, 0.5)
+		if state == 2 and not is_unfolded() and Env.s("BMX_LEAFLET_SPIN") == "": _play_slice(1.25, 0.5)
 	# a soft spring follows the target (a sheet of paper has a little lag and overshoot)
 	_spin_v += ((_spin_t - spin) * 60.0 - _spin_v * 11.0) * rdt
 	spin += _spin_v * rdt

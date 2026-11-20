@@ -66,7 +66,7 @@ var bike_cfg: Dictionary
 var t := 0.0
 var drawn_pos := Vector3.ZERO
 # tests (BMX_CLIP_PROBE): how deep the drawn tyres went into the ground before / after unclipping
-var clip_probe := OS.get_environment("BMX_CLIP_PROBE") != ""
+var clip_probe := Env.s("BMX_CLIP_PROBE") != ""
 var _lean_max := 0.0; var _lean_shot_t := -9.0; var _lean_shots := 0   # tests (BMX_LEAN_SHOT)
 var _lip_t := -1.0; var _lip_shots := 0   # tests (BMX_LIP_SHOT)
 var clip_stats := {"frames": 0, "fixed": 0, "bad": 0, "before": 0.0, "after": 0.0}
@@ -101,7 +101,7 @@ func _ready() -> void:
 	bike_cfg = GameState.bike_config()
 	Tune.set_ride(bike_cfg.ride)
 	_build_environment()
-	terrain = load("res://scripts/world/terrain.gd").new((int(OS.get_environment("BMX_TITLE_SEED")) if OS.get_environment("BMX_TITLE_SEED") != "" else TITLE_SEED) if title_world else GameState.seed)
+	terrain = load("res://scripts/world/terrain.gd").new((int(Env.s("BMX_TITLE_SEED")) if Env.s("BMX_TITLE_SEED") != "" else TITLE_SEED) if title_world else GameState.seed)
 	add_child(terrain)
 	terrain.view_scale = float(Settings.get_v("view_distance"))   # before the first chunks are built
 	terrain.update_stream(0, 0, INF)
@@ -118,7 +118,7 @@ func _ready() -> void:
 	add_child(rig)
 	rig.load_bike(bike_cfg, bike_cfg.get("build", {}))
 	susp = rig.susp
-	if susp != null and OS.get_environment("BMX_NOUNCLIP") == "": susp.wheels_follow = true   # the wheels track the ground, the frame floats
+	if susp != null and Env.s("BMX_NOUNCLIP") == "": susp.wheels_follow = true   # the wheels track the ground, the frame floats
 	pedal_a0 = rig.pedal_a0
 	phys = BikePhysics.new(self)
 	phys.T = Tune.v
@@ -128,7 +128,7 @@ func _ready() -> void:
 	rig.lean_g.add_child(rider)
 	rider.set_look(RiderPanels.load_look())
 	var pose: Dictionary = RiderPanels.load_pose(GameState.bike_id, bike_cfg.pose)
-	for kv in OS.get_environment("BMX_POSE").split(",", false):   # tests: "bumpAbsorb=2,kneeOpen=0" (not saved)
+	for kv in Env.s("BMX_POSE").split(",", false):   # tests: "bumpAbsorb=2,kneeOpen=0" (not saved)
 		var pr := kv.split("=")
 		if pr.size() == 2 and pose.has(pr[0]): pose[pr[0]] = float(pr[1])
 	rider.set_style(pose)
@@ -438,26 +438,35 @@ func _apply_light(h: float, L: Dictionary) -> void:
 var _studio: Node3D
 var _look_yaw := 0.0
 var _look_pitch := 0.0
-const LOOK_SIDE := 1.0   # sign of the head yaw that turns towards the camera
+const LOOK_DEPTH := 0.75       # how far from the camera to the head the looked-at point sits
+const LOOK_YAW_MAX := 1.9      # ~110 deg: neck + shoulders turned back
+const LOOK_PITCH_BIAS := 0.15  # the pose already tips the head down a little
 
-## title screen: the rider's head follows the mouse. The bike points to the left of the frame, so the mouse
-## ahead of the rider = looking straight on, above / below = nodding, behind them = turning towards the camera.
+## title screen: the rider's head looks straight at the mouse, all the time, wherever it is on the screen.
 func _update_look(dt: float) -> void:
 	var yaw_t := 0.0
 	var pitch_t := 0.0
 	if scenic and cam and rider and rider.head:
 		var vp := get_viewport()
 		var m: Vector2 = vp.get_mouse_position()
-		if OS.get_environment("BMX_TITLE_MOUSE") != "":   # tests: a fixed mouse position (fractions of the screen)
-			var q := OS.get_environment("BMX_TITLE_MOUSE").split_floats(",")
+		if Env.s("BMX_TITLE_MOUSE") != "":   # tests: a fixed mouse position (fractions of the screen)
+			var q := Env.s("BMX_TITLE_MOUSE").split_floats(",")
 			m = Vector2(q[0], q[1]) * vp.get_visible_rect().size
-		var hp: Vector2 = cam.unproject_position(rider.head.global_position)
-		var span: float = vp.get_visible_rect().size.x * 0.35
-		var dx: float = m.x - hp.x          # + = behind the rider
-		var dy: float = hp.y - m.y          # + = above
-		pitch_t = clampf(atan2(dy, maxf(absf(dx), span * 0.5)) * 0.8, -0.45, 0.55)
-		yaw_t = LOOK_SIDE * clampf(dx / span, 0.0, 1.0) * 1.25
-	var k := 1.0 - exp(-dt * 7.0)
+		# a real point under the mouse, between the camera and the head (= "at the screen"): the mouse over the
+		# helmet = looking into the camera, ahead of him = looking forward, behind him = turning back over the
+		# shoulder. Worked out in the head's parent space, where +x = forward, +y = up.
+		var c3: Camera3D = vp.get_camera_3d()
+		if c3:
+			var hw: Vector3 = rider.head.global_position
+			var o: Vector3 = c3.project_ray_origin(m)
+			var tgt: Vector3 = o + c3.project_ray_normal(m) * (o.distance_to(hw) * LOOK_DEPTH)
+			var par: Node3D = rider.head.get_parent_node_3d()
+			var d: Vector3 = par.global_transform.affine_inverse() * tgt - rider.head.position
+			yaw_t = clampf(atan2(-d.z, d.x), -LOOK_YAW_MAX, LOOK_YAW_MAX)
+			pitch_t = clampf(atan2(d.y, Vector2(d.x, d.z).length()) + LOOK_PITCH_BIAS, -0.6, 0.7)
+			# past straight behind the yaw wraps: keep turning the way he already is instead of snapping round
+			if absf(yaw_t - _look_yaw) > PI: yaw_t = signf(_look_yaw) * LOOK_YAW_MAX
+	var k := 1.0 - exp(-dt * 9.0)
 	_look_yaw += (yaw_t - _look_yaw) * k
 	_look_pitch += (pitch_t - _look_pitch) * k
 
@@ -500,38 +509,14 @@ func _title_lights(heading: float) -> void:
 ## title screen: stand the bike on the hand-picked summit of the title world
 func _to_hilltop() -> void:
 	var sp := TITLE_SPOT
-	if OS.get_environment("BMX_TITLE_SPOT") != "":   # tests / picking a new spot: x,z,heading
-		var q := OS.get_environment("BMX_TITLE_SPOT").split_floats(",")
+	if Env.s("BMX_TITLE_SPOT") != "":   # tests / picking a new spot: x,z,heading
+		var q := Env.s("BMX_TITLE_SPOT").split_floats(",")
 		sp = Vector3(q[0], q[1], q[2])
 	terrain.update_stream(sp.x, sp.y, INF)
 	phys.reset_at(sp.x, sp.y, 0.0)
 	_snap_prev()
 	cam.snap_to(Vector3(sp.x, phys.y + 0.5, sp.y))
 	_title_heading = sp.z
-
-## the heading with the best view from the rider: nothing close blocking the eye line (ground + room
-## for trees) and hills rising far off. Seen from a few metres up, like the lookout camera.
-func _best_view() -> float:
-	var eye: float = phys.y + 6.0
-	var best := 0.0
-	var best_s := -INF
-	for i in 48:
-		var a := TAU * i / 48.0
-		var ca := cos(a); var sa := -sin(a)
-		var block := -1.0
-		var r := 25.0
-		while r < 450.0:
-			block = maxf(block, (terrain.height(phys.x + ca * r, phys.z + sa * r) + 5.0 - eye) / r)
-			r *= 1.25
-		var hills := -1.0
-		r = 450.0
-		while r < 1600.0:
-			hills = maxf(hills, (terrain.height(phys.x + ca * r, phys.z + sa * r) - eye) / r)
-			r += 100.0
-		var s := hills - block * 0.5 - maxf(0.0, block + 0.03) * 6.0
-		if s > best_s:
-			best_s = s; best = a
-	return best
 
 func _apply_settings() -> void:
 	terrain.set_view_scale(float(Settings.get_v("view_distance")))
@@ -627,7 +612,8 @@ func rock_chips(c: Dictionary) -> void:
 func start_crash(reason: String) -> void:
 	phys.crash_pending = ""
 	if phys.crash_on: return
-	if OS.get_environment("BMX_TRICK") != "": print("CRASH ", reason, " v=%.1f air=%s" % [phys.v, phys.air])   # tests
+	_rd_air.resize(0)   # crash dust: per-part "was in the air" flags start fresh
+	if Env.s("BMX_TRICK") != "": print("CRASH ", reason, " v=%.1f air=%s" % [phys.v, phys.air])   # tests
 	var pts: Array = rider.joints_world()
 	var f := phys.fwd()
 	# the body carries on with the bike's own motion (no extra pop up: it used to throw the body into the air)
@@ -667,12 +653,12 @@ func _break_action_cam(body_vel: Vector3) -> void:
 	var vel := body_vel * 1.05 + Vector3(0, 2.0 + randf() * 2.5, 0) + side * (randf() - 0.5) * 3.0
 	var spin := Vector3(randf() - 0.5, randf() - 0.5, randf() - 0.5).normalized() * (12.0 + randf() * 14.0)
 	flying_cam = FlyingCam.launch(self, r.body, xf, terrain, vel, spin)
-	if OS.get_environment("BMX_CAM_PROBE") != "" or OS.get_environment("BMX_GOPRO_PROBE") != "":
+	if Env.s("BMX_CAM_PROBE") != "" or Env.s("BMX_GOPRO_PROBE") != "":
 		print("GOPRO off at %s v=%s" % [str(xf.origin), str(vel)])
 
 ## the crash slow-mo is on (Settings › Gameplay; autotests keep normal time unless BMX_WASTED=1)
 func _wasted_on() -> bool:
-	if OS.get_environment("BMX_WASTED") != "": return true
+	if Env.s("BMX_WASTED") != "": return true
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--autotest"): return false
 	return bool(Settings.get_v("wasted"))
@@ -688,7 +674,7 @@ func get_up() -> void:
 	rider.transform = Transform3D.IDENTITY
 	rider.reset_pose()
 	rider.remount_action_cam()
-	if OS.get_environment("BMX_GOPRO_PROBE") != "": print("GOPRO remounted: ", rider.action_cam.get_node_or_null("Body") != null)
+	if Env.s("BMX_GOPRO_PROBE") != "": print("GOPRO remounted: ", rider.action_cam.get_node_or_null("Body") != null)
 	_snap_prev()
 	if hud: hud.on_get_up()
 
@@ -697,7 +683,7 @@ func on_trick(trick: String) -> void:
 
 func on_style(points: int, label: String) -> void:
 	if hud: hud.on_style(points, label)
-	if OS.get_environment("BMX_TRICK") != "": print("STYLE +%d %s" % [points, label])   # tests
+	if Env.s("BMX_TRICK") != "": print("STYLE +%d %s" % [points, label])   # tests
 
 func on_takeoff() -> void:
 	takeoff = Vector3(phys.x, phys.y, phys.z)
@@ -778,14 +764,14 @@ func _crash_dust() -> void:
 			if hit > 1.5 and made < 6:
 				# the slam: a puff blown out round the impact, carried on a little the way it was going
 				var k := clampf((hit - 1.5) / 6.0, 0.15, 1.0)
-				if OS.get_environment("BMX_SMOKE_PROBE") != "": print("CRASHDUST impact i=%d t=%.2f hit=%.1f" % [i, phys.crash_t, hit])
+				if Env.s("BMX_SMOKE_PROBE") != "": print("CRASHDUST impact i=%d t=%.2f hit=%.1f" % [i, phys.crash_t, hit])
 				dust.sim.burst(at, Vector3(v.x * 0.25, 0.6 + k * 0.8, v.z * 0.25), 0.3 + k * 0.25, (50.0 + 110.0 * k) * amt * CRASH_DUST_BODY,
 					1.2 + k * 2.2, 0.08 + k * 0.05, ground_dust(pp.x, pp.z, s), 20.0)
-				if OS.get_environment("BMX_NOGRIT") == "": dust.grit_burst(at, Vector3(v.x * 0.3, 0.8 + k * 1.6, v.z * 0.3), 1.0 + k * 2.5, 600.0 * k * amt * 0.2 * CRASH_DEBRIS, 0.06, ground_dust(pp.x, pp.z, s))
+				if Env.s("BMX_NOGRIT") == "": dust.grit_burst(at, Vector3(v.x * 0.3, 0.8 + k * 1.6, v.z * 0.3), 1.0 + k * 2.5, 600.0 * k * amt * 0.2 * CRASH_DEBRIS, 0.06, ground_dust(pp.x, pp.z, s))
 				made += 1
 		elif hs > 1.2 and made < 10:
 			# sliding / rolling along the ground
-			if OS.get_environment("BMX_SMOKE_PROBE") != "": print("CRASHDUST slide i=%d t=%.2f hs=%.1f" % [i, phys.crash_t, hs])
+			if Env.s("BMX_SMOKE_PROBE") != "": print("CRASHDUST slide i=%d t=%.2f hs=%.1f" % [i, phys.crash_t, hs])
 			dust.sim.add_source(at, Vector3(v.x * 0.3, 0.4, v.z * 0.3), 0.25, minf(hs, 6.0) * 4.0 * amt * CRASH_DUST_BODY, 6.0, 0.3, ground_dust(pp.x, pp.z, s))
 			made += 1
 	# the bike sliding / tumbling along the ground
@@ -794,7 +780,7 @@ func _crash_dust() -> void:
 		var g2: float = terrain.height(phys.x, phys.z)
 		var ba := 1.0 if bs == 1 else (0.85 if bs == 3 else 0.3)
 		var f := phys.fwd()
-		if OS.get_environment("BMX_SMOKE_PROBE") != "": print("CRASHDUST bike t=%.2f v=%.1f" % [phys.crash_t, phys.v])
+		if Env.s("BMX_SMOKE_PROBE") != "": print("CRASHDUST bike t=%.2f v=%.1f" % [phys.crash_t, phys.v])
 		for e in [-0.5, 0.5]:   # both wheels / the frame scraping
 			dust.sim.add_source(Vector3(phys.x + f.x * e, g2 + 0.1, phys.z + f.z * e), f * phys.v * 0.3 + Vector3(0, 0.6, 0),
 				0.3, minf(absf(phys.v), 10.0) * 9.0 * ba * CRASH_DUST_BIKE, 8.0, 0.5, ground_dust(phys.x, phys.z, bs))
@@ -889,22 +875,57 @@ func respawn(new_world: bool) -> void:
 	if blood: blood.clear()
 	if flying_cam and is_instance_valid(flying_cam): flying_cam.queue_free()
 	flying_cam = null
-	var sp := _water_spawn() if OS.get_environment("BMX_WATER_SPAWN") != "" else Vector3.ZERO
-	if OS.get_environment("BMX_TRAIL_FEAT") != "":
-		sp = _feature_spawn(OS.get_environment("BMX_TRAIL_FEAT"))
+	var sp := _water_spawn() if Env.s("BMX_WATER_SPAWN") != "" else Vector3.ZERO
+	if Env.s("BMX_TRAIL_FEAT") != "":
+		sp = _feature_spawn(Env.s("BMX_TRAIL_FEAT"))
 	phys.reset_at(sp.x, sp.z, sp.y)
-	if OS.get_environment("BMX_PACK_SPAWN") != "":   # tests: "x,z" of a health pack -> start 3.5 m before it, facing +x
-		var pxz := OS.get_environment("BMX_PACK_SPAWN").split(",")
+	if Env.s("BMX_PACK_SPAWN") != "":   # tests: "x,z" of a health pack -> start 9 m before it, facing +x
+		var pxz := Env.s("BMX_PACK_SPAWN").split(",")
 		sp = Vector3(float(pxz[0]) - 9.0, 0.0, float(pxz[1]))
 		phys.reset_at(sp.x, sp.z, sp.y)
 	if sp != Vector3.ZERO: terrain.update_stream(sp.x, sp.z, INF)
 	rider.reset_pose()
 	_snap_prev()
-	cam.snap_to(Vector3(0, phys.y + 0.5, 0))
+	cam.snap_to(Vector3(phys.x, phys.y + 0.5, phys.z))
+	place_start_tv()
 	# the area you start in: its banner once the screen has faded in
 	biome_cur = terrain.biome_name(phys.x, phys.z)
 	biome_next = ""; biome_hold = 0
 	if area_title: area_title.show_area(biome_cur, 1.6)
+
+var start_tv: CrtTv
+const START_TV_SCALE := 2.5   # oversized: ~0.95 m wide
+const START_TV_AHEAD := 10.0
+const START_TV_SIDE := 5.5
+
+## the old CRT TV from the boot intro, dumped on the ground beside the start of every world, facing the rider:
+## it switches on to the RUNOUT card a moment after the ride starts and stays on
+func place_start_tv() -> void:
+	if OS.get_environment("BMX_NO_TV") != "": return
+	if start_tv == null:
+		start_tv = CrtTv.new()
+		start_tv.light_energy = 3.0
+		start_tv.light_range = 7.0
+		start_tv.mat.set_shader_parameter("gain", 5.0)
+		add_child(start_tv)
+	var fwd := Vector3(cos(phys.heading), 0.0, -sin(phys.heading))
+	var side := Vector3(-fwd.z, 0.0, fwd.x)
+	var at := Vector3(phys.x, 0.0, phys.z) + fwd * START_TV_AHEAD + side * START_TV_SIDE
+	var to_cam := (Vector3(phys.x, 0.0, phys.z) - fwd * 4.0 - at).normalized()   # where the ride camera starts
+	var yaw := atan2(to_cam.x, to_cam.z) + deg_to_rad(8.0)   # glass (+Z) towards it, a little askew
+	var b := Basis(Vector3.UP, yaw)
+	# sit it on the ground: lowest of its four feet on the drawn ground, tilted to the slope
+	var hx := CrtTv.SIZE.x * 0.5 * START_TV_SCALE; var hz := CrtTv.SIZE.z * 0.5 * START_TV_SCALE
+	var hs := []
+	for c in [Vector2(-hx, -hz), Vector2(hx, -hz), Vector2(-hx, hz), Vector2(hx, hz)]:
+		var p: Vector3 = at + b * Vector3(c.x, 0.0, c.y)
+		hs.append(terrain.top_height(p.x, p.z))
+	var pitch := atan2(((hs[0] + hs[1]) - (hs[2] + hs[3])) * 0.5, hz * 2.0)   # back higher -> tips forward
+	var roll := atan2(((hs[0] + hs[2]) - (hs[1] + hs[3])) * 0.5, hx * 2.0)
+	b = b * Basis(Vector3.RIGHT, pitch) * Basis(Vector3.BACK, -roll) * Basis.from_scale(Vector3.ONE * START_TV_SCALE)
+	at.y = (hs[0] + hs[1] + hs[2] + hs[3]) * 0.25 - 0.04
+	start_tv.transform = Transform3D(b, at)
+	start_tv.power_on(1.4)
 
 const BAIL_HOLD_MS := 350   # holding bail this long throws the rider off; a shorter tap resets to the trail
 var _bail_down := -1        # tick (ms) the bail key went down, -1 = not held
@@ -1078,7 +1099,7 @@ var _base_bins := {}
 var _v_prev_fx := 0.0; var _surge := 0.0   # speed feel: last speed, acceleration surge
 var ride_log := RideLog.new()   # the last 60 s, saved with R3 / F8 (save_log)
 var _log_lift := 0.0
-var jitter_on := OS.get_environment("BMX_JITTER_ALL") != ""
+var jitter_on := Env.s("BMX_JITTER_ALL") != ""
 var _jit_skip := 0
 var _yaw_s := 0.0; var _turn_s := 0.0; var _aspin_s := 0.0; var _atilt_s := 0.0; var _blat_s := 0.0
 var _jit_head := Vector3.INF
@@ -1180,7 +1201,7 @@ func _exit_tree() -> void:
 	Engine.time_scale = 1.0
 
 # tests (BMX_DAB_PROBE): per-frame shoe moves on the bike, the sole's lowest point vs the ground
-var dab_probe := OS.get_environment("BMX_DAB_PROBE") != ""
+var dab_probe := Env.s("BMX_DAB_PROBE") != ""
 var _dab_last := []
 var _dab_stats := {"jump_dab": 0.0, "jump_ride": 0.0, "sole_min": 1e9, "t_print": 0.0}
 func _dab_probe(st: BikePhysics) -> void:
@@ -1243,6 +1264,8 @@ func _process(dt: float) -> void:
 		if area_title: area_title.view.visible = false
 		return
 	if area_title: area_title.view.visible = hud.visible
+	if _bail_down >= 0 and not Input.is_action_pressed("bail"):   # let go while photo mode / pause ate the release
+		_bail_down = -1
 	if _bail_down >= 0 and Time.get_ticks_msec() - _bail_down >= BAIL_HOLD_MS:   # held: the real bail
 		_bail_down = -1
 		if not phys.crash_on: phys.crash_pending = "BAIL!"
@@ -1256,7 +1279,7 @@ func _process(dt: float) -> void:
 	# wrapped interpolation: mid-flip the pitch jumps +PI -> -PI between two steps
 	var pk := "pitch" if st.crash_on else "pitch_draw"
 	var p_draw: float = wrapf(_prev[pk] + BikePhysics.ang_diff(st.get(pk), _prev[pk]) * a, -PI, PI)
-	if OS.get_environment("BMX_PITCH_POSE") != "": p_draw = wrapf(t * 4.0, -PI, PI) if OS.get_environment("BMX_PITCH_POSE") == "sweep" else float(OS.get_environment("BMX_PITCH_POSE"))   # tests: draw at a fixed pitch (flip poses)
+	if Env.s("BMX_PITCH_POSE") != "": p_draw = wrapf(t * 4.0, -PI, PI) if Env.s("BMX_PITCH_POSE") == "sweep" else float(Env.s("BMX_PITCH_POSE"))   # tests: draw at a fixed pitch (flip poses)
 	var hd: float = _prev.heading + BikePhysics.ang_diff(st.heading, _prev.heading) * a
 	drawn_pos = Vector3(lerp_k.call("x"), lerp_k.call("y"), lerp_k.call("z"))
 	var body_y: float = lerp_k.call("body_y")
@@ -1265,12 +1288,12 @@ func _process(dt: float) -> void:
 	var wobble := sin(t * 2.3) * 0.025 * maxf(0.0, 1 - absf(st.v) / 2) * (1.0 - dab_k)
 	var dab_lean := -dab_side * DAB_LEAN * dab_k   # bike_lean > 0 tips the top to the rider's left
 	if rig.chain and phys.geared and phys.gear >= 0: rig.chain.cog_teeth = float(phys.cogs[phys.gear])
-	rig.pose(drawn_pos.x, y_draw + (1.5 if OS.get_environment("BMX_PITCH_POSE") != "" else 0.0), drawn_pos.z, hd, p_draw, st.hop_nose, st.bike_lean + st.rock + wobble + dab_lean,
+	rig.pose(drawn_pos.x, y_draw + (1.5 if Env.s("BMX_PITCH_POSE") != "" else 0.0), drawn_pos.z, hd, p_draw, st.hop_nose, st.bike_lean + st.rock + wobble + dab_lean,
 		st.steer + st.bar_catch - wobble * 1.5, st.wheel_f, st.wheel_r, st.crank)
 	DebugOverlay.draw(self, st, drawn_pos, hd)
 	# the physics' tyres are soft and follow the smooth height field; the drawn ground is a triangle mesh
 	# (higher in hollows) with rocks and decks on it. Lift / tilt the drawn bike so no tyre is ever inside it
-	if OS.get_environment("BMX_NOUNCLIP") == "":
+	if Env.s("BMX_NOUNCLIP") == "":
 		rig.fit_wheels(terrain.top_height)
 		var _pre_y := rig.position.y
 		var _dF0 := rig.tyre_depth(rig.wheel_f, rig.wheel_rf, terrain.top_height) if st.bank_probe else 0.0
@@ -1303,24 +1326,24 @@ func _process(dt: float) -> void:
 		clip_stats.frames += 1
 		clip_stats.before = maxf(clip_stats.before, d)
 		if d > 0.002: clip_stats.bad += 1
-	if OS.get_environment("BMX_LIP_SHOT") != "" and _lip_shots < 10:   # tests: 10 shots, 0.08 s apart, from a lip
+	if Env.s("BMX_LIP_SHOT") != "" and _lip_shots < 10:   # tests: 10 shots, 0.08 s apart, from a lip
 		if _lip_shots == 0 and st.prep > 0.2 and not st.air: _lip_t = t
 		if _lip_t >= 0.0 and t - _lip_t >= _lip_shots * 0.08:
-			get_viewport().get_texture().get_image().save_png("%s_%d.png" % [OS.get_environment("BMX_LIP_SHOT"), _lip_shots])
+			get_viewport().get_texture().get_image().save_png("%s_%d.png" % [Env.s("BMX_LIP_SHOT"), _lip_shots])
 			print("LIPSHOT %d prep=%.2f air=%s compress=%.2f absorb=%.2f vy=%.1f" % [_lip_shots, st.prep, st.air, st.compress, st.body_y - st.y, st.vy])
 			_lip_shots += 1
-	if OS.get_environment("BMX_LEAN_SHOT") != "" and not st.air and not st.crash_on:   # tests: shots in deep leans
+	if Env.s("BMX_LEAN_SHOT") != "" and not st.air and not st.crash_on:   # tests: shots in deep leans
 		var ln := absf(st.bike_lean)
 		_lean_max = maxf(_lean_max, ln)
 		if ln > 0.7 and t - _lean_shot_t > 1.5 and _lean_shots < 4:
 			_lean_shot_t = t
-			get_viewport().get_texture().get_image().save_png("%s_%d.png" % [OS.get_environment("BMX_LEAN_SHOT"), _lean_shots])
+			get_viewport().get_texture().get_image().save_png("%s_%d.png" % [Env.s("BMX_LEAN_SHOT"), _lean_shots])
 			print("LEANSHOT %d bike=%.0fdeg body=%.0fdeg v=%.1f" % [_lean_shots, rad_to_deg(st.bike_lean), rad_to_deg(st.bike_lean - st.counter), st.v])
 			_lean_shots += 1
-	if clip_probe and OS.get_environment("BMX_CLIP_SHOT") != "":   # tests: a screenshot when a tyre was 12+ cm in
+	if clip_probe and Env.s("BMX_CLIP_SHOT") != "":   # tests: a screenshot when a tyre was 12+ cm in
 		var deep: float = clip_stats.before
 		if clip_stats.get("shot", 0) == 1:
-			get_viewport().get_texture().get_image().save_png(OS.get_environment("BMX_CLIP_SHOT"))
+			get_viewport().get_texture().get_image().save_png(Env.s("BMX_CLIP_SHOT"))
 			clip_stats.shot = 2
 		elif clip_stats.get("shot", 0) == 0 and deep > 0.12 and not st.crash_on and not st.air:
 			clip_stats.shot = 1
@@ -1347,7 +1370,6 @@ func _process(dt: float) -> void:
 			"air": st.air_k, "compress": maxf(0.0, -st.compress), "hipShift": st.hip_shift, "bodyStick": -0.55 if scenic else st.body_in_s, "relax": 1.0 if scenic else 0.0, "tall": 1.0 if scenic else 0.0, "lookYaw": _look_yaw, "lookPitch": _look_pitch, "slope": st._g_pitch, "airTilt": _atilt_s, "bodyLat": _blat_s, "latG": 0.0 if scenic else st.lat_a / BikePhysics.G, "wheelR": rider.to_local(rig.wheel_r.global_position), "wheelRR": rig.wheel_rr, "t": t,
 			"airSpin": _aspin_s, "wheelY": (rig.wheel_f.global_position.y + rig.wheel_r.global_position.y) * 0.5, "turn": _turn_s})
 		if dab_probe: _dab_probe(st)
-		if st.crash_on: _jit_skip = 40
 		elif _jit_skip > 0: _jit_skip -= 1
 		if jitter_on and _jit_skip == 0:   # tests: the drawn joints (rider space), per frame
 			var hj: Vector3 = rider.J[0]

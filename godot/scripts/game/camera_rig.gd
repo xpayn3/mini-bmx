@@ -43,7 +43,7 @@ var cam_fov := 34.0
 var occ := 0.0
 var track_pos = null
 var target := Vector3.ZERO
-var _probe_on := OS.get_environment("BMX_CAM_PROBE") != ""
+var _probe_on := Env.s("BMX_CAM_PROBE") != ""
 var _pp1 := Vector3.ZERO; var _pp2 := Vector3.ZERO; var _pa1 := Vector3.ZERO; var _pa2 := Vector3.ZERO
 var _pn := 0; var _pj := 0.0; var _pk := 0; var _paj := 0.0; var _psh := 0
 var anchor := Vector3.ZERO   # what the camera is placed from (the rider); target = where it looks
@@ -136,7 +136,7 @@ func _unhandled_input(e: InputEvent) -> void:
 const CRASH_ZOOM := 0.45     # how much closer the camera gets to a crashed rider (fraction of the distance)
 const CRASH_ZOOM_T := 3.5    # real seconds the zoom-in takes
 var crash_cam_t := 0.0       # real seconds since the crash began
-var _crash_probe := OS.get_environment("BMX_CRASHCAM") != ""
+var _crash_probe := Env.s("BMX_CRASHCAM") != ""
 var crash_zoom := 0.0       # the current zoom-in on a crashed rider (0 = normal distance)
 
 func update_cam(dt: float) -> void:
