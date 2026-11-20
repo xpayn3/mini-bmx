@@ -1296,8 +1296,9 @@ func _autotest(seconds: float) -> void:
 			var si := int((el - float(Env.s("BMX_SHIFT"))) / 0.7)
 			if si != _probe.get("shift_i", -1):
 				_probe.shift_i = si
-				game._shift(1 if (si / 3) % 2 == 0 else -1)
-				print("SHIFT t=%.2f d=%d gear=%d" % [el, 1 if (si / 3) % 2 == 0 else -1, game.phys.gear])
+				var srun := int(Env.s("BMX_SHIFT_RUN")) if Env.s("BMX_SHIFT_RUN") != "" else 3   # shifts each way (12 = run into the ends)
+				game._shift(1 if (si / srun) % 2 == 0 else -1)
+				print("SHIFT t=%.2f d=%d gear=%d" % [el, 1 if (si / srun) % 2 == 0 else -1, game.phys.gear])
 		if pedal and not (Env.s("BMX_COAST") != "" and int(el) % 6 >= 3): Input.action_press("pedal")   # BMX_COAST: 3 s pedal / 3 s coast
 		else: Input.action_release("pedal")
 		if Env.s("BMX_BRAKETURN") != "" and el > float(Env.s("BMX_BRAKETURN")):   # tests: 2 s pedal up to speed, 1.5 s hard brake + full steer, repeat
@@ -1681,6 +1682,7 @@ func _autotest(seconds: float) -> void:
 			for w in s.worst: print("  LIMBW %s %s" % [k, w])
 	print("AUTOTEST avg triangles/frame=%dk draw calls=%d" % [tris / maxi(frames, 1) / 1000, draws / maxi(frames, 1)])
 	if Env.s("BMX_PHOTO") != "": print("AUTOTEST photo: on=%s time_scale=%.2f hud=%s fov=%.1f" % [game.photo, Engine.time_scale, game.hud.visible, game.cam.fov])
+	if game.rumble and game.rumble.probe: print(game.rumble.probe_summary())
 	if Env.s("BMX_MAP") != "": print("AUTOTEST map: open=%s time_scale=%.2f hud=%s" % [game.paper_map.busy() if game.paper_map else "none", Engine.time_scale, game.hud.visible])
 	print("AUTOTEST frames=%d fps=%.1f pos=(%.1f, %.1f, %.1f) v=%.2f crash=%s sane=%s" % [frames, frames / seconds, st.x, st.y, st.z, st.v, st.crash_on, st.is_sane()])
 	if Env.s("BMX_BRAKETURN") != "" or Env.s("BMX_JITTER_ALL") != "": game.jitter_report()

@@ -76,7 +76,7 @@ the body (leaning alone turns, leaning with the steer turns harder + grips more,
 air it leans the bike). Numpad 8/5/4/6 do the same on keys. The camera no longer uses the right stick.
 **Settings › Controller** (`ui/pad_map.gd`): the Xbox photo (`assets/ui/xbox_pad.png`, cut out by root `tools/cut_pad.py`;
 without it a drawn pad) with what every button does, click to remap (sticks pick Steer / Rider body / Camera / Nothing and
-swap), live button test, vibration on / off + strength. `Settings.pad_active` follows the last device used: prompts show
+swap), live button test, vibration: on / off, motors and a strength per effect (see "Controller rumble" in section 5). `Settings.pad_active` follows the last device used: prompts show
 Xbox names (`Settings.prompt(action)`), and on a pad the triggers don't tilt or throw the bike in the air (only a real
 right-stick yank from centre throws at a lip; a held lean never does).
 In the air the right stick is a **360° attitude control** (`air_stick`): y tilts the nose on top of the landing aim
@@ -180,6 +180,19 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - **Physics overlay** (F3, `BMX_DEBUG_DRAW=1`, `scripts/game/debug_overlay.gd`, addon `addons/debug_draw_3d` = Debug Draw 3D
   1.7.3, MIT, Windows libs only): travel vs heading, front wheel aim, turn force, rear grip bar, loose ground, flight path.
 - Safety net: `is_sane()` / `reset_body()` — a non-finite step restores the last good state.
+- **Controller rumble** (`game/pad_rumble.gd`, `Game.rumble`, updated every physics step after `phys.step`): effects mixed as
+  1-(1-a)(1-b) onto the two Xbox motors (strong = left heavy thump, weak = right fast buzz), one Settings key each
+  (`PadRumble.EFFECTS`, default 1.0): GROUND `rumble_road` (grain by surface + speed), `rumble_bumps` (each wheel's vertical
+  acceleration `vw_f` / `vw_r`; front in the light motor, rear in the heavy), `rumble_bottom`, `rumble_water`; TYRES `rumble_slip`
+  (`slip`, rear `grip_r` x `slip_w`, `whip`: on / off chatter, rate rises with speed), `rumble_spin`, `rumble_brake`,
+  `rumble_skid` (`skid_fx` + brake); RIDER `rumble_pedal` (a push per stroke sprinting), `rumble_takeoff`, `rumble_land`;
+  HITS `rumble_smash` (via `shake`), `rumble_crash`, `rumble_tumble` (ragdoll slams + slide). Nothing in the air. Motors:
+  `rumble_strength`, `rumble_heavy`, `rumble_light`, `rumble_floor` (lowest motor speed, 0.06), `rumble_chatter` (slip pulse
+  rate); refreshed at 60 Hz with a 0.12 s hold (stop by themselves when paused), stopped in photo mode / the map / menus.
+  **Settings › Controller › VIBRATION** has every one of these as a slider (+ Reset vibration); changing one plays that
+  effect on the pad (`PadRumble.preview(tree, key)`, a canned ~1.2 s pattern per effect, real time, works while paused).
+  Probe: `BMX_RUMBLE_PROBE=1` (`RUMBLE` lines 4x / s per effect, `RUMBLESUM` at the end, `RUMBLE preview` lines); works without
+  a pad. `BMX_PAUSE=settings BMX_TAB=5 BMX_VIB_SCROLL=<key> [BMX_VIB_DY=px]` scrolls to the section and plays a preview.
 
 ### Terrain
 - Infinite world of 48 m chunks streamed around the rider on worker threads; ground as LOD grids
@@ -489,6 +502,12 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - The **Coasting** rider preview is the showcase pose: sat on the saddle, sitting up (`relax` input to
   `Rider.update_pose`: straighter back, chest up, chin up, whatever the saved riding pose).
 - Light: little volumetric haze (0.004), exposure 1.0, contrast 1.16 / saturation 1.18, depth fog from 90 m.
+  **Homely sun shaft** (2026-11-20): the sun (`SUN`) is late-afternoon gold, ~30 deg up behind the door and 45 deg to the left, so a
+  slanted shaft comes through the doorway and lands on the floor right of the bike (clear of the menu card; above the door top from
+  the camera, no glare). An indoor-only `FogVolume` (density 0.02) makes the shaft show (sun `light_volumetric_fog_energy` 12; the
+  room lights barely light the fog); `_build_sun_shaft` also adds ~7000 fine dust motes (GPUParticles3D, turbulence drift) drawn by
+  `shaders/sun_motes.gdshader`, which lights only the motes whose line to the sun passes through the open part of the door
+  (`_place_slats` updates it as the door rolls up). Room lights (tubes, bench strip, key, rim, ambient) are warm white.
 - Bike height is placed from the **real tyre size and real axle positions** (no tyre clipping into the floor
   or the roller drums; verified with `BMX_TYRE_PROBE`).
 - Saved in `garage.json`; `GameState.bike_config()` applies it to the ride.
@@ -702,12 +721,12 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   power-on chime 0.35 s after the HUD shows, key beep on the ◀ ▶ buttons, **gps** (satellites found, at `FIX_T`), **pause / resume**
   (auto-pause after `AUTO_PAUSE` 2 s standing still: falling / rising two-note), **lap** (three even beeps every `LAP_M` 1 km),
   **turn** (nav prompt, once per bend as it comes within 100 m) / **feature** (double beep: jump, rocks), **battery** (90 % of
-  `BAT_LIFE`), **record** (a new best air time today, fanfare), **incident** (knocked out: alarm after the slow motion).
+  `BAT_LIFE`), **record** (a new best air time today, fanfare), **gear_end** (shifted into the easiest / hardest cog: high double blip), **gear_none** (a shift with no gear left that way, or a single speed: low buzz; `Game._shift` -> `hud.gear_changed(at_end)` / `gear_blocked`), **incident** (knocked out: alarm after the slow motion).
   All driven from `hud._computer_tones` / `_trail_scan`. Test: `BMX_BEEP_PROBE=1` prints `BEEP <name>`.
 - **Gear shift sound** (`game/shift_sound.gd`, `ShiftSound`): the user's own shifter recording, cut into six shifts
   (`assets/audio/shifter/shift_0..5.ogg`, lever in + spring back), one at random per shift (not the same twice in a row).
   Three synthesised versions were rejected ("an empty bottle", "clipped on high pitch"): use the recording.
-  Test: `BMX_SHIFT=secs` (shifts every 0.7 s, `SHIFT` lines; add `BMX_REC=file.wav`).
+  Test: `BMX_SHIFT=secs` (shifts every 0.7 s, `SHIFT` lines; `BMX_SHIFT_RUN=12` = 12 each way, runs into both ends; add `BMX_REC=file.wav`).
 - Small touches: "acquiring satellites" for the first 3 s of a ride, battery icon (full to empty in 30 min of riding, `BAT_LIFE`; blinks under 10 %). Back to start / new world (`hud.on_respawn`) restarts the computer: ride timer,
   trip (distance, avg, max), battery, GPS fix and power-on chime; test `BMX_RESPAWN=secs` presses Backspace then,
   backlight for 3 s on a button press or a new alert.

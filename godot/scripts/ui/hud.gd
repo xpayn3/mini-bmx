@@ -162,8 +162,13 @@ func flash(text: String) -> void:
 	msg_l.show_msg(text)
 	msg_a = 1.4
 
-func gear_changed() -> void:
+func gear_changed(at_end: bool = false) -> void:
 	if gauge: gauge.bump = 1.0; gauge.queue_redraw()
+	if at_end and beep: beep.tone("gear_end")      # now in the easiest / hardest gear
+
+## a shift asked for with no gear left that way (or a single speed): the computer says no
+func gear_blocked() -> void:
+	if beep: beep.tone("gear_none")
 
 func on_takeoff() -> void:
 	air_card.takeoff()

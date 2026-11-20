@@ -108,8 +108,6 @@ func _interface() -> Control:
 func _controller() -> Control:
 	var p := _page("Controller")
 	_section(p, "XBOX CONTROLLER")
-	_check(p, "Vibration", "rumble", "Rumble on landings and crashes")
-	_slider(p, "Vibration strength", "rumble_strength", 0.0, 1.5, 0.05, "%.2fx")
 	_hint(p, "Click a button, trigger or stick to change what it does. Buttons light up as you press them.")
 	var m := PadMap.new()
 	m.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -120,8 +118,50 @@ func _controller() -> Control:
 	_slider(p, "Steering response (stick)", "steer_sens", 0.5, 2.0, 0.05, "%.2f", "Above 1: quicker off-centre; below 1: finer near centre")
 	_slider(p, "Stick deadzone", "deadzone", 0.05, 0.5, 0.01)
 	_slider(p, "Steering curve (stick)", "pad_expo", 1.0, 3.0, 0.05, "%.2f", "Higher = the first bit of stick leans the bike in more gently; full lock stays at the edge")
+	_vibration(p)
 	var hb := HBoxContainer.new()
 	hb.add_theme_constant_override("separation", 10)
 	hb.add_child(UITheme.button("Reset controller buttons", func(): Settings.reset_pad_bindings(); m.queue_redraw(), _f(15)))
+	hb.add_child(UITheme.button("Reset vibration", _reset_vibration, _f(15)))
 	p.add_child(hb)
 	return p
+
+func _reset_vibration() -> void:
+	for k in Settings.DEFAULTS:
+		if String(k).begins_with("rumble"): Settings.set_v(k, Settings.DEFAULTS[k])
+	var tc := find_children("*", "TabContainer", true, false)
+	_build.call_deferred(tc[0].current_tab if tc.size() > 0 else 0)
+
+## VIBRATION: on / off, the motors, then one strength per effect (game/pad_rumble.gd). Changing any of
+## them plays that effect on the pad so you feel what you set.
+func _vibration(p: Control) -> void:
+	_section(p, "VIBRATION")
+	if Env.s("BMX_VIB_SCROLL") != "":   # tests: scroll the page to this section and play one effect's preview
+		var sec: Control = p.get_child(p.get_child_count() - 1)
+		var sc := p.get_parent() as ScrollContainer
+		get_tree().create_timer(0.8, true, false, true).timeout.connect(func():
+			if is_instance_valid(sc) and is_instance_valid(sec): sc.scroll_vertical = int(sec.position.y) - 10 + int(Env.s("BMX_VIB_DY") if Env.s("BMX_VIB_DY") != "" else "0")
+			PadRumble.preview(get_tree(), Env.s("BMX_VIB_SCROLL")))
+	var cb := CheckButton.new()
+	cb.button_pressed = Settings.get_v("rumble")
+	cb.toggled.connect(func(on):
+		Settings.set_v("rumble", on)
+		PadRumble.preview(get_tree(), "rumble"))
+	_row(p, "Vibration", cb, "Feel the ground, bumps, sliding tyres, landings and crashes through the pad")
+	_rumble_slider(p, "Overall strength", "rumble_strength", 0.0, 1.5, "Every effect at once")
+	_rumble_slider(p, "Heavy motor (left grip)", "rumble_heavy", 0.0, 1.5, "The low thump: landings, rear wheel, crashes")
+	_rumble_slider(p, "Light motor (right grip)", "rumble_light", 0.0, 1.5, "The fast buzz: ground, front wheel, tyre chatter")
+	_rumble_slider(p, "Faintest feel", "rumble_floor", 0.0, 0.2, "The lowest speed a motor runs at: raise it if light effects don't come through, lower it for silence on smooth ground", "%.2f")
+	_rumble_slider(p, "Slip chatter speed", "rumble_chatter", 0.5, 2.0, "How fast the sliding-tyre chatter pulses")
+	var last := ""
+	for e in PadRumble.EFFECTS:
+		if e[3] != last:
+			last = e[3]
+			_section(p, "VIBRATION: " + PadRumble.GROUPS[last])
+		_rumble_slider(p, e[1], e[0], 0.0, 2.0, e[2])
+
+func _rumble_slider(p: Control, text: String, key: String, lo: float, hi: float, tip: String, fmt := "%.2fx") -> void:
+	_slider_row(p, text, lo, hi, 0.05 if hi > 0.5 else 0.01, float(Settings.get_v(key)), float(Settings.DEFAULTS.get(key, 1.0)), fmt, tip,
+		func(v):
+			Settings.set_v(key, v)
+			PadRumble.preview(get_tree(), key))

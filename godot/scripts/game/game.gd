@@ -30,6 +30,7 @@ var ragdoll
 var rider
 var rig: BikeRig
 var phys: BikePhysics
+var rumble: PadRumble   # layered controller vibration (game/pad_rumble.gd)
 var cam: CameraRig
 var hud
 var wasted                  # crash slow-mo + "WASTED" look (fx/wasted.gd)
@@ -122,6 +123,7 @@ func _ready() -> void:
 	pedal_a0 = rig.pedal_a0
 	phys = BikePhysics.new(self)
 	phys.T = Tune.v
+	rumble = PadRumble.new(self)
 	phys.setup(rig.extras, bike_cfg)
 	ragdoll = Ragdoll.new(terrain)
 	rider = load("res://scripts/rider/rider.gd").new()
@@ -480,31 +482,42 @@ func _title_lights(heading: float) -> void:
 	var d := Vector3(cos(heading), 0.0, -sin(heading))        # the way the bike points
 	var f := Vector3(-d.z, 0.0, d.x)                          # the camera looks along this (side-on)
 	var c := Vector3(phys.x, phys.y + 0.7, phys.z)            # the middle of bike + rider
+	# a magazine shoot: a big soft key (softbox, soft-edged shadows, gentle on skin and the glossy
+	# helmet), a low cool fill (about 3:1, the shadow side keeps its shape), and a warm hard rim from
+	# behind like the low sun, which outlines the rider + bike against the bright sky. The sun is
+	# already strong, so the studio lights only shape: nothing on the rider may clip to white.
 	var key := SpotLight3D.new()
-	key.light_color = Color(1.0, 0.86, 0.7)
-	key.light_energy = 9.0
+	key.light_color = Color(1.0, 0.96, 0.92)
+	key.light_energy = 2.8
+	key.light_size = 1.2                 # a softbox: wide soft shadow edges, soft highlights
+	key.light_specular = 0.35            # no hot white spot on the helmet / skin
 	key.spot_range = 30.0
-	key.spot_angle = 24.0
-	key.spot_angle_attenuation = 0.6
+	key.spot_angle = 30.0
+	key.spot_angle_attenuation = 1.8     # a broad even pool, no hard spotlight circle on the ground
 	key.shadow_enabled = true
 	key.shadow_bias = 0.05
+	key.shadow_blur = 2.0
 	_studio.add_child(key)
-	key.look_at_from_position(c - f * 7.0 + d * 3.0 + Vector3(0, 4.5, 0), c, Vector3.UP)
+	key.look_at_from_position(c - f * 5.5 + d * 6.0 + Vector3(0, 3.4, 0), c, Vector3.UP)
 	var rim := SpotLight3D.new()
-	rim.light_color = Color(1.0, 0.72, 0.5)
-	rim.light_energy = 7.0
+	rim.light_color = Color(1.0, 0.68, 0.42)
+	rim.light_energy = 9.0
+	rim.light_size = 0.15
+	rim.light_specular = 1.2             # a bright edge glint on the helmet, frame tubes, tyres
 	rim.spot_range = 30.0
-	rim.spot_angle = 26.0
+	rim.spot_angle = 18.0
+	rim.spot_angle_attenuation = 1.2
 	rim.shadow_enabled = false
 	_studio.add_child(rim)
-	rim.look_at_from_position(c + f * 5.0 - d * 4.0 + Vector3(0, 3.5, 0), c, Vector3.UP)
+	rim.look_at_from_position(c + f * 4.0 - d * 5.5 + Vector3(0, 2.6, 0), c, Vector3.UP)
 	var fill := OmniLight3D.new()
-	fill.light_color = Color(0.75, 0.82, 1.0)
-	fill.light_energy = 0.7
-	fill.omni_range = 14.0
+	fill.light_color = Color(0.72, 0.8, 1.0)
+	fill.light_energy = 0.35
+	fill.light_specular = 0.0
+	fill.omni_range = 12.0
 	fill.shadow_enabled = false
 	_studio.add_child(fill)
-	fill.global_position = c - f * 5.0 + Vector3(0, 0.6, 0)
+	fill.global_position = c - f * 5.0 - d * 2.5 + Vector3(0, 0.4, 0)
 
 ## title screen: stand the bike on the hand-picked summit of the title world
 func _to_hilltop() -> void:
@@ -639,7 +652,6 @@ func start_crash(reason: String) -> void:
 	else: flash(reason)
 	if hud: hud.on_crash(crash_v)
 	if audio: audio.crash()
-	Settings.rumble(1.0, 1.0, 0.45)
 
 ## the helmet action cam snaps off its hinge and tumbles away (FlyingCam); a new one is on the helmet
 ## after getting up. The old one lies where it landed until a respawn or FlyingCam.LIFE.
@@ -705,7 +717,7 @@ func on_landing(air_time: float, impact: float) -> void:
 			(1.0 if ls == 1 else 0.85 if ls == 3 else 0.3) * clampf(air_time / 0.8, 0.4, 1.3))
 	elif air_time > 0.45 and (ls == 1 or ls == 3):
 		dust.cloud(Vector3(phys.x, phys.y, phys.z), phys.fwd() * phys.v * 0.3, ground_dust(phys.x, phys.z, ls), 2.6 + impact * 0.15, 1.1)
-	if air_time > 0.2: Settings.rumble(clampf(impact / 8, 0.15, 1), clampf(impact / 12, 0, 1), 0.12 + minf(0.25, impact * 0.02))
+	if rumble: rumble.landing(air_time, impact)
 
 ## the bike and rider as solid shapes the dust sim's air has to go round: two spinning wheels, the
 ## frame and the rider's body
@@ -1044,10 +1056,12 @@ func _unhandled_input(e: InputEvent) -> void:
 
 func _shift(d: int) -> void:
 	if not phys.geared:
-		flash("Single speed"); return
+		flash("Single speed"); hud.gear_blocked(); return
 	if phys.shift(d):
-		hud.gear_changed()
+		hud.gear_changed(phys.gear == 0 or phys.gear == phys.cogs.size() - 1)
 		if audio: audio.shift(d)
+	else:
+		hud.gear_blocked()
 
 ## demo mode: an AI rider (game/demo_pilot.gd) supplies the input instead of the keys / pad, F2 hands it back
 var demo: DemoPilot = null
@@ -1145,6 +1159,9 @@ func _physics_process(dt: float) -> void:
 	_snap_prev()
 	var inp := _read_input()
 	phys.step(dt, inp)
+	if rumble:
+		if input_enabled and not photo and not (paper_map and paper_map.busy()): rumble.update(dt, inp)
+		else: rumble.stop()
 	ride_log.record(dt, phys, inp, _log_lift, rig.position.y if rig else 0.0, rider.J if rider else [])
 	if jitter_on and not phys.crash_on:
 		for kv in [["slip", phys.slip, 0.002], ["yaw_rate", phys.yaw_rate, 0.02], ["lean", phys.lean, 0.002], ["bike_lean", phys.bike_lean, 0.003],
@@ -1219,6 +1236,7 @@ func exit_map() -> void:
 
 func _exit_tree() -> void:
 	Engine.time_scale = 1.0
+	if rumble: rumble.stop()
 
 # tests (BMX_DAB_PROBE): per-frame shoe moves on the bike, the sole's lowest point vs the ground
 var dab_probe := Env.s("BMX_DAB_PROBE") != ""

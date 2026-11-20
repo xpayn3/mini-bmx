@@ -104,6 +104,15 @@ const DEFAULTS := {
 	"boot_intro": true,      # launch: the CRT TV intro (off = a still frame of it while the game loads)
 	"rumble": true,
 	"rumble_strength": 1.0,  # × every controller vibration
+	"rumble_heavy": 1.0,     # × the heavy (left, strong) motor
+	"rumble_light": 1.0,     # × the light (right, weak) motor
+	"rumble_floor": 0.06,    # lowest motor speed for anything felt at all (motors barely turn below ~0.06)
+	"rumble_chatter": 1.0,   # × how fast the tyre-slip chatter pulses
+	# × each effect (game/pad_rumble.gd PadRumble.EFFECTS)
+	"rumble_road": 1.0, "rumble_bumps": 1.0, "rumble_bottom": 1.0, "rumble_water": 1.0,
+	"rumble_slip": 1.0, "rumble_spin": 1.0, "rumble_brake": 1.0, "rumble_skid": 1.0,
+	"rumble_pedal": 1.0, "rumble_takeoff": 1.0, "rumble_land": 1.0,
+	"rumble_smash": 1.0, "rumble_crash": 1.0, "rumble_tumble": 1.0,
 	"wasted": true,          # crash: slow motion + "WASTED" screen
 	"blood": true,           # crash: blood smears on the ground, torn-off limbs on very hard crashes
 	"steer_sens": 1.0,       # analog steering response (1 = linear)
