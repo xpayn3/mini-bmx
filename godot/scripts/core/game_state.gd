@@ -76,6 +76,11 @@ func bike_config_for(id: String) -> Dictionary:
 		cfg.mods = mods
 		for k in mods.ride:
 			cfg.ride[k] = float(cfg.ride.get(k, 1.0)) * float(mods.ride[k])
+		# the frame's own character: geometry, weight, suspension design, class (BikeBuild.frame_mods)
+		var fm := BikeBuild.frame_mods(id, b)
+		for k in fm:
+			cfg.ride[k] = float(cfg.ride.get(k, 1.0)) * float(fm[k])
+		cfg.kg = BikeBuild.bike_kg(id, b)
 	elif bmx_tyre != "":
 		cfg.tyre_build = BikeBuild.bmx_build(bmx_tyre)
 	return cfg

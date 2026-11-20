@@ -77,7 +77,7 @@ func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
 	if rotor_id != "stock":
 		_swap_rotors(rotor_id)
 	_grips()
-	_pedals()
+	_pedals(str(build.get("drive", {}).get("pedals", "stock")), str(cfg.file))
 	_saddle()
 	var decal_cfg: Dictionary = BikeDecals.DH_DECALS if cfg.get("decals", false) else {}
 	if build.is_empty() and cfg.has("tyre_build"):   # a frame without a garage build: just the tyres
@@ -589,15 +589,16 @@ func _grips() -> void:
 		else: grip_l += p; nl += 1
 	grip_l /= maxi(nl, 1); grip_r /= maxi(nr, 1)
 
-func _pedals() -> void:
-	## the crank's plastic surface holds both pedals: cut it into a left and a right pedal, each on
-	## its own pivot, counter-rotated every frame so the pedals stay level while the crank turns
-	var mi := crank_n as MeshInstance3D
-	var si := _surface_named(mi, "plastic")
-	if si < 0:
-		return
-	var arr := mi.mesh.surface_get_arrays(si)
-	var mat := mi.mesh.surface_get_material(si)
+## the pedal pair in a crank mesh's "plastic" surface (every frame model keeps both pedals there), cut into one
+## pedal per side: {side (-1 / 1): [mesh centred on the pedal, centre in the crank's frame]}
+static func _split_pedals(crank: Mesh) -> Dictionary:
+	var out := {}
+	var si := -1
+	for i in crank.get_surface_count():
+		var m := crank.surface_get_material(i)
+		if m and m.resource_name == "plastic": si = i
+	if si < 0: return out
+	var arr := crank.surface_get_arrays(si)
 	var pos: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
 	var nrm: PackedVector3Array = arr[Mesh.ARRAY_NORMAL]
 	var idx: PackedInt32Array = arr[Mesh.ARRAY_INDEX]
@@ -624,9 +625,42 @@ func _pedals() -> void:
 		a2[Mesh.ARRAY_VERTEX] = p2; a2[Mesh.ARRAY_NORMAL] = n2; a2[Mesh.ARRAY_INDEX] = i2
 		var am := ArrayMesh.new()
 		am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, a2)
-		am.surface_set_material(0, mat)
-		var pm := MeshInstance3D.new(); pm.mesh = am
-		var pivot := Node3D.new(); pivot.position = c
+		am.surface_set_material(0, crank.surface_get_material(si))   # (pictures; the bike overrides it with its own)
+		out[side] = [am, c]
+	return out
+
+static var _pedal_models := {}   # glb path -> _split_pedals of its crank
+
+## the pedals of a model (BikeBuild.PEDALS id; "stock" = this frame's own, `own` = its glb): {side: [mesh, centre]}
+static func pedal_set(id: String, own := "res://assets/dh.glb") -> Dictionary:
+	var path: String = own if id == "stock" else BikeBuild.PEDAL_GLB.get(id, own)
+	if not _pedal_models.has(path):
+		var sc: Node = load(path).instantiate()
+		var cr := sc.find_child("crank", true, false) as MeshInstance3D
+		_pedal_models[path] = _split_pedals(cr.mesh) if cr and cr.mesh else {}
+		sc.free()
+	return _pedal_models[path]
+
+func _pedals(pedal_id := "stock", own_glb := "") -> void:
+	## the crank's plastic surface holds both pedals: cut it into a left and a right pedal, each on
+	## its own pivot, counter-rotated every frame so the pedals stay level while the crank turns.
+	## Another model's pedals (garage Gears tab, build.drive.pedals) go on the same pivots: each pedal centred
+	## where this frame's own pedal was.
+	var mi := crank_n as MeshInstance3D
+	var si := _surface_named(mi, "plastic")
+	if si < 0:
+		return
+	var mat := mi.mesh.surface_get_material(si)
+	var own := _split_pedals(mi.mesh)
+	var use := own
+	if pedal_id != "stock" and BikeBuild.PEDAL_GLB.has(pedal_id) and BikeBuild.PEDAL_GLB[pedal_id] != own_glb:
+		use = pedal_set(pedal_id)
+	for side in [-1.0, 1.0]:
+		if not own.has(side) or not use.has(side): continue
+		var pm := MeshInstance3D.new()
+		pm.mesh = use[side][0]
+		pm.set_surface_override_material(0, mat)   # this frame's pedal material: paint keeps working
+		var pivot := Node3D.new(); pivot.position = own[side][1]
 		pivot.add_child(pm)
 		mi.add_child(pivot)
 		pedal_pivots.append(pivot)

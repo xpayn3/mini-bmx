@@ -153,6 +153,10 @@ const LEVERS := [["stock", "RUNOUT stock"], ["tues", "Yonder Tusk"], ["fuzz", "N
 ## direct-mount stems for the stock frame (assets/forks/stem_<id>.glb, tools/make_forks.py; BikeRig._swap_cockpit): the bar rides in its clamp
 const STEMS := [["stock", "RUNOUT stock"], ["tues", "Yonder Tusk"], ["fuzz", "Nexo Fizz"]]
 const POSTS := [["stock", "Slammed (stock)"], ["dropper", "Dropper"]]
+## pedals: the pedal pair out of a frame model's crank (BikeRig.pedal_set), fitted on any frame's own pedal spots;
+## "stock" = the frame's own. PEDAL_GLB: where each pair comes from.
+const PEDALS := [["stock", "Frame's own"], ["dh", "RUNOUT flats"], ["tues", "Yonder Tusk"], ["fuzz", "Nexo Fizz"]]
+const PEDAL_GLB := {"dh": "res://assets/dh.glb", "tues": "res://assets/tues.glb", "fuzz": "res://assets/fuzz.glb"}
 ## rear brake calipers for the stock frame (assets/forks/caliper_<id>.glb, tools/make_forks.py); "stock" = the GLORY's own
 const REAR_CALIPERS := [["stock", "RUNOUT stock"], ["tues", "Yonder Tusk"], ["fuzz", "Nexo Fizz"]]
 
@@ -238,10 +242,102 @@ static func default_build() -> Dictionary:
 		"bars": {"width": 780, "rise": 30, "material": "alloy", "levers": "stock", "stem": "stock"},
 		"seat": {"model": "stock", "post": "stock", "post_h": 0.0},
 		"suspension": {"fork_model": "custom", "fork_travel": 200, "shock_travel": 200, "fork_spring": 1, "shock_spring": 1, "rebound": 1, "rear_caliper": "stock", "rotor": "stock"},
-		"drive": {"ring": 34, "cassette": "dh7"},
+		"drive": {"ring": 34, "cassette": "dh7", "pedals": "stock"},
 		# the bike's action cam: mount = ActionCam.BIKE_MOUNTS (none / bars / fork), the rest = the camera + add-ons (ActionCam.GEAR_ROWS)
 		"camera": {"mount": "none", "model": "hero", "lens": "stock", "housing": "none", "mic": "none", "acc": "none"},
 	}
+
+## Showroom editions: ready-made bikes on the garage frames, each its own colourway + mix of parts (made-up names).
+## frame = GameState.BIKES id; fork / tyre / rim / bar = model keys (applied through their presets, so the fork's
+## colours, the tyre lettering etc. come along); set = anything else, merged over the stock build (keys that exist).
+## Picking one in the garage loads it as the build to ride / edit (saved with SAVE like any change).
+const EDITIONS := {
+	"ghost_pepper": {"label": "Ghost Pepper", "style": "allround", "frame": "dh", "fork": "fox40p", "tyre": "assegai", "rim": "deemax", "bar": "fatbar_c",
+		"set": {"paint": {"frame": {"color": "111214", "finish": "matte"}, "rear": {"color": "111214", "finish": "matte"},
+			"linkage": {"color": "e8432e", "finish": "anodized"}, "spring": {"color": "e8432e", "finish": "gloss"},
+			"grips": {"color": "e8432e", "finish": "matte"}, "crank": {"color": "111214", "finish": "anodized"}},
+			"wheels": {"rim_color": "111214", "nipple_color": "e8432e", "hub_color": "e8432e"},
+			"logos": {"downtube": {"fill": "e8432e"}, "toptube": {"fill": "e8432e"}},
+			"drive": {"cassette": "helix"}, "suspension": {"rotor": "tues"}}},
+	"lime_slime": {"label": "Lime Slime", "style": "speed", "frame": "tues", "fork": "dorado", "tyre": "kryptotal", "rim": "fr560",
+		"set": {"paint": {"frame": {"color": "c6ff1a", "finish": "gloss"}, "rear": {"color": "c6ff1a", "finish": "gloss"},
+			"spring": {"color": "111214", "finish": "gloss"}, "grips": {"color": "c6ff1a", "finish": "matte"}},
+			"wheels": {"rim_color": "b8bcc0", "rim_finish": "chrome", "nipple_color": "c6ff1a"}, "drive": {"cassette": "mtb11"}}},
+	"mango_tango": {"label": "Mango Tango", "style": "freeride", "frame": "goat", "fork": "bomber58", "tyre": "dh22", "rim": "arc30",
+		"set": {"paint": {"frame": {"color": "ff6a00", "color2": "ffd21f", "finish": "pearl"}, "rear": {"color": "ff6a00", "color2": "ffd21f", "finish": "pearl"},
+			"spring": {"color": "ffd21f", "finish": "gloss"}, "grips": {"color": "ff6a00", "finish": "matte"}},
+			"wheels": {"rim_color": "2b2d31", "nipple_color": "ffb000"}, "drive": {"cassette": "summit"}}},
+	"midnight_owl": {"label": "Midnight Owl", "style": "freeride", "frame": "fuzz", "fork": "fuzz_fork", "tyre": "magic_mary", "rim": "flow",
+		"set": {"paint": {"frame": {"color": "1d2b64", "finish": "candy"}, "rear": {"color": "1d2b64", "finish": "candy"},
+			"spring": {"color": "c8a24a", "finish": "gloss"}, "grips": {"color": "111214", "finish": "matte"}},
+			"wheels": {"rim_color": "c8a24a", "rim_finish": "gloss", "nipple_color": "c8a24a"},
+			"drive": {"cassette": "eagle"}, "suspension": {"rotor": "fuzz"}}},
+	"bubblegum_bandit": {"label": "Bubblegum Bandit", "style": "park", "frame": "dh", "fork": "dorado", "tyre": "minion_dhf", "rim": "lg1", "bar": "atlas",
+		"set": {"paint": {"frame": {"color": "ff4f9a", "finish": "gloss"}, "rear": {"color": "ff4f9a", "finish": "gloss"},
+			"linkage": {"color": "f4f4f0", "finish": "gloss"}, "spring": {"color": "f4f4f0", "finish": "gloss"},
+			"grips": {"color": "f4f4f0", "finish": "matte"}, "saddle": {"color": "f4f4f0", "finish": "satin"}},
+			"wheels": {"rim_color": "f4f4f0", "rim_finish": "gloss", "spoke_color": "f4f4f0", "nipple_color": "ff4f9a"},
+			"drive": {"cassette": "rainbow"}, "bars": {"levers": "fuzz"}, "seat": {"model": "fuzz"}}},
+	"rusty_nail": {"label": "Rusty Nail", "style": "allround", "frame": "goat", "fork": "era", "tyre": "butcher", "rim": "reserve30",
+		"set": {"paint": {"frame": {"color": "8a5a2b", "finish": "satin"}, "rear": {"color": "8a5a2b", "finish": "satin"},
+			"spring": {"color": "e0d3b8", "finish": "gloss"}, "grips": {"color": "e0d3b8", "finish": "matte"}},
+			"wheels": {"rim_color": "6b6f75", "nipple_color": "c8a24a"}, "drive": {"cassette": "dh7w"}}},
+	"frosty_gnar": {"label": "Frosty Gnar", "style": "race", "frame": "tues", "fork": "fox40f", "tyre": "minion_dhr", "rim": "synthesis",
+		"set": {"paint": {"frame": {"color": "f4f4f0", "finish": "gloss"}, "rear": {"color": "f4f4f0", "finish": "gloss"},
+			"spring": {"color": "2f7de1", "finish": "gloss"}, "grips": {"color": "2f7de1", "finish": "matte"}},
+			"wheels": {"rim_color": "2f7de1", "rim_finish": "gloss", "nipple_color": "f4f4f0"},
+			"drive": {"cassette": "xtr"}, "suspension": {"rotor": "tues"}}},
+	"hot_lava": {"label": "Hot Lava", "style": "park", "frame": "fuzz", "fork": "boxxer_u", "tyre": "big_betty", "rim": "oozy",
+		"set": {"paint": {"frame": {"color": "e8432e", "color2": "ffb000", "finish": "candy"}, "rear": {"color": "e8432e", "color2": "ffb000", "finish": "candy"},
+			"spring": {"color": "111214", "finish": "gloss"}, "grips": {"color": "ffb000", "finish": "matte"}},
+			"wheels": {"rim_color": "111214", "nipple_color": "ffb000"}, "drive": {"cassette": "dh7"}}},
+	"stealth_mode": {"label": "Stealth Mode", "style": "race", "frame": "dh", "fork": "boxxer_s", "tyre": "shorty", "rim": "moto", "bar": "m9",
+		"set": {"paint": {"frame": {"color": "2b2d31", "finish": "matte"}, "rear": {"color": "2b2d31", "finish": "matte"},
+			"linkage": {"color": "111214", "finish": "anodized"}, "spring": {"color": "2b2d31", "finish": "satin"},
+			"grips": {"color": "111214", "finish": "matte"}, "crank": {"color": "111214", "finish": "anodized"}},
+			"wheels": {"rim_color": "111214", "spoke_color": "2b2d31", "nipple_color": "111214", "hub_color": "111214"},
+			"logos": {"downtube": {"fill": "6b6f75"}, "toptube": {"fill": "6b6f75"}, "chainstay": {"fill": "6b6f75"}},
+			"drive": {"cassette": "dh7w"}, "bars": {"levers": "tues", "stem": "tues"}, "suspension": {"rear_caliper": "tues"}}},
+	"toxic_waste": {"label": "Toxic Waste", "style": "speed", "frame": "goat", "fork": "onyx", "tyre": "minion_ss", "rim": "fuse",
+		"set": {"paint": {"frame": {"color": "35d04a", "color2": "7b3fe4", "finish": "pearl"}, "rear": {"color": "7b3fe4", "finish": "metallic"},
+			"spring": {"color": "c6ff1a", "finish": "gloss"}, "grips": {"color": "7b3fe4", "finish": "matte"}},
+			"wheels": {"rim_color": "7b3fe4", "rim_finish": "gloss", "nipple_color": "c6ff1a"}, "drive": {"cassette": "everest"}}},
+}
+
+## riding styles: the parts that make a bike ride for it (wheels, travel, springs, gearing), laid over an edition's
+## own set (its colours and the rest stay). Park = small, firm, light: pops and spins; speed = big wheels, tall gears.
+const STYLES := {
+	"park":     {"label": "Park", "set": {"wheels": {"front": "27.5", "rear": "27.5", "tyre_w": 2.35},
+		"suspension": {"fork_travel": 160, "shock_travel": 160, "fork_spring": 2, "shock_spring": 2, "rebound": 2},
+		"drive": {"ring": 32, "cassette": "single"}}},
+	"freeride": {"label": "Freeride", "set": {"wheels": {"front": "27.5", "rear": "27.5", "tyre_w": 2.6},
+		"suspension": {"fork_travel": 180, "shock_travel": 180, "fork_spring": 1, "shock_spring": 1, "rebound": 1},
+		"drive": {"ring": 32}}},
+	"allround": {"label": "All-round", "set": {}},
+	"race":     {"label": "Race", "set": {"wheels": {"front": "29", "rear": "29"},
+		"suspension": {"fork_travel": 200, "shock_travel": 200, "rebound": 0},
+		"drive": {"ring": 36, "cassette": "dh7"}}},
+	"speed":    {"label": "Speed", "set": {"wheels": {"front": "29", "rear": "29", "tyre_w": 2.4, "rim_material": "carbon"},
+		"suspension": {"fork_travel": 200, "shock_travel": 200, "fork_spring": 2, "shock_spring": 2, "rebound": 1},
+		"drive": {"ring": 38, "cassette": "dh7"}}},
+}
+
+## the build of a showroom edition (EDITIONS)
+static func edition_build(id: String) -> Dictionary:
+	var e: Dictionary = EDITIONS[id]
+	var b := default_build()
+	b.name = String(e.label).to_upper()
+	if e.has("fork"): apply_fork_model(b, e.fork)
+	if e.has("tyre"): apply_tyre_model(b, e.tyre)
+	if e.has("rim"): apply_rim_model(b, e.rim)
+	if e.has("bar") and Handlebar.MODELS.has(e.bar):
+		var m: Dictionary = Handlebar.MODELS[e.bar]
+		b.bars.model = e.bar
+		for k in ["width", "rise", "material"]:
+			if m.has(k): b.bars[k] = m[k]
+	_merge(b, e.get("set", {}))
+	_merge(b, STYLES.get(str(e.get("style", "allround")), STYLES.allround).set)   # the style's riding parts on top
+	return b
 
 ## the BMX only takes tyres: stock 20" wheels with this tyre model on them (single speed, no cassette)
 static func bmx_build(tyre_key: String) -> Dictionary:
@@ -465,17 +561,191 @@ static func ride_mods(b: Dictionary) -> Dictionary:
 		"fork_travel": float(s.fork_travel) / 1000.0, "shock_travel": float(s.shock_travel) / 1000.0,
 		"land": 0.85 + 0.15 * trav}
 
-## the garage's bars, 0..1
-static func stats(b: Dictionary) -> Dictionary:
+# ---------------------------------------------------------------- frame character
+## Every garage frame rides differently, from what it is: its geometry (measured off its glb by
+## tools/frame_geo_probe.gd), its weight and its suspension design. The RUNOUT DH ("dh") is the reference: with
+## stock parts all its multipliers are 1 (the tuned feel). The physics already turns on the real wheelbase
+## (yaw = v tan(steer) / L); frame_mods adds what the sim had no notion of:
+##   wheelbase  longer = calmer at speed (bumps knock the rear less, slides caught easier, less twitch) but slower
+##              to flick side to side, harder to whip
+##   head angle slacker (deg) = steadier, a steep drop takes more to nose-dive; lazier steering when slow
+##   chainstay  shorter = easier to manual / wheelie / pop / whip; longer = steadier, less wheelspin climbing
+##   bb_drop    lower bottom bracket (more drop) = more planted, grippier carving; higher = quicker to flick over
+##   kg         frame weight (with shock): the whole bike's weight (bike_kg) vs. the rider: heavier keeps its speed
+##              (air drag hurts less), stays planted on bumps; lighter accelerates, brakes and pops quicker
+##   progression rear suspension ramp-up: more = takes bigger hits (landings) and pumps / pops harder
+##   anti_squat pedalling efficiency (the suspension doesn't bob): more = more drive from each stroke
+##   stiff      frame / front end stiffness: sharper steering, less tyre squirm
+##   class      what it's built for (CLASSES): slow -> fast; sets the gear-limited top speed
+const FRAMES := {
+	"fuzz": {"class": "freeride", "wheelbase": 1.254, "head": 62.0, "chainstay": 0.449, "bb_drop": 0.017, "kg": 4.0,
+		"progression": 0.85, "anti_squat": 0.35, "stiff": 0.95},
+	"dh":   {"class": "allround", "wheelbase": 1.256, "head": 62.8, "chainstay": 0.442, "bb_drop": 0.035, "kg": 4.6,
+		"progression": 0.6, "anti_squat": 0.5, "stiff": 1.0},
+	"tues": {"class": "race", "wheelbase": 1.273, "head": 63.2, "chainstay": 0.451, "bb_drop": 0.0, "kg": 4.9,
+		"progression": 0.5, "anti_squat": 0.7, "stiff": 1.1},
+	"goat": {"class": "speed", "wheelbase": 1.380, "head": 62.8, "chainstay": 0.504, "bb_drop": 0.034, "kg": 5.6,
+		"progression": 0.45, "anti_squat": 0.6, "stiff": 1.15},
+}
+## the frame classes, slow -> fast. top = gear-limited top speed (topSpeed, pedalTop); the rest multiply on top of
+## the geometry (a park bike flips and spins a little quicker, a speed bike a little slower)
+const CLASSES := {
+	"freeride": {"label": "Freeride", "top": 0.93, "extra": {"flipRate": 1.06, "stickSpinMax": 1.06, "flickSpeed": 1.05, "leanRate": 1.08, "turnFast": 1.05}},
+	"allround": {"label": "All-round", "top": 1.0, "extra": {}},
+	"race":     {"label": "Race", "top": 1.06, "extra": {"flipRate": 0.97}},
+	"speed":    {"label": "Speed", "top": 1.12, "extra": {"flipRate": 0.94, "stickSpinMax": 0.94, "flickSpeed": 0.95, "leanRate": 0.94}},
+}
+const RIDER_KG := 75.0
+const PEDAL_KG := {"dh": 0.36, "tues": 0.42, "fuzz": 0.38}
+
+## the bike's weight by part (kg): frame (with shock), wheels (rims, spokes, tyres; both), fork, cassette, pedals,
+## cockpit (bars, stem, grips), rest (brakes, cranks, chain, seat: the same on every build)
+static func kg_parts(frame: String, b: Dictionary) -> Dictionary:
+	var F: Dictionary = FRAMES.get(frame, FRAMES.dh)
+	var w: Dictionary = b.wheels
+	var s: Dictionary = b.suspension
+	var wheels := 0.0
+	for size in [w.front, w.rear]:
+		wheels += {"20": 1.5, "26": 1.9, "27.5": 2.0, "29": 2.15}.get(str(size), 2.0)
+		wheels += (float(w.tyre_w) - 2.5) * 0.5 + (int(w.spokes) - 32) * 0.006 - (0.25 if w.rim_material == "carbon" else 0.0)
+	var fm: Dictionary = FORK_MODELS.get(str(s.get("fork_model", "")), {})
+	var fork := 2.7 + (0.35 if str(fm.get("spring", "Air")) == "Coil" else 0.0) + (float(s.fork_travel) - 200.0) * 0.005
+	var cogs: Array = CASSETTES[b.drive.cassette].cogs
+	return {
+		"Frame": float(F.kg),
+		"Wheels": wheels,
+		"Fork": fork,
+		"Cassette": cogs.size() * 0.03 + float(cogs[cogs.size() - 1]) * 0.004,
+		"Pedals": float(PEDAL_KG.get(str(b.drive.get("pedals", "stock")), 0.38)),
+		"Cockpit": 0.9 - (0.1 if str(b.bars.get("material", "alloy")).begins_with("carbon") else 0.0),
+		"Rest": 4.4,
+	}
+
+## the whole bike's weight (kg): frame + the parts the build fits
+static func bike_kg(frame: String, b: Dictionary) -> float:
+	var kg := 0.0
+	for v in kg_parts(frame, b).values(): kg += float(v)
+	return kg
+
+static func _opt_label(list: Array, id: String) -> String:
+	for o in list:
+		if str(o[0]) == id: return String(o[1])
+	return id
+
+## everything about a build, as [label, value] rows (garage part info): what the bike is fitted with
+static func props(b: Dictionary) -> Array:
+	var w: Dictionary = b.wheels
+	var s: Dictionary = b.suspension
+	var d: Dictionary = b.drive
+	var fm: Dictionary = FORK_MODELS.get(str(s.get("fork_model", "")), {})
+	var cogs: Array = CASSETTES[d.cassette].cogs
+	var rate := ["soft", "medium", "firm"]
+	var tm: Dictionary = TYRE_MODELS.get(str(w.get("tyre_model", "")), {})
+	var rm: Dictionary = RIM_MODELS.get(str(w.get("rim_model", "")), {})
+	return [
+		["Fork", "%s  ·  %d mm  ·  %s  ·  %s" % [String(fm.get("label", "Custom")), int(s.fork_travel), String(fm.get("spring", "Air")), rate[int(s.fork_spring)]]],
+		["Rear shock", "%d mm  ·  %s  ·  rebound %s" % [int(s.shock_travel), rate[int(s.shock_spring)], ["slow", "medium", "fast"][int(s.rebound)]]],
+		["Wheels", "%s\" front  ·  %s\" rear  ·  %d spokes" % [w.front, w.rear, int(w.spokes)]],
+		["Tyres", "%s  ·  %.1f\"  ·  %s  ·  %s casing" % [String(tm.get("label", "Custom")), float(w.tyre_w), String(w.pattern), String(w.casing)]],
+		["Rims", "%s  ·  %s  ·  %s" % [String(rm.get("label", "Custom")), String(w.rim_material), String(w.rim_profile)]],
+		["Bars", "%d mm  ·  %d mm rise  ·  %s" % [int(b.bars.width), int(b.bars.rise), String(b.bars.material)]],
+		["Gearing", "%dT ring  ·  %d-speed %d–%dT" % [int(d.ring), cogs.size(), cogs[0], cogs[cogs.size() - 1]]],
+		["Brakes", "%s rotors  ·  %s rear caliper  ·  %s levers" % [_opt_label(ROTORS, str(s.get("rotor", "stock"))),
+			_opt_label(REAR_CALIPERS, str(s.get("rear_caliper", "stock"))), _opt_label(LEVERS, str(b.bars.get("levers", "stock")))]],
+		["Pedals", _opt_label(PEDALS, str(d.get("pedals", "stock")))],
+	]
+
+## the frame's ride multipliers (Tune keys) for a build on it: geometry + weight + suspension design + class
+static func frame_mods(frame: String, b: Dictionary) -> Dictionary:
+	if not FRAMES.has(frame): return {}
+	var F: Dictionary = FRAMES[frame]
+	var R: Dictionary = FRAMES.dh
+	var d := float(F.wheelbase) / float(R.wheelbase) - 1.0   # wheelbase, fraction longer
+	var h := float(R.head) - float(F.head)                   # degrees slacker
+	var c := float(F.chainstay) - float(R.chainstay)         # m longer
+	var bb := float(F.bb_drop) - float(R.bb_drop)            # m lower
+	var pr := float(F.progression) - float(R.progression)
+	var aq := float(F.anti_squat) - float(R.anti_squat)
+	var st := float(F.stiff)
+	var kg := bike_kg(frame, b)
+	var kg_ref := bike_kg("dh", default_build())
+	var k := (RIDER_KG + kg) / (RIDER_KG + kg_ref)   # the whole system's mass vs. the reference
+	var kb := kg / kg_ref                            # the bike alone
+	var cl: Dictionary = CLASSES[F["class"]]
+	var m := {}
+	var mul := func(key: String, f: float) -> void: m[key] = float(m.get(key, 1.0)) * f
+	# class: the gear-limited top speed
+	mul.call("topSpeed", cl.top); mul.call("pedalTop", cl.top)
+	for key in cl.extra: mul.call(key, cl.extra[key])
+	# weight: forces stay, mass changes -> the same push / brake / drag moves a heavier bike less
+	mul.call("airDrag", 1.0 / k)
+	for key in ["pedalLaunch", "pedalPower", "sprintKick", "brakeForce"]: mul.call(key, 1.0 / k)
+	mul.call("popPower", 1.0 / sqrt(kb))
+	mul.call("gripBumps", 1.0 / kb)       # a heavy bike isn't knocked about as much
+	mul.call("flickSpeed", 1.0 / sqrt(kb))
+	# wheelbase
+	mul.call("leanRate", 1.0 - 3.0 * d)
+	mul.call("turnFast", 1.0 - 1.5 * d)   # a long bike needs more room to turn at speed
+	mul.call("turnSlow", 1.0 - 1.0 * d)
+	mul.call("flickKick", 1.0 - 3.0 * d)
+	mul.call("whipSnap", 1.0 - 2.0 * d)
+	mul.call("counter", 1.0 - 2.0 * d)
+	mul.call("gripBumps", 1.0 - 2.5 * d)
+	mul.call("oversteer", 1.0 - 2.0 * d)
+	mul.call("slipRecover", 1.0 + 1.5 * d)
+	# head angle
+	mul.call("noseDive", 1.0 + 0.06 * h)
+	mul.call("steerRate", 1.0 - 0.04 * h)
+	mul.call("slowSteer", 1.0 - 0.04 * h)
+	mul.call("turnSlow", 1.0 - 0.04 * h)
+	mul.call("counter", 1.0 - 0.04 * h)
+	# chainstay
+	mul.call("manualAngle", 1.0 - 3.0 * c)
+	mul.call("wheelieClimb", 1.0 - 4.0 * c)
+	mul.call("sprintLift", 1.0 - 3.0 * c)
+	mul.call("whipSnap", 1.0 - 3.0 * c)
+	mul.call("gripPower", 1.0 - 4.0 * c)
+	mul.call("popPower", 1.0 - 2.0 * c)
+	# bottom bracket height
+	mul.call("grip", 1.0 + 1.0 * bb)
+	mul.call("carveGrip", 1.0 + 3.0 * bb)
+	mul.call("leanRate", 1.0 - 3.0 * bb)
+	# suspension design
+	mul.call("slamJolt", 1.0 + 0.5 * pr)
+	mul.call("popPower", 1.0 + 0.4 * pr)
+	mul.call("pumpGain", 1.0 + 0.4 * pr)
+	mul.call("pedalPower", 1.0 + 0.3 * aq)
+	mul.call("sprintPower", 1.0 + 0.3 * aq)
+	mul.call("steerEase", st)
+	mul.call("gripSquirm", 2.0 - st)
+	for key in m: m[key] = clampf(m[key], 0.6, 1.5)
+	return m
+
+## the garage's bars, 0..1 (the build on `frame`)
+static func stats(b: Dictionary, frame := "dh") -> Dictionary:
 	var m := ride_mods(b)
 	var r: Dictionary = m.ride
+	var fm := frame_mods(frame, b)
+	var g := func(key: String) -> float: return float(fm.get(key, 1.0))
 	var cogs: Array = m.cogs
 	var top: float = m.ring_k * 16.0 / float(cogs[0])            # top-gear speed vs. stock 16T
 	var low: float = m.ring_k * 16.0 / float(cogs[cogs.size() - 1])
 	return {
-		"Top speed": clampf(0.35 + (top - 1.0) * 0.5 - (r.rollRes - 1.0) * 0.4, 0, 1),
-		"Acceleration": clampf(0.6 + (1.0 - low) * 0.6 + (r.pedalLaunch - 1.0) * 2.0 - (r.rollRes - 1.0) * 0.3, 0, 1),
-		"Handling": clampf(0.55 + (r.steerRate - 1.0) * 2.5 + (r.grip - 1.0) * 0.8, 0, 1),
-		"Grip": clampf(0.55 + (r.grip - 1.0) * 1.8, 0, 1),
-		"Landing": clampf(0.3 + (r.travel - 0.8) * 1.2 + (r.tyreDamp - 1.0) * 0.4, 0, 1),
+		"Top speed": clampf(0.35 + (top - 1.0) * 0.5 - (r.rollRes - 1.0) * 0.4 + (g.call("topSpeed") - 1.0) * 3.0
+			+ (1.0 / g.call("airDrag") - 1.0) * 1.5, 0, 1),
+		"Acceleration": clampf(0.6 + (1.0 - low) * 0.6 + (r.pedalLaunch - 1.0) * 2.0 - (r.rollRes - 1.0) * 0.3
+			+ (g.call("pedalPower") - 1.0) * 2.0, 0, 1),
+		"Handling": clampf(0.55 + (r.steerRate - 1.0) * 2.5 + (r.grip - 1.0) * 0.8 + (g.call("leanRate") - 1.0) * 2.0
+			+ (g.call("steerRate") - 1.0) * 1.5, 0, 1),
+		"Grip": clampf(0.55 + (r.grip - 1.0) * 1.8 + (g.call("grip") - 1.0) * 1.8 + (g.call("carveGrip") - 1.0) * 0.5, 0, 1),
+		"Landing": clampf(0.3 + (r.travel - 0.8) * 1.2 + (r.tyreDamp - 1.0) * 0.4 + (g.call("slamJolt") - 1.0) * 1.5, 0, 1),
+		"Pop": clampf(0.5 + (g.call("popPower") - 1.0) * 2.5 + (g.call("manualAngle") - 1.0) * 1.0 + (r.travel - 1.0) * -0.4, 0, 1),
 	}
+
+## speed class in stars, 1 (slow) .. 5 (fast): the top-speed bar of this build on this frame
+static func stars(b: Dictionary, frame := "dh") -> int:
+	return clampi(roundi(stats(b, frame)["Top speed"] * 5.0 + 1.2), 1, 5)
+
+## "★★★☆☆" for a star count
+static func star_text(n: int) -> String:
+	return "★".repeat(n) + "☆".repeat(5 - n)

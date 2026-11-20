@@ -932,14 +932,14 @@ func _build_ui() -> void:
 ## the showroom's frame strip: a big picture of every frame with the garage build, bottom centre
 func _showroom(root: Control) -> void:
 	var card := PanelContainer.new()
-	# a white band from screen edge to screen edge behind the frame cards only (centred in it); the BACK / EDIT /
-	# SAVE & RIDE row stays below it, over the room
-	var band := UITheme.box(Color.WHITE, 0, 0)
-	band.content_margin_left = EDGE; band.content_margin_right = EDGE
+	# a white band behind the frame cards only (from its left end), lined up with the button row under it: from BACK's
+	# left edge to SAVE & RIDE's right edge; the buttons stay below it, over the room
+	var band := UITheme.box(Color.WHITE, Tokens.R_SM, 0)
+	band.content_margin_left = Tokens.S3; band.content_margin_right = Tokens.S3
 	band.content_margin_top = Tokens.S3; band.content_margin_bottom = Tokens.S3
 	card.add_theme_stylebox_override("panel", band)
 	card.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	card.offset_left = 0; card.offset_right = 0
+	card.offset_left = EDGE; card.offset_right = -EDGE
 	card.offset_bottom = -(EDGE + Tokens.H_BTN + Tokens.S5); card.offset_top = card.offset_bottom - SHOW_H - Tokens.S3 * 2
 	root.add_child(card)
 	_show_only.append(card)
@@ -948,7 +948,7 @@ func _showroom(root: Control) -> void:
 	card.add_child(col)
 	_show_strip = PicStrip.new(Tokens.S3)
 	_show_strip.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_show_strip.row.alignment = BoxContainer.ALIGNMENT_CENTER
+	_show_strip.row.alignment = BoxContainer.ALIGNMENT_BEGIN   # the first frame at the strip's left end
 	_show_strip.row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	col.add_child(_show_strip)
 	_fill_showroom()
@@ -956,17 +956,46 @@ func _showroom(root: Control) -> void:
 const SHOW_H := 250.0
 const SHOW_CARD := Vector2(330, 236)
 
+var _show_pick := ""   # the showroom card in use: a frame id (your build on it) or "ed:<edition>"
+
 func _fill_showroom() -> void:
 	for c in _show_strip.row.get_children(): c.queue_free()
-	var items := []
+	var own := []
+	var saved := BikeBuild.load_build()   # the frame cards show your saved build, whatever edition is up
 	for id in GameState.BIKES:
 		if not GameState.BIKES[id].get("garage", false): continue
-		items.append({"key": id, "brand": "", "name": String(GameState.BIKES[id].label), "spec": "",
-			"thumb": "bike|%s|%s" % [id, _build_sig()], "make": PartThumbs.make_bike.bind(id), "view": Vector3(0.45, 0.2, 1.0)})
-	_cards(items, GameState.bike_id, func(v):
-		if v == GameState.bike_id: return
-		BikeBuild.save_build(build)
-		GameState.bike_id = v; GameState.save()
+		own.append({"key": id, "brand": "YOUR BUILD", "name": String(GameState.BIKES[id].label), "spec": _bike_line(id, saved),
+			"thumb": PartThumbs.build_key(id, saved), "make": PartThumbs.make_bike_build.bind(id, saved),
+			"view": Vector3(0.45, 0.2, 1.0), "speed": BikeBuild.stats(saved, id)["Top speed"]})
+	# the editions: the same frames, factory colourways + part mixes, each set up for a riding style
+	var eds := []
+	for e in BikeBuild.EDITIONS:
+		var ed: Dictionary = BikeBuild.EDITIONS[e]
+		var eb := BikeBuild.edition_build(e)
+		var style := String(BikeBuild.STYLES[ed.get("style", "allround")].label).to_upper()
+		eds.append({"key": "ed:" + e, "brand": "%s  ·  %s" % [style, String(GameState.BIKES[ed.frame].label).to_upper()],
+			"name": String(ed.label), "spec": _bike_line(ed.frame, eb),
+			"thumb": PartThumbs.build_key(ed.frame, eb), "make": PartThumbs.make_bike_build.bind(ed.frame, eb),
+			"view": Vector3(0.45, 0.2, 1.0), "speed": BikeBuild.stats(eb, ed.frame)["Top speed"]})
+	# slow -> fast: your bikes first, then the editions
+	var by_speed := func(a: Dictionary, b: Dictionary) -> bool: return float(a.speed) < float(b.speed)
+	own.sort_custom(by_speed)
+	eds.sort_custom(by_speed)
+	var items := own + eds
+	if _show_pick == "": _show_pick = GameState.bike_id
+	_cards(items, _show_pick, func(v):
+		if v == _show_pick: return
+		if v.begins_with("ed:"):   # an edition: its frame + build, to ride as it is or to edit (SAVE keeps it)
+			var e: String = v.substr(3)
+			if not _show_pick.begins_with("ed:"): BikeBuild.save_build(build)   # (your own build stays saved)
+			build = BikeBuild.edition_build(e)
+			GameState.bike_id = BikeBuild.EDITIONS[e].frame
+		else:
+			if not _show_pick.begins_with("ed:"): BikeBuild.save_build(build)
+			else: build = BikeBuild.load_build()   # back from an edition: your own build again
+			GameState.bike_id = v
+		_show_pick = v
+		GameState.save()
 		_rebuild_bike()
 		_update_stats()
 		_fill_showroom.call_deferred(), false, _show_strip, SHOW_CARD)
@@ -1010,7 +1039,7 @@ func _build_card(root: Control) -> void:
 	name_e.add_theme_stylebox_override("focus", UITheme.marked(Tokens.CLEAR, Tokens.ACCENT, SIDE_BOTTOM, 0, 0))
 	name_e.text_changed.connect(func(t): build.name = t)
 	stats_box.add_child(name_e)
-	for k in BikeBuild.stats(build):
+	for k in BikeBuild.stats(build, GameState.bike_id):
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", Tokens.S3)
 		var l := UITheme.caption(k.to_upper(), INK)
@@ -1023,6 +1052,13 @@ func _build_card(root: Control) -> void:
 		row.add_child(sbar)
 		stats_box.add_child(row)
 		_stat_bars[k] = sbar
+	_class_lbl = UITheme.caption("", INK, Tokens.T_SM)   # ★★★☆☆  ·  RACE  ·  16.8 KG
+	stats_box.add_child(_class_lbl)
+	# the part under the cursor / pad focus: what it is and what fitting it would change (_part_preview)
+	_part_box = VBoxContainer.new()
+	_part_box.add_theme_constant_override("separation", 0)
+	_part_box.visible = false
+	stats_box.add_child(_part_box)
 	_update_stats()
 
 ## bottom bar: back / stock / randomise left, hints in the middle, save + ride right
@@ -1104,11 +1140,146 @@ func _toast(t: String) -> void:
 	tw.tween_interval(0.8); tw.tween_property(l, "modulate:a", 0.0, 0.4); tw.tween_callback(l.queue_free)
 
 func _update_stats() -> void:
-	var s := BikeBuild.stats(build)
+	var s := BikeBuild.stats(build, GameState.bike_id)
 	for k in s:
 		if _stat_bars.has(k): _stat_bars[k].target = s[k]
+	if is_instance_valid(_class_lbl):
+		_class_lbl.text = _bike_line(GameState.bike_id, build)
+
+var _class_lbl: Label
+var _part_box: VBoxContainer
+const UP_COL := Color("1f9d55")     # a stat this part would raise
+const DOWN_COL := Color("d0342c")   # ... lower
+
+## the whole build as it is, by reference: every Dictionary object with its values, so a trial change (a card's own
+## apply callback, which may swap whole sub-dictionaries) can be put back exactly: the same objects the open page
+## holds on to, with their old values (_put_back)
+static func _capture(d: Dictionary) -> Dictionary:
+	var vals := {}
+	for k in d:
+		var v = d[k]
+		vals[k] = _capture(v) if v is Dictionary else (v.duplicate(true) if v is Array else v)
+	return {"__obj": d, "vals": vals}
+
+static func _put_back(cap: Dictionary) -> Dictionary:
+	var d: Dictionary = cap.__obj
+	d.clear()
+	for k in cap.vals:
+		var v = cap.vals[k]
+		d[k] = _put_back(v) if v is Dictionary and v.has("__obj") else v
+	return d
+
+## what fitting this card's part would do: tries it on the build (its own apply callback), reads the stats and weight,
+## puts the build back. The stat bars slide to the new values; the build card lists the part and every change.
+func _part_preview(it: Dictionary, apply: Callable) -> void:
+	if not is_instance_valid(_part_box) or not editing: return
+	var frame := GameState.bike_id
+	var s0 := BikeBuild.stats(build, frame)
+	var kg0 := BikeBuild.bike_kg(frame, build)
+	var kp0 := BikeBuild.kg_parts(frame, build)
+	var pr0 := BikeBuild.props(build)
+	var cap := _capture(build)
+	apply.call(it.key)
+	var s1 := BikeBuild.stats(build, frame)
+	var kg1 := BikeBuild.bike_kg(frame, build)
+	var st1 := BikeBuild.stars(build, frame)
+	var kp1 := BikeBuild.kg_parts(frame, build)
+	var pr1 := BikeBuild.props(build)
+	_put_back(cap)
+	for k in s1:
+		if _stat_bars.has(k):
+			_stat_bars[k].base = s0[k]
+			_stat_bars[k].target = s1[k]
+	for c in _part_box.get_children(): c.queue_free()
+	_part_box.add_child(UITheme.spacer(Tokens.S2))
+	var head := String(it.get("brand", ""))
+	if head != "": _part_box.add_child(UITheme.caption(head.to_upper(), SUB, Tokens.T_XS))
+	var nm := UITheme.display(String(it.get("name", "")).to_upper(), Tokens.T_LG, INK, Tokens.SLANT_TITLE)
+	nm.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_part_box.add_child(nm)
+	if String(it.get("spec", "")) != "":
+		var sp := UITheme.text(String(it.spec), SUB, Tokens.T_XS)
+		sp.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_part_box.add_child(sp)
+	# every change, biggest first; nothing = says so
+	var rows := []
+	for k in s1:
+		var dv: float = (float(s1[k]) - float(s0[k])) * 100.0
+		if absf(dv) >= 0.5: rows.append([k, dv])
+	rows.sort_custom(func(a, b): return absf(a[1]) > absf(b[1]))
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", Tokens.S3)
+	grid.add_theme_constant_override("v_separation", 0)
+	var add_row := func(label: String, val: String, col: Color) -> void:
+		grid.add_child(UITheme.caption(label.to_upper(), INK, Tokens.T_XS))
+		var l := UITheme.caption(val, col, Tokens.T_XS)
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		grid.add_child(l)
+	for r in rows:
+		add_row.call(r[0], ("▲ +%d" if r[1] > 0 else "▼ %d") % roundi(r[1]), UP_COL if r[1] > 0 else DOWN_COL)
+	var dkg := kg1 - kg0
+	if absf(dkg) >= 0.01:
+		add_row.call("Weight", "%+.2f kg  (%.1f)" % [dkg, kg1], DOWN_COL if dkg > 0 else UP_COL)   # (lighter = quicker)
+	var st0 := BikeBuild.stars(build, frame)
+	if st1 != st0:
+		add_row.call("Class", "%s → %s" % [BikeBuild.star_text(st0), BikeBuild.star_text(st1)], UP_COL if st1 > st0 else DOWN_COL)
+	if grid.get_child_count() == 0:
+		add_row.call("Ride", "no change (looks only)", SUB)
+	_part_box.add_child(UITheme.spacer(Tokens.S1))
+	_part_box.add_child(grid)
+	# the part's own weight: the parts of the bike whose weight it changes (else the slot it goes in, as it is)
+	var wg := GridContainer.new()
+	wg.columns = 2
+	wg.add_theme_constant_override("h_separation", Tokens.S3)
+	wg.add_theme_constant_override("v_separation", 0)
+	for k in kp1:
+		var dk: float = float(kp1[k]) - float(kp0[k])
+		if absf(dk) < 0.005: continue
+		wg.add_child(UITheme.caption(("%s weight" % k).to_upper(), INK, Tokens.T_XS))
+		var l := UITheme.caption("%.2f kg  (%+.2f)" % [kp1[k], dk], DOWN_COL if dk > 0 else UP_COL, Tokens.T_XS)
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		wg.add_child(l)
+	if wg.get_child_count() > 0:
+		_part_box.add_child(UITheme.spacer(Tokens.S1))
+		_part_box.add_child(wg)
+	# the bike with it: every property, the ones this part changes marked (yellow bar + ink)
+	_part_box.add_child(UITheme.spacer(Tokens.S2))
+	_part_box.add_child(UITheme.caption("THE BIKE WITH IT", SUB, Tokens.T_XS))
+	for i in pr1.size():
+		var changed: bool = pr1[i][1] != pr0[i][1]
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", Tokens.S2)
+		var bar := ColorRect.new()
+		bar.color = Tokens.ACCENT if changed else Tokens.CLEAR
+		bar.custom_minimum_size = Vector2(3, 0)
+		row.add_child(bar)
+		var lab := UITheme.caption(String(pr1[i][0]).to_upper(), INK if changed else SUB, Tokens.T_XS)
+		lab.custom_minimum_size.x = 72
+		row.add_child(lab)
+		var val := UITheme.text(String(pr1[i][1]), INK if changed else SUB, Tokens.T_XS)
+		val.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		val.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(val)
+		_part_box.add_child(row)
+	_part_box.visible = true
+
+func _part_preview_end() -> void:
+	if not is_instance_valid(_part_box): return
+	_part_box.visible = false
+	for k in _stat_bars: _stat_bars[k].base = -1.0
+	_update_stats()
+
+## "★★★☆☆  ·  RACE  ·  16.8 KG": a build on a frame, for the build card and the showroom cards
+static func _bike_line(frame: String, b: Dictionary) -> String:
+	var F: Dictionary = BikeBuild.FRAMES.get(frame, {})
+	var cls := String(BikeBuild.CLASSES[F["class"]].label).to_upper() if F.has("class") else ""
+	return "%s  ·  %s  ·  %.1f KG" % [BikeBuild.star_text(BikeBuild.stars(b, frame)), cls, BikeBuild.bike_kg(frame, b)]
 
 func _set_tab(t: String) -> void:
+	_part_preview_end()   # the page (and the card under the cursor) is rebuilt
 	# only switching to another tab frames the camera on that area; refreshing the page after a
 	# change (colour, finish, part, logo...) leaves the camera wherever you put it
 	if t != tab:
@@ -1616,6 +1787,11 @@ func _cards(items: Array, current: String, cb: Callable, bike := true, into: Pic
 			cb.call(it.key)
 			if bike: _changed()
 			if into == null: _set_tab(tab)))
+		if bike and into == null:   # the build card shows what this part is and would change (mouse over / pad focus)
+			b.mouse_entered.connect(_part_preview.bind(it, cb))
+			b.focus_entered.connect(_part_preview.bind(it, cb))
+			b.mouse_exited.connect(_part_preview_end)
+			b.focus_exited.connect(_part_preview_end)
 		g.add(b, on)
 	if into == null: body.add_child(g)
 
@@ -1771,6 +1947,11 @@ func _drive_page() -> void:
 	var lo := float(D.ring) / float(cogs[cogs.size() - 1])
 	var hi := float(D.ring) / float(cogs[0])
 	_note("Ratios %.2f – %.2f. Bigger ring / smaller cog = higher top speed, harder to get going. ▲ = a huge last cog (50T+): spins up the steepest hills." % [lo, hi])
+	_h("PEDALS")
+	var own := str(GameState.BIKES[GameState.bike_id].file)
+	_pic_cards(BikeBuild.PEDALS, str(D.get("pedals", "stock")), "pedal|" + own, PartThumbs.make_pedal.bind(own),
+		Vector3(0.55, 0.75, 1.0), func(v): D.pedals = v)
+	_note("Flat pedals from the bike models, on any frame. Their colour is in Paint > Saddle & pedals.")
 
 func _save_rider_ui() -> void:
 	var cf := ConfigFile.new(); cf.load(RiderPanels.PATH)
@@ -1993,18 +2174,37 @@ class StatBar extends Control:
 	var k := 0.0
 	func _process(dt: float) -> void:
 		k = lerpf(k, target, minf(1.0, dt * 6)); queue_redraw()
+	var base := -1.0   # >= 0 while a part is previewed: the value as fitted now (the change shows green / red)
 	func _draw() -> void:
-		# segmented meter: 12 slanted blocks, lit up to the value
-		var n := Tokens.METER_SEGMENTS
-		var gap := float(Tokens.S1)
-		var w := (size.x - gap * (n - 1)) / n
-		var lit := clampf(k, 0.02, 1.0) * n
-		for i in n:
-			var x := i * (w + gap)
-			var f := clampf(lit - i, 0.0, 1.0)
-			var sk := size.y * 0.35
-			var pts := PackedVector2Array([Vector2(x + sk, 0), Vector2(x + w + sk, 0), Vector2(x + w - sk, size.y), Vector2(x - sk, size.y)])
-			draw_colored_polygon(pts, Tokens.TRACK)
-			if f > 0.0:
-				var xr := x + w * f
-				draw_colored_polygon(PackedVector2Array([Vector2(x + sk, 0), Vector2(xr + sk, 0), Vector2(xr - sk, size.y), Vector2(x - sk, size.y)]), Tokens.ACCENT_DOWN)
+		# a slim rounded track with quarter ticks, the value filled in yellow, its number at the end. Previewing a part:
+		# what it would add shows green past the fitted value, what it would take away red below it.
+		var num_w := 26.0
+		var bw := size.x - num_w
+		var th := minf(size.y, 7.0)
+		var y0 := (size.y - th) * 0.5
+		var r := th * 0.5
+		var pill := func(x0: float, x1: float, col: Color) -> void:
+			if x1 - x0 < 0.5: return
+			var sb := StyleBoxFlat.new()
+			sb.bg_color = col
+			sb.set_corner_radius_all(int(r))
+			draw_style_box(sb, Rect2(x0, y0, x1 - x0, th))
+		pill.call(0.0, bw, Tokens.TRACK)
+		var v := clampf(k, 0.0, 1.0)
+		if base >= 0.0:
+			var b := clampf(base, 0.0, 1.0)
+			pill.call(0.0, maxf(bw * minf(b, v), th), Tokens.ACCENT_DOWN)
+			if v > b: pill.call(bw * b - th, bw * v, Color("1f9d55"))
+			elif v < b: pill.call(bw * v - th, bw * b, Color(0.82, 0.2, 0.17, 0.55))
+			pill.call(0.0, maxf(bw * minf(b, v), th), Tokens.ACCENT_DOWN)   # (the kept part on top of the change's round end)
+		else:
+			pill.call(0.0, maxf(bw * v, th), Tokens.ACCENT_DOWN)
+		for q in [0.25, 0.5, 0.75]:   # quarter marks: thin cuts through the track
+			draw_rect(Rect2(bw * q - 0.75, y0, 1.5, th), Color.WHITE)
+		var f := get_theme_default_font()
+		var txt := str(roundi(v * 100.0))
+		var fs := Tokens.T_SM
+		var tw := f.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		var col := Tokens.INK
+		if base >= 0.0 and absf(v - base) > 0.004: col = Color("1f9d55") if v > base else Color("d0342c")
+		draw_string(f, Vector2(size.x - tw, size.y * 0.5 + fs * 0.36), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, col)

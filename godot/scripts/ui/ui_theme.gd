@@ -625,14 +625,16 @@ static func paper_theme() -> Theme:
 	t.set_font_size("font_size", "Button", Tokens.T_MD)
 	t.set_font("font", "LineEdit", display_font(Tokens.W_MEDIUM))
 	t.set_font_size("font_size", "LineEdit", Tokens.T_LG)
-	# slim scrollbar: no track, a thin round thumb that darkens on hover
-	var track := box(Tokens.CLEAR, Tokens.R_SM, Tokens.SCROLL_W)
-	t.set_stylebox("scroll", "VScrollBar", track)
-	t.set_stylebox("scroll_focus", "VScrollBar", track)
-	for g in [["grabber", Tokens.THUMB], ["grabber_highlight", Tokens.THUMB_HOT], ["grabber_pressed", Tokens.INK]]:
-		t.set_stylebox(g[0], "VScrollBar", box(g[1], Tokens.R_SM, Tokens.SCROLL_W))
-	for ic in ["increment", "increment_highlight", "increment_pressed", "decrement", "decrement_highlight", "decrement_pressed"]:
-		t.set_icon(ic, "VScrollBar", ImageTexture.new())
+	# slim scrollbars (up / down lists and the sideways card strips): a hairline track, a thin round thumb that
+	# darkens on hover; no arrow buttons
+	for sb_type in ["VScrollBar", "HScrollBar"]:
+		var track := box(Color(0, 0, 0, 0.05), Tokens.R_PILL, Tokens.SCROLL_W)
+		t.set_stylebox("scroll", sb_type, track)
+		t.set_stylebox("scroll_focus", sb_type, track)
+		for g in [["grabber", Tokens.THUMB], ["grabber_highlight", Tokens.THUMB_HOT], ["grabber_pressed", Tokens.INK]]:
+			t.set_stylebox(g[0], sb_type, box(g[1], Tokens.R_PILL, Tokens.SCROLL_W))
+		for ic in ["increment", "increment_highlight", "increment_pressed", "decrement", "decrement_highlight", "decrement_pressed"]:
+			t.set_icon(ic, sb_type, ImageTexture.new())
 	t.set_constant("scrollbar_h_separation", "ScrollContainer", Tokens.S2)
 	t.set_constant("scrollbar_v_separation", "ScrollContainer", Tokens.S2)
 	_paper = t

@@ -252,6 +252,18 @@ static func make_bike(id: String) -> Node3D:
 	rig.load_bike(cfg, cfg.get("build", {}))
 	return rig
 
+## the picture key (disk cached, see bike_key) of a frame with a given build on it
+static func build_key(id: String, build: Dictionary) -> String:
+	var sig := var_to_str([THUMB_VER, ProjectSettings.get_setting("application/config/version", ""), SIZE, id, build])
+	return "bike|%s|b%s" % [id, sig.md5_text()]
+
+## a frame (GameState.BIKES id) with a given build on it (garage showroom: your build, the editions)
+static func make_bike_build(id: String, build: Dictionary) -> Node3D:
+	var cfg: Dictionary = GameState.BIKES[id].duplicate(true)
+	var rig := BikeRig.new()
+	rig.load_bike(cfg, build)
+	return rig
+
 ## drop the cached bike pictures (after a part changed)
 func forget_bikes() -> void:
 	for k in _cache.keys():
@@ -374,6 +386,16 @@ static func _catalogue_pose(fork: Node3D, ax: Vector2) -> Node3D:
 	root.rotation.y = FORK_TURN
 	return root
 
+
+## one flat pedal (the drive side's), from a model's pedal pair (BikeRig.pedal_set); `own` = the frame's glb ("stock").
+## Pin-studded platform seen from above and a little in front, in the frame model's own pedal material.
+static func make_pedal(id: String, own: String) -> Node3D:
+	var set := BikeRig.pedal_set(id, own)
+	var mi := MeshInstance3D.new()
+	if set.has(1.0): mi.mesh = set[1.0][0]
+	elif set.has(-1.0): mi.mesh = set[-1.0][0]
+	MetalFinish.apply(mi)
+	return mi
 
 ## a cassette alone (cogs in their anodized colours, lockring, freehub stub)
 static func make_cassette(key: String) -> Node3D:

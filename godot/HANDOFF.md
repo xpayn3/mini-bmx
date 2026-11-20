@@ -612,6 +612,23 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - Bike height is placed from the **real tyre size and real axle positions** (no tyre clipping into the floor
   or the roller drums; verified with `BMX_TYRE_PROBE`).
 - Saved in `garage.json`; `GameState.bike_config()` applies it to the ride.
+- **Bike character** (2026-11-20, `BikeBuild.FRAMES` / `CLASSES` / `frame_mods` / `bike_kg`): every garage frame rides
+  differently from what it is: geometry measured off its glb (`tools/frame_geo_probe.gd`: wheelbase, head angle, chainstay,
+  BB drop), frame weight, suspension design (progression, anti-squat, stiffness) and a class, slow -> fast: Nexo Fizz
+  FREERIDE ★★, RUNOUT DH ALL-ROUND ★★★, Yonder Tusk RACE ★★★★, Goat DH SPEED ★★★★★. `frame_mods` turns that into Tune
+  multipliers (applied in `GameState.bike_config_for` after the parts' `ride_mods`); the RUNOUT DH with stock parts is the
+  reference (all 1). New in the sim: the bike's weight (`bike_kg`: frame + wheels, tyres, fork, cassette, pedals; vs. a
+  75 kg rider): heavier keeps speed (less drag decel), accelerates / brakes / pops slower, gets knocked about less.
+  The turn itself was already real (yaw = v tan(steer) / L): a long bike turns wider when slow; at speed the radius is
+  grip-limited (v^2 / a), so a long bike shows as slower to tip in (flick). Garage: POP bar, "★★★★☆ · ALL-ROUND · 17.4 KG"
+  under the bars (`Garage._bike_line`). Measure: `slope_stress.tscn -- bike=<id> compare=1` prints a COMPARE line (coast
+  speed on 12 deg, 0-25 km/h, braking from 50, turn radius at 20 / 40, flick time, roller pop air, washboard); the stress
+  test now rides each bike's real config + geometry (the BMX fails 5 checks, already on main before this).
+  **Showroom editions** (`BikeBuild.EDITIONS`, fun made-up names, each a frame + colours + parts + a riding style,
+  `STYLES`: park / freeride / all-round / race / speed = wheels, travel, springs, gearing); cards: your builds first, then
+  the editions, slow -> fast, with stars / class / weight. Picking one loads it as the build (saved on SAVE).
+  **Pedals** (`build.drive.pedals`, `BikeBuild.PEDALS`, Gears tab cards): any model's pedal pair (`BikeRig.pedal_set`, cut
+  out of its crank's "plastic" surface) on any frame's own pedal spots, in this frame's pedal material.
 - **Materials at photo quality** (2026-11-20): car paint (`BikeFX.CAR_PAINT_SHADER`) = round metal flakes 0.15–0.3 mm (per finish,
   `FINISHES.*.flake`), in metres whatever the model scale; LOD keeps every flake ≥ ~2 px and turns the ones that can't be resolved
   into gloss spread (no pixel mosaic, no shimmer). Bare metal (`chrome`, `black`, `chain`, `gold`, wheel `hub` / `spokes`) gets the

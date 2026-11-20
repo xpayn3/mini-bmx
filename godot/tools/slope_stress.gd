@@ -79,6 +79,8 @@ var only := ""
 var verbose := false
 var trace := false   # trace=1: prints the state 4x / s in every case run
 var bike := "dh"
+var compare := false   # compare=1: measure this bike's character (COMPARE line) instead of the checks
+var extras: Dictionary = DH_EXTRAS
 var tune: Node
 var step_us := 0.0
 var step_n := 0
@@ -88,10 +90,23 @@ func _ready() -> void:
 		elif a.begins_with("bike="): bike = a.substr(5)
 		elif a == "verbose=1": verbose = true
 		elif a == "trace=1": trace = true
+		elif a == "compare=1": compare = true
 	tune = get_node("/root/Tune")
-	var gs = load("res://scripts/core/game_state.gd")
-	tune.set_ride(gs.BIKES[bike].ride)
-	_run_all(gs.BIKES[bike])
+	# the bike as the game rides it: its tuning x the garage build's parts x the frame's character
+	# (GameState.bike_config_for), on its own geometry (the glb's extras)
+	var gs = get_node("/root/GameState")
+	var cfg: Dictionary = gs.bike_config_for(bike)
+	tune.set_ride(cfg.ride)
+	if bike != "bmx":
+		var sc: Node = load(cfg.file).instantiate()
+		var m: Node = sc.find_child(cfg.root, true, false)
+		if m and m.has_meta("extras"): extras = (m.get_meta("extras") as Dictionary).duplicate(true)
+		sc.free()
+	if compare:
+		_compare(cfg)
+		get_tree().quit(0)
+		return
+	_run_all(cfg)
 	print("SLOPE_STRESS %s: %d / %d checks passed, physics step %.1f us avg over %d steps" % [
 		"PASS" if fails == 0 else "FAIL", checks - fails, checks, step_us / maxf(1.0, step_n), step_n])
 	get_tree().quit(fails)
@@ -104,7 +119,7 @@ func _make(cfg: Dictionary, kind: String, a := 0.0, b := 0.0) -> Array:
 	var p := BikePhysics.new(h); h.phys = p
 	_last_p = p
 	p.T = tune.v
-	p.setup(DH_EXTRAS if bike != "bmx" else {}, cfg)
+	p.setup(extras if bike != "bmx" else {}, cfg)
 	p.reset_at(0.0, 0.0, 0.0)
 	return [p, h]
 
@@ -159,6 +174,61 @@ func _coast_model(v0: float, g: Ground, secs: float) -> float:
 		v = clampf(v, -3.0, 24.0 * maxf(1.0, ts))
 		x += v * cos(th) * DT
 	return v
+
+## compare=1: the same rides on the same ground for this bike, one COMPARE line (run once per bike and set them
+## side by side): what each frame's character does in numbers
+func _compare(cfg: Dictionary) -> void:
+	var nothing := func(_t, _p): return _inp()
+	var out := {}
+	# terminal speed: coasting 30 s down a 12 deg grade
+	var r := _make(cfg, "grade", deg_to_rad(-12)); r[1].terrain.x0 = 2.0
+	r[0].v = 6.0
+	_ride(r[0], r[1], 30.0, nothing)
+	out["coast12"] = r[0].v * 3.6
+	# pedalling from a standstill on the flat: time to 25 km/h
+	r = _make(cfg, "flat")
+	var t25 := -1.0
+	for i in int(12.0 / DT):
+		r[0].step(DT, _inp(1.0))
+		if r[0].v * 3.6 >= 25.0: t25 = i * DT; break
+	out["t0_25"] = t25
+	# braking from 50 km/h on the flat: stopping distance
+	r = _make(cfg, "flat"); r[0].v = 50.0 / 3.6
+	_ride(r[0], r[1], 0.3, nothing)
+	var xb: float = r[0].x
+	_ride(r[0], r[1], 8.0, func(_t, _p): return _inp(0.0, 1.0))
+	out["brake50_m"] = r[0].x - xb
+	# turn radius on the flat at full lock, 20 and 40 km/h (speed held by pedalling a little)
+	for kmh in [20, 40]:
+		r = _make(cfg, "flat"); r[0].v = kmh / 3.6
+		var p: BikePhysics = r[0]
+		var target: float = kmh / 3.6
+		_ride(p, r[1], 4.0, func(_t, pp): return _inp(clampf((target - pp.v) * 2.0, 0.0, 1.0), clampf((pp.v - target) * 0.5, 0.0, 1.0), 1.0))
+		out["R%d_m" % kmh] = p.v / maxf(absf(p.yaw_rate), 0.001)
+	# side-to-side flick at 30 km/h: full lock one way 2 s, then the other: time until the bike lean has crossed over
+	r = _make(cfg, "flat"); r[0].v = 30.0 / 3.6
+	_ride(r[0], r[1], 2.0, func(_t, pp): return _inp(clampf((30.0 / 3.6 - pp.v) * 2.0, 0.0, 1.0), 0.0, -1.0))
+	var l0: float = r[0].bike_lean
+	var flip := -1.0
+	for i in int(3.0 / DT):
+		r[0].step(DT, _inp(clampf((30.0 / 3.6 - r[0].v) * 2.0, 0.0, 1.0), 0.0, 1.0))
+		if signf(r[0].bike_lean) != signf(l0) and absf(r[0].bike_lean) > absf(l0) * 0.8: flip = i * DT; break
+	out["flick_s"] = flip
+	# hop off a 0.5 m roller at 25 km/h with Space held into it: air time
+	r = _make(cfg, "crest", 0.5, 4.0); r[1].terrain.x0 = 12.0; r[0].v = 25.0 / 3.6
+	var st := _ride(r[0], r[1], 4.0, func(_t, pp): return _inp(0.0, 0.0, 0.0, false, pp.x > 8.0 and pp.x < 12.0))
+	out["pop_air_s"] = st.air_t
+	# washboard at 40 km/h: how far the rear gets knocked loose (max slip) and the speed lost in 4 s
+	r = _make(cfg, "washboard", 0.05, 0.9); r[1].terrain.x0 = 2.0; r[0].v = 40.0 / 3.6
+	var smax := 0.0
+	for i in int(4.0 / DT):
+		r[0].step(DT, _inp())
+		smax = maxf(smax, absf(r[0].slip))
+	out["wash_slip"] = smax
+	out["wash_kmh"] = r[0].v * 3.6
+	var line := "COMPARE %-5s kg=%.1f" % [bike, float(cfg.get("kg", 0.0))]
+	for k in out: line += "  %s=%.2f" % [k, out[k]]
+	print(line)
 
 func _run_all(cfg: Dictionary) -> void:
 	var nothing := func(_t, _p): return _inp()
