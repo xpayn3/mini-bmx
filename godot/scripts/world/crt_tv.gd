@@ -132,6 +132,23 @@ func glitch(secs := 0.3, amount := 1.0) -> void:
 	_burst(secs + 0.12, clampf(amount, 0.3, 1.0))
 	get_tree().create_timer(secs, true, false, true).timeout.connect(func(): _glitch = 0.0; _glitch_snow = 0.0)
 
+## the glass shows a picture of its own (a 4:3 colour card, white-on-black) instead of the lettering; null = nothing but snow
+func show_card(tex: Texture2D) -> void:
+	if tex == null:
+		mat.set_shader_parameter("text_tex", _text)
+		mat.set_shader_parameter("card_color", 0.0)
+		mat.set_shader_parameter("text_box", Vector4(2.0, 2.0, 3.0, 3.0))   # (off the glass)
+		return
+	mat.set_shader_parameter("text_tex", tex)
+	mat.set_shader_parameter("card_color", 1.0)
+	mat.set_shader_parameter("text_box", Vector4(0.0, 0.0, 1.0, 1.0))
+
+## back to the RUNOUT lettering
+func show_lettering() -> void:
+	mat.set_shader_parameter("text_tex", _text)
+	mat.set_shader_parameter("card_color", 0.0)
+	mat.set_shader_parameter("text_box", Vector4(0.07, 0.33, 0.93, 0.67))
+
 func is_on() -> bool:
 	return _on_t >= 0.0 and _off_t < 0.0
 

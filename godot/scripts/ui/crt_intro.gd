@@ -11,6 +11,8 @@ extends CanvasLayer
 signal finished
 
 const T_ON := 1.2        # TV switches on
+const CARD_STUDIO := Vector2(1.7, 3.9)    # the studio card, then the mature-content notice, then the game's name: all inside the old timeline (s)
+const CARD_MATURE := Vector2(3.9, 6.4)
 const T_GLITCH := 7.0    # the first big tear (the figure in the doorway is gone after it)
 const T_LOSS := 10.6     # the signal drops out: snow over everything
 const T_GLITCH2 := 13.2  # second tear: for a moment the figure stands inside the room
@@ -31,6 +33,10 @@ var moon_fill: OmniLight3D
 var env: Environment
 var figure: Node3D
 var figure2: Node3D
+var card_vp: SubViewport
+var card_art: TvCards
+var _card_shown := -1
+var blocked := false     # the boot cards (studio, mature content) are up: the clock does not start
 var hold := false        # true: stay on black (only the standby LED) while main loads the ride behind it
 var still := false       # Settings › Intro off: one still frame of it (TV on, RUNOUT) while loading, then done
 const STILL_T := 12.0    # the moment of the intro the still frame shows
@@ -103,7 +109,9 @@ func _input(e: InputEvent) -> void:
 func _process(delta: float) -> void:
 	if _done: return
 	var dt := minf(delta / maxf(Engine.time_scale, 0.001), 0.05)
-	if _freeze >= 0.0:
+	if blocked and _freeze < 0.0:
+		_born = Time.get_ticks_msec()   # (the watchdog counts from when the cards are gone)
+	elif _freeze >= 0.0:
 		t = _freeze
 	else:   # (while main builds the ride behind it the clock waits just before the TV comes on: no dead black time on top of the build)
 		t = minf(t + dt, T_ON - 0.05) if hold else t + dt
@@ -138,6 +146,7 @@ func _process(delta: float) -> void:
 func _update(_dt: float) -> void:
 	# TV timeline
 	if t >= T_ON and not tv.is_on() and not _offed: tv.power_on()
+	_cards_update()
 	if t >= T_GLITCH and not _glitched:
 		_glitched = true
 		tv.glitch(0.42, 1.0)
@@ -175,6 +184,27 @@ func _update(_dt: float) -> void:
 	k = maxf(k, smoothstep(T_OFF + 0.4, T_END - 0.05, t))   # then slowly to black
 	(overlay.material as ShaderMaterial).set_shader_parameter("black", k)
 	(overlay.material as ShaderMaterial).set_shader_parameter("grain", 0.0 if t >= T_OFF else 1.0)   # TV off: no film noise left in the dark
+
+## which card the glass shows: the studio card, the mature notice, then the game's name (the lettering); a hard tear between them
+func _cards_update() -> void:
+	var want := -1   # -1 = the game's name
+	if t >= CARD_STUDIO.x and t < CARD_STUDIO.y: want = 0
+	elif t >= CARD_MATURE.x and t < CARD_MATURE.y: want = 1
+	elif t < CARD_STUDIO.x: want = 2   # warming up: nothing but snow yet
+	if want != _card_shown:
+		if _card_shown != -2 and t > T_ON + 0.5: tv.glitch(0.3, 1.0)
+		_card_shown = want
+		if want == 0 or want == 1:
+			card_art.kind = want
+			card_art.dur = (CARD_STUDIO.y - CARD_STUDIO.x) if want == 0 else (CARD_MATURE.y - CARD_MATURE.x)
+			tv.show_card(card_vp.get_texture())
+		elif want == -1:
+			tv.show_lettering()
+		else:
+			tv.show_card(null)
+	if want == 0: card_art.ct = t - CARD_STUDIO.x
+	elif want == 1: card_art.ct = t - CARD_MATURE.x
+	if want == 0 or want == 1: card_art.queue_redraw()
 
 static func _smoother(x: float) -> float:
 	return x * x * x * (x * (x * 6.0 - 15.0) + 10.0)
@@ -273,6 +303,13 @@ func _build_room() -> void:
 	for i in 3:
 		var tp := _box(w, Vector3(0.19, 0.025, 0.105), Vector3(0.33 + i * 0.01, 0.513 + i * 0.026, -1.48), vhs)
 		tp.rotation.y = deg_to_rad(8.0 - i * 9.0)
+	card_vp = SubViewport.new()
+	card_vp.size = Vector2i(1024, 768)
+	card_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	card_art = TvCards.new()
+	card_art.size = Vector2(1024, 768)
+	card_vp.add_child(card_art)
+	root.add_child(card_vp)
 	tv = CrtTv.new()
 	tv.positional = false   # its own world: no listener there, play it flat
 	tv.silent = still
