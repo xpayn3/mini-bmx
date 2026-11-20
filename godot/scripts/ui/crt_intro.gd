@@ -11,8 +11,8 @@ extends CanvasLayer
 signal finished
 
 const T_ON := 1.2        # TV switches on
-const CARD_STUDIO := Vector2(1.7, 3.9)    # the studio card, then the mature-content notice, then the game's name: all inside the old timeline (s)
-const CARD_MATURE := Vector2(3.9, 6.4)
+const CARD_STUDIO := Vector2(1.7, 5.8)    # the studio card, then the mature-content notice, then the game's name: all inside the old timeline (s)
+const CARD_MATURE := Vector2(5.8, 10.2)
 const T_GLITCH := 7.0    # the first big tear (the figure in the doorway is gone after it)
 const T_LOSS := 10.6     # the signal drops out: snow over everything
 const T_GLITCH2 := 13.2  # second tear: for a moment the figure stands inside the room
