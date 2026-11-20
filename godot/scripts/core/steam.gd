@@ -47,7 +47,10 @@ func _ready() -> void:
 	var forced := OS.get_environment("BMX_STEAM") != ""   # tests: start Steam anyway
 	var args := OS.get_cmdline_args()
 	var tool_run := DisplayServer.get_name() == "headless" or args.has("-s") or args.has("--script")   # tools / headless exports
-	if (Settings._test_run and not forced) or tool_run or OS.get_environment("BMX_NO_STEAM") != "" or not ClassDB.class_exists("CSharpScript"):
+	# On the placeholder app 480 ("Spacewar") Steam Input takes the Xbox pad: the game got no buttons / sticks at all
+	# while Steam ran (measured). So Steam only starts with the real App ID, or when forced (BMX_STEAM=1).
+	var placeholder := APP_ID == 480 and not forced
+	if placeholder or (Settings._test_run and not forced) or tool_run or OS.get_environment("BMX_NO_STEAM") != "" or not ClassDB.class_exists("CSharpScript"):
 		return
 	var s = load("res://scripts/core/SteamService.cs")
 	if s == null: return

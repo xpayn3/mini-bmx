@@ -786,7 +786,8 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   art sizes, assets still to fix). `steam/upload.ps1` exports to `build/steam/windows/Runout.exe` and uploads with steamcmd.
 - `Steam` autoload (`scripts/core/steam.gd` + `SteamService.cs`, Steamworks.NET 2024.8.0 NuGet, native DLL in
   `addons/steamworks/`, copied next to the assemblies by the csproj and found by a DllImport resolver). `APP_ID` is 480
-  (Spacewar) until the real one exists. Off in test runs (`BMX_STEAM=1` forces it), headless and `-s` runs; without Steam
+  (Spacewar) until the real one exists, and **Steam stays off while it is 480**: on Spacewar Steam Input took the Xbox pad
+  (0 buttons / sticks reached the game, measured). Off in test runs too (`BMX_STEAM=1` forces it), headless and `-s` runs; without Steam
   every call is a no-op. `Steam.ACHIEVEMENTS` (records polled 1x/s, `Steam.trick()` from `hud.on_trick`, `Steam.event()`
   from crash / revive / health pack / garage save / photo / ride start), `Steam.presence()`.
 - **No real brands in anything a player sees** (user decision for the paid release): every bike, part, tyre, rim, fork,
