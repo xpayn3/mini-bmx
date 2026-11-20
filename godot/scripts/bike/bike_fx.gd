@@ -17,8 +17,9 @@ uniform float metallic : hint_range(0.0, 1.0) = 0.55;
 uniform float roughness : hint_range(0.0, 1.0) = 0.34;
 uniform float clearcoat : hint_range(0.0, 1.0) = 1.0;
 uniform float clearcoat_roughness : hint_range(0.0, 1.0) = 0.03;
-uniform float flake_scale = 625.0;   // 1 / flake size (m)
-uniform float sparkle = 0.22;
+uniform float flake_scale = 4000.0;  // 1 / flake spacing (m): 0.25 mm, real metal-flake paint
+uniform float sparkle = 0.22;        // how far a flake is tilted off the surface (rad-ish)
+uniform float flake_rough = 0.12;    // the flakes are tiny mirrors
 uniform vec4 color2 : source_color = vec4(1.0, 0.7, 0.0, 1.0);   // pearl: the colour seen at grazing angles
 uniform float flip : hint_range(0.0, 1.0) = 0.0;
 uniform float deep : hint_range(0.0, 1.0) = 0.0;                    // candy: richer, darker toward the edges
@@ -31,34 +32,57 @@ vec3 flake_hash(vec3 p) {
 	return fract((p.xxy + p.yxx) * p.zyx);
 }
 
+// One level of flakes: every cell holds one round platelet (a sphere cut by the surface, so the
+// discs come in all sizes), jittered, tilted at random. Returns the tilt (xyz) and coverage (w).
+vec4 flake_level(vec3 p, float lvl) {
+	vec3 c = floor(p);
+	vec3 h = flake_hash(c + lvl * 17.0);
+	vec3 centre = c + 0.3 + 0.4 * h;
+	float d = length(p - centre);
+	float r = 0.36;
+	float cover = 1.0 - smoothstep(r - 0.12, r, d);
+	vec3 tilt = flake_hash(c + lvl * 17.0 + 7.31) * 2.0 - 1.0;
+	return vec4(tilt, cover);
+}
+
 void vertex() {
-	v_flake_p = VERTEX;   // object space
+	// object space in metres (whatever the model's import scale), so the flakes stay glued to the part
+	v_flake_p = VERTEX * length(MODEL_MATRIX[0].xyz);
 }
 
 void fragment() {
 	vec3 fp = v_flake_p * flake_scale;
-	vec3 h = flake_hash(floor(fp)) * 2.0 - 1.0;
-	// fade the flakes out where one pixel covers many of them (far away): no shimmering noise
-	float aa = clamp(1.3 - length(fwidth(fp)) * 0.9, 0.0, 1.0);
-	vec3 n = normalize(NORMAL + h * sparkle * aa);
+	// Level of detail: flakes are never drawn smaller than ~2 pixels. Further away a cell gathers 4^l
+	// flakes whose tilts average out (amplitude / 2^l, like a real sparkle seen from afar); the part
+	// that can no longer be resolved widens the gloss instead. Two levels blended: no popping.
+	float px = max(length(fwidth(fp)), 1e-6);
+	float lod = max(0.0, log2(px * 2.2));
+	float l0 = floor(lod);
+	float t = lod - l0;
+	vec4 fa = flake_level(fp / exp2(l0), l0);
+	vec4 fb = flake_level(fp / exp2(l0 + 1.0), l0 + 1.0);
+	float ka = 1.0 / exp2(l0);
+	float kb = 0.5 * ka;
+	vec3 tilt = mix(fa.xyz * fa.w * ka, fb.xyz * fb.w * kb, t);
+	float cover = mix(fa.w * ka, fb.w * kb, t);       // how much of this pixel is a resolved mirror flake
+	vec3 n0 = NORMAL;
+	vec3 n = normalize(n0 + tilt * sparkle);
 	NORMAL = n;
-	// a few flakes catch the light hard: tiny bright glints that twinkle as the bike moves
-	// (three.js vViewPosition = -mvPosition: the direction from the surface to the camera)
-	vec3 vdir = normalize(-VERTEX);
-	float glint = pow(max(0.0, dot(reflect(vdir, n), normalize(vec3(0.3, 0.9, 0.3)))), 60.0);
-	glint *= step(0.9, flake_hash(floor(fp) + 7.0).x) * aa;
-	// metallic flop, exactly as the three.js shader computes it
-	float facing = clamp(dot(normalize(VERTEX), n), 0.0, 1.0);
-	float view_k = clamp(dot(-normalize(VERTEX), NORMAL), 0.0, 1.0);
+	// the flakes that can't be seen one by one scatter the base layer's highlight
+	float unresolved = sparkle * (1.0 - ka) * 0.9;
+	float base_rough = sqrt(roughness * roughness + unresolved * unresolved);
+	// metallic flop, as the three.js shader computes it
+	float view_k = clamp(dot(-normalize(VERTEX), n0), 0.0, 1.0);
+	float facing = clamp(dot(-normalize(VERTEX), n), 0.0, 1.0);
 	vec3 col = mix(albedo.rgb, color2.rgb, pow(1.0 - view_k, 1.5) * flip);
 	col = mix(col, col * col * 0.9, deep * (1.0 - view_k));
-	vec3 base = col * mix(0.62, 1.1, pow(facing, 0.6));
-	ALBEDO = base;
-	METALLIC = metallic;
-	ROUGHNESS = roughness;
+	vec3 base = col * mix(0.7, 1.05, pow(facing, 0.6));
+	float flake_k = sparkle > 0.001 ? clamp(cover * 1.6, 0.0, 1.0) : 0.0;
+	ALBEDO = mix(base, col * 1.08, flake_k * 0.5);
+	METALLIC = mix(metallic, max(metallic, 0.9), flake_k);
+	ROUGHNESS = mix(min(base_rough, 1.0), flake_rough, flake_k);
 	CLEARCOAT = clearcoat;
 	CLEARCOAT_ROUGHNESS = clearcoat_roughness;
-	EMISSION = base * glint * 2.0 + vec3(glint * 0.6);
 }
 """
 
@@ -73,11 +97,15 @@ uniform float roughness : hint_range(0.0, 1.0) = 0.25;
 uniform float heat : hint_range(0.0, 1.0) = 0.0;
 uniform float r0 = 0.07;
 uniform float r1 = 0.09;
+uniform sampler2D rough_tex : hint_roughness_r, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform float detail = 0.0;   // 1 = MetalFinish's brushed scan, ground in rings round the axle
 
 varying float v_rotor_r;
+varying vec2 v_rotor_p;
 
 void vertex() {
 	v_rotor_r = length(VERTEX.xy);
+	v_rotor_p = VERTEX.xy;
 }
 
 void fragment() {
@@ -88,7 +116,10 @@ void fragment() {
 	col = mix(col, vec3(1.0, 0.42, 0.08), smoothstep(0.8, 1.0, h));
 	ALBEDO = albedo.rgb * texture(albedo_texture, UV).rgb * (1.0 - 0.6 * h);   // hot steel loses its shine to the glow
 	METALLIC = metallic;
-	ROUGHNESS = roughness;
+	// grinding marks: the scan's brushing laid round the disc (4 tiles per turn: no seam), 16 cm across
+	vec2 puv = vec2(atan(v_rotor_p.y, v_rotor_p.x) / 6.2831853 * 4.0, v_rotor_r / 0.16);
+	float rt = mix(0.47, texture(rough_tex, puv).r, detail) / 0.47;
+	ROUGHNESS = clamp(roughness * rt, 0.0, 1.0);
 	EMISSION = col * h * (0.4 + 1.6 * h);
 }
 """
@@ -123,7 +154,7 @@ static func car_paint(mat: Material = null, opts: Dictionary = {}) -> ShaderMate
 	m.resource_name = "paint"
 	m.set_meta("car_paint", true)
 	m.set_shader_parameter("albedo", col)
-	m.set_shader_parameter("flake_scale", 1.0 / float(opts.get("flake", 0.0016)))
+	m.set_shader_parameter("flake_scale", 1.0 / float(opts.get("flake", 0.00025)))
 	m.set_shader_parameter("sparkle", float(opts.get("sparkle", 0.22)))
 	m.set_shader_parameter("metallic", float(opts.get("metallic", 0.55)))
 	m.set_shader_parameter("roughness", float(opts.get("roughness", 0.34)))

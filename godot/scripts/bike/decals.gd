@@ -170,7 +170,7 @@ static func word_texture(host: Node, text: String, aspect: float, opts: Dictiona
 	var art := TextArt.new()
 	art.mode = "word"
 	art.text = text
-	art.size = Vector2i(1024, maxi(8, roundi(1024.0 / aspect)))
+	art.size = Vector2i(2048, maxi(16, roundi(2048.0 / aspect)))
 	if opts.has("fill"): art.fill = opts["fill"]
 	if opts.has("stroke"): art.stroke = opts["stroke"]
 	art.italic = opts.get("italic", true)
