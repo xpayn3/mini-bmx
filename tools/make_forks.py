@@ -84,6 +84,26 @@ A_dh = np.array(dh_steer_node and [n for n in gd["nodes"] if n.get("name") == "f
 t_dh = float(A_dh @ ax_d)
 print("dh crowns mid", C_d.round(3), "lower crown bottom t %.3f; dh axle t %.3f offset %.3f" % (crown_t_min, t_dh, A_dh[0] * ax_d[1] - A_dh[1] * ax_d[0]))
 
+
+
+def comps_of(t3):
+    """connected pieces of a triangle soup (tri, 3, 3) -> lists of triangle indices"""
+    parent.clear()
+    for t in t3:
+        ks = [key(v) for v in t]
+        for k in ks[1:]: parent[find(k)] = find(ks[0])
+    c = {}
+    for i, t in enumerate(t3): c.setdefault(find(key(t[0])), []).append(i)
+    return list(c.values())
+
+
+def crown_top(parts):
+    """how far up the steering axis the top crown reaches (steer space, dh's axis): where a direct-mount stem sits"""
+    t3 = np.concatenate([p.reshape(-1, 3, 3) for p, _, m in parts if m != "gold"])
+    tops = [float((t3[c].reshape(-1, 3)[:, :2] @ ax_d).max()) for c in comps_of(t3) if len(c) > 1000 and np.abs(t3[c][:, :, 2]).max() > 0.05]
+    return max(tops)
+
+
 # ---------------------------------------------------------------- each exported fork, fitted
 for fid in ("tues", "fuzz"):
     g, b = load(os.path.join(A, "parts", "%s_fork.glb" % fid))
@@ -271,3 +291,117 @@ for fid in ("tues", "fuzz"):
             if sd_ == s_: final.append((p + d, n, m))
     write_glb(os.path.join(A, "forks", "levers_%s.glb" % fid), [{"name": "levers", "parent": None, "t": [0, 0, 0], "origin": np.zeros(3), "parts": final}], None, "levers")
 
+
+
+
+# ---------------------------------------------------------------- stems: the models' direct-mount stems on the stock cockpit
+# dh's stem (the small pieces on the top crown round the bar clamp) is cut out at run time and the model's stem (parts/<id>_cockpit.glb:
+# the pieces within 4.5 cm of the middle, on the crown; not the headset spacers under it) is put in its place: turned onto dh's steering axis
+# with its crowns' middle on dh's (like the forks). extras.seats = how far up the axis each fork's stem sits (its stem's lowest point;
+# dh / tues / fuzz): BikeRig slides the stem along the axis from its own fork's seat onto the seat of the fork in use.
+# The bar, grips and levers ride in the new clamp: extras.shift = how far the bar's middle moves. Which of dh's triangles are the stem
+# ("cut"), the bar furniture ("move") and the brake hose (bent: "hose", moved by its height between hoseY) are given as triangle middles.
+dt3 = tris; dcomps = comps_of(dt3)
+fork_set = set(fork_idx)
+def mids(idx):
+    return np.round(dt3[sorted(idx)].astype(np.float32).astype(float).mean(1), 5).ravel().tolist()
+stem_d, move_d, hose_d = [], [], []
+dh_bar = None
+for c in dcomps:
+    if fork_set.intersection(c): continue
+    P = dt3[c].reshape(-1, 3); az = np.abs(P[:, 2]); ms = {mats[i] for i in c}
+    if az.max() < 0.05 and P[:, 1].min() > 0.03:
+        stem_d += c
+    elif P[:, 1].min() > 0.09 and az.max() > 0.1:
+        move_d += c
+        if ms == {"black"} and az.max() > 0.35 and (dh_bar is None or len(c) > len(dh_bar)): dh_bar = c
+    elif P[:, 1].min() < -0.2 and P[:, 1].max() > 0.09:
+        hose_d += c
+def bar_mid(t3, c):
+    P = t3[c].reshape(-1, 3); P = P[np.abs(P[:, 2]) < 0.06]
+    return (P[:, :2].min(0) + P[:, :2].max(0)) / 2
+bm_d = bar_mid(dt3, dh_bar)
+seats = {"dh": crown_top([(dt3[sorted(fork_idx)].reshape(-1, 3), None, "black")])}   # dh's stem bolts reach into the crown: its top face
+print("dh stem: %d triangles; bar furniture %d; hose %d; bar middle %s; stem seat %.4f" % (len(stem_d), len(move_d), len(hose_d), bm_d.round(4), seats["dh"]))
+stems = {}
+for fid in ("tues", "fuzz"):
+    g, b = load(os.path.join(A, "parts", "%s_fork.glb" % fid)); ex = g["nodes"][0]["extras"]
+    ax_s = np.array(ex["steerAxis"]); ax_s /= np.linalg.norm(ax_s)
+    R = rot(math.atan2(ax_d[1], ax_d[0]) - math.atan2(ax_s[1], ax_s[0])); C_s = np.array(ex["crownMid"])
+    T = lambda p: np.concatenate([(p[..., :2] - C_s) @ R[:2, :2].T + C_d, p[..., 2:3]], -1)
+    own_top = crown_top([(T(p), None, m) for p, _, m in node_tris(g, b, "fork_crown")])
+    gc, bc = load(os.path.join(A, "parts", "%s_cockpit.glb" % fid)); cp = node_tris(gc, bc, "cockpit")
+    ct = np.concatenate([p.reshape(-1, 3, 3) for p, _, _ in cp]); cn = np.concatenate([n.reshape(-1, 3, 3) for _, n, _ in cp])
+    cm = np.array([m for p, _, m in cp for _ in range(len(p) // 3)])
+    cc = comps_of(ct)
+    bar = max([c for c in cc if np.abs(ct[c][:, :, 2]).max() > 0.35 and np.abs(ct[c][:, :, 2]).min() < 0.06], key=len)
+    shift = T(np.array([*bar_mid(ct, bar), 0.0]))[:2] - bm_d
+    tmin = lambda c: float((T(ct[c].reshape(-1, 3))[:, :2] @ ax_d).min())
+    sel = sorted(i for c in cc if np.abs(ct[c][:, :, 2]).max() < 0.045 and ct[c][:, :, 1].min() > -0.03 and tmin(c) > own_top - 0.03 for i in c)
+    seats[fid] = float((T(ct[sel].reshape(-1, 3))[:, :2] @ ax_d).min())
+    parts = []
+    for m in sorted(set(cm[sel])):
+        k = [i for i in sel if cm[i] == m]
+        parts.append((T(ct[k].reshape(-1, 3)), cn[k].reshape(-1, 3) @ R.T, m))
+    print("%s stem: %d triangles; seat %.4f (dh %.4f); bar middle moves %s" % (fid, len(sel), seats[fid], seats["dh"], (shift * 1000).round(1)))
+    stems[fid] = (parts, shift)
+for fid, (parts, shift) in stems.items():
+    write_glb(os.path.join(A, "forks", "stem_%s.glb" % fid), [{"name": "stem", "parent": None, "t": [0, 0, 0], "origin": np.zeros(3), "parts": parts}],
+              {"own": fid, "seats": seats, "shift": shift.tolist(), "axis": ax_d.tolist(), "hoseY": [-0.05, 0.12],
+               "cut": mids(stem_d), "move": mids(move_d), "hose": mids(hose_d)}, "stemroot")
+
+
+
+# ---------------------------------------------------------------- bars: the models' handlebars + grips on the stock cockpit
+# The model's bar (its biggest piece reaching past 35 cm each side) and grips (rubber, with their lock rings / end caps: whatever lies
+# round the grips' own tube) are turned onto dh's axis like the stem and written relative to the bar's middle (forks/bar_<id>.glb, nodes
+# "bar" and "grips"); BikeRig puts that middle in the clamp in use (extras.dhMid + the stem's shift). dh's bar + grips are cut by triangle
+# middle ("barcut"); the brake levers ("levers"; model levers by their side) move by leverShift[side]: so they sit against the new grip
+# as they sat against dh's (and the hose top follows the left one).
+bar_cut = [i for i in move_d if mats[i] in ("black", "rubber")]
+lev_d = [i for i in move_d if mats[i] not in ("black", "rubber")]
+def grip_end(t3, idx, s_):
+    """the inner end of a grip: (x, y) middle of its inner 5 cm, |z| of its inner edge (signed)"""
+    g = t3[idx].reshape(-1, 3); g = g[(g[:, 2] * s_) > 0.1]
+    gin = np.abs(g[:, 2]).min(); g = g[np.abs(g[:, 2]) < gin + 0.05]
+    c = (g[:, :2].min(0) + g[:, :2].max(0)) / 2
+    return np.array([c[0], c[1], s_ * gin])
+dh_rub = [i for i in move_d if mats[i] == "rubber"]
+G_d = {s_: grip_end(dt3, dh_rub, s_) for s_ in (-1, 1)}
+for fid in ("tues", "fuzz"):
+    g, b = load(os.path.join(A, "parts", "%s_fork.glb" % fid)); ex = g["nodes"][0]["extras"]
+    ax_s = np.array(ex["steerAxis"]); ax_s /= np.linalg.norm(ax_s)
+    R = rot(math.atan2(ax_d[1], ax_d[0]) - math.atan2(ax_s[1], ax_s[0])); C_s = np.array(ex["crownMid"])
+    T = lambda p: np.concatenate([(p[..., :2] - C_s) @ R[:2, :2].T + C_d, p[..., 2:3]], -1)
+    gc, bc = load(os.path.join(A, "parts", "%s_cockpit.glb" % fid)); cp = node_tris(gc, bc, "cockpit")
+    ct = T(np.concatenate([p.reshape(-1, 3, 3) for p, _, _ in cp])); cn = np.concatenate([n.reshape(-1, 3, 3) for _, n, _ in cp]) @ R.T
+    cm = np.array([m for p, _, m in cp for _ in range(len(p) // 3)])
+    cc = comps_of(ct)
+    bar = max([c for c in cc if np.abs(ct[c][:, :, 2]).max() > 0.35 and np.abs(ct[c][:, :, 2]).min() < 0.06], key=len)
+    mid = np.array([*bar_mid(ct, bar), 0.0])
+    rub = [i for i in range(len(ct)) if cm[i] == "rubber"]
+    grips = []
+    for s_ in (-1, 1):
+        rs = ct[[i for i in rub if ct[i][:, 2].mean() * s_ > 0]].reshape(-1, 3)
+        lo, hi = rs.min(0) - [0.008, 0.008, 0.012], rs.max(0) + [0.008, 0.008, 0.012]
+        for c in cc:
+            P = ct[c].reshape(-1, 3)
+            if c is not bar and (P >= lo).all() and (P <= hi).all(): grips += c
+    G_m = {s_: grip_end(ct, [i for i in rub], s_) for s_ in (-1, 1)}
+    lshift = {s_: ((G_m[s_] - mid) - (G_d[s_] - np.array([*bm_d, 0.0]))) for s_ in (-1, 1)}
+    width = float(np.abs(ct[bar][:, :, 2]).max() * 2)
+    P = ct[bar].reshape(-1, 3); ends = P[np.abs(P[:, 2]) > np.abs(P[:, 2]).max() - 0.02]
+    rise = float(ends[:, 1].mean() - mid[1])   # bar ends over its middle (roughly: the steer frame is tilted with the head angle)
+    print("%s bar: %d tris, grips + rings %d tris; %.0f mm wide, ends %.0f mm over the middle; levers move %s / %s mm"
+          % (fid, len(bar), len(grips), width * 1000, rise * 1000, (lshift[-1] * 1000).round(1), (lshift[1] * 1000).round(1)))
+    def part(idx):
+        out = []
+        for m in sorted(set(cm[idx])):
+            k = [i for i in idx if cm[i] == m]
+            out.append((ct[k].reshape(-1, 3) - mid, cn[k].reshape(-1, 3), m))
+        return out
+    write_glb(os.path.join(A, "forks", "bar_%s.glb" % fid),
+              [{"name": "bar", "parent": None, "t": [0, 0, 0], "origin": np.zeros(3), "parts": part(bar)},
+               {"name": "grips", "parent": None, "t": [0, 0, 0], "origin": np.zeros(3), "parts": part(sorted(set(grips)))}],
+              {"dhMid": [float(bm_d[0]), float(bm_d[1])], "width": width, "leverShift": [lshift[-1].tolist(), lshift[1].tolist()],
+               "hoseY": [-0.05, 0.12], "barcut": mids(bar_cut), "levers": mids(lev_d), "hose": mids(hose_d)}, "barroot")

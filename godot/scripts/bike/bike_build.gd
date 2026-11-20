@@ -150,6 +150,8 @@ const ROTORS := [["stock", "GLORY stock"], ["tues", "YT Tues 203 mm"], ["fuzz", 
 ## that stands up to build.seat.post_h metres (0 - 0.2) along the seat tube (BikeRig._swap_seat)
 const SADDLES := [["stock", "GLORY stock"], ["tues", "YT Tues"], ["fuzz", "NS Fuzz"]]
 const LEVERS := [["stock", "GLORY stock"], ["tues", "YT Tues"], ["fuzz", "NS Fuzz"]]
+## direct-mount stems for the stock frame (assets/forks/stem_<id>.glb, tools/make_forks.py; BikeRig._swap_cockpit): the bar rides in its clamp
+const STEMS := [["stock", "GLORY stock"], ["tues", "YT Tues"], ["fuzz", "NS Fuzz"]]
 const POSTS := [["stock", "Slammed (stock)"], ["dropper", "Dropper"]]
 ## rear brake calipers for the stock frame (assets/forks/caliper_<id>.glb, tools/make_forks.py); "stock" = the GLORY's own
 const REAR_CALIPERS := [["stock", "GLORY stock"], ["tues", "YT Tues"], ["fuzz", "NS Fuzz"]]
@@ -233,7 +235,7 @@ static func default_build() -> Dictionary:
 			"rim_color": "1a1a1c", "rim_finish": "matte", "rim_depth": 28, "rim_width": 30,
 			"spokes": 32, "lacing": 3, "gauge": 1, "spoke_color": "b8bcc0", "nipple_color": "e8432e", "hub_color": "1a1a1c",
 		},
-		"bars": {"width": 780, "rise": 30, "material": "alloy", "levers": "stock"},
+		"bars": {"width": 780, "rise": 30, "material": "alloy", "levers": "stock", "stem": "stock"},
 		"seat": {"model": "stock", "post": "stock", "post_h": 0.0},
 		"suspension": {"fork_model": "custom", "fork_travel": 200, "shock_travel": 200, "fork_spring": 1, "shock_spring": 1, "rebound": 1, "rear_caliper": "stock", "rotor": "stock"},
 		"drive": {"ring": 34, "cassette": "dh7"},
