@@ -1771,6 +1771,8 @@ func _autotest(seconds: float) -> void:
 				var dd: float = Vector2(cp[0] - ph.x, cp[1] - ph.z).length_squared()
 				if dd < best_d: best_d = dd; _probe.fs = s0 + k
 			var tp: Array = crs.at(float(_probe.fs) + 6.0 + absf(ph.v) * 0.5)
+			var ra = game.terrain.rope_aim(ph.x, ph.z, 6.0 + absf(ph.v) * 0.5)   # a rope bridge: along its line
+			if ra != null: tp = [ra.x, ra.y, tp[2], tp[3]]
 			var wv := Env.s("BMX_WEAVE")   # tests: weave this far (m) either side of the centreline, over berm / trail edges
 			if wv != "":
 				var off: float = float(wv) * sin(el * 1.3)
@@ -1786,6 +1788,7 @@ func _autotest(seconds: float) -> void:
 					var cp2: Array = crs.at(float(_probe.fs) + 3.0)
 					game.get_up()
 					ph.reset_at(cp2[0], cp2[1], atan2(-float(cp2[3]), float(cp2[2])))
+					game._out_of_crevasse()   # (the trail's line can run over a rope canyon: back onto the rim)
 					game._snap_prev()
 			if Env.s("BMX_PUMP") != "" and not ph.air and ph.prep > 0.15: Input.action_press("hop")   # tests: pump into lips
 			else: Input.action_release("hop")

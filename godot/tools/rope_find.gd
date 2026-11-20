@@ -21,7 +21,7 @@ func _init() -> void:
 			if j.type != "rope":
 				continue
 			var miss := 0
-			for a in range(-8, 60):
+			for a in range(-34, 92):   # u -30 .. len + 30: the approach ramps too (Feat.ramp)
 				for b in range(-36, 37):
 					var u := a * 0.83 - 2.0
 					var w := b * 1.37

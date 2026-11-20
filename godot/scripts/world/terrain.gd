@@ -82,6 +82,10 @@ var ropes: Array = []
 var rope_ref_y := INF
 var _rope_ok := false
 var _rope_t := 0.0
+## bridges still being built, a few ms a frame (RopeBridge.build_step); they join `ropes` once complete
+var _ropes_building: Array = []
+const ROPE_BUILD_US := 3000     # build budget per frame
+const ROPE_BUILD_NOW := 90.0    # a bridge whose middle is nearer the rider than this is finished at once
 
 
 ## seed_in: the world to build (pass it here rather than calling set_seed afterwards, which would
@@ -117,6 +121,8 @@ func _process(delta: float) -> void:
 	if _rope_t <= 0.0:
 		_rope_t = 0.5
 		_update_ropes()
+	if not _ropes_building.is_empty():
+		_build_ropes()
 	_tapes.update(delta, _focus.x, _focus.y, _wind_t, _wind_dir, _wind_ws)
 	for key in _packs:
 		var pk: Dictionary = _packs[key]
@@ -164,10 +170,13 @@ func set_seed(seed_in: int) -> void:
 		_debris.clear()
 	if _tapes:
 		_tapes.clear()
-	for rb in ropes:
+	for rb in ropes + _ropes_building:
 		(rb as Node).queue_free()
 	ropes.clear()
+	_ropes_building.clear()
 	_rope_t = 0.0
+	if use_cs and RopeBridge.available():
+		RopeBridge.warm()   # their materials' shaders compile while the ride loads, not as the first bridge appears
 	field = TerrainField.new()
 	field.setup(seed_in)
 	fcs = _make_cs() if use_cs else null
@@ -259,6 +268,17 @@ func rope_under(x: float, z: float, y: float):
 	return null
 
 
+## where to steer for (world x, z) on or approaching a rope bridge, `ahead` m along its line; null when none is
+## near. The trail's centreline bows up to ~2 m off the bridge's straight line (the deck is 1.1 m wide), so
+## anything that follows the trail (the demo rider, test autopilots) rode off the side mid-span
+func rope_aim(x: float, z: float, ahead: float):
+	for rb in ropes:
+		var l: Vector2 = rb.local(x, z)
+		if l.x > -20.0 and l.x < rb.length - 2.0 and absf(l.y) < 6.0:
+			return rb.world(l.x + ahead, 0.0)
+	return null
+
+
 ## keep a RopeBridge for every rope-bridge route feature within ~220 m of the rider (C# needed)
 func _update_ropes() -> void:
 	if not _rope_ok:
@@ -266,7 +286,7 @@ func _update_ropes() -> void:
 		if not _rope_ok:
 			return
 	var keep := {}
-	for rb in ropes:
+	for rb in ropes + _ropes_building:
 		keep[rb.feat_s] = rb
 	for j in field.route_feats:
 		if j.type != "rope":
@@ -277,11 +297,36 @@ func _update_ropes() -> void:
 			rb = RopeBridge.new()
 			rb.name = "RopeBridge"
 			add_child(rb)
-			rb.setup(j, self)
-			ropes.append(rb)
+			rb.begin(j, self)
+			_ropes_building.append(rb)
 		elif rb != null and d > 300.0:
 			ropes.erase(rb)
+			_ropes_building.erase(rb)
 			rb.queue_free()
+	_build_ropes()
+
+
+## a slice of the bridges being built (a few ms a frame); one the rider is already close to is finished now
+func _build_ropes() -> void:
+	var t0 := Time.get_ticks_usec()
+	for rb in _ropes_building.duplicate():
+		var mid: Vector2 = rb.world(rb.length * 0.5, 0.0)
+		var now: bool = mid.distance_to(_focus) < ROPE_BUILD_NOW
+		if not now and Time.get_ticks_usec() - t0 > ROPE_BUILD_US:
+			continue
+		var done := false
+		while true:
+			var ts := Time.get_ticks_usec()
+			var stg: int = rb._stage
+			done = rb.build_step()
+			if Env.s("BMX_ROPE_PROBE") != "" and Time.get_ticks_usec() - ts > 2000:
+				print("ROPE build stage %d took %.1f ms" % [stg, (Time.get_ticks_usec() - ts) / 1000.0])
+			if done or (not now and Time.get_ticks_usec() - t0 > ROPE_BUILD_US):
+				break
+		if done:
+			_ropes_building.erase(rb)
+			ropes.append(rb)
+			if Env.s("BMX_ROPE_PROBE") != "": print("ROPE built s=%.0f" % rb.feat_s)
 
 
 ## one physics tick of every rope bridge near the rider (Game, after the bike's step)
