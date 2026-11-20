@@ -259,11 +259,13 @@ for fid in ("tues", "fuzz"):
         # the bar axis: each side's grips are straight cylinders on it, so the grips' middle (the model's own, and dh's) gives the offset
         gm, gb = load(os.path.join(A, "parts", "%s_cockpit.glb" % fid))
         gr = np.concatenate([p for p, _, m in node_tris(gm, gb, "cockpit") if m == "rubber"])
-        gr = gr[(gr[:, 2] * s_) > 0.2]
+        gr = gr[(gr[:, 2] * s_) > 0.1]
+        gin = np.abs(gr[:, 2]).min(); gr = gr[np.abs(gr[:, 2]) < gin + 0.05]   # the grip's inner end, where the lever is
         c = (gr[:, :2].min(0) + gr[:, :2].max(0)) / 2
-        dr = np.concatenate([tris[i] for i in range(len(tris)) if mats[i] == "rubber" and i not in fork_idx and tris[i][:, 2].mean() * s_ > 0.2])
+        dr = np.concatenate([tris[i] for i in range(len(tris)) if mats[i] == "rubber" and i not in fork_idx and tris[i][:, 2].mean() * s_ > 0.1])
+        din = np.abs(dr[:, 2]).min(); dr = dr[np.abs(dr[:, 2]) < din + 0.05]
         dh_ctr[s_] = (dr[:, :2].min(0) + dr[:, :2].max(0)) / 2
-        d = np.array([dh_ctr[s_][0] - c[0], dh_ctr[s_][1] - c[1], s_ * (dh_in[s_] - np.abs(sp[:, 2]).min() * 1.0) if False else s_ * (dh_in[s_] - np.abs(sp[:, 2]).min())])
+        d = np.array([dh_ctr[s_][0] - c[0], dh_ctr[s_][1] - c[1], s_ * (din - gin)])   # keeps the lever's place against its own grip
         print("%s lever side %+d: bbox z %.3f..%.3f, moved by %s" % (fid, s_, sp[:, 2].min(), sp[:, 2].max(), np.round(d, 3)))
         for sd_, p, n, m in res:
             if sd_ == s_: final.append((p + d, n, m))
