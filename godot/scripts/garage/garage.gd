@@ -86,6 +86,7 @@ const VIEWS := {
 	"wheels": [0.25, 8.0, 2.4, Vector3(0.6, 0.4, 0)],
 	"bars": [0.9, 14.0, 1.7, Vector3(0.45, 1.0, 0)],
 	"suspension": [1.0, 10.0, 2.2, Vector3(0.05, 0.6, 0)],
+	"brakes": [2.2, 8.0, 2.4, Vector3(0.0, 0.45, 0)],   # the brake side: both rotors + calipers
 	"drive": [-1.3, 8.0, 1.5, Vector3(-0.3, 0.35, 0)],   # the drive side: chainring + cassette
 	"rider": [0.0, 7.0, 4.3, Vector3(-0.05, 1.0, 0)],
 	"kit": [0.2, 6.0, 4.2, Vector3(0.3, 0.85, 0.6)],
@@ -812,7 +813,7 @@ const INK := Tokens.INK
 const SUB := Tokens.INK_SOFT
 const LINE := Tokens.LINE
 const BIKE_TABS := [["paint", "PAINT"], ["logos", "LOGOS"], ["wheels", "WHEELS"], ["bars", "BARS"], ["suspension", "SHOCKS"],
-	["drive", "GEARS"]]
+	["brakes", "BRAKES"], ["drive", "GEARS"]]
 const RIDER_TABS := [["rider", "POSITION"], ["kit", "KIT"]]
 func _tabs() -> Array: return RIDER_TABS if mode == "rider" else BIKE_TABS
 func _has_tab(t: String) -> bool:
@@ -1007,6 +1008,7 @@ func _set_tab(t: String) -> void:
 		"wheels": _wheels_page()
 		"bars": _bars_page()
 		"suspension": _susp_page()
+		"brakes": _brakes_page()
 		"drive": _drive_page()
 		"rider": _rider_page()
 		"kit": _kit_page()
@@ -1421,7 +1423,6 @@ func _bars_page() -> void:
 		_choice("Material", Handlebar.MATERIALS, B.material, func(v): B.material = v; custom.call())
 	_note("Wide bars steer slower but steadier; narrow bars turn quicker. Alloy bars take the bars / stem colour from Paint.")
 	_choice("Stem", BikeBuild.STEMS, str(B.get("stem", "stock")), func(v): B.stem = v)
-	_choice("Brake levers", BikeBuild.LEVERS, str(B.get("levers", "stock")), func(v): B.levers = v)
 	_h("SEAT")
 	var SE: Dictionary = build.seat
 	_choice("Saddle", BikeBuild.SADDLES, str(SE.get("model", "stock")), func(v): SE.model = v)
@@ -1433,6 +1434,16 @@ func _bars_page() -> void:
 	if not build.has("camera"): build.camera = {"mount": "none"}
 	_choice("Mount", ActionCam.BIKE_MOUNTS, str(build.camera.get("mount", "none")), func(v): build.camera.mount = v)
 	_note("A GoPro-style camera on the bike: the Bike cam view (C) looks out of it. The helmet camera is picked in the Rider room's Kit tab.")
+
+func _brakes_page() -> void:
+	var S: Dictionary = build.suspension
+	_h("DISC BRAKES")
+	_choice("Rotors", BikeBuild.ROTORS, str(S.get("rotor", "stock")), func(v): S.rotor = v)
+	_choice("Rear caliper", BikeBuild.REAR_CALIPERS, str(S.get("rear_caliper", "stock")), func(v): S.rear_caliper = v)
+	_note("Rotors fit every frame. The front caliper comes with the fork (Shocks tab); the Tues and Fuzz rear calipers fit the GLORY's rear triangle, the new frames keep their own.")
+	_h("LEVERS")
+	var B: Dictionary = build.bars
+	_choice("Brake levers", BikeBuild.LEVERS, str(B.get("levers", "stock")), func(v): B.levers = v)
 
 func _susp_page() -> void:
 	var S: Dictionary = build.suspension
@@ -1448,10 +1459,6 @@ func _susp_page() -> void:
 	_cards(items, S.get("fork_model", "custom"), func(k): BikeBuild.apply_fork_model(build, k))
 	_slide("Travel", 160, 220, 10, S.fork_travel, "mm", func(v): S.fork_travel = int(v); S.fork_model = "custom")
 	_choice("Spring", rate, S.fork_spring, func(v): S.fork_spring = v)
-	_h("DISC BRAKES")
-	_choice("Rotors", BikeBuild.ROTORS, str(S.get("rotor", "stock")), func(v): S.rotor = v)
-	_choice("Rear caliper", BikeBuild.REAR_CALIPERS, str(S.get("rear_caliper", "stock")), func(v): S.rear_caliper = v)
-	_note("Rotors fit every frame. The front caliper comes with the fork; the Tues and Fuzz rear calipers fit the GLORY's rear triangle, the new frames keep their own.")
 	_h("REAR SHOCK")
 	_slide("Travel", 160, 220, 10, S.shock_travel, "mm", func(v): S.shock_travel = int(v))
 	_choice("Spring", rate, S.shock_spring, func(v): S.shock_spring = v)
