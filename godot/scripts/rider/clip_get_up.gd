@@ -212,7 +212,7 @@ func _start_seg(pose: Dictionary) -> void:
 	var names: Array = dz.clips.map(func(c): return str(c.name))
 	var want := ""
 	if _forced != "": want = _forced
-	elif _wait_n == 0: want = "hurting"
+	elif _wait_n == 0: want = "annoyed" if names.any(func(n): return n.contains("annoyed")) else "hurting"
 	elif _wait_n == 1: want = "look_around"
 	var idx := -1
 	for i in names.size():
@@ -224,6 +224,7 @@ func _start_seg(pose: Dictionary) -> void:
 		idx = pool[randi() % pool.size()]
 	_seg = idx; _seg_name = names[idx]; _seg_t = 0.0
 	_seg_len = 4.2 if _seg_name.contains("hurting") else clampf(float(dz.clips[idx].len), 3.0, 6.0)
+	if _seg_name.contains("annoyed"): _seg_len = clampf(float(dz.clips[idx].len), 2.5, 5.0)   # the clip's own head shake, once
 	# the clip's first frame at his spot, facing the way he faces now
 	var c0: Dictionary = dz.pose_at(idx, 0.0, false)
 	var bas := Basis(Vector3.UP, _wyaw - _heading(c0.P))
@@ -234,13 +235,13 @@ func _start_seg(pose: Dictionary) -> void:
 
 
 ## the head turned to the bike for `w` (0..1), shaking "no" once it has sunk in
-func _aim_head(pose: Dictionary, w: float) -> void:
+func _aim_head(pose: Dictionary, w: float, shake := true) -> void:
 	if w <= 0.001 or not pose.o.has("head"): return
 	var hp: Vector3 = pose.P[0]
 	var f: Vector3 = (target + Vector3(0, 0.25, 0)) - hp
 	f.y = maxf(f.y, -0.8 * f.length())
 	var x := f.normalized()
-	x = x.rotated(Vector3.UP, sin(_seg_t * 6.5) * 0.3 * smoothstep(1.2, 1.8, _seg_t))   # the head shake
+	if shake: x = x.rotated(Vector3.UP, sin(_seg_t * 6.5) * 0.3 * smoothstep(1.2, 1.8, _seg_t))   # the head shake
 	var z := x.cross(Vector3.UP).normalized()
 	var b := Basis(x, z.cross(x), z)
 	pose.o["head"] = (pose.o.head as Basis).orthonormalized().slerp(b, w)
@@ -281,8 +282,10 @@ func step(dt: float) -> bool:
 	if phase == "wait":
 		_seg_t += dt
 		pose = _place(dz.pose_at(_seg, _seg_t, false), _seg_xf)
-		if _seg_name.contains("hurting") and has_target:   # eyes on the bike: in, held, out
-			_aim_head(pose, smoothstep(0.0, 0.7, _seg_t) * (1.0 - smoothstep(_seg_len - 0.7, _seg_len, _seg_t)))
+		if has_target and (_seg_name.contains("hurting") or _seg_name.contains("annoyed")):   # eyes on the bike: in, held, out
+			var gaze := smoothstep(0.0, 0.7, _seg_t) * (1.0 - smoothstep(_seg_len - 0.7, _seg_len, _seg_t))
+			if _seg_name.contains("annoyed"): _aim_head(pose, gaze * 0.55, false)   # (the clip does the shaking)
+			else: _aim_head(pose, gaze)
 		if _seg_fade < 1.0:
 			_seg_fade = minf(_seg_fade + dt / FADE, 1.0)
 			pose = RiderAnim._blend(_seg_from, pose, smoothstep(0.0, 1.0, _seg_fade))
