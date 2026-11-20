@@ -223,7 +223,7 @@ func _start_seg(pose: Dictionary) -> void:
 			if i != _seg or names.size() == 1: pool.append(i)
 		idx = pool[randi() % pool.size()]
 	_seg = idx; _seg_name = names[idx]; _seg_t = 0.0
-	_seg_len = 4.2 if _seg_name.contains("hurting") else clampf(float(dz.clips[idx].len), 3.0, 6.0)
+	_seg_len = 4.2 if _seg_name.contains("hurting") else clampf(float(dz.clips[idx].len), 2.0, 6.0)   # (gestures play once)
 	if _seg_name.contains("annoyed"): _seg_len = clampf(float(dz.clips[idx].len), 2.5, 5.0)   # the clip's own head shake, once
 	# the clip's first frame at his spot, facing the way he faces now
 	var c0: Dictionary = dz.pose_at(idx, 0.0, false)
