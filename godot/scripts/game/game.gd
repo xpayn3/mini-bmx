@@ -198,6 +198,7 @@ func _ready() -> void:
 	fx.chunk(Vector3(0, phys.y + 0.4, 0), Vector3.ZERO, Color.WHITE, 0.01, 0.2)
 	if blood: blood.warm_draw(cam)   # crash-only blood shaders + splat decals, so the first crash doesn't wait on them
 	if wasted and _wasted_on(): wasted.warm()   # and the WASTED silhouette mask's pipelines
+	ClipGetUp.warm()   # the get-up / dizzy clips load on a worker thread now, not at the first crash
 
 ## lift the terrain + far hills out of this Game before it is freed, for a later Game of the same world
 ## (`reuse`); they wait out of the tree, not processing (the terrain joins its workers on leaving)
@@ -705,7 +706,9 @@ func start_crash(reason: String) -> void:
 	add_child(rider)
 	rider.transform = Transform3D.IDENTITY
 	ragdoll.start(pts, body_vel, spin_v, 1.0 / 60)
-	if blood: blood.crash_start(Vector2(body_vel.x, body_vel.z).length())
+	var flat_v := Vector2(body_vel.x, body_vel.z).length()
+	crash_fatal = flat_v > Blood_FATAL_SPEED or Env.s("BMX_FATAL") != ""
+	if blood: blood.crash_start(flat_v)
 	grime.add_blood(clampf((crash_v - 8.0) * 0.035, 0.0, 0.5))   # only a severe crash (> ~8 m/s) stains; the rider + bike stay bloody until a death + revive
 	rider.pose_ragdoll(ragdoll.p)
 	# (no dust right where the crash starts with the smoke sim: only where the body / bike hit and slide)
@@ -740,25 +743,41 @@ func _wasted_on() -> bool:
 		if a.begins_with("--autotest"): return false
 	return bool(Settings.get_v("wasted"))
 
-## the hold to get up is done: the rider climbs to their feet (GetUpAnim), then get_up() puts them on the bike.
-## A torn-off limb (or BMX_GETUP_ANIM=0) gets straight back on as before.
-var getup_anim: GetUpAnim = null
+## the hold to get up is done: the rider climbs to their feet, then get_up() puts them on the bike.
+## With clips in ClipGetUp.GETUP_DIR: the clip matching how the body lies, then standing dizzy until hop is pressed
+## again (or Backspace). Without them: the procedural GetUpAnim straight onto the bike.
+## A fatal crash (crash_fatal), a torn-off limb (or BMX_GETUP_ANIM=0) gets straight back on as before:
+## the climb to the feet is only for crashes the rider walks away from.
+var getup_anim = null              # ClipGetUp / GetUpAnim
+var _hop_armed := false            # dizzy: hop let go since standing up (a fresh press gets back on)
+var crash_fatal := false
+const Blood_FATAL_SPEED := 12.0   # = Blood.FATAL_SPEED (fx/blood.gd), kept here: blood may be off
 var _stand_world: Array = []   # the standing pose it ended in (world), blended into the riding pose
 var _stand_blend := 1.0
 const STAND_BLEND := 0.35      # s from standing to on the bike
 func begin_getup() -> void:
 	if getup_anim != null: return
-	if not ragdoll.active or not ragdoll.cut.is_empty() or Env.s("BMX_GETUP_ANIM") == "0":
+	if not ragdoll.active or not ragdoll.cut.is_empty() or crash_fatal or Env.s("BMX_GETUP_ANIM") == "0":
 		get_up(); return
-	getup_anim = GetUpAnim.new(rider, terrain, ragdoll.p)
+	if ClipGetUp.available() and Env.s("BMX_GETUP_ANIM") != "proc":
+		var g := ClipGetUp.new(rider, terrain, ragdoll.p)
+		if g.ok(): getup_anim = g
+	if getup_anim == null: getup_anim = GetUpAnim.new(rider, terrain, ragdoll.p)
+	_hop_armed = false
 	ragdoll.active = false
 	phys.crash_hold = 0.0; phys.crash_armed = false
 	if wasted: wasted.finish()
 	if Env.s("BMX_GETUP_PROBE") != "": print("GETUP start at ", (ragdoll.p[Ragdoll.PELVIS] as Vector3).snapped(Vector3.ONE * 0.01))
 
 ## one physics step of the get-up: draw it, keep the ragdoll's points on it (camera, photo mode follow them)
-func _getup_step(dt: float) -> void:
-	var going := getup_anim.step(dt)
+func _getup_step(dt: float, hop: bool) -> void:
+	if getup_anim is ClipGetUp and getup_anim.dizzy():
+		# standing dizzy: a fresh hop press gets back on the bike (tests: BMX_DIZZY_SECS)
+		if not hop: _hop_armed = true
+		elif _hop_armed: getup_anim.release()
+		var ds := Env.s("BMX_DIZZY_SECS")
+		if ds != "" and getup_anim.t > float(ds): getup_anim.release()
+	var going: bool = getup_anim.step(dt)
 	var P: Array = getup_anim.last_world
 	for i in mini(P.size(), ragdoll.p.size()):
 		ragdoll.p[i] = P[i]; ragdoll.q[i] = P[i]
@@ -778,6 +797,7 @@ func _stand_to_bike(dt: float) -> void:
 	rider.pose_points(P)
 
 func get_up() -> void:
+	if getup_anim is ClipGetUp: getup_anim.free_clips()   # (Backspace while standing dizzy)
 	getup_anim = null
 	_stand_blend = 1.0
 	phys.get_up()
@@ -1336,7 +1356,7 @@ func _physics_process(dt: float) -> void:
 				["pitch", phys.pitch, 0.002], ["y", phys.y, 0.001], ["body_y", phys.body_y, 0.001], ["compress", phys.compress, 0.001], ["lat_a", phys.lat_a, 0.05], ["v", phys.v, 0.01]]:
 			_jitter_sample(kv[0], kv[1], kv[2])
 	if phys.crash_on and getup_anim != null:
-		_getup_step(dt)
+		_getup_step(dt, inp.hop)
 	elif phys.crash_on:
 		rider.pose_ragdoll(ragdoll.p, _ragdoll_roots())
 	_pk = _perf("p_ragdoll_pose", _pk)

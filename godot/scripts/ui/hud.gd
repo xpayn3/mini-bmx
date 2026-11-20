@@ -1168,11 +1168,15 @@ class GetUpPrompt extends Control:
 	var t := 0.0
 	var held := 0.0
 	var key := "Space"
+	var dizzy := false
 
 	func tick(dt: float) -> void:
 		var st: BikePhysics = hud.game.phys
 		t += dt
-		var show: bool = st.crash_on and st.crash_t > 0.6 and hud.game.getup_anim == null   # (not once they're getting up)
+		var ga = hud.game.getup_anim
+		var dz: bool = st.crash_on and ga is ClipGetUp and ga.dizzy() and ga.t > 0.8   # standing dizzy: press hop to ride on
+		var show: bool = (st.crash_on and st.crash_t > 0.6 and ga == null) or dz   # (not while getting up)
+		if show: dizzy = dz   # (fading out keeps the text it had)
 		k = clampf(st.crash_hold / st.getup_need, 0.0, 1.0) if show else k
 		held = move_toward(held, 1.0 if (show and st.crash_hold > 0.0) else 0.0, dt * 12)
 		if Env.s("BMX_GETUP_K") != "" and show:   # tests: draw it as if held this far
@@ -1189,8 +1193,8 @@ class GetUpPrompt extends Control:
 		var f := UITheme.font(true)
 		var fs := 18
 		var y := size.y * 0.5
-		var ko: bool = hud.life <= 0.0   # out of life: revive instead of getting up
-		var act := "REVIVE" if ko else "GET UP"
+		var ko: bool = hud.life <= 0.0 and not dizzy   # out of life: revive instead of getting up
+		var act := "RIDE ON" if dizzy else ("REVIVE" if ko else "GET UP")
 		if ko:
 			var p := 0.75 + 0.25 * sin(t * 6.0)
 			var tl := "KNOCKED OUT"
@@ -1201,7 +1205,7 @@ class GetUpPrompt extends Control:
 		var g := PadGlyph.glyph_for("hop")
 		var gh := 30.0
 		var gw := PadGlyph.width(g, gh)
-		var l1 := "HOLD"
+		var l1 := "PRESS" if dizzy else "HOLD"
 		var l2 := "TO " + act
 		var w1 := f.get_string_size(l1, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 		var w2 := f.get_string_size(l2, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
@@ -1211,6 +1215,7 @@ class GetUpPrompt extends Control:
 			draw_string(f, Vector2(x0, y) + sh, l1, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, c)
 			draw_string(f, Vector2(x0 + w1 + 24 + gw, y) + sh, l2, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, c)
 		PadGlyph.draw(self, g, Vector2(x0 + w1 + 12 + gw * 0.5, y - 6), gh)
+		if dizzy: return   # a press, no hold bar
 		var bar := Rect2((size.x - 240) * 0.5, y + 14, 240, 5)
 		draw_rect(bar, Color(0, 0, 0, 0.45))
 		if k > 0.0: draw_rect(Rect2(bar.position, Vector2(bar.size.x * k, bar.size.y)), Color("5dff8a") if ko else Color.WHITE)

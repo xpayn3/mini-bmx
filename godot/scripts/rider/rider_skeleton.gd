@@ -7,8 +7,9 @@ extends Skeleton3D
 ## animations and imported humanoid models all work with it.
 ##
 ## The rider is still drawn by its procedural parts; every frame (riding, ragdoll, playing a clip) the bones are
-## set from where those parts are (`follow`), so the skeleton always matches what is on screen. Fingers, eyes and
-## jaw keep their rest pose under the hand / head.
+## set from where those parts are (`follow`), so the skeleton always matches what is on screen. The finger bones
+## are posed by GloveFingers (curl per hand, `curls`) and drive the skinned finger meshes (`fingers`); eyes and
+## jaw keep their rest pose under the head.
 ##
 ## The profile faces +Z with its left at +X; the rider faces +X with its right at +Z, so this node is turned a
 ## quarter about Y (`TO_RIDER`) and everything below works in rider space.
@@ -24,6 +25,17 @@ const BODY := ["Hips", "Spine", "Chest", "UpperChest", "Neck", "Head",
 	"RightUpperLeg", "RightLowerLeg", "RightFoot", "RightToes"]
 
 var _rest_g := {}     # bone -> global rest basis in rider space (orthonormal)
+var curls := [GloveFingers.RELAXED, GloveFingers.RELAXED]   # each hand's finger curl (Rider sets it, GloveFingers)
+var fingers: Array[MeshInstance3D] = []   # the skinned finger meshes (left, right)
+
+
+## the gloved fingers, skinned to the finger bones (one mesh per hand). Children of this node: a skinned mesh is
+## drawn from its own transform x the bone poses, which are in this node's space
+func make_fingers(mat: Material) -> void:
+	for i in 2:
+		var mi := GloveFingers.build(self, i, mat)
+		add_child(mi)
+		fingers.append(mi)
 var _idx := {}        # bone name -> index
 
 
@@ -152,6 +164,16 @@ func follow(P: Array, spine: Array, head_t: Transform3D, hands: Array, shoes: Ar
 		# hand: the glove's x runs along the forearm, its y is the back of the hand (up at rest, palms down)
 		var wrist := ha - hand_t.basis.x.normalized() * 0.07
 		_put(side + "Hand", wrist, _aim(side + "Hand", hand_t.basis.x, up, hand_t.basis.y))
+		# fingers (GloveFingers): curled round the bar / relaxed, drawn by the skinned finger meshes
+		var hand_b := hand_t.basis.orthonormalized()
+		for bt in GloveFingers.pose(i, curls[i]):
+			var t: Transform3D = bt[1]
+			_put(bt[0], hand_t * t.origin, hand_b * t.basis)
+		if i < fingers.size():
+			var c := TO_RIDER.inverse() * hand_t.origin
+			var bx: AABB = fingers[i].custom_aabb
+			if not bx.has_point(c - Vector3.ONE) or not bx.has_point(c + Vector3.ONE):
+				fingers[i].custom_aabb = AABB(c - Vector3(3, 3, 3), Vector3(6, 6, 6))
 		# legs: knees point forward at rest
 		var bend_l := (kn - hp) - (kn - hp).project(ft - hp)
 		var kf := bend_l if bend_l.length_squared() > 1e-8 else fwd
