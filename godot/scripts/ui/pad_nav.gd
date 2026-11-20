@@ -76,6 +76,7 @@ func _prep(n: Node) -> void:
 	if not is_instance_valid(root) or not (n == root or root.is_ancestor_of(n)): return
 	if n is ScrollContainer:
 		(n as ScrollContainer).follow_focus = true
+		SmoothScroll.attach(n)
 	elif n is BaseButton and not n.has_meta(&"nav_prepped"):
 		n.set_meta(&"nav_prepped", true)
 		_prep_button.call_deferred(n)   # deferred: the button's own style overrides are set by then
