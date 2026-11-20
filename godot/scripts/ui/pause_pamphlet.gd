@@ -27,7 +27,7 @@ var _font_b: Font
 
 
 func _ready() -> void:
-	sound_stream = load("res://assets/audio/map_unfold_gravel.ogg")   # the user's paper sound (the map's): opening, unfolding, folding
+	sound_stream = load("res://assets/audio/paper_unfold.mp3")   # the user's crumpling paper recording (same as the map): opening, unfolding, folding, turning over
 	super._ready()
 	cols = 3; rows = 1
 	panel = Vector2(0.099, 0.21)

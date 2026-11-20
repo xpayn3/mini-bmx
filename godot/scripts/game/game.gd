@@ -438,10 +438,11 @@ func _apply_light(h: float, L: Dictionary) -> void:
 var _studio: Node3D
 var _look_yaw := 0.0
 var _look_pitch := 0.0
-const LOOK_SIDE := 1.0   # sign of the head yaw that turns towards the camera
+const LOOK_DEPTH := 0.75       # how far from the camera to the head the looked-at point sits
+const LOOK_YAW_MAX := 1.9      # ~110 deg: neck + shoulders turned back
+const LOOK_PITCH_BIAS := 0.15  # the pose already tips the head down a little
 
-## title screen: the rider's head follows the mouse. The bike points to the left of the frame, so the mouse
-## ahead of the rider = looking straight on, above / below = nodding, behind them = turning towards the camera.
+## title screen: the rider's head looks straight at the mouse, all the time, wherever it is on the screen.
 func _update_look(dt: float) -> void:
 	var yaw_t := 0.0
 	var pitch_t := 0.0
@@ -451,13 +452,21 @@ func _update_look(dt: float) -> void:
 		if OS.get_environment("BMX_TITLE_MOUSE") != "":   # tests: a fixed mouse position (fractions of the screen)
 			var q := OS.get_environment("BMX_TITLE_MOUSE").split_floats(",")
 			m = Vector2(q[0], q[1]) * vp.get_visible_rect().size
-		var hp: Vector2 = cam.unproject_position(rider.head.global_position)
-		var span: float = vp.get_visible_rect().size.x * 0.35
-		var dx: float = m.x - hp.x          # + = behind the rider
-		var dy: float = hp.y - m.y          # + = above
-		pitch_t = clampf(atan2(dy, maxf(absf(dx), span * 0.5)) * 0.8, -0.45, 0.55)
-		yaw_t = LOOK_SIDE * clampf(dx / span, 0.0, 1.0) * 1.25
-	var k := 1.0 - exp(-dt * 7.0)
+		# a real point under the mouse, between the camera and the head (= "at the screen"): the mouse over the
+		# helmet = looking into the camera, ahead of him = looking forward, behind him = turning back over the
+		# shoulder. Worked out in the head's parent space, where +x = forward, +y = up.
+		var c3: Camera3D = vp.get_camera_3d()
+		if c3:
+			var hw: Vector3 = rider.head.global_position
+			var o: Vector3 = c3.project_ray_origin(m)
+			var tgt: Vector3 = o + c3.project_ray_normal(m) * (o.distance_to(hw) * LOOK_DEPTH)
+			var par: Node3D = rider.head.get_parent_node_3d()
+			var d: Vector3 = par.global_transform.affine_inverse() * tgt - rider.head.position
+			yaw_t = clampf(atan2(-d.z, d.x), -LOOK_YAW_MAX, LOOK_YAW_MAX)
+			pitch_t = clampf(atan2(d.y, Vector2(d.x, d.z).length()) + LOOK_PITCH_BIAS, -0.6, 0.7)
+			# past straight behind the yaw wraps: keep turning the way he already is instead of snapping round
+			if absf(yaw_t - _look_yaw) > PI: yaw_t = signf(_look_yaw) * LOOK_YAW_MAX
+	var k := 1.0 - exp(-dt * 9.0)
 	_look_yaw += (yaw_t - _look_yaw) * k
 	_look_pitch += (pitch_t - _look_pitch) * k
 

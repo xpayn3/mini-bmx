@@ -19,12 +19,12 @@ def reduce_ratio(f):
     return max(0.02, min(0.1, 8000.0 / f)) if f > 12000 else 0.15 if f > 5000 else 0.3 if f > 2000 else 0.5 if f > 800 else 1.0
 
 
-def extract(o):
+def extract(o, ratio=None):
     """world-space triangles + smooth normals of one part: (positions, normals, material names per tri)"""
     f0 = len(o.data.polygons)
     with bpy.context.temp_override(object=o, active_object=o, selected_objects=[o]):
         tri = o.modifiers.new("t", 'TRIANGULATE'); bpy.ops.object.modifier_apply(modifier=tri.name)
-        r = reduce_ratio(f0)
+        r = reduce_ratio(f0) if ratio is None else ratio
         if r < 1.0:
             m = o.modifiers.new("d", 'DECIMATE'); m.ratio = r
             bpy.ops.object.modifier_apply(modifier=m.name)

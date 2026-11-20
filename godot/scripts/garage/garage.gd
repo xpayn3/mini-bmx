@@ -644,6 +644,8 @@ func _process(dt: float) -> void:
 		focus_t = stand_rider.head.global_position + Vector3(0, -0.1, 0)
 	elif stand_rider and head_env != "":   # tests: frame the standing rider's helmet
 		focus_t = stand_rider.head.global_position + Vector3(0, 0.15, 0)
+	var aim := OS.get_environment("BMX_GARAGE_AIM").split(",", false)   # tests: "x,y,z" = look at this point
+	if aim.size() == 3: focus_t = Vector3(float(aim[0]), float(aim[1]), float(aim[2]))
 	focus = focus.lerp(focus_t, minf(1.0, dt * 4))
 	var p := deg_to_rad(pitch)
 	var dir := Vector3(sin(orbit) * cos(p), sin(p), cos(orbit) * cos(p))
@@ -1337,6 +1339,10 @@ func _susp_page() -> void:
 	_cards(items, S.get("fork_model", "custom"), func(k): BikeBuild.apply_fork_model(build, k))
 	_slide("Travel", 160, 220, 10, S.fork_travel, "mm", func(v): S.fork_travel = int(v); S.fork_model = "custom")
 	_choice("Spring", rate, S.fork_spring, func(v): S.fork_spring = v)
+	_h("DISC BRAKES")
+	_choice("Rotors", BikeBuild.ROTORS, str(S.get("rotor", "stock")), func(v): S.rotor = v)
+	_choice("Rear caliper", BikeBuild.REAR_CALIPERS, str(S.get("rear_caliper", "stock")), func(v): S.rear_caliper = v)
+	_note("Rotors fit every frame. The front caliper comes with the fork; the Tues and Fuzz rear calipers fit the GLORY's rear triangle, the new frames keep their own.")
 	_h("REAR SHOCK")
 	_slide("Travel", 160, 220, 10, S.shock_travel, "mm", func(v): S.shock_travel = int(v))
 	_choice("Spring", rate, S.shock_spring, func(v): S.shock_spring = v)

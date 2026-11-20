@@ -330,7 +330,11 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   replaces the `fork_lower` mesh (lowers + the model's front brake caliper) and moves its node to the fork's own axle offset (extras.wheelbase follows; physics reads it). The
   fork starts at dh's axle position, so the glb's `travel` (room before the lowers hit the crown, 0.18 / 0.17 m) caps the fork travel; the stock fork-leg decal slot is dropped.
   Frames with their own cockpit + fork (Tues, Fuzz) ignore the fork pick; the Goat (dh steer + fork) takes it. Test: `BMX_BUILD="suspension.fork_model=tues_fork"`.
-  Not done: swapping the REAR caliper (it is merged into dh's seatstay mesh); the new frames' own rear calipers are in `assets/parts/*_brakes.glb`.
+  **Disc brakes** (garage Shocks tab, DISC BRAKES): `suspension.rotor` ("stock" / "tues" / "fuzz", `BikeBuild.ROTORS`; `assets/forks/rotor_<id>.glb` from
+  `tools/export_rotors.py`: disc + carrier + bolts, relative to the axle, moved onto the stock rotors' planes) replaces the mesh of the wheels' split-off "rotor"
+  (`BikeRig._swap_rotors`, keeps the heat-glow material; works on every frame). `suspension.rear_caliper` ("stock" / "tues" / "fuzz", `BikeBuild.REAR_CALIPERS`): on the stock frame
+  `_swap_rear_caliper` uses `forks/dh_seatstay.glb` (seatstay without its caliper, cut by `make_forks.py` as components) + `forks/caliper_<id>.glb` (the frame's rear caliper
+  turned about the axle to the stock caliper's angle on the rotor). Test: `BMX_BUILD="suspension.rotor=fuzz;suspension.rear_caliper=tues"`, `BMX_GARAGE_AIM=x,y,z` aims the garage camera.
 - **Helmet models** (`look.helmet`, `Rider.HELMETS`, picked in the garage Kit tab and the tuning card Look > Helmet; `Rider.use_helmet(id)`):
   GLORY = the stock recolourable helmet + our goggles; **6D ATR-2** (black / silver skin) and **TLD SE5** (`assets/helmets/helmet_*.glb`, from the user's FBXs by
   `tools/export_helmets.py` + `tools/prep_helmet_textures.py`) are textured models that always wear their own goggles + strap (our goggles don't fit them):
@@ -548,8 +552,8 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   it** (clicks are ray-traced onto the panels as they lie, `page_point`). `unfold = false` keeps it folded (a
   leaflet). cols even for unfolding (the outer panel's back = the cover, a strip under the page); odd cols only folded.
   `close_actions` / `close_requested` / `auto_close`, `opened` / `closed`, `tempo` (< 1 slower; the map 0.4),
-  `sound_stream` (a recording played in random faded slices; the map: `assets/audio/map_unfold_gravel.ogg`). Paper = ambientCG **Paper003** (CC0) scan in
-  `assets/textures/paper/` × the print, creases worn (`shaders/paper_sheet.gdshader`). Sound: only the user's recording (`sound_stream`; the map and the pause leaflet use `map_unfold_gravel.ogg`), no stream = silent - never synthesised paper sounds.
+  `sound_stream` (a recording played in random faded slices; the map: `assets/audio/paper_unfold.mp3`). Paper = ambientCG **Paper003** (CC0) scan in
+  `assets/textures/paper/` × the print, creases worn (`shaders/paper_sheet.gdshader`). Sound: only the user's recording (`sound_stream`; the map and the pause leaflet use `paper_unfold.mp3`, the user's crumpling paper recording), no stream = silent - never synthesised paper sounds.
 - **Trail map** (`PaperMap`, `scripts/ui/paper_map.gd`; `Game.open_map` / `exit_map`): 4×2 panels (0.84 × 0.525 m),
   two layers. **World** (`World`, `set_content`): one 3.2 × 2 km print around you (2 px/m, heights every 10 m,
   colours every 20 m, hill shade, 5 m / 25 m contours, shore, 100 m grid with numbers, trail in red dashes, route

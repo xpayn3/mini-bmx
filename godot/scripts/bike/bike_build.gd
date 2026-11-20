@@ -144,6 +144,11 @@ static func apply_fork_model(b: Dictionary, key: String) -> void:
 	b.paint.fork = (m.lowers as Dictionary).duplicate()
 	b.paint.stanchions = (m.stanchions as Dictionary).duplicate()
 
+## brake rotors (assets/forks/rotor_<id>.glb, tools/export_rotors.py); "stock" = the generated wheels' own
+const ROTORS := [["stock", "GLORY stock"], ["tues", "YT Tues 203 mm"], ["fuzz", "NS Fuzz 190 mm"]]
+## rear brake calipers for the stock frame (assets/forks/caliper_<id>.glb, tools/make_forks.py); "stock" = the GLORY's own
+const REAR_CALIPERS := [["stock", "GLORY stock"], ["tues", "YT Tues"], ["fuzz", "NS Fuzz"]]
+
 ## the fork model's glb id (FORK_MODELS.*.glb) of a build, or "" for the frame's own fork
 static func fork_glb(b: Dictionary) -> String:
 	var m: Dictionary = FORK_MODELS.get(str(b.get("suspension", {}).get("fork_model", "")), {})
@@ -224,7 +229,7 @@ static func default_build() -> Dictionary:
 			"spokes": 32, "lacing": 3, "gauge": 1, "spoke_color": "b8bcc0", "nipple_color": "e8432e", "hub_color": "1a1a1c",
 		},
 		"bars": {"width": 780, "rise": 30, "material": "alloy"},
-		"suspension": {"fork_travel": 200, "shock_travel": 200, "fork_spring": 1, "shock_spring": 1, "rebound": 1},
+		"suspension": {"fork_travel": 200, "shock_travel": 200, "fork_spring": 1, "shock_spring": 1, "rebound": 1, "rear_caliper": "stock", "rotor": "stock"},
 		"drive": {"ring": 34, "cassette": "dh7"},
 	}
 

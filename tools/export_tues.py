@@ -99,7 +99,7 @@ def to_game(p):   # (fx, fy, fz) -> game, BB at the origin
 
 parts = {}   # node -> list of (pos(tri*3,3), nrm, matname)
 CROWN_CENTERS = []   # the two crowns (Forks.001 lower, .003 upper): where the fork clamps the steerer
-lib = {"fork": [], "cranks": [], "cockpit": [], "brakes": [], "derail": []}
+lib = {"fork": [], "cranks": [], "cockpit": [], "brakes": [], "derail": [], "rcal": []}
 for o in list(bpy.data.objects):
     if o.type != 'MESH' or len(o.data.polygons) == 0: continue
     base = o.name.split(".")[0]
@@ -124,6 +124,7 @@ for o in list(bpy.data.objects):
         entry = (node, pos[sel], nrm[sel], mn)
         if base == "Forks": lib["fork"].append(entry)
         if base == "Brakes" and node == "fork_lower": lib["fork"].append(entry)
+        if base == "Brakes" and i in (0, 1, 2, 3, 4, 5, 6, 7, 52, 69): lib["rcal"].append(entry)   # the rear caliper (not its hose)
         if base == "Forks" and i in (1, 3) and mn == "black" and len(CROWN_CENTERS) < 2: CROWN_CENTERS.append(((pos[:, :2].min(0) + pos[:, :2].max(0)) / 2))
         if base == "Drivetrain" and node == "crank": lib["cranks"].append(entry)
         if base == "Drivetrain" and node == "seatstay": lib["derail"].append(entry)
@@ -208,5 +209,12 @@ write_glb(os.path.join(OUT, "parts", "tues_fork.glb"), fork_nodes,
 
 lib_glb("tues_cranks.glb", "cranks", z3(g2(*BBF)), "cranks", "crank")
 lib_glb("tues_cockpit.glb", "cockpit", z3(SP), "cockpit", "cockpit")
+
+# the rear brake caliper alone (relative to the rear axle) for tools/make_forks.py
+if lib["rcal"]:
+    main = max(lib["rcal"], key=lambda e: len(e[1]))
+    mc = (main[1][:, :2].min(0) + main[1][:, :2].max(0)) / 2 - A
+    write_glb(os.path.join(OUT, "parts", "tues_caliper_rear.glb"), [{"name": "caliper", "parent": None, "t": [0, 0, 0], "origin": z3(A),
+              "parts": [(e[1], e[2], e[3]) for e in lib["rcal"]]}], {"center": mc.tolist()}, "caliper")
 lib_glb("tues_derailleur.glb", "derail", z3(A), "derailleur", "derailleur")
 lib_glb("tues_brakes.glb", "brakes", np.zeros(3), "brakes", "brakes")
