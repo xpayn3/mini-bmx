@@ -891,6 +891,10 @@ func respawn(new_world: bool) -> void:
 	flying_cam = null
 	var sp := _water_spawn() if OS.get_environment("BMX_WATER_SPAWN") != "" else Vector3.ZERO
 	phys.reset_at(sp.x, sp.z, sp.y)
+	if OS.get_environment("BMX_PACK_SPAWN") != "":   # tests: "x,z" of a health pack -> start 3.5 m before it, facing +x
+		var pxz := OS.get_environment("BMX_PACK_SPAWN").split(",")
+		sp = Vector3(float(pxz[0]) - 9.0, 0.0, float(pxz[1]))
+		phys.reset_at(sp.x, sp.z, sp.y)
 	if sp != Vector3.ZERO: terrain.update_stream(sp.x, sp.z, INF)
 	rider.reset_pose()
 	_snap_prev()
@@ -1326,6 +1330,9 @@ func _process(dt: float) -> void:
 				_jitter_sample(ji[1] + "x", jp.x, 0.002); _jitter_sample(ji[1] + "y", jp.y, 0.002); _jitter_sample(ji[1] + "z", jp.z, 0.002)
 	var vd: float = Settings.get_v("view_distance")
 	terrain.update_stream(st.x, st.z, 4.0)
+	if not phys.crash_on and hud and hud.life < 1.0:   # a full-health rider rolls past a pack and leaves it
+		if terrain.take_pack(st.x, st.y, st.z) != null:
+			hud.on_health_pack(HealthPack.HEAL)
 	terrain.tape_push(null if phys.crash_on else Vector3(st.x, st.y + 0.85, st.z) + st.fwd() * 0.75)   # what a caught tape stretches over
 	far_hills.follow(drawn_pos)
 	sheep.follow(dt, drawn_pos, st.v, st.fwd())
