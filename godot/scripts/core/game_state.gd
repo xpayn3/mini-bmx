@@ -35,9 +35,13 @@ const BIKES := {
 	"bmx": {"label": "BMX", "file": "res://assets/bmx.glb", "root": "bmx", "pose": {}, "ride": {}, "land": 1.0, "geared": false},
 }
 
+const _GoggleLens = preload("res://scripts/rider/goggle_lens.gd")
+
 var bike_id := "dh"   # the downhill bike is the main bike: every launch starts on it (B / title screen switch)
 var computer_id := "classic"   # the bike computer mounted for every ride (ComputerUnits, chosen on the ride setup page)
 var computer_cfg := {}   # per bike computer: switched-off pages, alerts, beep, backlight (ComputerUnits.opt)
+var goggle_lens := "neutral"   # goggle lens = the ride's colour grade (scripts/rider/goggle_lens.gd), picked on the ride setup page
+var _lens_saved := "neutral"   # what save.cfg holds (a BMX_LENS test override is never written)
 var bmx_tyre := ""   # tyre model on the BMX ("" = the stock wheels); the DH frames take theirs from the garage build
 var seed := 0
 var records := {"longest": 0.0, "highest": 0.0, "air": 0.0, "top_speed": 0.0, "jumps": 0, "distance": 0.0}
@@ -54,6 +58,9 @@ func _ready() -> void:
 				var e = cf.get_value("days", k, null)
 				if k.is_valid_int() and e is Array and e.size() == 2: days[int(k)] = [float(e[0]), int(e[1])]
 		computer_id = String(cf.get_value("game", "computer", computer_id))
+		goggle_lens = String(cf.get_value("game", "lens", goggle_lens))
+		if not _GoggleLens.has(goggle_lens): goggle_lens = _GoggleLens.DEFAULT
+		_lens_saved = goggle_lens
 		bmx_tyre = String(cf.get_value("game", "bmx_tyre", ""))
 		if not BikeBuild.TYRE_MODELS.has(bmx_tyre): bmx_tyre = ""
 		if not ComputerUnits.UNITS.has(computer_id): computer_id = ComputerUnits.DEFAULT
@@ -62,6 +69,7 @@ func _ready() -> void:
 			if c is Dictionary: computer_cfg[id] = c
 	if BIKES.has(OS.get_environment("BMX_BIKE")): bike_id = OS.get_environment("BMX_BIKE")   # tests: ride this frame
 	if BikeBuild.TYRE_MODELS.has(OS.get_environment("BMX_TYRE")): bmx_tyre = OS.get_environment("BMX_TYRE")   # tests: this tyre on the BMX
+	if _GoggleLens.has(OS.get_environment("BMX_LENS")): goggle_lens = OS.get_environment("BMX_LENS")   # tests: ride with this lens
 	if OS.get_environment("BMX_COMPUTER") != "": computer_id = OS.get_environment("BMX_COMPUTER")   # tests: mount this unit
 
 ## the bike to ride: the downhill bike carries the player's garage build (parts change the ride)
@@ -91,6 +99,8 @@ func save() -> void:
 	var cf := ConfigFile.new()
 	cf.set_value("game", "bike", bike_id)
 	cf.set_value("game", "computer", computer_id)
+	if OS.get_environment("BMX_LENS") == "": _lens_saved = goggle_lens
+	cf.set_value("game", "lens", _lens_saved)
 	cf.set_value("game", "bmx_tyre", bmx_tyre)
 	for id in computer_cfg:
 		cf.set_value("computer_" + id, "cfg", computer_cfg[id])

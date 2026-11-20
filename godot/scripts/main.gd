@@ -186,6 +186,7 @@ func _free_title_keep() -> void:
 	_title_keep = {}
 
 func _exit_tree() -> void:
+	LensScene.join()
 	_free_title_keep()
 
 func restart_ride() -> void:
@@ -243,6 +244,7 @@ func _prebuild_behind(intro: CrtIntro) -> void:
 	hero_view.show_rider(RiderPanels.load_look())   # the Character step's standing rider too
 	hero_view.set_bike(GameState.bike_id)
 	print("PREBUILD turntable ms=", Time.get_ticks_msec() - t0)
+	LensScene.prewarm()   # the RACE step's trail preview: its land is worked out on a worker meanwhile
 	if is_instance_valid(intro): intro.hold = false
 
 func _take_prebuilt() -> bool:
@@ -587,6 +589,12 @@ func _menu_page_main() -> void:
 	ride.grab_focus.call_deferred()
 
 ## RIDE -> choose the bike and the time of day, then GO
+const GoggleLens = preload("res://scripts/rider/goggle_lens.gd")   # goggle lens = the ride's colour grade (RACE step)
+const TimeSlider = preload("res://scripts/ui/time_slider.gd")
+const LensScene = preload("res://scripts/ui/lens_scene.gd")
+var lens_view: SubViewportContainer   # the RACE step's trail preview (LensScene)
+var GOGGLE_VIEW: Vector3 = Vector3(1.0, 0.12, 0.16) if Env.s("BMX_GOG_VIEW") == "" else str_to_var("Vector3(" + Env.s("BMX_GOG_VIEW") + ")")   # lens cards: the camera looks from here
+const LensIcon = preload("res://scripts/ui/lens_icon.gd")
 const SETUP_STEPS := ["BIKE", "TUNE", "CHARACTER", "COMPUTER", "RACE"]
 const COMPUTER_STEP := 3
 var setup_step := 0
@@ -692,12 +700,21 @@ func _menu_page_setup_build(step := 0) -> void:
 		var left := Control.new()
 		left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(left)
-		hero_view = keep_view if keep_view else BikeTurntable.new()
-		keep_view = null
-		hero_view.set_anchors_preset(Control.PRESET_FULL_RECT)
-		left.add_child(hero_view)
-		if setup_step == 2: hero_view.show_rider(RiderPanels.load_look())   # the rider step shows the rider standing
-		else: hero_view.set_bike(GameState.bike_id)
+		var race := setup_step == SETUP_STEPS.size() - 1
+		if race:   # RACE: a little trail seen from riding height, lit by the picked time, through the picked lens (LensScene)
+			if not is_instance_valid(keep_view): keep_view = hero_view if is_instance_valid(hero_view) else null
+			lens_view = LensScene.new()
+			lens_view.set_anchors_preset(Control.PRESET_FULL_RECT)
+			left.add_child(lens_view)
+			lens_view.set_hour(LightSettings.get_value("time"))
+			lens_view.set_lens(GameState.goggle_lens)
+		else:
+			hero_view = keep_view if keep_view else BikeTurntable.new()
+			keep_view = null
+			hero_view.set_anchors_preset(Control.PRESET_FULL_RECT)
+			left.add_child(hero_view)
+			if setup_step == 2: hero_view.show_rider(RiderPanels.load_look())   # the rider step shows the rider standing
+			else: hero_view.set_bike(GameState.bike_id)
 		var ov := MarginContainer.new()
 		ov.set_anchors_preset(Control.PRESET_FULL_RECT)
 		ov.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -723,6 +740,13 @@ func _menu_page_setup_build(step := 0) -> void:
 		hero_spec.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		lv.add_child(hero_spec)
 		_hero_text(GameState.bike_id)
+		if race:   # over the trail scene: white type with a soft shadow
+			for lb in [tcol.get_child(0), tcol.get_child(1), hero_name, hero_spec]:
+				(lb as Control).add_theme_color_override("font_color", Color.WHITE)
+				(lb as Control).add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.45))
+				(lb as Control).add_theme_constant_override("shadow_offset_y", 2)
+				(lb as Control).add_theme_constant_override("shadow_outline_size", 6)
+			hero_spec.text = "THE TRAIL AT THIS TIME OF DAY  ·  THROUGH YOUR LENS"
 		if setup_step == 2:
 			hero_name.text = "YOUR CHARACTER"
 			hero_spec.text = "KIT  ·  HAIR  ·  PLATE  ·  DRAG TO TURN"
@@ -731,6 +755,10 @@ func _menu_page_setup_build(step := 0) -> void:
 		bl.add_child(UITheme.make_button("BACK", back_cb, "link", Tokens.T_XL))
 		bl.add_child(UITheme.make_button("TUNE IN GARAGE", _open_garage, "link", Tokens.T_MD))
 		lv.add_child(bl)
+		if race:   # the links read on the dark trail scene too
+			for lk in bl.get_children():
+				for st in ["font_color", "font_hover_color", "font_focus_color", "font_pressed_color"]:
+					(lk as Control).add_theme_color_override(st, Color.WHITE if st == "font_color" else Tokens.ACCENT)
 		# right: the steps, this step's picks, next
 		var rm := MarginContainer.new()
 		rm.custom_minimum_size.x = 600
@@ -779,6 +807,7 @@ func _menu_page_setup_build(step := 0) -> void:
 		keep_view.visible = false
 		scr.add_child(keep_view)
 	elif is_instance_valid(hero_view): hero_view.visible = true
+	_lens_preview(GameState.goggle_lens if setup_step == SETUP_STEPS.size() - 1 else "")   # the RACE step shows the bike through the lens
 	menu_focus = next_btn   # a step with one main pick moves this onto the picked card
 	match setup_step:
 		0: _setup_bike(content)
@@ -1213,49 +1242,99 @@ func _setup_race(content: HBoxContainer) -> void:
 	side.add_theme_constant_override("separation", Tokens.S3)
 	content.add_child(side)
 	side.add_child(UITheme.caption("TIME OF DAY"))
-	var grid := GridContainer.new()
-	grid.columns = 2
-	grid.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	grid.add_theme_constant_override("h_separation", Tokens.S3)
-	grid.add_theme_constant_override("v_separation", Tokens.S3)
-	var tgroup := ButtonGroup.new()
-	var active := LightSettings.get_active()
-	for n in LightSettings.BUILTIN:
-		var p := LightSettings.preset(n)
-		var cyc := float(p.cycle) > 0.5
-		var sub := "AUTO" if cyc else LightSettings.clock(float(p.time))
-		var b := UITheme.make_button("", LightSettings.select.bind(n), "chip")
+	# one slider over the whole day: the sky's colours, the sun's arc rising and setting (TimeSlider)
+	var ts = TimeSlider.new()
+	ts.hour = LightSettings.get_value("time")
+	ts.cycle = LightSettings.get_value("cycle") > 0.5
+	ts.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ts.set_meta(&"nav_accept", _setup_next)
+	ts.committed.connect(func(h: float): LightSettings.set_value("time", h))
+	ts.changed.connect(func(h: float): if is_instance_valid(lens_view): lens_view.set_hour(h))
+	side.add_child(ts)
+	menu_focus = ts
+	# quick picks under it + the day / night cycle
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", Tokens.S2)
+	for q in [["SUNRISE", 6.55], ["GOLDEN HOUR", 19.33], ["NOON", 13.0], ["DUSK", 20.1], ["NIGHT", 23.5]]:
+		var qb := UITheme.make_button(String(q[0]), func(): ts._set_hour(float(q[1]), true), "chip")
+		qb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		qb.set_meta(&"nav_accept", _setup_next)
+		row.add_child(qb)
+	var cyc := UITheme.make_button("DAY / NIGHT CYCLE", Callable(), "chip")
+	cyc.toggle_mode = true
+	cyc.button_pressed = ts.cycle
+	cyc.tooltip_text = "Time runs: the day goes round from the hour picked above"
+	cyc.toggled.connect(func(on: bool):
+		LightSettings.set_value("cycle", 1.0 if on else 0.0)
+		ts.cycle = on
+		ts.queue_redraw())
+	row.add_child(cyc)
+	side.add_child(row)
+	_setup_lenses(side)
+	side.add_child(UITheme.text("Computer: " + String(ComputerUnits.get_unit(GameState.computer_id).name), Tokens.INK_SOFT, Tokens.T_MD))
+
+## the RACE step's GOGGLES picks: each lens is a colour grade for the whole ride (GoggleLens). The bike view on the
+## left is graded live by the picked lens (_lens_preview); the line under the picks says what the lens does.
+func _setup_lenses(side: VBoxContainer) -> void:
+	_ensure_thumbs()
+	side.add_child(UITheme.caption("GOGGLES  ·  LENS"))
+	var lg := GridContainer.new()
+	lg.columns = 4
+	lg.add_theme_constant_override("h_separation", Tokens.S2)
+	lg.add_theme_constant_override("v_separation", Tokens.S2)
+	var desc := UITheme.caption(GoggleLens.description(GameState.goggle_lens), Tokens.INK_SOFT, Tokens.T_XS)
+	var grp := ButtonGroup.new()
+	for id in GoggleLens.ids():
+		var b := UITheme.make_button("", Callable(), "chip")
 		b.toggle_mode = true
-		b.button_group = tgroup
-		b.button_pressed = n == active
-		_pick_card(b)
+		b.button_group = grp
+		b.button_pressed = id == GameState.goggle_lens
+		b.set_meta(&"nav_accept", _setup_next)   # A on a lens = RACE, like the time cards
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		b.custom_minimum_size.y = 108
-		# a postcard: the little landscape in a white border, the name and the time written under it
+		b.custom_minimum_size.y = 96
+		b.tooltip_text = GoggleLens.description(id)
 		var cv := VBoxContainer.new()
 		cv.set_anchors_preset(Control.PRESET_FULL_RECT)
-		cv.offset_left = Tokens.S2; cv.offset_right = -Tokens.S2; cv.offset_top = Tokens.S2; cv.offset_bottom = -Tokens.S2
+		cv.offset_left = Tokens.S2; cv.offset_right = -Tokens.S2; cv.offset_top = Tokens.S1; cv.offset_bottom = -Tokens.S1
 		cv.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		cv.add_theme_constant_override("separation", Tokens.S1)
-		var ic := TimeIcon.new()
-		ic.hour = float(p.time); ic.cycle = cyc
-		ic.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		cv.add_child(ic)
-		var cap := HBoxContainer.new()
-		cap.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		var nl := UITheme.display(String(n).to_upper(), Tokens.T_MD, Tokens.INK, Tokens.SLANT_TITLE)
-		nl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		cv.add_theme_constant_override("separation", 0)
+		# the newest helmets' goggle model with this lens (GoggleLens.make_goggles), rendered once by PartThumbs
+		var pic := TextureRect.new()
+		pic.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		pic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		pic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		cv.add_child(pic)
+		var pref: WeakRef = weakref(pic)
+		bike_thumbs.request("goggles|2|" + id, GoggleLens.make_goggles.bind(id), GOGGLE_VIEW, func(t):
+			var pr = pref.get_ref()
+			if pr: pr.texture = t)
+		var nl := UITheme.display(GoggleLens.display_name(id).to_upper(), Tokens.T_SM, Tokens.INK, Tokens.SLANT_TITLE)
+		nl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		nl.clip_text = true
+		nl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		nl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		cap.add_child(nl)
-		var tl := UITheme.caption(sub, Tokens.INK_SOFT, Tokens.T_XS)
-		tl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		cap.add_child(tl)
-		cv.add_child(cap)
+		cv.add_child(nl)
 		b.add_child(cv)
-		grid.add_child(b)
-	side.add_child(grid)
-	side.add_child(UITheme.text("Computer: " + String(ComputerUnits.get_unit(GameState.computer_id).name), Tokens.INK_SOFT, Tokens.T_MD))
+		b.pressed.connect(func():
+			if is_instance_valid(desc): desc.text = GoggleLens.description(id)
+			if GameState.goggle_lens != id:
+				GameState.goggle_lens = id
+				GameState.save()
+			_lens_preview(id))
+		lg.add_child(b)
+	side.add_child(lg)
+	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	side.add_child(desc)
+
+## grades the setup page's bike view with a lens ("" / "neutral" = none); the turntable is kept across steps,
+## so every other step sets it back to none
+func _lens_preview(id: String) -> void:
+	if is_instance_valid(lens_view) and id != "": lens_view.set_lens(id)
+	if not is_instance_valid(hero_view): return
+	for we in hero_view.find_children("*", "WorldEnvironment", true, false):
+		var env: Environment = (we as WorldEnvironment).environment
+		if env: env.adjustment_color_correction = GoggleLens.lut(id) if id != "" else null
 
 ## a setup pick that follows the pad cursor: the picked one is where the cursor starts, A on it = next step
 func _pick_card(b: Button) -> void:

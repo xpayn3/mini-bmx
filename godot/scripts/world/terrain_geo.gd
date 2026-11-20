@@ -98,6 +98,12 @@ static func _build_materials() -> void:
 	for k in [["leaf", 0.02, 0.2], ["cactus", 0.004, 0.12], ["leafSoft", 0.035, 0.25], ["tuft", 0.12, 0.3]]:
 		MAT[k[0]].set_shader_parameter("sway", k[1])
 		MAT[k[0]].set_shader_parameter("backlight", k[2])
+	# golden-hour light through the leaves (view dependent: low sun behind the plant) and, for crowns,
+	# dappled shadows (holes in their sun shadow: flecks of sun under the trees). Trunks / rocks / wood: none.
+	for k in [["leaf", 0.7, 0.0, 0.32], ["leafSoft", 0.9, 0.0, 0.4], ["tuft", 0.8, 0.0, 0.0], ["cactus", 0.5, 1.0, 0.0]]:
+		MAT[k[0]].set_shader_parameter("scatter", k[1])
+		MAT[k[0]].set_shader_parameter("scatter_rim", k[2])
+		MAT[k[0]].set_shader_parameter("dapple", k[3])
 	var f := ShaderMaterial.new()
 	f.shader = preload("res://scripts/world/flower.gdshader")
 	MAT["flower"] = f
