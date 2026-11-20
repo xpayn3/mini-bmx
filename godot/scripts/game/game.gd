@@ -121,6 +121,9 @@ var sky_mat: ShaderMaterial
 ## The title screen's backdrop is its own hand-picked place (a fixed world and spot), not the player's world:
 ## main builds the title Game with title_world = true and swaps to the real world when a ride starts.
 const TITLE_SEED := 37   # a desert summit with rolling hills far below, picked by hand
+## the bike is turned this far from the hand-picked heading: the camera (yaw_off -1.2 from it) then looks ~0.5 rad round
+## from the original view, across the valley the hill falls into, instead of into the sun
+const TITLE_TURN := 1.7
 const TITLE_SPOT := Vector3(30.0, -120.0, 1.4399)   # x, z, heading (rad) of the bike on that summit
 var title_world := false
 ## parts of an earlier Game of the same world to use instead of building them ({terrain, far_hills}; main sets it
@@ -152,6 +155,7 @@ func _ready() -> void:
 		far_hills = reuse.far_hills
 	else:
 		far_hills = FarHills.new()   # the distant landscape behind the streamed chunks
+		if title_world: far_hills.ridge_gain = 1.4   # the title view: real mountains on the horizon
 		far_hills.setup(terrain)
 	add_child(far_hills)
 	reuse = {}
@@ -387,7 +391,7 @@ func set_scenic(on: bool) -> void:
 	if on:
 		_to_hilltop()
 		var best := _title_heading
-		var sy := best - 0.62
+		var sy := best - 0.3   # low sun ahead-right of the bike, out of the frame
 		var el := deg_to_rad(10.0)
 		sun.look_at_from_position(Vector3(cos(sy) * cos(el), sin(el), -sin(sy) * cos(el)), Vector3.ZERO, Vector3.UP)
 		sun.light_color = Color(1.0, 0.62, 0.34)
@@ -857,7 +861,7 @@ func _to_hilltop() -> void:
 	phys.reset_at(sp.x, sp.y, 0.0)
 	_snap_prev()
 	cam.snap_to(Vector3(sp.x, phys.y + 0.5, sp.y))
-	_title_heading = sp.z
+	_title_heading = sp.z + TITLE_TURN   # the bike turned so the camera looks out over the long drop, away from the sun
 
 func _apply_settings() -> void:
 	terrain.set_view_scale(float(Settings.get_v("view_distance")))

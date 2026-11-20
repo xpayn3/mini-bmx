@@ -72,6 +72,7 @@ static var _tree_sh: Shader
 
 var _terrain
 var _seed := 0
+var ridge_gain := 1.0   # the title screen raises the backdrop ridges into real mountains (set before setup)
 var _ridge := FastNoiseLite.new()
 var _roll := FastNoiseLite.new()
 var _task := -1
@@ -124,7 +125,7 @@ func _start(x: float, z: float) -> void:
 
 ## extra height of the backdrop ridges at full strength (the shaders fade it in with rider distance)
 func _ridge_h(x: float, z: float) -> float:
-	return (_ridge.get_noise_2d(x, z) * 0.5 + 0.5) * 150.0 + (_roll.get_noise_2d(x, z) * 0.5 + 0.5) * 45.0
+	return ((_ridge.get_noise_2d(x, z) * 0.5 + 0.5) * 150.0 + (_roll.get_noise_2d(x, z) * 0.5 + 0.5) * 45.0) * ridge_gain
 
 static func _cell_rand(ix: int, iz: int, k: int) -> float:
 	var h := (ix * 73856093) ^ (iz * 19349663) ^ (k * 83492791)
