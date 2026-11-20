@@ -181,7 +181,6 @@ const DEFS := [
 		["dustSwirl", "Swirl strength", 6.5, 0, 15, 0.25, ""],
 		["dustSwirlSize", "Swirl size", 0.7, 0.2, 2, 0.05, "1/m"],
 		["dustCurl", "Curls / rolls", 0.9, 0, 3, 0.05, ""],
-		["dustGrit", "Grit (flying grains)", 1.0, 0, 3, 0.05, "×"],
 	]],
 	["Dust trail", [
 		["dustFade", "Fade speed (low = longer)", 0.07, 0, 0.6, 0.01, "/s"],
@@ -192,21 +191,29 @@ const DEFS := [
 	["Dust spray", [
 		["dustAmount", "Rear tyre amount", 1.0, 0, 3, 0.05, "×"],
 		["dustFront", "Front tyre amount", 0.35, 0, 1.5, 0.05, "×"],
-		["dustWidth", "Spray width (fan)", 0.8, 0, 2.5, 0.05, "×"],
+		["dustWidth", "Spray cone at the tyre", 8, 0, 60, 1, "°"],
 		["dustPushOut", "Pushed out sideways", 1.0, 0, 3, 0.05, "×"],
 		["dustKickUp", "Kicked up", 1.0, 0, 3, 0.05, "×"],
 		["dustThrow", "Thrown back", 1.0, 0, 3, 0.05, "×"],
 		["dustGust", "Gusty / pulsing", 2.6, 0, 5, 0.1, ""],
 		["dustLanding", "Landing / crash clouds", 1.0, 0, 3, 0.05, "×"],
 	]],
+	["Dust grit", [
+		["dustGrit", "Amount (flying grains)", 1.0, 0, 3, 0.05, "×"],
+		["dustGritSize", "Grain size", 1.0, 0.2, 4, 0.05, "×"],
+		["dustGritWidth", "Spread (random scatter)", 1.0, 0, 4, 0.05, "×"],
+		["dustGritThrow", "Thrown back", 1.4, 0, 3, 0.05, "×"],
+		["dustGritUp", "Kicked up", 1.0, 0, 3, 0.05, "×"],
+		["dustGritFrom", "Starts at speed", 30, 0, 80, 1, "km/h"],
+	]],
 ]
 
 const PATH := "user://tune.cfg"
 ## bump VER when defaults are retuned: saved values of the RETUNED keys are dropped once
-const VER := 14
+const VER := 15
 ## later retunes, per version: only these keys are dropped for saves older than that version (bumping VER
 ## with one shared list would reset every earlier retuned key again)
-const RETUNED_AT := {8: ["manualFrom", "stickAirRoll", "stickSpinBuild", "stickYawRate"], 9: ["leanMax"], 11: ["leanIn", "leanOut", "flickSpeed"], 12: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 13: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 14: ["sprintRock"]}
+const RETUNED_AT := {8: ["manualFrom", "stickAirRoll", "stickSpinBuild", "stickYawRate"], 9: ["leanMax"], 11: ["leanIn", "leanOut", "flickSpeed"], 12: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 13: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 14: ["sprintRock"], 15: ["dustWidth"]}
 const RETUNED := ["steerRate", "steerRelease", "steerCurve", "turnSlow", "turnFast", "turnFloor", "steerMax", "slowSteer",
 	"barSpeed", "grip", "slipRecover", "slipMax", "turnWeight", "leanMax", "leanIn", "leanOut", "leanDamp", "bikeLeanMul", "bikeLeanCap", "flipAccel", "flipRate", "airTwist", "landBack", "travel", "popKick"]
 var defaults := {}

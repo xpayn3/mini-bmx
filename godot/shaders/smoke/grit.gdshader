@@ -9,6 +9,7 @@ uniform sampler3D vel_tex : filter_linear, repeat_disable;   // air velocity (m/
 uniform sampler2D hmap : filter_linear, repeat_disable;
 uniform vec3 origin;
 uniform vec3 size_m;
+uniform float grain_k = 1.0;   // grain size (Dust › Grit)
 uniform float hm_cells = 32.0;
 uniform vec4 em_pos[8];    // xyz, w = cumulative weight (0..1)
 uniform vec4 em_vel[8];    // xyz throw velocity, w = spread (m/s)
@@ -71,10 +72,10 @@ void process() {
 		}
 	}
 	TRANSFORM[3].xyz = p;
-	// tiny: 5 mm fine grains .. 3 cm clods; shrink away at the end of life
+	// tiny: 2 mm fine grains .. 1.2 cm bits; shrink away at the end of life
 	float life = clamp(CUSTOM.w / max(LIFETIME, 1e-3), 0.0, 1.0);
 	CUSTOM.w += DELTA;
-	float sc = mix(0.005, 0.028, size) * (1.0 - smoothstep(0.75, 1.0, life));
+	float sc = mix(0.002, 0.012, size) * grain_k * (1.0 - smoothstep(0.75, 1.0, life));
 	TRANSFORM[0].xyz = vec3(sc, 0.0, 0.0);
 	TRANSFORM[1].xyz = vec3(0.0, sc, 0.0);
 	TRANSFORM[2].xyz = vec3(0.0, 0.0, sc);
