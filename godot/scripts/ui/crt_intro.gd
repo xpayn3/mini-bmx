@@ -172,7 +172,7 @@ func _update(_dt: float) -> void:
 	# fade: in from black at the start is the TV itself; out on skip / at the end
 	var k := 0.0
 	if _skip >= 0.0: k = clampf(_skip / 0.3, 0.0, 1.0)
-	k = maxf(k, smoothstep(T_OFF + 0.15, T_END - 0.05, t))
+	k = maxf(k, smoothstep(T_OFF, T_END - 0.05, t))
 	(overlay.material as ShaderMaterial).set_shader_parameter("black", k)
 
 static func _smoother(x: float) -> float:
@@ -396,11 +396,11 @@ void fragment() {
 	vec2 uv = UV;
 	float g = fract(sin(dot(floor(uv * vec2(800.0, 450.0)) + fract(TIME * 7.13) * vec2(37.0, 91.0), vec2(12.9898, 78.233))) * 43758.5453);
 	float vig = smoothstep(0.35, 0.95, length((uv - 0.5) * vec2(1.3, 1.05)));
-	float a = vig * 0.72;
+	float a = vig * 0.72 * (1.0 - black);
 	vec3 col = vec3(0.0);
 	// grain: dark and light specks at low opacity
 	col = mix(col, vec3(g), 0.06 / max(a + 0.06, 0.001));
-	a = max(a, 0.06);
+	a = max(a, 0.06 * (1.0 - black));
 	if (uv.y < bars || uv.y > 1.0 - bars) { col = vec3(0.0); a = 1.0; }
 	col = mix(col, vec3(0.0), black); a = mix(a, 1.0, black);
 	COLOR = vec4(col, a);
