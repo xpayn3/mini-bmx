@@ -115,6 +115,7 @@ var reuse := {}
 var _title_heading := NAN
 var scenic := false          # title screen: golden hour, a lookout camera, far hills to the horizon
 var far_hills: FarHills
+var grass: GrassField
 var sheep: SheepHerd
 
 func _ready() -> void:
@@ -138,6 +139,8 @@ func _ready() -> void:
 		far_hills.setup(terrain)
 	add_child(far_hills)
 	reuse = {}
+	grass = GrassField.new(terrain)   # the grass carpet round the camera (Settings "grass")
+	add_child(grass)
 	sheep = SheepHerd.new()   # woolly flocks that graze and run from the bike
 	sheep.setup(terrain)
 	add_child(sheep)
@@ -688,6 +691,8 @@ func _to_hilltop() -> void:
 
 func _apply_settings() -> void:
 	terrain.set_view_scale(float(Settings.get_v("view_distance")))
+	if grass:
+		grass.set_quality(int(Env.s("BMX_GRASS")) if Env.s("BMX_GRASS") != "" else int(Settings.get_v("grass")))
 	var sq: int = Settings.get_v("shadows")
 	# shadows: Low = 2 cascades, hard-ish; Ultra = 4 blended cascades + contact-hardening soft shadows
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS if sq == 0 else DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS

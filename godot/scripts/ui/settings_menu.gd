@@ -67,6 +67,7 @@ func _graphics() -> Control:
 	_section(p, "WORLD & EFFECTS")
 	_slider(p, "View distance", "view_distance", 0.6, 2.0, 0.1, "%.1fx")
 	_slider(p, "Model detail (LOD)", "lod", 0.25, 4.0, 0.25, "%.2f", "Lower = more detail far away")
+	_option(p, "Grass", "grass", ["Off", "Low", "Medium", "High"], "A grass carpet round you, out to 40 / 52 / 60 m")
 	_check(p, "Wind in the grass", "wind")
 	_check(p, "Mud & wet bike", "grime", "Mud builds up on dirt and sand, washes off in water")
 	_slider(p, "Dust & dirt effects", "fx_density", 0.0, 1.5, 0.1, "%.1fx")

@@ -245,6 +245,25 @@ func _build() -> void:
 	img_d.generate_mipmaps()
 	out["land_img"] = img_g
 	out["dirt_img"] = img_d
+	# ---- grass field data (world/grass_field.gd): the ground's own heights + land colour, density in alpha ----
+	var DRY: PackedFloat32Array = gs["DRY"]
+	var pK := PackedByteArray(); pK.resize(NV * NV * 4)
+	var gh := PackedFloat32Array(); gh.resize(NV * NV)
+	for iz in NV:
+		for ix in NV:
+			var o := iz * NV + ix
+			var h: float = G[(iz + 1) * W + ix + 1]
+			gh[o] = h
+			var g: Color = LG[o]
+			var snow := clampf((minf(g.r, minf(g.g, g.b)) - 0.45) * 4.0, 0.0, 1.0)
+			var den := (1.0 - sm(0.04, 0.4, TW[o])) * (1.0 - sm(0.1, 0.6, SW[o])) * sm(WATER + 0.25, WATER + 0.8, h)
+			den *= (1.0 - sm(0.7, 0.97, DRY[o])) * (1.0 - snow) * (0.55 + 0.45 * ao[o])
+			pK[o * 4] = pG[o * 4]; pK[o * 4 + 1] = pG[o * 4 + 1]; pK[o * 4 + 2] = pG[o * 4 + 2]
+			pK[o * 4 + 3] = roundi(clampf(den, 0, 1) * 255)
+	for sb in blocked:   # sheds, tape stakes, billboards: no grass through their floors / feet
+		_grass_hole(pK, NV, d, ox, oz, sb[0], sb[1], minf(float(sb[2]), 3.0))
+	out["grass_img"] = Image.create_from_data(NV, NV, false, Image.FORMAT_RGBA8, pK)
+	out["grass_h"] = Image.create_from_data(NV, NV, false, Image.FORMAT_RF, gh.to_byte_array())
 	# ---- debris collision: 49 x 49 heights at 1 m ----
 	var hm := PackedFloat32Array(); hm.resize(49 * 49)
 	for j in 49:
@@ -304,6 +323,7 @@ func ground_stage(ox: float, oz: float) -> Dictionary:
 	var LD := PackedColorArray(); LD.resize(NV * NV)
 	var TW := PackedFloat32Array(); TW.resize(NV * NV)
 	var SW := PackedFloat32Array(); SW.resize(NV * NV)
+	var DRY := PackedFloat32Array(); DRY.resize(NV * NV)
 	for iz in NV:
 		for ix in NV:
 			var k := (iz + 1) * W + ix + 1
@@ -320,9 +340,23 @@ func ground_stage(ox: float, oz: float) -> Dictionary:
 			f.color_post(lx + ox, lz + oz, h, nv.y, pre_b[o * 2], pre_b[o * 2 + 1])
 			TW[o] = pre_t[o]
 			SW[o] = f.cl_steep
+			DRY[o] = pre_b[o * 2]
 			LG[o] = f.cl_g
 			LD[o] = f.cl_d
-	return {"G": G, "verts": verts, "norms": norms, "uvs": uvs, "LG": LG, "LD": LD, "TW": TW, "SW": SW}
+	return {"G": G, "verts": verts, "norms": norms, "uvs": uvs, "LG": LG, "LD": LD, "TW": TW, "SW": SW, "DRY": DRY}
+
+
+## clears grass density (alpha of the grass_img bytes) within r of (x, z), soft over the outer 30 %
+static func _grass_hole(pK: PackedByteArray, NV: int, d: float, ox: float, oz: float, x: float, z: float, r: float) -> void:
+	var fx := (x - ox + S / 2) / d
+	var fz := (z - oz + S / 2) / d
+	var rr := ceili(r / d)
+	for iz in range(maxi(0, floori(fz - rr)), mini(NV - 1, ceili(fz + rr)) + 1):
+		for ix in range(maxi(0, floori(fx - rr)), mini(NV - 1, ceili(fx + rr)) + 1):
+			var dd := Vector2(ix - fx, iz - fz).length() * d
+			if dd < r:
+				var o := (iz * NV + ix) * 4 + 3
+				pK[o] = roundi(pK[o] * clampf((dd / r - 0.7) / 0.3, 0.0, 1.0))
 
 
 static func _gk(G: PackedFloat32Array, W: int, ix: int, iz: int) -> float:

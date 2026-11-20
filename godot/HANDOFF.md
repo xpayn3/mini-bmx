@@ -260,6 +260,21 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   `BMX_ROPE_SAG/LAND/BEND/ANCHOR` overrides. Photo tests:
   `BMX_PHOTO_AT=x,y,z,lx,ly,lz` puts the photo camera at a world point looking at another (FEATSPAWN prints the feature's `at` / `dir`).
 
+- **Grass carpet** (2026-11-20, `world/grass_field.gd` `GrassField` + `shaders/grass_field.gdshader`, made by `Game._ready`): a
+  Zelda-style field of blades over the whole land round the camera, built on the GPU; nothing stored per blade. Each chunk bakes
+  `grass_img` (land colour sRGB + density in alpha: none on trail / jumps, rock faces, below / near water, dunes (`DRY`, now also
+  returned by `build_ground` in C# + GDScript), snow, sheds / stakes / boards via `blocked`) and `grass_h` (its ground heights) on the
+  worker; GrassField blits the 5 x 5 chunks round the camera into two 481² window textures when the chunk or the loaded set changes
+  (`Terrain.chunk_serial`, ~1 ms). Blades are tiles of a fixed lattice in two MultiMeshes: NEAR (3-part curved blades) and MID
+  (one wide triangle facing the camera), cross-faded with ragged edges; the mid ring shrinks into the ground at its edge, which has
+  the blades' own colour, so the land keeps reading as grass. Each blade's lattice cell is a whole number -> its hash (size, lean,
+  colour, grows or not) never changes as tiles move. The rings centre on `ring_centre` = up to ~20 m ahead of a high camera (trail /
+  drone see the dense ring), round a low one. Blades widen when looked at steeply from above (no slivers from the drone). Tiles out of
+  view are skipped every frame. Colour: ground colour, darker root, greener / sun-dried patches. Wind + the bike parting it via
+  `wind_bend`. No shadows cast. Settings › Graphics › Grass (`grass` 0 off .. 3 high, presets Low 1 / Medium 2 / High 2 / Ultra 3;
+  `GrassField.QUALITY`). Medium ~135k blades, High ~200k; cost was within run-to-run noise in `--bench` (~1 ms at most on the 3090,
+  other GPU apps open). Tests: `BMX_GRASS=0..3`, `BMX_GRASS_PROBE=1` (`GRASS window` / `GRASS tiles near= mid= blades=` lines).
+
 - **Sponsor props** (`TrailCourse.chunk_gates` / `chunk_boards`, fixed spacing by centreline index so growing never moves them): a huge steel gantry with a sponsor banner over the trail every 300 m (`TrailGate.build`, made-up brands in `TrailGate.SPONSORS`, no collision, skipped on jumps) and breakable wooden roadside billboards every ~80 m (fence-style panel in `TerrainChunkBuilder._boards`, so the bike smashes them; the Label3D text is freed on smash). Probe: `BMX_GATE_PROBE=1`.
 
 - **Health packs** (`world/health_pack.gd`): a GTA-style floating, spinning red backpack with a white cross and a glow ring, one outside the door of each roadside shed (`TerrainChunkBuilder._sheds` -> `out["packs"]`, made in `Terrain._finalize`). Ride within 1.6 m (`Terrain.take_pack`, called from `Game._process`) and `hud.on_health_pack` gives back `HealthPack.HEAL` (45 %); full-health riders leave it. Taken ones stay gone until a new seed. Tests: `BMX_PACK_PROBE=1` (`PACK at` lines), `BMX_PACK_SPAWN=x,z` (start 9 m before a pack), `BMX_LIFE=0.3 BMX_LIFE_PROBE=1`.

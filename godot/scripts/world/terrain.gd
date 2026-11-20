@@ -72,6 +72,7 @@ var last_build_ms: float = 0.0
 ## that time split into ground mesh+textures / occluder / collider / decorations / grids+tape
 var last_stream_ms: float = 0.0
 var last_finalized: int = 0
+var chunk_serial: int = 0                # bumped whenever a chunk comes or goes (GrassField)
 var fin_parts := PackedFloat64Array([0, 0, 0, 0, 0])
 ## health packs beside the sheds: key (position in 25 cm cells) -> {node, pos, chunk}; taken ones stay gone
 var _packs := {}
@@ -667,6 +668,7 @@ func _unload(k: Vector2i) -> void:
 	(c["node"] as Node).queue_free()
 	if _debris: _debris.drop_chunk(k)
 	chunks.erase(k)
+	chunk_serial += 1
 	if _water:
 		_water.mark_dirty(Vector2(k) * SIZE, SIZE)
 
@@ -848,7 +850,8 @@ func _finalize(k: Vector2i) -> void:
 	fin_parts[3] += (Time.get_ticks_usec() - tp) / 1000.0; tp = Time.get_ticks_usec()
 	var colliders: Array = o["colliders"]
 	var rec := {"cx": k.x, "cz": k.y, "node": node, "colliders": colliders, "small": small, "rock_keys": [],
-		"G": o["G"], "N": b.N, "mms": mms, "packs": []}
+		"G": o["G"], "N": b.N, "mms": mms, "packs": [], "grass_img": o["grass_img"], "grass_h": o["grass_h"]}
+	chunk_serial += 1   # GrassField re-reads the chunks round the camera
 	for pp in o.get("packs", []):
 		var pkey := Vector2i(roundi(pp.x * 4.0), roundi(pp.z * 4.0))
 		if _pack_taken.has(pkey) or _packs.has(pkey):
