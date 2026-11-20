@@ -6,6 +6,10 @@ shader_type sky;
 // gradient with a glow round the low sun; its clouds are kept and re-lit in sunset colours.
 uniform sampler2D hdri : filter_linear, repeat_enable;
 uniform float rotation = 0.0;        // radians about +Y
+// second HDRI, crossfaded in by mix_b (the ride picks the photo by the sun's height)
+uniform sampler2D hdri_b : filter_linear, repeat_enable;
+uniform float rotation_b = 0.0;
+uniform float mix_b = 0.0;
 uniform float energy = 1.0;          // sky brightness in the view
 uniform float light_energy = 1.0;    // sky brightness in ambient / reflections
 uniform float sun_clamp = 6.0;       // cap on radiance in the lighting passes (kills the double sun)
@@ -79,6 +83,11 @@ void sky() {
 	float lon = atan(d.x, -d.z) - rotation;
 	vec2 uv = vec2(fract(lon / TAU + 0.5), acos(clamp(d.y, -1.0, 1.0)) / PI);
 	vec3 hd = texture(hdri, uv).rgb;
+	if (mix_b > 0.0) {
+		float lon_b = atan(d.x, -d.z) - rotation_b;
+		vec2 uv_b = vec2(fract(lon_b / TAU + 0.5), uv.y);
+		hd = mix(hd, texture(hdri_b, uv_b).rgb, mix_b);
+	}
 	vec3 c = hd * tint;
 	if (golden > 0.0) {
 		vec3 g = golden_sky(d, min(hd, vec3(3.0)));
