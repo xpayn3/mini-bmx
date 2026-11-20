@@ -57,6 +57,11 @@ func _ready() -> void:
 func request(key: String, make: Callable, view: Vector3, cb: Callable) -> void:
 	if _cache.has(key):
 		cb.call(_cache[key]); return
+	if _disk_path(key) != "" and FileAccess.file_exists(_disk_path(key)):   # pictured in an earlier session
+		var img := Image.load_from_file(_disk_path(key))
+		if img != null and not img.is_empty():
+			_cache[key] = ImageTexture.create_from_image(img)
+			cb.call(_cache[key]); return
 	if _waiting.has(key):
 		_waiting[key].append(cb); return
 	_waiting[key] = [cb]
@@ -74,8 +79,12 @@ func _run() -> void:
 		render_target_update_mode = SubViewport.UPDATE_ONCE
 		await RenderingServer.frame_post_draw
 		if not is_inside_tree(): return
-		var tex := ImageTexture.create_from_image(get_texture().get_image())
+		var img := get_texture().get_image()
+		var tex := ImageTexture.create_from_image(img)
 		_cache[job[0]] = tex
+		if _disk_path(job[0]) != "":
+			DirAccess.make_dir_recursive_absolute(DISK_DIR)
+			img.save_png(_disk_path(job[0]))
 		_stage.remove_child(node); node.queue_free()
 		for cb in _waiting.get(job[0], []):
 			if (cb as Callable).is_valid(): cb.call(tex)
@@ -88,6 +97,8 @@ func _frame(node: Node3D, view: Vector3) -> void:
 	var first := true
 	var mis: Array = node.find_children("*", "MeshInstance3D", true, false)
 	if node is MeshInstance3D: mis.append(node)
+	if node.has_meta("frame_on"):   # frame this one part (the rest may run off the picture: context)
+		mis = [node.get_meta("frame_on")]
 	for mi in mis:
 		var bb: AABB = (mi as MeshInstance3D).global_transform * (mi as MeshInstance3D).get_aabb()
 		box = bb if first else box.merge(bb)
@@ -118,8 +129,8 @@ func _frame(node: Node3D, view: Vector3) -> void:
 		var z := q.dot(d)
 		dist = maxf(dist, z + absf(q.dot(right)) / th)
 		dist = maxf(dist, z + absf(q.dot(up)) / tv)
-	dist *= 1.03
-	var r := box.size.length()
+	dist *= float(node.get_meta("frame_pad", 1.03))
+	var r := maxf(box.size.length(), dist)   # (near / far: room for any context round a framed part)
 	_cam.near = maxf(dist - r, 0.01); _cam.far = dist + r
 	_cam.look_at_from_position(c + d * dist, c, Vector3.UP)
 
@@ -148,7 +159,7 @@ static func _points(mis: Array, n: int) -> Array:
 static func glb_part(n: String) -> Array:
 	if _parts.is_empty():
 		var sc: Node3D = load("res://assets/dh.glb").instantiate()
-		for name in ["steer", "fork_lower"]:
+		for name in ["steer", "fork_lower", "seatstay", "wheel_front", "wheel_rear"]:
 			var mi: MeshInstance3D = sc.find_child(name, true, false)
 			var xf := Transform3D.IDENTITY
 			var p: Node = mi
@@ -215,7 +226,20 @@ static func _compact(arr: Array, K: PackedInt32Array) -> Array:
 
 static var _bar_stock: ArrayMesh = null
 
-## the handlebar alone (bar, stem clamp, grips, levers) at a width / rise / material, painted like the build
+## Whole-bike pictures (ride setup cards) are kept on disk: building a bike takes ~0.2-0.4 s, and the setup
+## page wants one per frame. The key holds a hash of everything the bike is built from (frame, garage
+## build), so a changed build gets a new picture; THUMB_VER: bump when how bikes look changes (models,
+## materials, decals, this studio).
+const DISK_DIR := "user://cache/thumbs"
+const THUMB_VER := 1
+static func bike_key(id: String) -> String:
+	var sig := var_to_str([THUMB_VER, ProjectSettings.get_setting("application/config/version", ""), SIZE, GameState.bike_config_for(id)])
+	return "bike|%s|%s" % [id, sig.md5_text()]
+
+static func _disk_path(key: String) -> String:
+	if not key.begins_with("bike|"): return ""
+	return "%s/%s.png" % [DISK_DIR, key.md5_text()]
+
 ## a whole bike (stock frame + the player's garage build when the frame takes one), for the ride setup cards
 static func make_bike(id: String) -> Node3D:
 	var cfg := GameState.bike_config_for(id)
@@ -228,6 +252,7 @@ func forget_bikes() -> void:
 	for k in _cache.keys():
 		if String(k).begins_with("bike|"): _cache.erase(k)
 
+## the handlebar alone (bar, stem clamp, grips, levers) at a width / rise / material, painted like the build
 static func make_bars(m: Dictionary, crown_paint: Dictionary, grip_paint: Dictionary) -> Node3D:
 	if _bar_stock == null:
 		_bar_stock = _filter(glb_part("steer")[0], func(a, b, c): return a.y > BAR_CUT and b.y > BAR_CUT and c.y > BAR_CUT,
@@ -344,6 +369,120 @@ static func _catalogue_pose(fork: Node3D, ax: Vector2) -> Node3D:
 	root.rotation.y = FORK_TURN
 	return root
 
+
+# ---------------------------------------------------------------- brakes
+## a stock part baked into a frame mesh: the triangles of `whole` that `without` (the same mesh with that part cut
+## out by tools/make_forks.py) doesn't have. Triangles are matched by their middles on a 2 mm grid; the cut mesh's
+## middles go in for every rounding within +-0.4 mm (imported positions are quantised a little differently).
+static func _diff(whole: Mesh, without: Mesh) -> ArrayMesh:
+	const Q := 500.0      # 2 mm cells
+	const E := 0.0004
+	var have := {}
+	for si in without.get_surface_count():
+		var arr := without.surface_get_arrays(si)
+		var P: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+		var I: PackedInt32Array = arr[Mesh.ARRAY_INDEX] if arr[Mesh.ARRAY_INDEX] != null else PackedInt32Array(range(P.size()))
+		for t in range(0, I.size(), 3):
+			var m := (P[I[t]] + P[I[t + 1]] + P[I[t + 2]]) / 3.0
+			for dx in [-E, E]:
+				for dy in [-E, E]:
+					for dz in [-E, E]:
+						have[Vector3i(roundi((m.x + dx) * Q), roundi((m.y + dy) * Q), roundi((m.z + dz) * Q))] = true
+	return _filter(whole, func(a: Vector3, b: Vector3, c: Vector3) -> bool:
+		var m := (a + b + c) / 3.0
+		return not have.has(Vector3i(roundi(m.x * Q), roundi(m.y * Q), roundi(m.z * Q))))
+
+static func _first_mesh(n: Node) -> MeshInstance3D:
+	if n is MeshInstance3D: return n
+	for c in n.get_children():
+		var r := _first_mesh(c)
+		if r: return r
+	return null
+
+## a part's meshes in the model frame, out of a glb (node `node`, or the first mesh in it)
+static func _glb_mesh(path: String, node := "") -> Mesh:
+	var sc: Node = load(path).instantiate()
+	var mi := sc.find_child(node, true, false) as MeshInstance3D if node != "" else null
+	if mi == null: mi = _first_mesh(sc)
+	var m: Mesh = mi.mesh if mi else null
+	sc.free()
+	return m
+
+static var _stock_caliper: Mesh
+static var _stock_levers: Mesh
+
+## a disc rotor alone, face on and a little turned, with the bike's rotor material (heat glow cold + brushed rings).
+## "stock" = the one split off dh.glb's front wheel (BikeFX.RotorGlow), else assets/forks/rotor_<id>.glb
+static func make_rotor(id: String, front := true) -> Node3D:
+	var host := MeshInstance3D.new()
+	host.mesh = glb_part("wheel_front" if front else "wheel_rear")[0]
+	var glow := BikeFX.find_rotor(host)   # splits the disc into its own child mesh (on this copy) and makes its material
+	var mi := MeshInstance3D.new()
+	if id == "stock":
+		mi.mesh = glow.mesh_instance.mesh if glow else null
+	else:
+		mi.mesh = _glb_mesh("res://assets/forks/rotor_%s.glb" % id, "rotor_front" if front else "rotor_rear")
+	if glow and mi.mesh:
+		MetalFinish.dress_rotor(glow.material)
+		for i in mi.mesh.get_surface_count(): mi.set_surface_override_material(i, glow.material)
+	host.free()
+	var root := Node3D.new()
+	root.add_child(mi)
+	root.rotation.y = 0.45   # a little turned so the disc reads as a disc, not a flat picture
+	return root
+
+## a rear caliper on the rear rotor (the build's rotor), seen from the drive side's opposite (the caliper side).
+## "stock" = the RUNOUT's own, cut out of its seatstay; else assets/forks/caliper_<id>.glb, placed on the axle
+## like BikeRig._swap_rear_caliper does.
+static func make_caliper(id: String, rotor_id: String) -> Node3D:
+	var ss: Array = glb_part("seatstay")
+	var wr: Array = glb_part("wheel_rear")
+	var root := Node3D.new()
+	var cal := MeshInstance3D.new()
+	if id == "stock":
+		if _stock_caliper == null:
+			_stock_caliper = _diff(ss[0], _glb_mesh("res://assets/forks/dh_seatstay.glb", "seatstay"))
+		cal.mesh = _stock_caliper
+		cal.transform = ss[1]
+	else:
+		cal.mesh = _glb_mesh("res://assets/forks/caliper_%s.glb" % id)
+		cal.transform = Transform3D((ss[1] as Transform3D).basis, (wr[1] as Transform3D).origin)
+	root.add_child(cal)
+	var disc := make_rotor(rotor_id, false)
+	var d: Node3D = disc.get_child(0)
+	disc.remove_child(d)
+	disc.free()
+	d.transform = wr[1]
+	root.add_child(d)
+	MetalFinish.apply(root)
+	# the axle in the middle, the caliper side towards the camera
+	var mid: Vector3 = (wr[1] as Transform3D).origin
+	for c in root.get_children(): (c as Node3D).position -= mid
+	var turn := Node3D.new()
+	turn.add_child(root)
+	turn.rotation.y = PI + 0.35
+	turn.set_meta("frame_on", cal)   # a close-up of the caliper, its disc running out of the picture
+	turn.set_meta("frame_pad", 1.6)
+	return turn
+
+## the right-hand brake lever on its own (blade + body + clamp). "stock" = the RUNOUT's, cut out of its steer
+## mesh (the bars without levers are forks/dh_steer_nl.glb); else assets/forks/levers_<id>.glb (fitted to the
+## same bar). Only one side: both levers are 70 cm apart and came out tiny.
+static func make_levers(id: String) -> Node3D:
+	var st: Array = glb_part("steer")
+	var m: Mesh
+	if id == "stock":
+		if _stock_levers == null:
+			_stock_levers = _diff(st[0], _glb_mesh("res://assets/forks/dh_steer_nl.glb"))
+		m = _stock_levers
+	else:
+		m = _glb_mesh("res://assets/forks/levers_%s.glb" % id)
+	var one := _filter(m, func(a: Vector3, b: Vector3, c: Vector3) -> bool: return a.z + b.z + c.z > 0.0)
+	var mi := MeshInstance3D.new()
+	mi.mesh = one
+	mi.transform = st[1]
+	MetalFinish.apply(mi)
+	return mi
 
 ## a cassette alone (cogs in their anodized colours, lockring, freehub stub)
 static func make_cassette(key: String) -> Node3D:

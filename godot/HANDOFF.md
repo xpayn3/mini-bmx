@@ -369,7 +369,10 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   relative to the bar's middle) from the cockpit glbs. `_swap_cockpit(stem, bar)` (one pass, stem + bar together) cuts dh's bar + grips (`barcut`), puts the model's at
   `dhMid` + the stem's shift (the tube as surface "bar": the Material pick still works, `Handlebar.apply` skips the width / rise reshape for them) and moves the levers
   (dh's or a model's) by `leverShift[side]` so they sit against the new grips. Width / rise rows are hidden for these bars. Test: `BMX_BUILD="bars.model=tues_bar;bars.stem=tues"`.
-  **Disc brakes** (garage BRAKES tab, `_brakes_page`: DISC BRAKES + LEVERS): `suspension.rotor` ("stock" / "tues" / "fuzz", `BikeBuild.ROTORS`; `assets/forks/rotor_<id>.glb` from
+  **Disc brakes** (garage BRAKES tab, `_brakes_page`: ROTORS, REAR CALIPER, LEVERS as picture cards, `_brake_cards`;
+  pictures `PartThumbs.make_rotor / make_caliper / make_levers`: model parts from their glbs; the stock caliper and levers are
+  cut out of dh.glb's seatstay / steer meshes by `PartThumbs._diff` against `dh_seatstay.glb` / `dh_steer_nl.glb`; caliper cards
+  sit on the build's rear rotor, framed on the caliper (`frame_on` / `frame_pad` metas)): `suspension.rotor` ("stock" / "tues" / "fuzz", `BikeBuild.ROTORS`; `assets/forks/rotor_<id>.glb` from
   `tools/export_rotors.py`: disc + carrier + bolts, relative to the axle, moved onto the stock rotors' planes) replaces the mesh of the wheels' split-off "rotor"
   (`BikeRig._swap_rotors`, keeps the heat-glow material; works on every frame). `suspension.rear_caliper` ("stock" / "tues" / "fuzz", `BikeBuild.REAR_CALIPERS`): on the stock frame
   `_swap_rear_caliper` uses `forks/dh_seatstay.glb` (seatstay without its caliper, cut by `make_forks.py` as components) + `forks/caliper_<id>.glb` (the frame's rear caliper
@@ -495,7 +498,21 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   under the logo); under it a small **stats card** (`main._stats_card`): this week's distance + rides, the Zwift-style weekly
   streak (weeks in a row with a ride) and the lifetime total. Data: `GameState.days` (day number -> [metres, rides], save.cfg
   `[days]`, kept 800 days), fed by `GameState.add_distance` from the HUD; a ride counts once it passes `ACTIVITY_M` (200 m),
-  only between `begin_ride` (RIDE) and `end_ride` (menu, demo); test runs never log. **QUIT** is a button top right
+  only between `begin_ride` (RIDE) and `end_ride` (menu, demo); test runs never log.
+  **Ride setup speed (2026-11-20)**: the page opens in ~20 ms (was ~0.6 s + seven 0.3-0.45 s frame stalls). The
+  `BikeTurntable` (bike + standing rider) is built during the intro prebuild and kept across the setup steps (only the
+  page round it is rebuilt), it keeps every bike it showed (`_built`), its studio HDRI is made once; bike-card
+  pictures are cached on disk (`user://cache/thumbs`, key `PartThumbs.bike_key(id)` = hash of the full bike config,
+  bump `THUMB_VER` when bikes look different); `BikeDecals.project` caches projected geometry by a hash of the
+  surface + projector, and lettering textures are baked once per text / size / colours (`BikeDecals._baked`): every
+  bike build (garage clicks, ride start) gets faster. Probes: `BMX_SETUP_PROBE=1` (`SETUP step= build_ms=`,
+  `SETUPFRAME worst_ms=`), `BMX_GARAGE_PROBE=1` (`GARAGE <step> ms=`, `GARAGE open / close total ms=`).
+  **Garage speed**: menu -> garage ~0.65 s (was ~2 s), back ~0.6 s (was ~1.75 s). The world out of the door builds
+  only its 3 x 3 near chunks up front (`Terrain.update_stream(x, z, INF, sync_r)`), the outer ring streams in
+  `Garage._process` (done ~1.6-3.6 s in, behind the closed door on the first visit, past the fog after).
+  The title world's terrain + far hills (always `TITLE_SEED`) wait out of the tree while the garage is open
+  (`Game.take_world()` -> `main._title_keep` -> `Game.reuse`) instead of being rebuilt (~0.9 s); SAVE & RIDE frees them.
+  Garage -> SAVE & RIDE still builds the player's world (~1.3 s). **QUIT** is a button top right
   (`menu_quit`, main page only) that asks first (`_confirm_quit`: CANCEL / QUIT, B or a click beside it cancels).
   Tests: `BMX_PADSEQ` has `click:x:y` (a left click). RIDE opens the **ride setup** page (`_menu_page_setup`): bike (Downhill / BMX) +
   time of day (the `LightSettings.BUILTIN` presets), then GO. Test: `BMX_MENU_PAGE=setup`.

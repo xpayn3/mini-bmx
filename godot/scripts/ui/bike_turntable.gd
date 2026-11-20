@@ -21,6 +21,7 @@ var _r := 1.0
 var _h := 1.0
 var _keep_r := 1.0
 var _keep_h := 1.0
+var _built := {}   # bike id -> [rig, r, h]: every bike shown so far stays built (hidden), switching back is instant
 
 
 func _init() -> void:
@@ -89,7 +90,12 @@ func _init() -> void:
 
 ## one studio HDRI made in code (equirectangular, 512 x 256): a big softbox over the top, strip lights
 ## round the sides, a mid-grey room and a darker floor so glossy paint has something to reflect
+static var _hdri: ImageTexture   # made once (131k pixels in GDScript took ~0.1-0.2 s every time the page opened)
 static func _studio_hdri() -> ImageTexture:
+	if _hdri == null: _hdri = _make_studio_hdri()
+	return _hdri
+
+static func _make_studio_hdri() -> ImageTexture:
 	var w := 512; var h := 256
 	var img := Image.create(w, h, false, Image.FORMAT_RGBF)
 	for y in h:
@@ -143,10 +149,19 @@ func set_bike(id: String, force := false) -> void:
 		_r = _keep_r; _h = _keep_h
 		_fit()
 		return
+	if _rig != null: _rig.visible = false
+	if force and _built.has(id):   # the build changed: this bike is made again
+		(_built[id][0] as Node).queue_free()
+		_built.erase(id)
 	_bike_id = id
-	if _rig != null:
-		pivot.remove_child(_rig); _rig.queue_free()
 	pivot.rotation = Vector3.ZERO
+	if _built.has(id):   # shown before: just bring it back
+		_rig = _built[id][0]
+		_rig.visible = true
+		_r = _built[id][1]; _h = _built[id][2]
+		_keep_r = _r; _keep_h = _h
+		_fit()
+		return
 	_rig = PartThumbs.make_bike(id)
 	pivot.add_child(_rig)
 	var box := AABB(); var first := true
@@ -162,6 +177,7 @@ func set_bike(id: String, force := false) -> void:
 	_r = maxf(box.size.x, box.size.z) * 0.5
 	_h = box.size.y
 	_keep_r = _r; _keep_h = _h
+	_built[id] = [_rig, _r, _h]
 	_fit()
 
 
@@ -171,8 +187,8 @@ func _fit() -> void:
 	var aspect := maxf(size.x, 1.0) / maxf(size.y, 1.0)
 	var ext := maxf(_h * 0.62, _r * 1.0 / aspect)   # half the height the view has to show
 	var dist := ext * 1.1 / tan(deg_to_rad(cam.fov * 0.5))
-	cam.position = Vector3(0, _h * 0.5 + dist * 0.14, dist)
-	cam.look_at(Vector3(0, _h * 0.45, 0))
+	# (look_at_from_position: works while the view is between pages, out of the tree)
+	cam.look_at_from_position(Vector3(0, _h * 0.5 + dist * 0.14, dist), Vector3(0, _h * 0.45, 0))
 
 
 func _process(dt: float) -> void:

@@ -36,6 +36,7 @@ const SURFACE_LIFT := 0.0006   # decal pushed out along the normal (stands in fo
 
 static var _tex_cache := {}
 static var _pending := {}   # ViewportTexture instance id -> TextArt still drawing it
+static var _baked := {}     # TextArt.cache_key() -> its baked, mipmapped ImageTexture
 static var _bolt_mat: StandardMaterial3D
 static var _socket_mat: StandardMaterial3D
 
@@ -70,6 +71,10 @@ class TextArt:
 	var materials: Array = []   # decal materials showing this texture (re-pointed when baked)
 	var _frames := 0
 
+	## everything that changes the picture: same key = same baked texture
+	func cache_key() -> String:
+		return var_to_str([mode, text, size, fill, stroke, italic, R, r0, r1, count, phase])
+
 	# render for a few frames (the glyph atlas fills on the first draw), then bake the result into a
 	# mipmapped ImageTexture (viewport textures have no mipmaps: minified text would sample garbage)
 	# and free the SubViewport
@@ -89,6 +94,8 @@ class TextArt:
 		var tex := ImageTexture.create_from_image(img)
 		for m in materials:
 			(m as StandardMaterial3D).albedo_texture = tex
+		if BikeDecals._baked.size() >= 32: BikeDecals._baked.clear()   # ~22 MB of VRAM each at 2048 px: keep it bounded
+		BikeDecals._baked[cache_key()] = tex   # the next bike with this lettering uses it straight away
 		BikeDecals._pending.erase(vp.get_texture().get_instance_id())
 		vp.queue_free()
 
@@ -146,6 +153,10 @@ class TextArt:
 
 
 static func _text_texture(host: Node, art: TextArt) -> Texture2D:
+	var baked = _baked.get(art.cache_key())
+	if baked != null:   # drawn and baked before: no viewport, no 2048 px read-back, no CPU mipmaps
+		art.free()
+		return baked
 	var vp := SubViewport.new()
 	vp.name = "decal_text"
 	vp.size = art.size
@@ -265,8 +276,40 @@ static func _clip(pp: Array, nn: Array, axis: int, sgn: float, h: float) -> Arra
 
 ## project a decal onto surface `si` of `mi` (in the mesh's own space) and keep only the faces that
 ## look toward the projector, so it never wraps round to the far side of a tube or tyre
+## projected decal geometry by (surface contents, projector): the same frame / tyre + sticker gives the same
+## mesh, so rebuilding a bike (ride setup cards, turntable, garage clicks, ride start) skips the per-triangle
+## clip loop (~7 ms a decal on a 13k-triangle tyre). Keyed by a hash of the vertices, so a reshaped mesh
+## (bars, new tyre) misses and is projected again.
+static var _proj_cache := {}
+const PROJ_CACHE_MAX := 600
+
 static func project(mi: MeshInstance3D, si: int, pos: Vector3, x_axis: Vector3, z_axis: Vector3, size: Vector3, material: Material) -> MeshInstance3D:
 	var arr := mi.mesh.surface_get_arrays(si)
+	var key := [hash(arr[Mesh.ARRAY_VERTEX]), hash(arr[Mesh.ARRAY_INDEX]), hash(arr[Mesh.ARRAY_NORMAL]), pos, x_axis, z_axis, size]
+	var hit = _proj_cache.get(key)
+	if hit == null:
+		hit = _project_arrays(arr, pos, x_axis, z_axis, size)
+		if _proj_cache.size() >= PROJ_CACHE_MAX: _proj_cache.clear()
+		_proj_cache[key] = hit
+	if (hit as Array).is_empty():
+		return null
+	var da := []
+	da.resize(Mesh.ARRAY_MAX)
+	da[Mesh.ARRAY_VERTEX] = hit[0]
+	da[Mesh.ARRAY_NORMAL] = hit[1]
+	da[Mesh.ARRAY_TEX_UV] = hit[2]
+	var am := ArrayMesh.new()
+	am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, da)
+	am.surface_set_material(0, material)
+	var d := MeshInstance3D.new()
+	d.name = "decal"
+	d.mesh = am
+	d.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.add_child(d, true)
+	return d
+
+## the clip itself: [positions, normals, uvs] of the decal, or [] if nothing of the surface is under it
+static func _project_arrays(arr: Array, pos: Vector3, x_axis: Vector3, z_axis: Vector3, size: Vector3) -> Array:
 	var P: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
 	var N: PackedVector3Array = arr[Mesh.ARRAY_NORMAL] if arr[Mesh.ARRAY_NORMAL] != null else PackedVector3Array()
 	var I: PackedInt32Array = arr[Mesh.ARRAY_INDEX] if arr[Mesh.ARRAY_INDEX] != null else PackedInt32Array()
@@ -326,21 +369,8 @@ static func project(mi: MeshInstance3D, si: int, pos: Vector3, x_axis: Vector3, 
 				out_n.append(nrm)
 				out_uv.append(Vector2(q.x / size.x + 0.5, 1.0 - (q.y / size.y + 0.5)))
 	if out_p.is_empty():
-		return null
-	var da := []
-	da.resize(Mesh.ARRAY_MAX)
-	da[Mesh.ARRAY_VERTEX] = out_p
-	da[Mesh.ARRAY_NORMAL] = out_n
-	da[Mesh.ARRAY_TEX_UV] = out_uv
-	var am := ArrayMesh.new()
-	am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, da)
-	am.surface_set_material(0, material)
-	var d := MeshInstance3D.new()
-	d.name = "decal"
-	d.mesh = am
-	d.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	mi.add_child(d, true)
-	return d
+		return []
+	return [out_p, out_n, out_uv]
 
 
 static func _surface_aabb(mi: MeshInstance3D, si: int) -> AABB:

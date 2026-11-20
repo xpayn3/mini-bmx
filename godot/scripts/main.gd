@@ -170,9 +170,23 @@ func _new_game(title := false) -> void:
 		await game.tree_exited
 	game = Game.new()
 	game.title_world = title   # the title screen's own backdrop world; a ride swaps it for the real one
+	if title and not _title_keep.is_empty():   # the title world's terrain kept from before the garage
+		game.reuse = _title_keep
+		_title_keep = {}
 	game.process_mode = Node.PROCESS_MODE_PAUSABLE
 	add_child(game)
 	move_child(game, 0)
+
+## the title world's terrain + far hills, out of the tree while the garage is open (Game.take_world)
+var _title_keep := {}
+
+func _free_title_keep() -> void:
+	for n in _title_keep.values():
+		if is_instance_valid(n): (n as Node).free()   # out of the tree: its workers were joined when it left
+	_title_keep = {}
+
+func _exit_tree() -> void:
+	_free_title_keep()
 
 func restart_ride() -> void:
 	fade.modulate.a = 1.0
@@ -221,6 +235,14 @@ func _prebuild_behind(intro: CrtIntro) -> void:
 	ride_ready = g
 	_ride_sig = _ride_sig_now()
 	print("PREBUILD ride world ms=", Time.get_ticks_msec() - t0)
+	# the ride setup page's turntable with this bike on it, parked hidden (~0.2 s that RIDE no longer waits for)
+	t0 = Time.get_ticks_msec()
+	hero_view = BikeTurntable.new()
+	hero_view.visible = false
+	add_child(hero_view)
+	hero_view.show_rider(RiderPanels.load_look())   # the Character step's standing rider too
+	hero_view.set_bike(GameState.bike_id)
+	print("PREBUILD turntable ms=", Time.get_ticks_msec() - t0)
 	if is_instance_valid(intro): intro.hold = false
 
 func _take_prebuilt() -> bool:
@@ -576,7 +598,7 @@ func _ensure_thumbs() -> void:
 		bike_thumbs = PartThumbs.new()
 		add_child(bike_thumbs)
 	for id in GameState.BIKES:   # pre-render every picture (one per frame, cached) so switching is instant
-		bike_thumbs.request("bike|" + id, PartThumbs.make_bike.bind(id), Vector3(0.45, 0.2, 1.0), func(_t): pass)
+		bike_thumbs.request(PartThumbs.bike_key(id), PartThumbs.make_bike.bind(id), Vector3(0.45, 0.2, 1.0), func(_t): pass)
 
 func _bike_pic(th: PartThumbs, id: String, min_size: Vector2) -> TextureRect:
 	var pic := TextureRect.new()
@@ -584,7 +606,7 @@ func _bike_pic(th: PartThumbs, id: String, min_size: Vector2) -> TextureRect:
 	pic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	pic.custom_minimum_size = min_size
 	pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	th.request("bike|" + id, PartThumbs.make_bike.bind(id), Vector3(0.45, 0.2, 1.0), func(t): if is_instance_valid(pic): pic.texture = t)
+	th.request(PartThumbs.bike_key(id), PartThumbs.make_bike.bind(id), Vector3(0.45, 0.2, 1.0), func(t): if is_instance_valid(pic): pic.texture = t)
 	return pic
 
 var hero_view: BikeTurntable
@@ -601,7 +623,32 @@ func _hero_text(id: String) -> void:
 ## Bike / rider / race: the bike turns on its podium in the whole left side (title, name and BACK sit inside
 ## that view), the picks are a column on the right. Computer: the whole screen is the device.
 func _menu_page_setup(step := 0) -> void:
+	var probe_t := Time.get_ticks_usec()
+	_menu_page_setup_build(step)
+	if Env.s("BMX_SETUP_PROBE") != "":
+		print("SETUP step=%d build_ms=%.1f" % [setup_step, (Time.get_ticks_usec() - probe_t) / 1000.0])
+		_probe_hitches()
+
+## tests (BMX_SETUP_PROBE=1): the slow frames in the 3 s after a menu page was built (`SETUPFRAME`)
+func _probe_hitches() -> void:
+	var t_end := Time.get_ticks_msec() + 3000
+	var last := Time.get_ticks_usec()
+	var worst := 0.0
+	var slow := 0
+	while Time.get_ticks_msec() < t_end:
+		await get_tree().process_frame
+		var now := Time.get_ticks_usec()
+		var ms := (now - last) / 1000.0
+		last = now
+		worst = maxf(worst, ms)
+		if ms > 33.0: slow += 1
+	print("SETUPFRAME step=%d worst_ms=%.1f frames_over_33ms=%d" % [setup_step, worst, slow])
+
+func _menu_page_setup_build(step := 0) -> void:
 	setup_step = clampi(step, 0, SETUP_STEPS.size() - 1)
+	# step to step the 3D turntable is kept (its world, light and the bike it shows); only the page round it is rebuilt
+	var keep_view: BikeTurntable = hero_view if is_instance_valid(hero_view) and not hero_view.is_queued_for_deletion() else null
+	if keep_view: keep_view.get_parent().remove_child(keep_view)
 	_menu_clear()
 	menu_page = "setup"
 	if is_instance_valid(menu_quit): menu_quit.visible = false
@@ -643,7 +690,8 @@ func _menu_page_setup(step := 0) -> void:
 		var left := Control.new()
 		left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(left)
-		hero_view = BikeTurntable.new()
+		hero_view = keep_view if keep_view else BikeTurntable.new()
+		keep_view = null
 		hero_view.set_anchors_preset(Control.PRESET_FULL_RECT)
 		left.add_child(hero_view)
 		if setup_step == 2: hero_view.show_rider(RiderPanels.load_look())   # the rider step shows the rider standing
@@ -725,6 +773,10 @@ func _menu_page_setup(step := 0) -> void:
 		foot.add_child(fl)
 		next_btn.custom_minimum_size.x = 420
 		foot.add_child(next_btn)
+	if keep_view:   # the full-screen computer step has no turntable: park it hidden for the next step
+		keep_view.visible = false
+		scr.add_child(keep_view)
+	elif is_instance_valid(hero_view): hero_view.visible = true
 	menu_focus = next_btn   # a step with one main pick moves this onto the picked card
 	match setup_step:
 		0: _setup_bike(content)
@@ -1174,26 +1226,35 @@ func _open_garage(mode := "bike") -> void:
 	Steam.presence("In the garage" if mode == "bike" else "Setting up the rider")
 	if menu: menu.queue_free(); menu = null
 	fade.modulate.a = 1.0
+	var t0 := Time.get_ticks_usec()
 	if game:
+		if game.title_world and _title_keep.is_empty():   # its terrain + far hills wait for the way back (~0.9 s to rebuild)
+			_title_keep = game.take_world()
 		game.queue_free()
 		await game.tree_exited
 		game = null
+	if Env.s("BMX_GARAGE_PROBE") != "": print("GARAGE free title world ms=%.1f" % ((Time.get_ticks_usec() - t0) / 1000.0))
 	if not GameState.BIKES[GameState.bike_id].get("garage", false): GameState.bike_id = "dh"   # the garage builds the DH frames
+	t0 = Time.get_ticks_usec()
 	garage = Garage.new()
 	garage.mode = mode
 	add_child(garage)
+	if Env.s("BMX_GARAGE_PROBE") != "": print("GARAGE open total ms=%.1f" % ((Time.get_ticks_usec() - t0) / 1000.0))
 	garage.closed.connect(_close_garage)
 	create_tween().set_ignore_time_scale().tween_property(fade, "modulate:a", 0.0, 0.5)
 
 func _close_garage(ride: bool) -> void:
 	fade.modulate.a = 1.0
+	var t0 := Time.get_ticks_usec()
 	garage.queue_free()
 	await garage.tree_exited
 	garage = null
 	bike_dirty = false   # the world is rebuilt right here (with the new build)
+	if ride: _free_title_keep()
 	await _new_game(not ride)   # back to the menu = the title backdrop world (its lookout spot belongs to that world)
 	if ride: _start_ride()
 	else: _show_menu()
+	if Env.s("BMX_GARAGE_PROBE") != "": print("GARAGE close total ms=%.1f" % ((Time.get_ticks_usec() - t0) / 1000.0))
 	create_tween().set_ignore_time_scale().tween_property(fade, "modulate:a", 0.0, 0.5)
 
 func _start_ride() -> void:

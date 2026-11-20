@@ -99,6 +99,9 @@ var sky_mat: ShaderMaterial
 const TITLE_SEED := 37   # a desert summit with rolling hills far below, picked by hand
 const TITLE_SPOT := Vector3(30.0, -120.0, 1.4399)   # x, z, heading (rad) of the bike on that summit
 var title_world := false
+## parts of an earlier Game of the same world to use instead of building them ({terrain, far_hills}; main sets it
+## before add_child: the title backdrop round a garage visit). See take_world().
+var reuse := {}
 var _title_heading := NAN
 var scenic := false          # title screen: golden hour, a lookout camera, far hills to the horizon
 var far_hills: FarHills
@@ -108,13 +111,20 @@ func _ready() -> void:
 	bike_cfg = GameState.bike_config()
 	Tune.set_ride(bike_cfg.ride)
 	_build_environment()
-	terrain = load("res://scripts/world/terrain.gd").new((int(Env.s("BMX_TITLE_SEED")) if Env.s("BMX_TITLE_SEED") != "" else TITLE_SEED) if title_world else GameState.seed)
+	if reuse.has("terrain"):   # the title world's own, kept while the garage was open (it is always the same place)
+		terrain = reuse.terrain
+	else:
+		terrain = load("res://scripts/world/terrain.gd").new((int(Env.s("BMX_TITLE_SEED")) if Env.s("BMX_TITLE_SEED") != "" else TITLE_SEED) if title_world else GameState.seed)
 	add_child(terrain)
 	terrain.view_scale = float(Settings.get_v("view_distance"))   # before the first chunks are built
 	terrain.update_stream(0, 0, INF)
-	far_hills = FarHills.new()   # the distant landscape behind the streamed chunks
-	far_hills.setup(terrain)
+	if reuse.has("far_hills"):
+		far_hills = reuse.far_hills
+	else:
+		far_hills = FarHills.new()   # the distant landscape behind the streamed chunks
+		far_hills.setup(terrain)
 	add_child(far_hills)
+	reuse = {}
 	sheep = SheepHerd.new()   # woolly flocks that graze and run from the bike
 	sheep.setup(terrain)
 	add_child(sheep)
@@ -183,6 +193,14 @@ func _ready() -> void:
 	dust.warm_up(Vector3(0, phys.y + 0.5, 0))
 	fx.puff(Vector3(0, phys.y + 0.4, 0), Vector3.ZERO, Color.WHITE, 0.3, 0.2, 0.0)
 	fx.chunk(Vector3(0, phys.y + 0.4, 0), Vector3.ZERO, Color.WHITE, 0.01, 0.2)
+
+## lift the terrain + far hills out of this Game before it is freed, for a later Game of the same world
+## (`reuse`); they wait out of the tree, not processing (the terrain joins its workers on leaving)
+func take_world() -> Dictionary:
+	var out := {"terrain": terrain, "far_hills": far_hills}
+	remove_child(terrain)
+	remove_child(far_hills)
+	return out
 
 # ---------------------------------------------------------------- environment
 func _build_environment() -> void:

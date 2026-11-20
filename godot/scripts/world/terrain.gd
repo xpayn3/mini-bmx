@@ -311,13 +311,20 @@ func colliders_near(x: float, z: float) -> Array:
 # ======================================================================
 # streaming
 # ======================================================================
+## every chunk round the last update_stream point is built (nothing left to stream there)
+func stream_complete() -> bool:
+	return _jobs.is_empty() and chunks.size() >= (2 * RADIUS + 1) * (2 * RADIUS + 1)
+
+
 func _max_jobs() -> int:
 	if max_jobs > 0:
 		return max_jobs
 	return clampi(OS.get_processor_count() - 2, 1, 4)
 
 
-func update_stream(px: float, pz: float, budget_ms: float = 4.0) -> void:
+## budget_ms INF = build everything round (px, pz) now; sync_r >= 0 then limits that to the chunks within sync_r of
+## it (the rest streams in later calls with a normal budget)
+func update_stream(px: float, pz: float, budget_ms: float = 4.0, sync_r := -1) -> void:
 	var t0 := Time.get_ticks_usec()
 	last_finalized = 0
 	fin_parts.fill(0.0)
@@ -341,6 +348,8 @@ func update_stream(px: float, pz: float, budget_ms: float = 4.0) -> void:
 			o.visible = near
 	if is_inf(budget_ms):
 		var queue := _missing(ccx, ccz)
+		if sync_r >= 0:
+			queue = queue.filter(func(k: Vector2i) -> bool: return absi(k.x - ccx) <= sync_r and absi(k.y - ccz) <= sync_r)
 		var lim := maxi(spawn_jobs, _max_jobs())
 		while not queue.is_empty() or not _jobs.is_empty():
 			while _jobs.size() < lim and not queue.is_empty():

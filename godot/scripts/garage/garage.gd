@@ -27,6 +27,8 @@ const SUN := Vector3(-0.6, 0.5, -0.6)
 var build: Dictionary
 var rig: BikeRig
 var outside: Node3D
+var _outside_terrain: Node3D   # the Terrain out of the door, still streaming its outer chunks while set
+var _outside_spot := Vector2.ZERO
 var rider: Rider = null
 var rider_on := false
 var rider_pose := {}
@@ -112,22 +114,39 @@ func _ready() -> void:
 			var p := kv.split("=")
 			if p.size() == 2: rider_pose[p[0]] = float(p[1])
 	if not PREVIEWS.has(rider_preview): rider_preview = "pedal"
+	_probe_t = Time.get_ticks_usec()
+	_open_t = _probe_t
 	_build_room()
+	_probe("room")
 	add_child(cam)
 	cam.fov = 38
 	cam.current = true
 	_rebuild_bike()
+	_probe("bike")
 	add_child(ui)
 	_build_ui()
+	_probe("ui")
 	var first := tab
 	tab = ""   # so _set_tab frames the camera on the first page
 	_set_tab(env_tab if env_tab != "" and _has_tab(env_tab) else first)
+	_probe("page")
 	if Env.s("BMX_TYRE_PROBE") != "":
 		_tyre_probe.call_deferred()
 	var cv := Env.s("BMX_GARAGE_CAM").split(",", false)   # tests: "orbit_rad,pitch_deg,dist"
 	if cv.size() == 3:
 		orbit_t = float(cv[0]); pitch_t = float(cv[1]); dist_t = float(cv[2])
 		orbit = orbit_t; pitch = pitch_t; dist = dist_t
+
+## tests (BMX_GARAGE_PROBE=1): how long each part of opening the garage takes (`GARAGE <step> ms=`)
+## and the first frames after it (`GARAGEFRAME`)
+var _probe_t := 0
+var _open_t := 0
+var _probe_frames := 0
+func _probe(step: String) -> void:
+	if Env.s("BMX_GARAGE_PROBE") == "": return
+	var now := Time.get_ticks_usec()
+	print("GARAGE %s ms=%.1f" % [step, (now - _probe_t) / 1000.0])
+	_probe_t = now
 
 # ================================================================ the room
 func _mat(c: Color, rough := 0.8, metal := 0.0) -> StandardMaterial3D:
@@ -284,7 +303,9 @@ func _build_room() -> void:
 	_box(Vector3(0.2, 5, 12), Vector3(-7, 2.5, 1.8), wall)
 	_box(Vector3(0.2, 5, 12), Vector3(7, 2.5, 1.8), wall)
 	_box(Vector3(14.2, 0.2, 12.2), Vector3(0, 5, 1.8), _mat(Color(0.08, 0.08, 0.09)))
+	_probe("room shell")
 	_build_outside()
+	_probe("outside")
 	# workbench + pegboard with tools on the left of the back wall
 	var wood := _mat(Color("6b4a2b"), 0.7)
 	var steel := _mat(Color(0.25, 0.27, 0.3), 0.4, 0.8)
@@ -382,8 +403,14 @@ func _build_outside() -> void:
 	var t = load("res://scripts/world/terrain.gd").new(GameState.seed)
 	t.name = "Terrain"
 	outside.add_child(t)
+	_probe("  terrain new")
 	var spot := Vector2(-6.0, 0.0)   # just behind spawn on the flat hilltop: the trail runs away from here
-	t.update_stream(spot.x, spot.y, INF)
+	# only the 3 x 3 chunks round the door are built before the first frame (all 7 x 7 took ~1.3 s); the
+	# outer ring streams in over the next frames (_process), on the first visit behind the closed door
+	t.update_stream(spot.x, spot.y, INF, 1)
+	_probe("  near chunks")
+	_outside_terrain = t
+	_outside_spot = spot
 	outside.rotation.y = PI / 2   # world +X (down the trail) -> garage -Z (out of the door)
 	var to_world := func(gx: float, gz: float) -> Vector2:   # garage floor point -> terrain x / z
 		var w := Basis(Vector3.UP, -PI / 2) * Vector3(gx - DOOR_X, 0, gz + 4.35)
@@ -491,6 +518,7 @@ func _rebuild_bike() -> void:
 	add_child(rig)
 	var cfg: Dictionary = GameState.BIKES[GameState.bike_id] if GameState.BIKES[GameState.bike_id].get("garage", false) else GameState.BIKES.dh
 	rig.load_bike(cfg, build)
+	_probe("  bike load")
 	var L := float(rig.extras.get("wheelbase", 1.25))
 	var bb := float(rig.extras.get("bbToRearAxle", 0.44))
 	# stand the bike in the middle of the bay, wheels on the floor
@@ -691,6 +719,15 @@ func _place_slats() -> void:
 		mi.visible = y < DOOR_H + 0.3   # higher up it is inside the drum
 
 func _process(dt: float) -> void:
+	if _probe_frames < 12 and Env.s("BMX_GARAGE_PROBE") != "":
+		_probe_frames += 1
+		print("GARAGEFRAME %d dt_ms=%.1f" % [_probe_frames, dt * 1000.0])
+	if _outside_terrain != null:   # the far chunks out of the door, a few ms a frame
+		_outside_terrain.update_stream(_outside_spot.x, _outside_spot.y, 3.0)
+		if _outside_terrain.stream_complete():
+			_outside_terrain = null
+			if Env.s("BMX_GARAGE_PROBE") != "":
+				print("GARAGE outside streamed after ms=%.0f" % ((Time.get_ticks_usec() - _open_t) / 1000.0))
 	if door_open < 1.0:
 		door_t += minf(dt, 0.05)   # the first frame after the long build has a huge dt: don't let it eat the wait
 		var k := clampf((door_t - DOOR_DELAY) / DOOR_TIME, 0.0, 1.0)
@@ -1438,15 +1475,40 @@ func _bars_page() -> void:
 		_choice(r[1], r[2], str(build.camera.get(gk, ActionCam.GEAR_DEFAULT[gk])), func(v): build.camera[gk] = v)
 	_note("An action camera on the bike: the Bike cam view (C) looks out of it. The helmet camera is picked in the Rider room's Kit tab.")
 
+## brand + name on the brake part cards, by option id (the parts come from these bikes)
+const BRAKE_MAKERS := {"stock": ["RUNOUT", "Stock"], "tues": ["YONDER", "Tusk"], "fuzz": ["NEXO", "Fizz"]}
+
+## one card per option of a BikeBuild list ([[id, label], ...]); `spec` = the card's spec line from (id, label)
+## `spec` = the card's spec line from (id, label), `make` = the picture's part from id, `apply` = fit id to the build
+func _brake_cards(opts: Array, current: String, kind: String, spec: Callable, make: Callable, view: Vector3, apply: Callable, thumb_extra := "") -> void:
+	var items := []
+	for o in opts:
+		var id: String = o[0]
+		var mk: Array = BRAKE_MAKERS.get(id, [String(o[1]).to_upper(), ""])
+		items.append({"key": id, "brand": mk[0], "name": mk[1], "spec": spec.call(id, String(o[1])),
+			"thumb": "%s|%s|%s" % [kind, id, thumb_extra], "make": make.bind(id), "view": view})
+	_cards(items, current, apply)
+
 func _brakes_page() -> void:
 	var S: Dictionary = build.suspension
-	_h("DISC BRAKES")
-	_choice("Rotors", BikeBuild.ROTORS, str(S.get("rotor", "stock")), func(v): S.rotor = v)
-	_choice("Rear caliper", BikeBuild.REAR_CALIPERS, str(S.get("rear_caliper", "stock")), func(v): S.rear_caliper = v)
-	_note("Rotors fit every frame. The front caliper comes with the fork (Shocks tab); the Tusk and Fizz rear calipers fit the RUNOUT's rear triangle, the new frames keep their own.")
-	_h("LEVERS")
 	var B: Dictionary = build.bars
-	_choice("Brake levers", BikeBuild.LEVERS, str(B.get("levers", "stock")), func(v): B.levers = v)
+	var rotor := str(S.get("rotor", "stock"))
+	_h("ROTORS")
+	var mm := func(_id: String, label: String) -> String:
+		var m := RegEx.create_from_string("(\\d+) ?mm").search(label)
+		return ("%s mm  ·  front + rear" % m.get_string(1)) if m else "Front + rear  ·  every frame"
+	_brake_cards(BikeBuild.ROTORS, rotor, "rotor", mm, PartThumbs.make_rotor, Vector3(0.25, 0.1, 1.0),
+		func(k): S.rotor = k)
+	_h("REAR CALIPER")
+	_brake_cards(BikeBuild.REAR_CALIPERS, str(S.get("rear_caliper", "stock")), "caliper",
+		func(id: String, _l: String) -> String: return "On the frame's own stays" if id == "stock" else "RUNOUT rear triangle",
+		func(id: String) -> Node3D: return PartThumbs.make_caliper(id, rotor), Vector3(0.0, 0.15, 1.0),
+		func(k): S.rear_caliper = k, rotor)
+	_note("The front caliper comes with the fork (Shocks tab). The Tusk and Fizz rear calipers fit the RUNOUT's rear triangle; the other frames keep their own.")
+	_h("LEVERS")
+	_brake_cards(BikeBuild.LEVERS, str(B.get("levers", "stock")), "levers",
+		func(_id: String, _l: String) -> String: return "Pair  ·  moves with the bar",
+		PartThumbs.make_levers, Vector3(0.55, 0.6, 1.0), func(k): B.levers = k)
 
 func _susp_page() -> void:
 	var S: Dictionary = build.suspension
