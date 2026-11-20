@@ -1048,7 +1048,12 @@ func begin_getup() -> void:
 		get_up(); return
 	if ClipGetUp.available() and Env.s("BMX_GETUP_ANIM") != "proc":
 		var g := ClipGetUp.new(rider, terrain, ragdoll.p)
-		if g.ok(): getup_anim = g
+		if g.ok():
+			getup_anim = g
+			g.target = rig.global_position   # the fallen bike: where the limp ends
+			g.has_target = true
+			if Env.s("BMX_WALK_FAR") != "":   # tests: walk to a point this many metres down the trail from the bike
+				g.target += float(Env.s("BMX_WALK_FAR")) * rig.global_transform.basis.x
 	if getup_anim == null: getup_anim = GetUpAnim.new(rider, terrain, ragdoll.p)
 	_hop_armed = false
 	ragdoll.active = false
@@ -1061,9 +1066,13 @@ func _getup_step(dt: float, hop: bool) -> void:
 	if getup_anim is ClipGetUp and getup_anim.dizzy():
 		# standing dizzy: a fresh hop press gets back on the bike (tests: BMX_DIZZY_SECS)
 		if not hop: _hop_armed = true
-		elif _hop_armed: getup_anim.release()
+		elif _hop_armed: getup_anim.release(); _hop_armed = false
 		var ds := Env.s("BMX_DIZZY_SECS")
-		if ds != "" and getup_anim.t > float(ds): getup_anim.release()
+		if ds != "" and getup_anim.t > float(ds): getup_anim.release(); _hop_armed = false
+	elif getup_anim is ClipGetUp and getup_anim.walking():
+		# limping to the bike: a fresh hop press gets on now
+		if not hop: _hop_armed = true
+		elif _hop_armed: getup_anim.skip()
 	var going: bool = getup_anim.step(dt)
 	var P: Array = getup_anim.last_world
 	for i in mini(P.size(), ragdoll.p.size()):
