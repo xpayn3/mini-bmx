@@ -30,6 +30,8 @@ func _init() -> void:
 	add_child(pitch_g)
 	pitch_g.add_child(lean_g)
 
+var fork_model := "dh"   # whose fork crowns are on the steer: dh's own or a fork model's glb id (_swap_fork); stems sit on its seat
+var _lever_surf0 := -1   # first steer-mesh surface that belongs to model brake levers (_swap_levers), -1 = none
 var fit_g := Node3D.new()   # lifts / tilts the model when the wheels are bigger or smaller than stock
 var wheel_rf := 0.374
 var wheel_rr := 0.355
@@ -61,6 +63,10 @@ func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
 	var lev := str(build.get("bars", {}).get("levers", "stock"))
 	if lev != "stock" and not extras.get("noBarMod", false) and not extras.get("noDecals", false):   # the stock frame: brake levers from a model
 		_swap_levers(lev, fork_id != "")
+	var stem := str(build.get("bars", {}).get("stem", "stock"))
+	var bar_glb := Handlebar.glb_of(build.get("bars", {}))
+	if (stem != "stock" or bar_glb != "") and not extras.get("noBarMod", false) and not extras.get("noDecals", false):   # the stock frame: stem / bar from a model
+		_swap_cockpit(stem, bar_glb)
 	if not extras.get("noBarMod", false) and not extras.get("noDecals", false):   # the stock frame: saddle model + seat post
 		_swap_seat(build)
 	var rc := str(build.get("suspension", {}).get("rear_caliper", "stock"))
@@ -114,7 +120,7 @@ func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
 		chain.setup(self)
 	if not decal_cfg.is_empty():
 		BikeDecals.add_bike_decals(model, decal_cfg)
-	mount_cam(str(build.get("camera", {}).get("mount", "none")))
+	mount_cam(str(build.get("camera", {}).get("mount", "none")), build.get("camera", {}))
 	if extras.has("suspension") and model.find_child("rocker", true, false):
 		var r: Dictionary = extras.suspension.rear
 		BikeDecals.add_pivot_bolts(model, [{"node": "rocker", "at": r.G2, "z": 0.029}, {"node": "rocker", "at": r.C2, "z": 0.029}, {"node": "rocker", "at": r.D, "z": 0.031, "r": 0.005}])
@@ -144,6 +150,7 @@ func _swap_fork(id: String, build: Dictionary) -> void:
 			var old := fl.position
 			fl.position = Vector3(float(ax[0]), float(ax[1]), 0.0)
 			extras.wheelbase = float(extras.get("wheelbase", 1.25)) + (fl.position.x - old.x)   # the axle moved with the fork's offset
+		fork_model = id
 		if extras.has("suspension"):   # the lowers stop at the crown: never more travel than fits
 			var f: Dictionary = extras.suspension.fork
 			f.maxTravel = float(fx.get("travel", 0.18))
@@ -175,10 +182,133 @@ func _swap_levers(id: String, fork_swapped: bool) -> void:
 			am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, src.surface_get_arrays(i))
 			am.surface_set_material(am.get_surface_count() - 1, mats.get(m.resource_name, m) if m else null)
 		for i in base.get_surface_count(): add.call(base, i)
+		_lever_surf0 = am.get_surface_count()
 		for i in lm.mesh.get_surface_count(): add.call(lm.mesh, i)
 		(steer_n as MeshInstance3D).mesh = am
 	ls.free()
 	if bs: bs.free()
+
+## a model's stem and / or handlebar on the stock frame (assets/forks/stem_<id>.glb, bar_<id>.glb, made by tools/make_forks.py), in one pass
+## over the steer mesh (whatever fork / lever variant it is): dh's stem / bar + grips are dropped, the model's go in as more surfaces. The stem
+## slides along the steering axis onto the crown in use and the bar (dh's, or the model's at its middle) rides in its clamp (shift d); the
+## brake levers come along and, on a model bar, move by leverShift[side] so they sit against its grips as they sat against dh's; the brake
+## hose bends: its top follows. dh's pieces are found by their triangle middles (extras), matched within 0.4 mm (imported positions are quantised).
+func _swap_cockpit(stem_id: String, bar_id: String) -> void:
+	if not (steer_n is MeshInstance3D): return
+	var sx := _glb_extras("res://assets/forks/stem_%s.glb" % stem_id, "stemroot") if stem_id != "stock" else []
+	var bx := _glb_extras("res://assets/forks/bar_%s.glb" % bar_id, "barroot") if bar_id != "" else []
+	if sx.is_empty() and bx.is_empty(): return
+	var slide := Vector3.ZERO
+	var d := Vector3.ZERO
+	var cut := {}; var mv := {}; var hose := {}; var barcut := {}; var levs := {}
+	var hy := [-0.05, 0.12]
+	if not sx.is_empty():
+		var ex: Dictionary = sx[1]
+		var ax: Array = ex.axis
+		var seats: Dictionary = ex.seats
+		slide = Vector3(float(ax[0]), float(ax[1]), 0.0) * (float(seats.get(fork_model, seats.dh)) - float(seats[ex.own]))   # own fork's seat -> the crown in use
+		d = Vector3(float(ex.shift[0]), float(ex.shift[1]), 0.0) + slide
+		cut = _mid_set(ex.cut); mv = _mid_set(ex.move); hose = _mid_set(ex.hose); hy = ex.hoseY
+	var e := [Vector3.ZERO, Vector3.ZERO]   # levers' extra move on a model bar: left, right
+	var bmid := Vector3.ZERO
+	if not bx.is_empty():
+		var ex: Dictionary = bx[1]
+		barcut = _mid_set(ex.barcut); levs = _mid_set(ex.levers)
+		if hose.is_empty(): hose = _mid_set(ex.hose); hy = ex.hoseY
+		for k in 2:
+			var a: Array = ex.leverShift[k]
+			e[k] = Vector3(float(a[0]), float(a[1]), float(a[2]))
+		bmid = Vector3(float(ex.dhMid[0]), float(ex.dhMid[1]), 0.0) + d
+	var old: Mesh = (steer_n as MeshInstance3D).mesh
+	var am := ArrayMesh.new()
+	var lev0 := -1
+	for si in old.get_surface_count():
+		if si == _lever_surf0: lev0 = am.get_surface_count()
+		var arr := old.surface_get_arrays(si)
+		var P: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+		var I: PackedInt32Array = arr[Mesh.ARRAY_INDEX] if arr[Mesh.ARRAY_INDEX] != null else PackedInt32Array(range(P.size()))
+		var keep := PackedInt32Array()
+		var off := PackedVector3Array(); off.resize(P.size())   # each vertex's move
+		var w := PackedFloat32Array(); w.resize(P.size())       # how much of it (the hose bends)
+		var whole := _lever_surf0 >= 0 and si >= _lever_surf0   # model levers: on the bar
+		for t in range(0, I.size(), 3):
+			var m := (P[I[t]] + P[I[t + 1]] + P[I[t + 2]]) / 3.0
+			if not whole and (_mid_has(cut, m) or _mid_has(barcut, m)): continue
+			keep.append_array(PackedInt32Array([I[t], I[t + 1], I[t + 2]]))
+			var to := Vector3.ZERO; var wt := 0.0
+			if whole or _mid_has(levs, m):
+				to = d + e[1 if m.z > 0.0 else 0]; wt = 1.0
+			elif _mid_has(mv, m):
+				to = d; wt = 1.0
+			elif _mid_has(hose, m):
+				to = d + e[0]; wt = -1.0
+			if wt == 0.0: continue
+			for k in 3:
+				var vi := I[t + k]
+				var wk := wt if wt > 0.0 else smoothstep(float(hy[0]), float(hy[1]), P[vi].y)
+				if wk >= w[vi]:
+					w[vi] = wk; off[vi] = to
+		for i in P.size():
+			if w[i] > 0.0: P[i] += off[i] * w[i]
+		arr[Mesh.ARRAY_VERTEX] = P
+		arr[Mesh.ARRAY_INDEX] = keep
+		if keep.is_empty(): continue
+		am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+		am.surface_set_material(am.get_surface_count() - 1, old.surface_get_material(si))
+	_lever_surf0 = lev0
+	var mats := {}
+	for i in old.get_surface_count():
+		var m := old.surface_get_material(i)
+		if m: mats[m.resource_name] = m
+	var add := func(mesh: Mesh, at: Vector3, rename: String) -> void:
+		for i in mesh.get_surface_count():
+			var arr := mesh.surface_get_arrays(i)
+			var P: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+			for k in P.size(): P[k] += at
+			arr[Mesh.ARRAY_VERTEX] = P
+			var m := mesh.surface_get_material(i)
+			var mat: Material = mats.get(m.resource_name, m) if m else null
+			if rename != "" and m and m.resource_name == "black":   # the bar tube: its own surface (carbon / paint like the stock bar's)
+				mat = mat.duplicate(); mat.resource_name = rename
+			am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+			am.surface_set_material(am.get_surface_count() - 1, mat)
+	if not sx.is_empty():
+		add.call((sx[0].find_child("stem", true, false) as MeshInstance3D).mesh, slide, "")
+	if not bx.is_empty():
+		add.call((bx[0].find_child("bar", true, false) as MeshInstance3D).mesh, bmid, "bar")
+		add.call((bx[0].find_child("grips", true, false) as MeshInstance3D).mesh, bmid, "")
+	(steer_n as MeshInstance3D).mesh = am
+	for x in [sx, bx]:
+		if not x.is_empty(): (x[0] as Node).free()
+
+## [instantiated glb, its root node's extras] or [] when the file / extras are missing
+func _glb_extras(path: String, root_name: String) -> Array:
+	if not ResourceLoader.exists(path): return []
+	var n: Node = load(path).instantiate()
+	var root := n if n.name == root_name else n.find_child(root_name, true, false)
+	if root == null or not root.has_meta("extras"):
+		n.free(); return []
+	return [n, root.get_meta("extras")]
+
+## triangle middles (flat x, y, z list) -> a 1 mm grid: each one is filed in every cell its +-0.4 mm box touches
+static func _mid_set(flat: Array) -> Dictionary:
+	var out := {}
+	for i in range(0, flat.size(), 3):
+		var p := Vector3(float(flat[i]), float(flat[i + 1]), float(flat[i + 2]))
+		for dx in [-0.0004, 0.0004]:
+			for dy in [-0.0004, 0.0004]:
+				for dz in [-0.0004, 0.0004]:
+					var k := Vector3i((p + Vector3(dx, dy, dz)) * 1000.0)
+					if not out.has(k): out[k] = []
+					if not (out[k] as Array).has(p): (out[k] as Array).append(p)
+	return out
+
+static func _mid_has(cells: Dictionary, m: Vector3) -> bool:
+	var cell = cells.get(Vector3i(m * 1000.0))
+	if cell == null: return false
+	for p in cell:
+		if (p as Vector3).distance_squared_to(m) < 0.0004 * 0.0004: return true
+	return false
 
 
 ## a saddle model and / or a dropper seat post on the stock frame: the frame mesh loses its saddle (assets/seats/dh_frame.glb), the chosen saddle
@@ -367,7 +497,8 @@ func _materials(_cfg: Dictionary) -> void:
 ## with the steering); "fork" = a clamp on the right fork lower (the caliper is on the left), camera beside
 ## the leg, low over the ground (moves with the suspension). Placed from the meshes themselves, so it fits
 ## every frame / bar / fork model. "none" (or no such part) = no camera.
-func mount_cam(kind: String) -> void:
+## `gear` = the camera + add-ons (ActionCam.GEAR_ROWS keys; build.camera carries them next to "mount")
+func mount_cam(kind: String, gear := {}) -> void:
 	if action_cam and is_instance_valid(action_cam):
 		action_cam.get_parent().remove_child(action_cam)
 		action_cam.queue_free()
@@ -379,7 +510,7 @@ func mount_cam(kind: String) -> void:
 		var hint := Vector3(lerpf(grip_r.x, 0.0, 0.3), grip_r.y, zc)
 		var t := _tube_at(steer_n as MeshInstance3D, Vector3(0, 0, 1), zc, hint)
 		if t.is_empty(): return
-		action_cam = ActionCam.build_clamp(Vector3(0, 0, 1), t.r, Vector3.UP, Vector3(0.0, t.r + 0.024, 0.0))
+		action_cam = ActionCam.build_clamp(Vector3(0, 0, 1), t.r, Vector3.UP, Vector3(0.0, t.r + 0.024, 0.0), 0.0, gear)
 		action_cam.position = t.c
 		steer_n.add_child(action_cam)
 		if probe: print("CAMMOUNT bars c=%s r=%.4f" % [t.c, t.r])
@@ -396,7 +527,7 @@ func mount_cam(kind: String) -> void:
 		var at: Vector3 = hi.c
 		var r: float = hi.r
 		# camera upright on the outside of the leg, centred on the clamp height, lens ahead
-		action_cam = ActionCam.build_clamp(axis, r, Vector3(0, 0, 1), Vector3(0.012, -0.03, r + 0.046))
+		action_cam = ActionCam.build_clamp(axis, r, Vector3(0, 0, 1), Vector3(0.012, -0.03, r + 0.046), 0.0, gear)
 		action_cam.position = at
 		fl.add_child(action_cam)
 		if probe: print("CAMMOUNT fork c=%s r=%.4f axis=%s" % [at, r, axis])

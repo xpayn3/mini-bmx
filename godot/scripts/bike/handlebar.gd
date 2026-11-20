@@ -35,10 +35,18 @@ const MODELS := {
 	"oneup":        {"brand": "ONEUP",      "label": "Carbon Bar 35",     "width": 800, "rise": 40, "material": "carbon_matte"},
 	"m9":           {"brand": "ENVE",       "label": "M9 DH",             "width": 800, "rise": 10, "material": "carbon"},
 	"flat":         {"brand": "SPANK",      "label": "Oozy Flat 760",     "width": 760, "rise": 0,  "material": "alloy"},
+	# the bars of our FBX bikes, as modelled (assets/forks/bar_<glb>.glb, tools/make_forks.py): fixed width / rise, the material still applies
+	"tues_bar":     {"brand": "YT",         "label": "Tues bar + grips",  "width": 810, "rise": 50, "material": "alloy", "glb": "tues"},
+	"fuzz_bar":     {"brand": "NS",         "label": "Fuzz bar + grips",  "width": 780, "rise": 20, "material": "alloy", "glb": "fuzz"},
 }
 const MATERIAL_SHORT := {"alloy": "Alloy", "carbon": "Carbon", "carbon_matte": "Carbon matte"}
 
 static var _cache := {}
+
+
+## the model bar's glb id of a build's bars ("" = the stock bar, reshaped by width / rise)
+static func glb_of(bars: Dictionary) -> String:
+	return str(MODELS.get(str(bars.get("model", "")), {}).get("glb", ""))
 
 
 ## fraction of the full offset at |z| = s
@@ -129,7 +137,8 @@ static func apply(steer: MeshInstance3D, bars: Dictionary) -> void:
 		var m := steer.mesh.surface_get_material(i)
 		if m and steer.get_surface_override_material(i):
 			over[m.resource_name] = steer.get_surface_override_material(i)
-	steer.mesh = build(steer.mesh, w, r)
+	if glb_of(bars) == "":   # a model bar keeps its own shape
+		steer.mesh = build(steer.mesh, w, r)
 	for i in steer.mesh.get_surface_count():
 		var nm := steer.mesh.surface_get_material(i).resource_name
 		var o = over.get("black" if nm == "bar" else nm)

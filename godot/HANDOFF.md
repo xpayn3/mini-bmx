@@ -347,10 +347,19 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   `make_forks.py` into `assets/seats/dh_frame.glb` (frame without saddle; extras: stock saddle origin, seat tube top + direction) + `seats/saddle_dh.glb`; `seats/saddle_<id>.glb` are the Tues / Fuzz saddles
   (from `parts/<id>_saddle.glb`, levelled). `BikeRig._swap_seat` rebuilds the frame mesh with the saddle as extra surfaces (so `_saddle()` / the rider's seat, paint by surface name and decals keep
   working), raised along the seat tube by `post_h` with a generated post tube + collar when the post is "dropper". Test: `BMX_BUILD="seat.model=fuzz;seat.post=dropper;seat.post_h=0.15"`.
-  **Brake levers** (garage Bars tab, "Brake levers"; `build.bars.levers` stock / tues / fuzz, `BikeBuild.LEVERS`): `make_forks.py` cuts dh's levers (chrome blades + plastic bodies) out of the steer mesh
+  **Brake levers** (garage BRAKES tab, "Brake levers"; `build.bars.levers` stock / tues / fuzz, `BikeBuild.LEVERS`): `make_forks.py` cuts dh's levers (chrome blades + plastic bodies) out of the steer mesh
   (`forks/dh_steer_nl.glb` whole, `dh_cockpit_nl.glb` fork-less) and places the models' levers (`parts/<id>_levers.glb`, Tues Brakes parts 16..51, Fuzz `Brake_levers`) so their grips' axis matches dh's bar axis and the clamp end sits
   where dh's did (`forks/levers_<id>.glb`, written as plastic / chrome so `Handlebar.apply` moves them with width / rise); `BikeRig._swap_levers` adds them as surfaces of the steer mesh (hoses stay dh's). Test: `BMX_BUILD="bars.levers=fuzz"`.
-  **Disc brakes** (garage Shocks tab, DISC BRAKES): `suspension.rotor` ("stock" / "tues" / "fuzz", `BikeBuild.ROTORS`; `assets/forks/rotor_<id>.glb` from
+  **Stems** (garage Bars tab, "Stem"; `build.bars.stem` stock / tues / fuzz, `BikeBuild.STEMS`): `make_forks.py` writes `forks/stem_<id>.glb` = the model's direct-mount stem
+  (pieces of `parts/<id>_cockpit.glb` within 4.5 cm of the middle, not the headset spacers) on dh's steering axis, crowns' middle on dh's. Extras: `seats` (how far up the axis each
+  fork's stem sits: dh / tues / fuzz), `shift` (the bar's middle moves into the new clamp), and dh's stem / bar furniture / hose as triangle middles. `BikeRig._swap_stem` drops dh's
+  stem from whatever steer mesh is in use (matched within 0.4 mm), slides the stem onto the seat of the fork in use (`BikeRig.fork_model`), moves bar + grips + levers (model levers
+  too) by the shift and bends the hose top along. Stock frame only. Test: `BMX_BUILD="bars.stem=fuzz;suspension.fork_model=fuzz_fork"`.
+  **Model bars** (`Handlebar.MODELS` `tues_bar` / `fuzz_bar`, cards in the Bars tab; key `glb`): `forks/bar_<id>.glb` (nodes `bar` + `grips` with lock rings / end caps,
+  relative to the bar's middle) from the cockpit glbs. `_swap_cockpit(stem, bar)` (one pass, stem + bar together) cuts dh's bar + grips (`barcut`), puts the model's at
+  `dhMid` + the stem's shift (the tube as surface "bar": the Material pick still works, `Handlebar.apply` skips the width / rise reshape for them) and moves the levers
+  (dh's or a model's) by `leverShift[side]` so they sit against the new grips. Width / rise rows are hidden for these bars. Test: `BMX_BUILD="bars.model=tues_bar;bars.stem=tues"`.
+  **Disc brakes** (garage BRAKES tab, `_brakes_page`: DISC BRAKES + LEVERS): `suspension.rotor` ("stock" / "tues" / "fuzz", `BikeBuild.ROTORS`; `assets/forks/rotor_<id>.glb` from
   `tools/export_rotors.py`: disc + carrier + bolts, relative to the axle, moved onto the stock rotors' planes) replaces the mesh of the wheels' split-off "rotor"
   (`BikeRig._swap_rotors`, keeps the heat-glow material; works on every frame). `suspension.rear_caliper` ("stock" / "tues" / "fuzz", `BikeBuild.REAR_CALIPERS`): on the stock frame
   `_swap_rear_caliper` uses `forks/dh_seatstay.glb` (seatstay without its caliper, cut by `make_forks.py` as components) + `forks/caliper_<id>.glb` (the frame's rear caliper
@@ -373,6 +382,17 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   Helmet spots are measured from the shell triangles (`Rider.cam_spots`: top = crown, side = left of the shell 7.5 cm under it, chin
   = the lowest shell point well forward + 4.5 cm); bike spots from the meshes (`BikeRig._tube_at`: the bar a third of the way to the
   right grip; `_leg_band`: the right fork lower, the caliper side is left), so new frames / bars / forks need no numbers.
+  **Camera models + add-ons** ("gear", `ActionCam.MODELS` / `GEAR_ROWS`, procedural shapes, no logos): camera GoPro HERO13 / GoPro MAX
+  (front + back fisheyes, rear screen) / DJI Osmo Action 5 (round lens, big front screen) / Insta360 X4 (tall 360 stick) / Insta360 GO 3S
+  (white pill); lens stock / Max Lens Mod (dome, POV +14 deg: the lens marker carries meta `fov`, `CameraRig._helmet` uses it) / ND / clear
+  guard; housing none / frame / silicone sleeve / dive housing; mic none / Media Mod (cage + 2 cold shoes) / shotgun (foam) / furry
+  windshield (shell fur, `_fur_shader`); top accessory none / Light Mod (a real SpotLight3D) / Display Mod (flip screen with the REC time).
+  Helmet cam: look keys `camModel camLens camHousing camMic camAcc` (`ActionCam.GEAR_LOOK`, not touched by kits), picked in the rider room
+  Kit tab › ACTION CAM and tuning card Look › Action cam; bike cam: `build.camera.{model,lens,housing,mic,acc}`, garage Bars › ACTION CAM.
+  Tests: `BMX_LOOK=camModel=x4,camMic=deadcat`, `BMX_BUILD="camera.mount=bars;camera.model=osmo;camera.acc=light"`.
+  Every camera is "recording": red LEDs (front corner + top) blink 0.3 s of every second with a soft halo (shader, `ActionCam._led_shader` /
+  `_glow_shader`, all cameras in step); the front LCD shows a red "● REC" over the recording time in the bike computer's Doto font
+  (`UITheme.lcd_font()`, `rider/cam_rec_label.gd`: game time since the camera was built, so a new camera after a crash starts at 0:00).
   Camera views: Helmet (`helmet`) and **Bike** (`bikecam`, `src: bike`) look out of the lens; C skips whichever has no camera.
   Probe: `BMX_CAMMOUNT_PROBE=1` (`CAMMOUNT` lines); tests `BMX_LOOK=camMount=side`, `BMX_BUILD="camera.mount=fork" BMX_CAM=bikecam`.
 - Look: kits + a colour per part (helmet shell/peak, goggles, jersey, pants, gloves, shoes, knee pads).
@@ -664,6 +684,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - **On-screen keyboard** (`ui/pad_keyboard.gd`, `PadKeyboard.open(line_edit)`): A on a text box with the pad (seed, race plate, bike / preset names) opens it in the field's own viewport: A types, X deletes, Y space, Menu / DONE = accept (fires `text_submitted`), B = cancel (old text back); group `nav_modal` so a paper sheet keeps B. Garage colour pickers (`_color`) are pad steppers through `SWATCHES` (shift colour, outline, spokes, nipples, hubs). Pad B with a side card up while riding closes it (not a bail tap). `Game.swallow_held()`: A / X / Space still held from resume / RACE don't sprint / hop until let go.
 - Focus marker: a container with meta `nav_row` (MenuBase / garage / tune card / photo rows) gets a wash + a bar
   on its left when its control has focus (`style` "paper" highlighter + red, "card" yellow tokens, "dark" in-ride).
+- **Smooth scrolling** (`ui/smooth_scroll.gd`, `SmoothScroll.attach(sc)`, also done by `PadNav` for every list it manages): the wheel / touchpad move a target and the list glides to it (eased, real time, notches pile up), follow-focus jumps glide too, dragging the bar stays 1:1. Test: `BMX_SCROLL_PROBE=1` + `BMX_PADSEQ="w6000,mw:200:500:3"` (`SCROLL` lines).
 - Every ScrollContainer under the root follows focus. On a pad, focus lands on the page's first control when a menu
   opens / a tab changes; a page rebuilt after a change (garage, preset, rebind) gets focus back at the same tree
   position (`_refocus`); a window closing hands focus back to where it was (title SETTINGS). Only the newest
