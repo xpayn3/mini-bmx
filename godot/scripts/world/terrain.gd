@@ -11,6 +11,7 @@ const SIZE := 48.0
 const RADIUS := 3
 const ROCK_CELL := 2.0
 var view_scale := 1.0   # Settings view distance: scales the decoration draw ranges
+static var _gl_compat: bool = RenderingServer.get_rendering_device() == null   # OpenGL fallback renderer
 const LAYER_GROUND := 1 << 1    # physics layer 2: chunk ground colliders (only for debris)
 
 ## ground mesh / texture resolution per 48 m chunk (JS: 128 -> 0.375 m). 96 = 0.5 m keeps the
@@ -644,8 +645,23 @@ func _multimesh(parent: Node3D, mesh: Mesh, mat: Material, buf: PackedFloat32Arr
 	mm.transform_format = MultiMesh.TRANSFORM_3D
 	mm.use_custom_data = true
 	mm.mesh = mesh
-	mm.instance_count = count
-	mm.buffer = buf
+	if _gl_compat:
+		# OpenGL fallback: a MultiMesh without per-instance colours gives the shader's COLOR a garbage
+		# instance colour (some trees came out bright pink). Give every instance white: 12 + 4 + 4 floats.
+		mm.use_colors = true
+		mm.instance_count = count
+		var wide := PackedFloat32Array()
+		wide.resize(count * 20)
+		for i in count:
+			var s := i * 16
+			var d := i * 20
+			for j in 12: wide[d + j] = buf[s + j]
+			wide[d + 12] = 1.0; wide[d + 13] = 1.0; wide[d + 14] = 1.0; wide[d + 15] = 1.0
+			for j in 4: wide[d + 16 + j] = buf[s + 12 + j]
+		mm.buffer = wide
+	else:
+		mm.instance_count = count
+		mm.buffer = buf
 	var mi := MultiMeshInstance3D.new()
 	mi.multimesh = mm
 	mi.material_override = mat
