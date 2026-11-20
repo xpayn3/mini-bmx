@@ -291,11 +291,10 @@ static func make_fork(lowers: Dictionary, stanchions: Dictionary, crown_paint: D
 	var ang := 0.5 * atan2(2.0 * sxy, sxx - syy)   # the principal axis
 	ax = Vector2(cos(ang), sin(ang))
 	if ax.y < 0.0: ax = -ax                          # pointing up the fork (to the crown)
-	root.rotation.z = PI - atan2(ax.y, ax.x)         # crown to the left, legs level
-	return root
+	return _catalogue_pose(root, ax)
 
 
-## a fork model from assets/forks/<glb>.glb (crowns + stanchions, lowers + caliper) in the model's colours, laid level
+## a fork model from assets/forks/<glb>.glb (crowns + stanchions, lowers + caliper) in the model's colours, catalogue pose
 static func _make_fork_glb(glb: String, lowers: Dictionary, stanchions: Dictionary, crown_paint: Dictionary) -> Node3D:
 	var fs: Node = load("res://assets/forks/%s.glb" % glb).instantiate()
 	var root := Node3D.new()
@@ -314,7 +313,19 @@ static func _make_fork_glb(glb: String, lowers: Dictionary, stanchions: Dictiona
 				mi.set_surface_override_material(i, BikeBuild.paint_material(lowers))
 		root.add_child(mi)
 	fs.free()
-	root.rotation.z = PI - atan2(ax.y, ax.x)   # crown to the left, legs level
+	return _catalogue_pose(root, ax)
+
+
+const FORK_RISE := 0.85   # rad: the fork stands at this angle above level, axle bottom left, crown top right
+const FORK_TURN := 1.0    # rad: then turned about the vertical so both legs and the arch show (a 3/4 front view)
+
+## a fork posed like a magazine / catalogue shot: standing diagonally across the picture, three-quarter view.
+## `ax` = the fork's steer axis in its model's side view (pointing up to the crown)
+static func _catalogue_pose(fork: Node3D, ax: Vector2) -> Node3D:
+	fork.rotation.z = FORK_RISE - atan2(ax.y, ax.x)
+	var root := Node3D.new()
+	root.add_child(fork)
+	root.rotation.y = FORK_TURN
 	return root
 
 
