@@ -1766,6 +1766,7 @@ public partial class TerrainFieldCs : RefCounted
 		var LD = new Color[NV * NV];
 		var TW = new float[NV * NV];
 		var SW = new float[NV * NV];
+		var DRY = new float[NV * NV];   // biome dryness (grass field density, GrassField)
 		for (long iz = 0; iz < NV; iz++)
 		{
 			for (long ix = 0; ix < NV; ix++)
@@ -1794,6 +1795,7 @@ public partial class TerrainFieldCs : RefCounted
 				color_post(lx + ox, lz + oz, h, nv.Y, pre_b[o * 2], pre_b[o * 2 + 1]);
 				TW[o] = pre_t[o];
 				SW[o] = (float)cl_steep;
+				DRY[o] = (float)pre_b[o * 2];
 				LG[o] = cl_g;
 				LD[o] = cl_d;
 			}
@@ -1801,7 +1803,7 @@ public partial class TerrainFieldCs : RefCounted
 		return new Godot.Collections.Dictionary
 		{
 			["G"] = G, ["verts"] = verts, ["norms"] = norms, ["uvs"] = uvs,
-			["LG"] = LG, ["LD"] = LD, ["TW"] = TW, ["SW"] = SW,
+			["LG"] = LG, ["LD"] = LD, ["TW"] = TW, ["SW"] = SW, ["DRY"] = DRY,
 		};
 	}
 
