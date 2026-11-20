@@ -432,7 +432,7 @@ func _input(e: InputEvent) -> void:
 func _page_busy() -> bool:
 	if not live or not page: return false
 	for w in page.get_embedded_subwindows():
-		if w.visible: return true
+		if PadNav.is_real_popup(w): return true
 	for n in get_tree().get_nodes_in_group(&"nav_modal"):
 		if page.is_ancestor_of(n): return true
 	return false

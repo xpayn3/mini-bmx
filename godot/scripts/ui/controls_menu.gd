@@ -76,7 +76,9 @@ func _refocus(action: String, pad: bool) -> void:
 
 func _input(e: InputEvent) -> void:
 	if _wait_action == "": return
-	if e is InputEventKey and e.pressed and e.physical_keycode == KEY_ESCAPE and not _wait_pad:
+	# Esc cancels a key rebind; B cancels a key rebind too (a pad user can't type), Esc cancels a pad rebind
+	var cancel: bool = (e is InputEventKey and e.pressed and e.physical_keycode == KEY_ESCAPE) 		or (not _wait_pad and e is InputEventJoypadButton and e.pressed and e.button_index == JOY_BUTTON_B)
+	if cancel:
 		_wait_btn.text = ""; _wait_btn.queue_redraw(); _wait_action = ""; _modal(false)
 		get_viewport().set_input_as_handled(); return
 	var ok := false

@@ -473,8 +473,13 @@ static func btn_box(fill: Color, border := Tokens.CLEAR, bw := 0, radius := Toke
 ##  primary   - yellow, bold outline (RIDE, GO, SAVE & RIDE)
 ##  secondary - paper with an ink outline (BACK, SAVE)
 ##  chip      - grey, yellow when picked (bike, time of day, finishes, parts)
+##  menu      - a big menu line: grey, solid yellow when focused (the title menu, ride setup)
 ##  link      - bare text, a yellow bar + light wash on hover / focus (SETTINGS, QUIT)
+## Focus (the pad / keyboard cursor) is always a yellow wash + an ink bar (`FOCUS_WASH`); inside a PadNav menu
+## hovering with the mouse moves that same cursor, so there is only ever one highlight.
 ##  tab       - bare text, a yellow underline when open (the garage's categories)
+const FOCUS_WASH := Color(1.0, 0.824, 0.122, 0.55)   # Tokens.ACCENT, see-through: the focus cursor over any fill
+
 static func style_button(b: Button, kind := "chip", size := Tokens.T_MD) -> Button:
 	var pad := Tokens.S4
 	var weight := Tokens.W_BOLD
@@ -485,26 +490,32 @@ static func style_button(b: Button, kind := "chip", size := Tokens.T_MD) -> Butt
 			b.add_theme_stylebox_override("normal", btn_box(Tokens.ACCENT, Tokens.CLEAR, 0, Tokens.R_LG, pad))
 			b.add_theme_stylebox_override("hover", btn_box(Tokens.ACCENT_HOT, Tokens.CLEAR, 0, Tokens.R_LG, pad))
 			b.add_theme_stylebox_override("pressed", btn_box(Tokens.ACCENT_DOWN, Tokens.CLEAR, 0, Tokens.R_LG, pad))
-			b.add_theme_stylebox_override("focus", btn_box(Tokens.ACCENT_HOT, Tokens.CLEAR, 0, Tokens.R_LG, pad))   # no black bar
+			b.add_theme_stylebox_override("focus", marked(Tokens.ACCENT_HOT, Tokens.INK, SIDE_BOTTOM, Tokens.R_LG, pad))   # always yellow: focus adds the ink bar
 		"secondary":
 			pad = Tokens.S5; weight = Tokens.W_BLACK; slant = Tokens.SLANT
 			b.add_theme_stylebox_override("normal", btn_box(Tokens.PAPER, Tokens.CLEAR, 0, Tokens.R_LG, pad))
 			b.add_theme_stylebox_override("hover", btn_box(Tokens.FILL, Tokens.CLEAR, 0, Tokens.R_LG, pad))
 			b.add_theme_stylebox_override("pressed", btn_box(Tokens.ACCENT, Tokens.CLEAR, 0, Tokens.R_LG, pad))
-			b.add_theme_stylebox_override("focus", marked(Tokens.CLEAR, Tokens.ACCENT, SIDE_BOTTOM, Tokens.R_LG, pad))
+			b.add_theme_stylebox_override("focus", marked(FOCUS_WASH, Tokens.INK, SIDE_BOTTOM, Tokens.R_LG, pad))
+		"menu":   # a big menu line (title menu, ride setup): grey at rest, the yellow cursor when focused
+			pad = Tokens.S6; weight = Tokens.W_BLACK; slant = Tokens.SLANT
+			b.add_theme_stylebox_override("normal", btn_box(Tokens.FILL, Tokens.CLEAR, 0, Tokens.R_LG, pad))
+			b.add_theme_stylebox_override("hover", btn_box(Tokens.FILL_HOT, Tokens.CLEAR, 0, Tokens.R_LG, pad))
+			b.add_theme_stylebox_override("pressed", btn_box(Tokens.ACCENT_DOWN, Tokens.CLEAR, 0, Tokens.R_LG, pad))
+			b.add_theme_stylebox_override("focus", btn_box(Tokens.ACCENT, Tokens.CLEAR, 0, Tokens.R_LG, pad))
 		"chip":
 			b.add_theme_stylebox_override("normal", btn_box(Tokens.FILL))
 			b.add_theme_stylebox_override("hover", btn_box(Tokens.FILL_HOT))
 			b.add_theme_stylebox_override("pressed", btn_box(Tokens.ACCENT))
 			b.add_theme_stylebox_override("hover_pressed", btn_box(Tokens.ACCENT_HOT))
-			b.add_theme_stylebox_override("focus", marked(Tokens.CLEAR, Tokens.INK))
+			b.add_theme_stylebox_override("focus", marked(FOCUS_WASH, Tokens.INK))
 		"link":
 			var clear := btn_box(Tokens.CLEAR, Tokens.CLEAR, 0, Tokens.R_SM, Tokens.S5)
 			var hot := marked(Tokens.PAGE, Tokens.ACCENT, SIDE_LEFT, Tokens.R_SM, Tokens.S5)
 			b.add_theme_stylebox_override("normal", clear)
 			b.add_theme_stylebox_override("hover", hot)
 			b.add_theme_stylebox_override("pressed", hot)
-			b.add_theme_stylebox_override("focus", hot)
+			b.add_theme_stylebox_override("focus", marked(FOCUS_WASH, Tokens.INK, SIDE_LEFT, Tokens.R_SM, Tokens.S5))
 			b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		"tab":
 			slant = Tokens.SLANT
@@ -516,7 +527,8 @@ static func style_button(b: Button, kind := "chip", size := Tokens.T_MD) -> Butt
 			b.add_theme_stylebox_override("hover", hov)
 			b.add_theme_stylebox_override("pressed", on)
 			b.add_theme_stylebox_override("hover_pressed", on)
-			b.add_theme_stylebox_override("focus", off)
+			var foc := off.duplicate(); foc.bg_color = FOCUS_WASH; foc.border_color = Tokens.INK; foc.border_width_bottom = Tokens.MARK
+			b.add_theme_stylebox_override("focus", foc)   # (was invisible: a pad couldn't see which step it was on)
 			b.add_theme_color_override("font_color", Tokens.INK_SOFT)
 	for c in ["font_hover_color", "font_pressed_color", "font_hover_pressed_color", "font_focus_color"]:
 		b.add_theme_color_override(c, Tokens.INK)
