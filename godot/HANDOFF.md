@@ -673,14 +673,19 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 
 ### Boot intro + the start TV (CRT)
 - The boot splash is plain black (`boot_splash/show_image=false`); a plain launch (no command-line args, or `BMX_INTRO=1`)
-  plays `CrtIntro` (`scripts/ui/crt_intro.gd`, layer 60, its own 3D world in a SubViewport, ~13.6 s, any key / click / pad
+  plays `CrtIntro` (`scripts/ui/crt_intro.gd`, layer 60, its own 3D world in a SubViewport, ~14.3 s, any key / click / pad
   button skips): a dark room at night, moonlight through broken blinds into volumetric fog, an old CRT on a low cabinet,
   a silhouette in the half-open doorway. It **holds on black** (only the TV's red standby LED) while main builds the ride
   world (below), then: TV on at 1.8 s, slow **Vertigo dolly zoom** over the whole intro (moves in while the FOV widens
   so the frame at the TV goes 0.80 -> 0.40 m, from 4 m off the glass: the TV stays put, the room stretches away), a tear at 5.6 s (the figure is
   gone after it), the signal drops out at 8.4 s, a second tear at 10.3 s (for a moment the figure stands inside the
-  room), at 12.6 s the TV **just switches off** (no squeeze to a line / dot) and every light goes with it, the haze too
-  (its temporal blend left the TV's red glow hanging for ~0.7 s): pitch dark, then the menu fades in over 3.5 s.
+  room), at 12.6 s the TV **switches off the classic way** (`CrtTv.power_off(_, true)`, ~1.4 s): the picture burns white
+  as it squeezes to a glowing line (`OFF_LINE`), the line hangs (`OFF_HOLD`), pulls in from both ends to a dot
+  (`OFF_DOT`), the dot shrinks and fades (`OFF_GLOW`); shader uniforms `whiten` / `off_glow` / `dot_k`, the line's
+  edge is anti-aliased and never under ~1.5 px (it flickered between pixels). The room dims with it, the haze stays on
+  until the dot is gone, then black (`T_END` 14.3) and the menu fades in over 3.5 s. The film grain overlay is fine
+  per-pixel dark specks at 3.5 % (2 x 2-pixel white specks at 6 % read as a noisy pattern over the dark room).
+  Test frames: `BMX_INTRO_SHOT_FROM=12.55 BMX_INTRO_SHOT_STEP=0.03` (named with 2 decimals).
   **Settings › Gameplay › Intro at start** (`boot_intro`) off = a still frame of it (`CrtIntro.still`: the room at
   9.6 s, TV on and settled, silent, frozen after 8 frames) while the ride loads, ~2.2 s, then the menu.
   `BMX_INTRO=still` forces that; `BMX_INTRO_SHOT_FROM` / `BMX_INTRO_SHOT_STEP` = when / how often test frames are saved.

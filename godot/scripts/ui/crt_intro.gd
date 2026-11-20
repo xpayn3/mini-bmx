@@ -17,7 +17,7 @@ const T_GLITCH := 5.6    # the first big tear (the figure in the doorway is gone
 const T_LOSS := 8.4      # the signal drops out: snow over everything
 const T_GLITCH2 := 10.3  # second tear: for a moment the figure stands inside the room
 const T_OFF := 12.6      # TV switches off
-const T_END := 13.6      # all black -> finished (no long dark grain at the end: straight into the game)
+const T_END := 14.3      # all black -> finished (after the switch-off line + dot, ~1.4 s; straight into the game)
 # dolly zoom: distance from the glass and the frame height kept there (start wide / far, end close / wide lens)
 const D0 := 4.0
 const D1 := 0.62
@@ -119,11 +119,11 @@ func _process(delta: float) -> void:
 	if _shots != "" and (t >= _next_shot or (still and _still_frames == 12)) and t < T_END:
 		_next_shot += float(OS.get_environment("BMX_INTRO_SHOT_STEP")) if OS.get_environment("BMX_INTRO_SHOT_STEP") != "" else 0.5
 		var img := get_viewport().get_texture().get_image()
-		img.save_png("%s_%04.1f.png" % [_shots, t])
+		img.save_png("%s_%05.2f.png" % [_shots, t])
 		var voices := 0
 		for v in tv._players:
 			if v[0].playing: voices += 1
-		print("INTROSHOT %.1f static_voices=%d hiss=%.2f" % [t, voices, tv._hiss])
+		print("INTROSHOT %.2f static_voices=%d hiss=%.2f fps=%d" % [t, voices, tv._hiss, Engine.get_frames_per_second()])
 	# watchdog (real time): whatever went wrong, the intro never sticks over the game
 	var real := (Time.get_ticks_msec() - _born) / 1000.0
 	if _freeze < 0.0 and (real > 90.0 or (not hold and real > T_END + 10.0)):
@@ -166,7 +166,7 @@ func _update(_dt: float) -> void:
 	# only the standby LED)
 	var moon_k := smoothstep(T_ON + 0.2, T_ON + 2.6, t) * (1.0 - smoothstep(T_OFF, T_OFF + 0.6, t))   # the room dims away after the TV
 	# the haze goes too: its temporal blend kept the TV's red glow hanging in the air for ~0.7 s after the cut
-	env.volumetric_fog_enabled = t < T_OFF + 0.7
+	env.volumetric_fog_enabled = t < T_OFF + 1.5   # (on through the line + dot: the haze carries their glow)
 	moon.light_energy = 7.0 * moon_k
 	moon_fill.light_energy = 0.08 * moon_k
 	# Vertigo: dolly in, lens widens so the frame height at the TV goes H0 -> H1 (the TV grows a little)
@@ -181,7 +181,7 @@ func _update(_dt: float) -> void:
 	# fade: in from black at the start is the TV itself; out on skip / at the end
 	var k := 0.0
 	if _skip >= 0.0: k = clampf(_skip / 0.3, 0.0, 1.0)
-	k = maxf(k, smoothstep(T_OFF + 0.4, T_END - 0.05, t))   # then slowly to black
+	k = maxf(k, smoothstep(T_OFF + 1.1, T_END - 0.05, t))   # then slowly to black
 	(overlay.material as ShaderMaterial).set_shader_parameter("black", k)
 	(overlay.material as ShaderMaterial).set_shader_parameter("grain", 0.0 if t >= T_OFF else 1.0)   # TV off: no film noise left in the dark
 
@@ -433,13 +433,14 @@ uniform float grain = 1.0;
 uniform float bars = 0.085;
 void fragment() {
 	vec2 uv = UV;
-	float g = fract(sin(dot(floor(uv * vec2(800.0, 450.0)) + fract(TIME * 7.13) * vec2(37.0, 91.0), vec2(12.9898, 78.233))) * 43758.5453);
+	// per screen pixel (the old 800 x 450 grid made 2 x 2 blocks at 1600 wide), only a faint dark speck:
+	// 6 % white specks over this dark room read as a loud noisy pattern
+	float g = fract(sin(dot(floor(FRAGCOORD.xy) + fract(TIME * 7.13) * vec2(37.0, 91.0), vec2(12.9898, 78.233))) * 43758.5453);
 	float vig = smoothstep(0.35, 0.95, length((uv - 0.5) * vec2(1.3, 1.05)));
 	float a = vig * 0.72 * (1.0 - black);
 	vec3 col = vec3(0.0);
-	// grain: dark and light specks at low opacity
-	col = mix(col, vec3(g), grain * 0.06 / max(a + 0.06, 0.001));
-	a = max(a, 0.06 * grain * (1.0 - black));
+	// grain: black specks at very low opacity
+	a = max(a, g * 0.035 * grain * (1.0 - black));
 	if (uv.y < bars || uv.y > 1.0 - bars) { col = vec3(0.0); a = 1.0; }
 	col = mix(col, vec3(0.0), black); a = mix(a, 1.0, black);
 	COLOR = vec4(col, a);

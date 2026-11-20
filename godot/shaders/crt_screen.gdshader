@@ -20,6 +20,9 @@ uniform float snow = 0.0;       // static
 uniform float glitch = 0.0;     // tearing + colour split
 uniform float roll = 0.0;       // vertical hold slip
 uniform float afterglow = 0.0;  // the dot left after switch-off
+uniform float dot_k = 1400.0;   // the dot's tightness (grows as it shrinks away)
+uniform float whiten = 0.0;     // switch-off: picture -> flat white
+uniform float off_glow = 0.0;   // switch-off: halo round the collapsing line / dot
 uniform float card_color = 0.0;   // 1: the picture is a colour card (studio / notice), drawn as it is
 uniform float gain = 1.35;      // screen brightness (the outdoor TV needs more to read in daylight)
 
@@ -70,7 +73,10 @@ void fragment() {
 		vec2 c = g - 0.5;
 		vec2 b = c * (1.0 + 0.28 * dot(c, c));                   // barrel: the picture curves with the tube
 		vec2 p = b / vec2(max(hopen, 1e-3), max(vopen, 1e-3));
-		float inside = step(abs(p.x), 0.5) * step(abs(p.y), 0.5);
+		// the picture's edge, anti-aliased and never thinner than ~1.5 px (a squeezed line used to fall between pixels and flicker)
+		vec2 px = max(fwidth(b), vec2(1e-5));
+		vec2 he = max(vec2(hopen, vopen) * 0.5, px * 0.75);
+		float inside = smoothstep(he.x + px.x, he.x - px.x, abs(b.x)) * smoothstep(he.y + px.y, he.y - px.y, abs(b.y));
 		p += 0.5;
 		// sync trouble: the picture slips sideways in bands (always a little, hard while glitching), wobbles line by
 		// line, and now and then jumps vertically
@@ -98,9 +104,13 @@ void fragment() {
 		float bar = exp(-pow((fract(g.y * 0.6 - TIME * 0.11) - 0.5) * 5.0, 2.0));   // rolling hum bar
 		col *= 1.0 + 0.22 * bar;
 		col *= smoothstep(0.80, 0.30, length(c * vec2(1.05, 1.15)));            // darker tube edges
+		col = mix(col, vec3(0.85, 0.92, 1.0) * 1.2, whiten);   // switching off: the picture burns out to flat white as it squeezes
 		col *= bright * inside;
 		col += inside * flash * vec3(0.85, 0.92, 1.0) * 3.0;
-		col += afterglow * exp(-dot(c, c) * 1400.0) * vec3(0.8, 0.9, 1.0) * 6.0;
+		// switch-off halo round the line / dot: the phosphor blooming through the glass
+		vec2 out_d = max(abs(b) - vec2(hopen, vopen) * 0.5, vec2(0.0));
+		col += off_glow * exp(-dot(out_d, out_d) * 2600.0) * vec3(0.75, 0.86, 1.0) * 2.2;
+		col += afterglow * exp(-dot(c, c) * dot_k) * vec3(0.8, 0.9, 1.0) * 6.0;
 		ALBEDO *= 0.35;                 // dark phosphor glass
 		ROUGHNESS = 0.08;
 		METALLIC = 0.0;

@@ -46,9 +46,10 @@ var _dtm := 0.016
 var _off_player: Node       # plays assets/audio/tv_off.mp3 when the TV is switched off with the animation
 var _off_anim := false     # power_off(animate): the old squeeze to a line, then a dot, then the afterglow dies away
 const OFF_CLICK_AT := 1.08   # s into tv_off.mp3 where playing starts (its click is at ~1.15 s)
-const OFF_LINE := 0.14     # s: the picture squeezes down to a line
-const OFF_DOT := 0.13       # s: the line shrinks to a dot
-const OFF_GLOW := 0.7      # s: the dot's afterglow fades
+const OFF_LINE := 0.16     # s: the picture burns white and squeezes down to a glowing line
+const OFF_HOLD := 0.07     # s: the line hangs there for a moment
+const OFF_DOT := 0.30      # s: the line pulls in from both ends to a dot in the middle
+const OFF_GLOW := 0.9      # s: the dot shrinks and fades
 var _glitch := 0.0
 var _glitch_snow := 0.0
 var _next_blip := 3.0
@@ -180,6 +181,9 @@ func _process(delta: float) -> void:
 	var hopen := 1.0
 	var after := 0.0
 	var gl := _glitch
+	var whiten := 0.0
+	var off_glow := 0.0
+	var dot_k := 1400.0
 	if blips and _off_t < 0.0 and a > 2.0:
 		_next_blip -= dt
 		if _next_blip <= 0.0:
@@ -188,20 +192,28 @@ func _process(delta: float) -> void:
 	if _off_t >= 0.0 and _off_anim:   # switched off with the old animation: line, dot, fading glow
 		_off_t += dt
 		var o := _off_t
-		var k1 := clampf(o / OFF_LINE, 0.0, 1.0)
-		var k2 := clampf((o - OFF_LINE) / OFF_DOT, 0.0, 1.0)
-		vopen = lerpf(1.0, 0.006, k1 * k1)
-		hopen = lerpf(1.0, 0.0, k2 * k2)
-		bright = (1.0 - 0.7 * k1) * (1.0 - k2)
-		flash = 0.6 * k1 * (1.0 - k2)
+		var k1 := clampf(o / OFF_LINE, 0.0, 1.0)                                  # squeeze to the line
+		var k2 := clampf((o - OFF_LINE - OFF_HOLD) / OFF_DOT, 0.0, 1.0)           # line -> dot
+		var k3 := clampf((o - OFF_LINE - OFF_HOLD - OFF_DOT) / OFF_GLOW, 0.0, 1.0)  # the dot dies
+		vopen = lerpf(1.0, 0.0, pow(k1, 2.2))                 # slow start, snaps shut (the shader keeps it >= ~1.5 px)
+		hopen = lerpf(1.0, 0.0, k2 * k2 * (3.0 - 2.0 * k2) * (0.6 + 0.4 * k2))   # pulls in, faster at the end
+		whiten = smoothstep(0.45, 1.0, k1)   # burns white only as it gets thin (early = a flat white screen for a frame or two)
+		bright = 1.0 if k2 < 1.0 else 0.0
+		flash = 0.35 * smoothstep(0.3, 1.0, k1) * (1.0 - k2)   # the line glows hotter as the picture's light piles into it
+		off_glow = smoothstep(0.4, 1.0, k1) * (1.0 - smoothstep(0.75, 1.0, k2)) * (0.8 + 0.4 * k2)
 		snow = lerpf(snow, 0.0, k1); gl = 0.0; roll = 0.0
-		after = exp(-maxf(o - OFF_LINE, 0.0) * 6.0) * smoothstep(0.0, 0.5, o / OFF_LINE) if o < OFF_LINE + OFF_DOT + OFF_GLOW else 0.0
-		if o >= OFF_LINE + OFF_DOT + OFF_GLOW:
+		after = smoothstep(0.6, 1.0, k2) * pow(1.0 - k3, 2.0)   # the dot: there as the line arrives, fades out
+		dot_k = lerpf(1400.0, 9000.0, k3)                       # and shrinks while it fades
+		if k3 >= 1.0:
 			_off_t = -1.0; _on_t = -1.0; _off_anim = false; vopen = 0.0; bright = 0.0; after = 0.0; hopen = 1.0
+			whiten = 0.0; off_glow = 0.0; flash = 0.0
 	elif _off_t >= 0.0:   # switched off: the picture just goes (no squeeze to a line / dot)
 		_off_t = -1.0
 		_on_t = -1.0
 		vopen = 0.0; flash = 0.0; bright = 0.0; snow = 0.0; gl = 0.0; roll = 0.0
+	mat.set_shader_parameter("whiten", whiten)
+	mat.set_shader_parameter("off_glow", off_glow)
+	mat.set_shader_parameter("dot_k", dot_k)
 	_apply(vopen, hopen, bright, flash, snow, gl, roll, after)
 
 func _apply(vopen: float, hopen: float, bright: float, flash: float, snow: float, gl: float, roll: float, after: float) -> void:
