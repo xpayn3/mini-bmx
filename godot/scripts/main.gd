@@ -2276,6 +2276,19 @@ func _fence_all(el: float) -> void:
 				if tr.break_collider(c, Vector3(cos(a) * sp, 0, sin(a) * sp)): n += 1
 		_fall = {"t": el, "n": n, "pieces": tr._debris._items.size()}
 		print("FENCEALL smashed panels=%d pieces=%d" % [n, _fall.pieces])
+		# the parts left standing must stay drawn: a hidden instance may not stretch its MultiMesh's box
+		# (the draw distance is measured to the box's middle)
+		var stretched := 0
+		for ck in tr.chunks:
+			var mms: Dictionary = tr.chunks[ck].get("mms", {})
+			for kind in ["post", "rail", "picket", "stake", "cactus0", "cactus1", "cactus2", "cactus3", "cactus4"]:
+				if not mms.has(kind): continue
+				var ab: AABB = (mms[kind] as MultiMesh).get_aabb()
+				var off := Vector2(ab.get_center().x - ck.x * tr.SIZE, ab.get_center().z - ck.y * tr.SIZE).length()
+				if maxf(ab.size.x, ab.size.z) > 62.0:
+					stretched += 1
+					print("FENCEALL stretched %s chunk=%s size=%s centre_off=%.0f m" % [kind, str(ck), str(ab.size), off])
+		print("FENCEALL stretched boxes=%d" % stretched)
 	elif not _fall.is_empty() and not _fall.has("done") and el > _fall.t + 7.0:
 		_fall.done = true
 		var d = tr._debris

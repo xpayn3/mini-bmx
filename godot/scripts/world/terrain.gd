@@ -1039,6 +1039,13 @@ func restore_tape(sp: Dictionary) -> void:
 	if ch != null and ch.has("tape"): _rebuild_tape(ch)
 
 
+## a MultiMesh instance hidden where it stands (scale 0). Never at the world origin: that stretched the
+## MultiMesh's box all the way there, its middle moved off the chunk, and past ~300 m from the origin the
+## draw distance (measured to that middle) hid every other fence part / stake of the chunk too
+static func _hidden_at(pos: Vector3) -> Transform3D:
+	return Transform3D(Basis.from_scale(Vector3.ZERO), pos)
+
+
 ## fences / cacti: smash it (hide the visual, throw rigid-body debris); tape: snap it (hide the span, hand
 ## its two halves to the ribbon sim). Returns true if it broke.
 func break_collider(c: Dictionary, vel: Vector3, at = null) -> bool:
@@ -1048,7 +1055,6 @@ func break_collider(c: Dictionary, vel: Vector3, at = null) -> bool:
 			return false
 		panel["broken"] = true
 		_broken.append({"kind": "fence", "rec": panel, "chunk": c.get("chunk")})
-		var zero := Transform3D(Basis.from_scale(Vector3.ZERO), Vector3.ZERO)
 		var hit := Vector2(c["x"], c["z"])
 		# throw the debris first, only then hide the fence parts: a part is never hidden without its piece
 		var made: int = _debris.smash_fence(panel, vel, hit, c.get("chunk"))
@@ -1061,7 +1067,7 @@ func break_collider(c: Dictionary, vel: Vector3, at = null) -> bool:
 				continue   # a post you didn't hit stays standing
 			var mm: MultiMesh = panel["meshes"].get(part["kind"])
 			if mm:
-				mm.set_instance_transform(part["i"], zero)
+				mm.set_instance_transform(part["i"], _hidden_at(part["xform"].origin))
 		for lb in panel.get("labels", []):
 			if is_instance_valid(lb):
 				lb.queue_free()
@@ -1074,7 +1080,7 @@ func break_collider(c: Dictionary, vel: Vector3, at = null) -> bool:
 		_broken.append({"kind": "cactus", "rec": rec, "chunk": c.get("chunk")})
 		var mm: MultiMesh = rec.get("mm")
 		if mm:
-			mm.set_instance_transform(rec["i"], Transform3D(Basis.from_scale(Vector3.ZERO), Vector3.ZERO))
+			mm.set_instance_transform(rec["i"], _hidden_at(rec["xform"].origin))
 		_debris.smash_cactus(rec, vel, at if at is Vector3 else Vector3(c["x"], rec["xform"].origin.y + 0.5, c["z"]), c.get("chunk"))
 		return true
 	if c.has("tape"):
@@ -1144,7 +1150,7 @@ func stake_yank(k: int, dir: Vector3, sev: float, vel: Vector3, skip = null) -> 
 	else:
 		st["gone"] = true
 		var mm: MultiMesh = st["mm"]
-		mm.set_instance_transform(st["i"], Transform3D(Basis.from_scale(Vector3.ZERO), Vector3.ZERO))
+		mm.set_instance_transform(st["i"], _hidden_at(st["pos"]))
 		var whole: bool = sev > 1.25 or randf() < 0.25   # soft ground: out it comes, foot and all
 		var bs: Basis = st["basis"]
 		var pos: Vector3 = st["pos"]
