@@ -1,6 +1,6 @@
 ## The game's logo, the same one the old CRT TV shows (world/crt_tv.gd `_Lettering`): RUNOUT in the display face, the letters spread
 ## evenly across the width, white-hot at the top fading to deep red at the bottom, a short rule and the spaced tagline under it.
-## `on_dark` = the TV's own colours (cream-hot to red); otherwise the same red ramp made dark enough for a light page.
+## `on_dark` = the TV's own colours (cream-hot to red); otherwise the page ink (no red).
 ## Used by the title menu (and anywhere the game's name is shown, so it reads the same everywhere).
 class_name GameLogo
 extends Control
@@ -40,7 +40,7 @@ func _draw() -> void:
 	if on_dark:
 		_mat.set_shader_parameter("top", Color(1.0, 0.82, 0.74)); _mat.set_shader_parameter("bottom", Color(0.85, 0.06, 0.04))
 	else:
-		_mat.set_shader_parameter("top", Color(1.0, 0.3, 0.12)); _mat.set_shader_parameter("bottom", Color(0.62, 0.03, 0.03))
+		_mat.set_shader_parameter("top", Tokens.INK); _mat.set_shader_parameter("bottom", Tokens.INK)   # on the light page: the page ink, not red
 	_mat.set_shader_parameter("y0", asc * 0.14)
 	_mat.set_shader_parameter("h", asc * 0.72)
 	material = _mat
@@ -52,7 +52,7 @@ func _draw() -> void:
 		var tf := UITheme.display_font(600)
 		var tfs := int(size.y * 0.15)
 		var tw := tf.get_string_size(TAG, HORIZONTAL_ALIGNMENT_LEFT, -1, tfs).x
-		var ink := Color(1, 1, 1, 0.85) if on_dark else Color(0.1, 0.11, 0.15, 0.85)
+		var ink := Color(1, 1, 1, 0.85) if on_dark else Tokens.INK_SOFT
 		var ry := size.y - tfs - 8.0
-		draw_rect(Rect2(size.x * 0.5 - 45.0, ry, 90.0, 3.0), Color(ink, 0.8))
+		draw_rect(Rect2(size.x * 0.5 - 45.0, ry, 90.0, 3.0), Color(1, 1, 1, 0.8) if on_dark else Tokens.ACCENT)
 		draw_string(tf, Vector2((size.x - tw) * 0.5, size.y - 2.0), TAG, HORIZONTAL_ALIGNMENT_LEFT, -1, tfs, ink)
