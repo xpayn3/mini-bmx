@@ -484,13 +484,15 @@ func _build_sun_shaft() -> void:
 	pm.damping_min = 0.0; pm.damping_max = 0.01
 	pm.turbulence_enabled = true
 	pm.turbulence_noise_strength = 1.0
-	pm.turbulence_noise_scale = 3.0
-	pm.turbulence_noise_speed = Vector3(0.02, 0.01, 0.015)
-	pm.turbulence_noise_speed_random = 0.3
-	pm.turbulence_influence_min = 0.01
-	pm.turbulence_influence_max = 0.035
+	pm.turbulence_noise_scale = 1.7   # smaller swirls: the motes wander about instead of all drifting one way
+	pm.turbulence_noise_speed = Vector3(0.03, 0.015, 0.02)
+	pm.turbulence_noise_speed_random = 1.0
+	pm.turbulence_influence_min = 0.004   # some hang almost still, some get caught by the air
+	pm.turbulence_influence_max = 0.07
 	pm.scale_min = 0.4
 	pm.scale_max = 1.2
+	motes.randomness = 1.0
+	pm.lifetime_randomness = 0.6
 	var fade := Gradient.new()   # fade in and out over the life, no popping
 	fade.offsets = PackedFloat32Array([0.0, 0.15, 0.85, 1.0])
 	fade.colors = PackedColorArray([Color(1, 1, 1, 0), Color.WHITE, Color.WHITE, Color(1, 1, 1, 0)])
@@ -930,10 +932,15 @@ func _build_ui() -> void:
 ## the showroom's frame strip: a big picture of every frame with the garage build, bottom centre
 func _showroom(root: Control) -> void:
 	var card := PanelContainer.new()
-	card.add_theme_stylebox_override("panel", StyleBoxEmpty.new())   # no panel: just the cards over the room
+	# a white band from screen edge to screen edge behind the frame cards only (centred in it); the BACK / EDIT /
+	# SAVE & RIDE row stays below it, over the room
+	var band := UITheme.box(Color.WHITE, 0, 0)
+	band.content_margin_left = EDGE; band.content_margin_right = EDGE
+	band.content_margin_top = Tokens.S3; band.content_margin_bottom = Tokens.S3
+	card.add_theme_stylebox_override("panel", band)
 	card.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	card.offset_left = EDGE; card.offset_right = -EDGE
-	card.offset_bottom = -(EDGE + Tokens.H_BTN + Tokens.S5); card.offset_top = card.offset_bottom - SHOW_H
+	card.offset_left = 0; card.offset_right = 0
+	card.offset_bottom = -(EDGE + Tokens.H_BTN + Tokens.S5); card.offset_top = card.offset_bottom - SHOW_H - Tokens.S3 * 2
 	root.add_child(card)
 	_show_only.append(card)
 	var col := VBoxContainer.new()

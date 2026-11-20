@@ -601,7 +601,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   the camera, no glare). An indoor-only `FogVolume` (density 0.02) makes the shaft show (sun `light_volumetric_fog_energy` 12; the
   room lights barely light the fog); `_build_sun_shaft` also adds ~7000 fine dust motes (GPUParticles3D, turbulence drift) drawn by
   `shaders/sun_motes.gdshader`, which lights only the motes whose line to the sun passes through the open part of the door
-  (`_place_slats` updates it as the door rolls up). Room lights (tubes, bench strip, key, rim, ambient) are warm white.
+  (`_place_slats` updates it as the door rolls up). The motes vary per speck (size: mostly fine, a rare big flake; brightness; warm / pale tint), sparkle irregularly (two unrelated waves multiplied), thin out in slowly drifting clumps (world value noise) and go soft and big within `bokeh_near` (1.6 m) of the camera (out of focus); the air has wider-ranging turbulence + random lifetimes. Room lights (tubes, bench strip, key, rim, ambient) are warm white.
 - **Roller door** (`scripts/garage/roller_door.gd`, `RollerDoor.build`, 2026-11-20): 10 cm insulated slats (extruded profile, domed
   face, V groove at each joint) in white powder coat (RAL 9016 look) with clear coat and light real grime (ambientCG
   SurfaceImperfections008, CC0, `assets/textures/grime`: its map baked into a soft grey multiply map `grime_dirt.jpg` + its normals;
