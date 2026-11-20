@@ -79,6 +79,8 @@ func _snap(s: Dictionary) -> void:
 	var h: float = s["last"]
 	var over := clampf((float(s["strain"]) + 0.05) / (SNAP_STRAIN + 0.05), 0.5, 1.5)
 	var idx := [range(0, gi + 1), range(n - 1, gi - 1, -1)]
+	var sp: Dictionary = s["sp"]
+	var spd := Vector2(vel.x, vel.z).length()
 	for side in 2:
 		var ii: Array = idx[side]
 		var m := ii.size()
@@ -101,11 +103,94 @@ func _snap(s: Dictionary) -> void:
 		var cols := []
 		for j in m - 1:
 			cols.append(span_cols[(SEG - 1 - j if side else j) & 1])
-		var free := randf() < 0.25
-		_add(hp, hq, cols, float(s["seg"]), null if free else stake)
+		# the snap yanks the stake towards where the tape was pulled: the faster, the likelier it leans,
+		# snaps off or comes out (the torn half stays tied to it and goes along)
+		var pull := P[gi] - stake
+		var res := {}
+		if terrain:
+			res = terrain.stake_yank(sp["kb"] if side else sp["ka"], pull, spd / 11.0 * over * randf_range(0.55, 1.45), vel, sp)
+		var pin = res["to"] if res.has("to") else (null if randf() < 0.15 else stake)
+		_add(hp, hq, cols, float(s["seg"]), null)
 		var t: Dictionary = strips[strips.size() - 1]
+		_set_end(t, 0, pin)
 		t["last"] = 1.0 / 60.0
 		t["tw_k"] = 0.0
+
+
+## a whole span let go at one or both stakes (its stake was knocked over / out): a sim strip from its
+## stake A end to its B end, each end tied to `ta` / `tb` (Vector3 = fixed, {body, off} = on a flying
+## stake, null = loose). The caller has taken the span out of its chunk's mesh.
+func hang(sp: Dictionary, ta, tb) -> void:
+	var pts: PackedVector3Array = sp["pts"]
+	var cols := []
+	for i in pts.size() - 1:
+		cols.append((sp["cols"] as Array)[i & 1])
+	_add(pts.duplicate(), pts.duplicate(), cols, sp["len"] / SEG, null)
+	var t: Dictionary = strips[strips.size() - 1]
+	var segs := PackedFloat32Array()
+	var rest := 0.0
+	for i in pts.size() - 1:
+		var l := pts[i].distance_to(pts[i + 1])
+		segs.append(l)
+		rest += l
+	t.merge({"segs": segs, "rest_len": rest, "tw_k": 0.0, "tw_cap": 0.15})   # still a whole tape: hardly twists
+	_set_end(t, 0, ta)
+	_set_end(t, 1, tb)
+
+
+## strips tied at `old` (a stake's tie point) are now tied to `to` (its new tie point / flying piece / nothing)
+func retarget(old: Vector3, to) -> void:
+	for s in strips:
+		if s.get("state", "free") == "stretch":
+			continue
+		for e in 2:
+			var p = s.get("pin" if e == 0 else "pin2")
+			if p != null and not s.has("pb" if e == 0 else "pb2") and (p as Vector3).distance_squared_to(old) < 0.0064:
+				_set_end(s, e, to)
+
+
+func _set_end(s: Dictionary, e: int, to) -> void:
+	var key := "pin" if e == 0 else "pin2"
+	var pbk := "pb" if e == 0 else "pb2"
+	if to is Dictionary:
+		s[pbk] = to
+		s[key] = (to["body"] as Node3D).global_transform * (to["off"] as Vector3)
+	else:
+		s.erase(pbk)
+		s[key] = to
+	if to != null:
+		var P: PackedVector3Array = s["P"]
+		P[0 if e == 0 else P.size() - 1] = s[key]
+		s["P"] = P
+
+
+## ends tied to a flying stake follow it; a tape tied at both ends that runs out of length pulls the
+## stake back (it swings / drops short), and pulled much further the knot slips off
+func _follow(s: Dictionary, dt: float) -> void:
+	for e in 2:
+		var pbk := "pb" if e == 0 else "pb2"
+		if not s.has(pbk):
+			continue
+		var d: Dictionary = s[pbk]
+		var b = d["body"]
+		var key := "pin" if e == 0 else "pin2"
+		if not is_instance_valid(b) or not (b as Node).is_inside_tree() or (b as Node).is_queued_for_deletion():
+			s.erase(pbk)   # come to rest: the tape stays tied where it lies
+			continue
+		var body := b as RigidBody3D
+		var p: Vector3 = body.global_transform * (d["off"] as Vector3)
+		s[key] = p
+		var other = s.get("pin2" if e == 0 else "pin")
+		if other == null or not s.has("rest_len"):
+			continue
+		var dv: Vector3 = other - p
+		var L := dv.length()
+		var R: float = s["rest_len"]
+		if L > R * 1.35:
+			s.erase(pbk)
+			s[key] = null
+		elif L > R:
+			body.apply_impulse(dv / L * minf((L - R) * 90.0 * dt, 1.5) * body.mass, p - body.global_position)
 
 
 ## the bike's front, at tape height, while riding (null = no rider / crashed)
@@ -238,7 +323,7 @@ func update(dt: float, px: float, pz: float, t: float, wdir: Vector3, ws: float)
 			strips.remove_at(si)
 			if terrain: terrain.restore_tape(s["sp"])
 			continue
-		if far > 180 or (s["pin"] == null and s["age"] > 40):
+		if far > 180 or (s["pin"] == null and s.get("pin2") == null and s["age"] > 40):
 			strips.remove_at(si)
 			continue
 		var state: String = s.get("state", "free")
@@ -262,7 +347,8 @@ func update(dt: float, px: float, pz: float, t: float, wdir: Vector3, ws: float)
 			continue
 		elif far > 90:   # out of sight: freeze
 			continue
-		if state == "free": s["tw_k"] = minf(1.0, float(s.get("tw_k", 1.0)) + dt * 1.5)   # the foil starts twisting once torn
+		if state == "free": s["tw_k"] = minf(s.get("tw_cap", 1.0), float(s.get("tw_k", 1.0)) + dt * 1.5)   # the foil starts twisting once torn
+		if s.has("pb") or s.has("pb2"): _follow(s, dt)
 		_step(s, h, t, wdir, ws)
 		_ribbon(s, t)
 	for s in snapped: _snap(s)
