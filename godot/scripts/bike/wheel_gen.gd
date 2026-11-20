@@ -213,9 +213,6 @@ class Surf:
 		else:
 			idx.append_array(PackedInt32Array([a, a + 1, a + 2, a, a + 2, a + 3]))
 
-	func tri_count() -> int:
-		return idx.size() / 3
-
 	func commit(mesh: ArrayMesh, mat: Material, name: String) -> void:
 		if idx.is_empty():
 			return

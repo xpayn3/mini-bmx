@@ -77,7 +77,7 @@ var spin_hold := 0.0; var spin_k := 1.0
 var yaw_edge_s := 0.0; var yaw_hold := 0.0; var stick_yaw := 0.0
 var style_air := 0.0   # this jump's tweak: seconds x how far the stick swung the bike about (style points)   # how long it's been held one way, and the spin-rate multiplier that gives
 var pad := false
-var bank_probe := OS.get_environment("BMX_BANK_PROBE") != ""
+var bank_probe := Env.s("BMX_BANK_PROBE") != ""
 var lean_room := NAN   # how steeply the ground rises beside the bike on its lean side (rad, eased)
 var _lean_hist := []; var _bank_raw := 0.0   # the player is on a gamepad (Settings.pad_active): triggers don't tilt / throw in the air
 var wheel_f := 0.0; var wheel_r := 0.0; var crank := 0.0; var pedal := 0.0; var throttle_in := 0.0   # the raw gas key / trigger this step (pedal is its smoothed version)
@@ -117,7 +117,7 @@ var y_prev := NAN; var pump_acc := 0.0; var brake_heat := 0.0
 var foot_down := false    # set by Game: the rider's foot is on the ground (the bike stays put)
 var brake_stop := false  # braked to a standstill: held in place while the brake stays on
 var brake_back := false   # brake pressed fresh from a standstill: backs the bike up
-var dust_acc := 0.0; var chunk_acc := 0.0
+var chunk_acc := 0.0
 var joint_rock = null
 var distance := 0.0
 # tests (BMX_CLIP_PROBE): suspension bottom-outs (steps) and how rough the ride is on the ground
@@ -220,7 +220,7 @@ func reset_at(px: float, pz: float, hd: float) -> void:
 	bank = 0; body_x = 0; hip_shift = 0; spin = 0; a_drive = 0; charge = 0; hop_charge = 0; lift_t = 0
 	body_xv = 0; hip_v = 0; v_last = NAN; air_lean = 0; air_pull = 0; flip_acc = 0; spin_acc = 0; flip_in = 0; spin_in = 0
 	body_pw = 0; throw_v = 0; air_w = 0; air_inertia = 1; air_tilt = 0; air_tilt_v = 0; air_yaw = 0; air_tw = 0; air_tw_v = 0; land_jolt = 0
-	pivot = 0; pivot_acc = 0; body_in_s = 0; flick = 0; flick_v = 0; _flick_arm = 0; _flick_side = 0; flick_prev = 0; manual_up = 0; flick_kick = 0; whip = 0; whip_hold = 0; _whip_arm = 0; _whip_t = 0; _whip_flashed = false
+	pivot = 0; pivot_acc = 0; body_in_s = 0; flick = 0; flick_v = 0; _flick_arm = 0; _flick_side = 0; flick_prev = 0; manual_up = 0; wheelie_time = 0.0; wheelie_pedal = false; flick_kick = 0; whip = 0; whip_hold = 0; _whip_arm = 0; _whip_t = 0; _whip_flashed = false
 	sprint = 0; flow = 0; flow_t = 0; lat_m = 0; carve = 0; carve_acc = 0; carve_berm = false
 	y_draw = y; pitch_draw = 0; nose_ref = NAN; pitch_w = NAN; y_prev = NAN; kick_t = 0
 	w_f = y; w_r = y
@@ -237,13 +237,13 @@ func get_up() -> void:
 	bank = 0; body_x = 0; hip_shift = 0; spin = 0; a_drive = 0; charge = 0; hop_charge = 0; lift_t = 0
 	body_xv = 0; hip_v = 0; v_last = NAN; air_lean = 0; air_pull = 0; flip_acc = 0; spin_acc = 0; flip_in = 0; spin_in = 0
 	body_pw = 0; throw_v = 0; air_w = 0; air_inertia = 1; air_tilt = 0; air_tilt_v = 0; air_yaw = 0; air_tw = 0; air_tw_v = 0; land_jolt = 0
-	pivot = 0; pivot_acc = 0; body_in_s = 0; flick = 0; flick_v = 0; _flick_arm = 0; _flick_side = 0; flick_prev = 0; manual_up = 0; flick_kick = 0; whip = 0; whip_hold = 0; _whip_arm = 0; _whip_t = 0; _whip_flashed = false
+	pivot = 0; pivot_acc = 0; body_in_s = 0; flick = 0; flick_v = 0; _flick_arm = 0; _flick_side = 0; flick_prev = 0; manual_up = 0; wheelie_time = 0.0; wheelie_pedal = false; flick_kick = 0; whip = 0; whip_hold = 0; _whip_arm = 0; _whip_t = 0; _whip_flashed = false
 	sprint = 0; flow = 0; flow_t = 0; lat_m = 0; carve = 0; carve_acc = 0; carve_berm = false; y_draw = y; pitch_draw = 0
 
 func begin_crash() -> void:
 	crash_pending = ""
 	flow = 0
-	crash_on = true; crash_t = 0; crash_rest = 0; crash_armed = false; crash_hold = 0
+	crash_on = true; crash_t = 0; crash_rest = 0; crash_armed = false; crash_hold = 0; wheelie_time = 0.0; wheelie_pedal = false
 	crash_side = signf(bike_lean) if absf(bike_lean) > 0.05 else (-1.0 if randf() < 0.5 else 1.0)
 	crash_fall_v = crash_side * 1.5
 	crash_bvy = vy if air else minf(vy, 0.5)
@@ -299,12 +299,13 @@ func _crash_step(dt: float, inp: Dictionary) -> void:
 	body_y = y; body_v = 0; y_draw = y; pitch_draw = pitch
 	if rag:
 		var P: Vector3 = rag.p[Ragdoll.PELVIS]
-		for c in terrain.colliders_near(P.x, P.z):
+		var near: Array = terrain.colliders_near(P.x, P.z)
+		for c in near:
 			if c.get("tape", false): continue
 			if not c.get("fence", false) or rag.speed < 2.5 or Vector2(P.x - c.x, P.z - c.z).length() > c.r + 0.3 or P.y > terrain.height(P.x, P.z) + 1.4: continue
 			var Q: Vector3 = rag.q[Ragdoll.PELVIS]
 			host.smash(c, (P - Q) / dt * 3.0 * Vector3(1, 0, 1), P - Vector3(0, 0.4, 0))
-		rag.step(dt, terrain.colliders_near(P.x, P.z))
+		rag.step(dt, near)
 		crash_rest = crash_rest + dt if rag.speed < 0.6 else 0.0
 	var holding: bool = crash_armed and inp.hop
 	if holding: crash_hold += dt
@@ -926,7 +927,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	if true:
 		if not air and dP > 0.02 and v > 0: v *= cos(minf(dP, 1.2))
 		g_pitch = _g_pitch
-		natural = float(terrain.jump(x, z)[1]) < 0.05
+		natural = terrain.jump_mask(x, z) < 0.05
 		var climb_max := absf(v) * 0.9 + 0.3
 		var XF := L - BB_REAR
 		var XR := -BB_REAR
@@ -1201,7 +1202,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			# the rider's body turns with the bike, smoothed by the arms and legs
 			body_pw += (pitch_v - body_pw) * minf(1.0, dt * 4)
 		if now_air and not was_air:
-			if since_land < 0.5 and OS.get_environment("BMX_TRICK") != "": print("BOUNCE %.2fs after landing vy=%.2f pitch=%.2f" % [since_land, vy, pitch])   # tests
+			if since_land < 0.5 and Env.s("BMX_TRICK") != "": print("BOUNCE %.2fs after landing vy=%.2f pitch=%.2f" % [since_land, vy, pitch])   # tests
 			air = true; air_time = 0; flip_acc = 0.0; spin_acc = 0.0; style_air = 0.0
 			# rider + bike fly off at the speed of their shared centre of mass: a bike kicked up by a roller
 			# while the body (on soft legs) lags behind doesn't launch the rider with it. In the air the
@@ -1219,7 +1220,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			pitch_v = air_w + air_tilt_v
 			throw_v = 0.0
 			air_yaw = yaw_rate; air_tw = 0.0; air_tw_v = 0.0
-			if OS.get_environment("BMX_TRICK") != "": print("TAKEOFF v=%.1f vy=%.2f pitch_v=%.2f spin=%.2f natural=%s at=(%.0f,%.0f) slope=%.2f" % [v, vy, pitch_v, air_w, natural, x, z, _g_pitch])   # tests
+			if Env.s("BMX_TRICK") != "": print("TAKEOFF v=%.1f vy=%.2f pitch_v=%.2f spin=%.2f natural=%s at=(%.0f,%.0f) slope=%.2f" % [v, vy, pitch_v, air_w, natural, x, z, _g_pitch])   # tests
 			host.on_takeoff()
 		elif not now_air and was_air:
 			# how fast the bike comes down into the slope (the speed along it is kept: the tyres just roll on)
@@ -1248,7 +1249,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			v = v * cos(_g_pitch) + vy_in * sin(_g_pitch)
 			compress_v -= minf(2.2, impact * 0.35) + (minf(1.2, impact * 0.2 + 0.4) if back_land else 0.0)
 			if host.susp != null: host.susp.land(maxf(0.0, -vy_in) * cos(_g_pitch) * 0.5 + impact * (0.57 if back_land else 0.4), front_air, rear_air)
-			if OS.get_environment("BMX_TRICK") != "": print("LAND impact=%.1f back=%s v_after=%.1f" % [impact, back_land, v])   # tests
+			if Env.s("BMX_TRICK") != "": print("LAND impact=%.1f back=%s v_after=%.1f" % [impact, back_land, v])   # tests
 			# only a real landing shakes the camera (rollers at speed give lots of tiny hops)
 			if at > 0.4 and impact > 3.0: shake = maxf(shake, minf(0.2, (impact - 3.0) * 0.04))
 			if at > 0.15: host.burst(Vector3(x, y + 0.03, z), roundi(10 + minf(30, impact * 6)), surf, 0.8 + minf(1.5, impact * 0.25))
@@ -1266,7 +1267,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			# the legs bottomed out: a hit bigger than they can take throws the rider down
 			if land_jolt > T.slamJolt * LAND: crash_pending = "SLAM!"
 			elif land_jolt > T.slamJolt * LAND * 0.6: host.flash("OOF!")
-			if OS.get_environment("BMX_TRICK") != "" and land_jolt > 0.5: print("JOLT %.2f m/s" % land_jolt)   # tests
+			if Env.s("BMX_TRICK") != "" and land_jolt > 0.5: print("JOLT %.2f m/s" % land_jolt)   # tests
 			land_jolt = -1.0   # one verdict per landing
 		kick_t = maxf(0.0, kick_t - dt)
 
@@ -1275,7 +1276,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	var space: bool = inp.hop and not hop_block
 	if not air and space: load = minf(1.0, load + dt * 3.5)
 	if not air and space and not (hop_t > 0): charge = minf(1.0, charge + dt / T.chargeTime)
-	var backside: bool = not air and _g_pitch < -0.06 and float(terrain.jump(x, z)[1]) > 0.05
+	var backside: bool = not air and _g_pitch < -0.06 and terrain.jump_mask(x, z) > 0.05
 	if not space and hop_held and not air and load > 0.15 and not (hop_t > 0) and not backside:
 		hop_t = HOP_PUSH; hop_load = maxf(load, 0.5)
 		hop_charge = smooth01(maxf(0.0, (charge * T.chargeTime - 0.2) / (T.chargeTime - 0.2)))
@@ -1316,7 +1317,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			var sz := z + f.z * d
 			var hh: float = terrain.height(sx, sz)
 			var sl := (hh - h_prev) / stp
-			if not is_nan(s_prev) and s_prev > 0.15 and (s_prev - sl) * v * v / stp > 2.5 * G and float(terrain.jump(sx, sz)[1]) > 0.05:
+			if not is_nan(s_prev) and s_prev > 0.15 and (s_prev - sl) * v * v / stp > 2.5 * G and terrain.jump_mask(sx, sz) > 0.05:
 				lip_t = (d - stp) / v; break
 			s_prev = sl; h_prev = hh
 	if air or v <= 3: lip_state = 0
@@ -1334,7 +1335,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		pop_fired = true; body_v = _or(body_v, 0) + T.popKick * prep * pump * (1.0 + 0.4 * charge); compress_v += 2.5 * prep * pump
 		# the legs keep driving to the end of their stroke: the ground pushes back, lifting rider + bike
 		pump_lift = T.popKick * 0.9 * prep * pump * (1.0 + 0.4 * charge)
-		if OS.get_environment("BMX_TRICK") != "": print("POP prep=%.2f pump=%.2f load=%.2f lift=%.2f" % [prep, pump, load, pump_lift])   # tests
+		if Env.s("BMX_TRICK") != "": print("POP prep=%.2f pump=%.2f load=%.2f lift=%.2f" % [prep, pump, load, pump_lift])   # tests
 	if not air and lip_t == INF: pop_fired = false
 	if not air: pump_lift *= exp(-dt * 1.2)   # the drive fades if the lip is still a while off
 	var lp := 0.0
@@ -1352,7 +1353,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	compress_v += ((cT - compress) * 120 - compress_v * 14) * dt
 	compress = clampf(compress + compress_v * dt, -0.28, 0.05)
 	air_k += ((1.0 if (air and air_time > 0.12) else 0.0) - air_k) * minf(1.0, dt * 6)
-	if host.susp != null:
+	if host.susp != null and not host.susp.wheels_follow:   # in a ride the tyres follow the ground (BikeRig.fit_wheels)
 		var sp := sin(pitch)
 		host.susp.update(dt, {"air": air, "load": maxf(load, -compress * 2.5), "brake": 1.0 if (brake and not air) else 0.0,
 			"bumpF": 0.0 if air else w_f - (y + (L - BB_REAR) * sp), "bumpR": 0.0 if air else w_r - (y - BB_REAR * sp)})
@@ -1397,7 +1398,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 ## or the rider goes down
 func _land_trick(at: float) -> void:
 	slip = wrapf(slip, -PI, PI)
-	if OS.get_environment("BMX_TRICK") != "":   # tests
+	if Env.s("BMX_TRICK") != "":   # tests
 		print("TRICK air=%.2fs v=%.1f flip=%.0fdeg spin=%.0fdeg pitch_err=%.0fdeg twist=%.0fdeg" % [at, v, rad_to_deg(flip_acc),
 			rad_to_deg(spin_acc), rad_to_deg(absf(wrapf(pitch - _g_pitch, -PI, PI))), rad_to_deg(absf(slip))])
 	if at < 0.2:

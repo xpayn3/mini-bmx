@@ -80,7 +80,7 @@ def to_game(p):   # (fx, fy, fz) -> game, BB at the origin
 
 parts = {}   # node -> list of (pos(tri*3,3), nrm, matname)
 CROWN_CENTERS = []   # the two crowns (Shock.012 lower, .013 upper)
-lib = {"fork": [], "cranks": [], "cockpit": [], "brakes": [], "derail": [], "rcal": []}
+lib = {"fork": [], "cranks": [], "cockpit": [], "brakes": [], "derail": [], "rcal": [], "saddle": [], "levers": []}
 for o in list(bpy.data.objects):
     if o.type != 'MESH' or len(o.data.polygons) == 0: continue
     base = o.name.split(".")[0]
@@ -105,6 +105,8 @@ for o in list(bpy.data.objects):
         entry = (node, pos[sel], nrm[sel], mn)
         if base == "Shock": lib["fork"].append(entry)
         if base == "Brakes" and node == "fork_lower": lib["fork"].append(entry)
+        if base == "Brake_levers": lib["levers"].append(entry)
+        if base == "Seat": lib["saddle"].append(entry)
         if base == "Brakes" and i in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 14, 15): lib["rcal"].append(entry)   # the rear caliper (not its hose)
         if base == "Shock" and i in (12, 13) and len(CROWN_CENTERS) < 2: CROWN_CENTERS.append(((pos[:, :2].min(0) + pos[:, :2].max(0)) / 2))
         if node == "crank": lib["cranks"].append(entry)
@@ -195,9 +197,17 @@ fork_nodes = [{"name": "fork_crown", "parent": None, "t": [0, 0, 0], "origin": z
 write_glb(os.path.join(OUT, "parts", "fuzz_fork.glb"), fork_nodes,
           {"steerAxis": [float(axis[0]), float(axis[1])], "crownMid": (crown_c - SP).tolist(), "axle": (FAX - SP).tolist()}, "fork")
 
+lib_glb("fuzz_levers.glb", "levers", z3(SP), "levers", "levers")
 lib_glb("fuzz_cranks.glb", "cranks", z3(g2(*BBF)), "cranks", "crank")
 lib_glb("fuzz_cockpit.glb", "cockpit", z3(SP), "cockpit", "cockpit")
 
+
+# the saddle alone (rails + cover), origin = under its middle at the rail bottom (where the post clamps) for tools/make_forks.py
+if lib["saddle"]:
+    sp = np.concatenate([e[1] for e in lib["saddle"]])
+    org = np.array([(sp[:, 0].min() + sp[:, 0].max()) / 2, sp[:, 1].min() + 0.012, 0.0])
+    write_glb(os.path.join(OUT, "parts", "fuzz_saddle.glb"), [{"name": "saddle", "parent": None, "t": [0, 0, 0], "origin": org,
+              "parts": [(e[1], e[2], e[3]) for e in lib["saddle"]]}], None, "saddle")
 # the rear brake caliper alone (relative to the rear axle) for tools/make_forks.py
 if lib["rcal"]:
     main = max(lib["rcal"], key=lambda e: len(e[1]))

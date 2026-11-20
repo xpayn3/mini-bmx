@@ -228,6 +228,7 @@ func update(dt: float, px: float, pz: float, t: float, wdir: Vector3, ws: float)
 	var h := dt / SUB
 	if h <= 0.0:
 		return
+	var snapped: Array = []   # torn this frame: _snap adds strips (and may drop the oldest), so after the loop
 	for si in range(strips.size() - 1, -1, -1):
 		var s: Dictionary = strips[si]
 		s["age"] += dt
@@ -245,7 +246,7 @@ func update(dt: float, px: float, pz: float, t: float, wdir: Vector3, ws: float)
 			match _stretch(s, dt):
 				"snap":
 					strips.remove_at(si)
-					_snap(s)
+					snapped.append(s)
 					continue
 				"release":
 					s["state"] = "settle"
@@ -264,6 +265,7 @@ func update(dt: float, px: float, pz: float, t: float, wdir: Vector3, ws: float)
 		if state == "free": s["tw_k"] = minf(1.0, float(s.get("tw_k", 1.0)) + dt * 1.5)   # the foil starts twisting once torn
 		_step(s, h, t, wdir, ws)
 		_ribbon(s, t)
+	for s in snapped: _snap(s)
 	_draw()
 
 
