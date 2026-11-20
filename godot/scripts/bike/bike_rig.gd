@@ -109,21 +109,84 @@ func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
 			decal_cfg["labels"] = fitted
 		if fork_id != "" and decal_cfg.has("labels"):   # the fork leg logo slot is cut for the stock fork
 			decal_cfg.labels = (decal_cfg.labels as Array).filter(func(l): return str(l.get("mesh", "")) != "fork_lower")
+	if cfg.get("head", null) is Dictionary and not extras.get("noBarMod", false):   # our fork on another frame's head tube
+		_seat_head(cfg.head)
 	MetalFinish.apply(model)   # bare metal parts get the brushed-metal scan (paint stays as it is)
 	for r in rotors:
 		MetalFinish.dress_rotor(r.material)
 	if extras.has("suspension"):
 		susp = Suspension.new(model, extras)
+	if not extras.has("chain"):
+		BikeChain.adopt_stock(model, extras)   # the stock frame: its fixed chain mesh -> a drawn chain
+	if extras.has("chain") and cfg.get("chain", null) is Dictionary:   # GameState.BIKES fixes to a glb's chain data
+		(extras.chain as Dictionary).merge(cfg.chain, true)
 	if extras.has("chain"):
 		chain = BikeChain.new()
 		model.add_child(chain)
-		chain.setup(self)
+		chain.setup(self, build)
 	if not decal_cfg.is_empty():
 		BikeDecals.add_bike_decals(model, decal_cfg)
 	mount_cam(str(build.get("camera", {}).get("mount", "none")), build.get("camera", {}))
 	if extras.has("suspension") and model.find_child("rocker", true, false):
 		var r: Dictionary = extras.suspension.rear
 		BikeDecals.add_pivot_bolts(model, [{"node": "rocker", "at": r.G2, "z": 0.029}, {"node": "rocker", "at": r.C2, "z": 0.029}, {"node": "rocker", "at": r.D, "z": 0.031, "r": 0.005}])
+
+## dh.glb's head tube on its steering axis, from the steer node: top / bottom end (our fork's crowns sit just past them)
+const HT_DH := [0.0565, -0.0418]
+var head_n: Node3D   # _seat_head: the front end's parent on another frame's head tube (null = straight under the model)
+
+## our fork on another frame (GameState.BIKES.<id>.head = that frame's head tube ends in model space, measured off its
+## mesh): the whole front end (steer, fork, wheel, bars) goes under one "head" node turned to that head tube's angle with
+## the upper crown on its top. Steering still turns about steer_axis in that node's space, the fork still slides along it.
+## A longer head tube slides the lower crown down the stanchions (like a real crown clamp) to sit under its bottom.
+func _seat_head(head: Dictionary) -> void:
+	var top := Vector3(float(head.top[0]), float(head.top[1]), 0.0)
+	var bot := Vector3(float(head.bottom[0]), float(head.bottom[1]), 0.0)
+	var a1 := (top - bot).normalized()
+	var b := Basis(Vector3(0, 0, 1), atan2(a1.y, a1.x) - atan2(steer_axis.y, steer_axis.x))
+	var t0 := steer_n.position + steer_axis * float(HT_DH[0])
+	var hd := Node3D.new()
+	hd.name = "head"
+	hd.transform = Transform3D(b, top - b * t0)
+	var fl := steer_n.find_child("fork_lower", false, false) as Node3D
+	var axle0 := steer_n.position + (fl.position if fl else Vector3.ZERO)
+	var par := steer_n.get_parent()
+	par.add_child(hd)
+	par.move_child(hd, steer_n.get_index())
+	steer_n.reparent(hd, false)
+	head_n = hd
+	extras.wheelbase = float(extras.get("wheelbase", 1.25)) + ((hd.transform * axle0).x - axle0.x)   # the front axle moved
+	var drop: float = (bot - top).length() - (float(HT_DH[0]) - float(HT_DH[1]))
+	if drop > 0.004:
+		for mi in [steer_n, steer_n.find_child("fork_crown", false, false)]:
+			if mi is MeshInstance3D and (mi as MeshInstance3D).mesh is ArrayMesh:
+				_slide_crown(mi, -drop)
+
+## the steer node at rest, in model space
+func steer_rest() -> Transform3D:
+	var t := Transform3D(Basis(), steer_n.position)
+	return head_n.transform * t if head_n else t
+
+func _slide_crown(mi: MeshInstance3D, d: float) -> void:
+	var src: ArrayMesh = mi.mesh
+	var out := ArrayMesh.new()
+	var moved := 0
+	for i in src.get_surface_count():
+		var arr := src.surface_get_arrays(i)
+		var mat := src.surface_get_material(i)
+		if not (mat and mat.resource_name == "gold"):
+			var v: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+			for j in v.size():
+				var t := v[j].dot(steer_axis)
+				if t > float(HT_DH[1]) - 0.09 and t < float(HT_DH[1]) - 0.004:
+					v[j] += steer_axis * d
+					moved += 1
+			arr[Mesh.ARRAY_VERTEX] = v
+		out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+		out.surface_set_name(i, src.surface_get_name(i))
+		out.surface_set_material(i, mat)
+	if moved > 0:
+		mi.mesh = out
 
 ## a fork model for the stock frame (assets/forks/<id>.glb, made by tools/make_forks.py): the steer mesh loses its own crowns
 ## and stanchions (assets/forks/dh_cockpit.glb is the rest: stem, bars, grips), the new crowns + stanchions ride on the steer
@@ -684,7 +747,7 @@ func _saddle() -> void:
 
 ## grip midpoint in model space (for fitting the rider)
 func grip_mid() -> Vector3:
-	return (grip_l + grip_r) * 0.5 + steer_n.position
+	return steer_rest() * ((grip_l + grip_r) * 0.5)
 
 ## Pose from the physics state (already interpolated by the caller).
 func pose(px: float, py: float, pz: float, heading: float, pitch: float, hop_nose: float, lean: float,
