@@ -275,6 +275,13 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   -> the foot on the lower pedal (level cranks: the side the bike leans to, else left) goes to `Terrain.top_height`
   beside the bike, the bike leans `DAB_LEAN` onto it, the body stays upright (rider `dab` input). Eases in 0.5 s, out
   0.4 s on pedalling or backing up (held brake). The physics is untouched (on a slope the bike may still creep).
+  **Smarter + calmer (2026-11-20)**: slowing to a stop (< 1.8 m/s, decelerating) brings the foot out early; which foot
+  (`_pick_dab_side`): on a side slope the uphill foot (shorter reach), never onto a rock / bank > 35 cm higher (steps to
+  the open side), else the lower pedal. Foot goes down `DAB_FWD` 10 cm ahead of the BB, `DAB_OUT` 36 cm out. The bike
+  settles onto it with a stylish `DAB_LEAN` 0.24 rad (~14 deg, more when the foot's ground is lower) plus a slow breathing
+  sway (`_dab_lean_s`); the body sits up relaxed (`relax` = 0.85 x dab) and, after 0.6 s, looks round (`_idle_look`:
+  ahead, off to a side, back up the trail over the shoulder, down at the foot, up at the hills, 1.4-3.6 s each, through
+  `lookYaw` / `lookPitch`). Test: `BMX_STRAIGHT=1 BMX_STOP_AT=3,30 BMX_CAM=chase BMX_CAM_ORBIT=3.0 BMX_DUST_SHOTS=…`.
 - **Riding style** (matched to a reference clip of real downhill technique): rolling, the rider stands in
   the attack position (`stand` in `update_pose`, not only while pedalling); in turns the bike lays over
   well past the body (`bikeLeanMul` 1.55, cap 1.3 rad; the body leans ~70 % of the rider + bike lean,
