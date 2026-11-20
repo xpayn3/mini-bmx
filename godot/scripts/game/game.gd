@@ -651,7 +651,7 @@ func _apply_light(h: float, L: Dictionary) -> void:
 	night_k = n
 	# rim: warm and strong when the sun is low (backlit riders), soft white by day, cold blue moonlight at night
 	_rim_col = Color(1.0, 0.97, 0.92).lerp(Color(1.0, 0.7, 0.45), gw).lerp(Color(0.85, 0.6, 0.75), tw).lerp(Color(0.6, 0.72, 1.0), n)
-	_rim_e = lerpf(lerpf(2.0, 3.8, gw), 2.4, tw * (1.0 - n))
+	_rim_e = lerpf(lerpf(0.5, 1.3, gw), 1.0, tw * (1.0 - n))   # was 2.0 / 3.8 / 2.4: it blew the jersey + helmet out to white
 	_rim_e = lerpf(_rim_e, 0.8, n)
 	if dust and dust.sim != null:   # the dust's sky light: dim and cold at night (it glowed white in the dark)
 		dust.sim.sun_gain = lerpf(1.0, 0.2, g * day)
