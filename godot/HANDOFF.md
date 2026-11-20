@@ -584,6 +584,9 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   Helmet cam: look keys `camModel camLens camHousing camMic camAcc` (`ActionCam.GEAR_LOOK`, not touched by kits), picked in the rider room
   Kit tab › ACTION CAM and tuning card Look › Action cam; bike cam: `build.camera.{model,lens,housing,mic,acc}`, garage Bars › ACTION CAM.
   Tests: `BMX_LOOK=camModel=x4,camMic=deadcat`, `BMX_BUILD="camera.mount=bars;camera.model=osmo;camera.acc=light"`.
+  Camera plastics are real scans (`bike/plastic_finish.gd` `PlasticFinish.dress(mat, kind)`, ambientCG Plastic012A / 018A / 006, CC0,
+  4K in `assets/textures/plastic`, triplanar like `MetalFinish`, colour / roughness kept on average): body `textured`, mounts `mount`,
+  sleeve `silicone`, bezel / trim / button `gloss`.
   Every camera is "recording": red LEDs (front corner + top) blink 0.3 s of every second with a soft halo (shader, `ActionCam._led_shader` /
   `_glow_shader`, all cameras in step); the front LCD shows a red "● REC" over the recording time in the bike computer's Doto font
   (`UITheme.lcd_font()`, `rider/cam_rec_label.gd`: game time since the camera was built, so a new camera after a crash starts at 0:00).
@@ -872,7 +875,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   **Showroom bike switch** (`Garage._swap_step`): parked bikes lean `PARK_LEAN` with the bars at `PARK_STEER`; the one on show
   stands up, straightens its bars and pedals off (cranks turn through `SWAP_GEAR`), the new one rolls in straight, brakes with
   a nose dip + rebound, then leans over and swings its bars (small overshoot). Bike cards: gold stars a size up; card
-  pictures get soft contact shadows (`PartThumbs._ground_shadow`) and an AgX studio light (bump `PartThumbs.THUMB_VER`).
+  pictures get soft contact shadows (`PartThumbs._ground_shadow`) and an AgX studio light; every part picture sits on an invisible tabletop (`_place_table`: a shadow catcher on render layer 20 that only the soft-shadowed key light reaches + a contact blob under its footprint) (bump `PartThumbs.THUMB_VER`).
   **Spare parts wall** (`garage/workshop_props.gd`, `WorkshopProps.build_async`, built a piece a frame after the garage
   shows, glbs loaded on a thread): hand tools on the pegboard (holes texture), chainrings, cassette, rotor, tubes, chain; our
   parts on the bench (fork, cranks, saddle, derailleur, rotor); painted framesets hung beside the door + one right of it;

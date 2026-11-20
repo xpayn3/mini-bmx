@@ -15,6 +15,19 @@ var _waiting := {}        # key -> [callbacks]
 var _busy := false
 var _stage := Node3D.new()
 var _cam := Camera3D.new()
+var _key: DirectionalLight3D = null
+var _table := MeshInstance3D.new()
+
+var _blob := MeshInstance3D.new()
+const TABLE_LAYER := 1 << 19   # render layer 20: only the key light reaches the table
+
+## the table under every part: a shadow catcher (only the key light's shadow shows), edges faded
+const TABLE_SHADER := "shader_type spatial;
+render_mode shadow_to_opacity, depth_draw_never, cull_disabled, specular_disabled;
+void fragment() {
+	ALBEDO = vec3(0.0);
+	ALPHA = (1.0 - smoothstep(0.2, 0.5, length(UV - 0.5))) * 0.55;
+}"
 
 
 func _init() -> void:
@@ -49,12 +62,41 @@ func _ready() -> void:
 	env.adjustment_saturation = 1.08
 	var we := WorldEnvironment.new(); we.environment = env
 	add_child(we)
-	for l in [[Vector3(-0.5, -0.85, -0.45), 1.15, Color(1, 0.97, 0.93)], [Vector3(0.8, -0.25, -0.3), 0.3, Color(0.82, 0.88, 1)],
-			[Vector3(0.25, -0.35, 0.9), 1.3, Color(1, 1, 1)]]:
+	# tabletop product light: a big soft key high front-left that casts a soft shadow onto the table, a cool fill,
+	# a strong rim from behind (the edges), a soft top light (the upper faces read as lit from a softbox)
+	for l in [[Vector3(-0.45, -0.9, -0.35), 1.15, Color(1, 0.97, 0.93)], [Vector3(0.8, -0.25, -0.3), 0.3, Color(0.82, 0.88, 1)],
+			[Vector3(0.25, -0.35, 0.9), 1.3, Color(1, 1, 1)], [Vector3(0.05, -1.0, 0.1), 0.25, Color(1, 1, 1)]]:
 		var d := DirectionalLight3D.new()
 		d.light_energy = l[1]; d.light_color = l[2]
 		add_child(d)
 		d.look_at_from_position(Vector3.ZERO, l[0], Vector3.UP if absf(l[0].normalized().y) < 0.99 else Vector3.FORWARD)
+		if _key == null:
+			_key = d
+			d.shadow_enabled = true
+			d.light_angular_distance = 7.0   # soft box: the shadow blurs with distance from the part
+			d.shadow_blur = 1.5
+			d.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+			d.shadow_bias = 0.02; d.shadow_normal_bias = 0.6
+		else:
+			d.light_cull_mask &= ~TABLE_LAYER   # the table sees the key only: any other light lifted its shadow away
+	# the table: invisible, it only shows the key light's shadow (shadow_to_opacity) and a soft contact darkening
+	# right under the part, faded out round the edge so it never shows as a plane on the card
+	var tm := ShaderMaterial.new()
+	tm.shader = Shader.new()
+	tm.shader.code = TABLE_SHADER
+	_table.material_override = tm
+	_table.mesh = PlaneMesh.new()
+	_table.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_table.layers = TABLE_LAYER
+	add_child(_table)
+	if _shadow_shader == null:
+		_shadow_shader = Shader.new(); _shadow_shader.code = SHADOW_SHADER
+	var bm := ShaderMaterial.new(); bm.shader = _shadow_shader
+	bm.set_shader_parameter("strength", 0.38); bm.set_shader_parameter("softness", 1.8)
+	_blob.material_override = bm
+	_blob.mesh = PlaneMesh.new()
+	_blob.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(_blob)
 	add_child(_stage)
 	_cam.fov = 24.0
 	add_child(_cam)
@@ -195,6 +237,32 @@ func _frame(node: Node3D, view: Vector3) -> void:
 	var r := box.size.length()
 	_cam.near = maxf(dist - r, 0.01); _cam.far = dist + r
 	_cam.look_at_from_position(c + d * dist, c, Vector3.UP)
+	_place_table(node, mis, box, dist + r)
+
+
+## the table under the part's lowest point: shadow catcher (3x the part) + a contact darkening on its footprint;
+## close-ups (`focus`: a spot on a whole bike, the head) rest on the bike's / rider's own floor
+func _place_table(node: Node3D, mis: Array, box: AABB, reach: float) -> void:
+	var all := _points(mis, 1500)
+	if all.is_empty(): return
+	var lo := INF
+	for p in all: lo = minf(lo, (p as Vector3).y)
+	var foot := AABB()
+	var first := true
+	for p: Vector3 in all:   # footprint = the points in the bottom 15 % of the part's height
+		if p.y > lo + maxf(box.size.y * 0.15, 0.004): continue
+		if first: foot = AABB(p, Vector3.ZERO); first = false
+		else: foot = foot.expand(p)
+	var full := AABB(box.position, box.size)
+	for p: Vector3 in all: full = full.expand(p)
+	var span := maxf(full.size.x, full.size.z)
+	var mid := full.get_center()
+	_table.global_transform = Transform3D(Basis().scaled(Vector3(span * 3.5, 1, span * 3.5)), Vector3(mid.x, lo - 0.0005, mid.z))
+	var fc := foot.get_center()
+	var fx := maxf(foot.size.x, span * 0.15) * 1.5; var fz := maxf(foot.size.z, span * 0.15) * 1.5
+	_blob.global_transform = Transform3D(Basis().scaled(Vector3(fx, 1, fz)), Vector3(fc.x, lo + 0.0005, fc.z))
+	_blob.visible = not node is BikeRig   # bikes lay their own tyre shadows
+	_key.directional_shadow_max_distance = maxf(reach * 1.5, 0.5)
 
 
 ## up to ~n world-space vertices of these meshes (every k-th), for framing
@@ -294,7 +362,7 @@ static var _bar_stock: ArrayMesh = null
 ## (models, materials, decals, this studio), then re-run the bake (tools/bake_thumbs.ps1) so the shipped
 ## pictures match. The game version is not in the keys: the shipped set stays valid until THUMB_VER moves.
 const DISK_DIR := "user://cache/thumbs"
-const THUMB_VER := 3
+const THUMB_VER := 4
 static func bike_key(id: String) -> String:
 	var sig := var_to_str([THUMB_VER, SIZE, GameState.bike_config_for(id)])
 	return "bike|%s|%s" % [id, sig.md5_text()]
