@@ -16,6 +16,8 @@ $root = Split-Path -Parent $PSScriptRoot
 $out = Join-Path $root "build\steam\windows"
 
 if (-not $SkipExport) {
+	# the card pictures a fresh install shows ship with the game: bake them from this build first
+	& (Join-Path $root "godot\tools\bake_thumbs.ps1") -Godot $Godot
 	if (Test-Path $out) { Remove-Item -Recurse -Force $out }
 	New-Item -ItemType Directory -Force $out | Out-Null
 	Push-Location (Join-Path $root "godot")
