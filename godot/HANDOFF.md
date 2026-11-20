@@ -864,6 +864,10 @@ rebuild hitch); rider body physics (fore/aft + air tuck/lean); bending spine + p
 All of it is on `main` (the Godot branch was merged, the web version removed). Work continues in this repo.
 
 Known, not fixed (lower priority from the code review):
+- Quit warnings: with SSIL on (GI setting 1, the default preset) Godot reports "7 RIDs of type Texture were leaked" at
+  exit (gone with `--set=gi=0`; a bare SSIL scene doesn't do it, not found which of our viewports / features adds it;
+  harmless, the OS frees it). "2 ObjectDB instances leaked" (ref count 0, C# side) also at exit; even an empty
+  `--quit` reports 5. The big leak (89 objects + 3 scripts "still in use") was `field.course` <-> `course._M`, fixed.
 - Records: "distance ridden" always 0; top speed lost if the window is closed instead of quitting.
 - Camera ignores rebound gamepad/camera keys (reads the right stick directly); `cam_up/down` unused.
 - Quick tune card sliders can show stale values after a reset (the tuning card re-reads on every tab).
