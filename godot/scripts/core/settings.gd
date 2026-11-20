@@ -260,21 +260,49 @@ func _install_bindings() -> void:
 				var jb := InputEventJoypadButton.new(); jb.button_index = pair[1]
 				InputMap.action_add_event(pair[0], jb)
 
-func rebind(action: String, ev: InputEvent, slot: int) -> void:
+## does this event mean the same input (same physical key, pad button, or axis + direction)?
+static func same_input(a: InputEvent, b: InputEvent) -> bool:
+	if a is InputEventKey and b is InputEventKey:
+		var ka: int = a.physical_keycode if a.physical_keycode else a.keycode
+		var kb: int = b.physical_keycode if b.physical_keycode else b.keycode
+		return ka != 0 and ka == kb
+	return same_pad(a, b)
+
+func rebind(action: String, ev: InputEvent, slot: int) -> Array:
 	## Replace the keyboard (slot 0) or gamepad (slot 1) binding of an action.
+	## Conflicts: any other action already on this key / button swaps: it gets the binding this
+	## action had (or loses it if there was none). Returns the labels of the actions that were moved.
 	var list: Array = (bindings[action] if bindings.has(action) else default_events(action)).duplicate()
 	var is_pad := ev is InputEventJoypadButton or ev is InputEventJoypadMotion
 	# drop the existing primary binding of the same kind
+	var old: InputEvent = null
 	for i in list.size():
 		var e = list[i]
 		var e_pad: bool = e is InputEventJoypadButton or e is InputEventJoypadMotion
 		if e_pad == is_pad:
+			old = e
 			list.remove_at(i)
 			break
+	# the same input anywhere else in this action's list would be a duplicate
+	list = list.filter(func(e): return not same_input(e, ev))
 	list.insert(0, ev)
+	var moved := []
+	for a in ACTIONS:
+		if a == action: continue
+		var other: Array = (bindings[a] if bindings.has(a) else default_events(a)).duplicate()
+		var hit := -1
+		for i in other.size():
+			if same_input(other[i], ev): hit = i; break
+		if hit < 0: continue
+		var give := old != null and not other.any(func(e): return same_input(e, old))
+		if give: other[hit] = old.duplicate()
+		else: other.remove_at(hit)
+		bindings[a] = other
+		moved.append(ACTIONS[a][0])
 	bindings[action] = list
 	_install_bindings()
 	save()
+	return moved
 
 ## does this gamepad event mean the same input (same button, or same axis + direction)?
 static func same_pad(a: InputEvent, b: InputEvent) -> bool:

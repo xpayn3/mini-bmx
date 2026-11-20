@@ -5,6 +5,9 @@ extends MenuBase
 var _wait_action := ""
 var _wait_pad := false
 var _wait_btn: Button
+var _wait_token := 0          # bumped on every start / finish so an old timeout can't cancel a newer wait
+var _notice := ""             # "X was on that key: swapped" line shown above the list after a conflict
+const WAIT_SECS := 6.0
 var _bind_box: VBoxContainer
 
 func _title() -> String: return "CONTROLS"
@@ -21,7 +24,8 @@ func _bindings() -> Control:
 
 func _fill_bindings() -> void:
 	for c in _bind_box.get_children(): _bind_box.remove_child(c); c.queue_free()
-	_hint(_bind_box, "Click a binding, then press the new key / button (Esc cancels).")
+	_hint(_bind_box, "Click a binding, then press the new key / button (Esc cancels; a pad rebind also cancels on a mouse click or after %d s). A key already used elsewhere is swapped." % int(WAIT_SECS))
+	if _notice != "": _hint(_bind_box, _notice)
 	var grid := GridContainer.new()
 	grid.columns = 3
 	grid.add_theme_constant_override("h_separation", 12)
@@ -60,6 +64,17 @@ func _start_rebind(action: String, pad: bool, b: Button) -> void:
 	_wait_action = action; _wait_pad = pad; _wait_btn = b
 	b.text = "press…"; b.queue_redraw()
 	_modal(true)
+	_wait_token += 1
+	# real-time timer (works while paused): a pad rebind nobody answers cancels itself
+	get_tree().create_timer(WAIT_SECS, true, false, true).timeout.connect(_wait_timeout.bind(_wait_token))
+
+func _wait_timeout(token: int) -> void:
+	if token == _wait_token and _wait_action != "" and _wait_pad: _cancel_rebind()
+
+func _cancel_rebind() -> void:
+	if _wait_btn and is_instance_valid(_wait_btn): _wait_btn.text = ""; _wait_btn.queue_redraw()
+	_wait_action = ""; _wait_token += 1
+	_modal(false)
 
 ## while waiting for a key / button nothing else may take it (menu navigation, the leaflet's B)
 func _modal(on: bool) -> void:
@@ -77,23 +92,30 @@ func _refocus(action: String, pad: bool) -> void:
 func _input(e: InputEvent) -> void:
 	if _wait_action == "": return
 	# Esc cancels a key rebind; B cancels a key rebind too (a pad user can't type), Esc cancels a pad rebind
-	var cancel: bool = (e is InputEventKey and e.pressed and e.physical_keycode == KEY_ESCAPE) 		or (not _wait_pad and e is InputEventJoypadButton and e.pressed and e.button_index == JOY_BUTTON_B)
+	# Esc cancels either kind; a pad rebind can also be cancelled with a mouse click or by waiting
+	# (WAIT_SECS), since every pad button is a valid binding and a pad user can't type Esc
+	var cancel: bool = (e is InputEventKey and e.pressed and e.physical_keycode == KEY_ESCAPE) 		or (not _wait_pad and e is InputEventJoypadButton and e.pressed and e.button_index == JOY_BUTTON_B) 		or (_wait_pad and e is InputEventMouseButton and e.pressed)
 	if cancel:
-		_wait_btn.text = ""; _wait_btn.queue_redraw(); _wait_action = ""; _modal(false)
+		_cancel_rebind()
 		get_viewport().set_input_as_handled(); return
 	var ok := false
+	var moved := []
 	if not _wait_pad and e is InputEventKey and e.pressed:
 		var ek := InputEventKey.new(); ek.physical_keycode = e.physical_keycode
-		Settings.rebind(_wait_action, ek, 0); ok = true
+		moved = Settings.rebind(_wait_action, ek, 0); ok = true
 	elif _wait_pad and e is InputEventJoypadButton and e.pressed:
 		var eb := InputEventJoypadButton.new(); eb.button_index = e.button_index
-		Settings.rebind(_wait_action, eb, 1); ok = true
+		moved = Settings.rebind(_wait_action, eb, 1); ok = true
 	elif _wait_pad and e is InputEventJoypadMotion and absf(e.axis_value) > 0.6:
 		var em := InputEventJoypadMotion.new(); em.axis = e.axis; em.axis_value = signf(e.axis_value)
-		Settings.rebind(_wait_action, em, 1); ok = true
+		moved = Settings.rebind(_wait_action, em, 1); ok = true
 	if ok:
 		var was := [_wait_action, _wait_pad]
 		_wait_action = ""
+		_wait_token += 1
+		_notice = ""
+		if not moved.is_empty():
+			_notice = "%s was on that %s: swapped to %s." % [", ".join(moved), "button" if was[1] else "key", "its old binding of " + Settings.ACTIONS[was[0]][0]]
 		get_viewport().set_input_as_handled()
 		_fill_bindings.call_deferred()
 		_refocus.call_deferred(was[0], was[1])
