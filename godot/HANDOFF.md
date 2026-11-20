@@ -498,6 +498,11 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   the lower ankle is kept as high over the floor as the clip's), then `Rider.pose_points(P, orient)` draws it. Clips
   play in turn (~7 s, whole loops, 0.45 s crossfade), one named "idle" between the others. Tests: `BMX_ANIM_DIR=res://tools/anim_test/`
   (a fake waving clip made by `-s res://tools/make_test_clip.gd`), `BMX_ANIM=<part of a name>`, `BMX_ANIM_PROBE=1` (`ANIM clips=`).
+- **Race number on the back** (`rider/back_number.gd`, `BackNumber`, look `bibOn / bibNumber / bibText`): a 6 x 5 Verlet paper.
+  Simulated in the back's own frame (built each frame from the four pin spots), drawn in rider space as a normal child (not
+  top_level): the pins are exact and nothing trails behind at speed / in turns / crashes (2026-11-20; the old world-space sim
+  pulled it towards 40 % of the rider's speed, so it lagged and snapped against its clamps). The ride's motion comes in only as
+  a bounded inertial push (-0.35 x acceleration, max 40 m/s^2) + the speed flap; the back surface is read with 5 bone reads a frame.
 - Look: kits + a colour per part (helmet shell/peak, goggles, jersey, pants, gloves, shoes, knee pads).
 - **Belt** (`rider/belt.gd`, class `Belt`, a child of the pelvis mesh): hides where the jersey meets the trousers. The torso's bottom spine bone is locked to the hips (`Rider.set_spine(..., base)`) and the hem sits at `Belt.HEM_Y` inside the band, so leaning / tucking never makes jersey and trousers cross (they used to poke out one under the other). Styles (`look.beltStyle`, Kit › Belt in the rider room and tuning card Look › Clothes): webbing (cam buckle), leather (stitched, frame buckle, keeper, holes), ratchet (teeth, plastic buckle), elastic waistband (two stripes, label at the back); colours `look.belt` + `look.buckle` (buckle / stripe). Band textures (albedo + normal) are baked per style + colours and cached. Test: `BMX_LOOK=beltStyle=leather`, `BMX_GARAGE_HEAD=waist` frames the waist in the garage / rider room.
 - **Knee pads** (`rider/knee_pad.gd` + `shaders/knee_cap.gdshader`, one `KneePad` per leg (`KneePad.new(side)`, -1 =
