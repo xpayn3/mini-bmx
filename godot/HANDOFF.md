@@ -76,7 +76,7 @@ the body (leaning alone turns, leaning with the steer turns harder + grips more,
 air it leans the bike). Numpad 8/5/4/6 do the same on keys. The camera no longer uses the right stick.
 **Settings › Controller** (`ui/pad_map.gd`): the Xbox photo (`assets/ui/xbox_pad.png`, cut out by root `tools/cut_pad.py`;
 without it a drawn pad) with what every button does, click to remap (sticks pick Steer / Rider body / Camera / Nothing and
-swap), live button test, vibration on / off, strength + per-layer strengths (ground / slip / hits, see "Controller rumble" in section 5). `Settings.pad_active` follows the last device used: prompts show
+swap), live button test, vibration: on / off, motors and a strength per effect (see "Controller rumble" in section 5). `Settings.pad_active` follows the last device used: prompts show
 Xbox names (`Settings.prompt(action)`), and on a pad the triggers don't tilt or throw the bike in the air (only a real
 right-stick yank from centre throws at a lip; a held lean never does).
 In the air the right stick is a **360° attitude control** (`air_stick`): y tilts the nose on top of the landing aim
@@ -180,17 +180,19 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - **Physics overlay** (F3, `BMX_DEBUG_DRAW=1`, `scripts/game/debug_overlay.gd`, addon `addons/debug_draw_3d` = Debug Draw 3D
   1.7.3, MIT, Windows libs only): travel vs heading, front wheel aim, turn force, rear grip bar, loose ground, flight path.
 - Safety net: `is_sane()` / `reset_body()` — a non-finite step restores the last good state.
-- **Controller rumble** (`game/pad_rumble.gd`, `Game.rumble`, updated every physics step after `phys.step`): layers mixed as
-  1-(1-a)(1-b) onto the two Xbox motors (strong = left heavy thump, weak = right fast buzz): **road** (grain by surface + speed,
-  from `distance`-driven noise; trail hum, grass coarse, sand soft, water a slow drag), **bumps** (each wheel's vertical
-  acceleration `vw_f` / `vw_r`, front more in the buzz motor, rear in the heavy one; suspension bottom-out = thump), **slip**
-  (`slip`, rear `grip_r` x `slip_w`, `whip`: on / off chatter whose rate rises with speed; wheelspin `spin` = whine), **brake**
-  (judder, a rattle once `skid_fx` with the brake held), **effort** (a push per pedal stroke sprinting), **hits** (take-off pop,
-  `landing(air_time, impact)`, smashes via `shake`, crash, then every ragdoll slam + a slide buzz). Nothing in the air. Motors get
-  `FLOOR` 0.06 as their lowest speed (below it they don't turn), are refreshed at 60 Hz with a 0.12 s hold (stop by themselves
-  when paused), and are stopped in photo mode / the map / menus. Settings › Controller: Vibration, strength, and
-  `rumble_road` / `rumble_slip` / `rumble_hits`. Probe: `BMX_RUMBLE_PROBE=1` (`RUMBLE` lines 4x / s per layer, `RUMBLESUM` at
-  the end); works without a pad. `Settings.rumble()` (one-off) is no longer used by the ride.
+- **Controller rumble** (`game/pad_rumble.gd`, `Game.rumble`, updated every physics step after `phys.step`): effects mixed as
+  1-(1-a)(1-b) onto the two Xbox motors (strong = left heavy thump, weak = right fast buzz), one Settings key each
+  (`PadRumble.EFFECTS`, default 1.0): GROUND `rumble_road` (grain by surface + speed), `rumble_bumps` (each wheel's vertical
+  acceleration `vw_f` / `vw_r`; front in the light motor, rear in the heavy), `rumble_bottom`, `rumble_water`; TYRES `rumble_slip`
+  (`slip`, rear `grip_r` x `slip_w`, `whip`: on / off chatter, rate rises with speed), `rumble_spin`, `rumble_brake`,
+  `rumble_skid` (`skid_fx` + brake); RIDER `rumble_pedal` (a push per stroke sprinting), `rumble_takeoff`, `rumble_land`;
+  HITS `rumble_smash` (via `shake`), `rumble_crash`, `rumble_tumble` (ragdoll slams + slide). Nothing in the air. Motors:
+  `rumble_strength`, `rumble_heavy`, `rumble_light`, `rumble_floor` (lowest motor speed, 0.06), `rumble_chatter` (slip pulse
+  rate); refreshed at 60 Hz with a 0.12 s hold (stop by themselves when paused), stopped in photo mode / the map / menus.
+  **Settings › Controller › VIBRATION** has every one of these as a slider (+ Reset vibration); changing one plays that
+  effect on the pad (`PadRumble.preview(tree, key)`, a canned ~1.2 s pattern per effect, real time, works while paused).
+  Probe: `BMX_RUMBLE_PROBE=1` (`RUMBLE` lines 4x / s per effect, `RUMBLESUM` at the end, `RUMBLE preview` lines); works without
+  a pad. `BMX_PAUSE=settings BMX_TAB=5 BMX_VIB_SCROLL=<key> [BMX_VIB_DY=px]` scrolls to the section and plays a preview.
 
 ### Terrain
 - Infinite world of 48 m chunks streamed around the rider on worker threads; ground as LOD grids
