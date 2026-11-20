@@ -10,12 +10,14 @@ extends CanvasLayer
 
 signal finished
 
-const T_ON := 1.8        # TV switches on
+const T_ON := 1.2        # TV switches on
+const CARD_STUDIO := Vector2(1.7, 5.8)    # the studio card, then the mature-content notice, then the game's name: all inside the old timeline (s)
+const CARD_MATURE := Vector2(5.8, 10.2)
 const T_GLITCH := 7.0    # the first big tear (the figure in the doorway is gone after it)
 const T_LOSS := 10.6     # the signal drops out: snow over everything
 const T_GLITCH2 := 13.2  # second tear: for a moment the figure stands inside the room
 const T_OFF := 16.5      # TV switches off
-const T_END := 18.3      # all black -> finished
+const T_END := 17.6      # all black -> finished (no long dark grain at the end: straight into the game)
 # dolly zoom: distance from the glass and the frame height kept there (start wide / far, end close / wide lens)
 const D0 := 5.2
 const D1 := 0.62
@@ -31,6 +33,10 @@ var moon_fill: OmniLight3D
 var env: Environment
 var figure: Node3D
 var figure2: Node3D
+var card_vp: SubViewport
+var card_art: TvCards
+var _card_shown := -1
+var blocked := false     # the boot cards (studio, mature content) are up: the clock does not start
 var hold := false        # true: stay on black (only the standby LED) while main loads the ride behind it
 var still := false       # Settings › Intro off: one still frame of it (TV on, RUNOUT) while loading, then done
 const STILL_T := 12.0    # the moment of the intro the still frame shows
@@ -48,10 +54,12 @@ var _glitched := false
 var _lost := false
 var _glitched2 := false
 var _offed := false
+var _born := 0
 var _tv_at := Vector3.ZERO   # world point of the middle of the glass
 
 func _ready() -> void:
 	layer = 60
+	_born = Time.get_ticks_msec()
 	CrtTv.mute_world = true
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	if OS.get_environment("BMX_INTRO_AT") != "": _freeze = float(OS.get_environment("BMX_INTRO_AT"))
@@ -73,8 +81,8 @@ func _ready() -> void:
 	root.add_child(svc)
 	vp = SubViewport.new()
 	vp.own_world_3d = true
-	vp.msaa_3d = Viewport.MSAA_4X
-	vp.positional_shadow_atlas_size = 4096
+	vp.msaa_3d = Viewport.MSAA_2X   # light: this is a dark, soft scene, 2x is plenty
+	vp.positional_shadow_atlas_size = 1024
 	svc.add_child(vp)
 	_build_room()
 	overlay = ColorRect.new()
@@ -101,10 +109,12 @@ func _input(e: InputEvent) -> void:
 func _process(delta: float) -> void:
 	if _done: return
 	var dt := minf(delta / maxf(Engine.time_scale, 0.001), 0.05)
-	if _freeze >= 0.0:
+	if blocked and _freeze < 0.0:
+		_born = Time.get_ticks_msec()   # (the watchdog counts from when the cards are gone)
+	elif _freeze >= 0.0:
 		t = _freeze
-	elif not hold:
-		t += dt
+	else:   # (while main builds the ride behind it the clock waits just before the TV comes on: no dead black time on top of the build)
+		t = minf(t + dt, T_ON - 0.05) if hold else t + dt
 	if _skip >= 0.0: _skip += dt
 	if _shots != "" and (t >= _next_shot or (still and _still_frames == 12)) and t < T_END:
 		_next_shot += float(OS.get_environment("BMX_INTRO_SHOT_STEP")) if OS.get_environment("BMX_INTRO_SHOT_STEP") != "" else 0.5
@@ -114,6 +124,10 @@ func _process(delta: float) -> void:
 		for v in tv._players:
 			if v[0].playing: voices += 1
 		print("INTROSHOT %.1f static_voices=%d hiss=%.2f" % [t, voices, tv._hiss])
+	# watchdog (real time): whatever went wrong, the intro never sticks over the game
+	var real := (Time.get_ticks_msec() - _born) / 1000.0
+	if _freeze < 0.0 and (real > 90.0 or (not hold and real > T_END + 10.0)):
+		t = T_END
 	if still:   # draw the frame a few times (lights, fog settle), then freeze the picture
 		_still_frames += 1
 		if _still_frames == 8: vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
@@ -132,6 +146,7 @@ func _process(delta: float) -> void:
 func _update(_dt: float) -> void:
 	# TV timeline
 	if t >= T_ON and not tv.is_on() and not _offed: tv.power_on()
+	_cards_update()
 	if t >= T_GLITCH and not _glitched:
 		_glitched = true
 		tv.glitch(0.42, 1.0)
@@ -143,15 +158,15 @@ func _update(_dt: float) -> void:
 		tv.glitch(0.4, 1.2)
 	if t >= T_OFF and not _offed:
 		_offed = true
-		tv.power_off()
+		tv.power_off(true, true)   # the old squeeze to a line and a dot, the glow dies away
 	# the figure in the doorway is only there until the tear
 	figure.visible = t < T_GLITCH + 0.36
 	figure2.visible = t > T_GLITCH2 + 0.05 and t < T_GLITCH2 + 0.38
 	# moonlight: the eyes adjust after the TV comes on; when the TV goes off every light goes with it (pitch dark,
 	# only the standby LED)
-	var moon_k := smoothstep(T_ON + 0.2, T_ON + 2.6, t) * (0.0 if t >= T_OFF else 1.0)
+	var moon_k := smoothstep(T_ON + 0.2, T_ON + 2.6, t) * (1.0 - smoothstep(T_OFF, T_OFF + 0.6, t))   # the room dims away after the TV
 	# the haze goes too: its temporal blend kept the TV's red glow hanging in the air for ~0.7 s after the cut
-	env.volumetric_fog_enabled = t < T_OFF
+	env.volumetric_fog_enabled = t < T_OFF + 0.7
 	moon.light_energy = 7.0 * moon_k
 	moon_fill.light_energy = 0.08 * moon_k
 	# Vertigo: dolly in, lens widens so the frame height at the TV goes H0 -> H1 (the TV grows a little)
@@ -166,8 +181,30 @@ func _update(_dt: float) -> void:
 	# fade: in from black at the start is the TV itself; out on skip / at the end
 	var k := 0.0
 	if _skip >= 0.0: k = clampf(_skip / 0.3, 0.0, 1.0)
-	k = maxf(k, smoothstep(T_OFF + 0.9, T_END - 0.1, t))
+	k = maxf(k, smoothstep(T_OFF + 0.4, T_END - 0.05, t))   # then slowly to black
 	(overlay.material as ShaderMaterial).set_shader_parameter("black", k)
+	(overlay.material as ShaderMaterial).set_shader_parameter("grain", 0.0 if t >= T_OFF else 1.0)   # TV off: no film noise left in the dark
+
+## which card the glass shows: the studio card, the mature notice, then the game's name (the lettering); a hard tear between them
+func _cards_update() -> void:
+	var want := -1   # -1 = the game's name
+	if t >= CARD_STUDIO.x and t < CARD_STUDIO.y: want = 0
+	elif t >= CARD_MATURE.x and t < CARD_MATURE.y: want = 1
+	elif t < CARD_STUDIO.x: want = 2   # warming up: nothing but snow yet
+	if want != _card_shown:
+		if _card_shown != -2 and t > T_ON + 0.5: tv.glitch(0.3, 1.0)
+		_card_shown = want
+		if want == 0 or want == 1:
+			card_art.kind = want
+			card_art.dur = (CARD_STUDIO.y - CARD_STUDIO.x) if want == 0 else (CARD_MATURE.y - CARD_MATURE.x)
+			tv.show_card(card_vp.get_texture())
+		elif want == -1:
+			tv.show_lettering()
+		else:
+			tv.show_card(null)
+	if want == 0: card_art.ct = t - CARD_STUDIO.x
+	elif want == 1: card_art.ct = t - CARD_MATURE.x
+	if want == 0 or want == 1: card_art.queue_redraw()
 
 static func _smoother(x: float) -> float:
 	return x * x * x * (x * (x * 6.0 - 15.0) + 10.0)
@@ -266,6 +303,13 @@ func _build_room() -> void:
 	for i in 3:
 		var tp := _box(w, Vector3(0.19, 0.025, 0.105), Vector3(0.33 + i * 0.01, 0.513 + i * 0.026, -1.48), vhs)
 		tp.rotation.y = deg_to_rad(8.0 - i * 9.0)
+	card_vp = SubViewport.new()
+	card_vp.size = Vector2i(1024, 768)
+	card_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	card_art = TvCards.new()
+	card_art.size = Vector2(1024, 768)
+	card_vp.add_child(card_art)
+	root.add_child(card_vp)
 	tv = CrtTv.new()
 	tv.positional = false   # its own world: no listener there, play it flat
 	tv.silent = still
@@ -385,16 +429,17 @@ void fragment() {
 const OVERLAY := """
 shader_type canvas_item;
 uniform float black = 0.0;
+uniform float grain = 1.0;
 uniform float bars = 0.085;
 void fragment() {
 	vec2 uv = UV;
 	float g = fract(sin(dot(floor(uv * vec2(800.0, 450.0)) + fract(TIME * 7.13) * vec2(37.0, 91.0), vec2(12.9898, 78.233))) * 43758.5453);
 	float vig = smoothstep(0.35, 0.95, length((uv - 0.5) * vec2(1.3, 1.05)));
-	float a = vig * 0.72;
+	float a = vig * 0.72 * (1.0 - black);
 	vec3 col = vec3(0.0);
 	// grain: dark and light specks at low opacity
-	col = mix(col, vec3(g), 0.06 / max(a + 0.06, 0.001));
-	a = max(a, 0.06);
+	col = mix(col, vec3(g), grain * 0.06 / max(a + 0.06, 0.001));
+	a = max(a, 0.06 * grain * (1.0 - black));
 	if (uv.y < bars || uv.y > 1.0 - bars) { col = vec3(0.0); a = 1.0; }
 	col = mix(col, vec3(0.0), black); a = mix(a, 1.0, black);
 	COLOR = vec4(col, a);

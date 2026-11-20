@@ -20,6 +20,7 @@ uniform float snow = 0.0;       // static
 uniform float glitch = 0.0;     // tearing + colour split
 uniform float roll = 0.0;       // vertical hold slip
 uniform float afterglow = 0.0;  // the dot left after switch-off
+uniform float card_color = 0.0;   // 1: the picture is a colour card (studio / notice), drawn as it is
 uniform float gain = 1.35;      // screen brightness (the outdoor TV needs more to read in daylight)
 
 float hash(vec2 p) {   // sin-free: no diagonal patterns at large inputs
@@ -34,6 +35,10 @@ float vnoise(float x) { float i = floor(x); float f = fract(x); f = f * f * (3.0
 vec3 picture(vec2 p, float lod) {
 	vec2 q = (p - text_box.xy) / (text_box.zw - text_box.xy);
 	if (q.y < 0.0 || q.y > 1.0 || q.x < 0.0 || q.x > 1.0) return vec3(0.0);
+	if (card_color > 0.5) {
+		vec3 cc = textureLod(text_tex, q, min(lod, 2.0)).rgb;
+		return cc * 1.5 + textureLod(text_tex, q, min(lod, 2.0) + 3.0).rgb * 0.35;
+	}
 	float a = textureLod(text_tex, q, lod).r;
 	float halo = textureLod(text_tex, q, lod + 3.0).r;
 	vec3 hot = mix(vec3(1.0, 0.82, 0.74), vec3(0.85, 0.06, 0.04), smoothstep(0.15, 0.62, q.y));

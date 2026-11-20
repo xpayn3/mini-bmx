@@ -76,6 +76,7 @@ func _prep(n: Node) -> void:
 	if not is_instance_valid(root) or not (n == root or root.is_ancestor_of(n)): return
 	if n is ScrollContainer:
 		(n as ScrollContainer).follow_focus = true
+		SmoothScroll.attach(n)
 	elif n is BaseButton and not n.has_meta(&"nav_prepped"):
 		n.set_meta(&"nav_prepped", true)
 		_prep_button.call_deferred(n)   # deferred: the button's own style overrides are set by then
@@ -247,8 +248,8 @@ var _path: Array = []
 func _refocus() -> void:
 	var n: Node = root
 	for i in _path:
-		if i >= n.get_child_count(): break
-		n = n.get_child(i)
+		if i >= n.get_child_count(true): break
+		n = n.get_child(i, true)   # internal children too (a TabContainer's tab bar)
 	var c: Control = null
 	if n is Control and (n as Control).focus_mode == Control.FOCUS_ALL and (n as Control).is_visible_in_tree(): c = n
 	if c == null:
@@ -306,7 +307,7 @@ func _on_focus(c: Control) -> void:
 		_path = []
 		var n: Node = c
 		while n and n != root:
-			_path.push_front(n.get_index()); n = n.get_parent()
+			_path.push_front(n.get_index(true)); n = n.get_parent()
 	var r: Control = null
 	if c and (c == root or root.is_ancestor_of(c)):
 		var p: Node = c

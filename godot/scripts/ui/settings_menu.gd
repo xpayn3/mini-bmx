@@ -1,11 +1,11 @@
-extends MenuBase
-## Settings: Display / Graphics / Audio / Gameplay / Interface / Controller. Key + camera settings live in
-## the separate Controls window (controls_menu.gd).
+extends "res://scripts/ui/controls_menu.gd"
+## Settings: Display / Graphics / Audio / Gameplay / Interface / Controller, then the Controls (key / pad
+## bindings) and Camera pages from controls_menu.gd (one window for all of it).
 
 func _title() -> String: return "SETTINGS"
 
 func _pages() -> Array:
-	return [_display(), _graphics(), _audio(), _gameplay(), _interface(), _controller()]
+	return [_display(), _graphics(), _audio(), _gameplay(), _interface(), _controller(), _bindings(), _camera()]
 
 func _display() -> Control:
 	var p := _page("Display")

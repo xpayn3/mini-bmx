@@ -370,7 +370,7 @@ func _helmet(dt: float, P: Dictionary) -> bool:
 	else:
 		helm_basis = helm_basis.slerp(b, minf(1.0, dt * 14.0)).orthonormalized()
 	global_transform = Transform3D(helm_basis, xf.origin)
-	cam_fov += (float(P.fov) - cam_fov) * minf(1.0, dt * 3.0)
+	cam_fov += (float(lens.get_meta("fov", P.fov)) - cam_fov) * minf(1.0, dt * 3.0)   # the camera model / lens mod sets it
 	fov = clampf(cam_fov * (1.0 + fov_boost * float(Settings.get_v("cam_speed_fov")) / 68.0) + float(Settings.get_v("fov")), 5, 120)
 	var st: BikePhysics = game.phys
 	st.shake = maxf(0.0, st.shake - dt * 1.2)

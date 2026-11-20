@@ -913,7 +913,7 @@ const START_TV_SIDE := 5.5
 ## the old CRT TV from the boot intro, dumped on the ground beside the start of every world, facing the rider:
 ## it switches on to the RUNOUT card a moment after the ride starts and stays on
 func place_start_tv() -> void:
-	if OS.get_environment("BMX_NO_TV") != "": return
+	if OS.get_environment("BMX_NO_TV") != "" or not CrtTv.assets_ok(): return
 	if start_tv == null:
 		start_tv = CrtTv.new()
 		start_tv.light_energy = 3.0

@@ -33,7 +33,7 @@ func _ready() -> void:
 		_show_menu()
 	create_tween().set_ignore_time_scale().tween_property(fade, "modulate:a", 0.0, 0.8)
 	# boot intro (the CRT TV): a plain launch only, or BMX_INTRO=1
-	if OS.get_cmdline_user_args().is_empty() or OS.get_environment("BMX_INTRO") != "":
+	if (OS.get_cmdline_user_args().is_empty() or OS.get_environment("BMX_INTRO") != "") and CrtTv.assets_ok():   # (no TV files: no intro, straight to the menu)
 		var intro := CrtIntro.new()
 		intro.hold = true
 		intro.still = (not Settings.get_v("boot_intro") and OS.get_environment("BMX_INTRO") != "1") or OS.get_environment("BMX_INTRO") == "still"
@@ -41,7 +41,7 @@ func _ready() -> void:
 		_prebuild_behind(intro)
 		intro.finished.connect(func() -> void:
 			var tw := create_tween().set_ignore_time_scale()
-			tw.tween_property(intro.root, "modulate:a", 0.0, 3.5).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)   # the menu fades in slowly
+			tw.tween_property(intro.root, "modulate:a", 0.0, 4.0).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)   # the menu fades in slowly
 			tw.tween_callback(intro.queue_free)
 			if OS.get_environment("BMX_INTRO_SHOTS") != "":   # tests: a frame of the menu after it, then quit
 				await get_tree().create_timer(2.5, true, false, true).timeout
@@ -68,7 +68,7 @@ func _ready() -> void:
 
 ## tests: drive the menus with a synthetic Xbox pad (use with BMX_PAD=1), then quit. Comma-separated steps:
 ## u d l r (D-pad) a b x y lb rb start, `D700` = hold D-pad down 700 ms (U / L / R too), `lsd` / `lsr` = a flick
-## of the left stick, esc / enter = keys, w500 = wait 500 ms, shot:<file.png>, at:<secs> = wait until then.
+## of the left stick, esc / enter = keys, w500 = wait 500 ms, shot:<file.png>, at:<secs> = wait until then, mw:x:y:n = n mouse-wheel notches at x, y (n < 0 = up).
 ## Prints PADSEQ <step> focus=<the focused control> after each.
 func _pad_seq(seq: String) -> void:
 	var t0 := Time.get_ticks_msec()
@@ -93,6 +93,28 @@ func _pad_seq(seq: String) -> void:
 				var k := InputEventKey.new(); k.keycode = OS.find_keycode_from_string(step.substr(2))
 				k.physical_keycode = k.keycode; k.pressed = down
 				Input.parse_input_event(k); await wait.call(60)
+		elif step.begins_with("mw:"):   # mw:x:y:n = n mouse-wheel notches at screen x, y (n < 0 = up), 40 ms apart
+			var pr := step.substr(3).split(":")
+			var at := Vector2(float(pr[0]), float(pr[1]))
+			Input.warp_mouse(at)
+			for i in absi(int(pr[2])):
+				for down in [true, false]:
+					var mb := InputEventMouseButton.new(); mb.position = at; mb.global_position = at
+					mb.button_index = MOUSE_BUTTON_WHEEL_UP if int(pr[2]) < 0 else MOUSE_BUTTON_WHEEL_DOWN
+					mb.pressed = down; mb.factor = 1.0
+					Input.parse_input_event(mb)
+				await wait.call(40)
+		elif step.begins_with("click:"):   # click:x:y = a left mouse click at screen x, y
+			var cp := step.substr(6).split(":")
+			var at := Vector2(float(cp[0]), float(cp[1]))
+			Input.warp_mouse(at)
+			var mm := InputEventMouseMotion.new(); mm.position = at; mm.global_position = at
+			Input.parse_input_event(mm); await wait.call(60)
+			for down in [true, false]:
+				var mb := InputEventMouseButton.new(); mb.position = at; mb.global_position = at
+				mb.button_index = MOUSE_BUTTON_LEFT; mb.pressed = down
+				mb.button_mask = MOUSE_BUTTON_MASK_LEFT if down else 0
+				Input.parse_input_event(mb); await wait.call(60)
 		elif step in ["esc", "enter"]:
 			for down in [true, false]:
 				var k := InputEventKey.new(); k.keycode = KEY_ESCAPE if step == "esc" else KEY_ENTER
@@ -249,25 +271,62 @@ func _show_menu() -> void:
 	vb.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vb.add_theme_constant_override("separation", Tokens.S3)
 	outer.add_child(vb)
-	# title: big condensed italic in ink, a yellow mark and the tagline under it
+	# title: the game's logo, the same one the TV shows (ui/game_logo.gd)
 	var head := VBoxContainer.new()
-	head.add_theme_constant_override("separation", -Tokens.S4)
-	head.add_child(UITheme.display("RUNOUT", Tokens.T_DISPLAY, Tokens.INK, Tokens.SLANT_TITLE))
-	var tag_row := HBoxContainer.new()
-	tag_row.add_theme_constant_override("separation", Tokens.S4)
-	var slab := ColorRect.new()
-	slab.color = Tokens.ACCENT
-	slab.custom_minimum_size = Tokens.SLAB_WIDE
-	slab.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	tag_row.add_child(slab)
-	tag_row.add_child(UITheme.caption("DOWNHILL  &  BMX  ·  ENDLESS TRAILS", Tokens.INK_SOFT, Tokens.T_MD))
-	head.add_child(tag_row)
+	var logo := GameLogo.new()
+	logo.custom_minimum_size = Vector2(0, 170)
+	head.add_child(logo)
 	vb.add_child(head)
 	menu_col = vb
-	outer.add_child(UITheme.text("v%s  ·  Godot %s" % [ProjectSettings.get_setting("application/config/version", "1.0.0"), Engine.get_version_info().string], Tokens.INK_SOFT, Tokens.T_XS))
+	# QUIT, top right of the screen (asks first)
+	menu_quit = UITheme.make_button("QUIT", _confirm_quit, "secondary", Tokens.T_LG)
+	menu_quit.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	menu_quit.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	menu_quit.offset_right = -MENU_EDGE; menu_quit.offset_top = MENU_EDGE
+	menu_quit.offset_left = -MENU_EDGE - 140; menu_quit.offset_bottom = MENU_EDGE + Tokens.H_CHIP + Tokens.S2
+	menu.add_child(menu_quit)
+	var ver := UITheme.text("v%s  ·  Godot %s" % [ProjectSettings.get_setting("application/config/version", "1.0.0"), Engine.get_version_info().string], Tokens.INK_SOFT, Tokens.T_XS)
+	ver.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	outer.add_child(ver)
 	_menu_page_main()
 	if Env.s("BMX_MENU_PAGE") == "setup": _menu_page_setup(int(Env.s("BMX_SETUP_STEP")))   # tests: the ride setup page (BMX_SETUP_STEP=0..3)
 	if Env.s("BMX_MENU_PAGE") == "credits": _show_credits()   # tests: the credits window
+
+var menu_quit: Button
+
+## "Quit the game?" over the title menu: QUIT / CANCEL (B, Esc and a click beside it cancel)
+func _confirm_quit() -> void:
+	if not is_instance_valid(menu) or menu.has_node("QuitAsk"): return
+	var veil := ColorRect.new()
+	veil.name = "QuitAsk"
+	veil.color = Color(0, 0, 0, 0.45)
+	veil.set_anchors_preset(Control.PRESET_FULL_RECT)
+	veil.mouse_filter = Control.MOUSE_FILTER_STOP
+	menu.add_child(veil)
+	var close := func(): if is_instance_valid(veil): veil.queue_free()
+	veil.gui_input.connect(func(e: InputEvent):
+		if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT: close.call())
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	veil.add_child(center)
+	var card := PanelContainer.new()
+	card.add_theme_stylebox_override("panel", UITheme.card_style(Tokens.PAPER, Tokens.R_XL, Tokens.S7))
+	center.add_child(card)
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", Tokens.S5)
+	card.add_child(vb)
+	vb.add_child(UITheme.display("QUIT THE GAME?", Tokens.T_2XL))
+	vb.add_child(UITheme.text("Are you sure? Your bike, rider and settings are saved.", Tokens.INK_SOFT, Tokens.T_MD))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", Tokens.S3)
+	row.alignment = BoxContainer.ALIGNMENT_END
+	vb.add_child(row)
+	var cancel := UITheme.make_button("CANCEL", close, "secondary", Tokens.T_LG)
+	row.add_child(cancel)
+	row.add_child(UITheme.make_button("QUIT", func(): GameState.save(); GameState.quit(), "primary", Tokens.T_LG))
+	PadNav.attach(veil, {"back": close, "first": func(): return cancel})
+	cancel.grab_focus.call_deferred()
 
 const MENU_EDGE := Tokens.S8
 const MENU_W := Tokens.CARD_W + Tokens.S8 + Tokens.S2
@@ -404,19 +463,22 @@ func _menu_page_main() -> void:
 	_menu_clear()
 	menu_page = "main"
 	var vb := menu_col
-	var ride := _menu_button("RIDE", "Pick a bike and the time of day", _menu_page_setup, true)
+	var ride := _menu_button("RIDE", "Pick a bike and the time of day", _menu_page_setup, true, true)
 	vb.add_child(ride)
-	vb.add_child(_menu_button("DEMO", "An AI rider rides; tune everything live", _start_demo))
-	vb.add_child(_menu_button("GARAGE", "Paint, wheels, bars, shocks, gears", _open_garage))
-	vb.add_child(_menu_button("RIDER", "Riding position on the rollers, kit", _open_garage.bind("rider")))
+	vb.add_child(_menu_button("DEMO", "An AI rider rides; tune everything live", _start_demo, false, true))
+	vb.add_child(_menu_button("GARAGE", "Paint, wheels, bars, shocks, gears", _open_garage, false, true))
+	vb.add_child(_menu_button("RIDER", "Riding position on the rollers, kit", _open_garage.bind("rider"), false, true))
 	vb.add_child(UITheme.spacer(Tokens.S2))
 	# world seed
-	vb.add_child(UITheme.caption("WORLD"))
+	var world_cap := UITheme.caption("WORLD")
+	world_cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(world_cap)
 	var seed_row := HBoxContainer.new()
 	seed_row.add_theme_constant_override("separation", Tokens.S2)
 	var se := LineEdit.new()
 	se.text = str(GameState.seed)
 	se.placeholder_text = "World seed"
+	se.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	se.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	se.custom_minimum_size.y = Tokens.H_CHIP
 	se.tooltip_text = "World seed: type a number and press Enter"
@@ -428,8 +490,13 @@ func _menu_page_main() -> void:
 	vb.add_child(seed_row)
 	vb.add_child(UITheme.spacer(Tokens.S4))
 	# secondary: a quiet list
-	for it in [["SETTINGS", _open_settings], ["CONTROLS", _show_controls], ["CREDITS", _show_credits], ["QUIT", func(): GameState.quit()]]:
-		vb.add_child(UITheme.make_button(it[0], it[1], "link", Tokens.T_XL))
+	var sett := UITheme.make_button("SETTINGS", _open_settings, "link", Tokens.T_XL)   # controls are a tab in it
+	sett.alignment = HORIZONTAL_ALIGNMENT_CENTER   # the title menu is centred in its card
+	vb.add_child(sett)
+	var cred := UITheme.make_button("CREDITS", _show_credits, "link", Tokens.T_XL)
+	cred.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(cred)
+	if is_instance_valid(menu_quit): menu_quit.visible = true
 	menu_focus = ride
 	ride.grab_focus.call_deferred()
 
@@ -474,6 +541,7 @@ func _menu_page_setup(step := 0) -> void:
 	setup_step = clampi(step, 0, SETUP_STEPS.size() - 1)
 	_menu_clear()
 	menu_page = "setup"
+	if is_instance_valid(menu_quit): menu_quit.visible = false
 	if is_instance_valid(setup_screen): setup_screen.queue_free()
 	_ensure_thumbs()
 	var scr := Control.new()
@@ -668,6 +736,7 @@ func _setup_tune(content: HBoxContainer) -> void:
 	var sc := ScrollContainer.new()
 	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	SmoothScroll.attach(sc)
 	col.add_child(sc)
 	tune_body = VBoxContainer.new()
 	tune_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1008,12 +1077,13 @@ func _setup_next() -> void:
 	else: _start_ride()
 
 ## a big menu button: display-font title (+ optional small line under it); primary = the yellow one
-func _menu_button(text: String, sub: String, cb: Callable, primary := false) -> Button:
+func _menu_button(text: String, sub: String, cb: Callable, primary := false, centred := false) -> Button:
 	var b := UITheme.make_button("", cb, "menu")   # one look for every line: the focused one is yellow (console cursor)
 	b.custom_minimum_size.y = Tokens.H_HERO if primary else Tokens.H_SUB
 	var m := MarginContainer.new()
 	m.set_anchors_preset(Control.PRESET_FULL_RECT)
 	m.add_theme_constant_override("margin_left", Tokens.S5 + Tokens.S2)
+	if centred: m.add_theme_constant_override("margin_right", Tokens.S5 + Tokens.S2)
 	m.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var col := VBoxContainer.new()
 	col.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -1022,6 +1092,8 @@ func _menu_button(text: String, sub: String, cb: Callable, primary := false) -> 
 	col.add_child(UITheme.display(text, Tokens.T_3XL if primary else Tokens.T_2XL + Tokens.S1))
 	if sub != "":
 		col.add_child(UITheme.text(sub, Tokens.INK if primary else Tokens.INK_SOFT, Tokens.T_SM))
+	if centred:
+		for l in col.get_children(): (l as Label).horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	m.add_child(col)
 	b.add_child(m)
 	return b
@@ -1130,7 +1202,6 @@ func _pause() -> void:
 	pm.add_item("Tuning", _open_tuning)
 	pm.add_item("Photo mode", func(): _resume(); game.toggle_photo())
 	pm.add_item("Settings", _open_settings)
-	pm.add_item("Controls", _show_controls)
 	pm.add_item("Main menu", func(): _close_pause(true); GameState.save(); _show_menu())
 	pm.add_item("Quit to desktop", func(): GameState.save(); GameState.quit())
 	pause_menu = pm
