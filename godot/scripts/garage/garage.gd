@@ -226,7 +226,11 @@ func _room_reach(from: Vector3, dir: Vector3) -> float:
 	for a in 3:
 		if absf(dir[a]) < 1e-5: continue
 		var lim: float = (ROOM_MAX[a] if dir[a] > 0 else ROOM_MIN[a]) - signf(dir[a]) * 0.35
-		best = minf(best, maxf(0.5, (lim - from[a]) / dir[a]))
+		var t: float = (lim - from[a]) / dir[a]
+		# a focus already past this wall's margin gives a negative reach: ignore it (it used to clamp to 0.5 m
+		# = the camera snapped right under the bike). The floor is handled by the pitch limit in _process.
+		if t <= 0.0 or is_nan(t): continue
+		best = minf(best, t)
 	return best
 
 func _box(size: Vector3, pos: Vector3, mat: Material, rot := Vector3.ZERO) -> MeshInstance3D:
@@ -954,8 +958,17 @@ func _process(dt: float) -> void:
 	if aim.size() == 3: focus_t = Vector3(float(aim[0]), float(aim[1]), float(aim[2]))
 	focus = focus.lerp(focus_t, minf(1.0, dt * 4))
 	var p := deg_to_rad(pitch)
+	# never swing below the floor: lift the pitch so the camera stays above it at the full distance
+	# (shrinking the distance instead made the camera jump to full zoom under the bike)
+	var floor_y := ROOM_MIN.y + 0.35
+	var d_cam := maxf(dist, 0.5)
+	var s_min := (floor_y - focus.y) / d_cam
+	if s_min > -1.0 and sin(p) < s_min:
+		p = asin(clampf(s_min, -1.0, 1.0))
 	var dir := Vector3(sin(orbit) * cos(p), sin(p), cos(orbit) * cos(p))
-	cam.position = focus + dir * minf(dist, _room_reach(focus, dir))
+	var reach := _room_reach(focus, dir)
+	cam.position = focus + dir * (minf(dist, reach) if reach < INF else dist)
+	cam.position.y = maxf(cam.position.y, floor_y)
 	cam.look_at(focus, Vector3.UP)
 	# HANDHELD: someone holding the camera -- a slow few-cm drift and a fraction of a degree of wobble,
 	# from a few unrelated sine waves (never repeats visibly, never jerks)
