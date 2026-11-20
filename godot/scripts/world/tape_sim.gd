@@ -3,7 +3,9 @@ extends MeshInstance3D
 ## Torn race tape (from tape.js TapeSim): ride into a span and it stretches over the bike, then SNAPS at the hit; the two
 ## halves become light foil ribbons simulated with Verlet that stream and float in the wind from their
 ## stakes, drape over the ground -- or, now and then (25 %), rip off the stake and blow away.
-## All strips are drawn as one double-sided ribbon strip mesh (rebuilt each frame), lit like the intact tape.
+## All strips are drawn as one double-sided ribbon strip mesh (rebuilt each frame from packed arrays in one
+## call), lit like the intact tape. While the bike holds a span it is posed exactly (straight once taut, a
+## parabola while slack), not simulated, so it stays on the tyre at any speed.
 
 const SEG := 30                  # TerrainChunkBuilder.TAPE_SEG
 const WIDTH := 0.075
@@ -16,12 +18,13 @@ const SETTLE := 1.3              # a released (not torn) tape springs back this 
 
 var terrain: Terrain
 var strips: Array = []           # [{P, Q, seg, pin, cols, age, tw, last, tr, tk, ta, td, tp, G, V, N}]
-var _imesh := ImmediateMesh.new()
+var _amesh := ArrayMesh.new()
 var _dirty := false
+var _warm := false               # a first surface has been made with the strip material (its shader compiled)
 
 
 func _init() -> void:
-	mesh = _imesh
+	mesh = _amesh
 	top_level = true                # strip vertices are in world space
 	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF   # JS: receiveShadow only
 	var m := ShaderMaterial.new()
@@ -32,7 +35,7 @@ func _init() -> void:
 
 func clear() -> void:
 	strips.clear()
-	_imesh.clear_surfaces()
+	_amesh.clear_surfaces()
 	_dirty = false
 
 
@@ -109,7 +112,7 @@ func _snap(s: Dictionary) -> void:
 var push_at = null
 
 
-func _stretch(s: Dictionary) -> String:
+func _stretch(s: Dictionary, dt: float) -> String:
 	var A: Vector3 = s["pin"]
 	var B: Vector3 = s["pin2"]
 	var n: int = (s["P"] as PackedVector3Array).size()
@@ -132,18 +135,61 @@ func _stretch(s: Dictionary) -> String:
 	var la := A.distance_to(c)
 	var lb := c.distance_to(B)
 	var rest: PackedFloat32Array = s["rest"]
-	var segs: PackedFloat32Array = s["segs"]
 	var ra := 0.0
 	for i in gi: ra += rest[i]
 	var rb: float = float(s["rest_len"]) - ra
 	s["strain"] = (la + lb) / float(s["rest_len"]) - 1.0
-	# each side stretches evenly once it's pulled straight (slack sag first)
-	var ka := maxf(1.0, la / ra) * 0.995
-	var kb := maxf(1.0, lb / rb) * 0.995
-	for i in n - 1:
-		segs[i] = rest[i] * (ka if i < gi else kb)
-	s["segs"] = segs
+	_pose_held(s, A, c, B, gi, ra, rb, la, lb, dt)
 	return "snap" if float(s["strain"]) > SNAP_STRAIN else ""
+
+
+## a held span, posed exactly every frame: each side runs from its stake to the grab point, straight (and
+## stretched evenly) once it's pulled taut, sagging in a parabola of the right length while it's slack.
+## Q keeps last frame's points so the strip carries its velocity on when it's let go or tears.
+func _pose_held(s: Dictionary, A: Vector3, c: Vector3, B: Vector3, gi: int, ra: float, rb: float, la: float, lb: float, dt: float) -> void:
+	var P: PackedVector3Array = s["P"]
+	var Q: PackedVector3Array = s["Q"]
+	var rest: PackedFloat32Array = s["rest"]
+	var n := P.size()
+	var G := _ground(s)
+	var sag_a := sqrt(3.0 * la * (ra - la) / 8.0) if ra > la else 0.0
+	var sag_b := sqrt(3.0 * lb * (rb - lb) / 8.0) if rb > lb else 0.0
+	var cum := 0.0
+	for i in n:
+		var p: Vector3
+		if i <= gi:
+			var u := cum / ra
+			p = A.lerp(c, u) - Vector3(0, sag_a * 4.0 * u * (1.0 - u), 0)
+		else:
+			var u := (cum - ra) / rb
+			p = c.lerp(B, u) - Vector3(0, sag_b * 4.0 * u * (1.0 - u), 0)
+		p.y = maxf(p.y, G[i] + 0.01)
+		Q[i] = P[i]
+		P[i] = p
+		if i < n - 1: cum += rest[i]
+	s["P"] = P
+	s["Q"] = Q
+	s["last"] = maxf(dt, 1e-4)
+
+
+## the ground under each point, re-read only for points that moved 0.2 m+ sideways (height() is costly)
+func _ground(s: Dictionary) -> PackedFloat32Array:
+	var P: PackedVector3Array = s["P"]
+	var n := P.size()
+	var G: PackedFloat32Array = s["G"]
+	var GP: PackedVector2Array = s.get("GP", PackedVector2Array())
+	if G.size() != n or GP.size() != n:
+		G.resize(n)
+		GP.resize(n)
+		for i in n: GP[i] = Vector2(INF, INF)
+	for i in n:
+		var q := Vector2(P[i].x, P[i].z)
+		if q.distance_squared_to(GP[i]) > 0.04:
+			GP[i] = q
+			G[i] = terrain.height(q.x, q.y)
+	s["G"] = G
+	s["GP"] = GP
+	return G
 
 
 func _add(P: PackedVector3Array, Q: PackedVector3Array, cols: Array, seg_len: float, pin) -> void:
@@ -164,12 +210,25 @@ func _add(P: PackedVector3Array, Q: PackedVector3Array, cols: Array, seg_len: fl
 func update(dt: float, px: float, pz: float, t: float, wdir: Vector3, ws: float) -> void:
 	if strips.is_empty():
 		if _dirty:
-			_imesh.clear_surfaces()
+			_amesh.clear_surfaces()
 			_dirty = false
+		elif not _warm:
+			# one tiny triangle far underground with the strip material: its pipeline is made now, at the
+			# start of the ride, not on the first tape you hit (a hitch right at the moment of impact)
+			_warm = true
+			var arr := []
+			arr.resize(Mesh.ARRAY_MAX)
+			var o := Vector3(px, -2000.0, pz)
+			arr[Mesh.ARRAY_VERTEX] = PackedVector3Array([o, o + Vector3(0.01, 0, 0), o + Vector3(0, 0, 0.01)])
+			arr[Mesh.ARRAY_NORMAL] = PackedVector3Array([Vector3.UP, Vector3.UP, Vector3.UP])
+			arr[Mesh.ARRAY_COLOR] = PackedColorArray([Color.WHITE, Color.WHITE, Color.WHITE])
+			_amesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+			_dirty = true
 		return
 	var h := dt / SUB
 	if h <= 0.0:
 		return
+	var snapped: Array = []   # torn this frame: _snap adds strips (and may drop the oldest), so after the loop
 	for si in range(strips.size() - 1, -1, -1):
 		var s: Dictionary = strips[si]
 		s["age"] += dt
@@ -184,16 +243,19 @@ func update(dt: float, px: float, pz: float, t: float, wdir: Vector3, ws: float)
 			continue
 		var state: String = s.get("state", "free")
 		if state == "stretch":
-			match _stretch(s):
+			match _stretch(s, dt):
 				"snap":
 					strips.remove_at(si)
-					_snap(s)
+					snapped.append(s)
 					continue
 				"release":
 					s["state"] = "settle"
 					s["age"] = 0.0
 					s["grab"] = -1
 					s["segs"] = (s["rest"] as PackedFloat32Array).duplicate()
+				_:
+					_ribbon(s, t)   # held: posed exactly by _stretch, nothing to simulate
+					continue
 		elif state == "settle" and s["age"] > SETTLE:
 			strips.remove_at(si)
 			if terrain: terrain.restore_tape(s["sp"])
@@ -203,6 +265,7 @@ func update(dt: float, px: float, pz: float, t: float, wdir: Vector3, ws: float)
 		if state == "free": s["tw_k"] = minf(1.0, float(s.get("tw_k", 1.0)) + dt * 1.5)   # the foil starts twisting once torn
 		_step(s, h, t, wdir, ws)
 		_ribbon(s, t)
+	for s in snapped: _snap(s)
 	_draw()
 
 
@@ -222,10 +285,7 @@ func _step(s: Dictionary, h: float, t: float, wdir: Vector3, ws: float) -> void:
 	var gi: int = s.get("grab", -1)
 	var gat: Vector3 = s.get("grab_at", Vector3.ZERO)
 	var taut := pinned2   # a whole span: stiffer, the wind only ripples it
-	var G := PackedFloat32Array()
-	G.resize(n)
-	for i in n:   # once a frame (height() is costly)
-		G[i] = terrain.height(P[i].x, P[i].z)
+	var G := _ground(s)
 	var drag := 3.2
 	for sub in SUB:
 		var r := ratio if sub == 0 else 1.0
@@ -352,22 +412,31 @@ func _ribbon(s: Dictionary, t: float) -> void:
 
 
 func _draw() -> void:
-	_imesh.clear_surfaces()
-	var any := false
+	var V := PackedVector3Array()
+	var N := PackedVector3Array()
+	var C := PackedColorArray()
 	for s in strips:
-		if (s["V"] as PackedVector3Array).size() > 0:
-			any = true
-			break
-	_dirty = any
-	if not any:
+		var sv: PackedVector3Array = s["V"]
+		if sv.is_empty():
+			continue
+		var sc: PackedColorArray = s.get("C", PackedColorArray())
+		if sc.size() != sv.size():   # the colours never change: made once per strip
+			var cols: Array = s["cols"]
+			sc = PackedColorArray()
+			sc.resize(sv.size())
+			for k in sv.size():
+				sc[k] = cols[mini(cols.size() - 1, k / (6 * SUBD))]
+			s["C"] = sc
+		V.append_array(sv)
+		N.append_array(s["N"])
+		C.append_array(sc)
+	_amesh.clear_surfaces()
+	_dirty = not V.is_empty()
+	if not _dirty:
 		return
-	_imesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
-	for s in strips:
-		var V: PackedVector3Array = s["V"]
-		var N: PackedVector3Array = s["N"]
-		var cols: Array = s["cols"]
-		for k in V.size():
-			_imesh.surface_set_color(cols[mini(cols.size() - 1, k / (6 * SUBD))])
-			_imesh.surface_set_normal(N[k])
-			_imesh.surface_add_vertex(V[k])
-	_imesh.surface_end()
+	var arr := []
+	arr.resize(Mesh.ARRAY_MAX)
+	arr[Mesh.ARRAY_VERTEX] = V
+	arr[Mesh.ARRAY_NORMAL] = N
+	arr[Mesh.ARRAY_COLOR] = C
+	_amesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)

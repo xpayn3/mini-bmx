@@ -23,8 +23,6 @@ var lp_w2 := 0.0
 var lp_r := 0.0
 var lp_r2 := 0.0
 var hp_s := 0.0
-var bp_s := 0.0
-var lp_wt := 0.0
 var wind_tone := 0.03   # wind low-pass coefficient: opens up (brighter) with speed
 var gust_ph := 0.0
 var gust_ph2 := 0.0
@@ -35,7 +33,6 @@ var bp_hi := 0.0
 var whistle := 0.0
 # freewheel: pawl clicks synthesised in C#; speed sets the click rate only, the tone stays crisp
 const FW_RATE := 44100.0
-const FW_POE := 24.0   # pawl clicks per wheel turn (the recorded hub; FreewheelSound "poe" sets it)
 var fw_ver := -1       # FreewheelSound.version last applied to the synth
 var fw := AudioStreamPlayer.new()
 var fw_pb: AudioStreamGeneratorPlayback
@@ -43,9 +40,9 @@ var fw_synth = null    # FreewheelSynth (C#); null on the non-.NET Godot -> no f
 var fw_clicks := 0.0
 var fw_amp := 0.0
 var fw_peak := 0.0
-var pan := 0.0
 # tyre on gravel: pebble knocks synthesised in C# (GravelSynth.cs); null -> the old noise rumble
 var gravel = null
+var bed = null   # RideBedSynth (C#): wind / splash / gravel mix per sample; null -> the GDScript loop in _fill
 var g_speed := 0.0
 var g_amp := 0.0
 var g_tone := 650.0
@@ -58,10 +55,13 @@ var shots: Array = []
 var shift_snd: ShiftSound
 
 ## drop the C# synths while the engine is still up: if their .NET finalizers run during shutdown
-## instead, Godot can crash on exit ("Leaked unsafe reference" -> SEHException)
-func _exit_tree() -> void:
-	gravel = null
-	fw_synth = null
+## instead, Godot can crash on exit ("Leaked unsafe reference" -> SEHException). On PREDELETE, not _exit_tree:
+## the ride world built during the boot intro is moved into the scene (main.gd), which fires _exit_tree
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE:
+		gravel = null
+		bed = null
+		fw_synth = null
 
 
 func _ready() -> void:
@@ -79,6 +79,9 @@ func _ready() -> void:
 	var gs = load("res://scripts/game/GravelSynth.cs")
 	if gs != null and gs.can_instantiate():
 		gravel = gs.new()
+	var bs = load("res://scripts/game/RideBedSynth.cs")
+	if bs != null and bs.can_instantiate():
+		bed = bs.new()
 	var cs = load("res://scripts/game/FreewheelSynth.cs")
 	if cs != null and cs.can_instantiate():
 		fw_synth = cs.new()
@@ -196,7 +199,7 @@ func update_audio(dt: float) -> void:
 	_update_chain(dt, va, on_ground, st.pedal)
 	_fill()
 	_fill_fw()
-	if OS.get_environment("BMX_AUDIO_PROBE") != "" and Engine.get_process_frames() % 30 == 0:
+	if Env.s("BMX_AUDIO_PROBE") != "" and Engine.get_process_frames() % 30 == 0:
 		print("FW v=%.1f pedal=%.2f clicks/s=%.0f amp=%.2f peak=%.3f | GRAVEL surf=%d amp=%.2f wind=%.2f" % [va, st.pedal, fw_clicks, fw_amp, fw_peak, st.surf, g_amp, wind])
 		fw_peak = 0.0
 
@@ -206,13 +209,19 @@ func _fill_fw() -> void:
 	var n := fw_pb.get_frames_available()
 	if n <= 0: return
 	var buf: PackedVector2Array = fw_synth.Render(n, fw_clicks, fw_amp)
-	if OS.get_environment("BMX_AUDIO_PROBE") != "":
+	if Env.s("BMX_AUDIO_PROBE") != "":
 		for v in buf: fw_peak = maxf(fw_peak, absf(v.x))
 	fw_pb.push_buffer(buf)
 
 func _fill() -> void:
 	var n := pb.get_frames_available()
 	if n <= 0: return
+	if bed != null:   # C#: the per-sample bed (wind, splash, gravel mixed in, clamped)
+		var gb: PackedVector2Array = gravel.Render(n, g_speed, g_amp, g_tone, g_crack, g_rumble) if gravel != null else PackedVector2Array()
+		var bb: PackedVector2Array = bed.Render(n, wind_tone, roll_tone, wind, roll, skid, water, whistle, gb)
+		if not shots.is_empty(): bb = _mix_shots(bb, n)
+		pb.push_buffer(bb)
+		return
 	var buf := PackedVector2Array()
 	buf.resize(n)
 	var aw := wind_tone  # wind low-pass, brighter with speed
@@ -254,7 +263,10 @@ func _fill() -> void:
 	if gravel != null:
 		var gb: PackedVector2Array = gravel.Render(n, g_speed, g_amp, g_tone, g_crack, g_rumble)
 		for i in n: buf[i] += gb[i]
-	# one-shots, mixed on top
+	pb.push_buffer(_mix_shots(buf, n))
+
+## one-shots (crunches, wood, gear clicks) mixed on top of buf, clamped; returns it (packed arrays are values)
+func _mix_shots(buf: PackedVector2Array, n: int) -> PackedVector2Array:
 	for sh in shots:
 		var kind: String = sh[0]
 		var t0: float = sh[1]
@@ -274,4 +286,4 @@ func _fill() -> void:
 	shots = shots.filter(func(sh): return sh[1] < (1.6 if sh[0] == "wood" else 0.8))
 	for i in n:
 		buf[i] = buf[i].clamp(Vector2(-1, -1), Vector2(1, 1))
-	pb.push_buffer(buf)
+	return buf

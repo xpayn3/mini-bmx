@@ -49,6 +49,8 @@ func _ready() -> void:
 		for k in records:
 			records[k] = cf.get_value("records", k, records[k])
 		computer_id = String(cf.get_value("game", "computer", computer_id))
+		bmx_tyre = String(cf.get_value("game", "bmx_tyre", ""))
+		if not BikeBuild.TYRE_MODELS.has(bmx_tyre): bmx_tyre = ""
 		if not ComputerUnits.UNITS.has(computer_id): computer_id = ComputerUnits.DEFAULT
 		for id in ComputerUnits.UNITS:
 			var c = cf.get_value("computer_" + id, "cfg", {})

@@ -39,7 +39,7 @@ func _ready() -> void:
 ## play a tone by name (TONES), if this unit's beeper is on
 func tone(name: String) -> void:
 	if not ComputerUnits.opt(GameState.computer_id, "beep") or not _tones.has(name): return
-	if OS.get_environment("BMX_BEEP_PROBE") != "": print("BEEP ", name)
+	if Env.s("BMX_BEEP_PROBE") != "": print("BEEP ", name)
 	stream = _tones[name]
 	play()
 

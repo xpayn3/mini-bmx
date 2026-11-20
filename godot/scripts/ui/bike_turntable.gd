@@ -177,7 +177,7 @@ func _fit() -> void:
 
 func _process(dt: float) -> void:
 	if not visible: return
-	if OS.get_environment("BMX_TURN_YAW") != "": pivot.rotation.y = float(OS.get_environment("BMX_TURN_YAW"))   # tests: hold the turntable at this angle
+	if Env.s("BMX_TURN_YAW") != "": pivot.rotation.y = float(Env.s("BMX_TURN_YAW"))   # tests: hold the turntable at this angle
 	elif not _drag: pivot.rotation.y += SPIN * dt
 	if _rider != null and _rider.visible:
 		_hand_t += dt

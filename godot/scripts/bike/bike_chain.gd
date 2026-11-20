@@ -71,10 +71,8 @@ func _process(_dt: float) -> void:
 	# the chain runs the other way round to the path when pedalling forward
 	var phase := fposmod(-rig.crank_angle * float(cfg.ring_r), step * 2.0)
 	var seg := 1
-	for i in MAX_LINKS:
-		if i >= n:
-			mm.set_instance_transform(i, Transform3D(Basis.IDENTITY.scaled(Vector3.ZERO), Vector3.ZERO))
-			continue
+	mm.visible_instance_count = n   # only the links in use are drawn / updated
+	for i in n:
 		var s := fposmod(phase + i * step, total)
 		while seg < cum.size() - 1 and cum[seg] < s: seg += 1
 		while seg > 1 and cum[seg - 1] > s: seg -= 1

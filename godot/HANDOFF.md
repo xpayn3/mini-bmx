@@ -330,6 +330,13 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   replaces the `fork_lower` mesh (lowers + the model's front brake caliper) and moves its node to the fork's own axle offset (extras.wheelbase follows; physics reads it). The
   fork starts at dh's axle position, so the glb's `travel` (room before the lowers hit the crown, 0.18 / 0.17 m) caps the fork travel; the stock fork-leg decal slot is dropped.
   Frames with their own cockpit + fork (Tues, Fuzz) ignore the fork pick; the Goat (dh steer + fork) takes it. Test: `BMX_BUILD="suspension.fork_model=tues_fork"`.
+  **Saddles + dropper post** (garage Bars tab, SEAT; `build.seat = {model, post, post_h}`, `BikeBuild.SADDLES` / `POSTS`): the stock frame's saddle is a set of components in its frame mesh, cut by
+  `make_forks.py` into `assets/seats/dh_frame.glb` (frame without saddle; extras: stock saddle origin, seat tube top + direction) + `seats/saddle_dh.glb`; `seats/saddle_<id>.glb` are the Tues / Fuzz saddles
+  (from `parts/<id>_saddle.glb`, levelled). `BikeRig._swap_seat` rebuilds the frame mesh with the saddle as extra surfaces (so `_saddle()` / the rider's seat, paint by surface name and decals keep
+  working), raised along the seat tube by `post_h` with a generated post tube + collar when the post is "dropper". Test: `BMX_BUILD="seat.model=fuzz;seat.post=dropper;seat.post_h=0.15"`.
+  **Brake levers** (garage Bars tab, "Brake levers"; `build.bars.levers` stock / tues / fuzz, `BikeBuild.LEVERS`): `make_forks.py` cuts dh's levers (chrome blades + plastic bodies) out of the steer mesh
+  (`forks/dh_steer_nl.glb` whole, `dh_cockpit_nl.glb` fork-less) and places the models' levers (`parts/<id>_levers.glb`, Tues Brakes parts 16..51, Fuzz `Brake_levers`) so their grips' axis matches dh's bar axis and the clamp end sits
+  where dh's did (`forks/levers_<id>.glb`, written as plastic / chrome so `Handlebar.apply` moves them with width / rise); `BikeRig._swap_levers` adds them as surfaces of the steer mesh (hoses stay dh's). Test: `BMX_BUILD="bars.levers=fuzz"`.
   **Disc brakes** (garage Shocks tab, DISC BRAKES): `suspension.rotor` ("stock" / "tues" / "fuzz", `BikeBuild.ROTORS`; `assets/forks/rotor_<id>.glb` from
   `tools/export_rotors.py`: disc + carrier + bolts, relative to the axle, moved onto the stock rotors' planes) replaces the mesh of the wheels' split-off "rotor"
   (`BikeRig._swap_rotors`, keeps the heat-glow material; works on every frame). `suspension.rear_caliper` ("stock" / "tues" / "fuzz", `BikeBuild.REAR_CALIPERS`): on the stock frame
@@ -345,7 +352,18 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   **The rider always wears a helmet (no bare head, user decision):** `Rider.set_look` forces helmet on; hair only shows as the tuft / tail coming out under the back
   of the helmet (`Hair.HELMET_STYLES`: none = short, long, ponytail, braid; `hair.gd` braid = the ponytail tie, stiffer). Menus: title-menu Character > HELMET tab (models, hair style,
   hair colour), garage Kit tab + tuning card Look > Helmet (same pickers + hair colour row). Old saved `helmetOn = 0` is ignored.
+- **Action cams (GoPro-style, `rider/action_cam.gd`)**: one on the helmet (`look.camMount`, `ActionCam.HELMET_MOUNTS`: top / side /
+  chin bar / none; picked in the rider room Kit tab, tuning card Look › Helmet, title-menu Character › HEAD) and one on the bike
+  (`build.camera.mount`, `ActionCam.BIKE_MOUNTS`: none / handlebar / fork leg; garage Bars tab › ACTION CAM). `ActionCam.build("top")`
+  = the buckle + hinge; `build_arm(normal, body_at)` = pad + extension arm (side, chin); `build_clamp(axis, r, out, body_at)` = a tube
+  clamp + arm (bars, fork). The camera is always upright (lens +X) and always the `Body` child (the crash tear-off uses it).
+  Helmet spots are measured from the shell triangles (`Rider.cam_spots`: top = crown, side = left of the shell 7.5 cm under it, chin
+  = the lowest shell point well forward + 4.5 cm); bike spots from the meshes (`BikeRig._tube_at`: the bar a third of the way to the
+  right grip; `_leg_band`: the right fork lower, the caliper side is left), so new frames / bars / forks need no numbers.
+  Camera views: Helmet (`helmet`) and **Bike** (`bikecam`, `src: bike`) look out of the lens; C skips whichever has no camera.
+  Probe: `BMX_CAMMOUNT_PROBE=1` (`CAMMOUNT` lines); tests `BMX_LOOK=camMount=side`, `BMX_BUILD="camera.mount=fork" BMX_CAM=bikecam`.
 - Look: kits + a colour per part (helmet shell/peak, goggles, jersey, pants, gloves, shoes, knee pads).
+- **Belt** (`rider/belt.gd`, class `Belt`, a child of the pelvis mesh): hides where the jersey meets the trousers. The torso's bottom spine bone is locked to the hips (`Rider.set_spine(..., base)`) and the hem sits at `Belt.HEM_Y` inside the band, so leaning / tucking never makes jersey and trousers cross (they used to poke out one under the other). Styles (`look.beltStyle`, Kit › Belt in the rider room and tuning card Look › Clothes): webbing (cam buckle), leather (stitched, frame buckle, keeper, holes), ratchet (teeth, plastic buckle), elastic waistband (two stripes, label at the back); colours `look.belt` + `look.buckle` (buckle / stripe). Band textures (albedo + normal) are baked per style + colours and cached. Test: `BMX_LOOK=beltStyle=leather`, `BMX_GARAGE_HEAD=waist` frames the waist in the garage / rider room.
 - **Knee pads** (`rider/knee_pad.gd` + `shaders/knee_cap.gdshader`, one `KneePad` per leg (`KneePad.new(side)`, -1 =
   left), posed in `update_pose` and `pose_ragdoll`): articulated so no part ever spans the bend: the cap sits on the
   bisector of thigh / shin, facing out of the bend, and wraps the knee as a sphere shell; plates / guards + fabric sleeves
@@ -375,10 +393,52 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   Dusk, Night, Day / night cycle + the player's own. With the cycle on, Game runs the clock and re-applies 10× / s.
   Tests: `BMX_LIGHT_PRESET=Night`, `BMX_LIGHT=time=12,haze=2`, `BMX_PANEL=light`.
 
+### Boot intro + the start TV (CRT)
+- The boot splash is plain black (`boot_splash/show_image=false`); a plain launch (no command-line args, or `BMX_INTRO=1`)
+  plays `CrtIntro` (`scripts/ui/crt_intro.gd`, layer 60, its own 3D world in a SubViewport, ~18 s, any key / click / pad
+  button skips): a dark room at night, moonlight through broken blinds into volumetric fog, an old CRT on a low cabinet,
+  a silhouette in the half-open doorway. It **holds on black** (only the TV's red standby LED) while main builds the ride
+  world (below), then: TV on at 1.8 s, slow **Vertigo dolly zoom** over the whole intro (moves in while the FOV widens
+  so the frame at the TV goes 0.95 -> 0.40 m: the TV stays put, the room stretches away), a tear at 7 s (the figure is
+  gone after it), the signal drops out at 10.6 s, a second tear at 13.2 s (for a moment the figure stands inside the
+  room), at 16.5 s the TV **just switches off** (no squeeze to a line / dot) and every light goes with it, the haze too
+  (its temporal blend left the TV's red glow hanging for ~0.7 s): pitch dark, then the menu fades in over 3.5 s.
+  **Settings › Gameplay › Intro at start** (`boot_intro`) off = a still frame of it (`CrtIntro.still`: the room at
+  12 s, TV on and settled, silent, frozen after 8 frames) while the ride loads, ~2.2 s, then the menu.
+  `BMX_INTRO=still` forces that; `BMX_INTRO_SHOT_FROM` / `BMX_INTRO_SHOT_STEP` = when / how often test frames are saved.
+- **Ride built during the intro** (`main._prebuild_behind` / `_take_prebuilt`): while the intro holds on black, the
+  player's own ride `Game` (seed, bike, garage build, rider) is built in a never-drawn SubViewport with its own World3D
+  (`_ride_park`, process disabled). RIDE moves it into the scene (`reparent`) and frees the title backdrop: ~13 ms
+  instead of ~1.2-1.5 s. If the seed / bike / build / rider look or pose changed in the menus since (`_ride_sig_now`),
+  it's dropped and RIDE builds the normal way. Moving a Game fires `_exit_tree` on all its nodes: never tear down
+  state there that a living node still needs (`ride_audio` frees its C# synths on PREDELETE for that reason).
+  `BMX_NO_PREBUILD=1` = the old way.
+- **`CrtTv`** (`scripts/world/crt_tv.gd`): the user's TV model (`assets/tv/tv.fbx` + `tv_albedo.jpg`, `tv_normal.png`,
+  `tv_orm.png` made from the download's TGA maps: Unity MaskMap R metal / G AO / A smoothness -> ORM), ~38 cm wide, origin
+  on the floor, glass +Z. `shaders/crt_screen.gdshader` draws the model's maps and, on the glass UV island (rotated in the
+  UVs: UV.y = left -> right, UV.x = bottom -> top), live TV static (re-rolled every frame, drifting bands, streaks, rolling
+  bar) with the RUNOUT lettering (drawn once with the display font into a texture and baked with mipmaps) wobbling,
+  slipping sync, jumping and splitting colour; scanlines, shadow mask, ghost. `power_on(delay)` (white line opens up,
+  snow, vertical roll settles), `power_off()` (instant), `glitch(secs, amount)`, small random blips while on. Front panel
+  power LED (`LED_AT`): red standby, blinking amber warming up, green on. A small light in front of the glass glows with
+  the picture (no specular: it put a hot spot on the glass). `gain` = screen brightness (5 outdoors).
+- **Sound** = the user's recording `assets/audio/tv_static.mp3` (old TV static + channel changes) with its near-silent
+  stretches never played: only its four loud bursts (`STATIC_CUTS`) are used, chopped into 0.3-0.6 s slices fired every
+  0.07-0.16 s on 6 voices (3-5 overlap: one dense hiss that never repeats), loudness following the picture; tears /
+  power on / off play a louder slice on top. World TVs are 3D sound (`positional`) and are muted while the intro plays
+  (`CrtTv.mute_world`); the intro's TV plays flat.
+- **Start TV** (`Game.place_start_tv`, from `respawn`): the same TV at `START_TV_SCALE` 2.5 (~0.95 m wide), 10 m ahead /
+  5.5 m to the side of every start (any world), tilted to the slope, glass towards the camera, switches on 1.4 s in.
+  Visual only (no collision). `BMX_NO_TV=1` leaves it out.
+- The texture has a Magnavox logo and anime stickers on it: check before sharing the game.
+- Tests: `BMX_INTRO_SHOTS=dir/prefix` saves a frame every 0.5 s (+ `static_voices` / `hiss` lines) and one of the menu
+  after, then quits; `+ BMX_INTRO_RIDE=1` then presses RIDE (`INTRO ride start ms=`) and saves `_ride.png`;
+  `BMX_INTRO_AT=secs` freezes the intro there.
+
 ### Title screen (golden hour lookout)
 - `Game.set_scenic(true)` while the menu is up: a low warm sun ahead-right of the view, golden sky mode in
   `sky_hdri.gdshader` (`golden`: warm gradient + sun glow, the HDRI's clouds re-lit), warm long fog.
-- Camera `vista` mode (`CameraRig.VISTA`, not in the C cycle): behind/above the rider facing `_best_view()`
+- Camera `vista` mode (`CameraRig.VISTA`, not in the C cycle): behind/above the rider facing `_title_heading` (the hand-picked `TITLE_SPOT`)
   (clear near eye line + hills far off), slow sway, drag turns it.
 - `FarHills` (`scripts/world/far_hills.gd`): coarse ground + far trees out to 2.6 km, built on a worker
   thread; past ~450 m it adds rolling ridges (title screen only) so every seed has a hilly skyline.
@@ -476,7 +536,12 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   only past `SNAP_STRAIN` (17 %); the halves whip back towards their stakes. Stop / back off / slide off its end / crash before
   that and it springs back (`SETTLE` 1.3 s) and is whole again (`Terrain.restore_tape`). Strips are drawn through a Catmull-Rom
   spline (`SUBD` 4 pieces per sim segment): smooth when floating, no extra sim cost. Test: `BMX_TAPE=dir/prefix` (or `1`),
-  `BMX_TAPE_SPEED`, `BMX_TAPE_STOP=secs` (`TAPE` lines: state, strain).
+  `BMX_TAPE_SPEED`, `BMX_TAPE_STOP=secs`, `BMX_TAPE_OFF=m` (aim along the span) (`TAPE` lines: state, strain).
+  The hit is a **swept test** (`bike_physics.gd`: the front tyre's leading edge this step vs each span's line), so no speed
+  slips through; skipped only when the wheels are above the tape. While held, the span is **posed exactly** each frame
+  (`TapeSim._pose_held`: straight once taut, parabola sag while slack) on the drawn front tyre (`Game` passes
+  `rig.wheel_f`), not simulated, so it never trails the bike. Strips draw as one ArrayMesh from packed arrays (no
+  per-vertex calls), ground heights are cached per point, the strip shader is warmed at ride start.
 - Torn race tape as cloth-like ribbons, wind over the grass, drifting cloud shadows, speed blur / FOV.
 
 ### Photo mode (O, `scripts/game/photo_mode.gd`)
@@ -701,6 +766,7 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `-s res://tools/terrain_cs_cmp.gd --headless` | C# vs GDScript terrain must be EXACT |
 | `-s res://tools/trail_grow_probe.gd --headless` | grows the endless trail 6×: old trail unchanged, C# = GDScript, timings; must say `PASS` |
 | `-s res://tools/cactus_probe.gd --headless` | cactus kinds + Voronoi fracture: closed pieces, volumes add up; must say `PASS` |
+| `-s res://tools/far_hills_probe.gd --headless [-- seed]` | the title / ride backdrop grid: C# batch vs GDScript per point (must match), far tree count; must say `PASS` |
 | `-s res://tools/wood_edge_probe.gd --headless` | drives angled lines onto every wooden ramp; must report `walls=0` |
 | `BMX_FW_PRESET=<name>`, `BMX_FW=pitch=1.3,poe=60`, `BMX_FW_PREVIEW=<m/s>` | freewheel preset / values / Preview for a test run (not saved) |
 | `BMX_FLOW_DEMO=1` | HUD flow meter: adds a flow level every 0.9 s from 3 s up to MAX, then lets it drain (pair with `BMX_DUST_SHOTS` for screenshots) |
@@ -797,10 +863,13 @@ Known, not fixed (lower priority from the code review):
 - HUD hotkeys (P/K/L/H) work on the title screen.
 - Rebinding: no conflict detection; pad rebind can't be cancelled.
 - Garage: test env `BMX_POSE` values get saved if you then touch a slider; config written on every slider tick.
-- Stale code: `set_torso` (unused), `hood_hem`, `_grid_indices`, `_time`, some one-off `tools/*.gd`
+- Stale code: `hood_hem`, `_time`, some one-off `tools/*.gd`
   (`fork_measure`, `wheel_measure(2)`, `inspect_glb`, `hdri_sun`).
-- Perf ideas: ragdoll terrain sampling, HUD stylebox allocations per frame, fx dust buffer upload when idle,
-  `terrain.jump()` array allocation per physics step.
+- Perf (done 2026-11-20): ragdoll ground sampled once per substep, HUD boxes cached (`UITheme.draw_box`), fx dust /
+  chunk buffers skip work when idle, `jump_mask` instead of `jump()` per step, wind / splash bed in C# (`RideBedSynth.cs`),
+  test flags cached (`Env.s`), torn tape drawn from packed arrays, rider pose inputs in one reused dictionary
+  (`Game._pose_in`), ride log = one flat buffer, FarHills grid via batched C# (`far_ground` / `far_colors`), sticker
+  fits cached per frame + label (`BikeRig._fit_cache`), chain draws only its links in use.
 
 Ideas offered, not started:
 - Tyre tracks option **B**: a painted top-down "track map" the ground shader reads → real ruts in mud/sand.
