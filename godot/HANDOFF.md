@@ -299,6 +299,19 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   (~0.42 rad) at `whipSnap`, held while both stay there, speed mostly kept (`whipCarry` cuts the slide scrub); "WHIP!" after
   0.3 s. Sticks must pass `whipTrigger` and stay there 0.12 s (`_whip_arm`); the ride log has `whip`, `whip_hold`, `raw_right_x`, `raw_left_x` columns; `whip_hold` keeps control `whipCatch` s after letting go so the drift is caught (without it the rear spun out to the
   wash-out angle). Test: `BMX_WHIP=secs` (+ `BMX_WHIP_T0`, `BMX_STRAIGHT=1`) prints `WHIP` lines.
+- **Balance manual / downhill pump / perfect landing** (2026-11-20, side-on BMX game feel; Tune group `Balance & pump`,
+  tuning card Ride › Balance): the manual / wheelie is a **tipping balance** (`BikePhysics._balance_step`, `man_a` / `man_w`):
+  below `manBalance` the front falls, past it the bike tips over backwards faster and faster; the body stick back pulls it up
+  (`manLift`), pedalling while pulling helps (`manPedal`), the rear brake (`manBrake`) / leaning forward drop it. Past
+  `manBalance + manLoop` = LOOPED OUT (speed x0.72, front thrown down, no crash). In the sweet spot (`manZone`) a small speed
+  push (`manBoost`). `manBalanceOn = 0` = the old self-holding manual. **Hop held with both wheels down pumps**: + `pumpHold` x g
+  x slope on a down slope, - `pumpHoldUp` on an up slope (`pump_push`, `pump_gain`); a press spent pumping a downhill
+  doesn't hop when let go (unless a lip is right there). A jump (> 0.45 s air) landed within `landPerfect` of the slope =
+  PERFECT LANDING + `landBoost` m/s. **HUD bars** (bottom centre, `hud.gd` `SlimBar` look: 4 px track, caption left, value
+  right): `HopBar` (hop / pop charge in the ride accent, full mark, flash on release), `PumpBar` (centre-zero: green = gaining,
+  red = losing, km/h won this rhythm), `BalanceMeter` (sweet spot green, loop-out end red, marker = the front's angle, time).
+  Tests: `BMX_BODY=balance|overpull` (+ `BMX_STRAIGHT=1 BMX_MAN_PROBE=1`, `MAN` lines), `BMX_FOLLOW=1 BMX_PUMPRIDE=down|all|off`
+  (`PUMPRIDE` lines), `BMX_TRICK=…` prints `LANDERR`.
 - **Aerodynamics** (`aero_k` in `bike_physics.gd`): the air drag scales with the body: right stick forward on the ground = a race tuck
   (chest folded over the bars, hips back, knees bent) cuts drag by `tuckDrag` (0.42; half that while pedalling), stick back = sat up,
   `upDrag` more (an air brake). Straight test: 65.9 → 68.3 km/h in 20 s.

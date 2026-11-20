@@ -165,6 +165,24 @@ const DEFS := [
 		["tuckDrag", "Tuck: air drag cut (stick forward)", 0.42, 0, 0.8, 0.02, "×"],
 		["upDrag", "Sit up: extra air drag (stick back)", 0.3, 0, 1, 0.05, "×"],
 	]],
+	# side-on BMX game feel: the manual / wheelie is a balance you work, holding hop on the downhills pumps speed,
+	# a landing in line with the ground gives speed back
+	["Balance & pump", [
+		["manBalanceOn", "Manual / wheelie: you balance it (0 = holds itself)", 1, 0, 1, 1, ""],
+		["manBalance", "Balance point (front up)", 0.55, 0.3, 0.9, 0.01, "rad"],
+		["manGravity", "Falls away from the balance point", 7.0, 2, 16, 0.25, "rad/s²"],
+		["manLift", "Pull on the bars (stick back)", 9.0, 3, 20, 0.25, "rad/s²"],
+		["manPedal", "A pedal stroke lifts it", 3.0, 0, 8, 0.25, "rad/s²"],
+		["manBrake", "Rear brake drops it", 12.0, 0, 30, 0.5, "rad/s²"],
+		["manDamp", "Damping", 1.6, 0, 6, 0.1, "/s"],
+		["manLoop", "Loops out past the balance point by", 0.42, 0.15, 0.7, 0.01, "rad"],
+		["manZone", "Sweet spot width", 0.14, 0.04, 0.3, 0.01, "rad"],
+		["manBoost", "Sweet spot speed push", 0.5, 0, 2, 0.05, "m/s²"],
+		["pumpHold", "Hop held downhill: pump push (× slope)", 0.45, 0, 1.5, 0.05, "×g"],
+		["pumpHoldUp", "Hop held uphill: pump cost (× slope)", 0.4, 0, 1.5, 0.05, "×g"],
+		["landPerfect", "Perfect landing within", 0.14, 0.03, 0.4, 0.01, "rad"],
+		["landBoost", "Perfect landing speed boost", 1.6, 0, 5, 0.1, "m/s"],
+	]],
 	# the demo rider (F2, tuning card › Ride › Demo; not ride feel, so presets leave it alone)
 	["Demo rider", [
 		["demoPace", "Cornering pace (1 = safe pro)", 1.0, 0.4, 1.7, 0.05, "×"],
