@@ -383,8 +383,11 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   world (below), then: TV on at 1.8 s, slow **Vertigo dolly zoom** over the whole intro (moves in while the FOV widens
   so the frame at the TV goes 0.95 -> 0.40 m: the TV stays put, the room stretches away), a tear at 7 s (the figure is
   gone after it), the signal drops out at 10.6 s, a second tear at 13.2 s (for a moment the figure stands inside the
-  room), at 16.5 s the TV **just switches off** (no squeeze to a line / dot) and every light goes with it: pitch dark,
-  then the menu fades in.
+  room), at 16.5 s the TV **just switches off** (no squeeze to a line / dot) and every light goes with it, the haze too
+  (its temporal blend left the TV's red glow hanging for ~0.7 s): pitch dark, then the menu fades in over 3.5 s.
+  **Settings › Gameplay › Intro at start** (`boot_intro`) off = a still frame of it (`CrtIntro.still`: the room at
+  12 s, TV on and settled, silent, frozen after 8 frames) while the ride loads, ~2.2 s, then the menu.
+  `BMX_INTRO=still` forces that; `BMX_INTRO_SHOT_FROM` / `BMX_INTRO_SHOT_STEP` = when / how often test frames are saved.
 - **Ride built during the intro** (`main._prebuild_behind` / `_take_prebuilt`): while the intro holds on black, the
   player's own ride `Game` (seed, bike, garage build, rider) is built in a never-drawn SubViewport with its own World3D
   (`_ride_park`, process disabled). RIDE moves it into the scene (`reparent`) and frees the title backdrop: ~13 ms

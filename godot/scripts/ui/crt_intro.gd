@@ -28,9 +28,15 @@ var cam: Camera3D
 var tv: CrtTv
 var moon: SpotLight3D
 var moon_fill: OmniLight3D
+var env: Environment
 var figure: Node3D
 var figure2: Node3D
 var hold := false        # true: stay on black (only the standby LED) while main loads the ride behind it
+var still := false       # Settings › Intro off: one still frame of it (TV on, RUNOUT) while loading, then done
+const STILL_T := 12.0    # the moment of the intro the still frame shows
+const STILL_HOLD := 2.2  # s it stays up after loading
+var _still_left := STILL_HOLD
+var _still_frames := 0
 var overlay: ColorRect
 var t := 0.0
 var _done := false
@@ -49,7 +55,9 @@ func _ready() -> void:
 	CrtTv.mute_world = true
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	if OS.get_environment("BMX_INTRO_AT") != "": _freeze = float(OS.get_environment("BMX_INTRO_AT"))
+	if still: _freeze = STILL_T
 	_shots = OS.get_environment("BMX_INTRO_SHOTS")
+	if OS.get_environment("BMX_INTRO_SHOT_FROM") != "": _next_shot = float(OS.get_environment("BMX_INTRO_SHOT_FROM"))
 	root = Control.new()
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -77,6 +85,9 @@ func _ready() -> void:
 	sm.shader.code = OVERLAY
 	overlay.material = sm
 	root.add_child(overlay)
+	if still:   # pose the room at that moment, without replaying its tears into the picture
+		t = STILL_T
+		_glitched = true; _lost = true; _glitched2 = true
 	_update(0.0)
 
 func _input(e: InputEvent) -> void:
@@ -95,15 +106,24 @@ func _process(delta: float) -> void:
 	elif not hold:
 		t += dt
 	if _skip >= 0.0: _skip += dt
-	_update(dt)
-	if _shots != "" and t >= _next_shot and t < T_END:
-		_next_shot += 0.5
+	if _shots != "" and (t >= _next_shot or (still and _still_frames == 12)) and t < T_END:
+		_next_shot += float(OS.get_environment("BMX_INTRO_SHOT_STEP")) if OS.get_environment("BMX_INTRO_SHOT_STEP") != "" else 0.5
 		var img := get_viewport().get_texture().get_image()
 		img.save_png("%s_%04.1f.png" % [_shots, t])
 		var voices := 0
 		for v in tv._players:
 			if v[0].playing: voices += 1
 		print("INTROSHOT %.1f static_voices=%d hiss=%.2f" % [t, voices, tv._hiss])
+	if still:   # draw the frame a few times (lights, fog settle), then freeze the picture
+		_still_frames += 1
+		if _still_frames == 8: vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
+		if not hold: _still_left -= dt
+		if _still_left <= 0.0 or _skip >= 0.0:
+			_done = true
+			CrtTv.mute_world = false
+			finished.emit()
+		return
+	_update(dt)
 	if t >= T_END or _skip >= 0.35:
 		_done = true
 		CrtTv.mute_world = false
@@ -130,6 +150,8 @@ func _update(_dt: float) -> void:
 	# moonlight: the eyes adjust after the TV comes on; when the TV goes off every light goes with it (pitch dark,
 	# only the standby LED)
 	var moon_k := smoothstep(T_ON + 0.2, T_ON + 2.6, t) * (0.0 if t >= T_OFF else 1.0)
+	# the haze goes too: its temporal blend kept the TV's red glow hanging in the air for ~0.7 s after the cut
+	env.volumetric_fog_enabled = t < T_OFF
 	moon.light_energy = 7.0 * moon_k
 	moon_fill.light_energy = 0.08 * moon_k
 	# Vertigo: dolly in, lens widens so the frame height at the TV goes H0 -> H1 (the TV grows a little)
@@ -154,7 +176,7 @@ static func _smoother(x: float) -> float:
 func _build_room() -> void:
 	var w := Node3D.new()
 	vp.add_child(w)
-	var env := Environment.new()
+	env = Environment.new()
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color(0.012, 0.018, 0.04)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
@@ -246,6 +268,7 @@ func _build_room() -> void:
 		tp.rotation.y = deg_to_rad(8.0 - i * 9.0)
 	tv = CrtTv.new()
 	tv.positional = false   # its own world: no listener there, play it flat
+	tv.silent = still
 	tv.position = Vector3(-0.08, 0.5, -1.72)
 	tv.rotation.y = deg_to_rad(4.0)
 	tv.light_energy = 1.1
@@ -253,6 +276,7 @@ func _build_room() -> void:
 	tv.blips = false
 	w.add_child(tv)
 	_tv_at = tv.position + tv.basis * CrtTv.GLASS
+	if still: tv.settle_on()
 	# a moon outside, its light through the blinds into the fog
 	var moon_disc := MeshInstance3D.new(); var md := SphereMesh.new(); md.radius = 0.9; md.height = 1.8; moon_disc.mesh = md
 	var mm := StandardMaterial3D.new(); mm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED; mm.albedo_color = Color(0.75, 0.82, 1.0)
