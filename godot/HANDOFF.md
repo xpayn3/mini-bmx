@@ -555,6 +555,12 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   Smoke, Glacier, Dusk Yellow, Moss; `GoggleLens.lut(id)` = a cached 48^3 Texture3D for `env.adjustment_color_correction` (applied
   after tonemap). Picked on the ride setup page (GOGGLES · LENS cards, live preview on the bike), `GameState.goggle_lens` (save.cfg
   `[game] lens`), `BMX_LENS=<id>` for tests; `Game._update_light` follows a change. Probe: `-s res://tools/lens_lut_probe.gd -- <dir>`.
+  Lens cards show the newest helmets' own goggle model (`GoggleLens.make_goggles`: `helmet_goggles` of helmet_tld.glb, its
+  magenta lens texels recoloured by `shaders/goggle_lens.gdshader`), rendered by `bike_thumbs`; `BMX_GOG_VIEW=x,y,z` turns the view.
+- **Time-of-day slider** (`ui/time_slider.gd`, preloaded, RACE step): the day as a sky strip with the sun's arc (`elev()` =
+  `Game.sun_elev_deg`), sunrise / sunset marks, golden-hour bands, sun / moon handle with the time + part of day; drag / click /
+  wheel, pad left / right = 15 min (`nav_step`), snaps to 5 min; saves `LightSettings` "time" on release. Quick chips + a
+  DAY / NIGHT CYCLE toggle under it replace the old preset cards (`TimeIcon` still draws the sky colours).
 - **Glare guard** (`Game._glare_guard`, every frame): the camera facing a sun under ~30 deg eases off the sun's haze light,
   sun scatter, bloom, sky brightness and the dust's sun light (up to -80 / -100 / -65 / -38 / -60 %), smoothed over ~0.3 s, so a
   descent straight into the sunrise / sunset stays readable. `BMX_GLARE_OFF=1` compares, `BMX_GLARE_PROBE=1` prints `GLARE` lines.

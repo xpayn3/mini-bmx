@@ -150,3 +150,26 @@ static func _roll(x: float, amt: float) -> float:
 	if x <= KNEE: return x
 	var t := (x - KNEE) / (1.0 - KNEE)
 	return KNEE + (1.0 - KNEE) * (t - amt * 0.35 * t * t)
+
+
+## the lens cards' picture: the newest helmets' own goggle model (helmet_goggles in helmet_tld.glb) with its lens in this
+## lens's colour (shaders/goggle_lens.gdshader); rendered by PartThumbs (main.gd `bike_thumbs`)
+const GOGGLE_GLB := "res://assets/helmets/helmet_tld.glb"
+static func make_goggles(id: String) -> Node3D:
+	var src: Node = (load(GOGGLE_GLB) as PackedScene).instantiate()
+	var g := src.find_child("helmet_goggles", true, false) as MeshInstance3D
+	var root := Node3D.new()
+	if g == null:
+		src.free()
+		return root
+	var mi := MeshInstance3D.new()
+	mi.mesh = g.mesh
+	var sm := ShaderMaterial.new()
+	sm.shader = load("res://shaders/goggle_lens.gdshader")
+	var om := g.mesh.surface_get_material(0) as StandardMaterial3D
+	if om: sm.set_shader_parameter("albedo_tex", om.albedo_texture)
+	sm.set_shader_parameter("lens_tint", tint(id))
+	mi.material_override = sm
+	root.add_child(mi)
+	src.free()
+	return root
