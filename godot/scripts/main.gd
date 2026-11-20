@@ -284,7 +284,9 @@ func _show_menu() -> void:
 	menu_quit.offset_right = -MENU_EDGE; menu_quit.offset_top = MENU_EDGE
 	menu_quit.offset_left = -MENU_EDGE - 140; menu_quit.offset_bottom = MENU_EDGE + Tokens.H_CHIP + Tokens.S2
 	menu.add_child(menu_quit)
-	outer.add_child(UITheme.text("v1.0  ·  Godot %s" % Engine.get_version_info().string, Tokens.INK_SOFT, Tokens.T_XS))
+	var ver := UITheme.text("v1.0  ·  Godot %s" % Engine.get_version_info().string, Tokens.INK_SOFT, Tokens.T_XS)
+	ver.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	outer.add_child(ver)
 	_menu_page_main()
 	if Env.s("BMX_MENU_PAGE") == "setup": _menu_page_setup(int(Env.s("BMX_SETUP_STEP")))   # tests: the ride setup page (BMX_SETUP_STEP=0..3)
 
@@ -459,19 +461,22 @@ func _menu_page_main() -> void:
 	_menu_clear()
 	menu_page = "main"
 	var vb := menu_col
-	var ride := _menu_button("RIDE", "Pick a bike and the time of day", _menu_page_setup, true)
+	var ride := _menu_button("RIDE", "Pick a bike and the time of day", _menu_page_setup, true, true)
 	vb.add_child(ride)
-	vb.add_child(_menu_button("DEMO", "An AI rider rides; tune everything live", _start_demo))
-	vb.add_child(_menu_button("GARAGE", "Paint, wheels, bars, shocks, gears", _open_garage))
-	vb.add_child(_menu_button("RIDER", "Riding position on the rollers, kit", _open_garage.bind("rider")))
+	vb.add_child(_menu_button("DEMO", "An AI rider rides; tune everything live", _start_demo, false, true))
+	vb.add_child(_menu_button("GARAGE", "Paint, wheels, bars, shocks, gears", _open_garage, false, true))
+	vb.add_child(_menu_button("RIDER", "Riding position on the rollers, kit", _open_garage.bind("rider"), false, true))
 	vb.add_child(UITheme.spacer(Tokens.S2))
 	# world seed
-	vb.add_child(UITheme.caption("WORLD"))
+	var world_cap := UITheme.caption("WORLD")
+	world_cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(world_cap)
 	var seed_row := HBoxContainer.new()
 	seed_row.add_theme_constant_override("separation", Tokens.S2)
 	var se := LineEdit.new()
 	se.text = str(GameState.seed)
 	se.placeholder_text = "World seed"
+	se.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	se.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	se.custom_minimum_size.y = Tokens.H_CHIP
 	se.tooltip_text = "World seed: type a number and press Enter"
@@ -483,7 +488,9 @@ func _menu_page_main() -> void:
 	vb.add_child(seed_row)
 	vb.add_child(UITheme.spacer(Tokens.S4))
 	# secondary: a quiet list
-	vb.add_child(UITheme.make_button("SETTINGS", _open_settings, "link", Tokens.T_XL))   # controls are a tab in it
+	var sett := UITheme.make_button("SETTINGS", _open_settings, "link", Tokens.T_XL)   # controls are a tab in it
+	sett.alignment = HORIZONTAL_ALIGNMENT_CENTER   # the title menu is centred in its card
+	vb.add_child(sett)
 	if is_instance_valid(menu_quit): menu_quit.visible = true
 	menu_focus = ride
 	ride.grab_focus.call_deferred()
@@ -1065,12 +1072,13 @@ func _setup_next() -> void:
 	else: _start_ride()
 
 ## a big menu button: display-font title (+ optional small line under it); primary = the yellow one
-func _menu_button(text: String, sub: String, cb: Callable, primary := false) -> Button:
+func _menu_button(text: String, sub: String, cb: Callable, primary := false, centred := false) -> Button:
 	var b := UITheme.make_button("", cb, "menu")   # one look for every line: the focused one is yellow (console cursor)
 	b.custom_minimum_size.y = Tokens.H_HERO if primary else Tokens.H_SUB
 	var m := MarginContainer.new()
 	m.set_anchors_preset(Control.PRESET_FULL_RECT)
 	m.add_theme_constant_override("margin_left", Tokens.S5 + Tokens.S2)
+	if centred: m.add_theme_constant_override("margin_right", Tokens.S5 + Tokens.S2)
 	m.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var col := VBoxContainer.new()
 	col.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -1079,6 +1087,8 @@ func _menu_button(text: String, sub: String, cb: Callable, primary := false) -> 
 	col.add_child(UITheme.display(text, Tokens.T_3XL if primary else Tokens.T_2XL + Tokens.S1))
 	if sub != "":
 		col.add_child(UITheme.text(sub, Tokens.INK if primary else Tokens.INK_SOFT, Tokens.T_SM))
+	if centred:
+		for l in col.get_children(): (l as Label).horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	m.add_child(col)
 	b.add_child(m)
 	return b
