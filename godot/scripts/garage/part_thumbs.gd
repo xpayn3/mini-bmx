@@ -23,9 +23,11 @@ func _init() -> void:
 	transparent_bg = true
 	msaa_3d = Viewport.MSAA_4X
 	render_target_update_mode = SubViewport.UPDATE_DISABLED
+	process_mode = Node.PROCESS_MODE_ALWAYS   # saved pictures decode in _process, also behind a paused game
 
 
 func _ready() -> void:
+	_prune_disk()
 	var env := Environment.new()
 	env.background_mode = Environment.BG_CLEAR_COLOR
 	var sky := Sky.new()
@@ -63,16 +65,33 @@ func _ready() -> void:
 func request(key: String, make: Callable, view: Vector3, cb: Callable) -> void:
 	if _cache.has(key):
 		cb.call(_cache[key]); return
-	if _disk_path(key) != "" and FileAccess.file_exists(_disk_path(key)):   # pictured in an earlier session
-		var img := Image.load_from_file(_disk_path(key))
-		if img != null and not img.is_empty():
-			_cache[key] = ImageTexture.create_from_image(img)
-			cb.call(_cache[key]); return
 	if _waiting.has(key):
 		_waiting[key].append(cb); return
 	_waiting[key] = [cb]
+	if FileAccess.file_exists(_disk_path(key)):   # pictured in an earlier session: decoded a few per frame (_process)
+		_disk_queue.append([key, make, view])
+		return
 	_queue.append([key, make, view])
 	if not _busy: _run()
+
+## saved pictures waiting to be decoded: a page full of cards decoded at once was a ~70 ms hitch
+var _disk_queue: Array = []
+const DISK_BUDGET_US := 4000
+
+func _process(_dt: float) -> void:
+	var t0 := Time.get_ticks_usec()
+	while not _disk_queue.is_empty() and Time.get_ticks_usec() - t0 < DISK_BUDGET_US:
+		var job: Array = _disk_queue.pop_front()
+		var img := Image.load_from_file(_disk_path(job[0]))
+		if img == null or img.is_empty():   # unreadable: make it again
+			_queue.append(job)
+			if not _busy: _run()
+			continue
+		var tex := ImageTexture.create_from_image(img)
+		_cache[job[0]] = tex
+		for cb in _waiting.get(job[0], []):
+			if (cb as Callable).is_valid(): cb.call(tex)
+		_waiting.erase(job[0])
 
 
 func _run() -> void:
@@ -248,9 +267,29 @@ static func bike_key(id: String) -> String:
 	var sig := var_to_str([THUMB_VER, ProjectSettings.get_setting("application/config/version", ""), SIZE, GameState.bike_config_for(id)])
 	return "bike|%s|%s" % [id, sig.md5_text()]
 
+## Every picture is saved to disk and made once, ever: each one builds a whole bike / part / rider and
+## costs ~30-120 ms, and making them while you click through the garage tabs was the stutter. Their keys
+## hold everything that changes how they look (the memory cache relied on that already); the studio
+## version + game version are added here, so a studio or game change makes new ones. Kept to DISK_MAX
+## files (the oldest go, once a session).
+const DISK_MAX := 3000
+static var _pruned := false
 static func _disk_path(key: String) -> String:
-	if not key.begins_with("bike|"): return ""
+	if not key.begins_with("bike|"):
+		key = "v%d|%s|%s" % [THUMB_VER, ProjectSettings.get_setting("application/config/version", ""), key]
 	return "%s/%s.png" % [DISK_DIR, key.md5_text()]
+
+static func _prune_disk() -> void:
+	if _pruned: return
+	_pruned = true
+	var files := DirAccess.get_files_at(DISK_DIR)
+	if files.size() <= DISK_MAX: return
+	var list := []
+	for f in files:
+		list.append([FileAccess.get_modified_time(DISK_DIR + "/" + f), f])
+	list.sort()
+	for i in list.size() - DISK_MAX:
+		DirAccess.remove_absolute(DISK_DIR + "/" + list[i][1])
 
 ## a whole bike (stock frame + the player's garage build when the frame takes one), for the ride setup cards
 static func make_bike(id: String) -> Node3D:
