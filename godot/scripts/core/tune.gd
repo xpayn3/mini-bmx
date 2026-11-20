@@ -178,10 +178,16 @@ const DEFS := [
 		["manLoop", "Loops out past the balance point by", 0.42, 0.15, 0.7, 0.01, "rad"],
 		["manZone", "Sweet spot width", 0.14, 0.04, 0.3, 0.01, "rad"],
 		["manBoost", "Sweet spot speed push", 0.5, 0, 2, 0.05, "m/s²"],
+		["manTurn", "Manual / wheelie: turning on the back wheel", 0.65, 0, 1, 0.05, "×"],
+		["manLoopKeep", "Looped out: speed kept", 0.72, 0.3, 1, 0.02, "×"],
+		["manSlideCatch", "Front set down when the rear slides past (× slide limit)", 0.7, 0.3, 1, 0.05, "×"],
+		["manSprintLift", "Sprint stamp from slow lifts the front", 1.1, 0, 2.5, 0.05, "×"],
 		["pumpHold", "Hop held downhill: pump push (× slope)", 0.45, 0, 1.5, 0.05, "×g"],
 		["pumpHoldUp", "Hop held uphill: pump cost (× slope)", 0.4, 0, 1.5, 0.05, "×g"],
+		["pumpMinSpeed", "Pump works from", 2.0, 0, 8, 0.25, "m/s"],
 		["landPerfect", "Perfect landing within", 0.14, 0.03, 0.4, 0.01, "rad"],
 		["landBoost", "Perfect landing speed boost", 1.6, 0, 5, 0.1, "m/s"],
+		["landPerfectAir", "Perfect landing: from air time", 0.45, 0.1, 1.5, 0.05, "s"],
 	]],
 	# the demo rider (F2, tuning card › Ride › Demo; not ride feel, so presets leave it alone)
 	["Demo rider", [

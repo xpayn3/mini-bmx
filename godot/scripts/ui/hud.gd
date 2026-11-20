@@ -1374,7 +1374,7 @@ class HopBar extends Control:
 	var _last_k := 0.0
 
 	func tick(st: BikePhysics, dt: float) -> void:
-		var show: bool = st.hop_bar_show and absf(st.pump_push) < 0.05 and not st.crash_on
+		var show: bool = st.hop_bar_show and st.pump_press_t < 0.25 and not st.crash_on   # a press pumping a downhill won't hop
 		if _was and not show and _last_k > 0.15 and (st.hop_t > 0.0 or st.kick_t > 0.0 or st.air):
 			fire = 1.0
 		_was = show
@@ -1420,9 +1420,9 @@ class PumpBar extends Control:
 	var gain_s := 0.0
 
 	func tick(st: BikePhysics, dt: float) -> void:
-		var live := absf(st.pump_push) > 0.05 or absf(st.pump_gain) > 0.6
-		a = move_toward(a, 1.0 if (live and not st.crash_on) else 0.0, dt * (8.0 if live else 2.0))
-		var full: float = 0.45 * 9.81 * 0.3   # the push on a ~17 deg back side = a full half
+		var live: bool = (st.pump_on and not st.air) or absf(st.pump_gain) > 0.6
+		a = move_toward(a, 1.0 if (live and not st.crash_on) else 0.0, dt * (12.0 if live else 2.0))
+		var full: float = 0.45 * 9.81 * 0.12   # the push on a ~7 deg back side = a full half
 		push_s = lerpf(push_s, clampf(st.pump_push / full, -1.0, 1.0), minf(1.0, dt * 30.0))
 		gain_s = lerpf(gain_s, st.pump_gain, minf(1.0, dt * 12.0))
 		visible = a > 0.01
@@ -1454,8 +1454,8 @@ class BalanceMeter extends Control:
 	var zone_glow := 0.0
 
 	func tick(st: BikePhysics, dt: float) -> void:
-		var up := st.man_a > 0.04 and not st.crash_on and not st.air
-		a = move_toward(a, 1.0 if up else 0.0, dt * (10.0 if up else 4.0))
+		var up := (st.man_a > 0.04 or st.man_pull > 0.0) and not st.crash_on and not st.air
+		a = move_toward(a, 1.0 if up else 0.0, dt * (16.0 if up else 4.0))
 		ang_s = lerpf(ang_s, st.man_a, minf(1.0, dt * 40.0))
 		zone_glow = move_toward(zone_glow, 1.0 if st.man_zone else 0.0, dt * 10.0)
 		visible = a > 0.01

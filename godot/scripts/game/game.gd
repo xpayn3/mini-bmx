@@ -692,7 +692,7 @@ func start_crash(reason: String) -> void:
 	if phys.crash_on: return
 	if rope_probe: print("ROPE CRASH ", reason, " at ", Vector3(phys.x, phys.y, phys.z))
 	_rd_air.resize(0)   # crash dust: per-part "was in the air" flags start fresh
-	if Env.s("BMX_TRICK") != "": print("CRASH ", reason, " v=%.1f air=%s" % [phys.v, phys.air])   # tests
+	if Env.s("BMX_TRICK") != "" or Env.s("BMX_MAN_PROBE") != "": print("CRASH ", reason, " v=%.1f air=%s pitch=%.2f gp=%.2f man=%.2f lean=%.2f slip=%.2f" % [phys.v, phys.air, phys.pitch, phys._g_pitch, phys.man_a, phys.lean, phys.slip])   # tests
 	var pts: Array = rider.joints_world()
 	var f := phys.fwd()
 	# the body carries on with the bike's own motion (no extra pop up: it used to throw the body into the air)
