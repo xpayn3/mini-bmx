@@ -180,6 +180,16 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - **Physics overlay** (F3, `BMX_DEBUG_DRAW=1`, `scripts/game/debug_overlay.gd`, addon `addons/debug_draw_3d` = Debug Draw 3D
   1.7.3, MIT, Windows libs only): travel vs heading, front wheel aim, turn force, rear grip bar, loose ground, flight path.
 - Safety net: `is_sane()` / `reset_body()` — a non-finite step restores the last good state.
+- **Slope physics review (2026-11-20, `tools/slope_stress.tscn`)**: on a slope only g cos(slope) presses the tyres
+  (grip / brakes / drive use `n_cos`), and the slope moves load between the tyres (`SLOPE_TRANSFER` 0.7 = CoM height /
+  wheelbase: climbs load the rear, descents the front; the rider's auto shift up / down a grade works against it).
+  Before, climbing 15 deg unloaded the rear completely (wheelspin, WASHED OUT going straight). Other fixes: `nose_ref`
+  at wheel lift-off = last step's two-wheel slope (`_gpc_last`; it came out ~1 rad nose up off any ledge = instant
+  NOSE DIVE); spawn / get-up set the pitch to the slope; the brake hold only holds where the tyres can (past the
+  friction angle the bike slides; rolling back with the brake held brakes); a steep edge is a wall only if it rises
+  more than half a wheel radius (12 cm curbs used to BONK / SMACK); air drag in flight; a hard compression on the
+  ground (steep chute into flat) is judged like a landing (`g_jolt` vs `slamJolt` -> SLAM / OOF); the first ~1 deg of
+  slip doesn't scrub (the chatter wobble added ~15 % rolling resistance). One collider lookup per step, not two.
 - **Controller rumble** (`game/pad_rumble.gd`, `Game.rumble`, updated every physics step after `phys.step`): effects mixed as
   1-(1-a)(1-b) onto the two Xbox motors (strong = left heavy thump, weak = right fast buzz), one Settings key each
   (`PadRumble.EFFECTS`, default 1.0): GROUND `rumble_road` (grain by surface + speed), `rumble_bumps` (each wheel's vertical
@@ -843,6 +853,7 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `-s res://tools/cactus_probe.gd --headless` | cactus kinds + Voronoi fracture: closed pieces, volumes add up; must say `PASS` |
 | `-s res://tools/far_hills_probe.gd --headless [-- seed]` | the title / ride backdrop grid: C# batch vs GDScript per point (must match), far tree count; must say `PASS` |
 | `-s res://tools/wood_edge_probe.gd --headless` | drives angled lines onto every wooden ramp; must report `walls=0` |
+| `--headless res://tools/slope_stress.tscn [-- verbose=1 trace=1 only=<substr> bike=dh]` | ride physics on synthetic ground (no world): coast speed vs the closed form on -45..+15 deg grades (within 3 %), braking / holding vs the friction angle, climbs, cambers to 45 deg, crests (air only past v^2 = g R), rollers, washboard, curbs / ledges / drops, chute compressions, full-lock turns on grades, 4 x 60 s random rides; must say `SLOPE_STRESS PASS` (exit code = failures). A scene, not `-s`: the physics needs the Tune autoload |
 | `BMX_FW_PRESET=<name>`, `BMX_FW=pitch=1.3,poe=60`, `BMX_FW_PREVIEW=<m/s>` | freewheel preset / values / Preview for a test run (not saved) |
 | `BMX_FLOW_DEMO=1` | HUD flow meter: adds a flow level every 0.9 s from 3 s up to MAX, then lets it drain (pair with `BMX_DUST_SHOTS` for screenshots) |
 | `BMX_GETUP_K=0.6` | draws the get-up prompt as if the key were held that far (with `BMX_BAIL`) |

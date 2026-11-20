@@ -15,6 +15,7 @@ const CLIMB := 1.2
 const HOP_PUSH := 0.09
 const FLOW_MAX := 5.0
 const GETUP_HOLD := 0.25   # seconds holding hop to get up after a crash
+const SLOPE_TRANSFER := 0.7   # centre-of-mass height / wheelbase: how much load a slope moves between the tyres
 
 var host
 var T: Dictionary          # Tune.v (effective values)
@@ -107,7 +108,7 @@ var w_init := false; var hf_prev := NAN; var hr_prev := NAN
 # unsprung wheels: height of each wheel's lowest point + its speed. The ground drives the wheel through a stiff
 # tyre; the shock (spring + damper that blows off on sharp hits) is the only thing between wheel and frame
 var zw_f := NAN; var zw_r := NAN; var vw_f := 0.0; var vw_r := 0.0
-var nose_ref := NAN
+var nose_ref := NAN; var _gpc_last := NAN   # (_gpc_last: the wheel-ground slope the last step both tyres were down)
 var w_f := 0.0; var w_r := 0.0; var y_draw := 0.0; var pitch_draw := 0.0
 var kick_t := 0.0; var hop_t := 0.0; var hop_load := 0.0; var hop_charge := 0.0; var charge := 0.0
 var lift_t := 0.0; var hop_block := false; var hop_held := false
@@ -123,6 +124,7 @@ var distance := 0.0
 # tests (BMX_CLIP_PROBE): suspension bottom-outs (steps) and how rough the ride is on the ground
 var probe_bottom := 0; var probe_acc2 := 0.0; var probe_n := 0; var probe_vy := NAN
 var probe_g2 := 0.0; var probe_gy := [NAN, NAN]
+var ground_jolt := 0.0   # biggest leg bottom-out on the ground (not a landing) since the test last read it
 # what the HUD reads
 var skid_fx := false; var surf := 0; var hop_bar := 0.0; var hop_bar_show := false
 
@@ -216,13 +218,16 @@ func reset_at(px: float, pz: float, hd: float) -> void:
 	pitch_v = 0; c_f = true; c_r = true; wheelie_up = 0.0
 	g_pitch = NAN
 	y = host.terrain.height(x, z); body_y = y; body_v = 0
+	# start lined up with the ground: a bike set down level on a steep slope had one wheel in the air and was
+	# judged LOOPED OUT / NOSE DIVE on its first step (a spawn or a get-up on anything past ~35 deg)
+	_sample(fwd()); pitch = _g_pitch; g_pitch = _g_pitch; _gpc_last = NAN
 	n_f = NAN; n_r = NAN; n_ref = NAN; lip_state = 0; hf_prev = NAN; hr_prev = NAN; zw_f = NAN; zw_r = NAN
 	bank = 0; body_x = 0; hip_shift = 0; spin = 0; a_drive = 0; charge = 0; hop_charge = 0; lift_t = 0
 	body_xv = 0; hip_v = 0; v_last = NAN; air_lean = 0; air_pull = 0; flip_acc = 0; spin_acc = 0; flip_in = 0; spin_in = 0
 	body_pw = 0; throw_v = 0; air_w = 0; air_inertia = 1; air_tilt = 0; air_tilt_v = 0; air_yaw = 0; air_tw = 0; air_tw_v = 0; land_jolt = 0
 	pivot = 0; pivot_acc = 0; body_in_s = 0; flick = 0; flick_v = 0; _flick_arm = 0; _flick_side = 0; flick_prev = 0; manual_up = 0; wheelie_time = 0.0; wheelie_pedal = false; flick_kick = 0; whip = 0; whip_hold = 0; _whip_arm = 0; _whip_t = 0; _whip_flashed = false
 	sprint = 0; flow = 0; flow_t = 0; lat_m = 0; carve = 0; carve_acc = 0; carve_berm = false
-	y_draw = y; pitch_draw = 0; nose_ref = NAN; pitch_w = NAN; y_prev = NAN; kick_t = 0
+	y_draw = y; pitch_draw = pitch; nose_ref = NAN; pitch_w = NAN; y_prev = NAN; kick_t = 0
 	w_f = y; w_r = y
 
 func get_up() -> void:
@@ -233,12 +238,15 @@ func get_up() -> void:
 	course = heading; turn_off = 0.0; rev_cap = 3.0; _fakie_hold = 0.0
 	hop_block = true
 	y = host.terrain.height(x, z); body_y = y; body_v = 0
+	# start lined up with the ground: a bike set down level on a steep slope had one wheel in the air and was
+	# judged LOOPED OUT / NOSE DIVE on its first step (a spawn or a get-up on anything past ~35 deg)
+	_sample(fwd()); pitch = _g_pitch; g_pitch = _g_pitch; _gpc_last = NAN
 	n_f = NAN; n_r = NAN; n_ref = NAN; lip_state = 0; hf_prev = NAN; hr_prev = NAN; zw_f = NAN; zw_r = NAN
 	bank = 0; body_x = 0; hip_shift = 0; spin = 0; a_drive = 0; charge = 0; hop_charge = 0; lift_t = 0
 	body_xv = 0; hip_v = 0; v_last = NAN; air_lean = 0; air_pull = 0; flip_acc = 0; spin_acc = 0; flip_in = 0; spin_in = 0
 	body_pw = 0; throw_v = 0; air_w = 0; air_inertia = 1; air_tilt = 0; air_tilt_v = 0; air_yaw = 0; air_tw = 0; air_tw_v = 0; land_jolt = 0
 	pivot = 0; pivot_acc = 0; body_in_s = 0; flick = 0; flick_v = 0; _flick_arm = 0; _flick_side = 0; flick_prev = 0; manual_up = 0; wheelie_time = 0.0; wheelie_pedal = false; flick_kick = 0; whip = 0; whip_hold = 0; _whip_arm = 0; _whip_t = 0; _whip_flashed = false
-	sprint = 0; flow = 0; flow_t = 0; lat_m = 0; carve = 0; carve_acc = 0; carve_berm = false; y_draw = y; pitch_draw = 0
+	sprint = 0; flow = 0; flow_t = 0; lat_m = 0; carve = 0; carve_acc = 0; carve_berm = false; y_draw = y; pitch_draw = pitch
 
 func begin_crash() -> void:
 	crash_pending = ""
@@ -465,8 +473,11 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	var sp_k := sprint
 	var a_long := 0.0
 	var n_sc := G / _or(n_ref, G)
-	var nR := 0.0 if air else _or(n_r, G * SH_R) * n_sc
-	var nF := 0.0 if air else _or(n_f, G * (1 - SH_R)) * n_sc
+	# the tyre springs carry the weight straight down; on a slope only g cos(slope) of it presses the tyres onto
+	# the ground (what grip, brakes and drive can use), the rest is the pull down the slope
+	var n_cos := cos(clampf(_g_pitch, -1.2, 1.2))
+	var nR := 0.0 if air else _or(n_r, G * SH_R) * n_sc * n_cos
+	var nF := 0.0 if air else _or(n_f, G * (1 - SH_R)) * n_sc * n_cos
 	var n_tot := nR + nF
 	# rider weight fore / aft moves load between the tyres (total unchanged): leaning back puts it on the rear
 	# (drive + rear sideways grip up, front light and washy), leaning forward does the opposite (rear lets go)
@@ -474,6 +485,11 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	if not air:
 		lean_fb = clampf(body_in_s + (body_x + hip_shift) * 0.5 / maxf(0.05, T.weightShift), -1.0, 1.0)
 		var dN: float = -lean_fb * float(T.get("leanTraction", 0.45)) * G
+		# and the slope itself: the centre of mass sits ~0.9 m above the ground, so climbing puts weight on the rear
+		# and descending on the front (g sin(slope) x height / wheelbase). The rider's own shift up / down a slope
+		# (body_x follows the grade) works against it; without this the auto forward lean on a climb took all
+		# the load off the rear: wheelspin, no side grip, and a WASHED OUT crash pedalling straight up 15 deg
+		dN += G * sin(clampf(_g_pitch, -1.2, 1.2)) * SLOPE_TRANSFER
 		dN = clampf(dN, -nR + 0.08 * G, nF - 0.08 * G)
 		nR += dN; nF -= dN
 	n_load = n_tot
@@ -504,8 +520,9 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			var b: float = minf(T.brakeForce * brake_k, 0.85 * mu * n_tot)
 			a -= b; a_long += b; drive -= b
 			brake_heat += b * v * dt / 45.0
-		elif brake and rear_down and v < -0.3 and rev_cap > 3.0:
-			# braking while rolling backwards after a fakie landing
+		elif brake and rear_down and v < -0.3 and (rev_cap > 3.0 or not brake_back):
+			# braking while rolling backwards (after a fakie landing, or sliding back down a climb the brakes
+			# can't hold); a fresh press from a standstill backs up on purpose (brake_back) and doesn't brake
 			var b: float = minf(T.brakeForce * brake_k, 0.85 * mu * n_tot)
 			a += b; a_long += b; drive += b
 			brake_heat += b * -v * dt / 45.0
@@ -535,13 +552,23 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		# go; pressing brake again from a standstill backs the bike up
 		if not brake:
 			brake_stop = false; brake_back = absf(v) < 0.3
-		elif v <= 0.3 and not brake_back:
+		elif absf(v) <= 0.3 and not brake_back:
 			brake_stop = true
+		# ...but only where the tyres can: past the friction angle (or the brake's own limit) the locked bike
+		# slides down the slope like a real one (normal trail grades hold as before)
+		if brake_stop and G * absf(sin(slope)) > minf(T.brakeForce * brake_k, 0.85 * mu * n_tot):
+			brake_stop = false
 		if brake_stop or (foot_down and throttle < 0.1 and not (brake and brake_back)):
 			v = 0.0   # a foot on the ground holds the bike still (no creeping on a slope)
 		elif brake and brake_back and v <= 0.3:
 			v += (-1.3 - v) * minf(1.0, dt * 3)
 		if throttle < 0.1 and not brake and absf(v) < 0.05 and absf(_g_pitch) < 0.03: v = 0
+	else:
+		# air drag doesn't stop at the lip: the same body area slows the flight (on the full speed, along it).
+		# Small (~0.5 m/s off a 1 s jump at 55 km/h) but it was missing, so jumps flew a touch long and fast
+		var k_air: float = T.airDrag / (T.topSpeed * T.topSpeed) * aero_k
+		var sp_air := sqrt(v * v + vy * vy)
+		v -= k_air * sp_air * v * dt; vy -= k_air * sp_air * vy * dt
 	if flow > 0:
 		flow_t += dt
 		if brake and v > 1: flow = maxf(0.0, flow - dt * 3)
@@ -714,7 +741,9 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		heading = course + slip + turn_off
 		yaw_rate = course_rate + slip_rate
 		lat_a = a_lat
-		var scrub := (mu * G * minf(load_k, 1.5) * absf(sin(slip)) * 0.9 + absf(excess) * (1 - share) * absf(v) * 0.15) * (1.0 - float(T.get("whipCarry", 0.6)) * wk)   # a held drift keeps its speed
+		# (the first ~1 deg of slip is the tyre's own give, not a slide: the chatter wobble kept a phantom scrub on
+		# dead-straight riding, ~15 % more rolling resistance than set)
+		var scrub := (mu * G * minf(load_k, 1.5) * maxf(0.0, absf(sin(slip)) - 0.015) * 0.9 + absf(excess) * (1 - share) * absf(v) * 0.15) * (1.0 - float(T.get("whipCarry", 0.6)) * wk)   # a held drift keeps its speed
 		v -= signf(v) * minf(absf(v), scrub * dt)
 		if absf(slip) > T.slipMax and va > 3: crash_pending = "WASHED OUT!"
 		var into_bank := maxf(0.0, bk * signf(a_lat))
@@ -828,6 +857,13 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		var stp := maxf(absf(v) * dt, 1e-3)
 		var g_new: float = terrain.deck_height(x, z)
 		var wall := g_new > y + 0.35 if air else ((g_new - g_prev) / stp > 1.6 and g_new - g_prev > 0.05)
+		if wall and not air:
+			# a steep edge is only a wall if it's taller than a tyre rolls up: a 12 cm curb / root step used to stop
+			# the bike dead ("BONK!", or a SMACK crash above 6 m/s). Look a little further along the travel so a
+			# real face (that keeps rising) still is one; the tyres + suspension ride the small ones
+			var sv := signf(v) if v != 0.0 else 1.0
+			var g_ahead: float = terrain.deck_height(x + cos(course) * 0.3 * sv, z - sin(course) * 0.3 * sv)
+			wall = maxf(g_new, g_ahead) - g_prev > 0.5 * minf(RWF, RWR)
 		if wall:
 			x = px; z = pz
 			if absf(v) > 6: crash_pending = "SMACK! Hit the cliff"
@@ -843,8 +879,9 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	var tf := FRONT + RWF
 	var a0 := Vector2(px + f.x * tf, pz + f.z * tf)
 	var a1 := Vector2(x + f.x * tf, z + f.z * tf)
+	var near: Array = terrain.colliders_near(x, z)   # one grid walk for tape + obstacles (it was done twice a step)
 	var tapes_seen := []
-	for c in terrain.colliders_near(x, z):
+	for c in near:
 		if not c.get("tape", false): continue
 		var sp: Dictionary = c["tape"]
 		if sp["broken"] or tapes_seen.any(func(o): return is_same(o, sp)): continue
@@ -865,7 +902,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		if host.smash(c, Vector3(f.x * v, vy, f.z * v), Vector3(hp.x, tape_y, hp.y)):
 			v *= 0.97
 			if absf(v) > 3: host.flash("SNAP!")
-	for c in terrain.colliders_near(x, z):
+	for c in near:
 		if c.get("tape", false): continue   # handled above
 		var fx0 := x + f.x * FRONT
 		var fz0 := z + f.z * FRONT
@@ -1032,6 +1069,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		if wheelie_up > 0.0:
 			bal_max = maxf(bal_max, 30.0)   # the whole body holds a wheelie, not just the hands
 		var was_air := air
+		var g_jolt := 0.0   # legs bottomed out on the ground this step (a compression, not a landing): the hit taken
 		var vy_in := vy
 		var was_f := c_f
 		var was_r := c_r
@@ -1161,6 +1199,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 					body_y = y - T.legComp
 					# legs bottomed out: the speed the body still had into the bike is the hit the rider takes
 					if body_v < vy and since_land < 0.6 and land_jolt >= 0: land_jolt = maxf(land_jolt, vy - body_v)
+					if body_v < vy and since_land >= 0.6: g_jolt = maxf(g_jolt, vy - body_v)
 					if body_v < vy:
 						var vc := PHI * body_v + mB * vy if coupled else vy
 						body_v = vc; vy = vc
@@ -1182,7 +1221,12 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		elif cF and not cR and gpC - pitch > 0.6 and _local_slope(f, XF, RWF, cp0) - pitch > 1.15: crash_pending = "NOSE DIVE!"
 		if absf(pitch) > 1.45 and (cF or cR):   # on the ground only: in the air flips go all the way round
 			pitch = signf(pitch) * 1.45; pitch_v = 0
-		if not now_air and (front_air or rear_air) and was_f and was_r: nose_ref = gpC - dP
+		# one wheel just left the ground: the rider holds the bike at the slope it was on with both wheels down
+		# (last step's wheel-ground slope). It was gpC - dP, with dP from the axle point samples: rolling off a
+		# ledge those jump a whole step before the round tyre does and the reference came out ~1 rad nose up,
+		# so every drop off an edge was an instant NOSE DIVE
+		if not now_air and (front_air or rear_air) and was_f and was_r: nose_ref = _or(_gpc_last, gpC)
+		_gpc_last = gpC if (cF and cR) else _gpc_last
 		if front_air and pitch - _or(nose_ref, _g_pitch) < -T.noseDive: crash_pending = "NOSE DIVE!"
 		var snN := sin(pitch)
 		w_f = hfC if cF else y + XF * snN
@@ -1262,6 +1306,12 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			var ag: float = (gy_now - 2.0 * probe_gy[0] + probe_gy[1]) / (dt * dt)
 			probe_acc2 += ay * ay; probe_g2 += ag * ag; probe_n += 1
 		probe_vy = vy; probe_gy = [gy_now, probe_gy[0]]
+		# a compression on the ground (a steep chute slamming into flat, a wall ride into a ledge) is judged like a
+		# landing: the legs can only take so much. It used to be ignored, so 45 deg into flat at 55 km/h rode on
+		ground_jolt = maxf(ground_jolt, g_jolt)
+		if not air and g_jolt > 0.0 and since_land >= 0.6:
+			if g_jolt > T.slamJolt * LAND: crash_pending = "SLAM!"
+			elif g_jolt > T.slamJolt * LAND * 0.6 and host.msg_idle(): host.flash("OOF!")
 		if air: air_time += dt
 		elif land_jolt > 0 and since_land < 0.6:
 			# the legs bottomed out: a hit bigger than they can take throws the rider down
@@ -1547,7 +1597,8 @@ func flow_up() -> void:
 ## Every float field finite? (the frame loop's safety net)
 func is_sane() -> bool:
 	for k in ["x", "z", "y", "vy", "v", "heading", "pitch", "pitch_v", "lean", "lean_v", "steer", "steer_in", "steer_in_v", "slip", "slip_w", "course", "compress", "compress_v",
-			"body_x", "body_xv", "hip_shift", "hip_v", "air_lean", "air_pull", "a_drive"]:
+			"body_x", "body_xv", "hip_shift", "hip_v", "air_lean", "air_pull", "a_drive",
+			"body_y", "body_v", "air_w", "air_tilt", "air_tilt_v", "bike_lean", "counter", "flick", "flick_v"]:
 		if not is_finite(get(k)):
 			return false
 	return true
@@ -1556,3 +1607,4 @@ func is_sane() -> bool:
 func reset_body() -> void:
 	body_v = 0; body_y = y; body_x = 0; body_xv = 0; hip_shift = 0; hip_v = 0; v_last = NAN
 	air_lean = 0; air_pull = 0; a_drive = 0; pitch_v = 0; compress_v = 0; lean_v = 0; steer_in_v = 0
+	air_w = 0; air_tilt = 0; air_tilt_v = 0; flick = 0; flick_v = 0; bike_lean = 0; counter = 0
