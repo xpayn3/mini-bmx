@@ -56,10 +56,7 @@ class View extends Control:
 	var font: SystemFont
 
 	func _init() -> void:
-		font = SystemFont.new()
-		font.font_names = PackedStringArray(["Haettenschweiler", "Impact", "Bahnschrift", "Arial Black"])
-		font.font_weight = 900
-		font.multichannel_signed_distance_field = true
+		font = UITheme.punch_font()
 
 	func t_in() -> float:
 		return T_STAGGER * maxi(word.length() - 1, 0) + T_LETTER

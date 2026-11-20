@@ -2193,7 +2193,7 @@ func _hitch(secs: float) -> void:
 	var sm := PackedFloat32Array()     # update_stream ms
 	var nf := PackedInt32Array()       # chunks finalized
 	var gp := PackedFloat32Array()     # GPU ms
-	var ph := PackedFloat32Array()     # physics process ms
+	var ph := PackedFloat32Array()     # TIME_PHYSICS_PROCESS: the slowest single tick of the last second, not an average
 	var parts := PackedFloat64Array([0, 0, 0, 0, 0])
 	var fin_ms := PackedFloat32Array()
 	var t0 := Time.get_ticks_msec()
@@ -2259,7 +2259,7 @@ func _hitch(secs: float) -> void:
 		print("HITCH per chunk: avg %.2f ms, max %.2f | ground+tex %.2f, occluder %.2f, collider %.2f, decorations %.2f, grids+tape %.2f" % [
 			Array(fsorted).reduce(func(a, b): return a + b, 0.0) / fsorted.size(), fsorted[fsorted.size() - 1],
 			parts[0] / c, parts[1] / c, parts[2] / c, parts[3] / c, parts[4] / c])
-	print("HITCH GPU: normal frames %.2f ms, frame after a finalize %.2f ms | physics avg %.2f ms" % [
+	print("HITCH GPU: normal frames %.2f ms, frame after a finalize %.2f ms | worst physics tick per second (avg) %.2f ms" % [
 		gpu_norm / maxi(n_norm, 1), gpu_after / maxi(n_after, 1), Array(ph).reduce(func(a, b): return a + b, 0.0) / n])
 	GameState.quit()
 

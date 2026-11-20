@@ -9,6 +9,7 @@ var btn: Btn
 
 func _ready() -> void:
 	layer = 60   # over the HUD, menus and the fade
+	add_to_group(&"fullscreen_button")
 	process_mode = Node.PROCESS_MODE_ALWAYS   # works while paused
 	btn = Btn.new()
 	btn.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
@@ -34,18 +35,34 @@ static func is_full() -> bool:
 
 static func toggle() -> void:
 	Settings.set_v("window_mode", 0 if is_full() else 1)
+	for n in Engine.get_main_loop().get_nodes_in_group(&"fullscreen_button"):
+		n._check_t = 0   # show the new icon on the next frame, not up to 0.25 s later
 
 func _unhandled_input(e: InputEvent) -> void:
 	if e is InputEventKey and e.pressed and not e.echo and e.keycode == KEY_F11:
 		toggle()
 		get_viewport().set_input_as_handled()
 
+## only touched when something changed, and the OS asked for the window mode 4x a second (real time: photo
+## mode freezes the game clock): re-placing, re-asking and redrawing every frame cost ~1 ms a frame (hover /
+## press redraw the button by themselves)
+var _check_t := 0
+var _lift_was := -1.0
+var _full_was := -1
 func _process(_dt: float) -> void:
 	# in the garage its Save / Save & ride buttons sit in that corner: go up over them
 	var lift := 56.0 if is_instance_valid(get_parent().get("garage")) else 0.0
-	_place(lift)
-	btn.tooltip_text = "Exit fullscreen (F11)" if is_full() else "Fullscreen (F11)"
-	btn.queue_redraw()
+	if lift != _lift_was:
+		_lift_was = lift
+		_place(lift)
+	var now := Time.get_ticks_msec()
+	if now < _check_t: return
+	_check_t = now + 250
+	var full := 1 if is_full() else 0
+	if full != _full_was:
+		_full_was = full
+		btn.tooltip_text = "Exit fullscreen (F11)" if full == 1 else "Fullscreen (F11)"
+		btn.queue_redraw()
 
 class Btn extends Button:
 	## four corner brackets: pointing out = go fullscreen, pointing in = leave it

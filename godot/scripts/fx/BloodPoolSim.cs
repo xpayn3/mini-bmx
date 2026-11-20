@@ -23,6 +23,19 @@ public partial class BloodPoolSim : RefCounted
 	/// ground: (gn x gn) heights sampled over the same square (corners included), interpolated
 	public void Setup(int n, float cell, float[] ground, int gn, float seed)
 	{
+		SetupBegin(n, cell, ground, gn, seed);
+		SetupRows(0, n);
+	}
+
+	float[] _ground;
+	int _gn;
+	float _seed;
+	Random _rng;
+
+	/// the same as Setup, in pieces: SetupBegin, then SetupRows over 0..n in order (the cells' noise is ~1M sin
+	/// calls, ~10 ms: a fatal crash spreads it over a few frames)
+	public void SetupBegin(int n, float cell, float[] ground, int gn, float seed)
+	{
 		_n = n;
 		_cell = cell;
 		_g = new float[n * n];
@@ -30,8 +43,20 @@ public partial class BloodPoolSim : RefCounted
 		_ret = new float[n * n];
 		_out = new float[n * n];
 		_bytes = new byte[n * n * 4];
-		var rng = new Random((int)(seed * 1000.0f));
-		for (int z = 0; z < n; z++)
+		_ground = ground;
+		_gn = gn;
+		_seed = seed;
+		_rng = new Random((int)(seed * 1000.0f));
+		_x0 = _z0 = n / 2;
+		_x1 = _z1 = n / 2;
+	}
+
+	public void SetupRows(int z0, int z1)
+	{
+		int n = _n, gn = _gn;
+		float cell = _cell, seed = _seed;
+		var ground = _ground;
+		for (int z = z0; z < Math.Min(z1, n); z++)
 		{
 			for (int x = 0; x < n; x++)
 			{
@@ -46,11 +71,10 @@ public partial class BloodPoolSim : RefCounted
 				// bumps: a few millimetres at 40 cm / 12 cm / 4 cm, so the edge fingers out unevenly
 				h += 0.003f * Vn(wx * 2.5f + seed, wz * 2.5f) + 0.0018f * Vn(wx * 8f - seed, wz * 8f) + 0.0008f * Vn(wx * 25f, wz * 25f + seed);
 				_g[x + z * n] = h;
-				_ret[x + z * n] = 0.0028f + 0.0018f * Vn(wx * 6f + seed * 2f, wz * 6f) + 0.0005f * (float)rng.NextDouble();   // blood is thick: it holds a film of ~3-5 mm
+				_ret[x + z * n] = 0.0028f + 0.0018f * Vn(wx * 6f + seed * 2f, wz * 6f) + 0.0005f * (float)_rng.NextDouble();   // blood is thick: it holds a film of ~3-5 mm
 			}
 		}
-		_x0 = _z0 = n / 2;
-		_x1 = _z1 = n / 2;
+		if (z1 >= n) _ground = null;
 	}
 
 	static float Hash(float x, float z)

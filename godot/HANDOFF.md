@@ -1071,6 +1071,28 @@ Known, not fixed (lower priority from the code review):
   clutter visibility only on a chunk change; tyre unclip caches ground heights per frame on a 1 mm grid
   (`BikeRig._ground_cache`); standing sheep reuse their ground reading. Game scripts ~3.9 -> ~2.7 ms a frame. Still the
   biggest cost: rendering (~5.6M triangles, ~2000 draw calls a frame).
+- Frame rate (2026-11-20, RTX 3090, 1600×900, the user's Custom settings, nothing else on the GPU): 118–201 fps by camera
+  (`--bench`), ride median ~6.5 ms, ~6 of 3700 frames over 16.7 ms. Fixed then: the start TV is hidden + frozen past
+  `START_TV_CULL` 80 m (it cost ~1.5 ms GPU all ride), the fullscreen button no longer re-asks the OS / redraws every frame (~1 ms).
+  Then the hitches (worst frame in a ride with crashes 55–100 ms -> 15–21 ms):
+  - **MSDF display text** (`UITheme.punch_font`, shared by WASTED, the area banner, the achievement pops): each glyph's
+    distance field is made on the CPU on first use (~2.5 ms a letter); the first pop ~4 s in cost ~47 ms in a `_draw`.
+    `UITheme.warm_punch_step()` (from `hud.update_hud`) makes one glyph a frame from the start. Don't give these views
+    their own SystemFont again (each had its own cache).
+  - **WASTED mask** (its own unshaded, no-MSAA, transparent viewport over every rider / bike surface): ~40 render pipelines
+    compiled in the first crash frame (~55 ms). `Wasted.warm()` renders the mask a few frames after the ride starts.
+  - **Blood**: `Blood.warm_draw(cam)` draws every blood piece once, sub-pixel in front of the camera, and keeps the 8
+    splat decals (hidden) so their textures stay in the decal atlas; the bone crunch is built then too. Fatal-crash
+    pools (`blood_pool.gd`) set up in stages (ground rows, the C# sim in row chunks `SetupBegin` / `SetupRows`, mesh,
+    material), one pool per frame (was ~85 ms when 3 started at once).
+  - How they were found: `RenderingServer.get_rendering_info(RENDERING_INFO_PIPELINE_COMPILATIONS_DRAW)` counts pipelines
+    compiled while drawing (a stall; should stay 0 in a ride); time spent outside every `_process` is often a `_draw`
+    (deferred, runs in the message-queue flush). A frame-phase probe (`RenderingServer.frame_pre/post_draw`,
+    `SceneTree.physics_frame/process_frame`, priority ±1e5 nodes) splits a slow frame into its parts.
+- **Measuring perf**: other GPU programs (an open game window takes ~32 % of the 3090, other sessions' tests) cut the fps in
+  half and make GPU spikes; check `nvidia-smi pmon -c 1` first. `TIME_PHYSICS_PROCESS` / `TIME_PROCESS` are the slowest
+  single tick of the last second, not averages (our physics tick is ~0.3–0.7 ms). Don't print per slow frame while
+  measuring: console prints through a pipe cost tens of ms and make more slow frames.
 
 Ideas offered, not started:
 - Tyre tracks option **B**: a painted top-down "track map" the ground shader reads → real ruts in mud/sand.

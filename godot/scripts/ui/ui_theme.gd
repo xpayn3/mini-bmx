@@ -48,6 +48,36 @@ static func display_font(weight := 700, slant := 0.0) -> Font:
 	_display[key] = out
 	return out
 
+static var _punch := {}
+
+## the WASTED face (condensed black display type as MSDF, stays sharp scaled up huge): WASTED, the area banner,
+## the achievement pops. One shared font per MSDF range: each glyph's distance field is made on the CPU the first
+## time it is used (~2.5 ms a letter: a new message with a dozen new letters cost ~45 ms in one frame), so
+## warm_punch_step() makes them one a frame from the start of a ride (all ~100 in ~0.26 s of CPU, done long before
+## the first message shows).
+static func punch_font(pixel_range := 16) -> SystemFont:
+	if _punch.has(pixel_range): return _punch[pixel_range]
+	var f := SystemFont.new()
+	f.font_names = PackedStringArray(["Haettenschweiler", "Impact", "Bahnschrift", "Arial Black"])
+	f.font_weight = 900
+	f.multichannel_signed_distance_field = true
+	f.msdf_pixel_range = pixel_range
+	_punch[pixel_range] = f
+	return f
+
+const PUNCH_CHARS := "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!?+-/.,:%'&()"   # all of it is drawn upper case
+const PUNCH_RANGES := [16, 48]   # 16: area banner + WASTED (the banner comes first, 1.6 s in), 48: achievement pops
+static var _punch_next := 0
+
+## make the next glyph (one a frame, HUD); false once all are made (once per session: the fonts are shared)
+static func warm_punch_step() -> bool:
+	var n := PUNCH_CHARS.length()
+	if _punch_next >= n * PUNCH_RANGES.size(): return false
+	var f := punch_font(PUNCH_RANGES[_punch_next / n])
+	f.get_string_size(PUNCH_CHARS[_punch_next % n], HORIZONTAL_ALIGNMENT_LEFT, -1, 200)
+	_punch_next += 1
+	return true
+
 static var _lcd: Font
 
 ## dot-matrix LCD type for the bike computer: Doto (OFL, assets/fonts/), heavy round dots;

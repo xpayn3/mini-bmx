@@ -193,6 +193,8 @@ func _ready() -> void:
 	dust.warm_up(Vector3(0, phys.y + 0.5, 0))
 	fx.puff(Vector3(0, phys.y + 0.4, 0), Vector3.ZERO, Color.WHITE, 0.3, 0.2, 0.0)
 	fx.chunk(Vector3(0, phys.y + 0.4, 0), Vector3.ZERO, Color.WHITE, 0.01, 0.2)
+	if blood: blood.warm_draw(cam)   # crash-only blood shaders + splat decals, so the first crash doesn't wait on them
+	if wasted and _wasted_on(): wasted.warm()   # and the WASTED silhouette mask's pipelines
 
 ## lift the terrain + far hills out of this Game before it is freed, for a later Game of the same world
 ## (`reuse`); they wait out of the tree, not processing (the terrain joins its workers on leaving)
@@ -1038,7 +1040,21 @@ func place_start_tv() -> void:
 	b = b * Basis(Vector3.RIGHT, pitch) * Basis(Vector3.BACK, -roll) * Basis.from_scale(Vector3.ONE * START_TV_SCALE)
 	at.y = (hs[0] + hs[1] + hs[2] + hs[3]) * 0.25 - 0.04
 	start_tv.transform = Transform3D(b, at)
+	_start_tv_on(true)
 	start_tv.power_on(1.4)
+
+## the start TV (shadowed glow light, live screen, 6 static voices) cost ~1.5 ms of GPU a frame for the whole
+## ride; ridden past START_TV_CULL it is hidden and frozen, and comes back on if the rider returns
+const START_TV_CULL := 80.0
+func _start_tv_on(on: bool) -> void:
+	if start_tv == null or start_tv.visible == on: return
+	start_tv.visible = on
+	start_tv.process_mode = Node.PROCESS_MODE_INHERIT if on else Node.PROCESS_MODE_DISABLED
+
+func _cull_start_tv(at: Vector3) -> void:
+	if start_tv == null: return
+	var p := start_tv.global_position
+	_start_tv_on(Vector2(at.x - p.x, at.z - p.z).length() < START_TV_CULL)
 
 const BAIL_HOLD_MS := 350   # holding bail this long throws the rider off; a shorter tap resets to the trail
 var _bail_down := -1        # tick (ms) the bail key went down, -1 = not held
@@ -1664,6 +1680,7 @@ func _process(dt: float) -> void:
 	_pk = _perf("far_hills", _pk)
 	sheep.follow(dt, drawn_pos, st.v, st.fwd())
 	_pk = _perf("sheep", _pk)
+	_cull_start_tv(drawn_pos)
 	biome_t -= dt
 	if biome_t <= 0:
 		biome_t = 0.5
