@@ -92,6 +92,7 @@ static func build(skel: Skeleton3D, i: int, mat: Material) -> MeshInstance3D:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	st.set_material(mat)
+	st.set_custom_format(0, SurfaceTool.CUSTOM_RGB_FLOAT)   # unskinned shape for the mud / blood passes (bike/grime.gd)
 	var skin := Skin.new()
 	var pre := prefix(i)
 	var bind := 0
@@ -174,4 +175,6 @@ static func _tri(st: SurfaceTool, bone: int, a: Vector3, b: Vector3, c: Vector3)
 		st.set_normal(n)
 		st.set_bones(PackedInt32Array([bone, 0, 0, 0]))
 		st.set_weights(PackedFloat32Array([1.0, 0.0, 0.0, 0.0]))
+		# bone space, each phalanx offset so they don't share the same mud pattern
+		st.set_custom(0, Color(v.x + bone * 0.31, v.y + bone * 0.17, v.z + bone * 0.23))
 		st.add_vertex(v)

@@ -880,7 +880,31 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - Dirt chunks, **tyre tracks**: one ring-buffer ArrayMesh
   (14 000 segments ≈ 1 km/wheel, one draw call, each segment uploads only its own bytes) drawn by
   `tyre_track.gdshader` — lit, knob-tread dimples bump-mapped, soft edges + soil lip, skid streaks, distance fade.
-- Grime: mud builds up (slow: `Grime.MUD_RATE` 0.25) and washes off in water; wet gloss + drips. Passes
+- Grime: mud builds up (slow: `Grime.MUD_RATE` 0.25) and washes off in water; wet gloss + drips. **Dust first** (2026-11-20): riding dirt / sand
+  lays a see-through film of the ground's colour (`Grime.dust`, global `grime_dust`, ~30 s to full, thickest low down, drawn by the
+  same `grime_mud` pass, now a transparent pass); mud only piles up once the bike is dusty (`smoothstep(0.4, 0.95, dust)`) or
+  wet. Mud is much darker than the dust and raised (screen-space bump from a lumpy height field in the pass: no UVs
+  needed); thick middles dark, edges drying lighter. **Dirt map** (where it gathers, `grime_mud.gdshader`): low down;
+  the spray band round each tyre (globals `grime_wf` / `grime_wr` = axle + radius in bike-root space; fork arch / lowers,
+  down tube, stays, shins); crevices from a baked 3D map of the bike (`Grime._cav_work` on a worker, ~250 ms, 2.5 cm
+  occupancy grid box-blurred, sampled 7 cm off the surface so only *other* geometry nearby counts; spokes left out);
+  undersides + forward faces (mud), top faces (dust). Every bike part is pinned like the rider's (`_pin_rows`: its rest
+  transform as `grime_r0` / `grime_hrow` / `grime_r2`), so nothing slides with steering / suspension / a spinning rim.
+  `BMX_GRIME_MAP=1` shows the map (r spray, g crevice, b under / front), `BMX_GRIME_PROBE=1` prints the bake.
+  Wheel parts (rim / hub / spokes / rotor, `wheel` flag) skip the map: mud in clumps by angle, heavier toward the bead;
+  tyre sidewalls get the same clumps, the tread fills first. **Stickers get dirty too**: each decal material gets its
+  own mud + blood pass (`Grime._decal_mud`, masked by the sticker's alpha, render priority 2 / 3 after the decal's 1;
+  wet 4); blood is now drawn see-through for that. Tyre lettering: `logos.tyres.lift` (0 at the rim .. 1 at the knobs,
+  default 0.1), scale, turn and colour are now used (garage Logos > Tyre walls > Placement: "Height on sidewall").
+  **Drying + flaking**: `Grime.dry` (0 fresh .. 1 crust, `DRY_T` 90 s without fresh mud, not while wet; fresh mud
+  and water make it wet again) and `Grime.flake` (crust knocked off: landings, wheel rattle from `vw_f` / `vw_r`, speed;
+  fresh mud fills it back) go to the shader as global `grime_age`. Per splotch: thin edges and random plates dry first,
+  dried = pale / matte, thick crust cracks into ~2 cm Voronoi plates (`gr_cells`), flaked plates vanish along the cracks
+  leaving a stain. Knocked-off crust flies as `fx.chunk`s (`Grime.take_shed`, spawned in `Game.ride_fx`).
+  Tests: `BMX_MUD_COAT` (start, not held), `BMX_MUD_DRY`, `BMX_MUD_FLAKE`; `BMX_GRIME_PROBE=1` prints `GRIME t=` lines.
+  Test: `BMX_DUST_COAT=0.8` (+ `BMX_MUD`, `BMX_BLOOD_COAT`). Mud / blood on rider limbs stay put: `Rider.set_limb` takes the
+  limb's twist from the sideways axis (the shortest turn from +Y spun shins / forearms round as they pointed down, so the
+  pattern slid round the leg); glove fingers carry their bone-space shape in CUSTOM0 (`grime_pin` 2). Passes
   are removed from shared materials when a ride ends.
 - **Cacti** (`world/cactus_geo.gd`): five kinds (saguaro, tall saguaro with blossoms, barrel with a flower
   crown, organ pipe, prickly pear with fruit), each its own MultiMesh list `cactus0..4`. Built from ribbed tubes

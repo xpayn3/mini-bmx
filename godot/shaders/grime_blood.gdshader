@@ -1,5 +1,6 @@
 // Blood on the rider and bike: stains drawn as a next_pass over each part's own material (same trick as
-// grime_mud.gdshader, and chained after it by scripts/bike/grime.gd). Opaque alpha-scissored, glossy dark
+// grime_mud.gdshader, and chained after it by scripts/bike/grime.gd). Solid-edged (but drawn see-through,
+// after the stickers, so it covers logos too: `decal` masks it by the sticker's alpha), glossy dark
 // red patches picked from the part's own space, so they stay put on the part (pinned rider parts use the
 // rest shape like the mud). grime.w = how much blood 0..1 (it builds with every crash and stays until a
 // death + revive). Tyres carry none.
@@ -9,6 +10,8 @@ render_mode blend_mix, depth_draw_opaque, cull_back, diffuse_burley, specular_sc
 global uniform vec4 grime;
 uniform float bias = 1.0;
 uniform bool tyre = false;
+uniform bool decal = false;
+uniform sampler2D decal_tex : source_color, filter_linear_mipmap;
 instance uniform float grime_pin = 0.0;
 
 varying vec3 v_local;
@@ -37,6 +40,6 @@ void fragment() {
 	ALBEDO = vec3(0.34, 0.015, 0.02) * shade;
 	ROUGHNESS = 0.32;
 	SPECULAR = 0.6;
-	ALPHA = m;
-	ALPHA_SCISSOR_THRESHOLD = 0.5;
+	ALPHA = step(0.5, m);
+	if (decal) ALPHA *= texture(decal_tex, UV).a;
 }
