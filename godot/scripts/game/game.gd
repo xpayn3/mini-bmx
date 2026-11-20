@@ -1371,7 +1371,9 @@ func _process(dt: float) -> void:
 	if not phys.crash_on and hud and hud.life < 1.0:   # a full-health rider rolls past a pack and leaves it
 		if terrain.take_pack(st.x, st.y, st.z) != null:
 			hud.on_health_pack(HealthPack.HEAL)
-	terrain.tape_push(null if phys.crash_on else Vector3(st.x, st.y + 0.85, st.z) + st.fwd() * 0.75)   # what a caught tape stretches over
+	# what a caught tape stretches over: the drawn front tyre's leading edge (the drawn bike, not the physics
+	# state a step ahead of it, so the tape sits on the tyre you see)
+	terrain.tape_push(null if phys.crash_on else rig.wheel_f.global_position + Vector3(cos(hd), 0.0, -sin(hd)) * rig.wheel_rf)
 	far_hills.follow(drawn_pos)
 	sheep.follow(dt, drawn_pos, st.v, st.fwd())
 	biome_t -= dt

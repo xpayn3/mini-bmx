@@ -1584,7 +1584,8 @@ func _tape_test(el: float) -> void:
 		var along := Vector2(pts[pts.size() - 1].x - pts[0].x, pts[pts.size() - 1].z - pts[0].z).normalized()
 		var rd := Vector2(-along.y, along.x)
 		var spd := float(OS.get_environment("BMX_TAPE_SPEED")) if OS.get_environment("BMX_TAPE_SPEED") != "" else 7.0
-		var start := Vector2(mid.x, mid.z) - rd * 6.0
+		var off := float(OS.get_environment("BMX_TAPE_OFF")) if OS.get_environment("BMX_TAPE_OFF") != "" else 0.0   # aim this far along the span
+		var start := Vector2(mid.x, mid.z) + along * off - rd * 6.0
 		ph.reset_at(start.x, start.y, atan2(-rd.y, rd.x))
 		ph.v = spd
 		_tape = {"sp": best, "t": el, "shot": 0, "next": el}
