@@ -32,7 +32,7 @@ def acc(g, b, i):
 
 def node_tris(g, b, node_name):
     """-> list of (pos(tri*3,3), nrm, material) of one node's mesh"""
-    n = [n for n in g["nodes"] if n.get("name") == node_name][0]
+    n = [n for n in g["nodes"] if n.get("name") == node_name and "mesh" in n][0]
     out = []
     for p in g["meshes"][n["mesh"]]["primitives"]:
         P = acc(g, b, p["attributes"]["POSITION"]).astype(float); N = acc(g, b, p["attributes"]["NORMAL"]).astype(float)
@@ -113,3 +113,40 @@ for fid in ("tues", "fuzz"):
                {"name": "fork_lower", "parent": None, "t": [float(A_pl[0]), float(A_pl[1]), 0.0], "origin": np.zeros(3), "parts": parts_l}],
               {"axle": A_pl.tolist(), "travel": travel, "extraLength": -compress}, "fork")
     print("   max travel that fits: %.2f m" % travel)
+
+
+# ---------------------------------------------------------------- rear brake calipers for the stock frame
+# dh's rear caliper is a handful of black components in the seatstay mesh, on the left of the wheel next to the rotor. They are cut out
+# (assets/forks/dh_seatstay.glb = the seatstay without them) and the frames' rear calipers (parts/<id>_caliper_rear.glb, relative to
+# their axle) are turned about the axle to the stock caliper's angle on the rotor (assets/forks/caliper_<id>.glb, relative to the axle).
+ax_w = np.array([n for n in gd["nodes"] if n.get("name") == "wheel_rear"][0]["translation"][:2])
+seat = node_tris(gd, bd, "seatstay")
+st = np.concatenate([p.reshape(-1, 3, 3) for p, _, _ in seat]); sn = np.concatenate([n.reshape(-1, 3, 3) for _, n, _ in seat])
+sm = np.array([m for p, _, m in seat for _ in range(len(p) // 3)])
+parent.clear()
+for t in st:
+    ks = [key(v) for v in t]
+    for k in ks[1:]: parent[find(k)] = find(ks[0])
+comp = {}
+for i, t in enumerate(st): comp.setdefault(find(key(t[0])), []).append(i)
+cal_idx, main_c = set(), None
+for idx in comp.values():
+    P = st[idx].reshape(-1, 3); r = P[:, :2] - ax_w
+    if set(sm[idx]) == {"black"} and P[:, 2].max() < -0.035 and P[:, 2].min() > -0.09 and r.min() >= 0.015 and r.max() <= 0.11:
+        cal_idx.update(idx)
+        if main_c is None or len(idx) > main_c[0]: main_c = (len(idx), (r.min(0) + r.max(0)) / 2)
+ang_d = math.atan2(main_c[1][1], main_c[1][0])
+print("dh rear caliper: %d triangles cut; main body %.0f mm from the axle at %.1f deg" % (len(cal_idx), float(np.linalg.norm(main_c[1])) * 1000, math.degrees(ang_d)))
+keep = np.array([i not in cal_idx for i in range(len(st))])
+parts = []
+for m in sorted(set(sm)):
+    sel = keep & (sm == m)
+    if sel.any(): parts.append((st[sel].reshape(-1, 3), sn[sel].reshape(-1, 3), m))
+write_glb(os.path.join(A, "forks", "dh_seatstay.glb"), [{"name": "seatstay", "parent": None, "t": [0, 0, 0], "origin": np.zeros(3), "parts": parts}], None, "seatstay")
+for fid in ("tues", "fuzz"):
+    g, b = load(os.path.join(A, "parts", "%s_caliper_rear.glb" % fid))
+    mc = np.array(g["nodes"][0]["extras"]["center"])
+    d = ang_d - math.atan2(mc[1], mc[0]); R = rot(d)
+    cal = [(p @ R.T, n @ R.T, m) for p, n, m in node_tris(g, b, "caliper")]
+    write_glb(os.path.join(A, "forks", "caliper_%s.glb" % fid), [{"name": "caliper", "parent": None, "t": [0, 0, 0], "origin": np.zeros(3), "parts": cal}], None, "caliper")
+    print("%s rear caliper: turned %.1f deg about the axle (%.0f mm from it)" % (fid, math.degrees(d), float(np.linalg.norm(mc)) * 1000))

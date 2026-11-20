@@ -53,7 +53,13 @@ func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
 	var fork_id := BikeBuild.fork_glb(build)
 	if fork_id != "" and not extras.get("noBarMod", false):   # frames with their own cockpit + fork keep them
 		_swap_fork(fork_id, build)
+	var rc := str(build.get("suspension", {}).get("rear_caliper", "stock"))
+	if rc != "stock" and not extras.get("noBarMod", false) and not extras.get("noDecals", false):   # the stock frame's own rear triangle only
+		_swap_rear_caliper(rc)
 	_materials(cfg)
+	var rotor_id := str(build.get("suspension", {}).get("rotor", "stock"))
+	if rotor_id != "stock":
+		_swap_rotors(rotor_id)
 	_grips()
 	_pedals()
 	_saddle()
@@ -125,6 +131,44 @@ func _swap_fork(id: String, build: Dictionary) -> void:
 			f.maxTravel = float(fx.get("travel", 0.18))
 	fs.free()
 	cs.free()
+
+## a rotor model (assets/forks/rotor_<id>.glb): the "rotor" meshes the wheels split off keep their heat-glow material and get the model's disc
+func _swap_rotors(id: String) -> void:
+	if not ResourceLoader.exists("res://assets/forks/rotor_%s.glb" % id):
+		return
+	var rs: Node = load("res://assets/forks/rotor_%s.glb" % id).instantiate()
+	for r in rotors:
+		var mi: MeshInstance3D = r.mesh_instance
+		if mi == null or mi.get_parent() == null:
+			continue
+		var front: bool = mi.get_parent() == wheel_f
+		var src := rs.find_child("rotor_front" if front else "rotor_rear", true, false) as MeshInstance3D
+		if src == null or src.mesh == null:
+			continue
+		var m: ArrayMesh = src.mesh.duplicate()
+		for i in m.get_surface_count():
+			m.surface_set_material(i, r.material)
+		mi.mesh = m
+	rs.free()
+
+## a rear brake caliper for the stock frame: the seatstay mesh loses its own caliper (assets/forks/dh_seatstay.glb) and the model's
+## caliper (assets/forks/caliper_<id>.glb, already turned to the stock one's place on the rotor, relative to the axle) rides on the seatstay
+func _swap_rear_caliper(id: String) -> void:
+	var ss := model.find_child("seatstay", true, false) as MeshInstance3D
+	if ss == null or wheel_r == null or not ResourceLoader.exists("res://assets/forks/caliper_%s.glb" % id):
+		return
+	var a: Node = load("res://assets/forks/dh_seatstay.glb").instantiate()
+	var c: Node = load("res://assets/forks/caliper_%s.glb" % id).instantiate()
+	var nss := a.find_child("seatstay", true, false) as MeshInstance3D
+	var cal := c.find_child("caliper", true, false) as MeshInstance3D
+	if nss and cal:
+		ss.mesh = nss.mesh
+		cal.get_parent().remove_child(cal)
+		cal.name = "rear_caliper"
+		cal.position = wheel_r.position   # relative to the axle; the wheel node sits on the seatstay
+		ss.add_child(cal)
+	a.free()
+	c.free()
 
 ## generated wheels (size, tyres, rims, spokes, hubs, cassette); the brake rotors split off the stock
 ## wheels stay. The frame is lifted / tilted so the new tyres sit on the ground.
