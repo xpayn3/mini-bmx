@@ -730,6 +730,14 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   (`TapeSim._pose_held`: straight once taut, parabola sag while slack) on the drawn front tyre (`Game` passes
   `rig.wheel_f`), not simulated, so it never trails the bike. Strips draw as one ArrayMesh from packed arrays (no
   per-vertex calls), ground heights are cached per point, the strip shader is warmed at ride start.
+- **Tape stakes take damage** (`Terrain.stake_yank`, event-driven, no per-frame cost while nothing is loose): a snap yanks
+  both stakes toward the pull with severity ~ speed / 11 m/s x how hard it was stretched (random 0.55-1.45): < 0.2 nothing,
+  then it **leans** (accumulates up to 43 deg, a leaning stake gives way sooner), past 0.8 it **snaps at the ground** (stub
+  left, `stake_stub`), past ~1.25 (or 25 % of the time) it **pulls out whole** (earth on its foot). Riding straight into a
+  stake (tape hit within `STAKE_HIT` 0.3 m of it) hits the stake itself (severity speed / 6). Flying pieces are
+  `TerrainDebris.fling` bodies; tape tied to them follows (`TapeSim` `pb` / `pb2` ends, `_follow`), the intact span on the
+  stake's other side drops / hangs from it (`TapeSim.hang`), and a tape tied at both ends that runs out of length catches the
+  stake (impulse) or the knot slips off at 135 %. Respawn (`clear_dynamic`) stands them back up. `BMX_TAPE` prints `STAKE` lines.
 - Torn race tape as cloth-like ribbons, wind over the grass, drifting cloud shadows, speed blur / FOV.
 
 ### Photo mode (O, `scripts/game/photo_mode.gd`)
