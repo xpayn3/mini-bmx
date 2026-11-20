@@ -245,6 +245,8 @@ static func default_build() -> Dictionary:
 		"drive": {"ring": 34, "cassette": "dh7", "pedals": "stock"},
 		# the bike's action cam: mount = ActionCam.BIKE_MOUNTS (none / bars / fork), the rest = the camera + add-ons (ActionCam.GEAR_ROWS)
 		"camera": {"mount": "none", "model": "hero", "lens": "stock", "housing": "none", "mic": "none", "acc": "none"},
+		# bike lights: model = BikeLight.MODELS (none / glint / luma / nocta / duskbane / sundowner), on when it's dark
+		"lights": {"model": "luma"},
 	}
 
 ## Showroom editions: ready-made bikes on the garage frames, each its own colourway + mix of parts (made-up names).

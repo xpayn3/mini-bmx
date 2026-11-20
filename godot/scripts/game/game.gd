@@ -59,7 +59,8 @@ var sun_energy := RIDE_SUN
 var tod := 19.33             # the clock (hours); the cycle runs it, a slider move resets it
 var light_ver := -1          # LightSettings.version last applied
 var light_t := 0.0
-var amb_base := 0.36         # flat ambient for the GI setting (SDFGI brings its own sky light)
+var night_k := 0.0           # how much night (0 day .. 1 full night), from _apply_light
+var amb_base := 0.36        # flat ambient for the GI setting (SDFGI brings its own sky light)
 var speed_k := 0.0           # 0..1 speed feel (FOV boost, edge blur)
 var photo := false           # photo mode (O, game/photo_mode.gd): time frozen, free camera, lens / light / look card
 var photo_mode: PhotoMode    # built on first use
@@ -393,6 +394,7 @@ func set_scenic(on: bool) -> void:
 ## Applied when the Light sliders change; with the cycle on, the clock runs and it re-applies 10x / s.
 func _update_light(dt: float) -> void:
 	if scenic: return
+	if rig: rig.set_lights_on(night_k > 0.35 or Env.s("BMX_BIKELIGHT_ON") != "")   # a new bike (B) gets its lamp on too
 	LightSettings.ensure_loaded()
 	var L: Dictionary = LightSettings.current
 	var changed := light_ver != LightSettings.version
@@ -457,34 +459,51 @@ func _apply_light(h: float, L: Dictionary) -> void:
 		sun.light_color = Color(1.0, 0.95, 0.87).lerp(Color(1.0, 0.6, 0.34), gw)
 		sun_energy = lerpf(RIDE_SUN, 2.2, g) * smoothstep(-3.0, 5.0, el_deg) * float(L.sun)
 	else:
-		var e := deg_to_rad(38.0)   # the moon, opposite the sun
+		var e := deg_to_rad(15.0)   # the moon, opposite the sun (low enough to show in the sky ahead)
 		dirv = Vector3(cos(yaw + PI) * cos(e), sin(e), sin(yaw + PI) * cos(e))
-		sun.light_color = Color(0.62, 0.72, 1.0)
-		sun_energy = 0.32 * float(L.moon) * smoothstep(-3.0, -10.0, el_deg)
+		# moonlight: faint, cold, desaturated (the eye sees almost no colour at night). Only enough to make out
+		# the shapes of the land and soft moon shadows; the bike's own lamp lights the trail.
+		sun.light_color = Color(0.55, 0.66, 0.95)
+		sun_energy = 0.3 * float(L.moon) * smoothstep(-3.0, -10.0, el_deg)
 	sun.look_at_from_position(dirv, Vector3.ZERO, Vector3.UP)
+	if Env.s("BMX_MOON_PROBE") != "": print("MOON dir=%s az=%.2f" % [dirv, atan2(dirv.z, dirv.x)])
 	# grazing light needs more bias (acne) and softer edges on the long shadows
 	sun.shadow_bias = lerpf(0.02, 0.08, g)
 	sun.shadow_normal_bias = lerpf(1.2, 3.0, g)
-	sun.shadow_blur = lerpf(1.0, 2.0, g) * float(L.shadow_soft)
+	sun.shadow_blur = lerpf(lerpf(1.0, 2.0, g), 2.6, n) * float(L.shadow_soft)
+	sun.light_volumetric_fog_energy = lerpf(2.6, 0.12, n)
 	# sky: blue + white clouds by day, golden low, stars at night; its photographed sun follows ours
 	_pick_sky_hdri(el_deg, atan2(dirv.x, -dirv.z))
 	sky_mat.set_shader_parameter("golden", gw)
 	sky_mat.set_shader_parameter("sunny", day * (1.0 - gw))
 	sky_mat.set_shader_parameter("night", n)
-	sky_mat.set_shader_parameter("light_energy", lerpf(lerpf(0.55, 0.85, g), 0.3, n) * float(L.sky))
-	env.ambient_light_energy = amb_base * float(L.sky) * lerpf(1.0, 0.5, n)
-	env.ambient_light_color = Color(0.55, 0.68, 0.9).lerp(Color(0.3, 0.4, 0.78), n)
-	# fog / haze
+	sky_mat.set_shader_parameter("energy", lerpf(1.0, 0.55, n))   # the night exposure is high: keep the sky a deep blue
+	sky_mat.set_shader_parameter("light_energy", lerpf(lerpf(0.55, 0.85, g), 0.2, n) * float(L.sky))
+	# night: the sky barely lights anything; what's in shadow of the moon goes close to black
+	env.ambient_light_energy = amb_base * float(L.sky) * lerpf(1.0, 0.3, n)
+	env.ambient_light_color = Color(0.55, 0.68, 0.9).lerp(Color(0.16, 0.22, 0.42), n)
+	env.ambient_light_sky_contribution = lerpf(0.8, 0.5, n)
+	# fog / haze: at night a black-blue distance that swallows the land, a thin cold haze the lamp beam shows in
 	_ride_fog()
-	env.fog_density *= float(L.haze)
-	env.fog_light_color = RIDE_FOG.lerp(Color(0.93, 0.72, 0.55), g * day).lerp(Color(0.07, 0.09, 0.16), n)
+	env.fog_density *= float(L.haze) * lerpf(1.0, 1.35, n)
+	env.fog_light_color = RIDE_FOG.lerp(Color(0.93, 0.72, 0.55), g * day).lerp(Color(0.012, 0.016, 0.03), n)
 	env.fog_sun_scatter = 0.3 * g * day
 	env.fog_aerial_perspective = 0.75 * (1.0 - n)
-	env.volumetric_fog_albedo = Color(0.86, 0.9, 0.95).lerp(Color(1.0, 0.84, 0.66), g * day).lerp(Color(0.45, 0.55, 0.8), n)
-	env.volumetric_fog_density = VOL_DENSITY * float(L.haze)
-	env.tonemap_exposure = lerpf(lerpf(0.8, 0.95, g), 1.6, n) * float(L.exposure)
-	env.adjustment_saturation = float(L.saturation) * lerpf(1.0, 0.8, n)
-	env.adjustment_contrast = float(L.contrast)
+	env.volumetric_fog_albedo = Color(0.86, 0.9, 0.95).lerp(Color(1.0, 0.84, 0.66), g * day).lerp(Color(0.7, 0.75, 0.85), n)
+	env.volumetric_fog_density = VOL_DENSITY * float(L.haze) * lerpf(1.0, 2.2, n)
+	env.volumetric_fog_ambient_inject = lerpf(0.12, 0.0, n)   # no milky veil at night: only the lamp lights the haze
+	env.tonemap_exposure = lerpf(lerpf(0.8, 0.95, g), 1.9, n) * float(L.exposure)
+	# night vision: colour fades (rods), shadows stay deep
+	env.adjustment_saturation = float(L.saturation) * lerpf(1.0, 0.42, n)
+	env.adjustment_contrast = float(L.contrast) * lerpf(1.0, 1.08, n)
+	env.adjustment_brightness = lerpf(1.0, 0.94, n)
+	# lamps bloom at night
+	env.glow_hdr_threshold = lerpf(0.92, 0.7, n)
+	if cam_attr:   # auto exposure lifted the night ~5x into a grey day: off in the dark, the exposure above sets it
+		cam_attr.auto_exposure_enabled = n < 0.5
+	night_k = n
+	if dust and dust.sim != null:   # the dust's sky light: dim and cold at night (it glowed white in the dark)
+		dust.sim.amb_col = Color(0.5, 0.6, 0.78).lerp(Color(0.025, 0.032, 0.05), n)
 	# water: reflect this sky and glint where this sun is (it used to keep a fixed noon sky + sun)
 	if terrain and terrain.has_method("water_light"):
 		var hz := Color(0.784, 0.933, 0.969).lerp(Color(1.0, 0.78, 0.6), gw).lerp(Color(0.07, 0.09, 0.15), n)

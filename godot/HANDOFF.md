@@ -488,6 +488,16 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   exposure, haze, shadow softness, saturation, contrast). Presets: Golden hour, Sunrise, Morning, Noon, Afternoon,
   Dusk, Night, Day / night cycle + the player's own. With the cycle on, Game runs the clock and re-applies 10× / s.
   Tests: `BMX_LIGHT_PRESET=Night`, `BMX_LIGHT=time=12,haze=2`, `BMX_PANEL=light`.
+- **Night (2026-11-20)**: auto exposure is **off at night** (it lifted the night ~5x into a grey day). Moonlight 0.3, cold and
+  low (15 deg, long shadows), exposure 1.9 with the sky's view `energy` 0.55 so the sky stays a moonlit blue, ambient x0.3,
+  saturation x0.42 (night vision), no ambient haze inject (only lamps light the fog), dark blue-black distance fog, the smoke
+  sim's sky light dimmed (`dust.sim.amb_col`). A real moon in `sky_hdri.gdshader` (`moon_disc`: maria, craters, limb
+  darkening, halo; clouds pass over it) where the moon light is. `BMX_MOON_PROBE=1` prints its direction.
+- **Bike lights** (`bike/bike_light.gd`, `BikeLight`; `build.lights.model`, garage Bars tab › LIGHTS, cards with lumens):
+  Glint 150 (pod) / Luma 800 (can, default incl. old saves) / Nocta 1800 (finned) / Duskbane 4000 (twin) / Sundowner 6500 (LED bar
+  over the stem) + a red tail light under the saddle. `BikeRig.mount_lights` puts the lamp on the left third of the bar (`_tube_at`,
+  the cam takes the right), a SpotLight3D (shadows, lights the haze) + a small spill omni; `set_lights_on` (Game, when night > 0.35)
+  shows the lights + lens glow. Test: `BMX_BUILD="lights.model=sundowner"`, `BMX_BIKELIGHT_ON=1` forces them on by day.
 
 ### Boot intro + the start TV (CRT)
 - The boot splash is plain black (`boot_splash/show_image=false`); a plain launch (no command-line args, or `BMX_INTRO=1`)

@@ -127,6 +127,7 @@ func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
 	if not decal_cfg.is_empty():
 		BikeDecals.add_bike_decals(model, decal_cfg)
 	mount_cam(str(build.get("camera", {}).get("mount", "none")), build.get("camera", {}))
+	mount_lights(str(build.get("lights", {}).get("model", "luma")))   # builds saved before lights: a mid lamp
 	if extras.has("suspension") and model.find_child("rocker", true, false):
 		var r: Dictionary = extras.suspension.rear
 		BikeDecals.add_pivot_bolts(model, [{"node": "rocker", "at": r.G2, "z": 0.029}, {"node": "rocker", "at": r.C2, "z": 0.029}, {"node": "rocker", "at": r.D, "z": 0.031, "r": 0.005}])
@@ -599,6 +600,48 @@ func mount_cam(kind: String, gear := {}) -> void:
 	cam_mount = kind
 	for mi in action_cam.find_children("*", "MeshInstance3D", true, false):
 		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+
+## bike lights (BikeLight.MODELS): the lamp on the left of the bar (the action cam takes the right; the light bar
+## sits over the stem on two clamps) + a tail light under the saddle. Off until `set_lights_on(true)`.
+var bike_lights: Array = []   # BikeLight.build results: {node, lens, lights, glow}
+var lights_model := "none"
+var _lights_on := false
+func mount_lights(id: String) -> void:
+	for l in bike_lights:
+		if is_instance_valid(l.node):
+			l.node.get_parent().remove_child(l.node)
+			l.node.queue_free()
+	bike_lights.clear()
+	lights_model = "none"
+	if not BikeLight.MODELS.has(id) or id == "none" or not (steer_n is MeshInstance3D): return
+	var big: bool = BikeLight.MODELS[id].kind == "bar"
+	var zc := lerpf(0.0, grip_l.z, 0.12 if big else 0.36)
+	var hint := Vector3(lerpf(grip_l.x, 0.0, 0.3), grip_l.y, zc)
+	var t := _tube_at(steer_n as MeshInstance3D, Vector3(0, 0, 1), zc, hint)
+	if t.is_empty(): return
+	var lamp := BikeLight.build(id, t.r)
+	if lamp.is_empty(): return
+	lamp.node.position = Vector3(t.c.x, t.c.y, 0.0) if big else t.c
+	steer_n.add_child(lamp.node)
+	bike_lights.append(lamp)
+	lights_model = id
+	var fr := model.find_child("frame", true, false) as MeshInstance3D
+	if fr and seat is Dictionary:
+		var tail := BikeLight.build_tail()
+		# under the saddle's back, on the seat post / rails, facing back
+		tail.node.position = Vector3(float(seat.rear) + 0.06, float(seat.top) - 0.075, 0.0)
+		fr.add_child(tail.node)
+		bike_lights.append(tail)
+	var was := _lights_on
+	_lights_on = not was
+	set_lights_on(was)
+
+func set_lights_on(on: bool) -> void:
+	if on == _lights_on: return
+	_lights_on = on
+	for l in bike_lights:
+		for lt in l.lights: (lt as Light3D).visible = on
+		for m in l.lens: (m as StandardMaterial3D).emission_energy_multiplier = float(l.glow) if on else 0.0
 
 ## every vertex of a mesh (all surfaces), mesh space
 static func _verts(mi: MeshInstance3D) -> PackedVector3Array:

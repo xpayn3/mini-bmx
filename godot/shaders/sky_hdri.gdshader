@@ -29,12 +29,42 @@ float hash3(vec3 p) {
 	return fract((p.x + p.y) * p.z);
 }
 
+float vnoise(vec2 p) {
+	vec2 i = floor(p); vec2 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);
+	float a = hash3(vec3(i, 7.0)), b = hash3(vec3(i + vec2(1.0, 0.0), 7.0));
+	float c = hash3(vec3(i + vec2(0.0, 1.0), 7.0)), e = hash3(vec3(i + vec2(1.0), 7.0));
+	return mix(mix(a, b, f.x), mix(c, e, f.x), f.y);
+}
+
+// the moon's face: a disc of radius MOON_R (rad) round md, grey maria (dark seas), a few bright craters,
+// darker towards the rim. Returns rgb (0 outside), alpha in .a
+const float MOON_R = 0.026;
+vec4 moon_disc(vec3 d, vec3 md) {
+	float mu = dot(d, md);
+	if (mu < cos(MOON_R * 1.05)) return vec4(0.0);
+	vec3 t = normalize(cross(md, abs(md.y) > 0.95 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0)));
+	vec3 b = cross(md, t);
+	vec2 q = vec2(dot(d, t), dot(d, b)) / MOON_R;   // -1..1 across the disc
+	float r = length(q);
+	float edge = 1.0 - smoothstep(0.96, 1.02, r);
+	float limb = sqrt(max(1.0 - r * r, 0.0));
+	float maria = vnoise(q * 2.2 + 3.1) * 0.6 + vnoise(q * 5.0 + 9.7) * 0.4;
+	float seas = smoothstep(0.42, 0.68, maria);
+	float spots = smoothstep(0.78, 0.95, vnoise(q * 11.0 + 1.3));
+	vec3 col = vec3(0.92, 0.93, 0.95) * mix(1.0, 0.58, seas) + vec3(0.12) * spots;
+	col *= 0.55 + 0.45 * limb;
+	return vec4(col, edge);
+}
+
 vec3 night_sky(vec3 d, vec3 hd) {
 	float up = clamp(d.y, 0.0, 1.0);
-	vec3 sky = mix(vec3(0.045, 0.06, 0.11), vec3(0.008, 0.014, 0.035), pow(up, 0.6));
+	// a moonlit night: deep blue overhead, a lighter blue band along the horizon (never pitch black)
+	vec3 sky = mix(vec3(0.085, 0.11, 0.19), vec3(0.018, 0.03, 0.075), pow(up, 0.5));
 	vec3 md = normalize(LIGHT0_DIRECTION);
 	float mu = dot(d, md);
-	sky += vec3(0.10, 0.13, 0.22) * pow(max(mu, 0.0), 12.0) * 0.6;   // glow round the moon
+	sky += vec3(0.07, 0.1, 0.2) * pow(max(mu, 0.0), 22.0) * 0.6;    // the sky lit round the moon
+	sky += vec3(0.5, 0.55, 0.7) * pow(max(mu, 0.0), 900.0) * 0.6;     // halo close round the disc
 	// stars: one candidate per cell of a direction grid, most cells empty
 	vec3 g = d * 220.0;
 	vec3 cell = floor(g);
@@ -49,9 +79,9 @@ vec3 night_sky(vec3 d, vec3 hd) {
 	float blue = clamp((hd.b - hd.r) / max(hd.b, 1e-3), 0.0, 1.0);
 	float cloud = (1.0 - smoothstep(0.08, 0.32, blue)) * smoothstep(0.0, 0.06, d.y);
 	float lum = dot(hd, vec3(0.3, 0.59, 0.11));
-	vec3 cloud_c = vec3(0.05, 0.06, 0.09) * (0.6 + lum * 0.25) + vec3(0.12, 0.14, 0.2) * pow(max(mu, 0.0), 6.0);
-	sky = mix(sky, cloud_c, cloud * 0.9);
-	sky = mix(sky, vec3(0.03, 0.04, 0.07), smoothstep(0.0, -0.08, d.y));
+	vec3 cloud_c = vec3(0.06, 0.07, 0.1) * (0.6 + lum * 0.25) + vec3(0.14, 0.16, 0.24) * pow(max(mu, 0.0), 14.0);
+	sky = mix(sky, cloud_c, cloud * 0.85);
+	sky = mix(sky, vec3(0.05, 0.065, 0.11), smoothstep(0.0, -0.08, d.y));
 	return sky;
 }
 
@@ -101,8 +131,11 @@ void sky() {
 	if (night > 0.0) {
 		vec3 n = night_sky(d, min(hd, vec3(3.0)));
 		if (!AT_CUBEMAP_PASS) {
-			float mu = dot(d, normalize(LIGHT0_DIRECTION));
-			n += vec3(0.9, 0.93, 1.0) * smoothstep(0.99965, 0.99985, mu) * 3.0;   // the moon
+			// the moon itself, bright enough to bloom; clouds pass in front of it
+			vec4 m = moon_disc(d, normalize(LIGHT0_DIRECTION));
+			float blue = clamp((hd.b - hd.r) / max(hd.b, 1e-3), 0.0, 1.0);
+			float cl = (1.0 - smoothstep(0.08, 0.32, blue)) * 0.75;
+			n = mix(n, m.rgb * 7.0, m.a * (1.0 - cl));
 		}
 		c = mix(c, n, night);
 	}
