@@ -440,6 +440,16 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   head). So `BoneAttachment3D`, retargeted animations, an imported humanoid mesh skinned to it etc. all work, riding
   and in a crash. `bone_rider(name)` = a bone in rider space. Tests: `BMX_SKEL_DRAW=1` draws the bones on top (yellow
   to the parent, rgb axes), `BMX_SKEL_PROBE=1` prints `SKEL worst_m=` (bone vs joint, must be ~0) 1x / s.
+- **Getting up after a crash** (`rider/get_up_anim.gd`, `GetUpAnim`; `Game.begin_getup` when the hold-to-get-up completes):
+  instead of snapping onto the bike, the rider climbs up where the ragdoll lies (~1.75 s): ragdoll pose -> hands and knees
+  (0.5 s) -> one foot forward (1.05 s) -> standing (1.6 s), facing the way the body lay. Keys are body targets (pelvis,
+  chest, head, hands, feet, knee / elbow poles) over the ground under each point (`top_height`, slopes ok), limbs solved
+  with `Rider.limb_ik` (own lengths + joint limits). The ragdoll stops while it plays; its points are kept on the drawn
+  body (camera, photo mode); the get-up prompt hides. Then `get_up()` puts them on the bike and the standing body blends
+  into the riding pose over `STAND_BLEND` (0.35 s, `Game._stand_to_bike`). A torn-off limb, a respawn / Backspace, or
+  `BMX_GETUP_ANIM=0` = the old instant get-up. Test: `BMX_BAIL=4 BMX_GETUP_PROBE=1` (gets up 2.5 s after the bail,
+  `GETUP start / stood up` lines; + `BMX_DUST_SHOTS=dir/prefix BMX_DUST_T0=6.3` for frames). The bike stays where it fell
+  (they don't walk to it yet).
 - **Animation clips / Mixamo** (`rider/rider_anim.gd`, `RiderAnim`, `Rider.animate(dt)`): FBX / glb clips with Mixamo bone
   names in `assets/anim/mixamo/` (README there: FBX, "Without Skin") play on the menus' standing rider (garage rider
   room KIT tab `_pose_stand_rider`, ride setup turntable `BikeTurntable._process`); none = the old procedural stand.
