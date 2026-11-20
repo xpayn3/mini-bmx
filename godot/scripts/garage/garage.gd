@@ -62,6 +62,12 @@ var _mote_mat: ShaderMaterial = null   # sun-shaft dust motes (lit up to the doo
 var door_open := 1.0
 var _door_hold := false   # BMX_GARAGE_DOOR: the door stays where the test put it
 var door_t := 0.0
+## the door's sound: the user's recording (assets/audio/garage_door_open.mp3, ~12 s of the motor running,
+## then the stop clunk at ~12.5 s). The door rolls up in DOOR_TIME, so the motor plays from the start and,
+## when the door reaches the top, fades out under the clunk from the end of the recording.
+const DOOR_SOUND := "res://assets/audio/garage_door_open.mp3"
+const DOOR_CLUNK_AT := 12.3   # s into the recording: the stop
+var _door_motor: AudioStreamPlayer3D = null
 var cam := Camera3D.new()
 var orbit := 0.0
 var orbit_t := 0.0
@@ -518,7 +524,14 @@ func _rebuild_bike() -> void:
 	var keep: Rider = rider if rider_on and is_instance_valid(rider) else null
 	if keep:
 		keep.get_parent().remove_child(keep)
-	if rig:
+	var swap := _swap_next and rig != null and not rider_on
+	_swap_next = false
+	if swap:   # showroom: the old bike rolls away instead of vanishing (see _swap_step)
+		if is_instance_valid(_leaving): _leaving.queue_free()
+		_leaving = rig
+		_leave_x0 = rig.position.x
+		_leave_t = 0.0
+	elif rig:
 		rig.queue_free()
 	rig = BikeRig.new()
 	add_child(rig)
@@ -552,6 +565,67 @@ func _rebuild_bike() -> void:
 	_rider_visibility()
 	for mi in rig.find_children("*", "MeshInstance3D", true, false):
 		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	if swap:
+		_arrive_t = -SWAP_DELAY
+		_swap_step(0.0)
+	else:
+		_arrive_t = INF
+
+# ---------------------------------------------------------------- door sound
+## the recording from `at` s, from the door's hood (3D: it comes from behind the bike)
+func _door_sound(at: float) -> AudioStreamPlayer3D:
+	var p := AudioStreamPlayer3D.new()
+	p.stream = load(DOOR_SOUND)
+	p.bus = "SFX" if AudioServer.get_bus_index("SFX") >= 0 else "Master"
+	p.unit_size = 6.0
+	p.position = Vector3(DOOR_X, DOOR_H, WALL_IN)
+	add_child(p)
+	p.play(at)
+	p.finished.connect(p.queue_free)
+	return p
+
+## the door is up: the motor fades out, the stop clunk plays
+func _door_stop() -> void:
+	if is_instance_valid(_door_motor):
+		var tw := create_tween()
+		tw.tween_property(_door_motor, "volume_db", -40.0, 0.3)
+		tw.tween_callback(_door_motor.queue_free)
+	_door_motor = null
+	_door_sound(DOOR_CLUNK_AT)
+
+# ---------------------------------------------------------------- showroom: bikes roll out / in
+## Picking another bike in the showroom: the one on show rolls off forward (speeding up), the new one
+## rolls in from behind and brakes to a stop in the middle, wheels turning with the distance.
+const SWAP_OUT_T := 0.8     # s to roll off
+const SWAP_IN_T := 1.0      # s to roll in
+const SWAP_DELAY := 0.25    # the new one starts this long after the old one
+const SWAP_D := 4.5         # m rolled (off screen at the showroom lens)
+var _swap_next := false
+var _leaving: BikeRig = null
+var _leave_x0 := 0.0
+var _leave_t := 0.0
+var _arrive_t := INF
+
+func _swap_step(dt: float) -> void:
+	if is_instance_valid(_leaving):
+		_leave_t += dt
+		var k := clampf(_leave_t / SWAP_OUT_T, 0.0, 1.0)
+		var d := SWAP_D * k * k   # speeding up
+		_leaving.position.x = _leave_x0 + d
+		_leaving.wheel_r.rotation.z = -d / _leaving.wheel_rr
+		_leaving.wheel_f.rotation.z = -d / _leaving.wheel_rf
+		if k >= 1.0:
+			_leaving.queue_free()
+			_leaving = null
+	if _arrive_t < INF and rig:
+		_arrive_t += dt
+		var k := clampf(_arrive_t / SWAP_IN_T, 0.0, 1.0)
+		var rest := SWAP_D * (1.0 - k) * (1.0 - k)   # braking to a stop
+		rig.position.x = bike_x - rest
+		rig.wheel_r.rotation.z = rest / rig.wheel_rr   # turns forward, ending where it was posed
+		rig.wheel_f.rotation.z = rest / rig.wheel_rf
+		if k >= 1.0:
+			_arrive_t = INF
 
 # ---------------------------------------------------------------- the rider on the bike
 ## the rider in the garage: same look and pose (sliders) as on the trail, posed every frame from the
@@ -726,6 +800,7 @@ func _place_slats() -> void:
 		mi.visible = y < DOOR_H + 0.3   # higher up it is inside the drum
 
 func _process(dt: float) -> void:
+	_swap_step(dt)
 	if _probe_frames < 12 and Env.s("BMX_GARAGE_PROBE") != "":
 		_probe_frames += 1
 		print("GARAGEFRAME %d dt_ms=%.1f" % [_probe_frames, dt * 1000.0])
@@ -740,9 +815,12 @@ func _process(dt: float) -> void:
 		var k := clampf((door_t - DOOR_DELAY) / DOOR_TIME, 0.0, 1.0)
 		var e := k * k * (3.0 - 2.0 * k)
 		door_open = minf(1.0, e + sin(k * 37.0) * 0.004 * (1.0 - k) * k * 4.0)   # a little motor judder
+		if door_t >= DOOR_DELAY and _door_motor == null:
+			_door_motor = _door_sound(0.0)
 		if k >= 1.0:
 			door_open = 1.0
 			_door_opened_once = true
+			_door_stop()
 		_place_slats()
 	if _dirty > 0:
 		_dirty -= dt
@@ -999,6 +1077,7 @@ func _fill_showroom() -> void:
 			build = BikeBuild.load_build(v)   # your build, in this frame's own paint
 		_show_pick = v
 		GameState.save()
+		_swap_next = true   # the old bike rolls off, the new one rolls in
 		_rebuild_bike()
 		_update_stats()
 		_fill_showroom.call_deferred(), false, _show_strip, SHOW_CARD)
@@ -1755,8 +1834,8 @@ func _cards(items: Array, current: String, cb: Callable, bike := true, into: Pic
 		b.add_theme_stylebox_override("focus", UITheme.marked(Color(Tokens.INK, 0.06), Tokens.INK, SIDE_BOTTOM, Tokens.R_LG, 0))
 		var col := VBoxContainer.new()
 		col.set_anchors_preset(Control.PRESET_FULL_RECT)
-		col.offset_left = Tokens.S3; col.offset_right = -Tokens.S3; col.offset_top = Tokens.S2; col.offset_bottom = -Tokens.S3
-		col.add_theme_constant_override("separation", 0)
+		col.offset_left = Tokens.S4; col.offset_right = -Tokens.S4; col.offset_top = Tokens.S3; col.offset_bottom = -Tokens.S3
+		col.add_theme_constant_override("separation", Tokens.S1)
 		col.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		var pic := TextureRect.new()
 		pic.custom_minimum_size.y = Tokens.CARD_THUMB_H
@@ -1774,10 +1853,27 @@ func _cards(items: Array, current: String, cb: Callable, bike := true, into: Pic
 		nm.clip_text = true
 		nm.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		col.add_child(nm)
-		var sp := UITheme.text(String(it.spec), SUB, Tokens.T_XS)
+		var spec := String(it.spec)
+		var stars := ""
+		if spec.begins_with("★") or spec.begins_with("☆"):   # "★★★☆☆  ·  ...": the stars a size up
+			stars = spec.substr(0, 5)
+			spec = spec.substr(5).strip_edges()   # "·  RACE  ·  17.3 KG"
+		var sp := UITheme.text(spec, SUB, Tokens.T_XS)
 		sp.clip_text = true
 		sp.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-		if String(it.spec) != "": col.add_child(sp)
+		if stars != "":
+			var row := HBoxContainer.new()
+			row.add_theme_constant_override("separation", 0)
+			row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			row.add_theme_constant_override("separation", Tokens.S2)
+			var st := UITheme.text(stars, Color("e9a400"), Tokens.T_LG)   # gold
+			st.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+			row.add_child(st)
+			sp.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+			sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			row.add_child(sp)
+			col.add_child(row)
+		elif spec != "": col.add_child(sp)
 		b.add_child(col)
 		if on:
 			var tag := UITheme.display("FITTED", Tokens.T_XS, INK, 0.0)
