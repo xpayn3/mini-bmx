@@ -1612,6 +1612,27 @@ public partial class TerrainFieldCs : RefCounted
 		return o;
 	}
 
+	/// far_hills.gd (worker): the backdrop's n x n ground grid in one call (approximate near-ties, like the map)
+	public float[] far_ground(double ox, double oz, double step, long n) => map_heights(ox, oz, step, n, 0, n);
+
+	/// far_hills.gd: colours for that grid, h / slope per cell as far_hills computed them
+	public Color[] far_colors(double ox, double oz, double step, long n, float[] h, float[] slope)
+	{
+		var o = new Color[n * n];
+		_approx = true;
+		try
+		{
+			for (long iz = 0; iz < n; iz++)
+				for (long ix = 0; ix < n; ix++)
+				{
+					long i = iz * n + ix;
+					o[i] = color(ox + ix * step, oz + iz * step, h[i], slope[i]);
+				}
+		}
+		finally { _approx = false; }
+		return o;
+	}
+
 	/// the paper map: linear ground colours on the same kind of grid; under `water` the alpha is 0
 	public Color[] map_colors(double ox, double oz, double step, long nx, long row0, long rows, double water)
 	{
