@@ -461,7 +461,6 @@ func _update_look(dt: float) -> void:
 	_look_yaw += (yaw_t - _look_yaw) * k
 	_look_pitch += (pitch_t - _look_pitch) * k
 
-const LOOK_SIDE := 1.0   # sign of the head yaw that turns towards the camera
 
 ## title screen: photo-shoot lighting round the bike - a warm key spot from the camera side to bring out the
 ## frame (welds, tube shapes, paint), a rim light from behind to cut it out of the backdrop, a soft fill
