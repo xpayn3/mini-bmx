@@ -11,17 +11,17 @@ extends CanvasLayer
 signal finished
 
 const T_ON := 1.2        # TV switches on
-const CARD_STUDIO := Vector2(1.7, 5.8)    # the studio card, then the mature-content notice, then the game's name: all inside the old timeline (s)
-const CARD_MATURE := Vector2(5.8, 10.2)
-const T_GLITCH := 7.0    # the first big tear (the figure in the doorway is gone after it)
-const T_LOSS := 10.6     # the signal drops out: snow over everything
-const T_GLITCH2 := 13.2  # second tear: for a moment the figure stands inside the room
-const T_OFF := 16.5      # TV switches off
-const T_END := 17.6      # all black -> finished (no long dark grain at the end: straight into the game)
+const CARD_STUDIO := Vector2(1.7, 4.8)    # the studio card, then the mature-content notice, then the game's name: all inside the old timeline (s)
+const CARD_MATURE := Vector2(4.8, 8.0)
+const T_GLITCH := 5.6    # the first big tear (the figure in the doorway is gone after it)
+const T_LOSS := 8.4      # the signal drops out: snow over everything
+const T_GLITCH2 := 10.3  # second tear: for a moment the figure stands inside the room
+const T_OFF := 12.6      # TV switches off
+const T_END := 13.6      # all black -> finished (no long dark grain at the end: straight into the game)
 # dolly zoom: distance from the glass and the frame height kept there (start wide / far, end close / wide lens)
-const D0 := 5.2
+const D0 := 4.0
 const D1 := 0.62
-const H0 := 0.95
+const H0 := 0.80
 const H1 := 0.40
 
 var root: Control
@@ -39,7 +39,7 @@ var _card_shown := -1
 var blocked := false     # the boot cards (studio, mature content) are up: the clock does not start
 var hold := false        # true: stay on black (only the standby LED) while main loads the ride behind it
 var still := false       # Settings › Intro off: one still frame of it (TV on, RUNOUT) while loading, then done
-const STILL_T := 12.0    # the moment of the intro the still frame shows
+const STILL_T := 9.6     # the moment of the intro the still frame shows
 const STILL_HOLD := 2.2  # s it stays up after loading
 var _still_left := STILL_HOLD
 var _still_frames := 0
