@@ -477,7 +477,10 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   thread; past ~450 m it adds rolling ridges (title screen only) so every seed has a hilly skyline.
   Freed and the normal light restored when the ride starts. `BMX_SEED` now also fixes the menu world.
 - Menu (`main._show_menu`): two pages in one column under the title. Main: RIDE, GARAGE, world seed + NEW WORLD,
-  Settings / Controls / Quit. RIDE opens the **ride setup** page (`_menu_page_setup`): bike (Downhill / BMX) +
+  SETTINGS (its last tabs are Controls = key / pad bindings and Camera: `settings_menu.gd` extends `controls_menu.gd`;
+  no separate Controls entry on the title menu or the pause leaflet any more); **QUIT** is a button top right
+  (`menu_quit`, main page only) that asks first (`_confirm_quit`: CANCEL / QUIT, B or a click beside it cancels).
+  Tests: `BMX_PADSEQ` has `click:x:y` (a left click). RIDE opens the **ride setup** page (`_menu_page_setup`): bike (Downhill / BMX) +
   time of day (the `LightSettings.BUILTIN` presets), then GO. Test: `BMX_MENU_PAGE=setup`.
 - **Design tokens** (`scripts/ui/tokens.gd`, class `Tokens`): every colour, gap, corner, border and type size the
   menus use. Look = flat, Metro-like: white paper cards, **no outlines, no drop shadows**, 1–3 px corners; the

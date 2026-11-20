@@ -81,6 +81,15 @@ func _build(tab: int) -> void:
 	tabs.get_tab_bar().add_theme_constant_override("h_separation", Tokens.S2)
 	tabs.current_tab = tab
 	_tabs = tabs
+	# a tab opens at its top (pages built while hidden came up scrolled), the cursor's row kept in view
+	tabs.tab_changed.connect(func(i: int):
+		var sc := tabs.get_tab_control(i) as ScrollContainer
+		if sc == null: return
+		await get_tree().process_frame
+		if not is_instance_valid(sc): return
+		var f := get_viewport().gui_get_focus_owner()
+		sc.scroll_vertical = 0
+		if f and sc.is_ancestor_of(f): sc.ensure_control_visible(f))
 	if not nav:   # D-pad / stick between rows, A press, B back (on paper the leaflet's B folds it), LB / RB tabs
 		nav = PadNav.attach(self, {"tab_container": tabs, "back": Callable() if paper else _close, "style": "paper" if paper else "card"})
 	else:

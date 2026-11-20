@@ -104,6 +104,17 @@ func _pad_seq(seq: String) -> void:
 					mb.pressed = down; mb.factor = 1.0
 					Input.parse_input_event(mb)
 				await wait.call(40)
+		elif step.begins_with("click:"):   # click:x:y = a left mouse click at screen x, y
+			var cp := step.substr(6).split(":")
+			var at := Vector2(float(cp[0]), float(cp[1]))
+			Input.warp_mouse(at)
+			var mm := InputEventMouseMotion.new(); mm.position = at; mm.global_position = at
+			Input.parse_input_event(mm); await wait.call(60)
+			for down in [true, false]:
+				var mb := InputEventMouseButton.new(); mb.position = at; mb.global_position = at
+				mb.button_index = MOUSE_BUTTON_LEFT; mb.pressed = down
+				mb.button_mask = MOUSE_BUTTON_MASK_LEFT if down else 0
+				Input.parse_input_event(mb); await wait.call(60)
 		elif step in ["esc", "enter"]:
 			for down in [true, false]:
 				var k := InputEventKey.new(); k.keycode = KEY_ESCAPE if step == "esc" else KEY_ENTER
@@ -266,9 +277,52 @@ func _show_menu() -> void:
 	head.add_child(logo)
 	vb.add_child(head)
 	menu_col = vb
+	# QUIT, top right of the screen (asks first)
+	menu_quit = UITheme.make_button("QUIT", _confirm_quit, "secondary", Tokens.T_LG)
+	menu_quit.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	menu_quit.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	menu_quit.offset_right = -MENU_EDGE; menu_quit.offset_top = MENU_EDGE
+	menu_quit.offset_left = -MENU_EDGE - 140; menu_quit.offset_bottom = MENU_EDGE + Tokens.H_CHIP + Tokens.S2
+	menu.add_child(menu_quit)
 	outer.add_child(UITheme.text("v1.0  ·  Godot %s" % Engine.get_version_info().string, Tokens.INK_SOFT, Tokens.T_XS))
 	_menu_page_main()
 	if Env.s("BMX_MENU_PAGE") == "setup": _menu_page_setup(int(Env.s("BMX_SETUP_STEP")))   # tests: the ride setup page (BMX_SETUP_STEP=0..3)
+
+var menu_quit: Button
+
+## "Quit the game?" over the title menu: QUIT / CANCEL (B, Esc and a click beside it cancel)
+func _confirm_quit() -> void:
+	if not is_instance_valid(menu) or menu.has_node("QuitAsk"): return
+	var veil := ColorRect.new()
+	veil.name = "QuitAsk"
+	veil.color = Color(0, 0, 0, 0.45)
+	veil.set_anchors_preset(Control.PRESET_FULL_RECT)
+	veil.mouse_filter = Control.MOUSE_FILTER_STOP
+	menu.add_child(veil)
+	var close := func(): if is_instance_valid(veil): veil.queue_free()
+	veil.gui_input.connect(func(e: InputEvent):
+		if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT: close.call())
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	veil.add_child(center)
+	var card := PanelContainer.new()
+	card.add_theme_stylebox_override("panel", UITheme.card_style(Tokens.PAPER, Tokens.R_XL, Tokens.S7))
+	center.add_child(card)
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", Tokens.S5)
+	card.add_child(vb)
+	vb.add_child(UITheme.display("QUIT THE GAME?", Tokens.T_2XL))
+	vb.add_child(UITheme.text("Are you sure? Your bike, rider and settings are saved.", Tokens.INK_SOFT, Tokens.T_MD))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", Tokens.S3)
+	row.alignment = BoxContainer.ALIGNMENT_END
+	vb.add_child(row)
+	var cancel := UITheme.make_button("CANCEL", close, "secondary", Tokens.T_LG)
+	row.add_child(cancel)
+	row.add_child(UITheme.make_button("QUIT", func(): GameState.save(); GameState.quit(), "primary", Tokens.T_LG))
+	PadNav.attach(veil, {"back": close, "first": func(): return cancel})
+	cancel.grab_focus.call_deferred()
 
 const MENU_EDGE := Tokens.S8
 const MENU_W := Tokens.CARD_W + Tokens.S8 + Tokens.S2
@@ -429,8 +483,8 @@ func _menu_page_main() -> void:
 	vb.add_child(seed_row)
 	vb.add_child(UITheme.spacer(Tokens.S4))
 	# secondary: a quiet list
-	for it in [["SETTINGS", _open_settings], ["CONTROLS", _show_controls], ["QUIT", func(): GameState.quit()]]:
-		vb.add_child(UITheme.make_button(it[0], it[1], "link", Tokens.T_XL))
+	vb.add_child(UITheme.make_button("SETTINGS", _open_settings, "link", Tokens.T_XL))   # controls are a tab in it
+	if is_instance_valid(menu_quit): menu_quit.visible = true
 	menu_focus = ride
 	ride.grab_focus.call_deferred()
 
@@ -475,6 +529,7 @@ func _menu_page_setup(step := 0) -> void:
 	setup_step = clampi(step, 0, SETUP_STEPS.size() - 1)
 	_menu_clear()
 	menu_page = "setup"
+	if is_instance_valid(menu_quit): menu_quit.visible = false
 	if is_instance_valid(setup_screen): setup_screen.queue_free()
 	_ensure_thumbs()
 	var scr := Control.new()
@@ -1129,7 +1184,6 @@ func _pause() -> void:
 	pm.add_item("Tuning", _open_tuning)
 	pm.add_item("Photo mode", func(): _resume(); game.toggle_photo())
 	pm.add_item("Settings", _open_settings)
-	pm.add_item("Controls", _show_controls)
 	pm.add_item("Main menu", func(): _close_pause(true); GameState.save(); _show_menu())
 	pm.add_item("Quit to desktop", func(): GameState.save(); GameState.quit())
 	pause_menu = pm

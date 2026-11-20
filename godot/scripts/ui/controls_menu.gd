@@ -14,7 +14,7 @@ func _pages() -> Array:
 
 # ---------------------------------------------------------------- bindings
 func _bindings() -> Control:
-	var p := _page("Bindings")
+	var p := _page("Controls")
 	_bind_box = p
 	_fill_bindings()
 	return p
