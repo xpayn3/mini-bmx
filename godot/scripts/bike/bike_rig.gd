@@ -21,6 +21,8 @@ var seat = null
 var susp = null
 var rotors: Array = []
 var chain: BikeChain   # drawn chain + derailleur pulleys, for frames that carry "chain" in their extras
+var action_cam: Node3D = null   # the bike's action cam (build.camera.mount: bars / fork); its "Body/Lens" is the Bike cam view
+var cam_mount := "none"
 var crank_angle := 0.0
 
 func _init() -> void:
@@ -31,7 +33,10 @@ func _init() -> void:
 var fit_g := Node3D.new()   # lifts / tilts the model when the wheels are bigger or smaller than stock
 var wheel_rf := 0.374
 var wheel_rr := 0.355
+const TYRE_ACROSS := [-0.8, 0.0, 0.8]   # where across the casing tyre_depth samples (x tyre_hw); one array, not one per call
 var tyre_hw := 0.03   # half the tyre's width (m): the casing is round, about as tall as it is wide
+
+static var _fit_cache := {}   # sticker fits on noDecals frames (BikeDecals.fit_label is slow in GDScript)
 
 ## build: a BikeBuild dictionary (paint, logos, wheels, suspension) or {} for the stock bike
 func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
@@ -53,6 +58,11 @@ func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
 	var fork_id := BikeBuild.fork_glb(build)
 	if fork_id != "" and not extras.get("noBarMod", false):   # frames with their own cockpit + fork keep them
 		_swap_fork(fork_id, build)
+	var lev := str(build.get("bars", {}).get("levers", "stock"))
+	if lev != "stock" and not extras.get("noBarMod", false) and not extras.get("noDecals", false):   # the stock frame: brake levers from a model
+		_swap_levers(lev, fork_id != "")
+	if not extras.get("noBarMod", false) and not extras.get("noDecals", false):   # the stock frame: saddle model + seat post
+		_swap_seat(build)
 	var rc := str(build.get("suspension", {}).get("rear_caliper", "stock"))
 	if rc != "stock" and not extras.get("noBarMod", false) and not extras.get("noDecals", false):   # the stock frame's own rear triangle only
 		_swap_rear_caliper(rc)
@@ -84,7 +94,10 @@ func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
 					if not extras.get("noBarMod", false):   # the garage bars are the same mesh on the goat
 						fitted.append(L)
 					continue
-				var F := BikeDecals.fit_label(model, L)
+				var fkey := str(cfg.file) + "|" + fork_id + "|" + var_to_str(L)   # same frame + label = same fit (the garage rebuilds per click)
+				if not _fit_cache.has(fkey):
+					_fit_cache[fkey] = BikeDecals.fit_label(model, L)
+				var F: Dictionary = (_fit_cache[fkey] as Dictionary).duplicate(true)
 				if not F.is_empty():
 					fitted.append(F)
 			decal_cfg["labels"] = fitted
@@ -101,6 +114,7 @@ func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
 		chain.setup(self)
 	if not decal_cfg.is_empty():
 		BikeDecals.add_bike_decals(model, decal_cfg)
+	mount_cam(str(build.get("camera", {}).get("mount", "none")))
 	if extras.has("suspension") and model.find_child("rocker", true, false):
 		var r: Dictionary = extras.suspension.rear
 		BikeDecals.add_pivot_bolts(model, [{"node": "rocker", "at": r.G2, "z": 0.029}, {"node": "rocker", "at": r.C2, "z": 0.029}, {"node": "rocker", "at": r.D, "z": 0.031, "r": 0.005}])
@@ -110,7 +124,8 @@ func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
 ## node, the lowers (+ caliper) replace the fork_lower mesh, and the lowers' node sits where the axle belongs (the fork's own offset).
 func _swap_fork(id: String, build: Dictionary) -> void:
 	var fs: Node = load("res://assets/forks/%s.glb" % id).instantiate()
-	var cs: Node = load("res://assets/forks/dh_cockpit.glb").instantiate()
+	var nl := str(build.get("bars", {}).get("levers", "stock")) != "stock"   # levers from a model: the cockpit comes without dh's own
+	var cs: Node = load("res://assets/forks/dh_cockpit_nl.glb" if nl else "res://assets/forks/dh_cockpit.glb").instantiate()
 	var crown := fs.find_child("fork_crown", true, false) as MeshInstance3D
 	var lowers := fs.find_child("fork_lower", true, false) as MeshInstance3D
 	var cock := cs.find_child("steer", true, false) as MeshInstance3D
@@ -134,6 +149,116 @@ func _swap_fork(id: String, build: Dictionary) -> void:
 			f.maxTravel = float(fx.get("travel", 0.18))
 	fs.free()
 	cs.free()
+
+## brake levers from a model on the stock frame (assets/forks/levers_<id>.glb, made by tools/make_forks.py): the steer mesh loses dh's own
+## levers (forks/dh_steer_nl.glb is the whole steer mesh without them; when a fork model is picked _swap_fork already used the cockpit
+## without them) and gets the model's as more surfaces of the same mesh, so Handlebar.apply moves them with the bar.
+func _swap_levers(id: String, fork_swapped: bool) -> void:
+	var path := "res://assets/forks/levers_%s.glb" % id
+	if not (steer_n is MeshInstance3D) or not ResourceLoader.exists(path): return
+	var ls: Node = load(path).instantiate()
+	var lm := _first_mesh(ls)
+	var base: Mesh = (steer_n as MeshInstance3D).mesh
+	var bs: Node = null
+	if not fork_swapped:
+		bs = load("res://assets/forks/dh_steer_nl.glb").instantiate()
+		var bm := _first_mesh(bs)
+		if bm: base = bm.mesh
+	if lm and base:
+		var mats := {}
+		for i in (steer_n as MeshInstance3D).mesh.get_surface_count():
+			var m := (steer_n as MeshInstance3D).mesh.surface_get_material(i)
+			if m: mats[m.resource_name] = m
+		var am := ArrayMesh.new()
+		var add := func(src: Mesh, i: int) -> void:
+			var m := src.surface_get_material(i)
+			am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, src.surface_get_arrays(i))
+			am.surface_set_material(am.get_surface_count() - 1, mats.get(m.resource_name, m) if m else null)
+		for i in base.get_surface_count(): add.call(base, i)
+		for i in lm.mesh.get_surface_count(): add.call(lm.mesh, i)
+		(steer_n as MeshInstance3D).mesh = am
+	ls.free()
+	if bs: bs.free()
+
+
+## a saddle model and / or a dropper seat post on the stock frame: the frame mesh loses its saddle (assets/seats/dh_frame.glb), the chosen saddle
+## (seats/saddle_dh.glb = the stock one, parts/<id>_saddle.glb) is added as more surfaces of the SAME mesh (so the rider's seat, the paint
+## by surface name and the decals keep working) at the stock place, raised along the seat tube by the dropper's height, with a post tube
+## from the seat tube to the clamp.
+func _swap_seat(build: Dictionary) -> void:
+	var S: Dictionary = build.get("seat", {})
+	var sid := str(S.get("model", "stock"))
+	var dropper := str(S.get("post", "stock")) == "dropper"
+	if sid == "stock" and not dropper:
+		return
+	var fmi := model.find_child("frame", true, false) as MeshInstance3D
+	var path := "res://assets/seats/saddle_%s.glb" % ("dh" if sid == "stock" else sid)
+	if fmi == null or fmi.mesh == null or not ResourceLoader.exists(path):
+		return
+	var fs: Node = load("res://assets/seats/dh_frame.glb").instantiate()
+	var ss: Node = load(path).instantiate()
+	var nf := fs.find_child("frame", true, false) as MeshInstance3D
+	var sm := _first_mesh(ss)   # (the glb root and its mesh node share a name: find the mesh itself)
+	var rootn := fs.find_child("seat", true, false)
+	if nf and sm and rootn:
+		var ex: Dictionary = rootn.get_meta("extras", {})
+		var org := Vector2(float(ex.stockOrigin[0]), float(ex.stockOrigin[1]))
+		var top := Vector2(float(ex.postTop[0]), float(ex.postTop[1]))
+		var dir := Vector2(float(ex.postDir[0]), float(ex.postDir[1])).normalized()
+		var h := float(S.get("post_h", 0.0)) if dropper else 0.0
+		var clamp := org + dir * h
+		var mats := {}
+		for i in fmi.mesh.get_surface_count():
+			var m := fmi.mesh.surface_get_material(i)
+			if m: mats[m.resource_name] = m
+		var am := ArrayMesh.new()
+		var add := func(arr: Array, nm: String, fallback: Material) -> void:
+			am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+			am.surface_set_material(am.get_surface_count() - 1, mats.get(nm, fallback))
+		for i in nf.mesh.get_surface_count():
+			var m := nf.mesh.surface_get_material(i)
+			add.call(nf.mesh.surface_get_arrays(i), m.resource_name, m)
+		for i in sm.mesh.get_surface_count():
+			var m := sm.mesh.surface_get_material(i)
+			add.call(_moved(sm.mesh.surface_get_arrays(i), Transform3D(Basis.IDENTITY, Vector3(clamp.x, clamp.y, 0.0))), m.resource_name, m)
+		if dropper:   # the post: a tube from inside the seat tube up to the clamp, with a collar at the tube's top
+			var ang := atan2(dir.y, dir.x) - PI * 0.5
+			var bas := Basis(Vector3.BACK, ang)
+			var bottom := top - dir * 0.04
+			var up := clamp + dir * 0.012
+			var len := bottom.distance_to(up)
+			var tube := CylinderMesh.new()
+			tube.top_radius = 0.0155; tube.bottom_radius = 0.0155; tube.height = len; tube.radial_segments = 16; tube.rings = 1
+			var mid := (bottom + up) * 0.5
+			add.call(_moved(tube.get_mesh_arrays(), Transform3D(bas, Vector3(mid.x, mid.y, 0.0))), "black", null)
+			var collar := CylinderMesh.new()
+			collar.top_radius = 0.0185; collar.bottom_radius = 0.0185; collar.height = 0.02; collar.radial_segments = 16; collar.rings = 1
+			var cp := top
+			add.call(_moved(collar.get_mesh_arrays(), Transform3D(bas, Vector3(cp.x, cp.y, 0.0))), "chrome", null)
+		fmi.mesh = am
+	fs.free()
+	ss.free()
+
+
+static func _first_mesh(n: Node) -> MeshInstance3D:
+	var l := n.find_children("*", "MeshInstance3D", true, false)
+	return l[0] as MeshInstance3D if not l.is_empty() else null
+
+
+## mesh arrays moved by a transform (positions + normals)
+static func _moved(arr: Array, xf: Transform3D) -> Array:
+	var out := arr.duplicate()
+	var P: PackedVector3Array = arr[Mesh.ARRAY_VERTEX].duplicate()
+	for i in P.size():
+		P[i] = xf * P[i]
+	out[Mesh.ARRAY_VERTEX] = P
+	if arr[Mesh.ARRAY_NORMAL] != null:
+		var N: PackedVector3Array = arr[Mesh.ARRAY_NORMAL].duplicate()
+		for i in N.size():
+			N[i] = xf.basis * N[i]
+		out[Mesh.ARRAY_NORMAL] = N
+	return out
+
 
 ## a rotor model (assets/forks/rotor_<id>.glb): the "rotor" meshes the wheels split off keep their heat-glow material and get the model's disc
 func _swap_rotors(id: String) -> void:
@@ -163,7 +288,7 @@ func _swap_rear_caliper(id: String) -> void:
 	var a: Node = load("res://assets/forks/dh_seatstay.glb").instantiate()
 	var c: Node = load("res://assets/forks/caliper_%s.glb" % id).instantiate()
 	var nss := a.find_child("seatstay", true, false) as MeshInstance3D
-	var cal := c.find_child("caliper", true, false) as MeshInstance3D
+	var cal := _first_mesh(c)
 	if nss and cal:
 		ss.mesh = nss.mesh
 		cal.get_parent().remove_child(cal)
@@ -203,12 +328,6 @@ func _swap_wheels(build: Dictionary, mods: Dictionary) -> void:
 	fit_g.position.y = dr + (df - dr) * (bb / L)
 	fit_g.rotation.z = atan2(df - dr, L)
 
-static func _has_class(n: String) -> bool:
-	for c in ProjectSettings.get_global_class_list():
-		if c["class"] == n:
-			return true
-	return false
-
 func _meshes(root: Node) -> Array:
 	var out := []
 	if root is MeshInstance3D:
@@ -243,6 +362,88 @@ func _materials(_cfg: Dictionary) -> void:
 		if w is MeshInstance3D:
 			var r = BikeFX.find_rotor(w)
 			if r: rotors.append(r)
+
+## the action cam on the bike: "bars" = a bar clamp right of the stem, camera on top looking ahead (turns
+## with the steering); "fork" = a clamp on the right fork lower (the caliper is on the left), camera beside
+## the leg, low over the ground (moves with the suspension). Placed from the meshes themselves, so it fits
+## every frame / bar / fork model. "none" (or no such part) = no camera.
+func mount_cam(kind: String) -> void:
+	if action_cam and is_instance_valid(action_cam):
+		action_cam.get_parent().remove_child(action_cam)
+		action_cam.queue_free()
+	action_cam = null
+	cam_mount = "none"
+	var probe := Env.s("BMX_CAMMOUNT_PROBE") != ""
+	if kind == "bars" and steer_n is MeshInstance3D:
+		var zc := lerpf(0.0, grip_r.z, 0.33)   # a third of the way out: clear of the stem, inside the levers
+		var hint := Vector3(lerpf(grip_r.x, 0.0, 0.3), grip_r.y, zc)
+		var t := _tube_at(steer_n as MeshInstance3D, Vector3(0, 0, 1), zc, hint)
+		if t.is_empty(): return
+		action_cam = ActionCam.build_clamp(Vector3(0, 0, 1), t.r, Vector3.UP, Vector3(0.0, t.r + 0.024, 0.0))
+		action_cam.position = t.c
+		steer_n.add_child(action_cam)
+		if probe: print("CAMMOUNT bars c=%s r=%.4f" % [t.c, t.r])
+	elif kind == "fork":
+		var fl := model.find_child("fork_lower", true, false) as MeshInstance3D
+		if fl == null or fl.mesh == null: return
+		var A := fl.mesh.get_aabb()
+		var h := A.size.y
+		var lo := _leg_band(fl, A.position.y + h * 0.3)
+		var hi := _leg_band(fl, A.position.y + h * 0.55)
+		if probe: print("CAMMOUNT fork aabb=%s lo=%s hi=%s" % [A, lo, hi])
+		if lo.is_empty() or hi.is_empty(): return
+		var axis: Vector3 = (hi.c - lo.c).normalized()
+		var at: Vector3 = hi.c
+		var r: float = hi.r
+		# camera upright on the outside of the leg, centred on the clamp height, lens ahead
+		action_cam = ActionCam.build_clamp(axis, r, Vector3(0, 0, 1), Vector3(0.012, -0.03, r + 0.046))
+		action_cam.position = at
+		fl.add_child(action_cam)
+		if probe: print("CAMMOUNT fork c=%s r=%.4f axis=%s" % [at, r, axis])
+	else:
+		return
+	cam_mount = kind
+	for mi in action_cam.find_children("*", "MeshInstance3D", true, false):
+		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+
+## every vertex of a mesh (all surfaces), mesh space
+static func _verts(mi: MeshInstance3D) -> PackedVector3Array:
+	var out := PackedVector3Array()
+	for si in mi.mesh.get_surface_count():
+		out.append_array(mi.mesh.surface_get_arrays(si)[Mesh.ARRAY_VERTEX])
+	return out
+
+## a round tube crossing the plane `axis`·p = d near `hint`: {c: its centre in that plane, r: radius}, {} if none
+static func _tube_at(mi: MeshInstance3D, axis: Vector3, d: float, hint: Vector3) -> Dictionary:
+	var ring := PackedVector3Array()
+	for p in _verts(mi):
+		if absf(p.dot(axis) - d) < 0.005: ring.append(p)
+	if ring.is_empty(): return {}
+	var near := ring[0]
+	for p in ring:
+		if p.distance_to(hint) < near.distance_to(hint): near = p
+	var c := Vector3.ZERO; var n := 0
+	for p in ring:
+		if p.distance_to(near) < 0.03: c += p; n += 1
+	c /= n
+	var rr := 0.0; n = 0
+	for p in ring:
+		if p.distance_to(c) < 0.03: rr += (p - c).length(); n += 1
+	c = c - axis * (c.dot(axis) - d)
+	return {"c": c, "r": clampf(rr / maxi(n, 1), 0.008, 0.03)}
+
+## the right fork lower's cross-section at height y (fork_lower space): {c, r}, {} if there's no leg there
+static func _leg_band(mi: MeshInstance3D, y: float) -> Dictionary:
+	var c := Vector3.ZERO; var n := 0
+	var band := PackedVector3Array()
+	for p in _verts(mi):
+		if absf(p.y - y) < 0.02 and p.z > 0.03:
+			band.append(p); c += p; n += 1
+	if n < 6: return {}
+	c /= n
+	var rr := 0.0
+	for p in band: rr = maxf(rr, Vector2(p.x - c.x, p.z - c.z).length())
+	return {"c": c, "r": clampf(rr, 0.012, 0.035)}
 
 func _grips() -> void:
 	var mi := steer_n as MeshInstance3D
@@ -355,7 +556,7 @@ func tyre_depth(wheel: Node3D, R: float, top: Callable) -> float:
 	for i in n:
 		var a := TAU * i / n if full else -1.4 + 2.8 * i / (n - 1)
 		var dir := d0 * cos(a) + side * sin(a)
-		for wo in [-0.8, 0.0, 0.8]:
+		for wo in TYRE_ACROSS:
 			var off: float = wo * hw
 			var r := R - hw + sqrt(hw * hw - off * off)
 			var p := c + dir * r + ax * off

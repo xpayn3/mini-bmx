@@ -767,6 +767,7 @@ public partial class TerrainFieldCs : RefCounted
 	// GDScript's sin / exp / log: the x87 emulation, and for the rare near-tie the engine's own function
 	// (Expression calls the same Math::sin / exp / log as GDScript; one per instance = per thread)
 	private Expression[] _libm;
+	private Godot.Collections.Array _libm_args;
 	public long libm_engine_calls;
 
 	private double _engine(int fn, double x)
@@ -778,7 +779,9 @@ public partial class TerrainFieldCs : RefCounted
 			_libm[fn] = new Expression();
 			_libm[fn].Parse(fn == 0 ? "sin(x)" : (fn == 1 ? "exp(x)" : "log(x)"), new[] { "x" });
 		}
-		return _libm[fn].Execute(new Godot.Collections.Array { x }).AsDouble();
+		_libm_args ??= new Godot.Collections.Array { 0.0 };   // one reused engine Array (disposed in release_libm), not one per call
+		_libm_args[0] = x;
+		return _libm[fn].Execute(_libm_args).AsDouble();
 	}
 
 	/// dispose the engine Expressions made for near-tie sin / exp / log now (made again if needed): the paper
@@ -786,6 +789,8 @@ public partial class TerrainFieldCs : RefCounted
 	/// the engine shut down, which crashed the quit
 	public void release_libm()
 	{
+		_libm_args?.Dispose();
+		_libm_args = null;
 		if (_libm == null) return;
 		foreach (var e in _libm) e?.Dispose();
 		_libm = null;
@@ -1602,6 +1607,27 @@ public partial class TerrainFieldCs : RefCounted
 				for (long i = 0; i < nx; i++)
 					o[r * nx + i] = (float)ground(ox + i * step, z);
 			}
+		}
+		finally { _approx = false; }
+		return o;
+	}
+
+	/// far_hills.gd (worker): the backdrop's n x n ground grid in one call (approximate near-ties, like the map)
+	public float[] far_ground(double ox, double oz, double step, long n) => map_heights(ox, oz, step, n, 0, n);
+
+	/// far_hills.gd: colours for that grid, h / slope per cell as far_hills computed them
+	public Color[] far_colors(double ox, double oz, double step, long n, float[] h, float[] slope)
+	{
+		var o = new Color[n * n];
+		_approx = true;
+		try
+		{
+			for (long iz = 0; iz < n; iz++)
+				for (long ix = 0; ix < n; ix++)
+				{
+					long i = iz * n + ix;
+					o[i] = color(ox + ix * step, oz + iz * step, h[i], slope[i]);
+				}
 		}
 		finally { _approx = false; }
 		return o;

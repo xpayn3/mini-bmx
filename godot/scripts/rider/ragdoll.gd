@@ -291,6 +291,11 @@ func step(dt: float, colliders: Array) -> void:
 		_squirm(h)
 		if not _no_lkeep: _keep_ang_mom(L0)
 		_touch.fill(0)
+		# ground under each part once per substep (a C# call each); the 6 solver passes move parts by mm only
+		_gh.resize(p.size())
+		for i in p.size():
+			var gp: Vector3 = p[i]
+			_gh[i] = terrain.height(gp.x, gp.z)
 		for it in 6:
 			for j in BONES.size():
 				var bb: int = BONES[j][1]
@@ -316,8 +321,8 @@ func step(dt: float, colliders: Array) -> void:
 			var dz := pp.z - qq.z
 			var d := sqrt(dx * dx + dz * dz)
 			if d < 1e-7: continue
-			var cut := minf(d, SLIDE_MU * 9.81 * h * h)   # Coulomb: speed drops by mu*g*h per substep
-			var k := (d - cut) / d * drag
+			var fric := minf(d, SLIDE_MU * 9.81 * h * h)   # Coulomb: speed drops by mu*g*h per substep
+			var k := (d - fric) / d * drag
 			qq.x = pp.x - dx * k
 			qq.z = pp.z - dz * k
 			q[i] = qq
@@ -490,11 +495,13 @@ func _dist(a: int, b: int, len: float, k: float, min_only: bool) -> void:
 	p[b] = B - d * c
 
 
+var _gh := PackedFloat32Array()   # ground height under each part this substep (step)
+
 func _collide(i: int) -> void:
 	var pp: Vector3 = p[i]
 	var qq: Vector3 = q[i]
 	var r: float = rad[i]
-	var g: float = terrain.height(pp.x, pp.z) + r
+	var g: float = _gh[i] + r
 	if pp.y < g:
 		pp.y = g
 		_touch[i] = 1   # ground friction after the solver passes (step)

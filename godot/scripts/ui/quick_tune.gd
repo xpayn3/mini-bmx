@@ -32,7 +32,7 @@ func _ready() -> void:
 	_rebuild()
 
 func _rebuild() -> void:
-	for c in list.get_children(): c.queue_free()
+	for c in list.get_children(): list.remove_child(c); c.queue_free()   # out of the tree now: _sync finds the new labels
 	list.visible = not Tune.quick_folded
 	fold_btn.text = "+" if Tune.quick_folded else "–"
 	if Tune.pins.is_empty():

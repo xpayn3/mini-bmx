@@ -74,6 +74,25 @@ static func box(bg: Color, radius := Tokens.R_LG, pad := Tokens.S4, border := To
 	s.anti_aliasing = true
 	return s
 
+## draw a rounded box straight away, reusing one StyleBoxFlat per corner / border size (the HUD draws dozens a
+## frame; StyleBoxFlat.draw issues its commands at once, so changing the colours after a draw is safe)
+static var _draw_boxes := {}
+static func draw_box(ci: CanvasItem, r: Rect2, bg: Color, radius: int, border := Tokens.CLEAR, bw := 0, square_end := false) -> void:
+	var key := Vector3i(radius, bw, 1 if square_end else 0)
+	var sb: StyleBoxFlat = _draw_boxes.get(key)
+	if sb == null:
+		sb = StyleBoxFlat.new()
+		sb.set_corner_radius_all(radius)
+		if square_end:   # a fill: rounded where it starts, cut straight where it ends
+			sb.corner_radius_top_right = 0
+			sb.corner_radius_bottom_right = 0
+		sb.set_border_width_all(bw)
+		sb.anti_aliasing = true
+		_draw_boxes[key] = sb
+	sb.bg_color = bg
+	sb.border_color = border
+	ci.draw_style_box(sb, r)
+
 static func get_theme() -> Theme:
 	if _theme: return _theme
 	var t := Theme.new()

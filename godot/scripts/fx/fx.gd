@@ -309,6 +309,7 @@ func puff(pos: Vector3, vel: Vector3, color: Color, size := 0.35, life := 1.4, a
 	dust_next = (i + 1) % DUST_MAX
 	d_age[i] = 0.0
 	d_life[i] = life * (0.8 + randf() * 0.4)
+	_dust_busy = true
 	d_s0[i] = size * (0.8 + randf() * 0.4)
 	d_a0[i] = alpha
 	d_vel[i * 3] = vel.x; d_vel[i * 3 + 1] = vel.y; d_vel[i * 3 + 2] = vel.z
@@ -330,6 +331,7 @@ func chunk(pos: Vector3, vel: Vector3, color: Color, size := 0.03, life := 2.2) 
 	chunk_next = (i + 1) % CHUNK_MAX
 	c_age[i] = 0.0
 	c_life[i] = life * (0.7 + randf() * 0.6)
+	_chunk_busy = true
 	c_rest[i] = 0
 	c_pos[i * 3] = pos.x; c_pos[i * 3 + 1] = pos.y; c_pos[i * 3 + 2] = pos.z
 	c_vel[i * 3] = vel.x; c_vel[i * 3 + 1] = vel.y; c_vel[i * 3 + 2] = vel.z
@@ -416,9 +418,17 @@ func _put_pos(k: int, x: float, y: float, z: float) -> void:
 # ======================================================================= simulation
 
 ## camera is unused (the dust shader faces the quads to whatever camera draws them); kept for parity
+var _dust_busy := false    # any puff alive (or one just died, so its slot still needs zeroing) -> loop + upload
+var _chunk_busy := false
+
 func update(dt: float, _camera: Camera3D = null) -> void:
 	t += dt
-	# dust: drift, slow down, rise a little, grow and fade
+	if _dust_busy: _update_dust(dt)
+	if _chunk_busy: _update_chunks(dt)
+
+## dust: drift, slow down, rise a little, grow and fade
+func _update_dust(dt: float) -> void:
+	var alive := false
 	var damp := exp(-dt * 1.8)
 	for i in DUST_MAX:
 		var o := i * DUST_STRIDE
@@ -426,6 +436,7 @@ func update(dt: float, _camera: Camera3D = null) -> void:
 			if dust_buf[o] != 0.0 or dust_buf[o + 15] != 0.0:
 				dust_buf[o] = 0.0; dust_buf[o + 5] = 0.0; dust_buf[o + 10] = 0.0; dust_buf[o + 15] = 0.0
 			continue
+		alive = true
 		d_age[i] += dt
 		var k := minf(1.0, d_age[i] / d_life[i])
 		var j := i * 3
@@ -453,12 +464,16 @@ func update(dt: float, _camera: Camera3D = null) -> void:
 		dust_buf[o + 12] = d_tint[j]; dust_buf[o + 13] = d_tint[j + 1]; dust_buf[o + 14] = d_tint[j + 2]; dust_buf[o + 15] = al
 		dust_buf[o + 16] = d_rot[i]; dust_buf[o + 17] = d_cell[i]; dust_buf[o + 18] = k; dust_buf[o + 19] = 0.0
 	RenderingServer.multimesh_set_buffer(dust_mm.get_rid(), dust_buf)
+	_dust_busy = alive   # one more pass after the last puff died has zeroed its slot
 
-	# chunks: ballistic, spin, bounce on the terrain, then settle and shrink away
+## chunks: ballistic, spin, bounce on the terrain, then settle and shrink away
+func _update_chunks(dt: float) -> void:
+	var alive := false
 	for i in CHUNK_MAX:
 		var o := i * CHUNK_STRIDE
 		if c_age[i] >= c_life[i]:
 			continue
+		alive = true
 		c_age[i] += dt
 		var j := i * 3
 		var s0 := c_s[i]
@@ -485,6 +500,7 @@ func update(dt: float, _camera: Camera3D = null) -> void:
 		chunk_buf[o + 4] = bx.y; chunk_buf[o + 5] = by.y; chunk_buf[o + 6] = bz.y; chunk_buf[o + 7] = c_pos[j + 1]
 		chunk_buf[o + 8] = bx.z; chunk_buf[o + 9] = by.z; chunk_buf[o + 10] = bz.z; chunk_buf[o + 11] = c_pos[j + 2]
 	RenderingServer.multimesh_set_buffer(chunk_mm.get_rid(), chunk_buf)
+	_chunk_busy = alive   # a chunk on its last frame wrote scale 0 above
 
 
 func clear_tracks() -> void:
