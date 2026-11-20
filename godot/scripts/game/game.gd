@@ -121,9 +121,9 @@ var sky_mat: ShaderMaterial
 ## The title screen's backdrop is its own hand-picked place (a fixed world and spot), not the player's world:
 ## main builds the title Game with title_world = true and swaps to the real world when a ride starts.
 const TITLE_SEED := 37   # a desert summit with rolling hills far below, picked by hand
-## the bike is turned this far from the hand-picked heading: the camera (yaw_off -1.2 from it) then looks ~0.5 rad round
+## the bike is turned this far from the hand-picked heading: the camera (yaw_off -1.95 from it: the bike faces three-quarters towards the camera) then looks ~0.5 rad round
 ## from the original view, across the valley the hill falls into, instead of into the sun
-const TITLE_TURN := 1.7
+const TITLE_TURN := 2.45
 const TITLE_SPOT := Vector3(30.0, -120.0, 1.4399)   # x, z, heading (rad) of the bike on that summit
 var title_world := false
 ## parts of an earlier Game of the same world to use instead of building them ({terrain, far_hills}; main sets it
@@ -391,7 +391,7 @@ func set_scenic(on: bool) -> void:
 	if on:
 		_to_hilltop()
 		var best := _title_heading
-		var sy := best - 0.3   # low sun ahead-right of the bike, out of the frame
+		var sy := best - 1.05   # low sun ahead-right of the bike, out of the frame
 		var el := deg_to_rad(10.0)
 		sun.look_at_from_position(Vector3(cos(sy) * cos(el), sin(el), -sin(sy) * cos(el)), Vector3.ZERO, Vector3.UP)
 		sun.light_color = Color(1.0, 0.62, 0.34)
@@ -827,14 +827,23 @@ func _rocks_near(x: float, z: float, reach: float) -> Array:
 	return out
 
 ## the spot nearest to (x, z) with no rock under or beside the bike (a spiral out to ~22 m; the spot itself if bare)
-func _clear_spot(x: float, z: float) -> Vector2:
+func _clear_spot(x: float, z: float, head: float) -> Vector2:
 	var rocks := _rocks_near(x, z, 30.0)
+	var V: Dictionary = CameraRig.VISTA   # where the title camera will stand: the view of the bike must be clear too
+	var cyaw := head + float(V.yaw_off)
+	var cdir := Vector2(cos(cyaw), -sin(cyaw))
+	var cright := Vector2(-cdir.y, cdir.x)
 	var free := func(px: float, pz: float) -> bool:
 		if _rock_rise(px, pz) >= 0.04:
 			return false
+		var cam2 := Vector2(px, pz) - cdir * float(V.back) + cright * float(V.side)
 		for r in rocks:
-			if Vector2(px - r[0], pz - r[1]).length() < r[2] + 2.6:   # the bike is ~2 m long: keep it well clear
+			var rp := Vector2(r[0], r[1])
+			if rp.distance_to(Vector2(px, pz)) < r[2] + 2.6:   # the bike is ~2 m long: keep it well clear
 				return false
+			for k in 7:   # nothing in the line from the camera to the bike (a low lens sees every rock)
+				if rp.distance_to(cam2.lerp(Vector2(px, pz), k / 6.0)) < r[2] + 1.2:
+					return false
 		return true
 	if free.call(x, z):
 		return Vector2(x, z)
@@ -856,7 +865,7 @@ func _to_hilltop() -> void:
 		var q := Env.s("BMX_TITLE_SPOT").split_floats(",")
 		sp = Vector3(q[0], q[1], q[2])
 	terrain.update_stream(sp.x, sp.y, INF)
-	var clear := _clear_spot(sp.x, sp.y)   # never on a rock: the nearest bare ground to the picked spot
+	var clear := _clear_spot(sp.x, sp.y, sp.z + TITLE_TURN)   # never on a rock: the nearest bare ground to the picked spot
 	sp = Vector3(clear.x, clear.y, sp.z)
 	phys.reset_at(sp.x, sp.y, 0.0)
 	_snap_prev()

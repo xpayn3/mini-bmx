@@ -19,7 +19,7 @@ const PRESETS := {
 	"trackside": {"label": "Trackside",  "mode": "trackside", "fov": 14.0},
 }
 ## title screen only (not in the C cycle): behind and above the rider, looking out over the landscape
-const VISTA := {"label": "Lookout", "mode": "vista", "fov": 24.0, "back": 10.5, "up": 2.6, "side": -1.2, "look": 160.0, "drop": 0.11, "yaw_off": -1.2}
+const VISTA := {"label": "Lookout", "mode": "vista", "fov": 18.0, "back": 10.5, "up": 0.5, "side": -0.8, "look": 160.0, "drop": -0.03, "yaw_off": -1.95}
 var vista_yaw := 0.0
 
 var game
@@ -399,7 +399,7 @@ func _vista(dt: float, P: Dictionary) -> void:
 	var right := Vector3(-dir.z, 0, dir.x)
 	var base: Vector3 = game.drawn_pos
 	var pos: Vector3 = base - dir * P.back + right * P.side + Vector3(0, P.up + sin(t * 0.21) * 0.25, 0)
-	var gh: float = game.terrain.height(pos.x, pos.z) + (2.6 if game.scenic else 1.2)   # the title shot sits low: a hero angle
+	var gh: float = game.terrain.height(pos.x, pos.z) + (0.5 if game.scenic else 1.2)   # the title shot sits low: a hero angle
 	pos.y = maxf(pos.y, gh)
 	global_position = pos
 	var aim: Vector3 = pos + dir * P.look
