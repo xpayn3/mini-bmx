@@ -52,6 +52,7 @@ var _probe_t := 0.0
 var grade_rect: ColorRect
 var atmos := Atmos.new()
 var grime: Grime
+var contact: ContactShadow   # soft dark patches under the tyres + bike / rider (fx/contact_shadow.gd)
 var blood                    # blood on the ground + torn-off limbs after a crash (fx/blood.gd; loaded by path, no class cache needed)
 var dust: RideDust
 var sun_energy := RIDE_SUN
@@ -183,6 +184,9 @@ func _ready() -> void:
 	blood = preload("res://scripts/fx/blood.gd").new(terrain, fx)
 	blood.ragdoll = ragdoll
 	add_child(blood)
+	if Env.s("BMX_NO_CONTACT") == "":   # tests: compare without
+		contact = ContactShadow.new()
+		add_child(contact)
 	dust = RideDust.new()
 	add_child(dust)
 	if dust.sim != null and dust.sim.compositor != null:   # the dust is drawn as a compositor effect
@@ -2001,6 +2005,15 @@ func _process(dt: float) -> void:
 	# what a caught tape stretches over: the drawn front tyre's leading edge (the drawn bike, not the physics
 	# state a step ahead of it, so the tape sits on the tyre you see)
 	terrain.tape_push(null if phys.crash_on else rig.wheel_f.global_position + Vector3(cos(hd), 0.0, -sin(hd)) * rig.wheel_rf)
+	if contact != null:   # contact shadows on the drawn bike (and the body in a crash)
+		var wf: Vector3 = rig.wheel_f.global_position
+		var wr: Vector3 = rig.wheel_r.global_position
+		var mid := (wf + wr) * 0.5
+		var bh := ContactShadow.RIDE_H
+		if phys.crash_on and ragdoll != null and not ragdoll.p.is_empty():
+			mid = ragdoll.p[Ragdoll.PELVIS]; bh = 0.15
+		contact.visible = not photo or rig.visible
+		contact.update(wf, wr, rig.wheel_rf, rig.wheel_rr, hd, mid, bh, terrain.top_height)
 	_pk = _perf("packs_tape", _pk)
 	far_hills.follow(drawn_pos)
 	_pk = _perf("far_hills", _pk)
