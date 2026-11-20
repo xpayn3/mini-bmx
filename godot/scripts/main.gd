@@ -587,6 +587,8 @@ func _menu_page_main() -> void:
 	ride.grab_focus.call_deferred()
 
 ## RIDE -> choose the bike and the time of day, then GO
+const GoggleLens = preload("res://scripts/rider/goggle_lens.gd")   # goggle lens = the ride's colour grade (RACE step)
+const LensIcon = preload("res://scripts/ui/lens_icon.gd")
 const SETUP_STEPS := ["BIKE", "TUNE", "CHARACTER", "COMPUTER", "RACE"]
 const COMPUTER_STEP := 3
 var setup_step := 0
@@ -779,6 +781,7 @@ func _menu_page_setup_build(step := 0) -> void:
 		keep_view.visible = false
 		scr.add_child(keep_view)
 	elif is_instance_valid(hero_view): hero_view.visible = true
+	_lens_preview(GameState.goggle_lens if setup_step == SETUP_STEPS.size() - 1 else "")   # the RACE step shows the bike through the lens
 	menu_focus = next_btn   # a step with one main pick moves this onto the picked card
 	match setup_step:
 		0: _setup_bike(content)
@@ -1193,7 +1196,7 @@ func _setup_race(content: HBoxContainer) -> void:
 		_pick_card(b)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		b.custom_minimum_size.y = 108
+		b.custom_minimum_size.y = 84
 		# a postcard: the little landscape in a white border, the name and the time written under it
 		var cv := VBoxContainer.new()
 		cv.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -1217,7 +1220,62 @@ func _setup_race(content: HBoxContainer) -> void:
 		b.add_child(cv)
 		grid.add_child(b)
 	side.add_child(grid)
+	_setup_lenses(side)
 	side.add_child(UITheme.text("Computer: " + String(ComputerUnits.get_unit(GameState.computer_id).name), Tokens.INK_SOFT, Tokens.T_MD))
+
+## the RACE step's GOGGLES picks: each lens is a colour grade for the whole ride (GoggleLens). The bike view on the
+## left is graded live by the picked lens (_lens_preview); the line under the picks says what the lens does.
+func _setup_lenses(side: VBoxContainer) -> void:
+	side.add_child(UITheme.caption("GOGGLES  ·  LENS"))
+	var lg := GridContainer.new()
+	lg.columns = 4
+	lg.add_theme_constant_override("h_separation", Tokens.S2)
+	lg.add_theme_constant_override("v_separation", Tokens.S2)
+	var desc := UITheme.caption(GoggleLens.description(GameState.goggle_lens), Tokens.INK_SOFT, Tokens.T_XS)
+	var grp := ButtonGroup.new()
+	for id in GoggleLens.ids():
+		var b := UITheme.make_button("", Callable(), "chip")
+		b.toggle_mode = true
+		b.button_group = grp
+		b.button_pressed = id == GameState.goggle_lens
+		b.set_meta(&"nav_accept", _setup_next)   # A on a lens = RACE, like the time cards
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.custom_minimum_size.y = 74
+		b.tooltip_text = GoggleLens.description(id)
+		var cv := VBoxContainer.new()
+		cv.set_anchors_preset(Control.PRESET_FULL_RECT)
+		cv.offset_left = Tokens.S2; cv.offset_right = -Tokens.S2; cv.offset_top = Tokens.S1; cv.offset_bottom = -Tokens.S1
+		cv.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		cv.add_theme_constant_override("separation", 0)
+		var ic = LensIcon.new()
+		ic.tint = GoggleLens.tint(id)
+		ic.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		cv.add_child(ic)
+		var nl := UITheme.display(GoggleLens.display_name(id).to_upper(), Tokens.T_SM, Tokens.INK, Tokens.SLANT_TITLE)
+		nl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		nl.clip_text = true
+		nl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		nl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		cv.add_child(nl)
+		b.add_child(cv)
+		b.pressed.connect(func():
+			if is_instance_valid(desc): desc.text = GoggleLens.description(id)
+			if GameState.goggle_lens != id:
+				GameState.goggle_lens = id
+				GameState.save()
+			_lens_preview(id))
+		lg.add_child(b)
+	side.add_child(lg)
+	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	side.add_child(desc)
+
+## grades the setup page's bike view with a lens ("" / "neutral" = none); the turntable is kept across steps,
+## so every other step sets it back to none
+func _lens_preview(id: String) -> void:
+	if not is_instance_valid(hero_view): return
+	for we in hero_view.find_children("*", "WorldEnvironment", true, false):
+		var env: Environment = (we as WorldEnvironment).environment
+		if env: env.adjustment_color_correction = GoggleLens.lut(id) if id != "" else null
 
 ## a setup pick that follows the pad cursor: the picked one is where the cursor starts, A on it = next step
 func _pick_card(b: Button) -> void:

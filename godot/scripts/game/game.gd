@@ -59,6 +59,19 @@ var sun_energy := RIDE_SUN
 var tod := 19.33             # the clock (hours); the cycle runs it, a slider move resets it
 var light_ver := -1          # LightSettings.version last applied
 var light_t := 0.0
+const GoggleLens = preload("res://scripts/rider/goggle_lens.gd")
+const RIM_LAYER := 1 << 11   # render layer 12: the rider + bike (only the rim light uses it)
+const AGX_CONTRAST := 1.35
+const MIST_DENSITY := 0.45   # height fog in the dips at sunrise (Env BMX_MIST=k forces the amount)
+const AGX_EXP_DAY := 0.7
+const AGX_EXP_GOLD := 0.9
+const AGX_EXP_NIGHT := 3.3
+var rim: DirectionalLight3D
+var _rim_col := Color(1, 1, 1)
+var _rim_e := 0.0
+var _rim_tag_t := 0.0
+var _mist_y := NAN
+var _lens_now := ""
 var night_k := 0.0           # how much night (0 day .. 1 full night), from _apply_light
 var amb_base := 0.36        # flat ambient for the GI setting (SDFGI brings its own sky light)
 var speed_k := 0.0           # 0..1 speed feel (FOV boost, edge blur)
@@ -234,7 +247,11 @@ func _build_environment() -> void:
 	env.ambient_light_color = Color(0.55, 0.68, 0.9)
 	env.ambient_light_energy = 0.42   # the web version: sky env 0.55 + a 0.32 hemisphere fill
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
-	env.tonemap_mode = Environment.TONE_MAPPER_ACES
+	# AgX (filmic): bright warm light rolls off to white gracefully instead of going flat orange / clipping
+	# (ACES did that at golden hour); it is a little flatter, so the exposure / grade numbers below are tuned for it
+	env.tonemap_mode = Environment.TONE_MAPPER_AGX if Env.s("BMX_ACES") == "" else Environment.TONE_MAPPER_ACES
+	env.tonemap_agx_contrast = AGX_CONTRAST
+	env.tonemap_agx_white = 12.0
 	env.tonemap_exposure = 0.8
 	env.tonemap_white = 6.0
 	env.fog_enabled = true
@@ -277,6 +294,9 @@ func _build_environment() -> void:
 	env.volumetric_fog_temporal_reprojection_enabled = true
 	env.volumetric_fog_temporal_reprojection_amount = 0.9
 	env.adjustment_enabled = true
+	# goggle lens (picked on the ride setup page): its tinted film = a colour LUT over the whole view; Clear = none
+	_lens_now = str(GameState.goggle_lens)
+	env.adjustment_color_correction = GoggleLens.lut(_lens_now)
 	env.adjustment_saturation = 1.22
 	env.adjustment_contrast = 1.12
 	we.environment = env
@@ -308,6 +328,17 @@ func _build_environment() -> void:
 	sun.light_volumetric_fog_energy = 2.6
 	add_child(sun)
 	sun.look_at_from_position(SUN_DIR.normalized(), Vector3.ZERO, Vector3.UP)
+	# rim light: lights only the rider + bike (RIM_LAYER) from behind them as the camera sees them, so their
+	# outline catches a bright edge and never sinks into the background (backlit, at dusk, in a forest)
+	rim = DirectionalLight3D.new()
+	rim.name = "RimLight"
+	rim.light_cull_mask = RIM_LAYER
+	rim.shadow_enabled = false
+	rim.sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_ONLY   # not in the sky shader (LIGHT0 must stay the sun / moon)
+	rim.light_volumetric_fog_energy = 0.0
+	rim.light_specular = 1.2
+	rim.light_energy = 0.0
+	add_child(rim)
 	refl_probe = ReflectionProbe.new()
 	refl_probe.size = Vector3(160, 60, 160)
 	refl_probe.max_distance = 260.0
@@ -394,6 +425,51 @@ func set_scenic(on: bool) -> void:
 		cam.far = RIDE_FAR
 		light_ver = -1   # the level light (time of day) takes over on the next frame
 
+## the rim light follows the camera: it shines from behind + above the rider as seen from the lens, a little from the
+## side the sun is on (so it agrees with the light in the scene). The rider / bike meshes get RIM_LAYER (twice a
+## second: helmets, cams, a new bike or a crash add meshes).
+func _rim_update(dt: float) -> void:
+	if rim == null: return
+	_rim_tag_t -= dt
+	if _rim_tag_t <= 0.0:
+		_rim_tag_t = 0.5
+		for root in [rider, rig]:
+			if root == null or not is_instance_valid(root): continue
+			for n in (root as Node).find_children("*", "GeometryInstance3D", true, false):
+				var gi := n as GeometryInstance3D
+				if gi.layers & RIM_LAYER == 0: gi.layers |= RIM_LAYER
+	var c3 := get_viewport().get_camera_3d()
+	if c3 == null or scenic or Env.s("BMX_NO_RIM") != "":
+		rim.light_energy = 0.0
+		return
+	var fwd := -c3.global_basis.z
+	var fh := Vector3(fwd.x, 0.0, fwd.z)
+	if fh.length() < 0.01: fh = Vector3(1, 0, 0)
+	fh = fh.normalized()
+	var side := Vector3(-fh.z, 0.0, fh.x)
+	var sun_side := signf(side.dot(Vector3(_gg_sun.x, 0.0, _gg_sun.z)))
+	# the light travels toward the camera (from behind the rider), down a little, leaning in from the sun's side
+	var travel := (-fh * 0.55 + Vector3.DOWN * 0.35 - side * sun_side * 0.9).normalized()   # ~60 deg off the view: lights the outline
+	rim.global_basis = Basis.looking_at(travel, Vector3.UP if absf(travel.y) < 0.98 else Vector3.FORWARD)
+	rim.light_color = _rim_col
+	rim.light_energy = _rim_e if Env.s("BMX_RIM_E") == "" else float(Env.s("BMX_RIM_E"))
+
+## morning mist: height fog that lies in the dips below the rider at sunrise (and a little at dusk), burning off by
+## mid-morning. Its top follows the rider's height slowly (~20 s), so riding down into a valley takes you into it.
+func _mist_update(dt: float) -> void:
+	if scenic or phys == null: return
+	var h := tod
+	var morning := smoothstep(4.8, 6.2, h) * (1.0 - smoothstep(8.6, 10.6, h))
+	var evening := smoothstep(19.4, 20.4, h) * (1.0 - smoothstep(21.5, 23.0, h)) * 0.45
+	var nightm := (1.0 - smoothstep(0.0, 1.0, minf(absf(h - 3.0) / 2.5, 1.0))) * 0.25   # a little in the small hours
+	var k := maxf(maxf(morning, evening), nightm) * float(LightSettings.current.get("haze", 1.0))
+	if Env.s("BMX_MIST") != "": k = float(Env.s("BMX_MIST"))
+	var gy := float(phys.y)
+	if is_nan(_mist_y) or absf(gy - _mist_y) > 80.0: _mist_y = gy
+	_mist_y += (gy - _mist_y) * (1.0 - exp(-dt / 20.0))
+	env.fog_height = _mist_y - 3.5
+	env.fog_height_density = MIST_DENSITY * k
+
 ## glare guard: riding (or looking) toward a low sun washed the screen out (the sunlit haze, the bloom, the bright
 ## sky round the sun, dust lit from behind) so the trail couldn't be seen. When the camera faces a low sun this eases
 ## all of those off, smoothly (like squinting / sunglasses); the light on the land stays the same.
@@ -432,6 +508,9 @@ func _glare_guard(dt: float) -> void:
 ## Applied when the Light sliders change; with the cycle on, the clock runs and it re-applies 10x / s.
 func _update_light(dt: float) -> void:
 	if scenic: return
+	if str(GameState.goggle_lens) != _lens_now:   # picked after this ride was pre-built (intro) / changed in a menu
+		_lens_now = str(GameState.goggle_lens)
+		env.adjustment_color_correction = GoggleLens.lut(_lens_now)
 	if rig: rig.set_lights_on(night_k > 0.35 or Env.s("BMX_BIKELIGHT_ON") != "")   # a new bike (B) gets its lamp on too
 	LightSettings.ensure_loaded()
 	var L: Dictionary = LightSettings.current
@@ -543,7 +622,7 @@ func _apply_light(h: float, L: Dictionary) -> void:
 	env.volumetric_fog_albedo = Color(0.86, 0.9, 0.95).lerp(Color(1.0, 0.8, 0.6), g * day).lerp(Color(0.7, 0.75, 0.85), n)
 	env.volumetric_fog_density = VOL_DENSITY * float(L.haze) * lerpf(1.0, 0.25, g * day) * lerpf(1.0, 2.2, n)   # a low sun lit the haze into a white veil
 	env.volumetric_fog_ambient_inject = lerpf(lerpf(0.12, 0.03, gw), 0.0, n)   # dark air between the sun's rays   # no milky veil at night: only the lamp lights the haze
-	env.tonemap_exposure = lerpf(lerpf(0.8, 0.78, g) + 0.75 * tw, 1.9, n) * float(L.exposure)
+	env.tonemap_exposure = lerpf(lerpf(AGX_EXP_DAY, AGX_EXP_GOLD, g) + 0.75 * tw, AGX_EXP_NIGHT, n) * float(L.exposure)
 	# night vision: colour fades (rods), shadows stay deep
 	env.adjustment_saturation = float(L.saturation) * lerpf(1.0, 1.06, gw) * lerpf(1.0, 0.42, n)
 	env.adjustment_contrast = float(L.contrast) * lerpf(1.0, 1.07, gw) * lerpf(1.0, 1.08, n)
@@ -555,6 +634,10 @@ func _apply_light(h: float, L: Dictionary) -> void:
 		cam_attr.auto_exposure_min_sensitivity = lerpf(80.0, 40.0, gw)   # facing the low sun the eye stops down
 		cam_attr.auto_exposure_max_sensitivity = lerpf(140.0, 95.0, gw)  # and doesn't lift the warm light into a wash
 	night_k = n
+	# rim: warm and strong when the sun is low (backlit riders), soft white by day, cold blue moonlight at night
+	_rim_col = Color(1.0, 0.97, 0.92).lerp(Color(1.0, 0.7, 0.45), gw).lerp(Color(0.85, 0.6, 0.75), tw).lerp(Color(0.6, 0.72, 1.0), n)
+	_rim_e = lerpf(lerpf(2.0, 3.8, gw), 2.4, tw * (1.0 - n))
+	_rim_e = lerpf(_rim_e, 0.8, n)
 	if dust and dust.sim != null:   # the dust's sky light: dim and cold at night (it glowed white in the dark)
 		dust.sim.sun_gain = lerpf(1.0, 0.2, g * day)
 		_gg_dust = dust.sim.sun_gain
@@ -1893,6 +1976,8 @@ func _process(dt: float) -> void:
 	atmos.update(t, dt, drawn_pos, 0.0 if st.air or st.crash_on else clampf(absf(st.v) / 2.0, 0.0, 1.0))
 	_update_light(dt)
 	_glare_guard(dt)
+	_rim_update(dt)
+	_mist_update(dt)
 	sun.light_energy = sun_energy * atmos.shade
 	_update_probe(dt, drawn_pos)
 	_pk = _perf("atmos_light_probe", _pk)

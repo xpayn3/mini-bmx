@@ -539,6 +539,22 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   -3.5..-11 deg so the afterglow shows (`tw` = twilight: lavender ambient, exposure up). A low sun lit the volumetric haze (and the
   dust) into a white veil when facing it: haze density x0.25 and dust `sun_gain` 0.2 at golden (`g`), auto exposure can't lift
   warm light. Presets: Sunrise 6.55 haze 0.85, Dusk 20.1 haze 1.1.
+- **Cinematic light (2026-11-20)**: **AgX** tonemapper (`env.tonemap_mode`, `AGX_CONTRAST`, exposures `AGX_EXP_DAY/GOLD/NIGHT`;
+  `BMX_ACES=1` = the old ACES for comparison). **Rim light** (`Game.rim`, a DirectionalLight3D with `light_cull_mask = RIM_LAYER`
+  (layer 12); `_rim_update` tags every rider / bike mesh with that layer twice a second and aims it from behind-side of the rider
+  as the camera sees it, on the sun's side; warm + strong at golden hour, cold at night; `sky_mode` light-only so LIGHT0 in the sky
+  shader stays the sun / moon; `BMX_NO_RIM=1`, `BMX_RIM_E=` test). **Morning mist** (`_mist_update`: depth-fog height fog, top
+  3.5 m under a slow (~20 s) average of the rider's height, strong 5-9 h, a little at dusk / small hours; `MIST_DENSITY`,
+  `BMX_MIST=k` forces it). Only shows where low ground is in view.
+- **Backlit foliage + dappled shade** (`deco.gdshader` / `flower.gdshader` uniforms set per material in `world/terrain_geo.gd`):
+  `scatter` = leaves / grass / bushes glow in their own colour when a low sun is behind them (shadowed glow stays dark; a quarter at
+  noon), `scatter_rim` = outline only (cacti); `dapple` / `dapple_size` = holes cut in the canopy only in the sun's shadow pass (the
+  only orthographic camera), fixed to the leaves before wind sway, so tree shadows have sun flecks that move with the crowns.
+  Trunks, rocks, wood, sheds: 0. No extra draw calls (~0.1 ms, in the noise).
+- **Goggle lenses = LUTs** (`scripts/rider/goggle_lens.gd`, preloaded, no class_name): Clear (neutral, default, no LUT), Ember, Rosé,
+  Smoke, Glacier, Dusk Yellow, Moss; `GoggleLens.lut(id)` = a cached 48^3 Texture3D for `env.adjustment_color_correction` (applied
+  after tonemap). Picked on the ride setup page (GOGGLES · LENS cards, live preview on the bike), `GameState.goggle_lens` (save.cfg
+  `[game] lens`), `BMX_LENS=<id>` for tests; `Game._update_light` follows a change. Probe: `-s res://tools/lens_lut_probe.gd -- <dir>`.
 - **Glare guard** (`Game._glare_guard`, every frame): the camera facing a sun under ~30 deg eases off the sun's haze light,
   sun scatter, bloom, sky brightness and the dust's sun light (up to -80 / -100 / -65 / -38 / -60 %), smoothed over ~0.3 s, so a
   descent straight into the sunrise / sunset stays readable. `BMX_GLARE_OFF=1` compares, `BMX_GLARE_PROBE=1` prints `GLARE` lines.
