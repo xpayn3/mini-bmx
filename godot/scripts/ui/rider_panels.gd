@@ -96,7 +96,7 @@ const POSE_DEFS := [
 ]
 
 ## look keys that belong to the person, not to a kit: picking a kit leaves them alone
-const NON_KIT := ["helmetOn", "hairStyle", "hair", "skin", "eyes", "beard", "bibOn", "bibNumber", "bibText"]
+const NON_KIT := ["camMount", "helmetOn", "hairStyle", "hair", "skin", "eyes", "beard", "bibOn", "bibNumber", "bibText"]
 
 const KITS := [
 	["Classic", {}],   # = Rider.DEFAULT_LOOK
@@ -213,6 +213,21 @@ static func hair_style_picker(current: String, on_pick: Callable, size := 13) ->
 	return grid
 
 ## the knee pad design picker (Kit > Knee pads): one toggle per design, on_pick(style id)
+## action cam mount picker (ActionCam.HELMET_MOUNTS: helmet top / side / chin bar / none), on_pick(id)
+static func cam_mount_picker(current: String, on_pick: Callable, size := 13) -> GridContainer:
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 6)
+	grid.add_theme_constant_override("v_separation", 6)
+	for m in ActionCam.HELMET_MOUNTS:
+		var id: String = m[0]
+		var b := UITheme.button(m[1], func(): on_pick.call(id), size)
+		b.toggle_mode = true
+		b.button_pressed = id == current
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		grid.add_child(b)
+	return grid
+
 static func pad_style_picker(current: String, on_pick: Callable, size := 13) -> GridContainer:
 	var grid := GridContainer.new()
 	grid.columns = 2

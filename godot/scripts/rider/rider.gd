@@ -24,7 +24,8 @@ const NEUTRAL := {hipX = 0.0, hipY = 0.0, lean = 0.0, elbowsOut = 0.0, kneesOut 
 ## lookpanel.js DEFAULT_LOOK
 const DEFAULT_LOOK := {shell = "#16171a", peak = "#ececec", goggleFrame = "#f2f2ee", lens = "#ff7a2a", strap = "#ff6a4d",
 	jersey = "#ff6a4d", pants = "#1d2b64", gloves = "#ffd21f", shoes = "#26292f", shoeAccent = "#d8232a", pads = "#1b1c20", padStyle = "enduro", helmet = "glory",
-	helmetOn = "1", hairStyle = "long", beard = "1", hair = "#4a3022", skin = "#efc29f", eyes = "#4a6b8a", bibOn = "1", bibNumber = "27", bibText = "RUNOUT  •  DOWNHILL CUP"}
+	helmetOn = "1", hairStyle = "long", beard = "1", hair = "#4a3022", skin = "#efc29f", eyes = "#4a6b8a", bibOn = "1", bibNumber = "27", bibText = "RUNOUT  •  DOWNHILL CUP",
+	camMount = "top"}
 ## where the helmet model sits on the head (head-local m / rad) and its scale
 ## helmet models picked in the Look tab (look.helmet): id -> [label, glb]. The glory one is the stock helmet (recolourable
 ## shell / peak, our goggles); the others are textured models (tools/export_helmets.py) that always wear their own goggles
@@ -84,8 +85,10 @@ var helmet_mats := {}
 var helmet_model: Node3D = null
 var helmet_id := ""   # which HELMETS entry + goggle source is on, "id/mode" (set by use_helmet)
 var goggles: Node3D = null
-var action_cam: Node3D = null   # helmet-top action camera (ActionCam); its "Lens" is the Helmet camera view
+var action_cam: Node3D = null   # the helmet action camera (ActionCam); its "Lens" is the Helmet camera view (null = look.camMount "none")
 var action_cam_at := Vector3.ZERO   # where it's mounted (head space)
+var cam_mount := ""                 # which ActionCam.HELMET_MOUNTS entry is on
+var cam_spots := {}                 # mount kind -> where it touches the shell (head space), set when a helmet goes on
 
 var torso: MeshInstance3D
 var hood_hem: MeshInstance3D
@@ -372,17 +375,27 @@ func _build_builtin_helmet() -> void:
 	for sz in [-1.0, 1.0]:
 		var tab: MeshInstance3D = add.call(G.box(0.05, 0.03, 0.012), frameMat, gog)
 		tab.transform = Transform3D(Basis(Vector3.UP, sz * 0.5), Vector3(-0.03, 0, sz * 0.1))
-	_mount_action_cam(Vector3(0.03, hel.position.y + R * 0.96 - 0.004, 0))
+	cam_spots = {top = Vector3(0.03, hel.position.y + R * 0.96 - 0.004, 0),
+		side = hel.position + Vector3(0.0, R * 0.28, -R * 0.9 * 0.97),
+		chin = Vector3(R * 1.14 + 0.035, -0.064, 0)}
+	_mount_action_cam()
 
 
-## the action camera on top of the helmet, just forward of the crown (`at` = shell top, head space)
-func _mount_action_cam(at: Vector3) -> void:
+## the action camera where look.camMount says (top = just forward of the crown, side = left of the shell,
+## chin = front of the chin bar, none = no camera), at the spot the helmet measured (cam_spots, head space)
+func _mount_action_cam() -> void:
 	if action_cam and is_instance_valid(action_cam):
 		action_cam.get_parent().remove_child(action_cam)
 		action_cam.queue_free()
-	action_cam = ActionCam.build()
+	action_cam = null
+	cam_mount = str(look.get("camMount", DEFAULT_LOOK.camMount))
+	if cam_mount == "none" or not cam_spots.has(cam_mount):
+		return
+	var at: Vector3 = cam_spots[cam_mount]
+	action_cam = ActionCam.build(cam_mount)
 	action_cam.position = at
 	action_cam_at = at
+	action_cam.visible = hel == null or hel.visible or (helmet_model != null and helmet_model.visible)
 	head.add_child(action_cam)
 
 
@@ -403,7 +416,7 @@ func break_action_cam() -> Dictionary:
 func remount_action_cam() -> void:
 	if action_cam and is_instance_valid(action_cam) and action_cam.get_node_or_null("Body") != null:
 		return
-	_mount_action_cam(action_cam_at)
+	_mount_action_cam()
 
 
 ## highest point of the shell near (x, z=0), head space (the action cam sits there)
@@ -489,7 +502,31 @@ func set_helmet(model: Node3D, own_goggles: Node3D = null) -> void:
 	var top := _shell_top(shell_tris, 0.03) if not shell_tris.is_empty() else -1e9
 	if top < -1e8:   # no shell triangles: the helmet's bounding box top
 		top = 0.2
-	_mount_action_cam(Vector3(0.03, top - 0.004, 0))
+	cam_spots = {top = Vector3(0.03, top - 0.004, 0)}
+	# side: on the left of the shell, ~7 cm under the crown, a little behind the ear line's front
+	var side_y := top - 0.075
+	var sd = _hug(shell_tris, 0.0, side_y, 0.0, -1.0) if not shell_tris.is_empty() else null
+	cam_spots.side = Vector3(0.0, side_y, -(float(sd) - 0.002) if sd != null else -0.15)
+	# chin: the bottom edge of the chin bar = the lowest shell point in front of the face on the centreline;
+	# the camera sits on the bar's front face 3 cm above that edge
+	var low := 1e9
+	var xmax := 0.0
+	for p in shell_tris: xmax = maxf(xmax, p.x)
+	for p in shell_tris:   # well forward only (a round shell's underside is not the chin bar)
+		if absf(p.z) < 0.03 and p.x > xmax * 0.6 and p.y > top - 0.40: low = minf(low, p.y)
+	if low < 1e8:
+		var fx := -1e9
+		for p in shell_tris:
+			if absf(p.z) < 0.03 and p.y > low + 0.02 and p.y < low + 0.08: fx = maxf(fx, p.x)
+		if fx > 0.07:
+			cam_spots.chin = Vector3(fx - 0.004, low + 0.045, 0)
+	if not cam_spots.has("chin"):
+		cam_spots.chin = Vector3(0.24, top - 0.27, 0)
+	if OS.get_environment("BMX_CAMMOUNT_PROBE") != "":
+		var ylo := 1e9; var yhi := -1e9; var xhi := -1e9
+		for p in shell_tris: ylo = minf(ylo, p.y); yhi = maxf(yhi, p.y); xhi = maxf(xhi, p.x)
+		print("CAMMOUNT helmet %s spots=%s low=%.3f shell y %.3f..%.3f xmax %.3f" % [helmet_id, cam_spots, low, ylo, yhi, xhi])
+	_mount_action_cam()
 	if not look.is_empty():
 		set_look(look)
 
@@ -567,6 +604,8 @@ func set_look(l: Dictionary) -> void:
 	if hel != null and want_key != helmet_id and HELMETS.has(want):   # another helmet / goggle source: mount it (set_helmet re-applies the look)
 		use_helmet(want)
 		return
+	if not cam_spots.is_empty() and str(L.get("camMount", DEFAULT_LOOK.camMount)) != cam_mount:
+		_mount_action_cam()
 	var c := func(m, k: String) -> void:
 		if m != null and L.get(k):
 			m.albedo_color = Color(L[k])

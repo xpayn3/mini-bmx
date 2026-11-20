@@ -795,6 +795,22 @@ func _char_hair(body: VBoxContainer) -> void:
 		b.pressed.connect(func(): _look_set({"helmetOn": "1", "helmet": hid}))
 		grid.add_child(b)
 	body.add_child(grid)
+	body.add_child(UITheme.caption("ACTION CAM"))
+	var cgrid := GridContainer.new()
+	cgrid.columns = 4
+	cgrid.add_theme_constant_override("h_separation", Tokens.S2)
+	cgrid.add_theme_constant_override("v_separation", Tokens.S2)
+	var cgrp := ButtonGroup.new()
+	for m in ActionCam.HELMET_MOUNTS:   # where the helmet camera sits (the Helmet view looks out of it)
+		var mid: String = m[0]
+		var cb := UITheme.make_button(String(m[1]).to_upper(), Callable(), "chip", Tokens.T_MD)
+		cb.toggle_mode = true; cb.button_group = cgrp
+		cb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		cb.custom_minimum_size.y = 56
+		cb.button_pressed = str(look.get("camMount", "top")) == mid
+		cb.pressed.connect(func(): _look_set({"camMount": mid}))
+		cgrid.add_child(cb)
+	body.add_child(cgrid)
 	body.add_child(UITheme.caption("HAIR STYLE"))
 	var hgrid := GridContainer.new()
 	hgrid.columns = 4

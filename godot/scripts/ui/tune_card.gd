@@ -334,6 +334,9 @@ func _look_group(group: String) -> void:
 			list.add_child(UITheme.label("Hair style", 13))
 			list.add_child(RiderPanels.hair_style_picker(str(look.get("hairStyle", "long")), func(id):
 				look.hairStyle = id; _apply_look(); _fill()))
+			list.add_child(UITheme.label("Action cam", 13))
+			list.add_child(RiderPanels.cam_mount_picker(str(look.get("camMount", "top")), func(id):
+				look.camMount = id; _apply_look(); _fill()))
 		if group == "Kit":
 			list.add_child(UITheme.label("Knee pads design", 13))
 			list.add_child(RiderPanels.pad_style_picker(str(look.get("padStyle", "enduro")), func(id):

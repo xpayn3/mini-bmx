@@ -1324,6 +1324,10 @@ func _bars_page() -> void:
 	_choice("Rise", Handlebar.RISES.map(func(r): return [r, "%d mm" % r if r > 0 else "Flat"]), int(B.rise), func(v): B.rise = v; custom.call())
 	_choice("Material", Handlebar.MATERIALS, B.material, func(v): B.material = v; custom.call())
 	_note("Wide bars steer slower but steadier; narrow bars turn quicker. Alloy bars take the bars / stem colour from Paint.")
+	_h("ACTION CAM")
+	if not build.has("camera"): build.camera = {"mount": "none"}
+	_choice("Mount", ActionCam.BIKE_MOUNTS, str(build.camera.get("mount", "none")), func(v): build.camera.mount = v)
+	_note("A GoPro-style camera on the bike: the Bike cam view (C) looks out of it. The helmet camera is picked in the Rider room's Kit tab.")
 
 func _susp_page() -> void:
 	var S: Dictionary = build.suspension
@@ -1474,6 +1478,9 @@ func _kit_page() -> void:
 			body.add_child(UITheme.text("Hair style", SUB, Tokens.T_XS))
 			body.add_child(RiderPanels.hair_style_picker(str(look.hairStyle), func(id):
 				look.hairStyle = id; _set_look(look); _set_tab("kit")))
+			body.add_child(UITheme.text("Action cam (the Helmet camera view looks out of it)", SUB, Tokens.T_XS))
+			body.add_child(RiderPanels.cam_mount_picker(str(look.get("camMount", "top")), func(id):
+				look.camMount = id; _set_look(look); _set_tab("kit")))
 		if g[0] == "Kit":
 			body.add_child(UITheme.text("Knee pads design", SUB, Tokens.T_XS))
 			body.add_child(RiderPanels.pad_style_picker(str(look.padStyle), func(id):

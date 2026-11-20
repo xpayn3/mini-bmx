@@ -10,6 +10,8 @@ const PRESETS := {
 	"trail":     {"label": "Trail",      "dist": 10.5, "pitch": 18.0, "follow": true,  "fov": 52.0, "orbit": 0.2, "rate": 2.6, "ahead": true, "occ_max": 16.0},
 	# POV from the action cam on top of the helmet (Rider.action_cam): wide lens, lightly stabilised
 	"helmet":    {"label": "Helmet",  "mode": "helmet", "fov": 88.0},
+	# POV from the action cam on the bike (BikeRig.action_cam: handlebar / fork leg), only in the cycle when one is mounted
+	"bikecam":   {"label": "Bike", "mode": "helmet", "src": "bike", "fov": 92.0},
 	"chase":     {"label": "Chase",      "dist": 7.0,  "pitch": 16.0, "follow": true,  "fov": 42.0, "rate": 3.2},
 	# a camera drone: slow + floaty, banks into turns, pitches with speed, hovers in the wind, OSD overlay
 	"drone":     {"label": "Drone",      "dist": 22.0, "pitch": 36.0, "follow": true,  "fov": 34.0, "rate": 0.55, "lag": 1.4, "drift": true, "drone": true},
@@ -103,7 +105,12 @@ func set_mode(m: String) -> void:
 func next_mode() -> String:
 	var ks := PRESETS.keys()
 	if not PRESETS.has(mode): mode = ks[ks.size() - 1]
-	set_mode(ks[(ks.find(mode) + 1) % ks.size()])
+	var i := ks.find(mode)
+	for k in ks.size():   # skip the action cam views whose camera isn't mounted
+		i = (i + 1) % ks.size()
+		if _pov_lens(PRESETS[ks[i]]) != null or PRESETS[ks[i]].get("mode", "") != "helmet":
+			break
+	set_mode(ks[i])
 	return PRESETS[mode].label + (" (default)" if mode == "trail" else "")
 
 func snap_to(p: Vector3) -> void:
@@ -340,12 +347,19 @@ func _drone_feel(dt: float) -> void:
 
 ## Helmet cam: looks out of the action cam's lens on the rider's helmet, its orientation lightly
 ## stabilised (the head's jolts are softened, not removed). false = no rider / cam yet (orbit instead).
+## the lens an action-cam view looks out of (P.src "bike" = the bike's, else the helmet's), null = none mounted
+func _pov_lens(P: Dictionary) -> Node3D:
+	if game == null: return null
+	var owner_n = game.rig if P.get("src", "") == "bike" else game.rider
+	if owner_n == null or not is_instance_valid(owner_n): return null
+	var ac = owner_n.action_cam
+	if ac == null or not is_instance_valid(ac): return null
+	var lens: Node3D = ac.get_node_or_null("Body/Lens")
+	return lens if lens != null and lens.is_inside_tree() else null
+
 func _helmet(dt: float, P: Dictionary) -> bool:
-	var r = game.rider
-	if r == null or r.action_cam == null or not is_instance_valid(r.action_cam):
-		return false
-	var lens: Node3D = r.action_cam.get_node_or_null("Body/Lens")
-	if lens == null or not lens.is_inside_tree():
+	var lens := _pov_lens(P)
+	if lens == null:
 		return false
 	var xf: Transform3D = lens.global_transform
 	# head space +X = forward; a camera looks down -Z: camera z = -X, y = Y, x = y × z = +Z

@@ -345,6 +345,16 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   **The rider always wears a helmet (no bare head, user decision):** `Rider.set_look` forces helmet on; hair only shows as the tuft / tail coming out under the back
   of the helmet (`Hair.HELMET_STYLES`: none = short, long, ponytail, braid; `hair.gd` braid = the ponytail tie, stiffer). Menus: title-menu Character > HELMET tab (models, hair style,
   hair colour), garage Kit tab + tuning card Look > Helmet (same pickers + hair colour row). Old saved `helmetOn = 0` is ignored.
+- **Action cams (GoPro-style, `rider/action_cam.gd`)**: one on the helmet (`look.camMount`, `ActionCam.HELMET_MOUNTS`: top / side /
+  chin bar / none; picked in the rider room Kit tab, tuning card Look › Helmet, title-menu Character › HEAD) and one on the bike
+  (`build.camera.mount`, `ActionCam.BIKE_MOUNTS`: none / handlebar / fork leg; garage Bars tab › ACTION CAM). `ActionCam.build("top")`
+  = the buckle + hinge; `build_arm(normal, body_at)` = pad + extension arm (side, chin); `build_clamp(axis, r, out, body_at)` = a tube
+  clamp + arm (bars, fork). The camera is always upright (lens +X) and always the `Body` child (the crash tear-off uses it).
+  Helmet spots are measured from the shell triangles (`Rider.cam_spots`: top = crown, side = left of the shell 7.5 cm under it, chin
+  = the lowest shell point well forward + 4.5 cm); bike spots from the meshes (`BikeRig._tube_at`: the bar a third of the way to the
+  right grip; `_leg_band`: the right fork lower, the caliper side is left), so new frames / bars / forks need no numbers.
+  Camera views: Helmet (`helmet`) and **Bike** (`bikecam`, `src: bike`) look out of the lens; C skips whichever has no camera.
+  Probe: `BMX_CAMMOUNT_PROBE=1` (`CAMMOUNT` lines); tests `BMX_LOOK=camMount=side`, `BMX_BUILD="camera.mount=fork" BMX_CAM=bikecam`.
 - Look: kits + a colour per part (helmet shell/peak, goggles, jersey, pants, gloves, shoes, knee pads).
 - **Knee pads** (`rider/knee_pad.gd` + `shaders/knee_cap.gdshader`, one `KneePad` per leg (`KneePad.new(side)`, -1 =
   left), posed in `update_pose` and `pose_ragdoll`): articulated so no part ever spans the bend: the cap sits on the

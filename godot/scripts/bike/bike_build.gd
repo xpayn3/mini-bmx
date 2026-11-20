@@ -231,6 +231,7 @@ static func default_build() -> Dictionary:
 		"bars": {"width": 780, "rise": 30, "material": "alloy"},
 		"suspension": {"fork_travel": 200, "shock_travel": 200, "fork_spring": 1, "shock_spring": 1, "rebound": 1, "rear_caliper": "stock", "rotor": "stock"},
 		"drive": {"ring": 34, "cassette": "dh7"},
+		"camera": {"mount": "none"},   # the bike's action cam: ActionCam.BIKE_MOUNTS (none / bars / fork)
 	}
 
 ## the BMX only takes tyres: stock 20" wheels with this tyre model on them (single speed, no cassette)
