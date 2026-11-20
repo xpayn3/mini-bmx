@@ -210,15 +210,16 @@ func _crash_layers(dt: float) -> void:
 	var h: float = maxf(rd.last_h, 1e-4)
 	var c := Vector3.ZERO
 	var lo := 1e9
+	var lo_i := 0
 	for k in rd.p.size():
 		c += (rd.p[k] - rd.q[k]) / h
-		lo = minf(lo, rd.p[k].y)
+		if rd.p[k].y < lo: lo = rd.p[k].y; lo_i = k
 	c /= rd.p.size()
 	if _rag_on:
 		var jolt := (c - _rag_v).length() / maxf(dt, 1e-3)
 		if jolt > 25.0: impulse(clampf(jolt / 160.0, 0.2, 0.9), clampf(jolt / 120.0, 0.25, 1.0), 0.18, "rumble_tumble")
 	_rag_v = c; _rag_on = true
-	var pp: Vector3 = rd.p[0]
+	var pp: Vector3 = rd.p[lo_i]   # (the ground under the lowest part, not the head: on a slope that was ~ slope x body length off)
 	var on_ground: float = 1.0 if lo - game.terrain.height(pp.x, pp.z) < 0.35 else 0.0
 	var hs := Vector2(c.x, c.z).length()
 	var g := 0.6 + 0.4 * _noise.get_noise_2d(_t * 30.0, 7.0)
