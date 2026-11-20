@@ -160,11 +160,14 @@ func _run() -> void:
 					rm[jz * n + jx] = d
 	for k in n * n:
 		rm[k] = smoothstep(RIDGE_CLEAR_NEAR, RIDGE_CLEAR_FAR, rm[k])
+	var batched: bool = f.has_method("far_ground")   # C#: the whole grid in one call (per-point calls from a worker
+	if batched:                                     # left engine objects for the GC; HANDOFF "never call per point")
+		hg = f.far_ground(x0, z0, STEP, n)
 	for iz in n:
 		for ix in n:
 			var x := x0 + ix * STEP
 			var z := z0 + iz * STEP
-			hg[iz * n + ix] = f.ground(x, z)
+			if not batched: hg[iz * n + ix] = f.ground(x, z)
 			hr[iz * n + ix] = _ridge_h(x, z) * rm[iz * n + ix]
 	# despike: a lone sample far above all four neighbours (a thin raised trail on a 20 m grid) would be a
 	# tower in the coarse mesh
@@ -179,6 +182,7 @@ func _run() -> void:
 	var norms := PackedVector3Array(); norms.resize(n * n)
 	var cols := PackedColorArray(); cols.resize(n * n)
 	var cust := PackedFloat32Array(); cust.resize(n * n * 4)
+	var slope := PackedFloat32Array(); slope.resize(n * n)
 	for iz in n:
 		for ix in n:
 			var i := iz * n + ix
@@ -194,7 +198,10 @@ func _run() -> void:
 			norms[i] = nf   # with the ridges at full height; CUSTOM0 = the plain ground's normal + ridge height
 			cust[i * 4] = ng.x; cust[i * 4 + 1] = ng.y; cust[i * 4 + 2] = ng.z; cust[i * 4 + 3] = hr[i]
 			# coloured as the plain ground (the ridges would otherwise read as snow and scree)
-			cols[i] = f.color(x, z, hg[i], maxf(minf(ng.y, nf.y), 0.82))
+			slope[i] = maxf(minf(ng.y, nf.y), 0.82)
+			if not batched: cols[i] = f.color(x, z, hg[i], slope[i])
+	if batched:
+		cols = f.far_colors(x0, z0, STEP, n, hg, slope)
 	var idx := PackedInt32Array(); idx.resize((n - 1) * (n - 1) * 6)
 	var w := 0
 	for iz in n - 1:
@@ -231,13 +238,14 @@ func _run() -> void:
 			var sc := 1.0 + _cell_rand(gx, gz, 5) * 0.9
 			var pine := h > 4.0 or r2 < 0.3 + float(f.b_rug) * 0.6
 			var shade := 0.75 + _cell_rand(gx, gz, 6) * 0.35
-			var buf := pines if pine else blobs
 			var tw := sc * (1.5 if pine else 2.1)
 			var ht := sc * (6.5 if pine else 4.2)
 			# Transform3D rows (round shapes: no yaw), colour, custom (x = ridge height under the tree).
 			# The origin is the base; the mesh is lifted inside the transform so it stands on it.
-			buf.append_array([tw, 0, 0, x, 0, ht, 0, h, 0, 0, tw, z,
+			var rec := PackedFloat32Array([tw, 0, 0, x, 0, ht, 0, h, 0, 0, tw, z,
 				shade, shade, shade, 1.0, _ridge_h(x, z) * rm[clampi(int(roundf((z - z0) / STEP)), 0, n - 1) * n + clampi(int(roundf((x - x0) / STEP)), 0, n - 1)], 0, 0, 0])
+			if pine: pines.append_array(rec)
+			else: blobs.append_array(rec)
 	_job.out = {"verts": verts, "norms": norms, "cols": cols, "cust": cust, "idx": idx,
 		"pines": pines, "blobs": blobs, "cx": cx, "cz": cz}
 	_job.f = null

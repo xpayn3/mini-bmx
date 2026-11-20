@@ -26,6 +26,7 @@ var level := 0.0           # how bright the screen is now (0 off .. ~1.5 power f
 var blips := true          # little random glitches while on
 var positional := true     # world TV: 3D sound; the intro's TV (its own world) plays it flat
 var sound_db := 0.0        # overall loudness of its hiss
+var silent := false        # no sound at all (the intro's still frame)
 
 # the loud parts of tv_static.mp3 (s): everything between them is near silence and is never played
 const STATIC_CUTS := [Vector2(2.52, 2.98), Vector2(5.02, 5.46), Vector2(8.18, 8.70), Vector2(10.0, 11.2)]
@@ -100,9 +101,13 @@ func _init() -> void:
 	_apply(0, 1, 0, 0, 0, 0, 0, 0)
 
 func _ready() -> void:
-	_build_sound()
+	if not silent: _build_sound()
 
 ## switch on after `delay` s: a white line, it opens up, the picture rolls in out of the snow and settles
+## already on and settled (no switch-on), for a still picture
+func settle_on() -> void:
+	_on_delay = 0.0; _on_t = 5.0; _off_t = -1.0; _powered_sound = true; blips = false
+
 func power_on(delay := 0.0) -> void:
 	_on_delay = delay; _on_t = 0.0; _off_t = -1.0
 	_powered_sound = false

@@ -1014,6 +1014,12 @@ func _unhandled_input(e: InputEvent) -> void:
 		else: flash("Debug Draw 3D addon not loaded")
 		return
 	if photo: return
+	# pad B with a side card up (P / K / L, demo tuning) closes it, like a console back, instead of a bail tap
+	if e is InputEventJoypadButton and e.is_action_pressed("ui_cancel") and hud and hud.card and hud.card.visible:
+		hud.close_sides()
+		_bail_down = -1
+		get_viewport().set_input_as_handled()
+		return
 	if e.is_action_pressed("demo") and not e.is_echo(): set_demo(demo == null); return
 	if e.is_action_pressed("map") and not e.is_echo(): open_map(); return
 	if e.is_action_pressed("new_world") and not e.is_echo(): respawn(true)
@@ -1041,7 +1047,7 @@ func _shift(d: int) -> void:
 		flash("Single speed"); return
 	if phys.shift(d):
 		hud.gear_changed()
-		if audio: audio.shift()
+		if audio: audio.shift(d)
 
 ## demo mode: an AI rider (game/demo_pilot.gd) supplies the input instead of the keys / pad, F2 hands it back
 var demo: DemoPilot = null
@@ -1089,9 +1095,23 @@ func _read_input() -> Dictionary:
 		"throttle": Input.get_action_strength("pedal"),
 		"brake": Input.get_action_strength("brake"),
 		"steer": clampf(steer, -1, 1),
-		"hop": Input.is_action_pressed("hop"),
-		"sprint": Input.is_action_pressed("sprint"),
+		"hop": _held_ok("hop"),
+		"sprint": _held_ok("sprint"),
 	}
+
+## a menu button that is also a ride action (A = sprint, X = hop) and was still held when the ride went on
+## (resume, RACE, a closed menu) does nothing until it is let go
+var _swallowed := {}
+func swallow_held() -> void:
+	for a in ["sprint", "hop"]:
+		if Input.is_action_pressed(a): _swallowed[a] = true
+
+func _held_ok(a: String) -> bool:
+	var down := Input.is_action_pressed(a)
+	if _swallowed.has(a):
+		if down: return false
+		_swallowed.erase(a)
+	return down
 
 ## tests (BMX_BRAKETURN): which values vibrate - per value, how often its step-to-step change flips sign
 ## with a real size (a vibration), and the biggest such flip
@@ -1239,6 +1259,8 @@ func _update_dab(dt: float, st: BikePhysics) -> void:
 	st.foot_down = want and dab_lin >= 0.6
 
 ## Moves the dabbing foot's target (lean-node space) from its pedal to the ground beside the bike.
+var _pose_in := {}   # the rider's pose inputs, reused (see _process)
+
 func _dab_foot(lt: Dictionary) -> void:
 	var key := "footL" if dab_side < 0.0 else "footR"
 	var hb := rig.global_transform.basis   # heading only: x forward, z to the rider's right
@@ -1361,14 +1383,47 @@ func _process(dt: float) -> void:
 		_aspin_s += ((st.yaw_rate if st.air else 0.0) - _aspin_s) * ek
 		_atilt_s += ((st.air_tilt * float(T.get("stickBodyTilt", 0.6)) * clampf(st.air_stick.length() * 3.0 + absf(st.edge_s) * 2.0, 0.0, 1.0) if st.air else 0.0) - _atilt_s) * ek
 		_blat_s += ((st.air_stick.x if st.air else st.flick) - _blat_s) * ek
-		rider.update_pose(dt, {"footL": lt.footL, "footR": lt.footR, "handL": lt.handL, "handR": lt.handR,
-			"dab": dab_k, "dabSide": dab_side, "dabLean": DAB_LEAN,
-			"v": st.v, "lean": st.bike_lean + st.rock, "steer": st.steer, "yawRate": _yaw_s,
-			"counter": st.counter, "rockRoll": st.rock, "headRoll": st.bike_lean * 0.85,
-			"absorb": clampf(body_y - y_draw, -T.legComp, T.legExt), "pitch": p_draw, "bodyLevel": T.bodyLevel,
-			"attackDrop": T.attackDrop, "pedal": st.pedal, "sprint": st.sprint * st.pedal, "crank": st.crank,
-			"air": st.air_k, "compress": maxf(0.0, -st.compress), "hipShift": st.hip_shift, "bodyStick": -0.55 if scenic else st.body_in_s, "relax": 1.0 if scenic else 0.0, "tall": 1.0 if scenic else 0.0, "lookYaw": _look_yaw, "lookPitch": _look_pitch, "slope": st._g_pitch, "airTilt": _atilt_s, "bodyLat": _blat_s, "latG": 0.0 if scenic else st.lat_a / BikePhysics.G, "wheelR": rider.to_local(rig.wheel_r.global_position), "wheelRR": rig.wheel_rr, "t": t,
-			"airSpin": _aspin_s, "wheelY": (rig.wheel_f.global_position.y + rig.wheel_r.global_position.y) * 0.5, "turn": _turn_s})
+		var pi := _pose_in   # one dictionary filled in place every frame (update_pose doesn't keep it)
+		pi["footL"] = lt.footL
+		pi["footR"] = lt.footR
+		pi["handL"] = lt.handL
+		pi["handR"] = lt.handR
+		pi["dab"] = dab_k
+		pi["dabSide"] = dab_side
+		pi["dabLean"] = DAB_LEAN
+		pi["v"] = st.v
+		pi["lean"] = st.bike_lean + st.rock
+		pi["steer"] = st.steer
+		pi["yawRate"] = _yaw_s
+		pi["counter"] = st.counter
+		pi["rockRoll"] = st.rock
+		pi["headRoll"] = st.bike_lean * 0.85
+		pi["absorb"] = clampf(body_y - y_draw, -T.legComp, T.legExt)
+		pi["pitch"] = p_draw
+		pi["bodyLevel"] = T.bodyLevel
+		pi["attackDrop"] = T.attackDrop
+		pi["pedal"] = st.pedal
+		pi["sprint"] = st.sprint * st.pedal
+		pi["crank"] = st.crank
+		pi["air"] = st.air_k
+		pi["compress"] = maxf(0.0, -st.compress)
+		pi["hipShift"] = st.hip_shift
+		pi["bodyStick"] = -0.55 if scenic else st.body_in_s
+		pi["relax"] = 1.0 if scenic else 0.0
+		pi["tall"] = 1.0 if scenic else 0.0
+		pi["lookYaw"] = _look_yaw
+		pi["lookPitch"] = _look_pitch
+		pi["slope"] = st._g_pitch
+		pi["airTilt"] = _atilt_s
+		pi["bodyLat"] = _blat_s
+		pi["latG"] = 0.0 if scenic else st.lat_a / BikePhysics.G
+		pi["wheelR"] = rider.to_local(rig.wheel_r.global_position)
+		pi["wheelRR"] = rig.wheel_rr
+		pi["t"] = t
+		pi["airSpin"] = _aspin_s
+		pi["wheelY"] = (rig.wheel_f.global_position.y + rig.wheel_r.global_position.y) * 0.5
+		pi["turn"] = _turn_s
+		rider.update_pose(dt, pi)
 		if dab_probe: _dab_probe(st)
 		elif _jit_skip > 0: _jit_skip -= 1
 		if jitter_on and _jit_skip == 0:   # tests: the drawn joints (rider space), per frame
@@ -1384,7 +1439,9 @@ func _process(dt: float) -> void:
 	if not phys.crash_on and hud and hud.life < 1.0:   # a full-health rider rolls past a pack and leaves it
 		if terrain.take_pack(st.x, st.y, st.z) != null:
 			hud.on_health_pack(HealthPack.HEAL)
-	terrain.tape_push(null if phys.crash_on else Vector3(st.x, st.y + 0.85, st.z) + st.fwd() * 0.75)   # what a caught tape stretches over
+	# what a caught tape stretches over: the drawn front tyre's leading edge (the drawn bike, not the physics
+	# state a step ahead of it, so the tape sits on the tyre you see)
+	terrain.tape_push(null if phys.crash_on else rig.wheel_f.global_position + Vector3(cos(hd), 0.0, -sin(hd)) * rig.wheel_rf)
 	far_hills.follow(drawn_pos)
 	sheep.follow(dt, drawn_pos, st.v, st.fwd())
 	biome_t -= dt

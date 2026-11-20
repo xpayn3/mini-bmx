@@ -83,6 +83,7 @@ func _gameplay() -> Control:
 	_check(p, "Crash slow motion (WASTED)", "wasted", "Time slows down and the screen goes grey when you fall")
 	_check(p, "Blood", "blood", "Falls leave blood smears on the ground; very hard crashes can tear off an arm or a leg")
 	_check(p, "Pause when the window loses focus", "pause_unfocused")
+	_check(p, "Intro at start (CRT TV)", "boot_intro", "Off: a still frame of the TV while the game loads, then straight to the menu")
 	var rb := UITheme.button("Reset ride tuning to defaults", func(): Tune.reset_defaults(), _f(15))
 	_row(p, "Ride tuning (P in game)", rb)
 	return p

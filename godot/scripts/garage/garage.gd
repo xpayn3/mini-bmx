@@ -640,6 +640,10 @@ func _process(dt: float) -> void:
 	var head_env := Env.s("BMX_GARAGE_HEAD")
 	if head_env == "bike" and rider and rider_on:   # tests: frame the head + neck of the rider on the bike
 		focus_t = rider.head.global_position + Vector3(0, -0.05, 0)
+	elif head_env == "waist" and stand_rider and stand_rider.is_visible_in_tree():   # tests: the belt / jersey hem (standing rider, else the one on the bike)
+		focus_t = stand_rider.pelvis_mesh.global_position + Vector3(0, 0.05, 0)
+	elif head_env == "waist" and rider and rider_on:
+		focus_t = rider.pelvis_mesh.global_position + Vector3(0, 0.05, 0)
 	elif stand_rider and head_env == "neck":   # tests: the standing rider's neck, collar + goggle strap
 		focus_t = stand_rider.head.global_position + Vector3(0, -0.1, 0)
 	elif stand_rider and head_env != "":   # tests: frame the standing rider's helmet
@@ -1031,8 +1035,18 @@ func _color(text: String, cur: String, cb: Callable) -> void:
 	cp.color = Color(cur)
 	cp.edit_alpha = false
 	cp.custom_minimum_size = Vector2(200, 34)
-	cp.focus_mode = Control.FOCUS_NONE   # the pad uses the swatches (the picker is a mouse tool)
 	cp.color_changed.connect(func(c): cb.call(c.to_html(false)); _changed())
+	# on a pad the picker is a stepper: left / right (or A) walk through the swatch palette from the nearest colour
+	cp.set_meta(&"nav_step", func(dir: int) -> void:
+		var best := 0
+		var bd := INF
+		for i in SWATCHES.size():
+			var c := Color(SWATCHES[i])
+			var d := Vector3(c.r - cp.color.r, c.g - cp.color.g, c.b - cp.color.b).length_squared()
+			if d < bd: bd = d; best = i
+		var hex: String = SWATCHES[wrapi(best + dir if bd < 1e-4 else best, 0, SWATCHES.size())]
+		cp.color = Color(hex)
+		cb.call(Color(hex).to_html(false)); _changed())
 	_row(text, cp)
 
 func _swatches(cur: String, cb: Callable) -> void:
@@ -1332,6 +1346,10 @@ func _bars_page() -> void:
 	if str(SE.get("post", "stock")) == "dropper":
 		_slide("Post height", 0, 200, 10, float(SE.get("post_h", 0.0)) * 1000.0, "mm", func(v): SE.post_h = float(v) / 1000.0)
 	_note("The dropper stands the saddle up along the seat tube (the rider follows). Saddle colour is in Paint > Saddle & pedals.")
+	_h("ACTION CAM")
+	if not build.has("camera"): build.camera = {"mount": "none"}
+	_choice("Mount", ActionCam.BIKE_MOUNTS, str(build.camera.get("mount", "none")), func(v): build.camera.mount = v)
+	_note("A GoPro-style camera on the bike: the Bike cam view (C) looks out of it. The helmet camera is picked in the Rider room's Kit tab.")
 
 func _susp_page() -> void:
 	var S: Dictionary = build.suspension
@@ -1482,10 +1500,17 @@ func _kit_page() -> void:
 			body.add_child(UITheme.text("Hair style", SUB, Tokens.T_XS))
 			body.add_child(RiderPanels.hair_style_picker(str(look.hairStyle), func(id):
 				look.hairStyle = id; _set_look(look); _set_tab("kit")))
+			body.add_child(UITheme.text("Action cam (the Helmet camera view looks out of it)", SUB, Tokens.T_XS))
+			body.add_child(RiderPanels.cam_mount_picker(str(look.get("camMount", "top")), func(id):
+				look.camMount = id; _set_look(look); _set_tab("kit")))
 		if g[0] == "Kit":
 			body.add_child(UITheme.text("Knee pads design", SUB, Tokens.T_XS))
 			body.add_child(RiderPanels.pad_style_picker(str(look.padStyle), func(id):
 				look.padStyle = id; _set_look(look); _set_tab("kit")))
+		if g[0] == "Belt":
+			body.add_child(UITheme.text("Style", SUB, Tokens.T_XS))
+			body.add_child(RiderPanels.belt_style_picker(str(look.beltStyle), func(id):
+				look.beltStyle = id; _set_look(look); _set_tab("kit")))
 		for row in g[1]:
 			if textured and g[0] == "Helmet" and row[0] != "hair":
 				continue

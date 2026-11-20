@@ -96,7 +96,7 @@ const POSE_DEFS := [
 ]
 
 ## look keys that belong to the person, not to a kit: picking a kit leaves them alone
-const NON_KIT := ["helmet", "helmetOn", "hairStyle", "hair", "skin", "eyes", "beard", "bibOn", "bibNumber", "bibText"]
+const NON_KIT := ["camMount", "helmet", "helmetOn", "hairStyle", "hair", "skin", "eyes", "beard", "bibOn", "bibNumber", "bibText"]
 
 const KITS := [
 	["Classic", {}],   # = Rider.DEFAULT_LOOK
@@ -119,8 +119,11 @@ const LOOK_ROWS := [
 	["Helmet", [["shell", "Shell", SW], ["peak", "Peak", SW], ["hair", "Hair colour", HAIR_SW]]],
 	["Goggles", [["lens", "Lens tint", LENS], ["goggleFrame", "Frame", SW], ["strap", "Strap", SW]]],
 	["Kit", [["jersey", "Jersey", SW], ["pants", "Pants", SW], ["gloves", "Gloves", SW], ["pads", "Knee pads", SW]]],
+	["Belt", [["belt", "Strap", SW], ["buckle", "Buckle / stripe", BUCKLE_SW]]],
 	["Shoes", [["shoes", "Upper", SW], ["shoeAccent", "Toe & collar", SW]]],
 ]
+## buckle colours: metals (silver, gunmetal, black, brass, gold) + a few loud ones
+const BUCKLE_SW := ["#c9ccd1", "#9aa0a8", "#55595f", "#1a1b1e", "#b8893c", "#d9b04a", "#e8231f", "#ff7a1a", "#7ed321", "#1478d4", "#f4f4f0"]
 
 # ---------------------------------------------------------------- persistence
 ## bump POSE_VER when a bike's default pose is retuned: a pose saved before keeps every value except the
@@ -210,7 +213,37 @@ static func hair_style_picker(current: String, on_pick: Callable, size := 13) ->
 		grid.add_child(b)
 	return grid
 
+## the belt style picker (Belt: Belt.STYLES, look.beltStyle), on_pick(style id)
+static func belt_style_picker(current: String, on_pick: Callable, size := 13) -> GridContainer:
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 6)
+	grid.add_theme_constant_override("v_separation", 6)
+	for id in Belt.ORDER:
+		var sid: String = id
+		var b := UITheme.button(Belt.STYLES[sid][0], func(): on_pick.call(sid), size)
+		b.toggle_mode = true
+		b.button_pressed = sid == current
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		grid.add_child(b)
+	return grid
+
 ## the knee pad design picker (Kit > Knee pads): one toggle per design, on_pick(style id)
+## action cam mount picker (ActionCam.HELMET_MOUNTS: helmet top / side / chin bar / none), on_pick(id)
+static func cam_mount_picker(current: String, on_pick: Callable, size := 13) -> GridContainer:
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 6)
+	grid.add_theme_constant_override("v_separation", 6)
+	for m in ActionCam.HELMET_MOUNTS:
+		var id: String = m[0]
+		var b := UITheme.button(m[1], func(): on_pick.call(id), size)
+		b.toggle_mode = true
+		b.button_pressed = id == current
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		grid.add_child(b)
+	return grid
+
 static func pad_style_picker(current: String, on_pick: Callable, size := 13) -> GridContainer:
 	var grid := GridContainer.new()
 	grid.columns = 2

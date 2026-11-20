@@ -352,7 +352,18 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   **The rider always wears a helmet (no bare head, user decision):** `Rider.set_look` forces helmet on; hair only shows as the tuft / tail coming out under the back
   of the helmet (`Hair.HELMET_STYLES`: none = short, long, ponytail, braid; `hair.gd` braid = the ponytail tie, stiffer). Menus: title-menu Character > HELMET tab (models, hair style,
   hair colour), garage Kit tab + tuning card Look > Helmet (same pickers + hair colour row). Old saved `helmetOn = 0` is ignored.
+- **Action cams (GoPro-style, `rider/action_cam.gd`)**: one on the helmet (`look.camMount`, `ActionCam.HELMET_MOUNTS`: top / side /
+  chin bar / none; picked in the rider room Kit tab, tuning card Look › Helmet, title-menu Character › HEAD) and one on the bike
+  (`build.camera.mount`, `ActionCam.BIKE_MOUNTS`: none / handlebar / fork leg; garage Bars tab › ACTION CAM). `ActionCam.build("top")`
+  = the buckle + hinge; `build_arm(normal, body_at)` = pad + extension arm (side, chin); `build_clamp(axis, r, out, body_at)` = a tube
+  clamp + arm (bars, fork). The camera is always upright (lens +X) and always the `Body` child (the crash tear-off uses it).
+  Helmet spots are measured from the shell triangles (`Rider.cam_spots`: top = crown, side = left of the shell 7.5 cm under it, chin
+  = the lowest shell point well forward + 4.5 cm); bike spots from the meshes (`BikeRig._tube_at`: the bar a third of the way to the
+  right grip; `_leg_band`: the right fork lower, the caliper side is left), so new frames / bars / forks need no numbers.
+  Camera views: Helmet (`helmet`) and **Bike** (`bikecam`, `src: bike`) look out of the lens; C skips whichever has no camera.
+  Probe: `BMX_CAMMOUNT_PROBE=1` (`CAMMOUNT` lines); tests `BMX_LOOK=camMount=side`, `BMX_BUILD="camera.mount=fork" BMX_CAM=bikecam`.
 - Look: kits + a colour per part (helmet shell/peak, goggles, jersey, pants, gloves, shoes, knee pads).
+- **Belt** (`rider/belt.gd`, class `Belt`, a child of the pelvis mesh): hides where the jersey meets the trousers. The torso's bottom spine bone is locked to the hips (`Rider.set_spine(..., base)`) and the hem sits at `Belt.HEM_Y` inside the band, so leaning / tucking never makes jersey and trousers cross (they used to poke out one under the other). Styles (`look.beltStyle`, Kit › Belt in the rider room and tuning card Look › Clothes): webbing (cam buckle), leather (stitched, frame buckle, keeper, holes), ratchet (teeth, plastic buckle), elastic waistband (two stripes, label at the back); colours `look.belt` + `look.buckle` (buckle / stripe). Band textures (albedo + normal) are baked per style + colours and cached. Test: `BMX_LOOK=beltStyle=leather`, `BMX_GARAGE_HEAD=waist` frames the waist in the garage / rider room.
 - **Knee pads** (`rider/knee_pad.gd` + `shaders/knee_cap.gdshader`, one `KneePad` per leg (`KneePad.new(side)`, -1 =
   left), posed in `update_pose` and `pose_ragdoll`): articulated so no part ever spans the bend: the cap sits on the
   bisector of thigh / shin, facing out of the bend, and wraps the knee as a sphere shell; plates / guards + fabric sleeves
@@ -390,8 +401,11 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   world (below), then: TV on at 1.8 s, slow **Vertigo dolly zoom** over the whole intro (moves in while the FOV widens
   so the frame at the TV goes 0.95 -> 0.40 m: the TV stays put, the room stretches away), a tear at 7 s (the figure is
   gone after it), the signal drops out at 10.6 s, a second tear at 13.2 s (for a moment the figure stands inside the
-  room), at 16.5 s the TV **just switches off** (no squeeze to a line / dot) and every light goes with it: pitch dark,
-  then the menu fades in.
+  room), at 16.5 s the TV **just switches off** (no squeeze to a line / dot) and every light goes with it, the haze too
+  (its temporal blend left the TV's red glow hanging for ~0.7 s): pitch dark, then the menu fades in over 3.5 s.
+  **Settings › Gameplay › Intro at start** (`boot_intro`) off = a still frame of it (`CrtIntro.still`: the room at
+  12 s, TV on and settled, silent, frozen after 8 frames) while the ride loads, ~2.2 s, then the menu.
+  `BMX_INTRO=still` forces that; `BMX_INTRO_SHOT_FROM` / `BMX_INTRO_SHOT_STEP` = when / how often test frames are saved.
 - **Ride built during the intro** (`main._prebuild_behind` / `_take_prebuilt`): while the intro holds on black, the
   player's own ride `Game` (seed, bike, garage build, rider) is built in a never-drawn SubViewport with its own World3D
   (`_ride_park`, process disabled). RIDE moves it into the scene (`reparent`) and frees the title backdrop: ~13 ms
@@ -478,6 +492,12 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - Bike height is placed from the **real tyre size and real axle positions** (no tyre clipping into the floor
   or the roller drums; verified with `BMX_TYRE_PROBE`).
 - Saved in `garage.json`; `GameState.bike_config()` applies it to the ride.
+- **Materials at photo quality** (2026-11-20): car paint (`BikeFX.CAR_PAINT_SHADER`) = round metal flakes 0.15–0.3 mm (per finish,
+  `FINISHES.*.flake`), in metres whatever the model scale; LOD keeps every flake ≥ ~2 px and turns the ones that can't be resolved
+  into gloss spread (no pixel mosaic, no shimmer). Bare metal (`chrome`, `black`, `chain`, `gold`, wheel `hub` / `spokes`) gets the
+  ambientCG **Metal009** brushed scan (`MetalFinish`, `assets/textures/brushed_metal`, CC0) triplanar, 16 cm a tile, normalised so each
+  part keeps its tuned colour / roughness; rotors get it as grinding rings. Every 3D texture import must have mipmaps (rubber / goggles
+  had none); logo PNGs are 4x upscaled, text decals bake at 2048 px, carbon weave 512 px.
 
 ### Effects
 - **Dust = a real 3D smoke simulation** (`fx/smoke_sim.gd` + compute shaders `shaders/smoke/*.glsl`): a
@@ -522,7 +542,12 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   only past `SNAP_STRAIN` (17 %); the halves whip back towards their stakes. Stop / back off / slide off its end / crash before
   that and it springs back (`SETTLE` 1.3 s) and is whole again (`Terrain.restore_tape`). Strips are drawn through a Catmull-Rom
   spline (`SUBD` 4 pieces per sim segment): smooth when floating, no extra sim cost. Test: `BMX_TAPE=dir/prefix` (or `1`),
-  `BMX_TAPE_SPEED`, `BMX_TAPE_STOP=secs` (`TAPE` lines: state, strain).
+  `BMX_TAPE_SPEED`, `BMX_TAPE_STOP=secs`, `BMX_TAPE_OFF=m` (aim along the span) (`TAPE` lines: state, strain).
+  The hit is a **swept test** (`bike_physics.gd`: the front tyre's leading edge this step vs each span's line), so no speed
+  slips through; skipped only when the wheels are above the tape. While held, the span is **posed exactly** each frame
+  (`TapeSim._pose_held`: straight once taut, parabola sag while slack) on the drawn front tyre (`Game` passes
+  `rig.wheel_f`), not simulated, so it never trails the bike. Strips draw as one ArrayMesh from packed arrays (no
+  per-vertex calls), ground heights are cached per point, the strip shader is warmed at ride start.
 - Torn race tape as cloth-like ribbons, wind over the grass, drifting cloud shadows, speed blur / FOV.
 
 ### Photo mode (O, `scripts/game/photo_mode.gd`)
@@ -616,6 +641,8 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   B = `back`, LB / RB = tabs (a TabContainer, or a `tabs(dir)` callable). Left / right on a row's control change it
   in place: sliders 1/20 of their range, dropdowns step options, toggles off / on, a custom stepper via meta
   `nav_step` (the garage's ◀ VALUE ▶; A steps it too). Dropdowns still open on A, take the stick, close on A / B.
+- **One cursor, console style** (2026-11-20): the focused control is the only highlight (`UITheme.FOCUS_WASH` yellow wash + ink bar on every button kind; title-menu / ride-setup lines are kind `menu`: grey, solid yellow when focused). Inside a PadNav menu hovering a button with the mouse moves the focus there and the button's own hover look is turned off (no second highlight). D-pad / stick onto an option of a ButtonGroup (bike, kit, time of day, garage part...) **picks it at once** (`_follow_pick`, only for real direction moves); meta `nav_accept` = what A does on it (ride setup: next step). Ride setup: the cursor starts on the picked card, A = next, B = previous step (step 1 -> main page), LB / RB = steps. A with nothing focused lands the cursor. Tooltips no longer count as open popups (they froze PadNav / the leaflet's B). B cancels a key rebind. Pausing closes a side card (it stole the cursor from the leaflet); pause > Tuning never toggles it shut.
+- **On-screen keyboard** (`ui/pad_keyboard.gd`, `PadKeyboard.open(line_edit)`): A on a text box with the pad (seed, race plate, bike / preset names) opens it in the field's own viewport: A types, X deletes, Y space, Menu / DONE = accept (fires `text_submitted`), B = cancel (old text back); group `nav_modal` so a paper sheet keeps B. Garage colour pickers (`_color`) are pad steppers through `SWATCHES` (shift colour, outline, spokes, nipples, hubs). Pad B with a side card up while riding closes it (not a bail tap). `Game.swallow_held()`: A / X / Space still held from resume / RACE don't sprint / hop until let go.
 - Focus marker: a container with meta `nav_row` (MenuBase / garage / tune card / photo rows) gets a wash + a bar
   on its left when its control has focus (`style` "paper" highlighter + red, "card" yellow tokens, "dark" in-ride).
 - Every ScrollContainer under the root follows focus. On a pad, focus lands on the page's first control when a menu
@@ -671,8 +698,16 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   At zero the get-up prompt says KNOCKED OUT / hold hop 1.2 s to **revive** (`REVIVE_HOLD`, back with 50 %) or
   Backspace back to start (full life, `on_respawn`). `BikePhysics.getup_need` is the hold time. Tests: `BMX_LIFE=0.1`
   (start life), `BMX_LIFE_PROBE=1` (`LIFE` lines).
-- Piezo sounds (`ui/garmin_beep.gd`, rendered once into AudioStreamWAVs): a rising power-on chime 0.35 s after the
-  HUD shows (ride start), a short key beep on the ◀ ▶ bezel buttons.
+- Piezo sounds (`ui/garmin_beep.gd`, `TONES`, rendered once into AudioStreamWAVs, `beep.tone(name)`; Settings of the unit can mute them):
+  power-on chime 0.35 s after the HUD shows, key beep on the ◀ ▶ buttons, **gps** (satellites found, at `FIX_T`), **pause / resume**
+  (auto-pause after `AUTO_PAUSE` 2 s standing still: falling / rising two-note), **lap** (three even beeps every `LAP_M` 1 km),
+  **turn** (nav prompt, once per bend as it comes within 100 m) / **feature** (double beep: jump, rocks), **battery** (90 % of
+  `BAT_LIFE`), **record** (a new best air time today, fanfare), **incident** (knocked out: alarm after the slow motion).
+  All driven from `hud._computer_tones` / `_trail_scan`. Test: `BMX_BEEP_PROBE=1` prints `BEEP <name>`.
+- **Gear shift sound** (`game/shift_sound.gd`, `ShiftSound`): the user's own shifter recording, cut into six shifts
+  (`assets/audio/shifter/shift_0..5.ogg`, lever in + spring back), one at random per shift (not the same twice in a row).
+  Three synthesised versions were rejected ("an empty bottle", "clipped on high pitch"): use the recording.
+  Test: `BMX_SHIFT=secs` (shifts every 0.7 s, `SHIFT` lines; add `BMX_REC=file.wav`).
 - Small touches: "acquiring satellites" for the first 3 s of a ride, battery icon (full to empty in 30 min of riding, `BAT_LIFE`; blinks under 10 %). Back to start / new world (`hud.on_respawn`) restarts the computer: ride timer,
   trip (distance, avg, max), battery, GPS fix and power-on chime; test `BMX_RESPAWN=secs` presses Backspace then,
   backlight for 3 s on a button press or a new alert.
@@ -739,6 +774,7 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `-s res://tools/terrain_cs_cmp.gd --headless` | C# vs GDScript terrain must be EXACT |
 | `-s res://tools/trail_grow_probe.gd --headless` | grows the endless trail 6×: old trail unchanged, C# = GDScript, timings; must say `PASS` |
 | `-s res://tools/cactus_probe.gd --headless` | cactus kinds + Voronoi fracture: closed pieces, volumes add up; must say `PASS` |
+| `-s res://tools/far_hills_probe.gd --headless [-- seed]` | the title / ride backdrop grid: C# batch vs GDScript per point (must match), far tree count; must say `PASS` |
 | `-s res://tools/wood_edge_probe.gd --headless` | drives angled lines onto every wooden ramp; must report `walls=0` |
 | `BMX_FW_PRESET=<name>`, `BMX_FW=pitch=1.3,poe=60`, `BMX_FW_PREVIEW=<m/s>` | freewheel preset / values / Preview for a test run (not saved) |
 | `BMX_FLOW_DEMO=1` | HUD flow meter: adds a flow level every 0.9 s from 3 s up to MAX, then lets it drain (pair with `BMX_DUST_SHOTS` for screenshots) |
@@ -829,6 +865,10 @@ rebuild hitch); rider body physics (fore/aft + air tuck/lean); bending spine + p
 All of it is on `main` (the Godot branch was merged, the web version removed). Work continues in this repo.
 
 Known, not fixed (lower priority from the code review):
+- Quit warnings: with SSIL on (GI setting 1, the default preset) Godot reports "7 RIDs of type Texture were leaked" at
+  exit (gone with `--set=gi=0`; a bare SSIL scene doesn't do it, not found which of our viewports / features adds it;
+  harmless, the OS frees it). "2 ObjectDB instances leaked" (ref count 0, C# side) also at exit; even an empty
+  `--quit` reports 5. The big leak (89 objects + 3 scripts "still in use") was `field.course` <-> `course._M`, fixed.
 - Records: "distance ridden" always 0; top speed lost if the window is closed instead of quitting.
 - Camera ignores rebound gamepad/camera keys (reads the right stick directly); `cam_up/down` unused.
 - Quick tune card sliders can show stale values after a reset (the tuning card re-reads on every tab).
@@ -837,10 +877,11 @@ Known, not fixed (lower priority from the code review):
 - Garage: test env `BMX_POSE` values get saved if you then touch a slider; config written on every slider tick.
 - Stale code: `hood_hem`, `_time`, some one-off `tools/*.gd`
   (`fork_measure`, `wheel_measure(2)`, `inspect_glb`, `hdri_sun`).
-- Perf ideas (done 2026-11-20: ragdoll ground sampled once per substep, HUD boxes cached (`UITheme.draw_box`), fx dust /
+- Perf (done 2026-11-20): ragdoll ground sampled once per substep, HUD boxes cached (`UITheme.draw_box`), fx dust /
   chunk buffers skip work when idle, `jump_mask` instead of `jump()` per step, wind / splash bed in C# (`RideBedSynth.cs`),
-  test flags cached (`Env.s`), torn tape drawn from packed arrays): still open: `rider.update_pose` gets a new ~45-key
-  dictionary every frame, the ride log builds a 65-value array 120x / s, FarHills samples C# per point on a worker.
+  test flags cached (`Env.s`), torn tape drawn from packed arrays, rider pose inputs in one reused dictionary
+  (`Game._pose_in`), ride log = one flat buffer, FarHills grid via batched C# (`far_ground` / `far_colors`), sticker
+  fits cached per frame + label (`BikeRig._fit_cache`), chain draws only its links in use.
 
 Ideas offered, not started:
 - Tyre tracks option **B**: a painted top-down "track map" the ground shader reads → real ruts in mud/sand.

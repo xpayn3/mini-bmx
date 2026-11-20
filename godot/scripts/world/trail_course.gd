@@ -91,6 +91,7 @@ static func make(rnd: WorldRng, field, hill_len: float, corridor: float, course_
 	c._commit(0)
 	c._build()
 	c._finish()
+	c._M = null   # only needed for the layout; kept, field.course <-> course._M was a cycle (never freed)
 	return c
 
 
@@ -115,6 +116,7 @@ func grown(field, to_x: float) -> TrailCourse:
 	c._cells = _cells.duplicate()
 	c._build()
 	c._finish()
+	c._M = null   # only needed for the layout; kept, field.course <-> course._M was a cycle (never freed)
 	return c
 
 

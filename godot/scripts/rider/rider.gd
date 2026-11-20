@@ -23,8 +23,10 @@ const NEUTRAL := {hipX = 0.0, hipY = 0.0, lean = 0.0, elbowsOut = 0.0, kneesOut 
 	kneesFwd = 0.0, kneeOutL = 0.0, kneeOutR = 0.0, heelFwd = 0.0, heelUp = 0.0, footAngle = 0.0, footOut = 0.0, footSlide = 0.025}
 ## lookpanel.js DEFAULT_LOOK
 const DEFAULT_LOOK := {shell = "#16171a", peak = "#ececec", goggleFrame = "#f2f2ee", lens = "#ff7a2a", strap = "#ff6a4d",
-	jersey = "#ff6a4d", pants = "#1d2b64", gloves = "#ffd21f", shoes = "#26292f", shoeAccent = "#d8232a", pads = "#1b1c20", padStyle = "enduro", helmet = "glory",
-	helmetOn = "1", hairStyle = "long", beard = "1", hair = "#4a3022", skin = "#efc29f", eyes = "#4a6b8a", bibOn = "1", bibNumber = "27", bibText = "RUNOUT  •  DOWNHILL CUP"}
+	jersey = "#ff6a4d", pants = "#1d2b64", gloves = "#ffd21f", shoes = "#26292f", shoeAccent = "#d8232a", pads = "#1b1c20", padStyle = "enduro",
+	beltStyle = "webbing", belt = "#16171a", buckle = "#9aa0a8", helmet = "glory",
+	helmetOn = "1", hairStyle = "long", beard = "1", hair = "#4a3022", skin = "#efc29f", eyes = "#4a6b8a", bibOn = "1", bibNumber = "27", bibText = "RUNOUT  •  DOWNHILL CUP",
+	camMount = "top"}
 ## where the helmet model sits on the head (head-local m / rad) and its scale
 ## helmet models picked in the Look tab (look.helmet): id -> [label, glb]. The glory one is the stock helmet (recolourable
 ## shell / peak, our goggles); the others are textured models (tools/export_helmets.py) that always wear their own goggles
@@ -84,11 +86,14 @@ var helmet_mats := {}
 var helmet_model: Node3D = null
 var helmet_id := ""   # which HELMETS entry + goggle source is on, "id/mode" (set by use_helmet)
 var goggles: Node3D = null
-var action_cam: Node3D = null   # helmet-top action camera (ActionCam); its "Lens" is the Helmet camera view
+var action_cam: Node3D = null   # the helmet action camera (ActionCam); its "Lens" is the Helmet camera view (null = look.camMount "none")
 var action_cam_at := Vector3.ZERO   # where it's mounted (head space)
+var cam_mount := ""                 # which ActionCam.HELMET_MOUNTS entry is on
+var cam_spots := {}                 # mount kind -> where it touches the shell (head space), set when a helmet goes on
 
 var torso: MeshInstance3D
 var hood_hem: MeshInstance3D
+var belt_node: Belt
 var pelvis_mesh: MeshInstance3D
 var neck_mesh: MeshInstance3D
 var bib_node: BackNumber
@@ -179,15 +184,11 @@ func _init() -> void:
 	pelvis_mesh = G.inst(G.rounded_box(0.2, 0.15, 0.3, 3, 0.05), mNavy)
 	pelvis_mesh.name = "Pelvis"
 	add_child(pelvis_mesh)
-	# a belt round the waist: hides the step where the jersey's hem meets the trouser top. Its own shape
-	# follows the hips' rounded box (a superellipse just outside it), so no corner pokes through
-	var belt := G.inst(_belt_geo(0.106, 0.156, 0.035, 0.08, 0.006), mat("#151517", 0.55, 0.1))
-	belt.name = "Belt"
-	pelvis_mesh.add_child(belt)
-	var buckle := G.inst(G.rounded_box(0.008, 0.042, 0.056, 1, 0.003), mat("#9aa0a8", 0.3, 0.9))
-	buckle.name = "Buckle"
-	buckle.position = Vector3(0.113, 0.058, 0.0)
-	pelvis_mesh.add_child(buckle)
+	# a belt round the waist (style + colours in the look): hides where the jersey's hem meets the trouser top.
+	# Its shape follows the hips' rounded box (a superellipse just outside it), so no corner pokes through
+	belt_node = Belt.new()
+	pelvis_mesh.add_child(belt_node)
+	belt_node.set_look(DEFAULT_LOOK.beltStyle, Color(DEFAULT_LOOK.belt), Color(DEFAULT_LOOK.buckle))
 	var bib := BackNumber.new()   # race number paper pinned to the back, flaps with speed
 	bib.name = "BackNumber"
 	bib_node = bib
@@ -372,17 +373,27 @@ func _build_builtin_helmet() -> void:
 	for sz in [-1.0, 1.0]:
 		var tab: MeshInstance3D = add.call(G.box(0.05, 0.03, 0.012), frameMat, gog)
 		tab.transform = Transform3D(Basis(Vector3.UP, sz * 0.5), Vector3(-0.03, 0, sz * 0.1))
-	_mount_action_cam(Vector3(0.03, hel.position.y + R * 0.96 - 0.004, 0))
+	cam_spots = {top = Vector3(0.03, hel.position.y + R * 0.96 - 0.004, 0),
+		side = hel.position + Vector3(0.0, R * 0.28, -R * 0.9 * 0.97),
+		chin = Vector3(R * 1.14 + 0.035, -0.064, 0)}
+	_mount_action_cam()
 
 
-## the action camera on top of the helmet, just forward of the crown (`at` = shell top, head space)
-func _mount_action_cam(at: Vector3) -> void:
+## the action camera where look.camMount says (top = just forward of the crown, side = left of the shell,
+## chin = front of the chin bar, none = no camera), at the spot the helmet measured (cam_spots, head space)
+func _mount_action_cam() -> void:
 	if action_cam and is_instance_valid(action_cam):
 		action_cam.get_parent().remove_child(action_cam)
 		action_cam.queue_free()
-	action_cam = ActionCam.build()
+	action_cam = null
+	cam_mount = str(look.get("camMount", DEFAULT_LOOK.camMount))
+	if cam_mount == "none" or not cam_spots.has(cam_mount):
+		return
+	var at: Vector3 = cam_spots[cam_mount]
+	action_cam = ActionCam.build(cam_mount)
 	action_cam.position = at
 	action_cam_at = at
+	action_cam.visible = hel == null or hel.visible or (helmet_model != null and helmet_model.visible)
 	head.add_child(action_cam)
 
 
@@ -403,7 +414,7 @@ func break_action_cam() -> Dictionary:
 func remount_action_cam() -> void:
 	if action_cam and is_instance_valid(action_cam) and action_cam.get_node_or_null("Body") != null:
 		return
-	_mount_action_cam(action_cam_at)
+	_mount_action_cam()
 
 
 ## highest point of the shell near (x, z=0), head space (the action cam sits there)
@@ -489,7 +500,31 @@ func set_helmet(model: Node3D, own_goggles: Node3D = null) -> void:
 	var top := _shell_top(shell_tris, 0.03) if not shell_tris.is_empty() else -1e9
 	if top < -1e8:   # no shell triangles: the helmet's bounding box top
 		top = 0.2
-	_mount_action_cam(Vector3(0.03, top - 0.004, 0))
+	cam_spots = {top = Vector3(0.03, top - 0.004, 0)}
+	# side: on the left of the shell, ~7 cm under the crown, a little behind the ear line's front
+	var side_y := top - 0.075
+	var sd = _hug(shell_tris, 0.0, side_y, 0.0, -1.0) if not shell_tris.is_empty() else null
+	cam_spots.side = Vector3(0.0, side_y, -(float(sd) - 0.002) if sd != null else -0.15)
+	# chin: the bottom edge of the chin bar = the lowest shell point in front of the face on the centreline;
+	# the camera sits on the bar's front face 3 cm above that edge
+	var low := 1e9
+	var xmax := 0.0
+	for p in shell_tris: xmax = maxf(xmax, p.x)
+	for p in shell_tris:   # well forward only (a round shell's underside is not the chin bar)
+		if absf(p.z) < 0.03 and p.x > xmax * 0.6 and p.y > top - 0.40: low = minf(low, p.y)
+	if low < 1e8:
+		var fx := -1e9
+		for p in shell_tris:
+			if absf(p.z) < 0.03 and p.y > low + 0.02 and p.y < low + 0.08: fx = maxf(fx, p.x)
+		if fx > 0.07:
+			cam_spots.chin = Vector3(fx - 0.004, low + 0.045, 0)
+	if not cam_spots.has("chin"):
+		cam_spots.chin = Vector3(0.24, top - 0.27, 0)
+	if Env.s("BMX_CAMMOUNT_PROBE") != "":
+		var ylo := 1e9; var yhi := -1e9; var xhi := -1e9
+		for p in shell_tris: ylo = minf(ylo, p.y); yhi = maxf(yhi, p.y); xhi = maxf(xhi, p.x)
+		print("CAMMOUNT helmet %s spots=%s low=%.3f shell y %.3f..%.3f xmax %.3f" % [helmet_id, cam_spots, low, ylo, yhi, xhi])
+	_mount_action_cam()
 	if not look.is_empty():
 		set_look(look)
 
@@ -569,6 +604,8 @@ func set_look(l: Dictionary) -> void:
 	if hel != null and want_key != helmet_id and HELMETS.has(want):   # another helmet / goggle source: mount it (set_helmet re-applies the look)
 		use_helmet(want)
 		if helmet_id == want_key and helmet_model and is_instance_valid(helmet_model): return   # set_helmet re-applied the look
+	if not cam_spots.is_empty() and str(L.get("camMount", DEFAULT_LOOK.camMount)) != cam_mount:
+		_mount_action_cam()
 	var c := func(m, k: String) -> void:
 		if m != null and L.get(k):
 			m.albedo_color = Color(L[k])
@@ -592,6 +629,9 @@ func set_look(l: Dictionary) -> void:
 		kp.set_design(str(L.get("padStyle", DEFAULT_LOOK.padStyle)))
 		kp.set_colors(Color(L.get("pads", DEFAULT_LOOK.pads)), Color(L.get("gloves", DEFAULT_LOOK.gloves)))
 		knee[i].visible = kp.design == "none"   # no pads: the plain knee
+	if belt_node:
+		belt_node.set_look(str(L.get("beltStyle", DEFAULT_LOOK.beltStyle)), Color(str(L.get("belt", DEFAULT_LOOK.belt))),
+			Color(str(L.get("buckle", DEFAULT_LOOK.buckle))))
 	c.call(shoe_mats.upper, "shoes")
 	c.call(shoe_mats.accent, "shoeAccent")
 	c.call(goggle_mats.frame, "goggleFrame")
@@ -671,34 +711,6 @@ func set_style(s: Dictionary) -> void:
 # ---------------- posing helpers ----------------
 
 ## unit-height (+Y) cylinder between a and b
-## a flat strap round a superellipse (|x/a|^4 + |z/b|^4 = 1) from y0 to y1, standing `t` out from it
-static func _belt_geo(a: float, b: float, y0: float, y1: float, t: float, n := 48) -> Dictionary:
-	var ring: Array[Vector3] = []
-	for i in n:
-		var u := TAU * i / n
-		var cu := cos(u)
-		var su := sin(u)
-		ring.append(Vector3(a * signf(cu) * sqrt(absf(cu)), 0.0, b * signf(su) * sqrt(absf(su))))
-	var pos := PackedVector3Array()
-	var idx := PackedInt32Array()
-	for i in n:
-		var pv: Vector3 = ring[(i - 1 + n) % n]
-		var nx: Vector3 = ring[(i + 1) % n]
-		var tang := (nx - pv).normalized()
-		var outv := Vector3(tang.z, 0.0, -tang.x)
-		if outv.dot(ring[i]) < 0.0: outv = -outv
-		var q: Vector3 = ring[i]
-		pos.append_array([q + Vector3(0, y0, 0) - outv * 0.004, q + outv * t + Vector3(0, y0, 0),
-			q + outv * t + Vector3(0, y1, 0), q + Vector3(0, y1, 0) - outv * 0.004])
-	for i in n:
-		var a0 := i * 4
-		var b0 := ((i + 1) % n) * 4
-		for f in [[1, 2], [2, 3], [0, 1]]:   # outside face, top edge, bottom edge
-			var c0: int = f[0]
-			var c1: int = f[1]
-			idx.append_array([a0 + c0, b0 + c1, b0 + c0, a0 + c0, a0 + c1, b0 + c1])
-	return {pos = pos, idx = idx}
-
 static func set_limb(n: Node3D, a: Vector3, b: Vector3) -> void:
 	var d := b - a
 	var l := d.length()
@@ -806,7 +818,11 @@ func back_point(t: float, z: float, off := 0.0) -> Vector3:
 ## the torso from hip `a` to chest `b` as a curve: `curve` bows the back out (+, hunched) or in (-, arched),
 ## `side` bows it sideways; `low` (0..1) moves the bend toward the hips (0) or the shoulders (1).
 ## The cross-section turns from `right_lo` at the hips to `right_hi` at the chest (twist).
-func set_spine(a: Vector3, b: Vector3, right_lo: Vector3, right_hi: Vector3, curve := 0.0, side := 0.0, low := 0.5) -> void:
+## `base` (optional): the hips' basis. The bottom bone then takes the hips' up / sideways, so the jersey's hem
+## stays level inside the belt however far the chest leans (it used to tilt with the spine and cross the trousers'
+## top: one poked out under the other at the front, the other at the back)
+func set_spine(a: Vector3, b: Vector3, right_lo: Vector3, right_hi: Vector3, curve := 0.0, side := 0.0, low := 0.5, base := Basis()) -> void:
+	var lock_base := base != Basis()
 	var d := b - a
 	var l := maxf(d.length(), 1e-4)
 	var dn := d / l
@@ -819,7 +835,11 @@ func set_spine(a: Vector3, b: Vector3, right_lo: Vector3, right_hi: Vector3, cur
 		var tg := (ctrl - a) * 2 * (1 - t) + (b - ctrl) * 2 * t
 		var tl := maxf(tg.length(), 1e-4)
 		var tn := tg / tl
+		if k == 0 and lock_base:
+			tn = base.y.normalized()
 		var rr := right_lo.lerp(right_hi, t)
+		if k == 0 and lock_base:
+			rr = base.z
 		rr = rr - tn * rr.dot(tn)
 		if rr.length_squared() < 1e-6:   # hips and shoulders turned opposite ways (a tangled ragdoll)
 			rr = r0 - tn * r0.dot(tn)
@@ -963,8 +983,8 @@ func pose_ragdoll(P: Array, roots: Dictionary = {}) -> void:
 	var body_r: Vector3 = hp[1] - hp[0]
 	var bb := _basis_from(ch - pe, body_r)
 	pelvis_mesh.transform = Transform3D(bb, pe)
-	var hip: Vector3 = pe + (ch - pe).normalized() * 0.02
-	set_spine(hip, ch, body_r.normalized(), (sh[1] - sh[0]).normalized())
+	var hip: Vector3 = pe + (ch - pe).normalized() * Belt.HEM_Y
+	set_spine(hip, ch, body_r.normalized(), (sh[1] - sh[0]).normalized(), 0.0, 0.0, 0.5, bb)
 	set_limb(hood_hem, hip, hip.lerp(ch, 0.2))
 	var sh_r: Vector3 = sh[1] - sh[0]
 	head.transform = Transform3D(_basis_from(hd - ch, sh_r), hd)
@@ -1426,9 +1446,11 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var tw := Basis(tw_axis, float(sty.twist) + clampf(_num(p, "airSpin") * 0.07 + sm_turn * 0.13 * float(sty.turnTwist), -0.5, 0.5) - 0.22 * tab)
 	# pelvis: turn (yaw about up), roll (one hip drops, about forward), tilt (about the hip line)
 	var pel_b := Basis(Vector3.UP, float(sty.pelvisYaw) + clampf(sm_turn * 0.07 * float(sty.turnHips), -0.4, 0.4) + 0.3 * tab) * Basis(Vector3.RIGHT, float(sty.pelvisRoll) - clampf(sm_turn * 0.04 * float(sty.turnHips), -0.25, 0.25))
+	var pel_full := pel_b * Basis(Vector3.BACK, -(ang * 0.3) - float(sty.pelvisTilt))
+	hip = pelvis + pel_full.y * Belt.HEM_Y   # the jersey's hem: inside the belt, level with it
 	set_spine(hip, chest, pel_b * Vector3(0, 0, 1), tw * Vector3(0, 0, 1),
-		float(sty.spineCurve) * (1.0 - 0.7 * relax), float(sty.spineSide), float(sty.spineLow))
-	pelvis_mesh.transform = Transform3D(pel_b * Basis(Vector3.BACK, -(ang * 0.3) - float(sty.pelvisTilt)), pelvis)
+		float(sty.spineCurve) * (1.0 - 0.7 * relax), float(sty.spineSide), float(sty.spineLow), pel_full)
+	pelvis_mesh.transform = Transform3D(pel_full, pelvis)
 	set_limb(hood_hem, Vector3(pelvis.x, pelvis.y + 0.04, pelvis.z), hip.lerp(chest, 0.2))
 
 	# neck / head

@@ -101,6 +101,7 @@ const DEFAULTS := {
 	"mute_unfocused": true,
 	# gameplay / controller
 	"pause_unfocused": true,
+	"boot_intro": true,      # launch: the CRT TV intro (off = a still frame of it while the game loads)
 	"rumble": true,
 	"rumble_strength": 1.0,  # × every controller vibration
 	"wasted": true,          # crash: slow motion + "WASTED" screen

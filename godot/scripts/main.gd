@@ -36,11 +36,12 @@ func _ready() -> void:
 	if (OS.get_cmdline_user_args().is_empty() or OS.get_environment("BMX_INTRO") != "") and CrtTv.assets_ok():   # (no TV files: no intro, straight to the menu)
 		var intro := CrtIntro.new()
 		intro.hold = true
+		intro.still = (not Settings.get_v("boot_intro") and OS.get_environment("BMX_INTRO") != "1") or OS.get_environment("BMX_INTRO") == "still"
 		add_child(intro)
 		_prebuild_behind(intro)
 		intro.finished.connect(func() -> void:
 			var tw := create_tween().set_ignore_time_scale()
-			tw.tween_property(intro.root, "modulate:a", 0.0, 1.2)
+			tw.tween_property(intro.root, "modulate:a", 0.0, 3.5).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)   # the menu fades in slowly
 			tw.tween_callback(intro.queue_free)
 			if OS.get_environment("BMX_INTRO_SHOTS") != "":   # tests: a frame of the menu after it, then quit
 				await get_tree().create_timer(2.5, true, false, true).timeout
@@ -232,7 +233,8 @@ func _show_menu() -> void:
 	menu.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(menu)
 	ui.move_child(menu, 0)
-	PadNav.attach(menu, {"back": func(): if menu_page == "setup": _menu_page_main()})   # B on the ride setup = back
+	# B on the ride setup = one step back (step 1 -> the main page); LB / RB = previous / next step
+	PadNav.attach(menu, {"back": _menu_back, "tabs": _menu_tabs, "first": func(): return menu_focus if is_instance_valid(menu_focus) else null})
 	# one flat white card down the left (the garage and settings use the same cards), the view beside it
 	var card := PanelContainer.new()
 	card.add_theme_stylebox_override("panel", UITheme.card_style(Tokens.PAPER, Tokens.R_XL, Tokens.S7))
@@ -386,6 +388,15 @@ func _menu_clear() -> void:
 	menu_col.add_child(UITheme.spacer(Tokens.S7))
 
 var menu_page := "main"
+var menu_focus: Control   # where the pad cursor lands on this page (RIDE, NEXT)
+
+func _menu_back() -> void:
+	if menu_page != "setup": return
+	if setup_step > 0: _menu_page_setup(setup_step - 1)
+	else: _menu_page_main()
+
+func _menu_tabs(dir: int) -> void:
+	if menu_page == "setup": _menu_page_setup(clampi(setup_step + dir, 0, SETUP_STEPS.size() - 1))
 
 func _menu_page_main() -> void:
 	_menu_clear()
@@ -403,6 +414,7 @@ func _menu_page_main() -> void:
 	seed_row.add_theme_constant_override("separation", Tokens.S2)
 	var se := LineEdit.new()
 	se.text = str(GameState.seed)
+	se.placeholder_text = "World seed"
 	se.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	se.custom_minimum_size.y = Tokens.H_CHIP
 	se.tooltip_text = "World seed: type a number and press Enter"
@@ -416,6 +428,7 @@ func _menu_page_main() -> void:
 	# secondary: a quiet list
 	for it in [["SETTINGS", _open_settings], ["CONTROLS", _show_controls], ["QUIT", func(): GameState.quit()]]:
 		vb.add_child(UITheme.make_button(it[0], it[1], "link", Tokens.T_XL))
+	menu_focus = ride
 	ride.grab_focus.call_deferred()
 
 ## RIDE -> choose the bike and the time of day, then GO
@@ -458,6 +471,7 @@ func _hero_text(id: String) -> void:
 func _menu_page_setup(step := 0) -> void:
 	setup_step = clampi(step, 0, SETUP_STEPS.size() - 1)
 	_menu_clear()
+	menu_page = "setup"
 	if is_instance_valid(setup_screen): setup_screen.queue_free()
 	_ensure_thumbs()
 	var scr := Control.new()
@@ -575,13 +589,14 @@ func _menu_page_setup(step := 0) -> void:
 		foot.add_child(fl)
 		next_btn.custom_minimum_size.x = 420
 		foot.add_child(next_btn)
+	menu_focus = next_btn   # a step with one main pick moves this onto the picked card
 	match setup_step:
 		0: _setup_bike(content)
 		1: _setup_tune(content)
 		2: _setup_rider(content)
 		3: _setup_computer(content)
 		4: _setup_race(content)
-	next_btn.grab_focus.call_deferred()
+	menu_focus.grab_focus.call_deferred()
 
 ## step 1: the presets as picture cards (the big 3D bike is the left side of the screen)
 func _setup_bike(content: HBoxContainer) -> void:
@@ -596,6 +611,7 @@ func _setup_bike(content: HBoxContainer) -> void:
 		b.button_group = group
 		b.button_pressed = id == GameState.bike_id
 		b.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		_pick_card(b)
 		var row := HBoxContainer.new()
 		row.set_anchors_preset(Control.PRESET_FULL_RECT)
 		row.offset_left = Tokens.S3; row.offset_right = -Tokens.S3
@@ -742,12 +758,14 @@ func _swatch_grid(cur: String, cb: Callable, palette: Array = TUNE_SWATCHES, col
 		var b := Button.new()
 		b.custom_minimum_size = Vector2(size, size)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.focus_mode = Control.FOCUS_NONE
 		b.tooltip_text = "#" + hex
 		var on: bool = hex == cur.to_lower().trim_prefix("#")
 		var col := Color(hex)
-		for st in ["normal", "pressed", "focus"]:
+		for st in ["normal", "pressed"]:
 			b.add_theme_stylebox_override(st, UITheme.marked(col, Tokens.INK, SIDE_BOTTOM, Tokens.R_MD, 0) if on else UITheme.box(col, Tokens.R_MD, 0))
+		var ring := UITheme.box(Tokens.CLEAR, Tokens.R_MD, 0, Tokens.INK, Tokens.MARK - 1)   # the pad cursor on a colour
+		ring.draw_center = false
+		b.add_theme_stylebox_override("focus", ring)
 		b.add_theme_stylebox_override("hover", UITheme.marked(col.lightened(0.12), Tokens.INK_SOFT, SIDE_BOTTOM, Tokens.R_MD, 0))
 		b.pressed.connect(func(): cb.call(hex))
 		g.add_child(b)
@@ -809,6 +827,7 @@ func _char_kit(body: VBoxContainer) -> void:
 			if key in RiderPanels.NON_KIT: continue
 			if str(look.get(key, "")) != str(kit_look[key]): same = false; break
 		b.button_pressed = same
+		_pick_card(b)
 		var col := VBoxContainer.new()
 		col.set_anchors_preset(Control.PRESET_FULL_RECT)
 		col.offset_left = Tokens.S3; col.offset_right = -Tokens.S3; col.offset_top = Tokens.S3; col.offset_bottom = -Tokens.S3
@@ -865,6 +884,22 @@ func _char_hair(body: VBoxContainer) -> void:
 		b.pressed.connect(func(): _look_set({"helmetOn": "1", "helmet": hid}))
 		grid.add_child(b)
 	body.add_child(grid)
+	body.add_child(UITheme.caption("ACTION CAM"))
+	var cgrid := GridContainer.new()
+	cgrid.columns = 4
+	cgrid.add_theme_constant_override("h_separation", Tokens.S2)
+	cgrid.add_theme_constant_override("v_separation", Tokens.S2)
+	var cgrp := ButtonGroup.new()
+	for m in ActionCam.HELMET_MOUNTS:   # where the helmet camera sits (the Helmet view looks out of it)
+		var mid: String = m[0]
+		var cb := UITheme.make_button(String(m[1]).to_upper(), Callable(), "chip", Tokens.T_MD)
+		cb.toggle_mode = true; cb.button_group = cgrp
+		cb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		cb.custom_minimum_size.y = 56
+		cb.button_pressed = str(look.get("camMount", "top")) == mid
+		cb.pressed.connect(func(): _look_set({"camMount": mid}))
+		cgrid.add_child(cb)
+	body.add_child(cgrid)
 	body.add_child(UITheme.caption("HAIR STYLE"))
 	var hgrid := GridContainer.new()
 	hgrid.columns = 4
@@ -894,12 +929,12 @@ func _char_plate(body: VBoxContainer) -> void:
 	body.add_child(on)
 	body.add_child(UITheme.caption("NUMBER"))
 	var num := LineEdit.new()
-	num.text = str(look.bibNumber); num.max_length = 3; num.custom_minimum_size.y = Tokens.H_CHIP
+	num.text = str(look.bibNumber); num.max_length = 3; num.placeholder_text = "Race number"; num.custom_minimum_size.y = Tokens.H_CHIP
 	num.text_changed.connect(func(t: String): _look_set({"bibNumber": t}))
 	body.add_child(num)
 	body.add_child(UITheme.caption("HEADER LINE"))
 	var hdr := LineEdit.new()
-	hdr.text = str(look.bibText); hdr.max_length = 30; hdr.custom_minimum_size.y = Tokens.H_CHIP
+	hdr.text = str(look.bibText); hdr.max_length = 30; hdr.placeholder_text = "Header line"; hdr.custom_minimum_size.y = Tokens.H_CHIP
 	hdr.text_changed.connect(func(t: String): _look_set({"bibText": t}))
 	body.add_child(hdr)
 
@@ -932,6 +967,7 @@ func _setup_race(content: HBoxContainer) -> void:
 		b.toggle_mode = true
 		b.button_group = tgroup
 		b.button_pressed = n == active
+		_pick_card(b)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		b.custom_minimum_size.y = 108
@@ -960,9 +996,18 @@ func _setup_race(content: HBoxContainer) -> void:
 	side.add_child(grid)
 	side.add_child(UITheme.text("Computer: " + String(ComputerUnits.get_unit(GameState.computer_id).name), Tokens.INK_SOFT, Tokens.T_MD))
 
+## a setup pick that follows the pad cursor: the picked one is where the cursor starts, A on it = next step
+func _pick_card(b: Button) -> void:
+	b.set_meta(&"nav_accept", _setup_next)
+	if b.button_pressed: menu_focus = b
+
+func _setup_next() -> void:
+	if setup_step < SETUP_STEPS.size() - 1: _menu_page_setup(setup_step + 1)
+	else: _start_ride()
+
 ## a big menu button: display-font title (+ optional small line under it); primary = the yellow one
 func _menu_button(text: String, sub: String, cb: Callable, primary := false) -> Button:
-	var b := UITheme.make_button("", cb, "primary" if primary else "chip")
+	var b := UITheme.make_button("", cb, "menu")   # one look for every line: the focused one is yellow (console cursor)
 	b.custom_minimum_size.y = Tokens.H_HERO if primary else Tokens.H_SUB
 	var m := MarginContainer.new()
 	m.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -1021,6 +1066,7 @@ func _start_ride() -> void:
 	if menu: menu.queue_free(); menu = null
 	if game: game.exit_photo()
 	state = RIDING
+	game.swallow_held()   # the A that pressed RACE is not a sprint
 	game.respawn(false)
 	_set_riding(true)
 
@@ -1059,6 +1105,10 @@ func _pause() -> void:
 	var shot := get_viewport().get_texture().get_image()
 	get_tree().paused = true
 	_close_pause(true)
+	# the pause menu replaces any side card (tuning, P / K / L): with it still up, its menu took the pad cursor
+	# and the leaflet had no highlight. Pause > Tuning brings it back.
+	_tuning_paused = false   # (else closing the card would resume the ride)
+	if game and game.hud.card and game.hud.card.visible: game.hud.close_sides()
 	var pm := PausePamphlet.new()
 	pm.photo = shot
 	if game:
@@ -1096,7 +1146,8 @@ var _tuning_paused := false
 func _open_tuning() -> void:
 	_close_pause(true)
 	_tuning_paused = true
-	game.hud._toggle_side("tune")
+	if game.hud.card and game.hud.card.visible: game.hud.card.show_tab("ride")   # already up (P, demo): keep it, never toggle it shut
+	else: game.hud._toggle_side("tune")
 	var card: Control = game.hud.card
 	if not card.visibility_changed.is_connected(_tuning_shown): card.visibility_changed.connect(_tuning_shown)
 	if card.get("nav"): card.nav.focus_first.call_deferred()
@@ -1112,6 +1163,7 @@ func _resume() -> void:
 	_close_controls()
 	state = RIDING
 	get_tree().paused = false
+	if game: game.swallow_held()   # the A that resumed is not a sprint
 
 func _open_settings() -> void:
 	if is_instance_valid(settings_open): return
@@ -1240,6 +1292,12 @@ func _autotest(seconds: float) -> void:
 			pedal = not braking
 			if braking and game.phys.v > 0.3: Input.action_press("brake")   # off once stopped (held brake backs up)
 			else: Input.action_release("brake")
+		if Env.s("BMX_SHIFT") != "" and el >= float(Env.s("BMX_SHIFT")):   # tests: shift every 0.7 s (3 easier, 3 harder...)
+			var si := int((el - float(Env.s("BMX_SHIFT"))) / 0.7)
+			if si != _probe.get("shift_i", -1):
+				_probe.shift_i = si
+				game._shift(1 if (si / 3) % 2 == 0 else -1)
+				print("SHIFT t=%.2f d=%d gear=%d" % [el, 1 if (si / 3) % 2 == 0 else -1, game.phys.gear])
 		if pedal and not (Env.s("BMX_COAST") != "" and int(el) % 6 >= 3): Input.action_press("pedal")   # BMX_COAST: 3 s pedal / 3 s coast
 		else: Input.action_release("pedal")
 		if Env.s("BMX_BRAKETURN") != "" and el > float(Env.s("BMX_BRAKETURN")):   # tests: 2 s pedal up to speed, 1.5 s hard brake + full steer, repeat
@@ -1659,7 +1717,8 @@ func _tape_test(el: float) -> void:
 		var along := Vector2(pts[pts.size() - 1].x - pts[0].x, pts[pts.size() - 1].z - pts[0].z).normalized()
 		var rd := Vector2(-along.y, along.x)
 		var spd := float(Env.s("BMX_TAPE_SPEED")) if Env.s("BMX_TAPE_SPEED") != "" else 7.0
-		var start := Vector2(mid.x, mid.z) - rd * 6.0
+		var off := float(Env.s("BMX_TAPE_OFF")) if Env.s("BMX_TAPE_OFF") != "" else 0.0   # aim this far along the span
+		var start := Vector2(mid.x, mid.z) + along * off - rd * 6.0
 		ph.reset_at(start.x, start.y, atan2(-rd.y, rd.x))
 		ph.v = spd
 		_tape = {"sp": best, "t": el, "shot": 0, "next": el}
