@@ -1082,7 +1082,8 @@ func _pose_from_points(P: Array, roots: Dictionary, orient: Dictionary) -> void:
 		knee_pad[i].pose(kn_from, kn[i], ft_from, ft[i], bb.x)
 		var up: Vector3 = ft_from - ft[i]
 		var sb: Basis = orient.get("foot%d" % i, _basis_from(up, body_r))
-		shoe[i].transform = Transform3D(sb, ft[i] - sb.y.normalized() * float(orient.get("shoe_drop", 0.08)))
+		# the ankle sits over the back of the shoe (riding: 4 cm behind the shoe's origin, 9 cm up), not over its middle
+		shoe[i].transform = Transform3D(sb, ft[i] - sb.y.normalized() * float(orient.get("shoe_drop", 0.08)) + sb.x.normalized() * float(orient.get("shoe_fwd", 0.0)))
 	_sync_skeleton(P)
 
 
