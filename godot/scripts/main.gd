@@ -248,19 +248,11 @@ func _show_menu() -> void:
 	vb.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vb.add_theme_constant_override("separation", Tokens.S3)
 	outer.add_child(vb)
-	# title: big condensed italic in ink, a yellow mark and the tagline under it
+	# title: the game's logo, the same one the TV shows (ui/game_logo.gd)
 	var head := VBoxContainer.new()
-	head.add_theme_constant_override("separation", -Tokens.S4)
-	head.add_child(UITheme.display("RUNOUT", Tokens.T_DISPLAY, Tokens.INK, Tokens.SLANT_TITLE))
-	var tag_row := HBoxContainer.new()
-	tag_row.add_theme_constant_override("separation", Tokens.S4)
-	var slab := ColorRect.new()
-	slab.color = Tokens.ACCENT
-	slab.custom_minimum_size = Tokens.SLAB_WIDE
-	slab.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	tag_row.add_child(slab)
-	tag_row.add_child(UITheme.caption("DOWNHILL  &  BMX  ·  ENDLESS TRAILS", Tokens.INK_SOFT, Tokens.T_MD))
-	head.add_child(tag_row)
+	var logo := GameLogo.new()
+	logo.custom_minimum_size = Vector2(0, 170)
+	head.add_child(logo)
 	vb.add_child(head)
 	menu_col = vb
 	outer.add_child(UITheme.text("v1.0  ·  Godot %s" % Engine.get_version_info().string, Tokens.INK_SOFT, Tokens.T_XS))
