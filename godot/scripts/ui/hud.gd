@@ -1146,7 +1146,7 @@ class GetUpPrompt extends Control:
 	func tick(dt: float) -> void:
 		var st: BikePhysics = hud.game.phys
 		t += dt
-		var show: bool = st.crash_on and st.crash_t > 0.6
+		var show: bool = st.crash_on and st.crash_t > 0.6 and hud.game.getup_anim == null   # (not once they're getting up)
 		k = clampf(st.crash_hold / st.getup_need, 0.0, 1.0) if show else k
 		held = move_toward(held, 1.0 if (show and st.crash_hold > 0.0) else 0.0, dt * 12)
 		if Env.s("BMX_GETUP_K") != "" and show:   # tests: draw it as if held this far

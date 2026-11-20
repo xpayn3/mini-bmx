@@ -305,7 +305,7 @@ func _crash_step(dt: float, inp: Dictionary) -> void:
 	hop_nose *= exp(-dt * 4)
 	wheel_f += v / RWF * dt; wheel_r += v / RWR * dt
 	body_y = y; body_v = 0; y_draw = y; pitch_draw = pitch
-	if rag:
+	if rag and rag.active:   # (not while the get-up animation draws the body: Game.getup_anim)
 		var P: Vector3 = rag.p[Ragdoll.PELVIS]
 		var near: Array = terrain.colliders_near(P.x, P.z)
 		for c in near:
@@ -315,12 +315,13 @@ func _crash_step(dt: float, inp: Dictionary) -> void:
 			host.smash(c, (P - Q) / dt * 3.0 * Vector3(1, 0, 1), P - Vector3(0, 0.4, 0))
 		rag.step(dt, near)
 		crash_rest = crash_rest + dt if rag.speed < 0.6 else 0.0
+	if host.getup_anim != null: return   # already getting up
 	var holding: bool = crash_armed and inp.hop
 	if holding: crash_hold += dt
 	else:
 		crash_armed = false; crash_hold = maxf(0.0, crash_hold - dt * 3)
 	if crash_hold >= getup_need:
-		host.get_up()
+		host.begin_getup()
 
 # ---------------------------------------------------------------------
 var _g_y := 0.0; var _g_pitch := 0.0; var _g_hr := 0.0; var _g_hf := 0.0

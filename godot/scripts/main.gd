@@ -1847,10 +1847,10 @@ func _autotest(seconds: float) -> void:
 			var dm := INF
 			for i in tc.n: dm = minf(dm, Vector2(tc.X[i] - game.phys.x, tc.Z[i] - game.phys.z).length())
 			print("TAPRESET from %s to (%.1f, %.1f) dist_to_trail=%.2f v=%.1f crash=%s" % [str(p0), game.phys.x, game.phys.z, dm, game.phys.v, str(game.phys.crash_on)])
-		if Env.s("BMX_GOPRO_PROBE") != "" and _probe.has("bailed") and not _probe.has("gotup") \
+		if (Env.s("BMX_GOPRO_PROBE") != "" or Env.s("BMX_GETUP_PROBE") != "") and _probe.has("bailed") and not _probe.has("gotup") \
 				and el > float(Env.s("BMX_BAIL")) + 2.5 and game.phys.crash_on:   # tests: get up (new GoPro on)
 			_probe["gotup"] = true
-			game.get_up()
+			game.begin_getup()
 		if Env.s("BMX_LAND_TEST") != "" and el > float(Env.s("BMX_LAND_TEST")) and not _probe.has("landed"):   # tests: fake a hard landing
 			_probe["landed"] = true
 			game.on_landing(1.0, 8.0)

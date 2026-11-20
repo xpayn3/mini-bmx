@@ -735,7 +735,46 @@ func _wasted_on() -> bool:
 		if a.begins_with("--autotest"): return false
 	return bool(Settings.get_v("wasted"))
 
+## the hold to get up is done: the rider climbs to their feet (GetUpAnim), then get_up() puts them on the bike.
+## A torn-off limb (or BMX_GETUP_ANIM=0) gets straight back on as before.
+var getup_anim: GetUpAnim = null
+var _stand_world: Array = []   # the standing pose it ended in (world), blended into the riding pose
+var _stand_blend := 1.0
+const STAND_BLEND := 0.35      # s from standing to on the bike
+func begin_getup() -> void:
+	if getup_anim != null: return
+	if not ragdoll.active or not ragdoll.cut.is_empty() or Env.s("BMX_GETUP_ANIM") == "0":
+		get_up(); return
+	getup_anim = GetUpAnim.new(rider, terrain, ragdoll.p)
+	ragdoll.active = false
+	phys.crash_hold = 0.0; phys.crash_armed = false
+	if wasted: wasted.finish()
+	if Env.s("BMX_GETUP_PROBE") != "": print("GETUP start at ", (ragdoll.p[Ragdoll.PELVIS] as Vector3).snapped(Vector3.ONE * 0.01))
+
+## one physics step of the get-up: draw it, keep the ragdoll's points on it (camera, photo mode follow them)
+func _getup_step(dt: float) -> void:
+	var going := getup_anim.step(dt)
+	var P: Array = getup_anim.last_world
+	for i in mini(P.size(), ragdoll.p.size()):
+		ragdoll.p[i] = P[i]; ragdoll.q[i] = P[i]
+	if not going:
+		_stand_world = P.duplicate()
+		if Env.s("BMX_GETUP_PROBE") != "": print("GETUP stood up, pelvis ", (P[2] as Vector3).snapped(Vector3.ONE * 0.01), " head ", (P[0] as Vector3).snapped(Vector3.ONE * 0.01))
+		get_up()
+		_stand_blend = 0.0
+
+## just back on the bike: the standing body eases into the riding pose (after update_pose)
+func _stand_to_bike(dt: float) -> void:
+	_stand_blend = minf(_stand_blend + dt / STAND_BLEND, 1.0)
+	var w := smoothstep(0.0, 1.0, _stand_blend)
+	var inv: Transform3D = rider.global_transform.affine_inverse()
+	var P := []
+	for i in 15: P.append((inv * (_stand_world[i] as Vector3)).lerp(rider.J[i], w))
+	rider.pose_points(P)
+
 func get_up() -> void:
+	getup_anim = null
+	_stand_blend = 1.0
 	phys.get_up()
 	_out_of_crevasse()
 	if wasted: wasted.finish()
@@ -1278,7 +1317,9 @@ func _physics_process(dt: float) -> void:
 				["counter", phys.counter, 0.003], ["steer", phys.steer, 0.003], ["hip_shift", phys.hip_shift, 0.001], ["body_x", phys.body_x, 0.001],
 				["pitch", phys.pitch, 0.002], ["y", phys.y, 0.001], ["body_y", phys.body_y, 0.001], ["compress", phys.compress, 0.001], ["lat_a", phys.lat_a, 0.05], ["v", phys.v, 0.01]]:
 			_jitter_sample(kv[0], kv[1], kv[2])
-	if phys.crash_on:
+	if phys.crash_on and getup_anim != null:
+		_getup_step(dt)
+	elif phys.crash_on:
 		rider.pose_ragdoll(ragdoll.p, _ragdoll_roots())
 	_pk = _perf("p_ragdoll_pose", _pk)
 	if not phys.is_sane():
@@ -1597,6 +1638,7 @@ func _process(dt: float) -> void:
 		pi["wheelY"] = (rig.wheel_f.global_position.y + rig.wheel_r.global_position.y) * 0.5
 		pi["turn"] = _turn_s
 		rider.update_pose(dt, pi)
+		if _stand_blend < 1.0 and _stand_world.size() >= 15: _stand_to_bike(dt)
 		if dab_probe: _dab_probe(st)
 		elif _jit_skip > 0: _jit_skip -= 1
 		if jitter_on and _jit_skip == 0:   # tests: the drawn joints (rider space), per frame
