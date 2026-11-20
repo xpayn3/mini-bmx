@@ -866,6 +866,10 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   `.glsl` files need an import (`--headless --import`) after editing. Falls back to the
   old sprites / FogVolumes without a RenderingDevice; `BMX_SPRITE_DUST=1` forces the sprites.
 - **Dust tab** in the tuning card (Tune groups `Dust look` / `Dust trail` / `Dust spray`, keys `dust*`, read live every frame by `SmokeSim._read_tune` and `RideDust`): thickness, wispy edges, rise, swirl, curls, grit; fade speed, spread, wind, room ahead of the rider (the sim box trails behind: `ahead` 3 m = ~22 m of trail); rear / front amount, spray cone at the tyre (`dustWidth`, degrees: the spray starts tyre-wide and widens behind like a funnel), sideways, kick-up, throw, gusts, landing clouds; **Grit** (`dustGrit*`): amount, grain size (2 mm-1.2 cm at 1x, shader `grain_k`), scatter, thrown back, kicked up, speed it starts at. Dust casts no shadow (`SmokeSim.SHADOW_K` 0). Ride presets leave `dust*` alone; Reset puts them back to the defaults. Test: `BMX_PANEL=dust`, `BMX_TUNE=dustOpacity=2`.
+- **Contact shadows** (`fx/contact_shadow.gd`, `Game.contact`): the sun's shadow bias (big at golden hour) lifts the
+  shadow off the tyres, so the bike looked like it floated. Three soft black Decals on `Terrain.GROUND_LAYER` only: a tight
+  one under each tyre + a faint wide one under the bike (the ragdoll's pelvis in a crash), lying on the ground's slope,
+  fading as the tyre / bike lifts off. Kept subtle (the user found a strong one a "black splotch"). `BMX_NO_CONTACT=1` = off.
 - Dirt chunks, **tyre tracks**: one ring-buffer ArrayMesh
   (14 000 segments ≈ 1 km/wheel, one draw call, each segment uploads only its own bytes) drawn by
   `tyre_track.gdshader` — lit, knob-tread dimples bump-mapped, soft edges + soil lip, skid streaks, distance fade.
