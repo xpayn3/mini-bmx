@@ -539,6 +539,20 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   part alone, rendered by `PartThumbs` (`scripts/garage/part_thumbs.gd`: an off-screen studio SubViewport, one part
   per frame, cached by key; bars / forks are cut out of dh.glb's steer + fork_lower meshes, wheels from
   `WheelGen`), brand, name and a spec line. Touching width / rise / material / travel makes the model "custom".
+- **Paint tab** (2026-11-20): a big material ball of the picked part (`PartThumbs.make_ball`: sphere + `BikeBuild.paint_material`
+  + a close key light so finishes read apart), parts as a strip of pictures of each part alone (`PartThumbs.make_paint_part`: the bike with every other surface
+  hidden), an 8-column grid of colour squares (picked = a dot), custom colour, finishes as a 4 x 2 grid of balls in the current colour. "Apply to whole frame" on the front / rear triangle.
+- **Showroom first** (2026-11-20): the garage opens minimal: GARAGE, the bike turning slowly (`VIEWS.show`), a strip of big frame
+  pictures (pick = switch frame) and BACK / EDIT / SAVE & RIDE. EDIT (`_set_edit(true)`) shows the customizer (tabs, options card,
+  build card, Stock / Randomise / Save); its BACK / Esc / pad B returns to the showroom (`_back`). The frame row left the Paint tab.
+  `BMX_GARAGE_TAB=<tab>` opens straight in the customizer.
+- **Picture strips everywhere** (2026-11-20): every part / look option is a big picture card in one slidable row (`ui/pic_strip.gd`
+  `PicStrip`: drag, wheel, pad focus; `guard(cb)` so a drag never picks). Garage `_cards` / `_pic_cards`, title menu `_pic_chip`.
+  `PartThumbs` also renders close-ups on the whole bike (`make_bike_spot`: stem, levers, rotor, caliper, bike cam mounts), saddles,
+  action cams with their gear (`make_cam`), wheelsets as a product shot (`make_wheelset`) and the rider's head (`make_head`: helmet,
+  helmet cam, hair; a Rider posed until the hair settles). Tests: `BMX_TUNE_CAT=wheels` opens the ride setup's Wheels & tyres.
+- **Braid** = its own low-poly plait mesh (`Hair._plait_mesh`, rebuilt each frame along the tail guides' mean line, so it swings
+  like the ponytail): alternating tilted lobes, a band at the tie, a flared tuft at the end.
 - The **Coasting** rider preview is the showcase pose: sat on the saddle, sitting up (`relax` input to
   `Rider.update_pose`: straighter back, chest up, chin up, whatever the saved riding pose).
 - Light: little volumetric haze (0.004), exposure 1.0, contrast 1.16 / saturation 1.18, depth fog from 90 m.

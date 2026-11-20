@@ -70,6 +70,11 @@ func _run() -> void:
 		var job: Array = _queue.pop_front()
 		var node: Node3D = job[1].call()
 		_stage.add_child(node)
+		if node.has_meta("setup"): (node.get_meta("setup") as Callable).call()
+		for i in int(node.get_meta("settle", 0)):   # a rider: posed every frame until the hair has fallen
+			if node.has_meta("tick"): (node.get_meta("tick") as Callable).call(1.0 / 60.0)
+			await get_tree().process_frame
+			if not is_inside_tree() or not is_instance_valid(node): return
 		_frame(node, job[2])
 		render_target_update_mode = SubViewport.UPDATE_ONCE
 		await RenderingServer.frame_post_draw
@@ -92,7 +97,9 @@ func _frame(node: Node3D, view: Vector3) -> void:
 		var bb: AABB = (mi as MeshInstance3D).global_transform * (mi as MeshInstance3D).get_aabb()
 		box = bb if first else box.merge(bb)
 		first = false
-	if node.has_meta("crop_top"):
+	if node.has_meta("focus"):   # a close-up of one spot (a part on a whole bike, the rider's head)
+		box = (node.get_meta("focus") as Callable).call()
+	elif node.has_meta("crop_top"):
 		var h: float = box.size.y * float(node.get_meta("crop_top"))
 		box = AABB(Vector3(box.position.x + box.size.x * 0.2, box.end.y - h, box.position.z), Vector3(box.size.x * 0.6, h, box.size.z))
 	var c := box.get_center()
@@ -103,7 +110,7 @@ func _frame(node: Node3D, view: Vector3) -> void:
 	var th := tv * float(size.x) / float(size.y)
 	# the part's own points (not its box: a part lying at an angle has a much bigger box than itself, so it came
 	# out small and off centre): centre on their extent across the view, then fit them as big as the picture lets
-	var pts := _points(mis, 600)
+	var pts := [] if node.has_meta("focus") else _points(mis, 600)
 	if node.has_meta("crop_top") or pts.is_empty():
 		for i in 8: pts.append(box.get_endpoint(i))
 	var lo := Vector2(INF, INF); var hi := -lo
@@ -360,3 +367,144 @@ static func make_wheel(spec: Dictionary, crop := 0.0) -> Node3D:
 	mi.mesh = WheelGen.build(spec)
 	if crop > 0.0: mi.set_meta("crop_top", crop)
 	return mi
+
+
+# ---------------------------------------------------------------- close-ups on the whole bike / rider
+## the stock frame built with `build`, the picture a close-up of one spot on it: "stem", "levers", "rotor", "caliper",
+## "bars" / "fork" (the action cam mounts). Parts that only make sense where they sit are shown there.
+static func make_bike_spot(build: Dictionary, spot: String) -> Node3D:
+	var cfg := GameState.bike_config_for("dh")
+	var rig := BikeRig.new()
+	rig.load_bike(cfg, build)
+	rig.set_meta("focus", _spot_box.bind(rig, spot))
+	return rig
+
+static func _spot_box(rig: BikeRig, spot: String) -> AABB:
+	var c := Vector3.ZERO
+	var r := 0.1
+	var sx := rig.steer_n.global_transform
+	var mid := (rig.grip_l + rig.grip_r) * 0.5
+	match spot:
+		"stem": c = sx * _stem_top(rig.steer_n as MeshInstance3D) + Vector3(0, -0.02, 0); r = 0.065
+		"levers": c = sx * rig.grip_l.lerp(mid, 0.15); r = 0.065
+		"bars": c = sx * mid.lerp(rig.grip_r, 0.33); r = 0.08
+		"rotor", "caliper":   # the rotor itself (front / rear), the caliper sits on its edge
+			for ro in rig.rotors:
+				var mi: MeshInstance3D = ro.mesh_instance
+				if mi and mi.get_parent() == (rig.wheel_f if spot == "rotor" else rig.wheel_r):
+					var bb := mi.global_transform * mi.get_aabb()
+					c = bb.get_center(); r = maxf(bb.size.x, bb.size.y) * 0.36
+					if spot == "caliper": r *= 1.15
+		"fork":
+			var fl := rig.model.find_child("fork_lower", true, false) as Node3D
+			c = (rig.action_cam.global_position if rig.action_cam else fl.global_position) + Vector3(0, -0.05, 0); r = 0.16
+	return AABB(c - Vector3.ONE * r, Vector3.ONE * 2.0 * r)
+
+## the top of the steerer / stem in the steer mesh (the highest point within 3 cm of the bike's middle plane)
+static func _stem_top(mi: MeshInstance3D) -> Vector3:
+	var best := Vector3(0, -INF, 0)
+	if mi == null or mi.mesh == null: return Vector3.ZERO
+	for si in mi.mesh.get_surface_count():
+		for v in (mi.mesh.surface_get_arrays(si)[Mesh.ARRAY_VERTEX] as PackedVector3Array):
+			if absf(v.z) < 0.03 and v.y > best.y: best = v
+	return best
+
+## a wheelset like a product photo: the pair stood up, turned three-quarters, the second one behind and beside the first
+static func make_wheelset(spec: Dictionary) -> Node3D:
+	var m := WheelGen.build(spec)
+	var root := Node3D.new()
+	for i in 2:
+		var mi := MeshInstance3D.new()
+		mi.mesh = m
+		mi.rotation.y = -0.62
+		mi.position = Vector3(0.36 * i, 0.0, -0.3 * i)
+		root.add_child(mi)
+	return root
+
+## one paintable part alone (BikeBuild.PARTS), cut out of the whole bike built with `build`: every other surface hidden,
+## the picture framed on what's left
+static func make_paint_part(bike_id: String, build: Dictionary, part: String) -> Node3D:
+	var cfg := GameState.bike_config_for(bike_id)
+	var rig := BikeRig.new()
+	rig.load_bike(cfg, build)
+	var targets: Array = (BikeBuild.PARTS[part][1] as Array).duplicate()
+	if part == "stanchions": targets.append(["fork_crown", "gold"])   # a fork model's own crowns + stanchions
+	if part == "crown": targets.append(["fork_crown", "black"])
+	var hide := StandardMaterial3D.new()
+	hide.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	hide.albedo_color = Color(0, 0, 0, 0)
+	var kept := []   # [mesh instance, surface]
+	var crank := rig.model.find_child("crank", true, false)
+	for mi in rig.find_children("*", "MeshInstance3D", true, false):
+		var m := mi as MeshInstance3D
+		var pedal: bool = crank != null and m.get_parent() != null and m.get_parent().get_parent() == crank and m.name != "rotor"
+		var any := false
+		if m.mesh:
+			for i in m.mesh.get_surface_count():
+				var sm := m.mesh.surface_get_material(i)
+				var keep := pedal and part == "saddle"
+				for t in targets:
+					if m.name == t[0] and sm and sm.resource_name == t[1]: keep = true
+				if keep: kept.append([m, i]); any = true
+				else: m.set_surface_override_material(i, hide)
+		if not any and m.material_override != null: m.material_override = hide   # (never hide the node: its children may be kept)
+	rig.set_meta("focus", func():
+		var box := AABB()
+		var first := true
+		for k in kept:
+			var vs: PackedVector3Array = (k[0] as MeshInstance3D).mesh.surface_get_arrays(k[1])[Mesh.ARRAY_VERTEX]
+			var xf: Transform3D = (k[0] as MeshInstance3D).global_transform
+			for i in range(0, vs.size(), maxi(1, vs.size() / 300)):
+				var p: Vector3 = xf * vs[i]
+				if first: box = AABB(p, Vector3.ZERO); first = false
+				else: box = box.expand(p)
+		return box)
+	return rig
+
+## a paint sample: a glossy ball in that paint (colour, shift colour, finish)
+static func make_ball(p: Dictionary) -> Node3D:
+	var mi := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = 0.1; sm.height = 0.2; sm.radial_segments = 48; sm.rings = 24
+	mi.mesh = sm
+	mi.material_override = BikeBuild.paint_material(p)
+	var key := OmniLight3D.new()   # a close soft box: a clear highlight, so gloss / satin / matte / chrome read apart
+	key.position = Vector3(-0.18, 0.26, 0.3)
+	key.light_energy = 2.2; key.omni_range = 1.2; key.light_size = 0.06
+	mi.add_child(key)
+	return mi
+
+## a saddle alone (assets/seats/saddle_<id>.glb; the stock one is saddle_dh)
+static func make_saddle(id: String) -> Node3D:
+	var f := "res://assets/seats/saddle_%s.glb" % ("dh" if id == "stock" else id)
+	return load(f).instantiate() if ResourceLoader.exists(f) else Node3D.new()
+
+## an action camera alone with its gear (lens, housing, mic, top accessory), on its helmet buckle
+static func make_cam(gear: Dictionary) -> Node3D:
+	return ActionCam.build("top", gear)
+
+## the rider's head in `look` (helmet model, hair, helmet cam): a standing rider, posed until the hair has settled;
+## the picture frames the head (`below` m more under it: hair hanging down the back)
+static func make_head(look: Dictionary, below := 0.0) -> Node3D:
+	var r := Rider.new()
+	var t := [0.0]
+	r.set_meta("setup", func():
+		r.set_look(look)
+		r.use_helmet(str(look.get("helmet", "glory")))
+		r.set_style(STAND_POSE))
+	r.set_meta("tick", func(dt: float):
+		t[0] += dt
+		r.update_pose(dt, {"footL": Vector3(0.0, 0.0, -0.13), "footR": Vector3(0.02, 0.0, 0.13),
+			"handL": Vector3(0.02, 0.83, -0.29), "handR": Vector3(0.04, 0.83, 0.29),
+			"v": 0.0, "lean": 0.0, "steer": 0.0, "yawRate": 0.0, "counter": 0.0, "rockRoll": 0.0, "headRoll": 0.0,
+			"absorb": 0.0, "pitch": 0.0, "bodyLevel": 0.85, "attackDrop": 0.0, "pedal": 0.0, "sprint": 0.0,
+			"crank": 0.0, "air": 0.0, "compress": 0.0, "hipShift": 0.0, "t": t[0], "stand": 1.0, "relax": 1.0}))
+	r.set_meta("settle", 36 if below > 0.0 else 3)   # only hanging hair needs time to fall
+	r.set_meta("focus", func():
+		var c: Vector3 = r.head.global_position + Vector3(0, 0.06 - below * 0.5, 0)
+		var e := Vector3(0.12, 0.12 + below * 0.5, 0.12)
+		return AABB(c - e, e * 2.0))
+	return r
+
+const STAND_POSE := {"hipX": 0.17, "hipY": 0.16, "lean": -0.66, "crouch": 0.0, "standPedal": 0.0, "sway": 0.0,
+	"elbowsOut": -0.2, "kneesOut": 0.0, "stance": 0.0, "headTilt": 0.08, "headTurn": 0.0, "hipSway": 0.0}

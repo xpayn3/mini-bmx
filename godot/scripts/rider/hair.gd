@@ -24,7 +24,8 @@ const STYLES := {
 	# gathered at one tie point on the back of the head and hanging from it: a rope of locks that swings (it comes out under a helmet too)
 	"ponytail": {"label": "Ponytail", "len": 0.3, "grav": 9.0, "flutter": 0.6, "bend": 0.1, "hold": 0.15, "hold_n": 2, "short": false, "tie": true},
 	# the same tie point, but plaited: stiffer and heavier, it hangs like a rope and swings less
-	"braid": {"label": "Braid", "len": 0.34, "grav": 10.0, "flutter": 0.2, "bend": 0.4, "hold": 0.2, "hold_n": 3, "short": false, "tie": true},
+	# drawn as one low-poly plait (`_braid`), not strands; it swings from the tie like a tail
+	"braid": {"label": "Braid", "len": 0.42, "grav": 10.0, "flutter": 0.45, "bend": 0.16, "hold": 0.2, "hold_n": 2, "short": false, "tie": true, "plait": true},
 }
 ## the styles the rider menus offer: the rider always wears a helmet, so these are what comes out under the back of it
 ## ("short" = nothing shows)
@@ -56,6 +57,11 @@ var _acc := 0.0
 var _img: Image
 var _tex: ImageTexture
 var _mat: ShaderMaterial
+var _built := false
+var _plait := false              # braid: the strands are hidden, `_braid` draws the plait along the tail's mean line
+var _braid := MeshInstance3D.new()
+var _braid_mat := StandardMaterial3D.new()
+var _strands: ArrayMesh
 
 
 func _init() -> void:
@@ -70,6 +76,15 @@ func _init() -> void:
 	_Q.resize(G * (SEG + 1))
 	_ph.resize(G)
 	_len.resize(G)
+	_braid_mat.vertex_color_use_as_albedo = true
+	_braid_mat.vertex_color_is_srgb = true
+	_braid_mat.roughness = 0.75
+	_braid_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_braid_mat.set_meta("grime_pass", true)
+	_braid.material_override = _braid_mat
+	_braid.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	_braid.visible = false
+	add_child(_braid)
 	set_style("long")
 
 
@@ -80,7 +95,7 @@ func set_color(c: Color) -> void:
 
 func set_style(s: String, helmet := false) -> void:
 	if not STYLES.has(s): s = "long"
-	if s == style and helmet == helmet_mode and mesh != null and mesh.get_surface_count() > 0: return
+	if s == style and helmet == helmet_mode and _built: return
 	style = s
 	helmet_mode = helmet
 	var P: Dictionary = STYLES[style]
@@ -92,8 +107,13 @@ func set_style(s: String, helmet := false) -> void:
 	_bend = P.bend
 	_flutter = P.flutter     # a faint sway, not a flap
 	_tie = bool(P.get("tie", false))
+	_plait = bool(P.get("plait", false))
 	_make_guides(short)
 	_make_strands(short)
+	_strands = mesh
+	mesh = ArrayMesh.new() if _plait else _strands   # a braid: no strands, the plait mesh instead
+	_braid.visible = _plait
+	_built = true
 	_have = false
 
 
@@ -239,6 +259,109 @@ func _process(dt: float) -> void:
 	_img.set_data(SEG + 1, G, false, Image.FORMAT_RGBF, _P.to_byte_array())
 	_tex.update(_img)
 	_mat.set_shader_parameter("head_xf", ht)
+	if _plait:
+		_braid.custom_aabb = custom_aabb
+		_braid.mesh = _plait_mesh(ht)
+
+
+# ---------------------------------------------------------------- the braid
+const PLAIT_LOBES := 13      # lobes down the braid (each one a strand crossing over)
+const PLAIT_SIDES := 6       # low poly: six faces round
+const PLAIT_R := [0.032, 0.017]   # half thickness at the tie / the end (m)
+
+## the braid's centre line: the mean of the tail guides, point by point down the lock
+func _plait_line() -> PackedVector3Array:
+	var line := PackedVector3Array()
+	line.resize(SEG + 1)
+	var n := 0
+	for i in G:
+		if not (helmet_mode or i < G * 6 / 10): continue
+		n += 1
+		for j in SEG + 1: line[j] += _P[i * (SEG + 1) + j]
+	for j in SEG + 1: line[j] /= maxf(1.0, n)
+	return line
+
+## a point on the centre line at f (0 = tie, 1 = end), Catmull-Rom between the sim points
+static func _cr(line: PackedVector3Array, f: float) -> Vector3:
+	var x := clampf(f, 0.0, 1.0) * (line.size() - 1)
+	var i := mini(int(x), line.size() - 2)
+	var t := x - i
+	var p0 := line[maxi(i - 1, 0)]; var p1 := line[i]; var p2 := line[i + 1]; var p3 := line[mini(i + 2, line.size() - 1)]
+	return 0.5 * ((2.0 * p1) + (-p0 + p2) * t + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t * t + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t * t * t)
+
+## the plait as flat-shaded low-poly lobes, alternating left / right and tilted into a chevron, a band at the tie
+## and a little flared tuft at the end. Rebuilt every frame from the swinging tail.
+func _plait_mesh(ht: Transform3D) -> ArrayMesh:
+	var line := _plait_line()
+	var V := []; var N := []; var C := []   # plain Arrays: the lambdas below append to them (packed arrays would be copied)
+	var side_ref: Vector3 = ht.basis.z.normalized()   # the head's left-right: the plait's lobes alternate across it
+	var base := color
+	var tri := func(a: Vector3, b: Vector3, c: Vector3, col: Color, mid: Vector3):
+		var n := (b - a).cross(c - a)
+		if n.length_squared() < 1e-14: return
+		n = n.normalized()
+		if n.dot((a + b + c) / 3.0 - mid) < 0.0: n = -n   # face outward (both sides drawn)
+		V.append_array([a, b, c]); N.append_array([n, n, n]); C.append_array([col, col, col])
+	# rings: [centre, axis, w, h, colour] in order; consecutive rings are joined by quads
+	var tube := func(rings: Array):
+		for r in range(rings.size() - 1):
+			var A: Array = rings[r]; var B: Array = rings[r + 1]
+			var mid: Vector3 = (A[0] + B[0]) * 0.5
+			for k in PLAIT_SIDES:
+				var a0: Vector3 = A[k + 5]; var a1: Vector3 = A[(k + 1) % PLAIT_SIDES + 5]
+				var b0: Vector3 = B[k + 5]; var b1: Vector3 = B[(k + 1) % PLAIT_SIDES + 5]
+				tri.call(a0, b0, a1, B[4], mid); tri.call(a1, b0, b1, B[4], mid)
+	var ring := func(c: Vector3, t: Vector3, w: Vector3, rw: float, rh: float, col: Color, twist: float) -> Array:
+		var h := t.cross(w).normalized()
+		var r := [c, t, rw, rh, col]
+		for k in PLAIT_SIDES:
+			var a := TAU * (float(k) + 0.5) / PLAIT_SIDES + twist
+			r.append(c + w * cos(a) * rw + h * sin(a) * rh)
+		return r
+	var frame := func(f: float) -> Array:   # [point, tangent, width axis]
+		var p := _cr(line, f)
+		var t := (_cr(line, f + 0.02) - _cr(line, f - 0.02)).normalized()
+		var w := (side_ref - t * side_ref.dot(t)).normalized()
+		return [p, t, w]
+	# the tie: a dark band where the plait starts
+	var f0: Array = frame.call(0.0)
+	var band := base.darkened(0.55)
+	var r0: float = PLAIT_R[0]
+	tube.call([ring.call(f0[0] - f0[1] * 0.004, f0[1], f0[2], r0 * 0.75, r0 * 0.75, band, 0.0),
+		ring.call(f0[0] + f0[1] * 0.012, f0[1], f0[2], r0 * 0.75, r0 * 0.75, band, 0.0)])
+	# the lobes: each spans a bit more than its step so they overlap like crossing strands
+	var end_f := 0.9
+	for L in PLAIT_LOBES:
+		var fa := 0.03 + end_f * float(L) / PLAIT_LOBES
+		var fb := 0.03 + end_f * float(L + 1) / PLAIT_LOBES
+		var fm := (fa + fb) * 0.5
+		var s := 1.0 if L % 2 == 0 else -1.0
+		var FA: Array = frame.call(fa - 0.02); var FB: Array = frame.call(fb + 0.02); var FM: Array = frame.call(fm)
+		var r: float = lerpf(PLAIT_R[0], PLAIT_R[1], fm)
+		var w: Vector3 = FM[2]
+		var off: Vector3 = w * s * r * 0.45                     # this strand crosses from one side...
+		var lean: Vector3 = (FM[1] + w * s * 0.55).normalized()  # ...tilted: the chevron of a plait
+		var shade := base.lightened(0.08) if L % 2 == 0 else base.darkened(0.08)
+		var lw := w - lean * w.dot(lean)
+		lw = lw.normalized()
+		tube.call([ring.call(FA[0] + off * 0.3, lean, lw, r * 0.45, r * 0.35, shade, 0.0),
+			ring.call(FM[0] + off, lean, lw, r * 1.0, r * 0.72, shade, 0.0),
+			ring.call(FB[0] + off * 0.3, lean, lw, r * 0.45, r * 0.35, shade, 0.0)])
+	# the end: a small band, then a flared tuft to a point
+	var fe: Array = frame.call(end_f + 0.03)
+	var r1: float = PLAIT_R[1]
+	var tip: Vector3 = _cr(line, 1.0) + (fe[1] as Vector3) * 0.02
+	tube.call([ring.call(fe[0], fe[1], fe[2], r1 * 0.6, r1 * 0.6, band, 0.0),
+		ring.call(fe[0] + fe[1] * 0.01, fe[1], fe[2], r1 * 0.6, r1 * 0.6, band, 0.0),
+		ring.call(fe[0] + fe[1] * 0.025, fe[1], fe[2], r1 * 1.25, r1 * 1.0, base, 0.5),
+		ring.call(tip.lerp(fe[0], 0.25), fe[1], fe[2], r1 * 0.8, r1 * 0.6, base.darkened(0.05), 0.2),
+		ring.call(tip, fe[1], fe[2], r1 * 0.05, r1 * 0.05, base.darkened(0.1), 0.0)])
+	var arr := []
+	arr.resize(Mesh.ARRAY_MAX)
+	arr[Mesh.ARRAY_VERTEX] = PackedVector3Array(V); arr[Mesh.ARRAY_NORMAL] = PackedVector3Array(N); arr[Mesh.ARRAY_COLOR] = PackedColorArray(C)
+	var am := ArrayMesh.new()
+	if V.size() > 0: am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+	return am
 
 
 ## the solid things hair rests on, as [world centre, radius]: the neck, spheres down the spine (back, chest, hips)

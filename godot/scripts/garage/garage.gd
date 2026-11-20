@@ -90,7 +90,15 @@ const VIEWS := {
 	"drive": [-1.3, 8.0, 1.5, Vector3(-0.3, 0.35, 0)],   # the drive side: chainring + cassette
 	"rider": [0.0, 7.0, 4.3, Vector3(-0.05, 1.0, 0)],
 	"kit": [0.2, 6.0, 4.2, Vector3(0.3, 0.85, 0.6)],
+	"show": [0.3, 5.0, 4.6, Vector3(0, 0.15, 0)],   # the showroom: the whole bike above the frame strip
 }
+
+## the garage opens as a showroom: the bike, a strip of frames, BACK / EDIT / RIDE. EDIT opens the customizer
+## (category tabs, options card, build card); its BACK comes back here.
+var editing := true
+var _edit_only: Array[Control] = []
+var _show_only: Array[Control] = []
+var _show_strip: PicStrip
 
 func _ready() -> void:
 	build = BikeBuild.load_build()
@@ -122,6 +130,7 @@ func _ready() -> void:
 	var first := tab
 	tab = ""   # so _set_tab frames the camera on the first page
 	_set_tab(env_tab if env_tab != "" and _has_tab(env_tab) else first)
+	if mode == "bike": _set_edit(env_tab != "", false)   # tests that name a tab go straight to the customizer
 	if Env.s("BMX_TYRE_PROBE") != "":
 		_tyre_probe.call_deferred()
 	var cv := Env.s("BMX_GARAGE_CAM").split(",", false)   # tests: "orbit_rad,pitch_deg,dist"
@@ -759,8 +768,8 @@ func _unhandled_input(e: InputEvent) -> void:
 		orbit_t -= e.relative.x * 0.008
 		pitch_t = clampf(pitch_t + e.relative.y * 0.2, -2, 70)
 	elif e.is_action_pressed("pause"):
-		_close(false)
-	elif e is InputEventKey and e.pressed and not e.echo and (e.keycode == KEY_Q or e.keycode == KEY_E):
+		_back()
+	elif editing and e is InputEventKey and e.pressed and not e.echo and (e.keycode == KEY_Q or e.keycode == KEY_E):
 		_step_tab(-1 if e.keycode == KEY_Q else 1)
 
 # ================================================================ UI
@@ -852,6 +861,7 @@ func _build_ui() -> void:
 	var bar := HBoxContainer.new()
 	bar.add_theme_constant_override("separation", Tokens.S1)
 	head.add_child(bar)
+	_edit_only.append(bar)
 	bar.add_child(UITheme.key_cap("LB" if Settings.pad_active else "Q"))
 	var grp := ButtonGroup.new()
 	for t in _tabs():
@@ -868,6 +878,7 @@ func _build_ui() -> void:
 	panel.offset_left = EDGE; panel.offset_right = EDGE + Tokens.CARD_W
 	panel.offset_top = EDGE + Tokens.H_CHIP + Tokens.S6 + Tokens.S5; panel.offset_bottom = -(EDGE + Tokens.H_BTN + Tokens.S5)
 	root.add_child(panel)
+	_edit_only.append(panel)
 	var sc := ScrollContainer.new()
 	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	SmoothScroll.attach(sc)
@@ -877,16 +888,75 @@ func _build_ui() -> void:
 	body.add_theme_constant_override("separation", Tokens.S3)
 	sc.add_child(body)
 	# the build card, top right: name + performance meters (the garage only)
-	if mode == "bike": _build_card(root)
+	if mode == "bike":
+		_build_card(root)
+		_showroom(root)
 	_bottom_bar(root)
 	# Xbox: D-pad / stick between rows, left / right change a value, A press, B back, LB / RB categories
-	PadNav.attach(root, {"tabs": _step_tab, "back": _close.bind(false)})
+	PadNav.attach(root, {"tabs": func(d): if editing: _step_tab(d), "back": _back})
+
+## the showroom's frame strip: a big picture of every frame with the garage build, bottom centre
+func _showroom(root: Control) -> void:
+	var card := PanelContainer.new()
+	card.add_theme_stylebox_override("panel", StyleBoxEmpty.new())   # no panel: just the cards over the room
+	card.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	card.offset_left = EDGE; card.offset_right = -EDGE
+	card.offset_bottom = -(EDGE + Tokens.H_BTN + Tokens.S5); card.offset_top = card.offset_bottom - SHOW_H
+	root.add_child(card)
+	_show_only.append(card)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", Tokens.S2)
+	card.add_child(col)
+	_show_strip = PicStrip.new(Tokens.S3)
+	_show_strip.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_show_strip.row.alignment = BoxContainer.ALIGNMENT_CENTER
+	_show_strip.row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	col.add_child(_show_strip)
+	_fill_showroom()
+
+const SHOW_H := 250.0
+const SHOW_CARD := Vector2(330, 236)
+
+func _fill_showroom() -> void:
+	for c in _show_strip.row.get_children(): c.queue_free()
+	var items := []
+	for id in GameState.BIKES:
+		if not GameState.BIKES[id].get("garage", false): continue
+		items.append({"key": id, "brand": "", "name": String(GameState.BIKES[id].label), "spec": "",
+			"thumb": "bike|%s|%s" % [id, _build_sig()], "make": PartThumbs.make_bike.bind(id), "view": Vector3(0.45, 0.2, 1.0)})
+	_cards(items, GameState.bike_id, func(v):
+		if v == GameState.bike_id: return
+		BikeBuild.save_build(build)
+		GameState.bike_id = v; GameState.save()
+		_rebuild_bike()
+		_update_stats()
+		_fill_showroom.call_deferred(), false, _show_strip, SHOW_CARD)
+
+## showroom (false) / customizer (true)
+func _set_edit(on: bool, open_page := true) -> void:
+	editing = on
+	for c in _edit_only: if is_instance_valid(c): c.visible = on
+	for c in _show_only: if is_instance_valid(c): c.visible = not on
+	if on and open_page:
+		tab = ""
+		_set_tab("paint")
+	elif not on:
+		var v: Array = VIEWS["show"]
+		orbit_t = v[0] + round((orbit_t - v[0]) / TAU) * TAU
+		pitch_t = v[1]; dist_t = v[2]; focus_t = v[3]
+		auto_spin = true
+
+## BACK / Esc / pad B: the customizer goes back to the showroom, the showroom leaves the garage
+func _back() -> void:
+	if mode == "bike" and editing: _set_edit(false)
+	else: _close(false)
 
 func _build_card(root: Control) -> void:
 	var sp := PanelContainer.new()
 	sp.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	sp.offset_left = -(EDGE + BUILD_W); sp.offset_right = -EDGE; sp.offset_top = EDGE
 	root.add_child(sp)
+	_edit_only.append(sp)
 	stats_box = VBoxContainer.new()
 	stats_box.add_theme_constant_override("separation", Tokens.S2)
 	sp.add_child(stats_box)
@@ -928,10 +998,12 @@ func _bottom_bar(root: Control) -> void:
 		var b := UITheme.make_button(text, cb, kind, Tokens.T_XL if kind == "primary" else Tokens.T_LG)
 		b.custom_minimum_size.y = Tokens.H_BTN
 		return b
-	bot.add_child(mk.call("BACK", func(): _close(false)))
+	bot.add_child(mk.call("BACK", _back))
 	if mode == "bike":
-		bot.add_child(mk.call("STOCK", func(): build = BikeBuild.default_build(); _rebuild_bike(); _set_tab(tab); _update_stats()))
-		bot.add_child(mk.call("RANDOMISE", _randomise))
+		var stock: Button = mk.call("STOCK", func(): build = BikeBuild.default_build(); _rebuild_bike(); _set_tab(tab); _update_stats())
+		var rnd: Button = mk.call("RANDOMISE", _randomise)
+		bot.add_child(stock); bot.add_child(rnd)
+		_edit_only.append_array([stock, rnd])
 	var spacer := Control.new(); spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL; bot.add_child(spacer)
 	var pill := PanelContainer.new()
 	var ps := UITheme.card_style(Tokens.PILL, Tokens.R_PILL, Tokens.S4); ps.content_margin_top = Tokens.S2; ps.content_margin_bottom = Tokens.S2
@@ -950,9 +1022,16 @@ func _bottom_bar(root: Control) -> void:
 		hints.add_child(UITheme.key_cap(h[0]))
 		hints.add_child(UITheme.caption(h[1].to_upper(), INK))
 	bot.add_child(pill)
+	if mode == "bike": _edit_only.append(pill)
 	var spacer2 := Control.new(); spacer2.size_flags_horizontal = Control.SIZE_EXPAND_FILL; bot.add_child(spacer2)
 	if mode == "bike":
-		bot.add_child(mk.call("SAVE", func(): BikeBuild.save_build(build); _toast("SAVED")))
+		var ed: Button = mk.call("EDIT", func(): _set_edit(true))
+		ed.custom_minimum_size.x = RIDE_W
+		bot.add_child(ed)
+		_show_only.append(ed)
+		var sv: Button = mk.call("SAVE", func(): BikeBuild.save_build(build); _toast("SAVED"))
+		bot.add_child(sv)
+		_edit_only.append(sv)
 	var ride: Button = mk.call("SAVE & RIDE" if mode == "bike" else "RIDE", func(): _close(true), "primary")
 	ride.custom_minimum_size.x = RIDE_W
 	bot.add_child(ride)
@@ -1151,54 +1230,150 @@ func _swatches(cur: String, cb: Callable) -> void:
 
 # ---------------------------------------------------------------- pages
 func _paint_page() -> void:
-	_h("FRAME")
-	var frames := []
-	for id in GameState.BIKES:
-		if GameState.BIKES[id].get("garage", false): frames.append([id, GameState.BIKES[id].label])
-	_choice("Frame", frames, GameState.bike_id, func(v):
-		if v == GameState.bike_id: return
-		GameState.bike_id = v; GameState.save()
-		_rebuild_bike(); _set_tab("paint"))
+	# (the frame is picked in the showroom, before EDIT)
+	var P: Dictionary = build.paint[part]
+	var F: Dictionary = BikeBuild.FINISHES.get(P.finish, BikeBuild.FINISHES.gloss)
+	# the selected part's paint as a big material ball, its name, finish and colour code
+	var hero := HBoxContainer.new()
+	hero.add_theme_constant_override("separation", Tokens.S3)
+	var ball := _ball_pic(P, Vector2(150, 120))
+	hero.add_child(ball)
+	var info := VBoxContainer.new()
+	info.alignment = BoxContainer.ALIGNMENT_CENTER
+	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	info.add_theme_constant_override("separation", 0)
+	info.add_child(UITheme.caption("PAINTING", SUB, Tokens.T_XS))
+	var nm := UITheme.display(String(BikeBuild.PARTS[part][0]).to_upper(), Tokens.T_2XL, INK, Tokens.SLANT_TITLE)
+	nm.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	info.add_child(nm)
+	info.add_child(UITheme.caption("%s  ·  #%s" % [String(F.label).to_upper(), _hex(P.color).to_upper()], SUB, Tokens.T_XS))
+	if part in ["frame", "rear"]:
+		var copy := UITheme.make_button("APPLY TO WHOLE FRAME", func():
+			for k in ["frame", "rear"]: build.paint[k] = P.duplicate()
+			_changed(); _set_tab("paint"), "link", Tokens.T_SM)
+		copy.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		info.add_child(copy)
+	hero.add_child(info)
+	body.add_child(hero)
+	# the parts: a strip of tiles, each with its own paint as a little ball
 	_h("PART")
-	var g := GridContainer.new()
-	g.columns = 2
-	g.add_theme_constant_override("h_separation", Tokens.S2)
-	g.add_theme_constant_override("v_separation", Tokens.S2)
+	var ps := PicStrip.new(Tokens.S2)
 	var grp := ButtonGroup.new()
 	for k in BikeBuild.PARTS:
-		var b := Button.new()
-		b.text = BikeBuild.PARTS[k][0]; b.toggle_mode = true; b.button_group = grp
-		b.button_pressed = k == part
-		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.add_theme_font_size_override("font_size", Tokens.T_MD)
-		b.pressed.connect(func(): part = k; _set_tab("paint"))
-		g.add_child(b)
-	body.add_child(g)
-	var P: Dictionary = build.paint[part]
+		var kp: Dictionary = build.paint[k]
+		var b := _tile(String(BikeBuild.PARTS[k][0]), _part_pic(k, Vector2(0, 74)), Vector2(132, 116), k == part, grp)
+		b.pressed.connect(ps.guard(func(): part = k; _set_tab("paint")))
+		ps.add(b, k == part)
+	body.add_child(ps)
 	_h("COLOUR")
-	_swatches(P.color, func(h): P.color = h)
+	# colours: a flat grid of squares, the picked one carries a dot
+	var g := GridContainer.new()
+	g.columns = 8
+	g.add_theme_constant_override("h_separation", Tokens.S2)
+	g.add_theme_constant_override("v_separation", Tokens.S2)
+	var cur := _hex(P.color)
+	for hex in SWATCHES:
+		var c := Color(hex)
+		var on: bool = hex == cur
+		var sb := Button.new()
+		sb.custom_minimum_size = Vector2(0, 40)
+		sb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		sb.tooltip_text = "#" + hex.to_upper()
+		sb.add_theme_stylebox_override("normal", UITheme.marked(c, INK, SIDE_BOTTOM, Tokens.R_SM, 0) if on else UITheme.box(c, Tokens.R_SM, 0))
+		sb.add_theme_stylebox_override("hover", UITheme.marked(c.lightened(0.12), Tokens.ACCENT, SIDE_BOTTOM, Tokens.R_SM, 0))
+		sb.add_theme_stylebox_override("pressed", UITheme.marked(c, Tokens.ACCENT, SIDE_BOTTOM, Tokens.R_SM, 0))
+		sb.add_theme_stylebox_override("focus", UITheme.marked(Tokens.CLEAR, Tokens.INK, SIDE_TOP, Tokens.R_SM, 0))
+		if on:   # a round mark in the middle, dark on light colours
+			var dot := Panel.new()
+			var ds := StyleBoxFlat.new()
+			ds.bg_color = INK if c.get_luminance() > 0.6 else Color.WHITE
+			ds.set_corner_radius_all(6)
+			dot.add_theme_stylebox_override("panel", ds)
+			dot.set_anchors_preset(Control.PRESET_CENTER)
+			dot.offset_left = -6; dot.offset_right = 6; dot.offset_top = -6; dot.offset_bottom = 6
+			dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			sb.add_child(dot)
+		sb.pressed.connect(func(): P.color = hex; _changed(); _set_tab("paint"))
+		g.add_child(sb)
+	body.add_child(g)
 	_color("Custom colour", P.color, func(h): P.color = h)
+	# finishes: the same colour as a ball in every finish
 	_h("FINISH")
-	var fg := GridContainer.new()
-	fg.columns = 4
-	fg.add_theme_constant_override("h_separation", Tokens.S2)
-	fg.add_theme_constant_override("v_separation", Tokens.S2)
+	var fs := GridContainer.new()   # all of them in view: 4 x 2
+	fs.columns = 4
+	fs.add_theme_constant_override("h_separation", Tokens.S2)
+	fs.add_theme_constant_override("v_separation", Tokens.S2)
 	var fgrp := ButtonGroup.new()
 	for f in BikeBuild.FINISHES:
-		var b := Button.new()
-		b.text = BikeBuild.FINISHES[f].label; b.toggle_mode = true; b.button_group = fgrp
-		b.button_pressed = f == P.finish
+		var fp := P.duplicate()
+		fp.finish = f
+		var b := _tile(String(BikeBuild.FINISHES[f].label), _ball_pic(fp, Vector2(0, 66)), Vector2(0, 104), f == P.finish, fgrp)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.add_theme_font_size_override("font_size", Tokens.T_MD)
 		b.pressed.connect(func(): P.finish = f; _changed(); _set_tab("paint"))
-		fg.add_child(b)
-	body.add_child(fg)
+		fs.add_child(b)
+	body.add_child(fs)
 	if P.finish == "pearl":
 		_color("Shift colour (at the edges)", P.color2, func(h): P.color2 = h)
-	var copy := UITheme.make_button("Copy this paint to the whole frame", func():
-		for k in ["frame", "rear"]: build.paint[k] = P.duplicate()
-		_changed(), "chip", Tokens.T_MD)
-	body.add_child(copy)
+
+## "#E8432E" / "e8432e" -> "e8432e"
+static func _hex(c) -> String:
+	return String(c).trim_prefix("#").to_lower()
+
+## a picture of one paintable part alone, in its paint (re-rendered when that part's paint or the bike's shape changes)
+func _part_pic(k: String, sz: Vector2) -> TextureRect:
+	var pic := TextureRect.new()
+	pic.custom_minimum_size = sz
+	pic.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	pic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	pic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var shape: Dictionary = build.duplicate(true)
+	shape.erase("paint"); shape.erase("logos"); shape.erase("name")
+	var key := "ppart|%s|%s|%s|%s" % [GameState.bike_id, k, JSON.stringify(build.paint[k]), str(JSON.stringify(shape).hash())]
+	var ref: WeakRef = weakref(pic)
+	thumbs.request(key, PartThumbs.make_paint_part.bind(GameState.bike_id, build.duplicate(true), k), Vector3(0.3, 0.2, 1.0), func(t):
+		var pr = ref.get_ref()
+		if pr: pr.texture = t)
+	return pic
+
+## a rendered ball in this paint (colour, shift colour, finish), cached by the paint
+func _ball_pic(p: Dictionary, sz: Vector2) -> TextureRect:
+	var pic := TextureRect.new()
+	pic.custom_minimum_size = sz
+	pic.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	pic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	pic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var ref: WeakRef = weakref(pic)
+	thumbs.request("ball|%s|%s|%s" % [p.color, p.get("color2", ""), p.finish], PartThumbs.make_ball.bind(p), Vector3(0.35, 0.3, 1.0), func(t):
+		var pr = ref.get_ref()
+		if pr: pr.texture = t)
+	return pic
+
+## a small picked-or-not tile: a picture over a name (paint parts, finishes)
+func _tile(label: String, pic: Control, sz: Vector2, on: bool, grp: ButtonGroup) -> Button:
+	var b := Button.new()
+	b.toggle_mode = true; b.button_group = grp; b.button_pressed = on
+	b.custom_minimum_size = sz
+	b.tooltip_text = label
+	b.add_theme_stylebox_override("normal", UITheme.marked(Tokens.ACCENT_TINT, Tokens.ACCENT, SIDE_BOTTOM, Tokens.R_LG, 0) if on else UITheme.box(Tokens.PAGE, Tokens.R_LG, 0))
+	b.add_theme_stylebox_override("hover", UITheme.marked(Tokens.ACCENT_TINT if on else Tokens.FILL, Tokens.ACCENT if on else Tokens.LINE, SIDE_BOTTOM, Tokens.R_LG, 0))
+	b.add_theme_stylebox_override("pressed", UITheme.marked(Tokens.ACCENT_TINT, Tokens.ACCENT, SIDE_BOTTOM, Tokens.R_LG, 0))
+	b.add_theme_stylebox_override("focus", UITheme.marked(Color(Tokens.INK, 0.06), Tokens.INK, SIDE_BOTTOM, Tokens.R_LG, 0))
+	var col := VBoxContainer.new()
+	col.set_anchors_preset(Control.PRESET_FULL_RECT)
+	col.offset_left = Tokens.S1; col.offset_right = -Tokens.S1; col.offset_top = Tokens.S1; col.offset_bottom = -Tokens.S2
+	col.add_theme_constant_override("separation", 0)
+	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	col.add_child(pic)
+	var nm := UITheme.caption(label.to_upper(), INK, Tokens.T_XS)
+	nm.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	nm.clip_text = true
+	nm.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	nm.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	col.add_child(nm)
+	b.add_child(col)
+	return b
 
 func _logos_page() -> void:
 	_h("SPOT")
@@ -1345,16 +1520,12 @@ func _wheels_page() -> void:
 
 ## part cards with a picture of the part alone (rendered by PartThumbs), brand, name and a spec line,
 ## two to a row; the fitted one is outlined. items: [{key, brand, name, spec, thumb (cache key), make, view}]
-func _cards(items: Array, current: String, cb: Callable) -> void:
-	var g := GridContainer.new()
-	g.columns = 2
-	g.add_theme_constant_override("h_separation", Tokens.S3)
-	g.add_theme_constant_override("v_separation", Tokens.S3)
+func _cards(items: Array, current: String, cb: Callable, bike := true, into: PicStrip = null, tile := Vector2.ZERO) -> void:
+	var g := into if into else PicStrip.new(Tokens.S3)   # one slidable row: drag / wheel / focus moves along it
 	for it in items:
 		var on: bool = it.key == current
 		var b := Button.new()
-		b.custom_minimum_size.y = Tokens.CARD_TILE_H
-		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.custom_minimum_size = tile if tile != Vector2.ZERO else Vector2(Tokens.CARD_TILE_W, Tokens.CARD_TILE_H)
 		b.tooltip_text = "%s %s" % [it.brand, it.name]
 		# flat tiles: grey at rest, lighter on hover; the fitted one is yellow-washed with a yellow bar
 		var rest := UITheme.marked(Tokens.ACCENT_TINT, Tokens.ACCENT, SIDE_BOTTOM, Tokens.R_LG, 0) if on else UITheme.box(Tokens.PAGE, Tokens.R_LG, 0)
@@ -1369,6 +1540,7 @@ func _cards(items: Array, current: String, cb: Callable) -> void:
 		col.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		var pic := TextureRect.new()
 		pic.custom_minimum_size.y = Tokens.CARD_THUMB_H
+		if tile != Vector2.ZERO: pic.size_flags_vertical = Control.SIZE_EXPAND_FILL   # big tiles: the picture takes the room
 		pic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		pic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1377,7 +1549,7 @@ func _cards(items: Array, current: String, cb: Callable) -> void:
 		thumbs.request(it.thumb, it.make, it.view, func(t):
 			var pr = pic_ref.get_ref()
 			if pr: pr.texture = t)
-		col.add_child(UITheme.caption(String(it.brand), SUB, Tokens.T_XS))
+		if String(it.brand) != "": col.add_child(UITheme.caption(String(it.brand), SUB, Tokens.T_XS))
 		var nm := UITheme.display(String(it.name).to_upper(), Tokens.T_LG)
 		nm.clip_text = true
 		nm.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
@@ -1385,7 +1557,7 @@ func _cards(items: Array, current: String, cb: Callable) -> void:
 		var sp := UITheme.text(String(it.spec), SUB, Tokens.T_XS)
 		sp.clip_text = true
 		sp.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-		col.add_child(sp)
+		if String(it.spec) != "": col.add_child(sp)
 		b.add_child(col)
 		if on:
 			var tag := UITheme.display("FITTED", Tokens.T_XS, INK, 0.0)
@@ -1394,9 +1566,41 @@ func _cards(items: Array, current: String, cb: Callable) -> void:
 			tag.add_theme_stylebox_override("normal", ts)
 			tag.position = Vector2(Tokens.S3, Tokens.S3)
 			b.add_child(tag)
-		b.pressed.connect(func(): cb.call(it.key); _changed(); _set_tab(tab))
-		g.add_child(b)
-	body.add_child(g)
+		b.pressed.connect(g.guard(func():
+			cb.call(it.key)
+			if bike: _changed()
+			if into == null: _set_tab(tab)))
+		g.add(b, on)
+	if into == null: body.add_child(g)
+
+## [id, label] options as picture cards. `make(id)` builds the picture's subject with that option; `view` = the camera
+## direction (or a Dictionary id -> direction, "" = the rest); `tag` + id = the picture's cache key
+func _pic_cards(opts: Array, current: String, tag: String, make: Callable, view, cb: Callable, bike := true) -> void:
+	var items := []
+	for o in opts:
+		var id := str(o[0])
+		items.append({"key": id, "brand": "", "name": String(o[1]), "spec": "", "thumb": tag + "|" + id,
+			"make": make.bind(id), "view": view.get(id, view.get("", Vector3.ONE)) if view is Dictionary else view})
+	_cards(items, current, cb, bike)
+
+## the stock bike with `path` (e.g. "bars.stem") set to id, as a close-up of `spot` (PartThumbs.make_bike_spot)
+func _spot_make(id: String, path: String, spot: String) -> Node3D:
+	var tmp: Dictionary = build.duplicate(true)
+	var k := path.split(".")
+	if not tmp.has(k[0]): tmp[k[0]] = {}
+	tmp[k[0]][k[1]] = id
+	if path == "camera.mount": spot = "fork" if id == "fork" else "bars"
+	return PartThumbs.make_bike_spot(tmp, spot)
+
+## the cache key part for pictures of the whole bike: they change with the build
+func _build_sig() -> String:
+	return str(JSON.stringify(build).hash())
+
+## the action cam with its gear row `gk` set to id (the rest as in `gear`)
+static func _cam_make(id: String, gk: String, gear: Dictionary) -> Node3D:
+	var g := gear.duplicate()
+	g[gk] = id
+	return PartThumbs.make_cam(g)
 
 func _bars_page() -> void:
 	var B: Dictionary = build.bars
@@ -1422,31 +1626,43 @@ func _bars_page() -> void:
 		_choice("Rise", Handlebar.RISES.map(func(r): return [r, "%d mm" % r if r > 0 else "Flat"]), int(B.rise), func(v): B.rise = v; custom.call())
 		_choice("Material", Handlebar.MATERIALS, B.material, func(v): B.material = v; custom.call())
 	_note("Wide bars steer slower but steadier; narrow bars turn quicker. Alloy bars take the bars / stem colour from Paint.")
-	_choice("Stem", BikeBuild.STEMS, str(B.get("stem", "stock")), func(v): B.stem = v)
+	_h("STEM")
+	_pic_cards(BikeBuild.STEMS, str(B.get("stem", "stock")), "stem|" + _build_sig(), _spot_make.bind("bars.stem", "stem"),
+		Vector3(0.55, 0.85, 0.75), func(v): B.stem = v)
 	_h("SEAT")
 	var SE: Dictionary = build.seat
-	_choice("Saddle", BikeBuild.SADDLES, str(SE.get("model", "stock")), func(v): SE.model = v)
+	_pic_cards(BikeBuild.SADDLES, str(SE.get("model", "stock")), "saddle", PartThumbs.make_saddle,
+		Vector3(0.45, 0.6, 1.0), func(v): SE.model = v)
 	_choice("Seat post", BikeBuild.POSTS, str(SE.get("post", "stock")), func(v): SE.post = v; _set_tab("bars"))
 	if str(SE.get("post", "stock")) == "dropper":
 		_slide("Post height", 0, 200, 10, float(SE.get("post_h", 0.0)) * 1000.0, "mm", func(v): SE.post_h = float(v) / 1000.0)
 	_note("The dropper stands the saddle up along the seat tube (the rider follows). Saddle colour is in Paint > Saddle & pedals.")
 	_h("ACTION CAM")
 	if not build.has("camera"): build.camera = {"mount": "none"}.merged(ActionCam.GEAR_DEFAULT)
-	_choice("Mount", ActionCam.BIKE_MOUNTS, str(build.camera.get("mount", "none")), func(v): build.camera.mount = v)
+	_pic_cards(ActionCam.BIKE_MOUNTS, str(build.camera.get("mount", "none")), "bikecam|" + _build_sig(),
+		_spot_make.bind("camera.mount", "bars"), {"": Vector3(0.75, 0.6, 0.75), "fork": Vector3(0.7, 0.15, 1.0)},
+		func(v): build.camera.mount = v)
+	var gear: Dictionary = ActionCam.gear_of(build.camera)
 	for r in ActionCam.GEAR_ROWS:
 		var gk: String = r[0]
-		_choice(r[1], r[2], str(build.camera.get(gk, ActionCam.GEAR_DEFAULT[gk])), func(v): build.camera[gk] = v)
+		_h(String(r[1]).to_upper())
+		_pic_cards(r[2], str(build.camera.get(gk, ActionCam.GEAR_DEFAULT[gk])), "cam|%s|%s" % [gk, ActionCam.gear_sig(gear)],
+			_cam_make.bind(gk, gear), Vector3(1.0, 0.45, 0.75), func(v): build.camera[gk] = v)
 	_note("An action camera on the bike: the Bike cam view (C) looks out of it. The helmet camera is picked in the Rider room's Kit tab.")
 
 func _brakes_page() -> void:
 	var S: Dictionary = build.suspension
 	_h("DISC BRAKES")
-	_choice("Rotors", BikeBuild.ROTORS, str(S.get("rotor", "stock")), func(v): S.rotor = v)
-	_choice("Rear caliper", BikeBuild.REAR_CALIPERS, str(S.get("rear_caliper", "stock")), func(v): S.rear_caliper = v)
+	_pic_cards(BikeBuild.ROTORS, str(S.get("rotor", "stock")), "rotor|" + _build_sig(), _spot_make.bind("suspension.rotor", "rotor"),
+		Vector3(0.15, 0.2, -1.0), func(v): S.rotor = v)
+	_h("REAR CALIPER")
+	_pic_cards(BikeBuild.REAR_CALIPERS, str(S.get("rear_caliper", "stock")), "caliper|" + _build_sig(),
+		_spot_make.bind("suspension.rear_caliper", "caliper"), Vector3(-0.15, 0.3, -1.0), func(v): S.rear_caliper = v)
 	_note("Rotors fit every frame. The front caliper comes with the fork (Shocks tab); the Tusk and Fizz rear calipers fit the RUNOUT's rear triangle, the new frames keep their own.")
 	_h("LEVERS")
 	var B: Dictionary = build.bars
-	_choice("Brake levers", BikeBuild.LEVERS, str(B.get("levers", "stock")), func(v): B.levers = v)
+	_pic_cards(BikeBuild.LEVERS, str(B.get("levers", "stock")), "levers|" + _build_sig(), _spot_make.bind("bars.levers", "levers"),
+		Vector3(0.65, 0.85, -0.55), func(v): B.levers = v)
 
 func _susp_page() -> void:
 	var S: Dictionary = build.suspension
@@ -1487,7 +1703,8 @@ func _wheel_cards(models: Dictionary, current: String, apply: Callable, spec_lin
 		var spec := BikeBuild.wheel_spec(tmp, false)
 		items.append({"key": k, "brand": m.brand, "name": _model_name(m.label, m.brand),
 			"spec": spec_line.call(m), "thumb": "%s|%s|%s" % [kind, k, JSON.stringify(spec)],
-			"make": PartThumbs.make_wheel.bind(spec, 0.3 if kind == "tyre" else 0.0), "view": Vector3(0.25, 0.75, 1.0) if kind == "tyre" else Vector3(0.3, 0.12, 1.0)})
+			"make": PartThumbs.make_wheel.bind(spec, 0.3) if kind == "tyre" else PartThumbs.make_wheelset.bind(spec),
+			"view": Vector3(0.25, 0.75, 1.0) if kind == "tyre" else Vector3(0.05, 0.12, 1.0)})
 	_cards(items, current, func(k): apply.call(build, k))
 
 func _drive_page() -> void:
@@ -1588,11 +1805,15 @@ func _kit_page() -> void:
 		_h(g[0].to_upper())
 		if g[0] == "Helmet":
 			body.add_child(UITheme.text("Model (the textured ones come with their goggles)", SUB, Tokens.T_XS))
-			body.add_child(RiderPanels.helmet_picker(RiderPanels.helmet_choice(look), func(id):
-				RiderPanels.helmet_set(look, id); _set_look(look); _set_tab("kit")))
+			var hl := []
+			for hid in Rider.HELMETS: hl.append([hid, String(Rider.HELMETS[hid][0])])
+			_pic_cards(hl, RiderPanels.helmet_choice(look), "head|helm|%s|%s" % [look.shell, look.peak],
+				_head_make.bind(look, "helmet", 0.0, {"camMount": "none", "hairStyle": "short"}), Vector3(1.0, 0.25, 0.75), func(id):
+				RiderPanels.helmet_set(look, id); _set_look(look), false)
 			body.add_child(UITheme.text("Hair style", SUB, Tokens.T_XS))
-			body.add_child(RiderPanels.hair_style_picker(str(look.hairStyle), func(id):
-				look.hairStyle = id; _set_look(look); _set_tab("kit")))
+			_pic_cards(Hair.HELMET_STYLES, str(look.hairStyle), "head|hair|%s|%s" % [look.helmet, look.hair],
+				_head_make.bind(look, "hairStyle", 0.22, {"camMount": "none"}), Vector3(-1.0, 0.2, 0.55), func(id):
+				look.hairStyle = id; _set_look(look), false)
 		if g[0] == "Kit":
 			body.add_child(UITheme.text("Knee pads design", SUB, Tokens.T_XS))
 			body.add_child(RiderPanels.pad_style_picker(str(look.padStyle), func(id):
@@ -1629,13 +1850,26 @@ func _kit_page() -> void:
 	# the helmet camera: where it sits, which camera, lens, housing, mic, top accessory
 	_h("ACTION CAM")
 	body.add_child(UITheme.text("Mount (the Helmet camera view looks out of it)", SUB, Tokens.T_XS))
-	body.add_child(RiderPanels.cam_mount_picker(str(look.get("camMount", "top")), func(id):
-		look.camMount = id; _set_look(look); _set_tab("kit")))
+	_pic_cards(ActionCam.HELMET_MOUNTS, str(look.get("camMount", "top")), "head|cam|%s|%s" % [look.helmet, ActionCam.gear_sig(ActionCam.gear_from_look(look))],
+		_head_make.bind(look, "camMount", 0.0, {"hairStyle": "short"}), Vector3(0.75, 0.45, -1.0), func(id):
+		look.camMount = id; _set_look(look), false)
+	var hgear := ActionCam.gear_from_look(look)
 	for r in ActionCam.GEAR_ROWS:
-		var lk: String = ActionCam.GEAR_LOOK[r[0]]
-		_choice(r[1], r[2], str(look.get(lk, ActionCam.GEAR_DEFAULT[r[0]])), func(v): look[lk] = v; _set_look(look), false)
+		var gk: String = r[0]
+		var lk: String = ActionCam.GEAR_LOOK[gk]
+		body.add_child(UITheme.text(r[1], SUB, Tokens.T_XS))
+		_pic_cards(r[2], str(look.get(lk, ActionCam.GEAR_DEFAULT[gk])), "cam|%s|%s" % [gk, ActionCam.gear_sig(hgear)],
+			_cam_make.bind(gk, hgear), Vector3(1.0, 0.45, 0.75), func(v): look[lk] = v; _set_look(look), false)
 	_note("Lens mods change the Helmet view: the Max Lens Mod is wider. The Light Mod lights the trail at night.")
 	body.add_child(UITheme.make_button("Reset kit", func(): _set_look(Rider.DEFAULT_LOOK.duplicate()); _set_tab("kit"), "chip", Tokens.T_MD))
+
+## the rider's head for a picture: `look` with `key` = id (and `extra` keys) set
+static func _head_make(id: String, look: Dictionary, key: String, below: float, extra: Dictionary) -> Node3D:
+	var lk := look.duplicate()
+	lk.merge(extra, true)
+	lk[key] = id
+	lk.helmetOn = "1"
+	return PartThumbs.make_head(lk, below)
 
 func _set_look(l: Dictionary) -> void:
 	RiderPanels.save_look(l)
