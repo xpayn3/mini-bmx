@@ -444,13 +444,19 @@ const LOOK_DEPTH := 0.75       # how far from the camera to the head the looked-
 const LOOK_YAW_MAX := 1.9      # ~110 deg: neck + shoulders turned back
 const LOOK_PITCH_BIAS := 0.15  # the pose already tips the head down a little
 
-## title screen: the rider's head looks straight at the mouse, all the time, wherever it is on the screen.
+## title screen: the rider's head looks straight at the mouse, all the time, wherever it is on the screen
+## (on a pad: at the focused button).
 func _update_look(dt: float) -> void:
 	var yaw_t := 0.0
 	var pitch_t := 0.0
 	if scenic and cam and rider and rider.head:
 		var vp := get_viewport()
 		var m: Vector2 = vp.get_mouse_position()
+		# on a pad: look at the menu button that has the cursor (focus) instead of the mouse
+		if Settings.pad_active:
+			var f: Control = vp.gui_get_focus_owner()
+			if f and f.is_visible_in_tree():
+				m = f.get_global_transform_with_canvas() * (f.size * 0.5)
 		if Env.s("BMX_TITLE_MOUSE") != "":   # tests: a fixed mouse position (fractions of the screen)
 			var q := Env.s("BMX_TITLE_MOUSE").split_floats(",")
 			m = Vector2(q[0], q[1]) * vp.get_visible_rect().size
@@ -471,6 +477,9 @@ func _update_look(dt: float) -> void:
 	var k := 1.0 - exp(-dt * 9.0)
 	_look_yaw += (yaw_t - _look_yaw) * k
 	_look_pitch += (pitch_t - _look_pitch) * k
+	if scenic and Env.s("BMX_LOOK_PROBE") != "" and Engine.get_process_frames() % 30 == 0:
+		var fo: Control = get_viewport().gui_get_focus_owner()
+		print("LOOK yaw=%.2f pitch=%.2f focus=%s" % [_look_yaw, _look_pitch, (fo.get_class() + " '" + str(fo.get("text")) + "'") if fo else "-"])
 
 
 ## title screen: photo-shoot lighting round the bike - a warm key spot from the camera side to bring out the

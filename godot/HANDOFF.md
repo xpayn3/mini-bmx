@@ -473,6 +473,8 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   `sky_hdri.gdshader` (`golden`: warm gradient + sun glow, the HDRI's clouds re-lit), warm long fog.
 - Camera `vista` mode (`CameraRig.VISTA`, not in the C cycle): behind/above the rider facing `_title_heading` (the hand-picked `TITLE_SPOT`)
   (clear near eye line + hills far off), slow sway, drag turns it.
+- The rider's head follows the mouse (`Game._update_look`); on a pad (`Settings.pad_active`) it looks at the focused
+  menu control instead. Probe: `BMX_LOOK_PROBE=1` (`LOOK yaw= pitch= focus=` lines).
 - `FarHills` (`scripts/world/far_hills.gd`): coarse ground + far trees out to 2.6 km, built on a worker
   thread; past ~450 m it adds rolling ridges (title screen only) so every seed has a hilly skyline.
   Freed and the normal light restored when the ride starts. `BMX_SEED` now also fixes the menu world.
