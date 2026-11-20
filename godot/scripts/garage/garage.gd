@@ -95,7 +95,7 @@ const VIEWS := {
 	"drive": [-1.3, 8.0, 1.5, Vector3(-0.3, 0.35, 0)],   # the drive side: chainring + cassette
 	"rider": [0.0, 7.0, 4.3, Vector3(-0.05, 1.0, 0)],
 	"kit": [0.2, 6.0, 4.2, Vector3(0.3, 0.85, 0.6)],
-	"show": [0.5, 6.0, 6.4, Vector3(0, 0.12, 0)],   # the showroom: still camera, the bike a little turned (3/4 side), centred above the frame strip
+	"show": [0.5, 6.0, 6.4, Vector3(0, 0.3, 0)],   # the showroom: still camera, the bike a little turned (3/4 side), centred above the frame strip
 }
 
 ## the garage opens as a showroom: the bike, a strip of frames, BACK / EDIT / RIDE. EDIT opens the customizer
