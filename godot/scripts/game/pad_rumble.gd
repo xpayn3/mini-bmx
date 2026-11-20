@@ -170,7 +170,8 @@ func _ride_layers(dt: float, st: BikePhysics, inp: Dictionary) -> void:
 	# TYRE SLIP: sideways scrub (travel vs heading past the tyres' normal slip angle) + the rear letting go
 	var slide := maxf(0.0, absf(st.slip) - 0.06)
 	var loose_rear := (1.0 - minf(1.0, st.grip_r)) * minf(1.0, absf(st.slip_w) * 0.8)
-	var sl := clampf(slide * 2.2 + loose_rear * 0.6 + st.whip * 0.5, 0.0, 1.0) * ground * clampf((va - 1.0) / 6.0, 0.0, 1.0)
+	# + the front tyre pushing wide (understeer) past its grip
+	var sl := clampf(slide * 2.2 + loose_rear * 0.6 + st.whip * 0.5 + minf(st.front_push, 1.0) * 0.6, 0.0, 1.0) * ground * clampf((va - 1.0) / 6.0, 0.0, 1.0)
 	# chatter: on / off pulses whose rate rises with speed (the tyre skipping over the ground), deeper on loose ground
 	_ph += dt * (9.0 + va * 0.9) * float(Settings.get_v("rumble_chatter"))
 	var chat := 0.55 + 0.45 * signf(sin(_ph * TAU))
@@ -178,10 +179,11 @@ func _ride_layers(dt: float, st: BikePhysics, inp: Dictionary) -> void:
 	# wheelspin: a high whine
 	_layer("rumble_spin", clampf(st.spin, 0.0, 1.0) * 0.4 * ground, clampf(st.spin, 0.0, 1.0) * 0.05 * ground)
 	# BRAKE: judder while rolling; SKID: a coarse rattle once the rear locks
-	var brake: float = float(inp.get("brake", 0.0))
+	var brake: float = maxf(st.brake_f, st.brake_r)
 	var bk := brake * clampf(va / 8.0, 0.0, 1.0) * ground
 	_layer("rumble_brake", bk * 0.06 * (0.8 + 0.2 * sin(_t * 70.0)), bk * 0.03)
-	var skid: float = (1.0 if st.skid_fx and brake > 0.5 else 0.0) * clampf(va / 5.0, 0.0, 1.0) * ground
+	# a wheel locked by its brake (rear = skid, front = the bars going dead)
+	var skid: float = maxf(st.rear_lock, st.front_lock) * clampf(va / 5.0, 0.0, 1.0) * ground
 	var rattle := 0.6 + 0.4 * _noise.get_noise_2d(_t * 40.0, 90.0)
 	_layer("rumble_skid", skid * 0.35 * rattle, skid * 0.3 * rattle)
 	# PEDAL: each stroke while sprinting (two per crank turn)

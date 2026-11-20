@@ -4,19 +4,22 @@ extends PanelContainer
 ## body physics), LOOK (kit colours) and SOUND (the freewheel's clicking + presets), each split into category tabs so only one group shows at a
 ## time. P / K / L open it on Ride / Rider / Look; the same key again closes it. Values save as they move.
 
-## [id, tab label, [[category, [sources...]], ...]]. A source is "T:<Tune.DEFS group>",
-## "P:<RiderPanels.POSE_DEFS group>", "L:<RiderPanels.LOOK_ROWS group>", "L:kits", "seat" or "F:freewheel".
+## [id, tab label, [[category, [sources...]], ...]]. A source is "T:<Tune.DEFS group>", "R:<RideLayout page>"
+## (the Ride tab, laid out by what each slider is for), "P:<RiderPanels.POSE_DEFS group>",
+## "L:<RiderPanels.LOOK_ROWS group>", "L:kits", "seat" or "F:freewheel".
 const TABS := [
 	["ride", "Ride", [
-		["Steering", ["T:Steering"]],
-		["Lean", ["T:Lean"]],
-		["Grip", ["T:Grip & slides", "T:Tyre grip sim", "T:Carving"]],
-		["Speed", ["T:Speed", "T:Momentum"]],
-		["Sprint", ["T:Sprint & wheelie"]],
-		["Body", ["T:Body stick"]],
-		["Suspension", ["T:Wheels & pump"]],
-		["Jumps", ["T:Jumping", "T:Air"]],
-		["Demo", ["T:Demo rider"]],
+		["Feel", ["R:feel"]],
+		["Steering", ["R:steer"]],
+		["Tyres", ["R:tyres"]],
+		["Ground", ["R:ground"]],
+		["Brakes", ["R:brakes"]],
+		["Speed", ["R:speed"]],
+		["Body", ["R:body"]],
+		["Suspension", ["R:susp"]],
+		["Jumps", ["R:jumps"]],
+		["Smoothing", ["R:smooth"]],
+		["Demo", ["R:demo"]],
 	]],
 	["rider", "Rider", [
 		["Body", ["P:Body position", "seat", "P:Pelvis"]],
@@ -26,7 +29,6 @@ const TABS := [
 		["Legs", ["P:Legs & feet"]],
 		["Motion", ["P:Movement"]],
 		["Style", ["P:Style"]],
-		["Physics", ["T:Legs & body"]],
 	]],
 	["look", "Look", [
 		["Kits", ["L:kits"]],
@@ -69,7 +71,7 @@ func _init(g) -> void:
 func _ready() -> void:
 	theme = UITheme.get_theme()
 	set_anchors_preset(Control.PRESET_RIGHT_WIDE)
-	offset_left = -380; offset_right = -14; offset_top = 64; offset_bottom = -90
+	offset_left = -420; offset_right = -14; offset_top = 64; offset_bottom = -90
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	var vb := VBoxContainer.new()
 	vb.add_theme_constant_override("separation", 6)
@@ -157,7 +159,7 @@ func show_tab(id: String) -> void:
 		cb.pressed.connect(func(): last_cat[tab] = i; _fill())
 		cat_row.add_child(cb)
 	match tab:
-		"ride": sub.text = "Scaled by the bike · ☆ pins to Quick tune"
+		"ride": sub.text = "Start with Feel · each page in plain words · the tick = the preset · ☆ pins to Quick tune"
 		"rider": sub.text = "%s · saved per bike" % GameState.BIKES[GameState.bike_id].label
 		"look": sub.text = "Helmet, goggles, kit and shoes"
 		"sound": sub.text = "Coast (or Preview) to hear it · presets save as you go"
@@ -182,7 +184,7 @@ func _fill() -> void:
 		sv.custom_minimum_size = Vector2(0, 28)
 		list.add_child(sv)
 	for src: String in cat[1]:
-		if src.begins_with("T:") and not src.begins_with("T:Dust"):
+		if (src.begins_with("T:") and not src.begins_with("T:Dust")) or src.begins_with("R:"):
 			_preset_bar(TunePresets, "Ride preset")
 			break
 	for src: String in cat[1]:
@@ -200,6 +202,7 @@ func _fill() -> void:
 		var name := src.substr(src.find(":") + 1)
 		match kind:
 			"T": _tune_group(name)
+			"R": _ride_page(name)
 			"P": _pose_group(name)
 			"seat": _seat_toggle()
 			"L": _look_group(name)
@@ -278,6 +281,74 @@ func _tune_group(group: String) -> void:
 			var stp: float = row[5]
 			_slider(row[1], row[3], row[4], stp, Tune.base[key], TunePresets.value_of(key),
 				func(v): return _fmt_step(v, stp, row[6]), func(v): Tune.set_value(key, v); _refresh_mod(TunePresets), pin)
+
+
+# ---------------------------------------------------------------- RIDE tab (RideLayout pages)
+static var ride_all := false   # Simple (the sliders that matter most) / All, remembered for the session
+
+func _pin_button(key: String) -> Button:
+	var pin := Button.new()
+	pin.text = "★" if key in Tune.pins else "☆"
+	pin.tooltip_text = "Pin to the Quick tune card"
+	pin.focus_mode = Control.FOCUS_NONE; pin.flat = true
+	pin.add_theme_color_override("font_color", UITheme.ACCENT if key in Tune.pins else UITheme.MUTED)
+	pin.pressed.connect(func(): Tune.toggle_pin(key); _fill())
+	return pin
+
+
+func _ride_page(id: String) -> void:
+	if id == "feel":
+		_header("Feel")
+		var intro := UITheme.label("The big picture. Each moves a set of the detail sliders on the other pages (they keep their own settings).", 12, UITheme.MUTED)
+		intro.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		list.add_child(intro)
+		for r in RideLayout.FEEL:
+			var key: String = r[0]
+			var tr: Array = Tune.row(key)
+			var moves: Array = []
+			for dk in Tune.MACROS[key]:
+				var dr: Array = Tune.row(dk)
+				if not dr.is_empty() and moves.size() < 4: moves.append(str(RideLayout.LABELS.get(dk, dr[1])).to_lower())
+			var ts := TuneSlider.make(tr[1], [tr[3], tr[4], tr[5]], Tune.base[key], TunePresets.value_of(key),
+				func(v): return "as set" if absf(v - 1.0) < 0.01 else "%+d %%" % roundi((v - 1.0) * 100.0),
+				[r[2], r[3]], r[1], _pin_button(key), true)
+			ts.tooltip_text = "Moves: " + ", ".join(moves)
+			ts.changed.connect(func(v): Tune.set_value(key, v); _refresh_mod(TunePresets))
+			list.add_child(ts)
+		return
+	var p := RideLayout.page(id)
+	if p.is_empty(): return
+	# Simple / All
+	var sw := HBoxContainer.new()
+	sw.add_theme_constant_override("separation", 4)
+	var grp := ButtonGroup.new()
+	for opt in [[false, "Simple"], [true, "All sliders"]]:
+		var b := _tab_button(opt[1], grp, 12)
+		b.button_pressed = ride_all == opt[0]
+		b.pressed.connect(func(): ride_all = opt[0]; _fill())
+		sw.add_child(b)
+	list.add_child(sw)
+	var blurb := UITheme.label(p[2], 12, UITheme.MUTED)
+	blurb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	list.add_child(blurb)
+	for sec in p[3]:
+		var rows: Array = []
+		for r in sec[1]:
+			if ride_all or str(r[0]).begins_with("*"): rows.append(r)
+		if rows.is_empty(): continue
+		_header(sec[0])
+		for r in rows:
+			var key: String = str(r[0]).trim_prefix("*")
+			var tr: Array = Tune.row(key)
+			if tr.is_empty(): continue
+			var stp: float = tr[5]
+			var hint: String = r[1]
+			var mk := Tune.macro_k(key)
+			if absf(mk - 1.0) > 0.005: hint += ("  " if hint != "" else "") + "Feel ×%.2f" % mk
+			var ts := TuneSlider.make(str(RideLayout.LABELS.get(key, tr[1])), [tr[3], tr[4], stp], Tune.base[key],
+				TunePresets.value_of(key), func(v): return _fmt_step(v, stp, tr[6]), [r[2], r[3]], hint, _pin_button(key))
+			ts.changed.connect(func(v): Tune.set_value(key, v); _refresh_mod(TunePresets))
+			list.add_child(ts)
 
 
 # ---------------------------------------------------------------- RIDER pose
@@ -533,7 +604,9 @@ func _reset_category() -> void:
 	var look_touched := false
 	for src: String in cat[1]:
 		var name := src.substr(src.find(":") + 1)
-		if src.begins_with("T:"):
+		if src.begins_with("R:"):
+			for k in RideLayout.page_keys(name): Tune.set_value(k, TunePresets.value_of(k))
+		elif src.begins_with("T:"):
 			for g in Tune.DEFS:
 				if g[0] == name:
 					for row in g[1]:   # back to the preset's value (dust: the default)

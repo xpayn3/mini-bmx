@@ -1494,10 +1494,12 @@ func _autotest(seconds: float) -> void:
 	if Env.s("BMX_PANEL") != "":   # tests: open the tuning card (ride/rider/look), BMX_PANEL_CAT = category tab
 		var pt: String = game.hud.SIDE_TABS.get(Env.s("BMX_PANEL"), "ride")
 		if Env.s("BMX_PANEL_CAT") != "": TuneCard.last_cat[pt] = int(Env.s("BMX_PANEL_CAT"))
+		if Env.s("BMX_RIDE_ALL") != "": TuneCard.ride_all = true   # tests: the Ride pages' "All sliders" view
 		game.hud._toggle_side(Env.s("BMX_PANEL"))
 	if Env.s("BMX_NOLOD") != "": get_viewport().mesh_lod_threshold = 0.0
 	if Env.s("BMX_LOD") != "": get_viewport().mesh_lod_threshold = float(Env.s("BMX_LOD"))
 	if Env.s("BMX_NOVSYNC") != "": DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED); Engine.max_fps = 0
+	if Env.s("BMX_FPS") != "": DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED); Engine.max_fps = int(Env.s("BMX_FPS"))   # tests: a fixed frame rate (60 = a vsynced screen)
 	var rec: AudioEffectRecord = null
 	if Env.s("BMX_REC") != "":   # tests: record the game's own sound to a wav
 		rec = AudioEffectRecord.new()
@@ -1741,6 +1743,11 @@ func _autotest(seconds: float) -> void:
 				elif trick == "right": Input.action_press("steer_right")
 				elif trick == "spin" and absf(ph.air_yaw) < 1.0:   # a flat spin (as the right stick gives)
 					ph.air_yaw = 7.0
+				if trick == "whip":   # an air whip: right stick 75 % to the side (short of its spin edge), let go for the landing
+					if ph.land_prep < 0.15: Input.action_press("body_left", 0.75)
+					else: Input.action_release("body_left")
+					if Engine.get_physics_frames() % 10 == 0:
+						print("WHIPA t=%.2f tw=%+.0fdeg slip=%+.0fdeg land_prep=%.2f" % [ph.air_time, rad_to_deg(ph.air_tw), rad_to_deg(wrapf(ph.slip, -PI, PI)), ph.land_prep])
 				if trick == "spin" and Engine.get_physics_frames() % 12 == 0:
 					print("SPIN t=%.2f cam_yaw=%.2f course=%.2f heading=%.2f" % [ph.air_time, game.cam.cam_yaw, ph.course, ph.heading])
 			await get_tree().process_frame
@@ -1748,6 +1755,7 @@ func _autotest(seconds: float) -> void:
 			continue
 		elif trick != "":
 			Input.action_release("brake"); Input.action_release("sprint")
+			if trick == "whip": Input.action_release("body_left")
 			var ph = game.phys
 			if (trick == "back" or trick == "front") and (ph.prep > 0.25 or ph.front_air or ph.rear_air):
 				# a fresh press at the lip throws the rider into the flip (a key held from before doesn't count)

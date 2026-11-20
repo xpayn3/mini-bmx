@@ -11,6 +11,8 @@ const PATH := "user://settings.cfg"
 const ACTIONS := {
 	"pedal":        ["Pedal",                    [KEY_W, KEY_UP],      [],                         [[JOY_AXIS_TRIGGER_RIGHT, 1]]],
 	"brake":        ["Brake / roll back",        [KEY_S, KEY_DOWN],    [],                         [[JOY_AXIS_TRIGGER_LEFT, 1]]],
+	"brake_front":  ["Front brake only",         [KEY_CTRL],           [],                         []],
+	"brake_rear":   ["Rear brake only (skid)",   [KEY_ALT],            [],                         []],
 	"steer_left":   ["Steer left",               [KEY_A, KEY_LEFT],    [],                         [[JOY_AXIS_LEFT_X, -1]]],
 	"steer_right":  ["Steer right",              [KEY_D, KEY_RIGHT],   [],                         [[JOY_AXIS_LEFT_X, 1]]],
 	"hop":          ["Hop / pump (hold to charge)", [KEY_SPACE],       [JOY_BUTTON_X],             []],

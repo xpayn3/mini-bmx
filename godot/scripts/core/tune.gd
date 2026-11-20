@@ -5,6 +5,18 @@ extends Node
 signal changed
 
 const DEFS := [
+	# the Feel page (2026-11-20): big-picture sliders, 1 = as the detail sliders have it. Each scales a set of
+	# detail values (MACROS, x m^exp) on top of the player's sliders and the bike's multipliers
+	["Feel", [
+		["feelGrip", "Grip", 1.0, 0.5, 1.5, 0.05, ""],
+		["feelAgile", "Handling", 1.0, 0.5, 1.5, 0.05, ""],
+		["feelSlide", "Slides", 1.0, 0.5, 1.5, 0.05, ""],
+		["feelReal", "Realism", 1.0, 0.5, 1.5, 0.05, ""],
+		["feelSpeed", "Speed", 1.0, 0.5, 1.5, 0.05, ""],
+		["feelFlow", "Flow", 1.0, 0.5, 1.5, 0.05, ""],
+		["feelAir", "Air", 1.0, 0.5, 1.5, 0.05, ""],
+		["feelPlush", "Suspension", 1.0, 0.5, 1.5, 0.05, ""],
+	]],
 	["Steering", [
 		["steerEase", "Steer eases in (higher = snappier)", 30, 2, 40, 0.5, "/s"],
 		["steerRate", "Steer build-up", 15, 1, 25, 0.5, "/s"],
@@ -34,6 +46,56 @@ const DEFS := [
 		["gripSquirm", "Tyres squirm in turns", 1.0, 0, 3, 0.05, "×"],
 		["gripPivot", "Rear swings round the front", 0.7, 0, 1, 0.05, ""],
 		["leanTraction", "Lean fore/aft shifts grip", 0.45, 0, 1, 0.05, "×"],
+	]],
+	# the ground sim (2026-11-20): balance, front tyre, two brakes, slopes / berms, knocks, weight in the turn
+	["Balance", [
+		["balanceSim", "Balanced bike (turn follows the lean)", 0.4, 0, 1, 0.05, ""],
+		["balanceFall", "Falls in when the grip goes", 0.5, 0, 1.5, 0.05, "×"],
+		["lowsideAngle", "Lowside: lean past the grip by", 0.3, 0.1, 0.8, 0.01, "rad"],
+		["gyroStable", "Fast = steadier (rolls slower)", 0.25, 0, 1, 0.05, "×"],
+	]],
+	["Crashing", [
+		["crashTime", "Losing it takes (at 1x past the limit)", 0.4, 0.05, 1.5, 0.05, "s"],
+		["riderSave", "Rider fights back (meter drains)", 1.2, 0.2, 4, 0.05, "/s"],
+		["riderSkill", "Rider reflexes in trouble", 1.0, 0, 2, 0.05, "×"],
+		["crashHard", "Down at once when this far past the limit", 3.0, 1.0, 8.0, 0.1, "×"],
+		["reflexBrake", "Reflex: eases off the brakes", 0.6, 0, 1, 0.05, ""],
+		["reflexStandUp", "Reflex: stands the bike up", 0.3, 0, 0.8, 0.05, ""],
+		["reflexCatch", "Reflex: fights the slide harder", 1.5, 0, 4, 0.1, "×"],
+		["frontWeight", "Weights the front in turns", 0.12, 0, 0.35, 0.01, "g"],
+		["bonkBoulder", "Over the bars: a boulder throws you from", 6.0, 3, 15, 0.5, "m/s"],
+		["bonkSmall", "Over the bars: a small rock throws you from", 12.0, 5, 25, 0.5, "m/s"],
+	]],
+	# the jitter fixes / motion caps (2026-11-20): how the ground readings are smoothed and how fast drawn parts may move
+	["Smoothing", [
+		["bankSmooth", "Bank reading settles over", 0.15, 0.02, 0.6, 0.01, "s"],
+		["knockSmooth", "Rock / rut knocks build over", 0.08, 0.01, 0.4, 0.01, "s"],
+		["tyreRelax", "Tyre grip follows its load over", 0.04, 0.005, 0.2, 0.005, "s"],
+		["cornerSmooth", "Turn load on the body builds over", 0.1, 0.01, 0.5, 0.01, "s"],
+		["bankLeanRate", "Lean into tilted ground changes at most", 1.5, 0.3, 6, 0.1, "rad/s"],
+		["motionCap", "Drawn parts' speed cap (higher = looser)", 1.0, 0.3, 3, 0.05, "×"],
+		["torsoMaxSpeed", "Rider torso moves at most", 2.5, 0.5, 8, 0.1, "m/s"],
+	]],
+	["Front tyre", [
+		["frontGrip", "Front tyre grip", 1.0, 0.5, 1.6, 0.02, "×"],
+		["frontWashAt", "Front washes out past", 1.35, 1.05, 2.5, 0.05, "× grip"],
+		["frontWashTime", "Pushing that hard for", 0.35, 0.05, 1.5, 0.05, "s"],
+	]],
+	["Brakes", [
+		["brakeFront", "Front brake power", 0.75, 0, 1.5, 0.05, "×"],
+		["brakeRear", "Rear brake power", 0.6, 0, 1.5, 0.05, "×"],
+		["brakeFrontMix", "Brake key: front lever share", 0.7, 0, 1, 0.05, ""],
+		["brakeSkid", "Brake key: how far the rear skids", 0.4, 0, 1, 0.05, ""],
+	]],
+	["Ground", [
+		["bermAssist", "Berms: lean with them, they carry the turn", 0.8, 0, 1, 0.05, ""],
+		["bankLean", "Lean into tilted ground (look)", 0.6, 0, 1, 0.05, "×"],
+		["camberPull", "Side slopes pull you down", 0.22, 0, 1.5, 0.02, "×"],
+		["cornerLoad", "Turns press you down (berms)", 0.6, 0, 2, 0.05, "×"],
+		["groundKnock", "Rocks / ruts knock the front", 0.6, 0, 2, 0.05, "×"],
+		["landSlide", "Landing on a side slope slides you down it", 1.0, 0, 2, 0.05, "×"],
+		["weightInside", "Hanging inside loses grip", 0.2, 0, 0.6, 0.02, "×"],
+		["weightSteady", "Outside pedal: steady over bumps", 0.5, 0, 1, 0.05, "×"],
 	]],
 	["Momentum", [
 		["turnWeight", "Turn weight", 0.09, 0, 0.5, 0.01, "s"],
@@ -81,9 +143,13 @@ const DEFS := [
 		["leanOut", "Roll-out stiffness", 30, 8, 200, 1, ""],
 		["leanDamp", "Lean damping", 1.0, 0.3, 1.6, 0.02, ""],
 		["leanRate", "Fastest roll (side to side)", 6.0, 0.5, 8, 0.1, "rad/s"],
+		["leanLead", "Slow: lean goes with the steer", 0.5, 0, 1, 0.05, ""],
+		["slowRoll", "Slow: quicker roll", 1.0, 0, 3, 0.05, "×"],
+		["slowLean", "Slow: bike thrown under you", 0.3, 0, 0.6, 0.01, "rad"],
 		["bikeLeanMul", "Bike leans extra", 1.55, 0.7, 2.0, 0.01, "×"],
 		["bikeLeanCap", "Bike lean soft cap", 1.3, 0.3, 1.5, 0.01, "rad"],
-		["bodyLean", "Body leans with bike", 0.7, 0.3, 1.0, 0.01, "×"],
+		["bikeLead", "Bike goes over before the body (two masses)", 0.08, 0, 0.2, 0.005, "s"],
+		["bodyLean", "Body leans with bike", 0.8, 0.3, 1.0, 0.01, "×"],
 		["groundLeanMax", "Max lean against the ground (off-camber)", 1.05, 0.6, 1.4, 0.01, "rad"],
 	]],
 	["Legs & body", [
@@ -155,6 +221,8 @@ const DEFS := [
 		["whipCatch", "Corner whip: drift caught over (after letting go)", 0.9, 0.2, 3, 0.05, "s"],
 		["stickAirTilt", "Air: stick tilts the nose", 0.55, 0, 1.2, 0.05, "rad"],
 		["stickAirRoll", "Air: stick lays the bike over", 0.75, 0, 1.2, 0.05, "rad"],
+		["airWhip", "Air: whip (stick to the side kicks the bike out)", 1.1, 0, 1.5, 0.05, "rad"],
+		["whipReturn", "Air: whip straightened for the landing", 0.7, 0, 1, 0.05, ""],
 		["stickAirEase", "Air: bike follows the stick (higher = snappier)", 3.5, 1, 12, 0.25, "/s"],
 		["stickSpinBuild", "Air: spin builds up (stick at the edge)", 2.5, 0.3, 5, 0.1, "/s"],
 		["stickSpinMax", "Air: flip spin strength (stick at the edge)", 0.7, 0.2, 1, 0.05, "×"],
@@ -203,10 +271,10 @@ const DEFS := [
 
 const PATH := "user://tune.cfg"
 ## bump VER when defaults are retuned: saved values of the RETUNED keys are dropped once
-const VER := 14
+const VER := 15
 ## later retunes, per version: only these keys are dropped for saves older than that version (bumping VER
 ## with one shared list would reset every earlier retuned key again)
-const RETUNED_AT := {8: ["manualFrom", "stickAirRoll", "stickSpinBuild", "stickYawRate"], 9: ["leanMax"], 11: ["leanIn", "leanOut", "flickSpeed"], 12: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 13: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 14: ["sprintRock"]}
+const RETUNED_AT := {8: ["manualFrom", "stickAirRoll", "stickSpinBuild", "stickYawRate"], 9: ["leanMax"], 11: ["leanIn", "leanOut", "flickSpeed"], 12: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 13: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 14: ["sprintRock"], 15: ["bodyLean"]}
 const RETUNED := ["steerRate", "steerRelease", "steerCurve", "turnSlow", "turnFast", "turnFloor", "steerMax", "slowSteer",
 	"barSpeed", "grip", "slipRecover", "slipMax", "turnWeight", "leanMax", "leanIn", "leanOut", "leanDamp", "bikeLeanMul", "bikeLeanCap", "flipAccel", "flipRate", "airTwist", "landBack", "travel", "popKick"]
 var defaults := {}
@@ -286,7 +354,44 @@ func row(k: String) -> Array:
 			if r[0] == k: return r
 	return []
 
+## the Feel sliders: macro key -> {detail key: exponent}. The detail value is x m^exp (m 0.5..1.5); a minus
+## exponent works the other way (more Realism = less arcade air control)
+const MACROS := {
+	"feelGrip": {"grip": 0.6, "frontGrip": 0.4, "slipRecover": 0.6, "gripLoose": -1.0, "carveGrip": 0.5},
+	"feelAgile": {"steerEase": 0.8, "leanIn": 0.8, "leanOut": 0.8, "leanRate": 0.7, "flickSpeed": 0.8, "barSpeed": 0.5,
+		"gyroStable": -1.0, "turnWeight": -1.0},
+	"feelSlide": {"oversteer": 1.2, "gripRearLock": 1.0, "gripBumps": 1.0, "gripPower": 1.0, "slipRecover": -0.8, "whipDrift": 0.6},
+	"feelReal": {"balanceSim": 1.2, "balanceFall": 1.2, "camberPull": 1.2, "groundKnock": 1.2, "cornerLoad": 1.0,
+		"weightInside": 1.0, "airArcade": -1.5, "frontWashAt": -0.4},
+	"feelSpeed": {"topSpeed": 0.5, "pedalPower": 0.6, "pedalTop": 0.5, "sprintTop": 0.6, "airDrag": -0.4},
+	"feelFlow": {"flowCarry": 1.0, "carveBoost": 1.0, "pumpGain": 0.8, "flowTime": 0.8, "rollRes": -0.8},
+	"feelAir": {"popKick": 0.6, "popPower": 0.5, "airSpinRate": 0.8, "airTilt": 0.6, "airTwist": 0.6, "flipRate": 0.6,
+		"flipAccel": 0.6, "stickAirEase": 0.5, "slamJolt": 0.6},
+	"feelPlush": {"tyreHz": -0.6, "travel": 0.6, "damperKnee": -0.5, "damperBlow": -0.6, "legStiff": -0.5, "tyreDamp": 0.3},
+}
+static var _macro_of := {}   # detail key -> [[macro, exp], ...]
+
+## what a detail key is scaled by from the Feel sliders now
+func macro_k(k: String) -> float:
+	if _macro_of.is_empty():
+		for m in MACROS:
+			for dk in MACROS[m]:
+				if not _macro_of.has(dk): _macro_of[dk] = []
+				_macro_of[dk].append([m, float(MACROS[m][dk])])
+	var f := 1.0
+	for me in _macro_of.get(k, []):
+		f *= pow(maxf(0.05, float(base.get(me[0], 1.0))), me[1])
+	return f
+
 func _rebuild() -> void:
 	for k in base:
-		v[k] = base[k] * float(ride.get(k, 1.0))
+		var raw: float = base[k] * float(ride.get(k, 1.0))
+		var f := macro_k(k)
+		if f != 1.0:
+			# a Feel slider can move a value past its own slider's range only as far as the range goes
+			var r := row(k)
+			var val := raw * f
+			if r.size() > 4: val = clampf(val, minf(raw, float(r[3])), maxf(raw, float(r[4])))
+			raw = val
+		v[k] = raw
 	changed.emit()

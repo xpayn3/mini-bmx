@@ -43,6 +43,8 @@ class Ground:
 				return -tan(a) * minf(s, 0.0) if s < 0.0 else 0.0
 			"noise":
 				return noise.get_noise_2d(x, z) * a
+			"dropcamber":   # a ledge of b (b < 0 = a drop) at x0, then ground falling to +z at a (a side-slope landing)
+				return (0.0 if x < x0 else b) - (0.0 if x < x0 else tan(a) * z)
 		return 0.0
 	func deck_height(x: float, z: float) -> float: return height(x, z)
 	func top_height(x: float, z: float) -> float: return height(x, z)
@@ -54,6 +56,7 @@ class Host:
 	var terrain := Ground.new()
 	var susp = null
 	var ragdoll = null
+	var getup_anim = null
 	var pedal_a0 := [0.0, PI]
 	var phys
 	var crash := ""
@@ -80,6 +83,7 @@ var verbose := false
 var trace := false   # trace=1: prints the state 4x / s in every case run
 var bike := "dh"
 var compare := false   # compare=1: measure this bike's character (COMPARE line) instead of the checks
+var feel := false   # feel=1: steering response by speed + right-stick lean slides (FEEL lines) instead of the checks
 var extras: Dictionary = DH_EXTRAS
 var tune: Node
 var step_us := 0.0
@@ -91,12 +95,18 @@ func _ready() -> void:
 		elif a == "verbose=1": verbose = true
 		elif a == "trace=1": trace = true
 		elif a == "compare=1": compare = true
+		elif a == "feel=1": feel = true
 	tune = get_node("/root/Tune")
 	# the bike as the game rides it: its tuning x the garage build's parts x the frame's character
 	# (GameState.bike_config_for), on its own geometry (the glb's extras)
 	var gs = get_node("/root/GameState")
 	var cfg: Dictionary = gs.bike_config_for(bike)
 	tune.set_ride(cfg.ride)
+	for a in OS.get_cmdline_user_args():   # tune=k=v,k=v overrides tuning values for this run
+		if a.begins_with("tune="):
+			for kv in a.substr(5).split(","):
+				var pr := kv.split("=")
+				if pr.size() == 2: tune.v[pr[0]] = float(pr[1])
 	if bike != "bmx":
 		var sc: Node = load(cfg.file).instantiate()
 		var m: Node = sc.find_child(cfg.root, true, false)
@@ -104,6 +114,14 @@ func _ready() -> void:
 		sc.free()
 	if compare:
 		_compare(cfg)
+		get_tree().quit(0)
+		return
+	if feel:
+		_feel()
+		get_tree().quit(0)
+		return
+	if "sim=1" in OS.get_cmdline_user_args():
+		_sim(cfg)
 		get_tree().quit(0)
 		return
 	_run_all(cfg)
@@ -229,6 +247,137 @@ func _compare(cfg: Dictionary) -> void:
 	var line := "COMPARE %-5s kg=%.1f" % [bike, float(cfg.get("kg", 0.0))]
 	for k in out: line += "  %s=%.2f" % [k, out[k]]
 	print(line)
+
+## feel=1: on the flat, speed held. STEER: full lock from straight: time to 63 % of the steady yaw rate and
+## bike lean, steady yaw rate / radius / lean. SWAP: full left 1.5 s then full right: time until the bike lean
+## crosses over. LEAN: right stick only / right stick + steer the same way / right stick against the steer:
+## steady yaw, peak slip (the rear sliding) and speed lost over 3 s
+func _feel() -> void:
+	var gs = get_node("/root/GameState")
+	var cfg: Dictionary = gs.bike_config_for(bike)
+	for kmh in [8, 12, 18, 25, 35, 50]:
+		var tv: float = kmh / 3.6
+		var hold := func(pp, st: float, bl := 0.0) -> Dictionary:
+			var d := _inp(clampf((tv - pp.v) * 2.0, 0.0, 1.0), clampf((pp.v - tv) * 0.5, 0.0, 1.0), st)
+			d.body_lean = bl
+			return d
+		# step to full lock
+		var r := _make(cfg, "flat"); var p: BikePhysics = r[0]; p.v = tv
+		for i in int(1.0 / DT): p.step(DT, hold.call(p, 0.0))
+		var yaws: Array = []; var leans: Array = []
+		for i in int(2.5 / DT):
+			p.step(DT, hold.call(p, 1.0))
+			yaws.append(absf(p.yaw_rate)); leans.append(absf(p.bike_lean))
+		var steer_crash: String = r[1].crash
+		var y_ss: float = yaws[-1]; var l_ss: float = leans[-1]
+		var ty := -1.0; var tl := -1.0
+		for i in yaws.size():
+			if ty < 0 and yaws[i] >= 0.63 * y_ss: ty = i * DT
+			if tl < 0 and leans[i] >= 0.63 * l_ss: tl = i * DT
+		# swap
+		var tsw := -1.0
+		var l0: float = p.bike_lean
+		for i in int(2.5 / DT):
+			p.step(DT, hold.call(p, -1.0))
+			if signf(p.bike_lean) != signf(l0) and absf(p.bike_lean) > absf(l0) * 0.63: tsw = i * DT; break
+		print("FEEL STEER %2d km/h  yaw63=%.2fs lean63=%.2fs  yaw=%.2f rad/s R=%.1fm lean=%.0fdeg  swap=%.2fs %s %s" % [kmh, ty, tl, y_ss, p.v / maxf(y_ss, 0.001), rad_to_deg(l_ss), tsw, steer_crash, r[1].crash])
+		for gk in ["flat", "noise"]:
+			for mode in [["steer", 1.0, 0.0], ["stick", 0.0, 1.0], ["both", 1.0, 1.0], ["half+stick", 0.5, 0.7], ["against", 1.0, -1.0], ["throw", 1.0, 2.0]]:
+				r = _make(cfg, gk, 0.15); p = r[0]; p.v = tv
+				if gk == "noise": r[1].terrain.noise.frequency = 0.35
+				for i in int(1.0 / DT): p.step(DT, hold.call(p, 0.0))
+				var smax := 0.0; var wmax := 0.0; var crash := ""; var yaw_sum := 0.0; var n := 0
+				for i in int(3.0 / DT):
+					# throw = the stick thrown from the centre to the edge with the steer held: a deliberate whip
+					# the other cases lean the stick in over 0.35 s (a body lean, not a throw)
+					var bl: float = mode[2] * clampf(i * DT / 0.35, 0.0, 1.0) if mode[2] <= 1.0 else clampf(i * DT / 0.08, 0.0, 1.0)
+					var d: Dictionary = _inp(0.0, 0.0, mode[1]); d.body_lean = bl
+					p.step(DT, d)
+					smax = maxf(smax, absf(p.slip)); wmax = maxf(wmax, p.whip)
+					if i * DT > 1.0: yaw_sum += absf(p.yaw_rate); n += 1
+					if r[1].crash != "": crash = r[1].crash; break
+				print("FEEL LEAN  %2d km/h %-5s %-10s yaw=%.2f slip_max=%.0fdeg whip=%.2f v_end=%.1f %s" % [kmh, gk, mode[0], yaw_sum / maxf(1, n), rad_to_deg(smax), wmax, p.v * 3.6, crash])
+
+## sim=1: the ground sim in numbers (SIM lines). Side slopes ridden straight hands off, a berm turn (how far the
+## rider sinks, the turn's load), brakes from 40 km/h (front / rear / both: distance, locks), braking hard in a
+## turn (front push, wash-out), straight over rough ground (how much the front gets knocked about)
+func _sim(cfg: Dictionary) -> void:
+	for deg in [5, 10, 20, 30]:
+		var r := _make(cfg, "camber", deg_to_rad(deg)); var p: BikePhysics = r[0]
+		p.reset_at(0.0, 0.0, 0.0); p.v = 6.0
+		_ride(p, r[1], 5.0, func(_t, pp): return _inp(clampf((6.0 - pp.v) * 2.0, 0.0, 1.0)))
+		print("SIM CAMBER %2d deg  drift=%.2f m  heading=%+.0fdeg  slip=%+.0fdeg  v=%.1f crash=%s" % [deg, p.z, rad_to_deg(p.heading), rad_to_deg(p.slip), p.v * 3.6, r[1].crash])
+	for gk in [["flat", 0.0], ["berm", 0.35]]:
+		var r := _make(cfg, "camber", -gk[1]); var p: BikePhysics = r[0]   # ground rising to the right... turn right into it
+		p.reset_at(0.0, 0.0, 0.0); p.v = 9.0
+		var sink := 0.0; var cg := 0.0; var fu := 0.0
+		for i in int(2.5 / DT):
+			p.step(DT, _inp(clampf((9.0 - p.v) * 2.0, 0.0, 1.0), 0.0, -0.8))
+			if i * DT > 1.0:
+				sink = maxf(sink, p.y - p.body_y); cg = maxf(cg, p.corner_g); fu = maxf(fu, p.front_use)
+		print("SIM TURN %-5s 32 km/h  yaw=%.2f rad/s  body_sink=%.3f m  extra_g=%.1f  front_use=%.2f  lean=%.0fdeg crash=%s" % [gk[0], absf(p.yaw_rate), sink, cg, fu, rad_to_deg(p.bike_lean), r[1].crash])
+	# a berm (20 deg, rising to the right) with a light steer into it (left, 30 %): with / without bermAssist
+	for ba in [0.0, 0.8]:
+		for kmh in [15, 25]:
+			tune.v["bermAssist"] = ba
+			var r := _make(cfg, "camber", deg_to_rad(-20)); var p: BikePhysics = r[0]
+			p.reset_at(0.0, 0.0, 0.0); p.v = kmh / 3.6
+			var tv: float = kmh / 3.6
+			for i in int(1.0 / DT): p.step(DT, _inp(clampf((tv - p.v) * 2.0, 0.0, 1.0), clampf((p.v - tv) * 0.5, 0.0, 1.0), 0.3))
+			print("SIM BERM assist=%.1f %2d km/h  lean=%+.0fdeg (bank %+.0f)  yaw=%.2f rad/s  tyre_side_grip_used=%.2f  berm_k=%.2f crash=%s" % [
+				ba, kmh, rad_to_deg(p.lean), rad_to_deg(p.bank), p.yaw_rate, absf(p._f_prev), p.berm_k, r[1].crash])
+	tune.v["bermAssist"] = 0.8
+	# landings: off a 1.5 m ledge at 25 km/h onto flat / a 15 deg side slope, and leaned 40 deg (right stick held over)
+	for lc in [["flat", 0.0, 0.0], ["slope15", 15.0, 0.0], ["leaned40", 0.0, 0.7]]:
+		var r := _make(cfg, "dropcamber", deg_to_rad(lc[1]), -1.5); var p: BikePhysics = r[0]
+		r[1].terrain.x0 = 8.0
+		p.reset_at(0.0, 0.0, 0.0); p.v = 25.0 / 3.6
+		var landed := false; var t_l := 0.0; var smax := 0.0; var c0 := 0.0; var imp := 0.0
+		for i in int(4.0 / DT):
+			var d := _inp(0.4)
+			if p.air: d.body_lean = lc[2]
+			if p.x < 8.0: r[1].max_impact = 0.0
+			var was_air := p.air
+			p.step(DT, d)
+			if was_air and not p.air and not landed and p.x > 8.5: landed = true; c0 = p.course; imp = r[1].max_impact
+			if landed:
+				t_l += DT; smax = maxf(smax, absf(p.slip))
+				if t_l > 1.5: break
+			if r[1].crash != "": break
+		print("SIM LAND %-8s  impact=%.1f  travel_turned=%+.0fdeg  slip_max=%.0fdeg  lean=%+.0fdeg  v=%.1f crash=%s" % [lc[0], imp,
+			rad_to_deg(p.course - c0) if landed else 0.0, rad_to_deg(smax), rad_to_deg(p.bike_lean), p.v * 3.6, r[1].crash])
+	for b in [["front", 0.0, 1.0, 0.0], ["rear", 0.0, 0.0, 1.0], ["both(S)", 1.0, 0.0, 0.0]]:
+		var r := _make(cfg, "flat"); var p: BikePhysics = r[0]; p.v = 40.0 / 3.6
+		_ride(p, r[1], 0.3, func(_t, _p): return _inp())
+		var x0: float = p.x; var lr := 0.0; var lf := 0.0; var pmin := 0.0
+		for i in int(6.0 / DT):
+			var d := _inp(0.0, b[1]); d.brake_front = b[2]; d.brake_rear = b[3]
+			p.step(DT, d)
+			lr = maxf(lr, p.rear_lock); lf = maxf(lf, p.front_lock); pmin = minf(pmin, p.pitch)
+			if p.v < 0.2 or r[1].crash != "": break
+		print("SIM BRAKE %-7s 40 km/h  stop=%.1f m  rear_lock=%.2f front_lock=%.2f nose_down=%.0fdeg crash=%s" % [b[0], p.x - x0, lr, lf, rad_to_deg(-pmin), r[1].crash])
+	for b in [["none", 0.0, 0.0], ["S", 1.0, 0.0], ["front", 0.0, 1.0]]:
+		var r := _make(cfg, "flat"); var p: BikePhysics = r[0]; p.v = 30.0 / 3.6
+		_ride(p, r[1], 1.5, func(_t, pp): return _inp(clampf((30.0 / 3.6 - pp.v) * 2.0, 0.0, 1.0), 0.0, 1.0))
+		var fu := 0.0; var push := 0.0
+		for i in int(1.5 / DT):
+			var d := _inp(0.0, b[1], 1.0); d.brake_front = b[2]
+			p.step(DT, d)
+			fu = maxf(fu, p.front_use); push = maxf(push, p.front_push)
+			if r[1].crash != "": break
+		print("SIM TURNBRAKE %-5s 30 km/h full lock  front_use=%.2f push=%.2f v=%.1f crash=%s" % [b[0], fu, push, p.v * 3.6, r[1].crash])
+	for kn in [0.0, 0.6]:
+		tune.v["groundKnock"] = kn
+		var r := _make(cfg, "noise", 0.12); var p: BikePhysics = r[0]
+		r[1].terrain.noise.frequency = 1.2
+		p.v = 20.0 / 3.6
+		var hs := 0.0; var n := 0
+		for i in int(4.0 / DT):
+			p.step(DT, _inp(clampf((20.0 / 3.6 - p.v) * 2.0, 0.0, 1.0)))
+			hs += p.yaw_rate * p.yaw_rate; n += 1
+			if r[1].crash != "": break
+		print("SIM KNOCK groundKnock=%.1f  yaw_rms=%.3f rad/s  heading_end=%+.0fdeg crash=%s" % [kn, sqrt(hs / maxf(1, n)), rad_to_deg(p.heading), r[1].crash])
+	tune.v["groundKnock"] = 0.6
 
 func _run_all(cfg: Dictionary) -> void:
 	var nothing := func(_t, _p): return _inp()

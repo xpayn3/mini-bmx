@@ -10,6 +10,7 @@ const GEAR := preload("res://scripts/rider/rider_gear.gd")
 ## neutral riding style (posepanel.js NEUTRAL): BMX = all of these
 const NEUTRAL := {hipX = 0.0, hipY = 0.0, lean = 0.0, elbowsOut = 0.0, kneesOut = 0.0, stance = 0.0, seatFloor = false,
 	crouch = 1.0, standPedal = 1.0, aero = 1.0, sway = 1.0, bikeRock = 1.0, upright = 1.0, hipSway = 0.015, torso = 0.46, attackStand = 1.0, kneeOpen = 1.0, bumpAbsorb = 2.0, bodyBounce = 0.4, leanFollow = 1.0, leanSwing = 1.0, leanUnweight = 1.0, leanLively = 1.0, leanBalance = 1.0, leanBumps = 1.0, leanLoad = 1.0, bodyBob = 1.0,
+	flowBend = 1.0, flowLead = 1.0, flowSink = 1.0,   # pro flow through lean changes: spine bend, shoulders / eyes lead, sink into the turn
 	# style (Rider > Style): the numbers the riding pose is built from
 	hipSteady = 90.0, standHeight = 0.15, standBack = 0.03, pedalChest = 0.05, turnLow = 1.0, turnTwist = 1.0,
 	turnHips = 1.0, slowWobble = 1.0, airCrouch = 1.0,
@@ -760,6 +761,8 @@ const SPINE_BONES := 5
 static var _KNEE_PROBE := Env.s("BMX_KNEE_PROBE") != ""
 var knee_dbg: Array = []   # tests: frames where a knee bends against its pole
 var torso_ratio := 1.0   # tests: torso length / its rest length before the limit
+const TORSO_VMAX := 2.5   # m/s: the most the hips / chest move relative to the bike between frames (motion cap)
+var _cap_pel := Vector3.ZERO; var _cap_ch := Vector3.ZERO; var _cap_ok := false
 ## tests (BMX_LIMB_PROBE): per joint, how fast its bend direction turns (deg/s) and how far it moves
 ## relative to its limb root per frame; frames over the limits are counted
 var limb_probe := Env.s("BMX_LIMB_PROBE") != ""
@@ -1003,6 +1006,7 @@ func joints_world() -> Array:
 ## roots: torn-off limbs (Ragdoll.cut): joint index -> the free piece's root point, so the segment that
 ## ends at that joint is drawn from the root instead of stretching back to the body
 func pose_ragdoll(P: Array, roots: Dictionary = {}) -> void:
+	_cap_ok = false   # (the motion cap starts fresh once riding again)
 	_pose_from_points(P, roots, {})
 
 
@@ -1022,6 +1026,7 @@ func animate(dt: float) -> bool:
 ## animation clip (RiderAnim). orient (optional): "head" Basis (x forward, y up), "hand0" / "hand1" (x along the
 ## forearm, y the back of the hand), "foot0" / "foot1" (x toward the toes, y up); left = 0
 func pose_points(P: Array, orient: Dictionary = {}) -> void:
+	_cap_ok = false
 	for k in 15: J[k] = P[k]
 	_pose_from_points(P, {}, orient)
 
@@ -1081,6 +1086,7 @@ func _sync_skeleton(P: Array) -> void:
 
 ## back on the bike: clear the ragdoll orientations the normal update doesn't set
 func reset_pose() -> void:
+	_cap_ok = false
 	pelvis_mesh.basis = Basis()
 	head.basis = Basis()
 	for s in shoe:
@@ -1092,7 +1098,7 @@ func reset_pose() -> void:
 	# what the pose remembers from before (a crash tumbling the bike nose-up left a "wheelie" behind that
 	# shoved the body about after getting up)
 	sm_wheelie = 0.0; sm_aero = 0.0; sm_effort = 0.0; sm_turn = 0.0
-	roll_init = false; roll_pv = 0.0; roll_cv = 0.0; lat_g_s = 0.0
+	roll_init = false; roll_pv = 0.0; roll_cv = 0.0; lat_g_s = 0.0; flow_e = 0.0
 
 
 # ---------------- per-frame pose ----------------
@@ -1120,8 +1126,9 @@ var bounce_stats := [0.0, 0, 0.0, 0.0]   # tests: sum of squared body offsets, s
 # is thrown over first and the body follows through (hips lead, shoulders after, a little overshoot)
 var roll_init := false
 var roll_p := 0.0; var roll_pv := 0.0; var roll_c := 0.0; var roll_cv := 0.0; var knee_lean := 0.0; var lat_g_s := 0.0
-const ROLL_HIP_W := 12.0; const ROLL_HIP_Z := 0.52     # hips: natural rate (rad/s), damping
-const ROLL_CHEST_W := 10.0; const ROLL_CHEST_Z := 0.44  # chest / shoulders: slower, rings on a touch
+var flow_e := 0.0   # how hard the body has just been rolling (rad/s, quick up, slow down): the sink into a new turn
+const ROLL_HIP_W := 8.0; const ROLL_HIP_Z := 0.55      # hips: natural rate (rad/s), damping (the heavy body arrives after the bike)
+const ROLL_CHEST_W := 6.5; const ROLL_CHEST_Z := 0.5    # chest / shoulders: slower still, rings on a touch
 const ROLL_UNWEIGHT := 0.045                          # m the legs extend through a side-to-side crossover
 func update_pose(dt: float, p: Dictionary) -> void:
 	var v := _num(p, "v")
@@ -1329,6 +1336,13 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var cr_c := clampf(bl - roll_c, -0.95, 0.95)
 	var unweight: float = ROLL_UNWEIGHT * float(sty.get("leanUnweight", 1.0)) * clampf(absf(roll_pv) / 1.6, 0.0, 1.0) * (1.0 - smoothstep(0.15, 0.6, absf(roll_p))) * (1.0 - air)
 	pelvis.y += unweight; chest.y += unweight * 0.8
+	# pro flow (Rider › Motion, flowSink): after a quick roll into a lean the rider weights the bike as it settles -
+	# hips and chest sink into the new turn (the pump after the unweight), fading over ~0.6 s
+	var re := absf(roll_pv)
+	flow_e = maxf(re, flow_e - hr * 2.0) if re > flow_e else flow_e + (re - flow_e) * (1.0 - exp(-1.6 * hr))
+	var settle: float = clampf(flow_e / 1.6, 0.0, 1.0) * smoothstep(0.15, 0.5, absf(roll_p)) * clampf(1.0 - re / 2.5, 0.0, 1.0) * (1.0 - air)
+	var fsink: float = 0.04 * settle * float(sty.get("flowSink", 1.0))
+	pelvis.y -= fsink; chest.y -= fsink * 0.9; chest.x += fsink * 0.4
 	if cr != 0.0 or cr_c != 0.0:
 		var c := cos(cr)
 		var sn := sin(cr)
@@ -1502,6 +1516,22 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		pelvis = chest - tv / tl * t_max
 	elif tl < t_min and tl > 1e-4:
 		chest = pelvis + tv / tl * t_min
+	# ---- motion cap: hips and chest move at most TORSO_VMAX relative to the bike. Whatever drives them (a limit
+	# above snapping on, a spike in an input, sliders stacking up), the torso can't jump between frames; real riding
+	# moves it well under this. Hands and feet are fitted after this, so they stay on the grips and pedals.
+	# A big jump (> 0.4 m: a reset, a respawn) is taken at once
+	var vcap: float = _num(p, "torsoVmax", TORSO_VMAX) * clampf(dt, 0.0, 0.05)   # (Ride › Smoothing, passed in by Game)
+	if _cap_ok and vcap > 0.0:
+		for which in 2:
+			var cur: Vector3 = pelvis if which == 0 else chest
+			var prev: Vector3 = _cap_pel if which == 0 else _cap_ch
+			var dmv := cur - prev
+			var dl := dmv.length()
+			if dl > vcap and dl < 0.4:
+				cur = prev + dmv / dl * vcap
+				if which == 0: pelvis = cur
+				else: chest = cur
+	_cap_pel = pelvis; _cap_ch = chest; _cap_ok = true
 	# torso from pelvis to chest
 	var hip := Vector3(pelvis.x, pelvis.y + 0.02, pelvis.z)
 	var tw_axis := (chest - hip).normalized()
@@ -1511,13 +1541,23 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	sm_turn += (turn - sm_turn) * (1.0 - exp(-8.0 * minf(dt, 0.1)))
 	# a side lean in the air (tabletop): the hips turn with the bike, the shoulders turn back against it
 	var tab: float = clampf(_num(p, "bodyLat"), -1.0, 1.0) * air
-	var tw := Basis(tw_axis, float(sty.twist) + clampf(_num(p, "airSpin") * 0.07 + sm_turn * 0.13 * float(sty.turnTwist), -0.5, 0.5) - 0.22 * tab)
+	# pro flow (flowLead): the shoulders lead into the turn the body is rolling towards (the target roll + the roll
+	# under way), ahead of the hips and the bike's actual turn - the upper body winds up and the bike follows
+	var lead: float = clampf(0.3 * clampf(_num(p, "lean") - _num(p, "rockRoll") - clampf(_num(p, "counter"), -0.85, 0.85), -0.9, 0.9) + 0.06 * roll_pv, -0.35, 0.35) * float(sty.get("flowLead", 1.0)) * (1.0 - air)
+	# an air whip: the bike is twisted under the body (airWhip = how far, rad, in bike space). The body is drawn in the
+	# bike's frame, so it turns back against it - the hips half way (they're on the saddle / pedals), the shoulders
+	# nearly all the way: the rider keeps facing where they fly while the bike hangs out sideways
+	var awhip: float = clampf(_num(p, "airWhip"), -1.4, 1.4) * air
+	var tw := Basis(tw_axis, float(sty.twist) + clampf(_num(p, "airSpin") * 0.07 + sm_turn * 0.13 * float(sty.turnTwist) + lead, -0.6, 0.6) - 0.22 * tab - 0.85 * awhip)
 	# pelvis: turn (yaw about up), roll (one hip drops, about forward), tilt (about the hip line)
-	var pel_b := Basis(Vector3.UP, float(sty.pelvisYaw) + clampf(sm_turn * 0.07 * float(sty.turnHips), -0.4, 0.4) + 0.3 * tab) * Basis(Vector3.RIGHT, float(sty.pelvisRoll) - clampf(sm_turn * 0.04 * float(sty.turnHips), -0.25, 0.25))
+	var pel_b := Basis(Vector3.UP, float(sty.pelvisYaw) + clampf(sm_turn * 0.07 * float(sty.turnHips), -0.4, 0.4) + 0.3 * tab - 0.4 * awhip) * Basis(Vector3.RIGHT, float(sty.pelvisRoll) - clampf(sm_turn * 0.04 * float(sty.turnHips), -0.25, 0.25))
 	var pel_full := pel_b * Basis(Vector3.BACK, -(ang * 0.3) - float(sty.pelvisTilt))
 	hip = pelvis + pel_full.y * Belt.HEM_Y   # the jersey's hem: inside the belt, level with it
+	# pro flow (flowBend): the hips go over first and the chest follows, so through a lean change the spine curves
+	# (a C bowed away from the way the chest still hangs) instead of moving as one stiff stick
+	var bend: float = clampf((roll_c - roll_p) * 0.6, -0.2, 0.2) * float(sty.get("flowBend", 1.0)) * (1.0 - air)
 	set_spine(hip, chest, pel_b * Vector3(0, 0, 1), tw * Vector3(0, 0, 1),
-		float(sty.spineCurve) * (1.0 - 0.7 * relax), float(sty.spineSide), float(sty.spineLow), pel_full)
+		float(sty.spineCurve) * (1.0 - 0.7 * relax), float(sty.spineSide) + bend, float(sty.spineLow), pel_full)
 	pelvis_mesh.transform = Transform3D(pel_full, pelvis)
 	set_limb(hood_hem, Vector3(pelvis.x, pelvis.y + 0.04, pelvis.z), hip.lerp(chest, 0.2))
 
@@ -1527,7 +1567,8 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	J[0] = head_p
 	J[1] = chest
 	J[2] = pelvis
-	var yaw: float = clampf((_num(p, "steer") * 1.2 + _num(p, "yawRate") * 0.15) * sty.headTurn, -0.8, 0.8) + sty.headYaw + _num(p, "lookYaw")
+	# (+ the eyes lead into the turn with the shoulders, flowLead)
+	var yaw: float = clampf((_num(p, "steer") * 1.2 + _num(p, "yawRate") * 0.15) * sty.headTurn + lead * 0.8, -0.8, 0.8) + sty.headYaw + _num(p, "lookYaw") - 0.95 * awhip
 	var rx: float = (_num(p, "headRoll") if p.get("headRoll") != null else _num(p, "lean") * 0.6) + sty.headRoll
 	var rz: float = -0.12 * (ang - 0.72) + 0.04 * sin(t * 3.3) * wig - sty.headTilt * (1.0 - 0.6 * relax) + 0.12 * tall + _num(p, "lookPitch")
 	head.transform = Transform3D(GEAR.euler_xyz(rx, yaw, rz), head_p)

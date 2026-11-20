@@ -64,7 +64,7 @@ Player data: `%APPDATA%\Godot\app_userdata\Mini BMX\` — `settings.cfg`, `tune.
 
 ## 3. Controls (defaults, all rebindable in Settings → Controls)
 
-W/↑ pedal · S/↓ brake · A/D steer · **Space** hop/pump (hold to charge; **in the air: tuck the bike up**) ·
+W/↑ pedal · S/↓ brake (both levers, with feel) · **Ctrl front brake only · Alt rear brake only (bare levers: they lock)** · A/D steer · **Space** hop/pump (hold to charge; **in the air: tuck the bike up**) ·
 **S/W pressed fresh as you leave a lip: throw a back/front flip** · **W/S in the air: tilt the bike nose down/up (limited, body shift)** · **A/D in the air: lean the bike left/right (no spins)** · **brake + A/D when slow: pivot (pirouette)** · Shift sprint (stamina) · Q/E shift gears · F bail · Backspace back to
 start · R new world · B next bike · C next camera · Z/X rotate camera · +/- zoom · mouse drag orbit ·
 H records · **M trail map** (pad: Share) · **P / K / L** the tuning card on its Ride / Rider / Look tab · **O photo mode** (free camera, see section 5) · F1 hide HUD ·
@@ -282,10 +282,111 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - **Corner life** (Rider › Motion › Corner life, `leanLively` master + `leanBalance` / `leanBumps` / `leanLoad`): leaned over, the body roll gets a slow uneven balance sway
   (~1-2 deg), bumps under the leaned bike nudge it, and the turn's load (`latG` from game.gd) presses the rider a few cm
   down into the attack position. Hip / chest roll springs ring a touch more (`ROLL_*_Z` 0.52 / 0.44).
-- **Corner whip / drift** (`bike_physics.gd` `whip`, Ride › Body › `whip*`): both sticks hard the same way (steer + body
-  lean, > 0.6) above `whipMinSpeed` = the bike is thrown further over (`whipLean`) and the rear swings out to `whipDrift`
+- **Ground sim** (2026-11-20, `bike_physics.gd`; sliders Ride › Steering / Tyres / Ground / Brakes / Body, Tune groups
+  Balance, Front tyre, Brakes, Ground). The user asked for "the best sim, but fun"; all parts work off one shared idea, the
+  friction the tyres need against the ground's own tilt (`_fric(a_lat, cos bank, sin bank)`):
+  - **Side slopes**: the grip sim (`_grip_step(dt, va, mu, nR, u_lat)`) gets the tyre use measured against the tilt, so
+    riding straight across a camber loads the tyres (loose ground / bumps move the rear downhill); `camberPull` drifts the
+    travel down the fall line (front falling to the low side), ~9 deg / 5 s hands-off on 5 deg. Berms: the bank bonus to the
+    turn now works at any speed. `cornerLoad`: the turn presses down through the bike (`corner_g` = sqrt(g²+a²)-g into the
+    vertical step: legs + shock sink, pop back out); the springs' extra load is taken back out for grip (`n_cos` x g/(g+corner_g)).
+  - **Balance** (`balanceSim` 0.4, `bal_k`): rolling, the rider leans to what the steer asks (`lean_need`, capped at what the
+    grip held last step `_amax/_amin`) and the bars follow the lean (`steer_lean`), with countersteer at speed. Leaned past
+    what the tyres can hold at all (not just past this moment's turn: a swap always leans ahead) it falls in (`balanceFall`)
+    and past `lowsideAngle` for 0.3 s = LOWSIDE. `gyroStable` slows the roll a little at speed. 0.7 made turn-in 0.4-0.5 s
+    at 25 km/h (too slow), 0.4 keeps it 0.10-0.23 s.
+  - **Front tyre**: `front_use` = its share of the turn on its current load and friction circle (front brake);
+    > 1 pushes wide (`front_push`, heading follows the travel), past `frontWashAt` for `frontWashTime` = FRONT WASHED OUT.
+    The old rough "light front = less grip" factor in `a_grip` is gone.
+  - **Two brakes**: `inp.brake` (S / LT) = both levers with feel (rear kept a touch past locking = light skid, eased off
+    the moment the rear steps out; front just under its limit); new actions `brake_front` (Ctrl) / `brake_rear` (Alt) =
+    bare levers. Each limited by its tyre (`cap = mu x load`), locked = 80 % (`rear_lock` / `front_lock`); `skid` = rear
+    locked (it used to be any brake press). Braking moves load forward (`_b_prev` x `SLOPE_TRANSFER`); a front grab that
+    would take the rear below nothing for 0.25 s = OVER THE BARS. The rear's friction circle counts only its own brake /
+    drive (`_a_rear`) and the front only swings a locked rear round with grip it has left (`_circ_f`): both together stay
+    straight. 40 km/h stops: front 7.5 m, rear 9.5 m (locks), both 7.1 m.
+  - **Knocks**: `groundKnock` = the side slope under the front tyre (`top_height` +-12 cm across) minus the land's tilt
+    turns the travel (rocks kick, ruts hold), `knock` rad/s.
+  - **Weight in the turn / right stick**: `weight_in` = side lean x the way the tyres push (`_f_prev`: into a turn, or uphill
+    across a slope) - with = more grip (`flickGrip`) and a steadier rear over bumps (`weightSteady`), against = hanging inside,
+    less grip (`weightInside`) and it no longer halves the steer (`fs_k`).
+  - **Berms + tilted ground look** (user: "takes them too straight up, he must lean into it"): steering into a bank's low
+    side, `bermAssist` raises the turn to at least the bank's own (G tan(bank), `berm_k`), so the lean matches the bank and the
+    tyres need no side grip; `bankLean` (0.6) draws rider + bike leaning into any tilt, part of the way square to it
+    (`bank_lean`, also in `counter` so the body follows); `bodyLean` 0.7 -> 0.8 (Tune VER 15). Real trail banks are only
+    ~4-10 deg (`BMX_BERM_SHOT=prefix [BMX_BERM_MIN=rad]` + `BMX_DEMO=1`: `BERMSHOT` lines + shots on banks).
+  - **Surfaces per tyre**: `surf_f` / `surf_r` (contact points), grip `SURF_MU` eased over ~0.1 s (`_mu_f` / `_mu_r`);
+    front tyre + front brake use the front's, rear brake / drive / grip sim / loose patches the rear's, rolling drag both.
+  - **Jumps**: the ground-only drawn lean (stick, slow steer, bank, whip: `_gx_lean` + `bank_lean`) is carried into the air
+    and eased out (it snapped at take-off), eased back in on landing. Take-off off a tilted lip: the legs' pop
+    (`pump_lift`) goes along the surface normal, part of it sideways to the low side. Landing: the tilt is read fresh at
+    touch-down (`_bank_at`; the reading drifted to flat in the air), the hit is x cos(tilt) and the rest slides you towards
+    the low side (`landSlide`, the tyres catch it); no falling in / lowside for the first ~0.4 s after landing.
+  - **Smoothing, not changing the feel** (user: "jitter and rough animation", worst in bank-to-bank swaps on rough
+    ground). Only what the bike READS from the ground is filtered: `knock` eases (~0.08 s, ripples < 0.08 ignored), the
+    bank reading is a critically damped spring (~0.15 s, `bank_v`), `berm_k` eases 4/s, the tyres' load for grip
+    (`_load_s`) and the front's share (`_share_f`) ease ~0.04 s (tyre relaxation), `_amax/_amin` (what the rider leans to)
+    ~0.12 s, `corner_g` ~0.1 s, the front push blends in over the first 15 % past its limit. Measured with
+    `BMX_JITTER_ALL=1` (+ `BMX_FOLLOW=1 BMX_PAD=1` or `BMX_FLIPFLOP=1.2`): lat_a step spikes 13 -> 1.6 m/s², bike lean
+    0.17 -> 0.02 rad, knock / bank flips 42 / 35 -> 0. Turn response (`feel=1` yaw63) unchanged.
+  - **Motion caps (drawn only)**: `Game.MCAP` / `_mcap` = every physics value the drawing uses (bike lean, bars, body
+    counter, head roll, lat g, hip shift, leg absorb, body stick) follows on a stiff spring with a top speed + acceleration
+    a body / bike can reach; `Rider.TORSO_VMAX` (2.5 m/s) caps the hips / chest per frame right after the skeleton safety
+    limits (whose clamps snapped the chest), before the limbs are fitted. Head jumps > 8 cm in a frame on the trail: 3-4 -> 0.
+    `_mcap` integrates in sub-steps of <= 1/240 s: one step per drawn frame (w = 60) was unstable at 60 fps and the legs
+    buzzed every frame even standing still ("violently vibrating"). **Test frame-rate-dependent drawing at 60 fps**:
+    `BMX_FPS=60` (also 30 / 144) + `BMX_JITTER_ALL=1 BMX_JITTER_FINE=1` (0.3 mm thresholds, `d_*` = drawn values).
+  - **Rider + bike = two masses** (user: "the whole rider leans as one"): bike and body lean were both fixed multiples of
+    the one `lean`, so they moved in lockstep. Now the drawn bike runs ahead while the lean changes (`bikeLead` s x roll
+    speed, `_bike_lead`, up to 20 deg; the body's target excludes it) and the body follows on slower springs
+    (`ROLL_HIP_W` 12 -> 8, `ROLL_CHEST_W` 10 -> 6.5): in a swap the bike crosses under a body that arrives ~0.2 s later.
+  - **Crash judge** (user: "prone to crash too much", "crash logic must be intelligent"): the soft failures are no
+    longer trip-wires. `_danger(reason, sev, dt[, t_build])`: sev = how far past the line (rear slide past `slipMax`
+    /0.25 rad, front past `frontWashAt` /0.6 x (1 + 2 front_lock), lean past the grip by `lowsideAngle` /0.25 rad, the
+    rear lifting under the front brake /0.25 g) fills that reason's meter over `crashTime` (0.4 s at sev 1, faster the
+    further past; front: `frontWashTime`), it drains at `riderSave` /s once back under; a full meter = the crash, sev >=
+    `CRASH_HARD` (3) = at once; below 2.5 m/s nothing soft crashes. `risk` = the fullest meter; reflexes scale with it
+    (`riderSkill`): brakes eased (front 60 %, rear 40 %), lean asked of the tyres down 30 %, slide catch up to x2.5. A scare
+    over 0.5 fought back to clear = SAVED! (+ style). Impacts stay instant, but BONK over the bars is graded by the rock's
+    height against the wheel: `throw_v` 6 m/s (boulder) .. 12 m/s (just past rolling height), never with the front in the
+    air. Ride › Tyres › Crashing. Test: `BMX_CRASH_LOG=1` (`CRASH reason | state` and `SAVED peak=` lines).
+    The front only washes out LOADED and LEANED (sev x front share / static share x lean): a light front just doesn't steer
+    (half of all test crashes were a near-weightless front after landings). `frontWeight`: leaned over the rider moves
+    0.12 g onto the front (more while it's in trouble) - the AI rider washed out at one bend every run without it.
+    Every number of this work is a slider: Crashing (`crashHard`, `reflexBrake`, `reflexStandUp`, `reflexCatch`,
+    `frontWeight`, `bonkBoulder`, `bonkSmall`), Jumps (`whipReturn`) and a **Ride › Smoothing** page (`bankSmooth`,
+    `knockSmooth`, `tyreRelax`, `cornerSmooth`, `bankLeanRate`, `motionCap` x the `MCAP` speeds, `torsoMaxSpeed` passed
+    to the rider as pose input `torsoVmax`). 60 s test rides (trail, AI rider, whips, swaps): ~0-1 crash each, all real hits.
+  - **Air whips** (two masses in the air): the right stick to the side, short of its spin edge (|x| < 0.8), sets the
+    hip twist target (`air_tw`, the bike's yaw against the body) to `airWhip` (1.1 rad) x stick / 0.8, past the old
+    `airTwist` limit, plus extra lay-over (roll + 0.3 x the whip); `land_prep` eases 70 % of it back for the landing.
+    The rider counter-turns in its pose (`airWhip` input = smoothed `air_tw`: hips -0.4, shoulders -0.85, head -0.95 of
+    it) so the body keeps facing the flight. Landed straight (< 20 deg) after > 35 deg: "WHIP" / "BIG WHIP" (> 55 deg),
+    +500..650 style. Test: `BMX_FOLLOW=1 BMX_TRICK=whip BMX_BIGAIR=1` (`WHIPA` lines, + `BMX_AIRSHOT=prefix`).
+  - **Pro flow** (Rider › Motion: `flowBend` spine bows through lean changes as the chest lags the hips, `flowLead`
+    shoulders + eyes turn into the turn the body is rolling towards, `flowSink` hips / chest sink into the new turn after
+    a quick roll). Test shots: `BMX_TSHOTS=prefix@t1,t2,...` (game clock, ~3 s behind the autotest clock).
+  - Measure: `slope_stress.tscn -- sim=1` (`SIM` lines: cambers, flat vs berm turn, `SIM BERM`, `SIM LAND`, brakes, braking in a turn, knocks) and
+    `feel=1`; ride log columns `in_brake_f ... balance`; rumble: front push in Tyre slip, either lock in Skids.
+- **Tuning card, Ride tab redesigned** (2026-11-20): pages by what you're doing (`ui/ride_layout.gd` `RideLayout.PAGES`:
+  Feel, Steering, Tyres, Ground, Brakes, Speed, Body, Suspension, Jumps, Demo; Rider › Physics moved into Ride › Body), each
+  row with a plain hint and end words, "*" rows in Simple view, All shows every slider (`TuneCard.ride_all`); any Tune key not
+  placed lands in Body › More (`RideLayout.pages()`). Own slider widget `ui/tune_slider.gd` `TuneSlider` (drawn track, tick =
+  the preset's value, fill from tick to value, end words either side, double-click / ↺ = preset; an HSlider underneath so the
+  pad works). **Feel** page = 8 macro sliders (`Tune.MACROS`, keys `feel*`, 0.5..1.5): each multiplies a set of detail values
+  by m^exp in `Tune._rebuild` (clamped to that slider's range), so the detail sliders keep their own settings; a detail row
+  shows "Feel x1.2" when one moves it. Test: `BMX_PANEL=ride BMX_PANEL_CAT=<n> [BMX_RIDE_ALL=1]`.
+- **Slow-speed feel** (2026-11-20, Ride › Lean: `leanLead`, `slowRoll`, `slowLean`, all fading out with `spd_k`, gone by ~30 km/h):
+  slow, the lean target moves towards the lean the asked-for turn needs (`lean_need`) instead of waiting for the turn, the roll
+  stiffness is up to 2x, and the steer throws the bike under the upright body (`slowLean` rad); the right-stick bike throw
+  (`flickLean`) is full from 1.5 m/s. Measured (`slope_stress.tscn -- feel=1`): lean 63 % in 0.30 s (was 0.58) at 8-25 km/h,
+  left / right swap 0.53 s (was 0.88) at 8 km/h; 50 km/h unchanged. The user found slow riding "stiff, not responsive".
+- **Corner whip / drift** (`bike_physics.gd` `whip`, Ride › Body › `whip*`): starts ONLY from a deliberate throw of the right
+  stick (centre -> edge within `FLICK_WINDOW`, `flick_thrown`) with the steer held the same way past `whipTrigger`, above
+  `whipMinSpeed` (2026-11-20: it used to start whenever both sticks passed 0.6, so leaning into a corner with the stick
+  slid 20-25 deg: "we slide weird when leaning"). Then the bike is thrown further over (`whipLean`) and the rear swings out to `whipDrift`
   (~0.42 rad) at `whipSnap`, held while both stay there, speed mostly kept (`whipCarry` cuts the slide scrub); "WHIP!" after
-  0.3 s. Sticks must pass `whipTrigger` and stay there 0.12 s (`_whip_arm`); the ride log has `whip`, `whip_hold`, `raw_right_x`, `raw_left_x` columns; `whip_hold` keeps control `whipCatch` s after letting go so the drift is caught (without it the rear spun out to the
+  0.3 s (`_whip_arm` = 0.25 s grace after the throw); the ride log has `whip`, `whip_hold`, `raw_right_x`, `raw_left_x` columns; `whip_hold` keeps control `whipCatch` s after letting go so the drift is caught (without it the rear spun out to the
   wash-out angle). Test: `BMX_WHIP=secs` (+ `BMX_WHIP_T0`, `BMX_STRAIGHT=1`) prints `WHIP` lines.
 - **Aerodynamics** (`aero_k` in `bike_physics.gd`): the air drag scales with the body: right stick forward on the ground = a race tuck
   (chest folded over the bars, hips back, knees bent) cuts drag by `tuckDrag` (0.42; half that while pedalling), stick back = sat up,
@@ -960,6 +1061,8 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `-s res://tools/far_hills_probe.gd --headless [-- seed]` | the title / ride backdrop grid: C# batch vs GDScript per point (must match), far tree count; must say `PASS` |
 | `-s res://tools/wood_edge_probe.gd --headless` | drives angled lines onto every wooden ramp; must report `walls=0` |
 | `--headless res://tools/slope_stress.tscn [-- verbose=1 trace=1 only=<substr> bike=dh]` | ride physics on synthetic ground (no world): coast speed vs the closed form on -45..+15 deg grades (within 3 %), braking / holding vs the friction angle, climbs, cambers to 45 deg, crests (air only past v^2 = g R), rollers, washboard, curbs / ledges / drops, chute compressions, full-lock turns on grades, 4 x 60 s random rides; must say `SLOPE_STRESS PASS` (exit code = failures). A scene, not `-s`: the physics needs the Tune autoload |
+| `--headless res://tools/slope_stress.tscn -- sim=1` | the ground sim in numbers: `SIM CAMBER` (hands-off drift across 5-30 deg), `SIM TURN` flat vs berm, `SIM BRAKE` front / rear / both from 40 km/h, `SIM TURNBRAKE`, `SIM KNOCK` |
+| `--headless res://tools/slope_stress.tscn -- feel=1 [tune=k=v,k=v]` | steering feel on synthetic ground: `FEEL STEER` (time to 63 % yaw / lean, radius, left-right swap) per speed, `FEEL LEAN` (steer / right stick / both / thrown: slip, whip, speed kept) on flat + bumpy ground; `tune=` overrides values (works for every slope_stress mode) |
 | `BMX_FW_PRESET=<name>`, `BMX_FW=pitch=1.3,poe=60`, `BMX_FW_PREVIEW=<m/s>` | freewheel preset / values / Preview for a test run (not saved) |
 | `BMX_FLOW_DEMO=1` | HUD flow meter: adds a flow level every 0.9 s from 3 s up to MAX, then lets it drain (pair with `BMX_DUST_SHOTS` for screenshots) |
 | `BMX_GETUP_K=0.6` | draws the get-up prompt as if the key were held that far (with `BMX_BAIL`) |

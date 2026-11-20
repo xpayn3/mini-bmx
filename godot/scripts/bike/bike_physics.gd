@@ -95,6 +95,35 @@ const LAND_CONE := 1.05   # heading within ~60 deg of the travel at touch-down =
 var slip_w := 0.0; var grip_r := 1.0; var loose := 0.0; var bar_catch := 0.0
 var _grip_noise: FastNoiseLite = null; var _grip_rng := RandomNumberGenerator.new(); var _grip_cv := 0.0
 var _squirm := 0.0; var _grip_rough := 0.0
+# ground sim (2026-11-20): front tyre (front_use = friction it's using, 1 = at its limit; front_push = how far past
+# it, pushing wide), the two brake levers (brake_f / brake_r 0..1) and how locked each wheel is, the turn's load
+# pressed down through bike + legs (corner_g, m/s² on top of g), the rider's weight in the turn (weight_in:
+# + over the outside pedal / bike pushed under, - hanging inside), the lean the grip can't hold (lean_err)
+var front_use := 0.0; var front_push := 0.0; var _push_t := 0.0
+var brake_f := 0.0; var brake_r := 0.0; var rear_lock := 0.0; var front_lock := 0.0; var _fb_f := 0.0
+var corner_g := 0.0; var weight_in := 0.0; var lean_err := 0.0; var _low_t := 0.0; var knock := 0.0
+var _amax := 99.0; var _amin := -99.0; var bal_k := 0.0; var _b_prev := 0.0; var _endo_t := 0.0; var _f_prev := 0.0; var _circ_f := 1.0; var _brake_feel := true; var _a_rear := 0.0
+var berm_k := 0.0   # how much a berm is carrying the turn right now (0..bermAssist)
+var bank_lean := 0.0   # the drawn lean into tilted ground (bankLean x bank), bike + body
+var bank_v := 0.0      # how fast the bank reading is changing (its smoothing spring)
+var _load_s := NAN     # the tyres' load factor for grip, eased (relaxation)
+var _share_f := NAN    # the front tyre's share of the load, eased the same way
+const SURF_MU := [0.72, 0.95, 0.45, 0.5]   # tyre grip by surface: ground, trail, water, sand / dry
+var surf_f := 0; var surf_r := 0; var _mu_f := NAN; var _mu_r := NAN   # the ground under each tyre, its eased grip
+var _gx_lean := 0.0    # the rest of the ground's drawn lean (body stick, slow steer, whip), eased through jumps
+var _bike_lead := 0.0  # how far the bike runs ahead of the rider's lean while it changes (two masses)
+var _whip_peak := 0.0  # this jump's biggest air whip (bike twisted against the body, rad)
+# ---- crash judge: losing control is a build-up, not a trip-wire. Each soft failure (a slide past its angle, a front
+# pushing past its grip, a lean past what the tyres hold, the rear lifting under the front brake) reports how far past
+# its line it is (sev: 0 at the line, 1 = clearly past); that fills its trouble meter while it lasts, the rider fights
+# it off when back under (riderSave /s), and only a full meter is a crash. Way past (sev >= CRASH_HARD) = down at once.
+# Rolling at walking pace nothing soft crashes (the rider dabs a foot). Impacts (walls, bonks, slams, landings on the
+# head) stay instant: they're hits, not lost control
+var _risk := {}        # reason -> trouble meter (0..1)
+var risk := 0.0        # the biggest meter now: the rider's reflexes scale with it (and the HUD may show it)
+var _risk_peak := 0.0  # the highest it got since it was last clear: a full recovery from > 0.5 = SAVED!
+const CRASH_HARD := 3.0
+var _crash_log := Env.s("BMX_CRASH_LOG") != ""
 var front_air := false; var rear_air := false; var c_f := true; var c_r := true
 var pitch_w := NAN; var stamina := 1.0; var tired := false; var sprint := 0.0
 var spin := 0.0; var a_drive := 0.0
@@ -229,6 +258,7 @@ func reset_at(px: float, pz: float, hd: float) -> void:
 	sprint = 0; flow = 0; flow_t = 0; lat_m = 0; carve = 0; carve_acc = 0; carve_berm = false
 	y_draw = y; pitch_draw = pitch; nose_ref = NAN; pitch_w = NAN; y_prev = NAN; kick_t = 0
 	w_f = y; w_r = y
+	_reset_ground_sim()
 
 func get_up() -> void:
 	crash_on = false; crash_hold = 0; crash_armed = false
@@ -247,6 +277,14 @@ func get_up() -> void:
 	body_pw = 0; throw_v = 0; air_w = 0; air_inertia = 1; air_tilt = 0; air_tilt_v = 0; air_yaw = 0; air_tw = 0; air_tw_v = 0; land_jolt = 0
 	pivot = 0; pivot_acc = 0; body_in_s = 0; flick = 0; flick_v = 0; _flick_arm = 0; _flick_side = 0; flick_prev = 0; manual_up = 0; wheelie_time = 0.0; wheelie_pedal = false; flick_kick = 0; whip = 0; whip_hold = 0; _whip_arm = 0; _whip_t = 0; _whip_flashed = false
 	sprint = 0; flow = 0; flow_t = 0; lat_m = 0; carve = 0; carve_acc = 0; carve_berm = false; y_draw = y; pitch_draw = pitch
+	_reset_ground_sim()
+
+func _reset_ground_sim() -> void:
+	front_use = 0.0; front_push = 0.0; _push_t = 0.0; rear_lock = 0.0; front_lock = 0.0; _fb_f = 0.0
+	corner_g = 0.0; weight_in = 0.0; lean_err = 0.0; _low_t = 0.0; knock = 0.0; _amax = 99.0; _amin = -99.0; bal_k = 0.0
+	_b_prev = 0.0; _endo_t = 0.0; _f_prev = 0.0; _circ_f = 1.0; bank_lean = 0.0; _gx_lean = 0.0; berm_k = 0.0
+	_mu_f = NAN; _mu_r = NAN; bank_v = 0.0; _load_s = NAN; _share_f = NAN; _bike_lead = 0.0
+	_risk.clear(); risk = 0.0; _risk_peak = 0.0
 
 func begin_crash() -> void:
 	crash_pending = ""
@@ -345,7 +383,17 @@ func _wheel_ground(f: Vector3, x0: float, R: float, cp0: float) -> float:
 func _ride_step(dt: float, inp: Dictionary) -> void:
 	var terrain = host.terrain
 	var throttle: float = inp.throttle
-	var brake_k: float = inp.brake
+	# two levers: "brake" (S / LT) squeezes both (the front by brakeFrontMix), brake_front / brake_rear one each
+	brake_r = maxf(float(inp.brake), float(inp.get("brake_rear", 0.0)))
+	brake_f = maxf(float(inp.brake) * float(T.get("brakeFrontMix", 0.7)), float(inp.get("brake_front", 0.0)))
+	# the brake key is a rider squeezing both with feel: they keep each wheel at the edge of locking (the rear a
+	# touch past it, a light skid). The front-only / rear-only keys are the bare levers: lock what you squeeze
+	_brake_feel = float(inp.brake) >= maxf(float(inp.get("brake_front", 0.0)), float(inp.get("brake_rear", 0.0)))
+	# the rider's reflexes in trouble (riderSkill x how full the crash meters are): ease off the brakes, the front most
+	var rfx := float(T.get("riderSkill", 1.0)) * smooth01((risk - 0.15) / 0.5)
+	var rb: float = float(T.get("reflexBrake", 0.6))
+	brake_f *= 1.0 - rb * rfx; brake_r *= 1.0 - rb * 0.67 * rfx
+	var brake_k: float = maxf(maxf(float(inp.brake), brake_r), float(inp.get("brake_front", 0.0)))
 	var brake := brake_k > 0.1
 	var steer_input: float = inp.steer
 	# rider body stick (gamepad right stick): fore / aft weight, side lean. Works the whole ride
@@ -435,7 +483,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	if lip_win:
 		throw_in = (0.0 if lock_ts else brake_k) - (0.0 if lock_tw else throttle)   # + = back (nose up)
 		if not lock_ts:
-			brake_k = 0.0; brake = false
+			brake_k = 0.0; brake = false; brake_f = 0.0; brake_r = 0.0
 	# the body stick throws too, but only a real yank: pushed past half way, starting from the centre inside
 	# the lip window. Any lean held into the lip (riding in the attack position, a manual) never throws -
 	# a light forward lean used to throw a front flip at every lip and nose-dive the landing
@@ -456,13 +504,20 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	var f := fwd()
 	_sample(f)
 	surf = terrain.surface(x, z)
+	# each tyre on its own ground (front on the sand at the trail's edge, rear still on the hardpack), its grip easing
+	# across a change over ~0.1 s (a hard step from 0.95 to 0.72 at the trail edge used to kick both tyres at once)
+	surf_f = terrain.surface(x + f.x * (L - BB_REAR), z + f.z * (L - BB_REAR))
+	surf_r = terrain.surface(x - f.x * BB_REAR, z - f.z * BB_REAR)
+	var mk := minf(1.0, dt * 12.0)
+	_mu_f = SURF_MU[clampi(surf_f, 0, 3)] if is_nan(_mu_f) else lerpf(_mu_f, SURF_MU[clampi(surf_f, 0, 3)], mk)
+	_mu_r = SURF_MU[clampi(surf_r, 0, 3)] if is_nan(_mu_r) else lerpf(_mu_r, SURF_MU[clampi(surf_r, 0, 3)], mk)
 	var in_water := surf == 2
 	if is_nan(course):
 		course = heading; slip = 0
 	since_land += dt
 	var slope: float = _or(pitch_w, _g_pitch) if (not air and (front_air or rear_air) and wheelie_up <= 0.0) else _g_pitch   # a wheelie rolls on the ground's slope
 	var rear_down := not air and not rear_air
-	var skid := brake and v > 0.5 and rear_down
+	var skid := false   # the rear tyre locked and sliding (set by the brakes below)
 	# --- sprint / stamina ---
 	var want_sprint: bool = inp.sprint and throttle > 0.1 and not brake and not air
 	if stamina <= 0: tired = true
@@ -477,6 +532,9 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	# the tyre springs carry the weight straight down; on a slope only g cos(slope) of it presses the tyres onto
 	# the ground (what grip, brakes and drive can use), the rest is the pull down the slope
 	var n_cos := cos(clampf(_g_pitch, -1.2, 1.2))
+	# the tyre springs also carry the turn's load (corner_g, pressed down through the leaned bike); the tyres' grip
+	# on the ground is worked out from the tilt of the ground below (_fric / a_max), so take it out here
+	n_cos *= G / (G + maxf(0.0, corner_g))
 	var nR := 0.0 if air else _or(n_r, G * SH_R) * n_sc * n_cos
 	var nF := 0.0 if air else _or(n_f, G * (1 - SH_R)) * n_sc * n_cos
 	var n_tot := nR + nF
@@ -491,10 +549,27 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		# (body_x follows the grade) works against it; without this the auto forward lean on a climb took all
 		# the load off the rear: wheelspin, no side grip, and a WASHED OUT crash pedalling straight up 15 deg
 		dN += G * sin(clampf(_g_pitch, -1.2, 1.2)) * SLOPE_TRANSFER
+		# braking throws the weight onto the front by the same lever (last step's brake decel x CoM height /
+		# wheelbase): the front brake can then do most of the stopping and the light rear locks easily. Grab so
+		# much front that the rear would carry less than nothing and the rear comes up: held, it's over the bars
+		# a rider weights the front in a turn (hands and hips pressing it into the ground): leaned over, frontWeight g
+		# of the load moves forward, more while the front is in trouble. Without it the front could ride a long turn
+		# carrying next to nothing (a climb + weight back) and wash out (the AI rider did, every run at one bend)
+		var fw_k: float = float(T.get("riderSkill", 1.0)) * smooth01((absf(lean) - 0.12) / 0.35)
+		dN -= G * float(T.get("frontWeight", 0.12)) * fw_k * (1.0 + 1.5 * float(_risk.get("FRONT WASHED OUT!", 0.0)))
+		var d_brake := -_b_prev * SLOPE_TRANSFER
+		# (how far the rear would go below nothing = how hard it's coming up: the crash judge builds on it)
+		var lift := (-nR + 0.03 * G) - (dN + d_brake)
+		_danger("OVER THE BARS!", lift / (0.25 * G) if (brake_f > 0.4 and v > 3.0) else -1.0, dt)
+		dN += d_brake
 		dN = clampf(dN, -nR + 0.08 * G, nF - 0.08 * G)
 		nR += dN; nF -= dN
 	n_load = n_tot
-	var mu: float = (0.95 if surf == 1 else 0.5 if surf == 3 else 0.45 if surf == 2 else 0.72) * T.grip
+	# surface grip per tyre (SURF_MU: 0 ground 0.72, 1 trail 0.95, 2 water 0.45, 3 sand / dry 0.5) x Tyre grip;
+	# mu = the whole bike's (weighted like the load: rear SH_R)
+	var mu_f: float = _mu_f * T.grip
+	var mu_r: float = _mu_r * T.grip
+	var mu: float = mu_r * SH_R + mu_f * (1.0 - SH_R)
 	spin = 0; a_drive = 0
 
 	# --- longitudinal ---
@@ -512,21 +587,42 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		var cad: float = v / (gk * T.pedalTop * ts * 0.7)
 		var grind := 1.0 if gear < 0 else 0.35 + 0.65 * smooth01((cad - 0.15) / 0.7)
 		var drive: float = (throttle if (rear_down and not (v < -0.3 and rev_cap > 3.0)) else 0.0) * minf(T.pedalLaunch * p_mul / ts / gk, T.pedalPower * p_mul / vp) * grind * clampf((p_top - v) / 2.5, 0, 1)
-		var drive_cap := mu * nR
+		var drive_cap := mu_r * nR
 		if drive > drive_cap:
 			spin = minf(1.0, (drive - drive_cap) / 3); drive = drive_cap + (drive - drive_cap) * 0.15
 		a_long = absf(drive)
 		var a := drive - G * sin(slope)
+		# two brakes, each limited by its own tyre: the front does most of the stopping (braking moves the weight onto
+		# it, so it can take more), the rear goes light and locks easily. Squeeze a lever past what its tyre can hold
+		# and that wheel locks: it slides at ~80 % of the grip (rear = skid / fishtail, front = no steering, and
+		# leaned over it washes out, see the front tyre below)
+		var fb_r: float = T.brakeForce * float(T.get("brakeRear", 0.45)) * brake_r
+		var fb_f: float = T.brakeForce * float(T.get("brakeFront", 0.75)) * brake_f * (0.0 if front_air else 1.0)
+		var cap_r: float = maxf(0.05, mu_r * nR)
+		var cap_f: float = maxf(0.05, mu_f * nF * float(T.get("frontGrip", 1.0)))
+		if _brake_feel:
+			# ...and eases the rear off the moment it starts stepping out sideways, so it grips sideways again
+			var r_ease := smooth01((absf(slip) - 0.04) / 0.08)
+			fb_r = minf(fb_r, cap_r * lerpf(1.0 + 0.25 * float(T.get("brakeSkid", 0.4)), 0.85, r_ease))
+			fb_f = minf(fb_f, cap_f * 0.97)
+		rear_lock = move_toward(rear_lock, clampf((fb_r - cap_r) / (0.25 * cap_r), 0.0, 1.0) if fb_r > cap_r else 0.0, dt * 8.0)
+		front_lock = move_toward(front_lock, clampf((fb_f - cap_f) / (0.25 * cap_f), 0.0, 1.0) if fb_f > cap_f else 0.0, dt * 8.0)
+		fb_r = lerpf(minf(fb_r, cap_r), cap_r * 0.8, rear_lock) if rear_down else 0.0
+		fb_f = lerpf(minf(fb_f, cap_f), cap_f * 0.8, front_lock)
+		_fb_f = fb_f
+		_a_rear = maxf(0.0, drive) + (fb_r if (brake and rear_down) else 0.0)   # what the REAR tyre carries along the bike
+		var b_all := fb_r + fb_f
+		_b_prev = b_all if (brake and rear_down and absf(v) > 0.3) else 0.0
 		if brake and rear_down and v > 0.3:
-			var b: float = minf(T.brakeForce * brake_k, 0.85 * mu * n_tot)
-			a -= b; a_long += b; drive -= b
-			brake_heat += b * v * dt / 45.0
+			a -= b_all; a_long += b_all; drive -= b_all
+			brake_heat += b_all * v * dt / 45.0
 		elif brake and rear_down and v < -0.3 and (rev_cap > 3.0 or not brake_back):
 			# braking while rolling backwards (after a fakie landing, or sliding back down a climb the brakes
 			# can't hold); a fresh press from a standstill backs up on purpose (brake_back) and doesn't brake
-			var b: float = minf(T.brakeForce * brake_k, 0.85 * mu * n_tot)
-			a += b; a_long += b; drive += b
-			brake_heat += b * -v * dt / 45.0
+			a += b_all; a_long += b_all; drive += b_all
+			brake_heat += b_all * -v * dt / 45.0
+		else:
+			rear_lock = move_toward(rear_lock, 0.0, dt * 8.0); front_lock = move_toward(front_lock, 0.0, dt * 8.0)
 		a_drive = drive
 		var pump_ok := not front_air and not rear_air and not (hop_t > 0) and since_land > 0.25 and prep < 0.1 and v > 1
 		var a_pump: float = T.pumpGain * clampf(compress_v, -2, 2) * -sin(slope) if pump_ok else 0.0
@@ -538,7 +634,10 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 				if host.msg_idle(): host.flash("PUMP +%d km/h" % roundi(pump_acc * 3.6))
 			pump_acc = 0
 		var carry: float = 1 - T.flowCarry * flow / FLOW_MAX
-		var roll: float = (0.32 if surf == 0 else 0.42 if surf == 3 else 0.1) * T.rollRes * signf(v) * minf(1.0, absf(v) * 4)
+		# rolling drag per tyre on its own ground (sand drags, hardpack rolls), weighted by the load like the grip
+		var rr_f: float = 0.32 if surf_f == 0 else 0.42 if surf_f == 3 else 0.1
+		var rr_r: float = 0.32 if surf_r == 0 else 0.42 if surf_r == 3 else 0.1
+		var roll: float = (rr_r * SH_R + rr_f * (1.0 - SH_R)) * T.rollRes * signf(v) * minf(1.0, absf(v) * 4)
 		# aerodynamics: the drag is the rider's frontal area. Folded down over the bars (right stick forward)
 		# it drops (~40 %: an upright downhill rider vs a race tuck), so the bike runs on and tops out faster;
 		# sat up tall (stick back) it catches the wind like an air brake. Pedalling hard spoils the tuck a bit
@@ -557,7 +656,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			brake_stop = true
 		# ...but only where the tyres can: past the friction angle (or the brake's own limit) the locked bike
 		# slides down the slope like a real one (normal trail grades hold as before)
-		if brake_stop and G * absf(sin(slope)) > minf(T.brakeForce * brake_k, 0.85 * mu * n_tot):
+		if brake_stop and G * absf(sin(slope)) > minf(T.brakeForce * (float(T.get("brakeRear", 0.45)) * brake_r + float(T.get("brakeFront", 0.75)) * brake_f), 0.85 * mu * n_tot):
 			brake_stop = false
 		if brake_stop or (foot_down and throttle < 0.1 and not (brake and brake_back)):
 			v = 0.0   # a foot on the ground holds the bike still (no creeping on a slope)
@@ -574,6 +673,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		flow_t += dt
 		if brake and v > 1: flow = maxf(0.0, flow - dt * 3)
 		elif flow_t > T.flowTime: flow = maxf(0.0, flow - dt * 1.5)
+	skid = brake and rear_down and v > 0.5 and rear_lock > 0.15
 	var top_now: float = (T.pedalTop + T.sprintTop * sprint) * gear_k() * T.topSpeed
 	if v > top_now + 0.3: spun_out = true
 	elif v < top_now - 0.8: spun_out = false
@@ -598,14 +698,19 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		_flick_arm = 0.0; _flick_side = 0.0
 	elif _flick_side == 0.0:
 		_flick_side = signf(flick_in)
+	var flick_thrown := 0.0   # +-1 the step a deliberate flick lands (it may start a corner whip)
 	if _flick_side != 0.0 and _flick_arm >= 0.0:
 		_flick_arm += dt
 		if absf(flick_in) > 0.85 and signf(flick_in) == _flick_side:
 			if _flick_arm < FLICK_WINDOW and not air and va > 2.0:
 				flick_kick += _flick_side * float(T.get("flickKick", 0.16)) * smooth01((va - 2.0) / 5.0)
+				flick_thrown = _flick_side
 			_flick_arm = -1.0   # spent until the stick comes back towards the centre
 	flick_prev = flick_in
-	var steer_eff := clampf(steer_input + flick * float(T.get("flickSteer", 0.5)), -1.0, 1.0)
+	# the side lean steers too (the bike leaned under you turns that way), but held AGAINST the steer it's the body
+	# hanging off the inside: that costs grip (weight_in below), it hardly undoes the turn (it used to halve it)
+	var fs_k := 1.0 if (absf(steer_input) < 0.2 or signf(flick) == signf(steer_input)) else 0.25
+	var steer_eff := clampf(steer_input + flick * float(T.get("flickSteer", 0.5)) * fs_k, -1.0, 1.0)
 	# leaning with the steer: how much the two agree, smooth through zero (no on / off as the steer crosses)
 	var agree := clampf(flick * steer_eff * 2.0, 0.0, 1.0) * absf(flick)
 	# corner whip: both sticks thrown the same way (steer + body lean) in a tight corner. The rider whips the bike
@@ -613,10 +718,13 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	# the tyres catch it. The lean / drift build in over ~0.25 s and ease out, nothing snaps
 	var wtr: float = float(T.get("whipTrigger", 0.6))
 	var whip_want := not air and va > float(T.get("whipMinSpeed", 4.0)) and absf(steer_input) > wtr and absf(flick_in) > wtr and signf(steer_input) == signf(flick_in) and float(T.get("whipDrift", 0.42)) > 0.0
-	# both sticks have to stay there a moment (0.12 s) before it starts: a thumb brushing the right stick while
-	# steering never whips
-	_whip_arm = _whip_arm + dt if whip_want else 0.0
-	if whip < 0.05 and _whip_arm < 0.12: whip_want = false
+	# it only STARTS from a deliberate throw of the right stick (centre -> edge within FLICK_WINDOW) with the steer
+	# held the same way: leaning the body into a corner with the stick, however far, just turns harder (it used to
+	# start a 20-25 deg drift whenever both sticks passed whipTrigger: "we slide weird when leaning"). Once going
+	# it is held while both stay past whipTrigger
+	if flick_thrown != 0.0 and absf(steer_input) > wtr and signf(steer_input) == flick_thrown: _whip_arm = 0.25
+	else: _whip_arm = maxf(0.0, _whip_arm - dt)
+	if whip < 0.05 and _whip_arm <= 0.0: whip_want = false
 	if whip_want and whip < 0.05: whip_side = signf(steer_input)
 	if whip_want and signf(steer_input) != whip_side: whip_want = false
 	whip = minf(1.0, whip + dt * 4.0) if whip_want else maxf(0.0, whip - dt * 3.0)
@@ -637,42 +745,74 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	steer_in = clampf(steer_in + steer_in_v * dt, -1.0, 1.0)
 	var s_in: float = steer_in * (1 - T.steerCurve + T.steerCurve * absf(steer_in))
 	if true:
-		var w := 0.5
-		var lx := f.z * w
-		var lz := -f.x * w
-		# the lay of the land (berms, cambers, wooden decks) WITHOUT the rock / log domes: a rock under one
-		# side read as a 30 deg berm and threw the lean about (the wheels still ride over the rock). Read
-		# across both axles, +-0.5 m, so a sharp trail edge isn't a sudden berm either
-		var b := 0.0
-		if not air:
-			var dh := 0.0
-			for wo in [L - BB_REAR, -BB_REAR]:
-				var mx: float = x + f.x * wo
-				var mz: float = z + f.z * wo
-				dh += terrain.deck_height(mx - lx, mz - lz) - terrain.deck_height(mx + lx, mz + lz)
-			b = atan(dh * 0.5 / (2 * w))
+		var b := 0.0 if air else _bank_at(f)
 		_bank_raw = b
 		# a sharp edge (berm lip, trail edge) gives a one-frame spike across the 0.7 m: the bank the bike
 		# feels changes at most 3 rad/s
+		# it follows the ground on a critically damped spring (~0.15 s), its speed capped at 3 rad/s: rough ground
+		# and a bank-to-bank changeover read as a step every physics tick, which shook the lean, the grip limits and
+		# the drawn rider. The berm itself is metres long, so this doesn't delay it
 		var b0: float = _or(bank, b)
-		bank = b0 + clampf((clampf(b, -0.9, 0.9) - b0) * minf(1.0, dt * 20), -3.0 * dt, 3.0 * dt)
+		var bw_n: float = 2.15 / maxf(0.01, float(T.get("bankSmooth", 0.15)))
+		bank_v += ((clampf(b, -0.9, 0.9) - b0) * bw_n * bw_n - 2.0 * bw_n * bank_v) * dt
+		bank_v = clampf(bank_v, -3.0, 3.0)
+		bank = b0 + bank_v * dt
 	var bk := bank
 	var carving := not air and absf(steer_eff) > 0.01 and va > 4 and not skid and absf(slip) < 0.3
 	carve = minf(1.0, carve + dt * 2) if carving else maxf(0.0, carve - dt * 5)
 	var carve_f := carve * smooth01((va - 4) / 4)
-	var a_lat_lim: float = maxf(1.2, T.turnSlow + spd_k * (T.turnFast - T.turnSlow) + G * tan(bk) * signf(s_in) * spd_k + carve_f * T.carveBite + agree * float(T.get("flickTurn", 4.0)) * spd_k)
+	# the rider's weight in the turn: the body stick into the turn = the bike pushed down under them, weight over the
+	# outside pedal (more grip, steadier over bumps); against it = hanging off the inside, the tyres lose bite
+	# "into the turn" = the way the tyres push (last step): a turn, or uphill riding across a side slope (leaning
+	# the bike into the hill there is weighting it right)
+	var turn_dir := signf(_f_prev) if absf(_f_prev) > 0.08 else signf(steer_eff)
+	weight_in = 0.0 if air else clampf(flick * turn_dir, -1.0, 1.0)
+	var w_grip: float = 1.0 + float(T.get("flickGrip", 0.2)) * agree - float(T.get("weightInside", 0.2)) * maxf(0.0, -weight_in)
+	# a berm helps the turn at any speed (it used to fade out below ~30 km/h with spd_k)
+	var a_lat_lim: float = maxf(1.2, T.turnSlow + spd_k * (T.turnFast - T.turnSlow) + G * tan(bk) * signf(s_in) * smooth01(va / 3.0) + carve_f * T.carveBite + agree * float(T.get("flickTurn", 4.0)) * spd_k)
 	var lock: float = T.steerMax + maxf(0.0, T.slowSteer - T.steerMax) * (1 - smooth01(va / maxf(0.5, T.slowSteerFade)))
 	var d_max: float = minf(lock, maxf(atan(a_lat_lim * L / maxf(va * va, 0.01)), atan(T.turnFloor * L / maxf(va, 0.1))))
 	var cmd: float = s_in * d_max
+	# berms: steering into a banked turn (towards its low, inside edge) the rider leans WITH the bank - the bike about
+	# square to its surface - and lets it carry the turn round at the speed it was built for (G tan(bank) of turn: the
+	# tyres then need no sideways grip at all). Turning harder than that leans further; a light touch of the steer is
+	# enough for the berm to take over (bermAssist). Not on a side slope ridden straight (no steer into it)
+	var b_in: float = signf(bk) * steer_eff
+	var bw_t: float = 0.0 if air else float(T.get("bermAssist", 0.8)) * smooth01((b_in - 0.03) / 0.25) * smooth01((absf(bk) - 0.04) / 0.08) * smooth01((va - 2.5) / 3.0)
+	# eased in / out (~0.25 s): switched on and off between steps it jerked the turn (13 m/s² spikes of lat_a)
+	berm_k = 0.0 if air else move_toward(berm_k, bw_t, dt * 4.0)
+	var bw := berm_k
+	if bw > 0.0:
+		# (no tighter than the bars may turn at this speed: at low speed the bank's own turn was full lock)
+		var cmd_bank: float = minf(d_max, atan(G * tan(absf(bk)) * L / maxf(va * va, 0.5)))
+		var held: float = absf(cmd) if signf(cmd) == signf(bk) else 0.0
+		cmd = lerpf(cmd, signf(bk) * maxf(held, cmd_bank), bw)
 	var lean_need: float = clampf(atan(v * (v * tan(cmd) / L) / G), -T.leanMax + minf(0.0, bk), T.leanMax + maxf(0.0, bk))
+	# balance (balanceSim): rolling, the bike is balanced, not driven. The rider tips it over (that is what the
+	# steer asks for) and the turn follows the lean: the front wheel steers itself into the lean (trail), so the
+	# bars end up where the lean needs them, after a short push the other way (countersteer) to start it.
+	# At walking pace it's the bars again. The rider leans only as far as the grip can hold
+	bal_k = 0.0 if air else float(T.get("balanceSim", 0.4)) * smooth01((va - 2.5) / 4.0)
+	if bal_k > 0.0:
+		var l_hold: float = atan(maxf(0.0, _amax if lean_need >= 0.0 else -_amin) / G) * 0.97
+		lean_need = lerpf(lean_need, signf(lean_need) * minf(absf(lean_need), l_hold), bal_k)
+	# reflex: in trouble the rider stands the bike up a little (less asked of the tyres)
+	lean_need *= 1.0 - float(T.get("reflexStandUp", 0.3)) * float(T.get("riderSkill", 1.0)) * smooth01((risk - 0.15) / 0.5)
 	var tipping_in := absf(steer_eff) > 0.01 and absf(lean_need) > absf(lean) and signf(lean_need) == signf(steer_eff)
 	var c_max: float = absf(cmd) * T.counter
-	var ctr: float = clampf((lean_need - lean) * T.counter, -c_max, c_max) * minf(1.0, va / 4) * (1 - spd_k) if tipping_in else 0.0
-	var steer_target := cmd - ctr
+	# countersteer: a real bike needs it most at speed (the old one only pushed at slow speed)
+	var ctr: float = clampf((lean_need - lean) * T.counter, -c_max, c_max) * minf(1.0, va / 4) * lerpf(1 - spd_k, 1.0, bal_k) if tipping_in else 0.0
+	var steer_lean: float = clampf(atan(G * tan(lean) * L / maxf(va * va, 0.5)), -lock, lock)
+	var steer_target := lerpf(cmd, steer_lean, bal_k) - ctr
 	steer += (steer_target - steer) * (1 - exp(-dt * T.barSpeed))
-	var load_k := clampf(pow(maxf(0.0, n_tot / G), 0.7), 0.25, 1.5)
+	# a tyre's grip follows its load only after it has rolled a little (relaxation length): over rough ground the
+	# load swings every step and the grip limits (and with them the lean) shook with it. Eased over ~0.04 s
+	var load_raw := clampf(pow(maxf(0.0, n_tot / G), 0.7), 0.25, 1.5)
+	_load_s = load_raw if (air or is_nan(_load_s)) else _load_s + (load_raw - _load_s) * minf(1.0, dt / maxf(0.005, float(T.get("tyreRelax", 0.04))))
+	var load_k: float = _load_s
 	var mu_g := mu * G * load_k
-	var a_grip: float = mu_g * sqrt(maxf(0.05, 1 - pow(a_long / mu_g, 2))) * (0.75 if skid else 1.0) * (1 + T.carveGrip * carve_f + float(T.get("flickGrip", 0.2)) * agree) * (0.65 + 0.35 * clampf(nF / maxf(0.1, G * (1.0 - SH_R)), 0.0, 1.2) if not air else 1.0)
+	# (the front tyre has its own limit below now; the old rough "light front = less grip" factor is gone)
+	var a_grip: float = mu_g * sqrt(maxf(0.05, 1 - pow(a_long / mu_g, 2))) * (0.75 if skid else 1.0) * (1 + T.carveGrip * carve_f) * w_grip
 	if not air:
 		var yaw_cmd := 0.0 if front_air else v * tan(steer) / L
 		var gE := G * load_k
@@ -681,12 +821,48 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		var sb := sin(bk)
 		var a_max := minf(2.5 * G, gE * (sb + mE * cb) / maxf(0.2, cb - mE * sb))
 		var a_min := maxf(-2.5 * G, gE * (sb - mE * cb) / maxf(0.2, cb + mE * sb))
+		# (what the rider leans to: the grip a moment ago, not this tick's)
+		var ak := minf(1.0, dt * 8.0)
+		_amax = a_max if _amax > 90.0 else _amax + (a_max - _amax) * ak
+		_amin = a_min if _amin < -90.0 else _amin + (a_min - _amin) * ak
 		var yaw_use := yaw_cmd
 		if carve_f > 0 and not skid and absf(v) > 0.3:
 			var want := v * yaw_cmd
 			var cap := (a_max if want >= 0 else a_min) * 0.97
 			if absf(want) > absf(cap): yaw_use = yaw_cmd + (cap / v - yaw_cmd) * carve_f
 		var a_lat_t := clampf(v * yaw_use, a_min, a_max)
+		# the front tyre: it carries its share of the turn (the static split, (1 - SH_R)) on whatever load is on it
+		# now. Light (weight back, a climb, a crest) or busy braking (its own friction circle) it runs out first and
+		# pushes wide (understeer, front_push); pushed hard and long, or locked while leaned over, it washes out
+		var fg: float = float(T.get("frontGrip", 1.0))
+		var f_need := _fric(a_lat_t, cb, sb)
+		# (its share of the load eased like the grip above: a front going light for one tick over a bump snapped the
+		# push in and out - lat_a spikes of 13 m/s² and a 15 deg jolt of the rider's body in quick swaps)
+		var share_raw := clampf(nF / maxf(0.1, n_tot), 0.05, 1.0)
+		_share_f = share_raw if is_nan(_share_f) else _share_f + (share_raw - _share_f) * minf(1.0, dt / maxf(0.005, float(T.get("tyreRelax", 0.04))))
+		var share_f: float = maxf(0.05, _share_f)
+		var circ_f := sqrt(maxf(0.05, 1.0 - pow(_fb_f / maxf(0.1, mu_f * nF * fg), 2)))
+		_circ_f = circ_f
+		var mu_fr: float = mu_f * fg * circ_f * w_grip * (1 + T.carveGrip * carve_f) * lerpf(1.0, 0.7, front_lock)
+		front_use = 0.0 if front_air else absf(f_need) * (1.0 - SH_R) / share_f / maxf(0.05, mu_fr)
+		if front_use > 1.0:
+			var f_cap := f_need / front_use
+			var a_cap := G * (f_cap * cb + sb) / maxf(0.2, cb - f_cap * sb)
+			# the push comes in over the first 15 % past the limit (a hard switch at exactly 1 flickered step to step)
+			var pk := smooth01((front_use - 1.0) / 0.15)
+			var a_pushed := minf(a_lat_t, a_cap) if f_need > 0.0 else maxf(a_lat_t, a_cap)
+			a_lat_t = lerpf(a_lat_t, a_pushed, pk)
+			# pushing wide, the front slides with the travel: the bike turns no tighter than it goes (no oversteer)
+			if absf(v) > 0.3: yaw_use = lerpf(yaw_use, a_lat_t / v, pk)
+		front_push = maxf(0.0, front_use - 1.0)
+		# past frontWashAt the front is losing it: the crash judge builds on how far past (a locked front far faster)
+		# Only a LOADED front, LEANED over, washes you out: a light front (just landed, nose up, over a crest) is far past
+		# its grip only because it carries nothing - it just doesn't steer, the bike runs on straight (that was half
+		# of all test crashes, front_use 1.6-4.4 within 0.6 s of landings)
+		var wash_at: float = float(T.get("frontWashAt", 1.35))
+		var w_load: float = clampf(share_f / (1.0 - SH_R), 0.0, 1.2)
+		var w_lean: float = smooth01((absf(lean) - 0.1) / 0.3)
+		_danger("FRONT WASHED OUT!", (front_use - wash_at) / 0.6 * (1.0 + 2.0 * front_lock) * w_load * w_lean if va > 3.0 else -1.0, dt, float(T.get("frontWashTime", 0.35)))
 		var tau_y: float = T.turnWeight * (0.4 + 0.6 * spd_k)
 		lat_m = _or(lat_m, a_lat_t) + (a_lat_t - _or(lat_m, a_lat_t)) * (1 - exp(-dt / tau_y)) if tau_y > 0.005 else a_lat_t
 		var a_lat := clampf(lat_m, a_min, a_max)
@@ -699,8 +875,13 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		var course_rate := a_lat / v if absf(v) > 0.3 else yaw_use
 		var excess := yaw_use - course_rate
 		var share: float = 1.0 if skid else T.oversteer
-		var margin := 1 - minf(1.0, absf(a_lat) / maxf(0.1, a_max if a_lat >= 0 else -a_min))
-		var gr := _grip_step(dt, va, skid, brake_k, mu, nR, a_lat, a_max, a_min)
+		# how much of the tyres' grip the turn uses, measured against the ground's own tilt: across a side slope
+		# riding straight the tyres hold the bike up the hill (it used to count as no load at all, so loose ground,
+		# bumps and squirm never moved the rear down a camber), and turning into a berm needs less than on the flat
+		_f_prev = _fric(a_lat, cb, sb)
+		var u_lat := clampf(_f_prev / maxf(0.05, mE), -1.5, 1.5)
+		var margin := 1 - minf(1.0, absf(u_lat))
+		var gr := _grip_step(dt, va, mu_r, nR, u_lat)
 		# the plain catch (tyre pulling back in line) only works with grip to pull with: a locked / spinning /
 		# loose rear barely pulls, so the slide lives on in slip_w (the grip sim) instead of being snapped out
 		var catch_k: float = (T.slipRecover * (0.25 + margin) + maxf(0.0, -signf(slip) * steer) * 8) * gr * gr
@@ -710,12 +891,36 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		var wk := whip * whip * (3.0 - 2.0 * whip)
 		whip_hold = maxf(wk, whip_hold - dt / maxf(0.1, float(T.get("whipCatch", 0.9))))
 		catch_k *= 1.0 - 0.85 * whip_hold
+		catch_k *= 1.0 + float(T.get("reflexCatch", 1.5)) * float(T.get("riderSkill", 1.0)) * risk   # reflex: fights a slide harder the worse it gets
 		var slip_rate := (excess * share + slip_w) * (1.0 - 0.75 * whip_hold) - (slip - _squirm) * catch_k
 		if whip_hold > 0.0:
 			var drift_t: float = whip_side * minf(float(T.get("whipDrift", 0.42)), T.slipMax * 0.6) * smooth01((va - 3.0) / 4.0) * wk
 			slip_rate += clampf((drift_t - slip) * float(T.get("whipSnap", 5.0)), -2.2, 2.2) * whip_hold
 		var slip_was := slip
 		slip = clampf(slip + slip_rate * dt, -1.5, 1.5)
+		# a side slope pulls the bike down it: the front wheel falls to the low side (gravity on the trail of the
+		# fork), gently, more when slow. On a berm that's into the turn: it draws you round. Steer to hold a line
+		if v > 0.5:
+			course_rate += float(T.get("camberPull", 0.22)) * G * sin(bk) / maxf(va, 3.0) * smooth01((v - 0.5) / 2.0)
+		# the front tyre is knocked off its line by whatever slopes sideways under it that isn't the land's own tilt:
+		# a rock's flank, a root, a rut's wall (ruts hold the wheel in, rocks kick it out). Not over a smooth berm
+		var kn: float = float(T.get("groundKnock", 0.6))
+		var knock_t := 0.0
+		if kn > 0.0 and not front_air:
+			var fwo := L - BB_REAR
+			var fx: float = x + f.x * fwo
+			var fz: float = z + f.z * fwo
+			var ox := f.z * 0.12
+			var oz := -f.x * 0.12   # to the left
+			var grad: float = (terrain.top_height(fx + ox, fz + oz) - terrain.top_height(fx - ox, fz - oz)) / 0.24
+			var loc := clampf(grad + tan(bk), -1.5, 1.5)
+			# small ripples don't steer (the ground mesh is never perfectly flat: they were a constant buzz in the bars)
+			loc = signf(loc) * maxf(0.0, absf(loc) - 0.08)
+			knock_t = clampf(-kn * loc * 1.6 * clampf(nF / maxf(0.1, G * (1.0 - SH_R)), 0.0, 1.5) * smooth01(va / 3.0), -1.2, 1.2)
+		# the tyre and the rider's arms take a moment: the knock builds and fades over ~0.08 s instead of kicking the
+		# travel round in one step (it was the biggest single source of step-to-step jitter)
+		knock += (knock_t - knock) * minf(1.0, dt / maxf(0.005, float(T.get("knockSmooth", 0.08))))
+		course_rate += knock
 		course += course_rate * dt
 		# the rear swings round the front: the front tyre holds its line, so the bike's BB moves sideways as
 		# the heading turns against the travel (pivot gripPivot of the way from the BB to the front axle)
@@ -742,11 +947,17 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		heading = course + slip + turn_off
 		yaw_rate = course_rate + slip_rate
 		lat_a = a_lat
+		# the turn presses down through the leaned bike: the rider feels sqrt(g² + a²) (1.4 g at 45 deg), the legs
+		# and shock sink into it (vertical step). Hard into a berm (more turn than the flat allows) it presses more
+		# (eased over ~0.1 s: the body felt every flicker of the turn force as a bob of the head)
+		var cg_t: float = float(T.get("cornerLoad", 0.6)) * (sqrt(G * G + a_lat * a_lat) - G)
+		corner_g += (cg_t - corner_g) * minf(1.0, dt / maxf(0.005, float(T.get("cornerSmooth", 0.1))))
 		# (the first ~1 deg of slip is the tyre's own give, not a slide: the chatter wobble kept a phantom scrub on
 		# dead-straight riding, ~15 % more rolling resistance than set)
 		var scrub := (mu * G * minf(load_k, 1.5) * maxf(0.0, absf(sin(slip)) - 0.015) * 0.9 + absf(excess) * (1 - share) * absf(v) * 0.15) * (1.0 - float(T.get("whipCarry", 0.6)) * wk)   # a held drift keeps its speed
 		v -= signf(v) * minf(absf(v), scrub * dt)
-		if absf(slip) > T.slipMax and va > 3: crash_pending = "WASHED OUT!"
+		# a slide past slipMax: the crash judge builds on how far past (it used to crash the moment it crossed)
+		_danger("WASHED OUT!", (absf(slip) - T.slipMax) / 0.25 if va > 3.0 else -1.0, dt)
 		var into_bank := maxf(0.0, bk * signf(a_lat))
 		if absf(slip) > 0.3: carve_acc = 0
 		elif carve > 0.6: carve_acc += absf(a_lat) * dt * (1 + 3 * into_bank)
@@ -762,40 +973,93 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		# it). The rider can only twist the bike at the hips, within airTwist, to keep it pointing where
 		# they fly; slip is the bike's heading against the travel direction
 		var sys_slip := wrapf(slip - air_tw, -PI, PI) + (air_yaw + stick_yaw) * dt
-		var tw_t := clampf(-sys_slip, -T.airTwist, T.airTwist)
+		# air WHIP (rider + bike as two masses): the right stick to the side (short of its edge, which spins) throws the
+		# bike sideways under a body that keeps facing where it flies - the hips kick the bike out, the shoulders stay.
+		# It comes back as the landing nears (the rider straightens it; held to the end it lands sketchy)
+		var whip_t: float = clampf(air_stick.x / 0.8, -1.0, 1.0) * float(T.get("airWhip", 1.1)) * (1.0 - float(T.get("whipReturn", 0.7)) * land_prep)
+		var tw_lim: float = maxf(T.airTwist, absf(whip_t) + 0.05)
+		var tw_t := clampf(-sys_slip + whip_t, -tw_lim, tw_lim)
 		air_tw_v += (60.0 * (tw_t - air_tw) - 12.0 * air_tw_v) * dt
 		air_tw += air_tw_v * dt
-		if absf(air_tw) > T.airTwist:
-			air_tw = signf(air_tw) * T.airTwist; air_tw_v = 0.0
+		if absf(air_tw) > tw_lim:
+			air_tw = signf(air_tw) * tw_lim; air_tw_v = 0.0
+		_whip_peak = maxf(_whip_peak, absf(air_tw))
 		var slip_new := wrapf(sys_slip + air_tw, -PI, PI)
 		yaw_rate = wrapf(slip_new - slip, -PI, PI) / dt
 		spin_acc += yaw_rate * dt
 		slip = slip_new
 		turn_off -= turn_off * minf(1.0, dt * 7.0)
 		heading = course + slip + turn_off
-		lat_a = 0; lat_m = 0; flick_kick = 0.0
+		lat_a = 0; lat_m = 0; flick_kick = 0.0; corner_g = 0.0; front_use = 0.0; front_push = 0.0; knock = 0.0
 		slip_w = 0.0; grip_r = 1.0; bar_catch += -bar_catch * minf(1.0, dt * 6)
 	if not air:
 		_pivot_step(dt, steer_input, brake_k)
-	var roll_t: float = roll_keys * T.airRoll + air_stick.x * float(T.get("stickAirRoll", 0.75))
+	# (+ a whip lays the bike flatter the further it's thrown, like the real thing)
+	var roll_t: float = roll_keys * T.airRoll + air_stick.x * float(T.get("stickAirRoll", 0.75)) + clampf(air_stick.x / 0.8, -1.0, 1.0) * float(T.get("airWhip", 1.1)) * 0.3
 	var lean_t: float = (roll_t if absf(roll_t) > 0.03 else lean * 0.98) if air else clampf(atan(lat_a / G), -T.leanMax + minf(0.0, bk), T.leanMax + maxf(0.0, bk))
+	# slow riding: the rider tips in WITH the steer (towards the lean the asked-for turn needs) instead of waiting for
+	# the turn to build, and a slow bike rolls quicker (little speed, little to hold it up). Both fade out with speed
+	# (spd_k), so fast riding is as before. Without it a slow turn was a flat pivot with the lean ~0.5 s behind
+	var slow_k := 1.0 - spd_k
+	if not air:
+		# balanced (bal_k): the rider leans to what the steer asks for and the turn follows the lean
+		lean_t = lerpf(lean_t, lean_need, maxf(float(T.get("leanLead", 0.5)) * slow_k, bal_k))
 	var kL: float = T.leanIn if absf(steer_eff) > 0.01 else T.leanOut
+	if not air: kL *= 1.0 + float(T.get("slowRoll", 1.0)) * slow_k
 	if air and air_stick.length() > 0.02: kL = 45.0   # the stick lays the bike over in the air (soft, no snap)
 	if not air:
 		# only the ground pushing on the tyres can change the lean: over a crest or an edge (tyres light) the
 		# bike carries its lean on instead of snapping upright with the momentary lack of grip
 		kL *= clampf(n_tot / G, 0.12, 1.0)
 	lean_v += ((lean_t - lean) * kL - lean_v * 2 * sqrt(kL) * T.leanDamp) * dt
+	lean_err = 0.0
 	if not air:
+		# a balanced bike leaned further than the tyres can turn it falls on over (an inverted pendulum, centre of
+		# mass ~1 m up): a loose patch, a brake grabbed mid-corner or a front pushing wide drops it in. Held there
+		# past lowsideAngle for 0.3 s it's down (LOWSIDE). The rider only leans as far as the grip held a moment
+		# ago (lean_need above), so riding the limit is fine; losing the grip under it isn't
+		# (measured against the most the tyres could turn it, not the turn right now: through a left-right swap the
+		# lean always runs ahead of the turn, that's how a bike changes direction, not a fall)
+		var l_grip: float = atan(maxf(0.0, _amax if lean >= 0.0 else -_amin) / G)
+		lean_err = signf(lean) * maxf(0.0, absf(lean) - l_grip)
+		# (just landed, the tyres haven't bitten yet and the rider is still bringing a lean carried out of the air
+		# round: no falling in / lowside for the first moment, it fades in over 0.4 s)
+		var land_k := smooth01((since_land - 0.1) / 0.3)
+		var fall: float = float(T.get("balanceFall", 0.5)) * bal_k * land_k
+		if fall > 0.0 and lean_err != 0.0:
+			lean_v += fall * G * sin(lean_err) * dt
+		_danger("LOWSIDE!", (absf(lean_err) - float(T.get("lowsideAngle", 0.3))) / 0.25 if (bal_k > 0.3 and land_k > 0.99 and va > 4.0) else -1.0, dt)
 		# a real bike + rider (~100 kg) only rolls so fast: the roll speed eases into a top rate (leanRate,
-		# rad/s of the body lean; the bike leans bikeLeanMul x that) instead of whipping from one side to the other
-		var lr: float = float(T.get("leanRate", 6.0))
+		# rad/s of the body lean; the bike leans bikeLeanMul x that) instead of whipping from one side to the other.
+		# Fast, the spinning wheels hold the bike up and it rolls a little slower (gyroStable)
+		var lr: float = float(T.get("leanRate", 6.0)) / (1.0 + float(T.get("gyroStable", 0.25)) * smooth01((va - 8.0) / 12.0))
 		lean_v = lr * tanh(lean_v / lr)
+	_risk_settle(dt)
 	lean += lean_v * dt
 	# the body stick throws the bike over under the rider (the body stays upright: counter grows)
-	var bl: float = lean * T.bikeLeanMul + (0.0 if air else flick * float(T.get("flickLean", 0.35)) * smooth01(va / 3.0))
-	if whip > 0.0 and not air:   # the whip throws the bike further over under the rider
-		bl += whip_side * float(T.get("whipLean", 0.22)) * whip * whip * (3.0 - 2.0 * whip)
+	# the lean the ground gives on top of the turn's own (drawn only): the body stick throwing the bike under the
+	# rider, slow steering, tilted ground (a berm, a banked bend, a side slope: rider + bike lean into it, part of the way
+	# to square with its surface - gravity-upright on a tilted trail looked like being flung off it), the corner whip.
+	# It needs the ground: off a lip it is carried into the air and eased out (it used to vanish in one step at take-off,
+	# a snap of the bike + rider), and on landing it eases back in
+	var gx_t := 0.0
+	var bank_t := 0.0
+	if not air:
+		gx_t = flick * float(T.get("flickLean", 0.35)) * smooth01(va / 1.5)
+		gx_t += s_in * float(T.get("slowLean", 0.3)) * slow_k * smooth01(va / 1.2)
+		bank_t = float(T.get("bankLean", 0.6)) * bank
+		if whip > 0.0: gx_t += whip_side * float(T.get("whipLean", 0.22)) * whip * whip * (3.0 - 2.0 * whip)
+	var gx_rate := 1.2 if air else (3.0 if since_land < 0.35 else 60.0)
+	_gx_lean = move_toward(_gx_lean, gx_t, gx_rate * dt)
+	# (the ground's share eases at most 1.5 rad/s: from one bank straight into the next it swings over, not snaps)
+	bank_lean = move_toward(bank_lean, bank_t, minf(gx_rate, float(T.get("bankLeanRate", 1.5))) * dt)
+	# rider + bike are two masses, not one block: the bike (~17 kg) is pushed over under the rider (~75 kg) first and
+	# the body follows. While the lean is changing the bike runs ahead of it by the roll speed (bikeLead s), the body's
+	# target (lean x bodyLean, see counter) doesn't, so in a swap the bike flicks across under a body that comes
+	# after it, and settles back as the lean holds. Drawn only (the turn follows the shared lean as before)
+	var lead_t: float = 0.0 if air else clampf(lean_v * T.bikeLeanMul * float(T.get("bikeLead", 0.08)), -0.35, 0.35)
+	_bike_lead += (lead_t - _bike_lead) * minf(1.0, dt * 20.0)
+	var bl: float = lean * T.bikeLeanMul + _gx_lean + bank_lean + _bike_lead
 	if not air:
 		cap_bank = 0.0 if signf(bk) != signf(bl) else absf(bk)
 	else:   # the bank's extra room is carried off the lip, fading over 2 s (the lean must not snap at take-off)
@@ -836,7 +1100,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	# the bike leans under the rider: the body always stays a little more upright than the bike (never
 	# hangs inside it, or the inside leg cuts through the frame). The body leans ~70 % of the way the
 	# rider + bike lean, so in a fast turn the bike tips well under a fairly upright rider
-	counter = maxf(absf(bike_lean - lean * T.bodyLean), absf(bike_lean) * 0.2) * signf(bike_lean)
+	counter = maxf(absf(bike_lean - (lean + bank_lean) * T.bodyLean), absf(bike_lean) * 0.2) * signf(bike_lean)
 	# in the air the stick's lean is the rider's doing: they push the bike over with the legs and arms and
 	# their body goes the other way a little (counter-lean), staying over the centre of mass
 	if air:
@@ -942,7 +1206,13 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			var back: float = (c.r * 0.85 - fd) / fd
 			x += fdx * back; z += fdz * back
 			var head := (f.x * fdx + f.z * fdz) / fd
-			if head < -0.77 and -v * head > 6: crash_pending = "BONK! Over the bars"
+			# over the bars only when the hit could really throw you: the taller the rock against the wheel, the less
+			# speed it takes (a rock just past rolling height ~12 m/s, a boulder ~6); a front already unweighted /
+			# in the air (a hop, a manual) rides up it. It used to be 6 m/s head-on for any rock past rolling height
+			var tall := clampf((clear - CLIMB * RWF) / (RWF * 0.8), 0.0, 1.0)
+			var bb: float = float(T.get("bonkBoulder", 6.0))
+			var throw_v: float = bb + (float(T.get("bonkSmall", 12.0)) - bb) * (1.0 - tall)
+			if head < -0.77 and -v * head > throw_v and not front_air: crash_pending = "BONK! Over the bars"
 			elif head < -0.3 and v > 1.5:
 				host.burst(Vector3(fx0, y + 0.3, fz0), 16, 0, 1.2); v *= -0.25; shake = 0.35; host.flash("BONK!")
 			else: v *= 0.97
@@ -1104,16 +1374,19 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			var FR := maxf(0.0, shR * (K * dR + cdR)) if dR > 0.0 else 0.0
 			sumF += FF; sumR += FR
 			var leg_f := 0.0
+			# a turn's load presses down through the leaned bike (corner_g): the body sinks into the legs, the
+			# bike into its suspension, and both come back up as the turn ends (the pump out of a berm)
+			var cg := 0.0 if was_air else corner_g
 			if not was_air:
 				var f_leg := kB * (y - body_y) - cB * (body_v - vy)
-				body_v += f_leg * h; body_y += body_v * h
+				body_v += (f_leg - cg) * h; body_y += body_v * h
 				leg_f = PHI * (G + f_leg)
 			var alpha := (FF * XF + FR * XR - leg_f * body_x) * cs / IK + (tq / IK if (cF or cR) else 0.0)
 			if cF != cR or (wheelie_up > 0.0 and cR):
 				var ref := _or(nose_ref, _g_pitch) + (wheelie_up if cR else 0.0)
 				var wk := 4.0 if (wheelie_up > 0.0 and cR) else 1.0   # holding a wheelie: the whole body works it
 				alpha += clampf(30 * wk * (ref - pitch) - 9 * sqrt(wk) * pitch_v, -bal_max, bal_max)
-			vy += (FF + FR - (press if (cF or cR) else 0.0) - mB * G - leg_f) / mB * h
+			vy += (FF + FR - (press if (cF or cR) else 0.0) - mB * (G + cg) - leg_f) / mB * h
 			pitch_v += alpha * h
 			if not cF and not cR and was_air:
 				# in the air: no outside torque. The shared spin air_w only changes with the inertia (tuck),
@@ -1248,12 +1521,18 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			body_pw += (pitch_v - body_pw) * minf(1.0, dt * 4)
 		if now_air and not was_air:
 			if since_land < 0.5 and Env.s("BMX_TRICK") != "": print("BOUNCE %.2fs after landing vy=%.2f pitch=%.2f" % [since_land, vy, pitch])   # tests
-			air = true; air_time = 0; flip_acc = 0.0; spin_acc = 0.0; style_air = 0.0
+			air = true; air_time = 0; flip_acc = 0.0; spin_acc = 0.0; style_air = 0.0; _whip_peak = 0.0
 			# rider + bike fly off at the speed of their shared centre of mass: a bike kicked up by a roller
 			# while the body (on soft legs) lags behind doesn't launch the rider with it. In the air the
 			# two then move together (the legs only shift them about that centre)
 			if coupled and not is_nan(body_v): vy = PHI * body_v + mB * vy
+			var pop := pump_lift
 			if pump_lift > 0.0: vy += pump_lift; pump_lift = 0.0
+			# the legs push off along the ground's surface: off a lip tilted sideways (a berm's lip, a banked kicker)
+			# part of the pop throws rider + bike towards its low side. The bike keeps pointing where it did
+			if pop > 0.0 and absf(bank) > 0.03 and absf(v) > 1.0:
+				var dc_t := atan(pop * sin(bank) / absf(v)) * signf(v)
+				course += dc_t; slip -= dc_t
 			# the speed along the lip splits into the horizontal part (v from now on) and the climb (vy)
 			v *= cos(_g_pitch)
 			# the spin rider + bike leave with: mostly the rider's (they're most of the inertia), plus the
@@ -1268,8 +1547,20 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			if Env.s("BMX_TRICK") != "": print("TAKEOFF v=%.1f vy=%.2f pitch_v=%.2f spin=%.2f natural=%s at=(%.0f,%.0f) slope=%.2f" % [v, vy, pitch_v, air_w, natural, x, z, _g_pitch])   # tests
 			host.on_takeoff()
 		elif not now_air and was_air:
-			# how fast the bike comes down into the slope (the speed along it is kept: the tyres just roll on)
-			var impact: float = maxf(0.0, v * sin(_g_pitch) - vy_in * cos(_g_pitch))
+			# the ground it comes down on, tilt and all (the bank reading eased back to flat during the flight, so a
+			# berm or side-slope landing was taken as flat)
+			var b_land := _bank_at(f)
+			bank = b_land; _bank_raw = b_land
+			# how fast the bike comes down into the slope (the speed along it is kept: the tyres just roll on). On a
+			# landing tilted sideways the fall meets the ground at an angle: only cos(tilt) of it is the hit...
+			var impact: float = maxf(0.0, v * sin(_g_pitch) - vy_in * cos(_g_pitch)) * cos(b_land)
+			# ...and the rest slides rider + bike towards the low side (the tyres then have to catch it: a slide on
+			# loose ground, a crash if it's huge). The bike keeps pointing where it did
+			if vy_in < 0.0 and absf(b_land) > 0.03 and absf(v) > 0.5:
+				var s_lat := -vy_in * cos(_g_pitch) * sin(b_land) * float(T.get("landSlide", 1.0))
+				var dc_l := atan(s_lat / absf(v)) * signf(v)
+				course += dc_l; slip -= dc_l
+				v = signf(v) * sqrt(v * v + s_lat * s_lat)
 			var at := air_time
 			var back_land: bool = cR and not cF and wrapf(pitch - _g_pitch, -PI, PI) > 0.4
 			_rev_land = false; _land_fix = false
@@ -1473,8 +1764,11 @@ func _land_trick(at: float) -> void:
 		host.flash("FAKIE!" if _rev_land else "SKETCHY!")
 	var flips := roundi(absf(flip_acc) / TAU)
 	var turns := int((absf(spin_acc) + 0.6) / TAU)   # flat spins landed facing forward again (within ~35 deg): 360, 720...
-	if flips >= 1 or turns >= 1:
+	# a whip thrown (bike kicked > ~35 deg sideways under the body) and brought back straight for the landing
+	var whipped := _whip_peak > 0.6 and turns == 0 and absf(slip) < 0.35
+	if flips >= 1 or turns >= 1 or whipped:
 		var trick := ""
+		if whipped: trick = "WHIP" if _whip_peak < 0.95 else "BIG WHIP"
 		if turns >= 1: trick = "%d" % (turns * 360)
 		if flips >= 1:
 			var kind := "BACKFLIP" if flip_acc > 0 else "FRONTFLIP"
@@ -1492,7 +1786,11 @@ func _style_points(at: float, flips: int, turns: int) -> void:
 	var parts := []
 	if turns >= 1: parts.append("%d" % (turns * 360))
 	if flips >= 1: parts.append(("%dx " % flips if flips > 1 else "") + ("BACKFLIP" if flip_acc > 0 else "FRONTFLIP"))
-	if style_air > 0.35: parts.append("TWEAK")
+	var whip_ok := _whip_peak > 0.6 and turns == 0 and absf(wrapf(slip, -PI, PI)) < 0.35
+	if whip_ok:   # an air whip brought back for the landing: more the further it was thrown
+		pts += roundi(500.0 * clampf(_whip_peak, 0.6, 1.3))
+		parts.append("WHIP" if _whip_peak < 0.95 else "BIG WHIP")
+	elif style_air > 0.35: parts.append("TWEAK")
 	if parts.is_empty(): parts.append("BIG AIR" if at > 1.0 else "AIR")
 	var clean := absf(wrapf(slip, -PI, PI)) < 0.2 and absf(wrapf(pitch - _g_pitch, -PI, PI)) < 0.15
 	if clean:
@@ -1530,7 +1828,52 @@ func _pivot_step(dt: float, steer_input: float, brake_k: float) -> void:
 ## lock the rear and the front wins -> the rear swings out and fishtails until let go / caught; wheelspin
 ## steps it out in a turn; loose patches, bumps and pedal strokes keep nudging it so the bike never runs
 ## dead straight. Sets slip_w, grip_r, loose, _squirm, bar_catch; returns grip_r (0..~1.2).
-func _grip_step(dt: float, va: float, skid: bool, brake_k: float, mu: float, nR: float, a_lat: float, a_max: float, a_min: float) -> float:
+## crash judge (see _risk): sev = how far past the line this step (<= 0 = within it). Builds over crashTime at sev 1
+## (faster the further past), drains at riderSave /s once back under; a full meter or sev >= CRASH_HARD = the crash
+func _danger(reason: String, sev: float, dt: float, t_build := -1.0) -> void:
+	var r: float = float(_risk.get(reason, 0.0))
+	if sev > 0.0 and absf(v) > 2.5:
+		if sev >= float(T.get("crashHard", 3.0)): r = 1.0
+		else: r += dt / maxf(0.05, t_build if t_build > 0.0 else float(T.get("crashTime", 0.4))) * sev * (0.5 + 0.5 * sev)
+	else:
+		r = maxf(0.0, r - dt * float(T.get("riderSave", 1.2)))
+	_risk[reason] = r
+	if r >= 1.0 and crash_pending == "": crash_pending = reason
+
+## once a step, after every _danger: the biggest meter (risk) and a SAVED! when a real scare was fought off
+func _risk_settle(dt: float) -> void:
+	if air:   # (the ground-only checks don't run in the air: their meters drain there)
+		for k in _risk: _risk[k] = maxf(0.0, float(_risk[k]) - dt * float(T.get("riderSave", 1.2)))
+	risk = 0.0
+	for k in _risk: risk = maxf(risk, float(_risk[k]))
+	_risk_peak = maxf(_risk_peak, risk)
+	if risk < 0.02:
+		if _risk_peak > 0.5 and crash_pending == "" and not crash_on:
+			if _crash_log: print("SAVED peak=%.2f v=%.1f" % [_risk_peak, v])   # tests (BMX_CRASH_LOG)
+			if host.msg_idle(): host.flash("SAVED!")
+			if host.has_method("on_style"): host.on_style(roundi(300.0 * _risk_peak), "SAVE")
+		_risk_peak = 0.0
+
+## the ground's sideways tilt under the bike (rad, + = rising to the right): the lay of the land (berms, cambers,
+## wooden decks) WITHOUT the rock / log domes - a rock under one side read as a 30 deg berm and threw the lean about
+## (the wheels still ride over the rock). Read across both axles, +-0.5 m, so a sharp trail edge isn't a sudden berm
+func _bank_at(f: Vector3) -> float:
+	var w := 0.5
+	var lx := f.z * w
+	var lz := -f.x * w
+	var dh := 0.0
+	for wo in [L - BB_REAR, -BB_REAR]:
+		var mx: float = x + f.x * wo
+		var mz: float = z + f.z * wo
+		dh += host.terrain.deck_height(mx - lx, mz - lz) - host.terrain.deck_height(mx + lx, mz + lz)
+	return atan(dh * 0.5 / (2 * w))
+
+## the sideways friction (force / normal) the tyres need for a horizontal turn a_lat (+ = left) on ground
+## tilted bk (+ = rising to the right): 0 = the ground's tilt carries it all, + = the tyres push left
+static func _fric(a_lat: float, cb: float, sb: float) -> float:
+	return (a_lat * cb - G * sb) / maxf(0.2 * G, G * cb + a_lat * sb)
+
+func _grip_step(dt: float, va: float, mu: float, nR: float, u_lat_in: float) -> float:
 	if _grip_noise == null:
 		_grip_noise = FastNoiseLite.new()
 		_grip_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
@@ -1540,14 +1883,14 @@ func _grip_step(dt: float, va: float, skid: bool, brake_k: float, mu: float, nR:
 	# the ground under the rear tyre: loose patches a few metres across (gravel, dust over hardpack)
 	var rx := x - cos(heading) * BB_REAR
 	var rz := z + sin(heading) * BB_REAR
-	var s_loose: float = 1.0 if surf == 0 else 0.2 if surf == 1 else 0.7 if surf == 2 else 1.4
+	var s_loose: float = 1.0 if surf_r == 0 else 0.2 if surf_r == 1 else 0.7 if surf_r == 2 else 1.4
 	var n := 0.5 + 0.5 * _grip_noise.get_noise_2d(rx, rz)
 	loose = smooth01((n - 0.4) / 0.45) * s_loose
 	var patch: float = 1.0 - float(T.get("gripLoose", 0.5)) * 0.4 * loose
 	# the rear tyre's friction circle: what braking / driving uses along the bike isn't there sideways
-	var lock: float = clampf(brake_k * 1.4 - 0.4, 0.0, 1.0) if skid else 0.0
+	var lock: float = rear_lock   # the rear brake past what the tyre holds (the brakes, longitudinal step)
 	var r_cap := maxf(0.3, mu * nR)
-	var use := clampf(absf(a_drive) / r_cap, 0.0, 1.0)
+	var use := clampf(_a_rear / r_cap, 0.0, 1.0)   # its own drive / brake only (the front brake is the front's)
 	use = maxf(use, lock)
 	if spin > 0.0: use = maxf(use, 0.85 + 0.15 * spin)
 	var lat_k := sqrt(maxf(0.0, 1.0 - use * use))
@@ -1556,13 +1899,15 @@ func _grip_step(dt: float, va: float, skid: bool, brake_k: float, mu: float, nR:
 	var g := clampf(lat_k * patch * sqrt(load_r), 0.0, 1.2)
 	grip_r = g
 	# tyre squirm: in a turn the tyres run a few degrees of slip angle, more as they near the limit
-	var lim := a_max if a_lat >= 0.0 else -a_min
-	var u_lat := clampf(a_lat / maxf(0.1, lim), -1.0, 1.0)
+	var u_lat := clampf(u_lat_in, -1.0, 1.0)   # + = the tyres pushing left (a left turn, or holding up a slope falling right)
+	var a_lat := u_lat   # (only its sign is used below: which way the rear is thrown)
 	_squirm = float(T.get("gripSquirm", 1.0)) * (0.025 * u_lat + 0.07 * u_lat * u_lat * u_lat) * spd * (1.0 + 0.5 * loose)
 	# yaw against the travel: rear tyre stiffness vs the front pushing it round, the rider catching it
 	var catch_r: float = float(T.get("gripCatch", 0.6))
 	var k_r := 15.0 * g
-	var k_f: float = 18.0 * float(T.get("gripRearLock", 1.0)) * spd
+	# (the front can only swing the rear round with sideways grip it has left: braking hard on it too, it has
+	# little, so a locked rear behind a braking front stays nearly in line - why both brakes together are stable)
+	var k_f: float = 18.0 * float(T.get("gripRearLock", 1.0)) * spd * _circ_f
 	var k := k_r - k_f + 4.0 * catch_r
 	var c := 2.2 + 3.0 * g + 1.5 * catch_r
 	var acc := -k * (sin(slip) - _squirm) - c * slip_w
@@ -1575,7 +1920,8 @@ func _grip_step(dt: float, va: float, skid: bool, brake_k: float, mu: float, nR:
 	# bumps: rough ground (suspension working hard, smoothed over ~0.2 s) makes a rear that's cornering near
 	# its limit drift out of the turn - a gentle push, never a kick (instant kicks per rock made the bike
 	# twitch about on rocky ground). The bump's real effect is already in load_r: an unloaded rear grips less
-	var bmp: float = float(T.get("gripBumps", 1.0))
+	# weight over the outside pedal keeps the rear planted over bumps; hanging inside it skips about more
+	var bmp: float = float(T.get("gripBumps", 1.0)) * (1.0 - float(T.get("weightSteady", 0.5)) * maxf(0.0, weight_in) + 0.5 * maxf(0.0, -weight_in))
 	var jolt := minf(absf(compress_v - _grip_cv) / maxf(dt, 1e-4), 60.0)
 	_grip_cv = compress_v
 	_grip_rough += (jolt - _grip_rough) * minf(1.0, dt * 5.0)

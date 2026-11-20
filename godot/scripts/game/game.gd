@@ -689,6 +689,10 @@ func start_crash(reason: String) -> void:
 	if rope_probe: print("ROPE CRASH ", reason, " at ", Vector3(phys.x, phys.y, phys.z))
 	_rd_air.resize(0)   # crash dust: per-part "was in the air" flags start fresh
 	if Env.s("BMX_TRICK") != "": print("CRASH ", reason, " v=%.1f air=%s" % [phys.v, phys.air])   # tests
+	elif Env.s("BMX_CRASH_LOG") != "":   # tests: every crash with the ground sim's state at that moment
+		print("CRASH %s | v=%.1f air=%s since_land=%.2f slip=%.2f lean=%.2f lean_err=%.2f front_use=%.2f rear_lock=%.2f front_lock=%.2f bank=%.2f pitch_err=%.2f" % [
+			reason, phys.v, phys.air, phys.since_land, phys.slip, phys.lean, phys.lean_err, phys.front_use, phys.rear_lock, phys.front_lock, phys.bank,
+			wrapf(phys.pitch - phys._g_pitch, -PI, PI)])
 	var pts: Array = rider.joints_world()
 	var f := phys.fwd()
 	# the body carries on with the bike's own motion (no extra pop up: it used to throw the body into the air)
@@ -1246,6 +1250,8 @@ func _read_input() -> Dictionary:
 		"body_lean": bl,
 		"throttle": Input.get_action_strength("pedal"),
 		"brake": Input.get_action_strength("brake"),
+		"brake_front": Input.get_action_strength("brake_front"),
+		"brake_rear": Input.get_action_strength("brake_rear"),
 		"steer": clampf(steer, -1, 1),
 		"hop": _held_ok("hop"),
 		"sprint": _held_ok("sprint"),
@@ -1273,9 +1279,39 @@ var ride_log := RideLog.new()   # the last 60 s, saved with R3 / F8 (save_log)
 var _log_lift := 0.0
 var jitter_on := Env.s("BMX_JITTER_ALL") != ""
 var _jit_skip := 0
-var _yaw_s := 0.0; var _turn_s := 0.0; var _aspin_s := 0.0; var _atilt_s := 0.0; var _blat_s := 0.0
+var _yaw_s := 0.0; var _turn_s := 0.0; var _aspin_s := 0.0; var _atilt_s := 0.0; var _blat_s := 0.0; var _awhip_s := 0.0
 var _jit_head := Vector3.INF
 var _jit := {}
+
+## Motion cap (drawn only): every drawn part of rider + bike that the physics drives follows it on a stiff, critically
+## damped spring with a top speed and acceleration a real body / bike can reach (MCAP: key -> [rad or m per s,
+## per s²]). Normal riding it tracks within ~0.03 s; a single bad step (a grip limit snapping, a bump spike, a
+## clamp letting go) can no longer jolt the torso, the head or the bike. The physics and the ride feel are untouched
+const MCAP := {
+	"bike_lean": [10.0, 160.0], "steer": [9.0, 200.0], "counter": [7.0, 110.0], "head_roll": [8.0, 120.0],
+	"lat_g": [6.0, 80.0], "hip_shift": [1.6, 30.0], "absorb": [2.5, 60.0], "body_stick": [6.0, 80.0], "pitch": [9.0, 220.0],
+}
+var _mc := {}
+var _lean_c := 0.0; var _steer_c := 0.0   # this frame's capped bike lean / bars (the bike and the rider's pose share them)
+func _mcap(key: String, target: float, dt: float) -> float:
+	var mc: float = maxf(0.2, float(Tune.v.get("motionCap", 1.0)))   # (Ride › Smoothing: higher = looser caps)
+	var lim: Array = [float(MCAP[key][0]) * mc, float(MCAP[key][1]) * mc]
+	var s = _mc.get(key)
+	if s == null or not is_finite(target):
+		_mc[key] = [target, 0.0]
+		return target
+	# integrated in steps of at most 1/240 s: one step per drawn frame was unstable at 60 fps (w x dt = 1, the
+	# damping overshot every frame and the legs buzzed up to 14 cm standing still, on a vsynced 60 Hz screen)
+	var w := 60.0
+	var n := maxi(1, ceili(dt * 240.0))
+	var h := dt / n
+	for _i in n:
+		var acc := clampf((target - float(s[0])) * w * w - 2.0 * w * float(s[1]), -lim[1], lim[1])
+		s[1] = clampf(float(s[1]) + acc * h, -lim[0], lim[0])
+		s[0] = float(s[0]) + float(s[1]) * h
+	# never further behind than a real lag would leave it (a long hitch / a respawn mid-move)
+	if absf(target - float(s[0])) > lim[0] * 0.1: s[0] = target - signf(target - float(s[0])) * lim[0] * 0.1
+	return float(s[0])
 func _jitter_sample(key: String, val: float, thr: float) -> void:
 	var j: Array = _jit.get(key, [NAN, 0.0, 0, 0.0, 0])   # last value, last delta, flips, biggest flip, samples
 	if not is_nan(j[0]):
@@ -1285,6 +1321,10 @@ func _jitter_sample(key: String, val: float, thr: float) -> void:
 		j[1] = d
 	j[0] = val; j[4] += 1
 	_jit[key] = j
+
+func head_rot_probe() -> float:   # tests: the drawn head's roll + yaw (rider space)
+	var e: Vector3 = rider.head.transform.basis.get_euler()
+	return e.x + e.y
 
 func jitter_report() -> void:
 	var keys := _jit.keys()
@@ -1331,7 +1371,10 @@ func _physics_process(dt: float) -> void:
 	if jitter_on and not phys.crash_on:
 		for kv in [["slip", phys.slip, 0.002], ["yaw_rate", phys.yaw_rate, 0.02], ["lean", phys.lean, 0.002], ["bike_lean", phys.bike_lean, 0.003],
 				["counter", phys.counter, 0.003], ["steer", phys.steer, 0.003], ["hip_shift", phys.hip_shift, 0.001], ["body_x", phys.body_x, 0.001],
-				["pitch", phys.pitch, 0.002], ["y", phys.y, 0.001], ["body_y", phys.body_y, 0.001], ["compress", phys.compress, 0.001], ["lat_a", phys.lat_a, 0.05], ["v", phys.v, 0.01]]:
+				["pitch", phys.pitch, 0.002], ["y", phys.y, 0.001], ["body_y", phys.body_y, 0.001], ["compress", phys.compress, 0.001], ["lat_a", phys.lat_a, 0.05], ["v", phys.v, 0.01],
+				["heading", phys.heading, 0.001], ["knock", phys.knock, 0.02], ["bank", phys.bank, 0.002], ["bank_lean", phys.bank_lean, 0.002],
+				["gx_lean", phys._gx_lean, 0.002], ["berm_k", phys.berm_k, 0.01], ["corner_g", phys.corner_g, 0.05], ["front_use", phys.front_use, 0.02],
+				["lean_v", phys.lean_v, 0.05], ["slip_w", phys.slip_w, 0.02]]:
 			_jitter_sample(kv[0], kv[1], kv[2])
 	if phys.crash_on and getup_anim != null:
 		_getup_step(dt)
@@ -1538,8 +1581,12 @@ func _process(dt: float) -> void:
 	var wobble := sin(t * 2.3) * 0.025 * maxf(0.0, 1 - absf(st.v) / 2) * (1.0 - dab_k)
 	var dab_lean := -dab_side * DAB_LEAN * dab_k   # bike_lean > 0 tips the top to the rider's left
 	if rig.chain and phys.geared and phys.gear >= 0: rig.chain.cog_teeth = float(phys.cogs[phys.gear])
-	rig.pose(drawn_pos.x, y_draw + (1.5 if Env.s("BMX_PITCH_POSE") != "" else 0.0), drawn_pos.z, hd, p_draw, st.hop_nose, st.bike_lean + st.rock + wobble + dab_lean,
-		st.steer + st.bar_catch - wobble * 1.5, st.wheel_f, st.wheel_r, st.crank)
+	if st.crash_on: _mc.clear()   # (the motion cap starts fresh after a crash / get-up)
+	var mdt := minf(get_process_delta_time(), 0.05)
+	_lean_c = _mcap("bike_lean", st.bike_lean, mdt)
+	_steer_c = _mcap("steer", st.steer + st.bar_catch, mdt)
+	rig.pose(drawn_pos.x, y_draw + (1.5 if Env.s("BMX_PITCH_POSE") != "" else 0.0), drawn_pos.z, hd, p_draw, st.hop_nose,
+		_lean_c + st.rock + wobble + dab_lean, _steer_c - wobble * 1.5, st.wheel_f, st.wheel_r, st.crank)
 	_pk = _perf("bike_pose", _pk)
 	DebugOverlay.draw(self, st, drawn_pos, hd)
 	# the physics' tyres are soft and follow the smooth height field; the drawn ground is a triangle mesh
@@ -1591,6 +1638,22 @@ func _process(dt: float) -> void:
 			get_viewport().get_texture().get_image().save_png("%s_%d.png" % [Env.s("BMX_LEAN_SHOT"), _lean_shots])
 			print("LEANSHOT %d bike=%.0fdeg body=%.0fdeg v=%.1f" % [_lean_shots, rad_to_deg(st.bike_lean), rad_to_deg(st.bike_lean - st.counter), st.v])
 			_lean_shots += 1
+	if Env.s("BMX_TSHOTS") != "":   # tests: "prefix@t1,t2,..." = a screenshot at each ride time (s)
+		var spec := Env.s("BMX_TSHOTS").split("@")
+		var times := spec[1].split(",") if spec.size() > 1 else PackedStringArray()
+		if _lean_shots < times.size() and t >= float(times[_lean_shots]):
+			get_viewport().get_texture().get_image().save_png("%s_%02d.png" % [spec[0], _lean_shots])
+			print("TSHOT %d t=%.2f bike=%+.0fdeg body=%+.0fdeg roll_p=%+.2f roll_c=%+.2f v=%.1f" % [_lean_shots, t, rad_to_deg(st.bike_lean),
+				rad_to_deg(st.bike_lean - st.counter), rider.roll_p, rider.roll_c, st.v])
+			_lean_shots += 1
+	if Env.s("BMX_BERM_SHOT") != "" and not st.air and not st.crash_on:   # tests: shots + numbers on real berms
+		var bmin := float(Env.s("BMX_BERM_MIN")) if Env.s("BMX_BERM_MIN") != "" else 0.15
+		if absf(st.bank) > bmin and t - _lean_shot_t > 1.2 and _lean_shots < 6:
+			_lean_shot_t = t
+			get_viewport().get_texture().get_image().save_png("%s_%d.png" % [Env.s("BMX_BERM_SHOT"), _lean_shots])
+			print("BERMSHOT %d bank=%+.0fdeg lean=%+.0fdeg bike=%+.0fdeg body=%+.0fdeg steer_in=%+.2f lat=%+.1f berm_k=%.2f v=%.1f" % [_lean_shots,
+				rad_to_deg(st.bank), rad_to_deg(st.lean), rad_to_deg(st.bike_lean), rad_to_deg(st.bike_lean - st.counter), st.steer_in, st.lat_a, st.berm_k, st.v])
+			_lean_shots += 1
 	if clip_probe and Env.s("BMX_CLIP_SHOT") != "":   # tests: a screenshot when a tyre was 12+ cm in
 		var deep: float = clip_stats.before
 		if clip_stats.get("shot", 0) == 1:
@@ -1613,6 +1676,8 @@ func _process(dt: float) -> void:
 		_aspin_s += ((st.yaw_rate if st.air else 0.0) - _aspin_s) * ek
 		_atilt_s += ((st.air_tilt * float(T.get("stickBodyTilt", 0.6)) * clampf(st.air_stick.length() * 3.0 + absf(st.edge_s) * 2.0, 0.0, 1.0) if st.air else 0.0) - _atilt_s) * ek
 		_blat_s += ((st.air_stick.x if st.air else st.flick) - _blat_s) * ek
+		# the bike's twist against the body in the air (an air whip): the body turns back against it
+		_awhip_s += ((st.air_tw if st.air else 0.0) - _awhip_s) * (1.0 - exp(-dt * 16.0))
 		var pi := _pose_in   # one dictionary filled in place every frame (update_pose doesn't keep it)
 		pi["footL"] = lt.footL
 		pi["footR"] = lt.footR
@@ -1622,13 +1687,15 @@ func _process(dt: float) -> void:
 		pi["dabSide"] = dab_side
 		pi["dabLean"] = DAB_LEAN
 		pi["v"] = st.v
-		pi["lean"] = st.bike_lean + st.rock
-		pi["steer"] = st.steer
+		# (through the motion cap, MCAP: the torso, head and hips can't move faster than a body can)
+		var pdt := minf(dt, 0.05)
+		pi["lean"] = _lean_c + st.rock
+		pi["steer"] = _steer_c
 		pi["yawRate"] = _yaw_s
-		pi["counter"] = st.counter
+		pi["counter"] = _mcap("counter", st.counter, pdt)
 		pi["rockRoll"] = st.rock
-		pi["headRoll"] = st.bike_lean * 0.85
-		pi["absorb"] = clampf(body_y - y_draw, -T.legComp, T.legExt)
+		pi["headRoll"] = _mcap("head_roll", st.bike_lean * 0.85, pdt)
+		pi["absorb"] = _mcap("absorb", clampf(body_y - y_draw, -T.legComp, T.legExt), pdt)
 		pi["pitch"] = p_draw
 		pi["bodyLevel"] = T.bodyLevel
 		pi["attackDrop"] = T.attackDrop
@@ -1637,8 +1704,8 @@ func _process(dt: float) -> void:
 		pi["crank"] = st.crank
 		pi["air"] = st.air_k
 		pi["compress"] = maxf(0.0, -st.compress)
-		pi["hipShift"] = st.hip_shift
-		pi["bodyStick"] = -0.55 if scenic else st.body_in_s
+		pi["hipShift"] = _mcap("hip_shift", st.hip_shift, pdt)
+		pi["bodyStick"] = -0.55 if scenic else _mcap("body_stick", st.body_in_s, pdt)
 		pi["relax"] = 1.0 if scenic else 0.0
 		pi["tall"] = 1.0 if scenic else 0.0
 		pi["lookYaw"] = _look_yaw
@@ -1646,7 +1713,9 @@ func _process(dt: float) -> void:
 		pi["slope"] = st._g_pitch
 		pi["airTilt"] = _atilt_s
 		pi["bodyLat"] = _blat_s
-		pi["latG"] = 0.0 if scenic else st.lat_a / BikePhysics.G
+		pi["airWhip"] = _awhip_s
+		pi["torsoVmax"] = float(T.get("torsoMaxSpeed", 2.5))
+		pi["latG"] = 0.0 if scenic else _mcap("lat_g", st.lat_a / BikePhysics.G, pdt)
 		pi["wheelR"] = rider.to_local(rig.wheel_r.global_position)
 		pi["wheelRR"] = rig.wheel_rr
 		pi["t"] = t
@@ -1662,9 +1731,13 @@ func _process(dt: float) -> void:
 			if _jit_head != Vector3.INF and hj.distance_to(_jit_head) > 0.08:
 				print("JUMP head %.3f m  v=%.2f brake_stop=%s pivot=%.2f slip=%.2f counter=%.2f lean=%.2f pitch=%.2f slope=%.2f wheelie=%.2f air=%.2f hip=%.3f" % [hj.distance_to(_jit_head), st.v, st.brake_stop, st.pivot, st.slip, st.counter, st.lean, st.pitch, st._g_pitch, rider.sm_wheelie, st.air_k, st.hip_shift])
 			_jit_head = hj
+			var jthr := 0.0003 if Env.s("BMX_JITTER_FINE") != "" else 0.002   # (fine: sub-millimetre buzz)
 			for ji in [[0, "j_head"], [1, "j_chest"], [2, "j_pelvis"], [4, "j_elbowL"], [10, "j_kneeL"]]:
 				var jp: Vector3 = rider.J[ji[0]]
-				_jitter_sample(ji[1] + "x", jp.x, 0.002); _jitter_sample(ji[1] + "y", jp.y, 0.002); _jitter_sample(ji[1] + "z", jp.z, 0.002)
+				_jitter_sample(ji[1] + "x", jp.x, jthr); _jitter_sample(ji[1] + "y", jp.y, jthr); _jitter_sample(ji[1] + "z", jp.z, jthr)
+			_jitter_sample("d_bike_lean", _lean_c, jthr * 2.0); _jitter_sample("d_steer", _steer_c, jthr * 2.0)
+			_jitter_sample("d_counter", pi["counter"], jthr * 2.0); _jitter_sample("d_absorb", pi["absorb"], jthr)
+			_jitter_sample("d_rider_y", rider.global_position.y, jthr); _jitter_sample("d_head_rot", head_rot_probe(), jthr * 2.0)
 	_pk = _perf("rider_pose", _pk)
 	var vd: float = Settings.get_v("view_distance")
 	terrain.update_stream(st.x, st.z, 4.0)

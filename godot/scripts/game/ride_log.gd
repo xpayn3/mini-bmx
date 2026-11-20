@@ -16,10 +16,11 @@ const COLS := [
 	"in_throttle", "in_brake", "in_steer", "in_body_fwd", "in_body_lean", "in_hop", "in_sprint", "pad",
 	"tyre_lift", "drawn_y", "pelvis_x", "pelvis_y", "pelvis_z", "chest_x", "chest_y", "chest_z", "head_x", "head_y", "head_z",
 	"whip", "whip_hold", "flick_kick", "raw_right_x", "raw_left_x",
+	"in_brake_f", "in_brake_r", "front_use", "front_lock", "rear_lock", "corner_g", "knock", "lean_err", "weight_in", "balance",
 ]
 
 const ROWS := int(SECS * HZ)
-const NC := 65   # = COLS.size()
+const NC := 75   # = COLS.size()
 var _buf := PackedFloat32Array()   # ROWS x NC floats, written in place (no per-step arrays)
 var _head := 0
 var _count := 0
@@ -100,6 +101,16 @@ func record(dt: float, st: BikePhysics, inp: Dictionary, lift: float, drawn_y: f
 	_buf[o + 62] = st.flick_kick
 	_buf[o + 63] = Input.get_action_strength("body_right") - Input.get_action_strength("body_left")
 	_buf[o + 64] = Input.get_action_strength("steer_right") - Input.get_action_strength("steer_left")
+	_buf[o + 65] = st.brake_f
+	_buf[o + 66] = st.brake_r
+	_buf[o + 67] = st.front_use
+	_buf[o + 68] = st.front_lock
+	_buf[o + 69] = st.rear_lock
+	_buf[o + 70] = st.corner_g
+	_buf[o + 71] = st.knock
+	_buf[o + 72] = st.lean_err
+	_buf[o + 73] = st.weight_in
+	_buf[o + 74] = st.bal_k
 	_head = (_head + 1) % ROWS
 	_count = mini(_count + 1, ROWS)
 
