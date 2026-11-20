@@ -28,6 +28,7 @@ var E := PackedFloat32Array()
 var RD := PackedFloat32Array()
 var RK := PackedFloat32Array()
 var length: float = 0.0
+var drops: Array = []   # [[i0, i1]] centreline index ranges of drop-offs / cliffs (no route features there)
 # dense spatial hash of segments by midpoint
 var gx0: int = 0
 var gz0: int = 0
@@ -47,6 +48,10 @@ var chunk_fences := {}   # key -> PackedInt32Array of fence indices with a post 
 var chunk_gates := {}    # key -> PackedInt32Array of centreline indices that carry a distance gate
 const GATE_FIRST := 150    # centreline index of the first gate (300 m down the trail)
 const GATE_EVERY := 150     # one every 300 m
+var chunk_arches := {}   # key -> PackedInt32Array of (centreline index * 2 + TrailArch kind)
+var chunk_boards := {}  # key -> PackedInt32Array of centreline indices with a roadside billboard
+const BOARD_FIRST := 18
+const BOARD_EVERY := 41     # one every ~80 m, alternating sides
 
 # build state
 var _M  # TerrainField (zc, landform, pitches, water)
@@ -228,12 +233,12 @@ func _road(max_len: float) -> void:
 	while done < len:
 		var o := _off()
 		var lim := _corr - 30
-		var tgt := (_r.next() * 2 - 1) * 52 * D2R
+		var tgt := (_r.next() * 2 - 1) * 72 * D2R
 		if absf(o) > lim * 0.5:
-			tgt = -signf(o) * (18 + _r.next() * 34) * D2R
-		var seg := minf(len - done, 26 + _r.next() * 44)
-		# now and then a tight bend instead of a sweeper
-		var R := (16 + _r.next() * 18) if _r.next() < 0.3 else (38 + _r.next() * 60)
+			tgt = -signf(o) * (22 + _r.next() * 44) * D2R
+		var seg := minf(len - done, 18 + _r.next() * 40)
+		# often a tight bend instead of a sweeper
+		var R := (13 + _r.next() * 16) if _r.next() < 0.42 else (34 + _r.next() * 56)
 		var n0 := X.size()
 		_turn_to(tgt, R, ROAD)
 		var used := (X.size() - n0) * STEP
@@ -313,7 +318,7 @@ func _build() -> void:
 		var pick2 := _r.next()
 		if pk < 0 and _x > _hill - 80:
 			# past the mountain: the trail runs on through the hills, never long without a twist
-			_attempt([[0, 60 + _r.next() * 120]])
+			_attempt([[0, 40 + _r.next() * 90]])
 			var end_x := _x + 50 + _r.next() * 70
 			if pick2 < 0.3:
 				_attempt([[4, 0.0]])
@@ -398,6 +403,7 @@ func _finish() -> void:
 			var w := smooth(_hill + 60, _hill + 360, X[i])
 			if w > 0.0:
 				E[i] = E[i] + (fr[i] - E[i]) * w
+	_shape_profile()
 	var rd := PackedFloat32Array(); rd.resize(n)
 	var rk := PackedFloat32Array(); rk.resize(n)
 	for i in n:
@@ -431,6 +437,69 @@ func _finish() -> void:
 		var c := (keys[i * 2] - gx0) * gnz + keys[i * 2 + 1] - gz0
 		cell_items[fill[c]] = i
 		fill[c] += 1
+
+
+static func _hash(k: int, salt: int) -> float:
+	var v := sin(float(k) * 12.9898 + float(salt) * 78.233) * 43758.5453
+	return v - floor(v)
+
+
+## makes the trail height livelier: rolling dips, drop-offs, and (very rarely) a huge cliff to launch off.
+## Everything depends only on position along the trail (and the seed), and events near the laid-out end are
+## skipped, so growing the trail never changes what the rider has already seen.
+func _shape_profile() -> void:
+	var seed_i: int = _mark_seed % 9973
+	# rolling dips on the open trail (not in the mountain's steep section)
+	for i in n:
+		var w := smooth(_hill + 60, _hill + 360, X[i])
+		if w <= 0.0 or KD[i] != ROAD:
+			continue
+		var s := i * STEP
+		var amp := 0.3 + 1.5 * (0.5 + 0.5 * sin(s / 310.0 + seed_i))
+		E[i] += w * amp * sin(s * TAU / 60.0 + 0.7 * sin(s / 140.0))
+	drops = []
+	var last_end := 0
+	var SLOT := 80
+	var k := 1
+	while k * SLOT + 20 < n - 80:
+		var kk := k
+		k += 1
+		var r := _hash(kk, seed_i)
+		var big := r < 0.02
+		if not big and r > 0.16:
+			continue
+		var hh := (12.0 + _hash(kk, seed_i + 1) * 10.0) if big else (3.0 + _hash(kk, seed_i + 1) * 3.5)
+		# the trail climbs on to a ridge (gently: ~4 %), runs level a moment, then falls away in a cliff
+		var ramp := int(hh / 0.04 / STEP)
+		var hold := 6 + int(_hash(kk, seed_i + 2) * 6.0)
+		var dl := int(ceil((5.0 + hh * 0.4) / STEP))
+		var a := -1
+		var e := 0
+		for off in range(0, SLOT, 4):
+			var a0 := kk * SLOT + off + ramp
+			var e0 := a0 + hold + dl
+			if a0 - ramp < last_end + 10 or e0 + 8 >= n - 80:
+				continue
+			var ok := true
+			for q in range(a0 + hold - 14, e0 + 8):
+				if KD[q] != ROAD or absf(KAP[q]) > 0.012:
+					ok = false
+					break
+			if ok:
+				a = a0
+				e = e0
+				break
+		if a < 0:
+			continue
+		for q in range(a - ramp, e + 1):
+			var lift := hh
+			if q < a:
+				lift = hh * smooth(0.0, 1.0, float(q - (a - ramp)) / ramp)
+			elif q > a + hold:
+				lift = hh * (1.0 - smooth(0.0, 1.0, float(q - (a + hold)) / dl))
+			E[q] += lift
+		drops.append([a - ramp, e])
+		last_end = e
 
 
 ## point on the centreline at arc length s -> [x, z, tx, tz, i]
@@ -605,7 +674,14 @@ static func _add(d: Dictionary, k: int, v: int) -> void:
 
 
 func _bucket() -> void:
-	chunk_rocks = {}; chunk_stakes = {}; chunk_fences = {}; chunk_gates = {}
+	chunk_rocks = {}; chunk_stakes = {}; chunk_fences = {}; chunk_gates = {}; chunk_boards = {}; chunk_arches = {}
+	for i in range(BOARD_FIRST, n - 2, BOARD_EVERY):
+		var gd := posmod(i - GATE_FIRST, GATE_EVERY)
+		if gd < 8 or gd > GATE_EVERY - 8:
+			continue   # not right under a gate
+		var kb := KD[i]
+		if kb == ROAD or kb == START or kb == FINISH:
+			_add(chunk_boards, _chunk_of(X[i], Z[i]), i)
 	for i in n - 1:
 		if KD[i] == ROCKS:
 			_add(chunk_rocks, _chunk_of(X[i], Z[i]), i)
@@ -614,6 +690,34 @@ func _bucket() -> void:
 		var kd := KD[i]
 		if kd == ROAD or kd == START or kd == ESSES or kd == FINISH:
 			_add(chunk_gates, _chunk_of(X[i], Z[i]), i)
+	# rare rock tunnels / overhangs on straight bits of road, one candidate per 200 m slot
+	var seed_i: int = _mark_seed % 9973
+	for k in range(2, n / 100):
+		var kind := TrailArch.kind_for(k, seed_i)
+		if kind < 0:
+			continue
+		var ci := -1
+		for off in range(10, 90, 4):
+			var c0 := k * 100 + off
+			if c0 + 20 >= n - 2:
+				break
+			var okc := true
+			for q in range(c0 - 12, c0 + 13):
+				if KD[q] != ROAD or (absi(q - c0) <= 8 and absf(KAP[q]) > 0.012):
+					okc = false
+					break
+			for dr in drops:
+				if c0 + 20 > dr[0] and c0 - 20 < dr[1]:
+					okc = false
+			var gd2 := posmod(c0 - GATE_FIRST, GATE_EVERY)
+			if gd2 < 14 or gd2 > GATE_EVERY - 14:
+				okc = false
+			if okc:
+				ci = c0
+				break
+		if ci < 0:
+			continue
+		_add(chunk_arches, _chunk_of(X[ci], Z[ci]), ci * 2 + kind)
 	for k in stakes.size():
 		_add(chunk_stakes, _chunk_of(stakes[k]["x"], stakes[k]["z"]), k)
 	for fi in fences.size():

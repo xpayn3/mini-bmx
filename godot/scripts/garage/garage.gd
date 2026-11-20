@@ -91,9 +91,9 @@ const VIEWS := {
 
 func _ready() -> void:
 	build = BikeBuild.load_build()
-	rider_pose = RiderPanels.load_pose("dh", GameState.BIKES.dh.pose)
-	var env_tab := OS.get_environment("BMX_GARAGE_TAB")
-	if OS.get_environment("BMX_GARAGE_RIDER") != "" or env_tab in ["rider", "kit"]:
+	rider_pose = RiderPanels.load_pose(_pose_bike(), GameState.BIKES[_pose_bike()].pose)
+	var env_tab := Env.s("BMX_GARAGE_TAB")
+	if Env.s("BMX_GARAGE_RIDER") != "" or env_tab in ["rider", "kit"]:
 		mode = "rider"   # tests: the rider tabs live in the rider room
 	var rcf := ConfigFile.new()
 	if rcf.load(RiderPanels.PATH) == OK:
@@ -103,9 +103,9 @@ func _ready() -> void:
 	rider_on = mode == "rider"
 	stand_on = mode == "rider"
 	tab = "rider" if mode == "rider" else "paint"
-	if OS.get_environment("BMX_GARAGE_RIDER") != "":   # tests: a preview
-		rider_preview = OS.get_environment("BMX_GARAGE_RIDER")
-		for kv in OS.get_environment("BMX_POSE").split(",", false):   # tests: "spineCurve=0.2,pelvisRoll=0.1" (not saved)
+	if Env.s("BMX_GARAGE_RIDER") != "":   # tests: a preview
+		rider_preview = Env.s("BMX_GARAGE_RIDER")
+		for kv in Env.s("BMX_POSE").split(",", false):   # tests: "spineCurve=0.2,pelvisRoll=0.1" (not saved)
 			var p := kv.split("=")
 			if p.size() == 2: rider_pose[p[0]] = float(p[1])
 	if not PREVIEWS.has(rider_preview): rider_preview = "pedal"
@@ -119,9 +119,9 @@ func _ready() -> void:
 	var first := tab
 	tab = ""   # so _set_tab frames the camera on the first page
 	_set_tab(env_tab if env_tab != "" and _has_tab(env_tab) else first)
-	if OS.get_environment("BMX_TYRE_PROBE") != "":
+	if Env.s("BMX_TYRE_PROBE") != "":
 		_tyre_probe.call_deferred()
-	var cv := OS.get_environment("BMX_GARAGE_CAM").split(",", false)   # tests: "orbit_rad,pitch_deg,dist"
+	var cv := Env.s("BMX_GARAGE_CAM").split(",", false)   # tests: "orbit_rad,pitch_deg,dist"
 	if cv.size() == 3:
 		orbit_t = float(cv[0]); pitch_t = float(cv[1]); dist_t = float(cv[2])
 		orbit = orbit_t; pitch = pitch_t; dist = dist_t
@@ -637,7 +637,7 @@ func _process(dt: float) -> void:
 	orbit = lerpf(orbit, orbit_t, minf(1.0, dt * 4))
 	pitch = lerpf(pitch, pitch_t, minf(1.0, dt * 4))
 	dist = lerpf(dist, dist_t, minf(1.0, dt * 4))
-	var head_env := OS.get_environment("BMX_GARAGE_HEAD")
+	var head_env := Env.s("BMX_GARAGE_HEAD")
 	if head_env == "bike" and rider and rider_on:   # tests: frame the head + neck of the rider on the bike
 		focus_t = rider.head.global_position + Vector3(0, -0.05, 0)
 	elif stand_rider and head_env == "neck":   # tests: the standing rider's neck, collar + goggle strap
@@ -1059,10 +1059,10 @@ func _paint_page() -> void:
 	var frames := []
 	for id in GameState.BIKES:
 		if GameState.BIKES[id].get("garage", false): frames.append([id, GameState.BIKES[id].label])
-	body.add_child(_choice("Frame", frames, GameState.bike_id, func(v):
+	_choice("Frame", frames, GameState.bike_id, func(v):
 		if v == GameState.bike_id: return
 		GameState.bike_id = v; GameState.save()
-		_rebuild_bike(); _set_tab("paint")))
+		_rebuild_bike(); _set_tab("paint"))
 	_h("PART")
 	var g := GridContainer.new()
 	g.columns = 2
@@ -1518,17 +1518,21 @@ func _set_look(l: Dictionary) -> void:
 	if stand_rider: stand_rider.set_look(l)
 	if rider: rider.set_look(l)
 
+## the frame whose riding pose the rider room edits: the selected garage frame (the ride loads its pose by bike id)
+func _pose_bike() -> String:
+	return GameState.bike_id if GameState.BIKES[GameState.bike_id].get("garage", false) else "dh"
+
 func _apply_rider_pose() -> void:
 	if rider: rider.set_style(rider_pose)
-	RiderPanels.save_pose("dh", rider_pose)
-	PosePresets.bike = "dh"
+	RiderPanels.save_pose(_pose_bike(), rider_pose)
+	PosePresets.bike = _pose_bike()
 	PosePresets.pose_changed(rider_pose)
 	if is_instance_valid(_pose_mod): _pose_mod.visible = PosePresets.is_builtin(PosePresets.get_active()) and PosePresets.modified()
 
 ## riding position presets: pick one (it is the pose you ride with), Save as your own, Delete yours
 var _pose_mod: Label
 func _pose_presets() -> void:
-	PosePresets.bike = "dh"
+	PosePresets.bike = _pose_bike()
 	var names: Array = PosePresets.names()
 	var act := PosePresets.get_active()
 	var hb := HBoxContainer.new()
@@ -1542,7 +1546,7 @@ func _pose_presets() -> void:
 		if n == act: ob.select(ob.get_item_index(i))
 	ob.item_selected.connect(func(idx):
 		PosePresets.select(names[ob.get_item_id(idx)])
-		rider_pose = RiderPanels.load_pose("dh", GameState.BIKES.dh.pose)
+		rider_pose = RiderPanels.load_pose(_pose_bike(), GameState.BIKES[_pose_bike()].pose)
 		if rider: rider.set_style(rider_pose)
 		_set_tab.call_deferred("rider"))
 	hb.add_child(ob)

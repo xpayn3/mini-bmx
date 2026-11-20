@@ -7,7 +7,7 @@ extends SceneTree
 ## Run: godot --headless --path godot -s res://tools/trail_grow_probe.gd
 
 const GROWS := 6
-const SAFE := 400.0   # behind the old end by this much, nothing may change
+const SAFE := 520.0   # behind the old end by this much, nothing may change (drops look ~460 m ahead)
 
 
 func _init() -> void:
@@ -64,6 +64,15 @@ func _init() -> void:
 			bad += 1
 		print("GROW %d: to x=%.0f n=%d  grow %d ms  adopt %d ms | layout changed %d, derived changed %d, marks changed %s, route feats changed %s | C# vs GD %d/%d mismatches  %s" % [
 			g + 1, c.end_x(), c.n, t_grow, t_adopt, lay, der, mk, rf, miss, cmp, "OK" if ok else "FAIL"])
+	var cc: TrailCourse = f.course
+	var na := 0
+	for kk in cc.chunk_arches:
+		na += cc.chunk_arches[kk].size()
+	var big := 0
+	for d in cc.drops:
+		if cc.E[d[0]] - cc.E[d[1]] > 10.0:
+			big += 1
+	print("STATS length %.0f m: drops=%d (huge %d) arches=%d" % [cc.length, cc.drops.size(), big, na])
 	print("TRAIL GROW PROBE: %s" % ("PASS" if bad == 0 else "FAIL (%d)" % bad))
 	quit()
 

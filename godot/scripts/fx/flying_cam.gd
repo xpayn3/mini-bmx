@@ -38,9 +38,11 @@ static func launch(parent: Node, body: Node3D, xf: Transform3D, ter, vel: Vector
 	f.angular_velocity = spin
 	return f
 
+static var _PROBE := OS.get_environment("BMX_GOPRO_PROBE") != ""
+
 func _physics_process(dt: float) -> void:
 	t += dt
-	if OS.get_environment("BMX_GOPRO_PROBE") != "" and int(t * 4.0) != int((t - dt) * 4.0):   # tests
+	if _PROBE and int(t * 4.0) != int((t - dt) * 4.0):   # tests
 		var gp: float = terrain.height(global_position.x, global_position.z) if terrain else 0.0
 		print("GOPRO t=%.2f pos=%s above_ground=%.3f v=%.2f" % [t, str(global_position), global_position.y - gp, linear_velocity.length()])
 	if t > LIFE:

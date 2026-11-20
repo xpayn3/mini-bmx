@@ -235,7 +235,7 @@ static func default_build() -> Dictionary:
 		},
 		"bars": {"width": 780, "rise": 30, "material": "alloy", "levers": "stock"},
 		"seat": {"model": "stock", "post": "stock", "post_h": 0.0},
-		"suspension": {"fork_travel": 200, "shock_travel": 200, "fork_spring": 1, "shock_spring": 1, "rebound": 1, "rear_caliper": "stock", "rotor": "stock"},
+		"suspension": {"fork_model": "custom", "fork_travel": 200, "shock_travel": 200, "fork_spring": 1, "shock_spring": 1, "rebound": 1, "rear_caliper": "stock", "rotor": "stock"},
 		"drive": {"ring": 34, "cassette": "dh7"},
 	}
 

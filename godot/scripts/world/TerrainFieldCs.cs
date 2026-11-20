@@ -160,9 +160,9 @@ internal sealed class TfWood
 		}
 		if (u < 2.0)
 			return ramp(0.0, 2.0, 0.02, 0.45, u);
-		if (u < 13.0)
+		if (u < u1 - 2.0)
 			return 0.45;
-		return ramp(13.0, 15.0, 0.45, 0.02, u);
+		return ramp(u1 - 2.0, u1, 0.45, 0.02, u);
 	}
 
 	private static double ramp(double a, double b, double h0, double h1, double u)
@@ -204,6 +204,7 @@ internal static class TfSet
 			["woodKicker"] = new TfHermite(new[] { new[] { 0.0, 0, 0 }, new[] { 4.6, 0, 0 }, new[] { 6.4, 0.9, 0.1, 0 }, new[] { 7.4, 0.9, 0, 0 }, new[] { 10.0, 0.72, -0.17 }, new[] { 20.0, 0.14, -0.08 }, new[] { 26.0, 0, 0 } }),
 			["skinny"] = new TfFlat(19.0),
 			["bridge"] = new TfFlat(15.0),
+			["gorge"] = new TfFlat(36.0),
 		};
 		var kick = new TfHermite(new[] { new[] { 0.0, 0, 0.1 }, new[] { 3.8, 0.95, 0.4 } });
 		var skin = new TfHermite(new[] { new[] { 0.0, 0.02, 0.05 }, new[] { 2.0, 0.42, 0.3 }, new[] { 4.0, 0.85, 0 } });
@@ -212,10 +213,12 @@ internal static class TfSet
 			["woodKicker"] = new TfWood(0, 0.0, 3.8, 0.85, true, kick, skin),
 			["skinny"] = new TfWood(1, 0.0, 19.0, 0.33, false, kick, skin),
 			["bridge"] = new TfWood(2, 0.0, 15.0, 1.0, false, kick, skin),
+			["gorge"] = new TfWood(2, 0.0, 36.0, 1.4, false, kick, skin),
 		};
 		DIG = new Dictionary<string, TfProfile>
 		{
 			["bridge"] = new TfHermite(new[] { new[] { 0.0, 0, 0 }, new[] { 1.6, 0, 0 }, new[] { 3.4, -1.9, 0 }, new[] { 11.6, -1.9, 0 }, new[] { 13.4, 0, 0 }, new[] { 15.0, 0, 0 } }),
+			["gorge"] = new TfHermite(new[] { new[] { 0.0, 0, 0 }, new[] { 3.0, 0, 0 }, new[] { 4.6, -9.0, 0 }, new[] { 31.4, -9.0, 0 }, new[] { 33.0, 0, 0 }, new[] { 36.0, 0, 0 } }),
 		};
 	}
 }
@@ -764,6 +767,7 @@ public partial class TerrainFieldCs : RefCounted
 	// GDScript's sin / exp / log: the x87 emulation, and for the rare near-tie the engine's own function
 	// (Expression calls the same Math::sin / exp / log as GDScript; one per instance = per thread)
 	private Expression[] _libm;
+	private Godot.Collections.Array _libm_args;
 	public long libm_engine_calls;
 
 	private double _engine(int fn, double x)
@@ -775,7 +779,9 @@ public partial class TerrainFieldCs : RefCounted
 			_libm[fn] = new Expression();
 			_libm[fn].Parse(fn == 0 ? "sin(x)" : (fn == 1 ? "exp(x)" : "log(x)"), new[] { "x" });
 		}
-		return _libm[fn].Execute(new Godot.Collections.Array { x }).AsDouble();
+		_libm_args ??= new Godot.Collections.Array { 0.0 };   // one reused engine Array (disposed in release_libm), not one per call
+		_libm_args[0] = x;
+		return _libm[fn].Execute(_libm_args).AsDouble();
 	}
 
 	/// dispose the engine Expressions made for near-tie sin / exp / log now (made again if needed): the paper
@@ -783,6 +789,8 @@ public partial class TerrainFieldCs : RefCounted
 	/// the engine shut down, which crashed the quit
 	public void release_libm()
 	{
+		_libm_args?.Dispose();
+		_libm_args = null;
 		if (_libm == null) return;
 		foreach (var e in _libm) e?.Dispose();
 		_libm = null;
@@ -1155,6 +1163,8 @@ public partial class TerrainFieldCs : RefCounted
 			f.half = 2.3;
 		else if (type == "bridge")
 			f.half = 2.4;
+		else if (type == "gorge")
+			f.half = 3.2;
 		else if (type == "skinny")
 			f.half = 1.4;
 		else
