@@ -34,6 +34,8 @@ var wheel_rr := 0.355
 const TYRE_ACROSS := [-0.8, 0.0, 0.8]   # where across the casing tyre_depth samples (x tyre_hw); one array, not one per call
 var tyre_hw := 0.03   # half the tyre's width (m): the casing is round, about as tall as it is wide
 
+static var _fit_cache := {}   # sticker fits on noDecals frames (BikeDecals.fit_label is slow in GDScript)
+
 ## build: a BikeBuild dictionary (paint, logos, wheels, suspension) or {} for the stock bike
 func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
 	var scene: Node3D = load(cfg.file).instantiate()
@@ -90,7 +92,10 @@ func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
 					if not extras.get("noBarMod", false):   # the garage bars are the same mesh on the goat
 						fitted.append(L)
 					continue
-				var F := BikeDecals.fit_label(model, L)
+				var fkey := str(cfg.file) + "|" + fork_id + "|" + var_to_str(L)   # same frame + label = same fit (the garage rebuilds per click)
+				if not _fit_cache.has(fkey):
+					_fit_cache[fkey] = BikeDecals.fit_label(model, L)
+				var F: Dictionary = (_fit_cache[fkey] as Dictionary).duplicate(true)
 				if not F.is_empty():
 					fitted.append(F)
 			decal_cfg["labels"] = fitted
