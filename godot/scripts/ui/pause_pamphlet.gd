@@ -205,7 +205,7 @@ class Cover extends Control:
 		# the name tag top left
 		draw_rect(Rect2(36, 40, 262, 46), RED)
 		draw_string(p._font_b, Vector2(52, 74), "DOWNHILL PARK", HORIZONTAL_ALIGNMENT_LEFT, -1, 27, Color.WHITE)
-		draw_string(p._font_b, Vector2(38, PHOTO_H - 84), "MINI BMX", HORIZONTAL_ALIGNMENT_LEFT, -1, 92, Color(0.98, 0.97, 0.92))
+		draw_string(p._font_b, Vector2(38, PHOTO_H - 84), "RUNOUT", HORIZONTAL_ALIGNMENT_LEFT, -1, 92, Color(0.98, 0.97, 0.92))
 		draw_string(p._font, Vector2(42, PHOTO_H - 36), (p.place.to_upper() + "  ·  TRAIL GUIDE") if p.place != "" else "TRAIL GUIDE", HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color(1, 0.84, 0.5))
 		draw_rect(Rect2(0, PHOTO_H, W, 14), RED)
 		# the list's frame: a heading rule and a footer

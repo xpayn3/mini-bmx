@@ -24,7 +24,7 @@ const NEUTRAL := {hipX = 0.0, hipY = 0.0, lean = 0.0, elbowsOut = 0.0, kneesOut 
 ## lookpanel.js DEFAULT_LOOK
 const DEFAULT_LOOK := {shell = "#16171a", peak = "#ececec", goggleFrame = "#f2f2ee", lens = "#ff7a2a", strap = "#ff6a4d",
 	jersey = "#ff6a4d", pants = "#1d2b64", gloves = "#ffd21f", shoes = "#26292f", shoeAccent = "#d8232a", pads = "#1b1c20", padStyle = "enduro", helmet = "glory",
-	helmetOn = "1", hairStyle = "long", beard = "1", hair = "#4a3022", skin = "#efc29f", eyes = "#4a6b8a", bibOn = "1", bibNumber = "27", bibText = "MINI BMX  •  DOWNHILL CUP"}
+	helmetOn = "1", hairStyle = "long", beard = "1", hair = "#4a3022", skin = "#efc29f", eyes = "#4a6b8a", bibOn = "1", bibNumber = "27", bibText = "RUNOUT  •  DOWNHILL CUP"}
 ## where the helmet model sits on the head (head-local m / rad) and its scale
 ## helmet models picked in the Look tab (look.helmet): id -> [label, glb]. The glory one is the stock helmet (recolourable
 ## shell / peak, our goggles); the others are textured models (tools/export_helmets.py) that always wear their own goggles

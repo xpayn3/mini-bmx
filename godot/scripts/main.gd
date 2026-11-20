@@ -101,7 +101,7 @@ func _show_menu() -> void:
 	# title: big condensed italic in ink, a yellow mark and the tagline under it
 	var head := VBoxContainer.new()
 	head.add_theme_constant_override("separation", -Tokens.S4)
-	head.add_child(UITheme.display("MINI BMX", Tokens.T_DISPLAY, Tokens.INK, Tokens.SLANT_TITLE))
+	head.add_child(UITheme.display("RUNOUT", Tokens.T_DISPLAY, Tokens.INK, Tokens.SLANT_TITLE))
 	var tag_row := HBoxContainer.new()
 	tag_row.add_theme_constant_override("separation", Tokens.S4)
 	var slab := ColorRect.new()
@@ -1623,6 +1623,10 @@ func _shot(arg: String) -> void:
 	var path := arg.get_slice("@", 0)
 	var secs := float(arg.get_slice("@", 1)) if "@" in arg else 4.0
 	await get_tree().create_timer(secs, true, false, true).timeout
+	if OS.get_environment("BMX_SHOT_NOUI") != "":   # store / splash shots: the view without the menu card
+		ui.visible = false
+		await get_tree().process_frame
+		await get_tree().process_frame
 	get_viewport().get_texture().get_image().save_png(path)
 	print("SHOT ", path)
 	GameState.quit()
