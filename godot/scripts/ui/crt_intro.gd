@@ -172,7 +172,7 @@ func _update(_dt: float) -> void:
 	# fade: in from black at the start is the TV itself; out on skip / at the end
 	var k := 0.0
 	if _skip >= 0.0: k = clampf(_skip / 0.3, 0.0, 1.0)
-	k = maxf(k, smoothstep(T_OFF + 0.9, T_END - 0.1, t))
+	k = maxf(k, smoothstep(T_OFF + 0.15, T_END - 0.05, t))
 	(overlay.material as ShaderMaterial).set_shader_parameter("black", k)
 
 static func _smoother(x: float) -> float:
