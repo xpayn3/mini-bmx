@@ -382,6 +382,17 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   Helmet spots are measured from the shell triangles (`Rider.cam_spots`: top = crown, side = left of the shell 7.5 cm under it, chin
   = the lowest shell point well forward + 4.5 cm); bike spots from the meshes (`BikeRig._tube_at`: the bar a third of the way to the
   right grip; `_leg_band`: the right fork lower, the caliper side is left), so new frames / bars / forks need no numbers.
+  **Camera models + add-ons** ("gear", `ActionCam.MODELS` / `GEAR_ROWS`, procedural shapes, no logos): camera GoPro HERO13 / GoPro MAX
+  (front + back fisheyes, rear screen) / DJI Osmo Action 5 (round lens, big front screen) / Insta360 X4 (tall 360 stick) / Insta360 GO 3S
+  (white pill); lens stock / Max Lens Mod (dome, POV +14 deg: the lens marker carries meta `fov`, `CameraRig._helmet` uses it) / ND / clear
+  guard; housing none / frame / silicone sleeve / dive housing; mic none / Media Mod (cage + 2 cold shoes) / shotgun (foam) / furry
+  windshield (shell fur, `_fur_shader`); top accessory none / Light Mod (a real SpotLight3D) / Display Mod (flip screen with the REC time).
+  Helmet cam: look keys `camModel camLens camHousing camMic camAcc` (`ActionCam.GEAR_LOOK`, not touched by kits), picked in the rider room
+  Kit tab › ACTION CAM and tuning card Look › Action cam; bike cam: `build.camera.{model,lens,housing,mic,acc}`, garage Bars › ACTION CAM.
+  Tests: `BMX_LOOK=camModel=x4,camMic=deadcat`, `BMX_BUILD="camera.mount=bars;camera.model=osmo;camera.acc=light"`.
+  Every camera is "recording": red LEDs (front corner + top) blink 0.3 s of every second with a soft halo (shader, `ActionCam._led_shader` /
+  `_glow_shader`, all cameras in step); the front LCD shows a red "● REC" over the recording time in the bike computer's Doto font
+  (`UITheme.lcd_font()`, `rider/cam_rec_label.gd`: game time since the camera was built, so a new camera after a crash starts at 0:00).
   Camera views: Helmet (`helmet`) and **Bike** (`bikecam`, `src: bike`) look out of the lens; C skips whichever has no camera.
   Probe: `BMX_CAMMOUNT_PROBE=1` (`CAMMOUNT` lines); tests `BMX_LOOK=camMount=side`, `BMX_BUILD="camera.mount=fork" BMX_CAM=bikecam`.
 - Look: kits + a colour per part (helmet shell/peak, goggles, jersey, pants, gloves, shoes, knee pads).

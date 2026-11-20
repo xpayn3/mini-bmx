@@ -96,7 +96,7 @@ const POSE_DEFS := [
 ]
 
 ## look keys that belong to the person, not to a kit: picking a kit leaves them alone
-const NON_KIT := ["camMount", "helmet", "helmetOn", "hairStyle", "hair", "skin", "eyes", "beard", "bibOn", "bibNumber", "bibText"]
+const NON_KIT := ["camMount", "camModel", "camLens", "camHousing", "camMic", "camAcc", "helmet", "helmetOn", "hairStyle", "hair", "skin", "eyes", "beard", "bibOn", "bibNumber", "bibText"]
 
 const KITS := [
 	["Classic", {}],   # = Rider.DEFAULT_LOOK
@@ -238,6 +238,21 @@ static func cam_mount_picker(current: String, on_pick: Callable, size := 13) -> 
 	for m in ActionCam.HELMET_MOUNTS:
 		var id: String = m[0]
 		var b := UITheme.button(m[1], func(): on_pick.call(id), size)
+		b.toggle_mode = true
+		b.button_pressed = id == current
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		grid.add_child(b)
+	return grid
+
+## any [id, label] list as a grid of toggles (the action cam gear rows), on_pick(id)
+static func choice_picker(items: Array, current: String, on_pick: Callable, size := 13, cols := 2) -> GridContainer:
+	var grid := GridContainer.new()
+	grid.columns = cols
+	grid.add_theme_constant_override("h_separation", 6)
+	grid.add_theme_constant_override("v_separation", 6)
+	for it in items:
+		var id: String = it[0]
+		var b := UITheme.button(it[1], func(): on_pick.call(id), size)
 		b.toggle_mode = true
 		b.button_pressed = id == current
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
