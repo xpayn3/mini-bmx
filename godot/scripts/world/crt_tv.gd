@@ -45,6 +45,7 @@ var _lamp := 0.0           # the glow light's level: follows `level` up at once,
 var _dtm := 0.016
 var _off_player: Node       # plays assets/audio/tv_off.mp3 when the TV is switched off with the animation
 var _off_anim := false     # power_off(animate): the old squeeze to a line, then a dot, then the afterglow dies away
+const OFF_CLICK_AT := 1.08   # s into tv_off.mp3 where playing starts (its click is at ~1.15 s)
 const OFF_LINE := 0.14     # s: the picture squeezes down to a line
 const OFF_DOT := 0.13       # s: the line shrinks to a dot
 const OFF_GLOW := 0.7      # s: the dot's afterglow fades
@@ -121,7 +122,7 @@ func power_off(quiet := false, animate := false) -> void:
 	if _on_t >= 0.0:
 		_off_t = 0.0
 		_off_anim = animate
-		if animate and _off_player != null and not (positional and mute_world): _off_player.call("play")
+		if animate and _off_player != null and not (positional and mute_world): _off_player.call("play", OFF_CLICK_AT)   # (the click is 1.15 s into the recording: start just before it so it lands as the picture collapses)
 		if not quiet: _burst(0.22, 0.8)
 
 ## a hard tear + snow burst for `secs`
