@@ -574,6 +574,13 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   room lights barely light the fog); `_build_sun_shaft` also adds ~7000 fine dust motes (GPUParticles3D, turbulence drift) drawn by
   `shaders/sun_motes.gdshader`, which lights only the motes whose line to the sun passes through the open part of the door
   (`_place_slats` updates it as the door rolls up). Room lights (tubes, bench strip, key, rim, ambient) are warm white.
+- **Roller door** (`scripts/garage/roller_door.gd`, `RollerDoor.build`, 2026-11-20): 10 cm insulated slats (extruded profile, domed
+  face, V groove at each joint) in white powder coat (RAL 9016 look) with clear coat and light real grime (ambientCG
+  SurfaceImperfections008, CC0, `assets/textures/grime`: its map baked into a soft grey multiply map `grime_dirt.jpg` + its normals;
+  each slat samples its own patch, lower slats a touch dustier), closed box hood with a rounded nose + brushed
+  aluminium end plates, guide channels with black brush seals, brushed aluminium bottom bar + rubber bulb seal, wall key
+  switch (green LED) with conduit into the hood. Metal parts use the ambientCG Metal009 / Rubber004 scans. `RollerDoor.extrude` = a reusable profile-along-x mesh builder. Test:
+  `BMX_GARAGE_DOOR=0.45` holds the door that far open (+ `BMX_GARAGE_CAM=0,4,5.5 BMX_GARAGE_AIM=0,1.9,-4`).
 - Bike height is placed from the **real tyre size and real axle positions** (no tyre clipping into the floor
   or the roller drums; verified with `BMX_TYRE_PROBE`).
 - Saved in `garage.json`; `GameState.bike_config()` applies it to the ride.

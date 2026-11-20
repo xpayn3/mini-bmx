@@ -48,7 +48,6 @@ var stand_rider: Rider = null
 var stand_on := false
 const STAND_AT := Vector3(0.55, 0.0, 1.05)   # in front of the bike (camera side), the bike right behind them
 var preview_crank := 0.6
-const SLAT := 0.2
 const WALL_IN := -4.075   # z of the back wall's inside face (the wall is 0.25 thick, centred on z = -4.2)
 const DOOR_DELAY := 1.0     # s (after the garage is on screen) before the door starts to roll up
 const DOOR_TIME := 3.2      # s to roll it all the way up
@@ -56,6 +55,7 @@ static var _door_opened_once := false   # the door rolls up on the first visit; 
 var door_slats: Node3D
 var _mote_mat: ShaderMaterial = null   # sun-shaft dust motes (lit up to the door's open height)
 var door_open := 1.0
+var _door_hold := false   # BMX_GARAGE_DOOR: the door stays where the test put it
 var door_t := 0.0
 var cam := Camera3D.new()
 var orbit := 0.0
@@ -256,29 +256,21 @@ func _build_room() -> void:
 	_box(Vector3(dl + 7, 5, 0.25), Vector3((dl - 7) / 2.0, 2.5, -4.2), brick)      # wall left of the door (behind the bike)
 	_box(Vector3(7 - dr, 5, 0.25), Vector3((7 + dr) / 2.0, 2.5, -4.2), brick)      # wall right of the door
 	_box(Vector3(DOOR_W, 5 - DOOR_H, 0.25), Vector3(DOOR_X, (5 + DOOR_H) / 2.0, -4.2), brick)   # header
-	# the roller door, rolled up into its drum above the opening, and its guide rails
-	var steel_dark := _mat(Color(0.18, 0.19, 0.21), 0.45, 0.7)
-	# everything is mounted on the wall's inside face (z = WALL_IN) and never cuts into the brick or shares
-	# a face with it (shared faces flicker)
-	_cyl(0.3, DOOR_W + 0.3, Vector3(DOOR_X, DOOR_H + 0.34, WALL_IN + 0.32), _mat(Color(0.55, 0.57, 0.6), 0.45, 0.6), Vector3(0, 0, PI / 2))
-	_box(Vector3(DOOR_W + 0.5, 0.08, 0.64), Vector3(DOOR_X, DOOR_H + 0.68, WALL_IN + 0.33), steel_dark)
-	for sx in [-1, 1]:   # guide rails overlap the opening's edges; the curtain runs inside them
-		_box(Vector3(0.1, DOOR_H + 0.1, 0.15), Vector3(DOOR_X + sx * (dw + 0.03), (DOOR_H + 0.1) / 2.0, WALL_IN + 0.08), steel_dark)
-	_box(Vector3(DOOR_W - 0.02, 0.03, 0.24), Vector3(DOOR_X, 0.015, -4.2), _mat(Color(0.3, 0.3, 0.32), 0.5, 0.8))   # threshold strip
-	# the door curtain: ribbed steel slats that roll up into the drum (animated the first time)
-	door_slats = Node3D.new()
-	door_slats.name = "DoorSlats"
-	add_child(door_slats)
-	var slat_mat := _mat(Color(0.5, 0.52, 0.55), 0.5, 0.55)
-	var slat_n := ceili(DOOR_H / SLAT)
-	for i in slat_n:
-		# slats overlap a little (no light between them) and run past the opening into the rails
-		var b := BoxMesh.new(); b.size = Vector3(DOOR_W + 0.12, SLAT + 0.01, 0.05)
-		var mi := MeshInstance3D.new(); mi.mesh = b; mi.material_override = slat_mat
-		mi.set_meta("y0", SLAT * (i + 0.5))
-		door_slats.add_child(mi)
-	door_slats.position = Vector3(DOOR_X, 0, WALL_IN + 0.04)
+	# the roller door (RollerDoor: slats, hood, guides, bottom bar, wall switch), mounted on the wall's
+	# inside face (z = WALL_IN), never cutting into the brick or sharing a face with it (shared faces flicker)
+	var thr := StandardMaterial3D.new()   # brushed aluminium threshold strip
+	thr.albedo_color = Color(0.62, 0.63, 0.65); thr.metallic = 1.0; thr.roughness = 0.4
+	thr.normal_enabled = true; thr.normal_texture = load(RollerDoor.METAL % "normal"); thr.normal_scale = 0.5
+	thr.roughness_texture = load(RollerDoor.METAL % "rough")
+	thr.uv1_triplanar = true; thr.uv1_scale = Vector3.ONE / 0.4
+	_box(Vector3(DOOR_W - 0.02, 0.03, 0.24), Vector3(DOOR_X, 0.015, -4.2), thr)
+	# the curtain rolls up into the hood (animated the first time)
+	door_slats = RollerDoor.build(self, DOOR_X, DOOR_W, DOOR_H, WALL_IN)
 	door_open = 1.0 if _door_opened_once else 0.0
+	var hold := Env.s("BMX_GARAGE_DOOR")   # tests: hold the door this far open (0 = shut, 1 = open)
+	if hold != "":
+		door_open = clampf(float(hold), 0.0, 0.999)
+		_door_hold = true
 	_place_slats()
 	_box(Vector3(14.2, 5, 0.2), Vector3(0, 2.5, 7.8), wall)   # front wall (the side opposite the door)
 	_box(Vector3(0.2, 5, 12), Vector3(-7, 2.5, 1.8), wall)
@@ -691,7 +683,7 @@ func _place_slats() -> void:
 		mi.visible = y < DOOR_H + 0.3   # higher up it is inside the drum
 
 func _process(dt: float) -> void:
-	if door_open < 1.0:
+	if door_open < 1.0 and not _door_hold:
 		door_t += minf(dt, 0.05)   # the first frame after the long build has a huge dt: don't let it eat the wait
 		var k := clampf((door_t - DOOR_DELAY) / DOOR_TIME, 0.0, 1.0)
 		var e := k * k * (3.0 - 2.0 * k)
