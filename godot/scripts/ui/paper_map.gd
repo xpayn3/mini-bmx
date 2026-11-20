@@ -338,7 +338,7 @@ class Frame extends Ink:
 	func _title_block(p: Vector2) -> void:
 		_box(Rect2(p, Vector2(470, 190)))
 		draw_rect(Rect2(p, Vector2(470, 14)), TRAIL)
-		draw_string(font_b, p + Vector2(22, 76), "MINI BMX", HORIZONTAL_ALIGNMENT_LEFT, -1, 54, INK)
+		draw_string(font_b, p + Vector2(22, 76), "RUNOUT", HORIZONTAL_ALIGNMENT_LEFT, -1, 54, INK)
 		draw_string(font_b, p + Vector2(24, 112), "TRAIL MAP  ·  " + biome.to_upper(), HORIZONTAL_ALIGNMENT_LEFT, -1, 24, TRAIL)
 		draw_string(font, p + Vector2(24, 146), "Sheet %d  ·  %s  ·  contours 5 m" % [seed_n, scale_text()], HORIZONTAL_ALIGNMENT_LEFT, -1, 20, INK)
 		draw_string(font, p + Vector2(24, 172), "Grid 100 m  ·  heights in metres", HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(INK, 0.7))
@@ -397,7 +397,7 @@ class Frame extends Ink:
 		draw_rect(r, green)
 		draw_rect(Rect2(r.position, Vector2(r.size.x, 120)), Color("f2efe4"))
 		draw_rect(Rect2(r.position + Vector2(0, 120), Vector2(r.size.x, 12)), TRAIL)
-		draw_string(font_b, r.position + Vector2(32, 82), "MINI BMX", HORIZONTAL_ALIGNMENT_LEFT, -1, 64, INK)
+		draw_string(font_b, r.position + Vector2(32, 82), "RUNOUT", HORIZONTAL_ALIGNMENT_LEFT, -1, 64, INK)
 		draw_string(font_b, r.position + Vector2(34, 200), "TRAIL MAP", HORIZONTAL_ALIGNMENT_LEFT, -1, 52, Color("f2efe4"))
 		draw_string(font, r.position + Vector2(36, 240), biome.to_upper(), HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color(1, 0.84, 0.5))
 		# mountains + a dashed trail down them

@@ -24,7 +24,7 @@ const PX_H := 304
 
 var _imesh := ImmediateMesh.new()
 var number := "27"
-var header := "MINI BMX  •  DOWNHILL CUP"
+var header := "RUNOUT  •  DOWNHILL CUP"
 var class_line := "ELITE  DOWNHILL"
 var _vp: SubViewport
 var _vp_frames := 0
