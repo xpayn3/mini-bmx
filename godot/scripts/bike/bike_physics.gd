@@ -838,7 +838,35 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 
 	# --- obstacles ---
 	var FRONT := L - BB_REAR
+	# race tape: a swept test (the front tyre's leading edge this step vs each span's line), so a fast bike
+	# never slips between the span's hit points
+	var tf := FRONT + RWF
+	var a0 := Vector2(px + f.x * tf, pz + f.z * tf)
+	var a1 := Vector2(x + f.x * tf, z + f.z * tf)
+	var tapes_seen := []
 	for c in terrain.colliders_near(x, z):
+		if not c.get("tape", false): continue
+		var sp: Dictionary = c["tape"]
+		if sp["broken"] or tapes_seen.any(func(o): return is_same(o, sp)): continue
+		tapes_seen.append(sp)
+		var tp: PackedVector3Array = sp["pts"]
+		var tA := Vector2(tp[0].x, tp[0].z)
+		var tB := Vector2(tp[tp.size() - 1].x, tp[tp.size() - 1].z)
+		var dm := a1 - a0
+		var dt_ab := tB - tA
+		var den := dm.cross(dt_ab)
+		if absf(den) < 1e-9: continue
+		var sm := (tA - a0).cross(dt_ab) / den   # along the tyre's move
+		var su := (tA - a0).cross(dm) / den      # along the tape
+		if sm < 0.0 or sm > 1.0 or su < 0.0 or su > 1.0: continue
+		var tape_y: float = tp[clampi(roundi(su * (tp.size() - 1)), 0, tp.size() - 1)].y
+		if y > tape_y - 0.05: continue   # the wheels are over it
+		var hp := tA + dt_ab * su
+		if host.smash(c, Vector3(f.x * v, vy, f.z * v), Vector3(hp.x, tape_y, hp.y)):
+			v *= 0.97
+			if absf(v) > 3: host.flash("SNAP!")
+	for c in terrain.colliders_near(x, z):
+		if c.get("tape", false): continue   # handled above
 		var fx0 := x + f.x * FRONT
 		var fz0 := z + f.z * FRONT
 		var fdx: float = fx0 - c.x
@@ -860,12 +888,6 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		if c.get("cactus", false) and absf(v) > 2.5 and not (air and y > c.get("ceil", INF)):
 			if host.smash(c, vel, Vector3(x, y, z)):
 				v *= 0.8; shake = maxf(shake, 0.35); host.flash("OUCH! CACTUS!")
-			continue
-		if c.get("tape", false):
-			if y > c.get("ceil", 0.0) - 0.25: continue
-			if host.smash(c, vel, Vector3(x, c.get("ceil", y) - 0.1, z)):
-				v *= 0.97
-				if absf(v) > 3: host.flash("SNAP!")
 			continue
 		if c.get("fence", false) and (absf(v) > 2.2 or (air and vy < -2)) and not (air and y > terrain.height(c.x, c.z) + 1.2):
 			if host.smash(c, vel, Vector3(x, y, z)):

@@ -542,7 +542,12 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   only past `SNAP_STRAIN` (17 %); the halves whip back towards their stakes. Stop / back off / slide off its end / crash before
   that and it springs back (`SETTLE` 1.3 s) and is whole again (`Terrain.restore_tape`). Strips are drawn through a Catmull-Rom
   spline (`SUBD` 4 pieces per sim segment): smooth when floating, no extra sim cost. Test: `BMX_TAPE=dir/prefix` (or `1`),
-  `BMX_TAPE_SPEED`, `BMX_TAPE_STOP=secs` (`TAPE` lines: state, strain).
+  `BMX_TAPE_SPEED`, `BMX_TAPE_STOP=secs`, `BMX_TAPE_OFF=m` (aim along the span) (`TAPE` lines: state, strain).
+  The hit is a **swept test** (`bike_physics.gd`: the front tyre's leading edge this step vs each span's line), so no speed
+  slips through; skipped only when the wheels are above the tape. While held, the span is **posed exactly** each frame
+  (`TapeSim._pose_held`: straight once taut, parabola sag while slack) on the drawn front tyre (`Game` passes
+  `rig.wheel_f`), not simulated, so it never trails the bike. Strips draw as one ArrayMesh from packed arrays (no
+  per-vertex calls), ground heights are cached per point, the strip shader is warmed at ride start.
 - Torn race tape as cloth-like ribbons, wind over the grass, drifting cloud shadows, speed blur / FOV.
 
 ### Photo mode (O, `scripts/game/photo_mode.gd`)
