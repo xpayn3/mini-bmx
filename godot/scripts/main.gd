@@ -32,6 +32,26 @@ func _ready() -> void:
 		_new_game(plain)
 		_show_menu()
 	create_tween().set_ignore_time_scale().tween_property(fade, "modulate:a", 0.0, 0.8)
+	# boot intro (the CRT TV): a plain launch only, or BMX_INTRO=1
+	if OS.get_cmdline_user_args().is_empty() or OS.get_environment("BMX_INTRO") != "":
+		var intro := CrtIntro.new()
+		intro.hold = true
+		add_child(intro)
+		_prebuild_behind(intro)
+		intro.finished.connect(func() -> void:
+			var tw := create_tween().set_ignore_time_scale()
+			tw.tween_property(intro.root, "modulate:a", 0.0, 1.2)
+			tw.tween_callback(intro.queue_free)
+			if OS.get_environment("BMX_INTRO_SHOTS") != "":   # tests: a frame of the menu after it, then quit
+				await get_tree().create_timer(2.5, true, false, true).timeout
+				get_viewport().get_texture().get_image().save_png(OS.get_environment("BMX_INTRO_SHOTS") + "_menu.png")
+				if OS.get_environment("BMX_INTRO_RIDE") != "":   # ... then RIDE: the pre-built world goes straight in
+					var r0 := Time.get_ticks_msec()
+					await _start_ride()
+					print("INTRO ride start ms=", Time.get_ticks_msec() - r0, " prebuilt_used=", ride_ready == null and _ride_park == null)
+					await get_tree().create_timer(4.0, true, false, true).timeout
+					get_viewport().get_texture().get_image().save_png(OS.get_environment("BMX_INTRO_SHOTS") + "_ride.png")
+				GameState.quit())
 	# command-line: --ride skips the title screen; --autotest=N rides N seconds unattended then quits
 	for a in OS.get_cmdline_user_args():
 		if a == "--ride": _start_ride()
@@ -147,6 +167,56 @@ func _set_riding(riding: bool) -> void:
 	game.set_scenic(not riding)   # title screen: golden hour over the hills
 	if riding:
 		game.cam.set_mode(Settings.get_v("camera"))
+
+# ---------------------------------------------------------------- the ride, built during the boot intro
+var ride_ready: Game            # the player's own world, built off-screen while the intro holds on black
+var _ride_park: SubViewport     # its own World3D, never drawn
+var _ride_sig := ""             # what it was built from (seed, bike, garage build, rider): stale if that changed
+
+func _ride_sig_now() -> String:
+	var cfg: Dictionary = GameState.bike_config()
+	return JSON.stringify([GameState.seed, GameState.bike_id, cfg, RiderPanels.load_look(),
+		RiderPanels.load_pose(GameState.bike_id, cfg.get("pose", {}))])
+
+## while the intro shows black (only the TV's standby LED), build the ride world (the main-thread hitch is hidden
+## there), then let the intro play. RIDE then just moves it in (_take_prebuilt).
+func _prebuild_behind(intro: CrtIntro) -> void:
+	for i in 3: await get_tree().process_frame   # the black frame is up first
+	if OS.get_environment("BMX_NO_PREBUILD") != "":   # tests: the old way (RIDE builds the world)
+		intro.hold = false
+		return
+	var t0 := Time.get_ticks_msec()
+	_ride_park = SubViewport.new()
+	_ride_park.own_world_3d = true
+	_ride_park.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	_ride_park.size = Vector2i(get_viewport().get_visible_rect().size)
+	add_child(_ride_park)
+	var g := Game.new()
+	g.title_world = false
+	_ride_park.add_child(g)   # its _ready builds the terrain, bike, rider... here
+	g.process_mode = Node.PROCESS_MODE_DISABLED
+	ride_ready = g
+	_ride_sig = _ride_sig_now()
+	print("PREBUILD ride world ms=", Time.get_ticks_msec() - t0)
+	if is_instance_valid(intro): intro.hold = false
+
+func _take_prebuilt() -> bool:
+	if ride_ready == null or not is_instance_valid(ride_ready): return false
+	var g := ride_ready
+	ride_ready = null
+	if _ride_sig_now() != _ride_sig:   # changed in the menus since: build it the normal way
+		_ride_park.queue_free()
+		return false
+	if game: game.queue_free()
+	g.reparent(self, false)
+	move_child(g, 0)
+	g.process_mode = Node.PROCESS_MODE_PAUSABLE
+	g.cam.current = true
+	if g.hud and g.hud.has_method("set_computer"): g.hud.set_computer()
+	game = g
+	_ride_park.queue_free()
+	_ride_park = null
+	return true
 
 # ---------------------------------------------------------------- title screen
 func _show_menu() -> void:
@@ -937,7 +1007,9 @@ func _close_garage(ride: bool) -> void:
 	create_tween().set_ignore_time_scale().tween_property(fade, "modulate:a", 0.0, 0.5)
 
 func _start_ride() -> void:
-	if game and game.title_world:   # leave the title backdrop: build the player's own world first
+	if game and game.title_world and _take_prebuilt():   # the world built during the intro: straight in
+		bike_dirty = false
+	elif game and game.title_world:   # leave the title backdrop: build the player's own world first
 		bike_dirty = false
 		fade.modulate.a = 1.0
 		await _new_game(false)

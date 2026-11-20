@@ -57,9 +57,11 @@ var shots: Array = []
 
 ## drop the C# synths while the engine is still up: if their .NET finalizers run during shutdown
 ## instead, Godot can crash on exit ("Leaked unsafe reference" -> SEHException)
-func _exit_tree() -> void:
-	gravel = null
-	fw_synth = null
+# drop the C# synths when deleted (not on _exit_tree: the pre-built ride world is moved into the scene, main.gd)
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE:
+		gravel = null
+		fw_synth = null
 
 
 func _ready() -> void:

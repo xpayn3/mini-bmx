@@ -371,6 +371,45 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   Dusk, Night, Day / night cycle + the player's own. With the cycle on, Game runs the clock and re-applies 10× / s.
   Tests: `BMX_LIGHT_PRESET=Night`, `BMX_LIGHT=time=12,haze=2`, `BMX_PANEL=light`.
 
+### Boot intro + the start TV (CRT)
+- The boot splash is plain black (`boot_splash/show_image=false`); a plain launch (no command-line args, or `BMX_INTRO=1`)
+  plays `CrtIntro` (`scripts/ui/crt_intro.gd`, layer 60, its own 3D world in a SubViewport, ~18 s, any key / click / pad
+  button skips): a dark room at night, moonlight through broken blinds into volumetric fog, an old CRT on a low cabinet,
+  a silhouette in the half-open doorway. It **holds on black** (only the TV's red standby LED) while main builds the ride
+  world (below), then: TV on at 1.8 s, slow **Vertigo dolly zoom** over the whole intro (moves in while the FOV widens
+  so the frame at the TV goes 0.95 -> 0.40 m: the TV stays put, the room stretches away), a tear at 7 s (the figure is
+  gone after it), the signal drops out at 10.6 s, a second tear at 13.2 s (for a moment the figure stands inside the
+  room), at 16.5 s the TV **just switches off** (no squeeze to a line / dot) and every light goes with it: pitch dark,
+  then the menu fades in.
+- **Ride built during the intro** (`main._prebuild_behind` / `_take_prebuilt`): while the intro holds on black, the
+  player's own ride `Game` (seed, bike, garage build, rider) is built in a never-drawn SubViewport with its own World3D
+  (`_ride_park`, process disabled). RIDE moves it into the scene (`reparent`) and frees the title backdrop: ~13 ms
+  instead of ~1.2-1.5 s. If the seed / bike / build / rider look or pose changed in the menus since (`_ride_sig_now`),
+  it's dropped and RIDE builds the normal way. Moving a Game fires `_exit_tree` on all its nodes: never tear down
+  state there that a living node still needs (`ride_audio` frees its C# synths on PREDELETE for that reason).
+  `BMX_NO_PREBUILD=1` = the old way.
+- **`CrtTv`** (`scripts/world/crt_tv.gd`): the user's TV model (`assets/tv/tv.fbx` + `tv_albedo.jpg`, `tv_normal.png`,
+  `tv_orm.png` made from the download's TGA maps: Unity MaskMap R metal / G AO / A smoothness -> ORM), ~38 cm wide, origin
+  on the floor, glass +Z. `shaders/crt_screen.gdshader` draws the model's maps and, on the glass UV island (rotated in the
+  UVs: UV.y = left -> right, UV.x = bottom -> top), live TV static (re-rolled every frame, drifting bands, streaks, rolling
+  bar) with the RUNOUT lettering (drawn once with the display font into a texture and baked with mipmaps) wobbling,
+  slipping sync, jumping and splitting colour; scanlines, shadow mask, ghost. `power_on(delay)` (white line opens up,
+  snow, vertical roll settles), `power_off()` (instant), `glitch(secs, amount)`, small random blips while on. Front panel
+  power LED (`LED_AT`): red standby, blinking amber warming up, green on. A small light in front of the glass glows with
+  the picture (no specular: it put a hot spot on the glass). `gain` = screen brightness (5 outdoors).
+- **Sound** = the user's recording `assets/audio/tv_static.mp3` (old TV static + channel changes) with its near-silent
+  stretches never played: only its four loud bursts (`STATIC_CUTS`) are used, chopped into 0.3-0.6 s slices fired every
+  0.07-0.16 s on 6 voices (3-5 overlap: one dense hiss that never repeats), loudness following the picture; tears /
+  power on / off play a louder slice on top. World TVs are 3D sound (`positional`) and are muted while the intro plays
+  (`CrtTv.mute_world`); the intro's TV plays flat.
+- **Start TV** (`Game.place_start_tv`, from `respawn`): the same TV at `START_TV_SCALE` 2.5 (~0.95 m wide), 10 m ahead /
+  5.5 m to the side of every start (any world), tilted to the slope, glass towards the camera, switches on 1.4 s in.
+  Visual only (no collision). `BMX_NO_TV=1` leaves it out.
+- The texture has a Magnavox logo and anime stickers on it: check before sharing the game.
+- Tests: `BMX_INTRO_SHOTS=dir/prefix` saves a frame every 0.5 s (+ `static_voices` / `hiss` lines) and one of the menu
+  after, then quits; `+ BMX_INTRO_RIDE=1` then presses RIDE (`INTRO ride start ms=`) and saves `_ride.png`;
+  `BMX_INTRO_AT=secs` freezes the intro there.
+
 ### Title screen (golden hour lookout)
 - `Game.set_scenic(true)` while the menu is up: a low warm sun ahead-right of the view, golden sky mode in
   `sky_hdri.gdshader` (`golden`: warm gradient + sun glow, the HDRI's clouds re-lit), warm long fog.

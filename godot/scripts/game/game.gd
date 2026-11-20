@@ -901,10 +901,45 @@ func respawn(new_world: bool) -> void:
 	rider.reset_pose()
 	_snap_prev()
 	cam.snap_to(Vector3(0, phys.y + 0.5, 0))
+	place_start_tv()
 	# the area you start in: its banner once the screen has faded in
 	biome_cur = terrain.biome_name(phys.x, phys.z)
 	biome_next = ""; biome_hold = 0
 	if area_title: area_title.show_area(biome_cur, 1.6)
+
+var start_tv: CrtTv
+const START_TV_SCALE := 2.5   # oversized: ~0.95 m wide
+const START_TV_AHEAD := 10.0
+const START_TV_SIDE := 5.5
+
+## the old CRT TV from the boot intro, dumped on the ground beside the start of every world, facing the rider:
+## it switches on to the RUNOUT card a moment after the ride starts and stays on
+func place_start_tv() -> void:
+	if OS.get_environment("BMX_NO_TV") != "": return
+	if start_tv == null:
+		start_tv = CrtTv.new()
+		start_tv.light_energy = 3.0
+		start_tv.light_range = 7.0
+		start_tv.mat.set_shader_parameter("gain", 5.0)
+		add_child(start_tv)
+	var fwd := Vector3(cos(phys.heading), 0.0, -sin(phys.heading))
+	var side := Vector3(-fwd.z, 0.0, fwd.x)
+	var at := Vector3(phys.x, 0.0, phys.z) + fwd * START_TV_AHEAD + side * START_TV_SIDE
+	var to_cam := (Vector3(phys.x, 0.0, phys.z) - fwd * 4.0 - at).normalized()   # where the ride camera starts
+	var yaw := atan2(to_cam.x, to_cam.z) + deg_to_rad(8.0)   # glass (+Z) towards it, a little askew
+	var b := Basis(Vector3.UP, yaw)
+	# sit it on the ground: lowest of its four feet on the drawn ground, tilted to the slope
+	var hx := CrtTv.SIZE.x * 0.5 * START_TV_SCALE; var hz := CrtTv.SIZE.z * 0.5 * START_TV_SCALE
+	var hs := []
+	for c in [Vector2(-hx, -hz), Vector2(hx, -hz), Vector2(-hx, hz), Vector2(hx, hz)]:
+		var p: Vector3 = at + b * Vector3(c.x, 0.0, c.y)
+		hs.append(terrain.top_height(p.x, p.z))
+	var pitch := atan2(((hs[0] + hs[1]) - (hs[2] + hs[3])) * 0.5, hz * 2.0)   # back higher -> tips forward
+	var roll := atan2(((hs[0] + hs[2]) - (hs[1] + hs[3])) * 0.5, hx * 2.0)
+	b = b * Basis(Vector3.RIGHT, pitch) * Basis(Vector3.BACK, -roll) * Basis.from_scale(Vector3.ONE * START_TV_SCALE)
+	at.y = (hs[0] + hs[1] + hs[2] + hs[3]) * 0.25 - 0.04
+	start_tv.transform = Transform3D(b, at)
+	start_tv.power_on(1.4)
 
 const BAIL_HOLD_MS := 350   # holding bail this long throws the rider off; a shorter tap resets to the trail
 var _bail_down := -1        # tick (ms) the bail key went down, -1 = not held
