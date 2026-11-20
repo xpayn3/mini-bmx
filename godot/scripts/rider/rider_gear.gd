@@ -340,37 +340,35 @@ static func _capsule(radius: float, length: float, m: Material) -> MeshInstance3
 	return mi
 
 
+## The back of the gloved hand: palm block from the wrist to the knuckles, knuckle guard, cuff. The fingers are a
+## skinned mesh on the skeleton's finger bones (GloveFingers), posed in this node's space.
 ## m: {glove, knuckle, palm, cuff}; side -1 left, +1 right
 static func build_hand(m: Dictionary, side: int) -> Node3D:
 	var h := Node3D.new()
 	h.name = "Hand"
 	var inner := -side
-	var fist := _add(h, G.rounded_box(0.095, 0.078, 0.098, 4, 0.03), m.glove)
-	fist.position = Vector3(0.008, 0.004, 0)
-	var zs := [-0.034, -0.0115, 0.0115, 0.034]
-	for k in 4:
-		var f := _capsule(0.0155, 0.036, m.glove)
-		var edge := k == 0 or k == 3
-		var sc := 0.92 if edge else 1.0
-		f.transform = Transform3D(Basis(Vector3.BACK, 0.18).scaled_local(Vector3.ONE * sc),
-			Vector3(0.05 - (0.004 if edge else 0.0), -0.002 + (0.003 if edge else 0.0), zs[k]))
-		h.add_child(f)
-	var th := _capsule(0.016, 0.045, m.glove)
-	th.transform = Transform3D(Basis(Vector3.BACK, PI / 2 + 0.35), Vector3(0.012, -0.03, inner * 0.04))
-	h.add_child(th)
-	var pad := _add(h, G.rounded_box(0.06, 0.016, 0.08, 2, 0.007), m.knuckle)
-	pad.transform = Transform3D(Basis(Vector3.BACK, -0.15), Vector3(0.012, 0.043, 0))
-	var palm := _add(h, G.rounded_box(0.07, 0.014, 0.084, 2, 0.006), m.palm)
-	palm.position = Vector3(-0.004, -0.036, 0)
+	# the palm rises from the wrist (on the forearm's line) to sit on top of the grip at the knuckles
+	var tilt := Basis(Vector3.BACK, 0.30)
+	var palm_blk := _add(h, G.rounded_box(0.098, 0.038, 0.094, 1, 0.010), m.glove)
+	palm_blk.transform = Transform3D(tilt, Vector3(-0.026, 0.023, 0))
+	# the heel of the thumb (the thenar pad) bulging on the inside
+	var heel := _add(h, G.rounded_box(0.05, 0.03, 0.026, 1, 0.009), m.glove)
+	heel.transform = Transform3D(Basis(Vector3.UP, inner * 0.35) * tilt, Vector3(-0.040, 0.010, inner * 0.030))
+	# knuckle guard: a moulded strip across the knuckles
+	var pad := _add(h, G.rounded_box(0.022, 0.010, 0.078, 1, 0.004), m.knuckle)
+	pad.transform = Transform3D(Basis(Vector3.BACK, 0.6), Vector3(0.014, 0.046, 0))
+	var palm := _add(h, G.rounded_box(0.06, 0.008, 0.07, 1, 0.003), m.palm)
+	palm.transform = Transform3D(tilt, Vector3(-0.032, 0.002, 0))
 	var cyl := CylinderMesh.new()
-	cyl.top_radius = 0.052
-	cyl.bottom_radius = 0.05
+	cyl.top_radius = 0.054   # an octagon round the forearm tube's end (0.04-0.047): clear of it, no z-fighting
+	cyl.bottom_radius = 0.052
 	cyl.height = 0.05
-	cyl.radial_segments = 18
+	cyl.radial_segments = 8
+	cyl.rings = 1
 	var cuff := MeshInstance3D.new()
 	cuff.mesh = cyl
 	cuff.material_override = m.cuff
-	cuff.transform = Transform3D(Basis(Vector3.BACK, PI / 2), Vector3(-0.058, 0.002, 0))
+	cuff.transform = Transform3D(Basis(Vector3.BACK, PI / 2), Vector3(-0.078, 0.004, 0))
 	h.add_child(cuff)
 	return h
 

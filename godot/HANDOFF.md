@@ -450,6 +450,21 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   `BMX_GETUP_ANIM=0` = the old instant get-up. Test: `BMX_BAIL=4 BMX_GETUP_PROBE=1` (gets up 2.5 s after the bail,
   `GETUP start / stood up` lines; + `BMX_DUST_SHOTS=dir/prefix BMX_DUST_T0=6.3` for frames). The bike stays where it fell
   (they don't walk to it yet).
+  **Clip get-up + dizzy (2026-11-20, `rider/clip_get_up.gd`, `ClipGetUp`)**: with Mixamo clips in `assets/anim/getup/`
+  (4 now: face down / back / side starts) the clip whose first frame lies most like the ragdoll (`_lie`: the body's
+  front.y + right.y) plays where the body lies, turned to its head end, each point over `top_height`, blended from the
+  ragdoll pose over 0.45 s, at 1.4x speed. Standing, it loops `assets/anim/dizzy/` until a fresh hop press (HUD: "PRESS
+  [hop] TO RIDE ON") or Backspace; then onto the bike as before. **Fatal crashes (> 12 m/s, `Game.crash_fatal`) and torn-off
+  limbs never get up this way** (instant back on, user decision). `GetUpAnim` is the fallback (no clips, or
+  `BMX_GETUP_ANIM=proc`). Clips load on a worker at ride start (`ClipGetUp.warm`). Tests: `BMX_DIZZY_SECS=n` (released
+  after n s dizzy), `BMX_GETUP_CLIP=<part of a name>`; probe prints `GETUP clip= lie= scores=`.
+- **Fingers (2026-11-20, `rider/glove_fingers.gd`, `GloveFingers`)**: 5 low-poly (hexagonal, flat-shaded) gloved fingers
+  per hand, one skinned mesh per hand on the skeleton's finger bones (children of `RiderSkeleton`, identity binds, vertices
+  in bone space). `curl` per hand (`RiderSkeleton.curls`): 1 = wrapped round the grip (every joint on a circle of
+  `GRIP_R` round the bar, thumb under it the other way), 0.4 relaxed (standing, crash, clips; `pose_points` orient
+  `curl0` / `curl1` override), 0 open. The glove node (`RiderGear.build_hand`) keeps palm block, knuckle strip, cuff; the
+  forearm tube now ends at the wrist (`Rider._wrist`) so it doesn't poke out between the fingers. Check:
+  `..._console.exe --path godot res://tools/hand_gallery.tscn -- out.png` (curls 0 / 0.4 / 0.7 / 1 round a grip).
 - **Animation clips / Mixamo** (`rider/rider_anim.gd`, `RiderAnim`, `Rider.animate(dt)`): FBX / glb clips with Mixamo bone
   names in `assets/anim/mixamo/` (README there: FBX, "Without Skin") play on the menus' standing rider (garage rider
   room KIT tab `_pose_stand_rider`, ride setup turntable `BikeTurntable._process`); none = the old procedural stand.
