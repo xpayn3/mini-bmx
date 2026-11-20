@@ -99,7 +99,7 @@ def to_game(p):   # (fx, fy, fz) -> game, BB at the origin
 
 parts = {}   # node -> list of (pos(tri*3,3), nrm, matname)
 CROWN_CENTERS = []   # the two crowns (Forks.001 lower, .003 upper): where the fork clamps the steerer
-lib = {"fork": [], "cranks": [], "cockpit": [], "brakes": [], "derail": [], "rcal": []}
+lib = {"fork": [], "cranks": [], "cockpit": [], "brakes": [], "derail": [], "rcal": [], "saddle": []}
 for o in list(bpy.data.objects):
     if o.type != 'MESH' or len(o.data.polygons) == 0: continue
     base = o.name.split(".")[0]
@@ -124,6 +124,7 @@ for o in list(bpy.data.objects):
         entry = (node, pos[sel], nrm[sel], mn)
         if base == "Forks": lib["fork"].append(entry)
         if base == "Brakes" and node == "fork_lower": lib["fork"].append(entry)
+        if base == "Seat" and i != 13: lib["saddle"].append(entry)   # Seat.013 is the post
         if base == "Brakes" and i in (0, 1, 2, 3, 4, 5, 6, 7, 52, 69): lib["rcal"].append(entry)   # the rear caliper (not its hose)
         if base == "Forks" and i in (1, 3) and mn == "black" and len(CROWN_CENTERS) < 2: CROWN_CENTERS.append(((pos[:, :2].min(0) + pos[:, :2].max(0)) / 2))
         if base == "Drivetrain" and node == "crank": lib["cranks"].append(entry)
@@ -210,6 +211,13 @@ write_glb(os.path.join(OUT, "parts", "tues_fork.glb"), fork_nodes,
 lib_glb("tues_cranks.glb", "cranks", z3(g2(*BBF)), "cranks", "crank")
 lib_glb("tues_cockpit.glb", "cockpit", z3(SP), "cockpit", "cockpit")
 
+
+# the saddle alone (rails + cover), origin = under its middle at the rail bottom (where the post clamps) for tools/make_forks.py
+if lib["saddle"]:
+    sp = np.concatenate([e[1] for e in lib["saddle"]])
+    org = np.array([(sp[:, 0].min() + sp[:, 0].max()) / 2, sp[:, 1].min() + 0.012, 0.0])
+    write_glb(os.path.join(OUT, "parts", "tues_saddle.glb"), [{"name": "saddle", "parent": None, "t": [0, 0, 0], "origin": org,
+              "parts": [(e[1], e[2], e[3]) for e in lib["saddle"]]}], None, "saddle")
 # the rear brake caliper alone (relative to the rear axle) for tools/make_forks.py
 if lib["rcal"]:
     main = max(lib["rcal"], key=lambda e: len(e[1]))

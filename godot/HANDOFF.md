@@ -328,6 +328,10 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   replaces the `fork_lower` mesh (lowers + the model's front brake caliper) and moves its node to the fork's own axle offset (extras.wheelbase follows; physics reads it). The
   fork starts at dh's axle position, so the glb's `travel` (room before the lowers hit the crown, 0.18 / 0.17 m) caps the fork travel; the stock fork-leg decal slot is dropped.
   Frames with their own cockpit + fork (Tues, Fuzz) ignore the fork pick; the Goat (dh steer + fork) takes it. Test: `BMX_BUILD="suspension.fork_model=tues_fork"`.
+  **Saddles + dropper post** (garage Bars tab, SEAT; `build.seat = {model, post, post_h}`, `BikeBuild.SADDLES` / `POSTS`): the stock frame's saddle is a set of components in its frame mesh, cut by
+  `make_forks.py` into `assets/seats/dh_frame.glb` (frame without saddle; extras: stock saddle origin, seat tube top + direction) + `seats/saddle_dh.glb`; `seats/saddle_<id>.glb` are the Tues / Fuzz saddles
+  (from `parts/<id>_saddle.glb`, levelled). `BikeRig._swap_seat` rebuilds the frame mesh with the saddle as extra surfaces (so `_saddle()` / the rider's seat, paint by surface name and decals keep
+  working), raised along the seat tube by `post_h` with a generated post tube + collar when the post is "dropper". Test: `BMX_BUILD="seat.model=fuzz;seat.post=dropper;seat.post_h=0.15"`.
   **Disc brakes** (garage Shocks tab, DISC BRAKES): `suspension.rotor` ("stock" / "tues" / "fuzz", `BikeBuild.ROTORS`; `assets/forks/rotor_<id>.glb` from
   `tools/export_rotors.py`: disc + carrier + bolts, relative to the axle, moved onto the stock rotors' planes) replaces the mesh of the wheels' split-off "rotor"
   (`BikeRig._swap_rotors`, keeps the heat-glow material; works on every frame). `suspension.rear_caliper` ("stock" / "tues" / "fuzz", `BikeBuild.REAR_CALIPERS`): on the stock frame

@@ -150,3 +150,54 @@ for fid in ("tues", "fuzz"):
     cal = [(p @ R.T, n @ R.T, m) for p, n, m in node_tris(g, b, "caliper")]
     write_glb(os.path.join(A, "forks", "caliper_%s.glb" % fid), [{"name": "caliper", "parent": None, "t": [0, 0, 0], "origin": np.zeros(3), "parts": cal}], None, "caliper")
     print("%s rear caliper: turned %.1f deg about the axle (%.0f mm from it)" % (fid, math.degrees(d), float(np.linalg.norm(mc)) * 1000))
+
+
+# ---------------------------------------------------------------- seat: dh's frame without its saddle, + where the post goes
+# The saddle (cover, rails, clamp hardware) are components in the frame mesh above the seat tube. They are cut out
+# (assets/seats/dh_frame.glb) and the glb's extras say where the stock saddle sat (origin = under its middle, at the rail
+# bottom, like the parts/<id>_saddle.glb files) and the seat tube's top + direction (the post / dropper rides along it).
+os.makedirs(os.path.join(A, "seats"), exist_ok=True)
+fr = node_tris(gd, bd, "frame")
+ft = np.concatenate([p.reshape(-1, 3, 3) for p, _, _ in fr]); fn = np.concatenate([n.reshape(-1, 3, 3) for _, n, _ in fr])
+fm = np.array([m for p, _, m in fr for _ in range(len(p) // 3)])
+parent.clear()
+for t in ft:
+    ks = [key(v) for v in t]
+    for k in ks[1:]: parent[find(k)] = find(ks[0])
+comp = {}
+for i, t in enumerate(ft): comp.setdefault(find(key(t[0])), []).append(i)
+seat_idx, tube = set(), None
+for idx in comp.values():
+    P = ft[idx].reshape(-1, 3); mn, mx = P.min(0), P.max(0); ms = set(fm[idx])
+    if mn[1] >= 0.69 and mx[1] <= 0.83 and mn[0] >= -0.24 and mx[0] <= 0.05 and ms <= {"plastic", "chrome", "black"}:
+        seat_idx.update(idx)
+    if ms == {"paint"} and abs(mn[1] - 0.336) < 0.01 and abs(mx[1] - 0.723) < 0.01 and mx[0] < 0.03:   # the seat tube
+        tube = P
+SP_ = np.concatenate([ft[sorted(seat_idx)].reshape(-1, 3)])
+stock_org = [float((SP_[:, 0].min() + SP_[:, 0].max()) / 2), float(SP_[:, 1].min() + 0.012)]
+top = tube[tube[:, 1] > tube[:, 1].max() - 0.01]
+post_top = [float(top[:, 0].mean()), float(tube[:, 1].max())]
+c0 = tube[:, :2].mean(0); u, s_, vt = np.linalg.svd(tube[:, :2] - c0, full_matrices=False)
+post_dir = vt[0] if vt[0][1] > 0 else -vt[0]
+print("dh seat: %d triangles cut; stock saddle origin %s; seat tube top %s, direction %s" % (len(seat_idx), np.round(stock_org, 3), np.round(post_top, 3), post_dir.round(3)))
+keepf = np.array([i not in seat_idx for i in range(len(ft))])
+parts = []
+for m in sorted(set(fm)):
+    sel = keepf & (fm == m)
+    if sel.any(): parts.append((ft[sel].reshape(-1, 3), fn[sel].reshape(-1, 3), m))
+write_glb(os.path.join(A, "seats", "dh_frame.glb"), [{"name": "frame", "parent": None, "t": [0, 0, 0], "origin": np.zeros(3), "parts": parts}],
+          {"stockOrigin": stock_org, "postTop": post_top, "postDir": [float(post_dir[0]), float(post_dir[1])]}, "seat")
+cut = sorted(seat_idx)
+sd = [(ft[[i for i in cut if fm[i] == m]].reshape(-1, 3) - np.array([stock_org[0], stock_org[1], 0.0]),
+       fn[[i for i in cut if fm[i] == m]].reshape(-1, 3), m) for m in sorted({fm[i] for i in cut})]
+write_glb(os.path.join(A, "seats", "saddle_dh.glb"), [{"name": "saddle", "parent": None, "t": [0, 0, 0], "origin": np.zeros(3), "parts": sd}], None, "saddle")
+# the models' saddles, levelled: the long axis of the cover goes horizontal (they sat tilted to their own frames), written next to dh's
+for fid in ("tues", "fuzz"):
+    g, b = load(os.path.join(A, "parts", "%s_saddle.glb" % fid))
+    sparts = node_tris(g, b, "saddle")
+    cover = np.concatenate([p for p, _, m in sparts if m == "plastic"] or [p for p, _, _ in sparts])[:, :2]
+    c0 = cover.mean(0); u, s_, vt = np.linalg.svd(cover - c0, full_matrices=False); d = vt[0] if vt[0][0] > 0 else -vt[0]
+    tilt = math.atan2(d[1], d[0]); R = rot(-tilt)
+    print("%s saddle: levelled by %.1f deg" % (fid, math.degrees(tilt)))
+    write_glb(os.path.join(A, "seats", "saddle_%s.glb" % fid), [{"name": "saddle", "parent": None, "t": [0, 0, 0], "origin": np.zeros(3),
+              "parts": [(p @ R.T, n @ R.T, m) for p, n, m in sparts]}], None, "saddle")
