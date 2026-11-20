@@ -464,7 +464,7 @@ func _rim_update(dt: float) -> void:
 	var side := Vector3(-fh.z, 0.0, fh.x)
 	var sun_side := signf(side.dot(Vector3(_gg_sun.x, 0.0, _gg_sun.z)))
 	# the light travels toward the camera (from behind the rider), down a little, leaning in from the sun's side
-	var travel := (-fh * 0.55 + Vector3.DOWN * 0.35 - side * sun_side * 0.9).normalized()   # ~60 deg off the view: lights the outline
+	var travel := (-fh * 0.55 + Vector3.DOWN * 0.35 - side * sun_side * 0.9 * float(LightSettings.current.get("rim_side", 1.0))).normalized()   # ~60 deg off the view: lights the outline
 	rim.global_basis = Basis.looking_at(travel, Vector3.UP if absf(travel.y) < 0.98 else Vector3.FORWARD)
 	rim.light_color = _rim_col
 	rim.light_energy = _rim_e if Env.s("BMX_RIM_E") == "" else float(Env.s("BMX_RIM_E"))
@@ -477,7 +477,7 @@ func _mist_update(dt: float) -> void:
 	var morning := smoothstep(4.8, 6.2, h) * (1.0 - smoothstep(8.6, 10.6, h))
 	var evening := smoothstep(19.4, 20.4, h) * (1.0 - smoothstep(21.5, 23.0, h)) * 0.45
 	var nightm := (1.0 - smoothstep(0.0, 1.0, minf(absf(h - 3.0) / 2.5, 1.0))) * 0.25   # a little in the small hours
-	var k := maxf(maxf(morning, evening), nightm) * float(LightSettings.current.get("haze", 1.0))
+	var k := maxf(maxf(morning, evening), nightm) * float(LightSettings.current.get("haze", 1.0)) * float(LightSettings.current.get("mist", 1.0))
 	if Env.s("BMX_MIST") != "": k = float(Env.s("BMX_MIST"))
 	var gy := float(phys.y)
 	if is_nan(_mist_y) or absf(gy - _mist_y) > 80.0: _mist_y = gy
@@ -497,6 +497,7 @@ var _gg_sun := Vector3.UP
 var _gg_el := 60.0
 var _gg_k := 0.0
 var _gg_s := 0.0
+var _gg_glow := GG_GLOW   # bloom after the Light tab's Bloom slider
 func _glare_guard(dt: float) -> void:
 	if scenic or photo: return
 	var c3 := get_viewport().get_camera_3d()
@@ -509,11 +510,11 @@ func _glare_guard(dt: float) -> void:
 	_gg_s += (target - _gg_s) * (1.0 - exp(-dt * 3.0))
 	if absf(_gg_s - _gg_k) < 0.004: return
 	_gg_k = _gg_s
-	var k := _gg_s
+	var k := _gg_s * float(LightSettings.current.get("glare", 1.0))
 	if Env.s("BMX_GLARE_OFF") != "": k = 0.0
 	sun.light_volumetric_fog_energy = _gg_vol * (1.0 - 0.8 * k)
 	env.fog_sun_scatter = _gg_scat * (1.0 - k)
-	env.glow_intensity = GG_GLOW * (1.0 - 0.65 * k)
+	env.glow_intensity = _gg_glow * (1.0 - 0.65 * k)
 	sky_mat.set_shader_parameter("energy", _gg_sky * (1.0 - 0.38 * k))
 	if dust and dust.sim != null: dust.sim.sun_gain = _gg_dust * (1.0 - 0.6 * k)
 	if Env.s("BMX_GLARE_PROBE") != "" and Engine.get_process_frames() % 30 == 0:
@@ -652,7 +653,10 @@ func _apply_light(h: float, L: Dictionary) -> void:
 	# rim: warm and strong when the sun is low (backlit riders), soft white by day, cold blue moonlight at night
 	_rim_col = Color(1.0, 0.97, 0.92).lerp(Color(1.0, 0.7, 0.45), gw).lerp(Color(0.85, 0.6, 0.75), tw).lerp(Color(0.6, 0.72, 1.0), n)
 	_rim_e = lerpf(lerpf(0.5, 1.3, gw), 1.0, tw * (1.0 - n))   # was 2.0 / 3.8 / 2.4: it blew the jersey + helmet out to white
-	_rim_e = lerpf(_rim_e, 0.8, n)
+	_rim_e = lerpf(_rim_e, 0.8, n) * float(L.get("rim", 1.0))   # Light tab › Rim light
+	if rim != null: rim.light_specular = 1.2 * float(L.get("rim_spec", 1.0))
+	_gg_glow = GG_GLOW * float(L.get("bloom", 1.0))
+	env.glow_intensity = _gg_glow
 	if dust and dust.sim != null:   # the dust's sky light: dim and cold at night (it glowed white in the dark)
 		dust.sim.sun_gain = lerpf(1.0, 0.2, g * day)
 		_gg_dust = dust.sim.sun_gain
