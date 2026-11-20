@@ -45,6 +45,26 @@ var _glitch_snow := 0.0
 var _next_blip := 3.0
 var _rng := RandomNumberGenerator.new()
 
+const ASSETS := ["res://assets/tv/tv.fbx", "res://assets/tv/tv_albedo.jpg", "res://assets/tv/tv_normal.png", "res://assets/tv/tv_orm.png",
+	"res://shaders/crt_screen.gdshader"]
+static var _assets_ok := -1
+
+## every file the TV needs is there and loads (a missing / half-imported asset would otherwise leave a broken TV or a full-screen
+## noise picture): callers that cannot load it simply go without the TV
+static func assets_ok() -> bool:
+	if _assets_ok >= 0: return _assets_ok == 1
+	var ok := true
+	for p in ASSETS:
+		if not ResourceLoader.exists(p) or load(p) == null:
+			ok = false
+			push_warning("CrtTv: cannot load " + p + ", the TV is left out")
+	if ok:
+		var m: Node = (load(ASSETS[0]) as PackedScene).instantiate()
+		ok = m != null and not m.find_children("*", "MeshInstance3D", true, false).is_empty()
+		if m: m.free()
+	_assets_ok = 1 if ok else 0
+	return ok
+
 func _init() -> void:
 	var model: Node3D = load("res://assets/tv/tv.fbx").instantiate()
 	model.scale = Vector3.ONE * 0.01

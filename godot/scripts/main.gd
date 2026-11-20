@@ -33,7 +33,7 @@ func _ready() -> void:
 		_show_menu()
 	create_tween().set_ignore_time_scale().tween_property(fade, "modulate:a", 0.0, 0.8)
 	# boot intro (the CRT TV): a plain launch only, or BMX_INTRO=1
-	if OS.get_cmdline_user_args().is_empty() or OS.get_environment("BMX_INTRO") != "":
+	if (OS.get_cmdline_user_args().is_empty() or OS.get_environment("BMX_INTRO") != "") and CrtTv.assets_ok():   # (no TV files: no intro, straight to the menu)
 		var intro := CrtIntro.new()
 		intro.hold = true
 		add_child(intro)

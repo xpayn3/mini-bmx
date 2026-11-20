@@ -42,10 +42,12 @@ var _glitched := false
 var _lost := false
 var _glitched2 := false
 var _offed := false
+var _born := 0
 var _tv_at := Vector3.ZERO   # world point of the middle of the glass
 
 func _ready() -> void:
 	layer = 60
+	_born = Time.get_ticks_msec()
 	CrtTv.mute_world = true
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	if OS.get_environment("BMX_INTRO_AT") != "": _freeze = float(OS.get_environment("BMX_INTRO_AT"))
@@ -104,6 +106,10 @@ func _process(delta: float) -> void:
 		for v in tv._players:
 			if v[0].playing: voices += 1
 		print("INTROSHOT %.1f static_voices=%d hiss=%.2f" % [t, voices, tv._hiss])
+	# watchdog (real time): whatever went wrong, the intro never sticks over the game
+	var real := (Time.get_ticks_msec() - _born) / 1000.0
+	if _freeze < 0.0 and (real > 90.0 or (not hold and real > T_END + 10.0)):
+		t = T_END
 	if t >= T_END or _skip >= 0.35:
 		_done = true
 		CrtTv.mute_world = false
