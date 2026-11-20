@@ -116,7 +116,7 @@ const PAD_STYLES := [["enduro", "Enduro"], ["race", "Race brace"], ["trail", "Tr
 const SW := ["#f4f4f0", "#16171a", "#e8231f", "#ff7a1a", "#ffd21f", "#7ed321", "#11b3c9", "#1478d4", "#6a1b9a", "#ff5fa2"]
 const LENS := ["#ff7a2a", "#ffd21f", "#3fb6ff", "#7ed321", "#ff5fa2", "#8a96a8", "#d0d4da"]
 const LOOK_ROWS := [
-	["Helmet", [["shell", "Shell", SW], ["peak", "Peak", SW]]],
+	["Helmet", [["shell", "Shell", SW], ["peak", "Peak", SW], ["hair", "Hair colour", HAIR_SW]]],
 	["Goggles", [["lens", "Lens tint", LENS], ["goggleFrame", "Frame", SW], ["strap", "Strap", SW]]],
 	["Kit", [["jersey", "Jersey", SW], ["pants", "Pants", SW], ["gloves", "Gloves", SW], ["pads", "Knee pads", SW]]],
 	["Shoes", [["shoes", "Upper", SW], ["shoeAccent", "Toe & collar", SW]]],
@@ -167,7 +167,18 @@ static func save_look(l: Dictionary) -> void:
 	for k in l: cf.set_value("look", k, l[k])
 	cf.save(PATH)
 
-## the helmet model picker (Look > Helmet): one toggle per Rider.HELMETS entry, on_pick(helmet id)
+## hair colours (Look > Helmet > Hair colour)
+const HAIR_SW := ["#16130f", "#2a1a10", "#4a3022", "#7a4e2b", "#b07a3c", "#d9b36a", "#e8d9a8", "#8a8a8a", "#d8d8d8", "#8c2f1f", "#c8452a", "#3b5bd6", "#d22fbf", "#35a86a"]
+
+## the rider always wears a helmet (no bare head): the picker sets look.helmet
+static func helmet_choice(look: Dictionary) -> String:
+	return str(look.get("helmet", "glory"))
+
+static func helmet_set(look: Dictionary, id: String) -> void:
+	look.helmetOn = "1"
+	look.helmet = id
+
+## the helmet model picker (Look > Helmet): one toggle per Rider.HELMETS entry, on_pick(id)
 static func helmet_picker(current: String, on_pick: Callable, size := 13) -> GridContainer:
 	var grid := GridContainer.new()
 	grid.columns = 2
@@ -175,9 +186,25 @@ static func helmet_picker(current: String, on_pick: Callable, size := 13) -> Gri
 	grid.add_theme_constant_override("v_separation", 6)
 	for id in Rider.HELMETS:
 		var hid: String = id
-		var b := UITheme.button(Rider.HELMETS[id][0], func(): on_pick.call(hid), size)
+		var b := UITheme.button(Rider.HELMETS[hid][0], func(): on_pick.call(hid), size)
 		b.toggle_mode = true
 		b.button_pressed = hid == current
+		b.focus_mode = Control.FOCUS_NONE
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		grid.add_child(b)
+	return grid
+
+## hair style picker (Hair.HELMET_STYLES: none, long, ponytail, braid: what comes out under the back of the helmet), on_pick(style id)
+static func hair_style_picker(current: String, on_pick: Callable, size := 13) -> GridContainer:
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 6)
+	grid.add_theme_constant_override("v_separation", 6)
+	for st in Hair.HELMET_STYLES:
+		var sid: String = st[0]
+		var b := UITheme.button(st[1], func(): on_pick.call(sid), size)
+		b.toggle_mode = true
+		b.button_pressed = sid == current
 		b.focus_mode = Control.FOCUS_NONE
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		grid.add_child(b)

@@ -1443,14 +1443,17 @@ func _kit_page() -> void:
 		_h(g[0].to_upper())
 		if g[0] == "Helmet":
 			body.add_child(UITheme.text("Model (the textured ones come with their goggles)", SUB, Tokens.T_XS))
-			body.add_child(RiderPanels.helmet_picker(str(look.helmet), func(id):
-				look.helmet = id; _set_look(look); _set_tab("kit")))
+			body.add_child(RiderPanels.helmet_picker(RiderPanels.helmet_choice(look), func(id):
+				RiderPanels.helmet_set(look, id); _set_look(look); _set_tab("kit")))
+			body.add_child(UITheme.text("Hair style", SUB, Tokens.T_XS))
+			body.add_child(RiderPanels.hair_style_picker(str(look.hairStyle), func(id):
+				look.hairStyle = id; _set_look(look); _set_tab("kit")))
 		if g[0] == "Kit":
 			body.add_child(UITheme.text("Knee pads design", SUB, Tokens.T_XS))
 			body.add_child(RiderPanels.pad_style_picker(str(look.padStyle), func(id):
 				look.padStyle = id; _set_look(look); _set_tab("kit")))
 		for row in g[1]:
-			if textured and g[0] == "Helmet":
+			if textured and g[0] == "Helmet" and row[0] != "hair":
 				continue
 			var key: String = row[0]
 			var hb := HBoxContainer.new()
