@@ -120,7 +120,7 @@ func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
 		chain.setup(self)
 	if not decal_cfg.is_empty():
 		BikeDecals.add_bike_decals(model, decal_cfg)
-	mount_cam(str(build.get("camera", {}).get("mount", "none")))
+	mount_cam(str(build.get("camera", {}).get("mount", "none")), build.get("camera", {}))
 	if extras.has("suspension") and model.find_child("rocker", true, false):
 		var r: Dictionary = extras.suspension.rear
 		BikeDecals.add_pivot_bolts(model, [{"node": "rocker", "at": r.G2, "z": 0.029}, {"node": "rocker", "at": r.C2, "z": 0.029}, {"node": "rocker", "at": r.D, "z": 0.031, "r": 0.005}])
@@ -497,7 +497,8 @@ func _materials(_cfg: Dictionary) -> void:
 ## with the steering); "fork" = a clamp on the right fork lower (the caliper is on the left), camera beside
 ## the leg, low over the ground (moves with the suspension). Placed from the meshes themselves, so it fits
 ## every frame / bar / fork model. "none" (or no such part) = no camera.
-func mount_cam(kind: String) -> void:
+## `gear` = the camera + add-ons (ActionCam.GEAR_ROWS keys; build.camera carries them next to "mount")
+func mount_cam(kind: String, gear := {}) -> void:
 	if action_cam and is_instance_valid(action_cam):
 		action_cam.get_parent().remove_child(action_cam)
 		action_cam.queue_free()
@@ -509,7 +510,7 @@ func mount_cam(kind: String) -> void:
 		var hint := Vector3(lerpf(grip_r.x, 0.0, 0.3), grip_r.y, zc)
 		var t := _tube_at(steer_n as MeshInstance3D, Vector3(0, 0, 1), zc, hint)
 		if t.is_empty(): return
-		action_cam = ActionCam.build_clamp(Vector3(0, 0, 1), t.r, Vector3.UP, Vector3(0.0, t.r + 0.024, 0.0))
+		action_cam = ActionCam.build_clamp(Vector3(0, 0, 1), t.r, Vector3.UP, Vector3(0.0, t.r + 0.024, 0.0), 0.0, gear)
 		action_cam.position = t.c
 		steer_n.add_child(action_cam)
 		if probe: print("CAMMOUNT bars c=%s r=%.4f" % [t.c, t.r])
@@ -526,7 +527,7 @@ func mount_cam(kind: String) -> void:
 		var at: Vector3 = hi.c
 		var r: float = hi.r
 		# camera upright on the outside of the leg, centred on the clamp height, lens ahead
-		action_cam = ActionCam.build_clamp(axis, r, Vector3(0, 0, 1), Vector3(0.012, -0.03, r + 0.046))
+		action_cam = ActionCam.build_clamp(axis, r, Vector3(0, 0, 1), Vector3(0.012, -0.03, r + 0.046), 0.0, gear)
 		action_cam.position = at
 		fl.add_child(action_cam)
 		if probe: print("CAMMOUNT fork c=%s r=%.4f axis=%s" % [at, r, axis])

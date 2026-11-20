@@ -1043,7 +1043,8 @@ func _row(t: String, ctl: Control) -> void:
 
 ## a part / option picker like a racing game's tuning shop: ◀ VALUE ▶ with a dot per option
 ## items: [[value, label], ...]
-func _choice(t: String, items: Array, current, cb: Callable) -> Control:
+## rebuild = false: a change that isn't the bike's (the rider room's look): skip the bike rebuild
+func _choice(t: String, items: Array, current, cb: Callable, rebuild := true) -> Control:
 	var sel := 0
 	for i in items.size():
 		if str(items[i][0]) == str(current): sel = i
@@ -1086,7 +1087,8 @@ func _choice(t: String, items: Array, current, cb: Callable) -> Control:
 	var step := func(d: int):
 		sel = wrapi(sel + d, 0, items.size())
 		show.call()
-		cb.call(items[sel][0]); _changed()
+		cb.call(items[sel][0])
+		if rebuild: _changed()
 	prev.pressed.connect(step.bind(-1))
 	next.pressed.connect(step.bind(1))
 	box.focus_mode = Control.FOCUS_ALL   # the pad lands on the stepper: left / right (or A) step it
@@ -1430,8 +1432,11 @@ func _bars_page() -> void:
 		_slide("Post height", 0, 200, 10, float(SE.get("post_h", 0.0)) * 1000.0, "mm", func(v): SE.post_h = float(v) / 1000.0)
 	_note("The dropper stands the saddle up along the seat tube (the rider follows). Saddle colour is in Paint > Saddle & pedals.")
 	_h("ACTION CAM")
-	if not build.has("camera"): build.camera = {"mount": "none"}
+	if not build.has("camera"): build.camera = {"mount": "none"}.merged(ActionCam.GEAR_DEFAULT)
 	_choice("Mount", ActionCam.BIKE_MOUNTS, str(build.camera.get("mount", "none")), func(v): build.camera.mount = v)
+	for r in ActionCam.GEAR_ROWS:
+		var gk: String = r[0]
+		_choice(r[1], r[2], str(build.camera.get(gk, ActionCam.GEAR_DEFAULT[gk])), func(v): build.camera[gk] = v)
 	_note("A GoPro-style camera on the bike: the Bike cam view (C) looks out of it. The helmet camera is picked in the Rider room's Kit tab.")
 
 func _susp_page() -> void:
@@ -1583,9 +1588,6 @@ func _kit_page() -> void:
 			body.add_child(UITheme.text("Hair style", SUB, Tokens.T_XS))
 			body.add_child(RiderPanels.hair_style_picker(str(look.hairStyle), func(id):
 				look.hairStyle = id; _set_look(look); _set_tab("kit")))
-			body.add_child(UITheme.text("Action cam (the Helmet camera view looks out of it)", SUB, Tokens.T_XS))
-			body.add_child(RiderPanels.cam_mount_picker(str(look.get("camMount", "top")), func(id):
-				look.camMount = id; _set_look(look); _set_tab("kit")))
 		if g[0] == "Kit":
 			body.add_child(UITheme.text("Knee pads design", SUB, Tokens.T_XS))
 			body.add_child(RiderPanels.pad_style_picker(str(look.padStyle), func(id):
@@ -1619,6 +1621,15 @@ func _kit_page() -> void:
 			cp.color_changed.connect(func(c): look[key] = "#" + c.to_html(false); _set_look(look))
 			hb.add_child(cp)
 			body.add_child(hb)
+	# the helmet camera: where it sits, which camera, lens, housing, mic, top accessory
+	_h("ACTION CAM")
+	body.add_child(UITheme.text("Mount (the Helmet camera view looks out of it)", SUB, Tokens.T_XS))
+	body.add_child(RiderPanels.cam_mount_picker(str(look.get("camMount", "top")), func(id):
+		look.camMount = id; _set_look(look); _set_tab("kit")))
+	for r in ActionCam.GEAR_ROWS:
+		var lk: String = ActionCam.GEAR_LOOK[r[0]]
+		_choice(r[1], r[2], str(look.get(lk, ActionCam.GEAR_DEFAULT[r[0]])), func(v): look[lk] = v; _set_look(look), false)
+	_note("Lens mods change the Helmet view: the Max Lens Mod is wider. The Light Mod lights the trail at night.")
 	body.add_child(UITheme.make_button("Reset kit", func(): _set_look(Rider.DEFAULT_LOOK.duplicate()); _set_tab("kit"), "chip", Tokens.T_MD))
 
 func _set_look(l: Dictionary) -> void:

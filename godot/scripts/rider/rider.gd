@@ -26,7 +26,7 @@ const DEFAULT_LOOK := {shell = "#16171a", peak = "#ececec", goggleFrame = "#f2f2
 	jersey = "#ff6a4d", pants = "#1d2b64", gloves = "#ffd21f", shoes = "#26292f", shoeAccent = "#d8232a", pads = "#1b1c20", padStyle = "enduro",
 	beltStyle = "webbing", belt = "#16171a", buckle = "#9aa0a8", helmet = "glory",
 	helmetOn = "1", hairStyle = "long", beard = "1", hair = "#4a3022", skin = "#efc29f", eyes = "#4a6b8a", bibOn = "1", bibNumber = "27", bibText = "RUNOUT  •  DOWNHILL CUP",
-	camMount = "top"}
+	camMount = "top", camModel = "hero", camLens = "stock", camHousing = "none", camMic = "none", camAcc = "none"}
 ## where the helmet model sits on the head (head-local m / rad) and its scale
 ## helmet models picked in the Look tab (look.helmet): id -> [label, glb]. The glory one is the stock helmet (recolourable
 ## shell / peak, our goggles); the others are textured models (tools/export_helmets.py) that always wear their own goggles
@@ -89,6 +89,7 @@ var goggles: Node3D = null
 var action_cam: Node3D = null   # the helmet action camera (ActionCam); its "Lens" is the Helmet camera view (null = look.camMount "none")
 var action_cam_at := Vector3.ZERO   # where it's mounted (head space)
 var cam_mount := ""                 # which ActionCam.HELMET_MOUNTS entry is on
+var cam_gear := ""                  # ActionCam.gear_sig of the camera + add-ons on it (look.camModel ...)
 var cam_spots := {}                 # mount kind -> where it touches the shell (head space), set when a helmet goes on
 
 var torso: MeshInstance3D
@@ -387,10 +388,12 @@ func _mount_action_cam() -> void:
 		action_cam.queue_free()
 	action_cam = null
 	cam_mount = str(look.get("camMount", DEFAULT_LOOK.camMount))
+	var gear := ActionCam.gear_from_look(look)
+	cam_gear = ActionCam.gear_sig(gear)
 	if cam_mount == "none" or not cam_spots.has(cam_mount):
 		return
 	var at: Vector3 = cam_spots[cam_mount]
-	action_cam = ActionCam.build(cam_mount)
+	action_cam = ActionCam.build(cam_mount, gear)
 	action_cam.position = at
 	action_cam_at = at
 	action_cam.visible = hel == null or hel.visible or (helmet_model != null and helmet_model.visible)
@@ -604,7 +607,7 @@ func set_look(l: Dictionary) -> void:
 	if hel != null and want_key != helmet_id and HELMETS.has(want):   # another helmet / goggle source: mount it (set_helmet re-applies the look)
 		use_helmet(want)
 		if helmet_id == want_key and helmet_model and is_instance_valid(helmet_model): return   # set_helmet re-applied the look
-	if not cam_spots.is_empty() and str(L.get("camMount", DEFAULT_LOOK.camMount)) != cam_mount:
+	if not cam_spots.is_empty() and (str(L.get("camMount", DEFAULT_LOOK.camMount)) != cam_mount or ActionCam.gear_sig(ActionCam.gear_from_look(L)) != cam_gear):
 		_mount_action_cam()
 	var c := func(m, k: String) -> void:
 		if m != null and L.get(k):

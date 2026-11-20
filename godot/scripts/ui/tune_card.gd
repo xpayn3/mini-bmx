@@ -31,6 +31,7 @@ const TABS := [
 	["look", "Look", [
 		["Kits", ["L:kits"]],
 		["Helmet", ["L:Helmet", "L:Goggles"]],
+		["Action cam", ["L:actioncam"]],
 		["Clothes", ["L:Kit", "L:Belt", "L:Shoes"]],
 	]],
 	["sound", "Sound", [
@@ -312,6 +313,17 @@ func _apply_pose() -> void:
 
 # ---------------------------------------------------------------- LOOK
 func _look_group(group: String) -> void:
+	if group == "actioncam":   # the helmet camera: mount, model, lens, housing, mic, top accessory
+		_header("Action cam")
+		list.add_child(UITheme.label("Mount", 13))
+		list.add_child(RiderPanels.cam_mount_picker(str(look.get("camMount", "top")), func(id):
+			look.camMount = id; _apply_look(); _fill()))
+		for r in ActionCam.GEAR_ROWS:
+			var lk: String = ActionCam.GEAR_LOOK[r[0]]
+			list.add_child(UITheme.label(r[1], 13))
+			list.add_child(RiderPanels.choice_picker(r[2], str(look.get(lk, ActionCam.GEAR_DEFAULT[r[0]])), func(id):
+				look[lk] = id; _apply_look(); _fill()))
+		return
 	if group == "kits":
 		_header("Kits")
 		var kits := GridContainer.new(); kits.columns = 3
@@ -339,9 +351,6 @@ func _look_group(group: String) -> void:
 			list.add_child(UITheme.label("Hair style", 13))
 			list.add_child(RiderPanels.hair_style_picker(str(look.get("hairStyle", "long")), func(id):
 				look.hairStyle = id; _apply_look(); _fill()))
-			list.add_child(UITheme.label("Action cam", 13))
-			list.add_child(RiderPanels.cam_mount_picker(str(look.get("camMount", "top")), func(id):
-				look.camMount = id; _apply_look(); _fill()))
 		if group == "Kit":
 			list.add_child(UITheme.label("Knee pads design", 13))
 			list.add_child(RiderPanels.pad_style_picker(str(look.get("padStyle", "enduro")), func(id):
@@ -542,6 +551,10 @@ func _reset_category() -> void:
 			FreewheelSound.reset()
 		elif src.begins_with("W:"):
 			LightSettings.reset()
+		elif src == "L:actioncam":
+			look.camMount = Rider.DEFAULT_LOOK.camMount
+			for k in ActionCam.GEAR_LOOK.values(): look[k] = Rider.DEFAULT_LOOK[k]
+			look_touched = true
 		elif src.begins_with("L:"):
 			for g in RiderPanels.LOOK_ROWS:
 				if g[0] == name:
