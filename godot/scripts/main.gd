@@ -528,7 +528,7 @@ func _menu_page_main() -> void:
 	fill.call()
 	var ride := _menu_button("RIDE", "Pick a bike and the time of day", _menu_page_setup, true, true)
 	vb.add_child(ride)
-	vb.add_child(_menu_button("DEMO", "An AI rider rides; tune everything live", _start_demo, false, true))
+	# DEMO (AI rider) is hidden from the title menu; _start_demo is kept (BMX_DEMO runs the AI rider in tests)
 	vb.add_child(_menu_button("GARAGE", "Paint, wheels, bars, shocks, gears", _open_garage, false, true))
 	vb.add_child(_menu_button("RIDER", "Riding position on the rollers, kit", _open_garage.bind("rider"), false, true))
 	vb.add_child(UITheme.spacer(Tokens.S2))
