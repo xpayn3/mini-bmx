@@ -11,6 +11,21 @@ uniform float bump = 9.0;   // x the real dimple depth (4 mm), to read at riding
 uniform float fade_near = 55.0;
 uniform float fade_far = 110.0;
 
+// value noise, periodic along x (v wraps every 480 m in fx.gd, so the pattern carries on at the wrap)
+float hash21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vnoise(vec2 p, float per) {
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);
+	float x0 = mod(i.x, per);
+	float x1 = mod(i.x + 1.0, per);
+	float a = hash21(vec2(x0, i.y));
+	float b = hash21(vec2(x1, i.y));
+	float c = hash21(vec2(x0, i.y + 1.0));
+	float d = hash21(vec2(x1, i.y + 1.0));
+	return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
 varying float v_smear;
 
 // the imprint of one knob: a rounded rectangle, 1 inside fading to 0 over its edge
@@ -72,11 +87,14 @@ void fragment() {
 
 	vec3 ground = pow(COLOR.rgb, vec3(2.2));           // sRGB -> linear
 	// pressed soil is darker; the bottoms of the dimples darker still; the pushed-out lip a bit lighter
-	vec3 col = ground * (0.9 - 0.27 * h) + ground * 0.12 * lip;   // (was 0.78 - 0.42 h: too dark; a smidget darker than 0.92 - 0.2 h)
+	// a little random variation along and across the track: colour (patches + fine grain) and opacity
+	float nc = 0.65 * vnoise(vec2(v * 2.0, u * 1.5 + 3.0), 960.0) + 0.35 * vnoise(vec2(v * 0.4, u * 0.8 + 11.0), 192.0);
+	float no = 0.6 * vnoise(vec2(v * 1.3 + 57.0, u * 1.1 + 7.0), 624.0) + 0.4 * vnoise(vec2(v * 6.0, u * 4.0 + 23.0), 2880.0);
+	vec3 col = ground * (0.97 - 0.2 * h) * mix(0.86, 1.12, nc) + ground * 0.12 * lip;   // (was 0.78 - 0.42 h: too dark; a smidget darker than 0.92 - 0.2 h)
 	ALBEDO = col;
 	ROUGHNESS = 0.92 - 0.12 * h;
 	SPECULAR = 0.25;
 	float dist = length(VERTEX);
 	float fade = 1.0 - smoothstep(fade_near, fade_far, dist);
-	ALPHA = COLOR.a * band * fade * (0.72 + 0.2 * h);
+	ALPHA = COLOR.a * band * fade * (0.6 + 0.2 * h) * mix(0.65, 1.15, no);
 }
