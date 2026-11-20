@@ -244,6 +244,7 @@ func _take_prebuilt() -> bool:
 # ---------------------------------------------------------------- title screen
 func _show_menu() -> void:
 	state = MENU
+	GameState.end_ride()
 	get_tree().paused = false
 	if game: game.exit_photo()
 	_close_controls()
@@ -258,12 +259,19 @@ func _show_menu() -> void:
 	# B on the ride setup = one step back (step 1 -> the main page); LB / RB = previous / next step
 	PadNav.attach(menu, {"back": _menu_back, "tabs": _menu_tabs, "first": func(): return menu_focus if is_instance_valid(menu_focus) else null})
 	# one flat white card down the left (the garage and settings use the same cards), the view beside it
+	# the menu card fills the screen height, the small stats card sits under it at the bottom
+	var stack := VBoxContainer.new()
+	stack.add_theme_constant_override("separation", Tokens.S3)
+	stack.set_anchors_preset(Control.PRESET_LEFT_WIDE)
+	stack.offset_left = MENU_EDGE; stack.offset_right = MENU_EDGE + MENU_W
+	stack.offset_top = MENU_EDGE; stack.offset_bottom = -MENU_EDGE
+	menu.add_child(stack)
 	var card := PanelContainer.new()
-	card.add_theme_stylebox_override("panel", UITheme.card_style(Tokens.PAPER, Tokens.R_XL, Tokens.S7))
-	card.set_anchors_preset(Control.PRESET_LEFT_WIDE)
-	card.offset_left = MENU_EDGE; card.offset_right = MENU_EDGE + MENU_W
-	card.offset_top = MENU_EDGE; card.offset_bottom = -MENU_EDGE
-	menu.add_child(card)
+	card.add_theme_stylebox_override("panel", UITheme.card_style(Tokens.PAPER, Tokens.R_XL, Tokens.S6))
+	card.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	stack.add_child(card)
+	menu_stats = _stats_card()
+	stack.add_child(menu_stats)
 	var outer := VBoxContainer.new()
 	card.add_child(outer)
 	var vb := VBoxContainer.new()
@@ -273,7 +281,7 @@ func _show_menu() -> void:
 	# title: the game's logo, the same one the TV shows (ui/game_logo.gd)
 	var head := VBoxContainer.new()
 	var logo := GameLogo.new()
-	logo.custom_minimum_size = Vector2(0, 170)
+	logo.custom_minimum_size = Vector2(0, 130)
 	head.add_child(logo)
 	vb.add_child(head)
 	menu_col = vb
@@ -284,11 +292,64 @@ func _show_menu() -> void:
 	menu_quit.offset_right = -MENU_EDGE; menu_quit.offset_top = MENU_EDGE
 	menu_quit.offset_left = -MENU_EDGE - 140; menu_quit.offset_bottom = MENU_EDGE + Tokens.H_CHIP + Tokens.S2
 	menu.add_child(menu_quit)
-	outer.add_child(UITheme.text("v1.0  ·  Godot %s" % Engine.get_version_info().string, Tokens.INK_SOFT, Tokens.T_XS))
+	# SETTINGS: a gear button just left of QUIT (controls are a tab in it)
+	var bh := Tokens.H_CHIP + Tokens.S2
+	menu_settings = UITheme.make_button("", _open_settings, "secondary", Tokens.T_LG)
+	menu_settings.tooltip_text = "Settings"
+	menu_settings.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	menu_settings.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	menu_settings.offset_right = -MENU_EDGE - 140 - Tokens.S3; menu_settings.offset_top = MENU_EDGE
+	menu_settings.offset_left = menu_settings.offset_right - bh; menu_settings.offset_bottom = MENU_EDGE + bh
+	var gear := GearIcon.new()
+	gear.set_anchors_preset(Control.PRESET_FULL_RECT)
+	gear.offset_left = Tokens.S3; gear.offset_top = Tokens.S3; gear.offset_right = -Tokens.S3; gear.offset_bottom = -Tokens.S3
+	menu_settings.add_child(gear)
+	menu.add_child(menu_settings)
+	# version: small, bottom right of the screen, just left of the fullscreen button and centred on it
+	menu_version = UITheme.text("v1.0  ·  Godot %s" % Engine.get_version_info().string, Color(1, 1, 1, 0.8), Tokens.T_XS)
+	menu_version.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	menu_version.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	menu_version.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	menu_version.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	menu_version.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	menu_version.offset_right = -FSB.MARGIN - FSB.SIZE - Tokens.S3
+	menu_version.offset_bottom = -FSB.MARGIN
+	menu_version.offset_top = -FSB.MARGIN - FSB.SIZE
+	menu_version.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	menu.add_child(menu_version)
 	_menu_page_main()
 	if Env.s("BMX_MENU_PAGE") == "setup": _menu_page_setup(int(Env.s("BMX_SETUP_STEP")))   # tests: the ride setup page (BMX_SETUP_STEP=0..3)
 
 var menu_quit: Button
+var menu_settings: Button
+var menu_version: Label
+var menu_stats: Control
+
+## the small card under the title menu: this week (distance, rides), the weekly streak and the lifetime total
+func _stats_card() -> Control:
+	var card := PanelContainer.new()
+	var st := UITheme.card_style(Tokens.PAPER, Tokens.R_XL, Tokens.S5)
+	st.content_margin_left = Tokens.S6; st.content_margin_right = Tokens.S6   # text lines up with the menu card's
+	card.add_theme_stylebox_override("panel", st)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", Tokens.S4)
+	card.add_child(row)
+	var mi: bool = Settings.get_v("units") == 1
+	var unit := 1609.344 if mi else 1000.0
+	var wk := GameState.week_totals()
+	var streak := GameState.week_streak()
+	var stat := func(cap: String, val: String) -> void:
+		var col := VBoxContainer.new()
+		col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		col.add_theme_constant_override("separation", 0)
+		col.add_child(UITheme.caption(cap))
+		col.add_child(UITheme.display(val, Tokens.T_XL, Tokens.INK, Tokens.SLANT))
+		row.add_child(col)
+	stat.call("THIS WEEK", "%.1f %s" % [float(wk.metres) / unit, "MI" if mi else "KM"])
+	stat.call("RIDES", str(wk.rides))
+	stat.call("STREAK", "%d WK" % streak)
+	stat.call("TOTAL", "%d %s" % [roundi(float(GameState.records.distance) / unit), "MI" if mi else "KM"])
+	return card
 
 ## "Quit the game?" over the title menu: QUIT / CANCEL (B, Esc and a click beside it cancel)
 func _confirm_quit() -> void:
@@ -324,8 +385,9 @@ func _confirm_quit() -> void:
 	PadNav.attach(veil, {"back": close, "first": func(): return cancel})
 	cancel.grab_focus.call_deferred()
 
+const FSB := preload("res://scripts/ui/fullscreen_button.gd")   # the corner fullscreen button (the version sits beside it)
 const MENU_EDGE := Tokens.S8
-const MENU_W := Tokens.CARD_W + Tokens.S8 + Tokens.S2
+const MENU_W := Tokens.CARD_W
 
 ## the column under the title: everything after the title block (index 1 on) is the page
 var menu_col: VBoxContainer
@@ -459,6 +521,9 @@ func _menu_page_main() -> void:
 	_menu_clear()
 	menu_page = "main"
 	var vb := menu_col
+	var fill := func() -> void:   # equal stretch above and below: the menu sits centred under the logo
+		var c := Control.new(); c.size_flags_vertical = Control.SIZE_EXPAND_FILL; vb.add_child(c)
+	fill.call()
 	var ride := _menu_button("RIDE", "Pick a bike and the time of day", _menu_page_setup, true)
 	vb.add_child(ride)
 	vb.add_child(_menu_button("DEMO", "An AI rider rides; tune everything live", _start_demo))
@@ -481,10 +546,11 @@ func _menu_page_main() -> void:
 	seed_row.add_child(se)
 	seed_row.add_child(UITheme.make_button("NEW WORLD", func(): GameState.new_seed(); se.text = str(GameState.seed); _seed_changed(), "chip", Tokens.T_LG))
 	vb.add_child(seed_row)
-	vb.add_child(UITheme.spacer(Tokens.S4))
-	# secondary: a quiet list
-	vb.add_child(UITheme.make_button("SETTINGS", _open_settings, "link", Tokens.T_XL))   # controls are a tab in it
+	fill.call()
 	if is_instance_valid(menu_quit): menu_quit.visible = true
+	if is_instance_valid(menu_settings): menu_settings.visible = true
+	if is_instance_valid(menu_version): menu_version.visible = true
+	if is_instance_valid(menu_stats): menu_stats.visible = true
 	menu_focus = ride
 	ride.grab_focus.call_deferred()
 
@@ -530,6 +596,9 @@ func _menu_page_setup(step := 0) -> void:
 	_menu_clear()
 	menu_page = "setup"
 	if is_instance_valid(menu_quit): menu_quit.visible = false
+	if is_instance_valid(menu_settings): menu_settings.visible = false
+	if is_instance_valid(menu_version): menu_version.visible = false
+	if is_instance_valid(menu_stats): menu_stats.visible = false
 	if is_instance_valid(setup_screen): setup_screen.queue_free()
 	_ensure_thumbs()
 	var scr := Control.new()
@@ -1067,14 +1136,18 @@ func _setup_next() -> void:
 ## a big menu button: display-font title (+ optional small line under it); primary = the yellow one
 func _menu_button(text: String, sub: String, cb: Callable, primary := false) -> Button:
 	var b := UITheme.make_button("", cb, "menu")   # one look for every line: the focused one is yellow (console cursor)
-	b.custom_minimum_size.y = Tokens.H_HERO if primary else Tokens.H_SUB
+	# room above the name and below the second line (they used to touch the box's edges)
+	b.custom_minimum_size.y = (Tokens.H_HERO if primary else Tokens.H_SUB) + Tokens.S3
 	var m := MarginContainer.new()
 	m.set_anchors_preset(Control.PRESET_FULL_RECT)
-	m.add_theme_constant_override("margin_left", Tokens.S5 + Tokens.S2)
+	m.add_theme_constant_override("margin_left", Tokens.S4)    # same inset as the seed field's text below
+	m.add_theme_constant_override("margin_right", Tokens.S4)
+	m.add_theme_constant_override("margin_top", Tokens.S3)
+	m.add_theme_constant_override("margin_bottom", Tokens.S3)
 	m.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var col := VBoxContainer.new()
 	col.alignment = BoxContainer.ALIGNMENT_CENTER
-	col.add_theme_constant_override("separation", -Tokens.S2)
+	col.add_theme_constant_override("separation", -Tokens.S3)   # name and second line sit close (the display font has tall line spacing)
 	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	col.add_child(UITheme.display(text, Tokens.T_3XL if primary else Tokens.T_2XL + Tokens.S1))
 	if sub != "":
@@ -1128,10 +1201,12 @@ func _start_ride() -> void:
 	game.swallow_held()   # the A that pressed RACE is not a sprint
 	game.respawn(false)
 	_set_riding(true)
+	GameState.begin_ride()   # counts as an activity once it has covered GameState.ACTIVITY_M
 
 ## DEMO: the same ride, an AI rider at the bars (F2 hands it back); the tuning card opens on the Demo tab
 func _start_demo() -> void:
 	await _start_ride()
+	GameState.end_ride()   # the AI's riding is no activity of the player's
 	game.set_demo(true)
 	if game.hud:
 		TuneCard.last_cat["ride"] = 8

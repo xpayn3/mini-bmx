@@ -396,7 +396,7 @@ func _ride_stats(st: BikePhysics, dt: float) -> void:
 	if not st.crash_on:
 		var ds := absf(st.v) * dt
 		ride_dist += ds
-		GameState.records.distance += ds
+		GameState.add_distance(ds)   # total + today's log (title card: this week, streak)
 		if absf(st.v) > 0.5: moving_t += dt
 		max_v = maxf(max_v, absf(st.v))
 	if is_nan(_crank_last): _crank_last = st.crank

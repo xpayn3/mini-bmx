@@ -478,7 +478,12 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   Freed and the normal light restored when the ride starts. `BMX_SEED` now also fixes the menu world.
 - Menu (`main._show_menu`): two pages in one column under the title. Main: RIDE, GARAGE, world seed + NEW WORLD,
   SETTINGS (its last tabs are Controls = key / pad bindings and Camera: `settings_menu.gd` extends `controls_menu.gd`;
-  no separate Controls entry on the title menu or the pause leaflet any more); **QUIT** is a button top right
+  no separate Controls entry on the title menu or the pause leaflet any more; SETTINGS is a gear button, `ui/gear_icon.gd`, left
+  of QUIT; the version number is small bottom right beside the fullscreen button). The menu card fills the height (menu centred
+  under the logo); under it a small **stats card** (`main._stats_card`): this week's distance + rides, the Zwift-style weekly
+  streak (weeks in a row with a ride) and the lifetime total. Data: `GameState.days` (day number -> [metres, rides], save.cfg
+  `[days]`, kept 800 days), fed by `GameState.add_distance` from the HUD; a ride counts once it passes `ACTIVITY_M` (200 m),
+  only between `begin_ride` (RIDE) and `end_ride` (menu, demo); test runs never log. **QUIT** is a button top right
   (`menu_quit`, main page only) that asks first (`_confirm_quit`: CANCEL / QUIT, B or a click beside it cancels).
   Tests: `BMX_PADSEQ` has `click:x:y` (a left click). RIDE opens the **ride setup** page (`_menu_page_setup`): bike (Downhill / BMX) +
   time of day (the `LightSettings.BUILTIN` presets), then GO. Test: `BMX_MENU_PAGE=setup`.

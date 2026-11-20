@@ -48,6 +48,10 @@ func _ready() -> void:
 	if cf.load(SAVE) == OK:
 		for k in records:
 			records[k] = cf.get_value("records", k, records[k])
+		if cf.has_section("days"):
+			for k in cf.get_section_keys("days"):
+				var e = cf.get_value("days", k, null)
+				if k.is_valid_int() and e is Array and e.size() == 2: days[int(k)] = [float(e[0]), int(e[1])]
 		computer_id = String(cf.get_value("game", "computer", computer_id))
 		bmx_tyre = String(cf.get_value("game", "bmx_tyre", ""))
 		if not BikeBuild.TYRE_MODELS.has(bmx_tyre): bmx_tyre = ""
@@ -86,7 +90,73 @@ func save() -> void:
 		cf.set_value("computer_" + id, "cfg", computer_cfg[id])
 	for k in records:
 		cf.set_value("records", k, records[k])
+	var oldest := today() - KEEP_DAYS
+	for d in days:
+		if int(d) >= oldest: cf.set_value("days", str(d), days[d])
 	cf.save(SAVE)
+
+# ---------------------------------------------------------------- activity log (title card: this week + streak)
+## per day ridden (key = days since 1970, local date): [metres, rides]. A ride counts as an activity once it
+## has covered ACTIVITY_M; the streak is Zwift-style: weeks in a row (Monday to Sunday) with at least one.
+const ACTIVITY_M := 200.0
+const KEEP_DAYS := 800
+var days := {}
+var _ride_m := 0.0          # this ride so far
+var _live := false          # a ride of the player's (not the demo AI, the menu backdrop or a test run)
+var _ride_counted := true   # this ride is already an activity
+
+## a new ride starts (RIDE / GO): its distance is logged, and it becomes an activity after ACTIVITY_M
+func begin_ride() -> void:
+	_live = not Settings._test_run
+	_ride_m = 0.0
+	_ride_counted = false
+
+func end_ride() -> void:
+	_live = false   # nothing more is logged until the next begin_ride
+
+## called by the HUD with the metres ridden this step
+func add_distance(ds: float) -> void:
+	records.distance = float(records.distance) + ds
+	if not _live: return
+	var d := today()
+	var e: Array = days.get(d, [0.0, 0])
+	e[0] = float(e[0]) + ds
+	_ride_m += ds
+	if not _ride_counted and _ride_m >= ACTIVITY_M:
+		_ride_counted = true
+		e[1] = int(e[1]) + 1
+	days[d] = e
+
+static func today() -> int:
+	var t := Time.get_datetime_dict_from_system()   # local date
+	t.hour = 12; t.minute = 0; t.second = 0
+	return floori(Time.get_unix_time_from_datetime_dict(t) / 86400.0)
+
+## Monday-based week number (1970-01-01 was a Thursday)
+static func week_of(day: int) -> int:
+	return floori((day + 3) / 7.0)
+
+## {metres, rides} ridden in the week holding `day` (default this week)
+func week_totals(day := -1) -> Dictionary:
+	if day < 0: day = today()
+	var w := week_of(day)
+	var m := 0.0; var n := 0
+	for d in days:
+		if week_of(int(d)) == w:
+			m += float(days[d][0]); n += int(days[d][1])
+	return {"metres": m, "rides": n}
+
+## weeks in a row with an activity, ending this week (or last week while this one has none yet: still alive)
+func week_streak() -> int:
+	var weeks := {}
+	for d in days:
+		if int(days[d][1]) > 0: weeks[week_of(int(d))] = true
+	var w := week_of(today())
+	if not weeks.has(w): w -= 1
+	var n := 0
+	while weeks.has(w):
+		n += 1; w -= 1
+	return n
 
 func new_seed() -> int:
 	seed = randi() % 1000000
