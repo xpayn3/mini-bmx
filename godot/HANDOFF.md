@@ -367,6 +367,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - **Helmet models** (`look.helmet`, `Rider.HELMETS`, picked in the garage Kit tab and the tuning card Look > Helmet; `Rider.use_helmet(id)`):
   GLORY = the stock recolourable helmet + our goggles; **6D ATR-2** (black / silver skin) and **TLD SE5** (`assets/helmets/helmet_*.glb`, from the user's FBXs by
   `tools/export_helmets.py` + `tools/prep_helmet_textures.py`) are textured models that always wear their own goggles + strap (our goggles don't fit them):
+  the dark inside sphere (`helmet_fill`) is squashed so its front stays `FILL_GAP` behind the model goggles' lens (`Rider._fit_fill`; it showed through the lens);
   each glb has two nodes, `helmet` (shell, material `tex_shell`) and `helmet_goggles` (`tex_goggles`, the Oakley Airbrake maps: they fit both models' goggle UVs; the
   "6dgoggles" maps from the download are not used). Neither is recoloured: the Shell / Peak / Goggles colour rows are hidden for them. `Rider.HELMET_FITS` = where each sits
   (scale 1.12, a little back + low; the dark face sphere is smaller for them); test override `BMX_HELMET_FIT=x,y,scale,tilt`. Real brand logos on the textures (6D, TLD,
@@ -810,6 +811,7 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `--showcase=<dir>` | forces each effect on and saves screenshots |
 | `--hitch=<secs>` (+ `BMX_HITCH_CSV`) | hunts frame spikes and explains them |
 | `BMX_SEED=4242` | fixed world (4242 is the usual test seed) |
+| `BMX_PERF=1` (+ `--autotest=N`, `BMX_NOVSYNC=1`) | main-thread ms per frame for every part of `Game._process` / `_physics_process` (`PERF` lines every 5 s, biggest first) — the way to find what to make lighter |
 | `BMX_CAM=chase` / `BMX_CAM_ORBIT=rad` | camera mode / angle for autotest shots |
 | `BMX_GOPRO_PROBE=1` (+ `BMX_BAIL=secs`) | prints the torn-off GoPro's flight (`GOPRO` lines), gets up 2.5 s after the bail and checks a new one is mounted |
 | `BMX_CAM_CYCLE=1` | autotest presses C (next camera) every 0.6 s and prints `CAMCYCLE i mode` |
@@ -949,6 +951,11 @@ Known, not fixed (lower priority from the code review):
   test flags cached (`Env.s`), torn tape drawn from packed arrays, rider pose inputs in one reused dictionary
   (`Game._pose_in`), ride log = one flat buffer, FarHills grid via batched C# (`far_ground` / `far_colors`), sticker
   fits cached per frame + label (`BikeRig._fit_cache`), chain draws only its links in use.
+- Perf (2026-11-20, measured with `BMX_PERF`): the water sheet is hidden and not baked when no loaded chunk dips below
+  the water level (`Terrain.water_near`, chunk `gmin`); terrain streaming does nothing when no chunk is missing and sets
+  clutter visibility only on a chunk change; tyre unclip caches ground heights per frame on a 1 mm grid
+  (`BikeRig._ground_cache`); standing sheep reuse their ground reading. Game scripts ~3.9 -> ~2.7 ms a frame. Still the
+  biggest cost: rendering (~5.6M triangles, ~2000 draw calls a frame).
 
 Ideas offered, not started:
 - Tyre tracks option **B**: a painted top-down "track map" the ground shader reads → real ruts in mud/sand.

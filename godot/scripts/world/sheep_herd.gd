@@ -42,6 +42,8 @@ class Lamb:
 	var pitch := 0.0
 	var roll := 0.0
 	var size := 1.0
+	var ground_at := Vector3(INF, INF, INF)   # (x, z, heading) the ground below was last read at
+	var ground := Vector3.ZERO                # its height, slope pitch, slope roll
 
 class Flock:
 	var c := Vector2.ZERO       # anchor the sheep drift around
@@ -388,17 +390,21 @@ func _update_lamb(l: Lamb, f: Flock, dt: float, rider: Vector2, fleeing: bool) -
 			l.sp *= 0.85
 		else:
 			l.p = np
-	var gy: float = terrain.height(l.p.x, l.p.y)
-	l.y += (gy - l.y) * minf(1.0, dt * 14.0)
-	# slope pose
-	var dirv := Vector2(sin(l.theta), cos(l.theta))
-	var hf: float = terrain.height(l.p.x + dirv.x * 0.45, l.p.y + dirv.y * 0.45)
-	var hb: float = terrain.height(l.p.x - dirv.x * 0.45, l.p.y - dirv.y * 0.45)
-	var leftv := Vector2(dirv.y, -dirv.x)   # local +X in world (x, z)
-	var hl: float = terrain.height(l.p.x + leftv.x * 0.3, l.p.y + leftv.y * 0.3)
-	var hr: float = terrain.height(l.p.x - leftv.x * 0.3, l.p.y - leftv.y * 0.3)
-	l.pitch += (-atan2(hf - hb, 0.9) - l.pitch) * minf(1.0, dt * 8.0)
-	l.roll += (atan2(hl - hr, 0.6) - l.roll) * minf(1.0, dt * 8.0)
+	# the ground under it + slope pose: read again only when it moved or turned (a grazing sheep stands
+	# still most of the time; five height lookups per sheep per frame were most of the herd's cost)
+	var at := Vector3(l.p.x, l.p.y, l.theta)
+	if at != l.ground_at:
+		l.ground_at = at
+		var dirv := Vector2(sin(l.theta), cos(l.theta))
+		var hf: float = terrain.height(l.p.x + dirv.x * 0.45, l.p.y + dirv.y * 0.45)
+		var hb: float = terrain.height(l.p.x - dirv.x * 0.45, l.p.y - dirv.y * 0.45)
+		var leftv := Vector2(dirv.y, -dirv.x)   # local +X in world (x, z)
+		var hl: float = terrain.height(l.p.x + leftv.x * 0.3, l.p.y + leftv.y * 0.3)
+		var hr: float = terrain.height(l.p.x - leftv.x * 0.3, l.p.y - leftv.y * 0.3)
+		l.ground = Vector3(terrain.height(l.p.x, l.p.y), -atan2(hf - hb, 0.9), atan2(hl - hr, 0.6))
+	l.y += (l.ground.x - l.y) * minf(1.0, dt * 14.0)
+	l.pitch += (l.ground.y - l.pitch) * minf(1.0, dt * 8.0)
+	l.roll += (l.ground.z - l.roll) * minf(1.0, dt * 8.0)
 	# gait
 	var run_k := clampf((l.sp - 2.0) / 4.0, 0.0, 1.0)
 	l.phase += l.sp * dt * lerpf(3.2, 2.1, run_k)
