@@ -482,31 +482,42 @@ func _title_lights(heading: float) -> void:
 	var d := Vector3(cos(heading), 0.0, -sin(heading))        # the way the bike points
 	var f := Vector3(-d.z, 0.0, d.x)                          # the camera looks along this (side-on)
 	var c := Vector3(phys.x, phys.y + 0.7, phys.z)            # the middle of bike + rider
+	# a magazine shoot: a big soft key (softbox, soft-edged shadows, gentle on skin and the glossy
+	# helmet), a low cool fill (about 3:1, the shadow side keeps its shape), and a warm hard rim from
+	# behind like the low sun, which outlines the rider + bike against the bright sky. The sun is
+	# already strong, so the studio lights only shape: nothing on the rider may clip to white.
 	var key := SpotLight3D.new()
-	key.light_color = Color(1.0, 0.86, 0.7)
-	key.light_energy = 9.0
+	key.light_color = Color(1.0, 0.96, 0.92)
+	key.light_energy = 2.8
+	key.light_size = 1.2                 # a softbox: wide soft shadow edges, soft highlights
+	key.light_specular = 0.35            # no hot white spot on the helmet / skin
 	key.spot_range = 30.0
-	key.spot_angle = 24.0
-	key.spot_angle_attenuation = 0.6
+	key.spot_angle = 30.0
+	key.spot_angle_attenuation = 1.8     # a broad even pool, no hard spotlight circle on the ground
 	key.shadow_enabled = true
 	key.shadow_bias = 0.05
+	key.shadow_blur = 2.0
 	_studio.add_child(key)
-	key.look_at_from_position(c - f * 7.0 + d * 3.0 + Vector3(0, 4.5, 0), c, Vector3.UP)
+	key.look_at_from_position(c - f * 5.5 + d * 6.0 + Vector3(0, 3.4, 0), c, Vector3.UP)
 	var rim := SpotLight3D.new()
-	rim.light_color = Color(1.0, 0.72, 0.5)
-	rim.light_energy = 7.0
+	rim.light_color = Color(1.0, 0.68, 0.42)
+	rim.light_energy = 9.0
+	rim.light_size = 0.15
+	rim.light_specular = 1.2             # a bright edge glint on the helmet, frame tubes, tyres
 	rim.spot_range = 30.0
-	rim.spot_angle = 26.0
+	rim.spot_angle = 18.0
+	rim.spot_angle_attenuation = 1.2
 	rim.shadow_enabled = false
 	_studio.add_child(rim)
-	rim.look_at_from_position(c + f * 5.0 - d * 4.0 + Vector3(0, 3.5, 0), c, Vector3.UP)
+	rim.look_at_from_position(c + f * 4.0 - d * 5.5 + Vector3(0, 2.6, 0), c, Vector3.UP)
 	var fill := OmniLight3D.new()
-	fill.light_color = Color(0.75, 0.82, 1.0)
-	fill.light_energy = 0.7
-	fill.omni_range = 14.0
+	fill.light_color = Color(0.72, 0.8, 1.0)
+	fill.light_energy = 0.35
+	fill.light_specular = 0.0
+	fill.omni_range = 12.0
 	fill.shadow_enabled = false
 	_studio.add_child(fill)
-	fill.global_position = c - f * 5.0 + Vector3(0, 0.6, 0)
+	fill.global_position = c - f * 5.0 - d * 2.5 + Vector3(0, 0.4, 0)
 
 ## title screen: stand the bike on the hand-picked summit of the title world
 func _to_hilltop() -> void:
