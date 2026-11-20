@@ -789,18 +789,52 @@ func _rock_rise(x: float, z: float) -> float:
 		worst = maxf(worst, terrain.top_height(px, pz) - terrain.deck_height(px, pz))
 	return worst
 
-## the spot nearest to (x, z) with no rock under the bike (a spiral out to ~16 m; the spot itself if it is bare)
+## every rock drawn near (x, z): [x, z, radius] from the rock MultiMeshes of the loaded chunks (the visible meshes,
+## which can stick out past the ground's dome that height() knows about)
+func _rocks_near(x: float, z: float, reach: float) -> Array:
+	var out: Array = []
+	if not TerrainGeo.MESH.has("rock"):
+		return out
+	var rock: Mesh = TerrainGeo.MESH["rock"]
+	var rr := maxf(rock.get_aabb().size.x, rock.get_aabb().size.z) * 0.5
+	for k in terrain.chunks:
+		var n = terrain.chunks[k].get("node")
+		if not is_instance_valid(n):
+			continue
+		for mi in (n as Node).get_children():
+			if not (mi is MultiMeshInstance3D):
+				continue
+			var mm: MultiMesh = (mi as MultiMeshInstance3D).multimesh
+			if mm == null or mm.mesh != rock:
+				continue
+			for i in mm.instance_count:
+				var xf: Transform3D = mm.get_instance_transform(i)
+				var s := xf.basis.get_scale()
+				var r := rr * maxf(s.x, s.z)
+				if Vector2(xf.origin.x - x, xf.origin.z - z).length() < reach + r:
+					out.append([xf.origin.x, xf.origin.z, r])
+	return out
+
+## the spot nearest to (x, z) with no rock under or beside the bike (a spiral out to ~22 m; the spot itself if bare)
 func _clear_spot(x: float, z: float) -> Vector2:
-	if _rock_rise(x, z) < 0.06:
+	var rocks := _rocks_near(x, z, 30.0)
+	var free := func(px: float, pz: float) -> bool:
+		if _rock_rise(px, pz) >= 0.04:
+			return false
+		for r in rocks:
+			if Vector2(px - r[0], pz - r[1]).length() < r[2] + 2.6:   # the bike is ~2 m long: keep it well clear
+				return false
+		return true
+	if free.call(x, z):
 		return Vector2(x, z)
-	for ring in range(1, 22):
+	for ring in range(1, 30):
 		var rad := ring * 0.75
 		var n := maxi(8, ring * 6)
 		for i in n:
 			var a := i * TAU / n
 			var px := x + cos(a) * rad
 			var pz := z + sin(a) * rad
-			if _rock_rise(px, pz) < 0.06:
+			if free.call(px, pz):
 				return Vector2(px, pz)
 	return Vector2(x, z)
 
