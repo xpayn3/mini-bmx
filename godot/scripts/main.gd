@@ -549,12 +549,12 @@ func _menu_page_main() -> void:
 	var fill := func() -> void:   # equal stretch above and below: the menu sits centred under the logo
 		var c := Control.new(); c.size_flags_vertical = Control.SIZE_EXPAND_FILL; vb.add_child(c)
 	fill.call()
-	var ride := _menu_button("RIDE", "Pick a bike and the time of day", _menu_page_setup, true, true)
+	var ride := _menu_button("RIDE", "", _menu_page_setup, true, true)
 	vb.add_child(ride)
 	# LEVELS: not made yet (DEMO is off the title menu: the in-game panel switches the AI rider on; _start_demo is kept)
 	vb.add_child(_menu_button("LEVELS", "Coming soon", Callable(), false, true))
-	vb.add_child(_menu_button("GARAGE", "Paint, wheels, bars, shocks, gears", _open_garage, false, true))
-	vb.add_child(_menu_button("RIDER", "Riding position on the rollers, kit", _open_garage.bind("rider"), false, true))
+	vb.add_child(_menu_button("GARAGE", "", _open_garage, false, true))
+	vb.add_child(_menu_button("RIDER", "", _open_garage.bind("rider"), false, true))
 	vb.add_child(UITheme.spacer(Tokens.S2))
 	# world seed
 	var world_cap := UITheme.caption("WORLD")
