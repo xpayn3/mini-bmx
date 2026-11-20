@@ -17,7 +17,9 @@ var stamina: StaminaView
 var life_bar: StaminaView
 var life := 1.0          # rider health 0..1: crashes hurt (by speed), heals slowly while riding
 var hurt_t := 99.0       # seconds since the last crash
-var hop_bar: BarView
+var hop_bar: HopBar
+var pump_bar: PumpBar
+var balance: BalanceMeter
 var getup: GetUpPrompt
 var air_card: AirCard
 var records_panel: PanelContainer
@@ -105,10 +107,21 @@ func _ready() -> void:
 	life_bar.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	life_bar.size = Vector2(220, 16); life_bar.position = Vector2(-240, 14)   # top right
 	root.add_child(life_bar)
-	hop_bar = BarView.new()
+	hop_bar = HopBar.new(); hop_bar.hud = self
 	hop_bar.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	hop_bar.size = Vector2(180, 12); hop_bar.position = Vector2(-90, -100)
+	hop_bar.size = Vector2(320, 26); hop_bar.position = Vector2(-160, -108)
+	hop_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE; hop_bar.visible = false
 	root.add_child(hop_bar)
+	pump_bar = PumpBar.new(); pump_bar.hud = self
+	pump_bar.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	pump_bar.size = Vector2(320, 26); pump_bar.position = Vector2(-160, -142)
+	pump_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE; pump_bar.visible = false
+	root.add_child(pump_bar)
+	balance = BalanceMeter.new(); balance.hud = self
+	balance.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	balance.size = Vector2(320, 26); balance.position = Vector2(-160, -176)
+	balance.mouse_filter = Control.MOUSE_FILTER_IGNORE; balance.visible = false
+	root.add_child(balance)
 	getup = GetUpPrompt.new(); getup.hud = self
 	getup.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 	getup.size = Vector2(280, 84); getup.position = Vector2(-140, -160)   # bottom centre (the crash caption sits under it)
@@ -360,8 +373,9 @@ func update_hud(dt: float) -> void:
 	if Env.s("BMX_MSG_AT") != "" and _demo_t < 0.0:
 		msg_l.t = float(Env.s("BMX_MSG_AT")); msg_l.queue_redraw()
 	flow_leds.tick(st, dt)
-	hop_bar.visible = st.hop_bar_show
-	hop_bar.k = st.hop_bar
+	hop_bar.tick(st, dt)
+	pump_bar.tick(st, dt)
+	balance.tick(st, dt)
 	getup.tick(dt)
 	stamina.queue_redraw()
 	hurt_t += dt
@@ -1324,6 +1338,150 @@ class BarView extends Control:
 		UITheme.draw_box(self, Rect2(Vector2.ZERO, size), Color(0.08, 0.16, 0.2, 0.55), int(size.y / 2), UITheme.ACCENT if full else Color(1, 1, 1, 0.7), 2)
 		if k > 0:
 			UITheme.draw_box(self, Rect2(Vector2(2, 2), Vector2((size.x - 4) * minf(1, k), size.y - 4)), UITheme.ACCENT, int(size.y / 2))
+
+class SlimBar extends RefCounted:
+	## shared look for the pump + balance bars: a 4 px rounded track on a faint shadow, a caption left, a value right
+	const W := 300.0
+	const TH := 4.0
+	const GOOD := Color("5dff8a")
+	const BAD := Color("ff4d5e")
+
+	static func track(ci: CanvasItem, x0: float, cy: float, a: float) -> Rect2:
+		var tr := Rect2(x0, cy - TH * 0.5, W, TH)
+		UITheme.draw_box(ci, tr.grow(1.0), Color(0, 0, 0, 0.45 * a), 3)
+		UITheme.draw_box(ci, tr, Color(1, 1, 1, 0.16 * a), 2)
+		return tr
+
+	static func caption(ci: CanvasItem, x: float, y: float, text: String, a: float) -> void:
+		ci.draw_string(UITheme.display_font(700, 0.12), Vector2(x, y), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1, 0.7 * a))
+
+	static func value(ci: CanvasItem, right: float, y: float, text: String, col: Color, a: float) -> void:
+		var f := UITheme.display_font(800, 0.12)
+		var tw := f.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 15).x
+		ci.draw_string(f, Vector2(right - tw + 1, y + 1), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0, 0, 0, 0.5 * a))
+		ci.draw_string(f, Vector2(right - tw, y), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(col, a))
+
+class HopBar extends Control:
+	## the hop / pop charge (Space / pad X held on the ground): a slim bar in the ride accent that fills while it
+	## charges, a mark at full charge (the bar glows once it's there), and a short bright flash when the hop fires.
+	## Fades in while charging, out after. Stays away while the held button is pumping a downhill (the PUMP bar)
+	var hud
+	var a := 0.0
+	var k_s := 0.0
+	var fire := 0.0       # 1 when the hop fires, fades
+	var full_t := 0.0     # time at full charge (the glow pulses)
+	var _was := false
+	var _last_k := 0.0
+
+	func tick(st: BikePhysics, dt: float) -> void:
+		var show: bool = st.hop_bar_show and absf(st.pump_push) < 0.05 and not st.crash_on
+		if _was and not show and _last_k > 0.15 and (st.hop_t > 0.0 or st.kick_t > 0.0 or st.air):
+			fire = 1.0
+		_was = show
+		if show: _last_k = st.hop_bar
+		a = move_toward(a, 1.0 if (show or fire > 0.0) else 0.0, dt * (10.0 if show else 3.0))
+		k_s = lerpf(k_s, st.hop_bar if show else k_s, minf(1.0, dt * 30.0))
+		full_t = full_t + dt if (show and st.hop_bar >= 0.999) else 0.0
+		fire = maxf(0.0, fire - dt * 3.0)
+		if a <= 0.01 and not show: k_s = 0.0
+		visible = a > 0.01
+		if visible: queue_redraw()
+
+	func _draw() -> void:
+		var x0 := (size.x - SlimBar.W) * 0.5
+		var cy := size.y - 6.0
+		var acc := UITheme.ACCENT
+		var full := k_s >= 0.995
+		SlimBar.caption(self, x0, cy - 8, "POP", a)
+		if full or fire > 0.0:
+			SlimBar.value(self, x0 + SlimBar.W, cy - 7, "GO!" if fire > 0.0 else "FULL", acc.lerp(Color.WHITE, fire), a)
+		var tr := SlimBar.track(self, x0, cy, a)
+		var fw := tr.size.x * clampf(k_s, 0.0, 1.0)
+		if fw > 0.5:
+			var r := Rect2(tr.position, Vector2(fw, tr.size.y))
+			var glow := 0.18 + (0.22 * (0.5 + 0.5 * sin(full_t * 14.0)) if full else 0.0)
+			UITheme.draw_box(self, r.grow(2.0), Color(acc, glow * a), 4)
+			UITheme.draw_box(self, r, Color(acc.lerp(Color.WHITE, fire * 0.8), a), 2)
+		# full-charge mark at the end of the track
+		var mx := tr.end.x
+		UITheme.draw_box(self, Rect2(mx - 1.5, tr.position.y - 4, 3, tr.size.y + 8), Color(Color.WHITE if full else Color(1, 1, 1, 0.55), a), 1)
+		# release flash: the whole track lights up and a soft halo grows out
+		if fire > 0.0:
+			var g := (1.0 - fire) * 10.0
+			UITheme.draw_box(self, tr.grow(2.0 + g), Color(acc, 0.35 * fire * a), int(4 + g))
+			UITheme.draw_box(self, tr, Color(1, 1, 1, 0.9 * fire * a), 2)
+
+class PumpBar extends Control:
+	## bottom centre while pumping: a thin centre-zero bar, green to the right while the held hop drives the bike on
+	## down a back side, red to the left while it fights a face; km/h won in this rhythm on the right
+	var hud
+	var a := 0.0
+	var push_s := 0.0
+	var gain_s := 0.0
+
+	func tick(st: BikePhysics, dt: float) -> void:
+		var live := absf(st.pump_push) > 0.05 or absf(st.pump_gain) > 0.6
+		a = move_toward(a, 1.0 if (live and not st.crash_on) else 0.0, dt * (8.0 if live else 2.0))
+		var full: float = 0.45 * 9.81 * 0.3   # the push on a ~17 deg back side = a full half
+		push_s = lerpf(push_s, clampf(st.pump_push / full, -1.0, 1.0), minf(1.0, dt * 30.0))
+		gain_s = lerpf(gain_s, st.pump_gain, minf(1.0, dt * 12.0))
+		visible = a > 0.01
+		if visible: queue_redraw()
+
+	func _draw() -> void:
+		var x0 := (size.x - SlimBar.W) * 0.5
+		var cy := size.y - 6.0
+		SlimBar.caption(self, x0, cy - 8, "PUMP", a)
+		var g := roundi(gain_s)
+		if g != 0: SlimBar.value(self, x0 + SlimBar.W, cy - 7, ("+%d km/h" % g) if g > 0 else ("%d km/h" % g), SlimBar.GOOD if g > 0 else SlimBar.BAD, a)
+		var tr := SlimBar.track(self, x0, cy, a)
+		var mid := tr.position.x + tr.size.x * 0.5
+		var k := absf(push_s)
+		if k > 0.01:
+			var fw := tr.size.x * 0.5 * k
+			var col := SlimBar.GOOD if push_s > 0.0 else SlimBar.BAD
+			var r := Rect2(mid, tr.position.y, fw, tr.size.y) if push_s > 0.0 else Rect2(mid - fw, tr.position.y, fw, tr.size.y)
+			UITheme.draw_box(self, r.grow(2.0), Color(col, 0.18 * a), 4)
+			UITheme.draw_box(self, r, Color(col, a), 2)
+		draw_rect(Rect2(mid - 1, tr.position.y - 3, 2, tr.size.y + 6), Color(1, 1, 1, 0.85 * a))
+
+class BalanceMeter extends Control:
+	## a thin bar while a manual / wheelie is up: front down on the left, looped out on the right (red end), the sweet
+	## spot round the balance point in green, a white marker where the front is; time held on the right
+	var hud
+	var a := 0.0
+	var ang_s := 0.0
+	var zone_glow := 0.0
+
+	func tick(st: BikePhysics, dt: float) -> void:
+		var up := st.man_a > 0.04 and not st.crash_on and not st.air
+		a = move_toward(a, 1.0 if up else 0.0, dt * (10.0 if up else 4.0))
+		ang_s = lerpf(ang_s, st.man_a, minf(1.0, dt * 40.0))
+		zone_glow = move_toward(zone_glow, 1.0 if st.man_zone else 0.0, dt * 10.0)
+		visible = a > 0.01
+		if visible: queue_redraw()
+
+	func _draw() -> void:
+		var st: BikePhysics = hud.game.phys
+		var T := Tune.v
+		var b: float = float(T.get("manBalance", 0.55))
+		var loop_at: float = b + float(T.get("manLoop", 0.42))
+		var zone: float = float(T.get("manZone", 0.14))
+		var x0 := (size.x - SlimBar.W) * 0.5
+		var cy := size.y - 6.0
+		SlimBar.caption(self, x0, cy - 8, "WHEELIE" if st.wheelie_pedal else "MANUAL", a)
+		SlimBar.value(self, x0 + SlimBar.W, cy - 7, "%.1f s" % st.wheelie_time, Color.WHITE.lerp(SlimBar.GOOD, zone_glow), a)
+		var tr := SlimBar.track(self, x0, cy, a)
+		var at := func(m: float) -> float: return tr.position.x + tr.size.x * clampf(m / loop_at, 0.0, 1.0)
+		var zr := Rect2(at.call(b - zone), tr.position.y, at.call(b + zone) - at.call(b - zone), tr.size.y)
+		if zone_glow > 0.0: UITheme.draw_box(self, zr.grow(2.0), Color(SlimBar.GOOD, 0.25 * zone_glow * a), 4)
+		UITheme.draw_box(self, zr, Color(SlimBar.GOOD, (0.55 + 0.45 * zone_glow) * a), 2)
+		var lx: float = at.call(loop_at - 0.1)
+		UITheme.draw_box(self, Rect2(lx, tr.position.y, tr.end.x - lx, tr.size.y), Color(SlimBar.BAD, 0.8 * a), 2)
+		var mx: float = at.call(ang_s)
+		var mc := SlimBar.GOOD if st.man_zone else (SlimBar.BAD if ang_s > b + zone else Color.WHITE)
+		UITheme.draw_box(self, Rect2(mx - 2.5, tr.position.y - 5, 5, tr.size.y + 10).grow(1.0), Color(0, 0, 0, 0.5 * a), 3)
+		UITheme.draw_box(self, Rect2(mx - 2.5, tr.position.y - 5, 5, tr.size.y + 10), Color(mc, a), 2)
 
 class AirCard extends Control:
 	## live jump counter: distance from the take-off point, height and air time; the result holds for a

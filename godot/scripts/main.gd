@@ -1588,6 +1588,12 @@ func _autotest(seconds: float) -> void:
 		if body_t != "" and el >= 3.0:
 			var ph2: BikePhysics = game.phys
 			if body_t == "manual": Input.action_press("body_back", 0.9 if int(el) % 4 < 3 else 0.0)
+			elif body_t == "balance" or body_t == "overpull":   # balance the manual like a player: pull while it's under the balance point
+				var bp: float = float(Tune.v.get("manBalance", 0.55)) - (0.12 if body_t == "balance" else -0.6)
+				var mf: float = float(Tune.v.get("manualFrom", 0.4))
+				var need: float = float(Tune.v.get("manGravity", 7.0)) * sin(maxf(0.0, float(Tune.v.get("manBalance", 0.55)) - ph2.man_a)) / float(Tune.v.get("manLift", 9.0))
+				var pull: float = clampf(need + 3.0 * (bp - ph2.man_a) - 0.8 * ph2.man_w, 0.0, 1.0) if body_t == "balance" else (1.0 if ph2.man_a < bp else 0.0)
+				Input.action_press("body_back", mf + pull * (1.0 - mf)) if pull > 0.0 else Input.action_release("body_back")
 			elif body_t == "fwd": Input.action_press("body_fwd", 1.0)
 			elif body_t == "lightfwd": Input.action_press("body_fwd", 0.25)   # resting the stick a little forward (attack position)
 			elif body_t == "holdback":   # in the air: stick held fully back (wind up a back flip), hands off on the ground
@@ -1787,8 +1793,13 @@ func _autotest(seconds: float) -> void:
 					game.get_up()
 					ph.reset_at(cp2[0], cp2[1], atan2(-float(cp2[3]), float(cp2[2])))
 					game._snap_prev()
+			var pr := Env.s("BMX_PUMPRIDE")   # tests: hold hop on every downhill (down) / all the time (all) / never (off)
 			if Env.s("BMX_PUMP") != "" and not ph.air and ph.prep > 0.15: Input.action_press("hop")   # tests: pump into lips
+			elif pr != "" and pr != "off" and el > 3.0 and not ph.air and (pr == "all" or ph._g_pitch < -0.02): Input.action_press("hop")
 			else: Input.action_release("hop")
+			if pr != "" and int(el * 2.0) != int(_probe.get("pr_k", -1)):
+				_probe["pr_k"] = int(el * 2.0)
+				print("PUMPRIDE %s t=%.1f v=%.1f km/h push=%.2f gain=%.1f slope=%.3f at=(%.1f,%.1f) surf=%d slip=%.2f man=%.2f air=%s" % [pr, el, ph.v * 3.6, ph.pump_push, ph.pump_gain, ph._g_pitch, ph.x, ph.z, ph.surf, ph.slip, ph.man_a, ph.air])
 			await get_tree().process_frame
 			if Env.s("BMX_DUST_SHOTS") != "":   # the timed screenshots work here too
 				var t0f := float(Env.s("BMX_DUST_T0")) if Env.s("BMX_DUST_T0") != "" else 3.0
