@@ -740,16 +740,20 @@ func _tape() -> void:
 		var b := _plant(st)
 		if b.is_empty():
 			continue
-		stake_pos.append(b)
+		stake_pos.append([b, k])
 		var a := []
 		if st["prev"] >= 0:
 			a = _plant(stakes_all[st["prev"]])
 		if a.is_empty() or absf(b[2] - a[2]) > 2:
 			continue
-		spans.append({"a": a, "b": b, "k": k, "side": st["side"], "caution": st["caution"]})
-	for s in stake_pos:
+		spans.append({"a": a, "b": b, "k": k, "ka": st["prev"], "side": st["side"], "caution": st["caution"]})
+	var stakes := []   # [stake index, instance, x, ground y, z, tilt]: what Terrain.stake_yank needs to knock one over
+	for e in stake_pos:
+		var s: Array = e[0]
 		var r := sin(s[0] * 12.9 + s[1] * 78.2) * 0.04
-		_push("stake", euler_xyz(r, 0, -r), Vector3(s[0], s[2], s[1]), Color(1, 1, 1))
+		stakes.append([e[1], _push("stake", euler_xyz(r, 0, -r), Vector3(s[0], s[2], s[1]), Color(1, 1, 1)), s[0], s[2], s[1], r])
+	if not stakes.is_empty():
+		out["stakes"] = stakes
 	if spans.is_empty():
 		return
 	var pos := PackedVector3Array()
@@ -786,7 +790,7 @@ func _tape() -> void:
 			y = maxf(y, height(x, z) + 0.35)
 			pts.append(Vector3(x, y, z))
 		var cols: Array = [TAPE_COLS[2], TAPE_COLS[3]] if sp["caution"] else [TAPE_COLS[0], TAPE_COLS[1]]
-		var rec := {"broken": false, "v0": pos.size(), "pts": pts, "cols": cols, "len": L}
+		var rec := {"broken": false, "v0": pos.size(), "pts": pts, "cols": cols, "len": L, "ka": sp["ka"], "kb": kk}
 		for i in TAPE_SEG:
 			var p0 := pts[i]
 			var p1 := pts[i + 1]

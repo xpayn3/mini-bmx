@@ -11,7 +11,7 @@ func _display() -> Control:
 	var p := _page("Display")
 	_option(p, "Display mode", "window_mode", ["Windowed", "Borderless fullscreen", "Exclusive fullscreen"])
 	var res := OptionButton.new()
-	var list := [""] + Array(Settings.RESOLUTIONS)
+	var list := [""] + Settings.resolutions_for_screen()
 	for r in list: res.add_item("Desktop / default" if r == "" else r.replace("x", " × "))
 	res.selected = maxi(0, list.find(Settings.get_v("resolution")))
 	res.item_selected.connect(func(i): Settings.set_v("resolution", list[i]))

@@ -191,6 +191,13 @@ func spawn(mesh: Mesh, mesh_scale: Vector3, col: Color, xf: Transform3D, size: V
 	return b
 
 
+## one loose piece (a tape stake knocked out): a thin box body with its own mesh + material
+func fling(mesh: Mesh, mat: Material, xf: Transform3D, size: Vector3, v: Vector3, w: Vector3, chunk = null) -> RigidBody3D:
+	_tag = chunk if chunk is Vector2i else Vector2i(1 << 30, 0)
+	_hit = Vector2(xf.origin.x, xf.origin.z)
+	return spawn(mesh, Vector3.ONE, Color.WHITE, xf, size, v, w, 0.3, 0.05, 1.0, null, mat)
+
+
 static func _rs() -> float:
 	return randf() - 0.5
 

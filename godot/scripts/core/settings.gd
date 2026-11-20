@@ -164,7 +164,28 @@ func _sync_quality() -> void:
 			return
 	data["quality"] = 4
 
-const RESOLUTIONS := ["1280x720", "1366x768", "1600x900", "1920x1080", "2560x1440", "3440x1440", "3840x2160"]
+const RESOLUTIONS := ["1280x720", "1280x800", "1366x768", "1440x900", "1600x900", "1680x1050", "1920x1080", "1920x1200",
+	"2560x1080", "2560x1440", "2560x1600", "3440x1440", "3840x1600", "3840x2160", "5120x1440"]
+
+## the sizes that fit this screen (+ the screen's own size), for the Resolution picker
+func resolutions_for_screen() -> Array:
+	var scr := DisplayServer.screen_get_size(DisplayServer.window_get_current_screen())
+	var out := []
+	for r in RESOLUTIONS:
+		if int(r.get_slice("x", 0)) <= scr.x and int(r.get_slice("x", 1)) <= scr.y: out.append(r)
+	var native := "%dx%d" % [scr.x, scr.y]
+	if scr.x > 0 and not out.has(native): out.append(native)
+	var cur: String = get_v("resolution")
+	if cur != "" and not out.has(cur): out.append(cur)   # keep a saved size visible even on a smaller screen now
+	return out
+
+## first launch: a preset the PC can carry. Discrete GPU = High; integrated / software / unknown GPU = Low;
+## no RenderingDevice (Godot fell back to OpenGL on an old / broken Vulkan + D3D12 driver) = Low.
+static func auto_quality() -> int:
+	if DisplayServer.get_name() == "headless": return 2
+	if RenderingServer.get_rendering_device() == null: return 0
+	if RenderingServer.get_video_adapter_type() == RenderingDevice.DEVICE_TYPE_DISCRETE_GPU: return 2
+	return 0
 
 var data := DEFAULTS.duplicate()
 var bindings := {}   # action -> Array[InputEvent]
@@ -175,7 +196,13 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	if OS.get_environment("BMX_PAD") != "": pad_active = true   # tests: as if the player were on a gamepad
 	load_settings()
-	if not FileAccess.file_exists(PATH) or not _had_quality: _sync_quality()
+	if not FileAccess.file_exists(PATH):   # first launch on this PC: pick the preset from its GPU
+		var lvl := auto_quality()
+		for k in PRESETS[lvl]: data[k] = PRESETS[lvl][k]
+		data["quality"] = lvl
+		print("Settings: first launch, GPU '%s' (%s) -> %s preset" % [RenderingServer.get_video_adapter_name(),
+			RenderingServer.get_video_adapter_vendor(), QUALITY_NAMES[lvl]])
+	elif not _had_quality: _sync_quality()
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--set="):   # --set=key=value (testing / benchmarks), not saved
 			var kv := a.trim_prefix("--set=")
@@ -340,6 +367,7 @@ func load_settings() -> void:
 	if int(data.cam_rev) < 1:
 		if data.camera == "drone": data.camera = "trail"
 		data.cam_rev = 1
+	if not CameraRig.PRESETS.has(str(data.camera)): data.camera = "trail"   # a view that was removed
 	_install_bindings()
 
 func save() -> void:
@@ -372,6 +400,8 @@ func apply() -> void:
 			if mode == 0:
 				var scr := DisplayServer.screen_get_usable_rect(DisplayServer.window_get_current_screen())
 				DisplayServer.window_set_position(scr.position + (scr.size - sz) / 2)
+	if not headless and want == DisplayServer.WINDOW_MODE_WINDOWED:
+		_fit_window()
 	if _test_run and OS.get_environment("BMX_OFFSCREEN") != "" and not headless:   # tests: a normal window parked off the screens
 		DisplayServer.window_set_position(Vector2i(-20000, 0))                       # (minimised windows draw late)
 	if not headless:
@@ -400,6 +430,19 @@ func apply() -> void:
 	_install_bindings()
 	changed.emit()
 
+
+## windowed: never bigger than the screen (the 1600 x 900 default on a 1366 x 768 laptop, a saved size from a
+## bigger monitor): shrink to fit inside the work area with room for the title bar, same aspect, centred.
+func _fit_window() -> void:
+	var scr := DisplayServer.screen_get_usable_rect(DisplayServer.window_get_current_screen())
+	if scr.size.x <= 0 or scr.size.y <= 0: return
+	var room := Vector2(scr.size.x - 16, scr.size.y - 48)   # window frame + title bar
+	var cur := Vector2(DisplayServer.window_get_size())
+	if cur.x <= room.x and cur.y <= room.y: return
+	var k := minf(room.x / cur.x, room.y / cur.y)
+	var sz := Vector2i(int(cur.x * k), int(cur.y * k))
+	DisplayServer.window_set_size(sz)
+	DisplayServer.window_set_position(scr.position + Vector2i((scr.size.x - sz.x) / 2, (scr.size.y - sz.y + 32) / 2))
 
 ## focus lost: mute (if asked); the game pauses itself (main.gd)
 func _notification(what: int) -> void:

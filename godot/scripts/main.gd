@@ -293,6 +293,7 @@ func _show_menu() -> void:
 	card.add_theme_stylebox_override("panel", UITheme.card_style(Tokens.PAPER, Tokens.R_XL, Tokens.S6))
 	card.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	stack.add_child(card)
+	CrashLog.notice(menu)   # "the game closed unexpectedly last time" once per launch
 	menu_stats = _stats_card()
 	stack.add_child(menu_stats)
 	var outer := VBoxContainer.new()
@@ -548,12 +549,12 @@ func _menu_page_main() -> void:
 	var fill := func() -> void:   # equal stretch above and below: the menu sits centred under the logo
 		var c := Control.new(); c.size_flags_vertical = Control.SIZE_EXPAND_FILL; vb.add_child(c)
 	fill.call()
-	var ride := _menu_button("RIDE", "Pick a bike and the time of day", _menu_page_setup, true, true)
+	var ride := _menu_button("RIDE", "", _menu_page_setup, true, true)
 	vb.add_child(ride)
 	# LEVELS: not made yet (DEMO is off the title menu: the in-game panel switches the AI rider on; _start_demo is kept)
 	vb.add_child(_menu_button("LEVELS", "Coming soon", Callable(), false, true))
-	vb.add_child(_menu_button("GARAGE", "Paint, wheels, bars, shocks, gears", _open_garage, false, true))
-	vb.add_child(_menu_button("RIDER", "Riding position on the rollers, kit", _open_garage.bind("rider"), false, true))
+	vb.add_child(_menu_button("GARAGE", "", _open_garage, false, true))
+	vb.add_child(_menu_button("RIDER", "", _open_garage.bind("rider"), false, true))
 	vb.add_child(UITheme.spacer(Tokens.S2))
 	# world seed
 	var world_cap := UITheme.caption("WORLD")
@@ -1589,6 +1590,13 @@ func _autotest(seconds: float) -> void:
 		if body_t != "" and el >= 3.0:
 			var ph2: BikePhysics = game.phys
 			if body_t == "manual": Input.action_press("body_back", 0.9 if int(el) % 4 < 3 else 0.0)
+			elif body_t == "balance" or body_t == "overpull":   # balance the manual like a player: pull while it's under the balance point
+				var bp: float = float(Tune.v.get("manBalance", 0.55)) - (0.12 if body_t == "balance" else -0.6)
+				var mf: float = float(Tune.v.get("manualFrom", 0.4))
+				var need: float = float(Tune.v.get("manGravity", 7.0)) * sin(maxf(0.0, float(Tune.v.get("manBalance", 0.55)) - ph2.man_a)) / float(Tune.v.get("manLift", 9.0))
+				var pull: float = clampf(need + 3.0 * (bp - ph2.man_a) - 0.8 * ph2.man_w, 0.0, 1.0) if body_t == "balance" else (1.0 if ph2.man_a < bp else 0.0)
+				if ph2.air: pull = 0.0   # a player lets the manual go off a lip
+				Input.action_press("body_back", mf + pull * (1.0 - mf)) if pull > 0.0 else Input.action_release("body_back")
 			elif body_t == "fwd": Input.action_press("body_fwd", 1.0)
 			elif body_t == "lightfwd": Input.action_press("body_fwd", 0.25)   # resting the stick a little forward (attack position)
 			elif body_t == "holdback":   # in the air: stick held fully back (wind up a back flip), hands off on the ground
@@ -1767,6 +1775,10 @@ func _autotest(seconds: float) -> void:
 		if Env.s("BMX_FOLLOW") != "":   # tests: steer along the trail centreline, get up after a crash
 			var ph = game.phys
 			var crs = game.terrain.field.course
+			if Env.s("BMX_RESPAWN") != "" and el > float(Env.s("BMX_RESPAWN")) and not _probe.has("respawned"):   # tests: Backspace here
+				_probe["respawned"] = true; _probe.fs = 0.0
+				print("AUTOTEST respawn: ride_t before=%.1f" % game.hud.ride_t)
+				game.respawn(false)
 			var best_d := 1e9
 			var s0: float = _probe.get("fs", 0.0)
 			for k in range(-40, 81):   # nearest centreline point near the last one (1 m steps)
@@ -1774,6 +1786,8 @@ func _autotest(seconds: float) -> void:
 				var dd: float = Vector2(cp[0] - ph.x, cp[1] - ph.z).length_squared()
 				if dd < best_d: best_d = dd; _probe.fs = s0 + k
 			var tp: Array = crs.at(float(_probe.fs) + 6.0 + absf(ph.v) * 0.5)
+			var ra = game.terrain.rope_aim(ph.x, ph.z, 6.0 + absf(ph.v) * 0.5)   # a rope bridge: along its line
+			if ra != null: tp = [ra.x, ra.y, tp[2], tp[3]]
 			var wv := Env.s("BMX_WEAVE")   # tests: weave this far (m) either side of the centreline, over berm / trail edges
 			if wv != "":
 				var off: float = float(wv) * sin(el * 1.3)
@@ -1789,9 +1803,21 @@ func _autotest(seconds: float) -> void:
 					var cp2: Array = crs.at(float(_probe.fs) + 3.0)
 					game.get_up()
 					ph.reset_at(cp2[0], cp2[1], atan2(-float(cp2[3]), float(cp2[2])))
+					game._out_of_crevasse()   # (the trail's line can run over a rope canyon: back onto the rim)
 					game._snap_prev()
+			var pr := Env.s("BMX_PUMPRIDE")   # tests: hold hop on every downhill (down) / all the time (all) / never (off)
 			if Env.s("BMX_PUMP") != "" and not ph.air and ph.prep > 0.15: Input.action_press("hop")   # tests: pump into lips
+			elif pr == "stick" and el > 3.0 and not ph.air:   # the pro way: stick forward on the downs, eased back on the ups
+				Input.action_release("hop")
+				if Input.is_action_pressed("brake"): Input.action_release("body_fwd"); Input.action_release("body_back")   # no pumping into the brakes
+				elif ph._g_pitch < -0.02: Input.action_release("body_back"); Input.action_press("body_fwd", 0.75)
+				elif ph._g_pitch > 0.02: Input.action_release("body_fwd"); Input.action_press("body_back", 0.25)
+				else: Input.action_release("body_fwd"); Input.action_release("body_back")
+			elif pr != "" and pr != "off" and pr != "stick" and el > 3.0 and not ph.air and (pr == "all" or ph._g_pitch < -0.02): Input.action_press("hop")
 			else: Input.action_release("hop")
+			if pr != "" and int(el * 2.0) != int(_probe.get("pr_k", -1)):
+				_probe["pr_k"] = int(el * 2.0)
+				print("PUMPRIDE %s t=%.1f v=%.1f km/h push=%.2f gain=%.1f slope=%.3f at=(%.1f,%.1f) surf=%d slip=%.2f man=%.2f air=%s" % [pr, el, ph.v * 3.6, ph.pump_push, ph.pump_gain, ph._g_pitch, ph.x, ph.z, ph.surf, ph.slip, ph.man_a, ph.air])
 			await get_tree().process_frame
 			if Env.s("BMX_DUST_SHOTS") != "":   # the timed screenshots work here too
 				var t0f := float(Env.s("BMX_DUST_T0")) if Env.s("BMX_DUST_T0") != "" else 3.0
@@ -2148,7 +2174,7 @@ func _bench(dir: String) -> void:
 	for i in 90: await get_tree().process_frame   # let the world stream in, shaders compile
 	var q: int = Settings.get_v("quality")
 	var line := "BENCH quality=%s" % Settings.QUALITY_NAMES[q]
-	for cam in ["drone", "chase", "diorama"]:
+	for cam in ["trail", "chase", "drone"]:
 		game.cam.set_mode(cam)
 		var ft := PackedFloat32Array()
 		var gpu := 0.0
@@ -2296,7 +2322,7 @@ func _showcase(dir: String) -> void:
 	await ride.call(0.6)
 	await shot.call("wet")
 	game.grime.clean()
-	game.cam.set_mode("close")
+	game.cam.set_mode("drone")
 	for i in 3:
 		game.dust.cloud(game.drawn_pos, Vector3.ZERO, game.ground_dust(game.phys.x, game.phys.z, 1), 3.0, 1.2)
 		await ride.call(0.25)
@@ -2307,7 +2333,7 @@ func _showcase(dir: String) -> void:
 	await ride.call(0.15)
 	(game.grade_rect.material as ShaderMaterial).set_shader_parameter("blur", 1.0)
 	await shot.call("speedblur")
-	game.cam.set_mode("dolly")
+	game.cam.set_mode("side")
 	await ride.call(1.5)
 	game.toggle_photo()
 	for i in 20: await get_tree().process_frame

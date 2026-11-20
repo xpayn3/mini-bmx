@@ -11,6 +11,7 @@ const SIZE := 48.0
 const RADIUS := 3
 const ROCK_CELL := 2.0
 var view_scale := 1.0   # Settings view distance: scales the decoration draw ranges
+static var _gl_compat: bool = RenderingServer.get_rendering_device() == null   # OpenGL fallback renderer
 const LAYER_GROUND := 1 << 1    # physics layer 2: chunk ground colliders (only for debris)
 
 ## ground mesh / texture resolution per 48 m chunk (JS: 128 -> 0.375 m). 96 = 0.5 m keeps the
@@ -51,6 +52,8 @@ var _clutter_cc := Vector2i(1 << 30, 0)   # the chunk the clutter visibility was
 var _clutter_dirty := true                # a chunk came / went since
 var _water: TerrainWater
 var _broken: Array = []          # [{kind, rec}] for clear_dynamic()
+var _stakes := {}                # tape stake index -> {mm, i, pos, basis, basis0, chunk, node, lean, gone, stub}
+var _stake_spans := {}           # tape stake index -> the spans tied to it (one each side)
 var _time: float = 0.0
 var _wind_t: float = 0.0
 var _wind_ph: float = 0.0
@@ -79,6 +82,10 @@ var ropes: Array = []
 var rope_ref_y := INF
 var _rope_ok := false
 var _rope_t := 0.0
+## bridges still being built, a few ms a frame (RopeBridge.build_step); they join `ropes` once complete
+var _ropes_building: Array = []
+const ROPE_BUILD_US := 3000     # build budget per frame
+const ROPE_BUILD_NOW := 90.0    # a bridge whose middle is nearer the rider than this is finished at once
 
 
 ## seed_in: the world to build (pass it here rather than calling set_seed afterwards, which would
@@ -114,6 +121,8 @@ func _process(delta: float) -> void:
 	if _rope_t <= 0.0:
 		_rope_t = 0.5
 		_update_ropes()
+	if not _ropes_building.is_empty():
+		_build_ropes()
 	_tapes.update(delta, _focus.x, _focus.y, _wind_t, _wind_dir, _wind_ws)
 	for key in _packs:
 		var pk: Dictionary = _packs[key]
@@ -153,16 +162,21 @@ func set_seed(seed_in: int) -> void:
 	_rock_grid.clear()
 	_col_grid.clear()
 	_broken.clear()
+	_stakes.clear()
+	_stake_spans.clear()
 	_packs.clear()
 	_pack_taken.clear()
 	if _debris:
 		_debris.clear()
 	if _tapes:
 		_tapes.clear()
-	for rb in ropes:
+	for rb in ropes + _ropes_building:
 		(rb as Node).queue_free()
 	ropes.clear()
+	_ropes_building.clear()
 	_rope_t = 0.0
+	if use_cs and RopeBridge.available():
+		RopeBridge.warm()   # their materials' shaders compile while the ride loads, not as the first bridge appears
 	field = TerrainField.new()
 	field.setup(seed_in)
 	fcs = _make_cs() if use_cs else null
@@ -192,6 +206,13 @@ func clear_dynamic() -> void:
 				var ch = chunks.get(rec.get("chunk", Vector2i(1 << 30, 0)))
 				if ch != null:
 					_rebuild_tape(ch)
+			"stake":
+				rec["gone"] = false
+				rec["lean"] = 0.0
+				rec["basis"] = rec["basis0"]
+				(rec["mm"] as MultiMesh).set_instance_transform(rec["i"], Transform3D(rec["basis0"], rec["pos"]))
+				if is_instance_valid(rec.get("stub")): rec["stub"].queue_free()
+				rec.erase("stub")
 	_broken.clear()
 
 
@@ -247,6 +268,17 @@ func rope_under(x: float, z: float, y: float):
 	return null
 
 
+## where to steer for (world x, z) on or approaching a rope bridge, `ahead` m along its line; null when none is
+## near. The trail's centreline bows up to ~2 m off the bridge's straight line (the deck is 1.1 m wide), so
+## anything that follows the trail (the demo rider, test autopilots) rode off the side mid-span
+func rope_aim(x: float, z: float, ahead: float):
+	for rb in ropes:
+		var l: Vector2 = rb.local(x, z)
+		if l.x > -20.0 and l.x < rb.length - 2.0 and absf(l.y) < 6.0:
+			return rb.world(l.x + ahead, 0.0)
+	return null
+
+
 ## keep a RopeBridge for every rope-bridge route feature within ~220 m of the rider (C# needed)
 func _update_ropes() -> void:
 	if not _rope_ok:
@@ -254,7 +286,7 @@ func _update_ropes() -> void:
 		if not _rope_ok:
 			return
 	var keep := {}
-	for rb in ropes:
+	for rb in ropes + _ropes_building:
 		keep[rb.feat_s] = rb
 	for j in field.route_feats:
 		if j.type != "rope":
@@ -265,11 +297,36 @@ func _update_ropes() -> void:
 			rb = RopeBridge.new()
 			rb.name = "RopeBridge"
 			add_child(rb)
-			rb.setup(j, self)
-			ropes.append(rb)
+			rb.begin(j, self)
+			_ropes_building.append(rb)
 		elif rb != null and d > 300.0:
 			ropes.erase(rb)
+			_ropes_building.erase(rb)
 			rb.queue_free()
+	_build_ropes()
+
+
+## a slice of the bridges being built (a few ms a frame); one the rider is already close to is finished now
+func _build_ropes() -> void:
+	var t0 := Time.get_ticks_usec()
+	for rb in _ropes_building.duplicate():
+		var mid: Vector2 = rb.world(rb.length * 0.5, 0.0)
+		var now: bool = mid.distance_to(_focus) < ROPE_BUILD_NOW
+		if not now and Time.get_ticks_usec() - t0 > ROPE_BUILD_US:
+			continue
+		var done := false
+		while true:
+			var ts := Time.get_ticks_usec()
+			var stg: int = rb._stage
+			done = rb.build_step()
+			if Env.s("BMX_ROPE_PROBE") != "" and Time.get_ticks_usec() - ts > 2000:
+				print("ROPE build stage %d took %.1f ms" % [stg, (Time.get_ticks_usec() - ts) / 1000.0])
+			if done or (not now and Time.get_ticks_usec() - t0 > ROPE_BUILD_US):
+				break
+		if done:
+			_ropes_building.erase(rb)
+			ropes.append(rb)
+			if Env.s("BMX_ROPE_PROBE") != "": print("ROPE built s=%.0f" % rb.feat_s)
 
 
 ## one physics tick of every rope bridge near the rider (Game, after the bike's step)
@@ -596,6 +653,15 @@ func _unload(k: Vector2i) -> void:
 			_col_grid[key] = nl
 	for pkey in c.get("packs", []):
 		_packs.erase(pkey)
+	for sk in c.get("stakes", []):
+		_stakes.erase(sk)
+	if c.has("tape"):
+		for sp in c["tape"]["spans"]:
+			for sk in [sp["ka"], sp["kb"]]:
+				var l = _stake_spans.get(sk)
+				if l != null:
+					l.erase(sp)
+					if l.is_empty(): _stake_spans.erase(sk)
 	for i in range(_broken.size() - 1, -1, -1):   # its smashed things go with it (they held its MultiMeshes alive)
 		if _broken[i].get("chunk") == k: _broken.remove_at(i)
 	(c["node"] as Node).queue_free()
@@ -644,8 +710,23 @@ func _multimesh(parent: Node3D, mesh: Mesh, mat: Material, buf: PackedFloat32Arr
 	mm.transform_format = MultiMesh.TRANSFORM_3D
 	mm.use_custom_data = true
 	mm.mesh = mesh
-	mm.instance_count = count
-	mm.buffer = buf
+	if _gl_compat:
+		# OpenGL fallback: a MultiMesh without per-instance colours gives the shader's COLOR a garbage
+		# instance colour (some trees came out bright pink). Give every instance white: 12 + 4 + 4 floats.
+		mm.use_colors = true
+		mm.instance_count = count
+		var wide := PackedFloat32Array()
+		wide.resize(count * 20)
+		for i in count:
+			var s := i * 16
+			var d := i * 20
+			for j in 12: wide[d + j] = buf[s + j]
+			wide[d + 12] = 1.0; wide[d + 13] = 1.0; wide[d + 14] = 1.0; wide[d + 15] = 1.0
+			for j in 4: wide[d + 16 + j] = buf[s + 12 + j]
+		mm.buffer = wide
+	else:
+		mm.instance_count = count
+		mm.buffer = buf
 	var mi := MultiMeshInstance3D.new()
 	mi.multimesh = mm
 	mi.material_override = mat
@@ -793,7 +874,18 @@ func _finalize(k: Vector2i) -> void:
 		rec["tape_mi"] = tmi
 		for sp in t["spans"]:
 			sp["chunk"] = k
+			for sk in [sp["ka"], sp["kb"]]:
+				if not _stake_spans.has(sk): _stake_spans[sk] = []
+				_stake_spans[sk].append(sp)
 		_rebuild_tape(rec)
+	if o.has("stakes") and mms.has("stake"):
+		var sks := []
+		for e in o["stakes"]:
+			var bs := TerrainChunkBuilder.euler_xyz(e[5], 0, -e[5])
+			_stakes[e[0]] = {"mm": mms["stake"], "i": e[1], "pos": Vector3(e[2], e[3], e[4]), "basis": bs, "basis0": bs,
+				"chunk": k, "node": node, "lean": 0.0, "gone": false}
+			sks.append(e[0])
+		rec["stakes"] = sks
 	# rocks / logs / stumps into the dome grid
 	var keys := {}
 	for c in colliders:
@@ -986,14 +1078,102 @@ func break_collider(c: Dictionary, vel: Vector3, at = null) -> bool:
 		var sp: Dictionary = c["tape"]
 		if sp["broken"]:
 			return false
-		sp["broken"] = true
-		_broken.append({"kind": "tape", "rec": sp, "chunk": sp.get("chunk", c.get("chunk"))})
-		var ch = chunks.get(sp.get("chunk"))
-		if ch != null:
-			_rebuild_tape(ch)
+		var pts: PackedVector3Array = sp["pts"]
+		var hit := Vector2(at.x, at.z) if at is Vector3 else Vector2(c["x"], c["z"])
+		var near_a := hit.distance_to(Vector2(pts[0].x, pts[0].z)) < STAKE_HIT
+		var near_b := hit.distance_to(Vector2(pts[pts.size() - 1].x, pts[pts.size() - 1].z)) < STAKE_HIT
+		_tape_off(sp)
+		if near_a or near_b:
+			# straight into a stake: it takes the whole hit, and the span is dragged down / along with it
+			var hv := Vector3(vel.x, 0, vel.z)
+			var sev := hv.length() / 6.0 * randf_range(0.8, 1.3)
+			var res := stake_yank(sp["ka"] if near_a else sp["kb"], hv, sev, vel, sp)
+			if not res.is_empty():
+				var tie_a = res["to"] if near_a else pts[0]
+				var tie_b = pts[pts.size() - 1] if near_a else res["to"]
+				_tapes.hang(sp, tie_a, tie_b)
+				return true
 		_tapes.grab(sp, Vector2(c["x"], c["z"]), vel)
 		return true
 	return false
+
+
+## take a span out of its chunk's tape mesh (it's a sim strip now)
+func _tape_off(sp: Dictionary) -> void:
+	sp["broken"] = true
+	_broken.append({"kind": "tape", "rec": sp, "chunk": sp.get("chunk")})
+	var ch = chunks.get(sp.get("chunk"))
+	if ch != null:
+		_rebuild_tape(ch)
+
+
+const STAKE_HIT := 0.3       # a tape hit this close (m) to a stake hits the stake itself
+const STAKE_LEAN_MAX := 0.75 # rad: a stake leans at most this far before it gives way
+
+
+## the tape (or the bike) yanks stake k towards `dir` (horizontal) with severity `sev` (~ speed / 11 m/s:
+## < 0.2 nothing, then it leans over, past 0.8 it snaps off at the ground, past ~1.25 it pulls out whole; a
+## stake already leaning gives way sooner). Tape still tied to it follows: strips pinned there move with it,
+## an intact span on its other side drops / hangs from it (`skip` = the span doing the yanking).
+## Returns {} (unchanged / unknown stake) or {"to": the tie point: Vector3, or {body, off} on a flying piece}.
+func stake_yank(k: int, dir: Vector3, sev: float, vel: Vector3, skip = null) -> Dictionary:
+	var st = _stakes.get(k)
+	if st == null:
+		return {}
+	if st["gone"]:
+		return {"to": null}
+	sev += float(st["lean"]) * 0.8
+	if sev < 0.2:
+		return {}
+	dir.y = 0.0
+	dir = dir.normalized() if dir.length_squared() > 1e-6 else Vector3.RIGHT
+	var ax := Vector3.UP.cross(dir)   # turning about it tips the top towards dir
+	var old_tie := _stake_tie(st)
+	var to
+	if not _broken.any(func(b): return is_same(b["rec"], st)):
+		_broken.append({"kind": "stake", "rec": st, "chunk": st["chunk"]})
+	if sev < 0.8:
+		var lean := minf(STAKE_LEAN_MAX, float(st["lean"]) + sev * 0.5 * randf_range(0.7, 1.2))
+		st["basis"] = Basis(ax, lean - float(st["lean"])) * st["basis"]
+		st["lean"] = lean
+		(st["mm"] as MultiMesh).set_instance_transform(st["i"], Transform3D(st["basis"], st["pos"]))
+		to = _stake_tie(st)
+	else:
+		st["gone"] = true
+		var mm: MultiMesh = st["mm"]
+		mm.set_instance_transform(st["i"], Transform3D(Basis.from_scale(Vector3.ZERO), Vector3.ZERO))
+		var whole: bool = sev > 1.25 or randf() < 0.25   # soft ground: out it comes, foot and all
+		var bs: Basis = st["basis"]
+		var pos: Vector3 = st["pos"]
+		var mid := 0.375 if whole else 0.495             # the piece's middle above the ground
+		if not whole:
+			var stub := MeshInstance3D.new()
+			stub.mesh = TerrainGeo.MESH["stake_stub"]
+			stub.material_override = TerrainGeo.MAT["stake_loose"]
+			(st["node"] as Node3D).add_child(stub)
+			stub.global_transform = Transform3D(bs * Basis(ax, randf_range(0.05, 0.25)), pos)
+			st["stub"] = stub
+		var spd := Vector2(vel.x, vel.z).length()
+		var v := dir * (1.5 + spd * 0.4) * randf_range(0.7, 1.2) + Vector3(vel.x, 0, vel.z) * 0.15 \
+			+ Vector3(0, 1.0 + randf() * 1.5 + (1.0 if whole else 0.0), 0)
+		var w := ax * (4.0 + spd * 0.6) * randf_range(0.7, 1.3) + Vector3(randf() - .5, randf() - .5, randf() - .5) * 3.0
+		var body := _debris.fling(TerrainGeo.MESH["stake_whole" if whole else "stake_top"], TerrainGeo.MAT["stake_loose"],
+			Transform3D(bs, pos + bs * Vector3(0, mid, 0)), Vector3(0.05, 1.15 if whole else 0.92, 0.05), v, w, st["chunk"])
+		to = {"body": body, "off": Vector3(0, TerrainChunkBuilder.TAPE_H - mid, 0)}
+	if Env.s("BMX_TAPE") != "":
+		print("STAKE %d sev=%.2f -> %s" % [k, sev, ("lean %.0f deg" % rad_to_deg(st["lean"])) if not st["gone"] else ("flies" if st.has("stub") == false else "snapped")])
+	_tapes.retarget(old_tie, to)
+	for sp in _stake_spans.get(k, []).duplicate():
+		if is_same(sp, skip) or sp["broken"]:
+			continue
+		var pts: PackedVector3Array = sp["pts"]
+		_tape_off(sp)
+		_tapes.hang(sp, to if sp["ka"] == k else pts[0], to if sp["kb"] == k else pts[pts.size() - 1])
+	return {"to": to}
+
+
+func _stake_tie(st: Dictionary) -> Vector3:
+	return st["pos"] + (st["basis"] as Basis) * Vector3(0, TerrainChunkBuilder.TAPE_H, 0)
 
 
 # ======================================================================

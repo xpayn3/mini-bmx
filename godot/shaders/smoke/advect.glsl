@@ -108,6 +108,10 @@ void main() {
 			// a source no bigger than a cell (tyre patches): split over the 8 cells around it (trilinear), so the
 			// same amount goes in wherever it sits between cell centres (a small sphere could miss every centre)
 			vec3 t = max(vec3(1.0) - abs(dv) / h, vec3(0.0));
+			// sideways (x / z) the weight leans hard onto the nearest cell: a tyre patch is ~1 cell wide, not 2.
+			// t^3 / (t^3 + (1-t)^3): the two neighbours still add up to 1, so the amount doesn't depend on where it sits
+			vec3 t3 = t * t * t, u = vec3(1.0) - t, u3 = u * u * u;
+			t.xz = t3.xz / max(t3.xz + u3.xz, vec2(1e-6));
 			f = t.x * t.y * t.z * 1.45;   // ~ what a 0.24 m sphere put in
 			if (f <= 0.0) continue;
 		} else {

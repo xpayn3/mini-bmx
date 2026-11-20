@@ -24,11 +24,11 @@ const PARAMS := [
 ## built-in times of day: only what differs from the defaults (the default is golden hour)
 const BUILTIN := {
 	"Golden hour": {},
-	"Sunrise": {"time": 6.7, "haze": 1.6},
+	"Sunrise": {"time": 6.55, "haze": 0.85},
 	"Morning": {"time": 9.0},
 	"Noon": {"time": 13.0, "warmth": 0.8},
 	"Afternoon": {"time": 16.0},
-	"Dusk": {"time": 20.15, "haze": 1.3},
+	"Dusk": {"time": 20.1, "haze": 1.1},
 	"Night": {"time": 23.5},
 	"Day / night cycle": {"time": 8.0, "cycle": 1.0},
 }

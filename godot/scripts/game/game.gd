@@ -59,7 +59,8 @@ var sun_energy := RIDE_SUN
 var tod := 19.33             # the clock (hours); the cycle runs it, a slider move resets it
 var light_ver := -1          # LightSettings.version last applied
 var light_t := 0.0
-var amb_base := 0.36         # flat ambient for the GI setting (SDFGI brings its own sky light)
+var night_k := 0.0           # how much night (0 day .. 1 full night), from _apply_light
+var amb_base := 0.36        # flat ambient for the GI setting (SDFGI brings its own sky light)
 var speed_k := 0.0           # 0..1 speed feel (FOV boost, edge blur)
 var photo := false           # photo mode (O, game/photo_mode.gd): time frozen, free camera, lens / light / look card
 var photo_mode: PhotoMode    # built on first use
@@ -109,6 +110,9 @@ var sheep: SheepHerd
 
 func _ready() -> void:
 	bike_cfg = GameState.bike_config()
+	if not title_world:
+		CrashLog.game = weakref(self)
+		CrashLog.note("ride start: seed %d, bike %s" % [GameState.seed, GameState.bike_id])
 	Tune.set_ride(bike_cfg.ride)
 	_build_environment()
 	if reuse.has("terrain"):   # the title world's own, kept while the garage was open (it is always the same place)
@@ -195,6 +199,7 @@ func _ready() -> void:
 	fx.chunk(Vector3(0, phys.y + 0.4, 0), Vector3.ZERO, Color.WHITE, 0.01, 0.2)
 	if blood: blood.warm_draw(cam)   # crash-only blood shaders + splat decals, so the first crash doesn't wait on them
 	if wasted and _wasted_on(): wasted.warm()   # and the WASTED silhouette mask's pipelines
+	ClipGetUp.warm()   # the get-up / dizzy clips load on a worker thread now, not at the first crash
 
 ## lift the terrain + far hills out of this Game before it is freed, for a later Game of the same world
 ## (`reuse`); they wait out of the tree, not processing (the terrain joins its workers on leaving)
@@ -342,6 +347,9 @@ func set_scenic(on: bool) -> void:
 		sun.shadow_blur = 2.0
 		sun_energy = 2.3
 		sky_mat.set_shader_parameter("golden", 1.0)
+		sky_mat.set_shader_parameter("sun_vec", Vector3.ZERO)   # the sky's sun = the light here
+		sky_mat.set_shader_parameter("night", 0.0)
+		sky_mat.set_shader_parameter("energy", 1.0)
 		sky_mat.set_shader_parameter("sunny", 0.0)
 		sky_mat.set_shader_parameter("light_energy", 0.85)
 		env.fog_light_color = Color(0.93, 0.70, 0.52)
@@ -386,10 +394,45 @@ func set_scenic(on: bool) -> void:
 		cam.far = RIDE_FAR
 		light_ver = -1   # the level light (time of day) takes over on the next frame
 
+## glare guard: riding (or looking) toward a low sun washed the screen out (the sunlit haze, the bloom, the bright
+## sky round the sun, dust lit from behind) so the trail couldn't be seen. When the camera faces a low sun this eases
+## all of those off, smoothly (like squinting / sunglasses); the light on the land stays the same.
+const GG_GLOW := 0.25   # env.glow_intensity as set up in _build_env
+var _gg_vol := 2.6
+var _gg_scat := 0.0
+var _gg_sky := 1.0
+var _gg_dust := 1.0
+var _gg_sun := Vector3.UP
+var _gg_el := 60.0
+var _gg_k := 0.0
+var _gg_s := 0.0
+func _glare_guard(dt: float) -> void:
+	if scenic or photo: return
+	var c3 := get_viewport().get_camera_3d()
+	if c3 == null: return
+	var fwd := -c3.global_basis.z
+	var face := fwd.normalized().dot(_gg_sun)                       # 1 = looking straight at the sun
+	var lowsun := 1.0 - smoothstep(20.0, 40.0, _gg_el)              # a high sun is out of view anyway
+	var up := smoothstep(-6.0, 0.0, _gg_el)                         # only while it's up (dusk afterglow is soft)
+	var target := smoothstep(0.35, 0.92, face) * lowsun * up
+	_gg_s += (target - _gg_s) * (1.0 - exp(-dt * 3.0))
+	if absf(_gg_s - _gg_k) < 0.004: return
+	_gg_k = _gg_s
+	var k := _gg_s
+	if Env.s("BMX_GLARE_OFF") != "": k = 0.0
+	sun.light_volumetric_fog_energy = _gg_vol * (1.0 - 0.8 * k)
+	env.fog_sun_scatter = _gg_scat * (1.0 - k)
+	env.glow_intensity = GG_GLOW * (1.0 - 0.65 * k)
+	sky_mat.set_shader_parameter("energy", _gg_sky * (1.0 - 0.38 * k))
+	if dust and dust.sim != null: dust.sim.sun_gain = _gg_dust * (1.0 - 0.6 * k)
+	if Env.s("BMX_GLARE_PROBE") != "" and Engine.get_process_frames() % 30 == 0:
+		print("GLARE face=%.2f el=%.1f k=%.2f" % [face, _gg_el, k])
+
 ## level light: time of day -> sun (or moon at night), sky mode, ambient, fog, haze, exposure.
 ## Applied when the Light sliders change; with the cycle on, the clock runs and it re-applies 10x / s.
 func _update_light(dt: float) -> void:
 	if scenic: return
+	if rig: rig.set_lights_on(night_k > 0.35 or Env.s("BMX_BIKELIGHT_ON") != "")   # a new bike (B) gets its lamp on too
 	LightSettings.ensure_loaded()
 	var L: Dictionary = LightSettings.current
 	var changed := light_ver != LightSettings.version
@@ -444,44 +487,78 @@ func _apply_light(h: float, L: Dictionary) -> void:
 	# the sun swings ~200 deg across the day; 16:00 = the old afternoon sun (SUN_AZ)
 	var yaw := deg_to_rad(rad_to_deg(atan2(SUN_AZ.y, SUN_AZ.x)) + float(L.sun_turn) + (x - 10.0) * (100.0 / 7.0))
 	var g := 1.0 - smoothstep(8.0, 30.0, el_deg)        # how golden (low sun)
-	var n := 1.0 - smoothstep(-9.0, 0.5, el_deg)        # how much night
+	var n := 1.0 - smoothstep(-11.0, -3.5, el_deg)      # how much night (after the afterglow has faded)
 	var day := 1.0 - n
 	var gw := clampf(g * day * float(L.warmth), 0.0, 1.0)
+	var tw := smoothstep(1.0, -4.0, el_deg) * day        # twilight: the sun just under the horizon, the sky still glowing
+	var low := 1.0 - smoothstep(1.0, 12.0, el_deg)      # the sun touching the horizon: deep orange, long rays
 	var dirv: Vector3
 	if el_deg > -3.0:
 		var e := deg_to_rad(maxf(el_deg, 2.5))   # never light from below the ground
 		dirv = Vector3(cos(yaw) * cos(e), sin(e), sin(yaw) * cos(e))
-		sun.light_color = Color(1.0, 0.95, 0.87).lerp(Color(1.0, 0.6, 0.34), gw)
+		sun.light_color = Color(1.0, 0.95, 0.87).lerp(Color(1.0, 0.62, 0.36), gw).lerp(Color(1.0, 0.5, 0.26), low * gw)
 		sun_energy = lerpf(RIDE_SUN, 2.2, g) * smoothstep(-3.0, 5.0, el_deg) * float(L.sun)
 	else:
-		var e := deg_to_rad(38.0)   # the moon, opposite the sun
+		var e := deg_to_rad(15.0)   # the moon, opposite the sun (low enough to show in the sky ahead)
 		dirv = Vector3(cos(yaw + PI) * cos(e), sin(e), sin(yaw + PI) * cos(e))
-		sun.light_color = Color(0.62, 0.72, 1.0)
-		sun_energy = 0.32 * float(L.moon) * smoothstep(-3.0, -10.0, el_deg)
+		# moonlight: faint, cold, desaturated (the eye sees almost no colour at night). Only enough to make out
+		# the shapes of the land and soft moon shadows; the bike's own lamp lights the trail.
+		sun.light_color = Color(0.55, 0.66, 0.95)
+		sun_energy = 0.3 * float(L.moon) * smoothstep(-3.0, -10.0, el_deg)
 	sun.look_at_from_position(dirv, Vector3.ZERO, Vector3.UP)
+	if Env.s("BMX_MOON_PROBE") != "": print("MOON dir=%s az=%.2f" % [dirv, atan2(dirv.z, dirv.x)])
 	# grazing light needs more bias (acne) and softer edges on the long shadows
 	sun.shadow_bias = lerpf(0.02, 0.08, g)
 	sun.shadow_normal_bias = lerpf(1.2, 3.0, g)
-	sun.shadow_blur = lerpf(1.0, 2.0, g) * float(L.shadow_soft)
+	sun.shadow_blur = lerpf(lerpf(1.0, 2.0, g), 2.6, n) * float(L.shadow_soft)
+	sun.light_volumetric_fog_energy = lerpf(lerpf(2.6, 3.0, gw), 0.12, n)   # god rays through the haze at golden hour
+	_gg_vol = sun.light_volumetric_fog_energy
 	# sky: blue + white clouds by day, golden low, stars at night; its photographed sun follows ours
 	_pick_sky_hdri(el_deg, atan2(dirv.x, -dirv.z))
 	sky_mat.set_shader_parameter("golden", gw)
+	var se := deg_to_rad(el_deg)   # the true sun for the sky (also under the horizon: dusk / dawn glow)
+	sky_mat.set_shader_parameter("sun_vec", Vector3(cos(yaw) * cos(se), sin(se), sin(yaw) * cos(se)))
 	sky_mat.set_shader_parameter("sunny", day * (1.0 - gw))
 	sky_mat.set_shader_parameter("night", n)
-	sky_mat.set_shader_parameter("light_energy", lerpf(lerpf(0.55, 0.85, g), 0.3, n) * float(L.sky))
-	env.ambient_light_energy = amb_base * float(L.sky) * lerpf(1.0, 0.5, n)
-	env.ambient_light_color = Color(0.55, 0.68, 0.9).lerp(Color(0.3, 0.4, 0.78), n)
-	# fog / haze
+	_gg_sky = lerpf(1.0, 0.55, n)
+	_gg_sun = Vector3(cos(yaw) * cos(deg_to_rad(el_deg)), sin(deg_to_rad(el_deg)), sin(yaw) * cos(deg_to_rad(el_deg)))
+	_gg_el = el_deg
+	sky_mat.set_shader_parameter("energy", lerpf(1.0, 0.55, n))   # the night exposure is high: keep the sky a deep blue
+	sky_mat.set_shader_parameter("light_energy", lerpf(lerpf(0.55, 0.85, g), 0.2, n) * float(L.sky))
+	# night: the sky barely lights anything; what's in shadow of the moon goes close to black
+	# twilight: the glowing sky is the only light; the shade goes lavender
+	env.ambient_light_energy = amb_base * float(L.sky) * lerpf(1.0, 0.3, n) * (1.0 + 0.6 * tw)
+	env.ambient_light_color = Color(0.55, 0.68, 0.9).lerp(Color(0.62, 0.55, 0.78), gw * 0.6).lerp(Color(0.55, 0.45, 0.72), tw).lerp(Color(0.16, 0.22, 0.42), n)
+	env.ambient_light_sky_contribution = lerpf(0.8, 0.5, n)
+	# fog / haze: at night a black-blue distance that swallows the land, a thin cold haze the lamp beam shows in
 	_ride_fog()
-	env.fog_density *= float(L.haze)
-	env.fog_light_color = RIDE_FOG.lerp(Color(0.93, 0.72, 0.55), g * day).lerp(Color(0.07, 0.09, 0.16), n)
-	env.fog_sun_scatter = 0.3 * g * day
+	env.fog_density *= float(L.haze) * lerpf(1.0, 1.35, n) * lerpf(1.0, 0.6, gw)   # golden: clear air, not milk
+	env.fog_light_color = RIDE_FOG.lerp(Color(0.95, 0.64, 0.46), g * day).lerp(Color(0.4, 0.3, 0.46), tw).lerp(Color(0.012, 0.016, 0.03), n)
+	env.fog_sun_scatter = 0.1 * gw * (1.0 - tw) * (1.0 - 0.6 * low)
+	_gg_scat = env.fog_sun_scatter
+	_gg_k = -1.0   # re-apply the guard on top of the new values
+	# into a low sun the haze scattered it straight at the lens and the screen went white: less forward glare
+	env.volumetric_fog_anisotropy = lerpf(0.78, 0.6, g * day)
 	env.fog_aerial_perspective = 0.75 * (1.0 - n)
-	env.volumetric_fog_albedo = Color(0.86, 0.9, 0.95).lerp(Color(1.0, 0.84, 0.66), g * day).lerp(Color(0.45, 0.55, 0.8), n)
-	env.volumetric_fog_density = VOL_DENSITY * float(L.haze)
-	env.tonemap_exposure = lerpf(lerpf(0.8, 0.95, g), 1.6, n) * float(L.exposure)
-	env.adjustment_saturation = float(L.saturation) * lerpf(1.0, 0.8, n)
-	env.adjustment_contrast = float(L.contrast)
+	env.volumetric_fog_albedo = Color(0.86, 0.9, 0.95).lerp(Color(1.0, 0.8, 0.6), g * day).lerp(Color(0.7, 0.75, 0.85), n)
+	env.volumetric_fog_density = VOL_DENSITY * float(L.haze) * lerpf(1.0, 0.25, g * day) * lerpf(1.0, 2.2, n)   # a low sun lit the haze into a white veil
+	env.volumetric_fog_ambient_inject = lerpf(lerpf(0.12, 0.03, gw), 0.0, n)   # dark air between the sun's rays   # no milky veil at night: only the lamp lights the haze
+	env.tonemap_exposure = lerpf(lerpf(0.8, 0.78, g) + 0.75 * tw, 1.9, n) * float(L.exposure)
+	# night vision: colour fades (rods), shadows stay deep
+	env.adjustment_saturation = float(L.saturation) * lerpf(1.0, 1.06, gw) * lerpf(1.0, 0.42, n)
+	env.adjustment_contrast = float(L.contrast) * lerpf(1.0, 1.07, gw) * lerpf(1.0, 1.08, n)
+	env.adjustment_brightness = lerpf(1.0, 0.94, n)
+	# lamps bloom at night
+	env.glow_hdr_threshold = lerpf(lerpf(0.92, 0.85, gw), 0.7, n)   # the low sun blooms
+	if cam_attr:   # auto exposure lifted the night ~5x into a grey day: off in the dark, the exposure above sets it
+		cam_attr.auto_exposure_enabled = n < 0.5
+		cam_attr.auto_exposure_min_sensitivity = lerpf(80.0, 40.0, gw)   # facing the low sun the eye stops down
+		cam_attr.auto_exposure_max_sensitivity = lerpf(140.0, 95.0, gw)  # and doesn't lift the warm light into a wash
+	night_k = n
+	if dust and dust.sim != null:   # the dust's sky light: dim and cold at night (it glowed white in the dark)
+		dust.sim.sun_gain = lerpf(1.0, 0.2, g * day)
+		_gg_dust = dust.sim.sun_gain
+		dust.sim.amb_col = Color(0.5, 0.6, 0.78).lerp(Color(0.62, 0.5, 0.52), gw).lerp(Color(0.025, 0.032, 0.05), n)
 	# water: reflect this sky and glint where this sun is (it used to keep a fixed noon sky + sun)
 	if terrain and terrain.has_method("water_light"):
 		var hz := Color(0.784, 0.933, 0.969).lerp(Color(1.0, 0.78, 0.6), gw).lerp(Color(0.07, 0.09, 0.15), n)
@@ -628,6 +705,7 @@ func _apply_settings() -> void:
 # ---------------------------------------------------------------- host API used by BikePhysics
 func flash(text: String) -> void:
 	msg_t = 1.4
+	if Env.s("BMX_MAN_PROBE") != "": print("FLASH ", text, " v=%.1f" % phys.v)   # tests
 	if hud: hud.flash(text)
 
 func msg_idle() -> bool:
@@ -648,8 +726,12 @@ func ground_dust(px: float, pz: float, s: int) -> Color:
 		return c.lerp(Color.WHITE, 0.16)   # the road's colour, a touch lighter (fine dust scatters more)
 	return c.lerp(Color.WHITE, 0.42 if s == 0 else 0.28)
 
+## the point is on a rope bridge's deck (planks: no dust, dirt or tracks)
+func _on_rope_deck(x: float, z: float, y: float) -> bool:
+	return terrain != null and not terrain.ropes.is_empty() and terrain.rope_under(x, z, y) != null
+
 func burst(pos: Vector3, n: int, s: int, power: float, with_dust := true) -> void:
-	if s == 2: return
+	if s == 2 or _on_rope_deck(pos.x, pos.z, pos.y): return
 	var dc := ground_dust(pos.x, pos.z, s)
 	if dust.sim != null and with_dust:   # real smoke sim: one dust burst instead of sprite puffs
 		dust.puff_burst(pos, power, dc, (1.0 if s == 1 else 0.8 if s == 3 else 0.45) * clampf(float(n) / 20.0, 0.4, 2.0))
@@ -688,7 +770,7 @@ func start_crash(reason: String) -> void:
 	if phys.crash_on: return
 	if rope_probe: print("ROPE CRASH ", reason, " at ", Vector3(phys.x, phys.y, phys.z))
 	_rd_air.resize(0)   # crash dust: per-part "was in the air" flags start fresh
-	if Env.s("BMX_TRICK") != "": print("CRASH ", reason, " v=%.1f air=%s" % [phys.v, phys.air])   # tests
+	if Env.s("BMX_TRICK") != "" or Env.s("BMX_MAN_PROBE") != "": print("CRASH ", reason, " v=%.1f air=%s pitch=%.2f gp=%.2f man=%.2f lean=%.2f slip=%.2f" % [phys.v, phys.air, phys.pitch, phys._g_pitch, phys.man_a, phys.lean, phys.slip])   # tests
 	elif Env.s("BMX_CRASH_LOG") != "":   # tests: every crash with the ground sim's state at that moment
 		print("CRASH %s | v=%.1f air=%s since_land=%.2f slip=%.2f lean=%.2f lean_err=%.2f front_use=%.2f rear_lock=%.2f front_lock=%.2f bank=%.2f pitch_err=%.2f" % [
 			reason, phys.v, phys.air, phys.since_land, phys.slip, phys.lean, phys.lean_err, phys.front_use, phys.rear_lock, phys.front_lock, phys.bank,
@@ -706,7 +788,9 @@ func start_crash(reason: String) -> void:
 	add_child(rider)
 	rider.transform = Transform3D.IDENTITY
 	ragdoll.start(pts, body_vel, spin_v, 1.0 / 60)
-	if blood: blood.crash_start(Vector2(body_vel.x, body_vel.z).length())
+	var flat_v := Vector2(body_vel.x, body_vel.z).length()
+	crash_fatal = flat_v > Blood_FATAL_SPEED or Env.s("BMX_FATAL") != ""
+	if blood: blood.crash_start(flat_v)
 	grime.add_blood(clampf((crash_v - 8.0) * 0.035, 0.0, 0.5))   # only a severe crash (> ~8 m/s) stains; the rider + bike stay bloody until a death + revive
 	rider.pose_ragdoll(ragdoll.p)
 	# (no dust right where the crash starts with the smoke sim: only where the body / bike hit and slide)
@@ -741,25 +825,41 @@ func _wasted_on() -> bool:
 		if a.begins_with("--autotest"): return false
 	return bool(Settings.get_v("wasted"))
 
-## the hold to get up is done: the rider climbs to their feet (GetUpAnim), then get_up() puts them on the bike.
-## A torn-off limb (or BMX_GETUP_ANIM=0) gets straight back on as before.
-var getup_anim: GetUpAnim = null
+## the hold to get up is done: the rider climbs to their feet, then get_up() puts them on the bike.
+## With clips in ClipGetUp.GETUP_DIR: the clip matching how the body lies, then standing dizzy until hop is pressed
+## again (or Backspace). Without them: the procedural GetUpAnim straight onto the bike.
+## A fatal crash (crash_fatal), a torn-off limb (or BMX_GETUP_ANIM=0) gets straight back on as before:
+## the climb to the feet is only for crashes the rider walks away from.
+var getup_anim = null              # ClipGetUp / GetUpAnim
+var _hop_armed := false            # dizzy: hop let go since standing up (a fresh press gets back on)
+var crash_fatal := false
+const Blood_FATAL_SPEED := 12.0   # = Blood.FATAL_SPEED (fx/blood.gd), kept here: blood may be off
 var _stand_world: Array = []   # the standing pose it ended in (world), blended into the riding pose
 var _stand_blend := 1.0
 const STAND_BLEND := 0.35      # s from standing to on the bike
 func begin_getup() -> void:
 	if getup_anim != null: return
-	if not ragdoll.active or not ragdoll.cut.is_empty() or Env.s("BMX_GETUP_ANIM") == "0":
+	if not ragdoll.active or not ragdoll.cut.is_empty() or crash_fatal or Env.s("BMX_GETUP_ANIM") == "0":
 		get_up(); return
-	getup_anim = GetUpAnim.new(rider, terrain, ragdoll.p)
+	if ClipGetUp.available() and Env.s("BMX_GETUP_ANIM") != "proc":
+		var g := ClipGetUp.new(rider, terrain, ragdoll.p)
+		if g.ok(): getup_anim = g
+	if getup_anim == null: getup_anim = GetUpAnim.new(rider, terrain, ragdoll.p)
+	_hop_armed = false
 	ragdoll.active = false
 	phys.crash_hold = 0.0; phys.crash_armed = false
 	if wasted: wasted.finish()
 	if Env.s("BMX_GETUP_PROBE") != "": print("GETUP start at ", (ragdoll.p[Ragdoll.PELVIS] as Vector3).snapped(Vector3.ONE * 0.01))
 
 ## one physics step of the get-up: draw it, keep the ragdoll's points on it (camera, photo mode follow them)
-func _getup_step(dt: float) -> void:
-	var going := getup_anim.step(dt)
+func _getup_step(dt: float, hop: bool) -> void:
+	if getup_anim is ClipGetUp and getup_anim.dizzy():
+		# standing dizzy: a fresh hop press gets back on the bike (tests: BMX_DIZZY_SECS)
+		if not hop: _hop_armed = true
+		elif _hop_armed: getup_anim.release()
+		var ds := Env.s("BMX_DIZZY_SECS")
+		if ds != "" and getup_anim.t > float(ds): getup_anim.release()
+	var going: bool = getup_anim.step(dt)
 	var P: Array = getup_anim.last_world
 	for i in mini(P.size(), ragdoll.p.size()):
 		ragdoll.p[i] = P[i]; ragdoll.q[i] = P[i]
@@ -779,6 +879,7 @@ func _stand_to_bike(dt: float) -> void:
 	rider.pose_points(P)
 
 func get_up() -> void:
+	if getup_anim is ClipGetUp: getup_anim.free_clips()   # (Backspace while standing dizzy)
 	getup_anim = null
 	_stand_blend = 1.0
 	phys.get_up()
@@ -914,7 +1015,10 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 	var sand := s == 3
 	var skid_fx := st.skid_fx
 	if st.air: air_peak = maxf(air_peak, st.y)
-	if not st.air and va > 0.6:
+	# on a rope bridge's planks: no dirt to throw, and no tyre tracks (they're drawn fixed in the world: on a deck
+	# that swings and sags they hung in the air / sank into the planks)
+	var bare := in_water or _on_rope_deck(st.x, st.z, st.y)
+	if not st.air and va > 0.6 and not bare:
 		var dirt := s == 1
 		var side := Vector3(-f.z, 0, f.x)
 		var lat_a := absf(st.v * st.yaw_rate)
@@ -959,12 +1063,12 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 				var ev := Vector3(-f.x * back + side.x * out, 1 + randf() * 2.2, -f.z * back + side.z * out)
 				var cc: Color = (DIRT_CHUNK if randf() < 0.7 else ROCK_CHUNK) if dirt else (dcol * 0.8 if sand else GRASS_CHUNK)
 				fx.chunk(rear, ev, cc, 0.022)
-	if st.air or va <= 0.6 or in_water:
+	if st.air or va <= 0.6 or bare:
 		dust.feed(rear, Vector3.ZERO, 0.0, dcol, 0.0, 20.0)
 		dust.feed_front(front, Vector3.ZERO, 0.0, 0.0)
 	grime.feed(dt, 2 if in_water else s, va, skid_fx, st.air, _landed, terrain.ground_color(rear.x, rear.z))
 	_landed = 0.0
-	var on_ground := not st.air and not in_water and va > 0.2
+	var on_ground := not st.air and not bare and va > 0.2
 	var tc: Color = TRACK_DIRT if s == 1 else (dcol * 0.6 if sand else TRACK_GRASS)
 	var ta := 0.85 if s == 1 else (0.75 if sand else 0.45)
 	# a tyre that rolled through blood prints red for a few metres (fx/blood.gd)
@@ -1070,6 +1174,18 @@ func _out_of_crevasse() -> void:
 		var l: Vector2 = rb.local(phys.x, phys.z)
 		if l.x < 0.0 or l.x > rb.length or absf(l.y) > 8.0:
 			continue
+		# got up on (or right beside, at its height) the deck: back in the middle of the planks, lined up with the
+		# bridge whichever way is nearer the bike's heading. Stood up as it fell, crosswise on a 1.1 m deck, the
+		# first pedal stroke rode off the side
+		var mid: float = rb.sim.Height(l.x, 0.0, 0.0)
+		if l.x > rb._u0 and l.x < rb._u1 and not is_nan(mid) and absf(mid - phys.y) < 1.0:
+			var c: Vector2 = rb.world(l.x, 0.0)
+			var fwd_h := atan2(-rb._dz, rb._dx)
+			var hd := fwd_h if absf(BikePhysics.ang_diff(fwd_h, phys.heading)) < PI / 2 else fwd_h + PI
+			terrain.rope_ref_y = mid
+			phys.reset_at(c.x, c.y, hd)
+			_snap_prev()
+			return
 		var near_start: bool = l.x < rb.length * 0.5
 		var rim: Vector2 = rb.world(-2.5 if near_start else rb.length + 2.5, 0.0)
 		if phys.y > terrain.height(rim.x, rim.y) - 3.0:
@@ -1159,9 +1275,8 @@ func _unhandled_input(e: InputEvent) -> void:
 	if get_tree().paused or not input_enabled: return
 	if e.is_action_pressed("photo") and not e.is_echo(): toggle_photo(); return
 	if e.is_action_pressed("save_log") and not e.is_echo():   # the last 60 s of physics + inputs to a CSV
-		var lp := ride_log.save()
-		flash("Ride log saved (last 60 s)" if lp != "" else "Couldn't save the ride log")
-		if lp != "": print("RIDELOG ", lp)
+		var lp := CrashLog.report("manual", "saved with the save-log button")   # report + ride log + recent log lines
+		flash("Report saved (last 60 s + log)" if lp != "" else "Couldn't save the report")
 		return
 	if e.is_action_pressed("debug_draw") and not e.is_echo():
 		if DebugOverlay.available(): flash("Physics overlay " + ("on" if DebugOverlay.toggle() else "off"))
@@ -1356,6 +1471,10 @@ func _physics_process(dt: float) -> void:
 	var _pk := Time.get_ticks_usec()
 	_snap_prev()
 	var inp := _read_input()
+	if _rope_hold > 0.0:   # tests (BMX_ROPE_STOP): brake to a stop on the bridge and stand there
+		_rope_hold -= dt
+		inp.throttle = 0.0; inp.sprint = false
+		inp.brake = 1.0 if phys.v > 0.3 else 0.0
 	_pk = _perf("p_input", _pk)
 	terrain.rope_ref_y = phys.y
 	phys.step(dt, inp)
@@ -1377,7 +1496,7 @@ func _physics_process(dt: float) -> void:
 				["lean_v", phys.lean_v, 0.05], ["slip_w", phys.slip_w, 0.02]]:
 			_jitter_sample(kv[0], kv[1], kv[2])
 	if phys.crash_on and getup_anim != null:
-		_getup_step(dt)
+		_getup_step(dt, inp.hop)
 	elif phys.crash_on:
 		rider.pose_ragdoll(ragdoll.p, _ragdoll_roots())
 	_pk = _perf("p_ragdoll_pose", _pk)
@@ -1396,23 +1515,101 @@ const RIDER_KG := 95.0
 const ROPE_STROKE := 4.0   # m/s² sideways per pedal stroke
 var rope_probe := Env.s("BMX_ROPE_PROBE") != ""
 var _rope_pt := 0.0
+var _rope_shot := Env.s("BMX_ROPE_SHOT")
+var _rope_shot_i := 0
+var _rope_hold := 0.0
+var _rope_test_done := {}
+const ROPE_SHOT_U := [3.0, 5.0, 8.0, 15.0, 23.0, 32.0, 40.0, 42.5, 45.0]
+func _save_rope_shot(path: String) -> void:
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(path)
+	print("ROPESHOT ", path)
 func _rope_tick(dt: float) -> void:
 	if terrain.ropes.is_empty():
 		return
 	var rb = null
-	if not phys.crash_on and not phys.air:
+	if not phys.crash_on:
 		rb = terrain.rope_under(phys.x, phys.z, phys.y)
-	if rb != null:
+		if not phys.air:
+			# a wheel rolled off the side of a deck: down you go. Left to the ride physics, the bike hung on the plank
+			# edge with one axle on the deck and one over the drop: an ~85 deg "slope" it sped up on without moving,
+			# sunk into the planks, until it washed out a second later
+			var fw := phys.fwd()
+			for d in [0.0, phys.L - phys.BB_REAR, -phys.BB_REAR]:
+				var px: float = phys.x + fw.x * d
+				var pz: float = phys.z + fw.z * d
+				var hit := false
+				for b in terrain.ropes:
+					if b.off_side(px, pz, phys.y) and terrain._height0(px, pz) < phys.y - 1.5:
+						hit = true
+						break
+				if hit:
+					phys.crash_pending = "OFF THE BRIDGE!"
+					if rope_probe: print("ROPE off the side at d=%.2f" % d)
+					break
+	if rb != null and not phys.air:
 		var h := phys.heading
 		# sideways: the turn's reaction + each pedal stroke shoving the deck (like footsteps set a rope bridge swinging)
 		var side := phys.lat_a + ROPE_STROKE * phys.pedal * sin(phys.crank)
-		rb.push(phys.x, phys.z, -RIDER_KG * clampf(phys.n_load, 0.0, 40.0), Vector3(sin(h), 0, cos(h)) * RIDER_KG * side)
+		# the weight goes down through the two tyres (split as the physics loads them), not one point under the
+		# cranks: one point folded the deck into a V the bike pitched about in. A wheel still on the rim or off
+		# the end pushes on nothing (AddLoad ignores points off the deck), as it should
+		var nf: float = phys.n_f if is_finite(phys.n_f) else 0.4
+		var nr: float = phys.n_r if is_finite(phys.n_r) else 0.6
+		var kf := clampf(nf / maxf(nf + nr, 1e-3), 0.0, 1.0)
+		if phys.front_air: kf = 0.0
+		elif phys.rear_air: kf = 1.0
+		var fy := -RIDER_KG * clampf(phys.n_load, 0.0, 40.0)
+		var fs := Vector3(sin(h), 0, cos(h)) * RIDER_KG * side
+		var fw := phys.fwd()
+		var df: float = phys.L - phys.BB_REAR
+		var dr: float = -phys.BB_REAR
+		rb.push(phys.x + fw.x * df, phys.z + fw.z * df, fy * kf, fs * kf)
+		rb.push(phys.x + fw.x * dr, phys.z + fw.z * dr, fy * (1.0 - kf), fs * (1.0 - kf))
 	terrain.ropes_step(dt)
-	if rb != null:
+	if rb != null and not phys.air:
 		var c: Vector2 = rb.carry(phys.x, phys.z)
 		phys.x += c.x
 		phys.z += c.y
-	if rope_probe:
+	if _rope_shot != "":   # tests: a screenshot as the rider passes each mark on a bridge (by place, not time)
+		for b in terrain.ropes:
+			var u: float = b.local(phys.x, phys.z).x
+			while _rope_shot_i < ROPE_SHOT_U.size() and u > ROPE_SHOT_U[_rope_shot_i] and u < b.length + 8.0:
+				_save_rope_shot.call_deferred("%s_u%02d.png" % [_rope_shot, int(ROPE_SHOT_U[_rope_shot_i])])
+				_rope_shot_i += 1
+	# tests by place on the first bridge: BMX_ROPE_STOP=u,secs brakes to a stop at u and stands secs (game time);
+	# BMX_ROPE_BAIL=u bails at u (wall-clock test timers fire in the wrong place when the frame rate drops)
+	if (Env.s("BMX_ROPE_STOP") != "" or Env.s("BMX_ROPE_BAIL") != "") and not phys.crash_on:
+		var u0: float = terrain.ropes[0].local(phys.x, phys.z).x
+		var st := Env.s("BMX_ROPE_STOP").split(",")
+		if Env.s("BMX_ROPE_STOP") != "" and not _rope_test_done.has("stop") and u0 > float(st[0]) and u0 < terrain.ropes[0].length:
+			_rope_test_done["stop"] = true
+			_rope_hold = float(st[1]) if st.size() > 1 else 3.0
+			print("ROPETEST stop at u=%.2f" % u0)
+		if Env.s("BMX_ROPE_BAIL") != "" and not _rope_test_done.has("bail") and u0 > float(Env.s("BMX_ROPE_BAIL")) and u0 < terrain.ropes[0].length:
+			_rope_test_done["bail"] = true
+			phys.crash_pending = "BAIL!"
+			print("ROPETEST bail at u=%.2f" % u0)
+	if _rope_test_done.has("bail") and not _rope_test_done.has("getup") and phys.crash_on and getup_anim == null:
+		_rope_test_done["bail_t"] = float(_rope_test_done.get("bail_t", 0.0)) + dt
+		if _rope_test_done["bail_t"] > 2.5:   # the real get-up (animated), as a held hop does
+			_rope_test_done["getup"] = true
+			begin_getup()
+			print("ROPETEST getup from (%.2f, %.2f, %.2f)" % [phys.x, phys.y, phys.z])
+	if _rope_test_done.has("getup") and not _rope_test_done.has("upped") and not phys.crash_on:
+		_rope_test_done["upped"] = true
+		var lb: Vector2 = terrain.ropes[0].local(phys.x, phys.z)
+		print("ROPETEST up at u=%.2f w=%.2f y=%.2f heading_off_axis=%.2f" % [lb.x, lb.y, phys.y,
+			absf(BikePhysics.ang_diff(phys.heading, atan2(-terrain.ropes[0]._dz, terrain.ropes[0]._dx)))])
+	if rope_probe and Env.s("BMX_ROPE_PROBE") == "tick":
+		for b in terrain.ropes:
+			var l: Vector2 = b.local(phys.x, phys.z)
+			if l.x < -2.0 or l.x > b.length + 2.0: continue
+			var f := Vector3(sin(phys.heading), 0, cos(phys.heading))
+			print("RTICK t=%.3f u=%.2f w=%.2f on=%s g=%.3f y=%.3f vy=%.2f deck=%.3f wf=%.3f wr=%.3f n=%.1f cmp=%.3f p=%.3f air=%s fa=%s ra=%s v=%.1f" % [
+				t, l.x, l.y, rb != null, terrain._height0(phys.x, phys.z), phys.y, phys.vy, b.deck_at(phys.x, phys.z), phys.w_f, phys.w_r, phys.n_load, phys.compress, phys.pitch,
+				phys.air, phys.front_air, phys.rear_air, phys.v])
+	elif rope_probe:
 		_rope_pt -= dt
 		if _rope_pt <= 0.0:
 			_rope_pt = 0.25
@@ -1580,7 +1777,7 @@ func _process(dt: float) -> void:
 	_update_look(dt)
 	var wobble := sin(t * 2.3) * 0.025 * maxf(0.0, 1 - absf(st.v) / 2) * (1.0 - dab_k)
 	var dab_lean := -dab_side * DAB_LEAN * dab_k   # bike_lean > 0 tips the top to the rider's left
-	if rig.chain and phys.geared and phys.gear >= 0: rig.chain.cog_teeth = float(phys.cogs[phys.gear])
+	if rig.chain and phys.geared and phys.gear >= 0: rig.chain.set_gear(phys.gear, phys.cogs)
 	if st.crash_on: _mc.clear()   # (the motion cap starts fresh after a crash / get-up)
 	var mdt := minf(get_process_delta_time(), 0.05)
 	_lean_c = _mcap("bike_lean", st.bike_lean, mdt)
@@ -1769,6 +1966,7 @@ func _process(dt: float) -> void:
 	# weather: wind, the bike parting the grass, cloud shadows (the sun dims with the shade at the rider)
 	atmos.update(t, dt, drawn_pos, 0.0 if st.air or st.crash_on else clampf(absf(st.v) / 2.0, 0.0, 1.0))
 	_update_light(dt)
+	_glare_guard(dt)
 	sun.light_energy = sun_energy * atmos.shade
 	_update_probe(dt, drawn_pos)
 	_pk = _perf("atmos_light_probe", _pk)

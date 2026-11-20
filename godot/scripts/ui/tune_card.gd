@@ -16,6 +16,7 @@ const TABS := [
 		["Brakes", ["R:brakes"]],
 		["Speed", ["R:speed"]],
 		["Body", ["R:body"]],
+		["Manual & pump", ["R:manual"]],
 		["Suspension", ["R:susp"]],
 		["Jumps", ["R:jumps"]],
 		["Smoothing", ["R:smooth"]],
@@ -47,6 +48,7 @@ const TABS := [
 		["Look", ["T:Dust look"]],
 		["Trail", ["T:Dust trail"]],
 		["Spray", ["T:Dust spray"]],
+		["Grit", ["T:Dust grit"]],
 	]],
 ]
 
@@ -164,7 +166,7 @@ func show_tab(id: String) -> void:
 		"look": sub.text = "Helmet, goggles, kit and shoes"
 		"sound": sub.text = "Coast (or Preview) to hear it · presets save as you go"
 		"light": sub.text = "Time of day, day / night cycle and the level's light"
-		"dust": sub.text = "Tyre dust: how it looks, how long the trail hangs, how it sprays"
+		"dust": sub.text = "Tyre dust: how it looks, how long the trail hangs, how it sprays, the grains"
 	if id != "sound": FreewheelSound.preview_speed = 0.0
 	_fill()
 

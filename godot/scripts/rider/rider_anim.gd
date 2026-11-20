@@ -53,14 +53,15 @@ static func _dir() -> String:
 	return e if e != "" else DIR
 
 
-func _init(r: Rider) -> void:
+## dir: the clips' folder ("" = the menus' DIR; ClipGetUp uses its own folders and drives them with pose_at)
+func _init(r: Rider, dir := "") -> void:
 	rider = r
 	_rng.seed = Time.get_ticks_usec()
-	for path in clip_files(_dir()):
+	for path in clip_files(dir if dir != "" else _dir()):
 		var c := _load_clip(path)
 		if not c.is_empty(): clips.append(c)
 	var only := Env.s("BMX_ANIM")   # tests: just this clip (part of its file name)
-	if only != "":
+	if only != "" and dir == "":
 		clips = clips.filter(func(c): return str(c.name).to_lower().contains(only.to_lower()))
 	if Env.s("BMX_ANIM_PROBE") != "":
 		print("ANIM clips=%d %s" % [clips.size(), ", ".join(clips.map(func(c): return "%s %.1fs" % [c.name, c.len]))])
@@ -217,8 +218,17 @@ static func _blend(a: Dictionary, b: Dictionary, w: float) -> Dictionary:
 	return {P = P, o = o}
 
 
+## clip i's pose at time `at` (s, wraps) on the rider: {P = 15 joint points, o = orientations} in the clip's frame
+## (its start hips over x = z = 0, y up). on_floor: heights as the clip has them over its floor (lying, kneeling:
+## ClipGetUp) instead of the lower foot set on the floor
+func pose_at(i: int, at: float, on_floor := false) -> Dictionary:
+	var c: Dictionary = clips[i]
+	_seek(c, at)
+	return _retarget(c, on_floor)
+
+
 ## the clip's pose on the rider's body: directions from the clip, lengths from the rider
-func _retarget(c: Dictionary) -> Dictionary:
+func _retarget(c: Dictionary, on_floor := false) -> Dictionary:
 	var g := _globals(c)
 	var k: float = c.k
 	var q := func(n: String) -> Vector3: return ((g[n] as Transform3D).origin - c.root) * k
@@ -274,6 +284,7 @@ func _retarget(c: Dictionary) -> Dictionary:
 	var low := 0 if q.call("LeftFoot").y <= q.call("RightFoot").y else 1
 	var clip_y: float = q.call("LeftFoot" if low == 0 else "RightFoot").y - float(c.ankle)
 	var lift: float = clip_y + 0.08 - (P[11 + low * 3] as Vector3).y
+	if on_floor: lift = 0.08 - float(c.ankle)   # the clip's own heights; its flat-foot ankle = our 0.08
 	for i in 15: P[i] = (P[i] as Vector3) + Vector3(0, lift, 0)
 	o["shoe_drop"] = 0.05
 	return {P = P, o = o}

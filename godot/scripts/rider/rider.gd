@@ -94,7 +94,6 @@ var cam_gear := ""                  # ActionCam.gear_sig of the camera + add-ons
 var cam_spots := {}                 # mount kind -> where it touches the shell (head space), set when a helmet goes on
 
 var torso: MeshInstance3D
-var hood_hem: MeshInstance3D
 var belt_node: Belt
 var pelvis_mesh: MeshInstance3D
 var neck_mesh: MeshInstance3D
@@ -182,8 +181,6 @@ func _init() -> void:
 	torso.name = "Torso"
 	_skin_torso()
 	add_child(torso)
-	hood_hem = cyl.call(0.15, 0.15, mCoralDark, 22)
-	hood_hem.visible = false
 	pelvis_mesh = G.inst(G.rounded_box(0.2, 0.15, 0.3, 3, 0.05), mNavy)
 	pelvis_mesh.name = "Pelvis"
 	add_child(pelvis_mesh)
@@ -266,6 +263,7 @@ func _init() -> void:
 	# the humanoid skeleton (Godot's profile names): follows the parts every frame, for attachments / animation
 	skeleton = RiderSkeleton.new()
 	add_child(skeleton)
+	skeleton.make_fingers(hand_mats.glove)   # the gloves' fingers ride on its finger bones (GloveFingers)
 
 
 ## the bare head and the hair that replaces the helmet (look.helmetOn = "0"). A friendly, slightly cartoon face:
@@ -903,6 +901,17 @@ func _pose_neck() -> void:
 	set_limb(neck_mesh, base, head.transform * NECK_TOP)
 
 
+## the forearm tube ends at the wrist inside the glove's cuff, not at the grip point (it showed between the fingers)
+const WRIST_BACK := 0.062
+func _wrist(i: int, from: Vector3) -> Vector3:
+	var h: Vector3 = glove[i].position
+	var d := h - from
+	return h - d.normalized() * minf(WRIST_BACK, d.length() * 0.5) if d.length_squared() > 1e-8 else h
+
+## ease a hand's finger curl (GloveFingers: 0 open, 0.4 relaxed, 1 round the bar) toward `to`
+func _curl_to(i: int, to: float, step: float) -> void:
+	if skeleton: skeleton.curls[i] = move_toward(skeleton.curls[i], to, step)
+
 ## hand: +X along the forearm, +Z along the bar, +Y the back of the hand
 static func orient_hand(n: Node3D, el: Vector3, at: Vector3, right: Vector3) -> void:
 	var x := (at - el).normalized()
@@ -1046,7 +1055,6 @@ func _pose_from_points(P: Array, roots: Dictionary, orient: Dictionary) -> void:
 	pelvis_mesh.transform = Transform3D(bb, pe)
 	var hip: Vector3 = pe + (ch - pe).normalized() * Belt.HEM_Y
 	set_spine(hip, ch, body_r.normalized(), (sh[1] - sh[0]).normalized(), 0.0, 0.0, 0.5, bb)
-	set_limb(hood_hem, hip, hip.lerp(ch, 0.2))
 	var sh_r: Vector3 = sh[1] - sh[0]
 	head.transform = Transform3D(orient.get("head", _basis_from(hd - ch, sh_r)), hd)
 	_pose_neck()
@@ -1061,11 +1069,12 @@ func _pose_from_points(P: Array, roots: Dictionary, orient: Dictionary) -> void:
 		var ft_from: Vector3 = roots.get(fi, kn[i])
 		shoulder_sph[i].position = sh[i]
 		set_limb(upper_arm[i], el_from, el[i])
-		set_limb(fore_arm[i], ha_from, ha[i])
 		elbow[i].position = el[i]
 		glove[i].position = ha[i]
 		if orient.has("hand%d" % i): glove[i].basis = orient["hand%d" % i]
 		else: orient_hand(glove[i], ha_from, ha[i], sh_r)
+		set_limb(fore_arm[i], ha_from, _wrist(i, ha_from))
+		_curl_to(i, float(orient.get("curl%d" % i, GloveFingers.RELAXED)), 0.06)
 		set_limb(thigh[i], kn_from, kn[i])
 		set_limb(shin[i], ft_from, ft[i])
 		knee[i].position = kn[i]
@@ -1559,7 +1568,6 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	set_spine(hip, chest, pel_b * Vector3(0, 0, 1), tw * Vector3(0, 0, 1),
 		float(sty.spineCurve) * (1.0 - 0.7 * relax), float(sty.spineSide) + bend, float(sty.spineLow), pel_full)
 	pelvis_mesh.transform = Transform3D(pel_full, pelvis)
-	set_limb(hood_hem, Vector3(pelvis.x, pelvis.y + 0.04, pelvis.z), hip.lerp(chest, 0.2))
 
 	# neck / head
 	var neck := chest
@@ -1616,13 +1624,14 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		var ika := limb_ik(shp, hand, L_UARM, L_FARM, pole_a, Vector3(0, -0.5, side), ELBOW_MIN, ELBOW_MAX, _bd_prev[2 + i], max_turn)
 		_bd_prev[2 + i] = ika[2]
 		set_limb(upper_arm[i], shp, ika[0])
-		set_limb(fore_arm[i], ika[0], ika[1])
 		elbow[i].position = ika[0]
 		hand = ika[1]   # out of reach: the hand stays at the end of the arm
 		glove[i].position = hand
 		orient_hand(glove[i], ika[0], hand, right)
 		if sty.wristRoll != 0.0:
 			glove[i].rotate_object_local(Vector3.RIGHT, side * float(sty.wristRoll))
+		set_limb(fore_arm[i], ika[0], _wrist(i, ika[0]))
+		_curl_to(i, GloveFingers.RELAXED if standing else 1.0, dt * 5.0)   # on the bike: wrapped round the grip
 		J[3 + i * 3] = shp
 		J[4 + i * 3] = ika[0]
 		J[5 + i * 3] = hand

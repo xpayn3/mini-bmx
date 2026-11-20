@@ -26,6 +26,18 @@ public partial class RopeBridgeSim : RefCounted
 	float _time;
 	public float HangerK = 0.35f;
 	public float DiagK = 0f;     // plank shear stiffness (any made the deck rigid sideways: it hardly swung)
+	/// the deck's bending stiffness (node i to i + 2 along each deck rope): the planks are lashed edge to edge, so
+	/// under a bike the deck bends round in a curve instead of folding into a sharp V at the node under it
+	/// (that V pitched the bike about and threw the front wheel off at the ends)
+	public float BendK = 0.12f;
+	/// the ground's slope (dy / du) just before the deck's start / just after its end (set before Setup; NaN = none):
+	/// the deck's first and last plank are held in line with it (lashed onto the sill log), so the deck leaves the
+	/// rim along the ground and curves down over a few metres instead of kinking at the lip (a kicker at speed)
+	public float EndSlope0 = float.NaN, EndSlope1 = float.NaN;
+	public float AnchorK = 0.5f;
+	/// segments at each end laid on a fixed landing (a short ramp on the sill) instead of hanging: they ease from the
+	/// ground's slope (EndSlope) into the hanging curve over Landing x ~1 m, a gentle roll on / off at speed
+	public int Landing = 0;
 
 	int DL(int i) => i;
 	int DR(int i) => _m + i;
@@ -38,7 +50,7 @@ public partial class RopeBridgeSim : RefCounted
 		float hu0, float hu1, float hh, float hhw, float hsag, float mDeck, float mHand)
 	{
 		_n = n; _m = n + 1;
-		int cnt = 4 * _m;
+		int cnt = 4 * _m + 4;   // + 4 pinned ghost points: the sill line beyond each deck rope's end (EndSlope)
 		_x = new float[cnt]; _y = new float[cnt]; _z = new float[cnt];
 		_ox = new float[cnt]; _oy = new float[cnt]; _oz = new float[cnt];
 		_ax = new float[cnt]; _ay = new float[cnt]; _az = new float[cnt];
@@ -58,7 +70,34 @@ public partial class RopeBridgeSim : RefCounted
 			_iw[DL(i)] = _iw[DR(i)] = pin ? 0f : 1f / mDeck;
 			_iw[HL(i)] = _iw[HR(i)] = pin ? 0f : 1f / mHand;
 		}
-		int cap = 4 * n + _m + 2 * n + 2 * _m;
+		int K = float.IsFinite(EndSlope0) && float.IsFinite(EndSlope1) ? Math.Clamp(Landing, 0, n / 4) : 0;
+		if (K > 0)
+		{
+			// the landings: a cubic (Hermite) from the deck end along the ground slope to node K on the hanging curve,
+			// matching its height and slope there; those nodes are pinned (the planks sit on the sill)
+			float L = u1 - u0;
+			for (int e = 0; e < 2; e++)
+			{
+				int ia = e == 0 ? 0 : n, ib = e == 0 ? K : n - K;
+				float fb = (float)ib / n;
+				float ua = e == 0 ? u0 : u1, ya = e == 0 ? y0 : y1, sa = e == 0 ? EndSlope0 : EndSlope1;
+				float ub = u0 + L * fb;
+				float yb = y0 + (y1 - y0) * fb - 4f * sag * fb * (1f - fb);
+				float sb = (y1 - y0) / L - 4f * sag * (1f - 2f * fb) / L;
+				float d = ub - ua;
+				for (int i = Math.Min(ia, ib) + 1; i < Math.Max(ia, ib); i++)
+				{
+					float uu = u0 + L * i / n;
+					float q = (uu - ua) / d;
+					float h00 = 2 * q * q * q - 3 * q * q + 1, h10 = q * q * q - 2 * q * q + q, h01 = -2 * q * q * q + 3 * q * q, h11 = q * q * q - q * q;
+					float yy = h00 * ya + h10 * d * sa + h01 * yb + h11 * d * sb;
+					_y[DL(i)] = _oy[DL(i)] = _y[DR(i)] = _oy[DR(i)] = yy;
+					_iw[DL(i)] = _iw[DR(i)] = 0f;
+				}
+				_iw[DL(ib)] = _iw[DR(ib)] = 0f;
+			}
+		}
+		int cap = 4 * n + _m + 2 * n + 2 * _m + 2 * n + 4;
 		_ca = new int[cap]; _cb = new int[cap]; _rest = new float[cap]; _k = new float[cap]; _rope = new bool[cap];
 		_cc = 0;
 		for (int i = 0; i < n; i++)
@@ -66,6 +105,31 @@ public partial class RopeBridgeSim : RefCounted
 			Add(DL(i), DL(i + 1), 1f, false); Add(DR(i), DR(i + 1), 1f, false);
 			Add(HL(i), HL(i + 1), 1f, false); Add(HR(i), HR(i + 1), 1f, false);
 			if (DiagK > 0f) { Add(DL(i), DR(i + 1), DiagK, false); Add(DR(i), DL(i + 1), DiagK, false); }   // planks resist shear a little
+		}
+		if (BendK > 0f)
+			for (int i = 0; i + 2 <= n; i++) { Add(DL(i), DL(i + 2), BendK, false); Add(DR(i), DR(i + 2), BendK, false); }
+		float seg = (u1 - u0) / n;
+		for (int e = 0; e < 2; e++)
+		{
+			float sl = e == 0 ? EndSlope0 : EndSlope1;
+			for (int side = 0; side < 2; side++)
+			{
+				int gi = 4 * _m + e * 2 + side;
+				float gz = side == 0 ? -hw : hw;
+				if (e == 0) Set(gi, u0 - seg, y0 - (float.IsFinite(sl) ? sl : 0f) * seg, gz);
+				else Set(gi, u1 + seg, y1 + (float.IsFinite(sl) ? sl : 0f) * seg, gz);
+				if (!float.IsFinite(sl))
+					continue;
+				// the line through the last two fixed points (the ghost and the end, or the landing's last two nodes)
+				// held straight on into the first hanging node: the deck leaves the end along it, no kink
+				int b = side == 0 ? 0 : _m;
+				int pi = e == 0 ? K : n - K;
+				int pin = b + pi, nx = b + (e == 0 ? pi + 1 : pi - 1);
+				int pv = K > 0 ? b + (e == 0 ? pi - 1 : pi + 1) : gi;
+				float l1 = Dist(pv, pin), l2 = Dist(pin, nx);
+				_ca[_cc] = pv; _cb[_cc] = nx; _rest[_cc] = l1 + l2; _k[_cc] = AnchorK; _rope[_cc] = false;
+				_cc++;
+			}
 		}
 		for (int i = 0; i < _m; i++)
 		{
@@ -77,10 +141,24 @@ public partial class RopeBridgeSim : RefCounted
 			}
 		}
 		Snap();
-		// settle into the hanging shape before anyone sees it (heavily damped)
-		for (int k = 0; k < 360; k++)
+		Settle(SettleTicks);
+	}
+
+	/// ticks run by Setup to hang the ropes into shape (0: the caller runs Settle itself, a slice per frame)
+	public int SettleTicks = 360;
+
+	/// settle into the hanging shape before anyone sees it (heavily damped)
+	public void Settle(int ticks)
+	{
+		for (int k = 0; k < ticks; k++)
 			Tick(1f / 60f, 0, 0, 0.9f);
 		Snap(); Snap();
+	}
+
+	float Dist(int a, int b)
+	{
+		float dx = _x[b] - _x[a], dy = _y[b] - _y[a], dz = _z[b] - _z[a];
+		return MathF.Sqrt(dx * dx + dy * dy + dz * dz);
 	}
 
 	void Set(int a, float x, float y, float z)
@@ -213,14 +291,21 @@ public partial class RopeBridgeSim : RefCounted
 		return t >= -m && t <= 1f + m;
 	}
 
+	/// the deck point at node index s (fractional), across t: a Catmull-Rom curve through the rope nodes (the same
+	/// curve the deck ropes are drawn along), so the surface the tyres roll on has no corner at every node
 	Vector3 At(float[] X, float[] Y, float[] Z, float s, float t)
 	{
 		int i = Math.Clamp((int)s, 0, _n - 1);
 		float fs = Math.Clamp(s - i, 0f, 1f);
-		int l0 = DL(i), l1 = DL(i + 1), r0 = DR(i), r1 = DR(i + 1);
-		float lx = X[l0] + (X[l1] - X[l0]) * fs, ly = Y[l0] + (Y[l1] - Y[l0]) * fs, lz = Z[l0] + (Z[l1] - Z[l0]) * fs;
-		float rx = X[r0] + (X[r1] - X[r0]) * fs, ry = Y[r0] + (Y[r1] - Y[r0]) * fs, rz = Z[r0] + (Z[r1] - Z[r0]) * fs;
-		return new Vector3(lx + (rx - lx) * t, ly + (ry - ly) * t, lz + (rz - lz) * t);
+		Vector3 l = Curve(X, Y, Z, 0, i, fs), r = Curve(X, Y, Z, _m, i, fs);
+		return l + (r - l) * t;
+	}
+
+	Vector3 Curve(float[] X, float[] Y, float[] Z, int b, int i, float fs)
+	{
+		int a0 = b + Math.Max(0, i - 1), a1 = b + i, a2 = b + i + 1, a3 = b + Math.Min(_n, i + 2);
+		return CatmullRom(new Vector3(X[a0], Y[a0], Z[a0]), new Vector3(X[a1], Y[a1], Z[a1]),
+			new Vector3(X[a2], Y[a2], Z[a2]), new Vector3(X[a3], Y[a3], Z[a3]), fs);
 	}
 
 	/// the deck top under (u, w), NaN off the deck (margin: how far past a rope still counts, a tyre's half width)

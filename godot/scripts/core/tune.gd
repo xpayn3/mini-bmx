@@ -233,6 +233,33 @@ const DEFS := [
 		["tuckDrag", "Tuck: air drag cut (stick forward)", 0.42, 0, 0.8, 0.02, "×"],
 		["upDrag", "Sit up: extra air drag (stick back)", 0.3, 0, 1, 0.05, "×"],
 	]],
+	# side-on BMX game feel: the manual / wheelie is a balance you work, holding hop on the downhills pumps speed,
+	# a landing in line with the ground gives speed back
+	["Balance & pump", [
+		["manBalanceOn", "Manual / wheelie: you balance it (0 = holds itself)", 1, 0, 1, 1, ""],
+		["manBalance", "Balance point (front up)", 0.55, 0.3, 0.9, 0.01, "rad"],
+		["manGravity", "Falls away from the balance point", 7.0, 2, 16, 0.25, "rad/s²"],
+		["manLift", "Pull on the bars (stick back)", 9.0, 3, 20, 0.25, "rad/s²"],
+		["manPedal", "A pedal stroke lifts it", 3.0, 0, 8, 0.25, "rad/s²"],
+		["manBrake", "Rear brake drops it", 12.0, 0, 30, 0.5, "rad/s²"],
+		["manDamp", "Damping", 1.6, 0, 6, 0.1, "/s"],
+		["manLoop", "Loops out past the balance point by", 0.42, 0.15, 0.7, 0.01, "rad"],
+		["manZone", "Sweet spot width", 0.14, 0.04, 0.3, 0.01, "rad"],
+		["manBoost", "Sweet spot speed push", 0.5, 0, 2, 0.05, "m/s²"],
+		["manTurn", "Manual / wheelie: turning on the back wheel", 0.65, 0, 1, 0.05, "×"],
+		["manLoopKeep", "Looped out: speed kept", 0.72, 0.3, 1, 0.02, "×"],
+		["manSlideCatch", "Front set down when the rear slides past (× slide limit)", 0.7, 0.3, 1, 0.05, "×"],
+		["manSprintLift", "Sprint stamp from slow lifts the front", 1.1, 0, 2.5, 0.05, "×"],
+		["pumpHold", "Hop held downhill: pump push (× slope)", 0.45, 0, 1.5, 0.05, "×g"],
+		["pumpHoldUp", "Hop held uphill: pump cost (× slope)", 0.4, 0, 1.5, 0.05, "×g"],
+		["pumpMinSpeed", "Pump works from", 2.0, 0, 8, 0.25, "m/s"],
+		["pumpStick", "Body stick forward: pump strength (× the button)", 1.2, 0, 2, 0.05, "×"],
+		["pumpUnweight", "Body stick eased back up a face: speed carried (× slope)", 0.15, 0, 0.6, 0.01, "×g"],
+		["pumpCentred", "Stick pumping keeps the weight centred (rear keeps grip)", 0.75, 0, 1, 0.05, "×"],
+		["landPerfect", "Perfect landing within", 0.14, 0.03, 0.4, 0.01, "rad"],
+		["landBoost", "Perfect landing speed boost", 1.6, 0, 5, 0.1, "m/s"],
+		["landPerfectAir", "Perfect landing: from air time", 0.45, 0.1, 1.5, 0.05, "s"],
+	]],
 	# the demo rider (F2, tuning card › Ride › Demo; not ride feel, so presets leave it alone)
 	["Demo rider", [
 		["demoPace", "Cornering pace (1 = safe pro)", 1.0, 0.4, 1.7, 0.05, "×"],
@@ -249,7 +276,6 @@ const DEFS := [
 		["dustSwirl", "Swirl strength", 6.5, 0, 15, 0.25, ""],
 		["dustSwirlSize", "Swirl size", 0.7, 0.2, 2, 0.05, "1/m"],
 		["dustCurl", "Curls / rolls", 0.9, 0, 3, 0.05, ""],
-		["dustGrit", "Grit (flying grains)", 1.0, 0, 3, 0.05, "×"],
 	]],
 	["Dust trail", [
 		["dustFade", "Fade speed (low = longer)", 0.07, 0, 0.6, 0.01, "/s"],
@@ -260,21 +286,29 @@ const DEFS := [
 	["Dust spray", [
 		["dustAmount", "Rear tyre amount", 1.0, 0, 3, 0.05, "×"],
 		["dustFront", "Front tyre amount", 0.35, 0, 1.5, 0.05, "×"],
-		["dustWidth", "Spray width (fan)", 0.8, 0, 2.5, 0.05, "×"],
+		["dustWidth", "Spray cone at the tyre", 8, 0, 60, 1, "°"],
 		["dustPushOut", "Pushed out sideways", 1.0, 0, 3, 0.05, "×"],
 		["dustKickUp", "Kicked up", 1.0, 0, 3, 0.05, "×"],
 		["dustThrow", "Thrown back", 1.0, 0, 3, 0.05, "×"],
 		["dustGust", "Gusty / pulsing", 2.6, 0, 5, 0.1, ""],
 		["dustLanding", "Landing / crash clouds", 1.0, 0, 3, 0.05, "×"],
 	]],
+	["Dust grit", [
+		["dustGrit", "Amount (flying grains)", 1.0, 0, 3, 0.05, "×"],
+		["dustGritSize", "Grain size", 1.0, 0.2, 4, 0.05, "×"],
+		["dustGritWidth", "Spread (random scatter)", 1.0, 0, 4, 0.05, "×"],
+		["dustGritThrow", "Thrown back", 1.4, 0, 3, 0.05, "×"],
+		["dustGritUp", "Kicked up", 1.0, 0, 3, 0.05, "×"],
+		["dustGritFrom", "Starts at speed", 30, 0, 80, 1, "km/h"],
+	]],
 ]
 
 const PATH := "user://tune.cfg"
 ## bump VER when defaults are retuned: saved values of the RETUNED keys are dropped once
-const VER := 15
+const VER := 16
 ## later retunes, per version: only these keys are dropped for saves older than that version (bumping VER
 ## with one shared list would reset every earlier retuned key again)
-const RETUNED_AT := {8: ["manualFrom", "stickAirRoll", "stickSpinBuild", "stickYawRate"], 9: ["leanMax"], 11: ["leanIn", "leanOut", "flickSpeed"], 12: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 13: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 14: ["sprintRock"], 15: ["bodyLean"]}
+const RETUNED_AT := {8: ["manualFrom", "stickAirRoll", "stickSpinBuild", "stickYawRate"], 9: ["leanMax"], 11: ["leanIn", "leanOut", "flickSpeed"], 12: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 13: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 14: ["sprintRock"], 15: ["dustWidth"], 16: ["bodyLean"]}
 const RETUNED := ["steerRate", "steerRelease", "steerCurve", "turnSlow", "turnFast", "turnFloor", "steerMax", "slowSteer",
 	"barSpeed", "grip", "slipRecover", "slipMax", "turnWeight", "leanMax", "leanIn", "leanOut", "leanDamp", "bikeLeanMul", "bikeLeanCap", "flipAccel", "flipRate", "airTwist", "landBack", "travel", "popKick"]
 var defaults := {}

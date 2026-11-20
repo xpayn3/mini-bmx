@@ -55,6 +55,20 @@ static func ensure() -> void:
 	# tape stake: thin white fibreglass stake with an orange cap, 0.2 m in the ground
 	MESH["stake"] = GeoBuf.merge([GeoBuf.cylinder(0.018, 0.022, 1.15, 5).translate(0, 0.575 - 0.2, 0).paint(lin(0xe9e6dc)),
 		GeoBuf.cylinder(0.024, 0.024, 0.12, 5).translate(0, 0.9, 0).paint(lin(0xff6a1a))]).to_mesh()
+	# loose stake pieces (Terrain.stake_yank), centred on their middle: pulled out whole (earth on its foot),
+	# the top snapped off at the ground, and the stub left standing
+	MESH["stake_whole"] = GeoBuf.merge([GeoBuf.cylinder(0.018, 0.022, 1.15, 5).paint(lin(0xe9e6dc)),
+		GeoBuf.cylinder(0.026, 0.03, 0.2, 5).translate(0, -0.475, 0).paint(lin(0x5a4430)),
+		GeoBuf.cylinder(0.024, 0.024, 0.12, 5).translate(0, 0.525, 0).paint(lin(0xff6a1a))]).to_mesh()
+	MESH["stake_top"] = GeoBuf.merge([GeoBuf.cylinder(0.018, 0.021, 0.86, 5).paint(lin(0xe9e6dc)),
+		GeoBuf.cone(0.02, 0.06, 4).rot_x(PI).translate(0.004, -0.46, 0).paint(lin(0xe9e6dc)),
+		GeoBuf.cylinder(0.024, 0.024, 0.12, 5).translate(0, 0.405, 0).paint(lin(0xff6a1a))]).to_mesh()
+	MESH["stake_stub"] = GeoBuf.merge([GeoBuf.cylinder(0.021, 0.022, 0.26, 5).translate(0, -0.07, 0),
+		GeoBuf.cone(0.02, 0.05, 4).translate(-0.004, 0.085, 0)]).paint(lin(0xe9e6dc)).to_mesh()
+	var lm := StandardMaterial3D.new()
+	lm.vertex_color_use_as_albedo = true
+	lm.roughness = 0.6
+	MAT["stake_loose"] = lm
 	_build_sheds()
 
 

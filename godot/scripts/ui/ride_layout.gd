@@ -212,6 +212,37 @@ const PAGES := [
 			["riderMass", "Body weight on the legs.", "Light", "Heavy"],
 		]],
 	]],
+	["manual", "Manual & pump", "Manuals / wheelies you balance yourself, pumping for speed, perfect landings", [
+		["Manual & wheelie", [
+			["*manBalanceOn", "1 = you balance it (stick back lifts, brake / lean forward drops). 0 = it holds itself.", "Holds itself", "You balance"],
+			["*manBalance", "The balance point: how high the front sits when it's balanced.", "Low", "High"],
+			["*manGravity", "How fast it falls away from the balance point.", "Lazy", "Twitchy"],
+			["manLift", "How hard pulling the stick back lifts the front.", "Gentle", "Strong"],
+			["manPedal", "A pedal stroke lifts the front.", "No", "Lots"],
+			["manBrake", "The rear brake drops the front.", "Gently", "Fast"],
+			["manDamp", "Damping of the balance.", "Bouncy", "Damped"],
+			["manLoop", "Past the balance point by this much it loops out.", "Strict", "Forgiving"],
+			["manZone", "Sweet-spot width.", "Narrow", "Wide"],
+			["manBoost", "Riding the sweet spot gives a small push.", "None", "Lots"],
+			["manTurn", "Turning while on the back wheel.", "None", "Full"],
+			["manLoopKeep", "Speed kept when it loops out.", "Little", "All"],
+			["manSlideCatch", "The front is set down when the rear slides this far (x the slide limit).", "Early", "Late"],
+			["manSprintLift", "A sprint stamp from slow lifts the front.", "No", "Lots"],
+		]],
+		["Pumping", [
+			["*pumpHold", "Hop held going down a slope pushes you along.", "None", "Strong"],
+			["pumpHoldUp", "Hop held going up a slope costs speed.", "None", "Lots"],
+			["pumpMinSpeed", "Pumping works from this speed.", "Slow", "Fast"],
+			["*pumpStick", "Right stick forward pumps (x the hop button's strength).", "None", "Strong"],
+			["pumpUnweight", "Stick eased back up a face carries speed.", "None", "Lots"],
+			["pumpCentred", "Stick pumping keeps the weight centred (the rear keeps grip).", "Shifts", "Centred"],
+		]],
+		["Perfect landings", [
+			["*landBoost", "Speed boost for a landing matched to the slope.", "None", "Big"],
+			["landPerfect", "How close to the slope counts as perfect.", "Strict", "Forgiving"],
+			["landPerfectAir", "Only from this much air time.", "Short", "Long"],
+		]],
+	]],
 	["susp", "Suspension", "Tyres, shock and how the ground comes through", [
 		["Wheels & shock", [
 			["*travel", "Suspension travel.", "Short", "Long"],

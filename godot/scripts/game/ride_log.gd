@@ -116,9 +116,10 @@ func record(dt: float, st: BikePhysics, inp: Dictionary, lift: float, drawn_y: f
 
 ## writes the buffer (oldest first) and returns the file's full path ("" if it failed). `mark` = the time
 ## the player pressed the button (the last row), so "seconds before the press" is easy to read
-func save() -> String:
-	DirAccess.make_dir_recursive_absolute("user://ridelogs")
-	var path := "user://ridelogs/ride_%s.csv" % Time.get_datetime_string_from_system().replace(":", "-")
+func save(path := "") -> String:
+	if path == "":
+		DirAccess.make_dir_recursive_absolute("user://ridelogs")
+		path = "user://ridelogs/ride_%s.csv" % Time.get_datetime_string_from_system().replace(":", "-")
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f == null: return ""
 	f.store_line("# Mini BMX ride log: last %.0f s at %d Hz, saved at t=%.2f s (the last row = the moment of the press). before_press = seconds before it" % [SECS, HZ, _t])
