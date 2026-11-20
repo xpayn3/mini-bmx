@@ -10,6 +10,12 @@ signal quit_to_menu
 const SUN_AZ := Vector2(-0.55, 0.42)
 const SUN_ELEV := 0.8376   # 48 deg
 const HDRI_SUN_U := 0.5952  # where the sun is across the HDRI (tools/hdri_sun.gd)
+## Poly Haven pure-sky HDRIs (CC0, 4K), with the sun's U across each photo (measured: brightest 0.02 % of pixels).
+## `el` = the sun height they were shot at; the ride crossfades between them as the sun climbs.
+const HDRI_DIR := "res://assets/hdri/"
+const HDRI_NIGHT := ["rogland_clear_night_4k.hdr", 0.5084]
+const HDRI_LOW := [["belfast_sunset_puresky_4k.hdr", 0.5992], ["qwantani_dusk_2_puresky_4k.hdr", 0.6002]]
+const HDRI_DAY := [["kloofendal_48d_partly_cloudy_puresky_4k.hdr", 0.5952], ["kloofendal_43d_clear_puresky_4k.hdr", 0.6003], ["autumn_field_puresky_4k.hdr", 0.6006]]
 static var SUN_DIR := Vector3(SUN_AZ.normalized().x * cos(SUN_ELEV), sin(SUN_ELEV), SUN_AZ.normalized().y * cos(SUN_ELEV))
 const SKY := Color("a9d6ea")
 ## ride light: a clear afternoon. A strong warm sun against a cool blue sky fill (warm light, cool shade)
@@ -386,6 +392,32 @@ static func sun_elev_deg(h: float) -> float:
 	return 62.0 * sin(PI * x / 14.0) if x <= 14.0 else -50.0 * sin(PI * (x - 14.0) / 10.0)
 
 
+## the HDRI for this sun height: night -> low sun (two photos) -> the day photo of this world (by seed),
+## crossfaded between neighbours so a day / night cycle never pops
+func _pick_sky_hdri(el_deg: float, az: float) -> void:
+	var day: Array = HDRI_DAY[posmod(GameState.seed, HDRI_DAY.size())]
+	var low: Array = HDRI_LOW[posmod(GameState.seed, HDRI_LOW.size())]
+	var a: Array
+	var b: Array
+	var t := 0.0
+	if el_deg < -6.0:
+		a = HDRI_NIGHT; b = HDRI_NIGHT
+	elif el_deg < 1.0:
+		a = HDRI_NIGHT; b = low; t = smoothstep(-6.0, 1.0, el_deg)
+	elif el_deg < 14.0:
+		a = low; b = day; t = smoothstep(4.0, 14.0, el_deg)
+	else:
+		a = day; b = day
+	sky_mat.set_shader_parameter("hdri", load(HDRI_DIR + String(a[0])))
+	sky_mat.set_shader_parameter("rotation", az - (float(a[1]) - 0.5) * TAU)
+	if b == a or t <= 0.0:
+		sky_mat.set_shader_parameter("mix_b", 0.0)
+		return
+	sky_mat.set_shader_parameter("hdri_b", load(HDRI_DIR + String(b[0])))
+	sky_mat.set_shader_parameter("rotation_b", az - (float(b[1]) - 0.5) * TAU)
+	sky_mat.set_shader_parameter("mix_b", t)
+
+
 func _apply_light(h: float, L: Dictionary) -> void:
 	var el_deg := sun_elev_deg(h)
 	var x := fposmod(h - 6.0, 24.0)
@@ -412,7 +444,7 @@ func _apply_light(h: float, L: Dictionary) -> void:
 	sun.shadow_normal_bias = lerpf(1.2, 3.0, g)
 	sun.shadow_blur = lerpf(1.0, 2.0, g) * float(L.shadow_soft)
 	# sky: blue + white clouds by day, golden low, stars at night; its photographed sun follows ours
-	sky_mat.set_shader_parameter("rotation", atan2(dirv.x, -dirv.z) - (HDRI_SUN_U - 0.5) * TAU)
+	_pick_sky_hdri(el_deg, atan2(dirv.x, -dirv.z))
 	sky_mat.set_shader_parameter("golden", gw)
 	sky_mat.set_shader_parameter("sunny", day * (1.0 - gw))
 	sky_mat.set_shader_parameter("night", n)

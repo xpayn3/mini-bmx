@@ -14,6 +14,7 @@ const CREDITS := [
 	]],
 	["TEXTURES + LIGHT", [
 		["Kloofendal 48d Partly Cloudy (Pure Sky) HDRI", "Poly Haven, polyhaven.com", "CC0"],
+		["Kloofendal 43d Clear, Autumn Field, Belfast Sunset, Qwantani Dusk 2 (Pure Sky) and Rogland Clear Night HDRIs", "Poly Haven, polyhaven.com", "CC0"],
 		["Painted Concrete 02", "Poly Haven, polyhaven.com", "CC0"],
 		["Broken Brick Wall", "Amal Kumar / Poly Haven, polyhaven.com", "CC0"],
 		["Paper003, Metal009, Rubber004", "ambientCG, ambientcg.com", "CC0"],
