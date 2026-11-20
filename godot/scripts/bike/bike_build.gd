@@ -349,30 +349,42 @@ static func bmx_build(tyre_key: String) -> Dictionary:
 
 ## each frame's own factory colours (paint parts laid over default_build's), so the frames don't all come out alike.
 ## The parts of a build are shared by every frame; the paint is kept per frame (garage.json "paints": {frame: paint}).
-## A frame not painted yet gets a random factory colourway (picked once a session): a plain frame colour from a list
-## of real-looking bike paints, a matching spring / linkage / grips, black or tan-wall tyres.
-const FACTORY_COLORS := ["1e9bd7", "1d2b64", "2f7de1", "1a1c1f", "2b2d31", "f4f4f0", "6b6f75", "c8ccd0",
-	"2e7d32", "4a5d3a", "8a5a2b", "ff6a00", "ffd21f", "7b3fe4", "0f8f8a", "b3122e", "e8432e", "3a3f47"]
+## A frame not painted yet gets a factory colourway picked at random once, the same every launch (fixed seed, frames
+## in GameState.BIKES order): a plain frame colour from a list of real-looking bike paints, a matching spring / linkage /
+## grips, black or tan-wall tyres. Change FACTORY_SEED for a different set.
+const FACTORY_COLORS := ["1e9bd7", "1d2b64", "2f7de1", "1a1c1f", "2e7d32", "4a5d3a", "8a5a2b", "ff6a00",
+	"ffd21f", "7b3fe4", "0f8f8a", "b3122e", "e8432e"]
 const FACTORY_FINISHES := ["gloss", "gloss", "metallic", "metallic", "matte", "satin", "pearl"]
 const FACTORY_ACCENTS := ["111214", "f4f4f0", "e8b030", "c8ccd0", "e8432e", "ff6a00"]
-static var _factory := {}   # frame -> {"paint", "sidewall"} for this session
+const FACTORY_SEED := 20261120
+static var _factory := {}   # frame -> {"paint", "sidewall"}
 
 static func _factory_look(frame: String) -> Dictionary:
-	if _factory.has(frame): return _factory[frame]
-	var used := []   # no two frames the same colour
+	if _factory.is_empty():   # every garage frame at once, in a fixed order, so no two share a colour
+		var rng := RandomNumberGenerator.new()
+		rng.seed = FACTORY_SEED
+		for id in GameState.BIKES:
+			if GameState.BIKES[id].get("garage", false): _factory[id] = _make_factory(rng)
+	if not _factory.has(frame):
+		var rng := RandomNumberGenerator.new()
+		rng.seed = FACTORY_SEED + hash(frame)
+		_factory[frame] = _make_factory(rng)
+	return _factory[frame]
+
+static func _make_factory(rng: RandomNumberGenerator) -> Dictionary:
+	var used := []
 	for f in _factory: used.append(_factory[f].paint.frame.color)
 	var cols := FACTORY_COLORS.filter(func(c): return not used.has(c))
-	var col: String = cols[randi() % cols.size()]
-	var fin: String = FACTORY_FINISHES[randi() % FACTORY_FINISHES.size()]
-	var acc: String = FACTORY_ACCENTS[randi() % FACTORY_ACCENTS.size()]
+	var col: String = cols[rng.randi() % cols.size()]
+	var fin: String = FACTORY_FINISHES[rng.randi() % FACTORY_FINISHES.size()]
+	var acc: String = FACTORY_ACCENTS[rng.randi() % FACTORY_ACCENTS.size()]
 	if acc == col: acc = "111214" if col != "111214" else "f4f4f0"
 	var p: Dictionary = default_build().paint
 	_merge(p, {"frame": {"color": col, "color2": col, "finish": fin}, "rear": {"color": col, "color2": col, "finish": fin},
 		"spring": {"color": acc, "finish": "gloss"},
-		"linkage": {"color": ["111214", "c8ccd0", col][randi() % 3], "finish": ["anodized", "chrome", fin][randi() % 3]},
-		"grips": {"color": acc if randf() < 0.4 else "1c1c1c", "finish": "matte"}})
-	_factory[frame] = {"paint": p, "sidewall": "tan" if randf() < 0.45 else "black"}
-	return _factory[frame]
+		"linkage": {"color": ["111214", "c8ccd0", col][rng.randi() % 3], "finish": ["anodized", "chrome", fin][rng.randi() % 3]},
+		"grips": {"color": acc if rng.randf() < 0.4 else "1c1c1c", "finish": "matte"}})
+	return {"paint": p, "sidewall": "tan" if rng.randf() < 0.45 else "black"}
 
 ## an old file's paint that is just the stock red default (never painted)
 static func _is_stock_paint(p) -> bool:
