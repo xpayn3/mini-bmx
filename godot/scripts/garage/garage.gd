@@ -13,6 +13,9 @@ var mode := "bike"
 
 const SWATCHES := ["e8432e", "ff6a00", "ffb000", "ffd21f", "c6ff1a", "35d04a", "00a86b", "00c2c7", "2f7de1", "1d2b64",
 	"7b3fe4", "d22fbf", "ff4f9a", "f4f4f0", "b8bcc0", "6b6f75", "2b2d31", "111214", "c8a24a", "8a5a2b", "4a6b3a", "e0d3b8"]
+## the paint-shop chip names of SWATCHES (same order; made up, like the rest of the game's names); code = RO 1xx
+const SWATCH_NAMES := ["Signal Red", "Blaze", "Amber", "Race Yellow", "Acid Lime", "Fern", "Jade", "Lagoon", "Cobalt", "Navy",
+	"Violet", "Magenta", "Bubblegum", "Chalk", "Alloy", "Gunmetal", "Graphite", "Jet Black", "Brass", "Saddle", "Olive", "Sand"]
 
 const DOOR_W := 3.6
 const DOOR_H := 3.2
@@ -1168,20 +1171,54 @@ func _color(text: String, cur: String, cb: Callable) -> void:
 		cb.call(Color(hex).to_html(false)); _changed())
 	_row(text, cp)
 
+## paint-shop colour chips: a square of the colour over a white strip with its code + name. The picked chip's
+## strip turns yellow with an ink bar (flat: no outlines), hover lightens the strip.
+const CHIP := 68          # px: the colour square (5 chips fill the card's width)
+const CHIP_STRIP := 36    # px: the label strip under it
 func _swatches(cur: String, cb: Callable) -> void:
 	var g := GridContainer.new()
-	g.columns = 11
+	g.columns = 5
 	g.add_theme_constant_override("h_separation", Tokens.S2)
 	g.add_theme_constant_override("v_separation", Tokens.S2)
-	for hex in SWATCHES:
-		var b := Button.new()
-		b.custom_minimum_size = Vector2.ONE * (Tokens.S6 + Tokens.S2)
+	for i in SWATCHES.size():
+		var hex: String = SWATCHES[i]
+		var nm: String = SWATCH_NAMES[i] if i < SWATCH_NAMES.size() else "#" + hex
+		var code := "RO %d" % (101 + i)
 		var on: bool = hex == cur
-		# the picked colour gets an ink bar under it (flat: no outlines)
-		b.add_theme_stylebox_override("normal", UITheme.marked(Color(hex), INK, SIDE_BOTTOM, Tokens.R_SM, 0) if on else UITheme.box(Color(hex), Tokens.R_SM, 0))
-		b.add_theme_stylebox_override("hover", UITheme.marked(Color(hex).lightened(0.15), Tokens.ACCENT, SIDE_BOTTOM, Tokens.R_SM, 0))
-		b.add_theme_stylebox_override("pressed", UITheme.marked(Color(hex), Tokens.ACCENT, SIDE_BOTTOM, Tokens.R_SM, 0))
-		b.add_theme_stylebox_override("focus", UITheme.marked(Tokens.CLEAR, Tokens.INK, SIDE_TOP, Tokens.R_SM, 0))
+		var b := Button.new()
+		b.custom_minimum_size = Vector2(CHIP, CHIP + CHIP_STRIP)
+		b.tooltip_text = "%s  %s  #%s" % [code, nm, hex]
+		var strip := Tokens.ACCENT_TINT if on else Color.WHITE
+		b.add_theme_stylebox_override("normal", UITheme.marked(strip, INK, SIDE_BOTTOM, Tokens.R_SM, 0) if on else UITheme.box(strip, Tokens.R_SM, 0))
+		b.add_theme_stylebox_override("hover", UITheme.marked(Tokens.ACCENT_TINT if on else Tokens.FILL, Tokens.ACCENT, SIDE_BOTTOM, Tokens.R_SM, 0))
+		b.add_theme_stylebox_override("pressed", UITheme.marked(Tokens.ACCENT_TINT, Tokens.ACCENT, SIDE_BOTTOM, Tokens.R_SM, 0))
+		b.add_theme_stylebox_override("focus", UITheme.marked(Color(Tokens.INK, 0.06), Tokens.INK, SIDE_BOTTOM, Tokens.R_SM, 0))
+		var col := VBoxContainer.new()
+		col.set_anchors_preset(Control.PRESET_FULL_RECT)
+		col.add_theme_constant_override("separation", 0)
+		col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var sq := ColorRect.new()
+		sq.color = Color(hex)
+		sq.custom_minimum_size = Vector2(CHIP, CHIP)
+		sq.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		col.add_child(sq)
+		var lab := VBoxContainer.new()
+		lab.add_theme_constant_override("separation", -3)
+		lab.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var m := MarginContainer.new()
+		m.add_theme_constant_override("margin_left", 4); m.add_theme_constant_override("margin_right", 2)
+		m.add_theme_constant_override("margin_top", 2)
+		m.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		m.add_child(lab)
+		col.add_child(m)
+		var c1 := UITheme.display(code, 14, INK, 0.0)
+		var c2 := UITheme.caption(nm.to_upper(), SUB, 11)
+		for l in [c1, c2]:
+			(l as Label).clip_text = true
+			(l as Label).text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+			(l as Label).mouse_filter = Control.MOUSE_FILTER_IGNORE
+			lab.add_child(l)
+		b.add_child(col)
 		b.pressed.connect(func(): cb.call(hex); _changed(); _set_tab(tab))
 		g.add_child(b)
 	body.add_child(g)
