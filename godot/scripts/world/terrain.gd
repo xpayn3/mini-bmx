@@ -668,6 +668,12 @@ func _finalize(k: Vector2i) -> void:
 		mms[name] = mm
 		if spec[3]:
 			small.append(node.get_child(node.get_child_count() - 1))
+	if o.has("gates"):
+		for g in o["gates"]:
+			node.add_child(TrailGate.build(g))
+	if o.has("arches"):
+		for a in o["arches"]:
+			node.add_child(TrailArch.build(a))
 	var sheds: Array = o["sheds"]
 	for i in sheds.size():
 		var buf: PackedFloat32Array = sheds[i]

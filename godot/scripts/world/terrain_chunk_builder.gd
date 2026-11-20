@@ -187,6 +187,8 @@ func _build() -> void:
 	for p in panels:
 		blocked.append([p["cx"], p["cz"], 1.6])
 	_gates()
+	_arches()
+	_boards()
 	_tape()
 	for k in colliders:
 		if k.has("tape"):
@@ -598,8 +600,94 @@ func _gates() -> void:
 					ok = false
 		if not ok:
 			continue
-		var top := maxf(hl, hr) + 5.4
-		var panel := {"broken": false, "parts": [], "style": "gate", "cx": cxp, "cz": czp}
+		list.append({"x": cxp, "z": czp, "tx": tx, "tz": tz, "half": half, "hl": hl, "hr": hr, "hc": hc, "i": i})
+	if not list.is_empty():
+		out["gates"] = list
+	if OS.get_environment("BMX_GATE_PROBE") != "":
+		print("GATES chunk=", cx, ",", cz, " cand=", C.chunk_gates.get(TrailCourse.chunk_key(cx, cz), PackedInt32Array()).size(), " placed=", list.size(), " boards_cand=", C.chunk_boards.get(TrailCourse.chunk_key(cx, cz), PackedInt32Array()).size())
+
+
+## rare rock tunnels / cliff overhangs over the trail (data only; Terrain builds the nodes)
+func _arches() -> void:
+	var C: TrailCourse = f.course
+	var list := []
+	for code in C.chunk_arches.get(TrailCourse.chunk_key(cx, cz), PackedInt32Array()):
+		var i: int = code >> 1
+		var tx: float = C.TX[i]
+		var tz: float = C.TZ[i]
+		var half: float = C.W[i] + 1.3
+		var nx := -tz
+		var nz := tx
+		var cxp: float = C.X[i]
+		var czp: float = C.Z[i]
+		if sqrt(cxp * cxp + czp * czp) < 30:
+			continue
+		var hl := height(cxp - nx * half, czp - nz * half)
+		var hr := height(cxp + nx * half, czp + nz * half)
+		if hl < WATER + 0.2 or hr < WATER + 0.2 or absf(hl - hr) > 4.0:
+			continue
+		var ok := true
+		for s in [-9.0, 0.0, 9.0]:
+			f.jump_eval(cxp + tx * s, czp + tz * s)
+			if f.fo_h > 0.05:
+				ok = false
+		if ok:
+			list.append({"x": cxp, "z": czp, "tx": tx, "tz": tz, "half": half, "hl": hl, "hr": hr,
+				"hc": height(cxp, czp), "i": i, "kind": code & 1})
+	if OS.get_environment("BMX_GATE_PROBE") != "":
+		print("ARCHES chunk=", cx, ",", cz, " cand=", C.chunk_arches.get(TrailCourse.chunk_key(cx, cz), PackedInt32Array()).size(), " placed=", list.size())
+	if not list.is_empty():
+		out["arches"] = list
+
+
+## wooden roadside billboards: a fence-style panel (so the bike can smash it) of two posts and
+## three painted planks, angled a little towards the trail, with sponsor text added by Terrain
+func _boards() -> void:
+	var C: TrailCourse = f.course
+	for i in C.chunk_boards.get(TrailCourse.chunk_key(cx, cz), PackedInt32Array()):
+		var tx: float = C.TX[i]
+		var tz: float = C.TZ[i]
+		var side0 := 1.0 if (i / TrailCourse.BOARD_EVERY) % 2 == 0 else -1.0
+		var side := side0
+		var nx := 0.0
+		var nz := 0.0
+		var bx := 0.0
+		var bz := 0.0
+		var h := 0.0
+		var found := false
+		# a clear spot beyond the fences / tape: this side first (near, then further out), then the other
+		for cand in [[side0, 3.4], [side0, 5.6], [side0, 8.0], [-side0, 3.4], [-side0, 5.6], [-side0, 8.0]]:
+			side = cand[0]
+			nx = -tz * side
+			nz = tx * side
+			bx = C.X[i] + nx * (C.W[i] + cand[1])
+			bz = C.Z[i] + nz * (C.W[i] + cand[1])
+			if sqrt(bx * bx + bz * bz) < 12:
+				continue
+			h = height(bx, bz)
+			f.jump_eval(bx, bz)
+			if h >= WATER + 0.4 and f.fo_h <= 0.05 and not is_blocked(bx, bz, -0.4):
+				found = true
+				break
+		if OS.get_environment("BMX_GATE_PROBE") != "":
+			print("BOARD i=", i, " found=", found, " at ", bx, ",", bz, " cx=", cx, " cz=", cz)
+		if not found:
+			continue
+		# board direction: across the trail, turned ~25 degrees towards the riders coming
+		var ang := 0.45 * side
+		var ca := cos(ang)
+		var sa := sin(ang)
+		var dx := nx * ca - nz * sa
+		var dz := nx * sa + nz * ca
+		var px := dz
+		var pz := -dx
+		if px * tx + pz * tz > 0.0:
+			px = -px
+			pz = -pz   # face normal points back up the trail, at the riders
+		var spn := TrailGate.sponsor(i + 5)
+		var panel := {"broken": false, "parts": [], "style": "billboard"}
+		var wood := TerrainField.lin(spn[1])
+		var W := 3.6
 		var add := func(kind: String, pos: Vector3, b: Basis, scl: Vector3, c: Color) -> void:
 			var bs := _scaled(b, scl.x, scl.y, scl.z)
 			var k := _push(kind, bs, pos, c)

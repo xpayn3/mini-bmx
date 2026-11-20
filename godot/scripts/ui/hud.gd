@@ -60,7 +60,7 @@ var trail_d := INF      # how far off the trail centreline (m)
 var alert := {}         # the next turn / feature on the trail: {kind, text, d}, or empty
 var alert_new := 0.0    # seconds left to show a just-appeared alert while it is still far off
 const FEAT_NAMES := {"table": "TABLETOP", "tableLine": "JUMP LINE", "kicker": "KICKER", "rhythm": "ROLLERS",
-	"flow": "FLOW LINE", "woodKicker": "WOOD KICKER", "bridge": "BRIDGE"}
+	"flow": "FLOW LINE", "woodKicker": "WOOD KICKER", "bridge": "BRIDGE", "gorge": "GORGE BRIDGE"}
 var hidden := false
 
 func _ready() -> void:

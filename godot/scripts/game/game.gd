@@ -890,6 +890,8 @@ func respawn(new_world: bool) -> void:
 	if flying_cam and is_instance_valid(flying_cam): flying_cam.queue_free()
 	flying_cam = null
 	var sp := _water_spawn() if OS.get_environment("BMX_WATER_SPAWN") != "" else Vector3.ZERO
+	if OS.get_environment("BMX_TRAIL_FEAT") != "":
+		sp = _feature_spawn(OS.get_environment("BMX_TRAIL_FEAT"))
 	phys.reset_at(sp.x, sp.z, sp.y)
 	if OS.get_environment("BMX_PACK_SPAWN") != "":   # tests: "x,z" of a health pack -> start 3.5 m before it, facing +x
 		var pxz := OS.get_environment("BMX_PACK_SPAWN").split(",")
@@ -931,6 +933,33 @@ func reset_to_trail() -> void:
 	cam.snap_to(Vector3(tx, phys.y + 0.5, tz))
 	if hud: hud.trail_i = -1
 	flash("Back on the trail")
+## tests (BMX_TRAIL_FEAT=drop|arch|N): 70 m up the trail from the Nth drop / the first rock arch -> (x, heading, z)
+func _feature_spawn(what: String) -> Vector3:
+	var C: TrailCourse = terrain.field.course
+	var idx := -1
+	if what == "gorge":
+		for rf in terrain.field.route_feats:
+			if rf.type == "gorge":
+				var gi := int(rf.s / TrailCourse.STEP)
+				print("FEATSPAWN gorge s=", rf.s)
+				var gj := maxi(2, gi - 30)
+				return Vector3(C.X[gj], -atan2(C.TZ[gj], C.TX[gj]), C.Z[gj])
+		return Vector3.ZERO
+	if what == "arch":
+		var best := 1 << 30
+		for kk in C.chunk_arches:
+			for code in C.chunk_arches[kk]:
+				best = mini(best, code >> 1)
+		idx = best if best < (1 << 30) else -1
+	elif not C.drops.is_empty():
+		idx = C.drops[mini(int(what) if what.is_valid_int() else 0, C.drops.size() - 1)][1] - 6
+		idx += int(what.get_slice(":", 1)) if what.contains(":") else 0
+	if idx < 0:
+		return Vector3.ZERO
+	var j := maxi(2, idx - 35)
+	print("FEATSPAWN %s idx=%d at %.0f,%.0f" % [what, idx, C.X[j], C.Z[j]])
+	return Vector3(C.X[j], -atan2(C.TZ[j], C.TX[j]), C.Z[j])
+
 
 ## tests (BMX_WATER_SPAWN=1): a dry spot 6 m from the nearest lake, facing it -> (x, heading, z)
 func _water_spawn() -> Vector3:
