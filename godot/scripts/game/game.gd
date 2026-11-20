@@ -63,7 +63,8 @@ var light_t := 0.0
 const GoggleLens = preload("res://scripts/rider/goggle_lens.gd")
 const RIM_LAYER := 1 << 11   # render layer 12: the rider + bike (only the rim light uses it)
 const AGX_CONTRAST := 1.35
-const MIST_DENSITY := 0.45   # height fog in the dips at sunrise (Env BMX_MIST=k forces the amount)
+const MIST_MAX_ABOVE := 2.0   # the mist top is never more than this far over the rider (the 20 s average lags on descents)
+const MIST_DENSITY := 0.45  # height fog in the dips at sunrise (Env BMX_MIST=k forces the amount)
 const AGX_EXP_DAY := 0.7
 const AGX_EXP_GOLD := 0.9
 const AGX_EXP_NIGHT := 3.3
@@ -482,6 +483,9 @@ func _mist_update(dt: float) -> void:
 	var gy := float(phys.y)
 	if is_nan(_mist_y) or absf(gy - _mist_y) > 80.0: _mist_y = gy
 	_mist_y += (gy - _mist_y) * (1.0 - exp(-dt / 20.0))
+	# the slow average lags behind on a long descent and buried the rider deep in the fog (couldn't see anything):
+	# the mist top may sit at most MIST_MAX_ABOVE over the rider, so it only ever lies in the dips below the camera
+	_mist_y = minf(_mist_y, gy + MIST_MAX_ABOVE)
 	env.fog_height = _mist_y - 3.5
 	env.fog_height_density = MIST_DENSITY * k
 
