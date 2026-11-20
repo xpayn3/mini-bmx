@@ -1103,8 +1103,16 @@ class StaminaView extends Control:
 		shown = lerpf(shown, val, 0.25 if heal <= 0.0 else 0.06)   # a revive fills up visibly
 		var pulse := 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.012) if low else 1.0
 		var h := size.y
+		# pixel snapping: the HUD is drawn at the window's stretch scale, so 1 unit here is rarely 1 screen
+		# pixel. Every edge / tick is put on a whole screen pixel and the ticks are exactly 1 pixel wide,
+		# or the anti-aliasing smears some over two pixels and they come out thinner / fainter than others.
+		var stf := get_screen_transform()
+		_s = maxf(stf.get_scale().x, 0.01)
+		_o = stf.origin
+		var px := 1.0 / _s
 		if shake > 0.0:
-			draw_set_transform(Vector2(sin(Time.get_ticks_msec() * 0.09) * 4.0 * shake, 0))
+			var off := sin(Time.get_ticks_msec() * 0.09) * 4.0 * shake
+			draw_set_transform(Vector2(roundf(off * _s) / _s, 0))
 		var ix := 8.0
 		var cy := h * 0.5
 		if life:   # heart icon on the left
@@ -1117,22 +1125,39 @@ class StaminaView extends Control:
 				Vector2(ix - 2, cy + 6), Vector2(ix + 4, cy - 1.5), Vector2(ix + 1, cy - 1.5)])
 			draw_colored_polygon(bolt, Color(col, 0.55 + 0.45 * pulse))
 		# track
-		var tr := Rect2(22, 3, size.x - 22, h - 6)
-		if heal > 0.0: _pill(self, tr.grow(3 + 3 * heal), Color(0.36, 1.0, 0.54, 0.3 * heal))
-		_pill(self, Rect2(tr.position - Vector2(1, 1), tr.size + Vector2(2, 2)), Color(0, 0, 0, 0.55))
+		var x0 := _sx(size.x - 200.0)   # 200 wide: the 10 % ticks land 20 px apart at 1:1
+		var x1 := _sx(size.x)
+		var y0 := _sy(3.0)
+		var y1 := _sy(h - 3.0)
+		var tr := Rect2(x0, y0, x1 - x0, y1 - y0)
+		if heal > 0.0: _pill(self, tr.grow(roundf((3 + 3 * heal) * _s) * px), Color(0.36, 1.0, 0.54, 0.3 * heal))
+		_pill(self, tr.grow(px), Color(0, 0, 0, 0.55))
 		_pill(self, tr, Color(1, 1, 1, 0.10))
-		# fill
-		var fw := maxf(tr.size.y, tr.size.x * clampf(shown, 0, 1)) if shown > 0.01 else 0.0
+		# fill (its straight end on a whole pixel too)
+		var fw := 0.0
+		if shown > 0.01:
+			fw = _sx(x0 + maxf(tr.size.y, tr.size.x * clampf(shown, 0, 1))) - x0
 		if fw > 0.0:
+			var cut := fw < tr.size.x - 0.5 * px
 			if sprinting and not tired:
-				_pill(self, Rect2(tr.position - Vector2(2, 2), Vector2(fw + 2, tr.size.y + 4)), Color(col, 0.22), true)
-			_pill(self, Rect2(tr.position, Vector2(fw, tr.size.y)), Color(col, 0.55 + 0.45 * pulse), fw < tr.size.x - 0.5)
+				_pill(self, Rect2(tr.position - Vector2(2, 2) * px, Vector2(fw + 2 * px, tr.size.y + 4 * px)), Color(col, 0.22), true)
+			_pill(self, Rect2(tr.position, Vector2(fw, tr.size.y)), Color(col, 0.55 + 0.45 * pulse), cut)
 			# lighter top half for a soft gloss
-			_pill(self, Rect2(tr.position + Vector2(1, 1), Vector2(maxf(fw - 1, 2), tr.size.y * 0.4)), Color(1, 1, 1, 0.22), fw < tr.size.x - 0.5)
-		# tick marks every 10 %
+			var gh := maxf(roundf(tr.size.y * 0.4 * _s), 1.0) * px
+			_pill(self, Rect2(tr.position + Vector2(px, px), Vector2(maxf(fw - px, 2 * px), gh)), Color(1, 1, 1, 0.22), cut)
+		# tick marks every 10 %: one screen pixel wide, each on a whole pixel
 		for i in range(1, 10):
-			var x := tr.position.x + tr.size.x * i / 10.0
-			draw_rect(Rect2(x - 0.5, tr.position.y + 1, 1, tr.size.y - 2), Color(0, 0, 0, 0.35))
+			var x := _sx(tr.position.x + tr.size.x * i / 10.0)
+			draw_rect(Rect2(x, y0 + px, px, tr.size.y - 2 * px), Color(0, 0, 0, 0.35))
+
+	var _s := 1.0              # screen pixels per unit
+	var _o := Vector2.ZERO     # this control's origin on the screen
+
+	func _sx(v: float) -> float:   # local x -> nearest whole screen pixel, back in local units
+		return (roundf(_o.x + v * _s) - _o.x) / _s
+
+	func _sy(v: float) -> float:
+		return (roundf(_o.y + v * _s) - _o.y) / _s
 
 class GetUpPrompt extends Control:
 	## after a crash, bottom centre: "HOLD SPACE TO GET UP" and a thin bar that fills while the hop key
