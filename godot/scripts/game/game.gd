@@ -895,10 +895,17 @@ func _stand_to_bike(dt: float) -> void:
 	for i in 15: P.append((inv * (_stand_world[i] as Vector3)).lerp(rider.J[i], w))
 	rider.pose_points(P)
 
+## the drawn-only smoothing (motion caps, pose smoothers, the stand-to-bike blend) starts fresh: after a respawn / a
+## reset onto the trail it kept the old spot's values (a spawn drawn ~50 deg leaned, swinging upright; Backspace while
+## climbing back on stretched the body from the old spot)
+func _reset_draw_state() -> void:
+	_mc.clear(); _stand_blend = 1.0
+	_yaw_s = 0.0; _turn_s = 0.0; _aspin_s = 0.0; _atilt_s = 0.0; _blat_s = 0.0; _awhip_s = 0.0
+
 func get_up() -> void:
 	if getup_anim is ClipGetUp: getup_anim.free_clips()   # (Backspace while standing dizzy)
 	getup_anim = null
-	_stand_blend = 1.0
+	_reset_draw_state()
 	phys.get_up()
 	_out_of_crevasse()
 	if wasted: wasted.finish()
@@ -1106,6 +1113,7 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 # ---------------------------------------------------------------- ride control
 func respawn(new_world: bool) -> void:
 	if phys.crash_on: get_up()
+	_reset_draw_state()
 	if hud: hud.on_respawn()
 	if new_world:
 		GameState.new_seed()
@@ -1228,6 +1236,7 @@ func _out_of_crevasse() -> void:
 func reset_to_trail() -> void:
 	var tc: TrailCourse = terrain.field.course if terrain and terrain.field else null
 	if tc == null or tc.n < 2: return
+	_reset_draw_state()
 	var best := 0
 	var bd := INF
 	for i in tc.n:
@@ -1415,7 +1424,7 @@ func _held_ok(a: String) -> bool:
 ## tests (BMX_BRAKETURN): which values vibrate - per value, how often its step-to-step change flips sign
 ## with a real size (a vibration), and the biggest such flip
 var _base_bins := {}
-var _v_prev_fx := 0.0; var _surge := 0.0   # speed feel: last speed, acceleration surge
+var _v_prev_fx := 0.0; var _acc_fx := 0.0; var _surge := 0.0   # speed feel: last speed, its acceleration (per physics step), surge
 var ride_log := RideLog.new()   # the last 60 s, saved with R3 / F8 (save_log)
 var _log_lift := 0.0
 var jitter_on := Env.s("BMX_JITTER_ALL") != ""
@@ -1430,7 +1439,7 @@ var _jit := {}
 ## clamp letting go) can no longer jolt the torso, the head or the bike. The physics and the ride feel are untouched
 const MCAP := {
 	"bike_lean": [10.0, 160.0], "steer": [9.0, 200.0], "counter": [7.0, 110.0], "head_roll": [8.0, 120.0],
-	"lat_g": [6.0, 80.0], "hip_shift": [1.6, 30.0], "absorb": [2.5, 60.0], "body_stick": [6.0, 80.0], "pitch": [9.0, 220.0],
+	"lat_g": [6.0, 80.0], "hip_shift": [1.6, 30.0], "absorb": [2.5, 60.0], "body_stick": [6.0, 80.0],
 }
 var _mc := {}
 var _lean_c := 0.0; var _steer_c := 0.0   # this frame's capped bike lean / bars (the bike and the rider's pose share them)
@@ -1438,7 +1447,9 @@ func _mcap(key: String, target: float, dt: float) -> float:
 	var mc: float = maxf(0.2, float(Tune.v.get("motionCap", 1.0)))   # (Ride › Smoothing: higher = looser caps)
 	var lim: Array = [float(MCAP[key][0]) * mc, float(MCAP[key][1]) * mc]
 	var s = _mc.get(key)
-	if s == null or not is_finite(target):
+	if not is_finite(target):   # (stored, a NaN stayed in this channel until the next crash)
+		return float(s[0]) if s != null else 0.0
+	if s == null or not is_finite(float(s[0])) or not is_finite(float(s[1])):
 		_mc[key] = [target, 0.0]
 		return target
 	# integrated in steps of at most 1/240 s: one step per drawn frame was unstable at 60 fps (w x dt = 1, the
@@ -1494,6 +1505,11 @@ func _perf_report() -> void:
 	_perf_acc.clear(); _perf_frames = 0
 
 func _physics_process(dt: float) -> void:
+	# photo mode / the trail map set time_scale 0, but physics ticks still come, with dt = 0: stepping the ride then
+	# divided by zero (air yaw, pivot, wheel ground speed) and left NaNs in yaw_rate / spin_acc, and live keys fed it
+	if dt <= 0.0:
+		if rumble: rumble.stop()
+		return
 	var _pk := Time.get_ticks_usec()
 	_snap_prev()
 	var inp := _read_input()
@@ -1507,10 +1523,6 @@ func _physics_process(dt: float) -> void:
 	_pk = _perf("p_bike_step", _pk)
 	_rope_tick(dt)
 	_pk = _perf("p_rope", _pk)
-	if rumble:
-		if input_enabled and not photo and not (paper_map and paper_map.busy()): rumble.update(dt, inp)
-		else: rumble.stop()
-	_pk = _perf("p_rumble", _pk)
 	ride_log.record(dt, phys, inp, _log_lift, rig.position.y if rig else 0.0, rider.J if rider else [])
 	_pk = _perf("p_ride_log", _pk)
 	if jitter_on and not phys.crash_on:
@@ -1534,6 +1546,14 @@ func _physics_process(dt: float) -> void:
 	else:
 		for k in ["x", "z", "y", "heading", "course", "pitch", "lean", "steer", "slip", "compress"]:
 			_last_good[k] = phys.get(k)
+	# (after the sanity check: a step that went non-finite must not reach the motors or the rumble's smoothing)
+	if rumble:
+		if input_enabled and not photo and not (paper_map and paper_map.busy()): rumble.update(dt, inp)
+		else: rumble.stop()
+	_pk = _perf("p_rumble", _pk)
+	# speed feel's surge: the bike's acceleration per physics step (per drawn frame it came out 3-4x weaker at 400 fps)
+	_acc_fx = (absf(phys.v) - _v_prev_fx) / dt
+	_v_prev_fx = absf(phys.v)
 
 ## rope bridges: the rider's weight (with every bump / landing: the ground's push n_load) and sideways push
 ## (the turn's reaction) go into the deck, the decks step, then the deck's sideways swing carries the bike
@@ -2066,9 +2086,7 @@ func _process(dt: float) -> void:
 	var fx_on: bool = Settings.get_v("speed_fx") and not st.crash_on
 	var sk := smoothstep(7.0, 21.0, absf(st.v)) if fx_on else 0.0
 	speed_k += (sk - speed_k) * minf(1.0, dt * (2.5 if sk > speed_k else 1.2))
-	var acc_now := (absf(st.v) - _v_prev_fx) / maxf(dt, 1e-3)
-	_v_prev_fx = absf(st.v)
-	_surge += ((clampf(acc_now / 5.0, 0.0, 1.0) * smoothstep(4.0, 12.0, absf(st.v)) if fx_on else 0.0) - _surge) * minf(1.0, dt * 2.0)
+	_surge += ((clampf(_acc_fx / 5.0, 0.0, 1.0) * smoothstep(4.0, 12.0, absf(st.v)) if fx_on else 0.0) - _surge) * minf(1.0, dt * 2.0)
 	cam.fov_boost = speed_k * 14.0 + _surge * 5.0
 	cam.speed_feel = speed_k
 	var gm := grade_rect.material as ShaderMaterial
