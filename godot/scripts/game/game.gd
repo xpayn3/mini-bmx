@@ -394,6 +394,40 @@ func set_scenic(on: bool) -> void:
 		cam.far = RIDE_FAR
 		light_ver = -1   # the level light (time of day) takes over on the next frame
 
+## glare guard: riding (or looking) toward a low sun washed the screen out (the sunlit haze, the bloom, the bright
+## sky round the sun, dust lit from behind) so the trail couldn't be seen. When the camera faces a low sun this eases
+## all of those off, smoothly (like squinting / sunglasses); the light on the land stays the same.
+const GG_GLOW := 0.25   # env.glow_intensity as set up in _build_env
+var _gg_vol := 2.6
+var _gg_scat := 0.0
+var _gg_sky := 1.0
+var _gg_dust := 1.0
+var _gg_sun := Vector3.UP
+var _gg_el := 60.0
+var _gg_k := 0.0
+var _gg_s := 0.0
+func _glare_guard(dt: float) -> void:
+	if scenic or photo: return
+	var c3 := get_viewport().get_camera_3d()
+	if c3 == null: return
+	var fwd := -c3.global_basis.z
+	var face := fwd.normalized().dot(_gg_sun)                       # 1 = looking straight at the sun
+	var lowsun := 1.0 - smoothstep(20.0, 40.0, _gg_el)              # a high sun is out of view anyway
+	var up := smoothstep(-6.0, 0.0, _gg_el)                         # only while it's up (dusk afterglow is soft)
+	var target := smoothstep(0.35, 0.92, face) * lowsun * up
+	_gg_s += (target - _gg_s) * (1.0 - exp(-dt * 3.0))
+	if absf(_gg_s - _gg_k) < 0.004: return
+	_gg_k = _gg_s
+	var k := _gg_s
+	if Env.s("BMX_GLARE_OFF") != "": k = 0.0
+	sun.light_volumetric_fog_energy = _gg_vol * (1.0 - 0.8 * k)
+	env.fog_sun_scatter = _gg_scat * (1.0 - k)
+	env.glow_intensity = GG_GLOW * (1.0 - 0.65 * k)
+	sky_mat.set_shader_parameter("energy", _gg_sky * (1.0 - 0.38 * k))
+	if dust and dust.sim != null: dust.sim.sun_gain = _gg_dust * (1.0 - 0.6 * k)
+	if Env.s("BMX_GLARE_PROBE") != "" and Engine.get_process_frames() % 30 == 0:
+		print("GLARE face=%.2f el=%.1f k=%.2f" % [face, _gg_el, k])
+
 ## level light: time of day -> sun (or moon at night), sky mode, ambient, fog, haze, exposure.
 ## Applied when the Light sliders change; with the cycle on, the clock runs and it re-applies 10x / s.
 func _update_light(dt: float) -> void:
@@ -478,6 +512,7 @@ func _apply_light(h: float, L: Dictionary) -> void:
 	sun.shadow_normal_bias = lerpf(1.2, 3.0, g)
 	sun.shadow_blur = lerpf(lerpf(1.0, 2.0, g), 2.6, n) * float(L.shadow_soft)
 	sun.light_volumetric_fog_energy = lerpf(lerpf(2.6, 3.0, gw), 0.12, n)   # god rays through the haze at golden hour
+	_gg_vol = sun.light_volumetric_fog_energy
 	# sky: blue + white clouds by day, golden low, stars at night; its photographed sun follows ours
 	_pick_sky_hdri(el_deg, atan2(dirv.x, -dirv.z))
 	sky_mat.set_shader_parameter("golden", gw)
@@ -485,6 +520,9 @@ func _apply_light(h: float, L: Dictionary) -> void:
 	sky_mat.set_shader_parameter("sun_vec", Vector3(cos(yaw) * cos(se), sin(se), sin(yaw) * cos(se)))
 	sky_mat.set_shader_parameter("sunny", day * (1.0 - gw))
 	sky_mat.set_shader_parameter("night", n)
+	_gg_sky = lerpf(1.0, 0.55, n)
+	_gg_sun = Vector3(cos(yaw) * cos(deg_to_rad(el_deg)), sin(deg_to_rad(el_deg)), sin(yaw) * cos(deg_to_rad(el_deg)))
+	_gg_el = el_deg
 	sky_mat.set_shader_parameter("energy", lerpf(1.0, 0.55, n))   # the night exposure is high: keep the sky a deep blue
 	sky_mat.set_shader_parameter("light_energy", lerpf(lerpf(0.55, 0.85, g), 0.2, n) * float(L.sky))
 	# night: the sky barely lights anything; what's in shadow of the moon goes close to black
@@ -497,6 +535,8 @@ func _apply_light(h: float, L: Dictionary) -> void:
 	env.fog_density *= float(L.haze) * lerpf(1.0, 1.35, n) * lerpf(1.0, 0.6, gw)   # golden: clear air, not milk
 	env.fog_light_color = RIDE_FOG.lerp(Color(0.95, 0.64, 0.46), g * day).lerp(Color(0.4, 0.3, 0.46), tw).lerp(Color(0.012, 0.016, 0.03), n)
 	env.fog_sun_scatter = 0.1 * gw * (1.0 - tw) * (1.0 - 0.6 * low)
+	_gg_scat = env.fog_sun_scatter
+	_gg_k = -1.0   # re-apply the guard on top of the new values
 	# into a low sun the haze scattered it straight at the lens and the screen went white: less forward glare
 	env.volumetric_fog_anisotropy = lerpf(0.78, 0.6, g * day)
 	env.fog_aerial_perspective = 0.75 * (1.0 - n)
@@ -517,6 +557,7 @@ func _apply_light(h: float, L: Dictionary) -> void:
 	night_k = n
 	if dust and dust.sim != null:   # the dust's sky light: dim and cold at night (it glowed white in the dark)
 		dust.sim.sun_gain = lerpf(1.0, 0.2, g * day)
+		_gg_dust = dust.sim.sun_gain
 		dust.sim.amb_col = Color(0.5, 0.6, 0.78).lerp(Color(0.62, 0.5, 0.52), gw).lerp(Color(0.025, 0.032, 0.05), n)
 	# water: reflect this sky and glint where this sun is (it used to keep a fixed noon sky + sun)
 	if terrain and terrain.has_method("water_light"):
@@ -1851,6 +1892,7 @@ func _process(dt: float) -> void:
 	# weather: wind, the bike parting the grass, cloud shadows (the sun dims with the shade at the rider)
 	atmos.update(t, dt, drawn_pos, 0.0 if st.air or st.crash_on else clampf(absf(st.v) / 2.0, 0.0, 1.0))
 	_update_light(dt)
+	_glare_guard(dt)
 	sun.light_energy = sun_energy * atmos.shade
 	_update_probe(dt, drawn_pos)
 	_pk = _perf("atmos_light_probe", _pk)
