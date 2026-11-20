@@ -43,6 +43,7 @@ var _on_delay := 0.0
 var _off_t := -1.0         # seconds since power_off
 var _lamp := 0.0           # the glow light's level: follows `level` up at once, down slowly
 var _dtm := 0.016
+var _off_player: Node       # plays assets/audio/tv_off.mp3 when the TV is switched off with the animation
 var _off_anim := false     # power_off(animate): the old squeeze to a line, then a dot, then the afterglow dies away
 const OFF_LINE := 0.14     # s: the picture squeezes down to a line
 const OFF_DOT := 0.13       # s: the line shrinks to a dot
@@ -120,6 +121,7 @@ func power_off(quiet := false, animate := false) -> void:
 	if _on_t >= 0.0:
 		_off_t = 0.0
 		_off_anim = animate
+		if animate and _off_player != null and not (positional and mute_world): _off_player.call("play")
 		if not quiet: _burst(0.22, 0.8)
 
 ## a hard tear + snow burst for `secs`
@@ -225,6 +227,16 @@ func _build_sound() -> void:
 		p.set("volume_db", -80.0)
 		add_child(p)
 		_players.append([p, 0.0, 0.0, 0.0])
+	# the switch-off click (the user's recording)
+	var off_stream = load("res://assets/audio/tv_off.mp3")
+	if off_stream != null:
+		if positional:
+			var q3 := AudioStreamPlayer3D.new(); q3.unit_size = 2.5; q3.max_distance = 40.0; q3.position = GLASS
+			_off_player = q3
+		else:
+			_off_player = AudioStreamPlayer.new()
+		_off_player.set("stream", off_stream); _off_player.set("bus", bus); _off_player.set("volume_db", 0.0)
+		add_child(_off_player)
 
 ## a slice of one of the loud parts on voice i: `len` s with soft ends, at `gain` (0..1)
 func _slice(i: int, len: float, gain: float) -> void:
