@@ -1874,6 +1874,17 @@ func _bars_page() -> void:
 		_pic_cards(r[2], str(build.camera.get(gk, ActionCam.GEAR_DEFAULT[gk])), "cam|%s|%s" % [gk, ActionCam.gear_sig(gear)],
 			_cam_make.bind(gk, gear), Vector3(1.0, 0.45, 0.75), func(v): build.camera[gk] = v)
 	_note("An action camera on the bike: the Bike cam view (C) looks out of it. The helmet camera is picked in the Rider room's Kit tab.")
+	_h("LIGHTS")
+	if not build.has("lights"): build.lights = {"model": "luma"}
+	var sig := _build_sig()
+	var litems := []
+	for id in BikeLight.ORDER:
+		var lm: Dictionary = BikeLight.MODELS[id]
+		litems.append({"key": id, "brand": lm.brand, "name": lm.label, "spec": BikeLight.spec_line(id),
+			"thumb": "light|%s|%s" % [id, sig], "make": _spot_make.bind(id, "lights.model", "light"),
+			"view": Vector3(0.9, 0.55, -0.7)})
+	_cards(litems, str(build.lights.get("model", "luma")), func(v): build.lights.model = v)
+	_note("A lamp on the bars (small to big: more lumens = a longer, wider beam) and a red tail light. They switch on by themselves when it gets dark.")
 
 func _brakes_page() -> void:
 	var S: Dictionary = build.suspension

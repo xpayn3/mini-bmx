@@ -44,6 +44,7 @@ var sun: DirectionalLight3D = null
 var wind := Vector2.ZERO           # m/s
 var dust_col := Color(0.78, 0.66, 0.52)
 var amb_col := Color(0.5, 0.6, 0.78)
+var sun_gain := 1.0   # Game: less at a low sun (dust between the camera and the sun lit up the whole screen)
 
 var rd: RenderingDevice
 var _st: Array[RID] = [RID(), RID()]
@@ -270,7 +271,7 @@ func step(dt: float, focus: Vector3, fwd: Vector3) -> void:
 	var scol := Vector3(3, 2.8, 2.5)
 	if sun != null and is_instance_valid(sun):
 		sdir = sun.global_basis.z.normalized()
-		var c := sun.light_color.srgb_to_linear() * sun.light_energy
+		var c := sun.light_color.srgb_to_linear() * sun.light_energy * sun_gain
 		scol = Vector3(c.r, c.g, c.b)
 	var mn := _hm_min
 	var mx := _hm_max

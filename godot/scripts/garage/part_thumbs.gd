@@ -421,6 +421,7 @@ static func make_bike_spot(build: Dictionary, spot: String) -> Node3D:
 	var cfg := GameState.bike_config_for("dh")
 	var rig := BikeRig.new()
 	rig.load_bike(cfg, build)
+	if spot == "light": rig.set_lights_on(true)   # the lamp's lens glows on its card
 	rig.set_meta("focus", _spot_box.bind(rig, spot))
 	return rig
 
@@ -433,6 +434,11 @@ static func _spot_box(rig: BikeRig, spot: String) -> AABB:
 		"stem": c = sx * _stem_top(rig.steer_n as MeshInstance3D) + Vector3(0, -0.02, 0); r = 0.065
 		"levers": c = sx * rig.grip_l.lerp(mid, 0.15); r = 0.065
 		"bars": c = sx * mid.lerp(rig.grip_r, 0.33); r = 0.08
+		"light":   # the lamp (or where it would go on the bar)
+			if not rig.bike_lights.is_empty():
+				c = (rig.bike_lights[0].node as Node3D).global_position + Vector3(0, 0.03, 0); r = 0.11
+			else:
+				c = sx * mid.lerp(rig.grip_l, 0.36); r = 0.09
 		"rotor", "caliper":   # the rotor itself (front / rear), the caliper sits on its edge
 			for ro in rig.rotors:
 				var mi: MeshInstance3D = ro.mesh_instance
