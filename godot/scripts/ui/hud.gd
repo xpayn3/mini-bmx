@@ -174,6 +174,9 @@ func speed_unit() -> String:
 func flash(text: String) -> void:
 	msg_l.show_msg(text)
 	msg_a = 1.4
+	# achievements get the computer's soft pop (not the bad news: BONK, OOF, LOOPED OUT...)
+	if beep and not (text.begins_with("BONK") or text.begins_with("OOF") or text.begins_with("OUCH") or text.begins_with("LOOPED") or text.begins_with("SKETCHY") or text.begins_with("SMASH") or text.begins_with("CRUNCH") or text.begins_with("SNAP")):
+		beep.tone("pickup" if text.begins_with("HEALTH") else "gain")
 
 func gear_changed(at_end: bool = false) -> void:
 	if gauge: gauge.bump = 1.0; gauge.queue_redraw()
@@ -197,6 +200,7 @@ func on_landing(air_time: float, dist: float, height: float, impact: float) -> v
 ## style points for a landed jump (bike_physics._style_points): the popup chains them into a combo
 func on_style(points: int, label: String) -> void:
 	if style_pop: style_pop.add(points, label)
+	if beep: beep.tone("combo" if style_pop and style_pop.combo > 1 else "points")
 
 func on_trick(trick: String) -> void:
 	tricks += 1
