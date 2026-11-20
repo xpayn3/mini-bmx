@@ -41,7 +41,7 @@ func _ready() -> void:
 		_prebuild_behind(intro)
 		intro.finished.connect(func() -> void:
 			var tw := create_tween().set_ignore_time_scale()
-			tw.tween_property(intro.root, "modulate:a", 0.0, 3.5).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)   # the menu fades in slowly
+			tw.tween_property(intro.root, "modulate:a", 0.0, 0.8).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)   # the menu fades in slowly
 			tw.tween_callback(intro.queue_free)
 			if OS.get_environment("BMX_INTRO_SHOTS") != "":   # tests: a frame of the menu after it, then quit
 				await get_tree().create_timer(2.5, true, false, true).timeout
