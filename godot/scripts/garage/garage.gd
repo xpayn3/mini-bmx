@@ -1411,10 +1411,15 @@ func _bars_page() -> void:
 		B.model = k; B.width = m.width; B.rise = m.rise; B.material = m.material)
 	_h("FINE TUNE")
 	var custom := func(): B.model = "custom"
-	_choice("Width", Handlebar.WIDTHS.map(func(w): return [w, "%d mm" % w]), int(B.width), func(v): B.width = v; custom.call())
-	_choice("Rise", Handlebar.RISES.map(func(r): return [r, "%d mm" % r if r > 0 else "Flat"]), int(B.rise), func(v): B.rise = v; custom.call())
-	_choice("Material", Handlebar.MATERIALS, B.material, func(v): B.material = v; custom.call())
+	if Handlebar.glb_of(B) != "":   # a model bar keeps its own width / rise; only the material changes
+		_choice("Material", Handlebar.MATERIALS, B.material, func(v): B.material = v)
+		_note("This bar is the bike model's own: width and rise are as modelled. Pick another bar to set them.")
+	else:
+		_choice("Width", Handlebar.WIDTHS.map(func(w): return [w, "%d mm" % w]), int(B.width), func(v): B.width = v; custom.call())
+		_choice("Rise", Handlebar.RISES.map(func(r): return [r, "%d mm" % r if r > 0 else "Flat"]), int(B.rise), func(v): B.rise = v; custom.call())
+		_choice("Material", Handlebar.MATERIALS, B.material, func(v): B.material = v; custom.call())
 	_note("Wide bars steer slower but steadier; narrow bars turn quicker. Alloy bars take the bars / stem colour from Paint.")
+	_choice("Stem", BikeBuild.STEMS, str(B.get("stem", "stock")), func(v): B.stem = v)
 	_choice("Brake levers", BikeBuild.LEVERS, str(B.get("levers", "stock")), func(v): B.levers = v)
 	_h("SEAT")
 	var SE: Dictionary = build.seat

@@ -233,7 +233,23 @@ static func make_bars(m: Dictionary, crown_paint: Dictionary, grip_paint: Dictio
 		_bar_stock = _filter(glb_part("steer")[0], func(a, b, c): return a.y > BAR_CUT and b.y > BAR_CUT and c.y > BAR_CUT,
 			["black", "rubber", "plastic", "chrome"])
 	var mi := MeshInstance3D.new()
-	mi.mesh = Handlebar.build(_bar_stock, float(m.width), float(m.rise))
+	if m.has("glb"):   # a model's bar + grips (assets/forks/bar_<glb>.glb) as one mesh, the tube as "bar"
+		var n: Node = load("res://assets/forks/bar_%s.glb" % m.glb).instantiate()
+		var am := ArrayMesh.new()
+		for part in ["bar", "grips"]:
+			var src := (n.find_child(part, true, false) as MeshInstance3D).mesh
+			for i in src.get_surface_count():
+				am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, src.surface_get_arrays(i))
+				var mat := src.surface_get_material(i)
+				if part == "bar" and mat and mat.resource_name == "black":
+					mat = mat.duplicate(); mat.resource_name = "bar"
+				am.surface_set_material(am.get_surface_count() - 1, mat)
+		n.free()
+		mi.mesh = am
+		var stock_mid := _bar_stock.get_aabb().get_center()
+		mi.position = Vector3(stock_mid.x, stock_mid.y, 0.0)   # about where the stock bar sits, so the card framing fits
+	else:
+		mi.mesh = Handlebar.build(_bar_stock, float(m.width), float(m.rise))
 	var paint := BikeBuild.paint_material(crown_paint)
 	for i in mi.mesh.get_surface_count():
 		var nm: String = mi.mesh.surface_get_material(i).resource_name

@@ -350,6 +350,15 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   **Brake levers** (garage Bars tab, "Brake levers"; `build.bars.levers` stock / tues / fuzz, `BikeBuild.LEVERS`): `make_forks.py` cuts dh's levers (chrome blades + plastic bodies) out of the steer mesh
   (`forks/dh_steer_nl.glb` whole, `dh_cockpit_nl.glb` fork-less) and places the models' levers (`parts/<id>_levers.glb`, Tues Brakes parts 16..51, Fuzz `Brake_levers`) so their grips' axis matches dh's bar axis and the clamp end sits
   where dh's did (`forks/levers_<id>.glb`, written as plastic / chrome so `Handlebar.apply` moves them with width / rise); `BikeRig._swap_levers` adds them as surfaces of the steer mesh (hoses stay dh's). Test: `BMX_BUILD="bars.levers=fuzz"`.
+  **Stems** (garage Bars tab, "Stem"; `build.bars.stem` stock / tues / fuzz, `BikeBuild.STEMS`): `make_forks.py` writes `forks/stem_<id>.glb` = the model's direct-mount stem
+  (pieces of `parts/<id>_cockpit.glb` within 4.5 cm of the middle, not the headset spacers) on dh's steering axis, crowns' middle on dh's. Extras: `seats` (how far up the axis each
+  fork's stem sits: dh / tues / fuzz), `shift` (the bar's middle moves into the new clamp), and dh's stem / bar furniture / hose as triangle middles. `BikeRig._swap_stem` drops dh's
+  stem from whatever steer mesh is in use (matched within 0.4 mm), slides the stem onto the seat of the fork in use (`BikeRig.fork_model`), moves bar + grips + levers (model levers
+  too) by the shift and bends the hose top along. Stock frame only. Test: `BMX_BUILD="bars.stem=fuzz;suspension.fork_model=fuzz_fork"`.
+  **Model bars** (`Handlebar.MODELS` `tues_bar` / `fuzz_bar`, cards in the Bars tab; key `glb`): `forks/bar_<id>.glb` (nodes `bar` + `grips` with lock rings / end caps,
+  relative to the bar's middle) from the cockpit glbs. `_swap_cockpit(stem, bar)` (one pass, stem + bar together) cuts dh's bar + grips (`barcut`), puts the model's at
+  `dhMid` + the stem's shift (the tube as surface "bar": the Material pick still works, `Handlebar.apply` skips the width / rise reshape for them) and moves the levers
+  (dh's or a model's) by `leverShift[side]` so they sit against the new grips. Width / rise rows are hidden for these bars. Test: `BMX_BUILD="bars.model=tues_bar;bars.stem=tues"`.
   **Disc brakes** (garage Shocks tab, DISC BRAKES): `suspension.rotor` ("stock" / "tues" / "fuzz", `BikeBuild.ROTORS`; `assets/forks/rotor_<id>.glb` from
   `tools/export_rotors.py`: disc + carrier + bolts, relative to the axle, moved onto the stock rotors' planes) replaces the mesh of the wheels' split-off "rotor"
   (`BikeRig._swap_rotors`, keeps the heat-glow material; works on every frame). `suspension.rear_caliper` ("stock" / "tues" / "fuzz", `BikeBuild.REAR_CALIPERS`): on the stock frame
