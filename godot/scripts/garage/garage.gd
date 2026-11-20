@@ -1324,6 +1324,7 @@ func _bars_page() -> void:
 	_choice("Rise", Handlebar.RISES.map(func(r): return [r, "%d mm" % r if r > 0 else "Flat"]), int(B.rise), func(v): B.rise = v; custom.call())
 	_choice("Material", Handlebar.MATERIALS, B.material, func(v): B.material = v; custom.call())
 	_note("Wide bars steer slower but steadier; narrow bars turn quicker. Alloy bars take the bars / stem colour from Paint.")
+	_choice("Brake levers", BikeBuild.LEVERS, str(B.get("levers", "stock")), func(v): B.levers = v)
 	_h("SEAT")
 	var SE: Dictionary = build.seat
 	_choice("Saddle", BikeBuild.SADDLES, str(SE.get("model", "stock")), func(v): SE.model = v)

@@ -53,6 +53,9 @@ func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
 	var fork_id := BikeBuild.fork_glb(build)
 	if fork_id != "" and not extras.get("noBarMod", false):   # frames with their own cockpit + fork keep them
 		_swap_fork(fork_id, build)
+	var lev := str(build.get("bars", {}).get("levers", "stock"))
+	if lev != "stock" and not extras.get("noBarMod", false) and not extras.get("noDecals", false):   # the stock frame: brake levers from a model
+		_swap_levers(lev, fork_id != "")
 	if not extras.get("noBarMod", false) and not extras.get("noDecals", false):   # the stock frame: saddle model + seat post
 		_swap_seat(build)
 	var rc := str(build.get("suspension", {}).get("rear_caliper", "stock"))
@@ -109,7 +112,8 @@ func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
 ## node, the lowers (+ caliper) replace the fork_lower mesh, and the lowers' node sits where the axle belongs (the fork's own offset).
 func _swap_fork(id: String, build: Dictionary) -> void:
 	var fs: Node = load("res://assets/forks/%s.glb" % id).instantiate()
-	var cs: Node = load("res://assets/forks/dh_cockpit.glb").instantiate()
+	var nl := str(build.get("bars", {}).get("levers", "stock")) != "stock"   # levers from a model: the cockpit comes without dh's own
+	var cs: Node = load("res://assets/forks/dh_cockpit_nl.glb" if nl else "res://assets/forks/dh_cockpit.glb").instantiate()
 	var crown := fs.find_child("fork_crown", true, false) as MeshInstance3D
 	var lowers := fs.find_child("fork_lower", true, false) as MeshInstance3D
 	var cock := cs.find_child("steer", true, false) as MeshInstance3D
@@ -133,6 +137,37 @@ func _swap_fork(id: String, build: Dictionary) -> void:
 			f.maxTravel = float(fx.get("travel", 0.18))
 	fs.free()
 	cs.free()
+
+## brake levers from a model on the stock frame (assets/forks/levers_<id>.glb, made by tools/make_forks.py): the steer mesh loses dh's own
+## levers (forks/dh_steer_nl.glb is the whole steer mesh without them; when a fork model is picked _swap_fork already used the cockpit
+## without them) and gets the model's as more surfaces of the same mesh, so Handlebar.apply moves them with the bar.
+func _swap_levers(id: String, fork_swapped: bool) -> void:
+	var path := "res://assets/forks/levers_%s.glb" % id
+	if not (steer_n is MeshInstance3D) or not ResourceLoader.exists(path): return
+	var ls: Node = load(path).instantiate()
+	var lm := _first_mesh(ls)
+	var base: Mesh = (steer_n as MeshInstance3D).mesh
+	var bs: Node = null
+	if not fork_swapped:
+		bs = load("res://assets/forks/dh_steer_nl.glb").instantiate()
+		var bm := _first_mesh(bs)
+		if bm: base = bm.mesh
+	if lm and base:
+		var mats := {}
+		for i in (steer_n as MeshInstance3D).mesh.get_surface_count():
+			var m := (steer_n as MeshInstance3D).mesh.surface_get_material(i)
+			if m: mats[m.resource_name] = m
+		var am := ArrayMesh.new()
+		var add := func(src: Mesh, i: int) -> void:
+			var m := src.surface_get_material(i)
+			am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, src.surface_get_arrays(i))
+			am.surface_set_material(am.get_surface_count() - 1, mats.get(m.resource_name, m) if m else null)
+		for i in base.get_surface_count(): add.call(base, i)
+		for i in lm.mesh.get_surface_count(): add.call(lm.mesh, i)
+		(steer_n as MeshInstance3D).mesh = am
+	ls.free()
+	if bs: bs.free()
+
 
 ## a saddle model and / or a dropper seat post on the stock frame: the frame mesh loses its saddle (assets/seats/dh_frame.glb), the chosen saddle
 ## (seats/saddle_dh.glb = the stock one, parts/<id>_saddle.glb) is added as more surfaces of the SAME mesh (so the rider's seat, the paint

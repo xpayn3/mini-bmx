@@ -201,3 +201,71 @@ for fid in ("tues", "fuzz"):
     print("%s saddle: levelled by %.1f deg" % (fid, math.degrees(tilt)))
     write_glb(os.path.join(A, "seats", "saddle_%s.glb" % fid), [{"name": "saddle", "parent": None, "t": [0, 0, 0], "origin": np.zeros(3),
               "parts": [(p @ R.T, n @ R.T, m) for p, n, m in sparts]}], None, "saddle")
+
+
+# ---------------------------------------------------------------- brake levers: dh's steer mesh without them + the models' levers placed where dh's sat
+# dh's levers are small components on the bar (chrome blades, plastic bodies / clamps) either side of the stem. They are cut out of the steer
+# mesh (assets/forks/dh_steer_nl.glb = the whole steer mesh, dh_cockpit_nl.glb = the fork-less cockpit) and the frames' levers
+# (parts/<id>_levers.glb, in their own steer space) are moved so their clamp end sits where dh's does: assets/forks/levers_<id>.glb.
+# Their parts are written as "plastic" / "chrome" so Handlebar.apply moves them with the bar like the stock ones.
+parent.clear()
+for t in tris:
+    ks = [key(v) for v in t]
+    for k in ks[1:]: parent[find(k)] = find(ks[0])
+comp = {}
+for i, t in enumerate(tris): comp.setdefault(find(key(t[0])), []).append(i)
+lev_idx = set()
+for idx in comp.values():
+    P = tris[idx].reshape(-1, 3); ms = {mats[i] for i in idx}
+    az = np.abs(P[:, 2])
+    if ms <= {"chrome", "plastic"} and az.min() > 0.19 and az.max() < 0.37 and len(idx) <= 200 and 0.1 < P[:, 1].min() and P[:, 1].max() < 0.2:
+        lev_idx.update(idx)
+print("dh levers: %d triangles cut" % len(lev_idx))
+LP = tris[sorted(lev_idx)].reshape(-1, 3)
+dh_in = {s_: np.abs(LP[(LP[:, 2] * s_) > 0][:, 2]).min() for s_ in (-1, 1)}
+dh_ctr = {s_: LP[(LP[:, 2] * s_) > 0][:, :2].mean(0) for s_ in (-1, 1)}
+for name, drop in (("dh_steer_nl", set()), ("dh_cockpit_nl", fork_idx)):
+    kp = np.array([i not in lev_idx and i not in drop for i in range(len(tris))])
+    pr = []
+    for m in sorted(set(mats)):
+        sel = kp & (np.array(mats) == m)
+        if sel.any(): pr.append((tris[sel].reshape(-1, 3), nrms[sel].reshape(-1, 3), m))
+    write_glb(os.path.join(A, "forks", name + ".glb"), [{"name": "steer", "parent": None, "t": [0, 0, 0], "origin": np.zeros(3), "parts": pr}], None, "cockpit")
+for fid in ("tues", "fuzz"):
+    g, b = load(os.path.join(A, "parts", "%s_levers.glb" % fid))
+    lp = node_tris(g, b, "levers")
+    allp = np.concatenate([p for p, _, _ in lp])
+    out = {}
+    for s_ in (-1, 1):
+        side = [(p[(p[:, 2] * s_) > 0] if False else p, n, m) for p, n, m in lp]
+    res = []
+    for p, n, m in lp:
+        # whole triangles go to the side their middle is on
+        tri_z = p.reshape(-1, 3, 3)[:, :, 2].mean(1)
+        for s_ in (-1, 1):
+            sel = np.repeat((tri_z * s_) > 0, 3)
+            if not sel.any(): continue
+            res.append((s_, p[sel], n[sel], "chrome" if m == "chrome" else "plastic"))
+    final = []
+    for s_ in (-1, 1):
+        sp = np.concatenate([p for sd_, p, _, _ in res if sd_ == s_])
+        # the clamp (the biggest connected piece) must sit round the bar: its middle goes onto dh's bar axis at the lever
+        st = sp.reshape(-1, 3, 3); parent.clear()
+        for t in st:
+            ks = [key(v) for v in t]
+            for k in ks[1:]: parent[find(k)] = find(ks[0])
+        cc = {}
+        for i, t in enumerate(st): cc.setdefault(find(key(t[0])), []).append(i)
+        # the bar axis: each side's grips are straight cylinders on it, so the grips' middle (the model's own, and dh's) gives the offset
+        gm, gb = load(os.path.join(A, "parts", "%s_cockpit.glb" % fid))
+        gr = np.concatenate([p for p, _, m in node_tris(gm, gb, "cockpit") if m == "rubber"])
+        gr = gr[(gr[:, 2] * s_) > 0.2]
+        c = (gr[:, :2].min(0) + gr[:, :2].max(0)) / 2
+        dr = np.concatenate([tris[i] for i in range(len(tris)) if mats[i] == "rubber" and i not in fork_idx and tris[i][:, 2].mean() * s_ > 0.2])
+        dh_ctr[s_] = (dr[:, :2].min(0) + dr[:, :2].max(0)) / 2
+        d = np.array([dh_ctr[s_][0] - c[0], dh_ctr[s_][1] - c[1], s_ * (dh_in[s_] - np.abs(sp[:, 2]).min() * 1.0) if False else s_ * (dh_in[s_] - np.abs(sp[:, 2]).min())])
+        print("%s lever side %+d: bbox z %.3f..%.3f, moved by %s" % (fid, s_, sp[:, 2].min(), sp[:, 2].max(), np.round(d, 3)))
+        for sd_, p, n, m in res:
+            if sd_ == s_: final.append((p + d, n, m))
+    write_glb(os.path.join(A, "forks", "levers_%s.glb" % fid), [{"name": "levers", "parent": None, "t": [0, 0, 0], "origin": np.zeros(3), "parts": final}], None, "levers")
+
