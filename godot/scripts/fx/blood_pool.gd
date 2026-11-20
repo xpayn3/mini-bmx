@@ -82,6 +82,7 @@ func _setup_step() -> void:
 			m.set_shader_parameter("depth_tex", _tex)
 			m.set_shader_parameter("seed", _seed)
 			m.set_shader_parameter("grid_m", size)
+			if Env.s("BMX_POOL_AGE") != "": m.set_shader_parameter("age_add", float(Env.s("BMX_POOL_AGE")))   # tests: start part dried
 			material_override = m
 			# the WET HALO: a second pass that darkens the dirt round the pool where blood has soaked in
 			_halo = ShaderMaterial.new()
@@ -90,6 +91,7 @@ func _setup_step() -> void:
 			_halo.set_shader_parameter("depth_tex", _tex)
 			_halo.set_shader_parameter("seed", _seed)
 			_halo.set_shader_parameter("grid_m", size)
+			if Env.s("BMX_POOL_AGE") != "": _halo.set_shader_parameter("age_add", float(Env.s("BMX_POOL_AGE")))
 			m.next_pass = _halo
 			_stage = 4
 			if _wiped: _apply_wipe()
