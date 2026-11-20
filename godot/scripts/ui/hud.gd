@@ -1207,44 +1207,54 @@ class GetUpPrompt extends Control:
 		queue_redraw()
 
 	func _draw() -> void:
-		# GTA-like and plain: one line of white text, a thin bar under it that fills while the key is held
-		var f := UITheme.font(true)
-		var fs := 18
-		var y := size.y * 0.5
+		# a flat dark card in the menus' language (display face, yellow accent, 2 px corners, no outline): the
+		# prompt on one line, the hold progress as a yellow bar along the card's bottom edge
+		var f := UITheme.display_font(700, 0.0)
+		var fs := 22
+		var cy := size.y * 0.5
 		var ko: bool = hud.life <= 0.0 and not dizzy   # out of life: revive instead of getting up
 		var act := "RIDE ON" if dizzy else ("REVIVE" if ko else "GET UP")
+		var g := PadGlyph.glyph_for("hop")
+		var gh := 28.0
+		var gw := PadGlyph.width(g, gh)
+		var l1 := "PRESS" if dizzy else "HOLD"
+		var l2 := "TO "
+		var w1 := f.get_string_size(l1, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		var w2 := f.get_string_size(l2, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		var w3 := f.get_string_size(act, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		var gap := 12.0
+		var padx := 22.0
+		var ph := 52.0
+		var pw := padx * 2.0 + w1 + gap + gw + gap + w2 + w3
+		var panel := Rect2(Vector2((size.x - pw) * 0.5, cy - ph * 0.5), Vector2(pw, ph))
+		UITheme.draw_box(self, panel, Color(0.07, 0.07, 0.08, 0.86), Tokens.R_LG)
+		var lift := 0.0 if dizzy else 2.0   # (the bar takes the bottom edge: sit a touch higher)
+		var ty := cy + fs * 0.32 - lift
+		var x := panel.position.x + padx
+		draw_string(f, Vector2(x, ty), l1, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1, 1, 1, 0.62))
+		x += w1 + gap
+		PadGlyph.draw(self, g, Vector2(x + gw * 0.5, cy - lift), gh)
+		x += gw + gap
+		draw_string(f, Vector2(x, ty), l2, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color.WHITE)
+		draw_string(f, Vector2(x + w2, ty), act, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Tokens.ACCENT)
 		if ko:
 			var p := 0.75 + 0.25 * sin(t * 6.0)
 			var tl := "KNOCKED OUT"
-			var tw0 := f.get_string_size(tl, HORIZONTAL_ALIGNMENT_LEFT, -1, 26).x
-			draw_string(f, Vector2((size.x - tw0) * 0.5 + 2, y - 22), tl, HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color(0, 0, 0, 0.5))
-			draw_string(f, Vector2((size.x - tw0) * 0.5, y - 24), tl, HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color(1, 0.3 * p, 0.28 * p))
-		# "HOLD [button] TO GET UP": the button / key drawn as its icon (PadGlyph)
-		var g := PadGlyph.glyph_for("hop")
-		var gh := 30.0
-		var gw := PadGlyph.width(g, gh)
-		var l1 := "PRESS" if dizzy else "HOLD"
-		var l2 := "TO " + act
-		var w1 := f.get_string_size(l1, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-		var w2 := f.get_string_size(l2, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-		var x0 := (size.x - (w1 + 12 + gw + 12 + w2)) * 0.5
-		for sh in [Vector2(1, 1), Vector2.ZERO]:
-			var c := Color(0, 0, 0, 0.45) if sh != Vector2.ZERO else Color.WHITE
-			draw_string(f, Vector2(x0, y) + sh, l1, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, c)
-			draw_string(f, Vector2(x0 + w1 + 24 + gw, y) + sh, l2, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, c)
-		PadGlyph.draw(self, g, Vector2(x0 + w1 + 12 + gw * 0.5, y - 6), gh)
+			var tw0 := f.get_string_size(tl, HORIZONTAL_ALIGNMENT_LEFT, -1, 30).x
+			draw_string(f, Vector2((size.x - tw0) * 0.5, panel.position.y - 16), tl, HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1, 0.3 * p, 0.28 * p))
 		if dizzy: return   # a press, no hold bar
-		var bar := Rect2((size.x - 240) * 0.5, y + 14, 240, 5)
-		draw_rect(bar, Color(0, 0, 0, 0.45))
-		if k > 0.0: draw_rect(Rect2(bar.position, Vector2(bar.size.x * k, bar.size.y)), Color("5dff8a") if ko else Color.WHITE)
+		var bar := Rect2(panel.position.x, panel.end.y - 5, panel.size.x, 5)
+		draw_rect(bar, Color(1, 1, 1, 0.12))
+		if k > 0.0: draw_rect(Rect2(bar.position, Vector2(bar.size.x * k, bar.size.y)), Tokens.ACCENT)
 		if ko:   # the other way out: back to the start with full life
 			var g3 := PadGlyph.glyph_for("respawn")
 			var l3 := "BACK TO START"
-			var w3 := f.get_string_size(l3, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
+			var f3 := UITheme.display_font(600, 0.0)
+			var w4 := f3.get_string_size(l3, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
 			var g3w := PadGlyph.width(g3, 20.0)
-			var x3 := (size.x - (g3w + 8 + w3)) * 0.5
-			PadGlyph.draw(self, g3, Vector2(x3 + g3w * 0.5, y + 34), 20.0, 0.8)
-			draw_string(f, Vector2(x3 + g3w + 8, y + 39), l3, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1, 1, 1, 0.6))
+			var x3 := (size.x - (g3w + 8 + w4)) * 0.5
+			PadGlyph.draw(self, g3, Vector2(x3 + g3w * 0.5, panel.end.y + 22), 20.0, 0.8)
+			draw_string(f3, Vector2(x3 + g3w + 8, panel.end.y + 27), l3, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(1, 1, 1, 0.7))
 
 class FlowLeds extends RefCounted:
 	## flow on the bike computer's LEDs, kept like real hardware (Wahoo-style): small pinhole LEDs in a
