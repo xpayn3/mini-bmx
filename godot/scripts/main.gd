@@ -43,6 +43,83 @@ func _ready() -> void:
 		elif a.begins_with("--bench="): _bench(a.get_slice("=", 1))
 		elif a.begins_with("--showcase="): _showcase(a.get_slice("=", 1))
 		elif a.begins_with("--hitch"): _hitch(float(a.get_slice("=", 1)) if "=" in a else 30.0)
+	if OS.get_environment("BMX_PADSEQ") != "": _pad_seq(OS.get_environment("BMX_PADSEQ"))
+
+## tests: drive the menus with a synthetic Xbox pad (use with BMX_PAD=1), then quit. Comma-separated steps:
+## u d l r (D-pad) a b x y lb rb start, `D700` = hold D-pad down 700 ms (U / L / R too), `lsd` / `lsr` = a flick
+## of the left stick, esc / enter = keys, w500 = wait 500 ms, shot:<file.png>, at:<secs> = wait until then.
+## Prints PADSEQ <step> focus=<the focused control> after each.
+func _pad_seq(seq: String) -> void:
+	var t0 := Time.get_ticks_msec()
+	await get_tree().create_timer(2.0, true, false, true).timeout
+	var btn := {"u": JOY_BUTTON_DPAD_UP, "d": JOY_BUTTON_DPAD_DOWN, "l": JOY_BUTTON_DPAD_LEFT, "r": JOY_BUTTON_DPAD_RIGHT,
+		"a": JOY_BUTTON_A, "b": JOY_BUTTON_B, "x": JOY_BUTTON_X, "y": JOY_BUTTON_Y, "lb": JOY_BUTTON_LEFT_SHOULDER,
+		"rb": JOY_BUTTON_RIGHT_SHOULDER, "start": JOY_BUTTON_START}
+	var wait := func(ms: float) -> void: await get_tree().create_timer(ms / 1000.0, true, false, true).timeout
+	for step in seq.split(","):
+		step = step.strip_edges()
+		if step.begins_with("shot:"):
+			await RenderingServer.frame_post_draw
+			get_viewport().get_texture().get_image().save_png(step.substr(5))
+			print("PADSEQ shot ", step.substr(5)); continue
+		if step.begins_with("at:"):
+			var until := float(step.substr(3)) * 1000.0
+			while Time.get_ticks_msec() - t0 < until: await get_tree().process_frame
+			continue
+		if step.begins_with("w"): await wait.call(float(step.substr(1))); continue
+		if step.begins_with("k:"):   # any key: k:O, k:M ...
+			for down in [true, false]:
+				var k := InputEventKey.new(); k.keycode = OS.find_keycode_from_string(step.substr(2))
+				k.physical_keycode = k.keycode; k.pressed = down
+				Input.parse_input_event(k); await wait.call(60)
+		elif step in ["esc", "enter"]:
+			for down in [true, false]:
+				var k := InputEventKey.new(); k.keycode = KEY_ESCAPE if step == "esc" else KEY_ENTER
+				k.physical_keycode = k.keycode; k.pressed = down
+				Input.parse_input_event(k); await wait.call(60)
+		elif step.begins_with("ls"):
+			var m := InputEventJoypadMotion.new()
+			m.axis = JOY_AXIS_LEFT_Y if step[2] in "ud" else JOY_AXIS_LEFT_X
+			m.axis_value = -1.0 if step[2] in "ul" else 1.0
+			Input.parse_input_event(m); await wait.call(90)
+			m = m.duplicate(); m.axis_value = 0.0
+			Input.parse_input_event(m); await wait.call(60)
+		elif step.length() > 1 and step[0] in "UDLR" and step.substr(1).is_valid_int():
+			var jb := InputEventJoypadButton.new(); jb.button_index = btn[step[0].to_lower()]; jb.pressed = true
+			Input.parse_input_event(jb)
+			await wait.call(float(step.substr(1)))
+			jb = jb.duplicate(); jb.pressed = false
+			Input.parse_input_event(jb); await wait.call(60)
+		elif btn.has(step):
+			for down in [true, false]:
+				var jb := InputEventJoypadButton.new(); jb.button_index = btn[step]; jb.pressed = down
+				Input.parse_input_event(jb); await wait.call(70)
+		else:
+			print("PADSEQ unknown step ", step); continue
+		await wait.call(120)
+		print("PADSEQ ", step, " focus=", _focus_desc())
+	await wait.call(200)
+	GameState.quit()
+
+func _focus_desc() -> String:
+	var vps: Array = []
+	if is_instance_valid(pause_menu) and pause_menu.get("page"): vps.append(pause_menu.page)
+	for n in get_tree().get_nodes_in_group(&"pad_nav_vp"): vps.append(n)
+	vps.append(get_viewport())
+	for vp in vps:
+		var f: Control = vp.gui_get_focus_owner()
+		if f:
+			var t = f.get("text")
+			var extra := ""
+			if f is Range: extra = " v=%s" % (f as Range).value
+			if f is OptionButton: extra = " sel=%d" % (f as OptionButton).selected
+			if f is TabBar: extra = " tab=%d" % (f as TabBar).current_tab
+			var row := f.get_parent()
+			var lbl := ""
+			if row and row.get_child_count() > 0 and row.get_child(0) is Label: lbl = " row='%s'" % row.get_child(0).text
+			if lbl == "" and row and row.get_parent() and row.get_parent().get_child_count() > 0 and row.get_parent().get_child(0) is Label: lbl = " row='%s'" % row.get_parent().get_child(0).text
+			return "%s '%s'%s%s" % [f.get_class(), t if t != null else "", extra, lbl]
+	return "-"
 
 func _new_game(title := false) -> void:
 	if game:
@@ -85,6 +162,7 @@ func _show_menu() -> void:
 	menu.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ui.add_child(menu)
 	ui.move_child(menu, 0)
+	PadNav.attach(menu, {"back": func(): if menu_page == "setup": _menu_page_main()})   # B on the ride setup = back
 	# one flat white card down the left (the garage and settings use the same cards), the view beside it
 	var card := PanelContainer.new()
 	card.add_theme_stylebox_override("panel", UITheme.card_style(Tokens.PAPER, Tokens.R_XL, Tokens.S7))
@@ -101,7 +179,7 @@ func _show_menu() -> void:
 	# title: big condensed italic in ink, a yellow mark and the tagline under it
 	var head := VBoxContainer.new()
 	head.add_theme_constant_override("separation", -Tokens.S4)
-	head.add_child(UITheme.display("MINI BMX", Tokens.T_DISPLAY, Tokens.INK, Tokens.SLANT_TITLE))
+	head.add_child(UITheme.display("RUNOUT", Tokens.T_DISPLAY, Tokens.INK, Tokens.SLANT_TITLE))
 	var tag_row := HBoxContainer.new()
 	tag_row.add_theme_constant_override("separation", Tokens.S4)
 	var slab := ColorRect.new()
@@ -237,8 +315,11 @@ func _menu_clear() -> void:
 		menu_col.remove_child(c); c.queue_free()
 	menu_col.add_child(UITheme.spacer(Tokens.S7))
 
+var menu_page := "main"
+
 func _menu_page_main() -> void:
 	_menu_clear()
+	menu_page = "main"
 	var vb := menu_col
 	var ride := _menu_button("RIDE", "Pick a bike and the time of day", _menu_page_setup, true)
 	vb.add_child(ride)
@@ -374,7 +455,7 @@ func _menu_page_setup(step := 0) -> void:
 		_hero_text(GameState.bike_id)
 		if setup_step == 2:
 			hero_name.text = "YOUR CHARACTER"
-			hero_spec.text = "KIT  ·  HAIR  ·  FACE  ·  PLATE  ·  DRAG TO TURN"
+			hero_spec.text = "KIT  ·  HAIR  ·  PLATE  ·  DRAG TO TURN"
 		var bl := HBoxContainer.new()
 		bl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		bl.add_child(UITheme.make_button("BACK", back_cb, "link", Tokens.T_XL))
@@ -623,9 +704,8 @@ func _setup_rider(content: HBoxContainer) -> void:
 		match char_tab:
 			"kit": _char_kit(body)
 			"hair": _char_hair(body)
-			"face": _char_face(body)
 			"plate": _char_plate(body)
-	for t in [["kit", "KIT"], ["hair", "HELMET"], ["face", "FACE"], ["plate", "PLATE"]]:
+	for t in [["kit", "KIT"], ["hair", "HELMET"], ["plate", "PLATE"]]:
 		var b := UITheme.make_button(t[1], Callable(), "chip", Tokens.T_MD)
 		b.toggle_mode = true; b.button_group = grp
 		b.button_pressed = t[0] == char_tab
@@ -733,16 +813,6 @@ func _char_hair(body: VBoxContainer) -> void:
 	body.add_child(hgrid)
 	body.add_child(UITheme.caption("HAIR COLOUR"))
 	body.add_child(_swatch_grid(str(look.hair), func(h): _look_set({"hair": "#" + h}), HAIR_COLOURS, 7, 44))
-
-func _char_face(body: VBoxContainer) -> void:
-	var look := RiderPanels.load_look()
-	body.add_child(UITheme.caption("SKIN TONE"))
-	body.add_child(_swatch_grid(str(look.skin), func(h): _look_set({"skin": "#" + h}), SKIN_TONES, 8, 44))
-	var bd := UITheme.make_button("FACIAL HAIR", Callable(), "chip", Tokens.T_MD)
-	bd.toggle_mode = true
-	bd.button_pressed = str(look.beard) != "0"
-	bd.toggled.connect(func(v: bool): _look_set({"beard": "1" if v else "0"}))
-	body.add_child(bd)
 
 func _char_plate(body: VBoxContainer) -> void:
 	var look := RiderPanels.load_look()
@@ -929,6 +999,8 @@ func _pause() -> void:
 	pm.add_item("Resume", _resume)
 	pm.add_item("Back to start", func(): _resume(); game.respawn(false))
 	pm.add_item("New world", func(): _resume(); game.respawn(true))
+	pm.add_item("Tuning", _open_tuning)
+	pm.add_item("Photo mode", func(): _resume(); game.toggle_photo())
 	pm.add_item("Settings", _open_settings)
 	pm.add_item("Controls", _show_controls)
 	pm.add_item("Main menu", func(): _close_pause(true); GameState.save(); _show_menu())
@@ -946,7 +1018,23 @@ func _close_pause(now := false) -> void:
 	pm.closed.connect(pm.queue_free)
 	pm.close(now)
 
+## pause > Tuning: the tuning card over the paused ride (the pad drives it); closing it rides on
+var _tuning_paused := false
+func _open_tuning() -> void:
+	_close_pause(true)
+	_tuning_paused = true
+	game.hud._toggle_side("tune")
+	var card: Control = game.hud.card
+	if not card.visibility_changed.is_connected(_tuning_shown): card.visibility_changed.connect(_tuning_shown)
+	if card.get("nav"): card.nav.focus_first.call_deferred()
+
+func _tuning_shown() -> void:
+	if not game.hud.card.visible and _tuning_paused and state == PAUSED: _resume()
+
 func _resume() -> void:
+	if _tuning_paused:
+		_tuning_paused = false
+		if game and game.hud.card and game.hud.card.visible: game.hud.close_sides()
 	_close_pause()
 	_close_controls()
 	state = RIDING
@@ -1637,6 +1725,10 @@ func _shot(arg: String) -> void:
 	var path := arg.get_slice("@", 0)
 	var secs := float(arg.get_slice("@", 1)) if "@" in arg else 4.0
 	await get_tree().create_timer(secs, true, false, true).timeout
+	if OS.get_environment("BMX_SHOT_NOUI") != "":   # store / splash shots: the view without the menu card
+		ui.visible = false
+		await get_tree().process_frame
+		await get_tree().process_frame
 	get_viewport().get_texture().get_image().save_png(path)
 	print("SHOT ", path)
 	GameState.quit()

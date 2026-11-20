@@ -23,6 +23,8 @@ var RWF := 0.261
 var RWR := 0.261
 var BB_REAR := 0.3331
 var SH_R := 0.63
+# wheel model: tyre ~1.2 cm squash under half the weight, light wheels, damper knee at 0.6 m/s
+# (the numbers are tuning sliders: Ride > Wheels & pump)
 var LAND := 1.0
 var geared := false
 var gear := -1
@@ -102,6 +104,9 @@ var bank := NAN; var carve := 0.0; var carve_acc := 0.0; var carve_berm := false
 var lat_m := NAN; var lat_a := 0.0; var n_load := G   # (n_load: the ground's push on the tyres, m/s², for the ride log)
 var g_pitch := NAN
 var w_init := false; var hf_prev := NAN; var hr_prev := NAN
+# unsprung wheels: height of each wheel's lowest point + its speed. The ground drives the wheel through a stiff
+# tyre; the shock (spring + damper that blows off on sharp hits) is the only thing between wheel and frame
+var zw_f := NAN; var zw_r := NAN; var vw_f := 0.0; var vw_r := 0.0
 var nose_ref := NAN
 var w_f := 0.0; var w_r := 0.0; var y_draw := 0.0; var pitch_draw := 0.0
 var kick_t := 0.0; var hop_t := 0.0; var hop_load := 0.0; var hop_charge := 0.0; var charge := 0.0
@@ -211,7 +216,7 @@ func reset_at(px: float, pz: float, hd: float) -> void:
 	pitch_v = 0; c_f = true; c_r = true; wheelie_up = 0.0
 	g_pitch = NAN
 	y = host.terrain.height(x, z); body_y = y; body_v = 0
-	n_f = NAN; n_r = NAN; n_ref = NAN; lip_state = 0; hf_prev = NAN; hr_prev = NAN
+	n_f = NAN; n_r = NAN; n_ref = NAN; lip_state = 0; hf_prev = NAN; hr_prev = NAN; zw_f = NAN; zw_r = NAN
 	bank = 0; body_x = 0; hip_shift = 0; spin = 0; a_drive = 0; charge = 0; hop_charge = 0; lift_t = 0
 	body_xv = 0; hip_v = 0; v_last = NAN; air_lean = 0; air_pull = 0; flip_acc = 0; spin_acc = 0; flip_in = 0; spin_in = 0
 	body_pw = 0; throw_v = 0; air_w = 0; air_inertia = 1; air_tilt = 0; air_tilt_v = 0; air_yaw = 0; air_tw = 0; air_tw_v = 0; land_jolt = 0
@@ -228,7 +233,7 @@ func get_up() -> void:
 	course = heading; turn_off = 0.0; rev_cap = 3.0; _fakie_hold = 0.0
 	hop_block = true
 	y = host.terrain.height(x, z); body_y = y; body_v = 0
-	n_f = NAN; n_r = NAN; n_ref = NAN; lip_state = 0; hf_prev = NAN; hr_prev = NAN
+	n_f = NAN; n_r = NAN; n_ref = NAN; lip_state = 0; hf_prev = NAN; hr_prev = NAN; zw_f = NAN; zw_r = NAN
 	bank = 0; body_x = 0; hip_shift = 0; spin = 0; a_drive = 0; charge = 0; hop_charge = 0; lift_t = 0
 	body_xv = 0; hip_v = 0; v_last = NAN; air_lean = 0; air_pull = 0; flip_acc = 0; spin_acc = 0; flip_in = 0; spin_in = 0
 	body_pw = 0; throw_v = 0; air_w = 0; air_inertia = 1; air_tilt = 0; air_tilt_v = 0; air_yaw = 0; air_tw = 0; air_tw_v = 0; land_jolt = 0
@@ -320,8 +325,8 @@ func _sample(f: Vector3) -> void:
 func _wheel_ground(f: Vector3, x0: float, R: float, cp0: float) -> float:
 	var terrain = host.terrain
 	var best := -INF
-	for k in range(-3, 4):
-		var s := k / 3.0 * R
+	for k in range(-5, 6):   # 11 points across the contact: a small rock can't slip between them
+		var s := k / 5.0 * R
 		var d := x0 * cp0 + s
 		var hh: float = terrain.height(x + f.x * d, z + f.z * d) + sqrt(R * R - s * s) - R
 		if hh > best: best = hh
@@ -908,6 +913,8 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		var hrC := _wheel_ground(f, XR, RWR, cp0)
 		if not w_init or is_nan(hf_prev):
 			hf_prev = hfC; hr_prev = hrC; pitch_v = 0; w_init = true
+		if not is_finite(zw_f + zw_r + vw_f + vw_r):
+			zw_f = hfC; zw_r = hrC; vw_f = 0.0; vw_r = 0.0
 		var hfP := hf_prev
 		var hrP := hr_prev
 		var vgF := minf((hfC - hfP) / dt, climb_max)
@@ -931,6 +938,11 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		var s0 := (G + press) / K
 		n_ref = _or(n_ref, G + press) + (G + press - _or(n_ref, G + press)) * minf(1.0, dt * 2 * PI * T.tyreHz * 0.6)
 		var TRAVEL: float = T.travel
+		var WHEEL_M: float = float(T.get("wheelMass", 0.03))
+		var TYRE_K: float = 0.5 * G / (float(T.get("tyreSquash", 1.2)) * 0.01)
+		var TYRE_C: float = 0.5 * sqrt(TYRE_K * WHEEL_M)
+		var BLOW_V: float = float(T.get("damperKnee", 0.6))
+		var BLOW_K: float = float(T.get("damperBlow", 0.2))
 		var bal_max: float = T.riderBalance * G * BB_REAR / IK
 		if true:
 			var R: float = T.weightShift
@@ -1014,13 +1026,20 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			var gR := hrP + (hrC - hrP) * u
 			var cs := cos(pitch)
 			var sn := sin(pitch)
-			var dF := gF - (y + XF * sn) + s0
-			var dR := gR - (y + XR * sn) + s0
+			var dF := zw_f - (y + XF * sn) + s0
+			var dR := zw_r - (y + XR * sn) + s0
 			var pvF := vy + XF * cs * pitch_v
 			var pvR := vy + XR * cs * pitch_v
-			cF = dF > 0; cR = dR > 0
-			var FF := maxf(0.0, shF * (K * dF + C * (vgF - pvF))) if cF else 0.0
-			var FR := maxf(0.0, shR * (K * dR + C * (vgR - pvR))) if cR else 0.0
+			# touching the ground = the tyre is squashed by it (the wheel can hang topped out above a drop)
+			cF = gF > zw_f; cR = gR > zw_r
+			# shock damper: full strength up to a knee, then it blows off (shim stack opens) so sharp small hits
+			# go into the wheel, not the frame; rebound stays fully damped
+			var relF := vw_f - pvF
+			var relR := vw_r - pvR
+			var cdF := C * (relF if relF <= BLOW_V else BLOW_V + BLOW_K * (relF - BLOW_V))
+			var cdR := C * (relR if relR <= BLOW_V else BLOW_V + BLOW_K * (relR - BLOW_V))
+			var FF := maxf(0.0, shF * (K * dF + cdF)) if dF > 0.0 else 0.0
+			var FR := maxf(0.0, shR * (K * dR + cdR)) if dR > 0.0 else 0.0
 			sumF += FF; sumR += FR
 			var leg_f := 0.0
 			if not was_air:
@@ -1080,6 +1099,17 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 					if air_tilt_v * air_tilt > 0: air_tilt_v = 0.0
 				pitch_v = air_w + air_tilt_v
 			y += vy * h; pitch += pitch_v * h
+			# wheels: tyre spring from the ground, the shock's reaction, gravity. Stops at full extension
+			var tyF := maxf(0.0, TYRE_K * (gF - zw_f) + TYRE_C * (vgF - vw_f)) if gF > zw_f else 0.0
+			var tyR := maxf(0.0, TYRE_K * (gR - zw_r) + TYRE_C * (vgR - vw_r)) if gR > zw_r else 0.0
+			vw_f += ((tyF - FF) / WHEEL_M - G) * h; zw_f += vw_f * h
+			vw_r += ((tyR - FR) / WHEEL_M - G) * h; zw_r += vw_r * h
+			var wsn := sin(pitch)
+			var wcs := cos(pitch)
+			var topF := y + XF * wsn - s0
+			var topR := y + XR * wsn - s0
+			if zw_f < topF: zw_f = topF; vw_f = maxf(vw_f, vy + XF * wcs * pitch_v)
+			if zw_r < topR: zw_r = topR; vw_r = maxf(vw_r, vy + XR * wcs * pitch_v)
 			if not cF and not cR:   # in the air the bike can go all the way round (flips)
 				flip_acc += pitch_v * h
 				pitch = wrapf(pitch, -PI, PI)

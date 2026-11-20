@@ -1,5 +1,0 @@
-Low-poly Head (assets/head_lowpoly.glb)
-Author: MvdE (https://sketchfab.com/MvdE)
-Source: https://sketchfab.com/3d-models/low-poly-head-e869717813844a06ab340feb893a81aa
-License: CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
-Attribution is required wherever the game is shared.

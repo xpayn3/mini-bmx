@@ -70,6 +70,9 @@ var last_build_ms: float = 0.0
 var last_stream_ms: float = 0.0
 var last_finalized: int = 0
 var fin_parts := PackedFloat64Array([0, 0, 0, 0, 0])
+## health packs beside the sheds: key (position in 25 cm cells) -> {node, pos, chunk}; taken ones stay gone
+var _packs := {}
+var _pack_taken := {}
 
 
 ## seed_in: the world to build (pass it here rather than calling set_seed afterwards, which would
@@ -102,6 +105,24 @@ func _process(delta: float) -> void:
 	_time += delta
 	_update_wind(delta)
 	_tapes.update(delta, _focus.x, _focus.y, _wind_t, _wind_dir, _wind_ws)
+	for key in _packs:
+		var pk: Dictionary = _packs[key]
+		if absf(pk["pos"].x - _focus.x) < 120.0 and absf(pk["pos"].z - _focus.y) < 120.0:
+			(pk["node"] as HealthPack).tick(delta)
+
+
+## the rider rolls through a health pack within r (metres, sideways) of (x, z) and about the bike's height y:
+## returns its position (it is gone for good) or null
+func take_pack(x: float, y: float, z: float, r: float = 1.6):
+	for key in _packs:
+		var pk: Dictionary = _packs[key]
+		var p: Vector3 = pk["pos"]
+		if absf(p.x - x) < r and absf(p.z - z) < r and Vector2(p.x - x, p.z - z).length() < r and absf(p.y - y) < 2.5:
+			_pack_taken[key] = true
+			(pk["node"] as Node).queue_free()
+			_packs.erase(key)
+			return p
+	return null
 
 
 # ======================================================================
@@ -122,6 +143,8 @@ func set_seed(seed_in: int) -> void:
 	_rock_grid.clear()
 	_col_grid.clear()
 	_broken.clear()
+	_packs.clear()
+	_pack_taken.clear()
 	if _debris:
 		_debris.clear()
 	if _tapes:
@@ -473,6 +496,8 @@ func _unload(k: Vector2i) -> void:
 			_col_grid.erase(key)
 		else:
 			_col_grid[key] = nl
+	for pkey in c.get("packs", []):
+		_packs.erase(pkey)
 	(c["node"] as Node).queue_free()
 	if _debris: _debris.drop_chunk(k)
 	chunks.erase(k)
@@ -657,7 +682,18 @@ func _finalize(k: Vector2i) -> void:
 	fin_parts[3] += (Time.get_ticks_usec() - tp) / 1000.0; tp = Time.get_ticks_usec()
 	var colliders: Array = o["colliders"]
 	var rec := {"cx": k.x, "cz": k.y, "node": node, "colliders": colliders, "small": small, "rock_keys": [],
-		"G": o["G"], "N": b.N, "mms": mms}
+		"G": o["G"], "N": b.N, "mms": mms, "packs": []}
+	for pp in o.get("packs", []):
+		var pkey := Vector2i(roundi(pp.x * 4.0), roundi(pp.z * 4.0))
+		if _pack_taken.has(pkey) or _packs.has(pkey):
+			continue
+		var hp := HealthPack.new()
+		hp.name = "HealthPack"
+		hp.position = pp
+		node.add_child(hp)
+		_packs[pkey] = {"node": hp, "pos": pp}
+		rec["packs"].append(pkey)
+		if OS.get_environment("BMX_PACK_PROBE") != "": print("PACK at ", pp)
 	for c in colliders:
 		if c.has("cactus"):
 			c["cactus"]["mm"] = mms.get("cactus%d" % c["cactus"].get("kind", 0))

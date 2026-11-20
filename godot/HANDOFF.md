@@ -33,6 +33,7 @@ repo, see above — never develop it).
   `shock_spring` node, parts in `assets/parts/fuzz_*.glb`). Both the Tues and Fuzz (and Goat) draw the chain + derailleur pulleys with `BikeChain`
   (`scripts/bike/bike_chain.gd`, enabled by `chain` in the glb extras; the Goat uses the Tues derailleur and pedals). `tools/bike_glb.py` = shared glb writer.
   Not done: swapping the Tues fork onto the GLORY as a fork model.
+  **Stickers on every frame**: the logo slots (down / top tube, chainstay, fork legs) carry a `slot` name; frames flagged `noDecals` (Tues, Goat, Fuzz) get them placed by `BikeDecals.fit_label` from the model's own vertices (crank = bottom bracket, steer = head tube, tube direction found by vertex density, fork leg by a line fit), then the same flat projection as the GLORY bakes them into a mesh. New frames need no hand-set numbers.
 
 ## 2. Install / run
 
@@ -198,6 +199,8 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   binary-searched — nothing scans the whole course. `tools/trail_grow_probe.gd` checks all of it.
 
 - **Sponsor props** (`TrailCourse.chunk_gates` / `chunk_boards`, fixed spacing by centreline index so growing never moves them): a huge steel gantry with a sponsor banner over the trail every 300 m (`TrailGate.build`, made-up brands in `TrailGate.SPONSORS`, no collision, skipped on jumps) and breakable wooden roadside billboards every ~80 m (fence-style panel in `TerrainChunkBuilder._boards`, so the bike smashes them; the Label3D text is freed on smash). Probe: `BMX_GATE_PROBE=1`.
+
+- **Health packs** (`world/health_pack.gd`): a GTA-style floating, spinning red backpack with a white cross and a glow ring, one outside the door of each roadside shed (`TerrainChunkBuilder._sheds` -> `out["packs"]`, made in `Terrain._finalize`). Ride within 1.6 m (`Terrain.take_pack`, called from `Game._process`) and `hud.on_health_pack` gives back `HealthPack.HEAL` (45 %); full-health riders leave it. Taken ones stay gone until a new seed. Tests: `BMX_PACK_PROBE=1` (`PACK at` lines), `BMX_PACK_SPAWN=x,z` (start 9 m before a pack), `BMX_LIFE=0.3 BMX_LIFE_PROBE=1`.
 
 ### Rider
 - Procedural meshes posed every frame from the bike's grips/pedals with 2-bone IK; style dictionary
@@ -505,7 +508,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   leaflet). cols even for unfolding (the outer panel's back = the cover, a strip under the page); odd cols only folded.
   `close_actions` / `close_requested` / `auto_close`, `opened` / `closed`, `tempo` (< 1 slower; the map 0.4),
   `sound_stream` (a recording played in random faded slices; the map: `assets/audio/map_unfold_gravel.ogg`). Paper = ambientCG **Paper003** (CC0) scan in
-  `assets/textures/paper/` × the print, creases worn (`shaders/paper_sheet.gdshader`). Rustle sound synthesised.
+  `assets/textures/paper/` × the print, creases worn (`shaders/paper_sheet.gdshader`). Sound: only the user's recording (`sound_stream`; the map and the pause leaflet use `map_unfold_gravel.ogg`), no stream = silent - never synthesised paper sounds.
 - **Trail map** (`PaperMap`, `scripts/ui/paper_map.gd`; `Game.open_map` / `exit_map`): 4×2 panels (0.84 × 0.525 m),
   two layers. **World** (`World`, `set_content`): one 3.2 × 2 km print around you (2 px/m, heights every 10 m,
   colours every 20 m, hill shade, 5 m / 25 m contours, shore, 100 m grid with numbers, trail in red dashes, route
@@ -554,6 +557,31 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   chunks stay exact, `terrain_cs_cmp` still EXACT). Also kept: `GameState.quit()` (C# GC before quitting, `CsGc`),
   `TerrainFieldCs` frees its feature wrappers / Expressions on delete. Hunted with `BMX_FREEZE=a,b` (time frozen,
   no map: clean) vs the map with / without printing / C# sampling; 14 / 14 clean after the fix.
+
+### Xbox menu navigation (`scripts/ui/pad_nav.gd`, class `PadNav`)
+- Every menu works without a mouse, console style: `PadNav.attach(root, {tab_container | tabs, back, first, style})`.
+  D-pad / left stick move focus (Godot's built-in neighbours; held = repeats after 0.38 s every 75 ms), A presses,
+  B = `back`, LB / RB = tabs (a TabContainer, or a `tabs(dir)` callable). Left / right on a row's control change it
+  in place: sliders 1/20 of their range, dropdowns step options, toggles off / on, a custom stepper via meta
+  `nav_step` (the garage's ◀ VALUE ▶; A steps it too). Dropdowns still open on A, take the stick, close on A / B.
+- Focus marker: a container with meta `nav_row` (MenuBase / garage / tune card / photo rows) gets a wash + a bar
+  on its left when its control has focus (`style` "paper" highlighter + red, "card" yellow tokens, "dark" in-ride).
+- Every ScrollContainer under the root follows focus. On a pad, focus lands on the page's first control when a menu
+  opens / a tab changes; a page rebuilt after a change (garage, preset, rebind) gets focus back at the same tree
+  position (`_refocus`); a window closing hands focus back to where it was (title SETTINGS). Only the newest
+  visible PadNav in a viewport is active (Settings over the title menu).
+- Paper sheets push pad / keys into their page: `PaperSheet._page_busy()` keeps B for an open dropdown or a
+  control waiting for a key (group `nav_modal`: Controls rebinding) instead of folding the sheet.
+- Where: title menu (B on ride setup = back), Settings / Controls (window or leaflet; type is bigger on the
+  leaflet, `MenuBase.fs` 1.45), pause leaflet (now also **Tuning** and **Photo mode** lines: the tuning card
+  over the paused ride, B closes it and rides on), garage / rider room (LB / RB categories, B back, right stick
+  orbits, LT / RT zoom), tuning card (only while paused: riding, nothing on it keeps focus), photo mode (**Menu**
+  = edit the card, B / Menu back to the camera), Settings › Controller pad picture (D-pad between callouts, A =
+  the picker), trail map (B closes).
+- Test: `BMX_PADSEQ="w8000,esc,d,d,a,rb,D700,lsd,k:O,shot:<png>,b"` (+ `BMX_PAD=1 BMX_OFFSCREEN=1`) drives a
+  synthetic pad, prints `PADSEQ <step> focus=<control>` and quits; such runs never write any save file. Wait ~8 s
+  before quitting from a fresh `--ride`: quitting within ~3 s of start can crash in C# (exit 132, an old
+  Expression / worker-thread quit issue, not the menus).
 
 ### Button icons (`scripts/ui/pad_glyph.gd`)
 - `PadGlyph.draw(ci, name, centre, h)` draws Xbox Series–style icons in code: glossy dark face buttons with the

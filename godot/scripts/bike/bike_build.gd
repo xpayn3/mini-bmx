@@ -36,10 +36,10 @@ const PARTS := {
 
 ## logo slots (decals.gd label templates); "logo" picks one of LOGOS or "text" / "file:<path>" / "none"
 const SLOTS := {
-	"downtube":  {"label": "Down tube",  "tmpl": {"mesh": "frame", "surface": "paint", "from": [0.168, 0.486], "to": [0.404, 0.809], "length": 0.2, "height": 0.0627}},
-	"toptube":   {"label": "Top tube",   "tmpl": {"mesh": "frame", "surface": "paint", "from": [0.05, 0.74], "to": [0.30, 0.86], "length": 0.19, "height": 0.032}},
-	"chainstay": {"label": "Chainstays", "tmpl": {"mesh": "swing", "surface": "paint", "from": [-0.44, -0.025], "to": [-0.25, 0.03], "length": 0.09, "height": 0.0282, "z": 0.075, "depth": 0.06}},
-	"forklegs":  {"label": "Fork legs",  "tmpl": {"mesh": "fork_lower", "surface": "black", "from": [-0.03, 0.07], "to": [-0.165, 0.335], "upright": true, "length": 0.078, "height": 0.15, "z": 0.085, "depth": 0.05}},   # Fox 40 size: ~15 cm, wrapped round the leg
+	"downtube":  {"label": "Down tube",  "tmpl": {"slot": "downtube", "mesh": "frame", "surface": "paint", "from": [0.168, 0.486], "to": [0.404, 0.809], "length": 0.2, "height": 0.0627}},
+	"toptube":   {"label": "Top tube",   "tmpl": {"slot": "toptube", "mesh": "frame", "surface": "paint", "from": [0.05, 0.74], "to": [0.30, 0.86], "length": 0.19, "height": 0.032}},
+	"chainstay": {"label": "Chainstays", "tmpl": {"slot": "chainstay", "mesh": "swing", "surface": "paint", "from": [-0.44, -0.025], "to": [-0.25, 0.03], "length": 0.09, "height": 0.0282, "z": 0.075, "depth": 0.06}},
+	"forklegs":  {"label": "Fork legs",  "tmpl": {"slot": "forklegs", "mesh": "fork_lower", "surface": "black", "from": [-0.03, 0.07], "to": [-0.165, 0.335], "upright": true, "length": 0.078, "height": 0.15, "z": 0.085, "depth": 0.05}},   # Fox 40 size: ~15 cm, wrapped round the leg
 	"bars":      {"label": "Handlebar",  "tmpl": {"mesh": "steer", "surface": "bar", "bar": true, "length": 0.07, "height": 0.04, "depth": 0.05}},   # a sticker on each side of the stem
 }
 
@@ -268,6 +268,7 @@ static func _merge(dst: Dictionary, src: Dictionary) -> void:
 			dst[k] = src[k]
 
 static func save_build(b: Dictionary) -> void:
+	if OS.get_environment("BMX_PADSEQ") != "": return   # menu tests: never into the player\'s files
 	var f := FileAccess.open(PATH, FileAccess.WRITE)
 	if f: f.store_string(JSON.stringify(b, "\t"))
 

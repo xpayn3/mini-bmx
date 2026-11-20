@@ -42,7 +42,7 @@ func _graphics() -> Control:
 	presets.add_theme_constant_override("separation", 8)
 	var cur: int = Settings.get_v("quality")
 	for lvl in 4:
-		var b := UITheme.button(Settings.QUALITY_NAMES[lvl], _preset.bind(lvl), 15)
+		var b := UITheme.button(Settings.QUALITY_NAMES[lvl], _preset.bind(lvl), _f(15))
 		b.toggle_mode = true
 		b.button_pressed = lvl == cur
 		presets.add_child(b)
@@ -87,7 +87,7 @@ func _gameplay() -> Control:
 	_check(p, "Crash slow motion (WASTED)", "wasted", "Time slows down and the screen goes grey when you fall")
 	_check(p, "Blood", "blood", "Falls leave blood smears on the ground; very hard crashes can tear off an arm or a leg")
 	_check(p, "Pause when the window loses focus", "pause_unfocused")
-	var rb := UITheme.button("Reset ride tuning to defaults", func(): Tune.reset_defaults(), 15)
+	var rb := UITheme.button("Reset ride tuning to defaults", func(): Tune.reset_defaults(), _f(15))
 	_row(p, "Ride tuning (P in game)", rb)
 	return p
 
@@ -125,6 +125,6 @@ func _controller() -> Control:
 	_slider(p, "Stick deadzone", "deadzone", 0.05, 0.5, 0.01)
 	var hb := HBoxContainer.new()
 	hb.add_theme_constant_override("separation", 10)
-	hb.add_child(UITheme.button("Reset controller buttons", func(): Settings.reset_pad_bindings(); m.queue_redraw(), 15))
+	hb.add_child(UITheme.button("Reset controller buttons", func(): Settings.reset_pad_bindings(); m.queue_redraw(), _f(15)))
 	p.add_child(hb)
 	return p

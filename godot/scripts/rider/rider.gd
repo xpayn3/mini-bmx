@@ -24,7 +24,7 @@ const NEUTRAL := {hipX = 0.0, hipY = 0.0, lean = 0.0, elbowsOut = 0.0, kneesOut 
 ## lookpanel.js DEFAULT_LOOK
 const DEFAULT_LOOK := {shell = "#16171a", peak = "#ececec", goggleFrame = "#f2f2ee", lens = "#ff7a2a", strap = "#ff6a4d",
 	jersey = "#ff6a4d", pants = "#1d2b64", gloves = "#ffd21f", shoes = "#26292f", shoeAccent = "#d8232a", pads = "#1b1c20", padStyle = "enduro", helmet = "glory",
-	helmetOn = "1", hairStyle = "long", beard = "1", hair = "#4a3022", skin = "#efc29f", eyes = "#4a6b8a", bibOn = "1", bibNumber = "27", bibText = "MINI BMX  •  DOWNHILL CUP"}
+	helmetOn = "1", hairStyle = "long", beard = "1", hair = "#4a3022", skin = "#efc29f", eyes = "#4a6b8a", bibOn = "1", bibNumber = "27", bibText = "RUNOUT  •  DOWNHILL CUP"}
 ## where the helmet model sits on the head (head-local m / rad) and its scale
 ## helmet models picked in the Look tab (look.helmet): id -> [label, glb]. The glory one is the stock helmet (recolourable
 ## shell / peak, our goggles); the others are textured models (tools/export_helmets.py) that always wear their own goggles
@@ -98,12 +98,8 @@ var hair: Hair              # long hair, shown instead of the helmet
 var skin_mat: StandardMaterial3D
 var hair_mat: StandardMaterial3D
 var eye_mat: StandardMaterial3D
-var beard_node: MeshInstance3D   # the custom head's dark mesh: beard, brows and moustache
-var beard_mat: StandardMaterial3D
-var custom_head := false
 var helmet_fill: MeshInstance3D
 var hair_tail := false   # helmet on + long / bob hair: the tuft at the back is shown
-var face_base: Array[Node3D] = []   # the built-in head shape and features, hidden when the custom head is loaded
 var scalp_mat: StandardMaterial3D
 var neck_mat0: Material
 var shoulder_sph: Array[MeshInstance3D] = []
@@ -286,52 +282,6 @@ func _build_face() -> void:
 	helmet_fill.transform = Transform3D(Basis.from_scale(Vector3(1, 1.2, 0.95)), Vector3(0, -0.01, 0))
 	helmet_fill.visible = false
 	head.add_child(helmet_fill)
-	# the skull is an ellipsoid (radii 0.1 / 0.12 / 0.095 about (0, -0.01, 0)): the hair collides with it, so features are
-	# placed on its surface
-	var sx := func(y: float, z: float) -> float:
-		return 0.1 * sqrt(maxf(1.0 - pow((y + 0.01) / 0.12, 2.0) - pow(z / 0.095, 2.0), 0.0))
-	var ball := func(r: float, m: Material, pos: Vector3, scl := Vector3.ONE) -> MeshInstance3D:
-		var mi := MeshInstance3D.new()
-		var sm := SphereMesh.new()
-		sm.radius = r; sm.height = r * 2.0; sm.radial_segments = 20; sm.rings = 12
-		mi.mesh = sm; mi.material_override = m
-		mi.transform = Transform3D(Basis.from_scale(scl), pos)
-		face_root.add_child(mi)
-		face_base.append(mi)
-		return mi
-	var bar := func(size: Vector3, m: Material, pos: Vector3, tilt: float) -> MeshInstance3D:   # tilt: about the forward axis
-		var mi := MeshInstance3D.new()
-		var bm := BoxMesh.new(); bm.size = size
-		mi.mesh = bm; mi.material_override = m
-		mi.transform = Transform3D(Basis(Vector3.RIGHT, tilt), pos)
-		face_root.add_child(mi)
-		face_base.append(mi)
-		return mi
-	face_base.append(ball.call(0.1, skin_mat, Vector3(0, -0.01, 0), Vector3(1, 1.2, 0.95)))                    # the head
-	face_base.append(ball.call(0.066, skin_mat, Vector3(0.024, -0.062, 0), Vector3(0.82, 0.8, 1.12)))          # soft cheeks and a small round chin
-	var white := mat("#fbf9f5", 0.3)
-	var pupil := mat("#17110e", 0.25)
-	var shine := mat("#ffffff", 0.1)
-	var blush := mat(Color(1.0, 0.5, 0.5, 0.3), 0.9)
-	blush.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	var lip := mat("#c8656c", 0.45)
-	for s in [-1.0, 1.0]:
-		var ez: float = s * 0.041
-		var ex: float = sx.call(0.0, ez) - 0.012
-		ball.call(0.0125, white, Vector3(ex, 0.004, ez), Vector3(0.4, 1.0, 0.95))                    # big round eyes
-		ball.call(0.0085, eye_mat, Vector3(ex + 0.003, 0.003, ez), Vector3(0.35, 1.0, 1.0))           # the iris
-		ball.call(0.0047, pupil, Vector3(ex + 0.0052, 0.003, ez), Vector3(0.3, 1.0, 1.0))
-		ball.call(0.003, shine, Vector3(ex + 0.0068, 0.008, ez - s * 0.003), Vector3(0.3, 1.0, 1.0))  # catch-light: makes the look alive
-		ball.call(0.0016, shine, Vector3(ex + 0.0068, -0.001, ez + s * 0.004), Vector3(0.3, 1.0, 1.0))
-		face_base.append(bar.call(Vector3(0.004, 0.0045, 0.03), hair_mat, Vector3(sx.call(0.046, s * 0.045) - 0.002, 0.046, s * 0.045), -s * 0.2))   # soft, slightly raised brows
-		ball.call(0.0145, blush, Vector3(sx.call(-0.03, s * 0.062) - 0.001, -0.03, s * 0.062), Vector3(0.2, 0.75, 1.0))   # a touch of blush
-		face_base.append(ball.call(0.018, skin_mat, Vector3(-0.006, -0.004, s * 0.098), Vector3(0.5, 1.15, 0.5)))                         # ears
-	face_base.append(ball.call(0.0085, skin_mat, Vector3(0.1, -0.02, 0), Vector3(1.0, 0.85, 0.9)))                                         # a small nose
-	for k in range(-3, 4):                                                                                            # a gentle smile
-		var mz: float = k * 0.0072
-		var my: float = -0.056 + 0.011 * pow(k / 3.0, 2.0)
-		face_base.append(ball.call(0.0032, lip, Vector3(sx.call(my, mz) - 0.0005, my, mz)))
-	_attach_custom_head()
 	scalp = MeshInstance3D.new()
 	scalp.mesh = Hair.scalp_mesh()
 	scalp.material_override = scalp_mat
@@ -344,34 +294,6 @@ func _build_face() -> void:
 	hair.visible = false
 	add_child(hair)
 
-
-## the custom head (assets/head_lowpoly.glb, "Low-poly Head" by MvdE, CC-BY 4.0): its skin mesh replaces the built-in head
-## shape (nose, brows, ears, mouth come with it); its dark mesh is the beard / brows / moustache, in the hair colour.
-## Turned so its face looks along +X and sized to the skull the hair collides with (the file has a 0.6 scale in its own
-## node transforms, hence the division).
-const CUSTOM_HEAD := "res://assets/head_lowpoly.glb"
-func _attach_custom_head() -> void:
-	if not ResourceLoader.exists(CUSTOM_HEAD): return
-	var ps: PackedScene = load(CUSTOM_HEAD)
-	if ps == null: return
-	var root: Node3D = ps.instantiate()
-	var meshes := root.find_children("*", "MeshInstance3D", true, false)
-	if meshes.size() < 1:
-		root.free(); return
-	var holder := Node3D.new()
-	holder.name = "CustomHead"
-	holder.transform = Transform3D(Basis(Vector3.UP, -PI / 2) * Basis.from_scale(Vector3(0.17, 0.15, 0.125) / 0.6), Vector3(0.0, 0.0, 0.0))
-	face_root.add_child(holder)
-	holder.add_child(root)
-	beard_mat = mat("#4a3022", 0.6)
-	for i in meshes.size():
-		var mi := meshes[i] as MeshInstance3D
-		var m: Material = skin_mat if i == 0 else beard_mat
-		for si in mi.mesh.get_surface_count(): mi.set_surface_override_material(si, m)
-		if i == 1: beard_node = mi
-	for n in face_base: n.visible = false     # no built-in eyes, blush or mouth: the head is used as it is
-	if neck_mesh: neck_mesh.visible = false  # and its own neck replaces the rider's neck tube
-	custom_head = true
 
 
 ## helmet on: the shell, goggles and action camera; off: the bare head with long hair
@@ -387,7 +309,7 @@ func _apply_head_gear(on: bool) -> void:
 	if neck_mesh:
 		if neck_mat0 == null: neck_mat0 = neck_mesh.material_override
 		neck_mesh.material_override = neck_mat0 if on else skin_mat
-		neck_mesh.visible = on or not custom_head      # the custom head brings its own neck
+		neck_mesh.visible = true
 
 
 func _build_builtin_helmet() -> void:
@@ -681,9 +603,6 @@ func set_look(l: Dictionary) -> void:
 		hair_mat.albedo_color = Color(str(L.get("hair", DEFAULT_LOOK.hair)))
 		scalp_mat.albedo_color = hair_mat.albedo_color.lightened(0.04)
 		eye_mat.albedo_color = Color(str(L.get("eyes", DEFAULT_LOOK.eyes)))
-		if beard_mat:
-			beard_mat.albedo_color = hair_mat.albedo_color
-			if beard_node: beard_node.visible = str(L.get("beard", "1")) != "0"
 		hair.set_color(hair_mat.albedo_color)
 		var hs := str(L.get("hairStyle", "long"))
 		var helmet_on := true   # the rider always wears a helmet: hair only shows coming out under the back of it
@@ -1401,7 +1320,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# acceleration pushes the body the other way (Bump bounce); Body bounce sets how long it rings on
 	var bump_k: float = float(sty.get("bumpAbsorb", 2.0)) * (1.0 - air)
 	# what the legs feel: half the frame's motion, half the wheels' (the bumps the suspension passes on)
-	var gy := (global_position.y if is_inside_tree() else 0.0) * 0.5 + _num(p, "wheelY") * 0.5
+	var gy := (global_position.y if is_inside_tree() else 0.0) * 0.85 + _num(p, "wheelY") * 0.15
 	var acc := 0.0
 	if not is_nan(_fy_prev) and absf(gy - _fy_prev) > 1.0:
 		_fy_prev = NAN; _fv_prev = NAN   # teleports (respawn, a new ride) are not bumps
@@ -1524,9 +1443,9 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	J[0] = head_p
 	J[1] = chest
 	J[2] = pelvis
-	var yaw: float = clampf((_num(p, "steer") * 1.2 + _num(p, "yawRate") * 0.15) * sty.headTurn, -0.8, 0.8) + sty.headYaw
+	var yaw: float = clampf((_num(p, "steer") * 1.2 + _num(p, "yawRate") * 0.15) * sty.headTurn, -0.8, 0.8) + sty.headYaw + _num(p, "lookYaw")
 	var rx: float = (_num(p, "headRoll") if p.get("headRoll") != null else _num(p, "lean") * 0.6) + sty.headRoll
-	var rz: float = -0.12 * (ang - 0.72) + 0.04 * sin(t * 3.3) * wig - sty.headTilt * (1.0 - 0.6 * relax) + 0.12 * tall
+	var rz: float = -0.12 * (ang - 0.72) + 0.04 * sin(t * 3.3) * wig - sty.headTilt * (1.0 - 0.6 * relax) + 0.12 * tall + _num(p, "lookPitch")
 	head.transform = Transform3D(GEAR.euler_xyz(rx, yaw, rz), head_p)
 	_pose_neck()
 
