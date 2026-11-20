@@ -632,6 +632,7 @@ func _apply_settings() -> void:
 # ---------------------------------------------------------------- host API used by BikePhysics
 func flash(text: String) -> void:
 	msg_t = 1.4
+	if Env.s("BMX_MAN_PROBE") != "": print("FLASH ", text, " v=%.1f" % phys.v)   # tests
 	if hud: hud.flash(text)
 
 func msg_idle() -> bool:

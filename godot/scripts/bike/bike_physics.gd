@@ -502,6 +502,9 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	var lean_fb := 0.0
 	if not air:
 		lean_fb = clampf(body_in_s + (body_x + hip_shift) * 0.5 / maxf(0.05, T.weightShift), -1.0, 1.0)
+		# pumping with the stick is pushing down, not leaning over the bars: the rear keeps its load (it locked and
+		# slid out under braking with the pump stick forward)
+		if lean_fb > 0.0 and pump_push > 0.05 and body_in > 0.12: lean_fb *= 1.0 - float(T.get("pumpCentred", 0.75))
 		var dN: float = -lean_fb * float(T.get("leanTraction", 0.45)) * G
 		# and the slope itself: the centre of mass sits ~0.9 m above the ground, so climbing puts weight on the rear
 		# and descending on the front (g sin(slope) x height / wheelbase). The rider's own shift up / down a slope
@@ -558,12 +561,23 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		# which drives it on down a back side (+pumpHold x g x slope) but fights it up a face (-pumpHoldUp). Held all
 		# the time it about cancels out: the speed is in the timing (press on the downs, let go on the ups)
 		pump_push = 0.0
-		pump_on = inp.hop and not hop_block and not front_air and not rear_air and hop_t <= 0.0 and v > float(T.get("pumpMinSpeed", 2.0)) and man_a < 0.08
-		if pump_on and prep < 0.1:
+		# two ways in: the hop button (easy: on or off) or the body stick (the pro way: how far forward = how hard
+		# the bike is pushed into the ground; easing it back unweights, so a face costs nothing). Pulled well back
+		# it is a manual instead (manualFrom)
+		var btn: bool = inp.hop and not hop_block
+		var p_fwd: float = clampf((body_in - 0.12) / 0.6, 0.0, 1.0)
+		var p_back: float = clampf((-body_in - 0.12) / maxf(0.05, float(T.get("manualFrom", 0.4)) - 0.12), 0.0, 1.0)
+		var p_in: float = maxf(1.0 if btn else 0.0, p_fwd * float(T.get("pumpStick", 1.2)))
+		var ground_ok: bool = not front_air and not rear_air and hop_t <= 0.0 and v > float(T.get("pumpMinSpeed", 2.0)) and man_a < 0.08
+		pump_on = ground_ok and (btn or p_fwd > 0.0 or p_back > 0.0)
+		if ground_ok and prep < 0.1 and (p_in > 0.0 or p_back > 0.0):
 			var s_up := sin(clampf(slope, -0.8, 0.8))
-			pump_push = (-float(T.get("pumpHold", 0.45)) if s_up < 0.0 else -float(T.get("pumpHoldUp", 0.4))) * G * s_up
+			if s_up < 0.0: pump_push = -float(T.get("pumpHold", 0.45)) * G * s_up * p_in
+			else:
+				# up a face: pushing costs, unweighting (stick eased back) carries a little more speed up it
+				pump_push = -float(T.get("pumpHoldUp", 0.4)) * G * s_up * p_in + float(T.get("pumpUnweight", 0.15)) * G * s_up * p_back * (1.0 - p_in)
 			a += pump_push
-			if s_up < -0.03: pump_press_t += dt
+			if btn and s_up < -0.03: pump_press_t += dt
 		if not inp.hop: pump_press_t = 0.0
 		if absf(pump_push) > 0.05:
 			pump_gain += pump_push * dt * 3.6; pump_idle = 0.0

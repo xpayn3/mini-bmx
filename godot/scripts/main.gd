@@ -1796,7 +1796,13 @@ func _autotest(seconds: float) -> void:
 					game._snap_prev()
 			var pr := Env.s("BMX_PUMPRIDE")   # tests: hold hop on every downhill (down) / all the time (all) / never (off)
 			if Env.s("BMX_PUMP") != "" and not ph.air and ph.prep > 0.15: Input.action_press("hop")   # tests: pump into lips
-			elif pr != "" and pr != "off" and el > 3.0 and not ph.air and (pr == "all" or ph._g_pitch < -0.02): Input.action_press("hop")
+			elif pr == "stick" and el > 3.0 and not ph.air:   # the pro way: stick forward on the downs, eased back on the ups
+				Input.action_release("hop")
+				if Input.is_action_pressed("brake"): Input.action_release("body_fwd"); Input.action_release("body_back")   # no pumping into the brakes
+				elif ph._g_pitch < -0.02: Input.action_release("body_back"); Input.action_press("body_fwd", 0.75)
+				elif ph._g_pitch > 0.02: Input.action_release("body_fwd"); Input.action_press("body_back", 0.25)
+				else: Input.action_release("body_fwd"); Input.action_release("body_back")
+			elif pr != "" and pr != "off" and pr != "stick" and el > 3.0 and not ph.air and (pr == "all" or ph._g_pitch < -0.02): Input.action_press("hop")
 			else: Input.action_release("hop")
 			if pr != "" and int(el * 2.0) != int(_probe.get("pr_k", -1)):
 				_probe["pr_k"] = int(el * 2.0)

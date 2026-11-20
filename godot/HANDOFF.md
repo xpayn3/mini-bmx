@@ -298,7 +298,11 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   the hold's swing into the air spin; it steers on the back wheel (`manTurn`; with the front up the steer used to be 0, so a
   manual went straight on in any bend into the trees). The sprint stamp from slow lifts the front through the balance
   (`manSprintLift`) instead of the old climb that always looped out. HUD: the balance bar shows the moment the stick is
-  pulled back (`man_pull`), the pump bar whenever hop is held on the ground (`pump_on`). **Hop held with both wheels down pumps**: + `pumpHold` x g
+  pulled back (`man_pull`), the pump bar whenever hop is held on the ground (`pump_on`).
+  **The right stick pumps too (the pro way, user decision: it's the universal body stick)**: forward = push the bike into
+  the ground (how far = how hard, `pumpStick` x the button), eased back up a face = unweight (`pumpUnweight`, a little speed
+  carried, no cost), pulled past `manualFrom` = the manual. The hop button is the easy on / off pump. Test
+  `BMX_FOLLOW=1 BMX_PUMPRIDE=stick`. **Hop held with both wheels down pumps**: + `pumpHold` x g
   x slope on a down slope, - `pumpHoldUp` on an up slope (`pump_push`, `pump_gain`); a press spent pumping a downhill
   doesn't hop when let go (unless a lip is right there). A jump (> 0.45 s air) landed within `landPerfect` of the slope =
   PERFECT LANDING + `landBoost` m/s. **HUD bars** (bottom centre, `hud.gd` `SlimBar` look: 4 px track, caption left, value
