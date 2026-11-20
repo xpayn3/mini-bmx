@@ -68,8 +68,17 @@ func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
 			Handlebar.apply(steer_n as MeshInstance3D, build.bars)
 			_grips()   # the grips moved with the bar
 		decal_cfg = BikeBuild.decal_config(build)
-		if extras.get("noDecals", false):   # the logo slots are placed for the GLORY frame; keep the tyre / rim ones
-			decal_cfg.erase("labels")
+		if extras.get("noDecals", false):   # the slot numbers are the GLORY's: place each one on this frame from its own geometry
+			var fitted := []
+			for L in decal_cfg.get("labels", []):
+				if L.get("bar", false):
+					if not extras.get("noBarMod", false):   # the garage bars are the same mesh on the goat
+						fitted.append(L)
+					continue
+				var F := BikeDecals.fit_label(model, L)
+				if not F.is_empty():
+					fitted.append(F)
+			decal_cfg["labels"] = fitted
 	if extras.has("suspension"):
 		susp = Suspension.new(model, extras)
 	if extras.has("chain"):

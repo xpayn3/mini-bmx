@@ -33,6 +33,7 @@ repo, see above — never develop it).
   `shock_spring` node, parts in `assets/parts/fuzz_*.glb`). Both the Tues and Fuzz (and Goat) draw the chain + derailleur pulleys with `BikeChain`
   (`scripts/bike/bike_chain.gd`, enabled by `chain` in the glb extras; the Goat uses the Tues derailleur and pedals). `tools/bike_glb.py` = shared glb writer.
   Not done: swapping the Tues fork onto the GLORY as a fork model.
+  **Stickers on every frame**: the logo slots (down / top tube, chainstay, fork legs) carry a `slot` name; frames flagged `noDecals` (Tues, Goat, Fuzz) get them placed by `BikeDecals.fit_label` from the model's own vertices (crank = bottom bracket, steer = head tube, tube direction found by vertex density, fork leg by a line fit), then the same flat projection as the GLORY bakes them into a mesh. New frames need no hand-set numbers.
 
 ## 2. Install / run
 
