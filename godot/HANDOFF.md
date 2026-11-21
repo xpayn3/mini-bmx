@@ -1099,7 +1099,10 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - Grime: mud builds up (slow: `Grime.MUD_RATE` 0.25) and washes off in water; wet gloss + drips. **Dust first** (2026-11-20): riding dirt / sand
   lays a see-through film of the ground's colour (`Grime.dust`, global `grime_dust`, ~30 s to full, thickest low down, drawn by the
   same `grime_mud` pass, now a transparent pass); mud only piles up once the bike is dusty (`smoothstep(0.4, 0.95, dust)`) or
-  wet. Mud is much darker than the dust and raised (screen-space bump from a lumpy height field in the pass: no UVs
+  wet. **Colours = the ground ridden on** (2026-11-21, user: bike looked pale / bright, "make dirt and dust the same colour as
+  the ground"): the dust film is the ground colour itself, mud the same colour x 0.68 (sand 0.8); both keep following the
+  ground while riding it (`Grime.GROUND_FOLLOW` 6 s, mud 2.5x). `grime_dust` is a plain vec4 global, so it must be sent
+  linear (`srgb_to_linear`): sRGB numbers read as linear were the chalky white film. Mud is raised (screen-space bump from a lumpy height field in the pass: no UVs
   needed); thick middles dark, edges drying lighter. **Dirt map** (where it gathers, `grime_mud.gdshader`): low down;
   the spray band round each tyre (globals `grime_wf` / `grime_wr` = axle + radius in bike-root space; fork arch / lowers,
   down tube, stays, shins); crevices from a baked 3D map of the bike (`Grime._cav_work` on a worker, ~250 ms, 2.5 cm

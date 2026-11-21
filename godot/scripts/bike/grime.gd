@@ -29,6 +29,7 @@ var _shed := 0.0                  # dry chunks waiting to fly off the bike (take
 const DRY_T := 90.0               # seconds for fresh mud to dry out
 static var _PROBE := OS.get_environment("BMX_GRIME_PROBE") != ""
 var _vw := Vector2(NAN, NAN)      # last wheel vertical speeds (rattle)
+const GROUND_FOLLOW := 6.0   # s of riding new ground until the dust film has its colour (mud: 2.5x)
 var dust_col := Color(0.6, 0.53, 0.43)
 var wet := 0.0
 var blood := 0.0                  # blood stains on the rider + bike: builds with every crash, stays until a death + revive
@@ -472,9 +473,9 @@ func feed(dt: float, surf: int, speed: float, skid: bool, air: bool, landed: flo
 		elif surf == 3: drate = speed * 0.0045 + (0.06 if skid else 0.0)
 	var dgain := drate * dt + (0.04 * landed if landed > 0.0 and surf != 0 else 0.0)
 	if dgain > 0.0:
-		var dt_col := (col * 0.95).lerp(Color(0.74, 0.67, 0.56), 0.4)   # dry dust: paler, greyer than the ground
-		dt_col.a = 1.0
-		dust_col = dust_col.lerp(dt_col, minf(1.0, dgain / (dust + dgain + 0.02)))
+		var dt_col := Color(col.r, col.g, col.b, 1.0)   # the dust IS the ground it came off: the same colour
+		# new dust covers the old: the film follows the ground's colour within ~GROUND_FOLLOW s of riding it
+		dust_col = dust_col.lerp(dt_col, maxf(minf(1.0, dgain / (dust + dgain + 0.02)), 1.0 - exp(-dt / GROUND_FOLLOW)))
 		dust = minf(1.0, dust + dgain)
 	# then mud: it only piles up on a dusty bike; a wet one picks it up at once, and much faster
 	var ready := smoothstep(0.4, 0.95, dust)
@@ -484,10 +485,10 @@ func feed(dt: float, surf: int, speed: float, skid: bool, air: bool, landed: flo
 	var gain := (rate * dt + (0.05 * landed if landed > 0.0 and surf != 0 else 0.0)) * MUD_RATE * ready
 	if gain > 0.0:
 		# the colour shifts toward the ground it's picking up now (darker: damp, packed dirt)
-		var target := (col * (0.5 if surf == 3 else 0.38)).lerp(Color(0.19, 0.12, 0.065), 0.45)   # wet, packed: much darker than the dust
+		var target := col * (0.8 if surf == 3 else 0.68)   # the same ground, damp and packed: a shade darker, same hue
 		target.a = 1.0
 		var fresh := minf(1.0, gain / (mud + gain + 0.02))
-		mud_col = mud_col.lerp(target, fresh)
+		mud_col = mud_col.lerp(target, maxf(fresh, 1.0 - exp(-dt / (GROUND_FOLLOW * 2.5))))   # fresh mud covers the old
 		mud = minf(1.0, mud + gain)
 		dry = maxf(0.0, dry - fresh * 1.5)       # fresh mud on top: wet again
 		flake = maxf(0.0, flake - fresh * 2.0)   # and the gaps fill in
@@ -529,7 +530,8 @@ func update(dt: float, bike_root: Node3D) -> void:
 	RenderingServer.global_shader_parameter_set("mud_col", mud_col)
 	RenderingServer.global_shader_parameter_set("rider_trim", trim)
 	RenderingServer.global_shader_parameter_set("grime_age", Vector4(dry, flake, 0.0, 0.0))
-	RenderingServer.global_shader_parameter_set("grime_dust", Vector4(dust_col.r, dust_col.g, dust_col.b, d))
+	var dl := dust_col.srgb_to_linear()   # a plain vec4 global: no colour conversion is done for us (sRGB numbers read
+	RenderingServer.global_shader_parameter_set("grime_dust", Vector4(dl.r, dl.g, dl.b, d))   # as linear made the film pale / chalky)
 	var inv := bike_root.global_transform.affine_inverse()
 	RenderingServer.global_shader_parameter_set("grime_root", Projection(inv))
 	# the tyres in bike-root space, for the spray they throw (xyz axle, w radius)
