@@ -161,6 +161,7 @@ const DEFS := [
 		["landPrepTime", "Reach for landing", 0.35, 0.05, 1, 0.05, "s"],
 		["airAimDelay", "Wait before aiming at the landing", 1.0, 0, 2, 0.05, "s"],
 		["airAimSpeed", "Aim at the landing: softness", 14, 4, 70, 1, ""],
+		["airAssist", "Landing help in the air (0 = all yours)", 0.6, 0, 1, 0.05, ""],
 		["chargeTime", "Hop charge time", 2, 0.5, 4, 0.1, "s"],
 		["chargePop", "Full-charge extra pop", 0.6, 0, 4, 0.1, "m/s"],
 	]],
@@ -197,7 +198,7 @@ const DEFS := [
 		["stickAirRoll", "Air: stick lays the bike over", 0.75, 0, 1.2, 0.05, "rad"],
 		["airWhip", "Air: whip (stick to the side kicks the bike out)", 1.1, 0, 1.5, 0.05, "rad"],
 		["whipReturn", "Air: whip straightened for the landing", 0.7, 0, 1, 0.05, ""],
-		["stickAirEase", "Air: bike follows the stick (higher = snappier)", 3.5, 1, 12, 0.25, "/s"],
+		["stickAirEase", "Air: bike follows the stick (higher = snappier)", 8.0, 1, 12, 0.25, "/s"],
 		["stickYawRate", "Air: flat spin speed (stick at left / right edge)", 5.0, 1, 9, 0.1, "rad/s"],
 		["stickBodyCounter", "Air: body leans against the bike", 0.25, 0, 0.6, 0.05, "×"],
 		["stickBodyTilt", "Air: body stays as the bike tilts", 0.6, 0, 1, 0.05, "×"],
@@ -279,10 +280,10 @@ const DEFS := [
 
 const PATH := "user://tune.cfg"
 ## bump VER when defaults are retuned: saved values of the RETUNED keys are dropped once
-const VER := 16
+const VER := 17
 ## later retunes, per version: only these keys are dropped for saves older than that version (bumping VER
 ## with one shared list would reset every earlier retuned key again)
-const RETUNED_AT := {8: ["manualFrom", "stickAirRoll", "stickSpinBuild", "stickYawRate"], 9: ["leanMax"], 11: ["leanIn", "leanOut", "flickSpeed"], 12: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 13: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 14: ["sprintRock"], 15: ["dustWidth"], 16: ["bodyLean"]}
+const RETUNED_AT := {8: ["manualFrom", "stickAirRoll", "stickSpinBuild", "stickYawRate"], 9: ["leanMax"], 11: ["leanIn", "leanOut", "flickSpeed"], 12: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 13: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 14: ["sprintRock"], 15: ["dustWidth"], 16: ["bodyLean"], 17: ["stickAirEase"]}
 const RETUNED := ["steerRate", "steerRelease", "steerCurve", "turnFloor", "steerMax", "slowSteer",
 	"barSpeed", "grip", "slipRecover", "slipMax", "turnWeight", "leanMax", "leanIn", "leanOut", "leanDamp", "bikeLeanMul", "bikeLeanCap", "flipAccel", "flipRate", "airTwist", "landBack", "travel", "popKick"]
 var defaults := {}
@@ -375,7 +376,7 @@ const FOLLOW := {
 	"popPower": [2.4, "popKick", 1.0],                                   # pop off a lip: one slider
 	"pumpHoldUp": [0.4, "pumpHold", 1.0], "pumpUnweight": [0.15, "pumpStick", 1.0], "pumpCentred": [0.75, "", 0.0], "pumpMinSpeed": [2.0, "", 0.0],
 	"airSpinResp": [7.0, "airSpinRate", 1.0], "airSpinStop": [3.0, "airSpinRate", 1.0],
-	"stickSpinBuild": [2.5, "stickAirEase", 1.0], "stickSpinGrow": [0.8, "", 0.0], "stickSpinMax": [0.7, "", 0.0],
+	"stickSpinBuild": [5.5, "stickAirEase", 1.0], "stickSpinGrow": [0.4, "", 0.0], "stickSpinMax": [0.7, "", 0.0],
 	"whipSnap": [5.0, "whipDrift", 1.0], "whipLean": [0.22, "whipDrift", 1.0], "whipCarry": [0.6, "", 0.0],
 	"whipCatch": [0.9, "", 0.0], "whipMinSpeed": [4.0, "", 0.0],
 }

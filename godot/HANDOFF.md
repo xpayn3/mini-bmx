@@ -600,6 +600,14 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
     wall (BONK, thrown backwards; seen in an F8 log as v 9.2 -> -2.6 m/s with a 23 cm lift).
   - Still open: big rocks (>= 20 cm) pitch the bike 13-16 deg and throw it into the air at 35 km/h (spring rate, not shape); the pose changes
     between pedalling and coasting move the hips ~10 cm; not yet confirmed by the user riding.
+- **Air control, arcade-smooth (2026-11-21, user: "can't trigger it right away, spinning left / right is weird, the landing assistance nags"; wants old motocross / BMX game feel)**:
+  the stick is followed quicker (`stickAirEase` 3.5 -> 8, Tune VER 17; tilt spring 22 -> 50, lean 45 -> 80; spin answers at 11 /s and stops at 10 /s,
+  edge lets go at 10 /s; `stickSpinGrow` 0.8 -> 0.4). **A flat spin turns rider + bike as one**: the hip twist / whip (`tw_t`) and most of the lay-over
+  fade out with `stick_yaw` (the hips used to hold the bike on the travel line: it snapped out ~60 deg, hung, then jumped ~130 deg in 0.1 s when
+  `sys_slip` wrapped). **The player's stick always wins**: `_air_own` (1 while any air control is used, fades 0.4 s after) and `air_help` =
+  `airAssist` (new slider, Ride > Jumps > Landing, 0.6) x hands off scale the landing tilt aim, the yaw straighten (now within 1.2 rad) and the whip
+  return. A steer held off the lip counts in the air once moved 0.35 (not only after re-centring). Measured with `BMX_FOLLOW=1 BMX_PAD=1
+  BMX_BODY=spin360 BMX_BODY_PRINT=1 BMX_BIGAIR=1`: let go at 300 deg -> lands 362 (was 450, with the lurch). Not yet confirmed by the user riding.
 - **Cameras ride the bike's height without its bumps (2026-11-21, user: "side cam reacts harshly on bumps, exaggerates impacts, looks glitchy")**:
   `CameraRig._smooth_y` (two low-passes of `Y_TAU` 0.28 s read as 2 x first - second: no lag on slopes / jumps, a rock's kick or a landing's
   compression at about a sixth) feeds every follow camera's aim and anchor (side, chase, trail, drone, the playground's). The view-blocked check

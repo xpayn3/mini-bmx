@@ -279,6 +279,7 @@ const PAGES := [
 			["*landSlide", "Land on ground tilted sideways: the hit is softer, the rest slides you towards its low side.", "Sticks", "Slides"],
 			["*slamJolt", "Legs take a hit up to (bigger = harder landings are fine).", "Fragile", "Tough"],
 			["landPrepTime", "Reaches for the landing.", "Late", "Early"],
+			["*airAssist", "How much the rider lines the bike up for the landing by himself. Only with your hands off the stick: your stick always wins.", "All yours", "He helps"],
 			["airAimDelay", "Waits before aiming at the landing.", "At once", "Later"],
 			["airAimSpeed", "Aim at the landing: softness.", "Soft", "Firm"],
 			["landBack", "Back-wheel balance limit.", "Strict", "Forgiving"],
