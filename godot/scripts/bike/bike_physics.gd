@@ -119,6 +119,7 @@ var corner_g := 0.0; var weight_in := 0.0; var lean_err := 0.0; var _low_t := 0.
 var _amax := 99.0; var _amin := -99.0; var bal_k := 0.0; var _b_prev := 0.0; var _endo_t := 0.0; var _f_prev := 0.0; var _circ_f := 1.0; var _brake_feel := true; var _a_rear := 0.0
 var berm_k := 0.0   # how much a berm is carrying the turn right now (0..bermAssist)
 var bank_lean := 0.0   # the drawn lean into tilted ground (bankLean x bank), bike + body
+var bank_sq := 0.0     # how far the body goes into line with the bike on banked ground (0 flat .. bankBody), drawn only
 var bank_v := 0.0      # how fast the bank reading is changing (its smoothing spring)
 var _load_s := NAN     # the tyres' load factor for grip, eased (relaxation)
 var _share_f := NAN    # the front tyre's share of the load, eased the same way
@@ -291,7 +292,7 @@ func _reset_motion() -> void:
 func _reset_ground_sim() -> void:
 	front_use = 0.0; front_push = 0.0; _push_t = 0.0; rear_lock = 0.0; front_lock = 0.0; _fb_f = 0.0
 	corner_g = 0.0; weight_in = 0.0; lean_err = 0.0; _low_t = 0.0; knock = 0.0; _amax = 99.0; _amin = -99.0; bal_k = 0.0
-	_b_prev = 0.0; _endo_t = 0.0; _f_prev = 0.0; _circ_f = 1.0; bank_lean = 0.0; _gx_lean = 0.0; berm_k = 0.0
+	_b_prev = 0.0; _endo_t = 0.0; _f_prev = 0.0; _circ_f = 1.0; bank_lean = 0.0; bank_sq = 0.0; _gx_lean = 0.0; berm_k = 0.0
 	_mu_f = NAN; _mu_r = NAN; bank_v = 0.0; _load_s = NAN; _share_f = NAN; _bike_lead = 0.0
 	_risk.clear(); risk = 0.0; _risk_peak = 0.0
 
@@ -476,7 +477,9 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	# the lip throw: W / S pressed fresh as the bike leaves a lip (a jump spotted just ahead, or one wheel
 	# already off) throw the rider back / forward, pushing against the bike and through it the ground. That
 	# is the only way to start a flip (keys held from before don't count; S there pulls back, it doesn't brake)
-	var lip_win := not air and (prep > 0.25 or front_air or rear_air)
+	# (not while a balance manual is held: its raised front opened the window, so on keys a fresh S to drop the
+	# manual / W to pedal it was a flip throw and S didn't brake)
+	var lip_win := not air and not (_balancing() or _man_grace > 0.0) and (prep > 0.25 or front_air or rear_air)
 	if pad:   # gamepad: the triggers never throw a flip (the right stick does), so brake stays a brake
 		lock_tw = true; lock_ts = true
 	elif not lip_win:
@@ -570,7 +573,8 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		# carrying next to nothing (a climb + weight back) and wash out (the AI rider did, every run at one bend)
 		var fw_k: float = float(T.get("riderSkill", 1.0)) * smooth01((absf(lean) - 0.12) / 0.35)
 		dN -= G * float(T.get("frontWeight", 0.12)) * fw_k * (1.0 + 1.5 * float(_risk.get("FRONT WASHED OUT!", 0.0)))
-		var d_brake := -_b_prev * SLOPE_TRANSFER
+		# (rolling backwards, braking loads the rear, not the front)
+		var d_brake := -_b_prev * SLOPE_TRANSFER * (1.0 if v >= 0.0 else -1.0)
 		# (how far the rear would go below nothing = how hard it's coming up: the crash judge builds on it)
 		var lift := (-nR + 0.03 * G) - (dN + d_brake)
 		_danger("OVER THE BARS!", lift / (0.25 * G) if (brake_f > 0.4 and v > 3.0) else -1.0, dt)
@@ -625,11 +629,13 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		_fb_f = fb_f
 		_a_rear = maxf(0.0, drive) + (fb_r if (brake and rear_down) else 0.0)   # what the REAR tyre carries along the bike
 		var b_all := fb_r + fb_f
-		_b_prev = b_all if (brake and rear_down and absf(v) > 0.3) else 0.0
-		if brake and rear_down and v > 0.3:
+		# (gated on any tyre down, not on the rear: with the rear bounced up the front brake did nothing; each brake
+		# is already zero while its own wheel is off the ground)
+		_b_prev = b_all if (brake and not air and absf(v) > 0.3) else 0.0
+		if brake and not air and v > 0.3:
 			a -= b_all; a_long += b_all; drive -= b_all
 			brake_heat += b_all * v * dt / 45.0
-		elif brake and rear_down and v < -0.3 and (rev_cap > 3.0 or not brake_back):
+		elif brake and not air and v < -0.3 and (rev_cap > 3.0 or not brake_back):
 			# braking while rolling backwards (after a fakie landing, or sliding back down a climb the brakes
 			# can't hold); a fresh press from a standstill backs up on purpose (brake_back) and doesn't brake
 			a += b_all; a_long += b_all; drive += b_all
@@ -1127,8 +1133,11 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		# into it and the drawn bike was shoved 25-38 cm up ("shoots up for a sec"). Look 0.3 / 0.5 m to the
 		# lean side at both wheels: the bike leans at most groundLeanMax against the steepest rise there
 		var sg := signf(bike_lean)
-		var lx := -f.z * sg
-		var lz := f.x * sg   # unit vector to the lean side
+		# (+ lean = left = (f.z, -f.x), as in _bank_at. This used to look to the OTHER side: in a berm its own face on the
+		# outside read as ground rising at the tyre and stood the bike up, 60 deg of lean drawn as 38 on a 21 deg bank,
+		# while a lean toward a real rise wasn't limited at all)
+		var lx := f.z * sg
+		var lz := -f.x * sg   # unit vector to the lean side
 		var phi := -0.5
 		for wo in [L - BB_REAR, -BB_REAR]:
 			var wx: float = x + f.x * wo
@@ -1140,7 +1149,9 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 				phi = maxf(phi, atan((terrain.deck_height(wx + lx * d, wz + lz * d) - h0) / d))
 		lean_room = _or(lean_room, phi)
 		lean_room += clampf(phi - lean_room, -3.0 * dt, 3.0 * dt)
-		lim_t = maxf(0.25, float(T.get("groundLeanMax", 1.05)) - maxf(lean_room, -0.3))
+		# (ground falling away on the lean side, the inside of a berm: half of that as extra room, at most ~9 deg -
+		# all of it laid the bike nearly flat, 77 deg, at full stick in a 20 deg berm)
+		lim_t = maxf(0.25, float(T.get("groundLeanMax", 1.05)) - (lean_room if lean_room > 0.0 else maxf(lean_room * 0.5, -float(T.get("bermLeanRoom", 0.15)))))
 	# the ground's limit on the lean opens / closes over a moment when the bike leaves / meets the ground: it used
 	# to switch on and off in a single step (a 0.5-0.8 rad jump of the bike and the rider at take-off and landing)
 	if air:
@@ -1154,7 +1165,22 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	# the bike leans under the rider: the body always stays a little more upright than the bike (never
 	# hangs inside it, or the inside leg cuts through the frame). The body leans ~70 % of the way the
 	# rider + bike lean, so in a fast turn the bike tips well under a fairly upright rider
-	counter = maxf(absf(bike_lean - (lean + bank_lean) * T.bodyLean), absf(bike_lean) * 0.2) * signf(bike_lean)
+	# (signed: where the ground / the soft cap holds the bike more upright than the body's own target, the body stays
+	# 20 % inside the bike. The absolute difference used to flip it: bike held at 31 deg with the body wanting 55 gave a
+	# body at 7 deg, or leaning the wrong way - the rider stood up out of every steep berm)
+	var b_sg := signf(bike_lean)
+	counter = maxf((bike_lean - (lean + bank_lean) * T.bodyLean) * b_sg, absf(bike_lean) * 0.2) * b_sg
+	# on a bank the rider goes WITH the bike (drawn only). "Bike under an upright body" is flat-corner technique; in a
+	# berm rider and bike are one line, square to its face. The body's target above is measured against gravity, and
+	# the body stick's throw (flickLean) goes to the bike alone, so on banked ground with both sticks he stood up out
+	# of a laid-over bike. bank_sq (0 flat .. bankBody on banks toward the lean) takes the body that share
+	# of the way into line with the bike (the trail's banked bends are only ~4-10 deg: full from ~8.5); game.gd fades the stick's hips-to-the-outside shift by it too
+	var sq_t := 0.0
+	if not air:
+		sq_t = float(T.get("bankBody", 0.7)) * smooth01((bank * signf(bike_lean) - 0.03) / 0.12)
+	bank_sq = move_toward(bank_sq, sq_t, (1.2 if air else 3.0) * dt)
+	if bank_sq > 0.0:
+		counter = lerpf(counter, bike_lean * 0.2, bank_sq)
 	# in the air the stick's lean is the rider's doing: they push the bike over with the legs and arms and
 	# their body goes the other way a little (counter-lean), staying over the centre of mass
 	if air:
@@ -1353,7 +1379,9 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			var a_body := 0.0
 			if not is_nan(v_last) and not air:
 				a_body = clampf((v - v_last) / maxf(dt, 1e-4), -40.0, 40.0)
-			v_last = v
+			# (not through a flight: the landing re-projects v onto the slope / flips it for a fakie, which read as a
+			# 40 m/s2 jolt of the body on the first ground step)
+			v_last = NAN if air else v
 			var kx: float = T.bodyStiff
 			var cx := 2 * sqrt(kx) * 0.75
 			var push: float = -a_body * T.bodyInertia
@@ -1383,6 +1411,10 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 				host.on_style(roundi(wheelie_time * 220.0), "%s %.1f s" % ["WHEELIE" if wheelie_pedal else "MANUAL", wheelie_time])
 			wheelie_time = 0.0; wheelie_pedal = false
 		wheelie_up = maxf(wheelie_up, manual_up)
+		# a held manual / wheelie follows the ground it rolls onto (nose_ref was the slope where the front came up,
+		# so over a crest or into a dip the front was held at the old slope's angle)
+		if wheelie_up > 0.0 and not air and not is_nan(nose_ref):
+			nose_ref = lerpf(nose_ref, _g_pitch, minf(1.0, dt * 6.0))
 		if wheelie_up > 0.0:
 			bal_max = maxf(bal_max, 30.0)   # the whole body holds a wheelie, not just the hands
 		var was_air := air
@@ -1540,7 +1572,9 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 		if _balancing() or _man_grace > 0.0: pass   # the balance manual handles its own loop-out (no crash)
 		elif back_up > T.landBack + 0.1 or (back_up > 1.15 and pitch_v > 0.5 and not was_air): crash_pending = "LOOPED OUT!"
 		elif cF and not cR and gpC - pitch > 0.6 and _local_slope(f, XF, RWF, cp0) - pitch > 1.15: crash_pending = "NOSE DIVE!"
-		if absf(pitch) > 1.45 and (cF or cR):   # on the ground only: in the air flips go all the way round
+		# (not on the touch-down step: the clamp ran before the landing verdict, so a flip that came down upside
+		# down was clamped to 1.45 and rarely read as UNDER- / OVER-ROTATED)
+		if absf(pitch) > 1.45 and (cF or cR) and not was_air:   # on the ground only: in the air flips go all the way round
 			pitch = signf(pitch) * 1.45; pitch_v = 0
 		# one wheel just left the ground: the rider holds the bike at the slope it was on with both wheels down
 		# (last step's wheel-ground slope). It was gpC - dP, with dP from the axle point samples: rolling off a
@@ -1850,7 +1884,8 @@ func _balance_step(dt: float, pedalling: bool, m_from: float, throttle: float, b
 		# pedalling while pulling = a wheelie: each stroke helps lift (the stick is still what holds it)
 		if pedalling and pull > 0.0:
 			acc += float(T.get("manPedal", 3.0)) * pull * minf(throttle, 1.0) * (0.4 + 0.6 * absf(sin(crank)))
-	if brake and man_a > 0.0: acc -= float(T.get("manBrake", 12.0))
+	# (the REAR brake drops a manual: the bare front lever, its wheel in the air, does nothing)
+	if brake and brake_r > 0.1 and man_a > 0.0: acc -= float(T.get("manBrake", 12.0))
 	acc -= float(T.get("manLift", 9.0)) * 0.8 * push
 	acc -= float(T.get("manDamp", 1.6)) * man_w
 	man_w += acc * dt
@@ -2087,3 +2122,6 @@ func reset_body() -> void:
 	air_lean = 0; air_pull = 0; a_drive = 0; pitch_v = 0; compress_v = 0; lean_v = 0; steer_in_v = 0
 	air_w = 0; air_tilt = 0; air_tilt_v = 0; flick = 0; flick_v = 0; bike_lean = 0; counter = 0
 	man_a = 0.0; man_w = 0.0; bank = 0.0; bank_v = 0.0; corner_g = 0.0
+	# (is_sane checks slip_w / steer_in too: left NaN they failed every later step and froze the bike until a respawn)
+	slip_w = 0.0; steer_in = 0.0; knock = 0.0; _gx_lean = 0.0; bank_lean = 0.0; bank_sq = 0.0; _bike_lead = 0.0
+	_amax = 99.0; _amin = -99.0; yaw_rate = 0.0

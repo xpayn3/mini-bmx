@@ -80,6 +80,8 @@ const DEFS := [
 	["Ground", [
 		["bermAssist", "Berms: lean with them, they carry the turn", 0.8, 0, 1, 0.05, ""],
 		["bankLean", "Lean into tilted ground (look)", 0.6, 0, 1, 0.05, "×"],
+		["bankBody", "On a bank the body leans with the bike (look)", 0.7, 0, 1, 0.05, ""],
+		["bermLeanRoom", "Extra bike lean a berm allows (look)", 0.15, 0, 0.3, 0.01, "rad"],
 		["camberPull", "Side slopes pull you down", 0.22, 0, 1.5, 0.02, "×"],
 		["cornerLoad", "Turns press you down (berms)", 0.6, 0, 2, 0.05, "×"],
 		["groundKnock", "Rocks / ruts knock the front", 0.6, 0, 2, 0.05, "×"],
