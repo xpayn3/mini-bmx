@@ -785,10 +785,12 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   shader stays the sun / moon; `BMX_NO_RIM=1`, `BMX_RIM_E=` test). **Morning mist** (`_mist_update`: height fog, strong 5-9 h, a little at dusk / small hours; `MIST_DENSITY`,
   `BMX_MIST=k` forces it). Since 2026-11-21 it is a pool with a level fixed in the world, never tied to the rider's height
   (that made the whole fog level sink away in front of the bike on descents): the level = the 2nd lowest of 13 land heights
-  round the spot ~4 s ahead + `MIST_DEEP` 2.5 m (lakes count as their surface), scanned every 0.3 s. It only drifts
-  `MIST_DRIFT` 0.3 m/s in view; inside a pool it thins so the ground at the wheels is at most `MIST_NEAR` 30 % fogged
-  (thins at once, thickens over 4 s); a pool the rider is `MIST_SPENT` 4 m deep in, or has climbed `MIST_LEFT` 8 m away
-  from, fades out, the level moves while nothing shows, the new pool fades in over `MIST_FADE_IN` 6 s. Probe:
+  round the spot ~4 s ahead (70 / 150 m rings) + `MIST_DEEP` 2 m (lakes count as their surface), scanned every 0.3 s. It only drifts
+  `MIST_DRIFT` 0.3 m/s in view. **The rider is never in it** (user: "a lot of times I ride in the fog, can't see
+  anything"): it is only there while the rider is above its top, full from `MIST_CLEAR_FULL` 8 m over it, gone by
+  `MIST_CLEAR_NONE` 3 m (goes at once, comes back over 4 s), so it burns off as you ride down to it. A burnt-off pool, or
+  one the rider has climbed `MIST_LEFT` 8 m away from, moves while nothing shows; the new one fades in over `MIST_FADE_IN` 6 s.
+  The distance haze starts 20 m further out too (`fog_depth_begin` = cam.dist + 75).
   `BMX_MIST_PROBE=1` (`MIST level= want= deep= fade= thin=` lines 2x / s).
 - **Backlit foliage + dappled shade** (`deco.gdshader` / `flower.gdshader` uniforms set per material in `world/terrain_geo.gd`):
   `scatter` = leaves / grass / bushes glow in their own colour when a low sun is behind them (shadowed glow stays dark; a quarter at
