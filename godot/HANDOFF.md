@@ -473,6 +473,9 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   PERFECT LANDING + `landBoost` m/s. **HUD bars** (bottom centre, `hud.gd` `SlimBar` look: 4 px track, caption left, value
   right): `HopBar` (hop / pop charge in the ride accent, full mark, flash on release), `PumpBar` (centre-zero: green = gaining,
   red = losing, km/h won this rhythm), `BalanceMeter` (sweet spot green, loop-out end red, marker = the front's angle, time).
+  The bars' round badges and the balance knob are anti-aliased and on the pixel grid (`SlimBar.badge` / `SlimBar.disc`:
+  plain `draw_circle` / `draw_colored_polygon` are not anti-aliased and looked jagged); `BMX_BAR_DEMO=pump|man` holds that
+  bar on screen for a shot (they sit ~96 px above the bottom edge, the POP bar lower).
   Tests: `BMX_BODY=balance|overpull` (+ `BMX_STRAIGHT=1 BMX_MAN_PROBE=1`, `MAN` lines), `BMX_FOLLOW=1 BMX_PUMPRIDE=down|all|off`
   (`PUMPRIDE` lines), `BMX_TRICK=…` prints `LANDERR`.
 - **One balance, one hop** (2026-11-21, `bike_physics.gd`; sliders Ride › Manual & pump, Tune group `Balance & pump`). The

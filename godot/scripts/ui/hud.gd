@@ -1434,22 +1434,33 @@ class SlimBar extends RefCounted:
 
 	## round badge with a tiny icon: kind 0 = up arrow (pop), 1 = chevrons (pump), 2 = wheel (manual)
 	static func badge(ci: CanvasItem, x0: float, cy: float, col: Color, kind: int, a: float, pulse := 0.0) -> void:
-		var c := snap(ci, Vector2(x0 + 12.0, cy))   # on a whole pixel: the icon is symmetric round it
-		if pulse > 0.0: ci.draw_circle(c, 12.0 + 6.0 * pulse, Color(col, 0.3 * (1.0 - pulse) * a))
-		ci.draw_circle(c, 11.5, Color(col.darkened(0.6), 0.96 * a))
+		# everything here is anti-aliased and sits on the screen's pixel grid: the disc's centre is on a pixel corner
+		# with a whole radius (its edge lands on pixel edges), straight strokes are a whole number of pixels wide
+		var px := 1.0 / maxf(ci.get_screen_transform().get_scale().x, 0.01)   # one screen pixel in local units
+		var c := snap(ci, Vector2(x0 + 12.0, cy))
+		if pulse > 0.0: disc(ci, c, 12.0 + 6.0 * pulse, Color(col, 0.3 * (1.0 - pulse) * a))
+		disc(ci, c, 12.0, Color(0, 0, 0, 0.45 * a))
+		disc(ci, c, 11.0, Color(col.darkened(0.6), a))
+		ci.draw_arc(c, 10.5, 0.0, TAU, 64, Color(col, 0.55 * a), maxf(px, 1.0), true)   # a thin rim in the bar's colour
 		var ic := Color(col.lerp(Color.WHITE, 0.3), a)
+		var sw := maxf(roundf(2.0 / px), 2.0) * px   # stroke: 2 units, a whole number of pixels
 		match kind:
-			0:   # up arrow
-				ci.draw_colored_polygon(PackedVector2Array([c + Vector2(0, -6.0), c + Vector2(6, 0.5), c + Vector2(2.3, 0.5), c + Vector2(2.3, 7.0), c + Vector2(-2.3, 7.0), c + Vector2(-2.3, 0.5), c + Vector2(-6, 0.5)]), ic)
+			0:   # up arrow: a chevron head on a stem
+				ci.draw_line(c + Vector2(0, -4.5), c + Vector2(0, 6.0), ic, sw, true)
+				ci.draw_polyline(PackedVector2Array([c + Vector2(-5.0, 0.0), c + Vector2(0, -5.5), c + Vector2(5.0, 0.0)]), ic, sw, true)
 			1:   # two chevrons
-				for o in [-3.4, 3.4]:
-					ci.draw_polyline(PackedVector2Array([c + Vector2(-5.2, o - 2.0), c + Vector2(0, o + 2.0), c + Vector2(5.2, o - 2.0)]), ic, 2.4, true)
+				for o in [-3.5, 3.5]:
+					ci.draw_polyline(PackedVector2Array([c + Vector2(-5.0, o - 2.0), c + Vector2(0, o + 2.0), c + Vector2(5.0, o - 2.0)]), ic, sw, true)
 			_:   # wheel: tyre ring, hub, four spokes
-				ci.draw_arc(c, 6.2, 0.0, TAU, 28, ic, 2.0, true)
+				ci.draw_arc(c, 6.0, 0.0, TAU, 64, ic, sw, true)
 				for k in 4:
 					var d := Vector2.from_angle(k * PI * 0.5 + PI * 0.25)
-					ci.draw_line(c + d * 1.8, c + d * 5.4, Color(ic, 0.8 * a), 1.2, true)
-				ci.draw_circle(c, 1.9, ic)
+					ci.draw_line(c + d * 2.0, c + d * 5.2, Color(ic, 0.8 * a), maxf(px, 1.0), true)
+				disc(ci, c, 2.0, ic)
+
+	## a smooth (anti-aliased) filled circle
+	static func disc(ci: CanvasItem, c: Vector2, r: float, col: Color) -> void:
+		ci.draw_circle(c, r, col, true, -1.0, true)
 
 	static func caption(ci: CanvasItem, x0: float, y: float, text: String, a: float) -> void:
 		ci.draw_string(UITheme.display_font(700, 0.12), Vector2(x0 + GAP + 1, y), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1, 0.78 * a))
@@ -1526,6 +1537,10 @@ class PumpBar extends Control:
 		push_s = lerpf(push_s, clampf(st.pump_push / full, -1.0, 1.0), minf(1.0, dt * 30.0))
 		gain_s = lerpf(gain_s, st.pump_gain, minf(1.0, dt * 12.0))
 		t += dt
+		if Env.s("BMX_BAR_DEMO") == "pump":   # test: the bar held on screen (also "man" for the balance bar)
+			a = 1.0
+			push_s = 0.6
+			gain_s = 3.0
 		visible = a > 0.01
 		if visible: queue_redraw()
 
@@ -1566,6 +1581,9 @@ class BalanceMeter extends Control:
 		ang_s = lerpf(ang_s, st.nose_a if nose else st.man_a, minf(1.0, dt * 40.0))
 		zone_glow = move_toward(zone_glow, 1.0 if (st.nose_zone if nose else st.man_zone) else 0.0, dt * 10.0)
 		t += dt
+		if Env.s("BMX_BAR_DEMO") == "man":
+			a = 1.0
+			ang_s = 0.5
 		visible = a > 0.01
 		if visible: queue_redraw()
 
@@ -1592,11 +1610,11 @@ class BalanceMeter extends Control:
 		SlimBar.pill(self, Rect2(lx, tr.position.y, tr.end.x - lx, tr.size.y), Color(SlimBar.BAD, 0.8 * a))
 		SlimBar.ticks(self, tr, 8, a)
 		# the front's angle: a round knob with a halo
-		var mx: float = at.call(ang_s)
-		draw_circle(Vector2(mx, cy), 9.0, Color(mc, 0.22 * a))
-		draw_circle(Vector2(mx, cy), 6.5, Color(0, 0, 0, 0.55 * a))
-		draw_circle(Vector2(mx, cy), 5.0, Color(mc, a))
-		draw_circle(Vector2(mx - 1.2, cy - 1.4), 1.8, Color(1, 1, 1, 0.5 * a))
+		var kc := Vector2(at.call(ang_s), tr.position.y + tr.size.y * 0.5)   # on the track's own (pixel-snapped) middle
+		SlimBar.disc(self, kc, 9.0, Color(mc, 0.22 * a))
+		SlimBar.disc(self, kc, 6.5, Color(0, 0, 0, 0.55 * a))
+		SlimBar.disc(self, kc, 5.0, Color(mc, a))
+		SlimBar.disc(self, kc + Vector2(-1.2, -1.4), 1.8, Color(1, 1, 1, 0.5 * a))
 
 class AirCard extends Control:
 	## live jump counter: distance from the take-off point, height and air time; the result holds for a
