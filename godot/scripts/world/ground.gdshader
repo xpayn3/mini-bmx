@@ -19,7 +19,8 @@ uniform float trail_fx = 0.0;      // 0 = plain trail colour (no frame bound)
 // Colour, rider lines, wear and puddles are procedural, so nothing tiles and no scan edge can show.
 uniform sampler2D tr_nr0 : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D tr_nr1 : filter_linear_mipmap_anisotropic, repeat_enable;
-uniform float trail_bump = 0.55;
+uniform float trail_bump = 0.9;
+uniform float trail_relief = 1.0;   // depth of the worn lines / tyre prints / grit, x the real centimetres below
 uniform float trail_puddles = 1.0;   // 0 = none, 1 = normal
 uniform int trail_debug = 0;       // 1 = show the mask layers: r driven, g loose, b puddle (wet rim dimmer), white tyre prints, yellow run-off skids
 varying vec3 v_world;
@@ -96,6 +97,7 @@ void fragment() {
 	vec3 tcol = vec3(1.0);
 	vec2 tslope = vec2(0.0);
 	float trough = 0.95, tbump = 0.0;
+	float thgt = 0.0;   // the trail surface's own height (m): worn lines sit lower, grit and the ground between them higher
 	float m_driven = 0.0, m_loose = 0.0, m_tracks = 0.0, m_wet = 0.0, m_puddle = 0.0, m_skid = 0.0, jm = 0.0;
 	vec2 pdx = dFdx(P.xz), pdy = dFdy(P.xz);
 	vec4 tf = texture(trail_tex, UV);
@@ -185,6 +187,13 @@ void fragment() {
 		k *= 1.0 - 0.1 * length(rl.xy) * tbump;          // the relief's hollows sit a little darker
 		k *= 1.0 - 0.11 * m_tracks;
 		k *= 1.0 - 0.24 * m_skid;
+		// relief: each ridden line is a shallow groove (deepest where most riders go), tyre prints and skids are pressed
+		// into it, loose grit and pebbles stand proud, and the unridden ground between the lines is slightly lumpy
+		float lump = (gd_noise3(vec3(ac * 5.0, sl * 0.9, 6.0)) - 0.5) * 0.012 + (n1 - 0.5) * 0.006 * f2;
+		thgt = -0.03 * line * (1.0 - 0.7 * jm) - 0.008 * m_tracks - 0.014 * m_skid
+			+ (peb * (0.006 + 0.008 * pb.y) + lump) * (0.3 + 0.7 * m_loose) * (1.0 - 0.8 * jm);
+		thgt *= (1.0 - smoothstep(0.04, 0.16, gpx)) * tnear * (1.0 - m_puddle);
+		k *= 1.0 + thgt * 2.2;                           // hollows hold a little shade, high spots catch light
 		k *= 1.0 + jm * 0.04;                            // built jumps: raked, packed clay, more even
 		k = mix(k, 1.0 + (k - 1.0) * 0.45, jm);
 		tcol = vec3(mix(1.0, k, tnear));
@@ -216,9 +225,19 @@ void fragment() {
 	ALBEDO = col;
 	ROUGHNESS = mix(mix(0.95, trough, wd), 0.04, pud);
 	SPECULAR = mix(0.3, 0.6, pud);
-	if (wd * tbump > 0.0 || pud > 0.0) {
+	if (wd * tbump > 0.0 || pud > 0.0 || thgt != 0.0) {
 		vec3 nw = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
 		nw = normalize(nw + vec3(tslope.x, 0.0, tslope.y) * (wd * trail_bump));
+		// the height above as a real slope of the surface (its screen-space gradient turned into the world)
+		float hh = thgt * wd * trail_relief;
+		vec3 dpx = dFdx(P), dpy = dFdy(P);
+		float dhx = dFdx(hh), dhy = dFdy(hh);
+		vec3 r1 = cross(dpy, nw), r2 = cross(nw, dpx);
+		float det = dot(dpx, r1);
+		if (abs(det) > 1e-12) {
+			vec3 grad = (dhx * r1 + dhy * r2) / det;
+			nw = normalize(nw - clamp(grad, vec3(-1.2), vec3(1.2)));
+		}
 		vec2 rip = (vec2(gd_noise3(vec3(P.xz * 7.0 + TIME * 0.35, 1.0)), gd_noise3(vec3(P.xz * 7.0 - TIME * 0.3, 6.0))) - 0.5) * 0.02 * f2;
 		nw = normalize(mix(nw, vec3(rip.x, 1.0, rip.y), pud));
 		NORMAL = normalize((VIEW_MATRIX * vec4(nw, 0.0)).xyz);

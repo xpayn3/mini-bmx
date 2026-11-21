@@ -297,7 +297,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   both fields (the 3.5 cm worn dip + the baked darkening follow it). **Run-offs** (`RO` / `ROS`): at ~40 % of sharp corners
   (|KAP| peak > 0.035) a skid leaves the line a few metres before the apex and goes straight on off the outside, cut into
   the grass. Tests: `BMX_TRAIL_DEBUG=1` shows the masks (red driven, green loose, blue puddle, white prints, yellow skids),
-  `BMX_TRAIL_PUDDLES=0|2` (none / on every wet road). Uniforms `trail_fx`, `trail_bump`, `trail_puddles`. Playground / vista
+  `BMX_TRAIL_PUDDLES=0|2` (none / on every wet road). **Relief** (user: "nice in colour but all just smooth"): the masks also make a height `thgt` (lines = grooves to 3 cm, prints / skids pressed in, grit + pebbles proud, lumpy between the lines) turned into the surface normal from its screen-space gradient; lighting only, the 37 cm ground mesh can't carry it. Uniforms `trail_fx`, `trail_bump`, `trail_relief` (x the depth), `trail_puddles`. Playground / vista
   ground don't use it.
 
 - **Grass carpet** (2026-11-20, `world/grass_field.gd` `GrassField` + `shaders/grass_field.gdshader`, made by `Game._ready`): a
