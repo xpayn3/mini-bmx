@@ -39,6 +39,7 @@ var fw_pb: AudioStreamGeneratorPlayback
 var fw_synth = null    # FreewheelSynth (C#); null on the non-.NET Godot -> no freewheel
 var fw_clicks := 0.0
 var fw_amp := 0.0
+var fw_fast := 0.0     # 0 slow .. 1 full speed character
 var fw_peak := 0.0
 # tyre on gravel: pebble knocks synthesised in C# (GravelSynth.cs); null -> the old noise rumble
 var gravel = null
@@ -188,6 +189,7 @@ func update_audio(dt: float) -> void:
 		fw_ver = FreewheelSound.version
 		var c := FreewheelSound.current
 		fw_synth.SetParams(c.pitch, c.ring, c.crack, c.crack_len, c.detune, c.tilt, c.uneven, c.jitter, c.vary)
+		fw_synth.SetSpeedParams(c.poe, c.warble, c.sp_pitch, c.sp_bright, c.sp_ring, c.repeat, c.sp_soft)
 	var fs: float = va
 	# (the raw key, not the smoothed pedal: that took ~0.4 s to fall under the threshold after letting go)
 	var coasting := st.throttle_in < 0.1 and va > 0.12 and not st.crash_on
@@ -196,11 +198,14 @@ func update_audio(dt: float) -> void:
 	var poe := FreewheelSound.get_value("poe")
 	fw_clicks = fs / st.RWR / TAU * poe if coasting else 0.0
 	fw_amp = 0.23 * FreewheelSound.get_value("vol") * smoothstep(0.1, 1.0, fs) 		* (1.0 - FreewheelSound.get_value("fade") * clampf((fs - 8.0) / 10.0, 0.0, 1.0))
+	# at speed the pawls have less time to drop: higher, brighter, shorter clicks (0 slow .. 1 full)
+	var sp0 := FreewheelSound.get_value("sp_from") / 3.6
+	fw_fast = smoothstep(sp0, maxf(sp0 + 0.5, FreewheelSound.get_value("sp_full") / 3.6), fs)
 	_update_chain(dt, va, on_ground, st.pedal)
 	_fill()
 	_fill_fw()
 	if Env.s("BMX_AUDIO_PROBE") != "" and Engine.get_process_frames() % 30 == 0:
-		print("FW v=%.1f pedal=%.2f clicks/s=%.0f amp=%.2f peak=%.3f | GRAVEL surf=%d amp=%.2f wind=%.2f" % [va, st.pedal, fw_clicks, fw_amp, fw_peak, st.surf, g_amp, wind])
+		print("FW v=%.1f pedal=%.2f clicks/s=%.0f amp=%.2f fast=%.2f peak=%.3f | GRAVEL surf=%d amp=%.2f wind=%.2f" % [va, st.pedal, fw_clicks, fw_amp, fw_fast, fw_peak, st.surf, g_amp, wind])
 		fw_peak = 0.0
 
 
@@ -208,7 +213,7 @@ func _fill_fw() -> void:
 	if fw_synth == null: return
 	var n := fw_pb.get_frames_available()
 	if n <= 0: return
-	var buf: PackedVector2Array = fw_synth.Render(n, fw_clicks, fw_amp)
+	var buf: PackedVector2Array = fw_synth.Render(n, fw_clicks, fw_amp, fw_fast)
 	if Env.s("BMX_AUDIO_PROBE") != "":
 		for v in buf: fw_peak = maxf(fw_peak, absf(v.x))
 	fw_pb.push_buffer(buf)
