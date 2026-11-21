@@ -168,6 +168,14 @@ var distance := 0.0
 # tests (BMX_CLIP_PROBE): suspension bottom-outs (steps) and how rough the ride is on the ground
 var probe_bottom := 0; var probe_acc2 := 0.0; var probe_n := 0; var probe_vy := NAN
 var probe_g2 := 0.0; var probe_gy := [NAN, NAN]
+## diagnostics (playground diag panel, F4): the last physics step's suspension, read only by RideDiag.
+## x = shock compression from topped out (m), v = shock speed (m/s, + = compressing), f = spring + damper force,
+## ty = tyre force, sq = tyre squash (m): forces per unit mass (/ G = share of the whole weight). bot / blow = this step
+## the end bottomed out / the damper blew off past its knee. leg = rider's legs (body - bike, m), leg_f its push
+var dg_xF := 0.0; var dg_xR := 0.0; var dg_vF := 0.0; var dg_vR := 0.0; var dg_fF := 0.0; var dg_fR := 0.0
+var dg_tyF := 0.0; var dg_tyR := 0.0; var dg_sqF := 0.0; var dg_sqR := 0.0; var dg_botF := false; var dg_botR := false
+var dg_blowF := false; var dg_blowR := false; var dg_travel := 0.2; var dg_sag := 0.0; var dg_leg := 0.0; var dg_leg_f := 0.0
+var dg_knee := 0.6; var dg_cF := false; var dg_cR := false
 var ground_jolt := 0.0   # biggest leg bottom-out on the ground (not a landing) since the test last read it
 # what the HUD reads
 var skid_fx := false; var surf := 0; var hop_bar := 0.0; var hop_bar_show := false
@@ -1451,6 +1459,10 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			var FF := maxf(0.0, shF * (K * dF + cdF)) if dF > 0.0 else 0.0
 			var FR := maxf(0.0, shR * (K * dR + cdR)) if dR > 0.0 else 0.0
 			sumF += FF; sumR += FR
+			if i == 1:
+				dg_botF = false; dg_botR = false; dg_blowF = false; dg_blowR = false
+			dg_xF = dF; dg_xR = dR; dg_vF = relF; dg_vR = relR; dg_fF = FF; dg_fR = FR
+			dg_blowF = dg_blowF or relF > BLOW_V; dg_blowR = dg_blowR or relR > BLOW_V
 			var leg_f := 0.0
 			# a turn's load presses down through the leaned bike (corner_g): the body sinks into the legs, the
 			# bike into its suspension, and both come back up as the turn ends (the pump out of a berm)
@@ -1459,6 +1471,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 				var f_leg := kB * (y - body_y) - cB * (body_v - vy)
 				body_v += (f_leg - cg) * h; body_y += body_v * h
 				leg_f = PHI * (G + f_leg)
+				dg_leg_f = f_leg
 			var alpha := (FF * XF + FR * XR - leg_f * body_x) * cs / IK + (tq / IK if (cF or cR) else 0.0)
 			if cF != cR or (wheelie_up > 0.0 and cR):
 				var ref := _or(nose_ref, _g_pitch) + (wheelie_up if cR else 0.0)
@@ -1517,6 +1530,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 			var tyR := maxf(0.0, TYRE_K * (gR - zw_r) + TYRE_C * (vgR - vw_r)) if gR > zw_r else 0.0
 			vw_f += ((tyF - FF) / WHEEL_M - G) * h; zw_f += vw_f * h
 			vw_r += ((tyR - FR) / WHEEL_M - G) * h; zw_r += vw_r * h
+			dg_tyF = tyF; dg_tyR = tyR; dg_sqF = maxf(0.0, gF - zw_f); dg_sqR = maxf(0.0, gR - zw_r)
 			var wsn := sin(pitch)
 			var wcs := cos(pitch)
 			var topF := y + XF * wsn - s0
@@ -1535,6 +1549,8 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 				var dd := gg - (y + xx * sin(pitch)) - TRAVEL
 				if dd <= 0: continue
 				probe_bottom += 1
+				if wi == 0: dg_botF = true
+				else: dg_botR = true
 				var lx := xx * c2
 				var m_inv := 1 / mB + lx * lx / IK
 				var dq := dd / m_inv
@@ -1560,6 +1576,8 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 					if body_v > vy:
 						var vc := PHI * body_v + mB * vy if coupled else vy
 						body_v = vc; vy = vc
+		dg_travel = TRAVEL; dg_sag = s0; dg_knee = BLOW_V; dg_cF = cF; dg_cR = cR
+		dg_leg = body_y - y if not was_air else 0.0
 		var kN := minf(1.0, dt * 30)
 		n_f = _or(n_f, shF * G) + (sumF / N - _or(n_f, shF * G)) * kN
 		n_r = _or(n_r, shR * G) + (sumR / N - _or(n_r, shR * G)) * kN

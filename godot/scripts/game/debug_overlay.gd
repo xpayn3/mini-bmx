@@ -10,7 +10,15 @@ extends RefCounted
 ##   bar at rear   rear tyre's sideways grip (green full .. red gone); square under it = loose ground
 ##   magenta path  in the air: the flight path to the landing (sphere = touch-down)
 
+##   (test playground also) RGB axes  the drawn bike's frame (red forward, green up, blue right)
+##   pink ball     the rider's body mass on its leg spring (over the bike)
+##   yellow path   where the bike really went (the last ~5 s): compare with the magenta prediction
+##   orange post   the lip of the jump ahead; green line = its landing, green ball = the sweet spot (35 % down it,
+##                 what the test rider's AUTO speed aims for)
+
 static var on := OS.get_environment("BMX_DEBUG_DRAW") != ""
+static var text_on := true      # the text block (the playground's graphs show all of it: off there)
+static var _trail := PackedVector3Array()
 
 static func toggle() -> bool:
 	on = not on
@@ -71,7 +79,9 @@ static func draw(game, st, pos: Vector3, hd: float) -> void:
 		d3.draw_line_path(pts, Color(1.0, 0.3, 0.9))
 		if land != Vector3.INF:
 			d3.draw_sphere(land, 0.25, Color(1.0, 0.3, 0.9))
-	if d2 != null:
+	if game.level_probe != null:
+		_playground(game, st, d3)
+	if d2 != null and text_on:
 		d2.config.text_block_offset = Vector2i(12, 140)   # top left, under the HUD jump card
 		d2.set_text("DEBUG DRAW (F3)", "", 0, Color.WHITE)
 		d2.set_text("speed", "%.1f km/h" % (st.v * 3.6), 1)
@@ -82,3 +92,41 @@ static func draw(game, st, pos: Vector3, hd: float) -> void:
 		d2.set_text("turn force", "%.1f m/s²" % st.lat_a, 6)
 		d2.set_text("lean", "%.0f°" % rad_to_deg(st.bike_lean), 7)
 		d2.set_text("air", "%s  vy %.1f" % [str(st.air), st.vy], 8)
+
+
+## the test playground's extras (see the list at the top)
+static func _playground(game, st, d3) -> void:
+	var rig = game.rig
+	if rig != null:
+		var b: Basis = rig.global_transform.basis
+		var o: Vector3 = rig.global_position + Vector3.UP * 0.35
+		d3.draw_arrow(o, o + b.x.normalized() * 0.9, Color(1, 0.25, 0.2), 0.08, true)
+		d3.draw_arrow(o, o + b.y.normalized() * 0.9, Color(0.3, 1, 0.3), 0.08, true)
+		d3.draw_arrow(o, o + b.z.normalized() * 0.6, Color(0.3, 0.5, 1), 0.08, true)
+	if is_finite(st.body_y):
+		d3.draw_sphere(Vector3(st.x, st.body_y + 1.0, st.z), 0.09, Color(1, 0.4, 0.85))
+	# the path flown
+	var p := Vector3(st.x, st.y + 0.05, st.z)
+	if _trail.is_empty() or _trail[_trail.size() - 1].distance_to(p) > 0.15:
+		if not _trail.is_empty() and _trail[_trail.size() - 1].distance_to(p) > 4.0: _trail.clear()   # (put back)
+		_trail.append(p)
+		if _trail.size() > 400: _trail = _trail.slice(_trail.size() - 400)
+	if _trail.size() >= 2: d3.draw_line_path(_trail, Color(1, 0.9, 0.2))
+	# the jump ahead: lip, landing, sweet spot
+	var pr = game.level_probe
+	var f = pr._next_feature(st.x, st.z)
+	if f == null: f = pr.course.feature_at(st.x, st.z)
+	if f == null or f.has("bowl"): return
+	var l = pr.course.lane_by_id(f.lane)
+	var X0 := PlaygroundCourse.X0
+	if float(f.lip) >= 0.0:
+		var lp := Vector3(X0 + f.lip, l.profile(f.lip), l.z)
+		d3.draw_line(lp, lp + Vector3.UP * 1.2, Color(1, 0.55, 0.1))
+	if float(f.get("land0", -1.0)) >= 0.0:
+		var pts := PackedVector3Array()
+		var u := float(f.land0)
+		while u <= float(f.land1):
+			pts.append(Vector3(X0 + u, l.profile(u) + 0.04, l.z)); u += 0.25
+		if pts.size() >= 2: d3.draw_line_path(pts, Color(0.3, 1, 0.4))
+		var ut: float = f.land0 + 0.35 * (f.land1 - f.land0)
+		d3.draw_sphere(Vector3(X0 + ut, l.profile(ut) + 0.1, l.z), 0.18, Color(0.3, 1, 0.4))

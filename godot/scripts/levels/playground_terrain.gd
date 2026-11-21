@@ -1,0 +1,318 @@
+class_name PlaygroundTerrain
+extends Terrain
+## The test playground (LEVELS > TEST PLAYGROUND, BMX_LEVEL=playground) in the ride's Terrain slot: the same API
+## the bike, rider, camera, fx and HUD use (height, deck_height, top_height, surface, jump_mask, trail, ...),
+## answered from PlaygroundCourse instead of the procedural world. No chunks, trees, rocks, water, ropes, sheep or
+## trail: the ground is built once (lane strips + bowls at fine resolution, the rest a coarse flat plane) with a
+## measuring grid, plus a sign at every feature. The base Terrain still sets up its field (and keeps an EMPTY trail
+## course in it), so code that looks at the trail finds none and falls back to the bike's heading.
+
+const GRASS := Color(0.40, 0.47, 0.31)
+const DIRT := Color(0.58, 0.45, 0.32)
+const CLAY := Color(0.66, 0.46, 0.30)
+const FAR := 2400.0            # the flat plane goes out this far (the fog hides the edge)
+
+var course: PlaygroundCourse
+var _built := false
+var _mat: ShaderMaterial
+
+
+func _init(seed_in := 12345) -> void:
+	course = PlaygroundCourse.new()
+	super(seed_in)
+
+
+func set_seed(seed_in: int) -> void:
+	super(seed_in)
+	field.course = TrailCourse.new()   # no trail: alerts, the trail camera and "back on the trail" find nothing
+	field.route_feats = []
+	water_enabled = false
+
+
+func update_stream(_px: float, _pz: float, _budget_ms: float = 4.0, _sync_r := -1) -> void:
+	if _built: return
+	_built = true
+	var t0 := Time.get_ticks_msec()
+	_build_ground()
+	_build_signs()
+	chunk_serial += 1
+	print("PLAYGROUND built ms=", Time.get_ticks_msec() - t0, " lanes=", course.lanes.size(), " features=", course.feats.size())
+
+
+func stream_complete() -> bool:
+	return _built
+
+
+func _update_ropes() -> void:
+	pass
+
+
+func update_water(_px: float, _pz: float, _t: float) -> void:
+	pass
+
+
+func water_near(_px: float, _pz: float, _reach: float) -> bool:
+	return false
+
+
+# ---- physics queries -------------------------------------------------------------------------------------
+func _height0(x: float, z: float) -> float:
+	return course.height(x, z)
+
+func height(x: float, z: float) -> float:
+	return course.height(x, z)
+
+func deck_height(x: float, z: float) -> float:
+	return course.height(x, z)
+
+func mesh_height(x: float, z: float) -> float:
+	return course.height(x, z)
+
+func top_height(x: float, z: float) -> float:
+	return course.height(x, z)
+
+func grid_height(x: float, z: float) -> float:
+	return course.height(x, z)
+
+## 1 (trail: hard-packed dirt, dust) on built ground, 0 (grass) on the plane
+func surface(x: float, z: float) -> int:
+	return 1 if course.is_dirt(x, z) else 0
+
+func jump(x: float, z: float) -> Array:
+	var h := course.height(x, z)
+	return [h, course.jump_mask(x, z), 0.0, 0.0, null]
+
+func jump_mask(x: float, z: float) -> float:
+	return course.jump_mask(x, z)
+
+## the lane / bowl you are on: the HUD's area name and the area banner
+func biome_name(x: float, z: float) -> String:
+	var l = course.lane_at(x, z)
+	if l != null: return "Playground · " + l.title.capitalize()
+	var f = course.feature_at(x, z)
+	if f != null and f.has("bowl"): return "Playground · Berms"
+	return "Test Playground"
+
+func ground_color(x: float, z: float, _ny: float = 1.0) -> Color:
+	return DIRT if course.is_dirt(x, z) else GRASS
+
+func trail(x: float, z: float) -> float:
+	return 1.0 if course.is_dirt(x, z) else 0.0
+
+func colliders_near(_x: float, _z: float) -> Array:
+	return []
+
+func take_pack(_x: float, _y: float, _z: float, _r: float = 1.6):
+	return null
+
+## the start (BMX_PG_AT=<feature id or lane id> picks another): (x, heading, z) as Game.respawn takes it
+func level_spawn() -> Vector3:
+	var at := Env.s("BMX_PG_AT")
+	if at != "":
+		var f = course.feature_by_id(at)
+		if f == null:
+			var l = course.lane_by_id(at)
+			if l != null: return Vector3(PlaygroundCourse.X0 + 4.0, 0.0, l.z)
+			push_warning("BMX_PG_AT: no feature / lane '%s'" % at)
+		else:
+			return course.spawn_for(f, float(Env.s("BMX_PG_BACK")) if Env.s("BMX_PG_BACK") != "" else 25.0)
+	return course.default_spawn()
+
+## the bail tap ("back on the trail"): on a lane, 25 m before the feature you are at (try it again); else the start
+func level_reset(x: float, z: float) -> Vector3:
+	var f = course.feature_at(x, z)
+	if f == null:
+		var l = course.lane_at(x, z)
+		if l != null:   # between features: the next one along
+			for g in l.feats:
+				if g.u0 > x - PlaygroundCourse.X0: f = g; break
+	if f != null: return course.spawn_for(f)
+	return course.default_spawn()
+
+
+# ---- the drawn ground ---------------------------------------------------------------------------------------
+func _build_ground() -> void:
+	_mat = ShaderMaterial.new()
+	_mat.shader = preload("res://shaders/playground_ground.gdshader")
+	for l in course.lanes:
+		_add_mesh(_lane_mesh(l), "Lane_" + l.id)
+	for b in course.bowls:
+		_add_mesh(_grid_mesh(b.rect, 0.4, 0.4), "Bowl_" + b.id)
+	_add_mesh(_plane_mesh(), "Plane")
+
+
+func _add_mesh(m: ArrayMesh, nm: String) -> void:
+	var mi := MeshInstance3D.new()
+	mi.name = nm
+	mi.mesh = m
+	mi.material_override = _mat
+	mi.layers = 1 | GROUND_LAYER
+	add_child(mi)
+
+
+## rows along x: fine (0.1 m) wherever the profile is not flat, coarse (2 m) on the flat run-ins
+func _lane_mesh(l) -> ArrayMesh:
+	var r: Rect2 = l.rect
+	var xs := PackedFloat64Array()
+	var x := r.position.x
+	var x_end := r.end.x
+	while x < x_end - 1e-6:
+		xs.append(x)
+		var uu: float = x - PlaygroundCourse.X0
+		var busy := false
+		for k in range(-6, 7):   # anything non-flat within 0.6 m (incl. camber)
+			var q: float = uu + k * 0.1
+			if absf(l.profile(q)) > 1e-4 or (not l.camber.is_empty() and l.tilt_at(q) != 0.0) or absf(l.profile(q) - l.profile(q + 0.05)) > 1e-5:
+				busy = true; break
+		x += 0.1 if busy else 2.0
+	xs.append(x_end)
+	var zs := PackedFloat64Array()
+	var z := r.position.y
+	while z < r.end.y - 1e-6:
+		zs.append(z)
+		z += 0.5
+	zs.append(r.end.y)
+	return _mesh_from(xs, zs)
+
+
+func _grid_mesh(r: Rect2, dx: float, dz: float) -> ArrayMesh:
+	var xs := PackedFloat64Array(); var zs := PackedFloat64Array()
+	var x := r.position.x
+	while x < r.end.x - 1e-6: xs.append(x); x += dx
+	xs.append(r.end.x)
+	var z := r.position.y
+	while z < r.end.y - 1e-6: zs.append(z); z += dz
+	zs.append(r.end.y)
+	return _mesh_from(xs, zs)
+
+
+func _mesh_from(xs: PackedFloat64Array, zs: PackedFloat64Array) -> ArrayMesh:
+	var nx := xs.size(); var nz := zs.size()
+	var H := PackedFloat32Array(); H.resize(nx * nz)
+	for j in nz:
+		for i in nx:
+			H[j * nx + i] = course.height(xs[i], zs[j])
+	var V := PackedVector3Array(); V.resize(nx * nz)
+	var N := PackedVector3Array(); N.resize(nx * nz)
+	var C := PackedColorArray(); C.resize(nx * nz)
+	var grass := GRASS.srgb_to_linear(); var dirt := DIRT.srgb_to_linear(); var clay := CLAY.srgb_to_linear()
+	for j in nz:
+		for i in nx:
+			var k := j * nx + i
+			var h := H[k]
+			V[k] = Vector3(xs[i], h, zs[j])
+			var i0 := maxi(0, i - 1); var i1 := mini(nx - 1, i + 1)
+			var j0 := maxi(0, j - 1); var j1 := mini(nz - 1, j + 1)
+			var gx := (H[j * nx + i1] - H[j * nx + i0]) / maxf(1e-4, xs[i1] - xs[i0])
+			var gz := (H[j1 * nx + i] - H[j0 * nx + i]) / maxf(1e-4, zs[j1] - zs[j0])
+			N[k] = Vector3(-gx, 1.0, -gz).normalized()
+			if absf(h) > 0.02: C[k] = clay
+			elif course.is_dirt(xs[i], zs[j]): C[k] = dirt
+			else: C[k] = grass
+	var I := PackedInt32Array(); I.resize((nx - 1) * (nz - 1) * 6)
+	var p := 0
+	for j in nz - 1:
+		for i in nx - 1:
+			var a := j * nx + i
+			I[p] = a; I[p + 1] = a + 1; I[p + 2] = a + nx
+			I[p + 3] = a + 1; I[p + 4] = a + nx + 1; I[p + 5] = a + nx
+			p += 6
+	var arr := []
+	arr.resize(Mesh.ARRAY_MAX)
+	arr[Mesh.ARRAY_VERTEX] = V; arr[Mesh.ARRAY_NORMAL] = N; arr[Mesh.ARRAY_COLOR] = C; arr[Mesh.ARRAY_INDEX] = I
+	var m := ArrayMesh.new()
+	m.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+	return m
+
+
+## the flat: 4 m cells over the playground except where a lane / bowl strip lies, then four big quads out to FAR
+func _plane_mesh() -> ArrayMesh:
+	var holes: Array = []
+	for l in course.lanes: holes.append(l.rect)
+	for b in course.bowls: holes.append(b.rect)
+	var B := course.bounds
+	var V := PackedVector3Array(); var I := PackedInt32Array()
+	var s := PlaygroundCourse.SNAP
+	var cz := B.position.y
+	while cz < B.end.y - 1e-6:
+		var cx := B.position.x
+		while cx < B.end.x - 1e-6:
+			var cell := Rect2(cx + 0.01, cz + 0.01, s - 0.02, s - 0.02)
+			var hole := false
+			for hr in holes:
+				if (hr as Rect2).intersects(cell): hole = true; break
+			if not hole: _quad(V, I, cx, cz, cx + s, cz + s)
+			cx += s
+		cz += s
+	_quad(V, I, -FAR, -FAR, FAR, B.position.y)
+	_quad(V, I, -FAR, B.end.y, FAR, FAR)
+	_quad(V, I, -FAR, B.position.y, B.position.x, B.end.y)
+	_quad(V, I, B.end.x, B.position.y, FAR, B.end.y)
+	var N := PackedVector3Array(); N.resize(V.size()); N.fill(Vector3.UP)
+	var C := PackedColorArray(); C.resize(V.size()); C.fill(GRASS.srgb_to_linear())
+	var arr := []
+	arr.resize(Mesh.ARRAY_MAX)
+	arr[Mesh.ARRAY_VERTEX] = V; arr[Mesh.ARRAY_NORMAL] = N; arr[Mesh.ARRAY_COLOR] = C; arr[Mesh.ARRAY_INDEX] = I
+	var m := ArrayMesh.new()
+	m.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+	return m
+
+
+static func _quad(V: PackedVector3Array, I: PackedInt32Array, x0: float, z0: float, x1: float, z1: float) -> void:
+	var b := V.size()
+	V.append(Vector3(x0, 0, z0)); V.append(Vector3(x1, 0, z0)); V.append(Vector3(x0, 0, z1)); V.append(Vector3(x1, 0, z1))
+	I.append_array([b, b + 1, b + 2, b + 1, b + 3, b + 2])
+
+
+# ---- signs ---------------------------------------------------------------------------------------------------
+## a post + a billboard label at every feature (name, numbers, id for BMX_PG_AT), the lane name at its roll-in,
+## and distance marks every 50 m along each lane
+func _build_signs() -> void:
+	var root := Node3D.new()
+	root.name = "Signs"
+	add_child(root)
+	var post_mat := StandardMaterial3D.new()
+	post_mat.albedo_color = Color(0.95, 0.55, 0.1)
+	var post := BoxMesh.new()
+	post.size = Vector3(0.08, 1.2, 0.08)
+	post.material = post_mat
+	for l in course.lanes:
+		var side: float = l.z - l.hw - 2.2
+		_label(root, Vector3(PlaygroundCourse.X0 + 2.0, PlaygroundCourse.ROLLIN_H + 3.2, l.z), l.title, 160, Color(1, 0.86, 0.2))
+		for f in l.feats:
+			if str(f.id).begins_with("rollin"): continue
+			var x0: float = PlaygroundCourse.X0 + f.u0
+			var pm := MeshInstance3D.new(); pm.mesh = post
+			pm.position = Vector3(x0, 0.6, side)
+			root.add_child(pm)
+			_label(root, Vector3(x0, 2.6, side), "%s\n%s\n[%s]" % [f.name, f.desc, f.id], 64, Color.WHITE)
+			if f.lip >= 0.0:   # a small mark where the lip is
+				var lm := MeshInstance3D.new(); lm.mesh = post
+				var lx: float = PlaygroundCourse.X0 + f.lip
+				lm.position = Vector3(lx, l.profile(f.lip) + 0.6, side + 0.6)
+				lm.scale = Vector3(1, 0.6, 1)
+				root.add_child(lm)
+		var d := 50.0
+		while d < l.length():
+			_label(root, Vector3(PlaygroundCourse.X0 + ROLL_X + d, 0.35, l.z + l.hw + 1.4), "%.0f m" % d, 48, Color(1, 1, 1, 0.75))
+			d += 50.0
+	for b in course.bowls:
+		_label(root, Vector3(b.c.x, b.W * b.tn + 2.5, b.c.y), "%s\n[%s]" % [b.title, b.id], 96, Color(1, 0.86, 0.2))
+	_label(root, Vector3(PlaygroundCourse.X0 - 12.0, 3.0, -20.0), "TEST PLAYGROUND\nopen flat for turns, brakes, sprints", 120, Color(1, 0.86, 0.2))
+
+const ROLL_X := 0.0
+
+
+static func _label(parent: Node3D, at: Vector3, text: String, size: int, col: Color) -> void:
+	var lb := Label3D.new()
+	lb.text = text
+	lb.font_size = size
+	lb.pixel_size = 0.004
+	lb.modulate = col
+	lb.outline_size = 12
+	lb.outline_modulate = Color(0, 0, 0, 0.8)
+	lb.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	lb.no_depth_test = false
+	lb.fixed_size = false
+	lb.position = at
+	parent.add_child(lb)

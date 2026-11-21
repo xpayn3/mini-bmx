@@ -18,6 +18,23 @@ const PRESETS := {
 	"side":      {"label": "Side",       "dist": 14.0, "pitch": 10.0, "follow": true,  "fov": 28.0, "orbit": PI / 2, "rate": 2.5},
 	"trackside": {"label": "Trackside",  "mode": "trackside", "fov": 14.0},
 }
+## the test playground only (levels): side-on views locked square to the lanes (they all run along +x: `follow`
+## false + cam_yaw 0, `orbit` PI/2 puts the camera on the +z side looking -z, the bike crossing left to right). Picked
+## from the dev view's camera dropdown or C (they come first there); "pg_side" is the playground's default
+const LEVEL_PRESETS := {
+	"pg_side":   {"label": "Side",       "dist": 12.0, "pitch": 6.0,  "follow": false, "fov": 42.0, "orbit": PI / 2, "lag": 4.0},
+	"pg_wide":   {"label": "Side wide",  "dist": 13.0, "pitch": 9.0,  "follow": false, "fov": 66.0, "orbit": PI / 2, "lag": 3.0},
+	"pg_low":    {"label": "Side low",   "dist": 6.5,  "pitch": 2.0,  "follow": false, "fov": 48.0, "orbit": PI / 2, "lag": 6.0},
+	"pg_front":  {"label": "Front 3/4",  "dist": 9.0,  "pitch": 10.0, "follow": false, "fov": 44.0, "orbit": PI * 0.78, "lag": 5.0},
+}
+
+## every view this ride can use: the level's own first (C cycles them in this order)
+func presets() -> Dictionary:
+	if game == null or str(game.get("level")) == "": return PRESETS
+	var d := LEVEL_PRESETS.duplicate()
+	d.merge(PRESETS)
+	return d
+
 ## title screen only (not in the C cycle): behind and above the rider, looking out over the landscape
 const VISTA := {"label": "Lookout", "mode": "vista", "fov": 18.0, "back": 10.5, "up": 0.5, "side": -0.8, "look": 160.0, "drop": -0.03, "yaw_off": -1.95}
 var vista_yaw := 0.0
@@ -76,14 +93,15 @@ func _ready() -> void:
 	layer.add_child(osd)
 
 func preset() -> Dictionary:
-	return VISTA if mode == "vista" else PRESETS[mode]
+	return VISTA if mode == "vista" else presets()[mode]
 
 func set_mode(m: String) -> void:
 	if m == "vista":
 		mode = m; orbit = 0.0; orbit_t = 0.0; cam_pitch_t = 0.0; cam_pitch = 0.0
 		return
-	if not PRESETS.has(m): return
-	var P: Dictionary = PRESETS[m]
+	var all := presets()
+	if not all.has(m): return
+	var P: Dictionary = all[m]
 	mode = m
 	track_pos = null
 	dr_init = false; helm_init = false
@@ -97,15 +115,21 @@ func set_mode(m: String) -> void:
 		cam_yaw = 0.0
 
 func next_mode() -> String:
-	var ks := PRESETS.keys()
-	if not PRESETS.has(mode): mode = ks[ks.size() - 1]
+	var all := presets()
+	var ks := all.keys()
+	if not all.has(mode): mode = ks[ks.size() - 1]
 	var i := ks.find(mode)
 	for k in ks.size():   # skip the action cam views whose camera isn't mounted
 		i = (i + 1) % ks.size()
-		if _pov_lens(PRESETS[ks[i]]) != null or PRESETS[ks[i]].get("mode", "") != "helmet":
+		if _pov_lens(all[ks[i]]) != null or all[ks[i]].get("mode", "") != "helmet":
 			break
 	set_mode(ks[i])
-	return PRESETS[mode].label + (" (default)" if mode == "trail" else "")
+	return all[mode].label + (" (default)" if mode == default_mode() else "")
+
+## the view a ride starts in: the playground's side view, else the player's setting
+func default_mode() -> String:
+	if game != null and str(game.get("level")) != "": return "pg_side"
+	return str(Settings.get_v("camera"))
 
 func snap_to(p: Vector3) -> void:
 	target = p; anchor = p

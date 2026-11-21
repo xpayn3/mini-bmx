@@ -159,6 +159,42 @@ func _corner_label(text: String, col: Color, up: float) -> Label:
 func _layout() -> void:
 	pass
 
+## the test playground's developer view (levels/ride_diag.gd): graphs on the right, the tuning card docked on the left,
+## the HUD squeezed in between. Normal rides never call these.
+## move the right-hand column (life, stamina, style, corner lines, quick tune) px to the left
+func set_right_inset(px: float) -> void:
+	for c in [stamina, life_bar, style_pop, info_l, biome_l, quick]:
+		_shift_x(c, -px)
+
+## move the left-hand items (jump card, bike computer) px to the right
+func set_left_inset(px: float) -> void:
+	for c in [air_card, gauge]:
+		_shift_x(c, px)
+
+func _shift_x(c: Control, dx: float) -> void:
+	if c == null: return
+	if not c.has_meta("x0"): c.set_meta("x0", c.position.x)
+	c.position.x = float(c.get_meta("x0")) + dx
+
+var card_left := false   # dev view: the tuning card docked down the left edge (full height) instead of the right
+func _dock_card() -> void:
+	if card == null: return
+	if card_left:
+		card.set_anchors_preset(Control.PRESET_LEFT_WIDE)
+		card.offset_left = 8; card.offset_right = 414; card.offset_top = 8; card.offset_bottom = -8
+	else:
+		card.set_anchors_preset(Control.PRESET_RIGHT_WIDE)
+		card.offset_left = -420; card.offset_right = -14; card.offset_top = 64; card.offset_bottom = -90
+
+## dev view full screen: everything of the HUD but the tuning card hidden (on = false puts it back)
+func dev_full(on: bool) -> void:
+	for c in root.get_children():
+		if c == card or not (c is CanvasItem): continue
+		if on:
+			c.set_meta("dev_vis", c.visible); c.visible = false
+		elif c.has_meta("dev_vis"):
+			c.visible = c.get_meta("dev_vis"); c.remove_meta("dev_vis")
+
 func apply_settings() -> void:
 	if gauge: gauge.visible = Settings.get_v("hud_gauge")
 	if gauge: gauge.show_gear = Settings.get_v("hud_gear"); gauge.queue_redraw()
@@ -306,6 +342,7 @@ func _toggle_side(which: String) -> void:
 		card.show_tab(t)
 	card.visible = true
 	quick.visible = false
+	_dock_card()
 
 func _build_records() -> void:
 	records_panel = PanelContainer.new()

@@ -126,6 +126,12 @@ const TITLE_SEED := 37   # a desert summit with rolling hills far below, picked 
 const TITLE_TURN := 2.45
 const TITLE_SPOT := Vector3(30.0, -120.0, 1.4399)   # x, z, heading (rad) of the bike on that summit
 var title_world := false
+## a test level instead of the procedural world (main sets it before add_child from GameState.level): "playground" =
+## the test playground (scripts/levels: PlaygroundTerrain + PlaygroundProbe, which measures every jump)
+var level := ""
+var level_probe: PlaygroundProbe
+var diag: RideDiag   # ride diagnostics (F4, levels/ride_diag.gd): graphs of suspension, input, tyres, body, air
+var _level_light_ver := -1
 ## parts of an earlier Game of the same world to use instead of building them ({terrain, far_hills}; main sets it
 ## before add_child: the title backdrop round a garage visit). See take_world().
 var reuse := {}
@@ -146,6 +152,8 @@ func _ready() -> void:
 	_build_environment()
 	if reuse.has("terrain"):   # the title world's own, kept while the garage was open (it is always the same place)
 		terrain = reuse.terrain
+	elif level == "playground":
+		terrain = PlaygroundTerrain.new(GameState.seed)
 	else:
 		terrain = load("res://scripts/world/terrain.gd").new((int(Env.s("BMX_TITLE_SEED")) if Env.s("BMX_TITLE_SEED") != "" else TITLE_SEED) if title_world else GameState.seed)
 	add_child(terrain)
@@ -153,17 +161,29 @@ func _ready() -> void:
 	terrain.update_stream(0, 0, INF)
 	if reuse.has("far_hills"):
 		far_hills = reuse.far_hills
+	elif level != "":
+		far_hills = null   # a test level: flat to the horizon
 	else:
 		far_hills = FarHills.new()   # the distant landscape behind the streamed chunks
 		if title_world: far_hills.ridge_gain = 1.4   # the title view: real mountains on the horizon
 		far_hills.setup(terrain)
-	add_child(far_hills)
+	if far_hills: add_child(far_hills)
 	reuse = {}
 	grass = GrassField.new(terrain)   # the grass carpet round the camera (Settings "grass")
 	add_child(grass)
 	sheep = SheepHerd.new()   # woolly flocks that graze and run from the bike
 	sheep.setup(terrain)
+	if level != "": sheep.enabled = false
 	add_child(sheep)
+	if terrain is PlaygroundTerrain:
+		level_probe = PlaygroundProbe.new()
+		level_probe.name = "PlaygroundProbe"
+		add_child(level_probe)
+		level_probe.setup(self, terrain.course)
+		diag = RideDiag.new()   # the developer view: graphs + the tuning card (only on the test playground)
+		diag.name = "RideDiag"
+		add_child(diag)
+		diag.setup(self)
 	tumbleweeds = Tumbleweeds.new()   # dry bushes that roll over the desert before the wind
 	add_child(tumbleweeds)
 	fx = load("res://scripts/fx/fx.gd").new()
@@ -198,7 +218,7 @@ func _ready() -> void:
 	add_child(cam)
 	cam.current = true
 	cam.far = RIDE_FAR
-	cam.set_mode(Settings.get_v("camera"))
+	cam.set_mode(cam.default_mode())
 	hud = load("res://scripts/ui/hud.gd").new()
 	hud.game = self
 	add_child(hud)
@@ -549,6 +569,12 @@ func _update_light(dt: float) -> void:
 	if rig: rig.set_lights_on(night_k > 0.35 or Env.s("BMX_BIKELIGHT_ON") != "")   # a new bike (B) gets its lamp on too
 	LightSettings.ensure_loaded()
 	var L: Dictionary = LightSettings.current
+	if level != "" and Env.s("BMX_LIGHT_PRESET") == "" and Env.s("BMX_LIGHT") == "":
+		# a test level: clear midday light (readable shots, no golden haze) until the player changes the light in it
+		if _level_light_ver < 0: _level_light_ver = LightSettings.version
+		if LightSettings.version == _level_light_ver:
+			L = LightSettings.preset("Noon")
+			L.haze = 0.3; L.mist = 0.0; L.cycle = 0.0
 	var changed := light_ver != LightSettings.version
 	if changed:
 		light_ver = LightSettings.version
@@ -973,6 +999,8 @@ func rock_chips(c: Dictionary) -> void:
 func start_crash(reason: String) -> void:
 	phys.crash_pending = ""
 	if phys.crash_on: return
+	if level_probe: level_probe.on_crash(reason)
+	if diag: diag.on_crash(reason)
 	if rope_probe: print("ROPE CRASH ", reason, " at ", Vector3(phys.x, phys.y, phys.z))
 	_rd_air.resize(0)   # crash dust: per-part "was in the air" flags start fresh
 	if Env.s("BMX_TRICK") != "" or Env.s("BMX_MAN_PROBE") != "": print("CRASH ", reason, " v=%.1f air=%s pitch=%.2f gp=%.2f man=%.2f lean=%.2f slip=%.2f" % [phys.v, phys.air, phys.pitch, phys._g_pitch, phys.man_a, phys.lean, phys.slip])   # tests
@@ -1312,6 +1340,8 @@ func respawn(new_world: bool) -> void:
 	if phys.crash_on: get_up()
 	_reset_draw_state()
 	if hud: hud.on_respawn()
+	if new_world and level != "":
+		new_world = false   # a test level has no other world
 	if new_world:
 		GameState.new_seed()
 		terrain.clear_dynamic()
@@ -1332,6 +1362,8 @@ func respawn(new_world: bool) -> void:
 	var sp := _water_spawn() if Env.s("BMX_WATER_SPAWN") != "" else Vector3.ZERO
 	if Env.s("BMX_TRAIL_FEAT") != "":
 		sp = _feature_spawn(Env.s("BMX_TRAIL_FEAT"))
+	if terrain.has_method("level_spawn"):
+		sp = terrain.level_spawn()
 	phys.reset_at(sp.x, sp.z, sp.y)
 	if Env.s("BMX_PACK_SPAWN") != "":   # tests: "x,z" of a health pack -> start 9 m before it, facing +x
 		var pxz := Env.s("BMX_PACK_SPAWN").split(",")
@@ -1342,7 +1374,7 @@ func respawn(new_world: bool) -> void:
 	rider.reset_pose()
 	_snap_prev()
 	cam.snap_to(Vector3(phys.x, phys.y + 0.5, phys.z))
-	place_start_tv()
+	if level == "": place_start_tv()
 	# the area you start in: its banner once the screen has faded in
 	biome_cur = terrain.biome_name(phys.x, phys.z)
 	biome_next = ""; biome_hold = 0
@@ -1432,6 +1464,10 @@ func _out_of_crevasse() -> void:
 ## a tap on bail: stand the rider back up on the nearest point of the trail, facing along it (not a new ride:
 ## the computer, trip and world stay)
 func reset_to_trail() -> void:
+	if terrain.has_method("level_reset"):   # a test level: back before the feature you were on
+		level_reset_to(terrain.level_reset(phys.x, phys.z))
+		flash("Again")
+		return
 	var tc: TrailCourse = terrain.field.course if terrain and terrain.field else null
 	if tc == null or tc.n < 2: return
 	_reset_draw_state()
@@ -1455,6 +1491,17 @@ func reset_to_trail() -> void:
 	cam.snap_to(Vector3(tx, phys.y + 0.5, tz))
 	if hud: hud.trail_i = -1
 	flash("Back on the trail")
+## a test level: stand at sp = (x, heading, z), at rest (tries / the bail tap)
+func level_reset_to(sp: Vector3) -> void:
+	_reset_draw_state()
+	if phys.crash_on: get_up()
+	if flying_cam and is_instance_valid(flying_cam): flying_cam.queue_free()
+	flying_cam = null
+	if blood: blood.clear()
+	phys.reset_at(sp.x, sp.z, sp.y)
+	rider.reset_pose()
+	_snap_prev()
+	cam.snap_to(Vector3(sp.x, phys.y + 0.5, sp.z))
 ## tests (BMX_TRAIL_FEAT=drop|arch|N): 70 m up the trail from the Nth drop / the first rock arch -> (x, heading, z)
 func _feature_spawn(what: String) -> Vector3:
 	var C: TrailCourse = terrain.field.course
@@ -1535,7 +1582,7 @@ func _unhandled_input(e: InputEvent) -> void:
 	elif e.is_action_pressed("gear_harder") and not e.is_echo(): _shift(-1)
 	elif e.is_action_pressed("camera_next") and not e.is_echo():
 		flash(cam.next_mode())
-		Settings.data["camera"] = cam.mode; Settings.save()
+		if level == "": Settings.data["camera"] = cam.mode; Settings.save()   # (a level's own views aren't saved)
 	elif e.is_action_pressed("next_bike") and not e.is_echo():
 		var ids := GameState.BIKES.keys()
 		GameState.bike_id = ids[(ids.find(GameState.bike_id) + 1) % ids.size()]
@@ -1558,10 +1605,18 @@ var demo: DemoPilot = null
 
 func set_demo(on: bool) -> void:
 	if on == (demo != null): return
-	demo = DemoPilot.new() if on else null
+	if on and terrain is PlaygroundTerrain:   # the test playground: its test rider repeats one feature / lane
+		demo = PlaygroundPilot.new(terrain.course)
+	else:
+		demo = DemoPilot.new() if on else null
 	if not on:
 		for a in ["pedal", "brake", "steer_left", "steer_right", "hop", "sprint"]: Input.action_release(a)
-	flash("DEMO RIDER on  -  P: tune it live  ·  F2: ride yourself" if on else "You ride")
+	if demo is PlaygroundPilot:
+		flash("TEST RIDER on  -  STOP / F2: ride yourself")
+		if diag: diag.pilot_changed()
+	else:
+		flash("DEMO RIDER on  -  P: tune it live  ·  F2: ride yourself" if on else "You ride")
+		if diag: diag.pilot_changed()
 
 func _read_input() -> Dictionary:
 	if not input_enabled:
@@ -1718,7 +1773,10 @@ func _physics_process(dt: float) -> void:
 		inp.brake = 1.0 if phys.v > 0.3 else 0.0
 	_pk = _perf("p_input", _pk)
 	terrain.rope_ref_y = phys.y
+	if level_probe: level_probe.pre_step(dt, inp)
 	phys.step(dt, inp)
+	if level_probe: level_probe.post_step(dt)
+	if diag: diag.record(dt, inp)
 	_pk = _perf("p_bike_step", _pk)
 	_rope_tick(dt)
 	_pk = _perf("p_rope", _pk)
@@ -2250,7 +2308,7 @@ func _process(dt: float) -> void:
 		contact.visible = not photo or rig.visible
 		contact.update(wf, wr, rig.wheel_rf, rig.wheel_rr, hd, mid, bh, terrain.top_height)
 	_pk = _perf("packs_tape", _pk)
-	far_hills.follow(drawn_pos)
+	if far_hills: far_hills.follow(drawn_pos)
 	_pk = _perf("far_hills", _pk)
 	sheep.follow(dt, drawn_pos, st.v, st.fwd())
 	_pk = _perf("sheep", _pk)
