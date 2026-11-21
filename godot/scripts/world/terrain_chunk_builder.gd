@@ -603,7 +603,7 @@ func _rock_gardens() -> void:
 			var sx := sc * (1 + rk.next() * 0.5)
 			var sy := sc * (0.5 + rk.next() * 0.35)
 			put("pebble" if sc < 0.2 else "rock", x, h - sc * 0.3, z, sx, sy, sc, rk.next() * 6.28, null, 0.4)
-			colliders.append({"x": x, "z": z, "r": (sx + sc) * 0.45, "top": h - sc * 0.3 + sy * 0.9, "base": f.ground(x, z)})
+			colliders.append({"x": x, "z": z, "r": (sx + sc) * 0.45, "top": h - sc * 0.3 + sy * 0.9, "base": f.ground(x, z), "sink": sc * 0.3})
 
 
 # ---------------- sponsor gates ----------------
@@ -924,7 +924,7 @@ func _rocks(ox: float, oz: float) -> void:
 		var sx := sc * (1 + rnd.next() * .5)
 		var sy := sc * (0.6 + rnd.next() * .4)
 		put("pebble" if sc < 0.6 else "rock", x, h - sc * 0.25, z, sx, sy, sc, rnd.next() * 6.28, null, 0.5)
-		colliders.append({"x": x, "z": z, "r": (sx + sc) * 0.45, "top": h - sc * 0.25 + sy * 0.9, "base": f.ground(x, z)})
+		colliders.append({"x": x, "z": z, "r": (sx + sc) * 0.45, "top": h - sc * 0.25 + sy * 0.9, "base": f.ground(x, z), "sink": sc * 0.25})
 
 
 func _tuft_col(dry: float) -> Color:

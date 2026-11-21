@@ -351,11 +351,20 @@ func _height0(x: float, z: float) -> float:
 			var r: float = c["r"]
 			var q := (dx * dx + dz * dz) / (r * r)
 			if q < 1.0:
-				var base: float = c["base"]
-				var h: float = base + (c["top"] - base) * sqrt(1.0 - q)
+				var h: float = dome_h(c["base"], c["top"], c.get("sink", 0.0), q)
 				if h > g:
 					g = h
 	return g
+
+
+## The rideable shape of a rock / log / stump at q = (distance / r)^2 from its middle: the part above the ground of
+## a stone whose middle lies `sink` under it (rocks are drawn sunk ~0.3 of their size). sink = 0 is a half dome,
+## which meets the ground as a vertical wall: every garden rock used to be a square-edged step to the wheel (a
+## 20 cm rock at 35 km/h pitched the bike 15 deg and threw it into the air). Mirrored in TerrainFieldCs.height
+static func dome_h(base: float, top: float, sink: float, q: float) -> float:
+	var a := top - base + sink
+	var k := sink / a if a > 1e-9 else 0.0
+	return base - sink + a * sqrt(1.0 - q * (1.0 - k * k))
 
 
 ## the ground or a wooden deck WITHOUT the rock / log domes (JS's shadowed surface(): cliff-wall test)
@@ -908,7 +917,7 @@ func _finalize(k: Vector2i) -> void:
 		var dd := PackedFloat64Array()
 		for c in colliders:
 			if c.has("top"):
-				dd.append_array([c["x"], c["z"], c["r"], c["base"], c["top"]])
+				dd.append_array([c["x"], c["z"], c["r"], c["base"], c["top"], c.get("sink", 0.0)])
 		fcs.domes_add(_chunk_id(k), dd)
 	var ckeys := {}
 	for c in colliders:

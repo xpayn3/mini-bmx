@@ -539,6 +539,31 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   (secant, clamped), up to 6 passes. Seen in the F8 ride log as `tyre_lift` zigzagging 0.00 / 0.08 at `bike_lean` 1.2 (162 zigzags in
   60 s; none below 0.8 rad). Test riders rarely lean that far on a bank, so no autotest shows it: check with an F8 log from a real ride
   (`tyre_lift`, `drawn_y`, `pelvis_y` columns). F8 / R3 now pops "LOG SAVED · CRASHLOGS/<folder>" in the loud all-caps style.
+- **Rocks (2026-11-21, user: "rocks shake the whole rider, he rocks back and forth as one stiff unit, some we crash on though we could ride over")**:
+  - Playground lane **ROCKS** (z = -24; `Lane.rock_row` / `rock_garden`, `PlaygroundCourse.rocks`, `height_rocks`, `rocks_near`): the world's own rock meshes
+    + colliders + domes: rows of one size (`rock_3` .. `rock_22` cm, `rock_34` = too tall), `garden_line` (the trail's recipe, with its clean
+    line) and `garden_full` (rocks everywhere). Ride it with `BMX_PG_PILOT=lane BMX_PG_AT=rocks BMX_PG_PILOT_KMH=36 BMX_PG_PILOT_PUMP=0` (the lane
+    rider steers; `BMX_STRAIGHT` gets knocked off line by the 6 cm row). Lanes start at x = -30 (`X0`): feature u = x + 30.
+  - Rideable rock shape = the stone's visible cap (`Terrain.dome_h(base, top, sink, q)`, collider key `sink` = how far the middle is under the
+    ground, mirrored in `TerrainFieldCs.height`; logs / stumps have no sink = the old half dome). The half dome met the ground as a vertical wall.
+    Only ~10 % calmer in numbers: the hit is mostly the rock's height against the spring rate.
+  - Rider holds their line against quick pitch kicks (`rider.gd` `bump_pitch` = the bike's pitch minus its ~0.35 s average, x pose input
+    `bumpPitch` 0.85, turned back out of hips + chest AFTER the body springs: through them it came ~60 ms late and made it worse). A rock is no
+    longer a wheelie / climb to the rider: pose input `slope` is the land's (deck_height, no domes) and the wheelie pose needs `frontUp`
+    (`wheelie_up`). Torso swing in the world on rock_20 at 35 km/h: 16 -> 11 deg, rock_14: 9.3 -> 7.2. Probe: `BMX_KICK_PROBE=1` (`KICK` lines).
+  - The body isn't thrown fore / aft by a rock's edge any more (`proj_dv`: the speed lost to a ground kink is left out of `a_body`).
+  - The drawn tyre-unclip lift is eased (`Game.LIFT_UP` 2.4 m/s, `LIFT_DOWN` 0.6 m/s, `_lift_s`) and kept out of the rider's bump spring (pose
+    input `frameY` = the physics frame height). A tyre may now dip into a rock for a frame (CLIP probe: 1 frame, 1.5 cm in a 45 s ride).
+  - Wall check measures a rock against its own ground too (`min(top - y, top - base)`): on a climb / bank / leaned, a 15 cm stone read as a
+    wall (BONK, thrown backwards; seen in an F8 log as v 9.2 -> -2.6 m/s with a 23 cm lift).
+  - Still open: big rocks (>= 20 cm) pitch the bike 13-16 deg and throw it into the air at 35 km/h (spring rate, not shape); the pose changes
+    between pedalling and coasting move the hips ~10 cm; not yet confirmed by the user riding.
+- **Cameras ride the bike's height without its bumps (2026-11-21, user: "side cam reacts harshly on bumps, exaggerates impacts, looks glitchy")**:
+  `CameraRig._smooth_y` (two low-passes of `Y_TAU` 0.28 s read as 2 x first - second: no lag on slopes / jumps, a rock's kick or a landing's
+  compression at about a sixth) feeds every follow camera's aim and anchor (side, chase, trail, drone, the playground's). The view-blocked check
+  (`_blocked`) looks at the land only (`deck_height`: rocks tripped it), uses the smoothed height and has a 0.2 m margin (on flat ground it was
+  razor-thin: a 1 cm suspension dip flipped it and the camera hopped a few cm a frame). Impact shake amplitude halved. Measured on the rocks lane
+  (`BMX_CAM_PROBE=1`, new `world_y_jerk_mm` = the camera's own height, 2nd difference per frame): side 5.9 -> 1.7 mm, chase 1.1 mm.
 - **Lean vs terrain**: the lean only changes as fast as the tyres are loaded (`kL *= load`): over a crest / edge the
   bike carries its lean instead of snapping upright. The bank the bike feels changes at most 3 rad/s. The lean is
   limited against the ground where the leaned tyre swings to (0.3 / 0.5 m to the lean side at both wheels,

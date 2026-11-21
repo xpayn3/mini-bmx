@@ -1482,7 +1482,7 @@ public partial class TerrainFieldCs : RefCounted
 	private const double ROCK_CELL = 2.0;
 	private sealed class Dome
 	{
-		public double x, z, r, b, top;
+		public double x, z, r, b, top, sink;   // sink: how far the stone's middle lies under the ground (0 = a half dome)
 		public long chunk;
 	}
 	private readonly Dictionary<long, List<Dome>> _domes = new Dictionary<long, List<Dome>>();
@@ -1490,15 +1490,15 @@ public partial class TerrainFieldCs : RefCounted
 
 	private static long _dome_key(long gx, long gz) => gx * 4294967296L + gz;
 
-	/// a chunk's domes: data = (x, z, r, base, top) per rock / log / stump, registered in every 2 m cell their
+	/// a chunk's domes: data = (x, z, r, base, top, sink) per rock / log / stump, registered in every 2 m cell their
 	/// bounding square touches (same cells as Terrain._finalize)
 	public void domes_add(long chunk, double[] data)
 	{
 		domes_remove(chunk);
 		var keys = new List<long>();
-		for (int i = 0; i + 4 < data.Length; i += 5)
+		for (int i = 0; i + 5 < data.Length; i += 6)
 		{
-			var d = new Dome { x = data[i], z = data[i + 1], r = data[i + 2], b = data[i + 3], top = data[i + 4], chunk = chunk };
+			var d = new Dome { x = data[i], z = data[i + 1], r = data[i + 2], b = data[i + 3], top = data[i + 4], sink = data[i + 5], chunk = chunk };
 			for (long gx = floori((d.x - d.r) / ROCK_CELL); gx < floori((d.x + d.r) / ROCK_CELL) + 1; gx++)
 			{
 				for (long gz = floori((d.z - d.r) / ROCK_CELL); gz < floori((d.z + d.r) / ROCK_CELL) + 1; gz++)
@@ -1543,7 +1543,11 @@ public partial class TerrainFieldCs : RefCounted
 			double q = (dx * dx + dz * dz) / (r * r);
 			if (q < 1.0)
 			{
-				double h = c.b + (c.top - c.b) * Math.Sqrt(1.0 - q);
+				// the visible cap of a stone whose middle is `sink` under the ground: it meets the ground at an angle
+				// (~50 deg for a rock) instead of the half dome's vertical wall (see Terrain.dome_h)
+				double a = c.top - c.b + c.sink;
+				double k = a > 1e-9 ? c.sink / a : 0.0;
+				double h = c.b - c.sink + a * Math.Sqrt(1.0 - q * (1.0 - k * k));
 				if (h > g)
 					g = h;
 			}

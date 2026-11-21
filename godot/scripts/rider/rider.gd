@@ -1135,6 +1135,8 @@ var sm_turn := 0.0
 var sm_aero := 0.0
 var sm_effort := 0.0
 var sm_pitch0 := 0.0
+var sm_pitch_slow := 0.0   # the bike's pitch averaged over ~0.35 s: what the body swings with
+var bump_pitch := 0.0      # this frame's quick pitch kick the body holds against (tests)
 var sm_wheelie := 0.0   # the slope the body levels against, rate-limited
 const PITCH_LEVEL_RATE := 2.5   # rad/s
 var _fy_prev := NAN; var _fv_prev := NAN; var _facc := 0.0   # the frame's height / speed / acceleration (bump bounce)
@@ -1271,10 +1273,25 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var raw_p := wrapf(_num(p, "pitch"), -PI, PI)
 	var wh_t: float = clampf(raw_p - slope0, 0.0, 1.1) * (1.0 - clampf(air * 3.0, 0.0, 1.0)) if p.has("slope") else 0.0
 	if wh_t < 0.08: wh_t = 0.0   # small pitch noise is not a wheelie
+	# (frontUp: the physics' own manual angle. A rock kicking the front up is not a wheelie: without this the rider sat
+	# back behind the saddle with long arms on every stone, then snapped forward again)
+	if p.has("frontUp"): wh_t *= smoothstep(0.02, 0.1, _num(p, "frontUp"))
 	sm_wheelie = move_toward(sm_wheelie, wh_t, 2.5 * minf(dt, 0.1))
 	var wheelie: float = sm_wheelie
 	var base := pitch0 - wheelie   # the slope part of the bike's pitch
 	var pit := base * (0.2 if base > 0 else _num(p, "bodyLevel", 0.85)) + wheelie * 0.75   # most of a wheelie's tilt is taken back
+	# the body is its own mass in pitch too: a quick kick of the bike (a rock or a root under one wheel, a curb, a
+	# landing rocking it) turns the bike UNDER the rider - arms and legs take it, hips and shoulders hold their line.
+	# The body used to follow 80 % of any nose-up pitch at once: over rocks the whole rider rocked back and forth with
+	# the frame as one stiff piece. Quick = the bike's pitch against its own slow average (~0.35 s): a slope or a held
+	# manual is followed as before, only what changes faster than the body can swing is held back (bumpPitch of it)
+	if not spring_init or air > 0.5: sm_pitch_slow = raw_p
+	sm_pitch_slow += wrapf(raw_p - sm_pitch_slow, -PI, PI) * (1.0 - exp(-3.0 * h0))
+	var kick: float = clampf(wrapf(raw_p - sm_pitch_slow, -PI, PI), -0.4, 0.4) * (1.0 - air) * (1.0 - smoothstep(0.7, 1.3, absf(raw_p)))
+	bump_pitch = kick
+	if Env.s("BMX_KICK_PROBE") != "" and absf(kick) > 0.02: print("KICK raw=%.3f slow=%.3f kick=%.3f base=%.3f wheelie=%.3f slope=%.3f air=%.2f" % [raw_p, sm_pitch_slow, kick, base, wheelie, slope0, air])
+	# (applied after the body's springs, below: it is the bike turning under a body that stays put, not a move of
+	# the body - through the springs it arrived ~60 ms late, out of step with an 80 ms kick, and made it worse)
 	# in the air, when the rider tilts the bike with the stick, the body stays and the bike rotates under
 	# it: nose down = arms push the bars away, hips back; nose up = bars pulled into the chest
 	var at := _num(p, "airTilt")
@@ -1433,7 +1450,10 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# acceleration pushes the body the other way (Bump bounce); Body bounce sets how long it rings on
 	var bump_k: float = float(sty.get("bumpAbsorb", 2.0)) * (1.0 - air)
 	# what the legs feel: half the frame's motion, half the wheels' (the bumps the suspension passes on)
-	var gy := (global_position.y if is_inside_tree() else 0.0) * 0.85 + _num(p, "wheelY") * 0.15
+	# (frameY: the frame's height from the physics, without the drawn bike's tyre-unclip lift - that lift is a
+	# correction of the picture, and as "bumps" it threw the body about over every rock)
+	var fy0 := _num(p, "frameY", NAN)
+	var gy := (fy0 if not is_nan(fy0) else (global_position.y if is_inside_tree() else 0.0)) * 0.85 + _num(p, "wheelY") * 0.15
 	var acc := 0.0
 	if not is_nan(_fy_prev) and absf(gy - _fy_prev) > 1.0:
 		_fy_prev = NAN; _fv_prev = NAN   # teleports (respawn, a new ride) are not bumps
@@ -1478,6 +1498,19 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		dz = chest.z
 		chest.y = dy * c - dz * sn
 		chest.z = dy * sn + dz * c
+	# quick pitch kicks: the bike turns under the body (see bump_pitch above)
+	var kp: float = bump_pitch * clampf(_num(p, "bumpPitch", 0.85), 0.0, 1.0)
+	if kp != 0.0:
+		var kc := cos(kp)
+		var ks := sin(kp)
+		var kdy := pelvis.y - 0.3
+		var kdx := pelvis.x
+		pelvis.x = kdx * kc + kdy * ks
+		pelvis.y = 0.3 - kdx * ks + kdy * kc
+		kdy = chest.y - 0.3
+		kdx = chest.x
+		chest.x = kdx * kc + kdy * ks
+		chest.y = 0.3 - kdx * ks + kdy * kc
 	# arms only reach so far: the torso follows the hands so the elbows keep a bend
 	var handL = p.get("handL")
 	var handR = p.get("handR")

@@ -1362,7 +1362,10 @@ func _step_move(dt: float, f: Vector3) -> void:
 				v *= 0.86; shake = maxf(shake, 0.3); host.flash("CRUNCH!" if c.get("fence_style", "") == "picket" else "SMASH!")
 			continue
 		if c.has("top"):
-			var clear: float = c.top - y
+			# how tall the rock stands: over the bike's own height, but never more than over the ground it sits on. On a
+			# climb, a bank or leaned in a turn the rock's ground is higher than the bike's middle, and a 15 cm stone
+			# measured from there read as a wall: BONK, the bike thrown backwards off a rock it rolls over
+			var clear: float = minf(c.top - y, c.top - float(c.get("base", y)))
 			if clear < CLIMB * RWF: continue
 			if not hit_f or fd > c.r * 0.85: continue
 			if (f.x * fdx + f.z * fdz) / fd >= 0: continue
@@ -1407,7 +1410,9 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 	var natural: bool
 	var dP := _g_pitch - _or(g_pitch, _g_pitch)
 	if true:
+		var v_pre := v
 		if not air and dP > 0.02 and v > 0: v *= cos(minf(dP, 1.2))
+		var proj_dv := v - v_pre   # speed lost to the ground kinking up this step (a rock's edge, a curb)
 		g_pitch = _g_pitch
 		natural = terrain.jump_mask(x, z) < 0.05
 		var climb_max := absf(v) * 0.9 + 0.3
@@ -1468,7 +1473,9 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			# the body carries on when the bike slows (braking, a landing, a root) and lags when it surges
 			var a_body := 0.0
 			if not is_nan(v_last) and not air:
-				a_body = clampf((v - v_last) / maxf(dt, 1e-4), -40.0, 40.0)
+				# (not the kink loss above: over a rock that is a one-step spike of 10-40 m/s2, and the body was thrown
+				# forward and back by every stone - "the whole rider leans back and forth")
+				a_body = clampf((v - v_last - proj_dv) / maxf(dt, 1e-4), -40.0, 40.0)
 			# (not through a flight: the landing re-projects v onto the slope / flips it for a fakie, which read as a
 			# 40 m/s2 jolt of the body on the first ground step)
 			v_last = NAN if air else v

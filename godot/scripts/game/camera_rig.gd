@@ -57,6 +57,7 @@ var target := Vector3.ZERO
 var _probe_on := Env.s("BMX_CAM_PROBE") != ""
 var _pp1 := Vector3.ZERO; var _pp2 := Vector3.ZERO; var _pa1 := Vector3.ZERO; var _pa2 := Vector3.ZERO
 var _pn := 0; var _pj := 0.0; var _pk := 0; var _paj := 0.0; var _psh := 0
+var _pw1 := 0.0; var _pw2 := 0.0; var _pwj := 0.0; var _pwmax := 0.0   # the camera's own height in the world (2nd difference)
 var anchor := Vector3.ZERO   # what the camera is placed from (the rider); target = where it looks
 var pos_s := Vector3.ZERO
 var pos_v := Vector3.ZERO
@@ -133,6 +134,23 @@ func default_mode() -> String:
 
 func snap_to(p: Vector3) -> void:
 	target = p; anchor = p
+	_ys_init = false
+
+
+## The bike's height as the camera follows it: bumps and impacts taken out, slopes and jumps kept. Two low-passes in a
+## row (Y_TAU each), read as 2 * first - second: no lag on a steady climb / descent / flight, while a rock's 80 ms kick
+## or a landing's compression comes through at about a sixth. The cameras used to ride the bike's own height (side /
+## chase 0.2 s behind, trail 0.08 s): every bump moved the whole view, the bike stayed put in the frame and the world
+## jumped instead - impacts looked harsher than they were, and glitchy
+const Y_TAU := 0.28
+var _ys1 := 0.0; var _ys2 := 0.0; var _ys_init := false
+func _smooth_y(y: float, dt: float) -> float:
+	if not _ys_init or absf(y - (2.0 * _ys1 - _ys2)) > 4.0:
+		_ys1 = y; _ys2 = y; _ys_init = true
+	var k := 1.0 - exp(-dt / Y_TAU)
+	_ys1 += (y - _ys1) * k
+	_ys2 += (_ys1 - _ys2) * k
+	return 2.0 * _ys1 - _ys2
 	pos_init = false
 	trail_i = -1; trail_dir = Vector3.ZERO
 
@@ -189,6 +207,7 @@ func update_cam(dt: float) -> void:
 	var hd: float = st.course if st.air and not is_nan(st.course) else st.heading
 	var f := Vector3(cos(hd), 0, -sin(hd))
 	var drawn: Vector3 = game.drawn_pos
+	var ys := _smooth_y(drawn.y, dt)   # the bike's height without its bumps (see _smooth_y)
 	var want: Vector3
 	if st.crash_on and game.ragdoll:
 		want = (game.ragdoll.p[Ragdoll.PELVIS] as Vector3) + Vector3(0, 0.3, 0)   # the body itself (the bike slides off on its own)
@@ -206,11 +225,11 @@ func update_cam(dt: float) -> void:
 		var lead := clampf(5.0 + absf(st.v) * 0.6, 5.0, 14.0) * float(Settings.get_v("cam_ahead"))
 		# aim at the ground up ahead (+ a little): on a descent the view tips down the slope with you
 		var ap: Vector3 = Vector3(drawn.x, 0, drawn.z) + look * lead
-		var gy: float = game.terrain.height(ap.x, ap.z)
-		want = Vector3(ap.x, lerpf(drawn.y, gy, 0.6) + 1.0, ap.z)
+		var gy: float = game.terrain.deck_height(ap.x, ap.z)   # (the land: not the rocks lying on it)
+		want = Vector3(ap.x, lerpf(ys, gy, 0.6) + 1.0, ap.z)
 	else:
 		var k := 0.05 if P.get("mode", "") == "trackside" else (0.1 if P.get("drift", false) else 0.25)
-		want = Vector3(drawn.x, drawn.y + 0.5, drawn.z) + f * clampf(st.v, -1, 10) * k
+		want = Vector3(drawn.x, ys + 0.5, drawn.z) + f * clampf(st.v, -1, 10) * k
 	# a crash: the view locks onto the ragdoll at once (real time: the slow motion shrinks dt ~5x), then
 	# slowly closes in on the body
 	var crashed: bool = st.crash_on and game.ragdoll != null
@@ -224,7 +243,7 @@ func update_cam(dt: float) -> void:
 	target = target.lerp(want, minf(1.0, (rdt * 18.0) if crashed else dt * (7.0 if P.get("drift", false) else P.get("lag", 5.0))))
 	if P.get("ahead", false) and not (st.crash_on and game.ragdoll):
 		# placed behind the RIDER (not behind the look point, which runs up to 14 m ahead)
-		anchor = anchor.lerp(Vector3(drawn.x, drawn.y + 1.0, drawn.z), minf(1.0, dt * 12.0)) if pos_init else Vector3(drawn.x, drawn.y + 1.0, drawn.z)
+		anchor = anchor.lerp(Vector3(drawn.x, ys + 1.0, drawn.z), minf(1.0, dt * 12.0)) if pos_init else Vector3(drawn.x, ys + 1.0, drawn.z)
 	elif P.get("ahead", false):
 		anchor = anchor.lerp(target, minf(1.0, rdt * 12.0))   # crash: straight over to the ragdoll
 	else:
@@ -274,7 +293,7 @@ func update_cam(dt: float) -> void:
 		var back := Vector3(cos(yaw), 0, -sin(yaw))
 		var need := 0.0
 		var occ_max: float = P.get("occ_max", 46.0)
-		while need < occ_max and pit + need < 84 and _blocked(pit + need, back, drawn.y, anchor):
+		while need < occ_max and pit + need < 84 and _blocked(pit + need, back, ys, anchor):   # (the smoothed height: the bike's bumps flipped this on and off)
 			need += 4 if P.get("ahead", false) else 6
 		occ += (need - occ) * minf(1.0, dt * (2.0 if need > occ else 0.7))   # rise gently: no hops at some angles
 		pit = minf(84, pit + occ)
@@ -305,12 +324,16 @@ func update_cam(dt: float) -> void:
 	fov = clampf(cam_fov * (1.0 + fov_boost * float(Settings.get_v("cam_speed_fov")) / 34.0) + float(Settings.get_v("fov")), 5, 110)
 	var sk: float = st.shake * float(Settings.get_v("cam_shake"))
 	if sk > 0:
-		global_position += Vector3(sin(t * 37) * sk * 0.12, sin(t * 29 + 1) * sk * 0.12, 0)
+		global_position += Vector3(sin(t * 37) * sk * 0.06, sin(t * 29 + 1) * sk * 0.06, 0)   # (half of what it was: on top of a real impact it read as a glitch)
 	st.shake = maxf(0.0, st.shake - dt * 1.2)
 	if _probe_on:   # BMX_CAM_PROBE: how much the camera rattles (2nd difference per frame: position, aim)
 		var po: Vector3 = global_position - game.drawn_pos
 		var d2: Vector3 = po - 2.0 * _pp1 + _pp2
 		var a2: Vector3 = target - 2.0 * _pa1 + _pa2
+		var w2: float = global_position.y - 2.0 * _pw1 + _pw2
+		if _pn > 2 and st.v > 8.0:
+			_pwj += w2 * w2; _pwmax = maxf(_pwmax, absf(w2))
+		_pw2 = _pw1; _pw1 = global_position.y
 		if _pn > 2 and st.v > 8.0 and not st.air:
 			_pj += d2.length_squared(); _pk += 1; _paj += (a2 / maxf(1.0, global_position.distance_to(target))).length_squared()
 			if st.shake > 0.0: _psh += 1
@@ -397,7 +420,7 @@ func _helmet(dt: float, P: Dictionary) -> bool:
 
 
 func _exit_tree() -> void:
-	if _probe_on and _pk > 0: print("CAMPROBE pos_jerk_mm=%.2f aim_jerk_mrad=%.2f shaking_frames=%d frames=%d" % [sqrt(_pj / _pk) * 1000.0, sqrt(_paj / _pk) * 1000.0, _psh, _pk])
+	if _probe_on and _pk > 0: print("CAMPROBE pos_jerk_mm=%.2f aim_jerk_mrad=%.2f shaking_frames=%d frames=%d  world_y_jerk_mm=%.2f worst_mm=%.1f" % [sqrt(_pj / _pk) * 1000.0, sqrt(_paj / _pk) * 1000.0, _psh, _pk, sqrt(_pwj / _pk) * 1000.0, _pwmax * 1000.0])
 	RenderingServer.global_shader_parameter_set("cam_see", Vector4.ZERO)
 
 ## never lose the rider: if the look point would put them more than ~70% of the way to the frame edge
@@ -442,7 +465,10 @@ func _blocked(p_deg: float, back: Vector3, dy: float, from: Vector3) -> bool:
 		var u := i / 21.0
 		var px := from.x + hx * u
 		var pz := from.z + hz * u
-		if game.terrain.height(px, pz) + 0.6 > y0 + (from.y + hy - y0) * u:
+		# the LAND only (deck_height): a rock by the trail is no hill in the way (and it dissolves at the lens anyway).
+		# With the rocks in, the side camera hopped a few cm a frame all through a rock garden
+		# (0.4, not the 0.6 of y0: on flat ground the two were equal, and a suspension dip of 1 cm tripped it)
+		if game.terrain.deck_height(px, pz) + 0.4 > y0 + (from.y + hy - y0) * u:
 			return true
 	return false
 
