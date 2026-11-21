@@ -103,6 +103,9 @@ var cBT := PackedFloat32Array()
 var cE := PackedFloat32Array()
 var cRD := PackedFloat32Array()
 var cRK := PackedFloat32Array()
+var cLN := PackedFloat32Array()    # the racing line (TrailCourse.LN)
+var cRO := PackedFloat32Array()    # run-off skids (TrailCourse.RO / ROS)
+var cROS := PackedFloat32Array()
 var c_gx0: int = 0
 var c_gz0: int = 0
 var c_gnx: int = 0
@@ -261,7 +264,7 @@ func grow_course(to_x: float) -> void:
 func adopt_course(g: TerrainField) -> void:
 	course = g.course
 	cX = g.cX; cZ = g.cZ; cKD = g.cKD; cTX = g.cTX; cTZ = g.cTZ; cKAP = g.cKAP; cW = g.cW; cBT = g.cBT; cE = g.cE
-	cRD = g.cRD; cRK = g.cRK
+	cRD = g.cRD; cRK = g.cRK; cLN = g.cLN; cRO = g.cRO; cROS = g.cROS
 	c_gx0 = g.c_gx0; c_gz0 = g.c_gz0; c_gnx = g.c_gnx; c_gnz = g.c_gnz; c_start = g.c_start; c_items = g.c_items
 	c_seg = g.c_seg; c_run_start = g.c_run_start; c_runs = g.c_runs
 	route_feats = g.route_feats
@@ -296,7 +299,7 @@ func fork() -> TerrainField:
 func _bind_course(private: bool = false) -> void:
 	var c := course
 	cX = c.X; cZ = c.Z; cKD = c.KD; cTX = c.TX; cTZ = c.TZ; cKAP = c.KAP; cW = c.W; cBT = c.BT; cE = c.E
-	cRD = c.RD; cRK = c.RK
+	cRD = c.RD; cRK = c.RK; cLN = c.LN; cRO = c.RO; cROS = c.ROS
 	c_gx0 = c.gx0; c_gz0 = c.gz0; c_gnx = c.gnx; c_gnz = c.gnz; c_start = c.cell_start; c_items = c.cell_items
 	c_seg = PackedFloat64Array()
 	c_seg.resize(maxi(0, c.n - 1) * 6)
@@ -333,7 +336,7 @@ func _bind_course(private: bool = false) -> void:
 	if private:
 		cX = cX.duplicate(); cZ = cZ.duplicate(); cKD = cKD.duplicate(); cTX = cTX.duplicate(); cTZ = cTZ.duplicate()
 		cKAP = cKAP.duplicate(); cW = cW.duplicate(); cBT = cBT.duplicate(); cE = cE.duplicate(); cRD = cRD.duplicate()
-		cRK = cRK.duplicate(); c_start = c_start.duplicate(); c_items = c_items.duplicate()
+		cRK = cRK.duplicate(); cLN = cLN.duplicate(); cRO = cRO.duplicate(); cROS = cROS.duplicate(); c_start = c_start.duplicate(); c_items = c_items.duplicate()
 	_qp.resize(15)
 	_qp[0] = NAN; _qp[1] = NAN; _qp[2] = INF
 
@@ -342,7 +345,7 @@ func _reset_caches() -> void:
 	_jc = {}
 	q_x = NAN; q_z = NAN; q_d = INF
 	_qp.resize(15); _qp[0] = NAN; _qp[1] = NAN; _qp[2] = INF
-	_fo_x = NAN; _gr_x = NAN; _pn_x = NAN; _mt_x = NAN; _zc_x = NAN; _bi_x = NAN; _g_x = NAN
+	_fo_x = NAN; _gr_x = NAN; _pn_x = NAN; _mt_x = NAN; _zc_x = NAN; _bi_x = NAN; _g_x = NAN; _rg_x = NAN
 
 
 # ---------------- Perlin (three.js ImprovedNoise, z fixed at sz) ----------------
@@ -421,10 +424,56 @@ func zc(x: float) -> float:
 	return _zc_v
 
 
+# ---------------- the mountains after the first: one every RANGE_P m, for ever ----------------
+## Each is a gentle climb (about 4 % on average) up the back of a ridge that follows the trail's corridor, a short
+## level top, then the descent (about 7.5 %). Height, lengths and where it sits in its slot come from an integer
+## hash of the slot + seed (no table: any x can be asked, the trail can grow for ever). Mirrored in TerrainFieldCs.
+const RANGE_X0 := 2100.0    # the first one's slot starts here (the first mountain ends at HILL_LEN)
+const RANGE_P := 2800.0
+const RANGE_UP := 0.042     # mean grade of the climb
+const RANGE_DOWN := 0.075   # ... of the descent
+var _rg_x: float = NAN
+var _rg_h: float = 0.0      # height along the ridge line at x (m)
+var _rg_m: float = 0.0      # 0..1: on a mountain (calms the land's own bumps like the first mountain does)
+var rg_down: float = 0.0    # 0..1: on a descent (TrailCourse puts its tight technical sections there)
+
+
+func _range_hash(k: int, ch: int) -> float:
+	return float(((k * 73856093) ^ (ch * 19349663) ^ (seed_value * 2654435761)) & 0xffff) / 65536.0
+
+
+func range_at(x: float) -> void:
+	if x == _rg_x:
+		return
+	_rg_x = x
+	_rg_h = 0.0; _rg_m = 0.0; rg_down = 0.0
+	if x <= RANGE_X0:
+		return
+	var k := floori((x - RANGE_X0) / RANGE_P)
+	var u := x - RANGE_X0 - k * RANGE_P
+	var hh := 40.0 + 14.0 * _range_hash(k, 1)
+	var a0 := 120.0 + 260.0 * _range_hash(k, 2)
+	var lc := hh / RANGE_UP
+	var lp := 50.0 + 40.0 * _range_hash(k, 3)
+	var ld := hh / RANGE_DOWN
+	var e := a0 + lc + lp + ld
+	if u <= a0 - 140.0 or u >= e + 140.0:
+		return
+	var up := sm(a0, a0 + lc, u)
+	var dn := sm(a0 + lc + lp, e, u)
+	_rg_h = hh * up * (1.0 - dn)
+	_rg_m = sm(a0 - 140.0, a0, u) * (1.0 - sm(e, e + 140.0, u))
+	rg_down = sm(a0 + lc + lp - 30.0, a0 + lc + lp + 20.0, u) * (1.0 - sm(e - 40.0, e + 20.0, u))
+
+
 func mtn(x: float, z: float) -> float:
 	if x == _mt_x and z == _mt_z:
 		return _mt_v
 	var v := 0.0
+	if x > RANGE_X0:
+		range_at(x)
+		if _rg_m > 0.0:
+			v = _rg_m * (1.0 - sm(MTN_W - 20, MTN_W + 90, absf(z - zc(x))))
 	if x > -300.0 and x < HILL_LEN + 150:
 		# (1 - sm(MTN_W - 20, MTN_W + 90, |z - zc|)) * sm(-300, -170, x) * (1 - sm(HILL_LEN, HILL_LEN + 150, x))
 		var t := (absf(z - zc(x)) - (MTN_W - 20)) / ((MTN_W + 90) - (MTN_W - 20))
@@ -463,9 +512,13 @@ func hill(x: float, z: float) -> float:
 	t = (x - -330.0) / (-90.0 - -330.0)
 	t = 1.0 if t > 1.0 else t
 	var along := (1.0 - steep - (1.0 - pitch_share) * (0.6 * s1 + 0.4 * lin_)) * (t * t * (3.0 - 2.0 * t))
-	if along <= 0.0:
+	var top := HILL_TOP * along if along > 0.0 else 0.0
+	if x > RANGE_X0:
+		range_at(x)
+		top += _rg_h
+	if top <= 0.0:
 		return 0.0
-	return HILL_TOP * along * (1.0 - sm(MTN_W, MTN_W + 260, absf(z - zc(x))))
+	return top * (1.0 - sm(MTN_W, MTN_W + 260, absf(z - zc(x))))
 
 
 func route_dist(x: float, z: float) -> float:
@@ -518,15 +571,21 @@ func across(x: float, z: float) -> float:
 	return pathN(x, z) / maxf(sqrt(_gx * _gx + _gz * _gz), 0.012)
 
 
-func line(x: float, z: float) -> float:
-	var off := noise((x + 91.7) * I23, (z - 13.3) * I23) * 1.5
-	var a := across(x, z)
+## where the ridden line sits across the trail (m): on the course the racing line (TrailCourse.LN) with a small
+## wander, on the wild side paths a slow wander
+func line_off(x: float, z: float) -> float:
+	var wob := noise((x + 91.7) * I23, (z - 13.3) * I23)
 	query(x, z)
-	var single := 1.0 - sm(0.25, 0.7, absf(a - off))
-	if not (q_d < q_w + 2.6) or q_rd <= 0.0:
-		return single
-	var ruts := 1.0 - sm(0.16, 0.48, absf(absf(a) - 0.85))
-	return single + (ruts - single) * q_rd
+	if q_d < q_w + 2.6:
+		return cLN[q_i] + (cLN[q_i + 1] - cLN[q_i]) * q_t + wob * 0.18
+	return wob * 1.5
+
+
+func line(x: float, z: float) -> float:
+	var off := line_off(x, z)
+	var a := across(x, z)
+	# one ridden line everywhere: only bikes use these trails, so a road has no pair of wheel ruts
+	return 1.0 - sm(0.25, 0.7, absf(a - off))
 
 
 # ---------------- berms ----------------

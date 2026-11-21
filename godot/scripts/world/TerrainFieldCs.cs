@@ -472,7 +472,7 @@ internal sealed class TfShared
 	public double rp_a, rp_sg;
 	public double[] pitches;
 	public double pitch_share;
-	public double[] cX, cZ, cTX, cTZ, cKAP, cW, cBT, cE, cRD, cRK;
+	public double[] cX, cZ, cTX, cTZ, cKAP, cW, cBT, cE, cRD, cRK, cLN, cRO, cROS;
 	public int[] cKD;
 	public long c_gx0, c_gz0, c_gnx, c_gnz;
 	public double[] c_seg;
@@ -535,7 +535,7 @@ public partial class TerrainFieldCs : RefCounted
 	private double rp_a, rp_sg, _sin_rp_a;
 	private double[] pitches;
 	private double pitch_share;
-	private double[] cX, cZ, cTX, cTZ, cKAP, cW, cBT, cE, cRD, cRK;
+	private double[] cX, cZ, cTX, cTZ, cKAP, cW, cBT, cE, cRD, cRK, cLN, cRO, cROS;
 	private int[] cKD;
 	private long c_gx0, c_gz0, c_gnx, c_gnz;
 	private double[] c_seg;
@@ -676,6 +676,9 @@ public partial class TerrainFieldCs : RefCounted
 		sh.cE = F32(f.Get("cE"));
 		sh.cRD = F32(f.Get("cRD"));
 		sh.cRK = F32(f.Get("cRK"));
+		sh.cLN = F32(f.Get("cLN"));
+		sh.cRO = F32(f.Get("cRO"));
+		sh.cROS = F32(f.Get("cROS"));
 		sh.c_gx0 = f.Get("c_gx0").AsInt64();
 		sh.c_gz0 = f.Get("c_gz0").AsInt64();
 		sh.c_gnx = f.Get("c_gnx").AsInt64();
@@ -712,7 +715,7 @@ public partial class TerrainFieldCs : RefCounted
 		_sin_rp_a = gd_sin(rp_a);
 		pitches = sh.pitches; pitch_share = sh.pitch_share;
 		cX = sh.cX; cZ = sh.cZ; cKD = sh.cKD; cTX = sh.cTX; cTZ = sh.cTZ; cKAP = sh.cKAP; cW = sh.cW; cBT = sh.cBT;
-		cE = sh.cE; cRD = sh.cRD; cRK = sh.cRK;
+		cE = sh.cE; cRD = sh.cRD; cRK = sh.cRK; cLN = sh.cLN; cRO = sh.cRO; cROS = sh.cROS;
 		c_gx0 = sh.c_gx0; c_gz0 = sh.c_gz0; c_gnx = sh.c_gnx; c_gnz = sh.c_gnz;
 		c_seg = sh.c_seg; c_run_start = sh.c_run_start; c_runs = sh.c_runs;
 		_route = sh.route_feats;
@@ -862,11 +865,50 @@ public partial class TerrainFieldCs : RefCounted
 		return _zc_v;
 	}
 
+	// ---------------- the mountains after the first (TerrainField.range_at) ----------------
+	public const double RANGE_X0 = 2100.0, RANGE_P = 2800.0, RANGE_UP = 0.042, RANGE_DOWN = 0.075;
+	private double _rg_x = double.NaN, _rg_h, _rg_m;
+	public double rg_down;
+
+	private double _range_hash(long k, long ch)
+		=> (double)(((k * 73856093) ^ (ch * 19349663) ^ (seed_value * 2654435761)) & 0xffff) / 65536.0;
+
+	public void range_at(double x)
+	{
+		if (x == _rg_x)
+			return;
+		_rg_x = x;
+		_rg_h = 0.0; _rg_m = 0.0; rg_down = 0.0;
+		if (x <= RANGE_X0)
+			return;
+		long k = floori((x - RANGE_X0) / RANGE_P);
+		double u = x - RANGE_X0 - k * RANGE_P;
+		double hh = 40.0 + 14.0 * _range_hash(k, 1);
+		double a0 = 120.0 + 260.0 * _range_hash(k, 2);
+		double lc = hh / RANGE_UP;
+		double lp = 50.0 + 40.0 * _range_hash(k, 3);
+		double ld = hh / RANGE_DOWN;
+		double e = a0 + lc + lp + ld;
+		if (u <= a0 - 140.0 || u >= e + 140.0)
+			return;
+		double up = sm(a0, a0 + lc, u);
+		double dn = sm(a0 + lc + lp, e, u);
+		_rg_h = hh * up * (1.0 - dn);
+		_rg_m = sm(a0 - 140.0, a0, u) * (1.0 - sm(e, e + 140.0, u));
+		rg_down = sm(a0 + lc + lp - 30.0, a0 + lc + lp + 20.0, u) * (1.0 - sm(e - 40.0, e + 20.0, u));
+	}
+
 	public double mtn(double x, double z)
 	{
 		if (x == _mt_x && z == _mt_z)
 			return _mt_v;
 		double v = 0.0;
+		if (x > RANGE_X0)
+		{
+			range_at(x);
+			if (_rg_m > 0.0)
+				v = _rg_m * (1.0 - sm(MTN_W - 20, MTN_W + 90, Math.Abs(z - zc(x))));
+		}
 		if (x > -300.0 && x < HILL_LEN + 150)
 		{
 			double t = (Math.Abs(z - zc(x)) - (MTN_W - 20)) / ((MTN_W + 90) - (MTN_W - 20));
@@ -912,9 +954,15 @@ public partial class TerrainFieldCs : RefCounted
 		t = (x - -330.0) / (-90.0 - -330.0);
 		t = t > 1.0 ? 1.0 : t;
 		double along = (1.0 - steep - (1.0 - pitch_share) * (0.6 * s1 + 0.4 * lin_)) * (t * t * (3.0 - 2.0 * t));
-		if (along <= 0.0)
+		double top = along > 0.0 ? HILL_TOP * along : 0.0;
+		if (x > RANGE_X0)
+		{
+			range_at(x);
+			top += _rg_h;
+		}
+		if (top <= 0.0)
 			return 0.0;
-		return HILL_TOP * along * (1.0 - sm(MTN_W, MTN_W + 260, Math.Abs(z - zc(x))));
+		return top * (1.0 - sm(MTN_W, MTN_W + 260, Math.Abs(z - zc(x))));
 	}
 
 	public double route_dist(double x, double z)
@@ -969,16 +1017,22 @@ public partial class TerrainFieldCs : RefCounted
 		return pathN(x, z) / maxf(Math.Sqrt(_gx * _gx + _gz * _gz), 0.012);
 	}
 
+	/// where the ridden line sits across the trail (TerrainField.line_off)
+	public double line_off(double x, double z)
+	{
+		double wob = noise((x + 91.7) * I23, (z - 13.3) * I23);
+		query(x, z);
+		if (q_d < q_w + 2.6)
+			return cLN[q_i] + (cLN[q_i + 1] - cLN[q_i]) * q_t + wob * 0.18;
+		return wob * 1.5;
+	}
+
 	public double line(double x, double z)
 	{
-		double off = noise((x + 91.7) * I23, (z - 13.3) * I23) * 1.5;
+		double off = line_off(x, z);
 		double a = across(x, z);
-		query(x, z);
-		double single = 1.0 - sm(0.25, 0.7, Math.Abs(a - off));
-		if (!(q_d < q_w + 2.6) || q_rd <= 0.0)
-			return single;
-		double ruts = 1.0 - sm(0.16, 0.48, Math.Abs(Math.Abs(a) - 0.85));
-		return single + (ruts - single) * q_rd;
+		// one ridden line everywhere: only bikes use these trails, so a road has no pair of wheel ruts
+		return 1.0 - sm(0.25, 0.7, Math.Abs(a - off));
 	}
 
 	// ---------------- berms ----------------
@@ -1743,6 +1797,8 @@ public partial class TerrainFieldCs : RefCounted
 		var pre_d = new Color[NV * NV];
 		var pre_t = new float[NV * NV];
 		var pre_b = new double[NV * NV * 2];
+		var TR = new float[NV * NV * 4];   // trail frame for ground.gdshader: across, line offset, along, run-off skid's place
+		var T2 = new float[NV * NV * 4];   // road, dry biome, built jump, run-off skid's strength
 		for (long iz = -1; iz < N + 2; iz++)
 		{
 			for (long ix = -1; ix < N + 2; ix++)
@@ -1760,6 +1816,18 @@ public partial class TerrainFieldCs : RefCounted
 					pre_d[o] = cl_d;
 					pre_b[o * 2] = cp_dry;
 					pre_b[o * 2 + 1] = cp_rug;
+					double jm = jump_mask(x, z);
+					double ac = across(x, z);
+					query(x, z);
+					bool on = q_d < q_w + 2.6;
+					TR[o * 4] = (float)Math.Clamp(ac, -20.0, 20.0);
+					TR[o * 4 + 1] = (float)line_off(x, z);
+					TR[o * 4 + 2] = (float)(on ? q_s : x * 0.6 + z * 0.8);
+					TR[o * 4 + 3] = (float)(on ? cRO[q_i] + (cRO[q_i + 1] - cRO[q_i]) * q_t : 0.0);
+					T2[o * 4] = (float)(on ? q_rd : 0.0);
+					T2[o * 4 + 1] = (float)cp_dry;
+					T2[o * 4 + 2] = (float)jm;
+					T2[o * 4 + 3] = (float)(on ? cROS[q_i] + (cROS[q_i + 1] - cROS[q_i]) * q_t : 0.0);
 				}
 			}
 		}
@@ -1807,7 +1875,7 @@ public partial class TerrainFieldCs : RefCounted
 		return new Godot.Collections.Dictionary
 		{
 			["G"] = G, ["verts"] = verts, ["norms"] = norms, ["uvs"] = uvs,
-			["LG"] = LG, ["LD"] = LD, ["TW"] = TW, ["SW"] = SW, ["DRY"] = DRY,
+			["LG"] = LG, ["LD"] = LD, ["TW"] = TW, ["SW"] = SW, ["DRY"] = DRY, ["TR"] = TR, ["T2"] = T2,
 		};
 	}
 
