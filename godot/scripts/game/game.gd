@@ -63,7 +63,12 @@ var light_t := 0.0
 const GoggleLens = preload("res://scripts/rider/goggle_lens.gd")
 const RIM_LAYER := 1 << 11   # render layer 12: the rider + bike (only the rim light uses it)
 const AGX_CONTRAST := 1.35
-const MIST_MAX_ABOVE := 2.0   # the mist top is never more than this far over the rider (the 20 s average lags on descents)
+const MIST_DEEP := 2.5      # the mist top sits this far over the low ground round the rider's path
+const MIST_NEAR := 0.3      # inside a pool: the most fog allowed on the ground at the wheels
+const MIST_SPENT := 4.0     # this deep inside a pool (and it belongs elsewhere) it is taken away
+const MIST_LEFT := 8.0      # the low ground round here is this far above the pool for 3 s: a new one
+const MIST_DRIFT := 0.3     # m/s the level may move in view (small changes only)
+const MIST_FADE_IN := 6.0   # s a new pool takes to appear
 const MIST_DENSITY := 0.45  # height fog in the dips at sunrise (Env BMX_MIST=k forces the amount)
 const AGX_EXP_DAY := 0.7
 const AGX_EXP_GOLD := 0.9
@@ -72,7 +77,17 @@ var rim: DirectionalLight3D
 var _rim_col := Color(1, 1, 1)
 var _rim_e := 0.0
 var _rim_tag_t := 0.0
-var _mist_y := NAN
+var _mist_y := NAN           # the mist top (world height); see _mist_update
+var _mist_want := 0.0
+var _mist_gy := 0.0
+var _mist_pos := Vector3.ZERO
+var _mist_f := 0.0
+var _mist_thin := 1.0
+var _mist_swap := false
+var _mist_out := 1.2
+var _mist_off_t := 0.0
+var _mist_scan_t := 0.0
+var _mist_probe_t := 0.0
 var _lens_now := ""
 var night_k := 0.0           # how much night (0 day .. 1 full night), from _apply_light
 var amb_base := 0.36        # flat ambient for the GI setting (SDFGI brings its own sky light)
@@ -505,8 +520,15 @@ func _rim_update(dt: float) -> void:
 	rim.light_color = _rim_col
 	rim.light_energy = _rim_e if Env.s("BMX_RIM_E") == "" else float(Env.s("BMX_RIM_E"))
 
-## morning mist: height fog that lies in the dips below the rider at sunrise (and a little at dusk), burning off by
-## mid-morning. Its top follows the rider's height slowly (~20 s), so riding down into a valley takes you into it.
+## morning mist: height fog that lies in the dips at sunrise (and a little at dusk), burning off by mid-morning.
+## The mist is a pool with a level fixed in the WORLD (it used to hang off the rider's height, so on a descent the
+## whole fog level sank away in front of the bike and never arrived). The level comes from the land: the low ground
+## round the place the rider is heading for (13 height samples every 0.3 s), a few metres deep over it.
+##  - the level itself never moves in view, except a slow drift (MIST_DRIFT) for small changes
+##  - riding down into a pool it thins round the rider (mist is thick from above, thin from inside): the ground at
+##    the wheels is never more than MIST_NEAR fogged, so the trail stays readable
+##  - a pool that no longer fits (the rider is deep inside it, or has climbed well away from it) fades out, the
+##    level moves while nothing shows, and the new pool fades in slowly in the low ground ahead
 func _mist_update(dt: float) -> void:
 	if scenic or phys == null: return
 	var h := tod
@@ -515,14 +537,72 @@ func _mist_update(dt: float) -> void:
 	var nightm := (1.0 - smoothstep(0.0, 1.0, minf(absf(h - 3.0) / 2.5, 1.0))) * 0.25   # a little in the small hours
 	var k := maxf(maxf(morning, evening), nightm) * float(LightSettings.current.get("haze", 1.0)) * float(LightSettings.current.get("mist", 1.0))
 	if Env.s("BMX_MIST") != "": k = float(Env.s("BMX_MIST"))
-	var gy := float(phys.y)
-	if is_nan(_mist_y) or absf(gy - _mist_y) > 80.0: _mist_y = gy
-	_mist_y += (gy - _mist_y) * (1.0 - exp(-dt / 20.0))
-	# the slow average lags behind on a long descent and buried the rider deep in the fog (couldn't see anything):
-	# the mist top may sit at most MIST_MAX_ABOVE over the rider, so it only ever lies in the dips below the camera
-	_mist_y = minf(_mist_y, gy + MIST_MAX_ABOVE)
-	env.fog_height = _mist_y - 3.5
-	env.fog_height_density = MIST_DENSITY * k
+	if k <= 0.001:
+		env.fog_height_density = 0.0
+		_mist_y = NAN
+		return
+	var pos := Vector3(float(phys.x), float(phys.y), float(phys.z))
+	var jumped := is_nan(_mist_y) or pos.distance_to(_mist_pos) > 30.0   # a new ride / respawn / test spawn
+	_mist_pos = pos
+	# where the pool belongs: the low ground round the spot ~4 s ahead
+	_mist_scan_t -= dt
+	if jumped or _mist_scan_t <= 0.0:
+		_mist_scan_t = 0.3
+		var f: Vector3 = phys.fwd()
+		var lead := clampf(float(phys.v) * 4.0, -80.0, 80.0)
+		var cx := pos.x + f.x * lead
+		var cz := pos.z + f.z * lead
+		var lo := [maxf(float(terrain.height(pos.x, pos.z)), Terrain.WATER)]
+		for i in 12:
+			var a := float(i) * TAU / 6.0 + (0.0 if i < 6 else 0.52)
+			var r := 50.0 if i < 6 else 110.0
+			lo.append(maxf(float(terrain.height(cx + cos(a) * r, cz + sin(a) * r)), Terrain.WATER))   # lakes: mist lies on the water
+		lo.sort()
+		_mist_want = float(lo[1]) + MIST_DEEP   # the second lowest: one odd hole doesn't set the level
+	if jumped:
+		_mist_y = _mist_want
+		_mist_gy = pos.y
+		_mist_f = 0.0
+		_mist_thin = 1.0
+		_mist_swap = false
+		_mist_off_t = 0.0
+	_mist_gy += (pos.y - _mist_gy) * (1.0 - exp(-dt / 0.7))   # the rider's height without hops / bumps
+	var d := _mist_y - _mist_gy          # how deep the rider's wheels are under the mist top
+	var off := _mist_want - _mist_y      # how far the pool is from where it belongs
+	# does this pool still fit?
+	if not _mist_swap:
+		if d > MIST_SPENT and absf(off) > 3.0:
+			_mist_swap = true                # deep inside it (thinned to nearly nothing by now): take it away quickly
+			_mist_out = 1.2
+		else:
+			_mist_off_t = _mist_off_t + dt if off > MIST_LEFT else 0.0
+			if _mist_off_t > 3.0:            # climbed away: the low ground round here is well above the old pool
+				_mist_swap = true
+				_mist_out = 4.0
+			elif absf(off) < 3.0:
+				_mist_y += clampf(off, -MIST_DRIFT * dt, MIST_DRIFT * dt)
+	if _mist_swap:
+		_mist_f -= dt / _mist_out
+		if _mist_f <= 0.0:
+			_mist_f = 0.0
+			_mist_y = _mist_want
+			_mist_swap = false
+			_mist_off_t = 0.0
+			_mist_thin = 1.0
+	else:
+		_mist_f = minf(1.0, _mist_f + dt / MIST_FADE_IN)
+	# thin it round a rider who is inside: the fog on the ground at the wheels stays under MIST_NEAR
+	var dens := MIST_DENSITY * k
+	var want_thin := 1.0 if d <= 0.05 else minf(1.0, -log(1.0 - MIST_NEAR) / (d * dens))
+	_mist_thin += (want_thin - _mist_thin) * (1.0 - exp(-dt / (0.35 if want_thin < _mist_thin else 4.0)))   # thins at once, thickens slowly
+	var ease_f := _mist_f * _mist_f * (3.0 - 2.0 * _mist_f)
+	env.fog_height = _mist_y
+	env.fog_height_density = dens * ease_f * _mist_thin
+	if Env.s("BMX_MIST_PROBE") != "":
+		_mist_probe_t -= dt
+		if _mist_probe_t <= 0.0:
+			_mist_probe_t = 0.5
+			print("MIST level=%.1f want=%.1f rider=%.1f deep=%.1f fade=%.2f thin=%.2f dens=%.3f swap=%s" % [_mist_y, _mist_want, _mist_gy, d, _mist_f, _mist_thin, env.fog_height_density, _mist_swap])
 
 ## glare guard: riding (or looking) toward a low sun washed the screen out (the sunlit haze, the bloom, the bright
 ## sky round the sun, dust lit from behind) so the trail couldn't be seen. When the camera faces a low sun this eases

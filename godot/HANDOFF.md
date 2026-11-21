@@ -779,9 +779,14 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   `BMX_ACES=1` = the old ACES for comparison). **Rim light** (`Game.rim`, a DirectionalLight3D with `light_cull_mask = RIM_LAYER`
   (layer 12); `_rim_update` tags every rider / bike mesh with that layer twice a second and aims it from behind-side of the rider
   as the camera sees it, on the sun's side; warm + strong at golden hour, cold at night; `sky_mode` light-only so LIGHT0 in the sky
-  shader stays the sun / moon; `BMX_NO_RIM=1`, `BMX_RIM_E=` test). **Morning mist** (`_mist_update`: depth-fog height fog, top
-  3.5 m under a slow (~20 s) average of the rider's height, strong 5-9 h, a little at dusk / small hours; `MIST_DENSITY`,
-  `BMX_MIST=k` forces it). Only shows where low ground is in view.
+  shader stays the sun / moon; `BMX_NO_RIM=1`, `BMX_RIM_E=` test). **Morning mist** (`_mist_update`: height fog, strong 5-9 h, a little at dusk / small hours; `MIST_DENSITY`,
+  `BMX_MIST=k` forces it). Since 2026-11-21 it is a pool with a level fixed in the world, never tied to the rider's height
+  (that made the whole fog level sink away in front of the bike on descents): the level = the 2nd lowest of 13 land heights
+  round the spot ~4 s ahead + `MIST_DEEP` 2.5 m (lakes count as their surface), scanned every 0.3 s. It only drifts
+  `MIST_DRIFT` 0.3 m/s in view; inside a pool it thins so the ground at the wheels is at most `MIST_NEAR` 30 % fogged
+  (thins at once, thickens over 4 s); a pool the rider is `MIST_SPENT` 4 m deep in, or has climbed `MIST_LEFT` 8 m away
+  from, fades out, the level moves while nothing shows, the new pool fades in over `MIST_FADE_IN` 6 s. Probe:
+  `BMX_MIST_PROBE=1` (`MIST level= want= deep= fade= thin=` lines 2x / s).
 - **Backlit foliage + dappled shade** (`deco.gdshader` / `flower.gdshader` uniforms set per material in `world/terrain_geo.gd`):
   `scatter` = leaves / grass / bushes glow in their own colour when a low sun is behind them (shadowed glow stays dark; a quarter at
   noon), `scatter_rim` = outline only (cacti); `dapple` / `dapple_size` = holes cut in the canopy only in the sun's shadow pass (the
