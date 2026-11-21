@@ -9,7 +9,10 @@ public partial class RideBedSynth : RefCounted
 {
 	private const double RATE = 22050.0;
 	private readonly Random _rng = new Random(7);
-	private double _gustPh, _gustPh2;
+	// gusts: no fixed LFOs (a steady sine read as a "whoosh whoosh" in the pedalling rhythm). Loudness and
+	// left / right balance each ease towards a random target that changes after a random 0.7-2.6 s.
+	private double _gT = 0.78, _gV = 0.78, _gV2 = 0.78, _gTimer;
+	private double _pT, _pV, _pV2, _pTimer;
 	private double _lpW, _lpW2, _lpWR, _lpWR2, _bpHi, _bpLo, _lpR, _lpR2, _hpS;
 
 	private double Noise() => _rng.NextDouble() * 2.0 - 1.0;
@@ -21,14 +24,19 @@ public partial class RideBedSynth : RefCounted
 		var buf = new Vector2[n];
 		bool hasGravel = gravel != null && gravel.Length >= n;
 		double aw = windTone, ar = rollTone;
-		double gInc = 0.23 / RATE, gInc2 = 0.61 / RATE;
+		const double dt = 1.0 / RATE;
+		const double gA = 1.0 / (RATE * 0.35);   // two-pole ease, ~0.35 s per pole: soft swells, no corners
 		double wamp = wind * 2.6 / Math.Sqrt(Math.Max(aw, 0.02) / 0.03);   // keep loudness even as it brightens
 		double splash = (hasGravel ? 0.0 : skid * 0.35) + water * 0.25;
 		for (int i = 0; i < n; i++)
 		{
-			_gustPh = (_gustPh + gInc) % 1.0;
-			_gustPh2 = (_gustPh2 + gInc2) % 1.0;
-			double gust = 0.78 + 0.16 * Math.Sin(Mathf.Tau * _gustPh) + 0.08 * Math.Sin(Mathf.Tau * _gustPh2);
+			_gTimer -= dt;
+			if (_gTimer <= 0.0) { _gT = 0.62 + 0.32 * _rng.NextDouble(); _gTimer = 0.7 + 1.9 * _rng.NextDouble(); }
+			_pTimer -= dt;
+			if (_pTimer <= 0.0) { _pT = 0.16 * (_rng.NextDouble() * 2.0 - 1.0); _pTimer = 1.2 + 2.4 * _rng.NextDouble(); }
+			_gV += (_gT - _gV) * gA; _gV2 += (_gV - _gV2) * gA;
+			_pV += (_pT - _pV) * gA; _pV2 += (_pV - _pV2) * gA;
+			double gust = _gV2;
 			double w = Noise();
 			_lpW += (w - _lpW) * aw;
 			_lpW2 += (_lpW - _lpW2) * aw;
@@ -37,9 +45,9 @@ public partial class RideBedSynth : RefCounted
 			_lpWR2 += (_lpWR - _lpWR2) * aw;
 			_bpHi += (w - _bpHi) * 0.18;
 			_bpLo += (_bpHi - _bpLo) * 0.06;
-			double wh = (_bpHi - _bpLo) * whistle * (0.6 + 0.4 * Math.Sin(Mathf.Tau * _gustPh2 * 3.0));
-			double wl = _lpW2 * wamp * gust + wh;
-			double wr = _lpWR2 * wamp * (1.56 - gust) + wh;
+			double wh = (_bpHi - _bpLo) * whistle * (0.45 + 0.6 * (gust - 0.62) / 0.32);
+			double wl = _lpW2 * wamp * gust * (1.0 + _pV2) + wh;
+			double wr = _lpWR2 * wamp * gust * (1.0 - _pV2) + wh;
 			double s = 0.0;
 			double w2 = Noise();
 			if (!hasGravel)

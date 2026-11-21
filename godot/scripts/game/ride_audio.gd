@@ -25,7 +25,9 @@ var lp_r2 := 0.0
 var hp_s := 0.0
 var wind_tone := 0.03   # wind low-pass coefficient: opens up (brighter) with speed
 var gust_ph := 0.0
-var gust_ph2 := 0.0
+var gust_ph2 := 0.0   # (GDScript fallback) time left until the next gust / pan target
+var _g_t := 0.78; var _g_v := 0.78; var _g_v2 := 0.78
+var _p_t := 0.0; var _p_v := 0.0; var _p_v2 := 0.0
 var lp_wR := 0.0
 var lp_wR2 := 0.0
 var bp_lo := 0.0
@@ -115,10 +117,20 @@ func _setup_chain() -> void:
 	add_child(chain)
 	chain.play(randf() * 6.0)
 
-func _update_chain(dt: float, va: float, on_ground: bool, pedal: float) -> void:
+var _crank_last := 0.0
+var _crank_w := 0.0   # how fast the cranks really turn (rad/s, smoothed)
+
+func _update_chain(dt: float, va: float, on_ground: bool, st: BikePhysics) -> void:
 	if chain.stream == null: return
-	var t := clampf(pedal, 0.0, 1.0) * smoothstep(0.3, 3.0, va) * (0.6 + 0.4 * clampf(va / 14.0, 0.0, 1.0)) if on_ground else 0.0
-	chain_amp += (t - chain_amp) * minf(1.0, dt * 5.0)
+	# only while the legs spin the cranks: the raw gas key (the smoothed pedal lingers ~0.5 s after letting
+	# go) AND the cranks measurably turning (not stalled, not just settling to their coasting angle)
+	if dt > 0.0:
+		var w := absf(st.crank - _crank_last) / dt
+		_crank_w += (minf(w, 40.0) - _crank_w) * minf(1.0, dt * 10.0)
+	_crank_last = st.crank
+	var spinning := st.throttle_in >= 0.1 and st.pedal > 0.05 and on_ground
+	var t := smoothstep(1.5, 4.0, _crank_w) * smoothstep(0.3, 3.0, va) * (0.6 + 0.4 * clampf(va / 14.0, 0.0, 1.0)) if spinning else 0.0
+	chain_amp += (t - chain_amp) * minf(1.0, dt * (5.0 if t > chain_amp else 14.0))
 	chain.volume_db = CHAIN_DB + linear_to_db(maxf(chain_amp, 0.0001)) if chain_amp > 0.003 else -80.0
 	chain.pitch_scale = clampf(va / CHAIN_REF, 0.6, 1.4)
 
@@ -205,11 +217,11 @@ func update_audio(dt: float) -> void:
 	# at speed the pawls have less time to drop: higher, brighter, shorter clicks (0 slow .. 1 full)
 	var sp0 := FreewheelSound.get_value("sp_from") / 3.6
 	fw_fast = smoothstep(sp0, maxf(sp0 + 0.5, FreewheelSound.get_value("sp_full") / 3.6), fs)
-	_update_chain(dt, va, on_ground, st.pedal)
+	_update_chain(dt, va, on_ground, st)
 	_fill()
 	_fill_fw()
 	if Env.s("BMX_AUDIO_PROBE") != "" and Engine.get_process_frames() % 30 == 0:
-		print("FW v=%.1f pedal=%.2f clicks/s=%.0f amp=%.2f fast=%.2f peak=%.3f | GRAVEL surf=%d amp=%.2f wind=%.2f | CHAIN db=%.1f rate=%.2f" % [va, st.pedal, fw_clicks, fw_amp, fw_fast, fw_peak, st.surf, g_amp, wind, chain.volume_db, chain.pitch_scale])
+		print("FW v=%.1f pedal=%.2f clicks/s=%.0f amp=%.2f fast=%.2f peak=%.3f | GRAVEL surf=%d amp=%.2f wind=%.2f | CHAIN db=%.1f rate=%.2f crank_w=%.1f" % [va, st.pedal, fw_clicks, fw_amp, fw_fast, fw_peak, st.surf, g_amp, wind, chain.volume_db, chain.pitch_scale, _crank_w])
 		fw_peak = 0.0
 
 
@@ -235,15 +247,19 @@ func _fill() -> void:
 	buf.resize(n)
 	var aw := wind_tone  # wind low-pass, brighter with speed
 	var ar := roll_tone  # roll low-pass
-	# slow gusts: two incommensurate LFOs so the wind breathes instead of hissing flat
-	var g_inc := 0.23 / RATE
-	var g_inc2 := 0.61 / RATE
+	# gusts: random swells (as RideBedSynth.cs), no fixed LFOs: a steady sine read as "whoosh whoosh" in rhythm
+	var g_dt := 1.0 / RATE
+	var g_a := 1.0 / (RATE * 0.35)
 	var wl := 0.0
 	var wr := 0.0
 	for i in n:
-		gust_ph = fmod(gust_ph + g_inc, 1.0)
-		gust_ph2 = fmod(gust_ph2 + g_inc2, 1.0)
-		var gust := 0.78 + 0.16 * sin(TAU * gust_ph) + 0.08 * sin(TAU * gust_ph2)
+		gust_ph -= g_dt
+		if gust_ph <= 0.0: _g_t = randf_range(0.62, 0.94); gust_ph = randf_range(0.7, 2.6)
+		gust_ph2 -= g_dt
+		if gust_ph2 <= 0.0: _p_t = randf_range(-0.16, 0.16); gust_ph2 = randf_range(1.2, 3.6)
+		_g_v += (_g_t - _g_v) * g_a; _g_v2 += (_g_v - _g_v2) * g_a
+		_p_v += (_p_t - _p_v) * g_a; _p_v2 += (_p_v - _p_v2) * g_a
+		var gust := _g_v2
 		# wind: two-pole low-passed noise, separate noise per ear for a wide stereo rush
 		var w := randf() * 2.0 - 1.0
 		lp_w += (w - lp_w) * aw
@@ -254,10 +270,10 @@ func _fill() -> void:
 		# soft whistle past the helmet at speed: band-passed noise
 		bp_hi += (w - bp_hi) * 0.18
 		bp_lo += (bp_hi - bp_lo) * 0.06
-		var wh := (bp_hi - bp_lo) * whistle * (0.6 + 0.4 * sin(TAU * gust_ph2 * 3.0))
+		var wh := (bp_hi - bp_lo) * whistle * (0.45 + 0.6 * (gust - 0.62) / 0.32)
 		var wamp := wind * 2.6 / sqrt(maxf(aw, 0.02) / 0.03)  # keep loudness even as it brightens
-		wl = lp_w2 * wamp * gust + wh
-		wr = lp_wR2 * wamp * (1.56 - gust) + wh
+		wl = lp_w2 * wamp * gust * (1.0 + _p_v2) + wh
+		wr = lp_wR2 * wamp * gust * (1.0 - _p_v2) + wh
 		var s := 0.0
 		# tyre roll: low rumble (only without the C# gravel synth)
 		var w2 := randf() * 2.0 - 1.0
