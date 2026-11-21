@@ -2330,6 +2330,7 @@ func _process(dt: float) -> void:
 	_pk = _perf("audio", _pk)
 	if absf(st.v) * 3.6 > float(GameState.records.top_speed) + 0.5 and not st.crash_on:
 		GameState.records.top_speed = absf(st.v) * 3.6
+		GameState.touch_records()
 
 
 ## reflection probe: sits above the rider and re-captures the surroundings (UPDATE_ONCE, re-armed) after
