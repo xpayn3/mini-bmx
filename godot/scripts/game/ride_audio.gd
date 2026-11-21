@@ -102,7 +102,7 @@ func _ready() -> void:
 # freewheel synth has the coasting). Its
 # playback rate follows the wheel speed (CHAIN_REF m/s = as recorded), so the ticking speeds up / slows
 # down with the bike; louder with speed, fades out when coasting, stopped or in the air.
-const CHAIN_DB := 10.0   # the recording itself is very quiet (mean -40 dB, peaks -16 dB): -24 here was inaudible
+const CHAIN_DB := -6.0   # the recording itself is very quiet (mean -40 dB, peaks -16 dB): -24 was inaudible, +10 far too loud
 const CHAIN_REF := 7.0
 var chain := AudioStreamPlayer.new()
 var chain_amp := 0.0
