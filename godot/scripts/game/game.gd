@@ -1618,6 +1618,7 @@ var ride_log := RideLog.new()   # the last 60 s, saved with R3 / F8 (save_log)
 var _log_lift := 0.0
 var jitter_on := Env.s("BMX_JITTER_ALL") != ""
 var _jit_skip := 0
+var _berm_hold := 0.0
 var _yaw_s := 0.0; var _turn_s := 0.0; var _aspin_s := 0.0; var _atilt_s := 0.0; var _blat_s := 0.0; var _awhip_s := 0.0
 var _jit_head := Vector3.INF
 var _jit := {}
@@ -2123,8 +2124,14 @@ func _process(dt: float) -> void:
 			_lean_shots += 1
 	if Env.s("BMX_BERM_SHOT") != "" and not st.air and not st.crash_on:   # tests: shots + numbers on real berms
 		var bmin := float(Env.s("BMX_BERM_MIN")) if Env.s("BMX_BERM_MIN") != "" else 0.15
-		if absf(st.bank) > bmin and t - _lean_shot_t > 1.2 and _lean_shots < 6:
+		# (BMX_BERM_STICK=1: only with the body stick leaned into the bank; body_flat = the body without bank_sq)
+		var stick_ok: bool = Env.s("BMX_BERM_STICK") == "" or (st.flick * signf(st.bank) > 0.4 and st.lean * st.bank > 0.0)
+		_berm_hold = _berm_hold + dt if (absf(st.bank) > bmin and stick_ok) else 0.0   # (settled in the bank, not just entering it)
+		if _berm_hold > (0.5 if Env.s("BMX_BERM_STICK") != "" else 0.0) and t - _lean_shot_t > 1.2 and _lean_shots < 6:
 			_lean_shot_t = t
+			var c_flat: float = maxf((st.bike_lean - (st.lean + st.bank_lean) * float(Tune.v.bodyLean)) * signf(st.bike_lean), absf(st.bike_lean) * 0.2) * signf(st.bike_lean)
+			print("BERMBODY %d flick=%+.2f bank_sq=%.2f body_flat=%+.0fdeg body_drawn=%+.1fdeg hips=%+.1fdeg chest=%+.1fdeg" % [_lean_shots, st.flick, st.bank_sq,
+				rad_to_deg(st.bike_lean - c_flat), rad_to_deg(st.bike_lean - st.counter), rad_to_deg(rider.roll_p), rad_to_deg(rider.roll_c)])
 			get_viewport().get_texture().get_image().save_png("%s_%d.png" % [Env.s("BMX_BERM_SHOT"), _lean_shots])
 			print("BERMSHOT %d bank=%+.0fdeg lean=%+.0fdeg bike=%+.0fdeg body=%+.0fdeg steer_in=%+.2f lat=%+.1f berm_k=%.2f v=%.1f" % [_lean_shots,
 				rad_to_deg(st.bank), rad_to_deg(st.lean), rad_to_deg(st.bike_lean), rad_to_deg(st.bike_lean - st.counter), st.steer_in, st.lat_a, st.berm_k, st.v])
@@ -2150,7 +2157,8 @@ func _process(dt: float) -> void:
 		_turn_s += ((0.0 if st.air else st.yaw_rate * clampf(absf(st.v) / 3.0, 0.3, 1.0)) - _turn_s) * (1.0 - exp(-dt * 5.0))
 		_aspin_s += ((st.yaw_rate if st.air else 0.0) - _aspin_s) * ek
 		_atilt_s += ((st.air_tilt * float(T.get("stickBodyTilt", 0.6)) * clampf(st.air_stick.length() * 3.0 + absf(st.edge_s) * 2.0, 0.0, 1.0) if st.air else 0.0) - _atilt_s) * ek
-		_blat_s += ((st.air_stick.x if st.air else st.flick) - _blat_s) * ek
+		# (on a bank the stick leans the body with the bike: no hips to the outside there, see bank_sq)
+		_blat_s += ((st.air_stick.x if st.air else st.flick * (1.0 - st.bank_sq)) - _blat_s) * ek
 		# the bike's twist against the body in the air (an air whip): the body turns back against it
 		_awhip_s += ((st.air_tw if st.air else 0.0) - _awhip_s) * (1.0 - exp(-dt * 16.0))
 		var pi := _pose_in   # one dictionary filled in place every frame (update_pose doesn't keep it)

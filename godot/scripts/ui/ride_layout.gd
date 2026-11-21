@@ -110,6 +110,8 @@ const PAGES := [
 		["The land", [
 			["*bermAssist", "Steer into a berm and the rider leans with it, square to its surface, and the berm carries you round.", "Upright", "With the berm"],
 			["*bankLean", "On a berm or a slope, rider and bike lean into the tilt (square to the ground at 1).", "Upright", "Square to it"],
+			["*bankBody", "On banked ground the rider leans in with the bike, in one line, instead of staying upright over it. Look only.", "Upright", "With the bike"],
+			["*bermLeanRoom", "How much further the bike may lay over inside a berm than on flat ground. Look only.", "Like flat", "Laid over"],
 			["*camberPull", "Riding across a side slope, the bike drifts down it unless you steer.", "None", "Strong"],
 			["*cornerLoad", "Turns (berms most) press you down into the bike: legs and shock sink, then pop.", "None", "Heavy"],
 			["*groundKnock", "Rock flanks, roots and rut walls push the front off its line.", "Smooth", "Rough"],

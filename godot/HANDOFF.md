@@ -349,6 +349,19 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
     tyres need no side grip; `bankLean` (0.6) draws rider + bike leaning into any tilt, part of the way square to it
     (`bank_lean`, also in `counter` so the body follows); `bodyLean` 0.7 -> 0.8 (Tune VER 15). Real trail banks are only
     ~4-10 deg (`BMX_BERM_SHOT=prefix [BMX_BERM_MIN=rad]` + `BMX_DEMO=1`: `BERMSHOT` lines + shots on banks).
+  - **Body with the bike on banks** (2026-11-20, user: "too straight up on an angled surface" with both sticks; drawn only):
+    (1) the lean-room probe (`lean_room`, `groundLeanMax`) looked to the wrong side (+ lean = left = `(f.z, -f.x)`), so a
+    berm's own face stood the bike up (60 deg of lean drawn as 38 on a 21 deg bank) - fixed; ground falling away on the
+    lean side gives half of it as extra room, at most `bermLeanRoom` 0.15 rad (Ride › Ground; all of it = 77 deg, nearly
+    flat). (1b) `counter` took the ABSOLUTE difference bike lean - body target: whenever the ground limit / soft cap held
+    the bike more upright than the body's target the body was mirrored to the upright side (bike 31, body wanted 55 ->
+    drawn 7 deg, or the wrong way); now signed, the body stays 20 % inside the bike there. (2) `bank_sq` (0 flat ..
+    `bankBody` 0.7 from ~8.5 deg of bank toward the lean, Ride › Ground): the body goes that share into line with the bike
+    (`counter` -> 0.2 x bike lean) and `Game` fades the stick's hips-to-the-outside shift by it; flat corners keep "bike
+    under the body". Test: `BMX_FOLLOW=1 BMX_PAD=1 BMX_BODY=both BMX_BERM_SHOT=prefix BMX_BERM_MIN=0.09 BMX_BERM_STICK=1`
+    (shots after 0.5 s settled in a bank with the stick into it; `BERMBODY` lines: body without / with, hips, chest).
+    Same day, from a code review: reverse braking loads the rear, only the rear brake drops a manual, no body jolt from the
+    landing's speed bookkeeping (`v_last`), `reset_body` clears `slip_w` / `steer_in`. Review findings fixed after (2026-11-21): the pitch clamp (1.45) no longer runs on the touch-down step, so a flip landed upside down reads UNDER- / OVER-ROTATED (it was clamped first and came out as NOSE DIVE); no lip window while a balance manual is held (on keys a fresh S / W in a manual was a flip throw and S didn't brake); the brakes are gated on any tyre down (`not air`), not on the rear (with the rear bounced up the front brake did nothing); a held manual's `nose_ref` eases to the ground slope it rolls onto (6 /s).
   - **Surfaces per tyre**: `surf_f` / `surf_r` (contact points), grip `SURF_MU` eased over ~0.1 s (`_mu_f` / `_mu_r`);
     front tyre + front brake use the front's, rear brake / drive / grip sim / loose patches the rear's, rolling drag both.
   - **Jumps**: the ground-only drawn lean (stick, slow steer, bank, whip: `_gx_lean` + `bank_lean`) is carried into the air
