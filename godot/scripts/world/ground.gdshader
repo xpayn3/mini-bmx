@@ -10,6 +10,9 @@ render_mode blend_mix, depth_draw_opaque, cull_back, diffuse_burley, specular_sc
 uniform sampler2D land_tex : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
 uniform sampler2D dirt_tex : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
 varying vec3 v_world;
+// the grass carpet's window (world/grass_field.gd): a = how much grass grows here; info = origin xz, texel, radius (0 = off)
+global uniform sampler2D grass_win : filter_linear;
+global uniform vec4 grass_win_info;
 
 vec3 gd_hash3(vec2 p) {
 	vec3 q = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
@@ -65,6 +68,18 @@ void fragment() {
 	col *= mix(1.0, 1.0 + peb * 0.2 * pb.y + (n2 - 0.5) * 0.14 * f1, wd);
 	float rk = gd_noise3(P * 4.3 + 5.0) * 0.6 + gd_noise3(P * 13.0) * 0.4 * f2;
 	col *= mix(1.0, 0.78 + 0.44 * rk, rockW * (1.0 - wd) * f3);
+	// under the grass carpet the floor is the shaded ground between the blades: darker and a touch greener,
+	// the colour of the blades' roots, fading back to the plain land colour where the blades end
+	if (grass_win_info.w > 0.0) {
+		vec2 guv = ((P.xz - grass_win_info.xy) / grass_win_info.z + 0.5) / 481.0;
+		if (guv.x > 0.0 && guv.x < 1.0 && guv.y > 0.0 && guv.y < 1.0) {
+			float gden = clamp(texture(grass_win, guv).a * 1.6, 0.0, 1.0);
+			float gd = length(P.xz - CAMERA_POSITION_WORLD.xz);
+			float gfar = 1.0 - smoothstep(grass_win_info.w - 24.0, grass_win_info.w, gd);
+			float under = gden * gfar * (1.0 - wd);
+			col = mix(col, col * vec3(0.66, 0.76, 0.56), under * 0.85);
+		}
+	}
 	ALBEDO = col;
 	ROUGHNESS = 0.95;
 	SPECULAR = 0.3;

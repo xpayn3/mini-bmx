@@ -21,9 +21,9 @@ const TEX := WIN_CHUNKS * SEG + 1     # window texture size
 
 ## per quality: near spacing / tile / radius, mid spacing / tile / radius
 const QUALITY := {
-	1: {"ns": 0.18, "nt": 4.5, "nr": 12.0, "ms": 0.45, "mt": 9.0, "mr": 40.0},
-	2: {"ns": 0.13, "nt": 3.9, "nr": 16.0, "ms": 0.36, "mt": 9.0, "mr": 52.0},
-	3: {"ns": 0.12, "nt": 3.96, "nr": 18.0, "ms": 0.33, "mt": 9.9, "mr": 60.0},
+	1: {"ns": 0.16, "nt": 4.48, "nr": 16.0, "ms": 0.45, "mt": 9.0, "mr": 64.0},
+	2: {"ns": 0.12, "nt": 3.84, "nr": 22.0, "ms": 0.40, "mt": 8.0, "mr": 90.0},
+	3: {"ns": 0.10, "nt": 3.9, "nr": 26.0, "ms": 0.36, "mt": 9.0, "mr": 96.0},
 }
 
 static var _shader: Shader
@@ -45,6 +45,19 @@ var _tile_buf := {}                    # MultiMesh -> PackedFloat32Array (reused
 var probe := Env.s("BMX_GRASS_PROBE") != ""
 var _probe_t := 0.0
 
+# ---- trampled trail: where the tyres / a crashed body pressed the grass down. A window of TR x TR texels
+# (TR_TEXEL m) round the rider; each texel holds (time it was pressed, direction it was pressed in, rad).
+# The shader lays those blades down and lets them spring back over TRAMPLE_BACK s: nothing decays here.
+const TR := 192
+const TR_TEXEL := 0.25
+const TR_EMPTY := -1.0e6
+var _tr_img: Image
+var _tr_tex: ImageTexture
+var _tr_origin := Vector2(INF, INF)    # world xz of texel (0, 0)'s corner
+var _tr_now := 0.0                     # the trail's own clock (stops in photo mode / pause)
+var _tr_dirty := false
+var _tr_last := {}                     # stamp id -> last stamped point (strokes between frames have no gaps)
+
 
 func _init(t) -> void:
 	terrain = t
@@ -53,9 +66,77 @@ func _init(t) -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS   # photo mode / pause: the camera still moves
 
 
-func _process(_dt: float) -> void:
+func _process(dt: float) -> void:
 	if is_visible_in_tree():
+		if not get_tree().paused:
+			_tr_now += dt          # already game time (0 in photo mode, slow in crash slow motion)
+		_mat.set_shader_parameter("trample_now", _tr_now)
+		if _tr_dirty:
+			_tr_tex.update(_tr_img)
+			_tr_dirty = false
 		update(get_viewport().get_camera_3d())
+
+
+## presses the grass down along the stroke from this id's last point to p (a tyre, a body part), in direction
+## dir, r metres wide either side. Call every frame something rolls / slides through the grass.
+func trample(id: int, p: Vector3, dir: Vector3, r: float) -> void:
+	if quality == 0 or _tr_img == null:
+		return
+	var q := Vector2(p.x, p.z)
+	_tr_recentre(q)
+	var last: Vector2 = _tr_last.get(id, q)
+	_tr_last[id] = q
+	var seg := q - last
+	if seg.length() > 3.0:      # teleported (respawn, get-up): start a new stroke
+		seg = Vector2.ZERO
+		last = q
+	var d2 := Vector2(dir.x, dir.z)
+	var ang := atan2(d2.y, d2.x) if d2.length() > 0.05 else atan2(seg.y, seg.x)
+	var steps := clampi(ceili(seg.length() / (TR_TEXEL * 0.7)), 1, 24)
+	var rt := r / TR_TEXEL
+	var ri := ceili(rt)
+	for s in steps:
+		var c := (last + seg * float(s + 1) / steps - _tr_origin) / TR_TEXEL
+		var cx := int(c.x)
+		var cy := int(c.y)
+		for y in range(cy - ri, cy + ri + 1):
+			if y < 0 or y >= TR: continue
+			for x in range(cx - ri, cx + ri + 1):
+				if x < 0 or x >= TR: continue
+				var k := Vector2(x + 0.5, y + 0.5).distance_to(c) / maxf(rt, 0.5)
+				if k > 1.0: continue
+				_tr_img.set_pixel(x, y, Color(_tr_now, ang, 1.0 - k * 0.55, 0.0))
+	_tr_dirty = true
+	if probe and id == 1 and Engine.get_process_frames() % 60 == 0:
+		var px := Vector2i(((q - _tr_origin) / TR_TEXEL).floor())
+		print("TRAMPLE now=%.1f at=%s px=%s val=%s" % [_tr_now, q, px, _tr_img.get_pixelv(px.clamp(Vector2i.ZERO, Vector2i(TR - 1, TR - 1)))])
+
+
+## forget the trail (a new world / respawn)
+func clear_trample() -> void:
+	if _tr_img:
+		_tr_img.fill(Color(TR_EMPTY, 0, 0, 0))
+		_tr_dirty = true
+	_tr_last.clear()
+
+
+## keeps the window round the rider: snapped to 8 m, content moved along with it
+func _tr_recentre(q: Vector2) -> void:
+	var span := TR * TR_TEXEL
+	var rel := q - _tr_origin
+	if rel.x > span * 0.25 and rel.x < span * 0.75 and rel.y > span * 0.25 and rel.y < span * 0.75:
+		return
+	var o := ((q - Vector2(span, span) * 0.5) / 8.0).floor() * 8.0
+	if _tr_origin.x != INF:
+		var sh := Vector2i(((_tr_origin - o) / TR_TEXEL).round())
+		var old := _tr_img
+		_tr_img = Image.create_empty(TR, TR, false, Image.FORMAT_RGBAF)
+		_tr_img.fill(Color(TR_EMPTY, 0, 0, 0))
+		if absi(sh.x) < TR and absi(sh.y) < TR:
+			_tr_img.blit_rect(old, Rect2i(0, 0, TR, TR), sh)
+	_tr_origin = o
+	_mat.set_shader_parameter("trample_origin", o)
+	_tr_dirty = true
 
 
 func _ready() -> void:
@@ -70,6 +151,12 @@ func _ready() -> void:
 	_mat.set_shader_parameter("grass_col", _tex_c)
 	_mat.set_shader_parameter("grass_h", _tex_h)
 	_mat.set_shader_parameter("win_size", float(TEX))
+	_tr_img = Image.create_empty(TR, TR, false, Image.FORMAT_RGBAF)
+	_tr_img.fill(Color(TR_EMPTY, 0, 0, 0))
+	_tr_tex = ImageTexture.create_from_image(_tr_img)
+	_mat.set_shader_parameter("trample", _tr_tex)
+	_mat.set_shader_parameter("trample_span", TR * TR_TEXEL)
+	_mat.set_shader_parameter("trample_origin", Vector2(1.0e7, 1.0e7))
 
 
 ## 0 = off (frees the meshes), 1..3 = the QUALITY rows
@@ -85,6 +172,7 @@ func set_quality(q: int) -> void:
 	_tile_buf.clear()
 	visible = q > 0
 	if q == 0:
+		_set_ground_info()
 		return
 	_q = QUALITY[q]
 	_near = _ring(_q.ns, _q.nt, true)
@@ -93,6 +181,27 @@ func set_quality(q: int) -> void:
 	_mat.set_shader_parameter("mid_r", float(_q.mr))
 	_mat.set_shader_parameter("near_spacing", float(_q.ns))
 	_mat.set_shader_parameter("mid_spacing", float(_q.ms))
+	_set_ground_info()
+
+
+## the ground shader (world/ground.gdshader) reads the window too: under grass it shades the floor like the
+## blades' roots so field and floor read as one. Global `grass_win_info` = (origin x, z, texel, grass radius; 0 = off).
+func _set_ground_info() -> void:
+	var on := quality > 0 and _win_sig != "" and is_inside_tree()
+	RenderingServer.global_shader_parameter_set("grass_win", _tex_c)
+	var h := WIN_CHUNKS / 2
+	RenderingServer.global_shader_parameter_set("grass_win_info", Vector4(
+		(_win_k.x - h) * CHUNK - CHUNK / 2, (_win_k.y - h) * CHUNK - CHUNK / 2, CHUNK / SEG,
+		float(_q.mr) if on else 0.0))
+
+
+func _enter_tree() -> void:
+	if _tex_c != null:      # moved between viewports (the ride pre-built behind the intro)
+		_set_ground_info()
+
+
+func _exit_tree() -> void:
+	RenderingServer.global_shader_parameter_set("grass_win_info", Vector4.ZERO)
 
 
 func _ring(spacing: float, tile: float, near: bool) -> MultiMeshInstance3D:
@@ -185,6 +294,7 @@ func _refresh_window(cam: Vector3) -> void:
 	# texel (0, 0) sits on the window's first grid point
 	_mat.set_shader_parameter("win_origin", Vector2((_win_k.x - h) * CHUNK - CHUNK / 2, (_win_k.y - h) * CHUNK - CHUNK / 2))
 	_mat.set_shader_parameter("texel", CHUNK / SEG)
+	_set_ground_info()
 	if probe:
 		print("GRASS window %s copied in %.2f ms" % [s.substr(0, 24), (Time.get_ticks_usec() - t0) / 1000.0])
 

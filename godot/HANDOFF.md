@@ -272,8 +272,16 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   drone see the dense ring), round a low one. Blades widen when looked at steeply from above (no slivers from the drone). Tiles out of
   view are skipped every frame. Colour: ground colour, darker root, greener / sun-dried patches. Wind + the bike parting it via
   `wind_bend`. No shadows cast. Settings › Graphics › Grass (`grass` 0 off .. 3 high, presets Low 1 / Medium 2 / High 2 / Ultra 3;
-  `GrassField.QUALITY`). Medium ~135k blades, High ~200k; cost was within run-to-run noise in `--bench` (~1 ms at most on the 3090,
-  other GPU apps open). Tests: `BMX_GRASS=0..3`, `BMX_GRASS_PROBE=1` (`GRASS window` / `GRASS tiles near= mid= blades=` lines).
+  `GrassField.QUALITY`). Medium ~240k blades in view (2026-11-21: rings 22 / 90 m, was 16 / 52; denser too), High more.
+  Tests: `BMX_GRASS=0..3`, `BMX_GRASS_PROBE=1` (`GRASS window` / `GRASS tiles near= mid= blades=` lines, `TRAMPLE` lines).
+  **Look (2026-11-21)**: blade roots = the floor under the grass: `ground.gdshader` reads the grass window through the shader
+  globals `grass_win` / `grass_win_info` (set by `GrassField._set_ground_info`) and tints the floor x (0.66, 0.76, 0.56) where
+  grass grows, fading out at the ring's edge; blades are a touch more saturated. **Backlit tips** (`light()`: looking towards the
+  sun the top of each blade glows in its own colour). **Wind waves**: `wind_gust` lightens the bent blades, so gust fronts roll
+  across as paler bands. **Trampled trail** (`GrassField.trample(id, p, dir, r)`, from `Game.ride_fx` per tyre and
+  `_crash_dust` per ragdoll part): a 192² RGBAF window (0.25 m texels, follows the rider in 8 m steps) storing the time pressed,
+  the direction and how hard; the shader lays those blades down along the travel (pale, sheeny) and lets them stand up again
+  over `trample_hold` 2.5 s .. `trample_back` 28 s (per blade). Cleared on respawn.
 
 - **Sponsor props** (`TrailCourse.chunk_gates` / `chunk_boards`, fixed spacing by centreline index so growing never moves them): a huge steel gantry with a sponsor banner over the trail every 300 m (`TrailGate.build`, made-up brands in `TrailGate.SPONSORS`, no collision, skipped on jumps) and breakable wooden roadside billboards every ~80 m (fence-style panel in `TerrainChunkBuilder._boards`, so the bike smashes them; the Label3D text is freed on smash). Probe: `BMX_GATE_PROBE=1`.
 
