@@ -202,7 +202,7 @@ class Cover extends Control:
 			var cw := mini(int(ch * want), im.get_width())
 			ch = int(cw / want)
 			var cx := (im.get_width() - cw) / 2
-			var cy := int((im.get_height() - ch) * 0.42)
+			var cy := int((im.get_height() - ch) * 0.62)   # a bit lower: the area banner (top centre of the HUD) used to show clipped at the top
 			var crop := im.get_region(Rect2i(cx, cy, cw, ch))
 			crop.resize(int(W), PHOTO_H, Image.INTERPOLATE_LANCZOS)
 			_photo_tex = ImageTexture.create_from_image(crop)

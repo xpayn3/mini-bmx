@@ -274,7 +274,7 @@ func close(now := false) -> void:
 ## a slice of the sound: a recording plays from a random spot (no two unfolds sound the same), faded out
 ## by the end
 func _play_slice(pitch: float, secs: float) -> void:
-	if not sound_stream or not _sound: return
+	if not sound_stream or not _sound or not _sound.is_inside_tree(): return   # (a sheet being put away can still be asked to rustle)
 	_sound.pitch_scale = pitch
 	var from := 0.0
 	var total := _sound.stream.get_length()
