@@ -18,11 +18,20 @@ uniform float near_spacing = 0.19;
 uniform float mid_spacing = 0.48;
 uniform float height_scale = 1.0;
 uniform vec2 ring_centre;         // where the rings are centred: ahead of a high camera, at a low one
+// trampled trail (GrassField.trample): r = time pressed, g = direction pressed (rad), b = how hard
+uniform sampler2D trample : filter_nearest, repeat_disable;
+uniform vec2 trample_origin = vec2(1.0e7);
+uniform float trample_span = 48.0;
+uniform float trample_now = 0.0;
+uniform float trample_hold = 2.5;  // s fully flat
+uniform float trample_back = 28.0; // s until it stands again
 
 varying vec3 v_world;
 varying vec3 v_col;
 varying vec3 v_n;
 varying float v_t;
+varying float v_gust;
+varying float v_flat;
 
 vec2 win_uv(vec2 xz) { return ((xz - win_origin) / texel + 0.5) / win_size; }
 
@@ -61,6 +70,9 @@ void vertex() {
 	float fade = near ? 1.0 - smoothstep(near_r - 6.0, near_r - 1.0, dist + jit)
 	                  : smoothstep(near_r - 6.0, near_r - 1.0, dist + jit) * (1.0 - smoothstep(mid_r - 16.0, mid_r - 1.0, dist + jit));
 	float hgt = (0.2 + 0.36 * h1.w) * (0.6 + 0.6 * patch) * (0.6 + 0.4 * gc.a) * height_scale;
+	// height variation: broad short / long swathes (~20 m) and a few stalks standing out above the rest
+	hgt *= mix(0.86, 1.18, g_noise(root * 0.05 + 13.0));
+	hgt *= h2.z > 0.96 ? 1.3 : 1.0;
 	hgt *= grow * fade;
 	float wid = near ? (0.03 + 0.025 * h2.x) : (0.09 + 0.05 * h2.x);
 	wid *= mix(0.4, 1.0, fade);
@@ -79,8 +91,26 @@ void vertex() {
 	float taper = near ? (1.0 - t * 0.8) : 1.0 - t;
 	float lean = (0.25 + 0.45 * h2.z) * (h2.y > 0.5 ? 1.0 : -1.0);
 	vec3 base = vec3(root.x, gy - 0.04, root.y);
-	vec3 p = base + side * UV.x * wid * 0.5 * taper + vec3(0.0, t * hgt, 0.0) + fwd * lean * t * t * hgt;
-	p += wind_bend(base, t * hgt, 1.0, 1.0);
+	// trampled: laid over along the way it was pressed (a little fanned per blade), springing back slowly;
+	// the blades stand up again one by one (own hash), stiff ones first
+	float flat_k = 0.0;
+	vec2 tdir = vec2(0.0);
+	vec2 tuv = (root - trample_origin) / trample_span;
+	if (tuv.x > 0.0 && tuv.x < 1.0 && tuv.y > 0.0 && tuv.y < 1.0) {
+		vec4 tr = textureLod(trample, tuv, 0.0);
+		float age = trample_now - tr.r;
+		if (age >= 0.0) {
+			float back = trample_back * (0.6 + 0.8 * h2.z);
+			flat_k = tr.b * (1.0 - smoothstep(trample_hold, back, age));
+			float ta = tr.g + (h1.y - 0.5) * 0.9;
+			tdir = vec2(cos(ta), sin(ta));
+		}
+	}
+	float up_k = 1.0 - 0.88 * flat_k;
+	vec3 p = base + side * UV.x * wid * 0.5 * taper * (1.0 + 0.3 * flat_k)
+		+ vec3(0.0, t * hgt * up_k, 0.0) + fwd * lean * t * t * hgt * (1.0 - flat_k);
+	p.xz += tdir * flat_k * hgt * (0.35 * t + 0.6 * t * t);
+	p += wind_bend(base, t * hgt * up_k, 1.0, 1.0 - flat_k * 0.8);
 	// ground normal from the height window: the blades shade like the ground they cover (soft, no stripes)
 	float e = texel;
 	float hx = textureLod(grass_h, win_uv(root + vec2(e, 0.0)), 0.0).r - textureLod(grass_h, win_uv(root - vec2(e, 0.0)), 0.0).r;
@@ -93,12 +123,26 @@ void vertex() {
 	// colour patches across the field (greener / sun-dried) and each blade a little its own
 	float cp = g_noise(root * 0.07 + 31.0);
 	vec3 c = gc.rgb * (0.82 + 0.36 * h2.x);
-	c = mix(c, c * vec3(0.78, 1.08, 0.7), smoothstep(0.55, 0.85, cp) * 0.8);
-	c = mix(c, c * vec3(1.12, 1.0, 0.72), smoothstep(0.45, 0.15, cp) * 0.6);
-	vec3 tip = c * vec3(1.1, 1.16, 0.88);
+	c = mix(c, c * vec3(0.86, 1.05, 0.82), smoothstep(0.55, 0.85, cp) * 0.5);
+	c = mix(c, c * vec3(1.08, 1.0, 0.84), smoothstep(0.45, 0.15, cp) * 0.4);
+	// a little richer than the land colour (it reads olive once the low sun warms it)
+	float lum = dot(c, vec3(0.3, 0.55, 0.15));
+	c = max(mix(vec3(lum), c, 1.18), vec3(0.0));
+	vec3 tip = c * vec3(1.1, 1.16, 0.9);
 	float far_k = smoothstep(near_r, mid_r, dist);
-	v_col = mix(c * mix(0.42, 0.75, far_k), mix(tip, c, far_k * 0.5), smoothstep(0.0, 1.0, t));
-	v_t = t;
+	// root = the floor under the grass (ground.gdshader shades it the same: x (0.66, 0.76, 0.56)), so blades
+	// grow out of it without an edge; far away blades and floor both go back to the plain land colour
+	vec3 root_c = c * mix(vec3(0.66, 0.76, 0.56) * 0.95, vec3(0.95), far_k);
+	v_col = mix(root_c,mix(tip, c, far_k * 0.7), smoothstep(0.0, 1.0, t));
+	// laid-down blades show their pale, shiny side: the trail reads as a lighter, silvery stripe
+	vec3 pale = mix(c, vec3(dot(c, vec3(0.3, 0.55, 0.15))), 0.3) * vec3(1.5, 1.45, 1.15);
+	v_col = mix(v_col, pale, flat_k * 0.9);
+	v_flat = flat_k;
+	// wind waves: a gust bends the blades over and their paler undersides catch the light, so the gust
+	// fronts roll across the field as lighter bands (the wind already moves them: wind_gust in atmos)
+	float gust = wind_gust(root);
+	v_col *= 1.0 + gust * vec3(0.32, 0.3, 0.18) * smoothstep(0.1, 0.9, t);
+	v_gust = gust;	v_t = t;
 	VERTEX = p;
 	v_world = p;
 }
@@ -106,12 +150,19 @@ void vertex() {
 void fragment() {
 	ALBEDO = v_col;
 	NORMAL = normalize((VIEW_MATRIX * vec4(v_n, 0.0)).xyz);
-	ROUGHNESS = 0.72;
+	ROUGHNESS = 0.72 - 0.2 * v_gust * v_t - 0.3 * v_flat;   // gust-bent / laid-down blades: a soft sheen
+	AO = mix(mix(0.72, 1.0, v_t), 1.0, v_flat);
 	SPECULAR = 0.22;
-	AO = mix(0.55, 1.0, v_t);
 	AO_LIGHT_AFFECT = 0.4;
 }
 
 void light() {
 	DIFFUSE_LIGHT += atmos_diffuse(NORMAL, LIGHT, ATTENUATION * LIGHT_COLOR, LIGHT_IS_DIRECTIONAL, v_world, 0.2);
+	// backlit glow: sun behind the blade, camera in front -> the thin tip lights up in its own colour (low sun = strong)
+	if (LIGHT_IS_DIRECTIONAL) {
+		float facing = clamp(dot(-VIEW, LIGHT), 0.0, 1.0);          // looking towards the light
+		float glow = pow(facing, 3.0) * smoothstep(0.25, 1.0, v_t); // tips only
+		vec3 lc = atmos_light_col(ATTENUATION * LIGHT_COLOR, true, v_world);
+		DIFFUSE_LIGHT += glow * lc * v_col * vec3(1.5, 1.35, 0.8) * 2.2;
+	}
 }

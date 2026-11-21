@@ -1220,6 +1220,9 @@ func _crash_dust() -> void:
 			_rd_air[i] = 1   # off the ground: the next touch-down is an impact
 			continue
 		if above > 0.2: continue
+		if grass and i % 2 == 0:   # the body flattens the grass it lies / slides in
+			var pq: Vector3 = prv[i] if i < prv.size() else pp
+			grass.trample(100 + i, pp, pp - pq, 0.28)
 		var v: Vector3 = (pp - (prv[i] as Vector3)) / h
 		var s: int = terrain.surface(pp.x, pp.z)
 		if s == 2: continue
@@ -1334,6 +1337,10 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 	var tcr: Color = blood.tyre_color(1, rear, tc) if blood and on_ground else tc
 	fx.track(0, front, f, ta if on_ground else 0.0, tcf, 0.085)
 	fx.track(1, rear, f, (minf(1.0, ta + 0.2) if skid_fx else ta) if on_ground else 0.0, tcr, 0.12 if skid_fx else 0.095, skid_fx)
+	# the bike lays the grass down behind it (wheels + the frame / pedals sweeping over); it stands up again slowly
+	if grass and on_ground:
+		grass.trample(0, front, f, 0.26)
+		grass.trample(1, rear, f, 0.34 if skid_fx else 0.3)
 
 # ---------------------------------------------------------------- ride control
 func respawn(new_world: bool) -> void:
@@ -1355,6 +1362,7 @@ func respawn(new_world: bool) -> void:
 		tumbleweeds.clear()
 		flash("New world #%d" % GameState.seed)
 	if fx.has_method("clear_tracks"): fx.clear_tracks()
+	if grass: grass.clear_trample()
 	if new_world: grime.clean()
 	if blood: blood.clear()
 	if flying_cam and is_instance_valid(flying_cam): flying_cam.queue_free()
