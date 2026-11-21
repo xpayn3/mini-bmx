@@ -113,6 +113,15 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 ## 5. Systems — how they work
 
 ### Ride physics (`bike_physics.gd`)
+- **The ride step is 11 stage functions** (2026-11-21; it was one 1,514-line function). `_ride_step` is the short driver; the
+  stages, in order: `_step_controls` (levers, body stick, air inputs, lip throw; returns the brake level), `_step_ground`
+  (heights, surface, grip per tyre), `_step_sprint`, `_step_loads` (weight on each tyre -> `n_rear` / `n_front` / `n_load`),
+  `_step_drive` (pedalling, brakes, pump, drag; sets `skid`, returns `a_long`), `_step_steer` (steering, lean, balance, turn,
+  grip sim, soft crash meters; returns `va`), `_step_move` (move + everything it can hit), `_step_vertical` (springs, legs,
+  manual / nose balance, air, take-off, landing), `_step_hop`, `_step_lip` (lip spotting, pop, leg compression),
+  `_step_wheels`. What stages share is passed as parameters / those three members; everything else is the bike's own state.
+  The split changed no numbers: `slope_stress.tscn -- verbose=1 trace=1`, `feel=1`, `sim=1` and `compare=1` outputs were
+  identical line for line before and after (that diff is the way to check any future "no behaviour change" refactor).
 - Fixed **120 Hz** `_physics_process`; `game.gd` draws **interpolated** between the last two states.
 - Two-wheel contact with tyre springs, pitch, lean/countersteer, slip/skid, carving, flow speed, sprint
   stamina, gears (`gear_k()`: ungeared bikes = ratio 1, the DH uses the garage cassette + chainring).
@@ -458,6 +467,31 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   red = losing, km/h won this rhythm), `BalanceMeter` (sweet spot green, loop-out end red, marker = the front's angle, time).
   Tests: `BMX_BODY=balance|overpull` (+ `BMX_STRAIGHT=1 BMX_MAN_PROBE=1`, `MAN` lines), `BMX_FOLLOW=1 BMX_PUMPRIDE=down|all|off`
   (`PUMPRIDE` lines), `BMX_TRICK=…` prints `LANDERR`.
+- **One balance, one hop** (2026-11-21, `bike_physics.gd`; sliders Ride › Manual & pump, Tune group `Balance & pump`). The
+  manual, the nose manual and every kind of hop share their code; don't add a second path beside them.
+  - **Balance, both ends** (`_balance_step` -> `_tip` / `_tip_over`): one tipping-balance integrator for the manual / wheelie
+    (`man_a`, on the back wheel) and the **nose manual / stoppie** (`nose_a`, on the front wheel; `noseBalance`, `noseGravity`,
+    `noseLift` (0 = off), `noseBrake`, `noseLoop`, `noseFrom`). Only one can be up. Nose: front brake (LT counts) + stick forward
+    past `noseFrom` above 2.5 m/s tips the rear up; then stick forward = further over, back = down, the brake tips it on, and the
+    brake can be let go (a rolling nose manual). Too far, either end = `_tip_over` (wheel thrown back down, speed x `manLoopKeep`,
+    "LOOPED OUT!" / "TOO FAR!", no crash). The pitch hold in the vertical step is shared (`w_up` / `e_up`); on the front wheel
+    the fork's levering torque is taken out (the rider's weight is over the front axle; without it the bike only dived on its
+    fork). While the rear is up: no OVER THE BARS / NOSE DIVE / WASHED OUT verdicts, no lip window, the rear trails the front (slip
+    eased to 0). Style: STOPPIE / NOSE MANUAL x s after 0.8 s; the HUD `BalanceMeter` shows either end (`nose`). `manual_up` /
+    `endo_up` are gone (they were copies of `man_a` / `nose_a`); `wheelie_up` = `man_a` set down no faster than `wheelieDrop`.
+  - **The hop** (`_hop_begin` -> `_hop_pop`, power from `_hop_power(_charge_k, _scoop_k)`): started by letting go of hop, by the
+    **stick hop** (right stick back past 0.5, then snapped forward past 0.3 within 0.22 s) or both. Power = the better of the
+    button's charge and the **scoop** (the front already up when it starts: out of a manual, or the stick's own pull; best ~0.3 rad
+    .. the balance point, weak hauled to the loop-out; x `stickHop`, 0 = no stick hop / scoop) + a quarter of the other, up to 1.25.
+    So: a tap of hop out of a manual = a full hop (~1.1 m), a stick tap ~0.5 m, a well-timed stick hop ~1 m, charge + scoop more.
+    A hop let go with the front up is never eaten as a "pump press". `gest_hop` (0.4 s after a stick hop) keeps the forward snap
+    from being a flip throw / a nose manual. Near a lip stick back is still a flip throw.
+  - **Forgiveness** (`inputForgive` 0.12 s, 0 = off): hop let go up to that long after the wheels left a lip still pops (coyote
+    time, `_gl` / `_gc`); a hop tapped in the air just before touch-down hops on landing (`_hop_buf`); a lip pump pressed late gets
+    90 % of what it missed (`_pop_miss`); a flip throw (S / W, stick) pressed up to 1.5x that before the lip window opens still
+    throws (`_tw_t` / `_ts_t` / `_sb_t` / `_sf_t` = time held). The stick throw only counts inside the lip window (`yb` / `yf`).
+  - Tests (with `BMX_STRAIGHT=1 BMX_PAD=1`): `BMX_BODY=bhop` (+ `BMX_BHOP_HOLD=secs`), `BMX_BODY=manhop` (hop out of a manual),
+    `BMX_FORGIVE_PROBE=1` (`STICKHOP`, `SCOOPHOP`, `FORGIVE`, `BHOP` lines), `BMX_BODY=stoppie` + `BMX_NOSE_PROBE=1` (`NOSE` lines).
 - **Aerodynamics** (`aero_k` in `bike_physics.gd`): the air drag scales with the body: right stick forward on the ground = a race tuck
   (chest folded over the bars, hips back, knees bent) cuts drag by `tuckDrag` (0.42; half that while pedalling), stick back = sat up,
   `upDrag` more (an air brake). Straight test: 65.9 → 68.3 km/h in 20 s.

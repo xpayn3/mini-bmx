@@ -205,6 +205,18 @@ const PAGES := [
 			["manSlideCatch", "The front is set down when the rear slides this far (x the slide limit).", "Early", "Late"],
 			["manSprintLift", "A sprint stamp from slow lifts the front.", "No", "Lots"],
 		]],
+		["Nose manual & stoppie (front brake + stick forward)", [
+			["*noseBalance", "The balance point: how high the rear sits when it's balanced.", "Low", "High"],
+			["noseGravity", "How fast it falls away from the balance point.", "Lazy", "Twitchy"],
+			["*noseLift", "How hard your weight over the bars lifts the rear. 0 = no nose manuals.", "Off", "Strong"],
+			["noseBrake", "The front brake tips it further over.", "No", "Lots"],
+			["noseLoop", "Past the balance point by this much it's too far.", "Strict", "Forgiving"],
+			["noseFrom", "Stick pushed forward past this (with the front brake) starts it.", "Light push", "Full push"],
+		]],
+		["Hops & timing", [
+			["*stickHop", "Hopping with the front up scoops the rear after it: out of a manual, or stick back then snapped forward.", "Off", "High"],
+			["*inputForgive", "A hop, lip pump or flip throw this much early / late still counts.", "Exact", "Forgiving"],
+		]],
 		["Pumping", [
 			["*pumpHold", "Hop held down a slope pushes you along (and costs speed going up).", "None", "Strong"],
 			["*pumpStick", "Right stick forward pumps; eased back up a face it carries speed.", "None", "Strong"],

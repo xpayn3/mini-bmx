@@ -69,7 +69,7 @@ func record(dt: float, st: BikePhysics, inp: Dictionary, lift: float, drawn_y: f
 	_buf[o + 30] = st.body_in
 	_buf[o + 31] = st.air_stick.x
 	_buf[o + 32] = st.air_stick.y
-	_buf[o + 33] = st.manual_up
+	_buf[o + 33] = st.man_a
 	_buf[o + 34] = st.wheelie_up
 	_buf[o + 35] = st.edge_s
 	_buf[o + 36] = st.stick_yaw

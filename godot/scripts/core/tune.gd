@@ -225,6 +225,14 @@ const DEFS := [
 		["landPerfect", "Perfect landing within", 0.14, 0.03, 0.4, 0.01, "rad"],
 		["landBoost", "Perfect landing speed boost", 1.6, 0, 5, 0.1, "m/s"],
 		["landPerfectAir", "Perfect landing: from air time", 0.45, 0.1, 1.5, 0.05, "s"],
+		["inputForgive", "Timing forgiveness (hop, lip pump, flip throw)", 0.12, 0, 0.3, 0.01, "s"],
+		["stickHop", "Bunny hop scoop (front up when you hop): height", 1.0, 0, 1.25, 0.05, "×"],
+		["noseBalance", "Nose manual: balance point (rear up)", 0.5, 0.3, 0.8, 0.01, "rad"],
+		["noseGravity", "Nose manual: falls away from the balance point", 7.0, 2, 16, 0.25, "rad/s²"],
+		["noseLift", "Nose manual: weight over the bars lifts the rear (0 = off)", 9.0, 0, 20, 0.25, "rad/s²"],
+		["noseBrake", "Nose manual: the front brake tips it further", 4.0, 0, 12, 0.25, "rad/s²"],
+		["noseLoop", "Nose manual: too far past the balance point by", 0.4, 0.15, 0.7, 0.01, "rad"],
+		["noseFrom", "Nose manual: stick pushed forward past", 0.6, 0.2, 0.9, 0.05, ""],
 	]],
 	# the demo rider (F2, tuning card › Ride › Demo; not ride feel, so presets leave it alone)
 	["Demo rider", [
