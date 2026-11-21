@@ -14,6 +14,8 @@ uniform sampler2D dirt_tex : source_color, filter_linear_mipmap_anisotropic, rep
 uniform sampler2D trail_tex : filter_linear, repeat_disable;
 // r = road (wide, gravelly) 0..1, g = dry biome 0..1, b = built jump 0..1, a = run-off skid's strength
 uniform sampler2D trail2_tex : filter_linear, repeat_disable;
+// r = riders are in the air here (between a jump's lip and where they land): no ridden lines
+uniform sampler2D trail3_tex : filter_linear, repeat_disable;
 uniform float trail_fx = 0.0;      // 0 = plain trail colour (no frame bound)
 // fine relief only (assets/textures/trail, Poly Haven CC0): normal xy + roughness of packed dirt / loose gravel.
 // Colour, rider lines, wear and puddles are procedural, so nothing tiles and no scan edge can show.
@@ -21,8 +23,9 @@ uniform sampler2D tr_nr0 : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D tr_nr1 : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform float trail_bump = 0.9;
 uniform float trail_relief = 1.0;   // depth of the worn lines / tyre prints / grit, x the real centimetres below
+uniform float trail_play = 0.34;   // share of 26 m stretches with a playful mark (donut, figure of eight, slalom, skid arc); test: 1 = all
 uniform float trail_puddles = 1.0;   // 0 = none, 1 = normal
-uniform int trail_debug = 0;       // 1 = show the mask layers: r driven, g loose, b puddle (wet rim dimmer), white tyre prints, yellow run-off skids
+uniform int trail_debug = 0;       // 1 = show the mask layers: r driven, g loose, b puddle (wet rim dimmer), white tyre prints, yellow run-off skids, magenta stray lines, cyan playful marks
 varying vec3 v_world;
 // the grass carpet's window (world/grass_field.gd): a = how much grass grows here; info = origin xz, texel, radius (0 = off)
 global uniform sampler2D grass_win : filter_linear;
@@ -98,10 +101,11 @@ void fragment() {
 	vec2 tslope = vec2(0.0);
 	float trough = 0.95, tbump = 0.0;
 	float thgt = 0.0;   // the trail surface's own height (m): worn lines sit lower, grit and the ground between them higher
-	float m_driven = 0.0, m_loose = 0.0, m_tracks = 0.0, m_wet = 0.0, m_puddle = 0.0, m_skid = 0.0, jm = 0.0;
+	float m_driven = 0.0, m_loose = 0.0, m_tracks = 0.0, m_wet = 0.0, m_puddle = 0.0, m_skid = 0.0, m_stray = 0.0, m_play = 0.0, jm = 0.0;
 	vec2 pdx = dFdx(P.xz), pdy = dFdy(P.xz);
 	vec4 tf = texture(trail_tex, UV);
 	vec4 tf2 = texture(trail2_tex, UV);
+	float t_air = texture(trail3_tex, UV).r * trail_fx;
 	float tnear = (1.0 - smoothstep(0.25, 0.7, gpx)) * trail_fx;   // far off it all averages out to the plain colour
 	if ((t > 0.004 || tf2.a > 0.01) && tnear > 0.0) {
 		float ac = tf.r, off = tf.g, sl = tf.b, rd = tf2.r, dry = tf2.g;
@@ -134,7 +138,7 @@ void fragment() {
 			if (i < 4) { line += l * (1.0 - line); } else { alt += l * (1.0 - alt); }
 		}
 		line *= 0.6 + 0.4 * smoothstep(0.25, 0.6, n_s1);
-		line = line + alt * (1.0 - line);
+		line = (line + alt * (1.0 - line)) * (1.0 - t_air);   // nobody's tyres touch between the lip and the landing
 		float offb = off * 0.55 - 0.5, offc = off * 1.35 + 0.55;
 		// ragged edge, so the band is never a ruler line
 		float rag = (n0 - 0.5) * 0.3 + (mix(0.5, n1, f2) - 0.5) * 0.2;
@@ -155,7 +159,44 @@ void fragment() {
 				float knobs = 0.6 + 0.4 * smoothstep(-0.3, 0.3, sin(sl * 58.0 + fi * 2.0) * sin((ac - c) * 150.0 + sl * 20.0)) * f1 + 0.4 * (1.0 - f1) * 0.5;
 				m_tracks = max(m_tracks, (1.0 - smoothstep(0.018, 0.04, d)) * pres * knobs);
 			}
-			m_tracks *= trk_fade * (0.6 + 0.4 * m_driven);
+			m_tracks *= trk_fade * (0.6 + 0.4 * m_driven) * (1.0 - t_air);
+		}
+		// stray lines: single faint tyre lines running down the trail anywhere across it, nothing to do with the racing
+		// line (someone rolling down the side, drifting across, pulling over). Each wanders on its own, swaps sides,
+		// and comes and goes; seen from further off than the prints, much fainter than the ridden lines
+		float stray_fade = 1.0 - smoothstep(0.05, 0.2, gpx);
+		if (stray_fade > 0.0) {
+			float reach = 0.95 + 0.9 * rd;
+			for (int i = 0; i < 6; i++) {
+				float fi = float(i);
+				float c = (sin(sl * (0.011 + 0.0037 * fi) + fi * 4.1) * 0.7 + sin(sl * (0.031 + 0.006 * fi) + fi * 1.3) * 0.3) * reach
+					+ sin(sl * (0.17 + 0.02 * fi) + fi * 2.9) * 0.035;
+				float pres = smoothstep(0.05, 0.45, sin(sl * (0.0083 + 0.0029 * fi) + fi * 2.3) + 0.25 * sin(sl * 0.047 + fi * 5.7));
+				float wdt = 0.022 + 0.012 * fract(fi * 0.37);
+				m_stray = max(m_stray, (1.0 - smoothstep(wdt, wdt + 0.035, abs(ac - c))) * pres * (0.55 + 0.45 * fract(fi * 0.61)));
+			}
+			m_stray *= stray_fade * (1.0 - 0.6 * jm) * (1.0 - 0.5 * m_driven) * (1.0 - t_air);
+			// people messing about: in about a third of the 26 m stretches one mark, drawn in the trail's own frame
+			// (along / across), kept inside its stretch so nothing is cut at a border
+			float ci = floor(sl / 26.0);
+			vec3 ph = gd_hash3(vec2(ci, 71.0)), ph2 = gd_hash3(vec2(ci + 13.0, 193.0));
+			if (ph.x < trail_play) {
+				vec2 q = vec2(sl - (ci + 0.32 + 0.36 * ph.y) * 26.0, ac - (ph.z - 0.5) * (0.8 + 1.2 * rd));
+				float r = (0.7 + 0.65 * ph2.x) * (1.0 + 0.5 * rd);
+				float d;
+				if (ph2.y < 0.38) {            // a donut: a few laps, none quite on the last
+					d = min(abs(length(q) - r), min(abs(length(q - vec2(0.13, 0.08)) - r * 0.93), abs(length(q + vec2(0.1, -0.07)) - r * 1.06)));
+				} else if (ph2.y < 0.62) {     // a figure of eight
+					d = min(abs(length(q - vec2(r, 0.0)) - r), abs(length(q + vec2(r, 0.0)) - r));
+				} else if (ph2.y < 0.84) {     // a slalom: a few quick swerves down the trail
+					float wv = 0.5 * r, wk = 1.25;
+					d = abs(q.y - sin(q.x * wk) * wv) / sqrt(1.0 + pow(cos(q.x * wk) * wv * wk, 2.0))
+						+ (1.0 - smoothstep(-6.5, -4.5, q.x) * (1.0 - smoothstep(4.5, 6.5, q.x))) * 9.0;
+				} else {                       // a skid arc: a rider swinging the back wheel round
+					d = abs(length(q) - r * 1.7) + smoothstep(0.7, 1.0, abs(atan(q.y, q.x) - (ph2.z - 0.5) * 4.0)) * 9.0;
+				}
+				m_play = (1.0 - smoothstep(0.022, 0.055, d)) * (0.6 + 0.4 * ph2.z) * stray_fade * (1.0 - jm) * (1.0 - t_air);
+			}
 		}
 		// puddles: only on roads, in the worn lines (the lowest ground), on level ground, not in dry country; they come in stretches
 		float lvl = smoothstep(0.988, 0.998, normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz).y);
@@ -187,10 +228,12 @@ void fragment() {
 		k *= 1.0 - 0.1 * length(rl.xy) * tbump;          // the relief's hollows sit a little darker
 		k *= 1.0 - 0.11 * m_tracks;
 		k *= 1.0 - 0.24 * m_skid;
+		k *= 1.0 - 0.055 * m_stray;
+		k *= 1.0 - 0.075 * m_play;
 		// relief: each ridden line is a shallow groove (deepest where most riders go), tyre prints and skids are pressed
 		// into it, loose grit and pebbles stand proud, and the unridden ground between the lines is slightly lumpy
 		float lump = (gd_noise3(vec3(ac * 5.0, sl * 0.9, 6.0)) - 0.5) * 0.012 + (n1 - 0.5) * 0.006 * f2;
-		thgt = -0.03 * line * (1.0 - 0.7 * jm) - 0.008 * m_tracks - 0.014 * m_skid
+		thgt = -0.03 * line * (1.0 - 0.7 * jm) - 0.008 * m_tracks - 0.014 * m_skid - 0.006 * m_stray - 0.007 * m_play
 			+ (peb * (0.006 + 0.008 * pb.y) + lump) * (0.3 + 0.7 * m_loose) * (1.0 - 0.8 * jm);
 		thgt *= (1.0 - smoothstep(0.04, 0.16, gpx)) * tnear * (1.0 - m_puddle);
 		k *= 1.0 + thgt * 2.2;                           // hollows hold a little shade, high spots catch light
@@ -243,7 +286,7 @@ void fragment() {
 		NORMAL = normalize((VIEW_MATRIX * vec4(nw, 0.0)).xyz);
 	}
 	if (trail_debug == 1) {
-		ALBEDO = vec3(m_driven, m_loose, max(m_puddle, m_wet * 0.4)) * wd + vec3(m_tracks) * 0.5 + vec3(m_skid, m_skid, 0.0);
+		ALBEDO = vec3(m_driven, m_loose, max(m_puddle, m_wet * 0.4)) * wd + vec3(m_tracks) * 0.5 + vec3(m_skid, m_skid, 0.0) + vec3(m_stray, 0.0, m_stray) * wd + vec3(0.0, m_play, m_play) * wd;
 		ROUGHNESS = 1.0;
 	}
 }

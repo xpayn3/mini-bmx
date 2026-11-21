@@ -131,6 +131,12 @@ const KICKER := [[0, 0, 0], [3.2, 0.7, 0.42, 0], [4.0, 0.7, 0, 0], [6.5, 0.48, -
 const WHOOP := [[0, 0, 0], [1.6, 0.3, 0.3], [2.6, 0.48, 0], [8.6, 0.08, -0.09], [10, 0, 0]]
 
 
+## where riders are in the air over each feature: [from, to, ...] along it (m), the lip to about where they come
+## down. The ground shader draws no ridden lines there (ground.gdshader, via TerrainField.fo_air; mirrored in C#)
+const AIR := {"table": [5.5, 12.0], "double": [5.0, 11.0], "kicker": [3.6, 9.0], "woodKicker": [3.8, 9.0],
+	"tableLine": [5.5, 12.0, 27.6, 33.0], "flow": [3.6, 9.0], "doubleLine": [5.0, 11.0, 29.6, 35.0]}
+
+
 const FEATURE_TYPES := ["table", "table", "double", "kicker", "rhythm", "tableLine", "flow", "doubleLine",
 	"woodKicker", "woodKicker", "skinny", "bridge"]
 const ROUTE_TYPES := ["table", "table", "kicker", "rhythm", "tableLine", "flow", "woodKicker", "bridge"]

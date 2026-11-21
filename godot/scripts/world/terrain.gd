@@ -48,6 +48,7 @@ var _ground_shader: Shader = preload("res://scripts/world/ground.gdshader")
 ## loose gravel. Colour, rider lines, wear and puddles are procedural in ground.gdshader; the scans only add fine relief.
 const TRAIL_SCANS := ["brown_mud_02", "gravelly_sand"]
 static var _trail_debug := int(OS.get_environment("BMX_TRAIL_DEBUG"))
+static var _trail_play := OS.get_environment("BMX_TRAIL_PLAY")   # test: 1 = a playful mark in every stretch
 static var _trail_puddles := OS.get_environment("BMX_TRAIL_PUDDLES")   # test: 0 = none, 2 = on every wet road
 static var _trail_tex: Array = []   # [nr0, nr1], loaded once
 static func trail_textures() -> Array:
@@ -798,8 +799,10 @@ func _finalize(k: Vector2i) -> void:
 		mat.set_shader_parameter("tr_nr%d" % i, scans[i])
 	mat.set_shader_parameter("trail_tex", ImageTexture.create_from_image(o["trail_img"]))
 	mat.set_shader_parameter("trail2_tex", ImageTexture.create_from_image(o["trail2_img"]))
+	mat.set_shader_parameter("trail3_tex", ImageTexture.create_from_image(o["trail3_img"]))
 	mat.set_shader_parameter("trail_fx", 1.0)
 	if _trail_puddles != "": mat.set_shader_parameter("trail_puddles", float(_trail_puddles))
+	if _trail_play != "": mat.set_shader_parameter("trail_play", float(_trail_play))
 	if _trail_debug > 0: mat.set_shader_parameter("trail_debug", _trail_debug)   # BMX_TRAIL_DEBUG=1: the mask layers
 	var gi := MeshInstance3D.new()
 	gi.mesh = mesh

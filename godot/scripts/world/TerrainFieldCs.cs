@@ -228,6 +228,7 @@ internal static class TfSet
 internal sealed class TfFeat
 {
 	public double x, z, dx, dz, len, b0, b1, half, s;
+	public double[] air = System.Array.Empty<double>();   // TrailFeatures.AIR of its type
 	public bool canyon;   // rope bridge: a canyon across the land (TerrainField.canyon_rims)
 	public double ramp = 6.0;   // TerrainField.Feat.ramp: the trail eased onto the feature's plane over this
 	public TfProfile prof;
@@ -551,7 +552,7 @@ public partial class TerrainFieldCs : RefCounted
 	private double[] _qp = new double[15];
 	private int[] _cand = new int[64];
 	private int _cand_n;
-	public double fo_h, fo_m, fo_plane, fo_dig, fo_wood;
+	public double fo_h, fo_m, fo_plane, fo_dig, fo_wood, fo_air;
 	public bool fo_has_wood;
 	private double _fo_x = double.NaN, _fo_z = double.NaN;
 	public double wood;
@@ -1211,6 +1212,14 @@ public partial class TerrainFieldCs : RefCounted
 	// ======================================================================
 	// designed features
 	// ======================================================================
+	/// TrailFeatures.AIR: where riders are in the air over each feature, [from, to, ...] along it (m)
+	private static readonly System.Collections.Generic.Dictionary<string, double[]> AIR = new()
+	{
+		["table"] = new[] { 5.5, 12.0 }, ["double"] = new[] { 5.0, 11.0 }, ["kicker"] = new[] { 3.6, 9.0 },
+		["woodKicker"] = new[] { 3.8, 9.0 }, ["tableLine"] = new[] { 5.5, 12.0, 27.6, 33.0 }, ["flow"] = new[] { 3.6, 9.0 },
+		["doubleLine"] = new[] { 5.0, 11.0, 29.6, 35.0 },
+	};
+
 	private static TfFeat make_feat(double x, double z, double dx, double dz, string type, double b0, double b1)
 	{
 		var prof = TfSet.PROFILES[type];
@@ -1218,6 +1227,7 @@ public partial class TerrainFieldCs : RefCounted
 		TfSet.WOOD.TryGetValue(type, out f.wood);
 		TfSet.DIG.TryGetValue(type, out f.dig);
 		f.canyon = type == "rope";
+		if (AIR.TryGetValue(type, out var airv)) f.air = airv;
 		f.ramp = type == "rope" ? ROPE_RAMP : 6.0;
 		if (type == "rhythm" || type == "flow")
 			f.half = 2.3;
@@ -1376,6 +1386,12 @@ public partial class TerrainFieldCs : RefCounted
 		double ph = j.prof.ev(u) * acr;
 		if (ph > fo_h)
 			fo_h = ph;
+		for (int k = 0; k < j.air.Length; k += 2)
+		{
+			double av = sm(j.air[k], j.air[k] + 0.35, u) * (1.0 - sm(j.air[k + 1] - 0.9, j.air[k + 1] + 0.9, u)) * acr;
+			if (av > fo_air)
+				fo_air = av;
+		}
 		if (j.dig != null)
 		{
 			double dh = j.dig.ev(u) * acr;
@@ -1415,7 +1431,7 @@ public partial class TerrainFieldCs : RefCounted
 			return;
 		long cx = floori(x / JC);
 		long cz = floori(z / JC);
-		fo_h = 0.0; fo_m = 0.0; fo_plane = 0.0; fo_dig = 0.0; fo_wood = 0.0; fo_has_wood = false;
+		fo_h = 0.0; fo_m = 0.0; fo_plane = 0.0; fo_dig = 0.0; fo_wood = 0.0; fo_has_wood = false; fo_air = 0.0;
 		for (long dz = -1; dz < 2; dz++)
 		{
 			for (long dx = -1; dx < 2; dx++)
@@ -1799,6 +1815,7 @@ public partial class TerrainFieldCs : RefCounted
 		var pre_b = new double[NV * NV * 2];
 		var TR = new float[NV * NV * 4];   // trail frame for ground.gdshader: across, line offset, along, run-off skid's place
 		var T2 = new float[NV * NV * 4];   // road, dry biome, built jump, run-off skid's strength
+		var T3 = new float[NV * NV];       // riders in the air over a jump here
 		for (long iz = -1; iz < N + 2; iz++)
 		{
 			for (long ix = -1; ix < N + 2; ix++)
@@ -1827,6 +1844,7 @@ public partial class TerrainFieldCs : RefCounted
 					T2[o * 4] = (float)(on ? q_rd : 0.0);
 					T2[o * 4 + 1] = (float)cp_dry;
 					T2[o * 4 + 2] = (float)jm;
+					T3[o] = (float)fo_air;
 					T2[o * 4 + 3] = (float)(on ? cROS[q_i] + (cROS[q_i + 1] - cROS[q_i]) * q_t : 0.0);
 				}
 			}
@@ -1875,7 +1893,7 @@ public partial class TerrainFieldCs : RefCounted
 		return new Godot.Collections.Dictionary
 		{
 			["G"] = G, ["verts"] = verts, ["norms"] = norms, ["uvs"] = uvs,
-			["LG"] = LG, ["LD"] = LD, ["TW"] = TW, ["SW"] = SW, ["DRY"] = DRY, ["TR"] = TR, ["T2"] = T2,
+			["LG"] = LG, ["LD"] = LD, ["TW"] = TW, ["SW"] = SW, ["DRY"] = DRY, ["TR"] = TR, ["T2"] = T2, ["T3"] = T3,
 		};
 	}
 
