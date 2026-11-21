@@ -1,0 +1,6 @@
+Poly Haven (https://polyhaven.com), CC0 1.0 - no attribution required. 4K scans:
+brown_mud_02  = packed dirt (the trail's base)      brown_mud_03  = wet mud (patches)
+rocky_trail   = stones in dirt (rocky stretches)    gravelly_sand = loose gravel / sand (edges, dry biomes)
+Made from the downloads (diff / nor_gl / rough 4k JPG) by godot/tools/prep_trail_textures.py:
+*_col.jpg = colour as a ratio to the scan's mean (x0.5, slow light drifts flattened, half desaturated),
+*_nr.jpg  = normal x, y (OpenGL) + roughness in blue. Used by scripts/world/ground.gdshader.

@@ -269,6 +269,16 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   `BMX_ROPE_SAG/LAND/BEND/ANCHOR` overrides. Photo tests:
   `BMX_PHOTO_AT=x,y,z,lx,ly,lz` puts the photo camera at a world point looking at another (FEATSPAWN prints the feature's `at` / `dir`).
 
+- **Trail surface scans** (2026-11-21, `world/ground.gdshader`, `Terrain.trail_textures()`, `assets/textures/trail/` + `SOURCE.txt`): the
+  trail is four Poly Haven 4K scans (CC0): packed dirt (`brown_mud_02`), wet mud (`brown_mud_03`, darker + glossier, sun glint in
+  `light()`), stones in dirt (`rocky_trail`), loose gravel (`gravelly_sand`). Each is stored as a colour RATIO to its own mean
+  (`*_col.jpg`, slow light drifts flattened) + normal xy / roughness (`*_nr.jpg`), made by `godot/tools/prep_trail_textures.py`, so
+  the baked biome trail colour still decides the colour. No repeating tile: each scan has its own size + turn, they are mixed by
+  world noise patches (10-20 m) with a height blend, plus a slow brightness drift; mud favours dark dirt, gravel pale dirt and the
+  trail's edges, stones the rock faces. Only the scans that can show at a pixel are read (1-2 of 4, `need`), nothing past ~0.5 m
+  per pixel; the old procedural pebbles are gone. Frame rate measured the same or a touch better than before (87 -> 89-98 fps
+  uncapped, minimised). Uniforms `trail_scans` (0 = plain colour) / `trail_bump`. Playground / vista ground don't use it.
+
 - **Grass carpet** (2026-11-20, `world/grass_field.gd` `GrassField` + `shaders/grass_field.gdshader`, made by `Game._ready`): a
   Zelda-style field of blades over the whole land round the camera, built on the GPU; nothing stored per blade. Each chunk bakes
   `grass_img` (land colour sRGB + density in alpha: none on trail / jumps, rock faces, below / near water, dunes (`DRY`, now also

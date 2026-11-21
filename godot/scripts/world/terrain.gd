@@ -44,6 +44,16 @@ var _rock_grid := {}             # int key -> Array[collider]
 var _col_grid := {}              # 4 m cell key -> Array[collider] (by collider centre)
 const COL_CELL := 4.0
 var _ground_shader: Shader = preload("res://scripts/world/ground.gdshader")
+## the trail's surface scans (assets/textures/trail/SOURCE.txt): packed dirt, wet mud, stones in dirt, loose gravel;
+## colour ratio + normal / roughness each, mixed by world noise in ground.gdshader
+const TRAIL_SCANS := ["brown_mud_02", "brown_mud_03", "rocky_trail", "gravelly_sand"]
+static var _trail_tex: Array = []   # [col0, nr0, col1, nr1, ...], loaded once
+static func trail_textures() -> Array:
+	if _trail_tex.is_empty():
+		for id in TRAIL_SCANS:
+			_trail_tex.append(load("res://assets/textures/trail/%s_col.jpg" % id))
+			_trail_tex.append(load("res://assets/textures/trail/%s_nr.jpg" % id))
+	return _trail_tex
 var _tape_mat: ShaderMaterial
 var _debris: TerrainDebris
 var _tapes: TapeSim              # torn tape ribbons (tape.js TapeSim)
@@ -782,6 +792,10 @@ func _finalize(k: Vector2i) -> void:
 	mat.shader = _ground_shader
 	mat.set_shader_parameter("land_tex", ImageTexture.create_from_image(o["land_img"]))
 	mat.set_shader_parameter("dirt_tex", ImageTexture.create_from_image(o["dirt_img"]))
+	var scans := trail_textures()
+	for i in TRAIL_SCANS.size():
+		mat.set_shader_parameter("tr_col%d" % i, scans[i * 2])
+		mat.set_shader_parameter("tr_nr%d" % i, scans[i * 2 + 1])
 	var gi := MeshInstance3D.new()
 	gi.mesh = mesh
 	gi.material_override = mat
