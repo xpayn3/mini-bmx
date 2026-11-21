@@ -34,6 +34,12 @@ func _init() -> void:
 	add_child(_motes)
 
 
+## the dust is switched on only once it is in the tree (switching a particle node on outside it logs an engine error)
+func _ready() -> void:
+	_motes.emitting = true
+
+
+
 # ---------------------------------------------------------------- birds
 ## nose +X, wings out along +-Z, each wing cut into 5 strips so it can bend: the flap runs along the span in the shader
 static func _bird_mesh() -> ArrayMesh:
@@ -156,7 +162,6 @@ static func _make_motes() -> CPUParticles3D:
 	p.spread = 180.0
 	p.damping_min = 0.0
 	p.damping_max = 0.1
-	p.emitting = true
 	var grow := Curve.new()
 	grow.add_point(Vector2(0, 0.7))
 	grow.add_point(Vector2(1, 1.3))

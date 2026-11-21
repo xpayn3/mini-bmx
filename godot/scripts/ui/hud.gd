@@ -412,7 +412,6 @@ func update_hud(dt: float) -> void:
 	gauge.queue_redraw()
 	air_card.tick(dt)
 	biome_l.text = game.biome_cur
-	if st.crash_on: GameState.records.distance = GameState.records.distance   # (kept: saved on landing / menu)
 
 func _ride_stats(st: BikePhysics, dt: float) -> void:
 	ride_t += dt
@@ -1589,7 +1588,6 @@ class AirCard extends Control:
 		if GameState.submit("highest", h): recs.append("HIGHEST")
 		if GameState.submit("air", at): recs.append("HANG TIME")
 		GameState.records.jumps = int(GameState.records.jumps) + 1
-		GameState.records.distance = float(GameState.records.distance) + 0.0
 		GameState.save()
 		if recs.size() > 0: record = "NEW RECORD · " + " · ".join(recs)
 	func bail() -> void:

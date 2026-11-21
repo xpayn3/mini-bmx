@@ -129,10 +129,12 @@ func begin_ride() -> void:
 
 func end_ride() -> void:
 	_live = false   # nothing more is logged until the next begin_ride
+	flush_records()
 
 ## called by the HUD with the metres ridden this step
 func add_distance(ds: float) -> void:
 	records.distance = float(records.distance) + ds
+	touch_records()
 	if not _live: return
 	var d := today()
 	var e: Array = days.get(d, [0.0, 0])
@@ -190,6 +192,7 @@ func submit(k: String, val: float) -> bool:
 ## quit the game: first let C# collect + finalize its garbage while the engine is still up (CsGc.cs) - the
 ## terrain's leftovers finalized after shutdown crashed the quit. Use instead of get_tree().quit().
 func quit(code := 0) -> void:
+	flush_records()
 	cs_gc()
 	get_tree().quit(code)
 
@@ -199,6 +202,25 @@ static func cs_gc() -> void:
 	if gc: gc.collect()
 
 
+## records changed (top speed, distance): saved at most every SAVE_EVERY seconds while riding, and always on
+## close / quit, so closing the window no longer loses them
+const SAVE_EVERY := 15.0
+var _rec_dirty := false
+var _rec_saved_at := 0.0
+func touch_records() -> void:
+	if Settings._test_run: return
+	_rec_dirty = true
+	var now := Time.get_ticks_msec() / 1000.0
+	if now - _rec_saved_at >= SAVE_EVERY: flush_records()
+
+func flush_records() -> void:
+	if not _rec_dirty: return
+	_rec_dirty = false
+	_rec_saved_at = Time.get_ticks_msec() / 1000.0
+	save()
+
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_WM_CLOSE_REQUEST: cs_gc()   # the window's close button (auto-accepted right after)
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		flush_records()
+		cs_gc()   # the window's close button (auto-accepted right after)
 

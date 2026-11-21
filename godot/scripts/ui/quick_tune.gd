@@ -59,4 +59,6 @@ func _sync() -> void:
 	for k in Tune.pins:
 		var r: Array = Tune.row(k)
 		var vl := list.find_child("V_" + k, true, false) as Label
+		var sl := list.find_child("S_" + k, true, false) as HSlider
+		if sl and not is_equal_approx(sl.value, Tune.base[k]): sl.set_value_no_signal(Tune.base[k])   # a reset / preset moved it elsewhere
 		if vl and not r.is_empty(): vl.text = ("%.4f" % Tune.base[k] if absf(Tune.base[k]) < 0.1 and Tune.base[k] != 0 else "%.2f" % Tune.base[k]) + " " + r[6]
