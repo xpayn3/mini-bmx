@@ -790,6 +790,15 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   (thins at once, thickens over 4 s); a pool the rider is `MIST_SPENT` 4 m deep in, or has climbed `MIST_LEFT` 8 m away
   from, fades out, the level moves while nothing shows, the new pool fades in over `MIST_FADE_IN` 6 s. Probe:
   `BMX_MIST_PROBE=1` (`MIST level= want= deep= fade= thin=` lines 2x / s).
+- **Rider light match (2026-11-21, user: "the rider doesn't look part of the environment light, pops out too much")**: at a
+  low sun anything facing it gets ~1 / sin(elevation) (golden hour: ~6-15x) the light of the ground the exposure is set by, and
+  the kit's near-pure colours burnt out to flat cream (not the rim, not bloom, not dust: checked each). `Game._match` (0..1: full
+  under 8 deg of sun, gone by 35 deg, 0 at night / on the title screen; Light tab › "Rider in the scene's light (low sun)",
+  `rider_match`) -> `Grime.trim` -> global `rider_trim`: the wet pass (`grime_wet.gdshader`, the last next_pass on every rider /
+  bike material, now also attached while trim > 0) reads the lit pixel from the screen texture and rolls off what is above
+  `TRIM_KNEE` 0.45 scene-linear (`TRIM_SOFT` 0.5); dark parts and anything in shade stay as they are. It only draws on the
+  surface that is seen (depth texture compare, 1 mm): the pass is pulled towards the lens, so joint balls under the sleeves
+  drew it twice = dark discs on elbows / shoulders. Tests: `BMX_NO_MATCH=1` = off, `BMX_LIGHT=rider_match=0..2`.
 - **Backlit foliage + dappled shade** (`deco.gdshader` / `flower.gdshader` uniforms set per material in `world/terrain_geo.gd`):
   `scatter` = leaves / grass / bushes glow in their own colour when a low sun is behind them (shadowed glow stays dark; a quarter at
   noon), `scatter_rim` = outline only (cacti); `dapple` / `dapple_size` = holes cut in the canopy only in the sun's shadow pass (the
