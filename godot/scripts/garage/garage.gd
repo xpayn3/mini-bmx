@@ -200,6 +200,7 @@ func _showcase_quality(on: bool) -> void:
 	RenderingServer.environment_set_ssr_roughness_quality(RenderingServer.ENV_SSR_ROUGHNESS_QUALITY_HIGH)
 
 func _exit_tree() -> void:
+	_flush_pose()
 	_showcase_quality(false)
 
 ## The release bake (BMX_BAKE_THUMBS=<dir>, run by tools/bake_thumbs.ps1 on a fresh user folder): every
@@ -963,6 +964,9 @@ func _process(dt: float) -> void:
 	if _dirty > 0:
 		_dirty -= dt
 		if _dirty <= 0: _rebuild_bike()
+	if _pose_save_t > 0.0:
+		_pose_save_t -= dt
+		if _pose_save_t <= 0.0: _flush_pose()
 	if auto_spin and not dragging: orbit_t += dt * 0.12
 	# Xbox: right stick orbits the camera, LT / RT zoom (raw axes: menus own the D-pad / left stick)
 	var rs := Vector2(Input.get_joy_axis(0, JOY_AXIS_RIGHT_X), Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y))
@@ -1358,6 +1362,7 @@ func _step_tab(d: int) -> void:
 	_set_tab(tabs[wrapi(i + d, 0, tabs.size())][0])
 
 func _close(ride: bool) -> void:
+	_flush_pose()
 	BikeBuild.save_build(build)
 	closed.emit(ride)
 
@@ -2399,9 +2404,20 @@ func _set_look(l: Dictionary) -> void:
 func _pose_bike() -> String:
 	return GameState.bike_id if GameState.BIKES[GameState.bike_id].get("garage", false) else "dh"
 
+## the pose is applied live on every slider tick but written to rider.cfg once it settles (not 60x a second)
+var _pose_save_t := 0.0
+var _pose_save_bike := ""
+func _flush_pose() -> void:
+	if _pose_save_t == 0.0 and _pose_save_bike == "": return
+	_pose_save_t = 0.0
+	RiderPanels.save_pose(_pose_save_bike, rider_pose)
+	_pose_save_bike = ""
+
 func _apply_rider_pose() -> void:
 	if rider: rider.set_style(rider_pose)
-	RiderPanels.save_pose(_pose_bike(), rider_pose)
+	var b := _pose_bike()
+	if _pose_save_bike != "" and _pose_save_bike != b: _flush_pose()   # the bike changed under a pending save
+	_pose_save_bike = b; _pose_save_t = 0.4
 	PosePresets.bike = _pose_bike()
 	PosePresets.pose_changed(rider_pose)
 	if is_instance_valid(_pose_mod): _pose_mod.visible = PosePresets.is_builtin(PosePresets.get_active()) and PosePresets.modified()

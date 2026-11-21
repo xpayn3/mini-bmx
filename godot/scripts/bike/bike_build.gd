@@ -497,12 +497,23 @@ static func imported_logos() -> Array:
 # ---------------------------------------------------------------- materials
 static var _mat_cache := {}
 
+const BLACK_FLOOR := 0.15   # the darkest a paint's brightest channel may be (sRGB); a "black" swatch of 0.07 shaded to a flat hole
+## Nothing real is 0 % black: lifts very dark paint to a deep charcoal, keeping its hue, so the lighting still shapes it
+static func lift_black(c: Color) -> Color:
+	var f := float(OS.get_environment("BMX_BLACK_FLOOR")) if OS.get_environment("BMX_BLACK_FLOOR") != "" else BLACK_FLOOR
+	var mx := maxf(c.r, maxf(c.g, c.b))
+	if mx >= f: return c
+	if mx < 0.005: return Color(f, f, f * 1.03, c.a)
+	var k := lerpf(1.0, f / mx, 0.85)
+	return Color(c.r * k, c.g * k, c.b * k, c.a)
+
 static func paint_material(p: Dictionary) -> ShaderMaterial:
 	var key := "%s|%s|%s" % [p.color, p.color2, p.finish]
 	if _mat_cache.has(key): return _mat_cache[key]
 	var F: Dictionary = FINISHES.get(p.finish, FINISHES.gloss)
 	var col := Color(p.color)
 	if F.has("deep"): col = col.darkened(0.15)
+	col = lift_black(col)
 	var m := BikeFX.car_paint(null, {"color": col, "metallic": F.metallic, "roughness": F.roughness,
 		"sparkle": F.sparkle, "clearcoat_roughness": F.cc_rough, "flake": F.get("flake", 0.00025)})
 	m.set_shader_parameter("clearcoat", F.clearcoat)

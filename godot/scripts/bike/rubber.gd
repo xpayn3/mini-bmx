@@ -59,7 +59,8 @@ static func _build() -> void:
 
 
 const SCAN_DIR := "res://assets/textures/rubber/"
-const SCAN_TILE_M := 0.20     # one scan tile = 20 cm of tyre (the grain is ~1.5 mm)
+const SCAN_LIFT := 1.8       # albedo multiplier on the scan (env BMX_RUBBER_LIFT overrides, for tests)
+const SCAN_TILE_M := 0.20    # one scan tile = 20 cm of tyre (the grain is ~1.5 mm)
 
 ## true = the photographed ambientCG Rubber004 scan (colour already holds the compound's colour, so the
 ## vertex colour is white); false = the generated grain above (env BMX_RUBBER=gen, or the files are missing)
@@ -101,7 +102,9 @@ static func _apply_scan(m: StandardMaterial3D) -> void:
 	m.roughness_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_RED
 	m.normal_enabled = true
 	m.normal_texture = load(SCAN_DIR + "rubber_normal.jpg")
-	m.normal_scale = 1.0
+	var lift := float(OS.get_environment("BMX_RUBBER_LIFT")) if OS.get_environment("BMX_RUBBER_LIFT") != "" else SCAN_LIFT
+	m.albedo_color = Color(lift, lift, lift)   # the scan is nearly black (sRGB ~0.16): lifted to a dark charcoal so the tread reads
+	m.normal_scale = 1.8
 	m.uv1_triplanar = true
 	m.uv1_triplanar_sharpness = 2.0
 	m.uv1_scale = Vector3.ONE / SCAN_TILE_M

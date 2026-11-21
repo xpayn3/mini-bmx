@@ -25,6 +25,9 @@ func _ready() -> void:
 	ui.add_child(fade)
 	if Env.s("BMX_SEED") != "":   # tests: a fixed world behind the title screen too
 		GameState.seed = int(Env.s("BMX_SEED"))
+	if Env.s("BMX_LEVEL") != "": GameState.level = Env.s("BMX_LEVEL")   # tests: a test level (playground)
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--level="): GameState.level = a.get_slice("=", 1)
 	if "--garage" not in OS.get_cmdline_user_args() and "--rider" not in OS.get_cmdline_user_args():   # straight to the garage: don't build the world first
 		var plain := true   # only a plain launch (or a title screenshot) gets the title backdrop; tests ride the real world
 		for a in OS.get_cmdline_user_args():
@@ -55,7 +58,7 @@ func _ready() -> void:
 				GameState.quit())
 	# command-line: --ride skips the title screen; --autotest=N rides N seconds unattended then quits
 	for a in OS.get_cmdline_user_args():
-		if a == "--ride": _start_ride()
+		if a == "--ride" or a.begins_with("--level="): _start_ride()
 		elif a == "--demo": _start_demo()
 		elif a.begins_with("--autotest"): _autotest(float(a.get_slice("=", 1)) if "=" in a else 10.0)
 		elif a == "--garage": _open_garage()
@@ -170,6 +173,7 @@ func _new_game(title := false) -> void:
 		await game.tree_exited
 	game = Game.new()
 	game.title_world = title   # the title screen's own backdrop world; a ride swaps it for the real one
+	game.level = "" if title else GameState.level
 	if title and not _title_keep.is_empty():   # the title world's terrain kept from before the garage
 		game.reuse = _title_keep
 		_title_keep = {}
@@ -204,7 +208,7 @@ func _set_riding(riding: bool) -> void:
 	game.hud.visible = riding
 	game.set_scenic(not riding)   # title screen: golden hour over the hills
 	if riding:
-		game.cam.set_mode(Settings.get_v("camera"))
+		game.cam.set_mode(game.cam.default_mode())
 
 # ---------------------------------------------------------------- the ride, built during the boot intro
 var ride_ready: Game            # the player's own world, built off-screen while the intro holds on black
@@ -249,6 +253,7 @@ func _prebuild_behind(intro: CrtIntro) -> void:
 
 func _take_prebuilt() -> bool:
 	if ride_ready == null or not is_instance_valid(ride_ready): return false
+	if GameState.level != "": return false   # a test level: the pre-built world is the normal one (kept for later)
 	var g := ride_ready
 	ride_ready = null
 	if _ride_sig_now() != _ride_sig:   # changed in the menus since: build it the normal way
@@ -566,6 +571,7 @@ var menu_page := "main"
 var menu_focus: Control   # where the pad cursor lands on this page (RIDE, NEXT)
 
 func _menu_back() -> void:
+	if menu_page == "levels": _menu_page_main(); return
 	if menu_page != "setup": return
 	if setup_step > 0: _menu_page_setup(setup_step - 1)
 	else: _menu_page_main()
@@ -582,8 +588,9 @@ func _menu_page_main() -> void:
 	fill.call()
 	var ride := _menu_button("RIDE", "", _menu_page_setup, true, true)
 	vb.add_child(ride)
-	# LEVELS: not made yet (DEMO is off the title menu: the in-game panel switches the AI rider on; _start_demo is kept)
-	vb.add_child(_menu_button("LEVELS", "Coming soon", Callable(), false, true))
+	if Env.s("BMX_LEVEL") == "": GameState.level = ""   # back on the title: RIDE / the garage ride the real world
+	# LEVELS: test levels (DEMO is off the title menu: the in-game panel switches the AI rider on; _start_demo is kept)
+	vb.add_child(_menu_button("LEVELS", "", _menu_page_levels, false, true))
 	vb.add_child(_menu_button("GARAGE", "", _open_garage, false, true))
 	vb.add_child(_menu_button("RIDER", "", _open_garage.bind("rider"), false, true))
 	vb.add_child(UITheme.spacer(Tokens.S2))
@@ -616,6 +623,27 @@ func _menu_page_main() -> void:
 	if is_instance_valid(menu_stats): menu_stats.visible = true
 	menu_focus = ride
 	ride.grab_focus.call_deferred()
+
+## LEVELS: hand-built places instead of the endless trail. For now only the test playground (scripts/levels:
+## measured jumps, drops, rollers, slopes, cambers, berms on a flat plane; every jump is measured on screen)
+func _menu_page_levels() -> void:
+	_menu_clear()
+	menu_page = "levels"
+	var vb := menu_col
+	var fill := func() -> void:
+		var c := Control.new(); c.size_flags_vertical = Control.SIZE_EXPAND_FILL; vb.add_child(c)
+	fill.call()
+	var cap := UITheme.caption("LEVELS")
+	cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(cap)
+	var pg := _menu_button("TEST PLAYGROUND", "Jumps, drops, rollers, slopes, berms · measured", func():
+		GameState.level = "playground"
+		_start_ride(), true, true)
+	vb.add_child(pg)
+	vb.add_child(_menu_button("BACK", "", _menu_page_main, false, true))
+	fill.call()
+	menu_focus = pg
+	pg.grab_focus.call_deferred()
 
 ## RIDE -> choose the bike and the time of day, then GO
 const GoggleLens = preload("res://scripts/rider/goggle_lens.gd")   # goggle lens = the ride's colour grade (RACE step)
@@ -1445,7 +1473,7 @@ func _start_ride() -> void:
 		fade.modulate.a = 1.0
 		await _new_game(false)
 		create_tween().set_ignore_time_scale().tween_property(fade, "modulate:a", 0.0, 0.5)
-	elif bike_dirty:
+	elif bike_dirty or (game and game.level != GameState.level):
 		bike_dirty = false
 		await restart_ride()
 	if menu: menu.queue_free(); menu = null
@@ -1510,7 +1538,7 @@ func _pause() -> void:
 		else: _resume())
 	pm.add_item("Resume", _resume)
 	pm.add_item("Back to start", func(): _resume(); game.respawn(false))
-	pm.add_item("New world", func(): _resume(); game.respawn(true))
+	if game == null or game.level == "": pm.add_item("New world", func(): _resume(); game.respawn(true))
 	pm.add_item("Tuning", _open_tuning)
 	pm.add_item("Photo mode", func(): _resume(); game.toggle_photo())
 	pm.add_item("Settings", _open_settings)

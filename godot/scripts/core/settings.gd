@@ -45,6 +45,7 @@ const ACTIONS := {
 	"photo":        ["Photo mode",               [KEY_O],              [],                         []],
 	"save_log":     ["Save ride log (last 60 s)", [KEY_F8],            [JOY_BUTTON_RIGHT_STICK],   []],
 	"debug_draw":   ["Physics debug overlay",    [KEY_F3],             [],                         []],
+	"diag":         ["Ride diagnostics (test level)", [KEY_F4],        [],                         []],
 	"demo":         ["Demo rider (AI rides)",    [KEY_F2],             [],                         []],
 }
 
@@ -451,6 +452,9 @@ func apply() -> void:
 		vp.use_occlusion_culling = get_v("occlusion")
 		RenderingServer.directional_soft_shadow_filter_set_quality([RenderingServer.SHADOW_QUALITY_HARD, RenderingServer.SHADOW_QUALITY_SOFT_LOW, RenderingServer.SHADOW_QUALITY_SOFT_HIGH, RenderingServer.SHADOW_QUALITY_SOFT_ULTRA][sq])
 	AudioServer.set_bus_volume_db(0, linear_to_db(maxf(0.0001, float(get_v("volume")))))
+	if AudioServer.get_bus_effect_count(0) == 0:   # a ceiling on the master: stacked sounds (crash + bone crunch + bed) hit 0 dBFS
+		var lim := AudioEffectHardLimiter.new(); lim.ceiling_db = -1.0; lim.pre_gain_db = 0.0
+		AudioServer.add_bus_effect(0, lim)
 	var sfx := AudioServer.get_bus_index("SFX")
 	if sfx < 0:
 		AudioServer.add_bus(); sfx = AudioServer.bus_count - 1

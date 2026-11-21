@@ -145,7 +145,7 @@ func _wood_sample(t: float, hits: Array) -> float:
 		var m := sin(TAU * f * dt) * exp(-dt * 38.0) + 0.5 * sin(TAU * f * 2.76 * dt) * exp(-dt * 70.0) + 0.25 * sin(TAU * f * 5.4 * dt) * exp(-dt * 140.0)
 		v += (m + (randf() * 2 - 1) * exp(-dt * 600.0) * 0.5) * h[2] * 0.55
 	return v
-func crash() -> void: shots.append(["thud", 0.0, 1.0]); shots.append(["crunch", 0.0, 0.5])
+func crash() -> void: shots.append(["thud", 0.0, 0.7]); shots.append(["crunch", 0.0, 0.32])
 ## a gear change: the user's shifter recording (game/shift_sound.gd)
 func shift(d: int = 1) -> void: if shift_snd: shift_snd.shift(d)
 
@@ -285,5 +285,5 @@ func _mix_shots(buf: PackedVector2Array, n: int) -> PackedVector2Array:
 		sh[1] = t0 + n / RATE
 	shots = shots.filter(func(sh): return sh[1] < (1.6 if sh[0] == "wood" else 0.8))
 	for i in n:
-		buf[i] = buf[i].clamp(Vector2(-1, -1), Vector2(1, 1))
+		buf[i] = Vector2(tanh(buf[i].x), tanh(buf[i].y))   # soft clip: stacked hits squash instead of cracking
 	return buf
