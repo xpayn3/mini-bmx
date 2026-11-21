@@ -1,2 +1,3 @@
 map_unfold_gravel.ogg: cut from "tires on gravel road 2" (freesound_community via Pixabay, id 32740), Pixabay Content License.
 paper_unfold.mp3: liecio "crumpling paper" (Pixabay id 109585), supplied by the user.
+chain_rub.ogg: 5-11 s (the first steady part) of "bicycle forward movement" (freesound_community via Pixabay, id 31186), crossfaded into a loop, Pixabay Content License.

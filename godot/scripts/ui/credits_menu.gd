@@ -22,6 +22,7 @@ const CREDITS := [
 	]],
 	["SOUND", [
 		["Tires on gravel road", "freesound_community via Pixabay", "Pixabay Content License"],
+		["Bicycle forward movement", "freesound_community via Pixabay", "Pixabay Content License"],
 		["Crumpling paper", "liecio via Pixabay", "Pixabay Content License"],
 	]],
 	["FONTS", [

@@ -95,28 +95,32 @@ func _ready() -> void:
 		fw.play()
 		fw_pb = fw.get_stream_playback()
 
-# chain rub: the gravel recording looped very quietly under everything; louder with wheel speed and
-# when the chain is loaded (pedalling), silent when stopped or in the air
-const CHAIN_DB := -27.0
+# chain rub: the "bicycle forward movement" recording (its first steady part, 5-11 s, crossfaded into a seamless
+# 6 s loop, assets/audio/chain_rub.ogg) kept quietly under everything while the cranks turn (the
+# freewheel synth has the coasting). Its
+# playback rate follows the wheel speed (CHAIN_REF m/s = as recorded), so the ticking speeds up / slows
+# down with the bike; louder with speed, fades out when coasting, stopped or in the air.
+const CHAIN_DB := -24.0
+const CHAIN_REF := 7.0
 var chain := AudioStreamPlayer.new()
 var chain_amp := 0.0
 
 func _setup_chain() -> void:
-	var s = load("res://assets/audio/chain_rub.mp3")
+	var s = load("res://assets/audio/chain_rub.ogg")
 	if s == null: return
-	if s is AudioStreamMP3: s.loop = true
+	if s is AudioStreamOggVorbis: s.loop = true
 	chain.stream = s
 	chain.bus = player.bus
 	chain.volume_db = -80.0
 	add_child(chain)
-	chain.play()
+	chain.play(randf() * 6.0)
 
 func _update_chain(dt: float, va: float, on_ground: bool, pedal: float) -> void:
 	if chain.stream == null: return
-	var t := clampf(va / 8.0, 0.0, 1.0) * (0.55 + 0.45 * clampf(pedal, 0.0, 1.0)) if on_ground else 0.0
-	chain_amp += (t - chain_amp) * minf(1.0, dt * 6.0)
+	var t := clampf(pedal, 0.0, 1.0) * smoothstep(0.3, 3.0, va) * (0.6 + 0.4 * clampf(va / 14.0, 0.0, 1.0)) if on_ground else 0.0
+	chain_amp += (t - chain_amp) * minf(1.0, dt * 5.0)
 	chain.volume_db = CHAIN_DB + linear_to_db(maxf(chain_amp, 0.0001)) if chain_amp > 0.003 else -80.0
-	chain.pitch_scale = 0.8 + clampf(va / 20.0, 0.0, 1.0) * 0.5
+	chain.pitch_scale = clampf(va / CHAIN_REF, 0.6, 1.4)
 
 func thud(power: float) -> void: shots.append(["thud", 0.0, clampf(power * 0.5, 0.2, 1.0)])
 func crunch() -> void: shots.append(["crunch", 0.0, 0.8])
@@ -205,7 +209,7 @@ func update_audio(dt: float) -> void:
 	_fill()
 	_fill_fw()
 	if Env.s("BMX_AUDIO_PROBE") != "" and Engine.get_process_frames() % 30 == 0:
-		print("FW v=%.1f pedal=%.2f clicks/s=%.0f amp=%.2f fast=%.2f peak=%.3f | GRAVEL surf=%d amp=%.2f wind=%.2f" % [va, st.pedal, fw_clicks, fw_amp, fw_fast, fw_peak, st.surf, g_amp, wind])
+		print("FW v=%.1f pedal=%.2f clicks/s=%.0f amp=%.2f fast=%.2f peak=%.3f | GRAVEL surf=%d amp=%.2f wind=%.2f | CHAIN db=%.1f rate=%.2f" % [va, st.pedal, fw_clicks, fw_amp, fw_fast, fw_peak, st.surf, g_amp, wind, chain.volume_db, chain.pitch_scale])
 		fw_peak = 0.0
 
 
