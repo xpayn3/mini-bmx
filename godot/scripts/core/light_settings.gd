@@ -16,6 +16,7 @@ const PARAMS := [
 	["moon", "Moonlight", 1.0, 0.0, 3.0, 0.05, "×"],
 	["exposure", "Exposure", 1.0, 0.5, 2.0, 0.02, "×"],
 	["haze", "Haze / fog", 1.0, 0.0, 3.0, 0.05, "×"],
+	["rider_match", "Rider in the scene's light (low sun)", 1.0, 0.0, 2.0, 0.05, "×"],
 	["rim", "Rim light (rider + bike edge glow)", 1.0, 0.0, 4.0, 0.05, "×"],
 	["rim_spec", "Rim light glints", 1.0, 0.0, 3.0, 0.05, "×"],
 	["rim_side", "Rim light from the side", 1.0, 0.0, 2.0, 0.05, "×"],

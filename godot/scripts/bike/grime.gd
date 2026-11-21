@@ -34,6 +34,9 @@ var wet := 0.0
 var blood := 0.0                  # blood stains on the rider + bike: builds with every crash, stays until a death + revive
 var _blood_on := false
 var enabled := true
+## light match (set by Game every frame, 0..1): the wet pass rolls off whatever on the rider + bike came out far
+## brighter than the scene (bright kit facing a low sun), so it sits in the light instead of glowing out of it
+var trim := 0.0
 var mud_col := Color(0.22, 0.145, 0.08)
 var _mats := {}                   # base material -> mud pass material (by bias)
 var _mud_by_bias := {}
@@ -512,7 +515,7 @@ func update(dt: float, bike_root: Node3D) -> void:
 	var d := dust if enabled else 0.0
 	var state := 0
 	if m > 0.002 or w > 0.01 or b > 0.002 or d > 0.002: state = 1
-	if w > 0.01 or warm_frames > 0: state = 2
+	if w > 0.01 or warm_frames > 0 or trim > 0.01: state = 2
 	var bon := b > 0.002 or warm_frames > 0
 	if warm_frames > 0:
 		warm_frames -= 1
@@ -524,6 +527,7 @@ func update(dt: float, bike_root: Node3D) -> void:
 		for mat in _mats: _set_pass(mat, state)
 	RenderingServer.global_shader_parameter_set("grime", Vector4(m, w, _t, b))
 	RenderingServer.global_shader_parameter_set("mud_col", mud_col)
+	RenderingServer.global_shader_parameter_set("rider_trim", trim)
 	RenderingServer.global_shader_parameter_set("grime_age", Vector4(dry, flake, 0.0, 0.0))
 	RenderingServer.global_shader_parameter_set("grime_dust", Vector4(dust_col.r, dust_col.g, dust_col.b, d))
 	var inv := bike_root.global_transform.affine_inverse()

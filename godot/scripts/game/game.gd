@@ -72,6 +72,7 @@ var rim: DirectionalLight3D
 var _rim_col := Color(1, 1, 1)
 var _rim_e := 0.0
 var _rim_tag_t := 0.0
+var _match := 0.0   # rider light match (Grime.trim), 0..1: how much the over-bright parts of the rider + bike are rolled off
 var _mist_y := NAN
 var _lens_now := ""
 var night_k := 0.0           # how much night (0 day .. 1 full night), from _apply_light
@@ -700,6 +701,11 @@ func _apply_light(h: float, L: Dictionary) -> void:
 	_rim_e = lerpf(lerpf(0.5, 1.3, gw), 1.0, tw * (1.0 - n))   # was 2.0 / 3.8 / 2.4: it blew the jersey + helmet out to white
 	_rim_e = lerpf(_rim_e, 0.8, n) * float(L.get("rim", 1.0))   # Light tab › Rim light
 	if rim != null: rim.light_specular = 1.2 * float(L.get("rim_spec", 1.0))
+	# light match: a low sun puts ~1 / sin(elevation) times more light on anything facing it than on the ground the
+	# exposure is set by, so bright kit colours burnt out to cream. Rolled off on the rider + bike only (Grime.trim).
+	_match = 0.0
+	if el_deg > -3.0:
+		_match = clampf((1.0 - smoothstep(8.0, 35.0, el_deg)) * smoothstep(-3.0, 5.0, el_deg) * float(L.get("rider_match", 1.0)), 0.0, 1.0)
 	_gg_glow = GG_GLOW * float(L.get("bloom", 1.0))
 	env.glow_intensity = _gg_glow
 	if dust and dust.sim != null:   # the dust's sky light: dim and cold at night (it glowed white in the dark)
@@ -2388,6 +2394,7 @@ func _process(dt: float) -> void:
 		dust.sim.cloud = Vector4(atmos.cloud_off.x, atmos.cloud_off.y, Atmos.CLOUD_DEPTH if atmos.clouds_on else 0.0, atmos.shade)
 	dust.sim_step(dt, drawn_pos, st.fwd(), atmos.wind)
 	_pk = _perf("dust_sim", _pk)
+	grime.trim = 0.0 if scenic or Env.s("BMX_NO_MATCH") != "" else _match
 	grime.update(dt, rig)
 	# speed feel: wider FOV and streaky screen edges when fast
 	# from ~25 km/h, full by ~75 km/h: wider FOV with the camera pulled in (dolly zoom), a surge of extra FOV
