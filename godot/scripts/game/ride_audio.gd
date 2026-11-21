@@ -102,7 +102,7 @@ func _ready() -> void:
 # freewheel synth has the coasting). Its
 # playback rate follows the wheel speed (CHAIN_REF m/s = as recorded), so the ticking speeds up / slows
 # down with the bike; louder with speed, fades out when coasting, stopped or in the air.
-const CHAIN_DB := -24.0
+const CHAIN_DB := 10.0   # the recording itself is very quiet (mean -40 dB, peaks -16 dB): -24 here was inaudible
 const CHAIN_REF := 7.0
 var chain := AudioStreamPlayer.new()
 var chain_amp := 0.0
@@ -129,7 +129,7 @@ func _update_chain(dt: float, va: float, on_ground: bool, st: BikePhysics) -> vo
 		_crank_w += (minf(w, 40.0) - _crank_w) * minf(1.0, dt * 10.0)
 	_crank_last = st.crank
 	var spinning := st.throttle_in >= 0.1 and st.pedal > 0.05 and on_ground
-	var t := smoothstep(1.5, 4.0, _crank_w) * smoothstep(0.3, 3.0, va) * (0.6 + 0.4 * clampf(va / 14.0, 0.0, 1.0)) if spinning else 0.0
+	var t := smoothstep(0.6, 2.0, _crank_w) * smoothstep(0.3, 3.0, va) * (0.6 + 0.4 * clampf(va / 14.0, 0.0, 1.0)) if spinning else 0.0
 	chain_amp += (t - chain_amp) * minf(1.0, dt * (5.0 if t > chain_amp else 14.0))
 	chain.volume_db = CHAIN_DB + linear_to_db(maxf(chain_amp, 0.0001)) if chain_amp > 0.003 else -80.0
 	chain.pitch_scale = clampf(va / CHAIN_REF, 0.6, 1.4)
