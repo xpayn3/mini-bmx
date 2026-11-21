@@ -1556,7 +1556,8 @@ func _unhandled_input(e: InputEvent) -> void:
 	if e.is_action_pressed("photo") and not e.is_echo(): toggle_photo(); return
 	if e.is_action_pressed("save_log") and not e.is_echo():   # the last 60 s of physics + inputs to a CSV
 		var lp := CrashLog.report("manual", "saved with the save-log button")   # report + ride log + recent log lines
-		flash("Report saved (last 60 s + log)" if lp != "" else "Couldn't save the report")
+		# all caps = the loud pop (the quiet info line went unnoticed), with the folder it went to
+		flash(("LOG SAVED · CRASHLOGS/" + lp.replace("\\", "/").get_file().to_upper()) if lp != "" else "LOG NOT SAVED")
 		return
 	if e.is_action_pressed("debug_draw") and not e.is_echo():
 		if DebugOverlay.available(): flash("Physics overlay " + ("on" if DebugOverlay.toggle() else "off"))

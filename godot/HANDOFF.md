@@ -524,6 +524,21 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   rider joints, all inputs) kept in a ring buffer; **R3 / F8** (`save_log`) writes it to
   a `crashlogs/manual_<date>/` report (`ride_log.csv` + the recent log + context, via `CrashLog.report`; last row = the press, `before_press` column).
   The way to find a glitch the player saw. Test: `BMX_SAVELOG=secs`.
+- **Lean limit shiver (2026-11-21)**: `lean_room` (the ground slope 0.3 / 0.5 m beside the tyres that limits the lean) was only
+  rate limited (3 rad/s), so every ripple went into `lean_lim`: laid on the limit at the top of a berm the bike, `counter` and
+  with them the whole rider shivered ~+-1 deg at ~7 Hz (the user: "vibration in corners"; pedalling or not). Now also eased
+  (6 /s, ~0.17 s). Found from an F8 ride log (`bike_lean` wobbling while `lean` was smooth); the synthetic test riders never sit
+  on that limit, so it did not show in `BMX_JITTER_ALL`. Replayed on that log: 0.40 -> 0.06 deg rms (estimate). `BMX_JDUMP=file.csv`
+  (+ `BMX_JITTER_ALL=1`) writes every drawn frame's rider joints. Playground graphs (Body tab) now also draw the nose manual
+  angle and the rider's own hip / chest roll (`Rider.roll_p` / `roll_c`) beside the bike's lean.
+- **Berm shake = `BikeRig.fit_wheels` flip-flop (2026-11-21, the real cause of "the rider shakes at the top of berms")**: the fit
+  assumed a metre of travel gives `up_f` / `up_r` (>= 0.4) of clearance. Laid right over (>= ~57 deg) on banked ground the wheel moves
+  mostly sideways as it compresses, toward ground that falls away: real gain ~0.85, so each pass overshot by more than it corrected, and
+  since the travel carries over between frames the wheels flipped between two answers on alternate frames; `unclip_tyres` then lifted
+  the bike 0 / 8 cm frame by frame and the rider (hips / chest feel the frame) with it. Now the gain is measured from the last pass
+  (secant, clamped), up to 6 passes. Seen in the F8 ride log as `tyre_lift` zigzagging 0.00 / 0.08 at `bike_lean` 1.2 (162 zigzags in
+  60 s; none below 0.8 rad). Test riders rarely lean that far on a bank, so no autotest shows it: check with an F8 log from a real ride
+  (`tyre_lift`, `drawn_y`, `pelvis_y` columns). F8 / R3 now pops "LOG SAVED · CRASHLOGS/<folder>" in the loud all-caps style.
 - **Lean vs terrain**: the lean only changes as fast as the tyres are loaded (`kL *= load`): over a crest / edge the
   bike carries its lean instead of snapping upright. The bank the bike feels changes at most 3 rad/s. The lean is
   limited against the ground where the leaned tyre swings to (0.3 / 0.5 m to the lean side at both wheels,

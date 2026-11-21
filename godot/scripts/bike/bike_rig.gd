@@ -855,11 +855,22 @@ func fit_wheels(top: Callable) -> void:
 	var mb := model.global_transform.basis
 	var up_f: float = maxf(0.4, (mb * susp.axis).normalized().y)   # world rise per metre of fork travel
 	var up_r: float = maxf(0.4, mb.y.normalized().y)                 # ... per metre of rear axle rise
-	for it in 3:
+	# how much clearance a metre of travel really gives is MEASURED from the last pass (secant), starting from the
+	# axis' rise. Laid right over in a berm the wheel moves mostly sideways as it compresses, toward ground that
+	# falls away: the real gain was ~0.85 where the axis' rise said 0.4, every pass overshot by more than it
+	# corrected, and (the travel carries over from frame to frame) the wheels flipped between two answers on
+	# alternate frames - the bike and the rider jumped ~8 cm up and down every frame at the top of a berm
+	var gF := up_f; var gR := up_r
+	var pdF := 0.0; var pdR := 0.0; var pxF := 0.0; var pxR := 0.0
+	for it in 6:
 		var dF := tyre_depth(wheel_f, wheel_rf, top)
 		var dR := tyre_depth(wheel_r, wheel_rr, top)
-		var nF := clampf(susp.xF + dF / up_f, susp.F["min"], susp.F["max"]) if susp.has_f else 0.0
-		var nR := clampf(susp.xR + dR / up_r, susp.R["min"], susp.R["max"]) if susp.has_r else 0.0
+		if it > 0:
+			if absf(susp.xF - pxF) > 1e-4: gF = clampf((pdF - dF) / (susp.xF - pxF), up_f * 0.7, 4.0)
+			if absf(susp.xR - pxR) > 1e-4: gR = clampf((pdR - dR) / (susp.xR - pxR), up_r * 0.7, 4.0)
+		pdF = dF; pdR = dR; pxF = susp.xF; pxR = susp.xR
+		var nF := clampf(susp.xF + dF / gF, susp.F["min"], susp.F["max"]) if susp.has_f else 0.0
+		var nR := clampf(susp.xR + dR / gR, susp.R["min"], susp.R["max"]) if susp.has_r else 0.0
 		if absf(nF - susp.xF) < 5e-4 and absf(nR - susp.xR) < 5e-4:
 			break
 		susp.xF = nF; susp.xR = nR
