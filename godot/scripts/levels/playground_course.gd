@@ -224,6 +224,41 @@ class Lane:
 		camber.append([u0, u0 + len_m + 12.0, tan(deg_to_rad(deg))])
 		end(); flat(RUN * 0.5)
 
+	# ---- rocks: the game's own rocks (same mesh, same collider / dome recipe as TerrainChunkBuilder._rock_gardens) ----
+	var rock_specs: Array = []   # [u, v (across), sc, sx, sy, yaw] -> PlaygroundCourse.rocks
+
+	## how high a rock of scale sc with height factor ky (sy = sc * ky) stands over the ground
+	static func rock_top(sc: float, ky: float) -> float:
+		return sc * (0.9 * ky - 0.3)
+
+	## n rocks of one size in a row on the lane's middle, `gap` m apart (ride straight over them)
+	func rock_row(sc: float, ky: float, n: int, gap: float) -> void:
+		var hh := rock_top(sc, ky)
+		begin("rock_%s" % _n(snappedf(hh * 100.0, 1.0)), "ROCK %.0f cm" % (hh * 100.0), "%d in a row, %.0f cm across, %.0f m apart" % [n, sc * 2.25 * 0.9 * 100.0, gap], false)
+		flat(2.0)
+		for i in n:
+			rock_specs.append([u(), 0.0, sc, sc * 1.25, sc * ky, 0.7 * i])
+			flat(gap)
+		end(); flat(14.0)
+
+	## a rock garden laid out like the trail's (4 rocks per 2 m of trail, sizes 13..47 cm scale); `clean` leaves
+	## the trail's weaving clean line, else rocks everywhere
+	func rock_garden(len_m: float, seed_: int, clean: bool) -> void:
+		begin("garden_%s" % ("line" if clean else "full"), "ROCK GARDEN" + ("" if clean else " (no clean line)"), "like the trail's, %.0f m" % len_m, false)
+		var r := RandomNumberGenerator.new(); r.seed = seed_
+		var u0 := u()
+		for i in int(len_m / 2.0):
+			var line_a := sin(i * 0.23) * hw * 0.55
+			for k in 4:
+				var a := (r.randf() * 2.0 - 1.0) * (hw - 0.15)
+				var du := r.randf() * 2.0
+				if clean and absf(a - line_a) < 0.45 and r.randf() < 0.8: continue
+				var r1 := r.randf()
+				var sc := 0.13 + r1 * r1 * 0.34
+				rock_specs.append([u0 + i * 2.0 + du, a, sc, sc * (1.0 + r.randf() * 0.5), sc * (0.5 + r.randf() * 0.35), r.randf() * TAU])
+		flat(len_m)
+		end(); flat(RUN * 0.6)
+
 	static func _n(v: float) -> String:
 		return str(snappedf(v, 0.01)).trim_suffix(".0")
 
@@ -285,6 +320,9 @@ var lanes: Array = []
 var bowls: Array = []
 var feats: Array = []          # every lane feature + bowl, flat
 var bounds := Rect2()          # the whole playground (x, z)
+var rocks: Array = []          # {x, z, r, top, base, sx, sy, sc, yaw}: colliders as the ride's Terrain makes them
+var _rock_cells := {}          # Vector2i (2 m cells) -> Array of rocks reaching into it
+const ROCK_CELL := 2.0
 
 
 func _init() -> void:
@@ -329,6 +367,11 @@ func _build() -> void:
 	l = _lane("camber", "CAMBER", 126.0, 12.0, 4.0)
 	for cb in [5, 10, 15, 20, 25, 30, 35]:
 		l.tilt(cb, 24.0)
+	# the trail's rocks: single sizes from a pebble to one too tall to roll over, then two rock gardens
+	l = _lane("rocks", "ROCKS", -24.0)
+	for rk in [[0.13, 0.6, 5, 3.0], [0.22, 0.65, 5, 3.0], [0.3, 0.7, 4, 4.0], [0.38, 0.75, 4, 4.0], [0.47, 0.8, 3, 5.0], [0.47, 0.85, 3, 5.0], [0.8, 0.8, 1, 5.0]]:
+		l.rock_row(rk[0], rk[1], rk[2], rk[3])
+	l.rock_garden(40.0, 7, true); l.rock_garden(40.0, 19, false)
 	for ln in lanes:
 		(ln as Lane).flat(20.0)
 		ln.rect = _snap(Rect2(X0, ln.z - ln.band, ln.length(), ln.band * 2.0))
@@ -345,6 +388,17 @@ func _build() -> void:
 		bowls.append(bw)
 		feats.append({"id": bw.id, "name": bw.title, "desc": "banked ring, %.0f m wide, ride in from the west" % bw.W, "bowl": bw,
 			"lane": "", "u0": 0.0, "u1": 0.0, "lip": -1.0, "top": bw.W * bw.tn})
+	for ln in lanes:
+		for s in (ln as Lane).rock_specs:
+			var sc: float = s[2]
+			var rk := {"x": X0 + s[0], "z": ln.z + s[1], "r": (s[3] + sc) * 0.45, "base": 0.0, "top": -sc * 0.3 + s[4] * 0.9, "sink": sc * 0.3,
+				"sx": s[3], "sy": s[4], "sc": sc, "yaw": s[5]}
+			rocks.append(rk)
+			for gx in range(floori((rk.x - rk.r) / ROCK_CELL), floori((rk.x + rk.r) / ROCK_CELL) + 1):
+				for gz in range(floori((rk.z - rk.r) / ROCK_CELL), floori((rk.z + rk.r) / ROCK_CELL) + 1):
+					var key := Vector2i(gx, gz)
+					if not _rock_cells.has(key): _rock_cells[key] = []
+					_rock_cells[key].append(rk)
 	bounds = Rect2(X0 - 40.0, -60.0, 700.0, 300.0)
 	for ln in lanes: bounds = bounds.merge(ln.rect.grow(20.0))
 	for bw in bowls: bounds = bounds.merge(bw.rect.grow(20.0))
@@ -381,6 +435,24 @@ func height(x: float, z: float) -> float:
 		if (b as Bowl).rect.has_point(Vector2(x, z)):
 			return b.at(x, z)
 	return 0.0
+
+
+## the rocks reaching into (x, z)'s cell (Terrain.colliders_near)
+func rocks_near(x: float, z: float) -> Array:
+	return _rock_cells.get(Vector2i(floori(x / ROCK_CELL), floori(z / ROCK_CELL)), [])
+
+
+## the ground with a dome over every rock: exactly Terrain.height()'s formula
+func height_rocks(x: float, z: float) -> float:
+	var g := height(x, z)
+	for c in rocks_near(x, z):
+		var dx: float = x - c.x
+		var dz: float = z - c.z
+		var q: float = (dx * dx + dz * dz) / (c.r * c.r)
+		if q < 1.0:
+			var hh: float = Terrain.dome_h(c.base, c.top, c.sink, q)
+			if hh > g: g = hh
+	return g
 
 
 func jump_mask(x: float, z: float) -> float:

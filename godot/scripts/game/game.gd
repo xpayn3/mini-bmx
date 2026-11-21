@@ -1689,6 +1689,10 @@ var _base_bins := {}
 var _v_prev_fx := 0.0; var _acc_fx := 0.0; var _surge := 0.0   # speed feel: last speed, its acceleration (per physics step), surge
 var ride_log := RideLog.new()   # the last 60 s, saved with R3 / F8 (save_log)
 var _log_lift := 0.0
+const LIFT_UP := 2.4     # m/s the drawn bike may rise to clear its tyres off the ground (4 cm a frame at 60 fps)
+const LIFT_DOWN := 0.6   # m/s it settles back
+var _lift_s := 0.0       # the eased tyre-unclip lift
+var _frame_y := NAN      # where the physics put the frame this frame (before the lift): what the rider's legs feel
 var jitter_on := Env.s("BMX_JITTER_ALL") != ""
 var _jit_skip := 0
 var _berm_hold := 0.0
@@ -2164,6 +2168,15 @@ func _process(dt: float) -> void:
 		var _axR: Vector3 = rig.wheel_r.global_position
 		var was: float = rig.unclip_tyres(terrain.top_height)
 		_log_lift = maxf(was, 0.0)
+		# the lift is eased: up at most LIFT_UP (a tyre may dip into a rock for a frame or two), back down at
+		# LIFT_DOWN. Taken at once it popped the whole bike and rider 5-20 cm in one frame and dropped them the
+		# next, over any rock the suspension's drawn travel couldn't take
+		var need: float = rig.position.y - _pre_y
+		if st.air or st.crash_on or absf(need - _lift_s) > 0.5: _lift_s = need
+		elif need > _lift_s: _lift_s = minf(need, _lift_s + LIFT_UP * mdt)
+		else: _lift_s = maxf(need, _lift_s - LIFT_DOWN * mdt)
+		rig.position.y = _pre_y + _lift_s
+		_frame_y = _pre_y
 		if st.bank_probe and was > 0.05 and not st.air:   # tests: the drawn bike lifted a lot (it "shoots up")
 			print("BASE over ground=%.3f  axleF over base=%.3f  susp xF=%.3f xR=%.3f  y_draw-y=%.3f" % [_base_over, _axF_over_base, rig.susp.xF if rig.susp else 0.0, rig.susp.xR if rig.susp else 0.0, y_draw - st.y])
 			print("LIFT %.3f m  bike_lean=%.2f lean=%.2f bank=%.2f v=%.1f  dF=%.3f dR=%.3f  axleF-ground=%.3f axleR-ground=%.3f  field-vs-mesh F=%.3f R=%.3f" % [was, st.bike_lean, st.lean, st.bank, st.v, _dF0, _dR0,
@@ -2258,6 +2271,7 @@ func _process(dt: float) -> void:
 		pi["yawRate"] = _yaw_s
 		pi["counter"] = _mcap("counter", st.counter, pdt)
 		pi["rockRoll"] = st.rock
+		pi["frameY"] = _frame_y
 		pi["headRoll"] = _mcap("head_roll", st.bike_lean * 0.85, pdt)
 		pi["absorb"] = _mcap("absorb", clampf(body_y - y_draw, -T.legComp, T.legExt), pdt)
 		pi["pitch"] = p_draw
@@ -2274,7 +2288,12 @@ func _process(dt: float) -> void:
 		pi["tall"] = 1.0 if scenic else 0.0
 		pi["lookYaw"] = _look_yaw
 		pi["lookPitch"] = _look_pitch
-		pi["slope"] = st._g_pitch
+		# the LAND's slope under the two wheels (deck_height: no rock / log domes). With the domes in it the slope
+		# flipped +-6 deg as each wheel crossed a stone, and the rider read every rock as a climb / a wheelie
+		var sf: Vector3 = phys.fwd()
+		pi["slope"] = atan2(terrain.deck_height(phys.x + sf.x * (phys.L - phys.BB_REAR), phys.z + sf.z * (phys.L - phys.BB_REAR))
+			- terrain.deck_height(phys.x - sf.x * phys.BB_REAR, phys.z - sf.z * phys.BB_REAR), phys.L)
+		pi["frontUp"] = st.wheelie_up   # the balance manual's angle: only a held front counts as a wheelie pose
 		pi["airTilt"] = _atilt_s
 		pi["bodyLat"] = _blat_s
 		pi["airWhip"] = _awhip_s

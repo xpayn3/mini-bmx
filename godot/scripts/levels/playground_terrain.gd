@@ -34,6 +34,7 @@ func update_stream(_px: float, _pz: float, _budget_ms: float = 4.0, _sync_r := -
 	_built = true
 	var t0 := Time.get_ticks_msec()
 	_build_ground()
+	_build_rocks()
 	_build_signs()
 	chunk_serial += 1
 	print("PLAYGROUND built ms=", Time.get_ticks_msec() - t0, " lanes=", course.lanes.size(), " features=", course.feats.size())
@@ -60,7 +61,7 @@ func _height0(x: float, z: float) -> float:
 	return course.height(x, z)
 
 func height(x: float, z: float) -> float:
-	return course.height(x, z)
+	return course.height_rocks(x, z)   # (domes over the ROCKS lane's rocks, as in the world)
 
 func deck_height(x: float, z: float) -> float:
 	return course.height(x, z)
@@ -69,7 +70,7 @@ func mesh_height(x: float, z: float) -> float:
 	return course.height(x, z)
 
 func top_height(x: float, z: float) -> float:
-	return course.height(x, z)
+	return course.height_rocks(x, z)
 
 func grid_height(x: float, z: float) -> float:
 	return course.height(x, z)
@@ -99,8 +100,8 @@ func ground_color(x: float, z: float, _ny: float = 1.0) -> Color:
 func trail(x: float, z: float) -> float:
 	return 1.0 if course.is_dirt(x, z) else 0.0
 
-func colliders_near(_x: float, _z: float) -> Array:
-	return []
+func colliders_near(x: float, z: float) -> Array:
+	return course.rocks_near(x, z)
 
 func take_pack(_x: float, _y: float, _z: float, _r: float = 1.6):
 	return null
@@ -139,6 +140,21 @@ func _build_ground() -> void:
 	for b in course.bowls:
 		_add_mesh(_grid_mesh(b.rect, 0.4, 0.4), "Bowl_" + b.id)
 	_add_mesh(_plane_mesh(), "Plane")
+
+
+## the ROCKS lane: the world's own rock / pebble meshes, placed as TerrainChunkBuilder places a rock garden's
+func _build_rocks() -> void:
+	TerrainGeo.ensure()
+	var root := Node3D.new()
+	root.name = "Rocks"
+	add_child(root)
+	for c in course.rocks:
+		var mi := MeshInstance3D.new()
+		var nm := "pebble" if c.sc < 0.2 else "rock"
+		mi.mesh = TerrainGeo.MESH[nm]
+		mi.material_override = TerrainGeo.MAT.get(nm, TerrainGeo.MAT["rock"])
+		mi.transform = Transform3D(Basis(Vector3.UP, c.yaw).scaled_local(Vector3(c.sx, c.sy, c.sc)), Vector3(c.x, -c.sc * 0.3, c.z))
+		root.add_child(mi)
 
 
 func _add_mesh(m: ArrayMesh, nm: String) -> void:
