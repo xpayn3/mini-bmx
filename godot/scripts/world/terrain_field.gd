@@ -75,6 +75,7 @@ class Feat:
 	var dig: TrailFeatures.Profile
 	var half: float
 	var s: float = 0.0
+	var air := PackedFloat64Array()   # TrailFeatures.AIR of its type: the stretches riders fly over
 	var canyon := false   # rope bridge: a canyon cut across the land (canyon_rims), not a dig along the trail
 	## how far before / after the feature the trail is eased onto its plane (b0 .. b1). A rope bridge's plane can sit
 	## a metre or two off the trail: eased in over 5 m that was a kicker right before the rim (launched into the deck)
@@ -144,6 +145,7 @@ var fo_plane: float = 0.0
 var fo_dig: float = 0.0
 var fo_wood: float = 0.0
 var fo_has_wood: bool = false
+var fo_air: float = 0.0   # 0..1: riders are in the air over this spot of a jump (no ridden lines drawn)
 var _fo_x: float = NAN
 var _fo_z: float = NAN
 # wooden deck under the last ground() sample
@@ -754,6 +756,7 @@ func make_feat(x: float, z: float, dx: float, dz: float, type: String, b0: float
 	f.wood = woods.get(type)
 	f.dig = digs.get(type)
 	f.canyon = type == "rope"
+	f.air = PackedFloat64Array(TrailFeatures.AIR.get(type, []))
 	f.ramp = ROPE_RAMP if type == "rope" else 6.0
 	if type == "rhythm" or type == "flow":
 		f.half = 2.3
@@ -981,6 +984,10 @@ func _feat_at(j: Feat, x: float, z: float) -> void:
 	var ph := j.prof.ev(u) * acr
 	if ph > fo_h:
 		fo_h = ph
+	for k in range(0, j.air.size(), 2):
+		var av := sm(j.air[k], j.air[k] + 0.35, u) * (1.0 - sm(j.air[k + 1] - 0.9, j.air[k + 1] + 0.9, u)) * acr
+		if av > fo_air:
+			fo_air = av
 	if j.dig != null:
 		var dh := j.dig.ev(u) * acr
 		if dh < fo_dig:
@@ -1012,7 +1019,7 @@ func jump_eval(x: float, z: float) -> void:
 		return
 	var cx := floori(x / JC)
 	var cz := floori(z / JC)
-	fo_h = 0.0; fo_m = 0.0; fo_plane = 0.0; fo_dig = 0.0; fo_wood = 0.0; fo_has_wood = false
+	fo_h = 0.0; fo_m = 0.0; fo_plane = 0.0; fo_dig = 0.0; fo_wood = 0.0; fo_has_wood = false; fo_air = 0.0
 	for dz in range(-1, 2):
 		for dx in range(-1, 2):
 			var key := (cx + dx) * 1048576 + cz + dz

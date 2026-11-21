@@ -253,6 +253,11 @@ func _build() -> void:
 	for o in NV * NV * 4:
 		pT[o] = roundi(clampf(T2a[o], 0, 1) * 255)
 	out["trail2_img"] = Image.create_from_data(NV, NV, false, Image.FORMAT_RGBA8, pT)
+	var T3a: PackedFloat32Array = gs["T3"]
+	var pA := PackedByteArray(); pA.resize(NV * NV)
+	for o in NV * NV:
+		pA[o] = roundi(clampf(T3a[o], 0, 1) * 255)
+	out["trail3_img"] = Image.create_from_data(NV, NV, false, Image.FORMAT_R8, pA)
 	# ---- grass field data (world/grass_field.gd): the ground's own heights + land colour, density in alpha ----
 	var DRY: PackedFloat32Array = gs["DRY"]
 	var pK := PackedByteArray(); pK.resize(NV * NV * 4)
@@ -311,6 +316,7 @@ func ground_stage(ox: float, oz: float) -> Dictionary:
 	var pre_b := PackedFloat64Array(); pre_b.resize(NV * NV * 2)
 	var TR := PackedFloat32Array(); TR.resize(NV * NV * 4)   # trail frame for ground.gdshader: across, line offset, along, run-off skid's place
 	var T2 := PackedFloat32Array(); T2.resize(NV * NV * 4)   # road, dry biome, built jump, run-off skid's strength
+	var T3 := PackedFloat32Array(); T3.resize(NV * NV)       # riders in the air over a jump here
 	for iz in range(-1, N + 2):
 		for ix in range(-1, N + 2):
 			var x := ox - S / 2 + ix * d
@@ -337,6 +343,7 @@ func ground_stage(ox: float, oz: float) -> Dictionary:
 				T2[o * 4] = f.q_rd if on else 0.0
 				T2[o * 4 + 1] = f.cp_dry
 				T2[o * 4 + 2] = jm
+				T3[o] = f.fo_air
 				T2[o * 4 + 3] = (f.cROS[f.q_i] + (f.cROS[f.q_i + 1] - f.cROS[f.q_i]) * f.q_t) if on else 0.0
 	var verts := PackedVector3Array(); verts.resize(NV * NV)
 	var norms := PackedVector3Array(); norms.resize(NV * NV)
@@ -365,7 +372,7 @@ func ground_stage(ox: float, oz: float) -> Dictionary:
 			DRY[o] = pre_b[o * 2]
 			LG[o] = f.cl_g
 			LD[o] = f.cl_d
-	return {"G": G, "verts": verts, "norms": norms, "uvs": uvs, "LG": LG, "LD": LD, "TW": TW, "SW": SW, "DRY": DRY, "TR": TR, "T2": T2}
+	return {"G": G, "verts": verts, "norms": norms, "uvs": uvs, "LG": LG, "LD": LD, "TW": TW, "SW": SW, "DRY": DRY, "TR": TR, "T2": T2, "T3": T3}
 
 
 ## clears grass density (alpha of the grass_img bytes) within r of (x, z), soft over the outer 30 %
