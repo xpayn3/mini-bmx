@@ -230,6 +230,19 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   stored in course order). Chunks read rocks / stakes / fences from per-chunk buckets, route features are
   binary-searched — nothing scans the whole course. `tools/trail_grow_probe.gd` checks all of it.
 
+- **Mountains for ever + technical sections** (2026-11-21, user: "add mountains ... some gentle climbs ... missing nice tight
+  turns for slow speed, more technical parts"). `TerrainField.range_at(x)` (mirrored in `TerrainFieldCs`, integer hash of slot +
+  seed, no table): from `RANGE_X0` 2100 m one mountain every `RANGE_P` 2800 m on the trail's corridor: a climb averaging
+  `RANGE_UP` 4.2 % (40-54 m of height, ~1-1.3 km), a short level top, a descent averaging `RANGE_DOWN` 7.5 %; `hill()` adds it,
+  `mtn()` masks it like the first mountain (calm land, no wild terrain / side paths on it). The trail follows it by itself (its
+  height past the first mountain is the smoothed land). `TrailCourse._tech` (section code 6, kind SWITCH): a stack of tight
+  hairpins, 5-6.5 m radius, 8-17 m legs, now and then a left-right flick in a leg; picked for ~40 % of sections on a mountain's
+  descent (`rg_down`), ~13 % elsewhere; no jump lines up a climb. The first 1.3 km of every seed is unchanged, everything
+  after is laid out differently than before. Measured on seed 4242 over 13 km: tops at 43-54 m, steepest 100 m of trail +10.6 %
+  / -13.3 % (the rolling dips ride on top of the mean grades). Tests: `BMX_TRAIL_FEAT=x<metres>` starts that far along x
+  (`x2800` = the foot of the second mountain; within the 4 km laid out at start), `BMX_TRAIL_FEAT=tech` 40 m before the first
+  hairpin stack past the first mountain. Not done: the hairpin legs sit ~10-14 m apart, so their dirt nearly joins.
+
 - **Livelier trail** (`TrailCourse._shape_profile`, `trail_arch.gd`): roads bend more often and tighter; past the mountain the trail height gets rolling dips (~60 m); **ridge-and-cliff drops** (`drops`, ~1 per 3 km: the trail climbs ~4 % onto a ridge above the land, a short level run, then falls 3-6 m, and 2 % of slots 12-22 m: rare "gem" cliffs; route features skip them) and **rock tunnels / overhangs** (`chunk_arches`, merged blob-rock mesh, visual only, no collision). All deterministic by slot hash + seed, nothing near the laid-out end changes when the trail grows. **Gorge bridges** (route feature `gorge`, rare on straight road: a 36 m wooden bridge, deck on stilts, over a 9 m deep crevasse ~6.4 m wide; Wood kind 2 now takes its end from `u1`; mirrored in `TerrainFieldCs.cs`, `terrain_cs_cmp` must stay EXACT; HUD alert GORGE BRIDGE). Test: `BMX_TRAIL_FEAT=gorge` (try `BMX_SEED=5`), `BMX_TRAIL_FEAT=arch|<n>` spawns 80 m before the first arch / the n-th drop; `BMX_GATE_PROBE=1` prints `ARCHES` lines; `trail_grow_probe` prints `STATS`.
 
 - **Rope bridges** (route feature `rope`, `world/rope_bridge.gd` + C# `world/RopeBridgeSim.cs`): a 46 m feature, a swinging rope
@@ -269,15 +282,23 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   `BMX_ROPE_SAG/LAND/BEND/ANCHOR` overrides. Photo tests:
   `BMX_PHOTO_AT=x,y,z,lx,ly,lz` puts the photo camera at a world point looking at another (FEATSPAWN prints the feature's `at` / `dir`).
 
-- **Trail surface scans** (2026-11-21, `world/ground.gdshader`, `Terrain.trail_textures()`, `assets/textures/trail/` + `SOURCE.txt`): the
-  trail is four Poly Haven 4K scans (CC0): packed dirt (`brown_mud_02`), wet mud (`brown_mud_03`, darker + glossier, sun glint in
-  `light()`), stones in dirt (`rocky_trail`), loose gravel (`gravelly_sand`). Each is stored as a colour RATIO to its own mean
-  (`*_col.jpg`, slow light drifts flattened) + normal xy / roughness (`*_nr.jpg`), made by `godot/tools/prep_trail_textures.py`, so
-  the baked biome trail colour still decides the colour. No repeating tile: each scan has its own size + turn, they are mixed by
-  world noise patches (10-20 m) with a height blend, plus a slow brightness drift; mud favours dark dirt, gravel pale dirt and the
-  trail's edges, stones the rock faces. Only the scans that can show at a pixel are read (1-2 of 4, `need`), nothing past ~0.5 m
-  per pixel; the old procedural pebbles are gone. Frame rate measured the same or a touch better than before (87 -> 89-98 fps
-  uncapped, minimised). Uniforms `trail_scans` (0 = plain colour) / `trail_bump`. Playground / vista ground don't use it.
+- **Trail surface = procedural mask layers** (2026-11-21, `world/ground.gdshader`; the four-scan version was rejected the same
+  day: "weird, tiled, cut off with an ugly straight edge"). Colour is the baked biome trail colour x small procedural steps; the
+  scans are only fine relief (normals + roughness of `brown_mud_02` packed dirt at two sizes / turns + `gravelly_sand` where
+  loose; `Terrain.trail_textures()`, `assets/textures/trail/`; the colour scans + the other two were deleted). Each chunk bakes
+  the trail's own frame (`TerrainChunkBuilder.ground_stage` / C# `build_ground`, keys `TR` / `T2`): `trail_tex` RGBAF = metres
+  across, the ridden line's place, metres along, a run-off skid's place; `trail2_tex` RGBA8 = road, dry biome, built jump,
+  skid strength. Masks in the shader: `m_driven` (nine riders' own narrow lines, tables `LG` / `LD` / `LW`: four within a few cm on the racing line = the most worn core, the rest a bit tighter / wider, one cutting corners near the middle, one running wide, the outer ones wandering and coming and going (user: "majority on the perfect line, some more outside, some more inside, don't just make one thick line") + jumps: smoother, tighter,
+  less relief), `m_loose` (grit beside the line / at the edges), `m_tracks` (three riders' tyre prints inside the line),
+  `m_skid`, `m_wet` / `m_puddle` (roads only, in the worn line, level ground, not dry biomes, in stretches; mirror-smooth,
+  visual only: no splash / grip change yet). **Bikes only: never two parallel wheel ruts** (user; `line()` lost its road ruts
+  in both fields). **The line is a racing line** (user: "a perfect line, not random"): `TrailCourse._racing_line` -> `LN` =
+  short average of the curvature minus a long one (inside at the apex, outside before / after), read by `line_off(x, z)` in
+  both fields (the 3.5 cm worn dip + the baked darkening follow it). **Run-offs** (`RO` / `ROS`): at ~40 % of sharp corners
+  (|KAP| peak > 0.035) a skid leaves the line a few metres before the apex and goes straight on off the outside, cut into
+  the grass. Tests: `BMX_TRAIL_DEBUG=1` shows the masks (red driven, green loose, blue puddle, white prints, yellow skids),
+  `BMX_TRAIL_PUDDLES=0|2` (none / on every wet road). Uniforms `trail_fx`, `trail_bump`, `trail_puddles`. Playground / vista
+  ground don't use it.
 
 - **Grass carpet** (2026-11-20, `world/grass_field.gd` `GrassField` + `shaders/grass_field.gdshader`, made by `Game._ready`): a
   Zelda-style field of blades over the whole land round the camera, built on the GPU; nothing stored per blade. Each chunk bakes
