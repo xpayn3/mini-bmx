@@ -100,8 +100,8 @@ func _ready() -> void:
 
 func _input(e: InputEvent) -> void:
 	if _done or _skip >= 0.0 or t < 0.3: return
-	var hit: bool = (e is InputEventKey and e.pressed and not e.echo) or (e is InputEventMouseButton and e.pressed) \
-		or (e is InputEventJoypadButton and e.pressed)
+	# only Esc skips (mouse clicks, other keys and pad buttons do nothing)
+	var hit: bool = e is InputEventKey and e.pressed and not e.echo and e.keycode == KEY_ESCAPE
 	if hit:
 		_skip = 0.0
 		get_viewport().set_input_as_handled()
