@@ -27,6 +27,13 @@ var BT := PackedFloat32Array()
 var E := PackedFloat32Array()
 var RD := PackedFloat32Array()
 var RK := PackedFloat32Array()
+## the racing line: where riders' tyres have worn the trail, in metres across from the centreline (+ = the side
+## q_a is positive on). Wide into a turn, inside at the apex, wide out again.
+var LN := PackedFloat32Array()
+## run-offs: where a rider who braked too late went straight on at a corner. RO = that skid's place across the
+## trail at each point, ROS = how strong (0 = none here)
+var RO := PackedFloat32Array()
+var ROS := PackedFloat32Array()
 var length: float = 0.0
 var drops: Array = []   # [[i0, i1]] centreline index ranges of drop-offs / cliffs (no route features there)
 # dense spatial hash of segments by midpoint
@@ -212,6 +219,7 @@ func _run(sec: Array) -> void:
 		3: _chute(sec[1])
 		4: _jump_line()
 		5: _esses(_x + 50)
+		6: _tech(sec[1])
 
 
 func _attempt(fns: Array) -> bool:
@@ -287,6 +295,34 @@ func _esses(end_x: float, kind: int = ESSES) -> void:
 	_turn_to(0, 14, kind)
 
 
+## a slow technical section: a stack of tight hairpins (5-6.5 m radius, about walking-to-jogging pace on a bike),
+## short legs between them, now and then a quick flick left-right in a leg
+func _tech(end_x: float) -> void:
+	var dir := 1 if _r.next() < 0.5 else -1
+	if absf(_off()) > 25:
+		dir = -int(signf(_off()))
+	var alpha := (14 + _r.next() * 16) * D2R
+	var R := 5.0 + _r.next() * 1.5
+	var k := 0
+	_turn_to(dir * (PI / 2 - alpha), 8 + _r.next() * 3, SWITCH)
+	while k < 7:
+		var leg := 8 + _r.next() * 9
+		if _r.next() < 0.35:
+			_straight(leg * 0.4, SWITCH)
+			_arc(-dir * 0.7, 6.5, SWITCH)
+			_arc(dir * 0.7, 6.5, SWITCH)
+			_straight(leg * 0.3, SWITCH)
+		else:
+			_straight(leg, SWITCH, 0.3)
+		if _x > end_x and k >= 3:
+			break
+		dir = -dir
+		k += 1
+		_turn_to(dir * (PI / 2 - alpha), R, SWITCH)
+	_turn_to(0, 9, SWITCH)
+	_straight(6, SWITCH)
+
+
 func _chute(end_x: float) -> void:
 	_turn_to((_r.next() - .5) * 16 * D2R, 18, ROCKS)
 	_straight(maxf(26, end_x - _x + 6), ROCKS, 0.25)
@@ -322,11 +358,29 @@ func _build() -> void:
 			# past the mountain: the trail runs on through the hills, never long without a twist
 			_attempt([[0, 40 + _r.next() * 90]])
 			var end_x := _x + 50 + _r.next() * 70
-			if pick2 < 0.3:
+			# what comes next depends on the mountain under it (TerrainField.range_at): its descent is where the slow
+			# technical riding is (tight hairpin stacks, switchbacks, rock chutes); no jump lines up a climb
+			_M.range_at(_x + 30.0)
+			var down: bool = _M.rg_down > 0.5
+			var climbing: bool = _M.hill(_x + 60.0, _M.zc(_x + 60.0)) > _M.hill(_x, _M.zc(_x)) + 1.5
+			if down:
+				if pick2 < 0.4:
+					_attempt([[6, end_x], [1, end_x], [2, end_x]])
+				elif pick2 < 0.62:
+					_attempt([[1, end_x], [6, end_x], [2, end_x]])
+				elif pick2 < 0.8:
+					_attempt([[2, end_x], [1, end_x], [3, end_x]])
+				elif pick2 < 0.92:
+					_attempt([[3, end_x], [2, end_x], [1, end_x]])
+				else:
+					_attempt([[4, 0.0]])
+			elif pick2 < 0.3 and not climbing:
 				_attempt([[4, 0.0]])
-			elif pick2 < 0.6:
+			elif pick2 < 0.55:
 				_attempt([[2, end_x], [1, end_x], [3, end_x]])
-			elif pick2 < 0.8:
+			elif pick2 < 0.68:
+				_attempt([[6, end_x], [1, end_x], [2, end_x]])
+			elif pick2 < 0.84:
 				_attempt([[1, end_x], [2, end_x], [3, end_x]])
 			else:
 				_attempt([[3, end_x], [2, end_x], [1, end_x]])
@@ -376,6 +430,7 @@ func _finish() -> void:
 	for i in n:
 		wsrc[i] = WIDTH[KD[i]]
 	W = _avg(wsrc, 5)
+	_racing_line()
 	# BT is SIGNED: > 0 = berm on the left (turning left), < 0 = on the right. Each turn's bank is
 	# held a little past its ends (keeps the peak) and then smoothed three times (≈ a gaussian,
 	# ~20 m each way) so it builds up into the turn and unwinds out of it with no corner or step.
@@ -439,6 +494,53 @@ func _finish() -> void:
 		var c := (keys[i * 2] - gx0) * gnz + keys[i * 2 + 1] - gz0
 		cell_items[fill[c]] = i
 		fill[c] += 1
+
+
+## the line a good rider takes, from the curvature alone: a short average of it minus a long one is positive at
+## an apex (-> the inside) and negative just before and after the turn (-> the outside); straights sit in the middle.
+## Then the run-offs: at some sharp corners one rider's skid leaves the line before the apex and carries straight on
+## off the outside. Both depend only on the layout near them, so growing the trail leaves the ridden part alone.
+func _racing_line() -> void:
+	var kn := _avg(KAP, 4)
+	var kw := _avg(_avg(KAP, 14), 14)
+	var ln := PackedFloat32Array(); ln.resize(n)
+	for i in n:
+		ln[i] = clampf(37.0 * (kn[i] - kw[i]), -1.0, 1.0) * maxf(0.0, W[i] - 0.6)
+	LN = _avg(ln, 3)
+	RO = PackedFloat32Array(); RO.resize(n)
+	ROS = PackedFloat32Array(); ROS.resize(n)
+	var seed_i: int = _mark_seed % 9973
+	var i := 12
+	while i < n - 60:
+		var k := absf(KAP[i])
+		if k < 0.035 or k < absf(KAP[i - 1]) or k <= absf(KAP[i + 1]) or _hash(i, seed_i + 77) > 0.4:
+			i += 1
+			continue
+		var i0 := i - 3 - int(_hash(i, seed_i + 78) * 5.0)
+		# the skid starts on the line and keeps the heading it had there
+		var p0x := X[i0] - TZ[i0] * LN[i0]
+		var p0z := Z[i0] + TX[i0] * LN[i0]
+		var dx: float = TX[i0]
+		var dz: float = TZ[i0]
+		var j := i0
+		var last := 0.0
+		while j < n - 2 and j < i0 + 40:
+			var den: float = dx * TX[j] + dz * TZ[j]
+			if den < 0.3:
+				break
+			var tt: float = ((X[j] - p0x) * TX[j] + (Z[j] - p0z) * TZ[j]) / den
+			last = -(p0x + dx * tt - X[j]) * TZ[j] + (p0z + dz * tt - Z[j]) * TX[j]
+			RO[j] = last
+			ROS[j] = minf(1.0, 0.35 + 0.35 * (j - i0))
+			j += 1
+			if absf(last) > W[j] + 2.4:
+				break
+		# either side of it the place is held (strength 0) so the ends fade instead of sweeping across the trail
+		for q in range(maxi(0, i0 - 2), i0):
+			if ROS[q] == 0.0: RO[q] = RO[i0]
+		for q in range(j, mini(n, j + 2)):
+			if ROS[q] == 0.0: RO[q] = last
+		i = j + 20
 
 
 static func _hash(k: int, salt: int) -> float:

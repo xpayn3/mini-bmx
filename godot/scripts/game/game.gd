@@ -1596,7 +1596,7 @@ func level_reset_to(sp: Vector3) -> void:
 	rider.reset_pose()
 	_snap_prev()
 	cam.snap_to(Vector3(sp.x, phys.y + 0.5, sp.z))
-## tests (BMX_TRAIL_FEAT=drop|arch|N): 70 m up the trail from the Nth drop / the first rock arch -> (x, heading, z)
+## tests (BMX_TRAIL_FEAT=drop|arch|N|x<metres>|tech): 70 m up the trail from the Nth drop / the first rock arch -> (x, heading, z)
 func _feature_spawn(what: String) -> Vector3:
 	var C: TrailCourse = terrain.field.course
 	var idx := -1
@@ -1609,6 +1609,14 @@ func _feature_spawn(what: String) -> Vector3:
 					return Vector3(rf.x - rf.dx * 6.0, -atan2(rf.dz, rf.dx), rf.z - rf.dz * 6.0)
 				var gj := maxi(2, gi - (int(Env.s("BMX_FEAT_BACK")) if Env.s("BMX_FEAT_BACK") != "" else 30))
 				return Vector3(C.X[gj], -atan2(C.TZ[gj], C.TX[gj]), C.Z[gj])
+		return Vector3.ZERO
+	if what.begins_with("x") or what == "tech":   # x<metres>: that far along x; tech: the first tight hairpin stack past the first mountain
+		var x0 := float(what.substr(1)) if what != "tech" else 1500.0
+		for i in C.n:
+			if C.X[i] >= x0 and (what != "tech" or absf(C.KAP[i]) > 0.1):
+				var j2 := maxi(2, i - (20 if what == "tech" else 0))
+				print("FEATSPAWN %s idx=%d at %.0f,%.0f" % [what, i, C.X[j2], C.Z[j2]])
+				return Vector3(C.X[j2], -atan2(C.TZ[j2], C.TX[j2]), C.Z[j2])
 		return Vector3.ZERO
 	if what == "arch":
 		var best := 1 << 30

@@ -245,6 +245,14 @@ func _build() -> void:
 	img_d.generate_mipmaps()
 	out["land_img"] = img_g
 	out["dirt_img"] = img_d
+	# the trail's own frame for the ground shader's rider lines / tyre marks / puddles (no mipmaps: plain data)
+	var TRa: PackedFloat32Array = gs["TR"]
+	var T2a: PackedFloat32Array = gs["T2"]
+	out["trail_img"] = Image.create_from_data(NV, NV, false, Image.FORMAT_RGBAF, TRa.to_byte_array())
+	var pT := PackedByteArray(); pT.resize(NV * NV * 4)
+	for o in NV * NV * 4:
+		pT[o] = roundi(clampf(T2a[o], 0, 1) * 255)
+	out["trail2_img"] = Image.create_from_data(NV, NV, false, Image.FORMAT_RGBA8, pT)
 	# ---- grass field data (world/grass_field.gd): the ground's own heights + land colour, density in alpha ----
 	var DRY: PackedFloat32Array = gs["DRY"]
 	var pK := PackedByteArray(); pK.resize(NV * NV * 4)
@@ -301,6 +309,8 @@ func ground_stage(ox: float, oz: float) -> Dictionary:
 	var pre_d := PackedColorArray(); pre_d.resize(NV * NV)
 	var pre_t := PackedFloat32Array(); pre_t.resize(NV * NV)
 	var pre_b := PackedFloat64Array(); pre_b.resize(NV * NV * 2)
+	var TR := PackedFloat32Array(); TR.resize(NV * NV * 4)   # trail frame for ground.gdshader: across, line offset, along, run-off skid's place
+	var T2 := PackedFloat32Array(); T2.resize(NV * NV * 4)   # road, dry biome, built jump, run-off skid's strength
 	for iz in range(-1, N + 2):
 		for ix in range(-1, N + 2):
 			var x := ox - S / 2 + ix * d
@@ -316,6 +326,18 @@ func ground_stage(ox: float, oz: float) -> Dictionary:
 				pre_d[o] = f.cl_d
 				pre_b[o * 2] = f.cp_dry
 				pre_b[o * 2 + 1] = f.cp_rug
+				var jm: float = f.jump_mask(x, z)
+				var ac: float = f.across(x, z)
+				f.query(x, z)
+				var on: bool = f.q_d < f.q_w + 2.6
+				TR[o * 4] = clampf(ac, -20.0, 20.0)
+				TR[o * 4 + 1] = f.line_off(x, z)
+				TR[o * 4 + 2] = f.q_s if on else x * 0.6 + z * 0.8
+				TR[o * 4 + 3] = (f.cRO[f.q_i] + (f.cRO[f.q_i + 1] - f.cRO[f.q_i]) * f.q_t) if on else 0.0
+				T2[o * 4] = f.q_rd if on else 0.0
+				T2[o * 4 + 1] = f.cp_dry
+				T2[o * 4 + 2] = jm
+				T2[o * 4 + 3] = (f.cROS[f.q_i] + (f.cROS[f.q_i + 1] - f.cROS[f.q_i]) * f.q_t) if on else 0.0
 	var verts := PackedVector3Array(); verts.resize(NV * NV)
 	var norms := PackedVector3Array(); norms.resize(NV * NV)
 	var uvs := PackedVector2Array(); uvs.resize(NV * NV)
@@ -343,7 +365,7 @@ func ground_stage(ox: float, oz: float) -> Dictionary:
 			DRY[o] = pre_b[o * 2]
 			LG[o] = f.cl_g
 			LD[o] = f.cl_d
-	return {"G": G, "verts": verts, "norms": norms, "uvs": uvs, "LG": LG, "LD": LD, "TW": TW, "SW": SW, "DRY": DRY}
+	return {"G": G, "verts": verts, "norms": norms, "uvs": uvs, "LG": LG, "LD": LD, "TW": TW, "SW": SW, "DRY": DRY, "TR": TR, "T2": T2}
 
 
 ## clears grass density (alpha of the grass_img bytes) within r of (x, z), soft over the outer 30 %
