@@ -589,7 +589,7 @@ func _freewheel_group() -> void:
 	list.add_child(pv)
 	var pspeed := [FreewheelSound.preview_speed if FreewheelSound.preview_speed > 0.0 else 4.0]
 	pv.toggled.connect(func(on): FreewheelSound.preview_speed = pspeed[0] if on else 0.0)
-	_slider("Preview speed", 0.5, 15.0, 0.5, pspeed[0], 4.0, func(v): return "%.0f km/h" % (v * 3.6),
+	_slider("Preview speed", 0.5, 22.0, 0.5, pspeed[0], 4.0, func(v): return "%.0f km/h" % (v * 3.6),
 		func(v):
 			pspeed[0] = v
 			if FreewheelSound.preview_speed > 0.0: FreewheelSound.preview_speed = v)

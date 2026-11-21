@@ -18,16 +18,25 @@ const PARAMS := [
 	["jitter", "Timing wobble", 0.06, 0.0, 0.3, 0.01, ""],
 	["vary", "Click strength spread", 0.55, 0.0, 1.0, 0.05, ""],
 	["fade", "Quieter at speed", 0.3, 0.0, 1.0, 0.05, ""],
+	# the wheel's turn and speed (FreewheelSynth.SetSpeedParams); 0 on all = the old speed-blind sound
+	["warble", "Wheel-turn warble (swell each turn)", 0.04, 0.0, 1.0, 0.05, ""],
+	["repeat", "Pattern repeats each turn", 0.3, 0.0, 1.0, 0.05, ""],
+	["sp_pitch", "Pitch rise at speed", 0.06, -0.2, 0.5, 0.01, ""],
+	["sp_bright", "Brighter at speed", 0.3, -1.0, 1.5, 0.05, ""],
+	["sp_ring", "Shorter ring at speed", 0.3, 0.0, 0.8, 0.05, ""],
+	["sp_soft", "Softer snap at speed", 0.6, 0.0, 1.0, 0.05, ""],
+	["sp_from", "Speed effects start", 12.0, 0.0, 60.0, 1.0, " km/h"],
+	["sp_full", "Speed effects full", 60.0, 10.0, 120.0, 1.0, " km/h"],
 ]
 
 ## built-in hubs: only the values that differ from the defaults
 const BUILTIN := {
 	"Stock": {},
-	"Loud buzz": {"vol": 1.7, "poe": 44.0, "pitch": 0.85, "ring": 1.6, "crack": 1.4, "tilt": 0.2, "fade": 0.0},
+	"Loud buzz": {"vol": 1.7, "poe": 44.0, "pitch": 0.85, "ring": 1.6, "crack": 1.4, "tilt": 0.2, "fade": 0.0, "sp_pitch": 0.1},
 	"Quiet": {"vol": 0.45, "poe": 36.0, "ring": 0.6, "crack": 0.5, "tilt": -0.4, "fade": 0.5},
 	"Deep ratchet": {"poe": 36.0, "pitch": 0.7, "ring": 1.4, "crack": 0.8, "tilt": -0.3, "uneven": 0.2, "jitter": 0.03},
 	"High engagement": {"vol": 0.9, "poe": 102.0, "pitch": 1.15, "ring": 0.7, "uneven": 0.4, "crack": 0.9},
-	"Old school": {"poe": 18.0, "pitch": 0.9, "ring": 1.2, "crack": 1.2, "uneven": 1.5, "jitter": 0.1, "vary": 0.7},
+	"Old school": {"poe": 18.0, "pitch": 0.9, "ring": 1.2, "crack": 1.2, "uneven": 1.5, "jitter": 0.1, "vary": 0.7, "warble": 0.12, "repeat": 0.6},
 }
 
 const PATH := "user://freewheel.cfg"
