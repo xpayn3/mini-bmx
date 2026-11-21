@@ -1556,12 +1556,15 @@ class BalanceMeter extends Control:
 	var ang_s := 0.0
 	var zone_glow := 0.0
 	var t := 0.0
+	var nose := false   # showing the nose manual / stoppie (the same balance, on the front wheel)
 
 	func tick(st: BikePhysics, dt: float) -> void:
-		var up := (st.man_a > 0.04 or st.man_pull > 0.0) and not st.crash_on and not st.air
+		var n_up := (st.nose_a > 0.04 or st.nose_push > 0.0) and not st.crash_on and not st.air
+		var up := ((st.man_a > 0.04 or st.man_pull > 0.0) and not st.crash_on and not st.air) or n_up
+		if up: nose = n_up
 		a = move_toward(a, 1.0 if up else 0.0, dt * (16.0 if up else 4.0))
-		ang_s = lerpf(ang_s, st.man_a, minf(1.0, dt * 40.0))
-		zone_glow = move_toward(zone_glow, 1.0 if st.man_zone else 0.0, dt * 10.0)
+		ang_s = lerpf(ang_s, st.nose_a if nose else st.man_a, minf(1.0, dt * 40.0))
+		zone_glow = move_toward(zone_glow, 1.0 if (st.nose_zone if nose else st.man_zone) else 0.0, dt * 10.0)
 		t += dt
 		visible = a > 0.01
 		if visible: queue_redraw()
@@ -1569,17 +1572,18 @@ class BalanceMeter extends Control:
 	func _draw() -> void:
 		var st: BikePhysics = hud.game.phys
 		var T := Tune.v
-		var b: float = float(T.get("manBalance", 0.55))
-		var loop_at: float = b + float(T.get("manLoop", 0.42))
+		var b: float = float(T.get("noseBalance", 0.5)) if nose else float(T.get("manBalance", 0.55))
+		var loop_at: float = b + (float(T.get("noseLoop", 0.4)) if nose else float(T.get("manLoop", 0.42)))
 		var zone: float = float(T.get("manZone", 0.14))
+		var in_zone: bool = st.nose_zone if nose else st.man_zone
 		SlimBar.begin(self, a)
 		var x0 := (size.x - SlimBar.W) * 0.5
 		var cy := size.y - 9.0
 		var danger: bool = ang_s > b + zone
-		var mc := SlimBar.GOOD if st.man_zone else (SlimBar.BAD if danger else Color.WHITE)
+		var mc := SlimBar.GOOD if in_zone else (SlimBar.BAD if danger else Color.WHITE)
 		SlimBar.badge(self, x0, cy, mc, 2, a, (0.5 + 0.5 * sin(t * 16.0)) if danger else 0.0)
-		SlimBar.caption(self, x0, cy - 11, "WHEELIE" if st.wheelie_pedal else "MANUAL", a)
-		SlimBar.value(self, x0 + SlimBar.W, cy - 10, "%.1f s" % st.wheelie_time, Color.WHITE.lerp(SlimBar.GOOD, zone_glow), a)
+		SlimBar.caption(self, x0, cy - 11, ("STOPPIE" if st.nose_brake_t > st.nose_time * 0.6 else "NOSE MANUAL") if nose else ("WHEELIE" if st.wheelie_pedal else "MANUAL"), a)
+		SlimBar.value(self, x0 + SlimBar.W, cy - 10, "%.1f s" % (st.nose_time if nose else st.wheelie_time), Color.WHITE.lerp(SlimBar.GOOD, zone_glow), a)
 		var tr := SlimBar.track(self, x0, cy, a)
 		var at := func(m: float) -> float: return tr.position.x + tr.size.x * clampf(m / loop_at, 0.0, 1.0)
 		var zr := Rect2(at.call(b - zone), tr.position.y, at.call(b + zone) - at.call(b - zone), tr.size.y)

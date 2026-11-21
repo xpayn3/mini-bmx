@@ -1564,7 +1564,8 @@ func _unhandled_input(e: InputEvent) -> void:
 	if e.is_action_pressed("photo") and not e.is_echo(): toggle_photo(); return
 	if e.is_action_pressed("save_log") and not e.is_echo():   # the last 60 s of physics + inputs to a CSV
 		var lp := CrashLog.report("manual", "saved with the save-log button")   # report + ride log + recent log lines
-		flash("Report saved (last 60 s + log)" if lp != "" else "Couldn't save the report")
+		# all caps = the loud pop (the quiet info line went unnoticed), with the folder it went to
+		flash(("LOG SAVED · CRASHLOGS/" + lp.replace("\\", "/").get_file().to_upper()) if lp != "" else "LOG NOT SAVED")
 		return
 	if e.is_action_pressed("debug_draw") and not e.is_echo():
 		if DebugOverlay.available(): flash("Physics overlay " + ("on" if DebugOverlay.toggle() else "off"))
@@ -1740,7 +1741,12 @@ func head_rot_probe() -> float:   # tests: the drawn head's roll + yaw (rider sp
 	var e: Vector3 = rider.head.transform.basis.get_euler()
 	return e.x + e.y
 
+var _jdump := PackedStringArray()   # tests (BMX_JDUMP=file.csv): every drawn frame's rider joints (rider space) + state
 func jitter_report() -> void:
+	if Env.s("BMX_JDUMP") != "":
+		var fj := FileAccess.open(Env.s("BMX_JDUMP"), FileAccess.WRITE)
+		if fj != null: fj.store_string("
+".join(_jdump)); fj.close()
 	var keys := _jit.keys()
 	keys.sort_custom(func(a, b): return _jit[a][2] > _jit[b][2])
 	for k in keys:
@@ -2296,6 +2302,12 @@ func _process(dt: float) -> void:
 			_jitter_sample("d_bike_lean", _lean_c, jthr * 2.0); _jitter_sample("d_steer", _steer_c, jthr * 2.0)
 			_jitter_sample("d_counter", pi["counter"], jthr * 2.0); _jitter_sample("d_absorb", pi["absorb"], jthr)
 			_jitter_sample("d_rider_y", rider.global_position.y, jthr); _jitter_sample("d_head_rot", head_rot_probe(), jthr * 2.0)
+			if Env.s("BMX_JDUMP") != "":
+				var row := "%.4f,%.3f,%.4f,%.3f,%.3f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f" % [t, st.v, st.lean, float(pi.get("brake", 0.0)), st.air_k, _lean_c, _steer_c, float(pi["counter"]), float(pi["absorb"]), float(pi["latG"]), st.hip_shift]
+				for jq in rider.J.size():
+					var jv: Vector3 = rider.J[jq]
+					row += ",%.5f,%.5f,%.5f" % [jv.x, jv.y, jv.z]
+				_jdump.append(row)
 	_pk = _perf("rider_pose", _pk)
 	var vd: float = Settings.get_v("view_distance")
 	terrain.update_stream(st.x, st.z, 4.0)

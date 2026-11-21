@@ -1771,6 +1771,37 @@ func _autotest(seconds: float) -> void:
 				var pull: float = clampf(need + 3.0 * (bp - ph2.man_a) - 0.8 * ph2.man_w, 0.0, 1.0) if body_t == "balance" else (1.0 if ph2.man_a < bp else 0.0)
 				if ph2.air: pull = 0.0   # a player lets the manual go off a lip
 				Input.action_press("body_back", mf + pull * (1.0 - mf)) if pull > 0.0 else Input.action_release("body_back")
+			elif body_t == "bhop":   # the stick hop every 3 s: back for BMX_BHOP_HOLD s (0.3), then snapped forward
+				var ph_h := fmod(el, 3.0)
+				var hold_s: float = float(Env.s("BMX_BHOP_HOLD")) if Env.s("BMX_BHOP_HOLD") != "" else 0.3
+				if ph_h < hold_s:
+					Input.action_release("body_fwd"); Input.action_press("body_back", 1.0)
+				elif ph_h < hold_s + 0.15:
+					Input.action_release("body_back"); Input.action_press("body_fwd", 1.0)
+				else:
+					Input.action_release("body_back"); Input.action_release("body_fwd")
+				if ph2.air and int(el * 30) % 3 == 0: print("BHOP air=%.2f h=%.2f vy=%.2f pitch=%.2f" % [ph2.air_time, ph2.y - ph2._g_y, ph2.vy, ph2.pitch])
+			elif body_t == "manhop":   # every 3 s: stick back (a manual) with hop held, hop let go after 0.35 s = a hop out of the manual
+				var ph_m := fmod(el, 3.0)
+				if ph_m < 0.45: Input.action_press("body_back", 1.0)
+				else: Input.action_release("body_back")
+				if ph_m < 0.35: Input.action_press("hop")
+				else: Input.action_release("hop")
+				if ph2.air and int(el * 30) % 3 == 0: print("BHOP air=%.2f h=%.2f vy=%.2f pitch=%.2f" % [ph2.air_time, ph2.y - ph2._g_y, ph2.vy, ph2.pitch])
+			elif body_t == "stoppie":   # every 7 s: front brake + stick forward, then balanced like a player (brake let go after 0.7 s)
+				var ph_s := fmod(el - 3.0, 7.0)
+				var nb: float = float(Tune.v.get("noseBalance", 0.5)) - 0.1
+				if ph_s > 1.5 and ph_s < 5.0:
+					Input.action_release("pedal"); Input.action_release("sprint")
+					if ph_s < 2.2 and ph2.nose_a < nb: Input.action_press("brake_front", 1.0)
+					else: Input.action_release("brake_front")
+					if ph2.nose_a < nb - 0.5 * ph2.nose_w:
+						Input.action_release("body_back"); Input.action_press("body_fwd", 1.0)
+					else:
+						Input.action_release("body_fwd"); Input.action_press("body_back", 0.5)
+				else:
+					Input.action_release("brake_front"); Input.action_release("body_fwd"); Input.action_release("body_back")
+					Input.action_press("pedal"); Input.action_press("sprint")
 			elif body_t == "fwd": Input.action_press("body_fwd", 1.0)
 			elif body_t == "lightfwd": Input.action_press("body_fwd", 0.25)   # resting the stick a little forward (attack position)
 			elif body_t == "holdback":   # in the air: stick held fully back (wind up a back flip), hands off on the ground
@@ -1823,7 +1854,7 @@ func _autotest(seconds: float) -> void:
 				var ph3: BikePhysics = game.phys
 				if not ph3.air and not ph3.crash_on:
 					_probe.thumb_n = int(_probe.get("thumb_n", 0)) + 1
-					if ph3.manual_up > 0.05 or ph3.wheelie_up > 0.05: _probe.thumb_manual = int(_probe.get("thumb_manual", 0)) + 1
+					if ph3.man_a > 0.05: _probe.thumb_manual = int(_probe.get("thumb_manual", 0)) + 1
 					if absf(ph3.flick_kick) > 0.01: _probe.thumb_kick = int(_probe.get("thumb_kick", 0)) + 1
 					var dp: float = absf(ph3.body_in_s - float(_probe.get("thumb_bs", 0.0)))
 					_probe.thumb_bs = ph3.body_in_s; _probe.thumb_bsj = float(_probe.get("thumb_bsj", 0.0)) + dp
@@ -1832,7 +1863,7 @@ func _autotest(seconds: float) -> void:
 				Input.action_press("body_left", 1.0) if side else Input.action_release("body_left")
 				Input.action_press("body_right", 1.0) if not side else Input.action_release("body_right")
 			if Env.s("BMX_BODY_PRINT") != "" and int(el * 10) % 5 == 0:
-				print("BODY t=%.1f v=%.1f in=%.2f flick=%.2f manual=%.2f pitch=%.2f g=%.2f bike_lean=%.2f lean=%.2f yaw=%.2f slip=%.2f hip=%.3f air=%s" % [el, ph2.v, ph2.body_in, ph2.flick, ph2.manual_up, ph2.pitch, ph2._g_pitch, ph2.bike_lean, ph2.lean, ph2.yaw_rate, ph2.slip, ph2.hip_shift, ph2.air])
+				print("BODY t=%.1f v=%.1f in=%.2f flick=%.2f manual=%.2f pitch=%.2f g=%.2f bike_lean=%.2f lean=%.2f yaw=%.2f slip=%.2f hip=%.3f air=%s" % [el, ph2.v, ph2.body_in, ph2.flick, ph2.man_a, ph2.pitch, ph2._g_pitch, ph2.bike_lean, ph2.lean, ph2.yaw_rate, ph2.slip, ph2.hip_shift, ph2.air])
 		if Env.s("BMX_MUD") != "": game.grime.mud = float(Env.s("BMX_MUD"))   # tests: hold the mud level
 		var straight := Env.s("BMX_STRAIGHT") != ""   # tests: ride straight, no steering / hops
 		if Env.s("BMX_CAM_ORBIT") != "": game.cam.orbit_t = float(Env.s("BMX_CAM_ORBIT")); game.cam.pan_t = 1e9   # held: no re-centre
@@ -1988,7 +2019,7 @@ func _autotest(seconds: float) -> void:
 				elif ph._g_pitch > 0.02: Input.action_release("body_fwd"); Input.action_press("body_back", 0.25)
 				else: Input.action_release("body_fwd"); Input.action_release("body_back")
 			elif pr != "" and pr != "off" and pr != "stick" and el > 3.0 and not ph.air and (pr == "all" or ph._g_pitch < -0.02): Input.action_press("hop")
-			else: Input.action_release("hop")
+			elif Env.s("BMX_BODY") != "manhop": Input.action_release("hop")   # (manhop works the hop button itself)
 			if pr != "" and int(el * 2.0) != int(_probe.get("pr_k", -1)):
 				_probe["pr_k"] = int(el * 2.0)
 				print("PUMPRIDE %s t=%.1f v=%.1f km/h push=%.2f gain=%.1f slope=%.3f at=(%.1f,%.1f) surf=%d slip=%.2f man=%.2f air=%s" % [pr, el, ph.v * 3.6, ph.pump_push, ph.pump_gain, ph._g_pitch, ph.x, ph.z, ph.surf, ph.slip, ph.man_a, ph.air])
@@ -2039,7 +2070,7 @@ func _autotest(seconds: float) -> void:
 		elif not game.jitter_on: Input.action_release("steer_left")   # (BMX_BRAKETURN steers itself)
 		if pedal and not straight and int(el * 2) % 7 == 0: Input.action_press("hop")
 		elif Env.s("BMX_AIRPULL") != "" and game.phys.air and game.phys.air_time > 0.1: Input.action_press("hop")   # tests: tuck in the air
-		else: Input.action_release("hop")
+		elif Env.s("BMX_BODY") != "manhop": Input.action_release("hop")
 		if Env.s("BMX_RESPAWN") != "" and el > float(Env.s("BMX_RESPAWN")) and not _probe.has("respawned"):   # tests: Backspace here
 			_probe["respawned"] = true
 			print("AUTOTEST respawn: ride_t before=%.1f" % game.hud.ride_t)

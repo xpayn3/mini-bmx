@@ -34,7 +34,7 @@ const CH := [
 	"steer", "bfwd", "blean", "thr", "brk", "brkf", "brkr", "hop", "sprint",
 	"steer_in", "bars", "flick",
 	"grip_r", "front_use", "slip", "slip_w", "lat_a", "brake_f", "brake_r", "rlock", "flock", "loose", "risk",
-	"lean", "bike_lean", "counter", "pitch", "g_pitch", "body_x", "hip", "compress", "man_a",
+	"lean", "bike_lean", "counter", "pitch", "g_pitch", "body_x", "hip", "compress", "man_a", "nose_a", "roll_hip", "roll_chest",
 	"hgt", "vy", "air", "air_w", "air_tilt", "flip_in",
 ]
 const HB := 20                     # travel histogram bins (0..100 %)
@@ -160,7 +160,8 @@ func record(dt: float, inp: Dictionary) -> void:
 		_f(inp.get("brake", 0.0)), _f(inp.get("brake_front", 0.0)), _f(inp.get("brake_rear", 0.0)), _b(inp.get("hop", false)), _b(inp.get("sprint", false)),
 		ph.steer_in, ph.steer, ph.flick,
 		ph.grip_r, ph.front_use, rad_to_deg(ph.slip), ph.slip_w, ph.lat_a, ph.brake_f, ph.brake_r, ph.rear_lock, ph.front_lock, ph.loose, ph.risk,
-		rad_to_deg(ph.lean), rad_to_deg(ph.bike_lean), rad_to_deg(ph.counter), rad_to_deg(ph.pitch), rad_to_deg(_f(ph._g_pitch)), ph.body_x, ph.hip_shift, ph.compress, rad_to_deg(ph.man_a),
+		rad_to_deg(ph.lean), rad_to_deg(ph.bike_lean), rad_to_deg(ph.counter), rad_to_deg(ph.pitch), rad_to_deg(_f(ph._g_pitch)), ph.body_x, ph.hip_shift, ph.compress, rad_to_deg(ph.man_a), rad_to_deg(ph.nose_a),
+		rad_to_deg(_f(game.rider.roll_p)) if game.rider != null else 0.0, rad_to_deg(_f(game.rider.roll_c)) if game.rider != null else 0.0,   # the rider's own roll (hips / chest follow the bike on springs)
 		ph.y - gy, ph.vy, _b(ph.air), ph.air_w, rad_to_deg(ph.air_tilt), ph.flip_in,
 	]
 	var base := head * C
@@ -1042,12 +1043,12 @@ class DiagView extends Control:
 	func _p_body(b: Rect2) -> void:
 		var ph = _ph()
 		var R := rows(b, [1.2, 1.0, 1.2, 1.0, 1.0, 1.0])
-		chart(R[0], "LEAN deg  asked / bike / body counter", [["lean", WC, "lean"], ["bike_lean", FC, "bike"], ["counter", LC, "counter"]], -70, 70)
+		chart(R[0], "LEAN deg  asked / bike / body counter / rider hips, chest", [["lean", WC, "lean"], ["bike_lean", FC, "bike"], ["counter", LC, "counter"], ["roll_hip", YC, "hips"], ["roll_chest", GC, "chest"]], -70, 70)
 		chart(R[1], "BARS rad / flick", [["bars", FC, "bars"], ["flick", LC, "flick"]], -1, 1)
 		chart(R[2], "PITCH deg  bike / ground", [["pitch", FC, "bike"], ["g_pitch", WC, "ground"]], -45, 45)
 		chart(R[3], "BODY fore / aft m (+ back) / hips", [["body_x", LC, "body x"], ["hip", YC, "hips"]], -0.4, 0.4)
 		chart(R[4], "LEGS compress m / legs (body - bike)", [["compress", RC, "compress"], ["leg", LC, "legs"]], -0.3, 0.15)
-		chart(R[5], "MANUAL angle deg", [["man_a", GC, "manual"]], -5, 45, [[rad_to_deg(float(ph.T.get("manBalance", 0.5))), YC, "balance"]])
+		chart(R[5], "MANUAL / NOSE MANUAL angle deg", [["man_a", GC, "manual"], ["nose_a", RC, "nose"]], -5, 45, [[rad_to_deg(float(ph.T.get("manBalance", 0.5))), YC, "balance"]])
 
 	func _p_air(b: Rect2) -> void:
 		var ph = _ph()
