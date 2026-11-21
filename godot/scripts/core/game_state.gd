@@ -44,6 +44,7 @@ var goggle_lens := "neutral"   # goggle lens = the ride's colour grade (scripts/
 var _lens_saved := "neutral"   # what save.cfg holds (a BMX_LENS test override is never written)
 var bmx_tyre := ""   # tyre model on the BMX ("" = the stock wheels); the DH frames take theirs from the garage build
 var seed := 0
+var level := ""   # "" = the procedural world; "playground" = the test playground (LEVELS menu, --level=, BMX_LEVEL). Not saved
 var records := {"longest": 0.0, "highest": 0.0, "air": 0.0, "top_speed": 0.0, "jumps": 0, "distance": 0.0}
 
 func _ready() -> void:
