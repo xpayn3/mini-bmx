@@ -26,6 +26,9 @@ var course: PlaygroundCourse
 var speed := 30.0 / 3.6        # m/s on the run-in
 var mode := "feature"
 var pump := true
+var tech := ""          # tests: jump technique (pop / early / hold / squash / hop), see tick()
+var tech_rel := 0.1
+var _hop_clock := 0.0
 var target = null              # the feature it repeats
 var runs := 0
 var _done_t := 0.0             # s since the run ended (a short pause, then back)
@@ -47,6 +50,8 @@ func _init(c: PlaygroundCourse) -> void:
 	if Env.s("BMX_PG_PILOT_KMH") != "": speed = float(Env.s("BMX_PG_PILOT_KMH")) / 3.6
 	if Env.s("BMX_PG_PILOT") == "lane": mode = "lane"
 	if Env.s("BMX_PG_PILOT_PUMP") == "0": pump = false
+	tech = Env.s("BMX_PG_PILOT_TECH")
+	if Env.s("BMX_PG_PILOT_REL") != "": tech_rel = float(Env.s("BMX_PG_PILOT_REL"))
 	if Env.s("BMX_PG_PILOT_AUTO") == "0": auto = false
 
 
@@ -213,6 +218,27 @@ func tick(game, dt: float) -> Dictionary:
 		elif d > 0.4: out.brake = clampf(d * 0.35, 0.0, 1.0)
 		out.sprint = ph.v < 5.0 and spd > 7.0
 	out.hop = pump and not ph.air and ph.prep > 0.15
+	# jump technique (tests, BMX_PG_PILOT_TECH): how he works the lip with the body stick / hop.
+	#   pop = stick back as the lip comes up (preload), snapped forward `tech_rel` s before its edge; early = the same
+	#   let go 0.4 s out (a hop off the face); hold = hop held right through the lip, never let go (the assist alone);
+	#   squash = stick held forward into it; hop = a full hop on the flat run-in every 2.5 s
+	if tech != "":
+		out.hop = false
+		var lip_in: float = ph.lip_last if ph.lip_state == 2 else INF
+		var rel: float = 0.4 if tech == "early" else tech_rel
+		if tech == "pop" or tech == "early":
+			if ph.air: out.body_fwd = 1.0 if ph.air_time < 0.12 else 0.0
+			elif lip_in < rel: out.body_fwd = 1.0
+			elif lip_in < INF: out.body_fwd = -1.0
+		elif tech == "hold":
+			out.hop = (not ph.air and lip_in < INF) or (ph.air and ph.air_time < 0.4)
+		elif tech == "squash":
+			out.body_fwd = 0.9 if (near and not ph.air) else 0.0
+		elif tech == "hop":
+			_hop_clock += dt
+			var hp := fmod(_hop_clock, 2.5)
+			if hp < 0.3: out.body_fwd = -1.0
+			elif hp < 0.45: out.body_fwd = 1.0
 	# gears like a rider: easier when slow and working (a climb), harder when spinning out (shift() +1 = easier)
 	_gear_t -= dt
 	if ph.geared and not ph.air and _gear_t <= 0.0:

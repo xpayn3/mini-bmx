@@ -255,12 +255,15 @@ const PAGES := [
 	]],
 	["jumps", "Jumps", "Take-off, the air, the right stick up there, landing", [
 		["Take-off", [
-			["*popKick", "Pop off a lip: the legs and the pump (hold Space into it).", "Weak", "Strong"],
-			["autoPump", "Pops on his own (1 = no Space needed).", "You do it", "Auto"],
+			["*popKick", "Leg push: the most speed one pop or hop can add. 2.4 m/s is a strong rider.", "Weak", "Superhuman"],
+			["*popRebound", "Preload timing: crouch (stick back / hold hop) and pop on the rebound for the full push; held still it loses this much.", "No matter", "Matters"],
+			["*popAssist", "A crouch held right through a lip is timed for you, at this share of a well-timed pop.", "You time it", "Auto"],
+			["*squashPower", "Stick held forward into a lip squashes it: low and fast.", "Off", "Lots"],
+			["autoPump", "Hands off, he pops lips on his own this much.", "Not at all", "Fully"],
+			["crouchTime", "Time to crouch right down.", "Quick", "Slow"],
+			["popWindow", "A pop this long before a lip goes off at its edge.", "Exact", "Early ok"],
 			["prepTime", "Spots the lip ahead.", "Late", "Early"],
 			["prepDepth", "Crouch into the lip.", "Little", "Deep"],
-			["chargeTime", "Hop charge time.", "Quick", "Long"],
-			["chargePop", "Full-charge extra pop.", "Little", "Lots"],
 			["airLift", "Lifts the bike after take-off.", "No", "Lots"],
 		]],
 		["In the air", [

@@ -2308,10 +2308,10 @@ func _process(dt: float) -> void:
 		clip_stats.before = maxf(clip_stats.before, d)
 		if d > 0.002: clip_stats.bad += 1
 	if Env.s("BMX_LIP_SHOT") != "" and _lip_shots < 10:   # tests: 10 shots, 0.08 s apart, from a lip
-		if _lip_shots == 0 and st.prep > 0.2 and not st.air: _lip_t = t
-		if _lip_t >= 0.0 and t - _lip_t >= _lip_shots * 0.08:
+		if _lip_shots == 0 and st.prep > float(Env.s("BMX_LIP_PREP") if Env.s("BMX_LIP_PREP") != "" else "0.2") and not st.air: _lip_t = t
+		if _lip_t >= 0.0 and t - _lip_t >= _lip_shots * float(Env.s("BMX_LIP_STEP") if Env.s("BMX_LIP_STEP") != "" else "0.08"):
 			get_viewport().get_texture().get_image().save_png("%s_%d.png" % [Env.s("BMX_LIP_SHOT"), _lip_shots])
-			print("LIPSHOT %d prep=%.2f air=%s compress=%.2f absorb=%.2f vy=%.1f" % [_lip_shots, st.prep, st.air, st.compress, st.body_y - st.y, st.vy])
+			print("LIPSHOT %d prep=%.2f air=%s compress=%.2f absorb=%.2f vy=%.1f crouch=%.2f wait=%.2f pop_fx=%.2f squash=%.2f pull=%.2f" % [_lip_shots, st.prep, st.air, st.compress, st.body_y - st.y, st.vy, st.crouch, st.pop_wait, st.pop_fx, st.squash, st.air_pull])
 			_lip_shots += 1
 	if Env.s("BMX_LEAN_SHOT") != "" and not st.air and not st.crash_on:   # tests: shots in deep leans
 		var ln := absf(st.bike_lean)
@@ -2395,6 +2395,13 @@ func _process(dt: float) -> void:
 		pi["crank"] = st.crank
 		pi["air"] = st.air_k
 		pi["compress"] = maxf(0.0, -st.compress)
+		# the jump: the preload crouch, the legs driving straight through the lip / a hop (extend), the pop just gone
+		# (the tuck after it), a lip being squashed, and how close a lip is (he rides it centred, not like a climb)
+		pi["extend"] = maxf(0.0, st.compress)
+		pi["preload"] = st.crouch * (0.0 if st.air else 1.0)
+		pi["popFx"] = st.pop_fx * minf(1.0, st.pop_q)
+		pi["squash"] = maxf(st.squash * st.prep, st.squash_fx)
+		pi["lipK"] = maxf(st.prep, 1.0 if (st.pop_wait > 0.0 or st.hop_t > 0.0) else 0.0)
 		pi["hipShift"] = _mcap("hip_shift", st.hip_shift, pdt)
 		pi["bodyStick"] = -0.55 if scenic else _mcap("body_stick", st.body_in_s, pdt)
 		pi["relax"] = 1.0 if scenic else 0.85 * dab_k   # foot down = calm: sat up, back straight, chin up
@@ -2414,6 +2421,8 @@ func _process(dt: float) -> void:
 		pi["latG"] = 0.0 if scenic else _mcap("lat_g", st.lat_a / BikePhysics.G, pdt)
 		pi["wheelR"] = rider.to_local(rig.wheel_r.global_position)
 		pi["wheelRR"] = rig.wheel_rr
+		pi["wheelF"] = rider.to_local(rig.wheel_f.global_position)
+		pi["wheelRF"] = rig.wheel_rf
 		pi["t"] = t
 		pi["airSpin"] = _aspin_s
 		pi["wheelY"] = (rig.wheel_f.global_position.y + rig.wheel_r.global_position.y) * 0.5

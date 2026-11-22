@@ -534,6 +534,54 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
     throws (`_tw_t` / `_ts_t` / `_sb_t` / `_sf_t` = time held). The stick throw only counts inside the lip window (`yb` / `yf`).
   - Tests (with `BMX_STRAIGHT=1 BMX_PAD=1`): `BMX_BODY=bhop` (+ `BMX_BHOP_HOLD=secs`), `BMX_BODY=manhop` (hop out of a manual),
     `BMX_FORGIVE_PROBE=1` (`STICKHOP`, `SCOOPHOP`, `FORGIVE`, `BHOP` lines), `BMX_BODY=stoppie` + `BMX_NOSE_PROBE=1` (`NOSE` lines).
+- **Jumps = one push of the legs (2026-11-22, user: "we jump too much, unhuman", then "build MX vs ATV with the stick pump
+  to jump, realistic, one nice package, the animation mint")**. `bike_physics.gd`; sliders Ride > Jumps > Take-off.
+  **Supersedes the hop / pump numbers in the notes above** (`chargeTime` / `chargePop`, the 2 s charge, the late-pump top-up,
+  `pump_lift` and the body kick are gone; the triggers, scoop, coyote time and buffered hop stay).
+  - **One budget** (`_leg_dv(power)` = `popPower` x power x a g-out factor): the most speed one push adds to rider + bike.
+    `popKick` 2.4 m/s (Tune VER 22; ~2.3 x body weight over the 33 cm leg stroke, 75 kg rider + 17 kg bike); the DH's own
+    share is `popPower` 0.9 (was 0.7) = 2.16 m/s. The hop and the pop off a lip both draw on it; `_pop_used` = what this
+    take-off has had (a late pop only gets the rest). Pressed into the ground (`_n_grd` = tyre load / resting load) the legs
+    have up to 45 % less.
+  - **It leaves along the ground's normal** (`_pop_apply`: square to the bike's velocity), so it adds dv^2 / 2 and nothing
+    else. It used to be added straight up (+ dv x the climb speed: ~20 J/kg at a lip).
+  - **Preload** (`crouch` 0..1, `crouch_t`, `rebound`): hop held OR the right stick pulled back bends the legs over
+    `crouchTime` 0.25 s. Power = sqrt(crouch) x (1 - `popRebound` 0.18 x (1 - rebound)): all of it only 0.15-0.5 s after the
+    crouch began (the rebound), a crouch held still gives 82 %. A stick held back > 0.9 s stops being a crouch (weight back).
+    HUD bar PRELOAD (`hud.gd` `HopBar`, `hop_bar` = the power now: it peaks, then sags; "NOW!" on the rebound, "POP n%").
+  - **Pop** (`_pop_now`): let go of hop, or snap the stick forward. Within `popWindow` 0.24 s of a lip (or with the front
+    wheel already off its edge, `_lip_ago`) it waits for the edge (`pop_wait`) and goes at take-off, timing 1.0 inside the
+    last 0.12 s down to 0.6 at the window's start ("PERFECT POP"). Earlier = a hop off the face, now (worse than hands
+    off). In the air within `inputForgive` = late: 75 % of the budget less what was used. Never let go: `popAssist` 0.6 of
+    it, timed for you. Hands off: `autoPump` x 0.6 x prep (~0.15).
+  - **Squash** (`squash`, `squashPower`): stick held forward for 0.25 s+ into a lip (a fresh push at a lip is still the
+    front flip throw): at take-off up to 0.7 x popPower (at most 45 %) of the climb is taken out, speed kept (the velocity
+    turns): low and fast, "SQUASH". No auto pop on a squashed lip.
+  - **Stick vs flips / manual**: a pull back with a lip in sight (`lip_state` 2) never arms the manual; the forward snap
+    zeroes `throw_v` (the pull was the preload). Back and HELD through the lip is still the back flip throw.
+  - **Wheel height vs centre of mass**: after a pop the bike is pulled up under the rider (`air_pull` from `pop_fx`, the
+    tuck moves the bike by `TUCK_SHARE` 0.75 of the leg travel, was riderMass 0.45). A hop out of a manual no longer keeps
+    the frame's rise as climb speed (it added ~0.9 m/s).
+  - **Take-off energy fix** (the playground's open findings 1 and 3): the speed along the lip was split with
+    cos(the slope under both axles); with the front past the lip that is ~flat or the backside, so the bike kept all its
+    speed AND got the climb on top (table_1.5 at 34 km/h left at 29.5 km/h, now 24.8: what climbing 1.5 m costs). Now
+    cos(asin(vy / v)). A tyre brushing the lip within 0.2 s of take-off while still going up is not a landing (`_graze`).
+    **Every jump flies shorter hands off than before** (table_1.5 @ 34: 7.5 -> 4.5 m, lands on the knuckle); the trail's
+    jumps were not re-checked for the speeds they need.
+  - **Measured** (test rider, table_1.5 at 34 km/h, peak over the lip): hands off 1.00 m (before 1.07), well-timed pop
+    1.72 m (hop held: before 2.75), held and let go late 1.47, popped 0.4 s early 0.57, squash 0.38. Flat hop, full: 0.39 m
+    (before 1.0-1.2). Suite baseline re-saved; `slope_stress` 51 / 51.
+  - **Rider** (`rider.gd` `update_pose`, inputs `preload`, `extend`, `popFx`, `squash`, `lipK` from `game.gd`): preload =
+    sunk between the wheels, chest down over the bars (the stick's lean-back pose gives way to it); through the lip the
+    legs drive straight, hips up and forward, back straight, arms long; then the tuck; a squash hangs him back and low
+    behind the bars with long arms; on a jump face he stays centred (the climb pose is faded by `lipK`). Pose keys `jumpPreload` / `jumpExtend` /
+    `jumpSquash` (no sliders yet).
+  - Tests: test rider techniques `BMX_PG_PILOT_TECH=pop|early|hold|squash|hop` (+ `BMX_PG_PILOT_REL=secs` before the lip
+    the stick snaps, `BMX_PG_PILOT=feature BMX_PG_AT=...`); `BMX_FORGIVE_PROBE=1` prints `STICKHOP`, `POP lip in`, `HOP
+    power= dv= n= legs=`, `LANDED air= peak=`; `BMX_TRICK=none` prints `POP auto`, `SQUASH`; `BMX_LIP_SHOT=prefix`
+    (+ `BMX_LIP_PREP`, `BMX_LIP_STEP`) for the poses. Don't start more than 2-3 test windows at once (Vulkan device lost).
+  - Not done: the pump for speed on rollers / backsides is still the old push (`pumpHold`), not the leg model; the
+    suspension's own rebound is not simulated into the pop (the timing window stands in for it); not ridden by the user yet.
 - **Direct manual (2026-11-22, user: "too stiff, locks us in, going too far stops us, make it more manual"; then "fall if we pull too far", "turn
   less, with body lean")**. `manDirect` 1 (Ride > Manual & pump; 0 = the old tipping balance, they blend): **the stick is the front's height**.
   `_balance_step`: target = pull x (`manBalance` + `manLoop` + 0.08), `man_a` follows on a soft spring (`manFollow` 40, ~0.3 s), so it never runs
@@ -573,6 +621,31 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   on the pedals). Test shots: `BMX_BODY=air:x,y` holds the stick mid-air.
 - **Rear-wheel clearance** (always on, in the safety limits, `wheelR` / `wheelRR` from game.gd): the hips may go below
   the saddle but never inside the rear wheel's circle + 16 cm - the legs used to go into the wheel in the air.
+- **Never through the handlebar** (2026-11-22, user: "head and upper body clip into the handlebar a lot", then of a
+  squash shot "completely insane unnatural pose"; `rider.gd`, first of the safety limits, right after the hips box):
+  seen from the side the chest joint stays `BAR_CHEST` 0.32 m and the head's centre `BAR_HEAD` 0.31 m from the middle
+  of the two grips. Inside that the WHOLE upper body is moved out, mostly back and a little up (hips 85 % with it): the
+  arms get longer, the back keeps its angle, the hips go behind the saddle. Pushing only the chest (first version) stood
+  him bolt upright with his elbows folded under his chin; pushing mostly up did the same. The rear-wheel / torso limits
+  after it still apply. The crouches no longer stack past 20 cm (`deep_c`: lip crouch + preload + legs pressed in by a
+  transition came to 35 cm). The squash pose = hips back and down, arms pushing the bars away (not folded over them).
+  Before: on a 40 s trail ride the chest came within 1.5 cm of the bar's middle and the helmet 6.5 cm; it now holds him
+  out in ~14 % of frames, the joints' frame-to-frame steps about as before (chest 81 vs 74 direction flips).
+  Probe: `BMX_BAR_PROBE=1` (`BARCLEAR deepest_cm= held_frames= least_chest_cm= least_head_cm=`), `BMX_NO_BARLIMIT=1`
+  measures without holding. **Judge rider poses on enlarged side-view crops of every frame through a lip
+  (`BMX_LIP_SHOT`), not on one frame.**
+- **Body never through itself or the bike** (2026-11-22, user: "we need smart limits or our body will clip"; `rider.gd`).
+  Measured first, then limited: `BMX_BODY_CLIP=1` (`Rider._clip_probe`, `BODYCLIP <pair> frames= % deepest= cm` at the end
+  of a test run) takes the drawn body as capsules (head, torso, thighs, shins, upper arms, forearms) against the bar, the
+  saddle, both wheels and each other, every frame. Found over 12 scenarios (trail, flips, pop, squash, drop, tuck,
+  manual, hop, sprint, lean, air stick, brake + turn): knees in the chest (to 11 cm; 90 % of frames in the tuck),
+  forearms in the thigh / shin (to 7 cm in leans), hips in the saddle (to 10 cm), hips in the rear tyre (rare). Limits:
+  `_swing_clear` (a knee / elbow swings about its root-tip line, out to its own side, by the smallest angle that clears:
+  knees round the torso `LIMB_TORSO` 0.18 m, elbows round the leg on their side `LIMB_LIMB` 0.105 m; hands and feet
+  stay put) and a last saddle / rear-tyre floor for the hips after the bar limit and torso clamp moved them. After: all
+  of those 0 in all 12; left: hips / thigh in the rear tyre in 0.2-0.3 % of frames in flips, a shin in it in 0.9 % of
+  the brake + turn test. Run it after any change to the rider's pose: `. /tmp`-style loop = each scenario with
+  `BMX_BODY_CLIP=1`, two windows at a time.
 - **Skeleton safety limits** (`rider.gd`, just before the torso length clamp): hips in a box over the bike, the
   torso bends only -26..80 deg forward and +-34 deg sideways from the bike's up; body counter-roll capped at ~50 deg.
   Whatever stacks up (tuck, spin, lean, landing, sliders) the body can't be mangled.

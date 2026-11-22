@@ -1496,19 +1496,22 @@ class HopBar extends Control:
 	var a := 0.0
 	var k_s := 0.0
 	var fire := 0.0       # 1 when the hop fires, fades
-	var full_t := 0.0     # time at full charge (the glow pulses)
+	var full_t := 0.0     # time in the sweet spot (the glow pulses)
 	var _was := false
 	var _last_k := 0.0
+	var sweet := false    # the preload is on its rebound: pop now for all of it
+	var pop_pct := 0      # the pop that just went: its share of a full leg push
 
 	func tick(st: BikePhysics, dt: float) -> void:
 		var show: bool = st.hop_bar_show and st.pump_press_t < 0.25 and not st.crash_on   # a press pumping a downhill won't hop
-		if _was and not show and _last_k > 0.15 and (st.hop_t > 0.0 or st.kick_t > 0.0 or st.air):
-			fire = 1.0
+		if _was and not show and _last_k > 0.15 and (st.hop_t > 0.0 or st.kick_t > 0.0 or st.air or st.pop_wait > 0.0):
+			fire = 1.0; pop_pct = roundi(100.0 * minf(1.15, maxf(st.pop_q, st.pop_wait)))
+		sweet = show and st.crouch > 0.9 and st.rebound > 0.7
 		_was = show
 		if show: _last_k = st.hop_bar
 		a = move_toward(a, 1.0 if (show or fire > 0.0) else 0.0, dt * (10.0 if show else 3.0))
 		k_s = lerpf(k_s, st.hop_bar if show else k_s, minf(1.0, dt * 30.0))
-		full_t = full_t + dt if (show and st.hop_bar >= 0.999) else 0.0
+		full_t = full_t + dt if sweet else 0.0
 		fire = maxf(0.0, fire - dt * 3.0)
 		if a <= 0.01 and not show: k_s = 0.0
 		visible = a > 0.01
@@ -1519,13 +1522,13 @@ class HopBar extends Control:
 		var x0 := (size.x - SlimBar.W) * 0.5
 		var cy := size.y - 9.0
 		var acc := UITheme.ACCENT
-		var full := k_s >= 0.995
-		var beat := 0.5 + 0.5 * sin(full_t * 14.0)
+		var full := sweet
+		var beat := 0.5 + 0.5 * sin(full_t * 18.0)
 		var col := acc.lerp(Color.WHITE, fire * 0.8 + (0.35 * beat if full else 0.0))
 		SlimBar.badge(self, x0, cy, acc, 0, a, fire if fire > 0.0 else (beat * 0.6 if full else 0.0))
-		SlimBar.caption(self, x0, cy - 11, "POP", a)
+		SlimBar.caption(self, x0, cy - 11, "PRELOAD", a)
 		if full or fire > 0.0:
-			SlimBar.value(self, x0 + SlimBar.W, cy - 10, "GO!" if fire > 0.0 else "FULL", col, a)
+			SlimBar.value(self, x0 + SlimBar.W, cy - 10, ("POP %d%%" % pop_pct) if fire > 0.0 else "NOW!", col, a)
 		else:
 			SlimBar.value(self, x0 + SlimBar.W, cy - 10, "%d%%" % roundi(k_s * 100.0), Color(1, 1, 1, 0.8), a)
 		var tr := SlimBar.track(self, x0, cy, a)
