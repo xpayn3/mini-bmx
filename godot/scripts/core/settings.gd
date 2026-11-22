@@ -467,7 +467,7 @@ func apply() -> void:
 		vp.anisotropic_filtering_level = int(get_v("aniso")) as Viewport.AnisotropicFiltering
 		var sq: int = get_v("shadows")
 		# (ultra = 4096 + the softest filter: an 8192 atlas cost far more than it showed)
-		RenderingServer.directional_shadow_atlas_set_size([2048, 4096, 4096, 4096][sq], true)
+		RenderingServer.directional_shadow_atlas_set_size([2048, 4096, 4096, 8192][sq], true)
 		vp.use_occlusion_culling = get_v("occlusion")
 		RenderingServer.directional_soft_shadow_filter_set_quality([RenderingServer.SHADOW_QUALITY_HARD, RenderingServer.SHADOW_QUALITY_SOFT_LOW, RenderingServer.SHADOW_QUALITY_SOFT_HIGH, RenderingServer.SHADOW_QUALITY_SOFT_ULTRA][sq])
 	AudioServer.set_bus_volume_db(0, linear_to_db(maxf(0.0001, float(get_v("volume")))))

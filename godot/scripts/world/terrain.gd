@@ -812,8 +812,10 @@ const LIST_SPEC := {
 ## how far (m, camera to the chunk's centre) each kind of decoration is drawn; past the fog they fade
 ## out. Small ground clutter is also limited to the 3x3 chunks round the rider (update_stream).
 const VIS_RANGE := {"pebble": 90.0, "grass": 90.0, "daisy": 90.0, "tulip": 90.0, "spike": 90.0, "stick": 90.0,
-	"fern": 90.0, "mushroom": 90.0, "weed": 130.0, "bush": 170.0, "log": 170.0, "rock": 200.0,
-	"plank": 150.0, "beam": 150.0, "post": 150.0, "rail": 150.0, "picket": 150.0, "stake": 150.0}
+	"fern": 90.0, "mushroom": 90.0}
+## everything else (trees, rocks, bushes, logs, weeds, fence wood, sheds) has no per-chunk range: it dissolves by
+## its own distance from the rider (shaders/deco_fade.gdshaderinc, the band set by Game: FADE_IN .. FADE_OUT),
+## and the far backdrop's trees take over past it. A chunk-centre range popped whole chunks in at the load edge.
 
 ## the view-distance setting: rescales the draw range of decorations already built, not just new chunks
 func set_view_scale(s: float) -> void:
@@ -979,6 +981,7 @@ func _finalize(k: Vector2i) -> void:
 		var mm := _multimesh(node, TerrainGeo.MESH[spec[0]], TerrainGeo.MAT[spec[1]], lists[name], n, spec[2], VIS_RANGE.get(name, 0.0))
 		mms[name] = mm
 		var dmi := node.get_child(node.get_child_count() - 1)
+		dmi.set_instance_shader_parameter("fade_mode", 2.0 if spec[3] else 1.0)   # deco_fade.gdshaderinc
 		if spec[2]:
 			deco_mi.append(dmi)
 		if spec[3]:
@@ -994,6 +997,7 @@ func _finalize(k: Vector2i) -> void:
 		var buf: PackedFloat32Array = sheds[i]
 		if buf.size() > 0:
 			_multimesh(node, TerrainGeo.SHEDS[i], TerrainGeo.MAT["shed"], buf, buf.size() / 16, true)
+			node.get_child(node.get_child_count() - 1).set_instance_shader_parameter("fade_mode", 1.0)
 			deco_mi.append(node.get_child(node.get_child_count() - 1))
 	for p in o["panels"]:
 		p["meshes"] = mms

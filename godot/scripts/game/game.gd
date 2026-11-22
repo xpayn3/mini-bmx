@@ -74,7 +74,32 @@ const AGX_CONTRAST := 1.35
 const AE_NEUTRAL_ISO := 0.4 / 0.00125   # = auto_exposure_scale (0.4) / 0.00125 -> 320
 ## directional shadow reach: the terrain only loads +-168 m and far casters are trimmed
 const SHADOW_MAX := 150.0
-const SHADOW_MAX_LOW := 120.0
+## shadow reach by quality (Low .. Ultra): fixed, so the cascades never re-fit while riding. The streamed trees
+## are drawn to DECO_FADE_OUT (124 m): High reaches past them, so every tree you see has its shadow.
+const SHADOW_REACH := [100.0, 140.0, 170.0, 200.0]
+var _shadow_zoom := -1.0
+## the cascades sit where the picture is: the first one ends just past the rider (the follow cameras are 5-25 m
+## behind), the second over the trail ahead, the third out to the trees. Fixed shares of the reach put the rider in
+## a coarse middle cascade. Redone only when the zoom you set changes (not with the speed dolly).
+func _shadow_fit() -> void:
+	var sq := int(Settings.get_v("shadows"))
+	var reach: float = SHADOW_REACH[clampi(sq, 0, 3)]
+	var zoom := roundf(cam.dist / maxf(1.0 - 0.2 * cam.speed_feel, 0.5))   # the zoom set, without the speed dolly
+	if absf(sun.directional_shadow_max_distance - reach) > 0.5: sun.directional_shadow_max_distance = reach
+	if zoom == _shadow_zoom: return
+	_shadow_zoom = zoom
+	if sq == 0:
+		sun.directional_shadow_split_1 = clampf((zoom + 12.0) / reach, 0.1, 0.5)
+		return
+	sun.directional_shadow_split_1 = clampf((zoom + 6.0) / reach, 0.04, 0.3)
+	sun.directional_shadow_split_2 = clampf((zoom + 22.0) / reach, sun.directional_shadow_split_1 + 0.05, 0.5)
+	sun.directional_shadow_split_3 = clampf((zoom + 55.0) / reach, sun.directional_shadow_split_2 + 0.08, 0.75)
+
+## the band (m from the rider) the streamed trees / rocks dissolve out over and the far backdrop's trees in
+## (shaders/deco_fade.gdshaderinc): inside the 144 m the loaded chunks always cover, so chunks never pop in
+const DECO_FADE_IN := 100.0
+const DECO_FADE_OUT := 124.0
+var _deco_band := Vector2(DECO_FADE_IN, DECO_FADE_OUT) if Env.s("BMX_DECO_FADE") == "" 	else Vector2(float(Env.s("BMX_DECO_FADE").split(",")[0]), float(Env.s("BMX_DECO_FADE").split(",")[1]))   # test: in,out
 const MIST_DEEP := 2.0      # the mist top sits this far over the low ground round the rider's path
 const MIST_CLEAR_FULL := 8.0   # the rider this far above the mist top: full mist
 const MIST_CLEAR_NONE := 3.0   # ... this close above it (or in it): none, the ground round the bike is always clear
@@ -409,7 +434,7 @@ func _build_environment() -> void:
 	sun.directional_shadow_split_2 = 0.18
 	sun.directional_shadow_split_3 = 0.45
 	sun.directional_shadow_blend_splits = true
-	sun.directional_shadow_fade_start = 0.85
+	sun.directional_shadow_fade_start = 0.75   # a long fade: the end of the reach never shows as a line
 	sun.directional_shadow_max_distance = SHADOW_MAX
 	sun.directional_shadow_pancake_size = 30.0
 	sun.shadow_bias = 0.02
@@ -436,6 +461,11 @@ func _build_environment() -> void:
 	refl_probe.ambient_mode = ReflectionProbe.AMBIENT_DISABLED   # reflections only: the ambient stays as graded
 	refl_probe.update_mode = ReflectionProbe.UPDATE_ONCE
 	refl_probe.intensity = 1.0
+	# only the rider + bike take its reflections (paint, chrome, visor; _rim_update tags them with RIM_LAYER). On
+	# the land it lit every tree / dirt face within its 80 m box with the captured scene and nothing outside it:
+	# gloss popped on as trees came near, and on / off again each time the box jumped 30 m along the trail
+	refl_probe.reflection_mask = RIM_LAYER
+	refl_probe.cull_mask &= ~RIM_LAYER   # and they don't reflect themselves in it
 	add_child(refl_probe)
 	# colour grade (split tone) + vignette, drawn over the 3D view
 	var cl := CanvasLayer.new(); cl.layer = -1
@@ -481,9 +511,9 @@ func set_scenic(on: bool) -> void:
 		sun.light_color = Color(1.0, 0.62, 0.34)
 		# a grazing sun: more bias or the ground shades itself in thin stripes (acne); softer edges so
 		# the long tree shadows don't read as flat black bands
-		sun.shadow_bias = 0.08
-		sun.shadow_normal_bias = 3.0
-		sun.shadow_blur = 2.0
+		sun.shadow_bias = 0.05
+		sun.shadow_normal_bias = 2.0
+		sun.shadow_blur = 1.2
 		sun_energy = 2.3
 		_sky_set("golden", 1.0)
 		_sky_set("sun_vec", Vector3.ZERO)   # the sky's sun = the light here
@@ -854,9 +884,10 @@ func _apply_light(h: float, L: Dictionary) -> void:
 	sun.look_at_from_position(dirv, Vector3.ZERO, Vector3.UP)
 	if Env.s("BMX_MOON_PROBE") != "": print("MOON dir=%s az=%.2f" % [dirv, atan2(dirv.z, dirv.x)])
 	# grazing light needs more bias (acne) and softer edges on the long shadows
-	sun.shadow_bias = lerpf(0.02, 0.08, g)
-	sun.shadow_normal_bias = lerpf(1.2, 3.0, g)
-	sun.shadow_blur = lerpf(lerpf(1.0, 2.0, g), 2.6, n) * float(L.shadow_soft)
+	# (2026-11-22: was 0.08 / 3.0 / blur 2.0 low: shadows came out mushy and thin things lost theirs)
+	sun.shadow_bias = lerpf(0.02, 0.05, g)
+	sun.shadow_normal_bias = lerpf(1.2, 2.0, g)
+	sun.shadow_blur = lerpf(lerpf(0.8, 1.2, g), 2.6, n) * float(L.shadow_soft)
 	sun.light_volumetric_fog_energy = lerpf(lerpf(2.6, 3.0, gw), 0.12, n)   # god rays through the haze at golden hour
 	_gg_vol = sun.light_volumetric_fog_energy
 	# sky: blue + white clouds by day, golden low, stars at night; its photographed sun follows ours
@@ -1128,7 +1159,7 @@ func _apply_settings() -> void:
 	# shadows: Low = 2 cascades, hard-ish; Ultra = 4 blended cascades + contact-hardening soft shadows
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS if sq == 0 else DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
 	# 2 splits: the first one covers ~a fifth of the reach (0.06 left the second cascade stretched over the rest)
-	sun.directional_shadow_split_1 = 0.2 if sq == 0 else 0.06
+	_shadow_zoom = -1.0   # _shadow_fit places the splits
 	sun.directional_shadow_blend_splits = sq >= 2
 	sun.light_angular_distance = 0.6 if sq >= 3 else 0.0
 	env.ssao_enabled = Settings.get_v("ssao")
@@ -2298,6 +2329,7 @@ func exit_map() -> void:
 
 func _exit_tree() -> void:
 	Engine.time_scale = 1.0
+	RenderingServer.global_shader_parameter_set("deco_fade", Vector4.ZERO)   # no ride: decorations unfaded (garage)
 	if rumble: rumble.stop()
 
 # tests (BMX_DAB_PROBE): per-frame shoe moves on the bike, the sole's lowest point vs the ground
@@ -2656,6 +2688,8 @@ func _process(dt: float) -> void:
 	terrain.shadow_eye = scam.global_position if scam != null else Vector3(st.x, st.y, st.z)
 	terrain.shadow_sun = sun.global_transform.basis.z.normalized()
 	terrain.shadow_reach = sun.directional_shadow_max_distance
+	# streamed decorations dissolve out / the far backdrop's trees in over this band round the rider (no pop-in)
+	RenderingServer.global_shader_parameter_set("deco_fade", Vector4(st.x, st.z, _deco_band.x, _deco_band.y))
 	terrain.update_stream(st.x, st.z, 4.0)
 	_pk = _perf("terrain_stream", _pk)
 	if not phys.crash_on and hud and hud.life < 1.0:   # a full-health rider rolls past a pack and leaves it
@@ -2743,9 +2777,7 @@ func _process(dt: float) -> void:
 	else:
 		env.fog_depth_begin = (cam.dist + 75) * vd
 		env.fog_depth_end = (cam.dist * 1.6 + 130) * vd
-		var smax := SHADOW_MAX_LOW if int(Settings.get_v("shadows")) == 0 else SHADOW_MAX
-		var sd := clampf(cam.dist * 4.5, 80.0, smax)
-		if absf(sun.directional_shadow_max_distance - sd) > 0.5: sun.directional_shadow_max_distance = sd
+		_shadow_fit()
 	if cam_attr.dof_blur_far_enabled and scenic:   # lookout: keep the view sharp, soften only the horizon
 		cam_attr.dof_blur_far_distance = 9.0     # the cyclist sharp, the landscape behind softly out of focus
 		cam_attr.dof_blur_far_transition = 140.0

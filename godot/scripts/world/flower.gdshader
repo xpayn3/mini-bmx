@@ -4,22 +4,27 @@
 shader_type spatial;
 render_mode blend_mix, depth_draw_opaque, cull_disabled, diffuse_burley, specular_schlick_ggx, world_vertex_coords;
 #include "res://shaders/atmos.gdshaderinc"
+#include "res://shaders/deco_fade.gdshaderinc"
+instance uniform float fade_mode = 0.0;
 
 uniform float roughness = 0.55;
 uniform float stiff = 1.0;
 // golden-hour backlight: blades between the camera and a low sun glow in their own colour
 uniform float scatter = 0.9;
 varying vec3 v_col;
+varying flat vec3 v_origin;
 varying vec3 v_world;
 
 void vertex() {
 	v_col = COLOR.rgb * mix(vec3(1.0), INSTANCE_CUSTOM.rgb, UV.x);
 	vec3 base = MODEL_MATRIX[3].xyz;
+	v_origin = base;
 	VERTEX += wind_bend(base, max(VERTEX.y - base.y, 0.0), stiff, 1.0);
 	v_world = VERTEX;
 }
 
 void fragment() {
+	if (deco_cut(v_origin, fade_mode, FRAGCOORD.xy, PROJECTION_MATRIX[3][3] > 0.5)) discard;   // ortho = the sun's shadow pass
 	ALBEDO = v_col;
 	ROUGHNESS = roughness;
 	SPECULAR = 0.35;

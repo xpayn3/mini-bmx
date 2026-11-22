@@ -54,14 +54,24 @@ uniform float inner_half = 168.0;
 uniform float ridge_near = 420.0;
 uniform float ridge_far = 1500.0;
 uniform vec3 albedo : source_color;
+#include "res://shaders/deco_fade.gdshaderinc"
+varying flat vec3 v_origin;
 void vertex() {
 	vec3 o = MODEL_MATRIX[3].xyz;   // the tree's base (instance origin)
+	v_origin = o;
 	float k = smoothstep(ridge_near, ridge_far, length(o.xz - rider.xz));
 	VERTEX.y += k * INSTANCE_CUSTOM.x;
-	vec2 q = abs(o.xz - inner_c);
-	if (max(q.x, q.y) < inner_half + 4.0) VERTEX = o - vec3(0.0, 50.0, 0.0);   // the real trees are there
+	if (deco_fade.w > 0.0) {
+		// the real trees fade out over deco_fade's band round the rider and these fade in over it (fragment):
+		// a smooth circle instead of the streamed chunk square, which jumped 48 m at every chunk line
+		if (distance(o.xz, deco_fade.xy) < deco_fade.z - 1.0) VERTEX = o - vec3(0.0, 50.0, 0.0);
+	} else {
+		vec2 q = abs(o.xz - inner_c);
+		if (max(q.x, q.y) < inner_half + 4.0) VERTEX = o - vec3(0.0, 50.0, 0.0);   // the real trees are there
+	}
 }
 void fragment() {
+	if (deco_cut(v_origin, -1.0, FRAGCOORD.xy, false)) discard;
 	ALBEDO = albedo * COLOR.rgb;
 	ROUGHNESS = 1.0;
 }
