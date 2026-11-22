@@ -242,6 +242,7 @@ const DEFS := [
 		["landPerfect", "Perfect landing within", 0.14, 0.03, 0.4, 0.01, "rad"],
 		["landBoost", "Perfect landing on a downslope: speed pumped", 1.6, 0, 5, 0.1, "m/s"],
 		["landHeavy", "Heavy landing from (share of a slam)", 0.6, 0.2, 0.9, 0.05, ""],
+		["landForgive", "Clean landing: extra hit taken (x a slam)", 1.0, 0, 3, 0.05, "×"],
 		["landYawFree", "Sideways landing: free angle", 0.12, 0, 0.5, 0.01, "rad"],
 		["landYawGrip", "Sideways landing: tyres catch at once", 1.0, 0.3, 2, 0.05, "×"],
 		["landYawCrash", "Sideways landing: highside from", 5.5, 2, 12, 0.1, "m/s"],

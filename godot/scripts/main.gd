@@ -1522,7 +1522,12 @@ func _unhandled_input(e: InputEvent) -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and state == RIDING and Settings.get_v("pause_unfocused") and OS.get_cmdline_user_args().is_empty():
-		_pause()
+		# (deferred: focus can go while this node is busy adding children - the ride moving in - and the leaflet's
+		# add_child then failed, 80 errors and no pause menu)
+		_pause_unfocused.call_deferred()
+
+func _pause_unfocused() -> void:
+	if state == RIDING: _pause()
 
 ## paused during the crash slow motion: the menus (leaflet, its sounds, the tuning card) run at normal speed and
 ## pitch; the slow motion comes back on resume

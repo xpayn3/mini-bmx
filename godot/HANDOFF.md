@@ -605,6 +605,19 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
     that = a heavy landing (`land_heavy` 0..1): up to 22 % of the speed gone, `_stun` 0.25-0.85 s without power, "OOF!"
     / "HEAVY LANDING". Measured: 1 m drop 2.3 of 8.7 (clean); table_1.5 popped onto its landing 5.5 (heavy 0.3);
     overshot to flat 5.6-6.4 (0.4-0.5); the same with the tuck held into the ground 7.8 (0.8).
+  - **Clean landings forgiven (2026-11-22, user: "slam too easily on big jumps ... realism but must be fun")**: like the
+    arcade bike games the angle decides, the drop mostly costs flow. Landed square to the ground (`_land_pe` = pitch vs
+    ground at touch-down; full under 0.18 rad, none past 0.6) the crash line is `slamJolt` x (1 + `landForgive` 1.0),
+    i.e. twice the hit; heavy landing still starts at `landHeavy` x the plain limit and runs up to the forgiven one. The
+    biggest hit of a landing is kept through its little bounces (`_land_hit`; a bounce cleared it, so forgiven hits
+    read as nothing). The user's 7 m to flat at 63 km/h: SLAM -> heavy 0.4 / OOF, rides on. Slider Ride > Jumps > Landing.
+  - **Lip launch cap (2026-11-22, F8 log: "lip shot me up 50 m")**: 59 km/h into a ~43 deg natural face, the front left,
+    the frame tipped to 83 deg on the rear and the rear spring pumped the climb to 16.4 m/s (> the 15.4 the bike had):
+    off at 72 deg, 15 m up. At take-off the climb is held to `v` x sin(lip + `LIP_SPARE` 0.15) (lip = the steeper of the
+    last two-wheel slope and the rear's ground; floor 2.5 m/s), and where cut the frame leaves along the flight. Same
+    spot now ~5 m high. Probe `BMX_LIP_PROBE=1` (`LIPCAP` lines). Root (the rear probe swinging up the face as the frame
+    tips, `_wheel_ground` with cos(pitch)) not changed. Repro: `BMX_SEED=89158 BMX_BIKE=tues BMX_PACK_SPAWN=2382,-11.6
+    BMX_START_V=16.4 BMX_STRAIGHT=1 BMX_TRICK=none`.
   - **Sideways** (in the touch-down block): the speed across the tyres has to be stopped by their grip. `landYawFree`
     0.12 rad costs nothing; of the rest the tyres catch mu x (0.8 x impact + 2.5) x `landYawGrip` m/s at once (speed
     gone, `land_yaw`, "SKETCHY!" / "SIDEWAYS!"), what is left is a slide for the ground sim; more than `landYawCrash`

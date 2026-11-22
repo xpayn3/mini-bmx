@@ -295,6 +295,7 @@ const PAGES := [
 			["*landSlide", "Land on ground tilted sideways: the hit is softer, the rest slides you towards its low side.", "Sticks", "Slides"],
 			["*slamJolt", "The hit that throws him down (what gets through suspension, tyres and legs).", "Fragile", "Tough"],
 			["*landHeavy", "From this share of that, a landing is heavy: speed lost, a moment to recover.", "Soon", "Rarely"],
+			["*landForgive", "Landed square to the ground: how much bigger a hit is only a heavy landing, not a crash.", "Strict", "Forgiving"],
 			["*landYawFree", "Landed turned to the way you travel: this much costs nothing.", "Strict", "Forgiving"],
 			["landYawGrip", "How much sideways speed the tyres catch at once (the rest is a slide).", "Slides", "Bites"],
 			["*landYawCrash", "Sideways speed caught at once that throws you over (highside).", "Soon", "Never"],
