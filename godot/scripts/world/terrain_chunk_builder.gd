@@ -258,6 +258,8 @@ func _build() -> void:
 	for o in NV * NV:
 		pA[o] = roundi(clampf(T3a[o], 0, 1) * 255)
 	out["trail3_img"] = Image.create_from_data(NV, NV, false, Image.FORMAT_R8, pA)
+	# where puddles can be (world/trail_puddle.gd: tyre dust stops over them); empty for chunks with no wet road
+	out["pud"] = TrailPuddle.table(TRa, T2a, TW, norms, NV)
 	# ---- grass field data (world/grass_field.gd): the ground's own heights + land colour, density in alpha ----
 	var DRY: PackedFloat32Array = gs["DRY"]
 	var pK := PackedByteArray(); pK.resize(NV * NV * 4)
