@@ -250,10 +250,12 @@ void fragment() {
 		k *= 1.0 + jm * 0.04;                            // built jumps: raked, packed clay, more even
 		k = mix(k, 1.0 + (k - 1.0) * 0.45, jm);
 		tcol = vec3(mix(1.0, k, tnear));
-		trough = mix(0.95, mix(rl.z, 0.8, 0.5 * m_driven + 0.3 * jm) - 0.06 * m_tracks, rfade * tnear);
+		// dry dirt stays matte (>= 0.9 = no sun glint in light()): packed lines / prints at 0.74-0.8 glinted, so with a
+		// low sun the whole trail looked polished / wet (user: "why such a glossy track"). Only damp soil + puddles shine.
+		trough = mix(0.95, max(mix(rl.z, 0.8, 0.5 * m_driven + 0.3 * jm) - 0.06 * m_tracks, 0.9), rfade * tnear);
 		// damp soil, then water
 		tcol *= mix(vec3(1.0), vec3(0.6, 0.58, 0.56), m_wet);
-		trough = mix(trough, 0.45, m_wet);
+		// (damp soil only darkens: no gloss. Only standing water shines; a shiny damp rim spread over the whole road)
 	}
 	// slow light / dark drifts along the trail, so a long straight never reads as one flat band
 	float drift = 1.0 + (gd_noise3(vec3(P.xz * 0.05, 4.2)) - 0.5) * 0.1;
@@ -283,7 +285,8 @@ void fragment() {
 	ALBEDO = col;
 	float pud_r = mix(0.075, 0.22, smoothstep(0.02, 0.25, gpx));
 	ROUGHNESS = mix(mix(0.95, trough, wd), pud_r, pud);
-	SPECULAR = mix(0.3, 0.6, pud);
+	// soil reflects almost no sky: at 0.3 a low sun's sky lit the whole road white at grazing angles (Fresnel)
+	SPECULAR = mix(0.12, 0.6, pud);
 	// screen derivatives here, in uniform control flow: inside the branch below they are undefined wherever the
 	// branch differs between neighbouring pixels (trail / puddle edges), which flickered in 2x2 blocks
 	float hh = thgt * wd * trail_relief;

@@ -217,6 +217,12 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - Infinite world of 48 m chunks streamed around the rider on worker threads; ground as LOD grids
   (step 2/4/8 chosen by measured error) with skirts — no cracks; decorations are MultiMeshes with
   visibility-range fades (`VIS_RANGE` × the view-distance setting).
+  **Far decoration shadows** (`Terrain._update_far_shadows`, 2026-11-22): a chunk's trees / rocks cast only if their
+  shadows can land in the shadow-mapped disc round the camera (`shadow_eye` / `shadow_sun` / `shadow_reach`, set by `Game`
+  every frame): the disc swept towards the sun by `CASTER_H` / tan(sun height), + margin and hysteresis. It used to be
+  "2+ chunks from the rider = no shadow": at golden hour the 100+ m tree shadows across the trail blinked off / on at every
+  chunk line (user: "as if a light were switched off"). Probe `BMX_SHADOW_PROBE=1` (`SHADOWFLIP` = a change, with its
+  distance vs the reach; `SHADOWOLD` = where the old rule would have flipped a chunk that does reach the view).
 - Height field in **C#** (`TerrainFieldCs`), ~10× faster than GDScript (1.4–3.8 µs per height). The
   GDScript `TerrainField` is the reference: `tools/terrain_cs_cmp.gd` must report **EXACT** (≈736k
   comparisons, 0 mismatches). Switch: `Terrain.USE_CS`, env `BMX_TERRAIN_GD=1` forces GDScript.

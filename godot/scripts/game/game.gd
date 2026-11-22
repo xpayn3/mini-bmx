@@ -2651,6 +2651,11 @@ func _process(dt: float) -> void:
 				_jdump.append(row)
 	_pk = _perf("rider_pose", _pk)
 	var vd: float = Settings.get_v("view_distance")
+	# which chunks' trees cast shadows depends on where the shadow map is and where the sun is (Terrain._update_far_shadows)
+	var scam := get_viewport().get_camera_3d()
+	terrain.shadow_eye = scam.global_position if scam != null else Vector3(st.x, st.y, st.z)
+	terrain.shadow_sun = sun.global_transform.basis.z.normalized()
+	terrain.shadow_reach = sun.directional_shadow_max_distance
 	terrain.update_stream(st.x, st.z, 4.0)
 	_pk = _perf("terrain_stream", _pk)
 	if not phys.crash_on and hud and hud.life < 1.0:   # a full-health rider rolls past a pack and leaves it
