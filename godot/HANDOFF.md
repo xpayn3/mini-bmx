@@ -794,6 +794,50 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   Probe: `BMX_BAR_PROBE=1` (`BARCLEAR deepest_cm= held_frames= least_chest_cm= least_head_cm=`), `BMX_NO_BARLIMIT=1`
   measures without holding. **Judge rider poses on enlarged side-view crops of every frame through a lip
   (`BMX_LIP_SHOT`), not on one frame.**
+- **Head stabilisation + ankling (2026-11-22, from the research review `docs/research/rider_animation.md`; papers in
+  `C:\Users\Luka\Documents\GameResearch\`)**. `rider.gd`: the head's pitch follows a critically damped copy of the bike's
+  pitch (`_hp_s`, `HEAD_PITCH_HL` 0.16 s, Holden's exact spring `Rider.crit_spring`) and holds against the quick part
+  (`head_kick`, +-0.45 rad, faded mid-flip); quick yaw twitches (yaw rate minus its slow average) are held against and let
+  go (`_hy`, `HEAD_YAW_HL`); the pedalling rock is taken out of its roll (`rockRoll`); its position rides a short neck spring
+  on the chest (`NECK_W` 15, max `NECK_MAX` 2.5 / 3.5 / 1.2 cm). Ankling (Gregor 2000: ~20 deg of ankle per crank turn):
+  the foot pitches about the pedal axle with the stroke (`ANKLE_SWING` 0.17 rad, heel lowest `ANKLE_PHASE` past the front),
+  toes down sprinting, heels down coasting in the attack position / soaking a hit / reaching for a landing; the ankle (IK
+  end) turns with it and `Game` turns the pedal pivots by `rider.foot_pitch` (flat pedals tip under the shoe). Pose keys
+  (Rider > Head / Legs & feet): `headSteady`, `ankling`, `heelsDown` (0 = the old behaviour). Measured on the rocks lane
+  (`BMX_LEVEL=playground BMX_PG_PILOT=lane BMX_PG_AT=rocks BMX_PG_PILOT_KMH=30 BMX_PG_PILOT_PUMP=0 BMX_HEAD_PROBE=1`, repeatable
+  to ~1 %): head world angular speed rms pitch 0.30 -> 0.17, roll 0.26 -> 0.014, yaw 0.097 -> 0.083 rad/s; bar clearance,
+  jitter counts unchanged. `BMX_HEAD_PROBE` (`HEADPROBE` lines; its acc_rms is frame-timing noise, ignore). BMX_FOLLOW trail
+  runs are NOT repeatable enough to compare small changes: use the playground pilot.
+  **Shoe on the pedal (same day, user: "gap between foot and pedal, they float; riders have the pedal under the ball of
+  the foot")**: the sole used to sit a fixed 3 cm over the pedal's pivot (= the pedal mesh's middle) with the shoe's
+  middle (arch) over the axle: 13 / 6 / 18 mm of air on the stock / Tusk / Fizz pedals. Now the ball of the foot
+  (`Rider.BALL_X` 8 cm forward of the shoe's origin, ~70 % heel to toe) is over the axle and the sole rests on the pedal's
+  measured top (`BikeRig.pedal_top` = the pedal mesh's top above its pivot, per model, `pedal_top_in(rider)` -> pose input
+  `pedalTop`); the ankle hangs off the shoe (`ANKLE_UP` 9 cm, 4 cm behind its origin). The pedals turn with the foot's
+  whole pitch (footAngle + ankling, `rider.foot_pitch`) in the ride and on the rider room's rollers. Standing riders keep
+  the old placement. Probe `BMX_PEDAL_PROBE=1` (`PEDALPROBE gap max/min mm, ball off axle mm, sole vs pedal deg`): 0.0 mm
+  on all three pedal models; `-s res://tools/pedal_size_probe.gd --headless` prints each pedal model's size.
+- **Pose order: limits on the target, then the springs (2026-11-22, research points 4 / 5 / 6 / 3 of
+  `docs/research/rider_animation.md`)**. Measured first with the new probe `BMX_POSE_PROBE=1` (`rider.gd`: per correction
+  step - arm reach, hips box, bar, rear wheel, torso angle / length, saddle / tyre floor, motion cap - how often / how far it
+  moves hips + chest; per joint the frame-to-frame 2nd difference in the bike's frame and, `W*`, in the world; `POSEJUMP`
+  lines for single-frame hip steps > 4 cm with the jump / landing state). Found: the corrections ran AFTER the body springs
+  and moved the torso by up to 37-73 cm (arm reach) / 42 cm (bar), on and off frame to frame. Now:
+  (1) `Rider._constrain()` = the whole correction chain, run on the TARGET before the springs, again on the springs' result
+  with the correction written back into the spring state and the velocity into the limit removed (position-based dynamics:
+  no spring pushing into a limit every frame), and a last pass after the view-only turns (pedalling rock, pitch kick).
+  (2) Body + roll springs step exactly (`Rider.spring_exact`, Holden's closed form, under / critical / over-damped, with the
+  bump push; `BMX_EULER_BODY=1` = the old Euler steps). The fps difference that is left comes from the bump input measured per
+  frame, not the springs. (3) The pitch-kick hold read a jump face as a bump and leaned the whole body back up to ~20 deg up
+  every lip (+ a step as it switched off at take-off): it now measures against the land's slope on a rising jump face
+  (`face_k` from `lipK`), eases out in the air, soft limit (tanh). Curbs / ledges / rocks are still held against.
+  (4) The chest rides the hips softer up / down (`CHEST_KY` 0.6 x the legs, `CHEST_PUSH` 0.6 of the bump; 0.4 was worse).
+  Result vs before (playground lanes, 60 fps, world rms hips / chest / head): rocks -2..-5 %, drops -3 %, bumps -20 %,
+  tables hips +13 % (the jump moves now shown, not clipped) chest / head -4 %; knees 25-45 % smoother; the corrections
+  after the springs 4-9x smaller; no body clipping (`BMX_BODY_CLIP`), bar clearance unchanged. `BMX_OLD_LIMITS=1` = the old
+  order. **Check any pose change with `bash tools/pose_suite.sh <tag> [ENV=..]`** (rocks, tables, drops, bumps lanes + a
+  trail lean-swap run, 2 windows at a time; the trail one is not repeatable). Not done: per-limb speed into the ragdoll
+  (point 7: the stiff-then-tone start, startle and no-eject are already there).
 - **Body never through itself or the bike** (2026-11-22, user: "we need smart limits or our body will clip"; `rider.gd`).
   Measured first, then limited: `BMX_BODY_CLIP=1` (`Rider._clip_probe`, `BODYCLIP <pair> frames= % deepest= cm` at the end
   of a test run) takes the drawn body as capsules (head, torso, thighs, shins, upper arms, forearms) against the bar, the

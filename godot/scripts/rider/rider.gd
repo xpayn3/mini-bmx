@@ -11,6 +11,7 @@ const GEAR := preload("res://scripts/rider/rider_gear.gd")
 const NEUTRAL := {hipX = 0.0, hipY = 0.0, lean = 0.0, elbowsOut = 0.0, kneesOut = 0.0, stance = 0.0, seatFloor = false,
 	crouch = 1.0, standPedal = 1.0, aero = 1.0, sway = 1.0, bikeRock = 1.0, upright = 1.0, hipSway = 0.015, torso = 0.46, attackStand = 1.0, kneeOpen = 1.0, bumpAbsorb = 2.0, bodyBounce = 0.4, leanFollow = 1.0, leanSwing = 1.0, leanUnweight = 1.0, leanLively = 1.0, leanBalance = 1.0, leanBumps = 1.0, leanLoad = 1.0, bodyBob = 1.0,
 	flowBend = 1.0, flowLead = 1.0, flowSink = 1.0,   # pro flow through lean changes: spine bend, shoulders / eyes lead, sink into the turn
+	headSteady = 1.0, ankling = 1.0, heelsDown = 1.0,   # head held steady against the bike's kicks; ankle swing pedalling; heels drop coasting / landing
 	# style (Rider > Style): the numbers the riding pose is built from
 	hipSteady = 90.0, standHeight = 0.15, standBack = 0.03, pedalChest = 0.05, turnLow = 1.0, turnTwist = 1.0,
 	turnHips = 1.0, slowWobble = 1.0, airCrouch = 1.0,
@@ -1234,6 +1235,7 @@ func reset_pose() -> void:
 	sm_pre = 0.0; sm_ext = 0.0; sm_popfx = 0.0; sm_squash = 0.0; sm_lip = 0.0; sm_fold = 0.0; sm_reach = 0.0
 	roll_init = false; roll_pv = 0.0; roll_cv = 0.0; lat_g_s = 0.0; flow_e = 0.0
 	_fy_prev = NAN; _fv_prev = NAN; _facc = 0.0   # the bump bounce starts fresh (NAN = no previous frame)
+	_hp_init = false; _hy = 0.0; _neck_d = Vector3.ZERO; _neck_v = Vector3.ZERO
 
 
 # ---------------- per-frame pose ----------------
@@ -1259,6 +1261,84 @@ var sm_pitch_slow := 0.0   # the bike's pitch averaged over ~0.35 s: what the bo
 var bump_pitch := 0.0      # this frame's quick pitch kick the body holds against (tests)
 var sm_wheelie := 0.0   # the slope the body levels against, rate-limited
 const PITCH_LEVEL_RATE := 2.5   # rad/s
+# head stabilisation (riders keep the head steady and the eyes on the trail: the body soaks the bike's kicks from
+# the contact points up, the head sees the least of them; docs/research/rider_animation.md). The head's pitch follows
+# a smoothed copy of the bike's (slopes, held manuals) and holds against the quick part (rocks, landings); quick yaw
+# twitches of the bike (grip sim, slides) are held against too; the pedalling rock is taken out of its roll; its
+# position rides a short neck spring on the chest. Pose key headSteady (0 = the old head glued to the bike / chest)
+var _hp_init := false
+var _hp_s := 0.0; var _hp_v := 0.0       # the bike's pitch as the head follows it (critical spring)
+var _yr_s := 0.0; var _yr_v := 0.0       # the bike's yaw rate, slow
+var _hy := 0.0                           # head yaw held against quick yaw twitches (rad)
+var _neck_d := Vector3.ZERO; var _neck_v := Vector3.ZERO   # head position off its place on the chest (m)
+const HEAD_PITCH_HL := 0.16    # s: halflife the head follows the bike's pitch with
+const HEAD_YAW_HL := 0.22      # s: the slow yaw rate / the held yaw letting go
+const NECK_W := 15.0; const NECK_Z := 0.7   # neck spring (rad/s, damping ratio)
+# the chest rides the hips softer up and down than the hips ride the bike (0.6 x the legs' stiffness, 0.6 x the bump's
+# push): each part up the body sees less of the bike's kicks (MTB vibration studies: bike > lower back > head). Measured
+# on the rocks lane (BMX_POSE_PROBE, world): hips / chest / head 15-18 % smoother than at 1.0; 0.4 was worse again
+const CHEST_KY := 0.6; const CHEST_PUSH := 0.6
+const NECK_MAX := Vector3(0.025, 0.035, 0.012)   # m the head may sit off the chest's line
+# ankling (Gregor 2000, Road Cycling ch. 2: ~20 deg of ankle swing per crank turn, heel lowest just past the front of the
+# stroke, toes down at the back; standing adds toe-down): pose keys ankling, heelsDown
+const ANKLE_SWING := 0.17      # rad: half the swing pedalling
+const ANKLE_PHASE := 0.26      # rad: heel lowest this far past the front of the stroke
+var foot_pitch := [0.0, 0.0]   # this frame's foot pitch per foot (rad, + = toes up; footAngle + ankling): the pedals turn with it
+# the shoe on the pedal: riders on flats stand with the ball of the foot over the axle (the shoe runs x -0.115 heel ..
+# 0.175 toe, the ball ~70 % along); the sole rests on the pedal's top (set per frame from the bike: pose input pedalTop)
+const BALL_X := 0.08
+const ANKLE_UP := 0.09         # m: the ankle over the sole (and 4 cm behind the shoe's origin)
+var pedal_top := 0.017
+
+
+## The exact step of a damped spring x'' = k (g - x) - c x' + a (stiffness k, damping c, a constant push a) over dt:
+## the same motion at any frame rate (an Euler step drifts with dt). Under-, critically and over-damped.
+## Returns Vector2(x, v). (Holden, "Spring-It-On")
+static func spring_exact(x: float, v: float, g: float, k: float, c: float, a: float, dt: float) -> Vector2:
+	if k <= 1e-6 or dt <= 0.0: return Vector2(x + v * dt, v)
+	var gg := g + a / k          # where it settles with the push
+	var x0 := x - gg
+	var y := c * 0.5
+	var disc := k - y * y
+	if absf(disc) < 1e-4 * k:   # critical
+		var j1 := v + x0 * y
+		var e := exp(-y * dt)
+		return Vector2(e * (x0 + j1 * dt) + gg, e * (v - j1 * y * dt))
+	if disc > 0.0:               # under-damped: rings
+		var w := sqrt(disc)
+		var B := (v + y * x0) / w
+		var e := exp(-y * dt)
+		var cs := cos(w * dt); var sn := sin(w * dt)
+		return Vector2(gg + e * (x0 * cs + B * sn), e * ((B * w - y * x0) * cs - (x0 * w + y * B) * sn))
+	var r := sqrt(y * y - k)     # over-damped
+	var y0 := y + r; var y1 := y - r
+	var j1 := (-y0 * x0 - v) / (y1 - y0)
+	var j0 := x0 - j1
+	var e0 := exp(-y0 * dt); var e1 := exp(-y1 * dt)
+	return Vector2(j0 * e0 + j1 * e1 + gg, -y0 * j0 * e0 - y1 * j1 * e1)
+
+
+var _EULER_BODY := Env.s("BMX_EULER_BODY") != ""
+var _spring3_v := Vector3.ZERO   # the velocity _spring3 ends with
+## the body springs: sideways / fore-aft stiffness k, up / down ky (the legs), damping ratio z, an up / down push ay
+func _spring3(x: Vector3, v: Vector3, g: Vector3, k: float, ky: float, z: float, ay: float, dt: float) -> Vector3:
+	var c := 2.0 * sqrt(k) * z
+	var cy := 2.0 * sqrt(ky) * z
+	var rx := spring_exact(x.x, v.x, g.x, k, c, 0.0, dt)
+	var ry := spring_exact(x.y, v.y, g.y, ky, cy, ay, dt)
+	var rz := spring_exact(x.z, v.z, g.z, k, c, 0.0, dt)
+	_spring3_v = Vector3(rx.y, ry.y, rz.y)
+	return Vector3(rx.x, ry.x, rz.x)
+
+
+## Holden's exact critical spring ("Spring-It-On"): x, v towards goal g with halflife hl over dt, stable at any dt.
+## Returns Vector2(x, v)
+static func crit_spring(x: float, v: float, g: float, hl: float, dt: float) -> Vector2:
+	var y := 1.3862944 / maxf(hl, 1e-4)   # = (4 ln 2 / hl) / 2
+	var j0 := x - g
+	var j1 := v + j0 * y
+	var e := exp(-y * dt)
+	return Vector2(e * (j0 + j1 * dt) + g, e * (v - j1 * y * dt))
 var _fy_prev := NAN; var _fv_prev := NAN; var _facc := 0.0   # the frame's height / speed / acceleration (bump bounce)
 var bounce_stats := [0.0, 0, 0.0, 0.0]   # tests: sum of squared body offsets, samples, biggest offset
 # the body's own roll (world, rad): hips and chest follow the bike's lean on their own springs, so the bike
@@ -1440,9 +1520,19 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# The body used to follow 80 % of any nose-up pitch at once: over rocks the whole rider rocked back and forth with
 	# the frame as one stiff piece. Quick = the bike's pitch against its own slow average (~0.35 s): a slope or a held
 	# manual is followed as before, only what changes faster than the body can swing is held back (bumpPitch of it)
-	if not spring_init or air > 0.5: sm_pitch_slow = raw_p
-	sm_pitch_slow += wrapf(raw_p - sm_pitch_slow, -PI, PI) * (1.0 - exp(-3.0 * h0))
-	var kick: float = clampf(wrapf(raw_p - sm_pitch_slow, -PI, PI), -0.4, 0.4) * (1.0 - air) * (1.0 - smoothstep(0.7, 1.3, absf(raw_p)))
+	# (2026-11-22) a kick is the bike pitching against the LAND under it (`slope`: the ground without rocks / logs): on a
+	# jump face, a roller, any change of grade the bike pitches because the ground does - read as a kick, that leaned
+	# the whole body back up to ~20 deg running up every lip. In the air the hold eases out (it used to snap off as
+	# the air flag passed a half), and the +-0.4 rad limit is soft
+	# (only on the face of a jump - a lip ahead, the ground rising: he rides it centred with the bike. A curb, a pothole,
+	# a ledge or a rock is a kick the body holds against, though they are ground too; taking every slope out made those
+	# ~10 % rougher in the world)
+	var face_k: float = smoothstep(0.1, 0.4, sm_lip) * smoothstep(0.04, 0.15, slope0) if p.has("slope") else 0.0
+	var rel_p: float = wrapf(raw_p - slope0 * face_k, -PI, PI)
+	if not spring_init: sm_pitch_slow = rel_p
+	sm_pitch_slow += wrapf(rel_p - sm_pitch_slow, -PI, PI) * (1.0 - exp(-(3.0 + 30.0 * air) * h0))
+	var kick_r := wrapf(rel_p - sm_pitch_slow, -PI, PI)
+	var kick: float = 0.4 * tanh(kick_r / 0.4) * (1.0 - air) * (1.0 - smoothstep(0.7, 1.3, absf(raw_p)))
 	bump_pitch = kick
 	if Env.s("BMX_KICK_PROBE") != "" and absf(kick) > 0.02: print("KICK raw=%.3f slow=%.3f kick=%.3f base=%.3f wheelie=%.3f slope=%.3f air=%.2f" % [raw_p, sm_pitch_slow, kick, base, wheelie, slope0, air])
 	# (applied after the body's springs, below: it is the bike turning under a body that stays put, not a move of
@@ -1503,10 +1593,16 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var cw: float = ROLL_CHEST_W * fol
 	var hz: float = lerpf(1.0, ROLL_HIP_Z, minf(swing, 1.0)) - 0.2 * maxf(swing - 1.0, 0.0)
 	var cz: float = lerpf(1.0, ROLL_CHEST_Z, minf(swing, 1.0)) - 0.2 * maxf(swing - 1.0, 0.0)
-	roll_pv += ((roll_t - roll_p) * hw * hw - 2.0 * hz * hw * roll_pv) * hr
-	roll_p += roll_pv * hr
-	roll_cv += ((roll_t - roll_c) * cw * cw - 2.0 * cz * cw * roll_cv) * hr
-	roll_c += roll_cv * hr
+	if _EULER_BODY:
+		roll_pv += ((roll_t - roll_p) * hw * hw - 2.0 * hz * hw * roll_pv) * hr
+		roll_p += roll_pv * hr
+		roll_cv += ((roll_t - roll_c) * cw * cw - 2.0 * cz * cw * roll_cv) * hr
+		roll_c += roll_cv * hr
+	else:   # (exact steps, see spring_exact)
+		var rp := spring_exact(roll_p, roll_pv, roll_t, hw * hw, 2.0 * hz * hw, 0.0, hr)
+		roll_p = rp.x; roll_pv = rp.y
+		var rc := spring_exact(roll_c, roll_cv, roll_t, cw * cw, 2.0 * cz * cw, 0.0, hr)
+		roll_c = rc.x; roll_cv = rc.y
 	knee_lean += (bl - knee_lean) * (1.0 - exp(-7.0 * hr))
 	# corner life (Rider › Movement › Corner life, subtle): leaned over, the rider keeps making small balance
 	# corrections (a slow, uneven sway of the body roll, ~1-2 deg), a bump under the leaned bike nudges the body's
@@ -1594,6 +1690,10 @@ func update_pose(dt: float, p: Dictionary) -> void:
 			var sh := chest + Vector3(-0.03, -0.04, sd * sty.shoulders)
 			# hands by the thighs, just in front of the hip line: elbows soft, pointing back
 			p["handL" if sd < 0 else "handR"] = sh + Vector3(0.07, -arm * 0.95, sd * 0.07)
+	# the target keeps every limit before the springs follow it (docs/research/rider_animation.md, point 4)
+	if Env.s("BMX_OLD_LIMITS") == "":
+		var tgt := _constrain(pelvis, chest, p, sty, standing, aero, false)
+		pelvis = tgt[0]; chest = tgt[1]
 	# critically-damped-ish springs -> follow-through
 	if not spring_init:
 		pel_s = pelvis
@@ -1620,26 +1720,52 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	_fy_prev = gy
 	_facc += (acc - _facc) * (1.0 - exp(-40.0 * h))   # a touch of smoothing (frame-time jitter)
 	var zeta: float = clampf(float(sty.get("bodyBounce", 0.4)), 0.15, 1.0)
-	var dp := 2 * sqrt(260.0) * zeta
-	pel_v += ((pelvis - pel_s) * 260.0 - pel_v * dp) * h
 	# up / down the legs are a softer spring (~1.5 Hz): the body rides bumps and rebounds
 	var ky: float = clampf(float(sty.hipSteady), 20.0, 600.0)   # Hips steady: how stiffly the legs hold the hips
-	pel_v.y += ((pelvis.y - pel_s.y) * (ky - 260.0) - pel_v.y * 2.0 * (sqrt(ky) - sqrt(260.0)) * zeta) * h
-	pel_v.y -= _facc * bump_k * h
-	pel_s += pel_v * h
+	# (exact steps: the same body at any frame rate; BMX_EULER_BODY=1 = the old Euler steps, for comparison)
+	if _EULER_BODY:
+		var dp := 2 * sqrt(260.0) * zeta
+		pel_v += ((pelvis - pel_s) * 260.0 - pel_v * dp) * h
+		pel_v.y += ((pelvis.y - pel_s.y) * (ky - 260.0) - pel_v.y * 2.0 * (sqrt(ky) - sqrt(260.0)) * zeta) * h
+		pel_v.y -= _facc * bump_k * h
+		pel_s += pel_v * h
+	else:
+		pel_s = _spring3(pel_s, pel_v, pelvis, 260.0, ky, zeta, -_facc * bump_k, h)
+		pel_v = _spring3_v
 	# the legs only bend / straighten so far
 	pel_s.y = clampf(pel_s.y, pelvis.y - 0.14, pelvis.y + 0.05)
 	if air < 0.5:   # tests (BMX_CLIP_PROBE): how far the body moves on its legs while riding
 		bounce_stats[0] += (pel_s.y - pelvis.y) * (pel_s.y - pelvis.y); bounce_stats[1] += 1
 		bounce_stats[2] = maxf(bounce_stats[2], absf(pel_s.y - pelvis.y)); bounce_stats[3] += _facc * _facc
 	pelvis = pel_s
-	var dc := 2 * sqrt(200.0) * zeta
-	ch_v += ((chest - ch_s) * 200.0 - ch_v * dc) * h
-	ch_v.y += ((chest.y - ch_s.y) * (ky - 200.0) - ch_v.y * 2.0 * (sqrt(ky) - sqrt(200.0)) * zeta) * h
-	ch_v.y -= _facc * bump_k * 0.85 * h
-	ch_s += ch_v * h
+	if _EULER_BODY:
+		var dc := 2 * sqrt(200.0) * zeta
+		ch_v += ((chest - ch_s) * 200.0 - ch_v * dc) * h
+		ch_v.y += ((chest.y - ch_s.y) * (ky - 200.0) - ch_v.y * 2.0 * (sqrt(ky) - sqrt(200.0)) * zeta) * h
+		ch_v.y -= _facc * bump_k * 0.85 * h
+		ch_s += ch_v * h
+	else:
+		ch_s = _spring3(ch_s, ch_v, chest, 200.0, ky * CHEST_KY, zeta, -_facc * bump_k * 0.85 * CHEST_PUSH, h)
+		ch_v = _spring3_v
 	ch_s.y = clampf(ch_s.y, chest.y - 0.14, chest.y + 0.06)
 	chest = ch_s
+	# the springs lag their target, so what they made can still break a limit (a quick lean swap, a landing): correct
+	# it and write that back into the springs - the body is held at the limit and its speed into it is gone (position
+	# based dynamics), instead of the spring pushing in again every frame and being pulled back out (a fight that
+	# shook the torso). The quick view-only turns below (pedalling rock, pitch kicks) still get a last check after them
+	if Env.s("BMX_OLD_LIMITS") == "":
+		var sp := _constrain(pelvis, chest, p, sty, standing, aero, false)
+		var dpel: Vector3 = sp[0] - pelvis
+		var dch: Vector3 = sp[1] - chest
+		if dpel.length_squared() > 1e-10:
+			var n := dpel.normalized()
+			pel_v -= n * minf(0.0, pel_v.dot(n))   # (only the speed into the limit)
+			pel_s += dpel
+		if dch.length_squared() > 1e-10:
+			var n := dch.normalized()
+			ch_v -= n * minf(0.0, ch_v.dot(n))
+			ch_s += dch
+		pelvis = pel_s; chest = ch_s
 	# pedalling rock: undo the bike's rock for hips and chest about the tyres' contact line
 	var rr: float = _num(p, "rockRoll") * sty.upright
 	if rr != 0.0:
@@ -1666,9 +1792,263 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		kdx = chest.x
 		chest.x = kdx * kc + kdy * ks
 		chest.y = 0.3 - kdx * ks + kdy * kc
-	# arms only reach so far: the torso follows the hands so the elbows keep a bend
+	# the corrections again on what the springs made (a safety net: the target already keeps them)
+	var cpc := _constrain(pelvis, chest, p, sty, standing, aero, true)
+	pelvis = cpc[0]; chest = cpc[1]
+	# ---- motion cap: hips and chest move at most TORSO_VMAX relative to the bike. Whatever drives them (a limit
+	# above snapping on, a spike in an input, sliders stacking up), the torso can't jump between frames; real riding
+	# moves it well under this. Hands and feet are fitted after this, so they stay on the grips and pedals.
+	# A big jump (> 0.4 m: a reset, a respawn) is taken at once
+	var vcap: float = _num(p, "torsoVmax", TORSO_VMAX) * clampf(dt, 0.0, 0.05)   # (Ride › Smoothing, passed in by Game)
+	if _cap_ok and vcap > 0.0:
+		for which in 2:
+			var cur: Vector3 = pelvis if which == 0 else chest
+			var prev: Vector3 = _cap_pel if which == 0 else _cap_ch
+			var dmv := cur - prev
+			var dl := dmv.length()
+			if dl > vcap and dl < 0.4:
+				cur = prev + dmv / dl * vcap
+				if which == 0: pelvis = cur
+				else: chest = cur
+	_cap_pel = pelvis; _cap_ch = chest; _cap_ok = true
+	if _POSE_PROBE: _pp_mark(8, pelvis, chest)
+	# torso from pelvis to chest
+	var hip := Vector3(pelvis.x, pelvis.y + 0.02, pelvis.z)
+	var tw_axis := (chest - hip).normalized()
+	# spinning in the air: shoulders lead the bike round (the head turns via yawRate below)
+	# turning on the ground: shoulders and hips steer into the turn, the inside hip drops
+	var turn := clampf(_num(p, "turn"), -3.0, 3.0)
+	sm_turn += (turn - sm_turn) * (1.0 - exp(-8.0 * minf(dt, 0.1)))
+	# a side lean in the air (tabletop): the hips turn with the bike, the shoulders turn back against it
+	var tab: float = clampf(_num(p, "bodyLat"), -1.0, 1.0) * air
+	# pro flow (flowLead): the shoulders lead into the turn the body is rolling towards (the target roll + the roll
+	# under way), ahead of the hips and the bike's actual turn - the upper body winds up and the bike follows
+	var lead: float = clampf(0.3 * clampf(_num(p, "lean") - _num(p, "rockRoll") - clampf(_num(p, "counter"), -0.85, 0.85), -0.9, 0.9) + 0.06 * roll_pv, -0.35, 0.35) * float(sty.get("flowLead", 1.0)) * (1.0 - air)
+	# an air whip: the bike is twisted under the body (airWhip = how far, rad, in bike space). The body is drawn in the
+	# bike's frame, so it turns back against it - the hips half way (they're on the saddle / pedals), the shoulders
+	# nearly all the way: the rider keeps facing where they fly while the bike hangs out sideways
+	var awhip: float = clampf(_num(p, "airWhip"), -1.4, 1.4) * air
+	var tw := Basis(tw_axis, float(sty.twist) + clampf(_num(p, "airSpin") * 0.07 + sm_turn * 0.13 * float(sty.turnTwist) + lead, -0.6, 0.6) - 0.22 * tab - 0.85 * awhip)
+	# pelvis: turn (yaw about up), roll (one hip drops, about forward), tilt (about the hip line)
+	var pel_b := Basis(Vector3.UP, float(sty.pelvisYaw) + clampf(sm_turn * 0.07 * float(sty.turnHips), -0.4, 0.4) + 0.3 * tab - 0.4 * awhip) * Basis(Vector3.RIGHT, float(sty.pelvisRoll) - clampf(sm_turn * 0.04 * float(sty.turnHips), -0.25, 0.25))
+	var pel_full := pel_b * Basis(Vector3.BACK, -(ang * 0.3) - float(sty.pelvisTilt))
+	hip = pelvis + pel_full.y * Belt.HEM_Y   # the jersey's hem: inside the belt, level with it
+	# pro flow (flowBend): the hips go over first and the chest follows, so through a lean change the spine curves
+	# (a C bowed away from the way the chest still hangs) instead of moving as one stiff stick
+	var bend: float = clampf((roll_c - roll_p) * 0.6, -0.2, 0.2) * float(sty.get("flowBend", 1.0)) * (1.0 - air)
+	set_spine(hip, chest, pel_b * Vector3(0, 0, 1), tw * Vector3(0, 0, 1),
+		float(sty.spineCurve) * (1.0 - 0.7 * relax), float(sty.spineSide) + bend, float(sty.spineLow), pel_full)
+	pelvis_mesh.transform = Transform3D(pel_full, pelvis)
+
+	# neck / head
+	var neck := chest
+	var head_p := Vector3(neck.x + 0.05 + sty.lookAhead + 0.04 * aero, neck.y + 0.2 + sty.neck, neck.z)   # (forward: chin over the bars)
+	# head stabilisation (see _hp_s): how much, and what the head follows
+	var steady: float = clampf(float(sty.get("headSteady", 1.0)), 0.0, 2.0) * (0.0 if standing else 1.0)
+	var flip_k: float = 1.0 - smoothstep(0.7, 1.3, absf(raw_p))   # mid-flip the head goes round with the body
+	var hdt := clampf(dt, 0.0, 0.1)
+	if not _hp_init:
+		_hp_s = raw_p; _hp_v = 0.0; _yr_s = _num(p, "yawRate"); _yr_v = 0.0; _hy = 0.0
+		_neck_d = Vector3.ZERO; _neck_v = Vector3.ZERO; _hp_init = true
+	var hps := crit_spring(_hp_s, _hp_v, _hp_s + wrapf(raw_p - _hp_s, -PI, PI), HEAD_PITCH_HL, hdt)   # (goal unwrapped)
+	_hp_s = wrapf(hps.x, -PI, PI); _hp_v = hps.y
+	if absf(wrapf(raw_p - _hp_s, -PI, PI)) > 0.9: _hp_s = raw_p; _hp_v = 0.0   # (a flip / reset: catch up at once)
+	var head_kick: float = clampf(wrapf(raw_p - _hp_s, -PI, PI), -0.45, 0.45) * flip_k * steady
+	# quick yaw twitches: the bike's yaw rate minus its slow average, held against, let go again over HEAD_YAW_HL
+	var yr := _num(p, "yawRate")
+	var yrs := crit_spring(_yr_s, _yr_v, yr, HEAD_YAW_HL, hdt)
+	_yr_s = yrs.x; _yr_v = yrs.y
+	_hy -= (yr - _yr_s) * hdt
+	_hy *= pow(0.5, hdt / HEAD_YAW_HL)
+	_hy = clampf(_hy, -0.3, 0.3)
+	var head_yaw_hold: float = _hy * steady * (1.0 - air)
+	# the neck: the head rides a short spring on the chest, the frame's up / down kicks press it the other way (a free
+	# mass in the bike's frame), so it lags the chest a little more than the chest lags the bike
+	if hdt > 0.0:
+		var nsub := int(ceil(hdt * 240.0))
+		var nh := hdt / nsub
+		for _i in nsub:
+			_neck_v += (-_neck_d * NECK_W * NECK_W - _neck_v * 2.0 * NECK_Z * NECK_W) * nh
+			_neck_v.y -= _facc * (1.0 - air) * nh
+			_neck_d += _neck_v * nh
+		_neck_d = _neck_d.clamp(-NECK_MAX, NECK_MAX)
+	head_p += _neck_d * minf(steady, 1.0)
+	J[0] = head_p
+	J[1] = chest
+	J[2] = pelvis
+	# (+ the eyes lead into the turn with the shoulders, flowLead)
+	var yaw: float = clampf((_num(p, "steer") * 1.2 + _num(p, "yawRate") * 0.15) * sty.headTurn + lead * 0.8, -0.8, 0.8) + sty.headYaw + _num(p, "lookYaw") - 0.95 * awhip + head_yaw_hold
+	# (+ the pedalling rock taken back out: the bike rocks under a level head)
+	var rx: float = (_num(p, "headRoll") if p.get("headRoll") != null else _num(p, "lean") * 0.6) + sty.headRoll + _num(p, "rockRoll") * minf(steady, 1.0)
+	var rz: float = -0.12 * (ang - 0.72) + 0.04 * sin(t * 3.3) * wig - sty.headTilt * (1.0 - 0.6 * relax) + 0.12 * tall + _num(p, "lookPitch") - head_kick
+	head.transform = Transform3D(GEAR.euler_xyz(rx, yaw, rz), head_p)
+	_pose_neck()
+
+	var right := Vector3(0, 0, 1)
+	var max_turn := BEND_RATE * minf(dt, 0.1) if dt > 0.0 else PI
+	# ankling: the foot pitches about the pedal axle (+ = toes up / heel down). Pedalling it swings with the stroke
+	# (heel lowest just past the front, toes down at the back); standing hard on the pedals the toes point down more;
+	# coasting in the attack position the heels drop (the DH stance), deeper when the legs soak a hit or reach for a
+	# landing. The ankle (the leg's IK end) turns with the foot
+	var bb := Vector2.ZERO
+	var fL0 = p.get("footL"); var fR0 = p.get("footR")
+	if fL0 is Vector3 and fR0 is Vector3: bb = Vector2((fL0.x + fR0.x) * 0.5, (fL0.y + fR0.y) * 0.5)
+	pedal_top = clampf(_num(p, "pedalTop", 0.017), 0.0, 0.05)
+	var ank_k: float = clampf(float(sty.get("ankling", 1.0)), 0.0, 2.5) * (0.0 if standing else 1.0)
+	var heels: float = clampf(float(sty.get("heelsDown", 1.0)), 0.0, 2.5) * (0.0 if standing else 1.0)
+	var ank_swing: float = ANKLE_SWING * pedal * (1.0 - 0.7 * air) * ank_k
+	var ank_bias: float = -0.07 * spr * pedal * ank_k \
+		+ heels * (0.12 * stand * (1.0 - pedal) * (1.0 - air) + 0.15 * j_fold + 0.25 * clampf(comp, 0.0, 0.3) + 0.06 * sm_reach)
+	for i in 2:
+		var side := -1.0 if i == 0 else 1.0
+		var foot: Vector3 = p.get("footL" if i == 0 else "footR", Vector3.ZERO)
+		foot.z += side * float(sty.footSlide)   # slide the shoe outwards along the pedal axle
+		var hand: Vector3 = p.get("handL" if i == 0 else "handR", Vector3.ZERO)
+		# leg
+		var hp: Vector3 = pelvis + pel_b * Vector3(0, -0.02, side * (0.11 + sty.stance))
+		var phi := atan2(foot.y - bb.y, foot.x - bb.x)   # where on the stroke (0 = front, + up)
+		var toe_up: float = clampf(ank_swing * cos(phi + ANKLE_PHASE) + ank_bias, -0.35, 0.35)
+		# the shoe on its pedal: the ball of the foot (shoe x = BALL_X) over the axle, the sole resting on the pedal's top
+		# (pedalTop above the axle), both turned by the foot's pitch about the axle (Game / the garage turn the pedal with
+		# it: foot_pitch). The ankle hangs off the shoe. Standing on the floor (no pedal): the old placement
+		var f_pitch: float = float(sty.footAngle) + toe_up
+		foot_pitch[i] = f_pitch
+		var pb := Basis(Vector3.BACK, f_pitch)
+		var sb := Basis(Vector3.UP, -side * float(sty.footOut)) * pb
+		var shoe_o: Vector3 = foot + Vector3(0.0, 0.03, 0.0) if standing \
+			else foot + pb.y * pedal_top - sb.x * BALL_X
+		var ankle: Vector3 = shoe_o + sb * Vector3(-0.04 + sty.heelFwd, ANKLE_UP + sty.heelUp, 0.0) if not standing \
+			else Vector3(foot.x - 0.04 + sty.heelFwd, foot.y + 0.12 + sty.heelUp, foot.z)
+		# turning: the inside knee opens out toward the turn, the outside leg drives down on its pedal
+		var inside: float = clampf(-side * knee_lean * 1.6, 0.0, 0.9) * float(sty.kneeOpen) * (1.0 - air)
+		var pole_l: Vector3 = (poles_leg[i] + Vector3(0, 0, side * inside)).normalized()
+		var ik := limb_ik(hp, ankle, L_THIGH, L_SHIN, pole_l, Vector3.UP, KNEE_MIN, KNEE_MAX, _bd_prev[i], max_turn)
+		_bd_prev[i] = ik[2]
+		var ik_raw: Vector3 = ik[0]
+		ik[0] = _knee_clear(hp, ankle, ik[0], side)
+		# knees never into the chest / belly: folded right down they go out round it
+		ik[0] = _swing_clear(hp, ik[1], ik[0], side, [pelvis.lerp(chest, 0.35), chest], LIMB_TORSO)
+		if knee_dbg.size() < 40 and _KNEE_PROBE and knee[i].position.distance_to(ik[0]) > 0.08:
+			knee_dbg.append([i, snappedf(_num(p, "pitch"), 0.01), knee[i].position.snapped(Vector3.ONE * 0.01), hp.snapped(Vector3.ONE * 0.01), ankle.snapped(Vector3.ONE * 0.01), ik_raw.snapped(Vector3.ONE * 0.01), (ik[0] as Vector3).snapped(Vector3.ONE * 0.01)])
+		set_limb(thigh[i], hp, ik[0])
+		set_limb(shin[i], ik[0], ik[1])
+		knee[i].position = ik[0]
+		knee_pad[i].pose(hp, ik[0], ik[0], ik[1], pole_l)
+		# out of reach: the foot stays at the end of the leg (limbs never stretch)
+		shoe_o += ik[1] - ankle
+		shoe[i].position = shoe_o
+		shoe[i].basis = sb
+		J[9 + i * 3] = hp
+		J[10 + i * 3] = ik[0]
+		J[11 + i * 3] = shoe_o + Vector3(0.0, 0.05, 0.0)
+		# arm
+		var sh_off := Vector3(-0.03 + sty.shoulderFwd, -0.04 + sty.shoulderUp, side * sty.shoulders)
+		var shp: Vector3 = chest + tw * sh_off
+		shoulder_sph[i].position = shp
+		# hand nearly on the elbow's pole line (deep turns, arms up in the air): elbow out and down
+		var pole_a: Vector3 = poles_arm[i]
+		if aero > 0.01: pole_a = pole_a.lerp(Vector3(-0.15, 0.15, side * 1.0).normalized(), 0.7 * aero).normalized()   # elbows up and out
+		if back_k > 0.01: pole_a = pole_a.lerp(Vector3(-0.35, -0.85, side * 0.3).normalized(), 0.5 * back_k).normalized()
+		if standing: pole_a = Vector3(-1.0, 0.0, side * 0.25).normalized()   # arms hanging: elbows point back
+		var ika := limb_ik(shp, hand, L_UARM, L_FARM, pole_a, Vector3(0, -0.5, side), ELBOW_MIN, ELBOW_MAX, _bd_prev[2 + i], max_turn)
+		_bd_prev[2 + i] = ika[2]
+		# arms never through the leg on their side (a deep lean, braking hard into a turn): the elbow goes out round it
+		ika[0] = _swing_clear(shp, ika[1], ika[0], side, [hp.lerp(ik[0], 0.3), ik[0], ik[0], ik[1]], LIMB_LIMB)
+		set_limb(upper_arm[i], shp, ika[0])
+		elbow[i].position = ika[0]
+		hand = ika[1]   # out of reach: the hand stays at the end of the arm
+		glove[i].position = hand
+		orient_hand(glove[i], ika[0], hand, right)
+		if sty.wristRoll != 0.0:
+			glove[i].rotate_object_local(Vector3.RIGHT, side * float(sty.wristRoll))
+		set_limb(fore_arm[i], ika[0], _wrist(i, ika[0]))
+		_curl_to(i, GloveFingers.RELAXED if standing else 1.0, dt * 5.0)   # on the bike: wrapped round the grip
+		J[3 + i * 3] = shp
+		J[4 + i * 3] = ika[0]
+		J[5 + i * 3] = hand
+		if limb_probe:
+			_probe_limb("elbow%d" % i, shp, ika[0], hand, dt, air)
+			_probe_limb("knee%d" % i, hp, ik[0], ik[1], dt, air)
+	_sync_skeleton(J)
+	if _CLIP_PROBE and not standing: _clip_probe(p)
+	if _HEAD_PROBE and not standing and dt > 0.0 and is_inside_tree(): _head_probe(dt, air)
+	if _POSE_PROBE and not standing:
+		_pp_air = air
+		_pp_why = "pre=%.2f ext=%.2f pop=%.2f sq=%.2f fold=%.2f reach=%.2f wheelie=%.2f absorb=%.3f v=%.1f init=%s kick=%.3f lip=%.2f" % [sm_pre, sm_ext, sm_popfx, sm_squash, sm_fold, sm_reach, sm_wheelie, _num(p, "absorb"), _num(p, "v"), spring_init, bump_pitch, sm_lip]
+		_pp_joints()
+
+
+# tests (BMX_POSE_PROBE=1): what the pose's corrections do and how rough the drawn joints move. Per correction step after
+# the body springs (arm reach, hips box, bar, rear wheel, torso angle, torso length, saddle / tyre floor, motion cap):
+# how often it moves the hips / chest more than 2 mm, its rms and biggest move; per joint (rider space): the second
+# difference frame to frame (mm: a step / kink in the motion), rms, worst, frames over 3 mm. Run at a fixed frame rate
+# (BMX_FPS=60) so the second differences compare. Printed every 4 s (cumulative) and at the end of a test
+var _POSE_PROBE := Env.s("BMX_POSE_PROBE") != ""
+const _PP_STAGES := ["reach", "hipbox", "bar", "wheel", "angle", "length", "floor", "cap"]
+const _PP_JOINTS := [[2, "pelvis"], [1, "chest"], [0, "head"], [10, "kneeL"], [13, "kneeR"], [4, "elbowL"], [7, "elbowR"]]
+const _PP_WORLD := [[2, "Wpelvis"], [1, "Wchest"], [0, "Whead"]]   # the same seen in the world (bike + body)
+var _pp_ref := [Vector3.ZERO, Vector3.ZERO]
+var _pp_st := {}   # stage -> [frames moved, sum sq, max]
+var _pp_jt := {}   # joint -> [n, sum sq, max, over 3 mm, prev, prev2]
+var _pp_t := 0
+var _pp_jumps := 0; var _pp_air := 0.0; var _pp_why := ""
+func _pp_mark(k: int, pel: Vector3, ch: Vector3) -> void:
+	if k > 0:
+		var nm: String = _PP_STAGES[k - 1]
+		var mv := maxf((pel - _pp_ref[0]).length(), (ch - _pp_ref[1]).length())
+		var s: Array = _pp_st.get(nm, [0, 0.0, 0.0])
+		if mv > 0.002: s[0] += 1
+		s[1] += mv * mv; s[2] = maxf(s[2], mv)
+		_pp_st[nm] = s
+	_pp_ref = [pel, ch]
+
+func _pp_joints() -> void:
+	for jn in _PP_JOINTS + _PP_WORLD:
+		var x: Vector3 = J[jn[0]]
+		if String(jn[1]).begins_with("W"):
+			if not is_inside_tree(): continue
+			x = to_global(x)
+		var s: Array = _pp_jt.get(jn[1], [0, 0.0, 0.0, 0, Vector3.INF, Vector3.INF])
+		if s[4] != Vector3.INF and s[5] != Vector3.INF:
+			var a: float = (x - 2.0 * s[4] + s[5]).length()
+			if a < 0.3:   # (a teleport / reset is not motion)
+				s[0] += 1; s[1] += a * a; s[2] = maxf(s[2], a)
+				if a > 0.003: s[3] += 1
+				if a > 0.04 and jn[1] == "pelvis" and _pp_jumps < 30:
+					_pp_jumps += 1
+					print("POSEJUMP frame=%d pelvis 2nd diff=%.0fmm  air=%.2f pitch=%.2f %s" % [_pp_t, a * 1000.0, _pp_air, _probe_pitch, _pp_why])
+		s[5] = s[4]; s[4] = x
+		_pp_jt[jn[1]] = s
+	_pp_t += 1
+	if _pp_t % 120 == 0: pose_probe_print()
+
+func pose_probe_print() -> void:
+	var n: int = maxi(_pp_t, 1)
+	var line := "POSEPROBE frames=%d limits:" % _pp_t
+	for nm in _PP_STAGES:
+		var s: Array = _pp_st.get(nm, [0, 0.0, 0.0])
+		line += " %s %.1f%% rms=%.1f max=%.0fmm |" % [nm, 100.0 * s[0] / n, sqrt(s[1] / n) * 1000.0, s[2] * 1000.0]
+	print(line)
+	line = "POSEPROBE joints (2nd diff mm):"
+	for jn in _PP_JOINTS + _PP_WORLD:
+		var s: Array = _pp_jt.get(jn[1], [0, 0.0, 0.0, 0])
+		var m: int = maxi(s[0], 1)
+		line += " %s rms=%.2f max=%.1f >3mm=%d |" % [jn[1], sqrt(s[1] / m) * 1000.0, s[2] * 1000.0, s[3]]
+	print(line)
+
+
+## The pose's corrections, in order: arms reach (the torso follows the hands), hips in their box, never through the
+## handlebar, never into the rear wheel, the torso's angle and length, never into the saddle / rear tyre. Run on the
+## TARGET before the body springs (so the springs follow a pose a body can take: nothing steps when a limit engages) and
+## again after them as a safety net (it then only catches what the springs' lag leaves; `probe` measures that).
+## Returns [pelvis, chest]
+func _constrain(pelvis: Vector3, chest: Vector3, p: Dictionary, sty: Dictionary, standing: bool, aero: float, final: bool) -> Array:
+	var probe := final and _POSE_PROBE
+	var probe_bar := final and Env.s("BMX_BAR_PROBE") != ""
 	var handL = p.get("handL")
 	var handR = p.get("handR")
+	if probe: _pp_mark(0, pelvis, chest)
+	# arms only reach so far: the torso follows the hands so the elbows keep a bend
 	if handL is Vector3 and handR is Vector3 and not standing:
 		# Arm bend: how far the arms may straighten (more bend = chest closer to the bars)
 		var reach := (L_UARM + L_FARM) * clampf(0.9 - 0.2 * float(sty.armBend), 0.55, 0.98)
@@ -1686,12 +2066,14 @@ func update_pose(dt: float, p: Dictionary) -> void:
 				chest += d
 				pelvis += d * 0.35
 
+	if probe: _pp_mark(1, pelvis, chest)
 	# ---- safety limits. Whatever stacks up (tuck + spin + counter-lean + landing + style sliders), the
 	# skeleton stays humanly possible: hips in a box over the bike, the torso bends only so far from the
 	# bike's up (back / forward, sideways) and never folds below the hips
 	pelvis.x = clampf(pelvis.x, -0.6, 0.22)
 	pelvis.y = clampf(pelvis.y, 0.42, 1.08)
 	pelvis.z = clampf(pelvis.z, -0.22, 0.22)
+	if probe: _pp_mark(2, pelvis, chest)
 	# ---- never through the handlebar. The chest and the helmet keep clear of the bar / stem (the middle of the two
 	# grips), seen from the side: whatever leans the rider onto it (a sprint from a standstill, the tuck, a squash, a
 	# hard landing, braking) the whole upper body moves back and a little up, hips and all: the arms get longer and
@@ -1724,10 +2106,11 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		if push != Vector2.ZERO:
 			chest.x += push.x; chest.y += push.y
 			pelvis.x = maxf(-0.6, pelvis.x + push.x * 0.85); pelvis.y += push.y * 0.6
-		if Env.s("BMX_BAR_PROBE") != "":   # tests: how deep into the bar the chest / helmet would have been
+		if probe_bar:   # tests: how deep into the bar the chest / helmet would have been
 			bar_stats[0] = maxf(bar_stats[0], deep); bar_stats[1] += 1.0 if deep > 0.0 else 0.0; bar_stats[2] += 1.0
 			var d_c := Vector2(chest.x - bar_c.x, chest.y - bar_c.y)   # (before the limits below)
 			bar_stats[3] = minf(bar_stats[3], d_c.length()); bar_stats[4] = minf(bar_stats[4], (d_c + head_off).length())
+	if probe: _pp_mark(3, pelvis, chest)
 	# never INTO the rear wheel (they may go below the saddle, beside it): the hips keep out of the wheel's
 	# circle by the thigh / seat thickness. The legs used to go into the wheel when air crouch + landing
 	# absorb + the bike lifted into the body all stacked up
@@ -1740,6 +2123,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 			out.x = minf(out.x, 0.0) if d2.x < 0.0 else out.x   # pushed up / out, never forward through it
 			pelvis.x += out.x; pelvis.y += out.y
 			chest.x += out.x; chest.y += out.y   # the whole body comes up, not just the hips
+	if probe: _pp_mark(4, pelvis, chest)
 	var tv0 := chest - pelvis
 	var tl0 := maxf(tv0.length(), 1e-4)
 	# forward lean from upright. A chest at or below the hips counts as folded FORWARD whichever side of the
@@ -1747,6 +2131,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var f_ang := 1.4 if tv0.y < 0.05 else clampf(atan2(tv0.x, tv0.y), -0.45, 1.4)
 	var s_ang := clampf(asin(clampf(tv0.z / tl0, -1.0, 1.0)), -0.6, 0.6)   # sideways
 	chest = pelvis + Vector3(sin(f_ang) * cos(s_ang), cos(f_ang) * cos(s_ang), sin(s_ang)) * tl0
+	if probe: _pp_mark(5, pelvis, chest)
 	# the torso never stretches or squashes: past its length range the hips follow the chest
 	var tv := chest - pelvis
 	var tl := tv.length()
@@ -1757,6 +2142,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		pelvis = chest - tv / tl * t_max
 	elif tl < t_min and tl > 1e-4:
 		chest = pelvis + tv / tl * t_min
+	if probe: _pp_mark(6, pelvis, chest)
 	# the hips once more, now that everything above has moved them (the bar limit, the torso's length): never into the
 	# saddle, never into the rear tyre. The chest comes up with them
 	var hip_lift := 0.0
@@ -1769,122 +2155,28 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		if dw.length() < cr2 and dw.y > -0.1: hip_lift += sqrt(maxf(0.0, cr2 * cr2 - dw.x * dw.x)) - dw.y
 	if hip_lift > 0.0:
 		pelvis.y += hip_lift; chest.y += hip_lift
-	# ---- motion cap: hips and chest move at most TORSO_VMAX relative to the bike. Whatever drives them (a limit
-	# above snapping on, a spike in an input, sliders stacking up), the torso can't jump between frames; real riding
-	# moves it well under this. Hands and feet are fitted after this, so they stay on the grips and pedals.
-	# A big jump (> 0.4 m: a reset, a respawn) is taken at once
-	var vcap: float = _num(p, "torsoVmax", TORSO_VMAX) * clampf(dt, 0.0, 0.05)   # (Ride › Smoothing, passed in by Game)
-	if _cap_ok and vcap > 0.0:
-		for which in 2:
-			var cur: Vector3 = pelvis if which == 0 else chest
-			var prev: Vector3 = _cap_pel if which == 0 else _cap_ch
-			var dmv := cur - prev
-			var dl := dmv.length()
-			if dl > vcap and dl < 0.4:
-				cur = prev + dmv / dl * vcap
-				if which == 0: pelvis = cur
-				else: chest = cur
-	_cap_pel = pelvis; _cap_ch = chest; _cap_ok = true
-	# torso from pelvis to chest
-	var hip := Vector3(pelvis.x, pelvis.y + 0.02, pelvis.z)
-	var tw_axis := (chest - hip).normalized()
-	# spinning in the air: shoulders lead the bike round (the head turns via yawRate below)
-	# turning on the ground: shoulders and hips steer into the turn, the inside hip drops
-	var turn := clampf(_num(p, "turn"), -3.0, 3.0)
-	sm_turn += (turn - sm_turn) * (1.0 - exp(-8.0 * minf(dt, 0.1)))
-	# a side lean in the air (tabletop): the hips turn with the bike, the shoulders turn back against it
-	var tab: float = clampf(_num(p, "bodyLat"), -1.0, 1.0) * air
-	# pro flow (flowLead): the shoulders lead into the turn the body is rolling towards (the target roll + the roll
-	# under way), ahead of the hips and the bike's actual turn - the upper body winds up and the bike follows
-	var lead: float = clampf(0.3 * clampf(_num(p, "lean") - _num(p, "rockRoll") - clampf(_num(p, "counter"), -0.85, 0.85), -0.9, 0.9) + 0.06 * roll_pv, -0.35, 0.35) * float(sty.get("flowLead", 1.0)) * (1.0 - air)
-	# an air whip: the bike is twisted under the body (airWhip = how far, rad, in bike space). The body is drawn in the
-	# bike's frame, so it turns back against it - the hips half way (they're on the saddle / pedals), the shoulders
-	# nearly all the way: the rider keeps facing where they fly while the bike hangs out sideways
-	var awhip: float = clampf(_num(p, "airWhip"), -1.4, 1.4) * air
-	var tw := Basis(tw_axis, float(sty.twist) + clampf(_num(p, "airSpin") * 0.07 + sm_turn * 0.13 * float(sty.turnTwist) + lead, -0.6, 0.6) - 0.22 * tab - 0.85 * awhip)
-	# pelvis: turn (yaw about up), roll (one hip drops, about forward), tilt (about the hip line)
-	var pel_b := Basis(Vector3.UP, float(sty.pelvisYaw) + clampf(sm_turn * 0.07 * float(sty.turnHips), -0.4, 0.4) + 0.3 * tab - 0.4 * awhip) * Basis(Vector3.RIGHT, float(sty.pelvisRoll) - clampf(sm_turn * 0.04 * float(sty.turnHips), -0.25, 0.25))
-	var pel_full := pel_b * Basis(Vector3.BACK, -(ang * 0.3) - float(sty.pelvisTilt))
-	hip = pelvis + pel_full.y * Belt.HEM_Y   # the jersey's hem: inside the belt, level with it
-	# pro flow (flowBend): the hips go over first and the chest follows, so through a lean change the spine curves
-	# (a C bowed away from the way the chest still hangs) instead of moving as one stiff stick
-	var bend: float = clampf((roll_c - roll_p) * 0.6, -0.2, 0.2) * float(sty.get("flowBend", 1.0)) * (1.0 - air)
-	set_spine(hip, chest, pel_b * Vector3(0, 0, 1), tw * Vector3(0, 0, 1),
-		float(sty.spineCurve) * (1.0 - 0.7 * relax), float(sty.spineSide) + bend, float(sty.spineLow), pel_full)
-	pelvis_mesh.transform = Transform3D(pel_full, pelvis)
+	if probe: _pp_mark(7, pelvis, chest)
+	return [pelvis, chest]
 
-	# neck / head
-	var neck := chest
-	var head_p := Vector3(neck.x + 0.05 + sty.lookAhead + 0.04 * aero, neck.y + 0.2 + sty.neck, neck.z)   # (forward: chin over the bars)
-	J[0] = head_p
-	J[1] = chest
-	J[2] = pelvis
-	# (+ the eyes lead into the turn with the shoulders, flowLead)
-	var yaw: float = clampf((_num(p, "steer") * 1.2 + _num(p, "yawRate") * 0.15) * sty.headTurn + lead * 0.8, -0.8, 0.8) + sty.headYaw + _num(p, "lookYaw") - 0.95 * awhip
-	var rx: float = (_num(p, "headRoll") if p.get("headRoll") != null else _num(p, "lean") * 0.6) + sty.headRoll
-	var rz: float = -0.12 * (ang - 0.72) + 0.04 * sin(t * 3.3) * wig - sty.headTilt * (1.0 - 0.6 * relax) + 0.12 * tall + _num(p, "lookPitch")
-	head.transform = Transform3D(GEAR.euler_xyz(rx, yaw, rz), head_p)
-	_pose_neck()
-
-	var right := Vector3(0, 0, 1)
-	var max_turn := BEND_RATE * minf(dt, 0.1) if dt > 0.0 else PI
-	for i in 2:
-		var side := -1.0 if i == 0 else 1.0
-		var foot: Vector3 = p.get("footL" if i == 0 else "footR", Vector3.ZERO)
-		foot.z += side * float(sty.footSlide)   # slide the shoe outwards along the pedal axle
-		var hand: Vector3 = p.get("handL" if i == 0 else "handR", Vector3.ZERO)
-		# leg
-		var hp: Vector3 = pelvis + pel_b * Vector3(0, -0.02, side * (0.11 + sty.stance))
-		var ankle := Vector3(foot.x - 0.04 + sty.heelFwd, foot.y + 0.12 + sty.heelUp, foot.z)
-		# turning: the inside knee opens out toward the turn, the outside leg drives down on its pedal
-		var inside: float = clampf(-side * knee_lean * 1.6, 0.0, 0.9) * float(sty.kneeOpen) * (1.0 - air)
-		var pole_l: Vector3 = (poles_leg[i] + Vector3(0, 0, side * inside)).normalized()
-		var ik := limb_ik(hp, ankle, L_THIGH, L_SHIN, pole_l, Vector3.UP, KNEE_MIN, KNEE_MAX, _bd_prev[i], max_turn)
-		_bd_prev[i] = ik[2]
-		var ik_raw: Vector3 = ik[0]
-		ik[0] = _knee_clear(hp, ankle, ik[0], side)
-		# knees never into the chest / belly: folded right down they go out round it
-		ik[0] = _swing_clear(hp, ik[1], ik[0], side, [pelvis.lerp(chest, 0.35), chest], LIMB_TORSO)
-		if knee_dbg.size() < 40 and _KNEE_PROBE and knee[i].position.distance_to(ik[0]) > 0.08:
-			knee_dbg.append([i, snappedf(_num(p, "pitch"), 0.01), knee[i].position.snapped(Vector3.ONE * 0.01), hp.snapped(Vector3.ONE * 0.01), ankle.snapped(Vector3.ONE * 0.01), ik_raw.snapped(Vector3.ONE * 0.01), (ik[0] as Vector3).snapped(Vector3.ONE * 0.01)])
-		set_limb(thigh[i], hp, ik[0])
-		set_limb(shin[i], ik[0], ik[1])
-		knee[i].position = ik[0]
-		knee_pad[i].pose(hp, ik[0], ik[0], ik[1], pole_l)
-		# out of reach: the foot stays at the end of the leg (limbs never stretch)
-		foot += ik[1] - ankle
-		shoe[i].position = Vector3(foot.x, foot.y + 0.03, foot.z)
-		shoe[i].basis = Basis(Vector3.UP, -side * float(sty.footOut)) * Basis(Vector3.BACK, float(sty.footAngle))
-		J[9 + i * 3] = hp
-		J[10 + i * 3] = ik[0]
-		J[11 + i * 3] = Vector3(foot.x, foot.y + 0.08, foot.z)
-		# arm
-		var sh_off := Vector3(-0.03 + sty.shoulderFwd, -0.04 + sty.shoulderUp, side * sty.shoulders)
-		var shp: Vector3 = chest + tw * sh_off
-		shoulder_sph[i].position = shp
-		# hand nearly on the elbow's pole line (deep turns, arms up in the air): elbow out and down
-		var pole_a: Vector3 = poles_arm[i]
-		if aero > 0.01: pole_a = pole_a.lerp(Vector3(-0.15, 0.15, side * 1.0).normalized(), 0.7 * aero).normalized()   # elbows up and out
-		if back_k > 0.01: pole_a = pole_a.lerp(Vector3(-0.35, -0.85, side * 0.3).normalized(), 0.5 * back_k).normalized()
-		if standing: pole_a = Vector3(-1.0, 0.0, side * 0.25).normalized()   # arms hanging: elbows point back
-		var ika := limb_ik(shp, hand, L_UARM, L_FARM, pole_a, Vector3(0, -0.5, side), ELBOW_MIN, ELBOW_MAX, _bd_prev[2 + i], max_turn)
-		_bd_prev[2 + i] = ika[2]
-		# arms never through the leg on their side (a deep lean, braking hard into a turn): the elbow goes out round it
-		ika[0] = _swing_clear(shp, ika[1], ika[0], side, [hp.lerp(ik[0], 0.3), ik[0], ik[0], ik[1]], LIMB_LIMB)
-		set_limb(upper_arm[i], shp, ika[0])
-		elbow[i].position = ika[0]
-		hand = ika[1]   # out of reach: the hand stays at the end of the arm
-		glove[i].position = hand
-		orient_hand(glove[i], ika[0], hand, right)
-		if sty.wristRoll != 0.0:
-			glove[i].rotate_object_local(Vector3.RIGHT, side * float(sty.wristRoll))
-		set_limb(fore_arm[i], ika[0], _wrist(i, ika[0]))
-		_curl_to(i, GloveFingers.RELAXED if standing else 1.0, dt * 5.0)   # on the bike: wrapped round the grip
-		J[3 + i * 3] = shp
-		J[4 + i * 3] = ika[0]
-		J[5 + i * 3] = hand
-		if limb_probe:
-			_probe_limb("elbow%d" % i, shp, ika[0], hand, dt, air)
-			_probe_limb("knee%d" % i, hp, ik[0], ik[1], dt, air)
-	_sync_skeleton(J)
-	if _CLIP_PROBE and not standing: _clip_probe(p)
+# tests (BMX_HEAD_PROBE=1): how steady the head is in the world, on the ground: its angular speed (pitch / roll / yaw
+# parts, rad/s rms), its acceleration (m/s^2 rms, 2nd difference) vs the chest's. Printed every 2 s, cumulative
+var _HEAD_PROBE := Env.s("BMX_HEAD_PROBE") != ""
+var _hpr := {n = 0, p = 0.0, r = 0.0, y = 0.0, ha = 0.0, ca = 0.0, t = 0.0, b0 = Basis(), h1 = Vector3.INF, h2 = Vector3.INF, c1 = Vector3.INF, c2 = Vector3.INF}
+func _head_probe(dt: float, air: float) -> void:
+	var gb: Basis = head.global_transform.basis.orthonormalized()
+	var hp: Vector3 = head.global_position
+	var cp: Vector3 = to_global(J[1])
+	var s := _hpr
+	if air < 0.05 and s.h2 != Vector3.INF:
+		var d: Basis = (s.b0 as Basis).inverse() * gb   # the turn in the head's own frame this frame
+		var e := d.get_euler()
+		s.n += 1
+		s.p += pow(e.z / dt, 2); s.r += pow(e.x / dt, 2); s.y += pow(e.y / dt, 2)
+		s.ha += ((hp - 2.0 * s.h1 + s.h2) / (dt * dt)).length_squared()
+		s.ca += ((cp - 2.0 * s.c1 + s.c2) / (dt * dt)).length_squared()
+	s.b0 = gb; s.h2 = s.h1; s.h1 = hp; s.c2 = s.c1; s.c1 = cp
+	s.t += dt
+	if s.t >= 2.0 and s.n > 0:
+		s.t = 0.0
+		print("HEADPROBE n=%d ang_rms pitch=%.3f roll=%.3f yaw=%.3f rad/s  acc_rms head=%.2f chest=%.2f m/s2" % [s.n,
+			sqrt(s.p / s.n), sqrt(s.r / s.n), sqrt(s.y / s.n), sqrt(s.ha / s.n), sqrt(s.ca / s.n)])
