@@ -681,6 +681,12 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
     (stock, softest, firmest, air, hydraulic stop, 160 / 220 mm, three sets of sliders at their ends, the BMX, the old
     single spring): 0 non-finite states, travel max 100.0 %, tyre 4.6 cm. Behaviour checks fail only on absurd
     slider sets (everything rigid: it bounces off washboard) and the chaotic "brake grade -35 deg" one.
+  - **Rim strikes on rocks (found testing the merge on the trail)**: with the real, shorter travel a rock or kerb met
+    mid-corner at trail speed put an end on its rim, and the frame was then thrown up at the edge's whole rise (up to
+    12 m/s): the legs bottomed and it read SLAM! (2 in a 74 s ride; in the F8-style ride log `v` goes negative for a
+    moment: that is the crash's throw, not riding backwards). `RIM_CLIMB` 4 m/s now caps the upward speed a rim strike
+    on a rising edge gives (the position is still carried over the edge; landings are untouched). 3 trail rides
+    after: no SLAM. Suite 0 of 24 changed, stress 56 / 56.
   - Open: the wheelbase and head angle don't change as the fork dives (the ride geometry is fixed), no pedal kickback
     / bob with each stroke, the rear axle's path doesn't soak up square edges differently. No shop / prices for
     shocks yet, shock models have no 3D model or card picture. Not ridden by the user yet. (`slope_stress` is 51 / 51

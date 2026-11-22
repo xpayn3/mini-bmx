@@ -123,6 +123,7 @@ var _sag_seen := 1.0
 const ANTI_RISE := 0.6     # how much of the rear's rise under its own brake the linkage takes back (and then some)
 var _fb_r := 0.0           # the rear brake's deceleration this step (m/s2), like _fb_f
 const FRAME_PROG := 0.35   # the ramp-up the reference frame's linkage adds to its shock (BikeBuild.frame_mods scales it per frame)
+const RIM_CLIMB := 4.0   # m/s: the most upward speed a rim strike on a rising edge gives the frame
 const TYRE_MAX := 0.045   # m: a tyre squashed this far is on its rim
 var _ty_f := 0.0; var _ty_r := 0.0   # each tyre's push last substep (m/s2 of the whole weight)
 var _rim_hit := 0.0   # the most speed the frame lost against the ground with nothing left to give, since it was read (m/s)
@@ -1866,6 +1867,11 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 				var dq := dd / m_inv
 				y += dq / mB; pitch += dq * lx / IK
 				var vpp := vy + lx * pitch_v
+				# (riding into a rock or a kerb on the rim: the frame is carried up over it - the position, above - but it
+				# is thrown up at no more than RIM_CLIMB of the edge's rise. Matched to all of it, up to 12 m/s at trail
+				# speed, a stone met mid-corner launched the bike and slammed the rider. Coming down onto ground - a
+				# landing - is not touched: there the ground's speed under the wheel is zero or falling away)
+				vg = minf(vg, RIM_CLIMB)
 				if vpp < vg:
 					var j := (vg - vpp) / m_inv
 					vy += j / mB; pitch_v += j * lx / IK
