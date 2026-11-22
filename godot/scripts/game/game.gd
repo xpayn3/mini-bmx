@@ -28,6 +28,7 @@ const PUDDLE_DROP := Color(0.24, 0.21, 0.17)   # muddy water off a tyre through 
 var _splash_acc := 0.0
 var _pud_us := 0
 var _pud_n := 0
+var _dprobe_t := 0.0
 const DIRT_CHUNK := Color("7a5534")
 const ROCK_CHUNK := Color("8d8a84")
 const GRASS_CHUNK := Color("4f8a2e")
@@ -1434,8 +1435,8 @@ func _body_parts(st: BikePhysics) -> Array:
 	var rear := base - f * st.BB_REAR + Vector3(0, rr, 0)
 	var front := base + f * (st.L - st.BB_REAR) + Vector3(0, rf, 0)
 	return [
-		{p = rear, v = vel, r = rr * 1.05, spin = -axle * (st.v / rr)},
-		{p = front, v = vel, r = rf * 1.05, spin = -axle * (st.v / rf)},
+		{p = rear, v = vel, r = rr * 1.05, spin = -axle * (st.v / rr), solid = false, blend = 6.0},   # spokes: they stir the air (gently: the tyre's spray wins), they don't fill it
+		{p = front, v = vel, r = rf * 1.05, spin = -axle * (st.v / rf), solid = false, blend = 6.0},
 		{p = (rear + front) * 0.5 + Vector3(0, 0.08, 0), v = vel, r = 0.24, spin = Vector3.ZERO},
 		{p = base + Vector3(0, rr + 0.45, 0) - f * 0.05, v = vel, r = 0.3, spin = Vector3.ZERO},
 	]
@@ -1556,6 +1557,13 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 		var d_fan := rad_to_deg(atan2((1.6 + va * 0.18) * (1 - carve_k * 0.6) * 0.5, maxf(d_back, 0.6))) + dust_k * 25.0
 		var d_a := (0.62 if skid_fx else 0.45) if dirt else ((0.55 if skid_fx else 0.4) if sand else 0.26)
 		dust.feed(rear, d_ev, rate * fxd * dry_r, dcol, d_a, clampf(d_fan, 12.0, 70.0))
+		if Env.s("BMX_DUST_PROBE") != "":
+			_dprobe_t += dt
+			if _dprobe_t >= 2.0:
+				_dprobe_t = 0.0
+				print("DUSTFEED t=%.0f x=%.0f z=%.0f surf=%d va=%.1f rate=%.0f fxd=%.2f dry=%.2f a=%.2f feed=%.0f sim_n=%d idle=%.1f stopped=%s" % [
+					Time.get_ticks_msec() / 1000.0, rear.x, rear.z, s, va, rate, fxd, dry_r, d_a, dust._feed_rate,
+					dust.sim._n if dust.sim else -1, dust.sim._idle if dust.sim else -1.0, str(dust.sim._stopped) if dust.sim else "-"])
 		# the front tyre dusts too, less: it rolls (no drive / little skid), so it mostly lifts dust
 		# sideways and up as it carves
 		var f_ev := Vector3(-f.x * d_back * 0.4 + side.x * d_out * 0.6, 0.5 + carve_k * 0.3, -f.z * d_back * 0.4 + side.z * d_out * 0.6)

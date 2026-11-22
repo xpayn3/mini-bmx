@@ -98,6 +98,8 @@ var _front_prev := Vector3.INF
 var _front_v := Vector3.ZERO
 var _front_rate := 0.0
 const PATCH_R := 0.2    # m: the contact patch, as small as the sim's 0.2 m cells allow
+const PATCH_BACK := 0.18   # m: dust sources sit this far behind the contact patch (off the back of the tread)
+const PATCH_LAG := 1.0 / 120.0   # s: the fed physics point is ~a physics step ahead of the drawn tyre
 var _pulse_t := 0.0
 var _gust := FastNoiseLite.new()
 static var _dust_mat: ShaderMaterial
@@ -159,6 +161,15 @@ func _patch(on: bool, p: Vector3, prev: Vector3, v: Vector3, rate: float, _fan: 
 	if not on or rate <= 0.0: return Vector3.INF
 	var from := prev if prev != Vector3.INF and prev.distance_to(p) < 2.0 else p
 	var k := clampi(ceili(from.distance_to(p) / 0.15), 1, 5)
+	# the dust leaves the tread just behind where the tyre meets the ground; the fed point is the physics one,
+	# which runs up to a physics step ahead of the drawn (interpolated) bike, so pull it back by that too
+	var mv := Vector3(p.x - from.x, 0.0, p.z - from.z)
+	var back := Vector3.ZERO
+	if mv.length_squared() > 1e-6:
+		back = -mv.normalized() * (PATCH_BACK + sim.speed * PATCH_LAG)
+	var p0 := p
+	from += back
+	p += back
 	var sp := v.length()
 	var t: Dictionary = Tune.v
 	var cone := deg_to_rad(float(t.get("dustWidth", 8.0)))   # the spray's cone at the tyre (Dust › Spray)
@@ -182,7 +193,7 @@ func _patch(on: bool, p: Vector3, prev: Vector3, v: Vector3, rate: float, _fan: 
 		var g_up := (0.6 + sp * 0.15) * float(t.get("dustGritUp", 1.0))
 		var g_spread := (0.3 + sp * 0.1) * float(t.get("dustGritWidth", 1.0))
 		grit.emit(p, v * float(t.get("dustGritThrow", 1.4)) + Vector3(0, g_up, 0), g_spread, rate * 4.0 * gk * float(t.get("dustGrit", 1.0)), col)
-	return p
+	return p0
 
 ## grains thrown for secs (landings, crash impacts)
 func grit_burst(p: Vector3, v: Vector3, spread: float, rate: float, secs: float, col: Color) -> void:

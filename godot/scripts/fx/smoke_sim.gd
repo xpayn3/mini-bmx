@@ -101,6 +101,9 @@ var compositor: SmokeCompositor = null
 var cloud := Vector4(0, 0, 0, 1)  # atm_cloud (cloud shadows): drift xy, depth, shade at the rider
 
 var _scol := Vector3(3, 2.8, 2.5)
+var _probe := Env.s("BMX_DUST_PROBE") != ""
+var _pr_read := 0.0
+var _pr_n := 0;var _pr_steps := 0; var _pr_t := 0.0; var _pr_rate := 0.0
 
 ## what the grit (fx/grit.gd) needs to find the ground / the light / the air in the box
 func shading_inputs() -> Dictionary:
@@ -273,7 +276,7 @@ func step(dt: float, focus: Vector3, fwd: Vector3) -> void:
 	# the bike and rider are solid in the air: air inside them moves with them (the pressure solve then
 	# sends the air round them), and the wheels spin it - dust gets dragged, split and stirred
 	for b in _body:
-		add_source(b.p, b.v, b.r, 0.0, 40.0, 0.0, Color(0, 0, 0, 0), b.spin, true)
+		add_source(b.p, b.v, b.r, 0.0, float(b.get("blend", 40.0)), 0.0, Color(0, 0, 0, 0), b.spin, b.get("solid", true))
 	_body = []
 	# the box: ahead of the rider along their heading, moved in whole heightmap cells
 	var f2 := Vector2(fwd.x, fwd.z)
@@ -307,6 +310,14 @@ func step(dt: float, focus: Vector3, fwd: Vector3) -> void:
 		bytes[o + 2] = (z - origin.y) / H
 	var n := _n
 	_n = 0
+	if _probe:
+		_pr_n += n; _pr_steps += steps; _pr_t += fdt
+		for i in n: _pr_rate += bytes[i * SRC_F + 7]
+		if _pr_t >= 2.0:
+			print("DUSTSIM src/step=%.1f rate_sum/step=%.0f steps/s=%.1f origin=(%.0f,%.0f) speed=%.1f sim_t=%.0f hm=(%.1f..%.1f) srcy=%s" % [
+				float(_pr_n) / maxi(_pr_steps, 1), _pr_rate / maxi(_pr_steps, 1), _pr_steps / _pr_t, origin.x, origin.y, speed, _sim_t,
+				_hm_min, _hm_max, ("%.2f" % bytes[1]) if n > 0 else "-"])
+			_pr_n = 0; _pr_steps = 0; _pr_t = 0.0; _pr_rate = 0.0
 	# shading inputs
 	dust_col = dust_col.lerp(_col_target, 1.0 - exp(-dt * 2.0))
 	var sdir := Vector3(0.4, 0.8, 0.3).normalized()
@@ -385,7 +396,8 @@ func _tex(fmt_id: int, dims := Vector3i(NX, NY, NZ)) -> RID:
 	f.width = dims.x; f.height = dims.y; f.depth = dims.z
 	f.format = fmt_id
 	f.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice.TEXTURE_USAGE_STORAGE_BIT \
-		| RenderingDevice.TEXTURE_USAGE_CAN_UPDATE_BIT | RenderingDevice.TEXTURE_USAGE_CAN_COPY_TO_BIT
+		| RenderingDevice.TEXTURE_USAGE_CAN_UPDATE_BIT | RenderingDevice.TEXTURE_USAGE_CAN_COPY_TO_BIT \
+		| RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT
 	var t := rd.texture_create(f, RDTextureView.new(), [])
 	rd.texture_clear(t, Color(0, 0, 0, 0), 0, 1, 0, 1)
 	return t
@@ -491,6 +503,25 @@ func _gpu_step(dt: float, shift: Vector2i, clear: bool, src: PackedByteArray, n:
 	_disp(cl, "occupancy", _sets["occupancy%d" % q], PackedFloat32Array([1, 0, 0, 0]), Vector3i(maxi(1, NX / BRICK / 4), maxi(1, NY / BRICK / 4), maxi(1, NZ / BRICK / 4)))
 	rd.compute_list_end()
 	_cur = q
+	if _probe and _sim_t - _pr_read >= 10.0:
+		_pr_read = _sim_t
+		var raw := rd.texture_get_data(_st[q], 0)
+		var bad := 0; var vmax := 0.0; var dsum := 0.0; var dmax := 0.0; var pmax := 0.0
+		var i := 0
+		while i + 8 <= raw.size():
+			var vx := raw.decode_half(i); var vy := raw.decode_half(i + 2); var vz := raw.decode_half(i + 4); var dd := raw.decode_half(i + 6)
+			if is_nan(vx + vy + vz + dd) or is_inf(vx + vy + vz + dd): bad += 1
+			else:
+				vmax = maxf(vmax, sqrt(vx * vx + vy * vy + vz * vz)); dsum += dd; dmax = maxf(dmax, dd)
+			i += 8 * 7   # every 7th voxel
+		var pr := rd.texture_get_data(_pres, 0)
+		var j := 0
+		while j + 4 <= pr.size():
+			var pv := pr.decode_float(j)
+			if is_nan(pv) or is_inf(pv): bad += 1000000
+			else: pmax = maxf(pmax, absf(pv))
+			j += 4 * 7
+		print("DUSTGRID sim_t=%.0f bad=%d vmax=%.1f dsum=%.0f dmax=%.2f pmax=%.2f" % [_sim_t, bad, vmax, dsum, dmax, pmax])
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_PREDELETE and ok:
