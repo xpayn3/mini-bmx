@@ -185,7 +185,7 @@ func _ct_null_call(o) -> void:
 
 ## writes a report folder now ("error" / "manual"), returns its full path
 func report(kind: String, detail := "") -> String:
-	var d := "%s/%s_%s" % [dir, kind, _stamp()]
+	var d := _unique_dir("%s/%s_%s" % [dir, kind, _stamp()])
 	DirAccess.make_dir_recursive_absolute(d)
 	var txt := _header(kind)
 	txt += "\nuptime: %.1f s · errors: %d · warnings: %d\n" % [Time.get_ticks_msec() / 1000.0, _logger.errors, _logger.warnings]
@@ -275,7 +275,7 @@ func _collect_old_runs() -> void:
 		if FileAccess.file_exists(lock):
 			if OS.is_process_running(pid): continue   # another copy of the game is running
 			var when := _local(FileAccess.get_modified_time(log_path))
-			var d := "%s/crash_%s" % [dir, when]
+			var d := _unique_dir("%s/crash_%s" % [dir, when])
 			DirAccess.make_dir_recursive_absolute(d)
 			var tail := _tail(log_path, 400)
 			var txt := "RUNOUT crash report: the session below never reached a clean quit (crash, freeze + killed, or power loss).\n"
@@ -367,6 +367,13 @@ static func _local(t: int) -> String:
 static func _stamp() -> String:
 	return Time.get_datetime_string_from_system().replace(":", "-").replace("T", "_")
 
+
+## a folder name nothing has yet: several reports in the same second get _2, _3... (sorts after the first)
+static func _unique_dir(base: String) -> String:
+	if not DirAccess.dir_exists_absolute(base): return base
+	var n := 2
+	while DirAccess.dir_exists_absolute("%s_%d" % [base, n]): n += 1
+	return "%s_%d" % [base, n]
 
 static func _write(path: String, txt: String) -> void:
 	var f := FileAccess.open(path, FileAccess.WRITE)

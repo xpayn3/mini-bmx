@@ -1363,7 +1363,8 @@ func _step_tab(d: int) -> void:
 
 func _close(ride: bool) -> void:
 	_flush_pose()
-	BikeBuild.save_build(build)
+	# a showroom edition being looked at is not your build: only SAVE / SAVE & RIDE keep it, BACK doesn't
+	if ride or not _show_pick.begins_with("ed:"): BikeBuild.save_build(build)
 	closed.emit(ride)
 
 func _toast(t: String) -> void:
@@ -2369,7 +2370,8 @@ func _kit_page() -> void:
 			cp.color = Color(look[key]); cp.edit_alpha = false
 			cp.custom_minimum_size = Vector2(Tokens.S7, Tokens.S6)
 			cp.focus_mode = Control.FOCUS_NONE
-			cp.color_changed.connect(func(c): look[key] = "#" + c.to_html(false); _set_look(look))
+			cp.color_changed.connect(func(c): look[key] = "#" + c.to_html(false); _set_look(look, false))   # live while dragging
+			cp.popup_closed.connect(func(): RiderPanels.save_look(look))   # written once, when the picker closes
 			hb.add_child(cp)
 			body.add_child(hb)
 	# the helmet camera: where it sits, which camera, lens, housing, mic, top accessory
@@ -2395,8 +2397,8 @@ static func _head_make(id: String, look: Dictionary, key: String, below: float, 
 	lk.helmetOn = "1"
 	return PartThumbs.make_head(lk, below)
 
-func _set_look(l: Dictionary) -> void:
-	RiderPanels.save_look(l)
+func _set_look(l: Dictionary, write := true) -> void:
+	if write: RiderPanels.save_look(l)
 	if stand_rider: stand_rider.set_look(l)
 	if rider: rider.set_look(l)
 
@@ -2411,7 +2413,9 @@ func _flush_pose() -> void:
 	if _pose_save_t == 0.0 and _pose_save_bike == "": return
 	_pose_save_t = 0.0
 	RiderPanels.save_pose(_pose_save_bike, rider_pose)
+	PosePresets.flush()   # an own preset that followed the sliders
 	_pose_save_bike = ""
+	if is_instance_valid(_pose_mod): _pose_mod.visible = PosePresets.is_builtin(PosePresets.get_active()) and PosePresets.modified(rider_pose)
 
 func _apply_rider_pose() -> void:
 	if rider: rider.set_style(rider_pose)
@@ -2419,8 +2423,8 @@ func _apply_rider_pose() -> void:
 	if _pose_save_bike != "" and _pose_save_bike != b: _flush_pose()   # the bike changed under a pending save
 	_pose_save_bike = b; _pose_save_t = 0.4
 	PosePresets.bike = _pose_bike()
-	PosePresets.pose_changed(rider_pose)
-	if is_instance_valid(_pose_mod): _pose_mod.visible = PosePresets.is_builtin(PosePresets.get_active()) and PosePresets.modified()
+	PosePresets.pose_changed(rider_pose, false)   # in memory; written with the pose in _flush_pose
+	if is_instance_valid(_pose_mod): _pose_mod.visible = PosePresets.is_builtin(PosePresets.get_active()) and PosePresets.modified(rider_pose)
 
 ## riding position presets: pick one (it is the pose you ride with), Save as your own, Delete yours
 var _pose_mod: Label
@@ -2438,13 +2442,14 @@ func _pose_presets() -> void:
 		ob.add_item(n if PosePresets.is_builtin(n) else "★ " + n, i)
 		if n == act: ob.select(ob.get_item_index(i))
 	ob.item_selected.connect(func(idx):
+		_flush_pose()   # a pending slider pose goes to the old preset first
 		PosePresets.select(names[ob.get_item_id(idx)])
 		rider_pose = RiderPanels.load_pose(_pose_bike(), GameState.BIKES[_pose_bike()].pose)
 		if rider: rider.set_style(rider_pose)
 		_set_tab.call_deferred("rider"))
 	hb.add_child(ob)
 	if not PosePresets.is_builtin(act):
-		var del := UITheme.make_button("Delete", func(): PosePresets.delete(act); _set_tab.call_deferred("rider"), "chip", Tokens.T_SM)
+		var del := UITheme.make_button("Delete", func(): _flush_pose(); PosePresets.delete(act); _set_tab.call_deferred("rider"), "chip", Tokens.T_SM)
 		hb.add_child(del)
 	_row("Position", hb)
 	_pose_mod = UITheme.text("Changed from \"%s\" — Save as to keep it" % act, SUB, Tokens.T_XS)
@@ -2455,7 +2460,7 @@ func _pose_presets() -> void:
 	var le := LineEdit.new()
 	le.placeholder_text = "New position name"
 	le.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var save := func(): PosePresets.save_as(le.text); _set_tab.call_deferred("rider")
+	var save := func(): _flush_pose(); PosePresets.save_as(le.text); _set_tab.call_deferred("rider")   # save_as reads the saved pose
 	le.text_submitted.connect(func(_t): save.call())
 	sv.add_child(le)
 	var sb := UITheme.make_button("Save as", save, "chip", Tokens.T_SM)

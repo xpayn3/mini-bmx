@@ -17,6 +17,41 @@ extends Node3D
 const MUD_SHADER := preload("res://shaders/grime_mud.gdshader")
 const WET_SHADER := preload("res://shaders/grime_wet.gdshader")
 const BLOOD_SHADER := preload("res://shaders/grime_blood.gdshader")
+## the blood pass is alpha-scissored (opaque pipeline); a sticker's blood stays see-through (masked by the
+## sticker's alpha, drawn after it): the same shader with BLOOD_DECAL defined
+static var _blood_decal_shader: Shader
+static func _blood_decal() -> Shader:
+	if _blood_decal_shader == null:
+		_blood_decal_shader = Shader.new()
+		_blood_decal_shader.code = BLOOD_SHADER.code.replace("shader_type spatial;", "shader_type spatial;\n#define BLOOD_DECAL")
+	return _blood_decal_shader
+## the rider light match on its own (no water): the wet pass's roll-off only, unshaded, no lighting / gloss.
+## Same blend + depth compare as grime_wet.gdshader, so it looks the same.
+const TRIM_CODE := """
+shader_type spatial;
+render_mode unshaded, blend_premul_alpha, depth_draw_never, cull_back;
+global uniform float rider_trim;
+uniform sampler2D screen_tex : hint_screen_texture, filter_nearest;
+uniform sampler2D depth_tex : hint_depth_texture, filter_nearest;
+const float TRIM_KNEE = 0.45;
+const float TRIM_SOFT = 0.5;
+void vertex() {
+	POSITION = PROJECTION_MATRIX * (MODELVIEW_MATRIX * vec4(VERTEX, 1.0));
+	POSITION.z += 0.00008 * POSITION.w;
+}
+void fragment() {
+	vec3 lit = texture(screen_tex, SCREEN_UV).rgb;
+	float lmax = max(max(lit.r, lit.g), max(lit.b, 1e-4));
+	float over = max(lmax - TRIM_KNEE, 0.0);
+	float kept = (min(lmax, TRIM_KNEE) + over / (1.0 + over / TRIM_SOFT)) / lmax;
+	float trim = rider_trim * (1.0 - kept);
+	vec4 scn = INV_PROJECTION_MATRIX * vec4(SCREEN_UV * 2.0 - 1.0, texture(depth_tex, SCREEN_UV).r, 1.0);
+	if (-VERTEX.z + scn.z / scn.w > 0.001) trim = 0.0;
+	if (trim < 0.002) discard;
+	ALBEDO = vec3(0.0);
+	ALPHA = trim;
+}
+"""
 ## how fast mud builds up (1 = the web version: fully caked after ~40 s of fast dirt riding; 0.25 = ~2.5 min)
 const MUD_RATE := 0.25
 
@@ -43,7 +78,9 @@ var _mats := {}                   # base material -> mud pass material (by bias)
 var _mud_by_bias := {}
 var _decal_muds := {}             # sticker material -> its own mud pass (see _decal_mud)
 var _wet_mat: ShaderMaterial
-var _attached := 0                # 0 none, 1 mud, 2 mud + wet
+var _trim_mat: ShaderMaterial    # the light match alone (dry bike): cheap, unshaded
+var _mud_on := false              # the mud (+ blood) passes are chained
+var _tail: Material = null        # last pass: _wet_mat (wet), _trim_mat (light match only) or none
 var _scan_t := 0.0
 var _t := 0.0
 var drips: GPUParticles3D
@@ -59,6 +96,11 @@ func _init() -> void:
 	_wet_mat = ShaderMaterial.new()
 	_wet_mat.shader = WET_SHADER
 	_wet_mat.render_priority = 4   # last: over the mud, the stickers and the blood
+	var ts := Shader.new()
+	ts.code = TRIM_CODE
+	_trim_mat = ShaderMaterial.new()
+	_trim_mat.shader = ts
+	_trim_mat.render_priority = 4
 	_build_drips()
 
 ## many base materials are shared (glb imports, the paint / wheel caches): take our passes off them when
@@ -68,7 +110,7 @@ func _exit_tree() -> void:
 		WorkerThreadPool.wait_for_task_completion(_cav_task)   # never leave a task running at quit
 		_cav_task = -1
 	for m in _mats:
-		if is_instance_valid(m) and m.next_pass == _mats[m]:
+		if is_instance_valid(m) and (m.next_pass == _mats[m] or m.next_pass == _wet_mat or m.next_pass == _trim_mat):
 			m.next_pass = null
 	_mats.clear()
 	_decal_muds.clear()
@@ -363,14 +405,14 @@ func _mud_mat(bias: float, tyre := false, wheel := false) -> ShaderMaterial:
 		_mud_by_bias[key] = _new_mud(bias, tyre, wheel)
 	return _mud_by_bias[key]
 
-func _new_mud(bias: float, tyre: bool, wheel: bool) -> ShaderMaterial:
+func _new_mud(bias: float, tyre: bool, wheel: bool, decal := false) -> ShaderMaterial:
 	var m := ShaderMaterial.new()
 	m.shader = MUD_SHADER
 	m.set_shader_parameter("bias", bias)
 	m.set_shader_parameter("tyre", tyre)
 	m.set_shader_parameter("wheel", wheel)
-	var bm := ShaderMaterial.new()   # the blood pass that follows this mud pass
-	bm.shader = BLOOD_SHADER
+	var bm := ShaderMaterial.new()   # the blood pass that follows this mud pass (opaque, alpha scissor;
+	bm.shader = _blood_decal() if decal else BLOOD_SHADER   # a sticker's: see-through, masked by it)
 	bm.set_shader_parameter("bias", clampf(bias, 0.4, 1.0))
 	bm.set_shader_parameter("tyre", tyre)
 	bm.render_priority = 3   # see-through like the stickers: drawn after them
@@ -385,7 +427,7 @@ func _new_mud(bias: float, tyre: bool, wheel: bool) -> ShaderMaterial:
 func _decal_mud(m: BaseMaterial3D, mi: MeshInstance3D) -> ShaderMaterial:
 	var part := mi.get_parent() as MeshInstance3D
 	var ty := part != null and part.mesh != null and _is_tyre(m, part)
-	var mm := _new_mud(_bias_for(m, part if part else mi), ty, not ty and _is_wheel_part(mi))
+	var mm := _new_mud(_bias_for(m, part if part else mi), ty, not ty and _is_wheel_part(mi), true)
 	mm.set_shader_parameter("decal", true)
 	mm.set_shader_parameter("decal_tex", (m as BaseMaterial3D).albedo_texture)
 	mm.render_priority = 2
@@ -414,7 +456,7 @@ func _scan() -> void:
 				if m == null: m = mi.mesh.surface_get_material(s)
 				if m: list.append(m)
 		for m in list:
-			if _mats.has(m) or m == _wet_mat or m.get_meta("grime_pass", false): continue
+			if _mats.has(m) or m == _wet_mat or m == _trim_mat or m.get_meta("grime_pass", false): continue
 			if m.next_pass != null: continue   # already layered by something else: leave it alone
 			var mm: ShaderMaterial
 			if m is BaseMaterial3D and (m as BaseMaterial3D).transparency != BaseMaterial3D.TRANSPARENCY_DISABLED:
@@ -426,7 +468,7 @@ func _scan() -> void:
 			mm.set_meta("grime_pass", true)
 			_mats[m] = mm
 			_chain(mm)
-			_set_pass(m, _attached)
+			_set_pass(m)
 	# lettering textures are swapped for their baked version a frame or two after they're made
 	for dm in _decal_muds:
 		if not is_instance_valid(dm): continue
@@ -437,13 +479,14 @@ func _scan() -> void:
 			(mm.get_meta("blood") as ShaderMaterial).set_shader_parameter("decal_tex", tex)
 
 func _chain(mm: ShaderMaterial) -> void:
-	var tail: Material = _wet_mat if _attached == 2 else null
 	var bm: Material = mm.get_meta("blood")
-	bm.next_pass = tail
-	mm.next_pass = bm if _blood_on else tail
+	bm.next_pass = _tail
+	mm.next_pass = bm if _blood_on else _tail
 
-func _set_pass(m: Material, state: int) -> void:
-	m.next_pass = null if state == 0 else _mats[m]
+## base -> mud -> (blood) -> tail while there's dirt; a clean bike chains the tail (wet / light match) straight
+## off the base material, so the mud pass costs nothing
+func _set_pass(m: Material) -> void:
+	m.next_pass = _mats[m] if _mud_on else _tail
 
 ## per physics step. surf: 0 grass, 1 dirt, 2 water, 3 sand. col = colour of the ground here
 func feed(dt: float, surf: int, speed: float, skid: bool, air: bool, landed: float, col: Color, vw := Vector2.ZERO) -> void:
@@ -514,18 +557,24 @@ func update(dt: float, bike_root: Node3D) -> void:
 	var w := wet if enabled else 0.0
 	var b := blood if enabled else 0.0
 	var d := dust if enabled else 0.0
-	var state := 0
-	if m > 0.002 or w > 0.01 or b > 0.002 or d > 0.002: state = 1
-	if w > 0.01 or warm_frames > 0 or trim > 0.01: state = 2
+	# the dust film only shows from ~0.03 (and dust only washes off in water): below that the mud pass stays off
+	var mon := m > 0.002 or b > 0.002 or d > 0.03 or warm_frames > 0
+	var tail: Material = null
+	if w > 0.01 or warm_frames > 0: tail = _wet_mat
+	elif trim > 0.01: tail = _trim_mat
 	var bon := b > 0.002 or warm_frames > 0
+	var warm_trim := false
 	if warm_frames > 0:
 		warm_frames -= 1
 		drips.emitting = true
-	if state != _attached or bon != _blood_on:
-		_attached = state
+		warm_trim = warm_frames == 1   # the last warm-up frame shows the light-match pass instead (compiles it too)
+		if warm_trim: tail = _trim_mat
+	if mon != _mud_on or tail != _tail or bon != _blood_on:
+		_mud_on = mon
+		_tail = tail
 		_blood_on = bon
-		for mm in _all_muds(): _chain(mm)   # base -> mud -> blood -> wet
-		for mat in _mats: _set_pass(mat, state)
+		for mm in _all_muds(): _chain(mm)   # base -> mud -> blood -> tail
+		for mat in _mats: _set_pass(mat)
 	RenderingServer.global_shader_parameter_set("grime", Vector4(m, w, _t, b))
 	RenderingServer.global_shader_parameter_set("mud_col", mud_col)
 	RenderingServer.global_shader_parameter_set("rider_trim", trim)

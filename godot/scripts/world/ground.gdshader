@@ -82,10 +82,17 @@ void fragment() {
 	float f2 = 1.0 - smoothstep(0.035, 0.12, gpx);
 	float f3 = 1.0 - smoothstep(0.1, 0.45, gpx);
 	float t = gA.a, rockW = gB.a;
-	float n0 = gd_noise3(P * 2.3 + 3.3), n1 = gd_noise3(P * 9.0), n2 = gd_noise3(P * 23.0 + 7.1);
+	// fine noise only where it still shows: every use is mix(0.5, n, f) or (n - 0.5) * f, so 0.5 = faded out
+	float n0 = gd_noise3(P * 2.3 + 3.3), n1 = 0.5, n2 = 0.5;
+	if (f2 > 0.0) n1 = gd_noise3(P * 9.0);
+	if (f1 > 0.0) n2 = gd_noise3(P * 23.0 + 7.1);
 	float hG = mix(0.5, n1, f2) * 0.55 + mix(0.5, n2, f1) * 0.25 + n0 * 0.2;
-	vec2 pb = gd_pebbles(P.xz * 16.0);   // fine grit: ~6 cm cells
-	float peb = pb.x * (1.0 - smoothstep(0.018, 0.06, gpx));   // gone before they're smaller than a pixel
+	// fine grit: ~6 cm cells, pebbles ~1-3 cm across. Gone before a pebble is ~2 px (past that they were
+	// single-pixel salt-and-pepper dots), and not worked out at all there
+	float peb_f = 1.0 - smoothstep(0.003, 0.009, gpx);
+	vec2 pb = vec2(0.0);
+	if (peb_f > 0.0) pb = gd_pebbles(P.xz * 16.0);
+	float peb = pb.x * peb_f;
 	float hD = peb * 0.6 + gd_noise3(P * 3.1 + 11.0) * 0.45 + gd_noise3(P * 0.9 + 2.0) * 0.3;
 	float a1 = (1.0 - t) + hG * 0.75, a2 = t + hD * 0.75;
 	float m = max(a1, a2) - 0.28;
@@ -248,8 +255,11 @@ void fragment() {
 	// slow light / dark drifts along the trail, so a long straight never reads as one flat band
 	float drift = 1.0 + (gd_noise3(vec3(P.xz * 0.05, 4.2)) - 0.5) * 0.1;
 	vec3 col = mix(gA.rgb, gB.rgb * tcol * drift, wd);
-	float rk = gd_noise3(P * 4.3 + 5.0) * 0.6 + gd_noise3(P * 13.0) * 0.4 * f2;
-	col *= mix(1.0, 0.78 + 0.44 * rk, rockW * (1.0 - wd) * f3);
+	float rkw = rockW * (1.0 - wd) * f3;
+	if (rkw > 0.001) {
+		float rk = gd_noise3(P * 4.3 + 5.0) * 0.6 + (f2 > 0.0 ? gd_noise3(P * 13.0) * 0.4 * f2 : 0.0);
+		col *= mix(1.0, 0.78 + 0.44 * rk, rkw);
+	}
 	// under the grass carpet the floor is the shaded ground between the blades: darker and a touch greener,
 	// the colour of the blades' roots, fading back to the plain land colour where the blades end
 	if (grass_win_info.w > 0.0) {
@@ -268,13 +278,15 @@ void fragment() {
 	ALBEDO = col;
 	ROUGHNESS = mix(mix(0.95, trough, wd), 0.04, pud);
 	SPECULAR = mix(0.3, 0.6, pud);
+	// the trail height's screen-space gradient: taken here, outside any per-pixel branch (derivatives inside
+	// one are undefined where neighbouring pixels take the other path: speckled seams along the trail edges)
+	float hh = thgt * wd * trail_relief;
+	vec3 dpx = dFdx(P), dpy = dFdy(P);
+	float dhx = dFdx(hh), dhy = dFdy(hh);
 	if (wd * tbump > 0.0 || pud > 0.0 || thgt != 0.0) {
 		vec3 nw = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
 		nw = normalize(nw + vec3(tslope.x, 0.0, tslope.y) * (wd * trail_bump));
 		// the height above as a real slope of the surface (its screen-space gradient turned into the world)
-		float hh = thgt * wd * trail_relief;
-		vec3 dpx = dFdx(P), dpy = dFdy(P);
-		float dhx = dFdx(hh), dhy = dFdy(hh);
 		vec3 r1 = cross(dpy, nw), r2 = cross(nw, dpx);
 		float det = dot(dpx, r1);
 		if (abs(det) > 1e-12) {
@@ -294,13 +306,14 @@ void fragment() {
 // lit by hand only so cloud shadows can dim the sun here (shaders/atmos); land is matte (roughness .95),
 // packed lines / damp soil / puddles on the trail get a sun glint
 void light() {
-	DIFFUSE_LIGHT += atmos_diffuse(NORMAL, LIGHT, ATTENUATION * LIGHT_COLOR, LIGHT_IS_DIRECTIONAL, v_world, 0.0);
+	vec3 lc = atmos_light_col(ATTENUATION * LIGHT_COLOR, LIGHT_IS_DIRECTIONAL, v_world);   // cloud shade once
+	DIFFUSE_LIGHT += clamp(dot(NORMAL, LIGHT), 0.0, 1.0) * lc;
 	if (ROUGHNESS < 0.9) {
 		vec3 hv = normalize(LIGHT + VIEW);
 		float nl = clamp(dot(NORMAL, LIGHT), 0.0, 1.0), nh = clamp(dot(NORMAL, hv), 0.0, 1.0), lh = max(dot(LIGHT, hv), 0.2);
 		float a2 = ROUGHNESS * ROUGHNESS; a2 *= a2;
 		float dd = nh * nh * (a2 - 1.0) + 1.0;
 		float sp = a2 / (PI * dd * dd) * 0.04 / (4.0 * lh * lh);
-		SPECULAR_LIGHT += atmos_light_col(ATTENUATION * LIGHT_COLOR, LIGHT_IS_DIRECTIONAL, v_world) * PI * nl * min(sp, 4.0) * (0.9 - ROUGHNESS) / 0.9;
+		SPECULAR_LIGHT += lc * PI * nl * min(sp, 4.0) * (0.9 - ROUGHNESS) / 0.9;
 	}
 }

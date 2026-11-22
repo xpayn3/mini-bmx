@@ -9,10 +9,11 @@ layout(set = 0, binding = 1, r32f) uniform restrict readonly image3D div;
 layout(push_constant, std430) uniform Params { vec4 a; } pc;   // parity, h, omega, -
 
 void main() {
+	// dispatched over half the grid in x: each thread is the one cell of this colour in its pair
 	ivec3 id = ivec3(gl_GlobalInvocationID);
+	id.x = id.x * 2 + ((id.y + id.z + int(pc.a.x)) & 1);
 	ivec3 N = imageSize(pres);
 	if (any(greaterThanEqual(id, N))) return;
-	if (((id.x + id.y + id.z) & 1) != int(pc.a.x)) return;
 	float p = imageLoad(pres, id).x;
 	float s = 0.0;
 	s += id.x > 0 ? imageLoad(pres, id - ivec3(1, 0, 0)).x : 0.0;

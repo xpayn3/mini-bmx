@@ -25,6 +25,7 @@ static var bike := "dh"      # whose pose the presets apply to (set by the garag
 static var active := {}      # bike -> preset name
 static var customs := {}     # name -> full pose
 static var _loaded := false
+static var _dirty := false   # an own preset followed its sliders in memory; flush() writes it
 
 
 static func ensure_loaded() -> void:
@@ -37,11 +38,12 @@ static func ensure_loaded() -> void:
 
 
 static func save() -> void:
-	if OS.get_environment("BMX_PADSEQ") != "": return   # menu tests: never into the player\'s files
+	if Settings._no_save: return   # test runs: never into the player's files
 	var cf := ConfigFile.new()
 	cf.set_value("presets", "active", active)
 	cf.set_value("presets", "customs", customs)
-	cf.save(PATH)
+	_dirty = false
+	Settings.save_cfg(cf, PATH)
 
 
 static func stock() -> Dictionary:
@@ -97,18 +99,26 @@ static func select(n: String) -> void:
 	save()
 
 
-## the sliders moved (pose already saved): an own preset keeps up with its sliders
-static func pose_changed(p: Dictionary) -> void:
+## the sliders moved (pose already saved): an own preset keeps up with its sliders.
+## write = false: only in memory (slider drags); call flush() once they settle
+static func pose_changed(p: Dictionary, write := true) -> void:
 	ensure_loaded()
 	var a := get_active()
 	if a in customs:
 		customs[a] = p.duplicate()
-		save()
+		_dirty = true
+		if write: save()
 
 
-static func modified() -> bool:
+## writes what pose_changed(.., false) left in memory
+static func flush() -> void:
+	if _dirty: save()
+
+
+## the active preset differs from `cur` (the pose in use; empty = read the saved one)
+static func modified(cur := {}) -> bool:
 	var p := preset(get_active())
-	var cur := RiderPanels.load_pose(bike, GameState.BIKES[bike].pose if GameState.BIKES.has(bike) else {})
+	if cur.is_empty(): cur = RiderPanels.load_pose(bike, GameState.BIKES[bike].pose if GameState.BIKES.has(bike) else {})
 	for k in p:
 		if typeof(p[k]) == TYPE_BOOL:
 			if bool(p[k]) != bool(cur.get(k, p[k])): return true

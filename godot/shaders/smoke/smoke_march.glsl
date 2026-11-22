@@ -16,7 +16,7 @@ layout(set = 0, binding = 0, std140) uniform Params {
 	vec4 sun_dir;       // xyz toward the sun, detail amount
 	vec4 sun_col;       // rgb, max steps
 	vec4 amb_col;       // rgb, history blend (1 = no history)
-	vec4 dust_col;      // rgb, -
+	vec4 dust_col;      // rgb, w = fade-out 0 (drawn) .. 1 (gone)
 	vec4 drift;         // xyz detail drift (m), time
 	vec4 cloud;         // atm_cloud: drift xy, depth, shade at the rider
 	vec4 sizes;         // full w, h, half w, h
@@ -99,7 +99,7 @@ void main() {
 
 	// dust shadow on the surface behind
 	float shf = 1.0;
-	if (tsurf < tb) {
+	if (tsurf < tb && P.box_max.w > 0.0) {
 		vec3 sp = ro + rd * tsurf;
 		vec2 g = (sp.xz - origin.xz) / size_m.xz;
 		if (all(greaterThan(g, vec2(0.0))) && all(lessThan(g, vec2(1.0)))) {
@@ -126,7 +126,17 @@ void main() {
 			if (all(greaterThan(g, vec2(0.0))) && all(lessThan(g, vec2(1.0)))) {
 				float gr = ground(g);
 				float gy = (p.y - gr) / size_m.y;
-				if (gy > 0.0 && gy < 1.0 && texture(occ, vec3(g.x, gy, g.y)).r < 0.004) {
+				if (gy >= 1.0) {
+					// above the ground-following grid: no dust up here
+					if (rd.y >= 0.0) {
+						// rising: it can only come back into the grid where the land climbs faster than the ray;
+						// a steep ray, or one already over the whole grid's top, never does
+						if (rd.y > 0.3 || p.y > P.box_max.y - 0.3) break;
+					} else {
+						// descending: head for the grid top, half the way at a time (the land under it may rise)
+						ds = max(ds, (gy - 1.0) * size_m.y / -rd.y * 0.5);
+					}
+				} else if (gy > 0.0 && texture(occ, vec3(g.x, gy, g.y)).r < 0.004) {
 					ds = 1.2;
 				} else if (gy > 0.0 && gy < 1.0) {
 					vec4 s = texture(smoke, vec3(g.x, gy, g.y));

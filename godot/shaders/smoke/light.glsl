@@ -27,6 +27,10 @@ void main() {
 	imageStore(colv, id, vec4((d > 1e-4 ? cm / d : vec3(0.0)) * has, has));
 	imageStore(velv, id, s0);
 	float h = pc.a.x;
+	if (d < 1e-4) {   // no dust here: nothing to light (fully lit, open sky); the colour / air above are written
+		imageStore(outv, id, vec4(d, 1.0, 1.0, 0.0));
+		return;
+	}
 	// toward the sun: 14 steps growing from half a voxel to ~2.5 voxels (~5 m)
 	float acc = 0.0;
 	float t = 0.5;

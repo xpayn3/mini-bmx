@@ -55,8 +55,10 @@ float dap_noise(vec3 x) {
 }
 
 void fragment() {
-	// the sun's shadow pass (orthographic; every view camera is perspective): leaf gaps
-	if (dapple > 0.0 && PROJECTION_MATRIX[3][3] > 0.5) {
+	// the sun's shadow pass (orthographic; every view camera is perspective): leaf gaps. Only within ~40 m of
+	// the ride camera (cam_eye): further out the flecks are below a shadow texel of the far cascades, and the
+	// discard + noise ran for every crown in every cascade
+	if (dapple > 0.0 && PROJECTION_MATRIX[3][3] > 0.5 && distance(v_rest, cam_eye.xyz) < 40.0) {
 		vec3 p = v_rest / dapple_size;
 		float t = atm_wind.z;
 		float g = wind_gust(v_rest.xz);

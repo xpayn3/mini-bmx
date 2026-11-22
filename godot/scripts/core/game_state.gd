@@ -96,7 +96,7 @@ func bike_config_for(id: String) -> Dictionary:
 	return cfg
 
 func save() -> void:
-	if OS.get_environment("BMX_PADSEQ") != "": return   # menu tests: never into the player\'s files
+	if Settings._no_save: return   # test runs (autotest, PADSEQ, bench, shots...): never into the player's files
 	var cf := ConfigFile.new()
 	cf.set_value("game", "bike", bike_id)
 	cf.set_value("game", "computer", computer_id)
@@ -110,7 +110,7 @@ func save() -> void:
 	var oldest := today() - KEEP_DAYS
 	for d in days:
 		if int(d) >= oldest: cf.set_value("days", str(d), days[d])
-	cf.save(SAVE)
+	Settings.save_cfg(cf, SAVE)
 
 # ---------------------------------------------------------------- activity log (title card: this week + streak)
 ## per day ridden (key = days since 1970, local date): [metres, rides]. A ride counts as an activity once it

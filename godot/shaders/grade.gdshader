@@ -3,7 +3,9 @@ shader_type canvas_item;
 //  * colour grade from the web version: split tone (warm highlights, cool shadows) + vignette
 //  * speed blur: radial streaks toward the screen edges, stronger the faster you go (the centre,
 //    where the rider is, stays sharp)
-uniform sampler2D screen_tex : hint_screen_texture, filter_linear_mipmap;
+// plain filtering: a mipmap sampler makes Godot build the screen's mip chain every frame. The speed blur needs the
+// mips: game.gd swaps in a copy of this shader with filter_linear_mipmap here (GRADE_MIP_FROM / _TO) while blur > 0
+uniform sampler2D screen_tex : hint_screen_texture, filter_linear;
 uniform float grade_amt = 1.0;
 uniform float blur = 0.0;      // 0..1
 uniform float speed = 0.0;     // 0..1 speed feel: colour fringing, speed lines, tighter vignette

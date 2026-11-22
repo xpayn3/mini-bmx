@@ -3,7 +3,8 @@
 // (sRGB) + strength in alpha. Lit like the ground, with the knob dimples bump-mapped so they catch
 // the sun; soft edges with a lighter lip of pushed-out soil; fades out in the distance.
 shader_type spatial;
-render_mode blend_mix, depth_draw_never, cull_disabled, specular_schlick_ggx;
+// cull_back: fx.gd lays both triangles of every segment clockwise seen from above (Godot's front face)
+render_mode blend_mix, depth_draw_never, cull_back, specular_schlick_ggx;
 
 const float ROW = 0.024;     // metres between knob rows (fx.gd wraps the distance on 2 rows)
 
@@ -56,9 +57,13 @@ void vertex() {
 	v_smear = step(1.5, abs(UV.x));
 	UV.x = UV.x / mix(1.0, 2.0, v_smear);
 	NORMAL = vec3(0.0, 1.0, 0.0);   // lie flat on the ground (the node sits unrotated in the world)
-	// pull a little toward the camera instead of floating high above the ground
+	// pull a little toward the camera instead of floating high above the ground: offset in view space and
+	// project straight from there (no matrix inverse per vertex)
 	vec3 view = (MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
-	VERTEX = (inverse(MODELVIEW_MATRIX) * vec4(view - normalize(view) * 0.04, 1.0)).xyz;
+	POSITION = PROJECTION_MATRIX * vec4(view - normalize(view) * 0.04, 1.0);
+	// unused ring-buffer slots (alpha 0): fx.gd writes one alpha for all 6 vertices of a segment, so the whole
+	// segment lands on one point outside the view and is dropped before rasterising
+	if (COLOR.a < 0.004) POSITION = vec4(2.0, 2.0, 2.0, 1.0);
 }
 
 void fragment() {
@@ -84,6 +89,9 @@ void fragment() {
 	float det = dot(dpdx, r1);
 	vec3 grad = sign(det) * (dFdx(hh) * r1 + dFdy(hh) * r2);
 	NORMAL = normalize(abs(det) * NORMAL - grad * bump);
+	float dist = length(VERTEX);
+	float fade = 1.0 - smoothstep(fade_near, fade_far, dist);
+	if (COLOR.a * fade < 0.004) discard;   // after the derivatives above, so neighbours keep theirs
 
 	vec3 ground = pow(COLOR.rgb, vec3(2.2));           // sRGB -> linear
 	// pressed soil is darker; the bottoms of the dimples darker still; the pushed-out lip a bit lighter
@@ -94,7 +102,5 @@ void fragment() {
 	ALBEDO = col;
 	ROUGHNESS = 0.92 - 0.12 * h;
 	SPECULAR = 0.25;
-	float dist = length(VERTEX);
-	float fade = 1.0 - smoothstep(fade_near, fade_far, dist);
 	ALPHA = COLOR.a * band * fade * (0.6 + 0.2 * h) * mix(0.65, 1.15, no);
 }

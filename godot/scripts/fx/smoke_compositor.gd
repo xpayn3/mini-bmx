@@ -150,7 +150,7 @@ func _render_callback(_type: int, rdata: RenderData) -> void:
 	_put4(a, o, params.sun_dir, params.detail_amt); o += 4
 	_put4(a, o, params.sun_col, params.max_steps); o += 4
 	_put4(a, o, params.amb_col, k); o += 4
-	_put4(a, o, params.dust_col, 0.0); o += 4
+	_put4(a, o, params.dust_col, float(params.get("fade", 0.0))); o += 4   # w: fade-out before the sim stops
 	_put4(a, o, params.drift, 0.0); o += 4
 	var cv: Vector4 = params.cloud
 	a[o] = cv.x; a[o + 1] = cv.y; a[o + 2] = cv.z; a[o + 3] = cv.w; o += 4

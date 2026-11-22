@@ -42,6 +42,9 @@ var _mat: ShaderMaterial
 var _near: MultiMeshInstance3D
 var _mid: MultiMeshInstance3D
 var _tile_buf := {}                    # MultiMesh -> PackedFloat32Array (reused)
+var _tile_prev := {}                   # MultiMesh -> [buffer last uploaded, its count]: unchanged = no upload
+var _h_arr := PackedFloat32Array()     # the height window as floats (for the tiles' height range)
+var _tile_h := {}                      # MultiMesh -> {tile Vector2i: Vector2(min, max) ground height}, per window
 var probe := Env.s("BMX_GRASS_PROBE") != ""
 var _probe_t := 0.0
 
@@ -56,6 +59,8 @@ var _tr_tex: ImageTexture
 var _tr_origin := Vector2(INF, INF)    # world xz of texel (0, 0)'s corner
 var _tr_now := 0.0                     # the trail's own clock (stops in photo mode / pause)
 var _tr_dirty := false
+var _tr_up_ms := 0                     # when the trample texture was last uploaded (real time)
+const TR_UPLOAD_MS := 33               # at most this often (192^2 RGBAF = 590 KB a go); the tyre covers the lag
 var _tr_last := {}                     # stamp id -> last stamped point (strokes between frames have no gaps)
 
 
@@ -71,9 +76,11 @@ func _process(dt: float) -> void:
 		if not get_tree().paused:
 			_tr_now += dt          # already game time (0 in photo mode, slow in crash slow motion)
 		_mat.set_shader_parameter("trample_now", _tr_now)
-		if _tr_dirty:
+		var now_ms := Time.get_ticks_msec()
+		if _tr_dirty and now_ms - _tr_up_ms >= TR_UPLOAD_MS:
 			_tr_tex.update(_tr_img)
 			_tr_dirty = false
+			_tr_up_ms = now_ms
 		update(get_viewport().get_camera_3d())
 
 
@@ -95,6 +102,7 @@ func trample(id: int, p: Vector3, dir: Vector3, r: float) -> void:
 	var steps := clampi(ceili(seg.length() / (TR_TEXEL * 0.7)), 1, 24)
 	var rt := r / TR_TEXEL
 	var ri := ceili(rt)
+	var wrote := false
 	for s in steps:
 		var c := (last + seg * float(s + 1) / steps - _tr_origin) / TR_TEXEL
 		var cx := int(c.x)
@@ -105,8 +113,14 @@ func trample(id: int, p: Vector3, dir: Vector3, r: float) -> void:
 				if x < 0 or x >= TR: continue
 				var k := Vector2(x + 0.5, y + 0.5).distance_to(c) / maxf(rt, 0.5)
 				if k > 1.0: continue
-				_tr_img.set_pixel(x, y, Color(_tr_now, ang, 1.0 - k * 0.55, 0.0))
-	_tr_dirty = true
+				var want := 1.0 - k * 0.55
+				var was := _tr_img.get_pixel(x, y)
+				if was.r > _tr_now - 0.25 and was.b >= want - 0.02:
+					continue   # pressed just now already (a standing / slow tyre): nothing new to show
+				_tr_img.set_pixel(x, y, Color(_tr_now, ang, want, 0.0))
+				wrote = true
+	if wrote:
+		_tr_dirty = true
 	if probe and id == 1 and Engine.get_process_frames() % 60 == 0:
 		var px := Vector2i(((q - _tr_origin) / TR_TEXEL).floor())
 		print("TRAMPLE now=%.1f at=%s px=%s val=%s" % [_tr_now, q, px, _tr_img.get_pixelv(px.clamp(Vector2i.ZERO, Vector2i(TR - 1, TR - 1)))])
@@ -170,6 +184,8 @@ func set_quality(q: int) -> void:
 	_near = null
 	_mid = null
 	_tile_buf.clear()
+	_tile_prev.clear()
+	_tile_h.clear()
 	visible = q > 0
 	if q == 0:
 		_set_ground_info()
@@ -291,6 +307,8 @@ func _refresh_window(cam: Vector3) -> void:
 			_img_h.blit_rect(gh, Rect2i(Vector2i.ZERO, gh.get_size()), Vector2i(i * SEG, j * SEG))
 	_tex_c.update(_img_c)
 	_tex_h.update(_img_h)
+	_h_arr = _img_h.get_data().to_float32_array()
+	_tile_h.clear()
 	# texel (0, 0) sits on the window's first grid point
 	_mat.set_shader_parameter("win_origin", Vector2((_win_k.x - h) * CHUNK - CHUNK / 2, (_win_k.y - h) * CHUNK - CHUNK / 2))
 	_mat.set_shader_parameter("texel", CHUNK / SEG)
@@ -344,6 +362,10 @@ func _place(mi: MultiMeshInstance3D, cp: Vector3, planes: Array, tile: float, r0
 	var c := 0
 	var half := tile * 0.5
 	var rad := half * 1.4143
+	var hcache: Dictionary = _tile_h.get(mm, {})
+	_tile_h[mm] = hcache
+	var have_h := _h_arr.size() == TEX * TEX
+	var ex := half + 1.0   # + blades leaning / blowing over the tile's edge
 	for dz in range(-n, n + 1):
 		for dx in range(-n, n + 1):
 			var ox := (tx0 + dx) * tile
@@ -353,14 +375,33 @@ func _place(mi: MultiMeshInstance3D, cp: Vector3, planes: Array, tile: float, r0
 			var dd := Vector2(mx - cp.x, mz - cp.z).length()
 			if dd - rad > r1 or dd + rad < r0:
 				continue
-			# view test: a sphere round the tile (the ground's height near the camera, +-30 m of slope)
-			var centre := Vector3(mx, hy, mz)
-			var r := rad + 30.0
+			# view test: the tile as a box from its lowest ground to its highest blade tip (heights from the window);
+			# without the window yet, a sphere round the camera's ground height +-30 m
 			var inside := true
-			for p in planes:
-				if (p as Plane).distance_to(centre) > r:
-					inside = false
-					break
+			if have_h:
+				var tk := Vector2i(tx0 + dx, tz0 + dz)
+				var hr = hcache.get(tk)
+				if hr == null:
+					hr = _tile_range(ox, oz, tile)
+					hcache[tk] = hr
+				if hr.x > hr.y:
+					continue   # no ground data under it: no grass either
+				var cy: float = (hr.x + hr.y) * 0.5 + 0.5
+				var ey: float = (hr.y - hr.x) * 0.5 + 1.5   # 0.5 under the ground .. ~1.5 m blade tips over it
+				var centre := Vector3(mx, cy, mz)
+				for p in planes:
+					var pl := p as Plane
+					var r := absf(pl.normal.x) * ex + absf(pl.normal.y) * ey + absf(pl.normal.z) * ex
+					if pl.distance_to(centre) > r:
+						inside = false
+						break
+			else:
+				var centre := Vector3(mx, hy, mz)
+				var r := rad + 30.0
+				for p in planes:
+					if (p as Plane).distance_to(centre) > r:
+						inside = false
+						break
 			if not inside:
 				continue
 			var b := c * 16
@@ -370,6 +411,33 @@ func _place(mi: MultiMeshInstance3D, cp: Vector3, planes: Array, tile: float, r0
 			buf[b + 12] = ring; buf[b + 13] = 0.0; buf[b + 14] = 0.0; buf[b + 15] = 0.0
 			c += 1
 	_tile_buf[mm] = buf
-	mm.buffer = buf
-	mm.visible_instance_count = c
+	# same tiles as last frame (camera within a tile, view barely turned): nothing to upload
+	var prev: Array = _tile_prev.get(mm, [])
+	if prev.is_empty() or prev[1] != c or prev[0] != buf:
+		mm.buffer = buf
+		mm.visible_instance_count = c
+		_tile_prev[mm] = [buf.duplicate(), c]
 	return c
+
+
+## lowest / highest ground height under a tile (3 x 3 samples of the height window + 3 m margin for what lies
+## between them); x > y = no ground data there
+func _tile_range(ox: float, oz: float, tile: float) -> Vector2:
+	var h := WIN_CHUNKS / 2
+	var wx := (_win_k.x - h) * CHUNK - CHUNK / 2
+	var wz := (_win_k.y - h) * CHUNK - CHUNK / 2
+	var tx := CHUNK / SEG
+	var lo := INF
+	var hi := -INF
+	for j in 3:
+		for i in 3:
+			var px := clampi(roundi((ox + tile * 0.5 * i - wx) / tx), 0, TEX - 1)
+			var pz := clampi(roundi((oz + tile * 0.5 * j - wz) / tx), 0, TEX - 1)
+			var v := _h_arr[pz * TEX + px]
+			if v < -900.0:
+				continue
+			lo = minf(lo, v)
+			hi = maxf(hi, v)
+	if lo > hi:
+		return Vector2(1.0, 0.0)
+	return Vector2(lo - 3.0, hi + 3.0)

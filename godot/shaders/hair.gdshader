@@ -11,7 +11,11 @@ uniform sampler2D guides : filter_nearest, repeat_disable;   // (SEG+1) x G, rgb
 uniform mat4 head_xf;
 uniform int seg = 11;
 uniform vec3 hair_col : source_color = vec3(0.29, 0.19, 0.13);
-uniform vec3 key_dir = vec3(-0.45, 0.8, 0.55);                // the studio key, in view space
+uniform vec3 key_dir = vec3(-0.45, 0.8, 0.55);                // the studio key, in view space (menus, garage)
+// in a ride game.gd sets the real key light: the sun / moon, as a direction TOWARD it in world space + its colour
+uniform float key_world_on = 0.0;
+uniform vec3 key_world = vec3(0.0, 1.0, 0.0);
+uniform vec3 key_col = vec3(1.0, 0.97, 0.92);
 uniform float sheen = 0.16;
 
 varying vec3 vT;
@@ -64,7 +68,7 @@ void vertex() {
 void fragment() {
 	vec3 T = normalize(vT);
 	vec3 V = normalize(VIEW);
-	vec3 L = normalize(key_dir);
+	vec3 L = key_world_on > 0.5 ? normalize((VIEW_MATRIX * vec4(key_world, 0.0)).xyz) : normalize(key_dir);
 	float tl = dot(T, L);
 	float diff = sqrt(max(0.0, 1.0 - tl * tl));
 	vec3 H = normalize(L + V);
@@ -77,7 +81,7 @@ void fragment() {
 	vec3 base = hair_col * vShade * root;
 	ALBEDO = base * (0.3 + 0.5 * diff);
 	// a soft, narrow sheen only: calm, not glittery
-	EMISSION = vec3(1.0, 0.97, 0.92) * pow(s, 140.0) * sheen + hair_col * 1.2 * pow(s2, 30.0) * sheen * 0.5;
+	EMISSION = key_col * pow(s, 140.0) * sheen + hair_col * (key_col / vec3(1.0, 0.97, 0.92)) * 1.2 * pow(s2, 30.0) * sheen * 0.5;   // (the default key = the old look)
 	ROUGHNESS = 0.9;
 	SPECULAR = 0.0;
 	METALLIC = 0.0;

@@ -52,7 +52,7 @@ func _ready() -> void:
 				if OS.get_environment("BMX_INTRO_RIDE") != "":   # ... then RIDE: the pre-built world goes straight in
 					var r0 := Time.get_ticks_msec()
 					await _start_ride()
-					print("INTRO ride start ms=", Time.get_ticks_msec() - r0, " prebuilt_used=", ride_ready == null and _ride_park == null)
+					print("INTRO ride start ms=", Time.get_ticks_msec() - r0, " prebuilt_used=", _prebuilt_taken)
 					await get_tree().create_timer(4.0, true, false, true).timeout
 					get_viewport().get_texture().get_image().save_png(OS.get_environment("BMX_INTRO_SHOTS") + "_ride.png")
 				GameState.quit())
@@ -167,7 +167,10 @@ func _focus_desc() -> String:
 			return "%s '%s'%s%s" % [f.get_class(), t if t != null else "", extra, lbl]
 	return "-"
 
+var _rebuilding := false   # _new_game is between freeing the old Game and adding the new one
 func _new_game(title := false) -> void:
+	while _rebuilding: await get_tree().process_frame   # two quick restarts: one after the other, never two Games
+	_rebuilding = true
 	if game:
 		game.queue_free()
 		await game.tree_exited
@@ -180,6 +183,7 @@ func _new_game(title := false) -> void:
 	game.process_mode = Node.PROCESS_MODE_PAUSABLE
 	add_child(game)
 	move_child(game, 0)
+	_rebuilding = false
 
 ## the title world's terrain + far hills, out of the tree while the garage is open (Game.take_world)
 var _title_keep := {}
@@ -213,6 +217,7 @@ func _set_riding(riding: bool) -> void:
 # ---------------------------------------------------------------- the ride, built during the boot intro
 var ride_ready: Game            # the player's own world, built off-screen while the intro holds on black
 var _ride_park: SubViewport     # its own World3D, never drawn
+var _prebuilt_taken := false     # tests: RIDE used the pre-built world
 var _ride_sig := ""             # what it was built from (seed, bike, garage build, rider): stale if that changed
 
 func _ride_sig_now() -> String:
@@ -258,6 +263,7 @@ func _take_prebuilt() -> bool:
 	ride_ready = null
 	if _ride_sig_now() != _ride_sig:   # changed in the menus since: build it the normal way
 		_ride_park.queue_free()
+		_ride_park = null
 		return false
 	if game: game.queue_free()
 	g.reparent(self, false)
@@ -268,11 +274,14 @@ func _take_prebuilt() -> bool:
 	game = g
 	_ride_park.queue_free()
 	_ride_park = null
+	_prebuilt_taken = true
 	return true
 
 # ---------------------------------------------------------------- title screen
 func _show_menu() -> void:
 	state = MENU
+	_held_time_scale = -1.0   # (paused in a crash's slow motion, then Main menu: the menu runs at normal speed)
+	_held_audio_speed = -1.0
 	GameState.end_ride()
 	Steam.presence("In the menus")
 	get_tree().paused = false
@@ -1515,9 +1524,18 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and state == RIDING and Settings.get_v("pause_unfocused") and OS.get_cmdline_user_args().is_empty():
 		_pause()
 
+## paused during the crash slow motion: the menus (leaflet, its sounds, the tuning card) run at normal speed and
+## pitch; the slow motion comes back on resume
+var _held_time_scale := -1.0
+var _held_audio_speed := -1.0
 func _pause() -> void:
 	if game: game.exit_photo()
 	state = PAUSED
+	if _held_time_scale < 0.0:
+		_held_time_scale = Engine.time_scale
+		_held_audio_speed = AudioServer.playback_speed_scale
+	Engine.time_scale = 1.0
+	AudioServer.playback_speed_scale = 1.0
 	# the cover photo: the ride as it is now (the last frame drawn, before the leaflet is over it)
 	var shot := get_viewport().get_texture().get_image()
 	get_tree().paused = true
@@ -1579,6 +1597,10 @@ func _resume() -> void:
 	_close_controls()
 	state = RIDING
 	get_tree().paused = false
+	if _held_time_scale >= 0.0:   # back into the slow motion it was paused in
+		Engine.time_scale = _held_time_scale if _held_time_scale > 0.0 else 1.0   # (0 = a map / photo freeze that was closing)
+		AudioServer.playback_speed_scale = _held_audio_speed
+		_held_time_scale = -1.0
 	if game: game.swallow_held()   # the A that resumed is not a sprint
 
 func _open_settings() -> void:

@@ -882,12 +882,26 @@ func _tape() -> void:
 
 
 # ---------------- trees and cacti ----------------
+const TREE_TRIES := 140   # placement tries per chunk (was 90: forests read thin)
+const TREE_K := 1.4        # every tree this much bigger (they read small next to the rider)
+
+## a crown of radius r at (x, z) stays clear of the trail and its paths (the trees' own spot check only tests the trunk)
+func _crown_clear(x: float, z: float, r: float) -> bool:
+	for a in 6:
+		var px := x + cos(a * 1.047) * r
+		var pz := z + sin(a * 1.047) * r
+		if f.trail(px, pz) > 0.02 or absf(f.pathN(px, pz)) < 0.1 or f.jump_mask(px, pz) > 0:
+			return false
+	return true
+
 func _trees(ox: float, oz: float) -> void:
-	for i in 90:
+	for i in TREE_TRIES:
 		var x := ox + (rnd.next() - .5) * S
 		var z := oz + (rnd.next() - .5) * S
 		var forest: float = f.n(x + 400, z, TerrainField.I38)
-		if rnd.next() > sm(-0.25, 0.25, forest) * 0.9 + 0.05:
+		# beside the trail (within ~14 m) trees grow whatever the forest mask says: the road gets lined now and then
+		var roadside: bool = TerrainField.trail_metres_of(f.pathN(x, z)) < 14.0 and f.n(x - 900, z + 300, TerrainField.I38) > -0.1
+		if rnd.next() > (0.55 if roadside else sm(-0.25, 0.25, forest) * 0.9 + 0.05):
 			continue
 		if f.trail(x, z) > 0.02 or absf(f.pathN(x, z)) < 0.1 or f.jump_mask(x, z) > 0 or is_blocked(x, z, 0.8):
 			continue
@@ -911,12 +925,18 @@ func _trees(ox: float, oz: float) -> void:
 					"cactus": {"i": idx, "kind": kind, "broken": false, "col": cc, "xform": _last_xform(nm)}})
 			continue
 		var ceil_h := 0.0
+		sc *= TREE_K
 		if h > 4 or rnd.next() < 0.3 + rug * 0.6:
-			put("trunk", x, h - 0.1, z, sc, sc * 0.9, sc, yaw)
-			var py := sc * (1.1 + rnd.next() * 0.4)
+			# pines: tall and slim, the odd one a real giant (up to ~13 m)
+			var py := sc * (1.5 + rnd.next() * 0.7 + pow(rnd.next(), 4.0) * 0.9)
+			if not _crown_clear(x, z, sc * 1.05):
+				continue
+			put("trunk", x, h - 0.1, z, sc, sc * 0.9 + py * 0.15, sc, yaw)
 			put("pine", x, h + sc * 0.6, z, sc * 1.1, py, sc * 1.1, yaw, PINES[int(rnd.next() * PINES.size())])
 			ceil_h = h + sc * 0.6 + 2.8 * py
 		else:
+			if not _crown_clear(x, z, sc * 1.4):
+				continue
 			var th := sc * (1.1 + rnd.next() * 0.6)
 			ceil_h = h + th + sc * 1.8
 			put("trunk", x, h - 0.1, z, sc, th + 0.3, sc, yaw)

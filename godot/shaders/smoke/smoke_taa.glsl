@@ -16,7 +16,7 @@ layout(set = 0, binding = 0, std140) uniform Params {
 	vec4 sun_dir;       // xyz toward the sun, detail amount
 	vec4 sun_col;       // rgb, max steps
 	vec4 amb_col;       // rgb, history blend (1 = no history)
-	vec4 dust_col;      // rgb, -
+	vec4 dust_col;      // rgb, w = fade-out 0 (drawn) .. 1 (gone)
 	vec4 drift;         // xyz detail drift (m), time
 	vec4 cloud;         // atm_cloud: drift xy, depth, shade at the rider
 	vec4 sizes;         // full w, h, half w, h

@@ -22,6 +22,9 @@ const I23 := 1.0 / 23.0
 const I55 := 1.0 / 55.0
 const I260 := 1.0 / 260.0
 const I90 := 1.0 / 90.0
+const I240 := 1.0 / 240.0
+const I150 := 1.0 / 150.0
+const I700 := 1.0 / 700.0
 const I28 := 1.0 / 28.0
 const I8 := 1.0 / 8.0
 const I1_5 := 1.0 / 1.5
@@ -645,7 +648,13 @@ func berm(x: float, z: float) -> float:
 func landform(x: float, z: float) -> float:
 	var calm := 1.0 - 0.85 * mtn(x, z)
 	var relief := 1.0 + 1.3 * sm(0.0, 0.35, noise((x + 5000) * I260, (z - 800) * I260))
-	var h := (noise(x * I90, z * I90) * 10 * relief + noise((x + 31.7) * I28, (z - 17.2) * I28) * 3.2 * (0.6 + 0.4 * relief)) * calm + hill(x, z)
+	# big rolling hills (~240 m) in some regions, open flats in others: the land changes character as you ride
+	var big := sm(-0.15, 0.3, noise((x + 2600) * I700, (z - 3100) * I700))
+	# sharp ridgelines with long crests in other regions (ridged noise, mean taken out so the land doesn't rise)
+	var rdg := sm(0.05, 0.35, noise((x - 4100) * I700, (z + 1500) * I700))
+	var rr := 1.0 - absf(noise((x + 820) * I150, (z - 2300) * I150))
+	var h := (noise(x * I90, z * I90) * 10 * relief + noise((x + 31.7) * I28, (z - 17.2) * I28) * 3.2 * (0.6 + 0.4 * relief)
+		+ noise((x - 1700) * I240, (z + 900) * I240) * 16 * big + (rr * rr - 0.45) * 14 * rdg) * calm + hill(x, z)
 	var wm := wild_mask(x, z)
 	if wm == 0.0:
 		return h
@@ -709,6 +718,10 @@ func biome_name(x: float, z: float) -> String:
 
 func wild_mask(x: float, z: float) -> float:
 	return (1.0 - mtn(x, z)) * sm(45, 90, sqrt(x * x + z * z))
+
+
+static func trail_metres_of(path_n: float) -> float:
+	return absf(path_n) / 0.022
 
 
 func trail_metres(x: float, z: float) -> float:

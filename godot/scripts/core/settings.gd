@@ -140,7 +140,7 @@ const PRESETS := {
 	2: {"render_scale": 1.0, "upscaler": 0, "msaa": 2, "fxaa": false, "taa": false, "shadows": 2, "ssao": true, "gi": 1,
 		"vol_fog": true, "ssr": false, "bloom": true, "tilt_shift": true, "view_distance": 1.0, "lod": 1.0, "fx_density": 1.0,
 		"aniso": 3, "grass": 2, "cloud_shadows": true, "wind": true, "grime": true, "speed_fx": true},
-	3: {"render_scale": 1.0, "upscaler": 0, "msaa": 2, "fxaa": false, "taa": true, "shadows": 3, "ssao": true, "gi": 2,
+	3: {"render_scale": 1.0, "upscaler": 0, "msaa": 1, "fxaa": false, "taa": true, "shadows": 3, "ssao": true, "gi": 2,
 		"vol_fog": true, "ssr": true, "bloom": true, "tilt_shift": true, "view_distance": 1.4, "lod": 0.75, "fx_density": 1.2,
 		"aniso": 4, "grass": 3, "cloud_shadows": true, "wind": true, "grime": true, "speed_fx": true},
 }
@@ -193,6 +193,9 @@ var data := DEFAULTS.duplicate()
 var bindings := {}   # action -> Array[InputEvent]
 var _had_quality := false
 var _test_run: bool = OS.get_environment("BMX_PADSEQ") != "" or Array(OS.get_cmdline_user_args()).any(func(a): return a.begins_with("--autotest") or a.begins_with("--bench") or a.begins_with("--hitch") or a.begins_with("--showcase"))
+var _overridden := false   # --set= / --quality= on the command line: this session's settings are not the player's
+## nothing this session changes reaches the player's files: test runs, plus shot / minimised / headless runs
+var _no_save: bool = _test_run or OS.get_environment("BMX_MIN") != "" or OS.get_environment("BMX_OFFSCREEN") != "" or DisplayServer.get_name() == "headless" or Array(OS.get_cmdline_user_args()).any(func(a): return a.begins_with("--shot"))
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -209,11 +212,13 @@ func _ready() -> void:
 		if a.begins_with("--set="):   # --set=key=value (testing / benchmarks), not saved
 			var kv := a.trim_prefix("--set=")
 			data[kv.get_slice("=", 0)] = str_to_var(kv.get_slice("=", 1))
+			_overridden = true
 		if a.begins_with("--quality="):
 			var lvl := int(a.get_slice("=", 1))
 			if not PRESETS.has(lvl): continue
 			for k in PRESETS[lvl]: data[k] = PRESETS[lvl][k]
 			data["quality"] = lvl
+			_overridden = true
 	apply()
 
 func get_v(k: String):
@@ -401,13 +406,26 @@ func load_settings() -> void:
 	_install_bindings()
 
 func save() -> void:
-	if OS.get_environment("BMX_PADSEQ") != "": return   # menu tests flip settings: never into the player's file
+	if _no_save or _overridden: return   # tests / --set= / --quality= runs: never into the player's file
 	var cf := ConfigFile.new()
 	for k in data:
 		cf.set_value("settings", k, data[k])
 	for a in bindings:
 		cf.set_value("bindings", a, bindings[a])
-	cf.save(PATH)
+	save_cfg(cf, PATH)
+
+## writes a ConfigFile to <path>.tmp, then swaps it over the real file: a crash / power loss mid-write never
+## leaves the player with half a save. (Windows: rename can't replace, so the old file goes first.)
+static func save_cfg(cf: ConfigFile, path: String) -> Error:
+	var tmp := path + ".tmp"
+	var err := cf.save(tmp)
+	if err != OK: return err
+	var a := ProjectSettings.globalize_path(path)
+	var t := ProjectSettings.globalize_path(tmp)
+	if FileAccess.file_exists(path): DirAccess.remove_absolute(a)
+	err = DirAccess.rename_absolute(t, a)
+	if err != OK: err = cf.save(path)   # rename failed: at least write it directly
+	return err
 
 # ---------------- apply (window / renderer); the game applies the environment on `changed` ----------------
 func apply() -> void:
@@ -448,7 +466,8 @@ func apply() -> void:
 		vp.mesh_lod_threshold = float(get_v("lod"))
 		vp.anisotropic_filtering_level = int(get_v("aniso")) as Viewport.AnisotropicFiltering
 		var sq: int = get_v("shadows")
-		RenderingServer.directional_shadow_atlas_set_size([2048, 4096, 4096, 8192][sq], true)
+		# (ultra = 4096 + the softest filter: an 8192 atlas cost far more than it showed)
+		RenderingServer.directional_shadow_atlas_set_size([2048, 4096, 4096, 4096][sq], true)
 		vp.use_occlusion_culling = get_v("occlusion")
 		RenderingServer.directional_soft_shadow_filter_set_quality([RenderingServer.SHADOW_QUALITY_HARD, RenderingServer.SHADOW_QUALITY_SOFT_LOW, RenderingServer.SHADOW_QUALITY_SOFT_HIGH, RenderingServer.SHADOW_QUALITY_SOFT_ULTRA][sq])
 	AudioServer.set_bus_volume_db(0, linear_to_db(maxf(0.0001, float(get_v("volume")))))

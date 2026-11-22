@@ -122,11 +122,13 @@ void fragment() {
 	float front = v_sp * max(sn.x * fwd_ax, 0.0) * lowk;
 	float top = v_sp * max(sn.y, 0.0);
 	// wheels: clumps by angle round the axle (a few big ones + smaller), heavier out at the bead
-	float ang = atan(v_local.y, v_local.x);
-	vec3 ring = vec3(cos(ang), sin(ang), 0.0);
-	float clump = gr_noise(ring * 2.2 + vec3(0.0, 0.0, 3.1)) * 0.65 + gr_noise(ring * 5.5 + vec3(7.0)) * 0.35;
-	float rr = length(v_local.xy);
-	float bead = smoothstep(0.18, 0.31, rr);
+	float clump = 0.0, bead = 0.0;
+	if (wheel || tyre) {
+		float ang = atan(v_local.y, v_local.x);
+		vec3 ring = vec3(cos(ang), sin(ang), 0.0);
+		clump = gr_noise(ring * 2.2 + vec3(0.0, 0.0, 3.1)) * 0.65 + gr_noise(ring * 5.5 + vec3(7.0)) * 0.35;
+		bead = smoothstep(0.18, 0.31, length(v_local.xy));
+	}
 	if (wheel) { spr = 0.0; cav = 0.0; under = 0.0; front = 0.0; top = 0.0; }
 	// dust film: soft clouds, thickest low down, grainy up close; wet = darker (dust turns to a muddy wash)
 	float dn = gr_noise(v_local * 7.0) * 0.55 + gr_noise(v_local * 23.0) * 0.3 + gr_noise(v_local * 130.0) * 0.15;
@@ -134,47 +136,61 @@ void fragment() {
 	if (wheel) dlow = (0.25 + 0.6 * bead) * smoothstep(0.25, 0.75, clump) * 1.4;
 	float dmap = dlow + 0.5 * cav + 0.3 * top + 0.4 * spr;
 	float da = clamp(grime_dust.a * min(bias, 1.3) * dmap * (0.15 + 0.85 * dn), 0.0, 0.6);
-	// mud: crisp splotches laid over the dust, thicker toward their middles
-	float mmap = (1.05 - hgt * 1.4) + 1.1 * spr + 0.8 * cav + 0.45 * under + 0.35 * front + 0.2 * (1.0 - v_sp);
-	if (wheel) mmap = (0.1 + 0.9 * bead) * smoothstep(0.35, 0.8, clump) * 1.5;
-	// tyre: the tread fills first; the sidewalls take clumps flung round them (by angle, so they turn with it)
-	float side = 0.3 + 0.9 * smoothstep(0.3, 0.75, clump);
-	float cover = tyre ? grime.x * (1.15 * v_tread + (1.0 - v_tread) * side) : grime.x * bias * mmap;
-	float n = gr_noise(v_local * 26.0) * 0.6 + gr_noise(v_local * 71.0) * 0.4;
-	float fleck = gr_noise(v_local * 190.0);
-	float edge = 1.0 - cover;
-	float m = step(0.5, max(smoothstep(edge, edge + 0.08, n), step(1.0 - cover * 0.35, fleck)));
-	// bump: a height field for the mud (metres): a rounded rise from the splotch edge, lumpy clods on top,
-	// flecks as little beads; the normal is bent by its screen-space slope (the passes have no UVs / tangents)
-	float t = smoothstep(edge, edge + 0.2, n);
-	float lump = gr_noise(v_local * 140.0) * 0.6 + gr_noise(v_local * 330.0) * 0.4;
-	float fl = smoothstep(1.0 - cover * 0.35, 1.0 - cover * 0.2, fleck);
-	// drying: thin edges and some plates dry before the rest; a dried thick crust cracks into ~2 cm plates,
-	// and knocked-off plates (grime_age.y) are gone along those cracks, leaving a faint stain
-	float ld = 0.0, crack = 0.0, gone = 0.0;
-	if (grime_age.x > 0.01) {
-		vec3 c = gr_cells(v_local * 55.0);
-		ld = clamp(grime_age.x * 1.7 - 0.7 + (1.0 - t) * 0.55 + (c.z - 0.5) * 0.5, 0.0, 1.0);
-		crack = (1.0 - smoothstep(0.02, 0.09, c.y - c.x)) * smoothstep(0.55, 0.95, ld) * smoothstep(0.25, 0.6, t);
-		gone = m * step(c.z, grime_age.y * smoothstep(0.4, 0.9, ld));
-	}
-	float h = (max(t, fl * 0.6) * (0.5 + 0.5 * lump * (1.0 - 0.5 * ld))) * (0.0018 + 0.0035 * grime.x) - crack * 0.0014;
-	vec3 dpdx = dFdx(VERTEX), dpdy = dFdy(VERTEX);
-	vec3 r1 = cross(dpdy, NORMAL), r2 = cross(NORMAL, dpdx);
-	float det = dot(dpdx, r1);
-	vec3 grad = sign(det) * (dFdx(h) * r1 + dFdy(h) * r2);
-	vec3 bumped = normalize(abs(det) * NORMAL - grad);
-	m *= 1.0 - gone;
-	NORMAL = normalize(mix(NORMAL, bumped, m));
-	// thick middles dark and wet, thin edges drying a little lighter; dust pale and dry
-	vec3 mc = mud_col.rgb * (0.75 + 0.35 * gr_noise(v_local * 9.0)) * mix(1.25, 0.85, t) * (0.9 + 0.2 * lump);
 	vec3 dc = grime_dust.rgb * (0.9 + 0.2 * gr_noise(v_local * 41.0));
-	// dried: pale and dusty, the cracks dark
-	vec3 dried = mix(mud_col.rgb * 1.55, grime_dust.rgb, 0.35) * (0.85 + 0.3 * lump);
-	mc = mix(mc, dried, ld) * (1.0 - crack * 0.6);
-	da = max(da, gone * 0.45);   // a flaked plate leaves a stain
-	dc = mix(dc, mud_col.rgb * 1.3, gone * 0.6);
 	float w = grime.y;
+	float m = 0.0;
+	vec3 mc = vec3(0.0);
+	float t = 0.0, ld = 0.0;
+	// the mud itself (splotches, bump, drying crust) only once there is any: a dust-only bike stops here.
+	// grime.x is a uniform, so the derivatives below stay in uniform control flow.
+	if (grime.x > 0.001) {
+		// mud: crisp splotches laid over the dust, thicker toward their middles
+		float mmap = (1.05 - hgt * 1.4) + 1.1 * spr + 0.8 * cav + 0.45 * under + 0.35 * front + 0.2 * (1.0 - v_sp);
+		if (wheel) mmap = (0.1 + 0.9 * bead) * smoothstep(0.35, 0.8, clump) * 1.5;
+		// tyre: the tread fills first; the sidewalls take clumps flung round them (by angle, so they turn with it)
+		float side = 0.3 + 0.9 * smoothstep(0.3, 0.75, clump);
+		float cover = tyre ? grime.x * (1.15 * v_tread + (1.0 - v_tread) * side) : grime.x * bias * mmap;
+		float n = gr_noise(v_local * 26.0) * 0.6 + gr_noise(v_local * 71.0) * 0.4;
+		float fleck = gr_noise(v_local * 190.0);
+		float edge = 1.0 - cover;
+		m = step(0.5, max(smoothstep(edge, edge + 0.08, n), step(1.0 - cover * 0.35, fleck)));
+		// bump: a height field for the mud (metres): a rounded rise from the splotch edge, lumpy clods on top,
+		// flecks as little beads; the normal is bent by its screen-space slope (the passes have no UVs / tangents)
+		t = smoothstep(edge, edge + 0.2, n);
+		float fl = smoothstep(1.0 - cover * 0.35, 1.0 - cover * 0.2, fleck);
+		// off the splotches (t = fl = 0, so m = 0 too) the lumps, the crust and its cracks change nothing: skip them
+		bool on = t > 0.0 || fl > 0.0;
+		float lump = 0.0;
+		// drying: thin edges and some plates dry before the rest; a dried thick crust cracks into ~2 cm plates,
+		// and knocked-off plates (grime_age.y) are gone along those cracks, leaving a faint stain
+		float crack = 0.0, gone = 0.0;
+		if (on) {
+			lump = gr_noise(v_local * 140.0) * 0.6 + gr_noise(v_local * 330.0) * 0.4;
+			if (grime_age.x > 0.01) {
+				vec3 c = gr_cells(v_local * 55.0);
+				ld = clamp(grime_age.x * 1.7 - 0.7 + (1.0 - t) * 0.55 + (c.z - 0.5) * 0.5, 0.0, 1.0);
+				crack = (1.0 - smoothstep(0.02, 0.09, c.y - c.x)) * smoothstep(0.55, 0.95, ld) * smoothstep(0.25, 0.6, t);
+				gone = m * step(c.z, grime_age.y * smoothstep(0.4, 0.9, ld));
+			}
+		}
+		float h = (max(t, fl * 0.6) * (0.5 + 0.5 * lump * (1.0 - 0.5 * ld))) * (0.0018 + 0.0035 * grime.x) - crack * 0.0014;
+		vec3 dpdx = dFdx(VERTEX), dpdy = dFdy(VERTEX);
+		vec3 r1 = cross(dpdy, NORMAL), r2 = cross(NORMAL, dpdx);
+		float det = dot(dpdx, r1);
+		vec3 grad = sign(det) * (dFdx(h) * r1 + dFdy(h) * r2);
+		m *= 1.0 - gone;
+		if (m > 0.0) {
+			vec3 bumped = normalize(abs(det) * NORMAL - grad);
+			NORMAL = normalize(mix(NORMAL, bumped, m));
+			// thick middles dark and wet, thin edges drying a little lighter
+			mc = mud_col.rgb * (0.75 + 0.35 * gr_noise(v_local * 9.0)) * mix(1.25, 0.85, t) * (0.9 + 0.2 * lump);
+			// dried: pale and dusty, the cracks dark
+			vec3 dried = mix(mud_col.rgb * 1.55, grime_dust.rgb, 0.35) * (0.85 + 0.3 * lump);
+			mc = mix(mc, dried, ld) * (1.0 - crack * 0.6);
+		}
+		da = max(da, gone * 0.45);   // a flaked plate leaves a stain
+		dc = mix(dc, mud_col.rgb * 1.3, gone * 0.6);
+	}
 	ALBEDO = mix(dc * (1.0 - w * 0.5), mc * (1.0 - w * 0.43), m);
 	ROUGHNESS = mix(mix(0.97, 0.45, w), mix(mix(mix(0.75, 0.5, t), 0.98, ld), 0.3, w), m);
 	SPECULAR = mix(0.25, mix(0.5, 0.3, ld), m);

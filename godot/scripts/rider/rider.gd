@@ -1065,6 +1065,10 @@ func _pose_from_points(P: Array, roots: Dictionary, orient: Dictionary) -> void:
 	var sh_r: Vector3 = sh[1] - sh[0]
 	head.transform = Transform3D(orient.get("head", _basis_from(hd - ch, sh_r)), hd)
 	_pose_neck()
+	# the curl eases by time (0.06 a frame at 60 fps), not per call: no dt reaches here, so real time between calls
+	var now_us := Time.get_ticks_usec()
+	var cdt := clampf((now_us - _curl_us) / 1e6, 0.0, 0.1) if _curl_us > 0 else 1.0 / 60.0
+	_curl_us = now_us
 	for i in 2:
 		var ei: int = 4 if i == 0 else 7    # elbow / hand / knee / foot point of this side
 		var hi: int = ei + 1
@@ -1081,7 +1085,7 @@ func _pose_from_points(P: Array, roots: Dictionary, orient: Dictionary) -> void:
 		if orient.has("hand%d" % i): glove[i].basis = orient["hand%d" % i]
 		else: orient_hand(glove[i], ha_from, ha[i], sh_r)
 		set_limb(fore_arm[i], ha_from, _wrist(i, ha_from))
-		_curl_to(i, float(orient.get("curl%d" % i, GloveFingers.RELAXED)), 0.06)
+		_curl_to(i, float(orient.get("curl%d" % i, GloveFingers.RELAXED)), 3.6 * cdt)
 		set_limb(thigh[i], kn_from, kn[i])
 		set_limb(shin[i], ft_from, ft[i])
 		knee[i].position = kn[i]
@@ -1092,6 +1096,8 @@ func _pose_from_points(P: Array, roots: Dictionary, orient: Dictionary) -> void:
 		shoe[i].transform = Transform3D(sb, ft[i] - sb.y.normalized() * float(orient.get("shoe_drop", 0.08)) + sb.x.normalized() * float(orient.get("shoe_fwd", 0.0)))
 	_sync_skeleton(P)
 
+
+var _curl_us := 0   # Time.get_ticks_usec() of the last _pose_from_points (finger curl easing)
 
 ## the humanoid skeleton follows whatever was just drawn (P = the joint points in this node's space)
 func _sync_skeleton(P: Array) -> void:
@@ -1116,6 +1122,7 @@ func reset_pose() -> void:
 	# shoved the body about after getting up)
 	sm_wheelie = 0.0; sm_aero = 0.0; sm_effort = 0.0; sm_turn = 0.0
 	roll_init = false; roll_pv = 0.0; roll_cv = 0.0; lat_g_s = 0.0; flow_e = 0.0
+	_fy_prev = NAN; _fv_prev = NAN; _facc = 0.0   # the bump bounce starts fresh (NAN = no previous frame)
 
 
 # ---------------- per-frame pose ----------------

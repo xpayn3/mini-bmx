@@ -52,6 +52,7 @@ var active := false
 var speed := 0.0
 var last_h := 0.0      # substep the current displacements (p - q) were made with
 var _shapes: Array = []
+var _shape_src: Array = []   # the colliders _shapes were built from (cached per crash)
 var _touch := PackedByteArray()
 var rad: Array = []     # collision radius per point (RAD + the roots of torn-off limbs)
 ## torn-off limbs (fx/blood.gd): cutting the bone a-b frees b and everything below it; the free piece gets
@@ -199,6 +200,8 @@ func sever(a: int, kick := Vector3.ZERO) -> int:
 ## pts: world joints; vel: body velocity; spin: extra velocity per metre above the pelvis
 func start(pts: Array, vel: Vector3, spin: Vector3, dt := 1.0 / 60) -> void:
 	_reset_points()
+	_touch.fill(0)   # nothing on the ground yet (the last crash's contacts must not carry over)
+	_shape_src = []; _shapes.clear()
 	var pel: Vector3 = pts[PELVIS]
 	for i in p.size():
 		var pt: Vector3 = pts[i]
@@ -251,6 +254,14 @@ func start(pts: Array, vel: Vector3, spin: Vector3, dt := 1.0 / 60) -> void:
 	last_h = dt / SUB
 
 
+## the same collider entries (by identity, in order) as the shapes were built from
+func _same_colliders(cols: Array) -> bool:
+	if cols.size() != _shape_src.size(): return false
+	for i in cols.size():
+		if not is_same(cols[i], _shape_src[i]): return false
+	return true
+
+
 func step(dt: float, colliders: Array) -> void:
 	var n := SUB
 	var h := dt / n
@@ -258,15 +269,18 @@ func step(dt: float, colliders: Array) -> void:
 	var ratio := h / (last_h if last_h > 0.0 else h)
 	last_h = h
 	# collision shapes that match what you see: rocks = domes, trunks / cacti = thin cylinders
-	_shapes.clear()
-	for c in colliders:
-		if c.get("tape"):
-			continue
-		if c.get("top") != null:
-			var base: float = terrain.height(c.x, c.z) - 0.15
-			_shapes.append({rock = true, x = c.x, z = c.z, y = base, R = c.r * 0.9, H = maxf(0.1, c.top - base)})
-		else:
-			_shapes.append({rock = false, x = c.x, z = c.z, R = maxf(0.08, (c.r - 0.1) * 0.6)})
+	# (rebuilt only when the colliders near the body change; the list is new each step, its entries are not)
+	if not _same_colliders(colliders):
+		_shape_src = colliders
+		_shapes.clear()
+		for c in colliders:
+			if c.get("tape"):
+				continue
+			if c.get("top") != null:
+				var base: float = terrain.height(c.x, c.z) - 0.15
+				_shapes.append({rock = true, x = c.x, z = c.z, y = base, R = c.r * 0.9, H = maxf(0.1, c.top - base)})
+			else:
+				_shapes.append({rock = false, x = c.x, z = c.z, R = maxf(0.08, (c.r - 0.1) * 0.6)})
 	var kt := h / H0
 	var air_damp := pow(0.998, kt)
 	var wet_damp := pow(0.94, kt)

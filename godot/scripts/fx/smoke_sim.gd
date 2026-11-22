@@ -20,7 +20,11 @@ const SHADOW_K := 0.0               # dust shadow on the ground / bike behind it
 const HM := 32                    # heightmap cells across the box
 const HM_CELL := H * NX / HM      # 0.8 m; the box moves in whole heightmap cells
 const MAX_SRC := 64
-const PRESSURE_ITERS := 14
+const PRESSURE_ITERS := 6         # red-black sweeps per step, warm-started from the last step's pressure
+const STEP_DT := 1.0 / 60.0       # the sim steps at a fixed 60 Hz (at most 2 steps in a drawn frame)
+const MAX_STEPS := 2
+const IDLE_STOP := 14.0           # s with nothing kicked up: the air is clear, stop simulating...
+const FADE_OUT := 1.0             # ...after fading what's left out over this long, then clear the grid
 var ahead := 3.0                  # metres of box kept ahead of the rider (the rest trails behind: long dust trails)
 const PASSES := ["advect", "curl", "confine", "divergence", "pressure", "project", "light", "occupancy"]
 const BRICK := 8                  # voxels per occupancy cell (empty-space skipping)
@@ -84,6 +88,9 @@ var _src := PackedFloat32Array()
 var _n := 0
 var _emit: Array = []             # short bursts: {p, v, r, rate, radial, blend, t}
 var _idle := 1e9
+var _acc := 0.0                   # fixed-step accumulator (s)
+var _stopped := true              # not simulating; the grid is clear (the next step starts from empty air)
+var _fade := 0.0                  # 0 drawn .. 1 gone (the fade-out before a stop)
 var _last_focus := Vector3.INF
 var _col_target := dust_col
 var _drift := Vector3.ZERO
@@ -209,31 +216,65 @@ func tint(col: Color) -> void:
 
 # ---------------------------------------------------------------- per frame
 ## focus: the rider (the box follows it), fwd: which way they're going
+## called once per drawn frame; the sim itself steps at a fixed STEP_DT (none, one or MAX_STEPS this frame).
+## Sources are rates (per second) given every frame: only the ones of a frame that steps are splatted, each
+## for STEP_DT, so the amount of dust doesn't depend on the frame rate.
 func step(dt: float, focus: Vector3, fwd: Vector3) -> void:
 	if not ok: return
-	dt = clampf(dt, 1.0 / 240.0, 1.0 / 30.0)
+	var fdt := clampf(dt, 1.0 / 1000.0, 0.1)
+	if _last_focus != Vector3.INF:
+		var bv := (focus - _last_focus) / fdt
+		if bv.length() < 40.0:
+			speed += (bv.length() - speed) * (1.0 - exp(-fdt * 3.0))
+	_last_focus = focus
+	_idle += fdt
+	if _idle > IDLE_STOP + FADE_OUT:   # nothing kicked up for a while: the air is clear, stop simulating
+		_n = 0
+		_body = []
+		_emit.clear()
+		_box.visible = false
+		if compositor != null: compositor.active = false
+		if not _stopped:
+			_stopped = true
+			_has_origin = false   # restart from a fresh box (and pressure) on the next dust
+			RenderingServer.call_on_render_thread(_gpu_clear)
+		return
+	_stopped = false
+	_fade = clampf((_idle - IDLE_STOP) / FADE_OUT, 0.0, 1.0)
+	_drift += Vector3(wind.x * 0.6, 0.12, wind.y * 0.6) * fdt
+	_acc += fdt
+	var steps := 0
+	while _acc >= STEP_DT and steps < MAX_STEPS:
+		_acc -= STEP_DT
+		steps += 1
+	if steps == MAX_STEPS: _acc = minf(_acc, STEP_DT)   # a slow frame: drop the backlog, don't spiral
+	if steps == 0:
+		# no sim step this frame: nothing to splat (a step splats a frame's rates for STEP_DT); the last
+		# step's volume keeps being drawn every frame
+		for i in range(_emit.size() - 1, -1, -1):
+			_emit[i].t -= fdt
+			if _emit[i].t <= 0.0: _emit.remove_at(i)
+		_n = 0
+		_body = []
+		_mat.set_shader_parameter("drift", _drift)
+		if compositor != null and not compositor.params.is_empty():
+			var pp: Dictionary = compositor.params.duplicate()   # swapped whole: the render thread reads it
+			pp.drift = _drift
+			pp.fade = _fade
+			compositor.params = pp
+		return
+	dt = STEP_DT
 	_read_tune()
 	for i in range(_emit.size() - 1, -1, -1):
 		var e: Dictionary = _emit[i]
 		add_source(e.p, e.v, e.r, e.rate, e.blend, e.radial, e.col)
-		e.t -= dt
+		e.t -= fdt
 		if e.t <= 0.0: _emit.remove_at(i)
-	if _last_focus != Vector3.INF:
-		var bv := (focus - _last_focus) / dt
-		if bv.length() < 40.0:
-			speed += (bv.length() - speed) * (1.0 - exp(-dt * 3.0))
-	_last_focus = focus
 	# the bike and rider are solid in the air: air inside them moves with them (the pressure solve then
 	# sends the air round them), and the wheels spin it - dust gets dragged, split and stirred
 	for b in _body:
 		add_source(b.p, b.v, b.r, 0.0, 40.0, 0.0, Color(0, 0, 0, 0), b.spin, true)
 	_body = []
-	_idle += dt
-	if _idle > 14.0:   # nothing kicked up for a while: the air is clear, stop simulating
-		_n = 0
-		_box.visible = false
-		if compositor != null: compositor.active = false
-		return
 	# the box: ahead of the rider along their heading, moved in whole heightmap cells
 	var f2 := Vector2(fwd.x, fwd.z)
 	if f2.length() > 0.1: _dir = _dir.lerp(f2.normalized(), 1.0 - exp(-dt * 1.2)).normalized()
@@ -291,8 +332,7 @@ func step(dt: float, focus: Vector3, fwd: Vector3) -> void:
 	_mat.set_shader_parameter("amb_col", Vector3(amb_col.r, amb_col.g, amb_col.b))
 	var dc := dust_col.srgb_to_linear()
 	_mat.set_shader_parameter("dust_col", Vector3(dc.r, dc.g, dc.b))
-	_mat.set_shader_parameter("ext", extinction)
-	_drift += Vector3(wind.x * 0.6, 0.12, wind.y * 0.6) * dt
+	_mat.set_shader_parameter("ext", extinction * (1.0 - _fade))   # the box renderer's fade-out: thinner dust
 	_mat.set_shader_parameter("drift", _drift)
 	if use_comp:
 		compositor.active = true
@@ -300,8 +340,11 @@ func step(dt: float, focus: Vector3, fwd: Vector3) -> void:
 			origin = Vector3(origin.x, 0, origin.y), hm_cells = float(HM), size_m = Vector3(NX * H, NY * H, NZ * H),
 			step = 0.08, ext = extinction, box_min = bmin, box_max = bmax, shadow_k = SHADOW_K, sun_dir = sdir,
 			detail_amt = wisps, sun_col = scol, max_steps = 160.0, amb_col = Vector3(amb_col.r, amb_col.g, amb_col.b),
-			dust_col = Vector3(dc.r, dc.g, dc.b), drift = _drift, cloud = cloud}
-	RenderingServer.call_on_render_thread(_gpu_step.bind(dt, shift, clear, bytes.to_byte_array(), n, sdir))
+			dust_col = Vector3(dc.r, dc.g, dc.b), drift = _drift, cloud = cloud, fade = _fade}
+	var sb := bytes.to_byte_array()
+	for k in steps:   # the box shift / clear on the first step only; the sources splat in each
+		RenderingServer.call_on_render_thread(_gpu_step.bind(dt, shift if k == 0 else Vector2i.ZERO, clear and k == 0,
+			sb, n, sdir, k == 0 and (clear or shift != Vector2i.ZERO)))
 
 func _ground(x: float, z: float) -> float:
 	# bilinear in the heightmap, exactly like the renderer
@@ -410,7 +453,13 @@ func _disp(cl: int, pass_name: String, set_rid: RID, pcv: PackedFloat32Array, gr
 	rd.compute_list_dispatch(cl, groups.x, groups.y, groups.z)
 	rd.compute_list_add_barrier(cl)
 
-func _gpu_step(dt: float, shift: Vector2i, clear: bool, src: PackedByteArray, n: int, sdir: Vector3) -> void:
+## the sim stopped: empty air in every volume, so the next start doesn't show the old cloud frozen
+func _gpu_clear() -> void:
+	if not ok: return
+	for t in [_st[0], _st[1], _cm[0], _cm[1], _light, _colr, _velr, _occ, _pres]:
+		if t.is_valid(): rd.texture_clear(t, Color(0, 0, 0, 0), 0, 1, 0, 1)
+
+func _gpu_step(dt: float, shift: Vector2i, clear: bool, src: PackedByteArray, n: int, sdir: Vector3, moved := false) -> void:
 	if not ok or not _pipe.has("light"): return
 	if clear:
 		rd.texture_clear(_st[0], Color(0, 0, 0, 0), 0, 1, 0, 1)
@@ -430,10 +479,13 @@ func _gpu_step(dt: float, shift: Vector2i, clear: bool, src: PackedByteArray, n:
 		disperse * (1.0 + _fast * 0.6), disperse_reach * (1.0 + _fast * 0.5), 0, 0]))
 	_disp(cl, "curl", _sets["curl%d" % q], PackedFloat32Array([dt, H, 0, 0]))
 	_disp(cl, "confine", _sets["confine%d" % q], PackedFloat32Array([dt, H, vorticity, 0]))
-	_disp(cl, "divergence", _sets["divergence%d" % q], PackedFloat32Array([dt, H, 0, 0]))
-	for i in PRESSURE_ITERS:
-		_disp(cl, "pressure", _sets.pressure, PackedFloat32Array([0, H, 1.6, 0]))
-		_disp(cl, "pressure", _sets.pressure, PackedFloat32Array([1, H, 1.6, 0]))
+	# the pressure is kept between steps (warm start) unless the box moved under it: then it starts from 0
+	# and gets a full solve this once
+	_disp(cl, "divergence", _sets["divergence%d" % q], PackedFloat32Array([dt, H, 1.0 if moved or clear else 0.0, 0]))
+	var half_x := Vector3i(NX / 16, NY / 4, NZ / 8)   # pressure: one thread per cell of the colour being swept
+	for i in (14 if moved or clear else PRESSURE_ITERS):
+		_disp(cl, "pressure", _sets.pressure, PackedFloat32Array([0, H, 1.6, 0]), half_x)
+		_disp(cl, "pressure", _sets.pressure, PackedFloat32Array([1, H, 1.6, 0]), half_x)
 	_disp(cl, "project", _sets["project%d" % q], PackedFloat32Array([dt, H, 0, 0]))
 	_disp(cl, "light", _sets["light%d" % q], PackedFloat32Array([sdir.x, sdir.y, sdir.z, extinction, H, 0, 0, 0]))
 	_disp(cl, "occupancy", _sets["occupancy%d" % q], PackedFloat32Array([1, 0, 0, 0]), Vector3i(maxi(1, NX / BRICK / 4), maxi(1, NY / BRICK / 4), maxi(1, NZ / BRICK / 4)))

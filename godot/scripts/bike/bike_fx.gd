@@ -78,8 +78,11 @@ void fragment() {
 	col = mix(col, col * col * 0.9, deep * (1.0 - view_k));
 	vec3 base = col * mix(0.7, 1.05, pow(facing, 0.6));
 	float flake_k = sparkle > 0.001 ? clamp(cover * 1.6, 0.0, 1.0) : 0.0;
-	ALBEDO = mix(base, col * 1.08, flake_k * 0.5) * COLOR.rgb;   // COLOR = baked AO (bike/bike_ao.gd; white without it)
+	ALBEDO = mix(base, col * 1.08, flake_k * 0.5);
+	// COLOR = baked AO (bike/bike_ao.gd; white without it): applied once, as AO (it used to darken the albedo
+	// as well); a part of it on the direct light too, so the joints keep their depth
 	AO = COLOR.r;
+	AO_LIGHT_AFFECT = 0.3;
 	METALLIC = mix(metallic, max(metallic, 0.9), flake_k);
 	ROUGHNESS = mix(min(base_rough, 1.0), flake_rough, flake_k);
 	CLEARCOAT = clearcoat;

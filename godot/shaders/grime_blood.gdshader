@@ -1,6 +1,6 @@
 // Blood on the rider and bike: stains drawn as a next_pass over each part's own material (same trick as
-// grime_mud.gdshader, and chained after it by scripts/bike/grime.gd). Solid-edged (but drawn see-through,
-// after the stickers, so it covers logos too: `decal` masks it by the sticker's alpha), glossy dark
+// grime_mud.gdshader, and chained after it by scripts/bike/grime.gd). Solid-edged (alpha scissor; a sticker's
+// own blood pass is the BLOOD_DECAL variant: see-through, masked by the sticker's alpha), glossy dark
 // red patches picked from the part's own space, so they stay put on the part (pinned rider parts use the
 // rest shape like the mud). grime.w = how much blood 0..1 (it builds with every crash and stays until a
 // death + revive). Tyres carry none.
@@ -31,15 +31,24 @@ void vertex() {
 
 void fragment() {
 	float c = tyre ? 0.0 : clamp(grime.w * bias, 0.0, 1.0);
+	if (c <= 0.002) discard;   // no blood on this part: skip the noise
 	// big blotches + smaller spatter + fine flecks
 	float n = bl_noise(v_local * 26.0) * 0.6 + bl_noise(v_local * 71.0) * 0.4;
 	// the noise sits around 0.5: light blood = a few spots (threshold ~0.85), heavy = most of the body (~0.3)
 	float thr = mix(0.85, 0.30, c);
-	float m = c > 0.002 ? smoothstep(thr, thr + 0.06, n) : 0.0;
+	float m = smoothstep(thr, thr + 0.06, n);
 	float shade = 0.7 + 0.5 * bl_noise(v_local * 9.0);   // darker clots, brighter wet red
 	ALBEDO = vec3(0.34, 0.015, 0.02) * shade;
 	ROUGHNESS = 0.32;
 	SPECULAR = 0.6;
+#ifdef BLOOD_DECAL
+	// a sticker's blood (grime.gd adds the define): see-through, masked by the sticker's alpha, drawn after it
 	ALPHA = step(0.5, m);
 	if (decal) ALPHA *= texture(decal_tex, UV).a;
+#else
+	// on a part: alpha scissor = the opaque pipeline (no blending, depth written; the mud / light-match passes
+	// that come later depth-test against it, so the blood still covers the mud and the stickers)
+	ALPHA = m;
+	ALPHA_SCISSOR_THRESHOLD = 0.5;
+#endif
 }

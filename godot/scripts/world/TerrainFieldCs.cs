@@ -506,6 +506,9 @@ public partial class TerrainFieldCs : RefCounted
 	private const double I55 = 1.0 / 55.0;
 	private const double I260 = 1.0 / 260.0;
 	private const double I90 = 1.0 / 90.0;
+	private const double I240 = 1.0 / 240.0;
+	private const double I150 = 1.0 / 150.0;
+	private const double I700 = 1.0 / 700.0;
 	private const double I28 = 1.0 / 28.0;
 	private const double I8 = 1.0 / 8.0;
 	private const double I1_5 = 1.0 / 1.5;
@@ -1098,7 +1101,11 @@ public partial class TerrainFieldCs : RefCounted
 	{
 		double calm = 1.0 - 0.85 * mtn(x, z);
 		double relief = 1.0 + 1.3 * sm(0.0, 0.35, noise((x + 5000) * I260, (z - 800) * I260));
-		double h = (noise(x * I90, z * I90) * 10 * relief + noise((x + 31.7) * I28, (z - 17.2) * I28) * 3.2 * (0.6 + 0.4 * relief)) * calm + hill(x, z);
+		double big = sm(-0.15, 0.3, noise((x + 2600) * I700, (z - 3100) * I700));
+		double rdg = sm(0.05, 0.35, noise((x - 4100) * I700, (z + 1500) * I700));
+		double rr = 1.0 - Math.Abs(noise((x + 820) * I150, (z - 2300) * I150));
+		double h = (noise(x * I90, z * I90) * 10 * relief + noise((x + 31.7) * I28, (z - 17.2) * I28) * 3.2 * (0.6 + 0.4 * relief)
+			+ noise((x - 1700) * I240, (z + 900) * I240) * 16 * big + (rr * rr - 0.45) * 14 * rdg) * calm + hill(x, z);
 		double wm = wild_mask(x, z);
 		if (wm == 0.0)
 			return h;

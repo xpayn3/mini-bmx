@@ -45,13 +45,13 @@ var body_y := NAN; var body_v := 0.0; var body_x := 0.0; var hip_shift := 0.0
 # the rider's body as its own mass fore / aft: it lags the bike (braking and landings throw it forward,
 # drive pushes it back), and in the air the rider leans (W / S) and pulls the bike up (Space)
 var body_xv := 0.0; var hip_v := 0.0; var v_last := NAN
-var air_lean := 0.0; var air_pull := 0.0; var air_lock_w := false; var air_lock_s := false; var air_lock_h := false
+var air_lean := 0.0; var air_pull := 0.0; var air_lock_h := false
 # air tricks: the rider's input this step, and how far the bike has turned since take-off (rad)
 var air_lock_a := false; var _lock_a0 := 0.0
 # the player's hands on the air controls (1 = just used, fades ~0.4 s after letting go) and the landing help left
 # over for the rider (airAssist x hands off): the player's stick always wins
 var _air_own := 0.0; var air_help := 0.0
-var flip_in := 0.0; var spin_in := 0.0; var flip_acc := 0.0; var spin_acc := 0.0
+var flip_in := 0.0; var flip_acc := 0.0; var spin_acc := 0.0
 # rotation as real momentum. On the ground the rider's body turns with the bike, smoothed by the arms and
 # legs (body_pw), and W / S pressed at a lip throw the body back / forward against the ground (throw_v).
 # In the air nothing outside can turn rider + bike: their shared spin (air_w, rad/s at full stretch) is
@@ -67,7 +67,7 @@ var pivot := 0.0; var pivot_acc := 0.0
 # flick_in = side lean (+ = left, like steer). flick = the smoothed side lean (the bike is thrown under
 # the body)
 var aero_k := 1.0   # air drag scale from the body position (tuck < 1, sat up > 1)
-var body_in := 0.0; var body_in_s := 0.0; var flick_in := 0.0; var flick := 0.0; var flick_prev := 0.0
+var body_in := 0.0; var body_in_s := 0.0; var flick_in := 0.0; var flick := 0.0
 var wheelie_time := 0.0; var wheelie_pedal := false   # how long the current stick wheelie / manual has been held
 var lock_sb := false; var lock_sf := false; var flick_kick := 0.0
 # balance manual (the only manual / wheelie): man_a = how far the front is up (rad above the ground), man_w its rate. It is
@@ -137,10 +137,10 @@ var _squirm := 0.0; var _grip_rough := 0.0
 # it, pushing wide), the two brake levers (brake_f / brake_r 0..1) and how locked each wheel is, the turn's load
 # pressed down through bike + legs (corner_g, m/s² on top of g), the rider's weight in the turn (weight_in:
 # + over the outside pedal / bike pushed under, - hanging inside), the lean the grip can't hold (lean_err)
-var front_use := 0.0; var front_push := 0.0; var _push_t := 0.0
+var front_use := 0.0; var front_push := 0.0
 var brake_f := 0.0; var brake_r := 0.0; var rear_lock := 0.0; var front_lock := 0.0; var _fb_f := 0.0
-var corner_g := 0.0; var weight_in := 0.0; var lean_err := 0.0; var _low_t := 0.0; var knock := 0.0
-var _amax := 99.0; var _amin := -99.0; var bal_k := 0.0; var _b_prev := 0.0; var _endo_t := 0.0; var _f_prev := 0.0; var _circ_f := 1.0; var _brake_feel := true; var _a_rear := 0.0
+var corner_g := 0.0; var weight_in := 0.0; var lean_err := 0.0; var knock := 0.0
+var _amax := 99.0; var _amin := -99.0; var bal_k := 0.0; var _b_prev := 0.0; var _f_prev := 0.0; var _circ_f := 1.0; var _brake_feel := true; var _a_rear := 0.0
 var berm_k := 0.0   # how much a berm is carrying the turn right now (0..bermAssist)
 var bank_lean := 0.0   # the drawn lean into tilted ground (bankLean x bank), bike + body
 var bank_sq := 0.0     # how far the body goes into line with the bike on banked ground (0 flat .. bankBody), drawn only
@@ -192,6 +192,8 @@ var distance := 0.0
 # tests (BMX_CLIP_PROBE): suspension bottom-outs (steps) and how rough the ride is on the ground
 var probe_bottom := 0; var probe_acc2 := 0.0; var probe_n := 0; var probe_vy := NAN
 var probe_g2 := 0.0; var probe_gy := [NAN, NAN]
+const LEAN_PROBE := [0.3, 0.5]   # m beside each tyre the lean room is read at
+var _tapes_seen: Array = []      # tape spans already tested this step (_step_move)
 ## diagnostics (playground diag panel, F4): the last physics step's suspension, read only by RideDiag.
 ## x = shock compression from topped out (m), v = shock speed (m/s, + = compressing), f = spring + damper force,
 ## ty = tyre force, sq = tyre squash (m): forces per unit mass (/ G = share of the whole weight). bot / blow = this step
@@ -308,9 +310,9 @@ func _reset_motion() -> void:
 	_sample(fwd()); pitch = _g_pitch; g_pitch = _g_pitch; _gpc_last = NAN
 	n_f = NAN; n_r = NAN; n_ref = NAN; lip_state = 0; hf_prev = NAN; hr_prev = NAN; zw_f = NAN; zw_r = NAN
 	bank = 0; body_x = 0; hip_shift = 0; spin = 0; a_drive = 0; charge = 0; hop_charge = 0; lift_t = 0
-	body_xv = 0; hip_v = 0; v_last = NAN; air_lean = 0; air_pull = 0; flip_acc = 0; spin_acc = 0; flip_in = 0; spin_in = 0
+	body_xv = 0; hip_v = 0; v_last = NAN; air_lean = 0; air_pull = 0; flip_acc = 0; spin_acc = 0; flip_in = 0
 	body_pw = 0; throw_v = 0; air_w = 0; air_inertia = 1; air_tilt = 0; air_tilt_v = 0; air_yaw = 0; air_tw = 0; air_tw_v = 0; land_jolt = 0
-	pivot = 0; pivot_acc = 0; body_in_s = 0; flick = 0; flick_v = 0; _flick_arm = 0; _flick_side = 0; flick_prev = 0; flick_kick = 0
+	pivot = 0; pivot_acc = 0; body_in_s = 0; flick = 0; flick_v = 0; _flick_arm = 0; _flick_side = 0; flick_kick = 0
 	nose_a = 0.0; nose_w = 0.0; nose_zone = false; nose_lock = 0.0; nose_push = 0.0; nose_time = 0.0; nose_brake_t = 0.0; _nose_grace = 0.0
 	_tw_t = 9.0; _ts_t = 9.0; _sb_t = 9.0; _sf_t = 9.0; _hop_tap_t = 9.0; _hop_buf = 0.0; _pop_miss = 0.0; _pop_miss_t = 0.0; _gl = 0.0; _gc = 0.0
 	_bh_back = 0.0; _bh_since = 9.0; _bh_peak = 0.0; gest_hop = 0.0
@@ -322,12 +324,13 @@ func _reset_motion() -> void:
 	sprint = 0; flow = 0; flow_t = 0; lat_m = 0; carve = 0; carve_acc = 0; carve_berm = false
 	y_draw = y; pitch_draw = pitch; nose_ref = NAN; pitch_w = NAN; y_prev = NAN; kick_t = 0
 	w_f = y; w_r = y
+	pedal = 0.0; throttle_in = 0.0; _grip_cv = 0.0; _grip_rough = 0.0; hop_held = false   # (hop_block keeps a held hop from firing)
 	_reset_ground_sim()
 
 func _reset_ground_sim() -> void:
-	front_use = 0.0; front_push = 0.0; _push_t = 0.0; rear_lock = 0.0; front_lock = 0.0; _fb_f = 0.0
-	corner_g = 0.0; weight_in = 0.0; lean_err = 0.0; _low_t = 0.0; knock = 0.0; _amax = 99.0; _amin = -99.0; bal_k = 0.0
-	_b_prev = 0.0; _endo_t = 0.0; _f_prev = 0.0; _circ_f = 1.0; bank_lean = 0.0; bank_sq = 0.0; _gx_lean = 0.0; berm_k = 0.0
+	front_use = 0.0; front_push = 0.0; rear_lock = 0.0; front_lock = 0.0; _fb_f = 0.0
+	corner_g = 0.0; weight_in = 0.0; lean_err = 0.0; knock = 0.0; _amax = 99.0; _amin = -99.0; bal_k = 0.0
+	_b_prev = 0.0; _f_prev = 0.0; _circ_f = 1.0; bank_lean = 0.0; bank_sq = 0.0; _gx_lean = 0.0; berm_k = 0.0
 	_mu_f = NAN; _mu_r = NAN; bank_v = 0.0; _load_s = NAN; _share_f = NAN; _bike_lead = 0.0
 	_risk.clear(); risk = 0.0; _risk_peak = 0.0
 
@@ -478,11 +481,9 @@ func _step_controls(dt: float, inp: Dictionary, throttle: float, steer_input: fl
 	# body, spinning faster). W / S work at once; A / D and Space held at take-off count only once pressed
 	# again in the air (carving into a jump mustn't lean you).
 	if not air:
-		air_lock_w = throttle > 0.1; air_lock_s = brake; air_lock_h = inp.hop; air_lock_a = absf(steer_input) > 0.1; _lock_a0 = steer_input
+		air_lock_h = inp.hop; air_lock_a = absf(steer_input) > 0.1; _lock_a0 = steer_input
 		_air_own = 0.0
 	else:
-		if throttle <= 0.1: air_lock_w = false
-		if not brake: air_lock_s = false
 		if not inp.hop: air_lock_h = false
 		# (a steer held off the lip counts again as soon as it's let go OR clearly moved: no waiting for a re-press)
 		if absf(steer_input) <= 0.1 or absf(steer_input - _lock_a0) > 0.35: air_lock_a = false
@@ -521,8 +522,6 @@ func _step_controls(dt: float, inp: Dictionary, throttle: float, steer_input: fl
 		edge_s = 0.0; spin_hold = 0.0; spin_k = 1.0
 		yaw_edge_s = 0.0; yaw_hold = 0.0; stick_yaw = 0.0
 	flip_in = -lean_in                                          # + = nose up
-	spin_in = 0.0 if (not air or air_lock_a) else steer_input   # + = the steering direction
-	if air: spin_in = clampf(spin_in + flick_in, -1.0, 1.0)     # the body stick leans the bike too
 	# 360° air control with the right stick: x = lay the bike over left / right, y = nose up / down. It sets
 	# the bike's attitude (held where the stick points, back to the landing aim when let go), so circling
 	# the stick swings the bike round through every mix of tilt and lean
@@ -850,7 +849,6 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 				flick_kick += _flick_side * float(T.get("flickKick", 0.16)) * smooth01((va - 2.0) / 5.0)
 				flick_thrown = _flick_side
 			_flick_arm = -1.0   # spent until the stick comes back towards the centre
-	flick_prev = flick_in
 	# the side lean steers too (the bike leaned under you turns that way), but held AGAINST the steer it's the body
 	# hanging off the inside: that costs grip (weight_in below), it hardly undoes the turn (it used to halve it)
 	var fs_k := 1.0 if (absf(steer_input) < 0.2 or signf(flick) == signf(steer_input)) else 0.25
@@ -1252,13 +1250,14 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 		var lx := f.z * sg
 		var lz := -f.x * sg   # unit vector to the lean side
 		var phi := -0.5
-		for wo in [L - BB_REAR, -BB_REAR]:
+		for k in 2:   # front and rear wheel (no array built per step)
+			var wo: float = L - BB_REAR if k == 0 else -BB_REAR
 			var wx: float = x + f.x * wo
 			var wz: float = z + f.z * wo
 			# the land itself (deck_height: no rock / log domes): passing a rock beside the wheel used to clamp
 			# the lean down for a moment ("going over something resets the angle")
 			var h0: float = terrain.deck_height(wx, wz)
-			for d in [0.3, 0.5]:
+			for d in LEAN_PROBE:
 				phi = maxf(phi, atan((terrain.deck_height(wx + lx * d, wz + lz * d) - h0) / d))
 		lean_room = _or(lean_room, phi)
 		# eased (~0.17 s), not only rate limited: the slope 0.3 m beside a tyre picks up every ripple of the ground, and
@@ -1330,7 +1329,7 @@ func _step_move(dt: float, f: Vector3) -> void:
 			wall = maxf(g_new, g_ahead) - g_prev > 0.5 * minf(RWF, RWR)
 		if wall:
 			x = px; z = pz
-			if absf(v) > 6: crash_pending = "SMACK! Hit the cliff"
+			if absf(v) > 6: _crash("SMACK! Hit the cliff")
 			else:
 				if absf(v) > 1.5:
 					shake = 0.3; host.flash("BONK!")
@@ -1344,12 +1343,16 @@ func _step_move(dt: float, f: Vector3) -> void:
 	var a0 := Vector2(px + f.x * tf, pz + f.z * tf)
 	var a1 := Vector2(x + f.x * tf, z + f.z * tf)
 	var near: Array = terrain.colliders_near(x, z)   # one grid walk for tape + obstacles (it was done twice a step)
-	var tapes_seen := []
+	_tapes_seen.clear()   # (one member array + a plain loop: no array / lambda per step)
 	for c in near:
 		if not c.get("tape", false): continue
 		var sp: Dictionary = c["tape"]
-		if sp["broken"] or tapes_seen.any(func(o): return is_same(o, sp)): continue
-		tapes_seen.append(sp)
+		if sp["broken"]: continue
+		var seen := false
+		for o in _tapes_seen:
+			if is_same(o, sp): seen = true; break
+		if seen: continue
+		_tapes_seen.append(sp)
 		var tp: PackedVector3Array = sp["pts"]
 		var tA := Vector2(tp[0].x, tp[0].z)
 		var tB := Vector2(tp[tp.size() - 1].x, tp[tp.size() - 1].z)
@@ -1415,11 +1418,11 @@ func _step_move(dt: float, f: Vector3) -> void:
 			var bb: float = float(T.get("bonkBoulder", 6.0))
 			var bonk_v: float = bb + (float(T.get("bonkSmall", 12.0)) - bb) * (1.0 - tall)
 			if head < -0.77 and -v * head > bonk_v and not front_air:
-				crash_pending = "BONK! Over the bars"
+				_crash("BONK! Over the bars")
 				if Env.s("BMX_MAN_PROBE") != "": print("BONKROCK top=%.2f y=%.2f r=%.2f hit_f=%s front_air=%s w_f=%.2f keys=%s" % [c.top, y, c.r, hit_f, front_air, w_f, c.keys()])
 			elif head < -0.3 and v > 1.5:
 				host.burst(Vector3(fx0, y + 0.3, fz0), 16, 0, 1.2); v *= -0.25; shake = 0.35; host.flash("BONK!")
-			else: v *= 0.97
+			else: v *= exp(-3.6 * dt)   # rubbing past it (0.97 a step at 120 Hz, the same at any rate)
 			continue
 		if air:
 			var ceil_h: float = c.ceil if c.has("ceil") else terrain.height(c.x, c.z) + (1.2 if c.get("fence", false) else 3.2)
@@ -1427,12 +1430,12 @@ func _step_move(dt: float, f: Vector3) -> void:
 		var push := (mn - d) / d
 		x += dx * push; z += dz * push
 		var hd := (f.x * dx + f.z * dz) / d
-		if hd < -0.77 and -v * hd > 6:
-			crash_pending = "BONK! Over the bars"
+		if hd < -0.77 and -v * hd > 6 and not front_air:   # a front already up (manual, hop) rides into it, like rocks
+			_crash("BONK! Over the bars")
 			if Env.s("BMX_MAN_PROBE") != "": print("BONKOBJ y=%.2f r=%.2f hit_f=%s front_air=%s w_f=%.2f g=%.2f keys=%s" % [y, c.r, hit_f, front_air, w_f, terrain.height(c.x, c.z), c.keys()])
 		elif hd < -0.3 and v > 1.5:
 			host.burst(Vector3(fx0, y + 0.3, fz0), 16, 0, 1.2); v *= -0.25; shake = 0.35; host.flash("BONK!")
-		else: v *= 0.97
+		else: v *= exp(-3.6 * dt)
 
 ## stage 8: up / down and pitch: tyre + suspension springs, the rider on their legs, the balance (manual / nose
 ## manual), the air, take-off and landing
@@ -1724,9 +1727,9 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 		# the balance point (a back-wheel landing itself is caught, see _land_trick)
 		var back_up := pitch - _local_slope(f, XR, RWR, cp0) if cR and not cF and pitch - gpC > 0.6 else 0.0
 		if _balancing() or _man_grace > 0.0: pass   # the balance manual handles its own loop-out (no crash)
-		elif back_up > T.landBack + 0.1 or (back_up > 1.15 and pitch_v > 0.5 and not was_air): crash_pending = "LOOPED OUT!"
+		elif back_up > T.landBack + 0.1 or (back_up > 1.15 and pitch_v > 0.5 and not was_air): _crash("LOOPED OUT!")
 		elif _nosing() or _nose_grace > 0.0: pass   # so does the nose manual
-		elif cF and not cR and gpC - pitch > 0.6 and _local_slope(f, XF, RWF, cp0) - pitch > 1.15: crash_pending = "NOSE DIVE!"
+		elif cF and not cR and gpC - pitch > 0.6 and _local_slope(f, XF, RWF, cp0) - pitch > 1.15: _crash("NOSE DIVE!")
 		# (not on the touch-down step: the clamp ran before the landing verdict, so a flip that came down upside
 		# down was clamped to 1.45 and rarely read as UNDER- / OVER-ROTATED)
 		if absf(pitch) > 1.45 and (cF or cR) and not was_air:   # on the ground only: in the air flips go all the way round
@@ -1737,7 +1740,7 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 		# so every drop off an edge was an instant NOSE DIVE
 		if not now_air and (front_air or rear_air) and was_f and was_r: nose_ref = _or(_gpc_last, gpC)
 		_gpc_last = gpC if (cF and cR) else _gpc_last
-		if front_air and pitch - _or(nose_ref, _g_pitch) < -T.noseDive and not _balancing() and _man_grace <= 0.0: crash_pending = "NOSE DIVE!"
+		if front_air and pitch - _or(nose_ref, _g_pitch) < -T.noseDive and not _balancing() and _man_grace <= 0.0: _crash("NOSE DIVE!")
 		var snN := sin(pitch)
 		w_f = hfC if cF else y + XF * snN
 		w_r = hrC if cR else y + XR * snN
@@ -1842,17 +1845,17 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			var ay := (vy - probe_vy) / dt
 			var ag: float = (gy_now - 2.0 * probe_gy[0] + probe_gy[1]) / (dt * dt)
 			probe_acc2 += ay * ay; probe_g2 += ag * ag; probe_n += 1
-		probe_vy = vy; probe_gy = [gy_now, probe_gy[0]]
+		probe_vy = vy; probe_gy[1] = probe_gy[0]; probe_gy[0] = gy_now   # (in place: no array per step)
 		# a compression on the ground (a steep chute slamming into flat, a wall ride into a ledge) is judged like a
 		# landing: the legs can only take so much. It used to be ignored, so 45 deg into flat at 55 km/h rode on
 		ground_jolt = maxf(ground_jolt, g_jolt)
 		if not air and g_jolt > 0.0 and since_land >= 0.6:
-			if g_jolt > T.slamJolt * LAND: crash_pending = "SLAM!"
+			if g_jolt > T.slamJolt * LAND: _crash("SLAM!")
 			elif g_jolt > T.slamJolt * LAND * 0.6 and host.msg_idle(): host.flash("OOF!")
 		if air: air_time += dt
 		elif land_jolt > 0 and since_land < 0.6:
 			# the legs bottomed out: a hit bigger than they can take throws the rider down
-			if land_jolt > T.slamJolt * LAND: crash_pending = "SLAM!"
+			if land_jolt > T.slamJolt * LAND: _crash("SLAM!")
 			elif land_jolt > T.slamJolt * LAND * 0.6 and host.msg_idle(): host.flash("OOF!")
 			if Env.s("BMX_TRICK") != "" and land_jolt > 0.5: print("JOLT %.2f m/s" % land_jolt)   # tests
 			land_jolt = -1.0   # one verdict per landing
@@ -2114,6 +2117,7 @@ func _balance_step(dt: float, pedalling: bool, throttle: float, brake: bool) -> 
 		# (the pedals alone lift it to the balance point at most: only a pull can take it over the back)
 		var p_cap: float = b / (b + float(T.get("manLoop", 0.42)) + 0.08)
 		pull = maxf(pull if _man_armed else 0.0, minf(pull, p_cap) * minf(1.0, _man_pw))
+	elif not straight: pull = 0.0   # the corner gate holds in every mode (old tipping balance, manPullTime 0 too)
 	var can: bool = not air and not _nosing() and v > (0.6 if pedalling else 1.5) and throw_v <= 0.5
 	man_pull = pull if can else 0.0
 	if not can:
@@ -2160,7 +2164,7 @@ func _balance_step(dt: float, pedalling: bool, throttle: float, brake: bool) -> 
 				if float(T.get("manFall", 1.0)) < 0.5:
 					t = Vector2(loop_at, minf(t.y, 0.0))
 				elif _man_over > 0.2:
-					crash_pending = "LOOPED OUT!"; _man_over = 0.0
+					_crash("LOOPED OUT!"); _man_over = 0.0
 			else:
 				t = _tip_over(b, "LOOPED OUT!"); man_lock = 0.6
 		else:
@@ -2256,7 +2260,7 @@ func _land_trick(at: float) -> void:
 	var perr_s := wrapf(pitch - _g_pitch, -PI, PI)   # + = nose up (back wheel first)
 	if absf(perr_s) > 1.45:
 		# (a flip short of all the way round lands turned against the spin, one too far lands turned with it)
-		crash_pending = ("UNDER-ROTATED!" if absf(flip_acc) > 3.0 and signf(perr_s) != signf(flip_acc) else
+		_crash("UNDER-ROTATED!" if absf(flip_acc) > 3.0 and signf(perr_s) != signf(flip_acc) else
 			"OVER-ROTATED!" if absf(flip_acc) > 3.0 else "LOOPED OUT!" if perr_s > 0 else "BAD LANDING!")
 		return
 	# Graded landing zone instead of a hard cut: within ~60 deg of the travel it is a normal landing; past that
@@ -2343,7 +2347,11 @@ func _danger(reason: String, sev: float, dt: float, t_build := -1.0) -> void:
 	else:
 		r = maxf(0.0, r - dt * float(T.get("riderSave", 1.2)))
 	_risk[reason] = r
-	if r >= 1.0 and crash_pending == "": crash_pending = reason
+	if r >= 1.0: _crash(reason)
+
+## a crash this step: the first reason found is the one reported (later checks in the same step don't overwrite it)
+func _crash(reason: String) -> void:
+	if crash_pending == "": crash_pending = reason
 
 ## once a step, after every _danger: the biggest meter (risk) and a SAVED! when a real scare was fought off
 func _risk_settle(dt: float) -> void:
@@ -2367,7 +2375,8 @@ func _bank_at(f: Vector3) -> float:
 	var lx := f.z * w
 	var lz := -f.x * w
 	var dh := 0.0
-	for wo in [L - BB_REAR, -BB_REAR]:
+	for k in 2:   # front and rear axle
+		var wo: float = L - BB_REAR if k == 0 else -BB_REAR
 		var mx: float = x + f.x * wo
 		var mz: float = z + f.z * wo
 		dh += host.terrain.deck_height(mx - lx, mz - lz) - host.terrain.deck_height(mx + lx, mz + lz)

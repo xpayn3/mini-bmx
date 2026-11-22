@@ -211,6 +211,12 @@ func clear_dynamic() -> void:
 					var mm: MultiMesh = rec["meshes"].get(part["kind"])
 					if mm:
 						mm.set_instance_transform(part["i"], part["xform"])
+				if rec.has("flag") or rec.has("bb"):   # its flag / sponsor text was freed by the smash
+					var chf = chunks.get(b.get("chunk", Vector2i(1 << 30, 0)))
+					if chf != null and is_instance_valid(chf["node"]):
+						for lb in rec.get("labels", []):
+							if is_instance_valid(lb): lb.queue_free()
+						_panel_labels(rec, chf["node"])
 			"cactus":
 				var mm2: MultiMesh = rec.get("mm")
 				if mm2:
@@ -500,9 +506,19 @@ func update_stream(px: float, pz: float, budget_ms: float = 4.0, sync_r := -1) -
 		_clutter_cc = cc
 		_clutter_dirty = false
 		for k in chunks:
-			var near: bool = absi(k.x - ccx) <= 1 and absi(k.y - ccz) <= 1
+			var ring: int = maxi(absi(k.x - ccx), absi(k.y - ccz))
+			var near: bool = ring <= 1
 			for o in chunks[k]["small"]:
 				o.visible = near
+			# decorations 2+ chunks out (~70 m+) cast no shadow: past the close cascades it's mostly
+			# draw calls for shadows nobody sees. Only touched when the chunk's ring changes.
+			var far: bool = ring >= 2
+			var fk := 1 if far else 0
+			if int(chunks[k].get("shadow_far", -1)) != fk:
+				chunks[k]["shadow_far"] = fk
+				for mi in chunks[k].get("deco_mi", []):
+					if is_instance_valid(mi):
+						mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF if far else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	if is_inf(budget_ms):
 		var queue := _missing(ccx, ccz)
 		if sync_r >= 0:
@@ -612,14 +628,13 @@ func _update_grow(px: float) -> void:
 	var end := field.course.end_x()
 	if px < end - GROW_AHEAD:
 		return
-	var src := field
+	var g := field.fork()   # forked here: fork() reads the live field, which the main thread keeps changing
 	var to := end + GROW_STEP
 	_grow_gen = _gen
 	var box := []
 	_grow_box = box
 	_grow_task = WorkerThreadPool.add_task(func():
 		var t0 := Time.get_ticks_usec()
-		var g := src.fork()
 		g.grow_course(to)
 		box.append(g)
 		print_verbose("TRAIL grow on worker: %.0f ms" % ((Time.get_ticks_usec() - t0) / 1000.0)), false, "trail grow")
@@ -639,6 +654,10 @@ func _join_all() -> void:
 	for k in _jobs:
 		_stale_tasks.append(_jobs[k]["task"])
 	_jobs.clear()
+	if _grow_task >= 0:   # the trail grow job too: a worker still running at quit crashes the exit
+		_stale_tasks.append(_grow_task)
+		_grow_task = -1
+	_grow_box = []
 	_reap_stale(true)
 
 
@@ -699,13 +718,14 @@ const LIST_SPEC := {
 	"trunk": ["trunk", "trunk", true, false], "blob": ["blob", "leafSoft", true, false], "pine": ["pine", "leaf", true, false],
 	"rock": ["rock", "rock", true, false], "pebble": ["pebble", "rock", false, true], "grass": ["grass", "flower", false, true],
 	"daisy": ["daisy", "flower", false, true], "tulip": ["tulip", "flower", false, true], "spike": ["spike", "flower", false, true],
-	"bush": ["bush", "leafSoft", true, false], "log": ["log", "trunk", true, false], "weed": ["weed", "tuft", true, false],
+	"bush": ["bush", "leafSoft", true, false], "log": ["log", "trunk", true, false], "weed": ["weed", "tuft", false, false],
 	"stick": ["stick", "trunk", false, true], "fern": ["fern", "flower", false, true], "mushroom": ["mushroom", "flower", false, true],
 	"cactus0": ["cactus0", "cactus", true, false], "cactus1": ["cactus1", "cactus", true, false], "cactus2": ["cactus2", "cactus", true, false],
 	"cactus3": ["cactus3", "cactus", true, false], "cactus4": ["cactus4", "cactus", true, false],
 	"plank": ["box", "wood", true, false], "beam": ["box", "wood", true, false],
-	"post": ["post", "fence", true, false], "rail": ["rail", "fence", true, false], "picket": ["picket", "fence", true, false],
-	"stake": ["stake", "stake", true, false],
+	# thin fence / tape parts: their shadows are a few pixels wide but each is a draw call in every cascade
+	"post": ["post", "fence", false, false], "rail": ["rail", "fence", false, false], "picket": ["picket", "fence", false, false],
+	"stake": ["stake", "stake", false, false],
 }
 
 
@@ -761,6 +781,23 @@ func _multimesh(parent: Node3D, mesh: Mesh, mat: Material, buf: PackedFloat32Arr
 		mi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
 	parent.add_child(mi)
 	return mm
+
+
+## a panel's text / cloth: the distance gate's flag, a roadside billboard's sponsor lettering (both sides).
+## Freed when the panel is smashed (break_collider), made again by clear_dynamic.
+func _panel_labels(p: Dictionary, node: Node3D) -> void:
+	p["labels"] = []
+	if p.has("flag"):
+		var fl := TrailGate.flag(p["flag"])
+		node.add_child(fl)
+		p["labels"].append(fl)
+	if p.has("bb"):
+		var bb: Dictionary = p["bb"]
+		for s in [1.0, -1.0]:
+			var bas: Basis = bb["basis"] if s > 0 else Basis(Vector3.UP, PI) * bb["basis"]
+			var lb := TrailGate.label(bb["text"], bb["col"], bb["w"], bb["h"], bas, bb["at"] + bb["nrm"] * 0.045 * s)
+			node.add_child(lb)
+			p["labels"].append(lb)
 
 
 func _finalize(k: Vector2i) -> void:
@@ -852,6 +889,7 @@ func _finalize(k: Vector2i) -> void:
 	var lists: Dictionary = o["lists"]
 	var mms := {}
 	var small := []
+	var deco_mi := []   # the shadow-casting ones: update_stream turns their shadows off 2+ chunks out
 	for name in LIST_SPEC:
 		var n: int = counts.get(name, 0)
 		if n == 0:
@@ -859,8 +897,11 @@ func _finalize(k: Vector2i) -> void:
 		var spec: Array = LIST_SPEC[name]
 		var mm := _multimesh(node, TerrainGeo.MESH[spec[0]], TerrainGeo.MAT[spec[1]], lists[name], n, spec[2], VIS_RANGE.get(name, 0.0))
 		mms[name] = mm
+		var dmi := node.get_child(node.get_child_count() - 1)
+		if spec[2]:
+			deco_mi.append(dmi)
 		if spec[3]:
-			small.append(node.get_child(node.get_child_count() - 1))
+			small.append(dmi)
 	if o.has("gates"):
 		for g in o["gates"]:
 			node.add_child(TrailGate.build(g))
@@ -872,15 +913,13 @@ func _finalize(k: Vector2i) -> void:
 		var buf: PackedFloat32Array = sheds[i]
 		if buf.size() > 0:
 			_multimesh(node, TerrainGeo.SHEDS[i], TerrainGeo.MAT["shed"], buf, buf.size() / 16, true)
+			deco_mi.append(node.get_child(node.get_child_count() - 1))
 	for p in o["panels"]:
 		p["meshes"] = mms
-		if p.has("flag"):   # distance gate: the cloth flag (freed when the gate is smashed)
-			var fl := TrailGate.flag(p["flag"])
-			node.add_child(fl)
-			p["labels"] = [fl]
+		_panel_labels(p, node)
 	fin_parts[3] += (Time.get_ticks_usec() - tp) / 1000.0; tp = Time.get_ticks_usec()
 	var colliders: Array = o["colliders"]
-	var rec := {"cx": k.x, "cz": k.y, "node": node, "colliders": colliders, "small": small, "rock_keys": [],
+	var rec := {"cx": k.x, "cz": k.y, "node": node, "colliders": colliders, "small": small, "deco_mi": deco_mi, "rock_keys": [],
 		"G": o["G"], "N": b.N, "mms": mms, "packs": [], "grass_img": o["grass_img"], "grass_h": o["grass_h"]}
 	chunk_serial += 1   # GrassField re-reads the chunks round the camera
 	for pp in o.get("packs", []):

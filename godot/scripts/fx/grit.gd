@@ -68,6 +68,8 @@ func update(focus: Vector3) -> void:
 	_pm.set_shader_parameter("em_count", _pts.size())
 	_pm.set_shader_parameter("grain_k", float(Tune.v.get("dustGritSize", 1.0)))
 	amount_ratio = clampf(total / MAX_RATE, 0.0, 1.0)
+	var on := total > 0.0   # nothing thrown: stop emitting (the grains in the air live out their life)
+	if emitting != on: emitting = on
 	var ex: Dictionary = sim.shading_inputs()
 	for m in [_pm, _dm]: m.set_shader_parameter("origin", ex.origin)
 	_dm.set_shader_parameter("sun_col", ex.sun_col)

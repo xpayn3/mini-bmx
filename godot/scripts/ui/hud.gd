@@ -69,6 +69,7 @@ var style_pop: StylePop
 var trick_last := ""
 var trail_i := -1       # nearest trail centreline point
 var trail_d := INF      # how far off the trail centreline (m)
+var _full_scan_ms := -100000   # when _trail_scan last searched the whole trail (msec)
 var alert := {}         # the next turn / feature on the trail: {kind, text, d}, or empty
 var alert_new := 0.0    # seconds left to show a just-appeared alert while it is still far off
 const FEAT_NAMES := {"table": "TABLETOP", "tableLine": "JUMP LINE", "kicker": "KICKER", "rhythm": "ROLLERS",
@@ -536,12 +537,16 @@ func _trail_scan(p: Vector2, fw: Vector2, crashed: bool) -> void:
 	if t == null or t.field == null or t.field.course == null: return
 	var tc: TrailCourse = t.field.course
 	if tc.n < 2: return
+	var now := Time.get_ticks_msec()
 	if trail_i < 0 or trail_i >= tc.n:
 		trail_i = _nearest(tc, p, 0, tc.n)
+		_full_scan_ms = now
 	else:
 		trail_i = _nearest(tc, p, maxi(0, trail_i - 60), mini(tc.n, trail_i + 60))
-		if Vector2(tc.X[trail_i], tc.Z[trail_i]).distance_to(p) > 40.0:   # teleported
+		# teleported / far off the trail: search all of it, but riding about far off at most every 0.5 s
+		if Vector2(tc.X[trail_i], tc.Z[trail_i]).distance_to(p) > 40.0 and now - _full_scan_ms >= 500:
 			trail_i = _nearest(tc, p, 0, tc.n)
+			_full_scan_ms = now
 	trail_d = Vector2(tc.X[trail_i], tc.Z[trail_i]).distance_to(p)
 	if trail_d > 15.0 or crashed: return
 	if fw.dot(Vector2(tc.TX[trail_i], tc.TZ[trail_i])) < 0.3: return   # riding the trail backwards
@@ -1725,6 +1730,7 @@ class StylePop extends Control:
 	var combo_pop := 0.0
 	var flies := []        # {t, v}: banked points flying into the total
 	var sparks := []       # {p, v, life, max, c, s}
+	var _idle_drawn := false   # the settled state has been drawn: no redraws until something moves
 
 	func add(p: int, l: String) -> void:
 		combo = combo + 1 if since < COMBO_GAP else 1
@@ -1783,8 +1789,12 @@ class StylePop extends Control:
 			sp.v.y += 260.0 * dt
 			sp.v *= 1.0 - 1.5 * dt
 			sp.p += sp.v * dt
-		sparks = sparks.filter(func(sp): return sp.life > 0.0)
+		if not sparks.is_empty(): sparks = sparks.filter(func(sp): return sp.life > 0.0)
 		if since > 2.6 or (bailed and since > 1.6): a = maxf(0.0, a - dt * 2.0)
+		# nothing moving (only the settled total on screen): draw that once, then stop redrawing
+		var idle := pend < 0.0 and flies.is_empty() and sparks.is_empty() and a <= 0.0 and shown >= total and roll == float(pts) and pop <= 0.0 and tot_pop <= 0.0 and combo_pop <= 0.0 and ring >= 1.0
+		if idle and _idle_drawn: return
+		_idle_drawn = idle
 		queue_redraw()
 
 	static func _num(n: int) -> String:

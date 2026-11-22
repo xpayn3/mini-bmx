@@ -792,3 +792,6 @@ func clear() -> void:
 		get_tree().create_timer(WIPE + 0.2).timeout.connect((pl as Node).queue_free)
 	_all_pools.clear()
 	_pools.clear()
+	# jet drops still in flight would splat after the respawn: drop them
+	_jn = 0
+	if _jet_mm: _jet_mm.visible_instance_count = 0

@@ -29,11 +29,14 @@ const LEVEL_PRESETS := {
 }
 
 ## every view this ride can use: the level's own first (C cycles them in this order)
+## (the merged level list is made once: this is read every frame)
+var _presets_lv: Dictionary = {}
 func presets() -> Dictionary:
 	if game == null or str(game.get("level")) == "": return PRESETS
-	var d := LEVEL_PRESETS.duplicate()
-	d.merge(PRESETS)
-	return d
+	if _presets_lv.is_empty():
+		_presets_lv = LEVEL_PRESETS.duplicate()
+		_presets_lv.merge(PRESETS)
+	return _presets_lv
 
 ## title screen only (not in the C cycle): behind and above the rider, looking out over the landscape
 const VISTA := {"label": "Lookout", "mode": "vista", "fov": 18.0, "back": 10.5, "up": 0.5, "side": -0.8, "look": 160.0, "drop": -0.03, "yaw_off": -1.95}
@@ -132,9 +135,12 @@ func default_mode() -> String:
 	if game != null and str(game.get("level")) != "": return "pg_side"
 	return str(Settings.get_v("camera"))
 
+## a respawn / teleport: drop every smoothed follow state so nothing glides over from the old spot
 func snap_to(p: Vector3) -> void:
 	target = p; anchor = p
 	_ys_init = false
+	pos_init = false
+	trail_i = -1; trail_dir = Vector3.ZERO
 
 
 ## The bike's height as the camera follows it: bumps and impacts taken out, slopes and jumps kept. Two low-passes in a
@@ -151,8 +157,6 @@ func _smooth_y(y: float, dt: float) -> float:
 	_ys1 += (y - _ys1) * k
 	_ys2 += (_ys1 - _ys2) * k
 	return 2.0 * _ys1 - _ys2
-	pos_init = false
-	trail_i = -1; trail_dir = Vector3.ZERO
 
 func _unhandled_input(e: InputEvent) -> void:
 	if get_tree().paused or (game and game.photo): return   # photo mode drives the camera itself

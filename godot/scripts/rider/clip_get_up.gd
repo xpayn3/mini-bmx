@@ -70,15 +70,11 @@ func _init(r: Rider, terr, P: Array) -> void:
 	rider = r
 	terrain = terr
 	_rag = P.duplicate()
-	up = RiderAnim.new(r, GETUP_DIR)
-	if not up.ok(): return
-	if not RiderAnim.clip_files(DIZZY_DIR).is_empty():
-		dz = RiderAnim.new(r, DIZZY_DIR)
-		if not dz.ok(): dz = null
+	up = _anims(r, GETUP_DIR)
+	if up == null: return
+	dz = _anims(r, DIZZY_DIR)
 	_forced = Env.s("BMX_DIZZY_CLIP")
-	if not RiderAnim.clip_files(WALK_DIR).is_empty():
-		wk = RiderAnim.new(r, WALK_DIR)
-		if not wk.ok(): wk = null
+	wk = _anims(r, WALK_DIR)
 	# the clip that starts lying most like the body does (several close ones: any of them)
 	var lie_r := _lie(P)
 	var scores := []
@@ -103,6 +99,32 @@ func _init(r: Rider, terr, P: Array) -> void:
 
 func ok() -> bool:
 	return up != null and up.ok()
+
+
+## the clip sets (~20 FBX scenes, their hidden skeletons under the rider) are made once per rider and reused by
+## every get-up of the ride: instancing them at each get-up stalled the frame. A new rider (new ride) = new sets.
+static var _sets := {}              # dir -> RiderAnim (null = no usable clips there)
+static var _sets_rider: WeakRef = null
+static func _anims(r: Rider, dir: String) -> RiderAnim:
+	var old: Object = _sets_rider.get_ref() if _sets_rider else null
+	if old != r:
+		if old != null and is_instance_valid(old):   # an older rider still around: its clip nodes go
+			for set_a in _sets.values():
+				if set_a: (set_a as RiderAnim).free_clips()
+		_sets = {}
+		_sets_rider = weakref(r)
+	if not _sets.has(dir):
+		var a: RiderAnim = null
+		if not RiderAnim.clip_files(dir).is_empty():
+			a = RiderAnim.new(r, dir)
+			if not a.ok(): a = null
+		_sets[dir] = a
+	var got: RiderAnim = _sets[dir]
+	# its nodes were freed under us (rider rebuilt its children): make it again next time
+	if got and (got.clips.is_empty() or not is_instance_valid(got.clips[0].inst)):
+		_sets.erase(dir)
+		return _anims(r, dir)
+	return got
 
 
 ## how a body lies: (front.y, right.y) - face down (-1, 0), on the back (1, 0), on its right side (0, -1)...
@@ -304,7 +326,6 @@ func _finish(pose: Dictionary) -> bool:
 	return false
 
 
+## the clip sets are kept for the next get-up of this ride (see _anims); nothing to free here
 func free_clips() -> void:
-	if up: up.free_clips()
-	if dz: dz.free_clips()
-	if wk: wk.free_clips()
+	pass

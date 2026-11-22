@@ -169,6 +169,7 @@ static func _mats() -> Dictionary:
 	led.shader = _led_shader()
 	var glow := ShaderMaterial.new()
 	glow.shader = _glow_shader()
+	glow.set_meta("grime_pass", true)   # bike/grime.gd: no mud / light-match pass over the additive halo quad
 	var clear := _mat("#dfe8ee", 0.05)
 	clear.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	clear.albedo_color.a = 0.16
@@ -182,6 +183,7 @@ static func _mats() -> Dictionary:
 	lamp.emission_energy_multiplier = 5.0
 	var fur := ShaderMaterial.new()
 	fur.shader = _fur_shader()
+	fur.set_meta("grime_pass", true)   # nor over the fur shells (they'd draw it once per shell)
 	return {
 		clear = clear, nd = nd, lamp = lamp, fur = fur,
 		# real plastic scans (PlasticFinish): pebbled body, grainy mounts / sleeve, glossy trim / bezel / button

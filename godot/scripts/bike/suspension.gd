@@ -148,6 +148,8 @@ func solve(phi: float, prev: Vector2):
 
 func phi_for(rise: float) -> float:   # invert the table (monotonic in the working range)
 	var t := table
+	if t.is_empty(): return phi0   # no linkage table (rear not set up): the rest angle
+	if t.size() == 1: return t[0][0]
 	if rise <= t[0][1]:
 		return t[0][0]
 	if rise >= t[t.size() - 1][1]:
@@ -160,7 +162,7 @@ func phi_for(rise: float) -> float:   # invert the table (monotonic in the worki
 			lo = m
 		else:
 			hi = m
-	var u: float = (rise - t[lo][1]) / (t[hi][1] - t[lo][1])
+	var u: float = (rise - t[lo][1]) / maxf(1e-9, t[hi][1] - t[lo][1])
 	return t[lo][0] + (t[hi][0] - t[lo][0]) * u
 
 
@@ -256,7 +258,7 @@ func pose_rear() -> Dictionary:   # four-bar at the angle that lifts the axle by
 		n["shock_shaft"].rotation.z = sh - sh0
 	last_stroke = L0 - pd.distance_to(FE)
 	if n["shock_spring"]:
-		n["shock_spring"].scale.y = maxf(0.3, (spring_len - last_stroke) / spring_len)
+		n["shock_spring"].scale.y = maxf(0.3, (spring_len - last_stroke) / maxf(1e-3, spring_len))
 	return p
 
 

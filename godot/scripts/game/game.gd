@@ -59,10 +59,18 @@ var sun_energy := RIDE_SUN
 # level light (tuning card › Light, LightSettings): time of day, day / night cycle
 var tod := 19.33             # the clock (hours); the cycle runs it, a slider move resets it
 var light_ver := -1          # LightSettings.version last applied
+var _light_time := NAN       # the Light tab's time / cycle last applied (only a change of these resets the clock)
+var _light_cycle := false
 var light_t := 0.0
 const GoggleLens = preload("res://scripts/rider/goggle_lens.gd")
 const RIM_LAYER := 1 << 11   # render layer 12: the rider + bike (only the rim light uses it)
 const AGX_CONTRAST := 1.35
+## CameraAttributesPractical turns sensitivity (ISO) into a luminance clamp as ISO x 12.5 / 100 / 100, and the
+## tonemapper multiplies by auto_exposure_scale / luminance: pinned here (min = max) the factor is 1 = as if off
+const AE_NEUTRAL_ISO := 0.4 / 0.00125   # = auto_exposure_scale (0.4) / 0.00125 -> 320
+## directional shadow reach: the terrain only loads +-168 m and far casters are trimmed
+const SHADOW_MAX := 150.0
+const SHADOW_MAX_LOW := 120.0
 const MIST_DEEP := 2.0      # the mist top sits this far over the low ground round the rider's path
 const MIST_CLEAR_FULL := 8.0   # the rider this far above the mist top: full mist
 const MIST_CLEAR_NONE := 3.0   # ... this close above it (or in it): none, the ground round the bike is always clear
@@ -91,6 +99,8 @@ var _mist_probe_t := 0.0
 var _match := 0.0   # rider light match (Grime.trim), 0..1: how much the over-bright parts of the rider + bike are rolled off
 var _lens_now := ""
 var night_k := 0.0           # how much night (0 day .. 1 full night), from _apply_light
+var golden_k := 0.0          # how golden the low sun is (0..1), from _apply_light
+var motes: AmbientMotes      # pollen by day, fireflies at dusk / night
 var amb_base := 0.36        # flat ambient for the GI setting (SDFGI brings its own sky light)
 var speed_k := 0.0           # 0..1 speed feel (FOV boost, edge blur)
 var photo := false           # photo mode (O, game/photo_mode.gd): time frozen, free camera, lens / light / look card
@@ -250,6 +260,8 @@ func _ready() -> void:
 		add_child(contact)
 	dust = RideDust.new()
 	add_child(dust)
+	motes = AmbientMotes.new()
+	add_child(motes)
 	if dust.sim != null and dust.sim.compositor != null:   # the dust is drawn as a compositor effect
 		var comp := Compositor.new()
 		comp.compositor_effects = [dust.sim.compositor]
@@ -280,6 +292,13 @@ func take_world() -> Dictionary:
 	var out := {"terrain": terrain, "far_hills": far_hills}
 	remove_child(terrain)
 	remove_child(far_hills)
+	# this Game is done: it must not drive the lifted terrain (update_stream etc.) while it waits to be freed
+	# (its children too: camera, HUD, grass... read game.terrain)
+	set_process(false)
+	set_physics_process(false)
+	process_mode = Node.PROCESS_MODE_DISABLED
+	terrain = null
+	far_hills = null
 	return out
 
 # ---------------------------------------------------------------- environment
@@ -298,6 +317,9 @@ func _build_environment() -> void:
 	sm.set_shader_parameter("sunny", 1.0)
 	sm.set_shader_parameter("light_energy", 0.55)
 	sky.radiance_size = Sky.RADIANCE_SIZE_256
+	# incremental: a re-filter of the radiance (time of day changed, the day / night cycle ticking) is spread over
+	# a few frames instead of all at once (AUTOMATIC re-filtered it in one frame whenever a sky uniform changed)
+	sky.process_mode = Sky.PROCESS_MODE_INCREMENTAL
 	sky.sky_material = sm
 	sky_mat = sm
 	env.background_mode = Environment.BG_SKY
@@ -381,7 +403,7 @@ func _build_environment() -> void:
 	sun.directional_shadow_split_3 = 0.45
 	sun.directional_shadow_blend_splits = true
 	sun.directional_shadow_fade_start = 0.85
-	sun.directional_shadow_max_distance = 200.0
+	sun.directional_shadow_max_distance = SHADOW_MAX
 	sun.directional_shadow_pancake_size = 30.0
 	sun.shadow_bias = 0.02
 	sun.shadow_normal_bias = 1.2
@@ -413,10 +435,29 @@ func _build_environment() -> void:
 	grade_rect = ColorRect.new()
 	grade_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
 	grade_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var gm := ShaderMaterial.new(); gm.shader = load("res://shaders/grade.gdshader")
+	_grade_sh = load("res://shaders/grade.gdshader")
+	_grade_sh_mip = Shader.new()   # the same pass with a mipmapped screen read: only while the speed blur is on
+	_grade_sh_mip.code = _grade_sh.code.replace(GRADE_MIP_FROM, GRADE_MIP_TO)
+	var gm := ShaderMaterial.new(); gm.shader = _grade_sh
 	grade_rect.material = gm
 	cl.add_child(grade_rect)
 	add_child(cl)
+
+## grade.gdshader reads the screen without mips (a mipmap sampler makes Godot build the screen's mip chain every
+## frame); the speed blur needs them, so while it is on the material runs a copy of the shader with them
+const GRADE_MIP_FROM := "hint_screen_texture, filter_linear;"
+const GRADE_MIP_TO := "hint_screen_texture, filter_linear_mipmap;"
+var _grade_sh: Shader
+var _grade_sh_mip: Shader
+func _grade_mips(gm: ShaderMaterial, on: bool) -> void:
+	var want := _grade_sh_mip if on else _grade_sh
+	if gm.shader == want or want == null: return
+	var keep := {}
+	for u in gm.shader.get_shader_uniform_list():   # carry every value over (photo mode's too)
+		keep[u.name] = gm.get_shader_parameter(u.name)
+	gm.shader = want
+	for k in keep:
+		if keep[k] != null: gm.set_shader_parameter(k, keep[k])
 
 ## Title screen look: golden hour from a lookout. The camera faces the best view from the spawn, the sun
 ## sits low ahead and to the right of it, and a coarse copy of the landscape fills the view to the
@@ -437,12 +478,12 @@ func set_scenic(on: bool) -> void:
 		sun.shadow_normal_bias = 3.0
 		sun.shadow_blur = 2.0
 		sun_energy = 2.3
-		sky_mat.set_shader_parameter("golden", 1.0)
-		sky_mat.set_shader_parameter("sun_vec", Vector3.ZERO)   # the sky's sun = the light here
-		sky_mat.set_shader_parameter("night", 0.0)
-		sky_mat.set_shader_parameter("energy", 1.0)
-		sky_mat.set_shader_parameter("sunny", 0.0)
-		sky_mat.set_shader_parameter("light_energy", 0.85)
+		_sky_set("golden", 1.0)
+		_sky_set("sun_vec", Vector3.ZERO)   # the sky's sun = the light here
+		_sky_set("night", 0.0)
+		_sky_set("energy", 1.0)
+		_sky_set("sunny", 0.0)
+		_sky_set("light_energy", 0.85)
 		env.fog_light_color = Color(0.93, 0.70, 0.52)
 		env.fog_aerial_perspective = 0.0
 		env.fog_sun_scatter = 0.35
@@ -452,6 +493,11 @@ func set_scenic(on: bool) -> void:
 		env.volumetric_fog_albedo = Color(1.0, 0.82, 0.62)
 		env.volumetric_fog_density = VOL_DENSITY
 		env.tonemap_exposure = 0.95
+		env.background_energy_multiplier = 1.0   # the glare guard is off here
+		env.adjustment_brightness = float(Settings.get_v("brightness"))
+		if cam_attr:
+			cam_attr.auto_exposure_min_sensitivity = 80.0   # a night ride left it pinned
+			cam_attr.auto_exposure_max_sensitivity = 140.0
 		cam.far = 3500.0
 		cam.vista_yaw = best
 		cam.set_mode("vista")
@@ -463,6 +509,7 @@ func set_scenic(on: bool) -> void:
 		_snap_prev()
 		atmos.gain = 0.3   # a slight breeze
 		_title_lights(best)
+		_hair_key()
 		if title_life == null:
 			title_life = TitleLife.new()
 			add_child(title_life)
@@ -480,9 +527,9 @@ func set_scenic(on: bool) -> void:
 		sun.shadow_normal_bias = 1.2
 		sun.shadow_blur = 1.0
 		sun_energy = RIDE_SUN
-		sky_mat.set_shader_parameter("golden", 0.0)
-		sky_mat.set_shader_parameter("sunny", 1.0)
-		sky_mat.set_shader_parameter("light_energy", 0.55)
+		_sky_set("golden", 0.0)
+		_sky_set("sunny", 1.0)
+		_sky_set("light_energy", 0.55)
 		env.fog_light_color = RIDE_FOG
 		env.fog_sun_scatter = 0.0
 		_ride_fog()
@@ -492,19 +539,54 @@ func set_scenic(on: bool) -> void:
 		cam.far = RIDE_FAR
 		light_ver = -1   # the level light (time of day) takes over on the next frame
 
+## the hair's sheen (shaders/hair.gdshader) comes from the light in use (sun / moon), not the studio key
+var _hair_nodes: Array = []
+func _hair_key() -> void:
+	if sun == null: return
+	var to_key := sun.global_basis.z   # toward the sun / moon
+	var kc := sun.light_color * clampf(sun_energy / maxf(RIDE_SUN, 0.01), 0.1, 1.2)
+	for h in _hair_nodes:
+		if not is_instance_valid(h): continue
+		var m := (h as GeometryInstance3D).material_override as ShaderMaterial
+		if m == null: continue
+		m.set_shader_parameter("key_world_on", 1.0)
+		m.set_shader_parameter("key_world", to_key)
+		m.set_shader_parameter("key_col", Vector3(kc.r, kc.g, kc.b))
+
+var _rim_dirty := true
+var _rim_hooked := false
+var _rim_rider: Node
+var _rim_rig: Node
+func _rim_node_added(n: Node) -> void:
+	if _rim_dirty or not (n is GeometryInstance3D): return
+	if (is_instance_valid(rider) and rider.is_ancestor_of(n)) or (is_instance_valid(rig) and rig.is_ancestor_of(n)):
+		_rim_dirty = true
+
 ## the rim light follows the camera: it shines from behind + above the rider as seen from the lens, a little from the
-## side the sun is on (so it agrees with the light in the scene). The rider / bike meshes get RIM_LAYER (twice a
-## second: helmets, cams, a new bike or a crash add meshes).
+## side the sun is on (so it agrees with the light in the scene). The rider / bike meshes get RIM_LAYER (re-tagged
+## when a mesh joins them: helmets, cams, a new bike or a crash add meshes).
 func _rim_update(dt: float) -> void:
 	if rim == null: return
+	# re-tag only when a mesh joined the rider / bike (or they were swapped), not by walking both trees twice a second
+	if not _rim_hooked:
+		_rim_hooked = true
+		get_tree().node_added.connect(_rim_node_added)
+	if rider != _rim_rider or rig != _rim_rig:
+		_rim_rider = rider
+		_rim_rig = rig
+		_rim_dirty = true
 	_rim_tag_t -= dt
-	if _rim_tag_t <= 0.0:
-		_rim_tag_t = 0.5
+	if _rim_dirty and _rim_tag_t <= 0.0:
+		_rim_tag_t = 0.2
+		_rim_dirty = false
+		_hair_nodes.clear()
 		for root in [rider, rig]:
 			if root == null or not is_instance_valid(root): continue
 			for n in (root as Node).find_children("*", "GeometryInstance3D", true, false):
 				var gi := n as GeometryInstance3D
 				if gi.layers & RIM_LAYER == 0: gi.layers |= RIM_LAYER
+				if gi is Hair: _hair_nodes.append(gi)
+		_hair_key()
 	var c3 := get_viewport().get_camera_3d()
 	if c3 == null or scenic or Env.s("BMX_NO_RIM") != "":
 		rim.light_energy = 0.0
@@ -514,7 +596,10 @@ func _rim_update(dt: float) -> void:
 	if fh.length() < 0.01: fh = Vector3(1, 0, 0)
 	fh = fh.normalized()
 	var side := Vector3(-fh.z, 0.0, fh.x)
-	var sun_side := signf(side.dot(Vector3(_gg_sun.x, 0.0, _gg_sun.z)))
+	# the side the key light is on: the light in use (the moon at night), not the true sun under the horizon.
+	# The light node looks from the light toward the scene (-Z), so +Z points at the sun / moon, like _gg_sun did
+	var to_key := sun.global_basis.z
+	var sun_side := signf(side.dot(Vector3(to_key.x, 0.0, to_key.z)))
 	# the light travels toward the camera (from behind the rider), down a little, leaning in from the sun's side
 	var travel := (-fh * 0.55 + Vector3.DOWN * 0.35 - side * sun_side * 0.9 * float(LightSettings.current.get("rim_side", 1.0))).normalized()   # ~60 deg off the view: lights the outline
 	rim.global_basis = Basis.looking_at(travel, Vector3.UP if absf(travel.y) < 0.98 else Vector3.FORWARD)
@@ -619,6 +704,29 @@ var _gg_el := 60.0
 var _gg_k := 0.0
 var _gg_s := 0.0
 var _gg_glow := GG_GLOW   # bloom after the Light tab's Bloom slider
+
+## sky material uniforms are only written when they really change: any write dirties the sky and
+## re-filters its radiance cubemap (ambient + reflections)
+var _sky_cache := {}
+func _sky_set(key: String, v: Variant) -> void:
+	if _sky_cache.has(key):
+		var o: Variant = _sky_cache[key]
+		if typeof(o) == typeof(v):
+			if v is float:
+				if absf(float(o) - float(v)) < 1e-4: return
+			elif v is Vector3:
+				if (o as Vector3).is_equal_approx(v): return
+			elif o == v:
+				return
+	_sky_cache[key] = v
+	sky_mat.set_shader_parameter(key, v)
+
+## the HDRI textures, loaded once each
+var _hdri_tex := {}
+func _hdri(file: String) -> Texture2D:
+	if not _hdri_tex.has(file): _hdri_tex[file] = load(HDRI_DIR + file)
+	return _hdri_tex[file]
+
 func _glare_guard(dt: float) -> void:
 	if scenic or photo: return
 	var c3 := get_viewport().get_camera_3d()
@@ -636,7 +744,9 @@ func _glare_guard(dt: float) -> void:
 	sun.light_volumetric_fog_energy = _gg_vol * (1.0 - 0.8 * k)
 	env.fog_sun_scatter = _gg_scat * (1.0 - k)
 	env.glow_intensity = _gg_glow * (1.0 - 0.65 * k)
-	sky_mat.set_shader_parameter("energy", _gg_sky * (1.0 - 0.38 * k))
+	# the sky's own brightness in view: through the environment, not the sky material (a material change
+	# re-filtered the whole radiance cubemap every frame the guard moved)
+	env.background_energy_multiplier = 1.0 - 0.38 * k
 	if dust and dust.sim != null: dust.sim.sun_gain = _gg_dust * (1.0 - 0.6 * k)
 	if Env.s("BMX_GLARE_PROBE") != "" and Engine.get_process_frames() % 30 == 0:
 		print("GLARE face=%.2f el=%.1f k=%.2f" % [face, _gg_el, k])
@@ -660,7 +770,14 @@ func _update_light(dt: float) -> void:
 	var changed := light_ver != LightSettings.version
 	if changed:
 		light_ver = LightSettings.version
-		tod = float(L.time)
+		# the clock only jumps when the time (or the cycle switch) itself changed: any other Light slider used to
+		# reset a running day / night cycle back to the slider's time
+		var lt := float(L.time)
+		var lc := float(L.cycle) > 0.5
+		if lt != _light_time or lc != _light_cycle or not lc:
+			tod = lt
+		_light_time = lt
+		_light_cycle = lc
 	if float(L.cycle) > 0.5:
 		tod = fposmod(tod + dt * 24.0 / (maxf(float(L.day_min), 0.5) * 60.0), 24.0)
 		light_t += dt
@@ -693,14 +810,14 @@ func _pick_sky_hdri(el_deg: float, az: float) -> void:
 		a = low; b = day; t = smoothstep(4.0, 14.0, el_deg)
 	else:
 		a = day; b = day
-	sky_mat.set_shader_parameter("hdri", load(HDRI_DIR + String(a[0])))
-	sky_mat.set_shader_parameter("rotation", az - (float(a[1]) - 0.5) * TAU)
+	_sky_set("hdri", _hdri(String(a[0])))
+	_sky_set("rotation", az - (float(a[1]) - 0.5) * TAU)
 	if b == a or t <= 0.0:
-		sky_mat.set_shader_parameter("mix_b", 0.0)
+		_sky_set("mix_b", 0.0)
 		return
-	sky_mat.set_shader_parameter("hdri_b", load(HDRI_DIR + String(b[0])))
-	sky_mat.set_shader_parameter("rotation_b", az - (float(b[1]) - 0.5) * TAU)
-	sky_mat.set_shader_parameter("mix_b", t)
+	_sky_set("hdri_b", _hdri(String(b[0])))
+	_sky_set("rotation_b", az - (float(b[1]) - 0.5) * TAU)
+	_sky_set("mix_b", t)
 
 
 func _apply_light(h: float, L: Dictionary) -> void:
@@ -737,16 +854,16 @@ func _apply_light(h: float, L: Dictionary) -> void:
 	_gg_vol = sun.light_volumetric_fog_energy
 	# sky: blue + white clouds by day, golden low, stars at night; its photographed sun follows ours
 	_pick_sky_hdri(el_deg, atan2(dirv.x, -dirv.z))
-	sky_mat.set_shader_parameter("golden", gw)
+	_sky_set("golden", gw)
 	var se := deg_to_rad(el_deg)   # the true sun for the sky (also under the horizon: dusk / dawn glow)
-	sky_mat.set_shader_parameter("sun_vec", Vector3(cos(yaw) * cos(se), sin(se), sin(yaw) * cos(se)))
-	sky_mat.set_shader_parameter("sunny", day * (1.0 - gw))
-	sky_mat.set_shader_parameter("night", n)
+	_sky_set("sun_vec", Vector3(cos(yaw) * cos(se), sin(se), sin(yaw) * cos(se)))
+	_sky_set("sunny", day * (1.0 - gw))
+	_sky_set("night", n)
 	_gg_sky = lerpf(1.0, 0.55, n)
 	_gg_sun = Vector3(cos(yaw) * cos(deg_to_rad(el_deg)), sin(deg_to_rad(el_deg)), sin(yaw) * cos(deg_to_rad(el_deg)))
 	_gg_el = el_deg
-	sky_mat.set_shader_parameter("energy", lerpf(1.0, 0.55, n))   # the night exposure is high: keep the sky a deep blue
-	sky_mat.set_shader_parameter("light_energy", lerpf(lerpf(0.55, 0.85, g), 0.2, n) * float(L.sky))
+	_sky_set("energy", lerpf(1.0, 0.55, n))   # the night exposure is high: keep the sky a deep blue
+	_sky_set("light_energy", lerpf(lerpf(0.55, 0.85, g), 0.2, n) * float(L.sky))
 	# night: the sky barely lights anything; what's in shadow of the moon goes close to black
 	# twilight: the glowing sky is the only light; the shade goes lavender
 	env.ambient_light_energy = amb_base * float(L.sky) * lerpf(1.0, 0.3, n) * (1.0 + 0.6 * tw)
@@ -769,14 +886,22 @@ func _apply_light(h: float, L: Dictionary) -> void:
 	# night vision: colour fades (rods), shadows stay deep
 	env.adjustment_saturation = float(L.saturation) * lerpf(1.0, 1.06, gw) * lerpf(1.0, 0.42, n)
 	env.adjustment_contrast = float(L.contrast) * lerpf(1.0, 1.07, gw) * lerpf(1.0, 1.08, n)
-	env.adjustment_brightness = lerpf(1.0, 0.94, n)
+	env.adjustment_brightness = lerpf(1.0, 0.94, n) * float(Settings.get_v("brightness"))   # Settings › Brightness on top
 	# lamps bloom at night
 	env.glow_hdr_threshold = lerpf(lerpf(0.92, 0.85, gw), 0.7, n)   # the low sun blooms
-	if cam_attr:   # auto exposure lifted the night ~5x into a grey day: off in the dark, the exposure above sets it
-		cam_attr.auto_exposure_enabled = n < 0.5
-		cam_attr.auto_exposure_min_sensitivity = lerpf(80.0, 40.0, gw)   # facing the low sun the eye stops down
-		cam_attr.auto_exposure_max_sensitivity = lerpf(140.0, 95.0, gw)  # and doesn't lift the warm light into a wash
+	if cam_attr:
+		# auto exposure lifted the night ~5x into a grey day: in the dark it is pinned (min = max) to the luminance
+		# that gives a factor of 1, i.e. the same picture as switched off, so the exposure above sets it. It stays
+		# enabled: toggling it compiled a new post-process pipeline mid-ride at dusk.
+		cam_attr.auto_exposure_enabled = true
+		if n >= 0.5:
+			cam_attr.auto_exposure_min_sensitivity = AE_NEUTRAL_ISO
+			cam_attr.auto_exposure_max_sensitivity = AE_NEUTRAL_ISO
+		else:
+			cam_attr.auto_exposure_min_sensitivity = lerpf(80.0, 40.0, gw)   # facing the low sun the eye stops down
+			cam_attr.auto_exposure_max_sensitivity = lerpf(140.0, 95.0, gw)  # and doesn't lift the warm light into a wash
 	night_k = n
+	golden_k = gw
 	# rim: warm and strong when the sun is low (backlit riders), soft white by day, cold blue moonlight at night
 	_rim_col = Color(1.0, 0.97, 0.92).lerp(Color(1.0, 0.7, 0.45), gw).lerp(Color(0.85, 0.6, 0.75), tw).lerp(Color(0.6, 0.72, 1.0), n)
 	_rim_e = lerpf(lerpf(0.5, 1.3, gw), 1.0, tw * (1.0 - n))   # was 2.0 / 3.8 / 2.4: it blew the jersey + helmet out to white
@@ -798,6 +923,7 @@ func _apply_light(h: float, L: Dictionary) -> void:
 		var hz := Color(0.784, 0.933, 0.969).lerp(Color(1.0, 0.78, 0.6), gw).lerp(Color(0.07, 0.09, 0.15), n)
 		var zn := Color(0.424, 0.765, 0.925).lerp(Color(0.62, 0.62, 0.72), gw).lerp(Color(0.02, 0.03, 0.07), n)
 		terrain.water_light(dirv, sun.light_color * clampf(sun_energy / maxf(RIDE_SUN, 0.01), 0.0, 1.5), hz, zn)
+	_hair_key()
 
 
 var _studio: Node3D
@@ -973,6 +1099,8 @@ func _clear_spot(x: float, z: float, head: float) -> Vector2:
 
 ## title screen: stand the bike on the hand-picked summit of the title world
 func _to_hilltop() -> void:
+	_end_crash()   # the main menu straight from a crash
+	if blood: blood.clear()
 	var sp := TITLE_SPOT
 	if Env.s("BMX_TITLE_SPOT") != "":   # tests / picking a new spot: x,z,heading
 		var q := Env.s("BMX_TITLE_SPOT").split_floats(",")
@@ -992,6 +1120,8 @@ func _apply_settings() -> void:
 	var sq: int = Settings.get_v("shadows")
 	# shadows: Low = 2 cascades, hard-ish; Ultra = 4 blended cascades + contact-hardening soft shadows
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS if sq == 0 else DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+	# 2 splits: the first one covers ~a fifth of the reach (0.06 left the second cascade stretched over the rest)
+	sun.directional_shadow_split_1 = 0.2 if sq == 0 else 0.06
 	sun.directional_shadow_blend_splits = sq >= 2
 	sun.light_angular_distance = 0.6 if sq >= 3 else 0.0
 	env.ssao_enabled = Settings.get_v("ssao")
@@ -1214,6 +1344,16 @@ func _reset_draw_state() -> void:
 	_mc.clear(); _stand_blend = 1.0
 	_yaw_s = 0.0; _turn_s = 0.0; _aspin_s = 0.0; _atilt_s = 0.0; _blat_s = 0.0; _awhip_s = 0.0
 
+## a crash (or its get-up / dizzy clip) is dropped at once: back on the bike, no slow motion, no WASTED.
+## Respawn / the title hilltop: phys.reset_at clears crash_on without a get-up, which left the ragdoll, the
+## WASTED slow motion and the blood running and the rider detached from the bike for the next ride
+func _end_crash() -> void:
+	if phys == null: return
+	var detached: bool = rider != null and rig != null and rig.lean_g != null and rider.get_parent() != null and rider.get_parent() != rig.lean_g
+	if phys.crash_on or getup_anim != null or detached:
+		get_up()
+	if wasted: wasted.stop()
+
 func get_up() -> void:
 	if getup_anim is ClipGetUp: getup_anim.free_clips()   # (Backspace while standing dizzy)
 	getup_anim = null
@@ -1431,7 +1571,7 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 
 # ---------------------------------------------------------------- ride control
 func respawn(new_world: bool) -> void:
-	if phys.crash_on: get_up()
+	_end_crash()
 	_reset_draw_state()
 	if hud: hud.on_respawn()
 	if new_world and level != "":
@@ -2055,6 +2195,9 @@ func toggle_photo() -> void:
 	if not photo and (phys == null or (paper_map and paper_map.busy())): return
 	photo = not photo
 	Engine.time_scale = 0.0 if photo else 1.0
+	# the crash slow motion pitched the sound down (Wasted._set_speed leaves photo mode alone): normal pitch while the
+	# world is frozen; leaving, WASTED sets its own speed again on its next frame
+	AudioServer.playback_speed_scale = 1.0
 	hud.visible = input_enabled and not photo
 	_photo_last = Time.get_ticks_usec()
 	if photo_mode == null:
@@ -2201,6 +2344,11 @@ func _dab_foot(lt: Dictionary) -> void:
 	f.y += sin(PI * dab_k) * 0.07   # lifts off the pedal on the way out / back
 	lt[key] = f
 
+## the drawn value of a physics state key, between the last two steps (`_lerp_a` = the fraction, set per frame)
+var _lerp_a := 1.0
+func _lerp_k(k: String) -> float:
+	return lerpf(_prev[k], phys.get(k), _lerp_a)
+
 func _process(dt: float) -> void:
 	if photo:
 		# time stands still; the camera moves on real time
@@ -2230,15 +2378,15 @@ func _process(dt: float) -> void:
 	var st := phys
 	var a := Engine.get_physics_interpolation_fraction()
 	if Vector2(st.x - _prev.x, st.z - _prev.z).length() > 2: a = 1.0
-	var lerp_k := func(k: String) -> float: return lerpf(_prev[k], st.get(k), a)
-	var y_draw: float = lerp_k.call("y") if st.crash_on else lerp_k.call("y_draw")
+	_lerp_a = a
+	var y_draw: float = _lerp_k("y") if st.crash_on else _lerp_k("y_draw")
 	# wrapped interpolation: mid-flip the pitch jumps +PI -> -PI between two steps
 	var pk := "pitch" if st.crash_on else "pitch_draw"
 	var p_draw: float = wrapf(_prev[pk] + BikePhysics.ang_diff(st.get(pk), _prev[pk]) * a, -PI, PI)
 	if Env.s("BMX_PITCH_POSE") != "": p_draw = wrapf(t * 4.0, -PI, PI) if Env.s("BMX_PITCH_POSE") == "sweep" else float(Env.s("BMX_PITCH_POSE"))   # tests: draw at a fixed pitch (flip poses)
 	var hd: float = _prev.heading + BikePhysics.ang_diff(st.heading, _prev.heading) * a
-	drawn_pos = Vector3(lerp_k.call("x"), lerp_k.call("y"), lerp_k.call("z"))
-	var body_y: float = lerp_k.call("body_y")
+	drawn_pos = Vector3(_lerp_k("x"), _lerp_k("y"), _lerp_k("z"))
+	var body_y: float = _lerp_k("body_y")
 	_update_dab(dt, st)
 	_update_look(dt)
 	var wobble := sin(t * 2.3) * 0.025 * maxf(0.0, 1 - absf(st.v) / 2) * (1.0 - dab_k)
@@ -2476,7 +2624,8 @@ func _process(dt: float) -> void:
 	_glare_guard(dt)
 	_rim_update(dt)
 	_mist_update(dt)
-	sun.light_energy = sun_energy * atmos.shade
+	var se_now := sun_energy * atmos.shade
+	if absf(se_now - sun.light_energy) > 0.005 * maxf(sun.light_energy, 0.01): sun.light_energy = se_now   # only a real change (each set re-uploads the light)
 	_update_probe(dt, drawn_pos)
 	_pk = _perf("atmos_light_probe", _pk)
 	# the dust simulation around the rider (fx/smoke_sim.gd)
@@ -2489,6 +2638,7 @@ func _process(dt: float) -> void:
 	if dust.sim != null:
 		dust.sim.cloud = Vector4(atmos.cloud_off.x, atmos.cloud_off.y, Atmos.CLOUD_DEPTH if atmos.clouds_on else 0.0, atmos.shade)
 	dust.sim_step(dt, drawn_pos, st.fwd(), atmos.wind)
+	if motes: motes.update(drawn_pos, night_k, golden_k)
 	_pk = _perf("dust_sim", _pk)
 	grime.trim = 0.0 if scenic or Env.s("BMX_NO_MATCH") != "" else _match
 	grime.update(dt, rig)
@@ -2504,6 +2654,7 @@ func _process(dt: float) -> void:
 	var gm := grade_rect.material as ShaderMaterial
 	gm.set_shader_parameter("blur", speed_k * speed_k)
 	gm.set_shader_parameter("speed", speed_k)
+	_grade_mips(gm, speed_k * speed_k > (0.0008 if gm.shader == _grade_sh_mip else 0.001))   # (the shader blurs from 0.001)
 	_pk = _perf("grime_speedfx", _pk)
 	cam.update_cam(dt)
 	_pk = _perf("camera", _pk)
@@ -2515,7 +2666,9 @@ func _process(dt: float) -> void:
 	else:
 		env.fog_depth_begin = (cam.dist + 75) * vd
 		env.fog_depth_end = (cam.dist * 1.6 + 130) * vd
-		sun.directional_shadow_max_distance = clampf(cam.dist * 4.5, 80, 260) * (0.7 if int(Settings.get_v("shadows")) == 0 else 1.0)
+		var smax := SHADOW_MAX_LOW if int(Settings.get_v("shadows")) == 0 else SHADOW_MAX
+		var sd := clampf(cam.dist * 4.5, 80.0, smax)
+		if absf(sun.directional_shadow_max_distance - sd) > 0.5: sun.directional_shadow_max_distance = sd
 	if cam_attr.dof_blur_far_enabled and scenic:   # lookout: keep the view sharp, soften only the horizon
 		cam_attr.dof_blur_far_distance = 9.0     # the cyclist sharp, the landscape behind softly out of focus
 		cam_attr.dof_blur_far_transition = 140.0
@@ -2546,10 +2699,10 @@ func _process(dt: float) -> void:
 func _update_probe(dt: float, at: Vector3) -> void:
 	if refl_probe == null or not refl_probe.visible: return
 	_probe_t += dt
-	refl_probe.global_position = at + Vector3(0, 4.0, 0)
 	if _probe_t > 6.0 or at.distance_to(_probe_pos) > 30.0:
 		_probe_t = 0.0
 		_probe_pos = at
+		refl_probe.global_position = at + Vector3(0, 4.0, 0)   # moved only when it re-captures: moving an UPDATE_ONCE probe re-captures it, so it did every frame
 		refl_probe.update_mode = ReflectionProbe.UPDATE_ONCE
 
 ## ride fog: a light, sunny distance haze that takes the sky's own colour (no grey wall at the horizon)

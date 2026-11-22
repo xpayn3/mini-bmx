@@ -74,6 +74,10 @@ void vertex() {
 	hgt *= mix(0.86, 1.18, g_noise(root * 0.05 + 13.0));
 	hgt *= h2.z > 0.96 ? 1.3 : 1.0;
 	hgt *= grow * fade;
+	if (hgt <= 0.0) {   // no blade here (doesn't grow / faded out): collapse it, skip the wind, hashes and normal reads
+		VERTEX = vec3(0.0, -1.0e5, 0.0);
+		v_world = VERTEX; v_col = vec3(0.0); v_n = vec3(0.0, 1.0, 0.0); v_t = 0.0; v_gust = 0.0; v_flat = 0.0;
+	} else {   // (Godot shaders don't allow return in vertex())
 	float wid = near ? (0.03 + 0.025 * h2.x) : (0.09 + 0.05 * h2.x);
 	wid *= mix(0.4, 1.0, fade);
 	// seen from above a thin blade is a sliver: the steeper the view, the wider (side views stay fine)
@@ -145,6 +149,7 @@ void vertex() {
 	v_gust = gust;	v_t = t;
 	VERTEX = p;
 	v_world = p;
+	}
 }
 
 void fragment() {
@@ -157,12 +162,12 @@ void fragment() {
 }
 
 void light() {
-	DIFFUSE_LIGHT += atmos_diffuse(NORMAL, LIGHT, ATTENUATION * LIGHT_COLOR, LIGHT_IS_DIRECTIONAL, v_world, 0.2);
+	vec3 lc = atmos_light_col(ATTENUATION * LIGHT_COLOR, LIGHT_IS_DIRECTIONAL, v_world);   // cloud shade once
+	DIFFUSE_LIGHT += (clamp(dot(NORMAL, LIGHT), 0.0, 1.0) + clamp(dot(-NORMAL, LIGHT), 0.0, 1.0) * 0.2) * lc;
 	// backlit glow: sun behind the blade, camera in front -> the thin tip lights up in its own colour (low sun = strong)
 	if (LIGHT_IS_DIRECTIONAL) {
 		float facing = clamp(dot(-VIEW, LIGHT), 0.0, 1.0);          // looking towards the light
 		float glow = pow(facing, 3.0) * smoothstep(0.25, 1.0, v_t); // tips only
-		vec3 lc = atmos_light_col(ATTENUATION * LIGHT_COLOR, true, v_world);
 		DIFFUSE_LIGHT += glow * lc * v_col * vec3(1.5, 1.35, 0.8) * 2.2;
 	}
 }
