@@ -1751,8 +1751,15 @@ func _read_input() -> Dictionary:
 	if bm > 0.01:
 		var sq := minf(Vector2(bf, bl).length() / bm, 1.4142)
 		bf = clampf(bf * sq, -1, 1); bl = clampf(bl * sq, -1, 1)
+	# the left stick pulled back (it only steers; "both sticks back" can be asked for to start a manual, manBothSticks)
+	var l_back := 0.0
+	if Settings.pad_active and not Settings._test_run:
+		var pads := Input.get_connected_joypads()
+		if not pads.is_empty(): l_back = maxf(0.0, Input.get_joy_axis(pads[0], JOY_AXIS_LEFT_Y))
+	if Env.s("BMX_LEFT_BACK") != "": l_back = float(Env.s("BMX_LEFT_BACK"))   # tests
 	return {
 		"pad": Settings.pad_active,
+		"left_back": l_back,
 		"body_fwd": bf,
 		"body_lean": bl,
 		"throttle": Input.get_action_strength("pedal"),

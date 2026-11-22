@@ -1764,6 +1764,13 @@ func _autotest(seconds: float) -> void:
 		if body_t != "" and el >= 3.0:
 			var ph2: BikePhysics = game.phys
 			if body_t == "manual": Input.action_press("body_back", 0.9 if int(el) % 4 < 3 else 0.0)
+			elif body_t.begins_with("slowback:"):   # tests: lean back slowly (over 1 s) to that far and hold: must NOT start a manual
+				if ph2.v > 4.0 and not _probe.has("sb0"): _probe["sb0"] = el   # (from rolling: the test clock runs while the ride loads)
+				Input.action_press("body_back", float(body_t.trim_prefix("slowback:")) * clampf(el - float(_probe.get("sb0", INF)), 0.0, 1.0))
+			elif body_t.begins_with("cornerpull:"):   # tests: a quick pull back only once leaned into a turn (corner gate: must NOT lift)
+				Input.action_press("body_back", float(body_t.trim_prefix("cornerpull:")) if absf(ph2.lean) > 0.3 else 0.0)
+			elif body_t.begins_with("pull:"):   # tests: hold the stick back that far (direct manual: stick = front height)
+				Input.action_press("body_back", float(body_t.trim_prefix("pull:")))
 			elif body_t == "balance" or body_t == "overpull":   # balance the manual like a player: pull while it's under the balance point
 				var bp: float = float(Tune.v.get("manBalance", 0.55)) - (0.12 if body_t == "balance" else -0.6)
 				var mf: float = float(Tune.v.get("manualFrom", 0.4))

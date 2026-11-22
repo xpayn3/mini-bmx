@@ -534,6 +534,32 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
     throws (`_tw_t` / `_ts_t` / `_sb_t` / `_sf_t` = time held). The stick throw only counts inside the lip window (`yb` / `yf`).
   - Tests (with `BMX_STRAIGHT=1 BMX_PAD=1`): `BMX_BODY=bhop` (+ `BMX_BHOP_HOLD=secs`), `BMX_BODY=manhop` (hop out of a manual),
     `BMX_FORGIVE_PROBE=1` (`STICKHOP`, `SCOOPHOP`, `FORGIVE`, `BHOP` lines), `BMX_BODY=stoppie` + `BMX_NOSE_PROBE=1` (`NOSE` lines).
+- **Direct manual (2026-11-22, user: "too stiff, locks us in, going too far stops us, make it more manual"; then "fall if we pull too far", "turn
+  less, with body lean")**. `manDirect` 1 (Ride > Manual & pump; 0 = the old tipping balance, they blend): **the stick is the front's height**.
+  `_balance_step`: target = pull x (`manBalance` + `manLoop` + 0.08), `man_a` follows on a soft spring (`manFollow` 40, ~0.3 s), so it never runs
+  away from the stick. `manualFrom` 0.4 -> 0.25 (Tune VER 18): a light pull lifts a little, ~65-70 % stick sits on the balance point (sweet spot,
+  boost), the edge is past the loop-out. Held past it 0.2 s = **falls off the back** (crash LOOPED OUT!; `manFall` 0 = floats at the top instead).
+  No lock-out, no speed cut in direct mode (`_tip_over` only in the old mode). Rear brake / stick forward lower the target; a sprint stamp raises it.
+  Nose manual: same spring, tops out at `noseBalance` + 0.12, never throws him over. `wheelieDrop` x4 in direct mode. **Turning on the back wheel**:
+  the turn and the lean asked are capped at what `manLean` (0.42 rad) gives at that speed (G tan / v: ~21 m radius at 36 km/h, tighter slower), x
+  `manTurn`; no FRONT WASHED OUT verdict while balancing. The drawn pitch sits ~0.13-0.17 rad under `man_a`. Tests: `BMX_BODY=pull:<0..1>`
+  (+ `BMX_STRAIGHT=1 BMX_PAD=1 BMX_MAN_PROBE=1 BMX_CRASH_LOG=1`): 0.5 -> a 0.28, 0.7 -> 0.59 steady in the zone, 1.0 -> falls after ~0.6 s. The old
+  **It starts from a quick pull, not from how far the stick is** (user: the manual "overrode our leaning", leaning back / forward on the track
+  changes the cornering): `_man_armed` is set when the stick goes centre -> back past 0.5 within `manPullTime` (0.25 s, `_pull_age`; 0 = any pull),
+  stays while the stick is back past 0.12, and without it `pull` = 0: a slow lean back, even to the edge, only shifts the weight. `manBothSticks`
+  (default ON since 2026-11-22, Tune VER 19: with the quick pull alone the user still "triggered a lot"): on a pad the left stick must be pulled back too
+  (`inp.left_back` = raw left stick Y from `Game._read_input`, test `BMX_LEFT_BACK=1`) to arm; after that only the right stick holds it.
+  Tests: `BMX_BODY=slowback:1.0` (ramps over 1 s once rolling: must stay `armed=false`), `pull:0.7` (armed), MAN probe prints `stick= armed= age=`.
+  **Corner gate + power wheelie (same day; user: "still trigger a lot", then "add corner gate and make it behave like in MX vs ATV")**:
+  `manBothSticks` is back to off (Tune VER 20). `manGate` (0.2 rad): the quick pull only arms when the bike is leaned less than that; leaned into
+  a corner, weight back never lifts the front (once up it stays up). `manPower` (1) / `manPowerSpeed` (9 m/s): weight back + pedalling lifts the
+  front with no pull (`_man_pw`, eased; all of it slow, none by 9 m/s; at most to the balance point, only a pull can go over the back); stop
+  pedalling and it comes down. Tests: `BMX_BODY=slowback:1.0` (pedalling: lifts slow, fades by ~10 m/s), `cornerpull:0.8` + `BMX_STEER=1`
+  (must stay `armed=false`), MAN probe prints `armed= pw= lean=`.
+  **Front wash-outs made rare (user: "a lot of times I fall front wash, make the rider more skilled")**: `frontWashAt` 1.35 -> 1.7,
+  `frontWashTime` 0.35 -> 0.7 (VER 21), the front's severity is capped under `crashHard` (never an instant wash-out), and the rider's weight-
+  forward reflex in trouble is x(1 + 3.5 x the meter) (was 1.5). Same trail test rides with weight back: the wash-out became a SAVED.
+  `BMX_BODY=balance|overpull|stoppie` controllers were written for the tipping balance (use `BMX_TUNE=manDirect=0` with them). Not yet confirmed by the user riding.
 - **Aerodynamics** (`aero_k` in `bike_physics.gd`): the air drag scales with the body: right stick forward on the ground = a race tuck
   (chest folded over the bars, hips back, knees bent) cuts drag by `tuckDrag` (0.42; half that while pedalling), stick back = sat up,
   `upDrag` more (an air brake). Straight test: 65.9 → 68.3 km/h in 20 s.

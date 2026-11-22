@@ -74,6 +74,11 @@ var lock_sb := false; var lock_sf := false; var flick_kick := 0.0
 # a tipping balance: below manBalance the front falls back down, past it the bike tips over backwards faster and
 # faster (loops out past manLoop). The bar pull / pedal strokes lift it, the rear brake / leaning forward drop it.
 # man_zone = in the sweet spot round the balance point (a little speed push, the HUD meter glows)
+# the manual starts from a quick pull (centre -> back within manPullTime), not from how far the stick is: a slow lean
+# back, however far, is just weight on the rear tyre (cornering). _pull_age = s since the stick left the centre going back
+var _man_armed := false; var _pull_age := 0.0; var left_back := 0.0
+var _man_pw := 0.0   # power wheelie: weight back + pedalling lifts the front (0..1, eased)
+var _man_over := 0.0   # s the front has been held past the loop-out angle (direct manual: then he falls off the back)
 var man_a := 0.0; var man_w := 0.0; var man_zone := false; var man_lock := 0.0; var man_zone_t := 0.0
 # downhill pump (hop held with both wheels down): pump_push = the push along the slope now (m/s², + = gaining),
 # pump_gain = km/h won in the current rhythm (shown on the HUD's pump bar, fades out when the rhythm stops),
@@ -309,7 +314,7 @@ func _reset_motion() -> void:
 	nose_a = 0.0; nose_w = 0.0; nose_zone = false; nose_lock = 0.0; nose_push = 0.0; nose_time = 0.0; nose_brake_t = 0.0; _nose_grace = 0.0
 	_tw_t = 9.0; _ts_t = 9.0; _sb_t = 9.0; _sf_t = 9.0; _hop_tap_t = 9.0; _hop_buf = 0.0; _pop_miss = 0.0; _pop_miss_t = 0.0; _gl = 0.0; _gc = 0.0
 	_bh_back = 0.0; _bh_since = 9.0; _bh_peak = 0.0; gest_hop = 0.0
-	man_a = 0.0; man_w = 0.0; man_zone = false; man_lock = 0.0; man_zone_t = 0.0; man_pull = 0.0; _man_grace = 0.0; _sprint_lift = 0.0
+	man_a = 0.0; man_w = 0.0; man_zone = false; man_lock = 0.0; man_zone_t = 0.0; man_pull = 0.0; _man_over = 0.0; _man_armed = false; _pull_age = 0.0; _man_pw = 0.0; _man_grace = 0.0; _sprint_lift = 0.0
 	pump_push = 0.0; pump_gain = 0.0; pump_idle = 0.0; pump_press_t = 0.0; _pump_release = 0.0; pump_on = false; pump_lift = 0.0; land_perfect = 0.0
 	wheelie_time = 0.0; wheelie_pedal = false; whip = 0; whip_hold = 0; whip_side = 0.0; _whip_arm = 0; _whip_t = 0; _whip_flashed = false; _whip_peak = 0.0
 	edge_s = 0.0; spin_hold = 0.0; spin_k = 1.0; yaw_edge_s = 0.0; yaw_hold = 0.0; stick_yaw = 0.0; air_stick = Vector2.ZERO; style_air = 0.0
@@ -465,6 +470,7 @@ func _step_controls(dt: float, inp: Dictionary, throttle: float, steer_input: fl
 	# rider body stick (gamepad right stick): fore / aft weight, side lean. Works the whole ride
 	pad = bool(inp.get("pad", false))
 	body_in = clampf(float(inp.get("body_fwd", 0.0)), -1.0, 1.0)
+	left_back = float(inp.get("left_back", 0.0))
 	flick_in = clampf(float(inp.get("body_lean", 0.0)), -1.0, 1.0)
 	body_in_s += (body_in - body_in_s) * minf(1.0, dt * 10)
 	# air control: W / S tilt the bike nose down / up against the rider's body (limited, see air_tilt; a
@@ -646,7 +652,7 @@ func _step_loads(dt: float) -> void:
 		# of the load moves forward, more while the front is in trouble. Without it the front could ride a long turn
 		# carrying next to nothing (a climb + weight back) and wash out (the AI rider did, every run at one bend)
 		var fw_k: float = float(T.get("riderSkill", 1.0)) * smooth01((absf(lean) - 0.12) / 0.35)
-		dN -= G * float(T.get("frontWeight", 0.12)) * fw_k * (1.0 + 1.5 * float(_risk.get("FRONT WASHED OUT!", 0.0)))
+		dN -= G * float(T.get("frontWeight", 0.12)) * fw_k * (1.0 + 3.5 * float(_risk.get("FRONT WASHED OUT!", 0.0)))
 		# (rolling backwards, braking loads the rear, not the front)
 		var d_brake := -_b_prev * SLOPE_TRANSFER * (1.0 if v >= 0.0 else -1.0)
 		# (how far the rear would go below nothing = how hard it's coming up: the crash judge builds on it)
@@ -740,7 +746,7 @@ func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_wa
 		# it is a manual instead (manualFrom)
 		var btn: bool = inp.hop and not hop_block
 		var p_fwd: float = clampf((body_in - 0.12) / 0.6, 0.0, 1.0)
-		var p_back: float = clampf((-body_in - 0.12) / maxf(0.05, float(T.get("manualFrom", 0.4)) - 0.12), 0.0, 1.0)
+		var p_back: float = clampf((-body_in - 0.12) / maxf(0.05, 0.4 - 0.12), 0.0, 1.0)
 		var p_in: float = maxf(1.0 if btn else 0.0, p_fwd * float(T.get("pumpStick", 1.2)))
 		var ground_ok: bool = not front_air and not rear_air and hop_t <= 0.0 and v > float(T.get("pumpMinSpeed", 2.0)) and man_a < 0.08
 		pump_on = ground_ok and (btn or p_fwd > 0.0 or p_back > 0.0)
@@ -929,6 +935,10 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 		var held: float = absf(cmd) if signf(cmd) == signf(bk) else 0.0
 		cmd = lerpf(cmd, signf(bk) * maxf(held, cmd_bank), bw)
 	var lean_need: float = clampf(atan(v * (v * tan(cmd) / L) / G), -T.leanMax + minf(0.0, bk), T.leanMax + maxf(0.0, bk))
+	# (on the back wheel he only leans a little: manLean)
+	if _balancing() and not air:
+		var ml: float = float(T.get("manLean", 0.42))
+		lean_need = clampf(lean_need, -ml, ml)
 	# balance (balanceSim): rolling, the bike is balanced, not driven. The rider tips it over (that is what the
 	# steer asks for) and the turn follows the lean: the front wheel steers itself into the lean (trail), so the
 	# bars end up where the lean needs them, after a short push the other way (countersteer) to start it.
@@ -959,6 +969,11 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 		# leaning and twisting the bike (manTurn of the normal turn); before, a manual into any bend went straight on
 		var yaw_cmd := v * tan(steer) / L
 		if front_air: yaw_cmd *= float(T.get("manTurn", 0.65)) if _balancing() else 0.0
+		# on the back wheel the bars do nothing: the turn is the lean (hips, knees), and a rider only leans a wheelie a
+		# little (manLean), so it carves wide arcs: at most the turn that lean gives at this speed
+		if front_air and _balancing():
+			var y_lim: float = G * tan(float(T.get("manLean", 0.42))) / maxf(absf(v), 2.5)
+			yaw_cmd = clampf(yaw_cmd, -y_lim, y_lim)
 		var gE := G * load_k
 		var mE := a_grip / gE
 		var cb := cos(bk)
@@ -1003,10 +1018,11 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 		# Only a LOADED front, LEANED over, washes you out: a light front (just landed, nose up, over a crest) is far past
 		# its grip only because it carries nothing - it just doesn't steer, the bike runs on straight (that was half
 		# of all test crashes, front_use 1.6-4.4 within 0.6 s of landings)
-		var wash_at: float = float(T.get("frontWashAt", 1.35))
+		var wash_at: float = float(T.get("frontWashAt", 1.7))
 		var w_load: float = clampf(share_f / (1.0 - SH_R), 0.0, 1.2)
 		var w_lean: float = smooth01((absf(lean) - 0.1) / 0.3)
-		_danger("FRONT WASHED OUT!", (front_use - wash_at) / 0.6 * (1.0 + 2.0 * front_lock) * w_load * w_lean if va > 3.0 else -1.0, dt, float(T.get("frontWashTime", 0.35)))
+		# (never at once: a skilled rider always gets the time to save a pushing front, so it is capped under crashHard)
+		_danger("FRONT WASHED OUT!", minf(2.2, (front_use - wash_at) / 0.6 * (1.0 + 2.0 * front_lock) * w_load * w_lean) if (va > 3.0 and not _balancing()) else -1.0, dt, float(T.get("frontWashTime", 0.7)))   # (not in a manual: the front is up or barely touching on purpose)
 		var tau_y: float = T.turnWeight * (0.4 + 0.6 * spd_k)
 		lat_m = _or(lat_m, a_lat_t) + (a_lat_t - _or(lat_m, a_lat_t)) * (1 - exp(-dt / tau_y)) if tau_y > 0.005 else a_lat_t
 		var a_lat := clampf(lat_m, a_min, a_max)
@@ -1524,7 +1540,7 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			wheelie_time = 0.0; wheelie_pedal = false
 		# (wheelie_up = the front's hold in the vertical step: man_a, set down no faster than wheelieDrop when the
 		# balance lets go of it at once: a loop-out, a hop)
-		wheelie_up = maxf(man_a, wheelie_up - float(T.get("wheelieDrop", 1.6)) * dt)
+		wheelie_up = maxf(man_a, wheelie_up - float(T.get("wheelieDrop", 1.6)) * (1.0 + 3.0 * float(T.get("manDirect", 1.0))) * dt)
 		if nose_a > 0.12 and rear_air and not front_air:
 			nose_time += dt
 			if brake: nose_brake_t += dt
@@ -2079,6 +2095,25 @@ func _balance_step(dt: float, pedalling: bool, throttle: float, brake: bool) -> 
 	man_lock = maxf(0.0, man_lock - dt)
 	_man_grace = 0.5 if man_a > 0.05 else maxf(0.0, _man_grace - dt)
 	var pull: float = clampf((-body_in - m_from) / maxf(0.05, 1.0 - m_from), 0.0, 1.0)
+	var pull_t: float = float(T.get("manPullTime", 0.25))
+	_pull_age = 0.0 if -body_in < 0.15 else _pull_age + dt
+	if -body_in < 0.12: _man_armed = false                        # back at the centre: it has to be pulled again
+	# (manBothSticks: on a pad the left stick has to be pulled back with it too)
+	# corner gate: the front only comes up from riding roughly straight (manGate = most lean). Leaned into a corner,
+	# weight back is weight back (it changes the corner), whatever the stick or the pedals do. Once up it stays up
+	var gate_ok: bool = absf(lean) < float(T.get("manGate", 0.2))
+	var straight: bool = gate_ok or man_a > 0.05
+	if not _man_armed and gate_ok and not air and -body_in >= 0.5 and _pull_age <= pull_t and (not pad or float(T.get("manBothSticks", 0.0)) < 0.5 or left_back >= 0.5): _man_armed = true
+	# power wheelie, like a motocross game: weight back + pedalling lifts the front with no pull at all, as far as the
+	# pedals have the power for (all of it slow, none by manPowerSpeed); stop pedalling and it comes down
+	var vp: float = maxf(1.0, float(T.get("manPowerSpeed", 9.0)))
+	var pw_t: float = float(T.get("manPower", 1.0)) * minf(throttle, 1.0) * (1.0 - smooth01((absf(v) - 0.5 * vp) / (0.5 * vp))) if (pedalling and straight and not air) else 0.0
+	_man_pw += (pw_t - _man_pw) * minf(1.0, dt * (6.0 if pw_t > _man_pw else 3.0))
+	if not straight: _man_pw = 0.0   # leaned into a corner with the front down: nothing left over lifts it
+	if float(T.get("manDirect", 1.0)) >= 0.5 and pull_t > 0.0: 
+		# (the pedals alone lift it to the balance point at most: only a pull can take it over the back)
+		var p_cap: float = b / (b + float(T.get("manLoop", 0.42)) + 0.08)
+		pull = maxf(pull if _man_armed else 0.0, minf(pull, p_cap) * minf(1.0, _man_pw))
 	var can: bool = not air and not _nosing() and v > (0.6 if pedalling else 1.5) and throw_v <= 0.5
 	man_pull = pull if can else 0.0
 	if not can:
@@ -2098,13 +2133,43 @@ func _balance_step(dt: float, pedalling: bool, throttle: float, brake: bool) -> 
 		if brake and brake_r > 0.1 and man_a > 0.0: drive -= float(T.get("manBrake", 12.0))
 		drive -= lift * 0.8 * clampf((body_in - 0.2) / 0.6, 0.0, 1.0)
 		var t := _tip(man_a, man_w, b, float(T.get("manGravity", 7.0)), drive, dt)
-		if t.x > b + float(T.get("manLoop", 0.42)):
-			t = _tip_over(b, "LOOPED OUT!"); man_lock = 0.6
+		# DIRECT manual (manDirect 1; 0 = the old tipping balance above): the stick IS the front's height. Pulled a
+		# little it lifts a little, about two thirds back it sits on the balance point, right at the edge it is past
+		# the loop-out. The front follows on a soft spring (manFollow), so it is smooth and never runs away from
+		# the stick: easing the stick forward always brings it back
+		var direct: float = clampf(float(T.get("manDirect", 1.0)), 0.0, 1.0)
+		var loop_at: float = b + float(T.get("manLoop", 0.42))
+		if direct > 0.0:
+			var tgt: float = pull * (loop_at + 0.08) if man_lock <= 0.0 else 0.0
+			tgt = maxf(tgt, 0.35 * float(T.get("manSprintLift", 1.1)) * _sprint_lift)
+			if brake and brake_r > 0.1: tgt *= 1.0 - minf(1.0, brake_r * 1.5)   # the rear brake sets it down
+			tgt *= 1.0 - clampf((body_in - 0.2) / 0.6, 0.0, 1.0)
+			var kf: float = float(T.get("manFollow", 40.0))
+			var acc: float = kf * (tgt - man_a) - 2.0 * sqrt(kf) * 0.9 * man_w
+			if pedalling and pull > 0.0 and man_lock <= 0.0:   # a wheelie: each stroke nudges the front
+				acc += 0.35 * float(T.get("manPedal", 3.0)) * pull * minf(throttle, 1.0) * absf(sin(crank))
+			var w2: float = man_w + acc * dt
+			var a2: float = man_a + w2 * dt
+			if a2 <= 0.0:
+				a2 = 0.0; w2 = maxf(0.0, w2)
+			t = Vector2(lerpf(t.x, a2, direct), lerpf(t.y, w2, direct))
+		if t.x > loop_at:
+			if direct >= 0.5:
+				# pulled too far and kept there: he goes off the back (manFall; 0 = the front just floats at the top)
+				_man_over += dt
+				if float(T.get("manFall", 1.0)) < 0.5:
+					t = Vector2(loop_at, minf(t.y, 0.0))
+				elif _man_over > 0.2:
+					crash_pending = "LOOPED OUT!"; _man_over = 0.0
+			else:
+				t = _tip_over(b, "LOOPED OUT!"); man_lock = 0.6
+		else:
+			_man_over = maxf(0.0, _man_over - dt * 2.0)
 		man_a = t.x; man_w = t.y
 		man_zone = man_a > 0.15 and absf(man_a - b) < zone
 		man_zone_t = man_zone_t + dt if man_zone else 0.0
 		if Env.s("BMX_MAN_PROBE") != "" and Engine.get_physics_frames() % 15 == 0:   # tests
-			print("MAN a=%.2f w=%.2f pull=%.2f zone=%s pitch=%.2f gp=%.2f v=%.1f" % [man_a, man_w, pull, man_zone, pitch, _g_pitch, v])
+			print("MAN a=%.2f pull=%.2f pitch=%.2f gp=%.2f v=%.1f stick=%.2f armed=%s pw=%.2f lean=%.2f" % [man_a, pull, pitch, _g_pitch, v, body_in, _man_armed, _man_pw, lean])
 	# --- front wheel: nose manual / stoppie ---
 	var nb: float = float(T.get("noseBalance", 0.5))
 	var n_from: float = float(T.get("noseFrom", 0.6))
@@ -2125,6 +2190,18 @@ func _balance_step(dt: float, pedalling: bool, throttle: float, brake: bool) -> 
 			if nose_a > 0.08: n_drive += float(T.get("noseBrake", 4.0)) * grab
 		n_drive -= n_lift * 0.8 * clampf((-body_in - 0.15) / 0.6, 0.0, 1.0)
 		var nt := _tip(nose_a, nose_w, nb, float(T.get("noseGravity", 7.0)), n_drive, dt)
+		var n_direct: float = clampf(float(T.get("manDirect", 1.0)), 0.0, 1.0)
+		if n_direct > 0.0:
+			# the same on the front wheel: the stick forward is how far the rear is up (the brake only starts it); it
+			# tops out just past the balance point, it never throws him over
+			var n_tgt: float = push * (nb + 0.12) * (grab if nose_a < 0.08 else 1.0) if nose_lock <= 0.0 else 0.0
+			n_tgt *= 1.0 - clampf((-body_in - 0.15) / 0.6, 0.0, 1.0)
+			var nk: float = float(T.get("manFollow", 40.0))
+			var nw2: float = nose_w + (nk * (n_tgt - nose_a) - 2.0 * sqrt(nk) * 0.9 * nose_w) * dt
+			var na2: float = nose_a + nw2 * dt
+			if na2 <= 0.0:
+				na2 = 0.0; nw2 = maxf(0.0, nw2)
+			nt = Vector2(lerpf(nt.x, na2, n_direct), lerpf(nt.y, nw2, n_direct))
 		if nt.x > nb + float(T.get("noseLoop", 0.4)):
 			nt = _tip_over(nb, "TOO FAR!"); nose_lock = 0.6
 		nose_a = nt.x; nose_w = nt.y

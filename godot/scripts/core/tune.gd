@@ -68,8 +68,8 @@ const DEFS := [
 	]],
 	["Front tyre", [
 		["frontGrip", "Front tyre grip", 1.0, 0.5, 1.6, 0.02, "×"],
-		["frontWashAt", "Front washes out past", 1.35, 1.05, 2.5, 0.05, "× grip"],
-		["frontWashTime", "Pushing that hard for", 0.35, 0.05, 1.5, 0.05, "s"],
+		["frontWashAt", "Front washes out past", 1.7, 1.05, 2.5, 0.05, "× grip"],
+		["frontWashTime", "Pushing that hard for", 0.7, 0.05, 1.5, 0.05, "s"],
 	]],
 	["Brakes", [
 		["brakeFront", "Front brake power", 0.75, 0, 1.5, 0.05, "×"],
@@ -186,7 +186,7 @@ const DEFS := [
 	]],
 	["Body stick", [
 		["stickShift", "Fore / aft reach (× weight shift)", 1.7, 0, 3, 0.05, "×"],
-		["manualFrom", "Manual / wheelie: stick pulled back past", 0.4, 0.1, 0.95, 0.05, ""],
+		["manualFrom", "Manual / wheelie: stick pulled back past", 0.25, 0.1, 0.95, 0.05, ""],
 		["flickSteer", "Side lean turns the bars", 0.5, 0, 1, 0.05, ""],
 		["flickGrip", "Lean into a turn: extra grip", 0.2, 0, 0.6, 0.02, "×"],
 		["flickLean", "Bike thrown under the body", 0.35, 0, 0.8, 0.01, "rad"],
@@ -208,6 +208,15 @@ const DEFS := [
 	# side-on BMX game feel: the manual / wheelie is a balance you work, holding hop on the downhills pumps speed,
 	# a landing in line with the ground gives speed back
 	["Balance & pump", [
+		["manDirect", "Manual: stick sets the front height (0 = old tipping balance)", 1.0, 0, 1, 0.05, ""],
+		["manPullTime", "Manual: starts from a pull back quicker than (0 = any pull)", 0.25, 0, 0.6, 0.01, "s"],
+		["manBothSticks", "Manual: pull BOTH sticks back to start it (pad)", 0.0, 0, 1, 1, ""],
+		["manGate", "Manual / wheelie only starts leaned less than", 0.2, 0.05, 1.3, 0.01, "rad"],
+		["manPower", "Wheelie: weight back + pedalling lifts the front", 1.0, 0, 1, 0.05, ""],
+		["manPowerSpeed", "Wheelie: pedals can lift the front up to", 9.0, 3, 20, 0.5, "m/s"],
+		["manFollow", "Manual: how quickly the front follows the stick", 40.0, 10, 120, 1, ""],
+		["manFall", "Manual: fall off the back when pulled too far (0 = floats)", 1.0, 0, 1, 1, ""],
+		["manLean", "Manual: most lean in a turn", 0.42, 0.1, 0.7, 0.01, "rad"],
 		["manBalance", "Balance point (front up)", 0.55, 0.3, 0.9, 0.01, "rad"],
 		["manGravity", "Falls away from the balance point", 7.0, 2, 16, 0.25, "rad/s²"],
 		["manLift", "Pull on the bars (stick back)", 9.0, 3, 20, 0.25, "rad/s²"],
@@ -280,10 +289,10 @@ const DEFS := [
 
 const PATH := "user://tune.cfg"
 ## bump VER when defaults are retuned: saved values of the RETUNED keys are dropped once
-const VER := 17
+const VER := 21
 ## later retunes, per version: only these keys are dropped for saves older than that version (bumping VER
 ## with one shared list would reset every earlier retuned key again)
-const RETUNED_AT := {8: ["manualFrom", "stickAirRoll", "stickSpinBuild", "stickYawRate"], 9: ["leanMax"], 11: ["leanIn", "leanOut", "flickSpeed"], 12: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 13: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 14: ["sprintRock"], 15: ["dustWidth"], 16: ["bodyLean"], 17: ["stickAirEase"]}
+const RETUNED_AT := {8: ["manualFrom", "stickAirRoll", "stickSpinBuild", "stickYawRate"], 9: ["leanMax"], 11: ["leanIn", "leanOut", "flickSpeed"], 12: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 13: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 14: ["sprintRock"], 15: ["dustWidth"], 16: ["bodyLean"], 17: ["stickAirEase"], 18: ["manualFrom"], 19: ["manBothSticks"], 20: ["manBothSticks"], 21: ["frontWashAt", "frontWashTime"]}
 const RETUNED := ["steerRate", "steerRelease", "steerCurve", "turnFloor", "steerMax", "slowSteer",
 	"barSpeed", "grip", "slipRecover", "slipMax", "turnWeight", "leanMax", "leanIn", "leanOut", "leanDamp", "bikeLeanMul", "bikeLeanCap", "flipAccel", "flipRate", "airTwist", "landBack", "travel", "popKick"]
 var defaults := {}

@@ -191,6 +191,15 @@ const PAGES := [
 	]],
 	["manual", "Manual & pump", "Manuals / wheelies you balance yourself, pumping for speed, perfect landings", [
 		["Manual & wheelie", [
+			["*manDirect", "The stick sets how high the front is, and it follows smoothly. 0 = the old balance that tips on its own.", "Old balance", "Stick = height"],
+			["*manPullTime", "The manual starts from a quick pull back (centre to back within this time). Leaning back slowly, however far, only shifts your weight for cornering. 0 = any pull lifts the front.", "Any pull", "Slow pulls too"],
+			["*manBothSticks", "On a pad: the left stick has to be pulled back together with the right one to start a manual. After that only the right stick holds it.", "Right stick", "Both sticks"],
+			["*manGate", "The front only comes up when you ride roughly straight: leaned more than this, weight back just changes the corner.", "Straight only", "Anywhere"],
+			["*manPower", "Weight back + pedalling lifts the front without any quick pull, like a motocross game. Stop pedalling and it comes down.", "Off", "On"],
+			["*manPowerSpeed", "Up to what speed the pedals have the power to lift the front (full when slow, fading to nothing here).", "Slow only", "Fast too"],
+			["*manFollow", "How quickly the front follows the stick.", "Lazy", "Snappy"],
+			["*manFall", "Pulled too far back and held: he falls off the back. Off = the front just floats at the top.", "Floats", "Falls"],
+			["*manLean", "How far he leans a manual / wheelie into a turn: more = tighter turns on the back wheel.", "Wide", "Tight"],
 			["*manBalance", "The balance point: how high the front sits when it's balanced.", "Low", "High"],
 			["*manGravity", "How fast it falls away from the balance point.", "Lazy", "Twitchy"],
 			["manLift", "How hard pulling the stick back lifts the front.", "Gentle", "Strong"],
