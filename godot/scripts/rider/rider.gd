@@ -1225,7 +1225,7 @@ func reset_pose() -> void:
 	# what the pose remembers from before (a crash tumbling the bike nose-up left a "wheelie" behind that
 	# shoved the body about after getting up)
 	sm_wheelie = 0.0; sm_aero = 0.0; sm_effort = 0.0; sm_turn = 0.0
-	sm_pre = 0.0; sm_ext = 0.0; sm_popfx = 0.0; sm_squash = 0.0; sm_lip = 0.0
+	sm_pre = 0.0; sm_ext = 0.0; sm_popfx = 0.0; sm_squash = 0.0; sm_lip = 0.0; sm_fold = 0.0; sm_reach = 0.0
 	roll_init = false; roll_pv = 0.0; roll_cv = 0.0; lat_g_s = 0.0; flow_e = 0.0
 
 
@@ -1244,6 +1244,7 @@ static func _num(p: Dictionary, k: String, def := 0.0) -> float:
 ## headRoll, absorb, pitch, bodyLevel, attackDrop, pedal, sprint, crank, air, compress, hipShift, t
 var sm_turn := 0.0
 var sm_aero := 0.0
+var sm_fold := 0.0; var sm_reach := 0.0   # landing: folded by the hit, reaching for the ground
 var sm_pre := 0.0; var sm_ext := 0.0; var sm_popfx := 0.0; var sm_squash := 0.0; var sm_lip := 0.0   # the jump (see update_pose)
 var sm_effort := 0.0
 var sm_pitch0 := 0.0
@@ -1301,6 +1302,13 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	sm_popfx += (clampf(_num(p, "popFx"), 0.0, 1.0) - sm_popfx) * (1.0 - exp(-18.0 * jh))
 	sm_squash += (clampf(_num(p, "squash"), 0.0, 1.0) - sm_squash) * (1.0 - exp(-12.0 * jh))
 	sm_lip += (clampf(_num(p, "lipK"), 0.0, 1.0) - sm_lip) * (1.0 - exp(-8.0 * jh))
+	# landing: he reaches for the ground with legs and arms nearly straight (the bike pushed away under him), then the
+	# hit folds him: hips down and back over the rear wheel, elbows out, chest and head down towards the bars - as deep as
+	# the hit was hard - and he comes back up as he gathers himself (slowly after a heavy one)
+	var fold_in := clampf(_num(p, "landFold"), 0.0, 1.0)
+	sm_fold += (fold_in - sm_fold) * (1.0 - exp(-(26.0 if fold_in > sm_fold else 7.0) * jh))
+	sm_reach += (clampf(_num(p, "landReach"), 0.0, 1.0) - sm_reach) * (1.0 - exp(-14.0 * jh))
+	var j_fold: float = sm_fold * float(sty.get("landFold", 1.0))
 	var j_pre: float = sm_pre * float(sty.get("jumpPreload", 1.0))
 	var j_ext: float = sm_ext * float(sty.get("jumpExtend", 1.0))
 	var j_sq: float = sm_squash * float(sty.get("jumpSquash", 1.0))
@@ -1337,13 +1345,13 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	pelvis.y += 0.07 * air * float(sty.airCrouch) * aero   # forward in the air: no crouch, legs pushed out
 	# (a squash is NOT folding over the bars: the hips go back and down behind the saddle and the arms push the bars
 	# away, so the bike has room to come up in front of him)
-	pelvis.x += -0.045 * j_pre + 0.09 * j_ext - 0.13 * j_sq
-	pelvis.y += -0.02 * j_pre + 0.06 * j_ext - 0.03 * j_sq
+	pelvis.x += -0.045 * j_pre + 0.09 * j_ext - 0.13 * j_sq - 0.07 * j_fold - 0.02 * sm_reach
+	pelvis.y += -0.02 * j_pre + 0.06 * j_ext - 0.03 * j_sq - 0.09 * j_fold + 0.06 * sm_reach
 
 	# chest
 	# (pedalling out of the saddle the chest stays forward over the bars)
 	var ang: float = 0.52 - 0.2 * clampf(-bstick, 0.0, 1.0) - float(sty.pedalChest) * pedal + 0.12 * spr + 0.3 * eff + 0.15 * (comp / 0.3) + 0.08 * air + sty.lean * (1 - 0.5 * pedal) + 0.32 * aero_a + 0.6 * aero_g
-	ang += 0.3 * j_pre - 0.3 * j_ext + 0.06 * j_sq + 0.12 * sm_popfx * air
+	ang += 0.3 * j_pre - 0.3 * j_ext + 0.06 * j_sq + 0.12 * sm_popfx * air + 0.42 * j_fold - 0.18 * sm_reach
 	# spinning in the air: tall and compact over the bike (chest up, knees in), the head and shoulders lead
 	var spin_style: float = smoothstep(0.8, 3.5, absf(_num(p, "airSpin"))) * air
 	ang = lerpf(ang, 0.42, 0.7 * spin_style)

@@ -582,6 +582,47 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
     (+ `BMX_LIP_PREP`, `BMX_LIP_STEP`) for the poses. Don't start more than 2-3 test windows at once (Vulkan device lost).
   - Not done: the pump for speed on rollers / backsides is still the old push (`pumpHold`), not the leg model; the
     suspension's own rebound is not simulated into the pop (the timing window stands in for it); not ridden by the user yet.
+- **Landings (2026-11-22, user: "make our landing better ... does suspension and body react realistically, big jumps,
+  landing at a slight corner", "suspension never past its end", "body reacts realistically, no clipping")**.
+  `bike_physics.gd`; sliders Ride > Jumps > Landing. Measured before: 43 deg sideways at 47 km/h cost nothing; a flat
+  landing from 2.4 m rode on with no reaction; suspension at 102-114 % of its travel, tyres squashed 5-6.6 cm.
+  - **Travel is a hard end** (`trF` / `trR` in `_step_vertical`): each end's travel = min(`T.travel`, sag + the DRAWN
+    fork's / rear end's room to its stop, `Suspension.F/R["max"]`), so the physics can never press an end further than
+    the model shows (the drawn bike was then lifted by the tyre unclip). The last fifth is a bump stop (rate to 7x, only
+    while being squeezed: as a plain spring it threw a bike set down deep in its travel into the air); on the stop the
+    tyre's push goes straight into the frame; the wheel is clamped at 100 %. Tyres stiffen with squash and sit on the
+    rim at `TYRE_MAX` 4.5 cm. Suite: max travel 100 % everywhere (was up to 123 %). The graphs read both ends on the
+    front's travel (`dg_travel` = `trF`, `dg_xR` rescaled).
+  - **The verdict = what got through** (0.4 s after touch-down): `hit` = sqrt(legs^2 + (1.3 x rim)^2), legs =
+    `land_jolt` (the body's speed into the bike when the legs ran out), rim = `_rim_hit` (the speed the whole bike lost
+    against the ground with suspension and tyres on their stops). > `slamJolt` x LAND = SLAM!; from `landHeavy` 0.45 of
+    that = a heavy landing (`land_heavy` 0..1): up to 22 % of the speed gone, `_stun` 0.25-0.85 s without power, "OOF!"
+    / "HEAVY LANDING". Measured: 1 m drop 2.3 of 8.7 (clean); table_1.5 popped onto its landing 5.5 (heavy 0.3);
+    overshot to flat 5.6-6.4 (0.4-0.5); the same with the tuck held into the ground 7.8 (0.8).
+  - **Sideways** (in the touch-down block): the speed across the tyres has to be stopped by their grip. `landYawFree`
+    0.12 rad costs nothing; of the rest the tyres catch mu x (0.8 x impact + 2.5) x `landYawGrip` m/s at once (speed
+    gone, `land_yaw`, "SKETCHY!" / "SIDEWAYS!"), what is left is a slide for the ground sim; more than `landYawCrash`
+    5.5 m/s caught at once = HIGHSIDE!. At 26 km/h: 15 deg 7.3 -> 7.2 m/s, 30 deg -> 6.7, 45 deg -> 5.7; at 47 km/h
+    30 deg+ is a highside. (Past `LAND_CONE` 60 deg the old SKETCHY / FAKIE rule still runs first.)
+  - **Drops**: rolling off level ground at speed the rider holds the bike level (`edge_k`: the balance torque x3.5 and
+    its gain x6, only with the front well clear of ground that falls away AND the rear on level ground: over a crest
+    or off a lip it stays out). drop_1 at 24 km/h: 40 -> 27 deg nose down; drop_2 at 28: NOSE DIVE crash -> clean.
+    Rolling on the rear wheel alone, the hill the drive feels is the ground under that wheel (it was the frame's
+    pitch: nose-high down a bump's back side it "climbed" and stalled).
+  - **Tuck held into the ground** (`_tuck_in`): the legs' reach for the landing is cut to a quarter, so they bottom.
+  - **Perfect landing**: the boost is pumped out of a downslope (`landBoost` x how steep x how hard, none on the
+    flat); it was a flat +6 km/h from nowhere.
+  - **Rider** (`rider.gd`, inputs `landFold`, `landReach`): reaches for the ground (hips up, back straighter), the hit
+    folds him (hips down and back, chest down; `land_fold` from the impact, kept down longer by a heavy one), then he
+    comes up (0.45-2 s). `BMX_BODY_CLIP` over the landing runs: 0 clips.
+  - Tests: `BMX_PG_PILOT_YAW=<deg>` / `BMX_PG_PILOT_TUCK=1` (test rider lands turned / tucked), `BMX_LAND_PROBE=1`
+    (`HIT legs= rim= hit= of heavy=`, `YAWLAND angle= side= caught= left=`; also with `BMX_TRICK`), `BMX_LAND_SHOT=prefix`
+    (12 frames through a touch-down). Suite baseline re-saved; `slope_stress` 51 / 51.
+  - Open: on the trail the auto rider's first jump measured a hit of 8.3 of 8.7 with the 1.5x rim weight (now 1.3x):
+    slams may be common at trail speeds, tune `slamJolt`; a rim strike still stops the frame in one step (50-67 g);
+    rollers show energy gains of ~0.5 J/kg at crests (the rear-wheel slope reading); drop_2 still lands 50-60 deg nose
+    down; high-speed compression damping is weak (the shock's blow-off), so big hits reach the rim; not ridden by the
+    user yet.
 - **Direct manual (2026-11-22, user: "too stiff, locks us in, going too far stops us, make it more manual"; then "fall if we pull too far", "turn
   less, with body lean")**. `manDirect` 1 (Ride > Manual & pump; 0 = the old tipping balance, they blend): **the stick is the front's height**.
   `_balance_step`: target = pull x (`manBalance` + `manLoop` + 0.08), `man_a` follows on a soft spring (`manFollow` 40, ~0.3 s), so it never runs

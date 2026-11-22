@@ -28,6 +28,8 @@ var mode := "feature"
 var pump := true
 var tech := ""          # tests: jump technique (pop / early / hold / squash / hop), see tick()
 var tech_rel := 0.1
+var land_yaw_deg := 0.0
+var land_tuck := false
 var _hop_clock := 0.0
 var target = null              # the feature it repeats
 var runs := 0
@@ -51,6 +53,8 @@ func _init(c: PlaygroundCourse) -> void:
 	if Env.s("BMX_PG_PILOT") == "lane": mode = "lane"
 	if Env.s("BMX_PG_PILOT_PUMP") == "0": pump = false
 	tech = Env.s("BMX_PG_PILOT_TECH")
+	if Env.s("BMX_PG_PILOT_YAW") != "": land_yaw_deg = float(Env.s("BMX_PG_PILOT_YAW"))
+	land_tuck = Env.s("BMX_PG_PILOT_TUCK") != ""
 	if Env.s("BMX_PG_PILOT_REL") != "": tech_rel = float(Env.s("BMX_PG_PILOT_REL"))
 	if Env.s("BMX_PG_PILOT_AUTO") == "0": auto = false
 
@@ -222,6 +226,10 @@ func tick(game, dt: float) -> Dictionary:
 	#   pop = stick back as the lip comes up (preload), snapped forward `tech_rel` s before its edge; early = the same
 	#   let go 0.4 s out (a hop off the face); hold = hop held right through the lip, never let go (the assist alone);
 	#   squash = stick held forward into it; hop = a full hop on the flat run-in every 2.5 s
+	# tests: land every jump with the bike turned this many degrees to the way it flies (BMX_PG_PILOT_YAW), or with the
+	# tuck held into the ground (BMX_PG_PILOT_TUCK=1)
+	if land_yaw_deg != 0.0 and ph.air and ph.air_time > 0.3: ph.slip = deg_to_rad(land_yaw_deg)
+	if land_tuck and ph.air and ph.air_time > 0.15: out.hop = true
 	if tech != "":
 		out.hop = false
 		var lip_in: float = ph.lip_last if ph.lip_state == 2 else INF

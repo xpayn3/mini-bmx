@@ -231,7 +231,7 @@ const PAGES := [
 			["*pumpStick", "Right stick forward pumps; eased back up a face it carries speed.", "None", "Strong"],
 		]],
 		["Perfect landings", [
-			["*landBoost", "Speed boost for a landing matched to the slope.", "None", "Big"],
+			["*landBoost", "A landing matched to a downslope is pumped for speed (none on the flat).", "None", "Big"],
 			["landPerfect", "How close to the slope counts as perfect.", "Strict", "Forgiving"],
 			["landPerfectAir", "Only from this much air time.", "Short", "Long"],
 		]],
@@ -289,7 +289,11 @@ const PAGES := [
 		]],
 		["Landing", [
 			["*landSlide", "Land on ground tilted sideways: the hit is softer, the rest slides you towards its low side.", "Sticks", "Slides"],
-			["*slamJolt", "Legs take a hit up to (bigger = harder landings are fine).", "Fragile", "Tough"],
+			["*slamJolt", "The hit that throws him down (what gets through suspension, tyres and legs).", "Fragile", "Tough"],
+			["*landHeavy", "From this share of that, a landing is heavy: speed lost, a moment to recover.", "Soon", "Rarely"],
+			["*landYawFree", "Landed turned to the way you travel: this much costs nothing.", "Strict", "Forgiving"],
+			["landYawGrip", "How much sideways speed the tyres catch at once (the rest is a slide).", "Slides", "Bites"],
+			["*landYawCrash", "Sideways speed caught at once that throws you over (highside).", "Soon", "Never"],
 			["landPrepTime", "Reaches for the landing.", "Late", "Early"],
 			["*airAssist", "How much the rider lines the bike up for the landing by himself. Only with your hands off the stick: your stick always wins.", "All yours", "He helps"],
 			["airAimDelay", "Waits before aiming at the landing.", "At once", "Later"],

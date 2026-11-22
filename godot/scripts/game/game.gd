@@ -108,6 +108,7 @@ var drawn_pos := Vector3.ZERO
 var clip_probe := Env.s("BMX_CLIP_PROBE") != ""
 var _lean_max := 0.0; var _lean_shot_t := -9.0; var _lean_shots := 0   # tests (BMX_LEAN_SHOT)
 var _lip_t := -1.0; var _lip_shots := 0   # tests (BMX_LIP_SHOT)
+var _land_t := -1.0; var _land_shots := 0   # tests (BMX_LAND_SHOT)
 var clip_stats := {"frames": 0, "fixed": 0, "bad": 0, "before": 0.0, "after": 0.0}
 var _prev := {}
 var _last_good := {}
@@ -2313,6 +2314,12 @@ func _process(dt: float) -> void:
 			get_viewport().get_texture().get_image().save_png("%s_%d.png" % [Env.s("BMX_LIP_SHOT"), _lip_shots])
 			print("LIPSHOT %d prep=%.2f air=%s compress=%.2f absorb=%.2f vy=%.1f crouch=%.2f wait=%.2f pop_fx=%.2f squash=%.2f pull=%.2f" % [_lip_shots, st.prep, st.air, st.compress, st.body_y - st.y, st.vy, st.crouch, st.pop_wait, st.pop_fx, st.squash, st.air_pull])
 			_lip_shots += 1
+	if Env.s("BMX_LAND_SHOT") != "" and _land_shots < 12:   # tests: 12 shots, 0.06 s apart, from just before a touch-down
+		if _land_shots == 0 and st.air and st.air_time > 0.5 and st.land_prep > 0.6: _land_t = t
+		if _land_t >= 0.0 and t - _land_t >= _land_shots * 0.06:
+			get_viewport().get_texture().get_image().save_png("%s_%d.png" % [Env.s("BMX_LAND_SHOT"), _land_shots])
+			print("LANDSHOT %d air=%s since=%.2f fold=%.2f heavy=%.2f absorb=%.2f prep=%.2f" % [_land_shots, st.air, st.since_land, st.land_fold, st.land_heavy, st.body_y - st.y, st.land_prep])
+			_land_shots += 1
 	if Env.s("BMX_LEAN_SHOT") != "" and not st.air and not st.crash_on:   # tests: shots in deep leans
 		var ln := absf(st.bike_lean)
 		_lean_max = maxf(_lean_max, ln)
@@ -2402,6 +2409,8 @@ func _process(dt: float) -> void:
 		pi["popFx"] = st.pop_fx * minf(1.0, st.pop_q)
 		pi["squash"] = maxf(st.squash * st.prep, st.squash_fx)
 		pi["lipK"] = maxf(st.prep, 1.0 if (st.pop_wait > 0.0 or st.hop_t > 0.0) else 0.0)
+		pi["landFold"] = 0.0 if st.air else st.land_fold   # folded up by a landing, gathering himself again
+		pi["landReach"] = st.land_prep                     # legs reaching down for the ground
 		pi["hipShift"] = _mcap("hip_shift", st.hip_shift, pdt)
 		pi["bodyStick"] = -0.55 if scenic else _mcap("body_stick", st.body_in_s, pdt)
 		pi["relax"] = 1.0 if scenic else 0.85 * dab_k   # foot down = calm: sat up, back straight, chin up
