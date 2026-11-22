@@ -1251,16 +1251,32 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   9.2 m/s @ 32 deg run up the lip (trace with `BMX_PG_TRACE`); (2) fast into a big kicker the bike leaves early off the
   transition (gap_9 at 40 km/h: 4.9 deg, no air off the lip, into the gap); (3) speed at the lip is often not lower than the
   run-in after climbing the kicker (table_1.5 at 42 km/h: lip 42, drop_1.5 run-up: lip = cruise speed): the pop / pump adds it.
+- **Found by the lab / suite (2026-11-22), not fixed yet** (the baseline `tools/pg_baseline.json` holds them as they are):
+  (4) the take-off depends on state left from earlier riding (smoothed grip / tyre loads / crash meters...): the same
+  run at the same speed left gap_5 at 41.5 deg from a clean state but at 84 deg (16 km/h, landed 0.5 m out) after other
+  features; stepdown_1.8 at 37-39 km/h left at 90 deg twice in lane mode (one LOOPED OUT), hop_0.8 at 30 km/h at 65 deg.
+  The suite now starts every run clean (`PlaygroundLab.fresh`), so it won't show this: ride a lane in lane mode to see it;
+  (5) drop_2 at 28 km/h
+  = NOSE DIVE; (6) landings stop all the downward speed in one physics step: 60-86 g "in one step" on flat landings
+  from ~1.5 m up, tyres squashed 5-7 cm (rim strike); (7) the pump at a lip adds ~21 J/kg (as much as climbing 2 m),
+  without it the take-off loses energy as it should; (8) brakes: 0.8-0.85 g on dirt / grass / sand alike (29 km/h: 4.1 m),
+  a real bike on loose dirt is nearer 0.6-0.7 g, and the surfaces barely differ; the wet strip (the game's water surface)
+  stops at ~0.97 g, harder than dirt (its drag adds to the brakes).
 
 ### Developer view of the test playground (`scripts/levels/ride_diag.gd`) - telemetry + sliders for riding code
-- **Only in the test playground** (user decision 2026-11-21: developer tools live in that level, normal rides have none):
-  the playground opens with the **tuning card docked down the left edge** (every Ride / Rider / Look / Sound / Light / Dust
-  slider, presets, Feel; `hud.card_left` -> `hud._dock_card`), the ride in the middle, the **ride diagnostics** graphs on
-  the right; the HUD's left items (jump card, bike computer, the playground's jump label) move right of the card
-  (`hud.set_left_inset`), its right column left of the graphs (`hud.set_right_inset`). ✕ / P closes / opens the card,
-  F4 cycles the graphs panel -> full screen (graphs fill everything right of the card, the rest of the HUD hidden:
-  `hud.dev_full`) -> off. `BMX_DEV_CARD=0` starts without the card. Try a slider, ride the feature again (bail tap = again),
-  read the graphs: that's the loop for ride feel and new riding code.
+- **Only in the test playground** (user decision 2026-11-21: developer tools live in that level, normal rides have none).
+  **Layout (2026-11-22, user: "tidy, compact, nothing covering")**: a slim **tuning column** on the left (the TuneCard,
+  every slider, scaled `DEV_CARD_SCALE` 0.84 with the graphs' flat dark panel: `hud.card_left` -> `hud._dock_card`), the
+  **graphs in a band along the bottom** (`RideDiag.BAND` 46 % of the height; a page's rows split over two columns when
+  the band is wide: `DiagView.rows` on the page body), one compact header over it (DEV, page tabs, keys, CAM pick; the
+  RIDER and LAB rows side by side, small flat buttons from `RideDiag._dev_theme`), the ride above the band
+  (`ride_rect`; `_frame_bike` slides the camera with `h_offset` / `v_offset` so the bike sits in its middle, never moving
+  the camera under the ground). The game HUD's big pieces are hidden there (`hud.dev_mode`: computer, jump card,
+  life / stamina, STYLE, corner lines, achievement pops, quick tune; plus the area banner, the WASTED slow motion
+  (`Game._wasted_on`) and the fullscreen button; F11 still works); the hop / pump / balance bars and the get-up prompt
+  move up over the band (`hud.dev_bars`). The playground readout is a small block at the ride's top left. ✕ / P closes /
+  opens the tuning column, F4 cycles band -> full screen (graphs beside the column) -> off. `BMX_DEV_CARD=0` starts
+  without the column. Try a slider, ride the feature again, read the graphs: that's the loop.
 - **Test rider** (`levels/playground_pilot.gd`, `PlaygroundPilot extends DemoPilot`; F2 there, or the RIDER bar under the
   graph tabs / along the bottom right with the graphs off): pick a feature or a whole lane in the dropdown and he rides it on
   repeat until STOP: holds the lane centre, pedals / brakes to the set speed (- / + km/h) on the run-in, hands off from 1.5 m
@@ -1287,6 +1303,56 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   magenta prediction), the lip of the jump ahead (orange post), its landing (green line) and sweet spot (green ball).
 - The probe no longer lets a bounce off a landing replace the jump that's still settling (it used to log the 0.2 s
   bounce instead of the real jump, or nothing), and skips airs < 0.3 s within 1.2 s of a landing.
+- **Lab** (`levels/playground_lab.gd`, `PlaygroundLab`, made by RideDiag; the LAB row under the RIDER bar, keys work with
+  the graphs off too):
+  - **Energy check**: E = ½ speed² (+ the climb speed in the air) + g height per kg, from the last reset (ENERGY page:
+    E, ½v², the inputs that add energy, COASTING / AIR flags). With nothing putting energy in (pedal, sprint, hop / pump,
+    body stick; each counts for 0.35 s after it's let go, the pump's push comes at the release) a rise over 0.5 J/kg
+    within 0.25 s is a check (`energy_gain`, with "take-off" / "air" / "ground").
+  - **Physics checks** (things a real bike can't do; counted, an event line on every graph, the list on the ENERGY page,
+    `PG CHECK <kind> ... | <feature> u= v= air=` lines, `PG CHECKS` summary with `BMX_LAB_PROBE=1`): `energy_gain`,
+    `rim_strike` (tyre squashed past 5 cm), `accel` (> 50 g in one step), `sunk` (under the ground by more than the
+    travel + 0.15 m), `jump_step` (height jumped > 0.3 m in a step), `non_finite`.
+  - **Time**: G pause / run the physics (the drawn bike holds: `Game` calls `lab.hold_physics()` first and snaps the
+    interpolation), N one physics step (1/120 s, pauses if running), T slow motion 1 / ½ / ¼ / ⅒ (`Engine.time_scale`,
+    only while nobody else owns it: crash slow-mo, photo mode). `BMX_PG_SLOW=0.25` for tests.
+  - **Record / replay**: V records the next run (resets to 25 m before the feature you're at, or the test rider's next
+    run) until the next reset / V / 60 s: the inputs the physics got each step (`IN_KEYS`), the path, every graph
+    channel, the Tune values; saved to `user://playground/last_run.dat` (survives a restart: record, change the code,
+    restart, replay). J replays it from the same start (+ grip noise reseeded, stamina full) with the same inputs
+    (`Game._read_input` takes `lab.replay_input()` first); a white wireframe ghost bike (Debug Draw) rides the recorded
+    path and every graph draws the recording faint under the live lines. `PG REPLAY feat= steps= end_moved= tune_changed:`.
+    Replays are exact: the same code replays to 0.000 m. Tests: `BMX_PG_REC=1` (records the test rider's first run, with
+    `BMX_PG_PILOT`), `BMX_PG_REPLAY=1`.
+- **Overlay extras** (F3, `DebugOverlay._tyres`): a white arrow at each tyre = the ground's push (1 m = the whole weight)
+  and a ring per tyre lying on the ground with a dot = its grip in use (along: brake / drive, across: turn / slide),
+  green inside, red past it.
+- **More features** (2026-11-22): lane **STEP-DOWNS, DROPS & HIPS** (z -48: `step_down`, `drop_land` onto a 30-34 deg
+  landing, `hip` = a table turned 20 / 35 deg to the lane: `Lane.skews` slides its shape along u with v (`skew_u`), so
+  ridden straight you take off and land across its faces) and **BRAKES, SURFACES & SLALOM** (z -72: `brake_strip` on
+  dirt (both / front only / rear only), grass, wet, sand (`Lane.surfs` -> `course.surface_at` -> `Terrain.surface`, ground
+  colour `SURF_COL`); a post at the brake line (`f.lip`); `slalom` cones 8 / 6 m apart). The test rider brakes at the
+  line with the lever the strip tests until stopped, and weaves the slalom (aims `SLALOM_OFF` beside each cone,
+  alternate sides). The probe prints `PG BRAKE feat= v= dist= time= decel= lock_f= lock_r= slip=` and `PG SLALOM
+  feat= time= v_in= v_min= v_out= ok= miss= lean=`. Main added a ROCKS lane (z -24, the game's own rock colliders).
+- **Repeatable runs**: before the test rider's every restart, a recording and a replay, `PlaygroundLab.fresh(phys)` copies
+  every plain value of a brand-new `BikePhysics` into the ride's (not the build / gearing / Tune: `KEEP`), the gear back to
+  the start gear, the grip randomness reseeded. Without it the same run came out different after other riding. Same
+  feature, same speed, from clean: identical to the centimetre (the first run after the level loads differs a little).
+- **Mouse wheel** (2026-11-22, the user moved sliders by accident while trying to scroll): no slider in the game takes the
+  wheel any more (`scrollable = false`: tune card / TuneSlider, quick tune, settings, garage); over the tuning card the
+  wheel scrolls its list (`TuneCard._input` -> `SmoothScroll.wheel`) and never reaches the camera zoom; over the graph
+  band / bars it's eaten too. Autotest / bench runs never save `tune.cfg` (`Tune.save`), like PADSEQ runs.
+  Test: `BMX_CARD_WHEEL=n` (n notches into the card's list, `CARDWHEEL scroll=` 1 s later; a minimised window has no
+  mouse position, so `mw:` steps can't test it).
+- **Baseline suite** (`levels/playground_suite.gd`): `BMX_PG_SUITE=save` rides 24 fixed runs (tables, gaps, hops, drops,
+  step-up, rollers, pump, curb, slope, camber, step-down, drop to landing, hip, five brake strips, slalom; the test
+  rider at fixed speeds, pump and AUTO off) and writes every result to `godot/tools/pg_baseline.json` (keep it in git);
+  `BMX_PG_SUITE=compare` rides them again and prints every number that moved past its tolerance (`PGBASE <run> metric
+  old -> new`, ⚠ on a result that got worse, more bottom-outs or more checks) and `PGBASE SUMMARY runs= changed= worse=`.
+  **Run it before and after every riding-physics change** (~3 min, minimised):
+  `BMX_MIN=1 BMX_LEVEL=playground BMX_STRAIGHT=1 BMX_PG_SUITE=compare` + `--autotest=400`; save a new baseline only
+  when the change is wanted. `BMX_PG_SUITE_ONLY=<part of an id>`.
 - `RideDiag` (CanvasLayer, made by `Game._ready` only for a `PlaygroundTerrain`): records **every physics step**
   (`Game._physics_process` -> `diag.record(dt, inp)` after `phys.step`; `inp` = what the physics got, after cruise control /
   test injection) into a 20 s ring (one flat `PackedFloat32Array`, `buf[sample * C + channel]`, channels in `RideDiag.CH`).
@@ -1308,7 +1374,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   judge's trouble meters `_risk`), **BODY** (lean asked / bike / counter, bars, pitch vs ground, body fore / aft, legs, manual
   angle vs `manBalance`), **AIR** (side view of the last jump: the ground along the take-off line, the bike drawn every
   0.1 s; height, vy, pitch vs slope, spin, stick). Event lines on every graph: take-off, landing, bottom-out, crash.
-- Keys: **F4** panel (right, 692 px) -> full screen -> off; F5 / Shift+F5 page (or click a tab); F6 freeze; F7 window 3 / 6 / 12 / 20 s; F9 reset the stats.
+- Keys: **F4** band -> full screen -> off; F5 / Shift+F5 page (or click a tab); F6 freeze; F7 window 3 / 6 / 12 / 20 s; F9 reset the stats.
   Mouse over any graph = every graph reads that moment (line + legends). Draw ~2 ms a frame while shown, nothing hidden.
 - Tests: `BMX_DIAG=<page name / prefix / number>` opens it (`BMX_DIAG_FULL=1` full screen) + `BMX_SHOT`;
   `BMX_DIAG_PROBE=1` prints at the end `DIAG SUSP` (max / avg travel, bottom-outs, blow-offs, shock speed range per end,
@@ -1580,6 +1646,8 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `-s res://tools/wood_edge_probe.gd --headless` | drives angled lines onto every wooden ramp; must report `walls=0` |
 | `BMX_LEVEL=playground BMX_STRAIGHT=1 BMX_PG_AT=table_1.5 BMX_PG_SPEEDS=20,25,30,35` + `--autotest=150` | the test playground: ride one feature at each speed, `PGSUM` per try (see "Test playground" in section 5) |
 | `BMX_DIAG=susp [BMX_DIAG_FULL=1] BMX_DIAG_PROBE=1` (+ `BMX_SHOT`) | ride diagnostics panel on a page (overview / susp / input / tyres / body / air); `DIAG` summary lines at the end (see "Ride diagnostics" in section 5) |
+| `BMX_LEVEL=playground BMX_STRAIGHT=1 BMX_PG_SUITE=compare` (or `save`) + `--autotest=400` | the playground baseline suite: 24 fixed runs vs `tools/pg_baseline.json`, `PGBASE` lines; run before / after any riding change |
+| `BMX_PG_REC=1` / `BMX_PG_REPLAY=1`, `BMX_LAB_PROBE=1`, `BMX_PG_SLOW=0.25` | playground lab: record the test rider's run / replay the saved run (`PG REPLAY end_moved=`), `PG CHECK` summary, slow motion |
 | `-s res://tools/playground_probe.gd --headless` | the playground's features (spans, heights, lips); must say `PASS` |
 | `--headless res://tools/slope_stress.tscn [-- verbose=1 trace=1 only=<substr> bike=dh]` | ride physics on synthetic ground (no world): coast speed vs the closed form on -45..+15 deg grades (within 3 %), braking / holding vs the friction angle, climbs, cambers to 45 deg, crests (air only past v^2 = g R), rollers, washboard, curbs / ledges / drops, chute compressions, full-lock turns on grades, 4 x 60 s random rides; must say `SLOPE_STRESS PASS` (exit code = failures). A scene, not `-s`: the physics needs the Tune autoload |
 | `--headless res://tools/slope_stress.tscn -- sweep=1` | slider audit: every ride slider (not Dust / Demo) at its min and max, from the defaults, through 33 short standard rides (turns at full / half lock, swaps, braking, a side slope, a berm, landings, a manual, pumping, a rock garden...); `SWEEP key group max change % (metric)`. ~10 min. 0 % = dead OR only acts where the rides don't go (air tricks, whips, crashes, drawing): check the code before removing. 2026-11-20 it found `turnSlow` / `turnFast` / `carveBite` / `flickTurn` dead (`turnFloor` always wins the bar limit, the grip decides) - removed, their old defaults are constants in `a_lat_lim` |

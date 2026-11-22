@@ -146,6 +146,7 @@ var title_world := false
 ## the test playground (scripts/levels: PlaygroundTerrain + PlaygroundProbe, which measures every jump)
 var level := ""
 var level_probe: PlaygroundProbe
+var lab: PlaygroundLab   # the playground's lab tools (energy / checks, pause / step / slow, record / replay), made by diag
 var diag: RideDiag   # ride diagnostics (F4, levels/ride_diag.gd): graphs of suspension, input, tyres, body, air
 var _level_light_ver := -1
 ## parts of an earlier Game of the same world to use instead of building them ({terrain, far_hills}; main sets it
@@ -1141,6 +1142,7 @@ func _break_action_cam(body_vel: Vector3) -> void:
 ## the crash slow-mo is on (Settings › Gameplay; autotests keep normal time unless BMX_WASTED=1)
 func _wasted_on() -> bool:
 	if Env.s("BMX_WASTED") != "": return true
+	if level != "": return false   # the test playground: no slow motion / WASTED screen (the lab has its own slow motion)
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--autotest"): return false
 	return bool(Settings.get_v("wasted"))
@@ -1597,6 +1599,7 @@ func level_reset_to(sp: Vector3) -> void:
 	rider.reset_pose()
 	_snap_prev()
 	cam.snap_to(Vector3(sp.x, phys.y + 0.5, sp.z))
+	if lab: lab.on_reset()
 ## tests (BMX_TRAIL_FEAT=drop|arch|N|x<metres>|tech): 70 m up the trail from the Nth drop / the first rock arch -> (x, heading, z)
 func _feature_spawn(what: String) -> Vector3:
 	var C: TrailCourse = terrain.field.course
@@ -1725,6 +1728,9 @@ func set_demo(on: bool) -> void:
 func _read_input() -> Dictionary:
 	if not input_enabled:
 		return {"throttle": 0.0, "brake": 0.0, "steer": 0.0, "hop": false, "sprint": false, "body_fwd": 0.0, "body_lean": 0.0}
+	if lab:   # the playground replaying a recorded run
+		var rp = lab.replay_input()
+		if rp != null: return rp
 	if demo != null and not photo:
 		return demo.tick(self, get_physics_process_delta_time())
 	var steer := Input.get_action_strength("steer_left") - Input.get_action_strength("steer_right")
@@ -1884,6 +1890,9 @@ func _physics_process(dt: float) -> void:
 	if dt <= 0.0:
 		if rumble: rumble.stop()
 		return
+	if lab and lab.hold_physics():   # the playground's pause (N steps one tick): hold the drawn bike still
+		_snap_prev()
+		return
 	var _pk := Time.get_ticks_usec()
 	_snap_prev()
 	var inp := _read_input()
@@ -1894,9 +1903,11 @@ func _physics_process(dt: float) -> void:
 	_pk = _perf("p_input", _pk)
 	terrain.rope_ref_y = phys.y
 	if level_probe: level_probe.pre_step(dt, inp)
+	if lab: lab.pre_step(inp)
 	phys.step(dt, inp)
 	if level_probe: level_probe.post_step(dt)
 	if diag: diag.record(dt, inp)
+	if lab: lab.post_step(dt, inp)
 	_pk = _perf("p_bike_step", _pk)
 	_rope_tick(dt)
 	_pk = _perf("p_rope", _pk)
@@ -2210,7 +2221,7 @@ func _process(dt: float) -> void:
 		photo_mode.update(rdt)
 		if area_title: area_title.view.visible = false
 		return
-	if area_title: area_title.view.visible = hud.visible
+	if area_title: area_title.view.visible = hud.visible and level == ""   # (the test playground: no big banners)
 	var _pk := Time.get_ticks_usec()
 	if perf_on:
 		if _perf_last > 0: _perf_acc["FRAME_wall"] = _perf_acc.get("FRAME_wall", 0) + (_pk - _perf_last)

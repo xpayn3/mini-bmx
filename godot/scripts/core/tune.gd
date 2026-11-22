@@ -352,6 +352,8 @@ func reset_defaults() -> void:
 
 func save() -> void:
 	if OS.get_environment("BMX_PADSEQ") != "": return   # menu tests: never into the player\'s files
+	for a in OS.get_cmdline_user_args():   # ride tests too (an autotest must never change the player's tuning)
+		if a.begins_with("--autotest") or a.begins_with("--bench"): return
 	var cf := ConfigFile.new()
 	for k in base:
 		cf.set_value("tune", k, base[k])

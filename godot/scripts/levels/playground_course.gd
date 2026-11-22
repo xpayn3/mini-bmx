@@ -27,6 +27,9 @@ class Lane:
 	var m := PackedByteArray()   # 1 = a jump / pump feature here (Terrain.jump_mask)
 	var feats: Array = []        # {id, name, desc, u0, u1, lip (u or -1), top (max height), lane}
 	var camber: Array = []       # [u0, u1, tan(angle)] tilts across the lane (uphill to +z)
+	var skews: Array = []        # [u0, u1, tan(angle)] features turned to the lane (hips): the shape slides along u with v
+	var surfs: Array = []        # [u0, u1, surface id] ground other than dirt (Terrain surface ids: 0 grass, 2 wet, 3 sand)
+	var cones: Array = []        # [u, v] slalom cones (visual)
 	var rect: Rect2              # snapped ground region (x, z)
 	# the turtle that lays the profile out
 	var y := 0.0
@@ -82,7 +85,7 @@ class Lane:
 	func begin(id_: String, name_: String, desc: String, jump := true) -> void:
 		mask = 1 if jump else 0
 		_f = {"id": id_, "name": name_, "desc": desc, "u0": u(), "u1": u(), "lip": -1.0, "top": 0.0, "lane": self.id,
-			"lip_deg": 0.0, "land0": -1.0, "land1": -1.0}   # land0..1: the landing slope / deck to aim for (jumps)
+			"lip_deg": 0.0, "land0": -1.0, "land1": -1.0, "jump": jump}   # land0..1: the landing slope / deck to aim for (jumps)
 
 	func lip() -> void:
 		if _f: _f.lip = u()
@@ -224,6 +227,72 @@ class Lane:
 		camber.append([u0, u0 + len_m + 12.0, tan(deg_to_rad(deg))])
 		end(); flat(RUN * 0.5)
 
+	## a kicker off a raised deck onto a landing lower than the take-off: run up 8 deg onto the deck, 6 m of deck,
+	## the kicker (lip_h over the deck at deg), the gap, the landing (knuckle at land_h) down at land_deg
+	func step_down(deck_h: float, lip_h: float, deg: float, gap_m: float, land_h: float, land_deg: float) -> void:
+		begin("stepdown_%s" % _n(deck_h + lip_h - land_h), "STEP-DOWN %.1f m" % (deck_h + lip_h - land_h),
+			"deck %.1f m, %.1f m kicker %.0f deg, %.0f m to a %.1f m landing" % [deck_h, lip_h, deg, gap_m, land_h])
+		bend(8.0, 10.0); line_to(deck_h - 10.0 * (1.0 - cos(deg_to_rad(8.0)))); bend(0.0, 10.0)
+		y = deck_h; flat(6.0)
+		var a := deg_to_rad(deg)
+		bend(deg, lip_h / maxf(0.01, 1.0 - cos(a)))
+		lip(); _f.lip_deg = deg
+		var ul := u()
+		s = deg_to_rad(-50.0); line_to(0.0); s = 0.0
+		flat(maxf(0.0, gap_m - (u() - ul) - land_h - 0.6))
+		s = deg_to_rad(45.0); line_to(land_h); s = 0.0
+		flat(0.6)
+		_f.land0 = u()
+		descend(land_deg, 2.0, 7.0)
+		_f.land1 = u()
+		end(); flat(RUN)
+
+	## a drop off a flat lip onto a landing slope (not to flat): the landing's top is 25 % lower, just past the lip
+	func drop_land(hh: float, land_deg: float) -> void:
+		begin("dropland_%s" % _n(hh), "DROP TO LANDING %.1f m" % hh, "8 deg run-up, flat lip, onto a %.0f deg landing" % land_deg)
+		bend(8.0, 10.0); line_to(hh - 10.0 * (1.0 - cos(deg_to_rad(8.0)))); bend(0.0, 10.0)
+		y = hh; flat(6.0)
+		lip(); _f.lip_deg = 0.0
+		wall_to(hh * 0.75)
+		_f.land0 = u()
+		descend(land_deg, 1.0, 7.0)
+		_f.land1 = u()
+		end(); flat(RUN)
+
+	## a table turned `turn` deg to the lane (a hip): ridden straight you take off and land across its faces
+	func hip(hh: float, up: float, deck: float, down: float, turn: float) -> void:
+		var n0 := feats.size()
+		table(hh, up, deck, down)
+		var f: Dictionary = feats[n0]
+		f.id = "hip_%s" % _n(turn); f.name = "HIP %.0f deg" % turn
+		f.desc = "%.1f m table turned %.0f deg to the lane" % [hh, turn]
+		skews.append([f.u0, f.u1, tan(deg_to_rad(turn))])
+
+	## a flat strip on one surface with a brake line in it: ride in at speed, brake at the line (`which`: both /
+	## front / rear lever), the probe measures the stopping distance. surf: 0 grass, 1 dirt, 2 wet, 3 sand
+	func brake_strip(surf: int, which: String) -> void:
+		var sname: String = ["GRASS", "DIRT", "WET", "SAND"][clampi(surf, 0, 3)]
+		var id_ := "brake_%s%s" % [sname.to_lower(), "" if which == "both" else "_" + which]
+		begin(id_, "BRAKE %s%s" % [sname, "" if which == "both" else " · " + which.to_upper() + " ONLY"],
+			"brake line at the post, stopping distance measured", false)
+		var u0 := u()
+		flat(4.0)
+		lip()   # (the brake line: the probe and the test rider use f.lip)
+		flat(26.0)
+		_f.kind = "brake"; _f.which = which; _f.surf = surf
+		if surf != 1: surfs.append([float(_f.lip) - 0.3, u() + 2.0, surf])   # (from the line: wet = the game's water surface, it drags)
+		end(); flat(RUN * 0.6)
+
+	## cones on the middle `gap` m apart: weave past them on alternate sides
+	func slalom(n: int, gap: float) -> void:
+		begin("slalom_%s" % _n(gap), "SLALOM %.0f m" % gap, "%d cones %.0f m apart, pass them on alternate sides" % [n, gap], false)
+		flat(4.0)
+		for i in n:
+			cones.append([u(), 0.0])
+			flat(gap)
+		_f.kind = "slalom"; _f.gap = gap; _f.n = n
+		end(); flat(RUN)
+
 	# ---- rocks: the game's own rocks (same mesh, same collider / dome recipe as TerrainChunkBuilder._rock_gardens) ----
 	var rock_specs: Array = []   # [u, v (across), sc, sx, sy, yaw] -> PlaygroundCourse.rocks
 
@@ -276,8 +345,16 @@ class Lane:
 				return c[2] * smoothstep(c[0], c[0] + 6.0, uu) * (1.0 - smoothstep(c[1] - 6.0, c[1], uu))
 		return 0.0
 
+	## a hip: inside a skewed feature the shape lies along a line turned from square to the lane
+	func skew_u(uu: float, v: float) -> float:
+		for k in skews:
+			if uu > k[0] - 4.0 and uu < k[1] + 4.0:
+				return uu - clampf(v, -hw - 3.0, hw + 3.0) * k[2]
+		return uu
+
 	## height at (along, across); v = 0 is the lane's middle
 	func at(uu: float, v: float) -> float:
+		if not skews.is_empty(): uu = skew_u(uu, v)
 		var p := profile(uu)
 		var d := maxf(0.0, absf(v) - hw)
 		var t := tilt_at(uu) if not camber.is_empty() else 0.0
@@ -288,6 +365,7 @@ class Lane:
 		return minf(0.0, p + d * SIDE)
 
 	func jump_at(uu: float, v: float) -> float:
+		if not skews.is_empty(): uu = skew_u(uu, v)
 		if uu <= 0.0 or absf(v) > hw + 2.0: return 0.0
 		var i := int(uu / DU)
 		return float(m[i]) if i < m.size() else 0.0
@@ -372,6 +450,14 @@ func _build() -> void:
 	for rk in [[0.13, 0.6, 5, 3.0], [0.22, 0.65, 5, 3.0], [0.3, 0.7, 4, 4.0], [0.38, 0.75, 4, 4.0], [0.47, 0.8, 3, 5.0], [0.47, 0.85, 3, 5.0], [0.8, 0.8, 1, 5.0]]:
 		l.rock_row(rk[0], rk[1], rk[2], rk[3])
 	l.rock_garden(40.0, 7, true); l.rock_garden(40.0, 19, false)
+	l = _lane("stepdowns", "STEP-DOWNS, DROPS & HIPS", -48.0)
+	l.step_down(1.2, 0.6, 28, 4.0, 0.8, 30); l.step_down(2.0, 0.8, 32, 6.0, 1.0, 34)
+	l.drop_land(1.5, 30); l.drop_land(2.5, 34)
+	l.hip(1.5, 32, 4, 30, 20); l.hip(1.5, 32, 4, 30, 35)
+	l = _lane("brakes", "BRAKES, SURFACES & SLALOM", -72.0)
+	l.brake_strip(1, "both"); l.brake_strip(1, "front"); l.brake_strip(1, "rear")
+	l.brake_strip(0, "both"); l.brake_strip(2, "both"); l.brake_strip(3, "both")
+	l.slalom(8, 8.0); l.slalom(8, 6.0)
 	for ln in lanes:
 		(ln as Lane).flat(20.0)
 		ln.rect = _snap(Rect2(X0, ln.z - ln.band, ln.length(), ln.band * 2.0))
@@ -411,6 +497,16 @@ static func _snap(r: Rect2) -> Rect2:
 	var x1 := ceilf(r.end.x / SNAP) * SNAP
 	var z1 := ceilf(r.end.y / SNAP) * SNAP
 	return Rect2(x0, z0, x1 - x0, z1 - z0)
+
+
+## the ground's surface id at (x, z) where a lane strip sets one (brake strips), else -1
+func surface_at(x: float, z: float) -> int:
+	var l := lane_at(x, z)
+	if l == null or absf(z - l.z) > l.hw + 1.0: return -1
+	var uu := x - X0
+	for sf in l.surfs:
+		if uu >= sf[0] and uu <= sf[1]: return int(sf[2])
+	return -1
 
 
 ## the lane whose strip (x, z) is on, or null
