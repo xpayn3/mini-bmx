@@ -205,8 +205,11 @@ void fragment() {
 		float inrut = max(1.0 - smoothstep(0.15, 0.8, abs(ac - off)), line);
 		float pn = gd_noise3(vec3(ac * 1.5, sl * 0.21, 13.0)) * (0.62 + 0.38 * inrut) + (n0 - 0.5) * 0.05 + (mix(0.5, n1, f2) - 0.5) * 0.025;
 		float pk = zone * rd * lvl * (1.0 - jm) * (1.0 - smoothstep(0.3, 0.6, dry)) * smoothstep(0.85, 1.0, t) * (1.0 - smoothstep(0.3, 0.7, gpx)) * min(trail_puddles, 1.0);
-		m_wet = smoothstep(0.44, 0.56, pn) * pk;
-		m_puddle = smoothstep(0.565, 0.59, pn) * pk;
+		// the edges widen to at least ~1.5 pixels of the noise (no shimmering 1-pixel rim from afar / at grazing views).
+		// The width comes from the pixel's size: fwidth() isn't defined in this per-pixel branch
+		float paa = gpx * 1.6;
+		m_wet = smoothstep(0.44 - paa, 0.56 + paa, pn) * pk;
+		m_puddle = smoothstep(0.565 - paa, 0.59 + paa, pn) * pk;
 		// fine relief from the scans: packed dirt at two sizes / turns mixed by a slow noise (no tile to see), gravel where it's loose
 		vec3 r0 = gd_relief(tr_nr0, P.xz, pdx, pdy, vec2(0.955, 0.296), 1.0 / 1.7);
 		vec3 r1 = gd_relief(tr_nr0, P.xz + 37.0, pdx, pdy, vec2(-0.416, 0.909), 1.0 / 2.9);
@@ -263,18 +266,23 @@ void fragment() {
 		}
 	}
 	float pud = m_puddle * wd;
-	// a puddle: murky water over the soil, level, mirror-smooth (the sky shows in it), with the lightest wind ripple
+	// a puddle: murky water over the soil, level, mirror-smooth (the sky shows in it), with the lightest wind ripple.
+	// Not a perfect mirror: the sun's glint on 0.04 was smaller than a pixel and sparkled; it also goes duller with
+	// the pixel's footprint (far off / grazing), where one pixel covers many ripples
 	col = mix(col, gB.rgb * vec3(0.3, 0.29, 0.27), pud * 0.85);
 	ALBEDO = col;
-	ROUGHNESS = mix(mix(0.95, trough, wd), 0.04, pud);
+	float pud_r = mix(0.075, 0.22, smoothstep(0.02, 0.25, gpx));
+	ROUGHNESS = mix(mix(0.95, trough, wd), pud_r, pud);
 	SPECULAR = mix(0.3, 0.6, pud);
+	// screen derivatives here, in uniform control flow: inside the branch below they are undefined wherever the
+	// branch differs between neighbouring pixels (trail / puddle edges), which flickered in 2x2 blocks
+	float hh = thgt * wd * trail_relief;
+	vec3 dpx = dFdx(P), dpy = dFdy(P);
+	float dhx = dFdx(hh), dhy = dFdy(hh);
 	if (wd * tbump > 0.0 || pud > 0.0 || thgt != 0.0) {
 		vec3 nw = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
 		nw = normalize(nw + vec3(tslope.x, 0.0, tslope.y) * (wd * trail_bump));
 		// the height above as a real slope of the surface (its screen-space gradient turned into the world)
-		float hh = thgt * wd * trail_relief;
-		vec3 dpx = dFdx(P), dpy = dFdy(P);
-		float dhx = dFdx(hh), dhy = dFdy(hh);
 		vec3 r1 = cross(dpy, nw), r2 = cross(nw, dpx);
 		float det = dot(dpx, r1);
 		if (abs(det) > 1e-12) {
@@ -285,6 +293,12 @@ void fragment() {
 		nw = normalize(mix(nw, vec3(rip.x, 1.0, rip.y), pud));
 		NORMAL = normalize((VIEW_MATRIX * vec4(nw, 0.0)).xyz);
 	}
+	// specular anti-aliasing (Tokuyoshi & Kaplanyan): a normal that changes fast across the pixel widens the
+	// highlight instead of sparkling. Matters on the smooth parts (puddles, damp soil, packed lines)
+	vec3 dnx = dFdx(NORMAL), dny = dFdy(NORMAL);
+	float nvar = 0.25 * (dot(dnx, dnx) + dot(dny, dny));
+	float ra = ROUGHNESS * ROUGHNESS;
+	ROUGHNESS = sqrt(sqrt(clamp(ra * ra + min(2.0 * nvar, 0.18), 0.0, 1.0)));
 	if (trail_debug == 1) {
 		ALBEDO = vec3(m_driven, m_loose, max(m_puddle, m_wet * 0.4)) * wd + vec3(m_tracks) * 0.5 + vec3(m_skid, m_skid, 0.0) + vec3(m_stray, 0.0, m_stray) * wd + vec3(0.0, m_play, m_play) * wd;
 		ROUGHNESS = 1.0;

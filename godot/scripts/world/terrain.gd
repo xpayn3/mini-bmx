@@ -404,6 +404,21 @@ func surface(x: float, z: float) -> int:
 	return 0
 
 
+## the trail's drawn puddles at a point (world/trail_puddle.gd): x = damp soil round one, y = standing water, 0..1
+func puddle_at(x: float, y: float, z: float) -> Vector2:
+	var k := Vector2i(WorldRng.jround(x / SIZE), WorldRng.jround(z / SIZE))
+	var rec = chunks.get(k)
+	if rec == null:
+		return Vector2.ZERO
+	var tab: PackedFloat32Array = rec.get("pud", PackedFloat32Array())
+	if tab.is_empty():
+		return Vector2.ZERO
+	var n: int = rec["N"]
+	var cell := SIZE / n
+	var tp := float(_trail_puddles) if _trail_puddles != "" else 1.0
+	return TrailPuddle.at(tab, n, (x - k.x * SIZE + SIZE * 0.5) / cell, (z - k.y * SIZE + SIZE * 0.5) / cell, Vector3(x, y, z), tp)
+
+
 ## [feature height, mask, flattened ground height, dug depth, wood deck top or null]
 func jump(x: float, z: float) -> Array:
 	if fcs != null:
@@ -881,7 +896,8 @@ func _finalize(k: Vector2i) -> void:
 	fin_parts[3] += (Time.get_ticks_usec() - tp) / 1000.0; tp = Time.get_ticks_usec()
 	var colliders: Array = o["colliders"]
 	var rec := {"cx": k.x, "cz": k.y, "node": node, "colliders": colliders, "small": small, "rock_keys": [],
-		"G": o["G"], "N": b.N, "mms": mms, "packs": [], "grass_img": o["grass_img"], "grass_h": o["grass_h"]}
+		"G": o["G"], "N": b.N, "mms": mms, "packs": [], "grass_img": o["grass_img"], "grass_h": o["grass_h"],
+		"pud": o.get("pud", PackedFloat32Array())}
 	chunk_serial += 1   # GrassField re-reads the chunks round the camera
 	for pp in o.get("packs", []):
 		var pkey := Vector2i(roundi(pp.x * 4.0), roundi(pp.z * 4.0))
