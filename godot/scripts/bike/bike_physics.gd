@@ -123,6 +123,7 @@ var _sag_seen := 1.0
 const ANTI_RISE := 0.6     # how much of the rear's rise under its own brake the linkage takes back (and then some)
 var _fb_r := 0.0           # the rear brake's deceleration this step (m/s2), like _fb_f
 const FRAME_PROG := 0.35   # the ramp-up the reference frame's linkage adds to its shock (BikeBuild.frame_mods scales it per frame)
+const LIP_SPARE := 0.15   # rad: how much steeper than the lip under the wheels a take-off may leave
 const RIM_CLIMB := 4.0   # m/s: the most upward speed a rim strike on a rising edge gives the frame
 const TYRE_MAX := 0.045   # m: a tyre squashed this far is on its rim
 var _ty_f := 0.0; var _ty_r := 0.0   # each tyre's push last substep (m/s2 of the whole weight)
@@ -1958,6 +1959,24 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			# while the body (on soft legs) lags behind doesn't launch the rider with it. In the air the
 			# two then move together (the legs only shift them about that centre)
 			if coupled and not is_nan(body_v): vy = PHI * body_v + mB * vy
+			# never off steeper than the lip itself. Hitting a steep face fast, the front left it, the frame tipped
+			# to ~83 deg on its back wheel and the rear spring kept pushing the bike up after ground it read as
+			# rising near-vertically (the wheel's ground probe swings up the face as the frame tips): 59 km/h into a
+			# 43 deg face took off at 72 deg with more climb speed (16.4 m/s) than the bike had at all (15.4) and
+			# flew 15 m high. The climb is held to the lip's own angle (+ LIP_SPARE: the legs, the spring) and so
+			# never exceeds the speed along the ground; the frame can't leave pointing far above that
+			if not _balancing() and _man_grace <= 0.0 and vy > 0.0:
+				var lip_a := maxf(_or(_gpc_last, gpC), _local_slope(f, XR, RWR, cp0))
+				var up_max := minf(lip_a + LIP_SPARE, 1.2)
+				var vy_cap := maxf(absf(v) * sin(up_max), 2.5)   # (a bounce / small hop off a crest or down a slope: never cut)
+				if Env.s("BMX_LIP_PROBE") != "": print("LIPCAP v=%.2f vy=%.2f cap=%.2f lip=%.2f pitch=%.2f" % [v, vy, vy_cap, lip_a, pitch])   # tests
+				# (the same tip-up leaves the frame pointing 60-80 deg nose up and still turning back: a loop / SLAM every
+				# time. Where the climb had to be cut, the frame leaves along its flight, turning no faster than a lip throws)
+				if vy > vy_cap:
+					vy = vy_cap
+					pitch = minf(pitch, up_max + 0.15); pitch_v = minf(pitch_v, 0.6); body_pw = minf(body_pw, 0.6)
+				elif pitch > up_max + 0.5:
+					pitch = up_max + 0.5; pitch_v = minf(pitch_v, 1.0); body_pw = minf(body_pw, 1.0)
 			# the speed along the lip splits into the horizontal part (v from now on) and the climb (vy): by the way the
 			# bike is really going. (It was cos(the ground's slope under the two axles): with the front already past the
 			# lip that is the backside's slope, and a rear wheel touching once more as it left took the cut twice)
