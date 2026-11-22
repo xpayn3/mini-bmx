@@ -100,7 +100,7 @@ void fragment() {
 	float no = 0.6 * vnoise(vec2(v * 1.3 + 57.0, u * 1.1 + 7.0), 624.0) + 0.4 * vnoise(vec2(v * 6.0, u * 4.0 + 23.0), 2880.0);
 	vec3 col = ground * (0.97 - 0.2 * h) * mix(0.86, 1.12, nc) + ground * 0.12 * lip;   // (was 0.78 - 0.42 h: too dark; a smidget darker than 0.92 - 0.2 h)
 	ALBEDO = col;
-	ROUGHNESS = 0.92 - 0.12 * h;
-	SPECULAR = 0.25;
+	ROUGHNESS = 0.96 - 0.06 * h;   // matte like the dry trail round it (0.8 in the ruts glinted at a low sun)
+	SPECULAR = 0.12;
 	ALPHA = COLOR.a * band * fade * (0.6 + 0.2 * h) * mix(0.65, 1.15, no);
 }

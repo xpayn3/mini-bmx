@@ -62,6 +62,18 @@ var _tapes: TapeSim              # torn tape ribbons (tape.js TapeSim)
 var _focus := Vector2.ZERO       # last update_stream() position: the torn tape simulates near it
 var _clutter_cc := Vector2i(1 << 30, 0)   # the chunk the clutter visibility was last set for
 var _clutter_dirty := true                # a chunk came / went since
+## far decoration shadows (_update_far_shadows): set by Game every frame. A chunk's trees / rocks cast only
+## if their shadows can land in the shadow-mapped area round the camera; that depends on the sun (a low sun
+## throws a 20 m tree's shadow 100+ m), so it is not a fixed ring round the rider.
+var shadow_eye := Vector3.ZERO     # the camera
+var shadow_sun := Vector3.UP       # unit vector towards the sun / moon
+var shadow_reach := 150.0          # the light's directional_shadow_max_distance
+var _shadow_at := Vector3(INF, 0, 0)   # eye / sun / reach the casting was last decided for
+var _shadow_sun_at := Vector3.ZERO
+var _shadow_reach_at := 0.0
+var _shadow_dirty := true          # a chunk came since
+var _shadow_probe := Env.s("BMX_SHADOW_PROBE") != ""
+var _shadow_flips := 0
 var _water: TerrainWater
 var _broken: Array = []          # [{kind, rec}] for clear_dynamic()
 var _stakes := {}                # tape stake index -> {mm, i, pos, basis, basis0, chunk, node, lean, gone, stub}
@@ -497,6 +509,67 @@ func _max_jobs() -> int:
 
 ## budget_ms INF = build everything round (px, pz) now; sync_r >= 0 then limits that to the chunks within sync_r of
 ## it (the rest streams in later calls with a normal budget)
+const CASTER_H := 26.0        # the tallest decoration (tall pines) whose shadow counts
+const SHADOW_MARGIN := 16.0   # m beyond the shadow reach a chunk still casts (camera lead, crown width)
+const SHADOW_HYST := 12.0     # ... and this much more before a casting chunk stops (no flicker on the line)
+
+## Decorations whose shadows can't reach the shadow-mapped area cast none (draw calls for nothing); all the
+## others always cast. Until 2026-11-22 it was "2+ chunks from the rider's chunk": crossing a chunk line
+## switched whole chunks of trees' shadows off / on at once, and at golden hour (sun ~10 deg) those shadows
+## are 100+ m long and lie right across the trail ahead, so they blinked out and back while riding.
+func _update_far_shadows() -> void:
+	var de := Vector2(shadow_eye.x - _shadow_at.x, shadow_eye.z - _shadow_at.z)
+	if not _shadow_dirty and de.length_squared() < 16.0 and shadow_sun.dot(_shadow_sun_at) > 0.9995 			and absf(shadow_reach - _shadow_reach_at) < 5.0:
+		return
+	_shadow_dirty = false
+	_shadow_at = shadow_eye
+	_shadow_sun_at = shadow_sun
+	_shadow_reach_at = shadow_reach
+	# a caster throws its shadow away from the sun, up to CASTER_H / tan(sun height) along the ground: a
+	# chunk matters if it is within the shadow disc round the camera swept that far towards the sun
+	var s2 := Vector2(shadow_sun.x, shadow_sun.z)
+	var sl := s2.length()
+	var sweep := Vector2.ZERO
+	if sl > 1e-4:
+		sweep = s2 / sl * minf(CASTER_H * sl / maxf(shadow_sun.y, 0.05), 320.0)
+	var e := Vector2(shadow_eye.x, shadow_eye.z)
+	var r := shadow_reach + SHADOW_MARGIN
+	var steps := clampi(int(sweep.length() / 16.0), 0, 20)
+	var hb := SIZE * 0.5
+	for k in chunks:
+		var c: Dictionary = chunks[k]
+		var was: int = int(c.get("shadow_far", -1))
+		var cx: float = k.x * SIZE
+		var cz: float = k.y * SIZE
+		var d := INF
+		for i in steps + 1:
+			var p := e + sweep * (float(i) / float(maxi(steps, 1)))
+			var dx := maxf(absf(p.x - cx) - hb, 0.0)
+			var dz := maxf(absf(p.y - cz) - hb, 0.0)
+			d = minf(d, sqrt(dx * dx + dz * dz))
+		var far: bool = d > (r + SHADOW_HYST if was == 0 else r)
+		var fk := 1 if far else 0
+		if _shadow_probe:
+			# what the old ring rule did here (2+ chunks from the rider's chunk = off)
+			var cc := Vector2i(WorldRng.jround(_focus.x / SIZE), WorldRng.jround(_focus.y / SIZE))
+			var old_far := 1 if maxi(absi(k.x - cc.x), absi(k.y - cc.y)) >= 2 else 0
+			var ow: int = int(c.get("shadow_old", -1))
+			c["shadow_old"] = old_far
+			if ow != -1 and ow != old_far and not far:
+				print("SHADOWOLD t=%.1f chunk=%s old rule %s a chunk whose shadows reach the view (eye %.0f m)" % [
+					Time.get_ticks_msec() / 1000.0, k, "turned OFF" if old_far == 1 else "turned on", d])
+		if was == fk:
+			continue
+		c["shadow_far"] = fk
+		for mi in c.get("deco_mi", []):
+			if is_instance_valid(mi):
+				mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF if far else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		if _shadow_probe and was != -1:
+			_shadow_flips += 1
+			print("SHADOWFLIP t=%.1f chunk=%s %s d=%.0f reach=%.0f sweep=%.0f flips=%d" % [
+				Time.get_ticks_msec() / 1000.0, k, "off" if far else "on", d, r, sweep.length(), _shadow_flips])
+
+
 func update_stream(px: float, pz: float, budget_ms: float = 4.0, sync_r := -1) -> void:
 	var t0 := Time.get_ticks_usec()
 	last_finalized = 0
@@ -525,15 +598,7 @@ func update_stream(px: float, pz: float, budget_ms: float = 4.0, sync_r := -1) -
 			var near: bool = ring <= 1
 			for o in chunks[k]["small"]:
 				o.visible = near
-			# decorations 2+ chunks out (~70 m+) cast no shadow: past the close cascades it's mostly
-			# draw calls for shadows nobody sees. Only touched when the chunk's ring changes.
-			var far: bool = ring >= 2
-			var fk := 1 if far else 0
-			if int(chunks[k].get("shadow_far", -1)) != fk:
-				chunks[k]["shadow_far"] = fk
-				for mi in chunks[k].get("deco_mi", []):
-					if is_instance_valid(mi):
-						mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF if far else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	_update_far_shadows()
 	if is_inf(budget_ms):
 		var queue := _missing(ccx, ccz)
 		if sync_r >= 0:
@@ -819,6 +884,7 @@ func _finalize(k: Vector2i) -> void:
 	var job: Dictionary = _jobs[k]
 	_jobs.erase(k)
 	_clutter_dirty = true
+	_shadow_dirty = true
 	var b: TerrainChunkBuilder = job["builder"]
 	if b.gen != _gen:
 		return
