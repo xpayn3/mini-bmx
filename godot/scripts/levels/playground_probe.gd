@@ -152,9 +152,70 @@ func post_step(dt: float) -> void:
 	if _trace and (ph.air or _land_t >= 0.0 and _land_t < 0.4 or (f_here_is_jump(ph))):
 		print("PGTRACE u=%.2f y=%.3f gy=%.3f v=%.2f vy=%.2f pitch=%.3f gp=%.3f air=%s cf=%s cr=%s body_y=%.3f throw=%.2f crash=%s" % [
 			uu, ph.y, course.height(ph.x, ph.z), ph.v, ph.vy, ph.pitch, ph._g_pitch, ph.air, ph.c_f, ph.c_r, ph.body_y - ph.y, ph.throw_v, ph.crash_pending])
+	_brake_slalom(dt, ph, uu)
 	_air = ph.air
 	_tries_step(dt)
 	_draw_label()
+
+
+## brake strips: from the line to a stop (distance, time, how locked); slalom: time from the first cone to the last,
+## speeds, cones passed on the right side. Shown as LAST + `PG BRAKE` / `PG SLALOM` lines, kept in `tests`
+var tests: Array = []
+var _brk = null
+var _brk_last := ""
+var _brk_seen := false
+var _slm = null
+
+func _brake_slalom(dt: float, ph, uu: float) -> void:
+	var on = course.feature_at(ph.x, ph.z)
+	var kind: String = str(on.get("kind", "")) if on != null else ""
+	if on == null or on.id != _brk_last: _brk_last = on.id if on != null else ""; _brk_seen = false
+	if kind == "brake" and _brk == null and not _brk_seen and uu >= float(on.lip) and uu < float(on.lip) + 1.0 and not ph.crash_on and ph.v > 2.0:
+		_brk_seen = true   # (once per pass over the line: a stop right on it must not start another)
+		_brk = {"feat": on.id, "u": uu, "v": ph.v, "t": 0.0, "lock_f": 0.0, "lock_r": 0.0, "slip": 0.0}
+	if _brk != null:
+		_brk.t += dt
+		_brk.lock_f = maxf(_brk.lock_f, ph.front_lock); _brk.lock_r = maxf(_brk.lock_r, ph.rear_lock)
+		_brk.slip = maxf(_brk.slip, absf(rad_to_deg(ph.slip)))
+		if uu < _brk.u - 2.0:   # put back
+			_brk = null
+		elif absf(ph.v) < 0.2 or ph.crash_on or _brk.t > 10.0:
+			var b: Dictionary = _brk
+			b.dist = uu - b.u
+			b.result = "CRASH " + ph.crash_pending if ph.crash_on else "STOP"
+			tests.append(b)
+			_last = "%s
+from %.0f km/h: %.2f m in %.2f s (%.1f m/s²)
+locked F %.0f %% R %.0f %% · slide %.0f°" % [b.feat, b.v * 3.6, b.dist, b.t, b.v / maxf(b.t, 0.01), b.lock_f * 100, b.lock_r * 100, b.slip]
+			print("PG BRAKE feat=%s v=%.1f dist=%.2f time=%.2f decel=%.2f lock_f=%.2f lock_r=%.2f slip=%.1f result=%s" % [b.feat, b.v * 3.6, b.dist, b.t, b.v / maxf(b.t, 0.01), b.lock_f, b.lock_r, b.slip, b.result.replace(" ", "_")])
+			_brk = null
+	if kind == "slalom" and _slm == null and not ph.crash_on:
+		var l = course.lane_by_id(on.lane)
+		var cs := []
+		for c in l.cones:
+			if c[0] >= float(on.u0) and c[0] <= float(on.u1): cs.append(c[0])
+		if not cs.is_empty() and uu >= cs[0] - 0.5 and uu < cs[0] + 1.0:
+			_slm = {"feat": on.id, "cones": cs, "z": l.z, "i": 0, "t": 0.0, "v_in": ph.v, "vmin": ph.v, "ok": 0, "miss": 0, "u": uu, "lean": 0.0}
+	if _slm != null:
+		var sl: Dictionary = _slm
+		sl.t += dt; sl.vmin = minf(sl.vmin, ph.v); sl.lean = maxf(sl.lean, absf(rad_to_deg(ph.bike_lean)))
+		var cs: Array = sl.cones
+		while int(sl.i) < cs.size() and uu >= cs[int(sl.i)]:
+			var side := 1.0 if int(sl.i) % 2 == 0 else -1.0
+			if (ph.z - float(sl.z)) * side > 0.25: sl.ok += 1
+			else: sl.miss += 1
+			sl.i += 1
+		if uu < float(sl.u) - 2.0 or ph.crash_on:
+			if ph.crash_on: print("PG SLALOM feat=%s result=CRASH_%s cones=%d" % [sl.feat, ph.crash_pending.replace(" ", "_"), int(sl.i)])
+			_slm = null
+		elif int(sl.i) >= cs.size():
+			sl.v_out = ph.v
+			tests.append(sl)
+			_last = "%s
+%.2f s · in %.0f, slowest %.0f, out %.0f km/h
+cones %d / %d on the right side · lean max %.0f°" % [sl.feat, sl.t, sl.v_in * 3.6, sl.vmin * 3.6, ph.v * 3.6, sl.ok, cs.size(), sl.lean]
+			print("PG SLALOM feat=%s time=%.2f v_in=%.1f v_min=%.1f v_out=%.1f ok=%d miss=%d lean=%.0f" % [sl.feat, sl.t, sl.v_in * 3.6, sl.vmin * 3.6, ph.v * 3.6, sl.ok, sl.miss, sl.lean])
+			_slm = null
 
 
 var _trace := Env.s("BMX_PG_TRACE") != ""   # tests: every physics step on a jump feature / in the air (PGTRACE lines)

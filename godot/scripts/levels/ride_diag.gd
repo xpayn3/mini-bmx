@@ -24,7 +24,7 @@ extends CanvasLayer
 
 const HZ := 120.0
 const RING := 2400                 # 20 s
-const PAGES := ["OVERVIEW", "SUSPENSION", "INPUT", "TYRES", "BODY", "AIR"]
+const PAGES := ["OVERVIEW", "SUSPENSION", "INPUT", "TYRES", "BODY", "AIR", "ENERGY"]
 const WINDOWS := [3.0, 6.0, 12.0, 20.0]
 const CH := [
 	"v", "slope",
@@ -36,6 +36,7 @@ const CH := [
 	"grip_r", "front_use", "slip", "slip_w", "lat_a", "brake_f", "brake_r", "rlock", "flock", "loose", "risk",
 	"lean", "bike_lean", "counter", "pitch", "g_pitch", "body_x", "hip", "compress", "man_a", "nose_a", "roll_hip", "roll_chest",
 	"hgt", "vy", "air", "air_w", "air_tilt", "flip_in",
+	"energy", "e_kin", "free",
 ]
 const HB := 20                     # travel histogram bins (0..100 %)
 const VB := 30                     # shock speed histogram bins (-3..3 m/s)
@@ -70,6 +71,7 @@ var _jt := 0.0
 var _probe := Env.s("BMX_DIAG_PROBE") != ""
 var _raw_dev := -1
 var _stroke_full := -1.0          # the drawn linkage's full shock stroke (m), worked out once
+var lab: PlaygroundLab
 var always := false                # record while hidden too (playground, BMX_DIAG): stats + histograms from the start
 
 
@@ -100,7 +102,18 @@ func setup(g) -> void:
 	if DebugOverlay.available() and Env.s("BMX_DEBUG_DRAW") != "0":
 		DebugOverlay.on = true
 	DebugOverlay.text_on = false
+	lab = PlaygroundLab.new()
+	lab.name = "Lab"
+	add_child(lab)
+	lab.setup(g, self)
+	g.lab = lab
+	if Env.s("BMX_PG_SUITE") != "":   # tests: the baseline suite (levels/playground_suite.gd)
+		var su := PlaygroundSuite.new()
+		su.name = "Suite"
+		add_child(su)
+		su.setup(g)
 	_build_bar()
+	_build_bar2()
 	_layout()
 	if Env.s("BMX_PG_PILOT") != "":   # tests: the test rider starts on BMX_PG_AT (or the first feature)
 		pilot_start.call_deferred(Env.s("BMX_PG_AT"))
@@ -149,6 +162,10 @@ func record(dt: float, inp: Dictionary) -> void:
 		ry = Input.get_action_strength("body_back") - Input.get_action_strength("body_fwd")
 		lt = Input.get_action_strength("brake"); rt = Input.get_action_strength("pedal")
 	var gy: float = game.terrain.height(ph.x, ph.z)
+	# energy per kg: ½ speed² (+ the climb speed in the air) + g height, from the last reset (the lab's e0)
+	var vt: float = ph.v * ph.v + (ph.vy * ph.vy if ph.air else 0.0)
+	var en: float = 0.5 * vt + 9.81 * ph.y
+	var e0v: float = lab.e0 if lab != null and is_finite(lab.e0) else en
 	var vals := [
 		ph.v * 3.6, rad_to_deg(_f(ph._g_pitch)),
 		ph.dg_xF / tr, ph.dg_xR / tr, dxF, dxR, ph.dg_vF, ph.dg_vR, ph.dg_fF / G, ph.dg_fR / G, ph.dg_tyF / G, ph.dg_tyR / G,
@@ -163,6 +180,7 @@ func record(dt: float, inp: Dictionary) -> void:
 		rad_to_deg(ph.lean), rad_to_deg(ph.bike_lean), rad_to_deg(ph.counter), rad_to_deg(ph.pitch), rad_to_deg(_f(ph._g_pitch)), ph.body_x, ph.hip_shift, ph.compress, rad_to_deg(ph.man_a), rad_to_deg(ph.nose_a),
 		rad_to_deg(_f(game.rider.roll_p)) if game.rider != null else 0.0, rad_to_deg(_f(game.rider.roll_c)) if game.rider != null else 0.0,   # the rider's own roll (hips / chest follow the bike on springs)
 		ph.y - gy, ph.vy, _b(ph.air), ph.air_w, rad_to_deg(ph.air_tilt), ph.flip_in,
+		en - e0v, 0.5 * vt, _b(lab.free if lab != null else _free(inp, ph)),
 	]
 	var base := head * C
 	for i in C:
@@ -174,6 +192,12 @@ func record(dt: float, inp: Dictionary) -> void:
 	_stats(dt, ph, tr)
 	_events(ph)
 	_jump(dt, ph, gy)
+
+
+## nothing put energy in this step (no pedal, sprint, hop / pump, body stick forward)
+static func _free(inp: Dictionary, ph) -> bool:
+	return not ph.crash_on and _f(inp.get("throttle", 0.0)) < 0.02 and not inp.get("sprint", false) \
+		and not inp.get("hop", false) and absf(_f(inp.get("body_fwd", 0.0))) < 0.05
 
 
 static func _f(x) -> float:
@@ -277,28 +301,64 @@ var bar: HBoxContainer
 var _ride_b: Button
 var _pick: OptionButton
 var _kmh_l: Label
-var _pump_c: CheckBox
+var _pump_c: Button
 var _runs_l: Label
 var _picks: Array = []             # per dropdown item: ["lane", lane id] / ["feature", feature id] / null (separator)
 var _kmh := 30.0
 var _cam_pick: OptionButton
-var _auto_c: CheckBox
+var _auto_c: Button
 var _cam_keys: Array = []
+
+## the dev view's own small flat controls (the game's big menu buttons covered the graphs)
+static func _dev_theme() -> Theme:
+	var th := Theme.new()
+	var mk := func(c: Color) -> StyleBoxFlat:
+		var sb := StyleBoxFlat.new(); sb.bg_color = c
+		sb.content_margin_left = 7; sb.content_margin_right = 7; sb.content_margin_top = 2; sb.content_margin_bottom = 2
+		return sb
+	for t in ["Button", "OptionButton", "CheckBox"]:
+		th.set_stylebox("normal", t, mk.call(Color(1, 1, 1, 0.08)))
+		th.set_stylebox("hover", t, mk.call(Color(1, 1, 1, 0.16)))
+		th.set_stylebox("pressed", t, mk.call(Color(1.0, 0.88, 0.3, 0.9)))
+		th.set_stylebox("hover_pressed", t, mk.call(Color(1.0, 0.92, 0.45, 0.95)))
+		th.set_stylebox("focus", t, StyleBoxEmpty.new())
+		th.set_stylebox("disabled", t, mk.call(Color(1, 1, 1, 0.04)))
+		th.set_font_size("font_size", t, 12)
+		th.set_color("font_color", t, Color(0.86, 0.9, 0.95))
+		th.set_color("font_hover_color", t, Color(1, 1, 1))
+		th.set_color("font_pressed_color", t, Color(0.05, 0.05, 0.05))
+		th.set_color("font_hover_pressed_color", t, Color(0.05, 0.05, 0.05))
+	th.set_font_size("font_size", "Label", 12)
+	th.set_color("font_color", "Label", Color(0.86, 0.9, 0.95))
+	th.set_font_size("font_size", "PopupMenu", 13)
+	th.set_constant("h_separation", "CheckBox", 4)
+	return th
+
+
+func _dev_btn(parent: Control, text: String, cb: Callable, tip := "", toggle := false) -> Button:
+	var b := Button.new()
+	b.text = text; b.tooltip_text = tip; b.toggle_mode = toggle
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size = Vector2(0, 22)
+	if toggle: b.toggled.connect(func(_on): cb.call())
+	else: b.pressed.connect(cb)
+	parent.add_child(b)
+	return b
+
 
 func _build_bar() -> void:
 	bar = HBoxContainer.new()
-	bar.theme = UITheme.get_theme()
-	bar.add_theme_constant_override("separation", 4)
+	bar.theme = _dev_theme()
+	bar.add_theme_constant_override("separation", 3)
 	bar.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(bar)
-	var t := UITheme.label("RIDER", 13, Color(1.0, 0.88, 0.3), true)
+	var t := Label.new(); t.text = "RIDER"; t.add_theme_color_override("font_color", Color(1.0, 0.88, 0.3))
 	bar.add_child(t)
-	_ride_b = UITheme.button("RIDE", func(): pilot_toggle(), 13)
-	_ride_b.custom_minimum_size = Vector2(58, 28)
-	bar.add_child(_ride_b)
+	_ride_b = _dev_btn(bar, "RIDE", func(): pilot_toggle(), "F2: the test rider rides the picked feature / lane on repeat")
+	_ride_b.custom_minimum_size = Vector2(46, 22)
 	_pick = OptionButton.new()
-	_pick.add_theme_font_size_override("font_size", 13)
-	_pick.custom_minimum_size = Vector2(120, 28)
+	_pick.focus_mode = Control.FOCUS_NONE
+	_pick.custom_minimum_size = Vector2(110, 22)
 	_pick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_pick.clip_text = true
 	_pick.fit_to_longest_item = false   # (else it grows to its longest line and pushes the bar off the panel)
@@ -316,42 +376,66 @@ func _build_bar() -> void:
 	_select(first)
 	_pick.item_selected.connect(func(_i): pilot_start(""))   # picking a feature sends him to it at once
 	bar.add_child(_pick)
-	var minus := UITheme.button("−", func(): _set_kmh(_kmh - 2.0), 14)
-	minus.custom_minimum_size = Vector2(28, 28)
-	bar.add_child(minus)
-	_kmh_l = UITheme.label("", 13)
-	_kmh_l.custom_minimum_size = Vector2(58, 0)
+	_dev_btn(bar, "-", func(): _set_kmh(_kmh - 2.0), "slower").custom_minimum_size = Vector2(22, 22)
+	_kmh_l = Label.new()
+	_kmh_l.custom_minimum_size = Vector2(62, 0)
 	_kmh_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	bar.add_child(_kmh_l)
-	var plus := UITheme.button("+", func(): _set_kmh(_kmh + 2.0), 14)
-	plus.custom_minimum_size = Vector2(28, 28)
-	bar.add_child(plus)
-	_pump_c = CheckBox.new()
-	_pump_c.text = "pump"
-	_pump_c.add_theme_font_size_override("font_size", 13)
-	_pump_c.button_pressed = Env.s("BMX_PG_PILOT_PUMP") != "0"
-	_pump_c.toggled.connect(func(on): if game.demo is PlaygroundPilot: game.demo.pump = on)
-	bar.add_child(_pump_c)
-	_auto_c = CheckBox.new()
-	_auto_c.text = "auto"
-	_auto_c.tooltip_text = "Jumps: ride at the speed the jump needs (learned run by run)"
-	_auto_c.add_theme_font_size_override("font_size", 13)
-	_auto_c.button_pressed = Env.s("BMX_PG_PILOT_AUTO") != "0"
-	_auto_c.toggled.connect(func(on): if game.demo is PlaygroundPilot: game.demo.auto = on)
-	bar.add_child(_auto_c)
-	_runs_l = UITheme.label("", 12, Color(0.6, 0.65, 0.72))
+	_dev_btn(bar, "+", func(): _set_kmh(_kmh + 2.0), "faster").custom_minimum_size = Vector2(22, 22)
+	_pump_c = _dev_btn(bar, "pump", func(): if game.demo is PlaygroundPilot: game.demo.pump = _pump_c.button_pressed,
+		"he pumps the lips (hop held into them)", true)
+	_pump_c.set_pressed_no_signal(Env.s("BMX_PG_PILOT_PUMP") != "0")
+	_auto_c = _dev_btn(bar, "auto", func(): if game.demo is PlaygroundPilot: game.demo.auto = _auto_c.button_pressed,
+		"jumps: ride at the speed the jump needs (learned run by run)", true)
+	_auto_c.set_pressed_no_signal(Env.s("BMX_PG_PILOT_AUTO") != "0")
+	_runs_l = Label.new()
+	_runs_l.add_theme_color_override("font_color", Color(0.6, 0.65, 0.72))
 	bar.add_child(_runs_l)
 	if Env.s("BMX_PG_PILOT_KMH") != "": _kmh = float(Env.s("BMX_PG_PILOT_KMH"))
 	_set_kmh(_kmh)
 	pilot_changed()
 
 
+## the lab row: pause / one step / slow motion, record / replay / ghost, what the lab is doing
+var bar2: HBoxContainer
+var _pause_b: Button
+var _slow_b: Button
+var _rec_b: Button
+var _ghost_c: Button
+var _lab_l: Label
+
+func _build_bar2() -> void:
+	bar2 = HBoxContainer.new()
+	bar2.theme = _dev_theme()
+	bar2.add_theme_constant_override("separation", 3)
+	bar2.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(bar2)
+	var t := Label.new(); t.text = "LAB"; t.add_theme_color_override("font_color", Color(1.0, 0.88, 0.3))
+	bar2.add_child(t)
+	_pause_b = _small("PAUSE", func(): lab.toggle_pause(), "G: pause / resume the physics")
+	_small("STEP", func(): lab.step_once(), "N: one physics step (1/120 s)")
+	_slow_b = _small("1x", func(): lab.cycle_slow(), "T: slow motion 1 / ½ / ¼ / ⅒")
+	_rec_b = _small("REC", func(): lab.toggle_record(), "V: record the next run (inputs, path, graphs)")
+	_small("REPLAY", func(): lab.start_replay(), "J: replay the saved run with its ghost")
+	_ghost_c = _dev_btn(bar2, "ghost", func(): lab.ghost = _ghost_c.button_pressed, "draw the replayed recording (bike + graphs)", true)
+	_ghost_c.set_pressed_no_signal(true)
+	_lab_l = Label.new()
+	_lab_l.add_theme_color_override("font_color", Color(0.6, 0.65, 0.72))
+	_lab_l.clip_text = true
+	_lab_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bar2.add_child(_lab_l)
+
+
+func _small(text: String, cb: Callable, tip: String) -> Button:
+	return _dev_btn(bar2, text, cb, tip)
+
+
 ## the camera: the playground's side views first (CameraRig.LEVEL_PRESETS), then the normal ones (made on the first
 ## frame: Game makes its camera after this node)
 func _build_cam_pick() -> void:
 	_cam_pick = OptionButton.new()
-	_cam_pick.theme = UITheme.get_theme()
-	_cam_pick.add_theme_font_size_override("font_size", 12)
+	_cam_pick.theme = _dev_theme()
+	_cam_pick.focus_mode = Control.FOCUS_NONE
 	_cam_pick.fit_to_longest_item = false
 	_cam_pick.tooltip_text = "Camera (C cycles)"
 	for k in game.cam.presets().keys():
@@ -419,6 +503,9 @@ func pilot_changed() -> void:
 
 ## the dev view's screen: tuning card left (when open), graphs right (panel) or everything right of the card (full),
 ## the HUD squeezed in between (its left items right of the card, its right column left of the graphs)
+const BAND := 0.46                 # the graph band's share of the screen height (panel mode)
+var ride_rect := Rect2()           # the screen left for the ride (the camera frames the bike in it)
+var _dev_on := false
 var _lay := ""
 var _card_opened := false
 var _full_on := false
@@ -426,7 +513,7 @@ var left_w := 0.0
 
 func _dev_layout() -> void:
 	var hud = game.hud if game else null
-	if hud == null or not hud.has_method("set_left_inset"): return
+	if hud == null or not hud.has_method("dev_mode"): return
 	if not _card_opened:   # the sliders come up with the level (BMX_DEV_CARD=0: not)
 		_card_opened = true
 		hud.card_left = true
@@ -436,29 +523,40 @@ func _dev_layout() -> void:
 	var key := "%d %s %s" % [size_mode, card_on, vp]
 	if key == _lay: return
 	_lay = key
-	left_w = 422.0 if card_on else 0.0
+	if not _dev_on:
+		hud.dev_mode(true); _dev_on = true
+		for fb in get_tree().get_nodes_in_group(&"fullscreen_button"): fb.set("visible", false)   # (a CanvasLayer; F11 still works)
+	left_w = hud.dev_card_w() + (4.0 if card_on else 0.0)
+	# the graphs: a band along the bottom (panel) or everything beside the tuning column (full screen); the ride above
 	if size_mode == 2:
-		view.position = Vector2(left_w + 8, 8); view.size = Vector2(vp.x - left_w - 16, vp.y - 16)
+		view.position = Vector2(left_w + 4, 4); view.size = Vector2(vp.x - left_w - 8, vp.y - 8)
 	else:
-		view.position = Vector2(vp.x - 700, 8); view.size = Vector2(692, vp.y - 58)   # (clear of the fullscreen button)
+		var bh := roundf(vp.y * BAND)
+		view.position = Vector2(left_w + 4, vp.y - bh - 4); view.size = Vector2(vp.x - left_w - 8, bh)
+	ride_rect = Rect2(left_w, 0, vp.x - left_w, (view.position.y if size_mode == 1 else vp.y))
 	view.queue_redraw()
-	# the test rider bar: under the page tabs while the graphs are up, else alone along the bottom right
 	if _cam_pick == null: _lay = ""; return
+	# the header: tabs + hints + camera on the first line, the RIDER and LAB rows side by side on the second
+	var hx: float = view.position.x + 8
+	var hw: float = view.size.x - 16
 	if size_mode > 0:
-		bar.position = view.position + Vector2(10, 52); bar.size = Vector2(minf(view.size.x - 20, 700), 30)
-		_cam_pick.position = view.position + Vector2(view.size.x - 200, 24); _cam_pick.size = Vector2(190, 24)
+		var half := (hw - 8) * 0.5
+		bar.position = Vector2(hx, view.position.y + 28); bar.size = Vector2(half, 24)
+		bar2.position = Vector2(hx + half + 8, view.position.y + 28); bar2.size = Vector2(half, 24)
+		_cam_pick.position = Vector2(view.position.x + view.size.x - 178, view.position.y + 3); _cam_pick.size = Vector2(170, 22)
 	else:
-		bar.position = Vector2(vp.x - 760, vp.y - 42); bar.size = Vector2(700, 30)
-		_cam_pick.position = Vector2(vp.x - 260, vp.y - 72); _cam_pick.size = Vector2(190, 24)
-	hud.set_left_inset(left_w)
-	hud.set_right_inset(708.0 if size_mode == 1 else 0.0)
+		bar.position = Vector2(left_w + 12, vp.y - 32); bar.size = Vector2(minf(620, vp.x - left_w - 24), 24)
+		bar2.position = Vector2(left_w + 12, vp.y - 60); bar2.size = Vector2(minf(620, vp.x - left_w - 24), 24)
+		_cam_pick.position = Vector2(left_w + 12, vp.y - 88); _cam_pick.size = Vector2(170, 22)
 	var full := size_mode == 2
+	hud.dev_bars((view.size.y + 8.0) if size_mode == 1 else 0.0, ride_rect.position.x, ride_rect.end.x)
 	if full != _full_on:
 		hud.dev_full(full); _full_on = full
 	var pr = game.level_probe
-	if pr and pr._label:
-		pr._label.position = Vector2(24.0 + left_w, 138.0)   # top of the middle (under the jump card): the side camera puts the rider mid-screen
-		pr._label.add_theme_font_size_override("font_size", 13)
+	if pr and pr._label:   # the playground's own readout: small, top left of the ride
+		pr._label.position = Vector2(left_w + 14.0, 10.0)
+		pr._label.add_theme_font_size_override("font_size", 12)
+		pr._label.add_theme_constant_override("outline_size", 4)
 		pr._layer.visible = not full
 
 
@@ -468,6 +566,18 @@ func _unhandled_input(e: InputEvent) -> void:
 		_layout()
 		get_viewport().set_input_as_handled()
 		return
+	if e is InputEventKey and e.pressed and not e.echo and lab != null:   # the lab keys (with the graphs off too)
+		var done := true
+		match e.keycode:
+			KEY_G: lab.toggle_pause()
+			KEY_N: lab.step_once()
+			KEY_T: lab.cycle_slow()
+			KEY_V: lab.toggle_record()
+			KEY_J: lab.start_replay()
+			_: done = false
+		if done:
+			get_viewport().set_input_as_handled()
+			return
 	if size_mode == 0 or not (e is InputEventKey) or not e.pressed or e.echo: return
 	match e.keycode:
 		KEY_F5:
@@ -483,7 +593,13 @@ func _unhandled_input(e: InputEvent) -> void:
 	get_viewport().set_input_as_handled()
 
 
-func _input(e: InputEvent) -> void:   # click a page tab
+func _input(e: InputEvent) -> void:   # click a page tab; the wheel over the graphs / bars isn't the camera's zoom
+	if e is InputEventMouseButton and e.pressed and e.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
+		var gm: Vector2 = view.get_global_mouse_position()
+		for c in [view, bar, bar2]:
+			if c != null and c.is_visible_in_tree() and (c as Control).get_global_rect().has_point(gm):
+				get_viewport().set_input_as_handled(); return
+		return
 	if size_mode == 0 or not (e is InputEventMouseButton) or not e.pressed or e.button_index != MOUSE_BUTTON_LEFT: return
 	var p: Vector2 = view.get_local_mouse_position()
 	for i in view.tab_rects.size():
@@ -503,6 +619,14 @@ func _process(_dt: float) -> void:
 	_frame_bike()
 	if _cam_pick and game.cam and _cam_keys.find(game.cam.mode) != _cam_pick.selected and _cam_keys.find(game.cam.mode) >= 0:
 		_cam_pick.select(_cam_keys.find(game.cam.mode))   # (C changed it)
+	if _lab_l:
+		_pause_b.text = "RUN" if lab.paused else "PAUSE"
+		_slow_b.text = ({0.5: "½x", 0.25: "¼x", 0.1: "⅒x"}.get(lab.slow, "%.2fx" % lab.slow)) if lab.slow < 1.0 else "1x"
+		_rec_b.text = "STOP" if lab.recording else "REC"
+		_rec_b.modulate = Color(1, 0.45, 0.4) if lab.recording or lab._rec_armed else Color.WHITE
+		var nchk := 0
+		for k in lab.counts: nchk += int(lab.counts[k])
+		_lab_l.text = lab.status + (("   checks %d" % nchk) if nchk > 0 else "")
 	if _runs_l:
 		var pl = game.demo
 		_runs_l.text = "run %d" % (pl.runs + 1) if pl is PlaygroundPilot else ""
@@ -518,14 +642,16 @@ func _frame_bike() -> void:
 	var c = game.cam
 	if c == null: return
 	var vp := view.get_viewport_rect().size
-	var lo := left_w
-	var hi := vp.x - (708.0 if size_mode == 1 else 0.0)
-	if size_mode == 2 or c.preset().get("mode", "") == "helmet":
-		c.h_offset = 0.0; return
-	var shift := (vp.x * 0.5 - (lo + hi) * 0.5) / vp.x   # + = the bike should sit left of centre
+	if size_mode == 2 or c.preset().get("mode", "") == "helmet" or ride_rect.size.x < 10.0:
+		c.h_offset = 0.0; c.v_offset = 0.0; return
+	var mid := ride_rect.get_center()
 	var d: float = c.global_position.distance_to(game.drawn_pos)
-	var w := 2.0 * d * tan(deg_to_rad(c.fov) * 0.5) * vp.x / vp.y
-	c.h_offset = shift * w
+	var hgt := 2.0 * d * tan(deg_to_rad(c.fov) * 0.5)   # (keep-height: fov is vertical)
+	c.h_offset = (vp.x * 0.5 - mid.x) / vp.x * hgt * vp.x / vp.y
+	# (down slides the camera down: never under the ground, it showed the underside of the level)
+	var cp: Vector3 = c.global_position
+	var gh: float = game.terrain.height(cp.x, cp.z)
+	c.v_offset = maxf(-(vp.y * 0.5 - mid.y) / vp.y * hgt, gh + 0.4 - cp.y)
 
 
 func _exit_tree() -> void:
@@ -588,27 +714,30 @@ class DiagView extends Control:
 		_charts.clear()
 		var R := Rect2(Vector2.ZERO, size)
 		draw_rect(R, BG if d.size_mode == 1 else Color(BG, 0.94))
-		# header + tabs
-		_t(Vector2(10, 18), "RIDE DIAGNOSTICS", YC, 14)
-		var hint := "F4 size  F5 page  F6 %s  F7 %.0f s  F9 reset" % ["RUN" if d.frozen else "freeze", d.win]
-		_t(Vector2(size.x - 10, 18), hint, DIM, 11, HORIZONTAL_ALIGNMENT_RIGHT, 0)
-		if d.frozen: _t(Vector2(170, 18), "FROZEN", RED, 13)
+		# header: title, page tabs, keys, (the camera pick sits at the right end); the RIDER / LAB rows under it
+		_t(Vector2(8, 17), "DEV", YC, 13)
+		var hint := "F4 size  F5 page  F6 %s  F7 %.0f s  F9 reset  G pause  N step  T slow  V rec  J replay" % ["RUN" if d.frozen else "freeze", d.win]
+		_t(Vector2(size.x - 186, 17), hint, DIM, 10, HORIZONTAL_ALIGNMENT_RIGHT, 0)
 		tab_rects.clear()
-		var x := 10.0
+		var x := 42.0
+		if d.frozen:
+			_t(Vector2(x, 17), "FROZEN", RED, 12); x += 60.0
 		for i in RideDiag.PAGES.size():
 			var nm: String = RideDiag.PAGES[i]
-			var w := font.get_string_size(nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 16
-			var tr := Rect2(x, 26, w, 20)
+			var w := font.get_string_size(nm, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x + 12
+			var tr := Rect2(x, 4, w, 18)
 			tab_rects.append(tr)
 			draw_rect(tr, YC if i == d.page else Color(1, 1, 1, 0.08))
-			_t(tr.position + Vector2(8, 15), nm, Color(0.05, 0.05, 0.05) if i == d.page else TXT, 12)
-			x += w + 4
+			_t(tr.position + Vector2(6, 13), nm, Color(0.05, 0.05, 0.05) if i == d.page else TXT, 11)
+			x += w + 3
 		# hover across the time window
 		_hover = -1.0
 		var m := get_local_mouse_position()
 		for r in _last_charts:
 			if (r as Rect2).has_point(m): _hover = clampf((m.x - r.position.x) / r.size.x, 0.0, 1.0)
-		var body := Rect2(10, 90, size.x - 20, size.y - 98)   # (the test rider bar sits at 52..82)
+		var body := Rect2(8, 58, size.x - 16, size.y - 64)   # (the RIDER / LAB rows sit at 28..52)
+		_body = body
+		_two = size.x > 900.0   # a wide band: the page's rows go into two columns
 		match d.page:
 			0: _p_overview(body)
 			1: _p_susp(body)
@@ -616,6 +745,7 @@ class DiagView extends Control:
 			3: _p_tyres(body)
 			4: _p_body(body)
 			5: _p_air(body)
+			6: _p_energy(body)
 		_last_charts = _charts.duplicate()
 
 	var _last_charts: Array = []
@@ -652,6 +782,24 @@ class DiagView extends Control:
 			if back < 0 or back >= n: continue
 			var ex := r.end.x - float(back) / (nwin - 1) * r.size.x
 			draw_line(Vector2(ex, r.position.y), Vector2(ex, r.end.y), Color(ev[2], 0.35), 1.0)
+		# the replayed recording's own values, faint, under the live ones (lined up on the replay's first step)
+		var lab = d.lab
+		if lab != null and lab.ghost and lab._rp_serial >= 0 and lab._ghost_i >= 0 and not lab.rec.is_empty():
+			var gch: PackedFloat32Array = lab.rec.chans
+			var chs: Array = lab.rec.channels
+			var gn := int(lab.rec.n)
+			var gys := (r.size.y - 8.0 - (8.0 if flags.size() > 0 else 0.0)) / maxf(hi - lo, 1e-6)
+			for s in series:
+				var gc := chs.find(s[0])
+				if gc < 0: continue
+				var mul: float = s[3] if s.size() > 3 else 1.0
+				var gp := PackedVector2Array()
+				for k in n:
+					var gi: int = d.serial - 1 - k - lab._rp_serial
+					if gi < 0 or gi >= gn: continue
+					var v: float = clampf(gch[gi * chs.size() + gc] * mul, lo, hi)
+					gp.append(Vector2(r.end.x - float(k) / (nwin - 1) * r.size.x, r.end.y - 4.0 - (v - lo) * gys))
+				if gp.size() >= 2: draw_polyline(gp, Color(s[1], 0.3), 3.0, true)
 		# series: min / max per pixel column so a one-step spike never hides (inlined: this runs for every sample)
 		var cols := maxi(2, int(r.size.x))
 		var per := float(nwin) / cols
@@ -769,12 +917,13 @@ class DiagView extends Control:
 		if x >= 0.995: draw_rect(tube.grow(2), RED, false, 2.0)
 		var tx := tube.end.x + 14
 		var ty := r.position.y + 30
-		label_value(Vector2(tx, ty), "travel", "%3.0f %%" % (x * 100), col)
-		label_value(Vector2(tx, ty + 34), "sag", "%3.0f %%" % (sag * 100))
-		label_value(Vector2(tx, ty + 68), "O-ring", "%3.0f %%" % (oring * 100), YC)
-		label_value(Vector2(tx, ty + 102), "bottom-outs", "%d" % bottoms, RED if bottoms > 0 else TXT)
-		label_value(Vector2(tx, ty + 136), "blow-offs", "%d" % blows)
-		if drawn >= 0.0: label_value(Vector2(tx, ty + 170), "drawn", "%3.0f %%" % (drawn * 100), WC)
+		var items := [["travel", "%3.0f %%" % (x * 100), col], ["sag", "%3.0f %%" % (sag * 100), TXT], ["O-ring", "%3.0f %%" % (oring * 100), YC],
+			["bottom-outs", "%d" % bottoms, RED if bottoms > 0 else TXT], ["blow-offs", "%d" % blows, TXT]]
+		if drawn >= 0.0: items.append(["drawn", "%3.0f %%" % (drawn * 100), WC])
+		# as many rows as fit (34 px each), then the next column
+		var per := maxi(1, int((r.size.y - 44.0) / 34.0))
+		for k in items.size():
+			label_value(Vector2(tx + (k / per) * 84.0, ty + (k % per) * 34.0), items[k][0], items[k][1], items[k][2])
 		if extra != "": _t(Vector2(r.position.x + 6, r.end.y - 6), extra, DIM, 10)
 
 	func hist(r: Rect2, title: String, a: PackedFloat32Array, col: Color, lo: float, hi: float, unit: String, split := false) -> void:
@@ -866,7 +1015,20 @@ class DiagView extends Control:
 
 	# ---- layout helpers
 
-	static func rows(r: Rect2, weights: Array, gap := 6.0) -> Array:
+	var _body := Rect2()
+	var _two := false
+
+	## a page's rows; on a wide band the body's rows are split over two columns (first half left)
+	func rows(r: Rect2, weights: Array, gap := 6.0) -> Array:
+		if _two and r == _body and weights.size() >= 2:
+			var h := ceili(weights.size() / 2.0)
+			var cw := (r.size.x - gap * 2.0) * 0.5
+			var a := _rows1(Rect2(r.position, Vector2(cw, r.size.y)), weights.slice(0, h), gap)
+			var b := _rows1(Rect2(r.position + Vector2(cw + gap * 2.0, 0), Vector2(cw, r.size.y)), weights.slice(h), gap)
+			return a + b
+		return _rows1(r, weights, gap)
+
+	static func _rows1(r: Rect2, weights: Array, gap := 6.0) -> Array:
 		var tot := 0.0
 		for w in weights: tot += w
 		var hh := r.size.y - gap * (weights.size() - 1)
@@ -930,9 +1092,15 @@ class DiagView extends Control:
 		var s: Dictionary = d.st
 		var tr: float = maxf(0.01, ph.dg_travel)
 		var sag: float = ph.dg_sag / tr
-		var full: bool = d.size_mode == 2
-		var main := cols(b, [0.62, 1.38] if not full else [0.45, 1.2, 0.8])
-		var left := rows(main[0], [1.5, 1.5, 1.0])
+		var full: bool = d.size_mode == 2 or size.x > 1100.0   # (room for the histograms: full screen or a wide band)
+		var main := cols(b, [0.62, 1.38] if not full else ([0.7, 1.2, 0.7] if b.size.y < 420.0 else [0.45, 1.2, 0.8]))
+		var left: Array
+		if b.size.y < 420.0:   # a short band: fork + shock side by side, the legs under them
+			var lr := _rows1(main[0], [2.2, 1.0])
+			left = cols(lr[0], [1, 1]) + [lr[1]]
+			main[0] = main[0]
+		else:
+			left = _rows1(main[0], [1.5, 1.5, 1.0])
 		var dr = d.game.susp
 		var sx := ""
 		if dr != null and dr.has_r:
@@ -1061,6 +1229,33 @@ class DiagView extends Control:
 		var pr = d.game.level_probe
 		if pr != null:
 			_t(Vector2(R[0].position.x + 6, R[0].end.y - 6), str(pr._last).replace("\n", "  ·  "), DIM, 10)
+
+	func _p_energy(b: Rect2) -> void:
+		var ph = _ph()
+		var lab = d.lab
+		var R := rows(b, [1.4, 1.0, 0.8, 1.6])
+		chart(R[0], "ENERGY J/kg since the last reset (½v² + g·h): coasting it may only fall", [["energy", YC, "E"]], -60, 20, [[0.0, WC, "start"]], [["free", Color(0.6, 0.9, 1), "COASTING"], ["air", Color(0.6, 1, 0.6), "AIR"]])
+		chart(R[1], "KINETIC ½v² J/kg / speed", [["e_kin", GC, "½v²"], ["v", FC, "km/h"]], 0, 120)
+		chart(R[2], "INPUTS THAT ADD ENERGY", [["thr", GC, "pedal"], ["bfwd", LC, "stick fwd"]], -0.1, 1.05, [], [["hop", YC, "HOP / PUMP"], ["sprint", GC, "SPRINT"]])
+		var cr: Rect2 = R[3]
+		draw_rect(cr, PANE)
+		_t(cr.position + Vector2(4, 12), "PHYSICS CHECKS (things a real bike can't do)", DIM, 11)
+		if lab == null: return
+		var x := cr.position.x + 6.0
+		var kinds := ["energy_gain", "rim_strike", "accel", "sunk", "jump_step", "non_finite"]
+		for k in kinds:
+			var c := int(lab.counts.get(k, 0))
+			var txt := "%s %d" % [k.replace("_", " "), c]
+			_t(Vector2(x, cr.position.y + 30), txt, RED if c > 0 else GC, 12)
+			x += font.get_string_size(txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 18
+		var y := cr.position.y + 50.0
+		for i in range(lab.checks.size() - 1, -1, -1):
+			if y > cr.end.y - 6: break
+			var c: Dictionary = lab.checks[i]
+			_t(Vector2(cr.position.x + 6, y), "%6.1f s  %-12s %s  · %s" % [float(c.t), c.kind, c.text, c.where], TXT, 11)
+			y += 15.0
+		if lab.checks.is_empty():
+			_t(Vector2(cr.position.x + 6, y), "none so far", DIM, 11)
 
 	## the last jump from the side: ground under the take-off line, the bike every 0.1 s (stroboscope)
 	func _side_view(r: Rect2) -> void:

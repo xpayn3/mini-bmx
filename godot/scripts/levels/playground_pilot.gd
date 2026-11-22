@@ -20,6 +20,7 @@ extends DemoPilot
 const LET_GO := 1.5            # m before a feature: hands off
 const RUNUP := 30.0            # m before the feature it restarts at
 const AFTER := 14.0            # m past a feature's end: that run is over
+const SLALOM_OFF := 1.3        # m beside a cone it passes
 
 var course: PlaygroundCourse
 var speed := 30.0 / 3.6        # m/s on the run-in
@@ -33,6 +34,11 @@ var auto := true
 var auto_v := {}               # feature id -> run-in speed (m/s) it learned for that jump
 var cur = null                 # the feature it's riding at now (the bar shows its speed)
 var _last := {}               # feature id -> [run-in m/s, landing error m] of the last run (bracketing)
+var _brake_t := 0.0
+var _gear_t := 0.0
+var ended := ""                # how the last run ended: OVER (past the feature), STALLED, ROLLED_BACK, CRASH, STOPPED (brakes)
+var _back_t := 0.0
+var _brake_done := ""          # lane mode: the strip it has stopped on (rides on from there)
 var _seen := 0                 # the probe's jumps already learned from
 
 
@@ -46,6 +52,7 @@ func _init(c: PlaygroundCourse) -> void:
 
 func reset() -> void:
 	super.reset()
+	_brake_done = ""
 	_done_t = 0.0
 
 
@@ -120,6 +127,7 @@ func restart(game) -> void:
 		var l = _lane if _lane != null else course.lanes[0]
 		sp = Vector3(PlaygroundCourse.X0 + 4.0, 0.0, l.z)
 		target = null
+	if game.lab != null: game.lab.fresh(game.phys)   # (a clean state: the same run comes out the same)
 	game.level_reset_to(sp)
 	if mode == "feature" and target != null: game.phys.v = speed_for(target)
 	runs += 1
@@ -135,7 +143,7 @@ func tick(game, dt: float) -> Dictionary:
 	# crashed: lie there a moment, then the run again
 	if ph.crash_on:
 		_crash_t += dt
-		if _crash_t > 2.0: restart(game)
+		if _crash_t > 2.0: ended = "CRASH"; restart(game)
 		return out
 	_crash_t = 0.0
 	var l = course.lane_at(ph.x, ph.z)
@@ -159,17 +167,43 @@ func tick(game, dt: float) -> Dictionary:
 	if over and not ph.air:
 		_done_t += dt
 		out.brake = 1.0
-		if _done_t > 0.6: restart(game)
+		if _done_t > 0.6: ended = "OVER"; restart(game)
 		return out
 	_done_t = 0.0
-	# steer: a point ahead on the lane's centre line (heading 0 = +x; atan2 as the demo rider does it)
+	# a brake strip: from its line full on the lever(s) it tests, until stopped; then the run again
+	var on = course.feature_at(ph.x, ph.z)
+	if on != null and str(on.get("kind", "")) == "brake" and uu >= float(on.lip) - 0.05 and uu <= float(on.u1) and not ph.air 			and on.id != _brake_done and (mode != "feature" or on == target):   # (feature mode: only its own strip)
+		var which: String = on.get("which", "both")
+		if which == "front": out.brake_front = 1.0
+		elif which == "rear": out.brake_rear = 1.0
+		else: out.brake = 1.0
+		out.steer = 0.0
+		if absf(ph.v) < 0.3:
+			_brake_t += dt
+			if _brake_t > 0.6:   # stopped: feature mode = the run again, lane mode = ride on to the next one
+				_brake_t = 0.0
+				if mode == "feature": ended = "STOPPED"; restart(game)
+				else: _brake_done = on.id
+		return out
+	_brake_t = 0.0
+	# steer: a point ahead on the lane's centre line (heading 0 = +x; atan2 as the demo rider does it); in a slalom
+	# the point beside the next cone, alternate sides
 	var look := clampf(5.0 + absf(ph.v) * 0.5, 6.0, 18.0)
-	var err: float = BikePhysics.ang_diff(atan2(-(l.z - ph.z), look), ph.heading)
+	var aim := Vector2(look, l.z - ph.z)
+	if on != null and str(on.get("kind", "")) == "slalom":
+		for i in l.cones.size():
+			var c: Array = l.cones[i]
+			if c[0] > uu + 0.3:
+				var side := 1.0 if i % 2 == 0 else -1.0
+				aim = Vector2(c[0] - uu, l.z + c[1] + side * SLALOM_OFF - ph.z)
+				break
+	var err: float = BikePhysics.ang_diff(atan2(-aim.y, maxf(1.0, aim.x)), ph.heading)
 	var want := clampf(err * 2.4, -1.0, 1.0) if not ph.air else 0.0
 	_steer += (want - _steer) * clampf(dt / (0.07 + dt), 0.0, 1.0)
 	out.steer = _steer
 	# speed: pedal / brake to `speed` on the run-in, hands off near and on a feature
-	var near: bool = f != null and uu > f.u0 - LET_GO
+	# hands off only into jumps (a fresh press at a lip throws a flip); bumps, slopes, camber, brakes: keep riding
+	var near: bool = f != null and uu > f.u0 - LET_GO and bool(f.get("jump", true)) and str(f.get("kind", "")) not in ["brake", "slalom"]
 	target_v = spd
 	if ph.air or near:
 		out.throttle = 0.0; out.brake = 0.0   # (letting go is fine; a fresh press near a lip would throw a flip)
@@ -179,10 +213,23 @@ func tick(game, dt: float) -> Dictionary:
 		elif d > 0.4: out.brake = clampf(d * 0.35, 0.0, 1.0)
 		out.sprint = ph.v < 5.0 and spd > 7.0
 	out.hop = pump and not ph.air and ph.prep > 0.15
+	# gears like a rider: easier when slow and working (a climb), harder when spinning out (shift() +1 = easier)
+	_gear_t -= dt
+	if ph.geared and not ph.air and _gear_t <= 0.0:
+		if ph.v < 4.5 and out.throttle > 0.5: ph.shift(1); _gear_t = 0.35
+		elif ph.v > 8.0 and out.throttle > 0.5: ph.shift(-1); _gear_t = 0.6
+	# stalled on a climb and rolling back down: brake and stand (then the stuck rule starts the run again)
+	if not ph.air and ph.v < -0.2:
+		out.throttle = 0.0; out.sprint = false; out.brake = 1.0
+		_back_t += dt
+		if _back_t > 1.0:
+			_back_t = 0.0; ended = "ROLLED_BACK"; restart(game)
+		return out
+	_back_t = 0.0
 	# stuck (stopped against something, or crawling up a slope it can't climb): the run again
 	if not ph.air and absf(ph.v) < 0.4 and not near:
 		_stuck_t += dt
-		if _stuck_t > 3.0: _stuck_t = 0.0; restart(game)
+		if _stuck_t > 3.0: _stuck_t = 0.0; ended = "STALLED"; restart(game)
 	else:
 		_stuck_t = 0.0
 	return out

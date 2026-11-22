@@ -13,6 +13,10 @@ extends RefCounted
 ##   (test playground also) RGB axes  the drawn bike's frame (red forward, green up, blue right)
 ##   pink ball     the rider's body mass on its leg spring (over the bike)
 ##   yellow path   where the bike really went (the last ~5 s): compare with the magenta prediction
+##   white arrows  at each tyre: the force the ground pushes back with (1 m = the whole weight)
+##   rings         each tyre's grip in use, lying on the ground: the dot = (along, across) / what it can hold;
+##                 green inside, red past the ring (sliding). Front: brake + turn; rear: drive / brake + slide
+##   white ghost   a replayed recording (lab, J): its bike + the path ahead of it
 ##   orange post   the lip of the jump ahead; green line = its landing, green ball = the sweet spot (35 % down it,
 ##                 what the test rider's AUTO speed aims for)
 
@@ -105,6 +109,10 @@ static func _playground(game, st, d3) -> void:
 		d3.draw_arrow(o, o + b.z.normalized() * 0.6, Color(0.3, 0.5, 1), 0.08, true)
 	if is_finite(st.body_y):
 		d3.draw_sphere(Vector3(st.x, st.body_y + 1.0, st.z), 0.09, Color(1, 0.4, 0.85))
+	if rig != null and rig.wheel_f != null and rig.wheel_r != null:
+		_tyres(st, rig, d3)
+	if game.lab != null:
+		game.lab.draw_ghost(d3)
 	# the path flown
 	var p := Vector3(st.x, st.y + 0.05, st.z)
 	if _trail.is_empty() or _trail[_trail.size() - 1].distance_to(p) > 0.15:
@@ -130,3 +138,35 @@ static func _playground(game, st, d3) -> void:
 		if pts.size() >= 2: d3.draw_line_path(pts, Color(0.3, 1, 0.4))
 		var ut: float = f.land0 + 0.35 * (f.land1 - f.land0)
 		d3.draw_sphere(Vector3(X0 + ut, l.profile(ut) + 0.1, l.z), 0.18, Color(0.3, 1, 0.4))
+
+
+## the tyre forces and grip circles (see the list at the top)
+static func _tyres(st, rig, d3) -> void:
+	var b: Basis = rig.global_transform.basis
+	var up := b.y.normalized()
+	var fw := b.x.normalized()
+	var sd := b.z.normalized()
+	var mu_f: float = st._mu_f if is_finite(st._mu_f) else 0.9
+	var mu_r: float = st._mu_r if is_finite(st._mu_r) else 0.9
+	var nf: float = maxf(0.5, st.n_f if is_finite(st.n_f) else 4.0)
+	var nr: float = maxf(0.5, st.n_r if is_finite(st.n_r) else 5.0)
+	var sgn := signf(st.lat_a) if absf(st.lat_a) > 0.05 else 0.0
+	var wheels := [
+		[rig.wheel_f.global_position - up * rig.wheel_rf, st.dg_tyF, Vector2(-st._fb_f / (mu_f * nf), st.front_use * sgn), st.dg_cF],
+		[rig.wheel_r.global_position - up * rig.wheel_rr, st.dg_tyR, Vector2(st._a_rear / (mu_r * nr), (1.0 - clampf(st.grip_r, 0.0, 1.0)) * sgn), st.dg_cR],
+	]
+	for w in wheels:
+		var c: Vector3 = w[0] + up * 0.02
+		var f: float = w[1] / 9.81
+		if w[3] and f > 0.02:
+			d3.draw_arrow(c, c + up * clampf(f, 0.0, 3.0), Color(1, 1, 1), 0.06, true)
+		var use: Vector2 = w[2]
+		var over := use.length() > 1.0
+		var ring := PackedVector3Array()
+		for k in 25:
+			var a := TAU * k / 24.0
+			ring.append(c + (fw * cos(a) + sd * sin(a)) * 0.25)
+		d3.draw_line_path(ring, Color(1, 0.3, 0.25) if over else Color(0.4, 1, 0.5, 0.8))
+		var dot := c + (fw * clampf(use.x, -1.5, 1.5) + sd * clampf(use.y, -1.5, 1.5)) * 0.25
+		d3.draw_line(c, dot, Color(1, 0.3, 0.25) if over else Color(0.4, 1, 0.5))
+		d3.draw_sphere(dot, 0.035, Color(1, 0.3, 0.25) if over else Color(0.4, 1, 0.5))

@@ -1626,6 +1626,7 @@ func _choice(t: String, items: Array, current, cb: Callable, rebuild := true) ->
 func _slide(text: String, lo: float, hi: float, stp: float, cur: float, unit: String, cb: Callable) -> void:
 	var hb := HBoxContainer.new()
 	var s := HSlider.new()
+	s.scrollable = false   # (the wheel scrolls the list; it never changes a value by accident)
 	s.min_value = lo; s.max_value = hi; s.step = stp; s.value = cur
 	s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	s.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -2274,6 +2275,7 @@ func _rider_page() -> void:
 			var stp: float = r[4]
 			var hb := HBoxContainer.new()
 			var s := HSlider.new()
+			s.scrollable = false   # (the wheel scrolls the list; it never changes a value by accident)
 			s.min_value = r[2]; s.max_value = r[3]; s.step = stp; s.value = float(rider_pose.get(key, 0.0))
 			s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			s.size_flags_vertical = Control.SIZE_SHRINK_CENTER

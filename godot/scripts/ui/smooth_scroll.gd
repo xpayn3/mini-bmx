@@ -61,6 +61,16 @@ func _on_input(e: InputEvent, from: Control) -> void:
 	_go()
 
 
+## scroll by n wheel notches (+ = down) from code: a parent that catches the wheel over its whole area (the tuning
+## card, so a wheel over a slider scrolls the list instead of moving the slider)
+func wheel(n: float) -> void:
+	if _max() <= 0.0: return
+	var dy := maxf(NOTCH_MIN, sc.size.y * NOTCH) * n
+	if signf(dy) != signf(target - pos) and absf(target - pos) > 1.0: target = pos
+	target = clampf(target + dy, 0.0, _max())
+	_go()
+
+
 ## the value changed by someone else: follow-focus, code, the scroll bar
 func _on_value(v: float) -> void:
 	if _setting: return

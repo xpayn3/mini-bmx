@@ -49,6 +49,7 @@ func _build(label: String, rng: Array, val: float, def: float, fmt: Callable, en
 	top.add_child(_reset)
 	add_child(top)
 	slider = HSlider.new()
+	slider.scrollable = false   # (the wheel scrolls the card, never moves a value)
 	slider.min_value = rng[0]; slider.max_value = rng[1]; slider.step = rng[2]
 	slider.value = val
 	slider.custom_minimum_size.y = 26 if big else 20
