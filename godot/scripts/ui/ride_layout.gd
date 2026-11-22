@@ -239,11 +239,15 @@ const PAGES := [
 	["susp", "Suspension", "Tyres, shock and how the ground comes through", [
 		["Wheels & shock", [
 			["*travel", "Suspension travel.", "Short", "Long"],
-			["*tyreHz", "Bounce frequency (stiffness).", "Soft", "Stiff"],
-			["tyreDamp", "Bounce damping.", "Bouncy", "Damped"],
+			["*tyreHz", "Spring rate, on top of the bike's setup (garage > Shocks).", "Soft", "Stiff"],
+			["*tyreDamp", "Damping, compression and rebound together, on top of the setup.", "Bouncy", "Damped"],
+			["*suspSag", "Sag: how far the bike sits into its travel.", "Rides high", "Sits deep"],
+			["*suspRebound", "Rebound damping: how fast it comes back up.", "Lively", "Planted"],
+			["suspProg", "How much the springs ramp up at the end of the travel.", "Linear", "Ramps hard"],
+			["*suspGeo", "Fork dive under the front brake, the rear's squat under power and under its brake.", "None", "Lots"],
 			["tyreSquash", "Tyre squash under load.", "Hard", "Squishy"],
 			["damperKnee", "Shock blow-off speed (low = sharp bumps pass into the wheel).", "Low", "High"],
-			["damperBlow", "Shock harshness past blow-off.", "Plush", "Harsh"],
+			["damperBlow", "High-speed compression: how much damping is left for big hits.", "Blows through", "Holds up"],
 			["wheelMass", "Wheel weight (heavier = harsher bumps).", "Light", "Heavy"],
 			["legPress", "Legs press the bike down.", "Light", "Heavy"],
 		]],

@@ -121,7 +121,11 @@ const DEFS := [
 		["wheelMass", "Wheel weight (heavier = harsher bumps)", 0.03, 0.01, 0.12, 0.005, ""],
 		["tyreSquash", "Tyre squash under load", 1.2, 0.4, 3.0, 0.1, "cm"],
 		["damperKnee", "Shock blow-off speed (low = bumps pass through)", 0.6, 0.1, 2.0, 0.05, "m/s"],
-		["damperBlow", "Shock harshness past blow-off", 0.2, 0.0, 1.0, 0.05, "×"],
+		["damperBlow", "High-speed compression (big hits)", 0.4, 0.0, 1.0, 0.05, "×"],
+		["suspSag", "Sag (× the bike's setup: softer springs)", 1.0, 0.6, 1.5, 0.02, "×"],
+		["suspRebound", "Rebound damping (× the setup)", 1.0, 0.4, 2.0, 0.05, "×"],
+		["suspProg", "Ramp-up at the end of the travel (× the setup)", 1.0, 0.0, 2.5, 0.05, "×"],
+		["suspGeo", "Brake dive and pedal squat from the geometry", 1.0, 0.0, 2.0, 0.05, "×"],
 		["riderBalance", "Rider balance (1 wheel)", 0.7, 0, 1.5, 0.05, ""],
 		["noseDive", "Nose-dive crash angle", 0.6, 0.3, 1.2, 0.05, "rad"],
 		["pumpGain", "Pump strength", 9, 0, 25, 0.5, ""],
@@ -296,10 +300,10 @@ const DEFS := [
 
 const PATH := "user://tune.cfg"
 ## bump VER when defaults are retuned: saved values of the RETUNED keys are dropped once
-const VER := 22
+const VER := 23
 ## later retunes, per version: only these keys are dropped for saves older than that version (bumping VER
 ## with one shared list would reset every earlier retuned key again)
-const RETUNED_AT := {8: ["manualFrom", "stickAirRoll", "stickSpinBuild", "stickYawRate"], 9: ["leanMax"], 11: ["leanIn", "leanOut", "flickSpeed"], 12: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 13: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 14: ["sprintRock"], 15: ["dustWidth"], 16: ["bodyLean"], 17: ["stickAirEase"], 18: ["manualFrom"], 19: ["manBothSticks"], 22: ["popKick"], 20: ["manBothSticks"], 21: ["frontWashAt", "frontWashTime"]}
+const RETUNED_AT := {8: ["manualFrom", "stickAirRoll", "stickSpinBuild", "stickYawRate"], 9: ["leanMax"], 11: ["leanIn", "leanOut", "flickSpeed"], 12: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 13: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 14: ["sprintRock"], 15: ["dustWidth"], 16: ["bodyLean"], 17: ["stickAirEase"], 18: ["manualFrom"], 19: ["manBothSticks"], 22: ["popKick"], 23: ["damperBlow"], 20: ["manBothSticks"], 21: ["frontWashAt", "frontWashTime"]}
 const RETUNED := ["steerRate", "steerRelease", "steerCurve", "turnFloor", "steerMax", "slowSteer",
 	"barSpeed", "grip", "slipRecover", "slipMax", "turnWeight", "leanMax", "leanIn", "leanOut", "leanDamp", "bikeLeanMul", "bikeLeanCap", "flipAccel", "flipRate", "airTwist", "landBack", "travel", "popKick"]
 var defaults := {}
@@ -392,6 +396,8 @@ const FOLLOW := {
 	"reflexBrake": [0.6, "", 0.0], "reflexStandUp": [0.3, "", 0.0], "reflexCatch": [1.5, "", 0.0],   # riderSkill scales them all
 	"leanIn": [40.0, "leanRate", 1.0], "leanOut": [30.0, "leanRate", 1.0], "gyroStable": [0.25, "", 0.0],
 	"popPower": [2.4, "popKick", 1.0],                                   # the legs' push x the bike (a heavy one pops less)
+	"antiSquat": [0.9, "", 0.0],   # the frame's anti-squat (1 = power doesn't squat the rear; BikeBuild.frame_mods)
+	"shockProg": [1.0, "", 0.0],   # the frame's linkage ramp-up (BikeBuild.frame_mods; 1 = the reference frame)
 	"pumpHoldUp": [0.4, "pumpHold", 1.0], "pumpUnweight": [0.15, "pumpStick", 1.0], "pumpCentred": [0.75, "", 0.0], "pumpMinSpeed": [2.0, "", 0.0],
 	"airSpinResp": [7.0, "airSpinRate", 1.0], "airSpinStop": [3.0, "airSpinRate", 1.0],
 	"stickSpinBuild": [5.5, "stickAirEase", 1.0], "stickSpinGrow": [0.4, "", 0.0], "stickSpinMax": [0.7, "", 0.0],

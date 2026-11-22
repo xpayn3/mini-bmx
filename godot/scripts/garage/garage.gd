@@ -2191,13 +2191,40 @@ func _susp_page() -> void:
 			"make": PartThumbs.make_fork.bind(m.lowers, m.stanchions, _product_paint("crown"), str(m.get("glb", ""))), "view": Vector3(0.35, 0.22, 1.0)})
 	_cards(items, S.get("fork_model", "custom"), func(k): BikeBuild.apply_fork_model(build, k))
 	_slide("Travel", 160, 220, 10, S.fork_travel, "mm", func(v): S.fork_travel = int(v); S.fork_model = "custom")
-	_choice("Spring", rate, S.fork_spring, func(v): S.fork_spring = v)
+	# the setup, like on a real bike: sag (how far it sits into its travel: air pressure / spring rate), volume
+	# spacers (how hard the end ramps up), and the damper's clicks. A damper only shows the adjusters it has
+	var fmod: Dictionary = BikeBuild.FORK_MODELS.get(str(S.get("fork_model", "")), {})
+	var f_air: bool = str(fmod.get("spring", "Air")).to_lower() != "coil"
+	var f_adj: Array = fmod.get("adj", ["lsc", "hsc", "reb"])
+	_slide("Sag (%s)" % ("air pressure" if f_air else "spring rate"), SuspSetup.SAG_MIN, SuspSetup.SAG_MAX, 1, float(SuspSetup.val(S, "fork_sag")), "%", func(v): S.fork_sag = int(v))
+	_slide("Volume spacers" if f_air else "Bottom-out bumper", 0, 4, 1, float(SuspSetup.val(S, "fork_tokens")), "", func(v): S.fork_tokens = int(v))
+	if f_adj.has("lsc"): _slide("LS compression", 0, SuspSetup.CLICKS, 1, float(SuspSetup.val(S, "fork_lsc")), "clicks", func(v): S.fork_lsc = int(v))
+	if f_adj.has("hsc"): _slide("HS compression", 0, SuspSetup.CLICKS, 1, float(SuspSetup.val(S, "fork_hsc")), "clicks", func(v): S.fork_hsc = int(v))
+	if f_adj.has("reb"): _slide("Rebound damping", 0, SuspSetup.CLICKS, 1, float(SuspSetup.val(S, "fork_reb")), "clicks", func(v): S.fork_reb = int(v))
 	_h("REAR SHOCK")
+	var shocks := []
+	for sk in SuspSetup.SHOCK_MODELS:
+		var smd: Dictionary = SuspSetup.SHOCK_MODELS[sk]
+		shocks.append([sk, "%s %s" % [str(smd.brand).capitalize(), smd.label]])
+	_choice("Shock", shocks, str(SuspSetup.val(S, "shock_model")), func(v): S.shock_model = v)
+	var smod: Dictionary = SuspSetup.SHOCK_MODELS.get(str(SuspSetup.val(S, "shock_model")), SuspSetup.SHOCK_MODELS[SuspSetup.DEFAULT_SHOCK])
+	var s_air: bool = str(smod.spring) == "air"
+	var s_adj: Array = smod.adj
+	_note(str(smod.note))
 	_slide("Travel", 160, 220, 10, S.shock_travel, "mm", func(v): S.shock_travel = int(v))
-	_choice("Spring", rate, S.shock_spring, func(v): S.shock_spring = v)
-	_h("DAMPING")
-	_choice("Rebound", [[0, "Slow (planted)"], [1, "Medium"], [2, "Fast (poppy)"]], S.rebound, func(v): S.rebound = v)
-	_note("More travel soaks bigger drops; firmer springs pop and pump harder but kick on rough ground. Fork colours can be changed in Paint.")
+	_slide("Sag (%s)" % ("air pressure" if s_air else "spring rate"), SuspSetup.SAG_MIN, SuspSetup.SAG_MAX, 1, float(SuspSetup.val(S, "shock_sag")), "%", func(v): S.shock_sag = int(v))
+	_slide("Volume spacers" if s_air else "Bottom-out bumper", 0, 4, 1, float(SuspSetup.val(S, "shock_tokens")), "", func(v): S.shock_tokens = int(v))
+	if s_adj.has("lsc"): _slide("LS compression", 0, SuspSetup.CLICKS, 1, float(SuspSetup.val(S, "shock_lsc")), "clicks", func(v): S.shock_lsc = int(v))
+	if s_adj.has("hsc"): _slide("HS compression", 0, SuspSetup.CLICKS, 1, float(SuspSetup.val(S, "shock_hsc")), "clicks", func(v): S.shock_hsc = int(v))
+	if s_adj.has("reb"): _slide("Rebound damping", 0, SuspSetup.CLICKS, 1, float(SuspSetup.val(S, "shock_reb")), "clicks", func(v): S.shock_reb = int(v))
+	_h("TYRE PRESSURE")
+	var W: Dictionary = build.wheels
+	_slide("Front", SuspSetup.PSI_MIN, SuspSetup.PSI_MAX, 1, float(W.get("psi_f", SuspSetup.DEFAULTS.psi_f)), "psi", func(v): W.psi_f = int(v))
+	_slide("Rear", SuspSetup.PSI_MIN, SuspSetup.PSI_MAX, 1, float(W.get("psi_r", SuspSetup.DEFAULTS.psi_r)), "psi", func(v): W.psi_r = int(v))
+	var su := SuspSetup.resolve(build)
+	_note("Fork: %s.
+Shock: %s.
+More sag = softer and grippier, but it bottoms sooner. Low-speed compression holds the bike up under braking and pumping; high-speed takes the big hits; slow rebound is planted, fast is lively. Soft tyres grip and soak up chatter but hit the rim on hard landings." % [SuspSetup.describe(su.f), SuspSetup.describe(su.r)])
 
 ## "Gripwell Raptor DHF" + GRIPWELL -> "Raptor DHF" (the card shows the brand above the name)
 static func _model_name(label: String, brand: String) -> String:

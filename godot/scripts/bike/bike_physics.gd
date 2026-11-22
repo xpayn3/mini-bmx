@@ -115,6 +115,14 @@ const TUCK_SHARE := 0.75   # the rider's share of rider + bike when he pulls the
 var crouch := 0.0; var crouch_t := 0.0; var rebound := 0.0; var _stick_hold := 0.0; var _cr_rel := 0.0; var _n_grd := 1.0
 var pop_wait := 0.0; var _pop_arm_t := 0.0; var squash := 0.0
 var _lip_ago := 9.0   # s since a lip was last in sight just ahead
+var sus := {}             # the bike's suspension setup (SuspSetup.resolve: fork, shock, tyre pressures); {} = none (the BMX)
+var _sus_synced := false
+var dg_sag_r := 0.0       # (diagnostics: the rear's sag, on the front's travel scale like dg_xR)
+var _su := PackedFloat64Array()   # the two units as floats (_sus_cache): fork [travel, sag, prog, zc, zr, hs, fric, bump], shock the same, psi f / r
+var _sag_seen := 1.0
+const ANTI_RISE := 0.6     # how much of the rear's rise under its own brake the linkage takes back (and then some)
+var _fb_r := 0.0           # the rear brake's deceleration this step (m/s2), like _fb_f
+const FRAME_PROG := 0.35   # the ramp-up the reference frame's linkage adds to its shock (BikeBuild.frame_mods scales it per frame)
 const TYRE_MAX := 0.045   # m: a tyre squashed this far is on its rim
 var _ty_f := 0.0; var _ty_r := 0.0   # each tyre's push last substep (m/s2 of the whole weight)
 var _rim_hit := 0.0   # the most speed the frame lost against the ground with nothing left to give, since it was read (m/s)
@@ -243,6 +251,7 @@ func setup(extras: Dictionary, bike_cfg: Dictionary) -> void:
 	LAND = float(bike_cfg.get("land", 1.0))
 	geared = bool(bike_cfg.get("geared", false))
 	var mods: Dictionary = bike_cfg.get("mods", {})
+	sus = {} if Env.s("BMX_NO_SUS") != "" else mods.get("susp", {}); _sus_synced = false; _su = PackedFloat64Array()   # (BMX_NO_SUS: tests, the old single spring)
 	if mods.has("cogs"):
 		cogs = mods.cogs; ring_k = mods.ring_k
 		LAND *= float(mods.get("land", 1.0))
@@ -751,7 +760,7 @@ func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_wa
 		front_lock = move_toward(front_lock, clampf((fb_f - cap_f) / (0.25 * cap_f), 0.0, 1.0) if fb_f > cap_f else 0.0, dt * 8.0)
 		fb_r = lerpf(minf(fb_r, cap_r), cap_r * 0.8, rear_lock) if rear_down else 0.0
 		fb_f = lerpf(minf(fb_f, cap_f), cap_f * 0.8, front_lock)
-		_fb_f = fb_f
+		_fb_f = fb_f; _fb_r = fb_r
 		_a_rear = maxf(0.0, drive) + (fb_r if (brake and rear_down) else 0.0)   # what the REAR tyre carries along the bike
 		var b_all := fb_r + fb_f
 		# (gated on any tyre down, not on the rear: with the rear bounced up the front brake did nothing; each brake
@@ -1518,21 +1527,105 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 		var kB: float = T.legStiff * (1 + 5 * prep + 4 * brace)
 		var cB: float = 2 * sqrt(kB) * T.legDamp
 		var press: float = T.legPress * G if (natural and not (hop_t > 0) and not (lift_t > 0)) else 0.0
-		var s0 := (G + press) / K
+		# (a bike with a real suspension setup needs much less of this to stay on the ground: its rebound damping does
+		# that. All of it sat the bike 12 % deeper into its travel on natural ground than its sag was set to)
+		if not sus.is_empty(): press *= 0.35
 		n_ref = _or(n_ref, G + press) + (G + press - _or(n_ref, G + press)) * minf(1.0, dt * 2 * PI * T.tyreHz * 0.6)
 		var TRAVEL: float = T.travel
-		# each end's own travel: never more than the drawn fork / rear end has (from its sag to its bump stop), so the
-		# physics can't press an end further than the model can show (the drawn bike was then lifted out of the ground)
-		var trF := TRAVEL
-		var trR := TRAVEL
-		if host.susp != null and host.susp.wheels_follow:
-			if host.susp.has_f: trF = clampf(s0 + float(host.susp.F["max"]), 0.05, TRAVEL)
-			if host.susp.has_r: trR = clampf(s0 + float(host.susp.R["max"]), 0.05, TRAVEL)
 		var WHEEL_M: float = float(T.get("wheelMass", 0.03))
-		var TYRE_K: float = 0.5 * G / (float(T.get("tyreSquash", 1.2)) * 0.01)
-		var TYRE_C: float = 0.5 * sqrt(TYRE_K * WHEEL_M)
 		var BLOW_V: float = float(T.get("damperKnee", 0.6))
 		var BLOW_K: float = float(T.get("damperBlow", 0.2))
+		# ---- the two ends, each its own suspension unit (SuspSetup: the garage build's fork and rear shock). Per end:
+		# travel (tr), spring rate (k) with its ramp-up (pg: F = k x (1 + pg (x / tr)^2), air ramps, coil barely), the
+		# compression it rests at under the bike (s0: its sag), damping in compression (cc; past the knee BLOW_V only
+		# hs of it is left) and in rebound (cr, its own setting), seal friction (fr), the bump stop's strength (bs),
+		# and its tyre's stiffness (ty, from the pressure). A bike with no setup (the BMX: rigid, its "suspension" is
+		# tyres and arms) keeps the one simple spring it always had, the same at both ends
+		var trF := TRAVEL; var trR := TRAVEL
+		var kF := shF * K; var kR := shR * K
+		var pgF := 0.0; var pgR := 0.0
+		var ccF := shF * C; var ccR := shR * C; var crF := ccF; var crR := ccR
+		var hsF := BLOW_K; var hsR := BLOW_K
+		var frF := 0.0; var frR := 0.0
+		var bsF := 6.0; var bsR := 6.0
+		var sq_cm: float = float(T.get("tyreSquash", 1.2)) * 0.01
+		var tyKF: float = 0.5 * G / sq_cm; var tyKR := tyKF
+		var s0F := (G + press) / K; var s0R := s0F
+		if not sus.is_empty():
+			if _su.size() != 18: _sus_cache()   # (the units' numbers as plain floats: this runs 120 times a second)
+			# (the Ride sliders still work on top of the setup: spring rate, damping, sag, rebound, ramp-up as multipliers)
+			var k_mul: float = (T.tyreHz / 2.4) * (T.tyreHz / 2.4)
+			var d_mul: float = T.tyreDamp / 0.39
+			var sag_mul: float = float(T.get("suspSag", 1.0))
+			var pg_mul: float = float(T.get("suspProg", 1.0))
+			var rb_mul: float = float(T.get("suspRebound", 1.0))
+			trF = _su[0]; trR = _su[8]
+			if host.susp != null and host.susp.wheels_follow:   # never more than the drawn fork / rear end can move
+				if host.susp.has_f: trF = minf(trF, float(host.susp.F["max"]) - float(host.susp.F["min"]))
+				if host.susp.has_r: trR = minf(trR, float(host.susp.R["max"]) - float(host.susp.R["min"]))
+			trF = maxf(trF, 0.03); trR = maxf(trR, 0.03)
+			pgF = _su[2] * pg_mul; pgR = (_su[10] + FRAME_PROG * float(T.get("shockProg", 1.0))) * pg_mul   # (+ the frame's linkage: its leverage falls through the travel)
+			var sgF: float = clampf(_su[1] * sag_mul, 0.1, 0.5)
+			var sgR: float = clampf(_su[9] * sag_mul, 0.1, 0.5)
+			# the rate that sits this end at its sag under its share of the weight
+			kF = shF * G / (sgF * trF * (1.0 + pgF * sgF * sgF)) * k_mul
+			kR = shR * G / (sgR * trR * (1.0 + pgR * sgR * sgR)) * k_mul
+			var ccrF := 2.0 * sqrt(kF * shF * mB)
+			var ccrR := 2.0 * sqrt(kR * shR * mB)
+			ccF = _su[3] * ccrF * d_mul; ccR = _su[11] * ccrR * d_mul
+			crF = _su[4] * ccrF * d_mul * rb_mul; crR = _su[12] * ccrR * d_mul * rb_mul
+			hsF = clampf(_su[5] * BLOW_K / 0.4, 0.05, 1.0); hsR = clampf(_su[13] * BLOW_K / 0.4, 0.05, 1.0)
+			frF = _su[6] * shF * G; frR = _su[14] * shR * G
+			bsF = _su[7]; bsR = _su[15]
+			tyKF = 0.5 * G / (sq_cm * SuspSetup.PSI_REF / _su[16]); tyKR = 0.5 * G / (sq_cm * SuspSetup.PSI_REF / _su[17])
+			s0F = SuspSetup.rest(shF * (G + press), kF, trF, pgF); s0R = SuspSetup.rest(shR * (G + press), kR, trR, pgR)
+			if not _sus_synced and host.susp != null:   # the drawn fork / rear end sit at the same sag
+				_sus_synced = true
+				if host.susp.has_method("set_sag"): host.susp.set_sag(SuspSetup.rest(shF * G, kF, trF, pgF) / trF, SuspSetup.rest(shR * G, kR, trR, pgR) / trR)
+			if absf(sag_mul - _sag_seen) > 0.001:   # (the sag slider moved: the drawn ends follow)
+				_sag_seen = sag_mul; _sus_synced = false
+		elif host.susp != null and host.susp.wheels_follow:
+			if host.susp.has_f: trF = clampf(s0F + float(host.susp.F["max"]), 0.05, TRAVEL)
+			if host.susp.has_r: trR = clampf(s0R + float(host.susp.R["max"]), 0.05, TRAVEL)
+		var tyCF: float = 0.5 * sqrt(tyKF * WHEEL_M); var tyCR: float = 0.5 * sqrt(tyKR * WHEEL_M)
+		# ---- what the step can integrate. A wheel is a small mass between two springs (tyre, suspension) and a damper,
+		# stepped explicitly at dt / 4: past stiffness x step^2 / mass ~ 4, or damping x step / mass ~ 2, it would
+		# ring up and blow apart instead of settling. Any setup or slider (a very light wheel, rock-hard tyres, rebound
+		# wound right in, a huge bump stop) is held inside that: the stiffnesses share k_cap, each damping rate is at
+		# most c_cap. The stock setup is far inside both (spring + tyre at their stiffest ~2900 of 8400, damping ~4 of 13)
+		var h_sub: float = dt / 4.0
+		var k_cap: float = WHEEL_M * (1.1 / h_sub) * (1.1 / h_sub)
+		var c_cap: float = 0.9 * WHEEL_M / h_sub
+		ccF = minf(ccF, c_cap); ccR = minf(ccR, c_cap); crF = minf(crF, c_cap); crR = minf(crR, c_cap)
+		var fr_w: float = maxf(0.04, maxf(frF, frR) / maxf(0.3 * c_cap, 1e-6))   # (the friction's ease through zero is a damper too)
+		var ks_cap: float = 0.35 * k_cap
+		var kt_cap: float = 0.65 * k_cap
+		tyKF = minf(tyKF, kt_cap); tyKR = minf(tyKR, kt_cap)
+		tyCF = minf(tyCF, 0.5 * c_cap); tyCR = minf(tyCR, 0.5 * c_cap)
+		# ---- the suspension's geometry: where a wheel moves as it compresses decides what braking and pedalling do to
+		# it, on top of the plain weight transfer.
+		#   Fork: it slides along the steering axis, tilted back by the head angle, so the wheel moves up AND back. A
+		#     brake force at the front tyre pushes it back along that line = into the fork: the spring carries the
+		#     tyre's load + brake x tan(tilt). That is brake dive (a slack fork dives more).
+		#   Rear: the axle swings about the linkage's pivot. The chain / drive force's line passes above the contact
+		#     patch, which holds the rear up under power: anti-squat (AS = 1 cancels the squat the weight transfer
+		#     gives, less = it squats, more = it stands up). The rear brake's force does the opposite through the same
+		#     geometry: anti-rise (the rear sits down under its brake instead of standing up).
+		# dvF / dvR = that extra push on each spring (m/s2 of the whole weight; + = compresses: frame down, wheel up).
+		# The tyre's load on the ground is not changed by it, only how far the spring is pressed.
+		var dvF := 0.0
+		var dvR := 0.0
+		if not sus.is_empty() and not air and v > 0.3:
+			var geo: float = float(T.get("suspGeo", 1.0))
+			var tan_f := 0.5
+			if host.susp != null and host.susp.axis.y > 0.3: tan_f = clampf(absf(host.susp.axis.x) / host.susp.axis.y, 0.2, 0.75)
+			var braking := _b_prev > 0.0
+			if braking: dvF = _fb_f * tan_f * geo
+			var h_l: float = T.loadHeight / maxf(L, 0.5)   # (the same lever the weight transfer's pitch torque uses)
+			var a_sq: float = float(T.get("antiSquat", 0.9))
+			dvR = (((_fb_r * ANTI_RISE) if braking else 0.0) - maxf(0.0, a_drive) * a_sq) * h_l * geo
+			if Env.s("BMX_GEO_PROBE") != "" and int(since_land * 4.0) != int((since_land - dt) * 4.0) and (braking or a_drive > 1.0):   # tests
+				print("GEO v=%.1f brake f=%.2f r=%.2f drive=%.2f tan=%.2f AS=%.2f dive=%.2f rear=%+.2f fork=%d%% shock=%d%%" % [v, _fb_f if braking else 0.0, _fb_r if braking else 0.0, a_drive, tan_f, a_sq, dvF, dvR, roundi(100.0 * dg_xF / maxf(dg_travel, 0.01)), roundi(100.0 * dg_xR / maxf(dg_travel, 0.01))])
 		var bal_max: float = T.riderBalance * G * BB_REAR / IK
 		# rolling off an edge at speed the rider holds the bike level with his weight (the front is unsupported for
 		# only a moment): the faster, the more he can hold. (At walking pace the nose still drops.) A 1 m drop at
@@ -1633,8 +1726,8 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			var gR := hrP + (hrC - hrP) * u
 			var cs := cos(pitch)
 			var sn := sin(pitch)
-			var dF := zw_f - (y + XF * sn) + s0
-			var dR := zw_r - (y + XR * sn) + s0
+			var dF := zw_f - (y + XF * sn) + s0F
+			var dR := zw_r - (y + XR * sn) + s0R
 			var pvF := vy + XF * cs * pitch_v
 			var pvR := vy + XR * cs * pitch_v
 			# touching the ground = the tyre is squashed by it (the wheel can hang topped out above a drop)
@@ -1643,20 +1736,24 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			# go into the wheel, not the frame; rebound stays fully damped
 			var relF := vw_f - pvF
 			var relR := vw_r - pvR
-			var cdF := C * (relF if relF <= BLOW_V else BLOW_V + BLOW_K * (relF - BLOW_V))
-			var cdR := C * (relR if relR <= BLOW_V else BLOW_V + BLOW_K * (relR - BLOW_V))
+			# (compression: the low-speed rate up to the knee, then only hs of it. Rebound: its own rate. Plus the
+			# seals' friction, eased through zero)
+			var cdF := (ccF * (relF if relF <= BLOW_V else BLOW_V + hsF * (relF - BLOW_V)) if relF >= 0.0 else crF * relF) + frF * clampf(relF / fr_w, -1.0, 1.0)
+			var cdR := (ccR * (relR if relR <= BLOW_V else BLOW_V + hsR * (relR - BLOW_V)) if relR >= 0.0 else crR * relR) + frR * clampf(relR / fr_w, -1.0, 1.0)
 			# the last fifth of the travel is the bump stop: the spring rate climbs steeply (to 7x), so an end slows into
 			# its stop instead of hitting a wall in one step
 			# (a bump stop is rubber: it pushes back hard only while it is being squeezed, and gives little of that back.
 			# As a plain spring it threw a bike set down deep in its travel back into the air)
 			var bpF := maxf(0.0, dF / trF - 0.8) * 5.0 * smooth01(relF / 0.3)
 			var bpR := maxf(0.0, dR / trR - 0.8) * 5.0 * smooth01(relR / 0.3)
-			var FF := maxf(0.0, shF * (K * dF * (1.0 + 6.0 * bpF * bpF) + cdF)) if dF > 0.0 else 0.0
-			var FR := maxf(0.0, shR * (K * dR * (1.0 + 6.0 * bpR * bpR) + cdR)) if dR > 0.0 else 0.0
+			var uF := dF / trF
+			var uR := dR / trR
+			var FF := maxf(0.0, minf(kF * (1.0 + pgF * uF * uF) * (1.0 + bsF * bpF * bpF), ks_cap) * dF + cdF) if dF > 0.0 else 0.0
+			var FR := maxf(0.0, minf(kR * (1.0 + pgR * uR * uR) * (1.0 + bsR * bpR * bpR), ks_cap) * dR + cdR) if dR > 0.0 else 0.0
 			# on the stop (100 %: it never goes past) the tyre's push goes straight into the frame
 			if dF >= trF - 0.0005: FF = maxf(FF, _ty_f)
 			if dR >= trR - 0.0005: FR = maxf(FR, _ty_r)
-			sumF += FF; sumR += FR
+			sumF += maxf(0.0, FF - (dvF if cF else 0.0)); sumR += maxf(0.0, FR - (dvR if cR else 0.0))   # (the tyres' loads: the spring forces less the geometry's part)
 			if i == 1:
 				dg_botF = false; dg_botR = false; dg_blowF = false; dg_blowR = false
 			dg_xF = dF; dg_xR = dR; dg_vF = relF; dg_vR = relR; dg_fF = FF; dg_fR = FR
@@ -1670,7 +1767,9 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 				body_v += (f_leg - cg) * h; body_y += body_v * h
 				leg_f = PHI * (G + f_leg)
 				dg_leg_f = f_leg
-			var alpha := (FF * XF + FR * XR - leg_f * body_x) * cs / IK + (tq / IK if (cF or cR) else 0.0)
+			var geoF := dvF if cF else 0.0
+			var geoR := dvR if cR else 0.0
+			var alpha := ((FF - geoF) * XF + (FR - geoR) * XR - leg_f * body_x) * cs / IK + (tq / IK if (cF or cR) else 0.0)
 			var w_up := wheelie_up > 0.0 and cR
 			var e_up := nose_a > 0.0 and cF and not w_up   # a nose manual: the same hold, about the front wheel
 			if cF != cR or w_up or e_up:
@@ -1680,7 +1779,7 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 				# the rider's weight is over the front axle in a nose manual: the fork's push doesn't lever the bike
 				# back level (without this it only dived on its fork, the rear never left the ground)
 				if e_up: alpha -= FF * XF * cs / IK * smooth01(nose_a / 0.15)
-			vy += (FF + FR - (press if (cF or cR) else 0.0) - mB * (G + cg) - leg_f) / mB * h
+			vy += (FF + FR - geoF - geoR - (press if (cF or cR) else 0.0) - mB * (G + cg) - leg_f) / mB * h
 			pitch_v += alpha * h
 			if not cF and not cR and was_air:
 				# in the air: no outside torque. The shared spin air_w only changes with the inertia (tuck),
@@ -1732,16 +1831,16 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			# (a tyre squashed deep gets much stiffer: the casing, then the rim)
 			var sqF := gF - zw_f
 			var sqR := gR - zw_r
-			var tyF := maxf(0.0, TYRE_K * sqF * (1.0 + minf(5.0, sqF * sqF / 0.0009)) + TYRE_C * (vgF - vw_f)) if sqF > 0.0 else 0.0
-			var tyR := maxf(0.0, TYRE_K * sqR * (1.0 + minf(5.0, sqR * sqR / 0.0009)) + TYRE_C * (vgR - vw_r)) if sqR > 0.0 else 0.0
+			var tyF := maxf(0.0, minf(tyKF * (1.0 + minf(5.0, sqF * sqF / 0.0009)), kt_cap) * sqF + tyCF * (vgF - vw_f)) if sqF > 0.0 else 0.0
+			var tyR := maxf(0.0, minf(tyKR * (1.0 + minf(5.0, sqR * sqR / 0.0009)), kt_cap) * sqR + tyCR * (vgR - vw_r)) if sqR > 0.0 else 0.0
 			_ty_f = tyF; _ty_r = tyR
-			vw_f += ((tyF - FF) / WHEEL_M - G) * h; zw_f += vw_f * h
-			vw_r += ((tyR - FR) / WHEEL_M - G) * h; zw_r += vw_r * h
+			vw_f += ((tyF - FF + (dvF if sqF > 0.0 else 0.0)) / WHEEL_M - G) * h; zw_f += vw_f * h
+			vw_r += ((tyR - FR + (dvR if sqR > 0.0 else 0.0)) / WHEEL_M - G) * h; zw_r += vw_r * h
 			dg_tyF = tyF; dg_tyR = tyR; dg_sqF = maxf(0.0, gF - zw_f); dg_sqR = maxf(0.0, gR - zw_r)
 			var wsn := sin(pitch)
 			var wcs := cos(pitch)
-			var topF := y + XF * wsn - s0
-			var topR := y + XR * wsn - s0
+			var topF := y + XF * wsn - s0F
+			var topR := y + XR * wsn - s0R
 			if zw_f < topF: zw_f = topF; vw_f = maxf(vw_f, vy + XF * wcs * pitch_v)
 			if zw_r < topR: zw_r = topR; vw_r = maxf(vw_r, vy + XR * wcs * pitch_v)
 			# ... and at full compression: the wheel never goes further into the frame than its travel
@@ -1757,7 +1856,7 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 				var gg := gF if wi == 0 else gR
 				var vg := vgF if wi == 0 else vgR
 				var c2 := cos(pitch)
-				var dd := gg - (y + xx * sin(pitch) - s0 + (trF if wi == 0 else trR)) - TYRE_MAX
+				var dd := gg - (y + xx * sin(pitch) - (s0F if wi == 0 else s0R) + (trF if wi == 0 else trR)) - TYRE_MAX
 				if dd <= 0: continue
 				probe_bottom += 1
 				if wi == 0: dg_botF = true
@@ -1775,6 +1874,13 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 				else: cR = true
 			# (the rim is as far as a tyre squashes: the wheel sits on it)
 			zw_f = maxf(zw_f, gF - TYRE_MAX); zw_r = maxf(zw_r, gR - TYRE_MAX)
+			# ... but never further into the frame than its travel: that limit has the last word. (Hung on a wall with
+			# one wheel up on it and the other 9 m down - the stress test's cliff - the ground can't be reached by any
+			# wheel position: the fork read 374 % of its travel there)
+			var endF := y + XF * sin(pitch) - s0F + trF
+			var endR := y + XR * sin(pitch) - s0R + trR
+			if zw_f > endF: zw_f = endF; vw_f = minf(vw_f, vy + XF * cos(pitch) * pitch_v)
+			if zw_r > endR: zw_r = endR; vw_r = minf(vw_r, vy + XR * cos(pitch) * pitch_v)
 			dg_sqF = maxf(0.0, gF - zw_f); dg_sqR = maxf(0.0, gR - zw_r)
 			if not was_air:
 				var rel := body_y - y
@@ -1793,7 +1899,7 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 						body_v = vc; vy = vc
 		# (the graphs read both ends against one travel: the rear's compression is given on the front's scale)
 		dg_xR *= trF / trR
-		dg_travel = trF; dg_sag = s0; dg_knee = BLOW_V; dg_cF = cF; dg_cR = cR
+		dg_travel = trF; dg_sag = s0F; dg_sag_r = s0R * trF / trR; dg_knee = BLOW_V; dg_cF = cF; dg_cR = cR
 		dg_leg = body_y - y if not was_air else 0.0
 		var kN := minf(1.0, dt * 30)
 		n_f = _or(n_f, shF * G) + (sumF / N - _or(n_f, shF * G)) * kN
@@ -2387,6 +2493,16 @@ func _balance_step(dt: float, pedalling: bool, throttle: float, brake: bool) -> 
 ## less: preload, then go
 func _crouch_power() -> float:
 	return sqrt(clampf(crouch, 0.0, 1.0)) * (1.0 - float(T.get("popRebound", 0.18)) * (1.0 - rebound))
+
+## the suspension setup's numbers out of its dictionaries, once (the vertical step reads them 120 times a second)
+func _sus_cache() -> void:
+	_su.resize(18)
+	var i := 0
+	for e in ["f", "r"]:
+		var u: Dictionary = sus[e]
+		for key in ["travel", "sag", "prog", "zc", "zr", "hs", "fric", "bump"]:
+			_su[i] = float(u[key]); i += 1
+	_su[16] = clampf(float(sus.psi_f), 5.0, 80.0); _su[17] = clampf(float(sus.psi_r), 5.0, 80.0)
 
 ## the speed one push of the legs adds to rider + bike (m/s), along the ground's normal. About 2.3 x body weight over
 ## the ~33 cm from a deep crouch to straight gives a 75 kg rider 2.9 m/s; shared with a 17 kg bike that is 2.4 m/s

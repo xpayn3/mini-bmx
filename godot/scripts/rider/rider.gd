@@ -1373,7 +1373,8 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	absorb = lerpf(absorb, maxf(absorb, 0.08), j_ext)   # driving through the lip the legs are straight, however hard it presses
 	# the crouches don't stack past what a rider gets down to (the lip's crouch + the preload + the legs pressed in by a
 	# transition came to 35 cm: sat on the rear tyre with the bars at his chin)
-	var deep_c: float = comp + maxf(0.0, -absorb) - 0.2
+	# (the landing fold counts too: on top of legs already driven right in by a hard landing it put the knees in the bar)
+	var deep_c: float = comp + maxf(0.0, -absorb) + 0.09 * j_fold - 0.22
 	if deep_c > 0.0: absorb += deep_c
 	pelvis.y += absorb
 	chest.y += absorb * 0.9

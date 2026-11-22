@@ -623,6 +623,68 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
     rollers show energy gains of ~0.5 J/kg at crests (the rear-wheel slope reading); drop_2 still lands 50-60 deg nose
     down; high-speed compression damping is weak (the shock's blow-off), so big hits reach the rim; not ridden by the
     user yet.
+- **Suspension = parts with a setup (2026-11-22, user: "should behave realistically like on bikes ... comprehensive:
+  later riders tune shocks, buy another one, some hydraulic, some spring")**. New `scripts/bike/susp_setup.gd`
+  (`SuspSetup`): a FORK and a REAR SHOCK, each a unit of plain data: spring `air` | `coil`, travel (mm), sag (%),
+  tokens (volume spacers / bottom-out bumper, 0-4), damper clicks `lsc` / `hsc` / `reb` (0-10, 5 = middle), `adj`
+  (which adjusters that damper has: a basic shock is rebound only), kg. `SuspSetup.unit(...)` turns one into the
+  physics' numbers, `resolve(build)` does a whole garage build -> `{f, r, psi_f, psi_r}`; `SHOCK_MODELS` = the rear
+  shocks (made-up brands; coil / air / one with a hydraulic bottom-out); forks stay `BikeBuild.FORK_MODELS` (their
+  `spring` Air / Coil is used; an optional `adj` list limits the adjusters). **A shop / rider tuning only has to write
+  the build's keys** (`suspension.fork_sag / fork_tokens / fork_lsc / fork_hsc / fork_reb / shock_model / shock_sag /
+  shock_tokens / shock_lsc / shock_hsc / shock_reb`, `wheels.psi_f / psi_r`; `SuspSetup.val` gives a key's value, old
+  saves' 3-step spring / rebound choices are carried over) or add a model to a catalogue.
+  - **Physics** (`_step_vertical`, per end): travel `tr`; spring F = k x (1 + pg (x / tr)^2) with k set so that end
+    rests at its sag under its share of the weight (air pg 0.4 + 0.22 / spacer, coil 0.04 + 0.03 / step; the rear adds
+    the frame's linkage: `FRAME_PROG` 0.35 x `shockProg`, from `BikeBuild.frame_mods`' progression); compression
+    damping zc (0.16-0.54 of critical) up to the knee `damperKnee`, past it `hs` of it (0.22-0.77; `damperBlow`
+    default 0.2 -> 0.4, Tune VER 23); rebound its own zr (0.25-0.85); seal friction (air 0.05 g, coil 0.018 g of that
+    end's load); bump stop strength by tokens; the tyre's stiffness from its pressure (`PSI_REF` 25). `press`
+    (legPress) is cut to 35 % on a bike with a setup. A bike with no setup (the BMX) keeps the one simple spring
+    (`sus` empty; `BMX_NO_SUS=1` forces that for comparison). The drawn fork / rear end get the same sag
+    (`Suspension.set_sag`) and the physics travel is never more than the drawn one.
+  - **Ride sliders on top of the setup** (Ride > Suspension): `tyreHz` (spring rate, 2.4 = as set up), `tyreDamp`
+    (all damping, 0.39 = as set up), new `suspSag`, `suspRebound`, `suspProg` (x). The garage no longer multiplies
+    `tyreHz` / `tyreDamp`; tyre pressure also moves grip (+0.6 % per psi softer) and rolling drag (+1.2 %).
+  - **Garage > Shocks** (`_susp_page`): per end travel, sag, spacers / bumper, LS / HS compression, rebound (only the
+    adjusters the unit has), the shock picker, tyre pressures, a line describing each end. The Landing stat bar
+    reads the setup (`BikeBuild._land_k`). Shock weight is in `bike_kg`.
+  - **Measured** (test rider, drop_1 at 24 km/h, speed lost at the rim): stock 0.44 m/s; sag 36 / 38 % 1.61; sag 20 /
+    22 % 0; spacers 4 0.03; spacers 0 1.03; compression all 10 clicks 0; all 0 clicks 1.56; air shock 0; tyres 15 psi
+    1.77. Suite vs the old single spring: jumps within tolerance, fork use on landings 72-93 % (was 96-100 %),
+    hard front braking 45 % of the fork. Sag on the graphs: 28 % on built ground, 32 % on natural (the rest of `press`).
+  - Tests: `BMX_BUILD="suspension.fork_sag=36;suspension.shock_model=air_dh;wheels.psi_f=15"` (setup keys work even
+    when a build doesn't hold them yet), `BMX_GARAGE_TAB=suspension`, `BMX_DIAG_PROBE=1` (`DIAG SUSP ... sag= travel=`).
+  - **Geometry: brake dive, anti-squat, anti-rise** (same day, user: "do this now"; `dvF` / `dvR` in
+    `_step_vertical`, only on a bike with a setup, on the ground): the extra push on each spring from where its wheel
+    moves as it compresses. Fork: it slides along the steering axis (`Suspension.axis`: tan 0.51 on the RUNOUT, 63 deg
+    head angle), so the front brake's force presses it in by brake x tan(tilt). Rear: `antiSquat` (Tune follower,
+    0.9 x the frame via `frame_mods`: 0.4 + its anti_squat figure) x drive x loadHeight / L holds it up under power,
+    `ANTI_RISE` 0.6 x the rear brake sits it down. Applied as equal and opposite forces on frame and wheel, so the
+    tyres' loads (grip, stopping distance) don't change: only how far the spring is pressed (`sumF` / `sumR` take it
+    back out). Slider Ride > Suspension `suspGeo` (0 = off). Measured: front brake at 0.75 g: fork 62 % of its travel
+    (41 % without), 4.23 m either way; rear brake: shock 33-34 % (31 %); sprint: shock 45-49 % (49-52 %).
+    Probe `BMX_GEO_PROBE=1` (`GEO v= brake f= r= drive= tan= AS= dive= rear= fork=% shock=%`).
+  - **Review for stability + speed (same day, user asked for it)**. Found and fixed: (1) nothing limited what the
+    explicit step (dt / 4) can integrate: a wheel is a small mass between the tyre and the suspension spring, and a
+    light wheel (`wheelMass` 0.01) with a firm setup, 4 spacers, `suspProg` 2.5 and rock-hard tyres came to stiffness
+    x step^2 / mass ~ 24 (limit ~4), rebound wound in to damping x step / mass ~ 17 (limit 2). Now `k_cap` / `c_cap`
+    in `_step_vertical` hold spring + tyre stiffness and every damping rate inside what the step can take (the stock
+    setup is at ~35 % / ~30 % of them, so nothing changes there: suite compare 0 of 24 changed). (2) The tyre's
+    re-seat on the rim could push a wheel past its travel when no wheel position can reach the ground (hung on the
+    stress test's 9 m wall: 374 %): the travel limit now has the last word. (3) The step read ~25 dictionary values
+    and ran two pow loops every step: the units' numbers are cached as floats (`_su`, `_sus_cache`), `SuspSetup.rest`
+    has no pow. Step cost (slope_stress, headless): 99 us before the suspension work, 117 after it, 108 now.
+    `slope_stress` grew: 5 "susp:" torture checks (drops of 5 / 9 m, a 25 cm square edge at 16 m/s, 15 cm washboard at
+    20 m/s, 1.2 m rollers) and a `SUSP travel max= tyre squash max= slowest step= blown-up rides=` line; every ride in
+    it tracks the most travel used. Run it on a setup with `BMX_BUILD="..."` + `tune=k=v,...`. Twelve setups tried
+    (stock, softest, firmest, air, hydraulic stop, 160 / 220 mm, three sets of sliders at their ends, the BMX, the old
+    single spring): 0 non-finite states, travel max 100.0 %, tyre 4.6 cm. Behaviour checks fail only on absurd
+    slider sets (everything rigid: it bounces off washboard) and the chaotic "brake grade -35 deg" one.
+  - Open: the wheelbase and head angle don't change as the fork dives (the ride geometry is fixed), no pedal kickback
+    / bob with each stroke, the rear axle's path doesn't soak up square edges differently. No shop / prices for
+    shocks yet, shock models have no 3D model or card picture. Not ridden by the user yet. (`slope_stress` is 51 / 51
+    again; its "brake grade -35 deg" check is a chaotic slide at the friction angle and flips with small changes.)
 - **Direct manual (2026-11-22, user: "too stiff, locks us in, going too far stops us, make it more manual"; then "fall if we pull too far", "turn
   less, with body lean")**. `manDirect` 1 (Ride > Manual & pump; 0 = the old tipping balance, they blend): **the stick is the front's height**.
   `_balance_step`: target = pull x (`manBalance` + `manLoop` + 0.08), `man_a` follows on a soft spring (`manFollow` 40, ~0.3 s), so it never runs
