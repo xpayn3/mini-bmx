@@ -241,7 +241,7 @@ const DEFS := [
 		["pumpStick", "Body stick forward: pump strength (× the button)", 1.2, 0, 2, 0.05, "×"],
 		["landPerfect", "Perfect landing within", 0.14, 0.03, 0.4, 0.01, "rad"],
 		["landBoost", "Perfect landing on a downslope: speed pumped", 1.6, 0, 5, 0.1, "m/s"],
-		["landHeavy", "Heavy landing from (share of a slam)", 0.45, 0.2, 0.9, 0.05, ""],
+		["landHeavy", "Heavy landing from (share of a slam)", 0.6, 0.2, 0.9, 0.05, ""],
 		["landYawFree", "Sideways landing: free angle", 0.12, 0, 0.5, 0.01, "rad"],
 		["landYawGrip", "Sideways landing: tyres catch at once", 1.0, 0.3, 2, 0.05, "×"],
 		["landYawCrash", "Sideways landing: highside from", 5.5, 2, 12, 0.1, "m/s"],
@@ -300,10 +300,10 @@ const DEFS := [
 
 const PATH := "user://tune.cfg"
 ## bump VER when defaults are retuned: saved values of the RETUNED keys are dropped once
-const VER := 23
+const VER := 24
 ## later retunes, per version: only these keys are dropped for saves older than that version (bumping VER
 ## with one shared list would reset every earlier retuned key again)
-const RETUNED_AT := {8: ["manualFrom", "stickAirRoll", "stickSpinBuild", "stickYawRate"], 9: ["leanMax"], 11: ["leanIn", "leanOut", "flickSpeed"], 12: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 13: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 14: ["sprintRock"], 15: ["dustWidth"], 16: ["bodyLean"], 17: ["stickAirEase"], 18: ["manualFrom"], 19: ["manBothSticks"], 22: ["popKick"], 23: ["damperBlow"], 20: ["manBothSticks"], 21: ["frontWashAt", "frontWashTime"]}
+const RETUNED_AT := {8: ["manualFrom", "stickAirRoll", "stickSpinBuild", "stickYawRate"], 9: ["leanMax"], 11: ["leanIn", "leanOut", "flickSpeed"], 12: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 13: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 14: ["sprintRock"], 15: ["dustWidth"], 16: ["bodyLean"], 17: ["stickAirEase"], 18: ["manualFrom"], 19: ["manBothSticks"], 22: ["popKick"], 23: ["damperBlow"], 24: ["landHeavy"], 20: ["manBothSticks"], 21: ["frontWashAt", "frontWashTime"]}
 const RETUNED := ["steerRate", "steerRelease", "steerCurve", "turnFloor", "steerMax", "slowSteer",
 	"barSpeed", "grip", "slipRecover", "slipMax", "turnWeight", "leanMax", "leanIn", "leanOut", "leanDamp", "bikeLeanMul", "bikeLeanCap", "flipAccel", "flipRate", "airTwist", "landBack", "travel", "popKick"]
 var defaults := {}

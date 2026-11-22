@@ -623,6 +623,24 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
     rollers show energy gains of ~0.5 J/kg at crests (the rear-wheel slope reading); drop_2 still lands 50-60 deg nose
     down; high-speed compression damping is weak (the shock's blow-off), so big hits reach the rim; not ridden by the
     user yet.
+- **Trail jumps resized to the speed riders arrive at (2026-11-22, found testing the landings on the trail)**.
+  Measured with `BMX_JUMP_PROBE=1` (`JUMPLAND SHORT | LANDING | LONG | NATURAL v_off= dist= height= impact= slope=`:
+  where on a built jump it came down, from `TerrainField.fo_air` / `fo_m`): the built jumps suited ~30-35 km/h; at the
+  48-60 km/h riders really carry, every one was overshot onto the flat past its landing (21-24 m out) or into the
+  next jump's face. With landings judged, that was a heavy landing on every jump and the demo rider slammed on a
+  jump line. Now `TrailFeatures.TABLE / DOUBLE / KICKER` (+ `AIR`) are 1.6x in every length and height (same lip and
+  landing angles; mirrored in `TerrainFieldCs.cs`), for the jumps ON THE TRAIL (`route_feats`). The free-ride jumps
+  out in the land (`jump_at`, found through 34 m cells, close to each other and to wooden features) keep the old
+  size: `TABLE_S / DOUBLE_S / KICKER_S / AIR_S`, `TerrainField.small`, `make_feat(..., old_size)` (bigger, they
+  overlapped: `wood_edge_probe` walls=4). Bigger jumps take more of each straight, so there are fewer route features
+  (12 worlds x 4 km: 166, was 222) and bridges were getting rare: gorge chance 0.06 -> 0.13, rope hash 0.12 -> 0.3
+  (7 bridges in those worlds, was 8). **Every world's trail features past the first are laid out differently than
+  before**; seed 4242 no longer has a rope bridge in its first 4 km (seed 12 has one at 2.26 km: `BMX_SEED=12
+  BMX_TRAIL_FEAT=rope`). Heavy landings also cost less: `landHeavy` 0.45 -> 0.6 (Tune VER 24), speed lost 22 -> 12 %,
+  stun 0.15-0.6 s. After, 150 s rides: the demo rider (35-47 km/h) lands every built jump on its downslope, no heavy
+  landing, no crash, no body clipping; flat out (54-63 km/h) one heavy 0.77 on the first jump, the rest light, no
+  crash. `terrain_cs_cmp` EXACT, `trail_grow_probe` / `rope_find` / `cactus_probe` PASS, `wood_edge_probe` walls=0,
+  suite 0 of 24 changed, stress 56 / 56. New `tools/route_count.gd` (-s: route features per type over 12 worlds).
 - **Suspension = parts with a setup (2026-11-22, user: "should behave realistically like on bikes ... comprehensive:
   later riders tune shocks, buy another one, some hydraulic, some spring")**. New `scripts/bike/susp_setup.gd`
   (`SuspSetup`): a FORK and a REAR SHOCK, each a unit of plain data: spring `air` | `coil`, travel (mm), sag (%),

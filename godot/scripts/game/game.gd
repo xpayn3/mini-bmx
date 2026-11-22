@@ -111,6 +111,7 @@ var drawn_pos := Vector3.ZERO
 # tests (BMX_CLIP_PROBE): how deep the drawn tyres went into the ground before / after unclipping
 var clip_probe := Env.s("BMX_CLIP_PROBE") != ""
 var _lean_max := 0.0; var _lean_shot_t := -9.0; var _lean_shots := 0   # tests (BMX_LEAN_SHOT)
+var _jp_v := 0.0   # tests (BMX_JUMP_PROBE): the speed it left the ground at
 var _lip_t := -1.0; var _lip_shots := 0   # tests (BMX_LIP_SHOT)
 var _land_t := -1.0; var _land_shots := 0   # tests (BMX_LAND_SHOT)
 var clip_stats := {"frames": 0, "fixed": 0, "bad": 0, "before": 0.0, "after": 0.0}
@@ -1249,12 +1250,24 @@ func on_style(points: int, label: String) -> void:
 
 func on_takeoff() -> void:
 	takeoff = Vector3(phys.x, phys.y, phys.z)
+	_jp_v = sqrt(phys.v * phys.v + phys.vy * phys.vy)
 	air_peak = phys.y
 	if hud: hud.on_takeoff()
 
 func on_landing(air_time: float, impact: float) -> void:
 	var dist := Vector2(phys.x - takeoff.x, phys.z - takeoff.z).length()
 	var height := air_peak - maxf(takeoff.y, phys.y)
+	if Env.s("BMX_JUMP_PROBE") != "" and air_time > 0.45 and terrain.field != null:   # tests: where on a trail jump it came down
+		# SHORT = on the stretch riders are meant to fly over (the table top, the gap), LANDING = on the jump past
+		# that, LONG = clear of the whole jump (flat ground), NATURAL = not off a built jump at all
+		terrain.field.jump_eval(takeoff.x, takeoff.z)
+		var m0: float = terrain.field.fo_m
+		terrain.field.jump_eval(phys.x, phys.z)
+		var m1: float = terrain.field.fo_m
+		var a1: float = terrain.field.fo_air
+		var where := "NATURAL" if m0 < 0.05 and m1 < 0.05 else ("SHORT" if a1 > 0.3 else ("LANDING" if m1 > 0.05 else "LONG"))
+		print("JUMPLAND %s v_off=%.0f km/h air=%.2f dist=%.1f height=%.1f impact=%.1f slope=%.0fdeg pitch_err=%.0fdeg x=%.0f" % [where, _jp_v * 3.6, air_time, dist, maxf(0.0, height), impact,
+			rad_to_deg(phys._g_pitch), rad_to_deg(wrapf(phys.pitch - phys._g_pitch, -PI, PI)), phys.x])
 	if hud: hud.on_landing(air_time, dist, maxf(0.0, height), impact)
 	_landed = clampf(impact / 6.0, 0.0, 1.0) if air_time > 0.25 else 0.0
 	var ls: int = terrain.surface(phys.x, phys.z)
