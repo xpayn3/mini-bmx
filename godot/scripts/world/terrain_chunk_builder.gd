@@ -884,7 +884,7 @@ func _tape() -> void:
 
 
 # ---------------- trees and cacti ----------------
-const TREE_TRIES := 140   # placement tries per chunk (was 90: forests read thin)
+const TREE_TRIES := 100   # placement tries per chunk (90 read thin, 140 too dense: user 2026-11-22)
 const TREE_K := 1.4        # every tree this much bigger (they read small next to the rider)
 
 ## a crown of radius r at (x, z) stays clear of the trail and its paths (the trees' own spot check only tests the trunk)
@@ -903,7 +903,7 @@ func _trees(ox: float, oz: float) -> void:
 		var forest: float = f.n(x + 400, z, TerrainField.I38)
 		# beside the trail (within ~14 m) trees grow whatever the forest mask says: the road gets lined now and then
 		var roadside: bool = TerrainField.trail_metres_of(f.pathN(x, z)) < 14.0 and f.n(x - 900, z + 300, TerrainField.I38) > -0.1
-		if rnd.next() > (0.55 if roadside else sm(-0.25, 0.25, forest) * 0.9 + 0.05):
+		if rnd.next() > (0.4 if roadside else sm(-0.25, 0.25, forest) * 0.9 + 0.05):
 			continue
 		if f.trail(x, z) > 0.02 or absf(f.pathN(x, z)) < 0.1 or f.jump_mask(x, z) > 0 or is_blocked(x, z, 0.8):
 			continue

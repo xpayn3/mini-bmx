@@ -4,10 +4,14 @@
 shader_type spatial;
 render_mode blend_mix, depth_draw_opaque, cull_back, diffuse_burley, specular_schlick_ggx, world_vertex_coords;
 #include "res://shaders/atmos.gdshaderinc"
+#include "res://shaders/deco_fade.gdshaderinc"
+instance uniform float fade_mode = 0.0;   // deco_fade.gdshaderinc: 1 world decorations, 2 small clutter (Terrain sets it)
 
 uniform vec3 albedo = vec3(1.0);
 uniform float roughness = 0.85;
 uniform float metallic = 0.0;
+// how much sky the faces mirror: leaves / cacti almost none (big flat low-poly faces read as glossy plastic)
+uniform float specular = 0.4;
 uniform bool use_instance = true;
 uniform float sway = 0.0;      // m of sway per m of height in a full gust
 uniform float backlight = 0.0;
@@ -21,6 +25,7 @@ uniform float dapple = 0.0;
 uniform float dapple_size = 0.55;  // m, the size of a gap in the leaves
 uniform bool tint_own = false;   // cacti: UV.x = 1 keeps the vertex colour (spines, flowers, cut flesh)
 varying vec3 v_col;
+varying flat vec3 v_origin;   // the instance's base (distance fade)
 varying vec3 v_world;
 varying vec3 v_rest;   // world position before the wind sway (dapple holes ride with the leaves)
 // ride camera: trees / rocks right at the lens dissolve (dither) so they never fill the screen.
@@ -33,6 +38,7 @@ void vertex() {
 	v_col = albedo * COLOR.rgb * ic;
 	if (tint_own) v_col = mix(v_col, COLOR.rgb, clamp(UV.x, 0.0, 1.0));
 	v_rest = VERTEX;
+	v_origin = MODEL_MATRIX[3].xyz;
 	if (sway > 0.0) {
 		vec3 base = MODEL_MATRIX[3].xyz;
 		float h = max(VERTEX.y - base.y, 0.0);
@@ -55,6 +61,7 @@ float dap_noise(vec3 x) {
 }
 
 void fragment() {
+	if (deco_cut(v_origin, fade_mode, FRAGCOORD.xy, PROJECTION_MATRIX[3][3] > 0.5)) discard;   // ortho = the sun's shadow pass
 	// the sun's shadow pass (orthographic; every view camera is perspective): leaf gaps. Only within ~40 m of
 	// the ride camera (cam_eye): further out the flecks are below a shadow texel of the far cascades, and the
 	// discard + noise ran for every crown in every cascade
@@ -76,7 +83,7 @@ void fragment() {
 	ALBEDO = v_col;
 	ROUGHNESS = roughness;
 	METALLIC = metallic;
-	SPECULAR = 0.4;
+	SPECULAR = specular;
 }
 
 void light() {

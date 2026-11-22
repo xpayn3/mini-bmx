@@ -223,6 +223,20 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   "2+ chunks from the rider = no shadow": at golden hour the 100+ m tree shadows across the trail blinked off / on at every
   chunk line (user: "as if a light were switched off"). Probe `BMX_SHADOW_PROBE=1` (`SHADOWFLIP` = a change, with its
   distance vs the reach; `SHADOWOLD` = where the old rule would have flipped a chunk that does reach the view).
+  **No pop-in (2026-11-22)**: streamed decorations dissolve by their OWN distance from the rider
+  (`shaders/deco_fade.gdshaderinc`, global `deco_fade` set by `Game`: `DECO_FADE_IN` 100 .. `DECO_FADE_OUT` 124 m; instance
+  uniform `fade_mode` 1 = trees / rocks / wood / sheds, 2 = small clutter 30 .. 44 m), and `FarHills`' backdrop trees
+  dissolve in over the same band (they were hidden by the streamed chunk square, which jumped 48 m at every chunk line).
+  Chunks load >= 144 m out, so a chunk arriving is never seen. The big decorations lost their chunk-centre
+  `VIS_RANGE`s (whole chunks popped at the load edge). The reflection probe only reflects onto the rider + bike
+  (`reflection_mask = RIM_LAYER`): its 160 m box lit near trees / ground with gloss that popped as it jumped 30 m.
+  Foliage `specular` 0.1. Shadow range follows the zoom you set, not the speed dolly (cascades re-fitted every frame).
+  Trees ~30 % fewer (`TREE_TRIES` 100). Test `BMX_DECO_FADE=20,30` pulls the band in to see it work.
+  **Sun shadows** (`Game._shadow_fit`): reach fixed by quality (`SHADOW_REACH` 100 / 140 / 170 / 200 m, fade from 75 %),
+  never with the speed dolly; the 4 cascades end at zoom + 6 / + 22 / + 55 m (the sharp one covers the rider, not the
+  empty air in front of the camera; it used to be fixed 6 / 18 / 45 % of an 80 m reach: shadows stopped ~70 m out and
+  the rider sat in a coarse cascade). Golden hour bias 0.05 / normal bias 2.0 / blur 1.2 (was 0.08 / 3.0 / 2.0: mushy).
+  Ultra atlas 8192 again. In the shadow pass trees keep casting to `DECO_FADE_OUT` + 20 m (low-sun shadows are long).
 - Height field in **C#** (`TerrainFieldCs`), ~10× faster than GDScript (1.4–3.8 µs per height). The
   GDScript `TerrainField` is the reference: `tools/terrain_cs_cmp.gd` must report **EXACT** (≈736k
   comparisons, 0 mismatches). Switch: `Terrain.USE_CS`, env `BMX_TERRAIN_GD=1` forces GDScript.
