@@ -738,6 +738,12 @@ static func _split_pedals(crank: Mesh) -> Dictionary:
 	return out
 
 static var _pedal_models := {}   # glb path -> _split_pedals of its crank
+var pedal_top := 0.017   # the pedals' top surface above their pivot (the foot's target), in the crank mesh's units
+
+## the pedals' top above their pivot as `space` (the rider) measures it: the shoe's sole rests there
+func pedal_top_in(space: Node3D) -> float:
+	if pedal_pivots.is_empty() or not is_inside_tree() or not space.is_inside_tree(): return pedal_top
+	return pedal_top * (space.global_basis.inverse() * pedal_pivots[0].global_basis).get_scale().y
 
 ## the pedals of a model (BikeBuild.PEDALS id; "stock" = this frame's own, `own` = its glb): {side: [mesh, centre]}
 static func pedal_set(id: String, own := "res://assets/dh.glb") -> Dictionary:
@@ -763,6 +769,9 @@ func _pedals(pedal_id := "stock", own_glb := "") -> void:
 	var use := own
 	if pedal_id != "stock" and BikeBuild.PEDAL_GLB.has(pedal_id) and BikeBuild.PEDAL_GLB[pedal_id] != own_glb:
 		use = pedal_set(pedal_id)
+	pedal_top = 0.0
+	for side in use: pedal_top = maxf(pedal_top, (use[side][0] as Mesh).get_aabb().end.y)
+	if pedal_top <= 0.0: pedal_top = 0.017
 	for side in [-1.0, 1.0]:
 		if not own.has(side) or not use.has(side): continue
 		var pm := MeshInstance3D.new()

@@ -36,6 +36,7 @@ const POSE_DEFS := [
 		["headYaw", "Head turn (fixed)", -0.8, 0.8, 0.01, "rad"],
 		["headRoll", "Head roll", -0.5, 0.5, 0.01, "rad"],
 		["headTurn", "Look into turns", 0.0, 2.0, 0.05, "×"],
+		["headSteady", "Head steady over bumps (0 = moves with the bike)", 0.0, 2.0, 0.05, "×"],
 	]],
 	["Shoulders & arms", [
 		["shoulders", "Shoulder width", 0.095, 0.235, 0.005, "m"],
@@ -60,6 +61,8 @@ const POSE_DEFS := [
 		["footAngle", "Foot angle (toes down)", -0.5, 0.5, 0.01, "rad"],
 		["footOut", "Toes out", -0.4, 0.6, 0.01, "rad"],
 		["footSlide", "Feet out on pedals", -0.03, 0.06, 0.002, "m"],
+		["ankling", "Ankle swing pedalling", 0.0, 2.5, 0.05, "×"],
+		["heelsDown", "Heels drop (coasting, landings)", 0.0, 2.5, 0.05, "×"],
 	]],
 	["Movement", [
 		["crouch", "Crouch depth", 0.0, 2.0, 0.05, "×"],

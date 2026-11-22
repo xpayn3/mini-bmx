@@ -2404,6 +2404,29 @@ func _pick_dab_side(st: BikePhysics) -> void:
 	else: dab_side = -1.0
 	_dab_gap = (gr - gl) * dab_side   # > 0: the foot's ground is higher than the other side's
 
+## tests (BMX_PEDAL_PROBE=1): where each shoe's sole meets its pedal - the gap between the sole under the ball of the
+## foot and the pedal's top (along the pedal's up, + = floating), how far the ball is from over the axle (along the
+## pedal), the angle between sole and pedal. Worst values printed every 2 s
+var _pp := {t = 0.0, gap = 0.0, gap_min = 1.0, along = 0.0, ang = 0.0, n = 0}
+func _pedal_probe() -> void:
+	for fi in 2:
+		var pv: Node3D = rig.pedal_pivots[fi]
+		var pt: Transform3D = pv.global_transform
+		var up := pt.basis.y.normalized()
+		var top: Vector3 = pt.origin + up * rig.pedal_top * pt.basis.get_scale().y
+		var st: Transform3D = rider.shoe[fi].global_transform
+		var ball: Vector3 = st * Vector3(Rider.BALL_X, 0.0, 0.0)
+		var d := ball - top
+		var gap := d.dot(up)
+		_pp.gap = maxf(_pp.gap, gap); _pp.gap_min = minf(_pp.gap_min, gap)
+		_pp.along = maxf(_pp.along, absf(d.dot(pt.basis.x.normalized())))
+		_pp.ang = maxf(_pp.ang, st.basis.y.normalized().angle_to(up))
+		_pp.n += 1
+	_pp.t += get_process_delta_time()
+	if _pp.t >= 2.0:
+		_pp.t = 0.0
+		print("PEDALPROBE n=%d gap max=%.1f min=%.1f mm  ball off axle max=%.1f mm  sole vs pedal max=%.1f deg" % [_pp.n, _pp.gap * 1000.0, _pp.gap_min * 1000.0, _pp.along * 1000.0, rad_to_deg(_pp.ang)])
+
 ## Stopped with a foot down the rider is calm: now and then he looks round (off to the side, back up the
 ## trail over a shoulder, down at the foot, out ahead), holding each glance a while. Feeds lookYaw / lookPitch.
 func _idle_look(dt: float) -> void:
@@ -2667,7 +2690,13 @@ func _process(dt: float) -> void:
 		pi["airSpin"] = _aspin_s
 		pi["wheelY"] = (rig.wheel_f.global_position.y + rig.wheel_r.global_position.y) * 0.5
 		pi["turn"] = _turn_s
+		pi["pedalTop"] = rig.pedal_top_in(rider)
 		rider.update_pose(dt, pi)
+		# the pedals turn with the feet (ankling): flat pedals tip under the shoe, about their axle (the foot's place
+		# doesn't move, so this frame's pose stays right)
+		if rig.pedal_pivots.size() == 2:
+			for fi in 2: rig.pedal_pivots[fi].rotation.z = st.crank + rider.foot_pitch[fi]
+			if Env.s("BMX_PEDAL_PROBE") != "": _pedal_probe()
 		if _stand_blend < 1.0 and _stand_world.size() >= 15: _stand_to_bike(dt)
 		if dab_probe: _dab_probe(st)
 		elif _jit_skip > 0: _jit_skip -= 1
