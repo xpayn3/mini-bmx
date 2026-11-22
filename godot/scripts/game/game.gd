@@ -24,6 +24,10 @@ const RIDE_SUN_COL := Color("fff1de")
 const RIDE_FAR := 2600.0   # camera far plane: the far hills (FarHills) reach the horizon
 const RIDE_FOG := Color(0.74, 0.85, 0.98)
 const DUST_SPLASH := Color("eef6fa")
+const PUDDLE_DROP := Color(0.24, 0.21, 0.17)   # muddy water off a tyre through a road puddle
+var _splash_acc := 0.0
+var _pud_us := 0
+var _pud_n := 0
 const DIRT_CHUNK := Color("7a5534")
 const ROCK_CHUNK := Color("8d8a84")
 const GRASS_CHUNK := Color("4f8a2e")
@@ -1375,6 +1379,22 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 		elif sand: rate = fast_k * 10 + dust_k * 240.0 + (clampf(va / 7.0, 0, 1) * 10.0 if dust.sim != null else 0.0) + (40.0 if skid_fx else 0.0) + carve_k * 45 + st.pedal * (4.0 if va < 3 else 0.0)
 		else: rate = (14.0 if skid_fx else 0.0) + carve_k * 12
 		var fxd: float = Settings.get_v("fx_density")
+		# puddles on the road (drawn by ground.gdshader, world/trail_puddle.gd): wet soil gives no dust, standing
+		# water none at all; looked up only where dust would come off the trail anyway
+		var wet_r := Vector2.ZERO
+		var wet_f := Vector2.ZERO
+		if dirt and rate > 0.0:
+			var pt0 := Time.get_ticks_usec()
+			wet_r = terrain.puddle_at(rear.x, rear.y - 0.03, rear.z)
+			wet_f = terrain.puddle_at(front.x, front.y - 0.03, front.z)
+			if Env.s("BMX_PUDDLE_PROBE") != "":
+				_pud_us += Time.get_ticks_usec() - pt0
+				_pud_n += 1
+				if _pud_n % 1200 == 0: print("PUDDLECOST calls=%d avg_us=%.1f (both tyres)" % [_pud_n, float(_pud_us) / _pud_n])
+		var dry_r := 1.0 - maxf(wet_r.y, wet_r.x * 0.75)
+		var dry_f := 1.0 - maxf(wet_f.y, wet_f.x * 0.75)
+		if Env.s("BMX_PUDDLE_PROBE") != "" and (wet_r != Vector2.ZERO or wet_f != Vector2.ZERO):
+			print("PUDDLE at=(%.1f,%.1f,%.1f) t=%.2f rear damp=%.2f water=%.2f front damp=%.2f water=%.2f dust=%.0f->%.0f" % [rear.x, rear.y, rear.z, Time.get_ticks_msec() / 1000.0, wet_r.x, wet_r.y, wet_f.x, wet_f.y, rate, rate * dry_r])
 		# the dust trail: a GPU particle emitter at the rear tyre (fx/ride_dust.gd), thrown back and up,
 		# flung outward in a carve
 		var d_out := turn_dir * carve_k * 3.5
@@ -1382,14 +1402,24 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 		var d_ev := Vector3(-f.x * d_back + side.x * d_out, 0.7 + carve_k * 0.4 + dust_k * 1.4, -f.z * d_back + side.z * d_out)
 		var d_fan := rad_to_deg(atan2((1.6 + va * 0.18) * (1 - carve_k * 0.6) * 0.5, maxf(d_back, 0.6))) + dust_k * 25.0
 		var d_a := (0.62 if skid_fx else 0.45) if dirt else ((0.55 if skid_fx else 0.4) if sand else 0.26)
-		dust.feed(rear, d_ev, rate * fxd, dcol, d_a, clampf(d_fan, 12.0, 70.0))
+		dust.feed(rear, d_ev, rate * fxd * dry_r, dcol, d_a, clampf(d_fan, 12.0, 70.0))
 		# the front tyre dusts too, less: it rolls (no drive / little skid), so it mostly lifts dust
 		# sideways and up as it carves
 		var f_ev := Vector3(-f.x * d_back * 0.4 + side.x * d_out * 0.6, 0.5 + carve_k * 0.3, -f.z * d_back * 0.4 + side.z * d_out * 0.6)
-		dust.feed_front(front, f_ev, 0.0 if st.front_air else rate * fxd * 0.35, d_a)   # none with the front up (wheelie)
+		dust.feed_front(front, f_ev, 0.0 if st.front_air else rate * fxd * 0.35 * dry_f, d_a)   # none with the front up (wheelie)
+		# through standing water: muddy drops thrown off both tyres instead of dust
+		var pud := wet_r.y + (0.0 if st.front_air else wet_f.y * 0.6)
+		if pud > 0.05 and va > 1.5 and fx:
+			_splash_acc += dt * pud * minf(va, 14.0) * 5.0 * fxd
+			while _splash_acc > 1.0:
+				_splash_acc -= 1.0
+				var at := rear if randf() * pud < wet_r.y else front
+				var sp := (randf() - 0.5) * 2.2
+				var ev := Vector3(-f.x * va * 0.25 + side.x * sp, 0.8 + randf() * 1.6, -f.z * va * 0.25 + side.z * sp)
+				fx.chunk(at, ev, PUDDLE_DROP, 0.008 + randf() * 0.008, 0.9)
 		# a hard skid on loose ground kicks up a real cloud now and then (volumetric fog)
 		_cloud_t -= dt
-		if (dirt or sand) and skid_fx and va > 5 and _cloud_t <= 0:
+		if (dirt or sand) and skid_fx and va > 5 and _cloud_t <= 0 and dry_r > 0.5:
 			_cloud_t = 0.45
 			dust.cloud(rear, d_ev * 0.5, dcol, 2.2 + va * 0.08, 0.9)
 		if not in_water:
@@ -1397,7 +1427,7 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 			if dirt: cr = (30.0 if skid_fx else 0.0) + carve_k * 28 + st.pedal * (9.0 if va < 8 else 2.0)
 			elif sand: cr = (18.0 if skid_fx else 0.0) + carve_k * 16 + st.pedal * (4.0 if va < 8 else 1.0)
 			elif skid_fx: cr = 6.0
-			st.chunk_acc += dt * cr * fxd
+			st.chunk_acc += dt * cr * fxd * dry_r   # wet soil sticks: no dry clods out of a puddle
 			while st.chunk_acc > 1:
 				st.chunk_acc -= 1
 				var out := turn_dir * carve_k * (2.5 + randf() * 3.5) if carve_k > 0.05 else (randf() - .5) * 1.2
