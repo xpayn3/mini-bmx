@@ -123,6 +123,8 @@ var _sag_seen := 1.0
 const ANTI_RISE := 0.6     # how much of the rear's rise under its own brake the linkage takes back (and then some)
 var _fb_r := 0.0           # the rear brake's deceleration this step (m/s2), like _fb_f
 const FRAME_PROG := 0.35   # the ramp-up the reference frame's linkage adds to its shock (BikeBuild.frame_mods scales it per frame)
+var _land_hit := 0.0   # the biggest hit of the landing being judged
+var _land_pe := 0.0   # the last touch-down's pitch against the ground (rad)
 const LIP_SPARE := 0.15   # rad: how much steeper than the lip under the wheels a take-off may leave
 const RIM_CLIMB := 4.0   # m/s: the most upward speed a rim strike on a rising edge gives the frame
 const TYRE_MAX := 0.045   # m: a tyre squashed this far is on its rim
@@ -351,7 +353,7 @@ func _reset_motion() -> void:
 	_bh_back = 0.0; _bh_since = 9.0; _bh_peak = 0.0; gest_hop = 0.0
 	crouch = 0.0; crouch_t = 0.0; rebound = 0.0; _stick_hold = 0.0; _cr_rel = 0.0; _n_grd = 1.0; pop_wait = 0.0; _pop_arm_t = 0.0; squash = 0.0
 	pop_fx = 0.0; squash_fx = 0.0; pop_q = 0.0; pop_time = 0.0; _pop_used = 0.0
-	land_heavy = 0.0; land_fold = 0.0; _stun = 0.0; land_yaw = 0.0; _rim_hit = 0.0; _ty_f = 0.0; _ty_r = 0.0; _tuck_in = false
+	land_heavy = 0.0; land_fold = 0.0; _land_hit = 0.0; _land_pe = 0.0; _stun = 0.0; land_yaw = 0.0; _rim_hit = 0.0; _ty_f = 0.0; _ty_r = 0.0; _tuck_in = false
 	man_a = 0.0; man_w = 0.0; man_zone = false; man_lock = 0.0; man_zone_t = 0.0; man_pull = 0.0; _man_over = 0.0; _man_armed = false; _pull_age = 0.0; _man_pw = 0.0; _man_grace = 0.0; _sprint_lift = 0.0
 	pump_push = 0.0; pump_gain = 0.0; pump_idle = 0.0; pump_press_t = 0.0; _pump_release = 0.0; pump_on = false; pump_lift = 0.0; land_perfect = 0.0
 	wheelie_time = 0.0; wheelie_pedal = false; whip = 0; whip_hold = 0; whip_side = 0.0; _whip_arm = 0; _whip_t = 0; _whip_flashed = false; _whip_peak = 0.0
@@ -1984,6 +1986,7 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			# the legs: a pop that was waiting for this edge goes now; or the lip is squashed (absorbed)
 			var pop := 0.0
 			if kick_t <= 0.0: _pop_used = 0.0
+			if since_land > 0.6: _land_hit = 0.0   # (a new jump: not a bounce off the last landing)
 			if _graze: _graze = false   # (the same take-off, after a brush with the lip: the legs have had their say)
 			elif pop_wait > 0.0:
 				pop = maxf(0.0, _leg_dv(pop_wait) - _pop_used); pop_q = pop_wait; pop_wait = 0.0
@@ -2034,6 +2037,7 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			var at := air_time
 			if Env.s("BMX_FORGIVE_PROBE") != "" and at > 0.1: print("LANDED air=%.2f peak=%.2f pop=%.2f" % [at, air_peak, pop_q])   # tests
 			var back_land: bool = cR and not cF and wrapf(pitch - _g_pitch, -PI, PI) > 0.4
+			_land_pe = absf(wrapf(pitch - _g_pitch, -PI, PI))   # (how square to the ground it came down: the verdict's forgiveness)
 			_rev_land = false; _land_fix = false
 			_land_trick(at)
 			if _land_fix:
@@ -2125,20 +2129,29 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			# moment to gather himself (land_heavy 0..1: the pose, the pedals)
 			# (the two together: legs that were still folded AND a bike on its rims is worse than either)
 			var hit := sqrt(maxf(land_jolt, 0.0) * maxf(land_jolt, 0.0) + _rim_hit * _rim_hit * 1.69)
-			var slam: float = T.slamJolt * LAND
+			# (the landing's biggest: a little bounce after it re-lands and clears land_jolt / _rim_hit, so a hit forgiven
+			# as clean then counted as nothing at all)
+			_land_hit = maxf(_land_hit, hit); hit = _land_hit
+			# a landing square to the ground (within ~10 deg) is forgiven a much bigger hit: it costs speed and a wobble
+			# (heavy landing), not the crash. Like the arcade bike games: the angle decides, the size of the drop mostly
+			# costs flow. (7 m to flat at 63 km/h, landed 12 deg off, read SLAM every time)
+			var clean := 1.0 - smoothstep(0.18, 0.6, _land_pe)
+			var slam0: float = T.slamJolt * LAND
+			var slam: float = slam0 * (1.0 + float(T.get("landForgive", 1.0)) * clean)
 			if hit > slam:
-				if Env.s("BMX_TRICK") != "" or Env.s("BMX_LAND_PROBE") != "": print("HIT legs=%.2f rim=%.2f hit=%.2f of %.2f SLAM" % [land_jolt, _rim_hit, hit, slam])   # tests
+				if Env.s("BMX_TRICK") != "" or Env.s("BMX_LAND_PROBE") != "": print("HIT legs=%.2f rim=%.2f hit=%.2f of %.2f pe=%.2f SLAM" % [land_jolt, _rim_hit, hit, slam, _land_pe])   # tests
 				_crash("SLAM!"); land_jolt = -1.0
 			elif since_land > 0.4:
 				var hv: float = float(T.get("landHeavy", 0.6))
-				if hit > slam * hv:
-					land_heavy = clampf((hit / slam - hv) / maxf(0.05, 1.0 - hv), 0.0, 1.0)
+				# (heavy from the plain limit up: a clean landing's bigger allowance is all heavy landing, worse the nearer the crash)
+				if hit > slam0 * hv:
+					land_heavy = clampf((hit - slam0 * hv) / maxf(0.05, slam - slam0 * hv), 0.0, 1.0)
 					v *= 1.0 - 0.12 * land_heavy   # (it was 22 %: at trail speed every built jump is overshot onto the flat, and each one took a fifth of the speed)
 					land_fold = maxf(land_fold, 0.3 + 0.3 * land_heavy)   # (he stays down: no second dip, a slower way back up)
 					_stun = 0.15 + 0.45 * land_heavy
 					shake = maxf(shake, 0.1 + 0.15 * land_heavy)
 					if host.msg_idle(): host.flash("HEAVY LANDING" if land_heavy > 0.5 else "OOF!")
-				if Env.s("BMX_TRICK") != "" or Env.s("BMX_LAND_PROBE") != "": print("HIT legs=%.2f rim=%.2f hit=%.2f of %.2f heavy=%.2f v=%.1f" % [land_jolt, _rim_hit, hit, slam, land_heavy, v])   # tests
+				if Env.s("BMX_TRICK") != "" or Env.s("BMX_LAND_PROBE") != "": print("HIT legs=%.2f rim=%.2f hit=%.2f of %.2f pe=%.2f heavy=%.2f v=%.1f" % [land_jolt, _rim_hit, hit, slam, _land_pe, land_heavy, v])   # tests
 				land_jolt = -1.0   # one verdict per landing
 		kick_t = maxf(0.0, kick_t - dt)
 
