@@ -87,15 +87,15 @@ void fragment() {
 		float hjump = step(0.93, hash(vec2(floor(t * 6.0), 2.0))) * (hash(vec2(floor(t * 6.0), 5.0)) - 0.5) * 0.05;
 		vec2 tp = p + vec2(tear + wave + hjump, step(0.95, hash(vec2(floor(t * 4.0), 9.0))) * 0.03);
 		tp.y = fract(tp.y + roll);
-		float ca = 0.003 + glitch * 0.014 + abs(hjump) * 0.2;
+		float ca = mix(0.003, 0.0012, card_color) + glitch * 0.014 + abs(hjump) * 0.2;   // (a card's small print must not split)
 		vec3 col;
 		col.r = picture(tp + vec2(ca, 0.0), lod).r;
 		col.g = picture(tp, lod).g;
 		col.b = picture(tp - vec2(ca, 0.0), lod).b;
-		col += 0.22 * picture(tp - vec2(0.018, 0.0), lod) * vec3(0.6, 0.7, 1.0);   // ghost
+		col += mix(0.22, 0.07, card_color) * picture(tp - vec2(0.018, 0.0), lod) * vec3(0.6, 0.7, 1.0);   // ghost (faint on a card: it doubled the small print)
 		col *= 0.75 + 0.35 * vnoise(t * 11.0);                                  // the signal breathes
 		float st = static_at(vec2(p.x + tear * 0.5, p.y), t);
-		float lvl = 0.22 + snow;
+		float lvl = mix(0.22, 0.07, card_color) + snow;   // a card (studio, mature notice) has to read: less standing snow under it
 		col = col * (1.15 - 0.4 * lvl) + vec3(st) * lvl * vec3(0.85, 0.9, 1.0);
 		col += vec3(0.010, 0.014, 0.020);                          // a lit tube's black is never black
 		col *= 0.58 + 0.42 * pow(sin(p.y * PI * 240.0) * 0.5 + 0.5, 0.7);   // scanlines

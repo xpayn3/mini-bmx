@@ -1112,6 +1112,11 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   until the dot is gone, then black (`T_END` 14.3) and the menu fades in over 3.5 s. The film grain overlay is fine
   per-pixel dark specks at 3.5 % (2 x 2-pixel white specks at 6 % read as a noisy pattern over the dark room).
   Test frames: `BMX_INTRO_SHOT_FROM=12.55 BMX_INTRO_SHOT_STEP=0.03` (named with 2 decimals).
+  **2026-11-22**: the room's SubViewport is hidden for its first 3 frames (sized up front, drawn while hidden): its first
+  frame was uninitialised GPU memory and once flashed the TV's texture atlas full-screen. While the intro covers the screen
+  (TV on .. `T_OFF` + 1.45 s) the game's own 3D (title world) is not drawn (`root.disable_3d`, `_world_3d`): ~4.7 -> ~1 ms
+  GPU a frame; restored on skip / end / `_exit_tree`. Studio / mature cards: less standing snow, ghost and colour split
+  (`card_color` in `crt_screen.gdshader`) so the small print reads. `INTROSHOT` lines print `gpu_ms room= game=`.
   **Settings › Gameplay › Intro at start** (`boot_intro`) off = a still frame of it (`CrtIntro.still`: the room at
   9.6 s, TV on and settled, silent, frozen after 8 frames) while the ride loads, ~2.2 s, then the menu.
   `BMX_INTRO=still` forces that; `BMX_INTRO_SHOT_FROM` / `BMX_INTRO_SHOT_STEP` = when / how often test frames are saved.

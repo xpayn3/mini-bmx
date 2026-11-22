@@ -56,6 +56,10 @@ var _glitched2 := false
 var _offed := false
 var _born := 0
 var _tv_at := Vector3.ZERO   # world point of the middle of the glass
+var svc: SubViewportContainer
+var _frames := 0             # frames the room's viewport has drawn: it is only shown from the 4th (its first frames are
+                             # uninitialised GPU memory: once that was the TV's texture atlas, a full-screen flash)
+var _world_off := false      # the game's own 3D (title world) is not drawn while the intro covers it
 
 func _ready() -> void:
 	layer = 60
@@ -74,13 +78,16 @@ func _ready() -> void:
 	bg.color = Color.BLACK
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.add_child(bg)
-	var svc := SubViewportContainer.new()
+	svc = SubViewportContainer.new()
 	svc.stretch = true
+	svc.visible = false   # until its viewport has drawn a few real frames (see _frames)
 	svc.set_anchors_preset(Control.PRESET_FULL_RECT)
 	svc.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(svc)
 	vp = SubViewport.new()
 	vp.own_world_3d = true
+	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS   # (draws while its container is still hidden)
+	vp.size = Vector2i(get_viewport().get_visible_rect().size)  # (its final size from the start: no resize as it is shown)
 	vp.msaa_3d = Viewport.MSAA_2X   # light: this is a dark, soft scene, 2x is plenty
 	vp.positional_shadow_atlas_size = 1024
 	svc.add_child(vp)
@@ -109,6 +116,8 @@ func _input(e: InputEvent) -> void:
 
 func _process(delta: float) -> void:
 	if _done: return
+	_frames += 1
+	if _frames == 4: svc.visible = true
 	var dt := minf(delta / maxf(Engine.time_scale, 0.001), 0.05)
 	if blocked and _freeze < 0.0:
 		_born = Time.get_ticks_msec()   # (the watchdog counts from when the cards are gone)
@@ -124,7 +133,11 @@ func _process(delta: float) -> void:
 		var voices := 0
 		for v in tv._players:
 			if v[0].playing: voices += 1
-		print("INTROSHOT %.2f static_voices=%d hiss=%.2f fps=%d" % [t, voices, tv._hiss, Engine.get_frames_per_second()])
+		var rr := get_tree().root.get_viewport_rid()
+		RenderingServer.viewport_set_measure_render_time(rr, true)
+		RenderingServer.viewport_set_measure_render_time(vp.get_viewport_rid(), true)
+		print("INTROSHOT %.2f static_voices=%d hiss=%.2f fps=%d gpu_ms room=%.2f game=%.2f" % [t, voices, tv._hiss, Engine.get_frames_per_second(),
+			RenderingServer.viewport_get_measured_render_time_gpu(vp.get_viewport_rid()), RenderingServer.viewport_get_measured_render_time_gpu(rr)])
 	# watchdog (real time): whatever went wrong, the intro never sticks over the game
 	var real := (Time.get_ticks_msec() - _born) / 1000.0
 	if _freeze < 0.0 and (real > 90.0 or (not hold and real > T_END + 10.0)):
@@ -134,12 +147,17 @@ func _process(delta: float) -> void:
 		if _still_frames == 8: vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
 		if not hold: _still_left -= dt
 		if _still_left <= 0.0 or _skip >= 0.0:
+			_world_3d(true)
 			_done = true
 			CrtTv.mute_world = false
 			finished.emit()
 		return
 	_update(dt)
+	# the title world behind is fully covered from the TV coming on until the screen is black again: don't draw it
+	# (its shaders are already compiled during the black hold, so turning it back on under black costs no hitch)
+	_world_3d(not (t >= T_ON and t < T_OFF + 1.45 and _skip < 0.0))
 	if t >= T_END or _skip >= 0.35:
+		_world_3d(true)
 		_done = true
 		CrtTv.mute_world = false
 		finished.emit()
@@ -206,6 +224,14 @@ func _cards_update() -> void:
 	if want == 0: card_art.ct = t - CARD_STUDIO.x
 	elif want == 1: card_art.ct = t - CARD_MATURE.x
 	if want == 0 or want == 1: card_art.queue_redraw()
+
+func _world_3d(on: bool) -> void:
+	if on == not _world_off: return
+	_world_off = not on
+	get_tree().root.disable_3d = _world_off
+
+func _exit_tree() -> void:
+	if _world_off: get_tree().root.disable_3d = false
 
 static func _smoother(x: float) -> float:
 	return x * x * x * (x * (x * 6.0 - 15.0) + 10.0)
