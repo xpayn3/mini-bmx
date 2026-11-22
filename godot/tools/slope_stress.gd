@@ -87,6 +87,10 @@ var feel := false   # feel=1: steering response by speed + right-stick lean slid
 var extras: Dictionary = DH_EXTRAS
 var tune: Node
 var step_us := 0.0
+var insane_n := 0        # rides that ended in a non-finite state
+var step_worst := 0.0   # the slowest single physics step (us)
+var trav_max := 0.0     # the most of its travel either end used (1 = all of it)
+var squash_max := 0.0   # the most a tyre was squashed (m)
 var step_n := 0
 func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
@@ -131,6 +135,7 @@ func _ready() -> void:
 	_run_all(cfg)
 	print("SLOPE_STRESS %s: %d / %d checks passed, physics step %.1f us avg over %d steps" % [
 		"PASS" if fails == 0 else "FAIL", checks - fails, checks, step_us / maxf(1.0, step_n), step_n])
+	print("SUSP travel max=%.1f %% tyre squash max=%.1f cm  slowest step=%.0f us  blown-up rides=%d" % [trav_max * 100.0, squash_max * 100.0, step_worst, insane_n])
 	get_tree().quit(fails)
 
 func _make(cfg: Dictionary, kind: String, a := 0.0, b := 0.0) -> Array:
@@ -157,10 +162,17 @@ func _ride(p: BikePhysics, h: Host, secs: float, inp_f: Callable) -> Dictionary:
 		var t := i * DT
 		var t0 := Time.get_ticks_usec()
 		p.step(DT, inp_f.call(t, p))
-		step_us += Time.get_ticks_usec() - t0; step_n += 1
+		var us := Time.get_ticks_usec() - t0
+		step_us += us; step_n += 1; step_worst = maxf(step_worst, us)
+		# (the suspension never goes past the end of its travel, the tyre never past its rim)
+		var trav_now: float = maxf(p.dg_xF, p.dg_xR) / maxf(p.dg_travel, 0.01)
+		if trav_now > 1.02 and trav_now > trav_max and OS.get_environment("BMX_TRAV_DBG") != "":
+			print("  TRAV %.0f %% xF=%.3f xR=%.3f tr=%.3f t=%.2f air=%s crash_on=%s cf=%s cr=%s y=%.2f g=%.2f vy=%.1f pitch=%.2f zwf=%.2f zwr=%.2f since_land=%.2f" % [trav_now * 100.0, p.dg_xF, p.dg_xR, p.dg_travel, t, p.air, p.crash_on, p.c_f, p.c_r, p.y, h.terrain.height(p.x, p.z), p.vy, p.pitch, p.zw_f, p.zw_r, p.since_land])
+		trav_max = maxf(trav_max, trav_now)
+		squash_max = maxf(squash_max, maxf(p.dg_sqF, p.dg_sqR))
 		st.steps += 1
 		if not p.is_sane() or not is_finite(p.body_y + p.air_w + p.bike_lean + p.zw_f + p.zw_r):
-			st.insane = true; break
+			st.insane = true; insane_n += 1; break
 		if h.crash != "": break
 		st.vmax = maxf(st.vmax, absf(p.v))
 		if trace and i % 30 == 0:
@@ -676,3 +688,27 @@ func _run_all(cfg: Dictionary) -> void:
 						if not p.crash_on: break
 					if p.crash_on: p.get_up()
 			_check("random ride amp=%.1f" % h.terrain.a, not insane, "60 s, crashes=%d x=%.0f z=%.0f" % [crashes, p.x, p.z])
+
+	# 12. suspension torture: the hardest things a spring / damper / tyre can be asked to take. Whatever the setup or
+	# the sliders, the state stays finite, no end goes past its travel and no tyre past its rim
+	for spec in [["step", 0.0, -5.0, 12.0, "drop 5 m at 12 m/s"], ["step", 0.0, -9.0, 16.0, "drop 9 m at 16 m/s"], ["step", 0.0, 0.25, 16.0, "25 cm square edge at 16 m/s"],
+			["washboard", 0.15, 0.6, 20.0, "washboard 15 cm / 0.6 m at 20 m/s"], ["rollers", 1.2, 5.0, 16.0, "rollers 1.2 m / 5 m at 16 m/s"]]:
+		var name := "susp: %s" % spec[4]
+		if not _want(name): continue
+		var t0m := trav_max
+		var r := _make(cfg, spec[0], spec[1], spec[2])
+		var p: BikePhysics = r[0]; var h: Host = r[1]
+		p.v = spec[3]
+		var crashes := 0
+		var insane := false
+		for seg in 8:   # 8 s; after a crash it gets up and rides on (the hit is what is being tested)
+			var st := _ride(p, h, 1.0, func(_t, pp): return _inp(0.0 if pp.air else 0.6, 0.0 if pp.air or int(_t * 2.0) % 2 == 0 else 1.0))
+			if st.insane: insane = true; break
+			if h.crash != "":
+				crashes += 1; h.crash = ""
+				p.begin_crash()
+				for k in 300:
+					p.step(DT, _inp(0, 0, 0, false, k > 60))
+					if not p.crash_on: break
+				if p.crash_on: p.get_up()
+		_check(name, not insane and trav_max <= 1.005, "travel max=%.1f %% (this test %.1f %%) tyre squash max=%.1f cm crashes=%d" % [trav_max * 100.0, maxf(trav_max, t0m) * 100.0, squash_max * 100.0, crashes])

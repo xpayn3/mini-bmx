@@ -22,9 +22,9 @@ const PRESETS := {
 ## false + cam_yaw 0, `orbit` PI/2 puts the camera on the +z side looking -z, the bike crossing left to right). Picked
 ## from the dev view's camera dropdown or C (they come first there); "pg_side" is the playground's default
 const LEVEL_PRESETS := {
-	"pg_side":   {"label": "Side",       "dist": 12.0, "pitch": 6.0,  "follow": false, "fov": 42.0, "orbit": PI / 2, "lag": 4.0},
-	"pg_wide":   {"label": "Side wide",  "dist": 13.0, "pitch": 9.0,  "follow": false, "fov": 66.0, "orbit": PI / 2, "lag": 3.0},
-	"pg_low":    {"label": "Side low",   "dist": 6.5,  "pitch": 2.0,  "follow": false, "fov": 48.0, "orbit": PI / 2, "lag": 6.0},
+	"pg_side":   {"label": "Side",       "dist": 12.0, "pitch": 12.0,  "follow": false, "fov": 42.0, "orbit": PI / 2, "lag": 4.0},
+	"pg_wide":   {"label": "Side wide",  "dist": 13.0, "pitch": 14.0,  "follow": false, "fov": 66.0, "orbit": PI / 2, "lag": 3.0},
+	"pg_low":    {"label": "Side low",   "dist": 6.5,  "pitch": 8.0,  "follow": false, "fov": 48.0, "orbit": PI / 2, "lag": 6.0},
 	"pg_front":  {"label": "Front 3/4",  "dist": 9.0,  "pitch": 10.0, "follow": false, "fov": 44.0, "orbit": PI * 0.78, "lag": 5.0},
 }
 

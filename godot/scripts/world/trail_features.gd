@@ -124,16 +124,28 @@ class Wood:
 		return h0 + (h1 - h0) * minf(1.0, maxf(0.0, (u - a) / (b - a)))
 
 
-const TABLE := [[0, 0, 0], [5.5, 1.25, 0.5, 0], [9.5, 1.25, 0, 0], [11.5, 0.95, -0.36], [17, 0.18, -0.2], [21, 0, 0]]
-const DOUBLE := [[0, 0, 0], [5, 1.35, 0.58, -1.6], [6.0, 0.35, 0, 0], [7.5, 0.35, 0, 1.4],
+# The built jumps, 1.6x the size they were (2026-11-22; same shapes, same lip and landing angles). They were sized
+# for ~30-35 km/h: at the 48-60 km/h riders really arrive at, every one was overshot onto the flat past its landing
+# (or into the next jump's face), which is a heavy landing or a slam now that landings are judged. At this size the
+# landing ramp sits 10-18 m past the lip, where a rider at trail speed comes down. Mirrored in TerrainFieldCs.cs
+const TABLE := [[0, 0, 0], [8.8, 2.0, 0.5, 0], [15.2, 2.0, 0, 0], [18.4, 1.52, -0.36], [27.2, 0.288, -0.2], [33.6, 0, 0]]
+const DOUBLE := [[0, 0, 0], [8.0, 2.16, 0.58, -1.6], [9.6, 0.56, 0, 0], [12.0, 0.56, 0, 1.4],
+	[14.72, 1.92, 0, 0], [16.32, 1.92, 0, 0], [20.0, 1.36, -0.34], [30.4, 0.24, -0.16], [36.8, 0, 0]]
+const KICKER := [[0, 0, 0], [5.12, 1.12, 0.42, 0], [6.4, 1.12, 0, 0], [10.4, 0.768, -0.2], [22.4, 0, 0]]
+# the same three at their old size: the free-ride jumps out in the land (TerrainField.jump_at), which are found through
+# 34 m cells and sit close to each other and to wooden features - bigger, they overlapped (walls at their edges)
+const TABLE_S := [[0, 0, 0], [5.5, 1.25, 0.5, 0], [9.5, 1.25, 0, 0], [11.5, 0.95, -0.36], [17, 0.18, -0.2], [21, 0, 0]]
+const DOUBLE_S := [[0, 0, 0], [5, 1.35, 0.58, -1.6], [6.0, 0.35, 0, 0], [7.5, 0.35, 0, 1.4],
 	[9.2, 1.2, 0, 0], [10.2, 1.2, 0, 0], [12.5, 0.85, -0.34], [19, 0.15, -0.16], [23, 0, 0]]
-const KICKER := [[0, 0, 0], [3.2, 0.7, 0.42, 0], [4.0, 0.7, 0, 0], [6.5, 0.48, -0.2], [14, 0, 0]]
+const KICKER_S := [[0, 0, 0], [3.2, 0.7, 0.42, 0], [4.0, 0.7, 0, 0], [6.5, 0.48, -0.2], [14, 0, 0]]
 const WHOOP := [[0, 0, 0], [1.6, 0.3, 0.3], [2.6, 0.48, 0], [8.6, 0.08, -0.09], [10, 0, 0]]
 
 
 ## where riders are in the air over each feature: [from, to, ...] along it (m), the lip to about where they come
 ## down. The ground shader draws no ridden lines there (ground.gdshader, via TerrainField.fo_air; mirrored in C#)
-const AIR := {"table": [5.5, 12.0], "double": [5.0, 11.0], "kicker": [3.6, 9.0], "woodKicker": [3.8, 9.0],
+const AIR := {"table": [8.8, 19.2], "double": [8.0, 17.6], "kicker": [5.76, 14.4], "woodKicker": [3.8, 9.0],
+	"tableLine": [8.8, 19.2, 42.36, 51.0], "flow": [5.76, 14.4], "doubleLine": [8.0, 17.6, 45.56, 54.2]}
+const AIR_S := {"table": [5.5, 12.0], "double": [5.0, 11.0], "kicker": [3.6, 9.0],
 	"tableLine": [5.5, 12.0, 27.6, 33.0], "flow": [3.6, 9.0], "doubleLine": [5.0, 11.0, 29.6, 35.0]}
 
 
@@ -182,4 +194,9 @@ static func make_set() -> Dictionary:
 	}
 	var dig := {"bridge": Hermite.new([[0, 0, 0], [1.6, 0, 0], [3.4, -1.9, 0], [11.6, -1.9, 0], [13.4, 0, 0], [15, 0, 0]]),
 		"gorge": Hermite.new([[0, 0, 0], [3.0, 0, 0], [4.6, -9.0, 0], [31.4, -9.0, 0], [33.0, 0, 0], [36, 0, 0]])}
-	return {"profiles": profiles, "wood": wood, "dig": dig}
+	var table_s := Hermite.new(TABLE_S)
+	var dbl_s := Hermite.new(DOUBLE_S)
+	var kicker_s := Hermite.new(KICKER_S)
+	var small := {"table": table_s, "double": dbl_s, "kicker": kicker_s, "tableLine": Line.new([table_s, 3.0, kicker_s]),
+		"flow": Line.new([kicker_s, 3.0, Rollers.new(3, 0.45)]), "doubleLine": Line.new([dbl_s, 3.0, kicker_s])}
+	return {"profiles": profiles, "wood": wood, "dig": dig, "small": small}

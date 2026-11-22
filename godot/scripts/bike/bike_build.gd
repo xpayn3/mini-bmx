@@ -426,6 +426,8 @@ static func load_build(frame := "") -> Dictionary:
 			d = d.get(path[i]) if d is Dictionary else null
 		var key: String = path[path.size() - 1]
 		if key == "fork_model" and d is Dictionary: apply_fork_model(b, p[1]); continue
+		if d is Dictionary and SuspSetup.DEFAULTS.has(key):   # (the suspension setup: its keys are only in a build once set)
+			d[key] = p[1] if SuspSetup.DEFAULTS[key] is String else float(p[1]); continue
 		if not (d is Dictionary) or not d.has(key) or d[key] is Dictionary: continue
 		if key == "tyre_model": apply_tyre_model(b, p[1]); continue
 		if key == "rim_model": apply_rim_model(b, p[1]); continue
@@ -621,8 +623,11 @@ static func ride_mods(b: Dictionary) -> Dictionary:
 	var rf := tyre_radius(WHEEL_SIZES[w.front], w.tyre_w)
 	var rr := tyre_radius(WHEEL_SIZES[w.rear], w.tyre_w)
 	var trav := (float(s.fork_travel) + float(s.shock_travel)) / 400.0     # 1 = stock 200 / 200
-	var spring_k: float = [0.88, 1.0, 1.14][int(s.fork_spring)] * 0.5 + [0.88, 1.0, 1.14][int(s.shock_spring)] * 0.5
-	var reb: float = [1.25, 1.0, 0.8][int(s.rebound)]            # slow rebound = more damping
+	# (springs, damping and tyre pressure are the suspension setup now: SuspSetup, read by the ride physics as it is)
+	var susp := SuspSetup.resolve(b)
+	var psi: float = (float(susp.psi_f) + float(susp.psi_r)) * 0.5
+	var psi_grip := 1.0 + 0.006 * (24.5 - psi)    # softer tyres: a bigger patch, more grip ...
+	var psi_roll := 1.0 + 0.012 * (24.5 - psi)    # ... and more drag
 	var tread_grip: float = {"knobby": 1.0, "semi": 0.94, "slick": 0.82}.get(w.tread, 1.0)
 	var tread_roll: float = {"knobby": 1.0, "semi": 0.85, "slick": 0.7}.get(w.tread, 1.0)
 	# the knob layout on top: dense / open knobs bite more and drag more, blocks roll fast
@@ -635,15 +640,14 @@ static func ride_mods(b: Dictionary) -> Dictionary:
 	if w.rim_material == "carbon": spoke_w *= 0.97   # lighter, stiffer wheels
 	var ride := {
 		"travel": trav, "legComp": 0.9 + 0.1 * trav,
-		"tyreHz": spring_k, "tyreDamp": reb,
-		"grip": tread_grip * width_grip, "rollRes": tread_roll * size_roll * (1.0 + (float(w.tyre_w) - 2.5) * 0.2),
+		"grip": tread_grip * width_grip * psi_grip, "rollRes": tread_roll * size_roll * (1.0 + (float(w.tyre_w) - 2.5) * 0.2) * psi_roll,
 		# wider bars: slower, steadier steering (780 mm = 1)
 		"pedalLaunch": 1.0 / spoke_w, "steerRate": 1.0 / sqrt(spoke_w) * (1.0 - (rf - 0.374) * 1.2) * (1.0 - (float(b.bars.width) - 780.0) * 0.0015),
 	}
 	var cogs: Array = CASSETTES[b.drive.cassette].cogs
 	return {"ride": ride, "wheel_f": rf, "wheel_r": rr, "cogs": cogs, "ring_k": float(b.drive.ring) / 34.0,
 		"fork_travel": float(s.fork_travel) / 1000.0, "shock_travel": float(s.shock_travel) / 1000.0,
-		"land": 0.85 + 0.15 * trav}
+		"land": 0.85 + 0.15 * trav, "susp": susp}
 
 # ---------------------------------------------------------------- frame character
 ## Every garage frame rides differently, from what it is: its geometry (measured off its glb by
@@ -694,6 +698,8 @@ static func kg_parts(frame: String, b: Dictionary) -> Dictionary:
 		wheels += (float(w.tyre_w) - 2.5) * 0.5 + (int(w.spokes) - 32) * 0.006 - (0.25 if w.rim_material == "carbon" else 0.0)
 	var fm: Dictionary = FORK_MODELS.get(str(s.get("fork_model", "")), {})
 	var fork := 2.7 + (0.35 if str(fm.get("spring", "Air")) == "Coil" else 0.0) + (float(s.fork_travel) - 200.0) * 0.005
+	# (the rear shock against the stock coil one: an air shock saves ~0.4 kg)
+	fork += float(SuspSetup.SHOCK_MODELS.get(str(SuspSetup.val(s, "shock_model")), SuspSetup.SHOCK_MODELS[SuspSetup.DEFAULT_SHOCK]).kg) - 0.95
 	var cogs: Array = CASSETTES[b.drive.cassette].cogs
 	return {
 		"Frame": float(F.kg),
@@ -793,15 +799,27 @@ static func frame_mods(frame: String, b: Dictionary) -> Dictionary:
 	mul.call("carveGrip", 1.0 + 3.0 * bb)
 	mul.call("leanRate", 1.0 - 3.0 * bb)
 	# suspension design
+	mul.call("shockProg", maxf(0.2, 1.0 + 1.2 * pr))   # the linkage's ramp-up, into the rear spring's curve
 	mul.call("slamJolt", 1.0 + 0.5 * pr)
 	mul.call("popPower", 1.0 + 0.4 * pr)
 	mul.call("pumpGain", 1.0 + 0.4 * pr)
+	mul.call("antiSquat", clampf(1.0 + aq / 0.9, 0.5, 1.5))   # (0.4 + the frame's figure: this frame squats / stands up under power)
 	mul.call("pedalPower", 1.0 + 0.3 * aq)
 	mul.call("sprintPower", 1.0 + 0.3 * aq)
 	mul.call("steerEase", st)
 	mul.call("gripSquirm", 2.0 - st)
 	for key in m: m[key] = clampf(m[key], 0.6, 1.5)
 	return m
+
+## how well a suspension setup takes a big landing, 1 = the stock one: more high-speed compression, more ramp-up at
+## the end and less sag all keep it off its stops (measured on the playground's drop: each of those alone turns a rim
+## strike into none)
+static func _land_k(su: Dictionary) -> float:
+	var k := 0.0
+	for e in ["f", "r"]:
+		var u: Dictionary = su[e]
+		k += 0.5 * (1.0 + (float(u.hs) - 0.495) * 0.9 + (float(u.prog) - (0.62 if u.air else 0.07)) * 0.25 + (0.29 - float(u.sag)) * 1.5 + (float(u.zc) - 0.35) * 0.4)
+	return k
 
 ## the garage's bars, 0..1 (the build on `frame`)
 static func stats(b: Dictionary, frame := "dh") -> Dictionary:
@@ -820,7 +838,7 @@ static func stats(b: Dictionary, frame := "dh") -> Dictionary:
 		"Handling": clampf(0.55 + (r.steerRate - 1.0) * 2.5 + (r.grip - 1.0) * 0.8 + (g.call("leanRate") - 1.0) * 2.0
 			+ (g.call("steerRate") - 1.0) * 1.5, 0, 1),
 		"Grip": clampf(0.55 + (r.grip - 1.0) * 1.8 + (g.call("grip") - 1.0) * 1.8 + (g.call("carveGrip") - 1.0) * 0.5, 0, 1),
-		"Landing": clampf(0.3 + (r.travel - 0.8) * 1.2 + (r.tyreDamp - 1.0) * 0.4 + (g.call("slamJolt") - 1.0) * 1.5, 0, 1),
+		"Landing": clampf(0.3 + (r.travel - 0.8) * 1.2 + (_land_k(m.susp) - 1.0) * 0.6 + (g.call("slamJolt") - 1.0) * 1.5, 0, 1),
 		"Pop": clampf(0.5 + (g.call("popPower") - 1.0) * 2.5 + (g.call("manLift") - 1.0) * 1.0 + (r.travel - 1.0) * -0.4, 0, 1),
 	}
 

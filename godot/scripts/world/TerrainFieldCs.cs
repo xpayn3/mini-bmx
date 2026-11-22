@@ -175,16 +175,22 @@ internal sealed class TfWood
 internal static class TfSet
 {
 	public const double WOOD_EDGE = 0.12, WOOD_BEVEL = 1.2, WOOD_BEVEL_MAX = 0.44;
-	public static readonly double[][] TABLE = { new[] { 0.0, 0, 0 }, new[] { 5.5, 1.25, 0.5, 0 }, new[] { 9.5, 1.25, 0, 0 }, new[] { 11.5, 0.95, -0.36 }, new[] { 17.0, 0.18, -0.2 }, new[] { 21.0, 0, 0 } };
-	public static readonly double[][] DOUBLE = { new[] { 0.0, 0, 0 }, new[] { 5.0, 1.35, 0.58, -1.6 }, new[] { 6.0, 0.35, 0, 0 }, new[] { 7.5, 0.35, 0, 1.4 },
-		new[] { 9.2, 1.2, 0, 0 }, new[] { 10.2, 1.2, 0, 0 }, new[] { 12.5, 0.85, -0.34 }, new[] { 19.0, 0.15, -0.16 }, new[] { 23.0, 0, 0 } };
-	public static readonly double[][] KICKER = { new[] { 0.0, 0, 0 }, new[] { 3.2, 0.7, 0.42, 0 }, new[] { 4.0, 0.7, 0, 0 }, new[] { 6.5, 0.48, -0.2 }, new[] { 14.0, 0, 0 } };
+	public static readonly double[][] TABLE = { new[] { 0.0, 0, 0 }, new[] { 8.8, 2.0, 0.5, 0 }, new[] { 15.2, 2.0, 0, 0 }, new[] { 18.4, 1.52, -0.36 }, new[] { 27.2, 0.288, -0.2 }, new[] { 33.6, 0, 0 } };   // (1.6x since 2026-11-22: see trail_features.gd)
+	public static readonly double[][] DOUBLE = { new[] { 0.0, 0, 0 }, new[] { 8.0, 2.16, 0.58, -1.6 }, new[] { 9.6, 0.56, 0, 0 }, new[] { 12.0, 0.56, 0, 1.4 },
+		new[] { 14.72, 1.92, 0, 0 }, new[] { 16.32, 1.92, 0, 0 }, new[] { 20.0, 1.36, -0.34 }, new[] { 30.4, 0.24, -0.16 }, new[] { 36.8, 0, 0 } };
+	public static readonly double[][] KICKER = { new[] { 0.0, 0, 0 }, new[] { 5.12, 1.12, 0.42, 0 }, new[] { 6.4, 1.12, 0, 0 }, new[] { 10.4, 0.768, -0.2 }, new[] { 22.4, 0, 0 } };
 	public static readonly double[][] WHOOP = { new[] { 0.0, 0, 0 }, new[] { 1.6, 0.3, 0.3 }, new[] { 2.6, 0.48, 0 }, new[] { 8.6, 0.08, -0.09 }, new[] { 10.0, 0, 0 } };
 
 	public static readonly string[] FEATURE_TYPES = { "table", "table", "double", "kicker", "rhythm", "tableLine", "flow", "doubleLine",
 		"woodKicker", "woodKicker", "skinny", "bridge" };
 	public static readonly string[] ROUTE_TYPES = { "table", "table", "kicker", "rhythm", "tableLine", "flow", "woodKicker", "bridge" };
 
+	// the same three at their old size, for the free-ride jumps out in the land (see trail_features.gd)
+	public static readonly double[][] TABLE_S = { new[] { 0.0, 0, 0 }, new[] { 5.5, 1.25, 0.5, 0 }, new[] { 9.5, 1.25, 0, 0 }, new[] { 11.5, 0.95, -0.36 }, new[] { 17.0, 0.18, -0.2 }, new[] { 21.0, 0, 0 } };
+	public static readonly double[][] DOUBLE_S = { new[] { 0.0, 0, 0 }, new[] { 5.0, 1.35, 0.58, -1.6 }, new[] { 6.0, 0.35, 0, 0 }, new[] { 7.5, 0.35, 0, 1.4 },
+		new[] { 9.2, 1.2, 0, 0 }, new[] { 10.2, 1.2, 0, 0 }, new[] { 12.5, 0.85, -0.34 }, new[] { 19.0, 0.15, -0.16 }, new[] { 23.0, 0, 0 } };
+	public static readonly double[][] KICKER_S = { new[] { 0.0, 0, 0 }, new[] { 3.2, 0.7, 0.42, 0 }, new[] { 4.0, 0.7, 0, 0 }, new[] { 6.5, 0.48, -0.2 }, new[] { 14.0, 0, 0 } };
+	public static readonly Dictionary<string, TfProfile> SMALL;
 	public static readonly Dictionary<string, TfProfile> PROFILES;
 	public static readonly Dictionary<string, TfWood> WOOD;
 	public static readonly Dictionary<string, TfProfile> DIG;
@@ -194,6 +200,14 @@ internal static class TfSet
 		var table = new TfHermite(TABLE);
 		var dbl = new TfHermite(DOUBLE);
 		var kicker = new TfHermite(KICKER);
+		var tableS = new TfHermite(TABLE_S);
+		var dblS = new TfHermite(DOUBLE_S);
+		var kickerS = new TfHermite(KICKER_S);
+		SMALL = new Dictionary<string, TfProfile>
+		{
+			["table"] = tableS, ["double"] = dblS, ["kicker"] = kickerS, ["tableLine"] = new TfLine(tableS, 3.0, kickerS),
+			["flow"] = new TfLine(kickerS, 3.0, new TfRollers(3, 0.45)), ["doubleLine"] = new TfLine(dblS, 3.0, kickerS),
+		};
 		PROFILES = new Dictionary<string, TfProfile>
 		{
 			["table"] = table, ["double"] = dbl, ["kicker"] = kicker,
@@ -1222,19 +1236,26 @@ public partial class TerrainFieldCs : RefCounted
 	/// TrailFeatures.AIR: where riders are in the air over each feature, [from, to, ...] along it (m)
 	private static readonly System.Collections.Generic.Dictionary<string, double[]> AIR = new()
 	{
-		["table"] = new[] { 5.5, 12.0 }, ["double"] = new[] { 5.0, 11.0 }, ["kicker"] = new[] { 3.6, 9.0 },
-		["woodKicker"] = new[] { 3.8, 9.0 }, ["tableLine"] = new[] { 5.5, 12.0, 27.6, 33.0 }, ["flow"] = new[] { 3.6, 9.0 },
-		["doubleLine"] = new[] { 5.0, 11.0, 29.6, 35.0 },
+		["table"] = new[] { 8.8, 19.2 }, ["double"] = new[] { 8.0, 17.6 }, ["kicker"] = new[] { 5.76, 14.4 },
+		["woodKicker"] = new[] { 3.8, 9.0 }, ["tableLine"] = new[] { 8.8, 19.2, 42.36, 51.0 }, ["flow"] = new[] { 5.76, 14.4 },
+		["doubleLine"] = new[] { 8.0, 17.6, 45.56, 54.2 },
 	};
 
-	private static TfFeat make_feat(double x, double z, double dx, double dz, string type, double b0, double b1)
+	private static readonly System.Collections.Generic.Dictionary<string, double[]> AIR_S = new()
 	{
-		var prof = TfSet.PROFILES[type];
+		["table"] = new[] { 5.5, 12.0 }, ["double"] = new[] { 5.0, 11.0 }, ["kicker"] = new[] { 3.6, 9.0 },
+		["tableLine"] = new[] { 5.5, 12.0, 27.6, 33.0 }, ["flow"] = new[] { 3.6, 9.0 }, ["doubleLine"] = new[] { 5.0, 11.0, 29.6, 35.0 },
+	};
+
+	private static TfFeat make_feat(double x, double z, double dx, double dz, string type, double b0, double b1, bool oldSize = false)
+	{
+		bool old = oldSize && TfSet.SMALL.ContainsKey(type);
+		var prof = old ? TfSet.SMALL[type] : TfSet.PROFILES[type];
 		var f = new TfFeat { x = x, z = z, dx = dx, dz = dz, len = prof.length, prof = prof, b0 = b0, b1 = b1, type = type };
 		TfSet.WOOD.TryGetValue(type, out f.wood);
 		TfSet.DIG.TryGetValue(type, out f.dig);
 		f.canyon = type == "rope";
-		if (AIR.TryGetValue(type, out var airv)) f.air = airv;
+		if ((old ? AIR_S : AIR).TryGetValue(type, out var airv)) f.air = airv;
 		f.ramp = type == "rope" ? ROPE_RAMP : 6.0;
 		if (type == "rhythm" || type == "flow")
 			f.half = 2.3;
@@ -1280,7 +1301,7 @@ public partial class TerrainFieldCs : RefCounted
 			{
 				var types = TfSet.FEATURE_TYPES;
 				string type = types[(long)(rnd.next() * types.Length)];
-				double len = TfSet.PROFILES[type].length;
+				double len = (TfSet.SMALL.ContainsKey(type) ? TfSet.SMALL[type] : TfSet.PROFILES[type]).length;   // (old-size jumps out here)
 				double gx = pathN(bx + 0.5, bz) - pathN(bx - 0.5, bz);
 				double gz = pathN(bx, bz + 0.5) - pathN(bx, bz - 0.5);
 				double l = Math.Sqrt(gx * gx + gz * gz);
@@ -1312,7 +1333,7 @@ public partial class TerrainFieldCs : RefCounted
 					k++;
 				}
 				if (ok && Math.Sqrt(sx * sx + szz * szz) > 34)
-					best = make_feat(sx, szz, dx, dz, type, b0, b1);
+					best = make_feat(sx, szz, dx, dz, type, b0, b1, true);
 			}
 		}
 		_jc[key] = best;

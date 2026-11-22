@@ -10,6 +10,7 @@ extends Terrain
 const GRASS := Color(0.40, 0.47, 0.31)
 const DIRT := Color(0.58, 0.45, 0.32)
 const CLAY := Color(0.66, 0.46, 0.30)
+const SURF_COL := [Color(0.36, 0.50, 0.28), Color(0.58, 0.45, 0.32), Color(0.30, 0.24, 0.18), Color(0.86, 0.76, 0.52)]   # grass, dirt, wet, sand
 const FAR := 2400.0            # the flat plane goes out this far (the fog hides the edge)
 
 var course: PlaygroundCourse
@@ -77,6 +78,8 @@ func grid_height(x: float, z: float) -> float:
 
 ## 1 (trail: hard-packed dirt, dust) on built ground, 0 (grass) on the plane
 func surface(x: float, z: float) -> int:
+	var sf := course.surface_at(x, z)   # (brake strips: grass / wet / sand)
+	if sf >= 0: return sf
 	return 1 if course.is_dirt(x, z) else 0
 
 func jump(x: float, z: float) -> Array:
@@ -95,6 +98,8 @@ func biome_name(x: float, z: float) -> String:
 	return "Test Playground"
 
 func ground_color(x: float, z: float, _ny: float = 1.0) -> Color:
+	var sf := course.surface_at(x, z)
+	if sf >= 0: return SURF_COL[sf]
 	return DIRT if course.is_dirt(x, z) else GRASS
 
 func trail(x: float, z: float) -> float:
@@ -180,6 +185,8 @@ func _lane_mesh(l) -> ArrayMesh:
 			var q: float = uu + k * 0.1
 			if absf(l.profile(q)) > 1e-4 or (not l.camber.is_empty() and l.tilt_at(q) != 0.0) or absf(l.profile(q) - l.profile(q + 0.05)) > 1e-5:
 				busy = true; break
+		for sk in l.skews:   # a hip's shape reaches up to (half width + batter) x tan along u at the edges
+			if uu > sk[0] - 7.0 and uu < sk[1] + 7.0: busy = true
 		x += 0.1 if busy else 2.0
 	xs.append(x_end)
 	var zs := PackedFloat64Array()
@@ -222,7 +229,9 @@ func _mesh_from(xs: PackedFloat64Array, zs: PackedFloat64Array) -> ArrayMesh:
 			var gx := (H[j * nx + i1] - H[j * nx + i0]) / maxf(1e-4, xs[i1] - xs[i0])
 			var gz := (H[j1 * nx + i] - H[j0 * nx + i]) / maxf(1e-4, zs[j1] - zs[j0])
 			N[k] = Vector3(-gx, 1.0, -gz).normalized()
-			if absf(h) > 0.02: C[k] = clay
+			var sf := course.surface_at(xs[i], zs[j])
+			if sf >= 0: C[k] = (SURF_COL[sf] as Color).srgb_to_linear()
+			elif absf(h) > 0.02: C[k] = clay
 			elif course.is_dirt(xs[i], zs[j]): C[k] = dirt
 			else: C[k] = grass
 	var I := PackedInt32Array(); I.resize((nx - 1) * (nz - 1) * 6)
@@ -312,6 +321,16 @@ func _build_signs() -> void:
 		while d < l.length():
 			_label(root, Vector3(PlaygroundCourse.X0 + ROLL_X + d, 0.35, l.z + l.hw + 1.4), "%.0f m" % d, 48, Color(1, 1, 1, 0.75))
 			d += 50.0
+	# slalom cones
+	var cone := CylinderMesh.new()
+	cone.top_radius = 0.02; cone.bottom_radius = 0.16; cone.height = 0.45
+	var cm := StandardMaterial3D.new(); cm.albedo_color = Color(1.0, 0.42, 0.08)
+	cone.material = cm
+	for l in course.lanes:
+		for c in l.cones:
+			var mi := MeshInstance3D.new(); mi.mesh = cone
+			mi.position = Vector3(PlaygroundCourse.X0 + c[0], 0.225, l.z + c[1])
+			root.add_child(mi)
 	for b in course.bowls:
 		_label(root, Vector3(b.c.x, b.W * b.tn + 2.5, b.c.y), "%s\n[%s]" % [b.title, b.id], 96, Color(1, 0.86, 0.2))
 	_label(root, Vector3(PlaygroundCourse.X0 - 12.0, 3.0, -20.0), "TEST PLAYGROUND\nopen flat for turns, brakes, sprints", 120, Color(1, 0.86, 0.2))

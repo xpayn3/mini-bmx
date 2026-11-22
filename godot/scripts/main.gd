@@ -2190,6 +2190,16 @@ func _autotest(seconds: float) -> void:
 			print("AUTOTEST resumed: paused=%s state_riding=%s" % [get_tree().paused, state == RIDING])
 	var st := game.phys
 	if not _probe.is_empty(): print("AUTOTEST body ", _probe)
+	if Env.s("BMX_BODY_CLIP") != "":   # tests: the rider's body parts inside each other / the bike (frames > 1.5 cm in, deepest)
+		var cpz: Dictionary = game.rider.clip_pairs
+		var nfr: int = maxi(1, int(cpz.get("n", 0)))
+		var keys := cpz.keys(); keys.erase("n"); keys.sort()
+		for kk in keys:
+			if int(cpz[kk][0]) > 0: print("BODYCLIP %-18s frames=%5.1f%% deepest=%4.1f cm" % [kk, 100.0 * cpz[kk][0] / nfr, cpz[kk][1] * 100.0])
+		print("BODYCLIP frames=%d" % nfr)
+	if Env.s("BMX_BAR_PROBE") != "":   # tests: the rider's chest / helmet against the handlebar
+		var br: Array = game.rider.bar_stats
+		print("BARCLEAR deepest_cm=%.1f held_frames=%d of %d least_chest_cm=%.1f least_head_cm=%.1f" % [br[0] * 100.0, int(br[1]), int(br[2]), br[3] * 100.0, br[4] * 100.0])
 	if game.clip_probe:
 		var bs: Array = game.rider.bounce_stats
 		print("BOUNCE body_rms=%.1fcm body_max=%.1fcm legs_feel=%.2fg" % [sqrt(bs[0] / maxi(bs[1], 1)) * 100, bs[2] * 100, sqrt(bs[3] / maxi(bs[1], 1)) / 9.81])

@@ -176,6 +176,7 @@ func _check(parent: Control, text: String, key: String, tip := "") -> void:
 func _slider_row(parent: Control, text: String, lo: float, hi: float, stepv: float, start: float, dflt: float, fmt: String, tip: String, apply: Callable) -> void:
 	var hb := HBoxContainer.new()
 	var s := HSlider.new()
+	s.scrollable = false   # (the wheel scrolls the list; it never changes a value by accident)
 	s.min_value = lo; s.max_value = hi; s.step = stepv
 	s.value = start
 	s.size_flags_horizontal = Control.SIZE_EXPAND_FILL

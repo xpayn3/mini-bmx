@@ -160,34 +160,48 @@ func _corner_label(text: String, col: Color, up: float) -> Label:
 func _layout() -> void:
 	pass
 
-## the test playground's developer view (levels/ride_diag.gd): graphs on the right, the tuning card docked on the left,
-## the HUD squeezed in between. Normal rides never call these.
-## move the right-hand column (life, stamina, style, corner lines, quick tune) px to the left
-func set_right_inset(px: float) -> void:
-	for c in [stamina, life_bar, style_pop, info_l, biome_l, quick]:
-		_shift_x(c, -px)
+## the test playground's developer view (levels/ride_diag.gd): a slim tuning column on the left, the graphs in a band
+## along the bottom, the ride above it. The game HUD's big pieces (computer, jump card, life / stamina, style, corner
+## lines, achievement pops) are hidden there; the hop / pump / balance bars + get-up prompt move up over the band.
+## Normal rides never call these.
+const DEV_HIDE := ["gauge", "air_card", "life_bar", "stamina", "style_pop", "info_l", "biome_l", "msg_l", "quick"]
+var dev_on := false
 
-## move the left-hand items (jump card, bike computer) px to the right
-func set_left_inset(px: float) -> void:
-	for c in [air_card, gauge]:
-		_shift_x(c, px)
+func dev_mode(on: bool) -> void:
+	dev_on = on
+	for k in DEV_HIDE:
+		var c = get(k)
+		if c is CanvasItem: c.visible = not on and (k != "quick" or Settings.get_v("hud_quick"))
 
-func _shift_x(c: Control, dx: float) -> void:
-	if c == null: return
-	if not c.has_meta("x0"): c.set_meta("x0", c.position.x)
-	c.position.x = float(c.get_meta("x0")) + dx
+## the bars at the bottom centre: up by `up` px, centred over [x0, x1] of the screen
+func dev_bars(up: float, x0: float, x1: float) -> void:
+	var vw: float = root.get_viewport_rect().size.x
+	for c in [hop_bar, pump_bar, balance, getup]:
+		if c == null: continue
+		if not c.has_meta("p0"): c.set_meta("p0", c.position)
+		var p0: Vector2 = c.get_meta("p0")
+		c.position = p0 + Vector2((x0 + x1) * 0.5 - vw * 0.5, -up)
 
-var card_left := false   # dev view: the tuning card docked down the left edge (full height) instead of the right
+var card_left := false   # dev view: the tuning card as the slim left column (scaled, the graphs' flat look)
+const DEV_CARD_W := 340.0
+const DEV_CARD_SCALE := 1.0   # (a scale blurred the text and the slider knobs: real size, narrower instead)
 func _dock_card() -> void:
 	if card == null: return
 	if card_left:
-		card.set_anchors_preset(Control.PRESET_LEFT_WIDE)
-		card.offset_left = 8; card.offset_right = 414; card.offset_top = 8; card.offset_bottom = -8
+		card.scale = Vector2.ONE * DEV_CARD_SCALE
+		card.set_anchors_preset(Control.PRESET_LEFT_WIDE)   # top to bottom of the screen, whatever its size: the list scrolls
+		card.offset_left = 0.0; card.offset_right = DEV_CARD_W; card.offset_top = 0.0; card.offset_bottom = 0.0
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = Color(0.04, 0.05, 0.07, 0.92)
+		sb.content_margin_left = 12; sb.content_margin_right = 12; sb.content_margin_top = 10; sb.content_margin_bottom = 10
+		card.add_theme_stylebox_override("panel", sb)
 	else:
+		card.scale = Vector2.ONE
+		card.remove_theme_stylebox_override("panel")
 		card.set_anchors_preset(Control.PRESET_RIGHT_WIDE)
 		card.offset_left = -420; card.offset_right = -14; card.offset_top = 64; card.offset_bottom = -90
 
-## dev view full screen: everything of the HUD but the tuning card hidden (on = false puts it back)
+## dev view full screen (graphs beside the tuning column): the rest of the HUD hidden too (false puts it back)
 func dev_full(on: bool) -> void:
 	for c in root.get_children():
 		if c == card or not (c is CanvasItem): continue
@@ -196,11 +210,15 @@ func dev_full(on: bool) -> void:
 		elif c.has_meta("dev_vis"):
 			c.visible = c.get_meta("dev_vis"); c.remove_meta("dev_vis")
 
+## the tuning column's width on screen (0 = closed)
+func dev_card_w() -> float:
+	return DEV_CARD_W * DEV_CARD_SCALE if card_left and card != null and card.visible else 0.0
+
 func apply_settings() -> void:
-	if gauge: gauge.visible = Settings.get_v("hud_gauge")
+	if gauge: gauge.visible = Settings.get_v("hud_gauge") and not dev_on
 	if gauge: gauge.show_gear = Settings.get_v("hud_gear"); gauge.queue_redraw()
 	if air_card: air_card.enabled = Settings.get_v("hud_jump")
-	if quick: quick.visible = Settings.get_v("hud_quick") and not _side_open()
+	if quick: quick.visible = Settings.get_v("hud_quick") and not _side_open() and not dev_on
 
 func speed_text(ms: float) -> String:
 	return "%d" % roundi(absf(ms) * (2.23694 if Settings.get_v("units") == 1 else 3.6))
@@ -1483,19 +1501,22 @@ class HopBar extends Control:
 	var a := 0.0
 	var k_s := 0.0
 	var fire := 0.0       # 1 when the hop fires, fades
-	var full_t := 0.0     # time at full charge (the glow pulses)
+	var full_t := 0.0     # time in the sweet spot (the glow pulses)
 	var _was := false
 	var _last_k := 0.0
+	var sweet := false    # the preload is on its rebound: pop now for all of it
+	var pop_pct := 0      # the pop that just went: its share of a full leg push
 
 	func tick(st: BikePhysics, dt: float) -> void:
 		var show: bool = st.hop_bar_show and st.pump_press_t < 0.25 and not st.crash_on   # a press pumping a downhill won't hop
-		if _was and not show and _last_k > 0.15 and (st.hop_t > 0.0 or st.kick_t > 0.0 or st.air):
-			fire = 1.0
+		if _was and not show and _last_k > 0.15 and (st.hop_t > 0.0 or st.kick_t > 0.0 or st.air or st.pop_wait > 0.0):
+			fire = 1.0; pop_pct = roundi(100.0 * minf(1.15, maxf(st.pop_q, st.pop_wait)))
+		sweet = show and st.crouch > 0.9 and st.rebound > 0.7
 		_was = show
 		if show: _last_k = st.hop_bar
 		a = move_toward(a, 1.0 if (show or fire > 0.0) else 0.0, dt * (10.0 if show else 3.0))
 		k_s = lerpf(k_s, st.hop_bar if show else k_s, minf(1.0, dt * 30.0))
-		full_t = full_t + dt if (show and st.hop_bar >= 0.999) else 0.0
+		full_t = full_t + dt if sweet else 0.0
 		fire = maxf(0.0, fire - dt * 3.0)
 		if a <= 0.01 and not show: k_s = 0.0
 		visible = a > 0.01
@@ -1506,13 +1527,13 @@ class HopBar extends Control:
 		var x0 := (size.x - SlimBar.W) * 0.5
 		var cy := size.y - 9.0
 		var acc := UITheme.ACCENT
-		var full := k_s >= 0.995
-		var beat := 0.5 + 0.5 * sin(full_t * 14.0)
+		var full := sweet
+		var beat := 0.5 + 0.5 * sin(full_t * 18.0)
 		var col := acc.lerp(Color.WHITE, fire * 0.8 + (0.35 * beat if full else 0.0))
 		SlimBar.badge(self, x0, cy, acc, 0, a, fire if fire > 0.0 else (beat * 0.6 if full else 0.0))
-		SlimBar.caption(self, x0, cy - 11, "POP", a)
+		SlimBar.caption(self, x0, cy - 11, "PRELOAD", a)
 		if full or fire > 0.0:
-			SlimBar.value(self, x0 + SlimBar.W, cy - 10, "GO!" if fire > 0.0 else "FULL", col, a)
+			SlimBar.value(self, x0 + SlimBar.W, cy - 10, ("POP %d%%" % pop_pct) if fire > 0.0 else "NOW!", col, a)
 		else:
 			SlimBar.value(self, x0 + SlimBar.W, cy - 10, "%d%%" % roundi(k_s * 100.0), Color(1, 1, 1, 0.8), a)
 		var tr := SlimBar.track(self, x0, cy, a)

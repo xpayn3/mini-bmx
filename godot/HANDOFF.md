@@ -291,7 +291,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   skid strength. Masks in the shader: `m_driven` (nine riders' own narrow lines, tables `LG` / `LD` / `LW`: four within a few cm on the racing line = the most worn core, the rest a bit tighter / wider, one cutting corners near the middle, one running wide, the outer ones wandering and coming and going (user: "majority on the perfect line, some more outside, some more inside, don't just make one thick line") + jumps: smoother, tighter,
   less relief), `m_loose` (grit beside the line / at the edges), `m_tracks` (three riders' tyre prints inside the line),
   `m_stray` (six single faint tyre lines running down the trail anywhere across it, each wandering and coming and going on its own; user: "too clean, some random down-the-road lines to make it look alive, more faint"), `m_play` (people messing about, user: "completely random, doing circles, joking around": in ~a third of the 26 m stretches one faint mark in the trail's own frame: a donut of a few laps, a figure of eight, a slalom, or a skid arc; uniform `trail_play`, test `BMX_TRAIL_PLAY=1` = every stretch), `m_skid`, `m_wet` / `m_puddle` (roads only, in the worn line, level ground, not dry biomes, in stretches; mirror-smooth,
-  visual only: no splash / grip change yet). **Bikes only: never two parallel wheel ruts** (user; `line()` lost its road ruts
+  no grip change; the tyre dust knows them: `TrailPuddle` (`world/trail_puddle.gd`) = the shader's puddle formula on the CPU from a per-chunk table (`rec.pud`, only chunks with wet road), `Terrain.puddle_at`; water = no dust / clods / skid cloud + muddy drops, damp = less dust, ~15 us a step; probe `BMX_PUDDLE_PROBE=1`. Puddle shading: roughness 0.075 -> 0.22 with the pixel footprint, AA edge, specular AA, relief derivatives outside the branch (flicker fix)). **Bikes only: never two parallel wheel ruts** (user; `line()` lost its road ruts
   in both fields). **The line is a racing line** (user: "a perfect line, not random"): `TrailCourse._racing_line` -> `LN` =
   short average of the curvature minus a long one (inside at the apex, outside before / after), read by `line_off(x, z)` in
   both fields (the 3.5 cm worn dip + the baked darkening follow it). **Run-offs** (`RO` / `ROS`): at ~40 % of sharp corners
@@ -534,6 +534,181 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
     throws (`_tw_t` / `_ts_t` / `_sb_t` / `_sf_t` = time held). The stick throw only counts inside the lip window (`yb` / `yf`).
   - Tests (with `BMX_STRAIGHT=1 BMX_PAD=1`): `BMX_BODY=bhop` (+ `BMX_BHOP_HOLD=secs`), `BMX_BODY=manhop` (hop out of a manual),
     `BMX_FORGIVE_PROBE=1` (`STICKHOP`, `SCOOPHOP`, `FORGIVE`, `BHOP` lines), `BMX_BODY=stoppie` + `BMX_NOSE_PROBE=1` (`NOSE` lines).
+- **Jumps = one push of the legs (2026-11-22, user: "we jump too much, unhuman", then "build MX vs ATV with the stick pump
+  to jump, realistic, one nice package, the animation mint")**. `bike_physics.gd`; sliders Ride > Jumps > Take-off.
+  **Supersedes the hop / pump numbers in the notes above** (`chargeTime` / `chargePop`, the 2 s charge, the late-pump top-up,
+  `pump_lift` and the body kick are gone; the triggers, scoop, coyote time and buffered hop stay).
+  - **One budget** (`_leg_dv(power)` = `popPower` x power x a g-out factor): the most speed one push adds to rider + bike.
+    `popKick` 2.4 m/s (Tune VER 22; ~2.3 x body weight over the 33 cm leg stroke, 75 kg rider + 17 kg bike); the DH's own
+    share is `popPower` 0.9 (was 0.7) = 2.16 m/s. The hop and the pop off a lip both draw on it; `_pop_used` = what this
+    take-off has had (a late pop only gets the rest). Pressed into the ground (`_n_grd` = tyre load / resting load) the legs
+    have up to 45 % less.
+  - **It leaves along the ground's normal** (`_pop_apply`: square to the bike's velocity), so it adds dv^2 / 2 and nothing
+    else. It used to be added straight up (+ dv x the climb speed: ~20 J/kg at a lip).
+  - **Preload** (`crouch` 0..1, `crouch_t`, `rebound`): hop held OR the right stick pulled back bends the legs over
+    `crouchTime` 0.25 s. Power = sqrt(crouch) x (1 - `popRebound` 0.18 x (1 - rebound)): all of it only 0.15-0.5 s after the
+    crouch began (the rebound), a crouch held still gives 82 %. A stick held back > 0.9 s stops being a crouch (weight back).
+    HUD bar PRELOAD (`hud.gd` `HopBar`, `hop_bar` = the power now: it peaks, then sags; "NOW!" on the rebound, "POP n%").
+  - **Pop** (`_pop_now`): let go of hop, or snap the stick forward. Within `popWindow` 0.24 s of a lip (or with the front
+    wheel already off its edge, `_lip_ago`) it waits for the edge (`pop_wait`) and goes at take-off, timing 1.0 inside the
+    last 0.12 s down to 0.6 at the window's start ("PERFECT POP"). Earlier = a hop off the face, now (worse than hands
+    off). In the air within `inputForgive` = late: 75 % of the budget less what was used. Never let go: `popAssist` 0.6 of
+    it, timed for you. Hands off: `autoPump` x 0.6 x prep (~0.15).
+  - **Squash** (`squash`, `squashPower`): stick held forward for 0.25 s+ into a lip (a fresh push at a lip is still the
+    front flip throw): at take-off up to 0.7 x popPower (at most 45 %) of the climb is taken out, speed kept (the velocity
+    turns): low and fast, "SQUASH". No auto pop on a squashed lip.
+  - **Stick vs flips / manual**: a pull back with a lip in sight (`lip_state` 2) never arms the manual; the forward snap
+    zeroes `throw_v` (the pull was the preload). Back and HELD through the lip is still the back flip throw.
+  - **Wheel height vs centre of mass**: after a pop the bike is pulled up under the rider (`air_pull` from `pop_fx`, the
+    tuck moves the bike by `TUCK_SHARE` 0.75 of the leg travel, was riderMass 0.45). A hop out of a manual no longer keeps
+    the frame's rise as climb speed (it added ~0.9 m/s).
+  - **Take-off energy fix** (the playground's open findings 1 and 3): the speed along the lip was split with
+    cos(the slope under both axles); with the front past the lip that is ~flat or the backside, so the bike kept all its
+    speed AND got the climb on top (table_1.5 at 34 km/h left at 29.5 km/h, now 24.8: what climbing 1.5 m costs). Now
+    cos(asin(vy / v)). A tyre brushing the lip within 0.2 s of take-off while still going up is not a landing (`_graze`).
+    **Every jump flies shorter hands off than before** (table_1.5 @ 34: 7.5 -> 4.5 m, lands on the knuckle); the trail's
+    jumps were not re-checked for the speeds they need.
+  - **Measured** (test rider, table_1.5 at 34 km/h, peak over the lip): hands off 1.00 m (before 1.07), well-timed pop
+    1.72 m (hop held: before 2.75), held and let go late 1.47, popped 0.4 s early 0.57, squash 0.38. Flat hop, full: 0.39 m
+    (before 1.0-1.2). Suite baseline re-saved; `slope_stress` 51 / 51.
+  - **Rider** (`rider.gd` `update_pose`, inputs `preload`, `extend`, `popFx`, `squash`, `lipK` from `game.gd`): preload =
+    sunk between the wheels, chest down over the bars (the stick's lean-back pose gives way to it); through the lip the
+    legs drive straight, hips up and forward, back straight, arms long; then the tuck; a squash hangs him back and low
+    behind the bars with long arms; on a jump face he stays centred (the climb pose is faded by `lipK`). Pose keys `jumpPreload` / `jumpExtend` /
+    `jumpSquash` (no sliders yet).
+  - Tests: test rider techniques `BMX_PG_PILOT_TECH=pop|early|hold|squash|hop` (+ `BMX_PG_PILOT_REL=secs` before the lip
+    the stick snaps, `BMX_PG_PILOT=feature BMX_PG_AT=...`); `BMX_FORGIVE_PROBE=1` prints `STICKHOP`, `POP lip in`, `HOP
+    power= dv= n= legs=`, `LANDED air= peak=`; `BMX_TRICK=none` prints `POP auto`, `SQUASH`; `BMX_LIP_SHOT=prefix`
+    (+ `BMX_LIP_PREP`, `BMX_LIP_STEP`) for the poses. Don't start more than 2-3 test windows at once (Vulkan device lost).
+  - Not done: the pump for speed on rollers / backsides is still the old push (`pumpHold`), not the leg model; the
+    suspension's own rebound is not simulated into the pop (the timing window stands in for it); not ridden by the user yet.
+- **Landings (2026-11-22, user: "make our landing better ... does suspension and body react realistically, big jumps,
+  landing at a slight corner", "suspension never past its end", "body reacts realistically, no clipping")**.
+  `bike_physics.gd`; sliders Ride > Jumps > Landing. Measured before: 43 deg sideways at 47 km/h cost nothing; a flat
+  landing from 2.4 m rode on with no reaction; suspension at 102-114 % of its travel, tyres squashed 5-6.6 cm.
+  - **Travel is a hard end** (`trF` / `trR` in `_step_vertical`): each end's travel = min(`T.travel`, sag + the DRAWN
+    fork's / rear end's room to its stop, `Suspension.F/R["max"]`), so the physics can never press an end further than
+    the model shows (the drawn bike was then lifted by the tyre unclip). The last fifth is a bump stop (rate to 7x, only
+    while being squeezed: as a plain spring it threw a bike set down deep in its travel into the air); on the stop the
+    tyre's push goes straight into the frame; the wheel is clamped at 100 %. Tyres stiffen with squash and sit on the
+    rim at `TYRE_MAX` 4.5 cm. Suite: max travel 100 % everywhere (was up to 123 %). The graphs read both ends on the
+    front's travel (`dg_travel` = `trF`, `dg_xR` rescaled).
+  - **The verdict = what got through** (0.4 s after touch-down): `hit` = sqrt(legs^2 + (1.3 x rim)^2), legs =
+    `land_jolt` (the body's speed into the bike when the legs ran out), rim = `_rim_hit` (the speed the whole bike lost
+    against the ground with suspension and tyres on their stops). > `slamJolt` x LAND = SLAM!; from `landHeavy` 0.45 of
+    that = a heavy landing (`land_heavy` 0..1): up to 22 % of the speed gone, `_stun` 0.25-0.85 s without power, "OOF!"
+    / "HEAVY LANDING". Measured: 1 m drop 2.3 of 8.7 (clean); table_1.5 popped onto its landing 5.5 (heavy 0.3);
+    overshot to flat 5.6-6.4 (0.4-0.5); the same with the tuck held into the ground 7.8 (0.8).
+  - **Sideways** (in the touch-down block): the speed across the tyres has to be stopped by their grip. `landYawFree`
+    0.12 rad costs nothing; of the rest the tyres catch mu x (0.8 x impact + 2.5) x `landYawGrip` m/s at once (speed
+    gone, `land_yaw`, "SKETCHY!" / "SIDEWAYS!"), what is left is a slide for the ground sim; more than `landYawCrash`
+    5.5 m/s caught at once = HIGHSIDE!. At 26 km/h: 15 deg 7.3 -> 7.2 m/s, 30 deg -> 6.7, 45 deg -> 5.7; at 47 km/h
+    30 deg+ is a highside. (Past `LAND_CONE` 60 deg the old SKETCHY / FAKIE rule still runs first.)
+  - **Drops**: rolling off level ground at speed the rider holds the bike level (`edge_k`: the balance torque x3.5 and
+    its gain x6, only with the front well clear of ground that falls away AND the rear on level ground: over a crest
+    or off a lip it stays out). drop_1 at 24 km/h: 40 -> 27 deg nose down; drop_2 at 28: NOSE DIVE crash -> clean.
+    Rolling on the rear wheel alone, the hill the drive feels is the ground under that wheel (it was the frame's
+    pitch: nose-high down a bump's back side it "climbed" and stalled).
+  - **Tuck held into the ground** (`_tuck_in`): the legs' reach for the landing is cut to a quarter, so they bottom.
+  - **Perfect landing**: the boost is pumped out of a downslope (`landBoost` x how steep x how hard, none on the
+    flat); it was a flat +6 km/h from nowhere.
+  - **Rider** (`rider.gd`, inputs `landFold`, `landReach`): reaches for the ground (hips up, back straighter), the hit
+    folds him (hips down and back, chest down; `land_fold` from the impact, kept down longer by a heavy one), then he
+    comes up (0.45-2 s). `BMX_BODY_CLIP` over the landing runs: 0 clips.
+  - Tests: `BMX_PG_PILOT_YAW=<deg>` / `BMX_PG_PILOT_TUCK=1` (test rider lands turned / tucked), `BMX_LAND_PROBE=1`
+    (`HIT legs= rim= hit= of heavy=`, `YAWLAND angle= side= caught= left=`; also with `BMX_TRICK`), `BMX_LAND_SHOT=prefix`
+    (12 frames through a touch-down). Suite baseline re-saved; `slope_stress` 51 / 51.
+  - Open: on the trail the auto rider's first jump measured a hit of 8.3 of 8.7 with the 1.5x rim weight (now 1.3x):
+    slams may be common at trail speeds, tune `slamJolt`; a rim strike still stops the frame in one step (50-67 g);
+    rollers show energy gains of ~0.5 J/kg at crests (the rear-wheel slope reading); drop_2 still lands 50-60 deg nose
+    down; high-speed compression damping is weak (the shock's blow-off), so big hits reach the rim; not ridden by the
+    user yet.
+- **Trail jumps resized to the speed riders arrive at (2026-11-22, found testing the landings on the trail)**.
+  Measured with `BMX_JUMP_PROBE=1` (`JUMPLAND SHORT | LANDING | LONG | NATURAL v_off= dist= height= impact= slope=`:
+  where on a built jump it came down, from `TerrainField.fo_air` / `fo_m`): the built jumps suited ~30-35 km/h; at the
+  48-60 km/h riders really carry, every one was overshot onto the flat past its landing (21-24 m out) or into the
+  next jump's face. With landings judged, that was a heavy landing on every jump and the demo rider slammed on a
+  jump line. Now `TrailFeatures.TABLE / DOUBLE / KICKER` (+ `AIR`) are 1.6x in every length and height (same lip and
+  landing angles; mirrored in `TerrainFieldCs.cs`), for the jumps ON THE TRAIL (`route_feats`). The free-ride jumps
+  out in the land (`jump_at`, found through 34 m cells, close to each other and to wooden features) keep the old
+  size: `TABLE_S / DOUBLE_S / KICKER_S / AIR_S`, `TerrainField.small`, `make_feat(..., old_size)` (bigger, they
+  overlapped: `wood_edge_probe` walls=4). Bigger jumps take more of each straight, so there are fewer route features
+  (12 worlds x 4 km: 166, was 222) and bridges were getting rare: gorge chance 0.06 -> 0.13, rope hash 0.12 -> 0.3
+  (7 bridges in those worlds, was 8). **Every world's trail features past the first are laid out differently than
+  before**; seed 4242 no longer has a rope bridge in its first 4 km (seed 12 has one at 2.26 km: `BMX_SEED=12
+  BMX_TRAIL_FEAT=rope`). Heavy landings also cost less: `landHeavy` 0.45 -> 0.6 (Tune VER 24), speed lost 22 -> 12 %,
+  stun 0.15-0.6 s. After, 150 s rides: the demo rider (35-47 km/h) lands every built jump on its downslope, no heavy
+  landing, no crash, no body clipping; flat out (54-63 km/h) one heavy 0.77 on the first jump, the rest light, no
+  crash. `terrain_cs_cmp` EXACT, `trail_grow_probe` / `rope_find` / `cactus_probe` PASS, `wood_edge_probe` walls=0,
+  suite 0 of 24 changed, stress 56 / 56. New `tools/route_count.gd` (-s: route features per type over 12 worlds).
+- **Suspension = parts with a setup (2026-11-22, user: "should behave realistically like on bikes ... comprehensive:
+  later riders tune shocks, buy another one, some hydraulic, some spring")**. New `scripts/bike/susp_setup.gd`
+  (`SuspSetup`): a FORK and a REAR SHOCK, each a unit of plain data: spring `air` | `coil`, travel (mm), sag (%),
+  tokens (volume spacers / bottom-out bumper, 0-4), damper clicks `lsc` / `hsc` / `reb` (0-10, 5 = middle), `adj`
+  (which adjusters that damper has: a basic shock is rebound only), kg. `SuspSetup.unit(...)` turns one into the
+  physics' numbers, `resolve(build)` does a whole garage build -> `{f, r, psi_f, psi_r}`; `SHOCK_MODELS` = the rear
+  shocks (made-up brands; coil / air / one with a hydraulic bottom-out); forks stay `BikeBuild.FORK_MODELS` (their
+  `spring` Air / Coil is used; an optional `adj` list limits the adjusters). **A shop / rider tuning only has to write
+  the build's keys** (`suspension.fork_sag / fork_tokens / fork_lsc / fork_hsc / fork_reb / shock_model / shock_sag /
+  shock_tokens / shock_lsc / shock_hsc / shock_reb`, `wheels.psi_f / psi_r`; `SuspSetup.val` gives a key's value, old
+  saves' 3-step spring / rebound choices are carried over) or add a model to a catalogue.
+  - **Physics** (`_step_vertical`, per end): travel `tr`; spring F = k x (1 + pg (x / tr)^2) with k set so that end
+    rests at its sag under its share of the weight (air pg 0.4 + 0.22 / spacer, coil 0.04 + 0.03 / step; the rear adds
+    the frame's linkage: `FRAME_PROG` 0.35 x `shockProg`, from `BikeBuild.frame_mods`' progression); compression
+    damping zc (0.16-0.54 of critical) up to the knee `damperKnee`, past it `hs` of it (0.22-0.77; `damperBlow`
+    default 0.2 -> 0.4, Tune VER 23); rebound its own zr (0.25-0.85); seal friction (air 0.05 g, coil 0.018 g of that
+    end's load); bump stop strength by tokens; the tyre's stiffness from its pressure (`PSI_REF` 25). `press`
+    (legPress) is cut to 35 % on a bike with a setup. A bike with no setup (the BMX) keeps the one simple spring
+    (`sus` empty; `BMX_NO_SUS=1` forces that for comparison). The drawn fork / rear end get the same sag
+    (`Suspension.set_sag`) and the physics travel is never more than the drawn one.
+  - **Ride sliders on top of the setup** (Ride > Suspension): `tyreHz` (spring rate, 2.4 = as set up), `tyreDamp`
+    (all damping, 0.39 = as set up), new `suspSag`, `suspRebound`, `suspProg` (x). The garage no longer multiplies
+    `tyreHz` / `tyreDamp`; tyre pressure also moves grip (+0.6 % per psi softer) and rolling drag (+1.2 %).
+  - **Garage > Shocks** (`_susp_page`): per end travel, sag, spacers / bumper, LS / HS compression, rebound (only the
+    adjusters the unit has), the shock picker, tyre pressures, a line describing each end. The Landing stat bar
+    reads the setup (`BikeBuild._land_k`). Shock weight is in `bike_kg`.
+  - **Measured** (test rider, drop_1 at 24 km/h, speed lost at the rim): stock 0.44 m/s; sag 36 / 38 % 1.61; sag 20 /
+    22 % 0; spacers 4 0.03; spacers 0 1.03; compression all 10 clicks 0; all 0 clicks 1.56; air shock 0; tyres 15 psi
+    1.77. Suite vs the old single spring: jumps within tolerance, fork use on landings 72-93 % (was 96-100 %),
+    hard front braking 45 % of the fork. Sag on the graphs: 28 % on built ground, 32 % on natural (the rest of `press`).
+  - Tests: `BMX_BUILD="suspension.fork_sag=36;suspension.shock_model=air_dh;wheels.psi_f=15"` (setup keys work even
+    when a build doesn't hold them yet), `BMX_GARAGE_TAB=suspension`, `BMX_DIAG_PROBE=1` (`DIAG SUSP ... sag= travel=`).
+  - **Geometry: brake dive, anti-squat, anti-rise** (same day, user: "do this now"; `dvF` / `dvR` in
+    `_step_vertical`, only on a bike with a setup, on the ground): the extra push on each spring from where its wheel
+    moves as it compresses. Fork: it slides along the steering axis (`Suspension.axis`: tan 0.51 on the RUNOUT, 63 deg
+    head angle), so the front brake's force presses it in by brake x tan(tilt). Rear: `antiSquat` (Tune follower,
+    0.9 x the frame via `frame_mods`: 0.4 + its anti_squat figure) x drive x loadHeight / L holds it up under power,
+    `ANTI_RISE` 0.6 x the rear brake sits it down. Applied as equal and opposite forces on frame and wheel, so the
+    tyres' loads (grip, stopping distance) don't change: only how far the spring is pressed (`sumF` / `sumR` take it
+    back out). Slider Ride > Suspension `suspGeo` (0 = off). Measured: front brake at 0.75 g: fork 62 % of its travel
+    (41 % without), 4.23 m either way; rear brake: shock 33-34 % (31 %); sprint: shock 45-49 % (49-52 %).
+    Probe `BMX_GEO_PROBE=1` (`GEO v= brake f= r= drive= tan= AS= dive= rear= fork=% shock=%`).
+  - **Review for stability + speed (same day, user asked for it)**. Found and fixed: (1) nothing limited what the
+    explicit step (dt / 4) can integrate: a wheel is a small mass between the tyre and the suspension spring, and a
+    light wheel (`wheelMass` 0.01) with a firm setup, 4 spacers, `suspProg` 2.5 and rock-hard tyres came to stiffness
+    x step^2 / mass ~ 24 (limit ~4), rebound wound in to damping x step / mass ~ 17 (limit 2). Now `k_cap` / `c_cap`
+    in `_step_vertical` hold spring + tyre stiffness and every damping rate inside what the step can take (the stock
+    setup is at ~35 % / ~30 % of them, so nothing changes there: suite compare 0 of 24 changed). (2) The tyre's
+    re-seat on the rim could push a wheel past its travel when no wheel position can reach the ground (hung on the
+    stress test's 9 m wall: 374 %): the travel limit now has the last word. (3) The step read ~25 dictionary values
+    and ran two pow loops every step: the units' numbers are cached as floats (`_su`, `_sus_cache`), `SuspSetup.rest`
+    has no pow. Step cost (slope_stress, headless): 99 us before the suspension work, 117 after it, 108 now.
+    `slope_stress` grew: 5 "susp:" torture checks (drops of 5 / 9 m, a 25 cm square edge at 16 m/s, 15 cm washboard at
+    20 m/s, 1.2 m rollers) and a `SUSP travel max= tyre squash max= slowest step= blown-up rides=` line; every ride in
+    it tracks the most travel used. Run it on a setup with `BMX_BUILD="..."` + `tune=k=v,...`. Twelve setups tried
+    (stock, softest, firmest, air, hydraulic stop, 160 / 220 mm, three sets of sliders at their ends, the BMX, the old
+    single spring): 0 non-finite states, travel max 100.0 %, tyre 4.6 cm. Behaviour checks fail only on absurd
+    slider sets (everything rigid: it bounces off washboard) and the chaotic "brake grade -35 deg" one.
+  - **Rim strikes on rocks (found testing the merge on the trail)**: with the real, shorter travel a rock or kerb met
+    mid-corner at trail speed put an end on its rim, and the frame was then thrown up at the edge's whole rise (up to
+    12 m/s): the legs bottomed and it read SLAM! (2 in a 74 s ride; in the F8-style ride log `v` goes negative for a
+    moment: that is the crash's throw, not riding backwards). `RIM_CLIMB` 4 m/s now caps the upward speed a rim strike
+    on a rising edge gives (the position is still carried over the edge; landings are untouched). 3 trail rides
+    after: no SLAM. Suite 0 of 24 changed, stress 56 / 56.
+  - Open: the wheelbase and head angle don't change as the fork dives (the ride geometry is fixed), no pedal kickback
+    / bob with each stroke, the rear axle's path doesn't soak up square edges differently. No shop / prices for
+    shocks yet, shock models have no 3D model or card picture. Not ridden by the user yet. (`slope_stress` is 51 / 51
+    again; its "brake grade -35 deg" check is a chaotic slide at the friction angle and flips with small changes.)
 - **Direct manual (2026-11-22, user: "too stiff, locks us in, going too far stops us, make it more manual"; then "fall if we pull too far", "turn
   less, with body lean")**. `manDirect` 1 (Ride > Manual & pump; 0 = the old tipping balance, they blend): **the stick is the front's height**.
   `_balance_step`: target = pull x (`manBalance` + `manLoop` + 0.08), `man_a` follows on a soft spring (`manFollow` 40, ~0.3 s), so it never runs
@@ -573,6 +748,31 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   on the pedals). Test shots: `BMX_BODY=air:x,y` holds the stick mid-air.
 - **Rear-wheel clearance** (always on, in the safety limits, `wheelR` / `wheelRR` from game.gd): the hips may go below
   the saddle but never inside the rear wheel's circle + 16 cm - the legs used to go into the wheel in the air.
+- **Never through the handlebar** (2026-11-22, user: "head and upper body clip into the handlebar a lot", then of a
+  squash shot "completely insane unnatural pose"; `rider.gd`, first of the safety limits, right after the hips box):
+  seen from the side the chest joint stays `BAR_CHEST` 0.32 m and the head's centre `BAR_HEAD` 0.31 m from the middle
+  of the two grips. Inside that the WHOLE upper body is moved out, mostly back and a little up (hips 85 % with it): the
+  arms get longer, the back keeps its angle, the hips go behind the saddle. Pushing only the chest (first version) stood
+  him bolt upright with his elbows folded under his chin; pushing mostly up did the same. The rear-wheel / torso limits
+  after it still apply. The crouches no longer stack past 20 cm (`deep_c`: lip crouch + preload + legs pressed in by a
+  transition came to 35 cm). The squash pose = hips back and down, arms pushing the bars away (not folded over them).
+  Before: on a 40 s trail ride the chest came within 1.5 cm of the bar's middle and the helmet 6.5 cm; it now holds him
+  out in ~14 % of frames, the joints' frame-to-frame steps about as before (chest 81 vs 74 direction flips).
+  Probe: `BMX_BAR_PROBE=1` (`BARCLEAR deepest_cm= held_frames= least_chest_cm= least_head_cm=`), `BMX_NO_BARLIMIT=1`
+  measures without holding. **Judge rider poses on enlarged side-view crops of every frame through a lip
+  (`BMX_LIP_SHOT`), not on one frame.**
+- **Body never through itself or the bike** (2026-11-22, user: "we need smart limits or our body will clip"; `rider.gd`).
+  Measured first, then limited: `BMX_BODY_CLIP=1` (`Rider._clip_probe`, `BODYCLIP <pair> frames= % deepest= cm` at the end
+  of a test run) takes the drawn body as capsules (head, torso, thighs, shins, upper arms, forearms) against the bar, the
+  saddle, both wheels and each other, every frame. Found over 12 scenarios (trail, flips, pop, squash, drop, tuck,
+  manual, hop, sprint, lean, air stick, brake + turn): knees in the chest (to 11 cm; 90 % of frames in the tuck),
+  forearms in the thigh / shin (to 7 cm in leans), hips in the saddle (to 10 cm), hips in the rear tyre (rare). Limits:
+  `_swing_clear` (a knee / elbow swings about its root-tip line, out to its own side, by the smallest angle that clears:
+  knees round the torso `LIMB_TORSO` 0.18 m, elbows round the leg on their side `LIMB_LIMB` 0.105 m; hands and feet
+  stay put) and a last saddle / rear-tyre floor for the hips after the bar limit and torso clamp moved them. After: all
+  of those 0 in all 12; left: hips / thigh in the rear tyre in 0.2-0.3 % of frames in flips, a shin in it in 0.9 % of
+  the brake + turn test. Run it after any change to the rider's pose: `. /tmp`-style loop = each scenario with
+  `BMX_BODY_CLIP=1`, two windows at a time.
 - **Skeleton safety limits** (`rider.gd`, just before the torso length clamp): hips in a box over the bike, the
   torso bends only -26..80 deg forward and +-34 deg sideways from the bike's up; body counter-roll capped at ~50 deg.
   Whatever stacks up (tuck, spin, lean, landing, sliders) the body can't be mangled.
@@ -1251,16 +1451,32 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   9.2 m/s @ 32 deg run up the lip (trace with `BMX_PG_TRACE`); (2) fast into a big kicker the bike leaves early off the
   transition (gap_9 at 40 km/h: 4.9 deg, no air off the lip, into the gap); (3) speed at the lip is often not lower than the
   run-in after climbing the kicker (table_1.5 at 42 km/h: lip 42, drop_1.5 run-up: lip = cruise speed): the pop / pump adds it.
+- **Found by the lab / suite (2026-11-22), not fixed yet** (the baseline `tools/pg_baseline.json` holds them as they are):
+  (4) the take-off depends on state left from earlier riding (smoothed grip / tyre loads / crash meters...): the same
+  run at the same speed left gap_5 at 41.5 deg from a clean state but at 84 deg (16 km/h, landed 0.5 m out) after other
+  features; stepdown_1.8 at 37-39 km/h left at 90 deg twice in lane mode (one LOOPED OUT), hop_0.8 at 30 km/h at 65 deg.
+  The suite now starts every run clean (`PlaygroundLab.fresh`), so it won't show this: ride a lane in lane mode to see it;
+  (5) drop_2 at 28 km/h
+  = NOSE DIVE; (6) landings stop all the downward speed in one physics step: 60-86 g "in one step" on flat landings
+  from ~1.5 m up, tyres squashed 5-7 cm (rim strike); (7) the pump at a lip adds ~21 J/kg (as much as climbing 2 m),
+  without it the take-off loses energy as it should; (8) brakes: 0.8-0.85 g on dirt / grass / sand alike (29 km/h: 4.1 m),
+  a real bike on loose dirt is nearer 0.6-0.7 g, and the surfaces barely differ; the wet strip (the game's water surface)
+  stops at ~0.97 g, harder than dirt (its drag adds to the brakes).
 
 ### Developer view of the test playground (`scripts/levels/ride_diag.gd`) - telemetry + sliders for riding code
-- **Only in the test playground** (user decision 2026-11-21: developer tools live in that level, normal rides have none):
-  the playground opens with the **tuning card docked down the left edge** (every Ride / Rider / Look / Sound / Light / Dust
-  slider, presets, Feel; `hud.card_left` -> `hud._dock_card`), the ride in the middle, the **ride diagnostics** graphs on
-  the right; the HUD's left items (jump card, bike computer, the playground's jump label) move right of the card
-  (`hud.set_left_inset`), its right column left of the graphs (`hud.set_right_inset`). ✕ / P closes / opens the card,
-  F4 cycles the graphs panel -> full screen (graphs fill everything right of the card, the rest of the HUD hidden:
-  `hud.dev_full`) -> off. `BMX_DEV_CARD=0` starts without the card. Try a slider, ride the feature again (bail tap = again),
-  read the graphs: that's the loop for ride feel and new riding code.
+- **Only in the test playground** (user decision 2026-11-21: developer tools live in that level, normal rides have none).
+  **Layout (2026-11-22, user: "tidy, compact, nothing covering")**: a slim **tuning column** on the left (the TuneCard,
+  every slider, scaled `DEV_CARD_SCALE` 0.84 with the graphs' flat dark panel: `hud.card_left` -> `hud._dock_card`), the
+  **graphs in a band along the bottom** (`RideDiag.BAND` 46 % of the height; a page's rows split over two columns when
+  the band is wide: `DiagView.rows` on the page body), one compact header over it (DEV, page tabs, keys, CAM pick; the
+  RIDER and LAB rows side by side, small flat buttons from `RideDiag._dev_theme`), the ride above the band
+  (`ride_rect`; `_frame_bike` slides the camera with `h_offset` / `v_offset` so the bike sits in its middle, never moving
+  the camera under the ground). The game HUD's big pieces are hidden there (`hud.dev_mode`: computer, jump card,
+  life / stamina, STYLE, corner lines, achievement pops, quick tune; plus the area banner, the WASTED slow motion
+  (`Game._wasted_on`) and the fullscreen button; F11 still works); the hop / pump / balance bars and the get-up prompt
+  move up over the band (`hud.dev_bars`). The playground readout is a small block at the ride's top left. ✕ / P closes /
+  opens the tuning column, F4 cycles band -> full screen (graphs beside the column) -> off. `BMX_DEV_CARD=0` starts
+  without the column. Try a slider, ride the feature again, read the graphs: that's the loop.
 - **Test rider** (`levels/playground_pilot.gd`, `PlaygroundPilot extends DemoPilot`; F2 there, or the RIDER bar under the
   graph tabs / along the bottom right with the graphs off): pick a feature or a whole lane in the dropdown and he rides it on
   repeat until STOP: holds the lane centre, pedals / brakes to the set speed (- / + km/h) on the run-in, hands off from 1.5 m
@@ -1287,6 +1503,56 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   magenta prediction), the lip of the jump ahead (orange post), its landing (green line) and sweet spot (green ball).
 - The probe no longer lets a bounce off a landing replace the jump that's still settling (it used to log the 0.2 s
   bounce instead of the real jump, or nothing), and skips airs < 0.3 s within 1.2 s of a landing.
+- **Lab** (`levels/playground_lab.gd`, `PlaygroundLab`, made by RideDiag; the LAB row under the RIDER bar, keys work with
+  the graphs off too):
+  - **Energy check**: E = ½ speed² (+ the climb speed in the air) + g height per kg, from the last reset (ENERGY page:
+    E, ½v², the inputs that add energy, COASTING / AIR flags). With nothing putting energy in (pedal, sprint, hop / pump,
+    body stick; each counts for 0.35 s after it's let go, the pump's push comes at the release) a rise over 0.5 J/kg
+    within 0.25 s is a check (`energy_gain`, with "take-off" / "air" / "ground").
+  - **Physics checks** (things a real bike can't do; counted, an event line on every graph, the list on the ENERGY page,
+    `PG CHECK <kind> ... | <feature> u= v= air=` lines, `PG CHECKS` summary with `BMX_LAB_PROBE=1`): `energy_gain`,
+    `rim_strike` (tyre squashed past 5 cm), `accel` (> 50 g in one step), `sunk` (under the ground by more than the
+    travel + 0.15 m), `jump_step` (height jumped > 0.3 m in a step), `non_finite`.
+  - **Time**: G pause / run the physics (the drawn bike holds: `Game` calls `lab.hold_physics()` first and snaps the
+    interpolation), N one physics step (1/120 s, pauses if running), T slow motion 1 / ½ / ¼ / ⅒ (`Engine.time_scale`,
+    only while nobody else owns it: crash slow-mo, photo mode). `BMX_PG_SLOW=0.25` for tests.
+  - **Record / replay**: V records the next run (resets to 25 m before the feature you're at, or the test rider's next
+    run) until the next reset / V / 60 s: the inputs the physics got each step (`IN_KEYS`), the path, every graph
+    channel, the Tune values; saved to `user://playground/last_run.dat` (survives a restart: record, change the code,
+    restart, replay). J replays it from the same start (+ grip noise reseeded, stamina full) with the same inputs
+    (`Game._read_input` takes `lab.replay_input()` first); a white wireframe ghost bike (Debug Draw) rides the recorded
+    path and every graph draws the recording faint under the live lines. `PG REPLAY feat= steps= end_moved= tune_changed:`.
+    Replays are exact: the same code replays to 0.000 m. Tests: `BMX_PG_REC=1` (records the test rider's first run, with
+    `BMX_PG_PILOT`), `BMX_PG_REPLAY=1`.
+- **Overlay extras** (F3, `DebugOverlay._tyres`): a white arrow at each tyre = the ground's push (1 m = the whole weight)
+  and a ring per tyre lying on the ground with a dot = its grip in use (along: brake / drive, across: turn / slide),
+  green inside, red past it.
+- **More features** (2026-11-22): lane **STEP-DOWNS, DROPS & HIPS** (z -48: `step_down`, `drop_land` onto a 30-34 deg
+  landing, `hip` = a table turned 20 / 35 deg to the lane: `Lane.skews` slides its shape along u with v (`skew_u`), so
+  ridden straight you take off and land across its faces) and **BRAKES, SURFACES & SLALOM** (z -72: `brake_strip` on
+  dirt (both / front only / rear only), grass, wet, sand (`Lane.surfs` -> `course.surface_at` -> `Terrain.surface`, ground
+  colour `SURF_COL`); a post at the brake line (`f.lip`); `slalom` cones 8 / 6 m apart). The test rider brakes at the
+  line with the lever the strip tests until stopped, and weaves the slalom (aims `SLALOM_OFF` beside each cone,
+  alternate sides). The probe prints `PG BRAKE feat= v= dist= time= decel= lock_f= lock_r= slip=` and `PG SLALOM
+  feat= time= v_in= v_min= v_out= ok= miss= lean=`. Main added a ROCKS lane (z -24, the game's own rock colliders).
+- **Repeatable runs**: before the test rider's every restart, a recording and a replay, `PlaygroundLab.fresh(phys)` copies
+  every plain value of a brand-new `BikePhysics` into the ride's (not the build / gearing / Tune: `KEEP`), the gear back to
+  the start gear, the grip randomness reseeded. Without it the same run came out different after other riding. Same
+  feature, same speed, from clean: identical to the centimetre (the first run after the level loads differs a little).
+- **Mouse wheel** (2026-11-22, the user moved sliders by accident while trying to scroll): no slider in the game takes the
+  wheel any more (`scrollable = false`: tune card / TuneSlider, quick tune, settings, garage); over the tuning card the
+  wheel scrolls its list (`TuneCard._input` -> `SmoothScroll.wheel`) and never reaches the camera zoom; over the graph
+  band / bars it's eaten too. Autotest / bench runs never save `tune.cfg` (`Tune.save`), like PADSEQ runs.
+  Test: `BMX_CARD_WHEEL=n` (n notches into the card's list, `CARDWHEEL scroll=` 1 s later; a minimised window has no
+  mouse position, so `mw:` steps can't test it).
+- **Baseline suite** (`levels/playground_suite.gd`): `BMX_PG_SUITE=save` rides 24 fixed runs (tables, gaps, hops, drops,
+  step-up, rollers, pump, curb, slope, camber, step-down, drop to landing, hip, five brake strips, slalom; the test
+  rider at fixed speeds, pump and AUTO off) and writes every result to `godot/tools/pg_baseline.json` (keep it in git);
+  `BMX_PG_SUITE=compare` rides them again and prints every number that moved past its tolerance (`PGBASE <run> metric
+  old -> new`, ⚠ on a result that got worse, more bottom-outs or more checks) and `PGBASE SUMMARY runs= changed= worse=`.
+  **Run it before and after every riding-physics change** (~3 min, minimised):
+  `BMX_MIN=1 BMX_LEVEL=playground BMX_STRAIGHT=1 BMX_PG_SUITE=compare` + `--autotest=400`; save a new baseline only
+  when the change is wanted. `BMX_PG_SUITE_ONLY=<part of an id>`.
 - `RideDiag` (CanvasLayer, made by `Game._ready` only for a `PlaygroundTerrain`): records **every physics step**
   (`Game._physics_process` -> `diag.record(dt, inp)` after `phys.step`; `inp` = what the physics got, after cruise control /
   test injection) into a 20 s ring (one flat `PackedFloat32Array`, `buf[sample * C + channel]`, channels in `RideDiag.CH`).
@@ -1308,7 +1574,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   judge's trouble meters `_risk`), **BODY** (lean asked / bike / counter, bars, pitch vs ground, body fore / aft, legs, manual
   angle vs `manBalance`), **AIR** (side view of the last jump: the ground along the take-off line, the bike drawn every
   0.1 s; height, vy, pitch vs slope, spin, stick). Event lines on every graph: take-off, landing, bottom-out, crash.
-- Keys: **F4** panel (right, 692 px) -> full screen -> off; F5 / Shift+F5 page (or click a tab); F6 freeze; F7 window 3 / 6 / 12 / 20 s; F9 reset the stats.
+- Keys: **F4** band -> full screen -> off; F5 / Shift+F5 page (or click a tab); F6 freeze; F7 window 3 / 6 / 12 / 20 s; F9 reset the stats.
   Mouse over any graph = every graph reads that moment (line + legends). Draw ~2 ms a frame while shown, nothing hidden.
 - Tests: `BMX_DIAG=<page name / prefix / number>` opens it (`BMX_DIAG_FULL=1` full screen) + `BMX_SHOT`;
   `BMX_DIAG_PROBE=1` prints at the end `DIAG SUSP` (max / avg travel, bottom-outs, blow-offs, shock speed range per end,
@@ -1580,6 +1846,8 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `-s res://tools/wood_edge_probe.gd --headless` | drives angled lines onto every wooden ramp; must report `walls=0` |
 | `BMX_LEVEL=playground BMX_STRAIGHT=1 BMX_PG_AT=table_1.5 BMX_PG_SPEEDS=20,25,30,35` + `--autotest=150` | the test playground: ride one feature at each speed, `PGSUM` per try (see "Test playground" in section 5) |
 | `BMX_DIAG=susp [BMX_DIAG_FULL=1] BMX_DIAG_PROBE=1` (+ `BMX_SHOT`) | ride diagnostics panel on a page (overview / susp / input / tyres / body / air); `DIAG` summary lines at the end (see "Ride diagnostics" in section 5) |
+| `BMX_LEVEL=playground BMX_STRAIGHT=1 BMX_PG_SUITE=compare` (or `save`) + `--autotest=400` | the playground baseline suite: 24 fixed runs vs `tools/pg_baseline.json`, `PGBASE` lines; run before / after any riding change |
+| `BMX_PG_REC=1` / `BMX_PG_REPLAY=1`, `BMX_LAB_PROBE=1`, `BMX_PG_SLOW=0.25` | playground lab: record the test rider's run / replay the saved run (`PG REPLAY end_moved=`), `PG CHECK` summary, slow motion |
 | `-s res://tools/playground_probe.gd --headless` | the playground's features (spans, heights, lips); must say `PASS` |
 | `--headless res://tools/slope_stress.tscn [-- verbose=1 trace=1 only=<substr> bike=dh]` | ride physics on synthetic ground (no world): coast speed vs the closed form on -45..+15 deg grades (within 3 %), braking / holding vs the friction angle, climbs, cambers to 45 deg, crests (air only past v^2 = g R), rollers, washboard, curbs / ledges / drops, chute compressions, full-lock turns on grades, 4 x 60 s random rides; must say `SLOPE_STRESS PASS` (exit code = failures). A scene, not `-s`: the physics needs the Tune autoload |
 | `--headless res://tools/slope_stress.tscn -- sweep=1` | slider audit: every ride slider (not Dust / Demo) at its min and max, from the defaults, through 33 short standard rides (turns at full / half lock, swaps, braking, a side slope, a berm, landings, a manual, pumping, a rock garden...); `SWEEP key group max change % (metric)`. ~10 min. 0 % = dead OR only acts where the rides don't go (air tricks, whips, crashes, drawing): check the code before removing. 2026-11-20 it found `turnSlow` / `turnFast` / `carveBite` / `flickTurn` dead (`turnFloor` always wins the bar limit, the grip decides) - removed, their old defaults are constants in `a_lat_lim` |

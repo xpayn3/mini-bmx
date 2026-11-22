@@ -47,6 +47,7 @@ func _rebuild() -> void:
 		var rb := UITheme.reset_button(null, 0.0)
 		top.add_child(rb)
 		var s := HSlider.new()
+		s.scrollable = false   # (the wheel scrolls the list; it never changes a value by accident)
 		s.name = "S_" + k
 		s.min_value = r[3]; s.max_value = r[4]; s.step = r[5]; s.value = Tune.base[k]
 		s.focus_mode = Control.FOCUS_NONE

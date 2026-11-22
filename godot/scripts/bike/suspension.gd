@@ -262,6 +262,16 @@ func pose_rear() -> Dictionary:   # four-bar at the angle that lifts the axle by
 	return p
 
 
+## the sag each end sits at (0..1 of its travel), from the ride's suspension setup: the travel stays what the model
+## has, only where in it the bike rests moves (so the physics and the drawn fork / rear end run out together)
+func set_sag(sag_f: float, sag_r: float) -> void:
+	if has_f:
+		var tf: float = float(F["max"]) - float(F["min"])
+		F = {"min": -clampf(sag_f, 0.05, 0.6) * tf, "max": (1.0 - clampf(sag_f, 0.05, 0.6)) * tf}
+	if has_r:
+		var tr: float = float(R["max"]) - float(R["min"])
+		R = {"min": -clampf(sag_r, 0.05, 0.6) * tr, "max": (1.0 - clampf(sag_r, 0.05, 0.6)) * tr}
+
 ## shock stroke used at the rear's full travel (for checking the export)
 func stroke() -> float:
 	if not has_r:

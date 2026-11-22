@@ -121,7 +121,11 @@ const DEFS := [
 		["wheelMass", "Wheel weight (heavier = harsher bumps)", 0.03, 0.01, 0.12, 0.005, ""],
 		["tyreSquash", "Tyre squash under load", 1.2, 0.4, 3.0, 0.1, "cm"],
 		["damperKnee", "Shock blow-off speed (low = bumps pass through)", 0.6, 0.1, 2.0, 0.05, "m/s"],
-		["damperBlow", "Shock harshness past blow-off", 0.2, 0.0, 1.0, 0.05, "×"],
+		["damperBlow", "High-speed compression (big hits)", 0.4, 0.0, 1.0, 0.05, "×"],
+		["suspSag", "Sag (× the bike's setup: softer springs)", 1.0, 0.6, 1.5, 0.02, "×"],
+		["suspRebound", "Rebound damping (× the setup)", 1.0, 0.4, 2.0, 0.05, "×"],
+		["suspProg", "Ramp-up at the end of the travel (× the setup)", 1.0, 0.0, 2.5, 0.05, "×"],
+		["suspGeo", "Brake dive and pedal squat from the geometry", 1.0, 0.0, 2.0, 0.05, "×"],
 		["riderBalance", "Rider balance (1 wheel)", 0.7, 0, 1.5, 0.05, ""],
 		["noseDive", "Nose-dive crash angle", 0.6, 0.3, 1.2, 0.05, "rad"],
 		["pumpGain", "Pump strength", 9, 0, 25, 0.5, ""],
@@ -155,15 +159,18 @@ const DEFS := [
 	["Jumping", [
 		["prepTime", "Spot lip ahead", 0.55, 0.1, 1.2, 0.05, "s"],
 		["prepDepth", "Crouch into lip", 0.16, 0, 0.3, 0.01, "m"],
-		["popKick", "Pump extension", 2.2, 0, 5, 0.1, "m/s"],
-		["autoPump", "Pumps on his own (1 = no Space needed)", 0.4, 0, 1, 0.05, ""],
+		["popKick", "Leg push (pop / hop)", 2.4, 0, 5, 0.1, "m/s"],
+		["autoPump", "Pops lips on his own", 0.4, 0, 1, 0.05, ""],
+		["crouchTime", "Preload: crouch time", 0.25, 0.08, 0.8, 0.01, "s"],
+		["popRebound", "Preload timing matters", 0.18, 0, 0.5, 0.01, "×"],
+		["popAssist", "Held crouch: pop timed for you", 0.6, 0, 1, 0.05, ""],
+		["popWindow", "Pop window before a lip", 0.24, 0.1, 0.5, 0.01, "s"],
+		["squashPower", "Squash a lip (stick forward)", 1.0, 0, 1.5, 0.05, "×"],
 		["airLift", "Lifts the bike after take-off", 0.6, 0, 1, 0.05, ""],
 		["landPrepTime", "Reach for landing", 0.35, 0.05, 1, 0.05, "s"],
 		["airAimDelay", "Wait before aiming at the landing", 1.0, 0, 2, 0.05, "s"],
 		["airAimSpeed", "Aim at the landing: softness", 14, 4, 70, 1, ""],
 		["airAssist", "Landing help in the air (0 = all yours)", 0.6, 0, 1, 0.05, ""],
-		["chargeTime", "Hop charge time", 2, 0.5, 4, 0.1, "s"],
-		["chargePop", "Full-charge extra pop", 0.6, 0, 4, 0.1, "m/s"],
 	]],
 	["Speed", [
 		["topSpeed", "Top speed", 1.2, 0.5, 2.0, 0.05, "×"],
@@ -233,7 +240,11 @@ const DEFS := [
 		["pumpHold", "Hop held downhill: pump push (× slope)", 0.45, 0, 1.5, 0.05, "×g"],
 		["pumpStick", "Body stick forward: pump strength (× the button)", 1.2, 0, 2, 0.05, "×"],
 		["landPerfect", "Perfect landing within", 0.14, 0.03, 0.4, 0.01, "rad"],
-		["landBoost", "Perfect landing speed boost", 1.6, 0, 5, 0.1, "m/s"],
+		["landBoost", "Perfect landing on a downslope: speed pumped", 1.6, 0, 5, 0.1, "m/s"],
+		["landHeavy", "Heavy landing from (share of a slam)", 0.6, 0.2, 0.9, 0.05, ""],
+		["landYawFree", "Sideways landing: free angle", 0.12, 0, 0.5, 0.01, "rad"],
+		["landYawGrip", "Sideways landing: tyres catch at once", 1.0, 0.3, 2, 0.05, "×"],
+		["landYawCrash", "Sideways landing: highside from", 5.5, 2, 12, 0.1, "m/s"],
 		["landPerfectAir", "Perfect landing: from air time", 0.45, 0.1, 1.5, 0.05, "s"],
 		["inputForgive", "Timing forgiveness (hop, lip pump, flip throw)", 0.12, 0, 0.3, 0.01, "s"],
 		["stickHop", "Bunny hop scoop (front up when you hop): height", 1.0, 0, 1.25, 0.05, "×"],
@@ -289,17 +300,17 @@ const DEFS := [
 
 const PATH := "user://tune.cfg"
 ## bump VER when defaults are retuned: saved values of the RETUNED keys are dropped once
-const VER := 21
+const VER := 24
 ## later retunes, per version: only these keys are dropped for saves older than that version (bumping VER
 ## with one shared list would reset every earlier retuned key again)
-const RETUNED_AT := {8: ["manualFrom", "stickAirRoll", "stickSpinBuild", "stickYawRate"], 9: ["leanMax"], 11: ["leanIn", "leanOut", "flickSpeed"], 12: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 13: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 14: ["sprintRock"], 15: ["dustWidth"], 16: ["bodyLean"], 17: ["stickAirEase"], 18: ["manualFrom"], 19: ["manBothSticks"], 20: ["manBothSticks"], 21: ["frontWashAt", "frontWashTime"]}
+const RETUNED_AT := {8: ["manualFrom", "stickAirRoll", "stickSpinBuild", "stickYawRate"], 9: ["leanMax"], 11: ["leanIn", "leanOut", "flickSpeed"], 12: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 13: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 14: ["sprintRock"], 15: ["dustWidth"], 16: ["bodyLean"], 17: ["stickAirEase"], 18: ["manualFrom"], 19: ["manBothSticks"], 22: ["popKick"], 23: ["damperBlow"], 24: ["landHeavy"], 20: ["manBothSticks"], 21: ["frontWashAt", "frontWashTime"]}
 const RETUNED := ["steerRate", "steerRelease", "steerCurve", "turnFloor", "steerMax", "slowSteer",
 	"barSpeed", "grip", "slipRecover", "slipMax", "turnWeight", "leanMax", "leanIn", "leanOut", "leanDamp", "bikeLeanMul", "bikeLeanCap", "flipAccel", "flipRate", "airTwist", "landBack", "travel", "popKick"]
 var defaults := {}
 var base := {}       # the player's slider values (before the bike's ride multipliers)
 var ride := {}       # multipliers for the bike being ridden
 var v := {}          # effective values: base * ride (what the physics reads)
-const DEFAULT_PINS := ["slowSteer", "turnWeight", "rollRes", "flowCarry", "carveBoost", "chargePop"]
+const DEFAULT_PINS := ["slowSteer", "turnWeight", "rollRes", "flowCarry", "carveBoost", "popKick"]
 var pins: Array = DEFAULT_PINS.duplicate()   # sliders on the Quick tune card
 var quick_folded := false
 signal pins_changed
@@ -352,6 +363,8 @@ func reset_defaults() -> void:
 
 func save() -> void:
 	if OS.get_environment("BMX_PADSEQ") != "": return   # menu tests: never into the player\'s files
+	for a in OS.get_cmdline_user_args():   # ride tests too (an autotest must never change the player's tuning)
+		if a.begins_with("--autotest") or a.begins_with("--bench"): return
 	var cf := ConfigFile.new()
 	for k in base:
 		cf.set_value("tune", k, base[k])
@@ -382,7 +395,9 @@ const FOLLOW := {
 	"gripCatch": [0.6, "slipRecover", 1.0],                              # slide catch: one slider
 	"reflexBrake": [0.6, "", 0.0], "reflexStandUp": [0.3, "", 0.0], "reflexCatch": [1.5, "", 0.0],   # riderSkill scales them all
 	"leanIn": [40.0, "leanRate", 1.0], "leanOut": [30.0, "leanRate", 1.0], "gyroStable": [0.25, "", 0.0],
-	"popPower": [2.4, "popKick", 1.0],                                   # pop off a lip: one slider
+	"popPower": [2.4, "popKick", 1.0],                                   # the legs' push x the bike (a heavy one pops less)
+	"antiSquat": [0.9, "", 0.0],   # the frame's anti-squat (1 = power doesn't squat the rear; BikeBuild.frame_mods)
+	"shockProg": [1.0, "", 0.0],   # the frame's linkage ramp-up (BikeBuild.frame_mods; 1 = the reference frame)
 	"pumpHoldUp": [0.4, "pumpHold", 1.0], "pumpUnweight": [0.15, "pumpStick", 1.0], "pumpCentred": [0.75, "", 0.0], "pumpMinSpeed": [2.0, "", 0.0],
 	"airSpinResp": [7.0, "airSpinRate", 1.0], "airSpinStop": [3.0, "airSpinRate", 1.0],
 	"stickSpinBuild": [5.5, "stickAirEase", 1.0], "stickSpinGrow": [0.4, "", 0.0], "stickSpinMax": [0.7, "", 0.0],

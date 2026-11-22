@@ -70,7 +70,27 @@ func _init(g) -> void:
 	game = g
 
 
+## the wheel over the card is the card's: over the list it scrolls it (a slider under the mouse would otherwise take
+## the wheel and change its value), anywhere else on the card it's just eaten (it zoomed the camera behind)
+func _input(e: InputEvent) -> void:
+	if not is_visible_in_tree() or scroll == null: return
+	if not (e is InputEventMouseButton) or not e.pressed: return
+	if e.button_index != MOUSE_BUTTON_WHEEL_UP and e.button_index != MOUSE_BUTTON_WHEEL_DOWN: return
+	var m := get_global_mouse_position()
+	if not get_global_rect().has_point(m): return
+	if scroll.get_global_rect().has_point(m):
+		var ss = SmoothScroll.attach(scroll)
+		var f: float = e.factor if e.factor > 0.0 else 1.0
+		ss.wheel(f if e.button_index == MOUSE_BUTTON_WHEEL_DOWN else -f)
+	get_viewport().set_input_as_handled()
+
+
 func _ready() -> void:
+	if Env.s("BMX_CARD_WHEEL") != "":   # tests: n wheel notches down after 1 s, the list's scroll printed 1 s later
+		get_tree().create_timer(1.0).timeout.connect(func():
+			var ss = SmoothScroll.attach(scroll)
+			ss.wheel(float(Env.s("BMX_CARD_WHEEL")))
+			get_tree().create_timer(1.0).timeout.connect(func(): print("CARDWHEEL scroll=%d of %d" % [scroll.scroll_vertical, int(scroll.get_v_scroll_bar().max_value)])))
 	theme = UITheme.get_theme()
 	set_anchors_preset(Control.PRESET_RIGHT_WIDE)
 	offset_left = -420; offset_right = -14; offset_top = 64; offset_bottom = -90
@@ -243,6 +263,7 @@ func _slider(label: String, lo: float, hi: float, stp: float, val: float, def: f
 	var l := UITheme.label(label, 13); l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	l.clip_text = true; l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	var s := HSlider.new()
+	s.scrollable = false   # (the wheel scrolls the card)
 	s.min_value = lo; s.max_value = hi; s.step = stp; s.value = val
 	s.size_flags_horizontal = Control.SIZE_EXPAND_FILL; s.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var vl := UITheme.label(fmt.call(val), 12, UITheme.MUTED)

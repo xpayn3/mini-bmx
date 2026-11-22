@@ -182,6 +182,7 @@ var col := {}            # per-instance copies (no shared refcounts between thre
 var red_bands := PackedColorArray()
 var grey_bands := PackedColorArray()
 var profiles := {}
+var small := {}   # the old-size jump profiles, for the free-ride jumps out in the land (TrailFeatures.TABLE_S ...)
 var woods := {}
 var digs := {}
 static var COL := {}
@@ -282,7 +283,7 @@ func _local_tables() -> void:
 	red_bands = PackedColorArray(RED_BANDS)
 	grey_bands = PackedColorArray(GREY_BANDS)
 	var st := TrailFeatures.make_set()
-	profiles = st["profiles"]; woods = st["wood"]; digs = st["dig"]
+	profiles = st["profiles"]; woods = st["wood"]; digs = st["dig"]; small = st["small"]
 
 
 func fork() -> TerrainField:
@@ -762,14 +763,14 @@ func wild(x: float, z: float) -> float:
 # ======================================================================
 # designed features
 # ======================================================================
-func make_feat(x: float, z: float, dx: float, dz: float, type: String, b0: float, b1: float) -> Feat:
+func make_feat(x: float, z: float, dx: float, dz: float, type: String, b0: float, b1: float, old_size := false) -> Feat:
 	var f := Feat.new()
-	var prof: TrailFeatures.Profile = profiles[type]
+	var prof: TrailFeatures.Profile = small[type] if (old_size and small.has(type)) else profiles[type]
 	f.x = x; f.z = z; f.dx = dx; f.dz = dz; f.len = prof.length; f.prof = prof; f.b0 = b0; f.b1 = b1; f.type = type
 	f.wood = woods.get(type)
 	f.dig = digs.get(type)
 	f.canyon = type == "rope"
-	f.air = PackedFloat64Array(TrailFeatures.AIR.get(type, []))
+	f.air = PackedFloat64Array((TrailFeatures.AIR_S if (old_size and small.has(type)) else TrailFeatures.AIR).get(type, []))
 	f.ramp = ROPE_RAMP if type == "rope" else 6.0
 	if type == "rhythm" or type == "flow":
 		f.half = 2.3
@@ -813,10 +814,11 @@ func _build_route() -> void:
 			var types: Array = TrailFeatures.ROUTE_TYPES if jmp else ["rhythm", "rhythm", "table", "kicker"]
 			var type: String = types[int(r.next() * types.size())]
 			# now and then (rare) a gorge: a deep crevasse crossed by a long wooden bridge
-			if not jmp and r.next() < 0.06:
+			# (0.06 / 0.12 before the jumps grew 1.6x: they take more of each straight, so there are fewer slots)
+			if not jmp and r.next() < 0.13:
 				type = "gorge"
 			# or (by a hash of the slot: no extra draw from r) a swinging rope bridge high over a deeper crevasse
-			elif not jmp and s > 400.0 and float(((int(s * 8.0) * 73856093) ^ (seed_value * 19349663)) & 0xffff) / 65536.0 < 0.12:
+			elif not jmp and s > 400.0 and float(((int(s * 8.0) * 73856093) ^ (seed_value * 19349663)) & 0xffff) / 65536.0 < 0.3:
 				type = "rope"
 			var len: float = profiles[type].length
 			if s + len > s_end:
@@ -866,7 +868,7 @@ func jump_at(cx: int, cz: int) -> Feat:
 		if found:
 			var types := TrailFeatures.FEATURE_TYPES
 			var type: String = types[int(rnd.next() * types.size())]
-			var len: float = profiles[type].length
+			var len: float = (small[type] if small.has(type) else profiles[type]).length   # (old-size jumps out here)
 			var gx := pathN(bx + 0.5, bz) - pathN(bx - 0.5, bz)
 			var gz := pathN(bx, bz + 0.5) - pathN(bx, bz - 0.5)
 			var l := sqrt(gx * gx + gz * gz)
@@ -894,7 +896,7 @@ func jump_at(cx: int, cz: int) -> Feat:
 					ok = false
 				k += 1
 			if ok and sqrt(sx * sx + szz * szz) > 34:
-				best = make_feat(sx, szz, dx, dz, type, b0, b1)
+				best = make_feat(sx, szz, dx, dz, type, b0, b1, true)
 	_jc[key] = best
 	return best
 

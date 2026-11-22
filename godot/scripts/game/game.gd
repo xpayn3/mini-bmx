@@ -24,6 +24,10 @@ const RIDE_SUN_COL := Color("fff1de")
 const RIDE_FAR := 2600.0   # camera far plane: the far hills (FarHills) reach the horizon
 const RIDE_FOG := Color(0.74, 0.85, 0.98)
 const DUST_SPLASH := Color("eef6fa")
+const PUDDLE_DROP := Color(0.24, 0.21, 0.17)   # muddy water off a tyre through a road puddle
+var _splash_acc := 0.0
+var _pud_us := 0
+var _pud_n := 0
 const DIRT_CHUNK := Color("7a5534")
 const ROCK_CHUNK := Color("8d8a84")
 const GRASS_CHUNK := Color("4f8a2e")
@@ -117,7 +121,9 @@ var drawn_pos := Vector3.ZERO
 # tests (BMX_CLIP_PROBE): how deep the drawn tyres went into the ground before / after unclipping
 var clip_probe := Env.s("BMX_CLIP_PROBE") != ""
 var _lean_max := 0.0; var _lean_shot_t := -9.0; var _lean_shots := 0   # tests (BMX_LEAN_SHOT)
+var _jp_v := 0.0   # tests (BMX_JUMP_PROBE): the speed it left the ground at
 var _lip_t := -1.0; var _lip_shots := 0   # tests (BMX_LIP_SHOT)
+var _land_t := -1.0; var _land_shots := 0   # tests (BMX_LAND_SHOT)
 var clip_stats := {"frames": 0, "fixed": 0, "bad": 0, "before": 0.0, "after": 0.0}
 var _prev := {}
 var _last_good := {}
@@ -156,6 +162,7 @@ var title_world := false
 ## the test playground (scripts/levels: PlaygroundTerrain + PlaygroundProbe, which measures every jump)
 var level := ""
 var level_probe: PlaygroundProbe
+var lab: PlaygroundLab   # the playground's lab tools (energy / checks, pause / step / slow, record / replay), made by diag
 var diag: RideDiag   # ride diagnostics (F4, levels/ride_diag.gd): graphs of suspension, input, tyres, body, air
 var _level_light_ver := -1
 ## parts of an earlier Game of the same world to use instead of building them ({terrain, far_hills}; main sets it
@@ -1271,6 +1278,7 @@ func _break_action_cam(body_vel: Vector3) -> void:
 ## the crash slow-mo is on (Settings › Gameplay; autotests keep normal time unless BMX_WASTED=1)
 func _wasted_on() -> bool:
 	if Env.s("BMX_WASTED") != "": return true
+	if level != "": return false   # the test playground: no slow motion / WASTED screen (the lab has its own slow motion)
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--autotest"): return false
 	return bool(Settings.get_v("wasted"))
@@ -1382,12 +1390,24 @@ func on_style(points: int, label: String) -> void:
 
 func on_takeoff() -> void:
 	takeoff = Vector3(phys.x, phys.y, phys.z)
+	_jp_v = sqrt(phys.v * phys.v + phys.vy * phys.vy)
 	air_peak = phys.y
 	if hud: hud.on_takeoff()
 
 func on_landing(air_time: float, impact: float) -> void:
 	var dist := Vector2(phys.x - takeoff.x, phys.z - takeoff.z).length()
 	var height := air_peak - maxf(takeoff.y, phys.y)
+	if Env.s("BMX_JUMP_PROBE") != "" and air_time > 0.45 and terrain.field != null:   # tests: where on a trail jump it came down
+		# SHORT = on the stretch riders are meant to fly over (the table top, the gap), LANDING = on the jump past
+		# that, LONG = clear of the whole jump (flat ground), NATURAL = not off a built jump at all
+		terrain.field.jump_eval(takeoff.x, takeoff.z)
+		var m0: float = terrain.field.fo_m
+		terrain.field.jump_eval(phys.x, phys.z)
+		var m1: float = terrain.field.fo_m
+		var a1: float = terrain.field.fo_air
+		var where := "NATURAL" if m0 < 0.05 and m1 < 0.05 else ("SHORT" if a1 > 0.3 else ("LANDING" if m1 > 0.05 else "LONG"))
+		print("JUMPLAND %s v_off=%.0f km/h air=%.2f dist=%.1f height=%.1f impact=%.1f slope=%.0fdeg pitch_err=%.0fdeg x=%.0f" % [where, _jp_v * 3.6, air_time, dist, maxf(0.0, height), impact,
+			rad_to_deg(phys._g_pitch), rad_to_deg(wrapf(phys.pitch - phys._g_pitch, -PI, PI)), phys.x])
 	if hud: hud.on_landing(air_time, dist, maxf(0.0, height), impact)
 	_landed = clampf(impact / 6.0, 0.0, 1.0) if air_time > 0.25 else 0.0
 	var ls: int = terrain.surface(phys.x, phys.z)
@@ -1512,6 +1532,22 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 		elif sand: rate = fast_k * 10 + dust_k * 240.0 + (clampf(va / 7.0, 0, 1) * 10.0 if dust.sim != null else 0.0) + (40.0 if skid_fx else 0.0) + carve_k * 45 + st.pedal * (4.0 if va < 3 else 0.0)
 		else: rate = (14.0 if skid_fx else 0.0) + carve_k * 12
 		var fxd: float = Settings.get_v("fx_density")
+		# puddles on the road (drawn by ground.gdshader, world/trail_puddle.gd): wet soil gives no dust, standing
+		# water none at all; looked up only where dust would come off the trail anyway
+		var wet_r := Vector2.ZERO
+		var wet_f := Vector2.ZERO
+		if dirt and rate > 0.0:
+			var pt0 := Time.get_ticks_usec()
+			wet_r = terrain.puddle_at(rear.x, rear.y - 0.03, rear.z)
+			wet_f = terrain.puddle_at(front.x, front.y - 0.03, front.z)
+			if Env.s("BMX_PUDDLE_PROBE") != "":
+				_pud_us += Time.get_ticks_usec() - pt0
+				_pud_n += 1
+				if _pud_n % 1200 == 0: print("PUDDLECOST calls=%d avg_us=%.1f (both tyres)" % [_pud_n, float(_pud_us) / _pud_n])
+		var dry_r := 1.0 - maxf(wet_r.y, wet_r.x * 0.75)
+		var dry_f := 1.0 - maxf(wet_f.y, wet_f.x * 0.75)
+		if Env.s("BMX_PUDDLE_PROBE") != "" and (wet_r != Vector2.ZERO or wet_f != Vector2.ZERO):
+			print("PUDDLE at=(%.1f,%.1f,%.1f) t=%.2f rear damp=%.2f water=%.2f front damp=%.2f water=%.2f dust=%.0f->%.0f" % [rear.x, rear.y, rear.z, Time.get_ticks_msec() / 1000.0, wet_r.x, wet_r.y, wet_f.x, wet_f.y, rate, rate * dry_r])
 		# the dust trail: a GPU particle emitter at the rear tyre (fx/ride_dust.gd), thrown back and up,
 		# flung outward in a carve
 		var d_out := turn_dir * carve_k * 3.5
@@ -1519,14 +1555,24 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 		var d_ev := Vector3(-f.x * d_back + side.x * d_out, 0.7 + carve_k * 0.4 + dust_k * 1.4, -f.z * d_back + side.z * d_out)
 		var d_fan := rad_to_deg(atan2((1.6 + va * 0.18) * (1 - carve_k * 0.6) * 0.5, maxf(d_back, 0.6))) + dust_k * 25.0
 		var d_a := (0.62 if skid_fx else 0.45) if dirt else ((0.55 if skid_fx else 0.4) if sand else 0.26)
-		dust.feed(rear, d_ev, rate * fxd, dcol, d_a, clampf(d_fan, 12.0, 70.0))
+		dust.feed(rear, d_ev, rate * fxd * dry_r, dcol, d_a, clampf(d_fan, 12.0, 70.0))
 		# the front tyre dusts too, less: it rolls (no drive / little skid), so it mostly lifts dust
 		# sideways and up as it carves
 		var f_ev := Vector3(-f.x * d_back * 0.4 + side.x * d_out * 0.6, 0.5 + carve_k * 0.3, -f.z * d_back * 0.4 + side.z * d_out * 0.6)
-		dust.feed_front(front, f_ev, 0.0 if st.front_air else rate * fxd * 0.35, d_a)   # none with the front up (wheelie)
+		dust.feed_front(front, f_ev, 0.0 if st.front_air else rate * fxd * 0.35 * dry_f, d_a)   # none with the front up (wheelie)
+		# through standing water: muddy drops thrown off both tyres instead of dust
+		var pud := wet_r.y + (0.0 if st.front_air else wet_f.y * 0.6)
+		if pud > 0.05 and va > 1.5 and fx:
+			_splash_acc += dt * pud * minf(va, 14.0) * 5.0 * fxd
+			while _splash_acc > 1.0:
+				_splash_acc -= 1.0
+				var at := rear if randf() * pud < wet_r.y else front
+				var sp := (randf() - 0.5) * 2.2
+				var ev := Vector3(-f.x * va * 0.25 + side.x * sp, 0.8 + randf() * 1.6, -f.z * va * 0.25 + side.z * sp)
+				fx.chunk(at, ev, PUDDLE_DROP, 0.008 + randf() * 0.008, 0.9)
 		# a hard skid on loose ground kicks up a real cloud now and then (volumetric fog)
 		_cloud_t -= dt
-		if (dirt or sand) and skid_fx and va > 5 and _cloud_t <= 0:
+		if (dirt or sand) and skid_fx and va > 5 and _cloud_t <= 0 and dry_r > 0.5:
 			_cloud_t = 0.45
 			dust.cloud(rear, d_ev * 0.5, dcol, 2.2 + va * 0.08, 0.9)
 		if not in_water:
@@ -1534,7 +1580,7 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 			if dirt: cr = (30.0 if skid_fx else 0.0) + carve_k * 28 + st.pedal * (9.0 if va < 8 else 2.0)
 			elif sand: cr = (18.0 if skid_fx else 0.0) + carve_k * 16 + st.pedal * (4.0 if va < 8 else 1.0)
 			elif skid_fx: cr = 6.0
-			st.chunk_acc += dt * cr * fxd
+			st.chunk_acc += dt * cr * fxd * dry_r   # wet soil sticks: no dry clods out of a puddle
 			while st.chunk_acc > 1:
 				st.chunk_acc -= 1
 				var out := turn_dir * carve_k * (2.5 + randf() * 3.5) if carve_k > 0.05 else (randf() - .5) * 1.2
@@ -1737,6 +1783,7 @@ func level_reset_to(sp: Vector3) -> void:
 	rider.reset_pose()
 	_snap_prev()
 	cam.snap_to(Vector3(sp.x, phys.y + 0.5, sp.z))
+	if lab: lab.on_reset()
 ## tests (BMX_TRAIL_FEAT=drop|arch|N|x<metres>|tech): 70 m up the trail from the Nth drop / the first rock arch -> (x, heading, z)
 func _feature_spawn(what: String) -> Vector3:
 	var C: TrailCourse = terrain.field.course
@@ -1865,6 +1912,9 @@ func set_demo(on: bool) -> void:
 func _read_input() -> Dictionary:
 	if not input_enabled:
 		return {"throttle": 0.0, "brake": 0.0, "steer": 0.0, "hop": false, "sprint": false, "body_fwd": 0.0, "body_lean": 0.0}
+	if lab:   # the playground replaying a recorded run
+		var rp = lab.replay_input()
+		if rp != null: return rp
 	if demo != null and not photo:
 		return demo.tick(self, get_physics_process_delta_time())
 	var steer := Input.get_action_strength("steer_left") - Input.get_action_strength("steer_right")
@@ -2024,6 +2074,9 @@ func _physics_process(dt: float) -> void:
 	if dt <= 0.0:
 		if rumble: rumble.stop()
 		return
+	if lab and lab.hold_physics():   # the playground's pause (N steps one tick): hold the drawn bike still
+		_snap_prev()
+		return
 	var _pk := Time.get_ticks_usec()
 	_snap_prev()
 	var inp := _read_input()
@@ -2034,9 +2087,11 @@ func _physics_process(dt: float) -> void:
 	_pk = _perf("p_input", _pk)
 	terrain.rope_ref_y = phys.y
 	if level_probe: level_probe.pre_step(dt, inp)
+	if lab: lab.pre_step(inp)
 	phys.step(dt, inp)
 	if level_probe: level_probe.post_step(dt)
 	if diag: diag.record(dt, inp)
+	if lab: lab.post_step(dt, inp)
 	_pk = _perf("p_bike_step", _pk)
 	_rope_tick(dt)
 	_pk = _perf("p_rope", _pk)
@@ -2358,7 +2413,7 @@ func _process(dt: float) -> void:
 		photo_mode.update(rdt)
 		if area_title: area_title.view.visible = false
 		return
-	if area_title: area_title.view.visible = hud.visible
+	if area_title: area_title.view.visible = hud.visible and level == ""   # (the test playground: no big banners)
 	var _pk := Time.get_ticks_usec()
 	if perf_on:
 		if _perf_last > 0: _perf_acc["FRAME_wall"] = _perf_acc.get("FRAME_wall", 0) + (_pk - _perf_last)
@@ -2445,11 +2500,17 @@ func _process(dt: float) -> void:
 		clip_stats.before = maxf(clip_stats.before, d)
 		if d > 0.002: clip_stats.bad += 1
 	if Env.s("BMX_LIP_SHOT") != "" and _lip_shots < 10:   # tests: 10 shots, 0.08 s apart, from a lip
-		if _lip_shots == 0 and st.prep > 0.2 and not st.air: _lip_t = t
-		if _lip_t >= 0.0 and t - _lip_t >= _lip_shots * 0.08:
+		if _lip_shots == 0 and st.prep > float(Env.s("BMX_LIP_PREP") if Env.s("BMX_LIP_PREP") != "" else "0.2") and not st.air: _lip_t = t
+		if _lip_t >= 0.0 and t - _lip_t >= _lip_shots * float(Env.s("BMX_LIP_STEP") if Env.s("BMX_LIP_STEP") != "" else "0.08"):
 			get_viewport().get_texture().get_image().save_png("%s_%d.png" % [Env.s("BMX_LIP_SHOT"), _lip_shots])
-			print("LIPSHOT %d prep=%.2f air=%s compress=%.2f absorb=%.2f vy=%.1f" % [_lip_shots, st.prep, st.air, st.compress, st.body_y - st.y, st.vy])
+			print("LIPSHOT %d prep=%.2f air=%s compress=%.2f absorb=%.2f vy=%.1f crouch=%.2f wait=%.2f pop_fx=%.2f squash=%.2f pull=%.2f" % [_lip_shots, st.prep, st.air, st.compress, st.body_y - st.y, st.vy, st.crouch, st.pop_wait, st.pop_fx, st.squash, st.air_pull])
 			_lip_shots += 1
+	if Env.s("BMX_LAND_SHOT") != "" and _land_shots < 12:   # tests: 12 shots, 0.06 s apart, from just before a touch-down
+		if _land_shots == 0 and st.air and st.air_time > 0.5 and st.land_prep > 0.6: _land_t = t
+		if _land_t >= 0.0 and t - _land_t >= _land_shots * 0.06:
+			get_viewport().get_texture().get_image().save_png("%s_%d.png" % [Env.s("BMX_LAND_SHOT"), _land_shots])
+			print("LANDSHOT %d air=%s since=%.2f fold=%.2f heavy=%.2f absorb=%.2f prep=%.2f" % [_land_shots, st.air, st.since_land, st.land_fold, st.land_heavy, st.body_y - st.y, st.land_prep])
+			_land_shots += 1
 	if Env.s("BMX_LEAN_SHOT") != "" and not st.air and not st.crash_on:   # tests: shots in deep leans
 		var ln := absf(st.bike_lean)
 		_lean_max = maxf(_lean_max, ln)
@@ -2532,6 +2593,15 @@ func _process(dt: float) -> void:
 		pi["crank"] = st.crank
 		pi["air"] = st.air_k
 		pi["compress"] = maxf(0.0, -st.compress)
+		# the jump: the preload crouch, the legs driving straight through the lip / a hop (extend), the pop just gone
+		# (the tuck after it), a lip being squashed, and how close a lip is (he rides it centred, not like a climb)
+		pi["extend"] = maxf(0.0, st.compress)
+		pi["preload"] = st.crouch * (0.0 if st.air else 1.0)
+		pi["popFx"] = st.pop_fx * minf(1.0, st.pop_q)
+		pi["squash"] = maxf(st.squash * st.prep, st.squash_fx)
+		pi["lipK"] = maxf(st.prep, 1.0 if (st.pop_wait > 0.0 or st.hop_t > 0.0) else 0.0)
+		pi["landFold"] = 0.0 if st.air else st.land_fold   # folded up by a landing, gathering himself again
+		pi["landReach"] = st.land_prep                     # legs reaching down for the ground
 		pi["hipShift"] = _mcap("hip_shift", st.hip_shift, pdt)
 		pi["bodyStick"] = -0.55 if scenic else _mcap("body_stick", st.body_in_s, pdt)
 		pi["relax"] = 1.0 if scenic else 0.85 * dab_k   # foot down = calm: sat up, back straight, chin up
@@ -2551,6 +2621,8 @@ func _process(dt: float) -> void:
 		pi["latG"] = 0.0 if scenic else _mcap("lat_g", st.lat_a / BikePhysics.G, pdt)
 		pi["wheelR"] = rider.to_local(rig.wheel_r.global_position)
 		pi["wheelRR"] = rig.wheel_rr
+		pi["wheelF"] = rider.to_local(rig.wheel_f.global_position)
+		pi["wheelRF"] = rig.wheel_rf
 		pi["t"] = t
 		pi["airSpin"] = _aspin_s
 		pi["wheelY"] = (rig.wheel_f.global_position.y + rig.wheel_r.global_position.y) * 0.5
