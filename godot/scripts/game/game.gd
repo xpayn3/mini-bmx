@@ -2054,7 +2054,11 @@ func _read_input() -> Dictionary:
 		var rp = lab.replay_input()
 		if rp != null: return rp
 	if demo != null and not photo:
-		return demo.tick(self, get_physics_process_delta_time())
+		var dout: Dictionary = demo.tick(self, get_physics_process_delta_time())
+		if Env.s("BMX_BODY") != "":   # tests: a scripted body stick (BMX_BODY=...) rides along with the test / demo rider
+			dout.body_lean = Input.get_action_strength("body_left") - Input.get_action_strength("body_right")
+			dout.body_fwd = Input.get_action_strength("body_fwd") - Input.get_action_strength("body_back")
+		return dout
 	var steer := Input.get_action_strength("steer_left") - Input.get_action_strength("steer_right")
 	# a thumbstick needs a curve: fine near the centre (the first bit of stick only tips the bike in a little),
 	# full lock at the edge. Keys (all or nothing) are unaffected. Steering response (Settings) scales it

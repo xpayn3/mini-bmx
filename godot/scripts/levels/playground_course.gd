@@ -583,7 +583,8 @@ func _build() -> void:
 	# jumps laid out by the maths (JumpDesign): each sized for the run-in speed in its name
 	l = _lane("designed", "DESIGNED JUMPS", -96.0)
 	for dj in [{"v": 8.0, "lip_deg": 22.0}, {"v": 10.0, "lip_deg": 24.0}, {"v": 12.0, "lip_deg": 26.0}, {"v": 13.5, "lip_deg": 26.0},
-			{"v": 15.0, "lip_deg": 25.0}, {"v": 11.0, "lip_deg": 30.0, "kind": "gap"}, {"v": 13.0, "lip_deg": 32.0, "kind": "gap"}]:
+			{"v": 15.0, "lip_deg": 25.0}, {"v": 11.0, "lip_deg": 30.0, "kind": "gap"}, {"v": 13.0, "lip_deg": 32.0, "kind": "gap"},
+			{"v": 16.7, "lip_deg": 28.0}, {"v": 18.3, "lip_deg": 30.0}]:   # (the last two: big air for whips / spins, ~1.5-2 s)
 		l.designed(dj)
 	l = _lane("brakes", "BRAKES, SURFACES & SLALOM", -72.0)
 	l.brake_strip(1, "both"); l.brake_strip(1, "front"); l.brake_strip(1, "rear")

@@ -1881,6 +1881,13 @@ func _autotest(seconds: float) -> void:
 				if on2:
 					Input.action_press("steer_left", ls) if ls > 0.0 else Input.action_release("steer_left")
 					Input.action_press("steer_right", -ls) if ls < 0.0 else Input.action_release("steer_right")
+			elif body_t.begins_with("whiplip") or body_t.begins_with("whipair"):   # tests (air step 2): the stick to the side, 0.7 by default
+				# whiplip: held from when a lip is spotted ahead and through the air (carved in); whipair: only once in the air
+				var wx := float(body_t.get_slice(":", 1)) if body_t.contains(":") else 0.7
+				var on5: bool = (ph2.air and ph2.air_time > 0.05 and ph2.air_time < 0.9) or (body_t.begins_with("whiplip") and not ph2.air and ph2.lip_state == 2)
+				if on5: Input.action_press("body_left", wx)
+				else: Input.action_release("body_left")
+				if ph2.air and int(el * 20) % 2 == 0 and Env.s("BMX_BODY_PRINT") != "": print("WHIPT t=%.2f load=%.2f whip_in=%.2f air_tw=%.0f deg" % [ph2.air_time, ph2.whip_load, ph2._whip_in, rad_to_deg(ph2.air_tw)])
 			elif body_t == "lean": Input.action_press("body_left", 1.0)
 			elif body_t == "both":   # both sticks: the right stick leans the way the left stick steers (+ hand wobble)
 				var s_l := Input.get_action_strength("steer_left") - Input.get_action_strength("steer_right")

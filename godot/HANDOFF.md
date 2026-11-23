@@ -1847,7 +1847,28 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   0.7; more and the arms can't reach the grips: the shoulder twist does the rest); (4) knees keep LIMB_BAR clear of the bar,
   elbows clear of the OTHER leg (last frame's) in the air. Held whip (air:0.75,0): torso 66 -> 30 deg from vertical, faces
   73 -> 48 deg off the flight; whips on trail jumps: no body clipping beyond the old 0.1 % rear-wheel touch.
-- Next (planned with the user): whips carved in at the lip + held / unwound with the stick, tabletop / scrub, landing legs
+- **Step 2 (done): whips carved in at the lip.** The right stick held to the side in the last `WHIP_WINDOW` 0.35 s before a
+  lip winds the whip up (`whip_load`, signed, full in `WHIP_WIND` 0.2 s); off the lip the bike swings out (`WHIP_KICK` 3
+  rad/s x load) and the whip may go to `airWhip` (now 1.5 rad ~86 deg, Tune VER 27) x load; from the air alone only
+  `WHIP_AIR_ONLY` 0.4 rad (taking off straight and throwing the stick does little, like the real thing). Holding the stick
+  holds it; let go it unwinds over ~0.4 s (softer spring, critically damped), hands-off the landing help still straightens
+  it. dtable_43, stick 0.7: from the air 20 deg; carved in 61 deg, back to 51 by touch-down. dtable_60 / 66 (new, end of
+  the DESIGNED lane: 1.4-1.6 s of air): out to 62-64 deg, unwound to ~25 by touch-down, CLEAN. `BMX_OLD_WHIP=1` = before.
+  Tests: `BMX_BODY=whiplip[:x]` (stick held from the lip spotted + in the air) / `whipair[:x]` (air only), `WHIPT` lines
+  with `BMX_BODY_PRINT=1`; a scripted BMX_BODY stick now rides along with the test rider.
+- **Jumps clear at their design speed (same day, user: "doesn't clear the jump")**: measured on the designed tables, the
+  bike loses more on the face than the climb (`JumpDesign.FACE_LOSS` 0.39: v_lip^2 = v^2 - 2gH - 0.39 H v, +-10 % on six
+  tables) and leaves `TAKEOFF_EXTRA` 8 deg steeper than the lip (the hands-off pop, the rear lifting): both now size the
+  deck / landing (trail jumps re-baked: table deck 14.7 m, landing 30 deg). Gaps: the backside / landing face squeezed to
+  70 deg when the gap is short (they pushed the landing mound out: the design speed came down in the gap / on its face).
+  Auto landing angle capped at 35 deg (`LAND_MAX_DEG`), designs aim 20 % down the landing. `airAssist` 0.6 -> 0.85 (Tune
+  VER 28; hands off only). The hands-off landing tilt aims at the slope where the flight comes down (`_landing_slope`,
+  `_land_pitch`), not the ground under the bike (over a table: the flat deck). `BMX_OLD_LANDAIM=1`. Playground, speed
+  learning on: every designed table and gap lands on its landing, CLEAN. Still open: they come down 25-40 deg nose-up vs
+  the landing - the tilt the rider can give (airTilt 26 deg) can't turn the bike from +35 to -35; the shared spin is damped
+  to 0 hands-off (arcade). Tried and reverted: a take-off spin / an eased in-flight spin to the arc: still rotating at
+  touch-down = NOSE DIVE verdicts. Needs a proper look (the touch-down judge vs the spin, how much spin a lip should give).
+- Next (planned with the user): tabletop / scrub, landing legs
   by impact speed, landing angle deciding speed (MX vs ATV All Out).
 
 ### Developer view of the test playground (`scripts/levels/ride_diag.gd`) - telemetry + sliders for riding code

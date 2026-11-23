@@ -22,8 +22,15 @@ extends RefCounted
 const G := 9.81
 const DS := 0.05            # sample spacing (m)
 const RUN_IN := 1.0         # flat before the face
+const LAND_MAX_DEG := 35.0 # steepest auto landing (steeper is short and leaves no room for a rider a bit fast)
 const LAND_SOFT := 3.0      # deg: the auto landing slope this much flatter than the flight at the aim point
 const EFH_MAX := 1.5        # m: what a landing should never ask more than
+# (2026-11-23, measured on the playground's designed tables at their design speed, the game's physics, hands off:) the bike
+# loses more on the face than the climb alone (suspension, tyres, the transition's load): v_lip^2 = v^2 - 2 g H - FACE_LOSS
+# x H x v, within +-10 % on six tables 1.6-5.9 m; and it leaves TAKEOFF_EXTRA steeper than the lip (the rider's pop, the
+# rear lifting off the lip). Both go into the flight the deck / landing are sized for and into predict()
+const FACE_LOSS := 0.39
+const TAKEOFF_EXTRA := 8.0  # deg
 
 const DEFAULTS := {
 	"kind": "table",        # table | gap | kicker (the take-off alone, open back: you land on the flat)
@@ -40,7 +47,7 @@ const DEFAULTS := {
 	"land_deg": 0.0,        # 0 = auto (matched to the flight)
 	"land_g": 2.5,          # most g in the landing's bottom transition
 	"knuckle_r": 2.5,       # m
-	"aim": 0.3,             # where on the landing slope the design speed comes down (0 = knuckle, 1 = bottom)
+	"aim": 0.2,             # where on the landing slope the design speed comes down (0 = knuckle, 1 = bottom)
 	"width": 3.0,           # riding width (placed ramps; the trail's jumps take the trail's)
 }
 
@@ -99,7 +106,7 @@ static func build(p_in := {}) -> Dictionary:
 				Ls = maxf(0.0, (H - 0.05) / sin(th)); R = maxf(1.0, 0.05 / (2.0 * th * rise))
 		else:
 			H = 2.0 * th * R * rise + Ls * sin(th)
-		vl = sqrt(maxf(1.0, v * v - 2.0 * G * H))
+		vl = sqrt(maxf(1.0, v * v - 2.0 * G * H - FACE_LOSS * H * v))
 	var gap_kind := str(p.kind) == "gap"
 	if str(p.kind) == "kicker": return _kicker(p, th, R, H, Ls, vl, v)
 	var hk: float = H if not gap_kind or float(p.land_h) <= 0.0 else float(p.land_h)
@@ -107,9 +114,10 @@ static func build(p_in := {}) -> Dictionary:
 	var vb := sqrt(vl * vl + 2.0 * G * H)
 	var rb := vb * vb / (maxf(0.5, float(p.land_g)) * G)
 	var aim := clampf(float(p.aim), 0.0, 1.0)
-	# where the lip is (x from the face's start, relative): the clothoid + the straight
-	var vx := vl * cos(th)
-	var vy := vl * sin(th)
+	# the flight: from the lip at the measured take-off angle (lip + TAKEOFF_EXTRA)
+	var thf := th + deg_to_rad(TAKEOFF_EXTRA)
+	var vx := vl * cos(thf)
+	var vy := vl * sin(thf)
 	# auto deck / gap and landing angle: the flight from the lip meets the aim point
 	var phi := deg_to_rad(float(p.land_deg)) if float(p.land_deg) > 0.0 else th + deg_to_rad(6.0)
 	var D: float = float(p.deck) if not gap_kind else float(p.gap)
@@ -122,14 +130,14 @@ static func build(p_in := {}) -> Dictionary:
 		var dy := P.y - H                               # aim point below the lip (-)
 		# y(x) = x tan th - g x^2 / (2 vx^2) = dy  ->  the far root
 		var a := G / (2.0 * vx * vx)
-		var disc := tan(th) * tan(th) - 4.0 * a * dy
-		var xt := (tan(th) + sqrt(maxf(0.0, disc))) / (2.0 * a)
+		var disc := tan(thf) * tan(thf) - 4.0 * a * dy
+		var xt := (tan(thf) + sqrt(maxf(0.0, disc))) / (2.0 * a)
 		if auto_d:
 			D = xt - P.x - (0.0 if not gap_kind else 0.0)
 		var x_hit := D + P.x
-		var slope_t := tan(th) - 2.0 * a * x_hit     # flight's slope there (-)
+		var slope_t := tan(thf) - 2.0 * a * x_hit     # flight's slope there (-)
 		if auto_phi:
-			phi = clampf(-atan(slope_t) - deg_to_rad(LAND_SOFT), deg_to_rad(12.0), deg_to_rad(48.0))
+			phi = clampf(-atan(slope_t) - deg_to_rad(LAND_SOFT), deg_to_rad(12.0), deg_to_rad(LAND_MAX_DEG))
 	D = maxf(0.6, D)
 	lnd = _landing(hk, phi, rk, rb, aim)
 	rk = lnd[1]; rb = lnd[2]
@@ -142,15 +150,24 @@ static func build(p_in := {}) -> Dictionary:
 	t.knot()
 	t.straight_to(H)
 	var lip_u := t.u()
-	t.knot_kink(0.0 if not gap_kind else -deg_to_rad(50.0))
+	t.knot_kink(0.0 if not gap_kind else -deg_to_rad(50.0))   # (a gap's backside angle is set again below)
 	var land0 := 0.0
 	if not gap_kind:
 		t.flat(D)
 	else:
 		var fl := clampf(float(p.fill), 0.0, minf(H, hk) - 0.1)
+		# (the backside and the landing mound's face are squeezed steeper when the gap is short, so the landing's knuckle
+		# really is D past the lip: at their 50 / 35 deg a short gap pushed the mound further out and the design speed
+		# came down in the gap / on the mound's face)
+		var bk_a := deg_to_rad(50.0)
+		var up := deg_to_rad(35.0)
+		var need := (H - fl) / tan(bk_a) + (hk - fl) / tan(up) + 0.6
+		if need > D:
+			bk_a = deg_to_rad(70.0); up = deg_to_rad(70.0)
+		t.a = -bk_a
+		t.knots[t.knots.size() - 1][3] = tan(t.a)   # (the lip knot's slope out = the backside's)
 		t.straight_to(fl)
 		t.knot_kink(0.0)
-		var up := deg_to_rad(35.0)
 		var run := D - (t.u() - lip_u) - (hk - fl) / tan(up) - 0.6
 		t.flat(maxf(0.0, run))
 		t.knot_kink(up)
@@ -208,8 +225,8 @@ static func _kicker(p: Dictionary, th: float, R: float, H: float, Ls: float, vl:
 ## a rider at run-in speed vr (point mass, no pop / pump / drag) over the built shape: where he lands, how hard
 static func predict(d: Dictionary, vr: float) -> Dictionary:
 	var H: float = d.lip_h
-	var th := deg_to_rad(float(d.lip_deg))
-	var vl := sqrt(maxf(0.1, vr * vr - 2.0 * G * H))
+	var th := deg_to_rad(float(d.lip_deg) + TAKEOFF_EXTRA)
+	var vl := sqrt(maxf(0.1, vr * vr - 2.0 * G * H - FACE_LOSS * H * vr))
 	var vx := vl * cos(th)
 	var vy0 := vl * sin(th)
 	var hs: PackedFloat32Array = d.h
