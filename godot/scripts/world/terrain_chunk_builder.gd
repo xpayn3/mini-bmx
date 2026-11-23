@@ -976,6 +976,7 @@ func _rocks(ox: float, oz: float) -> void:
 		var sy := sc * (0.6 + rnd.next() * .4)
 		put("pebble" if sc < 0.6 else "rock", x, h - sc * 0.25, z, sx, sy, sc, rnd.next() * 6.28, null, 0.5)
 		colliders.append({"x": x, "z": z, "r": (sx + sc) * 0.45, "top": h - sc * 0.25 + sy * 0.9, "base": f.ground(x, z), "sink": sc * 0.25})
+		blocked.append([x, z, (sx + sc) * 0.45])   # (no grass / tufts growing through a rock, hiding it)
 
 
 func _tuft_col(dry: float) -> Color:

@@ -2111,6 +2111,59 @@ const MCAP := {
 }
 var _mc := {}
 var _lean_c := 0.0; var _steer_c := 0.0   # this frame's capped bike lean / bars (the bike and the rider's pose share them)
+## the bars as drawn (2026-11-23, research review #5; drawing only, the physics' steer is unchanged). The physics' steer is
+## the turn on the ground; the bars turn about the tilted head tube and a leaned wheel turns more on the ground than the
+## bars (Meijaard 2007 App. A: tan(ground) = tan(bars) cos(head tilt) / cos(lean)). On top: the countersteer a real bike
+## shows as it rolls into / out of a lean (Limebeer & Sharp 2006 figs. 16-17: the bars flick the other way for a moment),
+## a short damped kick when the front is knocked by rocks / roots (~7 Hz, a DH front doesn't shimmy by itself), and the
+## bars flopping into the lean with a foot down. BMX_OLD_BARS=1 = the physics' steer as before
+const HEAD_TILT := 0.47       # rad, the head tube from vertical (63 deg head angle)
+const BAR_CS_K := 0.03        # countersteer: rad of bars per rad/s of roll
+const BAR_CS_MAX := 0.07
+const BAR_KICK_HZ := 7.0
+const BAR_KICK_Z := 0.25
+const BAR_KICK_K := 0.07      # rad of bars per rad/s of knock
+const BAR_FLOP := 0.6         # bars turned into the dab lean, x the lean
+const BAR_HIT_FROM := 1.0     # m/s: smaller changes of the front wheel's upward speed don't kick the bars
+const BAR_HIT_K := 0.6        # rad/s of bar swing per m/s of hit past that
+var _vwf_prev := 0.0
+var _bar_kick := 0.0; var _bar_kick_v := 0.0
+var _OLD_BARS := Env.s("BMX_OLD_BARS") != ""
+func _bar_draw(st: BikePhysics, dt: float, dab_lean: float) -> float:
+	if _OLD_BARS or st.crash_on:
+		_bar_kick = 0.0; _bar_kick_v = 0.0
+		return st.steer
+	var ln := clampf(st.bike_lean, -1.3, 1.3)
+	var sd: float = atan(tan(clampf(st.steer, -1.2, 1.2)) * cos(ln) / cos(HEAD_TILT))
+	var va := absf(st.v)
+	if not st.air:
+		sd -= clampf(st.lean_v * BAR_CS_K, -BAR_CS_MAX, BAR_CS_MAX) * smoothstep(3.0, 7.0, va)
+	# the kick: a damped spring pushed by the knock (in sub-steps: 7 Hz at 30 fps is past what one Euler step holds)
+	var w := TAU * BAR_KICK_HZ
+	var steps := maxi(1, ceili(dt * 240.0))
+	var h := dt / steps
+	var push := 0.0 if st.air else st.knock * BAR_KICK_K
+	# a hit on the front wheel (its upward speed jumping: a rock, a root, a landing) knocks the bars one way or the
+	# other (the side the wheel was hit on: the knock's side, else a fixed hash of where it happened)
+	var dvw: float = st.vw_f - _vwf_prev
+	_vwf_prev = st.vw_f
+	if not st.air and absf(dvw) > BAR_HIT_FROM:
+		var side: float = signf(st.knock) if absf(st.knock) > 0.02 else (1.0 if sin(st.x * 7.3 + st.z * 3.1) > 0.0 else -1.0)
+		_bar_kick_v += side * (absf(dvw) - BAR_HIT_FROM) * BAR_HIT_K * smoothstep(2.0, 6.0, va)
+	for i in steps:
+		_bar_kick_v += (-w * w * (_bar_kick - push) - 2.0 * BAR_KICK_Z * w * _bar_kick_v) * h
+		_bar_kick += _bar_kick_v * h
+	_bar_kick = clampf(_bar_kick, -0.08, 0.08)
+	sd += _bar_kick
+	sd += BAR_FLOP * dab_lean
+	if _bar_probe:   # tests: BMX_BAR_PROBE (BARS lines once a second: biggest kick, biggest countersteer, bars vs physics)
+		_bp_k = maxf(_bp_k, absf(_bar_kick)); _bp_n = maxf(_bp_n, absf(st.knock)); _bp_c = maxf(_bp_c, absf(st.lean_v * BAR_CS_K)); _bp_d = maxf(_bp_d, absf(sd - st.steer))
+		if int(t) != int(t - dt):
+			print("BARS t=%.0f knock_max=%.2f x=%.0f v=%.1f kick_max=%.1fdeg countersteer_max=%.1fdeg bars_vs_physics_max=%.1fdeg" % [t, _bp_n, st.x, st.v * 3.6, rad_to_deg(_bp_k), rad_to_deg(minf(_bp_c, BAR_CS_MAX)), rad_to_deg(_bp_d)])
+			_bp_k = 0.0; _bp_c = 0.0; _bp_d = 0.0; _bp_n = 0.0
+	return sd
+var _bar_probe := Env.s("BMX_BAR_PROBE") != ""
+var _bp_k := 0.0; var _bp_c := 0.0; var _bp_d := 0.0; var _bp_n := 0.0
 func _mcap(key: String, target: float, dt: float) -> float:
 	var mc: float = maxf(0.2, float(Tune.v.get("motionCap", 1.0)))   # (Ride › Smoothing: higher = looser caps)
 	var lim: Array = [float(MCAP[key][0]) * mc, float(MCAP[key][1]) * mc]
@@ -2647,7 +2700,7 @@ func _process(dt: float) -> void:
 	if st.crash_on: _mc.clear()   # (the motion cap starts fresh after a crash / get-up)
 	var mdt := minf(get_process_delta_time(), 0.05)
 	_lean_c = _mcap("bike_lean", st.bike_lean, mdt)
-	_steer_c = _mcap("steer", st.steer + st.bar_catch, mdt)
+	_steer_c = _mcap("steer", _bar_draw(st, mdt, dab_lean) + st.bar_catch, mdt)
 	rig.pose(drawn_pos.x, y_draw + (1.5 if Env.s("BMX_PITCH_POSE") != "" else 0.0), drawn_pos.z, hd, p_draw, st.hop_nose,
 		_lean_c + st.rock + wobble + dab_lean, _steer_c - wobble * 1.5, st.wheel_f, st.wheel_r, st.crank)
 	_pk = _perf("bike_pose", _pk)

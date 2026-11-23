@@ -820,6 +820,7 @@ func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_wa
 		# (the rear's grip follows its load only after a little rolling: a bump that unloads it for a few cm doesn't
 		# empty its friction circle. _nR_s is eased in _grip_step)
 		if not _OLD_GRIP and not is_nan(_nR_s): drive_cap = mu_r * _nR_s
+		drive_cap *= _ls(_or(_nR_s, nR), G * SH_R)
 		if drive > drive_cap:
 			spin = minf(1.0, (drive - drive_cap) / 3); drive = drive_cap + (drive - drive_cap) * 0.15
 		a_long = absf(drive)
@@ -836,8 +837,8 @@ func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_wa
 		var bg: float = float(T.get("brakeGrip", 1.0))
 		var bmu_f: float = mu_f if _OLD_BRAKE else _or(_bmu_f, 0.7) * bg
 		var bmu_r: float = mu_r if _OLD_BRAKE else _or(_bmu_r, 0.7) * bg
-		var cap_r: float = maxf(0.05, bmu_r * nR)
-		var cap_f: float = maxf(0.05, bmu_f * nF * float(T.get("frontGrip", 1.0)))
+		var cap_r: float = maxf(0.05, bmu_r * nR * _ls(nR, G * SH_R))
+		var cap_f: float = maxf(0.05, bmu_f * nF * _ls(nF, G * (1.0 - SH_R)) * float(T.get("frontGrip", 1.0)))
 		if _brake_feel:
 			# ...and eases the rear off the moment it starts stepping out sideways, so it grips sideways again
 			var r_ease := smooth01((absf(slip) - 0.04) / 0.08)
@@ -1122,7 +1123,7 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 	# a tyre's grip follows its load only after it has rolled a little (relaxation length): over rough ground the
 	# load swings every step and the grip limits (and with them the lean) shook with it. Eased over ~0.04 s
 	var load_raw := clampf(pow(maxf(0.0, n_tot / G), 0.7), 0.25, 1.5)
-	_load_s = load_raw if (air or is_nan(_load_s)) else _load_s + (load_raw - _load_s) * minf(1.0, dt / maxf(0.005, float(T.get("tyreRelax", 0.04))))
+	_load_s = load_raw if (air or is_nan(_load_s)) else _load_s + (load_raw - _load_s) * minf(1.0, dt / _relax_t(float(T.get("tyreRelax", 0.04)), va))
 	var load_k: float = _load_s
 	var mu_g := mu * G * load_k
 	# (the front tyre has its own limit below now; the old rough "light front = less grip" factor is gone)
@@ -1161,11 +1162,11 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 		# (its share of the load eased like the grip above: a front going light for one tick over a bump snapped the
 		# push in and out - lat_a spikes of 13 m/s² and a 15 deg jolt of the rider's body in quick swaps)
 		var share_raw := clampf(nF / maxf(0.1, n_tot), 0.05, 1.0)
-		_share_f = share_raw if is_nan(_share_f) else _share_f + (share_raw - _share_f) * minf(1.0, dt / maxf(0.005, float(T.get("tyreRelax", 0.04))))
+		_share_f = share_raw if is_nan(_share_f) else _share_f + (share_raw - _share_f) * minf(1.0, dt / _relax_t(float(T.get("tyreRelax", 0.04)), va))
 		var share_f: float = maxf(0.05, _share_f)
 		var circ_f := sqrt(maxf(0.05, 1.0 - pow(_fb_f / maxf(0.1, mu_f * nF * fg), 2)))
 		_circ_f = circ_f
-		var mu_fr: float = mu_f * fg * circ_f * w_grip * (1 + T.carveGrip * carve_f) * lerpf(1.0, 0.7, front_lock)
+		var mu_fr: float = mu_f * fg * circ_f * w_grip * (1 + T.carveGrip * carve_f) * lerpf(1.0, 0.7, front_lock) * _ls(nF, G * (1.0 - SH_R))
 		front_use = 0.0 if front_air else absf(f_need) * (1.0 - SH_R) / share_f / maxf(0.05, mu_fr)
 		if front_use > 1.0:
 			var f_cap := f_need / front_use
@@ -2926,6 +2927,24 @@ func _bank_at(f: Vector3) -> float:
 static func _fric(a_lat: float, cb: float, sb: float) -> float:
 	return (a_lat * cb - G * sb) / maxf(0.2 * G, G * cb + a_lat * sb)
 
+## load sensitivity (Magic Formula pD2 < 0, Schmeitz 2013 sl. 8): a tyre pressed harder grips a little less per unit of
+## load. The turn limit has it (load^0.7); this is the same for the brakes, the drive and the front tyre: x the grip at
+## the tyre's resting load n0, -LOAD_SENS per 100 % more load. BMX_OLD_LOADSENS=1 = off
+const LOAD_SENS := 0.15
+var _OLD_LS := OS.get_environment("BMX_OLD_LOADSENS") != ""
+func _ls(n: float, n0: float) -> float:
+	if _OLD_LS: return 1.0
+	return clampf(1.0 - LOAD_SENS * (n / maxf(0.1, n0) - 1.0), 0.75, 1.15)
+
+## a tyre's grip follows a change (its load, its share) over a DISTANCE rolled, not a time (relaxation length:
+## Schmeitz 2013 MF-Swift sl. 22-25, Limebeer & Sharp 2006 eq. 31): t_ref is the lag at RELAX_V (6 m/s), so it is
+## shorter at speed and longer slow, within 0.015 .. 0.12 s. BMX_OLD_RELAX=1 = the fixed times
+const RELAX_V := 6.0
+var _OLD_RELAX := OS.get_environment("BMX_OLD_RELAX") != ""
+func _relax_t(t_ref: float, va: float) -> float:
+	if _OLD_RELAX: return maxf(0.005, t_ref)
+	return clampf(t_ref * RELAX_V / maxf(va, 1.5), 0.015, 0.12) if t_ref > 0.005 else 0.005
+
 func _grip_step(dt: float, va: float, mu: float, nR: float, u_lat_in: float) -> float:
 	if _grip_noise == null:
 		_grip_noise = FastNoiseLite.new()
@@ -2944,7 +2963,7 @@ func _grip_step(dt: float, va: float, mu: float, nR: float, u_lat_in: float) -> 
 	var lock: float = rear_lock   # the rear brake past what the tyre holds (the brakes, longitudinal step)
 	# (its grip follows the load over ~0.08 s, a few tens of cm rolled: over bumpy grass the rear's load swung 2..17
 	# m/s^2 every few steps and each light moment let the rear step out a little further, never coming back)
-	_nR_s = nR if is_nan(_nR_s) else _nR_s + (nR - _nR_s) * minf(1.0, dt / 0.08)
+	_nR_s = nR if is_nan(_nR_s) else _nR_s + (nR - _nR_s) * minf(1.0, dt / _relax_t(0.08, va))
 	if not _OLD_GRIP: nR = _nR_s
 	var r_cap := maxf(0.3, mu * nR)
 	var use := clampf(_a_rear / r_cap, 0.0, 1.0)   # its own drive / brake only (the front brake is the front's)

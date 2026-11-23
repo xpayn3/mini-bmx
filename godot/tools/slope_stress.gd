@@ -590,12 +590,14 @@ func _run_all(cfg: Dictionary) -> void:
 		var x_b := p.x
 		var st := _ride(p, h, 6.0, func(_t, _p): return _inp(0.0, 1.0))
 		var mu: float = BikePhysics.BRAKE_MU[0] * float(tune.v.get("brakeGrip", 1.0))   # (the braking grip on grass, the test ground)
-		var can_hold := 9.81 * sin(absf(th)) < minf(float(tune.v.brakeForce), 0.85 * mu * 9.81 * cos(th))
+		var can_hold := 9.81 * sin(absf(th)) < minf(float(tune.v.brakeForce), 0.8 * mu * 9.81 * cos(th))   # (0.8: the brake feel cap x load sensitivity on the loaded front)
 		var stopped := absf(p.v) < 0.05
 		var x_s := p.x
 		_ride(p, h, 2.0, func(_t, _p): return _inp(0.0, 1.0))
 		var creep := absf(p.x - x_s)
-		var ok: bool = not st.insane and (stopped == can_hold) and (not can_hold or creep < 0.01)
+		# (within 10 % of the friction limit either way is right: load sensitivity and the brake feel decide it)
+		var edge: bool = absf(9.81 * sin(absf(th)) / maxf(0.01, 0.8 * mu * 9.81 * cos(th)) - 1.0) < 0.1
+		var ok: bool = not st.insane and (edge or ((stopped == can_hold) and (not can_hold or creep < 0.01)))
 		_check(name, ok, "stopped=%s (friction can hold: %s) dist=%.1f m creep=%.3f v=%.2f crash=%s" % [stopped, can_hold, (x_s - x_b) / cos(th), creep, p.v, h.crash])
 
 	# 3. pedalling up grades from a standstill: climbs what a rider can, nothing silly on the steep ones
@@ -860,3 +862,21 @@ func _slide(cfg: Dictionary) -> void:
 					smax = maxf(smax, ms)
 					if verbose: print("  SLIDE %s %s %2.0f km/h %-11s max=%.0fdeg %s v_end=%.0f" % [sf[1], gk, kmh, mode, rad_to_deg(ms), r[1].crash, p.v * 3.6])
 			print("SLIDE %-5s %-5s  out>8deg %4.1f %%  out>15deg %4.1f %%  max %2.0f deg  crashes %d" % [sf[1], gk, 100.0 * t8 / maxf(tt, 0.01), 100.0 * t15 / maxf(tt, 0.01), rad_to_deg(smax), crashes])
+	# asked-for slides: the rear lever locked through a turn for 1.2 s, then let go (a skid turn / brake slide)
+	for sf in [[0, "grass"], [1, "trail"], [3, "sand"]]:
+		for kmh in [20.0, 30.0]:
+			var r := _make(cfg, "flat"); var p: BikePhysics = r[0]; var g: Ground = r[1].terrain
+			g.surf = sf[0]; p.v = kmh / 3.6
+			var smax := 0.0; var hold := 0.0; var t_back := -1.0; var v_rel := 0.0
+			for i in int(5.0 / DT):
+				var t := i * DT
+				var d := _inp(0.0, 0.0, 0.7 if t > 0.5 and t < 2.0 else 0.0)
+				d.brake_rear = 1.0 if (t > 0.6 and t < 1.8) else 0.0
+				p.step(DT, d)
+				var sl := absf(p.slip)
+				smax = maxf(smax, sl)
+				if t > 0.6 and t < 1.8 and sl > deg_to_rad(15.0): hold += DT
+				if t >= 1.8 and v_rel == 0.0: v_rel = p.v
+				if t > 1.8 and t_back < 0.0 and sl < deg_to_rad(5.0): t_back = t - 1.8
+				if r[1].crash != "": break
+			print("SKIDTURN %-5s %2.0f km/h  slip_max=%2.0fdeg  held_past_15deg=%.2fs  speed_at_release=%.0f km/h  back_in_line=%.2fs  %s" % [sf[1], kmh, rad_to_deg(smax), hold, v_rel * 3.6, t_back, r[1].crash])

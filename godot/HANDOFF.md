@@ -206,6 +206,28 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   rear and a locked front then stopped at 0.14 g. Playground @30 km/h: dirt 0.80 g (was 0.86), sand 0.49 (0.73), front
   lever only locks 0.53 (never locked), rear only locks 0.46 (0.68). `sim=1` SIM BRAKE now per surface. `BMX_OLD_BRAKE=1`
   = before. Lateral grip (`SURF_MU` x `grip`) unchanged.
+- **Research review follow-ups (2026-11-23, `docs/research/papers_review_2026-11-23.md`)**. #2 off-trail "flow ground":
+  measured first (`-s res://tools/offtrail_probe.gd`: crests that throw the bike at 20/30/40 km/h, slopes): only ~1 % of
+  the open land throws at 30 km/h, 2.7 % at 40; removing the 8 m bumps, ridge creases, 28 m hills and rugged cliffs all
+  together only took 40 km/h to 1.6 %. Not the problem: not changed. #3 trees: `-s res://tools/deco_probe.gd` (real
+  chunks: trees / ha, trunk spacing, free ride from an open spot): a 2.6 m trunk gap rule removed the clumps (17 % -> 1 %
+  under 1.5 m) but the free ride stayed the same (~20 % of directions hit a tree within 10 m) and cost ~18 % of the trees:
+  not kept. Kept: rocks are added to `blocked`, so the grass carpet / tufts no longer grow over (and hide) them. #4 crash
+  shake (`camera_rig.gd`): trauma = physics shake / 0.45, shake = trauma^2, ROTATION only (yaw / pitch 1.5 deg, roll 2.5
+  deg on smooth noise, `SHAKE_*`), no camera move (Eiserloh GDC 2016); `BMX_OLD_SHAKE=1`. #5 drawn bars (`Game._bar_draw`,
+  drawing only): head-angle + lean correction (atan(tan steer cos lean / cos 27 deg)), countersteer flick from the roll
+  rate (`BAR_CS_K`, ~3-4 deg in swaps), a 7 Hz damped kick from front-wheel hits (`BAR_HIT_*`, 1-4 deg on the rocks lane,
+  0 on smooth ground), bars flop into a dab; `BMX_OLD_BARS=1`, probe `BMX_BAR_PROBE=1` (`BARS` lines).
+- **Tyre batch (2026-11-23, review #6-8)**. (a) Relaxation is a distance (`_relax_t`: the lag at `RELAX_V` 6 m/s, x 6 / v,
+  0.015-0.12 s) for `_load_s`, `_share_f` (`tyreRelax`) and the rear `_nR_s` (0.08 s at 6 m/s); `BMX_OLD_RELAX=1`. Feel
+  unchanged, slide wobble flips 184 -> 148 / biggest 0.40 -> 0.17 (`BMX_JITTER_ALL`). (b) Load sensitivity (`_ls`,
+  -`LOAD_SENS` 0.15 per 100 % over the resting load, 0.75-1.15) on the brake caps, drive cap and the front tyre's grip
+  (the turn limit already had load^0.7); `BMX_OLD_LOADSENS=1`. Brake key, 40 km/h: trail 0.81 -> 0.73 g, grass 0.72 ->
+  0.62, sand 0.53 -> 0.49 (the research targets); playground dirt 0.70 g. (c) Tried, dropped: a Magic Formula-style
+  peak-then-fall rear force curve per surface: no measurable change (whips are driven to their own angle, unasked slides
+  stay under the peak, a locked rear has almost no side grip anyway): `slide=1` now also prints `SKIDTURN` (rear lever
+  locked through a turn on grass / trail / sand). Stress: the brake-hold check accepts either result within 10 % of the
+  friction limit (56 / 56).
 - **The ride step is 11 stage functions** (2026-11-21; it was one 1,514-line function). `_ride_step` is the short driver; the
   stages, in order: `_step_controls` (levers, body stick, air inputs, lip throw; returns the brake level), `_step_ground`
   (heights, surface, grip per tyre), `_step_sprint`, `_step_loads` (weight on each tyre -> `n_rear` / `n_front` / `n_load`),

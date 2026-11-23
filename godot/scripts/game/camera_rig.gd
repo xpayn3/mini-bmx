@@ -58,6 +58,12 @@ var occ := 0.0
 var track_pos = null
 var target := Vector3.ZERO
 var _probe_on := Env.s("BMX_CAM_PROBE") != ""
+const SHAKE_YAW := 0.026     # rad at full trauma (~1.5 deg)
+const SHAKE_PITCH := 0.026
+const SHAKE_ROLL := 0.044    # (~2.5 deg)
+const SHAKE_RATE := 14.0     # noise per second: a quick shudder, not a wobble
+var _shake_n: FastNoiseLite = null
+var _OLD_SHAKE := Env.s("BMX_OLD_SHAKE") != ""
 var _pp1 := Vector3.ZERO; var _pp2 := Vector3.ZERO; var _pa1 := Vector3.ZERO; var _pa2 := Vector3.ZERO
 var _pn := 0; var _pj := 0.0; var _pk := 0; var _paj := 0.0; var _psh := 0
 var _pw1 := 0.0; var _pw2 := 0.0; var _pwj := 0.0; var _pwmax := 0.0   # the camera's own height in the world (2nd difference)
@@ -329,9 +335,14 @@ func update_cam(dt: float) -> void:
 		print("CRASHCAM t=%.2f aim_to_pelvis=%.2f cam_to_pelvis=%.2f zoom=%.2f" % [crash_cam_t, target.distance_to(pv), global_position.distance_to(pv), crash_zoom])
 	cam_fov += (fov_t - cam_fov) * minf(1.0, dt * (6.0 if P.get("mode", "") == "trackside" else 3.0))
 	fov = clampf(cam_fov * (1.0 + fov_boost * float(Settings.get_v("cam_speed_fov")) / 34.0) + float(Settings.get_v("fov")), 5, 110)
+	# impact shake (Eiserloh, "Juicing Your Cameras With Math", GDC 2016): the hit is "trauma" 0..1 (the physics' shake,
+	# 0.45 = a full BONK), the shake is trauma^2 (small knocks all but vanish, big ones punch) and it TURNS the camera
+	# (yaw / pitch / roll on smooth noise) instead of moving it: two sines moving the camera read as a glitch, and a
+	# moved camera can end up in the ground. Applied after look_at below. BMX_OLD_SHAKE=1 = the old one
 	var sk: float = st.shake * float(Settings.get_v("cam_shake"))
-	if sk > 0:
-		global_position += Vector3(sin(t * 37) * sk * 0.06, sin(t * 29 + 1) * sk * 0.06, 0)   # (half of what it was: on top of a real impact it read as a glitch)
+	if sk > 0 and _OLD_SHAKE:
+		global_position += Vector3(sin(t * 37) * sk * 0.06, sin(t * 29 + 1) * sk * 0.06, 0)
+	var trauma := clampf(sk / 0.45, 0.0, 1.0)
 	st.shake = maxf(0.0, st.shake - dt * 1.2)
 	if _probe_on:   # BMX_CAM_PROBE: how much the camera rattles (2nd difference per frame: position, aim)
 		var po: Vector3 = global_position - game.drawn_pos
@@ -353,6 +364,14 @@ func update_cam(dt: float) -> void:
 		# bank into the turn a little with speed (the horizon tips the way the rider leans)
 		bank_s += (-st.bike_lean * 0.13 * speed_feel - bank_s) * minf(1.0, dt * 3.0)
 		rotate_object_local(Vector3.BACK, bank_s)
+		if trauma > 0.0 and not _OLD_SHAKE:
+			if _shake_n == null:
+				_shake_n = FastNoiseLite.new(); _shake_n.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH; _shake_n.frequency = 1.0
+			var amt := trauma * trauma
+			var ts := t * SHAKE_RATE
+			rotate_object_local(Vector3.UP, amt * SHAKE_YAW * _shake_n.get_noise_2d(ts, 11.0))
+			rotate_object_local(Vector3.RIGHT, amt * SHAKE_PITCH * _shake_n.get_noise_2d(ts, 37.0))
+			rotate_object_local(Vector3.BACK, amt * SHAKE_ROLL * _shake_n.get_noise_2d(ts, 73.0))
 	if P.get("drone", false):
 		_drone_feel(dt)
 	# trees / rocks between the camera and the rider dissolve (deco.gdshader)
