@@ -2067,14 +2067,18 @@ func _read_input() -> Dictionary:
 	# round. Near an axis the other one is faded out (side lean within ~15 deg of sideways = no fore / aft,
 	# full again by ~35 deg), so leaning into a turn can't pull a manual or a tuck by accident; plus a small
 	# round deadzone for a worn stick
+	# (in the air the stick is a 360 deg attitude control: no axis fade there. Rolling the stick round in the air it
+	# snapped the off axis from 0 to full over 20 deg of stick: the bike jerked, worst with both sticks working,
+	# 2026-11-23. BMX_OLD_AIRFADE=1 = as before)
 	var mag := Vector2(bf, bl).length()
 	if mag < 0.1:
 		bf = 0.0; bl = 0.0
 	else:
 		var ang := atan2(absf(bf), absf(bl))   # 0 = pure side, PI/2 = pure fore / aft
 		var k := (mag - 0.1) / 0.9 / mag
-		bf *= k * BikePhysics.smooth01((ang - deg_to_rad(15.0)) / deg_to_rad(20.0))
-		bl *= k * BikePhysics.smooth01((PI / 2 - ang - deg_to_rad(15.0)) / deg_to_rad(20.0))
+		var fade := 0.0 if (phys != null and phys.air and not _OLD_AIRFADE) else 1.0
+		bf *= k * lerpf(1.0, BikePhysics.smooth01((ang - deg_to_rad(15.0)) / deg_to_rad(20.0)), fade)
+		bl *= k * lerpf(1.0, BikePhysics.smooth01((PI / 2 - ang - deg_to_rad(15.0)) / deg_to_rad(20.0)), fade)
 	var bm := maxf(absf(bf), absf(bl))
 	if bm > 0.01:
 		var sq := minf(Vector2(bf, bl).length() / bm, 1.4142)
@@ -2283,6 +2287,7 @@ func _physics_process(dt: float) -> void:
 	if _SKIP: _skip_probe(dt, inp)
 	if level_probe: level_probe.post_step(dt)
 	if diag: diag.record(dt, inp)
+	if _AIRJERK: _air_jerk_probe(inp)
 	if lab: lab.post_step(dt, inp)
 	_pk = _perf("p_bike_step", _pk)
 	_rope_tick(dt)
@@ -2880,6 +2885,7 @@ func _process(dt: float) -> void:
 		var auto_pre: float = 0.0 if (st.pop_wait > 0.0 or st.squash > 0.2) else st.prep * float(phys.T.autoPump)
 		pi["preload"] = maxf(st.crouch, auto_pre) * (0.0 if st.air else 1.0)
 		pi["popFx"] = st.pop_fx * minf(1.0, st.pop_q)
+		pi["airPull"] = st.air_pull if st.air else 0.0   # the bike pulled up into the body after the pop (the tuck)
 		pi["squash"] = maxf(st.squash * st.prep, st.squash_fx)
 		pi["lipK"] = maxf(st.prep, 1.0 if (st.pop_wait > 0.0 or st.hop_t > 0.0) else 0.0)
 		pi["landFold"] = 0.0 if st.air else st.land_fold   # folded up by a landing, gathering himself again
@@ -3111,3 +3117,32 @@ func _landbody_probe(st) -> void:
 	if _lb.t > 1.2:
 		print("LANDBODY air=%.2f v=%.1f hit=%.1f heavy=%.2f fold=%.2f leg_min=%.0fcm | pelvis touch=%.0f low=%.0f (-%.0f cm at %.2fs) end=%.0f | chest low -%.0f cm" % [_lb.air, _lb.v, st._land_hit, st.land_heavy, _lb.fold, _lb.leg * 100, _lb.p0 * 100, _lb.pmin * 100, (py - _lb.pmin) * 100, _lb.tmin, py * 100, (cy - _lb.cmin) * 100])
 		_lb = {}
+
+
+## tests (BMX_AIRJERK=1): how smooth the bike's attitude is in the air: per flight, the worst step-to-step change of
+## its pitch / lean / yaw rate (rad/s per physics step: a jerk shows as a spike) and of the stick values the physics got
+static var _AIRJERK := OS.get_environment("BMX_AIRJERK") != ""
+static var _OLD_AIRFADE := OS.get_environment("BMX_OLD_AIRFADE") != ""
+var _aj := {}
+func _air_jerk_probe(inp: Dictionary) -> void:
+	var st = phys
+	var yaw: float = st.heading
+	var cur := {"p": st.pitch, "l": st.bike_lean, "y": yaw, "sx": float(inp.get("body_lean", 0.0)), "sy": float(inp.get("body_fwd", 0.0)), "st": float(inp.get("steer", 0.0))}
+	if st.air and st.air_time > 0.1:
+		if _aj.has("prev") and _aj.has("prev2"):
+			var a: Dictionary = _aj.prev; var b: Dictionary = _aj.prev2
+			for k in ["p", "l", "y"]:
+				var d2 := absf(wrapf(cur[k] - a[k], -PI, PI) - wrapf(a[k] - b[k], -PI, PI)) * 120.0
+				_aj["m_" + k] = maxf(float(_aj.get("m_" + k, 0.0)), d2)
+				_aj["s_" + k] = float(_aj.get("s_" + k, 0.0)) + d2 * d2
+			for k in ["sx", "sy", "st"]:
+				_aj["m_" + k] = maxf(float(_aj.get("m_" + k, 0.0)), absf(cur[k] - a[k]))
+			_aj.n = int(_aj.get("n", 0)) + 1
+		_aj.prev2 = _aj.get("prev", cur); _aj.prev = cur
+	elif _aj.has("n") and int(_aj.n) > 10:
+		var n := float(_aj.n)
+		print("AIRJERK steps=%d pitch max=%.2f rms=%.2f | lean max=%.2f rms=%.2f | yaw max=%.2f rms=%.2f | input step max lean=%.2f fwd=%.2f steer=%.2f" % [
+			_aj.n, _aj.m_p, sqrt(_aj.s_p / n), _aj.m_l, sqrt(_aj.s_l / n), _aj.m_y, sqrt(_aj.s_y / n), _aj.m_sx, _aj.m_sy, _aj.m_st])
+		_aj = {}
+	else:
+		_aj = {}

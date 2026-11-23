@@ -1868,6 +1868,19 @@ func _autotest(seconds: float) -> void:
 				Input.action_press("body_back", -sy) if sy < 0.0 else Input.action_release("body_back")
 				if on and Env.s("BMX_BODY_PRINT") != "":
 					print("AIRSTICK t=%.2f stick=(%.2f,%.2f) pitch=%.2f g=%.2f bike_lean=%.2f air_tilt=%.2f" % [el, ph2.air_stick.x, ph2.air_stick.y, ph2.pitch, ph2._g_pitch, ph2.bike_lean, ph2.air_tilt])
+			elif body_t == "circle2":   # tests (air smoothness): in the air circle the right stick AND steer the left stick back and forth
+				var ca2 := el * TAU * 0.8
+				var on2 := ph2.air and ph2.air_time > 0.08
+				var sx2 := sin(ca2) * 0.9 if on2 else 0.0
+				var sy2 := cos(ca2) * 0.9 if on2 else 0.0
+				var ls := sin(el * TAU * 0.6) * 0.8 if on2 else 0.0
+				Input.action_press("body_left", sx2) if sx2 > 0.0 else Input.action_release("body_left")
+				Input.action_press("body_right", -sx2) if sx2 < 0.0 else Input.action_release("body_right")
+				Input.action_press("body_fwd", sy2) if sy2 > 0.0 else Input.action_release("body_fwd")
+				Input.action_press("body_back", -sy2) if sy2 < 0.0 else Input.action_release("body_back")
+				if on2:
+					Input.action_press("steer_left", ls) if ls > 0.0 else Input.action_release("steer_left")
+					Input.action_press("steer_right", -ls) if ls < 0.0 else Input.action_release("steer_right")
 			elif body_t == "lean": Input.action_press("body_left", 1.0)
 			elif body_t == "both":   # both sticks: the right stick leans the way the left stick steers (+ hand wobble)
 				var s_l := Input.get_action_strength("steer_left") - Input.get_action_strength("steer_right")

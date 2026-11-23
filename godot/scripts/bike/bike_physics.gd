@@ -1351,6 +1351,11 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 	var roll_t: float = roll_keys * T.airRoll + air_stick.x * float(T.get("stickAirRoll", 0.75)) + clampf(air_stick.x / 0.8, -1.0, 1.0) * float(T.get("airWhip", 1.1)) * 0.3
 	if air: roll_t *= 1.0 - 0.6 * clampf(absf(stick_yaw) / 1.2, 0.0, 1.0)   # spinning flat: a stylish lean, not laid right over
 	var lean_t: float = (roll_t if absf(roll_t) > 0.03 else lean * 0.98) if air else clampf(atan(lat_a / G), -T.leanMax + minf(0.0, bk), T.leanMax + maxf(0.0, bk))
+	# (in the air: blended, not switched. The target jumped between the stick's roll and "hold the lean" at |roll| 0.03,
+	# the stiffness between leanIn / leanOut / 80 as the sticks crossed 0.01 / 0.02: with both sticks working the lean
+	# jerked (user, 2026-11-23). AIR_LEAN_K is softer too: rider + bike need a moment to get turning. BMX_OLD_AIRLEAN=1)
+	if air and not _OLD_AIRLEAN:
+		lean_t = lerpf(lean * 0.98, roll_t, smooth01(absf(roll_t) / 0.15))
 	# slow riding: the rider tips in WITH the steer (towards the lean the asked-for turn needs) instead of waiting for
 	# the turn to build, and a slow bike rolls quicker (little speed, little to hold it up). Both fade out with speed
 	# (spd_k), so fast riding is as before. Without it a slow turn was a flat pivot with the lean ~0.5 s behind
@@ -1360,12 +1365,13 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 		lean_t = lerpf(lean_t, lean_need, maxf(float(T.get("leanLead", 0.5)) * slow_k, bal_k))
 	var kL: float = T.leanIn if absf(steer_eff) > 0.01 else T.leanOut
 	if not air: kL *= 1.0 + float(T.get("slowRoll", 1.0)) * slow_k
-	if air and air_stick.length() > 0.02: kL = 80.0   # the stick lays the bike over in the air (soft, no snap)
+	if air and _OLD_AIRLEAN and air_stick.length() > 0.02: kL = 80.0   # the stick lays the bike over in the air (soft, no snap)
+	elif air: kL = lerpf(float(T.leanOut), AIR_LEAN_K, smooth01(maxf(air_stick.length(), absf(roll_keys)) / 0.2))
 	if not air:
 		# only the ground pushing on the tyres can change the lean: over a crest or an edge (tyres light) the
 		# bike carries its lean on instead of snapping upright with the momentary lack of grip
 		kL *= clampf(n_tot / G, 0.12, 1.0)
-	lean_v += ((lean_t - lean) * kL - lean_v * 2 * sqrt(kL) * T.leanDamp) * dt
+	lean_v += ((lean_t - lean) * kL - lean_v * 2 * sqrt(kL) * (maxf(1.0, float(T.leanDamp)) if (air and not _OLD_AIRLEAN) else float(T.leanDamp))) * dt
 	lean_err = 0.0
 	if not air:
 		# a balanced bike leaned further than the tyres can turn it falls on over (an inverted pendulum, centre of
@@ -2765,7 +2771,9 @@ func _pop_apply(dv: float) -> void:
 	var th := clampf(atan2(vy, maxf(absf(v), 0.5)), -0.6, 1.2)
 	vy += dv * cos(th); v -= signf(v) * minf(absf(v), dv * sin(th))
 
-static var _OLD_AUTOPOP := OS.get_environment("BMX_OLD_AUTOPOP") != ""   # tests: the old weak hands-off pop
+static var _OLD_AUTOPOP := OS.get_environment("BMX_OLD_AUTOPOP") != ""
+static var _OLD_AIRLEAN := OS.get_environment("BMX_OLD_AIRLEAN") != ""
+const AIR_LEAN_K := 36.0   # lean spring in the air with the sticks in use (was 80: instant), critically damped there   # tests: the old weak hands-off pop
 
 ## the legs go. Close to a lip the push runs through it and leaves at its edge (pop_wait; best started in the last
 ## ~0.12 s, earlier part of the stroke is spent before the edge); anywhere else it is a hop, now

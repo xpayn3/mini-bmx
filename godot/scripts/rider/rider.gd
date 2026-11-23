@@ -1232,7 +1232,7 @@ func reset_pose() -> void:
 	# what the pose remembers from before (a crash tumbling the bike nose-up left a "wheelie" behind that
 	# shoved the body about after getting up)
 	sm_wheelie = 0.0; sm_aero = 0.0; sm_effort = 0.0; sm_turn = 0.0
-	sm_pre = 0.0; sm_ext = 0.0; sm_popfx = 0.0; sm_squash = 0.0; sm_lip = 0.0; sm_fold = 0.0; sm_reach = 0.0
+	sm_pre = 0.0; sm_ext = 0.0; sm_popfx = 0.0; sm_tuck = 0.0; sm_squash = 0.0; sm_lip = 0.0; sm_fold = 0.0; sm_reach = 0.0
 	roll_init = false; roll_pv = 0.0; roll_cv = 0.0; lat_g_s = 0.0; flow_e = 0.0
 	_fy_prev = NAN; _fv_prev = NAN; _facc = 0.0   # the bump bounce starts fresh (NAN = no previous frame)
 	_hp_init = false; _hy = 0.0; _neck_d = Vector3.ZERO; _neck_v = Vector3.ZERO
@@ -1258,6 +1258,7 @@ var sm_fold := 0.0; var sm_reach := 0.0   # landing: folded by the hit, reaching
 # at touch-down), the physics legs' bend that goes past the drawn body springs (hips / chest)
 var _sink := 0.0; var sm_airst := 0.0; var _abs_p := 0.0; var _abs_c := 0.0
 var sm_pre := 0.0; var sm_ext := 0.0; var sm_popfx := 0.0; var sm_squash := 0.0; var sm_lip := 0.0   # the jump (see update_pose)
+var sm_tuck := 0.0   # the air tuck (bike pulled up into the body), eased
 var sm_effort := 0.0
 var sm_pitch0 := 0.0
 var sm_pitch_slow := 0.0   # the bike's pitch averaged over ~0.35 s: what the body swings with
@@ -1445,7 +1446,20 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# the air pose's hip height: crouched in the air (none with the stick forward: legs pushed out), knees tucked up in a
 	# spin; reaching for the ground it goes (the legs straighten), and on the ground it is gone at once (air_st)
 	var air_y: float = (-0.07 * float(sty.airCrouch) * (1.0 - aero) - 0.05 * smoothstep(0.8, 3.5, absf(_num(p, "airSpin")))) * air_st
-	pelvis.y += air_y
+	# (2026-11-23, slow motion of a pro off a lip, research/jump: from the last of the face to ~0.3 s after the lip he
+	# stands TALL - legs nearly straight, torso upright in the world while the bike points 35-45 deg up, the bars pulled
+	# in to the chest - and only then the knees come up into the tuck. The air crouch came at once at take-off: the pop
+	# never showed. j_tall = the extension through the lip + the pop just gone (popFx, fades over ~0.35 s))
+	var j_tall: float = maxf(j_ext, sm_popfx * air * float(sty.get("jumpExtend", 1.0))) if not old_lp else 0.0
+	air_y *= 1.0 - clampf(j_tall, 0.0, 1.0)
+	pelvis.y += air_y + 0.10 * sm_popfx * air * (0.0 if old_lp else 1.0)
+	# then he pulls the bike up into himself (the physics' air_pull): knees up towards the chest, hips down to the
+	# saddle, chest folded forward over the bars, elbows up and out - the bike tucked under him; reaching for the
+	# landing it goes again
+	sm_tuck += ((0.0 if old_lp else clampf(_num(p, "airPull"), 0.0, 1.0)) * air * (1.0 - clampf(j_tall, 0.0, 1.0)) - sm_tuck) * (1.0 - exp(-10.0 * jh))
+	var j_tuck: float = sm_tuck * (1.0 - sm_reach) * float(sty.get("airTuck", 1.0))
+	pelvis.y -= 0.15 * j_tuck
+	pelvis.x += 0.03 * j_tuck
 	# (a squash is NOT folding over the bars: the hips go back and down behind the saddle and the arms push the bars
 	# away, so the bike has room to come up in front of him)
 	# (2026-11-23, sized from slow-motion of a pro off a lip, research/jump: wound right down into the transition, then
@@ -1456,7 +1470,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# chest
 	# (pedalling out of the saddle the chest stays forward over the bars)
 	var ang: float = 0.52 - 0.2 * clampf(-bstick, 0.0, 1.0) - float(sty.pedalChest) * pedal + 0.12 * spr + 0.3 * eff + 0.15 * (comp / 0.3) + 0.08 * air + sty.lean * (1 - 0.5 * pedal) + 0.32 * aero_a + 0.6 * aero_g
-	ang += 0.3 * j_pre - 0.3 * j_ext + 0.06 * j_sq + 0.12 * sm_popfx * air + 0.42 * j_fold - 0.18 * sm_reach
+	ang += 0.3 * j_pre - 0.3 * j_ext + 0.06 * j_sq + (0.12 if old_lp else -0.22) * sm_popfx * air + 0.28 * j_tuck + 0.42 * j_fold - 0.18 * sm_reach
 	# spinning in the air: tall and compact over the bike (chest up, knees in), the head and shoulders lead
 	var spin_style: float = smoothstep(0.8, 3.5, absf(_num(p, "airSpin"))) * air
 	ang = lerpf(ang, 0.42, 0.7 * spin_style)

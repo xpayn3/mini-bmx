@@ -434,6 +434,7 @@ func apply() -> void:
 	if not headless and mon >= 0 and mon < DisplayServer.get_screen_count() and DisplayServer.window_get_current_screen() != mon:
 		DisplayServer.window_set_current_screen(mon)
 	var mode: int = get_v("window_mode")
+	if _test_run and OS.get_environment("BMX_FULLSCREEN") == "": mode = 0   # tests: a normal window, never fullscreen (user, 2026-11-23)
 	var want := DisplayServer.WINDOW_MODE_WINDOWED
 	if mode == 1: want = DisplayServer.WINDOW_MODE_FULLSCREEN
 	elif mode == 2: want = DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN

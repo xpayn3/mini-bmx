@@ -1788,6 +1788,20 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   Open: the stand-tall at the lip's edge is still muted by the pose limits; the lab's energy check counts the auto pop as
   an energy gain.
 
+### Stand tall at the lip, tuck, smooth air control (2026-11-23, the whole research/jump video gone through)
+- Pose (rider.gd, drawing only): `j_tall` = the extension through the lip + popFx just after: the air crouch held off,
+  hips +10 cm, chest up (torso upright in the world while the bike points up); then `j_tuck` = the physics' `air_pull`
+  (new pose input `airPull`): hips -15 cm, chest folded over the bars, the bike tucked under him; it goes as he reaches
+  for the landing. Style key `airTuck` (no slider). `BMX_OLD_LANDPOSE=1` also turns these off.
+- Air control was jagged with both sticks: (1) `Game._read_input`'s axis fade (a ground anti-manual filter) also ran in
+  the air, snapping the off axis 0 -> full over 20 deg of stick (`BMX_OLD_AIRFADE=1`); (2) the in-air lean switched its
+  target at |roll| 0.03 and its spring between leanIn / leanOut / 80 at stick 0.01 / 0.02: now blended, `AIR_LEAN_K` 36
+  critically damped (a moment to get turning, `BMX_OLD_AIRLEAN=1`). Probe `BMX_AIRJERK=1` (+ `BMX_FOLLOW=1 BMX_BIGAIR=1
+  BMX_PAD=1 BMX_BODY=circle2`: both sticks circling in the air), per flight: lean step jerk mean worst 1.35 -> 0.49,
+  rms 0.215 -> 0.107; pitch / yaw unchanged.
+- Test runs are forced windowed (`Settings._test_run`; `BMX_FULLSCREEN=1` overrides). The user wants test windows
+  visible: don't use BMX_MIN any more. BMX_FOLLOW never brakes: it runs wide in later tight corners (test rider only).
+
 ### Developer view of the test playground (`scripts/levels/ride_diag.gd`) - telemetry + sliders for riding code
 - **Only in the test playground** (user decision 2026-11-21: developer tools live in that level, normal rides have none).
   **Layout (2026-11-22, user: "tidy, compact, nothing covering")**: a slim **tuning column** on the left (the TuneCard,
