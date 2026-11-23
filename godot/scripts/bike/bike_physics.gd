@@ -12,6 +12,7 @@ extends RefCounted
 
 const G := 9.81
 const CLIMB := 1.2
+const CRASH_WALL := 0.6   # m: ground rising more than this above the crashed bike in one step is a wall
 const HOP_PUSH := 0.09
 const PUMP_STROKE := 0.3      # m, the legs' pumping stroke from bent (-1) to pushed straight (+1)
 const PUMP_SPAN := 0.6       # m either side of the bottom bracket the ground's curve is read over (the wheels average a bump)
@@ -415,7 +416,12 @@ func _crash_step(dt: float, inp: Dictionary) -> void:
 	v *= exp(-dt * 2.2)
 	if absf(v) < 0.05: v = 0
 	yaw_rate *= exp(-dt * 3); heading += yaw_rate * dt
+	var _x0 := x; var _z0 := z
 	x += f.x * v * dt; z += f.z * v * dt
+	# a wall (canyon side, cliff face) stops the crashed bike: it used to follow the ground straight up it (F8 log 2026-11-23:
+	# 14 m in 0.2 s after a fall into a rope-bridge canyon)
+	if terrain.height(x, z) > y + CRASH_WALL:
+		x = _x0; z = _z0; v *= -0.2
 	for c in terrain.colliders_near(x, z):
 		if c.has("top") and c.top < y + 0.45: continue
 		if c.get("tape", false): continue
