@@ -362,7 +362,7 @@ func _reset_motion() -> void:
 	n_f = NAN; n_r = NAN; n_ref = NAN; lip_state = 0; hf_prev = NAN; hr_prev = NAN; zw_f = NAN; zw_r = NAN
 	bank = 0; body_x = 0; hip_shift = 0; spin = 0; a_drive = 0; charge = 0; hop_charge = 0; lift_t = 0
 	body_xv = 0; hip_v = 0; v_last = NAN; air_lean = 0; air_pull = 0; flip_acc = 0; spin_acc = 0; flip_in = 0
-	body_pw = 0; throw_v = 0; air_w = 0; air_inertia = 1; air_tilt = 0; air_tilt_v = 0; air_yaw = 0; air_tw = 0; air_tw_v = 0; land_jolt = 0
+	body_pw = 0; throw_v = 0; air_w = 0; air_inertia = 1; air_tilt = 0; air_tilt_v = 0; air_yaw = 0; air_tw = 0; air_tw_v = 0; whip_load = 0; _whip_in = 0; land_jolt = 0
 	pivot = 0; pivot_acc = 0; body_in_s = 0; flick = 0; flick_v = 0; _flick_arm = 0; _flick_side = 0; flick_kick = 0
 	nose_a = 0.0; nose_w = 0.0; nose_zone = false; nose_lock = 0.0; nose_push = 0.0; nose_time = 0.0; nose_brake_t = 0.0; _nose_grace = 0.0
 	_tw_t = 9.0; _ts_t = 9.0; _sb_t = 9.0; _sf_t = 9.0; _hop_tap_t = 9.0; _hop_buf = 0.0; _pop_miss = 0.0; _pop_miss_t = 0.0; _gl = 0.0; _gc = 0.0
@@ -1326,13 +1326,20 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 		# air WHIP (rider + bike as two masses): the right stick to the side (short of its edge, which spins) throws the
 		# bike sideways under a body that keeps facing where it flies - the hips kick the bike out, the shoulders stay.
 		# It comes back as the landing nears (the rider straightens it; held to the end it lands sketchy)
-		var whip_t: float = clampf(air_stick.x / 0.8, -1.0, 1.0) * float(T.get("airWhip", 1.1)) * (1.0 - float(T.get("whipReturn", 0.7)) * land_prep * float(T.get("airAssist", 0.6)))
+		# (the whip's size: carved in at the lip (_whip_in) up to airWhip, from the air alone only WHIP_AIR_ONLY - taking off
+		# straight and throwing the stick does little, like the real thing. BMX_OLD_WHIP=1 = always airWhip)
+		var w_cap: float = float(T.get("airWhip", 1.5)) if _OLD_WHIP else lerpf(WHIP_AIR_ONLY, float(T.get("airWhip", 1.5)), absf(_whip_in))
+		var whip_t: float = clampf(air_stick.x / 0.8, -1.0, 1.0) * w_cap * (1.0 - float(T.get("whipReturn", 0.7)) * land_prep * float(T.get("airAssist", 0.6)))
 		var tw_lim: float = maxf(T.airTwist, absf(whip_t) + 0.05)
 		var tw_t := clampf(-sys_slip + whip_t, -tw_lim, tw_lim)
 		# a flat spin turns rider + bike as one: no whip, no hips holding the bike on the travel line (they made the
 		# bike snap out ~60 deg, hang while the body turned, then jump round ~130 deg in a tenth of a second)
 		tw_t *= 1.0 - clampf(absf(stick_yaw) / 1.2, 0.0, 1.0)
-		air_tw_v += (60.0 * (tw_t - air_tw) - 12.0 * air_tw_v) * dt
+		# (thrown out: quick; let go / brought back: it unwinds over ~0.4 s, not a snap)
+		var back_tw: bool = not _OLD_WHIP and absf(tw_t) < absf(air_tw) - 0.02
+		var k_tw: float = 22.0 if back_tw else 60.0
+		var c_tw: float = 2.0 * sqrt(k_tw) * (1.0 if back_tw else 0.77)
+		air_tw_v += (k_tw * (tw_t - air_tw) - c_tw * air_tw_v) * dt
 		air_tw += air_tw_v * dt
 		if absf(air_tw) > tw_lim:
 			air_tw = signf(air_tw) * tw_lim; air_tw_v = 0.0
@@ -1348,7 +1355,7 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 	if not air:
 		_pivot_step(dt, steer_input, brake_k)
 	# (+ a whip lays the bike flatter the further it's thrown, like the real thing)
-	var roll_t: float = roll_keys * T.airRoll + air_stick.x * float(T.get("stickAirRoll", 0.75)) + clampf(air_stick.x / 0.8, -1.0, 1.0) * float(T.get("airWhip", 1.1)) * 0.3
+	var roll_t: float = roll_keys * T.airRoll + air_stick.x * float(T.get("stickAirRoll", 0.75)) + clampf(air_stick.x / 0.8, -1.0, 1.0) * (float(T.get("airWhip", 1.5)) if _OLD_WHIP else lerpf(WHIP_AIR_ONLY, float(T.get("airWhip", 1.5)), absf(_whip_in))) * 0.3
 	if air: roll_t *= 1.0 - 0.6 * clampf(absf(stick_yaw) / 1.2, 0.0, 1.0)   # spinning flat: a stylish lean, not laid right over
 	var lean_t: float = (roll_t if absf(roll_t) > 0.03 else lean * 0.98) if air else clampf(atan(lat_a / G), -T.leanMax + minf(0.0, bk), T.leanMax + maxf(0.0, bk))
 	# (in the air: blended, not switched. The target jumped between the stick's roll and "hold the lean" at |roll| 0.03,
@@ -2239,6 +2246,10 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			pitch_v = air_w + air_tilt_v
 			throw_v = 0.0
 			air_yaw = yaw_rate; air_tw = 0.0; air_tw_v = 0.0
+			# a whip wound up at the lip leaves swinging out (the hips already throwing the rear round)
+			_whip_in = 0.0 if _OLD_WHIP else whip_load
+			air_tw_v = WHIP_KICK * _whip_in
+			whip_load = 0.0
 			if Env.s("BMX_TRICK") != "": print("TAKEOFF v=%.1f vy=%.2f pitch_v=%.2f spin=%.2f natural=%s at=(%.0f,%.0f) slope=%.2f" % [v, vy, pitch_v, air_w, natural, x, z, _g_pitch])   # tests
 			host.on_takeoff()
 		elif not now_air and was_air:
@@ -2514,6 +2525,14 @@ func _step_lip(dt: float, f: Vector3, brake: bool) -> void:
 	else:
 		lip_state = 2; lip_last = lip_t
 	_lip_ago = 0.0 if lip_state == 2 else _lip_ago + dt
+	# (2026-11-23, air step 2) a whip is carved in at the lip, not started in the air: the right stick held to the side in
+	# the last WHIP_WINDOW s before the edge winds it up (whip_load, signed, like the stick); off the lip that sets how far
+	# the bike can be thrown out and gives it its swing (see the take-off and the air step). Decays when not held
+	if not _OLD_WHIP:
+		if not air and lip_state == 2 and lip_last < WHIP_WINDOW and absf(flick_in) > 0.25:
+			whip_load = move_toward(whip_load, clampf(flick_in / 0.8, -1.0, 1.0), dt / WHIP_WIND)
+		elif not air:
+			whip_load = move_toward(whip_load, 0.0, dt * 3.0)
 	# (2026-11-23, user: "small bumps propelled me a lot at my speed, the bike should eat that with the rider"; MX vs ATV
 	# style) hands off he reads the lip: one that height needs about ABSORB_V0 + ABSORB_VH x its height (m/s) to clear;
 	# going faster than that he soaks it up instead (legs and arms take the lip's throw, the bike stays low and quick:
@@ -2821,6 +2840,13 @@ func _pop_apply(dv: float) -> void:
 
 static var _OLD_AUTOPOP := OS.get_environment("BMX_OLD_AUTOPOP") != ""
 static var _OLD_AIRLEAN := OS.get_environment("BMX_OLD_AIRLEAN") != ""
+static var _OLD_WHIP := OS.get_environment("BMX_OLD_WHIP") != ""
+const WHIP_WINDOW := 0.35   # s before the lip: the stick held to the side winds the whip up
+const WHIP_WIND := 0.2      # s of holding it to wind it right up
+const WHIP_KICK := 3.0      # rad/s the bike swings out with off the lip, fully wound
+const WHIP_AIR_ONLY := 0.4  # rad: the most a whip started in the air alone can throw the bike out
+var whip_load := 0.0        # -1..1: the whip wound up into the lip ahead (signed like the stick)
+var _whip_in := 0.0         # this flight's whip load
 static var _OLD_ABSORB := OS.get_environment("BMX_OLD_ABSORB") != ""
 const ABSORB_V0 := 6.0      # m/s: a small lip of height h needs ~ V0 + VH x h (0.56 m kicker ~31 km/h, 1.1 m table ~40)
 const ABSORB_VH := 5.0

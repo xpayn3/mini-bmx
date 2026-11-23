@@ -1847,7 +1847,16 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   0.7; more and the arms can't reach the grips: the shoulder twist does the rest); (4) knees keep LIMB_BAR clear of the bar,
   elbows clear of the OTHER leg (last frame's) in the air. Held whip (air:0.75,0): torso 66 -> 30 deg from vertical, faces
   73 -> 48 deg off the flight; whips on trail jumps: no body clipping beyond the old 0.1 % rear-wheel touch.
-- Next (planned with the user): whips carved in at the lip + held / unwound with the stick, tabletop / scrub, landing legs
+- **Step 2 (done): whips carved in at the lip.** The right stick held to the side in the last `WHIP_WINDOW` 0.35 s before a
+  lip winds the whip up (`whip_load`, signed, full in `WHIP_WIND` 0.2 s); off the lip the bike swings out (`WHIP_KICK` 3
+  rad/s x load) and the whip may go to `airWhip` (now 1.5 rad ~86 deg, Tune VER 27) x load; from the air alone only
+  `WHIP_AIR_ONLY` 0.4 rad (taking off straight and throwing the stick does little, like the real thing). Holding the stick
+  holds it; let go it unwinds over ~0.4 s (softer spring, critically damped), hands-off the landing help still straightens
+  it. dtable_43, stick 0.7: from the air 20 deg; carved in 61 deg, back to 51 by touch-down. dtable_60 / 66 (new, end of
+  the DESIGNED lane: 1.4-1.6 s of air): out to 62-64 deg, unwound to ~25 by touch-down, CLEAN. `BMX_OLD_WHIP=1` = before.
+  Tests: `BMX_BODY=whiplip[:x]` (stick held from the lip spotted + in the air) / `whipair[:x]` (air only), `WHIPT` lines
+  with `BMX_BODY_PRINT=1`; a scripted BMX_BODY stick now rides along with the test rider.
+- Next (planned with the user): tabletop / scrub, landing legs
   by impact speed, landing angle deciding speed (MX vs ATV All Out).
 
 ### Developer view of the test playground (`scripts/levels/ride_diag.gd`) - telemetry + sliders for riding code
