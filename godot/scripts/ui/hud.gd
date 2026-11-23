@@ -89,7 +89,8 @@ func _ready() -> void:
 	# (FPS lives on the bike computer's SYSTEM page)
 	info_l = _corner_label("", UITheme.MUTED, 52)
 	msg_l = MsgView.new()   # BERM +2 km/h, BONK!, tricks...: an achievement pop in the WASTED type
-	msg_l.set_anchors_preset(Control.PRESET_FULL_RECT)
+	msg_l.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	msg_l.size = Vector2(420, 64); msg_l.position = Vector2(-440, 196)   # top right, right under the STYLE points
 	msg_l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(msg_l)
 	biome_l = _corner_label("", UITheme.MUTED, 68)
@@ -1907,9 +1908,7 @@ class MsgView extends Control:
 	const T_SHOW := 1.4
 	const GOLD := Color("ffc93a")
 	const INK := Color(1.0, 0.97, 0.9)
-	const CAP_H := 0.068         # cap height, of the screen height (achievements)
-	const Y := 0.25              # cap centre, of the screen height
-	const Y_LOW := 0.37          # under the area banner while it's up
+	const CAP_PX := 34.0         # cap height in pixels (big events), right-aligned in the top right corner
 	var head := ""
 	var tail := ""
 	var loud := true
@@ -1927,7 +1926,7 @@ class MsgView extends Control:
 		tail = "" if i < 0 else text.substr(i + 1)
 		# all caps = something done (BERM, BACKFLIP!, BONK!); mixed case = an info line
 		loud = text == text.to_upper()
-		head = head.to_upper(); tail = tail.to_upper()
+		if loud: head = head.to_upper(); tail = tail.to_upper()   # info lines keep their case
 		t = 0.0
 		queue_redraw()
 
@@ -1944,15 +1943,27 @@ class MsgView extends Control:
 
 	func _draw() -> void:
 		if head == "" or t >= T_SHOW: return
+		if not loud:   # info lines: small plain text, right-aligned in the same spot under the STYLE points
+			var q := clampf((t - (T_SHOW - 0.35)) / 0.35, 0.0, 1.0)
+			var qa := clampf(t / 0.15, 0.0, 1.0) * (1.0 - q)
+			var uf := UITheme.font(true)
+			var line := head if tail == "" else head + " " + tail
+			var lw := uf.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
+			var at := Vector2(size.x - 6.0 - lw, size.y * 0.5 + 6.0)
+			draw_string(uf, at + Vector2(1.5, 1.5), line, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0, 0, 0, 0.5 * qa))
+			draw_string(uf, at, line, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 1, 1, qa))
+			return
 		var fs := 200
 		var cap := font.get_ascent(fs) * 0.74
-		var sy := size.y * CAP_H * (1.0 if loud else 0.62) / cap
+		var sy := CAP_PX * (1.0 if loud else 0.55) / cap
 		var sx := sy * 0.86                          # squeezed a little, like the banner
 		var tail_k := 0.6                            # the "+2 KM/H" part is smaller
 		var gap := fs * 0.22
 		var hw := font.get_string_size(head, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 		var tw := 0.0 if tail == "" else font.get_string_size(tail, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x * tail_k + gap
 		var w := hw + tw
+		var fit := minf(1.0, (size.x - 16.0) / (w * sx))   # long names shrink to fit the corner
+		sx *= fit; sy *= fit
 		var k := clampf(t / 0.32, 0.0, 1.0)          # in
 		var e := _back(k) if loud else k * k * (3.0 - 2.0 * k)
 		var out := clampf((t - (T_SHOW - 0.35)) / 0.35, 0.0, 1.0)
@@ -1960,8 +1971,8 @@ class MsgView extends Control:
 		var sc := lerpf(1.9 if loud else 1.15, 1.0, e)
 		var rot := lerpf(-0.09, 0.0, e) if loud else 0.0
 		var hot := clampf(1.0 - (t - 0.1) / 0.35, 0.0, 1.0) if loud else 0.0
-		var cy := size.y * lerpf(Y, Y_LOW, y_k) - out * size.y * 0.02
-		var c := Vector2(size.x * 0.5, cy)
+		var cy := size.y * 0.5 - out * 6.0
+		var c := Vector2(size.x - 6.0, cy)           # right edge: the text grows leftwards from here
 		var outline := Color(0.08, 0.05, 0.03, 0.75 * a)
 		var shadow := Color(0, 0, 0, 0.35 * a)
 		var ol := 18
@@ -1973,11 +1984,10 @@ class MsgView extends Control:
 				var half := w * sx * 0.5
 				var len := size.x * 0.12 * se
 				var th := maxf(2.0, size.y * 0.0035) * (1.0 - sk)
-				for sd: float in [-1.0, 1.0]:
-					var x0 := c.x + sd * (half + size.x * 0.012 + se * size.x * 0.03)
-					draw_line(Vector2(x0, cy), Vector2(x0 + sd * len, cy), Color(GOLD, (1.0 - sk) * a), th, true)
+				var x0 := c.x - 2.0 * half - 8.0 - se * 10.0   # one streak shooting out to the left of the text
+				draw_line(Vector2(x0, cy), Vector2(x0 - len, cy), Color(GOLD, (1.0 - sk) * a), th, true)
 		draw_set_transform(c, rot, Vector2(sx * sc, sy * sc))
-		var base := Vector2(-w * 0.5, cap * 0.5)
+		var base := Vector2(-w, cap * 0.5)
 		var hc := INK.lerp(Color.WHITE, hot)
 		hc.a = a
 		draw_string_outline(font, base + Vector2(6, 12), head, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, ol, shadow)
