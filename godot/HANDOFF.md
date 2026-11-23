@@ -751,7 +751,8 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
     i.e. twice the hit; heavy landing still starts at `landHeavy` x the plain limit and runs up to the forgiven one. The
     biggest hit of a landing is kept through its little bounces (`_land_hit`; a bounce cleared it, so forgiven hits
     read as nothing). The user's 7 m to flat at 63 km/h: SLAM -> heavy 0.4 / OOF, rides on. Slider Ride > Jumps > Landing.
-  - **Lip launch cap (2026-11-22, F8 log: "lip shot me up 50 m")**: 59 km/h into a ~43 deg natural face, the front left,
+  - **Crashed bike stops at walls (2026-11-23, F8 log: "shot up 1 km")**: fell 15 m into a rope-bridge canyon, and `_crash_step` set y to the ground under the sliding bike every tick, so it climbed the canyon wall 14 m in 0.2 s (drawn bike / camera / ragdoll with it). Now ground > `CRASH_WALL` 0.6 m above the bike = a wall: move reverted, speed x -0.2. Not reproduced in a test yet (the fall itself: seed 80019, canyon at s=547).
+- **Lip launch cap (2026-11-22, F8 log: "lip shot me up 50 m")**: 59 km/h into a ~43 deg natural face, the front left,
     the frame tipped to 83 deg on the rear and the rear spring pumped the climb to 16.4 m/s (> the 15.4 the bike had):
     off at 72 deg, 15 m up. At take-off the climb is held to `v` x sin(lip + `LIP_SPARE` 0.15) (lip = the steeper of the
     last two-wheel slope and the rear's ground; floor 2.5 m/s), and where cut the frame leaves along the flight. Same
