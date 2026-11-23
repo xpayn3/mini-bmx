@@ -18,6 +18,8 @@ global uniform vec4 grime_dust;   // rgb = dust colour, a = how dusty 0..1
 global uniform vec4 grime_age;    // x = how dry the mud is 0 (fresh) .. 1 (crust), y = how much crust flaked off
 global uniform vec4 grime_wf;     // front tyre: axle in bike-root space, radius
 global uniform vec4 grime_wr;     // rear tyre
+global uniform vec4 grime_wf0;    // the tyres where they were when the parts were pinned (w = 0: not yet):
+global uniform vec4 grime_wr0;    // pinned parts measure the spray against these, so it stays put on them
 uniform sampler3D cav_tex : filter_linear, repeat_disable;   // crevice map (grime.gd _cav_work)
 uniform vec3 cav_min = vec3(0.0);
 uniform vec3 cav_size = vec3(1.0);
@@ -48,6 +50,7 @@ varying vec3 v_n;       // its normal there
 varying float v_sp;     // 1 = v_p / v_n are known (not the skinned torso / fingers)
 varying float v_hgt;
 varying float v_tread;
+varying float v_rest;   // 1 = pinned: use the tyres as they were at pin time
 
 float gr_hash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
 float gr_noise(vec3 x) {
@@ -57,12 +60,19 @@ float gr_noise(vec3 x) {
 }
 
 void vertex() {
-	vec3 rest = grime_pin > 1.5 ? CUSTOM0.xyz : VERTEX;
+	vec3 rest = (grime_pin > 1.5 && grime_pin < 2.5) ? CUSTOM0.xyz : VERTEX;
 	v_local = rest;
 	v_tread = smoothstep(0.5, 0.85, 1.0 - abs(normalize(NORMAL).z));
 	v_hgt = grime_pin > 0.5 ? dot(grime_hrow, vec4(rest, 1.0)) : (grime_root * (MODEL_MATRIX * vec4(VERTEX, 1.0))).y;
 	v_sp = 1.0;
-	if (grime_pin > 1.5) {
+	v_rest = (grime_pin > 0.5 && grime_wf0.w > 0.0) ? 1.0 : 0.0;
+	if (grime_pin > 2.5) {
+		// flapping parts, rebuilt every frame (race number, strap tails, hair): their vertices move, so the noise
+		// comes from what stays the same on them (the vertex's index, its UV) and there is no dirt map at all
+		float id = fract(sin(float(VERTEX_ID) * 12.9898) * 43758.5453);
+		v_local = vec3(UV * 6.0, id * 2.0);
+		v_hgt = 0.9; v_p = vec3(0.0, v_hgt, 0.0); v_n = vec3(0.0, 1.0, 0.0); v_sp = 0.0;
+	} else if (grime_pin > 1.5) {
 		v_p = vec3(0.0, v_hgt, 0.0); v_n = vec3(0.0, 1.0, 0.0); v_sp = 0.0;
 	} else if (grime_pin > 0.5) {
 		vec4 r4 = vec4(rest, 1.0);
@@ -112,12 +122,14 @@ void fragment() {
 	float hgt = clamp(v_hgt / 1.5, 0.0, 1.0);
 	// the dirt map
 	vec3 sn = normalize(v_n);
-	float spr = v_sp * max(spray(grime_wf, v_p, sn), spray(grime_wr, v_p, sn));
+	vec4 wf = v_rest > 0.5 ? grime_wf0 : grime_wf;
+	vec4 wr = v_rest > 0.5 ? grime_wr0 : grime_wr;
+	float spr = v_sp * max(spray(wf, v_p, sn), spray(wr, v_p, sn));
 	vec3 uvw = (v_p + sn * 0.07 - cav_min) / cav_size;
 	float inside = step(0.0, min(uvw.x, min(uvw.y, uvw.z))) * step(max(uvw.x, max(uvw.y, uvw.z)), 1.0);
 	float cav = v_sp * cav_on * inside * smoothstep(0.2, 0.65, texture(cav_tex, clamp(uvw, 0.0, 1.0)).r);
 	float lowk = smoothstep(0.9, 0.15, v_hgt);
-	float fwd_ax = sign(grime_wf.x - grime_wr.x + 1e-4);
+	float fwd_ax = sign(wf.x - wr.x + 1e-4);
 	float under = v_sp * max(-sn.y, 0.0) * lowk;
 	float front = v_sp * max(sn.x * fwd_ax, 0.0) * lowk;
 	float top = v_sp * max(sn.y, 0.0);

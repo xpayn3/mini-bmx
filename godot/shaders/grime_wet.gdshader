@@ -14,14 +14,37 @@ uniform sampler2D depth_tex : hint_depth_texture, filter_nearest;
 const float TRIM_KNEE = 0.45;     // scene-linear brightness (brightest channel) left alone
 const float TRIM_SOFT = 0.5;      // how gently it rolls off above the knee (smaller = flatter)
 
-varying vec3 v_local;
+global uniform vec4 grime_wf0;   // the front axle when the parts were pinned (w = 0: not yet)
+// the same pinning as the mud pass (grime.gd _pin, shaders/grime_mud): the water line and the drop columns are
+// measured where the point sat in the riding pose, so they stay on the leg / arm as it moves (they used to be
+// worked out from where it is now: the line and the drops slid over the pedalling legs and the swinging fork)
+instance uniform float grime_pin = 0.0;
+instance uniform vec4 grime_hrow = vec4(0.0);
+instance uniform vec4 grime_r0 = vec4(0.0);
+instance uniform vec4 grime_r2 = vec4(0.0);
+
 varying vec3 v_root;
+varying float v_ground;
 
 float wt_hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 
 void vertex() {
-	v_local = VERTEX;
-	v_root = (grime_root * (MODEL_MATRIX * vec4(VERTEX, 1.0))).xyz;
+	vec4 live = grime_root * (MODEL_MATRIX * vec4(VERTEX, 1.0));
+	v_root = live.xyz;
+	v_ground = grime_wf.y - grime_wf.w;
+	if (grime_pin > 2.5) {
+		// flapping parts (race number, strap tails, hair): no fixed shape, a steady place from UV + vertex index
+		float id = fract(sin(float(VERTEX_ID) * 12.9898) * 43758.5453);
+		v_root = vec3(UV.x * 0.3, 1.2 + UV.y * 0.05, id * 0.4);
+		v_ground = 0.0;
+	} else if (grime_pin > 0.5) {
+		vec3 rest = grime_pin > 1.5 ? CUSTOM0.xyz : VERTEX;
+		vec4 r4 = vec4(rest, 1.0);
+		float hy = dot(grime_hrow, r4);
+		// skinned torso / fingers: only their height is known, the columns run on the rest shape
+		v_root = grime_pin > 1.5 ? vec3(rest.x * 0.3, hy, rest.z * 0.3) : vec3(dot(grime_r0, r4), hy, dot(grime_r2, r4));
+		if (grime_wf0.w > 0.0) v_ground = grime_wf0.y - grime_wf0.w;
+	}
 	POSITION = PROJECTION_MATRIX * (MODELVIEW_MATRIX * vec4(VERTEX, 1.0));
 	POSITION.z += 0.00008 * POSITION.w;
 }
@@ -29,7 +52,7 @@ void vertex() {
 void fragment() {
 	// the water creeps up from the ground: grime.y is how far it has got (0..1 = ground .. above the helmet), and
 	// it dries from the top down. Not the whole bike + rider at once (2026-11-23)
-	float h = v_root.y - (grime_wf.y - grime_wf.w);
+	float h = v_root.y - v_ground;
 	float level = mix(-0.05, 1.95, grime.y);
 	float w = clamp(grime.y * 1.6, 0.0, 1.0) * (1.0 - smoothstep(level - 0.3, level + 0.05, h));
 	// running drops: columns of beads sliding down in bike-root space

@@ -360,6 +360,13 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   `grime_wf` axle - radius, top 1.95 m; dries top down), builds over ~3-5 s with speed; wet film roughness 0.32 / 0.1;
   washing is slow (mud ~10 s, dust ~4 s at 30 km/h); a wet bike collects no dust and mud no faster than a dusty one; no
   flying drips (`drips` never emits).
+  **Dirt / water stay on the limbs (2026-11-23, user: "dirt sliding on limbs, water also")**: the wet pass now uses the
+  mud pass's pinning (`grime_pin` / `grime_hrow` / `grime_r0` / `grime_r2`: where the point sat in the riding pose), so
+  the water line and the drop columns stay on the leg / fork lower as it moves (they were worked out from where it is
+  now and slid over the pedalling legs). Pinned parts measure the tyre spray and the ground line against the axles at
+  pin time (globals `grime_wf0` / `grime_wr0`, `Grime._set_rest_axles`), not the live ones that move with the fork /
+  swingarm. Parts rebuilt every frame (race number, strap tails, helmet flap, hair, braid: `Grime._is_flap`) get
+  `grime_pin` 3: a cheap blotch mask from UV + `VERTEX_ID`, no dirt map. Test `BMX_WET_HOLD=0.45` keeps the bike that wet.
   **Blur while riding (2026-11-23, user: "it blurs stuff in front of our view ... only on the side, like NFS")**: the
   tilt-shift depth of field in rides now only softens the distance (far blur from 60 m, full by ~150 m, over the
   100-124 m decoration hand-over; distance haze from cam.dist + 55, density 0.7; no near blur; the title

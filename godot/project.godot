@@ -125,6 +125,14 @@ grime_wr={
 "type": "vec4",
 "value": Vector4(0, 0, 0, 0)
 }
+grime_wf0={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+grime_wr0={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
 grime_root={
 "type": "mat4",
 "value": Projection(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
