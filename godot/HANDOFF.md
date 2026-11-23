@@ -1833,6 +1833,23 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   was 26); tables unchanged. `BMX_OLD_ABSORB=1` = off. Probe `BMX_PULL_PROBE=1` prints `ABSORB` / `TAKEOFF` lines.
   `tools/feat_at_probe.gd -- <seed> x,z ...` names the route feature at a spot (grows the trail there).
 
+### Air step 1: the rider stays upright and facing the flight while the bike twists / lays over (2026-11-23)
+- Research (docs in chat; sources: coaching guides, Tan 2014 in the library, MX vs ATV / Descenders): whips are carved in
+  at the lip; in the air the rider only moves the bike against his body (pitch ~80 % bike, yaw ~55 %, roll easy); the
+  shoulders / eyes stay on the trail. The physics already twisted (air_tw) and laid the bike (56 deg, 57 deg whip) but the
+  DRAWN rider went with it: torso 60-66 deg from vertical (measured off the skeleton: `BMX_BODYUP=1` prints the torso's
+  tilt from vertical, which way it faces vs the flight, the head's side offset; `BMX_ROLL_PROBE=1` the body roll terms).
+- Causes + fixes (rider.gd, drawing only, only in the air, `BMX_OLD_AIRBODY=1` = before): (1) the ground caps (counter
+  0.85, hips 0.85 / chest 0.95 rad, hips box z 0.22 m, torso sideways 0.6 rad) open to AIR_COUNTER 1.4 / AIR_HIP_ROLL 1.05 /
+  AIR_HIP_SIDE 0.5 m / AIR_SIDE 1.2 with the air blend; (2) the roll pivoted about the pedals, swinging the chest 0.5 m from
+  the bars - the arm-reach limit pulled it straight back: in the air it pivots about the chest (hands / chest stay at the
+  bars, hips and legs swing out, knees over); (3) in a whip the torso's lean turns back against the bike's yaw (AIR_FACE
+  0.7; more and the arms can't reach the grips: the shoulder twist does the rest); (4) knees keep LIMB_BAR clear of the bar,
+  elbows clear of the OTHER leg (last frame's) in the air. Held whip (air:0.75,0): torso 66 -> 30 deg from vertical, faces
+  73 -> 48 deg off the flight; whips on trail jumps: no body clipping beyond the old 0.1 % rear-wheel touch.
+- Next (planned with the user): whips carved in at the lip + held / unwound with the stick, tabletop / scrub, landing legs
+  by impact speed, landing angle deciding speed (MX vs ATV All Out).
+
 ### Developer view of the test playground (`scripts/levels/ride_diag.gd`) - telemetry + sliders for riding code
 - **Only in the test playground** (user decision 2026-11-21: developer tools live in that level, normal rides have none).
   **Layout (2026-11-22, user: "tidy, compact, nothing covering")**: a slim **tuning column** on the left (the TuneCard,

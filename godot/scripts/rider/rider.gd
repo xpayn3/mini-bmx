@@ -874,6 +874,14 @@ func _clip_probe(p: Dictionary) -> void:
 
 const LIMB_TORSO := 0.18   # m: a thigh's centre line from the torso's (their two thicknesses)
 const LIMB_LIMB := 0.105   # m: a forearm's from a thigh's / shin's
+const AIR_COUNTER := 1.4    # rad: in the air the body may stay this far upright from a laid-over bike (chest)
+const AIR_HIP_ROLL := 1.05  # rad: ... the hips
+const LIMB_BAR := 0.12      # m: knees keep this clear of the handlebar line in the air
+const AIR_FACE := 0.7       # in a whip the torso's lean turns back this share of the bike's yaw (faces the flight)
+const AIR_HIP_SIDE := 0.5   # m: the hips' sideways room in the bike's frame in the air (ground: 0.22)
+const AIR_SIDE := 1.2       # rad: ... the torso bent sideways from the bike's up (ground: 0.6)
+static var _ROLL_PROBE := OS.get_environment("BMX_ROLL_PROBE") != ""
+static var _OLD_AIRBODY := OS.get_environment("BMX_OLD_AIRBODY") != ""
 const BAR_CHEST := 0.32   # m: the chest joint stays this far from the middle of the bar (side view)
 const BAR_HEAD := 0.31    # m: and the head's centre this far (helmet + chin bar)
 var bar_stats := [0.0, 0.0, 0.0, 9.0, 9.0]   # tests: deepest it was held out of the bar, frames held, frames, least chest / head distance
@@ -1631,7 +1639,10 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# the new angle. Through a crossover (rolling fast near upright) the legs extend: the rider unweights the
 	# bike between turns and sinks into the next one
 	var bl := _num(p, "lean") - _num(p, "rockRoll")   # the bike's lean without the pedalling rock
-	var roll_t := bl - clampf(_num(p, "counter"), -0.85, 0.85)
+	# (in the air the body stays upright over the centre of mass while the bike is laid right over under it: a tabletop /
+	# whip, 2026-11-23. The ground caps (the legs crossing the frame past ~50 deg) open up to AIR_* with the air blend)
+	var c_cap: float = lerpf(0.85, AIR_COUNTER, air) if not _OLD_AIRBODY else 0.85
+	var roll_t := bl - clampf(_num(p, "counter"), -c_cap, c_cap)
 	var hr := minf(dt, 0.05)
 	if not roll_init:
 		roll_p = roll_t; roll_c = roll_t; roll_pv = 0.0; roll_cv = 0.0; knee_lean = bl; roll_init = true
@@ -1667,8 +1678,11 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	pelvis.y -= 0.03 * sink
 	chest.y -= 0.035 * sink
 	chest.x += 0.02 * sink
-	var cr := clampf(bl - roll_p, -0.85, 0.85)   # past ~50 deg the hips swing off the bike and the legs cross the frame
-	var cr_c := clampf(bl - roll_c, -0.95, 0.95)
+	var hip_cap: float = lerpf(0.85, AIR_HIP_ROLL, air) if not _OLD_AIRBODY else 0.85
+	var ch_cap: float = lerpf(0.95, AIR_COUNTER, air) if not _OLD_AIRBODY else 0.95
+	var cr := clampf(bl - roll_p, -hip_cap, hip_cap)   # past ~50 deg the hips swing off the bike and the legs cross the frame (in the air: allowed, the knees go over)
+	var cr_c := clampf(bl - roll_c, -ch_cap, ch_cap)
+	if _ROLL_PROBE and int(t * 4.0) != int((t - dt) * 4.0): print("ROLLP air=%.2f bike=%.1f counter=%.1f roll_t=%.1f hips=%.1f chest=%.1f cr=%.1f cr_c=%.1f" % [air, rad_to_deg(bl), rad_to_deg(_num(p, "counter")), rad_to_deg(roll_t), rad_to_deg(roll_p), rad_to_deg(roll_c), rad_to_deg(cr), rad_to_deg(cr_c)])
 	var unweight: float = ROLL_UNWEIGHT * float(sty.get("leanUnweight", 1.0)) * clampf(absf(roll_pv) / 1.6, 0.0, 1.0) * (1.0 - smoothstep(0.15, 0.6, absf(roll_p))) * (1.0 - air)
 	pelvis.y += unweight; chest.y += unweight * 0.8
 	# pro flow (Rider › Motion, flowSink): after a quick roll into a lean the rider weights the bike as it settles -
@@ -1678,6 +1692,13 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var settle: float = clampf(flow_e / 1.6, 0.0, 1.0) * smoothstep(0.15, 0.5, absf(roll_p)) * clampf(1.0 - re / 2.5, 0.0, 1.0) * (1.0 - air)
 	var fsink: float = 0.04 * settle * float(sty.get("flowSink", 1.0))
 	pelvis.y -= fsink; chest.y -= fsink * 0.9; chest.x += fsink * 0.4
+	# (in the air the roll pivots about the chest, not the pedals: the hands stay on the grips and the chest at the bars,
+	# the hips and legs swing out under him - knees over to one side - so the torso stands upright in the world over a
+	# laid-over bike: a tabletop / whip. Turned about the pedals the chest went ~0.5 m out from the bars, the arm-reach
+	# limit pulled it straight back and the rider lay over with the bike. Ground: unchanged)
+	var air_piv: float = 0.0 if _OLD_AIRBODY else air
+	var pel0 := pelvis
+	var ch0 := chest
 	if cr != 0.0 or cr_c != 0.0:
 		var c := cos(cr)
 		var sn := sin(cr)
@@ -1692,7 +1713,22 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		dz = chest.z
 		chest.y = y0 + dy * c - dz * sn
 		chest.z = dy * sn + dz * c
+		if air_piv > 0.0:
+			# about the chest: the chest stays (a little toward the low side), the torso turns by the chest's roll
+			var ty := pel0.y - ch0.y
+			var tz := pel0.z - ch0.z
+			var ca := cos(cr_c)
+			var sa := sin(cr_c)
+			var ch_a := ch0 + Vector3(0.0, 0.0, 0.08 * sin(cr_c))
+			var pel_a := Vector3(pel0.x, ch_a.y + ty * ca - tz * sa, ch_a.z + ty * sa + tz * ca)
+			pelvis = pelvis.lerp(pel_a, air_piv)
+			chest = chest.lerp(ch_a, air_piv)
 		pelvis.y -= absf(cr) * 0.12 * float(sty.turnLow)
+	# (in a whip the bike is yawed under him; his torso keeps facing the flight: its lean turns back against the bike's
+	# yaw, AIR_FACE of it, about the bike's up through the hips. The shoulders' own twist (below) does the rest)
+	var awh_pos: float = clampf(_num(p, "airWhip"), -1.4, 1.4) * air * (0.0 if _OLD_AIRBODY else AIR_FACE)
+	if absf(awh_pos) > 1e-3:
+		chest = pelvis + Basis(Vector3.UP, -awh_pos) * (chest - pelvis)
 		# in the air a stick lean: the hips move out against the bike (the legs push it over)
 		chest.x += absf(cr) * 0.05
 	# foot down at a stop: the bike leans onto the foot, the body stays nearly upright over it,
@@ -1997,6 +2033,10 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		ik[0] = _knee_clear(hp, ankle, ik[0], side)
 		# knees never into the chest / belly: folded right down they go out round it
 		ik[0] = _swing_clear(hp, ik[1], ik[0], side, [pelvis.lerp(chest, 0.35), chest], LIMB_TORSO)
+		# (in the air the knees come up over the top tube in a tabletop / whip: never through the handlebar)
+		var hL = p.get("handL"); var hR = p.get("handR")
+		if air > 0.3 and hL is Vector3 and hR is Vector3 and not _OLD_AIRBODY:
+			ik[0] = _swing_clear(hp, ik[1], ik[0], side, [hL, hR], LIMB_BAR)
 		if knee_dbg.size() < 40 and _KNEE_PROBE and knee[i].position.distance_to(ik[0]) > 0.08:
 			knee_dbg.append([i, snappedf(_num(p, "pitch"), 0.01), knee[i].position.snapped(Vector3.ONE * 0.01), hp.snapped(Vector3.ONE * 0.01), ankle.snapped(Vector3.ONE * 0.01), ik_raw.snapped(Vector3.ONE * 0.01), (ik[0] as Vector3).snapped(Vector3.ONE * 0.01)])
 		set_limb(thigh[i], hp, ik[0])
@@ -2023,6 +2063,10 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		_bd_prev[2 + i] = ika[2]
 		# arms never through the leg on their side (a deep lean, braking hard into a turn): the elbow goes out round it
 		ika[0] = _swing_clear(shp, ika[1], ika[0], side, [hp.lerp(ik[0], 0.3), ik[0], ik[0], ik[1]], LIMB_LIMB)
+		# (... nor through the OTHER leg, which comes over to this side when the hips swing out in the air; last frame's)
+		if air > 0.3 and not _OLD_AIRBODY and J.size() >= 15:
+			var o := 1 - i
+			ika[0] = _swing_clear(shp, ika[1], ika[0], side, [J[9 + o * 3].lerp(J[10 + o * 3], 0.3), J[10 + o * 3], J[10 + o * 3], J[11 + o * 3]], LIMB_LIMB)
 		set_limb(upper_arm[i], shp, ika[0])
 		elbow[i].position = ika[0]
 		hand = ika[1]   # out of reach: the hand stays at the end of the arm
@@ -2143,7 +2187,8 @@ func _constrain(pelvis: Vector3, chest: Vector3, p: Dictionary, sty: Dictionary,
 	# bike's up (back / forward, sideways) and never folds below the hips
 	pelvis.x = clampf(pelvis.x, -0.6, 0.22)
 	pelvis.y = clampf(pelvis.y, 0.42, 1.08)
-	pelvis.z = clampf(pelvis.z, -0.22, 0.22)
+	var z_cap: float = lerpf(0.22, AIR_HIP_SIDE, clampf(_num(p, "air"), 0.0, 1.0)) if not _OLD_AIRBODY else 0.22   # (air: an upright body over a laid-over bike)
+	pelvis.z = clampf(pelvis.z, -z_cap, z_cap)
 	if probe: _pp_mark(2, pelvis, chest)
 	# ---- never through the handlebar. The chest and the helmet keep clear of the bar / stem (the middle of the two
 	# grips), seen from the side: whatever leans the rider onto it (a sprint from a standstill, the tuck, a squash, a
@@ -2200,7 +2245,8 @@ func _constrain(pelvis: Vector3, chest: Vector3, p: Dictionary, sty: Dictionary,
 	# forward lean from upright. A chest at or below the hips counts as folded FORWARD whichever side of the
 	# hips it is (atan2 there flips between +-180 deg as it crosses over: the torso snapped back and forth)
 	var f_ang := 1.4 if tv0.y < 0.05 else clampf(atan2(tv0.x, tv0.y), -0.45, 1.4)
-	var s_ang := clampf(asin(clampf(tv0.z / tl0, -1.0, 1.0)), -0.6, 0.6)   # sideways
+	var s_cap: float = lerpf(0.6, AIR_SIDE, clampf(_num(p, "air"), 0.0, 1.0)) if not _OLD_AIRBODY else 0.6
+	var s_ang := clampf(asin(clampf(tv0.z / tl0, -1.0, 1.0)), -s_cap, s_cap)   # sideways (more in the air: the bike laid under him)
 	chest = pelvis + Vector3(sin(f_ang) * cos(s_ang), cos(f_ang) * cos(s_ang), sin(s_ang)) * tl0
 	if probe: _pp_mark(5, pelvis, chest)
 	# the torso never stretches or squashes: past its length range the hips follow the chest

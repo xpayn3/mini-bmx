@@ -2800,6 +2800,16 @@ func _process(dt: float) -> void:
 			print("LIPSHOT %d pitch=%.0f prep=%.2f air=%s compress=%.2f absorb=%.2f vy=%.1f crouch=%.2f wait=%.2f pop_fx=%.2f squash=%.2f pull=%.2f" % [_lip_shots, rad_to_deg(st.pitch), st.prep, st.air, st.compress, st.body_y - st.y, st.vy, st.crouch, st.pop_wait, st.pop_fx, st.squash, st.air_pull])
 			_lip_shots += 1
 	if Env.s("BMX_LANDBODY") != "": _landbody_probe(st)
+	if _BODYUP and int(t * 4.0) != int((t - get_process_delta_time()) * 4.0) and rider and rider.skeleton:   # tests: the drawn torso's tilt in the world
+		var gt: Transform3D = rider.global_transform
+		var hp: Vector3 = gt * rider.skeleton.bone_rider("Hips").origin
+		var ch: Vector3 = gt * rider.skeleton.bone_rider("UpperChest").origin
+		var hd_w: Vector3 = gt * rider.skeleton.bone_rider("Head").origin
+		var up := (ch - hp).normalized()
+		var fw := Vector3(cos(st.course if not is_nan(st.course) else st.heading), 0, -sin(st.course if not is_nan(st.course) else st.heading))
+		var sd := fw.cross(Vector3.UP).normalized()
+		var hz := Vector2(up.dot(fw), up.dot(sd))
+		print("BODYUP air=%s bike_lean=%.0f whip_yaw=%.0f | torso tilt from vertical=%.0f, faces %.0f deg off the flight | head %.2f m to the side" % [st.air, rad_to_deg(st.bike_lean), rad_to_deg(st.slip), rad_to_deg(acos(clampf(up.y, -1, 1))), rad_to_deg(atan2(hz.y, hz.x)), (hd_w - rig.global_position).dot(sd)])
 	if Env.s("BMX_LAND_SHOT") != "" and _land_shots < 12:   # tests: 12 shots, 0.06 s apart, from just before a touch-down
 		if _land_shots == 0 and st.air and st.air_time > 0.5 and st.land_prep > 0.6: _land_t = t
 		if _land_t >= 0.0 and t - _land_t >= _land_shots * 0.06:
@@ -3133,6 +3143,7 @@ func _landbody_probe(st) -> void:
 ## tests (BMX_AIRJERK=1): how smooth the bike's attitude is in the air: per flight, the worst step-to-step change of
 ## its pitch / lean / yaw rate (rad/s per physics step: a jerk shows as a spike) and of the stick values the physics got
 static var _AIRJERK := OS.get_environment("BMX_AIRJERK") != ""
+static var _BODYUP := OS.get_environment("BMX_BODYUP") != ""
 static var _OLD_AIRFADE := OS.get_environment("BMX_OLD_AIRFADE") != ""
 var _aj := {}
 func _air_jerk_probe(inp: Dictionary) -> void:
