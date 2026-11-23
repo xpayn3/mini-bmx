@@ -206,6 +206,8 @@ var _crash_log := Env.s("BMX_CRASH_LOG") != ""
 var front_air := false; var rear_air := false; var c_f := true; var c_r := true
 var pitch_w := NAN; var stamina := 1.0; var tired := false; var sprint := 0.0
 var spin := 0.0; var a_drive := 0.0
+var _nR_s := NAN      # the rear tyre's load as its grip feels it (eased: tyre relaxation, see _grip_step)
+var _OLD_GRIP := OS.get_environment("BMX_OLD_GRIP") != ""   # (tests: the grip before the off-trail fix)
 var n_f := NAN; var n_r := NAN; var n_ref := NAN
 var flow := 0.0; var flow_t := 0.0
 var spun_out := false
@@ -804,6 +806,9 @@ func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_wa
 		var grind := 1.0 if gear < 0 else 0.35 + 0.65 * smooth01((cad - 0.15) / 0.7)
 		var drive: float = (throttle if (rear_down and not (v < -0.3 and rev_cap > 3.0)) else 0.0) * minf(T.pedalLaunch * p_mul / ts / gk, T.pedalPower * p_mul / vp) * grind * clampf((p_top - v) / 2.5, 0, 1)
 		var drive_cap := mu_r * nR
+		# (the rear's grip follows its load only after a little rolling: a bump that unloads it for a few cm doesn't
+		# empty its friction circle. _nR_s is eased in _grip_step)
+		if not _OLD_GRIP and not is_nan(_nR_s): drive_cap = mu_r * _nR_s
 		if drive > drive_cap:
 			spin = minf(1.0, (drive - drive_cap) / 3); drive = drive_cap + (drive - drive_cap) * 0.15
 		a_long = absf(drive)
@@ -1194,6 +1199,14 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 		whip_hold = maxf(wk, whip_hold - dt / maxf(0.1, float(T.get("whipCatch", 0.9))))
 		catch_k *= 1.0 - 0.85 * whip_hold
 		catch_k *= 1.0 + float(T.get("reflexCatch", 1.5)) * float(T.get("riderSkill", 1.0)) * risk   # reflex: fights a slide harder the worse it gets
+		# a slide nobody asked for (no locked rear, no whip, no wheelspin sprint): a skilled rider steers into it and
+		# weights the outside pedal, so it is held near the tyres' own slip angle instead of growing out of the turn
+		# (slideHold; the plain catch above needs grip to pull with and fades out on loose ground). Asked-for slides
+		# (rear brake past locking, whip, sprint spin) are left alone
+		if not _OLD_GRIP:
+			var asked: float = maxf(maxf(rear_lock, whip_hold), spin * sprint)
+			var out_k: float = smooth01((absf(slip - _squirm) - 0.07) / 0.12)
+			catch_k += float(T.get("slideHold", 6.0)) * out_k * (1.0 - asked) * smooth01((va - 2.0) / 3.0)
 		var slip_rate := (excess * share + slip_w) * (1.0 - 0.75 * whip_hold) - (slip - _squirm) * catch_k
 		if whip_hold > 0.0:
 			var drift_t: float = whip_side * minf(float(T.get("whipDrift", 0.42)), T.slipMax * 0.6) * smooth01((va - 3.0) / 4.0) * wk
@@ -2913,6 +2926,10 @@ func _grip_step(dt: float, va: float, mu: float, nR: float, u_lat_in: float) -> 
 	var patch: float = 1.0 - float(T.get("gripLoose", 0.5)) * 0.4 * loose
 	# the rear tyre's friction circle: what braking / driving uses along the bike isn't there sideways
 	var lock: float = rear_lock   # the rear brake past what the tyre holds (the brakes, longitudinal step)
+	# (its grip follows the load over ~0.08 s, a few tens of cm rolled: over bumpy grass the rear's load swung 2..17
+	# m/s^2 every few steps and each light moment let the rear step out a little further, never coming back)
+	_nR_s = nR if is_nan(_nR_s) else _nR_s + (nR - _nR_s) * minf(1.0, dt / 0.08)
+	if not _OLD_GRIP: nR = _nR_s
 	var r_cap := maxf(0.3, mu * nR)
 	var use := clampf(_a_rear / r_cap, 0.0, 1.0)   # its own drive / brake only (the front brake is the front's)
 	use = maxf(use, lock)

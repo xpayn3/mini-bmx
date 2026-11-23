@@ -186,6 +186,18 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   legs (`legStiff` 60: +40 % flights). Left: on ground that rough at 55-65 km/h most flights are real (crests past -1 g),
   and about half the rest are the soft legs (0.9 Hz) letting the body lag, reaching full extension and jerking the bike
   up (inelastic merge at `legExt`); not changed.
+- **Off the trail the rear holds unless asked (2026-11-23, user: "some are sliding too much", riding off the trail;
+  "the outside must be enjoyable too")**. Measured with the new `slope_stress.tscn -- slide=1 [verbose=1 trace=1]`
+  (free riding on grass / trail / sand, flat and bumpy: weaves, half lock, full lock held, pedalling in a turn, keys
+  left / right; `SLIDE` = time the rear is past its slip angle with nothing asking). Trail: never out. Grass bumpy:
+  6 % of the time past 8 deg, holding a turn the rear grew to 25-60 deg and the speed died; sand to 80 deg + WASHED
+  OUT. Cause: over bumpy ground the rear's load swung 2..17 m/s^2 every few steps; each light moment the pedalling
+  emptied its friction circle (sideways grip 0) and the slide ratcheted out, the catch (x grip^2) never got it back.
+  Fix: (1) the rear tyre's grip follows its load over ~0.08 s (`_nR_s`, tyre relaxation; grip sim + drive cap);
+  (2) `slideHold` (6 /s, Ride > Tyres): a slide nobody asked for (no locked rear, whip or sprint spin) past ~4..11 deg
+  is caught back by the rider. Now: grass max 7-9 deg, sand 10, no crashes, speed kept; whips (24-25 deg) and rear
+  skids unchanged, rear-brake stop 9.7 -> 10.2 m. Tried and dropped: the rider feathering the pedals in a turn
+  (lost speed, sat sideways more). `BMX_OLD_GRIP=1` = before. MX vs ATV-style: the bike slides when you ask.
 - **The ride step is 11 stage functions** (2026-11-21; it was one 1,514-line function). `_ride_step` is the short driver; the
   stages, in order: `_step_controls` (levers, body stick, air inputs, lip throw; returns the brake level), `_step_ground`
   (heights, surface, grip per tyre), `_step_sprint`, `_step_loads` (weight on each tyre -> `n_rear` / `n_front` / `n_load`),
@@ -2013,6 +2025,7 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `BMX_CAM=chase` / `BMX_CAM_ORBIT=rad` | camera mode / angle for autotest shots |
 | `BMX_GOPRO_PROBE=1` (+ `BMX_BAIL=secs`) | prints the torn-off GoPro's flight (`GOPRO` lines), gets up 2.5 s after the bail and checks a new one is mounted |
 | `BMX_SKIP_PROBE=1` (+ `BMX_DEMO=1` or `BMX_FOLLOW=1 BMX_TRICK=none`) | every time the wheels leave the ground, sorted: built jump / hop or pop / crash / **skip** (the ground threw the bike off by itself); `SKIP` lines (speed, air, height, slope, v^2 x the ground's curve in g: < -1 = a crest it must fly over, > 0 = thrown out of a dip by the springs), `SKIPSUM` every 10 s (per km, one-wheel lifts). 2026-11-23, seed 4242, 120 s: demo AI 1.9 skips/km (all < 0.15 s); follow rider (52-62 km/h, no braking) 5.4/km, 6 s in the air, 3 of 9 thrown out of a dip |
+| `--headless res://tools/slope_stress.tscn -- slide=1 [verbose=1]` | free riding off the trail (grass / sand, flat / bumpy) vs on it: how much of the time the rear is out with nothing asking for it (`SLIDE` lines); must stay ~0 past 15 deg |
 | `--headless res://tools/slope_stress.tscn -- skip=1 [trace=1] [tune=...]` | hands off down a synthetic rough descent at 35-65 km/h: flights per 100 m sorted by the ground's curve at take-off (dip / crest / other), air time, time on the front wheel; repeatable, use it (not trail runs) to judge how the bike follows the ground |
 | `BMX_CAM_CYCLE=1` | autotest presses C (next camera) every 0.6 s and prints `CAMCYCLE i mode` |
 | `BMX_GARAGE_HEAD=1` (+ `BMX_GARAGE_TAB=kit BMX_GARAGE_CAM=1.9,22,0.75`) | garage camera frames the standing rider's helmet (action cam close-ups) |

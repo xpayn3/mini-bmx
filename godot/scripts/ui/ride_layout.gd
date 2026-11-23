@@ -81,6 +81,7 @@ const PAGES := [
 			["*frontGrip", "The front alone: pushes wide earlier or later.", "Washy", "Planted"],
 			["carveGrip", "Extra bite while carving a clean turn.", "None", "Lots"],
 			["gripLoose", "Loose patches: grip changes under the tyres.", "Even", "Patchy"],
+			["slideHold", "A slide you didn't ask for (no rear brake, whip or sprint) is caught back.", "Lets it go", "Holds it"],
 		]],
 		["Slides", [
 			["*oversteer", "How much the rear steps out when you ask too much.", "Planted", "Steps out"],
