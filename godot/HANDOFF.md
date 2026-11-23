@@ -1878,8 +1878,13 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   axes a rolled torso put a shoulder above the chest: "the shoulder pops off"), and the whip / tabletop shoulder twist is
   held to what both arms can still reach the grips from. `BMX_SKEL_PROBE` worst 0.000 m. Open: the held tabletop looks
   like he hangs off the high side (head ~1 m out) - user to judge.
-- Landing angle deciding speed (MX vs ATV All Out) and landing legs by impact speed: next.
-- Next (planned with the user): landing legs
+- **Step 4 (done): landing legs by the impact.** In the air `land_vn` = the predicted speed into the landing square to
+  its slope (at `_land_pitch` / `_land_t`, the predicted touch-down; else the ground below), `land_reach` = 0.35..1 of
+  `legExt` (full from ~4 m/s), and a hard one starts reaching up to 1.4x earlier (`landPrepTime` scaled). The drawn reach
+  (`landReach`) follows it. Drops to flat (vn 4.4-6.3): full reach earlier, hit 0.56 -> 0.29, 2.06 -> 1.67; a matched
+  landing (table_1.5, vn 2.2): 59 % reach, stays in his stance. `BMX_OLD_LANDLEGS=1`; `BMX_LAND_PROBE=1` HIT lines now
+  print `vn= reach=`. Suite: nothing new.
+- Next (planned with the user): landing angle deciding speed (MX vs ATV All Out)
   by impact speed, landing angle deciding speed (MX vs ATV All Out).
 
 ### Developer view of the test playground (`scripts/levels/ride_diag.gd`) - telemetry + sliders for riding code
