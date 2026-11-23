@@ -728,6 +728,22 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
     (+ `BMX_LIP_PREP`, `BMX_LIP_STEP`) for the poses. Don't start more than 2-3 test windows at once (Vulkan device lost).
   - Not done (the pump for speed is the leg model since 2026-11-23); the
     suspension's own rebound is not simulated into the pop (the timing window stands in for it); not ridden by the user yet.
+- **Landing body soaks the hit (2026-11-23, user: "when we land the whole body is stiff", "all jumps look small")**.
+  Drawing only (`rider.gd`, `game.gd`), physics unchanged. The physics legs (`body_y - y`) already compressed 17-26 cm,
+  but the drawn hips dipped 0-10 cm, the same on every jump. Found with the new probe `BMX_LANDBODY=1` (`LANDBODY` per
+  landing: pelvis height at touch-down / lowest / settled, peak fold, the physics legs' deepest): (1) the air pose (tuck,
+  air crouch, no attack stance, all x `air_k`) faded over ~0.5 s after touch-down and lifted the hips right through the
+  hit; now reaching for the landing (`sm_reach`) straightens it out and on the ground it is gone at once (`sm_airst`,
+  pose input `inAir`); (2) two saddle floors (`update_pose` "never sit INTO the saddle", `_constrain` `hip_lift`) held
+  the hips at ~90 cm: while the legs are bent past 4 cm (`_sink`) the hips go back (0.45 x) and the floors drop 0.3 x it;
+  (3) the bent part of the legs (past 3-10 cm, `_abs_p` / `_abs_c`) goes past the drawn body springs (they filtered the
+  dip twice: late and shallow), little bumps still go through them; (4) MCAP `absorb` 2.5 m/s / 60 m/s^2 -> 5 / 220;
+  (5) the crouch cap `deep_c` allows +10 cm with a landing fold, the fold sinks the hips 13 cm (was 9), the chest 5 cm
+  more. Dip from touch-down (test rider): table_0.6 0 -> 16 cm, drop_1 1 -> 15, table_1.5 4 -> 18, table_3 ~7 -> 19.
+  Rocks lane hips 2nd-diff rms 4.3 -> 3.2 mm. `BMX_OLD_LANDPOSE=1` = the old pose. Research: drop-landing studies:
+  soft landings = more knee / hip bend, more energy taken, lower peak force; MTB drops 29-67 cm measured 6-9 x the
+  weight at the tyres (Sports Med Open 2016); the library papers have nothing on landings. Left: the physics legs take
+  ~0.3 s to their deepest (leg spring tuning, not changed).
 - **Landings (2026-11-22, user: "make our landing better ... does suspension and body react realistically, big jumps,
   landing at a slight corner", "suspension never past its end", "body reacts realistically, no clipping")**.
   `bike_physics.gd`; sliders Ride > Jumps > Landing. Measured before: 43 deg sideways at 47 km/h cost nothing; a flat
