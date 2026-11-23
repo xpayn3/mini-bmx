@@ -2892,12 +2892,12 @@ func _process(dt: float) -> void:
 		# (the tuck after it), a lip being squashed, and how close a lip is (he rides it centred, not like a climb)
 		pi["extend"] = maxf(0.0, st.compress)
 		# (hands off he winds up into the lip himself: autoPump = his skill, see BikePhysics._step_lip)
-		var auto_pre: float = 0.0 if (st.pop_wait > 0.0 or st.squash > 0.2) else st.prep * float(phys.T.autoPump)
+		var auto_pre: float = 0.0 if (st.pop_wait > 0.0 or st.squash > 0.2) else st.prep * float(phys.T.autoPump) * (1.0 - st.auto_absorb)
 		pi["preload"] = maxf(st.crouch, auto_pre) * (0.0 if st.air else 1.0)
 		# (the stand-tall + pull-up of a pro: only after the player's own pump; hands off he rides it plainly)
 		pi["popFx"] = st.pop_fx * minf(1.0, st.pop_q) * (1.0 if st.pro_flight else 0.35)
 		pi["airPull"] = st.air_pull if (st.air and st.pro_flight) else 0.0   # the bike pulled up into the body after the pop (the tuck)
-		pi["squash"] = maxf(st.squash * st.prep, st.squash_fx)
+		pi["squash"] = maxf(maxf(st.squash, st.auto_absorb) * st.prep, st.squash_fx)   # (hands off he soaks small / fast lips: auto_absorb)
 		pi["lipK"] = maxf(st.prep, 1.0 if (st.pop_wait > 0.0 or st.hop_t > 0.0) else 0.0)
 		pi["landFold"] = 0.0 if st.air else st.land_fold   # folded up by a landing, gathering himself again
 		pi["landReach"] = st.land_prep                     # legs reaching down for the ground

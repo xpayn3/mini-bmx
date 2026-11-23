@@ -1964,6 +1964,14 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 				# in the air: no outside torque. The shared spin air_w only changes with the inertia (tuck),
 				# the bike turns with it plus whatever tilt the rider gives it against their own body:
 				# W / S tilt it on purpose, hands off the rider aims it at the landing slope
+				if _absorb_k > 0.0:   # the hands-off absorb of a small lip, now that the rear is off it too
+					if vy > 0.3:
+						var ad: float = minf(T.popPower * 1.4 * _absorb_k, 0.6 * vy)
+						var sp2a := v * v + vy * vy
+						vy -= ad
+						v = signf(v) * sqrt(maxf(0.0, sp2a - vy * vy))
+						if _PULL_PROBE: print("ABSORB applied k=%.2f dvy=-%.2f vy=%.2f" % [_absorb_k, ad, vy])
+					_absorb_k = 0.0
 				var I_new: float = 1.0 - T.riderShare * T.tuckSpin * air_pull
 				air_w *= air_inertia / I_new; air_inertia = I_new
 				# arcade air control (old side-on bike games): holding W / S spins the bike at a steady rate,
@@ -2183,6 +2191,7 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			if kick_t <= 0.0: _pop_used = 0.0
 			_air_pop = 0.0; pro_flight = false
 			if since_land > 0.6: _land_hit = 0.0   # (a new jump: not a bounce off the last landing)
+			if _PULL_PROBE: print("TAKEOFF graze=%s pop_wait=%.2f squash=%.2f absorb=%.2f prep=%.2f vy=%.2f kick=%.2f v=%.1f" % [_graze, pop_wait, squash, auto_absorb, prep, vy, kick_t, v])
 			if _graze: _graze = false   # (the same take-off, after a brush with the lip: the legs have had their say)
 			elif pop_wait > 0.0:
 				pop = maxf(0.0, _leg_dv(pop_wait) - _pop_used); pop_q = pop_wait; pop_wait = 0.0
@@ -2190,14 +2199,19 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 				pro_flight = pro_pop; pro_pop = false
 				_pop_apply(pop); _pop_used += pop; pop_fx = 1.0
 				if pop_time > 0.9 and pop_q > 0.85 and host.msg_idle(): host.flash("PERFECT POP")
-			elif squash > 0.05 and vy > 0.3 and kick_t <= 0.0:
+			elif vy > 0.3 and ((squash > 0.05 and kick_t <= 0.0) or auto_absorb * prep > 0.05):
 				# the legs let the bike come up into the body: the centre of mass flies a flatter line than the lip's. The
-				# speed is kept, only its direction turns (low and fast)
+				# speed is kept, only its direction turns (low and fast). (Hands off, auto_absorb: up to half the throw)
+				var sq_k: float = maxf(squash, auto_absorb * prep)
 				var sq_d: float = minf(T.popPower * 0.7 * squash, 0.45 * vy)
+				if auto_absorb * prep > squash and not _OLD_ABSORB:
+					# (hands off: applied once BOTH wheels are off - here the rear is still on the face and its spring gave
+					# the climb straight back; up to 60 % of the climb, the faster / smaller the more)
+					_absorb_k = sq_k; sq_d = 0.0
 				var sp2 := v * v + vy * vy
 				vy -= sq_d
 				v = signf(v) * sqrt(maxf(0.0, sp2 - vy * vy))
-				squash_fx = clampf(squash, 0.0, 1.0)
+				squash_fx = clampf(sq_k, 0.0, 1.0)
 				if squash > 0.6 and sq_d > 0.8 and host.msg_idle(): host.flash("SQUASH")
 				if Env.s("BMX_TRICK") != "": print("SQUASH k=%.2f dvy=-%.2f" % [squash, sq_d])   # tests
 			# the legs push off along the ground's surface: off a lip tilted sideways (a berm's lip, a banked kicker)
@@ -2491,13 +2505,27 @@ func _step_lip(dt: float, f: Vector3, brake: bool) -> void:
 			var hh: float = terrain.height(sx, sz)
 			var sl := (hh - h_prev) / stp
 			if not is_nan(s_prev) and s_prev > 0.15 and (s_prev - sl) * v * v / stp > 2.5 * G and terrain.jump_mask(sx, sz) > 0.05:
-				lip_t = (d - stp) / v; break
+				lip_t = (d - stp) / v
+				if lip_state != 2: lip_h = maxf(0.0, h_prev - terrain.height(x, z))   # (measured from where it's first seen)
+				break
 			s_prev = sl; h_prev = hh
 	if air or v <= 3: lip_state = 0
 	elif lip_t == INF: lip_state = 1
 	else:
 		lip_state = 2; lip_last = lip_t
 	_lip_ago = 0.0 if lip_state == 2 else _lip_ago + dt
+	# (2026-11-23, user: "small bumps propelled me a lot at my speed, the bike should eat that with the rider"; MX vs ATV
+	# style) hands off he reads the lip: one that height needs about ABSORB_V0 + ABSORB_VH x its height (m/s) to clear;
+	# going faster than that he soaks it up instead (legs and arms take the lip's throw, the bike stays low and quick:
+	# racer style) - the faster, the more. Your own pump / crouch always pops. BMX_OLD_ABSORB=1 = he pops everything
+	var ab_t := 0.0
+	if lip_state == 2 and crouch < 0.1 and not _OLD_ABSORB:
+		# small lips only (a real jump he pops): fully under ABSORB_SMALL, none past ABSORB_BIG; the faster past what it
+		# needs, the more (floatier over it)
+		ab_t = smooth01((absf(v) - (ABSORB_V0 + ABSORB_VH * lip_h)) / 3.0) * smooth01((ABSORB_BIG - lip_h) / (ABSORB_BIG - ABSORB_SMALL))
+	auto_absorb += (ab_t - auto_absorb) * minf(1.0, dt * (12.0 if ab_t > auto_absorb else 3.0))
+	if air: auto_absorb = maxf(0.0, auto_absorb - dt * 3.0)
+	if _PULL_PROBE and lip_state == 2 and int(Engine.get_physics_frames()) % 6 == 0: print("ABSORB v=%.1f lip_h=%.2f lip_t=%.2f ab_t=%.2f absorb=%.2f prep=%.2f" % [v, lip_h, lip_last, ab_t, auto_absorb, prep])
 	var prep_t: float = smooth01(1 - lip_t / T.prepTime) if lip_t < T.prepTime else 0.0
 	prep = maxf(0.0, prep - dt * 4) if air else prep + (prep_t - prep) * minf(1.0, dt * 8)
 	# (2026-11-23, after a biomechanics lab study of a pro jumping a lip, research/jump: the rider is ~6x the bike, so
@@ -2511,9 +2539,9 @@ func _step_lip(dt: float, f: Vector3, brake: bool) -> void:
 		# hands off, the rider gives the lip a push of his own (autoPump of a full one). A crouch still held
 		# into the lip (hop / stick held, never let go) is timed for the player, at popAssist of what letting go on
 		# time gives. A lip being squashed gets no push
-		var p_auto: float = float(T.autoPump) * (0.6 if _OLD_AUTOPOP else 1.0) * prep
+		var p_auto: float = float(T.autoPump) * (0.6 if _OLD_AUTOPOP else 1.0) * prep * (1.0 - auto_absorb)
 		if crouch > 0.1: p_auto = maxf(p_auto, _crouch_power() * float(T.get("popAssist", 0.6)))
-		if squash > 0.2: p_auto = 0.0
+		if squash > 0.2 or (crouch <= 0.1 and auto_absorb > 0.5): p_auto = 0.0   # (soaking it up: no push at all)
 		pop_fired = true
 		if p_auto > pop_wait:
 			pop_wait = p_auto; _pop_arm_t = 0.5
@@ -2793,6 +2821,14 @@ func _pop_apply(dv: float) -> void:
 
 static var _OLD_AUTOPOP := OS.get_environment("BMX_OLD_AUTOPOP") != ""
 static var _OLD_AIRLEAN := OS.get_environment("BMX_OLD_AIRLEAN") != ""
+static var _OLD_ABSORB := OS.get_environment("BMX_OLD_ABSORB") != ""
+const ABSORB_V0 := 6.0      # m/s: a small lip of height h needs ~ V0 + VH x h (0.56 m kicker ~31 km/h, 1.1 m table ~40)
+const ABSORB_VH := 5.0
+const ABSORB_SMALL := 0.9   # m: lips up to this he soaks fully when fast; ABSORB_BIG and up never (a real jump: popped)
+const ABSORB_BIG := 1.3
+var lip_h := 0.0            # the lip ahead's height over the ground where it was spotted (m)
+var _absorb_k := 0.0        # a hands-off absorb waiting for the rear wheel to leave the lip
+var auto_absorb := 0.0      # 0..1: hands off, how much he soaks up the lip ahead instead of popping it
 static var _OLD_PULLUP := OS.get_environment("BMX_OLD_PULLUP") != ""
 static var _PULL_PROBE := OS.get_environment("BMX_PULL_PROBE") != ""   # tests: the air tilt / pull-up each 0.05 s
 const AIR_PULL_UP := 0.4    # rad of nose-up the rider pulls the bike to off a full pop (air_tilt, within airTilt)

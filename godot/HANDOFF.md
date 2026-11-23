@@ -1819,6 +1819,20 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - Playground side cameras (pg_side / pg_wide / pg_low, `square`): a FIXED 8 deg (low: 4) down angle (dead level hid the wheels behind the jumps' side batters), no
   tilt / bank / shake / speed zoom: true side reference shots. Front 3/4 unchanged.
 
+### Small bumps soaked up at speed; small free-ride jumps from the formula (2026-11-23, F8: "mini bumps propelled me a lot")
+- The F8: two free-ride jumps out in the land (old `KICKER_S` / `TABLE_S`, kicky lips) hands off at 41-54 km/h threw him
+  2.0 / 4.8 m up (49 deg nose up off the second). Two fixes:
+- `TABLE_S` / `KICKER_S` baked from JumpDesign (tools/bake_jumps.gd `table_s` 1.1 m / 20 deg / 11 m/s, `kicker_s` 0.56 m /
+  16 deg / 9.5 m/s, within their old footprints), `AIR_S` too. terrain_cs_cmp EXACT, wood_edge_probe walls=0.
+- Hands off the rider reads the lip (`lip_h`, measured when first spotted): a small one (fully under `ABSORB_SMALL` 0.9 m,
+  none past `ABSORB_BIG` 1.3 m) taken faster than it needs (`ABSORB_V0` 6 + `ABSORB_VH` 5 x height, m/s) he soaks up
+  (`auto_absorb`, the faster the more: MX vs ATV style skimming): no pop, and once BOTH wheels are off up to 60 % of the
+  climb taken out, speed kept (`_absorb_k`; at the first take-off step the rear is still on the face and its spring gave a
+  velocity change straight back - that is why the old squash did little). Your own pump / crouch always pops. Drawn as the
+  squash pose. hop_0.4 @ 45 km/h peak 0.59 -> 0.09 m, hop_0.6 @ 40: 1.07 -> 0.36, hop_0.8 @ 50: 2.31 -> 1.11 (lands at 42 km/h,
+  was 26); tables unchanged. `BMX_OLD_ABSORB=1` = off. Probe `BMX_PULL_PROBE=1` prints `ABSORB` / `TAKEOFF` lines.
+  `tools/feat_at_probe.gd -- <seed> x,z ...` names the route feature at a spot (grows the trail there).
+
 ### Developer view of the test playground (`scripts/levels/ride_diag.gd`) - telemetry + sliders for riding code
 - **Only in the test playground** (user decision 2026-11-21: developer tools live in that level, normal rides have none).
   **Layout (2026-11-22, user: "tidy, compact, nothing covering")**: a slim **tuning column** on the left (the TuneCard,

@@ -186,10 +186,10 @@ internal static class TfSet
 	public static readonly string[] ROUTE_TYPES = { "table", "table", "kicker", "rhythm", "tableLine", "flow", "woodKicker", "bridge" };
 
 	// the same three at their old size, for the free-ride jumps out in the land (see trail_features.gd)
-	public static readonly double[][] TABLE_S = { new[] { 0.0, 0, 0 }, new[] { 5.5, 1.25, 0.5, 0 }, new[] { 9.5, 1.25, 0, 0 }, new[] { 11.5, 0.95, -0.36 }, new[] { 17.0, 0.18, -0.2 }, new[] { 21.0, 0, 0 } };
+	public static readonly double[][] TABLE_S = { new[] { 0.0, 0.0, 0.0, 0.0 }, new[] { 1.8, 0.0023, 0.0087, 0.0087 }, new[] { 2.6, 0.0186, 0.0349, 0.0349 }, new[] { 3.4, 0.0628, 0.0786, 0.0786 }, new[] { 4.25, 0.1564, 0.1453, 0.1453 }, new[] { 5.05, 0.3047, 0.2293, 0.2293 }, new[] { 5.9, 0.5471, 0.3468, 0.3468 }, new[] { 6.05, 0.6008, 0.364, 0.364 }, new[] { 7.45, 1.0961, 0.364, 0.0 }, new[] { 13.45, 1.0961, 0.0, 0.0 }, new[] { 14.3, 0.9383, -0.3608, -0.3608 }, new[] { 14.4, 0.8995, -0.3904, -0.3904 }, new[] { 15.65, 0.4223, -0.3904, -0.3904 }, new[] { 16.5, 0.1634, -0.2317, -0.2317 }, new[] { 17.3, 0.0362, -0.0963, -0.0963 }, new[] { 17.9, 0.0, 0.0, 0.0 }, new[] { 18.9, 0.0, 0.0, 0.0 } };   // baked: tools/bake_jumps.gd
 	public static readonly double[][] DOUBLE_S = { new[] { 0.0, 0, 0 }, new[] { 5.0, 1.35, 0.58, -1.6 }, new[] { 6.0, 0.35, 0, 0 }, new[] { 7.5, 0.35, 0, 1.4 },
 		new[] { 9.2, 1.2, 0, 0 }, new[] { 10.2, 1.2, 0, 0 }, new[] { 12.5, 0.85, -0.34 }, new[] { 19.0, 0.15, -0.16 }, new[] { 23.0, 0, 0 } };
-	public static readonly double[][] KICKER_S = { new[] { 0.0, 0, 0 }, new[] { 3.2, 0.7, 0.42, 0 }, new[] { 4.0, 0.7, 0, 0 }, new[] { 6.5, 0.48, -0.2 }, new[] { 14.0, 0, 0 } };
+	public static readonly double[][] KICKER_S = { new[] { 0.0, 0.0, 0.0, 0.0 }, new[] { 1.8, 0.0058, 0.0219, 0.0219 }, new[] { 2.6, 0.0469, 0.0881, 0.0881 }, new[] { 3.4, 0.1593, 0.2016, 0.2016 }, new[] { 3.85, 0.2692, 0.2867, 0.2867 }, new[] { 4.9, 0.5588, 0.2867, 0.0 }, new[] { 8.75, 0.5588, 0.0, 0.0 }, new[] { 9.5, 0.4363, -0.3063, -0.3063 }, new[] { 10.35, 0.1834, -0.3063, -0.3063 }, new[] { 11.2, 0.0224, -0.0898, -0.0898 }, new[] { 11.6, 0.0, 0.0, 0.0 }, new[] { 12.6, 0.0, 0.0, 0.0 } };   // baked: tools/bake_jumps.gd
 	public static readonly Dictionary<string, TfProfile> SMALL;
 	public static readonly Dictionary<string, TfProfile> PROFILES;
 	public static readonly Dictionary<string, TfWood> WOOD;
@@ -1243,8 +1243,8 @@ public partial class TerrainFieldCs : RefCounted
 
 	private static readonly System.Collections.Generic.Dictionary<string, double[]> AIR_S = new()
 	{
-		["table"] = new[] { 5.5, 12.0 }, ["double"] = new[] { 5.0, 11.0 }, ["kicker"] = new[] { 3.6, 9.0 },
-		["tableLine"] = new[] { 5.5, 12.0, 27.6, 33.0 }, ["flow"] = new[] { 3.6, 9.0 }, ["doubleLine"] = new[] { 5.0, 11.0, 29.6, 35.0 },
+		["table"] = new[] { 7.45, 17.17 }, ["double"] = new[] { 5.0, 11.0 }, ["kicker"] = new[] { 4.9, 11.6 },
+		["tableLine"] = new[] { 7.45, 17.17, 26.8, 33.5 }, ["flow"] = new[] { 4.9, 11.6 }, ["doubleLine"] = new[] { 5.0, 11.0, 30.9, 37.6 },
 	};
 
 	private static TfFeat make_feat(double x, double z, double dx, double dz, string type, double b0, double b1, bool oldSize = false)

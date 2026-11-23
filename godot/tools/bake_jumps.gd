@@ -8,6 +8,10 @@ const TRAIL_JUMPS := {
 	# on the sweet spot at ~60 km/h for real; slower riders case the deck (EFH < ~1 m: safe), never the flat
 	"table": {"v": 15.5, "lip_deg": 22.0, "aim": 0.3, "land_g": 1.8, "lip_t": 0.2},
 	"kicker": {"v": 15.0, "lip_deg": 17.0, "lip_g": 1.6, "aim": 0.3, "land_g": 1.8, "lip_t": 0.15},
+	# the small free-ride jumps out in the land (TerrainField.jump_at): within their old footprints (21 / 14 m: they sit
+	# close to each other and to wooden features), sized for ~40 / 35 km/h
+	"table_s": {"v": 11.0, "lip_deg": 20.0, "lip_g": 1.7, "lip_t": 0.15, "aim": 0.3, "land_g": 2.0},
+	"kicker_s": {"v": 9.5, "lip_deg": 16.0, "lip_g": 1.8, "lip_t": 0.12, "aim": 0.3, "land_g": 2.2},
 }
 
 

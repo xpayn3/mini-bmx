@@ -14,6 +14,12 @@ ta, ka = T["air"], K["air"]
 air = {"table": ta, "kicker": ka, "flow": ka,
        "tableLine": ta + [round(lt + 3.0 + ka[0], 2), round(lt + 3.0 + ka[1], 2)],
        "doubleLine": [8.0, 17.6, round(36.8 + 3.0 + ka[0], 2), round(36.8 + 3.0 + ka[1], 2)]}
+TS, KS = b["table_s"], b["kicker_s"]
+lts = TS["knots"][-1][0]
+tsa, ksa = TS["air"], KS["air"]
+air_s = {"table": tsa, "kicker": ksa, "flow": ksa,
+       "tableLine": tsa + [round(lts + 3.0 + ksa[0], 2), round(lts + 3.0 + ksa[1], 2)],
+       "doubleLine": [5.0, 11.0, round(23.0 + 3.0 + ksa[0], 2), round(23.0 + 3.0 + ksa[1], 2)]}
 root = sys.argv[1] if len(sys.argv) > 1 else "godot"
 p = root + "/scripts/world/trail_features.gd"
 s = open(p, encoding="utf-8").read()
@@ -21,6 +27,10 @@ s = re.sub(r"^const TABLE := .*$", "const TABLE := " + gd_knots(T["knots"]) + " 
 s = re.sub(r"^const KICKER := .*$", "const KICKER := " + gd_knots(K["knots"]) + "   # baked: tools/bake_jumps.gd", s, flags=re.M)
 for k, v in air.items():
     s = re.sub(r'(^const AIR := \{.*?)"%s": \[[^\]]*\]' % k, lambda m: m.group(1) + '"%s": [%s]' % (k, ", ".join(num(x) for x in v)), s, count=1, flags=re.M | re.S)
+s = re.sub(r"^const TABLE_S := .*$", "const TABLE_S := " + gd_knots(TS["knots"]) + "   # baked: tools/bake_jumps.gd", s, flags=re.M)
+s = re.sub(r"^const KICKER_S := .*$", "const KICKER_S := " + gd_knots(KS["knots"]) + "   # baked: tools/bake_jumps.gd", s, flags=re.M)
+for k, v in air_s.items():
+    s = re.sub(r'(^const AIR_S := \{.*?)"%s": \[[^\]]*\]' % k, lambda m: m.group(1) + '"%s": [%s]' % (k, ", ".join(num(x) for x in v)), s, count=1, flags=re.M | re.S)
 open(p, "w", encoding="utf-8").write(s)
 p = root + "/scripts/world/TerrainFieldCs.cs"
 s = open(p, encoding="utf-8").read()
@@ -32,6 +42,15 @@ blk = s[i:j]
 for k, v in air.items():
     blk = re.sub(r'\["%s"\] = new\[\] \{[^}]*\}' % k, '["%s"] = new[] { %s }' % (k, ", ".join(num(x) for x in v)), blk, count=1)
 s = s[:i] + blk + s[j:]
+s = re.sub(r"public static readonly double\[\]\[\] TABLE_S = \{.*?\};.*$", "public static readonly double[][] TABLE_S = " + cs_knots(TS["knots"]) + ";   // baked: tools/bake_jumps.gd", s, count=1, flags=re.M)
+s = re.sub(r"public static readonly double\[\]\[\] KICKER_S = \{.*?\};.*$", "public static readonly double[][] KICKER_S = " + cs_knots(KS["knots"]) + ";   // baked: tools/bake_jumps.gd", s, count=1, flags=re.M)
+i = s.index("private static readonly System.Collections.Generic.Dictionary<string, double[]> AIR_S = new()")
+j = s.index("};", i)
+blk = s[i:j]
+for k, v in air_s.items():
+    blk = re.sub(r'\["%s"\] = new\[\] \{[^}]*\}' % k, '["%s"] = new[] { %s }' % (k, ", ".join(num(x) for x in v)), blk, count=1)
+s = s[:i] + blk + s[j:]
 open(p, "w", encoding="utf-8").write(s)
-for k in ("table", "kicker"): print(k, b[k]["length"], b[k]["desc"])
+print("AIR_S", air_s)
+for k in ("table", "kicker", "table_s", "kicker_s"): print(k, b[k]["length"], b[k]["desc"])
 print("AIR", air)
