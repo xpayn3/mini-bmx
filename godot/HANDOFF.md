@@ -198,6 +198,14 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   is caught back by the rider. Now: grass max 7-9 deg, sand 10, no crashes, speed kept; whips (24-25 deg) and rear
   skids unchanged, rear-brake stop 9.7 -> 10.2 m. Tried and dropped: the rider feathering the pedals in a turn
   (lost speed, sat sideways more). `BMX_OLD_GRIP=1` = before. MX vs ATV-style: the bike slides when you ask.
+- **Brakes limited by the tyres, per surface (2026-11-23, `docs/research/papers_review_2026-11-23.md` #1)**. The levers used
+  to run out first (front 7.5 x 0.75 = 5.6 m/s^2 vs a front tyre good for 7-15), so every surface stopped at ~0.84 g. Now
+  `BRAKE_MU` (braking grip per surface: ground / grass 0.62, trail 0.78, water 0.5, sand 0.45, eased per tyre `_bmu_f/_r`,
+  x new slider `brakeGrip`, Ride > Brakes) caps each brake and `brakeForce` is 13 (levers can lock either wheel). The
+  hips-back brace while braking only counts a quarter for the load split (`xb` in `_step_loads`): it put +0.36 g on the
+  rear and a locked front then stopped at 0.14 g. Playground @30 km/h: dirt 0.80 g (was 0.86), sand 0.49 (0.73), front
+  lever only locks 0.53 (never locked), rear only locks 0.46 (0.68). `sim=1` SIM BRAKE now per surface. `BMX_OLD_BRAKE=1`
+  = before. Lateral grip (`SURF_MU` x `grip`) unchanged.
 - **The ride step is 11 stage functions** (2026-11-21; it was one 1,514-line function). `_ride_step` is the short driver; the
   stages, in order: `_step_controls` (levers, body stick, air inputs, lip throw; returns the brake level), `_step_ground`
   (heights, surface, grip per tyre), `_step_sprint`, `_step_loads` (weight on each tyre -> `n_rear` / `n_front` / `n_load`),

@@ -128,6 +128,7 @@ const PAGES := [
 		["Levers", [
 			["*brakeFront", "Front lever: does most of the stopping, washes out if grabbed leaned over.", "Weak", "Strong"],
 			["*brakeRear", "Rear lever: the rear goes light and locks easily (skids).", "Weak", "Strong"],
+			["*brakeGrip", "How hard the tyres can stop: hardpack grips best, grass less, sand and water least.", "Slippy", "Sticky"],
 			["brakeFrontMix", "The brake key (S / LT): how much front it squeezes with the rear.", "Rear only", "Both"],
 			["brakeSkid", "The brake key: how far past locking the rear goes (dust!).", "No skid", "Skids"],
 		]],

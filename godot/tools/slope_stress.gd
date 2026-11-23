@@ -384,16 +384,18 @@ func _sim(cfg: Dictionary) -> void:
 			if r[1].crash != "": break
 		print("SIM LAND %-8s  impact=%.1f  travel_turned=%+.0fdeg  slip_max=%.0fdeg  lean=%+.0fdeg  v=%.1f crash=%s" % [lc[0], imp,
 			rad_to_deg(p.course - c0) if landed else 0.0, rad_to_deg(smax), rad_to_deg(p.bike_lean), p.v * 3.6, r[1].crash])
-	for b in [["front", 0.0, 1.0, 0.0], ["rear", 0.0, 0.0, 1.0], ["both(S)", 1.0, 0.0, 0.0]]:
+	for b in [["front", 0.0, 1.0, 0.0, 1], ["rear", 0.0, 0.0, 1.0, 1], ["both(S)", 1.0, 0.0, 0.0, 1], ["S grass", 1.0, 0.0, 0.0, 0], ["S wet", 1.0, 0.0, 0.0, 2], ["S sand", 1.0, 0.0, 0.0, 3], ["F grass", 0.0, 1.0, 0.0, 0], ["R grass", 0.0, 0.0, 1.0, 0]]:
 		var r := _make(cfg, "flat"); var p: BikePhysics = r[0]; p.v = 40.0 / 3.6
+		r[1].terrain.surf = b[4]
 		_ride(p, r[1], 0.3, func(_t, _p): return _inp())
 		var x0: float = p.x; var lr := 0.0; var lf := 0.0; var pmin := 0.0
 		for i in int(6.0 / DT):
 			var d := _inp(0.0, b[1]); d.brake_front = b[2]; d.brake_rear = b[3]
 			p.step(DT, d)
 			lr = maxf(lr, p.rear_lock); lf = maxf(lf, p.front_lock); pmin = minf(pmin, p.pitch)
+			if trace and i % 12 == 0: print("    t=%.2f v=%.1f nF=%.2f nR=%.2f fbF=%.2f fbR=%.2f lockF=%.2f lockR=%.2f risk=%.2f fair=%s rair=%s bmuf=%.2f bmur=%.2f inbf=%.2f" % [i * DT, p.v, p.n_f, p.n_r, p._fb_f, p._fb_r, p.front_lock, p.rear_lock, p.risk, p.front_air, p.rear_air, p._bmu_f, p._bmu_r, p.brake_f if "brake_f" in p else -1.0])
 			if p.v < 0.2 or r[1].crash != "": break
-		print("SIM BRAKE %-7s 40 km/h  stop=%.1f m  rear_lock=%.2f front_lock=%.2f nose_down=%.0fdeg crash=%s" % [b[0], p.x - x0, lr, lf, rad_to_deg(-pmin), r[1].crash])
+		print("SIM BRAKE %-7s 40 km/h  stop=%.1f m  (%.2f g)  rear_lock=%.2f front_lock=%.2f nose_down=%.0fdeg crash=%s" % [b[0], p.x - x0, (40.0 / 3.6) * (40.0 / 3.6) / (2.0 * maxf(0.1, p.x - x0) * 9.81), lr, lf, rad_to_deg(-pmin), r[1].crash])
 	for b in [["none", 0.0, 0.0], ["S", 1.0, 0.0], ["front", 0.0, 1.0]]:
 		var r := _make(cfg, "flat"); var p: BikePhysics = r[0]; p.v = 30.0 / 3.6
 		_ride(p, r[1], 1.5, func(_t, pp): return _inp(clampf((30.0 / 3.6 - pp.v) * 2.0, 0.0, 1.0), 0.0, 1.0))
@@ -587,7 +589,7 @@ func _run_all(cfg: Dictionary) -> void:
 		_ride(p, h, 0.5, nothing)   # settle onto the slope
 		var x_b := p.x
 		var st := _ride(p, h, 6.0, func(_t, _p): return _inp(0.0, 1.0))
-		var mu: float = 0.72 * float(tune.v.grip)
+		var mu: float = BikePhysics.BRAKE_MU[0] * float(tune.v.get("brakeGrip", 1.0))   # (the braking grip on grass, the test ground)
 		var can_hold := 9.81 * sin(absf(th)) < minf(float(tune.v.brakeForce), 0.85 * mu * 9.81 * cos(th))
 		var stopped := absf(p.v) < 0.05
 		var x_s := p.x

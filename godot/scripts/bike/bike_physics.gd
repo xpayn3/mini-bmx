@@ -188,7 +188,12 @@ var bank_v := 0.0      # how fast the bank reading is changing (its smoothing sp
 var _load_s := NAN     # the tyres' load factor for grip, eased (relaxation)
 var _share_f := NAN    # the front tyre's share of the load, eased the same way
 const SURF_MU := [0.72, 0.95, 0.45, 0.5]   # tyre grip by surface: ground, trail, water, sand / dry
+## what a tyre can stop with on each surface (friction along the tyre, x brakeGrip): ground / grass, trail hardpack,
+## water, sand. The brakes are limited by these, not by the levers (they used to run out first: ~0.84 g on every surface)
+const BRAKE_MU := [0.62, 0.78, 0.5, 0.45]
 var surf_f := 0; var surf_r := 0; var _mu_f := NAN; var _mu_r := NAN   # the ground under each tyre, its eased grip
+var _bmu_f := NAN; var _bmu_r := NAN   # ...and its eased braking grip (BRAKE_MU)
+var _OLD_BRAKE := OS.get_environment("BMX_OLD_BRAKE") != ""   # (tests: the lever-limited brakes before 2026-11-23)
 var _gx_lean := 0.0    # the rest of the ground's drawn lean (body stick, slow steer, whip), eased through jumps
 var _bike_lead := 0.0  # how far the bike runs ahead of the rider's lean while it changes (two masses)
 var _whip_peak := 0.0  # this jump's biggest air whip (bike twisted against the body, rad)
@@ -377,7 +382,7 @@ func _reset_ground_sim() -> void:
 	front_use = 0.0; front_push = 0.0; rear_lock = 0.0; front_lock = 0.0; _fb_f = 0.0
 	corner_g = 0.0; weight_in = 0.0; lean_err = 0.0; knock = 0.0; _amax = 99.0; _amin = -99.0; bal_k = 0.0
 	_b_prev = 0.0; _f_prev = 0.0; _circ_f = 1.0; bank_lean = 0.0; bank_sq = 0.0; _gx_lean = 0.0; berm_k = 0.0
-	_mu_f = NAN; _mu_r = NAN; bank_v = 0.0; _load_s = NAN; _share_f = NAN; _bike_lead = 0.0
+	_mu_f = NAN; _mu_r = NAN; _bmu_f = NAN; _bmu_r = NAN; bank_v = 0.0; _load_s = NAN; _share_f = NAN; _bike_lead = 0.0
 	_risk.clear(); risk = 0.0; _risk_peak = 0.0
 
 func begin_crash() -> void:
@@ -720,6 +725,8 @@ func _step_ground(dt: float, f: Vector3) -> void:
 	var mk := minf(1.0, dt * 12.0)
 	_mu_f = SURF_MU[clampi(surf_f, 0, 3)] if is_nan(_mu_f) else lerpf(_mu_f, SURF_MU[clampi(surf_f, 0, 3)], mk)
 	_mu_r = SURF_MU[clampi(surf_r, 0, 3)] if is_nan(_mu_r) else lerpf(_mu_r, SURF_MU[clampi(surf_r, 0, 3)], mk)
+	_bmu_f = BRAKE_MU[clampi(surf_f, 0, 3)] if is_nan(_bmu_f) else lerpf(_bmu_f, BRAKE_MU[clampi(surf_f, 0, 3)], mk)
+	_bmu_r = BRAKE_MU[clampi(surf_r, 0, 3)] if is_nan(_bmu_r) else lerpf(_bmu_r, BRAKE_MU[clampi(surf_r, 0, 3)], mk)
 	if is_nan(course):
 		course = heading; slip = 0
 	since_land += dt
@@ -751,7 +758,11 @@ func _step_loads(dt: float) -> void:
 	# (drive + rear sideways grip up, front light and washy), leaning forward does the opposite (rear lets go)
 	var lean_fb := 0.0
 	if not air:
-		lean_fb = clampf(body_in_s + (body_x + hip_shift) * 0.5 / maxf(0.05, T.weightShift), -1.0, 1.0)
+		# (the hips go back when braking, x_brake in the body stage: that brace lowers the pitch-over a little, but it
+		# used to read as the rider sitting his weight on the rear: +0.36 g on the rear, nearly cancelling the brake's
+		# weight transfer; with the brakes tyre-limited a locked front then stopped at 0.14 g. Only a quarter counts)
+		var xb: float = 0.0 if _OLD_BRAKE else -0.8 * T.weightShift * (1.0 if maxf(brake_f, brake_r) > 0.1 else 0.0) * 0.75
+		lean_fb = clampf(body_in_s + (body_x + hip_shift - 2.0 * xb) * 0.5 / maxf(0.05, T.weightShift), -1.0, 1.0)
 		# pumping with the stick is pushing down, not leaning over the bars: the rear keeps its load (it locked and
 		# slid out under braking with the pump stick forward)
 		if lean_fb > 0.0 and pump_push > 0.05 and body_in > 0.12: lean_fb *= 1.0 - float(T.get("pumpCentred", 0.75))
@@ -818,10 +829,15 @@ func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_wa
 		# it, so it can take more), the rear goes light and locks easily. Squeeze a lever past what its tyre can hold
 		# and that wheel locks: it slides at ~80 % of the grip (rear = skid / fishtail, front = no steering, and
 		# leaned over it washes out, see the front tyre below)
-		var fb_r: float = T.brakeForce * float(T.get("brakeRear", 0.6)) * brake_r
-		var fb_f: float = T.brakeForce * float(T.get("brakeFront", 0.75)) * brake_f * (0.0 if front_air else 1.0)
-		var cap_r: float = maxf(0.05, mu_r * nR)
-		var cap_f: float = maxf(0.05, mu_f * nF * float(T.get("frontGrip", 1.0)))
+		# (the levers are strong enough to lock either wheel on any surface: the tyre's braking grip is what stops)
+		var lever: float = 7.5 if _OLD_BRAKE else T.brakeForce
+		var fb_r: float = lever * float(T.get("brakeRear", 0.6)) * brake_r
+		var fb_f: float = lever * float(T.get("brakeFront", 0.75)) * brake_f * (0.0 if front_air else 1.0)
+		var bg: float = float(T.get("brakeGrip", 1.0))
+		var bmu_f: float = mu_f if _OLD_BRAKE else _or(_bmu_f, 0.7) * bg
+		var bmu_r: float = mu_r if _OLD_BRAKE else _or(_bmu_r, 0.7) * bg
+		var cap_r: float = maxf(0.05, bmu_r * nR)
+		var cap_f: float = maxf(0.05, bmu_f * nF * float(T.get("frontGrip", 1.0)))
 		if _brake_feel:
 			# ...and eases the rear off the moment it starts stepping out sideways, so it grips sideways again
 			var r_ease := smooth01((absf(slip) - 0.04) / 0.08)

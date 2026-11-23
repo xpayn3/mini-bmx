@@ -75,6 +75,7 @@ const DEFS := [
 	["Brakes", [
 		["brakeFront", "Front brake power", 0.75, 0, 1.5, 0.05, "×"],
 		["brakeRear", "Rear brake power", 0.6, 0, 1.5, 0.05, "×"],
+		["brakeGrip", "Braking grip (how hard the tyres can stop)", 1.0, 0.5, 1.5, 0.05, "×"],
 		["brakeFrontMix", "Brake key: front lever share", 0.7, 0, 1, 0.05, ""],
 		["brakeSkid", "Brake key: how far the rear skids", 0.4, 0, 1, 0.05, ""],
 	]],
@@ -393,7 +394,7 @@ func row(k: String) -> Array:
 ## bike's multiplier (BIKES / frame_mods still shape them) x the Feel sliders. exp 0 = a fixed value. So the ride
 ## is unchanged at the defaults and one slider moves the whole group. The physics reads them as before (T.key)
 const FOLLOW := {
-	"brakeForce": [7.5, "", 0.0],                                         # brake power: the front / rear levers set it
+	"brakeForce": [13.0, "", 0.0],                                         # brake power: the front / rear levers set it
 	"steerRate": [15.0, "steerEase", 1.0], "steerRelease": [10.0, "steerEase", 1.0], "barSpeed": [28.0, "steerEase", 1.0],
 	"gripCatch": [0.6, "slipRecover", 1.0],                              # slide catch: one slider
 	"reflexBrake": [0.6, "", 0.0], "reflexStandUp": [0.3, "", 0.0], "reflexCatch": [1.5, "", 0.0],   # riderSkill scales them all
