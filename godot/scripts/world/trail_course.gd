@@ -854,7 +854,11 @@ func plan_marking(field) -> void:
 				last = stakes.size() - 1
 			else:
 				last = -1
-			s += minf(7.5, maxf(3.0, 0.32 / maxf(1e-4, absf(k))))
+			var step := minf(7.5, maxf(3.0, 0.32 / maxf(1e-4, absf(k))))
+			if inside:
+				# the stake line is shorter than the centreline on the inside of a bend: keep the sticks >= 3.6 m apart
+				step = maxf(step, 3.6 / maxf(0.25, 1.0 - o * absf(k)))
+			s += step
 	# both sides merged in course order, so a stake keeps its index when the course grows
 	var order := range(stakes.size())
 	order.sort_custom(func(a, b): return stakes[a]["s"] < stakes[b]["s"] or (stakes[a]["s"] == stakes[b]["s"] and a < b))

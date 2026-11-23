@@ -1035,6 +1035,18 @@ public partial class TerrainFieldCs : RefCounted
 		return pathN(x, z) / maxf(Math.Sqrt(_gx * _gx + _gz * _gz), 0.012);
 	}
 
+	/// how hard riders press the ground at a point of the trail, 0 on a straight .. 1 in a tight bend (TerrainField.corner_load).
+	/// They arrive fast and the bend turns them, so the lateral force grows with the curvature k (1 / radius, 1 / m): nothing
+	/// below ~80 m radius, full from ~14 m. The ground shader sinks the ridden line and the tyre prints deeper with it.
+	public static double corner_load(double k)
+	{
+		double t = (Math.Abs(k) - CORNER_K0) / (CORNER_K1 - CORNER_K0);
+		t = t < 0.0 ? 0.0 : (t > 1.0 ? 1.0 : t);
+		return t * t * (3.0 - 2.0 * t);
+	}
+	const double CORNER_K0 = 0.0125;
+	const double CORNER_K1 = 0.07;
+
 	/// where the ridden line sits across the trail (TerrainField.line_off)
 	public double line_off(double x, double z)
 	{
@@ -1900,6 +1912,7 @@ public partial class TerrainFieldCs : RefCounted
 		var TR = new float[NV * NV * 4];   // trail frame for ground.gdshader: across, line offset, along, run-off skid's place
 		var T2 = new float[NV * NV * 4];   // road, dry biome, built jump, run-off skid's strength
 		var T3 = new float[NV * NV];       // riders in the air over a jump here
+			var T4 = new float[NV * NV];       // corner load: how hard riders press the line here (0 straight .. 1 tight bend)
 		for (long iz = -1; iz < N + 2; iz++)
 		{
 			for (long ix = -1; ix < N + 2; ix++)
@@ -1929,7 +1942,26 @@ public partial class TerrainFieldCs : RefCounted
 					T2[o * 4 + 1] = (float)cp_dry;
 					T2[o * 4 + 2] = (float)jm;
 					T3[o] = (float)fo_air;
+						T4[o] = on ? (float)corner_load(q_k) : 0f;
 					T2[o * 4 + 3] = (float)(on ? cROS[q_i] + (cROS[q_i + 1] - cROS[q_i]) * q_t : 0.0);
+						if (on)
+						{
+							// the centreline is 2 m straight pieces: the distance to it kinks on every piece, which drew the
+							// ridden lines / tracks as low-poly facets in bends. Average it over ~1 m (only where every sample
+							// is still on the course). Last in the block: these calls move the q_* state.
+							double sum = ac * 0.36;
+							bool all_on = true;
+							for (int s4 = 0; s4 < 4 && all_on; s4++)
+							{
+								double sx = x + (s4 == 0 ? 1.0 : (s4 == 2 ? -1.0 : 0.0));
+								double sz = z + (s4 == 1 ? 1.0 : (s4 == 3 ? -1.0 : 0.0));
+								double a4 = across(sx, sz);
+								all_on = q_d < q_w + 2.6;
+								sum += a4 * 0.16;
+							}
+							if (all_on)
+								TR[o * 4] = (float)Math.Clamp(sum, -20.0, 20.0);
+						}
 				}
 			}
 		}
@@ -1977,7 +2009,7 @@ public partial class TerrainFieldCs : RefCounted
 		return new Godot.Collections.Dictionary
 		{
 			["G"] = G, ["verts"] = verts, ["norms"] = norms, ["uvs"] = uvs,
-			["LG"] = LG, ["LD"] = LD, ["TW"] = TW, ["SW"] = SW, ["DRY"] = DRY, ["TR"] = TR, ["T2"] = T2, ["T3"] = T3,
+			["LG"] = LG, ["LD"] = LD, ["TW"] = TW, ["SW"] = SW, ["DRY"] = DRY, ["TR"] = TR, ["T2"] = T2, ["T3"] = T3, ["T4"] = T4,
 		};
 	}
 
