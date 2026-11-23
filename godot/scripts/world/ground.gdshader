@@ -112,7 +112,11 @@ void fragment() {
 	vec2 pdx = dFdx(P.xz), pdy = dFdy(P.xz);
 	vec4 tf = texture(trail_tex, UV);
 	vec4 tf2 = texture(trail2_tex, UV);
-	float t_air = texture(trail3_tex, UV).r * trail_fx;
+	vec2 tf3 = texture(trail3_tex, UV).rg;
+	float t_air = tf3.r * trail_fx;
+	// corner load (baked from the trail's curvature): riders carry more force through a bend, so they press the
+	// ridden line and their tyre prints deeper there (a straight keeps ~1/7 of a tight bend's depth), and barely mark a straight
+	float depth_k = mix(0.2, 1.5, tf3.g);
 	float tnear = (1.0 - smoothstep(0.25, 0.7, gpx)) * trail_fx;   // far off it all averages out to the plain colour
 	if ((t > 0.004 || tf2.a > 0.01) && tnear > 0.0) {
 		// where the nearest trail switches (the course <-> a side path joining it) the baked frame jumps between two
@@ -256,7 +260,7 @@ void fragment() {
 		// relief: each ridden line is a shallow groove (deepest where most riders go), tyre prints and skids are pressed
 		// into it, loose grit and pebbles stand proud, and the unridden ground between the lines is slightly lumpy
 		float lump = (gd_noise3(vec3(ac * 5.0, sl * 0.9, 6.0)) - 0.5) * 0.012 * tfk + (n1 - 0.5) * 0.006 * f2;
-		thgt = -0.03 * line * (1.0 - 0.7 * jm) - 0.008 * m_tracks - 0.014 * m_skid - 0.006 * m_stray - 0.007 * m_play
+		thgt = -0.03 * line * depth_k * (1.0 - 0.7 * jm) - 0.008 * m_tracks * depth_k - 0.014 * m_skid - 0.006 * m_stray - 0.007 * m_play
 			+ (peb * (0.006 + 0.008 * pb.y) + lump) * (0.3 + 0.7 * m_loose) * (1.0 - 0.8 * jm);
 		thgt *= (1.0 - smoothstep(0.04, 0.16, gpx)) * tnear * (1.0 - m_puddle);
 		k *= 1.0 + thgt * 2.2;                           // hollows hold a little shade, high spots catch light

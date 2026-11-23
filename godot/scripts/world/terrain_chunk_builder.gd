@@ -254,10 +254,12 @@ func _build() -> void:
 		pT[o] = roundi(clampf(T2a[o], 0, 1) * 255)
 	out["trail2_img"] = Image.create_from_data(NV, NV, false, Image.FORMAT_RGBA8, pT)
 	var T3a: PackedFloat32Array = gs["T3"]
-	var pA := PackedByteArray(); pA.resize(NV * NV)
+	var T4a: PackedFloat32Array = gs["T4"]
+	var pA := PackedByteArray(); pA.resize(NV * NV * 2)   # R = riders in the air, G = corner load
 	for o in NV * NV:
-		pA[o] = roundi(clampf(T3a[o], 0, 1) * 255)
-	out["trail3_img"] = Image.create_from_data(NV, NV, false, Image.FORMAT_R8, pA)
+		pA[o * 2] = roundi(clampf(T3a[o], 0, 1) * 255)
+		pA[o * 2 + 1] = roundi(clampf(T4a[o], 0, 1) * 255)
+	out["trail3_img"] = Image.create_from_data(NV, NV, false, Image.FORMAT_RG8, pA)
 	# where puddles can be (world/trail_puddle.gd: tyre dust stops over them); empty for chunks with no wet road
 	out["pud"] = TrailPuddle.table(TRa, T2a, TW, norms, NV)
 	# ---- grass field data (world/grass_field.gd): the ground's own heights + land colour, density in alpha ----
@@ -319,6 +321,7 @@ func ground_stage(ox: float, oz: float) -> Dictionary:
 	var TR := PackedFloat32Array(); TR.resize(NV * NV * 4)   # trail frame for ground.gdshader: across, line offset, along, run-off skid's place
 	var T2 := PackedFloat32Array(); T2.resize(NV * NV * 4)   # road, dry biome, built jump, run-off skid's strength
 	var T3 := PackedFloat32Array(); T3.resize(NV * NV)       # riders in the air over a jump here
+	var T4 := PackedFloat32Array(); T4.resize(NV * NV)       # corner load: how hard riders press the line (0 straight .. 1 tight bend)
 	for iz in range(-1, N + 2):
 		for ix in range(-1, N + 2):
 			var x := ox - S / 2 + ix * d
@@ -346,7 +349,20 @@ func ground_stage(ox: float, oz: float) -> Dictionary:
 				T2[o * 4 + 1] = f.cp_dry
 				T2[o * 4 + 2] = jm
 				T3[o] = f.fo_air
+				T4[o] = TerrainField.corner_load(f.q_k) if on else 0.0
 				T2[o * 4 + 3] = (f.cROS[f.q_i] + (f.cROS[f.q_i + 1] - f.cROS[f.q_i]) * f.q_t) if on else 0.0
+				if on:
+					# same as the C# bake: average the distance to the 2 m-piece centreline over ~1 m (no facets in bends)
+					var sum := ac * 0.36
+					var all_on := true
+					for off in [Vector2(1, 0), Vector2(0, 1), Vector2(-1, 0), Vector2(0, -1)]:
+						var a4: float = f.across(x + off.x, z + off.y)
+						all_on = f.q_d < f.q_w + 2.6
+						if not all_on:
+							break
+						sum += a4 * 0.16
+					if all_on:
+						TR[o * 4] = clampf(sum, -20.0, 20.0)
 	var verts := PackedVector3Array(); verts.resize(NV * NV)
 	var norms := PackedVector3Array(); norms.resize(NV * NV)
 	var uvs := PackedVector2Array(); uvs.resize(NV * NV)
@@ -374,7 +390,7 @@ func ground_stage(ox: float, oz: float) -> Dictionary:
 			DRY[o] = pre_b[o * 2]
 			LG[o] = f.cl_g
 			LD[o] = f.cl_d
-	return {"G": G, "verts": verts, "norms": norms, "uvs": uvs, "LG": LG, "LD": LD, "TW": TW, "SW": SW, "DRY": DRY, "TR": TR, "T2": T2, "T3": T3}
+	return {"G": G, "verts": verts, "norms": norms, "uvs": uvs, "LG": LG, "LD": LD, "TW": TW, "SW": SW, "DRY": DRY, "TR": TR, "T2": T2, "T3": T3, "T4": T4}
 
 
 ## clears grass density (alpha of the grass_img bytes) within r of (x, z), soft over the outer 30 %

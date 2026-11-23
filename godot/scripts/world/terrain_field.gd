@@ -579,6 +579,16 @@ func across(x: float, z: float) -> float:
 
 ## where the ridden line sits across the trail (m): on the course the racing line (TrailCourse.LN) with a small
 ## wander, on the wild side paths a slow wander
+## how hard riders press the ground at a point of the trail, 0 on a straight .. 1 in a tight bend (mirrored in
+## TerrainFieldCs.corner_load). They arrive fast and the bend turns them, so the lateral force grows with the
+## curvature k (1 / radius, 1 / m): nothing below ~80 m radius, full from ~14 m. The ground shader sinks the
+## ridden line and the tyre prints deeper with it.
+const CORNER_K0 := 0.0125
+const CORNER_K1 := 0.07
+static func corner_load(k: float) -> float:
+	return smoothstep(CORNER_K0, CORNER_K1, absf(k))
+
+
 func line_off(x: float, z: float) -> float:
 	var wob := noise((x + 91.7) * I23, (z - 13.3) * I23)
 	query(x, z)
