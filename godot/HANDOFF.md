@@ -372,7 +372,20 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   slices (`Terrain._build_ropes`, 3 ms a frame, finished at once within 90 m; materials pre-made by `RopeBridge.warm`):
   was a 0.24 s freeze. Tests: `BMX_ROPE_PROBE=tick` (`RTICK` every physics step), `BMX_ROPE_SHOT=prefix` (shots by place
   on the deck), `BMX_ROPE_STOP=u,secs`, `BMX_ROPE_BAIL=u` (by place: wall-clock test timers misfire at low fps),
-  `BMX_ROPE_SAG/LAND/BEND/ANCHOR` overrides. Photo tests:
+  `BMX_ROPE_SAG/LAND/BEND/ANCHOR` overrides.
+  **Wider + fenced (2026-11-23, user: "we crash on it a lot, riding to the rope left / right crashes at once")**: the
+  deck is twice as wide (`DECK_HALF` 1.1, hand ropes `HAND_HALF` 1.6, trees `TREE_W` 2.0). The hangers + hand ropes
+  are a fence (`Game._rope_rail`, before the OFF THE BRIDGE check): a tyre reaching `ROPE_RAIL` 0.15 m inside a deck
+  rope (where the rope is NOW: `RopeBridgeSim.Edges(u)`, the deck sways up to ~0.4 m under the rider) is held inside,
+  the travel is turned along the bridge, speed x (1 - 0.55 sin angle), the rope takes the push; only > 60 deg into it
+  above 7 m/s = INTO THE ROPES! crash (`RopeBridge.fenced` / `axis_angle`). Test: `BMX_STEER_AT_ROPE=12 BMX_STEER=1|-1`
+  (+ `BMX_STRAIGHT=1`) holds full lock from 12 m along the first bridge; `ROPE rail` lines with `BMX_ROPE_PROBE=1`.
+  Same day, user: "turning feels weird, the sway messes with our riding" + "the camera on the bridge is weird":
+  the physics reads the deck level across (`RopeBridgeSim.HeightLevel`: its roll read as a bank / camber to the
+  steering), only `ROPE_TURN_PUSH` 0.3 of the turn's reaction shoves the deck and only `ROPE_CARRY` 0.4 of the deck's
+  sideways swing moves the bike. Trail camera: looks along the bridge (`Terrain.rope_aim` in `CameraRig._look_dir`)
+  and its look point never drops more than 3 m under the rider (it aimed at the canyon floor beside the deck).
+  Not done: a roadside billboard stands in the canyon under seed 12's bridge (`chunk_boards` doesn't skip ropes). Photo tests:
   `BMX_PHOTO_AT=x,y,z,lx,ly,lz` puts the photo camera at a world point looking at another (FEATSPAWN prints the feature's `at` / `dir`).
 
 - **Trail surface = procedural mask layers** (2026-11-21, `world/ground.gdshader`; the four-scan version was rejected the same

@@ -9,11 +9,11 @@ extends Node3D
 
 const SIM := "res://scripts/world/RopeBridgeSim.cs"
 const N := 40              # segments per rope
-const DECK_HALF := 0.55    # the deck ropes, +- across (planks overhang them a little)
-const HAND_HALF := 0.8
+const DECK_HALF := 1.1     # the deck ropes, +- across (planks overhang them a little); 2026-11-23 doubled (was 0.55)
+const HAND_HALF := 1.6     # (was 0.8)
 const HAND_H := 1.25       # hand ropes above the deck ends
 const TREE_U := 2.4        # trees this far in from each end of the feature
-const TREE_W := 1.16       # and this far to each side
+const TREE_W := 2.0        # and this far to each side (was 1.16: 2.3 m apart, now 4 m round the wider deck)
 ## the deck starts / ends right at the canyon's lip (TerrainField.CANYON_RIM, exact within 4 m of the trail), a
 ## hair onto the ground. It used to start 1.1 m before the lip: that metre of deck sagged ~20 cm under the rim's
 ## ground, so the bike rode the ground, dropped onto the deck at the lip (front wheel off, nose down) and hit a
@@ -371,7 +371,7 @@ func deck_at(x: float, z: float) -> float:
 	var w := -rx * _dz + rz * _dx
 	if absf(w) > DECK_HALF + 1.5:
 		return -INF
-	var h: float = sim.Height(u, w, 0.06)
+	var h: float = sim.HeightLevel(u, w, 0.06)   # level across: its roll is not a bank to the bike (RopeBridgeSim)
 	return -INF if is_nan(h) else h
 
 
@@ -384,6 +384,23 @@ func off_side(x: float, z: float, y: float) -> bool:
 		return false
 	var c: float = sim.Height(l.x, 0.0, DECK_HALF + 1.5)
 	return not is_nan(c) and absf(c - y) < 0.6
+
+
+## (x, z) at about height y is between this bridge's ends, over its deck or just beside it (where the hangers +
+## hand ropes fence it in): the bike is kept inside them (Game._rope_rail)
+func fenced(x: float, z: float, y: float) -> bool:
+	var l := local(x, z)
+	# from a little before the deck starts (the hand ropes start at the trees): a bike rolling on at an angle has
+	# its front over the drop while its middle is still on the rim
+	if l.x < _u0 - 1.5 or l.x > _u1 + 1.5 or absf(l.y) > HAND_HALF + 0.6:
+		return false
+	var c: float = sim.Height(clampf(l.x, _u0 + 0.05, _u1 - 0.05), 0.0, DECK_HALF + 1.5)
+	return not is_nan(c) and y > c - 0.6 and y < c + 1.2
+
+
+## the bridge's own heading in the ride physics' convention (travel = (cos, -sin))
+func axis_angle() -> float:
+	return atan2(-_dz, _dx)
 
 
 ## the rider's weight + sideways push on the deck (world N): fy up, f_side a horizontal world vector
