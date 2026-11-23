@@ -116,6 +116,11 @@ func _parts(label: String, root: Node) -> void:
 	var tl := []
 	for k in top.slice(0, 12): tl.append("%s:%d" % [k, names[k]])
 	print("RPARTS %s meshes=%d surfaces=%d casting=%d small(<12cm)=%d small_casting=%d top=%s" % [label, meshes, surfs, cast, small, small_cast, ", ".join(tl)])
+	if Env.s("BMX_RPARTS_LIST") != "":   # every visible mesh: its path under the root, surfaces, size, shadow
+		for mi in _under(root, false):
+			if not mi.is_visible_in_tree() or mi.mesh == null: continue
+			print("RPART %s %s surf=%d across=%.3f cast=%d" % [label, String(root.get_path_to(mi)), mi.mesh.get_surface_count(),
+				(mi.get_aabb().size * mi.global_transform.basis.get_scale()).length(), int(mi.cast_shadow)])
 
 func _info(type: int, what: int) -> int:
 	return RenderingServer.viewport_get_render_info(get_viewport().get_viewport_rid(), type, what)

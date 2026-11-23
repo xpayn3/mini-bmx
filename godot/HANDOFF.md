@@ -2250,8 +2250,19 @@ Known, not fixed (lower priority from the code review):
   picture off at a time and prints GPU / render-CPU ms saved, draws and primitives (`RPROBE`), plus `RPARTS` (rider /
   bike mesh counts). At golden hour standing at the start: GPU 3.8 ms, render CPU 1.1 ms; sun shadows 1.0 GPU + 0.35
   CPU, half resolution 1.4, MSAA 0.55, decorations 0.5 + 0.29 CPU, ground 0.46, grass 0.37, rider + bike 0.32 GPU +
-  0.54 CPU (245 meshes); smoke / SSAO / SSIL / SDFGI / fog / glow / SSR / DOF ~0 each. Left: the rider + bike as fewer
-  meshes (rigid bike parts merged), the physics step / rider pose (~0.3-0.4 ms each, thousands of lines of GDScript).
+  0.54 CPU (245 meshes); smoke / SSAO / SSIL / SDFGI / fog / glow / SSR / DOF ~0 each.
+  (4) **Rigid groups baked into one mesh** (`core/mesh_merge.gd`, `MeshMerge.merge(parent, sources, flat, keep, skip)`):
+  plain opaque parts become one surface with their colour in the vertices and one material (roughness / metal
+  averaged; parts this small don't show the plastic scans), emissive / see-through / `keep` materials one surface each,
+  ShaderMaterial parts (blinking LED, halo, fur) left as they are; the merged mesh casts a shadow only if one of its
+  pieces would have. Used on: every action cam (`ActionCam.merged`: the mount = one mesh, the Body = one mesh, so the
+  crash tear-off still works; 22 meshes -> ~4 draws), the bike lamp + tail light (lens kept: it's switched on / off),
+  the rocker's pivot bolts (15 -> 1). With the bar cam: 608 -> 518 draw calls in view, render CPU 1.18 -> 1.11 ms.
+  The wheels were already one mesh each (+ rotor + rim stickers). `BMX_NO_MERGE=1` = as built. Garage part pictures
+  (`PartThumbs`) still use the unmerged cam. The torn-off camera's box collider (`FlyingCam`) is now fitted to the
+  model's own bounds (HERO 4.6 x 6.4 x 7.2 cm, X4 6.9 x 13.6 x 4.6), `GOPRO` lines print it.
+  Left: the rider's kit (shoes 7, hands 5, knee pads ~11 meshes each) is recoloured live from the look, so it isn't
+  merged; the physics step / rider pose (~0.3-0.4 ms each, thousands of lines of GDScript).
   The terrain is already C# for every query in a ride; the GDScript `TerrainField` only sets up and grows the trail
   (worker) and is the reference. `-s res://tools/terrain_cs_cmp.gd` doesn't start (tape_sim.gd needs the `CrashLog`
   autoload, which `-s` scripts don't load), found 2026-11-23, not fixed.
