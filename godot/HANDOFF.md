@@ -1812,7 +1812,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - In the air the rider's hip moves against the bike move the BIKE (`Rider.body_off` = hips vs take-off, Game moves the
   drawn rig `AIR_SHARE` 0.8 of it the other way, faded by land_prep, never down into the ground on landing): tucking pulls
   the bike up to him, standing tall pushes it away; his body stays on its arc. `BMX_OLD_AIRSHARE=1` = off. CLIP 0 frames.
-- Playground side cameras (pg_side / pg_wide / pg_low, `square`): level with the rider, looking dead horizontal, no
+- Playground side cameras (pg_side / pg_wide / pg_low, `square`): a FIXED 8 deg (low: 4) down angle (dead level hid the wheels behind the jumps' side batters), no
   tilt / bank / shake / speed zoom: true side reference shots. Front 3/4 unchanged.
 
 ### Developer view of the test playground (`scripts/levels/ride_diag.gd`) - telemetry + sliders for riding code

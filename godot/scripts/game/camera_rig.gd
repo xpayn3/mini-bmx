@@ -22,11 +22,11 @@ const PRESETS := {
 ## false + cam_yaw 0, `orbit` PI/2 puts the camera on the +z side looking -z, the bike crossing left to right). Picked
 ## from the dev view's camera dropdown or C (they come first there); "pg_side" is the playground's default
 const LEVEL_PRESETS := {
-	# (square: a true reference side view: level with the rider, looking dead horizontal, never tilting after a jump, no
-	# bank, shake or speed zoom - for side-on comparison shots against real footage. User, 2026-11-23)
-	"pg_side":   {"label": "Side",       "dist": 12.0, "pitch": 0.0,  "follow": false, "fov": 42.0, "orbit": PI / 2, "lag": 4.0, "square": true},
-	"pg_wide":   {"label": "Side wide",  "dist": 13.0, "pitch": 0.0,  "follow": false, "fov": 66.0, "orbit": PI / 2, "lag": 3.0, "square": true},
-	"pg_low":    {"label": "Side low",   "dist": 6.5,  "pitch": 0.0,  "follow": false, "fov": 48.0, "orbit": PI / 2, "lag": 6.0, "square": true},
+	# (square: a reference side view: a FIXED angle a few degrees down (dead level, the jumps' near side batters hid the
+	# wheels), never tilting after the rider, no bank, shake or speed zoom - side-on comparison shots. User, 2026-11-23)
+	"pg_side":   {"label": "Side",       "dist": 12.0, "pitch": 8.0,  "follow": false, "fov": 42.0, "orbit": PI / 2, "lag": 4.0, "square": true},
+	"pg_wide":   {"label": "Side wide",  "dist": 13.0, "pitch": 8.0,  "follow": false, "fov": 66.0, "orbit": PI / 2, "lag": 3.0, "square": true},
+	"pg_low":    {"label": "Side low",   "dist": 6.5,  "pitch": 4.0,  "follow": false, "fov": 48.0, "orbit": PI / 2, "lag": 6.0, "square": true},
 	"pg_front":  {"label": "Front 3/4",  "dist": 9.0,  "pitch": 10.0, "follow": false, "fov": 44.0, "orbit": PI * 0.78, "lag": 5.0},
 }
 
@@ -365,8 +365,11 @@ func update_cam(dt: float) -> void:
 	if bool(Settings.get_v("cam_keep")) and not (st.crash_on and game.ragdoll):
 		aim = _keep_rider_in_view(target, drawn + Vector3(0, 0.9, 0))
 	if P.get("square", false) and not st.crash_on:
-		var flat := Vector3(target.x, global_position.y, target.z)
-		if global_position.distance_to(flat) > 0.01: look_at(flat, Vector3.UP)
+		# the same angle down whatever the rider does: towards him across, the preset's pitch down
+		var hz := Vector3(target.x - global_position.x, 0.0, target.z - global_position.z)
+		if hz.length_squared() > 1e-4:
+			var pd := deg_to_rad(cam_pitch)
+			look_at(global_position + hz.normalized() * cos(pd) - Vector3(0, sin(pd), 0), Vector3.UP)
 	elif global_position.distance_to(aim) > 0.01:
 		look_at(aim, Vector3.UP)
 		# bank into the turn a little with speed (the horizon tips the way the rider leans)
