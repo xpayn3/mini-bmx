@@ -1254,6 +1254,9 @@ static func _num(p: Dictionary, k: String, def := 0.0) -> float:
 var sm_turn := 0.0
 var sm_aero := 0.0
 var sm_fold := 0.0; var sm_reach := 0.0   # landing: folded by the hit, reaching for the ground
+# landings: how far the legs are bent past a little (the hips go back and onto the saddle), the air pose's weight (gone
+# at touch-down), the physics legs' bend that goes past the drawn body springs (hips / chest)
+var _sink := 0.0; var sm_airst := 0.0; var _abs_p := 0.0; var _abs_c := 0.0
 var sm_pre := 0.0; var sm_ext := 0.0; var sm_popfx := 0.0; var sm_squash := 0.0; var sm_lip := 0.0   # the jump (see update_pose)
 var sm_effort := 0.0
 var sm_pitch0 := 0.0
@@ -1378,6 +1381,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var wig: float = clampf(1 - absf(v) / 3, 0, 1) * sty.sway * float(sty.slowWobble) * (1.0 - 0.9 * clampf(eff * 1.5, 0.0, 1.0))
 	var air := _num(p, "air")
 	var comp: float = _num(p, "compress") * sty.crouch
+	var old_lp := Env.s("BMX_OLD_LANDPOSE") != ""
 	# the jump, like a rider who knows how. Preload: he sinks low and back over the rear wheel, chest down over the bars,
 	# elbows out, heels dropped - a spring wound up. The pop: the legs drive straight and the hips come up and forward to
 	# the bars, the back straightens, the arms go long (he stands tall into the lip), then he sucks the bike up under
@@ -1418,22 +1422,34 @@ func update_pose(dt: float, p: Dictionary) -> void:
 
 	# attack position: rolling, a downhill rider stands off the saddle (knees and elbows soft, ready),
 	# not only while pedalling
-	var stand: float = maxf(pedal, clampf(0.85 * float(sty.attackStand), 0.0, 1.3) * smoothstep(1.5, 5.0, absf(v)) * (1.0 - air))
+	# reaching for the landing the legs straighten out of the air tuck into the stance he will land in (the hips come up,
+	# the bike is pushed down to meet the ground), so the hit has a whole leg to fold
+	# (and on the ground the air pose is gone at once: it used to fade over ~0.5 s and lifted the hips by 15-20 cm right
+	# through the hit, so every landing looked like a small one. The dip is the legs': the physics' body on its leg
+	# spring, `absorb`)
+	var air_tg: float = air * (1.0 - sm_reach) if _num(p, "inAir") > 0.5 else 0.0
+	sm_airst += (air_tg - sm_airst) * (1.0 - exp(-(30.0 if air_tg < sm_airst else 60.0) * jh))
+	if not spring_init: sm_airst = air_tg
+	var air_st: float = air if old_lp else sm_airst
+	if not old_lp: comp *= 1.0 - sm_reach * air
+	var stand: float = maxf(pedal, clampf(0.85 * float(sty.attackStand), 0.0, 1.3) * smoothstep(1.5, 5.0, absf(v)) * (1.0 - air_st))
 
 	# pelvis
 	var pelvis := Vector3(
 		-0.16 - 0.07 * air * float(sty.airCrouch) + 0.06 * pedal * sty.standPedal - float(sty.standBack) * stand - comp * 0.25,
-		0.80 - 0.07 * air * float(sty.airCrouch) - comp + (float(sty.standHeight) * stand + 0.05 * spr) * sty.standPedal + 0.035 * bob + 0.14 * aero_a - 0.07 * aero_g,   # (forward: in the air legs extend; on the ground knees bend into the tuck)
+		0.80 - comp + (float(sty.standHeight) * stand + 0.05 * spr) * sty.standPedal + 0.035 * bob + 0.14 * aero_a - 0.07 * aero_g,   # (forward: in the air legs extend; on the ground knees bend into the tuck)
 		sway * sty.hipSway + shift * 0.3 + sin(t * 2.1) * 0.02 * wig) + fit
 	pelvis.x += sty.hipX * (1 - 0.5 * pedal) + 0.10 * aero_a - 0.05 * aero_g - 0.03 * eff   # sprint start: hips stay back over the saddle nose, the chest goes forward instead; forward over the cranks (air stick: hips forward; ground tuck: a touch back)
 	pelvis.y += 0.02 * eff                                               # up tall to stamp down
 	pelvis.y += sty.hipY * (1 - 0.6 * pedal)
-	pelvis.y -= 0.05 * smoothstep(0.8, 3.5, absf(_num(p, "airSpin"))) * air   # knees tucked up in a spin
-	pelvis.y += 0.07 * air * float(sty.airCrouch) * aero   # forward in the air: no crouch, legs pushed out
+	# the air pose's hip height: crouched in the air (none with the stick forward: legs pushed out), knees tucked up in a
+	# spin; reaching for the ground it goes (the legs straighten), and on the ground it is gone at once (air_st)
+	var air_y: float = (-0.07 * float(sty.airCrouch) * (1.0 - aero) - 0.05 * smoothstep(0.8, 3.5, absf(_num(p, "airSpin")))) * air_st
+	pelvis.y += air_y
 	# (a squash is NOT folding over the bars: the hips go back and down behind the saddle and the arms push the bars
 	# away, so the bike has room to come up in front of him)
 	pelvis.x += -0.045 * j_pre + 0.09 * j_ext - 0.13 * j_sq - 0.07 * j_fold - 0.02 * sm_reach
-	pelvis.y += -0.02 * j_pre + 0.06 * j_ext - 0.03 * j_sq - 0.09 * j_fold + 0.06 * sm_reach
+	pelvis.y += -0.02 * j_pre + 0.06 * j_ext - 0.03 * j_sq - (0.09 if old_lp else 0.13) * j_fold + (0.06 if old_lp else 0.09) * sm_reach
 
 	# chest
 	# (pedalling out of the saddle the chest stays forward over the bars)
@@ -1461,10 +1477,24 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# the crouches don't stack past what a rider gets down to (the lip's crouch + the preload + the legs pressed in by a
 	# transition came to 35 cm: sat on the rear tyre with the bars at his chin)
 	# (the landing fold counts too: on top of legs already driven right in by a hard landing it put the knees in the bar)
-	var deep_c: float = comp + maxf(0.0, -absorb) + 0.09 * j_fold - 0.22
+	# (a landing may go deeper: a rider soaking a big hit sinks right down, knees in front of the bars, never on the tyre)
+	var deep_c: float = comp + maxf(0.0, -absorb) + 0.09 * j_fold - (0.22 if old_lp else 0.22 + 0.10 * clampf(j_fold * 1.5, 0.0, 1.0))
 	if deep_c > 0.0: absorb += deep_c
 	pelvis.y += absorb
 	chest.y += absorb * 0.9
+	if not old_lp: chest.y -= 0.05 * j_fold   # (the arms take their share: elbows bend, the chest drops a bit further than the hips)
+	# the legs' bend is the physics' own body on its leg spring: it goes past the drawn body springs (a second soft
+	# spring on top of it filtered a landing's dip twice: ~0.2 s late and half as deep)
+	# (only a real bend: little bumps still go through the body springs, smoothed as before)
+	var by_k: float = 0.0 if old_lp else smoothstep(0.03, 0.10, -absorb)
+	_abs_p = absorb * by_k
+	_abs_c = absorb * 0.9 * by_k
+	# soaking a hit the hips go back as well as down, behind the saddle (the saddle stopped them ~12 cm under the stance:
+	# every landing came out the same depth); the chest less, so he folds over the bars a little
+	_sink = 0.0
+	if not old_lp:
+		_sink = clampf(-absorb - 0.04, 0.0, 0.3)
+		pelvis.x -= 0.45 * _sink; chest.x -= 0.2 * _sink
 	var hs := _num(p, "hipShift")
 	# (the physics' forward weight shift is carried by the chest going out over the bars in a ground tuck,
 	# not by the hips sliding up to the stem)
@@ -1668,7 +1698,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# never sit INTO the saddle
 	if sty.seatFloor and seat != null:
 		var over := clampf((pelvis.x - (float(seat.rear) - 0.18)) / 0.08, 0, 1)
-		var floor_y: float = float(seat.top) + 0.085
+		var floor_y: float = float(seat.top) + 0.085 - 0.3 * _sink   # (sinking into a landing the thighs come down onto it)
 		if pelvis.y < floor_y:
 			pelvis.y += (floor_y - pelvis.y) * over
 		if chest.y < pelvis.y + 0.15:
@@ -1698,6 +1728,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	if not spring_init:
 		pel_s = pelvis
 		ch_s = chest
+		if not _EULER_BODY: pel_s.y -= _abs_p; ch_s.y -= _abs_c
 		spring_init = true
 	var h := minf(dt, 0.05)
 	# the body is a mass on springy legs and arms: when the bike is kicked up by a bump (or drops) the body
@@ -1730,14 +1761,17 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		pel_v.y -= _facc * bump_k * h
 		pel_s += pel_v * h
 	else:
+		pelvis.y -= _abs_p
 		pel_s = _spring3(pel_s, pel_v, pelvis, 260.0, ky, zeta, -_facc * bump_k, h)
 		pel_v = _spring3_v
 	# the legs only bend / straighten so far
 	pel_s.y = clampf(pel_s.y, pelvis.y - 0.14, pelvis.y + 0.05)
+	if not _EULER_BODY: pelvis.y += _abs_p; pel_s.y += _abs_p
 	if air < 0.5:   # tests (BMX_CLIP_PROBE): how far the body moves on its legs while riding
 		bounce_stats[0] += (pel_s.y - pelvis.y) * (pel_s.y - pelvis.y); bounce_stats[1] += 1
 		bounce_stats[2] = maxf(bounce_stats[2], absf(pel_s.y - pelvis.y)); bounce_stats[3] += _facc * _facc
 	pelvis = pel_s
+	if not _EULER_BODY: pel_s.y -= _abs_p   # (the spring's own state stays without the legs' bend)
 	if _EULER_BODY:
 		var dc := 2 * sqrt(200.0) * zeta
 		ch_v += ((chest - ch_s) * 200.0 - ch_v * dc) * h
@@ -1745,10 +1779,13 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		ch_v.y -= _facc * bump_k * 0.85 * h
 		ch_s += ch_v * h
 	else:
+		chest.y -= _abs_c
 		ch_s = _spring3(ch_s, ch_v, chest, 200.0, ky * CHEST_KY, zeta, -_facc * bump_k * 0.85 * CHEST_PUSH, h)
 		ch_v = _spring3_v
 	ch_s.y = clampf(ch_s.y, chest.y - 0.14, chest.y + 0.06)
+	if not _EULER_BODY: chest.y += _abs_c; ch_s.y += _abs_c
 	chest = ch_s
+	if not _EULER_BODY: ch_s.y -= _abs_c
 	# the springs lag their target, so what they made can still break a limit (a quick lean swap, a landing): correct
 	# it and write that back into the springs - the body is held at the limit and its speed into it is gone (position
 	# based dynamics), instead of the spring pushing in again every frame and being pulled back out (a fight that
@@ -1766,6 +1803,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 			ch_v -= n * minf(0.0, ch_v.dot(n))
 			ch_s += dch
 		pelvis = pel_s; chest = ch_s
+		if not _EULER_BODY: pelvis.y += _abs_p; chest.y += _abs_c
 	# pedalling rock: undo the bike's rock for hips and chest about the tyres' contact line
 	var rr: float = _num(p, "rockRoll") * sty.upright
 	if rr != 0.0:
@@ -2150,7 +2188,7 @@ func _constrain(pelvis: Vector3, chest: Vector3, p: Dictionary, sty: Dictionary,
 	var hip_lift := 0.0
 	if sty.seatFloor and seat != null and not standing:
 		var s_in: float = clampf((pelvis.x - (float(seat.rear) - 0.1)) / 0.08, 0.0, 1.0) * clampf((float(seat.front) + 0.1 - pelvis.x) / 0.08, 0.0, 1.0)
-		hip_lift = maxf(0.0, (float(seat.top) + 0.078 - pelvis.y) * s_in)
+		hip_lift = maxf(0.0, (float(seat.top) + 0.078 - 0.3 * _sink - pelvis.y) * s_in)   # (soaking a landing: down onto it)
 	if wr is Vector3 and not standing:
 		var dw := Vector2(pelvis.x - wr.x, pelvis.y + hip_lift - wr.y)
 		var cr2: float = _num(p, "wheelRR", 0.36) + 0.12

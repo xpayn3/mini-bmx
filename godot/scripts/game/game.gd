@@ -2136,7 +2136,7 @@ var _jit := {}
 ## clamp letting go) can no longer jolt the torso, the head or the bike. The physics and the ride feel are untouched
 const MCAP := {
 	"bike_lean": [10.0, 160.0], "steer": [9.0, 200.0], "counter": [7.0, 110.0], "head_roll": [8.0, 120.0],
-	"lat_g": [6.0, 80.0], "hip_shift": [1.6, 30.0], "absorb": [2.5, 60.0], "body_stick": [6.0, 80.0],
+	"lat_g": [6.0, 80.0], "hip_shift": [1.6, 30.0], "absorb": [5.0, 220.0], "body_stick": [6.0, 80.0],
 }
 var _mc := {}
 var _lean_c := 0.0; var _steer_c := 0.0   # this frame's capped bike lean / bars (the bike and the rider's pose share them)
@@ -2784,6 +2784,7 @@ func _process(dt: float) -> void:
 			get_viewport().get_texture().get_image().save_png("%s_%d.png" % [Env.s("BMX_LIP_SHOT"), _lip_shots])
 			print("LIPSHOT %d prep=%.2f air=%s compress=%.2f absorb=%.2f vy=%.1f crouch=%.2f wait=%.2f pop_fx=%.2f squash=%.2f pull=%.2f" % [_lip_shots, st.prep, st.air, st.compress, st.body_y - st.y, st.vy, st.crouch, st.pop_wait, st.pop_fx, st.squash, st.air_pull])
 			_lip_shots += 1
+	if Env.s("BMX_LANDBODY") != "": _landbody_probe(st)
 	if Env.s("BMX_LAND_SHOT") != "" and _land_shots < 12:   # tests: 12 shots, 0.06 s apart, from just before a touch-down
 		if _land_shots == 0 and st.air and st.air_time > 0.5 and st.land_prep > 0.6: _land_t = t
 		if _land_t >= 0.0 and t - _land_t >= _land_shots * 0.06:
@@ -2881,6 +2882,7 @@ func _process(dt: float) -> void:
 		pi["lipK"] = maxf(st.prep, 1.0 if (st.pop_wait > 0.0 or st.hop_t > 0.0) else 0.0)
 		pi["landFold"] = 0.0 if st.air else st.land_fold   # folded up by a landing, gathering himself again
 		pi["landReach"] = st.land_prep                     # legs reaching down for the ground
+		pi["inAir"] = 1.0 if st.air else 0.0
 		pi["hipShift"] = _mcap("hip_shift", st.hip_shift, pdt)
 		pi["bodyStick"] = -0.55 if scenic else _mcap("body_stick", st.body_in_s, pdt)
 		pi["relax"] = 1.0 if scenic else 0.85 * dab_k   # foot down = calm: sat up, back straight, chin up
@@ -3085,3 +3087,25 @@ func _ride_fog() -> void:
 	env.fog_sky_affect = 0.0
 	env.fog_depth_curve = 1.6
 	env.fog_aerial_perspective = 0.75
+
+# tests (BMX_LANDBODY=1): how far the drawn body drops into a landing. From touch-down for 1.2 s: lowest pelvis /
+# chest height over the bike (rider space) vs where they settle at the end, peak fold, the physics legs' deepest
+var _lb := {}
+func _landbody_probe(st) -> void:
+	if rider == null or rider.pelvis_mesh == null or rider.torso == null: return
+	var py: float = rider.pelvis_mesh.position.y
+	var cy: float = rider.torso.position.y
+	if st.air:
+		if st.air_time > 0.3: _lb = {"air": st.air_time, "on": false}
+		return
+	if _lb.is_empty(): return
+	if not _lb.on:
+		_lb.merge({"on": true, "t": 0.0, "p0": py, "c0": cy, "pmin": py, "cmin": cy, "tmin": 0.0, "fold": 0.0, "leg": 0.0, "v": st.v})
+	_lb.t += get_process_delta_time()
+	if py < _lb.pmin: _lb.pmin = py; _lb.tmin = _lb.t
+	_lb.cmin = minf(_lb.cmin, cy)
+	_lb.fold = maxf(_lb.fold, st.land_fold)
+	_lb.leg = minf(_lb.leg, st.body_y - st.y)
+	if _lb.t > 1.2:
+		print("LANDBODY air=%.2f v=%.1f hit=%.1f heavy=%.2f fold=%.2f leg_min=%.0fcm | pelvis touch=%.0f low=%.0f (-%.0f cm at %.2fs) end=%.0f | chest low -%.0f cm" % [_lb.air, _lb.v, st._land_hit, st.land_heavy, _lb.fold, _lb.leg * 100, _lb.p0 * 100, _lb.pmin * 100, (py - _lb.pmin) * 100, _lb.tmin, py * 100, (cy - _lb.cmin) * 100])
+		_lb = {}
