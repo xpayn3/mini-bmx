@@ -230,6 +230,11 @@ func tick(game, dt: float) -> Dictionary:
 	# tuck held into the ground (BMX_PG_PILOT_TUCK=1)
 	if land_yaw_deg != 0.0 and ph.air and ph.air_time > 0.3: ph.slip = deg_to_rad(land_yaw_deg)
 	if land_tuck and ph.air and ph.air_time > 0.15: out.hop = true
+	# tests: come down nose up / down this many degrees from level (BMX_PG_PILOT_PITCH: a back-wheel landing)
+	if Env.s("BMX_PG_PILOT_PITCH") != "" and ph.air and ph.air_time > 0.25:
+		ph.pitch = deg_to_rad(float(Env.s("BMX_PG_PILOT_PITCH"))); ph.pitch_v = 0.0; ph.air_w = 0.0
+	if Env.s("BMX_PG_PILOT_VY") != "" and ph.air and ph.air_time > 0.25 and ph.vy < 0.0:   # tests: comes down at least this fast (m/s)
+		ph.vy = minf(ph.vy, -float(Env.s("BMX_PG_PILOT_VY")))
 	if tech != "":
 		out.hop = false
 		var lip_in: float = ph.lip_last if ph.lip_state == 2 else INF

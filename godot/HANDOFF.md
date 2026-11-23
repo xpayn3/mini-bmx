@@ -748,6 +748,19 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
     (+ `BMX_LIP_PREP`, `BMX_LIP_STEP`) for the poses. Don't start more than 2-3 test windows at once (Vulkan device lost).
   - Not done (the pump for speed is the leg model since 2026-11-23); the
     suspension's own rebound is not simulated into the pop (the timing window stands in for it); not ridden by the user yet.
+- **Back-wheel landings + leaning back over rollers (2026-11-23, user F8: "landed on rear tire leaned back", "rider should
+  be able to land that", "crashed on small rollers when holding back lean")**. `bike_physics.gd`. (1) A landing's crash
+  limit is doubled only when square to the ground (`landForgive`, `_land_pe`); nose up (back wheel first, `_land_up`) now
+  keeps most of it to ~30 deg and loses it by ~55 deg (nose first stays strict). Test rider `BMX_PG_PILOT_PITCH=<deg>`
+  (+ `BMX_PG_PILOT_VY=<m/s>`): drop_3 at 45 km/h, 35 deg nose up, 9.5 m/s down: SLAM -> heavy landing 0.64; 50 deg still
+  SLAM. `BMX_OLD_LANDUP=1`. (2) In the air the game hands the right stick to air control, so a stick held back read as
+  released and came back on landing as a fresh quick pull: it armed the direct manual, full back = past its edge = fell
+  off the back (LOOPED OUT) on every little roller. `_pull_age` / the arming now hold through the air (`MANARM` line with
+  `BMX_MAN_PROBE`). (3) The ground loop-out check, with weight held back on purpose (stick back or the power wheelie), throws
+  the front down and costs speed (`manLoopKeep`) instead of crashing. `BMX_OLD_LOOPOUT=1` = both as before. Repro:
+  `BMX_LEVEL=playground BMX_STRAIGHT=1 BMX_PAD=1 BMX_PG_AT=roller_0.3 BMX_PG_SPEED=25 BMX_BODY=slowback:1.0`. Every crash
+  now writes `CRASH <reason> v= vy= pitch= ground= ... stick= man= armed= pw=` into the session log (so F8 / crash reports
+  say why). Suite identical with / without (the suite rides hands off), stress 56 / 56.
 - **Landing body soaks the hit (2026-11-23, user: "when we land the whole body is stiff", "all jumps look small")**.
   Drawing only (`rider.gd`, `game.gd`), physics unchanged. The physics legs (`body_y - y`) already compressed 17-26 cm,
   but the drawn hips dipped 0-10 cm, the same on every jump. Found with the new probe `BMX_LANDBODY=1` (`LANDBODY` per

@@ -81,6 +81,7 @@ var lock_sb := false; var lock_sf := false; var flick_kick := 0.0
 # the manual starts from a quick pull (centre -> back within manPullTime), not from how far the stick is: a slow lean
 # back, however far, is just weight on the rear tyre (cornering). _pull_age = s since the stick left the centre going back
 var _man_armed := false; var _pull_age := 0.0; var left_back := 0.0
+var _loop_saved := 0.0   # a weight-back loop-out just caught (s)
 var _man_pw := 0.0   # power wheelie: weight back + pedalling lifts the front (0..1, eased)
 var _man_over := 0.0   # s the front has been held past the loop-out angle (direct manual: then he falls off the back)
 var man_a := 0.0; var man_w := 0.0; var man_zone := false; var man_lock := 0.0; var man_zone_t := 0.0
@@ -132,6 +133,7 @@ var _fb_r := 0.0           # the rear brake's deceleration this step (m/s2), lik
 const FRAME_PROG := 0.35   # the ramp-up the reference frame's linkage adds to its shock (BikeBuild.frame_mods scales it per frame)
 var _land_hit := 0.0   # the biggest hit of the landing being judged
 var _land_pe := 0.0   # the last touch-down's pitch against the ground (rad)
+var _land_up := false   # ... nose up (back wheel first)
 const LIP_SPARE := 0.15   # rad: how much steeper than the lip under the wheels a take-off may leave
 const RIM_CLIMB := 4.0   # m/s: the most upward speed a rim strike on a rising edge gives the frame
 const TYRE_MAX := 0.045   # m: a tyre squashed this far is on its rim
@@ -543,6 +545,7 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	if _stun > 0.0:
 		_stun = maxf(0.0, _stun - dt); throttle = 0.0
 	land_fold = maxf(0.0, land_fold - dt / (0.45 + 0.9 * land_fold + 1.0 * land_heavy))
+	_loop_saved = maxf(0.0, _loop_saved - dt)
 	var steer_input: float = inp.steer
 	var brake_k := _step_controls(dt, inp, throttle, steer_input)
 	var brake := brake_k > 0.1
@@ -2086,7 +2089,17 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 		# the balance point (a back-wheel landing itself is caught, see _land_trick)
 		var back_up := pitch - _local_slope(f, XR, RWR, cp0) if cR and not cF and pitch - gpC > 0.6 else 0.0
 		if _balancing() or _man_grace > 0.0: pass   # the balance manual handles its own loop-out (no crash)
-		elif back_up > T.landBack + 0.1 or (back_up > 1.15 and pitch_v > 0.5 and not was_air): _crash("LOOPED OUT!")
+		elif back_up > T.landBack + 0.1 or (back_up > 1.15 and pitch_v > 0.5 and not was_air):
+			# weight held back on purpose (the body stick, or the power wheelie it makes with the pedals) rolling over rollers /
+			# crests: the rider feels it going and throws the front back down (speed lost, no crash). Thrown back off a
+			# landing, or nobody leaning back, it is still the crash
+			if (body_in_s < -0.3 or _man_pw > 0.05) and not was_air and since_land > 0.3 and Env.s("BMX_OLD_LOOPOUT") == "":
+				if _loop_saved <= 0.0:
+					v *= float(T.get("manLoopKeep", 0.72)); shake = maxf(shake, 0.25); _man_pw = 0.0
+					if host.msg_idle(): host.flash("LOOPED OUT!")
+				_loop_saved = 0.6
+				pitch_v = minf(pitch_v, -2.5)
+			else: _crash("LOOPED OUT!")
 		elif _nosing() or _nose_grace > 0.0: pass   # so does the nose manual
 		elif cF and not cR and gpC - pitch > 0.6 and _local_slope(f, XF, RWF, cp0) - pitch > 1.15: _crash("NOSE DIVE!")
 		# (not on the touch-down step: the clamp ran before the landing verdict, so a flip that came down upside
@@ -2208,6 +2221,7 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			if Env.s("BMX_FORGIVE_PROBE") != "" and at > 0.1: print("LANDED air=%.2f peak=%.2f pop=%.2f" % [at, air_peak, pop_q])   # tests
 			var back_land: bool = cR and not cF and wrapf(pitch - _g_pitch, -PI, PI) > 0.4
 			_land_pe = absf(wrapf(pitch - _g_pitch, -PI, PI))   # (how square to the ground it came down: the verdict's forgiveness)
+			_land_up = wrapf(pitch - _g_pitch, -PI, PI) > 0.0   # (back wheel first)
 			_rev_land = false; _land_fix = false
 			_land_trick(at)
 			if _land_fix:
@@ -2306,6 +2320,11 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			# (heavy landing), not the crash. Like the arcade bike games: the angle decides, the size of the drop mostly
 			# costs flow. (7 m to flat at 63 km/h, landed 12 deg off, read SLAM every time)
 			var clean := 1.0 - smoothstep(0.18, 0.6, _land_pe)
+			# back wheel first (nose up) is a way to land, not a mistake: the rear end and the legs take the first part,
+			# the frame rotates the front down and the arms take the rest (the user's 1.5 s jump landed ~35 deg nose up on
+			# a rising roller at 54 km/h: SLAM). Forgiven nearly as much up to ~30 deg, none past ~55 deg. Nose first
+			# stays strict: that is the one that goes over the bars
+			if _land_up and Env.s("BMX_OLD_LANDUP") == "": clean = 1.0 - 0.15 * smoothstep(0.18, 0.5, _land_pe) - 0.85 * smoothstep(0.5, 0.95, _land_pe)
 			var slam0: float = T.slamJolt * LAND
 			var slam: float = slam0 * (1.0 + float(T.get("landForgive", 1.0)) * clean)
 			if hit > slam:
@@ -2588,15 +2607,21 @@ func _balance_step(dt: float, pedalling: bool, throttle: float, brake: bool) -> 
 	_man_grace = 0.5 if man_a > 0.05 else maxf(0.0, _man_grace - dt)
 	var pull: float = clampf((-body_in - m_from) / maxf(0.05, 1.0 - m_from), 0.0, 1.0)
 	var pull_t: float = float(T.get("manPullTime", 0.25))
-	_pull_age = 0.0 if -body_in < 0.15 else _pull_age + dt
-	if -body_in < 0.12: _man_armed = false                        # back at the centre: it has to be pulled again
+	# (not in the air: off a roller the stick held back would come back down as a fresh quick pull and arm a manual
+	# that is past its edge at once - the user held weight back over little rollers and LOOPED OUT)
+	if air and Env.s("BMX_OLD_LOOPOUT") == "": _pull_age = maxf(_pull_age, 1.0)
+	elif -body_in < 0.15: _pull_age = 0.0
+	else: _pull_age += dt
+	if -body_in < 0.12 and not (air and Env.s("BMX_OLD_LOOPOUT") == ""): _man_armed = false                        # back at the centre: it has to be pulled again
 	# (manBothSticks: on a pad the left stick has to be pulled back with it too)
 	# corner gate: the front only comes up from riding roughly straight (manGate = most lean). Leaned into a corner,
 	# weight back is weight back (it changes the corner), whatever the stick or the pedals do. Once up it stays up
 	var gate_ok: bool = absf(lean) < float(T.get("manGate", 0.2))
 	var straight: bool = gate_ok or man_a > 0.05
 	# (not with a lip right ahead: there the pull back is the preload for the pop)
-	if not _man_armed and gate_ok and lip_state != 2 and not air and -body_in >= 0.5 and _pull_age <= pull_t and (not pad or float(T.get("manBothSticks", 0.0)) < 0.5 or left_back >= 0.5): _man_armed = true
+	if not _man_armed and gate_ok and lip_state != 2 and not air and -body_in >= 0.5 and _pull_age <= pull_t and (not pad or float(T.get("manBothSticks", 0.0)) < 0.5 or left_back >= 0.5):
+		_man_armed = true
+		if Env.s("BMX_MAN_PROBE") != "": print("MANARM age=%.2f body_in=%.2f air_time=%.2f since_land=%.2f v=%.1f" % [_pull_age, body_in, air_time, since_land, v])
 	# power wheelie, like a motocross game: weight back + pedalling lifts the front with no pull at all, as far as the
 	# pedals have the power for (all of it slow, none by manPowerSpeed); stop pedalling and it comes down
 	var vp: float = maxf(1.0, float(T.get("manPowerSpeed", 9.0)))
@@ -2897,7 +2922,11 @@ func _danger(reason: String, sev: float, dt: float, t_build := -1.0) -> void:
 
 ## a crash this step: the first reason found is the one reported (later checks in the same step don't overwrite it)
 func _crash(reason: String) -> void:
-	if crash_pending == "": crash_pending = reason
+	if crash_pending == "":
+		crash_pending = reason
+		# (into the session log, so an F8 / crash report says why: v, climb, pitch vs the ground, which wheels were down,
+		# the legs, the body stick)
+		CrashLog.note("CRASH %s v=%.1f vy=%.1f pitch=%.2f ground=%.2f air=%s front_air=%s rear_air=%s legs=%.2f stick=%.2f man=%.2f armed=%s pw=%.2f" % [reason, v, vy, pitch, _g_pitch, air, front_air, rear_air, body_y - y, body_in_s, man_a, _man_armed, _man_pw])
 
 ## once a step, after every _danger: the biggest meter (risk) and a SAVED! when a real scare was fought off
 func _risk_settle(dt: float) -> void:
