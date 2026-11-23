@@ -237,6 +237,7 @@ const PAGES := [
 		["Perfect landings", [
 			["*landBoost", "A landing matched to a downslope is pumped for speed (none on the flat).", "None", "Big"],
 			["landPerfect", "How close to the slope counts as perfect.", "Strict", "Forgiving"],
+			["landAngleCost", "Landing with the bike off the slope's angle bogs it down: speed lost (MX vs ATV style).", "Free", "Harsh"],
 			["landPerfectAir", "Only from this much air time.", "Short", "Long"],
 		]],
 	]],

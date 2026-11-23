@@ -244,6 +244,7 @@ const DEFS := [
 		["bermPump", "Pumping a berm: speed from the turn's load (× corner load)", 0.12, 0, 0.4, 0.01, "×"],
 		["landPerfect", "Perfect landing within", 0.14, 0.03, 0.4, 0.01, "rad"],
 		["landBoost", "Perfect landing on a downslope: speed pumped", 1.6, 0, 5, 0.1, "m/s"],
+		["landAngleCost", "Landing off the slope's angle: speed lost (at 35 deg+)", 0.25, 0, 0.6, 0.01, "×"],
 		["landHeavy", "Heavy landing from (share of a slam)", 0.6, 0.2, 0.9, 0.05, ""],
 		["landForgive", "Clean landing: extra hit taken (x a slam)", 1.0, 0, 3, 0.05, "×"],
 		["landYawFree", "Sideways landing: free angle", 0.12, 0, 0.5, 0.01, "rad"],

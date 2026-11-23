@@ -2344,6 +2344,17 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 				var boost: float = float(T.get("landBoost", 1.6)) * clampf(-sin(_g_pitch) / 0.3, 0.0, 1.0) * clampf(impact / 2.5, 0.0, 1.0)
 				v += boost; land_perfect = 1.0
 				if host.msg_idle(): host.flash(("PERFECT LANDING +%d km/h" % roundi(boost * 3.6)) if boost > 0.4 else "PERFECT LANDING")
+			# (air step 5, MX vs ATV style: the landing's angle decides your speed) a real jump landed with the bike well off the
+			# slope (nose high: rear first; nose low: front first) bogs - the rider fights it and loses speed: none within
+			# LAND_ANGLE_FREE, rising to landAngleCost of it at 35 deg (on top of what the hit itself takes). Matched = kept,
+			# perfect = the boost above. BMX_OLD_LANDSPEED=1 = no cost
+			if not _OLD_LANDSPEED and at > float(T.get("landPerfectAir", 0.45)) and crash_pending == "" and absf(v) > 2.0:
+				var bad: float = smooth01((land_err - LAND_ANGLE_FREE) / (deg_to_rad(35.0) - LAND_ANGLE_FREE))
+				if bad > 0.0:
+					var cut: float = absf(v) * float(T.get("landAngleCost", 0.25)) * bad
+					v -= signf(v) * cut
+					if cut > 1.0 and host.msg_idle(): host.flash("BAD LANDING -%d km/h" % roundi(cut * 3.6))
+					if Env.s("BMX_LAND_PROBE") != "": print("LANDANGLE err=%.0fdeg cut=%.1f km/h" % [rad_to_deg(land_err), cut * 3.6])
 			if Env.s("BMX_TRICK") != "": print("LANDERR %.3f perfect=%s" % [land_err, land_perfect >= 1.0])   # tests
 			compress_v -= minf(2.2, impact * 0.35) + (minf(1.2, impact * 0.2 + 0.4) if back_land else 0.0)
 			if host.susp != null: host.susp.land(maxf(0.0, -vy_in) * cos(_g_pitch) * 0.5 + impact * (0.57 if back_land else 0.4), front_air, rear_air)
@@ -2900,6 +2911,8 @@ static var _OLD_LANDLEGS := OS.get_environment("BMX_OLD_LANDLEGS") != ""
 var land_vn := 0.0          # m/s: the predicted speed into the landing, square to its slope
 var _vn_td := 0.0; var _reach_td := 1.0   # (tests: the last flight's, for the HIT line)
 var land_reach := 1.0       # 0.35..1: how far the legs reach for this landing (by land_vn)
+static var _OLD_LANDSPEED := OS.get_environment("BMX_OLD_LANDSPEED") != ""
+const LAND_ANGLE_FREE := 0.26   # rad (~15 deg) off the landing's slope that costs no speed
 static var _OLD_WHIP := OS.get_environment("BMX_OLD_WHIP") != ""
 const WHIP_WINDOW := 0.35   # s before the lip: the stick held to the side winds the whip up
 const WHIP_WIND := 0.2      # s of holding it to wind it right up

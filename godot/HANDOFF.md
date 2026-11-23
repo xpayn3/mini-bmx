@@ -1884,8 +1884,13 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   (`landReach`) follows it. Drops to flat (vn 4.4-6.3): full reach earlier, hit 0.56 -> 0.29, 2.06 -> 1.67; a matched
   landing (table_1.5, vn 2.2): 59 % reach, stays in his stance. `BMX_OLD_LANDLEGS=1`; `BMX_LAND_PROBE=1` HIT lines now
   print `vn= reach=`. Suite: nothing new.
-- Next (planned with the user): landing angle deciding speed (MX vs ATV All Out)
-  by impact speed, landing angle deciding speed (MX vs ATV All Out).
+- **Step 5 (done): the landing angle decides the speed (MX vs ATV All Out).** At touch-down after a jump (air >
+  `landPerfectAir`), a bike pitched off the landing slope loses speed: none within `LAND_ANGLE_FREE` 0.26 rad (~15 deg),
+  smoothly up to `landAngleCost` (0.25, new slider Ride > Jumps > Landing) x the speed at 35 deg+; "BAD LANDING -n km/h"
+  when it is more than ~4 km/h. The PERFECT LANDING boost (< `landPerfect`) is unchanged, so: matched = boost, a bit
+  off = nothing, way off = slow. Hands-off test rider (22-29 deg nose up): -2..-5 km/h, all CLEAN. `BMX_OLD_LANDSPEED=1`
+  = off; `BMX_LAND_PROBE=1` prints `LANDANGLE err= cut=`. Suite baseline re-saved (it predated the whole jump / brake
+  work of the day).
 
 ### Developer view of the test playground (`scripts/levels/ride_diag.gd`) - telemetry + sliders for riding code
 - **Only in the test playground** (user decision 2026-11-21: developer tools live in that level, normal rides have none).
