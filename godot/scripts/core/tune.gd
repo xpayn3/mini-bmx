@@ -35,6 +35,7 @@ const DEFS := [
 	["Tyre grip sim", [
 		["gripRearLock", "Locked rear swings out (fishtail)", 1.0, 0, 2.5, 0.05, "×"],
 		["gripLoose", "Loose patches (grip varies)", 0.5, 0, 1.5, 0.05, "×"],
+		["slideHold", "Rider holds slides he didn't ask for", 6.0, 0, 15, 0.5, "/s"],
 		["gripBumps", "Bumps knock the rear loose", 1.0, 0, 3, 0.05, "×"],
 		["gripPower", "Power slides / wheelspin", 1.0, 0, 3, 0.05, "×"],
 		["gripSquirm", "Tyres squirm in turns", 1.0, 0, 3, 0.05, "×"],

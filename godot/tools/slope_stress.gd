@@ -17,6 +17,7 @@ class Ground:
 	var b := 0.0   # wavelength / radius / step height
 	var x0 := 20.0 # where the feature starts (m along +x)
 	var noise: FastNoiseLite
+	var surf := 0   # 0 grass (off the trail), 1 trail, 3 sand
 	func height(x: float, z: float) -> float:
 		match kind:
 			"flat": return 0.0
@@ -57,7 +58,7 @@ class Ground:
 		return 0.0
 	func deck_height(x: float, z: float) -> float: return height(x, z)
 	func top_height(x: float, z: float) -> float: return height(x, z)
-	func surface(_x: float, _z: float) -> int: return 0
+	func surface(_x: float, _z: float) -> int: return surf
 	func jump_mask(_x: float, _z: float) -> float: return 0.0
 	func colliders_near(_x: float, _z: float) -> Array: return []
 
@@ -139,6 +140,10 @@ func _ready() -> void:
 		return
 	if "skip=1" in OS.get_cmdline_user_args():
 		_skip(cfg)
+		get_tree().quit(0)
+		return
+	if "slide=1" in OS.get_cmdline_user_args():
+		_slide(cfg)
 		get_tree().quit(0)
 		return
 	if "rollpump=1" in OS.get_cmdline_user_args():
@@ -810,3 +815,46 @@ func _rollpump(cfg: Dictionary) -> void:
 				var de := (e1 - e0) / 8.0 if e1 > -1.0 and e0 > -1.0 else NAN
 				if mode == "off": base = de
 				print("ROLLPUMP h=%.2f L=%.0f kmh=%.0f %-10s dE/roller=%+6.2f vs off=%+6.2f air=%.2fs flights=%d %s" % [hl[0], hl[1], kmh, mode, de, de - base, air, pops, crash])
+
+## slide=1: free riding like a player off the trail (grass, bumpy) and on it: weaving at full / half lock, holding
+## full lock, pedalling hard through a turn. How much of the time the rear is out (slip past the tyres' own slip
+## angle) with nothing asking for it (no rear brake, no whip): SLIDE lines
+func _slide(cfg: Dictionary) -> void:
+	var tot := {}
+	var sfs := [[0, "grass"], [1, "trail"], [3, "sand"]]
+	if trace: sfs = [[0, "grass"]]
+	for sf in sfs:
+		for gk in (["noise"] if trace else ["flat", "noise"]):
+			var t8 := 0.0; var t15 := 0.0; var tt := 0.0; var smax := 0.0; var crashes := 0
+			for kmh in ([40.0] if trace else [12.0, 20.0, 30.0, 40.0]):
+				for mode in (["hold"] if trace else ["weave", "weave_half", "hold", "sprint_turn", "keys"]):
+					var r := _make(cfg, gk, 0.15); var p: BikePhysics = r[0]; var g: Ground = r[1].terrain
+					g.surf = sf[0]
+					if gk == "noise": g.noise.frequency = 0.25
+					var tv: float = kmh / 3.6
+					p.v = tv
+					var ms := 0.0
+					for i in int(8.0 / DT):
+						var t := i * DT
+						var st := 0.0
+						match mode:
+							"weave": st = sin(t * TAU / 2.4)
+							"weave_half": st = 0.5 * sin(t * TAU / 2.0)
+							"hold": st = 1.0 if t > 1.0 else 0.0
+							"sprint_turn": st = 0.6 if t > 1.0 else 0.0
+							"keys": st = 1.0 if fmod(t, 2.0) < 1.0 else -1.0   # keyboard: full left / full right
+						var th := clampf((tv - p.v) * 2.0, 0.0, 1.0)
+						var d := _inp(th, clampf((p.v - tv - 1.5) * 0.4, 0.0, 1.0), st, mode == "sprint_turn")
+						if mode == "sprint_turn": d.throttle = 1.0
+						p.step(DT, d)
+						if trace and mode == "hold" and i % 12 == 0 and t < 8.0: print("    t=%.2f v=%.1f slip=%+.1f sw=%+.2f squirm=%.1f gr=%.2f steer=%+.2f lat=%+.1f yaw=%+.2f fuse=%.2f fpush=%.2f lean=%+.2f loose=%.2f nR=%.1f" % [t, p.v, rad_to_deg(p.slip), p.slip_w, rad_to_deg(p._squirm), p.grip_r, p.steer, p.lat_a, p.yaw_rate, p.front_use, p.front_push, p.bike_lean, p.loose, p.n_r])
+						if r[1].crash != "": crashes += 1; break
+						if t < 1.0 or p.air: continue
+						var sl := absf(p.slip - p._squirm)
+						tt += DT
+						if sl > deg_to_rad(8.0): t8 += DT
+						if sl > deg_to_rad(15.0): t15 += DT
+						ms = maxf(ms, sl)
+					smax = maxf(smax, ms)
+					if verbose: print("  SLIDE %s %s %2.0f km/h %-11s max=%.0fdeg %s v_end=%.0f" % [sf[1], gk, kmh, mode, rad_to_deg(ms), r[1].crash, p.v * 3.6])
+			print("SLIDE %-5s %-5s  out>8deg %4.1f %%  out>15deg %4.1f %%  max %2.0f deg  crashes %d" % [sf[1], gk, 100.0 * t8 / maxf(tt, 0.01), 100.0 * t15 / maxf(tt, 0.01), rad_to_deg(smax), crashes])
