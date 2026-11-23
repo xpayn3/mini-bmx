@@ -175,6 +175,22 @@ class Lane:
 		descend(15.0, 3.0, 6.0)
 		end(); flat(RUN)
 
+	## a jump laid out by JumpDesign (scripts/world/jump_design.gd): clothoid take-off + straight lip, the deck / gap
+	## and landing sized to the flight at the design speed
+	func designed(prm: Dictionary) -> void:
+		var d := JumpDesign.build(prm)
+		var tag := "dgap" if d.kind == "gap" else "dtable"
+		begin("%s_%s" % [tag, _n(snappedf(float(d.p.v) * 3.6, 1.0))], "%s %.0f km/h" % ["DESIGNED GAP" if d.kind == "gap" else "DESIGNED TABLE", float(d.p.v) * 3.6],
+			JumpDesign.describe(d))
+		var u0 := u()
+		var hs: PackedFloat32Array = d.h
+		for i in hs.size():
+			y = hs[i]; _push()
+		_f.lip = u0 + float(d.lip_u); _f.lip_deg = float(d.lip_deg)
+		_f.land0 = u0 + float(d.land0); _f.land1 = u0 + float(d.land1)
+		_f.design = d
+		end(); flat(RUN)
+
 	## n rollers of amplitude amp (crest height, m) and wavelength L
 	func rollers(amp: float, L: float, n: int, id_ := "roller") -> void:
 		begin("%s_%s" % [id_, _n(amp)], ("PUMP" if id_ == "pump" else "ROLLERS") + " %.1f m" % amp, "%d x %.0f m wavelength" % [n, L])
@@ -394,6 +410,116 @@ class Bowl:
 		return hh * smoothstep(deg_to_rad(22.0), deg_to_rad(48.0), ang)
 
 
+## a jump put down anywhere with the ramp editor (dev view > RAMPS): JumpDesign's shape on its own axis
+class PlacedRamp:
+	var id := ""
+	var pos := Vector2.ZERO      # world (x, z) of its lip
+	var yaw := 0.0               # heading it is ridden at (0 = +x, the bike's convention: direction (cos, -sin))
+	var prm := {}                # JumpDesign parameters
+	var d := {}                  # JumpDesign.build(prm)
+	var feat := {}               # the feature dict the probe / test rider use (u in its own frame)
+	var rect := Rect2()          # world bounds (+ the batter)
+	var reach := 0.0             # half width incl. the batter
+
+	func dir() -> Vector2: return Vector2(cos(yaw), -sin(yaw))
+	func side() -> Vector2: return Vector2(sin(yaw), cos(yaw))
+	## world point of the ramp's u = 0 (its start)
+	func origin() -> Vector2: return pos - dir() * float(d.lip_u)
+	## (u along it from its start, v across) of a world point
+	func local(x: float, z: float) -> Vector2:
+		var q := Vector2(x, z) - origin()
+		return Vector2(q.dot(dir()), q.dot(side()))
+	func at_local(uu: float, vv: float) -> float:
+		if uu <= 0.0 or uu >= float(d.length): return 0.0
+		var hh := JumpDesign.sample(d.h, uu)
+		if wood(): return hh if absf(vv) <= float(prm.get("width", 3.0)) * 0.5 else 0.0   # (square edges)
+		var out := maxf(0.0, absf(vv) - float(prm.get("width", 3.0)) * 0.5)
+		return maxf(0.0, hh - out * PlaygroundCourse.SIDE)
+	func at(x: float, z: float) -> float:
+		if not rect.has_point(Vector2(x, z)): return 0.0
+		var l := local(x, z)
+		return at_local(l.x, l.y)
+
+	func wood() -> bool: return str(prm.get("build", "dirt")) == "wood"
+
+	func rebuild() -> void:
+		d = JumpDesign.build(prm)
+		var top := 0.0
+		for hh in d.h: top = maxf(top, hh)
+		reach = float(prm.get("width", 3.0)) * 0.5 + (0.0 if wood() else top * PlaygroundCourse.SIDE) + 0.2
+		var o := origin()
+		var a := o - side() * reach; var b := o + side() * reach
+		var e := dir() * float(d.length)
+		rect = Rect2(a, Vector2.ZERO).expand(b).expand(a + e).expand(b + e).grow(0.2)
+		feat = {"id": id, "name": "RAMP " + id.trim_prefix("ramp_"), "desc": JumpDesign.describe(d), "u0": float(d.face_u), "u1": float(d.length),
+			"lip": float(d.lip_u), "top": top, "lane": "", "lip_deg": float(d.lip_deg),
+			"land0": float(d.land0) if d.kind != "kicker" else -1.0, "land1": float(d.land1) if d.kind != "kicker" else -1.0,
+			"jump": true, "ramp": self, "design": d}
+
+	func to_dict() -> Dictionary:
+		return {"id": id, "x": pos.x, "z": pos.y, "yaw": yaw, "p": prm}
+
+
+const RAMP_FILE := "user://playground/ramps.json"
+var ramps: Array = []          # PlacedRamp
+
+
+func add_ramp(prm: Dictionary, at: Vector2, yaw: float, id := "") -> PlacedRamp:
+	var r := PlacedRamp.new()
+	if id == "":
+		var n := 1
+		while ramp_by_id("ramp_%d" % n) != null: n += 1
+		id = "ramp_%d" % n
+	r.id = id; r.pos = at; r.yaw = yaw; r.prm = JumpDesign.params(prm)
+	r.rebuild()
+	ramps.append(r)
+	return r
+
+
+func remove_ramp(r: PlacedRamp) -> void:
+	ramps.erase(r)
+
+
+func ramp_by_id(id: String) -> PlacedRamp:
+	for r in ramps:
+		if r.id == id: return r
+	return null
+
+
+## the ramp whose riding zone (run-up + its length + run-out, its width + a margin) holds (x, z), or null
+func ramp_zone(x: float, z: float, back := 40.0) -> PlacedRamp:
+	for r in ramps:
+		var l: Vector2 = r.local(x, z)
+		if l.x > -back and l.x < float(r.d.length) + 16.0 and absf(l.y) < r.reach + 3.0: return r
+	return null
+
+
+## u along the frame of whatever is at (x, z): a placed ramp's own axis, else the lanes' (x - X0)
+func u_for(x: float, z: float) -> float:
+	var r := ramp_zone(x, z)
+	if r != null: return r.local(x, z).x
+	return x - X0
+
+
+func save_ramps() -> void:
+	var st = (Engine.get_main_loop() as SceneTree).root.get_node_or_null("Settings") if Engine.get_main_loop() is SceneTree else null
+	if st == null or st._no_save: return   # (tests / tools never write the player's files)
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("user://playground"))
+	var arr := []
+	for r in ramps: arr.append(r.to_dict())
+	var f := FileAccess.open(RAMP_FILE, FileAccess.WRITE)
+	if f: f.store_string(JSON.stringify(arr, "	"))
+
+
+func load_ramps() -> void:
+	if Env.s("BMX_PG_RAMPS") == "0" or not FileAccess.file_exists(RAMP_FILE): return
+	var j = JSON.parse_string(FileAccess.get_file_as_string(RAMP_FILE))
+	if not (j is Array): return
+	for e in j:
+		if e is Dictionary and e.has("p"):
+			add_ramp(e.p, Vector2(float(e.get("x", 0.0)), float(e.get("z", 0.0))), float(e.get("yaw", 0.0)), str(e.get("id", "")))
+
+
 var lanes: Array = []
 var bowls: Array = []
 var feats: Array = []          # every lane feature + bowl, flat
@@ -454,6 +580,11 @@ func _build() -> void:
 	l.step_down(1.2, 0.6, 28, 4.0, 0.8, 30); l.step_down(2.0, 0.8, 32, 6.0, 1.0, 34)
 	l.drop_land(1.5, 30); l.drop_land(2.5, 34)
 	l.hip(1.5, 32, 4, 30, 20); l.hip(1.5, 32, 4, 30, 35)
+	# jumps laid out by the maths (JumpDesign): each sized for the run-in speed in its name
+	l = _lane("designed", "DESIGNED JUMPS", -96.0)
+	for dj in [{"v": 8.0, "lip_deg": 22.0}, {"v": 10.0, "lip_deg": 24.0}, {"v": 12.0, "lip_deg": 26.0}, {"v": 13.5, "lip_deg": 26.0},
+			{"v": 15.0, "lip_deg": 25.0}, {"v": 11.0, "lip_deg": 30.0, "kind": "gap"}, {"v": 13.0, "lip_deg": 32.0, "kind": "gap"}]:
+		l.designed(dj)
 	l = _lane("brakes", "BRAKES, SURFACES & SLALOM", -72.0)
 	l.brake_strip(1, "both"); l.brake_strip(1, "front"); l.brake_strip(1, "rear")
 	l.brake_strip(0, "both"); l.brake_strip(2, "both"); l.brake_strip(3, "both")
@@ -524,6 +655,13 @@ func lane_by_id(id: String) -> Lane:
 
 
 func height(x: float, z: float) -> float:
+	var g := _height_base(x, z)
+	for r in ramps:
+		if (r as PlacedRamp).rect.has_point(Vector2(x, z)): g = maxf(g, r.at(x, z))
+	return g
+
+
+func _height_base(x: float, z: float) -> float:
 	for l in lanes:
 		if absf(z - l.z) <= l.band:
 			return l.at(x - X0, z - l.z)
@@ -552,6 +690,8 @@ func height_rocks(x: float, z: float) -> float:
 
 
 func jump_mask(x: float, z: float) -> float:
+	for r in ramps:
+		if (r as PlacedRamp).rect.has_point(Vector2(x, z)) and r.at(x, z) > 0.0: return 1.0
 	for l in lanes:
 		if absf(z - l.z) <= l.band:
 			return l.jump_at(x - X0, z - l.z)
@@ -560,6 +700,8 @@ func jump_mask(x: float, z: float) -> float:
 
 ## built ground (dirt): lanes' riding width + every raised / dug bit, the bowls' banks
 func is_dirt(x: float, z: float) -> bool:
+	for r in ramps:
+		if (r as PlacedRamp).rect.has_point(Vector2(x, z)) and r.at(x, z) > 0.01: return true
 	for l in lanes:
 		if absf(z - l.z) <= l.band:
 			return absf(z - l.z) <= l.hw + 0.6 or absf(height(x, z)) > 0.01
@@ -571,6 +713,8 @@ func is_dirt(x: float, z: float) -> bool:
 
 ## the feature (dict) under / around (x, z): on a lane the one whose span (+ 6 m before, + 10 m after) holds x
 func feature_at(x: float, z: float):
+	var r := ramp_zone(x, z, 6.0)
+	if r != null: return r.feat
 	var l := lane_at(x, z)
 	if l != null:
 		var uu := x - X0
@@ -582,7 +726,20 @@ func feature_at(x: float, z: float):
 	return null
 
 
+## the world point on feature f's centre line at u (its own frame: a lane's or a placed ramp's), on its surface
+func feat_point(f, uu: float) -> Vector3:
+	if f.has("ramp"):
+		var r: PlacedRamp = f.ramp
+		var p: Vector2 = r.origin() + r.dir() * uu
+		return Vector3(p.x, r.at_local(uu, 0.0), p.y)
+	var l := lane_by_id(f.lane)
+	if l == null: return Vector3.ZERO
+	return Vector3(X0 + uu, l.profile(uu), l.z)
+
+
 func feature_by_id(id: String):
+	var r := ramp_by_id(id)
+	if r != null: return r.feat
 	for f in feats:
 		if f.id == id: return f
 	return null
@@ -590,6 +747,10 @@ func feature_by_id(id: String):
 
 ## where to stand to ride feature f: (x, heading, z) like Game.respawn takes it. Lane features: `back` m before it
 func spawn_for(f, back := 25.0) -> Vector3:
+	if f.has("ramp"):   # its own axis, `back` m before its face
+		var r: PlacedRamp = f.ramp
+		var p: Vector2 = r.origin() + r.dir() * (float(f.u0) - back)
+		return Vector3(p.x, r.yaw, p.y)
 	if f.has("bowl"):
 		var b: Bowl = f.bowl
 		return Vector3(b.c.x - b.R - b.W - 14.0, 0.0, b.c.y)

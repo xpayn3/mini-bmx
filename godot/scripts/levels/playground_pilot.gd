@@ -84,6 +84,7 @@ func speed_for(f) -> float:
 
 ## run-in speed from the shape: from the lip (height, angle) to 35 % down the landing, plus the climb up the kicker
 func estimate(f) -> float:
+	if f.has("design"): return float(f.design.p.v)   # a JumpDesign jump: the speed it was laid out for
 	var l = course.lane_by_id(f.lane)
 	var ul: float = f.lip
 	var hl: float = l.profile(ul)
@@ -155,6 +156,8 @@ func tick(game, dt: float) -> Dictionary:
 		if _crash_t > 2.0: ended = "CRASH"; restart(game)
 		return out
 	_crash_t = 0.0
+	if mode == "feature" and target != null and target.has("ramp"):
+		return _tick_ramp(game, dt, ph, out)
 	var l = course.lane_at(ph.x, ph.z)
 	if l == null:   # off the lanes (a bowl, the grass): back to a lane
 		_lane = _lane if _lane != null else course.lanes[0]
@@ -266,6 +269,46 @@ func tick(game, dt: float) -> Dictionary:
 		return out
 	_back_t = 0.0
 	# stuck (stopped against something, or crawling up a slope it can't climb): the run again
+	if not ph.air and absf(ph.v) < 0.4 and not near:
+		_stuck_t += dt
+		if _stuck_t > 3.0: _stuck_t = 0.0; ended = "STALLED"; restart(game)
+	else:
+		_stuck_t = 0.0
+	return out
+
+
+## a ramp placed with the ramp editor: the same riding, along its own axis
+func _tick_ramp(game, dt: float, ph, out: Dictionary) -> Dictionary:
+	var r = target.ramp
+	if not (r in course.ramps): target = null; return out
+	cur = target
+	var lc: Vector2 = r.local(ph.x, ph.z)
+	var uu := lc.x
+	if uu > float(target.u1) + AFTER or absf(lc.y) > r.reach + 25.0 or uu < -RUNUP - 20.0:
+		if not ph.air:
+			_done_t += dt
+			out.brake = 1.0
+			if _done_t > 0.6: ended = "OVER"; restart(game)
+		return out
+	_done_t = 0.0
+	var look := clampf(5.0 + absf(ph.v) * 0.5, 6.0, 18.0)
+	var p: Vector2 = r.origin() + r.dir() * (uu + look)
+	var aim := Vector2(p.x - ph.x, p.y - ph.z)
+	var err: float = BikePhysics.ang_diff(atan2(-aim.y, aim.x), ph.heading)
+	var want := clampf(err * 2.4, -1.0, 1.0) if not ph.air else 0.0
+	_steer += (want - _steer) * clampf(dt / (0.07 + dt), 0.0, 1.0)
+	out.steer = _steer
+	var spd := speed_for(target)
+	target_v = spd
+	var near := uu > float(target.u0) - LET_GO
+	if ph.air or near:
+		out.throttle = 0.0; out.brake = 0.0
+	else:
+		var d: float = ph.v - spd
+		if d < -0.3: out.throttle = clampf(-d * 0.8, 0.3, 1.0)
+		elif d > 0.4: out.brake = clampf(d * 0.35, 0.0, 1.0)
+		out.sprint = ph.v < 5.0 and spd > 7.0
+	out.hop = pump and not ph.air and ph.prep > 0.15
 	if not ph.air and absf(ph.v) < 0.4 and not near:
 		_stuck_t += dt
 		if _stuck_t > 3.0: _stuck_t = 0.0; ended = "STALLED"; restart(game)

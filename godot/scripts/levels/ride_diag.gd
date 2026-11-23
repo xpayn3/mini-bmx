@@ -114,6 +114,12 @@ func setup(g) -> void:
 		su.setup(g)
 	_build_bar()
 	_build_bar2()
+	ramps = RampEditor.new()
+	ramps.name = "RampEditor"
+	ramps.visible = Env.s("BMX_PG_RAMPS_OPEN") != "" or Env.s("BMX_PG_RAMP_ADD") != ""
+	add_child(ramps)
+	ramps.setup(g, self)
+	_ramps_b.set_pressed_no_signal(ramps.visible)
 	_layout()
 	if Env.s("BMX_PG_PILOT") != "":   # tests: the test rider starts on BMX_PG_AT (or the first feature)
 		pilot_start.call_deferred(Env.s("BMX_PG_AT"))
@@ -403,6 +409,8 @@ var _slow_b: Button
 var _rec_b: Button
 var _ghost_c: Button
 var _lab_l: Label
+var _ramps_b: Button
+var ramps: RampEditor
 
 func _build_bar2() -> void:
 	bar2 = HBoxContainer.new()
@@ -417,6 +425,7 @@ func _build_bar2() -> void:
 	_slow_b = _small("1x", func(): lab.cycle_slow(), "T: slow motion 1 / ½ / ¼ / ⅒")
 	_rec_b = _small("REC", func(): lab.toggle_record(), "V: record the next run (inputs, path, graphs)")
 	_small("REPLAY", func(): lab.start_replay(), "J: replay the saved run with its ghost")
+	_ramps_b = _dev_btn(bar2, "RAMPS", func(): ramps.visible = _ramps_b.button_pressed, "the ramp editor: jumps from the formula, put anywhere, every number a slider", true)
 	_ghost_c = _dev_btn(bar2, "ghost", func(): lab.ghost = _ghost_c.button_pressed, "draw the replayed recording (bike + graphs)", true)
 	_ghost_c.set_pressed_no_signal(true)
 	_lab_l = Label.new()
@@ -493,6 +502,21 @@ func pilot_start(id: String) -> void:
 	pilot_changed()
 
 
+## the test rider on a ramp placed with the ramp editor (on repeat, from 30 m before it)
+func pilot_ramp(id: String) -> void:
+	if not (game.demo is PlaygroundPilot):
+		game.set_demo(false)
+		game.set_demo(true)
+	var pl: PlaygroundPilot = game.demo
+	pl.speed = _kmh / 3.6
+	pl.auto = _auto_c.button_pressed
+	pl.pump = _pump_c.button_pressed
+	pl.mode = "feature"; pl.target = game.terrain.course.feature_by_id(id)
+	pl.restart(game)
+	pl.runs = 0
+	pilot_changed()
+
+
 ## Game.set_demo calls this: the bar follows
 func pilot_changed() -> void:
 	if _ride_b == null: return
@@ -548,6 +572,10 @@ func _dev_layout() -> void:
 		bar.position = Vector2(left_w + 12, vp.y - 32); bar.size = Vector2(minf(620, vp.x - left_w - 24), 24)
 		bar2.position = Vector2(left_w + 12, vp.y - 60); bar2.size = Vector2(minf(620, vp.x - left_w - 24), 24)
 		_cam_pick.position = Vector2(left_w + 12, vp.y - 88); _cam_pick.size = Vector2(170, 22)
+	if ramps:
+		var rw := 560.0
+		ramps.size = Vector2(rw, 0)
+		ramps.position = Vector2(ride_rect.end.x - rw - 8.0, 8.0)
 	var full := size_mode == 2
 	hud.dev_bars((view.size.y + 8.0) if size_mode == 1 else 0.0, ride_rect.position.x, ride_rect.end.x)
 	if full != _full_on:
@@ -596,7 +624,7 @@ func _unhandled_input(e: InputEvent) -> void:
 func _input(e: InputEvent) -> void:   # click a page tab; the wheel over the graphs / bars isn't the camera's zoom
 	if e is InputEventMouseButton and e.pressed and e.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
 		var gm: Vector2 = view.get_global_mouse_position()
-		for c in [view, bar, bar2]:
+		for c in [view, bar, bar2, ramps]:
 			if c != null and c.is_visible_in_tree() and (c as Control).get_global_rect().has_point(gm):
 				get_viewport().set_input_as_handled(); return
 		return
@@ -632,7 +660,7 @@ func _process(_dt: float) -> void:
 		_runs_l.text = "run %d" % (pl.runs + 1) if pl is PlaygroundPilot else ""
 		if pl is PlaygroundPilot:   # the speed he rides at now (auto: what this jump needs)
 			_kmh_l.text = ("%.1f km/h" if pl._auto_on(pl.cur) else "%.0f km/h") % pl.kmh()
-		if pl is PlaygroundPilot and pl.mode == "feature" and pl.target != null and _picks[_pick.selected] != null 				and _picks[_pick.selected][1] != pl.target.id:
+		if pl is PlaygroundPilot and pl.mode == "feature" and pl.target != null and not pl.target.has("ramp") and _picks[_pick.selected] != null 				and _picks[_pick.selected][1] != pl.target.id:
 			_select(pl.target.id)   # (F2 started it on the feature ahead: the dropdown shows which)
 
 

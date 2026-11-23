@@ -20,6 +20,7 @@ var _mat: ShaderMaterial
 
 func _init(seed_in := 12345) -> void:
 	course = PlaygroundCourse.new()
+	if Env.s("BMX_PG_SUITE") == "": course.load_ramps()   # (the ramp editor's ramps; the baseline suite rides without them)
 	super(seed_in)
 
 
@@ -38,6 +39,7 @@ func update_stream(_px: float, _pz: float, _budget_ms: float = 4.0, _sync_r := -
 	_build_ground()
 	_build_rocks()
 	_build_signs()
+	for r in course.ramps: refresh_ramp(r)
 	chunk_serial += 1
 	print("PLAYGROUND built ms=", Time.get_ticks_msec() - t0, " lanes=", course.lanes.size(), " features=", course.feats.size())
 
@@ -288,6 +290,177 @@ static func _quad(V: PackedVector3Array, I: PackedInt32Array, x0: float, z0: flo
 	var b := V.size()
 	V.append(Vector3(x0, 0, z0)); V.append(Vector3(x1, 0, z0)); V.append(Vector3(x0, 0, z1)); V.append(Vector3(x1, 0, z1))
 	I.append_array([b, b + 1, b + 2, b + 1, b + 3, b + 2])
+
+
+# ---- placed ramps (the ramp editor) ---------------------------------------------------------------------------
+var _ramp_nodes := {}   # ramp id -> Node3D
+
+## (re)draws a placed ramp: its ground mesh on its own grid (fine along it where it isn't flat), a post at the lip,
+## a label with its numbers
+func refresh_ramp(r) -> void:
+	drop_ramp_node(r.id)
+	if _mat == null: return
+	var root := Node3D.new()
+	root.name = "Ramp_" + r.id
+	add_child(root)
+	_ramp_nodes[r.id] = root
+	if r.wood(): _wood_ramp(r, root)
+	else: _dirt_ramp(r, root)
+	var sd: Vector2 = r.side()
+	var post := MeshInstance3D.new()
+	var bm := BoxMesh.new(); bm.size = Vector3(0.08, 1.0, 0.08)
+	var pm := StandardMaterial3D.new(); pm.albedo_color = Color(1.0, 0.35, 0.2); bm.material = pm
+	post.mesh = bm
+	var lp: Vector2 = r.pos + sd * (r.reach + 0.6)
+	post.position = Vector3(lp.x, float(r.d.lip_h) * 0.5, lp.y)
+	post.scale = Vector3(1, maxf(0.3, float(r.d.lip_h) + 0.5), 1)
+	root.add_child(post)
+	var pr: Dictionary = r.d.pred[1]
+	_label(root, Vector3(lp.x, float(r.d.lip_h) + 1.6, lp.y), "%s · %.0f km/h\n%s\nlands %.1f m out (%s), EFH %.2f m" % [
+		r.feat.name, float(r.prm.v) * 3.6, JumpDesign.describe(r.d), float(pr.dist), pr.spot, float(pr.efh)], 30, Color(1, 0.86, 0.2))
+	chunk_serial += 1
+
+
+## a wooden ramp like a home-built one: slats across the face (2 cm gaps), plywood sides following the profile down to
+## the ground, a back board where it ends square (a kicker's open back)
+const WOOD_SLAT := 0.14
+const WOOD_GAP := 0.02
+func _wood_ramp(r, root: Node3D) -> void:
+	var w: float = float(r.prm.get("width", 3.0))
+	var hs: PackedFloat32Array = r.d.h
+	var L: float = r.d.length
+	var o: Vector2 = r.origin(); var dx: Vector2 = r.dir(); var sd: Vector2 = r.side()
+	var S := Vector3(sd.x, 0.0, sd.y)
+	# slats (a MultiMesh of boards, each lying on the surface at its middle, a touch of colour per board)
+	var xs: Array = []
+	var uu := 0.0
+	while uu < L:
+		var hh := JumpDesign.sample(hs, uu + WOOD_SLAT * 0.5)
+		if hh > 0.01: xs.append(uu)
+		uu += WOOD_SLAT + WOOD_GAP
+	var board := BoxMesh.new(); board.size = Vector3(WOOD_SLAT, 0.025, w)
+	var bmat := StandardMaterial3D.new()
+	bmat.vertex_color_use_as_albedo = true
+	bmat.albedo_color = Color(1, 1, 1); bmat.roughness = 0.85
+	board.material = bmat
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D; mm.use_colors = true
+	mm.mesh = board; mm.instance_count = xs.size()
+	var rng := RandomNumberGenerator.new(); rng.seed = hash(r.id)
+	for i in xs.size():
+		var uc: float = xs[i] + WOOD_SLAT * 0.5
+		var hh := JumpDesign.sample(hs, uc)
+		var sl := (JumpDesign.sample(hs, uc + 0.05) - JumpDesign.sample(hs, uc - 0.05)) / 0.1
+		var a := atan(sl)
+		var F := Vector3(dx.x * cos(a), sin(a), dx.y * cos(a))
+		var N := S.cross(F).normalized()
+		var p2: Vector2 = o + dx * uc
+		mm.set_instance_transform(i, Transform3D(Basis(F, N, S), Vector3(p2.x, hh, p2.y) - N * 0.0125))
+		var k := rng.randf_range(0.8, 1.08)
+		mm.set_instance_color(i, Color(0.55 * k, 0.4 * k, 0.24 * k))
+	var mmi := MultiMeshInstance3D.new(); mmi.multimesh = mm
+	root.add_child(mmi)
+	# plywood sides (+ under them nothing: the sides reach the ground)
+	var ply := StandardMaterial3D.new()
+	ply.albedo_color = Color(0.72, 0.52, 0.33); ply.roughness = 0.8
+	ply.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for side in [-1.0, 1.0]:
+		var off: Vector2 = sd * (float(side) * (w * 0.5 + 0.01))
+		var nrm: Vector3 = S * float(side)
+		var i := 0
+		while i < hs.size() - 2:
+			var u0 := i * JumpDesign.DS; var u1 := (i + 2) * JumpDesign.DS
+			var h0 := hs[i] - 0.03; var h1 := hs[mini(i + 2, hs.size() - 1)] - 0.03
+			if h0 > 0.0 or h1 > 0.0:
+				var a0: Vector2 = o + dx * u0 + off; var a1: Vector2 = o + dx * u1 + off
+				var q: Array = [Vector3(a0.x, maxf(0.0, h0), a0.y), Vector3(a1.x, maxf(0.0, h1), a1.y), Vector3(a1.x, 0.0, a1.y), Vector3(a0.x, 0.0, a0.y)]
+				for k in [0, 1, 2, 0, 2, 3]:
+					st.set_normal(nrm); st.add_vertex(q[k])
+			i += 2
+	# a back board wherever the profile ends square (a drop of more than 20 cm between two samples)
+	for i in range(1, hs.size()):
+		if hs[i - 1] - hs[i] > 0.2:
+			var ub := i * JumpDesign.DS
+			var c: Vector2 = o + dx * ub
+			var a0: Vector2 = c - sd * (w * 0.5); var a1: Vector2 = c + sd * (w * 0.5)
+			var hb := hs[i - 1]
+			var q: Array = [Vector3(a0.x, hb, a0.y), Vector3(a1.x, hb, a1.y), Vector3(a1.x, 0.0, a1.y), Vector3(a0.x, 0.0, a0.y)]
+			for k in [0, 1, 2, 0, 2, 3]:
+				st.set_normal(Vector3(dx.x, 0, dx.y)); st.add_vertex(q[k])
+	var sm := st.commit()
+	if sm.get_surface_count() > 0:
+		var smi := MeshInstance3D.new(); smi.mesh = sm; smi.material_override = ply
+		root.add_child(smi)
+
+
+func _dirt_ramp(r, root: Node3D) -> void:
+	var L: float = r.d.length
+	var us := PackedFloat64Array()
+	var uu := -0.5
+	while uu < L + 0.5:
+		us.append(uu)
+		var busy := JumpDesign.sample(r.d.h, uu) > 1e-4 or JumpDesign.sample(r.d.h, uu + 0.3) > 1e-4 or JumpDesign.sample(r.d.h, uu - 0.3) > 1e-4
+		uu += 0.1 if busy else 0.5
+	us.append(L + 0.5)
+	var vs := PackedFloat64Array()
+	var vv: float = -r.reach - 0.3
+	while vv < r.reach + 0.3:
+		vs.append(vv); vv += 0.25
+	vs.append(r.reach + 0.3)
+	var nu := us.size(); var nv := vs.size()
+	var H := PackedFloat32Array(); H.resize(nu * nv)
+	for j in nv:
+		for i in nu:
+			var hh: float = r.at_local(us[i], vs[j])
+			H[j * nu + i] = hh if hh > 0.002 else -0.03   # (flat edges just under the plane: no z-fighting)
+	var o: Vector2 = r.origin(); var dx: Vector2 = r.dir(); var sd: Vector2 = r.side()
+	var V := PackedVector3Array(); V.resize(nu * nv)
+	var N := PackedVector3Array(); N.resize(nu * nv)
+	var C := PackedColorArray(); C.resize(nu * nv)
+	var clay := CLAY.srgb_to_linear(); var dirt := DIRT.srgb_to_linear()
+	for j in nv:
+		for i in nu:
+			var k := j * nu + i
+			var w: Vector2 = o + dx * us[i] + sd * vs[j]
+			V[k] = Vector3(w.x, H[k], w.y)
+			var i0 := maxi(0, i - 1); var i1 := mini(nu - 1, i + 1)
+			var j0 := maxi(0, j - 1); var j1 := mini(nv - 1, j + 1)
+			var gu := (H[j * nu + i1] - H[j * nu + i0]) / maxf(1e-4, us[i1] - us[i0])
+			var gv := (H[j1 * nu + i] - H[j0 * nu + i]) / maxf(1e-4, vs[j1] - vs[j0])
+			var g2: Vector2 = dx * gu + sd * gv
+			N[k] = Vector3(-g2.x, 1.0, -g2.y).normalized()
+			C[k] = clay if H[k] > 0.02 else dirt
+	var I := PackedInt32Array(); I.resize((nu - 1) * (nv - 1) * 6)
+	var p := 0
+	# (winding: the grid's u / v axes are turned; pick the order that faces up)
+	var flip := dx.x * sd.y - dx.y * sd.x < 0.0   # (dir x side = +1 here: the lanes' order)
+	for j in nv - 1:
+		for i in nu - 1:
+			var a := j * nu + i
+			if flip:
+				I[p] = a; I[p + 1] = a + nu; I[p + 2] = a + 1
+				I[p + 3] = a + 1; I[p + 4] = a + nu; I[p + 5] = a + nu + 1
+			else:
+				I[p] = a; I[p + 1] = a + 1; I[p + 2] = a + nu
+				I[p + 3] = a + 1; I[p + 4] = a + nu + 1; I[p + 5] = a + nu
+			p += 6
+	var arr := []
+	arr.resize(Mesh.ARRAY_MAX)
+	arr[Mesh.ARRAY_VERTEX] = V; arr[Mesh.ARRAY_NORMAL] = N; arr[Mesh.ARRAY_COLOR] = C; arr[Mesh.ARRAY_INDEX] = I
+	var m := ArrayMesh.new()
+	m.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+	var mi := MeshInstance3D.new()
+	mi.mesh = m; mi.material_override = _mat; mi.layers = 1 | GROUND_LAYER
+	root.add_child(mi)
+
+
+func drop_ramp_node(id: String) -> void:
+	if _ramp_nodes.has(id):
+		var n: Node = _ramp_nodes[id]
+		if is_instance_valid(n): n.queue_free()
+		_ramp_nodes.erase(id)
 
 
 # ---- signs ---------------------------------------------------------------------------------------------------

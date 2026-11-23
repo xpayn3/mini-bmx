@@ -606,7 +606,8 @@ func _shape_profile() -> void:
 		# the trail climbs on to a ridge (gently: ~4 %), runs level a moment, then falls away in a cliff
 		var ramp := int(hh / 0.04 / STEP)
 		var hold := 6 + int(_hash(kk, seed_i + 2) * 6.0)
-		var dl := int(ceil((5.0 + hh * 0.4) / STEP))
+		var prof := _drop_shape(hh, big) if not OLD_DROPS else PackedFloat32Array()
+		var dl := int(ceil(((prof.size() - 1) * DROP_DX if not OLD_DROPS else 5.0 + hh * 0.4) / STEP))
 		var a := -1
 		var e := 0
 		for off in range(0, SLOT, 4):
@@ -630,10 +631,59 @@ func _shape_profile() -> void:
 			if q < a:
 				lift = hh * smooth(0.0, 1.0, float(q - (a - ramp)) / ramp)
 			elif q > a + hold:
-				lift = hh * (1.0 - smooth(0.0, 1.0, float(q - (a + hold)) / dl))
+				if OLD_DROPS: lift = hh * (1.0 - smooth(0.0, 1.0, float(q - (a + hold)) / dl))
+				else: lift = hh - _drop_at(prof, (q - (a + hold)) * STEP)
 			E[q] += lift
 		drops.append([a - ramp, e])
 		last_end = e
+
+
+## The drop-offs used to fall their 3-6.5 m (12-22 m cliffs) over 5 + 0.4 x height metres on a smoothstep: a 1.6 m
+## radius crest into a ~47-65 deg face. At trail speed the crest threw the rider off flat and he came down on the
+## flat at the bottom from the whole height (EFH = the height: a slam every time; user: "nobody would build this
+## step, it wipes people off the track"). Now the face is laid out from the flight: off the level top it falls along
+## the path a rider at DROP_V flies (depth = g x^2 / 2 v^2, so anyone up to that speed floats down onto it or rolls it,
+## slower riders simply ride it, the curve presses them less than g), at most DROP_SMAX (35 deg, big cliffs 38) as a
+## straight, then a bottom transition of DROP_RB (2 g at ~70 km/h). BMX_OLD_DROPS=1 = the old ones.
+const DROP_V := 16.0          # m/s (~58 km/h): the fastest a rider rolls off; faster still lands on the transition
+const DROP_SMAX := 0.70       # tan: steepest straight face (35 deg)
+const DROP_SMAX_BIG := 0.78
+const DROP_RB := 22.0         # m: the bottom transition's radius
+const DROP_DX := 0.25         # m: the shape's sampling
+static var OLD_DROPS := OS.get_environment("BMX_OLD_DROPS") != ""
+
+## depth below the lip every DROP_DX m from it, ending at exactly hh
+static func _drop_shape(hh: float, big: bool) -> PackedFloat32Array:
+	var smax := DROP_SMAX_BIG if big else DROP_SMAX
+	var out := PackedFloat32Array([0.0])
+	var d := 0.0
+	var x := 0.0
+	var s := 0.0
+	var bending := false
+	var guard := 0
+	while guard < 4000:
+		guard += 1
+		x += DROP_DX
+		var a := atan(s)
+		if not bending and hh - d <= DROP_RB * (1.0 - cos(a)) and s > 0.0:
+			bending = true
+		if bending:
+			a = maxf(0.0, a - DROP_DX / (DROP_RB * maxf(0.3, cos(a))))
+			s = tan(a)
+		else:
+			s = minf(smax, 9.81 * x / (DROP_V * DROP_V))
+		d += s * DROP_DX
+		out.append(d)
+		if bending and s <= 1e-4: break
+	var k := hh / maxf(1e-3, d)
+	for i in out.size(): out[i] *= k
+	return out
+
+static func _drop_at(prof: PackedFloat32Array, x: float) -> float:
+	var f := x / DROP_DX
+	var i := int(f)
+	if i >= prof.size() - 1: return prof[prof.size() - 1]
+	return lerpf(prof[i], prof[i + 1], f - i)
 
 
 ## the bank (signed tan, like BT) each point of a bend needs for the speed a rider rolls into it at (VA's model, no

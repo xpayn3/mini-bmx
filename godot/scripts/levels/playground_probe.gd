@@ -79,7 +79,7 @@ func pre_step(_dt: float, inp: Dictionary) -> void:
 		return
 	var f = _next_feature(ph.x, ph.z)
 	if f == null: return
-	var uu: float = ph.x - PlaygroundCourse.X0
+	var uu: float = course.u_for(ph.x, ph.z)
 	if uu < f.u0 - 1.0:
 		ph.v = T
 		inp.throttle = 0.0; inp.brake = 0.0; inp.sprint = false; inp.steer = 0.0; inp.hop = false
@@ -89,6 +89,8 @@ func pre_step(_dt: float, inp: Dictionary) -> void:
 
 ## the feature on this lane that starts ahead of (or at) x
 func _next_feature(x: float, z: float):
+	var r = course.ramp_zone(x, z)
+	if r != null: return r.feat if r.local(x, z).x < float(r.feat.u1) else null
 	var l = course.lane_at(x, z)
 	if l == null: return null
 	var uu := x - PlaygroundCourse.X0
@@ -101,7 +103,7 @@ func _next_feature(x: float, z: float):
 ## after the physics step: take-off / landing bookkeeping
 func post_step(dt: float) -> void:
 	var ph = game.phys
-	var uu: float = ph.x - PlaygroundCourse.X0
+	var uu: float = course.u_for(ph.x, ph.z)
 	_since_land += dt
 	if uu < _last_u - 3.0: _feat_in = null   # put back (bail tap, the test rider's next run): this run-in counts afresh
 	_last_u = uu
@@ -228,12 +230,12 @@ func on_crash(reason: String) -> void:
 	if not _jump.is_empty() and _jump.result == "":
 		if _land_t < 0.0:   # crashed in the air (or at touch-down before it was seen)
 			_jump.dist = Vector2(game.phys.x - _jump.x0, game.phys.z - _jump.z0).length()
-			_jump.u_land = game.phys.x - PlaygroundCourse.X0
+			_jump.u_land = course.u_for(game.phys.x, game.phys.z)
 			_jump.spot = "?"; _jump.slope = 0.0; _jump.pitch_err = 0.0; _jump.jolt = game.phys.land_jolt; _jump.v_land = 0.0
 		_jump.result = "CRASH " + reason
 		_finish()
 	else:
-		print("PG CRASH (on the ground) %s at u=%.1f v=%.1f" % [reason, game.phys.x - PlaygroundCourse.X0, game.phys.v * 3.6])
+		print("PG CRASH (on the ground) %s at u=%.1f v=%.1f" % [reason, course.u_for(game.phys.x, game.phys.z), game.phys.v * 3.6])
 		_try_crash = reason
 
 
@@ -260,7 +262,7 @@ func _tries_step(dt: float) -> void:
 	if target == null or _try < 0: return
 	var ph = game.phys
 	_try_t += dt
-	var uu: float = ph.x - PlaygroundCourse.X0
+	var uu: float = course.u_for(ph.x, ph.z)
 	_still = _still + dt if absf(ph.v) < 0.3 else 0.0
 	var busy := not _jump.is_empty()
 	if _try_done < 0.0 and _try_t > 1.0 and not busy and (ph.crash_on or uu > target.u1 + 12.0 or _still > 1.5):

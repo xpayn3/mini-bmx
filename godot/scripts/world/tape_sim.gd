@@ -44,7 +44,9 @@ func _init() -> void:
 	material_override = m
 	extra_cull_margin = 16384.0     # JS: frustumCulled = false
 	if Env.s("BMX_TAPE_GD") == "":
-		_cs = CrashLog.cs_new(CS)
+		# (CrashLog.cs_new inline: the CrashLog autoload isn't there in `-s` tools such as terrain_cs_cmp)
+		var sc = load(CS) if ClassDB.class_exists("CSharpScript") else null
+		_cs = sc.new() if sc else null
 
 
 func clear() -> void:

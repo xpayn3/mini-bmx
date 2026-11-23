@@ -1754,6 +1754,29 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   a real bike on loose dirt is nearer 0.6-0.7 g, and the surfaces barely differ; the wet strip (the game's water surface)
   stops at ~0.97 g, harder than dirt (its drag adds to the brakes).
 
+### Jumps from the formula (2026-11-23, `scripts/world/jump_design.gd`, `JumpDesign`)
+- One recipe for every built jump (after trailism.com/jump-design + the research folder's "MTB jump design considerations"
+  sheet): clothoid take-off whose tightest radius is v^2 / (lip_g g) (1.5 g), a STRAIGHT lip `lip_t` s long (0.15-0.25 s:
+  both wheels leave on one line, no kicky pitch), table deck / gap / kicker-to-flat, landing knuckle + straight + bottom
+  transition (land_g); auto deck = as long as the flight at the design speed (`aim` down the landing), auto landing angle =
+  the flight's angle there - 3 deg. `JumpDesign.predict` = point-mass flight + EFH for any run-in speed. Kinds: table | gap
+  (`fill`) | kicker. Probe: `-s res://tools/jump_design_probe.gd -- v=12 lip_deg=26 ...`.
+- **Trail jumps** TABLE / KICKER are baked from it: `tools/bake_jumps.gd` (designs in TRAIL_JUMPS) piped into
+  `tools/bake_jumps.py` writes the knots + AIR spans into trail_features.gd AND TerrainFieldCs.cs (never hand-edit them).
+  Designed for ~60 km/h real (the physics loses ~7 % more on a face than the formula): slower riders case the deck
+  (EFH < 1 m). DOUBLE / the free-ride `*_S` jumps are still hand-shaped. RHYTHM release beats have more kickers.
+- **Trail drops** (`TrailCourse._drop_shape`): the face follows the flight of a rider at DROP_V 16 m/s (max 35 deg, a
+  22 m bottom transition); was a smoothstep over 5 + 0.4 h m (42-51 deg, launched riders onto the flat).
+  `BMX_OLD_DROPS=1` = old. Probe `-s res://tools/drop_probe.gd -- <seed>` (its landing column is not right yet).
+- **Playground**: lane DESIGNED JUMPS (z -96, ids `dtable_<kmh>` / `dgap_<kmh>`; the test rider's auto speed starts at
+  the design speed). **Ramp editor** (dev view, LAB row > RAMPS, `levels/ramp_editor.gd`): + ADD / DEL / MOVE (mouse; wheel
+  turns; click drops) / RIDE (test rider on repeat), kind TABLE / GAP / KICKER, build DIRT / WOOD (slats + plywood sides,
+  square edges), a slider for every number, side view with the flights at 85 / 100 / 115 % and EFH. Placed ramps
+  (`PlaygroundCourse.PlacedRamp`, their own axis; `course.u_for` / `feat_point` / `ramp_zone` give the probe, pilot and
+  overlay their frame) are saved in `user://playground/ramps.json` (not in tests; the suite never loads them).
+  Tests: `BMX_PG_RAMP_ADD=1 BMX_PG_RAMP_SET=kind=kicker,build=wood,v=28 BMX_PG_RAMP_RIDE=1`, `BMX_PG_RAMPS=0`.
+- `-s` tools that build terrain (terrain_cs_cmp, rope_find) run again (tape_sim no longer names the CrashLog autoload).
+
 ### Developer view of the test playground (`scripts/levels/ride_diag.gd`) - telemetry + sliders for riding code
 - **Only in the test playground** (user decision 2026-11-21: developer tools live in that level, normal rides have none).
   **Layout (2026-11-22, user: "tidy, compact, nothing covering")**: a slim **tuning column** on the left (the TuneCard,

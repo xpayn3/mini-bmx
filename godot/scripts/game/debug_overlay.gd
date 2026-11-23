@@ -125,19 +125,18 @@ static func _playground(game, st, d3) -> void:
 	var f = pr._next_feature(st.x, st.z)
 	if f == null: f = pr.course.feature_at(st.x, st.z)
 	if f == null or f.has("bowl"): return
-	var l = pr.course.lane_by_id(f.lane)
-	var X0 := PlaygroundCourse.X0
+	var c: PlaygroundCourse = pr.course
 	if float(f.lip) >= 0.0:
-		var lp := Vector3(X0 + f.lip, l.profile(f.lip), l.z)
+		var lp: Vector3 = c.feat_point(f, f.lip)
 		d3.draw_line(lp, lp + Vector3.UP * 1.2, Color(1, 0.55, 0.1))
 	if float(f.get("land0", -1.0)) >= 0.0:
 		var pts := PackedVector3Array()
 		var u := float(f.land0)
 		while u <= float(f.land1):
-			pts.append(Vector3(X0 + u, l.profile(u) + 0.04, l.z)); u += 0.25
+			pts.append(c.feat_point(f, u) + Vector3.UP * 0.04); u += 0.25
 		if pts.size() >= 2: d3.draw_line_path(pts, Color(0.3, 1, 0.4))
 		var ut: float = f.land0 + 0.35 * (f.land1 - f.land0)
-		d3.draw_sphere(Vector3(X0 + ut, l.profile(ut) + 0.1, l.z), 0.18, Color(0.3, 1, 0.4))
+		d3.draw_sphere(c.feat_point(f, ut) + Vector3.UP * 0.1, 0.18, Color(0.3, 1, 0.4))
 
 
 ## the tyre forces and grip circles (see the list at the top)

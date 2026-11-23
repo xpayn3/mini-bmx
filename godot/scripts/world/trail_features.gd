@@ -124,14 +124,16 @@ class Wood:
 		return h0 + (h1 - h0) * minf(1.0, maxf(0.0, (u - a) / (b - a)))
 
 
-# The built jumps, 1.6x the size they were (2026-11-22; same shapes, same lip and landing angles). They were sized
-# for ~30-35 km/h: at the 48-60 km/h riders really arrive at, every one was overshot onto the flat past its landing
-# (or into the next jump's face), which is a heavy landing or a slam now that landings are judged. At this size the
-# landing ramp sits 10-18 m past the lip, where a rider at trail speed comes down. Mirrored in TerrainFieldCs.cs
-const TABLE := [[0, 0, 0], [8.8, 2.0, 0.5, 0], [15.2, 2.0, 0, 0], [18.4, 1.52, -0.36], [27.2, 0.288, -0.2], [33.6, 0, 0]]
+# The trail's built jumps are laid out by JumpDesign (scripts/world/jump_design.gd: clothoid take-off at <= 1.5 g, a
+# straight lip 0.15-0.2 s long, a deck as long as the flight, a landing matched to it) and baked into these knots by
+# tools/bake_jumps.gd (+ bake_jumps.py writes them here and into TerrainFieldCs.cs: never edit them by hand). Sized so a
+# rider at ~60 km/h comes down on the landing's sweet spot and anyone slower cases the deck (EFH < ~1 m), never the
+# flat. (2026-11-23; before: hand-shaped Hermites whose face kept curving to the lip's edge = a kicky lip, the landing
+# overshot at trail speed.) DOUBLE (free ride only) is still the hand-shaped one.
+const TABLE := [[0.0, 0.0, 0.0, 0.0], [1.8, 0.0004, 0.0016, 0.0016], [2.6, 0.0033, 0.0063, 0.0063], [3.4, 0.0113, 0.0141, 0.0141], [4.25, 0.028, 0.0258, 0.0258], [5.05, 0.0541, 0.0401, 0.0401], [5.9, 0.0959, 0.0588, 0.0588], [6.75, 0.155, 0.081, 0.081], [7.55, 0.2294, 0.1054, 0.1054], [8.4, 0.3313, 0.135, 0.135], [9.2, 0.4517, 0.1666, 0.1666], [10.05, 0.6091, 0.2044, 0.2044], [10.85, 0.7883, 0.2444, 0.2444], [11.7, 1.0159, 0.292, 0.292], [12.55, 1.2865, 0.346, 0.346], [13.35, 1.5858, 0.4035, 0.4035], [13.4, 1.606, 0.404, 0.404], [15.95, 2.6179, 0.404, 0.0], [28.75, 2.6179, 0.0, 0.0], [29.55, 2.4782, -0.3371, -0.3371], [29.75, 2.3993, -0.4225, -0.4225], [32.9, 1.0729, -0.4225, -0.4225], [33.7, 0.7661, -0.35, -0.35], [34.55, 0.5012, -0.278, -0.278], [35.4, 0.2958, -0.2098, -0.2098], [36.2, 0.1543, -0.1482, -0.1482], [37.05, 0.0572, -0.0844, -0.0844], [37.9, 0.0138, -0.0216, -0.0216], [38.2, 0.0, 0.0, 0.0], [39.2, 0.0, 0.0, 0.0]]   # baked: tools/bake_jumps.gd
 const DOUBLE := [[0, 0, 0], [8.0, 2.16, 0.58, -1.6], [9.6, 0.56, 0, 0], [12.0, 0.56, 0, 1.4],
 	[14.72, 1.92, 0, 0], [16.32, 1.92, 0, 0], [20.0, 1.36, -0.34], [30.4, 0.24, -0.16], [36.8, 0, 0]]
-const KICKER := [[0, 0, 0], [5.12, 1.12, 0.42, 0], [6.4, 1.12, 0, 0], [10.4, 0.768, -0.2], [22.4, 0, 0]]
+const KICKER := [[0.0, 0.0, 0.0, 0.0], [1.8, 0.0007, 0.0026, 0.0026], [2.6, 0.0056, 0.0105, 0.0105], [3.4, 0.0189, 0.0236, 0.0236], [4.25, 0.0469, 0.0434, 0.0434], [5.05, 0.0909, 0.0674, 0.0674], [5.9, 0.1612, 0.099, 0.099], [6.75, 0.2609, 0.1369, 0.1369], [7.55, 0.3868, 0.1789, 0.1789], [8.4, 0.5604, 0.2308, 0.2308], [9.2, 0.7671, 0.2876, 0.2876], [9.45, 0.8415, 0.3057, 0.3057], [11.45, 1.4508, 0.3057, 0.0], [22.2, 1.4508, 0.0, 0.0], [22.95, 1.3284, -0.304, -0.304], [25.55, 0.551, -0.304, -0.304], [26.35, 0.3377, -0.2342, -0.2342], [27.15, 0.1788, -0.1676, -0.1676], [27.95, 0.0723, -0.103, -0.103], [28.8, 0.0151, -0.0358, -0.0358], [29.3, 0.0, 0.0, 0.0], [30.3, 0.0, 0.0, 0.0]]   # baked: tools/bake_jumps.gd
 # the same three at their old size: the free-ride jumps out in the land (TerrainField.jump_at), which are found through
 # 34 m cells and sit close to each other and to wooden features - bigger, they overlapped (walls at their edges)
 const TABLE_S := [[0, 0, 0], [5.5, 1.25, 0.5, 0], [9.5, 1.25, 0, 0], [11.5, 0.95, -0.36], [17, 0.18, -0.2], [21, 0, 0]]
@@ -143,8 +145,8 @@ const WHOOP := [[0, 0, 0], [1.6, 0.3, 0.3], [2.6, 0.48, 0], [8.6, 0.08, -0.09], 
 
 ## where riders are in the air over each feature: [from, to, ...] along it (m), the lip to about where they come
 ## down. The ground shader draws no ridden lines there (ground.gdshader, via TerrainField.fo_air; mirrored in C#)
-const AIR := {"table": [8.8, 19.2], "double": [8.0, 17.6], "kicker": [5.76, 14.4], "woodKicker": [3.8, 9.0],
-	"tableLine": [8.8, 19.2, 42.36, 51.0], "flow": [5.76, 14.4], "doubleLine": [8.0, 17.6, 45.56, 54.2]}
+const AIR := {"table": [15.95, 33.09], "double": [8.0, 17.6], "kicker": [11.45, 25.94], "woodKicker": [3.8, 9.0],
+	"tableLine": [15.95, 33.09, 53.65, 68.14], "flow": [11.45, 25.94], "doubleLine": [8.0, 17.6, 51.25, 65.74]}
 const AIR_S := {"table": [5.5, 12.0], "double": [5.0, 11.0], "kicker": [3.6, 9.0],
 	"tableLine": [5.5, 12.0, 27.6, 33.0], "flow": [3.6, 9.0], "doubleLine": [5.0, 11.0, 29.6, 35.0]}
 
