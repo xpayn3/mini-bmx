@@ -180,7 +180,8 @@ class Lane:
 	func designed(prm: Dictionary) -> void:
 		var d := JumpDesign.build(prm)
 		var tag := "dgap" if d.kind == "gap" else "dtable"
-		begin("%s_%s" % [tag, _n(snappedf(float(d.p.v) * 3.6, 1.0))], "%s %.0f km/h" % ["DESIGNED GAP" if d.kind == "gap" else "DESIGNED TABLE", float(d.p.v) * 3.6],
+		begin(str(prm.get("id", "%s_%s" % [tag, _n(snappedf(float(d.p.v) * 3.6, 1.0))])),
+			str(prm.get("name", "%s %.0f km/h" % ["DESIGNED GAP" if d.kind == "gap" else "DESIGNED TABLE", float(d.p.v) * 3.6])),
 			JumpDesign.describe(d))
 		var u0 := u()
 		var hs: PackedFloat32Array = d.h
@@ -582,6 +583,10 @@ func _build() -> void:
 	l.hip(1.5, 32, 4, 30, 20); l.hip(1.5, 32, 4, 30, 35)
 	# jumps laid out by the maths (JumpDesign): each sized for the run-in speed in its name
 	l = _lane("designed", "DESIGNED JUMPS", -96.0)
+	# (2026-11-23) the dirt jump from the side-view reference video (research/jump, "The MTB Jumping Technique That Changed
+	# Everything", 13:24-14:38: the same jump squashed / neutral / popped): a 1.45 m 42 deg lip (tight, R 1.5 m: a dirt jump; the bike sits ~50 deg on it in the video) into a step-up landing mound
+	# ~1.5 m high, measured off the frames with the wheel (0.74 m) as the scale
+	l.flat(30.0); l.designed({"id": "dj_video", "name": "VIDEO DIRT JUMP", "v": 8.0, "lip_deg": 42.0, "height": 1.45, "kind": "gap", "land_h": 1.5})
 	for dj in [{"v": 8.0, "lip_deg": 22.0}, {"v": 10.0, "lip_deg": 24.0}, {"v": 12.0, "lip_deg": 26.0}, {"v": 13.5, "lip_deg": 26.0},
 			{"v": 15.0, "lip_deg": 25.0}, {"v": 11.0, "lip_deg": 30.0, "kind": "gap"}, {"v": 13.0, "lip_deg": 32.0, "kind": "gap"},
 			{"v": 16.7, "lip_deg": 28.0}, {"v": 18.3, "lip_deg": 30.0}]:   # (the last two: big air for whips / spins, ~1.5-2 s)

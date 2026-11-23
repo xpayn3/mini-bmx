@@ -2803,7 +2803,7 @@ func _process(dt: float) -> void:
 		clip_stats.frames += 1
 		clip_stats.before = maxf(clip_stats.before, d)
 		if d > 0.002: clip_stats.bad += 1
-	if Env.s("BMX_LIP_SHOT") != "" and _lip_shots < 10:   # tests: 10 shots, 0.08 s apart, from a lip
+	if Env.s("BMX_LIP_SHOT") != "" and _lip_shots < (int(Env.s("BMX_LIP_N")) if Env.s("BMX_LIP_N") != "" else 10):   # tests: 10 shots (BMX_LIP_N), 0.08 s apart, from a lip
 		if _lip_shots == 0 and st.prep > float(Env.s("BMX_LIP_PREP") if Env.s("BMX_LIP_PREP") != "" else "0.2") and not st.air: _lip_t = t
 		if _lip_t >= 0.0 and t - _lip_t >= _lip_shots * float(Env.s("BMX_LIP_STEP") if Env.s("BMX_LIP_STEP") != "" else "0.08"):
 			get_viewport().get_texture().get_image().save_png("%s_%d.png" % [Env.s("BMX_LIP_SHOT"), _lip_shots])

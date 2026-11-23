@@ -89,7 +89,8 @@ func setup(g) -> void:
 	view.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(view)
 	var e := Env.s("BMX_DIAG")
-	if e != "":
+	if e == "off": size_mode = 0   # tests: graphs off (clean shots)
+	elif e != "":
 		size_mode = 2 if Env.s("BMX_DIAG_FULL") != "" else 1
 		if e.is_valid_int(): page = clampi(int(e), 0, PAGES.size() - 1)
 		else:
