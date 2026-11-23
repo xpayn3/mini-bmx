@@ -1802,6 +1802,19 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - Test runs are forced windowed (`Settings._test_run`; `BMX_FULLSCREEN=1` overrides). The user wants test windows
   visible: don't use BMX_MIN any more. BMX_FOLLOW never brakes: it runs wide in later tight corners (test rider only).
 
+### The pro move only after YOUR pump; the bike moves in the air, not the rider (2026-11-23)
+- `pro_pop` / `pro_flight` (bike_physics.gd): a pop the player timed (`_pop_now` at a lip) or a crouch he held into it is
+  his pump; the rider's own hands-off pop is not. Only a pro flight gets: the nose-up pull off the lip (`air_tilt` target
+  + `AIR_PULL_UP` 0.4 rad x pop power, quick spring, held `PULL_HOLD` 0.4 s, then he levels it for the landing himself;
+  the lip's nose-down kick soaked: air_w >= -0.15), the pull-up of the bike into the body (`air_pull`, airLift), and the
+  drawn stand-tall / tuck (`popFx`, `airPull` pose inputs). Hands off: a plain jump. dtable_43 pumped: pitch 21 -> 34 deg
+  at 0.45 s, then level; landings CLEAN on 4 features. `BMX_OLD_PULLUP=1` = before; probe `BMX_PULL_PROBE=1` (PULLP lines).
+- In the air the rider's hip moves against the bike move the BIKE (`Rider.body_off` = hips vs take-off, Game moves the
+  drawn rig `AIR_SHARE` 0.8 of it the other way, faded by land_prep, never down into the ground on landing): tucking pulls
+  the bike up to him, standing tall pushes it away; his body stays on its arc. `BMX_OLD_AIRSHARE=1` = off. CLIP 0 frames.
+- Playground side cameras (pg_side / pg_wide / pg_low, `square`): level with the rider, looking dead horizontal, no
+  tilt / bank / shake / speed zoom: true side reference shots. Front 3/4 unchanged.
+
 ### Developer view of the test playground (`scripts/levels/ride_diag.gd`) - telemetry + sliders for riding code
 - **Only in the test playground** (user decision 2026-11-21: developer tools live in that level, normal rides have none).
   **Layout (2026-11-22, user: "tidy, compact, nothing covering")**: a slim **tuning column** on the left (the TuneCard,
