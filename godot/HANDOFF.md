@@ -113,6 +113,62 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 ## 5. Systems — how they work
 
 ### Ride physics (`bike_physics.gd`)
+- **Energy account (2026-11-22, `BMX_ENERGY_PROBE=1`)**: every 5 s an `ENERGY` line, J/kg since the start: the drive
+  stage's terms (pedal, brakes, pump, rolling, air, grade, manual), the change across each other stage (`S_steer` slides,
+  `S_move` hits, `S_vertical` springs / landings, `S_lip`, ...) and `height` (g x height change). First result (seed 4242,
+  demo AI): the brakes take as much as all the pedalling (-692 vs +660 J/kg, braking 18 % of the time) - the trail's
+  bends don't fit the speed its descents give. See `docs/research/ride_feel.md` (research + ranked changes).
+- **Ride the berm + banks sized to speed (2026-11-22, `ride_feel.md` change 1)**. Measured first (`tools/bend_probe.gd`,
+  `tools/berm_probe.gd`, -s headless): the course's berms were already 20 deg on average (switchbacks 31) and the ground
+  matched (`berm_shape` rises from ~1.6 m inside the centreline outwards), but the racing line (`LN`: the worn ground,
+  the demo AI's aim) cut ~2 m to the flat INSIDE at the apex, so the bike felt 4-10 deg and the AI braked 18 % of the
+  time. Now: (1) `TrailCourse._racing_line` blends the line up onto the berm face (`BERM_LINE` 0.9 m out, from |BT| >
+  `BERM_LINE_FROM`); the demo pilot aims there too and plans a bend with its bank (`A_LAT + G x |BT|`, Tune `demoBerm`).
+  (2) `TrailCourse.VA` = the speed a good rider arrives at (gravity down E, rolling `VA_ROLL` + air `VA_DRAG` as measured,
+  pedalling when slow, capped by each bend's radius + bank: forward only, so growing never changes it); `_bank_need`
+  raises the bank of bends that carry berms (ROAD / SWITCH / ESSES) to what the free-rolling speed into them needs, up to
+  `BANK_MAX` 0.70 (35 deg), never below the old shape. E is now built before BT (`_shape_profile` doesn't read BT). Banks
+  and the line are course arrays C# copies: `terrain_cs_cmp` EXACT, `trail_grow_probe` PASS. Every world's berms / line
+  changed. Demo AI, 85 s: seed 4242 42.0 -> 46.2 km/h avg, braking 18 -> 15 %, brake energy -16 %; seed 5 43.0 -> 46.9,
+  braking 16 -> 12 %, brake energy -23 %; 0 crashes; more slide scrub (`S_steer` -40 -> -140 J/kg: faster corners).
+  `BMX_OLD_LINE=1` / `BMX_OLD_BANK=1` = the old line / banks. Left: ~7 % of bends too tight to hold at 35 deg (layout,
+  change not made); the demo AI still slows to 32 km/h for every rock garden (`ROCK_V`).
+- **Berms pay back, rollers pump, jump lines in rhythm (2026-11-23, `ride_feel.md` changes 2-4)**.
+  (2) `bermPump` (Ride > Pumping, 0.12): the pump held (hop or stick forward) while a berm carries the turn (`berm_k`,
+  `corner_g` > 0.3) pushes the bike on by bermPump x corner load: ~+75-100 J/kg on a 90 s demo ride (a tenth of the
+  pedalling), none hands off. The demo AI pumps berms with the stick (held hop crouched and popped off the berm top:
+  slower) and only below its target speed (pumped while too fast it went OVER THE BARS braking for the next bend).
+  (3) `slope_stress.tscn -- rollpump=1 [only=h0.30L6k35hop_back trace=1]` (`ROLLPUMP` lines: energy per roller vs hands
+  off, 8 sine rollers, hands off / held / hop on the backsides / stick on the backsides). Found: the downhill pump needed
+  BOTH wheels down, and over a roller's crest the front leaves the ground for most of the backside, so the hop button
+  never pumped a roller (and its release hopped). Now one wheel down is enough (`ground_ok`), and a press that spent
+  over half its time (>= 0.08 s) pumping is let go without a hop (`pumped`). Button on the backsides now +0.5..+2.2
+  J/kg per 0.3 m roller (was -0.2..-2.2), stick +1..+7, held all the way ~0. The trail's roller shape (10 m, 0.48 m)
+  stays: at 45 km/h it is ridden on the ground; 6 m ones (research size for pump-track speeds) are jumped there.
+  **Same day, later: the pump is now the legs' stroke** (`_step_drive`, supersedes `pumpHold` / `pumpHoldUp` /
+  `pumpUnweight` / `pumpGain` and the old hidden `compress_v` x slope pump, which also worked hands off: all gone).
+  `pleg` = the legs' stroke, -1 bent (hop held / stick back: `_bend_in`) .. +1 straight (stick forward), `PUMP_STROKE`
+  0.3 m end to end, at most a whole stroke in `PUMP_STROKE_T` 0.16 s. Moving it does work against the ground's push:
+  dE = rider share x (n - 1) x g x stroke moved, n - 1 = v^2 x the ground's curve under the bike over +-`PUMP_SPAN`
+  0.6 m (`deck_height`; NOT the tyre loads: over a crest the front leaves the ground and the springs ring, which put the
+  timing a quarter roller out), capped -1..+1.5. So: bend over a crest (light) and straighten into the dip (heavy) =
+  gain; the other way round = loss; held still or hands off = nothing; a straight slope, however steep, = nothing (the
+  old downhill push is gone). Button cue: press going over the top, let go at the bottom of the dip (a pumping press
+  let go straightens the legs at once, `_cr_rel`, no pop). Slider `pumpLegs` (1, Ride > Jumps > Pumping; bikes x
+  `frame_mods` progression, Flowy preset 1.5, Feel > Flow). Measured, ROLLPUMP ridden on the ground (no flights): hands
+  off identical to before; button done right +0.5..+1.3 J/kg per roller, stick done right +0.5..+1.4, stick the wrong
+  way -0.5..-1.1, held 0. Demo AI 130 s seed 4242: 46.7 km/h, 0 crashes. Suite: 5 of 24 moved by the hidden pump's
+  removal (table_1.5@34 lands on the knuckle edge, stepdown_1@30 rolls back after its upslope landing, two runs +1
+  landing check); baseline re-saved. Stress 55 / 56 (the chaotic "brake grade -35 deg").
+  (4) `TerrainField._build_route`: jump sections follow `RHYTHM` beats (build: rollers -> release: a jump / table line
+  -> rest: a bridge or plain trail), the next lip one roll-out after the landing (`VA` x 0.75 s, 6-14 m, + 12 m after a
+  rest); jump sections draw from their own random stream. **Every world's features after its first jump section are
+  laid out differently than before** (12 worlds x 4 km: 170 features, was 166; bridges 9, was 18; rollers 50, was 31).
+  `BMX_OLD_RHYTHM=1` = the old layout. C# copies `route_feats`: `terrain_cs_cmp` EXACT, `trail_grow_probe` /
+  `rope_find` PASS, `wood_edge_probe` walls=0. Demo AI, 130 s, seeds 4242 / 5: 46.0 / 46.6 km/h, 0 crashes, every
+  built jump landed on its landing. Stress 56 / 56, suite 1 of 24 changed (hop_0.8 take-off 2.5 deg flatter).
+  Changes 5 (forgiving sideways landings) and 6 (graded pop) were already in (landings / jumps work of 2026-11-22):
+  a sideways landing under ~20 deg can't highside below ~86 km/h; the pop is graded by snap speed, lip timing, rebound.
 - **The ride step is 11 stage functions** (2026-11-21; it was one 1,514-line function). `_ride_step` is the short driver; the
   stages, in order: `_step_controls` (levers, body stick, air inputs, lip throw; returns the brake level), `_step_ground`
   (heights, surface, grip per tyre), `_step_sprint`, `_step_loads` (weight on each tyre -> `n_rear` / `n_front` / `n_load`),
@@ -515,12 +571,10 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   manual went straight on in any bend into the trees). The sprint stamp from slow lifts the front through the balance
   (`manSprintLift`) instead of the old climb that always looped out. HUD: the balance bar shows the moment the stick is
   pulled back (`man_pull`), the pump bar whenever hop is held on the ground (`pump_on`).
-  **The right stick pumps too (the pro way, user decision: it's the universal body stick)**: forward = push the bike into
-  the ground (how far = how hard, `pumpStick` x the button), eased back up a face = unweight (`pumpUnweight`, a little speed
-  carried, no cost), pulled past `manualFrom` = the manual. The hop button is the easy on / off pump. Test
-  `BMX_FOLLOW=1 BMX_PUMPRIDE=stick`. **Hop held with both wheels down pumps**: + `pumpHold` x g
-  x slope on a down slope, - `pumpHoldUp` on an up slope (`pump_push`, `pump_gain`); a press spent pumping a downhill
-  doesn't hop when let go (unless a lip is right there). A jump (> 0.45 s air) landed within `landPerfect` of the slope =
+  **The right stick pumps too (the pro way, user decision: it's the universal body stick)**: back = legs bent, forward =
+  pushed straight, pulled past `manualFrom` quickly = the manual. The hop button is the easy pump. (2026-11-23: both are
+  now the legs' stroke against the ground's curve, see "Berms pay back, rollers pump" above; the old `pumpHold` downhill
+  push is gone.) A pumping press doesn't hop when let go (unless a lip is right there). A jump (> 0.45 s air) landed within `landPerfect` of the slope =
   PERFECT LANDING + `landBoost` m/s. **HUD bars** (bottom centre, `hud.gd` `SlimBar` look: 4 px track, caption left, value
   right): `HopBar` (hop / pop charge in the ride accent, full mark, flash on release), `PumpBar` (centre-zero: green = gaining,
   red = losing, km/h won this rhythm), `BalanceMeter` (sweet spot green, loop-out end red, marker = the front's angle, time).
@@ -600,7 +654,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
     the stick snaps, `BMX_PG_PILOT=feature BMX_PG_AT=...`); `BMX_FORGIVE_PROBE=1` prints `STICKHOP`, `POP lip in`, `HOP
     power= dv= n= legs=`, `LANDED air= peak=`; `BMX_TRICK=none` prints `POP auto`, `SQUASH`; `BMX_LIP_SHOT=prefix`
     (+ `BMX_LIP_PREP`, `BMX_LIP_STEP`) for the poses. Don't start more than 2-3 test windows at once (Vulkan device lost).
-  - Not done: the pump for speed on rollers / backsides is still the old push (`pumpHold`), not the leg model; the
+  - Not done (the pump for speed is the leg model since 2026-11-23); the
     suspension's own rebound is not simulated into the pop (the timing window stands in for it); not ridden by the user yet.
 - **Landings (2026-11-22, user: "make our landing better ... does suspension and body react realistically, big jumps,
   landing at a slight corner", "suspension never past its end", "body reacts realistically, no clipping")**.

@@ -128,6 +128,10 @@ func _ready() -> void:
 		_sim(cfg)
 		get_tree().quit(0)
 		return
+	if "rollpump=1" in OS.get_cmdline_user_args():
+		_rollpump(cfg)
+		get_tree().quit(0)
+		return
 	if "sweep=1" in OS.get_cmdline_user_args():
 		_sweep(cfg)
 		get_tree().quit(0)
@@ -712,3 +716,42 @@ func _run_all(cfg: Dictionary) -> void:
 					if not p.crash_on: break
 				if p.crash_on: p.get_up()
 		_check(name, not insane and trav_max <= 1.005, "travel max=%.1f %% (this test %.1f %%) tyre squash max=%.1f cm crashes=%d" % [trav_max * 100.0, maxf(trav_max, t0m) * 100.0, squash_max * 100.0, crashes])
+
+
+## rollpump=1: 8 sine rollers of each height / wavelength at each speed, ridden hands off, the pump held the whole
+## way, the pump only down the backsides (hop / the body stick forward): `ROLLPUMP h= L= kmh= mode= dE=` = the energy
+## won per roller (J/kg, + the rolling / air drag the hands-off run lost on the same ground), air time, crash
+func _rollpump(cfg: Dictionary) -> void:
+	for hl in [[0.3, 4.0], [0.3, 6.0], [0.5, 6.0], [0.5, 8.0], [0.48, 10.0], [0.8, 5.0]]:
+		for kmh in [15.0, 25.0, 35.0, 45.0]:
+			var base := 0.0
+			for mode in ["off", "hold", "hop_back", "stick_back", "stick_pump"]:
+				if only != "" and not ("h%.2fL%.0fk%.0f%s" % [hl[0], hl[1], kmh, mode]).contains(only): continue
+				var r := _make(cfg, "rollers", hl[0], hl[1]); var p: BikePhysics = r[0]; var g: Ground = r[1].terrain
+				g.x0 = 6.0; p.v = kmh / 3.6
+				var x_end: float = g.x0 + 8.0 * hl[1]
+				var e0 := -1.0; var e1 := -1.0; var air := 0.0; var crash := ""; var pops := 0; var was_air := false
+				for i in int(12.0 / DT):
+					var sl: float = (g.height(p.x + 0.05, 0.0) - g.height(p.x - 0.05, 0.0)) / 0.1
+					var back := sl < -0.02 and p.x > g.x0
+					# hop_back = the button pump done right: pressed going over the top (the legs bend as the ground goes light),
+					# let go at the bottom of the dip (they push as it presses hardest). stick_pump = the same with the stick
+					# (back down the backside, forward up the face); stick_back = the stick the wrong way round
+					var d := _inp(0.0, 0.0, 0.0, false, mode == "hold" or (mode == "hop_back" and back))
+					if mode == "stick_back" and back: d.body_fwd = 0.9
+					if mode == "stick_pump" and p.x > g.x0: d.body_fwd = -0.45 if back else 0.9
+					p.step(DT, d)
+					if trace and p.x > g.x0 and p.x < g.x0 + 2.0 * hl[1] and i % 3 == 0:
+						print("  RPT x=%.2f sl=%+.2f hop=%s push=%+.2f pleg=%+.2f hop_t=%.2f crouch=%.2f prep=%.2f air=%s fa=%s ra=%s v=%.2f man=%.2f pressT=%.2f" % [p.x - g.x0, sl, d.hop, p.pump_push, p.pleg, p.hop_t, p.crouch, p.prep, p.air, p.front_air, p.rear_air, p.v, p.man_a, p.pump_press_t])
+					if e0 < 0.0 and p.x >= g.x0: e0 = 0.5 * p.v * p.v + BikePhysics.G * p.y
+					if p.x > g.x0 and p.x < x_end:
+						if p.air: air += DT
+						if p.air and not was_air: pops += 1
+					was_air = p.air
+					if r[1].crash != "": crash = r[1].crash; break
+					if p.x >= x_end: e1 = 0.5 * p.v * p.v + BikePhysics.G * p.y; break
+				if only != "":
+					p._eb_t = 5.0; p._e_tick(0.0, false)
+				var de := (e1 - e0) / 8.0 if e1 > -1.0 and e0 > -1.0 else NAN
+				if mode == "off": base = de
+				print("ROLLPUMP h=%.2f L=%.0f kmh=%.0f %-10s dE/roller=%+6.2f vs off=%+6.2f air=%.2fs flights=%d %s" % [hl[0], hl[1], kmh, mode, de, de - base, air, pops, crash])

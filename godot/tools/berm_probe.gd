@@ -1,44 +1,31 @@
 extends SceneTree
-## Banked-turn transitions: walks the course and prints, per turn, the bank height on its outside wall
-## and the worst change in that height per metre along the trail (a step shows up as a big jump).
-## godot --headless --path godot -s res://tools/berm_probe.gd   (seed: env BMX_SEED, default 4242)
-
-
+## The ground's real tilt across the trail where the racing line (TrailCourse.LN) runs, on banked bends, vs the bank the
+## course asks for (BT). Seed 4242, the first 4 km. Run: --headless -s res://tools/berm_probe.gd
 func _init() -> void:
-	var seed := int(OS.get_environment("BMX_SEED")) if OS.get_environment("BMX_SEED") != "" else 4242
-	var t := Terrain.new()
-	t.use_cs = false
-	t.set_seed(seed)
-	var f: TerrainField = t.field
-	var C := f.course
-	var prev := [0.0, 0.0]
-	var worst := 0.0
-	var worst_s := 0.0
-	var worst2 := 0.0
-	var peaks := []
-	var s := 0.0
-	var hl := []
-	while s < minf(C.length, 1500.0):
-		var p: Array = C.at(s)
-		var nx: float = -p[3]
-		var nz: float = p[2]
-		var h := [0.0, 0.0]
-		for side in 2:
-			var sg := 1.0 if side == 0 else -1.0
-			h[side] = f.berm(p[0] + nx * 3.0 * sg, p[1] + nz * 3.0 * sg)
-		hl.append(maxf(h[0], h[1]))
-		if s > 0.0:
-			for side in 2:
-				var d := absf(h[side] - prev[side]) / 0.5
-				if d > worst:
-					worst = d; worst_s = s
-		prev = h
-		s += 0.5
-	for i in range(1, hl.size() - 1):
-		var c2: float = absf(hl[i + 1] - 2 * hl[i] + hl[i - 1]) / 0.25
-		worst2 = maxf(worst2, c2)
-		if hl[i] > 0.6 and hl[i] >= hl[i - 1] and hl[i] > hl[i + 1]:
-			peaks.append("s=%.0f h=%.2f" % [i * 0.5, hl[i]])
-	print("BERM seed %d: worst slope along trail %.3f m/m at s=%.1f, worst curvature %.3f" % [seed, worst, worst_s, worst2])
-	print("BERM peaks: ", ", ".join(peaks))
+	var tg := Terrain.new()
+	tg.use_cs = false
+	tg.set_seed(4242)
+	var f = tg.field
+	var c: TrailCourse = f.course
+	var rows := 0; var sum_bt := 0.0; var sum_real := 0.0; var sum_c := 0.0
+	var hist := {}
+	for i in range(10, c.n - 10, 3):
+		var bt := absf(c.BT[i])
+		if bt < 0.2: continue
+		# across the trail at the line: (q_a positive side) = (-TZ, TX)
+		var ax := -c.TZ[i]; var az := c.TX[i]
+		var lx: float = c.X[i] + ax * c.LN[i]; var lz: float = c.Z[i] + az * c.LN[i]
+		var h0: float = tg.deck_height(lx - ax * 0.5, lz - az * 0.5)
+		var h1: float = tg.deck_height(lx + ax * 0.5, lz + az * 0.5)
+		var real := absf(atan2(h1 - h0, 1.0))
+		var hc0: float = tg.deck_height(c.X[i] - ax * 0.5, c.Z[i] - az * 0.5)
+		var hc1: float = tg.deck_height(c.X[i] + ax * 0.5, c.Z[i] + az * 0.5)
+		sum_bt += atan(bt); sum_real += real; sum_c += absf(atan2(hc1 - hc0, 1.0)); rows += 1
+		var b := int(rad_to_deg(atan(bt)) / 5) * 5
+		var hs: Array = hist.get(b, [0, 0.0])
+		hs[0] += 1; hs[1] += real; hist[b] = hs
+	print("BERMPROBE points=%d asked=%.1fdeg  on the line=%.1fdeg  on the centreline=%.1fdeg" % [rows, rad_to_deg(sum_bt / maxf(1, rows)), rad_to_deg(sum_real / maxf(1, rows)), rad_to_deg(sum_c / maxf(1, rows))])
+	var ks := hist.keys(); ks.sort()
+	for k in ks: print("BERMPROBE asked %d-%d deg: n=%d real on the line %.1f deg" % [k, k + 5, hist[k][0], rad_to_deg(hist[k][1] / hist[k][0])])
+	tg.free()
 	quit()

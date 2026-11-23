@@ -7,7 +7,7 @@ extends RefCounted
 
 const BUILTIN := {
 	"Default": {},
-	"Flowy": {"flowCarry": 0.7, "flowTime": 7.0, "carveBoost": 2.2, "pumpGain": 14.0, "rollRes": 0.6, "turnWeight": 0.15, "popKick": 2.2},
+	"Flowy": {"flowCarry": 0.7, "flowTime": 7.0, "carveBoost": 2.2, "pumpLegs": 1.5, "rollRes": 0.6, "turnWeight": 0.15, "popKick": 2.2},
 	"Grippy": {"grip": 1.55, "oversteer": 0.1, "slipRecover": 12.0, "slipMax": 1.3, "carveGrip": 0.2, "counter": 0.1},
 	"Drifty": {"grip": 0.9, "oversteer": 0.8, "slipRecover": 3.0, "slipMax": 1.35, "counter": 0.4},
 	"Floaty air": {"airTwist": 0.9, "flipRate": 9.0, "flipAccel": 40.0, "airTilt": 0.7, "tuckSpin": 0.5, "slamJolt": 8.5, "popKick": 2.9},

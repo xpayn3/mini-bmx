@@ -227,8 +227,9 @@ const PAGES := [
 			["*inputForgive", "A hop, lip pump or flip throw this much early / late still counts.", "Exact", "Forgiving"],
 		]],
 		["Pumping", [
-			["*pumpHold", "Hop held down a slope pushes you along (and costs speed going up).", "None", "Strong"],
-			["*pumpStick", "Right stick forward pumps; eased back up a face it carries speed.", "None", "Strong"],
+			["*pumpLegs", "Pump rollers and dips with your legs: bend them (hop held / stick back) over a crest, push them straight (let go / stick forward) down the back and into the dip.", "None", "Strong"],
+			["*pumpStick", "Right stick forward pumps a berm (× the hop button).", "None", "Strong"],
+			["*bermPump", "Pumping through a banked turn (hop held / stick forward) drives the bike out of it faster.", "None", "Strong"],
 		]],
 		["Perfect landings", [
 			["*landBoost", "A landing matched to a downslope is pumped for speed (none on the flat).", "None", "Big"],
@@ -254,7 +255,6 @@ const PAGES := [
 		["Balance on one wheel", [
 			["riderBalance", "Rider balance on one wheel.", "Wobbly", "Steady"],
 			["noseDive", "Nose-dive crash angle.", "Strict", "Forgiving"],
-			["*pumpGain", "Pumping rollers gives speed.", "None", "Lots"],
 		]],
 	]],
 	["jumps", "Jumps", "Take-off, the air, the right stick up there, landing", [

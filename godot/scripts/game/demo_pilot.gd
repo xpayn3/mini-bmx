@@ -35,6 +35,7 @@ func reset() -> void:
 	_i = -1; _steer = 0.0; _thr = 0.0; _crash_t = 0.0; _stuck_t = 0.0
 
 
+var _OLD_LINE := OS.get_environment("BMX_OLD_LINE") != ""   # (tests: the old line + flat-ground corner plan)
 static func _tv(key: String, fallback: float) -> float:
 	return float(Tune.v.get(key, fallback))
 
@@ -99,7 +100,11 @@ func tick(game, dt: float) -> Dictionary:
 			k = maxf(k, absf(tc.KAP[q]))
 		var d := j * TrailCourse.STEP
 		if j < 8: kmax_near = maxf(kmax_near, k)
-		var va := minf(vmax, sqrt(a_lat / maxf(k, 0.004)))
+		# (a berm holds the bike up: its bank's own share of the turn, G x tan, comes on top of the tyres' grip)
+		var bank_t := 0.0
+		for q in range(maxi(0, idx - 1), mini(tc.n, idx + 2)): bank_t = maxf(bank_t, absf(tc.BT[q]))
+		if _OLD_LINE: bank_t = 0.0
+		var va := minf(vmax, sqrt((a_lat + BikePhysics.G * bank_t * _tv("demoBerm", 1.0)) / maxf(k, 0.004)))
 		if tc.KD[idx] == TrailCourse.ROCKS: va = minf(va, ROCK_V * pace)
 		tgt = minf(tgt, sqrt(va * va + 2.0 * DECEL * d))
 	var near_feat := false
@@ -137,6 +142,9 @@ func tick(game, dt: float) -> Dictionary:
 		if nl > 1e-5:
 			var bend := smoothstep(0.012, 0.05, absf(tc.KAP[li]))
 			var off := minf(tc.W[li] * 0.4, 1.3) * line * bend
+			# a banked bend: up on the berm (outside of the centreline, where its bank is), not cut to the flat inside
+			var bw := 0.0 if _OLD_LINE else smoothstep(TrailCourse.BERM_LINE_FROM, TrailCourse.BERM_LINE_FULL, absf(tc.BT[li]))
+			off = lerpf(off, -minf(TrailCourse.BERM_LINE, maxf(0.0, tc.W[li] - 0.9)) * bend, bw)
 			lx += nx / nl * off; lz += nz / nl * off
 	var ra = game.terrain.rope_aim(px, pz, look)   # a rope bridge: its own straight line, not the trail's
 	if ra != null:
@@ -172,6 +180,11 @@ func tick(game, dt: float) -> Dictionary:
 	_brk = out.brake
 	# the pump: push into the lips and rollers
 	out.hop = _tv("demoPump", 1.0) > 0.5 and not ph.air and ph.prep > 0.15
+	# ...and through a banked turn: pushed into the berm with the body stick forward (bermPump), not the hop button
+	# (held hop crouches and pops off the berm's top), not near a lip
+	# (only when it wants the speed: pumped while already too fast it arrives at the next bend braking hard)
+	if _tv("demoPump", 1.0) > 0.5 and not ph.air and not near_feat and ph.berm_k > 0.15 and absf(ph.lat_a) > 3.0 and over < -0.3:
+		out.body_fwd = 0.7
 	# from a standstill: sprint away
 	out.sprint = v < 5.0 and tgt > 7.0 and not in_air
 	if v < 5.0 and tgt > 4.0: out.throttle = 1.0; out.brake = 0.0
