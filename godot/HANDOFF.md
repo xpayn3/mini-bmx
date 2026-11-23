@@ -1915,8 +1915,14 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - dj_video at 28 km/h: neutral 41 deg / 0.6 m / CLEAN, squash 20 deg / 0.2 m, pop 56 deg / 1.7 m / CLEAN-PERFECT; the
   popped bike pulls up to ~42 deg and holds ~0.5 s (his ~55 deg). Old hand-built playground jumps take off ~11 deg flatter
   hands off (suite re-saved); trail demo 150 s seeds 4242 / 5: no crashes, short landings soft.
-- Open: the bike pitches up less than his after a pop (42 vs 55 deg), so the arms stay bent; hands-off landings still
-  come in nose-up on short flights.
+- **The front comes up off the lip** (user: "the bike is not tilted, the front wheel isn't pushed up"; in the video the
+  bike is ~55-60 deg at the edge of a ~42 deg lip even ridden neutral): the lip hold now keeps it `LIP_NOSE` 0.25 rad over
+  the face hands off, `LIP_NOSE_POP` 0.4 popping (+ `POP_FRONT_LIFT` 1.6 rad/s as a pop goes in on the face: the arms lift
+  the front, his J-hop), a squash pushes it down to the face; the take-off cap leaves that much room for the pitch while
+  the flight itself still leaves with the lip. Hands off he may scoop the nose `SCOOP_TILT` 0.4 rad further down for the
+  landing ("curl the toes, level out the bike"). dj_video: bike ~55-65 deg just off the edge, neutral flight 40 deg.
+- Open: the rider stays over the bars on the steep bike; in the video he hangs behind it, arms straight. Hands-off
+  landings still come in nose-up on short flights.
 
 ### Developer view of the test playground (`scripts/levels/ride_diag.gd`) - telemetry + sliders for riding code
 - **Only in the test playground** (user decision 2026-11-21: developer tools live in that level, normal rides have none).

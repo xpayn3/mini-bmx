@@ -135,6 +135,10 @@ var _land_hit := 0.0   # the biggest hit of the landing being judged
 var _land_pe := 0.0   # the last touch-down's pitch against the ground (rad)
 var _land_up := false   # ... nose up (back wheel first)
 const LIP_SPARE := 0.15   # rad: how much steeper than the lip under the wheels a take-off may leave
+const LIP_NOSE := 0.25      # rad: the front lets come up over the lip's face, hands off (video 2: ~14 deg)
+const LIP_NOSE_POP := 0.4   # rad: ... and lifted on purpose with a pop
+const POP_FRONT_LIFT := 1.6 # rad/s: the arms lift the front as a pop goes in on a lip's face
+const SCOOP_TILT := 0.4     # rad: hands off, the toes scoop the rear up: the nose can go that much further down for a landing
 const LIP_SPARE_OWN := 0.05   # rad: the same, hands off (the rider rides with the lip)
 const RIM_CLIMB := 4.0   # m/s: the most upward speed a rim strike on a rising edge gives the frame
 const TYRE_MAX := 0.045   # m: a tyre squashed this far is on its rim
@@ -1846,9 +1850,15 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 		# you"). Hands off, the rider loads a lip's face through hands and feet, so the bike follows the face to its edge.
 		# On a tight dirt-jump lip the front left the face early and the bike tipped up on its back wheel, leaving 8 deg
 		# steeper than the lip. Not while the player pumps / pops (that is his own) or soaks it up. BMX_OLD_LIPLOAD=1
+		# (the user, same day: "the bike is not tilted, the front wheel isn't pushed up". In the video the front DOES come up
+		# off the lip - the bike is ~55-60 deg at the edge of a ~42 deg lip, even ridden neutral; the flight still leaves with
+		# the lip (the take-off cap). So he holds it up to LIP_NOSE over the face, popping LIP_NOSE_POP: the front lifted on
+		# purpose, the rear follows. A squash pushes the front down to the face)
 		var lip_hold := 0.0; var lip_ref := 0.0
-		if front_air and not rear_air and not air and lip_state == 2 and not pro_pop and crouch < 0.1 and wheelie_up <= 0.0 				and nose_a <= 0.0 and auto_absorb * prep < 0.05 and not _OLD_LIPLOAD:
-			lip_ref = _local_slope(f, XR, RWR, cp0); lip_hold = clampf(prep / 0.3, 0.0, 1.0)
+		if front_air and not rear_air and not air and lip_state == 2 and wheelie_up <= 0.0 				and nose_a <= 0.0 and auto_absorb * prep < 0.05 and not _OLD_LIPLOAD:
+			var popping: bool = (pop_wait > 0.0 and pro_pop) or crouch > 0.1
+			lip_ref = _local_slope(f, XR, RWR, cp0) + (0.0 if squash > 0.2 else (LIP_NOSE_POP if popping else LIP_NOSE))
+			lip_hold = clampf(maxf(prep, 1.0 if popping else 0.0) / 0.3, 0.0, 1.0)
 			bal_max *= 1.0 + 2.5 * lip_hold
 		if true:
 			var R: float = T.weightShift
@@ -2045,7 +2055,11 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 						_pull_k = smooth01((air_time - 0.02) / 0.12) * (1.0 - aim_k)
 						tgt += AIR_PULL_UP * _air_pop * _pull_k
 					kt_base = lerpf(lerpf(float(T.get("airAimSpeed", 14.0)), 45.0, off_k), 70.0, land_prep)
-				tgt = clampf(tgt, -T.airTilt, T.airTilt)
+				# (video 2: "curl the toes, scoop the back end up, level out the bike": hands off he may bring the nose further DOWN
+				# for the landing than the arms alone tilt it, SCOOP_TILT more. The front comes up off a lip now and short flights
+				# landed 40-55 deg nose up. BMX_OLD_LIPLOAD=1)
+				var scoop: float = 0.0 if _OLD_LIPLOAD else SCOOP_TILT * (1.0 - _air_own)
+				tgt = clampf(tgt, -T.airTilt - scoop, T.airTilt)
 				# right stick: the nose goes where it points, on top of the landing aim
 				var st_t: float = float(T.get("stickAirTilt", 0.55))
 				tgt += air_stick.y * st_t
@@ -2057,8 +2071,9 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 				if pro_flight and not _OLD_PULLUP: kt = maxf(kt, lerpf(55.0, 90.0, maxf(_pull_k, land_prep)))   # (a pull on the bars, and putting it down for the landing: quick, the whole body)
 				air_tilt_v += (kt * (tgt - air_tilt) - 2.0 * sqrt(kt) * 0.85 * air_tilt_v) * h
 				air_tilt += air_tilt_v * h
-				if absf(air_tilt) > t_lim:
-					air_tilt = signf(air_tilt) * t_lim
+				var t_lo: float = t_lim + scoop
+				if air_tilt > t_lim or air_tilt < -t_lo:
+					air_tilt = clampf(air_tilt, -t_lo, t_lim)
 					if air_tilt_v * air_tilt > 0: air_tilt_v = 0.0
 				pitch_v = air_w + air_tilt_v
 				if _PULL_PROBE and int(air_time * 120.0) % 6 == 0: print("PULLP t=%.2f pitch=%.1f tilt=%.2f tgt=%.2f air_w=%.2f pop=%.2f pro=%s flip=%.2f own=%.2f lp=%.2f airTilt=%.3f" % [air_time, rad_to_deg(pitch), air_tilt, tgt, air_w, _air_pop, pro_flight, flip_in, _air_own, land_prep, float(T.airTilt)])
@@ -2220,7 +2235,8 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 				# time. Where the climb had to be cut, the frame leaves along its flight, turning no faster than a lip throws)
 				if vy > vy_cap:
 					vy = vy_cap
-					pitch = minf(pitch, up_max + 0.15); pitch_v = minf(pitch_v, 0.6); body_pw = minf(body_pw, 0.6)
+					var nose_room: float = 0.0 if _OLD_LIPLOAD else (LIP_NOSE_POP if spare == LIP_SPARE else LIP_NOSE)   # (the front lifted over the lip)
+					pitch = minf(pitch, up_max + 0.15 + nose_room); pitch_v = minf(pitch_v, 0.6); body_pw = minf(body_pw, 0.6)
 				elif pitch > up_max + 0.5:
 					pitch = up_max + 0.5; pitch_v = minf(pitch_v, 1.0); body_pw = minf(body_pw, 1.0)
 			# the speed along the lip splits into the horizontal part (v from now on) and the climb (vy): by the way the
@@ -2992,6 +3008,9 @@ func _pop_now(pw: float) -> void:
 		pop_wait = maxf(pop_wait, pw * pop_time); _pop_arm_t = lt + 0.3; pop_fired = true
 		pro_pop = true
 		if body_in > 0.3: _pop_latch = true
+		# (video 2, the J-hop he shows: load, lift the front with the arms, then the legs bring the rear up. Popped on a lip's
+		# face the front comes up first; the lip hold keeps it LIP_NOSE_POP over the face once it is off)
+		if not front_air and not air and not _OLD_LIPLOAD: pitch_v += POP_FRONT_LIFT * clampf(pw, 0.0, 1.0)
 		compress_v += 2.0 * pw
 		if man_a > 0.05: man_lock = maxf(man_lock, 0.3)
 		if Env.s("BMX_TRICK") != "" or Env.s("BMX_FORGIVE_PROBE") != "": print("POP lip in %.2fs power=%.2f timing=%.2f edge=%s" % [lt, pw, pop_time, edge])   # tests
