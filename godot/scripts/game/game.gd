@@ -2920,7 +2920,7 @@ func _process(dt: float) -> void:
 		pi["squash"] = maxf(maxf(st.squash, st.auto_absorb) * st.prep, st.squash_fx)   # (hands off he soaks small / fast lips: auto_absorb)
 		pi["lipK"] = maxf(st.prep, 1.0 if (st.pop_wait > 0.0 or st.hop_t > 0.0) else 0.0)
 		pi["landFold"] = 0.0 if st.air else st.land_fold   # folded up by a landing, gathering himself again
-		pi["landReach"] = st.land_prep                     # legs reaching down for the ground
+		pi["landReach"] = st.land_prep * st.land_reach     # legs reaching down for the ground (as far as this landing needs)
 		pi["inAir"] = 1.0 if st.air else 0.0
 		pi["hipShift"] = _mcap("hip_shift", st.hip_shift, pdt)
 		pi["bodyStick"] = -0.55 if scenic else _mcap("body_stick", st.body_in_s, pdt)

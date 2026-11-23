@@ -2391,7 +2391,7 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			var slam0: float = T.slamJolt * LAND
 			var slam: float = slam0 * (1.0 + float(T.get("landForgive", 1.0)) * clean)
 			if hit > slam:
-				if Env.s("BMX_TRICK") != "" or Env.s("BMX_LAND_PROBE") != "": print("HIT legs=%.2f rim=%.2f hit=%.2f of %.2f pe=%.2f SLAM" % [land_jolt, _rim_hit, hit, slam, _land_pe])   # tests
+				if Env.s("BMX_TRICK") != "" or Env.s("BMX_LAND_PROBE") != "": print("HIT legs=%.2f rim=%.2f hit=%.2f of %.2f pe=%.2f SLAM vn=%.1f reach=%.2f" % [land_jolt, _rim_hit, hit, slam, _land_pe, _vn_td, _reach_td])   # tests
 				_crash("SLAM!"); land_jolt = -1.0
 			elif since_land > 0.4:
 				var hv: float = float(T.get("landHeavy", 0.6))
@@ -2403,7 +2403,7 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 					_stun = 0.15 + 0.45 * land_heavy
 					shake = maxf(shake, 0.1 + 0.15 * land_heavy)
 					if host.msg_idle(): host.flash("HEAVY LANDING" if land_heavy > 0.5 else "OOF!")
-				if Env.s("BMX_TRICK") != "" or Env.s("BMX_LAND_PROBE") != "": print("HIT legs=%.2f rim=%.2f hit=%.2f of %.2f pe=%.2f heavy=%.2f v=%.1f" % [land_jolt, _rim_hit, hit, slam, _land_pe, land_heavy, v])   # tests
+				if Env.s("BMX_TRICK") != "" or Env.s("BMX_LAND_PROBE") != "": print("HIT legs=%.2f rim=%.2f hit=%.2f of %.2f pe=%.2f heavy=%.2f v=%.1f vn=%.1f reach=%.2f" % [land_jolt, _rim_hit, hit, slam, _land_pe, land_heavy, v, _vn_td, _reach_td])   # tests
 				land_jolt = -1.0   # one verdict per landing
 		kick_t = maxf(0.0, kick_t - dt)
 
@@ -2609,7 +2609,21 @@ func _step_lip(dt: float, f: Vector3, brake: bool) -> void:
 	if air:
 		var hh := maxf(0.0, y - _g_y)
 		var tg := (vy + sqrt(vy * vy + 2 * G * hh)) / G
-		lp = smooth01(1 - tg / T.landPrepTime) if vy < 0 else 0.0
+		# (air step 4) how hard this landing will be: the speed into the landing's slope, square to it (the part the legs
+		# have to stop; the rest rolls on). Steep (a flat landing, a case, a drop): the legs reach right out, early, for a
+		# whole stroke to soak it. Fast onto a matching downslope: he stays in his attack stance, only a little reach -
+		# the speed carries him through. land_reach 0.35..1 x legExt; the reach starts up to 1.4x earlier when it's hard
+		land_vn = 0.0
+		land_reach = 1.0
+		if not _OLD_LANDLEGS:
+			var tg_l: float = _land_t if (not is_nan(_land_pitch) and _land_t > 0.0) else tg
+			var sl: float = _land_pitch if not is_nan(_land_pitch) else _g_pitch
+			var vy_td: float = vy - G * tg_l
+			land_vn = absf(absf(v) * sin(sl) - vy_td * cos(sl))
+			land_reach = lerpf(0.35, 1.0, smooth01((land_vn - 1.0) / 3.0))
+			_vn_td = land_vn; _reach_td = land_reach
+		var lpt: float = T.landPrepTime * (1.0 if _OLD_LANDLEGS else lerpf(0.85, 1.4, (land_reach - 0.35) / 0.65))
+		lp = smooth01(1 - tg / lpt) if vy < 0 else 0.0
 		if _tuck_in: lp *= 0.25   # the tuck held into the ground: the legs are still folded, with little left to take the hit
 		tuck = smooth01((air_time - 0.08) / 0.2) * (1 - lp)
 	land_prep = lp
@@ -2650,7 +2664,7 @@ func _step_wheels(dt: float, f: Vector3, in_water: bool, va: float) -> void:
 		crank += (tgt - crank) * minf(1.0, dt * 3.5)
 	if air:
 		# legs reach for the landing; holding Space tucks the bike up into the body instead
-		var rel_t: float = T.legExt * land_prep - (T.legComp * 0.85 + 0.07 * smooth01(pop_fx / 0.35) * pop_q) * air_pull * (1 - land_prep)
+		var rel_t: float = T.legExt * land_prep * land_reach - (T.legComp * 0.85 + 0.07 * smooth01(pop_fx / 0.35) * pop_q) * air_pull * (1 - land_prep)
 		# on the take-off step the leg spring already moved body_y alongside y; after that body_y is
 		# last step's bike height + rel
 		var rel := _or(body_y, y) - (y if air_time <= dt * 1.5 else _or(y_prev, y))
@@ -2882,6 +2896,10 @@ static var _OLD_LANDAIM := OS.get_environment("BMX_OLD_LANDAIM") != ""
 var _land_pitch := NAN      # the ground's slope where this flight comes down (_landing_slope), NAN on the ground
 var _aim_tick := 0
 var _land_t := 0.0          # s of flight left (from _landing_slope)
+static var _OLD_LANDLEGS := OS.get_environment("BMX_OLD_LANDLEGS") != ""
+var land_vn := 0.0          # m/s: the predicted speed into the landing, square to its slope
+var _vn_td := 0.0; var _reach_td := 1.0   # (tests: the last flight's, for the HIT line)
+var land_reach := 1.0       # 0.35..1: how far the legs reach for this landing (by land_vn)
 static var _OLD_WHIP := OS.get_environment("BMX_OLD_WHIP") != ""
 const WHIP_WINDOW := 0.35   # s before the lip: the stick held to the side winds the whip up
 const WHIP_WIND := 0.2      # s of holding it to wind it right up
