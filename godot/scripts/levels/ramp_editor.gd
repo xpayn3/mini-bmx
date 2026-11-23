@@ -344,10 +344,10 @@ func _draw_view() -> void:
 	_view.draw_line(P.call(float(d.land0), JumpDesign.sample(hs, float(d.land0)) + 0.05), P.call(float(d.land1), 0.05), Color(0.4, 1, 0.5, 0.8), 2.0)
 	# flights
 	var cols := [Color(0.5, 0.8, 1.0), Color(1, 1, 1), Color(1.0, 0.5, 0.5)]
-	var th := deg_to_rad(float(d.lip_deg))
+	var th := deg_to_rad(float(d.lip_deg) + JumpDesign.TAKEOFF_EXTRA)
 	for k in d.pred.size():
 		var pr: Dictionary = d.pred[k]
-		var vl := sqrt(maxf(0.1, float(pr.v) * float(pr.v) - 2.0 * JumpDesign.G * float(d.lip_h)))
+		var vl := sqrt(maxf(0.1, float(pr.v) * float(pr.v) - 2.0 * JumpDesign.G * float(d.lip_h) - JumpDesign.FACE_LOSS * float(d.lip_h) * float(pr.v)))
 		var line := PackedVector2Array()
 		var t := 0.0
 		while t <= float(pr.air) + 1e-3:

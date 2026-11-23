@@ -726,6 +726,11 @@ func _step_controls(dt: float, inp: Dictionary, throttle: float, steer_input: fl
 func _step_ground(dt: float, f: Vector3) -> void:
 	var terrain = host.terrain
 	_sample(f)
+	if air and not _OLD_LANDAIM:
+		_aim_tick = (_aim_tick + 1) % 3
+		if _aim_tick == 0 or is_nan(_land_pitch): _land_pitch = _landing_slope(terrain)
+	else:
+		_land_pitch = NAN
 	surf = terrain.surface(x, z)
 	# each tyre on its own ground (front on the sand at the trail's edge, rear still on the hardpack), its grip easing
 	# across a change over ~0.1 s (a hard step from 0.95 to 0.72 at the trail edge used to kick both tyres at once)
@@ -1996,7 +2001,8 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 				else:
 					var hh := maxf(0.0, y - _g_y)
 					var tg := (vy + sqrt(vy * vy + 2 * G * hh)) / G
-					tgt = wrapf(_g_pitch - (pitch - air_tilt + air_w * minf(tg, 1.0)), -PI, PI)
+					var aim_g: float = _g_pitch if is_nan(_land_pitch) else _land_pitch   # (the landing's slope ahead, not the deck below)
+					tgt = wrapf(aim_g - (pitch - air_tilt + air_w * minf(tg, 1.0)), -PI, PI)
 					# hands off the rider doesn't snap the bike to the landing slope the moment he leaves the ground: he holds
 					# the attitude he took off with for airAimDelay s, then eases the bike round softly, and reaches for the
 					# landing (stiffer) only in the last moments
@@ -2496,6 +2502,29 @@ func _step_hop(dt: float, inp: Dictionary) -> void:
 	hop_nose *= exp(-dt * 3.5)
 	land_perfect = maxf(0.0, land_perfect - dt * 1.2)
 
+## (2026-11-23) where this flight comes down: the ballistic path from here, stepped until it meets the ground; the
+## ground's slope there along the flight (rad), or NAN. The hands-off landing aim matches the bike to THAT, not to the
+## ground under it (over a table that is the flat deck: he levelled the bike and met a 30-35 deg landing nose-high)
+func _landing_slope(terrain) -> float:
+	var c: float = course if not is_nan(course) else heading
+	var d := Vector2(cos(c), -sin(c))
+	var hv := absf(v) * signf(v if v != 0.0 else 1.0)
+	var py := y
+	var pvy := vy
+	var px := x
+	var pz := z
+	for i in 80:
+		var st := 0.04
+		px += d.x * hv * st; pz += d.y * hv * st
+		pvy -= G * st; py += pvy * st
+		var gh: float = terrain.height(px, pz)
+		if py <= gh and pvy < 0.0:
+			_land_t = (i + 1) * st
+			var hf: float = terrain.height(px + d.x * 0.6, pz + d.y * 0.6)
+			var hb: float = terrain.height(px - d.x * 0.6, pz - d.y * 0.6)
+			return atan2(hf - hb, 1.2)
+	return NAN
+
 ## stage 10: reading the trail (a lip ahead: crouch, pop), the legs' compression
 func _step_lip(dt: float, f: Vector3, brake: bool) -> void:
 	var terrain = host.terrain
@@ -2840,6 +2869,10 @@ func _pop_apply(dv: float) -> void:
 
 static var _OLD_AUTOPOP := OS.get_environment("BMX_OLD_AUTOPOP") != ""
 static var _OLD_AIRLEAN := OS.get_environment("BMX_OLD_AIRLEAN") != ""
+static var _OLD_LANDAIM := OS.get_environment("BMX_OLD_LANDAIM") != ""
+var _land_pitch := NAN      # the ground's slope where this flight comes down (_landing_slope), NAN on the ground
+var _aim_tick := 0
+var _land_t := 0.0          # s of flight left (from _landing_slope)
 static var _OLD_WHIP := OS.get_environment("BMX_OLD_WHIP") != ""
 const WHIP_WINDOW := 0.35   # s before the lip: the stick held to the side winds the whip up
 const WHIP_WIND := 0.2      # s of holding it to wind it right up
