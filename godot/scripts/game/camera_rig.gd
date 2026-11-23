@@ -22,9 +22,11 @@ const PRESETS := {
 ## false + cam_yaw 0, `orbit` PI/2 puts the camera on the +z side looking -z, the bike crossing left to right). Picked
 ## from the dev view's camera dropdown or C (they come first there); "pg_side" is the playground's default
 const LEVEL_PRESETS := {
-	"pg_side":   {"label": "Side",       "dist": 12.0, "pitch": 12.0,  "follow": false, "fov": 42.0, "orbit": PI / 2, "lag": 4.0},
-	"pg_wide":   {"label": "Side wide",  "dist": 13.0, "pitch": 14.0,  "follow": false, "fov": 66.0, "orbit": PI / 2, "lag": 3.0},
-	"pg_low":    {"label": "Side low",   "dist": 6.5,  "pitch": 8.0,  "follow": false, "fov": 48.0, "orbit": PI / 2, "lag": 6.0},
+	# (square: a true reference side view: level with the rider, looking dead horizontal, never tilting after a jump, no
+	# bank, shake or speed zoom - for side-on comparison shots against real footage. User, 2026-11-23)
+	"pg_side":   {"label": "Side",       "dist": 12.0, "pitch": 0.0,  "follow": false, "fov": 42.0, "orbit": PI / 2, "lag": 4.0, "square": true},
+	"pg_wide":   {"label": "Side wide",  "dist": 13.0, "pitch": 0.0,  "follow": false, "fov": 66.0, "orbit": PI / 2, "lag": 3.0, "square": true},
+	"pg_low":    {"label": "Side low",   "dist": 6.5,  "pitch": 0.0,  "follow": false, "fov": 48.0, "orbit": PI / 2, "lag": 6.0, "square": true},
 	"pg_front":  {"label": "Front 3/4",  "dist": 9.0,  "pitch": 10.0, "follow": false, "fov": 44.0, "orbit": PI * 0.78, "lag": 5.0},
 }
 
@@ -297,16 +299,18 @@ func update_cam(dt: float) -> void:
 		cam_pitch += (cam_pitch_t - cam_pitch) * minf(1.0, dt * 8)
 		var yaw := cam_yaw + orbit + deg_to_rad(float(Settings.get_v("cam_side")))
 		var pit := clampf(cam_pitch + float(Settings.get_v("cam_height")) - 4.0 * speed_feel, 2.0, 84.0)
+		if P.get("square", false): pit = cam_pitch   # (level: no Settings height, no speed dip)
 		var dist0 := dist
 		# speed: in closer while the FOV widens (the rider stays the same size, the world rushes past)
 		dist = dist0 * float(Settings.get_v("cam_dist")) * (1.0 - 0.2 * speed_feel)   # the zoom the user set × the Settings distance
+		if P.get("square", false): dist = dist0 * float(Settings.get_v("cam_dist"))
 		dist *= 1.0 - crash_zoom   # crashed: slowly zooming in on the body (eases back out after a reset)
 		if P.get("drift", false):
 			yaw += sin(t * 0.13) * 0.3; pit += sin(t * 0.09) * 4
 		var back := Vector3(cos(yaw), 0, -sin(yaw))
 		var need := 0.0
 		var occ_max: float = P.get("occ_max", 46.0)
-		while need < occ_max and pit + need < 84 and _blocked(pit + need, back, ys, anchor):   # (the smoothed height: the bike's bumps flipped this on and off)
+		while not P.get("square", false) and need < occ_max and pit + need < 84 and _blocked(pit + need, back, ys, anchor):   # (the smoothed height: the bike's bumps flipped this on and off)
 			need += 4 if P.get("ahead", false) else 6
 		occ += (need - occ) * minf(1.0, dt * (2.0 if need > occ else 0.7))   # rise gently: no hops at some angles
 		pit = minf(84, pit + occ)
@@ -335,6 +339,7 @@ func update_cam(dt: float) -> void:
 		print("CRASHCAM t=%.2f aim_to_pelvis=%.2f cam_to_pelvis=%.2f zoom=%.2f" % [crash_cam_t, target.distance_to(pv), global_position.distance_to(pv), crash_zoom])
 	cam_fov += (fov_t - cam_fov) * minf(1.0, dt * (6.0 if P.get("mode", "") == "trackside" else 3.0))
 	fov = clampf(cam_fov * (1.0 + fov_boost * float(Settings.get_v("cam_speed_fov")) / 34.0) + float(Settings.get_v("fov")), 5, 110)
+	if P.get("square", false): fov = clampf(cam_fov + float(Settings.get_v("fov")), 5, 110)
 	# impact shake (Eiserloh, "Juicing Your Cameras With Math", GDC 2016): the hit is "trauma" 0..1 (the physics' shake,
 	# 0.45 = a full BONK), the shake is trauma^2 (small knocks all but vanish, big ones punch) and it TURNS the camera
 	# (yaw / pitch / roll on smooth noise) instead of moving it: two sines moving the camera read as a glitch, and a
@@ -359,7 +364,10 @@ func update_cam(dt: float) -> void:
 	var aim := target
 	if bool(Settings.get_v("cam_keep")) and not (st.crash_on and game.ragdoll):
 		aim = _keep_rider_in_view(target, drawn + Vector3(0, 0.9, 0))
-	if global_position.distance_to(aim) > 0.01:
+	if P.get("square", false) and not st.crash_on:
+		var flat := Vector3(target.x, global_position.y, target.z)
+		if global_position.distance_to(flat) > 0.01: look_at(flat, Vector3.UP)
+	elif global_position.distance_to(aim) > 0.01:
 		look_at(aim, Vector3.UP)
 		# bank into the turn a little with speed (the horizon tips the way the rider leans)
 		bank_s += (-st.bike_lean * 0.13 * speed_feel - bank_s) * minf(1.0, dt * 3.0)

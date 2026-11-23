@@ -1259,6 +1259,9 @@ var sm_fold := 0.0; var sm_reach := 0.0   # landing: folded by the hit, reaching
 var _sink := 0.0; var sm_airst := 0.0; var _abs_p := 0.0; var _abs_c := 0.0
 var sm_pre := 0.0; var sm_ext := 0.0; var sm_popfx := 0.0; var sm_squash := 0.0; var sm_lip := 0.0   # the jump (see update_pose)
 var sm_tuck := 0.0   # the air tuck (bike pulled up into the body), eased
+var tuck_out := 0.0  # this frame's tuck (0..1)
+var body_off := Vector2.ZERO   # in the air: the hips (x fwd, y up, bike frame) against take-off; Game moves the bike against it
+var _air_ref := Vector2.ZERO; var _air_ref_ok := false
 var sm_effort := 0.0
 var sm_pitch0 := 0.0
 var sm_pitch_slow := 0.0   # the bike's pitch averaged over ~0.35 s: what the body swings with
@@ -1458,6 +1461,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# landing it goes again
 	sm_tuck += ((0.0 if old_lp else clampf(_num(p, "airPull"), 0.0, 1.0)) * air * (1.0 - clampf(j_tall, 0.0, 1.0)) - sm_tuck) * (1.0 - exp(-10.0 * jh))
 	var j_tuck: float = sm_tuck * (1.0 - sm_reach) * float(sty.get("airTuck", 1.0))
+	tuck_out = j_tuck   # (Game lifts the drawn bike by TUCK_LIFT x this: the bike comes up to him, his body stays on its arc)
 	pelvis.y -= 0.15 * j_tuck
 	pelvis.x += 0.03 * j_tuck
 	# (a squash is NOT folding over the bars: the hips go back and down behind the saddle and the arms push the bars
@@ -1866,6 +1870,17 @@ func update_pose(dt: float, p: Dictionary) -> void:
 				else: chest = cur
 	_cap_pel = pelvis; _cap_ch = chest; _cap_ok = true
 	if _POSE_PROBE: _pp_mark(8, pelvis, chest)
+	# (2026-11-23, user: "the bike is on rails in the air, only the rider moves") in the air the shared centre of mass
+	# flies the arc; the bike is ~1/6 of the weight, so a move of the hips against the bike (the tuck, standing tall,
+	# the stick pushing the bike away) is mostly the BIKE moving. body_off = the hips against where they were at
+	# take-off; Game moves the drawn bike AIR_SHARE of it the other way (the rider rides on the bike, so his body only
+	# moves the rest). On the ground it eases back to 0 (landing)
+	if air > 0.5 and _num(p, "inAir") > 0.5:
+		if not _air_ref_ok: _air_ref = Vector2(pelvis.x, pelvis.y); _air_ref_ok = true
+		body_off = Vector2(pelvis.x, pelvis.y) - _air_ref
+	else:
+		_air_ref_ok = false
+		body_off = body_off.move_toward(Vector2.ZERO, 1.5 * minf(dt, 0.1))
 	# torso from pelvis to chest
 	var hip := Vector3(pelvis.x, pelvis.y + 0.02, pelvis.z)
 	var tw_axis := (chest - hip).normalized()

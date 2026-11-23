@@ -2126,6 +2126,8 @@ var _log_lift := 0.0
 const LIFT_UP := 2.4     # m/s the drawn bike may rise to clear its tyres off the ground (4 cm a frame at 60 fps)
 const LIFT_DOWN := 0.6   # m/s it settles back
 var _lift_s := 0.0       # the eased tyre-unclip lift
+const AIR_SHARE := 0.8   # in the air the drawn bike moves this share of the rider's hip moves against it (the bike is ~1/6 of the weight)
+static var _OLD_AIRSHARE := OS.get_environment("BMX_OLD_AIRSHARE") != ""
 var _frame_y := NAN      # where the physics put the frame this frame (before the lift): what the rider's legs feel
 var jitter_on := Env.s("BMX_JITTER_ALL") != ""
 var _jit_skip := 0
@@ -2765,6 +2767,14 @@ func _process(dt: float) -> void:
 		elif need > _lift_s: _lift_s = minf(need, _lift_s + LIFT_UP * mdt)
 		else: _lift_s = maxf(need, _lift_s - LIFT_DOWN * mdt)
 		rig.position.y = _pre_y + _lift_s
+		# in the air the rider's hip moves against the bike move the BIKE (it is ~1/6 of the weight; the pair's centre of
+		# mass flies the arc): AIR_SHARE of Rider.body_off the other way (last frame's: the rider is posed after the bike).
+		# Back on the ground it eases out, never pushing the bike down into the ground. BMX_OLD_AIRSHARE=1 = off
+		if not st.crash_on and rider != null and not _OLD_AIRSHARE and rider.body_off.length_squared() > 1e-8:
+			var bo: Vector2 = rider.body_off
+			var dlt: Vector3 = -AIR_SHARE * (1.0 - st.land_prep) * (rig.global_transform.basis * Vector3(bo.x, bo.y, 0.0))
+			if not st.air: dlt.y = maxf(0.0, dlt.y)
+			rig.global_position += dlt
 		_frame_y = _pre_y
 		if st.bank_probe and was > 0.05 and not st.air:   # tests: the drawn bike lifted a lot (it "shoots up")
 			print("BASE over ground=%.3f  axleF over base=%.3f  susp xF=%.3f xR=%.3f  y_draw-y=%.3f" % [_base_over, _axF_over_base, rig.susp.xF if rig.susp else 0.0, rig.susp.xR if rig.susp else 0.0, y_draw - st.y])
@@ -2787,7 +2797,7 @@ func _process(dt: float) -> void:
 		if _lip_shots == 0 and st.prep > float(Env.s("BMX_LIP_PREP") if Env.s("BMX_LIP_PREP") != "" else "0.2") and not st.air: _lip_t = t
 		if _lip_t >= 0.0 and t - _lip_t >= _lip_shots * float(Env.s("BMX_LIP_STEP") if Env.s("BMX_LIP_STEP") != "" else "0.08"):
 			get_viewport().get_texture().get_image().save_png("%s_%d.png" % [Env.s("BMX_LIP_SHOT"), _lip_shots])
-			print("LIPSHOT %d prep=%.2f air=%s compress=%.2f absorb=%.2f vy=%.1f crouch=%.2f wait=%.2f pop_fx=%.2f squash=%.2f pull=%.2f" % [_lip_shots, st.prep, st.air, st.compress, st.body_y - st.y, st.vy, st.crouch, st.pop_wait, st.pop_fx, st.squash, st.air_pull])
+			print("LIPSHOT %d pitch=%.0f prep=%.2f air=%s compress=%.2f absorb=%.2f vy=%.1f crouch=%.2f wait=%.2f pop_fx=%.2f squash=%.2f pull=%.2f" % [_lip_shots, rad_to_deg(st.pitch), st.prep, st.air, st.compress, st.body_y - st.y, st.vy, st.crouch, st.pop_wait, st.pop_fx, st.squash, st.air_pull])
 			_lip_shots += 1
 	if Env.s("BMX_LANDBODY") != "": _landbody_probe(st)
 	if Env.s("BMX_LAND_SHOT") != "" and _land_shots < 12:   # tests: 12 shots, 0.06 s apart, from just before a touch-down
@@ -2884,8 +2894,9 @@ func _process(dt: float) -> void:
 		# (hands off he winds up into the lip himself: autoPump = his skill, see BikePhysics._step_lip)
 		var auto_pre: float = 0.0 if (st.pop_wait > 0.0 or st.squash > 0.2) else st.prep * float(phys.T.autoPump)
 		pi["preload"] = maxf(st.crouch, auto_pre) * (0.0 if st.air else 1.0)
-		pi["popFx"] = st.pop_fx * minf(1.0, st.pop_q)
-		pi["airPull"] = st.air_pull if st.air else 0.0   # the bike pulled up into the body after the pop (the tuck)
+		# (the stand-tall + pull-up of a pro: only after the player's own pump; hands off he rides it plainly)
+		pi["popFx"] = st.pop_fx * minf(1.0, st.pop_q) * (1.0 if st.pro_flight else 0.35)
+		pi["airPull"] = st.air_pull if (st.air and st.pro_flight) else 0.0   # the bike pulled up into the body after the pop (the tuck)
 		pi["squash"] = maxf(st.squash * st.prep, st.squash_fx)
 		pi["lipK"] = maxf(st.prep, 1.0 if (st.pop_wait > 0.0 or st.hop_t > 0.0) else 0.0)
 		pi["landFold"] = 0.0 if st.air else st.land_fold   # folded up by a landing, gathering himself again
