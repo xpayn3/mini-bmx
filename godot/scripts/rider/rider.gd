@@ -1448,8 +1448,10 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	pelvis.y += air_y
 	# (a squash is NOT folding over the bars: the hips go back and down behind the saddle and the arms push the bars
 	# away, so the bike has room to come up in front of him)
-	pelvis.x += -0.045 * j_pre + 0.09 * j_ext - 0.13 * j_sq - 0.07 * j_fold - 0.02 * sm_reach
-	pelvis.y += -0.02 * j_pre + 0.06 * j_ext - 0.03 * j_sq - (0.09 if old_lp else 0.13) * j_fold + (0.06 if old_lp else 0.09) * sm_reach
+	# (2026-11-23, sized from slow-motion of a pro off a lip, research/jump: wound right down into the transition, then
+	# stood fully tall through the lip with the bars pulled to the hips. It was -2 / +6 cm: the jump looked dead)
+	pelvis.x += -0.06 * j_pre + 0.10 * j_ext - 0.13 * j_sq - 0.07 * j_fold - 0.02 * sm_reach
+	pelvis.y += -0.08 * j_pre + 0.13 * j_ext - 0.03 * j_sq - (0.09 if old_lp else 0.13) * j_fold + (0.06 if old_lp else 0.09) * sm_reach
 
 	# chest
 	# (pedalling out of the saddle the chest stays forward over the bars)

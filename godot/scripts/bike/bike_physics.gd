@@ -2475,12 +2475,18 @@ func _step_lip(dt: float, f: Vector3, brake: bool) -> void:
 	_lip_ago = 0.0 if lip_state == 2 else _lip_ago + dt
 	var prep_t: float = smooth01(1 - lip_t / T.prepTime) if lip_t < T.prepTime else 0.0
 	prep = maxf(0.0, prep - dt * 4) if air else prep + (prep_t - prep) * minf(1.0, dt * 8)
-	var popping := lip_t < 0.14
+	# (2026-11-23, after a biomechanics lab study of a pro jumping a lip, research/jump: the rider is ~6x the bike, so
+	# what he does off a lip decides the jump; hands off "the bike does what it wants": low. A skilled rider winds up
+	# into the transition (prepTime / prepDepth: the crouch) and drives the legs straight LATE, through the end of the
+	# lip ("press later": more push on the last of the face, the rear leaves higher, +7 cm of centre of mass). So hands
+	# off he now pops at autoPump (0.75: his skill) of a full push, fired in the last 0.1 s; a pop the player times well
+	# is still worth more (1.0), a held crouch is timed at popAssist. It used to be 0.4 x 0.6 x prep ~0.15: a dead jump)
+	var popping := lip_t < (0.10 if not _OLD_AUTOPOP else 0.14)
 	if popping and not pop_fired:
-		# hands off, the rider gives the lip a little push of his own (autoPump of a full one). A crouch still held
+		# hands off, the rider gives the lip a push of his own (autoPump of a full one). A crouch still held
 		# into the lip (hop / stick held, never let go) is timed for the player, at popAssist of what letting go on
 		# time gives. A lip being squashed gets no push
-		var p_auto: float = float(T.autoPump) * 0.6 * prep
+		var p_auto: float = float(T.autoPump) * (0.6 if _OLD_AUTOPOP else 1.0) * prep
 		if crouch > 0.1: p_auto = maxf(p_auto, _crouch_power() * float(T.get("popAssist", 0.6)))
 		if squash > 0.2: p_auto = 0.0
 		pop_fired = true
@@ -2758,6 +2764,8 @@ func _leg_dv(power: float) -> float:
 func _pop_apply(dv: float) -> void:
 	var th := clampf(atan2(vy, maxf(absf(v), 0.5)), -0.6, 1.2)
 	vy += dv * cos(th); v -= signf(v) * minf(absf(v), dv * sin(th))
+
+static var _OLD_AUTOPOP := OS.get_environment("BMX_OLD_AUTOPOP") != ""   # tests: the old weak hands-off pop
 
 ## the legs go. Close to a lip the push runs through it and leaves at its edge (pop_wait; best started in the last
 ## ~0.12 s, earlier part of the stroke is spent before the edge); anywhere else it is a hop, now

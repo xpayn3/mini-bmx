@@ -1777,6 +1777,17 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   Tests: `BMX_PG_RAMP_ADD=1 BMX_PG_RAMP_SET=kind=kicker,build=wood,v=28 BMX_PG_RAMP_RIDE=1`, `BMX_PG_RAMPS=0`.
 - `-s` tools that build terrain (terrain_cs_cmp, rope_find) run again (tape_sim no longer names the CrashLog autoload).
 
+### Skilled hands-off jumping (2026-11-23, from research/jump: a lab study of a pro off a lip + its slow motion)
+- Rider ~6x the bike: what he does at a lip decides the jump. Doing nothing = low (the old game: hands off popped ~0.15 of a
+  push, no wind-up pose: "dead"). Now hands off he winds up into the transition (`prepTime` 0.8 s, `prepDepth` 0.22 m) and
+  drives the legs straight LATE, in the last 0.1 s of the lip ("press later": the lab's +7 cm) at `autoPump` 0.75 of a
+  full push (Tune VER 26). A player's well-timed pop is still more (1.0). `BMX_OLD_AUTOPOP=1` = the old one.
+  Drawn: preload = max(the player's crouch, prep x autoPump), hips -8 cm in the preload / +13 cm in the extension (were -2 / +6).
+- Measured hands off: dtable_36 peak 0.61 -> 0.96 m, dtable_43 0.99 -> 1.37 (timed pop 1.79), table_1.5 0.50 -> 0.75.
+  Suite (not re-saved): jumps +0.1-0.2 s air; table_2 / gap_7 / drop_2 one more bottom-out; landings ~10 deg more nose up.
+  Open: the stand-tall at the lip's edge is still muted by the pose limits; the lab's energy check counts the auto pop as
+  an energy gain.
+
 ### Developer view of the test playground (`scripts/levels/ride_diag.gd`) - telemetry + sliders for riding code
 - **Only in the test playground** (user decision 2026-11-21: developer tools live in that level, normal rides have none).
   **Layout (2026-11-22, user: "tidy, compact, nothing covering")**: a slim **tuning column** on the left (the TuneCard,
