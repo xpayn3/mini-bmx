@@ -1881,6 +1881,11 @@ func _autotest(seconds: float) -> void:
 				if on2:
 					Input.action_press("steer_left", ls) if ls > 0.0 else Input.action_release("steer_left")
 					Input.action_press("steer_right", -ls) if ls < 0.0 else Input.action_release("steer_right")
+			elif body_t == "scrub":   # tests (air step 3): the stick diagonal (forward + to the side) into the lip and in the air
+				var on6: bool = (ph2.air and ph2.air_time < 0.7) or (not ph2.air and ph2.lip_state == 2)
+				if on6: Input.action_press("body_left", 0.6); Input.action_press("body_fwd", 0.6)
+				else: Input.action_release("body_left"); Input.action_release("body_fwd")
+				if ph2.air and int(el * 10) % 2 == 0 and Env.s("BMX_BODY_PRINT") != "": print("SCRUBT t=%.2f h=%.2f lean=%.0f yaw=%.0f squash_fx=%.2f whip_in=%.2f" % [ph2.air_time, ph2.y - ph2._g_y, rad_to_deg(ph2.bike_lean), rad_to_deg(ph2.slip), ph2.squash_fx, ph2._whip_in])
 			elif body_t.begins_with("whiplip") or body_t.begins_with("whipair"):   # tests (air step 2): the stick to the side, 0.7 by default
 				# whiplip: held from when a lip is spotted ahead and through the air (carved in); whipair: only once in the air
 				var wx := float(body_t.get_slice(":", 1)) if body_t.contains(":") else 0.7

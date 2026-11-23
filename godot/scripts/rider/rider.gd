@@ -980,6 +980,21 @@ func back_point(t: float, z: float, off := 0.0) -> Vector3:
 ## `base` (optional): the hips' basis. The bottom bone then takes the hips' up / sideways, so the jersey's hem
 ## stays level inside the belt however far the chest leans (it used to tilt with the spine and cross the trousers'
 ## top: one poked out under the other at the front, the other at the back)
+## a shoulder joint on the TORSO's own frame (the one set_spine draws it in: up the spine, sideways = the twist's side
+## kept square to it). (2026-11-23) It was offset along the BIKE's axes turned by the twist: fine with the torso over
+## the bike, but with it rolled far over in the air the bike's sideways ran along the spine and a shoulder ended up
+## above the chest - the joint came apart ("the shoulder pops off")
+static func shoulder_at(hip_p: Vector3, chest_p: Vector3, tw: Basis, off: Vector3) -> Vector3:
+	var up := (chest_p - hip_p).normalized()
+	if up.length_squared() < 0.5: up = Vector3.UP
+	var r := tw * Vector3(0, 0, 1)
+	r = (r - up * r.dot(up))
+	if r.length_squared() < 1e-6: r = Vector3(0, 0, 1)
+	r = r.normalized()
+	var fw := up.cross(r)
+	return chest_p + fw * off.x + up * off.y + r * off.z
+
+
 func set_spine(a: Vector3, b: Vector3, right_lo: Vector3, right_hi: Vector3, curve := 0.0, side := 0.0, low := 0.5, base := Basis()) -> void:
 	var lock_base := base != Basis()
 	var d := b - a
@@ -1933,7 +1948,24 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# bike's frame, so it turns back against it - the hips half way (they're on the saddle / pedals), the shoulders
 	# nearly all the way: the rider keeps facing where they fly while the bike hangs out sideways
 	var awhip: float = clampf(_num(p, "airWhip"), -1.4, 1.4) * air
-	var tw := Basis(tw_axis, float(sty.twist) + clampf(_num(p, "airSpin") * 0.07 + sm_turn * 0.13 * float(sty.turnTwist) + lead, -0.6, 0.6) - 0.22 * tab - 0.85 * awhip)
+	var tw_base: float = float(sty.twist) + clampf(_num(p, "airSpin") * 0.07 + sm_turn * 0.13 * float(sty.turnTwist) + lead, -0.6, 0.6)
+	var tw_air: float = -0.22 * tab - 0.85 * awhip
+	var tw := Basis(tw_axis, tw_base + tw_air)
+	# (2026-11-23, user: "the shoulder pops off") the shoulders' twist (a whip, a tabletop) is held to what both arms can
+	# still reach the grips from: the arm-reach limit above works with untwisted shoulders, so a big twist left a shoulder
+	# out of reach and the joint came apart. Never more twist than leaves both hands on (or within 1 % of) the grips
+	var hl0 = p.get("handL"); var hr0 = p.get("handR")
+	if absf(tw_air) > 1e-3 and hl0 is Vector3 and hr0 is Vector3 and not standing:
+		var reach_max := (L_UARM + L_FARM) * 0.99
+		for it in 6:
+			var ok := true
+			for sd2 in [[-1.0, hl0], [1.0, hr0]]:
+				var so2 := Vector3(-0.03 + sty.shoulderFwd, -0.04 + sty.shoulderUp, float(sd2[0]) * sty.shoulders)
+				var sh2: Vector3 = (chest + tw * so2).lerp(shoulder_at(pelvis, chest, tw, so2), air)
+				if sh2.distance_to(sd2[1]) > reach_max: ok = false
+			if ok: break
+			tw_air *= 0.7
+			tw = Basis(tw_axis, tw_base + tw_air)
 	# pelvis: turn (yaw about up), roll (one hip drops, about forward), tilt (about the hip line)
 	var pel_b := Basis(Vector3.UP, float(sty.pelvisYaw) + clampf(sm_turn * 0.07 * float(sty.turnHips), -0.4, 0.4) + 0.3 * tab - 0.4 * awhip) * Basis(Vector3.RIGHT, float(sty.pelvisRoll) - clampf(sm_turn * 0.04 * float(sty.turnHips), -0.25, 0.25))
 	var pel_full := pel_b * Basis(Vector3.BACK, -(ang * 0.3) - float(sty.pelvisTilt))
@@ -2053,6 +2085,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		# arm
 		var sh_off := Vector3(-0.03 + sty.shoulderFwd, -0.04 + sty.shoulderUp, side * sty.shoulders)
 		var shp: Vector3 = chest + tw * sh_off
+		if not _OLD_AIRBODY and air > 0.0: shp = shp.lerp(shoulder_at(hip, chest, tw, sh_off), air)   # (in the air: on the torso's frame)
 		shoulder_sph[i].position = shp
 		# hand nearly on the elbow's pole line (deep turns, arms up in the air): elbow out and down
 		var pole_a: Vector3 = poles_arm[i]

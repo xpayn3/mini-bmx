@@ -1861,14 +1861,25 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   tables) and leaves `TAKEOFF_EXTRA` 8 deg steeper than the lip (the hands-off pop, the rear lifting): both now size the
   deck / landing (trail jumps re-baked: table deck 14.7 m, landing 30 deg). Gaps: the backside / landing face squeezed to
   70 deg when the gap is short (they pushed the landing mound out: the design speed came down in the gap / on its face).
-  Auto landing angle capped at 35 deg (`LAND_MAX_DEG`), designs aim 20 % down the landing. `airAssist` 0.6 -> 0.85 (Tune
-  VER 28; hands off only). The hands-off landing tilt aims at the slope where the flight comes down (`_landing_slope`,
+  Auto landing angle capped at 35 deg (`LAND_MAX_DEG`), designs aim 20 % down the landing. `airAssist` stays 0.6 for the player (Tune VER 29
+  put it back); only the playground's test rider gets 0.85 (`BikePhysics.test_rider` / `TEST_ASSIST`). The hands-off landing tilt aims at the slope where the flight comes down (`_landing_slope`,
   `_land_pitch`), not the ground under the bike (over a table: the flat deck). `BMX_OLD_LANDAIM=1`. Playground, speed
   learning on: every designed table and gap lands on its landing, CLEAN. Still open: they come down 25-40 deg nose-up vs
   the landing - the tilt the rider can give (airTilt 26 deg) can't turn the bike from +35 to -35; the shared spin is damped
   to 0 hands-off (arcade). Tried and reverted: a take-off spin / an eased in-flight spin to the arc: still rotating at
   touch-down = NOSE DIVE verdicts. Needs a proper look (the touch-down judge vs the spin, how much spin a lip should give).
-- Next (planned with the user): tabletop / scrub, landing legs
+- **Step 3 (done): tabletop + scrub.** Tabletop = the right stick to the side in the air: `stickAirRoll` is now the
+  lay-over at 0.8 of stick (1.25 rad, Tune VER 30; it was x times the stick, ~50 deg max short of the spin edge): 51 deg at
+  half stick, 66 deg near the edge; the drawn bars turn against the lay-over (`Game.BAR_TABLE` 0.4, `BMX_OLD_TABLETOP=1`).
+  Scrub = the stick diagonal (forward + side) into the lip: the absorb + the whip's wind-up + the lay-over fall out of the
+  existing pieces: dtable_49 @ 50 km/h take-off 34 -> 22 deg, peak 1.8 -> 0.8 m, laid 55 deg, lands PERFECT. Style:
+  "SCRUB" (+400: soaked take-off with lay-over / whip), "TABLETOP" / "BIG TABLETOP" (laid > 52 / 66 deg, back up for the
+  landing). Test `BMX_BODY=scrub`. Shoulders in the air are placed on the TORSO's frame (`Rider.shoulder_at`; on the bike's
+  axes a rolled torso put a shoulder above the chest: "the shoulder pops off"), and the whip / tabletop shoulder twist is
+  held to what both arms can still reach the grips from. `BMX_SKEL_PROBE` worst 0.000 m. Open: the held tabletop looks
+  like he hangs off the high side (head ~1 m out) - user to judge.
+- Landing angle deciding speed (MX vs ATV All Out) and landing legs by impact speed: next.
+- Next (planned with the user): landing legs
   by impact speed, landing angle deciding speed (MX vs ATV All Out).
 
 ### Developer view of the test playground (`scripts/levels/ride_diag.gd`) - telemetry + sliders for riding code
