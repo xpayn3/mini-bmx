@@ -410,6 +410,7 @@ var _rec_b: Button
 var _ghost_c: Button
 var _lab_l: Label
 var _ramps_b: Button
+var _air_b: Button
 var ramps: RampEditor
 
 func _build_bar2() -> void:
@@ -425,6 +426,8 @@ func _build_bar2() -> void:
 	_slow_b = _small("1x", func(): lab.cycle_slow(), "T: slow motion 1 / ½ / ¼ / ⅒")
 	_rec_b = _small("REC", func(): lab.toggle_record(), "V: record the next run (inputs, path, graphs)")
 	_small("REPLAY", func(): lab.start_replay(), "J: replay the saved run with its ghost")
+	_air_b = _dev_btn(bar2, "AIR", func(): lab.toggle_air_hold(), "hold the bike in the air (gravity off): try the air controls / rotation as long as you like", true)
+	_air_b.set_pressed_no_signal(lab.air_hold)
 	_ramps_b = _dev_btn(bar2, "RAMPS", func(): ramps.visible = _ramps_b.button_pressed, "the ramp editor: jumps from the formula, put anywhere, every number a slider", true)
 	_ghost_c = _dev_btn(bar2, "ghost", func(): lab.ghost = _ghost_c.button_pressed, "draw the replayed recording (bike + graphs)", true)
 	_ghost_c.set_pressed_no_signal(true)

@@ -1812,6 +1812,10 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - In the air the rider's hip moves against the bike move the BIKE (`Rider.body_off` = hips vs take-off, Game moves the
   drawn rig `AIR_SHARE` 0.8 of it the other way, faded by land_prep, never down into the ground on landing): tucking pulls
   the bike up to him, standing tall pushes it away; his body stays on its arc. `BMX_OLD_AIRSHARE=1` = off. CLIP 0 frames.
+- **AIR** (dev view LAB row, `PlaygroundLab.toggle_air_hold`, test `BMX_PG_AIRHOLD=1` prints `AIRHOLD` lines): the bike held
+  `HOLD_H` 4 m up, gravity cancelled after every physics step (frame, wheels, body mass moved together), drifting at
+  `HOLD_V` 1.5 m/s: try the air controls / rotation as long as you like; off = set down from 0.7 m. The lab's checks
+  pause while held. Try `BMX_PAD=1 BMX_BODY=circle2` with it.
 - Playground side cameras (pg_side / pg_wide / pg_low, `square`): a FIXED 8 deg (low: 4) down angle (dead level hid the wheels behind the jumps' side batters), no
   tilt / bank / shake / speed zoom: true side reference shots. Front 3/4 unchanged.
 

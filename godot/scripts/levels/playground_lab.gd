@@ -118,9 +118,51 @@ func pre_step(inp: Dictionary) -> void:
 		_in.append((1.0 if x else 0.0) if typeof(x) == TYPE_BOOL else float(x))
 
 
+## AIR (LAB row, BMX_PG_AIRHOLD=1): the bike held HOLD_H up in the air, gravity cancelled after every physics step,
+## drifting at HOLD_V: everything about rotation in the air runs as in a real jump (right stick tilt / lean, flips and
+## flat spins at the stick's edge, whips, the tuck, the landing aim, the rider's pose) for as long as you like. Off: set
+## down from a low height
+const HOLD_H := 4.0
+const HOLD_V := 1.5
+var air_hold := Env.s("BMX_PG_AIRHOLD") != ""
+var _held := false
+var _hold_print := 0.0
+
+func toggle_air_hold() -> void:
+	air_hold = not air_hold
+	if not air_hold and _held:
+		var ph = game.phys
+		_lift_to(ph, game.terrain.height(ph.x, ph.z) + 0.7)
+		_held = false
+	status = "AIR: held %.0f m up, sticks rotate him (off: set down)" % HOLD_H if air_hold else "AIR off"
+
+## moves the whole bike (frame, wheels, the rider's body mass) to height `want`, at rest up / down
+func _lift_to(ph, want: float) -> void:
+	var dy: float = want - ph.y
+	ph.y += dy; ph.vy = 0.0
+	if not is_nan(ph.body_y): ph.body_y += dy
+	ph.body_v = 0.0
+	if not is_nan(ph.zw_f): ph.zw_f += dy; ph.vw_f = 0.0
+	if not is_nan(ph.zw_r): ph.zw_r += dy; ph.vw_r = 0.0
+
+func _air_hold_step(dt: float, ph) -> void:
+	if not air_hold or ph.crash_on:
+		_held = false
+		return
+	_held = true
+	_lift_to(ph, game.terrain.height(ph.x, ph.z) + HOLD_H)
+	ph.v = move_toward(ph.v, HOLD_V, 25.0 * dt)
+	_hold_print += dt
+	if Env.s("BMX_PG_AIRHOLD") != "" and _hold_print >= 0.25:   # tests
+		_hold_print = 0.0
+		print("AIRHOLD t=%.2f air=%s pitch=%.0f lean=%.0f yaw=%.0f tilt=%.2f air_w=%.2f stick=(%.2f,%.2f) pull=%.2f" % [ph.air_time, ph.air,
+			rad_to_deg(ph.pitch), rad_to_deg(ph.bike_lean), rad_to_deg(ph.slip), ph.air_tilt, ph.air_w, ph.air_stick.x, ph.air_stick.y, ph.air_pull])
+
+
 ## after the physics step (and diag.record)
 func post_step(dt: float, inp: Dictionary) -> void:
 	var ph = game.phys
+	_air_hold_step(dt, ph)
 	_t += dt
 	var vt: float = ph.v * ph.v + (ph.vy * ph.vy if ph.air else 0.0)
 	energy = 0.5 * vt + 9.81 * ph.y
@@ -151,6 +193,7 @@ func on_reset() -> void:
 # ---- energy + checks --------------------------------------------------------------------------------------------
 
 func _checks(dt: float, ph, inp: Dictionary) -> void:
+	if _held: return   # (held in the air: not real physics, nothing to check)
 	# (a pump / hop counts for a moment after it's let go: its push comes at the release / the lip)
 	if inp.get("hop", false) or inp.get("sprint", false) or float(inp.get("throttle", 0.0)) >= 0.02 or absf(float(inp.get("body_fwd", 0.0))) >= 0.05:
 		_busy_t = 0.35
