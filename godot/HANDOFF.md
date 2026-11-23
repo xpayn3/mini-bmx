@@ -237,6 +237,19 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   empty air in front of the camera; it used to be fixed 6 / 18 / 45 % of an 80 m reach: shadows stopped ~70 m out and
   the rider sat in a coarse cascade). Golden hour bias 0.05 / normal bias 2.0 / blur 1.2 (was 0.08 / 3.0 / 2.0: mushy).
   Ultra atlas 8192 again. In the shadow pass trees keep casting to `DECO_FADE_OUT` + 20 m (low-sun shadows are long).
+  **Rider / bike gloss that came and went (2026-11-23)**: (1) the rim light picked its side with `signf()`: with the sun
+  near the view line every bend flipped it across the rider in one frame; now a smooth -1..1 and the direction eases
+  (`_rim_dir`, slerp 2.5 /s). (2) the reflection probe re-captured every 30 m / 6 s and the paint / chrome / visor then
+  reflected a different world at once: off in rides (`BMX_REFL_PROBE=1` brings it back); the sky's reflections stay.
+  **Water** (`Grime`): `wet` = how high the water has got, drawn from the ground up by `grime_wet.gdshader` (ground =
+  `grime_wf` axle - radius, top 1.95 m; dries top down), builds over ~3-5 s with speed; wet film roughness 0.32 / 0.1;
+  washing is slow (mud ~10 s, dust ~4 s at 30 km/h); a wet bike collects no dust and mud no faster than a dusty one; no
+  flying drips (`drips` never emits).
+  **Blur while riding (2026-11-23, user: "it blurs stuff in front of our view ... only on the side, like NFS")**: the
+  tilt-shift depth of field in rides now only softens the distance (far blur from 60 m, full by ~150 m, over the
+  100-124 m decoration hand-over; distance haze from cam.dist + 55, density 0.7; no near blur; the title
+  screen keeps its diorama focus), and the speed blur in `grade.gdshader` is only on the left / right sides of the
+  frame (it was an ellipse round the rider that reached the trail ahead).
 - Height field in **C#** (`TerrainFieldCs`), ~10× faster than GDScript (1.4–3.8 µs per height). The
   GDScript `TerrainField` is the reference: `tools/terrain_cs_cmp.gd` must report **EXACT** (≈736k
   comparisons, 0 mismatches). Switch: `Terrain.USE_CS`, env `BMX_TERRAIN_GD=1` forces GDScript.

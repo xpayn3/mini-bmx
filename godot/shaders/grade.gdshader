@@ -67,7 +67,9 @@ void fragment() {
 	float kb = 0.0;   // how much the speed blur smeared this pixel (the fringing below keeps it)
 	if (blur > 0.001) {
 		vec2 d = uv - focus;
-		float edge = smoothstep(0.12, 0.62, length(d * vec2(1.6, 1.0)));
+		// only the left / right sides of the frame (NFS style): the road ahead (top middle with the trail camera) and
+		// the rider stay sharp; it used to be an ellipse round the rider that reached the trail ahead
+		float edge = smoothstep(0.2, 0.46, abs(uv.x - 0.5)) * (1.0 - 0.5 * smoothstep(0.1, 0.5, -(uv.y - 0.5)));
 		float k = blur * edge;
 		if (k > 0.002) {
 			vec3 acc = c.rgb;
