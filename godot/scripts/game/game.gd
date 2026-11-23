@@ -2038,6 +2038,7 @@ func set_demo(on: bool) -> void:
 		demo = PlaygroundPilot.new(terrain.course)
 	else:
 		demo = DemoPilot.new() if on else null
+	phys.test_rider = demo is PlaygroundPilot   # (its stronger landing help: test runs only)
 	if not on:
 		for a in ["pedal", "brake", "steer_left", "steer_right", "hop", "sprint"]: Input.action_release(a)
 	if demo is PlaygroundPilot:
@@ -2195,6 +2196,10 @@ func _bar_draw(st: BikePhysics, dt: float, dab_lean: float) -> float:
 	_bar_kick = clampf(_bar_kick, -0.08, 0.08)
 	sd += _bar_kick
 	sd += BAR_FLOP * dab_lean
+	# (air step 3) a tabletop: the bike laid over in the air with the bars turned AGAINST the lay-over (the rider pushes the
+	# low-side grip forward) - drawing only. BMX_OLD_TABLETOP=1 = straight bars
+	if st.air and Env.s("BMX_OLD_TABLETOP") == "":
+		sd -= clampf(st.bike_lean * BAR_TABLE, -0.5, 0.5) * st.air_k
 	if _bar_probe:   # tests: BMX_BAR_PROBE (BARS lines once a second: biggest kick, biggest countersteer, bars vs physics)
 		_bp_k = maxf(_bp_k, absf(_bar_kick)); _bp_n = maxf(_bp_n, absf(st.knock)); _bp_c = maxf(_bp_c, absf(st.lean_v * BAR_CS_K)); _bp_d = maxf(_bp_d, absf(sd - st.steer))
 		if int(t) != int(t - dt):
@@ -2202,6 +2207,7 @@ func _bar_draw(st: BikePhysics, dt: float, dab_lean: float) -> float:
 			_bp_k = 0.0; _bp_c = 0.0; _bp_d = 0.0; _bp_n = 0.0
 	return sd
 var _bar_probe := Env.s("BMX_BAR_PROBE") != ""
+const BAR_TABLE := 0.4   # rad of bar turn per rad of lay-over in the air (a tabletop's bars against the lean)
 var _bp_k := 0.0; var _bp_c := 0.0; var _bp_d := 0.0; var _bp_n := 0.0
 func _mcap(key: String, target: float, dt: float) -> float:
 	var mc: float = maxf(0.2, float(Tune.v.get("motionCap", 1.0)))   # (Ride › Smoothing: higher = looser caps)

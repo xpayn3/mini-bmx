@@ -199,6 +199,8 @@ var _bmu_f := NAN; var _bmu_r := NAN   # ...and its eased braking grip (BRAKE_MU
 var _OLD_BRAKE := OS.get_environment("BMX_OLD_BRAKE") != ""   # (tests: the lever-limited brakes before 2026-11-23)
 var _gx_lean := 0.0    # the rest of the ground's drawn lean (body stick, slow steer, whip), eased through jumps
 var _bike_lead := 0.0  # how far the bike runs ahead of the rider's lean while it changes (two masses)
+var _lean_peak := 0.0  # this jump's biggest lay-over in the air (tabletop, rad)
+var _scrub_k := 0.0    # this take-off was soaked (squash / absorb) - with a lay-over or whip: a scrub
 var _whip_peak := 0.0  # this jump's biggest air whip (bike twisted against the body, rad)
 # ---- crash judge: losing control is a build-up, not a trip-wire. Each soft failure (a slide past its angle, a front
 # pushing past its grip, a lean past what the tyres hold, the rear lifting under the front brake) reports how far past
@@ -615,7 +617,8 @@ func _step_controls(dt: float, inp: Dictionary, throttle: float, steer_input: fl
 		var used: float = maxf(Vector2(flick_in, body_in).length(), 0.0 if air_lock_a else absf(steer_input))
 		if not pad: used = maxf(used, absf(throttle - brake_k))
 		_air_own = 1.0 if used > 0.15 else maxf(0.0, _air_own - 2.5 * dt)
-	air_help = float(T.get("airAssist", 0.6)) * (1.0 - _air_own) if air else 0.0
+	# (the playground's test rider gets a stronger hand: TEST_ASSIST, so test runs land; the player keeps airAssist)
+	air_help = maxf(float(T.get("airAssist", 0.6)), TEST_ASSIST if test_rider else 0.0) * (1.0 - _air_own) if air else 0.0
 	var lean_in := 0.0
 	if air:   # W / S act straight away, even if held from the ground (the user wants no re-press)
 		# + the body stick (forward = nose down), with a dead band so a light lean held from the ground doesn't
@@ -1349,6 +1352,7 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 		if absf(air_tw) > tw_lim:
 			air_tw = signf(air_tw) * tw_lim; air_tw_v = 0.0
 		_whip_peak = maxf(_whip_peak, absf(air_tw))
+		_lean_peak = maxf(_lean_peak, absf(bike_lean))
 		var slip_new := wrapf(sys_slip + air_tw, -PI, PI)
 		yaw_rate = wrapf(slip_new - slip, -PI, PI) / dt
 		spin_acc += yaw_rate * dt
@@ -1360,7 +1364,9 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 	if not air:
 		_pivot_step(dt, steer_input, brake_k)
 	# (+ a whip lays the bike flatter the further it's thrown, like the real thing)
-	var roll_t: float = roll_keys * T.airRoll + air_stick.x * float(T.get("stickAirRoll", 0.75)) + clampf(air_stick.x / 0.8, -1.0, 1.0) * (float(T.get("airWhip", 1.5)) if _OLD_WHIP else lerpf(WHIP_AIR_ONLY, float(T.get("airWhip", 1.5)), absf(_whip_in))) * 0.3
+	# (air step 3, tabletop: stickAirRoll = the lay-over at 0.8 of stick, short of the spin edge - it was x times it and the
+	# stick rarely goes past 0.8, so ~50 deg was the most)
+	var roll_t: float = roll_keys * T.airRoll + (air_stick.x * float(T.get("stickAirRoll", 0.75)) if _OLD_WHIP else clampf(air_stick.x / 0.8, -1.0, 1.0) * float(T.get("stickAirRoll", 1.25))) + clampf(air_stick.x / 0.8, -1.0, 1.0) * (float(T.get("airWhip", 1.5)) if _OLD_WHIP else lerpf(WHIP_AIR_ONLY, float(T.get("airWhip", 1.5)), absf(_whip_in))) * 0.3
 	if air: roll_t *= 1.0 - 0.6 * clampf(absf(stick_yaw) / 1.2, 0.0, 1.0)   # spinning flat: a stylish lean, not laid right over
 	var lean_t: float = (roll_t if absf(roll_t) > 0.03 else lean * 0.98) if air else clampf(atan(lat_a / G), -T.leanMax + minf(0.0, bk), T.leanMax + maxf(0.0, bk))
 	# (in the air: blended, not switched. The target jumped between the stick's roll and "hold the lean" at |roll| 0.03,
@@ -2172,7 +2178,7 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			body_pw += (pitch_v - body_pw) * minf(1.0, dt * 4)
 		if now_air and not was_air:
 			if since_land < 0.5 and Env.s("BMX_TRICK") != "": print("BOUNCE %.2fs after landing vy=%.2f pitch=%.2f" % [since_land, vy, pitch])   # tests
-			air = true; air_time = 0; air_peak = 0.0; flip_acc = 0.0; spin_acc = 0.0; style_air = 0.0; _whip_peak = 0.0
+			air = true; air_time = 0; air_peak = 0.0; flip_acc = 0.0; spin_acc = 0.0; style_air = 0.0; _whip_peak = 0.0; _lean_peak = 0.0; _scrub_k = 0.0
 			# rider + bike fly off at the speed of their shared centre of mass: a bike kicked up by a roller
 			# while the body (on soft legs) lags behind doesn't launch the rider with it. In the air the
 			# two then move together (the legs only shift them about that centre)
@@ -2225,6 +2231,7 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 				vy -= sq_d
 				v = signf(v) * sqrt(maxf(0.0, sp2 - vy * vy))
 				squash_fx = clampf(sq_k, 0.0, 1.0)
+				_scrub_k = sq_k
 				if squash > 0.6 and sq_d > 0.8 and host.msg_idle(): host.flash("SQUASH")
 				if Env.s("BMX_TRICK") != "": print("SQUASH k=%.2f dvy=-%.2f" % [squash, sq_d])   # tests
 			# the legs push off along the ground's surface: off a lip tilted sideways (a berm's lip, a banked kicker)
@@ -2869,6 +2876,8 @@ func _pop_apply(dv: float) -> void:
 
 static var _OLD_AUTOPOP := OS.get_environment("BMX_OLD_AUTOPOP") != ""
 static var _OLD_AIRLEAN := OS.get_environment("BMX_OLD_AIRLEAN") != ""
+var test_rider := false     # the playground's test rider is riding (Game.set_demo)
+const TEST_ASSIST := 0.85
 static var _OLD_LANDAIM := OS.get_environment("BMX_OLD_LANDAIM") != ""
 var _land_pitch := NAN      # the ground's slope where this flight comes down (_landing_slope), NAN on the ground
 var _aim_tick := 0
@@ -3010,7 +3019,15 @@ func _style_points(at: float, flips: int, turns: int) -> void:
 	if whip_ok:   # an air whip brought back for the landing: more the further it was thrown
 		pts += roundi(500.0 * clampf(_whip_peak, 0.6, 1.3))
 		parts.append("WHIP" if _whip_peak < 0.95 else "BIG WHIP")
-	elif style_air > 0.35: parts.append("TWEAK")
+	# (air step 3) a scrub: the lip soaked with the bike laid / whipped low; a tabletop: laid right over in the air and
+	# brought back up for the landing
+	var landed_up := absf(bike_lean) < 0.4
+	if _scrub_k > 0.3 and (_lean_peak > 0.5 or _whip_peak > 0.4):
+		pts += 400; parts.append("SCRUB")
+	elif _lean_peak > 0.9 and landed_up and not whip_ok:
+		pts += roundi(450.0 + 400.0 * clampf((_lean_peak - 0.9) / 0.4, 0.0, 1.0))
+		parts.append("TABLETOP" if _lean_peak < 1.15 else "BIG TABLETOP")
+	elif style_air > 0.35 and not whip_ok: parts.append("TWEAK")
 	if parts.is_empty(): parts.append("BIG AIR" if at > 1.0 else "AIR")
 	var clean := absf(wrapf(slip, -PI, PI)) < 0.2 and absf(wrapf(pitch - _g_pitch, -PI, PI)) < 0.15
 	if clean:
