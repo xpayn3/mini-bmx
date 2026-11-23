@@ -1317,6 +1317,7 @@ func _break_action_cam(body_vel: Vector3) -> void:
 
 ## the crash slow-mo is on (Settings › Gameplay; autotests keep normal time unless BMX_WASTED=1)
 func _wasted_on() -> bool:
+	return false   # removed (user, 2026-11-23): no crash slow motion, no grey WASTED screen; a crash just flashes its reason
 	if Env.s("BMX_WASTED") != "": return true
 	if level != "": return false   # the test playground: no slow motion / WASTED screen (the lab has its own slow motion)
 	for a in OS.get_cmdline_user_args():
