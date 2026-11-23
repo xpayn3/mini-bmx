@@ -90,6 +90,7 @@ var pump_push := 0.0; var pump_gain := 0.0; var pump_idle := 0.0; var pump_press
 var land_perfect := 0.0   # 1 on a perfect landing, fades (HUD flash)
 var man_pull := 0.0       # the body stick pulled back for a manual (0..1): the HUD balance bar shows at once
 var _bend_in := 0.0       # what the rider asks of the legs' bend this step (hop held / stick back), before the crouch follows
+var _ab_k := 0.0; var _ab_bend := 0.0; var dg_abs := 0.0   # auto-absorb on (eased) / the legs' rest it set (m, + = straighter), see _step_vertical
 var pleg := 0.0           # the legs' pump stroke: -1 bent (hop held / stick back) .. +1 pushed straight (stick forward)
 var pump_on := false      # hop held on the ground, rolling: the HUD pump bar is up
 var _sprint_lift := 0.0   # balance mode: a sprint stamp from slow lifts the front through the balance
@@ -481,6 +482,7 @@ func _wheel_ground(f: Vector3, x0: float, R: float, cp0: float) -> float:
 ## springs / landings; lip: take-offs). The grade's pull and the height change in `move` are the same energy changing
 ## form: their sum is the path's own error. Printed every 5 s (J/kg) with the time braking / in the air / crashed
 var _EPROBE := OS.get_environment("BMX_ENERGY_PROBE") != ""
+var _OLD_BOUNCE := OS.get_environment("BMX_OLD_BOUNCE") != ""   # (tests: a one-wheel bounce seeds the flight from the body's spin, as before)
 var _eb := {}
 var _e_y := 0.0
 var _eb_t := 0.0; var _eb_n := {t = 0.0, brake = 0.0, air = 0.0, dist = 0.0, vmax = 0.0, turn_t = 0.0, turn_bank = 0.0}
@@ -1621,6 +1623,40 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 		# first moments after a landing
 		var brace := 1.0 - smooth01(since_land / 0.35)
 		var kB: float = T.legStiff * (1 + 5 * prep + 4 * brace)
+		# --- the rider soaks up the ground by himself (auto-absorb). A crest the bike can't follow at this speed (v^2 x the
+		# ground's curve past -g: it would fly) is seen coming: on the face before it, where the ground presses up anyway,
+		# the legs bend, so that from the crest on they have their whole stroke to push the bike down onto the ground
+		# falling away (the rider's weight through straightening legs holds the light bike down). The bend is only the
+		# leg spring's rest moving (rel_t, within the legs' travel): nothing pushes the ride along, so it gains no speed;
+		# pumping on purpose (pleg, _step_drive) still does. Bending AT the crest (the body on a smoothed line) was tried:
+		# it lightened the bike just where it needed the weight and it flew more. Off where the rider does something else
+		# with his legs: a lip / built jump (the pop), the pump, a hop, a manual, braced for a landing
+		var rel_t := 0.0
+		var ab: float = float(T.get("autoAbsorb", 0.0))
+		var ab_on: bool = ab > 0.0 and not air and prep < 0.1 and natural and not (hop_t > 0) and kick_t <= 0.0 and man_a < 0.05 and nose_a < 0.05 and absf(pleg) < 0.1 and since_land > 0.3
+		_ab_k = move_toward(_ab_k, 1.0 if ab_on else 0.0, dt * 6.0)
+		if _ab_k > 0.0 and absf(v) > 4.0:
+			var worst := 0.0   # the hardest throw-off ahead, in g past standing (the crest's v^2 curve + g; < 0 = it flies)
+			var here := 0.0    # the same under the bike now
+			for q in 4:
+				var dq: float = 0.0 if q == 0 else signf(v) * absf(v) * (0.02 + 0.1 * q)   # (0.12 .. 0.32 s ahead)
+				# (the curve read over about an eighth of a second of travel: bumps quicker than that the tyres and
+				# suspension take, a rider can't bend for each of a string of short rollers)
+				var sp: float = clampf(absf(v) * 0.12, 0.7, 3.0)
+				var hq: float = terrain.deck_height(x + f.x * dq, z + f.z * dq)
+				var kq: float = (terrain.deck_height(x + f.x * (dq + sp), z + f.z * (dq + sp)) + terrain.deck_height(x + f.x * (dq - sp), z + f.z * (dq - sp)) - 2.0 * hq) / (sp * sp)
+				if q == 0: here = minf(0.0, 1.0 + v * v * kq / G)
+				else: worst = minf(worst, 1.0 + v * v * kq / G)
+			# bend for the crest coming (from 0.3 g short of flying); on it the legs come back to their rest and straighten
+			# as the ground falls away. (An extra active push off the crest, with the legs' damper let off, was tried: no
+			# better on the rough test)
+			var on_it: float = smooth01(-here / 0.6)
+			_ab_bend = move_toward(_ab_bend, smooth01((0.3 - worst) / 0.8) * (1.0 - on_it), dt * 5.0)
+			rel_t = -0.85 * T.legComp * _ab_bend * minf(1.0, ab) * _ab_k
+			kB *= 1.0 + 1.5 * _ab_k * minf(1.0, ab)   # (working legs, not hanging ones)
+		else:
+			_ab_bend = 0.0
+		dg_abs = rel_t
 		var cB: float = 2 * sqrt(kB) * T.legDamp
 		var press: float = T.legPress * G if (natural and not (hop_t > 0) and not (lift_t > 0)) else 0.0
 		# (a bike with a real suspension setup needs much less of this to stay on the ground: its rebound damping does
@@ -1859,7 +1895,7 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			# bike into its suspension, and both come back up as the turn ends (the pump out of a berm)
 			var cg := 0.0 if was_air else corner_g
 			if not was_air:
-				var f_leg := kB * (y - body_y) - cB * (body_v - vy)
+				var f_leg := kB * (y + rel_t - body_y) - cB * (body_v - vy)
 				body_v += (f_leg - cg) * h; body_y += body_v * h
 				leg_f = PHI * (G + f_leg)
 				dg_leg_f = f_leg
@@ -2099,6 +2135,13 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			# the spin rider + bike leave with: mostly the rider's (they're most of the inertia), plus the
 			# throw. Whatever the bike turns on its own beyond that is relative motion the arms and legs soak up
 			var sh: float = T.riderShare
+			# leaving the ground from ONE wheel (the other already up: the front bouncing along with the rear in the air
+			# after a crest, or the rear after the front) is a bounce, not a take-off the body set up: it flies on with the
+			# gentler of the bike's own spin and the body's. Seeded from the body's smoothed spin alone, the front bouncing
+			# with the rear up got back the nose-down rotation it had a moment before at every bounce and rode on like that
+			# for metres until it met a dip on a bottomed fork; the bike's own spin alone nose-dived big rollers (it was
+			# turning down with the ground's crest)
+			if was_f != was_r and not _balancing() and not _OLD_BOUNCE and absf(pitch_v) < absf(body_pw): body_pw = pitch_v
 			if _man_grace > 0.0 or _balancing(): pitch_v = clampf(pitch_v, -0.8, 0.8); body_pw = clampf(body_pw, -0.8, 0.8)
 			air_w = (1 - sh) * pitch_v + sh * body_pw + throw_v
 			air_tilt = 0.0; air_tilt_v = sh * (pitch_v - body_pw)

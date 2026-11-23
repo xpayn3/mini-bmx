@@ -169,6 +169,23 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   built jump landed on its landing. Stress 56 / 56, suite 1 of 24 changed (hop_0.8 take-off 2.5 deg flatter).
   Changes 5 (forgiving sideways landings) and 6 (graded pop) were already in (landings / jumps work of 2026-11-22):
   a sideways landing under ~20 deg can't highside below ~86 km/h; the pop is graded by snap speed, lip timing, rebound.
+- **Skipping off the ground (2026-11-23, user: "bike behaviour over terrain is kinda off")**. Measured with the new
+  `BMX_SKIP_PROBE=1` (trail) and `slope_stress.tscn -- skip=1` (repeatable: hands off down a synthetic rough descent,
+  crests / dips 4-23 m, 35-65 km/h; `trace=1` dumps the steps before a flight). Trail runs vary 5-9 skips/km between
+  identical runs (the follow rider never rides the same line): judge changes on `skip=1`. Found + fixed: after a crest
+  the bike rode 10 m on the front wheel with the rear up, because every little bounce of the front was a take-off and a
+  take-off seeds the flight's spin from the body's smoothed spin (`body_pw`): it handed back the nose-down rotation at
+  each bounce, until the front met a dip on a bottomed fork (46 g in a step) and the bike was thrown off. Now a take-off
+  from ONE wheel flies on with the gentler of the bike's own spin and the body's (the bike's alone nose-dived the 0.8 m
+  stress rollers). `BMX_OLD_BOUNCE=1` = before. Dip kicks on the trail got short (0.07-0.4 s, were 0.4-1.7). The user
+  rode it: "feels better". **Auto-absorb** (`autoAbsorb`, Ride > Body > Legs, default 0 = off, Tune VER 25): hands off
+  the legs bend ahead of a crest the bike would fly (the leg spring's rest, `rel_t`, `_ab_bend`), no speed from it.
+  On `skip=1`: air time -7..-14 %, flights not fewer, and the short 3 m stress rollers nose-dive with it, so it is off.
+  Tried and dropped: bending AT the crest (body on a smoothed line: lighter just where it needed weight, more flights),
+  an active push off the crest with the legs' damper let off, more leg travel (`legExt` 0.2 / 0.25: ~no change), stiffer
+  legs (`legStiff` 60: +40 % flights). Left: on ground that rough at 55-65 km/h most flights are real (crests past -1 g),
+  and about half the rest are the soft legs (0.9 Hz) letting the body lag, reaching full extension and jerking the bike
+  up (inelastic merge at `legExt`); not changed.
 - **The ride step is 11 stage functions** (2026-11-21; it was one 1,514-line function). `_ride_step` is the short driver; the
   stages, in order: `_step_controls` (levers, body stick, air inputs, lip throw; returns the brake level), `_step_ground`
   (heights, surface, grip per tyre), `_step_sprint`, `_step_loads` (weight on each tyre -> `n_rear` / `n_front` / `n_load`),
@@ -1949,6 +1966,8 @@ Run with the **console** exe so prints show. Every test run quits by itself.
 | `BMX_PERF=1` (+ `--autotest=N`, `BMX_NOVSYNC=1`) | main-thread ms per frame for every part of `Game._process` / `_physics_process` (`PERF` lines every 5 s, biggest first) — the way to find what to make lighter |
 | `BMX_CAM=chase` / `BMX_CAM_ORBIT=rad` | camera mode / angle for autotest shots |
 | `BMX_GOPRO_PROBE=1` (+ `BMX_BAIL=secs`) | prints the torn-off GoPro's flight (`GOPRO` lines), gets up 2.5 s after the bail and checks a new one is mounted |
+| `BMX_SKIP_PROBE=1` (+ `BMX_DEMO=1` or `BMX_FOLLOW=1 BMX_TRICK=none`) | every time the wheels leave the ground, sorted: built jump / hop or pop / crash / **skip** (the ground threw the bike off by itself); `SKIP` lines (speed, air, height, slope, v^2 x the ground's curve in g: < -1 = a crest it must fly over, > 0 = thrown out of a dip by the springs), `SKIPSUM` every 10 s (per km, one-wheel lifts). 2026-11-23, seed 4242, 120 s: demo AI 1.9 skips/km (all < 0.15 s); follow rider (52-62 km/h, no braking) 5.4/km, 6 s in the air, 3 of 9 thrown out of a dip |
+| `--headless res://tools/slope_stress.tscn -- skip=1 [trace=1] [tune=...]` | hands off down a synthetic rough descent at 35-65 km/h: flights per 100 m sorted by the ground's curve at take-off (dip / crest / other), air time, time on the front wheel; repeatable, use it (not trail runs) to judge how the bike follows the ground |
 | `BMX_CAM_CYCLE=1` | autotest presses C (next camera) every 0.6 s and prints `CAMCYCLE i mode` |
 | `BMX_GARAGE_HEAD=1` (+ `BMX_GARAGE_TAB=kit BMX_GARAGE_CAM=1.9,22,0.75`) | garage camera frames the standing rider's helmet (action cam close-ups) |
 | `BMX_SHOT=file.png` | screenshot at the end of an autotest |

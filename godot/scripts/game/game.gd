@@ -1413,6 +1413,67 @@ func get_up() -> void:
 	_snap_prev()
 	if hud: hud.on_get_up()
 
+## tests (BMX_SKIP_PROBE=1): every time the wheels leave the ground, sorted by why. A flight (both wheels off) is
+## "jump" off a built jump (TerrainField.fo_m at take-off), "hop" when the rider hopped / popped just before
+## (hop button, stick hop, a pop: pop_fx or kick_t), "crash", else "skip" = the ground threw the bike off by itself.
+## One-wheel lifts on the ground are counted too (front / rear off > 0.05 s, no flight). SKIP lines per event of
+## a skip (speed, air, height, ground slope / curve under the bike), SKIPSUM every 10 s (counts per km, air time)
+var _SKIP := OS.get_environment("BMX_SKIP_PROBE") != ""
+var _SKIP_TR: PackedFloat64Array = PackedFloat64Array(Array(OS.get_environment("BMX_SKIP_TRACE").split(",", false)).map(func(q): return float(q)))   # (tests: x0,x1 = every step between)
+var _sk := {"t": 0.0, "dist": 0.0, "jump": 0, "hop": 0, "skip": 0, "skip_air": 0.0, "skip_big": 0, "jump_air": 0.0, "lift_f": 0, "lift_r": 0, "lift_t": 0.0, "fast_t": 0.0, "fast_skip": 0, "fo_long": 0, "fo_max": 0.0, "fo_t": 0.0}
+var _sk_air := false; var _sk_why := ""; var _sk_v := 0.0; var _sk_y0 := 0.0; var _sk_peak := 0.0; var _sk_kap := 0.0; var _sk_sl := 0.0
+var _sk_fr1 := 0.0; var _sk_fo := 0.0; var _sk_fr := 0.0; var _sk_next := 10.0; var _sk_x := 0.0
+func _skip_probe(dt: float, inp: Dictionary) -> void:
+	_sk.t += dt
+	if _SKIP_TR.size() == 2 and phys.x > _SKIP_TR[0] and phys.x < _SKIP_TR[1]:
+		var f0: Vector3 = phys.fwd()
+		print("SKTR x=%.2f y=%.3f vy=%+.2f v=%.1f pitch=%+.3f pv=%+.2f gp=%+.3f air=%s fa=%s ra=%s cf=%s cr=%s xF=%.3f xR=%.3f vF=%+.2f vR=%+.2f fF=%.1f fR=%.1f tyF=%.1f tyR=%.1f sqF=%.3f sqR=%.3f leg=%+.3f legf=%+.1f body_v=%+.2f cg=%.1f gy=%.3f" % [phys.x, phys.y, phys.vy, phys.v, phys.pitch, phys.pitch_v, phys._g_pitch, phys.air, phys.front_air, phys.rear_air, phys.c_f, phys.c_r,
+			phys.dg_xF, phys.dg_xR, phys.dg_vF, phys.dg_vR, phys.dg_fF, phys.dg_fR, phys.dg_tyF, phys.dg_tyR, phys.dg_sqF, phys.dg_sqR, phys.dg_leg, phys.dg_leg_f, phys.body_v, phys.corner_g, terrain.deck_height(phys.x, phys.z)])
+	if phys.crash_on: _sk_air = false; return
+	_sk.dist += absf(phys.v) * dt
+	if phys.v > 11.0: _sk.fast_t += dt
+	var both: bool = phys.air
+	if both and not _sk_air:
+		_sk_air = true; _sk_v = phys.v; _sk_y0 = phys.y; _sk_peak = phys.y; _sk_x = phys.x
+		var fm := 0.0
+		if terrain.field != null:
+			terrain.field.jump_eval(phys.x, phys.z); fm = terrain.field.fo_m
+		_sk_why = "jump" if fm > 0.05 else ("hop" if (phys.pop_fx > 0.3 or phys.kick_t > 0.0 or phys.hop_t > 0.0) else "skip")
+		var f: Vector3 = phys.fwd()
+		var h0: float = terrain.deck_height(phys.x, phys.z)
+		_sk_kap = (terrain.deck_height(phys.x + f.x * 0.6, phys.z + f.z * 0.6) + terrain.deck_height(phys.x - f.x * 0.6, phys.z - f.z * 0.6) - 2.0 * h0) / 0.36
+		_sk_sl = phys._g_pitch
+	if both: _sk_peak = maxf(_sk_peak, phys.y)
+	if not both and _sk_air:
+		_sk_air = false
+		var at: float = phys.air_time
+		if at >= 0.05:
+			_sk[_sk_why] += 1
+			if _sk_why == "skip":
+				_sk.skip_air += at
+				if at > 0.25: _sk.skip_big += 1
+				if _sk_v > 11.0: _sk.fast_skip += 1
+				print("SKIP v=%.0f km/h air=%.2f s up=%.2f m dist=%.1f m slope=%.0fdeg curve=%.3f /m (v^2 x curve = %.2f g) x=%.0f" % [_sk_v * 3.6, at, _sk_peak - _sk_y0, absf(phys.x - _sk_x), rad_to_deg(_sk_sl), _sk_kap, _sk_v * _sk_v * _sk_kap / 9.81, phys.x])
+			elif _sk_why == "jump": _sk.jump_air += at
+	if not both:
+		# (riding on the front wheel alone, the rear up, not a nose manual: how long at a time)
+		if not phys.c_r and phys.nose_a < 0.05 and phys.man_a < 0.05 and (phys.c_f or _sk_fr1 > 0.0):
+			_sk_fr1 += dt; _sk.fo_t += dt
+		else:
+			if _sk_fr1 > 0.3: _sk.fo_long += 1
+			_sk.fo_max = maxf(_sk.fo_max, _sk_fr1); _sk_fr1 = 0.0
+		_sk_fo = _sk_fo + dt if phys.front_air else 0.0
+		_sk_fr = _sk_fr + dt if phys.rear_air else 0.0
+		if phys.front_air or phys.rear_air: _sk.lift_t += dt
+		if absf(_sk_fo - 0.05) < dt * 0.5 and phys.man_a < 0.05: _sk.lift_f += 1
+		if absf(_sk_fr - 0.05) < dt * 0.5 and phys.nose_a < 0.05: _sk.lift_r += 1
+	if _sk.t >= _sk_next:
+		_sk_next += 10.0
+		var km: float = maxf(0.001, _sk.dist / 1000.0)
+		print("SKIPSUM t=%.0fs dist=%.0fm | skips=%d (%.1f/km, %d over 0.25 s, %d above 40 km/h, %.1f s in the air) jumps=%d (%.1f s) hops=%d | wheel lifts front=%d rear=%d (%.1f/km, one wheel off %.1f %% of the time) | front wheel alone %.1f s, %d runs over 0.3 s, longest %.2f s | above 40 km/h %.0f %% of the time" % [
+			_sk.t, _sk.dist, _sk.skip, _sk.skip / km, _sk.skip_big, _sk.fast_skip, _sk.skip_air, _sk.jump, _sk.jump_air, _sk.hop,
+			_sk.lift_f, _sk.lift_r, (_sk.lift_f + _sk.lift_r) / km, 100.0 * _sk.lift_t / maxf(0.01, _sk.t), _sk.fo_t, _sk.fo_long, _sk.fo_max, 100.0 * _sk.fast_t / maxf(0.01, _sk.t)])
+
 func on_trick(trick: String) -> void:
 	if hud: hud.on_trick(trick)
 
@@ -2128,6 +2189,7 @@ func _physics_process(dt: float) -> void:
 	if level_probe: level_probe.pre_step(dt, inp)
 	if lab: lab.pre_step(inp)
 	phys.step(dt, inp)
+	if _SKIP: _skip_probe(dt, inp)
 	if level_probe: level_probe.post_step(dt)
 	if diag: diag.record(dt, inp)
 	if lab: lab.post_step(dt, inp)
