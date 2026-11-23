@@ -2098,6 +2098,9 @@ func _autotest(seconds: float) -> void:
 				print("LEANFF t=%.1f v=%.1f key=%+.0f steer_in=%+.2f lat=%+.1f bike=%+.0fdeg body_hip=%+.0fdeg body_chest=%+.0fdeg max_rate=%.1frad/s" % [el, ph3.v, sv, ph3.steer_in, ph3.lat_a, rad_to_deg(ph3.bike_lean), rad_to_deg(game.rider.roll_p), rad_to_deg(game.rider.roll_c), _probe["ff_rate"]])
 		elif Env.s("BMX_STEER") != "":   # tests: hold a steady turn (+ left, - right) after 2 s
 			var sv := float(Env.s("BMX_STEER")) if el > 2.0 else 0.0
+			if Env.s("BMX_STEER_AT_ROPE") != "":   # tests: hold it only once that far (m) along the first rope bridge
+				var rp: Array = game.terrain.ropes
+				sv = float(Env.s("BMX_STEER")) if not rp.is_empty() and rp[0].local(game.phys.x, game.phys.z).x > float(Env.s("BMX_STEER_AT_ROPE")) else 0.0
 			Input.action_press("steer_left", maxf(sv, 0.0)) if sv > 0 else Input.action_release("steer_left")
 			Input.action_press("steer_right", maxf(-sv, 0.0)) if sv < 0 else Input.action_release("steer_right")
 		elif pedal and not straight and int(el) % 6 == 3: Input.action_press("steer_left")

@@ -316,6 +316,28 @@ public partial class RopeBridgeSim : RefCounted
 		return At(_tx, _ty, _tz, s, Math.Clamp(t, 0f, 1f)).Y;
 	}
 
+	/// the deck's height under (u, w) read level across (its middle line's height), NaN off the deck: what the ride
+	/// physics stands on. The deck rolls as the rider loads one side and that roll read as a bank / side slope to the
+	/// steering (berm assist, camber drift): turning on the bridge fought the bridge
+	public float HeightLevel(float u, float w, float margin)
+	{
+		if (!Param(u, w, margin, out float s, out float _))
+			return float.NaN;
+		return At(_tx, _ty, _tz, s, 0.5f).Y;
+	}
+
+	/// where the two deck ropes are across (w of the left, w of the right) at u, as the deck swings now; NaN off its ends
+	public Vector2 Edges(float u)
+	{
+		if (!Param(u, 0f, 1e6f, out float s, out float _))
+			return new Vector2(float.NaN, float.NaN);
+		int i = Math.Clamp((int)s, 0, _n - 1);
+		float fs = Math.Clamp(s - i, 0f, 1f);
+		float l = _tz[DL(i)] + (_tz[DL(i + 1)] - _tz[DL(i)]) * fs;
+		float r = _tz[DR(i)] + (_tz[DR(i + 1)] - _tz[DR(i)]) * fs;
+		return new Vector2(l, r);
+	}
+
 	/// how far the deck under (u, w) moved along / across in the last tick (u, w)
 	public Vector2 Carry(float u, float w)
 	{
