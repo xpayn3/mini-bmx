@@ -12,15 +12,27 @@ const WIDTH := 0.075
 const MAX_STRIPS := 40
 const SUB := 3
 const ITER := 6
-const SNAP_STRAIN := 0.17      # the tape tears once stretched 17 % past its length (pulled straight first)
+const SNAP_STRAIN := 0.07      # the tape tears once stretched 7 % past its length (pulled straight first; was 17 %: too rubbery)
 const SUBD := 4                  # drawn: each sim segment is split into 4 along a smooth spline
+const RECOIL := 3.5              # m/s: a torn end whips back towards its stake this fast (x how far past SNAP_STRAIN; was 7: it looped and flickered)
+const SAG_EASE := 22.0           # 1/s: a held span's sag follows the slack this fast (smooths it pulling taut)
 const SETTLE := 1.3              # a released (not torn) tape springs back this long, then is whole again
+const LOD_NEAR := 30.0           # strips further than this from the rider step every LOD_EVERY frames ...
+const LOD_EVERY := 3             # ... with the frames' time added up (far, small: nobody sees the difference)
+const CS := "res://scripts/world/TapeStripCs.cs"
 
 var terrain: Terrain
+## a held span tore (speed = the bike's ground speed, m/s): Game pops "SNAP!" then, not at the first touch
+signal torn(speed: float)
 var strips: Array = []           # [{P, Q, seg, pin, cols, age, tw, last, tr, tk, ta, td, tp, G, V, N}]
 var _amesh := ArrayMesh.new()
 var _dirty := false
 var _warm := false               # a first surface has been made with the strip material (its shader compiled)
+var _cs: Object = null           # TapeStripCs (null without C# or with BMX_TAPE_GD=1: the GDScript _step / _ribbon)
+var _redraw := false             # a strip moved / came / went this frame: rebuild the mesh
+var _frame := 0
+var _t := 0.0                    # the wind clock (twist of the ribbons)
+var _next_id := 0
 
 
 func _init() -> void:
@@ -31,12 +43,15 @@ func _init() -> void:
 	m.shader = preload("res://scripts/world/tape_strip.gdshader")
 	material_override = m
 	extra_cull_margin = 16384.0     # JS: frustumCulled = false
+	if Env.s("BMX_TAPE_GD") == "":
+		_cs = CrashLog.cs_new(CS)
 
 
 func clear() -> void:
 	strips.clear()
 	_amesh.clear_surfaces()
 	_dirty = false
+	_redraw = false
 
 
 ## the bike (velocity vel) ran into span `sp` near `hit` (x, z). The tape doesn't snap at once: the span
@@ -81,6 +96,7 @@ func _snap(s: Dictionary) -> void:
 	var idx := [range(0, gi + 1), range(n - 1, gi - 1, -1)]
 	var sp: Dictionary = s["sp"]
 	var spd := Vector2(vel.x, vel.z).length()
+	torn.emit(spd)
 	for side in 2:
 		var ii: Array = idx[side]
 		var m := ii.size()
@@ -96,8 +112,8 @@ func _snap(s: Dictionary) -> void:
 			# harder it was pulled; the very end flicks on with the bike a little
 			var back := (stake - p)
 			back.y = 0.0
-			var rv := back.normalized() * (7.0 * over * k * k) if back.length_squared() > 1e-6 else Vector3.ZERO
-			rv += vel * 0.25 * k * k + Vector3(0, 1.5 * k * k * randf(), 0)
+			var rv := back.normalized() * (RECOIL * over * k * k) if back.length_squared() > 1e-6 else Vector3.ZERO
+			rv += vel * 0.2 * k * k + Vector3(0, 0.8 * k * k * randf(), 0)
 			hp.append(p)
 			hq.append(p - (rv + (P[ii[j]] - Q[ii[j]]) / h * 0.3) * (1.0 / 60.0))
 		var cols := []
@@ -112,6 +128,13 @@ func _snap(s: Dictionary) -> void:
 		var pin = res["to"] if res.has("to") else (null if randf() < 0.15 else stake)
 		_add(hp, hq, cols, float(s["seg"]), null)
 		var t: Dictionary = strips[strips.size() - 1]
+		# its own length piece by piece (with the sag it hung with): a uniform span / SEG is shorter, and the first
+		# step yanked the points together into loops that spun the ribbon edge-on and back (flicker)
+		var rest: PackedFloat32Array = s["rest"]
+		var hs := PackedFloat32Array()
+		for j in m - 1:
+			hs.append(rest[ii[j] if side == 0 else ii[j + 1]])
+		t["segs"] = hs
 		_set_end(t, 0, pin)
 		t["last"] = 1.0 / 60.0
 		t["tw_k"] = 0.0
@@ -193,8 +216,26 @@ func _follow(s: Dictionary, dt: float) -> void:
 			body.apply_impulse(dv / L * minf((L - R) * 90.0 * dt, 1.5) * body.mass, p - body.global_position)
 
 
-## the bike's front, at tape height, while riding (null = no rider / crashed)
+## the drawn bike's front while riding (null = no rider / crashed): {axle, fwd (heading, flat), axis (steering
+## axis, up the fork), r (front wheel radius)}, set by Game every frame. Where a span catches on it depends on the
+## tape's height: on the tyre's front below the tyre's top, on the front of the fork above it (TapeSim._contact)
 var push_at = null
+
+
+## where the bike holds tape at height y: the tyre's front at that height, or above the tyre the fork's front
+## (the steering axis + a stanchion's radius). The tape used to wrap round the tyre's leading edge at axle
+## height moved up to 85 cm: a corner hanging in the air half a metre in front of the bars.
+func _contact(y: float) -> Vector3:
+	var ax: Vector3 = push_at["axle"]
+	var fwd: Vector3 = push_at["fwd"]
+	var axis: Vector3 = push_at["axis"]
+	var r: float = push_at["r"]
+	var h := y - ax.y
+	if h < r * 0.9:
+		var f := sqrt(maxf(r * r - h * h, 0.0))
+		return Vector3(ax.x + fwd.x * f, y, ax.z + fwd.z * f)
+	var q := ax + axis * (h / maxf(axis.y, 0.3)) + fwd * 0.05
+	return Vector3(q.x, y, q.z)
 
 
 func _stretch(s: Dictionary, dt: float) -> String:
@@ -203,46 +244,93 @@ func _stretch(s: Dictionary, dt: float) -> String:
 	var n: int = (s["P"] as PackedVector3Array).size()
 	if push_at == null:
 		return "release"
-	var pa: Vector3 = push_at
+	var rp: PackedVector3Array = (s["sp"] as Dictionary)["pts"]
 	var ab := Vector2(B.x - A.x, B.z - A.z)
 	var L2 := ab.length_squared()
+	# the tape's height where the bike is: from the span as it hung (the axle's spot along it is near enough)
+	var ax: Vector3 = push_at["axle"]
+	var t0 := clampf(Vector2(ax.x - A.x, ax.z - A.z).dot(ab) / L2, 0.0, 1.0)
+	var fi := t0 * (n - 1)
+	var i0 := mini(int(fi), n - 2)
+	var pa := _contact(lerpf(rp[i0].y, rp[i0 + 1].y, fi - i0))
 	var t := clampf(Vector2(pa.x - A.x, pa.z - A.z).dot(ab) / L2, -1.0, 2.0)
 	var nrm: Vector2 = s["nrm"]
 	var d := Vector2(pa.x - A.x, pa.z - A.z).dot(nrm)
-	if t < 0.03 or t > 0.97 or d < -0.35:
-		return "release"   # backed off, or slid off its end
-	var rp: PackedVector3Array = (s["sp"] as Dictionary)["pts"]
-	var gi := clampi(roundi(t * (n - 1)), 1, n - 2)
+	# caught by the tyre's leading edge, the fork reaches the tape a little later: the tape stays as it hung till
+	# then. Backing out from where it was caught (or a crash) lets it go; otherwise it stretches and snaps, also
+	# when the bike runs along it to a stake (it used to let go at a span's end: "it ignores it")
+	if not s.has("d0"): s["d0"] = minf(d, 0.0)
+	if d < float(s["d0"]) - 0.35:
+		if Env.s("BMX_TAPE_PROBE") != "": print("TAPEREL t=%.2f d=%.2f strain=%.3f age=%.2f" % [t, d, float(s.get("strain", 0.0)), float(s["age"])])
+		return "release"
 	var base := A.lerp(B, t)
-	var c := Vector3(base.x + nrm.x * maxf(d, 0.0), rp[gi].y, base.z + nrm.y * maxf(d, 0.0))
-	s["grab"] = gi
-	s["grab_at"] = c
-	var la := A.distance_to(c)
-	var lb := c.distance_to(B)
+	var c := Vector3(base.x + nrm.x * maxf(d, 0.0), pa.y, base.z + nrm.y * maxf(d, 0.0))
+	var la := maxf(A.distance_to(c), 1e-3)
+	var lb := maxf(c.distance_to(B), 1e-3)
+	# the tape slides over the fork / tyre, so both sides stretch alike: each gets its share of the length by
+	# how far its stake is (a split by a fixed point stretched one side's stripes long and bunched the other's)
+	var rest_len: float = s["rest_len"]
+	var ra := rest_len * la / (la + lb)
+	var rb := rest_len - ra
+	s["strain"] = (la + lb) / rest_len - 1.0
+	_pose_held(s, A, c, B, ra, rb, la, lb, dt)
+	# the point nearest the corner: where it tears (_snap splits the strip there)
 	var rest: PackedFloat32Array = s["rest"]
-	var ra := 0.0
-	for i in gi: ra += rest[i]
-	var rb: float = float(s["rest_len"]) - ra
-	s["strain"] = (la + lb) / float(s["rest_len"]) - 1.0
-	_pose_held(s, A, c, B, gi, ra, rb, la, lb, dt)
+	var cum := 0.0
+	var gi := 1
+	var best := INF
+	for i in n:
+		if absf(cum - ra) < best:
+			best = absf(cum - ra)
+			gi = i
+		if i < n - 1: cum += rest[i]
+	s["grab"] = clampi(gi, 1, n - 2)
+	s["grab_at"] = c
+	if Env.s("BMX_TAPE_PROBE") != "":   # the held tape's points' acceleration (m/s^2): glitches = big jumps in it
+		var P: PackedVector3Array = s["P"]
+		var P1: PackedVector3Array = s.get("_p1", PackedVector3Array())
+		var P2: PackedVector3Array = s.get("_p2", PackedVector3Array())
+		var d1: float = s.get("_d1", dt)
+		if P2.size() == P.size() and dt > 0.0 and d1 > 0.0:
+			var j := 0.0
+			for i in P.size():
+				var aa := ((P[i] - P1[i]) / dt - (P1[i] - P2[i]) / d1).length() / dt
+				j = maxf(j, aa)
+			var acc: Array = s.get("_acc", [])
+			acc.append(j)
+
+			s["_acc"] = acc
+		s["_p2"] = P1
+		s["_p1"] = P.duplicate()
+		s["_d1"] = dt
 	return "snap" if float(s["strain"]) > SNAP_STRAIN else ""
 
 
-## a held span, posed exactly every frame: each side runs from its stake to the grab point, straight (and
-## stretched evenly) once it's pulled taut, sagging in a parabola of the right length while it's slack.
+## a held span, posed exactly every frame: each side runs from its stake to the corner c on the bike, straight
+## (and stretched evenly) once it's pulled taut, sagging in a parabola of the right length while it's slack. The
+## points are laid by their length along the tape (ra of it on A's side), so the corner sits between two points
+## and moves smoothly (pinning the nearest point made it hop ~25 cm as that changed).
 ## Q keeps last frame's points so the strip carries its velocity on when it's let go or tears.
-func _pose_held(s: Dictionary, A: Vector3, c: Vector3, B: Vector3, gi: int, ra: float, rb: float, la: float, lb: float, dt: float) -> void:
+func _pose_held(s: Dictionary, A: Vector3, c: Vector3, B: Vector3, ra: float, rb: float, la: float, lb: float, dt: float) -> void:
 	var P: PackedVector3Array = s["P"]
 	var Q: PackedVector3Array = s["Q"]
 	var rest: PackedFloat32Array = s["rest"]
 	var n := P.size()
-	var G := _ground(s)
+	var G := _ground(s, 0.0025)   # held: re-read every 5 cm (a slack side lying on the ground stepped with a 20 cm cache)
 	var sag_a := sqrt(3.0 * la * (ra - la) / 8.0) if ra > la else 0.0
 	var sag_b := sqrt(3.0 * lb * (rb - lb) / 8.0) if rb > lb else 0.0
+	# that sag goes with sqrt(slack): just before it pulls taut it falls steeply, and the middle snapped up into
+	# line in a frame or two (a twitch). Eased instead (~SAG_EASE), from the sag it had when it was caught
+	if s.has("sga"):
+		var k := 1.0 - exp(-dt * SAG_EASE)
+		sag_a = lerpf(float(s["sga"]), sag_a, k)
+		sag_b = lerpf(float(s["sgb"]), sag_b, k)
+	s["sga"] = sag_a
+	s["sgb"] = sag_b
 	var cum := 0.0
 	for i in n:
 		var p: Vector3
-		if i <= gi:
+		if cum <= ra:
 			var u := cum / ra
 			p = A.lerp(c, u) - Vector3(0, sag_a * 4.0 * u * (1.0 - u), 0)
 		else:
@@ -257,8 +345,8 @@ func _pose_held(s: Dictionary, A: Vector3, c: Vector3, B: Vector3, gi: int, ra: 
 	s["last"] = maxf(dt, 1e-4)
 
 
-## the ground under each point, re-read only for points that moved 0.2 m+ sideways (height() is costly)
-func _ground(s: Dictionary) -> PackedFloat32Array:
+## the ground under each point, re-read only for points that moved sqrt(tol2) (0.2 m) sideways (height() is costly)
+func _ground(s: Dictionary, tol2 := 0.04) -> PackedFloat32Array:
 	var P: PackedVector3Array = s["P"]
 	var n := P.size()
 	var G: PackedFloat32Array = s["G"]
@@ -269,7 +357,7 @@ func _ground(s: Dictionary) -> PackedFloat32Array:
 		for i in n: GP[i] = Vector2(INF, INF)
 	for i in n:
 		var q := Vector2(P[i].x, P[i].z)
-		if q.distance_squared_to(GP[i]) > 0.04:
+		if q.distance_squared_to(GP[i]) > tol2:
 			GP[i] = q
 			G[i] = terrain.height(q.x, q.y)
 	s["G"] = G
@@ -285,14 +373,31 @@ func _add(P: PackedVector3Array, Q: PackedVector3Array, cols: Array, seg_len: fl
 	for i in P.size():
 		tw.append(randf() * 6.28)
 	# each strip twists its own way: rate, how quickly the twist turns along it, how far, a slow drift
-	strips.append({"P": P, "Q": Q, "seg": seg_len, "pin": pin, "cols": cols, "age": 0.0, "tw": tw, "last": 1.0 / 60.0,
+	_next_id += 1
+	strips.append({"id": _next_id, "tb": _t, "P": P, "Q": Q, "seg": seg_len, "pin": pin, "cols": cols, "age": 0.0, "tw": tw, "last": 1.0 / 60.0,
 		"tr": 1.5 + randf() * 5, "tk": 0.1 + randf() * 0.6, "ta": 0.5 + randf() * 1.4, "td": (randf() - .5) * 1.2,
 		"tp": randf() * 6.28, "G": PackedFloat32Array(), "V": PackedVector3Array(), "N": PackedVector3Array()})
 	_dirty = true
+	_redraw = true
 
 
 ## t: wind clock, wdir: unit wind direction (y = 0), ws: wind speed (WIND.speed * gust * 1.5)
+## BMX_TAPE_PERF=1: `TAPEPERF` once a second (strips, main-thread us per frame: average / worst)
+var _pf := [0, 0, 0]
 func update(dt: float, px: float, pz: float, t: float, wdir: Vector3, ws: float) -> void:
+	if Env.s("BMX_TAPE_PERF") == "":
+		_update(dt, px, pz, t, wdir, ws)
+		return
+	var t0 := Time.get_ticks_usec()
+	_update(dt, px, pz, t, wdir, ws)
+	var us := Time.get_ticks_usec() - t0
+	_pf[0] += 1; _pf[1] += us; _pf[2] = maxi(_pf[2], us)
+	if _pf[0] >= 60:
+		print("TAPEPERF strips=%d avg_us=%d max_us=%d cs=%s" % [strips.size(), _pf[1] / _pf[0], _pf[2], _cs != null])
+		_pf = [0, 0, 0]
+
+
+func _update(dt: float, px: float, pz: float, t: float, wdir: Vector3, ws: float) -> void:
 	if strips.is_empty():
 		if _dirty:
 			_amesh.clear_surfaces()
@@ -301,6 +406,7 @@ func update(dt: float, px: float, pz: float, t: float, wdir: Vector3, ws: float)
 			# one tiny triangle far underground with the strip material: its pipeline is made now, at the
 			# start of the ride, not on the first tape you hit (a hitch right at the moment of impact)
 			_warm = true
+			if _cs: _cs.call("Warm")
 			var arr := []
 			arr.resize(Mesh.ARRAY_MAX)
 			var o := Vector3(px, -2000.0, pz)
@@ -310,9 +416,10 @@ func update(dt: float, px: float, pz: float, t: float, wdir: Vector3, ws: float)
 			_amesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
 			_dirty = true
 		return
-	var h := dt / SUB
-	if h <= 0.0:
+	if dt <= 0.0:
 		return
+	_frame += 1
+	_t = t
 	var snapped: Array = []   # torn this frame: _snap adds strips (and may drop the oldest), so after the loop
 	for si in range(strips.size() - 1, -1, -1):
 		var s: Dictionary = strips[si]
@@ -321,15 +428,21 @@ func update(dt: float, px: float, pz: float, t: float, wdir: Vector3, ws: float)
 		var far := Vector2(P[0].x - px, P[0].z - pz).length()
 		if far > 180 and s.get("state", "free") != "free":
 			strips.remove_at(si)
+			_redraw = true
 			if terrain: terrain.restore_tape(s["sp"])
 			continue
 		if far > 180 or (s["pin"] == null and s.get("pin2") == null and s["age"] > 40):
 			strips.remove_at(si)
+			_redraw = true
 			continue
 		var state: String = s.get("state", "free")
 		if state == "stretch":
 			match _stretch(s, dt):
 				"snap":
+					if Env.s("BMX_TAPE_PROBE") != "":
+						var acc: Array = s.get("_acc", [0.0])
+						acc.sort()
+						print("TAPESNAP age=%.2f acc_median=%.0f acc_max=%.0f frames=%d" % [float(s["age"]), acc[acc.size() / 2], acc[-1], acc.size()])
 					strips.remove_at(si)
 					snapped.append(s)
 					continue
@@ -339,20 +452,54 @@ func update(dt: float, px: float, pz: float, t: float, wdir: Vector3, ws: float)
 					s["grab"] = -1
 					s["segs"] = (s["rest"] as PackedFloat32Array).duplicate()
 				_:
-					_ribbon(s, t)   # held: posed exactly by _stretch, nothing to simulate
+					_ribbon_any(s, t)   # held: posed exactly by _stretch, nothing to simulate
 					continue
 		elif state == "settle" and s["age"] > SETTLE:
 			strips.remove_at(si)
+			_redraw = true
 			if terrain: terrain.restore_tape(s["sp"])
 			continue
 		elif far > 90:   # out of sight: freeze
 			continue
-		if state == "free": s["tw_k"] = minf(s.get("tw_cap", 1.0), float(s.get("tw_k", 1.0)) + dt * 1.5)   # the foil starts twisting once torn
-		if s.has("pb") or s.has("pb2"): _follow(s, dt)
-		_step(s, h, t, wdir, ws)
-		_ribbon(s, t)
+		var acc: float = float(s.get("acc", 0.0)) + dt   # time this strip hasn't been stepped yet
+		if far > LOD_NEAR and (_frame + si) % LOD_EVERY != 0 and acc < 0.1:
+			s["acc"] = acc
+			continue
+		s["acc"] = 0.0
+		if state == "free": s["tw_k"] = minf(s.get("tw_cap", 1.0), float(s.get("tw_k", 1.0)) + acc * 1.5)   # the foil starts twisting once torn
+		if s.has("pb") or s.has("pb2"): _follow(s, acc)
+		_step_any(s, acc / SUB, t, wdir, ws)
+		_ribbon_any(s, t)
 	for s in snapped: _snap(s)
-	_draw()
+	if _redraw:
+		_redraw = false
+		_draw()
+
+
+## one frame of the strip's sim: C# (TapeStripCs.Step) when there is one, else _step
+func _step_any(s: Dictionary, h: float, t: float, wdir: Vector3, ws: float) -> void:
+	if _cs == null:
+		_step(s, h, t, wdir, ws)
+		return
+	var ratio: float = h / s["last"]
+	s["last"] = h
+	var pin = s["pin"]
+	var pin2 = s.get("pin2")
+	var r: Array = _cs.call("Step", s["P"], s["Q"], _ground(s), s.get("segs", PackedFloat32Array()), float(s["seg"]),
+		h, ratio, SUB, ITER, pin != null, pin if pin != null else Vector3.ZERO, pin2 != null,
+		pin2 if pin2 != null else Vector3.ZERO, int(s.get("grab", -1)), s.get("grab_at", Vector3.ZERO), t,
+		(s["tw"] as PackedFloat32Array)[0], wdir, ws)
+	s["P"] = r[0]
+	s["Q"] = r[1]
+
+
+## the strip's drawn ribbon is out of date (C#: rebuilt in _draw, GDScript: now)
+func _ribbon_any(s: Dictionary, t: float) -> void:
+	_redraw = true
+	if _cs == null:
+		_ribbon(s, t)
+	else:
+		s["redo"] = true
 
 
 func _step(s: Dictionary, h: float, t: float, wdir: Vector3, ws: float) -> void:
@@ -473,7 +620,7 @@ func _ribbon(s: Dictionary, t: float) -> void:
 			ax = Vector3(1, 0, 0)
 		ax = ax.normalized()
 		var bx := ax.cross(d)
-		var twa := (sin(tp + t * tr - fi * tk) * ta + sin(t * tr * 0.37 + fi * tk * 2.3 + tw[mini(n0 - 1, int(fi))] * 0.15) * ta * 0.5 + fi * td * 0.2 + t * td) * twk
+		var twa := (sin(tp + t * tr - fi * tk) * ta + sin(t * tr * 0.37 + fi * tk * 2.3 + tw[mini(n0 - 1, int(fi))] * 0.15) * ta * 0.5 + fi * td * 0.2 + (t - float(s.get("tb", t))) * td) * twk
 		E[i] = bx * (cos(twa) * W) + ax * (sin(twa) * W)
 	var V := PackedVector3Array()
 	var N := PackedVector3Array()
@@ -498,6 +645,9 @@ func _ribbon(s: Dictionary, t: float) -> void:
 
 
 func _draw() -> void:
+	if _cs != null:
+		_dirty = int(_cs.call("Draw", _amesh, strips, _t, WIDTH, SUBD)) > 0
+		return
 	var V := PackedVector3Array()
 	var N := PackedVector3Array()
 	var C := PackedColorArray()

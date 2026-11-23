@@ -79,7 +79,7 @@ var _broken: Array = []          # [{kind, rec}] for clear_dynamic()
 var _stakes := {}                # tape stake index -> {mm, i, pos, basis, basis0, chunk, node, lean, gone, stub}
 var _stake_spans := {}           # tape stake index -> the spans tied to it (one each side)
 var _time: float = 0.0
-var _wind_t: float = 0.0
+var _wind_t: float = float(Env.s("BMX_WIND_T0")) if Env.s("BMX_WIND_T0") != "" else 0.0   # tests: start the wind clock later
 var _wind_ph: float = 0.0
 var _wind_dir := Vector3(0.8, 0, 0.6)
 var _wind_ws: float = 6.0
@@ -1325,7 +1325,7 @@ func stake_yank(k: int, dir: Vector3, sev: float, vel: Vector3, skip = null) -> 
 		var body := _debris.fling(TerrainGeo.MESH["stake_whole" if whole else "stake_top"], TerrainGeo.MAT["stake_loose"],
 			Transform3D(bs, pos + bs * Vector3(0, mid, 0)), Vector3(0.05, 1.15 if whole else 0.92, 0.05), v, w, st["chunk"])
 		to = {"body": body, "off": Vector3(0, TerrainChunkBuilder.TAPE_H - mid, 0)}
-	if Env.s("BMX_TAPE") != "":
+	if Env.s("BMX_TAPE") != "" and Env.s("BMX_TAPE_PERF") == "":   # (a print costs ms: not while timing)
 		print("STAKE %d sev=%.2f -> %s" % [k, sev, ("lean %.0f deg" % rad_to_deg(st["lean"])) if not st["gone"] else ("flies" if st.has("stub") == false else "snapped")])
 	_tapes.retarget(old_tie, to)
 	for sp in _stake_spans.get(k, []).duplicate():
