@@ -1537,11 +1537,13 @@ func _step_move(dt: float, f: Vector3) -> void:
 		var su := (tA - a0).cross(dm) / den      # along the tape
 		if sm < 0.0 or sm > 1.0 or su < 0.0 or su > 1.0: continue
 		var tape_y: float = tp[clampi(roundi(su * (tp.size() - 1)), 0, tp.size() - 1)].y
-		if y > tape_y - 0.05: continue   # the wheels are over it
+		if y > tape_y - 0.05:   # the wheels are over it
+			if Env.s("BMX_TAPE_PROBE") != "": print("TAPESKIP over y=%.2f tape_y=%.2f air=%s" % [y, tape_y, air])
+			continue
 		var hp := tA + dt_ab * su
+		if Env.s("BMX_TAPE_PROBE") != "": print("TAPECROSS su=%.2f v=%.1f" % [su, v])
 		if host.smash(c, Vector3(f.x * v, vy, f.z * v), Vector3(hp.x, tape_y, hp.y)):
-			v *= 0.97
-			if absf(v) > 3: host.flash("SNAP!")
+			v *= 0.97   # ("SNAP!" pops when it tears: TapeSim.torn -> Game._on_tape_torn)
 	for c in near:
 		if c.get("tape", false): continue   # handled above
 		var fx0 := x + f.x * FRONT

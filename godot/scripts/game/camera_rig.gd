@@ -230,6 +230,9 @@ func update_cam(dt: float) -> void:
 		# aim at the ground up ahead (+ a little): on a descent the view tips down the slope with you
 		var ap: Vector3 = Vector3(drawn.x, 0, drawn.z) + look * lead
 		var gy: float = game.terrain.deck_height(ap.x, ap.z)   # (the land: not the rocks lying on it)
+		# never aim down into a hole beside / under the line: on a rope bridge the look point off the deck is the
+		# canyon floor 16 m down (the view dived into the canyon); a real drop ahead still tips it down 3 m
+		gy = maxf(gy, ys - 3.0)
 		want = Vector3(ap.x, lerpf(ys, gy, 0.6) + 1.0, ap.z)
 	else:
 		var k := 0.05 if P.get("mode", "") == "trackside" else (0.1 if P.get("drift", false) else 0.25)
@@ -519,6 +522,12 @@ func _look_dir(st: BikePhysics, f: Vector3, dt: float) -> Vector3:
 				want = f.lerp(a, k).normalized()
 	else:
 		trail_i = -1
+	# on / coming up to a rope bridge: look along the bridge, not the trail's line (it bows ~2 m off the deck)
+	var ra = game.terrain.rope_aim(st.x, st.z, clampf(8.0 + absf(st.v) * 0.6, 8.0, 18.0)) if game.terrain else null
+	if ra != null:
+		var a := Vector3(ra.x - st.x, 0, ra.y - st.z)
+		if a.length_squared() > 1.0 and a.normalized().dot(f) > 0.3:
+			want = a.normalized()
 	if trail_dir.length_squared() < 0.01:
 		trail_dir = want
 	else:

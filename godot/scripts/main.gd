@@ -2098,6 +2098,9 @@ func _autotest(seconds: float) -> void:
 				print("LEANFF t=%.1f v=%.1f key=%+.0f steer_in=%+.2f lat=%+.1f bike=%+.0fdeg body_hip=%+.0fdeg body_chest=%+.0fdeg max_rate=%.1frad/s" % [el, ph3.v, sv, ph3.steer_in, ph3.lat_a, rad_to_deg(ph3.bike_lean), rad_to_deg(game.rider.roll_p), rad_to_deg(game.rider.roll_c), _probe["ff_rate"]])
 		elif Env.s("BMX_STEER") != "":   # tests: hold a steady turn (+ left, - right) after 2 s
 			var sv := float(Env.s("BMX_STEER")) if el > 2.0 else 0.0
+			if Env.s("BMX_STEER_AT_ROPE") != "":   # tests: hold it only once that far (m) along the first rope bridge
+				var rp: Array = game.terrain.ropes
+				sv = float(Env.s("BMX_STEER")) if not rp.is_empty() and rp[0].local(game.phys.x, game.phys.z).x > float(Env.s("BMX_STEER_AT_ROPE")) else 0.0
 			Input.action_press("steer_left", maxf(sv, 0.0)) if sv > 0 else Input.action_release("steer_left")
 			Input.action_press("steer_right", maxf(-sv, 0.0)) if sv < 0 else Input.action_release("steer_right")
 		elif pedal and not straight and int(el) % 6 == 3: Input.action_press("steer_left")
@@ -2264,6 +2267,26 @@ func _tape_test(el: float) -> void:
 		_tape = {"sp": best, "t": el, "shot": 0, "next": el}
 		print("TAPE test: span len=%.1f m at (%.1f, %.1f) speed=%.1f" % [best["len"], mid.x, mid.z, spd])
 	elif not _tape.is_empty():
+		# BMX_TAPE_FRAMES=n: from the hit, time at 0.15x and a shot every drawn frame (n of them: the tear up close)
+		if Env.s("BMX_TAPE_FRAMES") != "" and _tape.sp.broken and Env.s("BMX_TAPE").contains("/"):
+			var fi: int = _tape.get("fi", 0)
+			if fi == 0: Engine.time_scale = 0.15
+			if fi < int(Env.s("BMX_TAPE_FRAMES")):
+				var im := get_viewport().get_texture().get_image()   # kept in memory: a png per frame drops it to ~4 fps
+				im.resize(im.get_width() / 2, im.get_height() / 2, Image.INTERPOLATE_BILINEAR)
+				var keep: Array = _tape.get("ims", [])
+				var nst := 0
+				for s in ts.strips: if s.get("state", "free") == "stretch": nst += 1
+				keep.append([im, "%d strips=%d held=%d" % [fi, ts.strips.size(), nst]])
+				_tape.ims = keep
+			elif fi == int(Env.s("BMX_TAPE_FRAMES")):
+				Engine.time_scale = 1.0
+				var k := 0
+				for e in _tape.get("ims", []):
+					(e[0] as Image).save_png(Env.s("BMX_TAPE") + "_f%03d.png" % k)
+					print("TAPEFRAME " + e[1])
+					k += 1
+			_tape.fi = fi + 1
 		if Env.s("BMX_TAPE_STOP") != "" and el > _tape.t + float(Env.s("BMX_TAPE_STOP")):
 			Input.action_press("brake"); Input.action_release("pedal")
 		if el >= _tape.next and _tape.shot < 120:
@@ -2272,7 +2295,7 @@ func _tape_test(el: float) -> void:
 			for s in ts.strips:
 				if s.has("state") and is_same(s["sp"], _tape.sp): st = s["state"]; strain = s.get("strain", 0.0)
 			print("TAPE t=%.2f v=%.1f broken=%s state=%s strain=%.3f strips=%d" % [el - _tape.t, ph.v, _tape.sp.broken, st, strain, ts.strips.size()])
-			if Env.s("BMX_TAPE").contains("/") and _tape.shot in [16, 18, 20, 22, 26, 34]:
+			if Env.s("BMX_TAPE").contains("/") and (_tape.shot in [16, 18, 20, 22, 26, 34] or st == "stretch"):
 				get_viewport().get_texture().get_image().save_png(Env.s("BMX_TAPE") + "_%02d.png" % _tape.shot)
 			_tape.shot += 1
 

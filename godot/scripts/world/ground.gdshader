@@ -115,10 +115,23 @@ void fragment() {
 	float t_air = texture(trail3_tex, UV).r * trail_fx;
 	float tnear = (1.0 - smoothstep(0.25, 0.7, gpx)) * trail_fx;   // far off it all averages out to the plain colour
 	if ((t > 0.004 || tf2.a > 0.01) && tnear > 0.0) {
+		// where the nearest trail switches (the course <-> a side path joining it) the baked frame jumps between two
+		// unrelated ones ('along' = the course's metres vs a world projection, 'across' / the line's place too), and the
+		// linear filter blends them over one texel: 'along' races through hundreds of metres in a few cm and every mark
+		// drawn from the frame turned into a staircase band of aliased noise along the texel grid. Elsewhere the frame
+		// changes about as fast as the ground (~1 / m), so a much bigger step = that seam: the frame's marks fade there
+		// (plain dirt). Measured on the four texels the filter blends, so every pixel of it is caught (screen derivatives
+		// missed single pixels at its edges): a texel is 0.5 m, so they normally differ by < ~1.2 m (inside a hairpin)
+		vec2 tsz = vec2(textureSize(trail_tex, 0));
+		ivec2 ti = clamp(ivec2(floor(UV * tsz - 0.5)), ivec2(0), ivec2(tsz) - 2);
+		vec3 ta = texelFetch(trail_tex, ti, 0).rgb, tb = texelFetch(trail_tex, ti + ivec2(1, 0), 0).rgb;
+		vec3 tc = texelFetch(trail_tex, ti + ivec2(0, 1), 0).rgb, td = texelFetch(trail_tex, ti + ivec2(1, 1), 0).rgb;
+		vec3 tspan = max(max(ta, tb), max(tc, td)) - min(min(ta, tb), min(tc, td));
+		float tfk = 1.0 - smoothstep(1.8, 3.5, max(tspan.b, tspan.r + tspan.g));
 		float ac = tf.r, off = tf.g, sl = tf.b, rd = tf2.r, dry = tf2.g;
 		jm = tf2.b;
 		// the run-off skid: two locked tyres' streaks, a little unsteady, cut into the grass past the trail's edge
-		float skf = (1.0 - smoothstep(0.06, 0.22, gpx)) * tf2.a;
+		float skf = (1.0 - smoothstep(0.06, 0.22, gpx)) * tf2.a * tfk;
 		if (skf > 0.0) {
 			float sd = ac - tf.a + (gd_noise3(vec3(sl * 0.7, 31.0, 4.0)) - 0.5) * 0.1;
 			float sk = max(1.0 - smoothstep(0.025, 0.06, abs(sd)), 0.6 * (1.0 - smoothstep(0.02, 0.05, abs(sd - 0.13))));
@@ -145,7 +158,7 @@ void fragment() {
 			if (i < 4) { line += l * (1.0 - line); } else { alt += l * (1.0 - alt); }
 		}
 		line *= 0.6 + 0.4 * smoothstep(0.25, 0.6, n_s1);
-		line = (line + alt * (1.0 - line)) * (1.0 - t_air);   // nobody's tyres touch between the lip and the landing
+		line = (line + alt * (1.0 - line)) * (1.0 - t_air) * tfk;   // nobody's tyres touch between the lip and the landing
 		float offb = off * 0.55 - 0.5, offc = off * 1.35 + 0.55;
 		// ragged edge, so the band is never a ruler line
 		float rag = (n0 - 0.5) * 0.3 + (mix(0.5, n1, f2) - 0.5) * 0.2;
@@ -166,7 +179,7 @@ void fragment() {
 				float knobs = 0.6 + 0.4 * smoothstep(-0.3, 0.3, sin(sl * 58.0 + fi * 2.0) * sin((ac - c) * 150.0 + sl * 20.0)) * f1 + 0.4 * (1.0 - f1) * 0.5;
 				m_tracks = max(m_tracks, (1.0 - smoothstep(0.018, 0.04, d)) * pres * knobs);
 			}
-			m_tracks *= trk_fade * (0.6 + 0.4 * m_driven) * (1.0 - t_air);
+			m_tracks *= trk_fade * (0.6 + 0.4 * m_driven) * (1.0 - t_air) * tfk;
 		}
 		// stray lines: single faint tyre lines running down the trail anywhere across it, nothing to do with the racing
 		// line (someone rolling down the side, drifting across, pulling over). Each wanders on its own, swaps sides,
@@ -182,7 +195,7 @@ void fragment() {
 				float wdt = 0.022 + 0.012 * fract(fi * 0.37);
 				m_stray = max(m_stray, (1.0 - smoothstep(wdt, wdt + 0.035, abs(ac - c))) * pres * (0.55 + 0.45 * fract(fi * 0.61)));
 			}
-			m_stray *= stray_fade * (1.0 - 0.6 * jm) * (1.0 - 0.5 * m_driven) * (1.0 - t_air);
+			m_stray *= stray_fade * (1.0 - 0.6 * jm) * (1.0 - 0.5 * m_driven) * (1.0 - t_air) * tfk;
 			// people messing about: in about a third of the 26 m stretches one mark, drawn in the trail's own frame
 			// (along / across), kept inside its stretch so nothing is cut at a border
 			float ci = floor(sl / 26.0);
@@ -202,7 +215,7 @@ void fragment() {
 				} else {                       // a skid arc: a rider swinging the back wheel round
 					d = abs(length(q) - r * 1.7) + smoothstep(0.7, 1.0, abs(atan(q.y, q.x) - (ph2.z - 0.5) * 4.0)) * 9.0;
 				}
-				m_play = (1.0 - smoothstep(0.022, 0.055, d)) * (0.6 + 0.4 * ph2.z) * stray_fade * (1.0 - jm) * (1.0 - t_air);
+				m_play = (1.0 - smoothstep(0.022, 0.055, d)) * (0.6 + 0.4 * ph2.z) * stray_fade * (1.0 - jm) * (1.0 - t_air) * tfk;
 			}
 		}
 		// puddles: only on roads, in the worn lines (the lowest ground), on level ground, not in dry country; they come in stretches
@@ -211,7 +224,7 @@ void fragment() {
 		zone = max(zone, trail_puddles - 1.0);   // > 1 (tests): puddles on every wet road
 		float inrut = max(1.0 - smoothstep(0.15, 0.8, abs(ac - off)), line);
 		float pn = gd_noise3(vec3(ac * 1.5, sl * 0.21, 13.0)) * (0.62 + 0.38 * inrut) + (n0 - 0.5) * 0.05 + (mix(0.5, n1, f2) - 0.5) * 0.025;
-		float pk = zone * rd * lvl * (1.0 - jm) * (1.0 - smoothstep(0.3, 0.6, dry)) * smoothstep(0.85, 1.0, t) * (1.0 - smoothstep(0.3, 0.7, gpx)) * min(trail_puddles, 1.0);
+		float pk = tfk * zone * rd * lvl * (1.0 - jm) * (1.0 - smoothstep(0.3, 0.6, dry)) * smoothstep(0.85, 1.0, t) * (1.0 - smoothstep(0.3, 0.7, gpx)) * min(trail_puddles, 1.0);
 		// the edges widen to at least ~1.5 pixels of the noise (no shimmering 1-pixel rim from afar / at grazing views).
 		// The width comes from the pixel's size: fwidth() isn't defined in this per-pixel branch
 		float paa = gpx * 1.6;
@@ -228,7 +241,7 @@ void fragment() {
 		tslope = rl.xy * tbump;
 		// colour: all small steps. Driven dirt is tighter and a touch paler when dry (polished hardpack); loose grit is paler
 		// and speckled; streaks run along the trail; old scuffed patches; tyre prints press a little darker
-		float streak = gd_noise3(vec3(ac * 9.0, sl * 0.3, 2.0)) - 0.5;
+		float streak = (gd_noise3(vec3(ac * 9.0, sl * 0.3, 2.0)) - 0.5) * tfk;
 		float scuff = smoothstep(0.55, 0.8, gd_noise3(vec3(P.xz * 0.55, 4.0)));
 		float k = 1.0;
 		k *= 1.0 + m_driven * (0.05 * dry - 0.03) + m_loose * 0.05;
@@ -242,7 +255,7 @@ void fragment() {
 		k *= 1.0 - 0.075 * m_play;
 		// relief: each ridden line is a shallow groove (deepest where most riders go), tyre prints and skids are pressed
 		// into it, loose grit and pebbles stand proud, and the unridden ground between the lines is slightly lumpy
-		float lump = (gd_noise3(vec3(ac * 5.0, sl * 0.9, 6.0)) - 0.5) * 0.012 + (n1 - 0.5) * 0.006 * f2;
+		float lump = (gd_noise3(vec3(ac * 5.0, sl * 0.9, 6.0)) - 0.5) * 0.012 * tfk + (n1 - 0.5) * 0.006 * f2;
 		thgt = -0.03 * line * (1.0 - 0.7 * jm) - 0.008 * m_tracks - 0.014 * m_skid - 0.006 * m_stray - 0.007 * m_play
 			+ (peb * (0.006 + 0.008 * pb.y) + lump) * (0.3 + 0.7 * m_loose) * (1.0 - 0.8 * jm);
 		thgt *= (1.0 - smoothstep(0.04, 0.16, gpx)) * tnear * (1.0 - m_puddle);

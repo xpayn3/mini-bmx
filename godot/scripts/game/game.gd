@@ -216,6 +216,8 @@ func _ready() -> void:
 	else:
 		terrain = load("res://scripts/world/terrain.gd").new((int(Env.s("BMX_TITLE_SEED")) if Env.s("BMX_TITLE_SEED") != "" else TITLE_SEED) if title_world else GameState.seed)
 	add_child(terrain)
+	if terrain._tapes and not terrain._tapes.torn.is_connected(_on_tape_torn):
+		terrain._tapes.torn.connect(_on_tape_torn)
 	terrain.view_scale = float(Settings.get_v("view_distance"))   # before the first chunks are built
 	terrain.update_stream(0, 0, INF)
 	if reuse.has("far_hills"):
@@ -1195,6 +1197,12 @@ func flash(text: String) -> void:
 	if Env.s("BMX_MAN_PROBE") != "": print("FLASH ", text, " v=%.1f" % phys.v)   # tests
 	if hud: hud.flash(text)
 
+var _tape_front := {}   # what holds a caught tape: the drawn front axle, heading, steering axis, wheel radius (TapeSim.push_at)
+
+## a caught race tape tore (TapeSim.torn): the pop comes now, not when the tyre first touched it
+func _on_tape_torn(speed: float) -> void:
+	if speed > 3.0 and not phys.crash_on: flash("SNAP!")
+
 func msg_idle() -> bool:
 	return msg_t <= 0
 
@@ -1309,6 +1317,7 @@ func _break_action_cam(body_vel: Vector3) -> void:
 
 ## the crash slow-mo is on (Settings › Gameplay; autotests keep normal time unless BMX_WASTED=1)
 func _wasted_on() -> bool:
+	return false   # removed (user, 2026-11-23): no crash slow motion, no grey WASTED screen; a crash just flashes its reason
 	if Env.s("BMX_WASTED") != "": return true
 	if level != "": return false   # the test playground: no slow motion / WASTED screen (the lab has its own slow motion)
 	for a in OS.get_cmdline_user_args():
@@ -2232,6 +2241,11 @@ func _physics_process(dt: float) -> void:
 ## (the turn's reaction) go into the deck, the decks step, then the deck's sideways swing carries the bike
 const RIDER_KG := 95.0
 const ROPE_STROKE := 4.0   # m/s² sideways per pedal stroke
+## turning on the bridge (user: "the bridge sway messes with our riding"): the turn's whole reaction went into the
+## deck, the deck swung, and its swing carried the bike sideways under the rider: every turn fought itself. The
+## rider's legs soak most of both
+const ROPE_TURN_PUSH := 0.3   # share of the turn's sideways reaction that shoves the deck
+const ROPE_CARRY := 0.4       # share of the deck's sideways swing that moves the bike with it
 var rope_probe := Env.s("BMX_ROPE_PROBE") != ""
 var _rope_pt := 0.0
 var _rope_shot := Env.s("BMX_ROPE_SHOT")
@@ -2243,11 +2257,69 @@ func _save_rope_shot(path: String) -> void:
 	await RenderingServer.frame_post_draw
 	get_viewport().get_texture().get_image().save_png(path)
 	print("ROPESHOT ", path)
+## the hangers + hand ropes along both sides fence the deck in (user: "drive to the rope left or right, we crash
+## at once": the bike used to ride straight off the plank edge = OFF THE BRIDGE!). A tyre reaching the fence is
+## held inside it, the travel is turned along the bridge (a graze scrapes along the rope, speed scrubbed by how
+## hard it went in) and the rope takes the push. Only ridden square into it fast is it a crash
+const ROPE_RAIL := 0.15        # the tyres stay this far inside the deck ropes
+const ROPE_RAIL_CRASH := 1.05  # rad into the rope ...
+const ROPE_RAIL_CRASH_V := 7.0 # ... at more than this (m/s) = thrown over the hand rope
+func _rope_rail() -> void:
+	for b in terrain.ropes:
+		if not b.fenced(phys.x, phys.z, phys.y):
+			continue
+		var fw := phys.fwd()
+		var over := 0.0
+		for d in [phys.L - phys.BB_REAR, -phys.BB_REAR, 0.0]:
+			var l: Vector2 = b.local(phys.x + fw.x * d, phys.z + fw.z * d)
+			# the deck ropes where they are now (the deck swings sideways under the rider, up to ~0.4 m)
+			var e: Vector2 = b.sim.Edges(clampf(l.x, b._u0 + 0.05, b._u1 - 0.05))
+			if is_nan(e.x):
+				continue
+			var o := 0.0
+			if l.y > e.y - ROPE_RAIL: o = l.y - (e.y - ROPE_RAIL)
+			elif l.y < e.x + ROPE_RAIL: o = l.y - (e.x + ROPE_RAIL)
+			if absf(o) > absf(over):
+				over = o
+		if over == 0.0:
+			return
+		# back inside, across the bridge (its +w direction in world = (-dz, dx), from RopeBridge.world)
+		var n: Vector2 = b.world(0.0, 1.0) - b.world(0.0, 0.0)
+		phys.x -= n.x * over
+		phys.z -= n.y * over
+		if absf(phys.v) < 0.3:
+			return
+		var mv := Vector2(cos(phys.course), -sin(phys.course)) * signf(phys.v)
+		var ax: Vector2 = b.world(1.0, 0.0) - b.world(0.0, 0.0)
+		var along := mv.dot(ax)
+		var across := mv.dot(n)
+		if across * over <= 0.0:
+			return   # already heading back in
+		var ang := atan2(absf(across), absf(along))
+		if ang > ROPE_RAIL_CRASH and absf(phys.v) > ROPE_RAIL_CRASH_V:
+			phys.crash_pending = "INTO THE ROPES!"
+			if rope_probe: print("ROPE rail crash ang=%.2f v=%.2f" % [ang, phys.v])
+			return
+		# turn the travel (and the bike with it) along the bridge, the way it was going
+		var tgt: float = b.axis_angle() + (0.0 if along * signf(phys.v) >= 0.0 else PI)
+		var dc := wrapf(tgt - phys.course, -PI, PI)
+		phys.course += dc
+		phys.heading += dc
+		phys.v *= 1.0 - 0.55 * sin(ang)
+		# the rope takes the push: it swings out and back
+		var push := RIDER_KG * clampf(absf(phys.v) * sin(ang) * 30.0, 0.0, 40.0)
+		b.push(phys.x, phys.z, 0.0, Vector3(n.x, 0, n.y) * signf(over) * push)
+		if rope_probe: print("ROPE rail over=%.2f ang=%.2f v=%.2f" % [over, ang, phys.v])
+		return
+
+
 func _rope_tick(dt: float) -> void:
 	if terrain.ropes.is_empty():
 		return
 	var rb = null
 	if not phys.crash_on:
+		if not phys.air:
+			_rope_rail()
 		rb = terrain.rope_under(phys.x, phys.z, phys.y)
 		if not phys.air:
 			# a wheel rolled off the side of a deck: down you go. Left to the ride physics, the bike hung on the plank
@@ -2269,7 +2341,7 @@ func _rope_tick(dt: float) -> void:
 	if rb != null and not phys.air:
 		var h := phys.heading
 		# sideways: the turn's reaction + each pedal stroke shoving the deck (like footsteps set a rope bridge swinging)
-		var side := phys.lat_a + ROPE_STROKE * phys.pedal * sin(phys.crank)
+		var side := phys.lat_a * ROPE_TURN_PUSH + ROPE_STROKE * phys.pedal * sin(phys.crank)
 		# the weight goes down through the two tyres (split as the physics loads them), not one point under the
 		# cranks: one point folded the deck into a V the bike pitched about in. A wheel still on the rim or off
 		# the end pushes on nothing (AddLoad ignores points off the deck), as it should
@@ -2287,7 +2359,7 @@ func _rope_tick(dt: float) -> void:
 		rb.push(phys.x + fw.x * dr, phys.z + fw.z * dr, fy * (1.0 - kf), fs * (1.0 - kf))
 	terrain.ropes_step(dt)
 	if rb != null and not phys.air:
-		var c: Vector2 = rb.carry(phys.x, phys.z)
+		var c: Vector2 = rb.carry(phys.x, phys.z) * ROPE_CARRY
 		phys.x += c.x
 		phys.z += c.y
 	if _rope_shot != "":   # tests: a screenshot as the rider passes each mark on a bridge (by place, not time)
@@ -2794,9 +2866,16 @@ func _process(dt: float) -> void:
 	if not phys.crash_on and hud and hud.life < 1.0:   # a full-health rider rolls past a pack and leaves it
 		if terrain.take_pack(st.x, st.y, st.z) != null:
 			hud.on_health_pack(HealthPack.HEAL)
-	# what a caught tape stretches over: the drawn front tyre's leading edge (the drawn bike, not the physics
-	# state a step ahead of it, so the tape sits on the tyre you see)
-	terrain.tape_push(null if phys.crash_on else rig.wheel_f.global_position + Vector3(cos(hd), 0.0, -sin(hd)) * rig.wheel_rf)
+	# what a caught tape stretches over: the drawn bike's front (the tyre, or the fork above it; the drawn bike,
+	# not the physics state a step ahead of it, so the tape sits on the bike you see)
+	if phys.crash_on:
+		terrain.tape_push(null)
+	else:
+		_tape_front["axle"] = rig.wheel_f.global_position
+		_tape_front["fwd"] = Vector3(cos(hd), 0.0, -sin(hd))
+		_tape_front["axis"] = ((rig.steer_n.get_parent() as Node3D).global_basis * rig.steer_axis).normalized()
+		_tape_front["r"] = rig.wheel_rf
+		terrain.tape_push(_tape_front)
 	if contact != null:   # contact shadows on the drawn bike (and the body in a crash)
 		var wf: Vector3 = rig.wheel_f.global_position
 		var wr: Vector3 = rig.wheel_r.global_position
