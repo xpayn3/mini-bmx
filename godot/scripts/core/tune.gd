@@ -128,7 +128,7 @@ const DEFS := [
 		["suspGeo", "Brake dive and pedal squat from the geometry", 1.0, 0.0, 2.0, 0.05, "×"],
 		["riderBalance", "Rider balance (1 wheel)", 0.7, 0, 1.5, 0.05, ""],
 		["noseDive", "Nose-dive crash angle", 0.6, 0.3, 1.2, 0.05, "rad"],
-		["pumpGain", "Pump strength", 9, 0, 25, 0.5, ""],
+		["pumpLegs", "Pumping: the legs' stroke against the ground (× a real rider)", 1.0, 0, 3, 0.05, "×"],
 	]],
 	["Lean", [
 		["leanMax", "Max lean", 0.95, 0.15, 1.3, 0.01, "rad"],
@@ -237,8 +237,8 @@ const DEFS := [
 		["manLoopKeep", "Looped out: speed kept", 0.72, 0.3, 1, 0.02, "×"],
 		["manSlideCatch", "Front set down when the rear slides past (× slide limit)", 0.7, 0.3, 1, 0.05, "×"],
 		["manSprintLift", "Sprint stamp from slow lifts the front", 1.1, 0, 2.5, 0.05, "×"],
-		["pumpHold", "Hop held downhill: pump push (× slope)", 0.45, 0, 1.5, 0.05, "×g"],
-		["pumpStick", "Body stick forward: pump strength (× the button)", 1.2, 0, 2, 0.05, "×"],
+		["pumpStick", "Body stick forward: berm pump strength (× the button)", 1.2, 0, 2, 0.05, "×"],
+		["bermPump", "Pumping a berm: speed from the turn's load (× corner load)", 0.12, 0, 0.4, 0.01, "×"],
 		["landPerfect", "Perfect landing within", 0.14, 0.03, 0.4, 0.01, "rad"],
 		["landBoost", "Perfect landing on a downslope: speed pumped", 1.6, 0, 5, 0.1, "m/s"],
 		["landHeavy", "Heavy landing from (share of a slam)", 0.6, 0.2, 0.9, 0.05, ""],
@@ -399,7 +399,7 @@ const FOLLOW := {
 	"popPower": [2.4, "popKick", 1.0],                                   # the legs' push x the bike (a heavy one pops less)
 	"antiSquat": [0.9, "", 0.0],   # the frame's anti-squat (1 = power doesn't squat the rear; BikeBuild.frame_mods)
 	"shockProg": [1.0, "", 0.0],   # the frame's linkage ramp-up (BikeBuild.frame_mods; 1 = the reference frame)
-	"pumpHoldUp": [0.4, "pumpHold", 1.0], "pumpUnweight": [0.15, "pumpStick", 1.0], "pumpCentred": [0.75, "", 0.0], "pumpMinSpeed": [2.0, "", 0.0],
+	"pumpCentred": [0.75, "", 0.0], "pumpMinSpeed": [2.0, "", 0.0],
 	"airSpinResp": [7.0, "airSpinRate", 1.0], "airSpinStop": [3.0, "airSpinRate", 1.0],
 	"stickSpinBuild": [5.5, "stickAirEase", 1.0], "stickSpinGrow": [0.4, "", 0.0], "stickSpinMax": [0.7, "", 0.0],
 	"whipSnap": [5.0, "whipDrift", 1.0], "whipLean": [0.22, "whipDrift", 1.0], "whipCarry": [0.6, "", 0.0],
@@ -416,7 +416,7 @@ const MACROS := {
 	"feelReal": {"balanceSim": 1.2, "balanceFall": 1.2, "camberPull": 1.2, "groundKnock": 1.2, "cornerLoad": 1.0,
 		"weightInside": 1.0, "airArcade": -1.5, "frontWashAt": -0.4},
 	"feelSpeed": {"topSpeed": 0.5, "pedalPower": 0.6, "pedalTop": 0.5, "sprintTop": 0.6, "airDrag": -0.4},
-	"feelFlow": {"flowCarry": 1.0, "carveBoost": 1.0, "pumpGain": 0.8, "flowTime": 0.8, "rollRes": -0.8},
+	"feelFlow": {"flowCarry": 1.0, "carveBoost": 1.0, "pumpLegs": 0.8, "flowTime": 0.8, "rollRes": -0.8},
 	"feelAir": {"popKick": 0.6, "popPower": 0.5, "airSpinRate": 0.8, "airTilt": 0.6, "airTwist": 0.6, "flipRate": 0.6,
 		"flipAccel": 0.6, "stickAirEase": 0.5, "slamJolt": 0.6},
 	"feelPlush": {"tyreHz": -0.6, "travel": 0.6, "damperKnee": -0.5, "damperBlow": -0.6, "legStiff": -0.5, "tyreDamp": 0.3},

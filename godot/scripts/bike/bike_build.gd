@@ -802,7 +802,7 @@ static func frame_mods(frame: String, b: Dictionary) -> Dictionary:
 	mul.call("shockProg", maxf(0.2, 1.0 + 1.2 * pr))   # the linkage's ramp-up, into the rear spring's curve
 	mul.call("slamJolt", 1.0 + 0.5 * pr)
 	mul.call("popPower", 1.0 + 0.4 * pr)
-	mul.call("pumpGain", 1.0 + 0.4 * pr)
+	mul.call("pumpLegs", 1.0 + 0.4 * pr)
 	mul.call("antiSquat", clampf(1.0 + aq / 0.9, 0.5, 1.5))   # (0.4 + the frame's figure: this frame squats / stands up under power)
 	mul.call("pedalPower", 1.0 + 0.3 * aq)
 	mul.call("sprintPower", 1.0 + 0.3 * aq)

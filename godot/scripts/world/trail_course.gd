@@ -34,6 +34,20 @@ var LN := PackedFloat32Array()
 ## trail at each point, ROS = how strong (0 = none here)
 var RO := PackedFloat32Array()
 var ROS := PackedFloat32Array()
+## the speed (m/s) a good rider arrives at each point: no brakes except what a bend's radius and bank make him
+## (forward only from the start, so growing the trail never changes it). Banks are sized from it (_bank)
+var VA := PackedFloat32Array()
+const VA_START := 4.0       # m/s at the start
+const VA_PEDAL := 0.6       # m/s^2 of pedalling below VA_PED_TOP (~30 km/h)
+const VA_PED_TOP := 8.5
+const VA_ROLL := 0.08       # m/s^2 rolling drag (measured on the trail: ~0.07)
+const VA_DRAG := 0.0033     # air drag per v^2 (measured: ~0.5 m/s^2 at 45 km/h, an upright DH rider)
+const VA_MAX := 17.5        # m/s (~63 km/h): riders roll off there
+const A_RIDE := 6.0         # m/s^2 of side grip a good rider uses in a bend on the flat (the demo plans 7)
+const A_COMF := 4.0         # m/s^2: a bend that asks more than this of the tyres at the arrival speed gets banked
+const BANK_MAX := 0.70      # tan of the steepest berm (35 deg)
+const BERM_LINE := 0.9      # m out from the centreline the line rides a berm (on its face: berm_shape rises from ~0)
+const BERM_LINE_FROM := 0.08; const BERM_LINE_FULL := 0.22   # |BT| (tan of the bank) where the line moves onto the berm
 var length: float = 0.0
 var drops: Array = []   # [[i0, i1]] centreline index ranges of drop-offs / cliffs (no route features there)
 # dense spatial hash of segments by midpoint
@@ -430,22 +444,7 @@ func _finish() -> void:
 	for i in n:
 		wsrc[i] = WIDTH[KD[i]]
 	W = _avg(wsrc, 5)
-	_racing_line()
-	# BT is SIGNED: > 0 = berm on the left (turning left), < 0 = on the right. Each turn's bank is
-	# held a little past its ends (keeps the peak) and then smoothed three times (≈ a gaussian,
-	# ~20 m each way) so it builds up into the turn and unwinds out of it with no corner or step.
-	var bsrc := PackedFloat32Array(); bsrc.resize(n)
-	for i in n:
-		var k: float = KAP[i]
-		bsrc[i] = signf(k) * minf(0.6, 17 * absf(k)) * smooth(0.012, 0.03, absf(k)) * BERM[KD[i]]
-	var held := PackedFloat32Array(); held.resize(n)
-	for i in n:
-		var best := 0.0
-		for k in range(maxi(0, i - 6), mini(n - 1, i + 6) + 1):
-			if absf(bsrc[k]) > absf(best):
-				best = bsrc[k]
-		held[i] = best
-	BT = _avg(_avg(_avg(held, 5), 5), 5)
+	# the height first (the banks are sized from the speed it gives)
 	var raw := PackedFloat32Array(); raw.resize(n)
 	for i in n:
 		raw[i] = maxf(TerrainField.WATER + 0.7, _M.landform(X[i], Z[i]))
@@ -461,6 +460,28 @@ func _finish() -> void:
 			if w > 0.0:
 				E[i] = E[i] + (fr[i] - E[i]) * w
 	_shape_profile()
+	# BT is SIGNED: > 0 = berm on the left (turning left), < 0 = on the right. Each turn's bank is
+	# held a little past its ends (keeps the peak) and then smoothed three times (≈ a gaussian,
+	# ~20 m each way) so it builds up into the turn and unwinds out of it with no corner or step.
+	var bsrc := PackedFloat32Array(); bsrc.resize(n)
+	for i in n:
+		var k: float = KAP[i]
+		bsrc[i] = signf(k) * minf(0.6, 17 * absf(k)) * smooth(0.012, 0.03, absf(k)) * BERM[KD[i]]
+	# ...and a bend that can carry a berm gets at least the bank the speed riders arrive at needs (up to BANK_MAX), so
+	# it can be ridden without braking it all away (docs/research/ride_feel.md, change 1)
+	if OS.get_environment("BMX_OLD_BANK") == "":
+		var need := _bank_need(bsrc)
+		for i in n:
+			if absf(need[i]) > absf(bsrc[i]): bsrc[i] = need[i]
+	var held := PackedFloat32Array(); held.resize(n)
+	for i in n:
+		var best := 0.0
+		for k in range(maxi(0, i - 6), mini(n - 1, i + 6) + 1):
+			if absf(bsrc[k]) > absf(best):
+				best = bsrc[k]
+		held[i] = best
+	BT = _avg(_avg(_avg(held, 5), 5), 5)
+	_racing_line()   # (after BT: on a berm the line rides the berm)
 	var rd := PackedFloat32Array(); rd.resize(n)
 	var rk := PackedFloat32Array(); rk.resize(n)
 	for i in n:
@@ -469,6 +490,7 @@ func _finish() -> void:
 		rk[i] = 1.0 if k == ROCKS else 0.0
 	RD = _avg(rd, 4)
 	RK = _avg(rk, 4)
+	_speed_profile()
 	length = (n - 1) * STEP
 	# dense spatial hash
 	var mins := Vector2i(1 << 30, 1 << 30)
@@ -506,6 +528,14 @@ func _racing_line() -> void:
 	var ln := PackedFloat32Array(); ln.resize(n)
 	for i in n:
 		ln[i] = clampf(37.0 * (kn[i] - kw[i]), -1.0, 1.0) * maxf(0.0, W[i] - 0.6)
+	# on a banked bend the line rides the berm: up its face on the outside (berm_shape's bank is there, from the
+	# centreline out), not on the flat inside of it - cutting to the inside missed the bank (the bike felt 4-10 deg on
+	# berms built at 20-31 deg) and threw away the corner speed it is there to hold (docs/research/ride_feel.md)
+	var old_line := OS.get_environment("BMX_OLD_LINE") != ""   # (tests: the line cutting inside, as before)
+	for i in n:
+		var bw := 0.0 if old_line else smooth(BERM_LINE_FROM, BERM_LINE_FULL, absf(BT[i]))
+		if bw > 0.0:
+			ln[i] = lerpf(ln[i], -signf(BT[i]) * minf(BERM_LINE, maxf(0.0, W[i] - 0.9)), bw)
 	LN = _avg(ln, 3)
 	RO = PackedFloat32Array(); RO.resize(n)
 	ROS = PackedFloat32Array(); ROS.resize(n)
@@ -604,6 +634,43 @@ func _shape_profile() -> void:
 			E[q] += lift
 		drops.append([a - ramp, e])
 		last_end = e
+
+
+## the bank (signed tan, like BT) each point of a bend needs for the speed a rider rolls into it at (VA's model, no
+## brakes since the last bend), on bends whose kind carries berms; base = the shape-only bank (signed). A bend still too
+## tight at BANK_MAX slows the rider to what it allows (he brakes) before the next one is judged
+func _bank_need(base: PackedFloat32Array) -> PackedFloat32Array:
+	var out := PackedFloat32Array(); out.resize(n)
+	var v2 := VA_START * VA_START
+	for i in range(1, n):
+		var v := sqrt(v2)
+		var a := -VA_ROLL - VA_DRAG * v2 + (VA_PEDAL if v < VA_PED_TOP else 0.0)
+		v2 = clampf(v2 + 2.0 * (9.81 * (E[i - 1] - E[i]) + a * STEP), 4.0, VA_MAX * VA_MAX)
+		var k := absf(KAP[i])
+		if k > 0.004:
+			var t := 0.0
+			if BERM[KD[i]] >= 0.4:
+				t = clampf((v2 * k - A_RIDE) / 9.81, 0.0, BANK_MAX)
+				out[i] = signf(KAP[i]) * t
+			v2 = minf(v2, (A_RIDE + 9.81 * maxf(t, absf(base[i]))) / k)
+	return out
+
+
+## VA: the arrival speed along the trail (see VA_*): gravity down the trail's height E, rolling + air drag, pedalling
+## when slow; in a bend no more than its radius and bank allow (the rider brakes for it, before or in it)
+func _speed_profile() -> void:
+	VA.resize(n)
+	var v2 := VA_START * VA_START
+	VA[0] = VA_START
+	for i in range(1, n):
+		var v := sqrt(v2)
+		var a := -VA_ROLL - VA_DRAG * v2 + (VA_PEDAL if v < VA_PED_TOP else 0.0)
+		v2 = clampf(v2 + 2.0 * (9.81 * (E[i - 1] - E[i]) + a * STEP), 4.0, VA_MAX * VA_MAX)
+		var k := absf(KAP[i])
+		if k > 0.004:
+			var bank := absf(BT[i]) if BT.size() == n else 0.0
+			v2 = minf(v2, (A_RIDE + 9.81 * bank) / k)
+		VA[i] = sqrt(v2)
 
 
 ## point on the centreline at arc length s -> [x, z, tx, tz, i]

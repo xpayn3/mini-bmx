@@ -13,6 +13,9 @@ extends RefCounted
 const G := 9.81
 const CLIMB := 1.2
 const HOP_PUSH := 0.09
+const PUMP_STROKE := 0.3      # m, the legs' pumping stroke from bent (-1) to pushed straight (+1)
+const PUMP_SPAN := 0.6       # m either side of the bottom bracket the ground's curve is read over (the wheels average a bump)
+const PUMP_STROKE_T := 0.16   # s, the quickest a rider makes that whole stroke (~0.4 s a roller at its best: Luginbuhl 2023)
 const FLOW_MAX := 5.0
 const GETUP_HOLD := 0.25   # seconds holding hop to get up after a crash
 const SLOPE_TRANSFER := 0.7   # centre-of-mass height / wheelbase: how much load a slope moves between the tyres
@@ -80,12 +83,14 @@ var _man_armed := false; var _pull_age := 0.0; var left_back := 0.0
 var _man_pw := 0.0   # power wheelie: weight back + pedalling lifts the front (0..1, eased)
 var _man_over := 0.0   # s the front has been held past the loop-out angle (direct manual: then he falls off the back)
 var man_a := 0.0; var man_w := 0.0; var man_zone := false; var man_lock := 0.0; var man_zone_t := 0.0
-# downhill pump (hop held with both wheels down): pump_push = the push along the slope now (m/s², + = gaining),
+# the pump (the legs' stroke against the ground's push, see _step_drive): pump_push = its push along the way now (m/s², + = gaining),
 # pump_gain = km/h won in the current rhythm (shown on the HUD's pump bar, fades out when the rhythm stops),
-# pump_press_t = time this hop press spent pumping a downhill (then letting go doesn't hop)
+# pump_press_t = time this hop press spent pumping (the ground pressing or going light: then letting go doesn't hop)
 var pump_push := 0.0; var pump_gain := 0.0; var pump_idle := 0.0; var pump_press_t := 0.0; var _pump_release := 0.0
 var land_perfect := 0.0   # 1 on a perfect landing, fades (HUD flash)
 var man_pull := 0.0       # the body stick pulled back for a manual (0..1): the HUD balance bar shows at once
+var _bend_in := 0.0       # what the rider asks of the legs' bend this step (hop held / stick back), before the crouch follows
+var pleg := 0.0           # the legs' pump stroke: -1 bent (hop held / stick back) .. +1 pushed straight (stick forward)
 var pump_on := false      # hop held on the ground, rolling: the HUD pump bar is up
 var _sprint_lift := 0.0   # balance mode: a sprint stamp from slow lifts the front through the balance
 # this step's results shared by the stages of _ride_step: the load on each tyre (m/s2 of the bike's weight; _step_loads),
@@ -355,7 +360,7 @@ func _reset_motion() -> void:
 	pop_fx = 0.0; squash_fx = 0.0; pop_q = 0.0; pop_time = 0.0; _pop_used = 0.0
 	land_heavy = 0.0; land_fold = 0.0; _land_hit = 0.0; _land_pe = 0.0; _stun = 0.0; land_yaw = 0.0; _rim_hit = 0.0; _ty_f = 0.0; _ty_r = 0.0; _tuck_in = false
 	man_a = 0.0; man_w = 0.0; man_zone = false; man_lock = 0.0; man_zone_t = 0.0; man_pull = 0.0; _man_over = 0.0; _man_armed = false; _pull_age = 0.0; _man_pw = 0.0; _man_grace = 0.0; _sprint_lift = 0.0
-	pump_push = 0.0; pump_gain = 0.0; pump_idle = 0.0; pump_press_t = 0.0; _pump_release = 0.0; pump_on = false; pump_lift = 0.0; land_perfect = 0.0
+	pump_push = 0.0; pump_gain = 0.0; pump_idle = 0.0; pump_press_t = 0.0; _pump_release = 0.0; pump_on = false; pleg = 0.0; pump_lift = 0.0; land_perfect = 0.0
 	wheelie_time = 0.0; wheelie_pedal = false; whip = 0; whip_hold = 0; whip_side = 0.0; _whip_arm = 0; _whip_t = 0; _whip_flashed = false; _whip_peak = 0.0
 	edge_s = 0.0; spin_hold = 0.0; spin_k = 1.0; yaw_edge_s = 0.0; yaw_hold = 0.0; stick_yaw = 0.0; air_stick = Vector2.ZERO; style_air = 0.0
 	brake_stop = false; brake_back = false; lean_lim = 9.0; lean_room = NAN
@@ -470,6 +475,52 @@ func _wheel_ground(f: Vector3, x0: float, R: float, cp0: float) -> float:
 
 ## One ride step (120 Hz), stage by stage. The stages share only what is passed here; everything else they read
 ## and write is the bike's own state (the members above). Order matters: each stage works on what the last one left
+## tests (BMX_ENERGY_PROBE=1): where the ride's energy goes. Energy per kg E = v^2 / 2 (+ vy^2 / 2 in the air) + g y. The
+## drive stage's own terms (pedal, brakes, pump, rolling drag, air drag, the grade's pull, manual boost) and the change
+## across every other stage of the step (steer: slides / scrub; move: what it hits + the height it changes; vertical:
+## springs / landings; lip: take-offs). The grade's pull and the height change in `move` are the same energy changing
+## form: their sum is the path's own error. Printed every 5 s (J/kg) with the time braking / in the air / crashed
+var _EPROBE := OS.get_environment("BMX_ENERGY_PROBE") != ""
+var _eb := {}
+var _e_y := 0.0
+var _eb_t := 0.0; var _eb_n := {t = 0.0, brake = 0.0, air = 0.0, dist = 0.0, vmax = 0.0, turn_t = 0.0, turn_bank = 0.0}
+func _e_now() -> float:
+	return 0.5 * v * v + (0.5 * vy * vy if air else 0.0) + G * y
+func _e_add(k: String, e: float) -> void:
+	_eb[k] = float(_eb.get(k, 0.0)) + e
+	_eb["~" + k] = float(_eb.get("~" + k, 0.0)) + e   # (the drive stage's own terms, to take out of its stage total)
+func _e_stage(k: String, e0: float) -> float:
+	var e1 := _e_now()
+	var d := e1 - e0
+	# (the height part of every stage after the drive is the grade's energy changing form: kept apart as "height")
+	var dh := G * (y - _e_y)
+	_e_y = y
+	if k != "drive":
+		var hk := "height_air" if air else "height"
+		_eb[hk] = float(_eb.get(hk, 0.0)) + dh
+		d -= dh
+		if air: _eb["S_" + k + "_air"] = float(_eb.get("S_" + k + "_air", 0.0)) + d; d = 0.0
+	if k == "drive":   # what the drive stage did beyond its own listed terms
+		for t in ["pedal", "grade", "brakes", "pump", "rolling", "air", "manual"]:
+			d -= float(_eb.get("~" + t, 0.0)); _eb["~" + t] = 0.0
+		k = "drive_rest"
+	_eb["S_" + k] = float(_eb.get("S_" + k, 0.0)) + d
+	return e1
+func _e_tick(dt: float, brake: bool) -> void:
+	_eb_n.t += dt; _eb_n.dist += absf(v) * dt; _eb_n.vmax = maxf(_eb_n.vmax, absf(v))
+	if brake and not air and v > 0.5: _eb_n.brake += dt
+	if air: _eb_n.air += dt
+	if not air and absf(lat_a) > 3.0 and not is_nan(bank):   # turning hard: how much bank is under the bike
+		_eb_n.turn_t += dt; _eb_n.turn_bank += absf(bank) * dt
+	_eb_t += dt
+	if _eb_t >= 5.0:
+		_eb_t = 0.0
+		var ks := _eb.keys().filter(func(k): return not String(k).begins_with("~"))
+		ks.sort_custom(func(a, b): return float(_eb[a]) < float(_eb[b]))
+		var line := "ENERGY t=%.0fs dist=%.0fm avg=%.1fkmh max=%.1fkmh braking=%.0f%% air=%.0f%% turning: bank=%.1fdeg |" % [_eb_n.t, _eb_n.dist, _eb_n.dist / maxf(_eb_n.t, 0.01) * 3.6, _eb_n.vmax * 3.6, 100.0 * _eb_n.brake / _eb_n.t, 100.0 * _eb_n.air / _eb_n.t, rad_to_deg(_eb_n.turn_bank / maxf(_eb_n.turn_t, 1e-3))]
+		for k in ks: line += " %s=%.0f" % [k, float(_eb[k])]
+		print(line)
+
 func _ride_step(dt: float, inp: Dictionary) -> void:
 	var throttle: float = inp.throttle
 	# after a heavy / sideways landing the rider needs a moment before he can put power down again, and unfolds
@@ -493,14 +544,23 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	skid = false
 	_step_sprint(dt, inp, throttle, brake, in_water)
 	_step_loads(dt)
+	var e0 := _e_now() if _EPROBE else 0.0
+	_e_y = y
 	var a_long := _step_drive(dt, inp, throttle, brake, in_water, slope, rear_down, n_rear, n_front)
+	if _EPROBE: e0 = _e_stage("drive", e0)
 	var va := _step_steer(dt, f, brake_k, steer_input, roll_keys, a_long, n_rear, n_front)
+	if _EPROBE: e0 = _e_stage("steer", e0)
 	f = fwd()   # (the steering turned the bike)
 	_step_move(dt, f)
+	if _EPROBE: e0 = _e_stage("move", e0)
 	_step_vertical(dt, f, throttle, brake)
+	if _EPROBE: e0 = _e_stage("vertical", e0)
 	_step_hop(dt, inp)
+	if _EPROBE: e0 = _e_stage("hop", e0)
 	_step_lip(dt, f, brake)
+	if _EPROBE: e0 = _e_stage("lip", e0)
 	_step_wheels(dt, f, in_water, va)
+	if _EPROBE: e0 = _e_stage("wheels", e0); _e_tick(dt, brake)
 
 ## stage 1: the controls. Brake levers, the body stick, air control (tilt / spin / tuck inputs) and the lip throw.
 ## Returns the brake level (0 when S was a flip throw at a lip, not a brake)
@@ -746,6 +806,7 @@ func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_wa
 			spin = minf(1.0, (drive - drive_cap) / 3); drive = drive_cap + (drive - drive_cap) * 0.15
 		a_long = absf(drive)
 		var a := drive - G * sin(slope)
+		if _EPROBE: _e_add("pedal", drive * v * dt); _e_add("grade", -G * sin(slope) * v * dt)
 		# two brakes, each limited by its own tyre: the front does most of the stopping (braking moves the weight onto
 		# it, so it can take more), the rear goes light and locks easily. Squeeze a lever past what its tyre can hold
 		# and that wheel locks: it slides at ~80 % of the grip (rear = skid / fishtail, front = no steering, and
@@ -772,6 +833,7 @@ func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_wa
 		if brake and not air and v > 0.3:
 			a -= b_all; a_long += b_all; drive -= b_all
 			brake_heat += b_all * v * dt / 45.0
+			if _EPROBE: _e_add("brakes", -b_all * v * dt)
 		elif brake and not air and v < -0.3 and (rev_cap > 3.0 or not brake_back):
 			# braking while rolling backwards (after a fakie landing, or sliding back down a climb the brakes
 			# can't hold); a fresh press from a standstill backs up on purpose (brake_back) and doesn't brake
@@ -780,36 +842,59 @@ func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_wa
 		else:
 			rear_lock = move_toward(rear_lock, 0.0, dt * 8.0); front_lock = move_toward(front_lock, 0.0, dt * 8.0)
 		a_drive = drive
-		var pump_ok := not front_air and not rear_air and not (hop_t > 0) and since_land > 0.25 and prep < 0.1 and v > 1
-		var a_pump: float = T.pumpGain * clampf(compress_v, -2, 2) * -sin(slope) if pump_ok else 0.0
-		a += a_pump
-		if compress_v > 0.15 and pump_ok: pump_acc += a_pump * dt
-		elif compress_v <= 0.05:
-			if pump_acc > 0.35:
-				flow_up()
-				if host.msg_idle(): host.flash("PUMP +%d km/h" % roundi(pump_acc * 3.6))
-			pump_acc = 0
-		# downhill pump (side-on BMX game style): hop held with both wheels down pushes the bike into the ground,
-		# which drives it on down a back side (+pumpHold x g x slope) but fights it up a face (-pumpHoldUp). Held all
-		# the time it about cancels out: the speed is in the timing (press on the downs, let go on the ups)
+		# --- the pump = the legs' stroke (the same legs that hop and pop off a lip). Pumping is work done against the
+		# ground's push: straightening the legs while the ground presses harder than standing weight (the dip at the
+		# bottom of a roller, a compression) or bending them while it goes light (over a crest) adds that difference x the
+		# stroke to the ride's speed; the other way round costs it (holding stiff over a crest, absorbing a dip). Over a
+		# rhythm that is +(load in the dips - load at the crests) x stroke per roller: it grows with speed and with how
+		# curved the ground is, and on a straight slope, however steep, there is nothing to gain. Hands off the legs keep
+		# their length and nothing changes. Hop held / the stick back = legs bent (the crouch); the stick forward = pushed
+		# straight; letting the hop go / the stick forward straightens them. (Luginbuhl et al. 2023, Golembiewski et al. 2023)
 		pump_push = 0.0
-		# two ways in: the hop button (easy: on or off) or the body stick (the pro way: how far forward = how hard
-		# the bike is pushed into the ground; easing it back unweights, so a face costs nothing). Pulled well back
-		# it is a manual instead (manualFrom)
 		var btn: bool = inp.hop and not hop_block
 		var p_fwd: float = clampf((body_in - 0.12) / 0.6, 0.0, 1.0)
 		var p_back: float = clampf((-body_in - 0.12) / maxf(0.05, 0.4 - 0.12), 0.0, 1.0)
 		var p_in: float = maxf(1.0 if btn else 0.0, p_fwd * float(T.get("pumpStick", 1.2)))
-		var ground_ok: bool = not front_air and not rear_air and hop_t <= 0.0 and v > float(T.get("pumpMinSpeed", 2.0)) and man_a < 0.08
+		# (one wheel down is enough: over a roller's crest the front goes light and leaves the ground for most of the
+		# backside; the manual / hop guards keep a wheel up from pumping)
+		var ground_ok: bool = not (front_air and rear_air) and hop_t <= 0.0 and v > float(T.get("pumpMinSpeed", 2.0)) and man_a < 0.08
 		pump_on = ground_ok and (btn or p_fwd > 0.0 or p_back > 0.0)
-		if ground_ok and prep < 0.1 and (p_in > 0.0 or p_back > 0.0):
-			var s_up := sin(clampf(slope, -0.8, 0.8))
-			if s_up < 0.0: pump_push = -float(T.get("pumpHold", 0.45)) * G * s_up * p_in
-			else:
-				# up a face: pushing costs, unweighting (stick eased back) carries a little more speed up it
-				pump_push = -float(T.get("pumpHoldUp", 0.4)) * G * s_up * p_in + float(T.get("pumpUnweight", 0.15)) * G * s_up * p_back * (1.0 - p_in)
+		var terrain_pump = host.terrain
+		var pl_prev := pleg
+		var pl_t: float = clampf(p_fwd - _bend_in, -1.0, 1.0)
+		# (a rider straightens or bends the legs at most a whole stroke in PUMP_STROKE_T)
+		pleg = move_toward(pleg, pl_t, dt * 2.0 / PUMP_STROKE_T)
+		if ground_ok and prep < 0.1 and pop_wait <= 0.0 and kick_t <= 0.0 and since_land > 0.1:
+			# how much harder (or lighter) than standing weight the ground pushes on rider + bike along their path: speed²
+			# x the ground's curve under the bike, across about the wheelbase (+ in a dip, - over a crest). Not the tyre
+			# loads: over a roller's crest the front leaves the ground and the springs ring, which put the timing out by
+			# a quarter of a roller. The legs can drive against at most ~2.5 g
+			var cx: float = cos(_or(course, heading)) * PUMP_SPAN
+			var cz: float = -sin(_or(course, heading)) * PUMP_SPAN
+			var h0: float = terrain_pump.deck_height(x, z)
+			var kap: float = (terrain_pump.deck_height(x + cx, z + cz) + terrain_pump.deck_height(x - cx, z - cz) - 2.0 * h0) / (PUMP_SPAN * PUMP_SPAN)
+			var n_ex: float = clampf(v * v * kap / G, -1.0, 1.5)
+			var de: float = clampf(T.riderMass, 0.0, 0.7) * n_ex * G * 0.5 * PUMP_STROKE * (pleg - pl_prev) * float(T.get("pumpLegs", 1.0))
+			pump_push = de / (maxf(2.0, v) * dt)
 			a += pump_push
-			if btn and s_up < -0.03: pump_press_t += dt
+			if _EPROBE: _e_add("pump", de)
+			if pump_push > 0.0: pump_acc += pump_push * dt
+			if btn and absf(n_ex) > 0.15: pump_press_t += dt   # (a press spent pumping doesn't hop when it's let go)
+		if absf(pleg - pl_t) < 0.02:
+			if pump_acc > 0.35:
+				flow_up()
+				if host.msg_idle(): host.flash("PUMP +%d km/h" % roundi(pump_acc * 3.6))
+			pump_acc = 0.0
+		# pumping a berm (Golembiewski et al. 2023, a pump track: the rider's body working against the bike through a
+		# steep banked turn drives it on, no pedalling): the pump held (hop / stick forward) while a berm carries the turn
+		# - the legs drive the bike into the turn's extra load (corner_g, m/s² on top of g) - pushes it along. Physically
+		# small; bermPump scales it (0.12 x ~4 m/s² of load = ~0.5 m/s² through the turn: ~+2-3 km/h out of a good berm)
+		var berm_c: float = clampf(berm_k / maxf(0.05, float(T.get("bermAssist", 1.0))), 0.0, 1.0)
+		if ground_ok and prep < 0.1 and p_in > 0.0 and berm_c > 0.05 and corner_g > 0.3:
+			var bp: float = float(T.get("bermPump", 0.12)) * minf(corner_g, 8.0) * berm_c * minf(p_in, 1.0)
+			a += bp; pump_push += bp
+			if btn: pump_press_t += dt   # (a press spent pumping the berm doesn't hop when it's let go)
+			if _EPROBE: _e_add("pump", bp * v * dt)
 		if absf(pump_push) > 0.05:
 			pump_gain += pump_push * dt * 3.6; pump_idle = 0.0
 		else:
@@ -818,6 +903,7 @@ func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_wa
 		pump_gain = clampf(pump_gain, -30.0, 60.0)
 		# a manual held in the sweet spot keeps the speed rolling (like the games' manual boost)
 		if man_zone: a += float(T.get("manBoost", 0.5))
+		if man_zone and _EPROBE: _e_add("manual", float(T.get("manBoost", 0.5)) * v * dt)
 		var carry: float = 1 - T.flowCarry * flow / FLOW_MAX
 		# rolling drag per tyre on its own ground (sand drags, hardpack rolls), weighted by the load like the grip
 		var rr_f: float = 0.32 if surf_f == 0 else 0.42 if surf_f == 3 else 0.1
@@ -830,6 +916,7 @@ func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_wa
 		var sit_up: float = clampf(-body_in_s, 0.0, 1.0)
 		aero_k = 1.0 - float(T.get("tuckDrag", 0.42)) * tuck + float(T.get("upDrag", 0.3)) * sit_up
 		a -= (roll + T.airDrag / (ts * ts) * v * absf(v) * aero_k) * carry
+		if _EPROBE: _e_add("rolling", -roll * carry * v * dt); _e_add("air", -T.airDrag / (ts * ts) * v * absf(v) * aero_k * carry * v * dt)
 		if in_water: a -= 0.7 * v
 		v = clampf(v + a * dt, -maxf(3.0, rev_cap), 24 * maxf(1.0, ts))
 		rev_cap = maxf(3.0, minf(rev_cap, -v))   # the extra reverse room (fakie landing) only shrinks
@@ -850,11 +937,13 @@ func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_wa
 		if throttle < 0.1 and not brake and absf(v) < 0.05 and absf(_g_pitch) < 0.03: v = 0
 	else:
 		# no pumping in the air (these kept their last ground value through a jump: the HUD pump bar stayed up)
-		pump_push = 0.0; pump_on = false
+		pump_push = 0.0; pump_on = false; pump_acc = 0.0
+		pleg = clampf(clampf((body_in - 0.12) / 0.6, 0.0, 1.0) - _bend_in, -1.0, 1.0)   # (the legs' length carried to the landing)
 		# air drag doesn't stop at the lip: the same body area slows the flight (on the full speed, along it).
 		# Small (~0.5 m/s off a 1 s jump at 55 km/h) but it was missing, so jumps flew a touch long and fast
 		var k_air: float = T.airDrag / (T.topSpeed * T.topSpeed) * aero_k
 		var sp_air := sqrt(v * v + vy * vy)
+		if _EPROBE: _e_add("air", -k_air * sp_air * (v * v + vy * vy) * dt)
 		v -= k_air * sp_air * v * dt; vy -= k_air * sp_air * vy * dt
 	if flow > 0:
 		flow_t += dt
@@ -2168,6 +2257,7 @@ func _step_hop(dt: float, inp: Dictionary) -> void:
 	# (the stick held back a long while is weight back, not a crouch held ready)
 	var pre_in: float = maxf(1.0 if space else 0.0, back_in * (1.0 - smooth01((_stick_hold - 0.9) / 0.6)))
 	if air: pre_in = 0.0
+	_bend_in = pre_in
 	if pre_in >= crouch - 0.01:
 		crouch = minf(pre_in, crouch + dt / maxf(0.08, float(T.get("crouchTime", 0.25)))); _cr_rel = 0.0
 	else:
@@ -2190,7 +2280,8 @@ func _step_hop(dt: float, inp: Dictionary) -> void:
 	var backside: bool = not air and _g_pitch < -0.06 and terrain.jump_mask(x, z) > 0.05
 	# a press spent pumping a downhill is let go of on the next face without a hop (unless a lip is right there)
 	# (not with the front up: in a manual the legs aren't pumping, a hop let go there is the hop out of the manual)
-	var pumped: bool = _pump_release > 0.25 and prep < 0.1 and man_a < 0.08
+	# (a roller's backside lasts only 0.15-0.4 s at speed: a press that spent most of its time pumping one counts too)
+	var pumped: bool = (_pump_release > 0.25 or (_pump_release > 0.08 and _pump_release > 0.5 * _hop_tap_t)) and prep < 0.1 and man_a < 0.08
 	_pump_release = pump_press_t if space else _pump_release
 	# (reset whenever hop is up, in the air too: let go mid-jump it used to carry over and eat the next hop)
 	if not inp.hop: pump_press_t = 0.0
@@ -2226,6 +2317,8 @@ func _step_hop(dt: float, inp: Dictionary) -> void:
 		var pw2 := _hop_power(maxf(0.45, _crouch_power()), _scoop_k(man_a))
 		if Env.s("BMX_FORGIVE_PROBE") != "" and man_a > 0.05: print("SCOOPHOP power=%.2f crouch=%.2f man=%.2f" % [pw2, crouch, man_a])   # tests
 		_pop_now(pw2)
+	elif let_go and not air and (pumped or backside):
+		_cr_rel = 1.0   # a pumping press let go: the legs straighten now (that is the push), no pop
 	elif (let_go or (snapped and _bh_since < 0.22)) and air and not pumped:
 		if air_time <= fgv and crouch > 0.1 and kick_t <= 0.0:
 			# coyote time: let go a moment after the wheels left the lip still pops (what the legs have left)

@@ -1548,8 +1548,8 @@ class HopBar extends Control:
 			SlimBar.pill(self, tr, Color(1, 1, 1, 0.8 * fire * a))
 
 class PumpBar extends Control:
-	## bottom centre while pumping: a centre-zero capsule, green to the right while the held hop drives the bike on
-	## down a back side, red to the left while it fights a face; km/h won in this rhythm on the right
+	## bottom centre while pumping: a centre-zero capsule, green to the right while the legs' stroke wins speed (bent
+	## over a crest, straightened into a dip), red to the left while it costs; km/h won in this rhythm on the right
 	var hud
 	var a := 0.0
 	var push_s := 0.0
@@ -1559,7 +1559,7 @@ class PumpBar extends Control:
 	func tick(st: BikePhysics, dt: float) -> void:
 		var live: bool = not st.air and (st.pump_on or absf(st.pump_gain) > 0.6)
 		a = move_toward(a, 1.0 if (live and not st.crash_on) else 0.0, dt * (12.0 if live else 2.0))
-		var full: float = float(Tune.v.get("pumpHold", 0.45)) * 9.81 * 0.12   # the push on a ~7 deg back side = a full half
+		var full := 4.0   # m/s²: a good stroke into a roller's dip = a full half
 		push_s = lerpf(push_s, clampf(st.pump_push / full, -1.0, 1.0), minf(1.0, dt * 30.0))
 		gain_s = lerpf(gain_s, st.pump_gain, minf(1.0, dt * 12.0))
 		t += dt

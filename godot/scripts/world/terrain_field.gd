@@ -787,6 +787,12 @@ func make_feat(x: float, z: float, dx: float, dz: float, type: String, b0: float
 	return f
 
 
+## the beats of a jump line, in order (each a pick list): build up speed and timing on rollers, a jump (or a table
+## line) to release it, then a rest (a bridge or plain trail) before the next build. BMX_OLD_RHYTHM=1 = the old random picks (tests)
+## ("" = plain trail for that beat). Jump lines draw from their own random stream (seeded by where they start), so the
+## road features after them are laid out exactly as before
+const RHYTHM := [["rhythm", "flow", "rhythm"], ["table", "table", "kicker", "tableLine", "woodKicker"], ["bridge", "bridge", ""]]
+static var OLD_RHYTHM := OS.get_environment("BMX_OLD_RHYTHM") != ""
 func _build_route() -> void:
 	var C := course
 	var r := WorldRng.new(seed_value * 104729 + 7)
@@ -802,6 +808,8 @@ func _build_route() -> void:
 		var s_end := i1 * CSTEP - (2.0 if jmp else 30.0)
 		if not jmp:
 			s += r.next() * 60
+		var beat := 0   # jump lines in rhythm (Smith et al. 2009): build (rollers) -> release, release -> rest, again
+		var rr: WorldRng = WorldRng.new(seed_value * 15485863 + i0 * 7919 + 3) if jmp and not OLD_RHYTHM else r
 		while s < s_end:
 			var in_drop := false
 			for dr in C.drops:
@@ -812,7 +820,11 @@ func _build_route() -> void:
 				s += 12
 				continue
 			var types: Array = TrailFeatures.ROUTE_TYPES if jmp else ["rhythm", "rhythm", "table", "kicker"]
-			var type: String = types[int(r.next() * types.size())]
+			if jmp and not OLD_RHYTHM: types = RHYTHM[beat % RHYTHM.size()]
+			var type: String = types[int(rr.next() * types.size())]
+			if type == "":   # a rest beat on plain trail
+				s += 10.0 + rr.next() * 6.0; beat += 1
+				continue
 			# now and then (rare) a gorge: a deep crevasse crossed by a long wooden bridge
 			# (0.06 / 0.12 before the jumps grew 1.6x: they take more of each straight, so there are fewer slots)
 			if not jmp and r.next() < 0.13:
@@ -841,7 +853,17 @@ func _build_route() -> void:
 			var f := make_feat(x, z, dx, dz, type, base(x, z), base(x + dx * len, z + dz * len))
 			f.s = s
 			list.append(f)
-			s += len + ((5 + r.next() * 8) if jmp else (70 + r.next() * 90))
+			var rv := rr.next()
+			if jmp and not OLD_RHYTHM:
+				# the next lip one roll-out after a clean landing: ~0.75 s at the speed riders arrive at here (VA), so
+				# there is time to land, settle and load the legs, never on the knuckle; a rest beat gets a longer run
+				var ie := clampi(int((s + len) / CSTEP), 0, C.n - 1)
+				var gap := clampf(C.VA[ie] * 0.75, 6.0, 14.0) + rv * 3.0
+				if beat % RHYTHM.size() == RHYTHM.size() - 1: gap += 12.0
+				s += len + gap
+				beat += 1
+			else:
+				s += len + ((5 + rv * 8) if jmp else (70 + rv * 90))
 	route_feats = list
 	_index_canyons()
 
