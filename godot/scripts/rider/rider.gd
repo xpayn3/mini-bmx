@@ -397,7 +397,7 @@ func _mount_action_cam() -> void:
 	if cam_mount == "none" or not cam_spots.has(cam_mount):
 		return
 	var at: Vector3 = cam_spots[cam_mount]
-	action_cam = ActionCam.build(cam_mount, gear)
+	action_cam = ActionCam.merged(ActionCam.build(cam_mount, gear))   # one mesh for the mount, one for the camera
 	action_cam.position = at
 	action_cam_at = at
 	action_cam.visible = hel == null or hel.visible or (helmet_model != null and helmet_model.visible)

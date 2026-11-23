@@ -131,7 +131,11 @@ func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
 	mount_lights(str(build.get("lights", {}).get("model", "luma")))   # builds saved before lights: a mid lamp
 	if extras.has("suspension") and model.find_child("rocker", true, false):
 		var r: Dictionary = extras.suspension.rear
-		BikeDecals.add_pivot_bolts(model, [{"node": "rocker", "at": r.G2, "z": 0.029}, {"node": "rocker", "at": r.C2, "z": 0.029}, {"node": "rocker", "at": r.D, "z": 0.031, "r": 0.005}])
+		var bolts := BikeDecals.add_pivot_bolts(model, [{"node": "rocker", "at": r.G2, "z": 0.029}, {"node": "rocker", "at": r.C2, "z": 0.029}, {"node": "rocker", "at": r.D, "z": 0.031, "r": 0.005}])
+		if not bolts.is_empty():   # 15 little pieces -> one mesh on the rocker
+			_MERGE.merge(bolts[0].get_parent(), bolts)
+
+const _MERGE := preload("res://scripts/core/mesh_merge.gd")
 
 ## dh.glb's head tube on its steering axis, from the steer node: top / bottom end (our fork's crowns sit just past them)
 const HT_DH := [0.0565, -0.0418]
@@ -576,7 +580,7 @@ func mount_cam(kind: String, gear := {}) -> void:
 		var hint := Vector3(lerpf(grip_r.x, 0.0, 0.3), grip_r.y, zc)
 		var t := _tube_at(steer_n as MeshInstance3D, Vector3(0, 0, 1), zc, hint)
 		if t.is_empty(): return
-		action_cam = ActionCam.build_clamp(Vector3(0, 0, 1), t.r, Vector3.UP, Vector3(0.0, t.r + 0.024, 0.0), 0.0, gear)
+		action_cam = ActionCam.merged(ActionCam.build_clamp(Vector3(0, 0, 1), t.r, Vector3.UP, Vector3(0.0, t.r + 0.024, 0.0), 0.0, gear))
 		action_cam.position = t.c
 		steer_n.add_child(action_cam)
 		if probe: print("CAMMOUNT bars c=%s r=%.4f" % [t.c, t.r])
@@ -593,7 +597,7 @@ func mount_cam(kind: String, gear := {}) -> void:
 		var at: Vector3 = hi.c
 		var r: float = hi.r
 		# camera upright on the outside of the leg, centred on the clamp height, lens ahead
-		action_cam = ActionCam.build_clamp(axis, r, Vector3(0, 0, 1), Vector3(0.012, -0.03, r + 0.046), 0.0, gear)
+		action_cam = ActionCam.merged(ActionCam.build_clamp(axis, r, Vector3(0, 0, 1), Vector3(0.012, -0.03, r + 0.046), 0.0, gear))
 		action_cam.position = at
 		fl.add_child(action_cam)
 		if probe: print("CAMMOUNT fork c=%s r=%.4f axis=%s" % [at, r, axis])
@@ -601,7 +605,8 @@ func mount_cam(kind: String, gear := {}) -> void:
 		return
 	cam_mount = kind
 	for mi in action_cam.find_children("*", "MeshInstance3D", true, false):
-		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		if not mi.has_meta("shadow_sized"):   # the merged meshes decided their own (core/mesh_merge.gd)
+			(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 
 ## bike lights (BikeLight.MODELS): the lamp on the left of the bar (the action cam takes the right; the light bar
 ## sits over the stem on two clamps) + a tail light under the saddle. Off until `set_lights_on(true)`.
@@ -623,6 +628,7 @@ func mount_lights(id: String) -> void:
 	if t.is_empty(): return
 	var lamp := BikeLight.build(id, t.r)
 	if lamp.is_empty(): return
+	_MERGE.merge(lamp.node, [lamp.node], true, lamp.lens, lamp.lights)   # one mesh (the glowing lens its own surface)
 	lamp.node.position = Vector3(t.c.x, t.c.y, 0.0) if big else t.c
 	steer_n.add_child(lamp.node)
 	bike_lights.append(lamp)
@@ -630,6 +636,7 @@ func mount_lights(id: String) -> void:
 	var fr := model.find_child("frame", true, false) as MeshInstance3D
 	if fr and seat is Dictionary:
 		var tail := BikeLight.build_tail()
+		_MERGE.merge(tail.node, [tail.node], true, tail.lens, tail.lights)
 		# under the saddle's back, on the seat post / rails, facing back
 		tail.node.position = Vector3(float(seat.rear) + 0.06, float(seat.top) - 0.075, 0.0)
 		fr.add_child(tail.node)
@@ -835,6 +842,11 @@ func tyre_depth(wheel: Node3D, R: float, top: Callable) -> float:
 	var full := dl < 0.6
 	var n := 16 if full else 11
 	var hw := tyre_hw
+	# the ride's terrain does the whole loop below in one C# call (Terrain.tyre_worst)
+	var ter = top.get_object()
+	if ter is Terrain and top.get_method() == &"top_height":
+		var w = ter.tyre_worst(c, ax, d0, side, R, hw, n, full)
+		if w != null: return w
 	var worst := -INF
 	for i in n:
 		var a := TAU * i / n if full else -1.4 + 2.8 * i / (n - 1)

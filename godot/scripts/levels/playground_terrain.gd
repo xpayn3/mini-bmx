@@ -28,6 +28,7 @@ func set_seed(seed_in: int) -> void:
 	field.course = TrailCourse.new()   # no trail: alerts, the trail camera and "back on the trail" find nothing
 	field.route_feats = []
 	water_enabled = false
+	cs_tyres = false   # its own ground (top_height below): the drawn tyres sample it in GDScript
 
 
 func update_stream(_px: float, _pz: float, _budget_ms: float = 4.0, _sync_r := -1) -> void:

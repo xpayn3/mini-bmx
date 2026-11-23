@@ -199,7 +199,7 @@ var _title_heading := NAN
 var scenic := false          # title screen: golden hour, a lookout camera, far hills to the horizon
 var far_hills: FarHills
 var grass: GrassField
-var sheep: SheepHerd
+var sheep: Node3D   # SheepHerdCs
 var tumbleweeds: Tumbleweeds
 var title_life: TitleLife     # title screen only: birds, blowing dust, dust round the bushes
 
@@ -233,10 +233,13 @@ func _ready() -> void:
 	reuse = {}
 	grass = GrassField.new(terrain)   # the grass carpet round the camera (Settings "grass")
 	add_child(grass)
-	sheep = SheepHerd.new()   # woolly flocks that graze and run from the bike
-	sheep.setup(terrain)
-	if level != "": sheep.enabled = false
-	add_child(sheep)
+	sheep = CrashLog.cs_new("res://scripts/world/SheepHerdCs.cs")   # woolly flocks that graze and run from the bike (C#; none without it)
+	if sheep != null:
+		sheep.name = "Sheep"
+		add_child(sheep)
+		sheep.setup(terrain)
+		if level != "": sheep.enabled = false
+	if Env.s("BMX_RENDER_PROBE") != "": add_child(preload("res://scripts/game/render_probe.gd").new(self))
 	if terrain is PlaygroundTerrain:
 		level_probe = PlaygroundProbe.new()
 		level_probe.name = "PlaygroundProbe"
@@ -610,6 +613,21 @@ func _rim_node_added(n: Node) -> void:
 ## the rim light follows the camera: it shines from behind + above the rider as seen from the lens, a little from the
 ## side the sun is on (so it agrees with the light in the scene). The rider / bike meshes get RIM_LAYER (re-tagged
 ## when a mesh joins them: helmets, cams, a new bike or a crash add meshes).
+## Rider / bike parts too small for their sun shadow to show (bolts, pedals, fingers, buckles: < SMALL_SHADOW
+## across) and the stickers (they lie on the frame, which casts that shadow already) cast none: the rider + bike
+## were ~60 % of the shadow pass' draw calls, each tiny part drawn again in every cascade (BMX_RENDER_PROBE).
+## Decided once per mesh. BMX_ALL_SHADOWS=1 keeps every one.
+const SMALL_SHADOW := 0.1
+static var _ALL_SHADOWS := Env.s("BMX_ALL_SHADOWS") != ""
+func _shadow_size(gi: GeometryInstance3D) -> void:
+	if _ALL_SHADOWS or not (gi is MeshInstance3D) or gi.has_meta("shadow_sized"): return
+	var mi := gi as MeshInstance3D
+	if mi.mesh == null: return
+	gi.set_meta("shadow_sized", true)
+	var across := (mi.get_aabb().size * mi.global_basis.get_scale()).length()
+	if across < SMALL_SHADOW or String(mi.name).begins_with("decal"):
+		gi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
 func _rim_update(dt: float) -> void:
 	if rim == null: return
 	# re-tag only when a mesh joined the rider / bike (or they were swapped), not by walking both trees twice a second
@@ -631,6 +649,7 @@ func _rim_update(dt: float) -> void:
 				var gi := n as GeometryInstance3D
 				if gi.layers & RIM_LAYER == 0: gi.layers |= RIM_LAYER
 				if gi is Hair: _hair_nodes.append(gi)
+				_shadow_size(gi)
 		_hair_key()
 	var c3 := get_viewport().get_camera_3d()
 	if c3 == null or scenic or Env.s("BMX_NO_RIM") != "":
@@ -1750,7 +1769,7 @@ func respawn(new_world: bool) -> void:
 		far_hills = FarHills.new()
 		far_hills.setup(terrain)
 		add_child(far_hills)
-		sheep.reset()
+		if sheep: sheep.reset()
 		tumbleweeds.clear()
 		flash("New world #%d" % GameState.seed)
 	if fx.has_method("clear_tracks"): fx.clear_tracks()
@@ -2951,7 +2970,7 @@ func _process(dt: float) -> void:
 	_pk = _perf("packs_tape", _pk)
 	if far_hills: far_hills.follow(drawn_pos)
 	_pk = _perf("far_hills", _pk)
-	sheep.follow(dt, drawn_pos, st.v, st.fwd())
+	if sheep: sheep.follow(dt, drawn_pos, st.v, st.fwd())
 	_pk = _perf("sheep", _pk)
 	_cull_start_tv(drawn_pos)
 	biome_t -= dt

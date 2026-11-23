@@ -134,6 +134,9 @@ func _pin() -> void:
 	if rider_root == null or _bike_root == null or not is_instance_valid(rider_root): return
 	if not _bike_root.is_ancestor_of(rider_root): return   # crashed: wait for the riding pose
 	var inv := _bike_root.global_transform.affine_inverse()
+	# the tyres where they were when the parts were pinned: the spray band and the ground line are measured
+	# against these on pinned parts (the live ones move with the fork / swingarm, and the dirt slid with them)
+	if not _rest_axles: _set_rest_axles(inv)
 	var stack: Array[Node] = [rider_root]
 	while not stack.is_empty():
 		var o: Node = stack.pop_back()
@@ -141,6 +144,12 @@ func _pin() -> void:
 		if not (o is MeshInstance3D) or o.has_meta("grime_pinned"): continue
 		var mi := o as MeshInstance3D
 		if not mi.is_visible_in_tree(): continue
+		if _is_flap(mi):
+			# rebuilt every frame (race number, goggle strap tails, helmet flap, hair): no fixed shape to pin to,
+			# so just a cheap blotchy mask that fades in with the mud / water (grime_pin 3)
+			mi.set_instance_shader_parameter("grime_pin", 3.0)
+			mi.set_meta("grime_pinned", true)
+			continue
 		var skel := mi.get_node_or_null(mi.skeleton) as Skeleton3D if mi.skin else null
 		if skel and mi.skin and skel.name != "Spine":
 			# skinned on the rider skeleton (glove fingers): rest shape in CUSTOM0, height = the hand's
@@ -174,6 +183,21 @@ func _pin() -> void:
 		_bike_parts.append(mi)
 		fresh = true
 	if fresh: _bake_cavity(inv)
+
+var _rest_axles := false
+static var _WET_HOLD := float(Env.s("BMX_WET_HOLD")) if Env.s("BMX_WET_HOLD") != "" else 0.0
+var _wf0 := Vector4.ZERO   # sent every frame (globals are shared: another Game's grime may have set them)
+var _wr0 := Vector4.ZERO
+
+func _set_rest_axles(inv: Transform3D) -> void:
+	var rig := _bike_root as BikeRig
+	if rig == null or rig.wheel_f == null or rig.wheel_r == null: return
+	_rest_axles = true
+	_wf0 = _wheel_v(inv * rig.wheel_f.global_position, rig.wheel_rf)
+	_wr0 = _wheel_v(inv * rig.wheel_r.global_position, rig.wheel_rr)
+
+static func _is_flap(mi: MeshInstance3D) -> bool:
+	return mi is BackNumber or mi is HelmetFlap or mi is StrapTail or mi is Hair or mi.get_parent() is Hair
 
 ## the part's rest transform (part -> bike root) as three rows: the mud pass works out where each vertex
 ## sat on the bike from them (height above the ground, the tyre spray, the crevice map)
@@ -538,6 +562,7 @@ func feed(dt: float, surf: int, speed: float, skid: bool, air: bool, landed: flo
 		dry = maxf(0.0, dry - fresh * 1.5)       # fresh mud on top: wet again
 		flake = maxf(0.0, flake - fresh * 2.0)   # and the gaps fill in
 	wet *= exp(-dt / 7.0)   # dries off over a few seconds
+	if _WET_HOLD > 0.0: wet = maxf(wet, _WET_HOLD)   # tests: kept this wet
 	# the mud dries while nothing fresh lands on it (not while it's soaked)
 	if mud > 0.002 and wet < 0.3:
 		dry = minf(1.0, dry + dt / DRY_T * (1.0 - wet * 2.5))
@@ -589,6 +614,8 @@ func update(dt: float, bike_root: Node3D) -> void:
 	if rig and rig.wheel_f and rig.wheel_r:
 		RenderingServer.global_shader_parameter_set("grime_wf", _wheel_v(inv * rig.wheel_f.global_position, rig.wheel_rf))
 		RenderingServer.global_shader_parameter_set("grime_wr", _wheel_v(inv * rig.wheel_r.global_position, rig.wheel_rr))
+	RenderingServer.global_shader_parameter_set("grime_wf0", _wf0)   # w = 0 until pinned: the passes use the live ones
+	RenderingServer.global_shader_parameter_set("grime_wr0", _wr0)
 	# drips off the bike while it is still wet
 	drips.global_position = bike_root.global_position + Vector3(0, 0.55, 0)
 	drips.global_basis = bike_root.global_basis

@@ -23,6 +23,13 @@ static func launch(parent: Node, body: Node3D, xf: Transform3D, ter, vel: Vector
 	pm.bounce = 0.35
 	pm.friction = 0.7
 	f.physics_material_override = pm
+	# one simple box round the camera as built (every model / add-on is a different size: the X4 is tall, the GO 3S
+	# tiny), from its meshes' bounds in body space; the old fixed GoPro box when there's nothing to measure
+	var box := _bounds(body)
+	var centre := Vector3(0, 0.0315, 0)
+	if box.size.length() > 0.01:
+		f._half = box.size * 0.5
+		centre = box.get_center()
 	var cs := CollisionShape3D.new()
 	var bs := BoxShape3D.new()
 	bs.size = f._half * 2.0
@@ -30,13 +37,30 @@ static func launch(parent: Node, body: Node3D, xf: Transform3D, ter, vel: Vector
 	f.add_child(cs)
 	parent.add_child(f)
 	# the box centred on the body's middle: the model hangs off the rigid body at its offset
-	var mid := xf * Vector3(0, 0.0315, 0)
+	var mid := xf * centre
 	f.global_transform = Transform3D(xf.basis.orthonormalized(), mid)
 	f.add_child(body)
-	body.transform = Transform3D(Basis(), Vector3(0, -0.0315, 0))
+	body.transform = Transform3D(Basis(), -centre)
 	f.linear_velocity = vel
 	f.angular_velocity = spin
 	return f
+
+## the meshes under `body` in its own space (the merged camera mesh, its LED / halo), not counting the halo quad
+static func _bounds(body: Node3D) -> AABB:
+	var out := AABB()
+	var first := true
+	for n in body.find_children("*", "MeshInstance3D", true, false):
+		var mi := n as MeshInstance3D
+		if mi.mesh == null or mi.mesh is QuadMesh: continue
+		var t := Transform3D()
+		var o: Node = mi
+		while o != null and o != body:
+			if o is Node3D: t = (o as Node3D).transform * t
+			o = o.get_parent()
+		var a := t * mi.mesh.get_aabb()
+		out = a if first else out.merge(a)
+		first = false
+	return out
 
 static var _PROBE := OS.get_environment("BMX_GOPRO_PROBE") != ""
 
@@ -44,7 +68,7 @@ func _physics_process(dt: float) -> void:
 	t += dt
 	if _PROBE and int(t * 4.0) != int((t - dt) * 4.0):   # tests
 		var gp: float = terrain.height(global_position.x, global_position.z) if terrain else 0.0
-		print("GOPRO t=%.2f pos=%s above_ground=%.3f v=%.2f" % [t, str(global_position), global_position.y - gp, linear_velocity.length()])
+		print("GOPRO t=%.2f pos=%s above_ground=%.3f v=%.2f box=%s" % [t, str(global_position), global_position.y - gp, linear_velocity.length(), str(_half * 2.0)])
 	if t > LIFE:
 		queue_free()
 		return

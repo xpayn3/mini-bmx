@@ -421,6 +421,21 @@ static func _camera(cam: Node3D, M: Dictionary, gear := {}) -> void:
 static func _shoe(cam: Node3D, M: Dictionary, top: float, z: float) -> void:
 	_add(cam, G.box(0.020, 0.004, 0.018), M.trim, Transform3D(Basis(), Vector3(-0.004, top + 0.002, z)))
 
+## For the ride: the mount (buckle, arm, screws) baked into one mesh and the camera body (with every add-on) into
+## another, so a camera is a few draw calls instead of ~20-30 (core/mesh_merge.gd). The Body stays its own node
+## (it snaps off in a crash), the blinking LED / halo / fur keep their shaders, the REC print and the Light Mod's
+## lamp stay as they are. Returns root.
+static func merged(root: Node3D) -> Node3D:
+	if root == null: return root
+	var MM := preload("res://scripts/core/mesh_merge.gd")
+	var body := root.get_node_or_null("Body")
+	var mount := []
+	for c in root.get_children():
+		if c != body: mount.append(c)
+	MM.merge(root, mount, true, [], [body] if body else [])
+	if body: MM.merge(body, [body])
+	return root
+
 ## kind "top" (default): the helmet-top mount; the others: build_arm with the mount's own geometry
 static func build(kind := "top", gear := {}) -> Node3D:
 	match kind:
