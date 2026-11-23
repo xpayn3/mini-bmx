@@ -748,6 +748,7 @@ func _unload(k: Vector2i) -> void:
 	_clutter_dirty = true
 	if fcs != null:
 		fcs.domes_remove(_chunk_id(k))
+		fcs.mesh_remove(k.x, k.y)
 	for key in c["rock_keys"]:
 		var l = _rock_grid.get(key)
 		if l == null:
@@ -1066,6 +1067,7 @@ func _finalize(k: Vector2i) -> void:
 			if c.has("top"):
 				dd.append_array([c["x"], c["z"], c["r"], c["base"], c["top"], c.get("sink", 0.0)])
 		fcs.domes_add(_chunk_id(k), dd)
+		fcs.mesh_add(k.x, k.y, int(rec["N"]), rec["G"])   # for tyre_worst (the drawn tyres' fit, one call per tyre)
 	var ckeys := {}
 	for c in colliders:
 		c["chunk"] = k
@@ -1135,6 +1137,15 @@ func mesh_height(x: float, z: float) -> float:
 ## the highest solid thing drawn here: the ground mesh, a wooden deck, or a rock / log / stump dome
 func top_height(x: float, z: float) -> float:
 	return maxf(height(x, z), mesh_height(x, z))
+
+## BikeRig.tyre_depth's whole sample loop over top_height in one C# call (it was ~30-50 GDScript -> C# calls
+## per tyre, up to ~22 tyres a frame). null = do it in GDScript (no C#, a rope bridge near, or a level with
+## its own ground: cs_tyres false)
+var cs_tyres := Env.s("BMX_TYRE_GD") == ""   # BMX_TYRE_GD=1: the GDScript loop (A/B runs)
+func tyre_worst(c: Vector3, ax: Vector3, d0: Vector3, side: Vector3, r: float, hw: float, n: int, full: bool):
+	if fcs == null or not cs_tyres or not ropes.is_empty():
+		return null
+	return fcs.tyre_worst(c, ax, d0, side, r, hw, n, full)
 
 
 ## true when a loaded chunk within `reach` (square) of (px, pz) has ground below the water level (chunks

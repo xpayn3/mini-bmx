@@ -835,6 +835,11 @@ func tyre_depth(wheel: Node3D, R: float, top: Callable) -> float:
 	var full := dl < 0.6
 	var n := 16 if full else 11
 	var hw := tyre_hw
+	# the ride's terrain does the whole loop below in one C# call (Terrain.tyre_worst)
+	var ter = top.get_object()
+	if ter is Terrain and top.get_method() == &"top_height":
+		var w = ter.tyre_worst(c, ax, d0, side, R, hw, n, full)
+		if w != null: return w
 	var worst := -INF
 	for i in n:
 		var a := TAU * i / n if full else -1.4 + 2.8 * i / (n - 1)

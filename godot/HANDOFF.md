@@ -2233,6 +2233,28 @@ Known, not fixed (lower priority from the code review):
   clutter visibility only on a chunk change; tyre unclip caches ground heights per frame on a 1 mm grid
   (`BikeRig._ground_cache`); standing sheep reuse their ground reading. Game scripts ~3.9 -> ~2.7 ms a frame. Still the
   biggest cost: rendering (~5.6M triangles, ~2000 draw calls a frame).
+- Perf (2026-11-23, `BMX_PERF` + the new `BMX_RENDER_PROBE`). Same follow ride, seed 4242: 88.6 -> 104 fps.
+  (1) The drawn tyres' ground fit (`BikeRig.tyre_depth`, up to ~22 calls a frame x 33-48 points, each a GDScript ->
+  C# height call + a GDScript `mesh_height`) is one C# call per tyre: `TerrainFieldCs.tyre_worst` (same points, the
+  chunks' height grids registered with `mesh_add` / `mesh_remove` from `_finalize` / `_unload`), via
+  `Terrain.tyre_worst` (null = the GDScript loop: no C#, a rope bridge loaded, or the playground: `cs_tyres` false;
+  `BMX_TYRE_GD=1` forces it). tyre_unclip 0.46-0.67 -> 0.25-0.34 ms; CLIP probe unchanged.
+  (2) **Sheep are C#** (`world/SheepHerdCs.cs`; `sheep_herd.gd` deleted; no C# = no sheep): all sheep drawn by 4
+  MultiMeshes (was ~32 MeshInstances a sheep), the instance buffers filled once a frame, the C# field read directly,
+  far calm flocks stepped every 4th frame, a failed placement waits 0.5 s (it searched 24 spots every frame). Smarter:
+  they keep apart, lift their heads and watch an approaching bike (ears up), bolt out of its path rather than straight
+  away, and run as a flock. `BMX_SHEEP_PROBE=1` (`SHEEP` lines with position), `BMX_SHEEP_NEAR=1`. 0.2-0.34 -> ~0.02-0.18 ms.
+  (3) Rider / bike parts under `Game.SMALL_SHADOW` 10 cm across and the stickers cast no sun shadow (`Game._shadow_size`,
+  with the rim tagging): shadow pass 1050 -> ~840 draw calls. `BMX_ALL_SHADOWS=1` = all.
+  **`BMX_RENDER_PROBE=1`** (+ `BMX_IDLE=1 BMX_NOVSYNC=1 --autotest=45`, `game/render_probe.gd`): turns one part of the
+  picture off at a time and prints GPU / render-CPU ms saved, draws and primitives (`RPROBE`), plus `RPARTS` (rider /
+  bike mesh counts). At golden hour standing at the start: GPU 3.8 ms, render CPU 1.1 ms; sun shadows 1.0 GPU + 0.35
+  CPU, half resolution 1.4, MSAA 0.55, decorations 0.5 + 0.29 CPU, ground 0.46, grass 0.37, rider + bike 0.32 GPU +
+  0.54 CPU (245 meshes); smoke / SSAO / SSIL / SDFGI / fog / glow / SSR / DOF ~0 each. Left: the rider + bike as fewer
+  meshes (rigid bike parts merged), the physics step / rider pose (~0.3-0.4 ms each, thousands of lines of GDScript).
+  The terrain is already C# for every query in a ride; the GDScript `TerrainField` only sets up and grows the trail
+  (worker) and is the reference. `-s res://tools/terrain_cs_cmp.gd` doesn't start (tape_sim.gd needs the `CrashLog`
+  autoload, which `-s` scripts don't load), found 2026-11-23, not fixed.
 - Frame rate (2026-11-20, RTX 3090, 1600×900, the user's Custom settings, nothing else on the GPU): 118–201 fps by camera
   (`--bench`), ride median ~6.5 ms, ~6 of 3700 frames over 16.7 ms. Fixed then: the start TV is hidden + frozen past
   `START_TV_CULL` 80 m (it cost ~1.5 ms GPU all ride), the fullscreen button no longer re-asks the OS / redraws every frame (~1 ms).

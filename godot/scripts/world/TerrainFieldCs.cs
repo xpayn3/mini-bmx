@@ -1627,6 +1627,62 @@ public partial class TerrainFieldCs : RefCounted
 		}
 	}
 
+	// ---- the drawn ground mesh of the loaded chunks (Terrain.mesh_height), for the drawn tyres' fit ----
+	private const double CHUNK = 48.0;   // Terrain.SIZE
+	private readonly Dictionary<long, (int n, float[] g)> _mesh = new Dictionary<long, (int, float[])>();
+	private static long _mesh_key(long kx, long kz) => kx * 4294967296L + kz;
+
+	/// a chunk's full-detail height grid (Terrain._finalize: rec N / G); removed by mesh_remove (Terrain._unload)
+	public void mesh_add(int kx, int kz, int n, float[] g) => _mesh[_mesh_key(kx, kz)] = (n, g);
+	public void mesh_remove(int kx, int kz) => _mesh.Remove(_mesh_key(kx, kz));
+
+	/// Terrain.mesh_height(): the chunk mesh's own triangles; -inf where no chunk is loaded
+	public double mesh_height(double x, double z)
+	{
+		long kx = (long)Math.Floor(x / CHUNK + 0.5), kz = (long)Math.Floor(z / CHUNK + 0.5);
+		if (!_mesh.TryGetValue(_mesh_key(kx, kz), out var c))
+			return double.NegativeInfinity;
+		int N = c.n;
+		double d = CHUNK / N;
+		int W = N + 3;
+		float[] G = c.g;
+		double gx = (x - (kx * CHUNK - CHUNK / 2)) / d;
+		double gz = (z - (kz * CHUNK - CHUNK / 2)) / d;
+		int ix = Math.Clamp((int)Math.Floor(gx), 0, N - 1);
+		int iz = Math.Clamp((int)Math.Floor(gz), 0, N - 1);
+		double tx = gx - ix, tz = gz - iz;
+		int b = (iz + 1) * W + ix + 1;
+		double h00 = G[b], h10 = G[b + 1], h01 = G[b + W], h11 = G[b + W + 1];
+		if (tx + tz <= 1.0)
+			return h00 + (h10 - h00) * tx + (h01 - h00) * tz;
+		return h11 + (h01 - h11) * (1.0 - tx) + (h10 - h11) * (1.0 - tz);
+	}
+
+	private static readonly double[] ACROSS = { -0.8, 0.0, 0.8 };   // BikeRig.TYRE_ACROSS
+
+	/// BikeRig.tyre_depth's sample loop in one call: how deep the tyre (centre c, axle ax, d0 = down in the wheel's
+	/// plane, side = ax x d0, radius R, casing half width hw) sits inside max(height, mesh_height). n points round the
+	/// lower half (full = all the way round), three across the casing each. Same points / order as the GDScript loop.
+	public double tyre_worst(Vector3 c, Vector3 ax, Vector3 d0, Vector3 side, double R, double hw, int n, bool full)
+	{
+		double worst = double.NegativeInfinity;
+		for (int i = 0; i < n; i++)
+		{
+			double a = full ? Math.Tau * i / n : -1.4 + 2.8 * i / (n - 1);
+			double ca = Math.Cos(a), sa = Math.Sin(a);
+			double dx = d0.X * ca + side.X * sa, dy = d0.Y * ca + side.Y * sa, dz = d0.Z * ca + side.Z * sa;
+			foreach (double wo in ACROSS)
+			{
+				double off = wo * hw;
+				double r = R - hw + Math.Sqrt(hw * hw - off * off);
+				double px = c.X + dx * r + ax.X * off, py = c.Y + dy * r + ax.Y * off, pz = c.Z + dz * r + ax.Z * off;
+				double h = Math.Max(height(px, pz), mesh_height(px, pz));
+				if (h - py > worst) worst = h - py;
+			}
+		}
+		return worst;
+	}
+
 	/// Terrain.height(): ground, a wooden deck, and a dome over every rock / log / stump of the loaded chunks
 	public double height(double x, double z)
 	{
