@@ -181,6 +181,7 @@ const PAGES := [
 		]],
 		["Legs", [
 			["*legStiff", "How hard the legs hold the body up.", "Soft", "Stiff"],
+			["*autoAbsorb", "Hands off, the legs soak up crests and dips so the wheels stay on the ground (no speed from it).", "Off", "Strong"],
 			["legDamp", "Leg damping.", "Bouncy", "Damped"],
 			["legComp", "How far the legs bend.", "Little", "Lots"],
 			["legExt", "How far they stretch.", "Little", "Lots"],

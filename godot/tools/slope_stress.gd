@@ -9,6 +9,8 @@ extends Node
 const DT := 1.0 / 120.0
 const DH_EXTRAS := {"wheelbase": 1.2557, "wheelRadius": 0.374, "wheelRadiusRear": 0.355, "bbToRearAxle": 0.4423}
 
+const ROUGH := [[4.1, 0.05, 0.3], [6.7, 0.1, 1.9], [11.3, 0.22, 4.0], [17.9, 0.35, 2.6], [23.3, 0.45, 0.9]]   # wavelength m, height m, phase
+
 class Ground:
 	var kind := "flat"
 	var a := 0.0   # grade / camber angle (rad) or amplitude
@@ -43,6 +45,13 @@ class Ground:
 				return -tan(a) * minf(s, 0.0) if s < 0.0 else 0.0
 			"noise":
 				return noise.get_noise_2d(x, z) * a
+			"rough":   # a trail-like descent: grade a (rad, < 0 = down) + crests and dips 4-23 m long, b x their trail size
+				var s := x - x0
+				if s <= 0.0: return 0.0
+				var hh := tan(a) * s
+				var fade := clampf(s / 15.0, 0.0, 1.0)
+				for w in ROUGH: hh += b * w[1] * sin(TAU * s / w[0] + w[2]) * fade * fade * (3.0 - 2.0 * fade)
+				return hh
 			"dropcamber":   # a ledge of b (b < 0 = a drop) at x0, then ground falling to +z at a (a side-slope landing)
 				return (0.0 if x < x0 else b) - (0.0 if x < x0 else tan(a) * z)
 		return 0.0
@@ -126,6 +135,10 @@ func _ready() -> void:
 		return
 	if "sim=1" in OS.get_cmdline_user_args():
 		_sim(cfg)
+		get_tree().quit(0)
+		return
+	if "skip=1" in OS.get_cmdline_user_args():
+		_skip(cfg)
 		get_tree().quit(0)
 		return
 	if "rollpump=1" in OS.get_cmdline_user_args():
@@ -721,6 +734,48 @@ func _run_all(cfg: Dictionary) -> void:
 ## rollpump=1: 8 sine rollers of each height / wavelength at each speed, ridden hands off, the pump held the whole
 ## way, the pump only down the backsides (hop / the body stick forward): `ROLLPUMP h= L= kmh= mode= dE=` = the energy
 ## won per roller (J/kg, + the rolling / air drag the hands-off run lost on the same ground), air time, crash
+## skip=1: hands off down a trail-like rough descent (crests and dips 4-23 m long) at fixed speeds: how often the bike
+## leaves the ground by itself, sorted by the ground's curve under it at take-off (crest = it must fly, v^2 x curve < -g;
+## dip = thrown off while the ground pressed up), the time on one wheel, the longest ride on the front alone.
+## Repeatable (the trail runs aren't): the way to judge a change to how the bike follows the ground. SKIP lines + a total
+func _skip(cfg: Dictionary) -> void:
+	var tot := {"n": 0, "dip": 0, "crest": 0, "air": 0.0, "front": 0.0, "m": 0.0}
+	for sz in ([0.4] if trace else [0.25, 0.4]):
+		for kmh in ([45.0] if trace else [35.0, 45.0, 55.0, 65.0]):
+			var r := _make(cfg, "rough", deg_to_rad(-8.0), sz); var p: BikePhysics = r[0]; var g: Ground = r[1].terrain
+			g.x0 = 5.0; p.v = kmh / 3.6
+			var n := 0; var dip := 0; var crest := 0; var other := 0; var air := 0.0; var front := 0.0; var front_run := 0.0; var front_max := 0.0
+			var was := false; var kap0 := 0.0; var crash := ""; var ring: Array[String] = []; var pre: Array[String] = []; var dumped := 0
+			for i in int(30.0 / DT):
+				# (held at the speed: pedalled below it, a light brake well above it, on the ground only)
+				var d := _inp(1.0 if p.v < kmh / 3.6 else 0.0, 0.25 if (p.v > kmh / 3.6 + 1.0 and not p.air) else 0.0, 0.0, false, false)
+				p.step(DT, d)
+				if trace:
+					ring.append("  ST x=%.2f y=%.3f vy=%+.2f gy=%.3f pitch=%+.3f pv=%+.2f cf=%s cr=%s xF=%.3f xR=%.3f tyF=%.1f tyR=%.1f leg=%+.3f legf=%+.1f bv=%+.2f relt=%+.3f" % [p.x - g.x0, p.y, p.vy, g.height(p.x, 0.0), p.pitch, p.pitch_v, p.c_f, p.c_r, p.dg_xF, p.dg_xR, p.dg_tyF, p.dg_tyR, p.dg_leg, p.dg_leg_f, p.body_v, p.dg_abs])
+					if ring.size() > 40: ring.pop_front()
+				if p.x < g.x0 + 10.0: continue
+				if p.air and not was:
+					kap0 = (g.height(p.x + 0.6, 0.0) + g.height(p.x - 0.6, 0.0) - 2.0 * g.height(p.x, 0.0)) / 0.36
+					pre = ring.duplicate()
+				if was and not p.air and p.air_time >= 0.05:
+					n += 1; air += p.air_time
+					var ng := p.v * p.v * kap0 / BikePhysics.G
+					if ng > 0.0: dip += 1
+					elif ng < -1.0: crest += 1
+					else: other += 1
+					if trace and dumped < 2 and ng > -1.0 and ng < 0.0:
+						dumped += 1; print("  SKIPEV x=%.1f air=%.2f g=%.2f" % [p.x - g.x0, p.air_time, ng])
+						for ln in pre: print(ln)
+				was = p.air
+				if not p.air and p.rear_air and not p.front_air: front += DT; front_run += DT; front_max = maxf(front_max, front_run)
+				else: front_run = 0.0
+				if r[1].crash != "": crash = r[1].crash; break
+				if p.x > g.x0 + 400.0: break
+			var m := p.x - g.x0 - 10.0
+			print("SKIP size=%.1f kmh=%.0f flights=%d (dip %d, crest %d, other %d) per100m=%.1f air=%.1fs front-only=%.1fs longest=%.2fs %s" % [sz, kmh, n, dip, crest, other, 100.0 * n / maxf(1.0, m), air, front, front_max, crash])
+			tot.n += n; tot.dip += dip; tot.crest += crest; tot.air += air; tot.front += front; tot.m += m
+	print("SKIP TOTAL flights=%d (dip %d, crest %d) per100m=%.2f air=%.1fs front-only=%.1fs over %.0f m" % [tot.n, tot.dip, tot.crest, 100.0 * tot.n / maxf(1.0, tot.m), tot.air, tot.front, tot.m])
+
 func _rollpump(cfg: Dictionary) -> void:
 	for hl in [[0.3, 4.0], [0.3, 6.0], [0.5, 6.0], [0.5, 8.0], [0.48, 10.0], [0.8, 5.0]]:
 		for kmh in [15.0, 25.0, 35.0, 45.0]:
