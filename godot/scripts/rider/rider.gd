@@ -2062,7 +2062,9 @@ func _constrain(pelvis: Vector3, chest: Vector3, p: Dictionary, sty: Dictionary,
 			var d: Vector3 = (handL + handR) * 0.5 - Vector3(chest.x - 0.03, chest.y - 0.04, chest.z)
 			var len := d.length()
 			if len > 1e-4:
-				d *= minf(worst + 0.01, len * 0.6) / len
+				# (continuous: no fixed minimum step, or a pose resting right at the reach limit - the title screen's - popped
+				# 1 cm in and out every time it crossed it; 1.2 = the direction isn't exactly along the arm)
+				d *= minf(worst * 1.2, len * 0.6) / len
 				chest += d
 				pelvis += d * 0.35
 
