@@ -499,10 +499,13 @@ func feed(dt: float, surf: int, speed: float, skid: bool, air: bool, landed: flo
 	if rattle > 25.0: _knock(minf((rattle - 25.0) / 120.0, 1.0) * dt * 3.0)
 	if speed > 12.0 and not air: _knock((speed - 12.0) * 0.004 * dt)   # the wind and buzz at speed
 	if surf == 2:   # riding through water washes the mud off and soaks everything
-		dry = maxf(0.0, dry - dt * 2.0)   # what's left is soaked again
-		mud = maxf(0.0, mud - dt * (0.12 + speed * 0.05))
-		dust = maxf(0.0, dust - dt * (0.6 + speed * 0.1))   # dust rinses off at once
-		wet = minf(1.0, wet + dt * 3.0)
+		# (2026-11-23, user: "don't make the whole bike glossy at once", "water slowly washes away dirt")
+		# wet = how high the water has got (the wet pass draws it from the ground up: wheels and feet first); the
+		# spray climbs faster the faster you go, full in ~3 s at 30 km/h
+		dry = maxf(0.0, dry - dt * 0.5)   # what's left softens again
+		mud = maxf(0.0, mud - dt * (0.02 + speed * 0.008) * clampf(wet * 2.0, 0.2, 1.0))   # ~10 s to rinse at 30 km/h
+		dust = maxf(0.0, dust - dt * (0.08 + speed * 0.015) * clampf(wet * 2.0, 0.2, 1.0))   # ~4 s
+		wet = minf(1.0, wet + dt * (0.12 + speed * 0.035) * (1.0 - 0.5 * wet))
 		return
 	var rate := 0.0
 	if not air and speed > 0.5:
@@ -514,7 +517,7 @@ func feed(dt: float, surf: int, speed: float, skid: bool, air: bool, landed: flo
 	if not air and speed > 0.5:
 		if surf == 1: drate = speed * 0.0032 + (0.05 if skid else 0.0)
 		elif surf == 3: drate = speed * 0.0045 + (0.06 if skid else 0.0)
-	var dgain := drate * dt + (0.04 * landed if landed > 0.0 and surf != 0 else 0.0)
+	var dgain := (drate * dt + (0.04 * landed if landed > 0.0 and surf != 0 else 0.0)) * (1.0 - smoothstep(0.05, 0.5, wet))   # no dust on a wet bike
 	if dgain > 0.0:
 		var dt_col := Color(col.r, col.g, col.b, 1.0)   # the dust IS the ground it came off: the same colour
 		# new dust covers the old: the film follows the ground's colour within ~GROUND_FOLLOW s of riding it
@@ -522,9 +525,8 @@ func feed(dt: float, surf: int, speed: float, skid: bool, air: bool, landed: flo
 		dust = minf(1.0, dust + dgain)
 	# then mud: it only piles up on a dusty bike; a wet one picks it up at once, and much faster
 	var ready := smoothstep(0.4, 0.95, dust)
-	if wet > 0.3:
-		rate *= 2.5
-		ready = 1.0
+	if wet > 0.3:   # wet dirt sticks without a dust coat first, but no faster than on a dusty bike (it came back at once)
+		ready = maxf(ready, 0.5)
 	var gain := (rate * dt + (0.05 * landed if landed > 0.0 and surf != 0 else 0.0)) * MUD_RATE * ready
 	if gain > 0.0:
 		# the colour shifts toward the ground it's picking up now (darker: damp, packed dirt)
@@ -566,7 +568,6 @@ func update(dt: float, bike_root: Node3D) -> void:
 	var warm_trim := false
 	if warm_frames > 0:
 		warm_frames -= 1
-		drips.emitting = true
 		warm_trim = warm_frames == 1   # the last warm-up frame shows the light-match pass instead (compiles it too)
 		if warm_trim: tail = _trim_mat
 	if mon != _mud_on or tail != _tail or bon != _blood_on:
@@ -591,8 +592,7 @@ func update(dt: float, bike_root: Node3D) -> void:
 	# drips off the bike while it is still wet
 	drips.global_position = bike_root.global_position + Vector3(0, 0.55, 0)
 	drips.global_basis = bike_root.global_basis
-	drips.emitting = w > 0.12 or warm_frames > 0
-	drips.amount_ratio = clampf((w - 0.1) * 1.3, 0.0, 1.0)
+	drips.emitting = false   # (user 2026-11-23: the flying drops looked lame)
 
 static func _wheel_v(p: Vector3, r: float) -> Vector4:
 	return Vector4(p.x, p.y, p.z, r)

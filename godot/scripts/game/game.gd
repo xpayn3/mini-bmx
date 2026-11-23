@@ -114,6 +114,7 @@ const AGX_EXP_NIGHT := 3.3
 var rim: DirectionalLight3D
 var _rim_col := Color(1, 1, 1)
 var _rim_e := 0.0
+var _rim_dir := Vector3.ZERO   # the rim light's direction, eased (_rim_update)
 var _rim_tag_t := 0.0
 var _mist_y := NAN           # the mist top (world height); see _mist_update
 var _mist_want := 0.0
@@ -469,6 +470,10 @@ func _build_environment() -> void:
 	# gloss popped on as trees came near, and on / off again each time the box jumped 30 m along the trail
 	refl_probe.reflection_mask = RIM_LAYER
 	refl_probe.cull_mask &= ~RIM_LAYER   # and they don't reflect themselves in it
+	# off (2026-11-23): it re-captured every 30 m / 6 s and the bike paint, chrome and visor then reflected a different
+	# world in one frame (user: "sometimes glossy, sometimes not"); a moving probe can't be blended in Godot. The sky's
+	# own reflections are the same everywhere. BMX_REFL_PROBE=1 brings it back.
+	refl_probe.visible = Env.s("BMX_REFL_PROBE") != ""
 	add_child(refl_probe)
 	# colour grade (split tone) + vignette, drawn over the 3D view
 	var cl := CanvasLayer.new(); cl.layer = -1
@@ -639,10 +644,15 @@ func _rim_update(dt: float) -> void:
 	# the side the key light is on: the light in use (the moon at night), not the true sun under the horizon.
 	# The light node looks from the light toward the scene (-Z), so +Z points at the sun / moon, like _gg_sun did
 	var to_key := sun.global_basis.z
-	var sun_side := signf(side.dot(Vector3(to_key.x, 0.0, to_key.z)))
+	# which side the sun is on, as a smooth -1..1 (it was signf(): with the sun near the view line, every bend of the
+	# trail flipped the rim from one side of the rider to the other in one frame, and the glint on the helmet / frame /
+	# kit jumped on and off with it)
+	var sun_side := clampf(side.dot(Vector3(to_key.x, 0.0, to_key.z)) / 0.5, -1.0, 1.0)
 	# the light travels toward the camera (from behind the rider), down a little, leaning in from the sun's side
 	var travel := (-fh * 0.55 + Vector3.DOWN * 0.35 - side * sun_side * 0.9 * float(LightSettings.current.get("rim_side", 1.0))).normalized()   # ~60 deg off the view: lights the outline
-	rim.global_basis = Basis.looking_at(travel, Vector3.UP if absf(travel.y) < 0.98 else Vector3.FORWARD)
+	# and it turns at most like a slow pan (the trail camera swings round in bends)
+	_rim_dir = travel if _rim_dir == Vector3.ZERO else _rim_dir.slerp(travel, minf(1.0, dt * 2.5)).normalized()
+	rim.global_basis = Basis.looking_at(_rim_dir, Vector3.UP if absf(_rim_dir.y) < 0.98 else Vector3.FORWARD)
 	rim.light_color = _rim_col
 	rim.light_energy = _rim_e if Env.s("BMX_RIM_E") == "" else float(Env.s("BMX_RIM_E"))
 
@@ -1181,7 +1191,7 @@ func _apply_settings() -> void:
 	if blood: blood.enabled = Settings.get_v("blood")
 	dust.emitter.amount = int(RideDust.MAX_RATE * 3.2 * clampf(float(Settings.get_v("fx_density")), 0.2, 1.5))
 	env.ssr_enabled = Settings.get_v("ssr")
-	refl_probe.visible = gi >= 1   # High and up
+	refl_probe.visible = gi >= 1 and Env.s("BMX_REFL_PROBE") != ""   # off: see where it is made (it popped)
 	_probe_pos = Vector3(1e9, 0, 0)
 	env.adjustment_brightness = float(Settings.get_v("brightness"))
 	env.glow_enabled = Settings.get_v("bloom")
@@ -3006,7 +3016,7 @@ func _process(dt: float) -> void:
 		env.fog_depth_end = 3100.0
 		sun.directional_shadow_max_distance = 220.0
 	else:
-		env.fog_depth_begin = (cam.dist + 75) * vd
+		env.fog_depth_begin = (cam.dist + 55) * vd   # (+75: too thin over the 100-124 m hand-over, pop-in showed)
 		env.fog_depth_end = (cam.dist * 1.6 + 130) * vd
 		_shadow_fit()
 	if cam_attr.dof_blur_far_enabled and scenic:   # lookout: keep the view sharp, soften only the horizon
@@ -3015,10 +3025,14 @@ func _process(dt: float) -> void:
 		cam_attr.dof_blur_near_distance = 2.0
 		cam_attr.dof_blur_near_transition = 1.0
 	elif cam_attr.dof_blur_far_enabled:
-		cam_attr.dof_blur_far_distance = cam.dist * 1.25 + 4
-		cam_attr.dof_blur_far_transition = cam.dist * 0.9 + 6
-		cam_attr.dof_blur_near_distance = maxf(0.5, cam.dist * 0.6)
-		cam_attr.dof_blur_near_transition = maxf(0.5, cam.dist * 0.4)
+		# riding: nothing you need to see is blurred (user 2026-11-23: "it blurs stuff in front of our view"; the
+		# diorama focus ended ~17 m past the camera, i.e. the trail ahead). Only the far haze softens; no near blur.
+		# The sense of speed is the side blur in grade.gdshader.
+		# (then "pop-in from far, a little more blur on far stuff": the decorations hand over to the far backdrop at
+		# 100-124 m, so the soft blur starts at 60 m and is full by ~150 m; the trail just ahead stays sharp)
+		cam_attr.dof_blur_far_distance = 60.0
+		cam_attr.dof_blur_far_transition = 90.0
+	cam_attr.dof_blur_near_enabled = bool(Settings.get_v("tilt_shift")) and scenic
 	_pk = _perf("fog_dof", _pk)
 	if terrain.has_method("update_water"): terrain.update_water(st.x, st.z, t)
 	_pk = _perf("water", _pk)
@@ -3048,7 +3062,7 @@ func _update_probe(dt: float, at: Vector3) -> void:
 ## ride fog: a light, sunny distance haze that takes the sky's own colour (no grey wall at the horizon)
 ## and leaves the sky itself clear
 func _ride_fog() -> void:
-	env.fog_density = 0.6
+	env.fog_density = 0.7
 	env.fog_sky_affect = 0.0
 	env.fog_depth_curve = 1.6
 	env.fog_aerial_perspective = 0.75

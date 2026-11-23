@@ -7,6 +7,7 @@ render_mode blend_premul_alpha, depth_draw_never, cull_back, diffuse_burley, spe
 
 global uniform vec4 grime;   // x = mud, y = wet 0..1, z = time
 global uniform mat4 grime_root;
+global uniform vec4 grime_wf;   // front axle in bike-root space (xyz) + tyre radius (w): the ground is y - w
 global uniform float rider_trim;   // light match 0..1: how much of the roll-off below is applied
 uniform sampler2D screen_tex : hint_screen_texture, filter_nearest;
 uniform sampler2D depth_tex : hint_depth_texture, filter_nearest;
@@ -26,7 +27,11 @@ void vertex() {
 }
 
 void fragment() {
-	float w = grime.y;
+	// the water creeps up from the ground: grime.y is how far it has got (0..1 = ground .. above the helmet), and
+	// it dries from the top down. Not the whole bike + rider at once (2026-11-23)
+	float h = v_root.y - (grime_wf.y - grime_wf.w);
+	float level = mix(-0.05, 1.95, grime.y);
+	float w = clamp(grime.y * 1.6, 0.0, 1.0) * (1.0 - smoothstep(level - 0.3, level + 0.05, h));
 	// running drops: columns of beads sliding down in bike-root space
 	vec2 g = vec2(v_root.z + v_root.x * 0.6, v_root.y) * vec2(60.0, 18.0);
 	float col = floor(g.x);
@@ -50,7 +55,7 @@ void fragment() {
 	if (-VERTEX.z + scn.z / scn.w > 0.001) trim = 0.0;
 	ALPHA = 1.0 - (1.0 - a_wet) * (1.0 - trim);
 	float wk = clamp(w * 4.0, 0.0, 1.0);
-	ROUGHNESS = mix(1.0, mix(0.18, 0.04, bead), wk);
-	SPECULAR = (0.5 + bead * 0.5) * wk;
+	ROUGHNESS = mix(1.0, mix(0.32, 0.1, bead), wk);   // wet, not a mirror (0.18 / 0.04 read as glass)
+	SPECULAR = (0.35 + bead * 0.4) * wk;
 	NORMAL = normalize(NORMAL + (VIEW_MATRIX * vec4(0.0, bead * 0.6, 0.0, 0.0)).xyz);
 }
