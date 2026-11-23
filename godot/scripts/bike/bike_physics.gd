@@ -135,6 +135,7 @@ var _land_hit := 0.0   # the biggest hit of the landing being judged
 var _land_pe := 0.0   # the last touch-down's pitch against the ground (rad)
 var _land_up := false   # ... nose up (back wheel first)
 const LIP_SPARE := 0.15   # rad: how much steeper than the lip under the wheels a take-off may leave
+const LIP_SPARE_OWN := 0.05   # rad: the same, hands off (the rider rides with the lip)
 const RIM_CLIMB := 4.0   # m/s: the most upward speed a rim strike on a rising edge gives the frame
 const TYRE_MAX := 0.045   # m: a tyre squashed this far is on its rim
 var _ty_f := 0.0; var _ty_r := 0.0   # each tyre's push last substep (m/s2 of the whole weight)
@@ -370,7 +371,7 @@ func _reset_motion() -> void:
 	_tw_t = 9.0; _ts_t = 9.0; _sb_t = 9.0; _sf_t = 9.0; _hop_tap_t = 9.0; _hop_buf = 0.0; _pop_miss = 0.0; _pop_miss_t = 0.0; _gl = 0.0; _gc = 0.0
 	_bh_back = 0.0; _bh_since = 9.0; _bh_peak = 0.0; gest_hop = 0.0
 	crouch = 0.0; crouch_t = 0.0; rebound = 0.0; _stick_hold = 0.0; _cr_rel = 0.0; _n_grd = 1.0; pop_wait = 0.0; _pop_arm_t = 0.0; squash = 0.0
-	pop_fx = 0.0; _air_pop = 0.0; pro_pop = false; pro_flight = false; squash_fx = 0.0; pop_q = 0.0; pop_time = 0.0; _pop_used = 0.0
+	pop_fx = 0.0; _pop_latch = false; _air_pop = 0.0; pro_pop = false; pro_flight = false; squash_fx = 0.0; pop_q = 0.0; pop_time = 0.0; _pop_used = 0.0
 	land_heavy = 0.0; land_fold = 0.0; _land_hit = 0.0; _land_pe = 0.0; _stun = 0.0; land_yaw = 0.0; _rim_hit = 0.0; _ty_f = 0.0; _ty_r = 0.0; _tuck_in = false
 	man_a = 0.0; man_w = 0.0; man_zone = false; man_lock = 0.0; man_zone_t = 0.0; man_pull = 0.0; _man_over = 0.0; _man_armed = false; _pull_age = 0.0; _man_pw = 0.0; _man_grace = 0.0; _sprint_lift = 0.0
 	pump_push = 0.0; pump_gain = 0.0; pump_idle = 0.0; pump_press_t = 0.0; _pump_release = 0.0; pump_on = false; pleg = 0.0; pump_lift = 0.0; land_perfect = 0.0
@@ -600,6 +601,12 @@ func _step_controls(dt: float, inp: Dictionary, throttle: float, steer_input: fl
 	# rider body stick (gamepad right stick): fore / aft weight, side lean. Works the whole ride
 	pad = bool(inp.get("pad", false))
 	body_in = clampf(float(inp.get("body_fwd", 0.0)), -1.0, 1.0)
+	# (2026-11-24) the stick snapped forward to pop a lip is still forward for a moment after the take-off: it is the pop,
+	# not "nose down" (it spun the bike from 45 to 10 deg in 0.3 s; in the video the bike stays steep). Held until the
+	# stick comes back towards the centre, 0.5 s at most. BMX_OLD_POPSNAP=1
+	if _pop_latch:
+		if body_in < 0.3 or (air and air_time > 0.5) or (not air and pop_wait <= 0.0 and not pro_flight) or _OLD_POPSNAP: _pop_latch = false
+		elif air: body_in = 0.0
 	left_back = float(inp.get("left_back", 0.0))
 	flick_in = clampf(float(inp.get("body_lean", 0.0)), -1.0, 1.0)
 	body_in_s += (body_in - body_in_s) * minf(1.0, dt * 10)
@@ -1835,6 +1842,14 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			# and there the bike follows the ground / keeps its take-off attitude
 			edge_k = smooth01((absf(v) - 2.0) / 5.0) * smooth01((zw_f - hfC - 0.15) / 0.25) * (1.0 - smooth01((absf(_local_slope(f, XR, RWR, cp0)) - 0.05) / 0.1))
 			bal_max *= 1.0 + 2.5 * edge_k
+		# (2026-11-24, research/jump video 2: "load the lip - don't be a noodle and let the lip push the bike back into
+		# you"). Hands off, the rider loads a lip's face through hands and feet, so the bike follows the face to its edge.
+		# On a tight dirt-jump lip the front left the face early and the bike tipped up on its back wheel, leaving 8 deg
+		# steeper than the lip. Not while the player pumps / pops (that is his own) or soaks it up. BMX_OLD_LIPLOAD=1
+		var lip_hold := 0.0; var lip_ref := 0.0
+		if front_air and not rear_air and not air and lip_state == 2 and not pro_pop and crouch < 0.1 and wheelie_up <= 0.0 				and nose_a <= 0.0 and auto_absorb * prep < 0.05 and not _OLD_LIPLOAD:
+			lip_ref = _local_slope(f, XR, RWR, cp0); lip_hold = clampf(prep / 0.3, 0.0, 1.0)
+			bal_max *= 1.0 + 2.5 * lip_hold
 		if true:
 			var R: float = T.weightShift
 			var x_brake: float = -0.8 * R * (1.0 if (brake and not air) else 0.0) + 0.5 * R * clampf(a_drive / 4, 0, 1)
@@ -1972,6 +1987,8 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			if cF != cR or w_up or e_up:
 				var ref := _or(nose_ref, _g_pitch) + (wheelie_up if cR else 0.0) - (nose_a if e_up else 0.0)
 				var wk := 8.0 if e_up else (4.0 if w_up else 1.0 + 5.0 * edge_k)   # holding a wheelie: the whole body works it
+				if lip_hold > 0.0 and cR:   # (loading the lip: the bike held to the face under the rear wheel)
+					ref = lerpf(ref, lip_ref, lip_hold); wk = maxf(wk, 1.0 + 5.0 * lip_hold)
 				alpha += clampf(30 * wk * (ref - pitch) - 9 * sqrt(wk) * pitch_v, -bal_max, bal_max)
 				# the rider's weight is over the front axle in a nose manual: the fork's push doesn't lever the bike
 				# back level (without this it only dived on its fork, the rear never left the ground)
@@ -2158,7 +2175,10 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 		# so every drop off an edge was an instant NOSE DIVE
 		if not now_air and (front_air or rear_air) and was_f and was_r: nose_ref = _or(_gpc_last, gpC)
 		_gpc_last = gpC if (cF and cR) else _gpc_last
-		if front_air and pitch - _or(nose_ref, _g_pitch) < -T.noseDive and not _balancing() and _man_grace <= 0.0: _crash("NOSE DIVE!")
+		# (on the touch-down step itself the reference is the ground it lands on: nose_ref was still the lip's slope from
+		# the take-off, so a back wheel landing down a 29 deg landing read 45 deg nose down = NOSE DIVE. BMX_OLD_NOSEREF=1)
+		var n_ref: float = _g_pitch if (air and not _OLD_NOSEREF) else _or(nose_ref, _g_pitch)
+		if front_air and pitch - n_ref < -T.noseDive and not _balancing() and _man_grace <= 0.0: _crash("NOSE DIVE!")
 		var snN := sin(pitch)
 		w_f = hfC if cF else y + XF * snN
 		w_r = hrC if cR else y + XR * snN
@@ -2191,7 +2211,9 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			# never exceeds the speed along the ground; the frame can't leave pointing far above that
 			if not _balancing() and _man_grace <= 0.0 and vy > 0.0:
 				var lip_a := maxf(_or(_gpc_last, gpC), _local_slope(f, XR, RWR, cp0))
-				var up_max := minf(lip_a + LIP_SPARE, 1.2)
+				# (hands off he rides WITH the lip: LIP_SPARE_OWN; the player's pop / crouch may leave steeper - video 2, 2026-11-24)
+				var spare: float = LIP_SPARE if (pop_wait > 0.0 and pro_pop) or crouch > 0.1 or _OLD_LIPLOAD else LIP_SPARE_OWN
+				var up_max := minf(lip_a + spare, 1.2)
 				var vy_cap := maxf(absf(v) * sin(up_max), 2.5)   # (a bounce / small hop off a crest or down a slope: never cut)
 				if Env.s("BMX_LIP_PROBE") != "": print("LIPCAP v=%.2f vy=%.2f cap=%.2f lip=%.2f pitch=%.2f" % [v, vy, vy_cap, lip_a, pitch])   # tests
 				# (the same tip-up leaves the frame pointing 60-80 deg nose up and still turning back: a loop / SLAM every
@@ -2216,7 +2238,13 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 				pop = maxf(0.0, _leg_dv(pop_wait) - _pop_used); pop_q = pop_wait; pop_wait = 0.0
 				_air_pop = clampf(pop_q, 0.0, 1.0) if pro_pop else 0.0   # (the pro pull-up: only after the player's own pump)
 				pro_flight = pro_pop; pro_pop = false
-				_pop_apply(pop); _pop_used += pop; pop_fx = 1.0
+				# (2026-11-24, research/jump video 2, "load, then direct the energy": squash = forward through the lip, neutral =
+				# with the lip, pop = straight up. The player's own pop pushes off the face (up, square to it); the rider's own
+				# hands-off one rides WITH the lip: the same leg energy along the way he is going. Pushed square to a steep,
+				# slow dirt-jump lip it took forward speed away and left 20 deg steeper than the lip. BMX_OLD_POPDIR=1)
+				if pro_flight or _OLD_POPDIR: _pop_apply(pop)
+				else: _pop_along(pop)
+				_pop_used += pop; pop_fx = 1.0
 				if pop_time > 0.9 and pop_q > 0.85 and host.msg_idle(): host.flash("PERFECT POP")
 			elif vy > 0.3 and ((squash > 0.05 and kick_t <= 0.0) or auto_absorb * prep > 0.05):
 				# the legs let the bike come up into the body: the centre of mass flies a flatter line than the lip's. The
@@ -2447,7 +2475,7 @@ func _step_hop(dt: float, inp: Dictionary) -> void:
 	var sq_in: float = clampf((body_in - 0.25) / 0.45, 0.0, 1.0) * float(T.get("squashPower", 1.0)) if (_sf_t > 0.25 and gest_hop <= 0.0 and not _nosing()) else 0.0
 	if not air: squash += (sq_in - squash) * minf(1.0, dt * 10.0)
 	else: squash = maxf(0.0, squash - dt * 4.0)
-	pop_fx = maxf(0.0, pop_fx - dt / 0.45); squash_fx = maxf(0.0, squash_fx - dt / 0.5)
+	pop_fx = maxf(0.0, pop_fx - dt / (0.65 if (pro_flight and air and not _OLD_POPSNAP) else 0.45)); squash_fx = maxf(0.0, squash_fx - dt / 0.5)
 	if pop_wait > 0.0:
 		_pop_arm_t -= dt
 		if _pop_arm_t <= 0.0: pop_wait = 0.0   # the lip never came (braked, turned off it)
@@ -2899,6 +2927,19 @@ func _pop_apply(dv: float) -> void:
 	var th := clampf(atan2(vy, maxf(absf(v), 0.5)), -0.6, 1.2)
 	vy += dv * cos(th); v -= signf(v) * minf(absf(v), dv * sin(th))
 
+## the legs' push given along the way rider + bike are going (the same energy as dv square to it: dv^2 / 2 per kg)
+func _pop_along(dv: float) -> void:
+	var sp := sqrt(v * v + vy * vy)
+	if sp < 0.5:
+		_pop_apply(dv); return
+	var k := sqrt(sp * sp + dv * dv) / sp
+	v *= k; vy *= k
+
+static var _OLD_POPSNAP := OS.get_environment("BMX_OLD_POPSNAP") != ""
+var _pop_latch := false
+static var _OLD_NOSEREF := OS.get_environment("BMX_OLD_NOSEREF") != ""
+static var _OLD_LIPLOAD := OS.get_environment("BMX_OLD_LIPLOAD") != ""
+static var _OLD_POPDIR := OS.get_environment("BMX_OLD_POPDIR") != ""
 static var _OLD_AUTOPOP := OS.get_environment("BMX_OLD_AUTOPOP") != ""
 static var _OLD_AIRLEAN := OS.get_environment("BMX_OLD_AIRLEAN") != ""
 var test_rider := false     # the playground's test rider is riding (Game.set_demo)
@@ -2950,6 +2991,7 @@ func _pop_now(pw: float) -> void:
 		pop_time = 1.0 - 0.4 * smooth01((lt - 0.12) / maxf(0.02, win - 0.12))
 		pop_wait = maxf(pop_wait, pw * pop_time); _pop_arm_t = lt + 0.3; pop_fired = true
 		pro_pop = true
+		if body_in > 0.3: _pop_latch = true
 		compress_v += 2.0 * pw
 		if man_a > 0.05: man_lock = maxf(man_lock, 0.3)
 		if Env.s("BMX_TRICK") != "" or Env.s("BMX_FORGIVE_PROBE") != "": print("POP lip in %.2fs power=%.2f timing=%.2f edge=%s" % [lt, pw, pop_time, edge])   # tests

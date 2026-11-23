@@ -1892,6 +1892,32 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   = off; `BMX_LAND_PROBE=1` prints `LANDANGLE err= cut=`. Suite baseline re-saved (it predated the whole jump / brake
   work of the day).
 
+### Jump technique matched to video 2 (2026-11-24, research/jump "The MTB Jumping Technique That Changed Everything")
+- His model: load the lip, then direct the energy: squash = forward through the lip (low), neutral = with the lip (mid),
+  pop = straight up (high). Side views 13:24-14:38 compared frame by frame with ours: playground lane DESIGNED JUMPS now
+  starts with **VIDEO DIRT JUMP** (`dj_video`: his jump measured off the frames with the wheel as the scale: 1.45 m
+  42 deg lip, R 1.5 m, step-up landing 1.5 m). Shots: `BMX_DIAG=off BMX_LIP_SHOT=prefix BMX_LIP_N=14 BMX_LIP_STEP=0.1`
+  + `BMX_PG_PILOT_TECH=none|pop|squash`. (The clip with the car behind is on his hardtail; the big dirt jump on a
+  full-suspension e-bike.)
+- Found + fixed (`bike_physics.gd`): (1) hands off the rider's own pop pushed square to the lip; on a slow steep lip that
+  takes forward speed away: left at 61 deg off a 42 deg lip and landed at 11 km/h. Now it goes along the travel, same leg
+  energy (`_pop_along`); the player's pop still pushes off the face (`BMX_OLD_POPDIR=1`). (2) The front left a tight face
+  early and the bike tipped up on its back wheel: hands off he now loads the lip, the bike held to the face under the rear
+  wheel (`lip_hold`, `BMX_OLD_LIPLOAD=1`), and leaves within `LIP_SPARE_OWN` 0.05 rad of the lip (the player's pop / crouch
+  keeps `LIP_SPARE` 0.15). Hands off now leaves -1.2..+1.3 deg off the lip on five designed jumps, so
+  `JumpDesign.TAKEOFF_EXTRA` 8 -> 0 and the trail jumps were re-baked (`terrain_cs_cmp` EXACT, `wood_edge_probe` walls=0).
+  (3) NOSE DIVE on a back-wheel landing: on the touch-down step the check compared with the take-off lip's slope
+  (`nose_ref`), so popped jumps landed rear first crashed: now the landing ground (`BMX_OLD_NOSEREF=1`). (4) The stick
+  snapped forward to pop, still forward just after the take-off, read as "nose down" and levelled the bike at once: held
+  as the pop until the stick comes back (`_pop_latch`, `BMX_OLD_POPSNAP=1`); a popped flight's stand-tall lasts 0.65 s.
+- Poses (`rider.gd`, `BMX_OLD_JUMPPOSE=1`): load on the face 15 cm deep, chest low; squash = hips well back and low,
+  chest folded over the bars; popped = stands up behind the steep bike (hips back and up, torso upright) before the tuck.
+- dj_video at 28 km/h: neutral 41 deg / 0.6 m / CLEAN, squash 20 deg / 0.2 m, pop 56 deg / 1.7 m / CLEAN-PERFECT; the
+  popped bike pulls up to ~42 deg and holds ~0.5 s (his ~55 deg). Old hand-built playground jumps take off ~11 deg flatter
+  hands off (suite re-saved); trail demo 150 s seeds 4242 / 5: no crashes, short landings soft.
+- Open: the bike pitches up less than his after a pop (42 vs 55 deg), so the arms stay bent; hands-off landings still
+  come in nose-up on short flights.
+
 ### Developer view of the test playground (`scripts/levels/ride_diag.gd`) - telemetry + sliders for riding code
 - **Only in the test playground** (user decision 2026-11-21: developer tools live in that level, normal rides have none).
   **Layout (2026-11-22, user: "tidy, compact, nothing covering")**: a slim **tuning column** on the left (the TuneCard,

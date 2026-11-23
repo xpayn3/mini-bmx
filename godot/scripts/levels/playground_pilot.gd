@@ -243,7 +243,7 @@ func tick(game, dt: float) -> Dictionary:
 		var lip_in: float = ph.lip_last if ph.lip_state == 2 else INF
 		var rel: float = 0.4 if tech == "early" else tech_rel
 		if tech == "pop" or tech == "early":
-			if ph.air: out.body_fwd = 1.0 if ph.air_time < 0.12 else 0.0
+			if ph.air: out.body_fwd = 0.0   # (the thumb is back at the centre: pushed again in the air it read as nose down)
 			elif lip_in < rel: out.body_fwd = 1.0
 			elif lip_in < INF: out.body_fwd = -1.0
 		elif tech == "hold":

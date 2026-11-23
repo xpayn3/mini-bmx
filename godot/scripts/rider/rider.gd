@@ -5,6 +5,7 @@ extends Node3D
 ## +Y up, +Z the rider's right; the bottom bracket sits near the origin (0.297 up on the BMX).
 
 const G := preload("res://scripts/rider/rider_geo.gd")
+static var _OLD_JUMPPOSE := OS.get_environment("BMX_OLD_JUMPPOSE") != ""
 const GEAR := preload("res://scripts/rider/rider_gear.gd")
 
 ## neutral riding style (posepanel.js NEUTRAL): BMX = all of these
@@ -1491,13 +1492,24 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# away, so the bike has room to come up in front of him)
 	# (2026-11-23, sized from slow-motion of a pro off a lip, research/jump: wound right down into the transition, then
 	# stood fully tall through the lip with the bars pulled to the hips. It was -2 / +6 cm: the jump looked dead)
-	pelvis.x += -0.06 * j_pre + 0.10 * j_ext - 0.13 * j_sq - 0.07 * j_fold - 0.02 * sm_reach
-	pelvis.y += -0.08 * j_pre + 0.13 * j_ext - 0.03 * j_sq - (0.09 if old_lp else 0.13) * j_fold + (0.06 if old_lp else 0.09) * sm_reach
+	# (2026-11-24, video 2 side views, research/jump: on every take he loads the face deep - knees ~90 deg, hips ~15 cm
+	# down and back, chest low; squashing, the hips go well back and low and the chest folds down over the bars while the
+	# arms push the bike forward through the lip; popping, the legs are dead straight at the edge. BMX_OLD_JUMPPOSE=1)
+	if _OLD_JUMPPOSE:
+		pelvis.x += -0.06 * j_pre + 0.10 * j_ext - 0.13 * j_sq - 0.07 * j_fold - 0.02 * sm_reach
+		pelvis.y += -0.08 * j_pre + 0.13 * j_ext - 0.03 * j_sq - (0.09 if old_lp else 0.13) * j_fold + (0.06 if old_lp else 0.09) * sm_reach
+	else:
+		pelvis.x += -0.09 * j_pre + 0.10 * j_ext - 0.16 * j_sq - 0.07 * j_fold - 0.02 * sm_reach
+		pelvis.y += -0.15 * j_pre + 0.17 * j_ext - 0.12 * j_sq - (0.09 if old_lp else 0.13) * j_fold + (0.06 if old_lp else 0.09) * sm_reach
+		# popped off the lip (video 2 slow frames): he stands up BEHIND the steep bike - hips back over the rear wheel and
+		# up, torso upright, arms straight out to the bars - for ~half a second before the knees come up into the tuck
+		var j_up: float = sm_popfx * air
+		pelvis.x -= 0.20 * j_up; pelvis.y += 0.06 * j_up
 
 	# chest
 	# (pedalling out of the saddle the chest stays forward over the bars)
 	var ang: float = 0.52 - 0.2 * clampf(-bstick, 0.0, 1.0) - float(sty.pedalChest) * pedal + 0.12 * spr + 0.3 * eff + 0.15 * (comp / 0.3) + 0.08 * air + sty.lean * (1 - 0.5 * pedal) + 0.32 * aero_a + 0.6 * aero_g
-	ang += 0.3 * j_pre - 0.3 * j_ext + 0.06 * j_sq + (0.12 if old_lp else -0.22) * sm_popfx * air + 0.28 * j_tuck + 0.42 * j_fold - 0.18 * sm_reach
+	ang += (0.3 if _OLD_JUMPPOSE else 0.42) * j_pre - 0.3 * j_ext + (0.06 if _OLD_JUMPPOSE else 0.38) * j_sq - (0.0 if _OLD_JUMPPOSE else 0.35) * sm_popfx * air + (0.12 if old_lp else -0.22) * sm_popfx * air + 0.28 * j_tuck + 0.42 * j_fold - 0.18 * sm_reach
 	# spinning in the air: tall and compact over the bike (chest up, knees in), the head and shoulders lead
 	var spin_style: float = smoothstep(0.8, 3.5, absf(_num(p, "airSpin"))) * air
 	ang = lerpf(ang, 0.42, 0.7 * spin_style)
