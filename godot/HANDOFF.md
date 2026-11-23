@@ -1552,6 +1552,39 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   (`TapeSim._pose_held`: straight once taut, parabola sag while slack) on the drawn front tyre (`Game` passes
   `rig.wheel_f`), not simulated, so it never trails the bike. Strips draw as one ArrayMesh from packed arrays (no
   per-vertex calls), ground heights are cached per point, the strip shader is warmed at ride start.
+  **In C# (2026-11-23, user: "low fps sometimes")**: `world/TapeStripCs.cs` does each strip's Verlet step (`Step`, one
+  call per strip per frame, float arrays inside) and builds every ribbon + the mesh in one call (`Draw`: indexed, vertices
+  shared within each stripe colour, smooth normals; a strip's ribbon is rebuilt only when it moved, `redo`); `Warm()` at
+  ride start JIT-compiles it. Strips over `LOD_NEAR` 30 m from the rider step every `LOD_EVERY` 3rd frame with the time
+  added up. GDScript `_step` / `_ribbon` stay as the fallback (no C#, or `BMX_TAPE_GD=1`). Measured, 3 torn strips: ~0.34 ms
+  a frame vs ~0.83 ms GDScript. The game's wind never drops below ~3 m/s, which keeps lifting the foil, so strips never come
+  to rest (a sleep rule was tried: it never triggered). The "19 ms snap frame" first seen was the test's own `STAKE` print;
+  the real snap frame is ~1.5-3 ms (stake debris, fresh ground reads). Probe `BMX_TAPE_PERF=1` (`TAPEPERF strips= avg_us=
+  max_us=` per second; mutes the `STAKE` prints). Measure with no other game window open: another instance doubled the times.
+  **Stretch fixes (same day, user: "stretch glitchy, don't stretch so much, sometimes ignores it")**: (1) the tyre keeps the
+  spot of tape it first hit (`grab` index picked once): the grab used to be re-projected every frame, so riding across at a
+  shallow angle slid it to the span's end, where it let go and the tape sprang back (every weaving crossing in a
+  `BMX_FOLLOW=1 BMX_WEAVE=4.5` ride did that); now only backing out (`d < -0.35`) or a crash releases it, otherwise it
+  stretches and snaps. (2) The slack side's sag (~sqrt(slack)) snapped the middle up in a frame or two as it pulled taut:
+  eased (`SAG_EASE` 22/s). (3) Held spans re-read the ground every 5 cm, not 20. (4) `SNAP_STRAIN` 0.17 -> 0.07.
+  Probe `BMX_TAPE_PROBE=1`: `TAPECROSS su= v=` (a hit), `TAPESKIP` (wheels over it), `TAPEREL` (let go), `TAPESNAP age=
+  acc_median= acc_max=` (held points' acceleration in m/s^2: worst frames 280-1700 before, 40-130 after on the square-on
+  test). `BMX_TAPE=dir/prefix` now also saves a shot every sample while the tape is stretched.
+  **Then (user: "stretch kinda weird", "flickering when it snaps")**: (1) the tape catches where it would at its
+  height: on the tyre's front below the tyre's top, else on the front of the fork (`TapeSim._contact`; `Game` passes
+  `push_at` = {axle, fwd, axis (steering axis in world), r}); it used to wrap the tyre's leading edge moved up to 85 cm,
+  a corner in mid-air half a metre ahead of the bars. The tyre's edge finds the hit first, so the tape stays as it hung
+  until the fork reaches it (`d0`: backing out from there lets go). (2) The tape slides over the fork: both sides get
+  their share of its length by distance (`ra` = length x la / (la + lb)) and the points are laid by length along it,
+  the corner between two points (no fixed grab point: that stretched one side's stripes long). (3) **Flicker = the
+  twist**: the ribbon's drift term was the ride's whole wind clock x the twist's 0..1 ramp after a tear, so minutes
+  into a ride a torn half spun ~13 turns / s for half a second (a strobe); now the time since the strip was made
+  (`tb`). (4) Torn halves keep their real piece lengths (`segs`; a uniform span / 30 is shorter and yanked them into
+  loops) and whip back at `RECOIL` 3.5 m/s (was 7). (5) The ribbon's width direction is carried along the strip
+  (parallel transport) and from last frame at its first point (no jump where the tape points straight up / down).
+  "SNAP!" pops when it tears (`TapeSim.torn` -> `Game._on_tape_torn`). Tests: `BMX_TAPE_FRAMES=n` (+ `BMX_TAPE=dir/
+  prefix`) = time at 0.15x from the hit and n frames kept in memory, written after (a png a frame dropped it to 4 fps);
+  `BMX_WIND_T0=300` starts the wind clock 5 minutes in (the strobe only showed late in a ride).
 - **Tape stakes take damage** (`Terrain.stake_yank`, event-driven, no per-frame cost while nothing is loose): a snap yanks
   both stakes toward the pull with severity ~ speed / 11 m/s x how hard it was stretched (random 0.55-1.45): < 0.2 nothing,
   then it **leans** (accumulates up to 43 deg, a leaning stake gives way sooner), past 0.8 it **snaps at the ground** (stub

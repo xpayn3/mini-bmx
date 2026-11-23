@@ -216,6 +216,8 @@ func _ready() -> void:
 	else:
 		terrain = load("res://scripts/world/terrain.gd").new((int(Env.s("BMX_TITLE_SEED")) if Env.s("BMX_TITLE_SEED") != "" else TITLE_SEED) if title_world else GameState.seed)
 	add_child(terrain)
+	if terrain._tapes and not terrain._tapes.torn.is_connected(_on_tape_torn):
+		terrain._tapes.torn.connect(_on_tape_torn)
 	terrain.view_scale = float(Settings.get_v("view_distance"))   # before the first chunks are built
 	terrain.update_stream(0, 0, INF)
 	if reuse.has("far_hills"):
@@ -1194,6 +1196,12 @@ func flash(text: String) -> void:
 	msg_t = 1.4
 	if Env.s("BMX_MAN_PROBE") != "": print("FLASH ", text, " v=%.1f" % phys.v)   # tests
 	if hud: hud.flash(text)
+
+var _tape_front := {}   # what holds a caught tape: the drawn front axle, heading, steering axis, wheel radius (TapeSim.push_at)
+
+## a caught race tape tore (TapeSim.torn): the pop comes now, not when the tyre first touched it
+func _on_tape_torn(speed: float) -> void:
+	if speed > 3.0 and not phys.crash_on: flash("SNAP!")
 
 func msg_idle() -> bool:
 	return msg_t <= 0
@@ -2794,9 +2802,16 @@ func _process(dt: float) -> void:
 	if not phys.crash_on and hud and hud.life < 1.0:   # a full-health rider rolls past a pack and leaves it
 		if terrain.take_pack(st.x, st.y, st.z) != null:
 			hud.on_health_pack(HealthPack.HEAL)
-	# what a caught tape stretches over: the drawn front tyre's leading edge (the drawn bike, not the physics
-	# state a step ahead of it, so the tape sits on the tyre you see)
-	terrain.tape_push(null if phys.crash_on else rig.wheel_f.global_position + Vector3(cos(hd), 0.0, -sin(hd)) * rig.wheel_rf)
+	# what a caught tape stretches over: the drawn bike's front (the tyre, or the fork above it; the drawn bike,
+	# not the physics state a step ahead of it, so the tape sits on the bike you see)
+	if phys.crash_on:
+		terrain.tape_push(null)
+	else:
+		_tape_front["axle"] = rig.wheel_f.global_position
+		_tape_front["fwd"] = Vector3(cos(hd), 0.0, -sin(hd))
+		_tape_front["axis"] = ((rig.steer_n.get_parent() as Node3D).global_basis * rig.steer_axis).normalized()
+		_tape_front["r"] = rig.wheel_rf
+		terrain.tape_push(_tape_front)
 	if contact != null:   # contact shadows on the drawn bike (and the body in a crash)
 		var wf: Vector3 = rig.wheel_f.global_position
 		var wr: Vector3 = rig.wheel_r.global_position
