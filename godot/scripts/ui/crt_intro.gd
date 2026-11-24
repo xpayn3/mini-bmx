@@ -59,6 +59,8 @@ var _tv_at := Vector3.ZERO   # world point of the middle of the glass
 var svc: SubViewportContainer
 var _frames := 0             # frames the room's viewport has drawn: it is only shown from the 4th (its first frames are
                              # uninitialised GPU memory: once that was the TV's texture atlas, a full-screen flash)
+var logo: TextureRect       # the RUNOUT splash picture, up while main builds the ride behind it (the engine's boot splash shows the same one)
+var _logo_a := 1.0
 var _world_off := false      # the game's own 3D (title world) is not drawn while the intro covers it
 
 func _ready() -> void:
@@ -91,6 +93,15 @@ func _ready() -> void:
 	vp.msaa_3d = Viewport.MSAA_2X   # light: this is a dark, soft scene, 2x is plenty
 	vp.positional_shadow_atlas_size = 1024
 	svc.add_child(vp)
+	# the build holds the main thread for a while: show the logo (a static picture is fine, it is drawn before the block) instead of plain black
+	if _freeze < 0.0 and ResourceLoader.exists("res://assets/splash/logo.png"):
+		logo = TextureRect.new()
+		logo.texture = load("res://assets/splash/logo.png")
+		logo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		logo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		logo.set_anchors_preset(Control.PRESET_FULL_RECT)
+		logo.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		root.add_child(logo)
 	_build_room()
 	overlay = ColorRect.new()
 	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -125,6 +136,10 @@ func _process(delta: float) -> void:
 		t = _freeze
 	else:   # (while main builds the ride behind it the clock waits just before the TV comes on: no dead black time on top of the build)
 		t = minf(t + dt, T_ON - 0.05) if hold else t + dt
+	if logo:   # on until the ride is built, then it melts away as the TV comes on
+		if not hold: _logo_a = maxf(_logo_a - get_process_delta_time() / 0.7, 0.0)
+		logo.modulate.a = _logo_a
+		if _logo_a <= 0.0: logo.queue_free(); logo = null
 	if _skip >= 0.0: _skip += dt
 	if _shots != "" and (t >= _next_shot or (still and _still_frames == 12)) and t < T_END:
 		_next_shot += float(OS.get_environment("BMX_INTRO_SHOT_STEP")) if OS.get_environment("BMX_INTRO_SHOT_STEP") != "" else 0.5
