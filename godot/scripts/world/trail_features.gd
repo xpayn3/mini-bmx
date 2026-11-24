@@ -96,6 +96,7 @@ const WOOD_BEVEL_MAX := 0.44
 
 class Wood:
 	extends RefCounted
+	static var OLD_BRIDGE := OS.get_environment("BMX_OLD_BRIDGE") != ""
 	var kind: int   # 0 woodKicker, 1 skinny, 2 bridge
 	var u0: float
 	var u1: float
@@ -124,11 +125,18 @@ class Wood:
 				return base
 			return _ramp(u1 - 2.0, u1, 0.3, 0.02, u)
 		else:
-			if u < 2.0:
-				return _ramp(0.0, 2.0, 0.02, 0.45, u)
-			if u < u1 - 2.0:
+			# (2026-11-24) eased on / off over up to 9 m, no corner: the old 2 m ramp ended in a 12 deg kink that threw a
+			# rider at ~45 km/h ~9 m along the narrow deck, and over a gorge a little drift in that flight dropped him in.
+			# Eased, a rider stays on it up to ~63 km/h (crest: v^2 x 6 h / L^2 < g); BMX_OLD_BRIDGE=1 = the old ramp
+			var L := 2.0 if OLD_BRIDGE else minf(9.0, u1 * 0.5 - 1.0)
+			if u < L:
+				return _ramp(0.0, L, 0.02, 0.45, u) if OLD_BRIDGE else _ease(0.0, L, 0.02, 0.45, u)
+			if u < u1 - L:
 				return 0.45
-			return _ramp(u1 - 2.0, u1, 0.45, 0.02, u)
+			return _ramp(u1 - L, u1, 0.45, 0.02, u) if OLD_BRIDGE else _ease(u1 - L, u1, 0.45, 0.02, u)
+	static func _ease(a: float, b: float, h0: float, h1: float, u: float) -> float:
+		var t := minf(1.0, maxf(0.0, (u - a) / (b - a)))
+		return h0 + (h1 - h0) * (t * t * (3.0 - 2.0 * t))
 	static func _ramp(a: float, b: float, h0: float, h1: float, u: float) -> float:
 		return h0 + (h1 - h0) * minf(1.0, maxf(0.0, (u - a) / (b - a)))
 

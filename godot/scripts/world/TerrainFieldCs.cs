@@ -169,11 +169,21 @@ internal sealed class TfWood
 				return bw;
 			return ramp(u1 - 2.0, u1, 0.3, 0.02, u);
 		}
-		if (u < 2.0)
-			return ramp(0.0, 2.0, 0.02, 0.45, u);
-		if (u < u1 - 2.0)
+		// (trail_features.gd Wood.top: eased on / off over up to 9 m, no corner; BMX_OLD_BRIDGE=1 = the old 2 m ramp)
+		double L = OLD_BRIDGE ? 2.0 : TerrainFieldCs.minf(9.0, u1 * 0.5 - 1.0);
+		if (u < L)
+			return OLD_BRIDGE ? ramp(0.0, L, 0.02, 0.45, u) : ease(0.0, L, 0.02, 0.45, u);
+		if (u < u1 - L)
 			return 0.45;
-		return ramp(u1 - 2.0, u1, 0.45, 0.02, u);
+		return OLD_BRIDGE ? ramp(u1 - L, u1, 0.45, 0.02, u) : ease(u1 - L, u1, 0.45, 0.02, u);
+	}
+
+	private static readonly bool OLD_BRIDGE = System.Environment.GetEnvironmentVariable("BMX_OLD_BRIDGE") is { Length: > 0 };
+
+	private static double ease(double a, double b, double h0, double h1, double u)
+	{
+		double t = TerrainFieldCs.minf(1.0, TerrainFieldCs.maxf(0.0, (u - a) / (b - a)));
+		return h0 + (h1 - h0) * (t * t * (3.0 - 2.0 * t));
 	}
 
 	private static double ramp(double a, double b, double h0, double h1, double u)

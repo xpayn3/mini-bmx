@@ -2142,8 +2142,13 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   (`_course_from`), so the pick can't differ. `BMX_OLD_JUMPSIZE=1` = always the big one. 5 seeds: 7 / 3 / 12 / 6 jumps
   at sizes 0 .. 3; kickers mean 0.0 m from the aim (old -2.9), hard landings 3 (old 6); tables -2.6 m (old -9.3).
   **Every world's route features change after its first jump section.** terrain_cs_cmp EXACT, trail_grow_probe /
-  rope_find PASS, wood_edge_probe walls=0. Demo AI 120 s, seeds 4242 / 5 / 12: every built jump on its landing;
-  seed 4242 crashes twice at the gorge bridge at s=1422 (falls in) with the old sizes too: not looked into.
+  rope_find PASS, wood_edge_probe walls=0. Demo AI 120 s, seeds 4242 / 5 / 12: every built jump on its landing.
+- **Gorge / plain bridges eased on and off (same day)**: the deck (`TrailFeatures.Wood.top` kind 2, C# `TfWood.top`) rose
+  over a 2 m ramp ending in a 12 deg kink: at ~45 km/h it threw the rider ~9.5 m along the narrow (2.8 m) deck, and over a
+  gorge a little drift in that flight dropped him in (seed 4242, s=1419: the demo AI crashed there every run). Now the
+  ramps are smoothstep over min(9 m, half the bridge - 1 m): no corner, the crest's v^2 x 6 h / L^2 stays under g to
+  ~63 km/h on the gorge's 36 m deck. Demo AI and the follow rider (64 km/h) now cross it on the deck; `BMX_OLD_BRIDGE=1`
+  = the old ramps (the follow rider launched at x=1128 and fell in). terrain_cs_cmp EXACT, probes PASS, walls=0.
 - `Feat.v` / `Feat.vmin` = a sized jump's design speed x the type's share (`TerrainField.SIZE_V_K`; kickers at their full
   design speed, never under 90 %: slower the AI rolled off a small kicker's open back nose first): the demo AI plans each
   jump at its own speed (DemoPilot reads `v` / `vmin` since the level builder).
