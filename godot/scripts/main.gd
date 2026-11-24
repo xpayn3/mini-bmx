@@ -1416,7 +1416,7 @@ func _setup_computer(content: HBoxContainer) -> void:
 func _setup_route(content: HBoxContainer) -> void:
 	var col := VBoxContainer.new()
 	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	col.add_theme_constant_override("separation", Tokens.S3)
+	col.add_theme_constant_override("separation", Tokens.S2)
 	content.add_child(col)
 	var rv := route_view
 	# the world seed
@@ -1459,7 +1459,8 @@ func _setup_route(content: HBoxContainer) -> void:
 	var rows := [
 		["jumps", "JUMPS", "NONE", "JUMP PARK"],
 		["twist", "BENDS", "FLOWING", "TIGHT & TWISTY"],
-		["rolling", "ROLLING & DROPS", "SMOOTH", "ROLLERS & CLIFFS"]]
+		["rolling", "ROLLING & DROPS", "SMOOTH", "ROLLERS & CLIFFS"],
+		["grade", "STEEPNESS OF THE MOUNTAINS", "GENTLE", "STEEP"]]
 	for rw in rows:
 		var k: String = rw[0]
 		var head := HBoxContainer.new()
@@ -1472,7 +1473,7 @@ func _setup_route(content: HBoxContainer) -> void:
 		sl.scrollable = false
 		sl.value = RouteStyle.get_value(k)
 		sl.add_theme_stylebox_override("focus", StyleBoxEmpty.new())   # the focus wash covered the whole slider (the knob vanished)
-		sl.custom_minimum_size.y = 28
+		sl.custom_minimum_size.y = 20
 		sl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		sl.value_changed.connect(func(v: float):
 			RouteStyle.set_value(k, v, false)

@@ -43,7 +43,7 @@ var _timer: Timer
 var _t0 := 0
 var _build_ms := 0.0
 static var _hcache := {}   # land heights per 10 m cell for the seed (worker only): the land never depends on the style
-static var _hseed := -1
+static var _hseed := ""
 
 
 func _init() -> void:
@@ -180,9 +180,10 @@ func _work(seed_in: int, style: Dictionary) -> void:
 
 ## worker: the paper map's land for each ROW_M of trail: a shaded picture + contour lines, from the field's land heights
 func _land_rows(f: TerrainField, C: TrailCourse, seed_in: int) -> Array:
-	if _hseed != seed_in:
+	var hk := "%d_%.3f" % [seed_in, float(f.grade_k)]   # (the land's shape depends on the grade too)
+	if _hseed != hk:
 		_hcache = {}
-		_hseed = seed_in
+		_hseed = hk
 	var n := C.n
 	var x_start: float = C.X[0]
 	var nrows := 1   # one continuous map of the whole trail

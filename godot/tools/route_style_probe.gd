@@ -5,7 +5,7 @@ extends SceneTree
 
 func _init() -> void:
 	var seeds := [4242, 5]
-	var styles := {"default": {}, "flow": RouteStyle.PRESETS[0][1], "jumps": RouteStyle.PRESETS[2][1], "tech": RouteStyle.PRESETS[3][1], "gnarly": RouteStyle.PRESETS[4][1]}
+	var styles := {"default": RouteStyle.DEFAULT, "flow": RouteStyle.PRESETS[0][1], "jumps": RouteStyle.PRESETS[2][1], "tech": RouteStyle.PRESETS[3][1], "gnarly": RouteStyle.PRESETS[4][1]}
 	for sd in seeds:
 		for nm in styles:
 			var t0 := Time.get_ticks_usec()

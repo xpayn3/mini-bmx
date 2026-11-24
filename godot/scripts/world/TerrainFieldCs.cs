@@ -496,6 +496,7 @@ internal sealed class TfShared
 	public double rp_a, rp_sg;
 	public double[] pitches;
 	public double pitch_share;
+	public double grade_k = 1.0;
 	public double[] cX, cZ, cTX, cTZ, cKAP, cW, cBT, cE, cRD, cRK, cLN, cRO, cROS;
 	public int[] cKD;
 	public long c_gx0, c_gz0, c_gnx, c_gnz;
@@ -562,6 +563,7 @@ public partial class TerrainFieldCs : RefCounted
 	private double rp_a, rp_sg, _sin_rp_a;
 	private double[] pitches;
 	private double pitch_share;
+	private double grade_k = 1.0;   // RouteStyle.grade (TerrainField.grade_k)
 	private double[] cX, cZ, cTX, cTZ, cKAP, cW, cBT, cE, cRD, cRK, cLN, cRO, cROS;
 	private int[] cKD;
 	private long c_gx0, c_gz0, c_gnx, c_gnz;
@@ -676,6 +678,7 @@ public partial class TerrainFieldCs : RefCounted
 		sh.rp_sg = f.Get("rp_sg").AsDouble();
 		sh.pitches = F64(f.Get("pitches"));
 		sh.pitch_share = f.Get("pitch_share").AsDouble();
+		sh.grade_k = f.Get("grade_k").AsDouble();
 		_course_from(sh, f);
 		var col = f.Get("col").AsGodotDictionary();
 		sh.col = col.Duplicate();
@@ -740,7 +743,7 @@ public partial class TerrainFieldCs : RefCounted
 		_sh = sh;
 		seed_value = sh.seed_value; sz = sh.sz; NT = sh.NT; rp_a = sh.rp_a; rp_sg = sh.rp_sg;
 		_sin_rp_a = gd_sin(rp_a);
-		pitches = sh.pitches; pitch_share = sh.pitch_share;
+		pitches = sh.pitches; pitch_share = sh.pitch_share; grade_k = sh.grade_k;
 		cX = sh.cX; cZ = sh.cZ; cKD = sh.cKD; cTX = sh.cTX; cTZ = sh.cTZ; cKAP = sh.cKAP; cW = sh.cW; cBT = sh.cBT;
 		cE = sh.cE; cRD = sh.cRD; cRK = sh.cRK; cLN = sh.cLN; cRO = sh.cRO; cROS = sh.cROS;
 		c_gx0 = sh.c_gx0; c_gz0 = sh.c_gz0; c_gnx = sh.c_gnx; c_gnz = sh.c_gnz;
@@ -910,11 +913,12 @@ public partial class TerrainFieldCs : RefCounted
 			return;
 		long k = floori((x - RANGE_X0) / RANGE_P);
 		double u = x - RANGE_X0 - k * RANGE_P;
-		double hh = 40.0 + 14.0 * _range_hash(k, 1);
+		double hh0 = 40.0 + 14.0 * _range_hash(k, 1);
+		double hh = hh0 * grade_k;
 		double a0 = 120.0 + 260.0 * _range_hash(k, 2);
-		double lc = hh / RANGE_UP;
+		double lc = hh0 / RANGE_UP;
 		double lp = 50.0 + 40.0 * _range_hash(k, 3);
-		double ld = hh / RANGE_DOWN;
+		double ld = hh0 / RANGE_DOWN;
 		double e = a0 + lc + lp + ld;
 		if (u <= a0 - 140.0 || u >= e + 140.0)
 			return;
@@ -981,7 +985,7 @@ public partial class TerrainFieldCs : RefCounted
 		t = (x - -330.0) / (-90.0 - -330.0);
 		t = t > 1.0 ? 1.0 : t;
 		double along = (1.0 - steep - (1.0 - pitch_share) * (0.6 * s1 + 0.4 * lin_)) * (t * t * (3.0 - 2.0 * t));
-		double top = along > 0.0 ? HILL_TOP * along : 0.0;
+		double top = along > 0.0 ? HILL_TOP * along * grade_k : 0.0;
 		if (x > RANGE_X0)
 		{
 			range_at(x);

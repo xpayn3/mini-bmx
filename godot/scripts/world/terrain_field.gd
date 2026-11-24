@@ -225,9 +225,11 @@ static func sm(a: float, b: float, x: float) -> float:
 # ======================================================================
 ## style: the trail's character (RouteStyle keys); empty = what the player picked (RouteStyle.current)
 var style: Dictionary = {}
+var grade_k: float = 1.0   # RouteStyle.grade: the mountains' height x this (their lengths stay), so every fall is this much steeper (1 = as before)
 
 func setup(seed_in: int, style_in: Dictionary = {}) -> void:
 	style = style_in.duplicate() if not style_in.is_empty() else RouteStyle.snapshot()
+	grade_k = clampf(float(style.get("grade", 1.0)), 0.5, 1.7)
 	TrailFeatures.ensure()
 	_ensure_colors()
 	_local_tables()
@@ -294,6 +296,7 @@ func fork() -> TerrainField:
 	var f := TerrainField.new()
 	f._local_tables()
 	f.style = style.duplicate()
+	f.grade_k = grade_k
 	f.seed_value = seed_value; f.sz = sz; f.NT = NT.duplicate()   # private copies: no shared refcounts across threads
 	f.rp_a = rp_a; f.rp_sg = rp_sg; f.pitches = pitches.duplicate(); f.pitch_share = pitch_share
 	f.course = course
@@ -462,11 +465,12 @@ func range_at(x: float) -> void:
 		return
 	var k := floori((x - RANGE_X0) / RANGE_P)
 	var u := x - RANGE_X0 - k * RANGE_P
-	var hh := 40.0 + 14.0 * _range_hash(k, 1)
+	var hh0 := 40.0 + 14.0 * _range_hash(k, 1)   # (the mountain's height at grade 1: its lengths come from this)
+	var hh := hh0 * grade_k
 	var a0 := 120.0 + 260.0 * _range_hash(k, 2)
-	var lc := hh / RANGE_UP
+	var lc := hh0 / RANGE_UP
 	var lp := 50.0 + 40.0 * _range_hash(k, 3)
-	var ld := hh / RANGE_DOWN
+	var ld := hh0 / RANGE_DOWN
 	var e := a0 + lc + lp + ld
 	if u <= a0 - 140.0 or u >= e + 140.0:
 		return
@@ -523,7 +527,7 @@ func hill(x: float, z: float) -> float:
 	t = (x - -330.0) / (-90.0 - -330.0)
 	t = 1.0 if t > 1.0 else t
 	var along := (1.0 - steep - (1.0 - pitch_share) * (0.6 * s1 + 0.4 * lin_)) * (t * t * (3.0 - 2.0 * t))
-	var top := HILL_TOP * along if along > 0.0 else 0.0
+	var top := HILL_TOP * along * grade_k if along > 0.0 else 0.0
 	if x > RANGE_X0:
 		range_at(x)
 		top += _rg_h
