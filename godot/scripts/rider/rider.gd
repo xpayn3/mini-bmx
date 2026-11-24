@@ -1294,6 +1294,8 @@ var sm_wheelie := 0.0   # the slope the body levels against, rate-limited
 const PITCH_LEVEL_RATE := 2.5   # rad/s
 const FACE_SINK := 0.35  # share of the legs' sink drawn on a jump face (firm legs loading the lip)
 var _face_k := 0.0        # this frame's blend into the jump-face pose (0..1)
+const FLIP_LEAN := 0.7    # rad he lies back throwing a back flip (video: ~45 deg back, legs and arms straight)
+const FLIP_ARCH := 0.5    # the spine's arch at the start of a back flip (set_spine curve, - = arched)
 const FACE_REACH := 0.96  # arms on a jump face / popped: nearly straight (share of their length)
 const FACE_POSE := 0.85   # how far the body goes to the measured face pose (video 2) on a jump face / just popped
 const FACE_HIP := Vector2(-0.42, 0.68)   # hips from the crank centre, in the WORLD: behind, up (m; video 2)
@@ -1478,7 +1480,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	pelvis.y += sty.hipY * (1 - 0.6 * pedal)
 	# the air pose's hip height: crouched in the air (none with the stick forward: legs pushed out), knees tucked up in a
 	# spin; reaching for the ground it goes (the legs straighten), and on the ground it is gone at once (air_st)
-	var air_y: float = (-0.07 * float(sty.airCrouch) * (1.0 - aero) - 0.05 * smoothstep(0.8, 3.5, absf(_num(p, "airSpin")))) * air_st
+	var air_y: float = (-0.07 * float(sty.airCrouch) * (1.0 - aero) - 0.05 * smoothstep(0.8, 3.5, absf(_num(p, "airSpin")))) * air_st * (1.0 - clampf(_num(p, "flipExt"), 0.0, 1.0))
 	# (2026-11-23, slow motion of a pro off a lip, research/jump: from the last of the face to ~0.3 s after the lip he
 	# stands TALL - legs nearly straight, torso upright in the world while the bike points 35-45 deg up, the bars pulled
 	# in to the chest - and only then the knees come up into the tuck. The air crouch came at once at take-off: the pop
@@ -1515,9 +1517,10 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# chest
 	# (pedalling out of the saddle the chest stays forward over the bars)
 	var ang: float = 0.52 - 0.2 * clampf(-bstick, 0.0, 1.0) - float(sty.pedalChest) * pedal + 0.12 * spr + 0.3 * eff + 0.15 * (comp / 0.3) + 0.08 * air + sty.lean * (1 - 0.5 * pedal) + 0.32 * aero_a + 0.6 * aero_g
+	ang -= FLIP_LEAN * clampf(_num(p, "flipArch"), 0.0, 1.0)   # (a back flip's arch: he lies back, chest out)
 	ang += (0.3 if _OLD_JUMPPOSE else 0.12) * j_pre - 0.3 * j_ext + (0.06 if _OLD_JUMPPOSE else 0.38) * j_sq - (0.0 if _OLD_JUMPPOSE else 0.35) * sm_popfx * air + (0.12 if old_lp else -0.22) * sm_popfx * air + 0.28 * j_tuck + 0.42 * j_fold - 0.18 * sm_reach
 	# spinning in the air: tall and compact over the bike (chest up, knees in), the head and shoulders lead
-	var spin_style: float = smoothstep(0.8, 3.5, absf(_num(p, "airSpin"))) * air
+	var spin_style: float = smoothstep(0.8, 3.5, absf(_num(p, "airSpin"))) * air * (1.0 - clampf(_num(p, "flipExt"), 0.0, 1.0))   # (a flip hangs long, not compact)
 	ang = lerpf(ang, 0.42, 0.7 * spin_style)
 	# relaxed (garage showcase, `relax` 0..1): sat up tall, back straighter, chin up - whatever the saved riding pose
 	var relax := clampf(_num(p, "relax"), 0.0, 1.0)
@@ -1835,7 +1838,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		var pp: float = clampf(raw_p, 0.0, 1.2)
 		var fhw := Vector2(FACE_HIP.x, FACE_HIP.y - 0.05 * j_pre + 0.06 * sm_popfx * air)
 		var ph_t := Vector2(bbp.x + fhw.x * cos(pp) + fhw.y * sin(pp), bbp.y - fhw.x * sin(pp) + fhw.y * cos(pp))
-		var ta: float = pp + FACE_TORSO
+		var ta: float = pp + FACE_TORSO - FLIP_LEAN * clampf(_num(p, "flipArch"), 0.0, 1.0)   # (throwing a back flip he lies back)
 		var ch_t := ph_t + Vector2(sin(ta), cos(ta)) * float(sty.torso)
 		pelvis.x = lerpf(pelvis.x, ph_t.x, fk); pelvis.y = lerpf(pelvis.y, ph_t.y, fk)
 		chest.x = lerpf(chest.x, ch_t.x, fk); chest.y = lerpf(chest.y, ch_t.y, fk)
@@ -2031,7 +2034,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# (a C bowed away from the way the chest still hangs) instead of moving as one stiff stick
 	var bend: float = clampf((roll_c - roll_p) * 0.6, -0.2, 0.2) * float(sty.get("flowBend", 1.0)) * (1.0 - air)
 	set_spine(hip, chest, pel_b * Vector3(0, 0, 1), tw * Vector3(0, 0, 1),
-		float(sty.spineCurve) * (1.0 - 0.7 * relax) * (1.0 - _face_k), float(sty.spineSide) + bend, float(sty.spineLow), pel_full)
+		float(sty.spineCurve) * (1.0 - 0.7 * relax) * (1.0 - _face_k) - FLIP_ARCH * clampf(_num(p, "flipArch"), 0.0, 1.0), float(sty.spineSide) + bend, float(sty.spineLow), pel_full)
 	pelvis_mesh.transform = Transform3D(pel_full, pelvis)
 
 	# neck / head
@@ -2256,7 +2259,7 @@ func _constrain(pelvis: Vector3, chest: Vector3, p: Dictionary, sty: Dictionary,
 		# Arm bend: how far the arms may straighten (more bend = chest closer to the bars)
 		var reach := (L_UARM + L_FARM) * clampf(0.9 - 0.2 * float(sty.armBend), 0.55, 0.98)
 		# (on a jump face / popped: arms nearly straight, video 2 - the elbows' usual bend folded the chest onto the bars)
-		reach = lerpf(reach, (L_UARM + L_FARM) * FACE_REACH, _face_k)
+		reach = lerpf(reach, (L_UARM + L_FARM) * FACE_REACH, maxf(_face_k, clampf(_num(p, "flipExt"), 0.0, 1.0)))   # (and hanging long off the bike mid-flip)
 		var worst := 0.0
 		for sd in [[-1.0, handL], [1.0, handR]]:
 			var shp := Vector3(chest.x - 0.03, chest.y - 0.04, chest.z + sd[0] * sty.shoulders)

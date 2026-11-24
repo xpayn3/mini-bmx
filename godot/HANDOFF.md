@@ -1955,7 +1955,10 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   he drives the legs straight (no load crouch) with the head back; in the air by how far round the flip is: head back
   first, tucked tight through the middle, from half way the head and shoulders turn to spot the landing over the
   shoulder (`flipTwist`), the last quarter he opens up and reaches down for the landing. Big jumps: a slow flip spread
-  over the whole flight (Hardline ~2.5 s for one turn). `BMX_OLD_FLIPPOSE=1`. Not judged by the user yet.
+  over the whole flight (Hardline ~2.5 s for one turn). `BMX_OLD_FLIPPOSE=1`. User, same day: "he also arches the back"
+  and "upside down his body is a lot more extended, ours is tucked": throwing it he lies back `FLIP_LEAN` 0.7 rad with the
+  spine arched (`flipArch`, `FLIP_ARCH`), legs and arms straight; from ~a tenth round he hangs LONG off the bike (no tuck:
+  `flipExt` = legs reaching, arms `FACE_REACH`, the air "spin style" compact pose off) to the landing.
 
 ### Developer view of the test playground (`scripts/levels/ride_diag.gd`) - telemetry + sliders for riding code
 - **Only in the test playground** (user decision 2026-11-21: developer tools live in that level, normal rides have none).

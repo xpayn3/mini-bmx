@@ -2951,25 +2951,32 @@ func _process(dt: float) -> void:
 		# turns head and shoulders to spot the landing over his shoulder; the last quarter he opens up and pushes the bike
 		# down under him (that also slows the turn). Drawn from how far round the flip is (flip_acc). BMX_OLD_FLIPPOSE=1
 		pi["flipTwist"] = 0.0
+		pi["flipArch"] = 0.0
+		pi["flipExt"] = 0.0
 		if Env.s("BMX_OLD_FLIPPOSE") == "":
 			if not st.air and st.throw_v > 0.5:
 				var thr: float = clampf(st.throw_v / maxf(float(T.flipRate), 0.1), 0.0, 1.0)
 				pi["preload"] = float(pi["preload"]) * (1.0 - thr)
 				pi["extend"] = maxf(float(pi["extend"]), 0.1 * thr)
 				pi["lookPitch"] = float(pi["lookPitch"]) + 0.45 * thr
+				if st.throw_v > 0.0: pi["flipArch"] = thr   # (a back flip: the back arches as he throws it - video 2026-11-24)
 			elif st.air and absf(st.flip_acc) > 0.25:
 				var fon: float = smoothstep(1.0, 2.2, absf(st.air_w))
 				var ph: float = clampf(absf(st.flip_acc) / TAU, 0.0, 1.0)
 				var f_head: float = fon * (1.0 - smoothstep(0.15, 0.35, ph))
-				var f_tuck: float = fon * smoothstep(0.05, 0.2, ph) * (1.0 - smoothstep(0.6, 0.8, ph))
 				var f_look: float = fon * smoothstep(0.35, 0.55, ph) * (1.0 - smoothstep(0.85, 1.0, ph))
 				var f_open: float = maxf(fon, smoothstep(0.6, 0.75, ph)) * smoothstep(0.7, 0.9, ph)
 				var side: float = 1.0   # (spotting over the right shoulder)
 				pi["lookPitch"] = float(pi["lookPitch"]) + (0.5 * f_head - 0.35 * f_look) * signf(st.flip_acc)
 				pi["lookYaw"] = float(pi["lookYaw"]) + 0.75 * f_look * side
 				pi["flipTwist"] = 0.4 * f_look * side
-				pi["airPull"] = maxf(float(pi["airPull"]), 0.95 * f_tuck)
-				pi["landReach"] = maxf(float(pi["landReach"]), f_open)
+				# (the back arches as the flip starts - chest out, head and shoulders thrown back - then folds into the tuck)
+				if st.flip_acc > 0.0: pi["flipArch"] = fon * (1.0 - smoothstep(0.2, 0.4, ph))
+				# (the user, from the side view: upside down his body is LONG - legs nearly straight, arms straight, hanging off
+				# the bike - not balled up. So no tuck through the middle: he extends, and stays long to the landing)
+				var f_ext: float = fon * smoothstep(0.1, 0.3, ph)
+				pi["flipExt"] = maxf(f_ext, f_open)
+				pi["landReach"] = maxf(float(pi["landReach"]), maxf(f_ext, f_open))
 		pi["wheelY"] = (rig.wheel_f.global_position.y + rig.wheel_r.global_position.y) * 0.5
 		pi["turn"] = _turn_s
 		pi["pedalTop"] = rig.pedal_top_in(rider)
