@@ -90,8 +90,8 @@ void vertex() {
 	float dist = length(root - ring_centre);
 	float cdist = length(root - CAMERA_POSITION_WORLD.xz);
 	float jit = (h2.w - 0.5) * 3.0;
-	float fade = near ? 1.0 - smoothstep(near_r - 6.0, near_r - 1.0, dist + jit)
-	                  : smoothstep(near_r - 6.0, near_r - 1.0, dist + jit) * (1.0 - smoothstep(mid_r - 16.0, mid_r - 1.0, dist + jit));
+	float fade = near ? 1.0 - smoothstep(near_r - 11.0, near_r - 1.0, dist + jit)
+	                  : smoothstep(near_r - 11.0, near_r - 1.0, dist + jit) * (1.0 - smoothstep(mid_r - 16.0, mid_r - 1.0, dist + jit));
 	float hgt = (0.2 + 0.36 * h1.w) * (0.6 + 0.6 * patch) * (0.6 + 0.4 * gc.a) * height_scale;
 	// height variation: broad short / long swathes (~20 m) and a few stalks standing out above the rest
 	hgt *= mix(0.86, 1.18, g_noise(root * 0.05 + 13.0));

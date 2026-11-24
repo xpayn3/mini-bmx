@@ -21,9 +21,11 @@ const TEX := WIN_CHUNKS * SEG + 1     # window texture size
 
 ## per quality: near spacing / tile / radius, mid spacing / tile / radius
 const QUALITY := {
-	1: {"ns": 0.16, "nt": 4.48, "nr": 16.0, "ms": 0.45, "mt": 9.0, "mr": 64.0},
-	2: {"ns": 0.12, "nt": 3.84, "nr": 22.0, "ms": 0.40, "mt": 8.0, "mr": 90.0},
-	3: {"ns": 0.10, "nt": 3.9, "nr": 26.0, "ms": 0.36, "mt": 9.0, "mr": 96.0},
+	# 2026-11-24 (user: "grass goes low poly too fast"): the full blades reach further (nr was 16 / 22 / 26 m) and the
+	# hand-over to the simple blades is spread over ~10 m (FADE_W, was 5): they started showing ~16 m from the camera
+	1: {"ns": 0.16, "nt": 4.48, "nr": 24.0, "ms": 0.45, "mt": 9.0, "mr": 70.0},
+	2: {"ns": 0.12, "nt": 3.84, "nr": 34.0, "ms": 0.40, "mt": 8.0, "mr": 95.0},
+	3: {"ns": 0.10, "nt": 3.9, "nr": 42.0, "ms": 0.36, "mt": 9.0, "mr": 105.0},
 }
 
 static var _shader: Shader
@@ -347,10 +349,10 @@ func update(cam: Camera3D) -> void:
 		var pf := PackedFloat32Array()
 		for p in planes: pf.append_array([p.normal.x, p.normal.y, p.normal.z, p.d])
 		nn = _place_cs(0, _near, c3, pf, _q.nt, 0.0, _q.nr + 1.0, 1.0, ground)
-		nm = _place_cs(1, _mid, c3, pf, _q.mt, _q.nr - 7.0, _q.mr + 1.0, 0.0, ground)
+		nm = _place_cs(1, _mid, c3, pf, _q.mt, _q.nr - 12.0, _q.mr + 1.0, 0.0, ground)
 	else:
 		nn = _place(_near, c3, planes, _q.nt, 0.0, _q.nr + 1.0, 1.0, ground)
-		nm = _place(_mid, c3, planes, _q.mt, _q.nr - 7.0, _q.mr + 1.0, 0.0, ground)
+		nm = _place(_mid, c3, planes, _q.mt, _q.nr - 12.0, _q.mr + 1.0, 0.0, ground)
 	if probe:
 		_probe_t += get_process_delta_time()
 		if _probe_t > 1.0:

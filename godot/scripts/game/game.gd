@@ -99,7 +99,10 @@ func _shadow_fit() -> void:
 	if zoom == _shadow_zoom: return
 	_shadow_zoom = zoom
 	if sq == 0 or _two_splits():
-		var s1 := 12.0 if sq == 0 else 6.0   # (Low: the first cascade a bit longer, its map is smaller)
+		# 2026-11-24 (user: ground / grass / shadows blurry a couple of metres ahead of the rider): the near cascade ended at
+		# zoom + 6 m, i.e. ~6 m past the rider, so the ground he rides onto was in the coarse far map. Now it reaches 18 m
+		# past him (Low 24: smaller map) and the two cascades are cross-faded at every quality (like racing games do)
+		var s1 := 24.0 if sq == 0 else 18.0
 		if Env.s("BMX_SHADOW_S1") != "": s1 = float(Env.s("BMX_SHADOW_S1"))   # tests
 		sun.directional_shadow_split_1 = clampf((zoom + s1) / reach, 0.03, 0.5)
 		return
@@ -1233,7 +1236,7 @@ func _apply_settings() -> void:
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS if (sq == 0 or _two_splits()) else DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
 	# 2 splits: the first one covers ~a fifth of the reach (0.06 left the second cascade stretched over the rest)
 	_shadow_zoom = -1.0   # _shadow_fit places the splits
-	sun.directional_shadow_blend_splits = sq >= 2
+	sun.directional_shadow_blend_splits = true
 	sun.light_angular_distance = 0.6 if sq >= 3 else 0.0
 	env.ssao_enabled = Settings.get_v("ssao")
 	var gi: int = Settings.get_v("gi")
@@ -3246,8 +3249,9 @@ func _process(dt: float) -> void:
 		env.fog_depth_end = 3100.0
 		sun.directional_shadow_max_distance = 220.0
 	else:
-		env.fog_depth_begin = (cam.dist + 55) * vd   # (+75: too thin over the 100-124 m hand-over, pop-in showed)
-		env.fog_depth_end = (cam.dist * 1.6 + 130) * vd
+		# 2026-11-24 (user: "a little more fog to hide pop-ups, subtle"): starts 20 m earlier and ends 10 m sooner (was +55 / +130)
+		env.fog_depth_begin = (cam.dist + 35) * vd   # (+75: too thin over the 100-124 m hand-over, pop-in showed)
+		env.fog_depth_end = (cam.dist * 1.6 + 120) * vd
 		_shadow_fit()
 	if cam_attr.dof_blur_far_enabled and scenic:   # lookout: keep the view sharp, soften only the horizon
 		cam_attr.dof_blur_far_distance = 9.0     # the cyclist sharp, the landscape behind softly out of focus

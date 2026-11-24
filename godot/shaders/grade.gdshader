@@ -69,14 +69,15 @@ void fragment() {
 		vec2 d = uv - focus;
 		// only the left / right sides of the frame (NFS style): the road ahead (top middle with the trail camera) and
 		// the rider stay sharp; it used to be an ellipse round the rider that reached the trail ahead
-		float edge = smoothstep(0.2, 0.46, abs(uv.x - 0.5)) * (1.0 - 0.5 * smoothstep(0.1, 0.5, -(uv.y - 0.5)));
+		float edge = smoothstep(0.33, 0.5, abs(uv.x - 0.5)) * (1.0 - 0.5 * smoothstep(0.1, 0.5, -(uv.y - 0.5)));
+			edge *= 1.0 - 0.75 * smoothstep(0.55, 0.85, uv.y);   // 2026-11-24: outer sides only, lower frame (ground just ahead) stays sharp
 		float k = blur * edge;
 		if (k > 0.002) {
 			vec3 acc = c.rgb;
 			float jit = fract(sin(dot(FRAGCOORD.xy, vec2(12.9898, 78.233))) * 43758.5453);
 			for (int i = 1; i <= 8; i++) {
 				float s = (float(i) + jit) / 8.0;
-				acc += textureLod(screen_tex, uv - d * s * k * 0.09, k * 1.5).rgb;
+				acc += textureLod(screen_tex, uv - d * s * k * 0.09, k * 1.0).rgb;
 			}
 			c.rgb = acc / 9.0;
 			kb = k;
