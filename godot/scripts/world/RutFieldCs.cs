@@ -12,7 +12,7 @@ public partial class RutFieldCs : RefCounted
 {
 	public const int TILE = 160;          // cells per tile side
 	public const float CELL = 0.05f;      // m: a tile is 8 m
-	public const int MAX_TILES = 96;      // ~10 MB at most
+	public const int MAX_TILES = 256;     // ~26 MB at most: a ride keeps its ruts ~2 km back
 
 	private readonly Dictionary<long, float[]> _tiles = new();
 	private readonly LinkedList<long> _age = new();   // most recently dug last

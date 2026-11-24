@@ -2111,7 +2111,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   26 / 30 / 38 / 44 km/h all CLEAN (short onto the floor, on the landing at 38, past it at 44), popped at 38 PERFECT.
   `terrain_cs_cmp` EXACT, `wood_edge_probe` walls=0, `trail_grow_probe` PASS.
 
-### Ruts (2026-11-24, MX vs ATV-style; the test playground for now, `BMX_RUTS=1` in rides too)
+### Ruts (2026-11-24, MX vs ATV-style; rides + the test playground, Settings › Gameplay › Ruts)
 - The ground dug in where tyres roll, deeper each pass, and felt: `Terrain.height` / `deck_height` / `top_height`
   (and the playground's) subtract `rut_at(x, z)`, so a wheel drops into the groove, its walls tilt the ground under the
   tyre and the existing side-slope knock steers the bike along it / kicks it crossing one (no new steering code).
@@ -2129,8 +2129,13 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   the rear skids to a stop; riding down its own rut no side kick; slalom over its ruts on dirt: no crashes, same speeds.
 - Tests: `BMX_RUTS_PROBE=1` (`RUTS tiles= stamp_us= under_rear= under_front= knock=`), `BMX_RUTS=0` off,
   `BMX_NO_TRACKS=1` hides the drawn tyre tracks (to see the ruts alone).
-- Not done: the world's ground shader, the drawn tyre tracks lying down in the rut (the drawn tyre already sinks in:
-  `top_height` includes it), drying / filling in over time, ruts from AI riders / ghosts.
+- In rides too (same day): `ground.gdshader` draws them (`rut_depth` / `rut_colour` / `rut_normal` on the world
+  position `P`), the C# tyre fit sinks the drawn tyres into them (`TerrainFieldCs.set_ruts` + `tyre_worst`), the
+  terrain reads them only within `READ_R` 20 m of the bike (`Ruts._publish` clips `rut_box`), up to 256 tiles (~26
+  MB, ~2 km of ride); they stay when you go back to the start (Backspace), a new world clears them. A trail pass on
+  dirt leaves ~2-10 mm (skids / landings more). Seed 4242 follow ride: 130.7 fps off / 129.5 on, the same crash either
+  way. Setting `ruts` (from the next ride), `BMX_RUTS=0|1` overrides.
+- Not done: the drawn tyre tracks lying down in the rut, drying / filling in over time, ruts from AI riders / ghosts.
 
 ### Developer view of the test playground (`scripts/levels/ride_diag.gd`) - telemetry + sliders for riding code
 - **Only in the test playground** (user decision 2026-11-21: developer tools live in that level, normal rides have none).

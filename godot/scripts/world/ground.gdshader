@@ -6,6 +6,7 @@
 shader_type spatial;
 render_mode blend_mix, depth_draw_opaque, cull_back, diffuse_burley, specular_schlick_ggx;
 #include "res://shaders/atmos.gdshaderinc"
+#include "res://shaders/ruts.gdshaderinc"
 
 uniform sampler2D land_tex : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
 uniform sampler2D dirt_tex : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
@@ -299,6 +300,9 @@ void fragment() {
 	// Not a perfect mirror: the sun's glint on 0.04 was smaller than a pixel and sparkled; it also goes duller with
 	// the pixel's footprint (far off / grazing), where one pixel covers many ripples
 	col = mix(col, gB.rgb * vec3(0.3, 0.29, 0.27), pud * 0.85);
+	// ruts (world/ruts.gd): the dug groove darker, its lip lighter
+	float rd = rut_depth(P.xz);
+	col = rut_colour(col, rd);
 	ALBEDO = col;
 	float pud_r = mix(0.075, 0.22, smoothstep(0.02, 0.25, gpx));
 	ROUGHNESS = mix(mix(0.95, trough, wd), pud_r, pud);
@@ -309,8 +313,9 @@ void fragment() {
 	float hh = thgt * wd * trail_relief;
 	vec3 dpx = dFdx(P), dpy = dFdy(P);
 	float dhx = dFdx(hh), dhy = dFdy(hh);
-	if (wd * tbump > 0.0 || pud > 0.0 || thgt != 0.0) {
+	if (wd * tbump > 0.0 || pud > 0.0 || thgt != 0.0 || rd != 0.0) {
 		vec3 nw = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
+		if (rd != 0.0) nw = rut_normal(P.xz, nw);   // (the groove's walls)
 		nw = normalize(nw + vec3(tslope.x, 0.0, tslope.y) * (wd * trail_bump));
 		// the height above as a real slope of the surface (its screen-space gradient turned into the world)
 		vec3 r1 = cross(dpy, nw), r2 = cross(nw, dpx);

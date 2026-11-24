@@ -1815,9 +1815,9 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 
 # ---------------------------------------------------------------- ride control
 var ruts = null    # world/ruts.gd (the test playground for now)
-## ruts: in the test playground for now (BMX_RUTS=1: rides too, BMX_RUTS=0: off)
+## ruts: rides and the test playground (Settings › Gameplay › Ruts; BMX_RUTS=0 off, =1 on whatever the setting)
 func _make_ruts() -> void:
-	if Env.s("BMX_RUTS") == "0" or not (terrain is PlaygroundTerrain or Env.s("BMX_RUTS") == "1"): return
+	if Env.s("BMX_RUTS") == "0" or (Env.s("BMX_RUTS") != "1" and not bool(Settings.get_v("ruts"))): return
 	ruts = preload("res://scripts/world/ruts.gd").new(self)
 	add_child(ruts)
 	if not ruts.active(): ruts.queue_free(); ruts = null
