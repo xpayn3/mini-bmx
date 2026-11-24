@@ -223,7 +223,11 @@ static func sm(a: float, b: float, x: float) -> float:
 # ======================================================================
 # setup
 # ======================================================================
-func setup(seed_in: int) -> void:
+## style: the trail's character (RouteStyle keys); empty = what the player picked (RouteStyle.current)
+var style: Dictionary = {}
+
+func setup(seed_in: int, style_in: Dictionary = {}) -> void:
+	style = style_in.duplicate() if not style_in.is_empty() else RouteStyle.snapshot()
 	TrailFeatures.ensure()
 	_ensure_colors()
 	_local_tables()
@@ -289,6 +293,7 @@ func _local_tables() -> void:
 func fork() -> TerrainField:
 	var f := TerrainField.new()
 	f._local_tables()
+	f.style = style.duplicate()
 	f.seed_value = seed_value; f.sz = sz; f.NT = NT.duplicate()   # private copies: no shared refcounts across threads
 	f.rp_a = rp_a; f.rp_sg = rp_sg; f.pitches = pitches.duplicate(); f.pitch_share = pitch_share
 	f.course = course
@@ -809,6 +814,7 @@ func _build_route() -> void:
 	var C := course
 	var r := WorldRng.new(seed_value * 104729 + 7)
 	var list: Array = []
+	var jf := clampf(float(style.get("jumps", 1.0)), 0.25, 2.5)   # RouteStyle.jumps: closer / further apart on the road
 	for run in C.runs():
 		var i0: int = run[0]
 		var i1: int = run[1]
@@ -875,7 +881,7 @@ func _build_route() -> void:
 				s += len + gap
 				beat += 1
 			else:
-				s += len + ((5 + rv * 8) if jmp else (70 + rv * 90))
+				s += len + ((5 + rv * 8) if jmp else (70 + rv * 90) / jf)
 	route_feats = list
 	_index_canyons()
 

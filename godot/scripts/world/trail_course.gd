@@ -251,18 +251,34 @@ func _attempt(fns: Array) -> bool:
 	return false
 
 
+## one RouteStyle value (jumps / twist / rolling); 1.0 when the field has none (the original layout)
+func _sv(k: String) -> float:
+	if _M == null: return 1.0
+	return float(_M.style.get(k, 1.0))
+
+
+## RouteStyle.jumps: the chance band [0, 0.3) of "a jump line" in _build grows / shrinks to [0, 0.3 x j), the rest of the
+## picks keep their proportions (j = 1 returns p itself: the original layout)
+static func _jump_remap(p: float, j: float, old_band: float) -> float:
+	if j == 1.0: return p
+	var nb := minf(old_band * j, 0.9)
+	if p < nb: return p / maxf(nb, 1e-6) * old_band
+	return old_band + (p - nb) / (1.0 - nb) * (1.0 - old_band)
+
+
 func _road(max_len: float) -> void:
 	var len := minf(max_len, 90 + _r.next() * 150)
 	var done := 0.0
+	var tw := _sv("twist")   # RouteStyle.twist: 1 = as before
 	while done < len:
 		var o := _off()
 		var lim := _corr - 30
-		var tgt := (_r.next() * 2 - 1) * 72 * D2R
+		var tgt := (_r.next() * 2 - 1) * 72 * D2R * sqrt(tw)
 		if absf(o) > lim * 0.5:
 			tgt = -signf(o) * (22 + _r.next() * 44) * D2R
 		var seg := minf(len - done, 18 + _r.next() * 40)
 		# often a tight bend instead of a sweeper
-		var R := (13 + _r.next() * 16) if _r.next() < 0.42 else (34 + _r.next() * 56)
+		var R := (13 + _r.next() * 16) if _r.next() < minf(0.42 * tw, 0.95) else (34 + _r.next() * 56) / maxf(0.6, sqrt(tw))
 		var n0 := X.size()
 		_turn_to(tgt, R, ROAD)
 		var used := (X.size() - n0) * STEP
@@ -359,7 +375,7 @@ func _build() -> void:
 		if to_pitch < 30:
 			var end_x: float = P[pk] + P[pk + 1] / 2 + 6
 			var pick := _r.next()
-			if pick < 0.45:
+			if pick < 0.45:   # (the mountain's pitches: technical sections whatever the style)
 				_attempt([[1, end_x], [2, end_x], [3, end_x]])
 			elif pick < 0.75:
 				_attempt([[3, end_x], [2, end_x], [1, end_x]])
@@ -368,6 +384,8 @@ func _build() -> void:
 			continue
 		var room := minf(to_pitch, _L - 80 - _x)
 		var pick2 := _r.next()
+		var jst := _sv("jumps")
+		var tst := _sv("twist")
 		if pk < 0 and _x > _hill - 80:
 			# past the mountain: the trail runs on through the hills, never long without a twist
 			_attempt([[0, 40 + _r.next() * 90]])
@@ -377,31 +395,41 @@ func _build() -> void:
 			_M.range_at(_x + 30.0)
 			var down: bool = _M.rg_down > 0.5
 			var climbing: bool = _M.hill(_x + 60.0, _M.zc(_x + 60.0)) > _M.hill(_x, _M.zc(_x)) + 1.5
+			# the style's twist moves the technical (hairpin / switchback) picks, jumps the jump-line pick
+			var tech_k := 1.0 if tst == 1.0 else clampf(tst, 0.2, 2.0)
 			if down:
-				if pick2 < 0.4:
+				var jcut := 0.92 if jst == 1.0 else clampf(1.0 - 0.08 * jst, 0.81, 1.0)
+				var t1 := 0.4 * tech_k if tst != 1.0 else 0.4
+				var t2 := 0.62 if tst == 1.0 else t1 + 0.22 * tech_k
+				if tst != 1.0:
+					t1 = minf(t1, 0.5); t2 = minf(t2, 0.7)
+				if pick2 < t1:
 					_attempt([[6, end_x], [1, end_x], [2, end_x]])
-				elif pick2 < 0.62:
+				elif pick2 < t2:
 					_attempt([[1, end_x], [6, end_x], [2, end_x]])
 				elif pick2 < 0.8:
 					_attempt([[2, end_x], [1, end_x], [3, end_x]])
-				elif pick2 < 0.92:
+				elif pick2 < jcut:
 					_attempt([[3, end_x], [2, end_x], [1, end_x]])
 				else:
 					_attempt([[4, 0.0]])
-			elif pick2 < 0.3 and not climbing:
-				_attempt([[4, 0.0]])
-			elif pick2 < 0.55:
-				_attempt([[2, end_x], [1, end_x], [3, end_x]])
-			elif pick2 < 0.68:
-				_attempt([[6, end_x], [1, end_x], [2, end_x]])
-			elif pick2 < 0.84:
-				_attempt([[1, end_x], [2, end_x], [3, end_x]])
 			else:
-				_attempt([[3, end_x], [2, end_x], [1, end_x]])
+				var q := _jump_remap(pick2, jst, 0.3)
+				var tt := 0.68 if tst == 1.0 else 0.55 + 0.13 * tech_k
+				if q < 0.3 and not climbing:
+					_attempt([[4, 0.0]])
+				elif q < 0.55:
+					_attempt([[2, end_x], [1, end_x], [3, end_x]])
+				elif q < tt:
+					_attempt([[6, end_x], [1, end_x], [2, end_x]])
+				elif q < 0.84:
+					_attempt([[1, end_x], [2, end_x], [3, end_x]])
+				else:
+					_attempt([[3, end_x], [2, end_x], [1, end_x]])
 			continue
-		if room > 230 and pick2 < 0.7:
+		if room > 230 and pick2 < 0.7 * clampf(jst, 0.0, 1.35):
 			_attempt([[0, maxf(50, room - 190)]])
-			_attempt([[4, 0.0]])
+			_attempt([[4, 0.0]] if jst > 0.05 else [[5, 0.0]])
 		elif room > 150 and pick2 < 0.85:
 			_attempt([[0, maxf(50, room - 110)]])
 			_attempt([[5, 0.0]])
@@ -583,13 +611,14 @@ static func _hash(k: int, salt: int) -> float:
 ## skipped, so growing the trail never changes what the rider has already seen.
 func _shape_profile() -> void:
 	var seed_i: int = _mark_seed % 9973
+	var roll := _sv("rolling")   # RouteStyle.rolling: how much the trail rolls (dips) and how many cliff drops
 	# rolling dips on the open trail (not in the mountain's steep section)
 	for i in n:
 		var w := smooth(_hill + 60, _hill + 360, X[i])
 		if w <= 0.0 or KD[i] != ROAD:
 			continue
 		var s := i * STEP
-		var amp := 0.3 + 1.5 * (0.5 + 0.5 * sin(s / 310.0 + seed_i))
+		var amp := (0.3 + 1.5 * (0.5 + 0.5 * sin(s / 310.0 + seed_i))) * roll
 		E[i] += w * amp * sin(s * TAU / 60.0 + 0.7 * sin(s / 140.0))
 	drops = []
 	var last_end := 0
@@ -599,8 +628,8 @@ func _shape_profile() -> void:
 		var kk := k
 		k += 1
 		var r := _hash(kk, seed_i)
-		var big := r < 0.02
-		if not big and r > 0.16:
+		var big := r < 0.02 * roll
+		if not big and r > 0.16 * roll:
 			continue
 		var hh := (12.0 + _hash(kk, seed_i + 1) * 10.0) if big else (3.0 + _hash(kk, seed_i + 1) * 3.5)
 		# the trail climbs on to a ridge (gently: ~4 %), runs level a moment, then falls away in a cliff

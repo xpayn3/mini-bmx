@@ -1,0 +1,75 @@
+class_name RouteStyle
+extends RefCounted
+## What kind of trail the world lays out (picked on the ride setup's ROUTE step, saved in user://route.cfg).
+## All 1.0 = the original worlds, laid out exactly as before (a seed keeps its trail). Read by TerrainField.setup
+## (a copy rides along on every fork) and by TrailCourse while it lays the trail out.
+##   jumps   0 .. 2.5  how many jump lines + route features (0 = none, 1 = as before)
+##   twist   0.3 .. 2  flowing sweepers (low) .. tight bends (high)
+##   rolling 0 .. 2.5  the trail's own dips, ridges and cliff drops (the mountain's overall fall stays the land's)
+
+const KEYS := ["jumps", "twist", "rolling"]
+const DEFAULT := {"jumps": 1.0, "twist": 1.0, "rolling": 1.0}
+const LIMITS := {"jumps": [0.0, 2.5], "twist": [0.3, 2.0], "rolling": [0.0, 2.5]}
+const PRESETS := [
+	["FLOW", {"jumps": 0.7, "twist": 0.45, "rolling": 0.8}],
+	["BALANCED", {"jumps": 1.0, "twist": 1.0, "rolling": 1.0}],
+	["JUMP PARK", {"jumps": 2.4, "twist": 0.7, "rolling": 1.1}],
+	["TECHNICAL", {"jumps": 0.35, "twist": 1.8, "rolling": 1.4}],
+	["GNARLY", {"jumps": 1.6, "twist": 1.6, "rolling": 2.2}],
+]
+const PATH := "user://route.cfg"
+
+static var current: Dictionary = DEFAULT.duplicate()
+static var _loaded := false
+
+
+static func ensure() -> void:
+	if _loaded: return
+	_loaded = true
+	var cf := ConfigFile.new()
+	if cf.load(PATH) != OK: return
+	for k in KEYS:
+		current[k] = clampf(float(cf.get_value("route", k, 1.0)), LIMITS[k][0], LIMITS[k][1])
+
+
+static func get_value(k: String) -> float:
+	ensure()
+	return float(current.get(k, 1.0))
+
+
+static func set_value(k: String, v: float, save := true) -> void:
+	ensure()
+	current[k] = clampf(v, LIMITS[k][0], LIMITS[k][1])
+	if save: save_file()
+
+
+static func apply(d: Dictionary) -> void:
+	ensure()
+	for k in KEYS:
+		if d.has(k): current[k] = clampf(float(d[k]), LIMITS[k][0], LIMITS[k][1])
+	save_file()
+
+
+static func save_file() -> void:
+	var st = (Engine.get_main_loop() as SceneTree).root.get_node_or_null("Settings")   # (not a global in -s tools)
+	if st == null or st._no_save: return
+	var cf := ConfigFile.new()
+	for k in KEYS: cf.set_value("route", k, current[k])
+	cf.save(PATH)
+
+
+## a copy for a TerrainField (so a change in the menu never reaches a world that is being built)
+static func snapshot() -> Dictionary:
+	ensure()
+	return current.duplicate()
+
+
+static func is_default(d: Dictionary = current) -> bool:
+	for k in KEYS:
+		if absf(float(d.get(k, 1.0)) - 1.0) > 0.001: return false
+	return true
+
+
+static func sig() -> String:
+	ensure()
+	return JSON.stringify([current["jumps"], current["twist"], current["rolling"]])

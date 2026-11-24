@@ -225,7 +225,7 @@ var _ride_sig := ""             # what it was built from (seed, bike, garage bui
 
 func _ride_sig_now() -> String:
 	var cfg: Dictionary = GameState.bike_config()
-	return JSON.stringify([GameState.seed, GameState.bike_id, cfg, RiderPanels.load_look(),
+	return JSON.stringify([GameState.seed, RouteStyle.sig(), GameState.bike_id, cfg, RiderPanels.load_look(),
 		RiderPanels.load_pose(GameState.bike_id, cfg.get("pose", {}))])
 
 ## while the intro shows black (only the TV's standby LED), build the ride world (the main-thread hitch is hidden
@@ -760,7 +760,8 @@ const LensScene = preload("res://scripts/ui/lens_scene.gd")
 var lens_view: SubViewportContainer   # the RACE step's trail preview (LensScene)
 var GOGGLE_VIEW: Vector3 = Vector3(1.0, 0.12, 0.16) if Env.s("BMX_GOG_VIEW") == "" else str_to_var("Vector3(" + Env.s("BMX_GOG_VIEW") + ")")   # lens cards: the camera looks from here
 const LensIcon = preload("res://scripts/ui/lens_icon.gd")
-const SETUP_STEPS := ["BIKE", "TUNE", "CHARACTER", "COMPUTER", "RACE"]
+const SETUP_STEPS := ["BIKE", "TUNE", "CHARACTER", "COMPUTER", "ROUTE", "RACE"]
+var route_view: RoutePreview   # the ROUTE step's top-down trail map
 const COMPUTER_STEP := 3
 var setup_step := 0
 var bike_dirty := false   # the bike was changed in the selection flow; the ride is rebuilt on RACE
@@ -840,7 +841,7 @@ func _menu_page_setup_build(step := 0) -> void:
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	scr.add_child(bg)
 	var split := setup_step != COMPUTER_STEP
-	var title: String = ["CHOOSE YOUR BIKE", "COLOURS & WHEELS", "YOUR CHARACTER", "BIKE COMPUTER", "READY TO RACE"][setup_step]
+	var title: String = ["CHOOSE YOUR BIKE", "COLOURS & WHEELS", "YOUR CHARACTER", "BIKE COMPUTER", "PLAN YOUR ROUTE", "READY TO RACE"][setup_step]
 	var back_cb: Callable = (_menu_page_setup.bind(setup_step - 1) if setup_step > 0 else _menu_page_main)
 	var last := setup_step == SETUP_STEPS.size() - 1
 	var next_btn := _menu_button("RACE" if last else "NEXT", "" if last else SETUP_STEPS[setup_step + 1].capitalize(), _start_ride if last else _menu_page_setup.bind(setup_step + 1), true)
@@ -866,7 +867,13 @@ func _menu_page_setup_build(step := 0) -> void:
 		left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(left)
 		var race := setup_step == SETUP_STEPS.size() - 1
-		if race:   # RACE: a little trail seen from riding height, lit by the picked time, through the picked lens (LensScene)
+		var route := setup_step == SETUP_STEPS.size() - 2
+		if route:   # ROUTE: the trail this seed + style lays out, from straight above (RoutePreview), live
+			if not is_instance_valid(keep_view): keep_view = hero_view if is_instance_valid(hero_view) else null
+			route_view = RoutePreview.new()
+			route_view.set_anchors_preset(Control.PRESET_FULL_RECT)
+			left.add_child(route_view)
+		elif race:   # RACE: a little trail seen from riding height, lit by the picked time, through the picked lens (LensScene)
 			if not is_instance_valid(keep_view): keep_view = hero_view if is_instance_valid(hero_view) else null
 			lens_view = LensScene.new()
 			lens_view.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -912,6 +919,10 @@ func _menu_page_setup_build(step := 0) -> void:
 				(lb as Control).add_theme_constant_override("shadow_offset_y", 2)
 				(lb as Control).add_theme_constant_override("shadow_outline_size", 6)
 			hero_spec.text = "THE TRAIL AT THIS TIME OF DAY  ·  THROUGH YOUR LENS"
+
+		if route:
+			hero_name.text = ""
+			hero_spec.text = ""
 		if setup_step == 2:
 			hero_name.text = "YOUR CHARACTER"
 			hero_spec.text = "KIT  ·  HAIR  ·  PLATE  ·  DRAG TO TURN"
@@ -979,7 +990,8 @@ func _menu_page_setup_build(step := 0) -> void:
 		1: _setup_tune(content)
 		2: _setup_rider(content)
 		3: _setup_computer(content)
-		4: _setup_race(content)
+		4: _setup_route(content)
+		5: _setup_race(content)
 	menu_focus.grab_focus.call_deferred()
 
 ## step 1: the presets as picture cards (the big 3D bike is the left side of the screen)
@@ -1400,7 +1412,108 @@ func _setup_computer(content: HBoxContainer) -> void:
 	card.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	content.add_child(card)
 
-## step 4: the time of day, then RACE (the bike on the left is the one you picked)
+## step 4: the ROUTE. The map on the left is the trail of this seed + style, built live as the sliders move
+func _setup_route(content: HBoxContainer) -> void:
+	var col := VBoxContainer.new()
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	col.add_theme_constant_override("separation", Tokens.S3)
+	content.add_child(col)
+	var rv := route_view
+	# the world seed
+	col.add_child(UITheme.caption("WORLD SEED"))
+	var seed_row := HBoxContainer.new()
+	seed_row.add_theme_constant_override("separation", Tokens.S2)
+	var se := LineEdit.new()
+	se.text = str(GameState.seed)
+	se.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	se.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	se.custom_minimum_size.y = Tokens.H_CHIP
+	se.tooltip_text = "World seed: type a number and press Enter"
+	var ask := func():
+		if is_instance_valid(rv): rv.request(GameState.seed, RouteStyle.snapshot())
+	se.text_submitted.connect(func(t):
+		if t.is_valid_int():
+			GameState.seed = int(t); _seed_changed(); ask.call())
+	seed_row.add_child(se)
+	var nw := UITheme.make_button("NEW WORLD", func(): GameState.new_seed(); se.text = str(GameState.seed); _seed_changed(); ask.call(), "chip", Tokens.T_LG)
+	seed_row.add_child(nw)
+	col.add_child(seed_row)
+	# presets
+	col.add_child(UITheme.caption("STYLE"))
+	var pg := GridContainer.new()
+	pg.columns = 3
+	pg.add_theme_constant_override("h_separation", Tokens.S2)
+	pg.add_theme_constant_override("v_separation", Tokens.S2)
+	col.add_child(pg)
+	var sliders := {}
+	for pr in RouteStyle.PRESETS:
+		var vals: Dictionary = pr[1]
+		var pb := UITheme.make_button(String(pr[0]), func():
+			RouteStyle.apply(vals)
+			for k in sliders: (sliders[k] as HSlider).set_value_no_signal(RouteStyle.get_value(k))
+			bike_dirty = true
+			ask.call(), "chip", Tokens.T_MD)
+		pb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		pg.add_child(pb)
+	# one slider per trait
+	var rows := [
+		["jumps", "JUMPS", "NONE", "JUMP PARK"],
+		["twist", "BENDS", "FLOWING", "TIGHT & TWISTY"],
+		["rolling", "ROLLING & DROPS", "SMOOTH", "ROLLERS & CLIFFS"]]
+	for rw in rows:
+		var k: String = rw[0]
+		var head := HBoxContainer.new()
+		head.add_child(UITheme.caption(String(rw[1])))
+		col.add_child(head)
+		var sl := HSlider.new()
+		sl.min_value = RouteStyle.LIMITS[k][0]
+		sl.max_value = RouteStyle.LIMITS[k][1]
+		sl.step = 0.05
+		sl.scrollable = false
+		sl.value = RouteStyle.get_value(k)
+		sl.custom_minimum_size.y = 28
+		sl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		sl.value_changed.connect(func(v: float):
+			RouteStyle.set_value(k, v, false)
+			bike_dirty = true
+			ask.call())
+		sl.drag_ended.connect(func(_c): RouteStyle.save_file())
+		sliders[k] = sl
+		col.add_child(sl)
+		var ends := HBoxContainer.new()
+		ends.add_child(UITheme.caption(String(rw[2]), Tokens.INK_FAINT, Tokens.T_XS))
+		var fl := Control.new(); fl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		ends.add_child(fl)
+		ends.add_child(UITheme.caption(String(rw[3]), Tokens.INK_FAINT, Tokens.T_XS))
+		col.add_child(ends)
+	# colouring of the map
+	var cm := HBoxContainer.new()
+	cm.add_theme_constant_override("separation", Tokens.S2)
+	var cgrp := ButtonGroup.new()
+	for c in [["type", "PAPER MAP"], ["grade", "COLOUR BY GRADE"]]:
+		var cb := UITheme.make_button(String(c[1]), Callable(), "chip", Tokens.T_SM)
+		cb.toggle_mode = true; cb.button_group = cgrp
+		cb.button_pressed = is_instance_valid(rv) and rv.color_mode == c[0]
+		cb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		cb.pressed.connect(func(): if is_instance_valid(rv): rv.color_mode = c[0]; rv.queue_redraw())
+		cm.add_child(cb)
+	col.add_child(cm)
+	# what this trail is
+	var stats := UITheme.text("", Tokens.INK, Tokens.T_MD)
+	stats.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	col.add_child(stats)
+	var fill := Control.new(); fill.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	col.add_child(fill)
+	if is_instance_valid(rv):
+		rv.built.connect(func(st: Dictionary):
+			stats.text = "%.1f KM  ·  FALLS %d M  ·  AVERAGE %.1f %%  ·  STEEPEST 100 M: %d M
+%d JUMPS  ·  %d ROLLER SETS  ·  %d BRIDGES  ·  %d CLIFF DROPS
+%d BENDS, %d TIGHT" % [
+				st.length / 1000.0, roundi(st.fall), st.avg, roundi(st.steepest), st.jumps, st.rollers, st.bridges, st.drops, st.bends, st.tight])
+		rv.request(GameState.seed, RouteStyle.snapshot())
+	menu_focus = nw
+
+## step 5: the time of day, then RACE (the bike on the left is the one you picked)
 func _setup_race(content: HBoxContainer) -> void:
 	var side := VBoxContainer.new()
 	side.size_flags_horizontal = Control.SIZE_EXPAND_FILL
