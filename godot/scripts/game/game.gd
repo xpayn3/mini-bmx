@@ -1525,6 +1525,10 @@ func on_takeoff() -> void:
 	air_peak = phys.y
 	if hud: hud.on_takeoff()
 
+## a landing that went badly (HEAVY / SLAM verdict): the slam's second bounce + clatter
+func on_bad_landing(sev: float) -> void:
+	if audio: audio.landing_bad(sev)
+
 func on_landing(air_time: float, impact: float) -> void:
 	var dist := Vector2(phys.x - takeoff.x, phys.z - takeoff.z).length()
 	var height := air_peak - maxf(takeoff.y, phys.y)
@@ -1552,7 +1556,7 @@ func on_landing(air_time: float, impact: float) -> void:
 	elif air_time > 0.45 and (ls == 1 or ls == 3):
 		dust.cloud(Vector3(phys.x, phys.y, phys.z), phys.fwd() * phys.v * 0.3, ground_dust(phys.x, phys.z, ls), 2.6 + impact * 0.15, 1.1)
 	if rumble: rumble.landing(air_time, impact)
-	if audio and air_time > 0.15: audio.landing(impact)
+	if audio and air_time > 0.15: audio.landing(impact, phys.land_yaw)
 
 ## the bike and rider as solid shapes the dust sim's air has to go round: two spinning wheels, the
 ## frame and the rider's body

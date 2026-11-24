@@ -28,6 +28,7 @@ class Host:
 	func get_up(): phys.get_up()
 	func on_takeoff(): events.append("takeoff x=%.1f v=%.1f" % [phys.x, phys.v])
 	func on_landing(at, imp): events.append("land x=%.1f air=%.2fs impact=%.1f" % [phys.x, at, imp])
+	func on_bad_landing(_sev): pass
 	func ride_fx(dt, f, va, w): pass
 func _init():
 	var tune = load("res://scripts/core/tune.gd").new()

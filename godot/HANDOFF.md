@@ -2011,6 +2011,14 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - Seen with it on day one: on the trail at ~70 km/h both ends chatter fast (several strokes a second) through the whole travel band with blow-offs
   every few strokes (25 / 17 in 16 s), and a 1.5 m table landed flat uses 115-125 % (bottom-out); not looked into yet.
 
+### Landing slam sound (2026-11-24, from the user's bike-slam recording)
+- `scripts/game/SlamSynth.cs` = the user's recording (hit B of a YouTube MTB sound clip, kept raw in `assets/audio/biking_raw/`, not imported) rebuilt procedurally,
+  matched by WAVEFORM: 30 damped sines for the ~100 ms body + noise in 3 bands under the recording's own 1 ms envelope (first 20 ms waveform corr 0.92, 5 ms envelope 0.93).
+  `Render(seed, vary, peak, size, side, kind)`: size 0 small .. 1 big (pitch / decay / rattle / sub thump), side = sideways landing (rear tyre lands late + rubber scrub),
+  kind 1 = the bad-landing layer (second bounce + short metallic ticks). ~4-10 ms a render, so `RideAudio.landing(impact, yaw)` makes a fresh one every landing; `landing_bad(sev)`
+  is called from `bike_physics` on HEAVY / SLAM (`Game.on_bad_landing`). No C#: the recorded `bike_slam_1..10.ogg` play. Hit A (messy multi-bounce) fitted badly and is not used.
+  Test: `-s res://tools/slam_render.gd -- <dir>` writes every type to WAV; `BMX_LAND_TEST=5` fakes a hard landing.
+
 ### Photo mode (O, `scripts/game/photo_mode.gd`)
 - Time freezes (`Engine.time_scale = 0`), HUD hidden, the camera comes loose: `Game._process` calls `PhotoMode.update(real dt)`
   instead of the ride; `CameraRig` / `hud` ignore input while `game.photo`; Esc / O / pad B / the card's ✕ leave.

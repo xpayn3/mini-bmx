@@ -139,6 +139,8 @@ func _update_chain(dt: float, va: float, on_ground: bool, st: BikePhysics) -> vo
 ## roll-out, ~6-8 a big drop) the louder it plays (and a touch deeper); a tiny one stays silent.
 ## 1-5 are the first recording (plain, deeper, lighter, dull, crisp), 6-10 the same five of the second
 const SLAM_CLIPS := 10
+const SLAM_VARY := 0.12   # how far each landing strays from the recording's own fit
+const SLAM_PEAK := 0.63   # -4 dBFS, like the recorded clips
 const SLAM_MIN := 0.8      # below this impact nothing plays
 const SLAM_FULL := 7.0     # impact that plays at full volume
 const SLAM_DB_SOFT := -30.0
@@ -148,28 +150,65 @@ var _slam_pl: Array = []
 var _slam_i := 0
 var _slam_last := -1
 
-func landing(impact: float) -> void:
-	if impact < SLAM_MIN: return
-	if _slam_clips.is_empty():
-		for n in range(1, SLAM_CLIPS + 1):
+var _slam_syn = null   # SlamSynth (C#): a fresh slam every landing, 4-8 ms; null -> the recorded clips
+
+func _slam_pool() -> void:
+	if not _slam_pl.is_empty(): return
+	var ss = load("res://scripts/game/SlamSynth.cs")
+	if ss != null and ss.can_instantiate(): _slam_syn = ss.new()
+	if _slam_syn == null:
+		for n in range(1, SLAM_CLIPS + 1):   # no C#: the recorded clips
 			var c = load("res://assets/audio/bike_slam_%d.ogg" % n)
 			if c != null: _slam_clips.append(c)
-		for i in 3:
-			var pl := AudioStreamPlayer.new()
-			pl.bus = player.bus
-			add_child(pl)
-			_slam_pl.append(pl)
-		if _slam_clips.is_empty(): return
+	for i in 4:
+		var pl := AudioStreamPlayer.new()
+		pl.bus = player.bus
+		add_child(pl)
+		_slam_pl.append(pl)
+
+func _slam_play(stream, db: float, pitch: float) -> void:
+	_slam_i = (_slam_i + 1) % _slam_pl.size()
+	var pl: AudioStreamPlayer = _slam_pl[_slam_i]
+	pl.stream = stream
+	pl.volume_db = db
+	pl.pitch_scale = pitch
+	pl.play()
+
+func _slam_wav(x: PackedFloat32Array) -> AudioStreamWAV:
+	var data := PackedByteArray()
+	data.resize(x.size() * 2)
+	for i in x.size(): data.encode_s16(i * 2, int(clampf(x[i], -1.0, 1.0) * 32767.0))
+	var w := AudioStreamWAV.new()
+	w.format = AudioStreamWAV.FORMAT_16_BITS
+	w.mix_rate = 48000
+	w.data = data
+	return w
+
+## touch-down of a jump. `impact` sets the size (a small drop = higher, quicker, lighter; a big one = deeper, longer, with a sub thump and more
+## rattle) and the volume; `yaw` = the sideways speed the tyres had to catch (m/s): from ~1 the rear tyre lands a moment after the front and
+## rubber scrubs over the dirt. Every landing is rendered fresh (random seed), so no two are the same.
+func landing(impact: float, yaw: float = 0.0) -> void:
+	if impact < SLAM_MIN: return
+	_slam_pool()
 	var k := clampf((impact - SLAM_MIN) / (SLAM_FULL - SLAM_MIN), 0.0, 1.0)
+	var db := lerpf(SLAM_DB_SOFT, SLAM_DB_HARD, pow(k, 0.75))
+	if _slam_syn != null:
+		var side := clampf((yaw - 0.8) / 3.5, 0.0, 1.0)
+		var x: PackedFloat32Array = _slam_syn.Render(randi(), SLAM_VARY, SLAM_PEAK, k, side, 0)
+		_slam_play(_slam_wav(x), db, 1.0)
+		return
+	if _slam_clips.is_empty(): return
 	var i := randi() % _slam_clips.size()
 	if i == _slam_last and _slam_clips.size() > 1: i = (i + 1) % _slam_clips.size()
 	_slam_last = i
-	_slam_i = (_slam_i + 1) % _slam_pl.size()
-	var pl: AudioStreamPlayer = _slam_pl[_slam_i]
-	pl.stream = _slam_clips[i]
-	pl.volume_db = lerpf(SLAM_DB_SOFT, SLAM_DB_HARD, pow(k, 0.75))
-	pl.pitch_scale = randf_range(0.985, 1.015) * lerpf(1.03, 0.97, k)
-	pl.play()
+	_slam_play(_slam_clips[i], db, randf_range(0.985, 1.015) * lerpf(1.03, 0.97, k))
+
+## a landing that went badly (heavy landing / SLAM, `sev` 0..1): the bike bounces again and parts clatter, a moment after the first hit
+func landing_bad(sev: float) -> void:
+	_slam_pool()
+	if _slam_syn == null: return
+	var x: PackedFloat32Array = _slam_syn.Render(randi(), SLAM_VARY, SLAM_PEAK, clampf(0.4 + 0.6 * sev, 0.0, 1.0), 0.0, 1)
+	_slam_play(_slam_wav(x), lerpf(-16.0, -6.0, clampf(sev, 0.0, 1.0)), 1.0)
 
 func thud(power: float) -> void: shots.append(["thud", 0.0, clampf(power * 0.5, 0.2, 1.0)])
 func crunch() -> void: shots.append(["crunch", 0.0, 0.8])

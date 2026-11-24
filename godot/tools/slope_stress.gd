@@ -84,6 +84,7 @@ class Host:
 	func get_up(): phys.get_up()
 	func on_takeoff(): takeoffs += 1
 	func on_landing(_at, imp): max_impact = maxf(max_impact, imp)
+	func on_bad_landing(_sev): pass
 	func ride_fx(_dt, _f, _va, _w): pass
 
 var fails := 0

@@ -2403,6 +2403,7 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			var slam: float = slam0 * (1.0 + float(T.get("landForgive", 1.0)) * clean)
 			if hit > slam:
 				if Env.s("BMX_TRICK") != "" or Env.s("BMX_LAND_PROBE") != "": print("HIT legs=%.2f rim=%.2f hit=%.2f of %.2f pe=%.2f SLAM vn=%.1f reach=%.2f" % [land_jolt, _rim_hit, hit, slam, _land_pe, _vn_td, _reach_td])   # tests
+				host.on_bad_landing(1.0)
 				_crash("SLAM!"); land_jolt = -1.0
 			elif since_land > 0.4:
 				var hv: float = float(T.get("landHeavy", 0.6))
@@ -2412,6 +2413,7 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 					v *= 1.0 - 0.12 * land_heavy   # (it was 22 %: at trail speed every built jump is overshot onto the flat, and each one took a fifth of the speed)
 					land_fold = maxf(land_fold, 0.3 + 0.3 * land_heavy)   # (he stays down: no second dip, a slower way back up)
 					_stun = 0.15 + 0.45 * land_heavy
+					if land_heavy > 0.12: host.on_bad_landing(land_heavy)
 					shake = maxf(shake, 0.1 + 0.15 * land_heavy)
 					if host.msg_idle(): host.flash("HEAVY LANDING" if land_heavy > 0.5 else "OOF!")
 				if Env.s("BMX_TRICK") != "" or Env.s("BMX_LAND_PROBE") != "": print("HIT legs=%.2f rim=%.2f hit=%.2f of %.2f pe=%.2f heavy=%.2f v=%.1f vn=%.1f reach=%.2f" % [land_jolt, _rim_hit, hit, slam, _land_pe, land_heavy, v, _vn_td, _reach_td])   # tests
