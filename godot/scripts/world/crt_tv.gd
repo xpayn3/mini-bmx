@@ -126,6 +126,14 @@ func power_off(quiet := false, animate := false) -> void:
 		if animate and _off_player != null and not (positional and mute_world): _off_player.call("play", OFF_CLICK_AT)   # (the click is 1.15 s into the recording: start just before it so it lands as the picture collapses)
 		if not quiet: _burst(0.22, 0.8)
 
+## every sound stops now and none starts again (the boot intro skipped)
+func silence() -> void:
+	for v in _players:
+		if v[0].get("playing"): v[0].call("stop")
+	_players.clear()
+	if _off_player != null and _off_player.get("playing"): _off_player.call("stop")
+	_off_player = null
+
 ## a hard tear + snow burst for `secs`
 func glitch(secs := 0.3, amount := 1.0) -> void:
 	_glitch = maxf(_glitch, amount)
