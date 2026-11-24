@@ -51,6 +51,20 @@ const UP_HZ := 10.0
 
 func _process(dt: float) -> void:
 	if field == null or game == null or game.phys == null: return
+	var _t0 := Time.get_ticks_usec()
+	_process_inner(dt)
+	if _probe:
+		var us := Time.get_ticks_usec() - _t0
+		_pus += us; _pn += 1; _pmax = maxi(_pmax, us)
+		if _pn >= 300:
+			print("RUTSPROC avg_us=%.1f max_us=%d" % [float(_pus) / _pn, _pmax])
+			_pus = 0; _pn = 0; _pmax = 0
+
+var _pus := 0
+var _pn := 0
+var _pmax := 0
+
+func _process_inner(dt: float) -> void:
 	RenderingServer.global_shader_parameter_set("rut_ctr", Vector4(game.phys.x, game.phys.z, FADE_A, FADE_B))   # every frame: the fade follows the rider smoothly
 	_up_t -= dt
 	if _up_t > 0.0: return
