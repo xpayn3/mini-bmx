@@ -11,9 +11,9 @@ uniform vec3 origin;
 uniform vec3 size_m;
 uniform float grain_k = 1.0;   // grain size (Dust › Grit)
 uniform float hm_cells = 32.0;
-uniform vec4 em_pos[8];    // xyz, w = cumulative weight (0..1)
-uniform vec4 em_vel[8];    // xyz throw velocity, w = spread (m/s)
-uniform vec4 em_col[8];    // rgb colour (linear)
+uniform vec4 em_pos[12];    // xyz, w = cumulative weight (0..1)
+uniform vec4 em_vel[12];    // xyz throw velocity, w = spread (m/s)
+uniform vec4 em_col[12];    // rgb colour (linear)
 uniform int em_count = 0;
 
 float rnd(inout uint s) {
@@ -33,7 +33,7 @@ void start() {
 	uint s = NUMBER * 1973u + RANDOM_SEED * 9277u + 1u;
 	float pick = rnd(s);
 	int k = 0;
-	for (int i = 0; i < 8; i++) {
+	for (int i = 0; i < 12; i++) {
 		if (i >= em_count) break;
 		k = i;
 		if (pick <= em_pos[i].w) break;
@@ -41,7 +41,7 @@ void start() {
 	vec3 dir = normalize(vec3(rnd(s) - 0.5, rnd(s) - 0.5, rnd(s) - 0.5) + vec3(0.0, 1e-3, 0.0));
 	vec3 p = em_pos[k].xyz + dir * 0.12 * rnd(s);
 	float size = rnd(s);
-	size *= size;   // mostly fine grains, a few coarse bits
+	size = pow(size, 2.0);   // mostly fine grains, a good share of coarse chunks
 	VELOCITY = em_vel[k].xyz * (0.6 + 0.8 * rnd(s)) + dir * em_vel[k].w * (0.4 + rnd(s))
 		+ vec3(0.0, (0.5 + rnd(s) * 1.5) * (0.4 + size), 0.0);
 	TRANSFORM = mat4(1.0);
@@ -75,7 +75,7 @@ void process() {
 	// tiny: 2 mm fine grains .. 1.2 cm bits; shrink away at the end of life
 	float life = clamp(CUSTOM.w / max(LIFETIME, 1e-3), 0.0, 1.0);
 	CUSTOM.w += DELTA;
-	float sc = mix(0.002, 0.012, size) * grain_k * (1.0 - smoothstep(0.75, 1.0, life));
+	float sc = mix(0.002, 0.02, size * size * 0.6 + size * 0.4) * grain_k * (1.0 - smoothstep(0.75, 1.0, life));
 	TRANSFORM[0].xyz = vec3(sc, 0.0, 0.0);
 	TRANSFORM[1].xyz = vec3(0.0, sc, 0.0);
 	TRANSFORM[2].xyz = vec3(0.0, 0.0, sc);

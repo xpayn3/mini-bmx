@@ -3,7 +3,7 @@ extends GPUParticles3D
 ## Sand grains / specks thrown out with the dust, carried by the smoke sim's air (shaders/smoke/grit*.gdshader).
 ## Each frame: emit(...) from up to 8 points (tyre patches, landings, crash impacts), then update().
 
-const MAX_EMIT := 8
+const MAX_EMIT := 12
 const MAX_RATE := 2400.0          # grains / s at amount_ratio 1
 const LIFE := 2.2
 
@@ -74,4 +74,5 @@ func update(focus: Vector3) -> void:
 	for m in [_pm, _dm]: m.set_shader_parameter("origin", ex.origin)
 	_dm.set_shader_parameter("sun_col", ex.sun_col)
 	_dm.set_shader_parameter("amb_col", ex.amb_col)
+	if sim.sun != null: _dm.set_shader_parameter("sun_dir", sim.sun.global_transform.basis.z)
 	_pts.clear()

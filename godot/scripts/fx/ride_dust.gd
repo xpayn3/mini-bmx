@@ -115,6 +115,7 @@ func _init() -> void:
 			add_child(sim)
 			grit = Grit.new(sim)
 			add_child(grit)
+			if Env.s("BMX_GRIT_GD") == "": _grit_cs = CrashLog.cs_new("res://scripts/fx/GritSprayCs.cs")
 			emitter.visible = false
 		else:
 			sim.free()
@@ -144,7 +145,7 @@ func sim_step(dt: float, focus: Vector3, fwd: Vector3, wind: Vector2) -> void:
 	_feed_prev = _patch(_feed_on, _feed_p, _feed_prev, _feed_v, _feed_rate * pulse, _feed_fan, _feed_col)
 	# the front tyre kicks up a little too (its own gusts)
 	var fpulse := clampf(0.9 + _gust.get_noise_1d(_pulse_t * 60.0 + 500.0) * gust, 0.35, 2.6)
-	_front_prev = _patch(_front_on, _front_p, _front_prev, _front_v, _front_rate * fpulse, _feed_fan, _feed_col)
+	_front_prev = _patch(_front_on, _front_p, _front_prev, _front_v, _front_rate * fpulse, _feed_fan, _feed_col, false)
 	sim.step(dt, focus, fwd)
 	if grit != null:
 		for i in range(_grit_bursts.size() - 1, -1, -1):
@@ -157,7 +158,7 @@ func sim_step(dt: float, focus: Vector3, fwd: Vector3, wind: Vector2) -> void:
 ## dust comes only from a tyre's contact patch: small sources on the ground along the path the patch
 ## swept this frame, each spraying its own way (back / out / up, in gusts). The cloud is what the sim
 ## makes of that spray: it fans out, rolls and spreads from there. Returns the new "previous" point.
-func _patch(on: bool, p: Vector3, prev: Vector3, v: Vector3, rate: float, _fan: float, col: Color) -> Vector3:
+func _patch(on: bool, p: Vector3, prev: Vector3, v: Vector3, rate: float, _fan: float, col: Color, rear := true) -> Vector3:
 	if not on or rate <= 0.0: return Vector3.INF
 	var from := prev if prev != Vector3.INF and prev.distance_to(p) < 2.0 else p
 	var k := clampi(ceili(from.distance_to(p) / 0.15), 1, 5)
@@ -189,11 +190,40 @@ func _patch(on: bool, p: Vector3, prev: Vector3, v: Vector3, rate: float, _fan: 
 		sim.add_source(at, jv * (1.0 + fast * 0.5), PATCH_R, rate * 14.0 / k, 10.0, (0.03 + randf() * 0.05 + fast * 0.08) * out_k, col)
 	# grit: grains flicked off the tread - only when going fast (Dust › Grit: from what speed, how many, which way)
 	var gk := clampf((sim.speed - float(t.get("dustGritFrom", 30.0)) / 3.6) / 5.0, 0.0, 1.0)
-	if grit != null and gk > 0.0:
-		var g_up := (0.6 + sp * 0.15) * float(t.get("dustGritUp", 1.0))
-		var g_spread := (0.3 + sp * 0.1) * float(t.get("dustGritWidth", 1.0))
-		grit.emit(p, v * float(t.get("dustGritThrow", 1.4)) + Vector3(0, g_up, 0), g_spread, rate * 4.0 * gk * float(t.get("dustGrit", 1.0)), col)
+	var slip_on := absf(_g_slip_long) + absf(_g_slip_lat) > 1.0 or _g_bump > 0.05
+	if grit != null and (slip_on or (gk > 0.0 and _grit_cs == null)):
+		var g_rate := rate * 4.0 * maxf(gk, 0.6 if slip_on else 0.0) * float(t.get("dustGrit", 1.0))
+		if _grit_cs != null and _g_dir != Vector3.ZERO:
+			# the C# model (GritSprayCs): stones leave the tread at angles worked out from the wheel's surface speed,
+			# the bike's speed, the sideways slide, the ground's looseness and the load
+			var surf := _g_vb.dot(_g_dir) + _g_slip_long if rear else _g_vb.dot(_g_dir)
+			var lat := _g_slip_lat if rear else _g_slip_lat * 0.5
+			var o: PackedFloat32Array = _grit_cs.Spray(p.x, p.y, p.z, _g_vb.x, _g_vb.z, _g_dir.x, _g_dir.z,
+				maxf(surf, 0.0), lat, _g_load, _g_loose, g_rate, float(t.get("dustGritThrow", 1.4)) / 1.4, _g_bump)
+			for i in 3:
+				var b := i * 8
+				grit.emit(Vector3(o[b], o[b + 1], o[b + 2]), Vector3(o[b + 3], o[b + 4], o[b + 5]),
+					o[b + 6] * float(t.get("dustGritWidth", 1.0)), o[b + 7], col)
+		else:
+			var g_up := (0.6 + sp * 0.15) * float(t.get("dustGritUp", 1.0))
+			var g_spread := (0.3 + sp * 0.1) * float(t.get("dustGritWidth", 1.0))
+			grit.emit(p, v * float(t.get("dustGritThrow", 1.4)) + Vector3(0, g_up, 0), g_spread, g_rate, col)
 	return p0
+
+## the tyre's real state for the grit spray, set every physics step before feed(): the bike's velocity over the ground,
+## its heading, how much faster the rear tread runs than the bike (+ wheelspin, - locked), the tread's sideways slide
+## (m/s, + right), the rear's load (1 = resting weight) and the ground's looseness (0 hard .. 1.5 sand)
+func set_grit_state(vb: Vector3, dir: Vector3, slip_long: float, slip_lat: float, load: float, loose: float, bump := 0.0) -> void:
+	_g_vb = vb; _g_dir = dir; _g_slip_long = slip_long; _g_slip_lat = slip_lat; _g_load = load; _g_loose = loose; _g_bump = bump
+
+var _g_vb := Vector3.ZERO
+var _g_dir := Vector3.ZERO
+var _g_slip_long := 0.0
+var _g_slip_lat := 0.0
+var _g_load := 1.0
+var _g_loose := 1.0
+var _g_bump := 0.0
+var _grit_cs = null   # GritSprayCs (C#) or null = the old GDScript throw
 
 ## grains thrown for secs (landings, crash impacts)
 ## the instant replay (ReplayMode): the tyre feeds as a state per sample, grit bursts as events (the sim records its bursts)
