@@ -3,7 +3,7 @@
 Everything a new chat needs to carry on with the game. The repo root `CLAUDE.md` points here, so Claude Code
 loads it into every chat.
 
-State as of **2026-11-18**. Repo `github.com/xpayn3/mini-bmx`, checkout `C:\Users\Luka\Documents\gamecycling`,
+State as of **2026-11-24**. Repo `github.com/xpayn3/mini-bmx`, checkout `C:\Users\Luka\Documents\gamecycling`,
 branch `main`, folder `godot/`. The repo holds **only the Godot game** (`godot/`) and its Houdini exporters
 (`tools/`). The old three.js web prototype was moved out to `C:\Users\Luka\Documents\mini-bmx-web-archive`
 (not developed; still in git history before the removal commit).
@@ -2807,6 +2807,17 @@ ide_<date>.replay` (test runs: `replays/tests/`), zstd, ~4 MB a
   `BMX_MENU_PAGE=setup` + `--shot=..@12` (the menu needs ~10 s to load before the preview animates).
 
 ### Settings & tuning
+- **Sound mixer (2026-11-24, Settings › Audio, `settings_menu.gd` `_audio`)**: master switch (`mute_all`), `volume` (Master bus),
+  `sfx_volume` (SFX bus = all game sounds), then five channel buses under SFX made by `Settings.apply()` from `Settings.MIX`
+  (`Wind` tyres / wind / water bed in `ride_audio.gd`'s main stream, `Bike` freewheel + chain + shifts, `Impacts` landing slam
+  pool + bone crunch, `World` TVs + garage door, `UI` computer beeps + paper): each has `vol_<key>` (0..1.5) and `on_<key>`.
+  Every audio player picks its bus with `Settings.bus_for("Name")` (falls back to SFX / Master): use that for new sounds, never
+  a literal bus name. Output device = `audio_device` (`AudioServer.output_device`). Focus-in restores the master mute to `mute_all`.
+  Crash / wood-smash one-shots are mixed into the Wind stream (they don't have their own player), so they follow Wind, not Impacts.
+- The title menu no longer has the WORLD seed box / NEW WORLD button (user, 2026-11-24); R / the pause menu still make a new world.
+- **Fresh worktree setup**: a new `claude/*` worktree has no import cache or C# build: run `godot --headless --import` then `dotnet build`
+  in `godot/` before any test (otherwise `Tokens` / `UITheme` "not declared" and `CSharpScript.new` errors). The import also rewrites
+  many `.import` files: don't commit those, `git add godot/scripts` only.
 - Settings: display (mode, resolution, vsync, UI scale, FPS cap), graphics presets Low/Medium/High/Ultra
   + every option, audio buses, controls (rebind keys + pad), gameplay. Sliders apply on release.
   Controls page starts with CAMERA: default camera, FOV, wider view at speed, distance, height, side offset,
@@ -3017,9 +3028,8 @@ Known, not fixed (lower priority from the code review):
   exit (gone with `--set=gi=0`; a bare SSIL scene doesn't do it, not found which of our viewports / features adds it;
   harmless, the OS frees it). "2 ObjectDB instances leaked" (ref count 0, C# side) also at exit; even an empty
   `--quit` reports 5. The big leak (89 objects + 3 scripts "still in use") was `field.course` <-> `course._M`, fixed.
-- Records: "distance ridden" always 0; top speed lost if the window is closed instead of quitting.
+- Records: top speed is lost if the window is closed instead of quitting. (Distance ridden works: `GameState.add_distance`.)
 - Camera ignores rebound gamepad/camera keys (reads the right stick directly); `cam_up/down` unused.
-- Quick tune card sliders can show stale values after a reset (the tuning card re-reads on every tab).
 - HUD hotkeys (P/K/L/H) work on the title screen.
 - Rebinding: no conflict detection; pad rebind can't be cancelled.
 - Garage: test env `BMX_POSE` values get saved if you then touch a slider; config written on every slider tick.
