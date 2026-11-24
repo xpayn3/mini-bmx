@@ -158,6 +158,17 @@ internal sealed class TfWood
 				return 0.85;
 			return skin.ev(TerrainFieldCs.maxf(0.001, 19.0 - u));
 		}
+		if (kind == 3)
+		{
+			double t = (u - 2.0) / 5.5;
+			t -= Math.Floor(t);
+			double bw = 0.3 + 0.32 * 16.0 * t * t * (1.0 - t) * (1.0 - t);
+			if (u < 2.0)
+				return ramp(0.0, 2.0, 0.02, 0.3, u);
+			if (u < u1 - 2.0)
+				return bw;
+			return ramp(u1 - 2.0, u1, 0.3, 0.02, u);
+		}
 		if (u < 2.0)
 			return ramp(0.0, 2.0, 0.02, 0.45, u);
 		if (u < u1 - 2.0)
@@ -219,7 +230,7 @@ internal static class TfSet
 			["skinny"] = new TfFlat(19.0),
 			["bridge"] = new TfFlat(15.0),
 			["gorge"] = new TfFlat(36.0),
-			["rope"] = new TfFlat(46.0),
+			["rope"] = new TfFlat(72.0),
 		};
 		var kick = new TfHermite(new[] { new[] { 0.0, 0, 0.1 }, new[] { 3.8, 0.95, 0.4 } });
 		var skin = new TfHermite(new[] { new[] { 0.0, 0.02, 0.05 }, new[] { 2.0, 0.42, 0.3 }, new[] { 4.0, 0.85, 0 } });
@@ -228,11 +239,11 @@ internal static class TfSet
 			["woodKicker"] = new TfWood(0, 0.0, 3.8, 0.85, true, kick, skin),
 			["skinny"] = new TfWood(1, 0.0, 19.0, 0.33, false, kick, skin),
 			["bridge"] = new TfWood(2, 0.0, 15.0, 1.0, false, kick, skin),
+			["bridgeW"] = new TfWood(3, 0.0, 15.0, 1.0, false, kick, skin),
 			["gorge"] = new TfWood(2, 0.0, 36.0, 1.4, false, kick, skin),
 		};
 		DIG = new Dictionary<string, TfProfile>
 		{
-			["bridge"] = new TfHermite(new[] { new[] { 0.0, 0, 0 }, new[] { 1.6, 0, 0 }, new[] { 3.4, -1.9, 0 }, new[] { 11.6, -1.9, 0 }, new[] { 13.4, 0, 0 }, new[] { 15.0, 0, 0 } }),
 			["gorge"] = new TfHermite(new[] { new[] { 0.0, 0, 0 }, new[] { 3.0, 0, 0 }, new[] { 4.6, -9.0, 0 }, new[] { 31.4, -9.0, 0 }, new[] { 33.0, 0, 0 }, new[] { 36.0, 0, 0 } }),
 		};
 	}
@@ -1265,6 +1276,8 @@ public partial class TerrainFieldCs : RefCounted
 		var prof = old ? TfSet.SMALL[type] : TfSet.PROFILES[type];
 		var f = new TfFeat { x = x, z = z, dx = dx, dz = dz, len = prof.length, prof = prof, b0 = b0, b1 = b1, type = type };
 		TfSet.WOOD.TryGetValue(type, out f.wood);
+		if (type == "bridge" && ((((long)Math.Floor(x) * 7 + (long)Math.Floor(z) * 13) % 3) + 3) % 3 == 0)
+			f.wood = TfSet.WOOD["bridgeW"];
 		TfSet.DIG.TryGetValue(type, out f.dig);
 		f.canyon = type == "rope";
 		if ((old ? AIR_S : AIR).TryGetValue(type, out var airv)) f.air = airv;
@@ -1362,7 +1375,7 @@ public partial class TerrainFieldCs : RefCounted
 	}
 
 	// ---------------- rope bridge canyons (TerrainField.canyon_rims: same arithmetic, same order) ----------------
-	const double CANYON_W = 42.0, CANYON_D = 16.0, CANYON_RIM = 4.2, CANYON_CELL = 64.0, ROPE_RAMP = 22.0;
+	const double CANYON_W = 90.0, CANYON_D = 20.0, CANYON_RIM = 4.2, CANYON_CELL = 64.0, ROPE_RAMP = 22.0;
 	private System.Collections.Generic.Dictionary<long, System.Collections.Generic.List<TfFeat>> _canyons = new();
 
 	private void _index_canyons()
@@ -1406,8 +1419,8 @@ public partial class TerrainFieldCs : RefCounted
 		double hw = (len * 0.5 - CANYON_RIM) * (1.0 - 0.6 * sm(8.0, CANYON_W, aw));
 		double a = cen - hw + amp * 3.0 * _canyon_n(k, sd + 1, aw / 7.0);
 		double b = cen + hw - amp * 3.0 * _canyon_n(k, sd + 2, aw / 7.0);
-		double ww = 1.8 + amp * 1.6;
-		double dep = CANYON_D * (1.0 - sm(CANYON_W - 18.0, CANYON_W, aw)) * (1.0 + 0.2 * amp * _canyon_n(k, 6, aw / 11.0));
+		double ww = 30.0 + amp * 10.0;
+		double dep = CANYON_D * (1.0 - sm(CANYON_W - 50.0, CANYON_W, aw)) * (1.0 + 0.2 * amp * _canyon_n(k, 6, aw / 11.0));
 		double v = Math.Min(sm(a, a + ww, u), 1.0 - sm(b - ww, b, u));
 		return v > 0.0 ? -dep * v : 0.0;
 	}
