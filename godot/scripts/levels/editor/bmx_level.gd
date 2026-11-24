@@ -30,6 +30,13 @@ signal rebuilt(summary: String)
 	set(v): rough_scale = v; _queue()
 @export var noise_seed := 1:
 	set(v): noise_seed = v; _queue()
+@export_group("Nature")
+@export_range(0.0, 3.0, 0.05) var trees := 1.0:   ## tree density (0 none .. a forest)
+	set(v): trees = v; _queue()
+@export_range(0.0, 30.0, 0.5, "suffix:m") var tree_clear := 4.0:   ## kept clear either side of the trail's edge
+	set(v): tree_clear = v; _queue()
+@export var tree_seed := 1:
+	set(v): tree_seed = v; _queue()
 @export_group("Editor")
 @export var live_preview := true:
 	set(v): live_preview = v; _queue()
@@ -94,6 +101,7 @@ func make_field() -> LevelField:
 	var f := LevelField.new()
 	f.length = length; f.width = width; f.drop = drop; f.steep_top = steep_top; f.side_rise = side_rise
 	f.rough = rough; f.rough_scale = rough_scale; f.noise_seed = noise_seed; f.flat = flat_ground
+	f.trees = trees; f.tree_clear = tree_clear; f.tree_seed = tree_seed
 	var t := trail()
 	if t: t.fill(f)
 	f.pieces = []
@@ -133,7 +141,7 @@ func _process(dt: float) -> void:
 
 func _signature() -> int:
 	var f := make_field()
-	return hash(str([f.flat, f.length, f.width, f.drop, f.steep_top, f.side_rise, f.rough, f.rough_scale, f.noise_seed, f.trail_in,
+	return hash(str([f.trees, f.tree_clear, f.tree_seed, f.flat, f.length, f.width, f.drop, f.steep_top, f.side_rise, f.rough, f.rough_scale, f.noise_seed, f.trail_in,
 		f.trail_width, f.blend, f.berms, f.bank_max_deg, f.smooth_len, f.follow, f.start_speed, f.pieces]))
 
 

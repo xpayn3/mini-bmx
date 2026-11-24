@@ -18,6 +18,9 @@ var side_rise := 18.0      # m the edges rise above the middle (the slope is a s
 var rough := 3.0           # m of rolling bumps
 var rough_scale := 45.0    # m between bumps
 var noise_seed := 1
+var trees := 1.0           # tree density (0 none .. 2 a forest)
+var tree_clear := 4.0      # m kept clear of trees either side of the trail's edge
+var tree_seed := 1
 var flat := false          # flat ground (a park / jump spot): no slope, no valley; only the bumps (rough) if any
 
 # ---- the trail ----------------------------------------------------------------------------------------------
@@ -45,6 +48,10 @@ var x0 := 0.0; var z0 := 0.0
 var nx := 0; var nz := 0
 var H := PackedFloat32Array()      # heights
 var S := PackedByteArray()         # 1 = trail dirt, 2 = berm face (clay), 0 = land
+var DT := PackedFloat32Array()     # per grid cell: distance to the trail's centreline (INF = far)
+var TSA := PackedFloat32Array()    # per grid cell: signed metres across the trail (+ = left) where near it
+var TAL := PackedFloat32Array()    # per grid cell: metres along the trail there
+var TKC := PackedFloat32Array()    # per grid cell: the trail's curvature there (1/m, signed)
 var JM := PackedByteArray()        # 1 = under a built structure (jump / drop): its own exact shape + fine mesh there
 
 # ---- pieces (BmxPiece.piece() dictionaries in; resolved by bake) -------------------------------------------------
@@ -188,6 +195,7 @@ func bake(grid_step := 0.5) -> void:
 	nx = int(ceil((length + 2.0 * margin) / step)) + 1
 	nz = int(ceil((width + 20.0) / step)) + 1
 	H.resize(nx * nz); S.resize(nx * nz); S.fill(0); JM.resize(nx * nz); JM.fill(0)
+	DT.resize(nx * nz); DT.fill(INF); TSA.resize(nx * nz); TSA.fill(0.0); TAL.resize(nx * nz); TAL.fill(0.0); TKC.resize(nx * nz); TKC.fill(0.0)
 	structs = []; rocks = []; _rock_cells = {}; gates = []; route = []; rock_runs = []
 	for j in nz:
 		var z := z0 + j * step
@@ -233,6 +241,7 @@ func bake(grid_step := 0.5) -> void:
 				var b := lerpf(TB[k], TB[k + 1], a)
 				cut[idx] = _trail_shape(y, b, clampf(s, -hw, hw))
 				sd[idx] = absf(s)
+				DT[idx] = sqrt(d2); TSA[idx] = s; TAL[idx] = (k + a) * DS; TKC[idx] = lerpf(TK[k], TK[k + 1], a)
 	for idx in nx * nz:
 		if best[idx] == INF: continue
 		var s := sd[idx]
@@ -266,6 +275,7 @@ func height(x: float, z: float) -> float:
 func height_rocks(x: float, z: float) -> float:
 	var g := height(x, z)
 	for c in rocks_near(x, z):
+		if not c.has("top"): continue   # (a tree trunk: a wall, not a dome)
 		var dx: float = x - c.x
 		var dz: float = z - c.z
 		var q: float = (dx * dx + dz * dz) / (c.r * c.r)
@@ -282,8 +292,8 @@ func rocks_near(x: float, z: float) -> Array:
 func jump_mask(x: float, z: float) -> float:
 	for st in structs:
 		if (st.rect as Rect2).has_point(Vector2(x, z)):
-			var l := _local(st, x, z)
-			if _at_local(st, l.x, l.y) > 0.01: return 1.0
+			var l := _local(st, x, z)   # (the whole feature, run-out included: as the world's features)
+			if l.x >= 0.0 and l.x <= float(st.L) and absf(l.y) <= float(st.reach): return 1.0
 	return 0.0
 
 
@@ -383,9 +393,11 @@ func ground_mesh(every := 2) -> ArrayMesh:
 
 
 ## the land round the grid out to `reach` m, coarse (it sits a little low under the grid's edge so no gap shows)
-func far_mesh(reach := 900.0, cell := 12.0) -> ArrayMesh:
+func far_mesh(reach := 900.0, cell := 12.0, hole := Rect2()) -> ArrayMesh:
 	var gx0 := x0 + cell; var gx1 := x0 + (nx - 1) * step - cell
 	var gz0 := z0 + cell; var gz1 := z0 + (nz - 1) * step - cell
+	if hole.has_area():   # (the ride's chunks cover exactly this)
+		gx0 = hole.position.x + cell; gx1 = hole.end.x - cell; gz0 = hole.position.y + cell; gz1 = hole.end.y - cell
 	var mx := length * 0.5
 	var n := int(ceil(reach * 2.0 / cell)) + 1
 	var V := PackedVector3Array(); V.resize(n * n)
@@ -498,6 +510,7 @@ func _bake_pieces() -> void:
 			"rocks": _add_rocks(p)
 			"gate": _add_gate(p)
 	route.sort_custom(func(a, b): return a.s < b.s)
+	_bake_trees()
 
 
 ## a structure's frame from where it starts, levelled to the ground's grade along it, stamped into the grid
@@ -734,8 +747,9 @@ func _add_gate(p: Dictionary) -> void:
 func start_stand() -> Vector3:
 	for g in gates:
 		if g.gate == "start":
-			if g.i >= 0: return stand_at(g.i)
-			return Vector3(g.pos.x, atan2(-g.dir.y, g.dir.x), g.pos.y)
+			if g.i >= 0: return stand_at(maxi(0, g.i - 3))   # (3 m behind its line: riding through it starts the clock)
+			var b: Vector2 = g.pos - g.dir * 3.0
+			return Vector3(b.x, atan2(-g.dir.y, g.dir.x), b.y)
 	return stand_at(2)
 
 
@@ -815,3 +829,61 @@ func struct_mesh(st: Dictionary) -> ArrayMesh:
 				i += 2
 	st2.generate_normals()
 	return st2.commit()
+
+
+# ---- trees -------------------------------------------------------------------------------------------------------
+var tree_list: Array = []          # {x, z, h, kind ("pine" | "leafy" | "bush"), sc, py, yaw, ci}
+const TREE_CELL := 9.0
+
+
+## trees on a jittered grid over the land: none on / near the trail, on structures, rocks, gates, steep rock faces;
+## pines more on the steep and high, leafy trees lower, bushes at the forest's edge. Trunks are colliders (as the world's)
+func _bake_trees() -> void:
+	tree_list = []
+	if trees <= 0.0: return
+	var rng := RandomNumberGenerator.new(); rng.seed = tree_seed * 104729 + noise_seed
+	var cell := TREE_CELL / sqrt(maxf(0.05, trees))
+	var xe := x0 + (nx - 1) * step; var ze := z0 + (nz - 1) * step
+	var hw := trail_width * 0.5
+	var z := z0 + cell * 0.5
+	while z < ze:
+		var x := x0 + cell * 0.5
+		while x < xe:
+			var px := x + (rng.randf() - 0.5) * cell * 0.9
+			var pz := z + (rng.randf() - 0.5) * cell * 0.9
+			x += cell
+			var clump := 0.5 + 0.5 * _noise.get_noise_2d(px * 0.6 + 900.0, pz * 0.6)   # (woods and clearings)
+			if rng.randf() > clump * 1.3: continue
+			var i := clampi(int(round((px - x0) / step)), 0, nx - 1); var j := clampi(int(round((pz - z0) / step)), 0, nz - 1)
+			var dt := DT[j * nx + i]
+			var edge := dt - hw
+			if edge < tree_clear: continue
+			if JM[j * nx + i] == 1 or S[j * nx + i] != 0: continue
+			if _near_piece(px, pz, 6.0): continue
+			var h := grid_height(px, pz)
+			var gx := grid_height(px + 1.0, pz) - grid_height(px - 1.0, pz)
+			var gz := grid_height(px, pz + 1.0) - grid_height(px, pz - 1.0)
+			var steep := sqrt(gx * gx + gz * gz) * 0.5
+			if steep > 0.9: continue
+			var sc := (0.7 + rng.randf() * 0.8) * 1.4   # (the world's sizes: TerrainChunkBuilder TREE_K)
+			var kind := "pine" if rng.randf() < 0.45 + steep * 0.6 else "leafy"
+			if edge < tree_clear + 3.0 and rng.randf() < 0.6: kind = "bush"
+			tree_list.append({"x": px, "z": pz, "h": h, "kind": kind, "sc": sc, "py": sc * (1.5 + rng.randf() * 0.7 + pow(rng.randf(), 4.0) * 0.9),
+				"yaw": rng.randf() * TAU, "ci": rng.randi() % 3})
+			if kind != "bush":   # trunk collider (rocks and trees share the lookup, as in the world)
+				var c := {"x": px, "z": pz, "r": 0.16 * sc + 0.02, "ceil": h + 6.0 * sc}
+				var key := Vector2i(floori(px / ROCK_CELL), floori(pz / ROCK_CELL))
+				if not _rock_cells.has(key): _rock_cells[key] = []
+				_rock_cells[key].append(c)
+		z += cell
+
+
+func _near_piece(x: float, z: float, r: float) -> bool:
+	var p := Vector2(x, z)
+	for st in structs:
+		if (st.rect as Rect2).grow(r).has_point(p): return true
+	for g in gates:
+		if (g.pos as Vector2).distance_to(p) < float(g.span) * 0.5 + r: return true
+	for c in rocks:
+		if Vector2(c.x, c.z).distance_to(p) < r * 0.5: return true
+	return false

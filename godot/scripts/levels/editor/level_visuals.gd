@@ -21,6 +21,7 @@ static func build(f: LevelField, parent: Node3D, in_game: bool, internal := fals
 		if in_game: mi.layers = 1 | Terrain.GROUND_LAYER
 		_add(parent, mi, internal)
 	_rocks(f, parent, in_game, internal)
+	_trees(f, parent, internal)
 	for g in f.gates: _gate(f, g, parent, internal)
 
 
@@ -89,3 +90,54 @@ static func _gate(f: LevelField, g: Dictionary, parent: Node3D, internal: bool) 
 	lbl.double_sided = true
 	root.add_child(lbl)
 	_add(parent, root, internal)
+
+
+const PINE_COLS := [0x2f6e45, 0x3b7d4b, 0x2a5f44]
+const LEAF_COLS := [0x4f9a3a, 0x6cb544, 0x3f8a3f]
+const BUSH_COLS := [0x3f7f33, 0x4c8c38, 0x5a8f3a]
+
+
+static func _lin(h: int) -> Color:
+	return Color.hex((h << 8) | 0xff).srgb_to_linear()
+
+
+## the trees, as the world draws them (TerrainGeo's trunk / pine / blob / bush meshes + deco materials, the colour in
+## each instance's custom data)
+static func _trees(f: LevelField, parent: Node3D, internal: bool) -> void:
+	if f.tree_list.is_empty(): return
+	TerrainGeo.ensure()
+	var lists := {"trunk": [], "pine": [], "blob": [], "bush": []}
+	for t in f.tree_list:
+		var sc: float = t.sc
+		var h: float = t.h
+		var yaw: float = t.yaw
+		var p := Vector3(t.x, 0, t.z)
+		match str(t.kind):
+			"pine":
+				lists.trunk.append([p + Vector3(0, h - 0.1, 0), Vector3(sc, sc * 0.9 + float(t.py) * 0.15, sc), yaw, Color(1, 1, 1)])
+				lists.pine.append([p + Vector3(0, h + sc * 0.6, 0), Vector3(sc * 1.1, t.py, sc * 1.1), yaw, _lin(PINE_COLS[t.ci])])
+			"leafy":
+				var th := sc * 1.3
+				lists.trunk.append([p + Vector3(0, h - 0.1, 0), Vector3(sc, th + 0.3, sc), yaw, Color(1, 1, 1)])
+				lists.blob.append([p + Vector3(0, h + th + sc * 0.7, 0), Vector3(sc * 1.2, sc * 1.05, sc * 1.2), yaw, _lin(LEAF_COLS[t.ci])])
+			_:
+				lists.bush.append([p + Vector3(0, h - 0.08, 0), Vector3(sc * 0.9, sc * 0.6, sc * 0.9), yaw, _lin(BUSH_COLS[t.ci])])
+	var spec := {"trunk": ["trunk", "trunk"], "pine": ["pine", "leaf"], "blob": ["blob", "leafSoft"], "bush": ["bush", "leafSoft"]}
+	for nm in lists:
+		var arr: Array = lists[nm]
+		if arr.is_empty(): continue
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.use_custom_data = true
+		mm.mesh = TerrainGeo.MESH[spec[nm][0]]
+		mm.instance_count = arr.size()
+		for i in arr.size():
+			var e: Array = arr[i]
+			mm.set_instance_transform(i, Transform3D(Basis(Vector3.UP, e[2]).scaled_local(e[1]), e[0]))
+			mm.set_instance_custom_data(i, e[3])
+		var mi := MultiMeshInstance3D.new()
+		mi.name = "Trees_" + nm
+		mi.multimesh = mm
+		mi.material_override = TerrainGeo.MAT[spec[nm][1]]
+		_add(parent, mi, internal)
+		mi.set_instance_shader_parameter("fade_mode", 1.0)

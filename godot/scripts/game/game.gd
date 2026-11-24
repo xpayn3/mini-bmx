@@ -208,6 +208,7 @@ var title_world := false
 var level := ""
 var level_probe: PlaygroundProbe
 var lab: PlaygroundLab   # the playground's lab tools (energy / checks, pause / step / slow, record / replay), made by diag
+var race: LevelRace   # a built level's race timing (levels/level_race.gd: gates, splits, best times)
 var diag: RideDiag   # ride diagnostics (F4, levels/ride_diag.gd): graphs of suspension, input, tyres, body, air
 var _level_light_ver := -1
 ## parts of an earlier Game of the same world to use instead of building them ({terrain, far_hills}; main sets it
@@ -274,6 +275,11 @@ func _ready() -> void:
 		sheep.setup(terrain)
 		if level != "": sheep.enabled = false
 	if Env.s("BMX_RENDER_PROBE") != "": add_child(preload("res://scripts/game/render_probe.gd").new(self))
+	if terrain is LevelTerrain:
+		race = LevelRace.new()
+		race.name = "LevelRace"
+		add_child(race)
+		race.setup(self, terrain.lf, terrain.path)
 	if terrain is PlaygroundTerrain:
 		level_probe = PlaygroundProbe.new()
 		level_probe.name = "PlaygroundProbe"
@@ -753,11 +759,12 @@ func _mist_update(dt: float) -> void:
 		var lead := clampf(float(phys.v) * 4.0, -80.0, 80.0)
 		var cx := pos.x + f.x * lead
 		var cz := pos.z + f.z * lead
-		var lo := [maxf(float(terrain.height(pos.x, pos.z)), Terrain.WATER)]
+		var wl := Terrain.WATER if level == "" else -INF   # (a built level has no world sea: mist lies in its own hollows)
+		var lo := [maxf(float(terrain.height(pos.x, pos.z)), wl)]
 		for i in 12:
 			var a := float(i) * TAU / 6.0 + (0.0 if i < 6 else 0.52)
 			var r := 70.0 if i < 6 else 150.0
-			lo.append(maxf(float(terrain.height(cx + cos(a) * r, cz + sin(a) * r)), Terrain.WATER))   # lakes: mist lies on the water
+			lo.append(maxf(float(terrain.height(cx + cos(a) * r, cz + sin(a) * r)), wl))   # lakes: mist lies on the water
 		lo.sort()
 		_mist_want = float(lo[1]) + MIST_DEEP   # the second lowest: one odd hole doesn't set the level
 	if jumped:
@@ -1869,6 +1876,7 @@ func respawn(new_world: bool) -> void:
 		sp = _feature_spawn(Env.s("BMX_TRAIL_FEAT"))
 	if terrain.has_method("level_spawn"):
 		sp = terrain.level_spawn()
+	if race: race.reset()
 	phys.reset_at(sp.x, sp.z, sp.y)
 	if Env.s("BMX_PACK_SPAWN") != "":   # tests: "x,z" of a health pack -> start 9 m before it, facing +x
 		var pxz := Env.s("BMX_PACK_SPAWN").split(",")

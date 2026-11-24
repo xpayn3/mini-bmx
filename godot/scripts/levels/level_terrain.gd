@@ -39,6 +39,9 @@ func set_seed(seed_in: int) -> void:
 	field.course = lf.to_course()   # the level's own trail (demo AI, follow rider, trail camera, bend alerts)
 	field.route_feats = lf.route   # its jumps / drops: the demo AI plans its speed for them, the HUD calls them out
 	water_enabled = false
+	if _water:   # (the world's sea level is -2.2 m; a level's ground is anywhere: no world water on it)
+		_water.queue_free()
+		_water = null
 	cs_tyres = false   # its own ground: the drawn tyres sample it in GDScript
 
 
@@ -51,8 +54,8 @@ func update_stream(_px: float, _pz: float, _budget_ms: float = 4.0, _sync_r := -
 	_mat.set_shader_parameter("line_1m", 0.0)
 	_mat.set_shader_parameter("line_5m", 0.0)
 	_mat.set_shader_parameter("contour", 0.0)
-	_add_mesh(lf.ground_mesh(2), "Ground")
-	_add_mesh(lf.far_mesh(1400.0, 14.0), "FarLand")
+	var cover := _build_chunks()   # the world's ground shader + grass data, 48 m chunks over the level's grid
+	_add_mesh(lf.far_mesh(1400.0, 14.0, cover), "FarLand")
 	var pieces := Node3D.new()
 	pieces.name = "Pieces"
 	add_child(pieces)
@@ -138,3 +141,131 @@ func level_spawn() -> Vector3:
 func level_reset(x: float, z: float) -> Vector3:
 	var i := lf.nearest(x, z)
 	return lf.stand_at(maxi(2, i - 8)) if i >= 0 else level_spawn()
+
+
+# ---- chunks: the level's ground drawn like the world's ------------------------------------------------------
+## 48 m chunks (Terrain.SIZE) covering the level's grid, each with the textures the world's chunks bake
+## (TerrainChunkBuilder): land / dirt colour + trail weight + rock weight, the trail's own frame (across, along),
+## built jumps, air, corner load, so world/ground.gdshader draws worn lines, tyre prints and grit on the level's trail;
+## and grass_img / grass_h, so the grass carpet (GrassField) grows on the level. Returns the rectangle covered.
+const NV := 97   # texels per chunk side (0.5 m), as the world's (GrassField.SEG + 1)
+
+func _build_chunks() -> Rect2:
+	var gx1 := lf.x0 + (lf.nx - 1) * lf.step; var gz1 := lf.z0 + (lf.nz - 1) * lf.step
+	var kx0 := int(ceil((lf.x0 + SIZE * 0.5) / SIZE)); var kx1 := int(floor((gx1 - SIZE * 0.5) / SIZE))
+	var kz0 := int(ceil((lf.z0 + SIZE * 0.5) / SIZE)); var kz1 := int(floor((gz1 - SIZE * 0.5) / SIZE))
+	var shader := load("res://scripts/world/ground.gdshader")
+	var scans := trail_textures()
+	for kz in range(kz0, kz1 + 1):
+		for kx in range(kx0, kx1 + 1):
+			_chunk(Vector2i(kx, kz), shader, scans)
+	return Rect2(kx0 * SIZE - SIZE * 0.5, kz0 * SIZE - SIZE * 0.5, (kx1 - kx0 + 1) * SIZE, (kz1 - kz0 + 1) * SIZE)
+
+
+static func _enc(v: float) -> int:
+	return TerrainChunkBuilder._enc(v)
+
+
+func _chunk(k: Vector2i, shader: Shader, scans: Array) -> void:
+	var ox := k.x * SIZE; var oz := k.y * SIZE
+	var gs := lf.step
+	var hw := lf.trail_width * 0.5
+	var pG := PackedByteArray(); pG.resize(NV * NV * 4)
+	var pD := PackedByteArray(); pD.resize(NV * NV * 4)
+	var TR := PackedFloat32Array(); TR.resize(NV * NV * 4)
+	var pT2 := PackedByteArray(); pT2.resize(NV * NV * 4)
+	var pA := PackedByteArray(); pA.resize(NV * NV * 2)
+	var pK := PackedByteArray(); pK.resize(NV * NV * 4)
+	var gh := PackedFloat32Array(); gh.resize(NV * NV)
+	var dirt := LevelField.DIRT.srgb_to_linear(); var clay := LevelField.CLAY.srgb_to_linear()
+	for j in NV:
+		for i in NV:
+			var o := j * NV + i
+			var x := ox - SIZE * 0.5 + i * 0.5; var z := oz - SIZE * 0.5 + j * 0.5
+			var gi := clampi(int(round((x - lf.x0) / gs)), 1, lf.nx - 2); var gj := clampi(int(round((z - lf.z0) / gs)), 1, lf.nz - 2)
+			var idx := gj * lf.nx + gi
+			var h := lf.H[idx]
+			gh[o] = h
+			var ny := Vector3(-(lf.H[idx + 1] - lf.H[idx - 1]) / (2.0 * gs), 1.0, -(lf.H[idx + lf.nx] - lf.H[idx - lf.nx]) / (2.0 * gs)).normalized().y
+			var sf := lf.S[idx]
+			var dt := lf.DT[idx]
+			var tw := 0.0
+			if sf == 1: tw = 1.0
+			elif sf == 2: tw = 0.75
+			elif dt < INF: tw = 1.0 - smoothstep(hw, hw + 0.9, dt)
+			var rockw := 0.0 if sf != 0 else smoothstep(0.80, 0.68, ny)
+			var g := lf._land_color(x, z, ny).srgb_to_linear()
+			var dc := clay if sf == 2 else dirt
+			pG[o * 4] = _enc(g.r); pG[o * 4 + 1] = _enc(g.g); pG[o * 4 + 2] = _enc(g.b); pG[o * 4 + 3] = roundi(clampf(tw, 0, 1) * 255)
+			pD[o * 4] = _enc(dc.r); pD[o * 4 + 1] = _enc(dc.g); pD[o * 4 + 2] = _enc(dc.b); pD[o * 4 + 3] = roundi(clampf(rockw, 0, 1) * 255)
+			if dt < INF:
+				TR[o * 4] = lf.TSA[idx]; TR[o * 4 + 1] = 0.0; TR[o * 4 + 2] = lf.TAL[idx]; TR[o * 4 + 3] = 0.0
+			var jmk := lf.JM[idx] == 1
+			pT2[o * 4 + 2] = 255 if jmk else 0
+			var air := 0.0
+			if jmk: air = _air_at(x, z)
+			pA[o * 2] = roundi(air * 255)
+			pA[o * 2 + 1] = roundi(smoothstep(1.0 / 80.0, 1.0 / 12.0, absf(lf.TKC[idx])) * 255)
+			var den := (1.0 - smoothstep(0.04, 0.4, tw)) * (1.0 - smoothstep(0.1, 0.6, rockw)) * (0.0 if jmk else 1.0)
+			if den > 0.0:
+				for c in lf.rocks_near(x, z):
+					if c.has("top") and Vector2(c.x - x, c.z - z).length() < float(c.r) + 0.15: den = 0.0
+			pK[o * 4] = pG[o * 4]; pK[o * 4 + 1] = pG[o * 4 + 1]; pK[o * 4 + 2] = pG[o * 4 + 2]; pK[o * 4 + 3] = roundi(clampf(den, 0, 1) * 255)
+	# the mesh: 1 m, the grid's heights (tucked under a structure's own mesh), UVs on the texel centres
+	var M := 49
+	var V := PackedVector3Array(); V.resize(M * M)
+	var N := PackedVector3Array(); N.resize(M * M)
+	var UV := PackedVector2Array(); UV.resize(M * M)
+	for j in M:
+		for i in M:
+			var x := ox - SIZE * 0.5 + i; var z := oz - SIZE * 0.5 + j
+			var gi := clampi(int(round((x - lf.x0) / gs)), 1, lf.nx - 2); var gj := clampi(int(round((z - lf.z0) / gs)), 1, lf.nz - 2)
+			var idx := gj * lf.nx + gi
+			V[j * M + i] = Vector3(i - SIZE * 0.5, lf.H[idx] - (0.14 if lf.JM[idx] == 1 else 0.0), j - SIZE * 0.5)
+			N[j * M + i] = Vector3(-(lf.H[idx + 1] - lf.H[idx - 1]) / (2.0 * gs), 1.0, -(lf.H[idx + lf.nx] - lf.H[idx - lf.nx]) / (2.0 * gs)).normalized()
+			UV[j * M + i] = Vector2((i * 2 + 0.5) / NV, (j * 2 + 0.5) / NV)
+	var I := PackedInt32Array(); I.resize((M - 1) * (M - 1) * 6)
+	var p := 0
+	for j in M - 1:
+		for i in M - 1:
+			var a := j * M + i
+			I[p] = a; I[p + 1] = a + 1; I[p + 2] = a + M; I[p + 3] = a + 1; I[p + 4] = a + M + 1; I[p + 5] = a + M
+			p += 6
+	var arr := []
+	arr.resize(Mesh.ARRAY_MAX)
+	arr[Mesh.ARRAY_VERTEX] = V; arr[Mesh.ARRAY_NORMAL] = N; arr[Mesh.ARRAY_TEX_UV] = UV; arr[Mesh.ARRAY_INDEX] = I
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+	var img_g := Image.create_from_data(NV, NV, false, Image.FORMAT_RGBA8, pG); img_g.generate_mipmaps()
+	var img_d := Image.create_from_data(NV, NV, false, Image.FORMAT_RGBA8, pD); img_d.generate_mipmaps()
+	var mat := ShaderMaterial.new()
+	mat.shader = shader
+	mat.set_shader_parameter("land_tex", ImageTexture.create_from_image(img_g))
+	mat.set_shader_parameter("dirt_tex", ImageTexture.create_from_image(img_d))
+	for q in scans.size(): mat.set_shader_parameter("tr_nr%d" % q, scans[q])
+	mat.set_shader_parameter("trail_tex", ImageTexture.create_from_image(Image.create_from_data(NV, NV, false, Image.FORMAT_RGBAF, TR.to_byte_array())))
+	mat.set_shader_parameter("trail2_tex", ImageTexture.create_from_image(Image.create_from_data(NV, NV, false, Image.FORMAT_RGBA8, pT2)))
+	mat.set_shader_parameter("trail3_tex", ImageTexture.create_from_image(Image.create_from_data(NV, NV, false, Image.FORMAT_RG8, pA)))
+	mat.set_shader_parameter("trail_fx", 1.0)
+	var node := Node3D.new()
+	node.name = "Chunk_%d_%d" % [k.x, k.y]
+	add_child(node)
+	var gi3 := MeshInstance3D.new()
+	gi3.mesh = mesh
+	gi3.material_override = mat
+	gi3.layers = 1 | GROUND_LAYER
+	gi3.position = Vector3(ox, 0, oz)
+	node.add_child(gi3)
+	chunks[k] = {"node": node, "grass_img": Image.create_from_data(NV, NV, false, Image.FORMAT_RGBA8, pK),
+		"grass_h": Image.create_from_data(NV, NV, false, Image.FORMAT_RF, gh.to_byte_array()), "pud": PackedFloat32Array()}
+
+
+## a jump's air (riders fly over it, the worn lines stop): from the lip to where the design speed lands
+func _air_at(x: float, z: float) -> float:
+	for st in lf.structs:
+		if not st.has("d") or not (st.rect as Rect2).has_point(Vector2(x, z)): continue
+		var l: Vector2 = lf._local(st, x, z)
+		var d: Dictionary = st.d
+		var u_end: float = float(d.lip_u) + float(st.flights[1].dist) if is_finite(float(st.flights[1].dist)) else float(d.land1)
+		return smoothstep(float(d.lip_u) - 0.3, float(d.lip_u) + 0.5, l.x) * (1.0 - smoothstep(u_end - 2.0, u_end + 0.5, l.x))
+	return 0.0

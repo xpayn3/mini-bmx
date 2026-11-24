@@ -13,29 +13,29 @@ _data = {
 }
 point_count = 12
 
-[node name="Level" type="Node3D" unique_id=464803461]
+[node name="Level" type="Node3D" unique_id=1550034866]
 script = ExtResource("1_geyhf")
 title = "Demo Descent"
 
-[node name="Trail" type="Path3D" parent="." unique_id=1944196248]
+[node name="Trail" type="Path3D" parent="." unique_id=826625098]
 curve = SubResource("Curve3D_d3mnb")
 script = ExtResource("2_4nkqr")
 
-[node name="StartGate" type="Node3D" parent="." unique_id=1558317055]
+[node name="StartGate" type="Node3D" parent="." unique_id=668161519]
 transform = Transform3D(0.99959606, 0, 0.028419659, 0, 1, 0, -0.028419659, 0, 0.99959606, 8.999247, -2.5638, -0.07092814)
 script = ExtResource("3_30y47")
 gate = "start"
 
-[node name="Table1" type="Node3D" parent="." unique_id=1784349414]
+[node name="Table1" type="Node3D" parent="." unique_id=1254396457]
 transform = Transform3D(0.9996729, 0, 0.025575364, 0, 1, 0, -0.025575364, 0, 0.9996729, 38.979675, -7.763994, -1.1471939)
 script = ExtResource("4_k8o72")
 
-[node name="Rocks1" type="Node3D" parent="." unique_id=1634405073]
+[node name="Rocks1" type="Node3D" parent="." unique_id=2005048668]
 transform = Transform3D(0.98178494, 0, -0.18999557, 0, 1, 0, 0.18999557, 0, 0.98178494, 116.98746, -23.76701, 20.774565)
 script = ExtResource("5_16kkj")
 length = 22.0
 
-[node name="Gap1" type="Node3D" parent="." unique_id=1356589845]
+[node name="Gap1" type="Node3D" parent="." unique_id=10116654]
 transform = Transform3D(0.99978924, 0, 0.02053076, 0, 1, 0, -0.02053076, 0, 0.99978924, 255.63069, -44.829113, -36.503975)
 script = ExtResource("4_k8o72")
 kind = "gap"
@@ -43,7 +43,11 @@ speed_scale = 0.8
 lip_deg = 28.0
 fill = 1.5
 
-[node name="FinishGate" type="Node3D" parent="." unique_id=1137357873]
+[node name="Checkpoint1" type="Node3D" parent="." unique_id=859104782]
+transform = Transform3D(0.94881845, 0, 0.315822, 0, 1, 0, -0.315822, 0, 0.94881845, 207.31708, -37.619003, -29.318264)
+script = ExtResource("3_30y47")
+
+[node name="FinishGate" type="Node3D" parent="." unique_id=1285353159]
 transform = Transform3D(0.71928316, 0, 0.69471705, 0, 1, 0, -0.69471705, 0, 0.71928316, 410.76788, -69.036644, 13.741254)
 script = ExtResource("3_30y47")
 gate = "finish"

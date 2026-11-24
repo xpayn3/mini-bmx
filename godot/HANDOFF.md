@@ -2176,9 +2176,25 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   table, rocks, gap, finish on its straights), `demo_park.tscn` (flat, no trail, standalone dirt table / wood kicker /
   gap / wood drop); both from `tools/make_demo_level.gd`. Ridden: the demo AI down the descent, 45 s, no crash; straight
   through the park, no crash.
-- Not yet: grass carpet / trees (no chunk data on levels), the world's trail shader (ground is vertex colour), gate
-  timing, baked lighting (step 3: LightmapGI + shadowmask, short sharp real-time shadows, baked reflection probes).
-  A wooden kicker's square back: the rear wheel reads it as a tiny second take-off (`natural=true` TAKEOFF).
+- **The world's look on levels (same day)**: `LevelTerrain._build_chunks` makes real 48 m chunks over the level's grid
+  with the textures a world chunk bakes (`land_tex` + trail weight, `dirt_tex` + rock weight, `trail_tex` = metres
+  across / along the trail from `LevelField.TSA` / `TAL`, `trail2` built-jump flag, `trail3` air from each jump's lip to
+  where the design speed lands + corner load from `TKC`), drawn by `world/ground.gdshader` (worn lines, prints, grit),
+  and `grass_img` / `grass_h` in `chunks[k]`, so `GrassField` grows its carpet (none on the trail, structures, rocks).
+  ~2 s to build for the 520 x 200 m demo (step 3's bake will cache it). Trees: `LevelField._bake_trees` (jittered grid,
+  clumps, `trees` density, `tree_clear` from the trail's edge, none on pieces / steep rock; pines / leafy / bushes,
+  the world's TerrainGeo meshes + deco materials via `LevelVisuals._trees`, trunk colliders in the rock lookup; editor
+  preview too). The world's water sheet is removed on levels (their ground is below its -2.2 m sea level: the level
+  was flooded white), and the morning mist's floor is the level's own ground (it clamped to that sea level). ~140 fps.
+- **Race timing** (`levels/level_race.gd`, made by `Game` on a LevelTerrain): the start gate starts the clock (the spawn
+  is 3 m behind it), checkpoints flash a split vs the best run's, the finish stops it and keeps the best time + splits per
+  level + bike in `user://level_times.cfg` (not in test runs); a timer top centre; Backspace resets the run, the bail
+  tap doesn't. `BMX_RACE_PROBE=1` prints `RACE` lines. Demo AI on the descent: start 0, checkpoint 18.2 s, finish 34.2 s.
+- `jump_mask` covers a structure's whole footprint (run-out included), as the world's features. The wooden kicker's
+  square back gives a zero-impact rear "landing" at the lip in the BMX_TRICK prints: the physics' `_graze` rule
+  already treats it as a brush with the lip (speed kept), nothing to fix.
+- Not yet: baked lighting (step 3: LightmapGI + shadowmask, short sharp real-time shadows, baked reflection probes,
+  cached chunk bake), publishing (step 4: LEVELS menu, medals).
 
 ### Developer view of the test playground (`scripts/levels/ride_diag.gd`) - telemetry + sliders for riding code
 - **Only in the test playground** (user decision 2026-11-21: developer tools live in that level, normal rides have none).
