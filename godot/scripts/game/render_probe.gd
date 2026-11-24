@@ -156,3 +156,41 @@ func _process(dt: float) -> void:
 		_undo = _tests[_i][1].call()
 	else:
 		print("RPROBE done")
+
+
+# ---------------------------------------------------------------- tests: what merging could save (BMX_MERGE_SCAN=1)
+## Records every visible rider / bike mesh's transform relative to its parent at 6 s, again at 12 s (riding: use with
+## BMX_FOLLOW), then: draw surfaces now, how many never moved against their parent, and how many draws would be left if
+## each (parent, material) group of those became one surface. Also how many are ShaderMaterials / transparent / textured.
+static func merge_scan(root: Node, label: String, snap: Dictionary, final: bool) -> void:
+	var surfs := 0; var stable := 0; var groups := {}; var moving := 0; var fgroups := {}; var grime_flat := 0
+	var kinds := {"shader": 0, "transp": 0, "tex": 0, "plain": 0}
+	var stack: Array = [root]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		for c in n.get_children(): stack.append(c)
+		var mi := n as MeshInstance3D
+		if mi == null or mi.mesh == null or not mi.is_visible_in_tree(): continue
+		if not final:
+			snap[mi] = mi.transform
+			continue
+		var still: bool = snap.has(mi) and (snap[mi] as Transform3D).is_equal_approx(mi.transform)
+		for si in mi.mesh.get_surface_count():
+			surfs += 1
+			var mat: Material = mi.material_override
+			if mat == null: mat = mi.get_surface_override_material(si)
+			if mat == null: mat = mi.mesh.surface_get_material(si)
+			if mat is ShaderMaterial: kinds.shader += 1
+			elif mat is BaseMaterial3D and (mat as BaseMaterial3D).transparency != BaseMaterial3D.TRANSPARENCY_DISABLED: kinds.transp += 1
+			elif mat is BaseMaterial3D and (mat as BaseMaterial3D).albedo_texture != null: kinds.tex += 1
+			else: kinds.plain += 1
+			if still:
+				stable += 1
+				groups[[mi.get_parent(), mat]] = true
+				var flat: bool = mat is BaseMaterial3D and (mat as BaseMaterial3D).transparency == BaseMaterial3D.TRANSPARENCY_DISABLED and (mat as BaseMaterial3D).albedo_texture == null and not (mat as BaseMaterial3D).emission_enabled
+				fgroups[[mi.get_parent(), "flat" if flat else mat]] = true
+				if flat: grime_flat += 1 if (mat as BaseMaterial3D).next_pass != null else 0
+			else: moving += 1
+	if final:
+		print("MERGESCAN %s surfaces=%d still=%d moving=%d -> same-material merge %d, colour-baked merge %d  kinds=%s flat_with_grime_pass=%d" % [label, surfs, stable, moving, moving + groups.size(), moving + fgroups.size(), kinds, grime_flat])
+

@@ -362,6 +362,13 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   (`reflection_mask = RIM_LAYER`): its 160 m box lit near trees / ground with gloss that popped as it jumped 30 m.
   Foliage `specular` 0.1. Shadow range follows the zoom you set, not the speed dolly (cascades re-fitted every frame).
   Trees ~30 % fewer (`TREE_TRIES` 100). Test `BMX_DECO_FADE=20,30` pulls the band in to see it work.
+  **2 cascades at every quality (2026-11-24, `Game._two_splits`)**: with 4, everything near the camera (the rider + bike:
+  409 of the 889 shadow draws) was drawn into 3-4 cascade maps. Now 2, the near one still ending zoom + 6 m (Low: + 12):
+  shadow draws 887 -> 539, render CPU -0.15 ms, GPU -0.13 ms at the start, the 30 s follow ride 141 -> 156 fps; the
+  rider's own shadow as sharp, mid-distance tree shadows a touch softer. `BMX_SHADOW_SPLITS=4` = before (what follows
+  describes the 4-cascade fit), `BMX_SHADOW_S1=m` the near cascade's end. (Merging rider / bike meshes was looked at the
+  same day, `BMX_MERGE_SCAN=1`: rider 73 -> 36 surfaces only by baking colours, bike 58 -> 50; ~0.1-0.2 ms for reworking
+  the per-part grime pins and live kit colours: not done.)
   **Sun shadows** (`Game._shadow_fit`): reach fixed by quality (`SHADOW_REACH` 100 / 140 / 170 / 200 m, fade from 75 %),
   never with the speed dolly; the 4 cascades end at zoom + 6 / + 22 / + 55 m (the sharp one covers the rider, not the
   empty air in front of the camera; it used to be fixed 6 / 18 / 45 % of an 80 m reach: shadows stopped ~70 m out and
