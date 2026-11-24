@@ -144,7 +144,7 @@ func _ready() -> void:
 	root.add_child(air_card)
 	pace_view = PaceView.new(); pace_view.hud = self
 	pace_view.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	pace_view.size = Vector2(230, 70); pace_view.position = Vector2(-115, 98)   # top centre, under the area banner
+	pace_view.size = Vector2(104, 78); pace_view.position = Vector2(-52, 96)   # top centre, under the area banner
 	pace_view.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(pace_view)
 	on_respawn()
@@ -576,7 +576,7 @@ func _trail_scan(p: Vector2, fw: Vector2, crashed: bool) -> void:
 	var gauge_ok: bool = gauge.unit.nav and ComputerUnits.opt(GameState.computer_id, "alerts")
 	if Env.s("BMX_PACE_DEMO") != "":   # tests: a fixed pacenote (BMX_PACE_DEMO=<1..6>, BMX_PACE_HOT=1 flags it too fast)
 		var sv := clampi(int(Env.s("BMX_PACE_DEMO")), 1, 6)
-		pace = {"sev": sv, "side": 1, "text": "SHARP RIGHT", "d": 64.0, "vs": [18.0, 25.0, 35.0, 45.0, 58.0, 75.0][sv - 1], "hot": 1.0 if Env.s("BMX_PACE_HOT") != "" else 0.0}
+		pace = {"sev": sv, "side": 1, "text": "SHARP RIGHT", "d": 64.0, "deg": [170, 125, 90, 60, 35, 20][sv - 1], "vs": [18.0, 25.0, 35.0, 45.0, 58.0, 75.0][sv - 1], "hot": 1.0 if Env.s("BMX_PACE_HOT") != "" else 0.0}
 		return
 	if gauge_ok and Env.s("BMX_ALERT_DEMO") != "":   # tests: a fixed alert to look at
 		alert = {"kind": Env.s("BMX_ALERT_DEMO"), "text": "HAIRPIN RIGHT", "d": 22.0}
@@ -632,7 +632,7 @@ func _trail_scan(p: Vector2, fw: Vector2, crashed: bool) -> void:
 			var hot := 0.0
 			if v_now > vs * 1.08:
 				hot = smoothstep(0.75, 1.25, ((v_now * v_now - vs * vs) / (2.0 * PACE_BRAKE)) / maxf(d - 3.0, 1.0))
-			pace = {"sev": sev, "side": 1 if sg > 0 else -1, "text": txt, "d": d, "vs": vk, "hot": hot}
+			pace = {"sev": sev, "side": 1 if sg > 0 else -1, "text": txt, "d": d, "vs": vk, "hot": hot, "deg": roundi(absf(ang) * 180.0 / PI)}
 			if d < best_d:
 				best_d = d; alert = {"kind": kind, "text": txt, "d": d, "sev": sev, "side": 1 if sg > 0 else -1}
 			break
@@ -1738,21 +1738,22 @@ class PaceView extends Control:
 		if last.is_empty(): return
 		var p: Dictionary = last
 		var sev: int = p.sev
-		var col: Color = COLS[sev - 1]
 		var hot: float = clampf(float(p.hot), 0.0, 1.0)
-		var pulse := 0.5 + 0.5 * sin(t * 14.0)
-		var bg := Color("12161a").lerp(Color("b01810"), hot * (0.55 + 0.45 * pulse))
-		bg.a = 0.82 * a
-		UITheme.draw_box(self, Rect2(Vector2.ZERO, size), bg, 8)
-		var f := UITheme.font(true)
-		draw_arrow(self, Vector2(42, size.y * 0.5), sev, float(p.side), Color(col, a), 46.0)
-		var d: float = p.d
-		var dtx := "%dm" % (roundi(d / 10.0) * 10 if d > 50.0 else roundi(d))
-		draw_string(f, Vector2(80, 34), dtx, HORIZONTAL_ALIGNMENT_RIGHT, size.x - 92, 28, Color("ffd21f", a))
-		if hot > 0.45:
-			draw_string(f, Vector2(80, 58), "BRAKE!", HORIZONTAL_ALIGNMENT_RIGHT, size.x - 92, 18, Color(1, 1, 1, a * (0.6 + 0.4 * pulse)))
-		else:
-			draw_string(f, Vector2(80, 58), String(p.text), HORIZONTAL_ALIGNMENT_RIGHT, size.x - 92, 12, Color(1, 1, 1, 0.75 * a))
+		var warn := hot > 0.45
+		# a flat card: colour = how hard the turn is, the arrow = its shape; too fast = it flashes red and shakes
+		var shake := sin(t * 40.0) * 2.5 * hot if warn else 0.0
+		var cw := 64.0
+		var ch := 74.0
+		var card := Rect2((size.x - cw) * 0.5 + shake, (1.0 - a) * -12.0, cw, ch)
+		var base_col: Color = COLS[sev - 1]
+		var fill := base_col.lerp(Color("e0231a"), hot * (0.4 + 0.6 * (0.5 + 0.5 * sin(t * 14.0))))
+		fill.a = a
+		UITheme.draw_box(self, card, fill, 10)
+		var ink := Color("ffffff") if (sev <= 2 or warn) else Color("14181c")
+		ink.a = a
+		draw_arrow(self, card.position + Vector2(cw * 0.5, 27.0), sev, float(p.side), ink, 38.0)
+		# how far the road turns, in degrees (too fast for it = the card flashes red and shakes)
+		draw_string(UITheme.font(true), Vector2(card.position.x, card.end.y - 8), "%d°" % int(p.get("deg", 0)), HORIZONTAL_ALIGNMENT_CENTER, cw, 16, ink)
 
 class AirCard extends Control:
 	## live jump counter: distance from the take-off point, height and air time; the result holds for a
