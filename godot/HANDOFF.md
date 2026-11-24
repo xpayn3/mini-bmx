@@ -64,8 +64,12 @@ Player data: `%APPDATA%\Mini BMX\` (custom user dir) — `crashlogs/` (see Crash
 
 ## 3. Controls (defaults, all rebindable in Settings → Controls)
 
-W/↑ pedal · S/↓ brake (both levers, with feel) · **Ctrl front brake only · Alt rear brake only (bare levers: they lock)** · A/D steer · **Space** hop/pump (hold to charge; **in the air: tuck the bike up**) ·
-**S/W pressed fresh as you leave a lip: throw a back/front flip** · **W/S in the air: tilt the bike nose down/up (limited, body shift)** · **A/D in the air: lean the bike left/right (no spins)** · **brake + A/D when slow: pivot (pirouette)** · Shift sprint (stamina) · Q/E shift gears · F bail · Backspace back to
+**Keyboard = MX vs ATV on PC (2026-11-24): WASD is the bike, the arrow keys are the rider's body (the pad's right stick).**
+W pedal · S brake (both levers, with feel) · **Ctrl front brake only · Alt rear brake only (bare levers: they lock)** · A/D steer · **Space** hop/pump (hold to charge; **in the air: tuck the bike up**) ·
+**↓ rolling = manual** (a held key sits on the balance point, `BikePhysics.kb_back_cap()`; full back only at a lip / in the air) ·
+**↓ / ↑ held into a lip = back / front flip, held in the air keeps it turning** · **← / → = lean, flick, whip; in the air lay the bike over / tabletop** (keys give `Game.KB_SIDE` 0.75: no flat spins from a key held into a lip, the stick's spin edge stays the pad's) ·
+W / S no longer tilt the bike in the air or throw flips (like the pad's triggers: braking through a bump used to loop you out, held S = nose up); **Settings › Controls › Classic keys** (`kb_ws_air`, input `ws_air`) brings that back. Old saves: `Settings._move_arrows_to_body` (`kb_layout` 1) takes the old arrow defaults off pedal / brake / steer. Test tricks (`BMX_TRICK=back|front|manual`) press the body keys now.
+**A/D in the air: lean the bike left/right (no spins)** · **brake + A/D when slow: pivot (pirouette)** · Shift sprint (stamina) · Q/E shift gears · F bail · Backspace back to
 start · R new world · B next bike · C next camera · Z/X rotate camera · +/- zoom · mouse drag orbit ·
 H records · **I instant replay** (pad L3; whole ride, savable: section 5) · **F4 ride diagnostics** (test playground only, section 5) · **F10 frame profiler** (section 9, Perf) · **M trail map** (pad: Share) · **P / K / L** the tuning card on its Ride / Rider / Look tab · **O photo mode** (free camera, see section 5) · F1 hide HUD ·
 F12 screenshot · **F11 / the small button bottom right: fullscreen on / off** (`ui/fullscreen_button.gd`, on every screen,
@@ -73,7 +77,7 @@ saves Settings › window mode; in the garage it sits above Save / Save & ride) 
 **right stick = the rider's body, all the time**: up / down shifts the weight forward over the bars / back (pulled well back
 rolling = a **manual**, yanked fresh at a lip = a flip throw, in the air = nose down / up), left / right throws the bike over under
 the body (leaning alone turns, leaning with the steer turns harder + grips more, a quick **flick** whips the bike round; in the
-air it leans the bike). Numpad 8/5/4/6 do the same on keys. The camera no longer uses the right stick.
+air it leans the bike). The arrow keys (and numpad 8/5/4/6) do the same on keys. The camera no longer uses the right stick.
 **Settings › Controller** (`ui/pad_map.gd`): the Xbox photo (`assets/ui/xbox_pad.png`, cut out by root `tools/cut_pad.py`;
 without it a drawn pad) with what every button does, click to remap (sticks pick Steer / Rider body / Camera / Nothing and
 swap), live button test, vibration: on / off, motors and a strength per effect (see "Controller rumble" in section 5). `Settings.pad_active` follows the last device used: prompts show

@@ -170,7 +170,7 @@ internal sealed class TfWood
 			return ramp(u1 - 2.0, u1, 0.3, 0.02, u);
 		}
 		// (trail_features.gd Wood.top: eased on / off over up to 9 m, no corner; BMX_OLD_BRIDGE=1 = the old 2 m ramp)
-		double L = OLD_BRIDGE ? 2.0 : TerrainFieldCs.minf(9.0, u1 * 0.5 - 1.0);
+		double L = OLD_BRIDGE ? 2.0 : TerrainFieldCs.minf(9.0, TerrainFieldCs.maxf(0.5, u1 * 0.5 - 1.0));   // (>= 0.5 m, as trail_features.gd)
 		if (u < L)
 			return OLD_BRIDGE ? ramp(0.0, L, 0.02, 0.45, u) : ease(0.0, L, 0.02, 0.45, u);
 		if (u < u1 - L)

@@ -1714,9 +1714,11 @@ class PaceView extends Control:
 			var ph := th * float(q) / steps
 			pts.append(cen + Vector2(-cos(ph) * side, -sin(ph)) * rad)
 		var out_dir := Vector2(sin(th) * side, -cos(th))
-		pts.append(pts[pts.size() - 1] + out_dir * (4.0 if sev == 1 else 9.0))
 		var sw := 6.0          # stroke width
 		var hl := 9.0          # head length
+		# (the run-out is a touch longer than the head, which is cut back out of it: shorter, the shaft doubled back
+		# along the curve under the head - the hairpin's was 4 px)
+		pts.append(pts[pts.size() - 1] + out_dir * (hl + 1.0))
 		var hw := 7.5          # head half width
 		var n := pts.size()
 		var tip := pts[n - 1]

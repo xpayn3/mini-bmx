@@ -245,6 +245,14 @@ var title_life: TitleLife     # title screen only: birds, blowing dust, dust rou
 ## ground shader reads through the globals puddle_wake / puddle_wake_info
 var puddle_wake: WaterWake = null
 var _pw_info := Vector4.ZERO
+static var _pw_owner := 0   # the Game whose wake the puddle_wake globals point at
+
+## freed (not just moved: a prebuilt ride's reparent fires _exit_tree): switch the puddle ripples off, or the title /
+## garage / next ride's ground would read this Game's freed wake texture through a live window
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE and _pw_owner == get_instance_id():
+		_pw_owner = 0
+		RenderingServer.global_shader_parameter_set("puddle_wake_info", Vector4.ZERO)   # (z = 0: ground.gdshader never samples it)
 
 func _ready() -> void:
 	if not title_world and level == "":
@@ -254,6 +262,7 @@ func _ready() -> void:
 			puddle_wake.cell = 0.03   # puddles: fine ripples (3 cm cells over a 10 m window: the same texel count, a window the rider's tyres never leave)
 			puddle_wake.wave_c = 0.55
 			RenderingServer.global_shader_parameter_set("puddle_wake", puddle_wake.tex)
+			_pw_owner = get_instance_id()
 		else:
 			puddle_wake = null
 	if not title_world: _make_ruts.call_deferred()   # (once the terrain exists)
@@ -2279,6 +2288,13 @@ func _read_input() -> Dictionary:
 	if bm > 0.01:
 		var sq := minf(Vector2(bf, bl).length() / bm, 1.4142)
 		bf = clampf(bf * sq, -1, 1); bl = clampf(bl * sq, -1, 1)
+	# the arrow keys as the rider's body (2026-11-24): a key is all or nothing, where a thumb would hold part way.
+	# ↓ held rolling sits on the manual's balance point (full back is past its edge: you'd fall off the back), full at
+	# a lip (the back flip) and in the air; ← / → lean to KB_SIDE, a whip / tabletop (the stick's spin edge stays
+	# the pad's: a key held into a lip mustn't spin you off every jump you carve into)
+	if not Settings.pad_active and phys != null:
+		if bf < 0.0 and not phys.air and phys.lip_state != 2: bf = maxf(bf, -BikePhysics.kb_back_cap())
+		bl = clampf(bl, -KB_SIDE, KB_SIDE)
 	# the left stick pulled back (it only steers; "both sticks back" can be asked for to start a manual, manBothSticks)
 	var l_back := 0.0
 	if Settings.pad_active and not Settings._test_run:
@@ -2287,6 +2303,7 @@ func _read_input() -> Dictionary:
 	if Env.s("BMX_LEFT_BACK") != "": l_back = float(Env.s("BMX_LEFT_BACK"))   # tests
 	return {
 		"pad": Settings.pad_active,
+		"ws_air": bool(Settings.get_v("kb_ws_air")),   # classic keys: W / S tilt in the air / throw flips too
 		"left_back": l_back,
 		"body_fwd": bf,
 		"body_lean": bl,
@@ -3676,7 +3693,8 @@ func _process(dt: float) -> void:
 	if terrain.has_method("update_water"): terrain.update_water(st.x, st.z, t)
 	if puddle_wake != null:
 		puddle_wake.step(dt, Vector3(st.x, 0.0, st.z))
-		var pwi := Vector4(puddle_wake.centre.x, puddle_wake.centre.y, WaterWake.N * puddle_wake.cell, puddle_wake.cell)
+		# (no window while the wake isn't running: its compute shader may have failed on the render thread after _ready)
+		var pwi := Vector4(puddle_wake.centre.x, puddle_wake.centre.y, WaterWake.N * puddle_wake.cell, puddle_wake.cell) if puddle_wake.ok else Vector4.ZERO
 		if pwi != _pw_info:   # (a global set re-uploads them all: only when the window moved a cell)
 			_pw_info = pwi
 			RenderingServer.global_shader_parameter_set("puddle_wake_info", pwi)
@@ -3740,6 +3758,7 @@ func _landbody_probe(st) -> void:
 static var _AIRJERK := OS.get_environment("BMX_AIRJERK") != ""
 static var _BODYUP := OS.get_environment("BMX_BODYUP") != ""
 static var _OLD_AIRFADE := OS.get_environment("BMX_OLD_AIRFADE") != ""
+const KB_SIDE := 0.75   # the arrow keys' side lean: short of the stick's spin edge (BikePhysics.SPIN_EDGE 0.85), past the whip's 0.7
 var _aj := {}
 func _air_jerk_probe(inp: Dictionary) -> void:
 	var st = phys

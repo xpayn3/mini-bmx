@@ -9,12 +9,14 @@ const PATH := "user://settings.cfg"
 
 ## action -> [description, default keys, default joypad buttons, default joypad axes [axis, sign]]
 const ACTIONS := {
-	"pedal":        ["Pedal",                    [KEY_W, KEY_UP],      [],                         [[JOY_AXIS_TRIGGER_RIGHT, 1]]],
-	"brake":        ["Brake / roll back",        [KEY_S, KEY_DOWN],    [],                         [[JOY_AXIS_TRIGGER_LEFT, 1]]],
+	# (2026-11-24, keyboard like MX vs ATV on PC: WASD = the bike, the arrow keys = the rider's body, as the pad's
+	# right stick. The arrows used to repeat W / S / A / D; `kb_layout` moves an older save across)
+	"pedal":        ["Pedal",                    [KEY_W],              [],                         [[JOY_AXIS_TRIGGER_RIGHT, 1]]],
+	"brake":        ["Brake / roll back",        [KEY_S],              [],                         [[JOY_AXIS_TRIGGER_LEFT, 1]]],
 	"brake_front":  ["Front brake only",         [KEY_CTRL],           [],                         []],
 	"brake_rear":   ["Rear brake only (skid)",   [KEY_ALT],            [],                         []],
-	"steer_left":   ["Steer left",               [KEY_A, KEY_LEFT],    [],                         [[JOY_AXIS_LEFT_X, -1]]],
-	"steer_right":  ["Steer right",              [KEY_D, KEY_RIGHT],   [],                         [[JOY_AXIS_LEFT_X, 1]]],
+	"steer_left":   ["Steer left",               [KEY_A],              [],                         [[JOY_AXIS_LEFT_X, -1]]],
+	"steer_right":  ["Steer right",              [KEY_D],              [],                         [[JOY_AXIS_LEFT_X, 1]]],
 	"hop":          ["Hop / pump (hold to charge)", [KEY_SPACE],       [JOY_BUTTON_X],             []],
 	"sprint":       ["Sprint",                   [KEY_SHIFT],          [JOY_BUTTON_A],             []],
 	"gear_easier":  ["Shift easier",             [KEY_Q],              [JOY_BUTTON_LEFT_SHOULDER], []],
@@ -24,10 +26,10 @@ const ACTIONS := {
 	"new_world":    ["New world",                [KEY_R],              [],                         []],
 	"next_bike":    ["Next bike",                [KEY_B],              [],                         []],
 	"camera_next":  ["Next camera",              [KEY_C],              [JOY_BUTTON_Y],             []],
-	"body_fwd":     ["Body forward (over the bars)", [KEY_KP_8],       [],                         [[JOY_AXIS_RIGHT_Y, -1]]],
-	"body_back":    ["Body back (manual)",       [KEY_KP_5],           [],                         [[JOY_AXIS_RIGHT_Y, 1]]],
-	"body_left":    ["Body lean left (flick)",   [KEY_KP_4],           [],                         [[JOY_AXIS_RIGHT_X, -1]]],
-	"body_right":   ["Body lean right (flick)",  [KEY_KP_6],           [],                         [[JOY_AXIS_RIGHT_X, 1]]],
+	"body_fwd":     ["Rider forward (pump, tuck, front flip)", [KEY_UP, KEY_KP_8], [],              [[JOY_AXIS_RIGHT_Y, -1]]],
+	"body_back":    ["Rider back (manual, back flip)", [KEY_DOWN, KEY_KP_5], [],                    [[JOY_AXIS_RIGHT_Y, 1]]],
+	"body_left":    ["Rider lean left (flick, whip)", [KEY_LEFT, KEY_KP_4], [],                     [[JOY_AXIS_RIGHT_X, -1]]],
+	"body_right":   ["Rider lean right (flick, whip)", [KEY_RIGHT, KEY_KP_6], [],                   [[JOY_AXIS_RIGHT_X, 1]]],
 	"cam_left":     ["Rotate camera left",       [KEY_Z],              [JOY_BUTTON_DPAD_LEFT],     []],
 	"cam_right":    ["Rotate camera right",      [KEY_X],              [JOY_BUTTON_DPAD_RIGHT],    []],
 	"cam_up":       ["Tilt camera up",           [],                   [],                         []],
@@ -141,6 +143,8 @@ const DEFAULTS := {
 	"blood": true,           # crash: blood smears on the ground, torn-off limbs on very hard crashes
 	"steer_sens": 1.0,       # analog steering response (1 = linear)
 	"pad_expo": 1.8,         # gamepad steering curve: higher = gentler near the centre
+	"kb_ws_air": false,      # classic keys: W / S also tilt the bike in the air and throw flips at a lip (the arrows do it now)
+	"kb_layout": 0,          # (save migration: 1 = the arrow keys are the rider's body, see load_settings)
 	# interface
 	"ui_scale": 1.0,
 	"hud_gauge": true,
@@ -424,7 +428,34 @@ func load_settings() -> void:
 		if data.camera == "drone": data.camera = "trail"
 		data.cam_rev = 1
 	if not CameraRig.PRESETS.has(str(data.camera)): data.camera = "trail"   # a view that was removed
+	if int(data.kb_layout) < 1:
+		_move_arrows_to_body()
+		data.kb_layout = 1
 	_install_bindings()
+
+## (save migration, 2026-11-24) the arrow keys used to repeat W / S / A / D; now they are the rider's body. Only
+## lists the player saved are touched (the rest follow the new defaults): their old arrow defaults come off the bike's
+## actions, and an arrow already put on something else by the player is left there (that body action goes without it)
+func _move_arrows_to_body() -> void:
+	var arrows := {"pedal": KEY_UP, "brake": KEY_DOWN, "steer_left": KEY_LEFT, "steer_right": KEY_RIGHT}
+	for a in arrows:
+		if bindings.has(a):
+			var arrow := InputEventKey.new(); arrow.physical_keycode = arrows[a]
+			bindings[a] = (bindings[a] as Array).filter(func(e): return not same_input(e, arrow))
+	for a in ["body_fwd", "body_back", "body_left", "body_right"]:
+		var want: Array = default_events(a)
+		var list: Array = (bindings[a] if bindings.has(a) else want).duplicate()
+		var changed := false
+		for e in want:
+			if not (e is InputEventKey) or list.any(func(x): return same_input(x, e)): continue
+			var taken := false
+			for o in bindings:
+				if o != a and (bindings[o] as Array).any(func(x): return same_input(x, e)): taken = true
+			if taken:
+				list = list.filter(func(x): return not same_input(x, e)); changed = true
+			elif bindings.has(a):
+				list.append(e); changed = true
+		if changed: bindings[a] = list
 
 func save() -> void:
 	if _no_save or _overridden: return   # tests / --set= / --quality= runs: never into the player's file

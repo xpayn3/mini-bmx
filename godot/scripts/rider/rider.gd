@@ -1439,9 +1439,9 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# cadence (smoothed rpm from the crank's own turn) and the sprint's arm pose, which comes on quickly but lets go slowly
 	# (measured over windows of >= 0.15 s: the crank moves in physics steps, so per drawn frame its turn is 0 or double and the
 	# rpm flickered, which shook everything that follows cadence)
-	if dt > 0.0:
+	if dt > 0.0 and dt <= 0.1:   # (a longer frame - a hitch - is left out: its crank turn would be counted over 0.1 s and spike the rpm)
 		_cad_acc += absf(wrapf(crank - _cad_prev, -PI, PI))
-		_cad_t += minf(dt, 0.1)
+		_cad_t += dt
 		if _cad_t >= 0.15:
 			_cad_s += (_cad_acc / _cad_t * 9.549 - _cad_s) * 0.35
 			_cad_acc = 0.0; _cad_t = 0.0
@@ -2263,6 +2263,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 			pole_a = pole_a.lerp(Vector3(pole_a.x, pole_a.y * 0.5, side * 1.1).normalized(), 0.12 * _inhale).normalized()
 			shp.z += side * 0.008 * _inhale
 			shp.y += 0.002 * _inhale
+			shoulder_sph[i].position = shp   # (the shoulder ball goes with it: the arm's IK starts here)
 		if standing: pole_a = Vector3(-1.0, 0.0, side * 0.25).normalized()   # arms hanging: elbows point back
 		if _pk_eo != 0.0: pole_a = (pole_a + Vector3(0, 0, side * _pk_eo)).normalized()   # (Pose Lab: elbows out / in)
 		var ika := limb_ik(shp, hand, L_UARM, L_FARM, pole_a, Vector3(0, -0.5, side), ELBOW_MIN, ELBOW_MAX, _bd_prev[2 + i], max_turn)

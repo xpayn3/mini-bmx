@@ -128,7 +128,7 @@ class Wood:
 			# (2026-11-24) eased on / off over up to 9 m, no corner: the old 2 m ramp ended in a 12 deg kink that threw a
 			# rider at ~45 km/h ~9 m along the narrow deck, and over a gorge a little drift in that flight dropped him in.
 			# Eased, a rider stays on it up to ~63 km/h (crest: v^2 x 6 h / L^2 < g); BMX_OLD_BRIDGE=1 = the old ramp
-			var L := 2.0 if OLD_BRIDGE else minf(9.0, u1 * 0.5 - 1.0)
+			var L := 2.0 if OLD_BRIDGE else clampf(u1 * 0.5 - 1.0, 0.5, 9.0)   # (>= 0.5 m: a deck of 2 m or less made it 0 / negative)
 			if u < L:
 				return _ramp(0.0, L, 0.02, 0.45, u) if OLD_BRIDGE else _ease(0.0, L, 0.02, 0.45, u)
 			if u < u1 - L:
