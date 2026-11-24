@@ -110,12 +110,12 @@ public partial class LensDropsCs : RefCounted
 			float m = r * r * r;
 			float dx = _x[i] - fx, dy = _y[i] - fy;
 			float d = MathF.Sqrt(dx * dx + dy * dy) + 1e-4f;
-			// windshield-style airflow, like racing games: the air runs UP the glass and fans out a little toward
+			// airflow: at speed the water streams DOWN the glass (windshield-style "up" read as inverted) and fans out a little toward
 			// the sides, about as strong everywhere; cornering pushes the water to the outside of the turn.
 			// (A radial flow out of the view's middle looked like a hyperspace jump: user, 2026-11-24.)
 			// (flowX, flowY) = the way the air runs over the glass on screen, from the camera's own motion;
-			// the forward part (flowY < 0, up) fans out toward the sides
-			float ax = flowX + dx * FAN * MathF.Max(-flowY, 0f), ay = flowY;
+			// the forward part (flowY > 0: streaming down the glass) fans out toward the sides
+			float ax = flowX + dx * FAN * MathF.Max(flowY, 0f), ay = flowY;
 			float al = MathF.Sqrt(ax * ax + ay * ay) + 1e-5f;
 			float u = wind * (0.85f + 0.35f * MathF.Min(MathF.Abs(dx), 1f));
 			float fa = AIR * u * u * r * r;

@@ -11,7 +11,7 @@ extends Node
 ## grade.gdshader reads the drop map and refracts the scene through it (shaders/lens_fx.gdshaderinc).
 ## Dust = one level 0..1 (`dust`): a scanned smudge mask that fades in as it rises (shader). Riding through
 ## dry dust builds it, water washes it off. (Mud splats were tried first: "very ugly", removed.)
-## Slow, drops crawl down; fast, the air pushes them up the glass (windshield style, from the camera's motion).
+## Slow, drops crawl down; fast, the air streams them down the glass, fanning out (from the camera's motion).
 ## Clean glass (no drops, no dust) = the viewports stop and the shader skips all of it.
 
 const MAP_SCALE := 0.5       # the lens map's size against the screen
@@ -22,7 +22,7 @@ var rain := 0.0              # rain falling on the glass (weather; 0 = none), 0.
 var wind := 0.0              # air over the glass, 0..1
 var wind_override := -1.0
 const INERTIA := 0.6         # m/s of "airflow" per m/s^2 of the camera's acceleration (the water lagging)
-var _flow := Vector2(0.0, -1.0)   # the air's direction over the glass, screen space
+var _flow := Vector2(0.0, 1.0)    # the air's direction over the glass, screen space
 var _cam_p := Vector3.ZERO
 var _cam_v := Vector3.ZERO
 var _cam_a := Vector3.ZERO
@@ -140,13 +140,13 @@ func wipe() -> void:
 	_map_live = false
 
 ## The air over the glass comes from the CAMERA's own motion (whatever view is in use): its velocity in its
-## own frame says where the air hits the lens from (forward = up the glass like a windshield, sideways (the
+## own frame says where the air hits the lens from (forward = down the glass, fanning out, sideways (the
 ## side cam) = across it, rising / falling = down / up), and its acceleration makes the water lag (a camera
 ## swinging round a bend throws it to the outside). A camera standing still (trackside) has no airflow.
 ## focus = the view's middle (uv); vs = the screen's size.
 func update(dt: float, cam: Camera3D, vs: Vector2, focus: Vector2) -> void:
 	_aspect = vs.x / maxf(vs.y, 1.0)
-	var flow := Vector2(0.0, -1.0)
+	var flow := Vector2(0.0, 1.0)
 	var spd := 0.0
 	if cam and dt > 0.0:
 		var p := cam.global_position
@@ -160,7 +160,9 @@ func update(dt: float, cam: Camera3D, vs: Vector2, focus: Vector2) -> void:
 		var bi := cam.global_transform.basis.orthonormalized().inverse()
 		var vl := bi * _cam_v    # x right, y up, -z forward
 		var al := bi * _cam_a
-		var air := Vector2(-vl.x, -maxf(-vl.z, 0.0) + vl.y)   # screen space, y down
+		# screen space, y down. Moving forward streams the water DOWN the glass (user, 2026-11-24: up, like a
+		# car windshield, read as inverted); sideways motion across it, rising / falling down / up
+		var air := Vector2(-vl.x, maxf(-vl.z, 0.0) + vl.y)
 		air += Vector2(-al.x, al.y) * INERTIA                 # the water lags the glass's acceleration
 		spd = air.length()
 		if spd > 0.01: flow = air / spd

@@ -1699,10 +1699,10 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   Water + mud on lens `lens_fx`)**. Research: Nakata / Kakimoto / Nishita "Real-Time Animation of Droplets on a
   Hydrophobic Windshield" (drops = mass points, contact-angle pinning, gravity, air drag) + Kaneda et al. 1993
   (meandering rivulets, water left behind). Each drop: pinning ~ r (varies over the glass: stop-and-go, meander),
-  gravity ~ r^3, the air ~ r^2 x airspeed^2. The air runs UP the glass like on a racing game's windshield (fanning out a
-  little at the sides, `FAN`; cornering pushes the water to the outside of the turn, `side` from v x yaw rate):
-  slow = drops crawl down, fast = big drops let go first and creep up and off, small beads stay. (A radial flow out of
-  the view's middle was tried first: "like a Star Wars hyperspace portal".) Rivulets dry `RIVULET_LIFE` 1 s behind a
+  gravity ~ r^3, the air ~ r^2 x airspeed^2. Moving forward the air streams the water DOWN the glass, fanning out a
+  little at the sides (`FAN`); a camera turning throws it to the outside (its acceleration): slow = drops crawl down,
+  fast = big drops let go first and stream down and off, small beads stay. (Tried and dropped: a radial flow out of the
+  view's middle, "like a Star Wars hyperspace portal"; up the glass like a car windshield, "inverted".) Rivulets dry `RIVULET_LIFE` 1 s behind a
   drop (faster in the wind). Drop size: `LensDropsCs.SIZE` 1.215 (forces scaled with it).
   Running drops leave beads + a rivulet and swallow what they hit (merge, volume kept). Drawn into a half-res lens
   NORMAL MAP: rivulet SubViewport (never cleared, HDR, dried by `lens_dry.gdshader` blend_mul) under a drop SubViewport
