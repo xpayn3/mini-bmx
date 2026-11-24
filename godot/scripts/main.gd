@@ -1429,8 +1429,23 @@ func _setup_route(content: HBoxContainer) -> void:
 	se.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	se.custom_minimum_size.y = Tokens.H_CHIP
 	se.tooltip_text = "World seed: type a number and press Enter"
+	var ui := {}   # the course code line, filled below
+	var sliders := {}
 	var ask := func():
+		if ui.has("code"): (ui["code"] as LineEdit).text = RouteStyle.code(GameState.seed)
 		if is_instance_valid(rv): rv.request(GameState.seed, RouteStyle.snapshot())
+	# a course code (or a bare seed) typed / pasted in: the same world + style
+	var load_code := func(t: String) -> bool:
+		var d := RouteStyle.parse(t)
+		if d.is_empty(): return false
+		GameState.seed = int(d["seed"])
+		se.text = str(GameState.seed)
+		RouteStyle.apply(d)
+		for k in sliders: (sliders[k] as HSlider).set_value_no_signal(RouteStyle.get_value(k))
+		bike_dirty = true
+		_seed_changed()
+		ask.call()
+		return true
 	se.text_submitted.connect(func(t):
 		if t.is_valid_int():
 			GameState.seed = int(t); _seed_changed(); ask.call())
@@ -1438,6 +1453,23 @@ func _setup_route(content: HBoxContainer) -> void:
 	var nw := UITheme.make_button("NEW WORLD", func(): GameState.new_seed(); se.text = str(GameState.seed); _seed_changed(); ask.call(), "chip", Tokens.T_LG)
 	seed_row.add_child(nw)
 	col.add_child(seed_row)
+	# the course code: this seed + style as one line to share
+	var code_row := HBoxContainer.new()
+	code_row.add_theme_constant_override("separation", Tokens.S2)
+	var ce := LineEdit.new()
+	ce.text = RouteStyle.code(GameState.seed)
+	ce.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	ce.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ce.custom_minimum_size.y = Tokens.H_CHIP
+	ce.tooltip_text = "Course code: seed + jumps + bends + rolling + steepness. Paste a friend's code and press Enter."
+	ce.text_submitted.connect(func(t):
+		if not load_code.call(t): ce.text = RouteStyle.code(GameState.seed))
+	ui["code"] = ce
+	code_row.add_child(ce)
+	code_row.add_child(UITheme.make_button("COPY", func(): DisplayServer.clipboard_set(RouteStyle.code(GameState.seed)), "chip", Tokens.T_MD))
+	code_row.add_child(UITheme.make_button("PASTE", func():
+		if not load_code.call(DisplayServer.clipboard_get()): ce.text = RouteStyle.code(GameState.seed), "chip", Tokens.T_MD))
+	col.add_child(code_row)
 	# presets
 	col.add_child(UITheme.caption("STYLE"))
 	var pg := GridContainer.new()
@@ -1445,7 +1477,6 @@ func _setup_route(content: HBoxContainer) -> void:
 	pg.add_theme_constant_override("h_separation", Tokens.S2)
 	pg.add_theme_constant_override("v_separation", Tokens.S2)
 	col.add_child(pg)
-	var sliders := {}
 	for pr in RouteStyle.PRESETS:
 		var vals: Dictionary = pr[1]
 		var pb := UITheme.make_button(String(pr[0]), func():

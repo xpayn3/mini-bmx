@@ -71,6 +71,27 @@ static func is_default(d: Dictionary = current) -> bool:
 	return true
 
 
+## the course code: world seed + the four sliders (in 0.05 steps) as one short line, e.g. 4242-20-20-20-20
+## (jumps, bends, rolling, steepness: 20 = 1.0). Anyone who types it in gets the same trail.
+static func code(seed_in: int, d: Dictionary = {}) -> String:
+	ensure()
+	var s: Dictionary = d if not d.is_empty() else current
+	return "%d-%d-%d-%d-%d" % [seed_in, roundi(float(s["jumps"]) * 20.0), roundi(float(s["twist"]) * 20.0), roundi(float(s["rolling"]) * 20.0), roundi(float(s["grade"]) * 20.0)]
+
+
+## {"seed", + the style keys} from a course code (a bare seed gives just the seed); {} if it isn't one
+static func parse(text: String) -> Dictionary:
+	var parts := text.strip_edges().replace(" ", "").replace("_", "-").split("-")
+	for p in parts:
+		if not p.is_valid_int(): return {}
+	if parts.size() == 1: return {"seed": int(parts[0])}
+	if parts.size() != 5: return {}
+	var out := {"seed": int(parts[0])}
+	for i in KEYS.size():
+		out[KEYS[i]] = clampf(float(int(parts[i + 1])) / 20.0, LIMITS[KEYS[i]][0], LIMITS[KEYS[i]][1])
+	return out
+
+
 static func sig() -> String:
 	ensure()
 	return JSON.stringify([current["jumps"], current["twist"], current["rolling"], current["grade"]])
