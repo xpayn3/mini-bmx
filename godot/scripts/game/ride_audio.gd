@@ -141,8 +141,8 @@ func _update_chain(dt: float, va: float, on_ground: bool, st: BikePhysics) -> vo
 const SLAM_CLIPS := 10
 const SLAM_MIN := 0.8      # below this impact nothing plays
 const SLAM_FULL := 7.0     # impact that plays at full volume
-const SLAM_DB_SOFT := -28.0
-const SLAM_DB_HARD := 0.0
+const SLAM_DB_SOFT := -30.0
+const SLAM_DB_HARD := -7.0
 var _slam_clips: Array = []
 var _slam_pl: Array = []
 var _slam_i := 0
@@ -168,7 +168,7 @@ func landing(impact: float) -> void:
 	var pl: AudioStreamPlayer = _slam_pl[_slam_i]
 	pl.stream = _slam_clips[i]
 	pl.volume_db = lerpf(SLAM_DB_SOFT, SLAM_DB_HARD, pow(k, 0.75))
-	pl.pitch_scale = randf_range(0.97, 1.03) * lerpf(1.06, 0.94, k)
+	pl.pitch_scale = randf_range(0.985, 1.015) * lerpf(1.03, 0.97, k)
 	pl.play()
 
 func thud(power: float) -> void: shots.append(["thud", 0.0, clampf(power * 0.5, 0.2, 1.0)])
