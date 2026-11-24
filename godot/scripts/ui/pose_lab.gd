@@ -67,7 +67,7 @@ func t_for_pose(live: float) -> float:
 
 
 func head_t() -> float:
-	return preview_t if preview_t >= 0.0 else (game.pose_t if game else -1.0)
+	return preview_t if preview_t >= 0.0 else PoseKeys.live_t
 
 
 func toggle() -> void:
@@ -158,7 +158,13 @@ func _build() -> void:
 	r3.add_child(_button("DEL KEY", func(): _del_key()))
 	r3.add_child(_button("ZERO KEY", func(): _zero_key()))
 	r3.add_child(_button("SAVE", func(): _say(PoseKeys.save_file())))
-	r3.add_child(_button("RELOAD", func(): PoseKeys.load_file(); _sel = -1; _pull(); _say("RELOADED")))
+	r3.add_child(_button("RELOAD", func(): PoseKeys.load_file(); _sel = -1; preview_t = -1.0; _pull(); _clip_ui_fill(); _say("RELOADED")))
+	var r4 := HBoxContainer.new()
+	r4.add_theme_constant_override("separation", 4)
+	outer.add_child(r4)
+	r4.add_child(_button("RESTART LINE", func(): _restart_line()))
+	r4.add_child(_button("STOP LINE", func(): game.line_stop("LINE STOPPED  ·  you ride")))
+	_build_clip_ui(outer)
 	# the sliders, by group
 	var sc := ScrollContainer.new()
 	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -208,6 +214,169 @@ func _build() -> void:
 	add_child(_tl)
 
 
+# ---- the clip library: pick / new / duplicate / delete, what triggers a clip, its fades --------------------------------
+
+var solo := true                # play only the clip being edited, at the playhead (off: the whole library, as in a ride)
+var _clip_pick: OptionButton
+var _clip_name: LineEdit
+var _trig_pick: OptionButton
+var _time_pick: OptionButton
+var _cs := {}                   # clip setting -> slider
+var _csl := {}                  # clip setting -> its value label
+var _chk_on: CheckBox
+var _chk_mir: CheckBox
+var _chk_solo: CheckBox
+
+const CLIP_SETS := [["length", "Length (s)", 0.1, 3.0, 0.05], ["fade_in", "Fade in (s)", 0.0, 1.0, 0.01],
+	["fade_out", "Fade out (s)", 0.0, 1.5, 0.01], ["strength", "Strength", 0.0, 2.0, 0.05]]
+
+
+func _build_clip_ui(outer: VBoxContainer) -> void:
+	outer.add_child(_label("CLIP LIBRARY", 12, C_ACC))
+	var r := HBoxContainer.new()
+	r.add_theme_constant_override("separation", 4)
+	outer.add_child(r)
+	_clip_pick = OptionButton.new()
+	_clip_pick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_clip_pick.focus_mode = Control.FOCUS_NONE
+	_clip_pick.clip_text = true
+	_clip_pick.item_selected.connect(func(i): _clip_select(i))
+	r.add_child(_clip_pick)
+	r.add_child(_button("NEW", func(): _clip_new()))
+	r.add_child(_button("DUP", func(): PoseKeys.duplicate_clip(PoseKeys.cur); _clip_switched()))
+	r.add_child(_button("DEL", func(): PoseKeys.delete_clip(PoseKeys.cur); _clip_switched()))
+	_clip_name = LineEdit.new()
+	_clip_name.placeholder_text = "clip name"
+	_clip_name.text_submitted.connect(func(s): _clip_rename(s))
+	_clip_name.focus_exited.connect(func(): _clip_rename(_clip_name.text))
+	outer.add_child(_clip_name)
+	var r2 := HBoxContainer.new()
+	r2.add_theme_constant_override("separation", 4)
+	outer.add_child(r2)
+	r2.add_child(_label("Trigger", 11, C_DIM))
+	_trig_pick = OptionButton.new()
+	_trig_pick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_trig_pick.focus_mode = Control.FOCUS_NONE
+	_trig_pick.clip_text = true
+	for t in PoseKeys.TRIGGERS: _trig_pick.add_item(t[1])
+	_trig_pick.item_selected.connect(func(i): _clip_set("trigger", PoseKeys.TRIGGERS[i][0]))
+	r2.add_child(_trig_pick)
+	var r3 := HBoxContainer.new()
+	r3.add_theme_constant_override("separation", 4)
+	outer.add_child(r3)
+	r3.add_child(_label("Time", 11, C_DIM))
+	_time_pick = OptionButton.new()
+	_time_pick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_time_pick.focus_mode = Control.FOCUS_NONE
+	_time_pick.clip_text = true
+	for t in PoseKeys.TIME_SRC: _time_pick.add_item(t[1])
+	_time_pick.item_selected.connect(func(i): _clip_set("time", PoseKeys.TIME_SRC[i][0]); _pull())
+	r3.add_child(_time_pick)
+	for cs in CLIP_SETS:
+		var row := HBoxContainer.new()
+		outer.add_child(row)
+		var nm := _label(cs[1], 11, C_TXT)
+		nm.custom_minimum_size = Vector2(80, 0)
+		row.add_child(nm)
+		var s := HSlider.new()
+		s.min_value = cs[2]; s.max_value = cs[3]; s.step = cs[4]
+		s.scrollable = false
+		s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		s.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		var key: String = cs[0]
+		s.value_changed.connect(func(v): _clip_set(key, v))
+		row.add_child(s)
+		var vl := _label("", 11, C_DIM)
+		vl.custom_minimum_size = Vector2(38, 0)
+		row.add_child(vl)
+		_cs[key] = s
+		_csl[key] = vl
+	var r4 := HBoxContainer.new()
+	r4.add_theme_constant_override("separation", 6)
+	outer.add_child(r4)
+	_chk_on = _check("ON", func(b): _clip_set("enabled", b))
+	_chk_mir = _check("MIRROR", func(b): _clip_set("mirror", b))
+	_chk_solo = _check("SOLO", func(b): solo = b)
+	_chk_solo.button_pressed = true
+	r4.add_child(_chk_on); r4.add_child(_chk_mir); r4.add_child(_chk_solo)
+	_clip_ui_fill()
+
+
+func _check(t: String, cb: Callable) -> CheckBox:
+	var c := CheckBox.new()
+	c.text = t
+	c.focus_mode = Control.FOCUS_NONE
+	c.add_theme_font_size_override("font_size", 11)
+	c.add_theme_color_override("font_color", C_TXT)
+	c.toggled.connect(cb)
+	return c
+
+
+## the clip widgets show the clip being edited
+func _clip_ui_fill() -> void:
+	if _clip_pick == null: return
+	_sync = true
+	_clip_pick.clear()
+	for c in PoseKeys.clips:
+		_clip_pick.add_item(("" if bool(c.enabled) else "· ") + str(c.name) + "  [" + str(c.trigger) + "]")
+	_clip_pick.select(PoseKeys.cur)
+	var c: Dictionary = PoseKeys.cur_clip()
+	if not c.is_empty():
+		_clip_name.text = str(c.name)
+		for i in PoseKeys.TRIGGERS.size():
+			if PoseKeys.TRIGGERS[i][0] == c.trigger: _trig_pick.select(i)
+		for i in PoseKeys.TIME_SRC.size():
+			if PoseKeys.TIME_SRC[i][0] == c.time: _time_pick.select(i)
+		for k in _cs:
+			(_cs[k] as HSlider).value = float(c[k])
+			(_csl[k] as Label).text = "%.2f" % float(c[k])
+		_chk_on.button_pressed = bool(c.enabled)
+		_chk_mir.button_pressed = bool(c.mirror)
+	_sync = false
+
+
+func _clip_set(key: String, v) -> void:
+	if _sync: return
+	var c: Dictionary = PoseKeys.cur_clip()
+	if c.is_empty(): return
+	c[key] = v
+	PoseKeys.dirty = true
+	if _csl.has(key): (_csl[key] as Label).text = "%.2f" % float(v)
+	if key in ["enabled", "trigger"]: _clip_ui_fill()
+
+
+func _clip_select(i: int) -> void:
+	if _sync: return
+	PoseKeys.select(i)
+	_clip_switched()
+
+
+func _clip_switched() -> void:
+	_sel = -1
+	preview_t = -1.0
+	_play = false
+	_clip_ui_fill()
+	_pull()
+	_refresh_buttons()
+
+
+func _clip_new() -> void:
+	var c := PoseKeys.make_clip("New clip", "manual_only", "clip")
+	PoseKeys.add_clip(c)
+	_clip_switched()
+	_clip_name.grab_focus()
+	_clip_name.select_all()
+
+
+func _clip_rename(s: String) -> void:
+	var c: Dictionary = PoseKeys.cur_clip()
+	if c.is_empty() or s.strip_edges() == "" or s == str(c.name): return
+	c.name = s.strip_edges()
+	PoseKeys.rev += 1
+	PoseKeys.dirty = true
+	_clip_ui_fill()
+
+
 func _box(c: Color) -> StyleBoxFlat:
 	var b := StyleBoxFlat.new()
 	b.bg_color = c
@@ -234,6 +403,16 @@ func _button(t: String, cb: Callable) -> Button:
 
 
 # ---- actions ----------------------------------------------------------------------------------------------------
+
+## ride the recorded line again from where this re-ride started (the style as it is NOW)
+func _restart_line() -> void:
+	if game.line_restart():
+		_play = false
+		_refresh_buttons()
+		_say("LINE RESTARTED")
+	else:
+		_say("NO LINE YET: record a ride, replay it (I), pick a moment and press L")
+
 
 func _toggle_hold() -> void:
 	game.pose_hold = not game.pose_hold
@@ -336,10 +515,13 @@ func _process(dt: float) -> void:
 	_head.text = "%s   t=%.2f %s   keys %d%s" % [
 		"PAUSED" if game.pose_hold else "RUNNING", t, ("· " + PoseKeys.phase_name(t)) if t >= 0.0 else "· not in a jump (drag the timeline)",
 		PoseKeys.keys.size(), "   *unsaved" if PoseKeys.dirty else ""]
+	if not game.line_play.is_empty():
+		_head.text += "\nLINE %.1f / %.1f s   drift %.2f m" % [float(game.line_play.i) / 120.0, float(game.line_play.n) / 120.0, float(game.line_play.drift)]
 	_pull_t -= dt
 	if _pull_t <= 0.0 and not _slider_drag and (preview_t < 0.0 or _play):
 		_pull_t = 0.08
 		_pull()
+	_tl.offset_left = _panel.size.x + 10.0
 	_tl.queue_redraw()
 	_update_handles()
 	_gz.queue_redraw()
@@ -525,6 +707,16 @@ class Overlay extends Control:
 # ---- tests (BMX_POSELAB=<secs|air>, BMX_POSELAB_SET="t:ch=v,ch=v;t:...", BMX_POSELAB_PLAY=1) --------------------------
 
 func test_script(spec: String, play: String) -> void:
+	var cl := Env.s("BMX_POSELAB_CLIP")   # a clip by (the start of) its name or its number
+	if cl != "":
+		for i in PoseKeys.clips.size():
+			if str(PoseKeys.clips[i].name).to_lower().begins_with(cl.to_lower()) or str(i) == cl:
+				PoseKeys.select(i)
+				break
+		_clip_switched()
+	if Env.s("BMX_POSELAB_SOLO") == "0":
+		solo = false
+		_chk_solo.button_pressed = false
 	for grp in spec.split(";", false):
 		var pr := grp.split(":")
 		if pr.size() < 2: continue
@@ -553,6 +745,7 @@ func test_script(spec: String, play: String) -> void:
 				print("POSELAB mouse ", pr[0], " -> ", PoseKeys.keys[_sel].v)
 				_dg = {}
 				break
+	if Env.s("BMX_POSELAB_RESTART") != "": _restart_line()   # tests: ride the line again from where the re-ride started
 	if play == "1": _toggle_play()
 	_pull()
 
@@ -583,7 +776,11 @@ class Timeline extends Control:
 		var f := ThemeDB.fallback_font
 		draw_rect(Rect2(Vector2.ZERO, size), PoseLab.C_BG)
 		# the jump's parts
+		var cc: Dictionary = PoseKeys.cur_clip()
 		var ph: Array = PoseKeys.PHASES
+		if not cc.is_empty() and str(cc.time) != "jump":   # a timed clip: seconds in tenths of its length
+			ph = []
+			for q in 10: ph.append(["%.2fs" % (q * 0.1 * float(cc.length)), q * 0.1])
 		for i in ph.size():
 			var a: float = ph[i][1]
 			var b: float = ph[i + 1][1] if i + 1 < ph.size() else 1.0
@@ -611,7 +808,7 @@ class Timeline extends Control:
 			var ky := base_y + 10.0
 			draw_colored_polygon(PackedVector2Array([Vector2(kx, ky - 8), Vector2(kx + 7, ky), Vector2(kx, ky + 8), Vector2(kx - 7, ky)]), c)
 		# the playhead: orange = put down by hand, white = the ride's own moment
-		var live: float = lab.game.pose_t
+		var live: float = PoseKeys.live_t
 		if live >= 0.0:
 			draw_line(Vector2(_x(live), 4.0), Vector2(_x(live), size.y - 6.0), Color(1, 1, 1, 0.55), 1.0)
 		var ht: float = lab.head_t()

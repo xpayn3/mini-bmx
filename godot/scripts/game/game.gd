@@ -164,7 +164,14 @@ var pose_hold := false          # the physics step is held (the rider is still d
 var pose_steps := 0             # physics ticks to run while held
 var pose_t := -1.0
 var _pl_air := 0.0              # s since take-off (for the timeline's air part)
-var _pk_bar := 0.0              # Pose Lab: the drawn handlebar turned by a key (rad)
+var style_names := PackedStringArray()   # what each float of style_row is ("pose|t", "clip|<name>|w / sig / t", "ch|<channel>", "sig|..", "drv|..")
+var style_row := PackedFloat32Array()    # this frame's style numbers: the replay keeps one per sample (Style Inspector)
+var _style_rev := -1
+const STYLE_SIG := ["kmh", "air", "bike_lean", "air_tw", "flip_acc", "yaw_rate", "man_a", "nose_a", "pop_fx", "squash", "prep", "land_fold", "air_pull"]
+const STYLE_DRV := ["preload", "extend", "popFx", "squash", "landFold", "landReach", "airPull", "bodyStick", "hipShift", "flipExt", "flipArch", "lipK", "bodyLat", "airWhip", "lean", "steer", "pitch"]
+var _clip_probe := Env.s("BMX_CLIP_PROBE") != ""
+var _clip_probe_k := -1
+var _pk_bar := 0.0             # Pose Lab: the drawn handlebar turned by a key (rad)
 var _pk_rt_on := false         # the rider node is turned about the bottom bracket by a "bike under body" key
 var _landed := 0.0           # landing impact to feed the mud next step
 var _cloud_t := 0.0
@@ -1872,6 +1879,7 @@ var ghost = null   # game/ghost_rider.gd (rides of this world only, not the titl
 func respawn(new_world: bool) -> void:
 	exit_replay()
 	if replay: replay.clear()
+	_line_reset()
 	_end_crash()
 	_reset_draw_state()
 	if hud: hud.on_respawn()
@@ -2185,6 +2193,9 @@ func _read_input() -> Dictionary:
 	if lab:   # the playground replaying a recorded run
 		var rp = lab.replay_input()
 		if rp != null: return rp
+	if not line_play.is_empty():   # re-riding a recorded line (replay: L)
+		var lp = line_input()
+		if lp != null: return lp
 	if demo != null and not photo:
 		var dout: Dictionary = demo.tick(self, get_physics_process_delta_time())
 		if Env.s("BMX_BODY") != "":   # tests: a scripted body stick (BMX_BODY=...) rides along with the test / demo rider
@@ -2422,6 +2433,117 @@ func _perf_report() -> void:
 	print(line)
 	_perf_acc.clear(); _perf_frames = 0
 
+# ---- the line: every physics step's input (and where the bike was) is kept, so a recorded line can be RIDDEN AGAIN
+# (replay: L, or the Pose Lab's RESTART LINE): the snapshot of that moment is put back and the recorded inputs are fed in,
+# live, so the rider rides the same line with whatever style (clips, keys, Anim Studio) is set NOW. The physics isn't
+# changed by any of it: only what is drawn differs. Drift (how far the re-ride ends up from the recorded line) is measured
+const LINE_MAX := 43200         # steps kept (6 min at 120 Hz)
+var _line_buf := PackedFloat32Array()   # per step: the input values (_line_keys order), then x, z
+var _line_keys: Array = []
+var _line_bool := {}
+var _line_base := 0             # absolute step index of the first kept step
+var _line_n := 0                # absolute index of the next step to record
+var line_play := {}             # the re-ride in progress: {keys, bools, buf, stride, i, n, snap, drift, drift_max}
+var line_last := {}             # the last re-ride's start (RESTART LINE)
+
+
+func _line_reset() -> void:
+	_line_buf = PackedFloat32Array()
+	_line_base = 0
+	_line_n = 0
+	line_play = {}
+	line_last = {}
+
+
+func _line_record(inp: Dictionary) -> void:
+	if _line_keys.is_empty():
+		for k in inp:
+			_line_keys.append(k)
+			_line_bool[k] = typeof(inp[k]) == TYPE_BOOL
+	for k in _line_keys:
+		var v = inp.get(k, 0.0)
+		_line_buf.append((1.0 if v else 0.0) if typeof(v) == TYPE_BOOL else float(v))
+	_line_buf.append(phys.x); _line_buf.append(phys.z)
+	_line_n += 1
+	if _line_n - _line_base > LINE_MAX:
+		var drop := 3000
+		var stride := _line_keys.size() + 2
+		_line_buf = _line_buf.slice(drop * stride)
+		_line_base += drop
+
+
+func line_has(idx: int) -> bool:
+	return not _line_keys.is_empty() and idx >= _line_base and idx < _line_n
+
+
+## a copy of the recorded inputs from step idx to the end (what a re-ride feeds in)
+func line_extract(idx: int) -> Dictionary:
+	var stride := _line_keys.size() + 2
+	return {"keys": _line_keys.duplicate(), "bools": _line_bool.duplicate(), "stride": stride, "i": 0, "n": _line_n - idx,
+		"buf": _line_buf.slice((idx - _line_base) * stride), "idx": idx, "drift": 0.0, "drift_max": 0.0}
+
+
+## the recording carries on from step idx (what came after is dropped: the ride writes it again)
+func line_truncate(idx: int) -> void:
+	if idx < _line_base or idx > _line_n: return
+	_line_buf.resize((idx - _line_base) * (_line_keys.size() + 2))
+	_line_n = idx
+
+
+func line_start(line: Dictionary, snap: Array) -> void:
+	line["snap"] = snap
+	line_last = line.duplicate()
+	line_last["i"] = 0
+	line_play = line
+	if Env.s("BMX_LINE_PROBE") != "": print("LINE start steps=%d from idx=%d" % [int(line.n), int(line.idx)])
+	flash("RIDING THE LINE AGAIN  ·  %.0f s" % (float(line.n) / 120.0))
+
+
+func line_stop(msg: String = "") -> void:
+	if not line_play.is_empty():
+		line_play = {}
+		if msg != "": flash(msg)
+
+
+## the next recorded input (null = the line is over: the player has the bike again)
+func line_input():
+	var lp: Dictionary = line_play
+	var i: int = lp.i
+	if i >= int(lp.n):
+		var dm: float = lp.drift_max
+		line_play = {}
+		if Env.s("BMX_LINE_PROBE") != "": print("LINE finished steps=%d drift_max=%.3f drift_end=%.3f" % [int(lp.n), dm, float(lp.drift)])
+		flash("LINE FINISHED  ·  drift max %.2f m, at the end %.2f m" % [dm, float(lp.drift)])
+		return null
+	var stride: int = lp.stride
+	var b := i * stride
+	var buf: PackedFloat32Array = lp.buf
+	var keys: Array = lp.keys
+	var inp := {}
+	for ki in keys.size():
+		var v := buf[b + ki]
+		inp[keys[ki]] = (v > 0.5) if bool(lp.bools.get(keys[ki], false)) else v
+	var d := Vector2(phys.x - buf[b + keys.size()], phys.z - buf[b + keys.size() + 1]).length()
+	lp.drift = d
+	lp.drift_max = maxf(float(lp.drift_max), d)
+	lp.i = i + 1
+	return inp
+
+
+## RESTART LINE: back to where the re-ride started, the recorded inputs again from there
+func line_restart() -> bool:
+	if line_last.is_empty() or replay == null: return false
+	var ln: Dictionary = line_last.duplicate()
+	ln["i"] = 0
+	ln["drift"] = 0.0; ln["drift_max"] = 0.0
+	var snap: Array = ln.snap
+	replay.ride_from_snap(snap)   # (puts the snapshot back, the recording carries on from it)
+	line_truncate(int(ln.idx))
+	line_start(ln, snap)
+	pose_hold = false
+	return true
+
+
 ## where we are on the Pose Lab's jump timeline (0..1; -1 = not in a jump): approach + load by how far the preload
 ## crouch is, the pop just off the lip, the flight by the share of it flown (time since take-off over that + what is
 ## left, `_land_t`), reaching for the landing, then the landing fold coming back up. Read only: no physics change
@@ -2444,17 +2566,91 @@ func _pose_phase(dt: float, st, pi: Dictionary) -> float:
 	return -1.0
 
 
+## what a clip's trigger says right now, read from the physics state (read only): x = how much (0..1), y = which side
+## (+1 / -1, for mirroring a clip). The Pose Lab clips (PoseKeys.TRIGGERS) are driven by these
+func _clip_signal(trig: String, st) -> Vector2:
+	match trig:
+		"jump": return Vector2(1.0 if pose_t >= 0.0 else 0.0, 1.0)
+		"whip": return Vector2(clampf(absf(_awhip_s) / 0.9, 0.0, 1.0), signf(_awhip_s) if _awhip_s != 0.0 else 1.0)
+		"tabletop": return Vector2(clampf((absf(_blat_s) - 0.25) / 0.55, 0.0, 1.0) if st.air else 0.0, signf(_blat_s) if _blat_s != 0.0 else 1.0)
+		"scrub": return Vector2(clampf(maxf(maxf(st.squash_fx, st.auto_absorb) * st.prep, st.squash * st.prep), 0.0, 1.0), 1.0)
+		"backflip": return Vector2(clampf(st.flip_acc / 1.2, 0.0, 1.0) if st.air else 0.0, 1.0)
+		"frontflip": return Vector2(clampf(-st.flip_acc / 1.2, 0.0, 1.0) if st.air else 0.0, 1.0)
+		"spin": return Vector2(clampf(absf(st.yaw_rate) / 3.0, 0.0, 1.0) if st.air else 0.0, signf(st.yaw_rate) if st.yaw_rate != 0.0 else 1.0)
+		"manual": return Vector2(clampf(float(st.man_a) / 0.5, 0.0, 1.0), 1.0)
+		"stoppie": return Vector2(clampf(float(st.nose_a) / 0.4, 0.0, 1.0), 1.0)
+		"corner": return Vector2(clampf(absf(st.bike_lean) / 0.6, 0.0, 1.0) if not st.air else 0.0, signf(st.bike_lean) if st.bike_lean != 0.0 else 1.0)
+		"sprint": return Vector2(clampf(st.sprint * st.pedal, 0.0, 1.0), 1.0)
+		"air": return Vector2(1.0 if st.air else 0.0, 1.0)
+		"ground": return Vector2(0.0 if st.air else 1.0, 1.0)
+		"always": return Vector2(1.0, 1.0)
+	return Vector2(0.0, 1.0)
+
+
+## all the clips of the library mixed into one set of pose offsets: each clip fades in / out by its trigger (a ramp over
+## its fade times), reads its own timeline (the jump timeline, or seconds since it fired), is mirrored by the side it fired
+## on, and the weighted offsets are summed. In the Pose Lab with SOLO on only the clip being edited plays, at full weight,
+## at the playhead (so what you edit is what you see); SOLO off shows the whole library as in a ride
+func _clips_mix(dt: float, st, pi: Dictionary) -> Dictionary:
+	PoseKeys.live_t = -1.0
+	if PoseKeys.clips.is_empty(): return {}
+	var open: bool = pose_lab != null and pose_lab.is_open()
+	var solo: bool = open and pose_lab.solo
+	var out := {}
+	if not solo and (not PoseKeys.enabled or dab_k >= 0.01): return out
+	var step: float = clampf(dt, 0.0, 0.1)
+	for ci in PoseKeys.clips.size():
+		var c: Dictionary = PoseKeys.clips[ci]
+		var is_cur: bool = ci == PoseKeys.cur
+		if solo and not is_cur: continue
+		if not solo and not bool(c.enabled): continue
+		var sg: Vector2 = _clip_signal(str(c.trigger), st)
+		var rt: Dictionary = PoseKeys.rt(c)
+		var target: float = 1.0 if solo else sg.x
+		var fade: float = float(c.fade_in) if target > float(rt.w) else float(c.fade_out)
+		rt.w = move_toward(float(rt.w), target, step / maxf(fade, 0.01))
+		if target > 0.02:
+			rt.age = float(rt.age) + step
+			rt.side = sg.y
+		elif float(rt.w) < 0.01:
+			rt.age = 0.0
+		# where this clip is on its own timeline now
+		var t_live: float = pose_t if str(c.time) == "jump" else clampf(float(rt.age) / maxf(float(c.length), 0.05), 0.0, 1.0)
+		if is_cur: PoseKeys.live_t = t_live
+		rt["t"] = t_live
+		var t: float = t_live
+		if solo: t = pose_lab.t_for_pose(t_live)
+		if t < 0.0 or float(rt.w) < 0.002: continue
+		var v: Dictionary = PoseKeys.eval_keys(c.ks, t, 1.0)
+		if v.is_empty(): continue
+		var wk: float = smoothstep(0.0, 1.0, float(rt.w)) * (1.0 if solo else float(c.strength))
+		var flip: float = -1.0 if (bool(c.mirror) and float(rt.side) < 0.0 and not solo) else 1.0
+		for id in v:
+			var val: float = float(v[id]) * wk
+			if flip < 0.0 and id in PoseKeys.MIRROR: val = -val
+			out[id] = float(out.get(id, 0.0)) + val
+	var tk: int = Time.get_ticks_msec() / 250
+	if _clip_probe and tk != _clip_probe_k:   # tests: BMX_CLIP_PROBE=1, the clips with a weight, 4x a second
+		_clip_probe_k = tk
+		var act := []
+		for c2 in PoseKeys.clips:
+			if float(PoseKeys.rt(c2).w) > 0.01: act.append("%s=%.2f" % [c2.name, float(PoseKeys.rt(c2).w)])
+		if not act.is_empty(): print("CLIPS air=%s active: %s" % [st.air, ", ".join(act)])
+	if out.is_empty(): return out
+	for id in out:
+		var inf: Array = PoseKeys.ch_info(id)
+		out[id] = clampf(float(out[id]) * PoseKeys.amount, float(inf[3]) * 1.5, float(inf[4]) * 1.5)
+	return out
+
+
 ## the keys of the moment (PoseKeys) go into the pose inputs; a "bike under body" key turns the rider about the bottom
 ## bracket, and the limb targets (grips, pedals) are given in his turned space so the arms and legs follow the bike
 func _pose_keys_apply(dt: float, st, pi: Dictionary, lt: Dictionary) -> void:
 	PoseKeys.ensure_loaded()
 	pose_t = _pose_phase(dt, st, pi)
-	var tu: float = pose_t
-	var open: bool = pose_lab != null and pose_lab.is_open()
-	if open: tu = pose_lab.t_for_pose(pose_t)
-	var pk: Dictionary = {}
-	if PoseKeys.enabled and tu >= 0.0 and dab_k < 0.01: pk = PoseKeys.eval(tu, PoseKeys.amount)
+	var pk: Dictionary = _clips_mix(dt, st, pi)
 	pi["pk"] = pk
+	_style_fill(st, pi, pk)
 	_pk_bar = -float(pk.get("bar_steer", 0.0))   # (drawn bars turn, + = right (the rig's steer is + = left): used when the rig is posed, next frame)
 	var rp: float = float(pk.get("rel_pitch", 0.0))
 	var rr: float = float(pk.get("rel_roll", 0.0))
@@ -2473,6 +2669,36 @@ func _pose_keys_apply(dt: float, st, pi: Dictionary, lt: Dictionary) -> void:
 	if _pk_rt_on:
 		pi["wheelR"] = rider.to_local(rig.wheel_r.global_position)
 		pi["wheelF"] = rider.to_local(rig.wheel_f.global_position)
+
+
+## this frame's style numbers (names in style_names): the jump timeline, every clip's weight / trigger signal / own time,
+## the channels the clips added, the physics signals the triggers read, the procedural pose inputs. The replay keeps one row
+## per sample so the Style Inspector can show what the rider's style did (rebuilt names when the clip library changes)
+func _style_fill(st, pi: Dictionary, pk: Dictionary) -> void:
+	if _style_rev != PoseKeys.rev or style_names.is_empty():
+		_style_rev = PoseKeys.rev
+		var nm := PackedStringArray(["pose|t"])
+		for c in PoseKeys.clips:
+			nm.append("clip|%s|w" % c.name); nm.append("clip|%s|sig" % c.name); nm.append("clip|%s|t" % c.name)
+		for id in PoseKeys.ch_ids(): nm.append("ch|" + id)
+		for k in STYLE_SIG: nm.append("sig|" + k)
+		for k in STYLE_DRV: nm.append("drv|" + k)
+		style_names = nm
+		style_row.resize(nm.size())
+	var row := style_row
+	var i := 0
+	row[i] = pose_t; i += 1
+	for c in PoseKeys.clips:
+		var rt: Dictionary = PoseKeys.rt(c)
+		row[i] = float(rt.w); row[i + 1] = _clip_signal(str(c.trigger), st).x; row[i + 2] = float(rt.get("t", -1.0))
+		i += 3
+	for id in PoseKeys.ch_ids():
+		row[i] = float(pk.get(id, 0.0)); i += 1
+	var sv := [absf(st.v) * 3.6, 1.0 if st.air else 0.0, st.bike_lean, st.air_tw, st.flip_acc, st.yaw_rate, float(st.man_a), float(st.nose_a), st.pop_fx, st.squash, st.prep, st.land_fold, st.air_pull]
+	for v in sv:
+		row[i] = float(v); i += 1
+	for k in STYLE_DRV:
+		row[i] = float(pi.get(k, 0.0)); i += 1
 
 
 func toggle_pose_lab() -> void:
@@ -2509,6 +2735,7 @@ func _physics_process(dt: float) -> void:
 	terrain.rope_ref_y = phys.y
 	if level_probe: level_probe.pre_step(dt, inp)
 	if lab: lab.pre_step(inp)
+	_line_record(inp)
 	phys.step(dt, inp)
 	if ruts: ruts.step(phys)
 	if _SKIP: _skip_probe(dt, inp)

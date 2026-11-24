@@ -2412,7 +2412,78 @@ ide_<date>.replay` (test runs: `replays/tests/`), zstd, ~4 MB a
   `BMX_POSELAB_DRAG="hips:0.05,0.05,0;..."` (metres, bike frame), `BMX_POSELAB_MOUSE="hips:60,-40"` (pixels, the real ray path).
   "Bike under body" turns the RIDER about the bottom bracket, so a dragged bike handle stays put and the rider moves
   (relative pose is right, the cursor does not follow the bike point).
-- Not done: keys per bike / per jump kind, easing choice per key, per-key mirror, undo, hands / feet are not movable.
+- **Clip library** (same day, user: "predefined poses library for different tricks ... clips we fade into when the rider triggers
+  them, industry standard"). Layered additive animation like production games: the live procedural pose (physics + IK) stays
+  underneath; authored clips fade in on top. A clip (`PoseKeys.clips`, JSON v2 `res://data/pose_keys.json`; a v1 file becomes the
+  "Jump style" clip): name, **trigger**, **time source** (`jump` = the jump timeline, `clip` = seconds since it fired, over
+  `length`), fade in / out, strength, mirror, enabled, keys. `Game._clip_signal` reads the trigger from the physics state
+  (read only; `PoseKeys.TRIGGERS`: jump, whip, tabletop, scrub, back / front flip, spin, manual, stoppie, corner, sprint, air,
+  ground, always, never = preview only) as (amount 0..1, side +-1); `Game._clips_mix` ramps each clip's weight by its fade
+  times, reads its timeline, mirrors it by the side it fired on (`PoseKeys.MIRROR`: roll, bars, hips z, torso roll / yaw, head
+  yaw), and SUMS the weighted offsets x `amount`; the rider's limits still run after. Starter clips (first guesses, tweak
+  them): Jump style, Whip, Tabletop, Scrub, Back / Front flip tuck, Manual, Stoppie, Attack stance (off). Pose Lab: CLIP
+  LIBRARY block (pick / NEW / DUP / DEL / rename, trigger, time source, length, fades, strength, ON, MIRROR, SOLO). SOLO (default)
+  plays only the clip being edited at the playhead; off = the whole library as in a ride. Timeline shows jump phases or the
+  clip's seconds. Tests: `BMX_POSELAB_CLIP=<name|n>`, `BMX_POSELAB_SOLO=0`, `BMX_CLIP_PROBE=1` (`CLIPS` lines: active clips).
+  Not possible: hands-off / feet-off tricks (no-hander, superman): hands and feet are pinned to the bike.
+- Not done: easing choice per key, undo, hands / feet are not movable, per-bike libraries, importing / exporting a single clip.
+
+### Ride the line again (2026-11-24, replay **L**, Pose Lab RESTART LINE; `Game._line_*`, `ReplayMode.reride_from_here`)
+- User ask: "the rider that rides that line can then be tweaked". Every physics step's input (all keys of the input
+  dictionary, bools kept as bools) + where the bike was is kept (`Game._line_record`, up to 6 min; cleared on respawn). In a
+  replay, L at the playhead = `reride_from_here`: the nearest snapshot (4x a second, `ReplayMode.snaps`, now with the step index
+  as `[3]`) is put back (`ride_from_snap`, shared with ride from here) and `line_input` feeds the recorded inputs in LIVE, so the
+  rider rides the same line with whatever style is set now (Pose Lab clips / keys, Anim Studio). Style only: the physics is
+  the same code on the same inputs. When the inputs run out the player has the bike (flash "LINE FINISHED" + drift).
+- **Pose Lab**: RESTART LINE = back to where the re-ride started, ride it again (so: pause mid-air, tweak, RESTART, watch);
+  STOP LINE; the header shows `LINE t / total  drift`. The recording / replay carry on from the restored moment as in ride from here.
+- **Drift** (the re-ride's bike vs the recorded one at the same step, `line_play.drift`): 0.3-0.6 m after 9-16 s at ~17 m/s (the
+  grip noise isn't restored, nor torn tape / fences). Test: `BMX_LINE_PROBE=1` (`LINE start / finished ... drift_max`),
+  `BMX_REPLAY=20 BMX_REPLAY_SET="at=-9,reride=1"`, `BMX_POSELAB_RESTART=1`.
+- Not done: old saved replay files have no inputs (re-ride only works for the session's own recording); saving the line with a
+  replay file; a gizmo to nudge the line itself (the line is the recorded inputs, not editable).
+
+### Style Inspector (2026-11-24, T in the instant replay / a saved replay; `ui/style_inspector.gd`)
+- User ask: drive a line, replay it, "see what our skeleton did, what animation did he use, when did we trigger different
+  animations, everything I would need so I could tweak and change our riding style", also on the recorded rides.
+- **Recorded**: every replay sample now carries a style row (`Game._style_fill`, names in `Game.style_names`, rebuilt when
+  `PoseKeys.rev` changes): `pose|t` (jump timeline), per Pose Lab clip `clip|<name>|w` (fade weight) / `|sig` (its trigger's
+  signal) / `|t` (its own timeline), the summed channels applied (`ch|..`), the physics signals the triggers read (`sig|..`: km/h,
+  air, bike lean, whip, flip, yaw rate, manual, nose, pop, squash, prep, land fold, air pull) and the procedural pose's inputs
+  (`drv|..`: preload, extend, popFx, squash, landFold, landReach, airPull, bodyStick, hipShift, flip*, lipK, bodyLat, airWhip,
+  lean, steer, pitch). Frames `[11]` = row, `[12]` = names. Saved replays keep them (`sty_sets` in the body, frame index 10 / 11
+  of a saved frame; VER unchanged, older files just show "no style data").
+- **Panel** (T; Y = window 3 / 6 / 12 s): CLIP LAYERS (one lane per clip that took part: fill = weight, white line = trigger signal,
+  click a lane label = pick the clip, click the axis = go there), FIRED / LET GO events with times relative to now, POSE CHANNELS
+  as curves with the value now, RIDER STATE NOW. **Insert** in a replay = Pose Lab here (ride from here, paused) with the picked clip
+  selected and its playhead at the clip time of that moment, so: ride -> replay -> see which clip fired and how hard -> edit it.
+- Not recorded: the skeleton's own joint angles (the drawn bones are already in the replay; the channels show what the clips
+  added), the live ride has no inspector (use the replay: I).
+- Test: `BMX_REPLAY=<secs> BMX_REPLAY_SET="cam=Side,at=-14,pause=1,style=1,pick=<clip>,win=6" BMX_REPLAY_SHOTS=<prefix>`.
+
+### Anim Studio (2026-11-24, `--anim`, or Insert in the rider room; `ui/anim_studio.gd`, `rider/anim_lib.gd`)
+- User ask: "modify our main menu stuff where the driver stands and idles", "import Mixamo and retarget automatically",
+  "blend and use them". `RiderAnim` (see "Animation clips / Mixamo" above) already retargeted + crossfaded clips on the menus'
+  standing rider (rider room KIT tab, ride setup CHARACTER step); the Studio adds the tools around it.
+- **Import at run time**: IMPORT... (native file dialog, multi select) copies a Mixamo FBX / glb to
+  `user://anim/mixamo/` (`AnimLib.import_file`) and loads it with `FBXDocument` + **`FBXState`** (GLTFState gives "state.is_null()"),
+  no editor import; `RiderAnim.clip_files` lists them with the project's `assets/anim/mixamo/` clips; REMOVE deletes an imported one.
+  Retargeting = the existing direction-based `RiderAnim._retarget` (any Mixamo character / skin; lengths stay the rider's).
+- **Per clip settings** (`AnimLib.cfg`, `res://data/anim_library.json`, user:// when res:// is read-only): ON, IDLE (the clip the
+  menu returns to between the others; a name with "idle" still counts), speed, pick weight, hold seconds, fade-in, and
+  **offsets** (hips xyz, torso pitch / roll / yaw, head nod / turn, elbows / knees out): `AnimLib.offset_pose` moves the upper body
+  as one chain, solves arms and legs again by IK (feet stay planted, nothing stretches). `RiderAnim.step` uses all of them, so
+  every menu that shows the standing rider follows the library.
+- **Modes**: PLAYLIST (exactly what the menus play), CLIP (loop one, scrub, pause), BLEND (A + B by a slider, B phase-locked to A
+  or free; `RiderAnim.blend_poses`).
+- **BAKE -> RIDE CLIP**: `AnimLib.bake` samples a clip (14 keys, relative to its first frame) into a Pose Lab clip on the hips /
+  torso / head / elbows / knees channels (trigger "never"); set its trigger in the Pose Lab and it plays in rides. A standing
+  clip's motion is small and the rider has no feet off the bike: it suits idle-like / body moves, not full-body tricks.
+- Tests: `--anim` with `BMX_ANIM_IMPORT=file`, `BMX_ANIM_SEL=name`, `BMX_ANIM_MODE=0|1|2`, `BMX_ANIM_MIX=0..1`,
+  `BMX_ANIM_OFF="hip_y=-0.05,torso_pitch=0.3"`, `BMX_ANIM_BAKE=1`, `BMX_ANIM_SHOT=png` (+ quits); `-s res://tools/fbx_runtime_probe.gd`.
+  A test import writes into the player's `user://anim/mixamo/` (delete it after).
+- Not done: a button on the title menu itself (use `--anim` / Insert in the rider room), blending several clips as layers,
+  root motion, retargeting to the riding pose (clips are standing only).
 
 ### Photo mode (O, `scripts/game/photo_mode.gd`)
 - Time freezes (`Engine.time_scale = 0`), HUD hidden, the camera comes loose: `Game._process` calls `PhotoMode.update(real dt)`

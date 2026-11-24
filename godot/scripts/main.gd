@@ -64,6 +64,7 @@ func _ready() -> void:
 		elif a.begins_with("--autotest"): _autotest(float(a.get_slice("=", 1)) if "=" in a else 10.0)
 		elif a == "--garage": _open_garage()
 		elif a == "--rider": _open_garage("rider")
+		elif a == "--anim": _open_anim_studio()
 		elif a == "--shop": _open_garage("shop")
 		elif a.begins_with("--shot="): _shot(a.get_slice("=", 1))
 		elif a.begins_with("--bench="): _bench(a.get_slice("=", 1))
@@ -1738,6 +1739,7 @@ func _open_garage(mode := "bike") -> void:
 	add_child(garage)
 	if Env.s("BMX_GARAGE_PROBE") != "": print("GARAGE open total ms=%.1f" % ((Time.get_ticks_usec() - t0) / 1000.0))
 	garage.closed.connect(_close_garage)
+	garage.anim_requested.connect(func(): await _close_garage(false); _open_anim_studio())
 	create_tween().set_ignore_time_scale().tween_property(fade, "modulate:a", 0.0, 0.5)
 	if Env.s("BMX_GARAGE_REOPEN") != "" and not _garage_reopened:   # tests: back to the menu and in again (the kept outside)
 		_garage_reopened = true
@@ -1745,6 +1747,31 @@ func _open_garage(mode := "bike") -> void:
 		await _close_garage(false)
 		await get_tree().create_timer(1.0).timeout
 		_open_garage(mode)
+
+## the Anim Studio (--anim, Insert in the rider room): the menus' standing rider + their animation library (ui/anim_studio.gd)
+var anim_studio: AnimStudio = null
+
+func _open_anim_studio() -> void:
+	if menu: menu.queue_free(); menu = null
+	fade.modulate.a = 1.0
+	if game:
+		if game.title_world and _title_keep.is_empty(): _title_keep = game.take_world()
+		game.queue_free()
+		await game.tree_exited
+		game = null
+	anim_studio = AnimStudio.new()
+	add_child(anim_studio)
+	anim_studio.closed.connect(_close_anim_studio)
+	create_tween().set_ignore_time_scale().tween_property(fade, "modulate:a", 0.0, 0.4)
+
+func _close_anim_studio() -> void:
+	fade.modulate.a = 1.0
+	anim_studio.queue_free()
+	await anim_studio.tree_exited
+	anim_studio = null
+	await _new_game(true)
+	_show_menu()
+	create_tween().set_ignore_time_scale().tween_property(fade, "modulate:a", 0.0, 0.5)
 
 func _close_garage(ride: bool) -> void:
 	fade.modulate.a = 1.0
