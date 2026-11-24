@@ -586,6 +586,8 @@ func _build() -> void:
 	# (2026-11-23) the dirt jump from the side-view reference video (research/jump, "The MTB Jumping Technique That Changed
 	# Everything", 13:24-14:38: the same jump squashed / neutral / popped): a 1.45 m 42 deg lip (tight, R 1.5 m: a dirt jump; the bike sits ~50 deg on it in the video) into a step-up landing mound
 	# ~1.5 m high, measured off the frames with the wheel (0.74 m) as the scale
+	# (2026-11-24) the free-ride double out in the land (TrailFeatures.DOUBLE_S, tools/bake_jumps.gd "double_s")
+	l.flat(20.0); l.designed({"id": "double_s", "name": "FREE-RIDE DOUBLE", "kind": "gap", "v": 10.5, "lip_deg": 24.0, "lip_g": 1.8, "lip_t": 0.12, "fill": 1.0, "aim": 0.3, "land_g": 2.2})
 	l.flat(30.0); l.designed({"id": "dj_video", "name": "VIDEO DIRT JUMP", "v": 8.0, "lip_deg": 42.0, "height": 1.45, "kind": "gap", "land_h": 1.5})
 	for dj in [{"v": 8.0, "lip_deg": 22.0}, {"v": 10.0, "lip_deg": 24.0}, {"v": 12.0, "lip_deg": 26.0}, {"v": 13.5, "lip_deg": 26.0},
 			{"v": 15.0, "lip_deg": 25.0}, {"v": 11.0, "lip_deg": 30.0, "kind": "gap"}, {"v": 13.0, "lip_deg": 32.0, "kind": "gap"},
