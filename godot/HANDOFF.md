@@ -1138,6 +1138,21 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   foot / knee / hand is down (all three used to launch the body). `BMX_RAGDOLL_PROBE` prints `rise` / `vup` (how
   high / fast the centre of mass went up from the crash start; now ~0.01 m) and `RAGSTART` (buried parts, start v).
   Ground friction `SLIDE_MU` 1.1 + `SLIDE_DRAG` 0.97.
+  **Contacts without launches (2026-11-24, user: "weird ejection force, flies too much", "slides on the floor too
+  much")**: measured with the new `BMX_RAGCOL_PROBE=1` (`RAGCOL t= com_v= up= pelvis_h= slide= kick= rise=` every 0.5 s
+  of a fall + a `RAGCOL rest` line; `kick` = the biggest upward speed a ground contact left a part with). Found: (1) a
+  part pushed out of the ground / a rock kept the push-out as speed (Verlet), ~7 m/s up from a 2 cm overlap; (2) HEAD
+  HIT crashes upside down in a flip started with up to 12 joints 0.83 m in the ground: `kick` 68-90 m/s, the body
+  thrown 6-14 m up; (3) the startle reflex added ~0.7 m/s up to the whole body. Now (`ragdoll.gd` CONTACT): the
+  push-out moves the part only and its speed into the ground (along the ground's normal, `_gn`, read again only after
+  the part moved 10 cm) is taken out, a hit over `BOUNCE_MIN` 3 m/s keeps `BOUNCE` 0.12 of it; friction is Coulomb on
+  the normal speed really taken out (`_jn`: g h at rest, the whole hit on a slam), `ROUGH_MU` 1.6 (more grip);
+  rocks / trunks the same (`_surface_v`, `ROCK_SLIDE`); buried joints at the crash start are set on the ground and the
+  bones settled round them with no speed (`_unbury`); the startle's net push is taken back out; every part capped at
+  `MAX_V` 40 m/s; a non-finite step falls back to the last good state; only shapes the body can reach are tested
+  (`_near`). Same flip crashes: rise 14.4 -> 0.0-1.2 m (the rest is the body tumbling over itself); an 18 m/s bail
+  at rest in 1.45 s (was 3.1); crash physics ~0.2 ms a frame cheaper. `BMX_OLD_RAGCOL=1` = the old contacts. Test:
+  `BMX_SEED=4242 BMX_FOLLOW=1 BMX_BIGAIR=1 BMX_TRICK=back BMX_RAGCOL_PROBE=1 BMX_RAGDOLL_PROBE=1 --autotest=70`.
   **No self-spinning**: the muscles (tension, reaching, squirm) bend the body but can't spin it — each substep the
   whole-body angular momentum they add is taken back (`_keep_ang_mom`; only the ground / things hit turn it; the
   joint pulls weren't collinear and used to spin the body up). Everything tuned per substep (damping, drag, tension)

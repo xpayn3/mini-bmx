@@ -65,6 +65,28 @@ var _xlims: Array = []    # [a, b, min len] extra limits (root - grandchild)
 ## body dead in ~0.1 s, so it never slid)
 const SLIDE_MU := 1.1
 const SLIDE_DRAG := 0.97
+## CONTACT (2026-11-24, user: "the rider gets a weird ejection force, flies too much" + "slides on the floor
+## too much"): a part pushed out of the ground / a rock used to keep the push-out as speed (Verlet: velocity =
+## p - q), up to ~7 m/s upward from a 2 cm overlap at 360 substeps/s, so contacts kicked the body up and it
+## spent half its slide in the air with no friction. Now the push-out moves the part only; its speed INTO the
+## surface is taken out (a hard hit keeps BOUNCE of it), and friction is Coulomb on what the contact really
+## pushed: mu x the normal speed taken out (gravity at rest, the whole impact on a hit), so a body that slams
+## down grabs the ground, one lying on it slides at mu g. ROUGH_MU = the ground's grip in that model.
+## `BMX_OLD_RAGCOL=1` = the old contacts.
+const ROUGH_MU := 1.6 
+const BOUNCE := 0.12           # of the speed into the ground given back on a hard hit
+const BOUNCE_MIN := 3.0        # m/s into the ground before anything bounces
+const ROCK_SLIDE := 0.98       # speed kept along a rock / trunk per contact (like the ground drag)
+const MAX_V := 40.0            # m/s: no part ever moves faster (a solver blow-up can't launch the body)
+var _old_col := OS.get_environment("BMX_OLD_RAGCOL") != ""
+var _jn := PackedFloat32Array()    # normal speed the ground took out of each part this substep (per substep)
+var _gn: Array = []                # ground normal under each part (this step)
+var _near: Array = []              # the shapes near the body this step
+var _gn_at := PackedVector2Array() # where each part's ground normal was read (x, z)
+var probe_kick := 0.0              # tests: biggest upward speed a ground contact left a part with (m/s)
+var probe_slide := 0.0             # tests: how far the pelvis went after the torso first touched (m)
+var _slide_on := false
+var _slide_last := Vector3.ZERO
 
 ## NEUTRAL BODY POSTURE: the pose a relaxed body floats into with no load (NASA's microgravity studies):
 ## head tipped ~24° forward, upper arms forward / a little out, elbows bent ~90° (hands in front of the
@@ -156,6 +178,10 @@ func _reset_points() -> void:
 	free_pt.fill(0)
 	_touch.resize(RAD.size())
 	broken.clear()
+	_jn.resize(RAD.size())
+	_gn.resize(RAD.size())
+	_gn.fill(Vector3.UP)
+	_gn_at.resize(0)
 
 ## BROKEN BONES (fx/blood.gd on a very hard hit): an elbow / knee whose bone broke has no muscle tension
 ## and no fold limit left: the forearm / shin flops and can bend the wrong way. `kick` throws it the
@@ -220,6 +246,11 @@ func start(pts: Array, vel: Vector3, spin: Vector3, dt := 1.0 / 60) -> void:
 	_nlen.resize(NEUTRAL.size())
 	for k in NEUTRAL.size():
 		_nlen[k] = (pts[NEUTRAL[k][0]] as Vector3).distance_to(pts[NEUTRAL[k][1]])
+	# (2026-11-24) a crash can start with joints in the ground: HEAD HIT upside down in a flip had up to 12
+	# joints as deep as 0.83 m, and digging them out (+ the bones pulling back to length) threw the body
+	# 10-14 m up. Now the buried joints are set on the ground and the bones settle round them first, every
+	# move made to the last position too: the body crumples onto the ground with no speed from it.
+	if not _old_col: _unbury()
 	# forward = the side the knees are on in the riding pose
 	_fsign = 1.0
 	var fr := _frame()
@@ -235,7 +266,24 @@ func start(pts: Array, vel: Vector3, spin: Vector3, dt := 1.0 / 60) -> void:
 	for j in [KN_L, FT_L, KN_R, FT_R]:
 		var kick: Vector3 = (fr.y + fr.z) * FEET_KICK * (1.0 if j == FT_L or j == FT_R else 0.6) * (0.8 + randf() * 0.4)
 		q[j] = (q[j] as Vector3) - kick * hs
+	# the startle is the body's own muscles: it moves the limbs against the trunk, it can't lift the body.
+	# Take its net push back out evenly (it added ~0.7 m/s upward to the whole body = a little launch).
+	if not _old_col:
+		var mean := Vector3.ZERO
+		for i in p.size():
+			mean += (p[i] as Vector3) - (q[i] as Vector3)
+		mean /= float(p.size())
+		var v_body := Vector3.ZERO
+		for i in p.size():
+			var pt: Vector3 = pts[i]
+			var h := pt.y - pel.y
+			v_body += (vel + spin * h) * hs   # (p may have been lifted out of the ground: the same speeds)
+		v_body /= float(p.size())
+		var extra := mean - v_body   # what the startle (+ the jitter) added to the whole body
+		for i in p.size():
+			q[i] = (q[i] as Vector3) + extra
 	t_fall = 0.0
+	probe_kick = 0.0; probe_slide = 0.0; _slide_on = false; _rest_said = false
 	_com0 = _com().y
 	if OS.get_environment("BMX_RAGDOLL_PROBE") != "":
 		var deep := 0.0
@@ -253,6 +301,29 @@ func start(pts: Array, vel: Vector3, spin: Vector3, dt := 1.0 / 60) -> void:
 	active = true
 	last_h = dt / SUB
 
+
+## buried joints onto the ground, the bones settled round them; p and q move together (no speed)
+func _unbury() -> void:
+	var np := p.size()
+	var g := PackedFloat32Array()
+	g.resize(np)
+	var any := false
+	for i in np:
+		var pt: Vector3 = p[i]
+		g[i] = terrain.height(pt.x, pt.z) + float(rad[i])
+		if pt.y < g[i]: any = true
+	if not any: return
+	var p0 := p.duplicate()
+	for it in 12:
+		for i in np:
+			var pt: Vector3 = p[i]
+			if pt.y < g[i]: p[i] = Vector3(pt.x, g[i], pt.z)
+		for j in BONES.size():
+			_dist(BONES[j][0], BONES[j][1], rest[j], BONES[j][2], false)
+	for i in np:
+		var pt: Vector3 = p[i]
+		if pt.y < g[i]: p[i] = Vector3(pt.x, g[i], pt.z)
+		q[i] = (q[i] as Vector3) + ((p[i] as Vector3) - (p0[i] as Vector3))
 
 ## the same collider entries (by identity, in order) as the shapes were built from
 func _same_colliders(cols: Array) -> bool:
@@ -285,13 +356,61 @@ func step(dt: float, colliders: Array) -> void:
 	var air_damp := pow(0.998, kt)
 	var wet_damp := pow(0.94, kt)
 	var drag := pow(SLIDE_DRAG, kt)
+	var np := p.size()
+	if _jn.size() != np: _jn.resize(np)
+	if _gn.size() != np:
+		var o := _gn.size()
+		_gn.resize(np)
+		for i in range(o, np): _gn[i] = Vector3.UP
+	# a good copy to fall back on if anything goes non-finite this step
+	var p_ok := p.duplicate()
+	var q_ok := q.duplicate()
+	# only the shapes the body can reach this step are tested (the list round the pelvis can hold dozens of
+	# trunks / rocks, tested 15 parts x 6 passes x 3 substeps)
+	var cen := Vector3.ZERO
+	var vmax := 0.0
+	for i in np:
+		cen += p[i]
+		vmax = maxf(vmax, ((p[i] as Vector3) - (q[i] as Vector3)).length())
+	cen /= float(np)
+	var reach := 0.0
+	for i in np: reach = maxf(reach, Vector2((p[i] as Vector3).x - cen.x, (p[i] as Vector3).z - cen.z).length())
+	reach += 0.25 + vmax * ratio * n
+	_near.clear()
+	for c in _shapes:
+		if Vector2(cen.x - c.x, cen.z - c.z).length() < reach + float(c.R): _near.append(c)
+	# the ground's tilt under each part near it (3 height reads), read again only once the part has moved
+	# 10 cm from where it was last read: a body lying still costs nothing
+	if not _old_col:
+		if _gn_at.size() != np:
+			_gn_at.resize(np)
+			_gn_at.fill(Vector2(INF, INF))
+		for i in np:
+			var gp: Vector3 = p[i]
+			var at := Vector2(gp.x, gp.z)
+			if at.distance_squared_to(_gn_at[i]) < 0.01: continue
+			var g0: float = terrain.height(gp.x, gp.z)
+			if gp.y - g0 > float(rad[i]) + 0.5:
+				_gn[i] = Vector3.UP   # well off the ground: read again when it comes down
+				_gn_at[i] = Vector2(INF, INF)
+				continue
+			_gn_at[i] = at
+			var e := 0.15
+			var gx: float = terrain.height(gp.x + e, gp.z) - g0
+			var gz: float = terrain.height(gp.x, gp.z + e) - g0
+			var nn := Vector3(-gx, e, -gz).normalized()
+			_gn[i] = nn if nn.is_finite() else Vector3.UP
+	var vcap := MAX_V * h
 	for s in n:
-		for i in p.size():
+		for i in np:
 			var pp: Vector3 = p[i]
 			var qq: Vector3 = q[i]
 			var wet := pp.y < WATER
 			var damp := (wet_damp if wet else air_damp) * (ratio if s == 0 else 1.0)
 			var vel := (pp - qq) * damp
+			if not _old_col:
+				var vl := vel.length()
+				if vl > vcap: vel *= vcap / vl
 			q[i] = pp
 			pp += vel
 			pp.y -= (2.0 if wet else 9.81) * h * h
@@ -305,6 +424,7 @@ func step(dt: float, colliders: Array) -> void:
 		_squirm(h)
 		if not _no_lkeep: _keep_ang_mom(L0)
 		_touch.fill(0)
+		_jn.fill(0.0)
 		# ground under each part once per substep (a C# call each); the 6 solver passes move parts by mm only
 		_gh.resize(p.size())
 		for i in p.size():
@@ -331,16 +451,42 @@ func step(dt: float, colliders: Array) -> void:
 			if _touch[i] == 0: continue
 			var pp: Vector3 = p[i]
 			var qq: Vector3 = q[i]
-			var dx := pp.x - qq.x
-			var dz := pp.z - qq.z
-			var d := sqrt(dx * dx + dz * dz)
+			if _old_col:
+				var dx := pp.x - qq.x
+				var dz := pp.z - qq.z
+				var d := sqrt(dx * dx + dz * dz)
+				if d < 1e-7: continue
+				var fric := minf(d, SLIDE_MU * 9.81 * h * h)   # Coulomb: speed drops by mu*g*h per substep
+				var k := (d - fric) / d * drag
+				qq.x = pp.x - dx * k
+				qq.z = pp.z - dz * k
+				q[i] = qq
+				continue
+			# Coulomb on the real contact push (see CONTACT): along the ground the speed drops by mu x the speed
+			# the ground took out of it square to it (at rest that is g h per substep; on a slam the whole hit)
+			var nrm: Vector3 = _gn[i]
+			var v := pp - qq
+			var vn := v.dot(nrm)
+			var vt := v - nrm * vn
+			var d := vt.length()
 			if d < 1e-7: continue
-			var fric := minf(d, SLIDE_MU * 9.81 * h * h)   # Coulomb: speed drops by mu*g*h per substep
-			var k := (d - fric) / d * drag
-			qq.x = pp.x - dx * k
-			qq.z = pp.z - dz * k
-			q[i] = qq
+			var push := maxf(_jn[i], 9.81 * h * h * nrm.y)
+			var k := maxf(0.0, d - ROUGH_MU * push) / d * drag
+			q[i] = pp - (nrm * vn + vt * k)
 	var c := _com()
+	# a step that went non-finite (a solver blow-up) is thrown away: back to the last good state, at rest
+	if not c.is_finite():
+		p = p_ok; q = q_ok
+		for i in p.size():
+			if not (p[i] as Vector3).is_finite(): p[i] = cen if cen.is_finite() else Vector3.ZERO
+			q[i] = p[i]
+		c = _com()
+	if not _slide_on and (_touch[PELVIS] == 1 or _touch[CHEST] == 1):
+		_slide_on = true; _slide_last = p[PELVIS]
+	if _slide_on:
+		var pv: Vector3 = p[PELVIS]
+		probe_slide += Vector2(pv.x - _slide_last.x, pv.z - _slide_last.z).length()
+		_slide_last = pv
 	probe_rise = maxf(probe_rise, c.y - _com0)
 	var cq := Vector3.ZERO
 	for i in RAD.size(): cq += q[i]
@@ -349,6 +495,17 @@ func step(dt: float, colliders: Array) -> void:
 	for i in p.size():
 		sp = maxf(sp, (p[i] as Vector3).distance_to(q[i]) / h)
 	speed = sp
+	if _col_probe and floori((t_fall - h * n) / 0.5) != floori(t_fall / 0.5):
+		var cv := Vector3.ZERO
+		for i in RAD.size(): cv += (p[i] as Vector3) - (q[i] as Vector3)
+		cv /= RAD.size() * h
+		var pe: Vector3 = p[PELVIS]
+		print("RAGCOL t=%.1f com_v=%.1f up=%.1f pelvis_h=%.2f slide=%.2f kick=%.1f rise=%.2f" % [t_fall, Vector2(cv.x, cv.z).length(), cv.y, pe.y - terrain.height(pe.x, pe.z), probe_slide, probe_kick, probe_rise])
+	if _col_probe and not _rest_said and t_fall > 0.3 and sp < 0.6:
+		_rest_said = true
+		print("RAGCOL rest t=%.2f slide=%.2f rise=%.2f vup=%.1f kick=%.1f shapes=%d near=%d" % [t_fall, probe_slide, probe_rise, probe_vup, probe_kick, _shapes.size(), _near.size()])
+var _col_probe := OS.get_environment("BMX_RAGCOL_PROBE") != ""   # tests: RAGCOL line when the body comes to rest
+var _rest_said := false
 
 
 ## the body's spin (angular momentum about its centre, equal masses, velocity = p - q); torn-off pieces
@@ -517,11 +674,27 @@ func _collide(i: int) -> void:
 	var r: float = rad[i]
 	var g: float = _gh[i] + r
 	if pp.y < g:
-		pp.y = g
 		_touch[i] = 1   # ground friction after the solver passes (step)
-		if qq.y < pp.y - 0.02:
-			qq.y = pp.y - (pp.y - qq.y) * 0.3   # small bounce
-	for c in _shapes:
+		if _old_col:
+			pp.y = g
+			if qq.y < pp.y - 0.02:
+				qq.y = pp.y - (pp.y - qq.y) * 0.3   # small bounce
+			if pp.y > qq.y: probe_kick = maxf(probe_kick, (pp.y - qq.y) / maxf(last_h, 1e-6))
+		else:
+			# out of the ground (straight up: the ground is a height field), keeping the part's own speed;
+			# then its speed into the ground (along the ground's normal) is taken out: see CONTACT
+			var v := pp - qq
+			pp.y = g
+			var nrm: Vector3 = _gn[i]
+			var vn := v.dot(nrm)
+			if vn < 0.0:
+				var out := -vn * BOUNCE if -vn > BOUNCE_MIN * last_h else 0.0
+				v += nrm * (-vn + out)
+				_jn[i] += -vn
+			qq = pp - v
+			if v.y > 0.0: probe_kick = maxf(probe_kick, v.y / maxf(last_h, 1e-6))
+	var shapes: Array = _shapes if _old_col else _near
+	for c in shapes:
 		var dx: float = pp.x - c.x
 		var dz: float = pp.z - c.z
 		if c.rock:
@@ -533,14 +706,29 @@ func _collide(i: int) -> void:
 			var k := sqrt((dx / R) * (dx / R) + (dy / H) * (dy / H) + (dz / R) * (dz / R))
 			if k >= 1.0 or k < 1e-4:
 				continue
+			var vr := pp - qq
 			pp = Vector3(c.x + dx / k, c.y + dy / k, c.z + dz / k)
-			qq.x += (pp.x - qq.x) * 0.1
-			qq.z += (pp.z - qq.z) * 0.1
+			if _old_col:
+				qq.x += (pp.x - qq.x) * 0.1
+				qq.z += (pp.z - qq.z) * 0.1
+			else:
+				qq = pp - _surface_v(vr, Vector3(dx / (R * R), dy / (H * H), dz / (R * R)).normalized())
 		else:
 			var d := sqrt(dx * dx + dz * dz)
 			var m: float = c.R + r * 0.6
 			if d < m and d > 1e-4:
+				var vc := pp - qq
 				pp.x = c.x + dx / d * m
 				pp.z = c.z + dz / d * m
+				if not _old_col: qq = pp - _surface_v(vc, Vector3(dx / d, 0.0, dz / d))
 	p[i] = pp
 	q[i] = qq
+
+## a part's velocity after touching a rock / trunk with normal n: nothing into it (no bounce, and the
+## push-out gives no speed), the slide along it a little slowed
+func _surface_v(v: Vector3, n: Vector3) -> Vector3:
+	if not n.is_finite(): return v
+	var vn := v.dot(n)
+	if vn < 0.0: v -= n * vn
+	var vt := v - n * v.dot(n)
+	return v - vt * (1.0 - ROCK_SLIDE)
