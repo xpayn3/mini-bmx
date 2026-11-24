@@ -16,7 +16,7 @@ uniform float near_r = 16.0;
 uniform float mid_r = 52.0;
 uniform float near_spacing = 0.19;
 uniform float mid_spacing = 0.48;
-uniform float height_scale = 1.0;
+uniform float height_scale = 0.8;   // 2026-11-24: grass a little shorter overall (was 1.0)
 uniform vec2 ring_centre;         // where the rings are centred: ahead of a high camera, at a low one
 // trampled trail (GrassField.trample): r = time pressed, g = direction pressed (rad), b = how hard
 uniform sampler2D trample : filter_nearest, repeat_disable;
