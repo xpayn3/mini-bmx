@@ -148,7 +148,7 @@ func _camera() -> Control:
 	p.add_child(hb)
 	_section(p, "SPEED EFFECTS")
 	_check(p, "Speed effects", "speed_fx", "Master switch: wider view, blur, lines and vignette when you go fast")
-	_slider(p, "Starts at", "sfx_start", 5.0, 60.0, 1.0, "%.0f km/h", "Speed where the effects begin to show (full about 20 km/h above)")
+	_slider(p, "Starts at", "sfx_start", 5.0, 60.0, 1.0, "%.0f km/h", "Speed where the effects begin: none below it, growing smoothly to full about 60 km/h above it")
 	_slider(p, "Wider view", "cam_speed_fov", 0.0, 2.0, 0.1, "%.1fx", "How much the view widens when you go fast")
 	_slider(p, "Camera pull-in", "sfx_pull", 0.0, 2.0, 0.1, "%.1fx", "How much closer the camera moves to the rider at speed")
 	_slider(p, "Edge blur", "sfx_blur", 0.0, 2.0, 0.1, "%.1fx", "Smeared left / right sides of the screen")

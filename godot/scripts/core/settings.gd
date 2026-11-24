@@ -79,7 +79,7 @@ const DEFAULTS := {
 	"cam_follow": 1.0,       # × how quickly the camera turns / catches up after the rider
 	"cam_speed_fov": 1.0,    # × the wider view at speed
 	"sfx_blur": 1.0,         # × the speed blur at the screen sides
-	"sfx_lines": 0.2,        # × the speed lines (user: white lines were distracting, kept very faint)
+	"sfx_lines": 0.07,       # × the speed lines (user: white lines were distracting, kept very faint)
 	"sfx_fringe": 1.0,       # × the colour fringing at the corners
 	"sfx_vignette": 1.0,     # × the frame closing in
 	"sfx_pull": 1.0,         # × how far the camera pulls in at speed

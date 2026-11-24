@@ -3593,7 +3593,7 @@ func _process(dt: float) -> void:
 	# while accelerating hard, rumble, bank, streaks and speed lines at the edges, tighter vignette
 	var fx_on: bool = Settings.get_v("speed_fx") and not st.crash_on
 	var sfx0 := float(Settings.get_v("sfx_start")) / 3.6   # m/s where it begins
-	var sk := smoothstep(sfx0 - 13.0, sfx0 + 4.0, absf(st.v)) if fx_on else 0.0  # 2026-11-24 (user: misjudged speed into corners): starts earlier, much stronger below
+	var sk := smoothstep(sfx0, sfx0 + 17.0, absf(st.v)) if fx_on else 0.0  # 2026-11-24 (user: misjudged speed into corners): starts earlier, much stronger below
 	speed_k += (sk - speed_k) * minf(1.0, dt * (2.5 if sk > speed_k else 1.2))
 	_surge += ((clampf(_acc_fx / 5.0, 0.0, 1.0) * smoothstep(4.0, 12.0, absf(st.v)) if fx_on else 0.0) - _surge) * minf(1.0, dt * 2.0)
 	cam.fov_boost = speed_k * 22.0 + _surge * 8.0
