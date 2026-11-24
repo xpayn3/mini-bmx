@@ -846,7 +846,7 @@ func _dist_signs() -> void:
 			var pos: Vector3 = base + R * off
 			var k := _push(kind, bs, pos, c)
 			panel["parts"].append({"kind": kind, "i": k, "col": c, "xform": Transform3D(bs, pos), "scale": scl})
-		# design (Figma "table sign"): blue field with the distance in white, white strip with DISTANCE in red
+		# design (Figma "table sign"): blue field with the distance in white, white strip with DISTANCE in dark grey
 		var white_c := TerrainField.lin(0xffffff)
 		white_c.a = 1.0
 		var blue_c := TerrainField.lin(0x0004ff)
@@ -856,17 +856,17 @@ func _dist_signs() -> void:
 		# (mesh is 1.1 tall with a pointed top: 0.0 .. 1.1 + a tip hidden inside the board)
 		add.call("post", Vector3(0, 0.58, 0), Vector3(0.7, 1.1, 0.5), post_c)
 		add.call("rail", Vector3(0, 1.505, 0), Vector3(0.81, 0.81, 0.07), white_c)
-		add.call("rail", Vector3(0, 1.64, 0), Vector3(0.81, 0.54, 0.09), blue_c)
+		add.call("rail", Vector3(0, 1.596, 0), Vector3(0.81, 0.628, 0.09), blue_c)
 		colliders.append({"x": bx, "z": bz, "r": 0.3, "fence": panel, "fence_style": "billboard"})
 		var nrm: Vector3 = R * Vector3(fx, 0, fz)
 		var km := int(round(float(i) * 2.0 / 1000.0))
 		panel["cx"] = bx
 		panel["cz"] = bz
 		var lb := R * Basis(Vector3(fz, 0, -fx), Vector3.UP, Vector3(fx, 0, fz))
-		panel["bb"] = {"text": "%dkm" % km, "col": Color.WHITE, "w": 0.76, "h": 0.36,
-			"basis": lb, "at": base + R * Vector3(0, 1.64, 0), "nrm": nrm}
-		panel["bb_more"] = [{"text": "DISTANCE", "col": Color.html("#ff3b30"), "w": 0.72, "h": 0.135,
-			"basis": lb, "at": base + R * Vector3(0, 1.235, 0), "nrm": nrm}]
+		panel["bb"] = {"text": "%dKM" % km, "col": Color.WHITE, "w": 0.74, "h": 0.34,
+			"basis": lb, "at": base + R * Vector3(0, 1.596, 0), "nrm": nrm}
+		panel["bb_more"] = [{"text": "DISTANCE", "col": Color.html("#313131"), "w": 0.7, "h": 0.1,
+			"basis": lb, "at": base + R * Vector3(0, 1.191, 0), "nrm": nrm}]
 		if OS.get_environment("BMX_GATE_PROBE") != "":
 			print("DISTSIGN i=", i, " at ", bx, ",", h, ",", bz)
 		panels.append(panel)
