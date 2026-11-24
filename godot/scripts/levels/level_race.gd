@@ -18,6 +18,7 @@ var _gates: Array = []         # [{gate, pos, dir, span, i}] sorted down the tra
 var _next := 0                 # index of the next gate to pass
 var _prev := Vector2(INF, INF)
 var _splits := PackedFloat32Array()
+var _missed := 0               # checkpoints skipped this run (no best time then)
 var _best := INF
 var _best_splits := PackedFloat32Array()
 var _label: Label
@@ -59,7 +60,7 @@ func _order(g: Dictionary) -> float:
 var practice := false   # started mid-level (the editor's "Ride from selected"): no timing
 
 func reset() -> void:
-	running = false; done = false; t = 0.0; _splits = PackedFloat32Array(); _prev = Vector2(INF, INF)
+	running = false; done = false; t = 0.0; _splits = PackedFloat32Array(); _prev = Vector2(INF, INF); _missed = 0
 	_next = 0
 	practice = game.terrain is LevelTerrain and game.terrain.practice_at.x != INF
 	if practice:
@@ -75,8 +76,17 @@ func _physics_process(dt: float) -> void:
 	var p := Vector2(ph.x, ph.z)
 	if running and not done: t += dt   # (a crash costs time: the clock runs on)
 	if not practice and _prev.x != INF and _next < _gates.size():
-		var g: Dictionary = _gates[_next]
-		if _crossed(g, _prev, p): _pass(g)
+		# the next gate, or any later one (a checkpoint ridden past outside its span, or on a line that doesn't go
+		# through it, mustn't stop the finish from counting): the ones jumped over are missed
+		for gi in range(_next, _gates.size()):
+			var g: Dictionary = _gates[gi]
+			if g.gate == "start" and gi != _next: continue
+			if _crossed(g, _prev, p):
+				for q in range(_next, gi):
+					if _gates[q].gate == "checkpoint": _missed += 1
+				_next = gi
+				_pass(g)
+				break
 	_prev = p
 	_show()
 
@@ -104,7 +114,9 @@ func _pass(g: Dictionary) -> void:
 		"finish":
 			done = true
 			var msg := "FINISH  %s" % _fmt(t)
-			if t < _best:
+			if _missed > 0:
+				msg += "  (%d checkpoint%s missed: no best time)" % [_missed, "" if _missed == 1 else "s"]
+			elif t < _best:
 				if _best < INF: msg += "  NEW BEST (%s)" % _diff(t - _best)
 				else: msg += "  NEW BEST"
 				_best = t; _best_splits = _splits.duplicate()
@@ -132,7 +144,7 @@ func _say(s: String) -> void:
 func _show() -> void:
 	if _label == null: return
 	var hud_on: bool = game.hud == null or game.hud.visible
-	_label.visible = hud_on and (running or done or not _gates.is_empty())
+	_label.visible = hud_on and (practice or running or done or not _gates.is_empty())
 	_label.text = "PRACTICE" if practice else (_fmt(t) if (running or done) else "START AT THE GATE")
 	_label.modulate = Color(0.55, 1.0, 0.55) if done else Color(1, 1, 1)
 

@@ -9,9 +9,7 @@ func _init() -> void:
 	if a.size() < 4:
 		push_error("import_world: -- seed start length out"); quit(1); return
 	var sd := int(a[0]); var s0 := float(a[1]); var L := float(a[2]); var out := a[3]
-	var t := Terrain.new()
-	t.use_cs = true
-	t.set_seed(sd)
+	var t := Terrain.new(sd)   # (the seed to the constructor: set_seed after builds the world twice)
 	var c: TrailCourse = t.field.course
 	var i0 := clampi(int(s0 / TrailCourse.STEP), 0, c.n - 2)
 	var i1 := clampi(int((s0 + L) / TrailCourse.STEP), i0 + 2, c.n - 1)

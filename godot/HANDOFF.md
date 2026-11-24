@@ -2233,6 +2233,14 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   **+ Alt line** (the main line's middle third pushed out 12 m, joining again). NOTE: Godot 4 packed arrays are shared
   by reference: `_bake_alts` keeps `.duplicate()`s (it lost the main line otherwise).
 - Rocks in rides: the deco material tints by instance custom data, so rock MultiMeshes set it white (they were black).
+- **Review fixes (same day)**: a jump line's rejected try is undone in the grid too (it left a phantom ramp); the editor
+  snaps follow-trail pieces to the nearest line incl. alt lines (as the bake does); the race takes any later gate (a
+  skipped checkpoint no longer blocks the finish: "N checkpoints missed", no best time); two quick Ride clicks no longer
+  leave `--level=` stuck in the editor's run args; `--level=` stays for the session only for `.tscn` levels (the
+  playground resets on the title again); the import passes the seed to `Terrain.new`; ground drag: an unselected piece,
+  or Ctrl + drag on a selected one (its gizmo works otherwise); PRACTICE shows without gates; an unsaved level can't
+  sculpt (no shared untitled layers file). Alt lines take the main line's height + bank sample by sample over their
+  last 20 m at each junction (a step there threw the demo AI at 234 m).
 - Not yet: publishing (LEVELS menu, medals).
 
 ### Developer view of the test playground (`scripts/levels/ride_diag.gd`) - telemetry + sliders for riding code

@@ -601,7 +601,7 @@ func _menu_page_main() -> void:
 	fill.call()
 	var ride := _menu_button("RIDE", "", _menu_page_setup, true, true)
 	vb.add_child(ride)
-	if Env.s("BMX_LEVEL") == "" and not _cmdline_level(): GameState.level = ""   # back on the title: RIDE / the garage ride the real world
+	if Env.s("BMX_LEVEL") == "" and not _cmdline_level().ends_with(".tscn"): GameState.level = ""   # back on the title: RIDE / the garage ride the real world
 	# LEVELS: test levels (DEMO is off the title menu: the in-game panel switches the AI rider on; _start_demo is kept)
 	vb.add_child(_menu_button("LEVELS", "", _menu_page_levels, false, true))
 	vb.add_child(_menu_button("REPLAYS", "", _menu_page_replays, false, true))

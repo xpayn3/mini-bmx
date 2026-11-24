@@ -184,8 +184,8 @@ func rebuild_preview() -> void:
 	for pc in pieces():
 		var p: Dictionary = pc.piece()
 		if pc.follow_trail and field.TX.size() > 1:
-			var i := field.nearest(p.pos.x, p.pos.y)
-			if i >= 0: pc.place_at(Vector2(field.TX[i], field.TZ[i]), Vector2(field.DX[i], field.DZ[i]), field.TY[i])
+			var pl: Array = field._place({"pos": p.pos, "dir": p.dir, "follow": true})   # (the nearest line, alt lines too: as the bake places it)
+			pc.place_at(pl[0], pl[1], field.grid_height(pl[0].x, pl[0].y))
 		else:   # (placed freely: kept where it is, standing on the ground)
 			pc.place_at(p.pos, p.dir, field.grid_height(p.pos.x, p.pos.y))
 	if _pieces_root: _pieces_root.queue_free()
@@ -324,10 +324,10 @@ static func make_new(title_in := "New level") -> BmxLevel:
 func ensure_layers() -> LevelLayers:
 	if layers == null:
 		layers = LevelLayers.new()
-		var sp := scene_file_path if scene_file_path != "" else "res://levels/untitled.tscn"
-		var path := sp.get_basename() + "_layers.res"
-		ResourceSaver.save(layers, path)
-		layers.take_over_path(path)
+		if scene_file_path != "":   # (an unsaved level keeps its layers inside the scene until it is saved somewhere)
+			var path := scene_file_path.get_basename() + "_layers.res"
+			ResourceSaver.save(layers, path)
+			layers.take_over_path(path)
 	layers.fit(-40.0, -width * 0.5 - 10.0, int(length + 81.0), int(width + 21.0))
 	return layers
 

@@ -4,8 +4,8 @@ extends EditorPlugin
 ##   New level / Snap trail / Rebuild preview / Ride this level.
 ##   PLACE: pick a piece (Jump, Drop, Rocks, Gate), a ghost follows the mouse on the ground (snapped to the grid);
 ##          Q / E turn it by the rotation step, click drops one (click again for more), right click / Esc ends.
-##   DRAG:  left-drag any piece on the ground to move it (snapped; a piece that follows the trail slides along it),
-##          Alt + drag turns it; one undo step per drag. (The usual gizmo still works: grab its arrows.)
+##   DRAG:  left-drag a piece (not selected yet; a selected one: Ctrl + drag) on the ground to move it (snapped; one
+##          that follows the trail slides along it), Alt turns it; one undo step per drag. Selected: its gizmo works.
 ##   Snap:  on / off, grid size, rotation step (Shift held = free); the preview ground draws the grid.
 ## The pieces are plain nodes (BmxLevel root, BmxTrail, BmxJump / BmxDrop / BmxRocks / BmxGate): every number is
 ## in the Inspector. Levels are saved in res://levels/.
@@ -21,6 +21,7 @@ var dock: VBoxContainer
 var info: Label
 var _lvl: BmxLevel
 var _args_back = null
+var _restore_pending := false
 var _map: Control
 
 # snapping
@@ -128,7 +129,7 @@ func _enter_tree() -> void:
 	var help := Label.new()
 	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	help.modulate = Color(1, 1, 1, 0.6)
-	help.text = "Drag a piece on the ground to move it (Alt + drag turns it). Untick follow_trail to place it anywhere; standalone = a ramp on the ground as it is. Flights: blue / green / red = 85 / 100 / 115 % of the design speed, a post where each lands. Trail: the Path3D tools. Line colour = speed (blue .. red), ticks = berm bank (white .. yellow)."
+	help.text = "Drag a piece on the ground to move it (a selected one: Ctrl + drag, its gizmo works; Alt turns it). Untick follow_trail to place it anywhere; standalone = a ramp on the ground as it is. Flights: blue / green / red = 85 / 100 / 115 % of the design speed, a post where each lands. Trail: the Path3D tools. Line colour = speed (blue .. red), ticks = berm bank (white .. yellow)."
 	dock.add_child(help)
 	add_control_to_dock(DOCK_SLOT_RIGHT_UL, dock)
 	scene_changed.connect(_on_scene)
@@ -304,8 +305,8 @@ func _drag_input(cam: Camera3D, event: InputEvent) -> int:
 			var pc := _piece_at(h)
 			if pc == null: return AFTER_GUI_INPUT_PASS
 			var lt := pc.level_transform()
-			if Vector2(h.x - lt.origin.x, h.z - lt.origin.z).length() < 0.9 and EditorInterface.get_selection().get_selected_nodes().has(pc):
-				return AFTER_GUI_INPUT_PASS   # (on its own origin: leave it to the gizmo's arrows)
+			if EditorInterface.get_selection().get_selected_nodes().has(pc) and not event.ctrl_pressed:
+				return AFTER_GUI_INPUT_PASS   # (selected: its gizmo's arrows / rings work; Ctrl + drag moves it on the ground)
 			_drag = pc
 			_drag_from = pc.transform
 			_drag_off = lt.origin - h
@@ -455,7 +456,7 @@ func _ride(from_selected := false) -> void:
 	if LevelBake.load_bake(root.scene_file_path, LevelBake.signature(root)).is_empty():
 		info.text += "
 (no up-to-date bake: the game works the level out live, no baked light. Bake level to fix.)"
-	_args_back = ProjectSettings.get_setting("editor/run/main_run_args", "")
+	if not _restore_pending: _args_back = ProjectSettings.get_setting("editor/run/main_run_args", "")   # (a 2nd click within 2 s: keep the real original)
 	var args := "-- --level=" + root.scene_file_path
 	if from_selected:
 		var sel := EditorInterface.get_selection().get_selected_nodes()
@@ -465,14 +466,20 @@ func _ride(from_selected := false) -> void:
 		args += " --level-at=%.2f,%.2f" % [lt.origin.x, lt.origin.z]
 	ProjectSettings.set_setting("editor/run/main_run_args", args)
 	EditorInterface.play_main_scene()
+	if _restore_pending: return   # (the first click's timer puts it back)
+	_restore_pending = true
 	get_tree().create_timer(2.0).timeout.connect(func():
-		ProjectSettings.set_setting("editor/run/main_run_args", _args_back))
+		ProjectSettings.set_setting("editor/run/main_run_args", _args_back)
+		_restore_pending = false)
 
 
 
 # ---- sculpt + paint -------------------------------------------------------------------------------------------
 func _set_sculpt(on: bool) -> void:
 	_sculpting = on and _lvl != null
+	if _sculpting and _lvl.scene_file_path == "":
+		_sculpting = false
+		info.text = "Save the level first (its sculpting is saved next to it)."
 	if _sculpting:
 		_set_placing("")
 		EditorInterface.get_selection().clear()

@@ -1017,12 +1017,14 @@ func _add_line(p: Dictionary) -> void:
 			q.pos = Vector2(TX[i], TZ[i]); q.dir = Vector2(DX[i], DZ[i])
 			var before := structs.size()
 			var r_before := route.size()
+			var snap := [H.duplicate(), S.duplicate(), JM.duplicate()]   # (a rejected try must not stay stamped in the ground)
 			_add_jump(q)
 			if structs.size() == before: break
 			st = structs[structs.size() - 1]
 			var s_start := nearest(st.o.x, st.o.y) * DS
 			if free_from < 0.0 or s_start >= free_from - 0.5: break
 			structs.pop_back(); route.resize(r_before)   # (too early: undo it, try further on)
+			H = snap[0]; S = snap[1]; JM = snap[2]
 			i += int((free_from - s_start) / DS) + 1
 			st = {}
 		if st.is_empty(): break
@@ -1057,10 +1059,14 @@ func _bake_alts() -> void:
 			var ie := 0 if end == 0 else n - 1
 			var mi := _nearest_in(m.TX, m.TZ, TX[ie], TZ[ie])
 			if mi < 0 or Vector2(m.TX[mi] - TX[ie], m.TZ[mi] - TZ[ie]).length() > 8.0: continue
-			var my: float = (m.TY as PackedFloat32Array)[mi]
-			for q in mini(15, n):
+			# over its last 20 m the alt line takes the main line's own height + bank where they run side by side (sample by
+			# sample, not one point's): where the two cross sections meet there is no step
+			for q in mini(20, n):
 				var ii := q if end == 0 else n - 1 - q
-				TY[ii] = lerpf(my, TY[ii], smoothstep(0.0, 15.0, float(q)))
+				var mj := _nearest_in(m.TX, m.TZ, TX[ii], TZ[ii])
+				var k := smoothstep(0.0, 20.0, float(q))
+				TY[ii] = lerpf((m.TY as PackedFloat32Array)[mj], TY[ii], k)
+				TB[ii] = lerpf((m.TB as PackedFloat32Array)[mj], TB[ii], k)
 		ALT.append({"TX": TX.duplicate(), "TZ": TZ.duplicate(), "DX": DX.duplicate(), "DZ": DZ.duplicate(), "TY": TY.duplicate(),
 			"TK": TK.duplicate(), "TV": TV.duplicate(), "TB": TB.duplicate()})
 	TX = m.TX; TZ = m.TZ; DX = m.DX; DZ = m.DZ; TY = m.TY; TK = m.TK; TV = m.TV; TB = m.TB
