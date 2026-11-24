@@ -286,7 +286,7 @@ const PAGES := [
 			["flipAccel", "Lip throw: pull.", "Gentle", "Hard"],
 		]],
 		["Right stick in the air", [
-			["*airWhip", "Whip: stick to the side kicks the bike out sideways under the body (the edge still spins).", "None", "Huge"],
+			["*airWhip", "Whip: stick to the side kicks the bike out sideways under the body (pushed right to the edge into a lip: a 360).", "None", "Huge"],
 			["whipReturn", "How much of the whip the rider straightens himself as the landing comes.", "You do it", "He does it"],
 			["*stickAirEase", "How quickly the bike follows the stick in the air, and how fast a spin builds.", "Smooth", "Snappy"],
 			["stickAirTilt", "Stick tilts the nose.", "Little", "Lots"],

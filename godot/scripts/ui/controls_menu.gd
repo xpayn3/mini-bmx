@@ -54,7 +54,7 @@ func _fill_bindings() -> void:
 	_bind_box.add_child(hb)
 	_section(_bind_box, "TIPS")
 	if Settings.pad_active:
-		_hint(_bind_box, "Right stick = your body: back = manual, yank it at a lip = flip, left / right = throw the bike over to turn harder, flick it to whip round. Hold A at a lip to pop higher. Settings › Controller to remap the pad.")
+		_hint(_bind_box, "Right stick = your body: back = manual, held back into a lip = back flip (forward = front flip), pushed right to the side into a lip = 360, left / right = throw the bike over to turn harder, flick it to whip round. Hold A at a lip to pop higher. Settings › Controller to remap the pad.")
 	else:
 		_hint(_bind_box, "Mouse drag: orbit · wheel: zoom · hold hop at a lip to pop higher · press S / W as you leave a lip to throw a back / front flip · carve: hold a turn at speed.")
 

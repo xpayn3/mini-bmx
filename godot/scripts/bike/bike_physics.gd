@@ -2047,7 +2047,9 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 						# predicted touch-down - up to FLIP_RATE_MAX. On a medium jump (~1 s air) it never made it round)
 						var thrown: float = maxf(0.0, _flip_in * signf(flip_in))
 						if not _OLD_SPIN and thrown > 0.3 and absf(flip_in) > 0.5 and not is_nan(_land_pitch) and _land_t > 0.05:
-							var done: float = fmod(absf(flip_acc), TAU)
+							# (only for the first turn: held on past it, it aimed at a second whole turn and over-rotated a held
+							# key flip to 540 deg; a double flip is still the normal rate held long enough)
+							var done: float = absf(flip_acc)
 							var left: float = TAU - done
 							if left > 0.35:
 								var need: float = left / maxf(_land_t, 0.12) * 1.05

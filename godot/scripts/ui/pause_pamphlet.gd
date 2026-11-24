@@ -312,7 +312,7 @@ class TipsBack extends Control:
 			_pen(o + Vector2(0, 150), o + Vector2(250, 150)); _pen(o + Vector2(250, 150), o + Vector2(420, 60))
 			_bike(o + Vector2(250, 112), 0.42, 26.0)
 			_arrow(o + Vector2(470, 80), o + Vector2(500, 0)))
-		_tip(450, "Flips", [g.call("body_back"), g.call("body_fwd")], "yank it as you leave the lip", func(o: Vector2):
+		_tip(450, "Flips", [g.call("body_back"), g.call("body_fwd")], "hold it back into the lip, let go to land", func(o: Vector2):
 			_bike(o + Vector2(160, 120), 0.0, 26.0)
 			_ring(o + Vector2(225, 78), 92, 4.5, RED, -2.6, 1.3)
 			_arrow(o + Vector2(250, 166), o + Vector2(205, 172)))
