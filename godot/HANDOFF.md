@@ -2218,6 +2218,21 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   (Path3D handles) and the trail regenerates over the real land. Seed 4242, 600 m from 300 m: 301 -> 44 points, 3.3 s.
   `tools/make_world_level.gd -- <import file>` makes `levels/world_cut.tscn` the same way (+ a sculpted mound, painted sand)
   and bakes it; demo AI rides it, no crash.
+- **Step 5, editor comfort (same day)**: `LevelBake.marks(field)` = every check with where it is: drawn in the preview as
+  a red (fix it) / yellow (a note) post + words, live; `checks()` is its text. Dock: **Fit all jumps to trail speed**
+  (auto speed on, deck / gap / landing angle auto, one undo), **Ride from selected** (`--level-at=x,z`: starts 30 m up
+  the trail from the selected piece; `LevelRace.practice`: "PRACTICE", no timing / bests), a **minimap** (land shaded,
+  trail red, structures yellow, sand / rock, piece dots, the editor camera; click a dot = select it). `BmxJumpLine`
+  (extends BmxJump: every jump control + `count`, `rollout` s): jumps down the trail, each sized for its spot's speed,
+  the next one's START at least one roll-out (6-14 m) past the last landing (a faster jump's longer run-in is pushed on).
+- **Step 6, several lines (same day)**: the first `BmxTrail` is the main line (AI, timing, rock gardens, jump lines
+  follow it); every other one is an alternative line (`LevelField.alts_in` -> `ALT`): baked the same way, its speed
+  starts from the main line's where it branches off, its height eases onto the main line's over 15 m at each end
+  within 8 m of it, all lines are cut into the ground together (the nearest wins: junctions are one surface). Jumps /
+  drops / gates snap to the nearest line (on an alt line: its own speed for auto speed, no AI / timing index). Dock
+  **+ Alt line** (the main line's middle third pushed out 12 m, joining again). NOTE: Godot 4 packed arrays are shared
+  by reference: `_bake_alts` keeps `.duplicate()`s (it lost the main line otherwise).
+- Rocks in rides: the deco material tints by instance custom data, so rock MultiMeshes set it white (they were black).
 - Not yet: publishing (LEVELS menu, medals).
 
 ### Developer view of the test playground (`scripts/levels/ride_diag.gd`) - telemetry + sliders for riding code

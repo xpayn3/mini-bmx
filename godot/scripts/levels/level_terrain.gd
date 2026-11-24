@@ -14,6 +14,7 @@ var baked := false             # loaded from the level's .bake (LevelBake): grou
 var baked_chunks := {}         # Vector2i -> LevelChunkData
 var hour := 16.5               # the level's time of day (BmxLevel.hour)
 var sun_turn := 0.0
+var practice_at := Vector2(INF, INF)   # --level-at=x,z (the editor's "Ride from selected"): start there, a practice run
 const RT_SHADOW := 45.0        # m: on a baked level the real-time sun shadow only reaches this far (sharper, cheaper)
 var _mat: ShaderMaterial
 
@@ -47,7 +48,15 @@ func _init(scene_path: String, seed_in := 12345) -> void:
 	super(seed_in)
 
 
+func _practice_arg() -> void:
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--level-at="):
+			var v := a.get_slice("=", 1).split(",")
+			if v.size() == 2: practice_at = Vector2(float(v[0]), float(v[1]))
+
+
 func set_seed(seed_in: int) -> void:
+	_practice_arg()
 	super(seed_in)
 	field.course = lf.to_course()   # the level's own trail (demo AI, follow rider, trail camera, bend alerts)
 	field.route_feats = lf.route   # its jumps / drops: the demo AI plans its speed for them, the HUD calls them out
@@ -149,6 +158,10 @@ func take_pack(_x: float, _y: float, _z: float, _r: float = 1.6):
 
 ## the start: the trail's first point, facing down it ((x, heading, z) as Game.respawn takes it)
 func level_spawn() -> Vector3:
+	if practice_at.x != INF:   # (the editor's "Ride from selected": 30 m up the trail from that piece)
+		var i := lf.nearest(practice_at.x, practice_at.y)
+		if i >= 0: return lf.stand_at(maxi(0, i - 30))
+		return Vector3(practice_at.x - 25.0, 0.0, practice_at.y)
 	return lf.start_stand()
 
 ## the bail tap: back on the nearest point of the trail, a few metres up it, facing down it

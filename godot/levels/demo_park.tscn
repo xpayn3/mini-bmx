@@ -5,7 +5,7 @@
 [ext_resource type="Script" path="res://scripts/levels/editor/bmx_jump.gd" id="3_a6qxh"]
 [ext_resource type="Script" path="res://scripts/levels/editor/bmx_drop.gd" id="4_tg8u4"]
 
-[node name="Level" type="Node3D" unique_id=800066835]
+[node name="Level" type="Node3D" unique_id=1870565871]
 script = ExtResource("1_sldq6")
 title = "Demo Park"
 length = 300.0
@@ -13,13 +13,13 @@ width = 120.0
 flat_ground = true
 rough = 0.0
 
-[node name="StartGate" type="Node3D" parent="." unique_id=329194764]
+[node name="StartGate" type="Node3D" parent="." unique_id=1020982984]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 10, 0, 0)
 script = ExtResource("2_1krvs")
 gate = "start"
 follow_trail = false
 
-[node name="Table1" type="Node3D" parent="." unique_id=1796982398]
+[node name="Table1" type="Node3D" parent="." unique_id=1019309594]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 60, 0, 0)
 script = ExtResource("3_a6qxh")
 auto_speed = false
@@ -27,7 +27,7 @@ design_kmh = 32.0
 follow_trail = false
 standalone = true
 
-[node name="Kicker1" type="Node3D" parent="." unique_id=753215614]
+[node name="Kicker1" type="Node3D" parent="." unique_id=347051905]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 120, 0, 0)
 script = ExtResource("3_a6qxh")
 kind = "kicker"
@@ -39,7 +39,7 @@ width = 2.4
 follow_trail = false
 standalone = true
 
-[node name="Gap1" type="Node3D" parent="." unique_id=2090503147]
+[node name="Gap1" type="Node3D" parent="." unique_id=1383549616]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 60, 0, 14)
 script = ExtResource("3_a6qxh")
 kind = "gap"
@@ -49,13 +49,13 @@ lip_deg = 28.0
 follow_trail = false
 standalone = true
 
-[node name="FinishGate" type="Node3D" parent="." unique_id=229801101]
+[node name="FinishGate" type="Node3D" parent="." unique_id=494054858]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 180, 0, 7)
 script = ExtResource("2_1krvs")
 gate = "finish"
 follow_trail = false
 
-[node name="Drop1" type="Node3D" parent="." unique_id=520932685]
+[node name="Drop1" type="Node3D" parent="." unique_id=1080714374]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 120, 0, 14)
 script = ExtResource("4_tg8u4")
 height = 1.2

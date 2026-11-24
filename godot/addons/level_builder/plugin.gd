@@ -12,14 +12,16 @@ extends EditorPlugin
 
 const LEVEL_DIR := "res://levels/"
 const PIECES := {"BmxJump": preload("res://scripts/levels/editor/bmx_jump.gd"), "BmxDrop": preload("res://scripts/levels/editor/bmx_drop.gd"),
-	"BmxRocks": preload("res://scripts/levels/editor/bmx_rocks.gd"), "BmxGate": preload("res://scripts/levels/editor/bmx_gate.gd")}
+	"BmxRocks": preload("res://scripts/levels/editor/bmx_rocks.gd"), "BmxGate": preload("res://scripts/levels/editor/bmx_gate.gd"),
+	"BmxJumpLine": preload("res://scripts/levels/editor/bmx_jump_line.gd")}
 ## the ghost's size per piece (across, up, along) and where it sits along from the node (a jump's node is its lip)
-const GHOST := {"BmxJump": [3.0, 1.2, 14.0, -5.0], "BmxDrop": [3.4, 1.5, 22.0, 9.0], "BmxRocks": [4.0, 0.3, 24.0, 12.0], "BmxGate": [7.0, 3.6, 0.3, 0.0]}
+const GHOST := {"BmxJumpLine": [3.0, 1.2, 40.0, 15.0], "BmxJump": [3.0, 1.2, 14.0, -5.0], "BmxDrop": [3.4, 1.5, 22.0, 9.0], "BmxRocks": [4.0, 0.3, 24.0, 12.0], "BmxGate": [7.0, 3.6, 0.3, 0.0]}
 
 var dock: VBoxContainer
 var info: Label
 var _lvl: BmxLevel
 var _args_back = null
+var _map: Control
 
 # snapping
 var snap_on := true
@@ -64,16 +66,23 @@ func _enter_tree() -> void:
 	head.text = "MINI BMX LEVEL BUILDER"
 	dock.add_child(head)
 	_button(dock, "New level", _new_level, "A new scene in res://levels/ with a slope and a winding trail")
+	_button(dock, "+ Alt line", _add_alt, "Adds another line (a BmxTrail) branching off the main one and joining it again: edit its points. The first trail stays the main line (the AI and timing ride it)")
 	_button(dock, "Snap trail to ground", _snap_trail, "Puts every trail point on the land (the handles sit where the trail is)")
 	_button(dock, "Rebuild preview", _rebuild, "Works the preview ground out again now")
 	_button(dock, "Bake level", _bake, "Writes <level>.bake: the ground, pieces, trees and the light at the level's time of day, worked out once (the game loads it instantly). Runs the level's checks")
 	_button(dock, "▶  Ride this level", _ride, "Saves the scene and starts the game on it")
+	_button(dock, "▶  Ride from selected", _ride.bind(true), "Starts 30 m before the selected piece (a practice run: no timing)")
+	_button(dock, "Fit all jumps to trail speed", _fit_jumps, "Every jump: auto speed on, deck / gap / landing angle back to auto (sized for the speed riders carry there)")
+	_map = _MiniMap.new()
+	_map.plugin = self
+	_map.custom_minimum_size = Vector2(200, 150)
+	dock.add_child(_map)
 	dock.add_child(HSeparator.new())
 	var pl := Label.new(); pl.text = "PLACE (click in the 3D view)"
 	dock.add_child(pl)
 	var row := HFlowContainer.new()
 	dock.add_child(row)
-	for it in [["Jump", "BmxJump"], ["Drop", "BmxDrop"], ["Rocks", "BmxRocks"], ["Gate", "BmxGate"]]:
+	for it in [["Jump", "BmxJump"], ["Line", "BmxJumpLine"], ["Drop", "BmxDrop"], ["Rocks", "BmxRocks"], ["Gate", "BmxGate"]]:
 		var b := Button.new()
 		b.text = it[0]
 		b.toggle_mode = true
@@ -83,7 +92,7 @@ func _enter_tree() -> void:
 		_place_btns[it[1]] = b
 	var row2 := HFlowContainer.new()
 	dock.add_child(row2)
-	for it in [["+ Jump on trail", "BmxJump"], ["+ Rocks on trail", "BmxRocks"]]:
+	for it in [["+ Jump on trail", "BmxJump"], ["+ Jump line on trail", "BmxJumpLine"], ["+ Rocks on trail", "BmxRocks"]]:
 		_button(row2, it[0], _add_on_trail.bind(it[1]), "Adds one on the trail where the editor camera looks, following the trail")
 	dock.add_child(HSeparator.new())
 	var sl := Label.new(); sl.text = "SCULPT + PAINT (drag in the 3D view)"
@@ -167,6 +176,7 @@ func _on_rebuilt(s: String) -> void:
 	if _lvl:
 		info.text = "%s\n%s" % [_lvl.title, s]
 		_show_grid()
+		if _map: _map.rebuild(_lvl)
 
 
 func _show_grid() -> void:
@@ -436,7 +446,7 @@ func _rebuild() -> void:
 	if _lvl: _lvl.rebuild_preview()
 
 
-func _ride() -> void:
+func _ride(from_selected := false) -> void:
 	var root := EditorInterface.get_edited_scene_root()
 	if not (root is BmxLevel) or root.scene_file_path == "":
 		info.text = "Open (and save) a level scene first."
@@ -446,7 +456,14 @@ func _ride() -> void:
 		info.text += "
 (no up-to-date bake: the game works the level out live, no baked light. Bake level to fix.)"
 	_args_back = ProjectSettings.get_setting("editor/run/main_run_args", "")
-	ProjectSettings.set_setting("editor/run/main_run_args", "-- --level=" + root.scene_file_path)
+	var args := "-- --level=" + root.scene_file_path
+	if from_selected:
+		var sel := EditorInterface.get_selection().get_selected_nodes()
+		if sel.is_empty() or not (sel[0] is BmxPiece):
+			info.text = "Select a piece first (Ride from selected starts 30 m before it)."; return
+		var lt: Transform3D = (sel[0] as BmxPiece).level_transform()
+		args += " --level-at=%.2f,%.2f" % [lt.origin.x, lt.origin.z]
+	ProjectSettings.set_setting("editor/run/main_run_args", args)
 	EditorInterface.play_main_scene()
 	get_tree().create_timer(2.0).timeout.connect(func():
 		ProjectSettings.set_setting("editor/run/main_run_args", _args_back))
@@ -605,3 +622,115 @@ func _import_world() -> void:
 	ur.commit_action(false)
 	_lvl.rebuild_preview()
 	info.text = "Imported seed %d (%.0f m of trail from %.0f m): %d spline points. Edit the trail's points / handles; the trail regenerates." % [sd, ln, s0, (d.pts as PackedVector2Array).size()]
+
+
+
+## every jump: auto speed, deck / gap / landing angle back to auto (one undo step)
+func _fit_jumps() -> void:
+	if _lvl == null: return
+	var ur := get_undo_redo()
+	ur.create_action("Fit all jumps to trail speed")
+	for pc in _lvl.pieces():
+		if not (pc is BmxJump): continue
+		for prop in ["auto_speed", "speed_scale", "deck", "gap", "land_deg"]: ur.add_undo_property(pc, prop, pc.get(prop))
+		ur.add_do_property(pc, "auto_speed", true)
+		ur.add_do_property(pc, "speed_scale", 1.0)
+		for prop in ["deck", "gap", "land_deg"]: ur.add_do_property(pc, prop, 0.0)
+	ur.commit_action()
+
+
+## the dock's minimap: the land shaded by its slope, the trail(s) red, structures yellow, rocks grey, gates, the
+## editor camera's spot; click a piece on it to select it
+class _MiniMap extends Control:
+	var plugin
+	var tex: ImageTexture
+	var rect := Rect2()          # the level's ground (x, z) the picture covers
+	var dots: Array = []         # [Vector2 level xz, Color, BmxPiece or null]
+
+	func rebuild(lvl: BmxLevel) -> void:
+		var f: LevelField = lvl.field
+		if f == null or f.nx < 4: return
+		var e := 4   # grid cells per pixel
+		var w := int((f.nx - 1) / e); var h := int((f.nz - 1) / e)
+		var img := Image.create(w, h, false, Image.FORMAT_RGB8)
+		for j in h:
+			for i in w:
+				var k := (j * e) * f.nx + i * e
+				var k2 := mini(k + f.nx * e + e, f.H.size() - 1)
+				var sh := clampf(0.6 + (f.H[k] - f.H[k2]) * 0.35, 0.25, 1.0)
+				var sf := f.S[k]
+				var c := LevelField.GRASS
+				if sf == 1 or sf == 2: c = Color(0.85, 0.3, 0.2)
+				elif sf == 3: c = LevelField.SAND
+				elif sf == 4: c = LevelField.ROCK
+				if f.JM[k] == 1: c = Color(1.0, 0.85, 0.2)
+				img.set_pixel(i, j, c * sh)
+		tex = ImageTexture.create_from_image(img)
+		rect = Rect2(f.x0, f.z0, (f.nx - 1) * f.step, (f.nz - 1) * f.step)
+		dots = []
+		for pc in lvl.pieces():
+			var lt: Transform3D = pc.level_transform()
+			var col := Color(1, 1, 1)
+			if pc is BmxGate: col = LevelVisuals.GATE_COL.get(pc.gate, Color.WHITE)
+			elif pc is BmxRocks: col = Color(0.6, 0.6, 0.6)
+			elif pc is BmxJump or pc is BmxDrop: col = Color(1.0, 0.9, 0.2)
+			dots.append([Vector2(lt.origin.x, lt.origin.z), col, pc])
+		queue_redraw()
+
+	func _to_px(p: Vector2) -> Vector2:
+		var sc := minf(size.x / rect.size.x, size.y / rect.size.y)
+		return (p - rect.position) * sc
+
+	func _draw() -> void:
+		if tex == null: return
+		var sc := minf(size.x / rect.size.x, size.y / rect.size.y)
+		draw_texture_rect(tex, Rect2(Vector2.ZERO, rect.size * sc), false)
+		for d in dots: draw_circle(_to_px(d[0]), 3.0, d[1])
+		var cam := EditorInterface.get_editor_viewport_3d(0).get_camera_3d()
+		if cam and plugin._lvl and is_instance_valid(plugin._lvl):
+			var lp: Vector3 = plugin._lvl.global_transform.affine_inverse() * cam.global_position
+			var fw: Vector3 = plugin._lvl.global_transform.basis.inverse() * -cam.global_transform.basis.z
+			var c := _to_px(Vector2(lp.x, lp.z))
+			draw_circle(c, 4.0, Color(0.3, 0.8, 1.0))
+			draw_line(c, c + Vector2(fw.x, fw.z).normalized() * 14.0, Color(0.3, 0.8, 1.0), 2.0)
+
+	func _process(_dt: float) -> void:
+		if is_visible_in_tree() and tex: queue_redraw()   # (the camera spot)
+
+	func _gui_input(ev: InputEvent) -> void:
+		if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT and tex:
+			var best = null
+			var bd := 12.0
+			for d in dots:
+				var dd: float = _to_px(d[0]).distance_to(ev.position)
+				if dd < bd: bd = dd; best = d[2]
+			if best:
+				EditorInterface.get_selection().clear()
+				EditorInterface.get_selection().add_node(best)
+				EditorInterface.edit_node(best)
+
+
+
+## another line: a copy of the main line's middle third, pushed 12 m to one side (the user then shapes it)
+func _add_alt() -> void:
+	if _lvl == null or _lvl.field == null or _lvl.field.TX.size() < 30: info.text = "The level needs a main trail first."; return
+	var f := _lvl.field
+	var n := f.TX.size()
+	var a := n / 3; var b := 2 * n / 3
+	var c := Curve3D.new()
+	var steps := 6
+	for q in steps + 1:
+		var i := a + (b - a) * q / steps
+		var off := sin(PI * float(q) / steps) * 12.0   # (0 at both ends: it branches off and joins again)
+		var sd := LevelField._side(Vector2(f.DX[i], f.DZ[i]))
+		var p := Vector2(f.TX[i], f.TZ[i]) + sd * off
+		var h := Vector2(f.DX[i], f.DZ[i]) * float(b - a) * f.DS / steps / 3.0
+		c.add_point(Vector3(p.x, f.TY[i] + 0.3, p.y), Vector3(-h.x, 0, -h.y), Vector3(h.x, 0, h.y))
+	var t := BmxTrail.new()
+	var k := 1
+	while _lvl.has_node("AltLine%d" % k): k += 1
+	t.name = "AltLine%d" % k
+	t.curve = c
+	_commit_add(t, "Add alt line")
+	EditorInterface.get_selection().clear()
+	EditorInterface.get_selection().add_node(t)

@@ -55,6 +55,7 @@ var _far: MeshInstance3D
 var _line: MeshInstance3D
 var _pieces_root: Node3D
 var _grid_mat: ShaderMaterial
+var _marks: Array = []          # LevelBake.marks of the last preview
 
 
 ## the editor's snap grid drawn on the preview ground (fine lines every `cell` m, bold every 5)
@@ -112,6 +113,12 @@ func make_field() -> LevelField:
 	if layers: f.layers = layers.data()
 	var t := trail()
 	if t: t.fill(f)
+	f.alts_in = []
+	for c in get_children():   # (every BmxTrail after the first: an alternative line)
+		if c is BmxTrail and c != t:
+			var g := LevelField.new()
+			c.fill(g)
+			f.alts_in.append({"pts": g.trail_in})
 	f.pieces = []
 	for pc in pieces(): f.pieces.append(pc.piece())
 	return f
@@ -149,7 +156,7 @@ func _process(dt: float) -> void:
 
 func _signature() -> int:
 	var f := make_field()
-	return hash(str([layers.content_hash() if layers else 0, f.trees, f.tree_clear, f.tree_seed, f.flat, f.length, f.width, f.drop, f.steep_top, f.side_rise, f.rough, f.rough_scale, f.noise_seed, f.trail_in,
+	return hash(str([f.alts_in, layers.content_hash() if layers else 0, f.trees, f.tree_clear, f.tree_seed, f.flat, f.length, f.width, f.drop, f.steep_top, f.side_rise, f.rough, f.rough_scale, f.noise_seed, f.trail_in,
 		f.trail_width, f.blend, f.berms, f.bank_max_deg, f.smooth_len, f.follow, f.start_speed, f.pieces]))
 
 
@@ -186,6 +193,25 @@ func rebuild_preview() -> void:
 	_pieces_root.name = "Preview pieces"
 	add_child(_pieces_root, false, Node.INTERNAL_MODE_BACK)
 	LevelVisuals.build(field, _pieces_root, false)
+	_marks = LevelBake.marks(field)
+	for m in _marks:   # every problem a rider will meet: a post + its words where it is (red = fix it, yellow = a note)
+		var col := Color(1.0, 0.2, 0.15) if m.warn else Color(1.0, 0.8, 0.15)
+		var post := MeshInstance3D.new()
+		var bm := BoxMesh.new(); bm.size = Vector3(0.25, 5.0, 0.25)
+		var pm := StandardMaterial3D.new(); pm.albedo_color = col; pm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		bm.material = pm
+		post.mesh = bm
+		post.position = m.pos + Vector3(0, 2.5, 0)
+		_pieces_root.add_child(post)
+		var lb := Label3D.new()
+		lb.text = str(m.msg)
+		lb.modulate = col
+		lb.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		lb.no_depth_test = true
+		lb.font_size = 40; lb.pixel_size = 0.01; lb.outline_size = 10
+		lb.width = 900.0; lb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		lb.position = m.pos + Vector3(0, 5.8, 0)
+		_pieces_root.add_child(lb)
 	_sig = _signature()
 	var s := field.summary() + " · preview %d ms" % (Time.get_ticks_msec() - t0)
 	var jr := field.jump_report()
@@ -221,6 +247,12 @@ func _trail_lines() -> ImmediateMesh:
 			var c := Color(0.2, 0.5, 1.0).lerp(Color(1.0, 0.25, 0.15), f.TV[j] / vmax)
 			im.surface_set_color(c)
 			im.surface_add_vertex(Vector3(f.TX[j], f.TY[j] + 0.35, f.TZ[j]))
+	for alt in f.ALT:   # the other lines, coloured the same way
+		for i in (alt.TX as PackedFloat32Array).size() - 1:
+			for k in 2:
+				var j := i + k
+				im.surface_set_color(Color(0.2, 0.5, 1.0).lerp(Color(1.0, 0.25, 0.15), alt.TV[j] / vmax))
+				im.surface_add_vertex(Vector3(alt.TX[j], alt.TY[j] + 0.35, alt.TZ[j]))
 	var hw := f.trail_width * 0.5
 	for i in range(0, f.TX.size(), 10):
 		var l := LevelField._left(f.DX[i], f.DZ[i])

@@ -26,6 +26,8 @@ var flat := false          # flat ground (a park / jump spot): no slope, no vall
 
 # ---- the trail ----------------------------------------------------------------------------------------------
 var trail_in := PackedVector2Array()   # (x, z) points along the designer's spline, any spacing
+var alts_in: Array = []    # other lines (BmxTrail after the first): [{pts: PackedVector2Array}]; the first is the main line
+var ALT: Array = []        # baked other lines: [{TX, TZ, DX, DZ, TY, TK, TV, TB}]
 var trail_width := 3.6     # m of ridden dirt
 var blend := 6.0           # m either side over which the cut / berm meets the land
 var berms := 1.0           # 0 flat bends .. 1 banked to the speed
@@ -222,6 +224,7 @@ func _trail_shape(y: float, b: float, s: float) -> float:
 func bake(grid_step := 0.5) -> void:
 	_prep_noise()
 	_bake_trail()
+	_bake_alts()
 	step = grid_step
 	var margin := 40.0
 	x0 = -margin; z0 = -width * 0.5 - 10.0
@@ -247,35 +250,40 @@ func bake(grid_step := 0.5) -> void:
 	var cut := PackedFloat32Array(); cut.resize(nx * nz)   # the trail's shape height there
 	var sd := PackedFloat32Array(); sd.resize(nx * nz)     # |s| there
 	var rb := absf(tan(deg_to_rad(bank_max_deg))) * R
-	for k in n - 1:
-		var ax := TX[k]; var az := TZ[k]
-		var ex := TX[k + 1] - ax; var ez := TZ[k + 1] - az
-		var l2 := ex * ex + ez * ez
-		if l2 < 1e-8: continue
-		var i0 := maxi(0, int(floor((minf(ax, ax + ex) - R - x0) / step)))
-		var i1 := mini(nx - 1, int(ceil((maxf(ax, ax + ex) + R - x0) / step)))
-		var j0 := maxi(0, int(floor((minf(az, az + ez) - R - z0) / step)))
-		var j1 := mini(nz - 1, int(ceil((maxf(az, az + ez) + R - z0) / step)))
-		var inv := 1.0 / sqrt(l2)
-		var lx := ez * inv; var lz := -ex * inv     # left of the segment
-		for j in range(j0, j1 + 1):
-			var z := z0 + j * step
-			var row := j * nx
-			for i in range(i0, i1 + 1):
-				var x := x0 + i * step
-				var px := x - ax; var pz := z - az
-				var a := clampf((px * ex + pz * ez) / l2, 0.0, 1.0)
-				var qx := px - ex * a; var qz := pz - ez * a
-				var d2 := qx * qx + qz * qz
-				var idx := row + i
-				if d2 >= R * R or d2 >= best[idx]: continue
-				best[idx] = d2
-				var s := qx * lx + qz * lz
-				var y := lerpf(TY[k], TY[k + 1], a)
-				var b := lerpf(TB[k], TB[k + 1], a)
-				cut[idx] = _trail_shape(y, b, clampf(s, -hw, hw))
-				sd[idx] = absf(s)
-				DT[idx] = sqrt(d2); TSA[idx] = s; TAL[idx] = (k + a) * DS; TKC[idx] = lerpf(TK[k], TK[k + 1], a)
+	var lines: Array = [{"TX": TX, "TZ": TZ, "TY": TY, "TB": TB, "TK": TK}]
+	lines.append_array(ALT)
+	for ln in lines:
+		var LX: PackedFloat32Array = ln.TX; var LZ: PackedFloat32Array = ln.TZ; var LY: PackedFloat32Array = ln.TY
+		var LB: PackedFloat32Array = ln.TB; var LK: PackedFloat32Array = ln.TK
+		for k in LX.size() - 1:
+			var ax := LX[k]; var az := LZ[k]
+			var ex := LX[k + 1] - ax; var ez := LZ[k + 1] - az
+			var l2 := ex * ex + ez * ez
+			if l2 < 1e-8: continue
+			var i0 := maxi(0, int(floor((minf(ax, ax + ex) - R - x0) / step)))
+			var i1 := mini(nx - 1, int(ceil((maxf(ax, ax + ex) + R - x0) / step)))
+			var j0 := maxi(0, int(floor((minf(az, az + ez) - R - z0) / step)))
+			var j1 := mini(nz - 1, int(ceil((maxf(az, az + ez) + R - z0) / step)))
+			var inv := 1.0 / sqrt(l2)
+			var lx := ez * inv; var lz := -ex * inv     # left of the segment
+			for j in range(j0, j1 + 1):
+				var z := z0 + j * step
+				var row := j * nx
+				for i in range(i0, i1 + 1):
+					var x := x0 + i * step
+					var px := x - ax; var pz := z - az
+					var a := clampf((px * ex + pz * ez) / l2, 0.0, 1.0)
+					var qx := px - ex * a; var qz := pz - ez * a
+					var d2 := qx * qx + qz * qz
+					var idx := row + i
+					if d2 >= R * R or d2 >= best[idx]: continue
+					best[idx] = d2
+					var s := qx * lx + qz * lz
+					var y := lerpf(LY[k], LY[k + 1], a)
+					var b := lerpf(LB[k], LB[k + 1], a)
+					cut[idx] = _trail_shape(y, b, clampf(s, -hw, hw))
+					sd[idx] = absf(s)
+					DT[idx] = sqrt(d2); TSA[idx] = s; TAL[idx] = (k + a) * DS; TKC[idx] = lerpf(LK[k], LK[k + 1], a)
 	for idx in nx * nz:
 		if best[idx] == INF: continue
 		var s := sd[idx]
@@ -528,12 +536,21 @@ func _place(p: Dictionary) -> Array:
 	var pos: Vector2 = p.pos
 	var dir: Vector2 = p.dir
 	var i := nearest(pos.x, pos.y)
+	var v := TV[i] if i >= 0 else 0.0
 	if p.follow and i >= 0:
 		pos = Vector2(TX[i], TZ[i]); dir = Vector2(DX[i], DZ[i])
-	return [pos, dir, i]
+		var bd := Vector2(TX[i], TZ[i]).distance_to(p.pos)
+		for a in ALT:   # (an alternative line nearer: on it; it has no main-line index for the AI / timing)
+			var ai := _nearest_in(a.TX, a.TZ, p.pos.x, p.pos.y)
+			if ai >= 0 and Vector2(a.TX[ai], a.TZ[ai]).distance_to(p.pos) < bd:
+				bd = Vector2(a.TX[ai], a.TZ[ai]).distance_to(p.pos)
+				pos = Vector2(a.TX[ai], a.TZ[ai]); dir = Vector2(a.DX[ai], a.DZ[ai])
+				i = -1; v = a.TV[ai]
+	return [pos, dir, i, v]
 
 
-func _speed_at(i: int, p: Dictionary) -> float:
+func _speed_at(i: int, p: Dictionary, line_v := 0.0) -> float:
+	if p.get("auto_v", false) and line_v > 0.0: return clampf(line_v * float(p.get("v_k", 1.0)), 4.0, 30.0)
 	if p.get("auto_v", false) and i >= 0: return clampf(TV[i] * float(p.get("v_k", 1.0)), 4.0, 30.0)
 	return float(p.get("v", 12.0))
 
@@ -542,6 +559,7 @@ func _bake_pieces() -> void:
 	for p in pieces:
 		match str(p.get("kind", "")):
 			"jump": _add_jump(p)
+			"line": _add_line(p)
 			"drop": _add_drop(p)
 			"rocks": _add_rocks(p)
 			"gate": _add_gate(p)
@@ -596,7 +614,7 @@ func _add_jump(p: Dictionary) -> void:
 	var pl := _place(p)
 	var lip: Vector2 = pl[0]; var dir: Vector2 = pl[1]; var i: int = pl[2]
 	var prm: Dictionary = (p.prm as Dictionary).duplicate()
-	if p.get("auto_v", false): prm["v"] = _speed_at(i, p)
+	if p.get("auto_v", false): prm["v"] = _speed_at(i, p, float(pl[3]))
 	var d := JumpDesign.build(prm)
 	var start := lip - dir * float(d.lip_u)
 	var wood := str(prm.get("build", "dirt")) == "wood"
@@ -694,7 +712,7 @@ func _flight(st: Dictionary, vr: float) -> Dictionary:
 func _add_drop(p: Dictionary) -> void:
 	var pl := _place(p)
 	var start: Vector2 = pl[0]; var dir: Vector2 = pl[1]; var i: int = pl[2]
-	var v := _speed_at(i, p)
+	var v := _speed_at(i, p, float(pl[3]))
 	var hh := float(p.height)
 	var hs := PackedFloat32Array()
 	var ds := JumpDesign.DS
@@ -951,7 +969,7 @@ func air_at(x: float, z: float) -> float:
 const STATE_KEYS := ["length", "width", "drop", "steep_top", "side_rise", "rough", "rough_scale", "noise_seed", "flat",
 	"trees", "tree_clear", "tree_seed", "trail_width", "blend", "berms", "bank_max_deg", "start_speed", "smooth_len", "follow",
 	"TX", "TZ", "DX", "DZ", "TY", "TK", "TV", "TB", "trail_len", "step", "x0", "z0", "nx", "nz", "H", "S", "JM", "DT", "TSA",
-	"TAL", "TKC", "structs", "rocks", "gates", "route", "rock_runs", "tree_list", "layers"]
+	"TAL", "TKC", "ALT", "structs", "rocks", "gates", "route", "rock_runs", "tree_list", "layers"]
 
 
 ## everything bake() worked out, as plain data (LevelBake writes it into the level's .bake file)
@@ -981,3 +999,78 @@ func _paint_surface() -> void:
 			if c == 1: S[idx] = 1
 			elif c == 2: S[idx] = 3
 			elif c == 3: S[idx] = 4
+
+
+
+## a jump line (BmxJumpLine): jumps one after another down the trail, the next lip one roll-out after a landing
+func _add_line(p: Dictionary) -> void:
+	if TX.size() < 2: return
+	var i := nearest(p.pos.x, p.pos.y)
+	var free_from := -1.0   # m along the trail where the next jump may start (the last landing + a roll-out)
+	for n in int(p.get("count", 3)):
+		if i < 0 or i >= TX.size() - 20: break
+		var q: Dictionary = p.duplicate(true)
+		q.kind = "jump"; q.follow = true; q.name = "%s_%d" % [p.name, n + 1]
+		var st: Dictionary = {}
+		for attempt in 4:   # (a faster jump has a longer run-in: push its lip on until its start clears the last landing)
+			if i >= TX.size() - 20: break
+			q.pos = Vector2(TX[i], TZ[i]); q.dir = Vector2(DX[i], DZ[i])
+			var before := structs.size()
+			var r_before := route.size()
+			_add_jump(q)
+			if structs.size() == before: break
+			st = structs[structs.size() - 1]
+			var s_start := nearest(st.o.x, st.o.y) * DS
+			if free_from < 0.0 or s_start >= free_from - 0.5: break
+			structs.pop_back(); route.resize(r_before)   # (too early: undo it, try further on)
+			i += int((free_from - s_start) / DS) + 1
+			st = {}
+		if st.is_empty(): break
+		var d: Dictionary = st.d
+		var land_end: Vector2 = (st.o as Vector2) + (st.dir as Vector2) * float(d.land1 if str(d.kind) != "kicker" else float(d.lip_u) + 6.0)
+		var ie := nearest(land_end.x, land_end.y)
+		var roll := clampf(TV[ie] * float(p.get("rollout", 0.75)), 6.0, 14.0)
+		free_from = ie * DS + roll
+		i = ie + int((roll + float(d.lip_u)) / DS)
+
+
+
+## the other lines (BmxTrail after the first): each baked like the main one (resampled, curvature, height, speed,
+## bank); its speed starts from the main line's where it branches off, and its ends ease onto the main line's height
+## over 15 m where they meet it, so the junctions are one surface
+func _bake_alts() -> void:
+	ALT = []
+	if alts_in.is_empty() or TX.size() < 2: return
+	# (packed arrays are shared: _bake_trail clears + refills the members, so keep real copies)
+	var m := {"TX": TX.duplicate(), "TZ": TZ.duplicate(), "DX": DX.duplicate(), "DZ": DZ.duplicate(), "TY": TY.duplicate(),
+		"TK": TK.duplicate(), "TV": TV.duplicate(), "TB": TB.duplicate(), "len": trail_len, "in": trail_in.duplicate(), "v0": start_speed}
+	for a in alts_in:
+		var pts: PackedVector2Array = a.pts
+		if pts.size() < 2: continue
+		var i0 := _nearest_in(m.TX, m.TZ, pts[0].x, pts[0].y)
+		trail_in = pts
+		start_speed = (m.TV as PackedFloat32Array)[i0] if i0 >= 0 else start_speed
+		_bake_trail()
+		var n := TX.size()
+		if n < 3: continue
+		for end in 2:
+			var ie := 0 if end == 0 else n - 1
+			var mi := _nearest_in(m.TX, m.TZ, TX[ie], TZ[ie])
+			if mi < 0 or Vector2(m.TX[mi] - TX[ie], m.TZ[mi] - TZ[ie]).length() > 8.0: continue
+			var my: float = (m.TY as PackedFloat32Array)[mi]
+			for q in mini(15, n):
+				var ii := q if end == 0 else n - 1 - q
+				TY[ii] = lerpf(my, TY[ii], smoothstep(0.0, 15.0, float(q)))
+		ALT.append({"TX": TX.duplicate(), "TZ": TZ.duplicate(), "DX": DX.duplicate(), "DZ": DZ.duplicate(), "TY": TY.duplicate(),
+			"TK": TK.duplicate(), "TV": TV.duplicate(), "TB": TB.duplicate()})
+	TX = m.TX; TZ = m.TZ; DX = m.DX; DZ = m.DZ; TY = m.TY; TK = m.TK; TV = m.TV; TB = m.TB
+	trail_len = m.len; trail_in = m.in; start_speed = m.v0
+
+
+static func _nearest_in(ax: PackedFloat32Array, az: PackedFloat32Array, x: float, z: float) -> int:
+	var bi := -1
+	var bd := INF
+	for i in ax.size():
+		var d := (ax[i] - x) * (ax[i] - x) + (az[i] - z) * (az[i] - z)
+		if d < bd: bd = d; bi = i
+	return bi

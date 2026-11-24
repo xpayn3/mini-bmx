@@ -31,11 +31,26 @@ func _init() -> void:
 		var r: Array = runs[k]
 		var at := int(lerpf(r[0], r[1], plan[k][1]))
 		match plan[k][0]:
-			"table": _add(lvl, BmxJump.new(), "Table1", f, at, {"kind": "table"})
+			"table": _add(lvl, BmxJumpLine.new(), "Line1", f, int(lerpf(runs[k][0], runs[k][1], 0.15)), {"count": 3, "speed_scale": 0.7})
 			"gap": _add(lvl, BmxJump.new(), "Gap1", f, at, {"kind": "gap", "lip_deg": 28.0, "speed_scale": 0.8, "fill": 2.0})
 			"kicker": _add(lvl, BmxJump.new(), "Kicker1", f, at, {"kind": "kicker", "lip_deg": 22.0, "build": "wood", "width": 2.4})
 			"drop": _add(lvl, BmxDrop.new(), "Drop1", f, at, {"height": 1.6})
 			"rocks": _add(lvl, BmxRocks.new(), "Rocks1", f, at, {"length": 22.0})
+	# a jump line on the last straight (if there is room), and an alternative line round the middle third
+	var n := f.TX.size()
+	var a0 := n / 3; var b0 := n / 2
+	var alt := BmxTrail.new()
+	alt.name = "AltLine1"
+	var ac := Curve3D.new()
+	for q in 7:
+		var ii := a0 + (b0 - a0) * q / 6
+		var sd := LevelField._side(Vector2(f.DX[ii], f.DZ[ii]))
+		var pp := Vector2(f.TX[ii], f.TZ[ii]) + sd * sin(PI * q / 6.0) * 12.0
+		var hh := Vector2(f.DX[ii], f.DZ[ii]) * float(b0 - a0) * f.DS / 18.0
+		ac.add_point(Vector3(pp.x, f.TY[ii] + 0.3, pp.y), Vector3(-hh.x, 0, -hh.y), Vector3(hh.x, 0, hh.y))
+	alt.curve = ac
+	lvl.add_child(alt)
+	alt.owner = lvl
 	_add(lvl, BmxGate.new(), "Checkpoint1", f, int(f.TX.size() * 0.5), {"gate": "checkpoint"})
 	_add(lvl, BmxGate.new(), "FinishGate", f, f.TX.size() - 6, {"gate": "finish"})
 	var ps := PackedScene.new()
@@ -46,6 +61,8 @@ func _init() -> void:
 	g.bake(0.5)
 	print("MAKELEVEL bake 0.5 ms=", Time.get_ticks_msec() - t0, " ", g.summary(), " structs=", g.structs.size(), " rocks=", g.rocks.size(), " gates=", g.gates.size(), " trees=", g.tree_list.size())
 	print(g.jump_report())
+	print("MAKELEVEL alt lines=", g.ALT.size(), " marks=", LevelBake.marks(g).size())
+	for m in LevelBake.marks(g): print("  MARK ", m.msg)
 	lvl.free()
 	_park()
 	quit()

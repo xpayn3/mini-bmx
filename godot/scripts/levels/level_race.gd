@@ -56,9 +56,14 @@ func _order(g: Dictionary) -> float:
 	return base
 
 
+var practice := false   # started mid-level (the editor's "Ride from selected"): no timing
+
 func reset() -> void:
 	running = false; done = false; t = 0.0; _splits = PackedFloat32Array(); _prev = Vector2(INF, INF)
 	_next = 0
+	practice = game.terrain is LevelTerrain and game.terrain.practice_at.x != INF
+	if practice:
+		_show(); return
 	if _gates.is_empty() or _gates[0].gate != "start":
 		running = true   # (no start gate: the clock runs from the start)
 	_show()
@@ -69,7 +74,7 @@ func _physics_process(dt: float) -> void:
 	var ph = game.phys
 	var p := Vector2(ph.x, ph.z)
 	if running and not done: t += dt   # (a crash costs time: the clock runs on)
-	if _prev.x != INF and _next < _gates.size():
+	if not practice and _prev.x != INF and _next < _gates.size():
 		var g: Dictionary = _gates[_next]
 		if _crossed(g, _prev, p): _pass(g)
 	_prev = p
@@ -128,7 +133,7 @@ func _show() -> void:
 	if _label == null: return
 	var hud_on: bool = game.hud == null or game.hud.visible
 	_label.visible = hud_on and (running or done or not _gates.is_empty())
-	_label.text = _fmt(t) if (running or done) else "START AT THE GATE"
+	_label.text = "PRACTICE" if practice else (_fmt(t) if (running or done) else "START AT THE GATE")
 	_label.modulate = Color(0.55, 1.0, 0.55) if done else Color(1, 1, 1)
 
 

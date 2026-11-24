@@ -89,42 +89,54 @@ static func load_bake(scene_path: String, sig: int) -> Dictionary:
 	return d
 
 
-## what a rider will meet: jumps that case / overshoot at their design speed or land hard, no start / finish, bends
-## that make him brake hard, pieces overlapping, a trail leaving the level
+## what a rider will meet, as text lines (the dock / a bake)
 static func checks(f: LevelField) -> Array:
 	var out: Array = []
+	for m in marks(f): out.append(("⚠ " if m.warn else "• ") + str(m.msg))
+	if out.is_empty(): out.append("✓ no problems found")
+	return out
+
+
+## the same, each with where it is (level space; drawn as a post in the editor's 3D view): [{msg, pos, warn}]
+## jumps that case / overshoot at their design speed or land hard, a slow rider dropping into a gap, pieces
+## overlapping, no start / finish, bends that make riders brake hard, the trail leaving the level's ground
+static func marks(f: LevelField) -> Array:
+	var out: Array = []
+	var at := func(p2: Vector2) -> Vector3: return Vector3(p2.x, f.height(p2.x, p2.y), p2.y)
 	for st in f.structs:
 		if not st.has("flights"): continue
 		var fl: Dictionary = st.flights[1]
 		var kind := str(st.d.kind)
+		var lip: Vector2 = st.get("lip", st.o)
 		if kind != "kicker" and str(fl.spot) != "landing":
-			out.append("⚠ %s: at its design speed (%.0f km/h) it lands on the %s" % [st.name, float(st.v) * 3.6, fl.spot])
+			out.append({"warn": true, "pos": at.call(lip), "msg": "%s: at its design speed (%.0f km/h) it lands on the %s" % [st.name, float(st.v) * 3.6, fl.spot]})
 		if float(fl.efh) > JumpDesign.EFH_MAX:
-			out.append("⚠ %s: hard landing at design speed (EFH %.1f m, keep under %.1f)" % [st.name, float(fl.efh), JumpDesign.EFH_MAX])
+			out.append({"warn": true, "pos": at.call(lip), "msg": "%s: hard landing at design speed (EFH %.1f m, keep under %.1f)" % [st.name, float(fl.efh), JumpDesign.EFH_MAX]})
 		var slow: Dictionary = st.flights[0]
 		if float(slow.efh) > 3.0 and kind == "gap":
-			out.append("• %s: a rider 15 %% slow drops into the gap (EFH %.1f m): add fill or a bail-out" % [st.name, float(slow.efh)])
+			out.append({"warn": false, "pos": at.call(lip), "msg": "%s: a rider 15 %% slow drops into the gap (EFH %.1f m): add fill" % [st.name, float(slow.efh)]})
 	for i in f.structs.size():
 		for j in range(i + 1, f.structs.size()):
-			if (f.structs[i].rect as Rect2).grow(-3.0).intersects((f.structs[j].rect as Rect2).grow(-3.0)):
-				out.append("⚠ %s and %s overlap" % [f.structs[i].name, f.structs[j].name])
+			var ra := (f.structs[i].rect as Rect2).grow(-3.0); var rb := (f.structs[j].rect as Rect2).grow(-3.0)
+			if ra.intersects(rb):
+				out.append({"warn": true, "pos": at.call(ra.intersection(rb).get_center()), "msg": "%s and %s overlap" % [f.structs[i].name, f.structs[j].name]})
 	var kinds := {}
 	for g in f.gates: kinds[g.gate] = true
-	if not kinds.has("start"): out.append("• no start gate: the clock runs from the trail's start")
-	if not kinds.has("finish"): out.append("• no finish gate: a run never ends")
-	# hard braking: the speed the trail allows drops a lot within a few metres
 	var n := f.TV.size()
-	var i := 1
-	while i < n:
-		if f.TV[i - 1] - f.TV[i] > 0.0:
-			var a := i - 1
-			while i < n and f.TV[i] < f.TV[i - 1]: i += 1
-			var dv := f.TV[a] - f.TV[mini(i, n - 1)]
-			if dv > 5.0: out.append("• %.0f m: riders brake from %.0f to %.0f km/h for a bend" % [a * f.DS, f.TV[a] * 3.6, f.TV[mini(i, n - 1)] * 3.6])
-		i += 1
+	if n > 1:
+		if not kinds.has("start"): out.append({"warn": false, "pos": at.call(Vector2(f.TX[0], f.TZ[0])), "msg": "no start gate: the clock runs from the trail's start"})
+		if not kinds.has("finish"): out.append({"warn": false, "pos": at.call(Vector2(f.TX[n - 1], f.TZ[n - 1])), "msg": "no finish gate: a run never ends"})
+	var i2 := 1
+	while i2 < n:
+		if f.TV[i2 - 1] - f.TV[i2] > 0.0:
+			var a := i2 - 1
+			while i2 < n and f.TV[i2] < f.TV[i2 - 1]: i2 += 1
+			var e := mini(i2, n - 1)
+			if f.TV[a] - f.TV[e] > 5.0:
+				out.append({"warn": false, "pos": at.call(Vector2(f.TX[e], f.TZ[e])), "msg": "%.0f m: riders brake from %.0f to %.0f km/h for this bend" % [a * f.DS, f.TV[a] * 3.6, f.TV[e] * 3.6]})
+		i2 += 1
 	var gx1 := f.x0 + (f.nx - 1) * f.step; var gz1 := f.z0 + (f.nz - 1) * f.step
 	for q in range(0, n, 10):
 		if f.TX[q] < f.x0 + 5.0 or f.TX[q] > gx1 - 5.0 or f.TZ[q] < f.z0 + 5.0 or f.TZ[q] > gz1 - 5.0:
-			out.append("⚠ the trail leaves the level's ground near %.0f m (make the slope longer / wider)" % (q * f.DS)); break
-	if out.is_empty(): out.append("✓ no problems found")
+			out.append({"warn": true, "pos": at.call(Vector2(f.TX[q], f.TZ[q])), "msg": "the trail leaves the level's ground (make the slope longer / wider)"}); break
 	return out
