@@ -3079,6 +3079,7 @@ func _process(dt: float) -> void:
 		pi["attackDrop"] = T.attackDrop
 		pi["pedal"] = st.pedal
 		pi["sprint"] = st.sprint * st.pedal
+		pi["stamina"] = st.stamina
 		pi["crank"] = st.crank
 		pi["air"] = st.air_k
 		pi["compress"] = maxf(0.0, -st.compress)
