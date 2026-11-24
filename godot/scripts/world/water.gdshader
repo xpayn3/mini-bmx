@@ -16,6 +16,12 @@ uniform vec3 u_mid : source_color = vec3(0.059, 0.725, 0.8);
 uniform vec3 u_deep : source_color = vec3(0.027, 0.404, 0.69);
 uniform vec3 u_sky_h : source_color = vec3(0.784, 0.933, 0.969);
 uniform vec3 u_sky_z : source_color = vec3(0.424, 0.765, 0.925);
+// the wake (WaterWake, compute): x height m, z foam; a torus texture of u_wake_span metres round u_wake_c
+uniform sampler2D u_wake : filter_linear, repeat_enable;
+uniform float u_wake_span = 48.0;
+uniform float u_wake_cell = 0.15;
+uniform float u_wake_on = 0.0;
+uniform vec2 u_wake_c = vec2(0.0);
 varying vec3 v_world;
 varying float v_depth;
 varying vec3 v_wave_n;
@@ -77,7 +83,7 @@ vec3 noised(vec2 p) {
 }
 vec2 ripples(vec2 p, float t, float px) {
 	vec2 g = vec2(0.0);
-	float amp = 0.05, freq = 1.1;
+	float amp = 0.016, freq = 1.1;   // fine ripples, calm lake (was 0.05)
 	mat2 M = mat2(1.0);
 	mat2 ROT = mat2(vec2(0.80, -0.60), vec2(0.60, 0.80));
 	for (int i = 0; i < 6; i++) {
@@ -105,8 +111,8 @@ void vertex() {
 	wave(wp.xz, vec2(0.7, -0.80), 2.2, 0.014, h, g);
 	wave(wp.xz, vec2(-1.0, -0.25), 6.8, 0.026, h, g);
 	wave(wp.xz, vec2(0.2, 1.00), 1.6, 0.008, h, g);
-	h *= 1.8;   // the swell read too faint
-	g *= 1.8;
+	h *= 0.45;   // a lake, not the sea: a gentle swell (was 1.8)
+	g *= 0.45;
 	VERTEX.y += h * damp;
 	v_wave_n = normalize(vec3(-g.x * damp, 1.0, -g.y * damp));
 	v_world = wp + vec3(0.0, h * damp, 0.0);
@@ -119,7 +125,23 @@ void fragment() {
 	float dist = length(cam - v_world);
 	float px = length(fwidth(v_world.xz));
 	vec2 rg = ripples(v_world.xz, u_time, px);
-	vec3 N = normalize(v_wave_n + vec3(-rg.x, 0.0, -rg.y));
+	// the wake: slope of its height field tilts the normal, its foam channel lays white. Faded out at the
+	// window's edge, past ~40 m / where a pixel is wider than a cell (no mips), and on the dry edge of the shore
+	float wk_m = 0.0, wk_foam = 0.0;
+	vec2 wk_g = vec2(0.0);
+	if (u_wake_on > 0.5) {
+		vec2 wd = abs(v_world.xz - u_wake_c) / (u_wake_span * 0.5);
+		wk_m = (1.0 - smoothstep(0.7, 0.93, max(wd.x, wd.y))) * (1.0 - smoothstep(0.06, 0.18, px)) * smoothstep(0.0, 0.14, d);
+		if (wk_m > 0.001) {
+			float e = u_wake_cell;
+			vec2 uv = v_world.xz / u_wake_span;
+			float hx0 = texture(u_wake, uv - vec2(e / u_wake_span, 0.0)).x, hx1 = texture(u_wake, uv + vec2(e / u_wake_span, 0.0)).x;
+			float hz0 = texture(u_wake, uv - vec2(0.0, e / u_wake_span)).x, hz1 = texture(u_wake, uv + vec2(0.0, e / u_wake_span)).x;
+			wk_g = vec2(hx1 - hx0, hz1 - hz0) / (2.0 * e) * 3.0 * wk_m;
+			wk_foam = texture(u_wake, uv).z * wk_m;
+		}
+	}
+	vec3 N = normalize(v_wave_n + vec3(-rg.x - wk_g.x, 0.0, -rg.y - wk_g.y));
 	vec3 V = normalize(cam - v_world);
 	vec3 L = normalize(u_sun_dir);
 	float t1 = exp(-d * 1.9), t2 = exp(-d * 0.55);
@@ -133,11 +155,15 @@ void fragment() {
 	vec3 R = reflect(-V, N);
 	vec3 sky = mix(u_sky_h, u_sky_z, smoothstep(0.0, 0.65, R.y));
 	float fres = 0.02 + 0.98 * pow(1.0 - max(dot(N, V), 0.0), 5.0);
-	vec3 refl = sky * clamp(fres * 1.25, 0.0, 0.8);
-	col *= 1.0 - clamp(fres * 1.25, 0.0, 0.8);
+	// at a grazing angle the full sky mirror read as polished metal: cap the reflection, tint it with the water
+	// itself (a real lake's sky is veiled by the surface ripples) and let it go soft with the angle
+	float rk = clamp(fres * 1.25, 0.0, 0.42) * mix(1.0, 0.8, smoothstep(0.6, 1.0, fres));
+	sky = mix(sky, col * 1.4 + u_sky_h * 0.15, 0.4);
+	vec3 refl = sky * rk;
+	col *= 1.0 - rk;
 	vec3 H = normalize(L + V);
 	float nh = max(dot(N, H), 0.0);
-	float glint = (pow(nh, 700.0) * 2.2 / (1.0 + dist * 0.025) + pow(nh, 60.0) * 0.18) * smoothstep(0.7, 1.0, cloud_shade(v_world));
+	float glint = (pow(nh, 700.0) * 1.6 / (1.0 + dist * 0.025) + pow(nh, 60.0) * 0.1) * smoothstep(0.7, 1.0, cloud_shade(v_world));
 	// foam: lines rolling in to the beach (shore distance approximated from the depth) + edge foam
 	vec2 wp = v_world.xz;
 	float sd = d / 0.12;
@@ -165,12 +191,13 @@ void fragment() {
 	float n1 = vnoise(wp * 1.6 + u_time * 0.2), n2 = vnoise(wp * 4.5 - u_time * 0.3);
 	float lip = 1.0 - smoothstep(0.0, 0.07 + n1 * 0.06 + arrive * 0.07, d);
 	float foam = clamp(max(lip * mix(0.55, 1.0, n2), waves), 0.0, 1.0);
+	foam = max(foam, wk_foam * smoothstep(0.25, 0.6, n2 * 0.6 + n1 * 0.4 + wk_foam * 0.5));
 	col = mix(col, vec3(1.0), foam * 0.85);
 	ALBEDO = col;
 	EMISSION = refl * (1.0 - foam) + u_sun_col * glint * (1.0 - foam);
 	NORMAL = normalize((VIEW_MATRIX * vec4(N, 0.0)).xyz);
-	ROUGHNESS = mix(0.06, 0.6, foam);
-	SPECULAR = 0.5;
+	ROUGHNESS = mix(0.12 + fres * 0.25, 0.6, foam);   // softer at a grazing angle
+	SPECULAR = 0.3;
 	float alpha = mix(0.55, 0.95, 1.0 - t2);
 	alpha = max(alpha, foam * 0.95);
 	alpha *= smoothstep(-0.02, 0.06, v_depth + 0.06);
