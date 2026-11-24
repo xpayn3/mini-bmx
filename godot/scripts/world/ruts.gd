@@ -37,8 +37,10 @@ func clear() -> void:
 	_publish()
 	_win_tile = Vector2i(1 << 30, 0)
 
-# ---- the ground shaders' window: 5 x 5 tiles (40 m) round the rider as an RH texture (shaders/ruts.gdshaderinc)
-const WT := 5
+# ---- the ground shaders' window: 7 x 7 tiles (56 m) round the rider as an RH texture (shaders/ruts.gdshaderinc)
+const WT := 7   # (56 m: the rider is always >= 24 m from every edge, and the fade is done by 20 m, even with the window 2 m behind at speed: the window never shows)
+const FADE_A := 12.0
+const FADE_B := 20.0
 var _img: Image
 var _tex: ImageTexture
 var _win_tile := Vector2i(1 << 30, 0)   # the window's corner tile
@@ -47,6 +49,7 @@ const UP_HZ := 10.0
 
 func _process(dt: float) -> void:
 	if field == null or game == null or game.phys == null: return
+	RenderingServer.global_shader_parameter_set("rut_ctr", Vector4(game.phys.x, game.phys.z, FADE_A, FADE_B))   # every frame: the fade follows the rider smoothly
 	_up_t -= dt
 	if _up_t > 0.0: return
 	_up_t = 1.0 / UP_HZ
