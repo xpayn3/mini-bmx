@@ -1697,35 +1697,42 @@ class PaceView extends Control:
 	var a := 0.0
 	var t := 0.0
 	var last := {}
-	## the bend as an arrow: up the road, round the turn (more for a lower grade), out the other side
-	static func draw_arrow(c: CanvasItem, ic: Vector2, sev: int, side: float, col: Color, h: float, w := 3.0) -> void:
-		var th: float = TURN[clampi(sev, 1, 6) - 1]
+	## the bend as a geometric arrow: a straight shaft, one crisp mitred corner at the turn's angle (hairpins: a squared U),
+	## and a flat triangular head; `h` = its height in px
+	static func draw_arrow(c: CanvasItem, ic: Vector2, sev: int, side: float, col: Color, h: float, _w := 3.0) -> void:
+		sev = clampi(sev, 1, 6)
+		# centre line: straight run-in, a perfect circular arc through the turn's angle, a short run-out
+		var th: float = PI if sev == 1 else TURN[sev - 1]
+		var rad: float = [8.0, 9.5, 11.0, 13.0, 17.0, 24.0][sev - 1]
 		var pts := PackedVector2Array()
-		var pos := Vector2(0, 14)
-		var hd := 0.0   # heading from straight up, + = towards `side`
-		pts.append(pos)
-		var run_in := 9.0
-		var steps := 10
-		var r := 5.5
-		var run_out := 5.0 + 7.0 * float(sev - 1) / 5.0
-		pos += Vector2(0, -run_in); pts.append(pos)
-		for q in steps:
-			hd += th / steps
-			pos += Vector2(sin(hd) * side, -cos(hd)) * (r * th / steps)
-			pts.append(pos)
-		pos += Vector2(sin(hd) * side, -cos(hd)) * run_out; pts.append(pos)
-		var mn := pts[0]; var mx := pts[0]
-		for p in pts:
-			mn = Vector2(minf(mn.x, p.x), minf(mn.y, p.y)); mx = Vector2(maxf(mx.x, p.x), maxf(mx.y, p.y))
+		var y0 := 8.0 if sev == 1 else 6.0
+		pts.append(Vector2(0, y0 + 10.0))
+		pts.append(Vector2(0, y0))
+		var cen := Vector2(side * rad, y0)
+		var steps := maxi(6, int(th / 0.12))
+		for q in range(1, steps + 1):
+			var ph := th * float(q) / steps
+			pts.append(cen + Vector2(-cos(ph) * side, -sin(ph)) * rad)
+		var out_dir := Vector2(sin(th) * side, -cos(th))
+		pts.append(pts[pts.size() - 1] + out_dir * (4.0 if sev == 1 else 9.0))
+		var sw := 6.0          # stroke width
+		var hl := 9.0          # head length
+		var hw := 7.5          # head half width
+		var n := pts.size()
+		var tip := pts[n - 1]
+		var hd := (tip - pts[n - 2]).normalized()
+		pts[n - 1] = tip - hd * hl          # the shaft stops where the head starts
+		var head := PackedVector2Array([tip, tip - hd * hl + Vector2(-hd.y, hd.x) * hw, tip - hd * hl - Vector2(-hd.y, hd.x) * hw])
+		var mn := tip; var mx := tip
+		for q in [pts, head]:
+			for p in q:
+				mn = Vector2(minf(mn.x, p.x), minf(mn.y, p.y)); mx = Vector2(maxf(mx.x, p.x), maxf(mx.y, p.y))
 		var mid := (mn + mx) * 0.5
 		var sc := h / 34.0
-		var out := PackedVector2Array()
-		for p in pts: out.append(ic + (p - mid) * sc)
-		c.draw_polyline(out, col, w * sc * 1.4, true)
-		var tip := out[out.size() - 1]
-		var dv := (tip - out[out.size() - 2]).normalized()
-		var nv := Vector2(-dv.y, dv.x)
-		c.draw_colored_polygon(PackedVector2Array([tip + dv * 7 * sc, tip + nv * 6 * sc, tip - nv * 6 * sc]), col)
+		var o1 := PackedVector2Array(); for p in pts: o1.append(ic + (p - mid) * sc)
+		var o2 := PackedVector2Array(); for p in head: o2.append(ic + (p - mid) * sc)
+		c.draw_polyline(o1, col, sw * sc, true)
+		c.draw_colored_polygon(o2, col)
 	func _process(dt: float) -> void:
 		t += dt
 		var p: Dictionary = hud.pace
@@ -1736,6 +1743,13 @@ class PaceView extends Control:
 		if visible: queue_redraw()
 	func _draw() -> void:
 		if last.is_empty(): return
+		if Env.s("BMX_PACE_ALL") != "":   # test: all six grades in a row (right turns, then left)
+			for q in 12:
+				var cc := Rect2(-340.0 + (q % 6) * 72.0, (q / 6) * 84.0, 64.0, 74.0)
+				UITheme.draw_box(self, cc, COLS[q % 6], 10)
+				var ik := Color.WHITE if q % 6 <= 1 else Color("14181c")
+				draw_arrow(self, cc.position + Vector2(32, 27), q % 6 + 1, 1.0 if q < 6 else -1.0, ik, 38.0)
+			return
 		var p: Dictionary = last
 		var sev: int = p.sev
 		var hot: float = clampf(float(p.hot), 0.0, 1.0)
