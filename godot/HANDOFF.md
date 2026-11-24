@@ -1504,6 +1504,17 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   `PartThumbs` also renders close-ups on the whole bike (`make_bike_spot`: stem, levers, rotor, caliper, bike cam mounts), saddles,
   action cams with their gear (`make_cam`), wheelsets as a product shot (`make_wheelset`) and the rider's head (`make_head`: helmet,
   helmet cam, hair; a Rider posed until the hair settles). Tests: `BMX_TUNE_CAT=wheels` opens the ride setup's Wheels & tyres.
+- **Hair sim moves with the head (2026-11-24, user: "the braid flaps really bad when speeding, almost glitches")**:
+  `hair.gd` was a world-space Verlet stepped at a fixed 1/60 s (max 2 a frame): above 60 fps a third of the frames drew
+  no step, so at speed the locks were left ~20 cm behind the head and snapped back; the drawn head's bob / bump shake
+  went in undamped too. Now the guide points are offsets from the head (world axes), stepped every drawn frame in
+  sub-steps of <= 1/120 s (head turn slerped across them); the ride comes in only as forces: air streaming past
+  (`STREAM_K` x speed, max `STREAM_MAX`), a push from the head's acceleration smoothed over `A_EASE` 0.15 s
+  (x `INERTIA` 0.5, max `ACC_MAX` 7 m/s^2), flutter x up to 2 with speed; per-step pulls rescaled to the step
+  (`_rate`). The plait's width axis is carried down it by parallel transport (it flipped where the plait swung
+  sideways). Probe `BMX_HAIR_PROBE=1` (+ `BMX_LOOK=hairStyle=braid BMX_STRAIGHT=1 BMX_START_V=16 BMX_FPS=60|144`):
+  `HAIRPROBE jerk_rms_mm` (the tail's mid / tip 2nd difference per frame in the head's frame), `stale`, `wflip`,
+  `tip_back_deg`. ~60 km/h: 144 fps 210-330 -> 4-10 mm rms, 60 fps 18-53 (max 275) -> 7-13 (max ~50).
 - **Braid** = its own low-poly plait mesh (`Hair._plait_mesh`, rebuilt each frame along the tail guides' mean line, so it swings
   like the ponytail): alternating tilted lobes, a band at the tie, a flared tuft at the end.
 - The **Coasting** rider preview is the showcase pose: sat on the saddle, sitting up (`relax` input to

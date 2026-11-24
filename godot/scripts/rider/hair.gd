@@ -51,9 +51,7 @@ var _bend := 0.14
 var _hold_n := 2
 var _tie := false   # ponytail: a part of the locks is gathered at the tie point
 var _have := false
-var _last := Vector3.ZERO
 var _t := 0.0
-var _acc := 0.0
 var _img: Image
 var _tex: ImageTexture
 var _mat: ShaderMaterial
@@ -226,13 +224,42 @@ func _make_strands(short: bool) -> void:
 func _reset(ht: Transform3D) -> void:
 	for i in G:
 		var b := i * (SEG + 1)
-		var root := ht * _roots[i]
+		var root := ht.basis * _roots[i]
 		var dir := ht.basis * _rest[i]
 		for j in SEG + 1:
 			_P[b + j] = root + dir * (_seg_len * _len[i] * j)
 			_Q[b + j] = _P[b + j]
+	_o = ht.origin
+	_hb = ht.basis
+	_vs = Vector3.ZERO
+	_as = Vector3.ZERO
+	_hprev = H_MAX
 	_have = true
 
+
+## The sim runs in a frame that moves WITH the head (world axes, origin on the head): _P / _Q are offsets from the
+## head, so riding fast carries no world speed into the locks. The ride's motion comes in only as forces: the air
+## streaming past (`STREAM_*`, grows with speed, capped), a bounded inertial push from the head's smoothed
+## acceleration (`INERTIA`, `ACC_MAX`) and a flutter that livens up a little with speed. It steps every drawn frame
+## (sub-steps of at most H_MAX), so the hair is never left behind the head for a frame.
+## (It used to be a world-space sim stepped at a fixed 1/60 s: above 60 fps a third of the frames drew no step and
+## at speed the locks were left ~20 cm behind the head, then snapped back: the braid "glitched". Head bumps came in
+## undamped too.)
+const H_MAX := 1.0 / 120.0
+const DAMP := 2.0          # /s: the locks' own damping against the head (air + friction in the plait)
+const STREAM_K := 1.0      # air streaming past: m/s^2 per m/s of speed ...
+const STREAM_MAX := 13.0   # ... up to this (a heavy plait lifts towards horizontal but never stands straight out)
+const INERTIA := 0.5       # share of the head's acceleration felt as a push
+const ACC_MAX := 7.0       # m/s^2: bumps / landings beyond this don't throw the hair further
+const V_EASE := 0.05       # s: the head's speed is smoothed this much before it is read for the push / the air
+const A_EASE := 0.15       # s: and its acceleration this much: the drawn head's bob / bump shake (tens of m/s^2,
+                           # many times a second) shook the plait; braking, turns, landings come through
+var _o := Vector3.ZERO           # the head's position last frame
+var _vs := Vector3.ZERO          # its smoothed velocity
+var _as := Vector3.ZERO          # its smoothed acceleration
+var _hb := Basis.IDENTITY        # the head's turn last frame (sub-steps turn the roots smoothly between the two)
+var _hprev := STEP               # last sub-step's length (Verlet with varying steps)
+var _W := PackedVector3Array()   # world positions of the guide points (for the shader / the plait)
 
 func _process(dt: float) -> void:
 	if head == null or not is_visible_in_tree() or dt <= 0.0:
@@ -240,28 +267,101 @@ func _process(dt: float) -> void:
 	global_transform = Transform3D.IDENTITY
 	dt = minf(dt, 1.0 / 30.0)
 	var ht := head.global_transform
-	if not _have or ht.origin.distance_to(_last) > 3.0:
+	if not _have or ht.origin.distance_to(_o) > 3.0:
 		_reset(ht)
-	_last = ht.origin
+	# the head's motion: smoothed speed + acceleration; a jump of over a metre in a frame (respawn, get-up) is no speed
+	var jump := ht.origin.distance_to(_o) > 1.0
+	var v_now := Vector3.ZERO if jump else (ht.origin - _o) / dt
+	if jump: _vs = Vector3.ZERO
+	var k := 1.0 - exp(-dt / V_EASE)
+	var vs_new := _vs.lerp(v_now, k)
+	var a_now := (vs_new - _vs) / dt
+	_as = _as.lerp(a_now, 1.0 - exp(-dt / A_EASE))
+	_vs = vs_new
+	_o = ht.origin
 	# the strands are placed by the shader, so the mesh itself has no real extent: tell the engine where the hair is
 	# (a box round the head, in world space - the node sits at the origin), or it is culled whenever the rider is far from the origin
 	custom_aabb = AABB(ht.origin - Vector3(1.5, 1.5, 1.5), Vector3(3, 3, 3))
-	_t += dt
-	_acc += dt
 	var solids := _solids(ht)
-	var steps := 0
-	while _acc >= STEP and steps < 2:
-		_step(ht, solids)
-		_acc -= STEP
+	for s in solids: s[0] = (s[0] as Vector3) - ht.origin            # the body, head-relative too
+	var push := -_as * INERTIA
+	if push.length() > ACC_MAX: push = push.normalized() * ACC_MAX
+	var spd := _vs.length()
+	var air := Vector3.ZERO if spd < 0.05 else -_vs / spd * minf(spd * STREAM_K, STREAM_MAX)
+	var force := Vector3(0, -_grav, 0) + push + air
+	var lively := 1.0 + minf(spd / 12.0, 1.0)                        # a touch more flutter at speed, never a flap
+	var hb := ht.basis
+	var n := maxi(1, ceili(dt / H_MAX - 0.01))
+	var h := dt / n
+	var steps := 0   # (the probe's "stale" count: frames drawn without a sim step; always 0 now)
+	for i in n:
+		_t += h
+		var q := _hb.get_rotation_quaternion().slerp(hb.get_rotation_quaternion(), float(i + 1) / n)
+		_step(Basis(q) * Basis.from_scale(hb.get_scale()), solids, h, force, lively)
 		steps += 1
-	if steps == 2: _acc = 0.0
+	_hb = hb
+	_W.resize(_P.size())
+	for i in _P.size(): _W[i] = _P[i] + ht.origin
 	# the guides go to the shader as a float texture, the head's transform with them
-	_img.set_data(SEG + 1, G, false, Image.FORMAT_RGBF, _P.to_byte_array())
+	_img.set_data(SEG + 1, G, false, Image.FORMAT_RGBF, _W.to_byte_array())
 	_tex.update(_img)
 	_mat.set_shader_parameter("head_xf", ht)
 	if _plait:
 		_braid.custom_aabb = custom_aabb
 		_braid.mesh = _plait_mesh(ht)
+	if _probe_on: _probe(ht, dt, steps)
+
+
+# ---------------------------------------------------------------- probe (BMX_HAIR_PROBE=1)
+## Per drawn frame, in the head's frame: how far the tail's mid / tip points jump (2nd difference, mm), how often that
+## jump reverses (a back-and-forth flicker), frames drawn without a sim step, the plait's width axis flipping, and
+## the tip's angle back from hanging. One HAIRPROBE line a second.
+var _probe_on := Env.s("BMX_HAIR_PROBE") != ""
+var _pb := {}
+
+func _probe(ht: Transform3D, dt: float, steps: int) -> void:
+	var line := _plait_line()
+	var hinv := ht.affine_inverse()
+	var tip := hinv * line[SEG]
+	var mid := hinv * line[SEG / 2]
+	if _pb.is_empty():
+		_pb = {"t": 0.0, "n": 0, "j2": 0.0, "jmax": 0.0, "flip": 0, "stale": 0, "wflip": 0, "ang": 0.0, "v": 0.0,
+			"tip1": tip, "tip2": tip, "mid1": mid, "mid2": mid, "d1": Vector3.ZERO, "w": Vector3.ZERO, "o": ht.origin}
+	var dd: Vector3 = tip - 2.0 * (_pb.tip1 as Vector3) + (_pb.tip2 as Vector3)
+	var dm: Vector3 = mid - 2.0 * (_pb.mid1 as Vector3) + (_pb.mid2 as Vector3)
+	var j := maxf(dd.length(), dm.length()) * 1000.0
+	_pb.j2 += j * j; _pb.jmax = maxf(_pb.jmax, j); _pb.n += 1
+	var tw := line[SEG] - ht.origin   # the tip from the head, world axes: the head's own turning left out
+	var dw: Vector3 = tw - 2.0 * (_pb.get("tw1", tw) as Vector3) + (_pb.get("tw2", tw) as Vector3)
+	_pb.w2 = float(_pb.get("w2", 0.0)) + dw.length_squared() * 1e6
+	_pb.tw2 = _pb.get("tw1", tw); _pb.tw1 = tw
+	if dd.length() > 0.004 and dd.dot(_pb.d1) < 0.0: _pb.flip += 1
+	_pb.d1 = dd
+	if steps == 0: _pb.stale += 1
+	var ws := PackedVector3Array()   # the plait's width axis per segment, transported down it as `_plait_mesh` does
+	var w := ht.basis.z.normalized()
+	for s in SEG:
+		var tg := (line[s + 1] - line[s]).normalized()
+		var wn := w - tg * w.dot(tg)
+		if wn.length_squared() > 1e-8: w = wn.normalized()
+		ws.append(w)
+	var prev: PackedVector3Array = _pb.get("ws", PackedVector3Array())
+	if prev.size() == ws.size():
+		for s in SEG:
+			if prev[s].dot(ws[s]) < 0.3: _pb.wflip += 1
+	_pb.ws = ws
+	var down := (hinv.basis * (line[SEG] - line[0])).normalized()
+	_pb.ang += rad_to_deg(down.angle_to(Vector3(0, -1, 0)))
+	_pb.v += (ht.origin - (_pb.o as Vector3)).length() / maxf(dt, 1e-4)
+	_pb.o = ht.origin
+	_pb.tip2 = _pb.tip1; _pb.tip1 = tip; _pb.mid2 = _pb.mid1; _pb.mid1 = mid
+	_pb.t += dt
+	if _pb.t >= 1.0:
+		var n := maxf(1.0, _pb.n)
+		print("HAIRPROBE v_kmh=%.0f fps=%.0f jerk_rms_mm=%.1f max=%.1f wjerk_rms_mm=%.1f flips=%d stale=%d wflip=%d tip_back_deg=%.0f" % [
+			_pb.v / n * 3.6, n / _pb.t, sqrt(_pb.j2 / n), _pb.jmax, sqrt(_pb.w2 / n), _pb.flip, _pb.stale, _pb.wflip, _pb.ang / n])
+		for k in ["t", "j2", "jmax", "ang", "v", "w2"]: _pb[k] = 0.0
+		for k in ["n", "flip", "stale", "wflip"]: _pb[k] = 0
 
 
 # ---------------------------------------------------------------- the braid
@@ -269,6 +369,7 @@ const PLAIT_PERIODS := 4     # full weaves of the three strands down the braid
 const PLAIT_STEPS := 8       # tube rings per weave
 const PLAIT_SIDES := 6       # low poly: six faces round
 const PLAIT_R := [0.032, 0.017]   # half thickness at the tie / the end (m)
+const PLAIT_TAB := 32        # steps of the width axis' transport down the plait
 
 ## the braid's centre line: the mean of the tail guides, point by point down the lock
 func _plait_line() -> PackedVector3Array:
@@ -278,7 +379,7 @@ func _plait_line() -> PackedVector3Array:
 	for i in G:
 		if not (helmet_mode or i < G * 6 / 10): continue
 		n += 1
-		for j in SEG + 1: line[j] += _P[i * (SEG + 1) + j]
+		for j in SEG + 1: line[j] += _W[i * (SEG + 1) + j]
 	for j in SEG + 1: line[j] /= maxf(1.0, n)
 	return line
 
@@ -319,10 +420,24 @@ func _plait_mesh(ht: Transform3D) -> ArrayMesh:
 			var a := TAU * (float(k) + 0.5) / PLAIT_SIDES + twist
 			r.append(c + w * cos(a) * rw + h * sin(a) * rh)
 		return r
+	# the width axis is the head's left-right at the tie, carried down the plait by parallel transport: picking it
+	# fresh from the head at every point flipped it (and the lobes / strands with it) wherever the plait swung sideways
+	var wt := PackedVector3Array()
+	wt.resize(PLAIT_TAB + 1)
+	var w_run := side_ref
+	for m in PLAIT_TAB + 1:
+		var fm := float(m) / PLAIT_TAB
+		var tm := (_cr(line, fm + 0.02) - _cr(line, fm - 0.02)).normalized()
+		var wn := w_run - tm * w_run.dot(tm)
+		if wn.length_squared() > 1e-8: w_run = wn.normalized()
+		wt[m] = w_run
 	var frame := func(f: float) -> Array:   # [point, tangent, width axis]
 		var p := _cr(line, f)
 		var t := (_cr(line, f + 0.02) - _cr(line, f - 0.02)).normalized()
-		var w := (side_ref - t * side_ref.dot(t)).normalized()
+		var x := clampf(f, 0.0, 1.0) * PLAIT_TAB
+		var i := mini(int(x), PLAIT_TAB - 1)
+		var w := wt[i].lerp(wt[i + 1], x - i)
+		w = (w - t * w.dot(t)).normalized()
 		return [p, t, w]
 	# the tie: a dark band where the plait starts
 	var f0: Array = frame.call(0.0)
@@ -387,28 +502,37 @@ func _solids(ht: Transform3D) -> Array:
 	return out
 
 
-func _step(ht: Transform3D, spheres: Array) -> void:
-	var h2 := STEP * STEP
-	var hinv := ht.affine_inverse()
+## a pull that was tuned as "this much per 1/60 s step", for a step of h
+static func _rate(a: float, h: float) -> float:
+	return 1.0 - pow(1.0 - minf(a, 0.999), h * 60.0)
+
+
+## one sub-step of length h, all in the head-relative frame (`hb` = the head's turn now, `force` = gravity + air + push)
+func _step(hb: Basis, spheres: Array, h: float, force: Vector3, lively: float) -> void:
+	var h2 := h * h
+	var hinv := hb.inverse()
+	var keep := (h / _hprev) * maxf(0.0, 1.0 - DAMP * h)
+	var bend := _rate(_bend, h)
+	var slide := _rate(0.7, h)
 	for i in G:
 		var b := i * (SEG + 1)
-		var root := ht * _roots[i]
+		var root := hb * _roots[i]
 		_P[b] = root
 		_Q[b] = root
 		var L := _seg_len * _len[i]
 		for j in range(1, SEG + 1):
 			var k := b + j
-			var v := (_P[k] - _Q[k]) * 0.978
+			var v := (_P[k] - _Q[k]) * keep
 			_Q[k] = _P[k]
 			var f := float(j) / SEG
 			# slow breathing sway through the whole length (a wave that travels down the lock), not a twitch
 			var sway := Vector3(sin(_t * 1.7 + _ph[i] * 0.5 - j * 0.45), sin(_t * 1.3 + _ph[i] - j * 0.35) * 0.4,
 				cos(_t * 1.5 + _ph[i] * 0.8 - j * 0.4)) * sqrt(f)
-			_P[k] += v + (Vector3(0, -_grav, 0) + sway * _flutter * 2.0) * h2
+			_P[k] += v + (force + sway * _flutter * 2.0 * lively) * h2
 		# the first points keep the hairstyle's shape (volume at the scalp)
 		for j in range(1, _hold_n + 1):
-			var target := root + ht.basis * _rest[i] * (L * j)
-			var moved := _P[b + j].lerp(target, minf(1.0, _hold / j))
+			var target := root + hb * _rest[i] * (L * j)
+			var moved := _P[b + j].lerp(target, _rate(minf(1.0, _hold / j), h))
 			_Q[b + j] += moved - _P[b + j]
 			_P[b + j] = moved
 		for it in 2:
@@ -424,9 +548,9 @@ func _step(ht: Transform3D, spheres: Array) -> void:
 			var ql := q.length()
 			if ql < 1.07 and ql > 1e-4:                                # push out to just above the scalp
 				q *= 1.07 / ql
-				_P[b + j] = ht * (Vector3(q.x * HEAD_R.x, q.y * HEAD_R.y, q.z * HEAD_R.z) + HEAD_C)
-				_Q[b + j] = _Q[b + j].lerp(_P[b + j], 0.7)             # sliding on the scalp: speed is lost, nothing is kicked out
-			elif _P[b + j].y < ht.origin.y - 0.1:                       # below the head: the body
+				_P[b + j] = hb * (Vector3(q.x * HEAD_R.x, q.y * HEAD_R.y, q.z * HEAD_R.z) + HEAD_C)
+				_Q[b + j] = _Q[b + j].lerp(_P[b + j], slide)          # sliding on the scalp: speed is lost, nothing is kicked out
+			elif _P[b + j].y < -0.1:                                    # below the head: the body
 				for s in spheres:
 					var dd: Vector3 = _P[b + j] - (s[0] as Vector3)
 					# a plait is thick: its drawn tubes reach PLAIT_R from the line, so keep that much clear of the body
@@ -435,10 +559,10 @@ func _step(ht: Transform3D, spheres: Array) -> void:
 					var l2 := dd.length_squared()
 					if l2 < r * r and l2 > 1e-9:
 						_P[b + j] = (s[0] as Vector3) + dd / sqrt(l2) * r
-						_Q[b + j] = _Q[b + j].lerp(_P[b + j], 0.7)
+						_Q[b + j] = _Q[b + j].lerp(_P[b + j], slide)
 		for j in range(2, SEG + 1):                                     # bending stiffness: a lock curves, it does not kink or flap
 			var dir := (_P[b + j - 1] - _P[b + j - 2]).normalized()
-			var moved := _P[b + j].lerp(_P[b + j - 1] + dir * L, _bend)
+			var moved := _P[b + j].lerp(_P[b + j - 1] + dir * L, bend)
 			_Q[b + j] += moved - _P[b + j]
 			_P[b + j] = moved
 		for j in range(1, SEG + 1):                                     # last: keep the lengths
@@ -446,6 +570,7 @@ func _step(ht: Transform3D, spheres: Array) -> void:
 			var d := _P[b + j] - a
 			var l := d.length()
 			if l > 1e-6: _P[b + j] = a + d * (L / l)
+	_hprev = h
 
 
 ## The hair-coloured cap under the strands: from the crown down to the hairline (high on the forehead, low at the
