@@ -49,12 +49,50 @@ var seed := 0
 var view := {}
 var level := ""   # "" = the procedural world; "playground" = the test playground (LEVELS menu, --level=, BMX_LEVEL). Not saved
 var records := {"longest": 0.0, "highest": 0.0, "air": 0.0, "top_speed": 0.0, "jumps": 0, "distance": 0.0}
+## The wallet + what the player owns (the SHOP, garage mode "shop"). owned: "kind:id" keys (Shop.price kinds:
+## "edition:ghost_pepper", "frame:goat", "fork:dh38"...). A new save starts with STARTING_MONEY and the stock
+## RUNOUT DH with the parts it is built with. Saved in save.cfg [shop]. Shop.UNLOCK_ALL still lets the garage use
+## everything; ownership shows as OWNED in the shop. Tests: BMX_MONEY=n starts with that much (not saved).
+const STARTING_MONEY := 15000
+var money := STARTING_MONEY
+var owned := {}
+
+func owns(key: String) -> bool:
+	return owned.has(key)
+
+## pays and takes it home. False when it can't be afforded (or is owned already)
+func buy(key: String, price: int) -> bool:
+	if owned.has(key) or price > money: return false
+	money -= price
+	owned[key] = Time.get_unix_time_from_system()
+	save()
+	return true
+
+## the parts a build carries, as owned keys (the starter bike, a bought complete bike)
+static func build_keys(frame: String, b: Dictionary) -> Array:
+	var out := ["frame:" + frame]
+	var W: Dictionary = b.get("wheels", {})
+	var S: Dictionary = b.get("suspension", {})
+	for kv in [["tyre", W.get("tyre_model", "")], ["rim", W.get("rim_model", "")], ["fork", S.get("fork_model", "")],
+			["shock", S.get("shock_model", "")], ["bar", b.get("bars", {}).get("model", "")],
+			["cassette", b.get("drive", {}).get("cassette", "")], ["light", b.get("lights", {}).get("model", "")]]:
+		if str(kv[1]) != "" and str(kv[1]) != "custom": out.append("%s:%s" % [kv[0], kv[1]])
+	return out
 
 func _ready() -> void:
 	randomize()
 	seed = randi() % 1000000
 	var cf := ConfigFile.new()
-	if cf.load(SAVE) == OK:
+	var loaded := cf.load(SAVE) == OK
+	if loaded and cf.has_section("shop"):
+		money = int(cf.get_value("shop", "money", STARTING_MONEY))
+		var o = cf.get_value("shop", "owned", {})
+		if o is Dictionary: owned = o
+	else:   # a new player (or a save from before the shop): the stock RUNOUT DH as it is built
+		for k in build_keys("dh", BikeBuild.load_build("dh")): owned[k] = 0
+		for k in Catalog.STARTER: owned[k] = 0
+	if OS.get_environment("BMX_MONEY") != "": money = int(OS.get_environment("BMX_MONEY"))
+	if loaded:
 		for k in records:
 			records[k] = cf.get_value("records", k, records[k])
 		if cf.has_section("days"):
@@ -110,6 +148,8 @@ func save() -> void:
 		cf.set_value("computer_" + id, "cfg", computer_cfg[id])
 	for k in records:
 		cf.set_value("records", k, records[k])
+	cf.set_value("shop", "money", money)
+	cf.set_value("shop", "owned", owned)
 	var oldest := today() - KEEP_DAYS
 	for d in days:
 		if int(d) >= oldest: cf.set_value("days", str(d), days[d])

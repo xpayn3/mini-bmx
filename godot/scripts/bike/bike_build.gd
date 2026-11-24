@@ -113,17 +113,17 @@ const FORK_MODELS := {
 	"fox40f":   {"brand": "KOMODO",     "label": "K40 Factory",      "travel": 200, "spring": "Air",
 		"lowers": {"color": "1a1a1c", "color2": "ffffff", "finish": "gloss"}, "stanchions": {"color": "c8a24a", "color2": "ffffff", "finish": "anodized"}, "coat": "Gold"},
 	"fox40p":   {"brand": "KOMODO",     "label": "K40 Performance",   "travel": 200, "spring": "Air",
-		"lowers": {"color": "1a1a1c", "color2": "ffffff", "finish": "satin"}, "stanchions": {"color": "202024", "color2": "ffffff", "finish": "anodized"}, "coat": "Black"},
+		"lowers": {"color": "1a1a1c", "color2": "ffffff", "finish": "satin"}, "stanchions": {"color": "9c6b3c", "color2": "ffffff", "finish": "anodized"}, "coat": "Bronze"},
 	"boxxer_u": {"brand": "STONEWALL",  "label": "Brawler Ultimate",  "travel": 200, "spring": "Air",
 		"lowers": {"color": "c4161c", "color2": "ffffff", "finish": "gloss"}, "stanchions": {"color": "c9cdd2", "color2": "ffffff", "finish": "chrome"}, "coat": "Silver"},
 	"boxxer_s": {"brand": "STONEWALL",  "label": "Brawler Select",   "travel": 190, "spring": "Air",
-		"lowers": {"color": "1a1a1c", "color2": "ffffff", "finish": "matte"}, "stanchions": {"color": "202024", "color2": "ffffff", "finish": "anodized"}, "coat": "Black"},
+		"lowers": {"color": "1a1a1c", "color2": "ffffff", "finish": "matte"}, "stanchions": {"color": "c9cdd2", "color2": "ffffff", "finish": "chrome"}, "coat": "Silver"},
 	"dh38":     {"brand": "NORDLUND",   "label": "NL38 m.1",         "travel": 200, "spring": "Coil",
 		"lowers": {"color": "1a1a1c", "color2": "ffffff", "finish": "gloss"}, "stanchions": {"color": "d9b347", "color2": "ffffff", "finish": "anodized"}, "coat": "Gold"},
 	"bomber58": {"brand": "VERDELLI",   "label": "Bruiser 58",       "travel": 200, "spring": "Coil",
-		"lowers": {"color": "d12b1f", "color2": "ffffff", "finish": "gloss"}, "stanchions": {"color": "202024", "color2": "ffffff", "finish": "anodized"}, "coat": "Black"},
+		"lowers": {"color": "d12b1f", "color2": "ffffff", "finish": "gloss"}, "stanchions": {"color": "9c6b3c", "color2": "ffffff", "finish": "anodized"}, "coat": "Bronze"},
 	"onyx":     {"brand": "QVX",        "label": "Obsidian DH",       "travel": 200, "spring": "Coil",
-		"lowers": {"color": "5fbf3f", "color2": "ffffff", "finish": "gloss"}, "stanchions": {"color": "202024", "color2": "ffffff", "finish": "anodized"}, "coat": "Black"},
+		"lowers": {"color": "5fbf3f", "color2": "ffffff", "finish": "gloss"}, "stanchions": {"color": "c9cdd2", "color2": "ffffff", "finish": "chrome"}, "coat": "Silver"},
 	"dorado":   {"brand": "MIRAGE",     "label": "Gilded Pro",       "travel": 200, "spring": "Air",
 		"lowers": {"color": "e9eaec", "color2": "ffffff", "finish": "gloss"}, "stanchions": {"color": "c9cdd2", "color2": "ffffff", "finish": "chrome"}, "coat": "Silver"},
 	"era":      {"brand": "AXT",        "label": "Epoch V2.1",       "travel": 180, "spring": "Coil",
@@ -135,6 +135,29 @@ const FORK_MODELS := {
 	"fuzz_fork": {"brand": "NEXO",       "label": "Fizz fork",        "travel": 170, "spring": "Air", "glb": "fuzz",
 		"lowers": {"color": "1a1a1c", "color2": "ffffff", "finish": "satin"}, "stanchions": {"color": "d9b347", "color2": "ffffff", "finish": "anodized"}, "coat": "Gold"},
 }
+
+## Stanchions are always a coating (hard-anodised / Kashima-style gold, bronze, or chrome silver), never paint:
+## whatever colour a build holds, they are drawn as the nearest of these.
+const STANCHION_COATS := [
+	{"color": "c9cdd2", "finish": "chrome"},     # silver
+	{"color": "c8a24a", "finish": "anodized"},   # gold
+	{"color": "9c6b3c", "finish": "anodized"},   # bronze
+]
+static func stanchion_paint(pp: Dictionary) -> Dictionary:
+	var c := Color(String(pp.get("color", "c8a24a")))
+	var best: Dictionary = STANCHION_COATS[1]
+	var bd := INF
+	for coat in STANCHION_COATS:
+		var k := Color(String(coat.color))
+		var d := Vector3(c.r - k.r, c.g - k.g, c.b - k.b).length() + absf(c.s - k.s) * 0.6
+		if c.get_luminance() < 0.3: d = 0.0 if coat == STANCHION_COATS[2] else 1.0   # black / near black: bronze
+		if d < bd:
+			bd = d
+			best = coat
+	var out := pp.duplicate()
+	out.color = best.color
+	out.finish = best.finish
+	return out
 
 static func apply_fork_model(b: Dictionary, key: String) -> void:
 	b.suspension.fork_model = key
@@ -575,6 +598,7 @@ static func apply_paint(model: Node3D, b: Dictionary) -> void:
 	var test_lv := OS.get_environment("BMX_LIVERY")   # test: "fade_x:1a1a1c" = that livery + colour on the frame
 	for part in PARTS:
 		var pp: Dictionary = b.paint[part]
+		if part == "stanchions": pp = stanchion_paint(pp)
 		if test_lv != "" and part in ["frame", "rear"]:
 			pp = pp.duplicate()
 			pp.livery = test_lv.get_slice(":", 0)
@@ -604,7 +628,7 @@ static func apply_paint(model: Node3D, b: Dictionary) -> void:
 	if fc and fc.mesh:
 		for i in fc.mesh.get_surface_count():
 			var nm := fc.mesh.surface_get_material(i).resource_name
-			if nm == "gold": fc.set_surface_override_material(i, paint_material(b.paint.stanchions))
+			if nm == "gold": fc.set_surface_override_material(i, paint_material(stanchion_paint(b.paint.stanchions)))
 			elif nm == "black": fc.set_surface_override_material(i, paint_material(b.paint.crown))
 
 ## decals.gd config from the logo slots
@@ -700,6 +724,8 @@ static func ride_mods(b: Dictionary) -> Dictionary:
 		# wider bars: slower, steadier steering (780 mm = 1)
 		"pedalLaunch": 1.0 / spoke_w, "steerRate": 1.0 / sqrt(spoke_w) * (1.0 - (rf - 0.374) * 1.2) * (1.0 - (float(b.bars.width) - 780.0) * 0.0015),
 	}
+	var perf := Catalog.ride_perf(b)   # the bought small parts' tiers (brakes, stem, pedals, post: store/catalog.gd)
+	for k in perf: ride[k] = float(ride.get(k, 1.0)) * float(perf[k])
 	var cogs: Array = CASSETTES[b.drive.cassette].cogs
 	return {"ride": ride, "wheel_f": rf, "wheel_r": rr, "cogs": cogs, "ring_k": float(b.drive.ring) / 34.0,
 		"fork_travel": float(s.fork_travel) / 1000.0, "shock_travel": float(s.shock_travel) / 1000.0,

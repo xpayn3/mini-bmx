@@ -81,6 +81,14 @@ var hand_t := 0.0   # handheld-camera clock
 const HANDHELD := 0.2          # how much of the original handheld sway is left (1 = the old, too-strong one)
 const HANDHELD_SPEED := 0.6    # and how fast it drifts
 var auto_spin := false   # the camera stays put unless you drag it
+var hq: HqStill = null
+## the SHOP (mode "shop", garage/store_page.gd): the studio instead of the workshop, bikes + parts for sale
+var store: StorePage = null
+var studio: StudioSet = null
+var shop_reveal := false      # a purchase reveal is playing (StorePurchase drives the camera + studio lamps)
+var _shop_frame := ""         # the frame on show in the shop (never GameState.bike_id: looking changes nothing)   # the showroom's HQ still: averages jittered frames once the camera rests (fx/hq_still.gd)
+var _idle_t := 0.0       # s since the last camera input; the handheld sway stops after HQ_IDLE so a still can build
+const HQ_IDLE := 1.0
 var dragging := false
 var ui := CanvasLayer.new()
 var panel: PanelContainer
@@ -136,11 +144,25 @@ func _ready() -> void:
 	_probe_t = Time.get_ticks_usec()
 	_open_t = _probe_t
 	_showcase_quality(true)
-	_build_room()
+	if mode == "shop":
+		rider_on = false; stand_on = false
+		store = StorePage.new(self)
+		_shop_frame = store.base_frame
+		build = store.base_build.duplicate(true)
+		tab = "bikes" if not Catalog.TABS.any(func(t): return t[0] == env_tab) else env_tab
+		_build_studio()
+	else:
+		_build_room()
 	_probe("room")
 	add_child(cam)
 	cam.fov = 38
 	cam.current = true
+	if mode == "shop": cam.cull_mask &= ~StudioSet.PANEL_LAYER   # the softboxes: in reflections only
+	if mode == "bike" or mode == "shop":
+		hq = HqStill.new()
+		hq.cam = cam
+		hq.show_badge = true
+		add_child(hq)
 	_rebuild_bike()
 	_probe("bike")
 	add_child(ui)
@@ -156,6 +178,8 @@ func _ready() -> void:
 	else:
 		_set_tab(env_tab if env_tab != "" and _has_tab(env_tab) else first)
 	if mode == "bike": _set_edit(env_tab != "", false)   # tests that name a tab go straight to the customizer
+	if mode == "shop" and Env.s("BMX_SHOP_BUY") != "":   # tests: buy what's picked, 2 s in
+		get_tree().create_timer(2.0).timeout.connect(func(): store._buy())
 	_probe("page")
 	if Env.s("BMX_TYRE_PROBE") != "":
 		_tyre_probe.call_deferred()
@@ -490,10 +514,59 @@ func _build_room() -> void:
 	rim.light_energy = 3.5; rim.light_color = Color(1.0, 0.86, 0.68)
 	rim.light_volumetric_fog_energy = 0.03
 
+const WEDGE_BACK := 8.0    # m: the view wedge's tip, inside the room behind the door
+const WEDGE_DEG := 70.0    # each side of straight out
+
 ## The real procedural world outside the door: the world seed you ride, turned so you look down the
 ## start of the trail (+X in the world) through the doorway (-Z here), with the spawn point just
 ## outside the threshold and its ground level with the garage floor.
+## The world out of the door is the same every visit for a seed: built once, it waits out of the tree when the
+## garage closes (NOTIFICATION_PREDELETE) and the next garage of the session takes it back (~0.2-0.3 s saved,
+## and no streaming). A new seed builds a new one; main frees it on quit (free_kept). BMX_GARAGE_NO_KEEP=1 = old.
+static var _kept: Node3D = null
+static var _kept_seed := 0
+static var _kept_streaming := false
+
+static var _app_closing := false   # set on quit: a garage deleted after that keeps nothing (nobody would free it)
+
+static func free_kept(app_closing := false) -> void:
+	if app_closing: _app_closing = true
+	if is_instance_valid(_kept): _kept.free()   # out of the tree: its workers were joined when it left
+	_kept = null
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE and is_instance_valid(outside) and not _app_closing and Env.s("BMX_GARAGE_NO_KEEP") == "":
+		free_kept()
+		if outside.get_parent() == self: remove_child(outside)
+		_kept = outside
+		_kept_seed = GameState.seed
+		_kept_streaming = _outside_terrain != null
+		outside = null
+
 func _build_outside() -> void:
+	var spot := Vector2(-6.0, 0.0)   # just behind spawn on the flat hilltop: the trail runs away from here
+	if is_instance_valid(_kept) and _kept_seed == GameState.seed:
+		outside = _kept
+		_kept = null
+		add_child(outside)
+		_outside_spot = spot
+		if _kept_streaming: _outside_terrain = outside.get_node("Terrain")
+		_probe("  outside kept")
+	else:
+		free_kept()
+		_build_outside_terrain(spot)
+	var sun := DirectionalLight3D.new()
+	sun.light_color = Color(1.0, 0.8, 0.56)   # late-afternoon gold
+	sun.light_energy = 2.2
+	sun.shadow_enabled = true
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+	sun.directional_shadow_max_distance = 120.0
+	sun.light_volumetric_fog_energy = 12.0   # the shaft through the door
+	add_child(sun)
+	sun.look_at_from_position(SUN.normalized(), Vector3.ZERO, Vector3.UP)
+	_build_sun_shaft()
+
+func _build_outside_terrain(spot: Vector2) -> void:
 	outside = Node3D.new()
 	outside.name = "Outside"
 	add_child(outside)
@@ -501,7 +574,19 @@ func _build_outside() -> void:
 	t.name = "Terrain"
 	outside.add_child(t)
 	_probe("  terrain new")
-	var spot := Vector2(-6.0, 0.0)   # just behind spawn on the flat hilltop: the trail runs away from here
+	# only the chunks that can be seen through the door: a wedge opening out of the door (+X in the world) from a
+	# point WEDGE_BACK inside the room, WEDGE_DEG either side (wide: a camera beside the door sees far to the side).
+	# Chunks behind / beside the building never show; ~40 % fewer to build. BMX_GARAGE_ALL_CHUNKS=1 = all of them.
+	if Env.s("BMX_GARAGE_ALL_CHUNKS") == "":
+		var apex := spot - Vector2(WEDGE_BACK, 0.0)
+		var lim := deg_to_rad(WEDGE_DEG)
+		t.stream_filter = func(k: Vector2i) -> bool:
+			var c: Vector2 = Vector2(k) * 48.0   # (Terrain.SIZE)
+			for fx in [-0.5, 0.0, 0.5]:
+				for fz in [-0.5, 0.0, 0.5]:
+					var d: Vector2 = c + Vector2(fx, fz) * 48.0 - apex
+					if d.x > 0.0 and absf(atan2(d.y, d.x)) < lim: return true
+			return false
 	# only the 3 x 3 chunks round the door are built before the first frame (all 7 x 7 took ~1.3 s); the
 	# outer ring streams in over the next frames (_process), on the first visit behind the closed door
 	t.update_stream(spot.x, spot.y, INF, 1)
@@ -520,16 +605,6 @@ func _build_outside() -> void:
 			var w: Vector2 = to_world.call(float(gx), float(gz))
 			h_top = maxf(h_top, t.height(w.x, w.y))
 	outside.position = Vector3(DOOR_X, -h_top - 0.05, -4.35) - Basis(Vector3.UP, PI / 2) * Vector3(spot.x, 0, spot.y)
-	var sun := DirectionalLight3D.new()
-	sun.light_color = Color(1.0, 0.8, 0.56)   # late-afternoon gold
-	sun.light_energy = 2.2
-	sun.shadow_enabled = true
-	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
-	sun.directional_shadow_max_distance = 120.0
-	sun.light_volumetric_fog_energy = 12.0   # the shaft through the door
-	add_child(sun)
-	sun.look_at_from_position(SUN.normalized(), Vector3.ZERO, Vector3.UP)
-	_build_sun_shaft()
 
 ## Dusty air inside the shed (a FogVolume only indoors, so the view out of the door stays clear): the
 ## sun through the doorway shows as a slanted shaft, and dust motes drift in it (`sun_motes.gdshader`
@@ -606,6 +681,7 @@ func _build_sun_shaft() -> void:
 
 # ================================================================ bike
 func _rebuild_bike() -> void:
+	if hq: hq.reset()
 	# keep the rider across part / paint changes: building one (helmet model, strap fitting) is the
 	# slow part of a rebuild and would hitch on every click
 	var keep: Rider = rider if rider_on and is_instance_valid(rider) else null
@@ -622,7 +698,8 @@ func _rebuild_bike() -> void:
 		rig.queue_free()
 	rig = BikeRig.new()
 	add_child(rig)
-	var cfg: Dictionary = GameState.BIKES[GameState.bike_id] if GameState.BIKES[GameState.bike_id].get("garage", false) else GameState.BIKES.dh
+	var fid := _frame_id()
+	var cfg: Dictionary = GameState.BIKES[fid] if GameState.BIKES[fid].get("garage", false) else GameState.BIKES.dh
 	rig.load_bike(cfg, build)
 	_probe("  bike load")
 	var L := float(rig.extras.get("wheelbase", 1.25))
@@ -924,8 +1001,32 @@ func _pose_rider(dt: float) -> void:
 	if rig.pedal_pivots.size() == 2:
 		for fi in 2: rig.pedal_pivots[fi].rotation.z = preview_crank + rider.foot_pitch[fi]
 
+## the frame the garage shows: in the shop the one on show, else the player's
+func _frame_id() -> String:
+	if mode == "shop" and _shop_frame != "": return _shop_frame
+	return GameState.bike_id
+
+## the shop: a bike / frameset onto the stand (rolls in when `swap`) or a part fitted to the bike on show
+func shop_show(frame: String, b: Dictionary, swap: bool) -> void:
+	_shop_frame = frame
+	build = b
+	_swap_next = swap
+	_rebuild_bike()
+	_update_stats()
+
+## the shop's room: the photo studio, its environment, no door / workshop / world outside
+func _build_studio() -> void:
+	studio = StudioSet.new()
+	add_child(studio)
+	var we := WorldEnvironment.new()
+	we.environment = studio.env
+	add_child(we)
+	door_open = 1.0
+	_door_hold = true
+
 func _changed() -> void:
 	_dirty = 0.12   # rebuild after the slider settles
+	if hq: hq.reset()
 	_update_stats()
 
 # ================================================================ camera
@@ -953,9 +1054,10 @@ func _process(dt: float) -> void:
 		_outside_terrain.update_stream(_outside_spot.x, _outside_spot.y, 3.0)
 		if probe: print("  stream_ms=%.1f" % ((Time.get_ticks_usec() - t0) / 1000.0))
 		if _outside_terrain.stream_complete():
+			var n_chunks: int = _outside_terrain.chunks.size()
 			_outside_terrain = null
 			if Env.s("BMX_GARAGE_PROBE") != "":
-				print("GARAGE outside streamed after ms=%.0f" % ((Time.get_ticks_usec() - _open_t) / 1000.0))
+				print("GARAGE outside streamed after ms=%.0f chunks=%d" % [(Time.get_ticks_usec() - _open_t) / 1000.0, n_chunks])
 	if door_open < 1.0 and not _door_hold:
 		door_t += minf(dt, 0.05)   # the first frame after the long build has a huge dt: don't let it eat the wait
 		var k := clampf((door_t - DOOR_DELAY) / DOOR_TIME, 0.0, 1.0)
@@ -977,14 +1079,17 @@ func _process(dt: float) -> void:
 	if auto_spin and not dragging: orbit_t += dt * 0.12
 	# Xbox: right stick orbits the camera, LT / RT zoom (raw axes: menus own the D-pad / left stick)
 	var rs := Vector2(Input.get_joy_axis(0, JOY_AXIS_RIGHT_X), Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y))
+	_idle_t += dt
 	if rs.length() > 0.2:
+		_idle_t = 0.0
 		orbit_t -= rs.x * dt * 2.2
 		pitch_t = clampf(pitch_t + rs.y * dt * 60.0, -2, 70)
 		auto_spin = false
 	var zt := Input.get_joy_axis(0, JOY_AXIS_TRIGGER_RIGHT) - Input.get_joy_axis(0, JOY_AXIS_TRIGGER_LEFT)
+	if absf(zt) > 0.15: _idle_t = 0.0
 	if absf(zt) > 0.15: dist_t = clampf(dist_t * (1.0 - zt * dt * 1.2), 1.2, 7)
 	orbit = lerpf(orbit, orbit_t, minf(1.0, dt * 4))
-	cam.fov = lerpf(cam.fov, SHOW_FOV if not editing and mode == "bike" else 38.0, minf(1.0, dt * 4))
+	cam.fov = lerpf(cam.fov, SHOW_FOV if (not editing and mode == "bike") or mode == "shop" else 38.0, minf(1.0, dt * 4))
 	pitch = lerpf(pitch, pitch_t, minf(1.0, dt * 4))
 	dist = lerpf(dist, dist_t, minf(1.0, dt * 4))
 	var head_env := Env.s("BMX_GARAGE_HEAD")
@@ -1016,7 +1121,7 @@ func _process(dt: float) -> void:
 	cam.look_at(focus, Vector3.UP)
 	# HANDHELD: someone holding the camera -- a slow few-cm drift and a fraction of a degree of wobble,
 	# from a few unrelated sine waves (never repeats visibly, never jerks)
-	hand_t += dt
+	if _idle_t < HQ_IDLE or hq == null: hand_t += dt   # resting: the sway holds still (a still can build)
 	_pose_rider(dt)
 	_pose_stand_rider(dt)
 	# kept very small and slow (HANDHELD, HANDHELD_SPEED): the stronger sway made the player motion sick
@@ -1030,8 +1135,13 @@ func _process(dt: float) -> void:
 	cam.rotate_object_local(Vector3.UP, (sin(t * 0.61 + 3.1) + 0.4 * sin(t * 1.9 + 0.5)) * 0.0028 * k)
 	# (no roll: a tilting horizon is the worst for motion sickness)
 	cam.h_offset = 0.0   # the bike sits in the middle of the frame
+	if hq:
+		hq.enabled = dragging == false and _idle_t >= HQ_IDLE and _leaving == null and _arrive_t == INF \
+			and (door_open >= 1.0 or _door_hold) and _dirty <= 0.0
 
 func _unhandled_input(e: InputEvent) -> void:
+	if e is InputEventMouseButton or (e is InputEventMouseMotion and dragging):
+		_idle_t = 0.0
 	if e is InputEventMouseButton:
 		if e.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT]:
 			dragging = e.pressed
@@ -1098,7 +1208,9 @@ const LINE := Tokens.LINE
 const BIKE_TABS := [["paint", "PAINT"], ["logos", "LOGOS"], ["wheels", "WHEELS"], ["bars", "BARS"], ["suspension", "SHOCKS"],
 	["brakes", "BRAKES"], ["drive", "GEARS"]]
 const RIDER_TABS := [["rider", "POSITION"], ["kit", "KIT"]]
-func _tabs() -> Array: return RIDER_TABS if mode == "rider" else BIKE_TABS
+func _tabs() -> Array:
+	if mode == "shop": return Catalog.TABS.map(func(t): return [t[0], t[1]])
+	return RIDER_TABS if mode == "rider" else BIKE_TABS
 func _has_tab(t: String) -> bool:
 	for x in _tabs():
 		if x[0] == t: return true
@@ -1129,7 +1241,7 @@ func _build_ui() -> void:
 	var head := HBoxContainer.new()
 	head.add_theme_constant_override("separation", Tokens.S6)
 	head_card.add_child(head)
-	var title := UITheme.display("RIDER" if mode == "rider" else "GARAGE", Tokens.T_3XL, INK, Tokens.SLANT_TITLE)
+	var title := UITheme.display({"rider": "RIDER", "shop": "SHOP"}.get(mode, "GARAGE"), Tokens.T_3XL, INK, Tokens.SLANT_TITLE)
 	title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	head.add_child(title)
 	var bar := HBoxContainer.new()
@@ -1146,6 +1258,7 @@ func _build_ui() -> void:
 		bar.add_child(b)
 		tab_buttons[t[0]] = b
 	bar.add_child(UITheme.key_cap("RB" if Settings.pad_active else "E"))
+	if mode == "shop": head.add_child(store.make_wallet())
 	# the options card under it
 	panel = PanelContainer.new()
 	panel.set_anchors_preset(Control.PRESET_LEFT_WIDE)
@@ -1162,7 +1275,7 @@ func _build_ui() -> void:
 	body.add_theme_constant_override("separation", Tokens.S3)
 	sc.add_child(body)
 	# the build card, top right: name + performance meters (the garage only)
-	if mode == "bike":
+	if mode == "bike" or mode == "shop":
 		_build_card(root)
 		_showroom(root)
 	_bottom_bar(root)
@@ -1191,7 +1304,7 @@ func _showroom(root: Control) -> void:
 	_show_strip.row.alignment = BoxContainer.ALIGNMENT_BEGIN   # the first frame at the strip's left end
 	_show_strip.row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	col.add_child(_show_strip)
-	_fill_showroom()
+	if mode == "bike": _fill_showroom()   # (the shop fills it per tab: StorePage)
 
 const SHOW_FOV := 30.0   # the showroom: a longer lens, flatter product-shot look
 const SHOW_H := 250.0
@@ -1270,7 +1383,7 @@ func _build_card(root: Control) -> void:
 	stats_box = VBoxContainer.new()
 	stats_box.add_theme_constant_override("separation", Tokens.S2)
 	sp.add_child(stats_box)
-	stats_box.add_child(UITheme.caption("YOUR BUILD"))
+	stats_box.add_child(UITheme.caption("ON SHOW" if mode == "shop" else "YOUR BUILD"))
 	var name_e := LineEdit.new()
 	name_e.text = build.name
 	name_e.placeholder_text = "Bike name"
@@ -1280,8 +1393,8 @@ func _build_card(root: Control) -> void:
 	name_e.add_theme_stylebox_override("normal", clear)
 	name_e.add_theme_stylebox_override("focus", UITheme.marked(Tokens.CLEAR, Tokens.ACCENT, SIDE_BOTTOM, 0, 0))
 	name_e.text_changed.connect(func(t): build.name = t)
-	stats_box.add_child(name_e)
-	for k in BikeBuild.stats(build, GameState.bike_id):
+	if mode != "shop": stats_box.add_child(name_e)
+	for k in BikeBuild.stats(build, _frame_id()):
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", Tokens.S3)
 		var l := UITheme.caption(k.to_upper(), INK)
@@ -1349,9 +1462,10 @@ func _bottom_bar(root: Control) -> void:
 		var sv: Button = mk.call("SAVE", func(): BikeBuild.save_build(build); _toast("SAVED"))
 		bot.add_child(sv)
 		_edit_only.append(sv)
-	var ride: Button = mk.call("SAVE & RIDE" if mode == "bike" else "RIDE", func(): _close(true), "primary")
-	ride.custom_minimum_size.x = RIDE_W
-	bot.add_child(ride)
+	if mode != "shop":
+		var ride: Button = mk.call("SAVE & RIDE" if mode == "bike" else "RIDE", func(): _close(true), "primary")
+		ride.custom_minimum_size.x = RIDE_W
+		bot.add_child(ride)
 	_file_dialog = FileDialog.new()
 	_file_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
 	_file_dialog.access = FileDialog.ACCESS_FILESYSTEM
@@ -1369,6 +1483,9 @@ func _step_tab(d: int) -> void:
 	_set_tab(tabs[wrapi(i + d, 0, tabs.size())][0])
 
 func _close(ride: bool) -> void:
+	if mode == "shop":   # looking changes nothing (purchases + FIT saved as they happen)
+		closed.emit(false)
+		return
 	_flush_pose()
 	# a showroom edition being looked at is not your build: only SAVE / SAVE & RIDE keep it, BACK doesn't
 	if ride or not _show_pick.begins_with("ed:"): BikeBuild.save_build(build)
@@ -1384,11 +1501,11 @@ func _toast(t: String) -> void:
 	tw.tween_interval(0.8); tw.tween_property(l, "modulate:a", 0.0, 0.4); tw.tween_callback(l.queue_free)
 
 func _update_stats() -> void:
-	var s := BikeBuild.stats(build, GameState.bike_id)
+	var s := BikeBuild.stats(build, _frame_id())
 	for k in s:
 		if _stat_bars.has(k): _stat_bars[k].target = s[k]
 	if is_instance_valid(_class_lbl):
-		_class_lbl.text = _bike_line(GameState.bike_id, build)
+		_class_lbl.text = _bike_line(_frame_id(), build)
 
 var _class_lbl: Label
 var _part_box: VBoxContainer
@@ -1417,7 +1534,7 @@ static func _put_back(cap: Dictionary) -> Dictionary:
 ## puts the build back. The stat bars slide to the new values; the build card lists the part and every change.
 func _part_preview(it: Dictionary, apply: Callable) -> void:
 	if not is_instance_valid(_part_box) or not editing: return
-	var frame := GameState.bike_id
+	var frame := _frame_id()
 	var s0 := BikeBuild.stats(build, frame)
 	var kg0 := BikeBuild.bike_kg(frame, build)
 	var kp0 := BikeBuild.kg_parts(frame, build)
@@ -1523,6 +1640,11 @@ static func _bike_line(frame: String, b: Dictionary) -> String:
 	return "%s  ·  %s  ·  %.1f KG  ·  %s" % [BikeBuild.star_text(BikeBuild.stars(b, frame)), cls, BikeBuild.bike_kg(frame, b), Shop.fmt(Shop.build_price(b, frame))]
 
 func _set_tab(t: String) -> void:
+	if mode == "shop":
+		tab = t
+		if tab_buttons.has(t): tab_buttons[t].button_pressed = true
+		store.show_tab(t)
+		return
 	_part_preview_end()   # the page (and the card under the cursor) is rebuilt
 	# only switching to another tab frames the camera on that area; refreshing the page after a
 	# change (colour, finish, part, logo...) leaves the camera wherever you put it
@@ -2075,7 +2197,14 @@ func _cards(items: Array, current: String, cb: Callable, bike := true, into: Pic
 			col.add_child(row)
 		elif spec != "": col.add_child(sp)
 		b.add_child(col)
-		if on:
+		if it.has("badge"):   # the shop: OWNED
+			var bg := UITheme.display(String(it.badge), Tokens.T_XS, Color.WHITE, 0.0)
+			var bs := UITheme.btn_box(Color("2f9e55"), Tokens.CLEAR, 0, Tokens.R_SM, Tokens.S2)
+			bs.content_margin_top = 0; bs.content_margin_bottom = 0
+			bg.add_theme_stylebox_override("normal", bs)
+			bg.position = Vector2(Tokens.S3, Tokens.S3)
+			b.add_child(bg)
+		elif on and mode != "shop":
 			var tag := UITheme.display("FITTED", Tokens.T_XS, INK, 0.0)
 			var ts := UITheme.btn_box(Tokens.ACCENT, Tokens.CLEAR, 0, Tokens.R_SM, Tokens.S2)
 			ts.content_margin_top = 0; ts.content_margin_bottom = 0
@@ -2084,7 +2213,7 @@ func _cards(items: Array, current: String, cb: Callable, bike := true, into: Pic
 			b.add_child(tag)
 		var kind := String(it.get("kind", ""))
 		var pid := String(it.key).trim_prefix("ed:")
-		var cost := Shop.price(kind, pid) if kind != "" else 0
+		var cost := int(it.price) if it.has("price") else (Shop.price(kind, pid) if kind != "" else 0)
 		if cost > 0:   # price tag, top right (everything is unlocked while Shop.UNLOCK_ALL)
 			var pt := UITheme.display(Shop.fmt(cost), Tokens.T_XS, INK, 0.0)
 			var ps := UITheme.btn_box(Tokens.FILL, Tokens.CLEAR, 0, Tokens.R_SM, Tokens.S2)
@@ -2097,7 +2226,7 @@ func _cards(items: Array, current: String, cb: Callable, bike := true, into: Pic
 			b.add_child(pt)
 			b.tooltip_text += "  ·  " + Shop.fmt(cost)
 		b.pressed.connect(g.guard(func():
-			if kind != "" and not Shop.unlocked(kind, pid): return
+			if kind != "" and not it.has("price") and not Shop.unlocked(kind, pid): return
 			cb.call(it.key)
 			if bike: _changed()
 			if into == null: _set_tab(tab)))

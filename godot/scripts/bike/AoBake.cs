@@ -105,6 +105,60 @@ public partial class AoBake : RefCounted
 		return ao;
 	}
 
+	/// Sharp convex edges per vertex, 0 (flat / smooth / concave) .. 1 (a crisp outside edge): the mean
+	/// curvature from the vertices within `radius`, (n_j - n_i) . (p_j - p_i) / |p_j - p_i|^2 (= 1 / r on a
+	/// sphere of radius r; across a hard crease, ~1 / distance), mapped from k0 (1 / m, no edge) to k1 (full).
+	/// Split normals at a crease (vertices on the same spot) are skipped: the neighbours just off it carry it.
+	public float[] Edges(Vector3[] verts, Vector3[] normals, float radius, float k0, float k1)
+	{
+		int nv = verts.Length;
+		var px = new float[nv]; var py = new float[nv]; var pz = new float[nv];
+		var nx = new float[nv]; var ny = new float[nv]; var nz = new float[nv];
+		for (int i = 0; i < nv; i++)
+		{
+			px[i] = verts[i].X; py[i] = verts[i].Y; pz[i] = verts[i].Z;
+			if (i < normals.Length) { nx[i] = normals[i].X; ny[i] = normals[i].Y; nz[i] = normals[i].Z; }
+		}
+		float ginv = 1f / radius;
+		var grid = new Dictionary<long, List<int>>();
+		for (int i = 0; i < nv; i++)
+		{
+			long key = Key((int)MathF.Floor(px[i] * ginv), (int)MathF.Floor(py[i] * ginv), (int)MathF.Floor(pz[i] * ginv));
+			if (!grid.TryGetValue(key, out var list)) { list = new List<int>(); grid[key] = list; }
+			list.Add(i);
+		}
+		var cells = new Dictionary<long, int[]>();
+		foreach (var kv in grid) cells[kv.Key] = kv.Value.ToArray();
+		var e = new float[nv];
+		float r2max = radius * radius;
+		float same2 = radius * radius * 1e-4f;   // within 1 % of the reach: the same spot (a split normal)
+		for (int i = 0; i < nv; i++)
+		{
+			int gx = (int)MathF.Floor(px[i] * ginv), gy = (int)MathF.Floor(py[i] * ginv), gz = (int)MathF.Floor(pz[i] * ginv);
+			float sum = 0f, wsum = 0f;
+			for (int ox = -1; ox <= 1; ox++)
+			for (int oy = -1; oy <= 1; oy++)
+			for (int oz = -1; oz <= 1; oz++)
+			{
+				if (!cells.TryGetValue(Key(gx + ox, gy + oy, gz + oz), out var list)) continue;
+				foreach (int j in list)
+				{
+					float dx = px[j] - px[i], dy = py[j] - py[i], dz = pz[j] - pz[i];
+					float d2 = dx * dx + dy * dy + dz * dz;
+					if (d2 > r2max || d2 < same2) continue;
+					float c = ((nx[j] - nx[i]) * dx + (ny[j] - ny[i]) * dy + (nz[j] - nz[i]) * dz) / d2;
+					float f = 1f - MathF.Sqrt(d2) / radius;
+					float w = f * f;
+					sum += c * w; wsum += w;
+				}
+			}
+			float k = wsum > 0f ? sum / wsum : 0f;
+			float t = Math.Clamp((k - k0) / (k1 - k0), 0f, 1f);
+			e[i] = t * t * (3f - 2f * t);
+		}
+		return e;
+	}
+
 	/// How many edges are longer than maxEdge (0 = nothing to split).
 	public int LongEdges(Vector3[] v, int[] idx, float maxEdge)
 	{

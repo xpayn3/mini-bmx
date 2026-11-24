@@ -222,6 +222,7 @@ static func decal_material(tex: Texture2D, roughness: float) -> StandardMaterial
 	m.metallic = 0.0
 	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
 	m.render_priority = 1
+	m.texture_repeat = false   # a sticker wrapped round a tube reaches past 0..1 at its sides: the clear margin, not the other edge
 	return m
 
 
@@ -329,7 +330,8 @@ static func _project_arrays(arr: Array, pos: Vector3, x_axis: Vector3, z_axis: V
 	var hz := size.z * 0.5
 	var out_p := PackedVector3Array()
 	var out_n := PackedVector3Array()
-	var out_uv := PackedVector2Array()
+	var out_q := PackedVector3Array()   # projector space, for the UVs
+	var out_m := PackedVector3Array()   # normals in projector space
 	for t in range(0, I.size(), 3):
 		var ia := I[t]
 		var ib := I[t + 1]
@@ -367,10 +369,98 @@ static func _project_arrays(arr: Array, pos: Vector3, x_axis: Vector3, z_axis: V
 				var nrm := (nn[j] as Vector3).normalized()
 				out_p.append(proj * q + nrm * SURFACE_LIFT)
 				out_n.append(nrm)
-				out_uv.append(Vector2(q.x / size.x + 0.5, 1.0 - (q.y / size.y + 0.5)))
+				out_q.append(q)
+				out_m.append(inv.basis * nrm)
 	if out_p.is_empty():
 		return []
-	return [out_p, out_n, out_uv]
+	return [out_p, out_n, _wrap_uvs(out_q, out_m, size)]
+
+
+## UVs for a sticker. Flat (the projector's x / y) on flat ground; on a round part the sticker is wrapped like
+## real vinyl: across the tube it is laid out by the distance round the surface (radius x angle from the side
+## facing the projector), so it no longer stretches where the tube curves away. The tube is found from the
+## patch itself: its axis is the projector axis the normals don't turn about (x for stickers along a tube, y for
+## lettering standing up a fork leg), its centre + radius a least-squares fit of p = c + r n in the other two.
+## Tubes over WRAP_MAX_R, or a fit that doesn't hold, stay flat. BMX_DECAL_FLAT=1 = always flat (compare).
+const WRAP_MAX_R := 0.25
+static func _wrap_uvs(Q: PackedVector3Array, M: PackedVector3Array, size: Vector3) -> PackedVector2Array:
+	var uv := PackedVector2Array()
+	uv.resize(Q.size())
+	for i in Q.size():
+		uv[i] = Vector2(Q[i].x / size.x + 0.5, 1.0 - (Q[i].y / size.y + 0.5))
+	if Q.size() < 6 or OS.get_environment("BMX_DECAL_FLAT") != "": return uv
+	var mx := 0.0; var my := 0.0
+	for n in M:
+		mx += absf(n.x); my += absf(n.y)
+	var across_y := my >= mx   # the normals swing in y: the tube runs along x, wrap y
+	var pr := OS.get_environment("BMX_DECAL_PROBE") != ""
+	# fit, then again on the points that sit on that circle: a sticker's box also catches bits round the tube
+	# (a fork leg's brake mount, arch), which on their own throw the fit off
+	var keep := PackedByteArray()
+	keep.resize(Q.size())
+	keep.fill(1)
+	var fit := _circle_fit(Q, M, across_y, keep)
+	if fit == Vector3.ZERO:
+		if pr: print("DECALFLAT nofit pts=%d" % Q.size())
+		return uv
+	var inl := 0
+	for i in Q.size():
+		var pa := Q[i].y if across_y else Q[i].x
+		var res := absf(Vector2(pa - fit.x, Q[i].z - fit.y).length() - fit.z)
+		keep[i] = 1 if res < maxf(0.003, fit.z * 0.25) else 0
+		inl += keep[i]
+	if inl >= 6: fit = _circle_fit(Q, M, across_y, keep)
+	var ca := fit.x; var cz := fit.y; var r := fit.z
+	if fit == Vector3.ZERO or r < 0.004 or r > WRAP_MAX_R:
+		if pr: print("DECALFLAT r=%.4f across=%s pts=%d" % [r, "y" if across_y else "x", Q.size()])
+		return uv
+	# does it hold? most points (80 %) on that circle within 15 % of r
+	var good := 0
+	var err := 0.0
+	for i in Q.size():
+		var pa := Q[i].y if across_y else Q[i].x
+		var res := absf(Vector2(pa - ca, Q[i].z - cz).length() - r)
+		if res <= r * 0.15 + 0.002:
+			good += 1
+			err = maxf(err, res)
+	if good < Q.size() * 0.8:
+		if pr: print("DECALFLAT fit r=%.4f good=%d of %d across=%s" % [r, good, Q.size(), "y" if across_y else "x"])
+		return uv
+	# the angle of the point straight under the projector's centre line (across = 0, front side): the
+	# sticker's middle stays where the flat projection put it
+	var a0 := asin(clampf(-ca / r, -1.0, 1.0))
+	if OS.get_environment("BMX_DECAL_PROBE") != "":
+		var lo := INF; var hi := -INF
+		for i in Q.size():
+			var pa := Q[i].y if across_y else Q[i].x
+			lo = minf(lo, pa); hi = maxf(hi, pa)
+		print("DECALWRAP r=%.4f across=%s flat_span=%.4f size_across=%.4f err=%.4f" % [r, "y" if across_y else "x", hi - lo, size.y if across_y else size.x, err])
+	for i in Q.size():
+		var pa := Q[i].y if across_y else Q[i].x
+		var s := r * wrapf(atan2(pa - ca, Q[i].z - cz) - a0, -PI, PI)   # distance round the tube
+		if across_y: uv[i].y = 1.0 - (s / size.y + 0.5)
+		else: uv[i].x = s / size.x + 0.5
+	return uv
+
+## least squares circle in the (across, z) plane from points + normals: across_i = a + r na_i, z_i = b + r nz_i,
+## over the points marked in keep whose normals don't run along the tube. (a, b, r), or ZERO.
+static func _circle_fit(Q: PackedVector3Array, M: PackedVector3Array, across_y: bool, keep: PackedByteArray) -> Vector3:
+	var s00 := 0.0; var s02 := 0.0; var s11 := 0.0; var s12 := 0.0; var s22 := 0.0
+	var r0 := 0.0; var r1 := 0.0; var r2 := 0.0
+	var used := 0
+	for i in Q.size():
+		if keep[i] == 0: continue
+		var n := M[i]
+		var na := n.y if across_y else n.x
+		if absf(n.x if across_y else n.y) > 0.5: continue   # a normal along the tube: not the round part
+		used += 1
+		var pa := Q[i].y if across_y else Q[i].x
+		s00 += 1.0; s02 += na; s11 += 1.0; s12 += n.z; s22 += na * na + n.z * n.z
+		r0 += pa; r1 += Q[i].z; r2 += na * pa + n.z * Q[i].z
+	if used < 6: return Vector3.ZERO
+	var A := Basis(Vector3(s00, 0.0, s02), Vector3(0.0, s11, s12), Vector3(s02, s12, s22))
+	if absf(A.determinant()) < 1e-12: return Vector3.ZERO
+	return A.inverse() * Vector3(r0, r1, r2)
 
 
 static func _surface_aabb(mi: MeshInstance3D, si: int) -> AABB:

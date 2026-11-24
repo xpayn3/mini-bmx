@@ -13,7 +13,13 @@ const MAX_EDGE := 0.02   # m: longer edges are split before the bake
 const CELL := 0.008       # m: the surface is merged into discs this big
 const STRENGTH := 1.0     # 1 = a fully covered vertex goes black
 const CACHE_DIR := "user://cache/ao"
-const VER := 4            # bump when the bake changes
+const VER := 5            # bump when the bake changes
+## Sharp convex edges (AoBake.Edges) baked beside the AO, into the vertex colour's alpha as 1 - edge (so a mesh
+## without it reads "no edge"): the car paint shader rounds them off (a bevel catch-light).
+## Curvature in 1 / m over EDGE_R: EDGE_K0 = none (tubes of ~2.5 cm radius and up), EDGE_K1 = full.
+const EDGE_R := 0.012
+const EDGE_K0 := 45.0
+const EDGE_K1 := 160.0
 
 static var _mem := {}     # content hash -> PackedFloat32Array
 static var _mats := {}    # material instance id -> its AO copy
@@ -83,18 +89,25 @@ static func _group(model: Node3D, mis: Array, split: bool) -> int:
 			surf.append([mi, s, a, base, v.size()])
 	if verts.is_empty(): return 0
 	var key := "%d_%d_%d_%d" % [VER, hash(verts), hash(idx), verts.size()]
-	var ao: PackedFloat32Array = _mem.get(key, PackedFloat32Array())
-	if ao.size() != verts.size():
-		ao = _load(key, verts.size())
-		if ao.size() != verts.size():
+	var nv := verts.size()
+	var ao: PackedFloat32Array = _mem.get(key, PackedFloat32Array())   # AO (nv) then edges (nv)
+	if ao.size() != nv * 2:
+		ao = _load(key, nv * 2)
+		if ao.size() != nv * 2:
 			var t0 := Time.get_ticks_usec()
 			ao = PackedFloat32Array(_cs.call("Bake", verts, norms, idx, RADIUS, CELL, STRENGTH))
-			if Env.s("BMX_AO_PROBE") != "": print("AO group verts=%d tris=%d bake_ms=%.1f" % [verts.size(), idx.size() / 3, (Time.get_ticks_usec() - t0) / 1000.0])
+			var t1 := Time.get_ticks_usec()
+			ao.append_array(PackedFloat32Array(_cs.call("Edges", verts, norms, EDGE_R, EDGE_K0, EDGE_K1)))
+			if Env.s("BMX_AO_PROBE") != "": print("AO group verts=%d tris=%d bake_ms=%.1f edges_ms=%.1f" % [nv, idx.size() / 3, (t1 - t0) / 1000.0, (Time.get_ticks_usec() - t1) / 1000.0])
 			_save(key, ao)
 		_mem[key] = ao
 	if Env.s("BMX_AO_PROBE") != "":
 		var hist := [0, 0, 0, 0, 0]
-		for k in ao: hist[clampi(int((1.0 - k) * 10.0), 0, 4)] += 1
+		var ehist := [0, 0, 0, 0, 0]
+		for i in nv:
+			hist[clampi(int((1.0 - ao[i]) * 10.0), 0, 4)] += 1
+			ehist[clampi(int(ao[nv + i] * 5.0), 0, 4)] += 1
+		print("AO edges (0-.2, -.4, -.6, -.8, -1) %s" % [ehist])
 		print("AO hist (1.0-0.9, -0.8, -0.7, -0.6, darker) %s of %d  first=%s" % [hist, ao.size(), (mis[0] as Node).name])
 	# rebuild each mesh with the AO in its vertex colour
 	var by_mi := {}
@@ -102,7 +115,7 @@ static func _group(model: Node3D, mis: Array, split: bool) -> int:
 		if not by_mi.has(e[0]): by_mi[e[0]] = []
 		by_mi[e[0]].append(e)
 	for mi in by_mi:
-		_apply_mesh(mi, by_mi[mi], ao)
+		_apply_mesh(mi, by_mi[mi], ao, nv)
 	return verts.size()
 
 
@@ -166,7 +179,7 @@ static func _split(a: Array) -> Array:
 	return out
 
 
-static func _apply_mesh(mi: MeshInstance3D, entries: Array, ao: PackedFloat32Array) -> void:
+static func _apply_mesh(mi: MeshInstance3D, entries: Array, ao: PackedFloat32Array, nv: int) -> void:
 	var src: ArrayMesh = mi.mesh
 	var done := {}
 	for e in entries: done[e[1]] = e
@@ -186,6 +199,7 @@ static func _apply_mesh(mi: MeshInstance3D, entries: Array, ao: PackedFloat32Arr
 			var bm := mat as BaseMaterial3D
 			var keep: bool = old != null and bm != null and bm.vertex_color_use_as_albedo
 			var srgb: bool = keep and bm.vertex_color_is_srgb
+			var see_through: bool = bm != null and bm.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED
 			for i in cnt:
 				var k := ao[base + i]
 				if keep:
@@ -193,7 +207,7 @@ static func _apply_mesh(mi: MeshInstance3D, entries: Array, ao: PackedFloat32Arr
 					var m := pow(k, 1.0 / 2.2) if srgb else k
 					col[i] = Color(c.r * m, c.g * m, c.b * m, c.a)
 				else:
-					col[i] = Color(k, k, k, 1.0)
+					col[i] = Color(k, k, k, 1.0 if see_through else 1.0 - ao[nv + base + i])
 			a[Mesh.ARRAY_COLOR] = col
 			if bm != null and not keep:
 				mat = _ao_mat(bm)
