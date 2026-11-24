@@ -1746,6 +1746,15 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 		var d_ev := Vector3(-f.x * d_back + side.x * d_out, 0.7 + carve_k * 0.4 + dust_k * 1.4, -f.z * d_back + side.z * d_out)
 		var d_fan := rad_to_deg(atan2((1.6 + va * 0.18) * (1 - carve_k * 0.6) * 0.5, maxf(d_back, 0.6))) + dust_k * 25.0
 		var d_a := (0.62 if skid_fx else 0.45) if dirt else ((0.55 if skid_fx else 0.4) if sand else 0.26)
+		# what the tyre really does to the ground, for the grit spray (fx/GritSprayCs.cs): the rear tread's speed over
+		# the bike's (wheelspin from the drive force past what the ground holds, locked = it stops turning), the sideways
+		# slide of the tread (slip angle x speed), the rear's load, and how loose the ground is
+		var g_long := 0.0
+		if skid_fx: g_long = -va
+		elif st.a_drive > 6.0: g_long = clampf((st.a_drive - 6.0) * 0.8, 0.0, 7.0)
+		var g_lat := va * sin(clampf(st.slip_w, -1.2, 1.2))
+		var g_loose := (1.5 if sand else (1.0 if dirt else 0.35)) * (0.75 + 0.5 * clampf(st.loose, 0.0, 1.0))
+		dust.set_grit_state(f * st.v, f, g_long, g_lat, clampf(st.n_rear / 9.81, 0.0, 2.0), g_loose, clampf((absf(st.vw_r) - 2.5) / 3.5, 0.0, 1.0))
 		dust.feed(rear, d_ev, rate * fxd * dry_r, dcol, d_a, clampf(d_fan, 12.0, 70.0))
 		if Env.s("BMX_DUST_PROBE") != "":
 			_dprobe_t += dt
