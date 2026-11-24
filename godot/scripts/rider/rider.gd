@@ -2001,7 +2001,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# bike's frame, so it turns back against it - the hips half way (they're on the saddle / pedals), the shoulders
 	# nearly all the way: the rider keeps facing where they fly while the bike hangs out sideways
 	var awhip: float = clampf(_num(p, "airWhip"), -1.4, 1.4) * air
-	var tw_base: float = float(sty.twist) + clampf(_num(p, "airSpin") * 0.07 + sm_turn * 0.13 * float(sty.turnTwist) + lead, -0.6, 0.6)
+	var tw_base: float = float(sty.twist) + clampf(_num(p, "airSpin") * 0.07 + sm_turn * 0.13 * float(sty.turnTwist) + lead, -0.6, 0.6) + _num(p, "flipTwist")   # (a flip: the shoulders turn to spot the landing)
 	var tw_air: float = -0.22 * tab - 0.85 * awhip
 	var tw := Basis(tw_axis, tw_base + tw_air)
 	# (2026-11-23, user: "the shoulder pops off") the shoulders' twist (a whip, a tabletop) is held to what both arms can

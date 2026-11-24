@@ -1937,6 +1937,26 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - Open: hands-off landings still come in nose-up on short flights; the big designed tables are knife-edge at their
   design speed (dtable_60 at 96 % of it lands on the deck).
 
+### Spins and flips carved / thrown at the lip (2026-11-24)
+- Like the whip (air step 2), a spin or a flip gets its rotation at the lip; from the air alone the stick only turns it a
+  little. **Spin**: the right stick pushed to its left / right EDGE (|x| >= `SPIN_EDGE` 0.85) in the last `WHIP_WINDOW` s
+  before a lip winds up `spin_load` (short of the edge it stays a whip); off the lip rider + bike leave turning
+  (`stick_yaw` = stickYawRate x load), the stick held at the edge keeps it going, let go it eases out over ~0.3 s
+  (`SPIN_OPEN`, opening up), the landing help twists it the rest of the way straight. Without a wind-up the edge spin is
+  `SPIN_AIR_ONLY` 0.35 of the rate. **Flip**: the lip throw (S / W fresh at a lip, stick yanked back / forward in the lip
+  window: `throw_v`) is kept as `_flip_in`; in the air the stick at its top / bottom edge drives the flip at the full rate
+  only that way, else `FLIP_AIR_ONLY` 0.35. Both turn faster tucked (/ air_inertia). `BMX_OLD_SPIN=1` = the old free
+  air spins / flips.
+- dtable_66 at 66 km/h (1.3-1.6 s air), test rider + `BMX_BODY=spinlip|spinair|fliplip|flipair` (stick held from the lip /
+  only in the air, let go ~300 deg round; `SPINT` lines with `BMX_BODY_PRINT=1`): spin wound up 385 deg CLEAN (a 360),
+  from the air 134-144 deg (lands FAKIE / HIGHSIDE); flip thrown 320-330 deg CLEAN (BACKFLIP), from the air 122 deg
+  LOOPED OUT. Whips unchanged (whiplip 0.7: 67 deg, CLEAN).
+- **Flip body** (research/jump: GMBN "How to backflip like a pro" side views 4:48, Hardline 97 ft short): thrown at the lip
+  he drives the legs straight (no load crouch) with the head back; in the air by how far round the flip is: head back
+  first, tucked tight through the middle, from half way the head and shoulders turn to spot the landing over the
+  shoulder (`flipTwist`), the last quarter he opens up and reaches down for the landing. Big jumps: a slow flip spread
+  over the whole flight (Hardline ~2.5 s for one turn). `BMX_OLD_FLIPPOSE=1`. Not judged by the user yet.
+
 ### Developer view of the test playground (`scripts/levels/ride_diag.gd`) - telemetry + sliders for riding code
 - **Only in the test playground** (user decision 2026-11-21: developer tools live in that level, normal rides have none).
   **Layout (2026-11-22, user: "tidy, compact, nothing covering")**: a slim **tuning column** on the left (the TuneCard,

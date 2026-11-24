@@ -370,7 +370,7 @@ func _reset_motion() -> void:
 	n_f = NAN; n_r = NAN; n_ref = NAN; lip_state = 0; hf_prev = NAN; hr_prev = NAN; zw_f = NAN; zw_r = NAN
 	bank = 0; body_x = 0; hip_shift = 0; spin = 0; a_drive = 0; charge = 0; hop_charge = 0; lift_t = 0
 	body_xv = 0; hip_v = 0; v_last = NAN; air_lean = 0; air_pull = 0; flip_acc = 0; spin_acc = 0; flip_in = 0
-	body_pw = 0; throw_v = 0; air_w = 0; air_inertia = 1; air_tilt = 0; air_tilt_v = 0; air_yaw = 0; air_tw = 0; air_tw_v = 0; whip_load = 0; _whip_in = 0; land_jolt = 0
+	body_pw = 0; throw_v = 0; air_w = 0; air_inertia = 1; air_tilt = 0; air_tilt_v = 0; air_yaw = 0; air_tw = 0; air_tw_v = 0; whip_load = 0; _whip_in = 0; spin_load = 0; _spin_in = 0; _flip_in = 0; land_jolt = 0
 	pivot = 0; pivot_acc = 0; body_in_s = 0; flick = 0; flick_v = 0; _flick_arm = 0; _flick_side = 0; flick_kick = 0
 	nose_a = 0.0; nose_w = 0.0; nose_zone = false; nose_lock = 0.0; nose_push = 0.0; nose_time = 0.0; nose_brake_t = 0.0; _nose_grace = 0.0
 	_tw_t = 9.0; _ts_t = 9.0; _sb_t = 9.0; _sf_t = 9.0; _hop_tap_t = 9.0; _hop_buf = 0.0; _pop_miss = 0.0; _pop_miss_t = 0.0; _gl = 0.0; _gc = 0.0
@@ -649,6 +649,11 @@ func _step_controls(dt: float, inp: Dictionary, throttle: float, steer_input: fl
 		var ys := _edge_spin(flick_in, yaw_edge_s, yaw_hold, dt)
 		yaw_edge_s = ys.x; yaw_hold = ys.y
 		var y_t: float = yaw_edge_s * float(T.get("stickYawRate", 5.0)) * _edge_grow(yaw_hold)
+		# (a spin is carved off the lip: from the air alone only SPIN_AIR_ONLY of the rate; tucked (less inertia) it
+		# turns faster)
+		if not _OLD_SPIN:
+			var wound: float = maxf(0.0, _spin_in * signf(yaw_edge_s))
+			y_t *= lerpf(SPIN_AIR_ONLY, 1.0, wound) / maxf(air_inertia, 0.5)
 		if absf(flick_in) < 0.815 and land_prep > 0.2:
 			# coming in to land off a spin: the rider twists it the rest of the way straight if it's close
 			var off := wrapf(slip, -PI, PI)
@@ -656,7 +661,7 @@ func _step_controls(dt: float, inp: Dictionary, throttle: float, steer_input: fl
 			if absf(off) < 1.2: y_t = lerpf(y_t, clampf(-off * 6.0, -4.0, 4.0), air_help)
 		# the spin answers the stick at once and stops soon after it's let go (it used to take ~0.5 s to get going and
 		# ran on ~150 deg after the release)
-		var y_resp: float = 11.0 if absf(y_t) > absf(stick_yaw) else 10.0
+		var y_resp: float = 11.0 if absf(y_t) > absf(stick_yaw) else (SPIN_OPEN if (absf(_spin_in) > 0.2 and not _OLD_SPIN) else 10.0)
 		stick_yaw += (y_t - stick_yaw) * minf(1.0, y_resp * dt)
 	else:
 		edge_s = 0.0; spin_hold = 0.0; spin_k = 1.0
@@ -2030,7 +2035,10 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 				var arc: float = T.airArcade
 				if arc > 0.0:
 					if absf(flip_in) > 0.05:
-						air_w += (flip_in * T.airSpinRate * spin_k - air_w) * minf(1.0, T.airSpinResp * h) * arc
+						# (a flip is thrown at the lip: without a throw the stick only rolls it FLIP_AIR_ONLY as fast;
+						# tucked it turns faster - the old arcade drive ignored the tuck)
+						var f_cap: float = 1.0 if _OLD_SPIN else lerpf(FLIP_AIR_ONLY, 1.0, maxf(0.0, _flip_in * signf(flip_in))) / maxf(air_inertia, 0.5)
+						air_w += (flip_in * T.airSpinRate * spin_k * f_cap - air_w) * minf(1.0, T.airSpinResp * h) * arc
 					else:
 						air_w *= 1.0 - minf(1.0, T.airSpinStop * h) * arc
 				var tgt: float
@@ -2307,12 +2315,19 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			air_tilt = 0.0; air_tilt_v = sh * (pitch_v - body_pw)
 			air_inertia = 1.0
 			pitch_v = air_w + air_tilt_v
+			_flip_in = clampf(throw_v / maxf(float(T.flipRate), 0.1), -1.0, 1.0) if not _OLD_SPIN else 1.0
 			throw_v = 0.0
 			air_yaw = yaw_rate; air_tw = 0.0; air_tw_v = 0.0
 			# a whip wound up at the lip leaves swinging out (the hips already throwing the rear round)
 			_whip_in = 0.0 if _OLD_WHIP else whip_load
 			air_tw_v = WHIP_KICK * _whip_in
 			whip_load = 0.0
+			# a spin wound up at the lip leaves already turning (rider + bike as one); a flip thrown at the lip sets how
+			# far it can be carried on in the air (_flip_in)
+			_spin_in = spin_load; spin_load = 0.0
+			if absf(_spin_in) > 0.05:
+				stick_yaw = float(T.get("stickYawRate", 5.0)) * _spin_in
+				yaw_edge_s = _spin_in
 			if Env.s("BMX_TRICK") != "": print("TAKEOFF v=%.1f vy=%.2f pitch_v=%.2f spin=%.2f natural=%s at=(%.0f,%.0f) slope=%.2f" % [v, vy, pitch_v, air_w, natural, x, z, _g_pitch])   # tests
 			host.on_takeoff()
 		elif not now_air and was_air:
@@ -2626,10 +2641,17 @@ func _step_lip(dt: float, f: Vector3, brake: bool) -> void:
 	# the last WHIP_WINDOW s before the edge winds it up (whip_load, signed, like the stick); off the lip that sets how far
 	# the bike can be thrown out and gives it its swing (see the take-off and the air step). Decays when not held
 	if not _OLD_WHIP:
-		if not air and lip_state == 2 and lip_last < WHIP_WINDOW and absf(flick_in) > 0.25:
+		# (spins, 2026-11-24: pushed right to the stick's edge it winds up a SPIN instead - the shoulders and head turned
+		# into it, carved off the lip; short of the edge it stays a whip. BMX_OLD_SPIN=1 = spins from the air alone)
+		var spin_edge: bool = absf(flick_in) >= SPIN_EDGE and not _OLD_SPIN
+		if not air and lip_state == 2 and lip_last < WHIP_WINDOW and absf(flick_in) > 0.25 and not spin_edge:
 			whip_load = move_toward(whip_load, clampf(flick_in / 0.8, -1.0, 1.0), dt / WHIP_WIND)
 		elif not air:
 			whip_load = move_toward(whip_load, 0.0, dt * 3.0)
+		if not air and lip_state == 2 and lip_last < WHIP_WINDOW and spin_edge:
+			spin_load = move_toward(spin_load, signf(flick_in), dt / WHIP_WIND)
+		elif not air:
+			spin_load = move_toward(spin_load, 0.0, dt * 3.0)
 	# (2026-11-23, user: "small bumps propelled me a lot at my speed, the bike should eat that with the rider"; MX vs ATV
 	# style) hands off he reads the lip: one that height needs about ABSORB_V0 + ABSORB_VH x its height (m/s) to clear;
 	# going faster than that he soaks it up instead (legs and arms take the lip's throw, the bike stays low and quick:
@@ -2957,6 +2979,14 @@ func _pop_along(dv: float) -> void:
 	var k := sqrt(sp * sp + dv * dv) / sp
 	v *= k; vy *= k
 
+static var _OLD_SPIN := OS.get_environment("BMX_OLD_SPIN") != ""
+const SPIN_EDGE := 0.85     # stick to the side this far into a lip = a spin wound up (less = a whip)
+const SPIN_AIR_ONLY := 0.35 # share of the spin rate the stick gives from the air alone (no wind-up at the lip)
+const SPIN_OPEN := 3.5      # /s: let go of a wound spin, it eases out this fast (the rider opens up)
+const FLIP_AIR_ONLY := 0.35 # share of the flip rate without a throw at the lip
+var spin_load := 0.0        # -1..1: a spin wound up into the lip ahead
+var _spin_in := 0.0         # this flight's spin wind-up
+var _flip_in := 0.0         # this flight's flip throw (-1..1, + = back)
 static var _OLD_POPSNAP := OS.get_environment("BMX_OLD_POPSNAP") != ""
 var _pop_latch := false
 static var _OLD_NOSEREF := OS.get_environment("BMX_OLD_NOSEREF") != ""

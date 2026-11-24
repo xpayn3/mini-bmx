@@ -1893,6 +1893,21 @@ func _autotest(seconds: float) -> void:
 				if on5: Input.action_press("body_left", wx)
 				else: Input.action_release("body_left")
 				if ph2.air and int(el * 20) % 2 == 0 and Env.s("BMX_BODY_PRINT") != "": print("WHIPT t=%.2f load=%.2f whip_in=%.2f air_tw=%.0f deg" % [ph2.air_time, ph2.whip_load, ph2._whip_in, rad_to_deg(ph2.air_tw)])
+			elif body_t.begins_with("spinlip") or body_t.begins_with("spinair") or body_t.begins_with("fliplip") or body_t.begins_with("flipair"):
+				# tests (spins / flips): the stick to the left edge (spin) / pulled back (back flip), held from the lip spotted
+				# ahead (*lip) or only in the air (*air), let go once ~300 deg round (a 360 / a back flip landed)
+				var is_spin: bool = body_t.begins_with("spin")
+				var from_lip: bool = body_t.ends_with("lip")   # ("flipair" contains "lip")
+				var turned: float = absf(ph2.spin_acc) if is_spin else absf(ph2.flip_acc)
+				var on7: bool = (ph2.air and (from_lip or ph2.air_time > 0.08) and turned < TAU - 1.0) or (from_lip and not ph2.air and ph2.lip_state == 2 and ph2.lip_last < 0.4)
+				if Env.s("BMX_BODY_PRINT") != "" and not ph2.air and ph2.lip_state == 2: print("SPINLIP on=%s back=%.2f body_in=%.2f crouch=%.2f throw=%.2f lip=%.2f" % [on7, Input.get_action_strength("body_back"), ph2.body_in, ph2.crouch, ph2.throw_v, ph2.lip_last])
+				if is_spin:
+					if on7: Input.action_press("body_left", 1.0)
+					else: Input.action_release("body_left")
+				else:
+					if on7: Input.action_press("body_back", 1.0)
+					else: Input.action_release("body_back")
+				if ph2.air and int(el * 10) % 2 == 0 and Env.s("BMX_BODY_PRINT") != "": print("SPINT t=%.2f spin=%.0f flip=%.0f spin_in=%.2f flip_in=%.2f yaw=%.2f air_w=%.2f" % [ph2.air_time, rad_to_deg(ph2.spin_acc), rad_to_deg(ph2.flip_acc), ph2._spin_in, ph2._flip_in, ph2.stick_yaw, ph2.air_w])
 			elif body_t == "lean": Input.action_press("body_left", 1.0)
 			elif body_t == "both":   # both sticks: the right stick leans the way the left stick steers (+ hand wobble)
 				var s_l := Input.get_action_strength("steer_left") - Input.get_action_strength("steer_right")
