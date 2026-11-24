@@ -274,11 +274,19 @@ static func _rock_key(gx: int, gz: int) -> int:
 
 
 ## what you ride on: ground, a wooden deck, a rope bridge's deck, and a dome over every rock / log / stump of loaded chunks
+## ruts (world/ruts.gd): the C# field and the area anything was dug in (x0, z0, x1, z1); every ground height the
+## physics reads near the bike subtracts the depth there
+var rut_field = null
+var rut_box := Vector4(INF, INF, -INF, -INF)
+func rut_at(x: float, z: float) -> float:
+	if rut_field == null or x < rut_box.x or z < rut_box.y or x > rut_box.z or z > rut_box.w: return 0.0
+	return rut_field.Depth(x, z)
+
 func height(x: float, z: float) -> float:
 	var g := _height0(x, z)
 	if not ropes.is_empty():
 		g = maxf(g, _rope_deck(x, z))
-	return g
+	return g - rut_at(x, z)
 
 
 func _rope_deck(x: float, z: float) -> float:
@@ -402,7 +410,7 @@ func deck_height(x: float, z: float) -> float:
 	var g: float = fcs.deck(x, z) if fcs != null else field.deck(x, z)
 	if not ropes.is_empty():
 		g = maxf(g, _rope_deck(x, z))
-	return g
+	return g - rut_at(x, z)
 
 
 ## 0 grass, 1 trail, 2 water, 3 sand (beaches, dunes)
@@ -1142,7 +1150,8 @@ func mesh_height(x: float, z: float) -> float:
 
 ## the highest solid thing drawn here: the ground mesh, a wooden deck, or a rock / log / stump dome
 func top_height(x: float, z: float) -> float:
-	return maxf(height(x, z), mesh_height(x, z))
+	var r := rut_at(x, z)
+	return maxf(height(x, z) + r, mesh_height(x, z)) - r   # (the drawn mesh, dug in too)
 
 ## BikeRig.tyre_depth's whole sample loop over top_height in one C# call (it was ~30-50 GDScript -> C# calls
 ## per tyre, up to ~22 tyres a frame). null = do it in GDScript (no C#, a rope bridge near, or a level with

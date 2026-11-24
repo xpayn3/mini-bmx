@@ -3,6 +3,7 @@ shader_type spatial;
 // thin lines every 1 m, bold every 5 m, and height contours every 0.25 m (bold every 1 m) on anything built up,
 // so heights / distances / angles read off a screenshot.
 render_mode cull_back, diffuse_burley, specular_schlick_ggx;
+#include "res://shaders/ruts.gdshaderinc"
 
 uniform float line_1m = 0.18;      // darkening of the 1 m lines
 uniform float line_5m = 0.38;
@@ -45,7 +46,11 @@ void fragment() {
 	// a little world noise so the flat isn't plastic
 	float n = fract(sin(dot(floor(wpos.xz * 6.0), vec2(12.9898, 78.233))) * 43758.5453);
 	c *= 0.94 + 0.06 * n;
+	// ruts: the grooves darker, their walls shaded from the dug depth's slope
+	float rd = rut_depth(wpos.xz);
+	c = rut_colour(c, rd);
+	if (rut_win.w > 0.5) NORMAL = normalize((VIEW_MATRIX * vec4(rut_normal(wpos.xz, normalize(wnrm)), 0.0)).xyz);
 	ALBEDO = c * (1.0 - dark);
-	ROUGHNESS = 0.92;
+	ROUGHNESS = 0.92 - 0.12 * smoothstep(0.01, 0.06, rd);   // (packed groove bottom: a touch smoother)
 	SPECULAR = 0.3;
 }

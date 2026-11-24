@@ -289,6 +289,7 @@ func _build_tracks() -> void:
 	track_mi.mesh = track_mesh
 	track_mi.custom_aabb = AABB(Vector3(-1e5, -1e5, -1e5), Vector3(2e5, 2e5, 2e5))
 	track_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	track_mi.visible = Env.s("BMX_NO_TRACKS") == ""   # tests: hide the drawn tyre tracks (e.g. to judge the ruts alone)
 	add_child(track_mi)
 	# the surface's real byte layout (position stream / attribute stream with the colour)
 	var fmt := track_mesh.surface_get_format(0)
