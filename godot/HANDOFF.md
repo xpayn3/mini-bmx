@@ -2156,8 +2156,29 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   trail camera, bend alerts and the bail tap work. Demo: `levels/demo_descent.tscn` (`-s res://tools/make_demo_level.gd`
   rewrites it). Test: `BMX_DEMO=1 BMX_CAM=chase -- --level=res://levels/demo_descent.tscn --autotest=40` (rides it all,
   no crash). Note: very short `--autotest` (< ~12 s) runs only drew 2 frames here.
-- Not yet: grass carpet / trees / rocks (no chunk data on levels), the world's trail shader (ground is vertex colour),
-  baked lighting.
+- **Step 2 (pieces, same day)**: `BmxPiece` (base: `follow_trail` = snapped onto the nearest trail point facing down it,
+  `standalone` = a ramp on the ground as it is: its own mesh + collision, the ground not levelled / blended) with
+  `BmxJump` (every JumpDesign control in the Inspector + `auto_speed` = designed for the speed riders carry there,
+  `speed_scale`), `BmxDrop` (climb onto a deck, optional square edge, landing face following a flight at the design speed,
+  bottom bend), `BmxRocks` (a rock garden: the world's rock meshes + dome colliders; clean line, density, sizes, spread),
+  `BmxGate` (start = the spawn, checkpoint, finish; visual, timing comes with publishing). `LevelField._structure` levels a
+  structure's footprint to the ground's grade (unless standalone) and stamps it; `height()` is the structure's EXACT shape
+  on its footprint (the drawn grid is tucked 14 cm under it, `struct_mesh` draws it at 0.1 m). JumpDesign sizes for flat
+  ground, so on a grade the auto deck / gap is fitted by bisection and the auto landing angle from the flight over the
+  real ground (`_flight`, `_trial`); the editor prints per jump where 85 / 100 / 115 % land + EFH and draws the arcs.
+  Measured: every auto jump on both demos lands on its landing at design speed, EFH 0.0-0.1 m. Route features (`lf.route`,
+  dictionaries with their own `v` / `vmin`: `DemoPilot` uses them) + rock runs in the TrailCourse (KD ROCKS).
+  `BmxLevel.flat_ground` = flat (a park; bumps only if rough > 0). Editor: PLACE mode (dock: Jump / Drop / Rocks / Gate:
+  a ghost follows the mouse, snapped to the grid, Q / E turn it, click drops one, right click / Esc ends), DRAG any piece
+  on the ground (snapped; Alt + drag turns; one undo step), snap on / off, grid size (drawn on the preview ground:
+  `grid_cell` in `playground_ground.gdshader`), rotation step, Shift = free. `BmxLevel` polls a signature of all inputs
+  (0.3 s), so inspector edits, gizmo drags and undo all rebuild the preview. Demos: `demo_descent.tscn` (start gate,
+  table, rocks, gap, finish on its straights), `demo_park.tscn` (flat, no trail, standalone dirt table / wood kicker /
+  gap / wood drop); both from `tools/make_demo_level.gd`. Ridden: the demo AI down the descent, 45 s, no crash; straight
+  through the park, no crash.
+- Not yet: grass carpet / trees (no chunk data on levels), the world's trail shader (ground is vertex colour), gate
+  timing, baked lighting (step 3: LightmapGI + shadowmask, short sharp real-time shadows, baked reflection probes).
+  A wooden kicker's square back: the rear wheel reads it as a tiny second take-off (`natural=true` TAKEOFF).
 
 ### Developer view of the test playground (`scripts/levels/ride_diag.gd`) - telemetry + sliders for riding code
 - **Only in the test playground** (user decision 2026-11-21: developer tools live in that level, normal rides have none).

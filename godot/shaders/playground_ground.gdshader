@@ -6,6 +6,7 @@ render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 #include "res://shaders/ruts.gdshaderinc"
 
 uniform float line_1m = 0.18;      // darkening of the 1 m lines
+uniform float grid_cell = 1.0;     // fine line spacing (m): the level builder sets its snap grid here (bold = 5 cells)
 uniform float line_5m = 0.38;
 uniform float contour = 0.30;
 uniform float grid_fade = 140.0;   // lines fade out by this distance (no moire far away)
@@ -35,8 +36,8 @@ void fragment() {
 	float dist = length(wpos - (INV_VIEW_MATRIX * vec4(0.0, 0.0, 0.0, 1.0)).xyz);
 	float fade = 1.0 - smoothstep(grid_fade * 0.6, grid_fade, dist);
 	// the grid is laid on the ground seen from above: on steep faces it is the plan grid projected (still metres in x / z)
-	float g1 = grid_line(wpos.xz, 1.0, 0.9);
-	float g5 = grid_line(wpos.xz, 5.0, 1.4);
+	float g1 = grid_line(wpos.xz, grid_cell, 0.9);
+	float g5 = grid_line(wpos.xz, grid_cell * 5.0, 1.4);
 	float dark = max(g1 * line_1m, g5 * line_5m) * fade;
 	// contours on built ground (y away from 0)
 	float built = smoothstep(0.02, 0.08, abs(wpos.y));

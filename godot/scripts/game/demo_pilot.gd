@@ -120,11 +120,13 @@ func tick(game, dt: float) -> Dictionary:
 		for q in range(lo, mini(lo + 3, rf.size())):
 			var fd: float = rf[q].s - s_here
 			if fd > SCAN: break
-			var vf := minf(vmax, float(FEAT_V.get(str(rf[q].type), 12.0)) * pace)
+			var own = rf[q].get("v")   # (a built level's jump: its own design speed)
+			var vf := minf(vmax, (float(own) if own != null else float(FEAT_V.get(str(rf[q].type), 12.0))) * pace)
 			var brake_d := maxf(0.0, fd - 14.0)   # be at the feature speed 14 m before it
 			tgt = minf(tgt, sqrt(vf * vf + 2.0 * DECEL * brake_d))
 			if fd < 16.0 and rf[q].s + rf[q].len > s_here - 4.0: near_feat = true
-			var fmin: float = float(FEAT_MIN.get(str(rf[q].type), 0.0))   # a gap needs a run-up, or it drops in
+			var own_min = rf[q].get("vmin")
+			var fmin: float = float(own_min) if own_min != null else float(FEAT_MIN.get(str(rf[q].type), 0.0))   # a gap needs a run-up, or it drops in
 			if fmin > 0.0 and fd < 40.0: floor_v = maxf(floor_v, minf(fmin, vmax))
 	tgt = maxf(tgt, floor_v)
 	target_v = tgt

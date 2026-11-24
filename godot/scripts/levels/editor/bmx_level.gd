@@ -17,6 +17,8 @@ signal rebuilt(summary: String)
 	set(v): width = v; _queue()
 @export_range(0.0, 400.0, 1.0, "suffix:m") var drop := 70.0:
 	set(v): drop = v; _queue()
+@export var flat_ground := false:   ## a flat spot (a park, a jump line): no slope, no valley; bumps only if rough > 0
+	set(v): flat_ground = v; _queue()
 @export_range(-1.0, 1.0, 0.05) var steep_top := 0.3:
 	set(v): steep_top = v; _queue()
 @export_range(0.0, 80.0, 0.5, "suffix:m") var side_rise := 18.0:
@@ -37,6 +39,40 @@ var _wait := -1.0
 var _ground: MeshInstance3D
 var _far: MeshInstance3D
 var _line: MeshInstance3D
+var _pieces_root: Node3D
+var _grid_mat: ShaderMaterial
+
+
+## the editor's snap grid drawn on the preview ground (fine lines every `cell` m, bold every 5)
+func show_grid(cell: float) -> void:
+	if _grid_mat: _grid_mat.set_shader_parameter("grid_cell", maxf(0.05, cell))
+
+
+## the ground (and structures) under a ray from the editor camera: level space point, or null
+func ray_ground(from: Vector3, dir: Vector3):
+	if field == null: return null
+	var inv := global_transform.affine_inverse()
+	var o := inv * from
+	var d := (inv.basis * dir).normalized()
+	var t := 0.0
+	var step := 0.5
+	var prev_above := true
+	while t < 2500.0:
+		var p := o + d * t
+		var g := field.height(p.x, p.z)
+		if p.y <= g:
+			if not prev_above: return null
+			var lo := t - step; var hi := t   # refine
+			for k in 12:
+				var m := (lo + hi) * 0.5
+				var q := o + d * m
+				if q.y <= field.height(q.x, q.z): hi = m
+				else: lo = m
+			var r := o + d * hi
+			return Vector3(r.x, field.height(r.x, r.z), r.z)
+		t += step
+		step = minf(4.0, step * 1.04)
+	return null
 
 
 func _ready() -> void:
@@ -57,10 +93,23 @@ func trail() -> BmxTrail:
 func make_field() -> LevelField:
 	var f := LevelField.new()
 	f.length = length; f.width = width; f.drop = drop; f.steep_top = steep_top; f.side_rise = side_rise
-	f.rough = rough; f.rough_scale = rough_scale; f.noise_seed = noise_seed
+	f.rough = rough; f.rough_scale = rough_scale; f.noise_seed = noise_seed; f.flat = flat_ground
 	var t := trail()
 	if t: t.fill(f)
+	f.pieces = []
+	for pc in pieces(): f.pieces.append(pc.piece())
 	return f
+
+
+## every BmxPiece under the level (any depth: folders are fine)
+func pieces() -> Array:
+	var out := []
+	var stack: Array = get_children()
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		if n is BmxPiece: out.append(n)
+		if not (n is BmxPiece): stack.append_array(n.get_children())
+	return out
 
 
 func _queue() -> void:
@@ -68,10 +117,24 @@ func _queue() -> void:
 	_wait = 0.35   # (rebuild once the slider / handle stops moving)
 
 
+var _poll := 0.0
+var _sig := 0
 func _process(dt: float) -> void:
+	# any change (inspector, gizmos, undo / redo) shows in the inputs: rebuild when they change
+	_poll -= dt
+	if _poll <= 0.0 and _wait < 0.0:
+		_poll = 0.3
+		var sg := _signature()
+		if sg != _sig: _sig = sg; _wait = 0.25
 	if _wait < 0.0: return
 	_wait -= dt
 	if _wait < 0.0: rebuild_preview()
+
+
+func _signature() -> int:
+	var f := make_field()
+	return hash(str([f.flat, f.length, f.width, f.drop, f.steep_top, f.side_rise, f.rough, f.rough_scale, f.noise_seed, f.trail_in,
+		f.trail_width, f.blend, f.berms, f.bank_max_deg, f.smooth_len, f.follow, f.start_speed, f.pieces]))
 
 
 func rebuild_preview() -> void:
@@ -87,13 +150,32 @@ func rebuild_preview() -> void:
 		m.shader = preload("res://shaders/playground_ground.gdshader")
 		m.set_shader_parameter("contour", 0.0)
 		m.set_shader_parameter("line_1m", 0.08)
+		_grid_mat = m
 		m.set_shader_parameter("line_5m", 0.2)
 		_ground.material_override = m
 		_far.material_override = m
 	_ground.mesh = field.ground_mesh(1)
 	_far.mesh = field.far_mesh(700.0, 16.0)
 	_line.mesh = _trail_lines()
+	# the pieces: snapped onto the trail where they follow it, then drawn
+	for pc in pieces():
+		var p: Dictionary = pc.piece()
+		if pc.follow_trail and field.TX.size() > 1:
+			var i := field.nearest(p.pos.x, p.pos.y)
+			if i >= 0: pc.place_at(Vector2(field.TX[i], field.TZ[i]), Vector2(field.DX[i], field.DZ[i]), field.TY[i])
+		else:   # (placed freely: kept where it is, standing on the ground)
+			pc.place_at(p.pos, p.dir, field.grid_height(p.pos.x, p.pos.y))
+	if _pieces_root: _pieces_root.queue_free()
+	_pieces_root = Node3D.new()
+	_pieces_root.name = "Preview pieces"
+	add_child(_pieces_root, false, Node.INTERNAL_MODE_BACK)
+	LevelVisuals.build(field, _pieces_root, false)
+	_sig = _signature()
 	var s := field.summary() + " · preview %d ms" % (Time.get_ticks_msec() - t0)
+	var jr := field.jump_report()
+	if jr != "": s += "
+
+" + jr
 	rebuilt.emit(s)
 
 
@@ -139,6 +221,17 @@ func _trail_lines() -> ImmediateMesh:
 	var ep := Vector3(f.TX[e], f.TY[e], f.TZ[e])
 	im.surface_set_color(Color(1.0, 1.0, 1.0))
 	im.surface_add_vertex(ep); im.surface_add_vertex(ep + Vector3(0, 4, 0))
+	# every jump's flights at 85 / 100 / 115 % of its design speed (blue / green / red), a post where each lands
+	var fc := [Color(0.3, 0.6, 1.0), Color(0.2, 1.0, 0.3), Color(1.0, 0.3, 0.25)]
+	for st in f.structs:
+		if not st.has("flights"): continue
+		for k in 3:
+			var pts: PackedVector3Array = st.flights[k].pts
+			im.surface_set_color(fc[k])
+			for q in range(1, pts.size(), 2):
+				im.surface_add_vertex(pts[q - 1]); im.surface_add_vertex(pts[q])
+			if pts.size() > 0:
+				im.surface_add_vertex(pts[pts.size() - 1]); im.surface_add_vertex(pts[pts.size() - 1] + Vector3(0, 1.2, 0))
 	im.surface_end()
 	return im
 

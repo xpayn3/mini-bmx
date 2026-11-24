@@ -18,6 +18,7 @@ var side_rise := 18.0      # m the edges rise above the middle (the slope is a s
 var rough := 3.0           # m of rolling bumps
 var rough_scale := 45.0    # m between bumps
 var noise_seed := 1
+var flat := false          # flat ground (a park / jump spot): no slope, no valley; only the bumps (rough) if any
 
 # ---- the trail ----------------------------------------------------------------------------------------------
 var trail_in := PackedVector2Array()   # (x, z) points along the designer's spline, any spacing
@@ -44,6 +45,18 @@ var x0 := 0.0; var z0 := 0.0
 var nx := 0; var nz := 0
 var H := PackedFloat32Array()      # heights
 var S := PackedByteArray()         # 1 = trail dirt, 2 = berm face (clay), 0 = land
+var JM := PackedByteArray()        # 1 = under a built structure (jump / drop): its own exact shape + fine mesh there
+
+# ---- pieces (BmxPiece.piece() dictionaries in; resolved by bake) -------------------------------------------------
+var pieces: Array = []
+var structs: Array = []            # jumps + drops: {name, kind, o, dir, side, L, hs, width, wood, y0, grade, reach, rect, d?, flights?}
+var rocks: Array = []              # rock colliders {x, z, r, base, top, sink, sx, sy, sc, yaw} (Terrain's dome formula)
+var _rock_cells := {}
+const ROCK_CELL := 2.0
+var gates: Array = []              # {gate, pos, dir, span, i}
+var route: Array = []              # TrailCourse route features for the demo AI / HUD alerts: {s, len, type, x, z, dx, dz, v, vmin}
+var rock_runs: Array = []          # [i0, i1] trail sample ranges with a rock garden
+const SIDE := 1.0                  # side batter of built dirt (m down per m out), as the playground's
 var _noise: FastNoiseLite
 
 
@@ -76,6 +89,7 @@ func _profile(x: float) -> float:
 
 
 func base(x: float, z: float) -> float:
+	if flat: return rough * _noise.get_noise_2d(x, z)
 	var hw := maxf(10.0, width * 0.5)
 	var q := z / hw
 	var side := side_rise * minf(q * q, 4.0 + absf(q))   # (a valley; keeps rising gently past the edges)
@@ -173,14 +187,17 @@ func bake(grid_step := 0.5) -> void:
 	x0 = -margin; z0 = -width * 0.5 - 10.0
 	nx = int(ceil((length + 2.0 * margin) / step)) + 1
 	nz = int(ceil((width + 20.0) / step)) + 1
-	H.resize(nx * nz); S.resize(nx * nz); S.fill(0)
+	H.resize(nx * nz); S.resize(nx * nz); S.fill(0); JM.resize(nx * nz); JM.fill(0)
+	structs = []; rocks = []; _rock_cells = {}; gates = []; route = []; rock_runs = []
 	for j in nz:
 		var z := z0 + j * step
 		var row := j * nx
 		for i in nx:
 			H[row + i] = base(x0 + i * step, z)
 	var n := TX.size()
-	if n < 2: return
+	if n < 2:
+		_bake_pieces()   # (no trail: a flat park / free pieces only)
+		return
 	# the trail: every grid point within reach of a segment takes the nearest segment's cross section
 	var hw := trail_width * 0.5
 	var R := hw + blend
@@ -227,10 +244,50 @@ func bake(grid_step := 0.5) -> void:
 			var land := H[idx]
 			H[idx] = lerpf(cut[idx], land, t)
 			if s < hw + 1.6 and absf(cut[idx] - land) > 0.45: S[idx] = 2   # (a built-up berm / dug cut face right beside it: bare clay)
+	_bake_pieces()
 
 
-## height anywhere (bilinear in the grid; the land past it)
+## height anywhere: a structure's own exact shape where one stands, else the grid (bilinear), the land past it
 func height(x: float, z: float) -> float:
+	var g := NAN
+	for st in structs:
+		if (st.rect as Rect2).has_point(Vector2(x, z)):
+			var e := _struct_at(st, x, z)
+			if is_nan(e): continue
+			if st.standalone:   # (on the ground as it is: the ramp where it stands, else the ground)
+				if is_nan(g): g = grid_height(x, z)
+				g = maxf(g, e)
+			else:
+				return e
+	return g if not is_nan(g) else grid_height(x, z)
+
+
+## the height with a dome over every rock (Terrain.height()'s formula): what the tyres ride
+func height_rocks(x: float, z: float) -> float:
+	var g := height(x, z)
+	for c in rocks_near(x, z):
+		var dx: float = x - c.x
+		var dz: float = z - c.z
+		var q: float = (dx * dx + dz * dz) / (c.r * c.r)
+		if q < 1.0:
+			var hh: float = Terrain.dome_h(c.base, c.top, c.sink, q)
+			if hh > g: g = hh
+	return g
+
+
+func rocks_near(x: float, z: float) -> Array:
+	return _rock_cells.get(Vector2i(floori(x / ROCK_CELL), floori(z / ROCK_CELL)), [])
+
+
+func jump_mask(x: float, z: float) -> float:
+	for st in structs:
+		if (st.rect as Rect2).has_point(Vector2(x, z)):
+			var l := _local(st, x, z)
+			if _at_local(st, l.x, l.y) > 0.01: return 1.0
+	return 0.0
+
+
+func grid_height(x: float, z: float) -> float:
 	var fx := (x - x0) / step; var fz := (z - z0) / step
 	if fx < 0.0 or fz < 0.0 or fx >= nx - 1 or fz >= nz - 1 or H.is_empty(): return base(x, z)
 	var i := int(fx); var j := int(fz)
@@ -297,7 +354,7 @@ func ground_mesh(every := 2) -> ArrayMesh:
 			var gi := mini(i * every, nx - 1); var gj := mini(j * every, nz - 1)
 			var k := gj * nx + gi
 			var x := x0 + gi * step; var z := z0 + gj * step
-			V[j * cx + i] = Vector3(x, H[k], z)
+			V[j * cx + i] = Vector3(x, H[k] - (0.14 if JM[k] == 1 else 0.0), z)   # (a structure's own fine mesh covers it)
 	for j in cz:
 		for i in cx:
 			var k := j * cx + i
@@ -382,7 +439,379 @@ func to_course() -> TrailCourse:
 		tc.E[q] = TY[i]
 		tc.VA[q] = TV[i]
 		tc.KD[q] = TrailCourse.ROAD
+	for rr in rock_runs:
+		for q in range(int(rr[0] / every), mini(m, int(rr[1] / every) + 1)): tc.KD[q] = TrailCourse.ROCKS
 	tc.KD[0] = TrailCourse.START; tc.KD[m - 1] = TrailCourse.FINISH
 	tc.n = m
 	tc.length = (m - 1) * TrailCourse.STEP
 	return tc
+
+
+# ---- pieces --------------------------------------------------------------------------------------------------
+static func _side(d: Vector2) -> Vector2:
+	return Vector2(-d.y, d.x)   # (right of the way it is ridden: the playground ramps' side())
+
+
+func _local(st: Dictionary, x: float, z: float) -> Vector2:
+	var q := Vector2(x, z) - (st.o as Vector2)
+	return Vector2(q.dot(st.dir), q.dot(st.side))
+
+
+## a structure's height over its plane at (u along, v across); 0 off it
+func _at_local(st: Dictionary, uu: float, vv: float) -> float:
+	if uu <= 0.0 or uu >= float(st.L): return 0.0
+	var hh := JumpDesign.sample(st.hs, uu)
+	var hw := float(st.width) * 0.5
+	if st.wood: return hh if absf(vv) <= hw else 0.0
+	return maxf(0.0, hh - maxf(0.0, absf(vv) - hw) * SIDE)
+
+
+## the exact ground on a structure's levelled footprint (NAN outside it: the grid there)
+func _struct_at(st: Dictionary, x: float, z: float) -> float:
+	var l := _local(st, x, z)
+	if l.x < -0.5 or l.x > float(st.L) + 0.5 or absf(l.y) > float(st.reach): return NAN
+	var jh := _at_local(st, l.x, l.y)
+	if st.standalone and jh <= 0.002: return NAN
+	return float(st.y0) + float(st.grade) * l.x + jh
+
+
+## where a piece goes: on the trail (follow) or where it was put; -> [pos, dir, trail index]
+func _place(p: Dictionary) -> Array:
+	var pos: Vector2 = p.pos
+	var dir: Vector2 = p.dir
+	var i := nearest(pos.x, pos.y)
+	if p.follow and i >= 0:
+		pos = Vector2(TX[i], TZ[i]); dir = Vector2(DX[i], DZ[i])
+	return [pos, dir, i]
+
+
+func _speed_at(i: int, p: Dictionary) -> float:
+	if p.get("auto_v", false) and i >= 0: return clampf(TV[i] * float(p.get("v_k", 1.0)), 4.0, 30.0)
+	return float(p.get("v", 12.0))
+
+
+func _bake_pieces() -> void:
+	for p in pieces:
+		match str(p.get("kind", "")):
+			"jump": _add_jump(p)
+			"drop": _add_drop(p)
+			"rocks": _add_rocks(p)
+			"gate": _add_gate(p)
+	route.sort_custom(func(a, b): return a.s < b.s)
+
+
+## a structure's frame from where it starts, levelled to the ground's grade along it, stamped into the grid
+func _structure(p: Dictionary, start: Vector2, dir: Vector2, hs: PackedFloat32Array, width_m: float, wood: bool, trial := false) -> Dictionary:
+	var L := (hs.size() - 1) * JumpDesign.DS
+	var st := {"name": p.get("name", ""), "kind": p.kind, "o": start, "dir": dir, "side": _side(dir), "L": L, "hs": hs,
+		"width": width_m, "wood": wood, "standalone": bool(p.get("standalone", false))}
+	var top := 0.0
+	for hh in hs: top = maxf(top, hh)
+	st["reach"] = width_m * 0.5 + (0.0 if wood else top * SIDE) + 0.3
+	var y0 := grid_height(start.x, start.y)
+	var e := start + dir * L
+	st["y0"] = y0
+	st["grade"] = (grid_height(e.x, e.y) - y0) / maxf(1.0, L)
+	var R := float(st.reach) + 3.0
+	var sd: Vector2 = st.side
+	var a := start - sd * R - dir * 4.0
+	var rect := Rect2(a, Vector2.ZERO)
+	for c in [start + sd * R - dir * 4.0, start - sd * R + dir * (L + 4.0), start + sd * R + dir * (L + 4.0)]: rect = rect.expand(c)
+	st["rect"] = rect.grow(0.5)
+	if trial or st.standalone:   # (a trial fit: nothing stamped; standalone: a ramp on the ground, the ground left as it is)
+		if not trial: structs.append(st)
+		return st
+	# the grid: levelled to the plane under the footprint (blended out over 3-4 m), the shape on top
+	var i0 := maxi(0, int(floor((rect.position.x - x0) / step))); var i1 := mini(nx - 1, int(ceil((rect.end.x - x0) / step)))
+	var j0 := maxi(0, int(floor((rect.position.y - z0) / step))); var j1 := mini(nz - 1, int(ceil((rect.end.y - z0) / step)))
+	for j in range(j0, j1 + 1):
+		for i in range(i0, i1 + 1):
+			var x := x0 + i * step; var z := z0 + j * step
+			var l := _local(st, x, z)
+			var fu := smoothstep(-4.0, 0.0, l.x) * (1.0 - smoothstep(L, L + 4.0, l.x))
+			var fv := 1.0 - smoothstep(float(st.reach), float(st.reach) + 3.0, absf(l.y))
+			var w := fu * fv
+			if w <= 0.0: continue
+			var idx := j * nx + i
+			var plane := y0 + float(st.grade) * l.x
+			H[idx] = lerpf(H[idx], plane, w)
+			var jh := _at_local(st, l.x, l.y)
+			if jh > 0.002:
+				H[idx] = plane + jh; S[idx] = 1
+			if l.x > -0.4 and l.x < L + 0.4 and absf(l.y) < float(st.reach): JM[idx] = 1
+	structs.append(st)
+	return st
+
+
+func _add_jump(p: Dictionary) -> void:
+	var pl := _place(p)
+	var lip: Vector2 = pl[0]; var dir: Vector2 = pl[1]; var i: int = pl[2]
+	var prm: Dictionary = (p.prm as Dictionary).duplicate()
+	if p.get("auto_v", false): prm["v"] = _speed_at(i, p)
+	var d := JumpDesign.build(prm)
+	var start := lip - dir * float(d.lip_u)
+	var wood := str(prm.get("build", "dirt")) == "wood"
+	var wdt := float(prm.get("width", 3.0))
+	# JumpDesign sizes the deck / gap and the landing for flat ground. On a grade the ground falls away (or rises)
+	# under the flight: fit what was left on auto to the flight over THIS ground (a trial structure, not stamped)
+	var auto_len := float(prm.get("deck" if str(prm.kind) == "table" else "gap", 0.0)) <= 0.0 and str(prm.kind) != "kicker"
+	var auto_ang := float(prm.get("land_deg", 0.0)) <= 0.0 and str(prm.kind) != "kicker"
+	if auto_len or auto_ang:
+		var key := "deck" if str(prm.kind) == "table" else "gap"
+		for round in 2:
+			if auto_len:   # bisection: a longer deck / gap moves the aim point further, the flight stays where it is
+				var lo := 0.5; var hi := 45.0
+				for it in 16:
+					var mid := (lo + hi) * 0.5
+					prm[key] = mid
+					d = JumpDesign.build(prm)
+					start = lip - dir * float(d.lip_u)
+					var fl := _flight(_trial(p, start, dir, d, wdt, wood), float(prm.v))
+					var u_aim := float(d.land0) + clampf(float(prm.get("aim", 0.2)), 0.0, 1.0) * (float(d.land1) - float(d.land0))
+					var u_got := float(d.lip_u) + float(fl.dist)
+					if not is_finite(u_got) or u_got > u_aim: lo = mid
+					else: hi = mid
+				prm[key] = (lo + hi) * 0.5
+				d = JumpDesign.build(prm)
+				start = lip - dir * float(d.lip_u)
+			if auto_ang and round == 0:   # the landing's angle: the flight's there, relative to the plane it sits on
+				var tr := _trial(p, start, dir, d, wdt, wood)
+				var fl := _flight(tr, float(prm.v))
+				if fl.has("angle"):
+					prm["land_deg"] = clampf(float(fl.angle) - JumpDesign.LAND_SOFT + rad_to_deg(atan(float(tr.grade))), 12.0, JumpDesign.LAND_MAX_DEG)
+					d = JumpDesign.build(prm)
+					start = lip - dir * float(d.lip_u)
+	var st := _structure(p, start, dir, d.h, wdt, wood)
+	st["d"] = d
+	st["v"] = float(prm.v)
+	st["lip"] = lip
+	st["flights"] = [_flight(st, float(prm.v) * 0.85), _flight(st, float(prm.v)), _flight(st, float(prm.v) * 1.15)]
+	var kind := str(prm.get("kind", "table"))
+	var si := nearest(start.x, start.y)
+	if si >= 0:
+		route.append({"s": si * DS, "len": float(st.L), "type": kind if kind != "gap" else "gap", "x": start.x, "z": start.y,
+			"dx": dir.x, "dz": dir.y, "v": float(prm.v), "vmin": float(prm.v) * 0.95 if kind != "kicker" else 0.0})
+
+
+func _trial(p: Dictionary, start: Vector2, dir: Vector2, d: Dictionary, wdt: float, wood: bool) -> Dictionary:
+	var tr := _structure(p, start, dir, d.h, wdt, wood, true)
+	tr["d"] = d
+	return tr
+
+
+## a rider at run-in speed vr over a jump on its real ground (the plane's grade and what is past it): the path flown
+## and where / how hard he lands. Point mass, no pop, no drag (like JumpDesign.predict)
+func _flight(st: Dictionary, vr: float) -> Dictionary:
+	var d: Dictionary = st.d
+	var H0 := float(d.lip_h)
+	var lu := float(d.lip_u)
+	var grade := float(st.grade)
+	var a := atan(tan(deg_to_rad(float(d.lip_deg))) + grade)
+	var v2 := vr * vr - 2.0 * G * H0 - JumpDesign.FACE_LOSS * H0 * vr - 2.0 * G * grade * lu
+	var vl := sqrt(maxf(0.1, v2))
+	var dir: Vector2 = st.dir
+	var p0: Vector2 = (st.o as Vector2) + dir * lu
+	var y0 := float(st.y0) + grade * lu + H0
+	var vx := vl * cos(a); var vy := vl * sin(a)
+	var pts := PackedVector3Array()
+	var t := 0.0
+	var dt := 0.01
+	while t < 6.0:
+		t += dt
+		var q := p0 + dir * (vx * t)
+		var y := y0 + vy * t - 0.5 * G * t * t
+		pts.append(Vector3(q.x, y, q.y))
+		var g := height(q.x, q.y)
+		if not structs.has(st):
+			var e := _struct_at(st, q.x, q.y)
+			if not is_nan(e): g = maxf(g, e) if st.standalone else e
+		if vx * t > 0.3 and y <= g:
+			var l := _local(st, q.x, q.y)
+			var spot := "past it"
+			if str(d.kind) != "kicker":
+				if l.x < float(d.land0) - 0.05: spot = "deck" if str(d.kind) == "table" else "gap"
+				elif l.x <= float(d.land1): spot = "landing"
+			# speed into the ground, square to it -> equivalent fall height
+			var gx := (height(q.x + 0.1, q.y) - height(q.x - 0.1, q.y)) / 0.2
+			var gz := (height(q.x, q.y + 0.1) - height(q.x, q.y - 0.1)) / 0.2
+			var n := Vector3(-gx, 1.0, -gz).normalized()
+			var vel := Vector3(dir.x * vx, vy - G * t, dir.y * vx)
+			var vn := -vel.dot(n)
+			return {"v": vr, "pts": pts, "dist": vx * t, "air": t, "spot": spot, "efh": vn * vn / (2.0 * G),
+				"angle": rad_to_deg(atan2(G * t - vy, vx))}
+	return {"v": vr, "pts": pts, "dist": INF, "air": t, "spot": "?", "efh": INF}
+
+
+func _add_drop(p: Dictionary) -> void:
+	var pl := _place(p)
+	var start: Vector2 = pl[0]; var dir: Vector2 = pl[1]; var i: int = pl[2]
+	var v := _speed_at(i, p)
+	var hh := float(p.height)
+	var hs := PackedFloat32Array()
+	var ds := JumpDesign.DS
+	# the climb onto the deck (eased), the deck
+	var up := hh / maxf(0.02, float(p.climb))
+	var u := 0.0
+	while u < up:
+		var t := u / up
+		hs.append(hh * t * t * (3.0 - 2.0 * t)); u += ds
+	var deck_n := int(float(p.deck) / ds)
+	for k in deck_n: hs.append(hh)
+	# the edge: a square step, then the face following a flight at v (slope g x / v^2, capped), the bottom bend
+	var edge := clampf(float(p.edge), 0.0, hh * 0.8)
+	var y := hh - edge
+	hs.append(y)
+	var smax := tan(deg_to_rad(float(p.face_deg)))
+	var vb := sqrt(v * v + 2.0 * G * hh)
+	var rb := vb * vb / (2.5 * G)
+	var x := 0.0; var sl := 0.0; var bending := false
+	var guard := 0
+	while y > 0.0 and guard < 8000:
+		guard += 1
+		x += ds
+		var a := atan(sl)
+		if not bending and y <= rb * (1.0 - cos(a)) and sl > 0.0: bending = true
+		if bending:
+			a = maxf(0.0, a - ds / (rb * maxf(0.3, cos(a)))); sl = tan(a)
+			if sl < 1e-3: break
+		else:
+			sl = minf(smax, G * x / (v * v))
+		y -= sl * ds
+		hs.append(maxf(0.0, y))
+	hs.append(0.0); hs.append(0.0)
+	var st := _structure(p, start, dir, hs, float(p.width), str(p.get("build", "dirt")) == "wood")
+	st["v"] = v
+	if i >= 0:
+		route.append({"s": i * DS, "len": float(st.L), "type": "drop", "x": start.x, "z": start.y, "dx": dir.x, "dz": dir.y, "v": v, "vmin": 0.0})
+
+
+func _add_rocks(p: Dictionary) -> void:
+	var pl := _place(p)
+	var i0: int = pl[2]
+	var rng := RandomNumberGenerator.new(); rng.seed = int(p.get("seed", 1)) * 7919 + 17
+	var L := float(p.length)
+	var hw := trail_width * 0.5 + float(p.get("spread", 0.0))
+	var smin := float(p.size_min); var smax := maxf(smin, float(p.size_max))
+	var per := 4.0 * float(p.get("density", 1.0))
+	var start: Vector2 = pl[0]; var dir: Vector2 = pl[1]
+	for k in int(L / 2.0):
+		var along := k * 2.0
+		var c: Vector2; var dd: Vector2
+		if p.follow and i0 >= 0 and TX.size() > 0:
+			var ti := mini(i0 + int(along / DS), TX.size() - 1)
+			c = Vector2(TX[ti], TZ[ti]); dd = Vector2(DX[ti], DZ[ti])
+		else:
+			c = start + dir * along; dd = dir
+		var sd := _side(dd)
+		var line_a := sin(k * 0.23) * hw * 0.55
+		var cnt := int(per) + (1 if rng.randf() < per - int(per) else 0)
+		for q in cnt:
+			var a := (rng.randf() * 2.0 - 1.0) * (hw - 0.15)
+			var du := rng.randf() * 2.0
+			if p.get("clean", true) and absf(a - line_a) < 0.45 and rng.randf() < 0.8: continue
+			var r1 := rng.randf()
+			var sc := lerpf(smin, smax, r1 * r1)
+			var sx := sc * (1.0 + rng.randf() * 0.5); var sy := sc * (0.5 + rng.randf() * 0.35)
+			var w := c + dd * du + sd * a
+			var base_h := height(w.x, w.y)
+			var rk := {"x": w.x, "z": w.y, "r": (sx + sc) * 0.45, "base": base_h, "top": base_h - sc * 0.3 + sy * 0.9, "sink": sc * 0.3,
+				"sx": sx, "sy": sy, "sc": sc, "yaw": rng.randf() * TAU}
+			rocks.append(rk)
+			for gx in range(floori((w.x - rk.r) / ROCK_CELL), floori((w.x + rk.r) / ROCK_CELL) + 1):
+				for gz in range(floori((w.y - rk.r) / ROCK_CELL), floori((w.y + rk.r) / ROCK_CELL) + 1):
+					var key := Vector2i(gx, gz)
+					if not _rock_cells.has(key): _rock_cells[key] = []
+					_rock_cells[key].append(rk)
+	if i0 >= 0: rock_runs.append([i0, mini(TX.size() - 1, i0 + int(L / DS))])
+
+
+func _add_gate(p: Dictionary) -> void:
+	var pl := _place(p)
+	gates.append({"gate": str(p.gate), "pos": pl[0], "dir": pl[1], "i": pl[2], "span": float(p.span), "name": p.get("name", "")})
+
+
+## the start: a start gate's spot if there is one, else the trail's first metres
+func start_stand() -> Vector3:
+	for g in gates:
+		if g.gate == "start":
+			if g.i >= 0: return stand_at(g.i)
+			return Vector3(g.pos.x, atan2(-g.dir.y, g.dir.x), g.pos.y)
+	return stand_at(2)
+
+
+## one line per jump for the editor: design speed, where 85 / 100 / 115 % land
+func jump_report() -> String:
+	var out := []
+	for st in structs:
+		if not st.has("flights"): continue
+		var f: Array = st.flights
+		var parts := []
+		for fl in f: parts.append("%s %.1f m (EFH %.1f)" % [fl.spot, fl.dist, fl.efh])
+		out.append("%s · %.0f km/h · %s\n   85%%: %s\n  100%%: %s\n  115%%: %s" % [st.name, float(st.v) * 3.6, JumpDesign.describe(st.d), parts[0], parts[1], parts[2]])
+	return "\n".join(out)
+
+
+## a structure's own mesh (0.1 m along where it isn't flat, 0.25 m across): dirt (dirt / clay on the faces) or wood
+## (plank stripes on top, plywood sides straight down)
+func struct_mesh(st: Dictionary) -> ArrayMesh:
+	var L := float(st.L)
+	var us := PackedFloat64Array()
+	var uu := -0.5
+	while uu < L + 0.5:
+		us.append(uu)
+		var busy := JumpDesign.sample(st.hs, uu) > 1e-4 or JumpDesign.sample(st.hs, uu + 0.3) > 1e-4 or JumpDesign.sample(st.hs, uu - 0.3) > 1e-4
+		uu += 0.1 if busy else 0.5
+	us.append(L + 0.5)
+	var R := float(st.reach) + 0.3
+	var vs := PackedFloat64Array()
+	var vv := -R
+	while vv < R:
+		vs.append(vv); vv += 0.25
+	vs.append(R)
+	var o: Vector2 = st.o; var dx: Vector2 = st.dir; var sd: Vector2 = st.side
+	var nu := us.size(); var nv := vs.size()
+	var V := PackedVector3Array(); V.resize(nu * nv)
+	var C := PackedColorArray(); C.resize(nu * nv)
+	var wood: bool = st.wood
+	var hw := float(st.width) * 0.5
+	var plank := Color(0.55, 0.40, 0.24).srgb_to_linear(); var plank2 := Color(0.47, 0.34, 0.2).srgb_to_linear()
+	for j in nv:
+		for i in nu:
+			var p := o + dx * us[i] + sd * vs[j]
+			var jh := _at_local(st, us[i], vs[j])
+			var yy := float(st.y0) + float(st.grade) * us[i] + jh
+			if jh <= 0.002: yy = grid_height(p.x, p.y) - (0.25 if st.standalone else 0.0)   # (the edge: the ground round it; standalone: tucked under it)
+			V[j * nu + i] = Vector3(p.x, yy + (0.004 if jh > 0.002 else 0.0), p.y)
+			var col := DIRT
+			if wood and jh > 0.002 and absf(vs[j]) <= hw: C[j * nu + i] = plank if int(us[i] / 0.16) % 2 == 0 else plank2; continue
+			if jh > 0.002:
+				var slope := absf(JumpDesign.sample(st.hs, us[i] + 0.05) - JumpDesign.sample(st.hs, us[i] - 0.05)) / 0.1
+				col = DIRT.lerp(CLAY, clampf(slope * 0.8, 0.0, 0.6))
+				if absf(vs[j]) > hw: col = CLAY
+			C[j * nu + i] = col.srgb_to_linear()
+	var I := PackedInt32Array()
+	for j in nv - 1:
+		for i in nu - 1:
+			var a := j * nu + i
+			I.append_array([a, a + 1, a + nu, a + 1, a + nu + 1, a + nu])   # (clockwise from above: Godot's front)
+	var st2 := SurfaceTool.new()
+	st2.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for k in I:
+		st2.set_color(C[k]); st2.add_vertex(V[k])
+	if wood:   # plywood sides
+		var ply := Color(0.72, 0.52, 0.33).srgb_to_linear()
+		for sgn: float in [-1.0, 1.0]:
+			var off := sd * (sgn * (hw + 0.01))
+			var i := 0
+			var hs: PackedFloat32Array = st.hs
+			while i < hs.size() - 2:
+				var u0 := i * JumpDesign.DS; var u1 := (i + 2) * JumpDesign.DS
+				if hs[i] > 0.01 or hs[i + 2] > 0.01:
+					var a0 := o + dx * u0 + off; var a1 := o + dx * u1 + off
+					var g0 := float(st.y0) + float(st.grade) * u0; var g1 := float(st.y0) + float(st.grade) * u1
+					var q := [Vector3(a0.x, g0 + hs[i], a0.y), Vector3(a1.x, g1 + hs[i + 2], a1.y), Vector3(a1.x, g1 - 0.2, a1.y), Vector3(a0.x, g0 - 0.2, a0.y)]
+					for k in [0, 1, 2, 0, 2, 3]:
+						st2.set_color(ply); st2.add_vertex(q[k])
+				i += 2
+	st2.generate_normals()
+	return st2.commit()

@@ -37,7 +37,7 @@ func _init(scene_path: String, seed_in := 12345) -> void:
 func set_seed(seed_in: int) -> void:
 	super(seed_in)
 	field.course = lf.to_course()   # the level's own trail (demo AI, follow rider, trail camera, bend alerts)
-	field.route_feats = []
+	field.route_feats = lf.route   # its jumps / drops: the demo AI plans its speed for them, the HUD calls them out
 	water_enabled = false
 	cs_tyres = false   # its own ground: the drawn tyres sample it in GDScript
 
@@ -53,6 +53,10 @@ func update_stream(_px: float, _pz: float, _budget_ms: float = 4.0, _sync_r := -
 	_mat.set_shader_parameter("contour", 0.0)
 	_add_mesh(lf.ground_mesh(2), "Ground")
 	_add_mesh(lf.far_mesh(1400.0, 14.0), "FarLand")
+	var pieces := Node3D.new()
+	pieces.name = "Pieces"
+	add_child(pieces)
+	LevelVisuals.build(lf, pieces, true)
 	chunk_serial += 1
 	print("LEVEL ground built ms=", Time.get_ticks_msec() - t0)
 
@@ -84,7 +88,7 @@ func _height0(x: float, z: float) -> float:
 	return lf.height(x, z)
 
 func height(x: float, z: float) -> float:
-	return lf.height(x, z) - rut_at(x, z)
+	return lf.height_rocks(x, z) - rut_at(x, z)   # (domes over the rocks, as in the world)
 
 func deck_height(x: float, z: float) -> float:
 	return lf.height(x, z) - rut_at(x, z)
@@ -93,7 +97,7 @@ func mesh_height(x: float, z: float) -> float:
 	return lf.height(x, z)
 
 func top_height(x: float, z: float) -> float:
-	return lf.height(x, z) - rut_at(x, z)
+	return lf.height_rocks(x, z) - rut_at(x, z)
 
 func grid_height(x: float, z: float) -> float:
 	return lf.height(x, z)
@@ -103,10 +107,10 @@ func surface(x: float, z: float) -> int:
 	return 1 if lf.surface_at(x, z) > 0 else 0
 
 func jump(x: float, z: float) -> Array:
-	return [lf.height(x, z), 0.0, 0.0, 0.0, null]
+	return [lf.height(x, z), lf.jump_mask(x, z), 0.0, 0.0, null]
 
-func jump_mask(_x: float, _z: float) -> float:
-	return 0.0
+func jump_mask(x: float, z: float) -> float:
+	return lf.jump_mask(x, z)
 
 func biome_name(_x: float, _z: float) -> String:
 	return title
@@ -120,15 +124,15 @@ func ground_color(x: float, z: float, _ny: float = 1.0) -> Color:
 func trail(x: float, z: float) -> float:
 	return 1.0 if lf.surface_at(x, z) == 1 else 0.0
 
-func colliders_near(_x: float, _z: float) -> Array:
-	return []
+func colliders_near(x: float, z: float) -> Array:
+	return lf.rocks_near(x, z)
 
 func take_pack(_x: float, _y: float, _z: float, _r: float = 1.6):
 	return null
 
 ## the start: the trail's first point, facing down it ((x, heading, z) as Game.respawn takes it)
 func level_spawn() -> Vector3:
-	return lf.stand_at(2)
+	return lf.start_stand()
 
 ## the bail tap: back on the nearest point of the trail, a few metres up it, facing down it
 func level_reset(x: float, z: float) -> Vector3:

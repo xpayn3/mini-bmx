@@ -1,0 +1,60 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/levels/editor/bmx_level.gd" id="1_sldq6"]
+[ext_resource type="Script" path="res://scripts/levels/editor/bmx_gate.gd" id="2_1krvs"]
+[ext_resource type="Script" path="res://scripts/levels/editor/bmx_jump.gd" id="3_a6qxh"]
+[ext_resource type="Script" path="res://scripts/levels/editor/bmx_drop.gd" id="4_tg8u4"]
+
+[node name="Level" type="Node3D" unique_id=320342103]
+script = ExtResource("1_sldq6")
+title = "Demo Park"
+length = 300.0
+width = 120.0
+flat_ground = true
+rough = 0.0
+
+[node name="StartGate" type="Node3D" parent="." unique_id=1897347232]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 10, 0, 0)
+script = ExtResource("2_1krvs")
+gate = "start"
+follow_trail = false
+
+[node name="Table1" type="Node3D" parent="." unique_id=2108558358]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 60, 0, 0)
+script = ExtResource("3_a6qxh")
+auto_speed = false
+design_kmh = 32.0
+follow_trail = false
+standalone = true
+
+[node name="Kicker1" type="Node3D" parent="." unique_id=716112482]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 120, 0, 0)
+script = ExtResource("3_a6qxh")
+kind = "kicker"
+build = "wood"
+auto_speed = false
+design_kmh = 30.0
+lip_deg = 24.0
+width = 2.4
+follow_trail = false
+standalone = true
+
+[node name="Gap1" type="Node3D" parent="." unique_id=244373013]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 60, 0, 14)
+script = ExtResource("3_a6qxh")
+kind = "gap"
+auto_speed = false
+design_kmh = 36.0
+lip_deg = 28.0
+follow_trail = false
+standalone = true
+
+[node name="Drop1" type="Node3D" parent="." unique_id=1861383287]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 120, 0, 14)
+script = ExtResource("4_tg8u4")
+height = 1.2
+auto_speed = false
+design_kmh = 26.0
+build = "wood"
+follow_trail = false
+standalone = true

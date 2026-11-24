@@ -1,19 +1,49 @@
 [gd_scene format=3]
 
-[ext_resource type="Script" path="res://scripts/levels/editor/bmx_level.gd" id="1_0l1pw"]
-[ext_resource type="Script" path="res://scripts/levels/editor/bmx_trail.gd" id="2_sagkb"]
+[ext_resource type="Script" path="res://scripts/levels/editor/bmx_level.gd" id="1_geyhf"]
+[ext_resource type="Script" path="res://scripts/levels/editor/bmx_trail.gd" id="2_4nkqr"]
+[ext_resource type="Script" path="res://scripts/levels/editor/bmx_gate.gd" id="3_30y47"]
+[ext_resource type="Script" path="res://scripts/levels/editor/bmx_jump.gd" id="4_k8o72"]
+[ext_resource type="Script" path="res://scripts/levels/editor/bmx_rocks.gd" id="5_16kkj"]
 
-[sub_resource type="Curve3D" id="Curve3D_wq2la"]
+[sub_resource type="Curve3D" id="Curve3D_d3mnb"]
 _data = {
-"points": PackedVector3Array(-7.8333335, 0, 3, 7.8333335, 0, -3, 8, -1.4267969, 0, -15.333333, 0, -2.5, 15.333333, 0, 2.5, 55, -9.94105, -18, -13.333333, 0, -9.666667, 13.333333, 0, 9.666667, 100, -19.92739, 15, -8.666667, 0, 0.5, 8.666667, 0, -0.5, 135, -23.945015, 40, -4.5, 0, 11.333333, 4.5, 0, -11.333333, 152, -30.949642, 12, -7.1666665, 0, 9.333333, 7.1666665, 0, -9.333333, 162, -29.875814, -28, -12.166667, 0, -2.6666667, 12.166667, 0, 2.6666667, 195, -33.471264, -44, -11.166667, 0, -11.333333, 11.166667, 0, 11.333333, 235, -43.14314, -12, -11.166667, 0, -7, 11.166667, 0, 7, 262, -48.080593, 24, -13, 0, 4.6666665, 13, 0, -4.6666665, 302, -52.755707, 30, -13, 0, 8.333333, 13, 0, -8.333333, 340, -60.260525, -4, -12, 0, -0.6666667, 12, 0, 0.6666667, 380, -62.85013, -20, -5.3333335, 0, -3.3333333, 5.3333335, 0, 3.3333333, 412, -70.61322, 0),
-"tilts": PackedFloat32Array(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+"points": PackedVector3Array(-11.666667, 0, 0, 11.666667, 0, 0, 5, -0.615535, 0, -16.666666, 0, -3, 16.666666, 0, 3, 75, -14.721558, 0, -14.166667, 0, -4, 14.166667, 0, 4, 105, -21.046604, 18, -13.5, 0, 2, 13.5, 0, -2, 160, -29.424479, 24, -6, 0, 8, 6, 0, -8, 186, -35.631073, 6, -9.833333, 0, 7, 9.833333, 0, -7, 196, -37.433525, -24, -17.333334, 0, 1.3333334, 17.333334, 0, -1.3333334, 245, -43.897644, -36, -14.166667, 0, -4.3333335, 14.166667, 0, 4.3333335, 300, -51.50524, -32, -7, 0, -8, 7, 0, 8, 330, -57.98698, -10, -10.333333, 0, -5.6666665, 10.333333, 0, 5.6666665, 342, -59.597115, 16, -12.166667, 0, 1, 12.166667, 0, -1, 392, -65.381584, 24, -3.8333333, 0, 2.3333333, 3.8333333, 0, -2.3333333, 415, -69.52021, 10),
+"tilts": PackedFloat32Array(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 }
-point_count = 13
+point_count = 12
 
-[node name="Level" type="Node3D" unique_id=535387661]
-script = ExtResource("1_0l1pw")
+[node name="Level" type="Node3D" unique_id=464803461]
+script = ExtResource("1_geyhf")
 title = "Demo Descent"
 
-[node name="Trail" type="Path3D" parent="." unique_id=1100678600]
-curve = SubResource("Curve3D_wq2la")
-script = ExtResource("2_sagkb")
+[node name="Trail" type="Path3D" parent="." unique_id=1944196248]
+curve = SubResource("Curve3D_d3mnb")
+script = ExtResource("2_4nkqr")
+
+[node name="StartGate" type="Node3D" parent="." unique_id=1558317055]
+transform = Transform3D(0.99959606, 0, 0.028419659, 0, 1, 0, -0.028419659, 0, 0.99959606, 8.999247, -2.5638, -0.07092814)
+script = ExtResource("3_30y47")
+gate = "start"
+
+[node name="Table1" type="Node3D" parent="." unique_id=1784349414]
+transform = Transform3D(0.9996729, 0, 0.025575364, 0, 1, 0, -0.025575364, 0, 0.9996729, 38.979675, -7.763994, -1.1471939)
+script = ExtResource("4_k8o72")
+
+[node name="Rocks1" type="Node3D" parent="." unique_id=1634405073]
+transform = Transform3D(0.98178494, 0, -0.18999557, 0, 1, 0, 0.18999557, 0, 0.98178494, 116.98746, -23.76701, 20.774565)
+script = ExtResource("5_16kkj")
+length = 22.0
+
+[node name="Gap1" type="Node3D" parent="." unique_id=1356589845]
+transform = Transform3D(0.99978924, 0, 0.02053076, 0, 1, 0, -0.02053076, 0, 0.99978924, 255.63069, -44.829113, -36.503975)
+script = ExtResource("4_k8o72")
+kind = "gap"
+speed_scale = 0.8
+lip_deg = 28.0
+fill = 1.5
+
+[node name="FinishGate" type="Node3D" parent="." unique_id=1137357873]
+transform = Transform3D(0.71928316, 0, 0.69471705, 0, 1, 0, -0.69471705, 0, 0.71928316, 410.76788, -69.036644, 13.741254)
+script = ExtResource("3_30y47")
+gate = "finish"
