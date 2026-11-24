@@ -225,7 +225,7 @@ var title_life: TitleLife     # title screen only: birds, blowing dust, dust rou
 
 func _ready() -> void:
 	if not title_world: _make_ruts.call_deferred()   # (once the terrain exists)
-	if not title_world and level == "" and Env.s("BMX_GHOST") != "0":   # the ghost of your best run on this world (game/ghost_rider.gd)
+	if not title_world and (level == "" or level.ends_with(".tscn")) and Env.s("BMX_GHOST") != "0":   # (built levels too)   # the ghost of your best run on this world (game/ghost_rider.gd)
 		ghost = preload("res://scripts/game/ghost_rider.gd").new(self)
 		add_child(ghost)
 		ghost.start_run.call_deferred()

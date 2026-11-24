@@ -12,6 +12,7 @@ length = 300.0
 width = 120.0
 flat_ground = true
 rough = 0.0
+published = true
 
 [node name="StartGate" type="Node3D" parent="." unique_id=1964417942]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 10, 0, 0)

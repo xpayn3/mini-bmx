@@ -127,6 +127,8 @@ func _dir() -> String:
 func start_run() -> void:
 	end_run()
 	_key = "%d_%s" % [GameState.seed, GameState.bike_id]
+	if str(GameState.level).ends_with(".tscn"):   # a built level: its own ghost per bike
+		_key = "level_%s_%s" % [str(GameState.level).get_file().get_basename(), GameState.bike_id]
 	_rec = PackedFloat32Array(); _rec_t = 0.0; _rec_next = 0.0
 	_gi = 0; _s_track = 0
 	_ghost = PackedFloat32Array(); _have_ghost = false

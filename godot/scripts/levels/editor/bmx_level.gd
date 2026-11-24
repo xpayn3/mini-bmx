@@ -42,6 +42,13 @@ signal rebuilt(summary: String)
 	set(v): tree_clear = v; _queue()
 @export var tree_seed := 1:
 	set(v): tree_seed = v; _queue()
+@export_group("Publish")
+@export var published := false   ## listed in the game's LEVELS menu (set by the dock's Publish)
+@export_multiline var description := ""
+@export_range(0, 5, 1) var difficulty := 0   ## 1-5 stars; 0 = worked out at Publish
+@export_range(0.0, 900.0, 0.1, "suffix:s") var medal_gold := 0.0     ## 0 = worked out at Publish (from the speed profile)
+@export_range(0.0, 900.0, 0.1, "suffix:s") var medal_silver := 0.0
+@export_range(0.0, 900.0, 0.1, "suffix:s") var medal_bronze := 0.0
 @export_group("Layers")
 @export var layers: LevelLayers   ## imported land, sculpting, surface paint (levels/<name>_layers.res)
 @export_group("Editor")

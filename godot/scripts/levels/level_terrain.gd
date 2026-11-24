@@ -14,6 +14,7 @@ var baked := false             # loaded from the level's .bake (LevelBake): grou
 var baked_chunks := {}         # Vector2i -> LevelChunkData
 var hour := 16.5               # the level's time of day (BmxLevel.hour)
 var sun_turn := 0.0
+var medals: Array = [0.0, 0.0, 0.0]   # gold, silver, bronze (s; 0 = none)
 var practice_at := Vector2(INF, INF)   # --level-at=x,z (the editor's "Ride from selected"): start there, a practice run
 const RT_SHADOW := 45.0        # m: on a baked level the real-time sun shadow only reaches this far (sharper, cheaper)
 var _mat: ShaderMaterial
@@ -34,6 +35,10 @@ func _init(scene_path: String, seed_in := 12345) -> void:
 	else:
 		title = lvl.title
 		hour = lvl.hour; sun_turn = lvl.sun_turn
+		medals = [lvl.medal_gold, lvl.medal_silver, lvl.medal_bronze]
+		var reg := LevelPublish.list()   # (the published medal times, worked out at Publish)
+		for e in reg:
+			if e.path == scene_path: medals = e.get("medals", medals)
 		var bk := {} if Env.s("BMX_LEVEL_LIVE") != "" else LevelBake.load_bake(scene_path, LevelBake.signature(lvl))
 		if not bk.is_empty():
 			lf = LevelField.new()

@@ -16,6 +16,7 @@ script = ExtResource("1_b7xb1")
 title = "World Cut 4242"
 length = 524.0
 width = 182.0
+published = true
 layers = ExtResource("2_cmyqr")
 
 [node name="Trail" type="Path3D" parent="." unique_id=95747417]

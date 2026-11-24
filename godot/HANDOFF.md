@@ -2241,7 +2241,17 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   or Ctrl + drag on a selected one (its gizmo works otherwise); PRACTICE shows without gates; an unsaved level can't
   sculpt (no shared untitled layers file). Alt lines take the main line's height + bank sample by sample over their
   last 20 m at each junction (a step there threw the demo AI at 234 m).
-- Not yet: publishing (LEVELS menu, medals).
+- **Publishing (same day)**: `BmxLevel` > Publish group (`published`, `description`, `difficulty`, `medal_gold / silver
+  / bronze`, 0 = worked out). Dock **Publish** (needs an up-to-date bake; `LevelPublish.publish`): medal times from the
+  speed profile between the start and finish gates (`ideal_time` = sum of DS / TV; gold x1.02, silver x1.15 of gold,
+  bronze x1.35; a level with no trail: gate to gate at 8 m/s), difficulty 1-5 from the biggest structure, top speed,
+  steepest 10 m and braking bends, a picture `levels/<name>_map.png` (`LevelPublish.picture`), all into the registry
+  `res://levels/levels.cfg` (section = scene path). **Unpublish** takes it out. `-s res://tools/publish_level.gd -- ...`
+  does it headless. Title > LEVELS lists them under TEST PLAYGROUND as cards (map, stars, length / drop / jumps, G / S / B
+  times, your best with this bike + its medal; a scrolling list), `BMX_MENU_PAGE=levels`. The finish flashes the medal
+  ("SILVER!  0:35.52  NEW BEST"); `LevelTerrain.medals` come from the registry. Ghosts ride on built levels too (key
+  `level_<name>_<bike>`). Demo AI on the demo descent: 35.5 s = SILVER (gold 33.9). LevelPublish keeps its own time
+  formatter: anything the editor runs must not reference scripts that use the game's autoloads (LevelRace, Game).
 
 ### Developer view of the test playground (`scripts/levels/ride_diag.gd`) - telemetry + sliders for riding code
 - **Only in the test playground** (user decision 2026-11-21: developer tools live in that level, normal rides have none).

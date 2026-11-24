@@ -364,6 +364,7 @@ func _show_menu() -> void:
 	_menu_after = ""
 	if Env.s("BMX_MENU_PAGE") == "setup": _menu_page_setup(int(Env.s("BMX_SETUP_STEP")))   # tests: the ride setup page (BMX_SETUP_STEP=0..3)
 	if Env.s("BMX_MENU_PAGE") == "credits": _show_credits()   # tests: the credits window
+	if Env.s("BMX_MENU_PAGE") == "levels": _menu_page_levels()   # tests: the LEVELS page
 	if PartThumbs.BAKE != "" and not _baking:
 		_baking = true
 		_bake_menu_thumbs.call_deferred()
@@ -659,6 +660,77 @@ func _menu_page_levels() -> void:
 		GameState.level = "playground"
 		_start_ride(), true, true)
 	vb.add_child(pg)
+	# levels built in the editor and published (levels/levels.cfg, LevelPublish): a card each with its map, stars,
+	# length / drop, medal times and the player's best (with this bike) + the medal it earned
+	var pub := LevelPublish.list()
+	var lv := VBoxContainer.new()   # (a scrolling list: any number of levels fits the column)
+	lv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lv.add_theme_constant_override("separation", 6)
+	if not pub.is_empty():
+		var sc := ScrollContainer.new()
+		sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		sc.custom_minimum_size.y = minf(pub.size() * 106.0, 300.0)
+		sc.add_child(lv)
+		vb.add_child(sc)
+	for e in pub:
+		var med: Array = e.get("medals", [0.0, 0.0, 0.0])
+		var d := int(e.get("difficulty", 1))
+		var best := LevelRace.best_time(e.path, str(GameState.bike_id))
+		var won := LevelRace.medal_for(best, med) if best < INF else ""
+		var lp: String = e.path
+		var b := _menu_button("", "", func():
+			GameState.level = lp
+			_start_ride(), false, false)
+		b.custom_minimum_size.y = 100.0
+		var row := HBoxContainer.new()
+		row.set_anchors_preset(Control.PRESET_FULL_RECT)
+		row.offset_left = 12; row.offset_right = -12; row.offset_top = 10; row.offset_bottom = -10
+		row.add_theme_constant_override("separation", 14)
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		b.add_child(row)
+		var tex := _level_picture(str(e.get("picture", "")))
+		if tex:
+			var tr := TextureRect.new()
+			tr.texture = tex
+			tr.custom_minimum_size = Vector2(108, 0)
+			tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+			tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			row.add_child(tr)
+		var col := VBoxContainer.new()
+		col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		col.alignment = BoxContainer.ALIGNMENT_CENTER
+		col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.add_child(col)
+		var t1 := Label.new()
+		t1.text = str(e.get("title", lp.get_file())).to_upper()
+		t1.add_theme_font_override("font", UITheme.display_font(700, false))
+		t1.add_theme_font_size_override("font_size", 26)
+		t1.clip_text = true
+		t1.add_theme_color_override("font_color", Tokens.INK)
+		col.add_child(t1)
+		var t2 := Label.new()
+		t2.text = "%s  %.0f m · %.0f m ↓ · %d jumps" % ["★".repeat(d) + "☆".repeat(5 - d), float(e.get("length", 0)), float(e.get("drop", 0)), int(e.get("jumps", 0))]
+		t2.add_theme_font_size_override("font_size", 13)
+		t2.clip_text = true
+		t2.add_theme_color_override("font_color", Tokens.INK_SOFT)
+		col.add_child(t2)
+		var t3 := Label.new()
+		var best_s := ((LevelRace._fmt(best) + ("  " + won.to_upper() if won != "" else "")) if best < INF else "--")
+		t3.text = "G %s · S %s · B %s" % [_short_t(float(med[0])), _short_t(float(med[1])), _short_t(float(med[2]))]
+		t3.add_theme_font_size_override("font_size", 12)
+		t3.clip_text = true
+		t3.add_theme_color_override("font_color", {"gold": Color(0.75, 0.55, 0.0), "silver": Color(0.45, 0.47, 0.52), "bronze": Color(0.62, 0.38, 0.18)}.get(won, Color(0.35, 0.37, 0.4)))
+		col.add_child(t3)
+		var t4 := Label.new()
+		t4.text = "YOUR BEST  " + best_s
+		t4.add_theme_font_size_override("font_size", 12)
+		t4.add_theme_color_override("font_color", Tokens.INK if best < INF else Tokens.INK_SOFT)
+		t4.clip_text = true
+		col.add_child(t4)
+		col.add_theme_constant_override("separation", 0)
+		for c in [t1, t2, t3, t4]: c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		lv.add_child(b)
 	vb.add_child(_menu_button("BACK", "", _menu_page_main, false, true))
 	fill.call()
 	menu_focus = pg
@@ -2983,3 +3055,21 @@ func _cmdline_level() -> String:
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--level="): return a.get_slice("=", 1)
 	return ""
+
+
+
+## a published level's map picture (imported texture, else the png read straight off the disk; null = none)
+func _level_picture(path: String) -> Texture2D:
+	if path == "": return null
+	if ResourceLoader.exists(path):
+		var t = load(path)
+		if t is Texture2D: return t
+	var img := Image.load_from_file(ProjectSettings.globalize_path(path))
+	return ImageTexture.create_from_image(img) if img else null
+
+
+
+## a medal time, short: 33.9 / 1:17.1
+static func _short_t(secs: float) -> String:
+	if secs < 60.0: return "%.1f" % secs
+	return "%d:%04.1f" % [int(secs / 60.0), fmod(secs, 60.0)]

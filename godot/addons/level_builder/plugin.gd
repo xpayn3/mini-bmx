@@ -70,6 +70,8 @@ func _enter_tree() -> void:
 	_button(dock, "+ Alt line", _add_alt, "Adds another line (a BmxTrail) branching off the main one and joining it again: edit its points. The first trail stays the main line (the AI and timing ride it)")
 	_button(dock, "Snap trail to ground", _snap_trail, "Puts every trail point on the land (the handles sit where the trail is)")
 	_button(dock, "Rebuild preview", _rebuild, "Works the preview ground out again now")
+	_button(dock, "Publish", _publish, "Lists the level in the game's LEVELS menu: medal times, difficulty and a picture worked out from its bake (bake first)")
+	_button(dock, "Unpublish", _unpublish, "Takes it out of the LEVELS menu")
 	_button(dock, "Bake level", _bake, "Writes <level>.bake: the ground, pieces, trees and the light at the level's time of day, worked out once (the game loads it instantly). Runs the level's checks")
 	_button(dock, "▶  Ride this level", _ride, "Saves the scene and starts the game on it")
 	_button(dock, "▶  Ride from selected", _ride.bind(true), "Starts 30 m before the selected piece (a practice run: no timing)")
@@ -741,3 +743,24 @@ func _add_alt() -> void:
 	_commit_add(t, "Add alt line")
 	EditorInterface.get_selection().clear()
 	EditorInterface.get_selection().add_node(t)
+
+
+
+func _publish() -> void:
+	var root := EditorInterface.get_edited_scene_root()
+	if not (root is BmxLevel): info.text = "Open a level first."; return
+	var r := LevelPublish.publish(root)
+	info.text = r.msg
+	if r.ok:
+		EditorInterface.mark_scene_as_unsaved()
+		EditorInterface.save_scene()
+		EditorInterface.get_resource_filesystem().scan()
+
+
+func _unpublish() -> void:
+	var root := EditorInterface.get_edited_scene_root()
+	if not (root is BmxLevel): return
+	LevelPublish.unpublish(root)
+	EditorInterface.mark_scene_as_unsaved()
+	EditorInterface.save_scene()
+	info.text = "%s is no longer in the LEVELS menu." % root.title

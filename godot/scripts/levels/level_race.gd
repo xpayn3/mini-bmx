@@ -113,7 +113,8 @@ func _pass(g: Dictionary) -> void:
 			_say(msg)
 		"finish":
 			done = true
-			var msg := "FINISH  %s" % _fmt(t)
+			var med := medal_for(t, game.terrain.medals)
+			var msg := ("%s!  %s" % [med.to_upper(), _fmt(t)]) if med != "" else ("FINISH  %s" % _fmt(t))
 			if _missed > 0:
 				msg += "  (%d checkpoint%s missed: no best time)" % [_missed, "" if _missed == 1 else "s"]
 			elif t < _best:
@@ -138,6 +139,7 @@ func _save() -> void:
 
 
 func _say(s: String) -> void:
+	if _probe: print("RACE say: ", s)
 	if game.has_method("flash"): game.flash(s)
 
 
@@ -156,3 +158,30 @@ static func _fmt(s: float) -> String:
 
 static func _diff(d: float) -> String:
 	return ("+" if d >= 0.0 else "-") + "%.2f" % absf(d)
+
+
+
+## "gold" / "silver" / "bronze" / "" for a time against the medal times [gold, silver, bronze]
+static func medal_for(secs: float, medals: Array) -> String:
+	var names := ["gold", "silver", "bronze"]
+	for i in mini(3, medals.size()):
+		if float(medals[i]) > 0.0 and secs <= float(medals[i]): return names[i]
+	return ""
+
+
+## the player's best time on a level with a bike (INF = none)
+static func best_time(level_path: String, bike: String) -> float:
+	var cf := ConfigFile.new()
+	if cf.load(FILE) != OK: return INF
+	return float(cf.get_value("best", "%s|%s" % [level_path, bike], INF))
+
+
+## the player's best on a level with any bike: [secs, bike] (INF = none)
+static func best_any(level_path: String) -> Array:
+	var cf := ConfigFile.new()
+	var out := [INF, ""]
+	if cf.load(FILE) != OK or not cf.has_section("best"): return out
+	for k in cf.get_section_keys("best"):
+		if k.begins_with(level_path + "|") and float(cf.get_value("best", k)) < float(out[0]):
+			out = [float(cf.get_value("best", k)), k.get_slice("|", 1)]
+	return out
