@@ -306,6 +306,8 @@ func _ready() -> void:
 		add_child(contact)
 	dust = RideDust.new()
 	add_child(dust)
+	dust.recorder = replay   # (the instant replay records the dust)
+	if dust.sim != null: dust.sim.recorder = replay
 	motes = AmbientMotes.new()
 	add_child(motes)
 	if dust.sim != null and dust.sim.compositor != null:   # the dust is drawn as a compositor effect
@@ -1995,6 +1997,7 @@ func _snap_prev() -> void:
 
 func _unhandled_input(e: InputEvent) -> void:
 	if get_tree().paused or not input_enabled: return
+	if e.is_action_pressed("photo") and not e.is_echo() and (photo or replay_on): toggle_photo(); return   # (also a replay frame)
 	if replay_on: return   # (the replay takes its own keys in its _input)
 	if e.is_action_pressed("replay") and not e.is_echo() and not photo:
 		if not open_replay(): flash("NO REPLAY YET")
@@ -2322,6 +2325,7 @@ func _physics_process(dt: float) -> void:
 	_pk = _perf("p_bike_step", _pk)
 	_rope_tick(dt)
 	_pk = _perf("p_rope", _pk)
+	if replay and input_enabled and not scenic and not title_world: replay.phys_snap()   # (rewind: "ride from here")
 	ride_log.record(dt, phys, inp, _log_lift, rig.position.y if rig else 0.0, rider.J if rider else [])
 	_pk = _perf("p_ride_log", _pk)
 	if jitter_on and not phys.crash_on:
@@ -2537,14 +2541,14 @@ func _ragdoll_roots() -> Dictionary:
 	return out
 
 func toggle_photo() -> void:
-	if replay_on: return
 	if not photo and (phys == null or (paper_map and paper_map.busy())): return
 	photo = not photo
-	Engine.time_scale = 0.0 if photo else 1.0
+	if photo and replay_on: replay.photo_begin()   # (a replay frame: the ride camera where the replay's camera is)
+	Engine.time_scale = 0.0 if (photo or replay_on) else 1.0
 	# the crash slow motion pitched the sound down (Wasted._set_speed leaves photo mode alone): normal pitch while the
 	# world is frozen; leaving, WASTED sets its own speed again on its next frame
 	AudioServer.playback_speed_scale = 1.0
-	hud.visible = input_enabled and not photo
+	hud.visible = input_enabled and not photo and not replay_on
 	_photo_last = Time.get_ticks_usec()
 	if photo_mode == null:
 		photo_mode = PhotoMode.new()
@@ -2556,6 +2560,7 @@ func toggle_photo() -> void:
 		photo_mode.close()
 		cam_attr.dof_blur_amount = 0.06
 		_apply_settings()   # also re-applies the level light (photo mode may have changed it)
+		if replay_on: replay.photo_end()
 
 ## leave photo mode if it is on (pausing, the menu or a new ride must never inherit a frozen world)
 func exit_photo() -> void:
@@ -2746,13 +2751,6 @@ func _lerp_k(k: String) -> float:
 	return lerpf(_prev[k], phys.get(k), _lerp_a)
 
 func _process(dt: float) -> void:
-	if replay_on:
-		var rnow := Time.get_ticks_usec()
-		var rrdt := minf((rnow - _photo_last) / 1e6, 0.1)
-		_photo_last = rnow
-		replay.update(rrdt)
-		if audio: audio.update_audio(rrdt)   # (frozen: the tyres / wind fade out, as in photo mode)
-		return
 	if photo:
 		# time stands still; the camera moves on real time
 		var now := Time.get_ticks_usec()
@@ -2760,6 +2758,13 @@ func _process(dt: float) -> void:
 		_photo_last = now
 		photo_mode.update(rdt)
 		if area_title: area_title.view.visible = false
+		return
+	if replay_on:
+		var rnow := Time.get_ticks_usec()
+		var rrdt := minf((rnow - _photo_last) / 1e6, 0.1)
+		_photo_last = rnow
+		replay.update(rrdt)
+		if audio: audio.update_audio(rrdt)   # (frozen: the tyres / wind fade out, as in photo mode)
 		return
 	if area_title: area_title.view.visible = hud.visible and level == ""   # (the test playground: no big banners)
 	var _pk := Time.get_ticks_usec()

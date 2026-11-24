@@ -184,8 +184,12 @@ func add_source(p: Vector3, vel: Vector3, r: float, rate: float, blend := 6.0, r
 	_n += 1
 	if rate > 0.0: _idle = 0.0
 
+## the instant replay (ReplayMode) records every burst to play the dust again (the tyre feeds: RideDust)
+var recorder = null
+
 ## a source that keeps going for secs (a landing / crash cloud)
 func burst(p: Vector3, vel: Vector3, r: float, rate: float, radial: float, secs := 0.2, col := Color(0, 0, 0, 0), blend := 7.0) -> void:
+	if recorder != null and not recorder.on: recorder.dust_event("sim", "burst", [p, vel, r, rate, radial, secs, col, blend])
 	if not ok: return
 	_emit.append({p = p, v = vel, r = r, rate = rate, radial = radial, t = secs, blend = blend, col = col})
 	if col.a > 0.0: tint(col)

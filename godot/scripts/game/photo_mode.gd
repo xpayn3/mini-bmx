@@ -155,6 +155,7 @@ func close() -> void:
 
 ## what the camera orbits round and auto focuses on: the rider (the ragdoll after a crash)
 func pivot() -> Vector3:
+	if game.replay_on and game.replay: return game.replay.focus_now()   # (the replayed rider)
 	if game.phys.crash_on and game.ragdoll and game.ragdoll.p.size() > 0:
 		var s := Vector3.ZERO
 		for p in game.ragdoll.p: s += p

@@ -2145,15 +2145,42 @@ ide_<date>.replay` (test runs: `replays/tests/`), zstd, ~4 MB a
   them (`main._menu_page_replays`); watching one (`_watch_replay`) sets `GameState.view` (= the header: `bike_config_for`
   uses its build, `Game._ready` its look / pose), builds that world + bike + rider, `replay.load_saved` resolves the paths,
   plays; leaving (`_replay_view_done`) restores seed / bike and comes back to the REPLAYS page.
-- Not replayed (stay as now): dust / smoke, mud / blood, tyre tracks, the world (torn tape, smashed fences), sounds. A
-  saved replay's world is fresh (tape whole).
-- Tests: `BMX_REPLAY=secs` opens it (+ `BMX_REPLAY_SET=cam=Free,speed=0.5,at=-6|6,pause=1,ui=0` (at < 0 from the end,
+- **Sound**: `RideAudio` reads `src` (a `ReplayMode.AudioState`: speed, air, crashed, surface, skid, pedal key, pedal,
+  cranks: the per-sample row `AROW`) instead of the physics while a replay plays forwards, and every one-shot it played
+  while riding (`_rec`: landing, landing_bad, crash, thud, crunch, wood_crash, shift) is kept in `aev` and played as the
+  playhead crosses it. Slow motion = `AudioServer.playback_speed_scale` = the rate (0.35..1.5, like WASTED); paused /
+  rewinding = quiet.
+- **Dust**: `RideDust.feed` / `feed_front` (a state per sample, `DROW`), `grit_burst` and `SmokeSim.burst` (events in
+  `dev`) are recorded through their `recorder` (= the replay) and called again in playback; the sim is stepped with the
+  replay's own time (paused = the cloud hangs still), reset on a jump back / open / close. Crash slide sources
+  (`add_source` from `_crash_dust`) aren't recorded. **Tyre tracks**: the segments laid after the replayed moment
+  (`fx.seg_birth` vs the sample's `fx.t`) get their colour bytes zeroed (newest first in the ring, binary search), the
+  whole attribute buffer is put back on close (`_tracks_open` / `_tracks_close`); not in a saved replay.
+- **Photo mode on a replay frame** (O): `Game.toggle_photo` works in a replay: `replay.photo_begin` puts the ride camera
+  where the replay camera is; photo mode's pivot is the replayed rider; leaving returns to the replay (`photo_end`).
+- **Highlights** (G / pad R3, `toggle_highlights`): windows round airs over `HL_AIR` 0.45 s (from 1.3 s before to 1 s
+  after) and crashes (2.2 s before .. 3.2 s after), merged; plays only those on the TV camera, airs at 0.55x, a crash
+  at 0.35x round its moment (`_hl_rate`); blue bands under the timeline.
+- **Clip export** ([ / ] in / out, Del clears, V exports; `export_clip`): the replay is stepped at an even `EX_FPS` 30
+  video frames a second (at the chosen speed: slow-motion clips), the bar / hint / fullscreen button hidden, master bus
+  muted; every frame a JPEG (`EX_Q` 0.9) into a Motion-JPEG AVI (`game/avi_writer.gd` `AviWriter`, RIFF + idx1) in
+  `%APPDATA%\Mini BMX\videos\` (tests: `videos/tests/`). ~220 KB a frame at 1600x900. No sound in the file. No in /
+  out: the 10 s from the playhead (or the highlights' span). Esc stops it, keeping what's done.
+- **Ride from here** (Enter / pad X, `ride_from_here`): every physics value of `BikePhysics` (its script variables,
+  `SNAP_KEEP` left out, like `PlaygroundLab.fresh`) is kept 4x a second for the last 2 min (`phys_snap`, from
+  `Game._physics_process`); the newest one at or before the playhead that isn't in a crash is put back (crashed now:
+  `_end_crash` first), the replay closes and the ride carries on; the recording after it is dropped and new samples
+  continue from that moment (`_t_off`). The world (torn tape, smashed fences) stays.
+- Opens on the last `OPEN_BACK` 10 s (Home = the start of the ride).
+- Not replayed (stay as now): mud / blood, the world (torn tape, smashed fences), the crash slide's dust. A saved
+  replay's world is fresh (tape whole, no tracks).
+- Tests: `BMX_REPLAY=secs` opens it (+ `BMX_REPLAY_SET=cam=Free,speed=0.5,at=-6|6,pause=1,ui=0,hl=1,in=-8,out=-5,export=1,ride=1` (at < 0 from the end,
   > 0 from the start), `BMX_REPLAY_SHOTS=dir/prefix` (a shot every 0.5 s, fps printed), `BMX_REPLAY_CLOSE=secs`,
   `BMX_REPLAY_SAVE=secs`, `BMX_REPLAY_PROBE=1`: `REPLAY frames= moving= mem= MB/min capture_us= apply_us=`, on load
   `missing` paths + `static differs` = parts matched wrong), `BMX_REPLAY_LOWQ=1` (no quality boost).
   `BMX_REPLAY_WATCH=<file> [BMX_REPLAY_WATCH_SHOT=png] BMX_REPLAY_NSHOTS=n` + `-- --noop`: watch a saved file from the
   title, back after n shots, then quit. PADSEQ `k:I` works too.
-- Not done: photo mode on a replay frame, replay sound, deleting saves in the game (OPEN FOLDER on the page).
+- Not done: sound in exported clips, deleting saves in the game (OPEN FOLDER on the page), ghosts, camera keyframes.
 
 ### Landing slam sound (2026-11-24, from the user's bike-slam recording)
 - `scripts/game/SlamSynth.cs` = the user's recording (hit B of a YouTube MTB sound clip, kept raw in `assets/audio/biking_raw/`, not imported) rebuilt procedurally,

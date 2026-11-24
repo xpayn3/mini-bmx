@@ -32,10 +32,21 @@ const SCRUB := 3.0            # s of replay per s held (rewind / fast forward)
 const ST := 13                # floats per node: basis (9) + origin (3) + visible
 const BW := 12                # floats per bone: its whole pose (basis + origin)
 const SKIP := -12345.0        # first float of a skeleton that wasn't there
+const OPEN_BACK := 10.0       # the replay opens this many seconds before the end
 
 var game
 var on := false
-var frames: Array = []        # [t, seg, data, m (moving nodes stored), focus, fwd, kmh, flags]
+var frames: Array = []        # [t, seg, data, m (moving nodes stored), focus, fwd, kmh, flags, sound row (`AROW`)]
+var aev: Array = []           # one-shot sounds as they played: [t, kind, args] (RideAudio._rec)
+var dev: Array = []           # dust bursts as they happened: [t, target ("sim" / "dust"), method, args]
+var _dfeed: Array = [[], []]  # the latest rear / front tyre dust feed (RideDust.feed / feed_front args), per sample
+const DROW := 9               # frames[DROW] = [rear feed, front feed]; frames[DROW + 1] = fx.t (tyre tracks' clock)
+## what the ride sound reads from the physics, per sample: speed, air, crashed, surface, skid, pedal key, pedal, cranks
+const AROW := 8
+var _astate := AudioState.new()
+class AudioState:
+	var v := 0.0; var air := false; var crash_on := false; var surf := 0; var skid_fx := false
+	var throttle_in := 0.0; var pedal := 0.0; var crank := 0.0; var RWR := 0.36
 var _seg = null               # the segment being recorded
 var _dirty := true
 var _last_t := -1e9
@@ -118,7 +129,7 @@ func _ready() -> void:
 	hint = PadGlyph.PromptBar.new()
 	hint.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	hint.offset_top = -38; hint.offset_bottom = -4
-	hint.h = 24; hint.label_size = 14
+	hint.h = 22; hint.label_size = 13
 	add_child(hint)
 
 func _tree_changed(n: Node) -> void:
@@ -129,8 +140,24 @@ func _tree_changed(n: Node) -> void:
 		_dirty = true
 
 ## forget everything (a respawn / new world: the old ride is somewhere else)
+## a one-shot sound while riding (RideAudio._rec): kept to play again at the same moment of the replay
+func audio_event(kind: String, args: Array) -> void:
+	if on: return
+	aev.append([game.t - _t_off, kind, args])
+
+## the dust (RideDust / SmokeSim recorders): a tyre's feed is a state kept per sample, bursts are events
+func dust_feed(which: int, args: Array) -> void:
+	if not on: _dfeed[which] = args
+
+func dust_event(target: String, method: String, args: Array) -> void:
+	if not on: dev.append([game.t - _t_off, target, method, args])
+
 func clear() -> void:
-	frames.clear()
+	frames = []
+	aev = []
+	dev = []
+	snaps = []
+	_t_off = 0.0
 	_marks.clear()
 	_mk_open.clear()
 	_seg = null
@@ -240,6 +267,7 @@ func _walk(n: Node, nodes: Array, glob: PackedByteArray, skels: Array) -> void:
 ## one sample of what's drawn now, at ride time t (Game._process, after posing)
 func capture(t: float) -> void:
 	if on: return
+	t -= _t_off   # (after a "ride from here" the recording carries on from that moment)
 	if t < _last_t: clear()
 	if t - _last_t < 1.0 / HZ - 1e-4: return
 	var t0 := Time.get_ticks_usec()
@@ -254,10 +282,16 @@ func capture(t: float) -> void:
 	f.y = 0.0
 	f = f.normalized() if f.length_squared() > 1e-6 else Vector3(1, 0, 0)
 	var flags := (1 if st.crash_on else 0) | (2 if st.air else 0)
-	frames.append([t, _seg, d, (_seg.moving as PackedInt32Array).size(), focus, f, absf(st.v) * 3.6, flags])
+	var arow := PackedFloat32Array([st.v, 1.0 if st.air else 0.0, 1.0 if st.crash_on else 0.0, float(st.surf), 1.0 if st.skid_fx else 0.0,
+		float(st.throttle_in), float(st.pedal), float(st.crank)])
+	frames.append([t, _seg, d, (_seg.moving as PackedInt32Array).size(), focus, f, absf(st.v) * 3.6, flags, arow,
+		[_dfeed[0], _dfeed[1]], float(game.fx.t) if game.fx else 0.0])
 	if float(frames[-1][0]) - float(frames[0][0]) > SECS + 5.0:   # (trimmed in batches: pop_front shifts the whole list)
 		var cut := _at(float(frames[-1][0]) - SECS)
 		frames = frames.slice(cut)
+		var t_lo := float(frames[0][0])
+		aev = aev.filter(func(ev): return float(ev[0]) >= t_lo)
+		dev = dev.filter(func(ev): return float(ev[0]) >= t_lo)
 		_marks_dirty = true
 	_mark_add(frames[-1])
 	if probe:
@@ -454,7 +488,7 @@ func _print_probe() -> void:
 
 # ---- saved replays (%APPDATA%\\Mini BMX\\replays) -----------------------------------------------------------------
 
-const VER := 3
+const VER := 5
 static func dir() -> String:
 	# (test runs write beside the player's, never into the list)
 	return "user://replays/tests/" if Settings._no_save else "user://replays/"
@@ -480,13 +514,14 @@ func save() -> String:
 			var sk_i := PackedInt32Array()
 			for sk in sg.skels: sk_i.append(sg.nodes.find(sk))
 			segs.append({"paths": sg.paths, "glob": sg.glob, "base": base, "moving": sg.moving, "bones": sg.bones, "skel": sk_i})
-		fr.append([f[0], seg_i[sg], f[2], f[3], f[4], f[5], f[6], f[7]])
+		fr.append([f[0], seg_i[sg], f[2], f[3], f[4], f[5], f[6], f[7], f[AROW] if f.size() > AROW else PackedFloat32Array(),
+			f[DROW] if f.size() > DROW else [[], []]])
 	var st = game.phys
 	var head := {"ver": VER, "date": Time.get_datetime_string_from_system(), "seed": GameState.seed, "bike": GameState.bike_id,
 		"level": game.level, "build": game.bike_cfg.get("build", {}), "look": game.rider.look.duplicate(true) if game.rider else {},
 		"pose": game.rider.style.duplicate(true) if game.rider else {}, "secs": duration(),
 		"light": LightSettings.current.duplicate(true), "hour": game.tod}
-	var body := {"segs": segs, "frames": fr}
+	var body := {"segs": segs, "frames": fr, "aev": aev.duplicate(true), "dev": dev.duplicate(true)}
 	if _save_task >= 0: WorkerThreadPool.wait_for_task_completion(_save_task)
 	_save_task = WorkerThreadPool.add_task(func():
 		var f := FileAccess.open_compressed(path, FileAccess.WRITE, FileAccess.COMPRESSION_ZSTD)
@@ -566,8 +601,11 @@ func load_saved(rd: Dictionary) -> bool:
 					print("REPLAY static differs %s %s saved o=%s s=%s now o=%s s=%s" % [sg.paths[ni], n.get_class(), str(bt.origin), str(bt.basis.get_scale()), str(lt.origin), str(lt.basis.get_scale())])
 	clear()
 	for f in rd.body.frames:
-		frames.append([f[0], segs[int(f[1])], f[2], f[3], f[4], f[5], f[6], f[7]])
+		frames.append([f[0], segs[int(f[1])], f[2], f[3], f[4], f[5], f[6], f[7], f[8] if f.size() > 8 else PackedFloat32Array(),
+			f[9] if f.size() > 9 else [[], []], 0.0])
 		_mark_add(frames[-1])
+	aev = rd.body.get("aev", [])
+	dev = rd.body.get("dev", [])
 	viewer = true
 	info = rd.head
 	if probe: print("REPLAY loaded segs=%d frames=%d secs=%.1f missing_nodes=%d" % [segs.size(), frames.size(), duration(), miss])
@@ -582,6 +620,8 @@ func open() -> void:
 	# the live state, to put back on leaving
 	_snap = _live()
 	_ap_seg = null
+	_tracks_open()
+	if game.dust and game.dust.sim: game.dust.sim.reset()
 	_hidden.clear()
 	# the rider's cloth sims (race number, hair, helmet flap, strap tails) step themselves in _process, which gets
 	# dt 0 while time is frozen: the replay steps them with its own time instead, so they stay on the replayed body
@@ -607,8 +647,9 @@ func open() -> void:
 	if gm:
 		gm.set_shader_parameter("blur", 0.0)
 		gm.set_shader_parameter("speed", 0.0)
-	tp = float(frames[0][0])
+	tp = maxf(float(frames[0][0]), float(frames[-1][0]) - OPEN_BACK)   # (the last moments; Home = the start)
 	playing = true
+	hl_on = false
 	speed_i = 3
 	_held = 0.0
 	_yaw = 0.0; _pitch = 0.0; _zoom = 1.0
@@ -626,13 +667,18 @@ func open() -> void:
 
 func close() -> void:
 	if not on: return
+	if exporting: _export_end()
 	on = false
+	if game.audio: game.audio.src = null
+	AudioServer.playback_speed_scale = 1.0
 	if _rmb: _set_mouselook(false)
 	_mmb = false; _orbiting = false
 	visible = false
 	if _snap != null:
 		_restore(_snap)
 		_snap = null
+	_tracks_close()
+	if game.dust and game.dust.sim: game.dust.sim.reset()
 	_ap_seg = null
 	for h in _hidden:
 		if is_instance_valid(h[0]): h[0].visible = h[1]
@@ -651,6 +697,237 @@ func _find_sims(n: Node) -> void:
 		var sc = c.get_script()
 		if sc != null and String(sc.resource_path).get_file() in SIM_SCRIPTS: _sims.append(c)
 		_find_sims(c)
+
+func focus_now() -> Vector3: return _focus_now
+
+## photo mode on this frame (O): the ride camera goes where the replay camera is, playback holds, the bar hides
+func photo_begin() -> void:
+	playing = false
+	visible = false
+	if _rmb: _set_mouselook(false)
+	var c: Camera3D = game.cam
+	c.global_transform = cam3.global_transform
+	c.fov = cam3.fov
+	c.make_current()
+	if game.audio: game.audio.src = null
+
+func photo_end() -> void:
+	visible = true
+	cam3.make_current()
+
+# ---- ride from here (rewind) ----------------------------------------------------------------------------------
+
+## every physics value of the bike (BikePhysics' own variables, as PlaygroundLab.fresh copies them), SNAP_HZ a
+## second for the last SNAP_SECS: "ride from here" puts one back and the ride carries on from that moment
+const SNAP_HZ := 4.0
+const SNAP_SECS := 120.0
+const SNAP_KEEP := ["host", "T", "L", "RWF", "RWR", "BB_REAR", "SH_R", "LAND", "geared", "cogs", "ring_k", "bike_rock", "distance", "bank_probe", "sus", "_sus_synced", "_su", "_sag_seen"]
+var snaps: Array = []          # [t, crashed, values]
+var _snap_keys := PackedStringArray()
+var _t_off := 0.0              # ride time - recording time (grows by what a "ride from here" cut away)
+var _snap_last := -1e9
+
+func phys_snap() -> void:
+	if on or viewer: return
+	var ph = game.phys
+	var t: float = game.t - _t_off
+	if t - _snap_last < 1.0 / SNAP_HZ: return
+	_snap_last = t
+	if _snap_keys.is_empty():
+		for p in ph.get_property_list():
+			if not (int(p.usage) & PROPERTY_USAGE_SCRIPT_VARIABLE): continue
+			var k: String = p.name
+			if k in SNAP_KEEP or typeof(ph.get(k)) == TYPE_OBJECT: continue
+			_snap_keys.append(k)
+	var vals: Array = []
+	vals.resize(_snap_keys.size())
+	for i in _snap_keys.size():
+		var v = ph.get(_snap_keys[i])
+		vals[i] = v.duplicate(true) if (v is Array or v is Dictionary) else v
+	snaps.append([t, ph.crash_on, vals])
+	if snaps.size() > int(SNAP_SECS * SNAP_HZ) + 20: snaps = snaps.slice(20)
+
+## the newest snapshot at or before the playhead that isn't in a crash
+func _snap_at(t: float) -> Variant:
+	for i in range(snaps.size() - 1, -1, -1):
+		if float(snaps[i][0]) <= t + 1e-4 and not snaps[i][1]: return snaps[i]
+	return null
+
+func can_ride_from_here() -> bool:
+	return not viewer and _snap_at(tp) != null
+
+## Enter / pad X: leave the replay and ride on from the playhead (the nearest snapshot before it). What came after
+## is dropped from the recording; the world (torn tape, smashed fences) stays as it is
+func ride_from_here() -> void:
+	var sn = _snap_at(tp)
+	if sn == null or viewer:
+		status = "NOTHING TO RIDE FROM HERE" if viewer else "TOO FAR BACK TO RIDE FROM"
+		_status_t = 2.0
+		return
+	var ts: float = sn[0]
+	game.exit_replay()
+	game._end_crash()   # (crashed now: back on the bike first)
+	var ph = game.phys
+	var vals: Array = sn[2]
+	for i in _snap_keys.size():
+		var v = vals[i]
+		ph.set(_snap_keys[i], v.duplicate(true) if (v is Array or v is Dictionary) else v)
+	ph.crash_pending = ""
+	game._reset_draw_state()
+	if game.rider: game.rider.reset_pose()
+	game._snap_prev()
+	game.terrain.update_stream(ph.x, ph.z, INF, 1)
+	# the recording carries on from that moment
+	frames = frames.slice(0, _at(ts) + 1)
+	aev = aev.filter(func(ev): return float(ev[0]) <= ts)
+	dev = dev.filter(func(ev): return float(ev[0]) <= ts)
+	snaps = snaps.filter(func(s): return float(s[0]) <= ts)
+	_marks.clear(); _mk_open.clear()
+	for f in frames: _mark_add(f)
+	_mk_open.clear()
+	_t_off += (game.t - _t_off) - ts
+	_last_t = ts
+	_snap_last = ts
+	_dirty = true
+	game.flash("RIDE ON")
+	if probe: print("REPLAY ride from t=%.2f at (%.1f, %.1f, %.1f) v=%.1f crash=%s frames_left=%d snaps=%d" % [ts, ph.x, ph.y, ph.z, ph.v, ph.crash_on, frames.size(), snaps.size()])
+
+# ---- clip export (a video file) -----------------------------------------------------------------------------------
+
+## [ / ] set the clip's in / out on the timeline (Del clears them), V exports it: the replay is played through at an
+## even EX_FPS frames a second of video, at the chosen speed (slow motion clips), on the current camera, with the bar
+## hidden; every frame a JPEG into an AVI (AviWriter) in %APPDATA%\Mini BMX\videos. No in / out: the highlights
+## (when on) or the 10 s from the playhead. No sound in the file (yet)
+const EX_FPS := 30
+const EX_Q := 0.9
+var clip_in := -1.0
+var clip_out := -1.0
+var exporting := false
+var _ex: AviWriter
+var _ex_end := 0.0
+var _ex_first := true
+var _ex_path := ""
+var _ex_hid: Array = []
+var _ex_start := 0.0
+
+static func video_dir() -> String:
+	return "user://videos/tests/" if Settings._no_save else "user://videos/"
+
+func export_clip() -> void:
+	if exporting or frames.size() < 2: return
+	var a := clip_in if clip_in >= 0.0 else tp
+	var b := clip_out if clip_out > a else minf(t1(), a + 10.0)
+	_ex_start = a
+	if hl_on and clip_in < 0.0 and not _hl.is_empty(): a = float(_hl[0][0]); b = float(_hl[-1][1])
+	if b - a < 0.2: return
+	DirAccess.make_dir_recursive_absolute(video_dir())
+	_ex_path = video_dir() + "clip_%s.avi" % Time.get_datetime_string_from_system().replace(":", "-")
+	var vs := get_viewport().get_visible_rect().size
+	_ex = AviWriter.new()
+	if not _ex.open(_ex_path, int(vs.x), int(vs.y), EX_FPS):
+		status = "COULDN'T WRITE THE VIDEO"; _status_t = 3.0
+		return
+	exporting = true
+	_ex_first = true
+	_ex_end = b
+	tp = a
+	if hl_on: _hl_i = 0
+	playing = true
+	_snap_cam = true; _shot = null
+	if _rmb: _set_mouselook(false)
+	# nothing but the picture: the replay bar, the corner fullscreen button
+	_ex_hid.clear()
+	for n in [bar, hint] + get_tree().root.find_children("*", "CanvasLayer", true, false).filter(func(c): return c.get_script() != null and String(c.get_script().resource_path).ends_with("fullscreen_button.gd")):
+		_ex_hid.append([n, n.visible]); n.visible = false
+	AudioServer.set_bus_mute(0, true)
+	if probe: print("REPLAY export %s %.2f..%.2f %dx%d" % [_ex_path, a, b, int(vs.x), int(vs.y)])
+
+## one video frame: grab what the last frame drew, then step the replay one frame of video
+func _export_step() -> float:
+	if not _ex_first:
+		var img := get_viewport().get_texture().get_image()
+		if img != null: _ex.add_jpeg(img.save_jpg_to_buffer(EX_Q))
+	_ex_first = false
+	status = "EXPORTING · %d FRAMES" % _ex.frames
+	if tp >= _ex_end - 1e-4 or (hl_on and _hl_i == _hl.size() - 1 and tp >= float(_hl[-1][1]) - 1e-4):
+		_export_end()
+		return 0.0
+	return 1.0 / EX_FPS
+
+func _export_end() -> void:
+	exporting = false
+	var n := _ex.frames
+	_ex.close()
+	_ex = null
+	for h in _ex_hid:
+		if is_instance_valid(h[0]): h[0].visible = h[1]
+	_ex_hid.clear()
+	AudioServer.set_bus_mute(0, false)
+	playing = false
+	status = "VIDEO SAVED · %s (%.1f s)" % [_ex_path.get_file().to_upper(), n / float(EX_FPS)]
+	_status_t = 5.0
+	if probe or Env.s("BMX_REPLAY_EXPORT") != "": print("REPLAY exported %s frames=%d" % [_ex_path, n])
+
+# ---- highlights ------------------------------------------------------------------------------------------------
+
+## G / pad R3: only the moments worth watching, each from a little before to a little after (airs over HL_AIR s,
+## crashes), cut with the TV camera; airs at half speed, a crash at a third round its start
+const HL_AIR := 0.45
+var hl_on := false
+var _hl: Array = []            # [from, to, kind (1 crash / 2 air), crash time]
+var _hl_i := 0
+
+func _hl_build() -> void:
+	var w: Array = []
+	for m in _marks:
+		var a := float(m[1]); var b := float(m[2])
+		if int(m[0]) == 2 and b - a >= HL_AIR: w.append([a - 1.3, b + 1.0, 2, -1.0])
+		elif int(m[0]) == 1: w.append([a - 2.2, a + 3.2, 1, a])
+	w.sort_custom(func(x, y): return x[0] < y[0])
+	_hl = []
+	for x in w:
+		x[0] = maxf(float(x[0]), t0()); x[1] = minf(float(x[1]), t1())
+		if not _hl.is_empty() and float(x[0]) <= float(_hl[-1][1]):
+			_hl[-1][1] = maxf(float(_hl[-1][1]), float(x[1]))
+			if int(x[2]) == 1: _hl[-1][2] = 1; _hl[-1][3] = x[3]
+		else: _hl.append(x)
+
+func toggle_highlights() -> void:
+	hl_on = not hl_on
+	if hl_on:
+		_hl_build()
+		if _hl.is_empty():
+			hl_on = false
+			status = "NO HIGHLIGHTS YET (BIG AIRS, CRASHES)"; _status_t = 2.5
+			return
+		cam_i = CAMS.find("TV")
+		_hl_i = 0
+		_hl_jump(0)
+		playing = true
+	status = ("HIGHLIGHTS · %d MOMENTS" % _hl.size()) if hl_on else "WHOLE RIDE"
+	if probe: print("REPLAY highlights on=%s %s" % [hl_on, str(_hl.map(func(w): return "%s %.1f..%.1f" % ["crash" if int(w[2]) == 1 else "air", float(w[0]) - t1(), float(w[1]) - t1()]))])
+	_status_t = 2.0
+	_refresh_hint()
+
+func _hl_jump(i: int) -> void:
+	_hl_i = i % _hl.size()
+	tp = float(_hl[_hl_i][0])
+	_shot = null
+	_snap_cam = true
+
+## inside a highlight: the slow motion there; past its end: the next one (round again after the last)
+func _hl_rate() -> float:
+	if not hl_on or _hl.is_empty(): return 1.0
+	var w: Array = _hl[_hl_i]
+	if tp > float(w[1]) or tp < float(w[0]) - 0.05:
+		var nxt := _hl_i + 1
+		for j in _hl.size():
+			if float(_hl[j][0]) > tp - 0.01 and tp <= float(_hl[j][1]): nxt = j; break
+		_hl_jump(nxt if tp > float(w[1]) else _hl_i)
+		w = _hl[_hl_i]
+	if int(w[2]) == 1 and tp >= float(w[3]) - 0.5 and tp <= float(w[3]) + 2.0: return 0.35
+	if (int(frames[_at(tp)][7]) & 2) != 0: return 0.55
+	return 1.0
 
 ## index of the last sample at or before t
 func _at(t: float) -> int:
@@ -689,19 +966,23 @@ func t1() -> float: return float(frames[-1][0]) if frames.size() > 0 else 0.0
 ## real-time step while the replay is up (Game._process, the ride frozen)
 func update(rdt: float) -> void:
 	if not on or frames.size() < 2: return
-	_poll(rdt)
+	if exporting:   # (an even video frame step, whatever the real frame time)
+		rdt = _export_step()
+		if rdt <= 0.0: rdt = 1.0 / EX_FPS
+	else:
+		_poll(rdt)
 	if _status_t > 0.0:
 		_status_t -= rdt
 		if _status_t <= 0.0: status = ""
 	var prev_tp := tp
-	var scrubbing := absf(_held) >= TAP
+	var scrubbing := absf(_held) >= TAP and not exporting
 	if scrubbing:
 		# (held longer = faster: 3x, doubling every 0.6 s up to 48x, so a 6 min ride is crossed in seconds)
 		tp += signf(_held) * SCRUB * pow(2.0, clampf((absf(_held) - TAP) / 0.6, 0.0, 4.0)) * rdt
 	elif _held != 0.0:
 		pass   # (maybe a tap: decided on release)
 	elif playing and not _drag_tl:
-		tp += rdt * SPEEDS[speed_i]
+		tp += rdt * SPEEDS[speed_i] * _hl_rate()
 	if tp > t1():
 		if playing and not scrubbing and not _drag_tl:
 			tp = t0(); _shot = null; _snap_cam = true   # loop
@@ -711,6 +992,10 @@ func update(rdt: float) -> void:
 	var fk := _frame_k(tp)
 	_apply(fk[0], fk[1], fk[2])
 	_focus_now = focus_at(tp)
+	_sound(prev_tp, rdt, fk)
+	_dust(prev_tp, fk)
+	_tracks(fk)
+	if probe: _vis_probe()
 	# (as much sim time as the replay moved, so slow motion is slow for the paper too; a little while paused so it
 	# settles on the body; a big jump resets them by itself)
 	var sdt := clampf(absf(tp - prev_tp), 0.002, 1.0 / 30.0)
@@ -723,8 +1008,8 @@ func update(rdt: float) -> void:
 	RenderingServer.global_shader_parameter_set("deco_fade", Vector4(sc.x, sc.z, game._deco_band.x, game._deco_band.y))
 	if game.far_hills: game.far_hills.follow(sc)
 	_camera(rdt)
-	bar.visible = ui_on
-	hint.visible = ui_on
+	bar.visible = ui_on and not exporting
+	hint.visible = ui_on and not exporting
 	if _hint_pad != Settings.pad_active: _refresh_hint()
 	bar.queue_redraw()
 	if Env.s("BMX_REPLAY_SHOTS") != "":   # tests: a shot every 0.5 s of real time
@@ -733,9 +1018,131 @@ func update(rdt: float) -> void:
 			_shots_t = 0.0
 			var path := "%s_%02d.png" % [Env.s("BMX_REPLAY_SHOTS"), _shots_i]
 			get_viewport().get_texture().get_image().save_png(path)
-			print("REPLAYSHOT %s tp=%.2f cam=%s speed=%.2f kmh=%.0f fps=%.0f" % [path, tp - t1(), CAMS[cam_i], SPEEDS[speed_i], _kmh_at(tp), Engine.get_frames_per_second()])
+			print("REPLAYSHOT %s tp=%.2f cam=%s speed=%.2f kmh=%.0f fps=%.0f tracks_hidden=%d dust_events=%d sound_events=%d" % [path, tp - t1(), CAMS[cam_i], SPEEDS[speed_i], _kmh_at(tp), Engine.get_frames_per_second(), _trk_hid, dev.size(), aev.size()])
 			_shots_i += 1
 			if viewer and _shots_i >= int(Env.s("BMX_REPLAY_NSHOTS") if Env.s("BMX_REPLAY_NSHOTS") != "" else "16"): game.exit_replay()   # (tests: BMX_REPLAY_WATCH)
+
+## the ride sound follows the replay: playing forwards it hears the recorded state (interpolated) and the one-shots
+## whose moment the playhead just crossed; slow motion slows and lowers the whole mix (like the crash slow motion);
+## paused, rewinding or scrubbing fast = quiet
+func _sound(prev_tp: float, rdt: float, fk: Array) -> void:
+	var au = game.audio
+	if au == null: return
+	var dtp := tp - prev_tp
+	var rate := dtp / rdt if rdt > 0.0 else 0.0
+	if rdt <= 0.0 or dtp <= 0.0 or rate > 3.0 or not playing and absf(_held) < TAP:
+		au.src = null
+		AudioServer.playback_speed_scale = 1.0
+		return
+	var a: Array = fk[0]
+	var ra: PackedFloat32Array = a[AROW] if a.size() > AROW else PackedFloat32Array()
+	if ra.size() < 8:
+		au.src = null
+		return
+	var rb: PackedFloat32Array = fk[1][AROW] if (fk[1] != null and fk[1].size() > AROW) else ra
+	var k: float = fk[2]
+	var s := _astate
+	s.v = lerpf(ra[0], rb[0], k); s.air = ra[1] > 0.5; s.crash_on = ra[2] > 0.5; s.surf = int(ra[3]); s.skid_fx = ra[4] > 0.5
+	s.throttle_in = lerpf(ra[5], rb[5], k); s.pedal = lerpf(ra[6], rb[6], k); s.crank = lerpf(ra[7], rb[7], k)
+	s.RWR = float(game.phys.RWR) if game.phys else 0.36
+	au.src = s
+	AudioServer.playback_speed_scale = clampf(rate, 0.35, 1.5)
+	if dtp < 0.5:   # (a loop / a jump: no burst of every sound in between)
+		for ev in aev:
+			var et := float(ev[0])
+			if et > prev_tp and et <= tp: au.callv(String(ev[1]), ev[2])
+
+## the dust plays again: the tyres' feeds of the sample + the bursts the playhead crossed, the smoke sim stepped by
+## the replay's own time (paused = the cloud hangs still; a jump back clears it: smoke can't run backwards)
+func _dust(prev_tp: float, fk: Array) -> void:
+	var du = game.dust
+	if du == null or du.sim == null: return
+	var dtp := tp - prev_tp
+	if dtp < 0.0 or dtp > 0.5:
+		du.sim.reset()
+		return
+	if dtp == 0.0: return
+	var a: Array = fk[0]
+	if a.size() > DROW:
+		var fd: Array = a[DROW]
+		if (fd[0] as Array).size() == 6: du.callv("feed", fd[0])
+		if (fd[1] as Array).size() == 4: du.callv("feed_front", fd[1])
+	for ev in dev:
+		var et := float(ev[0])
+		if et > prev_tp and et <= tp:
+			(du.sim if ev[1] == "sim" else du).callv(String(ev[2]), ev[3])
+	du.sim_step(dtp, _focus_now, fwd_at(tp), game.atmos.wind)
+
+## tyre tracks: the marks laid after the replayed moment are hidden (their colour bytes zeroed, the ring's newest
+## segments), so they appear behind the bike as it rides; all put back on leaving. Not for a saved replay (a fresh
+## world has none)
+var _trk_attr := PackedByteArray()   # the tracks' whole attribute buffer as the ride left it
+var _trk_hid := 0                    # how many of the newest segments are hidden now
+func _tracks(fk: Array) -> void:
+	var fx = game.fx
+	if fx == null or viewer or _trk_attr.is_empty(): return
+	var a: Array = fk[0]
+	if a.size() <= DROW + 1: return
+	var cut := float(a[DROW + 1])
+	if fk[1] != null and (fk[1] as Array).size() > DROW + 1: cut = lerpf(cut, float(fk[1][DROW + 1]), fk[2])
+	# the newest segment is at seg_next - 1, older ones behind it: find how many are newer than the cut
+	var n: int = fx.SEG_MAX
+	var lo := 0
+	var hi := n
+	while lo < hi:   # smallest k whose segment is no newer than the cut
+		var mid := (lo + hi) >> 1
+		if float(fx.seg_birth[posmod(int(fx.seg_next) - 1 - mid, n)]) > cut: lo = mid + 1
+		else: hi = mid
+	var h := lo
+	if h == _trk_hid: return
+	var rid: RID = fx.track_mesh.get_rid()
+	var sb: int = 6 * int(fx._a_stride)
+	var k0 := mini(h, _trk_hid)
+	var k1 := maxi(h, _trk_hid)
+	var zero := PackedByteArray()
+	if h > _trk_hid: zero.resize(sb)
+	for k in range(k0, k1):   # (a few segments a frame at riding speed)
+		var i := posmod(int(fx.seg_next) - 1 - k, n)
+		RenderingServer.mesh_surface_update_attribute_region(rid, 0, i * sb, zero if h > _trk_hid else _trk_attr.slice(i * sb, (i + 1) * sb))
+	_trk_hid = h
+
+func _tracks_open() -> void:
+	_trk_hid = 0
+	_trk_attr = PackedByteArray()
+	var fx = game.fx
+	if fx == null or viewer or fx.track_mesh == null: return
+	var sd: Dictionary = RenderingServer.mesh_get_surface(fx.track_mesh.get_rid(), 0)
+	_trk_attr = sd.get("attribute_data", PackedByteArray())
+
+func _tracks_close() -> void:
+	var fx = game.fx
+	if fx != null and not _trk_attr.is_empty() and _trk_hid > 0:
+		RenderingServer.mesh_surface_update_attribute_region(fx.track_mesh.get_rid(), 0, 0, _trk_attr)
+	_trk_attr = PackedByteArray()
+	_trk_hid = 0
+
+## tests: frames where the rider (or a big part of him) isn't drawn while the replay plays
+var _vis_bad := 0
+var _vis_live := {}
+var _vis_n := 0
+func _vis_probe() -> void:
+	var r = game.rider
+	if r == null: return
+	_vis_n += 1
+	var hidden := PackedStringArray()
+	if not r.is_visible_in_tree(): hidden.append("rider")
+	if _vis_live.is_empty() and _snap != null:   # (what is hidden in the live ride too: left out)
+		var ls: Dictionary = _snap[0]
+		for ni in ls.nodes.size():
+			if ls.base_v[ni] == 0: _vis_live[ls.nodes[ni]] = true
+	for c in r.find_children("*", "GeometryInstance3D", true, false):
+		if not (c as Node3D).visible and not _vis_live.has(c):
+			hidden.append("%s(%s)" % [String(c.name), String(c.get_parent().name)])
+	var dist: float = cam3.global_position.distance_to(r.global_position) if cam3 else 0.0
+	if hidden.size() > 0 or r.global_position.distance_to(_focus_now) > 3.0:
+		_vis_bad += 1
+		if _vis_bad < 12: print("REPLAYVIS tp=%.2f hidden=%s rider_to_focus=%.2f cam_dist=%.1f" % [tp - t1(), ",".join(hidden), r.global_position.distance_to(_focus_now), dist])
+	if _vis_n % 120 == 0: print("REPLAYVIS frames=%d bad=%d" % [_vis_n, _vis_bad])
 
 func _kmh_at(t: float) -> float:
 	return float(frames[_at(t)][6])
@@ -981,7 +1388,11 @@ var _yaw_d := 0.0            # Free: mouse look this frame
 var _pitch_d := 0.0
 
 func _input(e: InputEvent) -> void:
-	if not on: return
+	if not on or game.photo: return   # (photo mode on a replay frame takes the input)
+	if exporting:   # (Esc stops it, keeping what's done)
+		if e is InputEventKey and e.pressed and e.keycode == KEY_ESCAPE: _export_end()
+		get_viewport().set_input_as_handled()
+		return
 	var used := true
 	var free: bool = CAMS[cam_i] == "Free"
 	if e is InputEventKey and free and e.keycode in [KEY_W, KEY_A, KEY_S, KEY_D, KEY_Q, KEY_E, KEY_Z, KEY_X, KEY_SHIFT, KEY_ALT, KEY_CTRL]:
@@ -997,6 +1408,12 @@ func _input(e: InputEvent) -> void:
 			KEY_Q, KEY_DOWN: _speed(-1)
 			KEY_E, KEY_UP: _speed(1)
 			KEY_S: save()
+			KEY_G: toggle_highlights()
+			KEY_BRACKETLEFT: clip_in = tp; status = "CLIP IN " + clock(tp - t1()); _status_t = 1.5
+			KEY_BRACKETRIGHT: clip_out = tp; status = "CLIP OUT " + clock(tp - t1()); _status_t = 1.5
+			KEY_DELETE: clip_in = -1.0; clip_out = -1.0; status = "CLIP CLEARED"; _status_t = 1.5
+			KEY_V: export_clip()
+			KEY_ENTER, KEY_KP_ENTER: ride_from_here()
 			KEY_HOME: tp = t0(); _shot = null; _snap_cam = true
 			KEY_END: tp = t1()
 			KEY_H, KEY_F1: ui_on = not ui_on
@@ -1015,8 +1432,8 @@ func _input(e: InputEvent) -> void:
 			JOY_BUTTON_DPAD_DOWN: _speed(-1)
 			JOY_BUTTON_DPAD_UP: _speed(1)
 			JOY_BUTTON_B, JOY_BUTTON_LEFT_STICK: game.exit_replay()
-			JOY_BUTTON_X: ui_on = not ui_on
-			JOY_BUTTON_RIGHT_STICK: _yaw = 0.0; _pitch = 0.0; _zoom = 1.0; _free_roll = 0.0
+			JOY_BUTTON_X: ride_from_here()
+			JOY_BUTTON_RIGHT_STICK: toggle_highlights()
 			JOY_BUTTON_BACK: save()
 			JOY_BUTTON_START: used = false
 			_: pass
@@ -1137,11 +1554,12 @@ func _refresh_hint() -> void:
 				[["K:ALT"], "+ drag: orbit"], [["K:Z", "K:X"], "Tilt"], [["K:F"], "Frame"], [["K:C"], "Camera"]])
 		return
 	if _hint_pad:
-		hint.set_items([[["A"], "Play / pause"], [["D-Left", "D-Right"], "Rewind / forward"], [["LB", "RB"], "Speed"], [["Y"], "Camera"],
-			[["RS"], "Look"], [["X"], "Hide"]] + ([] if viewer else [[["VIEW"], "Save"]]) + [[["B"], "Back to menu" if viewer else "Back to riding"]])
+		hint.set_items([[["A"], "Play"], [["D-Left", "D-Right"], "Rewind"], [["LB", "RB"], "Speed"], [["Y"], "Camera"],
+			[["R3"], "Highlights"]] + ([] if viewer else [[["X"], "Ride from here"], [["VIEW"], "Save"]]) + [[["B"], "Back"]])
 	else:
-		hint.set_items([[["K:SPACE"], "Play / pause"], [["K:A", "K:D"], "Rewind / forward"], [["K:Q", "K:E"], "Speed"], [["K:C"], "Camera"],
-			[["MOUSE"], "Look"], [["K:H"], "Hide"]] + ([] if viewer else [[["K:S"], "Save"]]) + [[["K:ESC"], "Back to menu"] if viewer else [[PadGlyph.glyph_for("replay", false)], "Back to riding"]])
+		hint.set_items([[["K:SPACE"], "Play"], [["K:A", "K:D"], "Rewind"], [["K:Q", "K:E"], "Speed"], [["K:C"], "Camera"],
+			[["K:G"], "Highlights"], [["K:O"], "Photo"], [["K:[", "K:]", "K:V"], "Clip"]] + ([] if viewer else [[["K:ENTER"], "Ride from here"], [["K:S"], "Save"]])
+			+ [[["K:ESC"], "Back"]])
 
 func _test_set(spec: String) -> void:
 	for kv in spec.split(",", false):
@@ -1153,6 +1571,11 @@ func _test_set(spec: String) -> void:
 			"at": tp = clampf(t1() + float(p[1]), t0(), t1()) if float(p[1]) <= 0.0 else clampf(t0() + float(p[1]), t0(), t1())
 			"pause": playing = p[1] != "1"
 			"ui": ui_on = p[1] != "0"
+			"hl": if p[1] == "1": toggle_highlights.call_deferred()
+			"in": clip_in = clampf(t1() + float(p[1]), t0(), t1())
+			"out": clip_out = clampf(t1() + float(p[1]), t0(), t1())
+			"export": if p[1] == "1": export_clip.call_deferred()
+			"ride": if p[1] == "1": ride_from_here.call_deferred()
 
 
 ## the bar along the bottom: REPLAY, the timeline (crashes red, airs gold), time, speed, camera
@@ -1222,6 +1645,17 @@ class Bar extends Control:
 				draw_rect(Rect2(xa, r.position.y - 3, maxf(xb - xa, 1.5), r.size.y + 6), Color(1.0, 0.78, 0.2, 0.85))
 			else:
 				draw_rect(Rect2(xa - 1.5, r.position.y - 9, 3, r.size.y + 18), Color(0.95, 0.15, 0.12))
+		if rp.hl_on:   # the highlights: light bands over the line
+			for w in rp._hl:
+				var ha: float = r.position.x + (float(w[0]) - t0) / span * r.size.x
+				var hb: float = r.position.x + (float(w[1]) - t0) / span * r.size.x
+				draw_rect(Rect2(ha, r.position.y + r.size.y + 4, maxf(hb - ha, 2.0), 3), Color(0.45, 0.8, 1.0, 0.9))
+		if rp.clip_in >= 0.0 or rp.clip_out >= 0.0:   # the clip to export: brackets and a band
+			var ca: float = r.position.x + (maxf(rp.clip_in, t0) - t0) / span * r.size.x
+			var cb: float = r.position.x + ((rp.clip_out if rp.clip_out > rp.clip_in else t1) - t0) / span * r.size.x
+			draw_rect(Rect2(ca, r.position.y - 6, cb - ca, 3), Color(1, 1, 1, 0.75))
+			draw_rect(Rect2(ca - 1, r.position.y - 10, 2, r.size.y + 20), Color.WHITE)
+			draw_rect(Rect2(cb - 1, r.position.y - 10, 2, r.size.y + 20), Color.WHITE)
 		var k: float = (rp.tp - t0) / span
 		var px: float = r.position.x + k * r.size.x
 		draw_rect(Rect2(r.position.x, r.position.y, px - r.position.x, r.size.y), Color(1, 1, 1, 0.85))
