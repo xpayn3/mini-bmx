@@ -24,7 +24,7 @@ vec3 rut_normal(vec2 xz, vec3 n) {
 
 // a groove's bottom is packed / damp (darker), the lip of pushed-up loose dirt a little lighter
 vec3 rut_colour(vec3 c, float d) {
-	float g = smoothstep(0.002, 0.05, d);
+	float g = smoothstep(0.003, 0.06, d);
 	float lip = smoothstep(0.001, 0.012, -d);
-	return c * (1.0 - 0.32 * g) * (1.0 + 0.12 * lip);
+	return c * (1.0 - 0.16 * g) * (1.0 + 0.10 * lip);   // (0.32 read too dark, user 2026-11-24)
 }
