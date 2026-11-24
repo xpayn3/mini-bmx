@@ -17,11 +17,16 @@ const DAMP := 0.9                 # /s
 const IDLE_STOP := 9.0            # s with nothing pushed: the water has settled, stop stepping
 
 var ok := false
+var cell := CELL                  # metres per texel (the lake 15 cm; the puddles' own instance finer)
+var wave_c := WAVE_C
+var damp := DAMP                  # /s (puddles: more, so a ripple stays in its puddle)
 var tex: Texture2DRD
 var centre := Vector2.ZERO        # world metres of the window's middle (for the shader's edge fade)
 
 var rd: RenderingDevice
 var _t: Array[RID] = [RID(), RID()]
+var _out: RID                     # what the materials read: a fixed texture the finished step is copied into (flipping the
+							  # ping-pong texture itself every step made the engine rebuild every material's bindings)
 var _buf: RID
 var _shader: RID
 var _pipe: RID
@@ -62,7 +67,7 @@ func splash(p: Vector3, amount: float, radius := 0.5) -> void:
 	var o := _n * 4
 	if _probe and _n == 0: print("WAKE splash %.2f" % amount)
 	_src_max = maxf(_src_max, amount)
-	_src[o] = p.x; _src[o + 1] = p.z; _src[o + 2] = maxf(radius, 0.26); _src[o + 3] = amount
+	_src[o] = p.x; _src[o + 1] = p.z; _src[o + 2] = maxf(radius, cell * 1.7); _src[o + 3] = amount
 	_n += 1
 	_idle = 0.0
 
@@ -82,11 +87,11 @@ func step(dt: float, focus: Vector3) -> void:
 		steps += 1
 	if steps == MAX_STEPS: _acc = minf(_acc, STEP_DT)
 	if steps == 0: return   # pushes wait for the next step
-	var nc := Vector2i(floori(focus.x / CELL), floori(focus.z / CELL))
+	var nc := Vector2i(floori(focus.x / cell), floori(focus.z / cell))
 	var n := _n
 	var sb := _src.slice(0, n * 4).to_byte_array()
 	_n = 0
-	centre = Vector2(nc) * CELL
+	centre = Vector2(nc) * cell
 	if _probe:
 		_pr_steps += steps; _pr_src += n; _pr_t += dt; _pr_amt = maxf(_pr_amt, _src_max)
 		if _pr_t >= 2.0:
@@ -108,6 +113,8 @@ func _gpu_create() -> void:
 	for i in 2:
 		_t[i] = rd.texture_create(f, RDTextureView.new(), [])
 		rd.texture_clear(_t[i], Color(0, 0, 0, 0), 0, 1, 0, 1)
+	_out = rd.texture_create(f, RDTextureView.new(), [])
+	rd.texture_clear(_out, Color(0, 0, 0, 0), 0, 1, 0, 1)
 	_buf = rd.storage_buffer_create(MAX_SRC * 16)
 	var sf: RDShaderFile = load("res://shaders/water_wake.glsl")
 	var spirv := sf.get_spirv()
@@ -120,7 +127,7 @@ func _gpu_create() -> void:
 	for p in 2:
 		_sets[p] = rd.uniform_set_create([_img(0, _t[p]), _img(1, _t[1 - p]),
 			_u(RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, 2, [_buf])], _shader, 0)
-	tex.texture_rd_rid = _t[0]
+	tex.texture_rd_rid = _out
 
 
 func _u(type: int, b: int, ids: Array) -> RDUniform:
@@ -138,11 +145,11 @@ func _img(b: int, t: RID) -> RDUniform:
 func _gpu_step(steps: int, src: PackedByteArray, n: int, old_c: Vector2i, new_c: Vector2i) -> void:
 	if not ok or not _pipe.is_valid(): return
 	if n > 0: rd.buffer_update(_buf, 0, n * 16, src)
-	var coef := WAVE_C * WAVE_C / (CELL * CELL)
+	var coef := wave_c * wave_c / (cell * cell)
 	var cl := rd.compute_list_begin()
 	for k in steps:
 		var oc := old_c if k == 0 else new_c
-		var pc := PackedFloat32Array([STEP_DT, coef, DAMP, float(n if k == 0 else 0), oc.x, oc.y, new_c.x, new_c.y]).to_byte_array()
+		var pc := PackedFloat32Array([STEP_DT, coef, damp, float(n if k == 0 else 0), oc.x, oc.y, new_c.x, new_c.y, cell, 0.0, 0.0, 0.0]).to_byte_array()
 		rd.compute_list_bind_compute_pipeline(cl, _pipe)
 		rd.compute_list_bind_uniform_set(cl, _sets[_cur], 0)
 		rd.compute_list_set_push_constant(cl, pc, pc.size())
@@ -150,7 +157,7 @@ func _gpu_step(steps: int, src: PackedByteArray, n: int, old_c: Vector2i, new_c:
 		rd.compute_list_add_barrier(cl)
 		_cur = 1 - _cur
 	rd.compute_list_end()
-	tex.texture_rd_rid = _t[_cur]
+	rd.texture_copy(_t[_cur], _out, Vector3.ZERO, Vector3.ZERO, Vector3(N, N, 1), 0, 0, 0, 0)
 	if _probe:
 		_pr_read += steps
 		if _pr_read >= 120:
@@ -169,7 +176,7 @@ func _gpu_step(steps: int, src: PackedByteArray, n: int, old_c: Vector2i, new_c:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_PREDELETE and rd != null:
-		var rids: Array[RID] = [_t[0], _t[1], _buf, _shader]   # freeing the shader frees its pipeline + uniform sets
+		var rids: Array[RID] = [_t[0], _t[1], _out, _buf, _shader]   # freeing the shader frees its pipeline + uniform sets
 		if tex != null: tex.texture_rd_rid = RID()
 		var dev := rd
 		ok = false

@@ -22,6 +22,7 @@ var _dirty := false
 var _dirty_t := 0.0
 var _mat: ShaderMaterial
 var _wake: WaterWake
+var _wake_c := Vector2(INF, INF)
 var _demo := Env.s("BMX_WAKE_DEMO") != ""
 var _demo_t := 0.0
 
@@ -110,7 +111,9 @@ func follow(px: float, pz: float, t: float) -> void:
 				var a := t * 1.7
 				_wake.splash(Vector3(px + cos(a) * 5.0, Terrain.WATER, pz + sin(a) * 5.0), 0.4, 0.3)
 		_wake.step(get_process_delta_time(), Vector3(px, Terrain.WATER, pz))
-		_mat.set_shader_parameter("u_wake_c", _wake.centre)
+		if _wake.centre != _wake_c:
+			_wake_c = _wake.centre
+			_mat.set_shader_parameter("u_wake_c", _wake_c)
 	position =Vector3(roundf(px / MESH_SNAP) * MESH_SNAP, Terrain.WATER, roundf(pz / MESH_SNAP) * MESH_SNAP)
 	var c := Vector2(roundf(px / BAKE_SNAP) * BAKE_SNAP, roundf(pz / BAKE_SNAP) * BAKE_SNAP)
 	if not is_finite(_center.x):
