@@ -18,7 +18,7 @@ extends DemoPilot
 ## Tests: BMX_PG_PILOT=feature|lane (+ BMX_PG_AT, BMX_PG_PILOT_KMH=30, BMX_PG_PILOT_PUMP=0) starts with it on.
 
 const LET_GO := 1.5            # m before a feature: hands off
-const RUNUP := 30.0            # m before the feature it restarts at
+var RUNUP := float(Env.s("BMX_PG_PILOT_RUNUP")) if Env.s("BMX_PG_PILOT_RUNUP") != "" else 30.0   # m before the feature it restarts at (tests: BMX_PG_PILOT_RUNUP)
 const AFTER := 14.0            # m past a feature's end: that run is over
 const SLALOM_OFF := 1.3        # m beside a cone it passes
 
