@@ -48,6 +48,7 @@ var hover := -1                     # ring row under the mouse, -1 none
 var acc := {}                       # Game._perf adds microseconds per section here
 var ticks := 0                      # physics ticks since the last drawn frame
 
+var _worst_at := {}
 var _worst := {}   # each section's worst single frame this session (printed at exit in test runs: PROF WORST)
 ## tests (BMX_PROF + BMX_PROF_AVG=1): each section's mean per frame, crashed frames apart from riding ones (PROF AVG ride / crash)
 var _AVG := Env.s("BMX_PROF_AVG") != ""
@@ -82,7 +83,7 @@ func _exit_tree() -> void:
 	var ks := _worst.keys()
 	ks.sort_custom(func(a, b): return _worst[a] > _worst[b])
 	var line := "PROF WORST (ms, one frame):"
-	for k in ks.slice(0, 20): line += " %s=%.2f" % [k, _worst[k]]
+	for k in ks.slice(0, 20): line += " %s=%.2f" % [k, _worst[k]] + ("(%s)" % _worst_at[k] if k.begins_with("eng.") else "")
 	print(line)
 
 var _view: Control
@@ -205,7 +206,9 @@ func _close_frame(wall_ms: float) -> void:
 		var i := _key(k)
 		if i >= 0:
 			_sec[base + i] = acc[k] / 1000.0
-			if _frame > 60 and acc[k] / 1000.0 > _worst.get(k, 0.0): _worst[k] = acc[k] / 1000.0
+			if _frame > 60 and acc[k] / 1000.0 > _worst.get(k, 0.0):
+				_worst[k] = acc[k] / 1000.0
+				_worst_at[k] = "f%d@%.1fs%s" % [_frame, Time.get_ticks_msec() / 1000.0, "/crash" if game and game.phys and game.phys.crash_on else ""]
 			if _frame > 60 and _AVG: _avg_add(k, acc[k] / 1000.0)
 	_wall[r] = wall_ms
 	_gpu[r] = RenderingServer.viewport_get_measured_render_time_gpu(_vp_rid)

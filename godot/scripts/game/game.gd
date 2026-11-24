@@ -82,15 +82,26 @@ var _shadow_zoom := -1.0
 ## the cascades sit where the picture is: the first one ends just past the rider (the follow cameras are 5-25 m
 ## behind), the second over the trail ahead, the third out to the trees. Fixed shares of the reach put the rider in
 ## a coarse middle cascade. Redone only when the zoom you set changes (not with the speed dolly).
+## the sun's shadow uses 2 cascades at every quality (2026-11-24): the rider / bike / everything near the camera was drawn
+## into 3-4 of the 4 cascades' maps (409 of the 889 shadow draws were the rider + bike). 2 cascades, the near one still
+## ending zoom + 6 m (so the rider's own shadow stays as sharp): shadow draws 887 -> 539, render CPU -0.15 ms, GPU -0.13 ms
+## at the start, the 30 s follow ride 141 -> 156 fps; mid-distance tree shadows a touch softer.
+## BMX_SHADOW_SPLITS=4 = the old 4 cascades (Medium and up)
+func _two_splits() -> bool:
+	return Env.s("BMX_SHADOW_SPLITS") != "4"
+
 func _shadow_fit() -> void:
 	var sq := int(Settings.get_v("shadows"))
 	var reach: float = SHADOW_REACH[clampi(sq, 0, 3)]
+	if Env.s("BMX_SHADOW_REACH") != "": reach = float(Env.s("BMX_SHADOW_REACH"))   # tests
 	var zoom := roundf(cam.dist / maxf(1.0 - 0.2 * cam.speed_feel, 0.5))   # the zoom set, without the speed dolly
 	if absf(sun.directional_shadow_max_distance - reach) > 0.5: sun.directional_shadow_max_distance = reach
 	if zoom == _shadow_zoom: return
 	_shadow_zoom = zoom
-	if sq == 0:
-		sun.directional_shadow_split_1 = clampf((zoom + 12.0) / reach, 0.1, 0.5)
+	if sq == 0 or _two_splits():
+		var s1 := 12.0 if sq == 0 else 6.0   # (Low: the first cascade a bit longer, its map is smaller)
+		if Env.s("BMX_SHADOW_S1") != "": s1 = float(Env.s("BMX_SHADOW_S1"))   # tests
+		sun.directional_shadow_split_1 = clampf((zoom + s1) / reach, 0.03, 0.5)
 		return
 	sun.directional_shadow_split_1 = clampf((zoom + 6.0) / reach, 0.04, 0.3)
 	sun.directional_shadow_split_2 = clampf((zoom + 22.0) / reach, sun.directional_shadow_split_1 + 0.05, 0.5)
@@ -208,6 +219,11 @@ var tumbleweeds: Tumbleweeds
 var title_life: TitleLife     # title screen only: birds, blowing dust, dust round the bushes
 
 func _ready() -> void:
+	if Env.s("BMX_MERGE_SCAN") != "" and not title_world:   # tests: what merging rider / bike meshes could save
+		var RP := preload("res://scripts/game/render_probe.gd")
+		var snap_r := {}; var snap_b := {}
+		get_tree().create_timer(6.0).timeout.connect(func(): RP.merge_scan(rider, "rider", snap_r, false); RP.merge_scan(rig, "bike", snap_b, false))
+		get_tree().create_timer(12.0).timeout.connect(func(): RP.merge_scan(rider, "rider", snap_r, true); RP.merge_scan(rig, "bike", snap_b, true))
 	if Env.s("BMX_PROF") != "" and not title_world: toggle_profiler.call_deferred(int(Env.s("BMX_PROF")))   # tests: 1 compact, 2 full
 	bike_cfg = GameState.bike_config()
 	if not title_world:
@@ -1205,7 +1221,7 @@ func _apply_settings() -> void:
 		grass.set_quality(int(Env.s("BMX_GRASS")) if Env.s("BMX_GRASS") != "" else int(Settings.get_v("grass")))
 	var sq: int = Settings.get_v("shadows")
 	# shadows: Low = 2 cascades, hard-ish; Ultra = 4 blended cascades + contact-hardening soft shadows
-	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS if sq == 0 else DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS if (sq == 0 or _two_splits()) else DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
 	# 2 splits: the first one covers ~a fifth of the reach (0.06 left the second cascade stretched over the rest)
 	_shadow_zoom = -1.0   # _shadow_fit places the splits
 	sun.directional_shadow_blend_splits = sq >= 2
