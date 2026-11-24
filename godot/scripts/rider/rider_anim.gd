@@ -43,6 +43,9 @@ static func clip_files(dir := DIR) -> PackedStringArray:
 		var ext := f.get_extension().to_lower()
 		if ext in ["fbx", "glb", "gltf", "tscn", "scn"] and not out.has(dir + f):
 			out.append(dir + f)
+	if dir == DIR:   # + what the player imported in the Anim Studio (run-time loaded, user://)
+		for u in AnimLib.user_files():
+			if not out.has(u): out.append(u)
 	out.sort()
 	return out
 
@@ -89,12 +92,16 @@ static func _short(n: String) -> String:
 
 
 func _load_clip(path: String) -> Dictionary:
-	var ps: PackedScene = _scenes.get(path)
-	if ps == null:
-		ps = load(path) as PackedScene
-		if ps == null: return {}
-		_scenes[path] = ps
-	var inst := ps.instantiate() as Node3D
+	var inst: Node3D = null
+	if path.begins_with("user://"):   # an imported clip: read at run time
+		inst = AnimLib.load_instance(path)
+	else:
+		var ps: PackedScene = _scenes.get(path)
+		if ps == null:
+			ps = load(path) as PackedScene
+			if ps == null: return {}
+			_scenes[path] = ps
+		inst = ps.instantiate() as Node3D
 	if inst == null: return {}
 	var skel: Skeleton3D = null
 	for s in inst.find_children("*", "Skeleton3D", true, false):
@@ -183,20 +190,42 @@ static func _delta(c: Dictionary, g: Dictionary, n: String) -> Basis:
 	return (g[n] as Transform3D).basis.orthonormalized() * (c.rest[n] as Basis).inverse()
 
 
+func _is_idle(i: int) -> bool:
+	return bool(AnimLib.get_cfg(str(clips[i].name)).idle) or str(clips[i].name).to_lower().contains("idle")
+
+
 func _pick_next() -> void:
+	# (Anim Studio settings: ON, IDLE, pick weight, speed, hold)
 	var idle := -1
 	for i in clips.size():
-		if str(clips[i].name).to_lower().contains("idle"): idle = i; break
-	var nxt := 0
-	if clips.size() > 1:
-		if cur != idle and idle >= 0: nxt = idle
-		else:
-			nxt = _rng.randi_range(0, clips.size() - 2)
-			if nxt >= cur: nxt += 1
+		if _is_idle(i) and bool(AnimLib.get_cfg(str(clips[i].name)).on): idle = i; break
+	var nxt := -1
+	var pool: Array = []
+	var wsum := 0.0
+	for i in clips.size():
+		var cf := AnimLib.get_cfg(str(clips[i].name))
+		if i == cur or not bool(cf.on): continue
+		if i == idle and cur != idle and idle >= 0: continue
+		pool.append(i); wsum += maxf(float(cf.weight), 0.0)
+	if clips.size() > 1 and cur != idle and idle >= 0: nxt = idle   # (back to the idle between the others)
+	elif not pool.is_empty():
+		var r := _rng.randf() * maxf(wsum, 1e-6)
+		for i in pool:
+			r -= maxf(float(AnimLib.get_cfg(str(clips[i].name)).weight), 0.0)
+			if r <= 0.0: nxt = i; break
+		if nxt < 0: nxt = pool[-1]
+	if nxt < 0: nxt = maxi(cur, 0) if cur >= 0 else _first_on()
 	cur = nxt
 	t = 0.0
-	var ln: float = clips[cur].len
-	_until = maxf(1.0, round(CLIP_SECS / ln)) * ln
+	var cf2 := AnimLib.get_cfg(str(clips[cur].name))
+	var ln: float = float(clips[cur].len) / maxf(float(cf2.speed), 0.1)
+	_until = maxf(float(cf2.hold), maxf(1.0, round(CLIP_SECS / ln)) * ln)
+
+
+func _first_on() -> int:
+	for i in clips.size():
+		if bool(AnimLib.get_cfg(str(clips[i].name)).on): return i
+	return 0
 
 
 ## one frame: advance the clip, pose the rider. False when there is nothing to play.
@@ -209,10 +238,11 @@ func step(dt: float) -> bool:
 		_fade_t = 0.0
 		_pick_next()
 	var c: Dictionary = clips[cur]
-	_seek(c, t)
-	var pose := _retarget(c)
+	var cf := AnimLib.get_cfg(str(c.name))
+	_seek(c, t * float(cf.speed))
+	var pose := AnimLib.offset_pose(_retarget(c), cf.off, rider)
 	if _fade_t < 1.0 and not _fade_from.is_empty():
-		_fade_t = minf(_fade_t + dt / FADE, 1.0)
+		_fade_t = minf(_fade_t + dt / maxf(float(cf.fade), 0.05), 1.0)
 		pose = _blend(_fade_from, pose, smoothstep(0.0, 1.0, _fade_t))
 	_prev_pose = pose
 	rider.pose_points(pose.P, pose.o)
@@ -227,6 +257,17 @@ static func _blend(a: Dictionary, b: Dictionary, w: float) -> Dictionary:
 		if a.o.has(k) and b.o[k] is Basis: o[k] = (a.o[k] as Basis).orthonormalized().slerp((b.o[k] as Basis).orthonormalized(), w)
 		else: o[k] = b.o[k]
 	return {P = P, o = o}
+
+
+## clip i's pose with its Anim Studio offsets applied (the studio blends / previews these)
+func pose_for(i: int, at: float) -> Dictionary:
+	var c: Dictionary = clips[i]
+	_seek(c, at)
+	return AnimLib.offset_pose(_retarget(c), AnimLib.get_cfg(str(c.name)).off, rider)
+
+
+static func blend_poses(a: Dictionary, b: Dictionary, w: float) -> Dictionary:
+	return _blend(a, b, w)
 
 
 ## clip i's pose at time `at` (s, wraps) on the rider: {P = 15 joint points, o = orientations} in the clip's frame

@@ -101,6 +101,7 @@ const DEFAULTS := {
 	"wind": true,            # gusts rolling over the grass (and the bike parting it)
 	"grime": true,           # mud build-up, wet look and drips on bike and rider
 	"speed_fx": true,        # FOV boost and edge blur at speed
+	"lens_fx": true,         # water drops + mud splats on the camera lens (fx/lens_fx.gd)
 	"occlusion": false,      # occlusion culling (hills hide what's behind them; costs CPU)
 	# audio
 	"sfx_volume": 1.0,

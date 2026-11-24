@@ -21,6 +21,8 @@ uniform float p_vignette = 0.0;
 uniform float p_grain = 0.0;
 uniform float p_ca = 0.0;          // chromatic aberration toward the corners
 uniform float p_aspect = 0.0;      // 0 = full screen, else width / height of the frame (black bars outside)
+// water + mud on the lens (scripts/fx/lens_fx.gd); off = one uniform test
+#include "res://shaders/lens_fx.gdshaderinc"
 
 vec3 photo_filter(vec3 c, int f) {
 	float l = dot(c, vec3(0.299, 0.587, 0.114));
@@ -57,7 +59,15 @@ vec3 photo_filter(vec3 c, int f) {
 
 void fragment() {
 	vec2 uv = SCREEN_UV;
-	vec4 c = texture(screen_tex, uv);
+	float aspect = SCREEN_PIXEL_SIZE.y / SCREEN_PIXEL_SIZE.x;
+	float lwet = 0.0, lspec = 0.0, lrim = 0.0;
+	if (lens_water > 0.5) {
+		vec2 lofs;
+		lens_water_read(uv, aspect, lofs, lwet, lspec, lrim);
+		uv += lofs / vec2(aspect, 1.0);   // everything below reads the scene through the drops
+	}
+	// a drop millimetres from the glass is out of focus: what it shows is soft (game.gd turns the mips on)
+	vec4 c = lwet > 0.002 ? textureLod(screen_tex, uv, lwet * 1.5) : texture(screen_tex, uv);
 	if (photo > 0.5 && p_ca > 0.001) {
 		vec2 dd = uv - 0.5;
 		vec2 off = dd * dot(dd, dd) * 0.035 * p_ca;
@@ -112,6 +122,26 @@ void fragment() {
 	c.rgb += (l - 0.45) * vec3(0.035, 0.012, -0.03) * grade_amt;
 	vec2 v = SCREEN_UV - 0.5;
 	c.rgb *= 1.0 - dot(v, v) * (0.6 * grade_amt + 0.55 * speed);   // the frame closes in at speed
+	if (lwet > 0.002) {
+		c.rgb *= 1.0 - lrim * 0.4;
+		c.rgb += lspec * vec3(0.9, 0.95, 1.0) * 0.75;
+	}
+	if (lens_dust > 0.003) {
+		// dust on the glass: soft (it scatters), lit by the scene behind it (veiling glare: bright areas glow
+		// through it), tinted the ground's dust colour; water on the glass has washed its own path clean
+		float dk, dblur; vec3 dtint;
+		lens_dirt(SCREEN_UV, aspect, dk, dblur, dtint);
+		float clean = 1.0 - lwet * 0.9;
+		dk *= clean;
+		dblur *= clean;
+		if (dk > 0.002) {
+			vec3 soft = textureLod(screen_tex, SCREEN_UV, 3.5).rgb;
+			float lum = dot(soft, vec3(0.299, 0.587, 0.114));
+			c.rgb = mix(c.rgb, soft, dblur * 0.6);                        // smears scatter the view
+			c.rgb = mix(c.rgb, dtint * (0.5 + 0.9 * lum), dk * 0.38);      // the dirt itself, lit by what is behind
+			c.rgb += dtint * lum * lum * dk * 0.3;                         // bright light glows through it
+		}
+	}
 	if (photo > 0.5) {
 		c.rgb *= vec3(1.0 + 0.14 * p_temp, 1.0 + 0.02 * p_temp - 0.08 * p_tint, 1.0 - 0.16 * p_temp);
 		c.rgb.rb *= 1.0 + 0.05 * p_tint;

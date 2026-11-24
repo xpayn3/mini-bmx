@@ -1695,6 +1695,31 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   separate garage bikes, parts' own 3D looks for every variant (they share 2-3 looks), a purchase sound.
 
 ### Effects
+- **Water + mud on the lens (2026-11-24, `fx/lens_fx.gd` `LensFx` node + C# `fx/LensDropsCs.cs`, Settings › Gameplay ›
+  Water + mud on lens `lens_fx`)**. Research: Nakata / Kakimoto / Nishita "Real-Time Animation of Droplets on a
+  Hydrophobic Windshield" (drops = mass points, contact-angle pinning, gravity, air drag) + Kaneda et al. 1993
+  (meandering rivulets, water left behind). Each drop: pinning ~ r (varies over the glass: stop-and-go, meander),
+  gravity ~ r^3, the air ~ r^2 x airspeed^2. Moving forward the air streams the water DOWN the glass, fanning out a
+  little at the sides (`FAN`); a camera turning throws it to the outside (its acceleration): slow = drops crawl down,
+  fast = big drops let go first and stream down and off, small beads stay. (Tried and dropped: a radial flow out of the
+  view's middle, "like a Star Wars hyperspace portal"; up the glass like a car windshield, "inverted".) Rivulets dry `RIVULET_LIFE` 1 s behind a
+  drop (faster in the wind). Drop size: `LensDropsCs.SIZE` 1.215 (forces scaled with it).
+  Running drops leave beads + a rivulet and swallow what they hit (merge, volume kept). Drawn into a half-res lens
+  NORMAL MAP: rivulet SubViewport (never cleared, HDR, dried by `lens_dry.gdshader` blend_mul) under a drop SubViewport
+  (`lens_drop.gdshader`, premultiplied rg slope / b height / a cover); `grade.gdshader` refracts the scene through it
+  (`shaders/lens_fx.gdshaderinc`: flipped + out-of-focus view inside drops, dark rim, highlights tilted by the curved
+  front element, squeezed toward the rim). The air comes from the CAMERA's motion (`LensFx.update`: its velocity /
+  acceleration in its own frame), so the side cam's water runs sideways, a still trackside cam has none. Shown on the
+  default trail camera only (user). **Dust** (mud splats were tried: "very ugly", removed): one level `lens.dust`
+  0..1, built riding fast through dry dirt / sand dust (+ a bump on a crash there), washed off by water, cleared on
+  respawn; drawn from `assets/textures/lens/lens_dirt.png` (4096 x 2304, `tools/make_lens_dirt.py`: R ambientCG
+  Smear004 roughness, G SurfaceImperfections001 opacity, both CC0, B generated specks / fibres; no round blobs /
+  water rings: the user disliked the circles), each layer fading in from its own threshold, only toward the corners
+  (old-CRT rounded falloff), its own colour (smears / smudges = the ground's dust colour, specks paler, slow warm /
+  cool drift), softening the view and glowing where light comes through; water on the glass cuts clean paths in it.
+  `lens.rain` is ready for a weather system. Clean glass = viewports stopped, shader skips it. No C# = dust only.
+  Tests: `BMX_LENS_RAIN=0..1`, `BMX_LENS_SPLASH=k`, `BMX_LENS_DUST=0..1`, `BMX_LENS_WIND=0..1` (else the camera's
+  speed), `BMX_LENS_DUMP=file.png` (the normal map + `LENS ... flow=` line, 10 s in).
 - **Dust = a real 3D smoke simulation** (`fx/smoke_sim.gd` + compute shaders `shaders/smoke/*.glsl`): a
   128×32×128 grid (0.2 m voxels, 25.6×6.4×25.6 m) of air on the GPU that follows the rider (moves in
   0.8 m steps, ahead along the heading) and follows the ground (voxel height is measured from a
@@ -2493,6 +2518,113 @@ ide_<date>.replay` (test runs: `replays/tests/`), zstd, ~4 MB a
   `BMX_GHOST=0` = no ghost node. Record with one test run (e.g. `BMX_FOLLOW=1 --autotest=30`), then
   `BMX_FOLLOW=1 BMX_IDLE_FOR=0.5 BMX_CAM=side BMX_SHOT=...` shows it beside you.
 - Not done: ghosts from other players / a leaderboard (Steam), choosing which ghost (last / best), start / finish gates.
+
+### Pose Lab (2026-11-24, Insert; `ui/pose_lab.gd` + `rider/pose_keys.gd`; STYLE ONLY, the physics is untouched)
+- User ask: "pause mid air and correct it", pose the rider's skeleton on parts of a jump, "play back with our corrected poses,
+  automatically morphing between our set keyframes", a timeline UI, "a separate game mode / dev pose mode", saved so the rider
+  rides / leans / jumps with it everywhere. **No physics change** (user: "only style").
+- **Pause** = `Game.pose_hold` (the physics step is simply not run, like the playground's G; `pose_steps` = ticks to run
+  from STEP); `_process` keeps posing every frame, so the sliders show at once. Works mid-air in any ride / the playground.
+  In the instant replay: rewind to the moment, **Insert** = `ReplayMode._pose_from_here` (ride from here + Lab open, paused).
+- **Keys** (`PoseKeys`): on a normalised JUMP TIMELINE 0..1, not seconds (APPROACH 0, LOAD .12, POP .30, AIR .40, REACH .80,
+  LAND .90): `Game._pose_phase` reads it from the physics state (preload / popFx / flight share via `_land_t` / land_reach /
+  land_fold), so one set of keys fits every jump. A key = every channel (`PoseKeys.CH`: bike nose-up / lay-over UNDER the body,
+  hips x y z, torso pitch / roll / yaw, head nod / turn, elbows / knees out). Between keys: Cardinal cubic per channel; the
+  ends ease to neutral at 0 and 1. `amount` scales them, `enabled` switches them. Saved `res://data/pose_keys.json`
+  (commit it; user:// only when res:// can't be written; test runs never save).
+- **Where they act** (`Rider.update_pose`, after the final `_constrain`): hips offset carries pelvis + chest; the torso tilt
+  turns the chest about the pelvis, so head, shoulders and (by IK) arms follow; then `_constrain` runs again, so a key can't
+  push him through the bars or out of reach. Head / shoulder yaw, elbow / knee poles use `_pk_*`. Hands / feet stay on the
+  grips / pedals. "Bike under body" turns the RIDER NODE about the bottom bracket (`Game._pose_keys_apply`) and gives the
+  limb targets in that turned space: arms and legs follow the bike, nothing in the bike / physics moves.
+- **UI** (`PoseLab`, CanvasLayer 30): left = transport (PAUSE / RESUME, STEP, PLAY KEYS = the morph played over the frozen
+  moment, LIVE = playhead follows the ride), KEYS ON + amount, + KEY / DEL KEY / ZERO KEY / SAVE / RELOAD, sliders by group;
+  bottom = timeline (phase bands, key diamonds, morph-size curve, white line = the ride's moment, orange = your playhead; drag
+  playhead / key, right click a key = delete, double click = new key). Moving a slider auto-keys at the playhead. Closing saves.
+- Tests: `BMX_POSELAB=air|<secs>` opens it paused (first flight / after n s), `BMX_POSELAB_SET="0.55:hip_y=0.1,torso_pitch=0.3;0.7:..."`
+  (raw radians / metres), `BMX_POSELAB_PLAY=1`; with `BMX_FOLLOW=1 BMX_BIGAIR=1`, `BMX_SHOT`.
+- **3D handles** (same day, user: "a skeleton interactable we can click on joints and drag, also bike, spin the handlebar"):
+  the skeleton (`Rider.J`) is drawn over the ride with orange joint handles; click + drag in the 3D view (a ray against the
+  plane through the joint facing the camera, the move taken into the bike's frame): hips -> hip xyz, chest -> torso lean
+  (angle about the hips), head -> nod / turn, elbows / knees -> out / in, front / rear wheel (green squares) -> bike nose
+  up / down under the body, bar centre -> bike lay over, grips -> the handlebar turns (`bar_steer`, + = right; the rig's own
+  steer is + = left, so `Game._pk_bar` negates it; added to the drawn steer in `Game`, hands follow because the limb targets
+  are read after). Hands / feet are grey dots (pinned). A drag edits the key at the playhead (auto-key). Tests:
+  `BMX_POSELAB_DRAG="hips:0.05,0.05,0;..."` (metres, bike frame), `BMX_POSELAB_MOUSE="hips:60,-40"` (pixels, the real ray path).
+  "Bike under body" turns the RIDER about the bottom bracket, so a dragged bike handle stays put and the rider moves
+  (relative pose is right, the cursor does not follow the bike point).
+- **Clip library** (same day, user: "predefined poses library for different tricks ... clips we fade into when the rider triggers
+  them, industry standard"). Layered additive animation like production games: the live procedural pose (physics + IK) stays
+  underneath; authored clips fade in on top. A clip (`PoseKeys.clips`, JSON v2 `res://data/pose_keys.json`; a v1 file becomes the
+  "Jump style" clip): name, **trigger**, **time source** (`jump` = the jump timeline, `clip` = seconds since it fired, over
+  `length`), fade in / out, strength, mirror, enabled, keys. `Game._clip_signal` reads the trigger from the physics state
+  (read only; `PoseKeys.TRIGGERS`: jump, whip, tabletop, scrub, back / front flip, spin, manual, stoppie, corner, sprint, air,
+  ground, always, never = preview only) as (amount 0..1, side +-1); `Game._clips_mix` ramps each clip's weight by its fade
+  times, reads its timeline, mirrors it by the side it fired on (`PoseKeys.MIRROR`: roll, bars, hips z, torso roll / yaw, head
+  yaw), and SUMS the weighted offsets x `amount`; the rider's limits still run after. Starter clips (first guesses, tweak
+  them): Jump style, Whip, Tabletop, Scrub, Back / Front flip tuck, Manual, Stoppie, Attack stance (off). Pose Lab: CLIP
+  LIBRARY block (pick / NEW / DUP / DEL / rename, trigger, time source, length, fades, strength, ON, MIRROR, SOLO). SOLO (default)
+  plays only the clip being edited at the playhead; off = the whole library as in a ride. Timeline shows jump phases or the
+  clip's seconds. Tests: `BMX_POSELAB_CLIP=<name|n>`, `BMX_POSELAB_SOLO=0`, `BMX_CLIP_PROBE=1` (`CLIPS` lines: active clips).
+  Not possible: hands-off / feet-off tricks (no-hander, superman): hands and feet are pinned to the bike.
+- Not done: easing choice per key, undo, hands / feet are not movable, per-bike libraries, importing / exporting a single clip.
+
+### Ride the line again (2026-11-24, replay **L**, Pose Lab RESTART LINE; `Game._line_*`, `ReplayMode.reride_from_here`)
+- User ask: "the rider that rides that line can then be tweaked". Every physics step's input (all keys of the input
+  dictionary, bools kept as bools) + where the bike was is kept (`Game._line_record`, up to 6 min; cleared on respawn). In a
+  replay, L at the playhead = `reride_from_here`: the nearest snapshot (4x a second, `ReplayMode.snaps`, now with the step index
+  as `[3]`) is put back (`ride_from_snap`, shared with ride from here) and `line_input` feeds the recorded inputs in LIVE, so the
+  rider rides the same line with whatever style is set now (Pose Lab clips / keys, Anim Studio). Style only: the physics is
+  the same code on the same inputs. When the inputs run out the player has the bike (flash "LINE FINISHED" + drift).
+- **Pose Lab**: RESTART LINE = back to where the re-ride started, ride it again (so: pause mid-air, tweak, RESTART, watch);
+  STOP LINE; the header shows `LINE t / total  drift`. The recording / replay carry on from the restored moment as in ride from here.
+- **Drift** (the re-ride's bike vs the recorded one at the same step, `line_play.drift`): 0.3-0.6 m after 9-16 s at ~17 m/s (the
+  grip noise isn't restored, nor torn tape / fences). Test: `BMX_LINE_PROBE=1` (`LINE start / finished ... drift_max`),
+  `BMX_REPLAY=20 BMX_REPLAY_SET="at=-9,reride=1"`, `BMX_POSELAB_RESTART=1`.
+- Not done: old saved replay files have no inputs (re-ride only works for the session's own recording); saving the line with a
+  replay file; a gizmo to nudge the line itself (the line is the recorded inputs, not editable).
+
+### Style Inspector (2026-11-24, T in the instant replay / a saved replay; `ui/style_inspector.gd`)
+- User ask: drive a line, replay it, "see what our skeleton did, what animation did he use, when did we trigger different
+  animations, everything I would need so I could tweak and change our riding style", also on the recorded rides.
+- **Recorded**: every replay sample now carries a style row (`Game._style_fill`, names in `Game.style_names`, rebuilt when
+  `PoseKeys.rev` changes): `pose|t` (jump timeline), per Pose Lab clip `clip|<name>|w` (fade weight) / `|sig` (its trigger's
+  signal) / `|t` (its own timeline), the summed channels applied (`ch|..`), the physics signals the triggers read (`sig|..`: km/h,
+  air, bike lean, whip, flip, yaw rate, manual, nose, pop, squash, prep, land fold, air pull) and the procedural pose's inputs
+  (`drv|..`: preload, extend, popFx, squash, landFold, landReach, airPull, bodyStick, hipShift, flip*, lipK, bodyLat, airWhip,
+  lean, steer, pitch). Frames `[11]` = row, `[12]` = names. Saved replays keep them (`sty_sets` in the body, frame index 10 / 11
+  of a saved frame; VER unchanged, older files just show "no style data").
+- **Panel** (T; Y = window 3 / 6 / 12 s): CLIP LAYERS (one lane per clip that took part: fill = weight, white line = trigger signal,
+  click a lane label = pick the clip, click the axis = go there), FIRED / LET GO events with times relative to now, POSE CHANNELS
+  as curves with the value now, RIDER STATE NOW. **Insert** in a replay = Pose Lab here (ride from here, paused) with the picked clip
+  selected and its playhead at the clip time of that moment, so: ride -> replay -> see which clip fired and how hard -> edit it.
+- Not recorded: the skeleton's own joint angles (the drawn bones are already in the replay; the channels show what the clips
+  added), the live ride has no inspector (use the replay: I).
+- Test: `BMX_REPLAY=<secs> BMX_REPLAY_SET="cam=Side,at=-14,pause=1,style=1,pick=<clip>,win=6" BMX_REPLAY_SHOTS=<prefix>`.
+
+### Anim Studio (2026-11-24, `--anim`, or Insert in the rider room; `ui/anim_studio.gd`, `rider/anim_lib.gd`)
+- User ask: "modify our main menu stuff where the driver stands and idles", "import Mixamo and retarget automatically",
+  "blend and use them". `RiderAnim` (see "Animation clips / Mixamo" above) already retargeted + crossfaded clips on the menus'
+  standing rider (rider room KIT tab, ride setup CHARACTER step); the Studio adds the tools around it.
+- **Import at run time**: IMPORT... (native file dialog, multi select) copies a Mixamo FBX / glb to
+  `user://anim/mixamo/` (`AnimLib.import_file`) and loads it with `FBXDocument` + **`FBXState`** (GLTFState gives "state.is_null()"),
+  no editor import; `RiderAnim.clip_files` lists them with the project's `assets/anim/mixamo/` clips; REMOVE deletes an imported one.
+  Retargeting = the existing direction-based `RiderAnim._retarget` (any Mixamo character / skin; lengths stay the rider's).
+- **Per clip settings** (`AnimLib.cfg`, `res://data/anim_library.json`, user:// when res:// is read-only): ON, IDLE (the clip the
+  menu returns to between the others; a name with "idle" still counts), speed, pick weight, hold seconds, fade-in, and
+  **offsets** (hips xyz, torso pitch / roll / yaw, head nod / turn, elbows / knees out): `AnimLib.offset_pose` moves the upper body
+  as one chain, solves arms and legs again by IK (feet stay planted, nothing stretches). `RiderAnim.step` uses all of them, so
+  every menu that shows the standing rider follows the library.
+- **Modes**: PLAYLIST (exactly what the menus play), CLIP (loop one, scrub, pause), BLEND (A + B by a slider, B phase-locked to A
+  or free; `RiderAnim.blend_poses`).
+- **BAKE -> RIDE CLIP**: `AnimLib.bake` samples a clip (14 keys, relative to its first frame) into a Pose Lab clip on the hips /
+  torso / head / elbows / knees channels (trigger "never"); set its trigger in the Pose Lab and it plays in rides. A standing
+  clip's motion is small and the rider has no feet off the bike: it suits idle-like / body moves, not full-body tricks.
+- Tests: `--anim` with `BMX_ANIM_IMPORT=file`, `BMX_ANIM_SEL=name`, `BMX_ANIM_MODE=0|1|2`, `BMX_ANIM_MIX=0..1`,
+  `BMX_ANIM_OFF="hip_y=-0.05,torso_pitch=0.3"`, `BMX_ANIM_BAKE=1`, `BMX_ANIM_SHOT=png` (+ quits); `-s res://tools/fbx_runtime_probe.gd`.
+  A test import writes into the player's `user://anim/mixamo/` (delete it after).
+- Not done: a button on the title menu itself (use `--anim` / Insert in the rider room), blending several clips as layers,
+  root motion, retargeting to the riding pose (clips are standing only).
 
 ### Photo mode (O, `scripts/game/photo_mode.gd`)
 - Time freezes (`Engine.time_scale = 0`), HUD hidden, the camera comes loose: `Game._process` calls `PhotoMode.update(real dt)`
