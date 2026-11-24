@@ -454,7 +454,9 @@ static func rebrand(b: Dictionary) -> void:
 
 static func _merge(dst: Dictionary, src: Dictionary) -> void:
 	for k in src:
-		if dst.has(k) and dst[k] is Dictionary and src[k] is Dictionary:
+		if k in ["livery", "lcolor"] and src[k] is String:   # (only in a paint that has one: not in the defaults)
+			dst[k] = src[k]
+		elif dst.has(k) and dst[k] is Dictionary and src[k] is Dictionary:
 			_merge(dst[k], src[k])
 		elif dst.has(k) and typeof(dst[k]) in [TYPE_FLOAT, TYPE_INT] and typeof(src[k]) in [TYPE_FLOAT, TYPE_INT]:
 			dst[k] = src[k]
@@ -509,8 +511,24 @@ static func lift_black(c: Color) -> Color:
 	var k := lerpf(1.0, f / mx, 0.85)
 	return Color(c.r * k, c.g * k, c.b * k, c.a)
 
+## Liveries: a second colour (paint.lcolor) laid over the frame paint in a pattern (shader `livery` = the index).
+## Only the frame triangles offer them in the garage; any part's paint may carry one.
+const LIVERIES := {
+	"none":    {"label": "Solid",       "id": 0},
+	"fade_x":  {"label": "Fade",        "id": 1},
+	"fade_y":  {"label": "Fade up",     "id": 2},
+	"split":   {"label": "Two-tone",    "id": 3},
+	"stripe":  {"label": "Stripe",      "id": 4},
+	"bands":   {"label": "Bands",       "id": 5},
+	"speed":   {"label": "Speed",       "id": 6},
+	"camo":    {"label": "Camo",        "id": 7},
+	"splat":   {"label": "Splatter",    "id": 8},
+	"check":   {"label": "Checkers",    "id": 9},
+	"sunset":  {"label": "Sunset",      "id": 10},
+}
+
 static func paint_material(p: Dictionary) -> ShaderMaterial:
-	var key := "%s|%s|%s" % [p.color, p.color2, p.finish]
+	var key := "%s|%s|%s|%s|%s" % [p.color, p.color2, p.finish, p.get("livery", "none"), p.get("lcolor", "ffffff")]
 	if _mat_cache.has(key): return _mat_cache[key]
 	var F: Dictionary = FINISHES.get(p.finish, FINISHES.gloss)
 	var col := Color(p.color)
@@ -522,16 +540,54 @@ static func paint_material(p: Dictionary) -> ShaderMaterial:
 	m.set_shader_parameter("color2", Color(p.color2))
 	m.set_shader_parameter("flip", F.flip)
 	m.set_shader_parameter("deep", F.get("deep", 0.0))
+	m.set_shader_parameter("livery", int(LIVERIES.get(String(p.get("livery", "none")), LIVERIES.none).id))
+	m.set_shader_parameter("lcolor", lift_black(Color(String(p.get("lcolor", "ffffff")))))
 	_mat_cache[key] = m
 	return m
 
+## Where the bike's frame sits in the model and how big it is (model units): the livery's pattern is laid
+## across this box, so both triangles carry one design. Returns {min, ext} (Vector3s), or {} with no frame.
+static func _frame_box(model: Node3D) -> Dictionary:
+	var lo := Vector3(INF, INF, INF)
+	var hi := Vector3(-INF, -INF, -INF)
+	for n in ["frame", "swing", "seatstay"]:
+		var mi := model.find_child(n, true, false) as MeshInstance3D
+		if mi == null or mi.mesh == null: continue
+		var off := _model_off(model, mi)
+		var bb := mi.mesh.get_aabb()
+		lo = lo.min(bb.position + off)
+		hi = hi.max(bb.end + off)
+	if lo.x == INF: return {}
+	return {"min": lo, "ext": hi - lo}
+
+## the mesh's origin in the model's space (translation only: the frame's nodes are not rotated or scaled at rest)
+static func _model_off(model: Node3D, mi: Node3D) -> Vector3:
+	var off := Vector3.ZERO
+	var n: Node = mi
+	while n != null and n != model:
+		if n is Node3D: off += (n as Node3D).position
+		n = n.get_parent()
+	return off
+
 ## paint every part of a rig's bike model
 static func apply_paint(model: Node3D, b: Dictionary) -> void:
+	var box := _frame_box(model)
+	var test_lv := OS.get_environment("BMX_LIVERY")   # test: "fade_x:1a1a1c" = that livery + colour on the frame
 	for part in PARTS:
-		var mat := paint_material(b.paint[part])
+		var pp: Dictionary = b.paint[part]
+		if test_lv != "" and part in ["frame", "rear"]:
+			pp = pp.duplicate()
+			pp.livery = test_lv.get_slice(":", 0)
+			if ":" in test_lv: pp.lcolor = test_lv.get_slice(":", 1)
+		var mat := paint_material(pp)
+		var lv := String(pp.get("livery", "none")) != "none" and not box.is_empty()
 		for target in PARTS[part][1]:
 			var mi := model.find_child(target[0], true, false) as MeshInstance3D
 			if mi == null or mi.mesh == null: continue
+			if lv:
+				mi.set_instance_shader_parameter("liv_off", _model_off(model, mi))
+				mi.set_instance_shader_parameter("liv_min", box.min)
+				mi.set_instance_shader_parameter("liv_ext", box.ext)
 			for i in mi.mesh.get_surface_count():
 				var sm := mi.mesh.surface_get_material(i)
 				if sm and sm.resource_name == target[1]:

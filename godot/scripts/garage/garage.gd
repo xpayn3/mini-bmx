@@ -1776,6 +1776,38 @@ func _paint_page() -> void:
 	body.add_child(fs)
 	if P.finish == "pearl":
 		_color("Shift colour (at the edges)", P.color2, func(h): P.color2 = h)
+	if part in ["frame", "rear"]:
+		_livery_section(P)
+
+## LIVERY: a pattern in a second colour over the frame paint (both triangles share one design: set the front
+## and use APPLY TO WHOLE FRAME, or set them each)
+func _livery_section(P: Dictionary) -> void:
+	_h("LIVERY")
+	var cur := String(P.get("livery", "none"))
+	var lcol := String(P.get("lcolor", "ffffff"))
+	var g := GridContainer.new()
+	g.columns = 4
+	g.add_theme_constant_override("h_separation", Tokens.S2)
+	g.add_theme_constant_override("v_separation", Tokens.S2)
+	var grp := ButtonGroup.new()
+	for id in BikeBuild.LIVERIES:
+		var sw := HBoxContainer.new()   # the two colours side by side: a hint, the bike shows the real thing
+		sw.add_theme_constant_override("separation", 0)
+		sw.custom_minimum_size = Vector2(0, 30)
+		sw.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		sw.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var a := ColorRect.new(); a.color = Color(String(P.color)); a.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var b2 := ColorRect.new(); b2.color = Color(lcol) if id != "none" else Color(String(P.color)); b2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		a.mouse_filter = Control.MOUSE_FILTER_IGNORE; b2.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		sw.add_child(a); sw.add_child(b2)
+		var t := _tile(String(BikeBuild.LIVERIES[id].label), sw, Vector2(0, 66), id == cur, grp)
+		t.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		t.pressed.connect(func(): P.livery = id; _changed(); _set_tab("paint"))
+		g.add_child(t)
+	body.add_child(g)
+	if cur != "none":
+		_swatches(lcol, func(h): P.lcolor = h)
+		_color("Livery colour", lcol, func(h): P.lcolor = h)
 
 ## "#E8432E" / "e8432e" -> "e8432e"
 static func _hex(c) -> String:
@@ -1807,7 +1839,9 @@ func _ball_pic(p: Dictionary, sz: Vector2) -> TextureRect:
 	pic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var ref: WeakRef = weakref(pic)
-	thumbs.request("ball|%s|%s|%s" % [p.color, p.get("color2", ""), p.finish], PartThumbs.make_ball.bind(p), Vector3(0.35, 0.3, 1.0), func(t):
+	var plain := p.duplicate()   # (a ball shows the paint itself: a livery lies across the whole frame, not a sphere)
+	plain.livery = "none"
+	thumbs.request("ball|%s|%s|%s" % [p.color, p.get("color2", ""), p.finish], PartThumbs.make_ball.bind(plain), Vector3(0.35, 0.3, 1.0), func(t):
 		var pr = ref.get_ref()
 		if pr: pr.texture = t)
 	return pic
