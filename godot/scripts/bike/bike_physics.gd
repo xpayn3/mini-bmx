@@ -720,8 +720,12 @@ func _step_controls(dt: float, inp: Dictionary, throttle: float, steer_input: fl
 	# the body stick throws too, but only a real yank: pushed past half way, starting from the centre inside
 	# the lip window. Any lean held into the lip (riding in the attack position, a manual) never throws -
 	# a light forward lean used to throw a front flip at every lip and nose-dive the landing
+	# (2026-11-24, the user couldn't throw a back flip: the stick pulled back a moment before the lip window - as anyone
+	# loads a jump - was locked out as "held from before". The stick's throw buffer is FLIP_PULL_EARLY s; held right
+	# through the lip it throws, snapped forward at the lip it is still a pop. BMX_OLD_FLIPPULL=1)
+	var t_buf_s: float = t_buf if _OLD_FLIPPULL else maxf(t_buf, FLIP_PULL_EARLY)
 	if not lip_win:
-		lock_sb = body_in < -0.05 and _sb_t > t_buf; lock_sf = body_in > 0.05 and _sf_t > t_buf
+		lock_sb = body_in < -0.05 and _sb_t > t_buf_s; lock_sf = body_in > 0.05 and _sf_t > t_buf
 	else:
 		if body_in >= -0.15: lock_sb = false
 		if body_in <= 0.15: lock_sf = false
@@ -2038,7 +2042,17 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 						# (a flip is thrown at the lip: without a throw the stick only rolls it FLIP_AIR_ONLY as fast;
 						# tucked it turns faster - the old arcade drive ignored the tuck)
 						var f_cap: float = 1.0 if _OLD_SPIN else lerpf(FLIP_AIR_ONLY, 1.0, maxf(0.0, _flip_in * signf(flip_in))) / maxf(air_inertia, 0.5)
-						air_w += (flip_in * T.airSpinRate * spin_k * f_cap - air_w) * minf(1.0, T.airSpinResp * h) * arc
+						var f_rate: float = flip_in * T.airSpinRate * spin_k * f_cap
+						# (arcade, MX vs ATV style: a flip THROWN at the lip and held turns fast enough to come round before the
+						# predicted touch-down - up to FLIP_RATE_MAX. On a medium jump (~1 s air) it never made it round)
+						var thrown: float = maxf(0.0, _flip_in * signf(flip_in))
+						if not _OLD_SPIN and thrown > 0.3 and absf(flip_in) > 0.5 and not is_nan(_land_pitch) and _land_t > 0.05:
+							var done: float = fmod(absf(flip_acc), TAU)
+							var left: float = TAU - done
+							if left > 0.35:
+								var need: float = left / maxf(_land_t, 0.12) * 1.05
+								f_rate = signf(f_rate) * clampf(maxf(absf(f_rate), need), 0.0, FLIP_RATE_MAX)
+						air_w += (f_rate - air_w) * minf(1.0, T.airSpinResp * h) * arc
 					else:
 						air_w *= 1.0 - minf(1.0, T.airSpinStop * h) * arc
 				var tgt: float
@@ -2983,7 +2997,11 @@ static var _OLD_SPIN := OS.get_environment("BMX_OLD_SPIN") != ""
 const SPIN_EDGE := 0.85     # stick to the side this far into a lip = a spin wound up (less = a whip)
 const SPIN_AIR_ONLY := 0.35 # share of the spin rate the stick gives from the air alone (no wind-up at the lip)
 const SPIN_OPEN := 3.5      # /s: let go of a wound spin, it eases out this fast (the rider opens up)
-const FLIP_AIR_ONLY := 0.35 # share of the flip rate without a throw at the lip
+const FLIP_AIR_ONLY := 0.35
+static var _OLD_FLIPPULL := OS.get_environment("BMX_OLD_FLIPPULL") != ""
+const FLIP_PULL_EARLY := 1.0e9  # s: a stick held back however long before the lip still throws a flip (the user: "a held lean
+# should turn into a back flip like other games")
+const FLIP_RATE_MAX := 9.0    # rad/s: the most the flip help turns it (a full turn in 0.7 s) # share of the flip rate without a throw at the lip
 var spin_load := 0.0        # -1..1: a spin wound up into the lip ahead
 var _spin_in := 0.0         # this flight's spin wind-up
 var _flip_in := 0.0         # this flight's flip throw (-1..1, + = back)

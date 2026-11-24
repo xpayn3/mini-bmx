@@ -1951,6 +1951,13 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   only in the air, let go ~300 deg round; `SPINT` lines with `BMX_BODY_PRINT=1`): spin wound up 385 deg CLEAN (a 360),
   from the air 134-144 deg (lands FAKIE / HIGHSIDE); flip thrown 320-330 deg CLEAN (BACKFLIP), from the air 122 deg
   LOOPED OUT. Whips unchanged (whiplip 0.7: 67 deg, CLEAN).
+- **Held lean = back flip** (user: "I can't do it" + "a held lean should turn into a back flip like other games"): the stick
+  pulled back however long before the lip still throws it as it leaves the lip (`FLIP_PULL_EARLY`; it was locked out
+  unless pulled fresh inside the short lip window). Snapped forward at the lip it is still a pop; a balanced manual into
+  a lip stays a manual. A thrown flip held at the stick's edge turns fast enough to come round before the predicted
+  touch-down (`_land_t`, up to `FLIP_RATE_MAX` 9 rad/s): stick held from 3 s before, tables at 36 / 43 / 66 km/h (1.1-1.6 s
+  air) all 318-325 deg CLEAN; a stick pop stays a pop; the demo rider never flips (2 trail seeds). `BMX_OLD_FLIPPULL=1`.
+  `BMX_FLIP_EARLY=s` = how early the test stick (`BMX_BODY=fliplip`) pulls.
 - **Flip body** (research/jump: GMBN "How to backflip like a pro" side views 4:48, Hardline 97 ft short): thrown at the lip
   he drives the legs straight (no load crouch) with the head back; in the air by how far round the flip is: head back
   first, tucked tight through the middle, from half way the head and shoulders turn to spot the landing over the

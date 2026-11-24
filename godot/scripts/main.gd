@@ -1899,7 +1899,8 @@ func _autotest(seconds: float) -> void:
 				var is_spin: bool = body_t.begins_with("spin")
 				var from_lip: bool = body_t.ends_with("lip")   # ("flipair" contains "lip")
 				var turned: float = absf(ph2.spin_acc) if is_spin else absf(ph2.flip_acc)
-				var on7: bool = (ph2.air and (from_lip or ph2.air_time > 0.08) and turned < TAU - 1.0) or (from_lip and not ph2.air and ph2.lip_state == 2 and ph2.lip_last < 0.4)
+				var early: float = float(Env.s("BMX_FLIP_EARLY")) if Env.s("BMX_FLIP_EARLY") != "" else 0.4   # tests: how long before the lip it is pulled (s)
+				var on7: bool = (ph2.air and (from_lip or ph2.air_time > 0.08) and turned < TAU - 1.0) or (from_lip and not ph2.air and ph2.lip_state == 2 and ph2.lip_last < early)
 				if Env.s("BMX_BODY_PRINT") != "" and not ph2.air and ph2.lip_state == 2: print("SPINLIP on=%s back=%.2f body_in=%.2f crouch=%.2f throw=%.2f lip=%.2f" % [on7, Input.get_action_strength("body_back"), ph2.body_in, ph2.crouch, ph2.throw_v, ph2.lip_last])
 				if is_spin:
 					if on7: Input.action_press("body_left", 1.0)
