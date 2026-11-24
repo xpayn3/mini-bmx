@@ -228,6 +228,17 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   stay under the peak, a locked rear has almost no side grip anyway): `slide=1` now also prints `SKIDTURN` (rear lever
   locked through a turn on grass / trail / sand). Stress: the brake-hold check accepts either result within 10 % of the
   friction limit (56 / 56).
+- **Curbs / ledges: the rear rolls up, the tyres don't shiver at the edge (2026-11-24, user: "the rear always gets
+  stuck on a curb")**. (1) `_step_move`'s edge check (at the bottom bracket) read the rise per physics step, so whether a
+  curb was a wall at all depended on speed: at 6 km/h it never saw one (rolled up 30 cm), at 15 km/h a 20 cm curb was
+  a dead stop + BONK, at 25 a SMACK crash. Now read over at least `EDGE_BASE` 6 cm, and once the front is up on top an
+  edge up to `REAR_ROLL` 0.65 x the rear radius (~23 cm) is the rear wheel's to climb (the vertical step does it; too slow,
+  it rolls back), taller is a wall as before. (2) `_wheel_ground` read the ground at 11 points 7 cm apart, so a square
+  edge's corner jumped from point to point (rear tyre ground steps of 3.7 cm then flat): where the ground bends > `WG_EDGE`
+  8 mm over three points it searches finer (+10 reads). `BMX_OLD_CURB=1` = both as before. Probe `BMX_PG_EDGE=1` (`PG EDGE
+  feat= v_in v_min v_out stopped`, 2 = every step with the wheels' ground `hf` / `hr`), `BMX_PG_PILOT_RUNUP=m` (the test
+  rider's run-up; curbs are 20 m apart, 30 m rides the one before). Suite vs `BMX_OLD_CURB=1`: drop_1 +1 energy check
+  (+0.7 J/kg off the edge), gap_5 one bottom-out, curb_0.2 rear travel 81 -> 92 %; the baseline was already 7 runs stale.
 - **The ride step is 11 stage functions** (2026-11-21; it was one 1,514-line function). `_ride_step` is the short driver; the
   stages, in order: `_step_controls` (levers, body stick, air inputs, lip throw; returns the brake level), `_step_ground`
   (heights, surface, grip per tyre), `_step_sprint`, `_step_loads` (weight on each tyre -> `n_rear` / `n_front` / `n_load`),

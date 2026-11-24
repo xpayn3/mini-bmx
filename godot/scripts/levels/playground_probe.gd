@@ -154,6 +154,7 @@ func post_step(dt: float) -> void:
 	if _trace and (ph.air or _land_t >= 0.0 and _land_t < 0.4 or (f_here_is_jump(ph))):
 		print("PGTRACE u=%.2f y=%.3f gy=%.3f v=%.2f vy=%.2f pitch=%.3f gp=%.3f air=%s cf=%s cr=%s body_y=%.3f throw=%.2f crash=%s" % [
 			uu, ph.y, course.height(ph.x, ph.z), ph.v, ph.vy, ph.pitch, ph._g_pitch, ph.air, ph.c_f, ph.c_r, ph.body_y - ph.y, ph.throw_v, ph.crash_pending])
+	if _edge_probe: _edge_step(ph, uu, nf)
 	_brake_slalom(dt, ph, uu)
 	_air = ph.air
 	_tries_step(dt)
@@ -221,6 +222,25 @@ cones %d / %d on the right side · lean max %.0f°" % [sl.feat, sl.t, sl.v_in * 
 
 
 var _trace := Env.s("BMX_PG_TRACE") != ""   # tests: every physics step on a jump feature / in the air (PGTRACE lines)
+
+## tests (BMX_PG_EDGE=1, 2 = + every step): curbs / potholes / edges: speed into the feature, the slowest on it,
+## speed out, whether it stopped (v < 0.3 or rolled back) - `PG EDGE` lines; `PGEDGE` per step with 2
+var _edge_probe := Env.s("BMX_PG_EDGE")
+var _edge := {}
+func _edge_step(ph, uu: float, nf) -> void:
+	if ph.crash_on and _edge.is_empty(): return
+	var on = nf != null and uu >= nf.u0 - 1.5 and uu < nf.u1 and not str(nf.id).begins_with("roll")
+	if on and (_edge.is_empty() or _edge.id != nf.id):
+		_edge = {"id": nf.id, "u1": nf.u1, "vin": ph.v, "vmin": ph.v, "stop": false, "bonk": false, "air": 0.0}
+	if _edge.is_empty(): return
+	_edge.vmin = minf(_edge.vmin, ph.v)
+	if ph.v < 0.3: _edge.stop = true
+	if ph.air: _edge.air += 1.0 / 120.0
+	if _edge_probe == "2":
+		print("PGEDGE %s u=%.3f v=%.2f y=%.4f gy=%.3f pitch=%.4f air=%s cf=%s cr=%s hf=%.4f hr=%.4f zf=%.4f zr=%.4f" % [_edge.id, uu, ph.v, ph.y, course.height(ph.x, ph.z), ph.pitch, ph.air, ph.c_f, ph.c_r, ph.hf_prev, ph.hr_prev, ph.zw_f, ph.zw_r])
+	if uu >= float(_edge.u1) or ph.crash_on or (_edge.stop and ph.v < -0.2):
+		print("PG EDGE feat=%s v_in=%.1f v_min=%.1f v_out=%.1f stopped=%s crash=%s air=%.2f" % [_edge.id, _edge.vin * 3.6, _edge.vmin * 3.6, ph.v * 3.6, _edge.stop, ph.crash_on, _edge.air])
+		_edge = {}
 
 func f_here_is_jump(ph) -> bool:
 	return course.jump_mask(ph.x, ph.z) > 0.0

@@ -141,7 +141,10 @@ var nose_k := 1.0          # 0..1: how much this lip lets the front come up (ste
 const POP_FRONT_LIFT := 1.6 # rad/s: the arms lift the front as a pop goes in on a lip's face
 const SCOOP_TILT := 0.4     # rad: hands off, the toes scoop the rear up: the nose can go that much further down for a landing
 const LIP_SPARE_OWN := 0.05   # rad: the same, hands off (the rider rides with the lip)
-const RIM_CLIMB := 4.0   # m/s: the most upward speed a rim strike on a rising edge gives the frame
+const EDGE_BASE := 0.06   # m: an edge under the frame is read over at least this much ground, whatever the speed
+const REAR_ROLL := 0.65   # x the rear wheel's radius: the tallest edge the rear rolls up (the front already on top)
+var _OLD_CURB := OS.get_environment("BMX_OLD_CURB") != ""   # (tests: the old per-step edge check, rear stops dead)
+const RIM_CLIMB := 4.0  # m/s: the most upward speed a rim strike on a rising edge gives the frame
 const TYRE_MAX := 0.045   # m: a tyre squashed this far is on its rim
 var _ty_f := 0.0; var _ty_r := 0.0   # each tyre's push last substep (m/s2 of the whole weight)
 var _rim_hit := 0.0   # the most speed the frame lost against the ground with nothing left to give, since it was read (m/s)
@@ -490,12 +493,38 @@ func _sample(f: Vector3) -> void:
 func _wheel_ground(f: Vector3, x0: float, R: float, cp0: float) -> float:
 	var terrain = host.terrain
 	var best := -INF
+	var kb := 0
+	var raw := _wg_raw
 	for k in range(-5, 6):   # 11 points across the contact: a small rock can't slip between them
 		var s := k / 5.0 * R
 		var d := x0 * cp0 + s
-		var hh: float = terrain.height(x + f.x * d, z + f.z * d) + sqrt(R * R - s * s) - R
-		if hh > best: best = hh
+		var h0: float = terrain.height(x + f.x * d, z + f.z * d)
+		raw[k + 5] = h0
+		var hh: float = h0 + sqrt(R * R - s * s) - R
+		if hh > best: best = hh; kb = k
+	# an edge (curb, ledge, rock step) between two of those points: the corner the tyre really rests on lies between
+	# them, and read at the points alone it jumped from one to the next as the wheel rolled (2026-11-24: steps of up
+	# to 3.7 cm in one physics step on a 10 cm curb, the tyres shivered at the edge). Search finer around the best
+	# point where the ground changes sharply next to it
+	if _OLD_CURB: return best
+	var i := kb + 5
+	# (the ground's bend, not its slope: a smooth roller's face changes 3-4 cm between points but bends < 3 mm)
+	var sharp := false
+	for j in range(maxi(i - 1, 1), mini(i + 1, 9) + 1):
+		if absf(raw[j - 1] + raw[j + 1] - 2.0 * raw[j]) > WG_EDGE: sharp = true; break
+	if sharp:
+		var ds := R / 5.0
+		for j in range(-WG_FINE + 1, WG_FINE):
+			if j == 0: continue
+			var s := kb * ds + j * ds / WG_FINE
+			if s <= -R or s >= R: continue
+			var d := x0 * cp0 + s
+			var hh: float = terrain.height(x + f.x * d, z + f.z * d) + sqrt(R * R - s * s) - R
+			if hh > best: best = hh
 	return best
+const WG_EDGE := 0.008   # m: the ground bending this much over three contact points = an edge, search finer there
+const WG_FINE := 6       # finer points per gap either side of the best one (~1.2 cm apart on a 0.36 m wheel)
+var _wg_raw := PackedFloat32Array(); var _wg_init := _wg_raw.resize(11)
 
 ## One ride step (120 Hz), stage by stage. The stages share only what is passed here; everything else they read
 ## and write is the bike's own state (the members above). Order matters: each stage works on what the last one left
@@ -1547,14 +1576,33 @@ func _step_move(dt: float, f: Vector3) -> void:
 	if true:
 		var stp := maxf(absf(v) * dt, 1e-3)
 		var g_new: float = terrain.deck_height(x, z)
-		var wall := g_new > y + 0.35 if air else ((g_new - g_prev) / stp > 1.6 and g_new - g_prev > 0.05)
+		var sv := signf(v) if v != 0.0 else 1.0
+		var wall := false
+		if air: wall = g_new > y + 0.35
+		elif _OLD_CURB: wall = (g_new - g_prev) / stp > 1.6 and g_new - g_prev > 0.05
+		else:
+			# an edge is read over at least EDGE_BASE whatever the speed: per step, a slow bike's steps were too short
+			# to see a curb at all (it rolled up 30 cm at 6 km/h) and a fast one's long enough to stop dead on 20 cm
+			var bs := maxf(stp, EDGE_BASE)
+			var g_c: float = maxf(g_new, terrain.deck_height(px + cos(course) * bs * sv, pz - sin(course) * bs * sv))
+			wall = (g_c - g_prev) / bs > 1.6 and g_c - g_prev > 0.05
 		if wall and not air:
 			# a steep edge is only a wall if it's taller than a tyre rolls up: a 12 cm curb / root step used to stop
 			# the bike dead ("BONK!", or a SMACK crash above 6 m/s). Look a little further along the travel so a
 			# real face (that keeps rising) still is one; the tyres + suspension ride the small ones
-			var sv := signf(v) if v != 0.0 else 1.0
 			var g_ahead: float = terrain.deck_height(x + cos(course) * 0.3 * sv, z - sin(course) * 0.3 * sv)
-			wall = maxf(g_new, g_ahead) - g_prev > 0.5 * minf(RWF, RWR)
+			var rise := maxf(g_new, g_ahead) - g_prev
+			var lim := 0.5 * minf(RWF, RWR)
+			# the frame's point is the bottom bracket: by the time it reaches an edge the front wheel has already
+			# climbed it and the edge is the REAR wheel's to roll up (2026-11-24: "the rear always gets stuck on a
+			# curb"). Up to REAR_ROLL x its radius it is not a wall: the rear wheel climbs it in the vertical step and the
+			# climb takes the speed (too slow, it rolls back); taller, it is a wall as before. Only forwards, front up on top
+			if not _OLD_CURB and v > 0.0 and rise > lim:
+				var fr := L - BB_REAR
+				var g_fr: float = terrain.deck_height(x + f.x * fr, z + f.z * fr)
+				if g_fr >= g_prev + 0.7 * rise and rise <= REAR_ROLL * RWR:
+					lim = rise + 0.01
+			wall = rise > lim
 		if wall:
 			x = px; z = pz
 			if absf(v) > 6: _crash("SMACK! Hit the cliff")
