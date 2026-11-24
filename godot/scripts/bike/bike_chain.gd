@@ -96,8 +96,15 @@ func setup(p_rig: BikeRig, build: Dictionary = {}) -> void:
 	if _mesh_out == null:
 		_mesh_out = _link_mesh(true)
 		_mesh_in = _link_mesh(false)
+		_mesh_out_lo = _link_mesh(true, true)
+		_mesh_in_lo = _link_mesh(false, true)
 	mm_out = _multimesh(_mesh_out)
 	mm_in = _multimesh(_mesh_in)
+	_band = MeshInstance3D.new()
+	_band.mesh = ArrayMesh.new()
+	_band.material_override = _mesh_out.surface_get_material(0)
+	_band.visible = false
+	add_child(_band)
 
 
 ## the game, every frame: the gear in use (index into the cassette, small to big)
@@ -108,6 +115,51 @@ func set_gear(i: int, p_cogs: Array) -> void:
 		cogs = p_cogs.duplicate()
 	gear = clampi(i, 0, cogs.size() - 1)
 
+
+## distance LODs (2026-11-24): close the full links (304 triangles each), then light links (~1/3), far one swept low-poly
+## band through the pins (~8 triangles per link instead of ~300: the whole chain was ~33k). BMX_CHAIN_LOD=0|1|2 forces one
+const LOD_NEAR := 4.5    # m from the camera
+const LOD_FAR := 12.0
+static var _mesh_out_lo: ArrayMesh
+static var _mesh_in_lo: ArrayMesh
+var _band: MeshInstance3D
+var lod := -1
+
+func _set_lod(l: int) -> void:
+	if l == lod: return
+	lod = l
+	mm_out.mesh = _mesh_out if l == 0 else _mesh_out_lo
+	mm_in.mesh = _mesh_in if l == 0 else _mesh_in_lo
+	for c in get_children():
+		if c is MultiMeshInstance3D: c.visible = l < 2
+	_band.visible = l == 2
+
+## the far chain: a flat box section (7 x 7.5 mm) swept through the pins, rebuilt each frame it shows
+func _band_mesh(n: int) -> void:
+	var V := PackedVector3Array(); var N := PackedVector3Array(); var C := PackedColorArray()
+	var hw := 0.0036; var hh := 0.0036
+	var col := Color(0.34, 0.35, 0.37)   # (about the links' average from afar: their plates bright, rollers dark)
+	for i in n:
+		var a := _pins[i]; var b := _pins[(i + 1) % n]
+		var dir := b - a
+		if dir.length_squared() < 1e-10: continue
+		dir = dir.normalized()
+		var yy := Vector3(0, 0, 1).cross(dir).normalized()
+		var zz := Vector3(0, 0, 1)
+		var c := [yy * hh + zz * hw, -yy * hh + zz * hw, -yy * hh - zz * hw, yy * hh - zz * hw]
+		var nr := [yy, zz, -yy, -zz]
+		var faces := [[0, 3, yy], [1, 0, zz], [2, 1, -yy], [3, 2, -zz]]
+		for f in faces:
+			var p0: Vector3 = a + c[f[0]]; var p1: Vector3 = a + c[f[1]]; var p2: Vector3 = b + c[f[1]]; var p3: Vector3 = b + c[f[0]]
+			V.append_array([p0, p1, p2, p0, p2, p3])
+			for k in 6: N.append(f[2]); C.append(col)
+	var am := _band.mesh as ArrayMesh
+	am.clear_surfaces()
+	if V.is_empty(): return
+	var arr := []
+	arr.resize(Mesh.ARRAY_MAX)
+	arr[Mesh.ARRAY_VERTEX] = V; arr[Mesh.ARRAY_NORMAL] = N; arr[Mesh.ARRAY_COLOR] = C
+	am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
 
 func _multimesh(mesh: Mesh) -> MultiMesh:
 	var m := MultiMesh.new()
@@ -158,6 +210,18 @@ func _process(dt: float) -> void:
 		var seg := clampi(cum.bsearch(s), 1, cum.size() - 1)
 		var u := clampf((s - cum[seg - 1]) / maxf(cum[seg] - cum[seg - 1], 1e-6), 0.0, 1.0)
 		_pins[i] = pts[seg - 1].lerp(pts[seg], u)
+	# how far the camera is: which LOD
+	var cam := get_viewport().get_camera_3d()
+	var want := 0
+	var force := Env.s("BMX_CHAIN_LOD")
+	if force != "": want = int(force)
+	elif cam:
+		var d := cam.global_position.distance_to(ring_node.global_position) * tan(deg_to_rad(cam.fov * 0.5)) / tan(deg_to_rad(37.5))   # (as seen through a 75 deg lens: zoomed in counts as closer)
+		want = 0 if d < LOD_NEAR else (1 if d < LOD_FAR else 2)
+	_set_lod(want)
+	if want == 2:
+		_band_mesh(n)
+		return
 	# each link spans two pins (a polygon round the sprockets, like a real chain); even = outer, odd = inner
 	mm_out.visible_instance_count = n / 2
 	mm_in.visible_instance_count = n / 2
@@ -205,20 +269,20 @@ func _resize_ring(dr: float) -> void:
 
 ## one link, x along the chain (pins at +-PITCH/2), y in the chain's plane, z across. Outer: two plates outside +
 ## the pins (with their riveted heads); inner: two plates inside + the rollers the teeth sit between.
-static func _link_mesh(outer: bool) -> ArrayMesh:
+static func _link_mesh(outer: bool, lo := false) -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var plate_c := Color(0.62, 0.63, 0.66) if outer else Color(0.36, 0.37, 0.39)
 	var zc := 0.0029 if outer else 0.0018   # plate middle
 	var th := 0.0008
 	for sd in [-1.0, 1.0]:
-		_plate(st, sd * zc, th, 0.0037 if outer else 0.0039, 0.0026 if outer else 0.0030, plate_c)
+		_plate(st, sd * zc, th, 0.0037 if outer else 0.0039, 0.0026 if outer else 0.0030, plate_c, 4 if lo else 14)
 	for e in [-1.0, 1.0]:
 		var x: float = e * PITCH * 0.5
 		if outer:
-			_cyl(st, Vector3(x, 0, 0), 0.00185, -0.0040, 0.0040, Color(0.78, 0.79, 0.8))   # pin, heads proud of the plates
+			_cyl(st, Vector3(x, 0, 0), 0.00185, -0.0040, 0.0040, Color(0.78, 0.79, 0.8), 4 if lo else 10)   # pin, heads proud of the plates
 		else:
-			_cyl(st, Vector3(x, 0, 0), 0.0038, -0.0013, 0.0013, Color(0.28, 0.28, 0.3))     # roller
+			_cyl(st, Vector3(x, 0, 0), 0.0038, -0.0013, 0.0013, Color(0.28, 0.28, 0.3), 5 if lo else 10)     # roller
 	var mat := StandardMaterial3D.new()
 	mat.vertex_color_use_as_albedo = true
 	mat.metallic = 0.85
@@ -229,9 +293,8 @@ static func _link_mesh(outer: bool) -> ArrayMesh:
 
 
 ## a figure-eight side plate: lobes of radius R round both pins, a waist of half-height w, thickness th at z
-static func _plate(st: SurfaceTool, z: float, th: float, R: float, w: float, col: Color) -> void:
+static func _plate(st: SurfaceTool, z: float, th: float, R: float, w: float, col: Color, N := 14) -> void:
 	var L := PITCH * 0.5 + R
-	var N := 14
 	var outl := PackedVector2Array()
 	for k in N + 1:   # top edge, left -> right
 		var x := -L + 2.0 * L * float(k) / N
@@ -262,8 +325,7 @@ static func _plate(st: SurfaceTool, z: float, th: float, R: float, w: float, col
 
 
 ## a cylinder along z from z0 to z1 with caps
-static func _cyl(st: SurfaceTool, c: Vector3, r: float, z0: float, z1: float, col: Color) -> void:
-	var N := 10
+static func _cyl(st: SurfaceTool, c: Vector3, r: float, z0: float, z1: float, col: Color, N := 10) -> void:
 	for k in N:
 		var a0 := TAU * k / N; var a1 := TAU * (k + 1) / N
 		var d0 := Vector3(cos(a0), sin(a0), 0); var d1 := Vector3(cos(a1), sin(a1), 0)

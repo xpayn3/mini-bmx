@@ -373,6 +373,11 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   glbs import with `generate_lods`, but `BikeRig` rebuilds the meshes from surface arrays (AO bake, decals, part swaps)
   and that drops them (only the helmet keeps its LODs). Biggest: frame 68k, steer 41k, rear wheel 23k, seatstay 20k,
   front wheel 18k, chain 33k (108 links x 304), fork lower 16k, rotors 9.6k each, cranks 9k. Rider ~30k.
+  **Chain LODs (2026-11-24, `BikeChain._set_lod`)**: by the camera's distance to the chainring (as seen through a 75 deg
+  lens): under `LOD_NEAR` 4.5 m the full links, to `LOD_FAR` 12 m light links (plates 4 segments, pins 4-5 sides, ~1/3
+  of the triangles), past it one swept box-section band through the pins (~8 triangles a link, the chain ~33k -> ~0.9k).
+  `BMX_CHAIN_LOD=0|1|2` forces one. The user models LODs for the frames / parts (plan: `<part>_lod1` / `_lod2` siblings
+  in the glb, same pivots + surface names, an optional `frame_shadow` cast-only proxy); the wheels are code (WheelGen).
   **Sun shadows** (`Game._shadow_fit`): reach fixed by quality (`SHADOW_REACH` 100 / 140 / 170 / 200 m, fade from 75 %),
   never with the speed dolly; the 4 cascades end at zoom + 6 / + 22 / + 55 m (the sharp one covers the rider, not the
   empty air in front of the camera; it used to be fixed 6 / 18 / 45 % of an 80 m reach: shadows stopped ~70 m out and
