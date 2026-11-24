@@ -2314,11 +2314,11 @@ func _perf(key: String, t0: int) -> int:
 	return now
 
 ## F10: the live frame profiler (game/frame_profiler.gd), made on first use; it reads the same sections as BMX_PERF
-var profiler: FrameProfiler = null
+var profiler = null   # FrameProfiler (loaded by path below: works before Godot's class cache knows the name)
 var _prof_rec := false
 func toggle_profiler(m: int = -1) -> void:
 	if profiler == null:
-		profiler = FrameProfiler.new(self)
+		profiler = preload("res://scripts/game/frame_profiler.gd").new(self)
 		add_child(profiler)
 	if m < 0: profiler.cycle()
 	else: profiler.set_mode(m)
