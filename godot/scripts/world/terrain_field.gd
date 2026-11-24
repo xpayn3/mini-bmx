@@ -225,11 +225,15 @@ static func sm(a: float, b: float, x: float) -> float:
 # ======================================================================
 ## style: the trail's character (RouteStyle keys); empty = what the player picked (RouteStyle.current)
 var style: Dictionary = {}
+var biome_dry: float = 0.0   # RouteStyle.biome: added to the dry / rugged noise (+-2 pins the biome, 0 = the seed's own mix)
+var biome_rug: float = 0.0
 var grade_k: float = 1.0   # RouteStyle.grade: the mountains' height x this (their lengths stay), so every fall is this much steeper (1 = as before)
 
 func setup(seed_in: int, style_in: Dictionary = {}) -> void:
 	style = style_in.duplicate() if not style_in.is_empty() else RouteStyle.snapshot()
 	grade_k = clampf(float(style.get("grade", 1.0)), 0.5, 1.7)
+	var pick: Array = RouteStyle.BIOMES[clampi(roundi(float(style.get("biome", 0.0))), 0, RouteStyle.BIOMES.size() - 1)]
+	biome_dry = float(pick[1]); biome_rug = float(pick[2])
 	TrailFeatures.ensure()
 	_ensure_colors()
 	_local_tables()
@@ -297,6 +301,7 @@ func fork() -> TerrainField:
 	f._local_tables()
 	f.style = style.duplicate()
 	f.grade_k = grade_k
+	f.biome_dry = biome_dry; f.biome_rug = biome_rug
 	f.seed_value = seed_value; f.sz = sz; f.NT = NT.duplicate()   # private copies: no shared refcounts across threads
 	f.rp_a = rp_a; f.rp_sg = rp_sg; f.pitches = pitches.duplicate(); f.pitch_share = pitch_share
 	f.course = course
@@ -722,8 +727,8 @@ func biome(x: float, z: float) -> void:
 		return
 	var wx := x + noise(x * I160, (z + 500) * I160) * 60
 	var wz := z + noise((x - 500) * I160, z * I160) * 60
-	b_dry = sm(-0.12, 0.16, noise((wx + 3000) * I380, (wz - 1200) * I380))
-	b_rug = sm(-0.08, 0.2, noise((wx - 700) * I300, (wz + 2200) * I300))
+	b_dry = sm(-0.12, 0.16, noise((wx + 3000) * I380, (wz - 1200) * I380) + biome_dry)
+	b_rug = sm(-0.08, 0.2, noise((wx - 700) * I300, (wz + 2200) * I300) + biome_rug)
 	_bi_x = x; _bi_z = z
 
 

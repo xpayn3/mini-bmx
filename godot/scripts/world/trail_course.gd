@@ -266,6 +266,12 @@ static func _jump_remap(p: float, j: float, old_band: float) -> float:
 	return old_band + (p - nb) / (1.0 - nb) * (1.0 - old_band)
 
 
+## a section of the course; swap = a plain stretch of road instead of the tight sections (RouteStyle.twist below 1)
+func _section(fns: Array, swap: bool) -> void:
+	if swap: _attempt([[0, 50.0 + fposmod(_x * 0.37, 1.0) * 80.0]])
+	else: _attempt(fns)
+
+
 func _road(max_len: float) -> void:
 	var len := minf(max_len, 90 + _r.next() * 150)
 	var done := 0.0
@@ -395,37 +401,38 @@ func _build() -> void:
 			_M.range_at(_x + 30.0)
 			var down: bool = _M.rg_down > 0.5
 			var climbing: bool = _M.hill(_x + 60.0, _M.zc(_x + 60.0)) > _M.hill(_x, _M.zc(_x)) + 1.5
-			# the style's twist moves the technical (hairpin / switchback) picks, jumps the jump-line pick
-			var tech_k := 1.0 if tst == 1.0 else clampf(tst, 0.2, 2.0)
+			# the style's twist: fewer / more of the tight sections (a low twist turns some of them into plain road, a high one
+			# adds hairpin sections); the jump-line pick follows the jumps style. twist 1 / jumps 1 = the original picks.
+			var swap := tst < 1.0 and fposmod(pick2 * 977.0, 1.0) < (1.0 - tst) * 0.9
+			var jcut := 0.92 if jst == 1.0 else clampf(1.0 - 0.08 * jst, 0.81, 1.0)
+			var did_jump := false
 			if down:
-				var jcut := 0.92 if jst == 1.0 else clampf(1.0 - 0.08 * jst, 0.81, 1.0)
-				var t1 := 0.4 * tech_k if tst != 1.0 else 0.4
-				var t2 := 0.62 if tst == 1.0 else t1 + 0.22 * tech_k
-				if tst != 1.0:
-					t1 = minf(t1, 0.5); t2 = minf(t2, 0.7)
-				if pick2 < t1:
-					_attempt([[6, end_x], [1, end_x], [2, end_x]])
-				elif pick2 < t2:
-					_attempt([[1, end_x], [6, end_x], [2, end_x]])
+				if pick2 < 0.4:
+					_section([[6, end_x], [1, end_x], [2, end_x]], swap)
+				elif pick2 < 0.62:
+					_section([[1, end_x], [6, end_x], [2, end_x]], swap)
 				elif pick2 < 0.8:
-					_attempt([[2, end_x], [1, end_x], [3, end_x]])
+					_section([[2, end_x], [1, end_x], [3, end_x]], swap)
 				elif pick2 < jcut:
-					_attempt([[3, end_x], [2, end_x], [1, end_x]])
+					_section([[3, end_x], [2, end_x], [1, end_x]], swap)
 				else:
 					_attempt([[4, 0.0]])
+					did_jump = true
 			else:
 				var q := _jump_remap(pick2, jst, 0.3)
-				var tt := 0.68 if tst == 1.0 else 0.55 + 0.13 * tech_k
 				if q < 0.3 and not climbing:
 					_attempt([[4, 0.0]])
+					did_jump = true
 				elif q < 0.55:
-					_attempt([[2, end_x], [1, end_x], [3, end_x]])
-				elif q < tt:
-					_attempt([[6, end_x], [1, end_x], [2, end_x]])
+					_section([[2, end_x], [1, end_x], [3, end_x]], swap)
+				elif q < 0.68:
+					_section([[6, end_x], [1, end_x], [2, end_x]], swap)
 				elif q < 0.84:
-					_attempt([[1, end_x], [2, end_x], [3, end_x]])
+					_section([[1, end_x], [2, end_x], [3, end_x]], swap)
 				else:
-					_attempt([[3, end_x], [2, end_x], [1, end_x]])
+					_section([[3, end_x], [2, end_x], [1, end_x]], swap)
+			if tst > 1.0 and not did_jump and fposmod(pick2 * 613.0, 1.0) < (tst - 1.0) * 0.7:
+				_attempt([[6, end_x], [1, end_x], [2, end_x]])
 			continue
 		if room > 230 and pick2 < 0.7 * clampf(jst, 0.0, 1.35):
 			_attempt([[0, maxf(50, room - 190)]])

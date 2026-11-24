@@ -43,7 +43,13 @@ var _timer: Timer
 var _t0 := 0
 var _build_ms := 0.0
 static var _hcache := {}   # land heights per 10 m cell for the seed (worker only): the land never depends on the style
+static var _bcache := {}   # per cell: Vector2(dry, rugged)
+static var _pcache := {}   # pathN per cell (the wild side paths are its zero lines)
+static var _tcache := {}   # trees per 14 m cell
 static var _hseed := ""
+const TREE_CELL := 14.0
+const NAMES := {"table": "TABLETOP", "double": "DOUBLE", "kicker": "KICKER", "tableLine": "TABLE LINE", "flow": "FLOW LINE", "doubleLine": "DOUBLE LINE",
+	"woodKicker": "WOOD KICKER", "rhythm": "ROLLERS", "bridge": "BRIDGE", "gorge": "GORGE BRIDGE", "rope": "ROPE BRIDGE", "skinny": "SKINNY"}
 
 
 func _init() -> void:
@@ -170,7 +176,8 @@ func _work(seed_in: int, style: Dictionary) -> void:
 		"seed": seed_in, "style": style, "n": C.n,
 		"X": C.X.duplicate(), "Z": C.Z.duplicate(), "KD": C.KD.duplicate(),
 		"E": C.E.duplicate(), "KAP": C.KAP.duplicate(), "drops": C.drops.duplicate(true),
-		"feats": feats, "step": TrailCourse.STEP,
+		"feats": feats, "step": TrailCourse.STEP, "VA": C.VA.duplicate(),
+		"runs": _runs(C),
 	}
 	out["rows"] = _land_rows(f, C, seed_in)
 	_mutex.lock()
@@ -179,10 +186,43 @@ func _work(seed_in: int, style: Dictionary) -> void:
 
 
 ## worker: the paper map's land for each ROW_M of trail: a shaded picture + contour lines, from the field's land heights
+## the trees thinned for zooming out: [all, one per 24 m cell, 48 m, 96 m] (so the map never draws more than a few thousand symbols)
+const TREE_GAPS := [8.0, 24.0, 48.0, 96.0]
+func _tree_lods(all: PackedVector3Array) -> Array:
+	var out := [all]
+	for gi in range(1, TREE_GAPS.size()):
+		var cell: float = TREE_GAPS[gi]
+		var seen := {}
+		var arr := PackedVector3Array()
+		for t in all:
+			var key := int(floorf(t.x / cell)) * 100003 + int(floorf(t.y / cell))
+			if seen.has(key): continue
+			seen[key] = true
+			arr.append(t)
+		out.append(arr)
+	return out
+
+
+## [kind, first index, last index] of every run of one section kind (hairpins, esses, rock gardens, jump lines)
+func _runs(C: TrailCourse) -> Array:
+	var out := []
+	var i := 0
+	while i < C.n:
+		var k: int = C.KD[i]
+		var j := i
+		while j + 1 < C.n and C.KD[j + 1] == k: j += 1
+		if k in [TrailCourse.SWITCH, TrailCourse.ESSES, TrailCourse.ROCKS] and j - i >= 6: out.append([k, i, j])
+		i = j + 1
+	return out
+
+
 func _land_rows(f: TerrainField, C: TrailCourse, seed_in: int) -> Array:
-	var hk := "%d_%.3f" % [seed_in, float(f.grade_k)]   # (the land's shape depends on the grade too)
+	var hk := "%d_%.3f_%.0f_%.0f" % [seed_in, float(f.grade_k), f.biome_dry, f.biome_rug]   # (the land depends on the grade and the biome too)
 	if _hseed != hk:
 		_hcache = {}
+		_bcache = {}
+		_pcache = {}
+		_tcache = {}
 		_hseed = hk
 	var n := C.n
 	var x_start: float = C.X[0]
@@ -206,6 +246,9 @@ func _land_rows(f: TerrainField, C: TrailCourse, seed_in: int) -> Array:
 		var nz := int(h / GRIDM) + 1
 		var hh := PackedFloat32Array()
 		hh.resize(nx * nz)
+		var dd := PackedFloat32Array()   # dryness / ruggedness per grid vertex (the biome: sand or rock tints)
+		var rr := PackedFloat32Array()
+		dd.resize(nx * nz); rr.resize(nx * nz)
 		var ix0 := int(round(x0 / GRIDM))
 		var iz0 := int(round(z0 / GRIDM))
 		var lo := 1e9
@@ -218,6 +261,13 @@ func _land_rows(f: TerrainField, C: TrailCourse, seed_in: int) -> Array:
 				else:
 					v = f.landform(x0 + i * GRIDM, z0 + j * GRIDM)
 					_hcache[key] = v
+				var bv: Vector2
+				if _bcache.has(key): bv = _bcache[key]
+				else:
+					f.biome(x0 + i * GRIDM, z0 + j * GRIDM)
+					bv = Vector2(f.b_dry, f.b_rug)
+					_bcache[key] = bv
+				dd[j * nx + i] = bv.x; rr[j * nx + i] = bv.y
 				hh[j * nx + i] = v
 				lo = minf(lo, v); hi = maxf(hi, v)
 		# the picture: hypsometric paper tint x hill shade, water flat blue
@@ -244,8 +294,59 @@ func _land_rows(f: TerrainField, C: TrailCourse, seed_in: int) -> Array:
 				var nrm := Vector3(-gxh, GRIDM, -gzh).normalized()
 				var sh := clampf(nrm.dot(light), 0.0, 1.0)
 				var t := clampf((hv - lo) / span, 0.0, 1.0)
-				var base := Color(0.78, 0.86, 0.62).lerp(Color(0.86, 0.78, 0.58), t).lerp(paper, 0.45)
+				var dy := lerpf(lerpf(dd[j0 * nx + i0], dd[j0 * nx + i0 + 1], fx), lerpf(dd[(j0 + 1) * nx + i0], dd[(j0 + 1) * nx + i0 + 1], fx), fz)
+				var rg := lerpf(lerpf(rr[j0 * nx + i0], rr[j0 * nx + i0 + 1], fx), lerpf(rr[(j0 + 1) * nx + i0], rr[(j0 + 1) * nx + i0 + 1], fx), fz)
+				var base := Color(0.78, 0.86, 0.62).lerp(Color(0.86, 0.78, 0.58), t)
+				base = base.lerp(Color(0.84, 0.82, 0.76), rg * (1.0 - dy) * 0.7).lerp(Color(0.95, 0.82, 0.52).lerp(Color(0.86, 0.5, 0.32), rg * 0.8), dy * 0.85)   # rock grey / dune sand / canyon red
+				base = base.lerp(paper, 0.45)
 				img.set_pixel(pxi, py, (base * (0.62 + 0.5 * sh)).clamp())
+		# the wild side paths: the zero lines of the path noise (the ground shader draws dirt along them)
+		var pp := PackedFloat32Array()
+		pp.resize(nx * nz)
+		for j in nz:
+			for i in nx:
+				var key2 := (ix0 + i) * 100003 + (iz0 + j)
+				var pv: float
+				if _pcache.has(key2): pv = _pcache[key2]
+				else:
+					pv = f.pathN(x0 + i * GRIDM, z0 + j * GRIDM)
+					_pcache[key2] = pv
+				pp[j * nx + i] = pv
+		var paths := PackedVector2Array()
+		for j in nz - 1:
+			for i in nx - 1:
+				var q0 := pp[j * nx + i]; var q1 := pp[j * nx + i + 1]
+				var q2 := pp[(j + 1) * nx + i + 1]; var q3 := pp[(j + 1) * nx + i]
+				if minf(minf(q0, q1), minf(q2, q3)) > 0.0 or maxf(maxf(q0, q1), maxf(q2, q3)) < 0.0: continue
+				if hh[j * nx + i] < wl: continue
+				var cp := PackedVector2Array()
+				var cx0 := x0 + i * GRIDM; var cz0 := z0 + j * GRIDM
+				if (q0 < 0.0) != (q1 < 0.0): cp.append(Vector2(cx0 + GRIDM * q0 / (q0 - q1), cz0))
+				if (q1 < 0.0) != (q2 < 0.0): cp.append(Vector2(cx0 + GRIDM, cz0 + GRIDM * q1 / (q1 - q2)))
+				if (q3 < 0.0) != (q2 < 0.0): cp.append(Vector2(cx0 + GRIDM * q3 / (q3 - q2), cz0 + GRIDM))
+				if (q0 < 0.0) != (q3 < 0.0): cp.append(Vector2(cx0, cz0 + GRIDM * q0 / (q0 - q3)))
+				if cp.size() >= 2:
+					paths.append(cp[0]); paths.append(cp[1])
+		# trees (the game's forest mask + biome rules, a symbol per few real trees) kept off the trail
+		var near := {}
+		for ci in n:
+			var gx2 := int(C.X[ci] / 8.0); var gz2 := int(floorf(C.Z[ci] / 8.0))
+			for ax in range(-2, 3):
+				for az in range(-2, 3): near[(gx2 + ax) * 100003 + gz2 + az] = true
+		var trees := PackedVector3Array()
+		var k0x := int(floorf(x0 / TREE_CELL)); var k0z := int(floorf(z0 / TREE_CELL))
+		for kj in int(h / TREE_CELL):
+			for ki in int(w / TREE_CELL):
+				var ck := (k0x + ki) * 100003 + (k0z + kj)
+				var tl: Array
+				if _tcache.has(ck): tl = _tcache[ck]
+				else:
+					tl = _cell_trees(f, k0x + ki, k0z + kj, seed_in)
+					_tcache[ck] = tl
+				for tv in tl:
+					var tvv: Vector3 = tv
+					if near.has(int(tvv.x / 8.0) * 100003 + int(floorf(tvv.y / 8.0))): continue
+					trees.append(tvv)
 		# contours (marching squares on the 10 m grid)
 		var mi := PackedVector2Array()
 		var ma := PackedVector2Array()
@@ -267,8 +368,35 @@ func _land_rows(f: TerrainField, C: TrailCourse, seed_in: int) -> Array:
 							if is_equal_approx(fposmod(lv, CI * 5.0), 0.0): ma.append_array(pts)
 							else: mi.append_array(pts)
 					lv += CI
-		rows.append({"x0": x0, "z0": z0, "w": w, "h": h, "img": img, "minor": mi, "major": ma})
+		rows.append({"x0": x0, "z0": z0, "w": w, "h": h, "img": img, "minor": mi, "major": ma, "paths": paths, "trees": _tree_lods(trees)})
 	return rows
+
+
+## the trees of one 14 m cell, by the chunk builder's own rules (forest mask, roadside, dry = cacti, rugged = pines);
+## Vector3(x, z, kind): 0 broadleaf, 1 pine, 2 cactus
+func _cell_trees(f: TerrainField, kx: int, kz: int, seed_in: int) -> Array:
+	var out := []
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash([seed_in, kx, kz])
+	var cxm := (kx + 0.5) * TREE_CELL
+	var czm := (kz + 0.5) * TREE_CELL
+	if f.landform(cxm, czm) < TerrainField.WATER + 0.4: return out
+	var hc := f.landform(cxm, czm)
+	f.biome(cxm, czm)
+	var dry: float = f.b_dry
+	var rug: float = f.b_rug
+	for i in 6:
+		var x := (kx + rng.randf()) * TREE_CELL
+		var z := (kz + rng.randf()) * TREE_CELL
+		var forest: float = f.n(x + 400, z, TerrainField.I38)
+		var p := TerrainField.sm(-0.25, 0.25, forest) * 0.9 + 0.05
+		if rng.randf() > p: continue
+		if absf(f.pathN(x, z)) < 0.1: continue
+		if rng.randf() < dry:
+			if rng.randf() < 0.35: out.append(Vector3(x, z, 2.0))
+			continue
+		out.append(Vector3(x, z, 1.0 if (hc > 4.0 or rng.randf() < 0.3 + rug * 0.6) else 0.0))
+	return out
 
 
 func _process(_dt: float) -> void:
@@ -351,7 +479,19 @@ func _stats(d: Dictionary) -> Dictionary:
 		elif t in BRIDGE_TYPES: bridges += 1
 	var kinds := {}
 	for i in n: kinds[KD[i]] = int(kinds.get(KD[i], 0)) + 1
-	return {"length": len_m, "fall": fall, "avg": fall / maxf(1.0, len_m) * 100.0, "steepest": steepest,
+	# run time at a good rider's pace (VA: the speed he arrives at each point) and the difficulty from what is on the trail
+	var VA: PackedFloat32Array = d["VA"]
+	var secs := 0.0
+	var vmax := 0.0
+	for i in n - 1:
+		secs += st / maxf(2.0, VA[i])
+		vmax = maxf(vmax, VA[i])
+	var km := len_m / 1000.0
+	var avgp := fall / maxf(1.0, len_m) * 100.0
+	var score := 30.0 * clampf((avgp - 0.5) / 3.0, 0.0, 1.0) + 20.0 * clampf((steepest - 8.0) / 16.0, 0.0, 1.0) 		+ 20.0 * clampf((tight / km - 6.0) / 16.0, 0.0, 1.0) + 15.0 * clampf(jumps / km / 2.5, 0.0, 1.0) 		+ 10.0 * clampf((d["drops"] as Array).size() / 3.0, 0.0, 1.0) + 5.0 * clampf((vmax - 12.0) / 6.0, 0.0, 1.0)
+	var rating := 0 if score < 38.0 else (1 if score < 52.0 else (2 if score < 66.0 else 3))
+	return {"time": secs, "avg_kmh": len_m / maxf(1.0, secs) * 3.6, "score": score, "rating": rating,
+		"length": len_m, "fall": fall, "avg": fall / maxf(1.0, len_m) * 100.0, "steepest": steepest,
 		"bends": bends, "tight": tight, "jumps": jumps, "rollers": rollers, "bridges": bridges,
 		"drops": (d["drops"] as Array).size(), "kinds": kinds, "ms": _build_ms}
 
@@ -447,6 +587,8 @@ func _draw() -> void:
 	draw_string(font, Vector2(l2 + 74, ly + 25), "ROLLERS", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(INK, 0.8))
 	draw_rect(Rect2(l2 + 140, ly + 17, 7, 7), INK)
 	draw_string(font, Vector2(l2 + 152, ly + 25), "BRIDGE", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(INK, 0.8))
+	draw_colored_polygon(PackedVector2Array([Vector2(l2 - 105, ly + 17), Vector2(l2 - 93, ly + 17), Vector2(l2 - 99, ly + 26)]), TRAIL_C)
+	draw_string(font, Vector2(l2 - 88, ly + 25), "DROP", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(INK, 0.8))
 	if busy:
 		draw_rect(Rect2(Vector2.ZERO, sz), Color(PAPER, 0.3))
 		draw_string(font, Vector2(m, sz.y - 4), "UPDATING…", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, TRAIL_C)
@@ -509,45 +651,51 @@ class MapView extends Control:
 		var tr := Rect2(_w(Vector2(x0, z0)), Vector2(w, h) * z)
 		draw_rect(Rect2(Vector2.ZERO, size), RoutePreview.PAPER.darkened(0.04))
 		if rw.has("tex"): draw_texture_rect(rw["tex"], tr, false)
-		var org := _w(Vector2(x0, z0))
+		var font := ThemeDB.fallback_font
+		# everything in world metres goes through one canvas transform (the GPU moves it, no per-point work here);
+		# widths are given in pixels / z
+		var iz := 1.0 / z
+		var vx0 := pv.centre.x - size.x * 0.5 / z - 10.0
+		var vx1 := pv.centre.x + size.x * 0.5 / z + 10.0
+		var vz0 := pv.centre.y - size.y * 0.5 / z - 10.0
+		var vz1 := pv.centre.y + size.y * 0.5 / z + 10.0
+		draw_set_transform(size * 0.5 - pv.centre * z, 0.0, Vector2(z, z))
 		for kind in ["minor", "major"]:
 			var src: PackedVector2Array = rw[kind]
-			if src.size() < 2: continue
-			var pts := PackedVector2Array()
-			pts.resize(src.size())
-			for q in src.size(): pts[q] = org + (src[q] - Vector2(x0, z0)) * z
-			draw_multiline(pts, Color(RoutePreview.CONTOUR, 0.5 if kind == "minor" else 0.85), 0.8 if kind == "minor" else 1.5, true)
-		var font := ThemeDB.fallback_font
-		# 100 m grid, numbered every 500 m
-		var gx := ceilf(maxf(x0, pv.centre.x - size.x * 0.5 / z) / 100.0) * 100.0
-		var gx1 := minf(x0 + w, pv.centre.x + size.x * 0.5 / z)
-		while gx < gx1:
-			var px := _w(Vector2(gx, 0)).x
-			draw_line(Vector2(px, 0), Vector2(px, size.y), Color(RoutePreview.GRID_C, 0.2), 1.0)
-			if int(gx) % 500 == 0: draw_string(font, Vector2(px + 3, size.y - 5), "%d M" % int(gx), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(RoutePreview.GRID_C, 0.9))
+			if src.size() > 1:
+				draw_multiline(src, Color(RoutePreview.CONTOUR, 0.5 if kind == "minor" else 0.85), (0.8 if kind == "minor" else 1.5) * iz)
+		# 100 m grid
+		var gx := ceilf(maxf(x0, vx0) / 100.0) * 100.0
+		while gx < minf(x0 + w, vx1):
+			draw_line(Vector2(gx, vz0), Vector2(gx, vz1), Color(RoutePreview.GRID_C, 0.2), iz)
 			gx += 100.0
+		# the other tracks: thin, lighter than the main trail
+		var pth: PackedVector2Array = rw["paths"]
+		if pth.size() > 1:
+			var tw := clampf(z * 1.8, 0.9, 12.0)
+			draw_multiline(pth, Color(0.45, 0.33, 0.2, 0.4), (tw + 1.0) * iz)
+			draw_multiline(pth, Color(0.94, 0.86, 0.7, 0.85), tw * iz)
+		# the trail
 		var X: PackedFloat64Array = data["X"]
 		var Z: PackedFloat64Array = data["Z"]
 		var G: PackedFloat32Array = data["grade"]
 		var n: int = data["n"]
-		var line := PackedVector2Array()
 		var lines: Array = []
-		var vx0 := pv.centre.x - size.x * 0.5 / z - 10.0
-		var vx1 := pv.centre.x + size.x * 0.5 / z + 10.0
+		var line := PackedVector2Array()
 		for i in n:
 			var px := float(X[i])
 			if px < vx0 or px > vx1:
 				if line.size() > 1: lines.append(line)
 				line = PackedVector2Array()
 				continue
-			line.append(_w(Vector2(px, float(Z[i]))))
+			line.append(Vector2(px, float(Z[i])))
 		if line.size() > 1: lines.append(line)
-		var cw := clampf(z * 5.0, 5.0, 9.0)
-		for ln in lines: draw_polyline(ln, Color(1, 1, 1, 0.95), cw, true)
+		var cw := clampf(z * 5.5, 5.5, 40.0)   # real width (the trail is ~3 m, drawn 5.5 m) with a floor, like a road on a web map
+		for ln in lines:
+			draw_polyline(ln, Color(0.3, 0.19, 0.1, 0.95), (cw + clampf(cw * 0.35, 1.5, 3.0)) * iz, true)
+			draw_polyline(ln, Color(0.97, 0.84, 0.52), cw * iz, true)
 		if pv.color_mode == "type":
-			for ln in lines:
-				draw_polyline(ln, Color(RoutePreview.TRAIL_C, 0.35), cw * 0.35, true)
-				_dash(ln, cw * 1.6, cw * 0.9, RoutePreview.TRAIL_C, cw * 0.55)
+			for ln in lines: _dash(ln, 8.0 * iz, 6.0 * iz, RoutePreview.TRAIL_C, clampf(cw * 0.2, 1.2, 2.6) * iz)
 		else:
 			var pts := PackedVector2Array()
 			var col_prev := Color.WHITE
@@ -555,19 +703,55 @@ class MapView extends Control:
 			for i in n:
 				var px := float(X[i])
 				if px < vx0 or px > vx1:
-					if pts.size() > 1: draw_polyline(pts, col_prev, cw * 0.6, true)
+					if pts.size() > 1: draw_polyline(pts, col_prev, cw * 0.55 * iz, true)
 					pts = PackedVector2Array(); kprev = -999
 					continue
 				var gq := roundi(G[i])
-				var p := _w(Vector2(px, float(Z[i])))
+				var p := Vector2(px, float(Z[i]))
 				if gq != kprev and pts.size() > 0:
 					pts.append(p)
-					if pts.size() > 1: draw_polyline(pts, col_prev, cw * 0.6, true)
+					if pts.size() > 1: draw_polyline(pts, col_prev, cw * 0.55 * iz, true)
 					pts = PackedVector2Array([p])
 				else: pts.append(p)
 				col_prev = pv._grade_col(float(gq)); kprev = gq
-			if pts.size() > 1: draw_polyline(pts, col_prev, cw * 0.6, true)
+			if pts.size() > 1: draw_polyline(pts, col_prev, cw * 0.55 * iz, true)
+		# trees: the thinned list for this zoom (symbols stay about 14 px apart), a few thousand at most
+		if z >= 0.3:
+			var lod := 0
+			var gaps: Array = RoutePreview.TREE_GAPS
+			while lod < gaps.size() - 1 and float(gaps[lod]) * z < 14.0: lod += 1
+			var tl: PackedVector3Array = (rw["trees"] as Array)[lod]
+			var rr := clampf(z * 2.4, 1.4, 7.0) * iz
+			for tv in tl:
+				if tv.x < vx0 or tv.x > vx1 or tv.y < vz0 or tv.y > vz1: continue
+				var tp := Vector2(tv.x, tv.y)
+				if tv.z < 0.5:
+					draw_circle(tp, rr, Color(0.38, 0.6, 0.34, 0.9))
+				elif tv.z < 1.5:
+					draw_colored_polygon(PackedVector2Array([tp + Vector2(0, -rr * 1.3), tp + Vector2(rr, rr * 0.8), tp + Vector2(-rr, rr * 0.8)]), Color(0.18, 0.4, 0.28, 0.95))
+				else:
+					draw_line(tp + Vector2(0, -rr), tp + Vector2(0, rr), Color(0.45, 0.55, 0.25), maxf(1.0 * iz, rr * 0.45))
+					draw_line(tp + Vector2(-rr * 0.8, 0), tp + Vector2(rr * 0.8, 0), Color(0.45, 0.55, 0.25), maxf(1.0 * iz, rr * 0.45))
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		# 500 m numbers, features and labels in screen space
+		var gx2 := ceilf(maxf(x0, vx0) / 500.0) * 500.0
+		while gx2 < minf(x0 + w, vx1):
+			draw_string(font, Vector2(_w(Vector2(gx2, 0)).x + 3, size.y - 5), "%d M" % int(gx2), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(RoutePreview.GRID_C, 0.9))
+			gx2 += 500.0
 		var k := clampf(z * 1.4, 0.9, 2.2)   # marker size grows a little with the zoom
+		var placed: Array = []
+		var label := func(at: Vector2, txt: String, col: Color) -> void:
+			if z < 0.45: return
+			for q in placed:
+				if (q as Vector2).distance_to(at) < 70.0: return
+			placed.append(at)
+			draw_string_outline(font, at, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, 4, Color(1, 1, 1, 0.9))
+			draw_string(font, at, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, col)
+		for rn in data["runs"]:
+			var mi_: int = (int(rn[1]) + int(rn[2])) / 2
+			var mp := _w(Vector2(float(X[mi_]), float(Z[mi_])))
+			if mp.x < -40 or mp.x > size.x + 40 or mp.y < -20 or mp.y > size.y + 20: continue
+			label.call(mp + Vector2(-26, -16 - cw), ["", "", "HAIRPINS", "ESSES", "ROCK GARDEN"][int(rn[0])], Color(0.55, 0.2, 0.1))
 		for f in data["feats"]:
 			var fp := _w(Vector2(float(f[0]), float(f[1])))
 			if fp.x < -20 or fp.x > size.x + 20: continue
@@ -575,11 +759,17 @@ class MapView extends Control:
 			if t in RoutePreview.JUMP_TYPES:
 				draw_colored_polygon(PackedVector2Array([fp + Vector2(0, -7) * k, fp + Vector2(6, 4.5) * k, fp + Vector2(-6, 4.5) * k]), RoutePreview.INK)
 				draw_colored_polygon(PackedVector2Array([fp + Vector2(0, -3) * k, fp + Vector2(3, 2.5) * k, fp + Vector2(-3, 2.5) * k]), Color(1, 0.85, 0.2))
-				if z > 1.3: draw_string(font, fp + Vector2(9, 4) * k, t.to_upper(), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, RoutePreview.INK)
 			elif t == "rhythm":
 				draw_circle(fp, 2.4 * k, RoutePreview.INK)
 			elif t in RoutePreview.BRIDGE_TYPES:
 				draw_rect(Rect2(fp - Vector2(3.5, 3.5) * k, Vector2(7, 7) * k), RoutePreview.INK)
+			label.call(fp + Vector2(9, 4) * k, String(RoutePreview.NAMES.get(t, t.to_upper())), RoutePreview.INK)
+		for dr in data["drops"]:
+			var di: int = mini(int(dr[1]), n - 1)
+			var dp := _w(Vector2(float(X[di]), float(Z[di])))
+			if dp.x < -20 or dp.x > size.x + 20: continue
+			draw_colored_polygon(PackedVector2Array([dp + Vector2(-6, -5) * k, dp + Vector2(6, -5) * k, dp + Vector2(0, 6) * k]), RoutePreview.TRAIL_C)
+			label.call(dp + Vector2(9, 4) * k, "CLIFF DROP", RoutePreview.TRAIL_C)
 		var sp := _w(Vector2(float(X[0]), float(Z[0])))
 		draw_circle(sp, 6.0, Color("2f9e58"))
 		draw_circle(sp, 6.0, Color.WHITE, false, 1.5)

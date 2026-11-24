@@ -8,9 +8,9 @@ extends RefCounted
 ##   rolling 0 .. 2.5  the trail's own dips, ridges and cliff drops
 ##   grade   0.5 .. 1.7  how steep the mountains' falls are (their height x this; TerrainField.grade_k, mirrored in TerrainFieldCs)
 
-const KEYS := ["jumps", "twist", "rolling", "grade"]
-const DEFAULT := {"jumps": 1.0, "twist": 1.0, "rolling": 1.0, "grade": 1.0}
-const LIMITS := {"jumps": [0.0, 2.5], "twist": [0.3, 2.0], "rolling": [0.0, 2.5], "grade": [0.5, 1.7]}
+const KEYS := ["jumps", "twist", "rolling", "grade", "biome"]
+const DEFAULT := {"jumps": 1.0, "twist": 1.0, "rolling": 1.0, "grade": 1.0, "biome": 0.0}
+const LIMITS := {"jumps": [0.0, 2.5], "twist": [0.3, 2.0], "rolling": [0.0, 2.5], "grade": [0.5, 1.7], "biome": [0.0, 4.0]}
 const PRESETS := [
 	["FLOW", {"jumps": 0.7, "twist": 0.45, "rolling": 0.8, "grade": 0.75}],
 	["BALANCED", {"jumps": 1.0, "twist": 1.0, "rolling": 1.0, "grade": 1.0}],
@@ -18,6 +18,8 @@ const PRESETS := [
 	["TECHNICAL", {"jumps": 0.35, "twist": 1.8, "rolling": 1.4, "grade": 1.2}],
 	["GNARLY", {"jumps": 1.6, "twist": 1.6, "rolling": 2.2, "grade": 1.5}],
 ]
+## where the ride is: [name, dry bias, rugged bias] added to the seed's own biome noise (0 = the seed's mix)
+const BIOMES := [["ANY", 0.0, 0.0], ["GREEN HILLS", -2.0, -2.0], ["ROCKY MOUNTAINS", -2.0, 2.0], ["DUNE SEA", 2.0, -2.0], ["RED CANYONS", 2.0, 2.0]]
 const PATH := "user://route.cfg"
 
 static var current: Dictionary = DEFAULT.duplicate()
@@ -30,7 +32,7 @@ static func ensure() -> void:
 	var cf := ConfigFile.new()
 	if cf.load(PATH) != OK: return
 	for k in KEYS:
-		current[k] = clampf(float(cf.get_value("route", k, 1.0)), LIMITS[k][0], LIMITS[k][1])
+		current[k] = clampf(float(cf.get_value("route", k, DEFAULT[k])), LIMITS[k][0], LIMITS[k][1])
 
 
 static func get_value(k: String) -> float:
@@ -76,22 +78,28 @@ static func is_default(d: Dictionary = current) -> bool:
 static func code(seed_in: int, d: Dictionary = {}) -> String:
 	ensure()
 	var s: Dictionary = d if not d.is_empty() else current
-	return "%d-%d-%d-%d-%d" % [seed_in, roundi(float(s["jumps"]) * 20.0), roundi(float(s["twist"]) * 20.0), roundi(float(s["rolling"]) * 20.0), roundi(float(s["grade"]) * 20.0)]
+	var c := "%d-%d-%d-%d-%d" % [seed_in, roundi(float(s["jumps"]) * 20.0), roundi(float(s["twist"]) * 20.0), roundi(float(s["rolling"]) * 20.0), roundi(float(s["grade"]) * 20.0)]
+	var b := roundi(float(s.get("biome", 0.0)))
+	return c + ("-b%d" % b if b > 0 else "")   # (a code without the biome part = the seed's own mix)
 
 
 ## {"seed", + the style keys} from a course code (a bare seed gives just the seed); {} if it isn't one
 static func parse(text: String) -> Dictionary:
-	var parts := text.strip_edges().replace(" ", "").replace("_", "-").split("-")
+	var parts := Array(text.strip_edges().replace(" ", "").replace("_", "-").to_lower().split("-"))
+	var biome := 0
+	if parts.size() == 6 and String(parts[5]).begins_with("b") and String(parts[5]).substr(1).is_valid_int():
+		biome = clampi(int(String(parts[5]).substr(1)), 0, BIOMES.size() - 1)
+		parts.remove_at(5)
 	for p in parts:
-		if not p.is_valid_int(): return {}
+		if not String(p).is_valid_int(): return {}
 	if parts.size() == 1: return {"seed": int(parts[0])}
 	if parts.size() != 5: return {}
-	var out := {"seed": int(parts[0])}
-	for i in KEYS.size():
+	var out := {"seed": int(parts[0]), "biome": float(biome)}
+	for i in 4:
 		out[KEYS[i]] = clampf(float(int(parts[i + 1])) / 20.0, LIMITS[KEYS[i]][0], LIMITS[KEYS[i]][1])
 	return out
 
 
 static func sig() -> String:
 	ensure()
-	return JSON.stringify([current["jumps"], current["twist"], current["rolling"], current["grade"]])
+	return JSON.stringify([current["jumps"], current["twist"], current["rolling"], current["grade"], current["biome"]])

@@ -497,6 +497,7 @@ internal sealed class TfShared
 	public double[] pitches;
 	public double pitch_share;
 	public double grade_k = 1.0;
+	public double biome_dry, biome_rug;
 	public double[] cX, cZ, cTX, cTZ, cKAP, cW, cBT, cE, cRD, cRK, cLN, cRO, cROS;
 	public int[] cKD;
 	public long c_gx0, c_gz0, c_gnx, c_gnz;
@@ -563,6 +564,7 @@ public partial class TerrainFieldCs : RefCounted
 	private double rp_a, rp_sg, _sin_rp_a;
 	private double[] pitches;
 	private double pitch_share;
+	private double biome_dry, biome_rug;   // RouteStyle.biome (TerrainField.biome_dry / biome_rug)
 	private double grade_k = 1.0;   // RouteStyle.grade (TerrainField.grade_k)
 	private double[] cX, cZ, cTX, cTZ, cKAP, cW, cBT, cE, cRD, cRK, cLN, cRO, cROS;
 	private int[] cKD;
@@ -679,6 +681,7 @@ public partial class TerrainFieldCs : RefCounted
 		sh.pitches = F64(f.Get("pitches"));
 		sh.pitch_share = f.Get("pitch_share").AsDouble();
 		sh.grade_k = f.Get("grade_k").AsDouble();
+		sh.biome_dry = f.Get("biome_dry").AsDouble(); sh.biome_rug = f.Get("biome_rug").AsDouble();
 		_course_from(sh, f);
 		var col = f.Get("col").AsGodotDictionary();
 		sh.col = col.Duplicate();
@@ -743,7 +746,7 @@ public partial class TerrainFieldCs : RefCounted
 		_sh = sh;
 		seed_value = sh.seed_value; sz = sh.sz; NT = sh.NT; rp_a = sh.rp_a; rp_sg = sh.rp_sg;
 		_sin_rp_a = gd_sin(rp_a);
-		pitches = sh.pitches; pitch_share = sh.pitch_share; grade_k = sh.grade_k;
+		pitches = sh.pitches; pitch_share = sh.pitch_share; grade_k = sh.grade_k; biome_dry = sh.biome_dry; biome_rug = sh.biome_rug;
 		cX = sh.cX; cZ = sh.cZ; cKD = sh.cKD; cTX = sh.cTX; cTZ = sh.cTZ; cKAP = sh.cKAP; cW = sh.cW; cBT = sh.cBT;
 		cE = sh.cE; cRD = sh.cRD; cRK = sh.cRK; cLN = sh.cLN; cRO = sh.cRO; cROS = sh.cROS;
 		c_gx0 = sh.c_gx0; c_gz0 = sh.c_gz0; c_gnx = sh.c_gnx; c_gnz = sh.c_gnz;
@@ -1202,8 +1205,8 @@ public partial class TerrainFieldCs : RefCounted
 			return;
 		double wx = x + noise(x * I160, (z + 500) * I160) * 60;
 		double wz = z + noise((x - 500) * I160, z * I160) * 60;
-		b_dry = sm(-0.12, 0.16, noise((wx + 3000) * I380, (wz - 1200) * I380));
-		b_rug = sm(-0.08, 0.2, noise((wx - 700) * I300, (wz + 2200) * I300));
+		b_dry = sm(-0.12, 0.16, noise((wx + 3000) * I380, (wz - 1200) * I380) + biome_dry);
+		b_rug = sm(-0.08, 0.2, noise((wx - 700) * I300, (wz + 2200) * I300) + biome_rug);
 		_bi_x = x; _bi_z = z;
 	}
 

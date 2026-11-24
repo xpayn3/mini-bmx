@@ -1442,6 +1442,8 @@ func _setup_route(content: HBoxContainer) -> void:
 		se.text = str(GameState.seed)
 		RouteStyle.apply(d)
 		for k in sliders: (sliders[k] as HSlider).set_value_no_signal(RouteStyle.get_value(k))
+		var bc: Array = ui.get("biomes", [])
+		for bi in bc.size(): (bc[bi] as Button).set_pressed_no_signal(roundi(RouteStyle.get_value("biome")) == bi)
 		bike_dirty = true
 		_seed_changed()
 		ask.call()
@@ -1471,7 +1473,6 @@ func _setup_route(content: HBoxContainer) -> void:
 		if not load_code.call(DisplayServer.clipboard_get()): ce.text = RouteStyle.code(GameState.seed), "chip", Tokens.T_MD))
 	col.add_child(code_row)
 	# presets
-	col.add_child(UITheme.caption("STYLE"))
 	var pg := GridContainer.new()
 	pg.columns = 3
 	pg.add_theme_constant_override("h_separation", Tokens.S2)
@@ -1489,14 +1490,23 @@ func _setup_route(content: HBoxContainer) -> void:
 	# one slider per trait
 	var rows := [
 		["jumps", "JUMPS", "NONE", "JUMP PARK"],
-		["twist", "BENDS", "FLOWING", "TIGHT & TWISTY"],
-		["rolling", "ROLLING & DROPS", "SMOOTH", "ROLLERS & CLIFFS"],
-		["grade", "STEEPNESS OF THE MOUNTAINS", "GENTLE", "STEEP"]]
+		["twist", "BENDS", "FLOWING", "TWISTY"],
+		["rolling", "ROLLING & DROPS", "SMOOTH", "ROLLERS"],
+		["grade", "STEEPNESS", "GENTLE", "STEEP"]]
+	var sgrid := GridContainer.new()   # the four sliders two by two: the page has to fit one screen
+	sgrid.columns = 2
+	sgrid.add_theme_constant_override("h_separation", Tokens.S5)
+	sgrid.add_theme_constant_override("v_separation", Tokens.S1)
+	col.add_child(sgrid)
 	for rw in rows:
 		var k: String = rw[0]
+		var cell := VBoxContainer.new()
+		cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		cell.add_theme_constant_override("separation", 0)
+		sgrid.add_child(cell)
 		var head := HBoxContainer.new()
 		head.add_child(UITheme.caption(String(rw[1])))
-		col.add_child(head)
+		cell.add_child(head)
 		var sl := HSlider.new()
 		sl.min_value = RouteStyle.LIMITS[k][0]
 		sl.max_value = RouteStyle.LIMITS[k][1]
@@ -1512,13 +1522,31 @@ func _setup_route(content: HBoxContainer) -> void:
 			ask.call())
 		sl.drag_ended.connect(func(_c): RouteStyle.save_file())
 		sliders[k] = sl
-		col.add_child(sl)
+		cell.add_child(sl)
 		var ends := HBoxContainer.new()
 		ends.add_child(UITheme.caption(String(rw[2]), Tokens.INK_FAINT, Tokens.T_XS))
 		var fl := Control.new(); fl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		ends.add_child(fl)
 		ends.add_child(UITheme.caption(String(rw[3]), Tokens.INK_FAINT, Tokens.T_XS))
-		col.add_child(ends)
+		cell.add_child(ends)
+	# where: the biome the ride is in
+	var bm := HBoxContainer.new()
+	bm.add_theme_constant_override("separation", Tokens.S2)
+	var bgrp := ButtonGroup.new()
+	var bchips := []
+	for bi in RouteStyle.BIOMES.size():
+		var bb := UITheme.make_button(String(RouteStyle.BIOMES[bi][0]).replace(" MOUNTAINS", "").replace(" HILLS", " HILLS"), Callable(), "chip", Tokens.T_XS)
+		bb.toggle_mode = true; bb.button_group = bgrp
+		bb.button_pressed = roundi(RouteStyle.get_value("biome")) == bi
+		bb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		bb.pressed.connect(func():
+			RouteStyle.set_value("biome", float(bi))
+			bike_dirty = true
+			ask.call())
+		bchips.append(bb)
+		bm.add_child(bb)
+	ui["biomes"] = bchips
+	col.add_child(bm)
 	# colouring of the map
 	var cm := HBoxContainer.new()
 	cm.add_theme_constant_override("separation", Tokens.S2)
@@ -1532,17 +1560,23 @@ func _setup_route(content: HBoxContainer) -> void:
 		cm.add_child(cb)
 	col.add_child(cm)
 	# what this trail is
-	var stats := UITheme.text("", Tokens.INK, Tokens.T_MD)
+	var rate := UITheme.display("", Tokens.T_XL, Tokens.INK, Tokens.SLANT_TITLE)
+	col.add_child(rate)
+	var stats := UITheme.text("", Tokens.INK, Tokens.T_SM)
+	stats.add_theme_constant_override("line_spacing", -4)
 	stats.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	col.add_child(stats)
 	var fill := Control.new(); fill.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	col.add_child(fill)
 	if is_instance_valid(rv):
 		rv.built.connect(func(st: Dictionary):
-			stats.text = "%.1f KM  ·  FALLS %d M  ·  AVERAGE %.1f %%  ·  STEEPEST 100 M: %d M
+			rate.text = ["GREEN  ·  EASY", "BLUE  ·  INTERMEDIATE", "BLACK  ·  HARD", "DOUBLE BLACK  ·  EXPERT"][st.rating]
+			rate.add_theme_color_override("font_color", [Color("2f9e58"), Color("2f6fd0"), Color("151a23"), Color("d22b25")][st.rating])
+			stats.text = "ABOUT %d:%02d AT A GOOD RIDER'S PACE  ·  %d KM/H
+%.1f KM  ·  FALLS %d M  ·  AVERAGE %.1f %%  ·  STEEPEST 100 M: %d M
 %d JUMPS  ·  %d ROLLER SETS  ·  %d BRIDGES  ·  %d CLIFF DROPS
 %d BENDS, %d TIGHT" % [
-				st.length / 1000.0, roundi(st.fall), st.avg, roundi(st.steepest), st.jumps, st.rollers, st.bridges, st.drops, st.bends, st.tight])
+				int(st.time) / 60, int(st.time) % 60, roundi(st.avg_kmh), st.length / 1000.0, roundi(st.fall), st.avg, roundi(st.steepest), st.jumps, st.rollers, st.bridges, st.drops, st.bends, st.tight])
 		rv.request(GameState.seed, RouteStyle.snapshot())
 	menu_focus = nw
 
