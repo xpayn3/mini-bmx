@@ -416,12 +416,24 @@ func begin_crash() -> void:
 ## (bare levers), body_fwd / body_lean -1..1 (the right stick), pad bool}
 func step(dt: float, inp: Dictionary) -> void:
 	if dt <= 0.0: return   # (time frozen: several rates divide by dt)
+	var t0 := Time.get_ticks_usec() if prof != null else 0
 	if crash_pending != "":
 		host.start_crash(crash_pending)
+		if prof != null: t0 = _prof("start_crash", t0)
 	if crash_on:
 		_crash_step(dt, inp)
+		if prof != null: _prof("crash_step", t0)
 		return
 	_ride_step(dt, inp)
+
+## the frame profiler (F10, game/frame_profiler.gd): while it records, Game sets this to its per-frame dictionary and
+## every stage of the step adds its microseconds as "p_step.<stage>" (sub-sections of Game's p_bike_step)
+var prof = null
+func _prof(stage: String, t0: int) -> int:
+	var now := Time.get_ticks_usec()
+	var k := "p_step." + stage
+	prof[k] = prof.get(k, 0) + (now - t0)
+	return now
 
 # ---------------------------------------------------------------------
 func _crash_step(dt: float, inp: Dictionary) -> void:
@@ -587,11 +599,14 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	land_fold = maxf(0.0, land_fold - dt / (0.45 + 0.9 * land_fold + 1.0 * land_heavy))
 	_loop_saved = maxf(0.0, _loop_saved - dt)
 	var steer_input: float = inp.steer
+	var _pt := Time.get_ticks_usec() if prof != null else 0
 	var brake_k := _step_controls(dt, inp, throttle, steer_input)
+	if prof != null: _pt = _prof("controls", _pt)
 	var brake := brake_k > 0.1
 	var roll_keys: float = 0.0 if (not air or air_lock_a) else steer_input   # A / D in the air, before the body stick is added
 	var f := fwd()
 	_step_ground(dt, f)
+	if prof != null: _pt = _prof("ground", _pt)
 	var in_water := surf == 2
 	var slope: float = _or(pitch_w, _g_pitch) if (not air and (front_air or rear_air) and wheelie_up <= 0.0 and nose_a <= 0.0) else _g_pitch   # a wheelie rolls on the ground's slope
 	# (rolling on the rear wheel alone, the hill it feels is the ground under that wheel, not the way the frame points:
@@ -602,23 +617,31 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	skid = false
 	_step_sprint(dt, inp, throttle, brake, in_water)
 	_step_loads(dt)
+	if prof != null: _pt = _prof("sprint_loads", _pt)
 	var e0 := _e_now() if _EPROBE else 0.0
 	_e_y = y
 	var a_long := _step_drive(dt, inp, throttle, brake, in_water, slope, rear_down, n_rear, n_front)
 	if _EPROBE: e0 = _e_stage("drive", e0)
+	if prof != null: _pt = _prof("drive", _pt)
 	var va := _step_steer(dt, f, brake_k, steer_input, roll_keys, a_long, n_rear, n_front)
 	if _EPROBE: e0 = _e_stage("steer", e0)
+	if prof != null: _pt = _prof("steer", _pt)
 	f = fwd()   # (the steering turned the bike)
 	_step_move(dt, f)
 	if _EPROBE: e0 = _e_stage("move", e0)
+	if prof != null: _pt = _prof("move", _pt)
 	_step_vertical(dt, f, throttle, brake)
 	if _EPROBE: e0 = _e_stage("vertical", e0)
+	if prof != null: _pt = _prof("vertical", _pt)
 	_step_hop(dt, inp)
 	if _EPROBE: e0 = _e_stage("hop", e0)
+	if prof != null: _pt = _prof("hop", _pt)
 	_step_lip(dt, f, brake)
 	if _EPROBE: e0 = _e_stage("lip", e0)
+	if prof != null: _pt = _prof("lip", _pt)
 	_step_wheels(dt, f, in_water, va)
 	if _EPROBE: e0 = _e_stage("wheels", e0); _e_tick(dt, brake)
+	if prof != null: _prof("wheels", _pt)
 
 ## stage 1: the controls. Brake levers, the body stick, air control (tilt / spin / tuck inputs) and the lip throw.
 ## Returns the brake level (0 when S was a flip throw at a lip, not a brake)
@@ -1766,9 +1789,11 @@ func _step_move(dt: float, f: Vector3) -> void:
 ## stage 8: up / down and pitch: tyre + suspension springs, the rider on their legs, the balance (manual / nose
 ## manual), the air, take-off and landing
 func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void:
+	var _vt := Time.get_ticks_usec() if prof != null else 0
 	var terrain = host.terrain
 	# --- vertical + pitch: spring physics ---
 	_sample(f)
+	if prof != null: _vt = _prof("v_sample", _vt)
 	var natural: bool
 	var dP := _g_pitch - _or(g_pitch, _g_pitch)
 	if true:
@@ -2053,6 +2078,7 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			body_y = y; body_v = vy
 		var N := 4
 		var h := dt / N
+		if prof != null: _vt = _prof("v_before_substeps", _vt)
 		for i in range(1, N + 1):
 			var u := float(i) / N
 			var gF := hfP + (hfC - hfP) * u
@@ -2280,6 +2306,7 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 						var vc := PHI * body_v + mB * vy if coupled else vy
 						body_v = vc; vy = vc
 		# (the graphs read both ends against one travel: the rear's compression is given on the front's scale)
+		if prof != null: _vt = _prof("v_substeps", _vt)
 		dg_xR *= trF / trR
 		dg_travel = trF; dg_sag = s0F; dg_sag_r = s0R * trF / trR; dg_knee = BLOW_V; dg_cF = cF; dg_cR = cR
 		dg_leg = body_y - y if not was_air else 0.0
@@ -2323,6 +2350,7 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 		# the rider's head and chest ride on the bike: turned well past the ground's slope (upside down in a flip, a spin
 		# that came round wrong) they reach the terrain before the bike does. A body point under the ground = the crash
 		# (it used to clip through until the wheels hit)
+		if prof != null: _vt = _prof("v_nose_checks", _vt)
 		if Env.s("BMX_OLD_BODYHIT") == "" and not _balancing() and not _nosing() and absf(pitch - _g_pitch) > 1.0:
 			var sp := sin(pitch); var cp := cos(pitch)
 			var cr := cos(clampf(air_lean if air else bike_lean, -1.4, 1.4))
@@ -2337,6 +2365,7 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 		w_f = hfC if cF else y + XF * snN
 		w_r = hrC if cR else y + XR * snN
 		pitch_w = pitch
+		if prof != null: _vt = _prof("v_crash_checks", _vt)
 		if host.susp != null:
 			y_draw = y; pitch_draw = pitch
 		else:
@@ -2350,6 +2379,7 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 		if not now_air:
 			# the rider's body turns with the bike, smoothed by the arms and legs
 			body_pw += (pitch_v - body_pw) * minf(1.0, dt * 4)
+		if prof != null: _vt = _prof("v_slap_contacts", _vt)
 		if now_air and not was_air:
 			if since_land < 0.5 and Env.s("BMX_TRICK") != "": print("BOUNCE %.2fs after landing vy=%.2f pitch=%.2f" % [since_land, vy, pitch])   # tests
 			air = true; air_time = 0; air_peak = 0.0; flip_acc = 0.0; spin_acc = 0.0; style_air = 0.0; _whip_peak = 0.0; _lean_peak = 0.0; _scrub_k = 0.0
@@ -2456,6 +2486,7 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			if Env.s("BMX_TRICK") != "": print("TAKEOFF v=%.1f vy=%.2f pitch_v=%.2f spin=%.2f natural=%s at=(%.0f,%.0f) slope=%.2f" % [v, vy, pitch_v, air_w, natural, x, z, _g_pitch])   # tests
 			host.on_takeoff()
 		elif not now_air and was_air:
+			if prof != null: _vt = _prof("land_0_before", _vt)
 			# the ground it comes down on, tilt and all (the bank reading eased back to flat during the flight, so a
 			# berm or side-slope landing was taken as flat)
 			var b_land := _bank_at(f)
@@ -2476,7 +2507,10 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			_land_pe = absf(wrapf(pitch - _g_pitch, -PI, PI))   # (how square to the ground it came down: the verdict's forgiveness)
 			_land_up = wrapf(pitch - _g_pitch, -PI, PI) > 0.0   # (back wheel first)
 			_rev_land = false; _land_fix = false
+			var _lt := Time.get_ticks_usec() if prof != null else 0
+			if prof != null: _lt = _prof("land_1_pre", _vt)
 			_land_trick(at)
+			if prof != null: _lt = _prof("land_trick", _lt)
 			if _land_fix:
 				# the tyres grab the nearer axis: the bike keeps its heading, the travel is dragged round to within
 				# slipMax of it (what's left decays as a normal slide), speed lost by the angle dragged through.
@@ -2551,9 +2585,12 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			if Env.s("BMX_TRICK") != "": print("LAND impact=%.1f back=%s v_after=%.1f" % [impact, back_land, v])   # tests
 			# only a real landing shakes the camera (rollers at speed give lots of tiny hops)
 			if at > 0.4 and impact > 3.0: shake = maxf(shake, minf(0.2, (impact - 3.0) * 0.04))
+			if prof != null: _lt = _prof("land_verdict", _lt)
 			if at > 0.15: host.burst(Vector3(x, y + 0.03, z), roundi(10 + minf(30, impact * 6)), surf, 0.8 + minf(1.5, impact * 0.25))
+			if prof != null: _lt = _prof("land_burst", _lt)
 			if at > 0.45 and impact < 5: flow_up()
 			host.on_landing(at, impact)
+			if prof != null: _vt = _prof("land_9_on_landing", _lt)
 		# ride roughness: the body's vertical acceleration vs the ground's under it (riding, not landing)
 		var gy_now := hrC + (hfC - hrC) * (BB_REAR / L)
 		if not air and not was_air and since_land > 0.6 and not is_nan(probe_vy) and not is_nan(probe_gy[1]):
@@ -3341,10 +3378,12 @@ func _danger(reason: String, sev: float, dt: float, t_build := -1.0) -> void:
 ## a crash this step: the first reason found is the one reported (later checks in the same step don't overwrite it)
 func _crash(reason: String) -> void:
 	if crash_pending == "":
+		var _ct := Time.get_ticks_usec() if prof != null else 0
 		crash_pending = reason
 		# (into the session log, so an F8 / crash report says why: v, climb, pitch vs the ground, which wheels were down,
 		# the legs, the body stick)
 		CrashLog.note("CRASH %s v=%.1f vy=%.1f pitch=%.2f ground=%.2f air=%s front_air=%s rear_air=%s legs=%.2f stick=%.2f man=%.2f armed=%s pw=%.2f" % [reason, v, vy, pitch, _g_pitch, air, front_air, rear_air, body_y - y, body_in_s, man_a, _man_armed, _man_pw])
+		if prof != null: _prof("crash_note", _ct)
 
 ## once a step, after every _danger: the biggest meter (risk) and a SAVED! when a real scare was fought off
 func _risk_settle(dt: float) -> void:

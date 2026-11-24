@@ -74,6 +74,7 @@ func _notification(what: int) -> void:
 
 
 func _ready() -> void:
+	_slam_pool.call_deferred()   # (players + the slam bank now, not on the first landing)
 	var gen := AudioStreamGenerator.new()
 	gen.mix_rate = RATE
 	gen.buffer_length = 0.12
@@ -161,7 +162,9 @@ var _slam_syn = null   # SlamSynth (C#): a fresh slam every landing, 4-8 ms; nul
 func _slam_pool() -> void:
 	if not _slam_pl.is_empty(): return
 	var ss = load("res://scripts/game/SlamSynth.cs")
-	if ss != null and ss.can_instantiate(): _slam_syn = ss.new()
+	if ss != null and ss.can_instantiate():
+		_slam_syn = ss.new()
+		_slam_syn.StartBank(SLAM_VARY, SLAM_PEAK)   # every kind of slam rendered ahead on .NET threads (SlamSynth.Take)
 	if _slam_syn == null:
 		for n in range(1, SLAM_CLIPS + 1):   # no C#: the recorded clips
 			var c = load("res://assets/audio/bike_slam_%d.ogg" % n)
@@ -179,6 +182,17 @@ func _slam_play(stream, db: float, pitch: float) -> void:
 	pl.volume_db = db
 	pl.pitch_scale = pitch
 	pl.play()
+
+## a slam from the pre-rendered bank (~0.05 ms: bytes wrapped into a WAV); rendered here only if the bank isn't ready yet (the
+## first ~0.3 s of a ride, 5-10 ms)
+func _slam_take(size: float, side: float, kind: int) -> AudioStreamWAV:
+	var b: PackedByteArray = _slam_syn.Take(size, side, kind)
+	if b.is_empty(): return _slam_wav(_slam_syn.Render(randi(), SLAM_VARY, SLAM_PEAK, size, side, kind))
+	var w := AudioStreamWAV.new()
+	w.format = AudioStreamWAV.FORMAT_16_BITS
+	w.mix_rate = 48000
+	w.data = b
+	return w
 
 func _slam_wav(x: PackedFloat32Array) -> AudioStreamWAV:
 	var data := PackedByteArray()
@@ -201,8 +215,7 @@ func landing(impact: float, yaw: float = 0.0) -> void:
 	var db := lerpf(SLAM_DB_SOFT, SLAM_DB_HARD, pow(k, 0.75))
 	if _slam_syn != null:
 		var side := clampf((yaw - 0.8) / 3.5, 0.0, 1.0)
-		var x: PackedFloat32Array = _slam_syn.Render(randi(), SLAM_VARY, SLAM_PEAK, k, side, 0)
-		_slam_play(_slam_wav(x), db, 1.0)
+		_slam_play(_slam_take(k, side, 0), db, 1.0)
 		return
 	if _slam_clips.is_empty(): return
 	var i := randi() % _slam_clips.size()
@@ -215,8 +228,7 @@ func landing_bad(sev: float) -> void:
 	_rec("landing_bad", [sev])
 	_slam_pool()
 	if _slam_syn == null: return
-	var x: PackedFloat32Array = _slam_syn.Render(randi(), SLAM_VARY, SLAM_PEAK, clampf(0.4 + 0.6 * sev, 0.0, 1.0), 0.0, 1)
-	_slam_play(_slam_wav(x), lerpf(-16.0, -6.0, clampf(sev, 0.0, 1.0)), 1.0)
+	_slam_play(_slam_take(clampf(0.4 + 0.6 * sev, 0.0, 1.0), 0.0, 1), lerpf(-16.0, -6.0, clampf(sev, 0.0, 1.0)), 1.0)
 
 func thud(power: float) -> void: _rec("thud", [power]); shots.append(["thud", 0.0, clampf(power * 0.5, 0.2, 1.0)])
 func crunch() -> void: _rec("crunch", []); shots.append(["crunch", 0.0, 0.8])

@@ -46,6 +46,7 @@ var _tile_prev := {}                   # MultiMesh -> [buffer last uploaded, its
 var _h_arr := PackedFloat32Array()     # the height window as floats (for the tiles' height range)
 var _tile_h := {}                      # MultiMesh -> {tile Vector2i: Vector2(min, max) ground height}, per window
 var probe := Env.s("BMX_GRASS_PROBE") != ""
+var _cs = null   # GrassPlaceCs (C#: the per-frame tile placement, ~10x cheaper) or null = the GDScript `_place`
 var _probe_t := 0.0
 
 # ---- trampled trail: where the tyres / a crashed body pressed the grass down. A window of TR x TR texels
@@ -69,6 +70,9 @@ func _init(t) -> void:
 	name = "GrassField"
 	process_priority = 1000   # after the camera has moved this frame
 	process_mode = Node.PROCESS_MODE_ALWAYS   # photo mode / pause: the camera still moves
+	if Env.s("BMX_GRASS_GD") == "":
+		var sc = load("res://scripts/world/GrassPlaceCs.cs") if ClassDB.class_exists("CSharpScript") else null
+		_cs = sc.new() if sc else null
 
 
 func _process(dt: float) -> void:
@@ -162,6 +166,7 @@ func _ready() -> void:
 	_tex_h = ImageTexture.create_from_image(_img_h)
 	_mat = ShaderMaterial.new()
 	_mat.shader = _shader
+	if Env.s("BMX_GRASS_OLD") != "": _mat.set_shader_parameter("look_v2", 0.0)   # tests: the grass look before 2026-11-24
 	_mat.set_shader_parameter("grass_col", _tex_c)
 	_mat.set_shader_parameter("grass_h", _tex_h)
 	_mat.set_shader_parameter("win_size", float(TEX))
@@ -309,6 +314,7 @@ func _refresh_window(cam: Vector3) -> void:
 	_tex_h.update(_img_h)
 	_h_arr = _img_h.get_data().to_float32_array()
 	_tile_h.clear()
+	if _cs != null: _cs.SetHeights(_h_arr, TEX, (_win_k.x - h) * CHUNK - CHUNK / 2, (_win_k.y - h) * CHUNK - CHUNK / 2, CHUNK / SEG)
 	# texel (0, 0) sits on the window's first grid point
 	_mat.set_shader_parameter("win_origin", Vector2((_win_k.x - h) * CHUNK - CHUNK / 2, (_win_k.y - h) * CHUNK - CHUNK / 2))
 	_mat.set_shader_parameter("texel", CHUNK / SEG)
@@ -335,14 +341,37 @@ func update(cam: Camera3D) -> void:
 	_mat.set_shader_parameter("ring_centre", rc)
 	var c3 := Vector3(rc.x, cp.y, rc.y)
 	var planes := cam.get_frustum()
-	var nn := _place(_near, c3, planes, _q.nt, 0.0, _q.nr + 1.0, 1.0, ground)
-	var nm := _place(_mid, c3, planes, _q.mt, _q.nr - 7.0, _q.mr + 1.0, 0.0, ground)
+	var nn: int
+	var nm: int
+	if _cs != null:
+		var pf := PackedFloat32Array()
+		for p in planes: pf.append_array([p.normal.x, p.normal.y, p.normal.z, p.d])
+		nn = _place_cs(0, _near, c3, pf, _q.nt, 0.0, _q.nr + 1.0, 1.0, ground)
+		nm = _place_cs(1, _mid, c3, pf, _q.mt, _q.nr - 7.0, _q.mr + 1.0, 0.0, ground)
+	else:
+		nn = _place(_near, c3, planes, _q.nt, 0.0, _q.nr + 1.0, 1.0, ground)
+		nm = _place(_mid, c3, planes, _q.mt, _q.nr - 7.0, _q.mr + 1.0, 0.0, ground)
 	if probe:
 		_probe_t += get_process_delta_time()
 		if _probe_t > 1.0:
 			_probe_t = 0.0
 			print("GRASS tiles near=%d mid=%d blades=%d" % [nn, nm,
 				nn * roundi(_q.nt / _q.ns) ** 2 + nm * roundi(_q.mt / _q.ms) ** 2])
+
+
+## the same as `_place`, in C# (GrassPlaceCs): the buffer only comes back when the visible tiles changed
+func _place_cs(k: int, mi: MultiMeshInstance3D, cp: Vector3, pf: PackedFloat32Array, tile: float, r0: float, r1: float, ring: float, ground: float) -> int:
+	var mm := mi.multimesh
+	var cap := (2 * (ceili(r1 / tile) + 1) + 1) ** 2
+	if mm.instance_count < cap:
+		mm.instance_count = cap
+	var c: int = _cs.Place(k, cp, pf, tile, r0, r1, ring, 0.0 if is_nan(ground) else ground, is_nan(ground))
+	if _cs.Changed(k) or mm.visible_instance_count != c:
+		var buf: PackedFloat32Array = _cs.Buf(k)
+		if buf.size() != mm.instance_count * 16: buf.resize(mm.instance_count * 16)
+		mm.buffer = buf
+		mm.visible_instance_count = c
+	return c
 
 
 ## puts the ring's tiles that reach r0..r1 (horizontal distance from the camera) and touch the view into its
