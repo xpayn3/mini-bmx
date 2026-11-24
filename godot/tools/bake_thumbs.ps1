@@ -2,7 +2,7 @@
 # so they ship with the game: a new player never waits for them. Pictures of their own changes are still made
 # on their machine and cached in user://cache/thumbs.
 #
-# Runs the game three times (ride setup menu, garage, rider room) with BMX_BAKE_THUMBS set, on an EMPTY user
+# Runs the game four times (ride setup menu, garage, rider room, shop) with BMX_BAKE_THUMBS set, on an EMPTY user
 # folder (APPDATA pointed at a temp dir), so it sees exactly what a fresh install sees, not your saves.
 # Re-run after bumping PartThumbs.THUMB_VER or changing how any pictured thing looks; steam/upload.ps1 runs it
 # before every export.
@@ -23,7 +23,7 @@ try {
 	$env:BMX_BAKE_THUMBS = $out
 	$env:BMX_OFFSCREEN = "1"
 	$ErrorActionPreference = "Continue"   # Godot's warnings on stderr are not failures
-	foreach ($pass in @(@("--bakethumbs"), @("--garage"), @("--rider"))) {
+	foreach ($pass in @(@("--bakethumbs"), @("--garage"), @("--rider"), @("--shop"))) {
 		Write-Host "bake pass: $pass"
 		& $Godot --path $game -- @pass 2>&1 | Select-String -Pattern "^BAKE|SCRIPT ERROR" | ForEach-Object { Write-Host "  $_" }
 		if ($LASTEXITCODE -ne 0) { Write-Warning "pass $pass exited with $LASTEXITCODE" }

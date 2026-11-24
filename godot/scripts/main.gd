@@ -29,7 +29,7 @@ func _ready() -> void:
 	if Env.s("BMX_LEVEL") != "": GameState.level = Env.s("BMX_LEVEL")   # tests: a test level (playground)
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--level="): GameState.level = a.get_slice("=", 1)
-	if "--garage" not in OS.get_cmdline_user_args() and "--rider" not in OS.get_cmdline_user_args():   # straight to the garage: don't build the world first
+	if "--garage" not in OS.get_cmdline_user_args() and "--rider" not in OS.get_cmdline_user_args() and "--shop" not in OS.get_cmdline_user_args():   # straight to the garage: don't build the world first
 		var plain := true   # only a plain launch (or a title screenshot) gets the title backdrop; tests ride the real world
 		for a in OS.get_cmdline_user_args():
 			if not a.begins_with("--shot="): plain = false
@@ -64,6 +64,7 @@ func _ready() -> void:
 		elif a.begins_with("--autotest"): _autotest(float(a.get_slice("=", 1)) if "=" in a else 10.0)
 		elif a == "--garage": _open_garage()
 		elif a == "--rider": _open_garage("rider")
+		elif a == "--shop": _open_garage("shop")
 		elif a.begins_with("--shot="): _shot(a.get_slice("=", 1))
 		elif a.begins_with("--bench="): _bench(a.get_slice("=", 1))
 		elif a.begins_with("--showcase="): _showcase(a.get_slice("=", 1))
@@ -197,6 +198,7 @@ func _free_title_keep() -> void:
 func _exit_tree() -> void:
 	LensScene.join()
 	_free_title_keep()
+	Garage.free_kept(true)   # the garage's world out of the door, kept between visits
 
 func restart_ride() -> void:
 	fade.modulate.a = 1.0
@@ -604,6 +606,7 @@ func _menu_page_main() -> void:
 	# LEVELS: test levels (DEMO is off the title menu: the in-game panel switches the AI rider on; _start_demo is kept)
 	vb.add_child(_menu_button("LEVELS", "", _menu_page_levels, false, true))
 	vb.add_child(_menu_button("REPLAYS", "", _menu_page_replays, false, true))
+	vb.add_child(_menu_button("SHOP", "", _open_garage.bind("shop"), false, true))
 	vb.add_child(_menu_button("GARAGE", "", _open_garage, false, true))
 	vb.add_child(_menu_button("RIDER", "", _open_garage.bind("rider"), false, true))
 	vb.add_child(UITheme.spacer(Tokens.S2))
@@ -1535,8 +1538,9 @@ func _menu_button(text: String, sub: String, cb: Callable, primary := false, cen
 var garage: Garage
 
 ## mode "bike" = the garage, "rider" = the rider room (same room: position on the rollers + kit)
+var _garage_reopened := false
 func _open_garage(mode := "bike") -> void:
-	Steam.presence("In the garage" if mode == "bike" else "Setting up the rider")
+	Steam.presence({"bike": "In the garage", "shop": "In the bike shop"}.get(mode, "Setting up the rider"))
 	if menu: menu.queue_free(); menu = null
 	fade.modulate.a = 1.0
 	var t0 := Time.get_ticks_usec()
@@ -1555,6 +1559,12 @@ func _open_garage(mode := "bike") -> void:
 	if Env.s("BMX_GARAGE_PROBE") != "": print("GARAGE open total ms=%.1f" % ((Time.get_ticks_usec() - t0) / 1000.0))
 	garage.closed.connect(_close_garage)
 	create_tween().set_ignore_time_scale().tween_property(fade, "modulate:a", 0.0, 0.5)
+	if Env.s("BMX_GARAGE_REOPEN") != "" and not _garage_reopened:   # tests: back to the menu and in again (the kept outside)
+		_garage_reopened = true
+		await get_tree().create_timer(float(Env.s("BMX_GARAGE_REOPEN"))).timeout
+		await _close_garage(false)
+		await get_tree().create_timer(1.0).timeout
+		_open_garage(mode)
 
 func _close_garage(ride: bool) -> void:
 	fade.modulate.a = 1.0

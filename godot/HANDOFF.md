@@ -1576,6 +1576,69 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   part keeps its tuned colour / roughness; rotors get it as grinding rings. Every 3D texture import must have mipmaps (rubber / goggles
   had none); logo PNGs are 4x upscaled, text decals bake at 2048 px, carbon weave 512 px.
 
+### HQ still + bike edges (2026-11-24)
+- **HQ still** (`fx/hq_still.gd` + `fx/hq_accum_effect.gd` + `shaders/hq_accum.glsl`): in the garage showroom (bike mode)
+  and photo mode, once the camera rests (garage: 1 s without camera input, the handheld sway then holds still), every
+  frame is rendered again shifted by a fraction of a pixel (tent filter ~1.6 px, via a frustum projection equal to
+  the camera's) with each shadow-casting light wobbled a little, and averaged on the GPU before glow / tonemap
+  (128 samples, ~1 s in the garage). TAA is off while it samples. Any camera / light move, or `hq.reset()` (garage
+  part / paint change), starts again. Photo mode's shot waits for it. Costs nothing while moving. Tests:
+  `BMX_HQ=0` off, `BMX_HQ_SAMPLES=n`, `BMX_HQ_PROBE=1`.
+- **Edges**: `AoBake.Edges` bakes sharp convex edges per vertex beside the AO (bike_ao.gd, cached, VER 5) into
+  COLOR.a as 1 - edge; the car paint bends the normal there towards the eye (`bevel` 0.35: a rounded edge's
+  catch-light). Paint chips (`wear`) are in the shader but OFF: the user wants every bike mint; for a used-bike
+  look later. Tests `BMX_BEVEL=0`, `BMX_WEAR=0.6`.
+- **Stanchions are never black** (user): always a coating, `BikeBuild.STANCHION_COATS` silver chrome / gold / bronze
+  (any colour snaps to the nearest, black -> bronze), the whole tube from the top crown to the lowers like real DH
+  forks (user, 2026-11-24; a version with only the sliding part coated was tried and dropped).
+- **Stickers wrap round tubes** (`BikeDecals._wrap_uvs`): flat projection stretched a sticker's edges ~3x on a
+  3.3 cm tube; the patch's tube is fitted (centre + radius from points + normals) and the sticker is laid out by
+  distance round it, like vinyl (fitted twice: the points off the first circle, a fork's brake mount / arch, are dropped). Flat where the fit fails / r > 25 cm. `BMX_DECAL_FLAT=1` = old, `BMX_DECAL_PROBE=1`.
+- **Garage outside, cheaper** (`Garage._build_outside`): only the chunks seen through the door are built (a 70 deg
+  wedge out of the door, `Terrain.stream_filter`): 26 of 49, near build 327 -> 223 ms (`BMX_GARAGE_ALL_CHUNKS=1` =
+  all). And it is kept between visits: the garage parks it out of the tree when freed (static `_kept`, per seed),
+  the next garage of the session takes it back (outside ~2 ms instead of ~590, garage open 2.0 -> 1.2 s); main
+  frees it on quit (`Garage.free_kept(true)`). `BMX_GARAGE_NO_KEEP=1` = rebuild every time, test
+  `BMX_GARAGE_REOPEN=secs` (back to the menu after secs and into the garage again).
+
+- **Studio set for the shop** (`garage/studio_set.gd`, `StudioSet`, not used anywhere yet): cyclorama, softboxes seen
+  only in reflections (`PANEL_LAYER`, keep it off the camera), strip lights, top scrim, backdrop glow, reflection
+  probe, its own `env`. User decision: the garage stays the personal workshop for owned bikes; a future SHOP shows
+  bikes for sale in this showroom look (with the HQ still). **The shop = the showroom store**: everything is bought
+  there, whole bikes down to single components (forks, shocks, wheels, tyres, bars, brakes...), each shown in the studio.
+
+- **Prices = today's market** (`core/shop.gd`, 2026-11-24, user: "top bikes cost 25k like a car"): frames by class
+  $1.6k / 2.9k / 4.6k / 9.5k, plus a `kit` per class for the parts with no card (drivetrain, brakes, cockpit:
+  $1.5k / 2.6k / 4k / 7k), forks $1.4-2.8k, rear shocks priced now ($450-1,350), built wheels alloy $300 /
+  carbon $1,500 each, bars alloy $120 / carbon $220. Showroom bikes come out $6.3k (Midnight Owl) .. $23.2k
+  (Rusty Nail); a fully maxed build goes past $25k.
+
+### Shop (2026-11-24, user: "a major part of our game: buying stuff and customizing it")
+- Title menu SHOP / `--shop`: the garage scene in mode "shop" (`Garage.mode`), the StudioSet instead of the room,
+  `garage/store_page.gd` (`StorePage`) runs it. Tabs (`Catalog.TABS`): BIKES, FRAMES, SUSPENSION, WHEELS, COCKPIT,
+  BRAKES, DRIVE, SEAT, LIGHTS; cards worst -> best (`Catalog.TIER_NAMES` BUDGET / SPORT / EXPERT / PRO / FACTORY,
+  price tag, green OWNED badge); the left card = the product (tier, spec, what it does on the trail, price, your
+  cash -> after, BUY / OWNED / NEED $x MORE, FIT TO MY <BIKE> for owned parts). Bikes / framesets roll in onto the
+  stand; parts are shown fitted to YOUR bike (its saved build) with the camera on them (`StorePage.VIEW`). Looking
+  never saves anything; the garage keeps `GameState.bike_id` (the shop's frame on show is `Garage._shop_frame`).
+- `core/catalog.gd` (`Catalog`): every product. Kinds with several models already (complete bikes = editions,
+  frames, forks, shocks, rims as built wheelsets, tyres as a pair, bars, cassettes, lights) sell those, tiers from
+  the existing part scores / price rank. The small parts (rotors, calipers, levers, stems, saddles, posts, pedals)
+  are `VARIANTS`: 5 brands / tiers each on the 2-3 existing looks; `build.sku[kind]` = the product, and
+  `Catalog.ride_perf` (via `BikeBuild.ride_mods`) gives a tier step a few % on brakeGrip / steerRate / popPower.
+- Wallet: `GameState.money` (new save `STARTING_MONEY` $15,000), `GameState.owned` ("kind:id"), save.cfg [shop]; a
+  new player owns the stock RUNOUT DH's parts + `Catalog.STARTER`. Nothing earns money yet; `Shop.UNLOCK_ALL` still
+  lets the garage use every part. Test `BMX_MONEY=n`.
+- Buying = a reveal (`garage/store_purchase.gd`, `StorePurchase`), not a dialog / confetti (user): the UI slides
+  away, cinema bars, the studio goes dark and its lamps come back one by one with a fluorescent flicker
+  (`StudioSet.lamps` / `set_lamp`), the camera pushes in, the name stamps on letter by letter (white-hot -> yellow,
+  a glint sweeps across), stars pop in, PAID + cash ticking down, then FIT TO MY BIKE / CONTINUE. Silent until the
+  user gives a recording. Studio: no bloom (it hazed the clearcoat white), softbox panels glow ~2x.
+- Tests: `--shop`, `BMX_GARAGE_TAB=<store tab>`, `BMX_SHOP_PICK=<kind:id>`, `BMX_SHOP_BUY=1` (buys the pick 2 s in),
+  `BMX_SHOP_POP_AT=secs` (freezes the reveal), `BMX_SHOP_PROBE=1`.
+- Not done: earning money, the garage only offering owned parts (flip `Shop.UNLOCK_ALL`), owned complete bikes as
+  separate garage bikes, parts' own 3D looks for every variant (they share 2-3 looks), a purchase sound.
+
 ### Effects
 - **Dust = a real 3D smoke simulation** (`fx/smoke_sim.gd` + compute shaders `shaders/smoke/*.glsl`): a
   128×32×128 grid (0.2 m voxels, 25.6×6.4×25.6 m) of air on the GPU that follows the rider (moves in
@@ -2543,6 +2606,14 @@ and other GPU apps open; uncapped ~430 fps on an RTX 3090 after the C# terrain.
   `Co-Authored-By` line the session gives.
 - The user writes short, often typo'd messages (e.g. "merhe" = merge) — read intent, act, show screenshots.
 - Prefer doing and verifying (screenshots, autotests) over asking the user to check.
+- **Bike parts are individual pieces; merged only for riding** (user, 2026-11-24). In the garage and the shop every
+  part (frame, rear end, linkage, shock, fork crowns / stanchions / lowers, stem, bar, grips, levers, calipers,
+  rotors, cranks, pedals, saddle, post, chainring, cassette...) is its own node + mesh: swapped, shown alone on a
+  shop card, painted and priced on its own. Only a ride merges each rigid group (what moves together: frame, rear
+  end, steer, each wheel...) into a few meshes for draw calls (`MeshMerge`, as the action cams already are). The
+  current glbs still bake many parts into one mesh (dh.glb's steer = stem + bars + grips + levers + crowns +
+  stanchions; the seatstay holds the rear caliper), which is why the shop cuts stock parts out of meshes
+  (`PartThumbs.make_part_alone`): the user will deliver properly split models; new models must come split.
 - Riding / jump code: test it on the test playground (LEVELS, `BMX_LEVEL=playground`, section 5) before the trail; the user
   built it for exactly that.
 

@@ -362,7 +362,7 @@ static var _bar_stock: ArrayMesh = null
 ## (models, materials, decals, this studio), then re-run the bake (tools/bake_thumbs.ps1) so the shipped
 ## pictures match. The game version is not in the keys: the shipped set stays valid until THUMB_VER moves.
 const DISK_DIR := "user://cache/thumbs"
-const THUMB_VER := 6
+const THUMB_VER := 7
 static func bike_key(id: String) -> String:
 	var sig := var_to_str([THUMB_VER, SIZE, GameState.bike_config_for(id)])
 	return "bike|%s|%s" % [id, sig.md5_text()]
@@ -745,3 +745,220 @@ static func make_head(look: Dictionary, below := 0.0) -> Node3D:
 
 const STAND_POSE := {"hipX": 0.17, "hipY": 0.16, "lean": -0.66, "crouch": 0.0, "standPedal": 0.0, "sway": 0.0,
 	"elbowsOut": -0.2, "kneesOut": 0.0, "stance": 0.0, "headTilt": 0.08, "headTurn": 0.0, "hipSway": 0.0}
+
+
+# ---------------------------------------------------------------- parts alone (the SHOP's cards)
+## One part on its own, as it comes out of the box: kind "rotor" "caliper" "levers" "stem" "light" "post" "shock"
+## "frame", look = which model (the Catalog look / model id). The models' own parts come from their glbs
+## (assets/forks/<kind>_<id>.glb); the stock bike's are cut out of its meshes: the rear caliper = the seatstay less
+## forks/dh_seatstay.glb, the levers = the steer less forks/dh_steer_nl.glb, the stem = the steer triangles that
+## forks/stem_tues.glb lists as dh's stem; the rotor = the front one split off the stock wheel. A frameset = the frame
+## built with the stock parts, everything but frame / rear end / linkage / shock see-through.
+static func make_part_alone(kind: String, look: String, extra := "") -> Node3D:
+	match kind:
+		"rotor":
+			if look == "stock":
+				var rig := BikeRig.new()
+				rig.load_bike(GameState.bike_config_for("dh"), BikeBuild.default_build())
+				rig.set_meta("focus", _keep_only.bind(rig, func(mi: MeshInstance3D):
+					for ro in rig.rotors:
+						if ro.mesh_instance == mi and mi.get_parent() == rig.wheel_f: return true
+					return false))
+				return rig
+			return _glb_part("res://assets/forks/rotor_%s.glb" % look, "rotor_front")
+		"caliper":
+			if look == "stock": return _alone(_tidy(_cut_mesh("res://assets/dh.glb", "seatstay", "res://assets/forks/dh_seatstay.glb", "seatstay"), 0.06))
+			return _glb_part("res://assets/forks/caliper_%s.glb" % look, "")
+		"levers":   # one lever (the right): a pair 80 cm apart came out tiny
+			var lm := _cut_mesh("res://assets/dh.glb", "steer", "res://assets/forks/dh_steer_nl.glb", "steer") if look == "stock" 				else _glb_mesh("res://assets/forks/levers_%s.glb" % look, "")
+			return _alone(_tidy(_one_side(lm, 1.0), 0.09))
+		"stem":
+			if look == "stock":
+				var ex: Array = _extras("res://assets/forks/stem_tues.glb", "stemroot")
+				var src := _glb_mesh("res://assets/dh.glb", "steer")
+				if ex.is_empty() or src == null: return Node3D.new()
+				var cells := BikeRig._mid_set((ex[1] as Dictionary).cut)
+				(ex[0] as Node).free()
+				return _alone(_tri_filter(src, cells, true))
+			return _glb_part("res://assets/forks/stem_%s.glb" % look, "stem")
+		"light":
+			var d := BikeLight.build(look, 0.0175)
+			if d.is_empty():   # "no lights": a word on the card
+				var r := Node3D.new()
+				var l := Label3D.new(); l.text = "NO LAMP"; l.font_size = 96; l.pixel_size = 0.0006
+				l.modulate = Color(0.45, 0.48, 0.55); l.outline_size = 0
+				r.add_child(l)
+				return r
+			var root := Node3D.new()
+			root.add_child(d.node)
+			return root
+		"post":
+			return _seat_post(look == "dropper", extra)
+		"shock":
+			var n: Node3D = load("res://assets/dh.glb").instantiate()
+			var air := str(SuspSetup.SHOCK_MODELS.get(look, {}).get("spring", "coil")) == "air"
+			n.set_meta("focus", _keep_only.bind(n, func(mi: MeshInstance3D):
+				return mi.name in ["shock_body", "shock_shaft"] or (mi.name == "shock_spring" and not air)))
+			return n
+		"frame":
+			var rig := BikeRig.new()
+			var fb := BikeBuild.default_build()
+			fb.paint = BikeBuild.load_build(look).paint
+			rig.load_bike(GameState.bike_config_for(look), fb)
+			var parts := ["frame", "swing", "seatstay", "rocker", "shock_body", "shock_spring", "shock_shaft"]
+			var keep := func(mi: MeshInstance3D):
+				var p: Node = mi
+				while p != null and p != rig:   # (the stickers on the frame are its children)
+					if p.name in parts: return true
+					p = p.get_parent()
+				return false
+			_keep_only(rig, keep)   # now (as the paint pictures do): the rig must not rebuild its wheels over it later
+			rig.set_meta("focus", _keep_only.bind(rig, keep))
+			return rig
+	return Node3D.new()
+
+## everything under root but what `keep` picks goes see-through (never hidden: a kept part may be a child);
+## returns the kept parts' box (run as the "focus" callback, once the node is in the picture's world)
+static func _keep_only(root: Node3D, keep: Callable) -> AABB:
+	var hide := StandardMaterial3D.new()
+	hide.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	hide.albedo_color = Color(0, 0, 0, 0)
+	var box := AABB()
+	var first := true
+	for m in root.find_children("*", "MeshInstance3D", true, false):
+		var mi := m as MeshInstance3D
+		if mi.mesh == null: continue
+		if not keep.call(mi):
+			mi.material_override = hide
+			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			continue
+		var bb := mi.global_transform * mi.get_aabb()
+		box = bb if first else box.merge(bb)
+		first = false
+	return box
+
+static func _glb_mesh(path: String, node: String) -> Mesh:
+	if not ResourceLoader.exists(path): return null
+	var n: Node = load(path).instantiate()
+	var mi := (n.find_child(node, true, false) if node != "" else null) as MeshInstance3D
+	if mi == null: mi = BikeRig._first_mesh(n)
+	var m: Mesh = mi.mesh if mi else null
+	n.free()
+	return m
+
+static func _extras(path: String, root_name: String) -> Array:
+	if not ResourceLoader.exists(path): return []
+	var n: Node = load(path).instantiate()
+	var root := n if n.name == root_name else n.find_child(root_name, true, false)
+	if root == null or not root.has_meta("extras"):
+		n.free(); return []
+	return [n, root.get_meta("extras")]
+
+static func _alone(m: Mesh) -> Node3D:
+	var root := Node3D.new()
+	var mi := MeshInstance3D.new()
+	mi.mesh = m
+	root.add_child(mi)
+	return root
+
+static func _glb_part(path: String, node: String) -> Node3D:
+	var m := _glb_mesh(path, node)
+	return _alone(m) if m else Node3D.new()
+
+## the triangles of `full` (keep_in: whose middles are in cells / else: whose middles are not)
+static func _tri_filter(full: Mesh, cells: Dictionary, keep_in: bool) -> ArrayMesh:
+	var am := ArrayMesh.new()
+	for si in full.get_surface_count():
+		var arr := full.surface_get_arrays(si)
+		var P: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+		var I: PackedInt32Array = arr[Mesh.ARRAY_INDEX] if arr[Mesh.ARRAY_INDEX] != null else PackedInt32Array(range(P.size()))
+		var keep := PackedInt32Array()
+		for t in range(0, I.size(), 3):
+			var mid := (P[I[t]] + P[I[t + 1]] + P[I[t + 2]]) / 3.0
+			if BikeRig._mid_has(cells, mid) == keep_in: keep.append_array(PackedInt32Array([I[t], I[t + 1], I[t + 2]]))
+		if keep.is_empty(): continue
+		arr[Mesh.ARRAY_INDEX] = keep
+		am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+		am.surface_set_material(am.get_surface_count() - 1, full.surface_get_material(si))
+	return am
+
+## a part cut out of a mesh: the triangles of `path`'s `node` that the cut-down copy (`less_path`'s `less_node`) doesn't have
+static func _cut_mesh(path: String, node: String, less_path: String, less_node: String) -> Mesh:
+	var full := _glb_mesh(path, node)
+	var less := _glb_mesh(less_path, less_node)
+	if full == null or less == null: return null
+	var flat := []
+	for si in less.get_surface_count():
+		var arr := less.surface_get_arrays(si)
+		var P: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+		var I: PackedInt32Array = arr[Mesh.ARRAY_INDEX] if arr[Mesh.ARRAY_INDEX] != null else PackedInt32Array(range(P.size()))
+		for t in range(0, I.size(), 3):
+			var m := (P[I[t]] + P[I[t + 1]] + P[I[t + 2]]) / 3.0
+			flat.append_array([m.x, m.y, m.z])
+	return _tri_filter(full, BikeRig._mid_set(flat), false)
+
+## a mesh's triangles by a test on their middle
+static func _tri_where(src: Mesh, test: Callable) -> ArrayMesh:
+	var am := ArrayMesh.new()
+	if src == null: return am
+	for si in src.get_surface_count():
+		var arr := src.surface_get_arrays(si)
+		var P: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+		var I: PackedInt32Array = arr[Mesh.ARRAY_INDEX] if arr[Mesh.ARRAY_INDEX] != null else PackedInt32Array(range(P.size()))
+		var keep := PackedInt32Array()
+		for t in range(0, I.size(), 3):
+			if test.call((P[I[t]] + P[I[t + 1]] + P[I[t + 2]]) / 3.0): keep.append_array(PackedInt32Array([I[t], I[t + 1], I[t + 2]]))
+		if keep.is_empty(): continue
+		arr[Mesh.ARRAY_INDEX] = keep
+		am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+		am.surface_set_material(am.get_surface_count() - 1, src.surface_get_material(si))
+	return am
+
+## the triangles on one side of the bike (z > 0 or < 0)
+static func _one_side(src: Mesh, sgn: float) -> ArrayMesh:
+	return _tri_where(src, func(m: Vector3): return m.z * sgn > 0.0)
+
+## only the triangles within r of the part's middle (the median of its triangle middles): a cut can leave strays far off
+static func _tidy(src: Mesh, r: float) -> ArrayMesh:
+	if src == null: return ArrayMesh.new()
+	var xs := []; var ys := []; var zs := []
+	for si in src.get_surface_count():
+		var arr := src.surface_get_arrays(si)
+		var P: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+		var I: PackedInt32Array = arr[Mesh.ARRAY_INDEX] if arr[Mesh.ARRAY_INDEX] != null else PackedInt32Array(range(P.size()))
+		for t in range(0, I.size(), 3):
+			var m := (P[I[t]] + P[I[t + 1]] + P[I[t + 2]]) / 3.0
+			xs.append(m.x); ys.append(m.y); zs.append(m.z)
+	if xs.is_empty(): return src as ArrayMesh
+	xs.sort(); ys.sort(); zs.sort()
+	var c := Vector3(xs[xs.size() / 2], ys[ys.size() / 2], zs[zs.size() / 2])
+	return _tri_where(src, func(m: Vector3): return m.distance_to(c) < r)
+
+## a seat post on its own (the frame's is part of its mesh): 31.6 mm tube, saddle clamp on top; a dropper has the
+## wider upper, its collar seal and the remote cable out of the bottom
+static func _seat_post(dropper: bool, coat := "") -> Node3D:
+	var root := Node3D.new()
+	var black := StandardMaterial3D.new(); black.albedo_color = Color(0.03, 0.03, 0.035); black.metallic = 0.6; black.roughness = 0.35
+	var shiny := StandardMaterial3D.new(); shiny.albedo_color = Color(0.78, 0.6, 0.25) if coat == "gold" else Color(0.08, 0.08, 0.09)
+	shiny.metallic = 0.95; shiny.roughness = 0.18
+	var rubber := StandardMaterial3D.new(); rubber.albedo_color = Color(0.02, 0.02, 0.02); rubber.roughness = 0.85
+	var tube := func(r: float, h: float, y: float, m: Material) -> void:
+		var c := CylinderMesh.new(); c.top_radius = r; c.bottom_radius = r; c.height = h; c.radial_segments = 32
+		var mi := MeshInstance3D.new(); mi.mesh = c; mi.material_override = m; mi.position.y = y
+		root.add_child(mi)
+	if dropper:
+		tube.call(0.0158, 0.22, 0.11, black)     # lower (in the frame)
+		tube.call(0.0172, 0.018, 0.229, rubber)  # collar seal
+		tube.call(0.0148, 0.15, 0.31, shiny)     # the stanchion that drops
+		var cable := CylinderMesh.new(); cable.top_radius = 0.0025; cable.bottom_radius = 0.0025; cable.height = 0.12
+		var ci := MeshInstance3D.new(); ci.mesh = cable; ci.material_override = rubber
+		ci.position = Vector3(0.012, -0.05, 0); ci.rotation.z = 0.5
+		root.add_child(ci)
+	else:
+		tube.call(0.0158, 0.34, 0.17, black)
+	var head := BoxMesh.new(); head.size = Vector3(0.07, 0.022, 0.034)
+	var hi := MeshInstance3D.new(); hi.mesh = head; hi.material_override = black
+	hi.position.y = (0.395 if dropper else 0.35)
+	root.add_child(hi)
+	root.rotation.z = deg_to_rad(-16.0)   # leaning back like on a bike
+	return root

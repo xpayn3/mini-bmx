@@ -498,7 +498,13 @@ func colliders_near(x: float, z: float) -> Array:
 # ======================================================================
 ## every chunk round the last update_stream point is built (nothing left to stream there)
 func stream_complete() -> bool:
-	return _jobs.is_empty() and chunks.size() >= (2 * RADIUS + 1) * (2 * RADIUS + 1)
+	if not stream_filter.is_valid():
+		return _jobs.is_empty() and chunks.size() >= (2 * RADIUS + 1) * (2 * RADIUS + 1)
+	return _jobs.is_empty() and _missing(WorldRng.jround(_focus.x / SIZE), WorldRng.jround(_focus.y / SIZE)).is_empty()
+
+## Optional: which chunks to build at all (Vector2i chunk key -> bool). The garage's world out of the door only
+## wants the ones that can be seen through it. Empty = all within RADIUS (a ride).
+var stream_filter := Callable()
 
 
 func _max_jobs() -> int:
@@ -655,7 +661,7 @@ func _missing(ccx: int, ccz: int) -> Array:
 	for dz in range(-RADIUS, RADIUS + 1):
 		for dx in range(-RADIUS, RADIUS + 1):
 			var k := Vector2i(ccx + dx, ccz + dz)
-			if not chunks.has(k):
+			if not chunks.has(k) and (not stream_filter.is_valid() or stream_filter.call(k)):
 				out.append(k)
 	out.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
 		return (a.x - ccx) * (a.x - ccx) + (a.y - ccz) * (a.y - ccz) < (b.x - ccx) * (b.x - ccx) + (b.y - ccz) * (b.y - ccz))
@@ -671,7 +677,7 @@ func _dispatch_missing(ccx: int, ccz: int) -> void:
 	for dz in range(-RADIUS, RADIUS + 1):
 		for dx in range(-RADIUS, RADIUS + 1):
 			var k := Vector2i(ccx + dx, ccz + dz)
-			if not chunks.has(k) and not _jobs.has(k):
+			if not chunks.has(k) and not _jobs.has(k) and (not stream_filter.is_valid() or stream_filter.call(k)):
 				any = true
 				break
 		if any: break

@@ -23,6 +23,13 @@ uniform float flake_rough = 0.12;    // the flakes are tiny mirrors
 uniform vec4 color2 : source_color = vec4(1.0, 0.7, 0.0, 1.0);   // pearl: the colour seen at grazing angles
 uniform float flip : hint_range(0.0, 1.0) = 0.0;
 uniform float deep : hint_range(0.0, 1.0) = 0.0;                    // candy: richer, darker toward the edges
+// Edges (baked per vertex by bike/bike_ao.gd into COLOR.a as 1 - edge): a real part's outside edges are
+// rounded, so they turn towards every light and catch a thin highlight where a hard model edge goes dark;
+// `bevel` bends the normal there towards the eye.
+// `wear` (0 mint .. 1 thrashed) chips the paint off the sharpest edges first: bare alloy with a ring of pale
+// primer round it. Kept for later (a used-bike look): nothing sets it yet, every bike is mint (0 = no cost).
+uniform float bevel : hint_range(0.0, 1.0) = 0.15;
+uniform float wear : hint_range(0.0, 1.0) = 0.0;
 
 // Livery: a second colour laid over the paint in a pattern. The pattern lives in the bike's own frame
 // (instance uniforms: where this mesh sits in the model, and the size of the whole frame), so the front
@@ -130,7 +137,8 @@ void fragment() {
 	float kb = 0.5 * ka;
 	vec3 tilt = mix(fa.xyz * fa.w * ka, fb.xyz * fb.w * kb, t);
 	float cover = mix(fa.w * ka, fb.w * kb, t);       // how much of this pixel is a resolved mirror flake
-	vec3 n0 = NORMAL;
+	float edge = 1.0 - COLOR.a;
+	vec3 n0 = normalize(mix(NORMAL, VIEW, edge * bevel));
 	vec3 n = normalize(n0 + tilt * sparkle);
 	NORMAL = n;
 	// the flakes that can't be seen one by one scatter the base layer's highlight
@@ -156,6 +164,21 @@ void fragment() {
 	ROUGHNESS = mix(min(base_rough, 1.0), flake_rough, flake_k);
 	CLEARCOAT = clearcoat;
 	CLEARCOAT_ROUGHNESS = clearcoat_roughness;
+	if (wear > 0.001 && edge > 0.01) {
+		vec3 wp = v_flake_p;
+		float wn = lv_noise(wp * 140.0) * 0.6 + lv_noise(wp * 430.0 + 5.3) * 0.4;
+		float t = edge * (0.3 + wn);                       // up to ~1.3 on a crisp edge
+		float th = 1.35 - wear * 1.1;
+		float aa = max(fwidth(t), 0.01);
+		float chip = smoothstep(th, th + aa, t);
+		float primer = smoothstep(th - 0.08, th - 0.08 + aa, t) - chip;
+		vec3 alloy = vec3(0.62, 0.62, 0.64);
+		ALBEDO = mix(mix(ALBEDO, vec3(0.78, 0.77, 0.74), primer), alloy, chip);
+		METALLIC = mix(mix(METALLIC, 0.0, primer), 1.0, chip);
+		ROUGHNESS = mix(mix(ROUGHNESS, 0.7, primer), 0.38, chip);
+		CLEARCOAT *= 1.0 - max(chip, primer);
+		CLEARCOAT_ROUGHNESS = mix(CLEARCOAT_ROUGHNESS, 0.35, clamp(edge * wear * 1.5, 0.0, 1.0));
+	}
 }
 """
 
@@ -232,6 +255,8 @@ static func car_paint(mat: Material = null, opts: Dictionary = {}) -> ShaderMate
 	m.set_shader_parameter("metallic", float(opts.get("metallic", 0.55)))
 	m.set_shader_parameter("roughness", float(opts.get("roughness", 0.34)))
 	m.set_shader_parameter("clearcoat_roughness", float(opts.get("clearcoat_roughness", 0.03)))
+	if Env.s("BMX_BEVEL") != "": m.set_shader_parameter("bevel", float(Env.s("BMX_BEVEL")))   # tests: 0 = hard edges
+	if Env.s("BMX_WEAR") != "": m.set_shader_parameter("wear", float(Env.s("BMX_WEAR")))      # tests: the parked chip look
 	return m
 
 

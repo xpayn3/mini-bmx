@@ -78,6 +78,7 @@ var _light_dirty := true
 var _busy := false
 var _base := {}               # the light's exposure / saturation / contrast / brightness before the look sliders
 var _saved_dof := {}
+var hq: HqStill = null        # HQ still: once the camera rests, jittered frames are averaged into a clean picture
 
 # UI
 var _ui: Control
@@ -133,10 +134,18 @@ func open() -> void:
 	_apply_all()
 	_set_ui_hidden(false)
 	_status.text = "Saved photos go to the screenshots folder"
+	hq = HqStill.new()
+	hq.cam = cam
+	hq.show_badge = true
+	add_child(hq)
 	_test_hooks()
 
 func close() -> void:
 	if not active: return
+	if hq:
+		hq.queue_free()   # (_exit_tree puts the camera, lights and TAA back)
+		remove_child(hq)
+		hq = null
 	_set_edit(false)
 	active = false
 	visible = false
@@ -423,6 +432,12 @@ func capture() -> void:
 	_busy = true
 	var was_hidden := _ui_hidden
 	_ui.visible = false
+	if hq: hq.badge_hidden = true
+	if hq and hq.enabled and not hq.done():   # the HQ still is building: wait for it (it starts once the camera rests)
+		_status.text = "Rendering..."
+		var t0 := Time.get_ticks_msec()
+		while hq and not hq.done() and Time.get_ticks_msec() - t0 < 20000:
+			await get_tree().process_frame
 	await RenderingServer.frame_post_draw
 	await RenderingServer.frame_post_draw
 	var img := get_viewport().get_texture().get_image()
@@ -444,6 +459,7 @@ func capture() -> void:
 	if err == OK: Steam.event("PHOTO")
 	print("PHOTO ", ProjectSettings.globalize_path(p), " ", img.get_width(), "x", img.get_height(), " err=", err)
 	_ui.visible = true
+	if hq: hq.badge_hidden = false
 	_set_ui_hidden(was_hidden)
 	_status.text = ("Saved %s" % p.get_file()) if err == OK else "Couldn't save the photo"
 	# shutter flash
@@ -466,6 +482,7 @@ func _set_value(k: String, v: float) -> void:
 func _changed(k: String) -> void:
 	if k in ["time", "sun_turn", "sun", "haze"]: _light_dirty = true
 	_apply_all()
+	if hq and k in ["time", "sun_turn", "sun", "haze", "show_rider", "show_bike"]: hq.reset()   # the 3D changed (the look / focus act after the average)
 
 func _show_value(k: String) -> void:
 	var row: Dictionary = _rows.get(k, {})
