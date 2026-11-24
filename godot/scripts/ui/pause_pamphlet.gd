@@ -40,12 +40,8 @@ func _ready() -> void:
 	open_t = 0.7
 	close_t = 0.3
 	close_actions = [&"pause", &"ui_cancel"]
-	_font = SystemFont.new()
-	_font.font_names = PackedStringArray(["Bahnschrift", "Arial Narrow", "Segoe UI", "Arial"])
-	_font.font_weight = 500
-	_font_b = SystemFont.new()
-	_font_b.font_names = _font.font_names
-	_font_b.font_weight = 800
+	_font = UITheme.display_font(700)
+	_font_b = UITheme.display_font(900)
 	back_col = 1                                    # the middle panel's back faces out behind: the tips
 	setup(Vector2i(CW * 3, CH), Vector2i(CW, CH))   # inside spread + the cover strip under it (cover, back)
 	_inside = Control.new()                         # the inside: a menu printed across the three panels
@@ -81,7 +77,7 @@ func add_item(text: String, cb: Callable) -> Button:
 	b.custom_minimum_size = Vector2(0, 46)   # tight rows: nine lines fit the list
 	b.clip_text = true
 	b.add_theme_font_override("font", _font_b)
-	b.add_theme_font_size_override("font_size", 30)
+	b.add_theme_font_size_override("font_size", 22)
 	b.add_theme_color_override("font_color", INK)
 	b.add_theme_color_override("font_hover_color", INK)
 	b.add_theme_color_override("font_focus_color", INK)
@@ -251,10 +247,7 @@ class TipsBack extends Control:
 	var _rng := RandomNumberGenerator.new()
 
 	func _init() -> void:
-		var f := SystemFont.new()
-		f.font_names = PackedStringArray(["Ink Free", "Segoe Print", "Comic Sans MS", "Bahnschrift"])
-		f.font_weight = 600
-		_hand = f
+		_hand = UITheme.hand_font()
 
 	func _process(_dt: float) -> void:
 		if _pad != Settings.pad_active:

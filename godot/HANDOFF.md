@@ -1461,6 +1461,16 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   after, then quits; `+ BMX_INTRO_RIDE=1` then presses RIDE (`INTRO ride start ms=`) and saves `_ride.png`;
   `BMX_INTRO_AT=secs` freezes the intro there.
 
+- **Fonts: all embedded, nothing from the OS (2026-11-24, user: "all users must see the same font", "light and performance oriented")**.
+  No `SystemFont` anywhere (grep must stay empty); every font is a FontFile in `assets/fonts/` with `allow_system_fallback` off (import files + set
+  again in `UITheme.file`), so a player's installed fonts never change the look. Subset to Latin + the symbols the UI draws, hinting stripped
+  (`pyftsubset`; ~323 KB for all 8 files, Doto 457 -> 131 KB): Barlow Bold / Black = UI (`UITheme.font(black)`), Barlow Condensed Bold / Black =
+  display (`display_font(weight, slant)`), Anton = the WASTED / banner / pops MSDF face (`punch_font`), Caveat Bold = handwriting (`hand_font()`),
+  Symbols = merged Noto Sans Symbols + Symbols 2 (stars, arrows, triangles, check marks, trophy) as the fallback of every UI font, Doto = the bike
+  computer. Project default font = Barlow Bold (`gui/theme/custom_font`). Glyphs not in the set: add them to the subset (`↺ ━ ⅒ ▮` were replaced in
+  text). Never write a font name in code: go through `UITheme`. Specimen sheet of every face: `res://tools/font_specimen.tscn -- out.png`.
+  Metrics differ from Bahnschrift: place display text by cap height (the title logo does), not by ascent. Credits lists all four OFL families.
+
 ### Title screen (golden hour lookout)
 - `Game.set_scenic(true)` while the menu is up: a low warm sun ahead-right of the view, golden sky mode in
   `sky_hdri.gdshader` (`golden`: warm gradient + sun glow, the HDRI's clouds re-lit), warm long fog.

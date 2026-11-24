@@ -53,7 +53,7 @@ func _process(_dt: float) -> void:
 class View extends Control:
 	var word := ""
 	var t := 0.0
-	var font: SystemFont
+	var font: Font
 
 	func _init() -> void:
 		font = UITheme.punch_font()

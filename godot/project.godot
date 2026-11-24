@@ -39,6 +39,10 @@ window/vsync/vsync_mode=1
 
 project/assembly_name="Mini BMX"
 
+[gui]
+
+theme/custom_font="res://assets/fonts/Barlow-Bold.ttf"
+
 [physics]
 common/physics_ticks_per_second=120
 common/max_physics_steps_per_frame=12
