@@ -1921,8 +1921,21 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   the front, his J-hop), a squash pushes it down to the face; the take-off cap leaves that much room for the pitch while
   the flight itself still leaves with the lip. Hands off he may scoop the nose `SCOOP_TILT` 0.4 rad further down for the
   landing ("curl the toes, level out the bike"). dj_video: bike ~55-65 deg just off the edge, neutral flight 40 deg.
-- Open: the rider stays over the bars on the steep bike; in the video he hangs behind it, arms straight. Hands-off
-  landings still come in nose-up on short flights.
+- **Overlaid frame by frame** (user: "overlay the pictures, you'll see how much you miss"): `scratchpad overlay.py`-style
+  similarity transform matching both wheel centres, then 50 % blend. Measured from the crank centre: on a steep face his
+  hips are ~0.45 m behind / 0.6-0.7 m above it IN THE WORLD, torso upright in the world, arms nearly straight; ours squatted
+  0.25 m lower with the torso folded 60 deg and the head 0.55 m low. Fixed in `rider.gd` (`BMX_OLD_JUMPPOSE=1` = before):
+  the deep preload pose is lighter; on a jump face / just popped the body is put at the measured pose (`FACE_HIP` world
+  offset from the cranks, torso `FACE_TORSO` off upright, blended `FACE_POSE`, set last before the limits so the climb lean
+  etc. don't undo it), arms may reach `FACE_REACH` 0.96 of their length (the usual elbow bend folded the chest onto the
+  bars), the pelvis tilts with the torso as it stands and the spine curve is off (no bowed lower back), only `FACE_SINK`
+  of the legs' sink is drawn, the flip fade of the body levelling starts later on a face. **Dynamic** (user: "this is for
+  this jump and speed; faster = less front lift, less upright, more forward"): the stand-up fades with the bike's pitch
+  (0.25-0.55 rad) and the speed (6.5-9.5 m/s); the front's lift over the lip (`nose_k` in `bike_physics.gd`) with the
+  face's slope (0.4-0.75 rad) and the speed (9-15 m/s). dj_video: head ~0.2 m under his (was 0.55); the 43 km/h table:
+  forward attack position, no nose lift. `BMX_JPOSE=1` prints the pose on a face (pre / after the limits / end).
+- Open: hands-off landings still come in nose-up on short flights; the big designed tables are knife-edge at their
+  design speed (dtable_60 at 96 % of it lands on the deck).
 
 ### Developer view of the test playground (`scripts/levels/ride_diag.gd`) - telemetry + sliders for riding code
 - **Only in the test playground** (user decision 2026-11-21: developer tools live in that level, normal rides have none).

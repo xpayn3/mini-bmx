@@ -137,6 +137,7 @@ var _land_up := false   # ... nose up (back wheel first)
 const LIP_SPARE := 0.15   # rad: how much steeper than the lip under the wheels a take-off may leave
 const LIP_NOSE := 0.25      # rad: the front lets come up over the lip's face, hands off (video 2: ~14 deg)
 const LIP_NOSE_POP := 0.4   # rad: ... and lifted on purpose with a pop
+var nose_k := 1.0          # 0..1: how much this lip lets the front come up (steep + slow = all)
 const POP_FRONT_LIFT := 1.6 # rad/s: the arms lift the front as a pop goes in on a lip's face
 const SCOOP_TILT := 0.4     # rad: hands off, the toes scoop the rear up: the nose can go that much further down for a landing
 const LIP_SPARE_OWN := 0.05   # rad: the same, hands off (the rider rides with the lip)
@@ -1857,7 +1858,12 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 		var lip_hold := 0.0; var lip_ref := 0.0
 		if front_air and not rear_air and not air and lip_state == 2 and wheelie_up <= 0.0 				and nose_a <= 0.0 and auto_absorb * prep < 0.05 and not _OLD_LIPLOAD:
 			var popping: bool = (pop_wait > 0.0 and pro_pop) or crouch > 0.1
-			lip_ref = _local_slope(f, XR, RWR, cp0) + (0.0 if squash > 0.2 else (LIP_NOSE_POP if popping else LIP_NOSE))
+			var face_sl: float = _local_slope(f, XR, RWR, cp0)
+			# (the user: "this is for this jump and speed only - faster, less rotation and lift on the front, more forward
+			# flying". The front comes up on a STEEP lip taken SLOW (a dirt jump); on a flatter or fast lip it stays near the
+			# face: nose_k)
+			nose_k = 1.0 if _OLD_LIPLOAD else smooth01((face_sl - 0.4) / 0.35) * (1.0 - smooth01((absf(v) - 9.0) / 6.0))
+			lip_ref = face_sl + (0.0 if squash > 0.2 else (LIP_NOSE_POP if popping else LIP_NOSE) * nose_k)
 			lip_hold = clampf(maxf(prep, 1.0 if popping else 0.0) / 0.3, 0.0, 1.0)
 			bal_max *= 1.0 + 2.5 * lip_hold
 		if true:
@@ -2235,7 +2241,7 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 				# time. Where the climb had to be cut, the frame leaves along its flight, turning no faster than a lip throws)
 				if vy > vy_cap:
 					vy = vy_cap
-					var nose_room: float = 0.0 if _OLD_LIPLOAD else (LIP_NOSE_POP if spare == LIP_SPARE else LIP_NOSE)   # (the front lifted over the lip)
+					var nose_room: float = 0.0 if _OLD_LIPLOAD else (LIP_NOSE_POP if spare == LIP_SPARE else LIP_NOSE) * nose_k   # (the front lifted over the lip)
 					pitch = minf(pitch, up_max + 0.15 + nose_room); pitch_v = minf(pitch_v, 0.6); body_pw = minf(body_pw, 0.6)
 				elif pitch > up_max + 0.5:
 					pitch = up_max + 0.5; pitch_v = minf(pitch_v, 1.0); body_pw = minf(body_pw, 1.0)
@@ -3010,7 +3016,9 @@ func _pop_now(pw: float) -> void:
 		if body_in > 0.3: _pop_latch = true
 		# (video 2, the J-hop he shows: load, lift the front with the arms, then the legs bring the rear up. Popped on a lip's
 		# face the front comes up first; the lip hold keeps it LIP_NOSE_POP over the face once it is off)
-		if not front_air and not air and not _OLD_LIPLOAD: pitch_v += POP_FRONT_LIFT * clampf(pw, 0.0, 1.0)
+		if not front_air and not air and not _OLD_LIPLOAD:
+			nose_k = smooth01((_g_pitch - 0.4) / 0.35) * (1.0 - smooth01((absf(v) - 9.0) / 6.0))
+			pitch_v += POP_FRONT_LIFT * clampf(pw, 0.0, 1.0) * nose_k
 		compress_v += 2.0 * pw
 		if man_a > 0.05: man_lock = maxf(man_lock, 0.3)
 		if Env.s("BMX_TRICK") != "" or Env.s("BMX_FORGIVE_PROBE") != "": print("POP lip in %.2fs power=%.2f timing=%.2f edge=%s" % [lt, pw, pop_time, edge])   # tests
