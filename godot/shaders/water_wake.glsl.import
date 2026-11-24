@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://bhxtas1dgdw8d"
+path="res://.godot/imported/water_wake.glsl-efeccf3e5fdfa8b87d1b34fd677ed69c.res"
+
+[deps]
+
+source_file="res://shaders/water_wake.glsl"
+dest_files=["res://.godot/imported/water_wake.glsl-efeccf3e5fdfa8b87d1b34fd677ed69c.res"]
+
+[params]
+

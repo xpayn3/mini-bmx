@@ -38,6 +38,22 @@ varying vec3 v_world;
 global uniform sampler2D grass_win : filter_linear;
 global uniform vec4 grass_win_info;
 
+const float WATER_Y = -2.2;   // Terrain.WATER
+// sun-through-ripples light net (turbulent-water caustic, tiles every 2 pi), 0..1
+float gd_caustic(vec2 p0, float t) {
+	vec2 p = mod(p0, 6.2831853) - 250.0;
+	vec2 i = p;
+	float c = 1.0;
+	for (int n = 0; n < 4; n++) {
+		float tt = t * (1.0 - 3.5 / float(n + 1));
+		i = p + vec2(cos(tt - i.x) + sin(tt + i.y), sin(tt - i.y) + cos(tt + i.x));
+		c += 1.0 / length(vec2(p.x / (sin(i.x + tt) / 0.005), p.y / (cos(i.y + tt) / 0.005)));
+	}
+	c /= 4.0;
+	c = 1.17 - pow(c, 1.4);
+	return clamp(pow(abs(c), 8.0), 0.0, 1.0);
+}
+
 vec3 gd_hash3(vec2 p) {
 	vec3 q = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
 	q += dot(q, q.yxz + 33.33);
@@ -309,6 +325,18 @@ void fragment() {
 	// ruts (world/ruts.gd): the dug groove darker, its lip lighter
 	float rd = rut_depth(P.xz);
 	col = rut_colour(col, rd);
+	// light rays on the lake floor: the sun focused by the waves into drifting bright nets (fake caustics, a
+	// brightening of what is already lit), strongest in the shallows and gone by ~5 m down, dimmed under cloud
+	float cw = WATER_Y - P.y;
+	if (cw > 0.0) {
+		float cm = smoothstep(0.0, 0.12, cw) * (1.0 - smoothstep(1.2, 5.0, cw)) * (1.0 - smoothstep(0.12, 0.4, gpx));
+		if (cm > 0.001) {
+			float cc = gd_caustic(P.xz * 0.9, TIME * 0.6) * 0.6 + gd_caustic(P.xz * 1.7 + 11.0, TIME * 0.45 + 3.0) * 0.4;
+			float sk = smoothstep(0.6, 1.0, cloud_shade(P));
+			col *= 1.0 + cc * 2.6 * cm * mix(0.25, 1.0, sk);
+			col = mix(col, col * vec3(0.86, 1.02, 1.06), cm * 0.5);
+		}
+	}
 	if (bake_on > 0.0) {
 		vec2 bk = texture(bake_tex, UV).rg;
 		float dcam = length(P - CAMERA_POSITION_WORLD);

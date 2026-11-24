@@ -1653,6 +1653,11 @@ func on_landing(air_time: float, impact: float) -> void:
 	_lt = _perf("p_step.land_hud", _lt)   # (the frame profiler's landing breakdown: F10)
 	_landed = clampf(impact / 6.0, 0.0, 1.0) if air_time > 0.25 else 0.0
 	var ls: int = terrain.surface(phys.x, phys.z)
+	if ls == 2 and air_time > 0.15:   # a landing in the water: a ring of ripples off both tyres
+		var wf := phys.fwd()
+		var wk := clampf(0.25 + impact / 8.0, 0.25, 1.2)
+		terrain.water_splash(Vector3(phys.x - wf.x * phys.BB_REAR, phys.y, phys.z - wf.z * phys.BB_REAR), wk, 0.5)
+		terrain.water_splash(Vector3(phys.x + wf.x * (phys.L - phys.BB_REAR), phys.y, phys.z + wf.z * (phys.L - phys.BB_REAR)), wk, 0.5)
 	if dust.sim != null and air_time > 0.3 and ls != 2:   # real smoke sim: a ring of dust blasted outward
 		var lf := phys.fwd()
 		var lbb: float = phys.BB_REAR
@@ -1708,6 +1713,9 @@ func _crash_dust() -> void:
 		var pp: Vector3 = pts[i]
 		var g: float = terrain.height(pp.x, pp.z)
 		var above := pp.y - g
+		if g < Terrain.WATER - 0.02 and absf(pp.y - Terrain.WATER) < 0.6:   # a body part in the water pushes it about
+			var wsp := ((pp - (prv[i] as Vector3)) / h).length()
+			if wsp > 1.5 and i % 2 == 0: terrain.water_splash(pp, minf(wsp, 10.0) * 0.1, 0.35)
 		if above > 0.3:
 			_rd_air[i] = 1   # off the ground: the next touch-down is an impact
 			continue
@@ -1855,6 +1863,11 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 		dust.feed_front(front, Vector3.ZERO, 0.0, 0.0)
 	# riding through a lake / stream: the spray soaks the lens
 	if in_water and not st.air and va > 2.0: lens.splash(dt * minf(va, 12.0) * 0.06)
+	# ... and both tyres push the surface: the wake runs out behind (WaterWake, compute shader)
+	if in_water and va > 0.7:
+		var wpush := clampf(va / 10.0, 0.0, 1.4) * 14.0 * dt
+		if not st.air: terrain.water_splash(rear, wpush, 0.3)
+		if not st.air and not st.front_air: terrain.water_splash(front, wpush * 0.8, 0.28)
 	# riding fast through dry dust (dirt / sand) slowly dusts the lens: full in ~1.5 min flat out, a skid's
 	# cloud more; damp ground (wet bike) none
 	if not st.air and not bare and (s == 1 or s == 3) and va > 5.0:

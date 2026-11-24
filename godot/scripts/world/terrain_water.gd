@@ -21,6 +21,9 @@ var _job_row := -1
 var _dirty := false
 var _dirty_t := 0.0
 var _mat: ShaderMaterial
+var _wake: WaterWake
+var _demo := Env.s("BMX_WAKE_DEMO") != ""
+var _demo_t := 0.0
 
 
 func _init() -> void:
@@ -40,6 +43,18 @@ func _init() -> void:
 	_mat.set_shader_parameter("u_size", BAKE_SIZE)
 	position.y = Terrain.WATER
 	extra_cull_margin = 2.0
+	_wake = WaterWake.new()
+	if _wake.ok:
+		_mat.set_shader_parameter("u_wake", _wake.tex)
+		_mat.set_shader_parameter("u_wake_span", WaterWake.SPAN)
+		_mat.set_shader_parameter("u_wake_cell", WaterWake.CELL)
+		_mat.set_shader_parameter("u_wake_on", 1.0)
+
+
+## a push on the water (the rider's tyres, a landing, a crash): see WaterWake.splash
+func splash(p: Vector3, amount: float, radius := 0.5) -> void:
+	if _wake != null and _wake.ok and _wet:
+		_wake.splash(p, amount, radius)
 
 
 func invalidate() -> void:
@@ -87,7 +102,16 @@ func follow(px: float, pz: float, t: float) -> void:
 	if not _wet:
 		return
 	_mat.set_shader_parameter("u_time", t)
-	position = Vector3(roundf(px / MESH_SNAP) * MESH_SNAP, Terrain.WATER, roundf(pz / MESH_SNAP) * MESH_SNAP)
+	if _wake != null and _wake.ok:
+		if _demo:   # test: a splash every 0.7 s on a ring 5 m round the rider (BMX_WAKE_DEMO=1)
+			_demo_t -= get_process_delta_time()
+			if _demo_t <= 0.0:
+				_demo_t = 0.7
+				var a := t * 1.7
+				_wake.splash(Vector3(px + cos(a) * 5.0, Terrain.WATER, pz + sin(a) * 5.0), 0.4, 0.3)
+		_wake.step(get_process_delta_time(), Vector3(px, Terrain.WATER, pz))
+		_mat.set_shader_parameter("u_wake_c", _wake.centre)
+	position =Vector3(roundf(px / MESH_SNAP) * MESH_SNAP, Terrain.WATER, roundf(pz / MESH_SNAP) * MESH_SNAP)
 	var c := Vector2(roundf(px / BAKE_SNAP) * BAKE_SNAP, roundf(pz / BAKE_SNAP) * BAKE_SNAP)
 	if not is_finite(_center.x):
 		_start(c)

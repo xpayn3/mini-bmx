@@ -202,10 +202,10 @@ var bank_sq := 0.0     # how far the body goes into line with the bike on banked
 var bank_v := 0.0      # how fast the bank reading is changing (its smoothing spring)
 var _load_s := NAN     # the tyres' load factor for grip, eased (relaxation)
 var _share_f := NAN    # the front tyre's share of the load, eased the same way
-const SURF_MU := [0.72, 0.95, 0.45, 0.5]   # tyre grip by surface: ground, trail, water, sand / dry
+const SURF_MU := [0.72, 0.95, 0.62, 0.5]   # tyre grip by surface: ground, trail, water, sand / dry
 ## what a tyre can stop with on each surface (friction along the tyre, x brakeGrip): ground / grass, trail hardpack,
 ## water, sand. The brakes are limited by these, not by the levers (they used to run out first: ~0.84 g on every surface)
-const BRAKE_MU := [0.62, 0.78, 0.5, 0.45]
+const BRAKE_MU := [0.62, 0.78, 0.6, 0.45]
 var surf_f := 0; var surf_r := 0; var _mu_f := NAN; var _mu_r := NAN   # the ground under each tyre, its eased grip
 var _bmu_f := NAN; var _bmu_r := NAN   # ...and its eased braking grip (BRAKE_MU)
 var _OLD_BRAKE := OS.get_environment("BMX_OLD_BRAKE") != ""   # (tests: the lever-limited brakes before 2026-11-23)
@@ -831,7 +831,7 @@ func _step_sprint(dt: float, inp: Dictionary, throttle: float, brake: bool, in_w
 	var want_sprint: bool = inp.sprint and throttle > 0.1 and not brake and not air
 	if stamina <= 0: tired = true
 	elif stamina > 0.25: tired = false
-	var sprinting := want_sprint and not tired and not in_water
+	var sprinting := want_sprint and not tired
 	if sprinting and not air: stamina = maxf(0.0, stamina - dt / T.sprintTime)
 	elif not sprinting: stamina = minf(1.0, stamina + dt / T.sprintRecharge)
 	sprint += ((1.0 if sprinting else 0.0) - sprint) * minf(1.0, dt * 5)
@@ -1036,7 +1036,7 @@ func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_wa
 		aero_k = 1.0 - float(T.get("tuckDrag", 0.42)) * tuck + float(T.get("upDrag", 0.3)) * sit_up
 		a -= (roll + T.airDrag / (ts * ts) * v * absf(v) * aero_k) * carry
 		if _EPROBE: _e_add("rolling", -roll * carry * v * dt); _e_add("air", -T.airDrag / (ts * ts) * v * absf(v) * aero_k * carry * v * dt)
-		if in_water: a -= 0.7 * v
+		if in_water: a -= 0.06 * v   # (was 0.7: the water dragged a rider to a halt)
 		v = clampf(v + a * dt, -maxf(3.0, rev_cap), 24 * maxf(1.0, ts))
 		rev_cap = maxf(3.0, minf(rev_cap, -v))   # the extra reverse room (fakie landing) only shrinks
 		# braked to a stop the brake holds the bike where it is (no creeping, even on a slope) until it's let

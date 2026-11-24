@@ -1375,6 +1375,12 @@ func update_water(px: float, pz: float, t: float) -> void:
 		_water.follow(px, pz, t)
 
 
+## push the lake / sea surface at p (a tyre, a landing, a body): ripples run out from it (WaterWake)
+func water_splash(p: Vector3, amount: float, radius := 0.5) -> void:
+	if _water:
+		_water.splash(p, amount, radius)
+
+
 ## the ride light (sun / moon direction + colour, sky at the horizon / overhead) for the water's reflections
 func water_light(sun_dir: Vector3, sun_col: Color, sky_h: Color, sky_z: Color) -> void:
 	if _water:
