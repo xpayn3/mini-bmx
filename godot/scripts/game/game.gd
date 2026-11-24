@@ -1324,7 +1324,10 @@ func ground_dust(px: float, pz: float, s: int) -> Color:
 	var c: Color = terrain.ground_color(px, pz)
 	if dust != null and dust.sim != null:
 		if s == 0: return GRASS_SOIL_DUST
-		return c.lerp(Color.WHITE, 0.16)   # the road's colour, a touch lighter (fine dust scatters more)
+		# the road's own colour, a little DARKER: the sim lights the cloud with the full sun + sky (no ground AO, no
+		# worn-line darkening, the trail's baked colour is darker than the plain biome colour read here), and the
+		# old +16 % towards white on top made the cloud read paler than the track it comes from
+		return c * 0.82
 	return c.lerp(Color.WHITE, 0.42 if s == 0 else 0.28)
 
 ## the point is on a rope bridge's deck (planks: no dust, dirt or tracks)
