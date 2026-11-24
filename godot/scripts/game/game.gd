@@ -3592,13 +3592,18 @@ func _process(dt: float) -> void:
 	# from ~25 km/h, full by ~75 km/h: wider FOV with the camera pulled in (dolly zoom), a surge of extra FOV
 	# while accelerating hard, rumble, bank, streaks and speed lines at the edges, tighter vignette
 	var fx_on: bool = Settings.get_v("speed_fx") and not st.crash_on
-	var sk := smoothstep(7.0, 21.0, absf(st.v)) if fx_on else 0.0
+	var sfx0 := float(Settings.get_v("sfx_start")) / 3.6   # m/s where it begins
+	var sk := smoothstep(sfx0 - 13.0, sfx0 + 4.0, absf(st.v)) if fx_on else 0.0  # 2026-11-24 (user: misjudged speed into corners): starts earlier, much stronger below
 	speed_k += (sk - speed_k) * minf(1.0, dt * (2.5 if sk > speed_k else 1.2))
 	_surge += ((clampf(_acc_fx / 5.0, 0.0, 1.0) * smoothstep(4.0, 12.0, absf(st.v)) if fx_on else 0.0) - _surge) * minf(1.0, dt * 2.0)
-	cam.fov_boost = speed_k * 14.0 + _surge * 5.0
+	cam.fov_boost = speed_k * 22.0 + _surge * 8.0
 	cam.speed_feel = speed_k
 	var gm := grade_rect.material as ShaderMaterial
-	gm.set_shader_parameter("blur", speed_k * speed_k)
+	var blur_k: float = speed_k * (0.4 + 0.6 * speed_k) * float(Settings.get_v("sfx_blur"))
+	gm.set_shader_parameter("blur", blur_k)
+	gm.set_shader_parameter("fx_lines", float(Settings.get_v("sfx_lines")))
+	gm.set_shader_parameter("fx_fringe", float(Settings.get_v("sfx_fringe")))
+	gm.set_shader_parameter("fx_vig", float(Settings.get_v("sfx_vignette")))
 	gm.set_shader_parameter("speed", speed_k)
 	# water / dust on the lens: only on the default trail camera (user, 2026-11-24); on other views it is
 	# hidden and waits as it was
@@ -3608,7 +3613,7 @@ func _process(dt: float) -> void:
 		lens.update(dt, get_viewport().get_camera_3d(), get_viewport().get_visible_rect().size, Vector2(0.5, 0.52))
 	lens.apply(gm, lens_on)
 	var lens_mips := lens_on and lens.active()   # the drops / dust read the screen out of focus
-	_grade_mips(gm, lens_mips or speed_k * speed_k > (0.0008 if gm.shader == _grade_sh_mip else 0.001))   # (the shader blurs from 0.001)
+	_grade_mips(gm, lens_mips or blur_k > (0.0008 if gm.shader == _grade_sh_mip else 0.001))   # (the shader blurs from 0.001)
 	_pk = _perf("speed_fx", _pk)
 	cam.update_cam(dt)
 	_pk = _perf("camera", _pk)
