@@ -249,7 +249,7 @@ var _powered_sound := false
 func _build_sound() -> void:
 	var stream = load("res://assets/audio/tv_static.mp3")
 	if stream == null: return
-	var bus := "SFX" if AudioServer.get_bus_index("SFX") >= 0 else "Master"
+	var bus: String = Settings.bus_for("World")
 	for i in BED_LAYERS + 1:
 		var p: Node
 		if positional:

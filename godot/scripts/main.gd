@@ -611,25 +611,6 @@ func _menu_page_main() -> void:
 	vb.add_child(_menu_button("GARAGE", "", _open_garage, false, true))
 	vb.add_child(_menu_button("RIDER", "", _open_garage.bind("rider"), false, true))
 	vb.add_child(UITheme.spacer(Tokens.S2))
-	# world seed
-	var world_cap := UITheme.caption("WORLD")
-	world_cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	vb.add_child(world_cap)
-	var seed_row := HBoxContainer.new()
-	seed_row.add_theme_constant_override("separation", Tokens.S2)
-	var se := LineEdit.new()
-	se.text = str(GameState.seed)
-	se.placeholder_text = "World seed"
-	se.alignment = HORIZONTAL_ALIGNMENT_CENTER
-	se.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	se.custom_minimum_size.y = Tokens.H_CHIP
-	se.tooltip_text = "World seed: type a number and press Enter"
-	se.text_submitted.connect(func(t):
-		if t.is_valid_int():
-			GameState.seed = int(t); _seed_changed())
-	seed_row.add_child(se)
-	seed_row.add_child(UITheme.make_button("NEW WORLD", func(): GameState.new_seed(); se.text = str(GameState.seed); _seed_changed(), "chip", Tokens.T_LG))
-	vb.add_child(seed_row)
 	var cred := UITheme.make_button("CREDITS", _show_credits, "link", Tokens.T_XL)
 	cred.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vb.add_child(cred)

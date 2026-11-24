@@ -655,7 +655,7 @@ func _play_crunch(at: Vector3) -> void:
 	_make_crunch()
 	var pl := AudioStreamPlayer3D.new()
 	pl.stream = _crunch
-	pl.bus = "SFX" if AudioServer.get_bus_index("SFX") >= 0 else "Master"
+	pl.bus = Settings.bus_for("Impacts")
 	pl.unit_size = 8.0
 	pl.pitch_scale = randf_range(0.85, 1.12)
 	add_child(pl)

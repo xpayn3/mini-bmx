@@ -38,7 +38,7 @@ const TONES := {
 }
 
 func _ready() -> void:
-	bus = "SFX" if AudioServer.get_bus_index("SFX") >= 0 else "Master"
+	bus = Settings.bus_for("UI")
 	volume_db = -15.0
 	max_polyphony = 3
 	if _tones.is_empty():

@@ -15,7 +15,7 @@ var player := AudioStreamPlayer.new()
 var _last := -1
 
 func _ready() -> void:
-	player.bus = "SFX" if AudioServer.get_bus_index("SFX") >= 0 else "Master"
+	player.bus = Settings.bus_for("Bike")
 	player.max_polyphony = 3
 	player.volume_db = DB
 	add_child(player)

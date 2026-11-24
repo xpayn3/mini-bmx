@@ -113,6 +113,14 @@ const DEFAULTS := {
 	# audio
 	"sfx_volume": 1.0,
 	"mute_unfocused": true,
+	"mute_all": false,       # master switch: everything silent
+	"audio_device": "Default",
+	# mixer: a volume + an on / off per category (buses under SFX, see MIX)
+	"vol_wind": 1.0, "on_wind": true,
+	"vol_bike": 1.0, "on_bike": true,
+	"vol_impacts": 1.0, "on_impacts": true,
+	"vol_world": 1.0, "on_world": true,
+	"vol_ui": 1.0, "on_ui": true,
 	# gameplay / controller
 	"pause_unfocused": true,
 	"boot_intro": true,      # launch: the CRT TV intro (off = a still frame of it while the game loads)
@@ -491,6 +499,7 @@ func apply() -> void:
 		vp.use_occlusion_culling = get_v("occlusion")
 		apply_render_quality()
 	AudioServer.set_bus_volume_db(0, linear_to_db(maxf(0.0001, float(get_v("volume")))))
+	AudioServer.set_bus_mute(0, bool(get_v("mute_all")))
 	if AudioServer.get_bus_effect_count(0) == 0:   # a ceiling on the master: stacked sounds (crash + bone crunch + bed) hit 0 dBFS
 		var lim := AudioEffectHardLimiter.new(); lim.ceiling_db = -1.0; lim.pre_gain_db = 0.0
 		AudioServer.add_bus_effect(0, lim)
@@ -499,6 +508,16 @@ func apply() -> void:
 		AudioServer.add_bus(); sfx = AudioServer.bus_count - 1
 		AudioServer.set_bus_name(sfx, "SFX"); AudioServer.set_bus_send(sfx, "Master")
 	AudioServer.set_bus_volume_db(sfx, linear_to_db(maxf(0.0001, float(get_v("sfx_volume")))))
+	for m in MIX:
+		var b := AudioServer.get_bus_index(m[0])
+		if b < 0:
+			AudioServer.add_bus(); b = AudioServer.bus_count - 1
+			AudioServer.set_bus_name(b, m[0]); AudioServer.set_bus_send(b, "SFX")
+		AudioServer.set_bus_volume_db(b, linear_to_db(maxf(0.0001, float(get_v("vol_" + m[1])))))
+		AudioServer.set_bus_mute(b, not get_v("on_" + m[1]))
+	var dev := String(get_v("audio_device"))
+	if dev != AudioServer.output_device and (dev == "Default" or AudioServer.get_output_device_list().has(dev)):
+		AudioServer.output_device = dev
 	_install_bindings()
 	changed.emit()
 
@@ -521,7 +540,21 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and get_v("mute_unfocused"):
 		AudioServer.set_bus_mute(0, true)
 	elif what == NOTIFICATION_APPLICATION_FOCUS_IN:
-		AudioServer.set_bus_mute(0, false)
+		AudioServer.set_bus_mute(0, bool(get_v("mute_all")))
+
+## the mixer: [bus, key suffix, label, what it covers]
+const MIX := [
+	["Wind", "wind", "Wind, tyres & water", "The rush of air, tyre roll on the ground, skids, splashes"],
+	["Bike", "bike", "Bike mechanics", "Freewheel clicks, chain, gear shifts"],
+	["Impacts", "impacts", "Landings & crashes", "Landing slams, crashes, bone crunches, wood smashes"],
+	["World", "world", "World sounds", "TVs, garage door and other things out in the world"],
+	["UI", "ui", "Computer beeps & paper", "Bike computer tones, map / leaflet paper rustle"],
+]
+
+## the bus a category plays on (falls back to SFX / Master when the mixer isn't up yet)
+static func bus_for(cat: String) -> String:
+	if AudioServer.get_bus_index(cat) >= 0: return cat
+	return "SFX" if AudioServer.get_bus_index("SFX") >= 0 else "Master"
 
 ## Which device the player is using right now: the last real input wins (a pad button / a stick or
 ## trigger pushed well past the deadzone = pad, any key or mouse click = keyboard). Prompts show Xbox

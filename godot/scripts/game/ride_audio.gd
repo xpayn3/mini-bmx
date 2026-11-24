@@ -79,7 +79,7 @@ func _ready() -> void:
 	gen.mix_rate = RATE
 	gen.buffer_length = 0.12
 	player.stream = gen
-	player.bus = "SFX" if AudioServer.get_bus_index("SFX") >= 0 else "Master"
+	player.bus = Settings.bus_for("Wind")
 	add_child(player)
 	player.play()
 	pb = player.get_stream_playback()
@@ -99,7 +99,7 @@ func _ready() -> void:
 		g2.mix_rate = FW_RATE
 		g2.buffer_length = 0.1
 		fw.stream = g2
-		fw.bus = player.bus
+		fw.bus = Settings.bus_for("Bike")
 		add_child(fw)
 		fw.play()
 		fw_pb = fw.get_stream_playback()
@@ -119,7 +119,7 @@ func _setup_chain() -> void:
 	if s == null: return
 	if s is AudioStreamOggVorbis: s.loop = true
 	chain.stream = s
-	chain.bus = player.bus
+	chain.bus = Settings.bus_for("Bike")
 	chain.volume_db = -80.0
 	add_child(chain)
 	chain.play(randf() * 6.0)
@@ -171,7 +171,7 @@ func _slam_pool() -> void:
 			if c != null: _slam_clips.append(c)
 	for i in 4:
 		var pl := AudioStreamPlayer.new()
-		pl.bus = player.bus
+		pl.bus = Settings.bus_for("Impacts")
 		add_child(pl)
 		_slam_pl.append(pl)
 

@@ -94,8 +94,29 @@ func _gameplay() -> Control:
 
 func _audio() -> Control:
 	var p := _page("Audio")
+	_section(p, "VOLUME")
+	var son := CheckButton.new()
+	son.button_pressed = not Settings.get_v("mute_all")
+	son.toggled.connect(func(on): Settings.set_v("mute_all", not on))
+	_row(p, "Sound on", son, "Master switch: off silences everything")
 	_slider(p, "Master volume", "volume", 0.0, 1.0, 0.05)
-	_slider(p, "Ride sounds", "sfx_volume", 0.0, 1.0, 0.05)
+	_slider(p, "All game sounds", "sfx_volume", 0.0, 1.0, 0.05, "%.2f", "Scales every mixer channel below together")
+	_section(p, "MIXER")
+	for mx in Settings.MIX:
+		var hb := HBoxContainer.new()
+		var cb := CheckButton.new()
+		cb.button_pressed = Settings.get_v("on_" + mx[1])
+		cb.toggled.connect(func(on): Settings.set_v("on_" + mx[1], on))
+		hb.add_child(cb)
+		_row(p, mx[2] + " on / off", hb, mx[3])
+		_slider(p, mx[2], "vol_" + mx[1], 0.0, 1.5, 0.05, "%.2f", mx[3])
+	_section(p, "OUTPUT")
+	var devs: Array = AudioServer.get_output_device_list()
+	var dd := OptionButton.new()
+	for d in devs: dd.add_item(d)
+	dd.selected = maxi(0, devs.find(Settings.get_v("audio_device")))
+	dd.item_selected.connect(func(i): Settings.set_v("audio_device", devs[i]))
+	_row(p, "Output device", dd, "Where the game plays its sound")
 	_check(p, "Mute when the window loses focus", "mute_unfocused")
 	return p
 

@@ -192,7 +192,7 @@ func setup(p_size: Vector2i, c_size := Vector2i.ZERO) -> void:
 	_sound = AudioStreamPlayer.new()
 	if not sound_stream: sound_stream = load("res://assets/audio/paper_unfold.mp3")   # the user's recording; no synthesised stand-in
 	_sound.stream = sound_stream
-	_sound.bus = "SFX" if AudioServer.get_bus_index("SFX") >= 0 else "Master"
+	_sound.bus = Settings.bus_for("UI")
 	_sound.volume_db = sound_db
 	add_child(_sound)
 	if live: _use_texture(page.get_texture())

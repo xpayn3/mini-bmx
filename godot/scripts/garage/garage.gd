@@ -760,7 +760,7 @@ func _rebuild_bike() -> void:
 func _door_sound(at: float) -> AudioStreamPlayer3D:
 	var p := AudioStreamPlayer3D.new()
 	p.stream = load(DOOR_SOUND)
-	p.bus = "SFX" if AudioServer.get_bus_index("SFX") >= 0 else "Master"
+	p.bus = Settings.bus_for("World")
 	p.unit_size = 6.0
 	p.position = Vector3(DOOR_X, DOOR_H, WALL_IN)
 	add_child(p)
