@@ -82,6 +82,7 @@ func _gameplay() -> Control:
 	var p := _page("Gameplay")
 	_option(p, "Speed units", "units", ["km/h", "mph"])
 	_check(p, "Crash slow motion (WASTED)", "wasted", "Time slows down and the screen goes grey when you fall")
+	_check(p, "Ghost rider", "ghost", "Your best run on this world rides along as a see-through ghost, with the time gap to it")
 	_check(p, "Blood", "blood", "Falls leave blood smears on the ground; very hard crashes can tear off an arm or a leg")
 	_check(p, "Pause when the window loses focus", "pause_unfocused")
 	_check(p, "Intro at start (CRT TV)", "boot_intro", "Off: a still frame of the TV while the game loads, then straight to the menu")

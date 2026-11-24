@@ -2308,6 +2308,25 @@ ide_<date>.replay` (test runs: `replays/tests/`), zstd, ~4 MB a
   is called from `bike_physics` on HEAVY / SLAM (`Game.on_bad_landing`). No C#: the recorded `bike_slam_1..10.ogg` play. Hit A (messy multi-bounce) fitted badly and is not used.
   Test: `-s res://tools/slam_render.gd -- <dir>` writes every type to WAV; `BMX_LAND_TEST=5` fakes a hard landing.
 
+### Ghost rider (2026-11-24, `scripts/game/ghost_rider.gd`, made by `Game._ready` in rides of a world, not levels)
+- Your best run on this world (seed + bike) rides with you as a see-through glowing rider + bike; the HUD shows the gap
+  to it ("GHOST +1.2 s" red = behind, green = ahead; "GHOST: AHEAD OF IT" past where it got to, "GHOST FINISHED").
+- Recording: 30 samples / s of 68 floats: time, trail distance `s` (nearest point of the course polyline, searched
+  round the last one; kept as the furthest so far), the rider's 15 joints (Ragdoll order, `rider.J` in world space; in
+  a crash `ragdoll.p`, so falls replay), 6 bike points (rear axle, crank, saddle, steering pivot, bar middle, front
+  axle) and the wheel axle direction. ~7 KB / s zstd. A run starts at every start of a world (`Game.respawn` and the ride
+  start call `start_run`), ends at the next one / `Game._exit_tree` (`end_run`); it replaces the saved ghost when it got
+  further down the trail by the time the shorter of the two ended (runs under 15 s don't count). Files:
+  `user://ghosts/<seed>_<bike>.ghost` (u32 raw size + zstd; tests: `ghosts/tests/`).
+- Drawing: not a copy of the rider / bike: one MultiMesh of a low-poly capsule (14 limb / torso bones, a ball helmet, 7
+  frame tubes) + one of 2 torus wheels, world-space instances, one unshaded rim-glow shader (drifting band), no shadows,
+  no depth writes; fades where it overlaps the real bike (`player`) and near the camera, dims once its run is over.
+  2 draw calls, ~4k triangles, no measurable GPU / CPU change (render probe); script < 0.1 ms.
+- Settings › Gameplay › Ghost rider (`ghost`). Tests: `BMX_GHOST_PROBE=1` (`GHOST start / end / t= my_s= gap=`),
+  `BMX_GHOST=0` = no ghost node. Record with one test run (e.g. `BMX_FOLLOW=1 --autotest=30`), then
+  `BMX_FOLLOW=1 BMX_IDLE_FOR=0.5 BMX_CAM=side BMX_SHOT=...` shows it beside you.
+- Not done: ghosts from other players / a leaderboard (Steam), choosing which ghost (last / best), start / finish gates.
+
 ### Photo mode (O, `scripts/game/photo_mode.gd`)
 - Time freezes (`Engine.time_scale = 0`), HUD hidden, the camera comes loose: `Game._process` calls `PhotoMode.update(real dt)`
   instead of the ride; `CameraRig` / `hud` ignore input while `game.photo`; Esc / O / pad B / the card's ✕ leave.
