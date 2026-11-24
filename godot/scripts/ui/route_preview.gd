@@ -28,9 +28,13 @@ const BRIDGE_TYPES := ["bridge", "gorge", "rope", "skinny"]
 var color_mode := "type"   # "type" = the paper map (red dashes) | "grade" = coloured by steepness
 var data: Dictionary = {}   # the last finished trail (plain arrays)
 var busy := false
+var zoom := 0.0            # map pixels per metre (0 = fit the whole trail)
+var centre := Vector2.ZERO   # world point at the middle of the map
+var view: MapView
 
 var _seed := 0
 var _style: Dictionary = {}
+var _fresh_seed := true
 var _want := false           # a newer request is waiting
 var _task := -1
 var _result: Dictionary = {}
@@ -44,7 +48,7 @@ static var _hseed := -1
 
 func _init() -> void:
 	clip_contents = true
-	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mouse_filter = Control.MOUSE_FILTER_PASS
 
 
 func _ready() -> void:
@@ -53,7 +57,76 @@ func _ready() -> void:
 	_timer.wait_time = DEBOUNCE
 	_timer.timeout.connect(_start)
 	add_child(_timer)
+	view = MapView.new()
+	view.pv = self
+	add_child(view)
+	_layout()
+	resized.connect(_layout)
 	TrailFeatures.ensure()   # (its static tables, made here on the main thread, never first on the worker)
+
+
+func _layout() -> void:
+	if view == null: return
+	var top := 96.0
+	view.position = Vector2(28.0, top)
+	view.size = Vector2(maxf(10.0, size.x - 56.0), maxf(10.0, size.y - top - STRIP_H - 84.0))
+	if zoom > 0.0: _clamp_view()
+	queue_redraw()
+
+
+## the map opens at a real map scale (about HOME_M metres across) at the start of the trail, land all round it
+const HOME_M := 1000.0
+func fit() -> void:
+	zoom = 0.0
+	if data.is_empty() or view == null: return
+	zoom = maxf(_fit_zoom(), view.size.x / HOME_M)
+	var X: PackedFloat64Array = data["X"]
+	var Z: PackedFloat64Array = data["Z"]
+	centre = Vector2(float(X[0]) + view.size.x * 0.5 / zoom - 80.0, float(Z[0]))
+	_clamp_view()
+	view.queue_redraw(); queue_redraw()
+
+
+## the whole trail in view
+func fit_all() -> void:
+	if data.is_empty() or view == null: return
+	zoom = _fit_zoom()
+	var rg: Dictionary = (data["rows"] as Array)[0]
+	centre = Vector2(float(rg["x0"]) + float(rg["w"]) * 0.5, float(rg["z0"]) + float(rg["h"]) * 0.5)
+	_clamp_view()
+	view.queue_redraw(); queue_redraw()
+
+
+func _fit_zoom() -> float:
+	var rg: Dictionary = (data["rows"] as Array)[0]
+	return minf(view.size.x / float(rg["w"]), view.size.y / float(rg["h"]))
+
+
+func _clamp_view() -> void:
+	if data.is_empty(): return
+	var rg: Dictionary = (data["rows"] as Array)[0]
+	zoom = clampf(zoom, _fit_zoom(), 3.0)
+	var hx := view.size.x * 0.5 / zoom
+	var hz := view.size.y * 0.5 / zoom
+	var x0: float = rg["x0"]; var z0: float = rg["z0"]; var w: float = rg["w"]; var h: float = rg["h"]
+	centre.x = (x0 + w * 0.5) if hx * 2.0 >= w else clampf(centre.x, x0 + hx, x0 + w - hx)
+	centre.y = (z0 + h * 0.5) if hz * 2.0 >= h else clampf(centre.y, z0 + hz, z0 + h - hz)
+
+
+func zoom_at(screen: Vector2, factor: float) -> void:
+	if data.is_empty() or zoom <= 0.0: return
+	var before := centre + (screen - view.size * 0.5) / zoom
+	zoom = clampf(zoom * factor, _fit_zoom(), 3.0)
+	centre = before - (screen - view.size * 0.5) / zoom
+	_clamp_view()
+	view.queue_redraw(); queue_redraw()
+
+
+func pan(delta_px: Vector2) -> void:
+	if data.is_empty() or zoom <= 0.0: return
+	centre -= delta_px / zoom
+	_clamp_view()
+	view.queue_redraw(); queue_redraw()
 
 
 func _exit_tree() -> void:
@@ -68,6 +141,7 @@ func join() -> void:
 
 ## ask for the trail of this seed + style (debounced: the last ask wins)
 func request(seed_in: int, style: Dictionary) -> void:
+	if seed_in != _seed: _fresh_seed = true
 	_seed = seed_in
 	_style = style.duplicate()
 	_want = true
@@ -111,22 +185,22 @@ func _land_rows(f: TerrainField, C: TrailCourse, seed_in: int) -> Array:
 		_hseed = seed_in
 	var n := C.n
 	var x_start: float = C.X[0]
-	var nrows := int(ceil((C.X[n - 1] - x_start) / ROW_M))
+	var nrows := 1   # one continuous map of the whole trail
 	var zmin := PackedFloat64Array()
 	var zmax := PackedFloat64Array()
 	for r in nrows:
 		zmin.append(1e18); zmax.append(-1e18)
 	for i in n:
-		var r := mini(nrows - 1, int((C.X[i] - x_start) / ROW_M))
+		var r := 0
 		zmin[r] = minf(zmin[r], C.Z[i]); zmax[r] = maxf(zmax[r], C.Z[i])
 	var rows := []
 	var paper := PAPER
 	var light := Vector3(-0.55, 0.62, -0.55).normalized()
 	for r in nrows:
-		var x0 := floorf((x_start + r * ROW_M - 20.0) / GRIDM) * GRIDM
-		var z0 := floorf((minf(zmin[r], zmax[r] - 100.0) - 60.0) / GRIDM) * GRIDM
-		var w := ROW_M + 40.0
-		var h := ceilf((maxf(zmax[r], zmin[r] + 100.0) + 60.0 - z0) / GRIDM) * GRIDM
+		var x0 := floorf((x_start - 260.0) / GRIDM) * GRIDM
+		var z0 := floorf((minf(zmin[r], zmax[r] - 100.0) - 420.0) / GRIDM) * GRIDM
+		var w := ceilf((C.X[n - 1] - x_start + 520.0) / GRIDM) * GRIDM
+		var h := ceilf((maxf(zmax[r], zmin[r] + 100.0) + 420.0 - z0) / GRIDM) * GRIDM
 		var nx := int(w / GRIDM) + 1
 		var nz := int(h / GRIDM) + 1
 		var hh := PackedFloat32Array()
@@ -217,7 +291,10 @@ func _process(_dt: float) -> void:
 	data = r
 	data["stats"] = _stats(r)
 	data["grade"] = _grades(r)
+	if zoom <= 0.0 or _fresh_seed: fit()
+	_fresh_seed = false
 	built.emit(data["stats"])
+	if view: view.queue_redraw()
 	queue_redraw()
 
 
@@ -317,105 +394,8 @@ func _draw() -> void:
 	var E: PackedFloat32Array = data["E"]
 	var G: PackedFloat32Array = data["grade"]
 	var n: int = data["n"]
-	var rows: Array = data["rows"]
 	var m := 28.0
-	var top := 96.0   # the title block sits over the map's top left
-	var avail_h := sz.y - top - STRIP_H - 84.0
-	var hsum := 0.0
-	var wmax := 0.0
-	for rw in rows:
-		hsum += float(rw["h"]); wmax = maxf(wmax, float(rw["w"]))
-	var gap := 6.0
-	var sc := minf((sz.x - m * 2.0) / wmax, (avail_h - gap * rows.size()) / hsum)
-	var x_left := (sz.x - wmax * sc) * 0.5
-	var y := top
 	var first_p := Vector2.ZERO
-	for r in rows.size():
-		var rw: Dictionary = rows[r]
-		var x0: float = rw["x0"]
-		var z0: float = rw["z0"]
-		var w: float = rw["w"]
-		var h: float = rw["h"]
-		var o := Vector2(x_left, y)
-		var tr := Rect2(o, Vector2(w, h) * sc)
-		if rw.has("tex"): draw_texture_rect(rw["tex"], tr, false)
-		else: draw_rect(tr, Color(PAPER.darkened(0.06)))
-		# contours
-		for kind in ["minor", "major"]:
-			var src: PackedVector2Array = rw[kind]
-			if src.size() < 2: continue
-			var pts := PackedVector2Array()
-			pts.resize(src.size())
-			for q in src.size(): pts[q] = o + (src[q] - Vector2(x0, z0)) * sc
-			draw_multiline(pts, Color(CONTOUR, 0.5 if kind == "minor" else 0.85), 0.8 if kind == "minor" else 1.4, true)
-		# 100 m grid
-		var gx := ceilf(x0 / 100.0) * 100.0
-		while gx < x0 + w:
-			var px := o.x + (gx - x0) * sc
-			draw_line(Vector2(px, o.y), Vector2(px, o.y + h * sc), Color(GRID_C, 0.2), 1.0)
-			if int(gx) % 500 == 0: draw_string(font, Vector2(px + 3, o.y + h * sc - 4), "%d" % int(gx), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(GRID_C, 0.8))
-			gx += 100.0
-		draw_rect(tr, Color(INK, 0.35), false, 1.0)
-		# the trail: white casing, then red dashes (or its grade colours)
-		var xa := x0 - 2.0
-		var xb := x0 + w + 2.0
-		var line := PackedVector2Array()
-		var lines: Array = []
-		var cols: Array = []
-		var seg := PackedVector2Array()
-		var last_k := -1
-		for i in n:
-			var px := float(X[i])
-			if px < xa or px > xb:
-				if line.size() > 1: lines.append(line)
-				line = PackedVector2Array()
-				continue
-			var p := o + (Vector2(px, float(Z[i])) - Vector2(x0, z0)) * sc
-			line.append(p)
-			if i == 0: first_p = p
-		if line.size() > 1: lines.append(line)
-		for ln in lines: draw_polyline(ln, Color(1, 1, 1, 0.95), 6.0, true)
-		if color_mode == "type":
-			for ln in lines:
-				draw_polyline(ln, Color(TRAIL_C, 0.35), 2.0, true)
-				_dashes(ln, 9.0, 5.0, TRAIL_C, 3.2)
-		else:
-			var pts := PackedVector2Array()
-			var col_prev := Color.WHITE
-			var kprev := -999
-			for i in n:
-				var px := float(X[i])
-				if px < xa or px > xb:
-					if pts.size() > 1: draw_polyline(pts, col_prev, 3.6, true)
-					pts = PackedVector2Array(); kprev = -999
-					continue
-				var gq := roundi(G[i])
-				var p := o + (Vector2(px, float(Z[i])) - Vector2(x0, z0)) * sc
-				if gq != kprev and pts.size() > 0:
-					pts.append(p)
-					if pts.size() > 1: draw_polyline(pts, col_prev, 3.6, true)
-					pts = PackedVector2Array([p])
-				else: pts.append(p)
-				col_prev = _grade_col(float(gq)); kprev = gq
-			if pts.size() > 1: draw_polyline(pts, col_prev, 3.6, true)
-		# features: jumps as the map's black triangles with a yellow core, rollers dots, bridges squares
-		for f in data["feats"]:
-			var fx: float = f[0]
-			if fx < xa or fx > xb: continue
-			var fp := o + (Vector2(fx, float(f[1])) - Vector2(x0, z0)) * sc
-			var t: String = f[4]
-			if t in JUMP_TYPES:
-				draw_colored_polygon(PackedVector2Array([fp + Vector2(0, -7), fp + Vector2(6, 4.5), fp + Vector2(-6, 4.5)]), INK)
-				draw_colored_polygon(PackedVector2Array([fp + Vector2(0, -3), fp + Vector2(3, 2.5), fp + Vector2(-3, 2.5)]), Color(1, 0.85, 0.2))
-			elif t == "rhythm":
-				draw_circle(fp, 2.4, INK)
-			elif t in BRIDGE_TYPES:
-				draw_rect(Rect2(fp - Vector2(3.5, 3.5), Vector2(7, 7)), INK)
-		draw_string(font, o + Vector2(5, 13), "%d – %d M" % [r * 1000, (r + 1) * 1000], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(INK, 0.7))
-		y += h * sc + gap
-	draw_circle(first_p, 6.0, Color("2f9e58"))
-	draw_circle(first_p, 6.0, Color.WHITE, false, 1.5)
-	draw_string(font, first_p + Vector2(10, -8), "START", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, INK)
 	# elevation strip
 	var ey := sz.y - STRIP_H - 62.0
 	var ex0 := m
@@ -438,6 +418,14 @@ func _draw() -> void:
 		var xi: float = (float(X[mini(n - 1, dr[1])]) - X[0]) / xr
 		draw_line(Vector2(ex0 + xi * ew, ey + 4), Vector2(ex0 + xi * ew, ey + STRIP_H - 2), Color(TRAIL_C, 0.7), 1.5)
 	draw_string(font, Vector2(ex0 + 4, ey + 14), "ELEVATION  %d – %d M   (red tick = cliff drop)" % [roundi(emin), roundi(emax)], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(INK, 0.7))
+	if view != null and view.size.x > 0.0 and zoom > 0.0:   # the part of the trail the map shows now
+		var rg: Dictionary = (data["rows"] as Array)[0]
+		var vx0: float = centre.x - view.size.x * 0.5 / zoom
+		var vx1: float = centre.x + view.size.x * 0.5 / zoom
+		var xa2 := clampf((vx0 - float(X[0])) / xr, 0.0, 1.0)
+		var xb2 := clampf((vx1 - float(X[0])) / xr, 0.0, 1.0)
+		draw_rect(Rect2(ex0 + xa2 * ew, ey, (xb2 - xa2) * ew, STRIP_H), Color(TRAIL_C, 0.1))
+		draw_rect(Rect2(ex0 + xa2 * ew, ey, (xb2 - xa2) * ew, STRIP_H), Color(TRAIL_C, 0.6), false, 1.5)
 	# legend (top right)
 	var lx := sz.x - m
 	var ly := 24.0
@@ -461,3 +449,139 @@ func _draw() -> void:
 	if busy:
 		draw_rect(Rect2(Vector2.ZERO, sz), Color(PAPER, 0.3))
 		draw_string(font, Vector2(m, sz.y - 4), "UPDATING…", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, TRAIL_C)
+
+
+## the map itself: drag to pan, wheel to zoom, double click (or R) fits the whole trail. Clipped to its own rectangle.
+class MapView extends Control:
+	var pv: RoutePreview
+	var _drag := false
+
+	func _init() -> void:
+		clip_contents = true
+		mouse_filter = Control.MOUSE_FILTER_STOP
+		focus_mode = Control.FOCUS_CLICK
+		mouse_default_cursor_shape = Control.CURSOR_DRAG
+
+	func _gui_input(e: InputEvent) -> void:
+		if pv == null: return
+		if e is InputEventMouseButton:
+			var b := e as InputEventMouseButton
+			if b.button_index == MOUSE_BUTTON_LEFT or b.button_index == MOUSE_BUTTON_MIDDLE:
+				_drag = b.pressed
+				if b.pressed and b.double_click: pv.fit_all() if pv.zoom > pv._fit_zoom() * 1.05 else pv.fit()
+			elif b.pressed and b.button_index == MOUSE_BUTTON_WHEEL_UP: pv.zoom_at(b.position, 1.18)
+			elif b.pressed and b.button_index == MOUSE_BUTTON_WHEEL_DOWN: pv.zoom_at(b.position, 1.0 / 1.18)
+			accept_event()
+		elif e is InputEventMouseMotion and _drag:
+			pv.pan((e as InputEventMouseMotion).relative)
+			accept_event()
+		elif e is InputEventKey and e.pressed and (e as InputEventKey).keycode == KEY_R:
+			pv.fit()
+
+	func _w(p: Vector2) -> Vector2:   # world (x, z) -> this control
+		return size * 0.5 + (p - pv.centre) * pv.zoom
+
+	func _dash(line: PackedVector2Array, dash: float, gap: float, col: Color, w: float) -> void:
+		var on := true
+		var left := dash
+		for i in line.size() - 1:
+			var a := line[i]
+			var b := line[i + 1]
+			var seg := a.distance_to(b)
+			if seg < 0.001: continue
+			var d := 0.0
+			while d < seg:
+				var take := minf(left, seg - d)
+				if on: draw_line(a.lerp(b, d / seg), a.lerp(b, (d + take) / seg), col, w, true)
+				d += take
+				left -= take
+				if left <= 0.001:
+					on = not on
+					left = dash if on else gap
+
+	func _draw() -> void:
+		if pv == null or pv.data.is_empty() or pv.zoom <= 0.0: return
+		var data: Dictionary = pv.data
+		var z := pv.zoom
+		var rw: Dictionary = (data["rows"] as Array)[0]
+		var x0: float = rw["x0"]; var z0: float = rw["z0"]; var w: float = rw["w"]; var h: float = rw["h"]
+		var tr := Rect2(_w(Vector2(x0, z0)), Vector2(w, h) * z)
+		draw_rect(Rect2(Vector2.ZERO, size), RoutePreview.PAPER.darkened(0.04))
+		if rw.has("tex"): draw_texture_rect(rw["tex"], tr, false)
+		var org := _w(Vector2(x0, z0))
+		for kind in ["minor", "major"]:
+			var src: PackedVector2Array = rw[kind]
+			if src.size() < 2: continue
+			var pts := PackedVector2Array()
+			pts.resize(src.size())
+			for q in src.size(): pts[q] = org + (src[q] - Vector2(x0, z0)) * z
+			draw_multiline(pts, Color(RoutePreview.CONTOUR, 0.5 if kind == "minor" else 0.85), 0.8 if kind == "minor" else 1.5, true)
+		var font := ThemeDB.fallback_font
+		# 100 m grid, numbered every 500 m
+		var gx := ceilf(maxf(x0, pv.centre.x - size.x * 0.5 / z) / 100.0) * 100.0
+		var gx1 := minf(x0 + w, pv.centre.x + size.x * 0.5 / z)
+		while gx < gx1:
+			var px := _w(Vector2(gx, 0)).x
+			draw_line(Vector2(px, 0), Vector2(px, size.y), Color(RoutePreview.GRID_C, 0.2), 1.0)
+			if int(gx) % 500 == 0: draw_string(font, Vector2(px + 3, size.y - 5), "%d M" % int(gx), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(RoutePreview.GRID_C, 0.9))
+			gx += 100.0
+		var X: PackedFloat64Array = data["X"]
+		var Z: PackedFloat64Array = data["Z"]
+		var G: PackedFloat32Array = data["grade"]
+		var n: int = data["n"]
+		var line := PackedVector2Array()
+		var lines: Array = []
+		var vx0 := pv.centre.x - size.x * 0.5 / z - 10.0
+		var vx1 := pv.centre.x + size.x * 0.5 / z + 10.0
+		for i in n:
+			var px := float(X[i])
+			if px < vx0 or px > vx1:
+				if line.size() > 1: lines.append(line)
+				line = PackedVector2Array()
+				continue
+			line.append(_w(Vector2(px, float(Z[i]))))
+		if line.size() > 1: lines.append(line)
+		var cw := clampf(z * 5.0, 5.0, 9.0)
+		for ln in lines: draw_polyline(ln, Color(1, 1, 1, 0.95), cw, true)
+		if pv.color_mode == "type":
+			for ln in lines:
+				draw_polyline(ln, Color(RoutePreview.TRAIL_C, 0.35), cw * 0.35, true)
+				_dash(ln, cw * 1.6, cw * 0.9, RoutePreview.TRAIL_C, cw * 0.55)
+		else:
+			var pts := PackedVector2Array()
+			var col_prev := Color.WHITE
+			var kprev := -999
+			for i in n:
+				var px := float(X[i])
+				if px < vx0 or px > vx1:
+					if pts.size() > 1: draw_polyline(pts, col_prev, cw * 0.6, true)
+					pts = PackedVector2Array(); kprev = -999
+					continue
+				var gq := roundi(G[i])
+				var p := _w(Vector2(px, float(Z[i])))
+				if gq != kprev and pts.size() > 0:
+					pts.append(p)
+					if pts.size() > 1: draw_polyline(pts, col_prev, cw * 0.6, true)
+					pts = PackedVector2Array([p])
+				else: pts.append(p)
+				col_prev = pv._grade_col(float(gq)); kprev = gq
+			if pts.size() > 1: draw_polyline(pts, col_prev, cw * 0.6, true)
+		var k := clampf(z * 1.4, 0.9, 2.2)   # marker size grows a little with the zoom
+		for f in data["feats"]:
+			var fp := _w(Vector2(float(f[0]), float(f[1])))
+			if fp.x < -20 or fp.x > size.x + 20: continue
+			var t: String = f[4]
+			if t in RoutePreview.JUMP_TYPES:
+				draw_colored_polygon(PackedVector2Array([fp + Vector2(0, -7) * k, fp + Vector2(6, 4.5) * k, fp + Vector2(-6, 4.5) * k]), RoutePreview.INK)
+				draw_colored_polygon(PackedVector2Array([fp + Vector2(0, -3) * k, fp + Vector2(3, 2.5) * k, fp + Vector2(-3, 2.5) * k]), Color(1, 0.85, 0.2))
+				if z > 1.3: draw_string(font, fp + Vector2(9, 4) * k, t.to_upper(), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, RoutePreview.INK)
+			elif t == "rhythm":
+				draw_circle(fp, 2.4 * k, RoutePreview.INK)
+			elif t in RoutePreview.BRIDGE_TYPES:
+				draw_rect(Rect2(fp - Vector2(3.5, 3.5) * k, Vector2(7, 7) * k), RoutePreview.INK)
+		var sp := _w(Vector2(float(X[0]), float(Z[0])))
+		draw_circle(sp, 6.0, Color("2f9e58"))
+		draw_circle(sp, 6.0, Color.WHITE, false, 1.5)
+		draw_string(font, sp + Vector2(10, -8), "START", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, RoutePreview.INK)
+		draw_rect(Rect2(Vector2.ZERO, size), Color(RoutePreview.INK, 0.35), false, 1.0)
+		draw_string(font, Vector2(8, 16), "DRAG TO MOVE  ·  WHEEL TO ZOOM  ·  DOUBLE CLICK: WHOLE TRAIL / BACK", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(RoutePreview.INK, 0.6))

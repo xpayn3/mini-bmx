@@ -1471,6 +1471,7 @@ func _setup_route(content: HBoxContainer) -> void:
 		sl.step = 0.05
 		sl.scrollable = false
 		sl.value = RouteStyle.get_value(k)
+		sl.add_theme_stylebox_override("focus", StyleBoxEmpty.new())   # the focus wash covered the whole slider (the knob vanished)
 		sl.custom_minimum_size.y = 28
 		sl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		sl.value_changed.connect(func(v: float):
