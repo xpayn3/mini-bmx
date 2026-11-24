@@ -2111,6 +2111,27 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   26 / 30 / 38 / 44 km/h all CLEAN (short onto the floor, on the landing at 38, past it at 44), popped at 38 PERFECT.
   `terrain_cs_cmp` EXACT, `wood_edge_probe` walls=0, `trail_grow_probe` PASS.
 
+### Ruts (2026-11-24, MX vs ATV-style; the test playground for now, `BMX_RUTS=1` in rides too)
+- The ground dug in where tyres roll, deeper each pass, and felt: `Terrain.height` / `deck_height` / `top_height`
+  (and the playground's) subtract `rut_at(x, z)`, so a wheel drops into the groove, its walls tilt the ground under the
+  tyre and the existing side-slope knock steers the bike along it / kicks it crossing one (no new steering code).
+- `world/RutFieldCs.cs`: sparse 8 m tiles of 5 cm cells (made only where tyres rolled, oldest dropped past 96 tiles ~10
+  MB); `Stamp` digs a tyre's stretch since the last tick only (each point once per pass; standing still digs nothing):
+  a rounded groove `HALF_W` 4.5 cm + a lip of pushed-up dirt (`LIP` 0.4 of the dig); `Depth` bilinear; `TileRH` for the
+  shader. `world/ruts.gd` (made by `Game._make_ruts`, deferred): both grounded tyres stamp every physics tick
+  (`DIG` per surface: grass 4 mm / pass max 3.5 cm, dirt 7 / 7, wet 12 / 9, sand 20 / 11; x the tyre's load 0.3..3,
+  x2 under a locked rear); keeps a 40 m (5 x 5 tiles) RH texture window round the rider for the ground shader (only dug
+  tiles re-copied, 10 Hz), globals `rut_tex` / `rut_win` (project.godot). `shaders/ruts.gdshaderinc`: `rut_depth`,
+  `rut_normal` (the groove's walls shaded from the depth's slope), `rut_colour` (packed darker bottom, lighter lip);
+  used by `playground_ground.gdshader` (not the world's ground yet). Cost: stamping ~0.02 ms a tick, the node below
+  measurement; the depth reads are one bounds check outside the dug area.
+- Measured (playground `brake_sand`, test rider at 25 km/h): 2-3 mm the first pass, 1.5-3 cm after a few, 6-9 cm where
+  the rear skids to a stop; riding down its own rut no side kick; slalom over its ruts on dirt: no crashes, same speeds.
+- Tests: `BMX_RUTS_PROBE=1` (`RUTS tiles= stamp_us= under_rear= under_front= knock=`), `BMX_RUTS=0` off,
+  `BMX_NO_TRACKS=1` hides the drawn tyre tracks (to see the ruts alone).
+- Not done: the world's ground shader, the drawn tyre tracks lying down in the rut (the drawn tyre already sinks in:
+  `top_height` includes it), drying / filling in over time, ruts from AI riders / ghosts.
+
 ### Developer view of the test playground (`scripts/levels/ride_diag.gd`) - telemetry + sliders for riding code
 - **Only in the test playground** (user decision 2026-11-21: developer tools live in that level, normal rides have none).
   **Layout (2026-11-22, user: "tidy, compact, nothing covering")**: a slim **tuning column** on the left (the TuneCard,

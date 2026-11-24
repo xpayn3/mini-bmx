@@ -219,6 +219,7 @@ var tumbleweeds: Tumbleweeds
 var title_life: TitleLife     # title screen only: birds, blowing dust, dust round the bushes
 
 func _ready() -> void:
+	if not title_world: _make_ruts.call_deferred()   # (once the terrain exists)
 	if not title_world and level == "" and Env.s("BMX_GHOST") != "0":   # the ghost of your best run on this world (game/ghost_rider.gd)
 		ghost = preload("res://scripts/game/ghost_rider.gd").new(self)
 		add_child(ghost)
@@ -1813,6 +1814,13 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 		grass.trample(1, rear, f, 0.34 if skid_fx else 0.3)
 
 # ---------------------------------------------------------------- ride control
+var ruts = null    # world/ruts.gd (the test playground for now)
+## ruts: in the test playground for now (BMX_RUTS=1: rides too, BMX_RUTS=0: off)
+func _make_ruts() -> void:
+	if Env.s("BMX_RUTS") == "0" or not (terrain is PlaygroundTerrain or Env.s("BMX_RUTS") == "1"): return
+	ruts = preload("res://scripts/world/ruts.gd").new(self)
+	add_child(ruts)
+	if not ruts.active(): ruts.queue_free(); ruts = null
 var ghost = null   # game/ghost_rider.gd (rides of this world only, not the title / levels)
 
 func respawn(new_world: bool) -> void:
@@ -1833,6 +1841,7 @@ func respawn(new_world: bool) -> void:
 		far_hills.setup(terrain)
 		add_child(far_hills)
 		if sheep: sheep.reset()
+		if ruts: ruts.clear()
 		tumbleweeds.clear()
 		flash("New world #%d" % GameState.seed)
 	if fx.has_method("clear_tracks"): fx.clear_tracks()
@@ -2385,6 +2394,7 @@ func _physics_process(dt: float) -> void:
 	if level_probe: level_probe.pre_step(dt, inp)
 	if lab: lab.pre_step(inp)
 	phys.step(dt, inp)
+	if ruts: ruts.step(phys)
 	if _SKIP: _skip_probe(dt, inp)
 	if level_probe: level_probe.post_step(dt)
 	if diag: diag.record(dt, inp)

@@ -65,16 +65,16 @@ func _height0(x: float, z: float) -> float:
 	return course.height(x, z)
 
 func height(x: float, z: float) -> float:
-	return course.height_rocks(x, z)   # (domes over the ROCKS lane's rocks, as in the world)
+	return course.height_rocks(x, z) - rut_at(x, z)   # (domes over the ROCKS lane's rocks, as in the world; ruts dug in)
 
 func deck_height(x: float, z: float) -> float:
-	return course.height(x, z)
+	return course.height(x, z) - rut_at(x, z)
 
 func mesh_height(x: float, z: float) -> float:
 	return course.height(x, z)
 
 func top_height(x: float, z: float) -> float:
-	return course.height_rocks(x, z)
+	return course.height_rocks(x, z) - rut_at(x, z)
 
 func grid_height(x: float, z: float) -> float:
 	return course.height(x, z)
