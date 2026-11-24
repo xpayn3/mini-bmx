@@ -568,18 +568,29 @@ func feed(dt: float, surf: int, speed: float, skid: bool, air: bool, landed: flo
 		dry = minf(1.0, dry + dt / DRY_T * (1.0 - wet * 2.5))
 
 ## per frame. bike_root: world -> bike-root transform source (the rig: y = height above the ground)
+## the frame profiler (F10): while it records, Game sets this to its per-frame dict ("grime.*")
+var prof = null
+func _gp(k: String, t0: int) -> int:
+	var now := Time.get_ticks_usec()
+	prof["grime." + k] = prof.get("grime." + k, 0) + (now - t0)
+	return now
+
 func update(dt: float, bike_root: Node3D) -> void:
+	var _gt := Time.get_ticks_usec() if prof != null else 0
 	_t += dt
 	_bike_root = bike_root
 	_scan_t -= dt
 	if _scan_t <= 0.0:
 		_scan_t = 1.5   # catches parts that load later (helmet, drivetrain)
 		_scan()
+	if prof != null: _gt = _gp("scan", _gt)
 	_cav_poll()
+	if prof != null: _gt = _gp("cavity", _gt)
 	if _PROBE and int(_t) != int(_t - dt):
 		print("GRIME t=%.0f mud=%.3f dust=%.2f dry=%.2f flake=%.2f wet=%.2f" % [_t, mud, dust, dry, flake, wet])
 	if _t > 0.3 and int(_t * 4.0) != int((_t - dt) * 4.0):
 		_pin()   # once the rider is posed on the bike; new parts (helmet, kit) get pinned as they appear
+	if prof != null: _gt = _gp("pin", _gt)
 	var m := mud if enabled else 0.0
 	var w := wet if enabled else 0.0
 	var b := blood if enabled else 0.0
@@ -601,6 +612,7 @@ func update(dt: float, bike_root: Node3D) -> void:
 		_blood_on = bon
 		for mm in _all_muds(): _chain(mm)   # base -> mud -> blood -> tail
 		for mat in _mats: _set_pass(mat)
+	if prof != null: _gt = _gp("passes", _gt)
 	RenderingServer.global_shader_parameter_set("grime", Vector4(m, w, _t, b))
 	RenderingServer.global_shader_parameter_set("mud_col", mud_col)
 	RenderingServer.global_shader_parameter_set("rider_trim", trim)

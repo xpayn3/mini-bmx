@@ -393,7 +393,15 @@ func _refresh_records() -> void:
 		vb.add_child(hb)
 	vb.add_child(UITheme.label("H or ✕ to close", 12, UITheme.MUTED))
 
+## the frame profiler (F10): while it records, Game sets this to its per-frame dict; update_hud's parts go in as "hud.*"
+var prof = null
+func _hp(k: String, t0: int) -> int:
+	var now := Time.get_ticks_usec()
+	prof["hud." + k] = prof.get("hud." + k, 0) + (now - t0)
+	return now
+
 func update_hud(dt: float) -> void:
+	var _ht := Time.get_ticks_usec() if prof != null else 0
 	UITheme.warm_punch_step()   # the big display letters, one a frame, before the first pop / banner needs them
 	# the bike computer switches on when the ride starts (the HUD shows): its power-on chime
 	if not visible: _power_t = -1.0
@@ -401,6 +409,7 @@ func update_hud(dt: float) -> void:
 		var was := _power_t
 		_power_t = maxf(_power_t, 0.0) + dt
 		if was < 0.35 and _power_t >= 0.35: beep.power_on()
+	if prof != null: _ht = _hp("warm_font", _ht)
 	var st: BikePhysics = game.phys
 	# frame times on real time (the SYSTEM page): FPS over half a second + the last FRAME_HIST frames
 	var now_us := Time.get_ticks_usec()
@@ -413,6 +422,7 @@ func update_hud(dt: float) -> void:
 		fps_now = fps_frames / fps_acc
 		fps_frames = 0; fps_acc = 0
 	# the SYSTEM page shows the ride in 3D too: the Debug Draw 3D physics overlay is on while it's up
+	if prof != null: _ht = _hp("frame_stats", _ht)
 	var sys_up: bool = gauge != null and gauge.visible and visible and gauge.order.size() > gauge.page and int(gauge.order[gauge.page]) == GaugeView.SYS_PAGE
 	if sys_up != _sys_overlay:
 		_sys_overlay = sys_up
@@ -433,6 +443,7 @@ func update_hud(dt: float) -> void:
 			if style_pop: style_pop.add(1250, "BACKFLIP")
 	if Env.s("BMX_MSG_AT") != "" and _demo_t < 0.0:
 		msg_l.t = float(Env.s("BMX_MSG_AT")); msg_l.queue_redraw()
+	if prof != null: _ht = _hp("labels_msg", _ht)
 	flow_leds.tick(st, dt)
 	hop_bar.tick(st, dt)
 	pump_bar.tick(st, dt)
@@ -447,6 +458,7 @@ func update_hud(dt: float) -> void:
 	life_bar.queue_redraw()
 	gauge.bump = maxf(0.0, gauge.bump - dt * 4)
 	# elevation profile
+	if prof != null: _ht = _hp("bars_life", _ht)
 	elev_t += dt
 	if elev_t >= HIST_DT:
 		elev_t = 0
@@ -465,7 +477,9 @@ func update_hud(dt: float) -> void:
 	_ride_stats(st, dt)
 	_computer_tones(st, dt)
 	alert_new = maxf(0.0, alert_new - dt)
+	if prof != null: _ht = _hp("stats_tones", _ht)
 	_trail_watch(st)
+	if prof != null: _ht = _hp("trail_watch", _ht)
 	gauge.queue_redraw()
 	air_card.tick(dt)
 	biome_l.text = game.biome_cur

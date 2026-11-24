@@ -32,6 +32,14 @@ varying vec3 v_n;
 varying float v_t;
 varying float v_gust;
 varying float v_flat;
+varying vec3 v_side;    // the blade's width axis (world): the fragment rounds the normal across it
+varying float v_u;      // -1 .. 1 across the blade
+varying float v_round;  // how much rounding (near blades close up; gone with distance: no far shimmer)
+
+// (2026-11-24, grass research: Ghost of Tsushima GDC 2021, 2Retr0 GodotGrass, AMD mesh-shader grass) clumps, rounded
+// normals, root self-shadow, edge-on blades turned to the camera, wrapped diffuse. `BMX_GRASS_OLD` = before (grass_field.gd)
+uniform float look_v2 = 1.0;
+const float CLUMP = 1.15;   // m: clump cell size (a tuft every ~1 m)
 
 vec2 win_uv(vec2 xz) { return ((xz - win_origin) / texel + 0.5) / win_size; }
 
@@ -59,6 +67,21 @@ void vertex() {
 	vec4 gc = textureLod(grass_col, uvw, 0.0);
 	float gy = textureLod(grass_h, uvw, 0.0).r;
 	float inside = step(0.0, uvw.x) * step(uvw.x, 1.0) * step(0.0, uvw.y) * step(uvw.y, 1.0);
+	// clumps (GoT): the nearest of the 3 x 3 jittered clump centres round the root. Blades of one clump share a height,
+	// a shade and lean out from its middle: the field reads as tufts, not noise
+	vec2 ci = floor(root / CLUMP);
+	float cbest = 1.0e9; vec2 cc = root; vec4 ch = vec4(0.5);
+	for (int cy = -1; cy <= 1; cy++) {
+		for (int cx = -1; cx <= 1; cx++) {
+			vec2 id = ci + vec2(float(cx), float(cy));
+			vec4 hh = g_hash4(id * 1.71 + 203.0);
+			vec2 pt = (id + 0.15 + 0.7 * hh.xy) * CLUMP;
+			float d2 = dot(pt - root, pt - root);
+			if (d2 < cbest) { cbest = d2; cc = pt; ch = hh; }
+		}
+	}
+	float cl_d = sqrt(cbest) / CLUMP;   // 0 at the clump's middle .. ~0.75 at its edge (cl_d)
+	float clump_k = look_v2;
 	// patches: thick meadow here, thin there; the density map says whether grass grows at all
 	float patch = g_noise(root * 0.11) * 0.65 + g_noise(root * 0.43 + 7.0) * 0.35;
 	float den = clamp(gc.a * 1.6, 0.0, 1.0) * inside * smoothstep(0.05, 0.4, patch * 0.6 + gc.a * 0.6);
@@ -73,10 +96,13 @@ void vertex() {
 	// height variation: broad short / long swathes (~20 m) and a few stalks standing out above the rest
 	hgt *= mix(0.86, 1.18, g_noise(root * 0.05 + 13.0));
 	hgt *= h2.z > 0.96 ? 1.3 : 1.0;
+	// a clump: its own height (0.75 .. 1.25), tallest in its middle
+	hgt *= mix(1.0, mix(0.75, 1.25, ch.z) * (1.08 - 0.3 * smoothstep(0.15, 0.7, cl_d)), clump_k);
 	hgt *= grow * fade;
 	if (hgt <= 0.0) {   // no blade here (doesn't grow / faded out): collapse it, skip the wind, hashes and normal reads
 		VERTEX = vec3(0.0, -1.0e5, 0.0);
 		v_world = VERTEX; v_col = vec3(0.0); v_n = vec3(0.0, 1.0, 0.0); v_t = 0.0; v_gust = 0.0; v_flat = 0.0;
+		v_side = vec3(1.0, 0.0, 0.0); v_u = 0.0; v_round = 0.0;
 	} else {   // (Godot shaders don't allow return in vertex())
 	float wid = near ? (0.03 + 0.025 * h2.x) : (0.09 + 0.05 * h2.x);
 	wid *= mix(0.4, 1.0, fade);
@@ -88,12 +114,25 @@ void vertex() {
 	vec2 dirv = vec2(cos(yaw), sin(yaw));
 	vec2 to_cam = normalize(CAMERA_POSITION_WORLD.xz - root + 1e-4);
 	if (!near) dirv = vec2(-to_cam.y, to_cam.x);
+	else if (look_v2 > 0.5) {
+		// seen edge-on a blade is a sliver (GoT / 2Retr0 "view-space thickening"): the closer to edge-on, the more it
+		// turns to face the camera (up to 60 % of the way)
+		vec2 face = vec2(-to_cam.y, to_cam.x);
+		float edge = 1.0 - abs(dot(vec2(-dirv.y, dirv.x), to_cam));
+		dirv = normalize(mix(dirv, face * sign(dot(dirv, face) + 1e-4), pow(edge, 4.0) * 0.6));
+	}
 	vec3 side = vec3(dirv.x, 0.0, dirv.y);
 	vec3 fwd = vec3(-dirv.y, 0.0, dirv.x);
 	// shape: tapers to the tip, bows over towards its lean
 	float t = UV.y;
 	float taper = near ? (1.0 - t * 0.8) : 1.0 - t;
 	float lean = (0.25 + 0.45 * h2.z) * (h2.y > 0.5 ? 1.0 : -1.0);
+	vec3 lean_dir = fwd * lean;
+	if (near && clump_k > 0.0) {   // a tuft opens outwards: lean away from the clump's middle (plus a little of its own)
+		vec2 away = root - cc;
+		float al = length(away);
+		if (al > 1e-3) lean_dir = mix(lean_dir, vec3(away.x / al, 0.0, away.y / al) * abs(lean) * (0.6 + 0.8 * cl_d), 0.65 * clump_k);
+	}
 	vec3 base = vec3(root.x, gy - 0.04, root.y);
 	// trampled: laid over along the way it was pressed (a little fanned per blade), springing back slowly;
 	// the blades stand up again one by one (own hash), stiff ones first
@@ -112,7 +151,7 @@ void vertex() {
 	}
 	float up_k = 1.0 - 0.88 * flat_k;
 	vec3 p = base + side * UV.x * wid * 0.5 * taper * (1.0 + 0.3 * flat_k)
-		+ vec3(0.0, t * hgt * up_k, 0.0) + fwd * lean * t * t * hgt * (1.0 - flat_k);
+		+ vec3(0.0, t * hgt * up_k, 0.0) + lean_dir * t * t * hgt * (1.0 - flat_k);
 	p.xz += tdir * flat_k * hgt * (0.35 * t + 0.6 * t * t);
 	p += wind_bend(base, t * hgt * up_k, 1.0, 1.0 - flat_k * 0.8);
 	// ground normal from the height window: the blades shade like the ground they cover (soft, no stripes)
@@ -127,6 +166,7 @@ void vertex() {
 	// colour patches across the field (greener / sun-dried) and each blade a little its own
 	float cp = g_noise(root * 0.07 + 31.0);
 	vec3 c = gc.rgb * (0.82 + 0.36 * h2.x);
+	c *= mix(vec3(1.0), mix(vec3(0.9, 0.97, 0.88), vec3(1.07, 1.04, 0.93), ch.w), clump_k);   // each clump its own shade
 	c = mix(c, c * vec3(0.86, 1.05, 0.82), smoothstep(0.55, 0.85, cp) * 0.5);
 	c = mix(c, c * vec3(1.08, 1.0, 0.84), smoothstep(0.45, 0.15, cp) * 0.4);
 	// a little richer than the land colour (it reads olive once the low sun warms it)
@@ -141,6 +181,12 @@ void vertex() {
 	// laid-down blades show their pale, shiny side: the trail reads as a lighter, silvery stripe
 	vec3 pale = mix(c, vec3(dot(c, vec3(0.3, 0.55, 0.15))), 0.3) * vec3(1.5, 1.45, 1.15);
 	v_col = mix(v_col, pale, flat_k * 0.9);
+	// self-shadow down in the grass (AMD / 2Retr0: albedo x mix(dark, 1, h^1.5)): depth close up, faded out with
+	// distance so the far field doesn't go dark; laid-down blades are in the open
+	float ss = mix(0.58, 1.0, pow(t, 1.5));
+	v_col *= mix(1.0, ss, look_v2 * (1.0 - smoothstep(8.0, near_r + 4.0, dist)) * (1.0 - flat_k));
+	v_side = side; v_u = UV.x;
+	v_round = near ? look_v2 * (1.0 - smoothstep(6.0, near_r, dist)) : 0.0;
 	v_flat = flat_k;
 	// wind waves: a gust bends the blades over and their paler undersides catch the light, so the gust
 	// fronts roll across the field as lighter bands (the wind already moves them: wind_gust in atmos)
@@ -154,7 +200,9 @@ void vertex() {
 
 void fragment() {
 	ALBEDO = v_col;
-	NORMAL = normalize((VIEW_MATRIX * vec4(v_n, 0.0)).xyz);
+	// rounded across the width (GoT): the normal tilts out towards each edge, so a flat blade shades like a curved one
+	vec3 wn = normalize(v_n + v_side * v_u * 0.6 * v_round);
+	NORMAL = normalize((VIEW_MATRIX * vec4(wn, 0.0)).xyz);
 	ROUGHNESS = 0.72 - 0.2 * v_gust * v_t - 0.3 * v_flat;   // gust-bent / laid-down blades: a soft sheen
 	AO = mix(mix(0.72, 1.0, v_t), 1.0, v_flat);
 	SPECULAR = 0.22;
@@ -163,7 +211,10 @@ void fragment() {
 
 void light() {
 	vec3 lc = atmos_light_col(ATTENUATION * LIGHT_COLOR, LIGHT_IS_DIRECTIONAL, v_world);   // cloud shade once
-	DIFFUSE_LIGHT += (clamp(dot(NORMAL, LIGHT), 0.0, 1.0) + clamp(dot(-NORMAL, LIGHT), 0.0, 1.0) * 0.2) * lc;
+	// wrapped diffuse (2Retr0: light wraps round a thin blade, no flat black backs); the old one with look_v2 = 0
+	float nl = dot(NORMAL, LIGHT);
+	float dif = mix(clamp(nl, 0.0, 1.0) + clamp(-nl, 0.0, 1.0) * 0.2, clamp((nl + 0.35) / 1.35, 0.0, 1.0) + clamp(-nl, 0.0, 1.0) * 0.12, look_v2);
+	DIFFUSE_LIGHT += dif * lc;
 	// backlit glow: sun behind the blade, camera in front -> the thin tip lights up in its own colour (low sun = strong)
 	if (LIGHT_IS_DIRECTIONAL) {
 		float facing = clamp(dot(-VIEW, LIGHT), 0.0, 1.0);          // looking towards the light

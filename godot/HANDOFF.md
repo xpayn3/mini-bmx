@@ -67,7 +67,7 @@ Player data: `%APPDATA%\Mini BMX\` (custom user dir) — `crashlogs/` (see Crash
 W/↑ pedal · S/↓ brake (both levers, with feel) · **Ctrl front brake only · Alt rear brake only (bare levers: they lock)** · A/D steer · **Space** hop/pump (hold to charge; **in the air: tuck the bike up**) ·
 **S/W pressed fresh as you leave a lip: throw a back/front flip** · **W/S in the air: tilt the bike nose down/up (limited, body shift)** · **A/D in the air: lean the bike left/right (no spins)** · **brake + A/D when slow: pivot (pirouette)** · Shift sprint (stamina) · Q/E shift gears · F bail · Backspace back to
 start · R new world · B next bike · C next camera · Z/X rotate camera · +/- zoom · mouse drag orbit ·
-H records · **I instant replay** (pad L3; whole ride, savable: section 5) · **F4 ride diagnostics** (test playground only, section 5) · **M trail map** (pad: Share) · **P / K / L** the tuning card on its Ride / Rider / Look tab · **O photo mode** (free camera, see section 5) · F1 hide HUD ·
+H records · **I instant replay** (pad L3; whole ride, savable: section 5) · **F4 ride diagnostics** (test playground only, section 5) · **F10 frame profiler** (section 9, Perf) · **M trail map** (pad: Share) · **P / K / L** the tuning card on its Ride / Rider / Look tab · **O photo mode** (free camera, see section 5) · F1 hide HUD ·
 F12 screenshot · **F11 / the small button bottom right: fullscreen on / off** (`ui/fullscreen_button.gd`, on every screen,
 saves Settings › window mode; in the garage it sits above Save / Save & ride) · Esc pause. Gamepad (Xbox): triggers pedal/brake, left stick steer, X hop (jump), A sprint, bumpers gears, Y camera, D-pad left / right rotate the camera,
 **right stick = the rider's body, all the time**: up / down shifts the weight forward over the bars / back (pulled well back
@@ -505,6 +505,11 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   `_crash_dust` per ragdoll part): a 192² RGBAF window (0.25 m texels, follows the rider in 8 m steps) storing the time pressed,
   the direction and how hard; the shader lays those blades down along the travel (pale, sheeny) and lets them stand up again
   over `trample_hold` 2.5 s .. `trample_back` 28 s (per blade). Cleared on respawn.
+  **Look from the research (2026-11-24, `docs/research/grass.md`: Ghost of Tsushima GDC 2021, Jahrmann & Wimmer, AMD,
+  2Retr0 GodotGrass)**: Voronoi clumps (`CLUMP` 1.15 m: shared height / shade, near blades lean out of the middle),
+  normals rounded across the width (near, faded with distance), self-shadow down in the grass (faded from 8 m),
+  edge-on near blades turned towards the camera, wrapped diffuse. Uniform `look_v2` (`BMX_GRASS_OLD=1` = 0 = before).
+  GPU 0.59 -> 0.64 ms. Tile placement is C# (`world/GrassPlaceCs.cs`, `BMX_GRASS_GD=1` = the GDScript `_place`).
 
 - **Sponsor props** (`TrailCourse.chunk_gates` / `chunk_boards`, fixed spacing by centreline index so growing never moves them): a huge steel gantry with a sponsor banner over the trail every 300 m (`TrailGate.build`, made-up brands in `TrailGate.SPONSORS`, no collision, skipped on jumps) and breakable wooden roadside billboards every ~80 m (fence-style panel in `TerrainChunkBuilder._boards`, so the bike smashes them; the Label3D text is freed on smash). Probe: `BMX_GATE_PROBE=1`.
 
@@ -2656,6 +2661,55 @@ Known, not fixed (lower priority from the code review):
     compiled while drawing (a stall; should stay 0 in a ride); time spent outside every `_process` is often a `_draw`
     (deferred, runs in the message-queue flush). A frame-phase probe (`RenderingServer.frame_pre/post_draw`,
     `SceneTree.physics_frame/process_frame`, priority ±1e5 nodes) splits a slow frame into its parts.
+- **Frame profiler (F10, 2026-11-24, `game/frame_profiler.gd`, `FrameProfiler`, made by `Game.toggle_profiler` on first use;
+  rebindable action `profiler`)**: compact (graph) -> full (graph + table) -> off. Every drawn frame: wall time, each
+  `Game._perf` section (the same ones `BMX_PERF` prints; physics `p_*` included, filled only while it is open:
+  `Game._prof_rec`), GPU + render-CPU time of the main viewport, draw calls, primitives, physics ticks, pipelines
+  compiled while drawing (pink tick on the graph = a shader stall), and the ENGINE PHASES (`eng.*`, marker nodes at
+  process / physics priority -/+100000 under the root + `RenderingServer.frame_pre/post_draw`): all `_process` (ours
+  included), all physics ticks, the render, and "gaps" (present, waiting on the GPU, input). Graph: per frame our top 8
+  sections coloured, the rest of our code grey, render CPU light grey, the rest of the frame (other nodes, GPU wait)
+  faint; GPU = white dots; 120 / 60 / 30 fps lines; fixed 40 ms scale. It is an Image painted one column a frame
+  (`_paint`) and drawn as one texture; the header + table refresh 4x / s (the first version drew 600 x 8 rects and
+  recomputed everything each frame: the ride ran ~53 fps with it open, ~100 without; now ~96 vs ~101). Mouse over
+  the graph = that one frame in the table.
+  Shift+F10 freezes, Ctrl+F10 saves the 600-frame ring as CSV. A spike (> 25 ms or 2.2x the median, after the first
+  second) is red and is written by itself with 60 frames before / 30 after to `%APPDATA%\Mini BMX\profiles\`
+  (`spike_<ms>ms_<date>.csv`, max one per 5 s / 20 a session; tests: `profiles/tests/`). Reading a spike: one section
+  jumping = that system; every section 3-10x slower at once = the whole process was starved (another GPU / CPU program,
+  OS), not our code. Test: `BMX_PROF=1|2` opens it (+ `BMX_SHOT`); test runs print `PROF WORST` at exit (each section's
+  worst single frame, after the first second). To add a section: `_pk = _perf("name", _pk)` in `Game._process` /
+  `_physics_process` (only Game's own code is timed; other nodes' `_process` land in "engine"). A key with a dot is a
+  SUB-section (not summed, not stacked; the table lists the top 3 `p_step.*` under `p_bike_step`): `BikePhysics.prof`
+  (= the profiler's dict while it records) times every ride stage (`p_step.controls` .. `wheels`, `start_crash`,
+  `crash_step`, inside `_step_vertical`: `v_sample`, `v_substeps`, `v_nose_checks`, `v_crash_checks`, the landing's
+  `land_*`), `Game.get_up` its parts (`getup.*`), `Game.flash` (`msg.flash`).
+  **Found and fixed with it the same day** (seed 4242 follow rides, worst single frame): (1) every get-up rebuilt the
+  helmet action cam (`ActionCam.build` + `merged`): 91 ms -> ~1 ms, `Rider._cam_tpl` keeps a built copy per mount + gear
+  and remounts duplicate it (`BMX_CAM_NOCACHE=1` = the old way); (2) `CrashLog.note` printed to stdout: 7-14 ms inside
+  the physics step on every crash through a console pipe; it now writes straight into the session log (`_Sink._put`, no
+  print); (3) the landing slam was rendered on the landing step (`SlamSynth.Render` + a per-sample GDScript WAV loop,
+  5-10 ms): `SlamSynth.StartBank` pre-renders every size x sideways bucket (+ the bad-landing layer), 2 variants each, as
+  16-bit PCM on .NET pool threads at ride start; `Take` hands one out (~0.05 ms) and re-renders that slot in the
+  background (never the same twice). Worst physics step 18-30 ms -> 3-3.6 ms. (4) the first switch to the speed-blur
+  grade shader (`_grade_sh_mip`, ~25 km/h) compiled it mid-ride, 8 ms: it is now set once while the ride loads.
+  (5) `hud.warm_font` (one punch-font glyph a frame, up to ~7 ms) only shows in `--ride` test launches: a normal launch
+  builds them all on the title backdrop during the intro / menu. `grime.*`, `hud.*` sub-sections are timed too.
+  **Where a frame goes (seed 4242 follow ride, RTX 3090, 1600x900, the user's settings: vsync off, no cap, Ultra)**:
+  ~100 fps, ~10-11 ms a frame, CPU-bound on the main thread (GPU ~30 % busy, main view ~4-5 ms): all `_process` ~6.4 ms
+  (our timed sections ~3 ms, the other ~3.4 ms other nodes' scripts), render CPU ~2.5, physics ticks ~0.8, gaps ~1.7.
+  **Other nodes' scripts** (`BMX_PROF_NODES=1` + `BMX_PROF=1 BMX_IDLE=1 --autotest=55`: every node running `_process`
+  grouped by script, each group switched off for 110 frames, `PROFNODES group= nodes= ms=` = how much the whole _process
+  phase shrank; use BMX_IDLE, a moving ride drifts too much): the hair was 2.1-2.5 ms. Its guide-lock step is now C#
+  (`rider/HairSimCs.cs` `Step`, same maths; `Setup` on a style change, `SetState` on a reset, `GetP` once a frame) and
+  the braid's mesh too (`PlaitFromSim` refills one ArrayMesh in place; it was rebuilt through GDScript lambdas every
+  frame, ~1.4 ms): hair 2.45 -> 0.87 ms. `BMX_HAIR_GD=1` = the GDScript step + plait; `BMX_HAIR_PERF=1` (`HAIRPERF` /
+  `HAIRUP` lines: the parts of a hair frame), `BMX_HAIR_CMP=1` (`HAIRCMP`: C# braid vs GDScript, same 3636 vertices
+  within 0.07 mm). The same 30 s follow ride: ~101 -> ~133 fps; all _process 4.5 -> 2.9 ms. The grass carpet's
+  per-frame tile placement (~950 tiles through a 6-plane view test) is C# too: `world/GrassPlaceCs.cs` (`SetHeights`
+  when the height window changes, `Place` per ring, `Buf` only when the visible tiles changed; same tiles as the
+  GDScript `_place`, `BMX_GRASS_GD=1` = that): 0.6 -> < 0.1 ms; all _process 2.4 ms. Left: `back_number.gd` (race
+  number cloth) ~0.3-0.5 ms, the rest ~0.1-0.2 each. 1 % high ~16 ms.
 - **Measuring perf**: other GPU programs (an open game window takes ~32 % of the 3090, other sessions' tests) cut the fps in
   half and make GPU spikes; check `nvidia-smi pmon -c 1` first. `TIME_PHYSICS_PROCESS` / `TIME_PROCESS` are the slowest
   single tick of the last second, not averages (our physics tick is ~0.3–0.7 ms). Don't print per slow frame while

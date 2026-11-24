@@ -208,6 +208,7 @@ var tumbleweeds: Tumbleweeds
 var title_life: TitleLife     # title screen only: birds, blowing dust, dust round the bushes
 
 func _ready() -> void:
+	if Env.s("BMX_PROF") != "" and not title_world: toggle_profiler.call_deferred(int(Env.s("BMX_PROF")))   # tests: 1 compact, 2 full
 	bike_cfg = GameState.bike_config()
 	if not title_world:
 		CrashLog.game = weakref(self)
@@ -495,7 +496,8 @@ func _build_environment() -> void:
 	_grade_sh = load("res://shaders/grade.gdshader")
 	_grade_sh_mip = Shader.new()   # the same pass with a mipmapped screen read: only while the speed blur is on
 	_grade_sh_mip.code = _grade_sh.code.replace(GRADE_MIP_FROM, GRADE_MIP_TO)
-	var gm := ShaderMaterial.new(); gm.shader = _grade_sh
+	var gm := ShaderMaterial.new(); gm.shader = _grade_sh_mip   # (compiled now, while the ride loads: the first switch to it
+	gm.shader = _grade_sh                                         # mid-ride, at ~25 km/h, cost 8 ms; later switches ~0.1 ms)
 	grade_rect.material = gm
 	cl.add_child(grade_rect)
 	add_child(cl)
@@ -509,6 +511,11 @@ var _grade_sh_mip: Shader
 func _grade_mips(gm: ShaderMaterial, on: bool) -> void:
 	var want := _grade_sh_mip if on else _grade_sh
 	if gm.shader == want or want == null: return
+	var _st := Time.get_ticks_usec()
+	_grade_swap(gm, want)
+	_perf("fx.grade_swap", _st)
+
+func _grade_swap(gm: ShaderMaterial, want: Shader) -> void:
 	var keep := {}
 	for u in gm.shader.get_shader_uniform_list():   # carry every value over (photo mode's too)
 		keep[u.name] = gm.get_shader_parameter(u.name)
@@ -1233,7 +1240,9 @@ func _apply_settings() -> void:
 func flash(text: String) -> void:
 	msg_t = 1.4
 	if Env.s("BMX_MAN_PROBE") != "": print("FLASH ", text, " v=%.1f" % phys.v)   # tests
+	var _ft := Time.get_ticks_usec()
 	if hud: hud.flash(text)
+	_perf("msg.flash", _ft)
 
 var _tape_front := {}   # what holds a caught tape: the drawn front axle, heading, steering axis, wheel radius (TapeSim.push_at)
 
@@ -1442,20 +1451,26 @@ func _end_crash() -> void:
 	if wasted: wasted.stop()
 
 func get_up() -> void:
+	var _gt := Time.get_ticks_usec()   # (its parts are "getup.*" in the frame profiler, F10)
 	if getup_anim is ClipGetUp: getup_anim.free_clips()   # (Backspace while standing dizzy)
 	getup_anim = null
 	_reset_draw_state()
 	phys.get_up()
 	_out_of_crevasse()
 	if wasted: wasted.finish()
+	_gt = _perf("getup.phys_wasted", _gt)
 	ragdoll.active = false
 	if blood: blood.crash_end()
+	_gt = _perf("getup.blood", _gt)
 	if rider.get_parent() != rig.lean_g:
 		rider.get_parent().remove_child(rider)
 		rig.lean_g.add_child(rider)
+	_gt = _perf("getup.reparent", _gt)
 	rider.transform = Transform3D.IDENTITY
 	rider.reset_pose()
+	_gt = _perf("getup.reset_pose", _gt)
 	rider.remount_action_cam()
+	_gt = _perf("getup.action_cam", _gt)
 	if Env.s("BMX_GOPRO_PROBE") != "": print("GOPRO remounted: ", rider.action_cam.get_node_or_null("Body") != null)
 	_snap_prev()
 	if hud: hud.on_get_up()
@@ -1536,7 +1551,9 @@ func on_takeoff() -> void:
 
 ## a landing that went badly (HEAVY / SLAM verdict): the slam's second bounce + clatter
 func on_bad_landing(sev: float) -> void:
+	var _lt := Time.get_ticks_usec()
 	if audio: audio.landing_bad(sev)
+	_perf("p_step.land_bad_audio", _lt)
 
 func on_landing(air_time: float, impact: float) -> void:
 	var dist := Vector2(phys.x - takeoff.x, phys.z - takeoff.z).length()
@@ -1552,7 +1569,9 @@ func on_landing(air_time: float, impact: float) -> void:
 		var where := "NATURAL" if m0 < 0.05 and m1 < 0.05 else ("SHORT" if a1 > 0.3 else ("LANDING" if m1 > 0.05 else "LONG"))
 		print("JUMPLAND %s v_off=%.0f km/h air=%.2f dist=%.1f height=%.1f impact=%.1f slope=%.0fdeg pitch_err=%.0fdeg x=%.0f" % [where, _jp_v * 3.6, air_time, dist, maxf(0.0, height), impact,
 			rad_to_deg(phys._g_pitch), rad_to_deg(wrapf(phys.pitch - phys._g_pitch, -PI, PI)), phys.x])
+	var _lt := Time.get_ticks_usec()
 	if hud: hud.on_landing(air_time, dist, maxf(0.0, height), impact)
+	_lt = _perf("p_step.land_hud", _lt)   # (the frame profiler's landing breakdown: F10)
 	_landed = clampf(impact / 6.0, 0.0, 1.0) if air_time > 0.25 else 0.0
 	var ls: int = terrain.surface(phys.x, phys.z)
 	if dust.sim != null and air_time > 0.3 and ls != 2:   # real smoke sim: a ring of dust blasted outward
@@ -1564,8 +1583,10 @@ func on_landing(air_time: float, impact: float) -> void:
 			(1.0 if ls == 1 else 0.85 if ls == 3 else 0.3) * clampf(air_time / 0.8, 0.4, 1.3))
 	elif air_time > 0.45 and (ls == 1 or ls == 3):
 		dust.cloud(Vector3(phys.x, phys.y, phys.z), phys.fwd() * phys.v * 0.3, ground_dust(phys.x, phys.z, ls), 2.6 + impact * 0.15, 1.1)
+	_lt = _perf("p_step.land_dust", _lt)
 	if rumble: rumble.landing(air_time, impact)
 	if audio and air_time > 0.15: audio.landing(impact, phys.land_yaw)
+	_perf("p_step.land_audio", _lt)
 
 ## the bike and rider as solid shapes the dust sim's air has to go round: two spinning wheels, the
 ## frame and the rider's body
@@ -2008,6 +2029,9 @@ func _unhandled_input(e: InputEvent) -> void:
 		# all caps = the loud pop (the quiet info line went unnoticed), with the folder it went to
 		flash(("LOG SAVED · CRASHLOGS/" + lp.replace("\\", "/").get_file().to_upper()) if lp != "" else "LOG NOT SAVED")
 		return
+	if e.is_action_pressed("profiler") and not e.is_echo() and not (e is InputEventKey and (e.ctrl_pressed or e.shift_pressed)):
+		toggle_profiler()
+		return
 	if e.is_action_pressed("debug_draw") and not e.is_echo():
 		if DebugOverlay.available(): flash("Physics overlay " + ("on" if DebugOverlay.toggle() else "off"))
 		else: flash("Debug Draw 3D addon not loaded")
@@ -2286,7 +2310,22 @@ var _perf_last := 0
 func _perf(key: String, t0: int) -> int:
 	var now := Time.get_ticks_usec()
 	if perf_on: _perf_acc[key] = _perf_acc.get(key, 0) + (now - t0)
+	if _prof_rec: profiler.acc[key] = profiler.acc.get(key, 0) + (now - t0)
 	return now
+
+## F10: the live frame profiler (game/frame_profiler.gd), made on first use; it reads the same sections as BMX_PERF
+var profiler: FrameProfiler = null
+var _prof_rec := false
+func toggle_profiler(m: int = -1) -> void:
+	if profiler == null:
+		profiler = FrameProfiler.new(self)
+		add_child(profiler)
+	if m < 0: profiler.cycle()
+	else: profiler.set_mode(m)
+	_prof_rec = profiler.recording()
+	phys.prof = profiler.acc if _prof_rec else null   # (the physics' own stages, "p_step.*")
+	if hud: hud.prof = profiler.acc if _prof_rec else null   # ("hud.*")
+	if grime: grime.prof = profiler.acc if _prof_rec else null   # ("grime.*")
 
 func _perf_report() -> void:
 	var keys := _perf_acc.keys()
@@ -2306,6 +2345,7 @@ func _physics_process(dt: float) -> void:
 		_snap_prev()
 		return
 	var _pk := Time.get_ticks_usec()
+	if _prof_rec: profiler.ticks += 1
 	_snap_prev()
 	var inp := _read_input()
 	if _rope_hold > 0.0:   # tests (BMX_ROPE_STOP): brake to a stop on the bridge and stand there
@@ -3144,6 +3184,7 @@ func _process(dt: float) -> void:
 	_pk = _perf("dust_sim", _pk)
 	grime.trim = 0.0 if scenic or Env.s("BMX_NO_MATCH") != "" else _match
 	grime.update(dt, rig)
+	_pk = _perf("grime", _pk)
 	# speed feel: wider FOV and streaky screen edges when fast
 	# from ~25 km/h, full by ~75 km/h: wider FOV with the camera pulled in (dolly zoom), a surge of extra FOV
 	# while accelerating hard, rumble, bank, streaks and speed lines at the edges, tighter vignette
@@ -3157,7 +3198,7 @@ func _process(dt: float) -> void:
 	gm.set_shader_parameter("blur", speed_k * speed_k)
 	gm.set_shader_parameter("speed", speed_k)
 	_grade_mips(gm, speed_k * speed_k > (0.0008 if gm.shader == _grade_sh_mip else 0.001))   # (the shader blurs from 0.001)
-	_pk = _perf("grime_speedfx", _pk)
+	_pk = _perf("speed_fx", _pk)
 	cam.update_cam(dt)
 	_pk = _perf("camera", _pk)
 	# fog + shadows sized to the zoom level, sun follows the rider

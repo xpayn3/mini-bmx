@@ -204,4 +204,87 @@ public partial class SlamSynth : RefCounted
 		for (int i = 0; i < n; i++) { float f2 = i > n - fade ? (float)(n - i) / fade : 1f; y[i] *= k2 * f2; }
 		return y;
 	}
+
+	// ---------------------------------------------------------------- the bank (2026-11-24: a fresh Render on the landing step was
+	// 5-10 ms of the main thread, plus a per-sample GDScript loop into a WAV). Every kind of slam is rendered ahead as 16-bit PCM on
+	// .NET pool threads: kind 0 in BANK_SIZES x BANK_SIDES buckets, kind 1 in BANK_SIZES, BANK_VARIANTS each. Take() hands out the
+	// nearest bucket's next ready buffer and re-renders that slot in the background with a new seed, so landings never repeat and the
+	// main thread only wraps bytes into an AudioStreamWAV. Nothing here touches Godot objects off the main thread.
+	public const int BANK_SIZES = 6, BANK_SIDES = 3, BANK_VARIANTS = 2;
+	private byte[][] _bank;
+	private int[] _next;
+	private readonly object _lock = new object();
+	private int _seed = 1;
+	private float _vary = 0.12f, _peak = 0.63f;
+	private int _busy;
+
+	private static int Slot(int kind, int si, int di, int v) => kind == 0 ? (si * BANK_SIDES + di) * BANK_VARIANTS + v
+		: BANK_SIZES * BANK_SIDES * BANK_VARIANTS + si * BANK_VARIANTS + v;
+	private static float SizeOf(int si) => si / (float)(BANK_SIZES - 1);
+	private static float SideOf(int di) => di / (float)(BANK_SIDES - 1);
+
+	/// start filling the bank in the background (call once when the ride's audio is set up)
+	public void StartBank(float vary, float peak)
+	{
+		lock (_lock)
+		{
+			if (_bank != null) return;
+			_vary = vary; _peak = peak;
+			_bank = new byte[(BANK_SIZES * BANK_SIDES + BANK_SIZES) * BANK_VARIANTS][];
+			_next = new int[BANK_SIZES * BANK_SIDES + BANK_SIZES];
+		}
+		for (int kind = 0; kind < 2; kind++)
+			for (int si = 0; si < BANK_SIZES; si++)
+				for (int di = 0; di < (kind == 0 ? BANK_SIDES : 1); di++)
+					for (int v = 0; v < BANK_VARIANTS; v++)
+						Refill(kind, si, di, v);
+	}
+
+	/// how many renders are still running (tests / probes)
+	public int BankBusy() => System.Threading.Volatile.Read(ref _busy);
+
+	private void Refill(int kind, int si, int di, int v)
+	{
+		int seed;
+		lock (_lock) seed = _seed++ * 7919 + 17;
+		System.Threading.Interlocked.Increment(ref _busy);
+		System.Threading.Tasks.Task.Run(() =>
+		{
+			try
+			{
+				var y = Render(seed, _vary, _peak, SizeOf(si), kind == 0 ? SideOf(di) : 0f, kind);
+				var b = new byte[y.Length * 2];
+				for (int i = 0; i < y.Length; i++)
+				{
+					int q = (int)(Math.Clamp(y[i], -1f, 1f) * 32767f);
+					b[2 * i] = (byte)(q & 0xff); b[2 * i + 1] = (byte)((q >> 8) & 0xff);
+				}
+				lock (_lock) _bank[Slot(kind, si, di, v)] = b;
+			}
+			finally { System.Threading.Interlocked.Decrement(ref _busy); }
+		});
+	}
+
+	/// a ready slam as 16-bit 48 kHz mono PCM, from the bucket nearest (size, side); empty if none is ready yet
+	public byte[] Take(float size, float side, int kind)
+	{
+		if (_bank == null) return Array.Empty<byte>();
+		int si = (int)Math.Round(Math.Clamp(size, 0f, 1f) * (BANK_SIZES - 1));
+		int di = kind == 0 ? (int)Math.Round(Math.Clamp(side, 0f, 1f) * (BANK_SIDES - 1)) : 0;
+		int bucket = kind == 0 ? si * BANK_SIDES + di : BANK_SIZES * BANK_SIDES + si;
+		byte[] got = null; int v = 0;
+		lock (_lock)
+		{
+			for (int k = 0; k < BANK_VARIANTS && got == null; k++)
+			{
+				v = (_next[bucket] + k) % BANK_VARIANTS;
+				got = _bank[Slot(kind, si, di, v)];
+			}
+			if (got == null) return Array.Empty<byte>();
+			_bank[Slot(kind, si, di, v)] = null;
+			_next[bucket] = (v + 1) % BANK_VARIANTS;
+		}
+		Refill(kind, si, di, v);   // a new one for next time
+		return got;
+	}
 }

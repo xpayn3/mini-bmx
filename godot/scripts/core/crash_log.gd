@@ -203,8 +203,11 @@ func report(kind: String, detail := "") -> String:
 
 
 ## a line in the session log (shows in every later report)
+## a line for the session log (crash reports / F8 show it). Straight into the log, not printed: a print to stdout cost 7-14 ms
+## through a console pipe, inside the physics step on every crash (found with the frame profiler, 2026-11-24)
 func note(s: String) -> void:
-	print("[note] ", s)
+	if _logger != null and not _logger.closed: _logger._put("[note] " + s, false)
+	else: print("[note] ", s)
 
 
 ## the title menu calls this: a small card saying the last session crashed, once per launch

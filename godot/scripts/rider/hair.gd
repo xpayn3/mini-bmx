@@ -60,6 +60,16 @@ var _plait := false              # braid: the strands are hidden, `_braid` draws
 var _braid := MeshInstance3D.new()
 var _braid_mat := StandardMaterial3D.new()
 var _strands: ArrayMesh
+var _cs = null   # HairSimCs (C#) or null
+var _HPERF := Env.s("BMX_HAIR_PERF") != ""   # tests: HAIRPERF lines, the parts of a hair frame in microseconds
+var _hp := [0, 0, 0, 0, 0]
+var _hu := [0, 0, 0, 0, 0]
+
+## hand the C# step this style's guides + numbers (after _make_guides) and the points (after a reset)
+func _cs_setup() -> void:
+	if _cs == null: return
+	var lens := PackedFloat32Array(_len); var phs := PackedFloat32Array(_ph)
+	_cs.Setup(G, SEG, PackedVector3Array(_roots), PackedVector3Array(_rest), lens, phs, _seg_len, _hold, _hold_n, _bend, _flutter, _plait, PLAIT_R[0], PLAIT_R[1])
 
 
 func _init() -> void:
@@ -83,6 +93,9 @@ func _init() -> void:
 	_braid.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	_braid.visible = false
 	add_child(_braid)
+	if Env.s("BMX_HAIR_GD") == "":   # the sim step in C# (HairSimCs: ~10x cheaper); GDScript `_step` stays the fallback
+		var sc = load("res://scripts/rider/HairSimCs.cs") if ClassDB.class_exists("CSharpScript") else null
+		_cs = sc.new() if sc else null
 	set_style("long")
 
 
@@ -107,6 +120,7 @@ func set_style(s: String, helmet := false) -> void:
 	_tie = bool(P.get("tie", false))
 	_plait = bool(P.get("plait", false))
 	_make_guides(short)
+	_cs_setup()
 	_make_strands(short)
 	_strands = mesh
 	mesh = ArrayMesh.new() if _plait else _strands   # a braid: no strands, the plait mesh instead
@@ -235,6 +249,7 @@ func _reset(ht: Transform3D) -> void:
 	_as = Vector3.ZERO
 	_hprev = H_MAX
 	_have = true
+	if _cs != null: _cs.SetState(_P, _Q, _hprev)
 
 
 ## The sim runs in a frame that moves WITH the head (world axes, origin on the head): _P / _Q are offsets from the
@@ -264,6 +279,7 @@ var _W := PackedVector3Array()   # world positions of the guide points (for the 
 func _process(dt: float) -> void:
 	if head == null or not is_visible_in_tree() or dt <= 0.0:
 		return
+	var _h0 := Time.get_ticks_usec()
 	global_transform = Transform3D.IDENTITY
 	dt = minf(dt, 1.0 / 30.0)
 	var ht := head.global_transform
@@ -282,7 +298,9 @@ func _process(dt: float) -> void:
 	# the strands are placed by the shader, so the mesh itself has no real extent: tell the engine where the hair is
 	# (a box round the head, in world space - the node sits at the origin), or it is culled whenever the rider is far from the origin
 	custom_aabb = AABB(ht.origin - Vector3(1.5, 1.5, 1.5), Vector3(3, 3, 3))
+	var _h1 := Time.get_ticks_usec()
 	var solids := _solids(ht)
+	var _h2 := Time.get_ticks_usec()
 	for s in solids: s[0] = (s[0] as Vector3) - ht.origin            # the body, head-relative too
 	var push := -_as * INERTIA
 	if push.length() > ACC_MAX: push = push.normalized() * ACC_MAX
@@ -294,21 +312,54 @@ func _process(dt: float) -> void:
 	var n := maxi(1, ceili(dt / H_MAX - 0.01))
 	var h := dt / n
 	var steps := 0   # (the probe's "stale" count: frames drawn without a sim step; always 0 now)
+	var sph := PackedFloat32Array()
+	if _cs != null:
+		sph.resize(solids.size() * 4)
+		for si in solids.size():
+			var c: Vector3 = solids[si][0]
+			sph[4 * si] = c.x; sph[4 * si + 1] = c.y; sph[4 * si + 2] = c.z; sph[4 * si + 3] = float(solids[si][1])
 	for i in n:
 		_t += h
 		var q := _hb.get_rotation_quaternion().slerp(hb.get_rotation_quaternion(), float(i + 1) / n)
-		_step(Basis(q) * Basis.from_scale(hb.get_scale()), solids, h, force, lively)
+		if _cs != null: _cs.Step(Basis(q) * Basis.from_scale(hb.get_scale()), sph, h, force, lively, _t)
+		else: _step(Basis(q) * Basis.from_scale(hb.get_scale()), solids, h, force, lively)
 		steps += 1
+	if _cs != null: _P = _cs.GetP()
+	var _h3 := Time.get_ticks_usec()
 	_hb = hb
 	_W.resize(_P.size())
 	for i in _P.size(): _W[i] = _P[i] + ht.origin
+	var _u1 := Time.get_ticks_usec()
 	# the guides go to the shader as a float texture, the head's transform with them
 	_img.set_data(SEG + 1, G, false, Image.FORMAT_RGBF, _W.to_byte_array())
+	var _u2 := Time.get_ticks_usec()
 	_tex.update(_img)
+	var _u3 := Time.get_ticks_usec()
 	_mat.set_shader_parameter("head_xf", ht)
+	if _HPERF:
+		_hu[0] += _u1 - _h3; _hu[1] += _u2 - _u1; _hu[2] += _u3 - _u2; _hu[3] += Time.get_ticks_usec() - _u3; _hu[4] = maxi(_hu[4], _u3 - _u2)
+		if _hp[4] == 299: print("HAIRUP us/frame w=%d set_data=%d update=%d (max %d) param=%d" % [_hu[0] / 300, _hu[1] / 300, _hu[2] / 300, _hu[4], _hu[3] / 300]); _hu = [0, 0, 0, 0, 0]
 	if _plait:
 		_braid.custom_aabb = custom_aabb
-		_braid.mesh = _plait_mesh(ht)
+		if _cs != null:   # (C#: refills one mesh in place)
+			if not (_braid.mesh is ArrayMesh) or _braid.mesh == _strands: _braid.mesh = ArrayMesh.new()
+			_cs.PlaitFromSim(_braid.mesh, ht.origin, helmet_mode, ht.basis.z, color, PLAIT_R[0], PLAIT_R[1])
+			if Env.s("BMX_HAIR_CMP") != "" and Engine.get_process_frames() % 240 == 0:   # tests: C# braid vs the GDScript one
+				var g := _plait_mesh(ht).surface_get_arrays(0)
+				var c := (_braid.mesh as ArrayMesh).surface_get_arrays(0)
+				var gv: PackedVector3Array = g[Mesh.ARRAY_VERTEX]; var cv: PackedVector3Array = c[Mesh.ARRAY_VERTEX]
+				var gn: PackedVector3Array = g[Mesh.ARRAY_NORMAL]; var cn: PackedVector3Array = c[Mesh.ARRAY_NORMAL]
+				var dmax := 0.0; var nmax := 0.0
+				for vi in mini(gv.size(), cv.size()):
+					dmax = maxf(dmax, gv[vi].distance_to(cv[vi])); nmax = maxf(nmax, gn[vi].distance_to(cn[vi]))
+				print("HAIRCMP verts gd=%d cs=%d max_pos_diff_mm=%.4f max_normal_diff=%.5f" % [gv.size(), cv.size(), dmax * 1000.0, nmax])
+		else: _braid.mesh = _plait_mesh(ht)
+	if _HPERF:
+		var _h4 := Time.get_ticks_usec()
+		_hp[0] += _h1 - _h0; _hp[1] += _h2 - _h1; _hp[2] += _h3 - _h2; _hp[3] += _h4 - _h3; _hp[4] += 1
+		if _hp[4] >= 300:
+			print("HAIRPERF us/frame head=%.0f solids=%.0f step=%.0f upload=%.0f" % [_hp[0] / _hp[4], _hp[1] / _hp[4], _hp[2] / _hp[4], _hp[3] / _hp[4]])
+			_hp = [0, 0, 0, 0, 0]
 	if _probe_on: _probe(ht, dt, steps)
 
 

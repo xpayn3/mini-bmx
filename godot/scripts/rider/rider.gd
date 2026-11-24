@@ -91,6 +91,12 @@ var helmet_id := ""   # which HELMETS entry + goggle source is on, "id/mode" (se
 var goggles: Node3D = null
 var action_cam: Node3D = null   # the helmet action camera (ActionCam); its "Lens" is the Helmet camera view (null = look.camMount "none")
 var action_cam_at := Vector3.ZERO   # where it's mounted (head space)
+var _cam_tpl: Node3D = null   # a built copy of the action cam, never in the tree (remounts duplicate it)
+var _cam_tpl_key := ""
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE and _cam_tpl != null and is_instance_valid(_cam_tpl):
+		_cam_tpl.free()
 var cam_mount := ""                 # which ActionCam.HELMET_MOUNTS entry is on
 var cam_gear := ""                  # ActionCam.gear_sig of the camera + add-ons on it (look.camModel ...)
 var cam_spots := {}                 # mount kind -> where it touches the shell (head space), set when a helmet goes on
@@ -398,7 +404,14 @@ func _mount_action_cam() -> void:
 	if cam_mount == "none" or not cam_spots.has(cam_mount):
 		return
 	var at: Vector3 = cam_spots[cam_mount]
-	action_cam = ActionCam.merged(ActionCam.build(cam_mount, gear))   # one mesh for the mount, one for the camera
+	# (2026-11-24, frame profiler: building + merging it took ~90 ms on every get-up after a crash) a built copy of this
+	# mount + gear is kept off the tree; a remount duplicates it (the meshes are shared: a few nodes, well under 1 ms)
+	var key := "%s|%s" % [cam_mount, cam_gear]
+	if _cam_tpl == null or _cam_tpl_key != key or Env.s("BMX_CAM_NOCACHE") != "":
+		if _cam_tpl != null: _cam_tpl.free()
+		_cam_tpl = ActionCam.merged(ActionCam.build(cam_mount, gear))   # one mesh for the mount, one for the camera
+		_cam_tpl_key = key
+	action_cam = _cam_tpl.duplicate()
 	action_cam.position = at
 	action_cam_at = at
 	action_cam.visible = hel == null or hel.visible or (helmet_model != null and helmet_model.visible)
