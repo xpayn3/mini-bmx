@@ -1158,6 +1158,14 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   (`_near`). Same flip crashes: rise 14.4 -> 0.0-1.2 m (the rest is the body tumbling over itself); an 18 m/s bail
   at rest in 1.45 s (was 3.1); crash physics ~0.2 ms a frame cheaper. `BMX_OLD_RAGCOL=1` = the old contacts. Test:
   `BMX_SEED=4242 BMX_FOLLOW=1 BMX_BIGAIR=1 BMX_TRICK=back BMX_RAGCOL_PROBE=1 BMX_RAGDOLL_PROBE=1 --autotest=70`.
+  **Solver in C# (2026-11-24)**: the 6 solver passes per substep (bones, limits, ground + rock / trunk contacts) run in
+  `rider/RagdollSolverCs.cs` (`Solve`; ragdoll.gd `_solver_cs` builds the constraint list once per substep, torn-off /
+  broken joints left out, and keeps the friction, muscles, spin fix and probes). Made + run once when the ragdoll is
+  built (its first load / JIT was a 2.8 ms frame on the first crash). Per crashed frame: solver 0.27 -> 0.11 ms, worst
+  frame 0.55-0.7 ms; the whole ragdoll ~0.35 ms. `BMX_RAG_GD=1` = the GDScript passes (also used with `BMX_OLD_RAGCOL`);
+  `BMX_RAG_CMP=1` runs both from the same state every substep (`RAGCMP max_diff_mm=`: 0.03-0.6 mm, float rounding,
+  with and without rocks near). The frame profiler times its phases (`rag.*`) and `BMX_PROF_AVG=1` prints each
+  section's mean over riding vs crashed frames (`PROF AVG`).
   **No self-spinning**: the muscles (tension, reaching, squirm) bend the body but can't spin it — each substep the
   whole-body angular momentum they add is taken back (`_keep_ang_mom`; only the ground / things hit turn it; the
   joint pulls weren't collinear and used to spin the body up). Everything tuned per substep (damping, drag, tension)

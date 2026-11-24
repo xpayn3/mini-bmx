@@ -2326,6 +2326,7 @@ func toggle_profiler(m: int = -1) -> void:
 	phys.prof = profiler.acc if _prof_rec else null   # (the physics' own stages, "p_step.*")
 	if hud: hud.prof = profiler.acc if _prof_rec else null   # ("hud.*")
 	if grime: grime.prof = profiler.acc if _prof_rec else null   # ("grime.*")
+	if ragdoll: ragdoll.prof = profiler.acc if _prof_rec else null   # ("rag.*")
 
 func _perf_report() -> void:
 	var keys := _perf_acc.keys()
