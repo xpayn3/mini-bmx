@@ -407,6 +407,18 @@ static func _rim_mat(s: Dictionary) -> StandardMaterial3D:
 
 # ---------------------------------------------------------------- build
 
+## the tyre's casing grid inside its "rubber" surface (rows x cols vertices, row-major from vertex 0, its quads first in the
+## index list; the knobs come after): what BikeRig's far LODs need to cut the knobs off / thin the casing out
+static func tyre_dims(spec: Dictionary) -> Dictionary:
+	var s := _norm(spec)
+	var det: float = s["detail"]
+	var segs := maxi(24, int(round(96.0 * det)))
+	var kh: float = PATTERNS[s["pattern"]]["h"]
+	var np := maxi(12, int(round(26.0 * det)))
+	var csegs := segs if kh > 0.0 else int(segs * 1.5)
+	return {"rows": np + 1, "cols": csegs + 1, "uv_rep": 6.0}
+
+
 static func _build(s: Dictionary) -> ArrayMesh:
 	var rear: bool = s["rear"]
 	var det: float = s["detail"]
