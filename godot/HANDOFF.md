@@ -78,17 +78,21 @@ air it leans the bike). Numpad 8/5/4/6 do the same on keys. The camera no longer
 without it a drawn pad) with what every button does, click to remap (sticks pick Steer / Rider body / Camera / Nothing and
 swap), live button test, vibration: on / off, motors and a strength per effect (see "Controller rumble" in section 5). `Settings.pad_active` follows the last device used: prompts show
 Xbox names (`Settings.prompt(action)`), and on a pad the triggers don't tilt or throw the bike in the air (only a real
-right-stick yank from centre throws at a lip; a held lean never does).
+right-stick yank from centre throws at a lip; a held lean never does). **Superseded 2026-11-24**: a stick held back
+(forward) into a lip, however early, throws the back (front) flip, like other games; see "Spins and flips carved / thrown
+at the lip" in section 5.
 In the air the right stick is a **360° attitude control** (`air_stick`): y tilts the nose on top of the landing aim
 (`stickAirTilt`), x lays the bike over (`stickAirRoll`); only the very edge (> 0.88) keeps it turning over (flips). Test:
 `BMX_BODY=circle` circles the stick mid-air (`AIRSTICK` lines). Test runs ignore real controllers (`Settings._test_run`).
 Arcade-style feel: the stick is eased (`stickAirEase`), the tilt / lean springs go soft while it's used, and held at
 an **edge** it spins: top / bottom = flips (`edge_s` → `flip_in`), left / right = **flat spins** (`stick_yaw` on top of
-`air_yaw`, `stickYawRate`). Both build up gently (`stickSpinBuild`) and get faster the longer they're held
+`air_yaw`, `stickYawRate`). **Since 2026-11-24 both get their rotation at the lip** (spin: stick to its side edge
+into the lip; flip: held back / forward into it); from the air alone only ~35 % of the rate. Both build up gently (`stickSpinBuild`) and get faster the longer they're held
 (`stickSpinGrow`, up to 1.5 s); let go and they ease out. Near the landing a spin within ~57° of straight is twisted
 the rest of the way. Landed tricks are named "360", "720", "360 BACKFLIP"... In the air the rider's body drives it:
 counter-leans against the bike (`stickBodyCounter`) and stays steady while the bike tilts under it (`stickBodyTilt`).
-Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
+Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-only now: comes round only part way),
+`BMX_BODY=spinlip|fliplip` (wound up / thrown at the lip).
 
 ## 4. Project layout (`godot/`)
 
@@ -1764,7 +1768,8 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
 - **Trail jumps** TABLE / KICKER are baked from it: `tools/bake_jumps.gd` (designs in TRAIL_JUMPS) piped into
   `tools/bake_jumps.py` writes the knots + AIR spans into trail_features.gd AND TerrainFieldCs.cs (never hand-edit them).
   Designed for ~60 km/h real (the physics loses ~7 % more on a face than the formula): slower riders case the deck
-  (EFH < 1 m). DOUBLE / the free-ride `*_S` jumps are still hand-shaped. RHYTHM release beats have more kickers.
+  (EFH < 1 m). (DOUBLE / DOUBLE_S and TABLE_S / KICKER_S are baked from it
+  too since 2026-11-24; `TAKEOFF_EXTRA` is 0 since then: hands off rides with the lip.) RHYTHM release beats have more kickers.
 - **Trail drops** (`TrailCourse._drop_shape`): the face follows the flight of a rider at DROP_V 16 m/s (max 35 deg, a
   22 m bottom transition); was a smoothstep over 5 + 0.4 h m (42-51 deg, launched riders onto the flat).
   `BMX_OLD_DROPS=1` = old. Probe `-s res://tools/drop_probe.gd -- <seed>` (its landing column is not right yet).
@@ -1858,7 +1863,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   with `BMX_BODY_PRINT=1`; a scripted BMX_BODY stick now rides along with the test rider.
 - **Jumps clear at their design speed (same day, user: "doesn't clear the jump")**: measured on the designed tables, the
   bike loses more on the face than the climb (`JumpDesign.FACE_LOSS` 0.39: v_lip^2 = v^2 - 2gH - 0.39 H v, +-10 % on six
-  tables) and leaves `TAKEOFF_EXTRA` 8 deg steeper than the lip (the hands-off pop, the rear lifting): both now size the
+  tables) and leaves `TAKEOFF_EXTRA` 8 deg (0 since 2026-11-24) steeper than the lip (the hands-off pop, the rear lifting): both now size the
   deck / landing (trail jumps re-baked: table deck 14.7 m, landing 30 deg). Gaps: the backside / landing face squeezed to
   70 deg when the gap is short (they pushed the landing mound out: the design speed came down in the gap / on its face).
   Auto landing angle capped at 35 deg (`LAND_MAX_DEG`), designs aim 20 % down the landing. `airAssist` stays 0.6 for the player (Tune VER 29
