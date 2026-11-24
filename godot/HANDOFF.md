@@ -1967,6 +1967,16 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines).
   spine arched (`flipArch`, `FLIP_ARCH`), legs and arms straight; from ~a tenth round he hangs LONG off the bike (no tuck:
   `flipExt` = legs reaching, arms `FACE_REACH`, the air "spin style" compact pose off) to the landing.
 
+### Doubles from the formula too (2026-11-24)
+- `TrailFeatures.DOUBLE` / `DOUBLE_S` (and their `AIR` / `AIR_S` "double" / "doubleLine" spans) are baked from JumpDesign
+  like the tables and kickers (`tools/bake_jumps.gd` "double" / "double_s", kind gap; `bake_jumps.py` writes both files).
+  The gap's floor is raised to ~85 % of the lip (`fill`), so a rider short of it drops a little onto a dip, never into
+  the landing's face (plain gaps: a 2.4 m equivalent fall at 80-90 % of the design speed). The trail's route never
+  builds doubles; the small one is the free-ride jump out in the land (now 18 m, was 23: within its footprint), the big
+  one is unused but ready. Small one in the playground: DESIGNED JUMPS lane, `double_s` (FREE-RIDE DOUBLE): hands off
+  26 / 30 / 38 / 44 km/h all CLEAN (short onto the floor, on the landing at 38, past it at 44), popped at 38 PERFECT.
+  `terrain_cs_cmp` EXACT, `wood_edge_probe` walls=0, `trail_grow_probe` PASS.
+
 ### Developer view of the test playground (`scripts/levels/ride_diag.gd`) - telemetry + sliders for riding code
 - **Only in the test playground** (user decision 2026-11-21: developer tools live in that level, normal rides have none).
   **Layout (2026-11-22, user: "tidy, compact, nothing covering")**: a slim **tuning column** on the left (the TuneCard,

@@ -12,6 +12,11 @@ const TRAIL_JUMPS := {
 	# close to each other and to wooden features), sized for ~40 / 35 km/h
 	"table_s": {"v": 11.0, "lip_deg": 20.0, "lip_g": 1.7, "lip_t": 0.15, "aim": 0.3, "land_g": 2.0},
 	"kicker_s": {"v": 9.5, "lip_deg": 16.0, "lip_g": 1.8, "lip_t": 0.12, "aim": 0.3, "land_g": 2.2},
+	# doubles (2026-11-24): a gap whose floor is filled to ~85 % of the lip (`fill`), so a rider short of it drops a little
+	# into a dip instead of into the landing's face. The big one sized like the table, the small (free ride) within the
+	# old 23 m footprint for ~38 km/h
+	"double": {"kind": "gap", "v": 15.5, "lip_deg": 22.0, "aim": 0.3, "land_g": 1.8, "lip_t": 0.2, "fill": 2.2},
+	"double_s": {"kind": "gap", "v": 10.5, "lip_deg": 24.0, "lip_g": 1.8, "lip_t": 0.12, "fill": 1.0, "aim": 0.3, "land_g": 2.2},
 }
 
 
