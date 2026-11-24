@@ -82,7 +82,10 @@ void lens_dirt(vec2 uv, float aspect, out float cov, out float blur_k, out vec3 
 	// only toward the corners, like an old CRT's rounded screen; the dirtier, the further in it creeps
 	vec2 e = abs(uv - 0.5) * 2.0;
 	float r = pow(pow(e.x, 4.0) + pow(e.y, 4.0), 0.25);
-	float corner = smoothstep(0.42 - 0.2 * d, 1.0, r);
+	// a thin band along the edges, thickest in the corners; even filthy it only creeps a little further in
+	float edge = smoothstep(0.7 - 0.08 * d, 1.0, r);
+	float rc = length(uv - 0.5) * 1.414;                  // 0 middle .. 1 corner
+	float corner = edge * edge * (0.55 + 0.45 * smoothstep(0.6, 1.0, rc));
 	cov = clamp(sum, 0.0, 1.0) * corner;
 	blur_k = clamp(sm * 1.2 + sp * 0.7 + du * 0.2, 0.0, 1.0) * corner;
 }
