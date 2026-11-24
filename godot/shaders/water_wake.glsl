@@ -14,9 +14,9 @@ layout(set = 0, binding = 2, std430) restrict readonly buffer Srcs { vec4 s[]; }
 layout(push_constant, std430) uniform Params {
 	vec4 a;   // dt, wave coefficient c^2 / cell^2, damping per second, number of sources
 	vec4 b;   // old window centre cell (x, z), new window centre cell (x, z)
+	vec4 c;   // cell size m
 } pc;
 
-const float CELL = 0.15;
 const float FOAM_K = 5.0;       // foam laid per unit of push
 const float FOAM_FADE = 0.5;    // foam lives ~2 s
 
@@ -49,18 +49,25 @@ void main() {
 	float sponge = smoothstep(0.72, 1.0, max(e.x, e.y));
 	v *= exp(-(pc.a.z + sponge * 9.0) * dt);
 	h *= 1.0 - sponge * 6.0 * dt;
+	// the foam spreads a little as it ages: a trail widens into a patch of bubbles instead of staying a thin line
+	float fn = 0.25 * (imageLoad(src, (id + ivec2(-1, 0) + N) % N).z + imageLoad(src, (id + ivec2(1, 0)) % N).z
+		+ imageLoad(src, (id + ivec2(0, -1) + N) % N).z + imageLoad(src, (id + ivec2(0, 1)) % N).z);
+	f = mix(f, fn, 0.22);
 	f *= exp(-(FOAM_FADE + sponge * 4.0) * dt);
-	vec2 wp = (vec2(wn) + 0.5) * CELL;
+	f = max(f, smoothstep(0.02, 0.07, abs(h)) * 0.5);   // the crests of a strong wake break white
+	vec2 wp = (vec2(wn) + 0.5) * pc.c.x;
 	int n = int(pc.a.w);
+	float dv = 0.0;   // all of this step's pushes at this texel; capped, so a hitch that queues a dozen of them can't make a wall of water
 	for (int i = 0; i < n; i++) {
 		vec4 q = srcs.s[i];
 		vec2 d = wp - q.xy;
 		float r2 = dot(d, d) / (q.z * q.z);
 		float g = exp(-r2);
 		// pushed down in the middle, a lip of the same volume round it: the crests run out as rings, not a blob
-		v -= (g - 0.25 * exp(-r2 * 0.25)) * q.w * 1.6;
+		dv -= (g - 0.25 * exp(-r2 * 0.25)) * q.w * 1.6;
 		f = max(f, g * clamp(abs(q.w) * FOAM_K, 0.0, 1.0));
 	}
-	h += v * dt;
+	v += clamp(dv, -0.3, 0.3);
+	h = clamp(h + v * dt, -0.2, 0.2);
 	imageStore(dst, id, vec4(h, v, f, 0.0));
 }

@@ -241,7 +241,21 @@ var sheep: Node3D   # SheepHerdCs
 var tumbleweeds: Tumbleweeds
 var title_life: TitleLife     # title screen only: birds, blowing dust, dust round the bushes
 
+## ripples in the road's puddles: the lake's compute wake (world/water_wake.gd) as a second, snappier instance that the
+## ground shader reads through the globals puddle_wake / puddle_wake_info
+var puddle_wake: WaterWake = null
+var _pw_info := Vector4.ZERO
+
 func _ready() -> void:
+	if not title_world and level == "":
+		puddle_wake = WaterWake.new()
+		if puddle_wake.ok:
+			puddle_wake.damp = 2.5
+			puddle_wake.cell = 0.03   # puddles: fine ripples (3 cm cells over a 10 m window: the same texel count, a window the rider's tyres never leave)
+			puddle_wake.wave_c = 0.55
+			RenderingServer.global_shader_parameter_set("puddle_wake", puddle_wake.tex)
+		else:
+			puddle_wake = null
 	if not title_world: _make_ruts.call_deferred()   # (once the terrain exists)
 	if not title_world and (level == "" or level.ends_with(".tscn")) and Env.s("BMX_GHOST") != "0":   # (built levels too)   # the ghost of your best run on this world (game/ghost_rider.gd)
 		ghost = preload("res://scripts/game/ghost_rider.gd").new(self)
@@ -1655,7 +1669,7 @@ func on_landing(air_time: float, impact: float) -> void:
 	var ls: int = terrain.surface(phys.x, phys.z)
 	if ls == 2 and air_time > 0.15:   # a landing in the water: a ring of ripples off both tyres
 		var wf := phys.fwd()
-		var wk := clampf(0.25 + impact / 8.0, 0.25, 1.2)
+		var wk := clampf(0.1 + impact / 24.0, 0.1, 0.4)
 		terrain.water_splash(Vector3(phys.x - wf.x * phys.BB_REAR, phys.y, phys.z - wf.z * phys.BB_REAR), wk, 0.5)
 		terrain.water_splash(Vector3(phys.x + wf.x * (phys.L - phys.BB_REAR), phys.y, phys.z + wf.z * (phys.L - phys.BB_REAR)), wk, 0.5)
 	if dust.sim != null and air_time > 0.3 and ls != 2:   # real smoke sim: a ring of dust blasted outward
@@ -1830,6 +1844,10 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 		var f_ev := Vector3(-f.x * d_back * 0.4 + side.x * d_out * 0.6, 0.5 + carve_k * 0.3, -f.z * d_back * 0.4 + side.z * d_out * 0.6)
 		dust.feed_front(front, f_ev, 0.0 if st.front_air else rate * fxd * 0.35 * dry_f, d_a)   # none with the front up (wheelie)
 		# through standing water: muddy drops thrown off both tyres instead of dust
+		if puddle_wake != null and va > 0.8:   # the tyres push the puddle (ripples: ground.gdshader)
+			var pk := clampf(va / 10.0, 0.0, 1.4) * 24.0 * dt
+			if wet_r.y > 0.05: puddle_wake.splash(rear, pk * wet_r.y, 0.06)
+			if wet_f.y > 0.05 and not st.front_air: puddle_wake.splash(front, pk * wet_f.y * 0.8, 0.055)
 		var pud := wet_r.y + (0.0 if st.front_air else wet_f.y * 0.6)
 		if pud > 0.05 and va > 1.5 and fx:
 			_splash_acc += dt * pud * minf(va, 14.0) * 5.0 * fxd
@@ -3656,6 +3674,12 @@ func _process(dt: float) -> void:
 	cam_attr.dof_blur_near_enabled = bool(Settings.get_v("tilt_shift")) and scenic
 	_pk = _perf("fog_dof", _pk)
 	if terrain.has_method("update_water"): terrain.update_water(st.x, st.z, t)
+	if puddle_wake != null:
+		puddle_wake.step(dt, Vector3(st.x, 0.0, st.z))
+		var pwi := Vector4(puddle_wake.centre.x, puddle_wake.centre.y, WaterWake.N * puddle_wake.cell, puddle_wake.cell)
+		if pwi != _pw_info:   # (a global set re-uploads them all: only when the window moved a cell)
+			_pw_info = pwi
+			RenderingServer.global_shader_parameter_set("puddle_wake_info", pwi)
 	_pk = _perf("water", _pk)
 	if fx.has_method("update"): fx.update(dt, cam)
 	_pk = _perf("fx_tracks", _pk)

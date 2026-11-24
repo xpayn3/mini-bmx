@@ -37,6 +37,9 @@ varying vec3 v_world;
 // the grass carpet's window (world/grass_field.gd): a = how much grass grows here; info = origin xz, texel, radius (0 = off)
 global uniform sampler2D grass_win : filter_linear;
 global uniform vec4 grass_win_info;
+// ripples in the road's puddles (game.gd puddle_wake, the same compute wake as the lake): window centre xz, span m, cell m; z = 0 off
+global uniform sampler2D puddle_wake : filter_linear, repeat_enable;
+global uniform vec4 puddle_wake_info;
 
 const float WATER_Y = -2.2;   // Terrain.WATER
 // sun-through-ripples light net (turbulent-water caustic, tiles every 2 pi), 0..1
@@ -318,10 +321,29 @@ void fragment() {
 		}
 	}
 	float pud = m_puddle * wd;
+	// a tyre through a puddle pushes it: the wake's slope tilts the puddle's normal, its foam lightens it (only read inside a puddle)
+	vec2 pw_g = vec2(0.0);
+	float pw_f = 0.0;
+	if (pud > 0.02 && puddle_wake_info.z > 0.0) {
+		vec2 pd = abs(P.xz - puddle_wake_info.xy) / (puddle_wake_info.z * 0.5);
+		float pm = (1.0 - smoothstep(0.7, 0.93, max(pd.x, pd.y))) * (1.0 - smoothstep(0.06, 0.18, gpx));
+		if (pm > 0.001) {
+			float e = puddle_wake_info.w, sp = puddle_wake_info.z;
+			vec2 uv = P.xz / sp;
+			float hx0 = textureLod(puddle_wake, uv - vec2(e / sp, 0.0), 0.0).x, hx1 = textureLod(puddle_wake, uv + vec2(e / sp, 0.0), 0.0).x;
+			float hz0 = textureLod(puddle_wake, uv - vec2(0.0, e / sp), 0.0).x, hz1 = textureLod(puddle_wake, uv + vec2(0.0, e / sp), 0.0).x;
+			pw_g = vec2(hx1 - hx0, hz1 - hz0) / (2.0 * e) * 1.9 * pm;
+			pw_f = textureLod(puddle_wake, uv, 0.0).z * pm;
+			// fine capillary ripples riding on the wave, only where the water is moving (one noise pair, inside the puddle)
+			float pe = length(pw_g);
+			if (pe > 0.004) pw_g += (vec2(gd_noise3(vec3(P.xz * 70.0, TIME * 0.9)), gd_noise3(vec3(P.xz * 70.0 + 17.0, TIME * 0.9 + 4.0))) - 0.5) * min(pe, 0.1) * 1.3;
+		}
+	}
 	// a puddle: murky water over the soil, level, mirror-smooth (the sky shows in it), with the lightest wind ripple.
 	// Not a perfect mirror: the sun's glint on 0.04 was smaller than a pixel and sparkled; it also goes duller with
 	// the pixel's footprint (far off / grazing), where one pixel covers many ripples
 	col = mix(col, gB.rgb * vec3(0.3, 0.29, 0.27), pud * 0.85);
+	col = mix(col, vec3(0.7, 0.68, 0.62), pw_f * 0.3 * pud);
 	// ruts (world/ruts.gd): the dug groove darker, its lip lighter
 	float rd = rut_depth(P.xz);
 	col = rut_colour(col, rd);
@@ -366,7 +388,7 @@ void fragment() {
 			nw = normalize(nw - clamp(grad, vec3(-1.2), vec3(1.2)));
 		}
 		vec2 rip = (vec2(gd_noise3(vec3(P.xz * 7.0 + TIME * 0.35, 1.0)), gd_noise3(vec3(P.xz * 7.0 - TIME * 0.3, 6.0))) - 0.5) * 0.02 * f2;
-		nw = normalize(mix(nw, vec3(rip.x, 1.0, rip.y), pud));
+		nw = normalize(mix(nw, vec3(rip.x - pw_g.x, 1.0, rip.y - pw_g.y), pud));
 		NORMAL = normalize((VIEW_MATRIX * vec4(nw, 0.0)).xyz);
 	}
 	// specular anti-aliasing (Tokuyoshi & Kaplanyan): a normal that changes fast across the pixel widens the

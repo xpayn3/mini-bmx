@@ -191,7 +191,8 @@ void fragment() {
 	float n1 = vnoise(wp * 1.6 + u_time * 0.2), n2 = vnoise(wp * 4.5 - u_time * 0.3);
 	float lip = 1.0 - smoothstep(0.0, 0.07 + n1 * 0.06 + arrive * 0.07, d);
 	float foam = clamp(max(lip * mix(0.55, 1.0, n2), waves), 0.0, 1.0);
-	foam = max(foam, wk_foam * smoothstep(0.25, 0.6, n2 * 0.6 + n1 * 0.4 + wk_foam * 0.5));
+	// the wake's foam as lace: bubbles and thin web, the same noise as the shore's froth
+	foam = max(foam, smoothstep(0.18, 0.5, wk_foam) * smoothstep(0.3, 0.62, lace * 0.75 + wk_foam * 0.45));
 	col = mix(col, vec3(1.0), foam * 0.85);
 	ALBEDO = col;
 	EMISSION = refl * (1.0 - foam) + u_sun_col * glint * (1.0 - foam);
