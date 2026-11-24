@@ -2130,8 +2130,11 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
 - Controls: Space / A play-pause, A D / arrows / D-pad / left stick: tap = a step (paused: one sample), held = rewind /
   forward from 3x doubling every 0.6 s to 48x, Q E / LB RB speed 0.1-2x, C / Y camera: TV (trackside cuts placed ahead of
   where the rider WILL be, zoomed on him), Chase, Side, Orbit, Detail (round the bike itself, in to ~40 cm), Drone, Free
-  (fly anywhere, paused or playing: WASD + Q / E, Shift x4, mouse drag look, wheel zoom; pad sticks + triggers; rewind on
-  arrows / D-pad there). Mouse drag / right stick look, wheel / triggers zoom, R / R3 reset, H / X hide the bar,
+  (an editor fly camera like Unity / Unreal's scene view, paused or playing: right mouse held = mouselook, WASD flies
+  where it looks, Q / E down / up, Shift x3, wheel with right held = fly speed; middle drag pan; Alt + left drag orbit the
+  rider; wheel dolly, Ctrl + wheel lens; Z / X or LB / RB tilt (roll); F frames the rider; pad: sticks fly / look,
+  triggers down / up, D-pad up / down = speed; rewind on arrows / D-pad left / right; up to 600 m from the rider, the
+  world streams round the camera; `BMX_REPLAY_FLYTEST=1` flies it in a test). Mouse drag / right stick look, wheel / triggers zoom, R / R3 reset, H / X hide the bar,
   S / pad View save, I / B / Esc back. Timeline: drag to scrub; airs gold, crashes red (`_marks`, kept as recorded).
 - Saved replays (`save()`): `%APPDATA%\Mini BMX\replays\ride_<date>.replay` (test runs: `replays/tests/`), zstd, ~4 MB a
 eplays

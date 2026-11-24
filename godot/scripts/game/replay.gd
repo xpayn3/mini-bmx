@@ -90,8 +90,17 @@ var _free_yaw := 0.0
 var _free_pitch := 0.0
 var _free_fov := 55.0
 var _free_init := false
-const FREE_SPEED := 6.0         # m/s (Shift x4, Alt x0.25)
-const FREE_RANGE := 150.0       # m from the replayed rider
+const FREE_SPEED := 6.0         # m/s to start with (the wheel with right mouse held changes it; Shift x3, Alt x0.3)
+const FREE_RANGE := 600.0       # m from the replayed rider (the world streams in round the camera)
+var _free_speed := FREE_SPEED
+var _free_roll := 0.0           # tilt (Dutch angle): LB / RB, Z / X; R / R3 levels it
+var _free_vel := Vector3.ZERO
+var _rmb := false               # right mouse held: mouselook
+var _mmb := false               # middle mouse held: pan
+var _orbiting := false          # Alt + left drag: orbit
+var _pan_d := Vector2.ZERO
+var _orbit_d := Vector2.ZERO
+var _dolly_d := 0.0
 
 func _init(g) -> void:
 	game = g
@@ -618,6 +627,8 @@ func open() -> void:
 func close() -> void:
 	if not on: return
 	on = false
+	if _rmb: _set_mouselook(false)
+	_mmb = false; _orbiting = false
 	visible = false
 	if _snap != null:
 		_restore(_snap)
@@ -706,9 +717,11 @@ func update(rdt: float) -> void:
 	for sm in _sims:
 		if is_instance_valid(sm): sm._process(sdt)
 	# the world round the replayed rider: chunks, the decoration fade band
-	game.terrain.update_stream(_focus_now.x, _focus_now.z, 4.0)
-	RenderingServer.global_shader_parameter_set("deco_fade", Vector4(_focus_now.x, _focus_now.z, game._deco_band.x, game._deco_band.y))
-	if game.far_hills: game.far_hills.follow(_focus_now)
+	# (Free: round the camera, which may be far from him)
+	var sc: Vector3 = cam3.global_position if (CAMS[cam_i] == "Free" and cam3 != null and _free_init) else _focus_now
+	game.terrain.update_stream(sc.x, sc.z, 4.0)
+	RenderingServer.global_shader_parameter_set("deco_fade", Vector4(sc.x, sc.z, game._deco_band.x, game._deco_band.y))
+	if game.far_hills: game.far_hills.follow(sc)
 	_camera(rdt)
 	bar.visible = ui_on
 	hint.visible = ui_on
@@ -807,42 +820,97 @@ func _bike_centre() -> Vector3:
 	if r == null: return _focus_now
 	return (r.wheel_f.global_position + r.wheel_r.global_position) * 0.5 + Vector3(0, 0.12, 0)
 
-## Free: fly with WASD + Q / E (pad: left stick + triggers), look with a mouse drag / right stick, wheel = lens
+## Free: an editor fly camera (Unity / Unreal scene view). Right mouse held = mouselook (cursor hidden) with WASD
+## flying where it looks, Q / E down / up, Shift x3, Alt slow, the wheel (right held) = fly speed; middle drag = pan;
+## Alt + left drag = orbit the rider; wheel = dolly, Ctrl + wheel = lens; F = frame the rider. Pad: left stick fly,
+## right stick look, triggers down / up. Works paused or playing; the world streams in round the camera
 func _free_cam(rdt: float) -> void:
 	if not _free_init:
 		_free_init = true
 		_free_pos = cam3.global_position
-		var fwd := -cam3.global_basis.z
-		_free_yaw = atan2(-fwd.x, -fwd.z)
-		_free_pitch = asin(clampf(fwd.y, -1.0, 1.0))
+		_free_look_from(-cam3.global_basis.z)
 		_free_fov = cam3.fov
+		_free_vel = Vector3.ZERO
+		_free_roll = 0.0
 	var mv := Vector3.ZERO
 	if Input.is_key_pressed(KEY_W): mv.z -= 1.0
 	if Input.is_key_pressed(KEY_S): mv.z += 1.0
 	if Input.is_key_pressed(KEY_A): mv.x -= 1.0
 	if Input.is_key_pressed(KEY_D): mv.x += 1.0
-	if Input.is_key_pressed(KEY_E): mv.y += 1.0
-	if Input.is_key_pressed(KEY_Q): mv.y -= 1.0
+	var up := 0.0
+	if Input.is_key_pressed(KEY_E): up += 1.0
+	if Input.is_key_pressed(KEY_Q): up -= 1.0
 	var lx := Input.get_joy_axis(0, JOY_AXIS_LEFT_X)
 	var ly := Input.get_joy_axis(0, JOY_AXIS_LEFT_Y)
 	if absf(lx) > 0.15: mv.x += lx
 	if absf(ly) > 0.15: mv.z += ly
-	mv.y += Input.get_joy_axis(0, JOY_AXIS_TRIGGER_RIGHT) - Input.get_joy_axis(0, JOY_AXIS_TRIGGER_LEFT)
-	var sp := FREE_SPEED * (4.0 if Input.is_key_pressed(KEY_SHIFT) else (0.25 if Input.is_key_pressed(KEY_ALT) else 1.0))
-	_free_yaw += _yaw_d; _free_pitch = clampf(_free_pitch + _pitch_d, -1.5, 1.5)
-	_yaw_d = 0.0; _pitch_d = 0.0
+	up += Input.get_joy_axis(0, JOY_AXIS_TRIGGER_RIGHT) - Input.get_joy_axis(0, JOY_AXIS_TRIGGER_LEFT)
+	var sp := _free_speed * (3.0 if Input.is_key_pressed(KEY_SHIFT) else (0.3 if Input.is_key_pressed(KEY_ALT) and not _orbiting else 1.0))
+	# look: mouse (right held / left drag) + right stick
 	var rx := Input.get_joy_axis(0, JOY_AXIS_RIGHT_X)
 	var ry := Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y)
-	if absf(rx) > 0.15: _free_yaw -= rx * rdt * 2.0
-	if absf(ry) > 0.15: _free_pitch = clampf(_free_pitch - ry * rdt * 1.5, -1.5, 1.5)
-	var bas := Basis(Vector3.UP, _free_yaw) * Basis(Vector3.RIGHT, _free_pitch)
-	_free_pos += (Basis(Vector3.UP, _free_yaw) * Vector3(mv.x, 0.0, mv.z) + Vector3(0, mv.y, 0)) * sp * rdt
-	var off := _free_pos - _focus_now
-	if off.length() > FREE_RANGE: _free_pos = _focus_now + off.normalized() * FREE_RANGE
+	if absf(rx) > 0.15: _yaw_d -= rx * rdt * 2.0
+	if absf(ry) > 0.15: _pitch_d -= ry * rdt * 1.5
+	var pivot := _focus_now
+	if _orbit_d != Vector2.ZERO:   # Alt + drag: round the rider, looking at him
+		var off := _free_pos - pivot
+		off = Basis(Vector3.UP, -_orbit_d.x) * off
+		var rt := off.cross(Vector3.UP).normalized()
+		var pit := Basis(rt, _orbit_d.y) * off
+		if absf(pit.normalized().y) < 0.97: off = pit
+		_free_pos = pivot + off
+		_free_look_from(-off)
+		_orbit_d = Vector2.ZERO
+	_free_yaw += _yaw_d
+	_free_pitch = clampf(_free_pitch + _pitch_d, -1.55, 1.55)
+	_yaw_d = 0.0; _pitch_d = 0.0
+	if Env.s("BMX_REPLAY_FLYTEST") != "":   # tests: fly forward + up, turn, tilt, pan, dolly, then orbit
+		mv.z -= 1.0; up += 0.3; _yaw_d += rdt * 0.4
+		_pan_d += Vector2(40.0, 0.0) * rdt; _dolly_d += rdt
+		if int(Time.get_ticks_msec() / 1500) % 2 == 1: _orbit_d += Vector2(0.6, 0.0) * rdt
+	var rl := 0.0
+	if Env.s("BMX_REPLAY_FLYTEST") != "": rl += 0.5
+	if Input.is_key_pressed(KEY_Z) or Input.is_joy_button_pressed(0, JOY_BUTTON_LEFT_SHOULDER): rl += 1.0
+	if Input.is_key_pressed(KEY_X) or Input.is_joy_button_pressed(0, JOY_BUTTON_RIGHT_SHOULDER): rl -= 1.0
+	_free_roll = clampf(_free_roll + rl * rdt * 0.9, -PI * 0.5, PI * 0.5)
+	var bas := Basis(Vector3.UP, _free_yaw) * Basis(Vector3.RIGHT, _free_pitch) * Basis(Vector3.BACK, _free_roll)
+	# fly: along where it looks (W climbs when looking up, like the editors), eased in / out
+	var want := (bas * Vector3(mv.x, 0.0, mv.z) + Vector3(0, up, 0)) * sp
+	_free_vel = _free_vel.lerp(want, 1.0 - exp(-rdt * 10.0))
+	_free_pos += _free_vel * rdt
+	# pan (middle drag) and dolly (wheel): the further from the rider, the bigger the step
+	var reach := clampf(_free_pos.distance_to(pivot), 1.5, 200.0)
+	if _pan_d != Vector2.ZERO:
+		_free_pos += (-bas.x * _pan_d.x + bas.y * _pan_d.y) * reach * 0.0018
+		_pan_d = Vector2.ZERO
+	if _dolly_d != 0.0:
+		_free_pos += -bas.z * _dolly_d * maxf(reach * 0.12, 0.25)
+		_dolly_d = 0.0
+	var off2 := _free_pos - pivot
+	if off2.length() > FREE_RANGE: _free_pos = pivot + off2.normalized() * FREE_RANGE
 	_free_pos.y = maxf(_free_pos.y, _ground(_free_pos) + 0.15)
 	cam3.global_transform = Transform3D(bas, _free_pos)
-	cam3.fov = clampf(_free_fov, 8.0, 100.0)
+	cam3.fov = clampf(_free_fov, 6.0, 110.0)
 	cam3.near = 0.03
+
+func _free_look_from(dir: Vector3) -> void:
+	var d := dir.normalized()
+	_free_yaw = atan2(-d.x, -d.z)
+	_free_pitch = asin(clampf(d.y, -1.0, 1.0))
+
+## F: the camera a few metres off the rider, looking at him
+func _free_frame() -> void:
+	var fs := fwd_at(tp)
+	var side := fs.cross(Vector3.UP).normalized()
+	_free_pos = _focus_now - fs * 3.0 + side * 2.2 + Vector3(0, 1.2, 0)
+	_free_pos.y = maxf(_free_pos.y, _ground(_free_pos) + 0.4)
+	_free_look_from(_focus_now - _free_pos)
+	_free_vel = Vector3.ZERO
+	_free_roll = 0.0
+
+func _set_mouselook(on: bool) -> void:
+	_rmb = on
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED if on else Input.MOUSE_MODE_VISIBLE
 
 ## TV director: a fixed trackside camera ahead of where the rider will be, cut to a new one once he is past it
 func _tv_shot(f: Vector3, fs: Vector3) -> void:
@@ -916,7 +984,10 @@ func _input(e: InputEvent) -> void:
 	if not on: return
 	var used := true
 	var free: bool = CAMS[cam_i] == "Free"
-	if e is InputEventKey and free and e.keycode in [KEY_W, KEY_A, KEY_S, KEY_D, KEY_Q, KEY_E, KEY_SHIFT, KEY_ALT]:
+	if e is InputEventKey and free and e.keycode in [KEY_W, KEY_A, KEY_S, KEY_D, KEY_Q, KEY_E, KEY_Z, KEY_X, KEY_SHIFT, KEY_ALT, KEY_CTRL]:
+		get_viewport().set_input_as_handled()
+		return
+	if free and _free_input(e):
 		get_viewport().set_input_as_handled()
 		return
 	if e is InputEventKey and e.pressed and not e.echo:
@@ -929,7 +1000,7 @@ func _input(e: InputEvent) -> void:
 			KEY_HOME: tp = t0(); _shot = null; _snap_cam = true
 			KEY_END: tp = t1()
 			KEY_H, KEY_F1: ui_on = not ui_on
-			KEY_R: _yaw = 0.0; _pitch = 0.0; _zoom = 1.0
+			KEY_R: _yaw = 0.0; _pitch = 0.0; _zoom = 1.0; _free_roll = 0.0
 			KEY_LEFT, KEY_RIGHT, KEY_A, KEY_D: pass
 			_:
 				if e.is_action_pressed("replay"): game.exit_replay()
@@ -939,11 +1010,13 @@ func _input(e: InputEvent) -> void:
 		match e.button_index:
 			JOY_BUTTON_A: _toggle_play()
 			JOY_BUTTON_Y: _next_cam()
-			JOY_BUTTON_LEFT_SHOULDER: _speed(-1)
-			JOY_BUTTON_RIGHT_SHOULDER: _speed(1)
+			JOY_BUTTON_LEFT_SHOULDER: if not free: _speed(-1)   # (Free: the shoulders tilt the camera)
+			JOY_BUTTON_RIGHT_SHOULDER: if not free: _speed(1)
+			JOY_BUTTON_DPAD_DOWN: _speed(-1)
+			JOY_BUTTON_DPAD_UP: _speed(1)
 			JOY_BUTTON_B, JOY_BUTTON_LEFT_STICK: game.exit_replay()
 			JOY_BUTTON_X: ui_on = not ui_on
-			JOY_BUTTON_RIGHT_STICK: _yaw = 0.0; _pitch = 0.0; _zoom = 1.0
+			JOY_BUTTON_RIGHT_STICK: _yaw = 0.0; _pitch = 0.0; _zoom = 1.0; _free_roll = 0.0
 			JOY_BUTTON_BACK: save()
 			JOY_BUTTON_START: used = false
 			_: pass
@@ -988,6 +1061,44 @@ func _input(e: InputEvent) -> void:
 		used = false
 	if used: get_viewport().set_input_as_handled()
 
+## the editor fly camera's mouse (true = used). The timeline / bar buttons still take a plain left click
+func _free_input(e: InputEvent) -> bool:
+	if e is InputEventKey and e.pressed and not e.echo and e.keycode == KEY_F:
+		_free_frame(); return true
+	if e is InputEventMouseButton:
+		var mb := e as InputEventMouseButton
+		match mb.button_index:
+			MOUSE_BUTTON_RIGHT:
+				_set_mouselook(mb.pressed); return true
+			MOUSE_BUTTON_MIDDLE:
+				_mmb = mb.pressed; return true
+			MOUSE_BUTTON_LEFT:
+				if mb.pressed and mb.alt_pressed: _orbiting = true; return true
+				if not mb.pressed and _orbiting: _orbiting = false; return true
+				return false   # (bar buttons / timeline / plain drag look: the usual handling)
+			MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN:
+				if not mb.pressed: return true
+				var d := 1.0 if mb.button_index == MOUSE_BUTTON_WHEEL_UP else -1.0
+				if _rmb:   # fly speed, like the editors
+					_free_speed = clampf(_free_speed * (1.25 if d > 0.0 else 0.8), 0.5, 120.0)
+					status = "FLY SPEED %.1f M/S" % _free_speed; _status_t = 1.5
+				elif mb.ctrl_pressed: _free_fov *= (1.0 / 1.08 if d > 0.0 else 1.08)
+				else: _dolly_d += d
+				return true
+	if e is InputEventMouseMotion:
+		var mm := e as InputEventMouseMotion
+		if _rmb:
+			_yaw_d -= mm.relative.x * 0.0035
+			_pitch_d -= mm.relative.y * 0.0035
+			return true
+		if _mmb:
+			_pan_d += mm.relative
+			return true
+		if _orbiting:
+			_orbit_d += mm.relative * 0.006
+			return true
+	return false
+
 func _scrub_to(x: float) -> void:
 	var r: Rect2 = bar.timeline_rect()
 	var k := clampf((x - r.position.x) / maxf(r.size.x, 1.0), 0.0, 1.0)
@@ -1002,6 +1113,8 @@ func _toggle_play() -> void:
 	playing = not playing
 
 func _next_cam() -> void:
+	if _rmb: _set_mouselook(false)
+	_mmb = false; _orbiting = false
 	cam_i = (cam_i + 1) % CAMS.size()
 	_free_init = false
 	_touched = false
@@ -1017,11 +1130,11 @@ func _refresh_hint() -> void:
 	_hint_pad = Settings.pad_active
 	if CAMS[cam_i] == "Free":
 		if _hint_pad:
-			hint.set_items([[["A"], "Play / pause"], [["D-Left", "D-Right"], "Rewind / forward"], [["LS"], "Fly"], [["LT", "RT"], "Down / up"],
-				[["RS"], "Look"], [["Y"], "Camera"], [["B"], "Back to menu" if viewer else "Back to riding"]])
+			hint.set_items([[["LS"], "Fly"], [["RS"], "Look"], [["LT", "RT"], "Down / up"], [["LB", "RB"], "Tilt"], [["A"], "Play"],
+				[["D-Left", "D-Right"], "Rewind"], [["Y"], "Camera"], [["B"], "Back"]])
 		else:
-			hint.set_items([[["K:SPACE"], "Play / pause"], [["K:←", "K:→"], "Rewind / forward"], [["K:W", "K:A", "K:S", "K:D"], "Fly"], [["K:Q", "K:E"], "Down / up"],
-				[["MOUSE"], "Look"], [["WHEEL"], "Zoom"], [["K:C"], "Camera"]])
+			hint.set_items([[["MOUSE"], "Right: look"], [["K:W", "K:A", "K:S", "K:D"], "Fly"], [["K:Q", "K:E"], "Down / up"], [["MOUSE"], "Middle: pan"],
+				[["K:ALT"], "+ drag: orbit"], [["K:Z", "K:X"], "Tilt"], [["K:F"], "Frame"], [["K:C"], "Camera"]])
 		return
 	if _hint_pad:
 		hint.set_items([[["A"], "Play / pause"], [["D-Left", "D-Right"], "Rewind / forward"], [["LB", "RB"], "Speed"], [["Y"], "Camera"],
