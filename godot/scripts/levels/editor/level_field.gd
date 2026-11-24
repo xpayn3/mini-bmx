@@ -21,6 +21,7 @@ var noise_seed := 1
 var trees := 1.0           # tree density (0 none .. 2 a forest)
 var tree_clear := 4.0      # m kept clear of trees either side of the trail's edge
 var tree_seed := 1
+var layers := {}           # height layers on top of the land (imported world land, sculpting): see step 4
 var flat := false          # flat ground (a park / jump spot): no slope, no valley; only the bumps (rough) if any
 
 # ---- the trail ----------------------------------------------------------------------------------------------
@@ -870,12 +871,8 @@ func _bake_trees() -> void:
 			if edge < tree_clear + 3.0 and rng.randf() < 0.6: kind = "bush"
 			tree_list.append({"x": px, "z": pz, "h": h, "kind": kind, "sc": sc, "py": sc * (1.5 + rng.randf() * 0.7 + pow(rng.randf(), 4.0) * 0.9),
 				"yaw": rng.randf() * TAU, "ci": rng.randi() % 3})
-			if kind != "bush":   # trunk collider (rocks and trees share the lookup, as in the world)
-				var c := {"x": px, "z": pz, "r": 0.16 * sc + 0.02, "ceil": h + 6.0 * sc}
-				var key := Vector2i(floori(px / ROCK_CELL), floori(pz / ROCK_CELL))
-				if not _rock_cells.has(key): _rock_cells[key] = []
-				_rock_cells[key].append(c)
 		z += cell
+	_index_colliders()
 
 
 func _near_piece(x: float, z: float, r: float) -> bool:
@@ -887,3 +884,51 @@ func _near_piece(x: float, z: float, r: float) -> bool:
 	for c in rocks:
 		if Vector2(c.x, c.z).distance_to(p) < r * 0.5: return true
 	return false
+
+
+## the collider lookup (2 m cells): every rock (a dome) and every tree trunk (a wall, as the world's)
+func _index_colliders() -> void:
+	_rock_cells = {}
+	var all: Array = rocks.duplicate()
+	for t in tree_list:
+		if t.kind != "bush": all.append({"x": t.x, "z": t.z, "r": 0.16 * float(t.sc) + 0.02, "ceil": float(t.h) + 6.0 * float(t.sc)})
+	for c in all:
+		for gx in range(floori((c.x - c.r) / ROCK_CELL), floori((c.x + c.r) / ROCK_CELL) + 1):
+			for gz in range(floori((c.z - c.r) / ROCK_CELL), floori((c.z + c.r) / ROCK_CELL) + 1):
+				var key := Vector2i(gx, gz)
+				if not _rock_cells.has(key): _rock_cells[key] = []
+				_rock_cells[key].append(c)
+
+
+## a jump's air (riders fly over it: the worn lines stop there): from the lip to where the design speed lands
+func air_at(x: float, z: float) -> float:
+	for st in structs:
+		if not st.has("d") or not (st.rect as Rect2).has_point(Vector2(x, z)): continue
+		var l := _local(st, x, z)
+		var d: Dictionary = st.d
+		var fd := float(st.flights[1].dist)
+		var u_end: float = float(d.lip_u) + fd if is_finite(fd) else float(d.land1)
+		return smoothstep(float(d.lip_u) - 0.3, float(d.lip_u) + 0.5, l.x) * (1.0 - smoothstep(u_end - 2.0, u_end + 0.5, l.x))
+	return 0.0
+
+
+# ---- the bake file -----------------------------------------------------------------------------------------------
+const STATE_KEYS := ["length", "width", "drop", "steep_top", "side_rise", "rough", "rough_scale", "noise_seed", "flat",
+	"trees", "tree_clear", "tree_seed", "trail_width", "blend", "berms", "bank_max_deg", "start_speed", "smooth_len", "follow",
+	"TX", "TZ", "DX", "DZ", "TY", "TK", "TV", "TB", "trail_len", "step", "x0", "z0", "nx", "nz", "H", "S", "JM", "DT", "TSA",
+	"TAL", "TKC", "structs", "rocks", "gates", "route", "rock_runs", "tree_list", "layers"]
+
+
+## everything bake() worked out, as plain data (LevelBake writes it into the level's .bake file)
+func state() -> Dictionary:
+	var out := {}
+	for k in STATE_KEYS: out[k] = get(k)
+	return out
+
+
+## back from state(): no baking needed
+func load_state(d: Dictionary) -> void:
+	for k in STATE_KEYS:
+		if d.has(k): set(k, d[k])
+	_prep_noise()
+	_index_colliders()

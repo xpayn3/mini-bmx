@@ -49,7 +49,8 @@ func _enter_tree() -> void:
 	dock.add_child(head)
 	_button(dock, "New level", _new_level, "A new scene in res://levels/ with a slope and a winding trail")
 	_button(dock, "Snap trail to ground", _snap_trail, "Puts every trail point on the land (the handles sit where the trail is)")
-	_button(dock, "Rebuild preview", _rebuild, "Bakes the ground again now")
+	_button(dock, "Rebuild preview", _rebuild, "Works the preview ground out again now")
+	_button(dock, "Bake level", _bake, "Writes <level>.bake: the ground, pieces, trees and the light at the level's time of day, worked out once (the game loads it instantly). Runs the level's checks")
 	_button(dock, "▶  Ride this level", _ride, "Saves the scene and starts the game on it")
 	dock.add_child(HSeparator.new())
 	var pl := Label.new(); pl.text = "PLACE (click in the 3D view)"
@@ -375,6 +376,26 @@ func _snap_trail() -> void:
 	ur.commit_action(false)
 
 
+func _bake() -> void:
+	var root := EditorInterface.get_edited_scene_root()
+	if not (root is BmxLevel) or root.scene_file_path == "":
+		info.text = "Open (and save) a level scene first."
+		return
+	EditorInterface.save_scene()
+	var r := LevelBake.bake(root, root.scene_file_path)
+	if not r.ok:
+		info.text = "Bake failed: " + "
+".join(r.checks)
+		return
+	EditorInterface.get_resource_filesystem().scan()
+	info.text = "%s
+BAKED in %.1f s · %.1f MB · %s
+
+CHECKS
+%s" % [root.title, r.ms / 1000.0, r.size / 1048576.0, r.path.get_file(), "
+".join(r.checks)]
+
+
 func _rebuild() -> void:
 	if _lvl: _lvl.rebuild_preview()
 
@@ -385,6 +406,9 @@ func _ride() -> void:
 		info.text = "Open (and save) a level scene first."
 		return
 	EditorInterface.save_scene()
+	if LevelBake.load_bake(root.scene_file_path, LevelBake.signature(root)).is_empty():
+		info.text += "
+(no up-to-date bake: the game works the level out live, no baked light. Bake level to fix.)"
 	_args_back = ProjectSettings.get_setting("editor/run/main_run_args", "")
 	ProjectSettings.set_setting("editor/run/main_run_args", "-- --level=" + root.scene_file_path)
 	EditorInterface.play_main_scene()

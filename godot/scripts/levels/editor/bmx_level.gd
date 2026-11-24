@@ -30,6 +30,11 @@ signal rebuilt(summary: String)
 	set(v): rough_scale = v; _queue()
 @export var noise_seed := 1:
 	set(v): noise_seed = v; _queue()
+@export_group("Light")
+@export_range(5.0, 20.0, 0.25, "suffix:h") var hour := 16.5:   ## the level's time of day (its light is baked for it)
+	set(v): hour = v; _queue()
+@export_range(-180.0, 180.0, 1.0, "suffix:°") var sun_turn := 0.0:   ## turn the sun round the level
+	set(v): sun_turn = v; _queue()
 @export_group("Nature")
 @export_range(0.0, 3.0, 0.05) var trees := 1.0:   ## tree density (0 none .. a forest)
 	set(v): trees = v; _queue()

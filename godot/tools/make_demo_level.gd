@@ -32,7 +32,7 @@ func _init() -> void:
 		var at := int(lerpf(r[0], r[1], plan[k][1]))
 		match plan[k][0]:
 			"table": _add(lvl, BmxJump.new(), "Table1", f, at, {"kind": "table"})
-			"gap": _add(lvl, BmxJump.new(), "Gap1", f, at, {"kind": "gap", "lip_deg": 28.0, "speed_scale": 0.8, "fill": 1.5})
+			"gap": _add(lvl, BmxJump.new(), "Gap1", f, at, {"kind": "gap", "lip_deg": 28.0, "speed_scale": 0.8, "fill": 2.0})
 			"kicker": _add(lvl, BmxJump.new(), "Kicker1", f, at, {"kind": "kicker", "lip_deg": 22.0, "build": "wood", "width": 2.4})
 			"drop": _add(lvl, BmxDrop.new(), "Drop1", f, at, {"height": 1.6})
 			"rocks": _add(lvl, BmxRocks.new(), "Rocks1", f, at, {"length": 22.0})
@@ -70,8 +70,9 @@ func _park() -> void:
 		n.owner = lvl
 	put.call(BmxGate.new(), "StartGate", 10.0, 0.0, {"gate": "start"})
 	put.call(BmxJump.new(), "Table1", 60.0, 0.0, {"kind": "table", "auto_speed": false, "design_kmh": 32.0})
-	put.call(BmxJump.new(), "Kicker1", 120.0, 0.0, {"kind": "kicker", "build": "wood", "auto_speed": false, "design_kmh": 30.0, "lip_deg": 24.0, "width": 2.4})
+	put.call(BmxJump.new(), "Kicker1", 120.0, 0.0, {"kind": "kicker", "build": "wood", "auto_speed": false, "design_kmh": 26.0, "lip_deg": 22.0, "width": 2.4})
 	put.call(BmxJump.new(), "Gap1", 60.0, 14.0, {"kind": "gap", "auto_speed": false, "design_kmh": 36.0, "lip_deg": 28.0})
+	put.call(BmxGate.new(), "FinishGate", 180.0, 7.0, {"gate": "finish"})
 	put.call(BmxDrop.new(), "Drop1", 120.0, 14.0, {"auto_speed": false, "design_kmh": 26.0, "height": 1.2, "build": "wood"})
 	var ps := PackedScene.new()
 	ps.pack(lvl)

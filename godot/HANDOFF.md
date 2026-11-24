@@ -2193,8 +2193,20 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
 - `jump_mask` covers a structure's whole footprint (run-out included), as the world's features. The wooden kicker's
   square back gives a zero-impact rear "landing" at the lip in the BMX_TRICK prints: the physics' `_graze` rule
   already treats it as a brush with the lip (speed kept), nothing to fix.
-- Not yet: baked lighting (step 3: LightmapGI + shadowmask, short sharp real-time shadows, baked reflection probes,
-  cached chunk bake), publishing (step 4: LEVELS menu, medals).
+- **Step 3, bake (same day)**: dock **Bake level** (or `-s res://tools/bake_level.gd -- res://levels/x.tscn ...`) writes
+  `levels/<name>.bake` (zstd `store_var`): `LevelField.state()` (grid, trail, pieces, rocks, trees), every chunk's
+  `LevelChunkData` (the world chunk textures + `light`) and the baked light: `LevelShadeBake.cs` ([Tool]) marches
+  each 1 m cell towards the sun at the level's `hour` / `sun_turn` (BmxLevel > Light) through the heights and tree crowns
+  (soft edge from the closest miss), and samples the horizon in 8 directions for sky openness. `ground.gdshader`
+  `bake_tex` / `bake_on` / `bake_near`: past `bake_near` the sun's shadow is the baked one (x 0.42 in shadow), the sky term
+  darkens hollows everywhere. On a baked level the real-time sun shadow reaches only `LevelTerrain.RT_SHADOW` 45 m
+  (`Game._shadow_fit`), and the level's own time of day / sun are used (`Game` light override). LevelTerrain loads the bake
+  when `LevelBake.signature(lvl)` matches the scene (else works it out live; `BMX_LEVEL_LIVE=1` forces live). Godot's
+  LightmapGI was not used: its bake is editor-toolbar only and needs the meshes in the scene. Demo descent: bake 1.7 s,
+  4.0 MB; load 0.3 s (live 1.5 s). The bake runs the level's checks (`LevelBake.checks`): jumps not landing on their
+  landing at design speed, EFH > 1.5 m, a 15 % slow rider dropping into a gap, overlapping pieces, no start / finish, hard
+  braking zones, the trail leaving the ground. Not done: reflection probes, trees darkened by baked shadow far off.
+- Not yet: publishing (LEVELS menu, medals).
 
 ### Developer view of the test playground (`scripts/levels/ride_diag.gd`) - telemetry + sliders for riding code
 - **Only in the test playground** (user decision 2026-11-21: developer tools live in that level, normal rides have none).

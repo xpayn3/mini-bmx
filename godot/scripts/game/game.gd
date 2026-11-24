@@ -93,6 +93,7 @@ func _two_splits() -> bool:
 func _shadow_fit() -> void:
 	var sq := int(Settings.get_v("shadows"))
 	var reach: float = SHADOW_REACH[clampi(sq, 0, 3)]
+	if terrain is LevelTerrain and terrain.baked: reach = LevelTerrain.RT_SHADOW   # (baked level: far shadows are baked)
 	if Env.s("BMX_SHADOW_REACH") != "": reach = float(Env.s("BMX_SHADOW_REACH"))   # tests
 	var zoom := roundf(cam.dist / maxf(1.0 - 0.2 * cam.speed_feel, 0.5))   # the zoom set, without the speed dolly
 	if absf(sun.directional_shadow_max_distance - reach) > 0.5: sun.directional_shadow_max_distance = reach
@@ -886,8 +887,12 @@ func _update_light(dt: float) -> void:
 		# a test level: clear midday light (readable shots, no golden haze) until the player changes the light in it
 		if _level_light_ver < 0: _level_light_ver = LightSettings.version
 		if LightSettings.version == _level_light_ver:
-			L = LightSettings.preset("Noon")
-			L.haze = 0.3; L.mist = 0.0; L.cycle = 0.0
+			if terrain is LevelTerrain:   # a built level: its own time of day + sun (its light is baked for them)
+				L = LightSettings.current.duplicate()
+				L.time = terrain.hour; L.sun_turn = terrain.sun_turn; L.cycle = 0.0
+			else:
+				L = LightSettings.preset("Noon")
+				L.haze = 0.3; L.mist = 0.0; L.cycle = 0.0
 	var changed := light_ver != LightSettings.version
 	if changed:
 		light_ver = LightSettings.version

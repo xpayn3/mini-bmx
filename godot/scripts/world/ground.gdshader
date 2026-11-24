@@ -26,6 +26,12 @@ uniform float trail_bump = 0.9;
 uniform float trail_relief = 1.0;   // depth of the worn lines / tyre prints / grit, x the real centimetres below
 uniform float trail_play = 0.34;   // share of 26 m stretches with a playful mark (donut, figure of eight, slalom, skid arc); test: 1 = all
 uniform float trail_puddles = 1.0;   // 0 = none, 1 = normal
+// a built level's baked light (levels/editor/level_bake.gd): R = sun through hills / ramps / trees at the level's time of
+// day, G = sky openness. Past bake_near (the short real-time shadow's reach) the sun's shadow is the baked one; the
+// sky term darkens hollows everywhere. Off (0) on the world's chunks.
+uniform sampler2D bake_tex : filter_linear, repeat_disable;
+uniform float bake_on = 0.0;
+uniform float bake_near = 45.0;
 uniform int trail_debug = 0;       // 1 = show the mask layers: r driven, g loose, b puddle (wet rim dimmer), white tyre prints, yellow run-off skids, magenta stray lines, cyan playful marks
 varying vec3 v_world;
 // the grass carpet's window (world/grass_field.gd): a = how much grass grows here; info = origin xz, texel, radius (0 = off)
@@ -303,6 +309,13 @@ void fragment() {
 	// ruts (world/ruts.gd): the dug groove darker, its lip lighter
 	float rd = rut_depth(P.xz);
 	col = rut_colour(col, rd);
+	if (bake_on > 0.0) {
+		vec2 bk = texture(bake_tex, UV).rg;
+		float dcam = length(P - CAMERA_POSITION_WORLD);
+		float far = smoothstep(bake_near * 0.75, bake_near, dcam);
+		col *= mix(1.0, mix(0.42, 1.0, bk.r), far * bake_on);   // (in a baked shadow only the sky lights it)
+		col *= mix(1.0, mix(0.62, 1.0, bk.g), bake_on);
+	}
 	ALBEDO = col;
 	float pud_r = mix(0.075, 0.22, smoothstep(0.02, 0.25, gpx));
 	ROUGHNESS = mix(mix(0.95, trough, wd), pud_r, pud);
