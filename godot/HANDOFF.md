@@ -1695,6 +1695,31 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   separate garage bikes, parts' own 3D looks for every variant (they share 2-3 looks), a purchase sound.
 
 ### Effects
+- **Water + mud on the lens (2026-11-24, `fx/lens_fx.gd` `LensFx` node + C# `fx/LensDropsCs.cs`, Settings › Gameplay ›
+  Water + mud on lens `lens_fx`)**. Research: Nakata / Kakimoto / Nishita "Real-Time Animation of Droplets on a
+  Hydrophobic Windshield" (drops = mass points, contact-angle pinning, gravity, air drag) + Kaneda et al. 1993
+  (meandering rivulets, water left behind). Each drop: pinning ~ r (varies over the glass: stop-and-go, meander),
+  gravity ~ r^3, the air ~ r^2 x airspeed^2. The air runs UP the glass like on a racing game's windshield (fanning out a
+  little at the sides, `FAN`; cornering pushes the water to the outside of the turn, `side` from v x yaw rate):
+  slow = drops crawl down, fast = big drops let go first and creep up and off, small beads stay. (A radial flow out of
+  the view's middle was tried first: "like a Star Wars hyperspace portal".) Rivulets dry `RIVULET_LIFE` 1 s behind a
+  drop (faster in the wind). Drop size: `LensDropsCs.SIZE` 1.215 (forces scaled with it).
+  Running drops leave beads + a rivulet and swallow what they hit (merge, volume kept). Drawn into a half-res lens
+  NORMAL MAP: rivulet SubViewport (never cleared, HDR, dried by `lens_dry.gdshader` blend_mul) under a drop SubViewport
+  (`lens_drop.gdshader`, premultiplied rg slope / b height / a cover); `grade.gdshader` refracts the scene through it
+  (`shaders/lens_fx.gdshaderinc`: flipped + out-of-focus view inside drops, dark rim, highlights tilted by the curved
+  front element, squeezed toward the rim). The air comes from the CAMERA's motion (`LensFx.update`: its velocity /
+  acceleration in its own frame), so the side cam's water runs sideways, a still trackside cam has none. Shown on the
+  default trail camera only (user). **Dust** (mud splats were tried: "very ugly", removed): one level `lens.dust`
+  0..1, built riding fast through dry dirt / sand dust (+ a bump on a crash there), washed off by water, cleared on
+  respawn; drawn from `assets/textures/lens/lens_dirt.png` (4096 x 2304, `tools/make_lens_dirt.py`: R ambientCG
+  Smear004 roughness, G SurfaceImperfections001 opacity, both CC0, B generated specks / fibres; no round blobs /
+  water rings: the user disliked the circles), each layer fading in from its own threshold, only toward the corners
+  (old-CRT rounded falloff), its own colour (smears / smudges = the ground's dust colour, specks paler, slow warm /
+  cool drift), softening the view and glowing where light comes through; water on the glass cuts clean paths in it.
+  `lens.rain` is ready for a weather system. Clean glass = viewports stopped, shader skips it. No C# = dust only.
+  Tests: `BMX_LENS_RAIN=0..1`, `BMX_LENS_SPLASH=k`, `BMX_LENS_DUST=0..1`, `BMX_LENS_WIND=0..1` (else the camera's
+  speed), `BMX_LENS_DUMP=file.png` (the normal map + `LENS ... flow=` line, 10 s in).
 - **Dust = a real 3D smoke simulation** (`fx/smoke_sim.gd` + compute shaders `shaders/smoke/*.glsl`): a
   128×32×128 grid (0.2 m voxels, 25.6×6.4×25.6 m) of air on the GPU that follows the rider (moves in
   0.8 m steps, ahead along the heading) and follows the ground (voxel height is measured from a
