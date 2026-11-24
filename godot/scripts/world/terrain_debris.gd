@@ -273,7 +273,10 @@ func smash_cactus(rec: Dictionary, vel: Vector3, hit: Vector3, chunk = null) -> 
 	var sp := Vector2(vel.x, vel.z).length()
 	var dir := Vector3(vel.x, 0, vel.z) / sp if sp > 0.1 else Vector3.ZERO
 	var mat := _cactus_material(rec["col"])
-	for pc in CactusGeo.pieces(rec.get("kind", 0)):
+	# a cactus is a plant, not a rock: the arms (pads, pipes) snap off and the trunk falls; the harder the hit, the more
+	# often the trunk breaks across too, leaving the rooted lower part standing
+	var half := randf() < clampf(0.12 + sp * 0.035, 0.12, 0.6) or Env.s("BMX_CACTUS_HALF") != ""
+	for pc in CactusGeo.pieces(rec.get("kind", 0), "half" if half else "arms"):
 		var c: Vector3 = xf * pc["at"]
 		var size: Vector3 = pc["size"] * scl
 		var rel := c - hit
@@ -284,6 +287,9 @@ func smash_cactus(rec: Dictionary, vel: Vector3, hit: Vector3, chunk = null) -> 
 		var tip := Vector3.UP.cross(dir) * (-0.6 - sp * 0.08) * (1.0 - near) if dir != Vector3.ZERO else Vector3.ZERO
 		var spin := 1.0 + sp * 0.8 * near
 		var w := tip + Vector3(_rs(), _rs(), _rs()) * spin
+		if pc.get("stump", false):   # the rooted lower part stays where it grew
+			v = dir * sp * 0.04
+			w = Vector3.ZERO
 		var hull := ConvexPolygonShape3D.new()
 		var pts: PackedVector3Array = pc["pts"]
 		var sp_pts := PackedVector3Array()

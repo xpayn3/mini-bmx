@@ -42,6 +42,9 @@ var x := 0.0; var z := 0.0; var y := 0.0; var vy := 0.0
 var heading := 0.0; var v := 0.0; var steer := 0.0; var steer_in := 0.0; var steer_in_v := 0.0
 var lean := 0.0; var lean_v := 0.0; var bike_lean := 0.0; var counter := 0.0; var rock := 0.0
 var pitch := 0.0; var pitch_v := 0.0; var hop_nose := 0.0
+## body contact points for fences / tape / cacti, in the bike's frame: (forward from the bottom bracket, up, radius).
+## rear wheel hub, handlebar, chest, head (the front tyre has its own checks)
+const BODY_PTS: Array[Vector3] = [Vector3(-0.43, 0.05, 0.3), Vector3(0.42, 0.62, 0.1), Vector3(0.0, 0.66, 0.16), Vector3(0.02, 0.98, 0.14)]
 var wheelie_up := 0.0   # sprint wheelie: how far up (rad) the rider is holding the front
 var air := false; var air_time := 0.0; var air_k := 0.0; var cap_bank := 0.0; var lean_lim := 9.0
 var compress := 0.0; var compress_v := 0.0; var load := 0.0
@@ -1647,6 +1650,36 @@ func _step_move(dt: float, f: Vector3) -> void:
 		if Env.s("BMX_TAPE_PROBE") != "": print("TAPECROSS su=%.2f v=%.1f" % [su, v])
 		if host.smash(c, Vector3(f.x * v, vy, f.z * v), Vector3(hp.x, tape_y, hp.y)):
 			v *= 0.97   # ("SNAP!" pops when it tears: TapeSim.torn -> Game._on_tape_torn)
+	# the rider's body and the bars take tape too (swept like the tyre, from where each point was a step ago): a whip,
+	# a flip or a low jump over a span that the wheels clear can still catch the chest / head / bars
+	if Env.s("BMX_OLD_BODYHIT") == "":
+		var cb0 := cos(pitch); var sb0 := sin(pitch)
+		for bi in range(1, BODY_PTS.size()):
+			var bp: Vector3 = BODY_PTS[bi]
+			var off: float = bp.x * cb0 - bp.y * sb0
+			var by: float = y + bp.x * sb0 + bp.y * cb0
+			var b0 := Vector2(px + f.x * off, pz + f.z * off)
+			var b1 := Vector2(x + f.x * off, z + f.z * off)
+			for c in near:
+				if not c.get("tape", false): continue
+				var sp: Dictionary = c["tape"]
+				if sp["broken"]: continue
+				var tp: PackedVector3Array = sp["pts"]
+				var tA := Vector2(tp[0].x, tp[0].z)
+				var dt_ab := Vector2(tp[tp.size() - 1].x, tp[tp.size() - 1].z) - tA
+				var dm := b1 - b0
+				var den := dm.cross(dt_ab)
+				if absf(den) < 1e-9: continue
+				var sm := (tA - b0).cross(dt_ab) / den
+				var su := (tA - b0).cross(dm) / den
+				if sm < 0.0 or sm > 1.0 or su < 0.0 or su > 1.0: continue
+				var tape_y: float = tp[clampi(roundi(su * (tp.size() - 1)), 0, tp.size() - 1)].y
+				if absf(by - tape_y) > bp.z: continue
+				var hp := tA + dt_ab * su
+				if Env.s("BMX_TAPE_PROBE") != "": print("TAPEBODY pt=%d su=%.2f by=%.2f tape_y=%.2f" % [bi, su, by, tape_y])
+				if host.smash(c, Vector3(f.x * v, vy, f.z * v), Vector3(hp.x, tape_y, hp.y)):
+					v *= 0.97
+	var cbp := cos(pitch); var sbp := sin(pitch)
 	for c in near:
 		if c.get("tape", false): continue   # handled above
 		var fx0 := x + f.x * FRONT
@@ -1661,17 +1694,32 @@ func _step_move(dt: float, f: Vector3) -> void:
 		var c_min: float = c.r + 0.16
 		var hit_f := fd < f_min
 		var hit_c := cd < c_min
-		if not hit_f and not hit_c: continue
-		var dx := fdx if hit_f else cdx
-		var dz := fdz if hit_f else cdz
-		var d := maxf(1e-4, fd if hit_f else cd)
+		# fences and cacti: the rider's body, the bars and the rear wheel count too, at their own height (a flip, a whip,
+		# a low jump over the top rail: it's the body that goes through it)
+		var hit_b := false
+		var bdx := 0.0; var bdz := 0.0
+		if not hit_f and not hit_c and cd < c.r + 2.4 and (c.has("fence") or c.has("cactus")) and Env.s("BMX_OLD_BODYHIT") == "":
+			var gr: float = terrain.height(c.x, c.z)
+			var top: float = c.ceil if c.has("ceil") else gr + (1.2 if c.get("fence", false) else 2.0)
+			for bp in BODY_PTS:
+				var wy: float = y + bp.x * sbp + bp.y * cbp
+				if wy > top + bp.z or wy < gr - 0.1: continue
+				var off: float = bp.x * cbp - bp.y * sbp
+				var ddx: float = x + f.x * off - c.x
+				var ddz: float = z + f.z * off - c.z
+				if ddx * ddx + ddz * ddz < (c.r + bp.z + 0.04) * (c.r + bp.z + 0.04):
+					hit_b = true; bdx = ddx; bdz = ddz; break
+		if not hit_f and not hit_c and not hit_b: continue
+		var dx := fdx if hit_f else (cdx if hit_c else bdx)
+		var dz := fdz if hit_f else (cdz if hit_c else bdz)
+		var d := maxf(1e-4, fd if hit_f else (cd if hit_c else sqrt(bdx * bdx + bdz * bdz)))
 		var mn := f_min if hit_f else c_min
 		var vel := Vector3(f.x * v, vy, f.z * v)
 		if c.get("cactus", false) and absf(v) > 2.5 and not (air and y > c.get("ceil", INF)):
 			if host.smash(c, vel, Vector3(x, y, z)):
 				v *= 0.8; shake = maxf(shake, 0.35); host.flash("OUCH! CACTUS!")
 			continue
-		if c.get("fence", false) and (absf(v) > 2.2 or (air and vy < -2)) and not (air and y > terrain.height(c.x, c.z) + 1.2):
+		if c.get("fence", false) and (absf(v) > 2.2 or (air and vy < -2)) and not (air and y > terrain.height(c.x, c.z) + 1.2 and not hit_b):
 			if host.smash(c, vel, Vector3(x, y, z)):
 				v *= 0.86; shake = maxf(shake, 0.3); host.flash("CRUNCH!" if c.get("fence_style", "") == "picket" else "SMASH!")
 			continue
@@ -2272,6 +2320,19 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 		# the take-off, so a back wheel landing down a 29 deg landing read 45 deg nose down = NOSE DIVE. BMX_OLD_NOSEREF=1)
 		var n_ref: float = _g_pitch if (air and not _OLD_NOSEREF) else _or(nose_ref, _g_pitch)
 		if front_air and pitch - n_ref < -T.noseDive and not _balancing() and _man_grace <= 0.0: _crash("NOSE DIVE!")
+		# the rider's head and chest ride on the bike: turned well past the ground's slope (upside down in a flip, a spin
+		# that came round wrong) they reach the terrain before the bike does. A body point under the ground = the crash
+		# (it used to clip through until the wheels hit)
+		if Env.s("BMX_OLD_BODYHIT") == "" and not _balancing() and not _nosing() and absf(pitch - _g_pitch) > 1.0:
+			var sp := sin(pitch); var cp := cos(pitch)
+			var cr := cos(clampf(air_lean if air else bike_lean, -1.4, 1.4))
+			# (forward, up) from the bottom bracket in the bike's frame: head, chest
+			for pt in [Vector2(0.02, 0.98), Vector2(0.0, 0.66)]:
+				var wx: float = pt.x * cp - pt.y * sp * cr
+				var wy: float = y + pt.x * sp + pt.y * cp * cr
+				var gh: float = terrain.top_height(x + f.x * wx, z + f.z * wx)
+				if wy < gh + (0.12 if pt.y > 0.8 else 0.10):
+					_crash("HEAD HIT!" if pt.y > 0.8 else "BODY HIT!"); break
 		var snN := sin(pitch)
 		w_f = hfC if cF else y + XF * snN
 		w_r = hrC if cR else y + XR * snN
