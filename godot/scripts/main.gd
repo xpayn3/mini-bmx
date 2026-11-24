@@ -357,7 +357,9 @@ func _show_menu() -> void:
 	menu_version.offset_top = -FSB.MARGIN - FSB.SIZE
 	menu_version.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	menu.add_child(menu_version)
-	_menu_page_main()
+	if _menu_after == "replays": _menu_page_replays()
+	else: _menu_page_main()
+	_menu_after = ""
 	if Env.s("BMX_MENU_PAGE") == "setup": _menu_page_setup(int(Env.s("BMX_SETUP_STEP")))   # tests: the ride setup page (BMX_SETUP_STEP=0..3)
 	if Env.s("BMX_MENU_PAGE") == "credits": _show_credits()   # tests: the credits window
 	if PartThumbs.BAKE != "" and not _baking:
@@ -580,7 +582,7 @@ var menu_page := "main"
 var menu_focus: Control   # where the pad cursor lands on this page (RIDE, NEXT)
 
 func _menu_back() -> void:
-	if menu_page == "levels": _menu_page_main(); return
+	if menu_page == "levels" or menu_page == "replays": _menu_page_main(); return
 	if menu_page != "setup": return
 	if setup_step > 0: _menu_page_setup(setup_step - 1)
 	else: _menu_page_main()
@@ -600,6 +602,7 @@ func _menu_page_main() -> void:
 	if Env.s("BMX_LEVEL") == "": GameState.level = ""   # back on the title: RIDE / the garage ride the real world
 	# LEVELS: test levels (DEMO is off the title menu: the in-game panel switches the AI rider on; _start_demo is kept)
 	vb.add_child(_menu_button("LEVELS", "", _menu_page_levels, false, true))
+	vb.add_child(_menu_button("REPLAYS", "", _menu_page_replays, false, true))
 	vb.add_child(_menu_button("GARAGE", "", _open_garage, false, true))
 	vb.add_child(_menu_button("RIDER", "", _open_garage.bind("rider"), false, true))
 	vb.add_child(UITheme.spacer(Tokens.S2))
@@ -632,6 +635,10 @@ func _menu_page_main() -> void:
 	if is_instance_valid(menu_stats): menu_stats.visible = true
 	menu_focus = ride
 	ride.grab_focus.call_deferred()
+	if Env.s("BMX_REPLAY_WATCH") != "" and not _probe.get("watch", false):   # tests: watch a saved replay file
+		_probe.watch = true
+		print("AUTOTEST watch: ", Env.s("BMX_REPLAY_WATCH"))
+		_watch_replay.call_deferred(Env.s("BMX_REPLAY_WATCH"))
 
 ## LEVELS: hand-built places instead of the endless trail. For now only the test playground (scripts/levels:
 ## measured jumps, drops, rollers, slopes, cambers, berms on a flat plane; every jump is measured on screen)
@@ -653,6 +660,94 @@ func _menu_page_levels() -> void:
 	fill.call()
 	menu_focus = pg
 	pg.grab_focus.call_deferred()
+
+## REPLAYS: rides saved from the instant replay (S / pad View in it), newest first. Watching one rebuilds its
+## world, bike and rider from the file and plays it; leaving comes back here
+func _menu_page_replays() -> void:
+	_menu_clear()
+	menu_page = "replays"
+	var vb := menu_col
+	var fill := func() -> void:
+		var c := Control.new(); c.size_flags_vertical = Control.SIZE_EXPAND_FILL; vb.add_child(c)
+	fill.call()
+	var cap := UITheme.caption("REPLAYS")
+	cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(cap)
+	var first: Control = null
+	var files := ReplayMode.list_saved()
+	for path in files.slice(0, 8):
+		var h := ReplayMode.read_header(path)
+		if h.is_empty(): continue
+		var dt := String(h.get("date", "")).split("T")
+		var when := "%s  %s" % [dt[0], dt[1].substr(0, 5) if dt.size() > 1 else ""]
+		var bike := String(GameState.BIKES.get(str(h.get("bike", "")), {}).get("label", "")).to_upper()
+		var b := _menu_button(when, "%s  ·  %s  ·  WORLD %s" % [ReplayMode.clock(float(h.get("secs", 0.0))), bike, str(h.get("seed", ""))],
+			_watch_replay.bind(path), false, true)
+		vb.add_child(b)
+		if first == null: first = b
+	if files.is_empty():
+		var none := UITheme.caption("Nothing saved yet: press S (pad View) in a replay (I) to keep one")
+		none.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		none.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		vb.add_child(none)
+	var folder := UITheme.make_button("OPEN FOLDER", func():
+		DirAccess.make_dir_recursive_absolute(ReplayMode.dir())
+		OS.shell_open(ProjectSettings.globalize_path(ReplayMode.dir())), "link", Tokens.T_LG)
+	folder.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(folder)
+	var back := _menu_button("BACK", "", _menu_page_main, false, true)
+	vb.add_child(back)
+	fill.call()
+	menu_focus = first if first != null else back
+	menu_focus.grab_focus.call_deferred()
+
+var _view_back := {}
+var _menu_after := ""   # _show_menu opens this page instead of the main one (back from a saved replay)
+## watch a saved replay: build its world (seed), bike (its build) and rider (its look), then play it
+func _watch_replay(path: String) -> void:
+	var rd := ReplayMode.read_file(path)
+	if rd.is_empty(): return
+	var h: Dictionary = rd.head
+	_view_back = {"seed": GameState.seed, "bike": GameState.bike_id, "level": GameState.level}
+	GameState.view = h
+	GameState.seed = int(h.get("seed", GameState.seed))
+	if GameState.BIKES.has(str(h.get("bike", ""))): GameState.bike_id = str(h.bike)
+	GameState.level = str(h.get("level", ""))
+	fade.modulate.a = 1.0
+	if menu: menu.queue_free(); menu = null
+	if is_instance_valid(setup_screen): setup_screen.queue_free()
+	await _new_game(false)
+	state = RIDING
+	_set_riding(true)
+	if h.get("light") is Dictionary and h.has("hour"):   # the light it was ridden in
+		LightSettings.ensure_loaded()
+		var L: Dictionary = LightSettings.current.duplicate(true)
+		L.merge(h.light, true)
+		game._apply_light(float(h.hour), L)
+	if not game.replay.load_saved(rd) or not game.open_replay():
+		_replay_view_done()
+		return
+	create_tween().set_ignore_time_scale().tween_property(fade, "modulate:a", 0.0, 0.5)
+
+## left a saved replay: the player's own seed / bike back, the title world, the REPLAYS page
+func _replay_view_done() -> void:
+	GameState.view = {}
+	if not _view_back.is_empty():
+		GameState.seed = _view_back.seed; GameState.bike_id = _view_back.bike; GameState.level = _view_back.level
+	_view_back = {}
+	fade.modulate.a = 1.0
+	await _new_game(true)
+	_menu_after = "replays"
+	_show_menu()
+	create_tween().set_ignore_time_scale().tween_property(fade, "modulate:a", 0.0, 0.5)
+	if Env.s("BMX_REPLAY_WATCH") != "":   # tests: the page, then quit
+		await get_tree().create_timer(2.0).timeout
+		if Env.s("BMX_REPLAY_WATCH_SHOT") != "": get_viewport().get_texture().get_image().save_png(Env.s("BMX_REPLAY_WATCH_SHOT"))
+		var vc := get_viewport().get_camera_3d()
+		print("AUTOTEST watch done: menu_page=%s cam=%s at=%s game_title=%s menu=%s vis=%s ui_vis=%s fade=%.2f state=%d disable3d=%s" % [menu_page, vc.name if vc else "none",
+			str(vc.global_position) if vc else "-", game.title_world if game else "-", is_instance_valid(menu), menu.is_visible_in_tree() if is_instance_valid(menu) else false,
+			ui.visible, fade.modulate.a, state, get_tree().root.disable_3d])
+		get_tree().quit()
 
 ## RIDE -> choose the bike and the time of day, then GO
 const GoggleLens = preload("res://scripts/rider/goggle_lens.gd")   # goggle lens = the ride's colour grade (RACE step)
@@ -1508,6 +1603,10 @@ func _start_demo() -> void:
 func _unhandled_input(e: InputEvent) -> void:
 	if not e.is_action_pressed("pause") or e.is_echo(): return
 	if is_instance_valid(settings_open) or garage: return
+	if state == RIDING and game and game.replay_on:   # Esc leaves the replay first
+		game.exit_replay()
+		get_viewport().set_input_as_handled()
+		return
 	if state == RIDING and game and game.photo:   # Esc leaves photo mode first
 		game.toggle_photo()
 		get_viewport().set_input_as_handled()
@@ -1564,6 +1663,8 @@ func _pause() -> void:
 	if game == null or game.level == "": pm.add_item("New world", func(): _resume(); game.respawn(true))
 	pm.add_item("Tuning", _open_tuning)
 	pm.add_item("Photo mode", func(): _resume(); game.toggle_photo())
+	if game and game.replay and game.replay.ready_to_play():
+		pm.add_item("Replay", func(): _resume(); game.open_replay())
 	pm.add_item("Settings", _open_settings)
 	pm.add_item("Main menu", func(): _close_pause(true); GameState.save(); _show_menu())
 	pm.add_item("Quit to desktop", func(): GameState.save(); GameState.quit())
@@ -1730,6 +1831,16 @@ func _autotest(seconds: float) -> void:
 				var tv := Env.s("BMX_MAP_TILT").split(",")
 				Input.action_press("body_right" if float(tv[0]) > 0 else "body_left", absf(float(tv[0])))
 				Input.action_press("body_fwd" if float(tv[1]) > 0 else "body_back", absf(float(tv[1])))
+		if Env.s("BMX_REPLAY") != "" and el >= float(Env.s("BMX_REPLAY")) and not _probe.get("replay", false):   # tests: the instant replay (BMX_REPLAY_SET / _SHOTS)
+			_probe.replay = true
+			print("AUTOTEST replay: opened=%s secs=%.1f" % [game.open_replay(), game.replay.duration()])
+		if Env.s("BMX_REPLAY_SAVE") != "" and el >= float(Env.s("BMX_REPLAY_SAVE")) and not _probe.get("replay_s", false):   # tests: save it (tests/ folder)
+			_probe.replay_s = true
+			print("AUTOTEST replay saved: ", game.replay.save())
+		if Env.s("BMX_REPLAY_CLOSE") != "" and el >= float(Env.s("BMX_REPLAY_CLOSE")) and not _probe.get("replay_x", false):
+			_probe.replay_x = true
+			game.exit_replay()
+			print("AUTOTEST replay closed: time_scale=%.2f cam=%s" % [Engine.time_scale, get_viewport().get_camera_3d().name])
 		if Env.s("BMX_PHOTO") != "" and el >= float(Env.s("BMX_PHOTO")) and not _probe.get("photo", false):   # tests: photo mode (BMX_PHOTO_SET / _FLY / _SNAP)
 			_probe.photo = true; game.toggle_photo()
 		if Env.s("BMX_PHOTO_CLOSE") != "" and el >= float(Env.s("BMX_PHOTO_CLOSE")) and not _probe.get("photo_x", false):   # tests: O again

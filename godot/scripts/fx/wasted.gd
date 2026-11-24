@@ -215,7 +215,7 @@ func _mask_off_layers() -> void:
 	_masked.clear()
 
 func _set_speed(sp: float) -> void:
-	if game and game.photo: return
+	if game and (game.photo or game.replay_on): return
 	Engine.time_scale = sp
 	AudioServer.playback_speed_scale = lerpf(0.55, 1.0, (sp - SLOW) / (1.0 - SLOW))   # sound slows / drops in pitch too
 

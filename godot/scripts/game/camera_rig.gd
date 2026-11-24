@@ -167,7 +167,7 @@ func _smooth_y(y: float, dt: float) -> float:
 	return 2.0 * _ys1 - _ys2
 
 func _unhandled_input(e: InputEvent) -> void:
-	if get_tree().paused or (game and game.photo): return   # photo mode drives the camera itself
+	if get_tree().paused or (game and (game.photo or game.replay_on)): return   # photo mode drives the camera itself
 	var sens: float = Settings.get_v("mouse_sens")
 	var inv := -1.0 if Settings.get_v("invert_y") else 1.0
 	if e is InputEventMouseButton:

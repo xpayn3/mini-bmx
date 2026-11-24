@@ -43,6 +43,7 @@ const ACTIONS := {
 	"screenshot":   ["Screenshot",               [KEY_F12],            [],                         []],
 	"toggle_hud":   ["Hide HUD",                 [KEY_F1],             [],                         []],
 	"photo":        ["Photo mode",               [KEY_O],              [],                         []],
+	"replay":       ["Instant replay (last 60 s)", [KEY_I],            [JOY_BUTTON_LEFT_STICK],    []],
 	"save_log":     ["Save ride log (last 60 s)", [KEY_F8],            [JOY_BUTTON_RIGHT_STICK],   []],
 	"debug_draw":   ["Physics debug overlay",    [KEY_F3],             [],                         []],
 	"diag":         ["Ride diagnostics (test level)", [KEY_F4],        [],                         []],

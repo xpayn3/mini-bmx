@@ -67,7 +67,7 @@ Player data: `%APPDATA%\Mini BMX\` (custom user dir) — `crashlogs/` (see Crash
 W/↑ pedal · S/↓ brake (both levers, with feel) · **Ctrl front brake only · Alt rear brake only (bare levers: they lock)** · A/D steer · **Space** hop/pump (hold to charge; **in the air: tuck the bike up**) ·
 **S/W pressed fresh as you leave a lip: throw a back/front flip** · **W/S in the air: tilt the bike nose down/up (limited, body shift)** · **A/D in the air: lean the bike left/right (no spins)** · **brake + A/D when slow: pivot (pirouette)** · Shift sprint (stamina) · Q/E shift gears · F bail · Backspace back to
 start · R new world · B next bike · C next camera · Z/X rotate camera · +/- zoom · mouse drag orbit ·
-H records · **F4 ride diagnostics** (test playground only, section 5) · **M trail map** (pad: Share) · **P / K / L** the tuning card on its Ride / Rider / Look tab · **O photo mode** (free camera, see section 5) · F1 hide HUD ·
+H records · **I instant replay** (pad L3; whole ride, savable: section 5) · **F4 ride diagnostics** (test playground only, section 5) · **M trail map** (pad: Share) · **P / K / L** the tuning card on its Ride / Rider / Look tab · **O photo mode** (free camera, see section 5) · F1 hide HUD ·
 F12 screenshot · **F11 / the small button bottom right: fullscreen on / off** (`ui/fullscreen_button.gd`, on every screen,
 saves Settings › window mode; in the garage it sits above Save / Save & ride) · Esc pause. Gamepad (Xbox): triggers pedal/brake, left stick steer, X hop (jump), A sprint, bumpers gears, Y camera, D-pad left / right rotate the camera,
 **right stick = the rider's body, all the time**: up / down shifts the weight forward over the bars / back (pulled well back
@@ -2100,6 +2100,46 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   sag, travel), `DIAG LEGS`, `DIAG HIST F/R` (% of ground time per 5 % travel band), `DIAG PAD`, `DIAG DRAW` (ms).
 - Seen with it on day one: on the trail at ~70 km/h both ends chatter fast (several strokes a second) through the whole travel band with blow-offs
   every few strokes (25 / 17 in 16 s), and a 1.5 m table landed flat uses 115-125 % (bottom-out); not looked into yet.
+
+### Instant replay + saved replays (I / pad L3 / pause > Replay, title > REPLAYS, `scripts/game/replay.gd`, 2026-11-24)
+- Records what is DRAWN, not the inputs: `ReplayMode.capture(t)` (end of the ride part of `Game._process`, real rides only:
+  not the title backdrop, 30 Hz of ride time). A "segment" = one node list (bike rig, the rider as his own root kept in
+  world space, the torn-off action cam; a node added / removed under them starts a new one): every node's transform +
+  visibility at its start is the `base`; per sample only the nodes that have moved since (`moving`, append-only) are
+  stored (~45 of ~170), then every bone's whole pose (`BW` 12 floats: the spine bones carry the torso's length + a skew,
+  position + rotation alone stretched the body). The whole ride up to `SECS` 6 min (~7.5 MB a minute in memory,
+  ~0.15 ms a sample); cleared on respawn / new world. Samples are blended only inside one segment and when the bike didn't
+  jump > 4 m. The chain isn't stored: it redraws itself from the replayed parts (the replay sets `rig.crank_angle`).
+- Playback (`Game.open_replay` / `exit_replay`, `game.replay_on`): time frozen (time_scale 0 like photo mode), its own
+  Camera3D (copies the ride camera's environment / attributes / compositor), HUD / WASTED / contact shadows / drone OSD
+  hidden, speed blur off, render quality up (`Garage.showcase_quality(vp, on, heavy=false)`: full res, 4x MSAA + TAA, full
+  LOD, 16x aniso; not the garage's 8K shadows / 128-ray GI), terrain streams round the replayed rider (3x3 chunks built at
+  once on open). Leaving puts the live state back (`_live` / `_restore`). The cloth sims (race number, hair, helmet flap,
+  strap tails: `SIM_SCRIPTS`) see dt 0 while frozen, so the replay steps their `_process` with its own time step.
+- Controls: Space / A play-pause, A D / arrows / D-pad / left stick: tap = a step (paused: one sample), held = rewind /
+  forward from 3x doubling every 0.6 s to 48x, Q E / LB RB speed 0.1-2x, C / Y camera: TV (trackside cuts placed ahead of
+  where the rider WILL be, zoomed on him), Chase, Side, Orbit, Detail (round the bike itself, in to ~40 cm), Drone, Free
+  (fly anywhere, paused or playing: WASD + Q / E, Shift x4, mouse drag look, wheel zoom; pad sticks + triggers; rewind on
+  arrows / D-pad there). Mouse drag / right stick look, wheel / triggers zoom, R / R3 reset, H / X hide the bar,
+  S / pad View save, I / B / Esc back. Timeline: drag to scrub; airs gold, crashes red (`_marks`, kept as recorded).
+- Saved replays (`save()`): `%APPDATA%\Mini BMX\replays\ride_<date>.replay` (test runs: `replays/tests/`), zstd, ~4 MB a
+eplays
+ide_<date>.replay` (test runs: `replays/tests/`), zstd, ~4 MB a
+  minute. Header (`read_header`): seed, bike id + its build, rider look + pose, level, light + time of day, length; then
+  segments (node paths, bases, moving lists) + samples. Node paths are one step per level from the root: a real name, or
+  `#Class:k` = the k-th unnamed sibling of that class (generated "@Mesh@123" names differ every run). Title > REPLAYS lists
+  them (`main._menu_page_replays`); watching one (`_watch_replay`) sets `GameState.view` (= the header: `bike_config_for`
+  uses its build, `Game._ready` its look / pose), builds that world + bike + rider, `replay.load_saved` resolves the paths,
+  plays; leaving (`_replay_view_done`) restores seed / bike and comes back to the REPLAYS page.
+- Not replayed (stay as now): dust / smoke, mud / blood, tyre tracks, the world (torn tape, smashed fences), sounds. A
+  saved replay's world is fresh (tape whole).
+- Tests: `BMX_REPLAY=secs` opens it (+ `BMX_REPLAY_SET=cam=Free,speed=0.5,at=-6|6,pause=1,ui=0` (at < 0 from the end,
+  > 0 from the start), `BMX_REPLAY_SHOTS=dir/prefix` (a shot every 0.5 s, fps printed), `BMX_REPLAY_CLOSE=secs`,
+  `BMX_REPLAY_SAVE=secs`, `BMX_REPLAY_PROBE=1`: `REPLAY frames= moving= mem= MB/min capture_us= apply_us=`, on load
+  `missing` paths + `static differs` = parts matched wrong), `BMX_REPLAY_LOWQ=1` (no quality boost).
+  `BMX_REPLAY_WATCH=<file> [BMX_REPLAY_WATCH_SHOT=png] BMX_REPLAY_NSHOTS=n` + `-- --noop`: watch a saved file from the
+  title, back after n shots, then quit. PADSEQ `k:I` works too.
+- Not done: photo mode on a replay frame, replay sound, deleting saves in the game (OPEN FOLDER on the page).
 
 ### Photo mode (O, `scripts/game/photo_mode.gd`)
 - Time freezes (`Engine.time_scale = 0`), HUD hidden, the camera comes loose: `Game._process` calls `PhotoMode.update(real dt)`
