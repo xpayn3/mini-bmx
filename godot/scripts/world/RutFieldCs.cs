@@ -145,4 +145,31 @@ public partial class RutFieldCs : RefCounted
 		}
 		return b;
 	}
+
+	public const int FAR = 5;             // far layer: FAR x FAR cells -> one texel (25 cm)
+
+	/// the same tile for the far window: TILE/FAR x TILE/FAR texels, each the deepest of its cells (a 9 cm groove stays a
+	/// visible line from a long way off, only wider); 16-bit floats like TileRH; empty if the tile doesn't exist
+	public byte[] TileRHFar(int tx, int tz)
+	{
+		var t = TileFor(tx, tz, false);
+		if (t == null) return Array.Empty<byte>();
+		int n = TILE / FAR;
+		var b = new byte[n * n * 2];
+		for (int j = 0; j < n; j++)
+			for (int i = 0; i < n; i++)
+			{
+				float m = 0f;
+				for (int dj = 0; dj < FAR; dj++)
+					for (int di = 0; di < FAR; di++)
+					{
+						float v = t[(j * FAR + dj) * TILE + i * FAR + di];
+						if (v > m) m = v;
+					}
+				ushort h = BitConverter.HalfToUInt16Bits((Half)m);
+				int o = 2 * (j * n + i);
+				b[o] = (byte)(h & 0xff); b[o + 1] = (byte)(h >> 8);
+			}
+		return b;
+	}
 }

@@ -80,6 +80,14 @@ rut_win={
 "type": "vec4",
 "value": Vector4(0, 0, 0, 0)
 }
+rut_far_tex={
+"type": "sampler2D",
+"value": ""
+}
+rut_far_win={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
 rut_ctr={
 "type": "vec4",
 "value": Vector4(0, 0, 12, 20)

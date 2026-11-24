@@ -36,6 +36,8 @@ func clear() -> void:
 	field.Clear()
 	_publish()
 	_win_tile = Vector2i(1 << 30, 0)
+	_fcorner = Vector2i(1 << 30, 0)
+	_fdirty.clear()
 
 # ---- the ground shaders' window: 7 x 7 tiles (56 m) round the rider as an RH texture (shaders/ruts.gdshaderinc)
 const WT := 7   # (56 m: the rider is always >= 24 m from every edge, and the fade is done by 20 m, even with the window 2 m behind at speed: the window never shows)
@@ -58,6 +60,8 @@ func _process(dt: float) -> void:
 	var c := Vector2i(floori(game.phys.x / tile_m), floori(game.phys.z / tile_m))
 	var corner := c - Vector2i(WT / 2, WT / 2)
 	var dirty: PackedInt32Array = field.TakeDirty()
+	for k in dirty.size() / 2: _fdirty[Vector2i(dirty[2 * k], dirty[2 * k + 1])] = true
+	_far_update(c, tile_m)
 	if _img == null:
 		_img = Image.create_empty(T * WT, T * WT, false, Image.FORMAT_RH)
 		_tex = ImageTexture.create_from_image(_img)
@@ -80,6 +84,44 @@ func _process(dt: float) -> void:
 		_img.blit_rect(ti, Rect2i(0, 0, T, T), Vector2i((t.x - corner.x) * T, (t.y - corner.y) * T))
 	_tex.update(_img)
 	RenderingServer.global_shader_parameter_set("rut_win", Vector4(corner.x * tile_m, corner.y * tile_m, tile_m * WT, 1.0))
+
+# ---- the far layer: 25 x 25 tiles (200 m) at 25 cm a texel (the deepest cell of each 5 x 5), so every rut of the ride shows from afar
+const FT := 25
+const FPX := 32            # texels a tile side (160 / 5)
+var _fimg: Image
+var _ftex: ImageTexture
+var _fcorner := Vector2i(1 << 30, 0)
+var _fdirty := {}
+var _fup_t := 0.0
+const FAR_HZ := 4.0
+
+func _far_update(c: Vector2i, tile_m: float) -> void:
+	_fup_t -= 1.0 / UP_HZ
+	if _fup_t > 0.0: return
+	_fup_t = 1.0 / FAR_HZ
+	var corner := c - Vector2i(FT / 2, FT / 2)
+	if _fimg == null:
+		_fimg = Image.create_empty(FT * FPX, FT * FPX, false, Image.FORMAT_RH)
+		_ftex = ImageTexture.create_from_image(_fimg)
+		RenderingServer.global_shader_parameter_set("rut_far_tex", _ftex)
+	var redo: Array = []
+	if corner != _fcorner:
+		_fcorner = corner
+		_fimg.fill(Color(0, 0, 0))
+		for j in FT:
+			for i in FT: redo.append(corner + Vector2i(i, j))
+	else:
+		for t in _fdirty:
+			if t.x >= corner.x and t.y >= corner.y and t.x < corner.x + FT and t.y < corner.y + FT: redo.append(t)
+	_fdirty.clear()
+	if redo.is_empty(): return
+	for t in redo:
+		var b: PackedByteArray = field.TileRHFar(t.x, t.y)
+		if b.is_empty(): continue
+		var ti := Image.create_from_data(FPX, FPX, false, Image.FORMAT_RH, b)
+		_fimg.blit_rect(ti, Rect2i(0, 0, FPX, FPX), Vector2i((t.x - corner.x) * FPX, (t.y - corner.y) * FPX))
+	_ftex.update(_fimg)
+	RenderingServer.global_shader_parameter_set("rut_far_win", Vector4(corner.x * tile_m, corner.y * tile_m, tile_m * FT, 1.0))
 
 ## the terrain's height queries read the field: only near the bike (READ_R; the camera, sheep, decorations... far off
 ## never call it) and inside what was dug. The C# tyre fit gets the field once.
