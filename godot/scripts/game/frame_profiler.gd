@@ -49,6 +49,14 @@ var acc := {}                       # Game._perf adds microseconds per section h
 var ticks := 0                      # physics ticks since the last drawn frame
 
 var _worst := {}   # each section's worst single frame this session (printed at exit in test runs: PROF WORST)
+## tests (BMX_PROF + BMX_PROF_AVG=1): each section's mean per frame, crashed frames apart from riding ones (PROF AVG ride / crash)
+var _AVG := Env.s("BMX_PROF_AVG") != ""
+var _avg := {"ride": {}, "crash": {}}
+var _avg_n := {"ride": 0, "crash": 0}
+var _avg_cur := ""
+func _avg_add(k: String, ms: float) -> void:
+	var d: Dictionary = _avg[_avg_cur]
+	d[k] = d.get(k, 0.0) + ms
 
 var _marks: Array = []
 func _on_pre() -> void: _t_pre = Time.get_ticks_usec()
@@ -59,6 +67,17 @@ func _exit_tree() -> void:
 		if is_instance_valid(m): m.queue_free()
 	if RenderingServer.frame_pre_draw.is_connected(_on_pre): RenderingServer.frame_pre_draw.disconnect(_on_pre)
 	if RenderingServer.frame_post_draw.is_connected(_on_post): RenderingServer.frame_post_draw.disconnect(_on_post)
+	if _AVG:
+		for m in ["ride", "crash"]:
+			var d: Dictionary = _avg[m]; var nn: int = maxi(_avg_n[m], 1)
+			var ks2 := d.keys(); ks2.sort_custom(func(a, b): return d[a] > d[b])
+			var ln := "PROF AVG %s frames=%d (ms per frame):" % [m, _avg_n[m]]
+			for k in ks2.slice(0, 16): ln += " %s=%.2f" % [k, d[k] / nn]
+			print(ln)
+			var rl := "PROF AVG %s ragdoll/crash parts (ms per frame):" % m
+			for k in ks2:
+				if k.begins_with("rag.") or k.begins_with("p_step.crash") or k.begins_with("p_step.ragdoll") or k == "p_ragdoll_pose": rl += " %s=%.3f" % [k, d[k] / nn]
+			print(rl)
 	if Env.s("BMX_PROF") == "" or _worst.is_empty(): return
 	var ks := _worst.keys()
 	ks.sort_custom(func(a, b): return _worst[a] > _worst[b])
@@ -174,6 +193,11 @@ func _key(k: String) -> int:
 	return keys.size() - 1
 
 func _close_frame(wall_ms: float) -> void:
+	if _AVG:
+		_avg_cur = "crash" if game and game.phys and game.phys.crash_on else "ride"
+		if _frame > 60:
+			_avg_n[_avg_cur] += 1
+			_avg_add("WALL", wall_ms)
 	var r := head
 	var base := r * MAXK
 	for i in MAXK: _sec[base + i] = 0.0
@@ -182,6 +206,7 @@ func _close_frame(wall_ms: float) -> void:
 		if i >= 0:
 			_sec[base + i] = acc[k] / 1000.0
 			if _frame > 60 and acc[k] / 1000.0 > _worst.get(k, 0.0): _worst[k] = acc[k] / 1000.0
+			if _frame > 60 and _AVG: _avg_add(k, acc[k] / 1000.0)
 	_wall[r] = wall_ms
 	_gpu[r] = RenderingServer.viewport_get_measured_render_time_gpu(_vp_rid)
 	_rcpu[r] = RenderingServer.viewport_get_measured_render_time_cpu(_vp_rid) + RenderingServer.get_frame_setup_time_cpu()

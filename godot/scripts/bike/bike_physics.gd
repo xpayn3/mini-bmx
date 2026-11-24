@@ -486,7 +486,9 @@ func _crash_step(dt: float, inp: Dictionary) -> void:
 			if not c.get("fence", false) or rag.speed < 2.5 or Vector2(P.x - c.x, P.z - c.z).length() > c.r + 0.3 or P.y > terrain.height(P.x, P.z) + 1.4: continue
 			var Q: Vector3 = rag.q[Ragdoll.PELVIS]
 			host.smash(c, (P - Q) / dt * 3.0 * Vector3(1, 0, 1), P - Vector3(0, 0.4, 0))
+		var _rt := Time.get_ticks_usec() if prof != null else 0
 		rag.step(dt, near)
+		if prof != null: _prof("ragdoll", _rt)
 		crash_rest = crash_rest + dt if rag.speed < 0.6 else 0.0
 	if host.getup_anim != null: return   # already getting up
 	var holding: bool = crash_armed and inp.hop

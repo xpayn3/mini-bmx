@@ -79,6 +79,14 @@ const BOUNCE_MIN := 3.0        # m/s into the ground before anything bounces
 const ROCK_SLIDE := 0.98       # speed kept along a rock / trunk per contact (like the ground drag)
 const MAX_V := 40.0            # m/s: no part ever moves faster (a solver blow-up can't launch the body)
 var _old_col := OS.get_environment("BMX_OLD_RAGCOL") != ""
+## the constraint solver in C# (RagdollSolverCs: ~half the ragdoll's cost); GDScript `_dist` / `_collide` stay the fallback
+## (no C#, BMX_RAG_GD=1, or the old contact model)
+var _cs = null
+var _cs_try := false
+var _CMP := OS.get_environment("BMX_RAG_CMP") != ""
+var _cmp_max := 0.0
+var _cmp_n := 0
+var _cmp_near := 0
 var _jn := PackedFloat32Array()    # normal speed the ground took out of each part this substep (per substep)
 var _gn: Array = []                # ground normal under each part (this step)
 var _near: Array = []              # the shapes near the body this step
@@ -165,6 +173,15 @@ func _init(t) -> void:
 	lim.resize(LIMITS.size())
 	lim.fill(0.0)
 	_reset_points()
+	# the C# solver made and run once now (the ride loading), not on the first crash: its load + JIT cost ~2.8 ms
+	if not _old_col and OS.get_environment("BMX_RAG_GD") == "":
+		_cs_try = true
+		var sc = load("res://scripts/rider/RagdollSolverCs.cs") if ClassDB.class_exists("CSharpScript") else null
+		_cs = sc.new() if sc else null
+		if _cs:
+			_cs.Solve(PackedVector3Array([Vector3.ZERO, Vector3.UP]), PackedVector3Array([Vector3.ZERO, Vector3.UP]), PackedFloat32Array([-1.0, -1.0]),
+				PackedVector3Array([Vector3.UP, Vector3.UP]), PackedFloat32Array([0.1, 0.1]), PackedInt32Array([0, 1]), PackedFloat32Array([1.0]),
+				PackedFloat32Array([1.0]), PackedByteArray([0]), PackedFloat32Array([1.0, 3.0, 3.0, 0.0, 0.5, 0.5, 0.0, 3.0, 3.0, 0.0, 0.5, 0.0]), 0.003, 6, PackedFloat32Array([0.0, 0.0]))
 
 ## back to the 15 body points, nothing torn off
 func _reset_points() -> void:
@@ -333,7 +350,16 @@ func _same_colliders(cols: Array) -> bool:
 	return true
 
 
+## the frame profiler (F10): while it records, Game sets this to its per-frame dict ("rag.*" phases of step)
+var prof = null
+var _pt := 0
+func _rp(k: String) -> void:
+	var now := Time.get_ticks_usec()
+	prof["rag." + k] = prof.get("rag." + k, 0) + (now - _pt)
+	_pt = now
+
 func step(dt: float, colliders: Array) -> void:
+	if prof != null: _pt = Time.get_ticks_usec()
 	var n := SUB
 	var h := dt / n
 	# time-corrected Verlet: rescale the previous substep's displacement to this substep's length
@@ -401,6 +427,7 @@ func step(dt: float, colliders: Array) -> void:
 			var nn := Vector3(-gx, e, -gz).normalized()
 			_gn[i] = nn if nn.is_finite() else Vector3.UP
 	var vcap := MAX_V * h
+	if prof != null: _rp("setup")
 	for s in n:
 		for i in np:
 			var pp: Vector3 = p[i]
@@ -416,6 +443,7 @@ func step(dt: float, colliders: Array) -> void:
 			pp.y -= (2.0 if wet else 9.81) * h * h
 			p[i] = pp
 		t_fall += h
+		if prof != null: _rp("integrate")
 		# the body's own muscles (reaching, tension, squirming) can bend it but can't spin it: whatever
 		# whole-body spin they add is taken back (only the ground / things it hits can turn it)
 		var L0 := _ang_mom()
@@ -423,6 +451,7 @@ func step(dt: float, colliders: Array) -> void:
 		_neutral_pull(kt)
 		_squirm(h)
 		if not _no_lkeep: _keep_ang_mom(L0)
+		if prof != null: _rp("muscles")
 		_touch.fill(0)
 		_jn.fill(0.0)
 		# ground under each part once per substep (a C# call each); the 6 solver passes move parts by mm only
@@ -430,21 +459,24 @@ func step(dt: float, colliders: Array) -> void:
 		for i in p.size():
 			var gp: Vector3 = p[i]
 			_gh[i] = terrain.height(gp.x, gp.z)
-		for it in 6:
-			for j in BONES.size():
-				var bb: int = BONES[j][1]
-				if not cut.is_empty() and cut.has(bb) and BONES[j][0] != bb and LIMB_NEXT.get(BONES[j][0], -1) == bb: continue   # torn off
-				_dist(BONES[j][0], bb, rest[j], BONES[j][2], false)
-			for xb in _xbones:
-				_dist(xb[0], xb[1], xb[2], 1.0, false)
-			for j in LIMITS.size():
-				if not cut.is_empty() and free_pt[LIMITS[j][0]] != free_pt[LIMITS[j][1]]: continue
-				if not broken.is_empty() and broken.has(LIM_MID.get(j, -1)): continue   # broken: folds any way
-				_dist(LIMITS[j][0], LIMITS[j][1], lim[j], 1.0, true)
-			for xl in _xlims:
-				_dist(xl[0], xl[1], xl[2], 1.0, true)
-			for i in p.size():
-				_collide(i)
+		if prof != null: _rp("ground")
+		if not _solver_cs():   # the 6 passes in C# when it's there (RagdollSolverCs), else here
+			for it in 6:
+				for j in BONES.size():
+					var bb: int = BONES[j][1]
+					if not cut.is_empty() and cut.has(bb) and BONES[j][0] != bb and LIMB_NEXT.get(BONES[j][0], -1) == bb: continue   # torn off
+					_dist(BONES[j][0], bb, rest[j], BONES[j][2], false)
+				for xb in _xbones:
+					_dist(xb[0], xb[1], xb[2], 1.0, false)
+				for j in LIMITS.size():
+					if not cut.is_empty() and free_pt[LIMITS[j][0]] != free_pt[LIMITS[j][1]]: continue
+					if not broken.is_empty() and broken.has(LIM_MID.get(j, -1)): continue   # broken: folds any way
+					_dist(LIMITS[j][0], LIMITS[j][1], lim[j], 1.0, true)
+				for xl in _xlims:
+					_dist(xl[0], xl[1], xl[2], 1.0, true)
+				for i in p.size():
+					_collide(i)
+		if prof != null: _rp("solver")
 		# ground friction, once per substep for every part that touched: sliding friction (a body slides
 		# a few metres off a fast crash, the blood smears it, fx/blood.gd) + a little drag so it settles
 		for i in p.size():
@@ -473,6 +505,7 @@ func step(dt: float, colliders: Array) -> void:
 			var push := maxf(_jn[i], 9.81 * h * h * nrm.y)
 			var k := maxf(0.0, d - ROUGH_MU * push) / d * drag
 			q[i] = pp - (nrm * vn + vt * k)
+		if prof != null: _rp("friction")
 	var c := _com()
 	# a step that went non-finite (a solver blow-up) is thrown away: back to the last good state, at rest
 	if not c.is_finite():
@@ -653,6 +686,67 @@ func _neutral_pull(kt := 1.0) -> void:
 		var dv := vrel * minf(0.5, TONE_DAMP * kt)
 		q[c] = (q[c] as Vector3) + dv * 0.5
 		q[par] = (q[par] as Vector3) - dv * 0.5
+
+## one substep's 6 solver passes in C# (RagdollSolverCs). Returns false when it can't (no C#, BMX_RAG_GD, old contacts)
+func _solver_cs() -> bool:
+	if _old_col: return false
+	if not _cs_try:
+		_cs_try = true
+		if OS.get_environment("BMX_RAG_GD") == "":
+			var sc = load("res://scripts/rider/RagdollSolverCs.cs") if ClassDB.class_exists("CSharpScript") else null
+			_cs = sc.new() if sc else null
+	if _cs == null: return false
+	# the constraint list in the GDScript order: bones, extra bones, limits, extra limits (torn-off / broken left out)
+	var cons := PackedInt32Array(); var clen := PackedFloat32Array(); var ck := PackedFloat32Array(); var cmin := PackedByteArray()
+	for j in BONES.size():
+		var bb: int = BONES[j][1]
+		if not cut.is_empty() and cut.has(bb) and BONES[j][0] != bb and LIMB_NEXT.get(BONES[j][0], -1) == bb: continue
+		cons.append_array([BONES[j][0], bb]); clen.append(rest[j]); ck.append(BONES[j][2]); cmin.append(0)
+	for xb in _xbones:
+		cons.append_array([xb[0], xb[1]]); clen.append(xb[2]); ck.append(1.0); cmin.append(0)
+	for j in LIMITS.size():
+		if not cut.is_empty() and free_pt[LIMITS[j][0]] != free_pt[LIMITS[j][1]]: continue
+		if not broken.is_empty() and broken.has(LIM_MID.get(j, -1)): continue
+		cons.append_array([LIMITS[j][0], LIMITS[j][1]]); clen.append(lim[j]); ck.append(1.0); cmin.append(1)
+	for xl in _xlims:
+		cons.append_array([xl[0], xl[1]]); clen.append(xl[2]); ck.append(1.0); cmin.append(1)
+	var sh := PackedFloat32Array()
+	for c in _near:
+		if c.rock: sh.append_array([1.0, c.x, c.z, c.y, c.R, c.H])
+		else: sh.append_array([0.0, c.x, c.z, 0.0, c.R, 0.0])
+	var gn := PackedVector3Array(_gn)
+	var radf := PackedFloat32Array(rad)
+	_cs.Solve(PackedVector3Array(p), PackedVector3Array(q), _gh, gn, radf, cons, clen, ck, cmin, sh, last_h, 6, _jn.duplicate())
+	var P2: PackedVector3Array = _cs.GetP()
+	var Q2: PackedVector3Array = _cs.GetQ()
+	if _CMP:   # tests (BMX_RAG_CMP=1): the GDScript passes from the same state, compared with C#'s
+		var pb := p.duplicate(); var qb := q.duplicate()
+		_touch.fill(0)
+		for it in 6:
+			for j in BONES.size():
+				var bb: int = BONES[j][1]
+				if not cut.is_empty() and cut.has(bb) and BONES[j][0] != bb and LIMB_NEXT.get(BONES[j][0], -1) == bb: continue
+				_dist(BONES[j][0], bb, rest[j], BONES[j][2], false)
+			for xb in _xbones: _dist(xb[0], xb[1], xb[2], 1.0, false)
+			for j in LIMITS.size():
+				if not cut.is_empty() and free_pt[LIMITS[j][0]] != free_pt[LIMITS[j][1]]: continue
+				if not broken.is_empty() and broken.has(LIM_MID.get(j, -1)): continue
+				_dist(LIMITS[j][0], LIMITS[j][1], lim[j], 1.0, true)
+			for xl in _xlims: _dist(xl[0], xl[1], xl[2], 1.0, true)
+			for i in p.size(): _collide(i)
+		var dm := 0.0
+		for i in p.size(): dm = maxf(dm, maxf((p[i] as Vector3).distance_to(P2[i]), (q[i] as Vector3).distance_to(Q2[i])))
+		_cmp_max = maxf(_cmp_max, dm); _cmp_n += 1
+		if not _near.is_empty(): _cmp_near = maxi(_cmp_near, _near.size())
+		if _cmp_n % 360 == 0: print("RAGCMP substeps=%d max_diff_mm=%.4f most_shapes_near=%d" % [_cmp_n, _cmp_max * 1000.0, _cmp_near])
+		p = pb; q = qb
+	for i in p.size():
+		p[i] = P2[i]; q[i] = Q2[i]
+	_touch = _cs.GetTouch()
+	_jn = _cs.GetJn()
+	probe_kick = maxf(probe_kick, _cs.GetKick())
+	return true
+
 
 func _dist(a: int, b: int, len: float, k: float, min_only: bool) -> void:
 	var A: Vector3 = p[a]
