@@ -194,3 +194,44 @@ static func merge_scan(root: Node, label: String, snap: Dictionary, final: bool)
 	if final:
 		print("MERGESCAN %s surfaces=%d still=%d moving=%d -> same-material merge %d, colour-baked merge %d  kinds=%s flat_with_grime_pass=%d" % [label, surfs, stable, moving, moving + groups.size(), moving + fgroups.size(), kinds, grime_flat])
 
+
+## tests (BMX_TRI_SCAN=1): every visible rider / bike mesh: triangles, LOD levels left (from the renderer: a mesh rebuilt in
+## code from surface arrays loses the import's auto LODs), name; the biggest first + totals
+static func tri_scan(root: Node, label: String) -> void:
+	var rows: Array = []
+	var tot := 0; var tot_lod := 0
+	var stack: Array = [root]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		for c in n.get_children(): stack.append(c)
+		if n is MultiMeshInstance3D:
+			var mmi := n as MultiMeshInstance3D
+			if mmi.multimesh and mmi.multimesh.mesh and mmi.is_visible_in_tree():
+				var tm := 0
+				var m: Mesh = mmi.multimesh.mesh
+				for si in m.get_surface_count(): tm += _tris(m, si)
+				var cnt := mmi.multimesh.visible_instance_count if mmi.multimesh.visible_instance_count >= 0 else mmi.multimesh.instance_count
+				rows.append([tm * cnt, 0, "%s (multimesh %d x %d)" % [String(root.get_path_to(n)), cnt, tm]])
+				tot += tm * cnt
+			continue
+		var mi := n as MeshInstance3D
+		if mi == null or mi.mesh == null or not mi.is_visible_in_tree(): continue
+		var t := 0; var lods := 99
+		for si in mi.mesh.get_surface_count():
+			t += _tris(mi.mesh, si)
+			var sd: Dictionary = RenderingServer.mesh_get_surface(mi.mesh.get_rid(), si)
+			lods = mini(lods, (sd.get("lods", []) as Array).size())
+		if lods == 99: lods = 0
+		tot += t
+		if lods > 0: tot_lod += t
+		rows.append([t, lods, String(root.get_path_to(mi))])
+	rows.sort_custom(func(a, b): return a[0] > b[0])
+	print("TRISCAN %s total_tris=%d with_lods=%d meshes=%d" % [label, tot, tot_lod, rows.size()])
+	for r in rows.slice(0, 14): print("TRISCAN %s %7d tris lods=%d %s" % [label, r[0], r[1], r[2]])
+
+static func _tris(m: Mesh, si: int) -> int:
+	var sd: Dictionary = RenderingServer.mesh_get_surface(m.get_rid(), si)
+	var ic: int = int(sd.get("index_count", 0))
+	if ic > 0: return ic / 3
+	return int(sd.get("vertex_count", 0)) / 3
+

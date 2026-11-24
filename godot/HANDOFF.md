@@ -369,6 +369,10 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   describes the 4-cascade fit), `BMX_SHADOW_S1=m` the near cascade's end. (Merging rider / bike meshes was looked at the
   same day, `BMX_MERGE_SCAN=1`: rider 73 -> 36 surfaces only by baking colours, bike 58 -> 50; ~0.1-0.2 ms for reworking
   the per-part grime pins and live kit colours: not done.)
+  **Bike triangles (`BMX_TRI_SCAN=1`, `TRISCAN` lines)**: the DH bike is ~336k triangles and effectively has NO LODs: the
+  glbs import with `generate_lods`, but `BikeRig` rebuilds the meshes from surface arrays (AO bake, decals, part swaps)
+  and that drops them (only the helmet keeps its LODs). Biggest: frame 68k, steer 41k, rear wheel 23k, seatstay 20k,
+  front wheel 18k, chain 33k (108 links x 304), fork lower 16k, rotors 9.6k each, cranks 9k. Rider ~30k.
   **Sun shadows** (`Game._shadow_fit`): reach fixed by quality (`SHADOW_REACH` 100 / 140 / 170 / 200 m, fade from 75 %),
   never with the speed dolly; the 4 cascades end at zoom + 6 / + 22 / + 55 m (the sharp one covers the rider, not the
   empty air in front of the camera; it used to be fixed 6 / 18 / 45 % of an 80 m reach: shadows stopped ~70 m out and
@@ -2307,6 +2311,10 @@ ide_<date>.replay` (test runs: `replays/tests/`), zstd, ~4 MB a
   Alt ×¼, arrows look, Z / X roll, - / = zoom, R back to the start view. Pad: sticks fly / look, LT / RT down / up,
   LB / RB roll, D-pad zoom, A shoot, X grid, Y hide the card. Kept within `RANGE` (70 m) of the rider and 15 cm above
   `Terrain.top_height`.
+- **Top shadow quality while open (2026-11-24, `PhotoMode._shadow_boost`)**: 4 cascades fitted round the subject (the
+  ride uses 2), an 8192 atlas with the softest filter, every mesh at full detail (LOD threshold 0); closing puts back
+  the settings' (`Settings.apply_render_quality`) and the ride's cascades (`Game._apply_settings`). Test: `BMX_PHOTO=8
+  BMX_PHOTO_SNAP=1 BMX_PHOTO_CLOSE=14` prints `PHOTOSHADOW` lines (splits on open, the ride's mode after close).
 - Card (right, Tab / H hides it): **Camera** (fly speed, FOV, roll, look sensitivity, smoothing), **Focus** (DoF, auto focus
   on the rider = yellow brackets, F = focus under the cursor, aperture, in-focus depth, foreground blur, bokeh shape;
   DoF quality forced high while open), **Light** (time, sun direction / strength, exposure, haze: a copy of
