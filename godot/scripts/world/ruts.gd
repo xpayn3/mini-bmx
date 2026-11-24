@@ -12,6 +12,8 @@ const LIP := 0.4           # share of the dig pushed up beside it
 const LOAD_MIN := 0.3      # x the dig: a light tyre barely marks it, a landing digs in
 const LOAD_MAX := 3.0
 const SKID := 2.0          # x the dig under a locked rear
+const PATCH_L := 0.10      # m: the rear tyre's contact patch length (a slide sweeps it sideways)
+const SKID_WIDEN := 1.35   # a locked rear scrubs this much wider
 
 var game
 var field = null           # RutFieldCs
@@ -108,7 +110,15 @@ func step(st) -> void:
 		var n: float = float(st.n_front if w == 0 else st.n_rear)
 		var load_k := clampf(n / (g * 0.5), LOAD_MIN, LOAD_MAX)
 		var add: float = dig[0] * load_k * (SKID if (w == 1 and st.skid) else 1.0)
-		field.Stamp(w, x, z, HALF_W, add, dig[1], LIP)
+		# sliding sideways the tyre's patch sweeps across its path: the groove widens with the slide angle (patch ~10 cm
+		# long, 9 cm wide), a locked rear scrubs a bit wider even straight. The dig spreads over the wider band.
+		var hw := HALF_W
+		if w == 1:
+			var s := absf(st.slip)
+			hw = maxf(HALF_W, 0.5 * (PATCH_L * sin(minf(s, PI * 0.5)) + 2.0 * HALF_W * cos(minf(s, PI * 0.5))) + 0.01)
+			if st.skid: hw *= SKID_WIDEN
+			add *= HALF_W / hw
+		field.Stamp(w, x, z, minf(hw, 0.2), add, dig[1], LIP)
 	_publish()
 	_us += Time.get_ticks_usec() - t0; _n += 1
 	if _probe:
