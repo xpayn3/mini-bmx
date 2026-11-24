@@ -219,6 +219,10 @@ var tumbleweeds: Tumbleweeds
 var title_life: TitleLife     # title screen only: birds, blowing dust, dust round the bushes
 
 func _ready() -> void:
+	if not title_world and level == "" and Env.s("BMX_GHOST") != "0":   # the ghost of your best run on this world (game/ghost_rider.gd)
+		ghost = preload("res://scripts/game/ghost_rider.gd").new(self)
+		add_child(ghost)
+		ghost.start_run.call_deferred()
 	if Env.s("BMX_TRI_SCAN") != "" and not title_world:   # tests: triangles + LOD levels of every rider / bike mesh
 		var RPT := preload("res://scripts/game/render_probe.gd")
 		get_tree().create_timer(6.0).timeout.connect(func(): RPT.tri_scan(rig, "bike"); RPT.tri_scan(rider, "rider"))
@@ -1220,6 +1224,7 @@ func _to_hilltop() -> void:
 
 func _apply_settings() -> void:
 	terrain.set_view_scale(float(Settings.get_v("view_distance")))
+	if ghost: ghost.enabled = bool(Settings.get_v("ghost"))
 	if grass:
 		grass.set_quality(int(Env.s("BMX_GRASS")) if Env.s("BMX_GRASS") != "" else int(Settings.get_v("grass")))
 	var sq: int = Settings.get_v("shadows")
@@ -1808,6 +1813,8 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 		grass.trample(1, rear, f, 0.34 if skid_fx else 0.3)
 
 # ---------------------------------------------------------------- ride control
+var ghost = null   # game/ghost_rider.gd (rides of this world only, not the title / levels)
+
 func respawn(new_world: bool) -> void:
 	exit_replay()
 	if replay: replay.clear()
@@ -1854,6 +1861,7 @@ func respawn(new_world: bool) -> void:
 	biome_cur = terrain.biome_name(phys.x, phys.z)
 	biome_next = ""; biome_hold = 0
 	if area_title: area_title.show_area(biome_cur, 1.6)
+	if ghost: ghost.start_run()   # a new run from the start: the last one saved if it was the best, this world's ghost loaded
 
 var start_tv: CrtTv
 const START_TV_SCALE := 2.5   # oversized: ~0.95 m wide
@@ -2679,6 +2687,7 @@ func exit_map() -> void:
 		paper_map.close(true)
 
 func _exit_tree() -> void:
+	if ghost: ghost.end_run()   # (the run so far may be the new best)
 	Engine.time_scale = 1.0
 	RenderingServer.global_shader_parameter_set("deco_fade", Vector4.ZERO)   # no ride: decorations unfaded (garage)
 	if rumble: rumble.stop()
