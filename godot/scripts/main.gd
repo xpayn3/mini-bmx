@@ -1604,12 +1604,12 @@ func _start_demo() -> void:
 func _unhandled_input(e: InputEvent) -> void:
 	if not e.is_action_pressed("pause") or e.is_echo(): return
 	if is_instance_valid(settings_open) or garage: return
-	if state == RIDING and game and game.replay_on:   # Esc leaves the replay first
-		game.exit_replay()
+	if state == RIDING and game and game.photo:   # Esc leaves photo mode first (back to the replay, if one is up)
+		game.toggle_photo()
 		get_viewport().set_input_as_handled()
 		return
-	if state == RIDING and game and game.photo:   # Esc leaves photo mode first
-		game.toggle_photo()
+	if state == RIDING and game and game.replay_on:   # Esc leaves the replay
+		game.exit_replay()
 		get_viewport().set_input_as_handled()
 		return
 	if is_instance_valid(controls_open):   # Esc closes the controls card, back to the pause menu

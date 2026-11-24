@@ -56,6 +56,12 @@ const GRAVEL_SURF := [[0.09, 420.0, 0.04, 1.2], [0.15, 600.0, 0.12, 0.9], [0.0, 
 # one-shots: [kind, t, amp]
 var shots: Array = []
 var shift_snd: ShiftSound
+## the instant replay drives the sound: `src` = a recorded state (ReplayMode.AudioState: the same fields this reads
+## from BikePhysics), and every one-shot played while riding is handed to the replay (`_rec`) to play again there
+var src = null
+
+func _rec(kind: String, args: Array) -> void:
+	if game and game.replay and not game.replay_on: game.replay.audio_event(kind, args)
 
 ## drop the C# synths while the engine is still up: if their .NET finalizers run during shutdown
 ## instead, Godot can crash on exit ("Leaked unsafe reference" -> SEHException). On PREDELETE, not _exit_tree:
@@ -120,15 +126,15 @@ func _setup_chain() -> void:
 var _crank_last := 0.0
 var _crank_w := 0.0   # how fast the cranks really turn (rad/s, smoothed)
 
-func _update_chain(dt: float, va: float, on_ground: bool, st: BikePhysics) -> void:
+func _update_chain(dt: float, va: float, on_ground: bool, st) -> void:
 	if chain.stream == null: return
 	# only while the legs spin the cranks: the raw gas key (the smoothed pedal lingers ~0.5 s after letting
 	# go) AND the cranks measurably turning (not stalled, not just settling to their coasting angle)
 	if dt > 0.0:
-		var w := absf(st.crank - _crank_last) / dt
+		var w: float = absf(st.crank - _crank_last) / dt
 		_crank_w += (minf(w, 40.0) - _crank_w) * minf(1.0, dt * 10.0)
 	_crank_last = st.crank
-	var spinning := st.throttle_in >= 0.1 and st.pedal > 0.05 and on_ground
+	var spinning: bool = st.throttle_in >= 0.1 and st.pedal > 0.05 and on_ground
 	var t := smoothstep(0.6, 2.0, _crank_w) * smoothstep(0.3, 3.0, va) * (0.6 + 0.4 * clampf(va / 14.0, 0.0, 1.0)) if spinning else 0.0
 	chain_amp += (t - chain_amp) * minf(1.0, dt * (5.0 if t > chain_amp else 14.0))
 	chain.volume_db = CHAIN_DB + linear_to_db(maxf(chain_amp, 0.0001)) if chain_amp > 0.003 else -80.0
@@ -188,6 +194,7 @@ func _slam_wav(x: PackedFloat32Array) -> AudioStreamWAV:
 ## rattle) and the volume; `yaw` = the sideways speed the tyres had to catch (m/s): from ~1 the rear tyre lands a moment after the front and
 ## rubber scrubs over the dirt. Every landing is rendered fresh (random seed), so no two are the same.
 func landing(impact: float, yaw: float = 0.0) -> void:
+	_rec("landing", [impact, yaw])
 	if impact < SLAM_MIN: return
 	_slam_pool()
 	var k := clampf((impact - SLAM_MIN) / (SLAM_FULL - SLAM_MIN), 0.0, 1.0)
@@ -205,18 +212,20 @@ func landing(impact: float, yaw: float = 0.0) -> void:
 
 ## a landing that went badly (heavy landing / SLAM, `sev` 0..1): the bike bounces again and parts clatter, a moment after the first hit
 func landing_bad(sev: float) -> void:
+	_rec("landing_bad", [sev])
 	_slam_pool()
 	if _slam_syn == null: return
 	var x: PackedFloat32Array = _slam_syn.Render(randi(), SLAM_VARY, SLAM_PEAK, clampf(0.4 + 0.6 * sev, 0.0, 1.0), 0.0, 1)
 	_slam_play(_slam_wav(x), lerpf(-16.0, -6.0, clampf(sev, 0.0, 1.0)), 1.0)
 
-func thud(power: float) -> void: shots.append(["thud", 0.0, clampf(power * 0.5, 0.2, 1.0)])
-func crunch() -> void: shots.append(["crunch", 0.0, 0.8])
+func thud(power: float) -> void: _rec("thud", [power]); shots.append(["thud", 0.0, clampf(power * 0.5, 0.2, 1.0)])
+func crunch() -> void: _rec("crunch", []); shots.append(["crunch", 0.0, 0.8])
 
 ## wooden planks breaking: a sharp splintering crack, then the pieces knocking and bouncing on the ground.
 ## Each hit is a plank ringing (free-free beam modes, ratio 1 : 2.76 : 5.40) with a tick of noise; the hits
 ## come faster and quieter as the pieces settle, each with its own pitch. Built per call so no two sound alike.
 func wood_crash(power: float = 1.0) -> void:
+	_rec("wood_crash", [power])
 	var hits: Array = []
 	var t := 0.012
 	var g := 1.0
@@ -238,18 +247,20 @@ func _wood_sample(t: float, hits: Array) -> float:
 		var m := sin(TAU * f * dt) * exp(-dt * 38.0) + 0.5 * sin(TAU * f * 2.76 * dt) * exp(-dt * 70.0) + 0.25 * sin(TAU * f * 5.4 * dt) * exp(-dt * 140.0)
 		v += (m + (randf() * 2 - 1) * exp(-dt * 600.0) * 0.5) * h[2] * 0.55
 	return v
-func crash() -> void: shots.append(["thud", 0.0, 0.7]); shots.append(["crunch", 0.0, 0.32])
+func crash() -> void: _rec("crash", []); shots.append(["thud", 0.0, 0.7]); shots.append(["crunch", 0.0, 0.32])
 ## a gear change: the user's shifter recording (game/shift_sound.gd)
-func shift(d: int = 1) -> void: if shift_snd: shift_snd.shift(d)
+func shift(d: int = 1) -> void:
+	_rec("shift", [d])
+	if shift_snd: shift_snd.shift(d)
 
 func update_audio(dt: float) -> void:
 	if pb == null: return
-	var st: BikePhysics = game.phys
-	var va := absf(st.v)
-	var on_ground := not st.air and not st.crash_on
+	var st = src if (game.replay_on and src != null) else game.phys
+	var va := absf(float(st.v))
+	var on_ground: bool = not st.air and not st.crash_on
 	# the map / photo mode freeze the ride (time_scale 0) but leave the last speed in the physics: without
-	# this the tyres, wind and chain kept playing under the paper
-	if (game.paper_map != null and game.paper_map.busy()) or game.photo or game.replay_on:
+	# this the tyres, wind and chain kept playing under the paper (a replay that is paused / rewinding: no src)
+	if (game.paper_map != null and game.paper_map.busy()) or game.photo or (game.replay_on and src == null):
 		va = 0.0; on_ground = false
 	var k := minf(1.0, dt * 8)
 	# wind: louder AND brighter the faster you go, a touch more in the air (nothing else masks it)
@@ -284,7 +295,7 @@ func update_audio(dt: float) -> void:
 		fw_synth.SetSpeedParams(c.poe, c.warble, c.sp_pitch, c.sp_bright, c.sp_ring, c.repeat, c.sp_soft)
 	var fs: float = va
 	# (the raw key, not the smoothed pedal: that took ~0.4 s to fall under the threshold after letting go)
-	var coasting := st.throttle_in < 0.1 and va > 0.12 and not st.crash_on
+	var coasting: bool = st.throttle_in < 0.1 and va > 0.12 and not st.crash_on
 	if FreewheelSound.preview_speed > 0.0 and va < 0.5:
 		fs = FreewheelSound.preview_speed; coasting = true
 	var poe := FreewheelSound.get_value("poe")

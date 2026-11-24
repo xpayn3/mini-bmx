@@ -196,12 +196,17 @@ func _patch(on: bool, p: Vector3, prev: Vector3, v: Vector3, rate: float, _fan: 
 	return p0
 
 ## grains thrown for secs (landings, crash impacts)
+## the instant replay (ReplayMode): the tyre feeds as a state per sample, grit bursts as events (the sim records its bursts)
+var recorder = null
+
 func grit_burst(p: Vector3, v: Vector3, spread: float, rate: float, secs: float, col: Color) -> void:
+	if recorder != null and not recorder.on: recorder.dust_event("dust", "grit_burst", [p, v, spread, rate, secs, col])
 	if grit == null or rate <= 0.0: return
 	_grit_bursts.append({p = p, v = v, spread = spread, rate = rate, col = col, t = secs})
 
 ## per physics step: the front tyre's patch (sim only; a lighter dusting than the rear)
 func feed_front(front: Vector3, throw_v: Vector3, rate: float, alpha: float) -> void:
+	if recorder != null and not recorder.on: recorder.dust_feed(1, [front, throw_v, rate, alpha])
 	_front_age = 0.0
 	_front_on = sim != null and rate > 0.5 and alpha > 0.0
 	if not _front_on: return
@@ -298,6 +303,7 @@ func _build_emitter() -> void:
 ## per physics step: where the rear tyre is, which way the dust is thrown (world, m/s), how many
 ## puffs per second, their colour (sRGB) and opacity
 func feed(rear: Vector3, throw_v: Vector3, rate: float, col: Color, alpha: float, fan_deg: float) -> void:
+	if recorder != null and not recorder.on: recorder.dust_feed(0, [rear, throw_v, rate, col, alpha, fan_deg])
 	_rate = rate
 	if sim != null:
 		_feed_age = 0.0
