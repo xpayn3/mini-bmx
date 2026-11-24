@@ -79,6 +79,9 @@ class Feat:
 	var half: float
 	var s: float = 0.0
 	var air := PackedFloat64Array()   # TrailFeatures.AIR of its type: the stretches riders fly over
+	var size := 3   # a route jump's speed size (TrailJumpSizes, 0 .. 3 = the big one), picked from TrailCourse.VA
+	var v = null    # the speed it is designed for, as the demo AI plans it (null = DemoPilot.FEAT_V by type)
+	var vmin = null
 	var canyon := false   # rope bridge: a canyon cut across the land (canyon_rims), not a dig along the trail
 	## how far before / after the feature the trail is eased onto its plane (b0 .. b1). A rope bridge's plane can sit
 	## a metre or two off the trail: eased in over 5 m that was a kicker right before the rim (launched into the deck)
@@ -182,6 +185,15 @@ var col := {}            # per-instance copies (no shared refcounts between thre
 var red_bands := PackedColorArray()
 var grey_bands := PackedColorArray()
 var profiles := {}
+var sized := {}   # TrailFeatures.make_set()["sized"]: type -> [profile per speed size]
+## (2026-11-24) route jumps sized to the speed riders arrive at (TrailCourse.VA); BMX_OLD_JUMPSIZE=1 = always the big one
+static var OLD_JUMPSIZE := OS.get_environment("BMX_OLD_JUMPSIZE") != ""
+## the AI's planned speed / least speed as a share of a size's design speed, per type (DemoPilot.FEAT_V / FEAT_MIN at size 3)
+## (a smaller kicker at its full design speed, never under 90 % of it: slower, the AI rolled off its open back nose first)
+const SIZE_V_K := {"table": [0.9, 0.8], "tableLine": [0.9, 0.8], "kicker": [1.0, 0.9], "flow": [0.93, 0.0]}
+## riders arrive faster than TrailCourse.VA (free rolling: pedals only below ~30 km/h): measured, the demo AI leaves the
+## big jumps' lips at 38-46 km/h where VA says ~30-35, i.e. ~1.4x. Sizes are picked for VA x this
+const RIDER_K := 1.4
 var small := {}   # the old-size jump profiles, for the free-ride jumps out in the land (TrailFeatures.TABLE_S ...)
 var woods := {}
 var digs := {}
@@ -293,7 +305,7 @@ func _local_tables() -> void:
 	red_bands = PackedColorArray(RED_BANDS)
 	grey_bands = PackedColorArray(GREY_BANDS)
 	var st := TrailFeatures.make_set()
-	profiles = st["profiles"]; woods = st["wood"]; digs = st["dig"]; small = st["small"]
+	profiles = st["profiles"]; woods = st["wood"]; digs = st["dig"]; small = st["small"]; sized = st["sized"]
 
 
 func fork() -> TerrainField:
@@ -308,7 +320,7 @@ func fork() -> TerrainField:
 	f._bind_course(true)
 	f.route_feats = []
 	for j in route_feats:
-		var c: Feat = f.make_feat(j.x, j.z, j.dx, j.dz, j.type, j.b0, j.b1)
+		var c: Feat = f.make_feat(j.x, j.z, j.dx, j.dz, j.type, j.b0, j.b1, false, j.size)
 		c.s = j.s
 		f.route_feats.append(c)
 	f._index_canyons()
@@ -787,9 +799,10 @@ func wild(x: float, z: float) -> float:
 # ======================================================================
 # designed features
 # ======================================================================
-func make_feat(x: float, z: float, dx: float, dz: float, type: String, b0: float, b1: float, old_size := false) -> Feat:
+func make_feat(x: float, z: float, dx: float, dz: float, type: String, b0: float, b1: float, old_size := false, size := 3) -> Feat:
 	var f := Feat.new()
 	var prof: TrailFeatures.Profile = small[type] if (old_size and small.has(type)) else profiles[type]
+	if not old_size and size < 3 and sized.has(type): prof = sized[type][size]
 	f.x = x; f.z = z; f.dx = dx; f.dz = dz; f.len = prof.length; f.prof = prof; f.b0 = b0; f.b1 = b1; f.type = type
 	f.wood = woods.get(type)
 	if type == "bridge" and posmod(int(floorf(x)) * 7 + int(floorf(z)) * 13, 3) == 0:
@@ -797,6 +810,12 @@ func make_feat(x: float, z: float, dx: float, dz: float, type: String, b0: float
 	f.dig = digs.get(type)
 	f.canyon = type == "rope"
 	f.air = PackedFloat64Array((TrailFeatures.AIR_S if (old_size and small.has(type)) else TrailFeatures.AIR).get(type, []))
+	if not old_size and size < 3 and sized.has(type):
+		f.size = size
+		f.air = PackedFloat64Array(TrailFeatures.sized_air(type, size))
+		var vk: Array = SIZE_V_K.get(type, [0.9, 0.0])
+		f.v = float(TrailJumpSizes.V[size]) * vk[0]
+		f.vmin = float(TrailJumpSizes.V[size]) * vk[1] if vk[1] > 0.0 else 0.0
 	f.ramp = ROPE_RAMP if type == "rope" else 6.0
 	if type == "rhythm" or type == "flow":
 		f.half = 2.3
@@ -859,7 +878,17 @@ func _build_route() -> void:
 			# or (by a hash of the slot: no extra draw from r) a swinging rope bridge high over a deeper crevasse
 			elif not jmp and s > 400.0 and float(((int(s * 8.0) * 73856093) ^ (seed_value * 19349663)) & 0xffff) / 65536.0 < 0.3:
 				type = "rope"
-			var len: float = profiles[type].length
+			# a jump sized for the speed riders really arrive at here (VA ~12 m in, at the lip; TrailJumpSizes.V, the big one
+			# only where they carry ~56 km/h)
+			var size := 3
+			if sized.has(type) and not OLD_JUMPSIZE:
+				var va: float = C.VA[clampi(int((s + 12.0) / CSTEP), 0, C.n - 1)] * RIDER_K
+				# the smallest size designed for at least ~their speed: a bit big is the safe side (they case the deck /
+				# land early on the landing), a bit small throws them past the landing onto the flat
+				size = 3
+				for q in range(3, -1, -1):
+					if float(TrailJumpSizes.V[q]) >= va * 0.97: size = q
+			var len: float = (sized[type][size] if size < 3 else profiles[type]).length
 			if s + len > s_end:
 				break
 			var p0 := C.at(s)
@@ -877,7 +906,7 @@ func _build_route() -> void:
 			if type == "rope" and not _canyon_clear(x, z, dx, dz, s, len):
 				s += 8   # its canyon would cut the trail elsewhere (a bend, a switchback): not here
 				continue
-			var f := make_feat(x, z, dx, dz, type, base(x, z), base(x + dx * len, z + dz * len))
+			var f := make_feat(x, z, dx, dz, type, base(x, z), base(x + dx * len, z + dz * len), false, size)
 			f.s = s
 			list.append(f)
 			var rv := rr.next()

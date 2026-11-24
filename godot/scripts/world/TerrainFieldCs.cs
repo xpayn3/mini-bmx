@@ -203,6 +203,8 @@ internal static class TfSet
 	public static readonly Dictionary<string, TfProfile> PROFILES;
 	public static readonly Dictionary<string, TfWood> WOOD;
 	public static readonly Dictionary<string, TfProfile> DIG;
+	// trail_features.gd make_set()["sized"]: the route's jumps (and the lines made of them) at their speed sizes
+	public static readonly Dictionary<string, TfProfile[]> SIZED;
 
 	static TfSet()
 	{
@@ -217,6 +219,15 @@ internal static class TfSet
 			["table"] = tableS, ["double"] = dblS, ["kicker"] = kickerS, ["tableLine"] = new TfLine(tableS, 3.0, kickerS),
 			["flow"] = new TfLine(kickerS, 3.0, new TfRollers(3, 0.45)), ["doubleLine"] = new TfLine(dblS, 3.0, kickerS),
 		};
+		SIZED = new Dictionary<string, TfProfile[]> { ["table"] = new TfProfile[4], ["kicker"] = new TfProfile[4], ["tableLine"] = new TfProfile[4], ["flow"] = new TfProfile[4] };
+		for (int i = 0; i < 3; i++)
+		{
+			var t = new TfHermite(TfSizes.TABLE[i]);
+			var k = new TfHermite(TfSizes.KICKER[i]);
+			SIZED["table"][i] = t; SIZED["kicker"][i] = k;
+			SIZED["tableLine"][i] = new TfLine(t, 3.0, k);
+			SIZED["flow"][i] = new TfLine(k, 3.0, new TfRollers(3, 0.45));
+		}
 		PROFILES = new Dictionary<string, TfProfile>
 		{
 			["table"] = table, ["double"] = dbl, ["kicker"] = kicker,
@@ -230,6 +241,7 @@ internal static class TfSet
 			["gorge"] = new TfFlat(36.0),
 			["rope"] = new TfFlat(72.0),
 		};
+		foreach (var key in new[] { "table", "kicker", "tableLine", "flow" }) SIZED[key][3] = PROFILES[key];
 		var kick = new TfHermite(new[] { new[] { 0.0, 0, 0.1 }, new[] { 3.8, 0.95, 0.4 } });
 		var skin = new TfHermite(new[] { new[] { 0.0, 0.02, 0.05 }, new[] { 2.0, 0.42, 0.3 }, new[] { 4.0, 0.85, 0 } });
 		WOOD = new Dictionary<string, TfWood>
@@ -254,6 +266,7 @@ internal sealed class TfFeat
 	public double[] air = System.Array.Empty<double>();   // TrailFeatures.AIR of its type
 	public bool canyon;   // rope bridge: a canyon across the land (TerrainField.canyon_rims)
 	public double ramp = 6.0;   // TerrainField.Feat.ramp: the trail eased onto the feature's plane over this
+	public int size = 3;   // TerrainField.Feat.size: a route jump's speed size (TrailJumpSizes / TfSizes; 3 = the big one)
 	public TfProfile prof;
 	public string type;
 	public TfWood wood;
@@ -726,7 +739,7 @@ public partial class TerrainFieldCs : RefCounted
 		{
 			var j = rf[i].AsGodotObject();
 			var c = make_feat(j.Get("x").AsDouble(), j.Get("z").AsDouble(), j.Get("dx").AsDouble(), j.Get("dz").AsDouble(),
-				j.Get("type").AsString(), j.Get("b0").AsDouble(), j.Get("b1").AsDouble());
+				j.Get("type").AsString(), j.Get("b0").AsDouble(), j.Get("b1").AsDouble(), false, j.Get("size").AsInt32());
 			c.s = j.Get("s").AsDouble();
 			sh.route_feats[i] = c;
 		}
@@ -1275,10 +1288,29 @@ public partial class TerrainFieldCs : RefCounted
 		["tableLine"] = new[] { 7.4, 16.88, 26.35, 32.95 }, ["flow"] = new[] { 4.85, 11.45 }, ["doubleLine"] = new[] { 7.15, 16.39, 25.8, 32.4 },
 	};
 
-	private static TfFeat make_feat(double x, double z, double dx, double dz, string type, double b0, double b1, bool oldSize = false)
+	/// TrailFeatures.sized_air: the AIR spans of a route jump at a speed size
+	private static double[] SizedAir(string type, int size)
+	{
+		var ta = TfSizes.AIR_TABLE[size]; var ka = TfSizes.AIR_KICKER[size];
+		switch (type)
+		{
+			case "table": return ta;
+			case "kicker": case "flow": return ka;
+			case "tableLine":
+				var kn = TfSizes.TABLE[size];
+				double tl = kn[kn.Length - 1][0];
+				// (GDScript snappedf(v, 0.01) = floor(v / 0.01 + 0.5) * 0.01, exactly)
+				return new[] { ta[0], ta[1], Math.Floor((tl + 3.0 + ka[0]) / 0.01 + 0.5) * 0.01, Math.Floor((tl + 3.0 + ka[1]) / 0.01 + 0.5) * 0.01 };
+		}
+		return System.Array.Empty<double>();
+	}
+
+	private static TfFeat make_feat(double x, double z, double dx, double dz, string type, double b0, double b1, bool oldSize = false, int size = 3)
 	{
 		bool old = oldSize && TfSet.SMALL.ContainsKey(type);
 		var prof = old ? TfSet.SMALL[type] : TfSet.PROFILES[type];
+		bool sz = !old && size < 3 && TfSet.SIZED.ContainsKey(type);
+		if (sz) prof = TfSet.SIZED[type][size];
 		var f = new TfFeat { x = x, z = z, dx = dx, dz = dz, len = prof.length, prof = prof, b0 = b0, b1 = b1, type = type };
 		TfSet.WOOD.TryGetValue(type, out f.wood);
 		if (type == "bridge" && ((((long)Math.Floor(x) * 7 + (long)Math.Floor(z) * 13) % 3) + 3) % 3 == 0)
@@ -1286,6 +1318,7 @@ public partial class TerrainFieldCs : RefCounted
 		TfSet.DIG.TryGetValue(type, out f.dig);
 		f.canyon = type == "rope";
 		if ((old ? AIR_S : AIR).TryGetValue(type, out var airv)) f.air = airv;
+		if (sz) { f.size = size; f.air = SizedAir(type, size); }
 		f.ramp = type == "rope" ? ROPE_RAMP : 6.0;
 		if (type == "rhythm" || type == "flow")
 			f.half = 2.3;

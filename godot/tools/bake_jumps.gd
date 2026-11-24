@@ -20,10 +20,27 @@ const TRAIL_JUMPS := {
 }
 
 
+## m/s the smaller route jump sizes are designed for (size 3 = TRAIL_JUMPS' own v)
+const SIZE_V := [8.5, 11.0, 13.5]
+
+
 func _init() -> void:
 	var out := {}
 	for k in TRAIL_JUMPS:
 		var d := JumpDesign.build(TRAIL_JUMPS[k])
 		out[k] = {"knots": JumpDesign.knots(d), "air": JumpDesign.air_span(d), "length": d.length, "desc": JumpDesign.describe(d)}
+	# the route's table + kicker at smaller speed sizes (TrailJumpSizes, 2026-11-24): the route picks the size that fits the
+	# speed riders really arrive at (TrailCourse.VA). Size 3 is the design above (TABLE / KICKER)
+	var sized := {}
+	for k in ["table", "kicker"]:
+		var arr := []
+		for v in SIZE_V:
+			var prm: Dictionary = TRAIL_JUMPS[k].duplicate()
+			prm.v = v
+			var d := JumpDesign.build(prm)
+			arr.append({"knots": JumpDesign.knots(d), "air": JumpDesign.air_span(d), "length": d.length, "desc": JumpDesign.describe(d)})
+		sized[k] = arr
+	out["sized"] = sized
+	out["size_v"] = SIZE_V
 	print("BAKE " + JSON.stringify(out))
 	quit()

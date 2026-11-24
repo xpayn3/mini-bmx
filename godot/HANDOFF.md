@@ -2101,6 +2101,31 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   spine arched (`flipArch`, `FLIP_ARCH`), legs and arms straight; from ~a tenth round he hangs LONG off the bike (no tuck:
   `flipExt` = legs reaching, arms `FACE_REACH`, the air "spin style" compact pose off) to the landing.
 
+### Route jumps sized to the speed riders arrive at (2026-11-24, from the level builder's checks)
+- The level builder's checks ported to the world: `-s res://tools/route_checks.gd -- [seeds]` (`ROUTECHECK` per built jump:
+  flown from its lip at the rider's speed over the real ground (its plane b0 -> b1, the land past it), where it comes down
+  vs where its shape is meant to be landed on (AIR end - 2 m), EFH; `ROUTESUM` per type).
+- **Rider speed = `TrailCourse.VA` x `TerrainField.RIDER_K` 1.4**: VA is free rolling (pedals only below ~30 km/h); the
+  demo AI leaves the big jumps' lips at 38-46 km/h where VA says ~30-35. (A first version sized from VA alone made the
+  jumps too small for real riders: the AI then crashed off a small kicker; sizing from VA is wrong.)
+- `tools/bake_jumps.gd` also bakes the route's table + kicker at `SIZE_V` 8.5 / 11 / 13.5 m/s (size 3 = the 15.5 / 15
+  design); `bake_jumps.py` writes them as two generated files, `scripts/world/trail_jump_sizes.gd` (TrailJumpSizes) and
+  `TrailJumpSizesCs.cs` (TfSizes) (`godot -s res://tools/bake_jumps.gd | python tools/bake_jumps.py .`).
+  `TrailFeatures.make_set()["sized"]` / `TfSet.SIZED`: table, kicker, tableLine, flow per size; `sized_air` / `SizedAir`.
+  `TerrainField._build_route` picks the smallest size designed for >= 97 % of the rider speed ~12 m in (a bit big =
+  they case / land early: safe; a bit small = past the landing: hard). `Feat.size` goes to C# with the feature
+  (`_course_from`), so the pick can't differ. `BMX_OLD_JUMPSIZE=1` = always the big one. 5 seeds: 7 / 3 / 12 / 6 jumps
+  at sizes 0 .. 3; kickers mean 0.0 m from the aim (old -2.9), hard landings 3 (old 6); tables -2.6 m (old -9.3).
+  **Every world's route features change after its first jump section.** terrain_cs_cmp EXACT, trail_grow_probe /
+  rope_find PASS, wood_edge_probe walls=0. Demo AI 120 s, seeds 4242 / 5 / 12: every built jump on its landing;
+  seed 4242 crashes twice at the gorge bridge at s=1422 (falls in) with the old sizes too: not looked into.
+- `Feat.v` / `Feat.vmin` = a sized jump's design speed x the type's share (`TerrainField.SIZE_V_K`; kickers at their full
+  design speed, never under 90 %: slower the AI rolled off a small kicker's open back nose first): the demo AI plans each
+  jump at its own speed (DemoPilot reads `v` / `vmin` since the level builder).
+- Side-path junctions were checked for a seam like the level builder's alt lines had (`-s res://tools/junction_step_probe.gd
+  -- seed`: steepest 0.25 m step round junctions vs plain trail): the same (4242: 1.80 vs 1.63, seed 5: 1.27 vs 1.55);
+  the world's side paths fade their bench / berms out 6-22 m from the course, no change needed.
+
 ### Doubles from the formula too (2026-11-24)
 - `TrailFeatures.DOUBLE` / `DOUBLE_S` (and their `AIR` / `AIR_S` "double" / "doubleLine" spans) are baked from JumpDesign
   like the tables and kickers (`tools/bake_jumps.gd` "double" / "double_s", kind gap; `bake_jumps.py` writes both files).
@@ -2804,6 +2829,9 @@ and other GPU apps open; uncapped ~430 fps on an RTX 3090 after the C# terrain.
 - Minimised test windows (`BMX_MIN`) render late / irregularly: frame-timed screenshots of an animation all come out
   the same. Freeze the animation (`BMX_PAPER_AT` etc.) for those; stay minimised (the user opens the window from the taskbar to watch).
 - Packed arrays are values: `var dst := minor; dst.append(..)` does NOT append to `minor`.
+  BUT a packed array stored in a Dictionary / Array and the member it came from share their data until one is
+  re-assigned: the level builder kept `{"TX": TX}`, then `TX.clear()` emptied the dictionary's copy too (it lost the
+  main line). Store `.duplicate()` when the original will be cleared / refilled in place.
 
 - Tyres are never drawn in the ground: see "Tyres follow the ground" in section 5 (`BikeRig.fit_wheels` / `unclip_tyres`). Smashed-fence / cactus debris is held above the terrain every physics
   tick (thin pieces used to tunnel through the chunk collision and vanish).

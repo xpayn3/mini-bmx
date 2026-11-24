@@ -208,4 +208,26 @@ static func make_set() -> Dictionary:
 	var kicker_s := Hermite.new(KICKER_S)
 	var small := {"table": table_s, "double": dbl_s, "kicker": kicker_s, "tableLine": Line.new([table_s, 3.0, kicker_s]),
 		"flow": Line.new([kicker_s, 3.0, Rollers.new(3, 0.45)]), "doubleLine": Line.new([dbl_s, 3.0, kicker_s])}
-	return {"profiles": profiles, "wood": wood, "dig": dig, "small": small}
+	# the route's jumps at their speed sizes (TrailJumpSizes; size 3 = the big ones above): table / kicker and the lines
+	# made of them, so a size picked for the speed riders arrive at gives the whole line in that size
+	var sized := {"table": [], "kicker": [], "tableLine": [], "flow": []}
+	for i in 4:
+		var t: Profile = table if i == 3 else Hermite.new(TrailJumpSizes.TABLE[i])
+		var k: Profile = kicker if i == 3 else Hermite.new(TrailJumpSizes.KICKER[i])
+		sized.table.append(t); sized.kicker.append(k)
+		sized.tableLine.append(profiles.tableLine if i == 3 else Line.new([t, 3.0, k]))
+		sized.flow.append(profiles.flow if i == 3 else Line.new([k, 3.0, Rollers.new(3, 0.45)]))
+	return {"profiles": profiles, "wood": wood, "dig": dig, "small": small, "sized": sized}
+
+
+## the AIR spans of a route jump at a speed size (size 3 = AIR)
+static func sized_air(type: String, size: int) -> Array:
+	if size >= 3 or not (type in ["table", "kicker", "tableLine", "flow"]): return AIR.get(type, [])
+	var ta: Array = TrailJumpSizes.AIR_TABLE[size]; var ka: Array = TrailJumpSizes.AIR_KICKER[size]
+	match type:
+		"table": return ta
+		"kicker", "flow": return ka
+		"tableLine":
+			var tl: float = (TrailJumpSizes.TABLE[size] as Array).back()[0]
+			return ta + [snappedf(tl + 3.0 + ka[0], 0.01), snappedf(tl + 3.0 + ka[1], 0.01)]
+	return []
