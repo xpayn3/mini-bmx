@@ -55,6 +55,7 @@ var _lost := false
 var _glitched2 := false
 var _offed := false
 var _born := 0
+var _start_ms := Time.get_ticks_msec()   # (when the intro was made: the skip guard)
 var _tv_at := Vector3.ZERO   # world point of the middle of the glass
 var svc: SubViewportContainer
 var _frames := 0             # frames the room's viewport has drawn: it is only shown from the 4th (its first frames are
@@ -106,13 +107,32 @@ func _ready() -> void:
 	_update(0.0)
 
 func _input(e: InputEvent) -> void:
-	if _done or _skip >= 0.0 or t < 0.3: return
+	if _done or _skip >= 0.0 or not _skippable(): return
 	# only Esc / the pad's Start skip (mouse clicks, other keys and pad buttons do nothing)
 	var hit: bool = (e is InputEventKey and e.pressed and not e.echo and e.keycode == KEY_ESCAPE) \
 		or (e is InputEventJoypadButton and e.pressed and e.button_index == JOY_BUTTON_START)
 	if hit:
-		_skip = 0.0
+		_do_skip()
 		get_viewport().set_input_as_handled()
+
+func _do_skip() -> void:
+	if _done or _skip >= 0.0: return
+	_skip = 0.0
+	tv.silence()   # (the TV's sound runs on its own clock: it played on to the end after the picture had gone)
+
+## Esc / Start read straight from the devices each frame too: the menu built behind the intro (later in the tree) gets
+## input events first and its Esc handling swallowed them, so the skip never fired
+var _esc_was := true
+func _poll_skip() -> void:
+	var down := Input.is_physical_key_pressed(KEY_ESCAPE) or Input.is_key_pressed(KEY_ESCAPE)
+	for j in Input.get_connected_joypads():
+		if Input.is_joy_button_pressed(j, JOY_BUTTON_START): down = true
+	if down and not _esc_was and _skippable(): _do_skip()
+	_esc_was = down
+
+## skipped with Esc / Start: the menu comes in quickly, not over the slow end fade
+func skipped() -> bool:
+	return _skip >= 0.0
 
 func _process(delta: float) -> void:
 	if _done: return
@@ -125,6 +145,7 @@ func _process(delta: float) -> void:
 		t = _freeze
 	else:   # (while main builds the ride behind it the clock waits just before the TV comes on: no dead black time on top of the build)
 		t = minf(t + dt, T_ON - 0.05) if hold else t + dt
+	_poll_skip()
 	if _skip >= 0.0: _skip += dt
 	if _shots != "" and (t >= _next_shot or (still and _still_frames == 12)) and t < T_END:
 		_next_shot += float(OS.get_environment("BMX_INTRO_SHOT_STEP")) if OS.get_environment("BMX_INTRO_SHOT_STEP") != "" else 0.5
@@ -473,3 +494,8 @@ void fragment() {
 	COLOR = vec4(col, a);
 }
 """
+
+## Esc counts from 0.3 s of REAL time after the intro started (not its clock: that waits at ~0.2 s while main builds the
+## ride behind the black, which made every early Esc do nothing and the whole intro + its sound play out)
+func _skippable() -> bool:
+	return Time.get_ticks_msec() - _start_ms >= 300
