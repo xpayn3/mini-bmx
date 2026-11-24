@@ -431,6 +431,16 @@ static func save_cfg(cf: ConfigFile, path: String) -> Error:
 	return err
 
 # ---------------- apply (window / renderer); the game applies the environment on `changed` ----------------
+## the sun shadow atlas + filter and the mesh LOD from the settings (photo mode raises them while open and calls this
+## to put them back)
+func apply_render_quality() -> void:
+	var vp := get_viewport()
+	if vp: vp.mesh_lod_threshold = float(get_v("lod"))
+	var sq: int = get_v("shadows")
+	# (ultra = 4096 + the softest filter: an 8192 atlas cost far more than it showed)
+	RenderingServer.directional_shadow_atlas_set_size([2048, 4096, 4096, 8192][sq], true)
+	RenderingServer.directional_soft_shadow_filter_set_quality([RenderingServer.SHADOW_QUALITY_HARD, RenderingServer.SHADOW_QUALITY_SOFT_LOW, RenderingServer.SHADOW_QUALITY_SOFT_HIGH, RenderingServer.SHADOW_QUALITY_SOFT_ULTRA][sq])
+
 func apply() -> void:
 	var headless := DisplayServer.get_name() == "headless"
 	var mon: int = get_v("monitor")
@@ -467,13 +477,9 @@ func apply() -> void:
 		vp.msaa_3d = [Viewport.MSAA_DISABLED, Viewport.MSAA_2X, Viewport.MSAA_4X, Viewport.MSAA_8X][int(get_v("msaa"))]
 		vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if get_v("fxaa") else Viewport.SCREEN_SPACE_AA_DISABLED
 		vp.use_taa = get_v("taa")
-		vp.mesh_lod_threshold = float(get_v("lod"))
 		vp.anisotropic_filtering_level = int(get_v("aniso")) as Viewport.AnisotropicFiltering
-		var sq: int = get_v("shadows")
-		# (ultra = 4096 + the softest filter: an 8192 atlas cost far more than it showed)
-		RenderingServer.directional_shadow_atlas_set_size([2048, 4096, 4096, 8192][sq], true)
 		vp.use_occlusion_culling = get_v("occlusion")
-		RenderingServer.directional_soft_shadow_filter_set_quality([RenderingServer.SHADOW_QUALITY_HARD, RenderingServer.SHADOW_QUALITY_SOFT_LOW, RenderingServer.SHADOW_QUALITY_SOFT_HIGH, RenderingServer.SHADOW_QUALITY_SOFT_ULTRA][sq])
+		apply_render_quality()
 	AudioServer.set_bus_volume_db(0, linear_to_db(maxf(0.0001, float(get_v("volume")))))
 	if AudioServer.get_bus_effect_count(0) == 0:   # a ceiling on the master: stacked sounds (crash + bone crunch + bed) hit 0 dBFS
 		var lim := AudioEffectHardLimiter.new(); lim.ceiling_db = -1.0; lim.pre_gain_db = 0.0

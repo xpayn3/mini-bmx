@@ -219,6 +219,9 @@ var tumbleweeds: Tumbleweeds
 var title_life: TitleLife     # title screen only: birds, blowing dust, dust round the bushes
 
 func _ready() -> void:
+	if Env.s("BMX_TRI_SCAN") != "" and not title_world:   # tests: triangles + LOD levels of every rider / bike mesh
+		var RPT := preload("res://scripts/game/render_probe.gd")
+		get_tree().create_timer(6.0).timeout.connect(func(): RPT.tri_scan(rig, "bike"); RPT.tri_scan(rider, "rider"))
 	if Env.s("BMX_MERGE_SCAN") != "" and not title_world:   # tests: what merging rider / bike meshes could save
 		var RP := preload("res://scripts/game/render_probe.gd")
 		var snap_r := {}; var snap_b := {}

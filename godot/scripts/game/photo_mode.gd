@@ -129,6 +129,7 @@ func open() -> void:
 		"quality": ProjectSettings.get_setting("rendering/camera/depth_of_field/depth_of_field_bokeh_quality", 1),
 		"jitter": ProjectSettings.get_setting("rendering/camera/depth_of_field/depth_of_field_use_jitter", false)}
 	if game.cam.osd: game.cam.osd.visible = false   # the drone OSD (comes back with the drone view)
+	_shadow_boost(true)
 	_light_dirty = false   # the light as it is; only changed when a Light slider moves
 	_refresh_rows()
 	_apply_all()
@@ -160,7 +161,32 @@ func close() -> void:
 	var env: Environment = game.env
 	for k in _base: env.set("tonemap_exposure" if k == "exposure" else "adjustment_" + k, _base[k])
 	_save()
-	# the game re-applies its settings + the level light (Game.toggle_photo)
+	_shadow_boost(false)
+	# the game re-applies its settings + the level light (Game.toggle_photo): the sun's cascades come back with it
+
+## photo mode renders at the top shadow quality whatever the settings (2026-11-24): 4 cascades fitted round what the
+## camera looks at (the ride uses 2), an 8192 atlas with the softest filter, every mesh at full detail. Closing: the
+## settings' atlas / filter / LOD (Settings.apply_render_quality) and the ride's cascades (Game._apply_settings)
+func _shadow_boost(on: bool) -> void:
+	if not on:
+		Settings.apply_render_quality()
+		if Env.s("BMX_PHOTO") != "":   # tests: what the ride is back to (after Game.toggle_photo re-applies its settings)
+			(func(): print("PHOTOSHADOW closed: splits_mode=%d lod=%.2f" % [game.sun.directional_shadow_mode, get_viewport().mesh_lod_threshold])).call_deferred()
+		return
+	RenderingServer.directional_shadow_atlas_set_size(8192, true)
+	RenderingServer.directional_soft_shadow_filter_set_quality(RenderingServer.SHADOW_QUALITY_SOFT_ULTRA)
+	var vp := get_viewport()
+	if vp: vp.mesh_lod_threshold = 0.0
+	var sun: DirectionalLight3D = game.sun
+	if sun == null: return
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+	sun.directional_shadow_blend_splits = true
+	var reach: float = maxf(sun.directional_shadow_max_distance, 40.0)
+	var d: float = clampf(pos.distance_to(pivot()), 1.0, 60.0)   # how far the subject is
+	sun.directional_shadow_split_1 = clampf((d + 4.0) / reach, 0.02, 0.3)
+	sun.directional_shadow_split_2 = clampf((d + 16.0) / reach, sun.directional_shadow_split_1 + 0.03, 0.5)
+	sun.directional_shadow_split_3 = clampf((d + 45.0) / reach, sun.directional_shadow_split_2 + 0.05, 0.75)
+	if Env.s("BMX_PHOTO") != "": print("PHOTOSHADOW splits=%.3f,%.3f,%.3f reach=%.0f subject=%.1f m" % [sun.directional_shadow_split_1, sun.directional_shadow_split_2, sun.directional_shadow_split_3, reach, d])
 
 ## what the camera orbits round and auto focuses on: the rider (the ragdoll after a crash)
 func pivot() -> Vector3:
