@@ -2378,6 +2378,42 @@ ide_<date>.replay` (test runs: `replays/tests/`), zstd, ~4 MB a
   `BMX_FOLLOW=1 BMX_IDLE_FOR=0.5 BMX_CAM=side BMX_SHOT=...` shows it beside you.
 - Not done: ghosts from other players / a leaderboard (Steam), choosing which ghost (last / best), start / finish gates.
 
+### Pose Lab (2026-11-24, Insert; `ui/pose_lab.gd` + `rider/pose_keys.gd`; STYLE ONLY, the physics is untouched)
+- User ask: "pause mid air and correct it", pose the rider's skeleton on parts of a jump, "play back with our corrected poses,
+  automatically morphing between our set keyframes", a timeline UI, "a separate game mode / dev pose mode", saved so the rider
+  rides / leans / jumps with it everywhere. **No physics change** (user: "only style").
+- **Pause** = `Game.pose_hold` (the physics step is simply not run, like the playground's G; `pose_steps` = ticks to run
+  from STEP); `_process` keeps posing every frame, so the sliders show at once. Works mid-air in any ride / the playground.
+  In the instant replay: rewind to the moment, **Insert** = `ReplayMode._pose_from_here` (ride from here + Lab open, paused).
+- **Keys** (`PoseKeys`): on a normalised JUMP TIMELINE 0..1, not seconds (APPROACH 0, LOAD .12, POP .30, AIR .40, REACH .80,
+  LAND .90): `Game._pose_phase` reads it from the physics state (preload / popFx / flight share via `_land_t` / land_reach /
+  land_fold), so one set of keys fits every jump. A key = every channel (`PoseKeys.CH`: bike nose-up / lay-over UNDER the body,
+  hips x y z, torso pitch / roll / yaw, head nod / turn, elbows / knees out). Between keys: Cardinal cubic per channel; the
+  ends ease to neutral at 0 and 1. `amount` scales them, `enabled` switches them. Saved `res://data/pose_keys.json`
+  (commit it; user:// only when res:// can't be written; test runs never save).
+- **Where they act** (`Rider.update_pose`, after the final `_constrain`): hips offset carries pelvis + chest; the torso tilt
+  turns the chest about the pelvis, so head, shoulders and (by IK) arms follow; then `_constrain` runs again, so a key can't
+  push him through the bars or out of reach. Head / shoulder yaw, elbow / knee poles use `_pk_*`. Hands / feet stay on the
+  grips / pedals. "Bike under body" turns the RIDER NODE about the bottom bracket (`Game._pose_keys_apply`) and gives the
+  limb targets in that turned space: arms and legs follow the bike, nothing in the bike / physics moves.
+- **UI** (`PoseLab`, CanvasLayer 30): left = transport (PAUSE / RESUME, STEP, PLAY KEYS = the morph played over the frozen
+  moment, LIVE = playhead follows the ride), KEYS ON + amount, + KEY / DEL KEY / ZERO KEY / SAVE / RELOAD, sliders by group;
+  bottom = timeline (phase bands, key diamonds, morph-size curve, white line = the ride's moment, orange = your playhead; drag
+  playhead / key, right click a key = delete, double click = new key). Moving a slider auto-keys at the playhead. Closing saves.
+- Tests: `BMX_POSELAB=air|<secs>` opens it paused (first flight / after n s), `BMX_POSELAB_SET="0.55:hip_y=0.1,torso_pitch=0.3;0.7:..."`
+  (raw radians / metres), `BMX_POSELAB_PLAY=1`; with `BMX_FOLLOW=1 BMX_BIGAIR=1`, `BMX_SHOT`.
+- **3D handles** (same day, user: "a skeleton interactable we can click on joints and drag, also bike, spin the handlebar"):
+  the skeleton (`Rider.J`) is drawn over the ride with orange joint handles; click + drag in the 3D view (a ray against the
+  plane through the joint facing the camera, the move taken into the bike's frame): hips -> hip xyz, chest -> torso lean
+  (angle about the hips), head -> nod / turn, elbows / knees -> out / in, front / rear wheel (green squares) -> bike nose
+  up / down under the body, bar centre -> bike lay over, grips -> the handlebar turns (`bar_steer`, + = right; the rig's own
+  steer is + = left, so `Game._pk_bar` negates it; added to the drawn steer in `Game`, hands follow because the limb targets
+  are read after). Hands / feet are grey dots (pinned). A drag edits the key at the playhead (auto-key). Tests:
+  `BMX_POSELAB_DRAG="hips:0.05,0.05,0;..."` (metres, bike frame), `BMX_POSELAB_MOUSE="hips:60,-40"` (pixels, the real ray path).
+  "Bike under body" turns the RIDER about the bottom bracket, so a dragged bike handle stays put and the rider moves
+  (relative pose is right, the cursor does not follow the bike point).
+- Not done: keys per bike / per jump kind, easing choice per key, per-key mirror, undo, hands / feet are not movable.
+
 ### Photo mode (O, `scripts/game/photo_mode.gd`)
 - Time freezes (`Engine.time_scale = 0`), HUD hidden, the camera comes loose: `Game._process` calls `PhotoMode.update(real dt)`
   instead of the ride; `CameraRig` / `hud` ignore input while `game.photo`; Esc / O / pad B / the card's ✕ leave.

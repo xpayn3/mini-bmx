@@ -1414,6 +1414,7 @@ func _input(e: InputEvent) -> void:
 			KEY_DELETE: clip_in = -1.0; clip_out = -1.0; status = "CLIP CLEARED"; _status_t = 1.5
 			KEY_V: export_clip()
 			KEY_ENTER, KEY_KP_ENTER: ride_from_here()
+			KEY_INSERT: _pose_from_here()
 			KEY_HOME: tp = t0(); _shot = null; _snap_cam = true
 			KEY_END: tp = t1()
 			KEY_H, KEY_F1: ui_on = not ui_on
@@ -1516,6 +1517,18 @@ func _free_input(e: InputEvent) -> bool:
 			return true
 	return false
 
+## Pose Lab from the replay: rewind to the moment, press Insert: the ride carries on from there (ride from here) and
+## the Lab opens with the physics paused, so the jump can be posed / keyed in place
+func _pose_from_here() -> void:
+	if viewer or not can_ride_from_here():
+		status = "NO POINT TO POSE FROM HERE"; _status_t = 1.5
+		return
+	var g = game
+	ride_from_here()
+	if g.pose_lab == null or not g.pose_lab.is_open(): g.toggle_pose_lab()
+	else: g.pose_hold = true
+
+
 func _scrub_to(x: float) -> void:
 	var r: Rect2 = bar.timeline_rect()
 	var k := clampf((x - r.position.x) / maxf(r.size.x, 1.0), 0.0, 1.0)
@@ -1558,7 +1571,7 @@ func _refresh_hint() -> void:
 			[["R3"], "Highlights"]] + ([] if viewer else [[["X"], "Ride from here"], [["VIEW"], "Save"]]) + [[["B"], "Back"]])
 	else:
 		hint.set_items([[["K:SPACE"], "Play"], [["K:A", "K:D"], "Rewind"], [["K:Q", "K:E"], "Speed"], [["K:C"], "Camera"],
-			[["K:G"], "Highlights"], [["K:O"], "Photo"], [["K:[", "K:]", "K:V"], "Clip"]] + ([] if viewer else [[["K:ENTER"], "Ride from here"], [["K:S"], "Save"]])
+			[["K:G"], "Highlights"], [["K:O"], "Photo"], [["K:[", "K:]", "K:V"], "Clip"]] + ([] if viewer else [[["K:ENTER"], "Ride from here"], [["K:INS"], "Pose Lab here"], [["K:S"], "Save"]])
 			+ [[["K:ESC"], "Back"]])
 
 func _test_set(spec: String) -> void:

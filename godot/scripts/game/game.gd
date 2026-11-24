@@ -156,6 +156,16 @@ var _photo_last := 0
 ## with its own cameras while the ride is frozen (time_scale 0, like photo mode)
 var replay: ReplayMode
 var replay_on := false
+# ---- Pose Lab (ui/pose_lab.gd, rider/pose_keys.gd): pause anywhere (mid-air too) and pose the rider with keys on the
+# jump timeline. STYLE ONLY: pose_hold just stops the physics step like the playground's pause, nothing in the
+# physics changes. pose_t = where in the jump timeline we are now (-1 = not in a jump)
+var pose_lab = null
+var pose_hold := false          # the physics step is held (the rider is still drawn / posed every frame)
+var pose_steps := 0             # physics ticks to run while held
+var pose_t := -1.0
+var _pl_air := 0.0              # s since take-off (for the timeline's air part)
+var _pk_bar := 0.0              # Pose Lab: the drawn handlebar turned by a key (rad)
+var _pk_rt_on := false         # the rider node is turned about the bottom bracket by a "bike under body" key
 var _landed := 0.0           # landing impact to feed the mud next step
 var _cloud_t := 0.0
 var susp = null
@@ -2094,6 +2104,8 @@ func _unhandled_input(e: InputEvent) -> void:
 	if get_tree().paused or not input_enabled: return
 	if e.is_action_pressed("photo") and not e.is_echo() and (photo or replay_on): toggle_photo(); return   # (also a replay frame)
 	if replay_on: return   # (the replay takes its own keys in its _input)
+	if e is InputEventKey and e.pressed and not e.echo and e.keycode == KEY_INSERT and not photo:   # Pose Lab
+		toggle_pose_lab(); return
 	if e.is_action_pressed("replay") and not e.is_echo() and not photo:
 		if not open_replay(): flash("NO REPLAY YET")
 		return
@@ -2410,6 +2422,67 @@ func _perf_report() -> void:
 	print(line)
 	_perf_acc.clear(); _perf_frames = 0
 
+## where we are on the Pose Lab's jump timeline (0..1; -1 = not in a jump): approach + load by how far the preload
+## crouch is, the pop just off the lip, the flight by the share of it flown (time since take-off over that + what is
+## left, `_land_t`), reaching for the landing, then the landing fold coming back up. Read only: no physics change
+func _pose_phase(dt: float, st, pi: Dictionary) -> float:
+	if st.air:
+		if not pose_hold: _pl_air += dt
+		var left: float = maxf(st._land_t, 0.0)
+		var t: float = 0.40 + 0.40 * clampf(_pl_air / maxf(_pl_air + left, 0.05), 0.0, 1.0)
+		var rc: float = st.land_prep * st.land_reach
+		if rc > 0.05: t = maxf(t, 0.80 + 0.10 * clampf(rc, 0.0, 1.0))
+		return t
+	_pl_air = 0.0
+	var fold: float = float(pi.get("landFold", 0.0))
+	if fold > 0.03: return 0.90 + 0.10 * (1.0 - clampf(fold, 0.0, 1.0))
+	var pre: float = float(pi.get("preload", 0.0))
+	var pfx: float = float(pi.get("popFx", 0.0))
+	if pfx > 0.05: return 0.30 + 0.10 * (1.0 - clampf(pfx, 0.0, 1.0))
+	if pre > 0.03: return 0.12 + 0.18 * clampf(pre, 0.0, 1.0)
+	if st.prep > 0.05: return 0.12 * clampf(st.prep, 0.0, 1.0)
+	return -1.0
+
+
+## the keys of the moment (PoseKeys) go into the pose inputs; a "bike under body" key turns the rider about the bottom
+## bracket, and the limb targets (grips, pedals) are given in his turned space so the arms and legs follow the bike
+func _pose_keys_apply(dt: float, st, pi: Dictionary, lt: Dictionary) -> void:
+	PoseKeys.ensure_loaded()
+	pose_t = _pose_phase(dt, st, pi)
+	var tu: float = pose_t
+	var open: bool = pose_lab != null and pose_lab.is_open()
+	if open: tu = pose_lab.t_for_pose(pose_t)
+	var pk: Dictionary = {}
+	if PoseKeys.enabled and tu >= 0.0 and dab_k < 0.01: pk = PoseKeys.eval(tu, PoseKeys.amount)
+	pi["pk"] = pk
+	_pk_bar = -float(pk.get("bar_steer", 0.0))   # (drawn bars turn, + = right (the rig's steer is + = left): used when the rig is posed, next frame)
+	var rp: float = float(pk.get("rel_pitch", 0.0))
+	var rr: float = float(pk.get("rel_roll", 0.0))
+	if absf(rp) > 1e-4 or absf(rr) > 1e-4:
+		var piv: Vector3 = rig.lean_g.to_local(rig.crank_n.global_position)
+		var rb := Basis(Vector3(1, 0, 0), -rr) * Basis(Vector3(0, 0, 1), -rp)
+		var rt := Transform3D(rb, piv - rb * piv)
+		rider.transform = rt
+		var inv := rt.affine_inverse()
+		for k in ["handL", "handR", "footL", "footR"]: lt[k] = inv * (lt[k] as Vector3)
+		pi["handL"] = lt.handL; pi["handR"] = lt.handR; pi["footL"] = lt.footL; pi["footR"] = lt.footR
+		_pk_rt_on = true
+	elif _pk_rt_on:
+		rider.transform = Transform3D.IDENTITY
+		_pk_rt_on = false
+	if _pk_rt_on:
+		pi["wheelR"] = rider.to_local(rig.wheel_r.global_position)
+		pi["wheelF"] = rider.to_local(rig.wheel_f.global_position)
+
+
+func toggle_pose_lab() -> void:
+	if pose_lab == null:
+		pose_lab = PoseLab.new()
+		pose_lab.game = self
+		add_child(pose_lab)
+	pose_lab.toggle()
+
+
 func _physics_process(dt: float) -> void:
 	# photo mode / the trail map set time_scale 0, but physics ticks still come, with dt = 0: stepping the ride then
 	# divided by zero (air yaw, pivot, wheel ground speed) and left NaNs in yaw_rate / spin_acc, and live keys fed it
@@ -2419,6 +2492,11 @@ func _physics_process(dt: float) -> void:
 	if lab and lab.hold_physics():   # the playground's pause (N steps one tick): hold the drawn bike still
 		_snap_prev()
 		return
+	if pose_hold:   # the Pose Lab's pause (its STEP runs ticks): the same, in any ride
+		if pose_steps > 0: pose_steps -= 1
+		else:
+			_snap_prev()
+			return
 	var _pk := Time.get_ticks_usec()
 	if _prof_rec: profiler.ticks += 1
 	_snap_prev()
@@ -2922,7 +3000,7 @@ func _process(dt: float) -> void:
 	_lean_c = _mcap("bike_lean", st.bike_lean, mdt)
 	_steer_c = _mcap("steer", _bar_draw(st, mdt, dab_lean) + st.bar_catch, mdt)
 	rig.pose(drawn_pos.x, y_draw + (1.5 if Env.s("BMX_PITCH_POSE") != "" else 0.0), drawn_pos.z, hd, p_draw, st.hop_nose,
-		_lean_c + st.rock + wobble + dab_lean, _steer_c - wobble * 1.5, st.wheel_f, st.wheel_r, st.crank)
+		_lean_c + st.rock + wobble + dab_lean, _steer_c - wobble * 1.5 + _pk_bar, st.wheel_f, st.wheel_r, st.crank)
 	_pk = _perf("bike_pose", _pk)
 	DebugOverlay.draw(self, st, drawn_pos, hd)
 	# the physics' tyres are soft and follow the smooth height field; the drawn ground is a triangle mesh
@@ -3153,6 +3231,7 @@ func _process(dt: float) -> void:
 		pi["wheelY"] = (rig.wheel_f.global_position.y + rig.wheel_r.global_position.y) * 0.5
 		pi["turn"] = _turn_s
 		pi["pedalTop"] = rig.pedal_top_in(rider)
+		_pose_keys_apply(dt, st, pi, lt)
 		rider.update_pose(dt, pi)
 		# the pedals turn with the feet (ankling): flat pedals tip under the shoe, about their axle (the foot's place
 		# doesn't move, so this frame's pose stays right)

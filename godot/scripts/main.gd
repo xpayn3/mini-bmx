@@ -2040,6 +2040,12 @@ func _autotest(seconds: float) -> void:
 			_probe.replay_x = true
 			game.exit_replay()
 			print("AUTOTEST replay closed: time_scale=%.2f cam=%s" % [Engine.time_scale, get_viewport().get_camera_3d().name])
+		if Env.s("BMX_POSELAB") != "" and not _probe.get("poselab", false):   # tests: the Pose Lab (opens paused: "air" = at the first flight, else after n s); BMX_POSELAB_SET="t:ch=v,ch=v;t:..." keys, BMX_POSELAB_PLAY=1
+			var pw := Env.s("BMX_POSELAB")
+			if (pw == "air" and game.phys.air) or (pw != "air" and el >= float(pw)):
+				_probe.poselab = true
+				game.toggle_pose_lab()
+				game.pose_lab.test_script(Env.s("BMX_POSELAB_SET"), Env.s("BMX_POSELAB_PLAY"))
 		if Env.s("BMX_PHOTO") != "" and el >= float(Env.s("BMX_PHOTO")) and not _probe.get("photo", false):   # tests: photo mode (BMX_PHOTO_SET / _FLY / _SNAP)
 			_probe.photo = true; game.toggle_photo()
 		if Env.s("BMX_PHOTO_CLOSE") != "" and el >= float(Env.s("BMX_PHOTO_CLOSE")) and not _probe.get("photo_x", false):   # tests: O again
