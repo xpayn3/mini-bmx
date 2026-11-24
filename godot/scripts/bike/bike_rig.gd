@@ -120,6 +120,7 @@ func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
 	if not extras.has("chain"):
 		BikeChain.adopt_stock(model, extras)   # the stock frame: its fixed chain mesh -> a drawn chain
 	BikeAO.apply(model, wheel_f, wheel_r)   # baked AO in the vertex colours (before decals / cam / lights)
+	_build_tyre_lods()
 	if extras.has("chain") and cfg.get("chain", null) is Dictionary:   # GameState.BIKES fixes to a glb's chain data
 		(extras.chain as Dictionary).merge(cfg.chain, true)
 	if extras.has("chain"):
@@ -499,6 +500,119 @@ func _swap_rear_caliper(id: String) -> void:
 	a.free()
 	c.free()
 
+# ---------------------------------------------------------------- tyre LODs
+## Each generated wheel gets three meshes sharing its arrays: 0 = as built, 1 = no knobs (the casing alone), 2 = the casing
+## thinned to a third of its triangles. ~10k triangles a tyre -> ~5k -> ~1.5k. Picked by the camera's distance (BMX_TYRE_LOD=0
+## off, 1 / 2 = always that level). Drawing only: the physics and the tyre fit never read the mesh.
+const TYRE_LOD1 := 5.0     # m (as seen through a 75 deg lens)
+const TYRE_LOD2 := 14.0
+const TYRE_LOD_HYST := 0.8
+var _wlods: Array = []
+var _wlod_t := 0.0
+var _gen_wheels := false
+var _wheel_build: Dictionary = {}
+
+func _build_tyre_lods() -> void:
+	_wlods.clear()
+	var force := Env.s("BMX_TYRE_LOD")
+	if force == "0" or not _gen_wheels or _wheel_build.is_empty() or not _wheel_build.has("wheels"):
+		return
+	for pair in [[wheel_f, false], [wheel_r, true]]:
+		var mi := pair[0] as MeshInstance3D
+		if mi == null or not (mi.mesh is ArrayMesh):
+			continue
+		var src := mi.mesh as ArrayMesh
+		var si := -1
+		for i in src.get_surface_count():
+			if src.surface_get_name(i) == "rubber":
+				si = i
+		if si < 0:
+			continue
+		var d: Dictionary = WheelGen.tyre_dims(BikeBuild.wheel_spec(_wheel_build, pair[1]))
+		var rows: int = d.rows
+		var cols: int = d.cols
+		var arr := src.surface_get_arrays(si)
+		var V: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+		var UV = arr[Mesh.ARRAY_TEX_UV]
+		var idx: PackedInt32Array = arr[Mesh.ARRAY_INDEX]
+		var nc := rows * cols
+		# the casing grid must be where the generator put it (it was rebuilt by the AO bake: arrays and order are kept)
+		if V.size() < nc or UV == null or idx.size() < (rows - 1) * (cols - 1) * 6:
+			continue
+		var uv: PackedVector2Array = UV
+		if uv[0].distance_to(Vector2(0, 0)) > 1e-3 or uv[nc - 1].distance_to(Vector2(d.uv_rep, 1.0)) > 1e-3:
+			continue
+		var n1 := (rows - 1) * (cols - 1) * 6
+		var idx1 := idx.slice(0, n1)
+		# thinned casing: the same grid, every sj-th column and si-th row (same vertices, same winding as the generator's)
+		var sj := maxi((cols - 1) / 32, 1)
+		while (cols - 1) % sj != 0:
+			sj -= 1
+		var si_ := 2 if (rows - 1) % 2 == 0 else 1
+		var flip: bool = idx[1] != idx[0] + 1
+		var idx2 := PackedInt32Array()
+		for i in range(0, rows - 1, si_):
+			for j in range(0, cols - 1, sj):
+				var a := i * cols + j
+				var b := a + sj
+				var c := a + si_ * cols + sj
+				var e := a + si_ * cols
+				if flip:
+					idx2.append_array(PackedInt32Array([a, c, b, a, e, c]))
+				else:
+					idx2.append_array(PackedInt32Array([a, b, c, a, c, e]))
+		_wlods.append({"mi": mi, "meshes": [src, _mesh_variant(src, si, idx1), _mesh_variant(src, si, idx2)], "cur": 0})
+	if force == "1" or force == "2":
+		for w in _wlods:
+			_set_wheel_mesh(w.mi, w.meshes[int(force)])
+			w.cur = int(force)
+		_wlods.clear()
+	set_process(not _wlods.is_empty())
+
+func _mesh_variant(src: ArrayMesh, si: int, new_idx: PackedInt32Array) -> ArrayMesh:
+	var out := ArrayMesh.new()
+	out.resource_name = src.resource_name
+	for s in src.get_surface_count():
+		var a := src.surface_get_arrays(s)
+		if s == si:
+			a[Mesh.ARRAY_INDEX] = new_idx
+		out.add_surface_from_arrays(src.surface_get_primitive_type(s), a)
+		out.surface_set_name(s, src.surface_get_name(s))
+		out.surface_set_material(s, src.surface_get_material(s))
+	out.custom_aabb = src.custom_aabb if src.custom_aabb.size != Vector3.ZERO else src.get_aabb()
+	return out
+
+## swap a wheel's mesh and keep its per-surface material overrides (a new mesh drops them)
+func _set_wheel_mesh(mi: MeshInstance3D, m: Mesh) -> void:
+	var ov := []
+	for s in mi.mesh.get_surface_count():
+		ov.append(mi.get_surface_override_material(s))
+	mi.mesh = m
+	for s in mini(ov.size(), m.get_surface_count()):
+		mi.set_surface_override_material(s, ov[s])
+
+func _process(delta: float) -> void:
+	_wlod_t -= delta
+	if _wlod_t > 0.0 or _wlods.is_empty():
+		return
+	_wlod_t = 0.2
+	var cam := get_viewport().get_camera_3d()
+	if cam == null:
+		return
+	var zoom := tan(deg_to_rad(cam.fov * 0.5)) / tan(deg_to_rad(37.5))   # (zoomed in counts as closer)
+	for w in _wlods:
+		if not is_instance_valid(w.mi) or not w.mi.is_inside_tree():
+			continue
+		var dist: float = cam.global_position.distance_to(w.mi.global_position) * zoom
+		var want: int = w.cur
+		var lim := [TYRE_LOD1, TYRE_LOD2]
+		while want < 2 and dist > lim[want] + TYRE_LOD_HYST: want += 1
+		while want > 0 and dist < lim[want - 1] - TYRE_LOD_HYST: want -= 1
+		if want != w.cur:
+			_set_wheel_mesh(w.mi, w.meshes[want])
+			w.cur = want
+
+
 ## generated wheels (size, tyres, rims, spokes, hubs, cassette); the brake rotors split off the stock
 ## wheels stay. The frame is lifted / tilted so the new tyres sit on the ground.
 func _swap_wheels(build: Dictionary, mods: Dictionary) -> void:
@@ -506,6 +620,8 @@ func _swap_wheels(build: Dictionary, mods: Dictionary) -> void:
 	var rr0 := wheel_rr
 	if ResourceLoader.exists("res://scripts/bike/wheel_gen.gd"):
 		var WG = load("res://scripts/bike/wheel_gen.gd")
+		_gen_wheels = true
+		_wheel_build = build
 		for pair in [[wheel_f, false], [wheel_r, true]]:
 			var mi := pair[0] as MeshInstance3D
 			if mi == null: continue
