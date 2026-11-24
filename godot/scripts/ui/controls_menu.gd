@@ -56,7 +56,9 @@ func _fill_bindings() -> void:
 	if Settings.pad_active:
 		_hint(_bind_box, "Right stick = your body: back = manual, held back into a lip = back flip (forward = front flip), pushed right to the side into a lip = 360, left / right = throw the bike over to turn harder, flick it to whip round. Hold A at a lip to pop higher. Settings › Controller to remap the pad.")
 	else:
-		_hint(_bind_box, "Mouse drag: orbit · wheel: zoom · hold hop at a lip to pop higher · press S / W as you leave a lip to throw a back / front flip · carve: hold a turn at speed.")
+		_hint(_bind_box, "WASD rides the bike, the arrow keys are your body: ↓ rolling = manual (held, it sits on the balance point), held into a lip = back flip (↑ = front flip), ← / → throw the bike over to turn harder and whip it round; in the air they tilt and lay the bike over. Hold hop at a lip to pop higher · mouse drag: orbit · wheel: zoom.")
+		_check(_bind_box, "Classic keys: W / S also tilt the bike in the air and throw flips", "kb_ws_air",
+			"Off: only the arrow keys move the bike in the air, so braking or pedalling through a jump can't flip you")
 
 func _start_rebind(action: String, pad: bool, b: Button) -> void:
 	if _wait_btn and is_instance_valid(_wait_btn) and _wait_action != "":

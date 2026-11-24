@@ -311,6 +311,14 @@ static func crank_rate(w: float, gk: float, top_speed: float, p_sprint: float) -
 	# a sprint from slow spins the legs up hard (~70 rpm at once), not just at the wheel's rate
 	return maxf(w / (2.78 * gk * top_speed), 3.5 + float(Tune.v.get("sprintSpin", 4.0)) * p_sprint * slowness(w * 0.37)) * (1 + 0.3 * p_sprint)
 
+## how far back (0..1 of the body stick) holds a direct manual on its balance point: what the keyboard's held ↓
+## gives rolling (Game._read_input), so a held key sits in the sweet spot instead of falling off the back
+static func kb_back_cap() -> float:
+	var b: float = float(Tune.v.get("manBalance", 0.55))
+	var m_from: float = float(Tune.v.get("manualFrom", 0.4))
+	var p_cap: float = b / (b + float(Tune.v.get("manLoop", 0.42)) + 0.08)
+	return clampf(m_from + p_cap * (1.0 - m_from), 0.55, 1.0)   # (>= 0.55: past the 0.5 a quick pull needs to start a manual)
+
 ## 1 standing still .. 0 by ~40 km/h (smooth): how hard a sprinting rider fights to get up to speed
 static func slowness(va: float) -> float:
 	return 1.0 - smooth01(absf(va) / float(Tune.v.get("sprintSlowTo", 11.0)))
@@ -662,6 +670,10 @@ func _step_controls(dt: float, inp: Dictionary, throttle: float, steer_input: fl
 	var brake := brake_k > 0.1
 	# rider body stick (gamepad right stick): fore / aft weight, side lean. Works the whole ride
 	pad = bool(inp.get("pad", false))
+	# do pedal / brake (W / S) also tilt the bike in the air and throw flips at a lip? Only with the classic keys setting
+	# (2026-11-24: the arrow keys are the rider's body now, like the pad's right stick; on keys W / S work like the pad's
+	# triggers, so braking or pedalling through a bump can't loop you out)
+	var ws_air: bool = not pad and bool(inp.get("ws_air", false))
 	body_in = clampf(float(inp.get("body_fwd", 0.0)), -1.0, 1.0)
 	# (2026-11-24) the stick snapped forward to pop a lip is still forward for a moment after the take-off: it is the pop,
 	# not "nose down" (it spun the bike from 45 to 10 deg in 0.3 s; in the video the bike stays steep). Held until the
@@ -684,7 +696,7 @@ func _step_controls(dt: float, inp: Dictionary, throttle: float, steer_input: fl
 		# (a steer held off the lip counts again as soon as it's let go OR clearly moved: no waiting for a re-press)
 		if absf(steer_input) <= 0.1 or absf(steer_input - _lock_a0) > 0.35: air_lock_a = false
 		var used: float = maxf(Vector2(flick_in, body_in).length(), 0.0 if air_lock_a else absf(steer_input))
-		if not pad: used = maxf(used, absf(throttle - brake_k))
+		if ws_air: used = maxf(used, absf(throttle - brake_k))
 		_air_own = 1.0 if used > 0.15 else maxf(0.0, _air_own - 2.5 * dt)
 	# (the playground's test rider gets a stronger hand: TEST_ASSIST, so test runs land; the player keeps airAssist)
 	air_help = maxf(float(T.get("airAssist", 0.6)), TEST_ASSIST if test_rider else 0.0) * (1.0 - _air_own) if air else 0.0
@@ -701,7 +713,7 @@ func _step_controls(dt: float, inp: Dictionary, throttle: float, steer_input: fl
 		var es := _edge_spin(body_in, edge_s, spin_hold, dt)
 		edge_s = es.x; spin_hold = es.y
 		spin_k = _edge_grow(spin_hold) if absf(edge_s) > 0.01 else 1.0
-		lean_in = clampf((0.0 if pad else throttle - brake_k) + edge_s * float(T.get("stickSpinMax", 0.7)), -1.0, 1.0)
+		lean_in = clampf((throttle - brake_k if ws_air else 0.0) + edge_s * float(T.get("stickSpinMax", 0.7)), -1.0, 1.0)
 		# the same at the left / right edge: a flat spin
 		var ys := _edge_spin(flick_in, yaw_edge_s, yaw_hold, dt)
 		yaw_edge_s = ys.x; yaw_hold = ys.y
@@ -762,7 +774,7 @@ func _step_controls(dt: float, inp: Dictionary, throttle: float, steer_input: fl
 	_ts_t = _ts_t + dt if brake else 0.0
 	_sb_t = _sb_t + dt if body_in < -0.05 else 0.0
 	_sf_t = _sf_t + dt if body_in > 0.05 else 0.0
-	if pad:   # gamepad: the triggers never throw a flip (the right stick does), so brake stays a brake
+	if not ws_air:   # gamepad / keys: pedal and brake never throw a flip (the right stick / arrow keys do), so brake stays a brake
 		lock_tw = true; lock_ts = true
 	elif not lip_win:
 		lock_tw = throttle > 0.1 and _tw_t > t_buf; lock_ts = brake and _ts_t > t_buf
@@ -827,7 +839,7 @@ func _step_ground(dt: float, f: Vector3) -> void:
 	since_land += dt
 
 ## stage 3: sprint and stamina
-func _step_sprint(dt: float, inp: Dictionary, throttle: float, brake: bool, in_water: bool) -> void:
+func _step_sprint(dt: float, inp: Dictionary, throttle: float, brake: bool, _in_water: bool) -> void:   # (sprinting through water is allowed since 2026-11-24)
 	var want_sprint: bool = inp.sprint and throttle > 0.1 and not brake and not air
 	if stamina <= 0: tired = true
 	elif stamina > 0.25: tired = false

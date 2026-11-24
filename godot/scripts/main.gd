@@ -2432,15 +2432,17 @@ func _autotest(seconds: float) -> void:
 			if ph.air_time > 0.06 and trick == "side": trick = "left" if int(el / 2.0) % 2 == 0 else "right"
 			if trick != "hold": Input.action_release("pedal")   # hold: keeps pedalling through the air, like a pad trigger held down
 			Input.action_release("brake"); Input.action_release("steer_left"); Input.action_release("steer_right")
+			# (2026-11-24: the rider's body keys - the arrows, the pad's right stick - tilt / flip the bike in the air now, not W / S)
+			if trick in ["back", "front", "manual"]: Input.action_release("body_back"); Input.action_release("body_fwd")
 			if Env.s("BMX_BIGAIR") != "" and ph.air_time < 0.03 and ph.vy < 7.0: ph.vy = 7.0   # tests: big air for full flips
-			if ph.air_time > 0.06:   # a fresh press after take-off (held keys are locked)
-				if trick == "back": Input.action_press("brake")
+			if ph.air_time > 0.06:
+				if trick == "back": Input.action_press("body_back")
 				elif trick == "manual":   # lean back to this nose-up angle (BMX_MANUAL_PITCH, rad) and hold it
 					var mp := float(Env.s("BMX_MANUAL_PITCH")) if Env.s("BMX_MANUAL_PITCH") != "" else 1.0
 					var e: float = mp - ph.pitch - ph.pitch_v * 0.25
-					if e > 0.05: Input.action_press("brake")
-					elif e < -0.05: Input.action_press("pedal")
-				elif trick == "front": Input.action_press("pedal")
+					if e > 0.05: Input.action_press("body_back", 0.6)
+					elif e < -0.05: Input.action_press("body_fwd", 0.6)
+				elif trick == "front": Input.action_press("body_fwd")
 				elif trick == "left": Input.action_press("steer_left")
 				elif trick == "right": Input.action_press("steer_right")
 				elif trick == "spin" and absf(ph.air_yaw) < 1.0:   # a flat spin (as the right stick gives)
@@ -2460,12 +2462,11 @@ func _autotest(seconds: float) -> void:
 			if trick == "whip": Input.action_release("body_left")
 			var ph = game.phys
 			if (trick == "back" or trick == "front") and (ph.prep > 0.25 or ph.front_air or ph.rear_air):
-				# a fresh press at the lip throws the rider into the flip (a key held from before doesn't count)
-				if trick == "back": Input.action_press("brake")
-				elif _probe.get("lip_rel", false): Input.action_press("pedal")
-				else: Input.action_release("pedal"); _probe.lip_rel = true
-			else:
-				_probe.lip_rel = false
+				# ↓ / ↑ (the body keys) pressed at the lip throw the rider into the flip
+				if trick == "back": Input.action_press("body_back")
+				else: Input.action_press("body_fwd")
+			elif trick == "back" or trick == "front":
+				Input.action_release("body_back"); Input.action_release("body_fwd")
 		if Env.s("BMX_FOLLOW") != "":   # tests: steer along the trail centreline, get up after a crash
 			var ph = game.phys
 			var crs = game.terrain.field.course
