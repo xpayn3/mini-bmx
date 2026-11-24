@@ -1245,6 +1245,7 @@ func _pose_from_points(P: Array, roots: Dictionary, orient: Dictionary) -> void:
 	_sync_skeleton(P)
 
 
+var _pk_tyaw := 0.0; var _pk_hp := 0.0; var _pk_hy := 0.0; var _pk_eo := 0.0; var _pk_ko := 0.0   # Pose Lab key values of this frame (see the hook in update_pose)
 var _curl_us := 0   # Time.get_ticks_usec() of the last _pose_from_points (finger curl easing)
 
 ## the humanoid skeleton follows whatever was just drawn (P = the joint points in this node's space)
@@ -1969,6 +1970,23 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# the corrections again on what the springs made (a safety net: the target already keeps them)
 	var cpc := _constrain(pelvis, chest, p, sty, standing, aero, true)
 	pelvis = cpc[0]; chest = cpc[1]
+	# ---- Pose Lab keys (PoseKeys, style only): offsets added on top of the finished pose. The hips carry the torso (and so
+	# the head and shoulders); a torso tilt turns the chest about the hips and the head / shoulders go with it; the arms
+	# and legs follow by IK (hands / feet stay on the grips / pedals). Then the limits run once more, so a key can't
+	# push him through the bars / out of reach
+	var pk: Dictionary = p.get("pk", {}) as Dictionary
+	_pk_tyaw = float(pk.get("torso_yaw", 0.0)); _pk_hp = float(pk.get("head_pitch", 0.0)); _pk_hy = float(pk.get("head_yaw", 0.0))
+	_pk_eo = float(pk.get("elbows_out", 0.0)); _pk_ko = float(pk.get("knees_out", 0.0))
+	if not pk.is_empty():
+		var hipd := Vector3(float(pk.get("hip_x", 0.0)), float(pk.get("hip_y", 0.0)), float(pk.get("hip_z", 0.0)))
+		pelvis += hipd
+		chest += hipd
+		var tv: Vector3 = chest - pelvis
+		tv = Basis(Vector3(0, 0, 1), -float(pk.get("torso_pitch", 0.0))) * tv
+		tv = Basis(Vector3(1, 0, 0), float(pk.get("torso_roll", 0.0))) * tv
+		chest = pelvis + tv
+		var cpk := _constrain(pelvis, chest, p, sty, standing, aero, true)
+		pelvis = cpk[0]; chest = cpk[1]
 	# ---- motion cap: hips and chest move at most TORSO_VMAX relative to the bike. Whatever drives them (a limit
 	# above snapping on, a spike in an input, sliders stacking up), the torso can't jump between frames; real riding
 	# moves it well under this. Hands and feet are fitted after this, so they stay on the grips and pedals.
@@ -2017,7 +2035,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# bike's frame, so it turns back against it - the hips half way (they're on the saddle / pedals), the shoulders
 	# nearly all the way: the rider keeps facing where they fly while the bike hangs out sideways
 	var awhip: float = clampf(_num(p, "airWhip"), -1.4, 1.4) * air
-	var tw_base: float = float(sty.twist) + clampf(_num(p, "airSpin") * 0.07 + sm_turn * 0.13 * float(sty.turnTwist) + lead, -0.6, 0.6) + _num(p, "flipTwist")   # (a flip: the shoulders turn to spot the landing)
+	var tw_base: float = _pk_tyaw + float(sty.twist) + clampf(_num(p, "airSpin") * 0.07 + sm_turn * 0.13 * float(sty.turnTwist) + lead, -0.6, 0.6) + _num(p, "flipTwist")   # (a flip: the shoulders turn to spot the landing)
 	var tw_air: float = -0.22 * tab - 0.85 * awhip
 	var tw := Basis(tw_axis, tw_base + tw_air)
 	# (2026-11-23, user: "the shoulder pops off") the shoulders' twist (a whip, a tabletop) is held to what both arms can
@@ -2087,10 +2105,10 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	J[1] = chest
 	J[2] = pelvis
 	# (+ the eyes lead into the turn with the shoulders, flowLead)
-	var yaw: float = clampf((_num(p, "steer") * 1.2 + _num(p, "yawRate") * 0.15) * sty.headTurn + lead * 0.8, -0.8, 0.8) + sty.headYaw + _num(p, "lookYaw") - 0.95 * awhip + head_yaw_hold
+	var yaw: float = clampf((_num(p, "steer") * 1.2 + _num(p, "yawRate") * 0.15) * sty.headTurn + lead * 0.8, -0.8, 0.8) + sty.headYaw + _num(p, "lookYaw") - 0.95 * awhip + head_yaw_hold + _pk_hy
 	# (+ the pedalling rock taken back out: the bike rocks under a level head)
 	var rx: float = (_num(p, "headRoll") if p.get("headRoll") != null else _num(p, "lean") * 0.6) + sty.headRoll + _num(p, "rockRoll") * minf(steady, 1.0)
-	var rz: float = -0.12 * (ang - 0.72) + 0.04 * sin(t * 3.3) * wig - sty.headTilt * (1.0 - 0.6 * relax) + 0.12 * tall + _num(p, "lookPitch") - head_kick
+	var rz: float = -0.12 * (ang - 0.72) + 0.04 * sin(t * 3.3) * wig - sty.headTilt * (1.0 - 0.6 * relax) + 0.12 * tall + _num(p, "lookPitch") - head_kick - _pk_hp
 	head.transform = Transform3D(GEAR.euler_xyz(rx, yaw, rz), head_p)
 	_pose_neck()
 
@@ -2131,7 +2149,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 			else Vector3(foot.x - 0.04 + sty.heelFwd, foot.y + 0.12 + sty.heelUp, foot.z)
 		# turning: the inside knee opens out toward the turn, the outside leg drives down on its pedal
 		var inside: float = clampf(-side * knee_lean * 1.6, 0.0, 0.9) * float(sty.kneeOpen) * (1.0 - air)
-		var pole_l: Vector3 = (poles_leg[i] + Vector3(0, 0, side * inside)).normalized()
+		var pole_l: Vector3 = (poles_leg[i] + Vector3(0, 0, side * (inside + _pk_ko))).normalized()
 		var ik := limb_ik(hp, ankle, L_THIGH, L_SHIN, pole_l, Vector3.UP, KNEE_MIN, KNEE_MAX, _bd_prev[i], max_turn)
 		_bd_prev[i] = ik[2]
 		var ik_raw: Vector3 = ik[0]
@@ -2165,6 +2183,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		if aero > 0.01: pole_a = pole_a.lerp(Vector3(-0.15, 0.15, side * 1.0).normalized(), 0.7 * aero).normalized()   # elbows up and out
 		if back_k > 0.01: pole_a = pole_a.lerp(Vector3(-0.35, -0.85, side * 0.3).normalized(), 0.5 * back_k).normalized()
 		if standing: pole_a = Vector3(-1.0, 0.0, side * 0.25).normalized()   # arms hanging: elbows point back
+		if _pk_eo != 0.0: pole_a = (pole_a + Vector3(0, 0, side * _pk_eo)).normalized()   # (Pose Lab: elbows out / in)
 		var ika := limb_ik(shp, hand, L_UARM, L_FARM, pole_a, Vector3(0, -0.5, side), ELBOW_MIN, ELBOW_MAX, _bd_prev[2 + i], max_turn)
 		_bd_prev[2 + i] = ika[2]
 		# arms never through the leg on their side (a deep lean, braking hard into a turn): the elbow goes out round it

@@ -5,6 +5,7 @@ extends Node3D
 ## writes user://garage.json and the next ride uses it.
 
 signal closed(ride: bool)
+signal anim_requested   # Insert in the rider room: the Anim Studio (the standing rider's animation library)
 
 ## "bike" = the garage (paint, logos, wheels, bars, shocks, gears; the bike stands on the floor);
 ## "rider" = the rider room (riding position on the training rollers, kit beside the bike).
@@ -1140,6 +1141,9 @@ func _process(dt: float) -> void:
 			and (door_open >= 1.0 or _door_hold) and _dirty <= 0.0
 
 func _unhandled_input(e: InputEvent) -> void:
+	if mode == "rider" and e is InputEventKey and e.pressed and not e.echo and e.keycode == KEY_INSERT:
+		anim_requested.emit()
+		return
 	if e is InputEventMouseButton or (e is InputEventMouseMotion and dragging):
 		_idle_t = 0.0
 	if e is InputEventMouseButton:

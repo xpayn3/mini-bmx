@@ -75,6 +75,7 @@ var cam_i := 0
 var ui_on := true
 var cam3: Camera3D
 var bar: Control
+var style_ui: StyleInspector   # T: what the rider's style did (clip layers, events, channels, state)
 var hint: PadGlyph.PromptBar
 var _hint_pad := false
 var _last_us := 0
@@ -126,6 +127,9 @@ func _ready() -> void:
 	bar.rp = self
 	bar.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(bar)
+	style_ui = StyleInspector.new()
+	style_ui.rp = self
+	add_child(style_ui)
 	hint = PadGlyph.PromptBar.new()
 	hint.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	hint.offset_top = -38; hint.offset_bottom = -4
@@ -285,7 +289,7 @@ func capture(t: float) -> void:
 	var arow := PackedFloat32Array([st.v, 1.0 if st.air else 0.0, 1.0 if st.crash_on else 0.0, float(st.surf), 1.0 if st.skid_fx else 0.0,
 		float(st.throttle_in), float(st.pedal), float(st.crank)])
 	frames.append([t, _seg, d, (_seg.moving as PackedInt32Array).size(), focus, f, absf(st.v) * 3.6, flags, arow,
-		[_dfeed[0], _dfeed[1]], float(game.fx.t) if game.fx else 0.0])
+		[_dfeed[0], _dfeed[1]], float(game.fx.t) if game.fx else 0.0, game.style_row.duplicate(), game.style_names])
 	if float(frames[-1][0]) - float(frames[0][0]) > SECS + 5.0:   # (trimmed in batches: pop_front shifts the whole list)
 		var cut := _at(float(frames[-1][0]) - SECS)
 		frames = frames.slice(cut)
@@ -502,6 +506,8 @@ func save() -> String:
 	var segs: Array = []
 	var seg_i := {}
 	var fr: Array = []
+	var sty_sets: Array = []
+	var sty_i := {}
 	for f in frames:
 		var sg: Dictionary = f[1]
 		if not seg_i.has(sg):
@@ -514,14 +520,20 @@ func save() -> String:
 			var sk_i := PackedInt32Array()
 			for sk in sg.skels: sk_i.append(sg.nodes.find(sk))
 			segs.append({"paths": sg.paths, "glob": sg.glob, "base": base, "moving": sg.moving, "bones": sg.bones, "skel": sk_i})
+		var si := -1   # the style row's names: one list per library state, shared between frames
+		if f.size() > 12 and f[12] is PackedStringArray:
+			if not sty_i.has(f[12]):
+				sty_i[f[12]] = sty_sets.size()
+				sty_sets.append(f[12])
+			si = sty_i[f[12]]
 		fr.append([f[0], seg_i[sg], f[2], f[3], f[4], f[5], f[6], f[7], f[AROW] if f.size() > AROW else PackedFloat32Array(),
-			f[DROW] if f.size() > DROW else [[], []]])
+			f[DROW] if f.size() > DROW else [[], []], f[11] if f.size() > 11 else PackedFloat32Array(), si])
 	var st = game.phys
 	var head := {"ver": VER, "date": Time.get_datetime_string_from_system(), "seed": GameState.seed, "bike": GameState.bike_id,
 		"level": game.level, "build": game.bike_cfg.get("build", {}), "look": game.rider.look.duplicate(true) if game.rider else {},
 		"pose": game.rider.style.duplicate(true) if game.rider else {}, "secs": duration(),
 		"light": LightSettings.current.duplicate(true), "hour": game.tod}
-	var body := {"segs": segs, "frames": fr, "aev": aev.duplicate(true), "dev": dev.duplicate(true)}
+	var body := {"segs": segs, "frames": fr, "aev": aev.duplicate(true), "dev": dev.duplicate(true), "sty_sets": sty_sets}
 	if _save_task >= 0: WorkerThreadPool.wait_for_task_completion(_save_task)
 	_save_task = WorkerThreadPool.add_task(func():
 		var f := FileAccess.open_compressed(path, FileAccess.WRITE, FileAccess.COMPRESSION_ZSTD)
@@ -600,9 +612,12 @@ func load_saved(rd: Dictionary) -> bool:
 				if bt.origin.distance_to(lt.origin) > 0.002 or (bt.basis.get_scale() - lt.basis.get_scale()).length() > 0.01:
 					print("REPLAY static differs %s %s saved o=%s s=%s now o=%s s=%s" % [sg.paths[ni], n.get_class(), str(bt.origin), str(bt.basis.get_scale()), str(lt.origin), str(lt.basis.get_scale())])
 	clear()
+	var sty_sets: Array = rd.body.get("sty_sets", [])
 	for f in rd.body.frames:
+		var sn := PackedStringArray()
+		if f.size() > 11 and int(f[11]) >= 0 and int(f[11]) < sty_sets.size(): sn = sty_sets[int(f[11])]
 		frames.append([f[0], segs[int(f[1])], f[2], f[3], f[4], f[5], f[6], f[7], f[8] if f.size() > 8 else PackedFloat32Array(),
-			f[9] if f.size() > 9 else [[], []], 0.0])
+			f[9] if f.size() > 9 else [[], []], 0.0, f[10] if f.size() > 10 else PackedFloat32Array(), sn])
 		_mark_add(frames[-1])
 	aev = rd.body.get("aev", [])
 	dev = rd.body.get("dev", [])
@@ -744,7 +759,7 @@ func phys_snap() -> void:
 	for i in _snap_keys.size():
 		var v = ph.get(_snap_keys[i])
 		vals[i] = v.duplicate(true) if (v is Array or v is Dictionary) else v
-	snaps.append([t, ph.crash_on, vals])
+	snaps.append([t, ph.crash_on, vals, game._line_n])
 	if snaps.size() > int(SNAP_SECS * SNAP_HZ) + 20: snaps = snaps.slice(20)
 
 ## the newest snapshot at or before the playhead that isn't in a crash
@@ -764,8 +779,28 @@ func ride_from_here() -> void:
 		status = "NOTHING TO RIDE FROM HERE" if viewer else "TOO FAR BACK TO RIDE FROM"
 		_status_t = 2.0
 		return
-	var ts: float = sn[0]
 	game.exit_replay()
+	ride_from_snap(sn)
+	game.line_truncate(int(sn[3]) if sn.size() > 3 else -1)
+	game.line_stop()
+
+
+## re-ride: the same, but the recorded inputs from there on are fed in again (L). The old tail of the line is kept for it
+func reride_from_here() -> void:
+	var sn = _snap_at(tp)
+	if sn == null or viewer or sn.size() < 4 or not game.line_has(int(sn[3])):
+		status = "NO RECORDED INPUTS FROM HERE"; _status_t = 2.0
+		return
+	var line: Dictionary = game.line_extract(int(sn[3]))
+	game.exit_replay()
+	ride_from_snap(sn)
+	game.line_truncate(int(sn[3]))
+	game.line_start(line, sn)
+
+
+## put a snapshot's physics back and let the recording carry on from that moment (shared by ride from here / re-ride / restart)
+func ride_from_snap(sn: Array) -> void:
+	var ts: float = sn[0]
 	game._end_crash()   # (crashed now: back on the bike first)
 	var ph = game.phys
 	var vals: Array = sn[2]
@@ -1012,6 +1047,7 @@ func update(rdt: float) -> void:
 	hint.visible = ui_on and not exporting
 	if _hint_pad != Settings.pad_active: _refresh_hint()
 	bar.queue_redraw()
+	if style_ui.visible: style_ui.queue_redraw()
 	if Env.s("BMX_REPLAY_SHOTS") != "":   # tests: a shot every 0.5 s of real time
 		_shots_t += rdt
 		if _shots_t >= 0.5 and _shots_i < 16:
@@ -1393,6 +1429,10 @@ func _input(e: InputEvent) -> void:
 		if e is InputEventKey and e.pressed and e.keycode == KEY_ESCAPE: _export_end()
 		get_viewport().set_input_as_handled()
 		return
+	if style_ui != null and style_ui.visible and e is InputEventMouseButton and (e as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT 			and (e as InputEventMouseButton).pressed and style_ui.has_point((e as InputEventMouseButton).position):
+		style_ui.click((e as InputEventMouseButton).position)
+		get_viewport().set_input_as_handled()
+		return
 	var used := true
 	var free: bool = CAMS[cam_i] == "Free"
 	if e is InputEventKey and free and e.keycode in [KEY_W, KEY_A, KEY_S, KEY_D, KEY_Q, KEY_E, KEY_Z, KEY_X, KEY_SHIFT, KEY_ALT, KEY_CTRL]:
@@ -1414,6 +1454,10 @@ func _input(e: InputEvent) -> void:
 			KEY_DELETE: clip_in = -1.0; clip_out = -1.0; status = "CLIP CLEARED"; _status_t = 1.5
 			KEY_V: export_clip()
 			KEY_ENTER, KEY_KP_ENTER: ride_from_here()
+			KEY_INSERT: _pose_from_here()
+			KEY_L: reride_from_here()
+			KEY_T: style_ui.visible = not style_ui.visible
+			KEY_Y: style_ui.cycle_window()
 			KEY_HOME: tp = t0(); _shot = null; _snap_cam = true
 			KEY_END: tp = t1()
 			KEY_H, KEY_F1: ui_on = not ui_on
@@ -1516,6 +1560,31 @@ func _free_input(e: InputEvent) -> bool:
 			return true
 	return false
 
+## Pose Lab from the replay: rewind to the moment, press Insert: the ride carries on from there (ride from here) and
+## the Lab opens with the physics paused, so the jump can be posed / keyed in place
+func _pose_from_here() -> void:
+	if viewer or not can_ride_from_here():
+		status = "NO POINT TO POSE FROM HERE"; _status_t = 1.5
+		return
+	var g = game
+	var pick: String = style_ui.sel if style_ui != null else ""
+	var at_t := -1.0
+	if pick != "":
+		var fk := _frame_k(tp)
+		at_t = style_ui.val(fk[0], "clip|%s|t" % pick, -1.0)
+	ride_from_here()
+	if g.pose_lab == null or not g.pose_lab.is_open(): g.toggle_pose_lab()
+	else: g.pose_hold = true
+	if pick != "":   # the clip picked in the Style Inspector, at the very moment of the replay
+		for ci in PoseKeys.clips.size():
+			if str(PoseKeys.clips[ci].name) == pick:
+				PoseKeys.select(ci)
+				g.pose_lab._clip_switched()
+				if at_t >= 0.0: g.pose_lab.preview_t = at_t
+				g.pose_lab._pull()
+				break
+
+
 func _scrub_to(x: float) -> void:
 	var r: Rect2 = bar.timeline_rect()
 	var k := clampf((x - r.position.x) / maxf(r.size.x, 1.0), 0.0, 1.0)
@@ -1558,7 +1627,7 @@ func _refresh_hint() -> void:
 			[["R3"], "Highlights"]] + ([] if viewer else [[["X"], "Ride from here"], [["VIEW"], "Save"]]) + [[["B"], "Back"]])
 	else:
 		hint.set_items([[["K:SPACE"], "Play"], [["K:A", "K:D"], "Rewind"], [["K:Q", "K:E"], "Speed"], [["K:C"], "Camera"],
-			[["K:G"], "Highlights"], [["K:O"], "Photo"], [["K:[", "K:]", "K:V"], "Clip"]] + ([] if viewer else [[["K:ENTER"], "Ride from here"], [["K:S"], "Save"]])
+			[["K:G"], "Highlights"], [["K:T"], "Style"], [["K:L"], "Ride the line again"], [["K:O"], "Photo"], [["K:[", "K:]", "K:V"], "Clip"]] + ([] if viewer else [[["K:ENTER"], "Ride from here"], [["K:INS"], "Pose Lab here"], [["K:S"], "Save"]])
 			+ [[["K:ESC"], "Back"]])
 
 func _test_set(spec: String) -> void:
@@ -1571,11 +1640,15 @@ func _test_set(spec: String) -> void:
 			"at": tp = clampf(t1() + float(p[1]), t0(), t1()) if float(p[1]) <= 0.0 else clampf(t0() + float(p[1]), t0(), t1())
 			"pause": playing = p[1] != "1"
 			"ui": ui_on = p[1] != "0"
+			"style": style_ui.visible = p[1] != "0"   # tests: the Style Inspector
+			"pick": style_ui.sel = p[1]
+			"win": style_ui.win = float(p[1])
 			"hl": if p[1] == "1": toggle_highlights.call_deferred()
 			"in": clip_in = clampf(t1() + float(p[1]), t0(), t1())
 			"out": clip_out = clampf(t1() + float(p[1]), t0(), t1())
 			"export": if p[1] == "1": export_clip.call_deferred()
 			"ride": if p[1] == "1": ride_from_here.call_deferred()
+			"reride": if p[1] == "1": reride_from_here.call_deferred()   # tests: ride the line again from the playhead
 
 
 ## the bar along the bottom: REPLAY, the timeline (crashes red, airs gold), time, speed, camera
