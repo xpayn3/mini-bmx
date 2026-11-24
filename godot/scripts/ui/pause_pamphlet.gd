@@ -11,7 +11,7 @@ extends PaperSheet
 
 const CW := 600                      # one panel (px): DL, 99 x 210 mm
 const CH := 1273
-const PHOTO_H := 640
+const PHOTO_H := 700
 const COVER_Y := CH                  # the cover: the strip under the inside spread (printed on the cover flap's back)
 const INSIDE_SCALE := 1.3            # the inside menu, drawn this much bigger than its own pixels (readable)
 const INK := Color("1d1f22")
@@ -65,9 +65,9 @@ func _ready() -> void:
 	cover.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	content.add_child(cover)
 	_list = VBoxContainer.new()
-	_list.position = Vector2(40, COVER_Y + PHOTO_H + 34)
+	_list.position = Vector2(40, COVER_Y + PHOTO_H + 48)   # centred between the hazard strip and the footer rule
 	_list.size = Vector2(CW - 80, CH - PHOTO_H - 120)
-	_list.add_theme_constant_override("separation", 2)
+	_list.add_theme_constant_override("separation", 0)
 	content.add_child(_list)
 
 
@@ -75,24 +75,29 @@ func _ready() -> void:
 func add_item(text: String, cb: Callable) -> Button:
 	_items += 1
 	var b := Button.new()
-	b.text = "%02d   %s" % [_items, text.to_upper()]
+	b.text = text.to_upper()
 	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	b.focus_mode = Control.FOCUS_ALL
-	b.custom_minimum_size = Vector2(0, 55)   # nine lines fit the list
+	b.custom_minimum_size = Vector2(0, 46)   # tight rows: nine lines fit the list
 	b.clip_text = true
 	b.add_theme_font_override("font", _font_b)
-	b.add_theme_font_size_override("font_size", 31)
+	b.add_theme_font_size_override("font_size", 30)
 	b.add_theme_color_override("font_color", INK)
 	b.add_theme_color_override("font_hover_color", INK)
 	b.add_theme_color_override("font_focus_color", INK)
 	b.add_theme_color_override("font_pressed_color", RED)
 	b.add_theme_color_override("font_hover_pressed_color", RED)
-	var none := StyleBoxEmpty.new()
+	var none := StyleBoxFlat.new()
+	none.bg_color = Color(0, 0, 0, 0)
 	none.content_margin_left = 14
+	none.border_width_bottom = 2          # a thin printed rule between lines
+	none.border_color = Color(INK, 0.14)
 	var hi := StyleBoxFlat.new()          # a yellow highlighter swipe
 	hi.bg_color = Color(1.0, 0.86, 0.18, 0.75)
 	hi.skew = Vector2(-0.18, 0)
 	hi.content_margin_left = 14
+	hi.border_width_bottom = 2
+	hi.border_color = Color(INK, 0.14)
 	hi.set_corner_radius_all(3)
 	hi.expand_margin_left = 6
 	hi.expand_margin_right = 10
@@ -220,6 +225,15 @@ class Cover extends Control:
 		draw_string(p._font_b, Vector2(38, PHOTO_H - 84), "RUNOUT", HORIZONTAL_ALIGNMENT_LEFT, -1, 92, Color(0.98, 0.97, 0.92))
 		draw_string(p._font, Vector2(42, PHOTO_H - 36), (p.place.to_upper() + "  ·  TRAIL GUIDE") if p.place != "" else "TRAIL GUIDE", HORIZONTAL_ALIGNMENT_LEFT, -1, 28, Color(1, 0.84, 0.5))
 		draw_rect(Rect2(0, PHOTO_H, W, 14), RED)
+		# trail-sign details: a black diamond badge top right, a hazard chevron strip under the photo
+		var dc := Vector2(W - 70, 66)
+		draw_colored_polygon(PackedVector2Array([dc + Vector2(0, -40), dc + Vector2(40, 0), dc + Vector2(0, 40), dc + Vector2(-40, 0)]), Color("101214"))
+		draw_polyline(PackedVector2Array([dc + Vector2(0, -31), dc + Vector2(31, 0), dc + Vector2(0, 31), dc + Vector2(-31, 0), dc + Vector2(0, -31)]), Color(1, 0.84, 0.2), 3.0, true)
+		draw_string(p._font_b, dc + Vector2(-14, 10), "DH", HORIZONTAL_ALIGNMENT_LEFT, -1, 27, Color(1, 0.84, 0.2))
+		var sx := 0.0
+		while sx < W:
+			draw_colored_polygon(PackedVector2Array([Vector2(sx, PHOTO_H + 14), Vector2(sx + 16, PHOTO_H + 14), Vector2(sx + 30, PHOTO_H + 28), Vector2(sx + 14, PHOTO_H + 28)]), Color("101214"))
+			sx += 30.0
 		# the list's frame: a heading rule and a footer
 		draw_line(Vector2(48, H - 92), Vector2(W - 48, H - 92), Color(INK, 0.5), 2)
 		draw_string(p._font, Vector2(48, H - 56), "Ride safe  ·  Wear a helmet", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(INK, 0.7))
