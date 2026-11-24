@@ -71,6 +71,8 @@ const GATE_FIRST := 150    # centreline index of the first gate (300 m down the 
 const GATE_EVERY := 150     # one every 300 m
 var chunk_arches := {}   # key -> PackedInt32Array of (centreline index * 2 + TrailArch kind)
 var chunk_boards := {}  # key -> PackedInt32Array of centreline indices with a roadside billboard
+var chunk_signs := {}   # key -> PackedInt32Array of centreline indices with a distance table (small leaning sign)
+const SIGN_EVERY := 2500    # one every 5 km (centreline points are ~2 m apart)
 const BOARD_FIRST := 18
 const BOARD_EVERY := 41     # one every ~80 m, alternating sides
 
@@ -935,7 +937,12 @@ static func _add(d: Dictionary, k: int, v: int) -> void:
 
 
 func _bucket() -> void:
-	chunk_rocks = {}; chunk_stakes = {}; chunk_fences = {}; chunk_gates = {}; chunk_boards = {}; chunk_arches = {}
+	chunk_rocks = {}; chunk_stakes = {}; chunk_fences = {}; chunk_gates = {}; chunk_boards = {}; chunk_arches = {}; chunk_signs = {}
+	var sign_every := SIGN_EVERY
+	if OS.get_environment("BMX_SIGN_EVERY") != "":
+		sign_every = maxi(20, int(OS.get_environment("BMX_SIGN_EVERY")))   # test: signs closer together
+	for i in range(sign_every, n - 2, sign_every):
+		_add(chunk_signs, _chunk_of(X[i], Z[i]), i)
 	for i in range(BOARD_FIRST, n - 2, BOARD_EVERY):
 		var gd := posmod(i - GATE_FIRST, GATE_EVERY)
 		if gd < 8 or gd > GATE_EVERY - 8:

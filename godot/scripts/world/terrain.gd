@@ -889,12 +889,14 @@ func _panel_labels(p: Dictionary, node: Node3D) -> void:
 		node.add_child(fl)
 		p["labels"].append(fl)
 	if p.has("bb"):
-		var bb: Dictionary = p["bb"]
-		for s in [1.0, -1.0]:
-			var bas: Basis = bb["basis"] if s > 0 else Basis(Vector3.UP, PI) * bb["basis"]
-			var lb := TrailGate.label(bb["text"], bb["col"], bb["w"], bb["h"], bas, bb["at"] + bb["nrm"] * 0.045 * s)
-			node.add_child(lb)
-			p["labels"].append(lb)
+		var bbs: Array = [p["bb"]]
+		bbs.append_array(p.get("bb_more", []))
+		for bb: Dictionary in bbs:
+			for s in [1.0, -1.0]:
+				var bas: Basis = bb["basis"] if s > 0 else Basis(Vector3.UP, PI) * bb["basis"]
+				var lb := TrailGate.label(bb["text"], bb["col"], bb["w"], bb["h"], bas, bb["at"] + bb["nrm"] * 0.055 * s)
+				node.add_child(lb)
+				p["labels"].append(lb)
 
 
 func _finalize(k: Vector2i) -> void:

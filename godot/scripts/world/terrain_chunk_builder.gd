@@ -190,6 +190,7 @@ func _build() -> void:
 	_gates()
 	_arches()
 	_boards()
+	_dist_signs()
 	_tape()
 	for k in colliders:
 		if k.has("tape"):
@@ -796,6 +797,78 @@ func _boards() -> void:
 		panel["bb"] = {"text": spn[0], "col": Color.html("#%06x" % spn[2]), "w": W, "h": 1.5,
 			"basis": Basis(Vector3(pz, 0, -px), Vector3.UP, Vector3(px, 0, pz)),
 			"at": Vector3(bx, y0 + 0.75, bz), "nrm": Vector3(px, 0, pz)}
+		panels.append(panel)
+
+
+## distance tables: a small square low-poly sign on a stick beside the road every 5 km, each leaning
+## a little differently (smashable like the billboards)
+func _dist_signs() -> void:
+	var C: TrailCourse = f.course
+	for i in C.chunk_signs.get(TrailCourse.chunk_key(cx, cz), PackedInt32Array()):
+		var tx: float = C.TX[i]
+		var tz: float = C.TZ[i]
+		var rr := fposmod(sin(i * 12.9898) * 43758.5453, 1.0)
+		var rr2 := fposmod(sin(i * 78.233 + 1.7) * 24634.6345, 1.0)
+		var side0 := 1.0 if rr > 0.5 else -1.0
+		var found := false
+		var bx := 0.0
+		var bz := 0.0
+		var h := 0.0
+		var nx := 0.0
+		var nz := 0.0
+		for cand in [[side0, 2.6], [side0, 4.0], [-side0, 2.6], [-side0, 4.0]]:
+			nx = -tz * cand[0]
+			nz = tx * cand[0]
+			bx = C.X[i] + nx * (C.W[i] + cand[1])
+			bz = C.Z[i] + nz * (C.W[i] + cand[1])
+			h = height(bx, bz)
+			f.jump_eval(bx, bz)
+			if h >= WATER + 0.4 and f.fo_h <= 0.05 and not is_blocked(bx, bz, -0.4):
+				found = true
+				break
+		if not found:
+			continue
+		# the face looks back up the trail at the riders
+		var px := -tx
+		var pz := -tz
+		var yaw := atan2(px, pz) + (rr2 - 0.5) * 0.5
+		var fx := sin(yaw)   # face normal (the box's z axis) after the random turn
+		var fz := cos(yaw)
+		# a little lean in a random direction (up to ~9 deg)
+		var lean := 0.06 + 0.1 * fposmod(rr * 91.7, 1.0)
+		var la := rr2 * TAU
+		var R := Basis(Vector3(cos(la), 0, sin(la)).cross(Vector3.UP).normalized(), -lean)
+		var rb := R * Basis(Vector3.UP, yaw)
+		var base := Vector3(bx, h - 0.15, bz)
+		var panel := {"broken": false, "parts": [], "style": "billboard"}
+		var add := func(kind: String, off: Vector3, scl: Vector3, c: Color) -> void:
+			var bs := _scaled(rb, scl.x, scl.y, scl.z)
+			var pos: Vector3 = base + R * off
+			var k := _push(kind, bs, pos, c)
+			panel["parts"].append({"kind": kind, "i": k, "col": c, "xform": Transform3D(bs, pos), "scale": scl})
+		# design (Figma "table sign"): blue field with the distance in white, white strip with DISTANCE in red
+		var white_c := TerrainField.lin(0xffffff)
+		white_c.a = 1.0
+		var blue_c := TerrainField.lin(0x0004ff)
+		blue_c.a = 1.0
+		var post_c := TerrainField.lin(0x6b4a30)
+		# the stick ends at the table's bottom edge (y 1.1): the table sits on top of it, nothing pokes through
+		# (mesh is 1.1 tall with a pointed top: 0.0 .. 1.1 + a tip hidden inside the board)
+		add.call("post", Vector3(0, 0.58, 0), Vector3(0.7, 1.1, 0.5), post_c)
+		add.call("rail", Vector3(0, 1.505, 0), Vector3(0.81, 0.81, 0.07), white_c)
+		add.call("rail", Vector3(0, 1.64, 0), Vector3(0.81, 0.54, 0.09), blue_c)
+		colliders.append({"x": bx, "z": bz, "r": 0.3, "fence": panel, "fence_style": "billboard"})
+		var nrm: Vector3 = R * Vector3(fx, 0, fz)
+		var km := int(round(float(i) * 2.0 / 1000.0))
+		panel["cx"] = bx
+		panel["cz"] = bz
+		var lb := R * Basis(Vector3(fz, 0, -fx), Vector3.UP, Vector3(fx, 0, fz))
+		panel["bb"] = {"text": "%dkm" % km, "col": Color.WHITE, "w": 0.76, "h": 0.36,
+			"basis": lb, "at": base + R * Vector3(0, 1.64, 0), "nrm": nrm}
+		panel["bb_more"] = [{"text": "DISTANCE", "col": Color.html("#ff3b30"), "w": 0.72, "h": 0.135,
+			"basis": lb, "at": base + R * Vector3(0, 1.235, 0), "nrm": nrm}]
+		if OS.get_environment("BMX_GATE_PROBE") != "":
+			print("DISTSIGN i=", i, " at ", bx, ",", h, ",", bz)
 		panels.append(panel)
 
 
