@@ -2137,6 +2137,28 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   way. Setting `ruts` (from the next ride), `BMX_RUTS=0|1` overrides.
 - Not done: the drawn tyre tracks lying down in the rut, drying / filling in over time, ruts from AI riders / ghosts.
 
+### Level builder in the Godot editor (2026-11-24, step 1 of 4: `addons/level_builder`, `scripts/levels/editor/`)
+- Developer-side level editor for hand-built downhill levels (plan: 1 slope + trail + ride from the editor, 2 pieces:
+  jumps / drops / rocks / bridges / gates, 3 bake + test-rider checks, 4 publish to an in-game LEVELS list).
+- A level = a scene in `res://levels/` whose root is a `BmxLevel` (Node3D, @tool: the slope's length / width / drop /
+  steepness / side rise / bumps) with a `BmxTrail` child (Path3D: draw the line with the curve tools; only x, z are
+  used, its height is the land's smoothed along it). `LevelField` (pure data, used by the editor AND the ride) bakes it:
+  the trail resampled every 1 m, its curvature, the speed a rider carries (gravity, rolling + air drag, capped by each
+  bend, braking room backwards), the bank each bend needs for that speed (up to `bank_max_deg`), then a height grid
+  (0.5 m in the ride, 1 m preview) with the trail's banked cross-section blended into the land over `blend` m.
+  ~0.3 s for the 537 m demo. Physics reads the grid (bilinear); the drawn ground is the same grid at 1 m.
+- Editor: the plugin's dock (right, "Level Builder"): New level, Snap trail to ground, Rebuild preview, **Ride this
+  level** (saves, runs the game with `-- --level=<path>`). The preview (internal nodes, never saved) shows the ground,
+  the trail line coloured by speed (blue .. red), bank ticks (white flat .. yellow steep), start (green) / end posts.
+- Game: `--level=res://levels/x.tscn` (kept for the session: `main._cmdline_level`; it used to be cleared by the
+  title menu, also for `--level=playground`) -> `LevelTerrain` (Terrain API from the LevelField). The field's
+  TrailCourse is the level's trail (`LevelField.to_course`), so the demo AI (F2 / `BMX_DEMO=1`), the follow rider,
+  trail camera, bend alerts and the bail tap work. Demo: `levels/demo_descent.tscn` (`-s res://tools/make_demo_level.gd`
+  rewrites it). Test: `BMX_DEMO=1 BMX_CAM=chase -- --level=res://levels/demo_descent.tscn --autotest=40` (rides it all,
+  no crash). Note: very short `--autotest` (< ~12 s) runs only drew 2 frames here.
+- Not yet: grass carpet / trees / rocks (no chunk data on levels), the world's trail shader (ground is vertex colour),
+  baked lighting.
+
 ### Developer view of the test playground (`scripts/levels/ride_diag.gd`) - telemetry + sliders for riding code
 - **Only in the test playground** (user decision 2026-11-21: developer tools live in that level, normal rides have none).
   **Layout (2026-11-22, user: "tidy, compact, nothing covering")**: a slim **tuning column** on the left (the TuneCard,

@@ -246,6 +246,8 @@ func _ready() -> void:
 		terrain = reuse.terrain
 	elif level == "playground":
 		terrain = PlaygroundTerrain.new(GameState.seed)
+	elif level.ends_with(".tscn"):   # a level built in the editor (the level builder, res://levels/)
+		terrain = LevelTerrain.new(level, GameState.seed)
 	else:
 		terrain = load("res://scripts/world/terrain.gd").new((int(Env.s("BMX_TITLE_SEED")) if Env.s("BMX_TITLE_SEED") != "" else TITLE_SEED) if title_world else GameState.seed)
 	add_child(terrain)

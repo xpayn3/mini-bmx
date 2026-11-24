@@ -27,8 +27,7 @@ func _ready() -> void:
 	if Env.s("BMX_SEED") != "":   # tests: a fixed world behind the title screen too
 		GameState.seed = int(Env.s("BMX_SEED"))
 	if Env.s("BMX_LEVEL") != "": GameState.level = Env.s("BMX_LEVEL")   # tests: a test level (playground)
-	for a in OS.get_cmdline_user_args():
-		if a.begins_with("--level="): GameState.level = a.get_slice("=", 1)
+	if _cmdline_level(): GameState.level = _cmdline_level()   # (--level=playground, or a level from the editor's level builder)
 	if "--garage" not in OS.get_cmdline_user_args() and "--rider" not in OS.get_cmdline_user_args() and "--shop" not in OS.get_cmdline_user_args():   # straight to the garage: don't build the world first
 		var plain := true   # only a plain launch (or a title screenshot) gets the title backdrop; tests ride the real world
 		for a in OS.get_cmdline_user_args():
@@ -602,7 +601,7 @@ func _menu_page_main() -> void:
 	fill.call()
 	var ride := _menu_button("RIDE", "", _menu_page_setup, true, true)
 	vb.add_child(ride)
-	if Env.s("BMX_LEVEL") == "": GameState.level = ""   # back on the title: RIDE / the garage ride the real world
+	if Env.s("BMX_LEVEL") == "" and not _cmdline_level(): GameState.level = ""   # back on the title: RIDE / the garage ride the real world
 	# LEVELS: test levels (DEMO is off the title menu: the in-game panel switches the AI rider on; _start_demo is kept)
 	vb.add_child(_menu_button("LEVELS", "", _menu_page_levels, false, true))
 	vb.add_child(_menu_button("REPLAYS", "", _menu_page_replays, false, true))
@@ -2976,3 +2975,11 @@ func _showcase(dir: String) -> void:
 	await shot.call("photo")
 	game.toggle_photo()
 	GameState.quit()
+
+
+## --level=<id or res://levels/x.tscn> on the command line ("" none): kept as the level for the whole session
+## (the editor's level builder starts the game this way)
+func _cmdline_level() -> String:
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--level="): return a.get_slice("=", 1)
+	return ""

@@ -157,3 +157,7 @@ grime_root={
 "type": "mat4",
 "value": Projection(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
 }
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/level_builder/plugin.cfg")

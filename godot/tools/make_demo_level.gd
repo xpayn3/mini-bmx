@@ -1,0 +1,16 @@
+extends SceneTree
+## writes res://levels/demo_descent.tscn: the level builder's default level (-s, headless)
+func _init() -> void:
+	var lvl := BmxLevel.make_new("Demo Descent")
+	var ps := PackedScene.new()
+	ps.pack(lvl)
+	print("MAKELEVEL save=", ResourceSaver.save(ps, "res://levels/demo_descent.tscn"))
+	var f := lvl.make_field()
+	var t0 := Time.get_ticks_msec()
+	f.bake(0.5)
+	print("MAKELEVEL bake 0.5 ms=", Time.get_ticks_msec() - t0, " ", f.summary())
+	t0 = Time.get_ticks_msec()
+	f.bake(1.0)
+	print("MAKELEVEL bake 1.0 ms=", Time.get_ticks_msec() - t0)
+	lvl.free()
+	quit()
