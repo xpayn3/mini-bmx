@@ -9,6 +9,9 @@ uniform sampler2D screen_tex : hint_screen_texture, filter_linear;
 uniform float grade_amt = 1.0;
 uniform float blur = 0.0;      // 0..1
 uniform float speed = 0.0;     // 0..1 speed feel: colour fringing, speed lines, tighter vignette
+uniform float fx_lines = 1.0;     // Settings > Camera > Speed effects: × speed lines / fringing / vignette
+uniform float fx_fringe = 1.0;
+uniform float fx_vig = 1.0;
 uniform vec2 focus = vec2(0.5, 0.52);
 // photo mode (scripts/game/photo_mode.gd): filters, white balance, fade, vignette, grain, lens fringing, frame
 uniform float photo = 0.0;
@@ -79,15 +82,15 @@ void fragment() {
 		vec2 d = uv - focus;
 		// only the left / right sides of the frame (NFS style): the road ahead (top middle with the trail camera) and
 		// the rider stay sharp; it used to be an ellipse round the rider that reached the trail ahead
-		float edge = smoothstep(0.33, 0.5, abs(uv.x - 0.5)) * (1.0 - 0.5 * smoothstep(0.1, 0.5, -(uv.y - 0.5)));
-			edge *= 1.0 - 0.75 * smoothstep(0.55, 0.85, uv.y);   // 2026-11-24: outer sides only, lower frame (ground just ahead) stays sharp
+		float edge = smoothstep(0.2, 0.44, abs(uv.x - 0.5)) * (1.0 - 0.4 * smoothstep(0.1, 0.5, -(uv.y - 0.5)));   // 2026-11-24 (user: misjudged speed into corners): wider + ~2x stronger
+			edge *= 1.0 - 0.6 * smoothstep(0.6, 0.9, uv.y);   // the ground just ahead stays a bit sharper
 		float k = blur * edge;
 		if (k > 0.002) {
 			vec3 acc = c.rgb;
 			float jit = fract(sin(dot(FRAGCOORD.xy, vec2(12.9898, 78.233))) * 43758.5453);
 			for (int i = 1; i <= 8; i++) {
 				float s = (float(i) + jit) / 8.0;
-				acc += textureLod(screen_tex, uv - d * s * k * 0.09, k * 1.0).rgb;
+				acc += textureLod(screen_tex, uv - d * s * k * 0.19, k * 1.6).rgb;
 			}
 			c.rgb = acc / 9.0;
 			kb = k;
@@ -98,7 +101,7 @@ void fragment() {
 		float r2 = length(d2 * vec2(1.6, 1.0));
 		float edge2 = smoothstep(0.25, 0.75, r2);
 		// colour fringing toward the corners (red out, blue in), like a lens pushed hard
-		vec2 ca = d2 * 0.0025 * speed * edge2 * edge2;
+		vec2 ca = d2 * 0.0048 * fx_fringe * speed * edge2 * edge2;
 		// added as the shifted-minus-centre difference so the blur above isn't thrown away on red / blue
 		float lod = kb * 1.5;
 		vec2 cc = textureLod(screen_tex, uv, lod).rb;
@@ -106,22 +109,22 @@ void fragment() {
 		c.b += textureLod(screen_tex, uv - ca, lod).b - cc.y;
 		// speed lines: thin streaks rushing outward from the rider, only in the outer ring of the frame
 		float ang = atan(d2.y, d2.x);
-		float lanes = 140.0;
+		float lanes = 180.0;
 		float lane = floor(ang / 6.2831853 * lanes);
 		float h = fract(sin(lane * 91.17) * 43758.5453);
-		if (h > 0.6) {
+		if (h > 0.35) {
 			float across = abs(fract(ang / 6.2831853 * lanes) - 0.5) * 2.0;
-			float thin = pow(1.0 - across, 12.0);
-			float seg = fract(r2 * (1.6 + h) - TIME * (1.4 + 2.2 * h) * (0.6 + speed));
-			float streak = smoothstep(0.0, 0.08, seg) * smoothstep(0.55, 0.12, seg);
-			float s_amt = thin * streak * smoothstep(0.38, 0.8, r2) * speed * speed * 0.42;
+			float thin = pow(1.0 - across, 6.0);
+			float seg = fract(r2 * (1.6 + h) - TIME * (2.2 + 3.2 * h) * (0.6 + speed));
+			float streak = smoothstep(0.0, 0.08, seg) * smoothstep(0.7, 0.12, seg);
+			float s_amt = thin * streak * smoothstep(0.26, 0.7, r2) * speed * (0.35 + 0.65 * speed) * 0.85 * fx_lines;
 			c.rgb = mix(c.rgb, vec3(1.0, 0.98, 0.94), s_amt);
 		}
 	}
 	float l = dot(c.rgb, vec3(0.299, 0.587, 0.114));
 	c.rgb += (l - 0.45) * vec3(0.035, 0.012, -0.03) * grade_amt;
 	vec2 v = SCREEN_UV - 0.5;
-	c.rgb *= 1.0 - dot(v, v) * (0.6 * grade_amt + 0.55 * speed);   // the frame closes in at speed
+	c.rgb *= 1.0 - dot(v, v) * (0.6 * grade_amt + 1.0 * speed * fx_vig);   // the frame closes in at speed
 	if (lwet > 0.002) {
 		c.rgb *= 1.0 - lrim * 0.4;
 		c.rgb += lspec * vec3(0.9, 0.95, 1.0) * 0.75;

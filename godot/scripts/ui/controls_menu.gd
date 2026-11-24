@@ -132,7 +132,6 @@ func _camera() -> Control:
 	cams.item_selected.connect(func(i): Settings.set_v("camera", keys[i]))
 	_row(p, "Default camera", cams, "C cycles the cameras while riding")
 	_slider(p, "Field of view", "fov", -15.0, 30.0, 1.0, "%+.0f°", "Degrees added to every camera: higher = wider view")
-	_slider(p, "Wider view at speed", "cam_speed_fov", 0.0, 2.0, 0.1, "%.1fx", "How much the view widens when you go fast")
 	_slider(p, "Distance", "cam_dist", 0.5, 2.5, 0.05, "%.2fx", "How far the camera sits from the rider (the mouse wheel zooms too)")
 	_slider(p, "Height", "cam_height", -15.0, 40.0, 1.0, "%+.0f°", "Higher = looking down more from above")
 	_slider(p, "Side offset", "cam_side", -90.0, 90.0, 1.0, "%+.0f°", "Swing the camera round to the side of the rider")
@@ -147,10 +146,30 @@ func _camera() -> Control:
 	var hb := HBoxContainer.new()
 	hb.add_child(UITheme.button("Reset camera", _reset_camera, _f(15)))
 	p.add_child(hb)
+	_section(p, "SPEED EFFECTS")
+	_check(p, "Speed effects", "speed_fx", "Master switch: wider view, blur, lines and vignette when you go fast")
+	_slider(p, "Starts at", "sfx_start", 5.0, 60.0, 1.0, "%.0f km/h", "Speed where the effects begin to show (full about 20 km/h above)")
+	_slider(p, "Wider view", "cam_speed_fov", 0.0, 2.0, 0.1, "%.1fx", "How much the view widens when you go fast")
+	_slider(p, "Camera pull-in", "sfx_pull", 0.0, 2.0, 0.1, "%.1fx", "How much closer the camera moves to the rider at speed")
+	_slider(p, "Edge blur", "sfx_blur", 0.0, 2.0, 0.1, "%.1fx", "Smeared left / right sides of the screen")
+	_slider(p, "Speed lines", "sfx_lines", 0.0, 2.0, 0.1, "%.1fx", "Streaks rushing out from the middle")
+	_slider(p, "Colour fringing", "sfx_fringe", 0.0, 2.0, 0.1, "%.1fx", "Red / blue split toward the corners")
+	_slider(p, "Vignette", "sfx_vignette", 0.0, 2.0, 0.1, "%.1fx", "The frame darkens and closes in at speed")
+	_check(p, "Turn warnings", "pacenotes", "A small card for the next bend: an arrow, the distance, and BRAKE when you are too fast for it")
+	var hs := HBoxContainer.new()
+	hs.add_child(UITheme.button("Reset speed effects", _reset_speed_fx, _f(15)))
+	p.add_child(hs)
 	_section(p, "RIDING")
 	_tune_slider(p, "Top speed", "topSpeed", "×%.2f",
 		"How fast the rider can pedal the bike: top speed, the power to reach it and less drag (also in the tuning card, Ride › Speed)")
 	return p
+
+func _reset_speed_fx() -> void:
+	for k in ["speed_fx", "cam_speed_fov", "sfx_blur", "sfx_lines", "sfx_fringe", "sfx_vignette", "sfx_pull", "sfx_start", "pacenotes"]:
+		Settings.data[k] = Settings.DEFAULTS[k]
+	Settings.apply()
+	Settings.save()
+	_reopen(1)
 
 func _reset_camera() -> void:
 	for k in ["fov", "cam_speed_fov", "cam_dist", "cam_height", "cam_side", "cam_ahead", "cam_follow", "cam_shake",

@@ -71,6 +71,10 @@ var trail_i := -1       # nearest trail centreline point
 var trail_d := INF      # how far off the trail centreline (m)
 var _full_scan_ms := -100000   # when _trail_scan last searched the whole trail (msec)
 var alert := {}         # the next turn / feature on the trail: {kind, text, d}, or empty
+var pace := {}          # the next bend as a simple turn warning: {sev 1..6, side, text, d, hot 0..1}, or empty
+var pace_view: Control
+const PACE_A_LAT := 7.0   # m/s^2 of sideways grip a rider plans a bend with (the demo pilot's number)
+const PACE_BRAKE := 5.5   # m/s^2 he can count on to slow down
 var alert_new := 0.0    # seconds left to show a just-appeared alert while it is still far off
 const FEAT_NAMES := {"table": "TABLETOP", "tableLine": "JUMP LINE", "kicker": "KICKER", "rhythm": "ROLLERS",
 	"flow": "FLOW LINE", "woodKicker": "WOOD KICKER", "bridge": "BRIDGE", "gorge": "GORGE BRIDGE", "rope": "ROPE BRIDGE"}
@@ -138,6 +142,11 @@ func _ready() -> void:
 	air_card = AirCard.new(); air_card.hud = self
 	air_card.size = Vector2(260, 112); air_card.position = Vector2(20, 14)   # top left (top centre is the area banner's)
 	root.add_child(air_card)
+	pace_view = PaceView.new(); pace_view.hud = self
+	pace_view.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	pace_view.size = Vector2(230, 70); pace_view.position = Vector2(-115, 98)   # top centre, under the area banner
+	pace_view.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(pace_view)
 	on_respawn()
 	_build_records()
 	quick = load("res://scripts/ui/quick_tune.gd").new()
@@ -165,7 +174,7 @@ func _layout() -> void:
 ## along the bottom, the ride above it. The game HUD's big pieces (computer, jump card, life / stamina, style, corner
 ## lines, achievement pops) are hidden there; the hop / pump / balance bars + get-up prompt move up over the band.
 ## Normal rides never call these.
-const DEV_HIDE := ["gauge", "air_card", "life_bar", "stamina", "style_pop", "info_l", "biome_l", "msg_l", "quick"]
+const DEV_HIDE := ["gauge", "air_card", "pace_view", "life_bar", "stamina", "style_pop", "info_l", "biome_l", "msg_l", "quick"]
 var dev_on := false
 
 func dev_mode(on: bool) -> void:
@@ -562,8 +571,14 @@ func _probe_alerts() -> void:
 func _trail_scan(p: Vector2, fw: Vector2, crashed: bool) -> void:
 	var was: String = alert.get("text", "")
 	alert = {}
-	if not gauge.unit.nav or not ComputerUnits.opt(GameState.computer_id, "alerts"): return   # no navigation, or alerts off: no turn / feature alerts
-	if Env.s("BMX_ALERT_DEMO") != "":   # tests: a fixed alert to look at
+	pace = {}
+	# the computer's own alert card needs a unit with navigation; the rally pacenote (`pace`) works with any
+	var gauge_ok: bool = gauge.unit.nav and ComputerUnits.opt(GameState.computer_id, "alerts")
+	if Env.s("BMX_PACE_DEMO") != "":   # tests: a fixed pacenote (BMX_PACE_DEMO=<1..6>, BMX_PACE_HOT=1 flags it too fast)
+		var sv := clampi(int(Env.s("BMX_PACE_DEMO")), 1, 6)
+		pace = {"sev": sv, "side": 1, "text": "SHARP RIGHT", "d": 64.0, "vs": [18.0, 25.0, 35.0, 45.0, 58.0, 75.0][sv - 1], "hot": 1.0 if Env.s("BMX_PACE_HOT") != "" else 0.0}
+		return
+	if gauge_ok and Env.s("BMX_ALERT_DEMO") != "":   # tests: a fixed alert to look at
 		alert = {"kind": Env.s("BMX_ALERT_DEMO"), "text": "HAIRPIN RIGHT", "d": 22.0}
 		return
 	var t = game.terrain
@@ -595,16 +610,31 @@ func _trail_scan(p: Vector2, fw: Vector2, crashed: bool) -> void:
 			while j > trail_i and absf(tc.KAP[j - 1]) > 1.0 / 60.0 and signf(tc.KAP[j - 1]) == sg: j -= 1
 			var k := i
 			var ang := 0.0
+			var kmax := 0.0
+			var apex := i
 			while k < tc.n - 1 and absf(tc.KAP[k]) > 1.0 / 60.0 and signf(tc.KAP[k]) == sg:
-				ang += tc.KAP[k] * S; k += 1
+				ang += tc.KAP[k] * S
+				if absf(tc.KAP[k]) > kmax: kmax = absf(tc.KAP[k]); apex = k
+				k += 1
 			var d := (j - trail_i) * S
 			if d < 4.0 or absf(ang) < 0.6:
 				i = k + 1; continue
 			var side := "RIGHT" if sg > 0 else "LEFT"
 			var kind := ("H" if absf(ang) > 2.3 else "S" if absf(ang) > 1.2 else "") + side[0]
 			var txt := ("HAIRPIN " if absf(ang) > 2.3 else "SHARP " if absf(ang) > 1.2 else "") + side
+			# rally pacenote: the speed this bend can be taken at (its tightest curvature, the grip a rider plans with + the
+			# bank), graded 1 (hairpin) .. 6 (flat out), and whether the speed now leaves room to brake for it
+			var bank := absf(tc.BT[apex]) if apex < tc.BT.size() else 0.0
+			var vs := minf(sqrt((PACE_A_LAT + 9.81 * bank) / maxf(kmax, 0.001)), 40.0)
+			var vk := vs * 3.6
+			var sev := 1 if vk < 20.0 else 2 if vk < 28.0 else 3 if vk < 38.0 else 4 if vk < 50.0 else 5 if vk < 65.0 else 6
+			var v_now := absf(game.phys.v)
+			var hot := 0.0
+			if v_now > vs * 1.08:
+				hot = smoothstep(0.75, 1.25, ((v_now * v_now - vs * vs) / (2.0 * PACE_BRAKE)) / maxf(d - 3.0, 1.0))
+			pace = {"sev": sev, "side": 1 if sg > 0 else -1, "text": txt, "d": d, "vs": vk, "hot": hot}
 			if d < best_d:
-				best_d = d; alert = {"kind": kind, "text": txt, "d": d}
+				best_d = d; alert = {"kind": kind, "text": txt, "d": d, "sev": sev, "side": 1 if sg > 0 else -1}
 			break
 		i += 1
 	# the next route feature (jumps, rollers, wood)
@@ -629,6 +659,7 @@ func _trail_scan(p: Vector2, fw: Vector2, crashed: bool) -> void:
 			if d >= 4.0 and d < best_d:
 				best_d = d; alert = {"kind": "K", "text": "ROCKS", "d": d}
 			break
+	if not gauge_ok: alert = {}
 	if alert.get("text", "") != "" and alert.text != was:
 		if int(gauge.order[gauge.page]) == GaugeView.MAP_PAGE: gauge.light = 3.0   # the screen lights up for a new alert (map page only)
 		alert_new = 3.5
@@ -1656,6 +1687,72 @@ class BalanceMeter extends Control:
 		SlimBar.disc(self, kc, 6.5, Color(0, 0, 0, 0.55 * a))
 		SlimBar.disc(self, kc, 5.0, Color(mc, a))
 		SlimBar.disc(self, kc + Vector2(-1.2, -1.4), 1.8, Color(1, 1, 1, 0.5 * a))
+
+class PaceView extends Control:
+	## rally pacenote for the next bend: its grade 1 (hairpin) .. 6 (flat out) big, an arrow whose bend matches the grade,
+	## the distance and the speed it can be taken at; when the speed now leaves no room to brake the card flashes red.
+	const COLS := [Color("ff3b30"), Color("ff7a1f"), Color("ffb020"), Color("ffe03a"), Color("b8ee6a"), Color("8be8a0")]
+	const TURN := [2.95, 2.15, 1.55, 1.1, 0.7, 0.3]   # how far each grade bends the road (rad)
+	var hud
+	var a := 0.0
+	var t := 0.0
+	var last := {}
+	## the bend as an arrow: up the road, round the turn (more for a lower grade), out the other side
+	static func draw_arrow(c: CanvasItem, ic: Vector2, sev: int, side: float, col: Color, h: float, w := 3.0) -> void:
+		var th: float = TURN[clampi(sev, 1, 6) - 1]
+		var pts := PackedVector2Array()
+		var pos := Vector2(0, 14)
+		var hd := 0.0   # heading from straight up, + = towards `side`
+		pts.append(pos)
+		var run_in := 9.0
+		var steps := 10
+		var r := 5.5
+		var run_out := 5.0 + 7.0 * float(sev - 1) / 5.0
+		pos += Vector2(0, -run_in); pts.append(pos)
+		for q in steps:
+			hd += th / steps
+			pos += Vector2(sin(hd) * side, -cos(hd)) * (r * th / steps)
+			pts.append(pos)
+		pos += Vector2(sin(hd) * side, -cos(hd)) * run_out; pts.append(pos)
+		var mn := pts[0]; var mx := pts[0]
+		for p in pts:
+			mn = Vector2(minf(mn.x, p.x), minf(mn.y, p.y)); mx = Vector2(maxf(mx.x, p.x), maxf(mx.y, p.y))
+		var mid := (mn + mx) * 0.5
+		var sc := h / 34.0
+		var out := PackedVector2Array()
+		for p in pts: out.append(ic + (p - mid) * sc)
+		c.draw_polyline(out, col, w * sc * 1.4, true)
+		var tip := out[out.size() - 1]
+		var dv := (tip - out[out.size() - 2]).normalized()
+		var nv := Vector2(-dv.y, dv.x)
+		c.draw_colored_polygon(PackedVector2Array([tip + dv * 7 * sc, tip + nv * 6 * sc, tip - nv * 6 * sc]), col)
+	func _process(dt: float) -> void:
+		t += dt
+		var p: Dictionary = hud.pace
+		var show: bool = Settings.get_v("pacenotes") and not p.is_empty() and float(p.d) < 150.0 and not hud.game.phys.crash_on
+		a = move_toward(a, 1.0 if show else 0.0, dt * (6.0 if show else 3.0))
+		if show: last = p
+		visible = a > 0.01
+		if visible: queue_redraw()
+	func _draw() -> void:
+		if last.is_empty(): return
+		var p: Dictionary = last
+		var sev: int = p.sev
+		var col: Color = COLS[sev - 1]
+		var hot: float = clampf(float(p.hot), 0.0, 1.0)
+		var pulse := 0.5 + 0.5 * sin(t * 14.0)
+		var bg := Color("12161a").lerp(Color("b01810"), hot * (0.55 + 0.45 * pulse))
+		bg.a = 0.82 * a
+		UITheme.draw_box(self, Rect2(Vector2.ZERO, size), bg, 8)
+		var f := UITheme.font(true)
+		draw_arrow(self, Vector2(42, size.y * 0.5), sev, float(p.side), Color(col, a), 46.0)
+		var d: float = p.d
+		var dtx := "%dm" % (roundi(d / 10.0) * 10 if d > 50.0 else roundi(d))
+		draw_string(f, Vector2(80, 34), dtx, HORIZONTAL_ALIGNMENT_RIGHT, size.x - 92, 28, Color("ffd21f", a))
+		if hot > 0.45:
+			draw_string(f, Vector2(80, 58), "BRAKE!", HORIZONTAL_ALIGNMENT_RIGHT, size.x - 92, 18, Color(1, 1, 1, a * (0.6 + 0.4 * pulse)))
+		else:
+			draw_string(f, Vector2(80, 58), String(p.text), HORIZONTAL_ALIGNMENT_RIGHT, size.x - 92, 12, Color(1, 1, 1, 0.75 * a))
 
 class AirCard extends Control:
 	## live jump counter: distance from the take-off point, height and air time; the result holds for a

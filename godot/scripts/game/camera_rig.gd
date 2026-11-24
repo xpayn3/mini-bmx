@@ -302,7 +302,7 @@ func update_cam(dt: float) -> void:
 		if P.get("square", false): pit = cam_pitch   # (level: no Settings height, no speed dip)
 		var dist0 := dist
 		# speed: in closer while the FOV widens (the rider stays the same size, the world rushes past)
-		dist = dist0 * float(Settings.get_v("cam_dist")) * (1.0 - 0.2 * speed_feel)   # the zoom the user set × the Settings distance
+		dist = dist0 * float(Settings.get_v("cam_dist")) * (1.0 - 0.3 * float(Settings.get_v("sfx_pull")) * speed_feel)   # the zoom the user set × the Settings distance
 		if P.get("square", false): dist = dist0 * float(Settings.get_v("cam_dist"))
 		dist *= 1.0 - crash_zoom   # crashed: slowly zooming in on the body (eases back out after a reset)
 		if P.get("drift", false):
