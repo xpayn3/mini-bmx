@@ -5,6 +5,7 @@ extends Node3D
 ## +Y up, +Z the rider's right; the bottom bracket sits near the origin (0.297 up on the BMX).
 
 const G := preload("res://scripts/rider/rider_geo.gd")
+static var _OLD_JUMPPOSE := OS.get_environment("BMX_OLD_JUMPPOSE") != ""
 const GEAR := preload("res://scripts/rider/rider_gear.gd")
 
 ## neutral riding style (posepanel.js NEUTRAL): BMX = all of these
@@ -1291,6 +1292,12 @@ var sm_pitch_slow := 0.0   # the bike's pitch averaged over ~0.35 s: what the bo
 var bump_pitch := 0.0      # this frame's quick pitch kick the body holds against (tests)
 var sm_wheelie := 0.0   # the slope the body levels against, rate-limited
 const PITCH_LEVEL_RATE := 2.5   # rad/s
+const FACE_SINK := 0.35  # share of the legs' sink drawn on a jump face (firm legs loading the lip)
+var _face_k := 0.0        # this frame's blend into the jump-face pose (0..1)
+const FACE_REACH := 0.96  # arms on a jump face / popped: nearly straight (share of their length)
+const FACE_POSE := 0.85   # how far the body goes to the measured face pose (video 2) on a jump face / just popped
+const FACE_HIP := Vector2(-0.42, 0.68)   # hips from the crank centre, in the WORLD: behind, up (m; video 2)
+const FACE_TORSO := 0.08  # rad the torso leans forward of upright in the world
 # head stabilisation (riders keep the head steady and the eyes on the trail: the body soaks the bike's kicks from
 # the contact points up, the head sees the least of them; docs/research/rider_animation.md). The head's pitch follows
 # a smoothed copy of the bike's (slopes, held manuals) and holds against the quick part (rocks, landings); quick yaw
@@ -1491,13 +1498,24 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# away, so the bike has room to come up in front of him)
 	# (2026-11-23, sized from slow-motion of a pro off a lip, research/jump: wound right down into the transition, then
 	# stood fully tall through the lip with the bars pulled to the hips. It was -2 / +6 cm: the jump looked dead)
-	pelvis.x += -0.06 * j_pre + 0.10 * j_ext - 0.13 * j_sq - 0.07 * j_fold - 0.02 * sm_reach
-	pelvis.y += -0.08 * j_pre + 0.13 * j_ext - 0.03 * j_sq - (0.09 if old_lp else 0.13) * j_fold + (0.06 if old_lp else 0.09) * sm_reach
+	# (2026-11-24, video 2 side views, research/jump: on every take he loads the face deep - knees ~90 deg, hips ~15 cm
+	# down and back, chest low; squashing, the hips go well back and low and the chest folds down over the bars while the
+	# arms push the bike forward through the lip; popping, the legs are dead straight at the edge. BMX_OLD_JUMPPOSE=1)
+	if _OLD_JUMPPOSE:
+		pelvis.x += -0.06 * j_pre + 0.10 * j_ext - 0.13 * j_sq - 0.07 * j_fold - 0.02 * sm_reach
+		pelvis.y += -0.08 * j_pre + 0.13 * j_ext - 0.03 * j_sq - (0.09 if old_lp else 0.13) * j_fold + (0.06 if old_lp else 0.09) * sm_reach
+	else:
+		pelvis.x += -0.06 * j_pre + 0.10 * j_ext - 0.16 * j_sq - 0.07 * j_fold - 0.02 * sm_reach
+		pelvis.y += -0.07 * j_pre + 0.17 * j_ext - 0.12 * j_sq - (0.09 if old_lp else 0.13) * j_fold + (0.06 if old_lp else 0.09) * sm_reach
+		# popped off the lip (video 2 slow frames): he stands up BEHIND the steep bike - hips back over the rear wheel and
+		# up, torso upright, arms straight out to the bars - for ~half a second before the knees come up into the tuck
+		var j_up: float = sm_popfx * air
+		pelvis.x -= 0.20 * j_up; pelvis.y += 0.06 * j_up
 
 	# chest
 	# (pedalling out of the saddle the chest stays forward over the bars)
 	var ang: float = 0.52 - 0.2 * clampf(-bstick, 0.0, 1.0) - float(sty.pedalChest) * pedal + 0.12 * spr + 0.3 * eff + 0.15 * (comp / 0.3) + 0.08 * air + sty.lean * (1 - 0.5 * pedal) + 0.32 * aero_a + 0.6 * aero_g
-	ang += 0.3 * j_pre - 0.3 * j_ext + 0.06 * j_sq + (0.12 if old_lp else -0.22) * sm_popfx * air + 0.28 * j_tuck + 0.42 * j_fold - 0.18 * sm_reach
+	ang += (0.3 if _OLD_JUMPPOSE else 0.12) * j_pre - 0.3 * j_ext + (0.06 if _OLD_JUMPPOSE else 0.38) * j_sq - (0.0 if _OLD_JUMPPOSE else 0.35) * sm_popfx * air + (0.12 if old_lp else -0.22) * sm_popfx * air + 0.28 * j_tuck + 0.42 * j_fold - 0.18 * sm_reach
 	# spinning in the air: tall and compact over the bike (chest up, knees in), the head and shoulders lead
 	var spin_style: float = smoothstep(0.8, 3.5, absf(_num(p, "airSpin"))) * air
 	ang = lerpf(ang, 0.42, 0.7 * spin_style)
@@ -1516,6 +1534,10 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	chest += Vector3(sty.chestFwd, sty.chestUp, sty.chestSide)
 
 	var absorb := _num(p, "absorb")
+	# (2026-11-24, overlaid on video 2: on a lip's face he loads it with firm legs - "put force through your feet" - his
+	# hips stay ~0.3 m higher than ours, which sank with the physics legs pressed in ~20 cm by a tight transition. On a
+	# jump face only FACE_SINK of that sink is drawn)
+	if not _OLD_JUMPPOSE and absorb < 0.0: absorb *= 1.0 - (1.0 - FACE_SINK) * clampf(sm_lip, 0.0, 1.0) * (1.0 - air)
 	absorb = lerpf(absorb, maxf(absorb, 0.08), j_ext)   # driving through the lip the legs are straight, however hard it presses
 	# the crouches don't stack past what a rider gets down to (the lip's crouch + the preload + the legs pressed in by a
 	# transition came to 35 cm: sat on the rear tyre with the bars at his chin)
@@ -1563,7 +1585,10 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# keep the body level while the bike pitches (descents: almost fully; climbs: a little)
 	# only for slope-like angles: mid-flip (nose far up / down, upside down) the body stays on the bike
 	var pitch0 := wrapf(_num(p, "pitch"), -PI, PI)
-	pitch0 *= 1.0 - smoothstep(0.7, 1.3, absf(pitch0))
+	# (2026-11-24, overlaid on video 2: on a steep dirt-jump lip the bike is 45-60 deg and he stands up near vertical
+	# over it. This fade - for flips - cut the levelling right there. On a jump face / just off the lip it starts later)
+	var lip_lv: float = 0.0 if _OLD_JUMPPOSE else clampf(maxf(sm_lip * (1.0 - air), sm_popfx * air), 0.0, 1.0)
+	pitch0 *= 1.0 - smoothstep(lerpf(0.7, 1.15, lip_lv), lerpf(1.3, 1.6, lip_lv), absf(pitch0))
 	# that fade swings the body back ~2x the bike's own pitch rate as a flip passes through it, yanking
 	# the shoulders / hips 10-20 cm a frame (the limbs flail): the body follows it at a limited rate
 	var h0 := minf(dt, 0.1)
@@ -1635,6 +1660,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		var drop := _num(p, "attackDrop", 0.18)
 		pelvis.y -= down * drop
 		pelvis.x -= down * drop * 0.45
+	_face_k = 0.0
 	# climbing: hips to the saddle nose, chest low over the bars
 	var climb := clampf(slope0, 0, 0.6) * (1.0 - 0.85 * sm_lip)   # (not on the face of a jump: there he stays centred)
 	if wheelie > 0.0:   # hips back and a little down behind the saddle, chest back over them, arms long
@@ -1792,9 +1818,32 @@ func update_pose(dt: float, p: Dictionary) -> void:
 			# hands by the thighs, just in front of the hip line: elbows soft, pointing back
 			p["handL" if sd < 0 else "handR"] = sh + Vector3(0.07, -arm * 0.95, sd * 0.07)
 	# the target keeps every limit before the springs follow it (docs/research/rider_animation.md, point 4)
+	# (2026-11-24, measured off video 2 overlaid on ours, bike frame from the crank centre: on the face of a dirt jump,
+	# bike 37-48 deg up, his hips are right over the cranks ~0.77 m up and his torso is upright IN THE WORLD - in the
+	# bike's frame it leans forward as far as the bike is tipped back - so his chest is well above the bars (ours sat at
+	# bar height, pushed back 0.3 m by the bar limit). On a face / just popped off the lip the body is put there, blended
+	# by FACE_POSE; a squash keeps its own low pose)
+	if lip_lv > 0.0 and p.has("footL"):
+		var bbp: Vector3 = (p.get("footL", Vector3.ZERO) + p.get("footR", Vector3.ZERO)) * 0.5
+		# (dynamic, the user: the stand-up-over-the-bike is for a steep bike - a dirt-jump lip taken slow. On a flatter, fast
+		# lip he stays in his forward attack position: it fades with the bike's pitch, none under ~20 deg)
+		var steep_k: float = smoothstep(0.25, 0.55, clampf(raw_p, 0.0, 1.2)) * (1.0 - smoothstep(6.5, 9.5, absf(v)))
+		var fk: float = FACE_POSE * smoothstep(0.1, 0.45, lip_lv) * (1.0 - clampf(j_sq * 1.5, 0.0, 1.0)) * steep_k
+		_face_k = fk
+		# (the hips' place is set in the WORLD, from the crank centre: with the bike steeper, a spot fixed on the bike sank
+		# back and down)
+		var pp: float = clampf(raw_p, 0.0, 1.2)
+		var fhw := Vector2(FACE_HIP.x, FACE_HIP.y - 0.05 * j_pre + 0.06 * sm_popfx * air)
+		var ph_t := Vector2(bbp.x + fhw.x * cos(pp) + fhw.y * sin(pp), bbp.y - fhw.x * sin(pp) + fhw.y * cos(pp))
+		var ta: float = pp + FACE_TORSO
+		var ch_t := ph_t + Vector2(sin(ta), cos(ta)) * float(sty.torso)
+		pelvis.x = lerpf(pelvis.x, ph_t.x, fk); pelvis.y = lerpf(pelvis.y, ph_t.y, fk)
+		chest.x = lerpf(chest.x, ch_t.x, fk); chest.y = lerpf(chest.y, ch_t.y, fk)
+	if Env.s("BMX_JPOSE") != "" and sm_lip > 0.3: print("JPOSE pre pel=(%.2f,%.2f) ch=(%.2f,%.2f) lip=%.2f popfx=%.2f air=%.1f absorb=%.3f comp=%.3f pre=%.2f pitch=%.2f" % [pelvis.x, pelvis.y, chest.x, chest.y, sm_lip, sm_popfx, air, _num(p, "absorb"), _num(p, "compress"), sm_pre, _num(p, "pitch")])   # tests
 	if Env.s("BMX_OLD_LIMITS") == "":
 		var tgt := _constrain(pelvis, chest, p, sty, standing, aero, false)
 		pelvis = tgt[0]; chest = tgt[1]
+		if Env.s("BMX_JPOSE") != "" and sm_lip > 0.3: print("JPOSE lim pel=(%.2f,%.2f) ch=(%.2f,%.2f)" % [pelvis.x, pelvis.y, chest.x, chest.y])   # tests
 	# critically-damped-ish springs -> follow-through
 	if not spring_init:
 		pel_s = pelvis
@@ -1920,6 +1969,10 @@ func update_pose(dt: float, p: Dictionary) -> void:
 				if which == 0: pelvis = cur
 				else: chest = cur
 	_cap_pel = pelvis; _cap_ch = chest; _cap_ok = true
+	if Env.s("BMX_JPOSE") != "" and sm_lip > 0.3:   # tests: bike frame, from the crank centre
+		var bbj: Vector3 = (p.get("footL", Vector3.ZERO) + p.get("footR", Vector3.ZERO)) * 0.5
+		var hm: Vector3 = (p.get("handL", Vector3.ZERO) + p.get("handR", Vector3.ZERO)) * 0.5
+		print("JPOSE end pitch=%.2f hips=(%.2f,%.2f) chest=(%.2f,%.2f) hands=(%.2f,%.2f)" % [_num(p, "pitch"), pelvis.x - bbj.x, pelvis.y - bbj.y, chest.x - bbj.x, chest.y - bbj.y, hm.x - bbj.x, hm.y - bbj.y])
 	if _POSE_PROBE: _pp_mark(8, pelvis, chest)
 	# (2026-11-23, user: "the bike is on rails in the air, only the rider moves") in the air the shared centre of mass
 	# flies the arc; the bike is ~1/6 of the weight, so a move of the hips against the bike (the tuck, standing tall,
@@ -1968,13 +2021,17 @@ func update_pose(dt: float, p: Dictionary) -> void:
 			tw = Basis(tw_axis, tw_base + tw_air)
 	# pelvis: turn (yaw about up), roll (one hip drops, about forward), tilt (about the hip line)
 	var pel_b := Basis(Vector3.UP, float(sty.pelvisYaw) + clampf(sm_turn * 0.07 * float(sty.turnHips), -0.4, 0.4) + 0.3 * tab - 0.4 * awhip) * Basis(Vector3.RIGHT, float(sty.pelvisRoll) - clampf(sm_turn * 0.04 * float(sty.turnHips), -0.25, 0.25))
-	var pel_full := pel_b * Basis(Vector3.BACK, -(ang * 0.3) - float(sty.pelvisTilt))
+	# (a straight back on a jump face / popped, video 2: the pelvis turns with the torso as it really stands, not 30 % of
+	# the intended lean - the lower back bowed where the two met)
+	var t_act: float = atan2(chest.x - pelvis.x, maxf(0.05, chest.y - pelvis.y))
+	var p_tilt: float = lerpf(ang * 0.3, t_act * 0.85, _face_k)
+	var pel_full := pel_b * Basis(Vector3.BACK, -p_tilt - float(sty.pelvisTilt))
 	hip = pelvis + pel_full.y * Belt.HEM_Y   # the jersey's hem: inside the belt, level with it
 	# pro flow (flowBend): the hips go over first and the chest follows, so through a lean change the spine curves
 	# (a C bowed away from the way the chest still hangs) instead of moving as one stiff stick
 	var bend: float = clampf((roll_c - roll_p) * 0.6, -0.2, 0.2) * float(sty.get("flowBend", 1.0)) * (1.0 - air)
 	set_spine(hip, chest, pel_b * Vector3(0, 0, 1), tw * Vector3(0, 0, 1),
-		float(sty.spineCurve) * (1.0 - 0.7 * relax), float(sty.spineSide) + bend, float(sty.spineLow), pel_full)
+		float(sty.spineCurve) * (1.0 - 0.7 * relax) * (1.0 - _face_k), float(sty.spineSide) + bend, float(sty.spineLow), pel_full)
 	pelvis_mesh.transform = Transform3D(pel_full, pelvis)
 
 	# neck / head
@@ -2198,6 +2255,8 @@ func _constrain(pelvis: Vector3, chest: Vector3, p: Dictionary, sty: Dictionary,
 	if handL is Vector3 and handR is Vector3 and not standing:
 		# Arm bend: how far the arms may straighten (more bend = chest closer to the bars)
 		var reach := (L_UARM + L_FARM) * clampf(0.9 - 0.2 * float(sty.armBend), 0.55, 0.98)
+		# (on a jump face / popped: arms nearly straight, video 2 - the elbows' usual bend folded the chest onto the bars)
+		reach = lerpf(reach, (L_UARM + L_FARM) * FACE_REACH, _face_k)
 		var worst := 0.0
 		for sd in [[-1.0, handL], [1.0, handR]]:
 			var shp := Vector3(chest.x - 0.03, chest.y - 0.04, chest.z + sd[0] * sty.shoulders)

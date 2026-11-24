@@ -30,7 +30,9 @@ const EFH_MAX := 1.5        # m: what a landing should never ask more than
 # x H x v, within +-10 % on six tables 1.6-5.9 m; and it leaves TAKEOFF_EXTRA steeper than the lip (the rider's pop, the
 # rear lifting off the lip). Both go into the flight the deck / landing are sized for and into predict()
 const FACE_LOSS := 0.39
-const TAKEOFF_EXTRA := 8.0  # deg
+# (2026-11-24: 0. It was 8: the hands-off pop pushed square to the lip and the bike tipped up on its back wheel. Hands off
+# he now rides WITH the lip (bike_physics _pop_along, lip loading): measured -1.2..+1.3 deg on five designed jumps)
+const TAKEOFF_EXTRA := 0.0  # deg
 
 const DEFAULTS := {
 	"kind": "table",        # table | gap | kicker (the take-off alone, open back: you land on the flat)
