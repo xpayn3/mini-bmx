@@ -55,6 +55,7 @@ var refl_probe: ReflectionProbe   # scene reflections (trees, hills) for the bik
 var _probe_pos := Vector3(1e9, 0, 0)
 var _probe_t := 0.0
 var grade_rect: ColorRect
+var lens := LensFx.new()     # water + dust on the camera lens, drawn by grade_rect (fx/lens_fx.gd)
 var atmos := Atmos.new()
 var grime: Grime
 var contact: ContactShadow   # soft dark patches under the tyres + bike / rider (fx/contact_shadow.gd)
@@ -527,7 +528,20 @@ func _build_environment() -> void:
 	gm.shader = _grade_sh                                         # mid-ride, at ~25 km/h, cost 8 ms; later switches ~0.1 ms)
 	grade_rect.material = gm
 	cl.add_child(grade_rect)
+	add_child(lens)
 	add_child(cl)
+
+func _lens_aspect() -> float:
+	var vs := get_viewport().get_visible_rect().size
+	return vs.x / maxf(vs.y, 1.0)
+
+## tests: BMX_LENS_RAIN=0..1 keeps that much water on the lens (rain), BMX_LENS_DUST=0..1 dusts it,
+## BMX_LENS_WIND=0..1 holds the air over it (else the speed)
+func _lens_test_setup() -> void:
+	if Env.s("BMX_LENS_RAIN") != "": lens.rain = float(Env.s("BMX_LENS_RAIN"))
+	if Env.s("BMX_LENS_SPLASH") != "": lens.splash(float(Env.s("BMX_LENS_SPLASH")))
+	if Env.s("BMX_LENS_WIND") != "": lens.wind_override = float(Env.s("BMX_LENS_WIND"))
+	if Env.s("BMX_LENS_DUST") != "": lens.add_dust(float(Env.s("BMX_LENS_DUST")), Color(0.62, 0.55, 0.45))
 
 ## grade.gdshader reads the screen without mips (a mipmap sampler makes Godot build the screen's mip chain every
 ## frame); the speed blur needs them, so while it is on the material runs a copy of the shader with them
@@ -1259,7 +1273,7 @@ func _apply_settings() -> void:
 	env.adjustment_brightness = float(Settings.get_v("brightness"))
 	env.glow_enabled = Settings.get_v("bloom")
 	(grade_rect.material as ShaderMaterial).set_shader_parameter("grade_amt", 1.0 if Settings.get_v("grade") else 0.0)
-	grade_rect.visible = Settings.get_v("grade") or Settings.get_v("speed_fx")
+	grade_rect.visible = Settings.get_v("grade") or Settings.get_v("speed_fx") or Settings.get_v("lens_fx")
 	cam_attr.dof_blur_far_enabled = Settings.get_v("tilt_shift")
 	cam_attr.dof_blur_near_enabled = Settings.get_v("tilt_shift")
 	if hud: hud.apply_settings()
@@ -1342,6 +1356,9 @@ func start_crash(reason: String) -> void:
 	if diag: diag.on_crash(reason)
 	if rope_probe: print("ROPE CRASH ", reason, " at ", Vector3(phys.x, phys.y, phys.z))
 	_rd_air.resize(0)   # crash dust: per-part "was in the air" flags start fresh
+	# a fast crash on dirt / sand throws a couple of splats of it at the lens
+	if not phys.air and absf(phys.v) > 7.0 and (phys.surf == 1 or phys.surf == 3):
+		lens.add_dust(clampf((absf(phys.v) - 7.0) / 25.0, 0.05, 0.35), ground_dust(phys.x, phys.z, phys.surf))
 	if Env.s("BMX_TRICK") != "" or Env.s("BMX_MAN_PROBE") != "": print("CRASH ", reason, " v=%.1f air=%s pitch=%.2f gp=%.2f man=%.2f lean=%.2f slip=%.2f" % [phys.v, phys.air, phys.pitch, phys._g_pitch, phys.man_a, phys.lean, phys.slip])   # tests
 	elif Env.s("BMX_CRASH_LOG") != "":   # tests: every crash with the ground sim's state at that moment
 		print("CRASH %s | v=%.1f air=%s since_land=%.2f slip=%.2f lean=%.2f lean_err=%.2f front_use=%.2f rear_lock=%.2f front_lock=%.2f bank=%.2f pitch_err=%.2f" % [
@@ -1780,6 +1797,7 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 				var sp := (randf() - 0.5) * 2.2
 				var ev := Vector3(-f.x * va * 0.25 + side.x * sp, 0.8 + randf() * 1.6, -f.z * va * 0.25 + side.z * sp)
 				fx.chunk(at, ev, PUDDLE_DROP, 0.008 + randf() * 0.008, 0.9)
+				if randf() < 0.25: lens.splash(0.03 + 0.04 * pud)   # some of it reaches the lens
 		# a hard skid on loose ground kicks up a real cloud now and then (volumetric fog)
 		_cloud_t -= dt
 		if (dirt or sand) and skid_fx and va > 5 and _cloud_t <= 0 and dry_r > 0.5:
@@ -1801,6 +1819,12 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 	if st.air or va <= 0.6 or bare:
 		dust.feed(rear, Vector3.ZERO, 0.0, dcol, 0.0, 20.0)
 		dust.feed_front(front, Vector3.ZERO, 0.0, 0.0)
+	# riding through a lake / stream: the spray soaks the lens
+	if in_water and not st.air and va > 2.0: lens.splash(dt * minf(va, 12.0) * 0.06)
+	# riding fast through dry dust (dirt / sand) slowly dusts the lens: full in ~1.5 min flat out, a skid's
+	# cloud more; damp ground (wet bike) none
+	if not st.air and not bare and (s == 1 or s == 3) and va > 5.0:
+		lens.add_dust(dt * smoothstep(5.0, 16.0, va) * (0.011 + (0.02 if skid_fx else 0.0)) * (1.0 - clampf(grime.wet * 2.0, 0.0, 1.0)), dcol)
 	grime.feed(dt, 2 if in_water else s, va, skid_fx, st.air, _landed, terrain.ground_color(rear.x, rear.z), Vector2(st.vw_f, st.vw_r))
 	_landed = 0.0
 	# dry mud knocked off the bike flies off as chunks (low on the bike, carried along with it)
@@ -1860,6 +1884,8 @@ func respawn(new_world: bool) -> void:
 	if grass: grass.clear_trample()
 	if new_world: grime.clean()
 	if blood: blood.clear()
+	lens.wipe()
+	_lens_test_setup()
 	if flying_cam and is_instance_valid(flying_cam): flying_cam.queue_free()
 	flying_cam = null
 	var sp := _water_spawn() if Env.s("BMX_WATER_SPAWN") != "" else Vector3.ZERO
@@ -3248,7 +3274,15 @@ func _process(dt: float) -> void:
 	var gm := grade_rect.material as ShaderMaterial
 	gm.set_shader_parameter("blur", speed_k * speed_k)
 	gm.set_shader_parameter("speed", speed_k)
-	_grade_mips(gm, speed_k * speed_k > (0.0008 if gm.shader == _grade_sh_mip else 0.001))   # (the shader blurs from 0.001)
+	# water / dust on the lens: only on the default trail camera (user, 2026-11-24); on other views it is
+	# hidden and waits as it was
+	var lens_on: bool = Settings.get_v("lens_fx") and not scenic and cam.mode == "trail"
+	if lens_on:
+		# the air over the lens comes from the camera's own motion (grade.gdshader's focus = the view's middle)
+		lens.update(dt, get_viewport().get_camera_3d(), get_viewport().get_visible_rect().size, Vector2(0.5, 0.52))
+	lens.apply(gm, lens_on)
+	var lens_mips := lens_on and lens.active()   # the drops / dust read the screen out of focus
+	_grade_mips(gm, lens_mips or speed_k * speed_k > (0.0008 if gm.shader == _grade_sh_mip else 0.001))   # (the shader blurs from 0.001)
 	_pk = _perf("speed_fx", _pk)
 	cam.update_cam(dt)
 	_pk = _perf("camera", _pk)

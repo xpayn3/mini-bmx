@@ -64,6 +64,7 @@ func _graphics() -> Control:
 	_check(p, "Tilt-shift (miniature look)", "tilt_shift")
 	_check(p, "Colour grade + vignette", "grade")
 	_check(p, "Speed effects", "speed_fx", "Wider view and blurred screen edges when you go fast")
+	_check(p, "Water + mud on lens", "lens_fx", "Splashes and mud land on the camera lens; at speed the air blows the water off to the edges")
 	_section(p, "WORLD & EFFECTS")
 	_slider(p, "View distance", "view_distance", 0.6, 2.0, 0.1, "%.1fx")
 	_slider(p, "Model detail (LOD)", "lod", 0.25, 4.0, 0.25, "%.2f", "Lower = more detail far away")
