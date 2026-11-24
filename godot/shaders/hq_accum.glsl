@@ -12,6 +12,8 @@ layout(push_constant, std430) uniform P {
 	float mode;   // 0 = add this frame, 1 = only show the average
 } p;
 
+const float FIREFLY = 8.0;   // brightest channel one sample may add (scene-linear, 1 = white paper)
+
 void main() {
 	ivec2 px = ivec2(gl_GlobalInvocationID.xy);
 	if (px.x >= int(p.size.x) || px.y >= int(p.size.y)) return;
@@ -23,6 +25,11 @@ void main() {
 		vec3 cc = c.rgb;
 		bool bad = any(isnan(cc)) || any(isinf(cc));
 		s = p.n < 0.5 ? vec4(0.0) : imageLoad(accum, px);
+		// fireflies: a sub-pixel glint of a clearcoat catching a softbox can be hundreds of times the scene's
+		// white, and one such sample outweighs the other 127 (white patches along the tubes). Cap the
+		// brightest channel; real highlights stay well under it.
+		float m = max(cc.r, max(cc.g, cc.b));
+		if (m > FIREFLY) cc *= FIREFLY / m;
 		if (!bad) s += vec4(cc, 1.0);
 		imageStore(accum, px, s);
 	} else {
