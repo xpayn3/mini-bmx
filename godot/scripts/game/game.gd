@@ -3080,6 +3080,7 @@ func _process(dt: float) -> void:
 		pi["pedal"] = st.pedal
 		pi["sprint"] = st.sprint * st.pedal
 		pi["stamina"] = st.stamina
+		pi["hr"] = hud.hr if hud else 72.0   # the bike computer's heart rate (made up from effort, slow to recover): drives the breathing
 		pi["crank"] = st.crank
 		pi["air"] = st.air_k
 		pi["compress"] = maxf(0.0, -st.compress)
