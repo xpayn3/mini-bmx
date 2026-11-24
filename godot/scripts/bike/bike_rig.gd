@@ -114,6 +114,7 @@ func load_bike(cfg: Dictionary, build: Dictionary = {}) -> void:
 	MetalFinish.apply(model)   # bare metal parts get the brushed-metal scan (paint stays as it is)
 	for r in rotors:
 		MetalFinish.dress_rotor(r.material)
+		r.build_lod()
 	if extras.has("suspension"):
 		susp = Suspension.new(model, extras)
 	if not extras.has("chain"):

@@ -414,7 +414,115 @@ class RotorGlow:
 		if not nu.is_empty(): out[Mesh.ARRAY_TEX_UV] = nu
 		return out
 
+	# ---- far LOD: the rotor's top-down silhouette baked into a mask (holes + slots stay), drawn as one flat quad with alpha cut-out
+	const LOD_DIST := 4.0       # m from the camera: the full ~10k-triangle rotor up close, the quad beyond
+	const LOD_MARGIN := 0.5     # (hysteresis: no flicker at the switch)
+	const MASK_N := 512
+	static var _lod_shader: Shader
+	static var _mask_cache := {}
+	var lod_instance: MeshInstance3D
+	var lod_material: ShaderMaterial
+
+	## Call once the rotor's final mesh + material are set (after MetalFinish.dress_rotor). BMX_ROTOR_LOD=0 off, 1 = always the quad.
+	func build_lod() -> void:
+		var force := OS.get_environment("BMX_ROTOR_LOD")
+		if force == "0" or mesh_instance == null or not (mesh_instance.mesh is ArrayMesh) or mesh_instance.get_parent() == null:
+			return
+		var arr: Array = (mesh_instance.mesh as ArrayMesh).surface_get_arrays(0)
+		var P: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+		if P.size() < 3:
+			return
+		var R := 0.0
+		var zs := 0.0
+		var zn := 0
+		for i in range(0, P.size() - 2, 3):
+			var n := (P[i + 1] - P[i]).cross(P[i + 2] - P[i]).normalized()
+			if absf(n.z) > 0.7:
+				zs += P[i].z; zn += 1
+			for k in 3:
+				R = maxf(R, Vector2(P[i + k].x, P[i + k].y).length())
+		if zn == 0 or R < 0.02:
+			return
+		var S := R * 1.02
+		var key := hash(P)
+		var tex: Texture2D = _mask_cache.get(key)
+		if tex == null:
+			tex = _bake_mask(P, S)
+			_mask_cache[key] = tex
+		if _lod_shader == null:
+			var code: String = BikeFX.ROTOR_SHADER.replace("cull_back", "cull_disabled")
+			code = code.replace("uniform float detail", "uniform sampler2D mask_tex : filter_linear_mipmap, repeat_disable;
+uniform float detail")
+			code = code.replace("void fragment() {", "void fragment() {
+	ALPHA = texture(mask_tex, UV).r;
+	ALPHA_SCISSOR_THRESHOLD = 0.5;")
+			_lod_shader = BikeFX._shader(code)
+		lod_material = ShaderMaterial.new()
+		lod_material.shader = _lod_shader
+		lod_material.resource_name = "rotor_lod"
+		for nm in ["albedo", "metallic", "roughness", "r0", "r1", "rough_tex", "detail", "heat"]:
+			lod_material.set_shader_parameter(nm, material.get_shader_parameter(nm))
+		lod_material.set_shader_parameter("mask_tex", tex)
+		var al = material.get_shader_parameter("albedo")   # (no baked AO on the flat disc: a touch darker to match the full rotor from afar)
+		if al is Color:
+			lod_material.set_shader_parameter("albedo", Color(al.r * 0.8, al.g * 0.8, al.b * 0.8, al.a))
+		var z := zs / zn
+		var qa := []
+		qa.resize(Mesh.ARRAY_MAX)
+		qa[Mesh.ARRAY_VERTEX] = PackedVector3Array([Vector3(-S, S, z), Vector3(S, S, z), Vector3(S, -S, z), Vector3(-S, -S, z)])
+		qa[Mesh.ARRAY_NORMAL] = PackedVector3Array([Vector3.BACK, Vector3.BACK, Vector3.BACK, Vector3.BACK])
+		qa[Mesh.ARRAY_TEX_UV] = PackedVector2Array([Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1)])
+		qa[Mesh.ARRAY_INDEX] = PackedInt32Array([0, 1, 2, 0, 2, 3])
+		var qm := ArrayMesh.new()
+		qm.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, qa)
+		qm.surface_set_material(0, lod_material)
+		lod_instance = MeshInstance3D.new()
+		lod_instance.name = "rotor_lod"
+		lod_instance.mesh = qm
+		lod_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		lod_instance.visibility_range_begin = 0.0 if force == "1" else LOD_DIST
+		lod_instance.visibility_range_begin_margin = 0.0 if force == "1" else LOD_MARGIN
+		if force == "1":
+			mesh_instance.visible = false
+		else:
+			mesh_instance.visibility_range_end = LOD_DIST
+			mesh_instance.visibility_range_end_margin = LOD_MARGIN
+		mesh_instance.get_parent().add_child(lod_instance)
+
+	## coverage of the flat (up / down facing) triangles seen from the axle: 255 where there is metal, 0 in holes and slots
+	static func _bake_mask(P: PackedVector3Array, S: float) -> Texture2D:
+		var N := MASK_N
+		var data := PackedByteArray()
+		data.resize(N * N)
+		var k := float(N) * 0.5 / S
+		for i in range(0, P.size() - 2, 3):
+			var a := P[i]; var b := P[i + 1]; var c := P[i + 2]
+			if absf((b - a).cross(c - a).normalized().z) < 0.7:
+				continue
+			var ax := a.x * k + N * 0.5; var ay := N * 0.5 - a.y * k
+			var bx := b.x * k + N * 0.5; var by := N * 0.5 - b.y * k
+			var cx := c.x * k + N * 0.5; var cy := N * 0.5 - c.y * k
+			var d := (by - cy) * (ax - cx) + (cx - bx) * (ay - cy)
+			if absf(d) < 1e-9:
+				continue
+			var x0 := maxi(int(floorf(minf(ax, minf(bx, cx)))), 0)
+			var x1 := mini(int(ceilf(maxf(ax, maxf(bx, cx)))), N - 1)
+			var y0 := maxi(int(floorf(minf(ay, minf(by, cy)))), 0)
+			var y1 := mini(int(ceilf(maxf(ay, maxf(by, cy)))), N - 1)
+			for y in range(y0, y1 + 1):
+				var py := y + 0.5
+				for x in range(x0, x1 + 1):
+					var px := x + 0.5
+					var l1 := ((by - cy) * (px - cx) + (cx - bx) * (py - cy)) / d
+					var l2 := ((cy - ay) * (px - cx) + (ax - cx) * (py - cy)) / d
+					if l1 >= -0.002 and l2 >= -0.002 and l1 + l2 <= 1.002:
+						data[y * N + x] = 255
+		var img := Image.create_from_data(N, N, false, Image.FORMAT_L8, data)
+		img.generate_mipmaps()
+		return ImageTexture.create_from_image(img)
+
 	## heat: 0 cold .. 1 glowing hot
 	func set_heat(k: float) -> void:
 		heat = clampf(k, 0.0, 1.0)
 		material.set_shader_parameter("heat", heat)
+		if lod_material: lod_material.set_shader_parameter("heat", heat)
