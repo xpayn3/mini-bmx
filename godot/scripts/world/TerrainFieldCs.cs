@@ -1686,6 +1686,10 @@ public partial class TerrainFieldCs : RefCounted
 	/// BikeRig.tyre_depth's sample loop in one call: how deep the tyre (centre c, axle ax, d0 = down in the wheel's
 	/// plane, side = ax x d0, radius R, casing half width hw) sits inside max(height, mesh_height). n points round the
 	/// lower half (full = all the way round), three across the casing each. Same points / order as the GDScript loop.
+	/// the ruts (world/ruts.gd): the drawn tyres sit in them too (null = none)
+	private RutFieldCs _ruts;
+	public void set_ruts(RutFieldCs r) { _ruts = r; }
+
 	public double tyre_worst(Vector3 c, Vector3 ax, Vector3 d0, Vector3 side, double R, double hw, int n, bool full)
 	{
 		double worst = double.NegativeInfinity;
@@ -1700,6 +1704,7 @@ public partial class TerrainFieldCs : RefCounted
 				double r = R - hw + Math.Sqrt(hw * hw - off * off);
 				double px = c.X + dx * r + ax.X * off, py = c.Y + dy * r + ax.Y * off, pz = c.Z + dz * r + ax.Z * off;
 				double h = Math.Max(height(px, pz), mesh_height(px, pz));
+				if (_ruts != null) h -= _ruts.Depth((float)px, (float)pz);
 				if (h - py > worst) worst = h - py;
 			}
 		}

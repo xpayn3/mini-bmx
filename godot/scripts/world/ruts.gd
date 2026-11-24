@@ -76,12 +76,20 @@ func _process(dt: float) -> void:
 	_tex.update(_img)
 	RenderingServer.global_shader_parameter_set("rut_win", Vector4(corner.x * tile_m, corner.y * tile_m, tile_m * WT, 1.0))
 
-## the terrain's height queries read the field (inside its bounds only)
+## the terrain's height queries read the field: only near the bike (READ_R; the camera, sheep, decorations... far off
+## never call it) and inside what was dug. The C# tyre fit gets the field once.
+const READ_R := 20.0
+var _fcs_set := false
 func _publish() -> void:
 	var t = game.terrain
 	if t == null: return
 	t.rut_field = field
-	t.rut_box = field.Bounds()
+	var b: Vector4 = field.Bounds()
+	var px: float = game.phys.x if game.phys else 0.0
+	var pz: float = game.phys.z if game.phys else 0.0
+	t.rut_box = Vector4(maxf(b.x, px - READ_R), maxf(b.y, pz - READ_R), minf(b.z, px + READ_R), minf(b.w, pz + READ_R))
+	if not _fcs_set and t.get("fcs") != null and t.fcs.has_method("set_ruts"):
+		t.fcs.set_ruts(field); _fcs_set = true
 
 ## each physics step, after the bike moved: both tyres dig the stretch they rolled
 func step(st) -> void:

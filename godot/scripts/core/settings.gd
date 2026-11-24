@@ -120,7 +120,8 @@ const DEFAULTS := {
 	"rumble_pedal": 1.0, "rumble_takeoff": 1.0, "rumble_land": 1.0,
 	"rumble_smash": 1.0, "rumble_crash": 1.0, "rumble_tumble": 1.0,
 	"wasted": true,          # crash: slow motion + "WASTED" screen
-	"ghost": true,           # your best run on this world rides with you (game/ghost_rider.gd)
+	"ghost": true,
+	"ruts": true,            # tyres dig ruts, deeper each pass, and the bike feels them (world/ruts.gd)           # your best run on this world rides with you (game/ghost_rider.gd)
 	"blood": true,           # crash: blood smears on the ground, torn-off limbs on very hard crashes
 	"steer_sens": 1.0,       # analog steering response (1 = linear)
 	"pad_expo": 1.8,         # gamepad steering curve: higher = gentler near the centre
