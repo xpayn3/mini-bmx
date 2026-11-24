@@ -137,6 +137,10 @@ var speed_k := 0.0           # 0..1 speed feel (FOV boost, edge blur)
 var photo := false           # photo mode (O, game/photo_mode.gd): time frozen, free camera, lens / light / look card
 var photo_mode: PhotoMode    # built on first use
 var _photo_last := 0
+## instant replay (I / pad L3 / pause > Replay, game/replay.gd): the last 60 s of what was drawn, played back
+## with its own cameras while the ride is frozen (time_scale 0, like photo mode)
+var replay: ReplayMode
+var replay_on := false
 var _landed := 0.0           # landing impact to feed the mud next step
 var _cloud_t := 0.0
 var susp = null
@@ -267,8 +271,9 @@ func _ready() -> void:
 	ragdoll = Ragdoll.new(terrain)
 	rider = load("res://scripts/rider/rider.gd").new()
 	rig.lean_g.add_child(rider)
-	rider.set_look(RiderPanels.load_look())
-	var pose: Dictionary = RiderPanels.load_pose(GameState.bike_id, bike_cfg.pose)
+	var vw: Dictionary = GameState.view   # (watching a saved replay: its rider)
+	rider.set_look(vw.look if vw.get("look") is Dictionary and not (vw.look as Dictionary).is_empty() else RiderPanels.load_look())
+	var pose: Dictionary = vw.pose.duplicate(true) if vw.get("pose") is Dictionary and not (vw.pose as Dictionary).is_empty() else RiderPanels.load_pose(GameState.bike_id, bike_cfg.pose)
 	for kv in Env.s("BMX_POSE").split(",", false):   # tests: "bumpAbsorb=2,kneeOpen=0" (not saved)
 		var pr := kv.split("=")
 		if pr.size() == 2 and pose.has(pr[0]): pose[pr[0]] = float(pr[1])
@@ -287,6 +292,8 @@ func _ready() -> void:
 	hud = load("res://scripts/ui/hud.gd").new()
 	hud.game = self
 	add_child(hud)
+	replay = ReplayMode.new(self)
+	add_child(replay)
 	grime = Grime.new()
 	add_child(grime)
 	grime.watch(rig)
@@ -1756,6 +1763,8 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 
 # ---------------------------------------------------------------- ride control
 func respawn(new_world: bool) -> void:
+	exit_replay()
+	if replay: replay.clear()
 	_end_crash()
 	_reset_draw_state()
 	if hud: hud.on_respawn()
@@ -1982,6 +1991,10 @@ func _snap_prev() -> void:
 
 func _unhandled_input(e: InputEvent) -> void:
 	if get_tree().paused or not input_enabled: return
+	if replay_on: return   # (the replay takes its own keys in its _input)
+	if e.is_action_pressed("replay") and not e.is_echo() and not photo:
+		if not open_replay(): flash("NO REPLAY YET")
+		return
 	if e.is_action_pressed("photo") and not e.is_echo(): toggle_photo(); return
 	if e.is_action_pressed("save_log") and not e.is_echo():   # the last 60 s of physics + inputs to a CSV
 		var lp := CrashLog.report("manual", "saved with the save-log button")   # report + ride log + recent log lines
@@ -2520,6 +2533,7 @@ func _ragdoll_roots() -> Dictionary:
 	return out
 
 func toggle_photo() -> void:
+	if replay_on: return
 	if not photo and (phys == null or (paper_map and paper_map.busy())): return
 	photo = not photo
 	Engine.time_scale = 0.0 if photo else 1.0
@@ -2541,9 +2555,35 @@ func toggle_photo() -> void:
 
 ## leave photo mode if it is on (pausing, the menu or a new ride must never inherit a frozen world)
 func exit_photo() -> void:
+	exit_replay()
 	if photo:
 		toggle_photo()
 	exit_map()
+
+## open the instant replay (needs ~1 s recorded; not over photo mode / the map)
+func open_replay() -> bool:
+	if replay_on or photo or replay == null or not replay.ready_to_play() or (paper_map and paper_map.busy()): return false
+	replay_on = true
+	Engine.time_scale = 0.0
+	AudioServer.playback_speed_scale = 1.0
+	if rumble: rumble.stop()
+	hud.visible = false
+	_photo_last = Time.get_ticks_usec()
+	replay.open()
+	return true
+
+func exit_replay() -> void:
+	if not replay_on: return
+	replay.close()
+	replay_on = false
+	Engine.time_scale = 1.0
+	if replay.viewer:   # a saved replay: back to the title menu (main rebuilds the player's own world)
+		get_parent()._replay_view_done.call_deferred()
+		return
+	Engine.time_scale = 1.0   # (in a crash's slow motion WASTED sets its own speed again next frame)
+	hud.visible = input_enabled and not photo
+	_snap_prev()
+	swallow_held()   # (the A / Space that left it is no sprint / hop)
 
 ## the paper trail map (M, ui/paper_map.gd): the ride freezes, a folded map comes up and unfolds. Built on
 ## first use. It takes all input while it's up; M / Esc / bail fold it away again.
@@ -2702,6 +2742,13 @@ func _lerp_k(k: String) -> float:
 	return lerpf(_prev[k], phys.get(k), _lerp_a)
 
 func _process(dt: float) -> void:
+	if replay_on:
+		var rnow := Time.get_ticks_usec()
+		var rrdt := minf((rnow - _photo_last) / 1e6, 0.1)
+		_photo_last = rnow
+		replay.update(rrdt)
+		if audio: audio.update_audio(rrdt)   # (frozen: the tyres / wind fade out, as in photo mode)
+		return
 	if photo:
 		# time stands still; the camera moves on real time
 		var now := Time.get_ticks_usec()
@@ -3008,6 +3055,8 @@ func _process(dt: float) -> void:
 					row += ",%.5f,%.5f,%.5f" % [jv.x, jv.y, jv.z]
 				_jdump.append(row)
 	_pk = _perf("rider_pose", _pk)
+	if replay and input_enabled and not scenic and not title_world: replay.capture(t)   # (real rides only, not the title backdrop)
+	_pk = _perf("replay_rec", _pk)
 	var vd: float = Settings.get_v("view_distance")
 	# which chunks' trees cast shadows depends on where the shadow map is and where the sun is (Terrain._update_far_shadows)
 	var scam := get_viewport().get_camera_3d()

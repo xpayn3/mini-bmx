@@ -44,6 +44,9 @@ var goggle_lens := "neutral"   # goggle lens = the ride's colour grade (scripts/
 var _lens_saved := "neutral"   # what save.cfg holds (a BMX_LENS test override is never written)
 var bmx_tyre := ""   # tyre model on the BMX ("" = the stock wheels); the DH frames take theirs from the garage build
 var seed := 0
+## a saved replay being watched (ReplayMode header: seed, bike, build, look, pose): the ride is built from it, not
+## from the garage / rider files. Empty = a normal ride
+var view := {}
 var level := ""   # "" = the procedural world; "playground" = the test playground (LEVELS menu, --level=, BMX_LEVEL). Not saved
 var records := {"longest": 0.0, "highest": 0.0, "air": 0.0, "top_speed": 0.0, "jumps": 0, "distance": 0.0}
 
@@ -80,7 +83,7 @@ func bike_config() -> Dictionary:
 func bike_config_for(id: String) -> Dictionary:
 	var cfg: Dictionary = BIKES[id].duplicate(true)
 	if cfg.get("garage", false):
-		var b := BikeBuild.load_build(id)
+		var b: Dictionary = view.build if (not view.is_empty() and view.get("bike", "") == id and view.get("build") is Dictionary and not (view.build as Dictionary).is_empty()) else BikeBuild.load_build(id)
 		var mods := BikeBuild.ride_mods(b)
 		cfg.build = b
 		cfg.mods = mods

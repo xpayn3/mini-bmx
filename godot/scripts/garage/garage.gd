@@ -171,7 +171,11 @@ func _ready() -> void:
 ## rays, sharp glossy reflections). Leaving it puts the player's settings back (Settings.apply + the
 ## project's own defaults for the global qualities).
 func _showcase_quality(on: bool) -> void:
-	var vp := get_viewport()
+	showcase_quality(get_viewport(), on)
+
+## top render quality whatever the preset (the garage, the instant replay); off = back to the Settings.
+## heavy = false (the replay, out in the open world): no 8K shadow maps / 128-ray GI / ultra SSAO-SSIL, the rest
+static func showcase_quality(vp: Viewport, on: bool, heavy := true) -> void:
 	if vp == null: return
 	if not on:
 		Settings.apply()
@@ -180,7 +184,6 @@ func _showcase_quality(on: bool) -> void:
 		RenderingServer.environment_set_ssil_quality(ProjectSettings.get_setting("rendering/environment/ssil/quality", 2),
 			true, 0.5, 4, 50.0, 300.0)
 		RenderingServer.environment_set_sdfgi_ray_count(ProjectSettings.get_setting("rendering/global_illumination/sdfgi/probe_ray_count", 1))
-		RenderingServer.environment_set_ssr_roughness_quality(ProjectSettings.get_setting("rendering/environment/screen_space_reflection/roughness_quality", 1))
 		RenderingServer.positional_soft_shadow_filter_set_quality(ProjectSettings.get_setting("rendering/lights_and_shadows/positional_shadow/soft_shadow_filter_quality", 2))
 		return
 	vp.scaling_3d_scale = 1.0
@@ -190,6 +193,7 @@ func _showcase_quality(on: bool) -> void:
 	vp.use_taa = true
 	vp.mesh_lod_threshold = 0.0
 	vp.anisotropic_filtering_level = Viewport.ANISOTROPY_16X
+	if not heavy: return
 	vp.positional_shadow_atlas_size = 8192
 	RenderingServer.directional_shadow_atlas_set_size(8192, true)
 	RenderingServer.directional_soft_shadow_filter_set_quality(RenderingServer.SHADOW_QUALITY_SOFT_ULTRA)
@@ -197,7 +201,6 @@ func _showcase_quality(on: bool) -> void:
 	RenderingServer.environment_set_ssao_quality(RenderingServer.ENV_SSAO_QUALITY_ULTRA, false, 0.5, 2, 50.0, 300.0)
 	RenderingServer.environment_set_ssil_quality(RenderingServer.ENV_SSIL_QUALITY_ULTRA, false, 0.5, 4, 50.0, 300.0)
 	RenderingServer.environment_set_sdfgi_ray_count(RenderingServer.ENV_SDFGI_RAY_COUNT_128)
-	RenderingServer.environment_set_ssr_roughness_quality(RenderingServer.ENV_SSR_ROUGHNESS_QUALITY_HIGH)
 
 func _exit_tree() -> void:
 	_flush_pose()
