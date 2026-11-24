@@ -1301,6 +1301,18 @@ var tuck_out := 0.0  # this frame's tuck (0..1)
 var body_off := Vector2.ZERO   # in the air: the hips (x fwd, y up, bike frame) against take-off; Game moves the bike against it
 var _air_ref := Vector2.ZERO; var _air_ref_ok := false
 var sm_effort := 0.0
+const SPR_LAG := 0.5   # rad (~30 deg): standing, peak pedal force and the arms' pull come late in the stroke
+var _NO_SPR2 := Env.s("BMX_NO_SPR2") != ""   # test: none of the sprint pose additions (elbows, tilt, pull, knee lift, ankle)
+var _cad_acc := 0.0
+var _cad_t := 0.0
+var _cad_prev := 0.0
+var _cad_s := 0.0      # smoothed cadence, rpm
+var _NO_BREATH := Env.s("BMX_NO_BREATH") != ""   # test: no breathing
+var _inhale := 0.0     # 0..1, the in-breath of a winded rider (lifts elbows + shoulders)
+var _winded := 0.0   # how out of breath, 0..1 (slow to recover)
+var _breath_ph := 0.0
+var _fat := 0.0       # sprint fatigue 0..1
+var _spr_arm := 0.0   # sprint arm pose 0..1 (quick on, slow off)
 var sm_pitch0 := 0.0
 var sm_pitch_slow := 0.0   # the bike's pitch averaged over ~0.35 s: what the body swings with
 var bump_pitch := 0.0      # this frame's quick pitch kick the body holds against (tests)
@@ -1424,8 +1436,33 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var effort: float = spr * pedal * BikePhysics.slowness(v) * float(Tune.v.get("sprintEffort", 1.0))   # the slower, the harder they fight
 	sm_effort += (effort - sm_effort) * (1.0 - exp(-6.0 * minf(dt, 0.1)))
 	var eff: float = sm_effort
-	var sway: float = sin(crank) * pedal * sty.sway * (1 + 0.6 * spr + 0.45 * eff) * hi_fade   # a real sprinter's hips stay fairly still: the bike rocks under them
+	# cadence (smoothed rpm from the crank's own turn) and the sprint's arm pose, which comes on quickly but lets go slowly
+	# (measured over windows of >= 0.15 s: the crank moves in physics steps, so per drawn frame its turn is 0 or double and the
+	# rpm flickered, which shook everything that follows cadence)
+	if dt > 0.0:
+		_cad_acc += absf(wrapf(crank - _cad_prev, -PI, PI))
+		_cad_t += minf(dt, 0.1)
+		if _cad_t >= 0.15:
+			_cad_s += (_cad_acc / _cad_t * 9.549 - _cad_s) * 0.35
+			_cad_acc = 0.0; _cad_t = 0.0
+	_cad_prev = crank
+	var cad_k: float = smoothstep(70.0, 130.0, _cad_s) * clampf(spr + sm_effort, 0.0, 1.0)   # 0 grinding .. 1 spinning flat out
+	var arm_tgt: float = clampf(maxf(spr * pedal, sm_effort), 0.0, 1.0) * (0.0 if _NO_SPR2 else 1.0)
+	_spr_arm += (arm_tgt - _spr_arm) * (1.0 - exp(-(7.0 if arm_tgt > _spr_arm else 1.3) * minf(dt, 0.1)))   # ~0.8 s to relax
+	# fatigue: as the sprint's stamina runs out the form goes - head and chest sink toward the bars, the elbows narrow,
+	# and the bike rocks wilder (a tired rider hauls harder on the bars). Slow in, slower out.
+	var fat_tgt: float = pow(1.0 - clampf(_num(p, "stamina", 1.0), 0.0, 1.0), 1.5) * _spr_arm
+	_fat += (fat_tgt - _fat) * (1.0 - exp(-(2.0 if fat_tgt > _fat else 0.6) * minf(dt, 0.1)))
+	var fat: float = _fat
+	# sprint rock: big when grinding a heavy gear (Stone & Hull: bar pull / bike lean fall as cadence rises), calmer when spinning
+	var sway: float = sin(crank) * pedal * sty.sway * (1 + 0.9 * spr + 0.8 * eff) * lerpf(1.0, 0.55, cad_k) * hi_fade  # a real sprinter's hips stay fairly still: the bike rocks under them
 	# (Body bob: how far the body rises and drops with each pedal stroke)
+	# sprint hip rock: out of the saddle the hips swing over the pushing foot every stroke (~3-4 cm each way grinding, less spinning);
+	# not faded with speed like the idle sway, a sprint at 40 km/h still rocks
+	var hip_rock: float = sin(crank) * pedal * _spr_arm * float(sty.sway) * 0.04 * lerpf(1.0, 0.5, cad_k)
+	# sprint hip tilt: out of the saddle the pelvis dips to the side of the foot that is pushing (about 7 deg grinding, half that spinning);
+	# the shoulders stay level, so the spine takes the difference. Flip the sign if it dips the wrong side.
+	var hip_tilt: float = sin(crank - SPR_LAG) * pedal * _spr_arm * float(sty.sway) * 0.12 * lerpf(1.0, 0.5, cad_k) * (1.0 + 0.6 * fat)
 	var bob: float = sin(crank * 2) * pedal * sty.sway * float(sty.get("bodyBob", 1.0)) * (1 + 0.4 * spr + 0.35 * eff) * lerpf(0.4, 1.0, hi_fade)
 	# (the idle balance wobble is gone once the rider commits to a sprint: no random drifting)
 	var wig: float = clampf(1 - absf(v) / 3, 0, 1) * sty.sway * float(sty.slowWobble) * (1.0 - 0.9 * clampf(eff * 1.5, 0.0, 1.0))
@@ -1488,7 +1525,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var pelvis := Vector3(
 		-0.16 - 0.07 * air * float(sty.airCrouch) + 0.06 * pedal * sty.standPedal - float(sty.standBack) * stand - comp * 0.25,
 		0.80 - comp + (float(sty.standHeight) * stand + 0.05 * spr) * sty.standPedal + 0.035 * bob + 0.14 * aero_a - 0.07 * aero_g,   # (forward: in the air legs extend; on the ground knees bend into the tuck)
-		sway * sty.hipSway + shift * 0.3 + sin(t * 2.1) * 0.02 * wig) + fit
+		sway * sty.hipSway + hip_rock + shift * 0.3 + sin(t * 2.1) * 0.02 * wig) + fit
 	pelvis.x += sty.hipX * (1 - 0.5 * pedal) + 0.10 * aero_a - 0.05 * aero_g - 0.03 * eff   # sprint start: hips stay back over the saddle nose, the chest goes forward instead; forward over the cranks (air stick: hips forward; ground tuck: a touch back)
 	pelvis.y += 0.02 * eff                                               # up tall to stamp down
 	pelvis.y += sty.hipY * (1 - 0.6 * pedal)
@@ -1530,7 +1567,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 
 	# chest
 	# (pedalling out of the saddle the chest stays forward over the bars)
-	var ang: float = 0.52 - 0.2 * clampf(-bstick, 0.0, 1.0) - float(sty.pedalChest) * pedal + 0.12 * spr + 0.3 * eff + 0.15 * (comp / 0.3) + 0.08 * air + sty.lean * (1 - 0.5 * pedal) + 0.32 * aero_a + 0.6 * aero_g
+	var ang: float = 0.52 - 0.2 * clampf(-bstick, 0.0, 1.0) - float(sty.pedalChest) * pedal + 0.12 * spr + 0.3 * eff + 0.18 * fat +0.15 * (comp / 0.3) + 0.08 * air + sty.lean * (1 - 0.5 * pedal) + 0.32 * aero_a + 0.6 * aero_g
 	ang -= FLIP_LEAN * clampf(_num(p, "flipArch"), 0.0, 1.0)   # (a back flip's arch: he lies back, chest out)
 	ang += (0.3 if _OLD_JUMPPOSE else 0.12) * j_pre - 0.3 * j_ext + (0.06 if _OLD_JUMPPOSE else 0.38) * j_sq - (0.0 if _OLD_JUMPPOSE else 0.35) * sm_popfx * air + (0.12 if old_lp else -0.22) * sm_popfx * air + 0.28 * j_tuck + 0.42 * j_fold - 0.18 * sm_reach
 	# spinning in the air: tall and compact over the bike (chest up, knees in), the head and shoulders lead
@@ -1541,11 +1578,33 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	ang = lerpf(ang, 0.22, 0.8 * relax)
 	var tall := clampf(_num(p, "tall"), 0.0, 1.0)   # title screen: sat right up, looking out at the horizon
 	ang = lerpf(ang, 0.0, tall)
+	# breathing: the torso tips a hair about the hips, so the chest rises and falls WITHOUT the torso changing length (lifting the
+	# chest straight up stretched and squashed the whole upper body). Quiet and slow at rest (~15 a minute, ~10 mm at the chest),
+	# fast and deeper when winded (~55 a minute, ~20 mm); ~8 s to settle after a sprint. How winded = the bike computer's heart
+	# rate (72 at rest .. ~175 flat out; builds and recovers slowly by itself), or the sprint stamina running out. Flat out the
+	# breaths lock part way to the pedalling (one per whole number of crank turns), which riders tend to do at high effort
+	# ("locomotor-respiratory coupling"; from memory, not in the research library). None in the air.
+	var wind_tgt: float = clampf(maxf(maxf((_num(p, "hr", 72.0) - 80.0) / 95.0, 1.0 - _num(p, "stamina", 1.0)), 0.6 * _spr_arm), 0.0, 1.0)
+	_winded += (wind_tgt - _winded) * (1.0 - exp(-(1.5 if wind_tgt > _winded else 0.08) * minf(dt, 0.1)))
+	var br_hz: float = lerpf(0.25, 0.9, _winded)
+	var cad_hz: float = _cad_s / 60.0
+	if _winded > 0.45 and cad_hz > 0.8:
+		var n: float = maxf(1.0, roundf(cad_hz / br_hz))   # crank turns per breath nearest to the natural rate
+		br_hz = lerpf(br_hz, cad_hz / n, 0.5 * smoothstep(0.45, 0.8, _winded))
+	_breath_ph = fposmod(_breath_ph + dt * TAU * br_hz, TAU)
+	# (stopped after a hard effort, foot down: he stands there heaving - deeper breaths, shown best when still - and settles slowly)
+	# (only when stopped or nearly: gone by ~14 km/h, so nothing breathes mid-ride)
+	var still: float = 1.0 - smoothstep(1.0, 4.0, absf(v))
+	var heave: float = 1.0 + 1.2 * _winded * (1.0 - clampf(absf(v) / 4.0, 0.0, 1.0))
+	# the inhale of a deep breath (only when winded) also lifts the elbows and shoulders a little, used by the arms below
+	_inhale = maxf(0.0, sin(_breath_ph)) * smoothstep(0.25, 0.8, _winded) * still * (1.0 - air) * (0.0 if _NO_BREATH else 1.0)
+	# (only the chest tips: `ang` itself also turns the pelvis, which made the hips rock back and forth with every breath)
+	var br_ang: float = -sin(_breath_ph) * lerpf(0.022, 0.045, _winded) * heave * still * (1.0 - air) * (0.0 if _NO_BREATH else 1.0)   # rad: less lean = chest up
 	var L: float = sty.torso
 	var chest := Vector3(
-		pelvis.x + sin(ang) * L + 0.03 * pedal * (0.5 + 0.5 * bob),
-		pelvis.y + cos(ang) * L,
-		pelvis.z + shift * 0.3 - sway * sty.hipSway + sin(t * 1.7 + 1.0) * 0.02 * wig)
+		pelvis.x + sin(ang + br_ang) * L + 0.03 * pedal * (0.5 + 0.5 * bob),
+		pelvis.y + cos(ang + br_ang) * L,
+		pelvis.z + shift * 0.3 - sway * sty.hipSway - 0.7 * hip_rock + sin(t * 1.7 + 1.0) * 0.02 * wig)   # (shoulders stay steadier than the hips)
 
 	pelvis.z += sty.hipZ
 	chest += Vector3(sty.chestFwd, sty.chestUp, sty.chestSide)
@@ -2054,7 +2113,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 			tw_air *= 0.7
 			tw = Basis(tw_axis, tw_base + tw_air)
 	# pelvis: turn (yaw about up), roll (one hip drops, about forward), tilt (about the hip line)
-	var pel_b := Basis(Vector3.UP, float(sty.pelvisYaw) + clampf(sm_turn * 0.07 * float(sty.turnHips), -0.4, 0.4) + 0.3 * tab - 0.4 * awhip) * Basis(Vector3.RIGHT, float(sty.pelvisRoll) - clampf(sm_turn * 0.04 * float(sty.turnHips), -0.25, 0.25))
+	var pel_b := Basis(Vector3.UP, float(sty.pelvisYaw) + clampf(sm_turn * 0.07 * float(sty.turnHips), -0.4, 0.4) + 0.3 * tab - 0.4 * awhip) * Basis(Vector3.RIGHT, float(sty.pelvisRoll) - clampf(sm_turn * 0.04 * float(sty.turnHips), -0.25, 0.25) + hip_tilt)
 	# (a straight back on a jump face / popped, video 2: the pelvis turns with the torso as it really stands, not 30 % of
 	# the intended lean - the lower back bowed where the two met)
 	var t_act: float = atan2(chest.x - pelvis.x, maxf(0.05, chest.y - pelvis.y))
@@ -2124,7 +2183,9 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	pedal_top = clampf(_num(p, "pedalTop", 0.017), 0.0, 0.05)
 	var ank_k: float = clampf(float(sty.get("ankling", 1.0)), 0.0, 2.5) * (0.0 if standing else 1.0)
 	var heels: float = clampf(float(sty.get("heelsDown", 1.0)), 0.0, 2.5) * (0.0 if standing else 1.0)
-	var ank_swing: float = ANKLE_SWING * pedal * (1.0 - 0.7 * air) * ank_k
+	# (sprinting: more ankle swing, the feet work the whole stroke and pull up through recovery - Gregor 2000: competitive riders
+	# keep pulling up on the pedal for sprints and climbs)
+	var ank_swing: float = ANKLE_SWING * pedal * (1.0 - 0.7 * air) * ank_k * (1.0 + 0.5 * _spr_arm)
 	var ank_bias: float = -0.07 * spr * pedal * ank_k \
 		+ heels * (0.12 * stand * (1.0 - pedal) * (1.0 - air) + 0.15 * j_fold + 0.25 * clampf(comp, 0.0, 0.3) + 0.06 * sm_reach)
 	for i in 2:
@@ -2150,6 +2211,9 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		# turning: the inside knee opens out toward the turn, the outside leg drives down on its pedal
 		var inside: float = clampf(-side * knee_lean * 1.6, 0.0, 0.9) * float(sty.kneeOpen) * (1.0 - air)
 		var pole_l: Vector3 = (poles_leg[i] + Vector3(0, 0, side * (inside + _pk_ko))).normalized()
+		# sprint knee lift: the foot pulling up through the top of the stroke brings that knee up and forward
+		if _spr_arm > 0.01 and not standing and air < 0.3:
+			pole_l = (pole_l + Vector3(0.25, 0.7, 0.0) * (_spr_arm * pow(clampf(sin(phi), 0.0, 1.0), 2.0) * lerpf(1.0, 0.6, cad_k))).normalized()
 		var ik := limb_ik(hp, ankle, L_THIGH, L_SHIN, pole_l, Vector3.UP, KNEE_MIN, KNEE_MAX, _bd_prev[i], max_turn)
 		_bd_prev[i] = ik[2]
 		var ik_raw: Vector3 = ik[0]
@@ -2176,12 +2240,29 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		# arm
 		var sh_off := Vector3(-0.03 + sty.shoulderFwd, -0.04 + sty.shoulderUp, side * sty.shoulders)
 		var shp: Vector3 = chest + tw * sh_off
+		# sprint arm pull (Stone & Hull 1993: the arms pull on the bars during the leg's power stroke, push on the upstroke,
+		# and the peak comes late in the stroke): the shoulder on the pushing side is drawn forward and down toward the
+		# grip, so that arm bends and the bar is hauled in; the other arm eases. Flip `side` if the wrong arm pulls.
+		if _spr_arm > 0.01 and not standing and air < 0.3:
+			var pull: float = pow(clampf(sin(crank - SPR_LAG) * side, 0.0, 1.0), 2.0) * _spr_arm * float(sty.sway) * lerpf(1.0, 0.6, cad_k)
+			shp += Vector3(0.035 * pull, -0.02 * pull, 0.0)
 		if not _OLD_AIRBODY and air > 0.0: shp = shp.lerp(shoulder_at(hip, chest, tw, sh_off), air)   # (in the air: on the torso's frame)
 		shoulder_sph[i].position = shp
 		# hand nearly on the elbow's pole line (deep turns, arms up in the air): elbow out and down
 		var pole_a: Vector3 = poles_arm[i]
 		if aero > 0.01: pole_a = pole_a.lerp(Vector3(-0.15, 0.15, side * 1.0).normalized(), 0.7 * aero).normalized()   # elbows up and out
 		if back_k > 0.01: pole_a = pole_a.lerp(Vector3(-0.35, -0.85, side * 0.3).normalized(), 0.5 * back_k).normalized()
+		# sprinting: elbows go wide and up, pulling the bars against each pedal stroke (a sprinter's leverage;
+		# Gregor 2000 / Millet 2002: standing sprints are 25-30 % more powerful, the arms pull to counter the push)
+		# (eased in and out; spinning fast the elbows tuck in a little and drop a touch: a quicker, tighter sprint pose)
+		if _spr_arm > 0.01 and not standing and air < 0.3:
+			var wide := Vector3(-0.1, 0.05, side * 1.0).normalized().lerp(Vector3(-0.25, -0.15, side * 0.7).normalized(), 0.8 * cad_k).normalized()
+			pole_a = pole_a.lerp(wide, 0.85 * _spr_arm * (1.0 - 0.4 * fat)).normalized()
+		if _inhale > 0.01 and not standing:
+			# a deep breath is mostly rib flare: the ribcage widens, so the shoulders and elbows spread out a touch (not up)
+			pole_a = pole_a.lerp(Vector3(pole_a.x, pole_a.y * 0.5, side * 1.1).normalized(), 0.12 * _inhale).normalized()
+			shp.z += side * 0.008 * _inhale
+			shp.y += 0.002 * _inhale
 		if standing: pole_a = Vector3(-1.0, 0.0, side * 0.25).normalized()   # arms hanging: elbows point back
 		if _pk_eo != 0.0: pole_a = (pole_a + Vector3(0, 0, side * _pk_eo)).normalized()   # (Pose Lab: elbows out / in)
 		var ika := limb_ik(shp, hand, L_UARM, L_FARM, pole_a, Vector3(0, -0.5, side), ELBOW_MIN, ELBOW_MAX, _bd_prev[2 + i], max_turn)

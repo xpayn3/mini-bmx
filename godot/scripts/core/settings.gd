@@ -78,6 +78,13 @@ const DEFAULTS := {
 	"cam_ahead": 1.0,        # × how far ahead the Trail camera looks
 	"cam_follow": 1.0,       # × how quickly the camera turns / catches up after the rider
 	"cam_speed_fov": 1.0,    # × the wider view at speed
+	"sfx_blur": 1.0,         # × the speed blur at the screen sides
+	"sfx_lines": 0.07,       # × the speed lines (user: white lines were distracting, kept very faint)
+	"sfx_fringe": 1.0,       # × the colour fringing at the corners
+	"sfx_vignette": 1.0,     # × the frame closing in
+	"sfx_pull": 1.0,         # × how far the camera pulls in at speed
+	"pacenotes": true,       # simple turn warning card for the next bend (arrow, distance, BRAKE when too fast)
+	"sfx_start": 18.0,      # km/h where the speed effects begin (full ~44 km/h above it)
 	"cam_recenter": true,    # the camera swings back behind the rider a moment after you turn it
 	"cam_keep": true,        # never let the rider leave the frame
 	"cam_fade": true,        # trees / rocks between the camera and the rider dissolve
