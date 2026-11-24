@@ -321,12 +321,7 @@ func _show_menu() -> void:
 	vb.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vb.add_theme_constant_override("separation", Tokens.S3)
 	outer.add_child(vb)
-	# title: the game's logo, the same one the TV shows (ui/game_logo.gd)
-	var head := VBoxContainer.new()
-	var logo := GameLogo.new()
-	logo.custom_minimum_size = Vector2(0, 130)
-	head.add_child(logo)
-	vb.add_child(head)
+	# (no logo on the title menu any more: just the lines)
 	menu_col = vb
 	# QUIT, top right of the screen (asks first)
 	menu_quit = UITheme.make_button("QUIT", _confirm_quit, "secondary", Tokens.T_LG)
@@ -1747,7 +1742,7 @@ func _setup_next() -> void:
 func _menu_button(text: String, sub: String, cb: Callable, primary := false, centred := false) -> Button:
 	var b := UITheme.make_button("", cb, "menu")   # one look for every line: the focused one is yellow (console cursor)
 	# room above the name and below the second line (they used to touch the box's edges)
-	b.custom_minimum_size.y = (Tokens.H_HERO if primary else Tokens.H_SUB) + Tokens.S3
+	b.custom_minimum_size.y = Tokens.H_SUB + Tokens.S3   # every line the same height + type size: the focused one only turns yellow
 	var m := MarginContainer.new()
 	m.set_anchors_preset(Control.PRESET_FULL_RECT)
 	m.add_theme_constant_override("margin_left", Tokens.S4)    # same inset as the seed field's text below
@@ -1759,7 +1754,7 @@ func _menu_button(text: String, sub: String, cb: Callable, primary := false, cen
 	col.alignment = BoxContainer.ALIGNMENT_CENTER
 	col.add_theme_constant_override("separation", -Tokens.S3)   # name and second line sit close (the display font has tall line spacing)
 	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	col.add_child(UITheme.display(text, Tokens.T_3XL if primary else Tokens.T_2XL + Tokens.S1))
+	col.add_child(UITheme.display(text, Tokens.T_2XL + Tokens.S1))
 	if sub != "":
 		col.add_child(UITheme.text(sub, Tokens.INK if primary else Tokens.INK_SOFT, Tokens.T_SM))
 	if centred:
