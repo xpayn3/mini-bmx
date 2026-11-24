@@ -179,11 +179,11 @@ func _environment() -> Environment:
 	e.ssao_enabled = true
 	e.ssao_radius = 0.6
 	e.ssao_intensity = 1.6
-	e.ssil_enabled = true
-	e.ssil_radius = 2.0
-	e.ssil_intensity = 0.7
-	e.ssr_enabled = true
-	e.ssr_max_steps = 128
+	# SSIL and SSR are stochastic screen-space effects: before the HQ still has built up they shimmer and
+	# speckle, and they leave pale halos round the thin tubes. The reflection probe + softboxes + SDFGI
+	# already give the bounce and the gloss, so the studio stays crisp and steady without them.
+	e.ssil_enabled = false
+	e.ssr_enabled = Env.s("BMX_STUDIO_SSR") != ""
 	e.sdfgi_enabled = true
 	e.sdfgi_use_occlusion = true
 	e.sdfgi_min_cell_size = 0.1
