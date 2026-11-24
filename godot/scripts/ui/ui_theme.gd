@@ -10,56 +10,76 @@ const TEXT := Tokens.ON_SCENE
 const MUTED := Tokens.ON_SCENE_SOFT
 
 static var _theme: Theme
+
+## ALL type is embedded (assets/fonts/, SIL OFL, subset to Latin + the symbols the UI draws, ~190 KB together): every
+## player sees the same letters whatever is installed, and nothing is looked up in the OS (no SystemFont anywhere,
+## `allow_system_fallback` off on every one). Barlow = UI, Barlow Condensed = display, Anton = the WASTED face,
+## Caveat = handwriting, Symbols = arrows / stars / check marks (Noto Sans Symbols), Doto = the bike computer LCD.
+const FONT_DIR := "res://assets/fonts/"
+static var _files := {}
+
+## one shared FontFile per file, system fallback off
+static func file(name: String) -> FontFile:
+	var f: FontFile = _files.get(name)
+	if f == null:
+		f = load(FONT_DIR + name + ".ttf")
+		f.allow_system_fallback = false
+		_files[name] = f
+	return f
+
+static func symbols() -> Font:
+	return file("Symbols")
+
 static var _font: Font
 static var _font_black: Font
 
+## the UI text face: Barlow Bold, or Black
 static func font(black := false) -> Font:
 	if _font == null:
-		var f := SystemFont.new()
-		f.font_names = PackedStringArray(["Segoe UI", "Helvetica Neue", "Arial", "Noto Sans"])
-		f.font_weight = 700
-		f.antialiasing = TextServer.FONT_ANTIALIASING_GRAY
-		_font = f
-		var b := SystemFont.new()
-		b.font_names = f.font_names
-		b.font_weight = 900
-		_font_black = b
+		_font = _with_symbols("Barlow-Bold")
+		_font_black = _with_symbols("Barlow-Black")
 	return _font_black if black else _font
+
+static func _with_symbols(name: String) -> Font:
+	var f: FontFile = file(name).duplicate()
+	f.allow_system_fallback = false
+	f.fallbacks = [symbols()]
+	return f
 
 static var _display := {}
 
-## sporty display type for titles / big menu buttons: Bahnschrift (DIN-style, ships with Windows 10/11),
-## condensed + bold; `slant` leans it forward like a race number. Falls back to the UI font elsewhere.
+## sporty condensed display type for titles / big menu buttons (Barlow Condensed, Bold under weight 800, else Black);
+## `slant` leans it forward like a race number
 static func display_font(weight := 700, slant := 0.0) -> Font:
 	var key := "%d_%.2f" % [weight, slant]
 	if _display.has(key): return _display[key]
-	var f := SystemFont.new()
-	f.font_names = PackedStringArray(["Bahnschrift", "DIN Alternate", "Roboto Condensed", "Arial Narrow", "Segoe UI"])
-	f.font_weight = weight
-	f.font_stretch = 75
-	f.antialiasing = TextServer.FONT_ANTIALIASING_GRAY
-	f.fallbacks = [font(weight >= 800)]
-	var out: Font = f
+	var out: Font = _with_symbols("BarlowCondensed-Black" if weight >= 800 else "BarlowCondensed-Bold")
 	if slant != 0.0:
 		var v := FontVariation.new()
-		v.base_font = f
+		v.base_font = out
 		v.variation_transform = Transform2D(Vector2(1, 0), Vector2(-slant, 1), Vector2.ZERO)
 		out = v
 	_display[key] = out
 	return out
 
+static var _hand: Font
+
+## handwriting (the leaflet's ride tips): Caveat Bold
+static func hand_font() -> Font:
+	if _hand == null: _hand = _with_symbols("Caveat-Bold")
+	return _hand
+
 static var _punch := {}
 
-## the WASTED face (condensed black display type as MSDF, stays sharp scaled up huge): WASTED, the area banner,
+## the WASTED face (Anton, condensed black display type as MSDF, stays sharp scaled up huge): WASTED, the area banner,
 ## the achievement pops. One shared font per MSDF range: each glyph's distance field is made on the CPU the first
 ## time it is used (~2.5 ms a letter: a new message with a dozen new letters cost ~45 ms in one frame), so
 ## warm_punch_step() makes them one a frame from the start of a ride (all ~100 in ~0.26 s of CPU, done long before
 ## the first message shows).
-static func punch_font(pixel_range := 16) -> SystemFont:
+static func punch_font(pixel_range := 16) -> Font:
 	if _punch.has(pixel_range): return _punch[pixel_range]
-	var f := SystemFont.new()
-	f.font_names = PackedStringArray(["Haettenschweiler", "Impact", "Bahnschrift", "Arial Black"])
-	f.font_weight = 900
+	var f: FontFile = file("Anton-Regular").duplicate()
+	f.allow_system_fallback = false
 	f.multichannel_signed_distance_field = true
 	f.msdf_pixel_range = pixel_range
 	_punch[pixel_range] = f
@@ -264,12 +284,8 @@ const P_RED := Color("d22b25")
 static func print_theme() -> Theme:
 	if _print_t: return _print_t
 	var t: Theme = light_theme().duplicate(true)
-	var pf := SystemFont.new()
-	pf.font_names = PackedStringArray(["Bahnschrift", "Arial Narrow", "Segoe UI", "Arial"])
-	pf.font_weight = 600
-	var pfb := SystemFont.new()
-	pfb.font_names = pf.font_names
-	pfb.font_weight = 800
+	var pf: Font = display_font(Tokens.W_BOLD)
+	var pfb: Font = display_font(900)
 	t.default_font = pf
 	t.default_font_size = 19
 	var clear := Color(0, 0, 0, 0)
@@ -453,7 +469,7 @@ static func close_button(cb: Callable) -> Button:
 ## a small ↺ next to a slider: puts it back to its default (and fires value_changed like a drag would)
 static func reset_button(s: Range, default_value: float, muted := MUTED, hot := ACCENT) -> Button:
 	var b := Button.new()
-	b.text = "↺"
+	b.text = "×"
 	b.flat = true
 	b.focus_mode = Control.FOCUS_NONE
 	b.add_theme_font_size_override("font_size", 15)

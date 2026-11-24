@@ -27,6 +27,10 @@ const CREDITS := [
 	]],
 	["FONTS", [
 		["Doto", "The Doto Project Authors, github.com/oliverlalan/Doto", "SIL Open Font License 1.1"],
+		["Barlow + Barlow Condensed", "The Barlow Project Authors (Jeremy Tribby), github.com/jpt/barlow", "SIL Open Font License 1.1"],
+		["Anton", "The Anton Project Authors (Vernon Adams), fonts.google.com/specimen/Anton", "SIL Open Font License 1.1"],
+		["Caveat", "The Caveat Project Authors (Impallari Type), github.com/googlefonts/caveat", "SIL Open Font License 1.1"],
+		["Noto Sans Symbols + Symbols 2", "The Noto Project Authors, github.com/notofonts", "SIL Open Font License 1.1"],
 	]],
 	["SOFTWARE", [
 		["Godot Engine", "Juan Linietsky, Ariel Manzur and contributors, godotengine.org (see Engine)", "MIT"],
@@ -42,6 +46,10 @@ const LICENSE_FILES := [
 	["Steamworks.NET", "res://addons/steamworks/Steamworks.NET-LICENSE.txt"],
 	["Debug Draw 3D", "res://addons/debug_draw_3d/LICENSE"],
 	["Doto font (SIL OFL 1.1)", "res://assets/fonts/Doto-OFL.txt"],
+	["Barlow fonts (SIL OFL 1.1)", "res://assets/fonts/Barlow-OFL.txt"],
+	["Anton font (SIL OFL 1.1)", "res://assets/fonts/Anton-OFL.txt"],
+	["Caveat font (SIL OFL 1.1)", "res://assets/fonts/Caveat-OFL.txt"],
+	["Noto Symbols fonts (SIL OFL 1.1)", "res://assets/fonts/NotoSymbols-OFL.txt"],
 	["DH bike frame (CC BY 4.0)", "res://assets/dhframe_LICENSE.txt"],
 ]
 

@@ -261,14 +261,8 @@ class Ink extends Control:
 	var font_b: Font
 
 	func _init() -> void:
-		var f := SystemFont.new()
-		f.font_names = PackedStringArray(["Bahnschrift", "Arial Narrow", "Segoe UI", "Arial"])
-		f.font_weight = 500
-		font = f
-		var fb := SystemFont.new()
-		fb.font_names = f.font_names
-		fb.font_weight = 800
-		font_b = fb
+		font = UITheme.display_font(700)
+		font_b = UITheme.display_font(900)
 
 	func _dashes(line: PackedVector2Array, on: float, off: float, c: Color, w: float) -> void:
 		var acc := 0.0

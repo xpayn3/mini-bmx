@@ -17,11 +17,7 @@ static var _font: Font
 
 static func font() -> Font:
 	if _font == null:
-		var f := SystemFont.new()
-		f.font_names = PackedStringArray(["Bahnschrift", "Segoe UI", "Arial"])
-		f.font_weight = 700
-		f.antialiasing = TextServer.FONT_ANTIALIASING_GRAY
-		_font = f
+		_font = UITheme.display_font(700)
 	return _font
 
 

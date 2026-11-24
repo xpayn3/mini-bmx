@@ -40,7 +40,7 @@ func _build(label: String, rng: Array, val: float, def: float, fmt: Callable, en
 	_val_l.custom_minimum_size.x = 64
 	top.add_child(_val_l)
 	_reset = Button.new()
-	_reset.text = "↺"; _reset.flat = true; _reset.focus_mode = Control.FOCUS_NONE
+	_reset.text = "×"; _reset.flat = true; _reset.focus_mode = Control.FOCUS_NONE
 	_reset.tooltip_text = "Back to the preset"
 	_reset.add_theme_font_size_override("font_size", 13)
 	_reset.add_theme_color_override("font_color", UITheme.ACCENT)

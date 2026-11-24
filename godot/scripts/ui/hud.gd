@@ -2043,7 +2043,7 @@ class MsgView extends Control:
 	var t := 99.0
 	var low := false
 	var y_k := 0.0               # eased low / normal
-	var font: SystemFont
+	var font: Font
 
 	func _init() -> void:
 		font = UITheme.punch_font(48)   # range 48: room for the dark outline

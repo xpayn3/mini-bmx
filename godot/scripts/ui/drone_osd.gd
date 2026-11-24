@@ -62,4 +62,4 @@ func _draw() -> void:
 	var y := sz.y - m - 14
 	_txt(Vector2(200, y), "H %5.1f m   D %5.1f m   H.S %4.0f km/h   V.S %+4.1f m/s" % [cam_p.y - g, cam_p.distance_to(rider_p), hs, rig.dr_vel.y], 15)
 	var bc := Color(1, 1, 1, 0.9) if batt > 0.25 else Color(1, 0.35, 0.25)
-	_txt(Vector2(sz.x - m - 264, y), "GPS 18   ▮ %d%%" % int(batt * 100.0), 15, bc, HORIZONTAL_ALIGNMENT_RIGHT, 260)
+	_txt(Vector2(sz.x - m - 264, y), "GPS 18   | %d%%" % int(batt * 100.0), 15, bc, HORIZONTAL_ALIGNMENT_RIGHT, 260)

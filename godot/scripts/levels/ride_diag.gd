@@ -424,7 +424,7 @@ func _build_bar2() -> void:
 	bar2.add_child(t)
 	_pause_b = _small("PAUSE", func(): lab.toggle_pause(), "G: pause / resume the physics")
 	_small("STEP", func(): lab.step_once(), "N: one physics step (1/120 s)")
-	_slow_b = _small("1x", func(): lab.cycle_slow(), "T: slow motion 1 / ½ / ¼ / ⅒")
+	_slow_b = _small("1x", func(): lab.cycle_slow(), "T: slow motion 1 / ½ / ¼ / 1/10")
 	_rec_b = _small("REC", func(): lab.toggle_record(), "V: record the next run (inputs, path, graphs)")
 	_small("REPLAY", func(): lab.start_replay(), "J: replay the saved run with its ghost")
 	_air_b = _dev_btn(bar2, "AIR", func(): lab.toggle_air_hold(), "hold the bike in the air (gravity off): try the air controls / rotation as long as you like", true)
@@ -653,7 +653,7 @@ func _process(_dt: float) -> void:
 		_cam_pick.select(_cam_keys.find(game.cam.mode))   # (C changed it)
 	if _lab_l:
 		_pause_b.text = "RUN" if lab.paused else "PAUSE"
-		_slow_b.text = ({0.5: "½x", 0.25: "¼x", 0.1: "⅒x"}.get(lab.slow, "%.2fx" % lab.slow)) if lab.slow < 1.0 else "1x"
+		_slow_b.text = ({0.5: "½x", 0.25: "¼x", 0.1: "1/10x"}.get(lab.slow, "%.2fx" % lab.slow)) if lab.slow < 1.0 else "1x"
 		_rec_b.text = "STOP" if lab.recording else "REC"
 		_rec_b.modulate = Color(1, 0.45, 0.4) if lab.recording or lab._rec_armed else Color.WHITE
 		var nchk := 0
@@ -726,9 +726,7 @@ class DiagView extends Control:
 	const RED := Color(1.0, 0.3, 0.25)
 
 	func _init() -> void:
-		var f := SystemFont.new()
-		f.font_names = PackedStringArray(["Consolas", "Cascadia Mono", "Lucida Console", "Courier New"])
-		font = f
+		font = UITheme.font(false)
 
 	func _t(p: Vector2, s: String, c := TXT, fs := 12, align := HORIZONTAL_ALIGNMENT_LEFT, w := -1.0) -> void:
 		if align == HORIZONTAL_ALIGNMENT_RIGHT and w <= 0.0:   # right edge at p.x (draw_string only aligns inside a width)

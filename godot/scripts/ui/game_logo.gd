@@ -35,19 +35,21 @@ func _init() -> void:
 func _draw() -> void:
 	var f := UITheme.display_font(700)
 	var fs := int(size.y * (0.78 if show_tag else 0.95))
-	var asc := f.get_ascent(fs)
+	var cap := fs * 0.70   # Barlow Condensed's cap height (em): placed by it, not by the font's ascent
+	var area := size.y * (0.80 if show_tag else 1.0)   # the tag + rule take the bottom
+	var base := (area + cap) * 0.5
 	var gap := size.x / WORD.length()
 	if on_dark:
 		_mat.set_shader_parameter("top", Color(1.0, 0.82, 0.74)); _mat.set_shader_parameter("bottom", Color(0.85, 0.06, 0.04))
 	else:
 		_mat.set_shader_parameter("top", Tokens.INK); _mat.set_shader_parameter("bottom", Tokens.INK)   # on the light page: the page ink, not red
-	_mat.set_shader_parameter("y0", asc * 0.14)
-	_mat.set_shader_parameter("h", asc * 0.72)
+	_mat.set_shader_parameter("y0", base - cap)
+	_mat.set_shader_parameter("h", cap)
 	material = _mat
 	for i in WORD.length():
 		var ch := WORD[i]
 		var w := f.get_string_size(ch, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-		draw_string(f, Vector2(gap * (i + 0.5) - w * 0.5, asc * 0.86), ch, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color.WHITE)
+		draw_string(f, Vector2(gap * (i + 0.5) - w * 0.5, base), ch, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color.WHITE)
 	if show_tag:
 		var tf := UITheme.display_font(600)
 		var tfs := int(size.y * 0.15)

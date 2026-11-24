@@ -235,7 +235,7 @@ class WordView extends Control:
 	const FILL_W := 0.94      # of the screen width
 	const CAP_H := 0.62       # cap height, of the screen height
 	var zoom := 1.0
-	var font: SystemFont
+	var font: Font
 	func _init() -> void:
 		font = UITheme.punch_font()   # MSDF: stays sharp scaled up this much
 	func _draw() -> void:
