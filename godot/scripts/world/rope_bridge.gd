@@ -8,7 +8,7 @@ extends Node3D
 ## the rider). The node sits at the feature's start, turned so local x = along (u), z = across (w).
 
 const SIM := "res://scripts/world/RopeBridgeSim.cs"
-const N := 40              # segments per rope
+const N := 64              # segments per rope (the bridge is 72 m long)
 const DECK_HALF := 1.1     # the deck ropes, +- across (planks overhang them a little); 2026-11-23 doubled (was 0.55)
 const HAND_HALF := 1.6     # (was 0.8)
 const HAND_H := 1.25       # hand ropes above the deck ends
@@ -107,9 +107,7 @@ func build_step() -> bool:
 			_stage = 3
 		3:
 			_build_trees(_gy, _r)
-			_cl_ws = -TerrainField.CANYON_W + 2.0
-			_cl_gb = GeoBuf.new()
-			_stage = 4
+			_stage = 5   # no stone walls any more: the canyon is a wide grassy valley (_cliff_column kept, unused)
 		4:
 			if not _cliff_column():
 				_stage = 5

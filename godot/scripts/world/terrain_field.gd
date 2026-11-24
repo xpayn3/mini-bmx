@@ -778,6 +778,8 @@ func make_feat(x: float, z: float, dx: float, dz: float, type: String, b0: float
 	var prof: TrailFeatures.Profile = small[type] if (old_size and small.has(type)) else profiles[type]
 	f.x = x; f.z = z; f.dx = dx; f.dz = dz; f.len = prof.length; f.prof = prof; f.b0 = b0; f.b1 = b1; f.type = type
 	f.wood = woods.get(type)
+	if type == "bridge" and posmod(int(floorf(x)) * 7 + int(floorf(z)) * 13, 3) == 0:
+		f.wood = woods["bridgeW"]   # every third bridge or so is wavy
 	f.dig = digs.get(type)
 	f.canyon = type == "rope"
 	f.air = PackedFloat64Array((TrailFeatures.AIR_S if (old_size and small.has(type)) else TrailFeatures.AIR).get(type, []))
@@ -938,7 +940,7 @@ func jump_at(cx: int, cz: int) -> Feat:
 ## rims wandering (value noise along w) and the canyon narrowing, shallowing and ending CANYON_W m to each side.
 ## Within 4 m of the trail the rims sit exactly at CANYON_RIM / len - CANYON_RIM (the bridge's anchors).
 ## Mirrored exactly in TerrainFieldCs.cs (polynomials + integer hashes only: no sin / exp).
-const CANYON_W := 42.0
+const CANYON_W := 90.0
 const CANYON_CELL := 64.0
 var _canyons := {}   # 64 m cell key -> the rope canyons reaching into it
 
@@ -958,7 +960,7 @@ func _index_canyons() -> void:
 				if not _canyons.has(key):
 					_canyons[key] = []
 				_canyons[key].append(j)
-const CANYON_D := 16.0
+const CANYON_D := 20.0
 const CANYON_RIM := 4.2
 const ROPE_RAMP := 22.0   # Feat.ramp of a rope bridge (mirrored in TerrainFieldCs)
 
@@ -982,8 +984,8 @@ func canyon_rims(s: float, len: float, ws: float) -> PackedFloat64Array:
 	var hw := (len * 0.5 - CANYON_RIM) * (1.0 - 0.6 * sm(8.0, CANYON_W, aw))
 	var a := cen - hw + amp * 3.0 * _canyon_n(k, sd + 1, aw / 7.0)
 	var b := cen + hw - amp * 3.0 * _canyon_n(k, sd + 2, aw / 7.0)
-	var ww := 1.8 + amp * 1.6
-	var dep := CANYON_D * (1.0 - sm(CANYON_W - 18.0, CANYON_W, aw)) * (1.0 + 0.2 * amp * _canyon_n(k, 6, aw / 11.0))
+	var ww := 30.0 + amp * 10.0   # a wide sloping valley side, not a cliff
+	var dep := CANYON_D * (1.0 - sm(CANYON_W - 50.0, CANYON_W, aw)) * (1.0 + 0.2 * amp * _canyon_n(k, 6, aw / 11.0))
 	return PackedFloat64Array([a, b, ww, dep])
 
 

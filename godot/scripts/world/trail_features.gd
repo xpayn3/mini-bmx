@@ -114,6 +114,15 @@ class Wood:
 			if u < 15.0:
 				return 0.85
 			return skin.ev(maxf(0.001, 19.0 - u))
+		elif kind == 3:
+			# wavy bridge: the deck rolls over normal ground (two humps), ramps on / off like the flat one
+			var t := fposmod((u - 2.0) / 5.5, 1.0)
+			var base := 0.3 + 0.32 * 16.0 * t * t * (1.0 - t) * (1.0 - t)   # polynomial hump (no sin: C# must match exactly)
+			if u < 2.0:
+				return _ramp(0.0, 2.0, 0.02, 0.3, u)
+			if u < u1 - 2.0:
+				return base
+			return _ramp(u1 - 2.0, u1, 0.3, 0.02, u)
 		else:
 			if u < 2.0:
 				return _ramp(0.0, 2.0, 0.02, 0.45, u)
@@ -184,7 +193,7 @@ static func make_set() -> Dictionary:
 		"skinny": Flat.new(19.0),
 		"bridge": Flat.new(15.0),
 		"gorge": Flat.new(36.0),
-		"rope": Flat.new(46.0),
+		"rope": Flat.new(72.0),
 	}
 	var kick := Hermite.new([[0, 0, 0.1], [3.8, 0.95, 0.4]])
 	var skin := Hermite.new([[0, 0.02, 0.05], [2, 0.42, 0.3], [4, 0.85, 0]])
@@ -192,10 +201,10 @@ static func make_set() -> Dictionary:
 		"woodKicker": Wood.new(0, 0.0, 3.8, 0.85, true, kick, skin),
 		"skinny": Wood.new(1, 0.0, 19.0, 0.33, false, kick, skin),
 		"bridge": Wood.new(2, 0.0, 15.0, 1.0, false, kick, skin),
+		"bridgeW": Wood.new(3, 0.0, 15.0, 1.0, false, kick, skin),   # picked for some bridges by TerrainField.make_feat
 		"gorge": Wood.new(2, 0.0, 36.0, 1.4, false, kick, skin),
 	}
-	var dig := {"bridge": Hermite.new([[0, 0, 0], [1.6, 0, 0], [3.4, -1.9, 0], [11.6, -1.9, 0], [13.4, 0, 0], [15, 0, 0]]),
-		"gorge": Hermite.new([[0, 0, 0], [3.0, 0, 0], [4.6, -9.0, 0], [31.4, -9.0, 0], [33.0, 0, 0], [36, 0, 0]])}
+	var dig := {"gorge": Hermite.new([[0, 0, 0], [3.0, 0, 0], [4.6, -9.0, 0], [31.4, -9.0, 0], [33.0, 0, 0], [36, 0, 0]])}
 	var table_s := Hermite.new(TABLE_S)
 	var dbl_s := Hermite.new(DOUBLE_S)
 	var kicker_s := Hermite.new(KICKER_S)
