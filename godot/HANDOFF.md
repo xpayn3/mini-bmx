@@ -2206,6 +2206,18 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   4.0 MB; load 0.3 s (live 1.5 s). The bake runs the level's checks (`LevelBake.checks`): jumps not landing on their
   landing at design speed, EFH > 1.5 m, a 15 % slow rider dropping into a gap, overlapping pieces, no start / finish, hard
   braking zones, the trail leaving the ground. Not done: reflection probes, trees darkened by baked shadow far off.
+- **Step 4, sculpt / paint / import a world trail (same day)**: `LevelLayers` (Resource, `levels/<name>_layers.res`,
+  binary, saved with the scene via `_save_external_data`): `import_h` (an imported land: replaces the slope), `sculpt`
+  (m added, 1 m grid over the level's ground), `paint` (1 dirt / 2 sand / 3 rock: into `S` as 1 / 3 / 4: sand rides as
+  the world's sand, rock = rock weight). `LevelField.base` = `land` (import, flat or slope) + sculpt. Dock **Sculpt mode**:
+  Raise / Lower / Smooth / Flatten / Paint dirt / sand / rock / Erase paint / Erase sculpt, radius + strength, a brush ring
+  on the ground, one undo step per stroke, the preview rebuilt at the stroke's end. **Import world trail** (seed, start m,
+  length m): runs `tools/import_world.gd` as its own headless Godot (`OS.execute`: the world's generator isn't a @tool
+  script) which cuts that stretch of the world's trail out, turns it to run down +x, keeps a few Bezier points (RDP
+  1.2 m) and samples the world's land at 1 m; the level takes its size, land and trail (undoable). Edit the spline
+  (Path3D handles) and the trail regenerates over the real land. Seed 4242, 600 m from 300 m: 301 -> 44 points, 3.3 s.
+  `tools/make_world_level.gd -- <import file>` makes `levels/world_cut.tscn` the same way (+ a sculpted mound, painted sand)
+  and bakes it; demo AI rides it, no crash.
 - Not yet: publishing (LEVELS menu, medals).
 
 ### Developer view of the test playground (`scripts/levels/ride_diag.gd`) - telemetry + sliders for riding code

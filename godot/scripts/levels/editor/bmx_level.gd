@@ -42,6 +42,8 @@ signal rebuilt(summary: String)
 	set(v): tree_clear = v; _queue()
 @export var tree_seed := 1:
 	set(v): tree_seed = v; _queue()
+@export_group("Layers")
+@export var layers: LevelLayers   ## imported land, sculpting, surface paint (levels/<name>_layers.res)
 @export_group("Editor")
 @export var live_preview := true:
 	set(v): live_preview = v; _queue()
@@ -107,6 +109,7 @@ func make_field() -> LevelField:
 	f.length = length; f.width = width; f.drop = drop; f.steep_top = steep_top; f.side_rise = side_rise
 	f.rough = rough; f.rough_scale = rough_scale; f.noise_seed = noise_seed; f.flat = flat_ground
 	f.trees = trees; f.tree_clear = tree_clear; f.tree_seed = tree_seed
+	if layers: f.layers = layers.data()
 	var t := trail()
 	if t: t.fill(f)
 	f.pieces = []
@@ -146,7 +149,7 @@ func _process(dt: float) -> void:
 
 func _signature() -> int:
 	var f := make_field()
-	return hash(str([f.trees, f.tree_clear, f.tree_seed, f.flat, f.length, f.width, f.drop, f.steep_top, f.side_rise, f.rough, f.rough_scale, f.noise_seed, f.trail_in,
+	return hash(str([layers.content_hash() if layers else 0, f.trees, f.tree_clear, f.tree_seed, f.flat, f.length, f.width, f.drop, f.steep_top, f.side_rise, f.rough, f.rough_scale, f.noise_seed, f.trail_in,
 		f.trail_width, f.blend, f.berms, f.bank_max_deg, f.smooth_len, f.follow, f.start_speed, f.pieces]))
 
 
@@ -282,3 +285,34 @@ static func make_new(title_in := "New level") -> BmxLevel:
 	t.owner = lvl
 	lvl.snap_trail_to_ground()
 	return lvl
+
+
+## the layers resource (made + saved as levels/<scene>_layers.res the first time), its sculpt / paint grid fitted to the
+## level's ground (1 m, x -40 .. length + 40, z -(width / 2 + 10) .. +)
+func ensure_layers() -> LevelLayers:
+	if layers == null:
+		layers = LevelLayers.new()
+		var sp := scene_file_path if scene_file_path != "" else "res://levels/untitled.tscn"
+		var path := sp.get_basename() + "_layers.res"
+		ResourceSaver.save(layers, path)
+		layers.take_over_path(path)
+	layers.fit(-40.0, -width * 0.5 - 10.0, int(length + 81.0), int(width + 21.0))
+	return layers
+
+
+## a world stretch from tools/import_world.gd: the level takes its size, the land under it and its trail
+func apply_import(d: Dictionary) -> void:
+	length = float(d.length); width = float(d.width); flat_ground = false
+	var L := ensure_layers()
+	L.import_h = d.H; L.import_x0 = float(d.x0); L.import_z0 = float(d.z0); L.import_nx = int(d.nx); L.import_nz = int(d.nz)
+	var t := trail()
+	if t:
+		var c := Curve3D.new()
+		var P: PackedVector2Array = d.pts
+		for i in P.size():
+			var a: Vector2 = P[maxi(0, i - 1)]; var b: Vector2 = P[mini(P.size() - 1, i + 1)]
+			var h := (b - a) / 6.0
+			c.add_point(Vector3(P[i].x, 0, P[i].y), Vector3(-h.x, 0, -h.y), Vector3(h.x, 0, h.y))
+		t.transform = Transform3D()
+		t.curve = c
+	snap_trail_to_ground()

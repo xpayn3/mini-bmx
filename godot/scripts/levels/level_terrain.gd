@@ -120,7 +120,8 @@ func grid_height(x: float, z: float) -> float:
 
 ## trail + berm faces = dirt (1), the land = grass (0)
 func surface(x: float, z: float) -> int:
-	return 1 if lf.surface_at(x, z) > 0 else 0
+	var sf := lf.surface_at(x, z)
+	return 3 if sf == 3 else (1 if sf > 0 else 0)   # (painted sand rides as the world's sand)
 
 func jump(x: float, z: float) -> Array:
 	return [lf.height(x, z), lf.jump_mask(x, z), 0.0, 0.0, null]

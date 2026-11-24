@@ -32,6 +32,22 @@ var _ghost: MeshInstance3D
 var _ghost_yaw := 0.0
 var _place_btns := {}
 
+# sculpt
+const TOOLS := ["Raise", "Lower", "Smooth", "Flatten", "Paint dirt", "Paint sand", "Paint rock", "Erase paint", "Erase sculpt"]
+var brush_r := 6.0
+var brush_k := 0.5
+var _sculpt_btn: CheckButton
+var _tool_opt: OptionButton
+var _sculpting := false
+var _stroke := false
+var _stroke_old := {}
+var _flat_y := 0.0
+var _last_dab := Vector3(INF, 0, 0)
+var _ring: MeshInstance3D
+var _imp_seed: HBoxContainer
+var _imp_start: HBoxContainer
+var _imp_len: HBoxContainer
+
 # drag
 var _drag: BmxPiece = null
 var _drag_from: Transform3D
@@ -69,6 +85,25 @@ func _enter_tree() -> void:
 	dock.add_child(row2)
 	for it in [["+ Jump on trail", "BmxJump"], ["+ Rocks on trail", "BmxRocks"]]:
 		_button(row2, it[0], _add_on_trail.bind(it[1]), "Adds one on the trail where the editor camera looks, following the trail")
+	dock.add_child(HSeparator.new())
+	var sl := Label.new(); sl.text = "SCULPT + PAINT (drag in the 3D view)"
+	dock.add_child(sl)
+	_sculpt_btn = CheckButton.new(); _sculpt_btn.text = "Sculpt mode"
+	_sculpt_btn.toggled.connect(_set_sculpt)
+	dock.add_child(_sculpt_btn)
+	_tool_opt = OptionButton.new()
+	for nm in TOOLS: _tool_opt.add_item(nm)
+	dock.add_child(_tool_opt)
+	dock.add_child(_spin("Brush radius (m)", brush_r, 1.0, 40.0, 0.5, func(v): brush_r = v))
+	dock.add_child(_spin("Strength", brush_k, 0.05, 2.0, 0.05, func(v): brush_k = v))
+	dock.add_child(HSeparator.new())
+	var il := Label.new(); il.text = "IMPORT WORLD TRAIL"
+	dock.add_child(il)
+	_imp_seed = _spin("World seed", 4242, 0, 999999, 1, func(_v): pass)
+	_imp_start = _spin("Start (m along)", 300, 0, 3500, 10, func(_v): pass)
+	_imp_len = _spin("Length (m)", 600, 100, 2000, 10, func(_v): pass)
+	for w in [_imp_seed, _imp_start, _imp_len]: dock.add_child(w)
+	_button(dock, "Import into this level", _import_world, "Replaces this level's land and trail with that stretch of the procedural world (the trail as an editable spline). Undo puts it back")
 	dock.add_child(HSeparator.new())
 	var sn := CheckBox.new(); sn.text = "Snap (Shift = free)"; sn.button_pressed = snap_on
 	sn.toggled.connect(func(v): snap_on = v)
@@ -161,6 +196,7 @@ func _handles(object: Object) -> bool:
 func _forward_3d_gui_input(cam: Camera3D, event: InputEvent) -> int:
 	if _lvl == null or not is_instance_valid(_lvl) or _lvl.field == null: return AFTER_GUI_INPUT_PASS
 	if _placing != "": return _place_input(cam, event)
+	if _sculpting: return _sculpt_input(cam, event)
 	return _drag_input(cam, event)
 
 
@@ -414,3 +450,158 @@ func _ride() -> void:
 	EditorInterface.play_main_scene()
 	get_tree().create_timer(2.0).timeout.connect(func():
 		ProjectSettings.set_setting("editor/run/main_run_args", _args_back))
+
+
+
+# ---- sculpt + paint -------------------------------------------------------------------------------------------
+func _set_sculpt(on: bool) -> void:
+	_sculpting = on and _lvl != null
+	if _sculpting:
+		_set_placing("")
+		EditorInterface.get_selection().clear()
+		EditorInterface.get_selection().add_node(_lvl)
+		if _ring == null or not is_instance_valid(_ring):
+			_ring = MeshInstance3D.new()
+			_lvl.add_child(_ring, false, Node.INTERNAL_MODE_BACK)
+	elif _ring and is_instance_valid(_ring):
+		_ring.queue_free(); _ring = null
+	if _sculpt_btn: _sculpt_btn.set_pressed_no_signal(_sculpting)
+
+
+func _sculpt_input(cam: Camera3D, event: InputEvent) -> int:
+	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+		_set_sculpt(false); return AFTER_GUI_INPUT_STOP
+	if event is InputEventMouseMotion:
+		var h = _hit(cam, event.position)
+		if h != null:
+			_draw_ring(h)
+			if _stroke and h.distance_to(_last_dab) > brush_r * 0.25: _dab(h)
+		return AFTER_GUI_INPUT_STOP if _stroke else AFTER_GUI_INPUT_PASS
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			var h = _hit(cam, event.position)
+			if h == null: return AFTER_GUI_INPUT_PASS
+			var L := _lvl.ensure_layers()
+			_stroke = true
+			_stroke_old = {"sculpt": L.sculpt.duplicate(), "paint": L.paint.duplicate()}
+			_flat_y = h.y
+			_dab(h)
+			return AFTER_GUI_INPUT_STOP
+		elif _stroke:
+			_stroke = false
+			_last_dab = Vector3(INF, 0, 0)
+			var L := _lvl.layers
+			var ur := get_undo_redo()
+			ur.create_action("Sculpt / paint")
+			ur.add_do_property(L, "sculpt", L.sculpt.duplicate())
+			ur.add_do_property(L, "paint", L.paint.duplicate())
+			ur.add_undo_property(L, "sculpt", _stroke_old.sculpt)
+			ur.add_undo_property(L, "paint", _stroke_old.paint)
+			ur.commit_action(false)
+			_lvl.rebuild_preview()
+			return AFTER_GUI_INPUT_STOP
+	return AFTER_GUI_INPUT_PASS
+
+
+## one dab of the brush at h (level space)
+func _dab(h: Vector3) -> void:
+	_last_dab = h
+	var L := _lvl.layers
+	var f := _lvl.field
+	var tool: String = TOOLS[_tool_opt.selected]
+	var r := brush_r
+	var i0 := maxi(0, int(floor(h.x - r - L.grid_x0))); var i1 := mini(L.grid_nx - 1, int(ceil(h.x + r - L.grid_x0)))
+	var j0 := maxi(0, int(floor(h.z - r - L.grid_z0))); var j1 := mini(L.grid_nz - 1, int(ceil(h.z + r - L.grid_z0)))
+	var sc := L.sculpt
+	var pt := L.paint
+	var old := sc.duplicate() if tool == "Smooth" else PackedFloat32Array()
+	for j in range(j0, j1 + 1):
+		for i in range(i0, i1 + 1):
+			var x := L.grid_x0 + i; var z := L.grid_z0 + j
+			var d := Vector2(x - h.x, z - h.z).length() / r
+			if d >= 1.0: continue
+			var w := (1.0 - d * d) * (1.0 - d * d) * brush_k
+			var k := j * L.grid_nx + i
+			match tool:
+				"Raise": sc[k] += w * 0.35
+				"Lower": sc[k] -= w * 0.35
+				"Flatten":
+					var landh := f.land(x, z) if f else 0.0
+					sc[k] = lerpf(sc[k], _flat_y - landh, clampf(w, 0.0, 1.0))
+				"Smooth":
+					if i > 0 and j > 0 and i < L.grid_nx - 1 and j < L.grid_nz - 1 and f:
+						var tot := 0.0
+						for q: int in [k - 1, k + 1, k - L.grid_nx, k + L.grid_nx]:
+							var qx := L.grid_x0 + (q % L.grid_nx); var qz := L.grid_z0 + int(q / L.grid_nx)
+							tot += f.land(qx, qz) + old[q]
+						var target := tot * 0.25 - f.land(x, z)
+						sc[k] = lerpf(old[k], target, clampf(w, 0.0, 1.0))
+				"Erase sculpt": sc[k] = lerpf(sc[k], 0.0, clampf(w, 0.0, 1.0))
+				"Paint dirt": if w > 0.15: pt[k] = 1
+				"Paint sand": if w > 0.15: pt[k] = 2
+				"Paint rock": if w > 0.15: pt[k] = 3
+				"Erase paint": if w > 0.15: pt[k] = 0
+	L.sculpt = sc
+	L.paint = pt
+	L.emit_changed()
+
+
+func _draw_ring(h: Vector3) -> void:
+	if _ring == null or not is_instance_valid(_ring) or _lvl.field == null: return
+	var im := ImmediateMesh.new()
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.albedo_color = Color(1.0, 0.8, 0.2)
+	m.no_depth_test = true
+	im.surface_begin(Mesh.PRIMITIVE_LINE_STRIP, m)
+	for a in 49:
+		var t := a * TAU / 48.0
+		var x := h.x + cos(t) * brush_r; var z := h.z + sin(t) * brush_r
+		im.surface_add_vertex(Vector3(x, _lvl.field.height(x, z) + 0.2, z))
+	im.surface_end()
+	_ring.mesh = im
+
+
+## the editor saves the scene: the layers resource (written straight into by the brushes) with it
+func _save_external_data() -> void:
+	if _lvl and is_instance_valid(_lvl) and _lvl.layers and _lvl.layers.resource_path != "":
+		ResourceSaver.save(_lvl.layers, _lvl.layers.resource_path)
+
+
+# ---- import a stretch of the procedural world -------------------------------------------------------------------
+func _import_world() -> void:
+	if _lvl == null or _lvl.scene_file_path == "":
+		info.text = "Open (and save) a level scene first."; return
+	var sd := int((_imp_seed.get_child(1) as SpinBox).value)
+	var s0 := (_imp_start.get_child(1) as SpinBox).value
+	var ln := (_imp_len.get_child(1) as SpinBox).value
+	var tmp := ProjectSettings.globalize_path("user://level_import.var")
+	info.text = "Importing seed %d, %.0f m from %.0f m..." % [sd, ln, s0]
+	var out := []
+	var code := OS.execute(OS.get_executable_path(), ["--headless", "--path", ProjectSettings.globalize_path("res://"), "-s",
+		"res://tools/import_world.gd", "--", str(sd), str(s0), str(ln), tmp], out, true)
+	if code != 0 or not FileAccess.file_exists(tmp):
+		info.text = "Import failed (%d):\n%s" % [code, "\n".join(out).right(600)]; return
+	var fa := FileAccess.open(tmp, FileAccess.READ)
+	var d = fa.get_var()
+	fa.close()
+	if not (d is Dictionary):
+		info.text = "Import failed: no data"; return
+	var t := _lvl.trail()
+	var L := _lvl.ensure_layers()
+	var ur := get_undo_redo()
+	ur.create_action("Import world trail")
+	for prop in ["length", "width", "flat_ground"]: ur.add_undo_property(_lvl, prop, _lvl.get(prop))
+	for prop in ["import_h", "import_x0", "import_z0", "import_nx", "import_nz"]: ur.add_undo_property(L, prop, L.get(prop))
+	if t:
+		ur.add_undo_property(t, "curve", t.curve.duplicate() if t.curve else null)
+		ur.add_undo_property(t, "transform", t.transform)
+	_lvl.apply_import(d)
+	for prop in ["length", "width", "flat_ground"]: ur.add_do_property(_lvl, prop, _lvl.get(prop))
+	for prop in ["import_h", "import_x0", "import_z0", "import_nx", "import_nz"]: ur.add_do_property(L, prop, L.get(prop))
+	if t:
+		ur.add_do_property(t, "curve", t.curve.duplicate())
+		ur.add_do_property(t, "transform", t.transform)
+	ur.commit_action(false)
+	_lvl.rebuild_preview()
+	info.text = "Imported seed %d (%.0f m of trail from %.0f m): %d spline points. Edit the trail's points / handles; the trail regenerates." % [sd, ln, s0, (d.pts as PackedVector2Array).size()]

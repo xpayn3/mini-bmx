@@ -97,6 +97,38 @@ func _profile(x: float) -> float:
 
 
 func base(x: float, z: float) -> float:
+	return land(x, z) + _grid(layers.get("sculpt", PackedFloat32Array()), x, z)
+
+
+## 1 m layer grids (LevelLayers): bilinear, 0 off the grid (the imported land: clamped to its edge)
+func _grid(a: PackedFloat32Array, x: float, z: float, imported := false) -> float:
+	if a.is_empty(): return 0.0
+	var gx0: float = layers.import_x0 if imported else layers.grid_x0
+	var gz0: float = layers.import_z0 if imported else layers.grid_z0
+	var gnx: int = layers.import_nx if imported else layers.grid_nx
+	var gnz: int = layers.import_nz if imported else layers.grid_nz
+	var fx := x - gx0; var fz := z - gz0
+	if not imported and (fx < 0.0 or fz < 0.0 or fx >= gnx - 1 or fz >= gnz - 1): return 0.0
+	fx = clampf(fx, 0.0, gnx - 1.001); fz = clampf(fz, 0.0, gnz - 1.001)
+	var i := int(fx); var j := int(fz)
+	var u := fx - i; var w := fz - j
+	var k := j * gnx + i
+	return lerpf(lerpf(a[k], a[k + 1], u), lerpf(a[k + gnx], a[k + gnx + 1], u), w)
+
+
+## the surface painted at a point (0 none, 1 dirt, 2 sand, 3 rock)
+func paint_at(x: float, z: float) -> int:
+	var p: PackedByteArray = layers.get("paint", PackedByteArray())
+	if p.is_empty(): return 0
+	var i := int(round(x - float(layers.grid_x0))); var j := int(round(z - float(layers.grid_z0)))
+	if i < 0 or j < 0 or i >= int(layers.grid_nx) or j >= int(layers.grid_nz): return 0
+	return p[j * int(layers.grid_nx) + i]
+
+
+## the land before sculpting: the imported world land, a flat spot, or the slope
+func land(x: float, z: float) -> float:
+	var imp: PackedFloat32Array = layers.get("import_h", PackedFloat32Array())
+	if not imp.is_empty(): return _grid(imp, x, z, true)
 	if flat: return rough * _noise.get_noise_2d(x, z)
 	var hw := maxf(10.0, width * 0.5)
 	var q := z / hw
@@ -205,6 +237,7 @@ func bake(grid_step := 0.5) -> void:
 			H[row + i] = base(x0 + i * step, z)
 	var n := TX.size()
 	if n < 2:
+		_paint_surface()
 		_bake_pieces()   # (no trail: a flat park / free pieces only)
 		return
 	# the trail: every grid point within reach of a segment takes the nearest segment's cross section
@@ -254,6 +287,7 @@ func bake(grid_step := 0.5) -> void:
 			var land := H[idx]
 			H[idx] = lerpf(cut[idx], land, t)
 			if s < hw + 1.6 and absf(cut[idx] - land) > 0.45: S[idx] = 2   # (a built-up berm / dug cut face right beside it: bare clay)
+	_paint_surface()
 	_bake_pieces()
 
 
@@ -345,6 +379,7 @@ const GRASS_DRY := Color(0.52, 0.52, 0.34)
 const DIRT := Color(0.58, 0.45, 0.32)
 const CLAY := Color(0.66, 0.46, 0.30)
 const ROCK := Color(0.52, 0.50, 0.47)
+const SAND := Color(0.86, 0.76, 0.52)
 
 
 func _land_color(x: float, z: float, ny: float) -> Color:
@@ -375,7 +410,7 @@ func ground_mesh(every := 2) -> ArrayMesh:
 			N[k] = n
 			var gi := mini(i * every, nx - 1); var gj := mini(j * every, nz - 1)
 			var sf := S[gj * nx + gi]
-			var col := DIRT if sf == 1 else (CLAY if sf == 2 else _land_color(V[k].x, V[k].z, n.y))
+			var col := DIRT if sf == 1 else (CLAY if sf == 2 else (SAND if sf == 3 else (ROCK if sf == 4 else _land_color(V[k].x, V[k].z, n.y))))
 			C[k] = col.srgb_to_linear()
 	var I := PackedInt32Array(); I.resize((cx - 1) * (cz - 1) * 6)
 	var p := 0
@@ -932,3 +967,17 @@ func load_state(d: Dictionary) -> void:
 		if d.has(k): set(k, d[k])
 	_prep_noise()
 	_index_colliders()
+
+
+## painted surfaces into S (off the trail): 1 dirt, 3 sand, 4 rock
+func _paint_surface() -> void:
+	var p: PackedByteArray = layers.get("paint", PackedByteArray())
+	if p.is_empty(): return
+	for j in nz:
+		for i in nx:
+			var idx := j * nx + i
+			if S[idx] != 0: continue
+			var c := paint_at(x0 + i * step, z0 + j * step)
+			if c == 1: S[idx] = 1
+			elif c == 2: S[idx] = 3
+			elif c == 3: S[idx] = 4

@@ -55,7 +55,7 @@ static func build(lf: LevelField, k: Vector2i, light := PackedByteArray(), lnx :
 	var gh := PackedFloat32Array(); gh.resize(NV * NV)
 	var pL := PackedByteArray()
 	if not light.is_empty(): pL.resize(NV * NV * 2)
-	var dirt := LevelField.DIRT.srgb_to_linear(); var clay := LevelField.CLAY.srgb_to_linear()
+	var dirt := LevelField.DIRT.srgb_to_linear(); var clay := LevelField.CLAY.srgb_to_linear(); var sand := LevelField.SAND.srgb_to_linear()
 	for j in NV:
 		for i in NV:
 			var o := j * NV + i
@@ -68,12 +68,12 @@ static func build(lf: LevelField, k: Vector2i, light := PackedByteArray(), lnx :
 			var sf := lf.S[idx]
 			var dt := lf.DT[idx]
 			var tw := 0.0
-			if sf == 1: tw = 1.0
+			if sf == 1 or sf == 3: tw = 1.0
 			elif sf == 2: tw = 0.75
 			elif dt < INF: tw = 1.0 - smoothstep(hw, hw + 0.9, dt)
-			var rockw := 0.0 if sf != 0 else smoothstep(0.80, 0.68, ny)
+			var rockw := 1.0 if sf == 4 else (0.0 if sf != 0 else smoothstep(0.80, 0.68, ny))
 			var g := lf._land_color(x, z, ny).srgb_to_linear()
-			var dc := clay if sf == 2 else dirt
+			var dc := clay if sf == 2 else (sand if sf == 3 else dirt)
 			pG[o * 4] = _enc(g.r); pG[o * 4 + 1] = _enc(g.g); pG[o * 4 + 2] = _enc(g.b); pG[o * 4 + 3] = roundi(clampf(tw, 0, 1) * 255)
 			pD[o * 4] = _enc(dc.r); pD[o * 4 + 1] = _enc(dc.g); pD[o * 4 + 2] = _enc(dc.b); pD[o * 4 + 3] = roundi(clampf(rockw, 0, 1) * 255)
 			if dt < INF:
