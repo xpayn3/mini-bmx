@@ -201,6 +201,7 @@ var _no_save: bool = _test_run or OS.get_environment("BMX_MIN") != "" or OS.get_
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	if OS.get_environment("BMX_PAD") != "": pad_active = true   # tests: as if the player were on a gamepad
+	add_child(preload("res://scripts/ui/pad_toast.gd").new())   # "controller connected / disconnected" notice
 	load_settings()
 	if not FileAccess.file_exists(PATH):   # first launch on this PC: pick the preset from its GPU
 		var lvl := auto_quality()

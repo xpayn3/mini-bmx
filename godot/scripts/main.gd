@@ -17,6 +17,7 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	ui.layer = 20
 	add_child(ui)
+	Input.joy_connection_changed.connect(_on_pad_connection)
 	add_child(load("res://scripts/ui/fullscreen_button.gd").new())   # bottom-right fullscreen toggle (F11)
 	fade = ColorRect.new()
 	fade.color = Color(0.66, 0.84, 0.92)
@@ -1624,6 +1625,14 @@ func _notification(what: int) -> void:
 		# (deferred: focus can go while this node is busy adding children - the ride moving in - and the leaflet's
 		# add_child then failed, 80 errors and no pause menu)
 		_pause_unfocused.call_deferred()
+
+## the controller the player was riding with went away (battery, cable): pause, so the bike doesn't carry on with no
+## hands on it. Only when a pad was the active device (a keyboard rider unplugging a spare pad isn't interrupted).
+func _on_pad_connection(_device: int, connected: bool) -> void:
+	if connected or state != RIDING or not Settings.pad_active: return
+	if Settings._test_run or not OS.get_cmdline_user_args().is_empty(): return
+	if not Input.get_connected_joypads().is_empty(): return   # another pad is still there
+	_pause_unfocused.call_deferred()
 
 func _pause_unfocused() -> void:
 	if state == RIDING: _pause()
