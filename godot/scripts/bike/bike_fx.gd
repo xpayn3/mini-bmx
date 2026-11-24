@@ -24,7 +24,71 @@ uniform vec4 color2 : source_color = vec4(1.0, 0.7, 0.0, 1.0);   // pearl: the c
 uniform float flip : hint_range(0.0, 1.0) = 0.0;
 uniform float deep : hint_range(0.0, 1.0) = 0.0;                    // candy: richer, darker toward the edges
 
+// Livery: a second colour laid over the paint in a pattern. The pattern lives in the bike's own frame
+// (instance uniforms: where this mesh sits in the model, and the size of the whole frame), so the front
+// and rear triangles carry one design across the join. 0 = plain paint.
+uniform int livery = 0;
+uniform vec4 lcolor : source_color = vec4(1.0, 1.0, 1.0, 1.0);
+uniform float lscale = 1.0;
+instance uniform vec3 liv_off = vec3(0.0);
+instance uniform vec3 liv_min = vec3(-0.5, -0.1, -0.1);
+instance uniform vec3 liv_ext = vec3(1.0, 0.5, 0.2);
+
 varying vec3 v_flake_p;
+varying vec3 v_obj;
+
+float lv_hash(vec3 p) {
+	p = fract(p * 0.3183099 + 0.1);
+	p *= 17.0;
+	return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+
+float lv_noise(vec3 x) {
+	vec3 i = floor(x);
+	vec3 f = fract(x);
+	f = f * f * (3.0 - 2.0 * f);
+	return mix(mix(mix(lv_hash(i), lv_hash(i + vec3(1, 0, 0)), f.x), mix(lv_hash(i + vec3(0, 1, 0)), lv_hash(i + vec3(1, 1, 0)), f.x), f.y),
+		mix(mix(lv_hash(i + vec3(0, 0, 1)), lv_hash(i + vec3(1, 0, 1)), f.x), mix(lv_hash(i + vec3(0, 1, 1)), lv_hash(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}
+
+// 0..1 how much of the second colour sits here. u = position in the frame, 0..1 along x / y / z.
+float livery_mask(vec3 u, vec3 p) {
+	float aa = 0.012;
+	if (livery == 1) return smoothstep(0.15, 0.85, u.x);                         // fade: front to back
+	if (livery == 2) return smoothstep(0.1, 0.9, u.y);                           // fade: low to high
+	if (livery == 3) return smoothstep(0.5 - aa, 0.5 + aa, u.x);                 // split: front / rear
+	if (livery == 4) {                                                            // racing stripe along the tubes
+		float d = abs(u.z - 0.5);
+		return 1.0 - smoothstep(0.08 - aa, 0.08 + aa, d);
+	}
+	if (livery == 5) {                                                            // bands across the frame
+		float b = abs(fract(u.x * 4.0 * lscale) - 0.5);
+		return 1.0 - smoothstep(0.16 - aa * 3.0, 0.16 + aa * 3.0, b);
+	}
+	if (livery == 6) {                                                            // diagonal speed stripes
+		float b = abs(fract((u.x * 1.2 + u.y * 1.6) * 3.0 * lscale) - 0.5);
+		return 1.0 - smoothstep(0.2 - aa * 3.0, 0.2 + aa * 3.0, b);
+	}
+	if (livery == 7) {                                                            // camo blotches
+		float n = lv_noise(p * 24.0 * lscale) * 0.6 + lv_noise(p * 52.0 * lscale + 9.1) * 0.4;
+		return smoothstep(0.5, 0.53, n);
+	}
+	if (livery == 8) {                                                            // paint splatter
+		float n = lv_noise(p * 70.0 * lscale);
+		float m = smoothstep(0.7, 0.74, n);
+		float fine = smoothstep(0.78, 0.8, lv_noise(p * 220.0 * lscale + 3.0));
+		return max(m, fine);
+	}
+	if (livery == 9) {                                                            // checkers
+		vec3 c = floor(u * vec3(14.0, 5.0, 5.0) * lscale);
+		return mod(c.x + c.y + c.z, 2.0);
+	}
+	if (livery == 10) {                                                           // fade, then a hard edge: sunset
+		float f = smoothstep(0.0, 0.65, u.y);
+		return mix(f, 1.0, smoothstep(0.78 - aa, 0.78 + aa, u.y));
+	}
+	return 0.0;
+}
 
 vec3 flake_hash(vec3 p) {
 	p = fract(p * vec3(0.1031, 0.1030, 0.0973));
@@ -48,6 +112,7 @@ vec4 flake_level(vec3 p, float lvl) {
 void vertex() {
 	// object space in metres (whatever the model's import scale), so the flakes stay glued to the part
 	v_flake_p = VERTEX * length(MODEL_MATRIX[0].xyz);
+	v_obj = VERTEX + liv_off;
 }
 
 void fragment() {
@@ -75,6 +140,10 @@ void fragment() {
 	float view_k = clamp(dot(-normalize(VERTEX), n0), 0.0, 1.0);
 	float facing = clamp(dot(-normalize(VERTEX), n), 0.0, 1.0);
 	vec3 col = mix(albedo.rgb, color2.rgb, pow(1.0 - view_k, 1.5) * flip);
+	if (livery > 0) {
+		vec3 lu = (v_obj - liv_min) / max(liv_ext, vec3(1e-4));
+		col = mix(col, lcolor.rgb, clamp(livery_mask(lu, v_obj), 0.0, 1.0));
+	}
 	col = mix(col, col * col * 0.9, deep * (1.0 - view_k));
 	vec3 base = col * mix(0.7, 1.05, pow(facing, 0.6));
 	float flake_k = sparkle > 0.001 ? clamp(cover * 1.6, 0.0, 1.0) : 0.0;
