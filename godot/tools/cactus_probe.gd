@@ -67,5 +67,16 @@ func _init() -> void:
 		print("%-13s body_tris=%d spine_tris=%d build=%dms pieces=%d fracture=%dms vol=%.4f pieces_vol=%.4f open_pieces=%d broken_loops=%d bad_tri=%d" %
 			[CactusGeo.NAMES[k], tris, etris, t1 - t0, fr.size(), t2 - t1, vol, pv, bad, CactusGeo.fails[0], CactusGeo.fails[1]]); CactusGeo.fails = [0, 0]
 		if bad > 0 or absf(pv - vol) > vol * 0.01 or fr.size() < CactusGeo.CELLS[k] / 2: ok = false
+		# the plant-style break (arms / pads / pipes off, trunk whole or across): every piece closed
+		var st := CactusGeo.structured(d, k)
+		for variant in ["arms", "half"]:
+			var sbad := 0
+			for p in st[variant]:
+				var g2: GeoBuf = p["g"]
+				var n2: int = p["nbody"]
+				var v1 := _vol(g2, n2)
+				if absf(_vol(g2, n2, Vector3(3, 5, 7)) - v1) > 1e-4 + absf(v1) * 1e-3 or v1 <= 0.0: sbad += 1
+			print("   %s pieces=%d open=%d" % [variant, (st[variant] as Array).size(), sbad])
+			if sbad > 0 or (st[variant] as Array).is_empty(): ok = false
 	print("PASS" if ok else "FAIL")
 	quit()

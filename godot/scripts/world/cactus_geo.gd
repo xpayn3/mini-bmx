@@ -54,7 +54,7 @@ static func ensure() -> void:
 
 static func _fracture_all(datas: Array) -> void:
 	for k in KINDS:
-		_frac[k] = fracture(datas[k], CELLS[k], 9001 + k * 77, k)
+		_frac[k] = structured(datas[k], k)
 
 
 ## wait for the background fracture. Must run before the game quits: a task still cutting cacti while
@@ -66,15 +66,117 @@ static func join() -> void:
 
 
 ## the pieces of a smashed cactus of this kind: [{mesh, at, size, pts}] in the unscaled cactus space
-static func pieces(kind: int) -> Array:
+## variant "arms": the arms / pads / pipes come off, the trunk stays in one piece; "half": the trunk (or each pipe) is
+## also broken across. A piece flagged "stump" is the rooted lower part.
+static func pieces(kind: int, variant := "arms") -> Array:
 	join()
 	if _frac_meshes[kind] == null:
+		_frac_meshes[kind] = {}
+	var cache: Dictionary = _frac_meshes[kind]
+	if not cache.has(variant):
 		var out := []
-		for p in _frac[kind]:
+		for p in (_frac[kind] as Dictionary)[variant]:
 			var g: GeoBuf = p["g"]
-			out.append({"mesh": g.to_mesh(false, p["n"].duplicate()), "at": p["at"], "size": p["size"], "pts": p["pts"]})
-		_frac_meshes[kind] = out
-	return _frac_meshes[kind]
+			out.append({"mesh": g.to_mesh(false, p["n"].duplicate()), "at": p["at"], "size": p["size"], "pts": p["pts"], "stump": p.get("stump", false)})
+		cache[variant] = out
+	return cache[variant]
+
+
+## cactus tubes break like plant stems, not like rock: each arm (saguaro), pad (prickly pear) or pipe (organ pipe) is
+## its own piece, snapped off where it meets the trunk and capped with flesh; the trunk is one piece ("arms") or is
+## also broken across at `cut` ("half": the rooted lower part is the stump). Returns {"arms": [...], "half": [...]}
+static func structured(d: Dictionary, kind: int) -> Dictionary:
+	var bodies: Array = d["bodies"]
+	var paths: Array = []
+	for i in bodies.size():
+		if kind == 4:
+			paths.append(PackedVector3Array([(d["ellipsoids"][i] as Transform3D).origin]))
+		else:
+			paths.append(d["tubes"][i][0])
+	var parts_a: Array = []   # [[GeoBuf, owner index, stump]]
+	var parts_h: Array = []
+	var cut_y := 1.0
+	match kind:
+		0: cut_y = 0.5
+		1: cut_y = 0.65
+		2: cut_y = 0.2
+		3: cut_y = 0.8
+	for i in bodies.size():
+		var g: GeoBuf = bodies[i]
+		var is_trunk := (kind == 0 or kind == 1) and i == 0
+		if (kind == 0 or kind == 1) and i > 0:
+			# the arm is snapped off at the trunk's skin: keep what is outside 0.9 of the trunk radius, capped
+			var pa: PackedVector3Array = paths[i]
+			var hd := Vector3(pa[1].x - pa[0].x, 0, pa[1].z - pa[0].z).normalized()
+			var R := 0.2 if kind == 1 else 0.175
+			g = clip(g, -hd, -R * 0.92)
+			if g.pos.is_empty(): g = bodies[i]
+			parts_a.append([g, i, false]); parts_h.append([g, i, false])
+		elif is_trunk or kind == 2 or (kind == 3 and (i == 0 or i % 2 == 0)):
+			parts_a.append([g, i, false])
+			var lo := clip(g, Vector3.UP, cut_y + (0.12 * float(i % 3) if kind == 3 else 0.0))
+			var hi := clip(g, Vector3.DOWN, -(cut_y + (0.12 * float(i % 3) if kind == 3 else 0.0)))
+			if lo.pos.is_empty() or hi.pos.is_empty():
+				parts_h.append([g, i, false])
+			else:
+				parts_h.append([lo, i, true]); parts_h.append([hi, i, false])
+		else:
+			parts_a.append([g, i, false]); parts_h.append([g, i, false])
+	return {"arms": _build_pieces(d, paths, parts_a, cut_y), "half": _build_pieces(d, paths, parts_h, cut_y)}
+
+
+## closest distance from p to a polyline (a single point = that point)
+static func _path_dist(path: PackedVector3Array, p: Vector3) -> float:
+	if path.size() == 1: return p.distance_to(path[0])
+	var best := 1e9
+	for i in path.size() - 1:
+		var a := path[i]
+		var ab := path[i + 1] - a
+		var t := clampf((p - a).dot(ab) / maxf(ab.length_squared(), 1e-9), 0.0, 1.0)
+		best = minf(best, p.distance_to(a + ab * t))
+	return best
+
+
+static func _build_pieces(d: Dictionary, paths: Array, parts: Array, cut_y: float) -> Array:
+	var extra_owner: Array = []   # per extra: index into parts
+	for e in d["extras"]:
+		var at: Vector3 = e["at"]
+		var best_owner := 0
+		var bd := 1e9
+		for i in paths.size():
+			var dd := _path_dist(paths[i], at)
+			if dd < bd: bd = dd; best_owner = i
+		# among the parts of that body (a trunk cut in two), the one on the side of the extra
+		var cand := []
+		for pi in parts.size():
+			if parts[pi][1] == best_owner: cand.append(pi)
+		var pick: int = cand[0] if not cand.is_empty() else 0
+		if cand.size() == 2:
+			pick = cand[0] if at.y < cut_y + (0.12 * float(best_owner % 3) if d["bodies"].size() == 7 else 0.0) else cand[1]
+		extra_owner.append(pick)
+	var out := []
+	for pi in parts.size():
+		var piece: GeoBuf = (parts[pi][0] as GeoBuf).copy()
+		var pts := PackedVector3Array()
+		var seen := {}
+		for p in piece.pos:
+			var k := Vector3i(roundi(p.x * 200), roundi(p.y * 200), roundi(p.z * 200))
+			if not seen.has(k):
+				seen[k] = true; pts.append(p)
+		if pts.is_empty(): continue
+		var nbody := piece.pos.size()
+		for ei in d["extras"].size():
+			if extra_owner[ei] == pi: piece.append(d["extras"][ei]["g"].copy())
+		var a := AABB(pts[0], Vector3.ZERO)
+		for p in pts: a = a.expand(p)
+		var c := a.get_center()
+		piece.translate(-c.x, -c.y, -c.z)
+		var stride := maxi(1, pts.size() / 48)
+		var hull := PackedVector3Array()
+		for k in range(0, pts.size(), stride):
+			hull.append((pts[k] - c) * 0.9)
+		out.append({"g": piece, "n": TerrainGeo._soft_normals(piece), "at": c, "size": a.size, "pts": hull, "nbody": nbody, "stump": parts[pi][2]})
+	return out
 
 
 static func whole_mesh(d: Dictionary) -> ArrayMesh:
