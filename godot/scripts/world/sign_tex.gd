@@ -66,8 +66,11 @@ static func _print(px: Vector2i, draw: Callable, m: ShaderMaterial) -> void:
 	var img := vp.get_texture().get_image()
 	vp.queue_free()
 	img.convert(Image.FORMAT_RGB8)
+	if Env.s("BMX_SIGN_DUMP") != "":   # test: the printed faces as PNGs (dir)
+		img.save_png("%s/sign_%d.png" % [Env.s("BMX_SIGN_DUMP"), _mats.size()])
 	img.generate_mipmaps()
-	img.compress(Image.COMPRESS_S3TC, Image.COMPRESS_SOURCE_SRGB)
+	if Env.s("BMX_SIGN_RAW") == "":
+		img.compress(Image.COMPRESS_S3TC, Image.COMPRESS_SOURCE_SRGB)
 	m.set_shader_parameter("board_tex", ImageTexture.create_from_image(img))
 
 

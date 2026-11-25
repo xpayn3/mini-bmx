@@ -714,17 +714,33 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   ring's water), a third ring to push the 20 m backdrop further out, geomorphing instead of dithering, not measured on a slow GPU.
 - **Sponsor props** (`TrailCourse.chunk_gates` / `chunk_boards`, fixed spacing by centreline index so growing never moves them): a huge steel gantry with a sponsor banner over the trail every 300 m (`TrailGate.build`, made-up brands in `TrailGate.SPONSORS`, no collision, skipped on jumps) and breakable wooden roadside billboards every ~80 m (fence-style panel in `TerrainChunkBuilder._boards`, so the bike smashes them; the Label3D text is freed on smash). Probe: `BMX_GATE_PROBE=1`.
 
-- **Distance signs** (`TerrainChunkBuilder._dist_signs`, at 1 km then every 5 km, smashable): a square wooden stick (`pole`,
-  `shaders/sign_pole.gdshader`, ambientCG Wood035 scan in `assets/textures/wood_post`, CC0, grain up the post, muddy foot) with a
-  thin plate bolted to its front. The plate is its own mesh per sign (`Terrain._panel_labels`, `panel["plate"]`) whose texture is
-  printed once per distance by `world/sign_tex.gd` (`SignTex.material(km)`: a 512 px SubViewport read back with mipmaps, cached):
-  the Figma "table sign" layout (file qDRfS2eOv3e3e9wO1u8W5e, node 39:74: blue field, white strip), the number in Barlow Condensed
-  Black, DISTANCE in tracked-out Barlow Black. `shaders/sign_board.gdshader` weathers it per sign (seeded by place): real scans
-  for the paint (grime_dirt / grime_normal = SurfaceImperfections008, lens_dirt.png R = Smear004 smears, G = SurfaceImperfections001
-  scuffs through to bare metal), sun fade, chipped edges, a dent, mud flung up from the bottom; and retroreflection in its
-  `light()`: the paint sends light back towards the light (`retro` 6, the sun only `retro_sun` 0.12), so a bike lamp at night
-  makes it blaze (not yet checked in a night shot). `wear` 0 = mint. Find one: `BMX_GATE_PROBE=1` prints `DISTSIGN`; seed 4242's
-  1 km sign is at x 767, z 70.5 (`BMX_TRAIL_FEAT=x740 BMX_PHOTO=7 BMX_PHOTO_AT=765.6,43,70.5,766.99,43,70.54`).
+- **Printed signs** (`world/sign_tex.gd` `SignTex`, `shaders/sign_board.gdshader`; 2026-11-25). Every sign face is printed once per look
+  into a SubViewport, read back, mipmapped and DXT1-compressed, cached (`SignTex.material(km)`, `billboard(sp, size, planks)`,
+  `banner(sp, size)`, `for_plate(dict)`): no Label3D text, the print is lit with the board. One shader weathers them all per sign
+  (seeded by place): real scans for the paint (grime_dirt / grime_normal = ambientCG SurfaceImperfections008, lens_dirt.png R =
+  Smear004 smears, G = SurfaceImperfections001 scuffs), sun fade, chipped edges, a dent, mud flung up from the bottom (`mud_amt`);
+  `wood_mix` 1 = paint on wooden planks (Wood049 grain, `planks` seams, bare wood in chips, paint x0.5 so pure sponsor colours
+  don't bleach); retroreflection in its `light()` (`retro`, distance plates only: a bike lamp at night makes them blaze, NOT yet
+  checked in a night shot); a low sun's direct light on it is capped at `sun_cap` x the ground's. In a golden-hour view toward
+  the sun the boards still wash out pink like everything that way (the scene's haze), at noon they read as painted wood.
+  - **Distance signs** (`TerrainChunkBuilder._dist_signs`, at 1 km then every 5 km, smashable): a square wooden stick (`pole`,
+    `shaders/sign_pole.gdshader`, ambientCG Wood035 in `assets/textures/wood_post`) with a 0.8 m plate on its front, the Figma
+    "table sign" layout (file qDRfS2eOv3e3e9wO1u8W5e, node 39:74): blue field + number in Barlow Condensed Black, white strip with
+    DISTANCE in tracked-out Barlow Black. Seed 4242's 1 km sign: x 767, z 70.5 (`BMX_TRAIL_FEAT=x740 BMX_PHOTO=7
+    BMX_PHOTO_AT=765.6,43,70.5,766.99,43,70.54`).
+  - **Roadside billboards** (`_boards`): two posts + one 3.6 x 1.5 m painted plank board, sponsor on both sides; smashed off in one
+    piece. Seed 4242: x 85.2, z 2.3 (`BMX_TRAIL_FEAT=x72 BMX_PHOTO_AT=78.5,104.2,5.5,85.2,103.6,2.27`).
+  - **Gantry banners** (`TrailGate.build`): printed panel, weathered, no mud (`wear` 0.7). Not looked at in game yet.
+  - The plate is its own MeshInstance per sign (`Terrain._panel_labels`, `panel["plate"]`, part kind `signboard` with `i` -1);
+    `BMX_SIGN_DUMP=<dir>` writes each print as PNG, `BMX_SIGN_RAW=1` skips the runtime compression.
+- **Wooden fences** (`shaders/wood_fence.gdshader`, materials `fenceRail` / `fencePost`): ambientCG Wood049 (`assets/textures/wood_plank`,
+  clean sawn-plank grain) box-mapped in metres, grain along the rails / up posts and pickets; the instance colour picks the finish
+  (brown = bare wood at that tone, near white = painted pickets worn through to grey wood in grime-scan patches). Debris pieces
+  fly in plain colour (the shader reads its tint from the MultiMesh).
+- **Texture compression (2026-11-25)**: the 3D scans that were stored uncompressed are BC7 high quality + mipmaps (normals keep all
+  three channels: `compress/normal_map=2`, some shaders read .b), the 5 other HDRI skies BC6H like the main one, the plastic scans
+  capped at 1024 (`process/size_limit`: 7-16 cm tiles on camera bodies). ~1 GB of possible GPU memory -> ~0.25 GB. New 3D
+  textures: set `compress/mode=2` (+ mipmaps) in their .import; 2D / UI pictures stay lossless.
 
 - **Health packs** (`world/health_pack.gd`): a GTA-style floating, spinning red backpack with a white cross and a glow ring, one outside the door of each roadside shed (`TerrainChunkBuilder._sheds` -> `out["packs"]`, made in `Terrain._finalize`). Ride within 1.6 m (`Terrain.take_pack`, called from `Game._process`) and `hud.on_health_pack` gives back `HealthPack.HEAL` (45 %); full-health riders leave it. Taken ones stay gone until a new seed. Tests: `BMX_PACK_PROBE=1` (`PACK at` lines), `BMX_PACK_SPAWN=x,z` (start 9 m before a pack), `BMX_LIFE=0.3 BMX_LIFE_PROBE=1`.
 

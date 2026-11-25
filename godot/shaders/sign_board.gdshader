@@ -22,6 +22,7 @@ uniform float wood_mix = 0.0;  // 1 = painted wooden planks
 uniform float planks = 0.0;    // plank count across the height (seams), 0 = one sheet
 uniform bool both_sides = false;
 uniform float retro = 6.0;        // retroreflection strength (x a white diffuse surface, at the peak); 0 = plain paint
+uniform float sun_cap = 1.8;      // a low sun on the sign: at most this x the light on flat ground
 uniform float retro_sun = 0.12;   // the sun's share (a low sun behind you lights it a little, the bike lamp a lot)
 varying flat vec3 v_origin;
 varying vec3 v_local;   // -0.5 .. 0.5 on the unit box
@@ -60,7 +61,9 @@ void fragment() {
 	vec2 wuv = vec2(m.x, m.y) * 0.9 + off;
 	vec3 wood = texture(wood_col, wuv).rgb;
 	float wl = dot(wood, vec3(0.6, 0.3, 0.1)) / 0.1663;   // ~1 on average (Wood049's mean, linear)
-	col *= mix(1.0, (0.7 + 0.3 * wl) * 0.72, wood_mix);   // paint soaked into weathered wood: duller than a printed sheet
+	// paint soaked into weathered wood: far duller than the print's pure colours (a full-strength red reflected ~70 % and
+	// the tonemapper bleached it pink in a low sun); real weathered paint is ~30-45 %
+	col *= mix(1.0, (0.7 + 0.3 * wl) * 0.5, wood_mix);
 	float seam = 0.0;
 	if (planks > 0.5) {
 		float py = fract(q.y * planks);
@@ -80,7 +83,7 @@ void fragment() {
 	float smear = ld.r;
 	col = mix(col, col * vec3(0.78, 0.72, 0.64), smoothstep(0.35, 0.8, smear) * 0.5 * w);
 	rough += 0.3 * w * smoothstep(0.3, 0.8, smear) + 0.15 * w * (1.0 - patch);
-	float scr = smoothstep(0.45, 0.75, ld.g) * (0.35 + 0.65 * (1.0 - q.y)) * w;
+	float scr = smoothstep(mix(0.45, 0.7, wood_mix), mix(0.75, 0.9, wood_mix), ld.g) * (0.35 + 0.65 * (1.0 - q.y)) * w;
 
 	// chipped edges, scuffs: what's under the paint shows (aluminium, or bare grey wood)
 	float edge = min(min(m.x, plate_m.x - m.x), min(m.y, plate_m.y - m.y)) / 0.8;
@@ -128,7 +131,15 @@ void fragment() {
 // back towards the light, so it blazes when the light sits near your eye (a lamp on the bike, a sun behind you)
 void light() {
 	float nl = clamp(dot(NORMAL, LIGHT), 0.0, 1.0);
-	DIFFUSE_LIGHT += nl * ATTENUATION * LIGHT_COLOR / PI;
+	// a low sun square on to an upright sign gives it ~1/sin(elevation) the ground's light and the tonemapper bleaches
+	// its colours (a red board came out pale pink at golden hour): like the rider's light match (Game._match), the
+	// sun's direct light on it is held to at most `sun_cap` x what the ground gets
+	float lit = nl;
+	if (LIGHT_IS_DIRECTIONAL) {
+		float el = max(dot(LIGHT, normalize(mat3(VIEW_MATRIX) * vec3(0.0, 1.0, 0.0))), 0.02);
+		lit = min(nl, sun_cap * el);
+	}
+	DIFFUSE_LIGHT += lit * ATTENUATION * LIGHT_COLOR / PI;
 	vec3 hv = normalize(LIGHT + VIEW);
 	float a = max(ROUGHNESS * ROUGHNESS, 0.002);
 	float nh = clamp(dot(NORMAL, hv), 0.0, 1.0);
