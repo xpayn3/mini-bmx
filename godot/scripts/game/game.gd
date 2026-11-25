@@ -191,6 +191,28 @@ var _jp_v := 0.0   # tests (BMX_JUMP_PROBE): the speed it left the ground at
 var _lip_t := -1.0; var _lip_shots := 0   # tests (BMX_LIP_SHOT)
 var _land_t := -1.0; var _land_shots := 0   # tests (BMX_LAND_SHOT)
 var clip_stats := {"frames": 0, "fixed": 0, "bad": 0, "before": 0.0, "after": 0.0}
+# tests: BMX_GAP_PROBE=1 = the air left under each grounded tyre of the drawn bike, binned by bank and manual
+# (GAP lines at the end): gap = how far the tyre's lowest point is above the drawn ground, mesh = drawn ground
+# minus the physics ground under the axle (> 0: the drawn ground is higher), lift = the drawn bike's unclip lift
+var gap_probe := Env.s("BMX_GAP_PROBE") != ""
+var gap_stats := {}
+
+func _gap_probe(st) -> void:
+	var bank_b: String = "flat" if absf(st.bank) < 0.1 else ("bank" if absf(st.bank) < 0.25 else "steep")
+	var man: String = "manual" if st.man_a > 0.1 else ("nose" if st.nose_a > 0.1 else "both")
+	for w in [["F", rig.wheel_f, rig.wheel_rf, st.c_f], ["R", rig.wheel_r, rig.wheel_rr, st.c_r]]:
+		if not w[3]: continue
+		var drawn: Callable = terrain.drawn_height if terrain.has_method("drawn_height") and not (terrain is PlaygroundTerrain) and not (terrain is LevelTerrain) else terrain.top_height
+		rig._ground_cache.clear()   # (it holds this frame's fit samples of top_height)
+		var g: float = -rig.tyre_depth(w[1], w[2], drawn)
+		rig._ground_cache.clear()
+		var a: Vector3 = (w[1] as Node3D).global_position
+		var mesh: float = drawn.call(a.x, a.z) - terrain.height(a.x, a.z)
+		var k: String = "%s %s %s" % [bank_b, man, w[0]]
+		var s: Array = gap_stats.get(k, [0, 0.0, 0.0, 0.0, 0.0, 0])
+		s[0] += 1; s[1] += g; s[2] = maxf(s[2], g); s[3] += mesh; s[4] += _lift_s
+		if g > 0.01: s[5] += 1
+		gap_stats[k] = s
 var _prev := {}
 var _last_good := {}
 # foot down at a stop (drawn only, the physics doesn't know): 0..1 eased, which foot (-1 left, +1 right)
@@ -3471,6 +3493,7 @@ func _process(dt: float) -> void:
 			var left: float = maxf(rig.tyre_depth(rig.wheel_f, rig.wheel_rf, terrain.top_height), rig.tyre_depth(rig.wheel_r, rig.wheel_rr, terrain.top_height))
 			clip_stats.after = maxf(clip_stats.after, left)
 			if left > 0.0005: clip_stats.bad += 1
+		if gap_probe and not st.air and not st.crash_on: _gap_probe(st)
 	elif clip_probe:
 		var d: float = maxf(rig.tyre_depth(rig.wheel_f, rig.wheel_rf, terrain.top_height), rig.tyre_depth(rig.wheel_r, rig.wheel_rr, terrain.top_height))
 		clip_stats.frames += 1

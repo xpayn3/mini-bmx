@@ -2132,6 +2132,7 @@ public partial class TerrainFieldCs : RefCounted
 	}
 
 	private static readonly double[] ACROSS = { -0.8, 0.0, 0.8 };   // BikeRig.TYRE_ACROSS
+	private static readonly bool OLD_TOPFIT = System.Environment.GetEnvironmentVariable("BMX_OLD_TOPFIT") is { Length: > 0 };
 
 	/// BikeRig.tyre_depth's sample loop in one call: how deep the tyre (centre c, axle ax, d0 = down in the wheel's
 	/// plane, side = ax x d0, radius R, casing half width hw) sits inside max(height, mesh_height). n points round the
@@ -2153,7 +2154,13 @@ public partial class TerrainFieldCs : RefCounted
 				double off = wo * hw;
 				double r = R - hw + Math.Sqrt(hw * hw - off * off);
 				double px = c.X + dx * r + ax.X * off, py = c.Y + dy * r + ax.Y * off, pz = c.Z + dz * r + ax.Z * off;
-				double h = Math.Max(height(px, pz), mesh_height(px, pz));
+				// the drawn ground = the mesh (also where it dips under the smooth field); a rock / log / deck standing up out
+				// of the plain ground still counts (Terrain.top_height; OLD_TOPFIT = the old max(field, mesh))
+				double hs = height(px, pz);
+				double m = mesh_height(px, pz);
+				double h;
+				if (OLD_TOPFIT || double.IsNegativeInfinity(m)) h = Math.Max(hs, m);
+				else h = hs > ground(px, pz) + 0.001 ? Math.Max(hs, m) : m;   // (ground: cached by height's read)
 				if (_ruts != null) h -= _ruts.Depth((float)px, (float)pz);
 				if (h - py > worst) worst = h - py;
 			}
@@ -2453,7 +2460,8 @@ public partial class TerrainFieldCs : RefCounted
 				uvs[o] = new Vector2((float)(((double)ix / K + 0.5) / NV), (float)(((double)iz / K + 0.5) / NV));
 			}
 		}
-		return new Godot.Collections.Dictionary { ["verts"] = verts, ["norms"] = norms, ["uvs"] = uvs };
+		// H = the drawn heights ((M + 3)^2, one ring outside): the drawn tyres' fit reads them (Terrain.mesh_height / mesh_add)
+		return new Godot.Collections.Dictionary { ["verts"] = verts, ["norms"] = norms, ["uvs"] = uvs, ["H"] = H };
 	}
 
 	public Godot.Collections.Dictionary build_ground(double ox, double oz, long N)
