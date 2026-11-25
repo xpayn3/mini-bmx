@@ -1304,6 +1304,7 @@ func _sync_skeleton(P: Array) -> void:
 ## back on the bike: clear the ragdoll orientations the normal update doesn't set
 func reset_pose() -> void:
 	_cap_ok = false
+	if bib_node and is_instance_valid(bib_node) and bib_node.has_method("restart"): bib_node.restart()   # (the race number starts flat: it kept the crash's crumple for a frame)
 	pelvis_mesh.basis = Basis()
 	head.basis = Basis()
 	for s in shoe:

@@ -2984,7 +2984,13 @@ func _physics_process(dt: float) -> void:
 	_rope_tick(dt)
 	_pk = _perf("p_rope", _pk)
 	if replay and input_enabled and not scenic and not title_world: replay.phys_snap()   # (rewind: "ride from here")
-	ride_log.record(dt, phys, inp, _log_lift, rig.position.y if rig else 0.0, rider.J if rider else [])
+	# (crashed: the ragdoll's head / chest / pelvis relative to the bike's point, world axes: rider.J holds the last
+	# riding pose while the ragdoll draws the body, so an F8 after a crash showed nothing of it)
+	var log_j: Array = rider.J if rider else []
+	if phys.crash_on and ragdoll and ragdoll.active and ragdoll.p.size() > 2:
+		var bk := Vector3(phys.x, phys.y, phys.z)
+		log_j = [(ragdoll.p[0] as Vector3) - bk, (ragdoll.p[1] as Vector3) - bk, (ragdoll.p[2] as Vector3) - bk]
+	ride_log.record(dt, phys, inp, _log_lift, rig.position.y if rig else 0.0, log_j)
 	_pk = _perf("p_ride_log", _pk)
 	if jitter_on and not phys.crash_on:
 		for kv in [["slip", phys.slip, 0.002], ["yaw_rate", phys.yaw_rate, 0.02], ["lean", phys.lean, 0.002], ["bike_lean", phys.bike_lean, 0.003],
@@ -2998,6 +3004,9 @@ func _physics_process(dt: float) -> void:
 		_getup_step(dt, inp.hop)
 	elif phys.crash_on:
 		rider.pose_ragdoll(ragdoll.p, _ragdoll_roots())
+		if Env.s("BMX_RAGSTART_DUMP") != "" and phys.crash_t < 0.25:   # tests: the ragdoll's first steps (world, relative to the bike)
+			var bk := Vector3(phys.x, phys.y, phys.z)
+			print("RAGSTART t=%.3f head=%s chest=%s pelvis=%s bike_v=%.2f" % [phys.crash_t, str(((ragdoll.p[0] as Vector3) - bk).snapped(Vector3.ONE * 0.01)), str(((ragdoll.p[1] as Vector3) - bk).snapped(Vector3.ONE * 0.01)), str(((ragdoll.p[2] as Vector3) - bk).snapped(Vector3.ONE * 0.01)), phys.v])
 	_pk = _perf("p_ragdoll_pose", _pk)
 	_jump_watch(dt)
 	if not phys.is_sane():
@@ -3769,7 +3778,8 @@ func _process(dt: float) -> void:
 					row += ",%.5f,%.5f,%.5f" % [jv.x, jv.y, jv.z]
 				# + the drawn bike in the world (frame jumps through take-offs / landings) and the physics' air / pitch
 				var rgt: Transform3D = rig.global_transform
-				row += ",%.4f,%.4f,%.4f,%.4f,%d,%.4f,%.4f,%.4f,%.4f,%.4f" % [rgt.origin.x, rgt.origin.y, rgt.origin.z, asin(clampf(rgt.basis.x.normalized().y, -1.0, 1.0)), int(st.air), st.pitch, st.y, Engine.get_physics_frames(), float(pi["pitch"]), st.pitch_draw]
+				var wh: Vector3 = rider.to_global(rider.J[0]); var wp: Vector3 = rider.to_global(rider.J[2])
+				row += ",%.4f,%.4f,%.4f,%.4f,%d,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%d" % [rgt.origin.x, rgt.origin.y, rgt.origin.z, asin(clampf(rgt.basis.x.normalized().y, -1.0, 1.0)), int(st.air), st.pitch, st.y, Engine.get_physics_frames(), float(pi["pitch"]), st.pitch_draw, wh.x, wh.y, wh.z, wp.x, wp.y, wp.z, int(st.crash_on)]
 				_jdump.append(row)
 	_pk = _perf("rider_pose", _pk)
 	if replay and input_enabled and not scenic and not title_world: replay.capture(t)   # (real rides only, not the title backdrop)
