@@ -1926,7 +1926,7 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 	# riding fast through dry dust (dirt / sand) slowly dusts the lens: full in ~1.5 min flat out, a skid's
 	# cloud more; damp ground (wet bike) none
 	if not st.air and not bare and (s == 1 or s == 3) and va > 5.0:
-		lens.add_dust(dt * smoothstep(5.0, 16.0, va) * (0.011 + (0.02 if skid_fx else 0.0)) * (1.0 - clampf(grime.wet * 2.0, 0.0, 1.0)), dcol)
+		lens.add_dust(dt * smoothstep(5.0, 16.0, va) * (0.006 + (0.012 if skid_fx else 0.0)) * (1.0 - clampf(grime.wet * 2.0, 0.0, 1.0)), dcol)
 	grime.feed(dt, 2 if in_water else s, va, skid_fx, st.air, _landed, terrain.ground_color(rear.x, rear.z), Vector2(st.vw_f, st.vw_r))
 	_landed = 0.0
 	# dry mud knocked off the bike flies off as chunks (low on the bike, carried along with it)

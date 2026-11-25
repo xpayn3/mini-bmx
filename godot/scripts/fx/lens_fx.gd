@@ -120,7 +120,7 @@ func active() -> bool:
 
 ## dust on the glass: k per second of riding through it (ride_fx: fast on dry dirt / sand), or a bump (a crash)
 func add_dust(k: float, col: Color) -> void:
-	dust = clampf(dust + k, 0.0, 1.0)
+	dust = clampf(dust + k, 0.0, 0.75)   # (never fully filthy: subtle, edges and corners only)
 	dust_col = dust_col.lerp(col, clampf(k * 4.0, 0.02, 0.5))
 
 ## water thrown at the glass (a splash: 0.05 a few drops .. 1 soaked)
