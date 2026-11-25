@@ -23,6 +23,7 @@ var _keep_r := 1.0
 var _keep_h := 1.0
 var look_pitch := 0.0        # the standing rider's head pitch (hero shot: looks down at the camera)
 var _hero := false
+var clips_on := true         # false: no Mixamo clips (the hero shot keeps facing the lens)
 var fit_scale := 1.0         # > 1 pulls the camera back (more air round the rider)
 var spin := true             # false: holds still (the profile page)
 var _pod: MeshInstance3D
@@ -143,6 +144,7 @@ func plain_stage(bg: Color, yaw: float, scale_k := 1.0) -> void:
 func hero_stage(bg: Color, yaw: float) -> void:
 	plain_stage(bg, yaw)
 	_hero = true
+	clips_on = false
 	cam.fov = 66.0
 	_env.ambient_light_energy = 0.3
 	var key := DirectionalLight3D.new()
@@ -222,7 +224,7 @@ func set_bike(id: String, force := false) -> void:
 func _fit() -> void:
 	if _rig == null and _rider == null: return
 	if _hero:
-		cam.look_at_from_position(Vector3(0, 0.08, 2.05 * fit_scale), Vector3(0, _h * 0.52, 0))
+		cam.look_at_from_position(Vector3(0, 0.08, 1.85 * fit_scale), Vector3(0, _h * 0.52, 0))
 		return
 	var aspect := maxf(size.x, 1.0) / maxf(size.y, 1.0)
 	var ext := maxf(_h * 0.62, _r * 1.0 / aspect) * fit_scale   # half the height the view has to show
@@ -237,7 +239,7 @@ func _process(dt: float) -> void:
 	elif spin and not _drag: pivot.rotation.y += SPIN * dt
 	if _rider != null and _rider.visible:
 		_hand_t += dt
-		if _rider.animate(dt): return   # Mixamo clips (RiderAnim), if there are any
+		if clips_on and _rider.animate(dt): return   # Mixamo clips (RiderAnim), if there are any
 		var breathe := sin(_hand_t * 1.6) * 0.006
 		_rider.update_pose(dt, {"footL": Vector3(0.0, 0.0, -0.13), "footR": Vector3(0.02, 0.0, 0.13),
 			"handL": Vector3(0.02, 0.83 + breathe, -0.29), "handR": Vector3(0.04, 0.83 + breathe, 0.29),
