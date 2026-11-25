@@ -55,7 +55,9 @@ void lens_water_read(vec2 uv, float aspect, out vec2 ofs, out float wet, out flo
 	vec3 nn = normalize(vec3(n + gn, sqrt(max(1.0 - dot(n, n), 0.0)) + 0.2));
 	spec = (pow(max(dot(nn, normalize(vec3(-0.35, -0.75, 0.55))), 0.0), 40.0) * 0.9      // the sun / a window: sharp glint
 		+ pow(max(dot(nn, normalize(vec3(0.0, -0.6, 0.8))), 0.0), 6.0) * 0.1             // the sky: soft sheen on top
-		+ smoothstep(0.35, 0.9, abs(n.x + n.y * 0.3)) * 0.12) * lm.a;                     // a bright line down each side of a rivulet
+		+ smoothstep(0.35, 0.9, abs(n.x + n.y * 0.3)) * 0.12                              // a bright line down each side of a rivulet
+		+ pow(max(1.0 - length(n - vec2(0.18, 0.4)) * 1.6, 0.0), 3.0) * h * 0.22          // caustic: the drop focuses the light into a soft spot low inside it
+		+ smoothstep(0.72, 0.9, length(n)) * smoothstep(1.0, 0.9, length(n)) * 0.1) * lm.a; // the meniscus: a thin bright ring inside the dark edge
 	rim = smoothstep(0.5, 1.0, length(n)) * lm.a;
 }
 
