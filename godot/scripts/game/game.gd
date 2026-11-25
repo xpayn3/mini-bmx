@@ -2440,14 +2440,71 @@ func _bar_draw(st: BikePhysics, dt: float, dab_lean: float) -> float:
 	# low-side grip forward) - drawing only. BMX_OLD_TABLETOP=1 = straight bars
 	if st.air and Env.s("BMX_OLD_TABLETOP") == "":
 		sd -= clampf(st.bike_lean * BAR_TABLE, -0.5, 0.5) * st.air_k
+	# steer in the air / the landing carve (drawing only; Ride > Jumps > Steer in the air > barCarve, 0 = straight bars as before):
+	# in the air the bars turn a little into the steered / aimed turn, and the carve at touch-down bites them in and lets go
+	var bc: float = float(Tune.v.get("barCarve", 0.5))
+	if bc > 0.0 and Env.s("BMX_OLD_AIRSTEER") == "":
+		if st.carve_now != _carve_seen:
+			_carve_seen = st.carve_now
+			_bar_carve = st.carve_now
+		_bar_carve -= _bar_carve * minf(1.0, dt * 4.5)
+		var inair: float = (st._air_steer_s + st._air_aim_s) * 0.4 if st.air else 0.0
+		sd += (inair + _bar_carve * 0.8) * bc
+	else:
+		_bar_carve = 0.0
 	if _bar_probe:   # tests: BMX_BAR_PROBE (BARS lines once a second: biggest kick, biggest countersteer, bars vs physics)
 		_bp_k = maxf(_bp_k, absf(_bar_kick)); _bp_n = maxf(_bp_n, absf(st.knock)); _bp_c = maxf(_bp_c, absf(st.lean_v * BAR_CS_K)); _bp_d = maxf(_bp_d, absf(sd - st.steer))
 		if int(t) != int(t - dt):
 			print("BARS t=%.0f knock_max=%.2f x=%.0f v=%.1f kick_max=%.1fdeg countersteer_max=%.1fdeg bars_vs_physics_max=%.1fdeg" % [t, _bp_n, st.x, st.v * 3.6, rad_to_deg(_bp_k), rad_to_deg(minf(_bp_c, BAR_CS_MAX)), rad_to_deg(_bp_d)])
 			_bp_k = 0.0; _bp_c = 0.0; _bp_d = 0.0; _bp_n = 0.0
 	return sd
+## Next-bend aim (Ride > Jumps > Steer in the air > airAim): while the bike is in the air, work out how far the trail's direction at
+## the predicted touch-down (+ a few metres on, so the next bend counts) is turned from the travel direction, and hand it to the
+## physics (`aim_off`, same sign as `slip`). Off the trail, backwards on it, or no airAim: 0. The nearest trail point is kept up to
+## date every quarter second on the ground (a window round the last one), searched afresh when lost.
+func _aim_update() -> void:
+	var ph := phys
+	ph.aim_off = 0.0
+	if float(Tune.v.get("airAim", 0.6)) <= 0.0 or Env.s("BMX_OLD_AIRSTEER") != "": return
+	var t = terrain
+	if t == null or t.field == null or t.field.course == null: return
+	var tc: TrailCourse = t.field.course
+	if tc.n < 8: return
+	if not ph.air:
+		_aim_t -= 1.0 / 120.0
+		if _aim_t > 0.0 and _aim_i >= 0: return
+		_aim_t = 0.25
+		var p0 := Vector2(ph.x, ph.z)
+		if _aim_i < 0 or _aim_i >= tc.n: _aim_i = _aim_nearest(tc, p0, 0, tc.n)
+		else: _aim_i = _aim_nearest(tc, p0, maxi(0, _aim_i - 60), mini(tc.n, _aim_i + 60))
+		return
+	if _aim_i < 0 or _aim_i >= tc.n: return
+	var tl: float = clampf(ph._land_t if ph._land_t > 0.05 else 0.4, 0.15, 1.2)
+	var ahead: float = absf(ph.v) * tl
+	var cx: float = ph.x + cos(ph.course) * ahead
+	var cz: float = ph.z - sin(ph.course) * ahead
+	var j := _aim_nearest(tc, Vector2(cx, cz), maxi(0, _aim_i - 10), mini(tc.n, _aim_i + 40))
+	if Vector2(tc.X[j], tc.Z[j]).distance_to(Vector2(cx, cz)) > 12.0: return
+	var k := mini(tc.n - 1, j + 3)   # ~6 m past the landing: the line the rider will be turning onto
+	var ang := atan2(-tc.TZ[k], tc.TX[k])
+	var d := wrapf(ang - ph.course, -PI, PI)
+	if absf(d) > 1.2: return         # the trail doesn't run the way he travels: riding across it / backwards, no aim
+	ph.aim_off = d * smoothstep(0.06, 0.18, absf(d))
+
+func _aim_nearest(tc: TrailCourse, p: Vector2, a: int, b: int) -> int:
+	var best := a
+	var bd := INF
+	for i in range(a, b):
+		var dx: float = tc.X[i] - p.x
+		var dz: float = tc.Z[i] - p.y
+		var d := dx * dx + dz * dz
+		if d < bd: bd = d; best = i
+	return best
+
 var _bar_probe := Env.s("BMX_BAR_PROBE") != ""
-const BAR_TABLE := 0.4   # rad of bar turn per rad of lay-over in the air (a tabletop's bars against the lean)
+var _bar_carve := 0.0; var _carve_seen := 0.0   # the landing carve's bar turn (decays) and the last carve seen
+var _aim_i := -1; var _aim_t := 0.0              # next-bend aim: the trail index nearest the bike, its throttle clock
+const BAR_TABLE := 0.4  # rad of bar turn per rad of lay-over in the air (a tabletop's bars against the lean)
 var _bp_k := 0.0; var _bp_c := 0.0; var _bp_d := 0.0; var _bp_n := 0.0
 func _mcap(key: String, target: float, dt: float) -> float:
 	var mc: float = maxf(0.2, float(Tune.v.get("motionCap", 1.0)))   # (Ride › Smoothing: higher = looser caps)
@@ -2834,6 +2891,7 @@ func _physics_process(dt: float) -> void:
 	if level_probe: level_probe.pre_step(dt, inp)
 	if lab: lab.pre_step(inp)
 	_line_record(inp)
+	_aim_update()
 	phys.step(dt, inp)
 	if ruts: ruts.step(phys)
 	if _SKIP: _skip_probe(dt, inp)

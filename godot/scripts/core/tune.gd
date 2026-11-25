@@ -16,6 +16,7 @@ const DEFS := [
 		["feelFlow", "Flow", 1.0, 0.5, 1.5, 0.05, ""],
 		["feelAir", "Air", 1.0, 0.5, 1.5, 0.05, ""],
 		["feelPlush", "Suspension", 1.0, 0.5, 1.5, 0.05, ""],
+		["feelAirFlow", "Air flow", 1.0, 0.5, 1.5, 0.05, ""],
 	]],
 	["Steering", [
 		["steerEase", "Steer eases in (higher = snappier)", 30, 2, 40, 0.5, "/s"],
@@ -206,6 +207,14 @@ const DEFS := [
 		["whipTrigger", "Corner whip: how far both sticks must go", 0.6, 0.2, 0.95, 0.05, ""],
 		["stickAirTilt", "Air: stick tilts the nose", 0.55, 0, 1.2, 0.05, "rad"],
 		["stickAirRoll", "Air: stick lays the bike over (tabletop, at 0.8 of stick)", 1.25, 0, 1.5, 0.05, "rad"],
+		["airSteer", "Air: steer (A / D, left stick) turns the bike towards the next line", 0.6, 0, 1.0, 0.02, "rad"],
+		["airAim", "Air: hands off, the bike points where the trail goes after the landing (0 = off)", 0.6, 0, 1.0, 0.05, "×"],
+		["carveStyle", "Landing carve: style points + flow (0 = none)", 1.0, 0, 3.0, 0.1, "×"],
+		["barCarve", "Landing carve: bars turn into it (drawing only, 0 = straight)", 0.5, 0, 1.5, 0.05, "×"],
+		["airPrelean","Air: bike banks into that turn (ready for the next berm)", 0.5, 0, 1.0, 0.05, "×"],
+		["camHeadingRate", "Camera: how fast the view's heading may turn at touch-down (0 = the old jump)", 3.0, 0.0, 12.0, 0.25, "rad/s"],
+		["landSwapRate","Landing: how fast the lean swings to the next turn right after touch-down (old: 3, bank 1.5)", 7.0, 1.5, 20.0, 0.5, "rad/s"],
+		["landCarve","Landing: a steered heading becomes a turn, not a slide", 0.8, 0, 1.0, 0.05, "×"],
 		["airWhip", "Air: biggest whip (carved in at the lip: stick to the side into it)", 1.5, 0, 1.6, 0.05, "rad"],
 		["whipReturn", "Air: whip straightened for the landing", 0.7, 0, 1, 0.05, ""],
 		["stickAirEase", "Air: bike follows the stick (higher = snappier)", 8.0, 1, 12, 0.25, "/s"],
@@ -423,6 +432,7 @@ const MACROS := {
 	"feelFlow": {"flowCarry": 1.0, "carveBoost": 1.0, "pumpLegs": 0.8, "flowTime": 0.8, "rollRes": -0.8},
 	"feelAir": {"popKick": 0.6, "popPower": 0.5, "airSpinRate": 0.8, "airTilt": 0.6, "airTwist": 0.6, "flipRate": 0.6,
 		"flipAccel": 0.6, "stickAirEase": 0.5, "slamJolt": 0.6},
+	"feelAirFlow": {"airSteer": 0.8, "airAim": 0.8, "airPrelean": 0.5, "landCarve": 0.4, "landSwapRate": 0.8, "camHeadingRate": 0.3},
 	"feelPlush": {"tyreHz": -0.6, "travel": 0.6, "damperKnee": -0.5, "damperBlow": -0.6, "legStiff": -0.5, "tyreDamp": 0.3},
 }
 static var _macro_of := {}   # detail key -> [[macro, exp], ...]

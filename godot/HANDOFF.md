@@ -2142,6 +2142,37 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   = off; `BMX_LAND_PROBE=1` prints `LANDANGLE err= cut=`. Suite baseline re-saved (it predated the whole jump / brake
   work of the day).
 
+### Steer in the air + landing carve (2026-11-25, user: "come out of a berm, pump, turn in the air to land square and ready for the opposite turn")
+- A / D / the left stick (`roll_keys`, same lock rule as before: a steer held from the ground counts once moved) now YAW the bike in the air by up
+  to `airSteer` 0.6 rad off the travel (`_air_steer_s`, added to the whip's hip-twist target `tw_t`; eased in over `AIR_STEER_RAMP` after
+  `AIR_STEER_DELAY` 0.04 s, less while spinning flat; hip spring `AIR_STEER_K` 190 while steering, so a 0.3 s hop gets ~30 deg). The bike banks
+  into it (`airPrelean` 0.5 x the offset, on top of `airRoll`). The right stick is untouched (tilt, lay over, whip, spin, flip).
+- **Landing carve** (`landCarve` 0.8, touch-down block before the sideways rule): a heading within `CARVE_MAX` 0.7 rad of the travel, on the side
+  you steered, swings the travel round to it (course += heading offset x landCarve), `CARVE_COST` 0.15 x sin(turn) of the speed lost; what is
+  left goes through the old landYaw rule. Hands off = steer 0 = nothing changes (playground suite identical with / without).
+- Sliders: Ride > Jumps > "Steer in the air". `BMX_OLD_AIRSTEER=1` = off, `BMX_AIRSTEER_PROBE=1` (`AIRSTEER` 10x/s in the air, `CARVE` at touch-down).
+  Test: `BMX_FOLLOW=1 BMX_TRICK=side` (alternates A / D). Not ridden by the user yet.
+- **A steer held from the ground counts in a short hop** (user F8, 2026-11-25: keyboard, D held through a 0.1 s bump = "locked, no lean"): `roll_keys` was 0 for the whole
+  flight when the key was held at take-off (`air_lock_a`). Now it counts in full up to `AIR_LOCK_FROM` 0.3 s of air and fades out over `AIR_LOCK_FADE` 0.3 s (a held key
+  into a real lip is the old lock again). `BMX_OLD_AIRSTEER=1` = the old lock.
+- **Next-bend aim** (`airAim` 0.6, 0 = off): hands off (no steer, no stick, not spinning) the bike is pointed at the trail's direction ~6 m past the predicted touch-down
+  (`Game._aim_update` -> `phys.aim_off`, same sign as `slip`, only on the trail and only when the trail runs within ~70 deg of the travel; capped `AIM_MAX` 0.5 rad x airAim;
+  `_air_aim_s` added to the hip-twist target next to the steer, banks with `airPrelean`, counts for the landing carve). The player's steer / stick takes over at once.
+  Playground / levels without a course: no aim (the suite is unchanged). **Carve reward** (`carveStyle` 1, 0 = none): a carve of >= `CARVE_REWARD_MIN` 7 deg pays
+  ~120 x carveStyle points ("CARVE") + a notch of flow. **Bars** (`barCarve` 0.5, 0 = straight, drawing only, `Game._bar_draw`): turn a little into the steered / aimed
+  turn in the air and bite in at the carve (`phys.carve_now`, decays 4.5 /s). Probe `BMX_AIRSTEER_PROBE=1` prints `aim_want` / `aim`.
+- **Landing swap rate** (`landSwapRate` 7 rad/s, Ride > Jumps > Steer in the air; `BMX_OLD_LANDSWAP=1` = old): for the first 0.35 s after touch-down the drawn lean (stick / slow
+  steer / bank) moved at 3 rad/s and the bank part at `bankLeanRate` 1.5, which made a berm-to-berm swap out of a hop heavy; both now follow `landSwapRate` in that window.
+  Drawing only (`_gx_lean` / `bank_lean`). Follow ride 60 s seed 4242: 0 crashes, 0 jitter flips, same as before.
+- **Camera snap at touch-down** (user: "landing at an angle aligns us weirdly, snaps"): measured from an F8-style ride log: the drawn heading is steady through a carve, but
+  `course` jumps 7-34 deg in ONE physics step (the carve), and `CameraRig` follows `course` in the air and `heading` on the ground, so the view swung by the whole slip
+  (now up to ~35 deg with air steer). The view's heading (`_hd_s`) now turns at most `camHeadingRate` 3 rad/s (Ride > Jumps > Steer in the air; 0 = old; > ~90 deg
+  jumps are taken at once). Probe `BMX_CAMYAW_PROBE=1` (`CAMYAW max_step_deg` per second, final camera yaw): chase cam worst frame 2.1 -> 1.0 deg at rate 3.
+  Not eased: the travel direction itself still turns in one step at the carve (nothing drawn follows it but the camera).
+- **Slider layout (same day)**: Ride > Jumps > "Steer in the air" = `airSteer*`, `airAim*`, `airPrelean`, `landCarve`, `carveStyle`, `barCarve` (* = Simple view);
+  Landing page has `landSwapRate*` and `camHeadingRate`. Feel page has a 9th macro **Air flow** (`feelAirFlow`, 0.5..1.5) scaling `airSteer` / `airAim` x m^0.8,
+  `landSwapRate` x m^0.8, `airPrelean` x m^0.5, `landCarve` x m^0.4, `camHeadingRate` x m^0.3 (air offset in a follow ride: 0.5 -> 20 deg, 1.0 -> 34, 1.5 -> 48).
+
 ### Jump technique matched to video 2 (2026-11-24, research/jump "The MTB Jumping Technique That Changed Everything")
 - His model: load the lip, then direct the energy: squash = forward through the lip (low), neutral = with the lip (mid),
   pop = straight up (high). Side views 13:24-14:38 compared frame by frame with ours: playground lane DESIGNED JUMPS now

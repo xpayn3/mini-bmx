@@ -55,6 +55,8 @@ var orbit_t := 0.0
 var cam_pitch := 36.0
 var cam_pitch_t := 36.0
 var cam_yaw := 0.0
+var _hd_s := NAN   # the view's heading, turned at most camHeadingRate rad/s (smooths the air -> ground switch)
+var _cy_prev := NAN; var _cy_max := 0.0   # tests: BMX_CAMYAW_PROBE
 var cam_fov := 34.0
 var occ := 0.0
 var track_pos = null
@@ -217,6 +219,16 @@ func update_cam(dt: float) -> void:
 	# in the air the camera goes the way the rider is flying (course), never the way the bike points:
 	# a flat 180 / 360 spin turns the bike, not the view
 	var hd: float = st.course if st.air and not is_nan(st.course) else st.heading
+	# (the switch between "the way he flies" in the air and "the way the bike points" on the ground used to jump by the whole
+	# slip at touch-down: with steering in the air that is up to ~35 deg in one frame. Now the view's heading turns at most
+	# camHeadingRate rad/s; 0 = the old jump. A jump past ~90 deg (respawn, a fakie landing) is taken at once)
+	var hd_rate: float = float(Tune.v.get("camHeadingRate", 3.0))
+	if hd_rate > 0.0 and not st.crash_on and Env.s("BMX_OLD_AIRSTEER") == "":
+		if is_nan(_hd_s) or absf(BikePhysics.ang_diff(hd, _hd_s)) > 1.6: _hd_s = hd
+		_hd_s += clampf(BikePhysics.ang_diff(hd, _hd_s), -hd_rate * dt, hd_rate * dt)
+		hd = _hd_s
+	else:
+		_hd_s = hd
 	var f := Vector3(cos(hd), 0, -sin(hd))
 	var drawn: Vector3 = game.drawn_pos
 	var ys := _smooth_y(drawn.y, dt)   # the bike's height without its bumps (see _smooth_y)
@@ -298,6 +310,11 @@ func update_cam(dt: float) -> void:
 		orbit += (orbit_t - orbit) * minf(1.0, dt * 8)
 		cam_pitch += (cam_pitch_t - cam_pitch) * minf(1.0, dt * 8)
 		var yaw := cam_yaw + orbit + deg_to_rad(float(Settings.get_v("cam_side")))
+		if Env.s("BMX_CAMYAW_PROBE") != "":
+			if not is_nan(_cy_prev): _cy_max = maxf(_cy_max, absf(BikePhysics.ang_diff(yaw, _cy_prev)))
+			_cy_prev = yaw
+			if int(t) != int(t - dt):
+				print("CAMYAW max_step_deg=%.2f" % rad_to_deg(_cy_max)); _cy_max = 0.0
 		var pit := clampf(cam_pitch + float(Settings.get_v("cam_height")) - 4.0 * speed_feel, 2.0, 84.0)
 		if P.get("square", false): pit = cam_pitch   # (level: no Settings height, no speed dip)
 		var dist0 := dist

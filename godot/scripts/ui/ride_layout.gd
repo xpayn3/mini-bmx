@@ -39,6 +39,7 @@ const FEEL := [
 	["feelFlow", "How well speed is kept: rolling, pumping, carving out of berms.", "Work for it", "Keeps speed"],
 	["feelAir", "Pop off lips and how freely the bike flips, spins and tilts in the air.", "Heavy", "Floaty"],
 	["feelPlush", "Tyres, shock and legs: how much of the ground comes through.", "Firm", "Plush"],
+	["feelAirFlow", "How freely you steer through the air and land into the next turn: air steer, aim, carve, the swing after landing and the camera.", "Tame", "Flowing"],
 ]
 
 const PAGES := [
@@ -285,6 +286,14 @@ const PAGES := [
 			["flipRate", "Lip throw: max spin.", "Slow", "Fast"],
 			["flipAccel", "Lip throw: pull.", "Gentle", "Hard"],
 		]],
+		["Steer in the air (A / D, left stick)", [
+			["*airSteer", "Turns the bike in the air towards where you want to land and go next. Works from a small hop, no wind-up needed.", "None", "Lots"],
+			["*airAim", "Hands off, the rider points the bike where the trail goes after the landing (the next bend). Any steer of yours takes over at once. 0 = off.", "Off", "Strong"],
+			["airPrelean", "The bike banks into that turn while it is in the air: ready for the next berm.", "Flat", "Banked"],
+			["landCarve", "Landed turned the way you steered: the tyres turn it into a corner (little speed lost) instead of a slide.", "Slides", "Carves"],
+			["carveStyle", "A landing carved into the turn pays style points + a notch of flow. 0 = no reward.", "None", "Lots"],
+			["barCarve", "The bars turn into the turn in the air and bite in at the carve (drawing only). 0 = straight bars.", "Straight", "Turned"],
+		]],
 		["Right stick in the air", [
 			["*airWhip", "Whip: stick to the side kicks the bike out sideways under the body (pushed right to the edge into a lip: a 360).", "None", "Huge"],
 			["whipReturn", "How much of the whip the rider straightens himself as the landing comes.", "You do it", "He does it"],
@@ -296,6 +305,8 @@ const PAGES := [
 			["stickBodyTilt", "Body stays as the bike tilts.", "Follows", "Stays"],
 		]],
 		["Landing", [
+			["*landSwapRate", "How quickly the bike and rider swing over to the next turn in the first third of a second after touch-down. Low = heavy, high = snappy.", "Heavy", "Snappy"],
+			["camHeadingRate", "The camera does not jump round when you land turned: its heading turns at most this fast. Low = floaty, high / 0 = the old snap.", "Floaty", "Snap"],
 			["*landSlide", "Land on ground tilted sideways: the hit is softer, the rest slides you towards its low side.", "Sticks", "Slides"],
 			["*slamJolt", "The hit that throws him down (what gets through suspension, tyres and legs).", "Fragile", "Tough"],
 			["*landHeavy", "From this share of that, a landing is heavy: speed lost, a moment to recover.", "Soon", "Rarely"],
