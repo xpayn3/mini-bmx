@@ -526,6 +526,7 @@ internal sealed class TfShared
 	public long c_gx0, c_gz0, c_gnx, c_gnz;
 	public double[] c_seg;
 	public int[] c_run_start, c_runs;
+	public double[] c_far; public long c_far_x0, c_far_z0, c_far_nx, c_far_nz;
 	public TfFeat[] route_feats;
 	// colours (linear, float32 like Godot's Color)
 	public Color needle, marsh, savanna, frost, ash, ashLight;
@@ -563,7 +564,9 @@ public partial class TerrainFieldCs : RefCounted
 	private static double LAND_WARP = 38.0, LAND_TALUS = 0.30, LAND_DETAIL_S = 0.30, LAND_FINE_S = 0.55, LAND_VALLEY_FLAT = 0.65, LAND_VALLEY_MACRO = 0.40,
 		LAND_VI = 1.0 / 420.0, LAND_CR = 1.0 / 2600.0, LAND_CM = 1.0 / 1800.0, LAND_STRATA_STEP = 3.2, LAND_STRATA = 0.7,
 		L_A240 = 16.0, L_ARDG = 14.0, L_A90 = 10.0, L_A28 = 3.2, L_REL = 1.3,
-		L_I240 = 1.0 / 240.0, L_I150 = 1.0 / 150.0, L_I90 = 1.0 / 90.0, L_I28 = 1.0 / 28.0, L_I700 = 1.0 / 700.0, L_I260 = 1.0 / 260.0, L_I170 = 1.0 / 170.0;
+		L_I240 = 1.0 / 240.0, L_I150 = 1.0 / 150.0, L_I90 = 1.0 / 90.0, L_I28 = 1.0 / 28.0, L_I700 = 1.0 / 700.0, L_I260 = 1.0 / 260.0, L_I170 = 1.0 / 170.0,
+		PK_H = 140.0, PK_I = 1.0 / 700.0, PK_RI = 1.0 / 3000.0, PK_NEAR = 60.0, PK_FAR = 300.0, ER_H = 6.0, ER_C = 48.0, ER_SP = 0.5,
+		VL_D = 10.0, VL_W = 45.0, VL_I = 1.0 / 1100.0, VL_BD = 1.2, VL_BW = 4.0;
 	private static void _land_from(Godot.Collections.Dictionary d)
 	{
 		double G(string k, double v) => d.ContainsKey(k) ? d[k].AsDouble() : v;
@@ -574,6 +577,9 @@ public partial class TerrainFieldCs : RefCounted
 		L_A240 = G("L_A240", 16.0); L_ARDG = G("L_ARDG", 14.0); L_A90 = G("L_A90", 10.0); L_A28 = G("L_A28", 3.2); L_REL = G("L_REL", 1.3);
 		L_I240 = G("L_I240", 1.0 / 240.0); L_I150 = G("L_I150", 1.0 / 150.0); L_I90 = G("L_I90", 1.0 / 90.0); L_I28 = G("L_I28", 1.0 / 28.0);
 		L_I700 = G("L_I700", 1.0 / 700.0); L_I260 = G("L_I260", 1.0 / 260.0); L_I170 = G("L_I170", 1.0 / 170.0);
+		PK_H = G("PK_H", 140.0); PK_I = G("PK_I", 1.0 / 700.0); PK_RI = G("PK_RI", 1.0 / 3000.0); PK_NEAR = G("PK_NEAR", 60.0); PK_FAR = G("PK_FAR", 300.0);
+		ER_H = G("ER_H", 6.0); ER_C = G("ER_C", 48.0); ER_SP = G("ER_SP", 0.5);
+		VL_D = G("VL_D", 10.0); VL_W = G("VL_W", 45.0); VL_I = G("VL_I", 1.0 / 1100.0); VL_BD = G("VL_BD", 1.2); VL_BW = G("VL_BW", 4.0);
 	}
 	private static readonly bool OLD_LAND = System.Environment.GetEnvironmentVariable("BMX_OLD_LAND") is { Length: > 0 };
 	private const double I700 = 1.0 / 700.0;
@@ -614,6 +620,8 @@ public partial class TerrainFieldCs : RefCounted
 	private long c_gx0, c_gz0, c_gnx, c_gnz;
 	private double[] c_seg;
 	private int[] c_run_start, c_runs;
+	private double[] c_far; private long c_far_x0, c_far_z0, c_far_nx, c_far_nz;
+	private double _lf_gx, _lf_gz;
 	private TfFeat[] _route;
 
 	public long seed_value;
@@ -766,6 +774,9 @@ public partial class TerrainFieldCs : RefCounted
 		sh.c_seg = F64(f.Get("c_seg"));
 		sh.c_run_start = f.Get("c_run_start").AsInt32Array();
 		sh.c_runs = f.Get("c_runs").AsInt32Array();
+		sh.c_far = F32(f.Get("c_far"));
+		sh.c_far_x0 = f.Get("c_far_x0").AsInt64(); sh.c_far_z0 = f.Get("c_far_z0").AsInt64();
+		sh.c_far_nx = f.Get("c_far_nx").AsInt64(); sh.c_far_nz = f.Get("c_far_nz").AsInt64();
 		sh.course = f.Get("course").AsGodotObject();
 		var rf = f.Get("route_feats").AsGodotArray();
 		sh.route_feats = new TfFeat[rf.Count];
@@ -798,6 +809,7 @@ public partial class TerrainFieldCs : RefCounted
 		cE = sh.cE; cRD = sh.cRD; cRK = sh.cRK; cLN = sh.cLN; cRO = sh.cRO; cROS = sh.cROS;
 		c_gx0 = sh.c_gx0; c_gz0 = sh.c_gz0; c_gnx = sh.c_gnx; c_gnz = sh.c_gnz;
 		c_seg = sh.c_seg; c_run_start = sh.c_run_start; c_runs = sh.c_runs;
+		c_far = sh.c_far; c_far_x0 = sh.c_far_x0; c_far_z0 = sh.c_far_z0; c_far_nx = sh.c_far_nx; c_far_nz = sh.c_far_nz;
 		_route = sh.route_feats;
 		_index_canyons();
 		_col = sh.col.Duplicate();
@@ -1341,6 +1353,7 @@ public partial class TerrainFieldCs : RefCounted
 		double slt = Math.Sqrt(tx * tx + tz * tz);
 		double fs = slt / LAND_FINE_S;
 		double a28 = L_A28 * (0.6 + 0.4 * relief) * kd * dk / (1.0 + fs * fs);
+		_lf_gx = tx; _lf_gz = tz;
 		double h = (n90 * a90 + noise((wx + 31.7) * L_I28, (wz - 17.2) * L_I28) * a28) * calm + m0 * tk * calm + hill(x, z);
 		double wm = wild_mask(x, z);
 		if (wm == 0.0)
@@ -1354,6 +1367,139 @@ public partial class TerrainFieldCs : RefCounted
 			double fl = Math.Floor(ph);
 			double st = fl + sm(0.35, 0.65, ph - fl);
 			h += sk * LAND_STRATA_STEP * (st - ph);
+		}
+		return h;
+	}
+
+	// ---------------- relief layers (terrain_field.gd _relief / _gully / trail_far: same operations, same order) ----------------
+	private const double FAR_CELL = 32.0, FAR_MAX = 640.0;
+
+	public double trail_far(double x, double z)
+	{
+		if (c_far == null || c_far_nx < 2)
+			return FAR_MAX;
+		double fx = x / FAR_CELL - c_far_x0 - 0.5;
+		double fz = z / FAR_CELL - c_far_z0 - 0.5;
+		if (fx < 0.0 || fz < 0.0 || fx >= c_far_nx - 1 || fz >= c_far_nz - 1)
+			return FAR_MAX;
+		long ix = (long)Math.Floor(fx);
+		long iz = (long)Math.Floor(fz);
+		fx -= ix;
+		fz -= iz;
+		long k = iz * c_far_nx + ix;
+		double a = c_far[k] + (c_far[k + 1] - c_far[k]) * fx;
+		double b = c_far[k + c_far_nx] + (c_far[k + c_far_nx + 1] - c_far[k + c_far_nx]) * fx;
+		return a + (b - a) * fz;
+	}
+
+	private double _cell_hash(long ix, long iz, long ch)
+	{
+		return (double)(((ix * 73856093L) ^ (iz * 19349663L) ^ (seed_value * 2654435761L) ^ (ch * 83492791L)) & 0xffff) / 65536.0;
+	}
+
+	private double _gully(double x, double z, double ux, double uz, double c, long ch)
+	{
+		long ix = floori(x / c);
+		long iz = floori(z / c);
+		double r2 = c * c;
+		double sp = c * ER_SP;
+		double acc = 0.02 / 3.0, ws = 0.02;
+		for (long dj = -1; dj < 2; dj++)
+		{
+			for (long di = -1; di < 2; di++)
+			{
+				long cx = ix + di;
+				long cz = iz + dj;
+				double px = (cx + _cell_hash(cx, cz, ch)) * c;
+				double pz = (cz + _cell_hash(cx, cz, ch + 1)) * c;
+				double dx = x - px;
+				double dz = z - pz;
+				double w = 1.0 - (dx * dx + dz * dz) / r2;
+				if (w <= 0.0)
+					continue;
+				w *= w;
+				double s = (dz * ux - dx * uz) / sp;
+				double u = 2.0 * (s - Math.Floor(s)) - 1.0;
+				acc += w * u * u;
+				ws += w;
+			}
+		}
+		return acc / ws;
+	}
+
+	private double _relief(double x, double z)
+	{
+		double gx = _lf_gx;
+		double gz = _lf_gz;
+		double wm = wild_mask(x, z);
+		if (wm == 0.0)
+			return 0.0;
+		double far = trail_far(x, z);
+		double side = sm(3.0, 14.0, trail_metres(x, z));
+		double h = 0.0;
+		if (PK_H > 0.0)
+		{
+			double fk = sm(PK_NEAR, PK_FAR, far) * wm;
+			if (fk > 0.0)
+			{
+				double reg = sm(-0.35, 0.15, noise((x + 9100.0) * PK_RI, (z - 5300.0) * PK_RI));
+				if (reg > 0.0)
+				{
+					double n1 = noise_d((x - 3300.0) * PK_I, (z + 1700.0) * PK_I);
+					double g1x = _ndx * PK_I;
+					double g1z = _ndy * PK_I;
+					double r1 = 1.0 - Math.Abs(n1);
+					double s1 = signf(n1);
+					double n2 = noise_d((x + 2100.0) * PK_I * 2.17, (z - 600.0) * PK_I * 2.17);
+					double g2x = _ndx * PK_I * 2.17;
+					double g2z = _ndy * PK_I * 2.17;
+					double r2 = 1.0 - Math.Abs(n2);
+					double s2 = signf(n2);
+					double r1q = r1 * r1;
+					double pk = r1q * (1.0 + 0.45 * r2 * r2);
+					double a = PK_H * fk * reg;
+					h += a * (pk - 0.3);
+					gx += a * (-2.0 * r1 * s1 * g1x * (1.0 + 0.45 * r2 * r2) + r1q * 0.9 * r2 * -s2 * g2x);
+					gz += a * (-2.0 * r1 * s1 * g1z * (1.0 + 0.45 * r2 * r2) + r1q * 0.9 * r2 * -s2 * g2z);
+				}
+			}
+		}
+		if (VL_D > 0.0)
+		{
+			double vf = sm(15.0, 60.0, far) * side * wm;
+			if (vf > 0.0)
+			{
+				double vx = x + noise((x - 700.0) * VL_I * 3.1, (z + 260.0) * VL_I * 3.1) * 0.12 / VL_I;
+				double vz = z + noise((x + 1500.0) * VL_I * 3.1, (z - 900.0) * VL_I * 3.1) * 0.12 / VL_I;
+				double nv = noise_d((vx + 4700.0) * VL_I, (vz - 2900.0) * VL_I);
+				double gl = Math.Sqrt(_ndx * _ndx + _ndy * _ndy) * VL_I;
+				double dv = Math.Abs(nv) / Math.Max(gl, 0.00005);
+				if (dv < VL_W)
+				{
+					double q = 1.0 - dv / VL_W;
+					double cut = VL_D * q * q * (3.0 - 2.0 * q);
+					if (dv < VL_BW)
+					{
+						double qb = 1.0 - dv / VL_BW;
+						cut += VL_BD * qb * qb;
+					}
+					h -= cut * vf;
+				}
+			}
+		}
+		if (ER_H > 0.0)
+		{
+			double ef = sm(12.0, 40.0, far) * side * wm;
+			double sl = Math.Sqrt(gx * gx + gz * gz);
+			if (ef > 0.0 && sl > 0.06)
+			{
+				double ux = gx / sl;
+				double uz = gz / sl;
+				double a = ER_H * ef * sm(0.06, 0.4, sl);
+				double g1 = _gully(x, z, ux, uz, ER_C, 11);
+				double g2 = _gully(x, z, ux, uz, ER_C * 0.43, 23);
+				h += a * ((g1 - 0.3333333333333333) + 0.4 * g1 * (g2 - 0.3333333333333333));
+			}
 		}
 		return h;
 	}
@@ -1397,6 +1543,8 @@ public partial class TerrainFieldCs : RefCounted
 	{
 		double t = trail(x, z);
 		double h = landform(x, z);
+		if (!OLD_LAND)
+			h += _relief(x, z);
 		double p = pathN(x, z);
 		double ap = Math.Abs(p);
 		double dist = 99.0;

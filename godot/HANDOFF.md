@@ -543,6 +543,30 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   the mountains (`RANGE_*`, `HILL_TOP`), biomes, wild terrain, lakes, trail shape; a changed land moves the whole
   trail's heights (it follows the smoothed land), so jump / berm checks (`route_checks`, demo AI) should be re-run
   after saving big changes.
+- **Relief layers: mountains, erosion, valleys (2026-11-25, user: "a really good landscape generator like Houdini / World
+  Creator", picked: generator (not hand sculpting), erosion look + bigger mountains + rivers / valleys)**. `TerrainField._relief`
+  (mirrored `TerrainFieldCs._relief`, `terrain_cs_cmp` EXACT) is added to the land in `base()`, NOT in `landform()`: the
+  course's heights (`TrailCourse` E = smoothed `landform` along the trail), berms, jumps and route features are untouched; every
+  layer fades in away from the course (`trail_far`: a 32 m coarse distance map of the course, chamfer distance transform,
+  capped 640 m, built in `_bind_course` -> `_build_far`, copied to C# in `_course_from`, follows the trail when it grows) and
+  away from the side paths (`trail_metres`) and the spawn / first mountain (`wild_mask`). (1) **Mountains**: ridged noise (two
+  octaves, analytic gradient) in regions (~70 % of the land, `PK_RI` 3 km), rising from `PK_NEAR` 60 m to full `PK_H` 140 m
+  at `PK_FAR` 300 m from the trail: real ranges on the skyline (seed 4242 over 4.8 km: -4 .. 189 m). (2) **Erosion**
+  (`_gully`, own implementation from the published idea of the Johansen erosion filter, NO code copied: its code is MPL /
+  CC BY-NC-SA): stripes running down the slope (the land's + the mountains' gradient, `_lf_gx` / `_lf_gz` left by
+  `landform`), laid by a 3 x 3 neighbourhood of grid cells with hashed pivots (`_cell_hash`), bump kernel radius = 1 cell
+  (1.5 made seams), a parabola across each stripe (rounded gullies, sharp crests), two octaves (48 m, 21 m; the small ones
+  sit on the big ridges), depth `ER_H` 6 m on faces steeper than ~22 deg, from 12-40 m off the trail. (3) **Valleys**:
+  long winding channels where a domain-warped noise crosses zero (distance = |n| / |grad n|), `VL_D` 10 m deep, `VL_W` 45 m
+  half wide, ~1.1 km apart, with a riverbed `VL_BD` 1.2 m x `VL_BW` 4 m in the floor; where the land is low they fill
+  with the world's water (no flowing rivers: there is one water level). All are Land Lab sliders (groups Mountains /
+  Erosion / Valleys & rivers; 0 = off). Cost: a C# ground height 2.6 -> 2.9 us (`-s res://tools/relief_cost.gd`, with
+  `BMX_LAND=peak_h=0,eros_h=0,valley_d=0` for the old cost). `-s res://tools/relief_probe.gd -- [seed x0 z0 size]` = the
+  relief's range + how far the area is from the trail. EXACTNESS LESSON: write long decimal constants as divisions
+  (`0.02 / 3.0`): GDScript read `0.006666666666666667` one rounding step off C# (68 mismatches of 1e-14). Every world's land
+  away from the trail changed; `trail_grow_probe` / `rope_find` PASS, `wood_edge_probe` walls=0, follow ride sane.
+  Not done: river colours (gravel bed / water flowing downhill), cliff / scree colours on the new steep faces, erosion
+  on the mountains' own fine detail, gullies feeding the valleys.
 - **Rope bridges** (route feature `rope`, `world/rope_bridge.gd` + C# `world/RopeBridgeSim.cs`): a 46 m feature, a swinging rope
   bridge tied round four big pines (two each end, 2.3 m apart: ride between them) over a **canyon cut across the land**
   (`TerrainField.canyon_rims` / `canyon_dig`, mirrored in `TerrainFieldCs._canyon_dig`: polynomials + integer hashes only, exact):

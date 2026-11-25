@@ -35,6 +35,19 @@ const DEFS := [
 	["valley_p", 420.0, 100.0, 2000.0, "Valleys", "valley size (m)"],
 	["strata", 0.7, 0.0, 1.0, "Rock bands", "stepped rock ledges in rugged land"],
 	["strata_step", 3.2, 0.8, 12.0, "Rock bands", "ledge height (m)"],
+	["peak_h", 140.0, 0.0, 400.0, "Mountains", "mountain peaks: height (m)"],
+	["peak_p", 700.0, 200.0, 2500.0, "Mountains", "peaks: size (m)"],
+	["peak_region", 3000.0, 800.0, 10000.0, "Mountains", "size of the regions with / without ranges (m)"],
+	["peak_near", 60.0, 20.0, 400.0, "Mountains", "start rising this far from the trail (m)"],
+	["peak_far", 300.0, 60.0, 640.0, "Mountains", "full height from this far from the trail (m)"],
+	["eros_h", 6.0, 0.0, 25.0, "Erosion", "gullies: depth on steep faces (m)"],
+	["eros_c", 48.0, 12.0, 160.0, "Erosion", "gullies: size (m)"],
+	["eros_sp", 0.5, 0.2, 1.5, "Erosion", "gullies: spacing (higher = fewer, wider)"],
+	["valley_d", 10.0, 0.0, 40.0, "Valleys & rivers", "valleys: depth (m)"],
+	["valley_w", 45.0, 10.0, 150.0, "Valleys & rivers", "valleys: half width (m)"],
+	["valley_sp", 1100.0, 300.0, 4000.0, "Valleys & rivers", "how far apart the valleys are (m)"],
+	["bed_d", 1.2, 0.0, 5.0, "Valleys & rivers", "riverbed in the floor: depth (m)"],
+	["bed_w", 4.0, 1.0, 15.0, "Valleys & rivers", "riverbed: half width (m)"],
 ]
 
 static var values := {}       # key -> value (all keys)
@@ -113,6 +126,19 @@ static func apply() -> void:
 	TerrainField.LAND_VI = 1.0 / v.valley_p
 	TerrainField.LAND_STRATA = v.strata
 	TerrainField.LAND_STRATA_STEP = v.strata_step
+	TerrainField.PK_H = v.peak_h
+	TerrainField.PK_I = 1.0 / v.peak_p
+	TerrainField.PK_RI = 1.0 / v.peak_region
+	TerrainField.PK_NEAR = v.peak_near
+	TerrainField.PK_FAR = maxf(v.peak_far, v.peak_near + 1.0)
+	TerrainField.ER_H = v.eros_h
+	TerrainField.ER_C = v.eros_c
+	TerrainField.ER_SP = v.eros_sp
+	TerrainField.VL_D = v.valley_d
+	TerrainField.VL_W = v.valley_w
+	TerrainField.VL_I = 1.0 / v.valley_sp
+	TerrainField.VL_BD = v.bed_d
+	TerrainField.VL_BW = v.bed_w
 
 
 ## what the C# field needs (TerrainFieldCs._land_from: the same names as the static vars)
@@ -120,7 +146,8 @@ static func cs_dict() -> Dictionary:
 	var d := {}
 	for n in ["LAND_WARP", "LAND_TALUS", "LAND_DETAIL_S", "LAND_FINE_S", "LAND_VALLEY_FLAT", "LAND_VALLEY_MACRO", "LAND_VI",
 			"LAND_CR", "LAND_CM", "LAND_STRATA_STEP", "LAND_STRATA", "L_A240", "L_ARDG", "L_A90", "L_A28", "L_REL",
-			"L_I240", "L_I150", "L_I90", "L_I28", "L_I700", "L_I260", "L_I170"]:
+			"L_I240", "L_I150", "L_I90", "L_I28", "L_I700", "L_I260", "L_I170", "PK_H", "PK_I", "PK_RI", "PK_NEAR", "PK_FAR",
+			"ER_H", "ER_C", "ER_SP", "VL_D", "VL_W", "VL_I", "VL_BD", "VL_BW"]:
 		d[n] = _static(n)
 	return d
 
@@ -150,6 +177,19 @@ static func _static(n: String) -> float:
 		"L_I700": return TerrainField.L_I700
 		"L_I260": return TerrainField.L_I260
 		"L_I170": return TerrainField.L_I170
+		"PK_H": return TerrainField.PK_H
+		"PK_I": return TerrainField.PK_I
+		"PK_RI": return TerrainField.PK_RI
+		"PK_NEAR": return TerrainField.PK_NEAR
+		"PK_FAR": return TerrainField.PK_FAR
+		"ER_H": return TerrainField.ER_H
+		"ER_C": return TerrainField.ER_C
+		"ER_SP": return TerrainField.ER_SP
+		"VL_D": return TerrainField.VL_D
+		"VL_W": return TerrainField.VL_W
+		"VL_I": return TerrainField.VL_I
+		"VL_BD": return TerrainField.VL_BD
+		"VL_BW": return TerrainField.VL_BW
 	return 0.0
 
 

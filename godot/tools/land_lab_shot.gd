@@ -22,6 +22,12 @@ func _apply_args() -> void:
 		if s == "3d":
 			_p.view_3d = true
 			_p._show_view()
+		elif s.begins_with("size="):
+			_p.size_i = int(s.get_slice("=", 1))
+		elif s.begins_with("at="):
+			_p.cx = float(s.get_slice("=", 1).get_slice(",", 0)); _p.cz = float(s.get_slice("=", 1).get_slice(",", 1))
+		elif s.begins_with("orbit="):
+			_p._orbit = Vector2(float(s.get_slice("=", 1).get_slice(",", 0)), float(s.get_slice("=", 1).get_slice(",", 1)))
 		elif "=" in s:
 			LandParams.values[s.get_slice("=", 0)] = float(s.get_slice("=", 1))
 			_p._sync()

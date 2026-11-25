@@ -64,6 +64,20 @@ static var L_I28 := 1.0 / 28.0
 static var L_I700 := 1.0 / 700.0
 static var L_I260 := 1.0 / 260.0
 static var L_I170 := 1.0 / 170.0
+## the relief layers on top of the land, away from the trail (Land Lab: Mountains / Erosion / Valleys; _relief)
+static var PK_H := 140.0          # mountain peaks: height (m)
+static var PK_I := 1.0 / 700.0    # ... their size (1 / m)
+static var PK_RI := 1.0 / 3000.0  # ... size of the regions with / without ranges
+static var PK_NEAR := 60.0        # ... start rising this far from the trail (m)
+static var PK_FAR := 300.0        # ... full height from here
+static var ER_H := 6.0            # erosion gullies: depth (m) on a steep face
+static var ER_C := 48.0           # ... cell size of the big gullies (m)
+static var ER_SP := 0.5           # ... gully spacing in cells
+static var VL_D := 10.0           # valleys: depth (m)
+static var VL_W := 45.0           # ... half width (m)
+static var VL_I := 1.0 / 1100.0   # ... how far apart (1 / m)
+static var VL_BD := 1.2           # riverbed in the valley floor: depth (m)
+static var VL_BW := 4.0           # ... half width (m)
 func land_get() -> Dictionary:   # for TerrainFieldCs.setup_from
 	return LandParams.cs_dict()
 ## biome climate noises (periods in m): altitude proxy, moisture, forest, ash patches (they never read the real height: the
@@ -172,6 +186,17 @@ var c_seg := PackedFloat64Array()
 # per cell: runs of consecutive segment indices, packed as start * 256 + (end - start)
 var c_run_start := PackedInt32Array()
 var c_runs := PackedInt32Array()
+## coarse distance to the course (m), FAR_CELL cells, capped at FAR_MAX: how far the relief layers are from the trail
+## (query() only sees QR = 19 m). Built with the course (_build_far), copied to C# (TerrainFieldCs._course_from).
+const FAR_CELL := 32.0
+const FAR_MAX := 640.0
+var c_far := PackedFloat32Array()
+var c_far_x0: int = 0
+var c_far_z0: int = 0
+var c_far_nx: int = 0
+var c_far_nz: int = 0
+var _lf_gx := 0.0                 # the land's slope at the last landform() (its 240 / 90 m terms)
+var _lf_gz := 0.0
 
 # ---------------- per-instance state ----------------
 # course query result (the JS q object)
@@ -351,6 +376,7 @@ func adopt_course(g: TerrainField) -> void:
 	cRD = g.cRD; cRK = g.cRK; cLN = g.cLN; cRO = g.cRO; cROS = g.cROS
 	c_gx0 = g.c_gx0; c_gz0 = g.c_gz0; c_gnx = g.c_gnx; c_gnz = g.c_gnz; c_start = g.c_start; c_items = g.c_items
 	c_seg = g.c_seg; c_run_start = g.c_run_start; c_runs = g.c_runs
+	c_far = g.c_far; c_far_x0 = g.c_far_x0; c_far_z0 = g.c_far_z0; c_far_nx = g.c_far_nx; c_far_nz = g.c_far_nz
 	route_feats = g.route_feats
 	_index_canyons()
 	_reset_caches()
@@ -420,6 +446,7 @@ func _bind_course(private: bool = false) -> void:
 		if a >= 0:
 			c_runs.append(a * 256 + (b - a))
 	c_run_start[c_start.size() - 1] = c_runs.size()
+	_build_far()
 	if private:
 		cX = cX.duplicate(); cZ = cZ.duplicate(); cKD = cKD.duplicate(); cTX = cTX.duplicate(); cTZ = cTZ.duplicate()
 		cKAP = cKAP.duplicate(); cW = cW.duplicate(); cBT = cBT.duplicate(); cE = cE.duplicate(); cRD = cRD.duplicate()
@@ -896,6 +923,7 @@ func landform(x: float, z: float) -> float:
 	var slt := sqrt(tx * tx + tz * tz)
 	var fs := slt / LAND_FINE_S
 	var a28 := L_A28 * (0.6 + 0.4 * relief) * kd * dk / (1.0 + fs * fs)
+	_lf_gx = tx; _lf_gz = tz
 	var h := (n90 * a90 + noise((wx + 31.7) * L_I28, (wz - 17.2) * L_I28) * a28) * calm + m0 * tk * calm + hill(x, z)
 	var wm := wild_mask(x, z)
 	if wm == 0.0:
@@ -908,6 +936,173 @@ func landform(x: float, z: float) -> float:
 		var fl := floorf(ph)
 		var st := fl + sm(0.35, 0.65, ph - fl)
 		h += sk * LAND_STRATA_STEP * (st - ph)
+	return h
+
+
+## distance to the course from c_far (bilinear between cell centres), FAR_MAX outside
+func trail_far(x: float, z: float) -> float:
+	if c_far_nx < 2:
+		return FAR_MAX
+	var fx := x / FAR_CELL - c_far_x0 - 0.5
+	var fz := z / FAR_CELL - c_far_z0 - 0.5
+	if fx < 0.0 or fz < 0.0 or fx >= c_far_nx - 1 or fz >= c_far_nz - 1:
+		return FAR_MAX
+	var ix := int(floorf(fx))
+	var iz := int(floorf(fz))
+	fx -= ix
+	fz -= iz
+	var k := iz * c_far_nx + ix
+	var a: float = c_far[k] + (c_far[k + 1] - c_far[k]) * fx
+	var b: float = c_far[k + c_far_nx] + (c_far[k + c_far_nx + 1] - c_far[k + c_far_nx]) * fx
+	return a + (b - a) * fz
+
+
+func _build_far() -> void:
+	var n := cX.size()
+	c_far = PackedFloat32Array()
+	c_far_nx = 0; c_far_nz = 0
+	if n == 0:
+		return
+	var mnx := INF; var mxx := -INF; var mnz := INF; var mxz := -INF
+	for i in n:
+		mnx = minf(mnx, cX[i]); mxx = maxf(mxx, cX[i]); mnz = minf(mnz, cZ[i]); mxz = maxf(mxz, cZ[i])
+	c_far_x0 = floori((mnx - FAR_MAX) / FAR_CELL)
+	c_far_z0 = floori((mnz - FAR_MAX) / FAR_CELL)
+	c_far_nx = floori((mxx + FAR_MAX) / FAR_CELL) - c_far_x0 + 1
+	c_far_nz = floori((mxz + FAR_MAX) / FAR_CELL) - c_far_z0 + 1
+	var nx := c_far_nx
+	var d := PackedFloat64Array()
+	d.resize(nx * c_far_nz)
+	d.fill(FAR_MAX)
+	for i in n:
+		var ix := floori(cX[i] / FAR_CELL) - c_far_x0
+		var iz := floori(cZ[i] / FAR_CELL) - c_far_z0
+		var ex := (c_far_x0 + ix + 0.5) * FAR_CELL - cX[i]
+		var ez := (c_far_z0 + iz + 0.5) * FAR_CELL - cZ[i]
+		var k := iz * nx + ix
+		d[k] = minf(d[k], sqrt(ex * ex + ez * ez))
+	var c1 := FAR_CELL
+	var c2 := FAR_CELL * 1.4142135623730951
+	for iz in c_far_nz:
+		for ix in nx:
+			var k := iz * nx + ix
+			var v: float = d[k]
+			if ix > 0: v = minf(v, d[k - 1] + c1)
+			if iz > 0:
+				v = minf(v, d[k - nx] + c1)
+				if ix > 0: v = minf(v, d[k - nx - 1] + c2)
+				if ix < nx - 1: v = minf(v, d[k - nx + 1] + c2)
+			d[k] = v
+	for iz in range(c_far_nz - 1, -1, -1):
+		for ix in range(nx - 1, -1, -1):
+			var k := iz * nx + ix
+			var v: float = d[k]
+			if ix < nx - 1: v = minf(v, d[k + 1] + c1)
+			if iz < c_far_nz - 1:
+				v = minf(v, d[k + nx] + c1)
+				if ix < nx - 1: v = minf(v, d[k + nx + 1] + c2)
+				if ix > 0: v = minf(v, d[k + nx - 1] + c2)
+			d[k] = v
+	c_far.resize(d.size())
+	for k in d.size():
+		c_far[k] = minf(d[k], FAR_MAX)
+
+
+func _cell_hash(ix: int, iz: int, ch: int) -> float:
+	return float(((ix * 73856093) ^ (iz * 19349663) ^ (seed_value * 2654435761) ^ (ch * 83492791)) & 0xffff) / 65536.0
+
+
+## one octave of erosion gullies: stripes that run down the slope (u = downhill direction, unit), laid by the cells of a
+## c-metre grid round (x, z), each with its own random pivot, blended by a bump kernel. Returns 0 (gully floor) .. 1
+## (ridge crest): a parabola across each stripe, so the gullies are rounded and the crests sharp. Pure add / multiply.
+func _gully(x: float, z: float, ux: float, uz: float, c: float, ch: int) -> float:
+	var ix := floori(x / c)
+	var iz := floori(z / c)
+	var r2 := c * c
+	var sp := c * ER_SP
+	var acc := 0.02 / 3.0
+	var ws := 0.02
+	for dj in range(-1, 2):
+		for di in range(-1, 2):
+			var cx := ix + di
+			var cz := iz + dj
+			var px := (cx + _cell_hash(cx, cz, ch)) * c
+			var pz := (cz + _cell_hash(cx, cz, ch + 1)) * c
+			var dx := x - px
+			var dz := z - pz
+			var w := 1.0 - (dx * dx + dz * dz) / r2
+			if w <= 0.0:
+				continue
+			w *= w
+			var s := (dz * ux - dx * uz) / sp
+			var u := 2.0 * (s - floorf(s)) - 1.0
+			acc += w * u * u
+			ws += w
+	return acc / ws
+
+
+## the relief layers (Land Lab: Mountains, Erosion, Valleys) added to the land in base(): never on the course
+## (they fade in from a few metres off it: course heights, berms, jumps are untouched) nor on the side paths, the spawn
+## or the first mountain (wild_mask). Mirrored in TerrainFieldCs._relief.
+func _relief(x: float, z: float) -> float:
+	var gx := _lf_gx
+	var gz := _lf_gz
+	var wm := wild_mask(x, z)
+	if wm == 0.0:
+		return 0.0
+	var far := trail_far(x, z)
+	var side := sm(3.0, 14.0, trail_metres(x, z))
+	var h := 0.0
+	# mountains: ridged peaks in some regions, growing with the distance from the trail
+	if PK_H > 0.0:
+		var fk := sm(PK_NEAR, PK_FAR, far) * wm
+		if fk > 0.0:
+			var reg := sm(-0.35, 0.15, noise((x + 9100.0) * PK_RI, (z - 5300.0) * PK_RI))
+			if reg > 0.0:
+				var n1 := noise_d((x - 3300.0) * PK_I, (z + 1700.0) * PK_I)
+				var g1x := _ndx * PK_I
+				var g1z := _ndy * PK_I
+				var r1 := 1.0 - absf(n1)
+				var s1 := signf(n1)
+				var n2 := noise_d((x + 2100.0) * PK_I * 2.17, (z - 600.0) * PK_I * 2.17)
+				var g2x := _ndx * PK_I * 2.17
+				var g2z := _ndy * PK_I * 2.17
+				var r2 := 1.0 - absf(n2)
+				var s2 := signf(n2)
+				var r1q := r1 * r1
+				var pk := r1q * (1.0 + 0.45 * r2 * r2)
+				var a := PK_H * fk * reg
+				h += a * (pk - 0.3)
+				# its slope (the regions' and the fade's slopes left out): for the erosion below
+				gx += a * (-2.0 * r1 * s1 * g1x * (1.0 + 0.45 * r2 * r2) + r1q * 0.9 * r2 * -s2 * g2x)
+				gz += a * (-2.0 * r1 * s1 * g1z * (1.0 + 0.45 * r2 * r2) + r1q * 0.9 * r2 * -s2 * g2z)
+	# valleys: long winding channels (where a warped noise crosses zero) with a riverbed in the floor
+	if VL_D > 0.0:
+		var vf := sm(15.0, 60.0, far) * side * wm
+		if vf > 0.0:
+			var vx := x + noise((x - 700.0) * VL_I * 3.1, (z + 260.0) * VL_I * 3.1) * 0.12 / VL_I
+			var vz := z + noise((x + 1500.0) * VL_I * 3.1, (z - 900.0) * VL_I * 3.1) * 0.12 / VL_I
+			var nv := noise_d((vx + 4700.0) * VL_I, (vz - 2900.0) * VL_I)
+			var gl := sqrt(_ndx * _ndx + _ndy * _ndy) * VL_I
+			var dv := absf(nv) / maxf(gl, 0.00005)
+			if dv < VL_W:
+				var q := 1.0 - dv / VL_W
+				var cut := VL_D * q * q * (3.0 - 2.0 * q)
+				if dv < VL_BW:
+					var qb := 1.0 - dv / VL_BW
+					cut += VL_BD * qb * qb
+				h -= cut * vf
+	# erosion: gullies and sharp ridges down every slope (big ones, then small ones that the big gullies swallow)
+	if ER_H > 0.0:
+		var ef := sm(12.0, 40.0, far) * side * wm
+		var sl := sqrt(gx * gx + gz * gz)
+		if ef > 0.0 and sl > 0.06:
+			var ux := gx / sl
+			var uz := gz / sl
+			var a := ER_H * ef * sm(0.06, 0.4, sl)
+			var g1 := _gully(x, z, ux, uz, ER_C, 11)
+			var g2 := _gully(x, z, ux, uz, ER_C * 0.43, 23)
+			h += a * ((g1 - 0.3333333333333333) + 0.4 * g1 * (g2 - 0.3333333333333333))
 	return h
 
 
@@ -948,6 +1143,8 @@ func _macro(wx: float, wz: float, big: float, rdg: float) -> float:
 func base(x: float, z: float) -> float:
 	var t := trail(x, z)
 	var h := landform(x, z)
+	if not OLD_LAND:
+		h += _relief(x, z)
 	var p := pathN(x, z)
 	var ap := absf(p)
 	var dist := 99.0
