@@ -487,6 +487,34 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   fine mesh only, `BMX_NO_MICRO=1` = off): 0.3 / 1 m grain near the trail, washboard ripples in bends (stronger with `corner_load`), a pothole / washout on the road in some 37 m
   stretches (hash), ragged dirt edge, rills down banked faces. The physics + tyre fit read the smooth ground, so a tyre can sit up to ~3 cm off the drawn surface. Berm rim
   rounded too (cap 0.8..1.4 m, lip 1.1 m half-width, back slope 2.5..6 m). Not re-checked: C# vs GD EXACT after the rim rounding, the rim's shadow edge up close.
+- **Land Lab: the land's knobs in the Godot editor (2026-11-25, user: "an editor for the procedural generation so I can
+  tweak it easily with you"; user: not in the game, in the editor)**. Plugin `addons/land_lab` (enabled in project.godot):
+  a main-screen tab **Land Lab** in the editor's top bar (next to 2D / 3D / Script). Left: seed, area (300 m .. 4.8 km),
+  centre x / z, Detail (256 / 512 / 1024 points across, default 512 = 2.3 m a point over 1.2 km; the game's ground
+  is 0.5 m, so use a small area + 1024 for close detail), then one slider per knob of `LandParams` (`scripts/world/land_params.gd` `DEFS`: overall height, rolling
+  hills / ridges height + size, region size, 90 m / small bumps, rough patches, swirl (domain warp), steepness limits
+  (talus, detail / fine damping), plains vs rough region sizes, valleys, rock bands; orange value = changed, R = back to
+  default). Right: a shaded map (game ground colours, contours every 5 / 10 m, the trail in red) or 3D (left drag turns,
+  wheel zooms, "3D height x" view-only exaggeration); map: drag pans, wheel = area size. A / B (hold) = the default land
+  for the same seed / area. Numbers under it: height range, mean slope, % flat / > 15 / 25 / 35 deg, % under water.
+  SAVE writes `res://data/land_params.json` (only the changed values; **the file Claude reads / edits to tweak the land**);
+  the game reads it at the first field setup (`TerrainField.setup` -> `LandParams.ensure()`), so every world uses it.
+  RIDE HERE starts the game on that seed at the area's x with the current values (env `BMX_LAND`, nothing saved).
+  SNAPSHOT writes the view + values + numbers to `%APPDATA%\Mini BMX\landlab\snap_<date>.png/.txt` (to show Claude).
+  How it works: the generator isn't @tool, so the tab runs a background headless Godot (`tools/land_lab_render.gd --
+  --serve <user://landlab_worker/<editor pid>>`, the tab's log in `panel.log` there: rebuilds on every new job.json, ~0.7 s; quits 15 s after the editor stops touching
+  `alive`; the tab is a plain Control placing its halves itself, height cut to the window: as a container the editor
+  gave it 8348 px) with the real `TerrainField` + `TerrainFieldCs` (trail, berms, lakes, biomes all included) and samples
+  `map_heights` / `map_colors`. The knobs are static vars in `TerrainField` (`LAND_*`, `L_A*` heights, `L_I*` periods)
+  mirrored in `TerrainFieldCs` (`_land_from`, handed over in `setup_from` via `land_get`); defaults = the old constants,
+  so with no file nothing changes: `terrain_cs_cmp` EXACT with defaults and with tweaked values (`BMX_LAND=...` +
+  `BMX_MESH_K=1`: the 0.25 m near-trail mesh is C#-only, so its chunk.verts / lods / norms always differ there, before
+  this too). Tests: `BMX_LAND="land_scale=1.8,warp=80"` (any ride / tool), `BMX_LAND_FILE=0` ignores the file,
+  `--path godot -s res://tools/land_lab_shot.gd -- out.png [3d] [key=v ...]` (the tab in a plain window, shot after its
+  first build). `BMX_OLD_LAND=1` still = the original land (`_landform_old`, never reads the knobs). Not done: knobs for
+  the mountains (`RANGE_*`, `HILL_TOP`), biomes, wild terrain, lakes, trail shape; a changed land moves the whole
+  trail's heights (it follows the smoothed land), so jump / berm checks (`route_checks`, demo AI) should be re-run
+  after saving big changes.
 - **Rope bridges** (route feature `rope`, `world/rope_bridge.gd` + C# `world/RopeBridgeSim.cs`): a 46 m feature, a swinging rope
   bridge tied round four big pines (two each end, 2.3 m apart: ride between them) over a **canyon cut across the land**
   (`TerrainField.canyon_rims` / `canyon_dig`, mirrored in `TerrainFieldCs._canyon_dig`: polynomials + integer hashes only, exact):

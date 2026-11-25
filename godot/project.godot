@@ -1,20 +1,25 @@
 ; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
 config_version=5
 
 [application]
+
 config/name="Runout"
-config/use_custom_user_dir=true
-config/custom_user_dir_name="Mini BMX"
 config/description="Downhill & BMX riding on endless procedural trails."
 config/version="1.0.0"
 run/main_scene="res://scenes/main.tscn"
-config/features=PackedStringArray("4.7", "Forward Plus")
-config/icon="res://icon.svg"
+config/use_custom_user_dir=true
+config/custom_user_dir_name="Mini BMX"
+config/features=PackedStringArray("4.7", "C#", "Forward Plus")
 boot_splash/bg_color=Color(0, 0, 0, 1)
-boot_splash/show_image=true
 boot_splash/image="res://assets/splash/logo.png"
-boot_splash/fullsize=true
-boot_splash/use_filter=true
+config/icon="res://icon.svg"
 
 [autoload]
 
@@ -28,43 +33,44 @@ Steam="*res://scripts/core/steam.gd"
 
 file_logging/max_log_files=20
 
+[debug_draw_3d]
+
+settings/addon_root_folder="res://addons/debug_draw_3d"
+
 [display]
+
 window/size/viewport_width=1600
 window/size/viewport_height=900
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
-window/vsync/vsync_mode=1
 
 [dotnet]
 
 project/assembly_name="Mini BMX"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/level_builder/plugin.cfg", "res://addons/land_lab/plugin.cfg")
 
 [gui]
 
 theme/custom_font="res://assets/fonts/Barlow-Bold.ttf"
 
 [physics]
+
 common/physics_ticks_per_second=120
 common/max_physics_steps_per_frame=12
-common/physics_interpolation=false
 
 [rendering]
-anti_aliasing/quality/msaa_3d=2
-anti_aliasing/quality/screen_space_aa=1
-lights_and_shadows/directional_shadow/size=4096
+
 lights_and_shadows/directional_shadow/soft_shadow_filter_quality=3
-anti_aliasing/quality/use_debanding=true
-occlusion_culling/use_occlusion_culling=true
-rendering_device/pipeline_cache/enable=true
-shader_compiler/shader_cache/enabled=true
-environment/defaults/default_clear_color=Color(0.66, 0.84, 0.92, 1)
-camera/depth_of_field/depth_of_field_bokeh_shape=1
 camera/depth_of_field/depth_of_field_bokeh_quality=2
-environment/volumetric_fog/volume_size=64
-environment/volumetric_fog/volume_depth=64
-global_illumination/sdfgi/probe_ray_count=1
+anti_aliasing/quality/msaa_3d=2
+anti_aliasing/quality/use_debanding=true
 global_illumination/sdfgi/frames_to_converge=1
-lights_and_shadows/directional_shadow/16_bits=true
+environment/defaults/default_clear_color=Color(0.66, 0.84, 0.92, 1)
+anti_aliasing/quality/screen_space_aa=1
+occlusion_culling/use_occlusion_culling=true
 
 [shader_globals]
 
@@ -104,7 +110,6 @@ rut_ctr={
 "type": "vec4",
 "value": Vector4(0, 0, 12, 20)
 }
-
 atm_wind={
 "type": "vec4",
 "value": Vector4(0.8, 0.6, 0, 1)
@@ -169,7 +174,3 @@ grime_root={
 "type": "mat4",
 "value": Projection(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
 }
-
-[editor_plugins]
-
-enabled=PackedStringArray("res://addons/level_builder/plugin.cfg")
