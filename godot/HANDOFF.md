@@ -441,6 +441,19 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   same (drops apart). Demo AI 120 s on 4242 / 5: no crash, 135-145 fps. `BMX_OLD_ROUTE=1` = the old straight corridor.
   Map: `-s res://tools/trail_map.gd -- out.png [seed] [course m] [m/px]`. Tests `BMX_TRAIL_FEAT=s<m>` (was x<m>) = that
   far along the trail. Not changed yet: `biome_probe`, `land_probe`, `route_grade_probe` still sample round the old zc.
+- **Flow rules in the trail's layout (2026-11-25, Phase B, `trail_course.gd`)**. While laying out, the turtle keeps an
+  estimate of a rider's speed (`_v`: the land's fall in, rolling + air drag out, pedalling when slow, capped by every bend
+  at `A_BEND` 9.4 m/s^2; `_emit` reads `landform` per point). (1) Road bends never tighter than v^2 / A_BEND (a tight one
+  waits for a slow stretch). (2) Every arc of 4+ steps eases in / out: its curvature ramps over m = 25 % of it (max
+  `CLO_MAX` 6 steps = 12 m) and m steps are added so the peak radius stays R (clothoid-like: no straight-to-arc corner).
+  (3) Road bends alternate side (75 %, `_lt`) and the next one comes 1.5-3 s on at `_v` (15-70 m). (4) Grade reversals:
+  on descents steeper than ~3-7 % a 0.3-0.6 m dip-and-rise every 25-45 m (`_shape_profile`, phase summed from the start:
+  growing never changes it). (5) Switchbacks / hairpin stacks only where the hillside across the trail is steeper than
+  10 % (`_side_slope`), else plain road. `_snap` / `_undo` / `grown` carry `_v`, `_hv`, `_lt`. `BMX_OLD_FLOW=1` = before.
+  Probe `-s res://tools/flow_probe.gd -- [len] [seeds]` (old vs new: `FLOWBRAKE` bend braking / climbing per km, curvature
+  steps, alternation, dips per km). Measured 10 km: curvature steps (99th pct) 40-45 -> 15-19, bend braking 2.2-3.5 ->
+  1.7-2.4 m/s per km, dips 9 -> 12 per km. Demo AI 125 s seed 4242: braking 15 -> 13 % of the time, slide scrub -206 ->
+  -95 J/kg, avg 46.4 -> 46.9 km/h, max 59 -> 63, no crash. Grow / rope / wood / C# probes pass. Not ridden by the user yet.
 
 - **Mountains for ever + technical sections** (2026-11-21, user: "add mountains ... some gentle climbs ... missing nice tight
   turns for slow speed, more technical parts"). `TerrainField.range_at(x)` (mirrored in `TerrainFieldCs`, integer hash of slot +

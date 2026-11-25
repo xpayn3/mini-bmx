@@ -82,7 +82,17 @@ var _M  # TerrainField (zc, landform, pitches, water)
 var _r: WorldRng
 var _x := 0.0
 var _sps := PackedFloat64Array()   # (_finish) each point's s along the route spine
-var _send := 0.0   # the route spine's s at the course's last point (how far it is laid out: _L is in s)
+var _send := 0.0
+## flow rules (2026-11-25, Phase B): while laying out, the turtle keeps an estimate of the speed a rider carries here (_v,
+## from the land's fall: gravity in, rolling + air drag out, pedalling when slow, capped by every bend it lays) and sizes bends
+## to it, eases into and out of every bend, alternates bends, spaces them by time, and only lays the tight sections on
+## steep hillsides. BMX_OLD_FLOW=1 = the layout before (tests).
+static var OLD_FLOW := OS.get_environment("BMX_OLD_FLOW") != ""
+const A_BEND := 9.4      # m/s^2 a rider takes a bend with (A_RIDE + a modest berm's share of g)
+const CLO_MAX := 6       # steps (12 m): the most an arc's curvature ramps in / out over
+var _v := 4.0           # m/s: the speed estimate at the turtle
+var _hv := NAN          # the land's height at the last point it laid
+var _lt := 1.0          # the side of the last road bend (+1 / -1)   # the route spine's s at the course's last point (how far it is laid out: _L is in s)
 var _z := 0.0
 var _h := 0.0
 var _cells := {}
@@ -137,7 +147,7 @@ func grown(field, to_s: float) -> TrailCourse:
 	c._L = to_s
 	c._corr = _corr
 	c._mark_seed = _mark_seed
-	c._x = _x; c._z = _z; c._h = _h
+	c._x = _x; c._z = _z; c._h = _h; c._v = _v; c._hv = _hv; c._lt = _lt
 	c.X = X.duplicate(); c.Z = Z.duplicate(); c.KD = KD.duplicate()
 	c._cells = _cells.duplicate()
 	c._build()
@@ -183,10 +193,23 @@ func _clashes(from: int, gap: float = 19.0) -> bool:
 	return false
 
 
-func _emit(kind: int) -> void:
+func _emit(kind: int, dh: float = 0.0) -> void:
 	_x += cos(_h) * STEP
 	_z += sin(_h) * STEP
 	X.append(_x); Z.append(_z); KD.append(kind)
+	if OLD_FLOW:
+		return
+	var h: float = _M.landform(_x, _z)
+	var v2 := _v * _v
+	if not is_nan(_hv):
+		v2 += 2.0 * 9.81 * (_hv - h)
+	v2 -= 2.0 * STEP * (VA_ROLL + VA_DRAG * v2)
+	if _v < VA_PED_TOP:
+		v2 += 2.0 * VA_PEDAL * STEP
+	if absf(dh) > 1e-6:
+		v2 = minf(v2, A_BEND * STEP / absf(dh))   # a bend of radius STEP / dh: no faster than its grip allows
+	_v = clampf(sqrt(maxf(v2, 0.0)), VA_START, VA_MAX)
+	_hv = h
 
 
 func _straight(len: float, kind: int, wob: float = 0.0) -> void:
@@ -198,16 +221,37 @@ func _straight(len: float, kind: int, wob: float = 0.0) -> void:
 
 
 func _arc(ang: float, R: float, kind: int) -> void:
-	var cnt: int = maxi(1, WorldRng.jround(absf(ang) * R / STEP))
-	var dh := ang / cnt
+	var cnt0: int = maxi(1, WorldRng.jround(absf(ang) * R / STEP))
+	if OLD_FLOW or cnt0 < 4:
+		var dh := ang / cnt0
+		for i in cnt0:
+			_h += dh / 2
+			_emit(kind, dh)
+			_h += dh / 2
+		return
+	# eased: the curvature ramps up over m steps, holds (at radius R), ramps down (a clothoid-like entry / exit:
+	# no straight-to-arc corner the bars have to snap into). The ramps add m steps, so the peak radius stays R
+	var m := mini(CLO_MAX, maxi(1, WorldRng.jround(cnt0 * 0.25)))
+	var cnt := cnt0 + m
+	var wsum := 0.0
 	for i in cnt:
+		wsum += minf(1.0, minf((i + 0.5) / m, (cnt - i - 0.5) / m))
+	for i in cnt:
+		var dh := ang * minf(1.0, minf((i + 0.5) / m, (cnt - i - 0.5) / m)) / wsum
 		_h += dh / 2
-		_emit(kind)
+		_emit(kind, dh)
 		_h += dh / 2
 
 
 func _turn_to(target: float, R: float, kind: int) -> void:
 	_arc(wrap_angle(target - _h), R, kind)
+
+
+## how steep the land is here across the way the trail runs (rise over run, 40 m each side, the land with its mountains)
+func _side_slope() -> float:
+	var nx := -sin(_h)
+	var nz := cos(_h)
+	return absf(_M.landform(_x + nx * 40.0, _z + nz * 40.0) - _M.landform(_x - nx * 40.0, _z - nz * 40.0)) / 80.0
 
 
 ## how far along the route spine the turtle is (m: TerrainField.spine_near)
@@ -237,11 +281,11 @@ func _next_pitch() -> int:
 
 
 func _snap() -> Array:
-	return [_x, _z, _h, X.size()]
+	return [_x, _z, _h, X.size(), _v, _hv, _lt]
 
 
 func _undo(s: Array) -> void:
-	_x = s[0]; _z = s[1]; _h = s[2]
+	_x = s[0]; _z = s[1]; _h = s[2]; _v = s[4]; _hv = s[5]; _lt = s[6]
 	X.resize(s[3]); Z.resize(s[3]); KD.resize(s[3])
 
 
@@ -289,6 +333,10 @@ static func _jump_remap(p: float, j: float, old_band: float) -> float:
 
 ## a section of the course; swap = a plain stretch of road instead of the tight sections (RouteStyle.twist below 1)
 func _section(fns: Array, swap: bool) -> void:
+	# switchbacks / hairpin stacks exist because a hillside is too steep to ride straight down: on gentle land they
+	# make no sense, a flowing road does instead
+	if not OLD_FLOW and (fns[0][0] == 1 or fns[0][0] == 6) and _side_slope() < 0.10:
+		swap = true
 	if swap: _attempt([[0, 50.0 + fposmod(_x * 0.37, 1.0) * 80.0]])
 	else: _attempt(fns)
 
@@ -301,12 +349,21 @@ func _road(max_len: float) -> void:
 		var o := _off()
 		var lim := _corr - 30
 		var tgt := (_r.next() * 2 - 1) * 72 * D2R * sqrt(tw)
+		if not OLD_FLOW:   # rhythm: mostly the other way from the last bend (left-right-left), now and then the same way again
+			var mag := absf(tgt)
+			_lt = -_lt if _r.next() < 0.75 else _lt
+			tgt = _lt * maxf(mag, 18.0 * D2R)
 		if absf(o) > lim * (0.5 if TerrainField.OLD_ROUTE else 0.75):   # (new: the trail uses more of the corridor's width)
 			tgt = -signf(o) * (22 + _r.next() * 44) * D2R
+			_lt = signf(tgt)
 		tgt = _rel(tgt)
 		var seg := minf(len - done, 18 + _r.next() * 40)
+		if not OLD_FLOW:   # the next bend 1.5-3 s on at the speed riders carry here
+			seg = minf(len - done, clampf(_v * (1.5 + _r.next() * 1.5), 15.0, 70.0))
 		# often a tight bend instead of a sweeper
 		var R := (13 + _r.next() * 16) if _r.next() < minf(0.42 * tw, 0.95) else (34 + _r.next() * 56) / maxf(0.6, sqrt(tw))
+		if not OLD_FLOW:   # never tighter than the speed riders arrive at can take (a tight one waits for a slow stretch)
+			R = maxf(R, _v * _v / A_BEND)
 		var n0 := X.size()
 		_turn_to(tgt, R, ROAD)
 		var used := (X.size() - n0) * STEP
@@ -657,6 +714,21 @@ func _shape_profile() -> void:
 		var s := i * STEP
 		var amp := (0.3 + 1.5 * (0.5 + 0.5 * sin(s / 310.0 + seed_i))) * roll
 		E[i] += w * amp * sin(s * TAU / 60.0 + 0.7 * sin(s / 140.0))
+	if not OLD_FLOW:
+		# grade reversals: on a descent, a gentle dip-and-rise every 25-45 m (a 0.3-0.6 m wave on top of the fall). Where trail
+		# builders put them for drainage riders pump them; the trail never just runs one straight slope down. Phase summed
+		# from the start, so growing the trail never changes the part already laid out
+		var e0 := E.duplicate()
+		var ph := 0.0
+		for i in n:
+			var s := i * STEP
+			ph += TAU * STEP / (35.0 + 10.0 * sin(s / 170.0 + seed_i * 0.37))
+			if i < 10 or i >= n - 10 or KD[i] == JUMP or KD[i] == ROCKS or KD[i] == START or KD[i] == FINISH:
+				continue
+			var gr := (e0[i + 10] - e0[i - 10]) / (20.0 * STEP)
+			var w := smooth(0.03, 0.07, -gr)
+			if w > 0.0:
+				E[i] += w * (0.45 + 0.15 * sin(s / 230.0 + seed_i)) * sin(ph)
 	drops = []
 	var last_end := 0
 	var SLOT := 80
