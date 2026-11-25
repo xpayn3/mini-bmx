@@ -2281,8 +2281,8 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		orient_hand(glove[i], ika[0], hand, right)
 		if sty.wristRoll != 0.0:
 			glove[i].rotate_object_local(Vector3.RIGHT, side * float(sty.wristRoll))
-		if sty.get("palmIn", 0.0) != 0.0:   # both hands turned the same way in the world (the hero shot: arms hanging, palms to the thighs)
-			glove[i].rotate_object_local(Vector3.RIGHT, float(sty.palmIn))
+		if sty.get("palmIn", 0.0) != 0.0:   # mirrored per hand (the hero shot: arms hanging, both palms to the thighs)
+			glove[i].rotate_object_local(Vector3.RIGHT, float(sty.palmIn) * side * (float(Env.s("BMX_PALMSIDE")) if Env.s("BMX_PALMSIDE") != "" else 1.0))
 		set_limb(fore_arm[i], ika[0], _wrist(i, ika[0]))
 		_curl_to(i, GloveFingers.RELAXED if standing else 1.0, dt * 5.0)   # on the bike: wrapped round the grip
 		J[3 + i * 3] = shp
