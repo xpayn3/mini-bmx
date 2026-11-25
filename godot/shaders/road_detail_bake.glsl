@@ -47,6 +47,7 @@ layout(push_constant, std430) uniform Push {
 #define P_EDGE_VAR    prm.P[8]    // ragged edge wander (as ground.gdshader trail_edge_var)
 #define P_EDGE_FADE   prm.P[9]    // edge fade width (trail_edge_fade)
 #define P_GROOVE      prm.P[10]   // how much darker the worn riding line is
+#define P_FOOTPRINTS  prm.P[11]   // walkers' footprints along the trail (0 = none)
 
 // ---- ground.gdshader's noise, bit for bit ----
 vec3 gd_hash3(vec2 p) {
@@ -195,7 +196,7 @@ void layer_lines(inout Surf s, Ctx c, out float line) {
 	s.driven = smoothstep(0.08, 0.8, drv);
 	float edge = smoothstep(0.15, 0.5, c.t) * (1.0 - smoothstep(0.75, 0.98, c.t));
 	float shoulder = smoothstep(0.05, 0.3, line) * (1.0 - smoothstep(0.3, 0.8, line));
-	s.loose = clamp((1.0 - s.driven) * (0.45 + 0.4 * shoulder + 0.5 * edge) * (1.0 - c.jm), 0.0, 1.0);
+	s.loose = clamp((1.0 - s.driven) * (0.45 + 0.4 * shoulder + 0.5 * edge) * (1.0 - 0.6 * c.jm), 0.0, 1.0);
 }
 
 // three riders' tyre prints inside the line, with knob dimples
@@ -252,6 +253,47 @@ float layer_play(Ctx c) {
 	return lineaa(d, 0.022, 0.055, c.fw) * (0.6 + 0.4 * ph2.z) * (1.0 - c.jm) * (1.0 - c.t_air) * c.tfk;
 }
 
+// footprints of people who walked the trail (user, 2026-11-25): a shoe sole (ball + waist + heel, ~26 cm) pressed in,
+// drawn in the trail's own frame (along / across, metres), filtered to the sample spacing like every mark
+float footprint(vec2 q, float fw) {
+	// q: metres from the print's middle, x along the step, y across. Ball (front) and heel, a narrow waist between
+	vec2 b = (q - vec2(0.05, 0.0)) / vec2(0.085, 0.05);
+	vec2 h = (q + vec2(0.085, 0.0)) / vec2(0.055, 0.042);
+	vec2 m = q / vec2(0.13, 0.034);                          // the waist joining them
+	float d = min(min(length(b), length(h)), length(m));
+	float aa = fw / 0.04;
+	return 1.0 - smoothstep(0.85 - aa, 1.05 + aa, d);
+}
+// many people over time, not one walker (user: "random, more faint, random people, totally random walk over time"):
+// prints scattered in a jittered 0.55 m grid in the trail's frame, a share of the cells holding one; each its own
+// direction (mostly along the trail either way, often turned, now and then any way) and age (old ones barely there),
+// worn off the riders' line. Overlaps keep the clearest.
+float layer_footprints(Ctx c, float line) {
+	if (P_FOOTPRINTS <= 0.0 || c.t < 0.3) return 0.0;
+	const float CELLF = 0.55;
+	vec2 g = vec2(c.sl, c.ac) / CELLF;
+	vec2 gi = floor(g);
+	float fp = 0.0;
+	for (int j = -1; j <= 1; j++) {
+		for (int i = -1; i <= 1; i++) {
+			vec2 cc = gi + vec2(float(i), float(j));
+			vec3 h = gd_hash3(cc + 911.0);
+			if (h.x > 0.22 * P_FOOTPRINTS) continue;
+			vec3 h2 = gd_hash3(cc + 377.0);
+			vec2 ctr = (cc + 0.15 + 0.7 * h2.xy) * CELLF;         // where in its cell
+			// along the trail either way, spread ~+-35 deg; one in five turned any way
+			float ang = (h.y < 0.5 ? 0.0 : 3.14159) + (h2.z - 0.5) * 1.2;
+			if (h.z > 0.8) ang = h2.z * 6.28318;
+			vec2 q = vec2(c.sl, c.ac) - ctr;
+			q = vec2(q.x * cos(ang) + q.y * sin(ang), -q.x * sin(ang) + q.y * cos(ang));
+			float age = gd_hash(vec3(cc, 5.3));                     // 0 fresh .. 1 old
+			fp = max(fp, footprint(q, c.fw) * mix(0.75, 0.12, age * age));
+		}
+	}
+	// riders wear them off their line; none on built jumps or where riders fly
+	return fp * (1.0 - 0.7 * line) * (1.0 - c.jm) * (1.0 - c.t_air) * c.tfk;
+}
+
 // puddles + damp soil in a road's worn lines (ground.gdshader; "level ground" is applied by the ground shader)
 void layer_puddles(inout Surf s, Ctx c, float line) {
 	float zone = smoothstep(0.47, 0.62, gd_noise3(vec3(c.sl * 0.011, 21.0, 8.0)));
@@ -298,7 +340,7 @@ Surf surface(Ctx c) {
 	vec2 pb;
 	layer_pebbles(s, c, pb);
 	bool on = c.t > 0.004 || c.tf2.a > 0.01;
-	float line = 0.0, m_skid = 0.0, m_stray = 0.0, m_play = 0.0;
+	float line = 0.0, m_skid = 0.0, m_stray = 0.0, m_play = 0.0, m_foot = 0.0;
 	if (on) {
 		layer_skid(s, c, m_skid);
 		s.skid = m_skid;
@@ -306,6 +348,7 @@ Surf surface(Ctx c) {
 		layer_prints(s, c);
 		layer_stray(s, c, m_stray);
 		m_play = layer_play(c);
+		m_foot = layer_footprints(c, line);
 		layer_puddles(s, c, line);
 		// tyres sweep the grit off the packed line: it lies thick on the loose shoulders, thin where they ride
 		s.peb *= 0.25 + 0.75 * clamp(s.loose * 1.4, 0.0, 1.0);
@@ -318,7 +361,7 @@ Surf surface(Ctx c) {
 		float k = 1.0;
 		k *= 1.0 + s.driven * (0.05 * c.dry - 0.03) + s.loose * 0.05;
 		k *= 1.0 + streak * 0.09 * c.f2 * (0.35 + 0.65 * s.driven);
-		k *= 1.0 + scuff * 0.045 * (1.0 - c.jm);
+		k *= 1.0 + scuff * 0.045 * (1.0 - 0.5 * c.jm);
 		k *= 1.0 + s.peb * 0.16 * pb.y * (0.25 + 0.75 * s.loose) + (c.n2 - 0.5) * 0.1 * c.f1 * (1.0 - 0.6 * s.driven);
 		k *= 1.0 - P_GROOVE * line * (1.0 - c.jm);   // the worn line a touch darker (a racing game's groove)
 		// (darker than the per-pixel path had them: there the lines showed mostly by their relief, lit per pixel; baked,
@@ -327,14 +370,15 @@ Surf surface(Ctx c) {
 		k *= 1.0 - 0.24 * m_skid;
 		k *= 1.0 - 0.11 * m_stray;
 		k *= 1.0 - 0.11 * m_play;
+		k *= 1.0 - 0.16 * m_foot;   // a footprint: the soil pressed a little darker
 		// relief: worn lines below, prints / skids pressed in, grit proud, lumpy between the lines
 		float lump = (gd_noise3(vec3(c.ac * 5.0, c.sl * 0.9, 6.0)) - 0.5) * 0.012 * c.tfk + (c.n1 - 0.5) * 0.006 * c.f2;
-		float th = -0.03 * line * c.depth_k * (1.0 - 0.7 * c.jm) - 0.008 * s.prints * c.depth_k - 0.014 * m_skid - 0.006 * m_stray - 0.007 * m_play
-			+ (s.peb * (0.006 + 0.008 * pb.y) + lump) * (0.3 + 0.7 * s.loose) * (1.0 - 0.8 * c.jm);
+		float th = -0.03 * line * c.depth_k * (1.0 - 0.7 * c.jm) - 0.008 * s.prints * c.depth_k - 0.014 * m_skid - 0.006 * m_stray - 0.007 * m_play - 0.01 * m_foot
+			+ (s.peb * (0.006 + 0.008 * pb.y) + lump) * (0.3 + 0.7 * s.loose) * (1.0 - 0.4 * c.jm);
 		th *= 1.0 - s.puddle;
 		k *= 1.0 + th * 2.2;
 		k *= 1.0 + c.jm * 0.04;
-		k = mix(k, 1.0 + (k - 1.0) * 0.45, c.jm);
+		k = mix(k, 1.0 + (k - 1.0) * 0.8, c.jm);   // built jumps a touch more even (was 0.45: they read blurred)
 		s.k = k;
 		s.hgt += th;
 	}

@@ -285,7 +285,7 @@ void fragment() {
 		m_driven = smoothstep(0.08, 0.8, m_driven);
 		float edge = smoothstep(0.15, 0.5, t) * (1.0 - smoothstep(0.75, 0.98, t));
 		float shoulder = smoothstep(0.05, 0.3, line) * (1.0 - smoothstep(0.3, 0.8, line));   // just beside the line
-		m_loose = clamp((1.0 - m_driven) * (0.45 + 0.4 * shoulder + 0.5 * edge) * (1.0 - jm), 0.0, 1.0);
+		m_loose = clamp((1.0 - m_driven) * (0.45 + 0.4 * shoulder + 0.5 * edge) * (1.0 - 0.6 * jm), 0.0, 1.0);
 		// tyre prints: three riders' tracks, each its own slow wander and its own stretches
 		float trk_fade = 1.0 - smoothstep(0.02, 0.07, gpx);
 		if (trk_fade > 0.0) {
@@ -357,7 +357,9 @@ void fragment() {
 		rl = mix(rl, r2, clamp(m_loose * 1.2 + rd * 0.35, 0.0, 1.0) * (1.0 - m_driven));
 		// (the scans are textures with mips: with the baked road nothing fades them, distance does it the way it should)
 		float rfade = vt > 0.0 ? 1.0 : 1.0 - smoothstep(0.08, 0.35, gpx);
-		tbump = (1.0 - 0.6 * m_driven) * (1.0 - 0.8 * jm) * rfade * tn;
+		// built jumps: a bit smoother than the trail (packed clay), not wiped out (it was 1 - 0.8 jm, and the jump also
+		// counts as ridden line: ~8 % of the relief was left, the jumps read blurred: user, 2026-11-25)
+		tbump = (1.0 - 0.6 * m_driven * (1.0 - 0.6 * jm)) * (1.0 - 0.35 * jm) * rfade * tn;
 		tslope = rl.xy * tbump;
 		if (vt > 0.0) {
 			// baked colour; the relief's hollows darken as below; the worn relief tilts the normal from B's slope (below).
@@ -374,7 +376,7 @@ void fragment() {
 		float k = 1.0;
 		k *= 1.0 + m_driven * (0.05 * dry - 0.03) + m_loose * 0.05;
 		k *= 1.0 + streak * 0.09 * f2 * (0.35 + 0.65 * m_driven);
-		k *= 1.0 + scuff * 0.045 * (1.0 - jm);
+		k *= 1.0 + scuff * 0.045 * (1.0 - 0.5 * jm);
 		k *= 1.0 + peb * 0.16 * pb.y * (0.25 + 0.75 * m_loose) + (n2 - 0.5) * 0.1 * f1 * (1.0 - 0.6 * m_driven);
 		k *= 1.0 - 0.1 * length(rl.xy) * tbump;          // the relief's hollows sit a little darker
 		k *= 1.0 - 0.11 * m_tracks;
@@ -385,11 +387,11 @@ void fragment() {
 		// into it, loose grit and pebbles stand proud, and the unridden ground between the lines is slightly lumpy
 		float lump = (gd_noise3(vec3(ac * 5.0, sl * 0.9, 6.0)) - 0.5) * 0.012 * tfk + (n1 - 0.5) * 0.006 * f2;
 		thgt = -0.03 * line * depth_k * (1.0 - 0.7 * jm) - 0.008 * m_tracks * depth_k - 0.014 * m_skid - 0.006 * m_stray - 0.007 * m_play
-			+ (peb * (0.006 + 0.008 * pb.y) + lump) * (0.3 + 0.7 * m_loose) * (1.0 - 0.8 * jm);
+			+ (peb * (0.006 + 0.008 * pb.y) + lump) * (0.3 + 0.7 * m_loose) * (1.0 - 0.4 * jm);
 		thgt *= (1.0 - smoothstep(0.04, 0.16, gpx)) * tnear * (1.0 - m_puddle);
 		k *= 1.0 + thgt * 2.2;                           // hollows hold a little shade, high spots catch light
 		k *= 1.0 + jm * 0.04;                            // built jumps: raked, packed clay, more even
-		k = mix(k, 1.0 + (k - 1.0) * 0.45, jm);
+		k = mix(k, 1.0 + (k - 1.0) * 0.8, jm);
 		tcol = vec3(mix(1.0, k, tnear));
 		}   // (per-pixel colour)
 		// dry dirt stays matte (>= 0.9 = no sun glint in light()): packed lines / prints at 0.74-0.8 glinted, so with a

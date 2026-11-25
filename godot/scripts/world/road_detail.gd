@@ -33,6 +33,7 @@ const PARAMS := [
 	["edge_var", 1.0, "how far the ragged edge wanders (ground.gdshader trail_edge_var)"],
 	["edge_fade", 1.0, "edge fade width (ground.gdshader trail_edge_fade)"],
 	["groove", 0.05, "how much darker the worn riding line is (a racing game's groove)"],
+	["footprints", 1.0, "footprints of many people over time, scattered at random (0 = none, higher = more)"],
 ]
 const MAX_PARAMS := 32
 
