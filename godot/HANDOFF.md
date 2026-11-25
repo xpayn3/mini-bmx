@@ -695,6 +695,23 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   at the back, the four variants in front). Seen: close-ups + two rides (seeds 4242, 80019), no script errors; NOT measured: frame time with many bushes in
   view, the wind sway, how distant leaves thin out (mip alpha). Poly Haven's `searsia_burchellii` (1.4M polygons, ~35 MB glTF) was looked at as a scan source
   and not used: it would have to be decimated + baked to cards first.
+- **Ground crossfade + middle ring (2026-11-25, user: "the mountains pop really late and bad", "a lot of popping, a nice crossfade like big games")**.
+  Before: the real chunk ground ended at a hard edge (the loaded square, 144-168 m, jumping 48 m at each chunk line) and the 20 m backdrop (`FarHills`)
+  sat 5 m UNDER it, which showed as a step; past it the backdrop is smooth, pale, has no lakes. (Its heights are the field's own: `tools/far_vs_ground.gd`
+  says 0.00 m; the problem was the sink + the missing detail, not the height.) Now (`BMX_GROUND_FADE=in,out`, default 105,144, `0,0` = the old hard edge;
+  `Game._ground_band`, global `ground_fade` = rider xz + band, `FarHills.ground_crossfade`): the real ground (`shaders/ground`) dissolves out over the band with
+  the same screen-door pattern as the decorations, and **every pixel is drawn by exactly one of three surfaces**: chunk ground (`n1 < k`), the new **middle
+  ring** (`n1 >= k`, second pattern `n2 < km`), the 20 m backdrop (the rest), `km` = 1 - smoothstep(`MID_BAND_IN` 560, `MID_BAND_OUT` 620, d). None casts
+  shadows (the far meshes never did; the ground's shadow pass is not dithered), so no sink is needed in this mode. Middle ring = a second grid in `FarHills`
+  (`_rings`: `MID_HALF` 880, `MID_STEP` 8 m = the chunks' own coarsest LOD, rebuilt every `MID_REBUILD` 200 m on a worker, ~49k vertices, same
+  C# `far_ground` / `far_colors`, same ridge uplift via a shared 20 m ridge-clear map sampled bilinearly, no trees); only exists while the crossfade is on (the
+  title screen keeps the old single backdrop + sink). **Lakes continue past the chunks** in both rings: cells under `Terrain.WATER` are flat `WATER_COL`, 0.3 m
+  under the water sheet (which only exists inside the loaded chunks). `FarHills._run(job)` now takes its job (half, step, trees, ring); `far_hills_probe.gd`
+  (C# = GDScript, PASS) was updated. Seen: photo from 55 m up over seed 4242 x2150 (`BMX_PHOTO_AT=2150,55,36,2290,20,36 BMX_PHOTO_SET=dof=0,fov=70`): no cliff,
+  lakes carry on, real hills where there was a flat plain. 40 s follow ride seed 80019: no errors, fps unchanged. NOT done: the band is a visible stipple
+  from above (TAA / blue noise would soften it), the middle ring's colour is still vertex colour at 8 m (no road / trail detail, flatter than the chunks), no
+  decorations in it (the far trees are the backdrop's, fading in at ~124 m), the water sheet itself still ends hard at the chunk edge (z-ordered over the
+  ring's water), a third ring to push the 20 m backdrop further out, geomorphing instead of dithering, not measured on a slow GPU.
 - **Sponsor props** (`TrailCourse.chunk_gates` / `chunk_boards`, fixed spacing by centreline index so growing never moves them): a huge steel gantry with a sponsor banner over the trail every 300 m (`TrailGate.build`, made-up brands in `TrailGate.SPONSORS`, no collision, skipped on jumps) and breakable wooden roadside billboards every ~80 m (fence-style panel in `TerrainChunkBuilder._boards`, so the bike smashes them; the Label3D text is freed on smash). Probe: `BMX_GATE_PROBE=1`.
 
 - **Health packs** (`world/health_pack.gd`): a GTA-style floating, spinning red backpack with a white cross and a glow ring, one outside the door of each roadside shed (`TerrainChunkBuilder._sheds` -> `out["packs"]`, made in `Terrain._finalize`). Ride within 1.6 m (`Terrain.take_pack`, called from `Game._process`) and `hud.on_health_pack` gives back `HealthPack.HEAL` (45 %); full-health riders leave it. Taken ones stay gone until a new seed. Tests: `BMX_PACK_PROBE=1` (`PACK at` lines), `BMX_PACK_SPAWN=x,z` (start 9 m before a pack), `BMX_LIFE=0.3 BMX_LIFE_PROBE=1`.

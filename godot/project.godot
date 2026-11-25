@@ -161,6 +161,10 @@ deco_fade={
 "type": "vec4",
 "value": Vector4(0, 0, 0, 0)
 }
+ground_fade={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
 atm_cloud={
 "type": "vec4",
 "value": Vector4(0, 0, 0.42, 1)
