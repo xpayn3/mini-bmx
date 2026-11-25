@@ -103,6 +103,7 @@ func _ready() -> void:
 		logo.set_anchors_preset(Control.PRESET_FULL_RECT)
 		logo.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		root.add_child(logo)
+		# (the copyright line is part of logo.png itself: the engine's boot splash shows the same picture)
 	_build_room()
 	overlay = ColorRect.new()
 	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)

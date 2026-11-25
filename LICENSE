@@ -1,0 +1,25 @@
+RUNOUT (Mini BMX) - Proprietary Software Licence
+
+Copyright (c) 2026 Luka Grcar. All rights reserved.
+
+This repository and everything in it (source code, scripts, shaders, models,
+textures, sounds, tools and other original content) is proprietary. It is NOT
+free software and is NOT open source.
+
+No licence or permission is granted to copy, modify, merge, publish,
+distribute, sublicense, sell, rent, lend, or otherwise make available the
+game or any part of it, in source or binary form, without prior written
+permission from the copyright holder.
+
+This material is not supposed to be distributed. Access to this repository
+does not grant any right to use the content.
+
+THIRD-PARTY COMPONENTS
+Some files in this project were created by others and remain under their own
+licences (for example Godot Engine, Steamworks.NET, Debug Draw 3D, SIL OFL
+fonts, and CC0 / CC BY assets). Those licences apply to those files only and
+are listed in the in-game Credits screen and in the LICENSE / SOURCE files
+next to the assets. Nothing in this notice changes them.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED.
