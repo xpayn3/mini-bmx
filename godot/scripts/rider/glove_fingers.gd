@@ -26,6 +26,9 @@ const FINGERS := [
 ## how early each phalanx follows the curl (exponent on it): the knuckle bends first, the tips last, so a
 ## half-curled hand is softly bent from the knuckles, not hooked at the fingertips like a claw
 const CURL_EXP := [0.7, 1.15, 1.7]
+## index / middle on the brake lever: each phalanx's direction (rad, 0 = straight ahead, - = down) resting, and squeezed
+const LEVER_REST := [-0.30, -0.55, -0.85]
+const LEVER_PULL := [-0.62, -0.95, -1.25]
 const THUMB_BASE := Vector3(-0.046, 0.010, 0.026)   # z: toward the thumb side
 const THUMB_Z := 0.056
 const THUMB_START := 2.75      # rad round the grip where the thumb meets it (behind, a little up)
@@ -41,11 +44,18 @@ static func prefix(i: int) -> String:
 
 ## every finger bone's transform in hand space for this curl: [[bone, Transform3D], ...] (Y along the bone,
 ## Z the hand's +Z), parents first. i: 0 left, 1 right
-static func pose(i: int, curl: float) -> Array:
+## fin: optional per-finger curl [thumb, index, middle, ring, little] (null = every finger at `curl`); lever 0..1 = how much the
+## INDEX and MIDDLE finger rest on the brake lever instead of the bar (extended forward, hooked on the blade), pull 0..1 = the
+## lever squeezed (those two fingers close in with the blade)
+static func pose(i: int, curl: float, fin = null, lever: float = 0.0, pull: float = 0.0) -> Array:
 	var inner := 1.0 if i == 0 else -1.0     # the thumb side of the hand along +Z
 	var out := []
 	var pre := prefix(i)
+	var fi := 0
 	for f in FINGERS:
+		fi += 1
+		var fc: float = float(fin[fi]) if fin != null and fin.size() >= 5 else curl
+		var lv: float = lever if (fi == 1 or fi == 2) else 0.0   # (index, middle)
 		var a0: float = KNUCKLE_ANG + f[4]
 		var p := Vector3(cos(a0) * GRIP_R, sin(a0) * GRIP_R, inner * float(f[1]))
 		var ang := a0
@@ -56,7 +66,10 @@ static func pose(i: int, curl: float) -> Array:
 			var th := 2.0 * asin(clampf(L / (2.0 * GRIP_R), 0.0, 1.0))
 			var grip_dir := ang - th * 0.5 - PI * 0.5
 			ang -= th
-			var d := lerp_angle(OPEN_ANG, grip_dir, pow(clampf(curl, 0.0, 1.0), CURL_EXP[k]))
+			var d := lerp_angle(OPEN_ANG, grip_dir, pow(clampf(fc, 0.0, 1.0), CURL_EXP[k]))
+			if lv > 0.0:
+				# on the lever: out ahead of the bar, the tip hooked on the blade; squeezing closes the three joints
+				d = lerp_angle(d, LEVER_REST[k] + (LEVER_PULL[k] - LEVER_REST[k]) * clampf(pull, 0.0, 1.0), clampf(lv, 0.0, 1.0))
 			out.append([pre + f[0] + names[k], _seg(p, d)])
 			p += Vector3(cos(d), sin(d), 0.0) * L
 	# thumb: the metacarpal from the heel of the palm to the grip circle, then two phalanges round the other way
@@ -71,7 +84,8 @@ static func pose(i: int, curl: float) -> Array:
 		var th := 2.0 * asin(clampf(L / (2.0 * (GRIP_R + 0.002)), 0.0, 1.0))
 		var grip_dir := ang + th * 0.5 + PI * 0.5
 		ang += th
-		var d := lerp_angle(THUMB_OPEN, grip_dir, pow(clampf(curl, 0.0, 1.0), CURL_EXP[k + 1]))
+		var tc: float = float(fin[0]) if fin != null and fin.size() >= 5 else curl
+		var d := lerp_angle(THUMB_OPEN, grip_dir, pow(clampf(tc, 0.0, 1.0), CURL_EXP[k + 1]))
 		out.append([pre + tn[k], _seg(p, d)])
 		p += Vector3(cos(d), sin(d), 0.0) * L
 	return out

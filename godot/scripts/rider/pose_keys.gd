@@ -33,9 +33,13 @@ const CH := [
 	["head_yaw", "Head turn", "HEAD", -0.9, 0.9, 0.01, "deg"],
 	["elbows_out", "Elbows out", "LIMBS", -0.6, 0.9, 0.01, ""],
 	["knees_out", "Knees out", "LIMBS", -0.6, 0.9, 0.01, ""],
+	["wrist_bend", "Wrists bent up", "LIMBS", -0.6, 0.6, 0.01, "deg"],
+	["wrist_turn", "Wrists turn right", "LIMBS", -0.6, 0.6, 0.01, "deg"],
+	["grip", "Grip tightness", "LIMBS", -1.0, 1.0, 0.01, ""],
+	["lever_pull", "Brake fingers pull", "LIMBS", 0.0, 1.0, 0.01, ""],
 ]
 ## channels that flip sign when a clip is mirrored (a left whip -> a right whip)
-const MIRROR := ["rel_roll", "bar_steer", "hip_z", "torso_roll", "torso_yaw", "head_yaw"]
+const MIRROR := ["rel_roll", "bar_steer", "hip_z", "torso_roll", "torso_yaw", "head_yaw", "wrist_turn"]
 ## the jump timeline's parts: [name, start]; each runs to the next one's start (the last to 1.0)
 const PHASES := [["APPROACH", 0.0], ["LOAD", 0.12], ["POP", 0.30], ["AIR", 0.40], ["REACH", 0.80], ["LAND", 0.90]]
 ## what turns a clip on: [id, label]. The signals are read in Game._clip_signal (physics state, read only)

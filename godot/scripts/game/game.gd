@@ -2850,7 +2850,9 @@ func _pose_keys_apply(dt: float, st, pi: Dictionary, lt: Dictionary) -> void:
 		rider.transform = rt
 		var inv := rt.affine_inverse()
 		for k in ["handL", "handR", "footL", "footR"]: lt[k] = inv * (lt[k] as Vector3)
+		for k in ["gripX_L", "gripX_R", "gripZ"]: lt[k] = inv.basis * (lt[k] as Vector3)
 		pi["handL"] = lt.handL; pi["handR"] = lt.handR; pi["footL"] = lt.footL; pi["footR"] = lt.footR
+		pi["gripX_L"] = lt.gripX_L; pi["gripX_R"] = lt.gripX_R; pi["gripZ"] = lt.gripZ
 		_pk_rt_on = true
 	elif _pk_rt_on:
 		rider.transform = Transform3D.IDENTITY
@@ -3424,6 +3426,8 @@ func _process(dt: float) -> void:
 	# (higher in hollows) with rocks and decks on it. Lift / tilt the drawn bike so no tyre is ever inside it
 	if Env.s("BMX_NOUNCLIP") == "":
 		rig.fit_wheels(terrain.top_height)
+		if Env.s("BMX_STEERFIT_PROBE") != "" and Engine.get_process_frames() % 30 == 0:
+			print("STEERFIT steer=%.3f xF=%.4f v=%.2f" % [_steer_c, rig.susp.xF, st.v])
 		var _pre_y := rig.position.y
 		var _dF0 := rig.tyre_depth(rig.wheel_f, rig.wheel_rf, terrain.top_height) if st.bank_probe else 0.0
 		var _dR0 := rig.tyre_depth(rig.wheel_r, rig.wheel_rr, terrain.top_height) if st.bank_probe else 0.0
@@ -3554,6 +3558,7 @@ func _process(dt: float) -> void:
 		pi["footR"] = lt.footR
 		pi["handL"] = lt.handL
 		pi["handR"] = lt.handR
+		pi["gripX_L"] = lt.gripX_L; pi["gripX_R"] = lt.gripX_R; pi["gripZ"] = lt.gripZ
 		pi["dab"] = dab_k
 		pi["dabSide"] = dab_side
 		pi["dabLean"] = _dab_lean_s
@@ -3592,6 +3597,7 @@ func _process(dt: float) -> void:
 		pi["landFold"] = 0.0 if st.air else st.land_fold   # folded up by a landing, gathering himself again
 		pi["landReach"] = st.land_prep * st.land_reach     # legs reaching down for the ground (as far as this landing needs)
 		pi["inAir"] = 1.0 if st.air else 0.0
+		pi["brakeF"] = st.brake_f; pi["brakeR"] = st.brake_r   # the levers (the index + middle fingers pull them)
 		pi["hipShift"] = _mcap("hip_shift", st.hip_shift, pdt)
 		pi["bodyStick"] = -0.55 if scenic else _mcap("body_stick", st.body_in_s, pdt)
 		pi["relax"] = 1.0 if scenic else 0.85 * dab_k   # foot down = calm: sat up, back straight, chin up

@@ -25,6 +25,9 @@ const BODY := ["Hips", "Spine", "Chest", "UpperChest", "Neck", "Head",
 	"RightUpperLeg", "RightLowerLeg", "RightFoot", "RightToes"]
 
 var _rest_g := {}     # bone -> global rest basis in rider space (orthonormal)
+var fin := [null, null]       # per hand: the five fingers' own curl [thumb, index, middle, ring, little] (null = all at `curls`)
+var lever := [0.0, 0.0]       # per hand: index + middle resting on the brake lever (0..1)
+var pull := [0.0, 0.0]        # per hand: that lever squeezed (0..1)
 var curls := [GloveFingers.RELAXED, GloveFingers.RELAXED]   # each hand's finger curl (Rider sets it, GloveFingers)
 var fingers: Array[MeshInstance3D] = []   # the skinned finger meshes (left, right)
 
@@ -166,7 +169,7 @@ func follow(P: Array, spine: Array, head_t: Transform3D, hands: Array, shoes: Ar
 		_put(side + "Hand", wrist, _aim(side + "Hand", hand_t.basis.x, up, hand_t.basis.y))
 		# fingers (GloveFingers): curled round the bar / relaxed, drawn by the skinned finger meshes
 		var hand_b := hand_t.basis.orthonormalized()
-		for bt in GloveFingers.pose(i, curls[i]):
+		for bt in GloveFingers.pose(i, curls[i], fin[i], lever[i], pull[i]):
 			var t: Transform3D = bt[1]
 			_put(bt[0], hand_t * t.origin, hand_b * t.basis)
 		if i < fingers.size():

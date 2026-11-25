@@ -990,6 +990,15 @@ var _ground_cache := {}   # tyre_depth's ground samples, cleared every pose()
 func fit_wheels(top: Callable) -> void:
 	if susp == null or not susp.wheels_follow:
 		return
+	# The fork travel is solved with the bars STRAIGHT. Turning the bars (rake + trail) moves the front axle
+	# in the frame by a centimetre or two; on a real bike that lifts / dips the frame and the fork doesn't move,
+	# but fitting with the bars turned made the fork compress to cancel it ("suspension sinks when I turn the
+	# bars standing still"). What is left is a tyre in / off the ground, which unclip_tyres() takes up in the frame.
+	var steer_q := steer_n.quaternion
+	var straight: bool = not steer_q.is_equal_approx(Quaternion.IDENTITY) and susp.has_f and Env.s("BMX_OLD_STEERFIT") == ""
+	if straight:
+		steer_n.quaternion = Quaternion.IDENTITY
+		susp.apply()
 	var mb := model.global_transform.basis
 	var up_f: float = maxf(0.4, (mb * susp.axis).normalized().y)   # world rise per metre of fork travel
 	var up_r: float = maxf(0.4, mb.y.normalized().y)                 # ... per metre of rear axle rise
@@ -1012,6 +1021,9 @@ func fit_wheels(top: Callable) -> void:
 		if absf(nF - susp.xF) < 5e-4 and absf(nR - susp.xR) < 5e-4:
 			break
 		susp.xF = nF; susp.xR = nR
+		susp.apply()
+	if straight:
+		steer_n.quaternion = steer_q
 		susp.apply()
 
 ## Lift / tilt the drawn bike (not the physics) until no tyre is inside the ground, leaving `gap` m.
@@ -1042,6 +1054,13 @@ func limb_targets() -> Dictionary:
 	var to_lean := func(n: Node3D, v: Vector3) -> Vector3: return lean_g.to_local(n.to_global(v))
 	var out := {"handL": to_lean.call(steer_n, grip_l), "handR": to_lean.call(steer_n, grip_r),
 		"footL": Vector3.ZERO, "footR": Vector3.ZERO}
+	# the grip's own frame (the bar turns with the steering): forward across the bar and the bar's axis, in lean space.
+	# The rider's hands are locked to it (Rider.orient_grip) so the palm stays square on the bar however it is turned.
+	var lb := lean_g.global_transform.basis.orthonormalized().inverse()
+	var sb := steer_n.global_transform.basis.orthonormalized()
+	out["gripX_L"] = (lb * (sb * Vector3(1, 0, 0))).normalized()
+	out["gripX_R"] = out["gripX_L"]
+	out["gripZ"] = (lb * (sb * Vector3(0, 0, 1))).normalized()
 	if pedal_pivots.size() == 2:
 		out.footL = lean_g.to_local(pedal_pivots[0].global_position)
 		out.footR = lean_g.to_local(pedal_pivots[1].global_position)
