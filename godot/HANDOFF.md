@@ -479,6 +479,14 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   from position. Rim pebbles / the odd rock: `_berm_clutter` (chunk builder, GDScript, `berm_style` gives the rim). Seen: relief maps `tools/berm_map.gd` (old | new: a
   defined rim and back slope, contours); NOT seen cleanly in game (the follow rider leaves the trail at spawn, photo mode was blurred), lip / scoop / pebbles are
   unchecked by eye. Demo AI 100 s seeds 4242 / 5: no crashes, same distance as old. Constants are the tuning knobs (`berm_style`, `berm_shape2`).
+  **Finer ground mesh near the trail + micro detail (2026-11-25, user: "too low poly, peaks smoother", "finer around tracks where we have peaks", "more details and
+  imperfections")**. The chunk's texture grid stays N = 96 (0.5 m; `GrassField.SEG`, textures, `G` for the tyre fit all keep it), but chunks within `MESH_NEAR` 60 m of the
+  trail (`route_dist`) get a **0.25 m base mesh** (`TerrainFieldCs.fine_ground`, `TerrainChunkBuilder.MESH_K` 2, `BMX_MESH_K=1` = as before; needs the C# field): the old 0.5 m
+  grid is its first LOD (`_ground_lods(.., n, mk)` keys 2 / 4 / 8 / 16 by real error), so flat or far chunks cost what they did. Measured once (stationary rider, seed
+  4242 x3150): triangles / frame 4.45M -> 5.19M (+17 %), fps in the noise; the LODs may not drop early enough (tuning left). **Micro detail** (`micro_detail`, DRAWN ONLY, a few cm,
+  fine mesh only, `BMX_NO_MICRO=1` = off): 0.3 / 1 m grain near the trail, washboard ripples in bends (stronger with `corner_load`), a pothole / washout on the road in some 37 m
+  stretches (hash), ragged dirt edge, rills down banked faces. The physics + tyre fit read the smooth ground, so a tyre can sit up to ~3 cm off the drawn surface. Berm rim
+  rounded too (cap 0.8..1.4 m, lip 1.1 m half-width, back slope 2.5..6 m). Not re-checked: C# vs GD EXACT after the rim rounding, the rim's shadow edge up close.
 - **Rope bridges** (route feature `rope`, `world/rope_bridge.gd` + C# `world/RopeBridgeSim.cs`): a 46 m feature, a swinging rope
   bridge tied round four big pines (two each end, 2.3 m apart: ride between them) over a **canyon cut across the land**
   (`TerrainField.canyon_rims` / `canyon_dig`, mirrored in `TerrainFieldCs._canyon_dig`: polynomials + integer hashes only, exact):

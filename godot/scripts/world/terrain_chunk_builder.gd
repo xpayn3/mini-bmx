@@ -178,7 +178,14 @@ func _build() -> void:
 	var SW: PackedFloat32Array = gs["SW"]
 	_stage("ground+colour")
 	out["G"] = G
-	_ground_lods(verts, norms, uvs)   # adds edge skirts to the vertex arrays
+	var mk := 1
+	if MESH_K > 1 and not (f is TerrainField) and f.route_dist(ox, oz) < MESH_NEAR:
+		# finer ground mesh (the textures keep N + 1 texels): the nearest chunks draw 0.25 m triangles where the ground has detail,
+		# the coarser LODs (the old 0.5 m grid and below) take over by distance / flatness (_ground_lods keys them by real error)
+		var fm: Dictionary = f.fine_ground(ox, oz, N, MESH_K)
+		verts = fm["verts"]; norms = fm["norms"]; uvs = fm["uvs"]
+		mk = MESH_K
+	_ground_lods(verts, norms, uvs, N * mk, mk)   # adds edge skirts to the vertex arrays
 	out["verts"] = verts
 	out["norms"] = norms
 	out["uvs"] = uvs
@@ -1463,9 +1470,14 @@ func _wood_model(j) -> void:   # TerrainField.Feat or TerrainFeatCs
 # level, hiding the cracks where a neighbour shows a different level.
 const SKIRT := 0.8
 const LOD_STEPS := [2, 4, 8]
+## ground mesh refinement over the chunk's texture grid (2026-11-25, user: "too low poly, peaks more smooth"): 2 = 0.25 m triangles in the
+## base mesh. The old 0.5 m grid is its first LOD, so a flat or distant chunk costs what it did. 1 = as before (BMX_MESH_K=1).
+## Needs the C# field (fine_ground); the GDScript field keeps 0.5 m.
+## only chunks within MESH_NEAR m of the trail get it (where the berms, jumps and lips are: the rest of the land keeps 0.5 m)
+const MESH_NEAR := 60.0
+static var MESH_K := maxi(1, int(OS.get_environment("BMX_MESH_K"))) if OS.get_environment("BMX_MESH_K") != "" else 2
 
-func _ground_lods(verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array) -> void:
-	var n := N
+func _ground_lods(verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array, n: int, mk: int = 1) -> void:
 	var nv := n + 1
 	# skirt vertices: the 4 edges, walked in order, each point copied SKIRT lower
 	var edges := []
@@ -1484,9 +1496,10 @@ func _ground_lods(verts: PackedVector3Array, norms: PackedVector3Array, uvs: Pac
 			verts.append(verts[vi] - Vector3(0, SKIRT, 0))
 			norms.append(norms[vi])
 			uvs.append(uvs[vi])
-	out["indices"] = _grid_lod_indices(1, edges, skirt_of)
+	out["indices"] = _grid_lod_indices(1, edges, skirt_of, n)
 	var lods := {}
-	for s: int in LOD_STEPS:
+	var steps: Array = LOD_STEPS if mk == 1 else [2, 4, 8, 16]
+	for s: int in steps:
 		if n % s != 0: continue
 		var err := 0.0
 		for iz in nv:
@@ -1503,11 +1516,10 @@ func _ground_lods(verts: PackedVector3Array, norms: PackedVector3Array, uvs: Pac
 				var h11 := verts[cz1 * nv + cx1].y
 				var hb := lerpf(lerpf(h00, h10, tx), lerpf(h01, h11, tx), tz)
 				err = maxf(err, absf(verts[iz * nv + ix].y - hb))
-		lods[maxf(err, 0.02 * s)] = _grid_lod_indices(s, edges, skirt_of)
+		lods[maxf(err, 0.02 * s / mk)] = _grid_lod_indices(s, edges, skirt_of, n)
 	out["lods"] = lods
 
-func _grid_lod_indices(s: int, edges: Array, skirt_of: Dictionary) -> PackedInt32Array:
-	var n := N
+func _grid_lod_indices(s: int, edges: Array, skirt_of: Dictionary, n: int) -> PackedInt32Array:
 	var nv := n + 1
 	var idx := PackedInt32Array()
 	var m := n / s

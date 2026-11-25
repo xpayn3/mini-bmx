@@ -743,7 +743,7 @@ func berm_style(a: float, b: float, w: float) -> void:
 	var wn := sm(0.30, 0.55, noise(a / 11.0 - 5.0, b / 11.0 + 19.0))
 	bs_c = 0.75 * sm(-0.25, 0.3, n1)
 	bs_F = clampf(w + 0.1 + 0.8 * sm(-0.3, 0.3, n2), 2.0, 3.5)
-	bs_cw = 0.3 + 0.5 * (bs_c / 0.75)
+	bs_cw = 0.8 + 0.6 * (bs_c / 0.75)
 	bs_lip = 0.18 * sm(0.0, 0.35, n3)
 	bs_scoop = 0.5 * g * wn
 
@@ -774,12 +774,12 @@ func berm_shape2(o: float, tn: float) -> float:
 			var tc := d / cw
 			h = hF + slope_f * (d - cw * (tc * tc * tc - tc * tc * tc * tc * 0.5))
 		else:
-			var lb := clampf(hrim / 0.6, 2.0, 5.0)
+			var lb := clampf(hrim / 0.5, 2.5, 6.0)
 			var t2 := sm(0.0, lb, d - cw)
 			h = hrim * (1.0 - t2)
 	# the lip roll on the rim
 	if bs_lip > 0.0:
-		h += bs_lip * (1.0 - sm(0.0, 0.7, absf(o - (F + cw * 0.6))))
+		h += bs_lip * (1.0 - sm(0.0, 1.1, absf(o - (F + cw * 0.6))))
 	# worn hollows in the lip
 	if bs_scoop > 0.0:
 		h -= bs_scoop * sm(F - 1.4, F, o) * (1.0 - sm(F + cw, F + cw + 1.2, o))
