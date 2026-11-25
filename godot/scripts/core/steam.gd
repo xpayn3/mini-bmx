@@ -78,7 +78,8 @@ func _exit_tree() -> void:
 	on = false
 
 func _check_records() -> void:
-	Collection.check()
+	GameState.records.best_streak = maxi(int(GameState.records.best_streak), GameState.day_streak())
+	GameState.records.best_wstreak = maxi(int(GameState.records.best_wstreak), GameState.week_streak())
 	for id in ACHIEVEMENTS:
 		var a: Array = ACHIEVEMENTS[id]
 		if a[2] == "rec" and float(GameState.records.get(a[3], 0.0)) >= float(a[4]):
