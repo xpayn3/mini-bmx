@@ -3670,14 +3670,16 @@ func _process(dt: float) -> void:
 		_tape_front["r"] = rig.wheel_rf
 		terrain.tape_push(_tape_front)
 	if contact != null:   # contact shadows on the drawn bike (and the body in a crash)
-		var wf: Vector3 = rig.wheel_f.global_position
-		var wr: Vector3 = rig.wheel_r.global_position
-		var mid := (wf + wr) * 0.5
+		# under each tyre's lowest point in its own (leaned) plane, not under the axle: laid over, the
+		# contact patch swings out to the side by r x sin(lean)
+		var wf: Vector3 = _tyre_bottom(rig.wheel_f, rig.wheel_rf)
+		var wr: Vector3 = _tyre_bottom(rig.wheel_r, rig.wheel_rr)
+		var mid := (rig.wheel_f.global_position + rig.wheel_r.global_position) * 0.5
 		var bh := ContactShadow.RIDE_H
 		if phys.crash_on and ragdoll != null and not ragdoll.p.is_empty():
 			mid = ragdoll.p[Ragdoll.PELVIS]; bh = 0.15
 		contact.visible = not photo or rig.visible
-		contact.update(wf, wr, rig.wheel_rf, rig.wheel_rr, hd, mid, bh, terrain.top_height)
+		contact.update(wf, wr, 0.0, 0.0, hd, mid, bh, terrain.top_height)
 	_pk = _perf("packs_tape", _pk)
 	if far_hills: far_hills.follow(drawn_pos)
 	_pk = _perf("far_hills", _pk)
@@ -3884,3 +3886,13 @@ func _air_jerk_probe(inp: Dictionary) -> void:
 		_aj = {}
 	else:
 		_aj = {}
+
+## the lowest point of a drawn tyre: the axle + its radius straight down within the wheel's plane
+## (laid over, that is out to the side of the axle, where the tyre really touches the ground)
+static func _tyre_bottom(wheel: Node3D, r: float) -> Vector3:
+	var xf := wheel.global_transform
+	var ax := xf.basis.z.normalized()
+	var down := Vector3.DOWN - ax * ax.dot(Vector3.DOWN)
+	var dl := down.length()
+	if dl < 1e-3: return xf.origin + Vector3.DOWN * r
+	return xf.origin + down / dl * r
