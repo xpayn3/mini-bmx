@@ -8,6 +8,7 @@ extends Control
 
 var on_customize := Callable()
 const WEEKS := 12
+const CARD_PAD := Tokens.S6   # every card: 24 px on all four sides, a header caption, then the body
 const C_BG := Tokens.PAGE
 const C_STAGE := Color("171b26")
 const C_CARD := Tokens.PAPER
@@ -111,16 +112,29 @@ func _cap(text: String, col := C_SOFT, size := Tokens.T_SM) -> Label:
 func _body(text: String, col := C_TXT, size := Tokens.T_MD) -> Label:
 	return UITheme.text(text, col, size)
 
-func _card(pad := Tokens.S5, fill := C_CARD, _stroke := Color(0, 0, 0, 0)) -> PanelContainer:
+func _card(pad := CARD_PAD, fill := C_CARD, _stroke := Color(0, 0, 0, 0)) -> PanelContainer:
 	var pc := PanelContainer.new()
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = fill
 	sb.set_corner_radius_all(3)
 	sb.anti_aliasing = true
-	sb.content_margin_left = pad + 4; sb.content_margin_right = pad + 4
+	sb.content_margin_left = pad; sb.content_margin_right = pad
 	sb.content_margin_top = pad; sb.content_margin_bottom = pad
 	pc.add_theme_stylebox_override("panel", sb)
 	return pc
+
+## a card with its header caption on top and an empty body column under it (the same gap everywhere)
+func _titled(title: String, fill := C_CARD) -> Array:
+	var pc := _card(CARD_PAD, fill)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", Tokens.S4)
+	pc.add_child(col)
+	col.add_child(_cap(title, C_SOFT, Tokens.T_SM))
+	var body := VBoxContainer.new()
+	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	body.add_theme_constant_override("separation", Tokens.S3)
+	col.add_child(body)
+	return [pc, body]
 
 func _bar(frac: float, delay := 0.0, h := 8, col := ACC) -> ProgressBar:
 	var b := ProgressBar.new()
@@ -414,80 +428,77 @@ func _page_overview() -> void:
 	var tot := 0
 	for a in attrs: tot += int(a[1])
 	var ovr := roundi(float(tot) / attrs.size())
-	var ac := _card(Tokens.S5, C_CARD2)
+	var ta := _titled("OVERALL RATING  ·  %s" % String(LEVEL_NAMES[clampi(ovr / 17, 0, 5)]), C_CARD2)
+	var ac: PanelContainer = ta[0]
 	ac.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ac.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	ac.size_flags_stretch_ratio = 1.8
 	var ah := HBoxContainer.new()
+	ah.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	ah.add_theme_constant_override("separation", Tokens.S6)
-	var ob := VBoxContainer.new()
-	ob.alignment = BoxContainer.ALIGNMENT_CENTER
-	ob.add_theme_constant_override("separation", -22)
-	ob.add_child(_cap("OVERALL", C_SOFT, Tokens.T_SM))
 	var ol := UITheme.display("0", 84, C_TXT, 0.0, 900)
-	ob.add_child(ol)
+	ol.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	ol.custom_minimum_size.x = 120
+	ah.add_child(ol)
 	_count(ol, float(ovr), func(v: float): return str(roundi(v)), 0.1, 1.0)
-	var rank: String = LEVEL_NAMES[clampi(ovr / 17, 0, 5)]
-	ob.add_child(_cap(rank, C_TXT, Tokens.T_MD))
-	ah.add_child(ob)
 	var rows := VBoxContainer.new()
 	rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	rows.alignment = BoxContainer.ALIGNMENT_CENTER
-	rows.add_theme_constant_override("separation", Tokens.S2)
+	rows.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	rows.add_theme_constant_override("separation", 0)
 	for i in attrs.size():
 		var rw := HBoxContainer.new()
 		rw.add_theme_constant_override("separation", Tokens.S3)
 		var nm := _cap(String(attrs[i][0]), C_SOFT, Tokens.T_XS)
-		nm.custom_minimum_size.x = 112
+		nm.custom_minimum_size.x = 104
+		nm.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		rw.add_child(nm)
 		var br := _bar(float(attrs[i][1]) / 99.0, 0.2 + i * 0.07, 8, ACC if attrs[i][1] >= 70 else Tokens.INK_SOFT)
 		br.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		rw.add_child(br)
-		var nv := _num("0", 24)
-		nv.custom_minimum_size.x = 40
+		var nv := _num("0", 20)
+		nv.custom_minimum_size = Vector2(36, 28)
 		nv.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		nv.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		rw.add_child(nv)
 		_count(nv, float(attrs[i][1]), func(v: float): return str(roundi(v)), 0.2 + i * 0.07, 0.8)
 		rows.add_child(rw)
 	ah.add_child(rows)
-	ac.add_child(ah)
+	ta[1].add_child(ah)
 	hero.add_child(ac)
 	var wt := Goals.week_target_m()
-	var a := _card(Tokens.S5)
+	var tb := _titled("THIS WEEK")
+	var a: PanelContainer = tb[0]
 	a.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var av := VBoxContainer.new()
-	av.alignment = BoxContainer.ALIGNMENT_CENTER
-	av.add_theme_constant_override("separation", Tokens.S2)
-	av.add_child(_cap("THIS WEEK"))
+	a.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	var rr := HBoxContainer.new()
-	rr.add_theme_constant_override("separation", Tokens.S4)
-	rr.add_child(_ring(float(wk.metres) / wt, 96, 10, "%d%%" % roundi(minf(float(wk.metres) / wt, 9.99) * 100.0), "", ACC, 24, 0.1))
+	rr.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	rr.add_theme_constant_override("separation", Tokens.S5)
+	var ring := _ring(float(wk.metres) / wt, 92, 8, "%d%%" % roundi(minf(float(wk.metres) / wt, 9.99) * 100.0), "", ACC, 22, 0.1)
+	ring.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	rr.add_child(ring)
 	var at := VBoxContainer.new()
 	at.alignment = BoxContainer.ALIGNMENT_CENTER
 	at.add_theme_constant_override("separation", 0)
-	var al := _num("", 34)
+	var al := _num("", 32)
 	at.add_child(al)
 	_count(al, float(wk.metres) / unit, func(v: float): return "%.1f %s" % [v, un], 0.1)
 	at.add_child(_cap("%d RIDES  ·  %d DAYS LEFT" % [int(wk.rides), Goals.days_left_week()], C_SOFT, Tokens.T_XS))
 	rr.add_child(at)
-	av.add_child(rr)
-	a.add_child(av)
+	tb[1].add_child(rr)
 	hero.add_child(a)
-	var b := _card(Tokens.S5)
+	var tc := _titled("DAILY STREAK")
+	var b: PanelContainer = tc[0]
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var bv := VBoxContainer.new()
-	bv.alignment = BoxContainer.ALIGNMENT_CENTER
-	bv.add_theme_constant_override("separation", Tokens.S2)
-	bv.add_child(_cap("DAILY STREAK"))
-	var bl := _num("", 40)
-	bv.add_child(bl)
+	b.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var bl := _num("", 36)
+	tc[1].add_child(bl)
 	var ds := GameState.day_streak()
 	_count(bl, float(ds), func(v: float): return "%d DAY%s" % [roundi(v), "" if roundi(v) == 1 else "S"], 0.15, 0.7)
 	var dots := HBoxContainer.new()
-	dots.add_theme_constant_override("separation", Tokens.S2)
+	dots.add_theme_constant_override("separation", Tokens.S3)
 	for i in 7: dots.add_child(UITheme.display("▮", 22, ACC if i < mini(ds, 7) else C_LINE, 0.0, 700))
-	bv.add_child(dots)
-	bv.add_child(_cap("WEEK STREAK %d  ·  BEST %d DAYS" % [GameState.week_streak(), int(r.best_streak)], C_SOFT, Tokens.T_XS))
-	b.add_child(bv)
+	tc[1].add_child(dots)
+	tc[1].add_child(_cap("WEEK STREAK %d  ·  BEST %d DAYS" % [GameState.week_streak(), int(r.best_streak)], C_SOFT, Tokens.T_XS))
 	hero.add_child(b)
 	_appear([ac, a, b], 0.08, 0.05)
 	# stats as open typography
@@ -584,7 +595,7 @@ func _page_goals() -> void:
 	_appear(made, 0.07, 0.1)
 
 func _streak_card() -> Control:
-	var card := _card(Tokens.S5, C_CARD)
+	var card := _card(CARD_PAD, C_CARD)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", Tokens.S6)
 	card.add_child(row)
@@ -616,7 +627,7 @@ func _streak_card() -> Control:
 
 func _goal_card(g: Dictionary, delay: float) -> Control:
 	var ready: bool = g.done and not g.claimed
-	var pc := _card(Tokens.S4, Tokens.ACCENT_TINT if ready else C_CARD)
+	var pc := _card(CARD_PAD, Tokens.ACCENT_TINT if ready else C_CARD)
 	pc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	pc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	var row := HBoxContainer.new()
@@ -778,7 +789,7 @@ func _page_wallet() -> void:
 		_tile("EARNED · EVER", float(GameState.records.earned), func(v: float): return _money(int(v)), 0.10, 2),
 	]
 	for t in stats: left.add_child(t)
-	var how := _card(Tokens.S5)
+	var how := _card(CARD_PAD)
 	var hv := VBoxContainer.new()
 	hv.add_theme_constant_override("separation", Tokens.S2)
 	hv.add_child(_cap("HOW TO EARN"))
@@ -790,7 +801,7 @@ func _page_wallet() -> void:
 	how.add_child(hv)
 	left.add_child(how)
 	left.add_child(_pill("SPEND IT IN THE SHOP", func(): if on_customize.is_valid(): on_customize.call("shop"), false, Tokens.T_MD, true))
-	var card := _card(Tokens.S5)
+	var card := _card(CARD_PAD)
 	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	card.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	var vb := VBoxContainer.new()
