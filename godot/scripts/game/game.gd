@@ -3441,7 +3441,6 @@ func _process(dt: float) -> void:
 		elif clip_stats.get("shot", 0) == 0 and deep > 0.12 and not st.crash_on and not st.air:
 			clip_stats.shot = 1
 	_pk = _perf("tyre_unclip", _pk)
-	st.brake_heat *= exp(-dt / 3.5)
 	rig.set_brake_heat((st.brake_heat - 0.35) / 0.9)
 	if not st.crash_on:
 		var lt := rig.limb_targets()

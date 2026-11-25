@@ -78,6 +78,7 @@ const DEFS := [
 		["brakeGrip", "Braking grip (how hard the tyres can stop)", 1.0, 0.5, 1.5, 0.05, "×"],
 		["brakeFrontMix", "Brake key: front lever share", 0.7, 0, 1, 0.05, ""],
 		["brakeSkid", "Brake key: how far the rear skids", 0.4, 0, 1, 0.05, ""],
+		["brakeFade", "Brake fade: most braking lost when the brakes are hot", 0.35, 0, 0.8, 0.05, "×"],
 	]],
 	["Ground", [
 		["bermAssist", "Berms: lean with them, they carry the turn", 0.8, 0, 1, 0.05, ""],
@@ -128,6 +129,9 @@ const DEFS := [
 		["suspRebound", "Rebound damping (× the setup)", 1.0, 0.4, 2.0, 0.05, "×"],
 		["suspProg", "Ramp-up at the end of the travel (× the setup)", 1.0, 0.0, 2.5, 0.05, "×"],
 		["suspGeo", "Brake dive and pedal squat from the geometry", 1.0, 0.0, 2.0, 0.05, "×"],
+		["diveSteer", "Fork dive shortens the wheelbase (quicker turn-in)", 1.0, 0.0, 2.0, 0.05, "×"],
+		["pedalBob", "Pedal bob (the shock moves with each stroke)", 1.0, 0.0, 2.0, 0.05, "×"],
+		["pedalKick", "Pedal kickback (cranks pushed back over bumps)", 1.0, 0.0, 2.0, 0.05, "×"],
 		["riderBalance", "Rider balance (1 wheel)", 0.7, 0, 1.5, 0.05, ""],
 		["noseDive", "Nose-dive crash angle", 0.6, 0.3, 1.2, 0.05, "rad"],
 		["pumpLegs", "Pumping: the legs' stroke against the ground (× a real rider)", 1.0, 0, 3, 0.05, "×"],

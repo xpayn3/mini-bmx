@@ -131,6 +131,7 @@ const PAGES := [
 			["*brakeGrip", "How hard the tyres can stop: hardpack grips best, grass less, sand and water least.", "Slippy", "Sticky"],
 			["brakeFrontMix", "The brake key (S / LT): how much front it squeezes with the rear.", "Rear only", "Both"],
 			["brakeSkid", "The brake key: how far past locking the rear goes (dust!).", "No skid", "Skids"],
+			["brakeFade", "Long hard braking heats the brakes and the levers lose bite.", "No fade", "Fades"],
 		]],
 	]],
 	["speed", "Speed", "Pedalling, sprinting and air drag", [
@@ -250,6 +251,9 @@ const PAGES := [
 			["*suspRebound", "Rebound damping: how fast it comes back up.", "Lively", "Planted"],
 			["suspProg", "How much the springs ramp up at the end of the travel.", "Linear", "Ramps hard"],
 			["*suspGeo", "Fork dive under the front brake, the rear's squat under power and under its brake.", "None", "Lots"],
+			["diveSteer", "A diving fork shortens the wheelbase: the bike turns in quicker under the front brake.", "None", "Lots"],
+			["pedalBob", "The shock pumps with every pedal stroke.", "None", "Lots"],
+			["pedalKick", "Bumps push the cranks back against your feet while you pedal.", "None", "Lots"],
 			["tyreSquash", "Tyre squash under load.", "Hard", "Squishy"],
 			["damperKnee", "Shock blow-off speed (low = sharp bumps pass into the wheel).", "Low", "High"],
 			["damperBlow", "High-speed compression: how much damping is left for big hits.", "Blows through", "Holds up"],

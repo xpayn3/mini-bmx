@@ -1006,8 +1006,23 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
     moment: that is the crash's throw, not riding backwards). `RIM_CLIMB` 4 m/s now caps the upward speed a rim strike
     on a rising edge gives (the position is still carried over the edge; landings are untouched). 3 trail rides
     after: no SLAM. Suite 0 of 24 changed, stress 56 / 56.
-  - Open: the wheelbase and head angle don't change as the fork dives (the ride geometry is fixed), no pedal kickback
-    / bob with each stroke, the rear axle's path doesn't soak up square edges differently. No shop / prices for
+  - **Brake fade, dive steering, pedal bob + kickback (2026-11-25, `bike_physics.gd`, sliders Ride > Brakes / Suspension)**:
+    (1) `brake_heat` (the rotor glow's number) now cools in the physics (`HEAT_TAU` 3.5 s; Game no longer decays it) and
+    past `FADE_FROM` 3 up to `FADE_FULL` 10 the braking force that gets through is cut by up to `brakeFade` 0.35 (the
+    levers had far more than the tyres hold, so cutting the lever did nothing: it is taken off the delivered force).
+    Normal riding peaks ~1.5, so only sustained hard braking fades; "BRAKES FADING" flashes. Fully hot, 40 km/h both
+    brakes: 8.6 -> 11.9 m. (2) Fork dive (`dive`, from `dg_xF` past the sag) shortens the wheelbase the bars' yaw reads
+    by `DIVE_L` 0.12 x `diveSteer`: quicker turn-in under the front brake; the lean / grip limits don't read it.
+    (3) Pedal bob: a zero-mean push on the shock from the stroke (`stroke` x drive x (1.1 - 0.7 AS) x `BOB_K`, `pedalBob`).
+    (4) Kickback: the rear's shock speed x `CHAIN_GROWTH` 0.2 / `CRANK_ARM` 0.17 turns the cranks back (the other way on
+    the rebound) while pedalling, and costs up to `KICK_LOSS` 25 % of the stroke (`pedalKick`). Per part, for modular
+    bikes: dive needs a sprung fork (`_sprung_fork`: a setup + the frame's `has_f`), bob and kickback a rear shock
+    (`_rear_shock`: a setup + `has_r`); a rigid fork, a hardtail or no setup (the BMX) gets none of that end's effect
+    (brake fade needs no suspension). Bob goes through the shock's own spring and damper, so its settings move it
+    (`BMX_BOB_PROBE=1`, `BOB shock_rms`: LSC 0 -> 10 18 -> 15.6 mm, sag 20 -> 40 % 12.7 -> 19.8 mm). `BMX_OLD_FADE=1` / `BMX_OLD_SUSPFX=1` = before; `BMX_FADE_PROBE=1` prints `FADE` lines (heat, fade, dive,
+    kick), `BMX_HEAT=n` holds the brakes that hot. Stress 56 / 56; suite vs the stale baseline: 13 changed with, 12
+    without (the rest is old drift). Not ridden by the user yet.
+  - Open: the rear axle's path doesn't soak up square edges differently; the drawn head angle doesn't follow the dive. No shop / prices for
     shocks yet, shock models have no 3D model or card picture. Not ridden by the user yet. (`slope_stress` is 51 / 51
     again; its "brake grade -35 deg" check is a chaotic slide at the friction angle and flips with small changes.)
 - **Direct manual (2026-11-22, user: "too stiff, locks us in, going too far stops us, make it more manual"; then "fall if we pull too far", "turn
