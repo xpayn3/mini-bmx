@@ -23,6 +23,11 @@ uniform float trail_fx = 0.0;      // 0 = plain trail colour (no frame bound)
 uniform sampler2D tr_nr0 : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D tr_nr1 : filter_linear_mipmap_anisotropic, repeat_enable;
 uniform float trail_bump = 0.9;
+uniform float trail_edge_fade = 1.0;  // how wide the road's edge fades into the land (0 = the baked ramp)
+uniform float trail_edge_var = 1.0;   // how far the road's edge wanders in / out (0 = the baked edge)
+uniform float dirt_match = 0.65;      // road dirt darkened / tinted toward a darker landscape (0 = the baked dirt colour)
+uniform float ground_macro = 0.26;   // off-trail colour patchiness (0 = the baked colour only)
+uniform float ground_detail = 1.0;    // off-trail fine relief from the dirt scans (0 = off)
 uniform float trail_relief = 1.0;   // depth of the worn lines / tyre prints / grit, x the real centimetres below
 uniform float trail_play = 0.34;   // share of 26 m stretches with a playful mark (donut, figure of eight, slalom, skid arc); test: 1 = all
 uniform float trail_puddles = 1.0;   // 0 = none, 1 = normal
@@ -108,6 +113,31 @@ void fragment() {
 	float f2 = 1.0 - smoothstep(0.035, 0.12, gpx);
 	float f3 = 1.0 - smoothstep(0.1, 0.45, gpx);
 	float t = gA.a, rockW = gB.a;
+	// the road's edge is never a ruler line (2026-11-25, user: "still too much like a straight line", "more random", "fading
+	// wider"): the baked weight (a ~1.2 m ramp) is sampled again through a warped UV, which slides the edge in / out, then
+	// averaged over four taps spread ~1 m apart, which widens the fade to ~3 m so the dirt melts into the land. Three scales
+	// of warp: a long swell (~30 m, up to ~2 m each way), a medium one (~9 m, ~1 m) and a ragged one (~1.8 m, ~0.5 m), and a
+	// slow noise changes how strong it all is from one stretch to the next (some stretches straight-ish, some very loose).
+	// Built jumps keep their crisp edge, chunk borders keep the baked edge (no seams). Visual only: the physics' weight is untouched.
+	if (trail_edge_var > 0.0) {
+		// berms (user: riders ride right up into the edge there, so it is worn sharp): the bend's baked corner load takes the
+		// wander and the wide fade out again
+		float jmk = max(texture(trail2_tex, UV).b, 0.85 * smoothstep(0.3, 0.65, texture(trail3_tex, UV).g));
+		vec2 q0 = P.xz;
+		vec2 w1 = vec2(gd_noise3(vec3(q0 * 0.033, 3.3)), gd_noise3(vec3(q0 * 0.033 + 17.0, 7.7))) - 0.5;
+		vec2 w2 = vec2(gd_noise3(vec3(q0 * 0.11, 2.1)), gd_noise3(vec3(q0 * 0.11 + 31.0, 4.4))) - 0.5;
+		vec2 w3 = vec2(gd_noise3(vec3(q0 * 0.55, 1.1)), gd_noise3(vec3(q0 * 0.55 + 9.0, 5.5))) - 0.5;
+		float loose = 0.45 + 1.1 * gd_noise3(vec3(q0 * 0.017, 8.8));   // how wild this stretch is
+		vec2 wm = (w1 * 4.4 + w2 * 2.2 + w3 * 1.0 * f3) * loose * trail_edge_var * (1.0 - jmk);
+		vec2 bd = min(UV, 1.0 - UV);
+		float bk = smoothstep(0.0, 0.05, min(bd.x, bd.y));
+		wm *= bk;
+		float sp = (0.9 + 0.5 * trail_edge_fade) * bk * (1.0 - jmk) / 48.0;   // tap spread in UV (the fade's width)
+		vec2 u0 = UV + wm / 48.0;
+		float ta = texture(land_tex, u0 + vec2(sp, sp * 0.4)).a + texture(land_tex, u0 + vec2(-sp, -sp * 0.4)).a
+			+ texture(land_tex, u0 + vec2(-sp * 0.4, sp)).a + texture(land_tex, u0 + vec2(sp * 0.4, -sp)).a;
+		t = mix(t, ta * 0.25, bk * (1.0 - jmk));
+	}
 	// fine noise only where it still shows: every use is mix(0.5, n, f) or (n - 0.5) * f, so 0.5 = faded out
 	float n0 = gd_noise3(P * 2.3 + 3.3), n1 = 0.5, n2 = 0.5;
 	if (f2 > 0.0) n1 = gd_noise3(P * 9.0);
@@ -300,9 +330,34 @@ void fragment() {
 		tcol *= mix(vec3(1.0), vec3(0.6, 0.58, 0.56), m_wet);
 		// (damp soil only darkens: no gloss. Only standing water shines; a shiny damp rim spread over the whole road)
 	}
+	// off the trail (2026-11-25, realism pass): the land's baked colour gets slow patchiness (damp / sun-dried / thin soil, ~25 m
+	// and ~5 m) so wide open ground is never one flat tone, and a fine relief from the packed-dirt scan on bare ground
+	// (the grass carpet hides it elsewhere). Cost: 2 noise reads + one scan read, the relief only within ~40 m.
+	float mac = gd_noise3(vec3(P.xz * 0.04, 9.3)) * 0.6 + gd_noise3(vec3(P.xz * 0.2, 2.2)) * 0.4;
+	vec3 landc = gA.rgb * (1.0 + (mac - 0.5) * ground_macro);
+	float ofl = (1.0 - wd) * (1.0 - smoothstep(0.08, 0.4, gpx)) * ground_detail;
+	vec2 lslope = vec2(0.0);
+	if (ofl > 0.01) {
+		vec3 rlo = gd_relief(tr_nr0, P.xz + 11.0, pdx, pdy, vec2(0.707, 0.707), 1.0 / 2.3);
+		vec3 rlo2 = gd_relief(tr_nr1, P.xz - 5.0, pdx, pdy, vec2(-0.6, 0.8), 1.0 / 1.1);
+		lslope = (rlo.xy * 0.7 + rlo2.xy * 0.35) * ofl;
+		landc *= 1.0 - 0.07 * length(lslope);   // slopes / hollows read a touch darker
+	}
+	// the road's dirt is baked one orange-brown whatever country it runs through, so where the land turns dark (forest floor,
+	// marsh, ash, frost) it glowed bright against it. Match the dirt to the land beside it: only ever darker (the sunny
+	// green country keeps the look it has), and its hue picks up a little of the land's
+	vec3 dirtc = gB.rgb;
+	if (dirt_match > 0.0 && wd > 0.001) {
+		const vec3 LUM = vec3(0.2126, 0.7152, 0.0722);
+		float ll = dot(gA.rgb, LUM), ld = max(dot(gB.rgb, LUM), 1e-3);
+		float dark = clamp(ll / ld * 1.25, 0.42, 1.0);          // ~1 on the usual bright country, down to 0.42 on dark
+		dirtc *= mix(1.0, dark, dirt_match);
+		vec3 lch = gA.rgb / max(ll, 1e-3);
+		dirtc *= mix(vec3(1.0), clamp(lch, vec3(0.6), vec3(1.5)), dirt_match * 0.22 * (1.0 - dark * 0.6));
+	}
 	// slow light / dark drifts along the trail, so a long straight never reads as one flat band
 	float drift = 1.0 + (gd_noise3(vec3(P.xz * 0.05, 4.2)) - 0.5) * 0.1;
-	vec3 col = mix(gA.rgb, gB.rgb * tcol * drift, wd);
+	vec3 col = mix(landc, dirtc * tcol * drift, wd);
 	float rkw = rockW * (1.0 - wd) * f3;
 	if (rkw > 0.001) {
 		float rk = gd_noise3(P * 4.3 + 5.0) * 0.6 + (f2 > 0.0 ? gd_noise3(P * 13.0) * 0.4 * f2 : 0.0);
@@ -342,7 +397,7 @@ void fragment() {
 	// a puddle: murky water over the soil, level, mirror-smooth (the sky shows in it), with the lightest wind ripple.
 	// Not a perfect mirror: the sun's glint on 0.04 was smaller than a pixel and sparkled; it also goes duller with
 	// the pixel's footprint (far off / grazing), where one pixel covers many ripples
-	col = mix(col, gB.rgb * vec3(0.3, 0.29, 0.27), pud * 0.85);
+	col = mix(col, dirtc * vec3(0.3, 0.29, 0.27), pud * 0.85);
 	col = mix(col, vec3(0.7, 0.68, 0.62), pw_f * 0.3 * pud);
 	// ruts (world/ruts.gd): the dug groove darker, its lip lighter
 	float rd = rut_depth(P.xz);
@@ -376,9 +431,10 @@ void fragment() {
 	float hh = thgt * wd * trail_relief;
 	vec3 dpx = dFdx(P), dpy = dFdy(P);
 	float dhx = dFdx(hh), dhy = dFdy(hh);
-	if (wd * tbump > 0.0 || pud > 0.0 || thgt != 0.0 || rd != 0.0) {
+	if (wd * tbump > 0.0 || pud > 0.0 || thgt != 0.0 || rd != 0.0 || ofl > 0.01) {
 		vec3 nw = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
 		if (rd != 0.0) nw = rut_normal(P.xz, nw);   // (the groove's walls)
+		nw = normalize(nw + vec3(lslope.x, 0.0, lslope.y) * 0.5);
 		nw = normalize(nw + vec3(tslope.x, 0.0, tslope.y) * (wd * trail_bump));
 		// the height above as a real slope of the surface (its screen-space gradient turned into the world)
 		vec3 r1 = cross(dpy, nw), r2 = cross(nw, dpx);

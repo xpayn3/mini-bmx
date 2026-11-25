@@ -210,7 +210,7 @@ static func make_set() -> Dictionary:
 		"bridgeW": Wood.new(3, 0.0, 15.0, 1.0, false, kick, skin),   # picked for some bridges by TerrainField.make_feat
 		"gorge": Wood.new(2, 0.0, 36.0, 1.4, false, kick, skin),
 	}
-	var dig := {"gorge": Hermite.new([[0, 0, 0], [3.0, 0, 0], [4.6, -9.0, 0], [31.4, -9.0, 0], [33.0, 0, 0], [36, 0, 0]])}
+	var dig := {}   # (no gorge dig any more, 2026-11-25: its 9 m slot under the long bridge was a hole in the ground; mirrored in TerrainFieldCs.cs)
 	var table_s := Hermite.new(TABLE_S)
 	var dbl_s := Hermite.new(DOUBLE_S)
 	var kicker_s := Hermite.new(KICKER_S)

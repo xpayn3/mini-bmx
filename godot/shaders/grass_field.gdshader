@@ -48,6 +48,16 @@ vec4 g_hash4(vec2 p) {
 	p4 += dot(p4, p4.wzxy + 33.33);
 	return fract((p4.xxyz + p4.yzzw) * p4.zywx);
 }
+// the ground's own off-trail colour patchiness (ground.gdshader `mac`, same noise, same world scale): the blades take the
+// identical factor so grass and the floor under it are one colour field (2026-11-25, user: "uniform grass leaves with our new
+// grass colour"). Keep the two in step.
+float gm_hash(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
+float gm_noise3(vec3 p) {
+	vec3 i = floor(p), f = fract(p), u = f * f * (3.0 - 2.0 * f);
+	return mix(mix(mix(gm_hash(i), gm_hash(i + vec3(1, 0, 0)), u.x), mix(gm_hash(i + vec3(0, 1, 0)), gm_hash(i + vec3(1, 1, 0)), u.x), u.y),
+	           mix(mix(gm_hash(i + vec3(0, 0, 1)), gm_hash(i + vec3(1, 0, 1)), u.x), mix(gm_hash(i + vec3(0, 1, 1)), gm_hash(i + vec3(1, 1, 1)), u.x), u.y), u.z);
+}
+uniform float ground_macro = 0.26;
 float g_noise(vec2 p) {
 	vec2 i = floor(p), f = fract(p);
 	f = f * f * (3.0 - 2.0 * f);
@@ -165,7 +175,8 @@ void vertex() {
 	// colour: the ground's own at the root, lighter and yellower to the tip
 	// colour patches across the field (greener / sun-dried) and each blade a little its own
 	float cp = g_noise(root * 0.07 + 31.0);
-	vec3 c = gc.rgb * (0.82 + 0.36 * h2.x);
+	float gmac = gm_noise3(vec3(root * 0.04, 9.3)) * 0.6 + gm_noise3(vec3(root * 0.2, 2.2)) * 0.4;
+	vec3 c = gc.rgb * (1.0 + (gmac - 0.5) * ground_macro) * (0.82 + 0.36 * h2.x);
 	c *= mix(vec3(1.0), mix(vec3(0.9, 0.97, 0.88), vec3(1.07, 1.04, 0.93), ch.w), clump_k);   // each clump its own shade
 	c = mix(c, c * vec3(0.86, 1.05, 0.82), smoothstep(0.55, 0.85, cp) * 0.5);
 	c = mix(c, c * vec3(1.08, 1.0, 0.84), smoothstep(0.45, 0.15, cp) * 0.4);

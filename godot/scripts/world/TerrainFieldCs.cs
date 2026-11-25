@@ -264,7 +264,7 @@ internal static class TfSet
 		};
 		DIG = new Dictionary<string, TfProfile>
 		{
-			["gorge"] = new TfHermite(new[] { new[] { 0.0, 0, 0 }, new[] { 3.0, 0, 0 }, new[] { 4.6, -9.0, 0 }, new[] { 31.4, -9.0, 0 }, new[] { 33.0, 0, 0 }, new[] { 36.0, 0, 0 } }),
+			// (no gorge dig any more, 2026-11-25: the 9 m slot under the long bridge was a hole in the ground, like the plain bridge's pit)
 		};
 	}
 }

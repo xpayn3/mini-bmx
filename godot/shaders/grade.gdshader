@@ -13,6 +13,12 @@ uniform float fx_lines = 1.0;     // Settings > Camera > Speed effects: × speed
 uniform float fx_fringe = 1.0;
 uniform float fx_vig = 1.0;
 uniform vec2 focus = vec2(0.5, 0.52);
+// realism pass (2026-11-25): fine film grain (also breaks up banding in the sky gradients) and a soft sun flare.
+// sun_uv = where the sun is on screen (game.gd), flare = 0 off .. 1; it only shows while the pixels there really are bright
+// sky (a tree / hill / the rider in front of the sun kills it), so no depth read is needed
+uniform float film_grain = 0.5;
+uniform vec2 sun_uv = vec2(-1.0);
+uniform float flare = 0.0;
 // photo mode (scripts/game/photo_mode.gd): filters, white balance, fade, vignette, grain, lens fringing, frame
 uniform float photo = 0.0;
 uniform int p_filter = 0;          // 0 none, 1 B&W, 2 sepia, 3 vintage, 4 teal & orange, 5 noir, 6 golden, 7 cross process, 8 bleach bypass
@@ -125,6 +131,36 @@ void fragment() {
 	c.rgb += (l - 0.45) * vec3(0.035, 0.012, -0.03) * grade_amt;
 	vec2 v = SCREEN_UV - 0.5;
 	c.rgb *= 1.0 - dot(v, v) * (0.6 * grade_amt + 1.0 * speed * fx_vig);   // the frame closes in at speed
+	if (flare > 0.001) {
+		// how much of the sun is really visible: five reads of the screen round it, bright sky only
+		vec2 so = vec2(0.012 / aspect, 0.012);
+		float sl = dot(texture(screen_tex, sun_uv).rgb, vec3(0.333)) + dot(texture(screen_tex, sun_uv + so).rgb, vec3(0.333))
+			+ dot(texture(screen_tex, sun_uv - so).rgb, vec3(0.333)) + dot(texture(screen_tex, sun_uv + so * vec2(1.0, -1.0)).rgb, vec3(0.333))
+			+ dot(texture(screen_tex, sun_uv - so * vec2(1.0, -1.0)).rgb, vec3(0.333));
+		float vis = smoothstep(3.4, 4.4, sl) * flare * (1.0 - smoothstep(0.55, 0.85, length((sun_uv - 0.5) * vec2(1.0, 1.0))));
+		if (vis > 0.002) {
+			vec2 da = (uv - sun_uv) * vec2(aspect, 1.0);
+			float dl = length(da);
+			vec3 fc = vec3(1.0, 0.86, 0.62);
+			float glow = exp(-dl * 5.5) * 0.16 + exp(-dl * 22.0) * 0.22;
+			// a few ghosts strung along the line from the sun through the middle of the frame
+			vec2 axis = (vec2(0.5) - sun_uv);
+			float gh = 0.0;
+			for (int i = 0; i < 3; i++) {
+				float tt = 0.55 + 0.7 * float(i);
+				vec2 gp = sun_uv + axis * tt;
+				float gr = 0.035 + 0.028 * float(i);
+				float gd = length((uv - gp) * vec2(aspect, 1.0));
+				gh += (1.0 - smoothstep(gr * 0.55, gr, gd)) * (0.05 - 0.012 * float(i)) + exp(-pow(abs(gd - gr * 1.1) / 0.006, 2.0)) * 0.025;
+			}
+			c.rgb += (fc * glow + vec3(0.7, 0.85, 1.0) * gh) * vis;
+		}
+	}
+	if (film_grain > 0.001 && grade_amt > 0.5) {
+		float gn = fract(sin(dot(FRAGCOORD.xy + fract(TIME * 9.17) * 311.0, vec2(12.9898, 78.233))) * 43758.5453);
+		float lm = dot(c.rgb, vec3(0.299, 0.587, 0.114));
+		c.rgb += (gn - 0.5) * 0.026 * film_grain * (0.4 + 0.6 * (1.0 - abs(lm - 0.5) * 2.0));
+	}
 	if (lwet > 0.002) {
 		c.rgb *= 1.0 - lrim * 0.4;
 		c.rgb += lspec * vec3(0.9, 0.95, 1.0) * 0.75;

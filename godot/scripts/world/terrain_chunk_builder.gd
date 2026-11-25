@@ -1199,7 +1199,7 @@ func _berm_clutter(ox: float, oz: float) -> void:
 
 func _trail_clutter(ox: float, oz: float) -> void:
 	var rt := WorldRng.new(WorldRng.i32(cx * 2654435761) ^ WorldRng.i32(cz * 40503) ^ WorldRng.i32(f.seed_value * 2246822519) ^ 0x27d4eb2f)
-	for i in 420:
+	for i in 520:
 		var x := ox + (rt.next() - .5) * S
 		var z := oz + (rt.next() - .5) * S
 		var t: float = f.trail(x, z)
@@ -1228,6 +1228,9 @@ func _trail_clutter(ox: float, oz: float) -> void:
 				var sy := 0.5 + rt.next() * 0.6
 				var szz := 0.7 + rt.next() * 0.6
 				put("grass", x, h - 0.03, z, sx, sy, szz, rt.next() * 6.28, _tuft_col(dry))
+			elif rt.next() < 0.22:
+				# 2026-11-25 (realism pass): fallen twigs along the verge, the same MultiMesh list the forest floor uses
+				put("stick", x, h + 0.015, z, 0.2 + rt.next() * 0.45, 0.8, 0.8, rt.next() * 6.28, null, 0.15)
 
 
 func _grass(ox: float, oz: float) -> void:

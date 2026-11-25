@@ -89,7 +89,11 @@ var _shadow_zoom := -1.0
 ## at the start, the 30 s follow ride 141 -> 156 fps; mid-distance tree shadows a touch softer.
 ## BMX_SHADOW_SPLITS=4 = the old 4 cascades (Medium and up)
 func _two_splits() -> bool:
-	return Env.s("BMX_SHADOW_SPLITS") != "4"
+	var forced := Env.s("BMX_SHADOW_SPLITS")
+	if forced != "": return forced != "4"
+	# 2026-11-25 (realism pass): only the top shadow quality pays for the 4 cascades again (sharper mid-distance tree shadows,
+	# ~-8 % fps measured when it was dropped); every other preset keeps the cheap 2
+	return int(Settings.get_v("shadows")) < 3
 
 func _shadow_fit() -> void:
 	var sq := int(Settings.get_v("shadows"))
@@ -3681,6 +3685,19 @@ func _process(dt: float) -> void:
 	gm.set_shader_parameter("fx_fringe", float(Settings.get_v("sfx_fringe")))
 	gm.set_shader_parameter("fx_vig", float(Settings.get_v("sfx_vignette")))
 	gm.set_shader_parameter("speed", speed_k)
+	# sun flare (grade.gdshader): where the sun is on screen; the shader only shows it while the pixels there are bright sky
+	var fl_k := 0.0
+	var fl_uv := Vector2(-1.0, -1.0)
+	var fl_cam := get_viewport().get_camera_3d()
+	if fl_cam != null and not scenic and not photo and not st.crash_on and Settings.get_v("grade") and sun != null and sun.visible:
+		var to_sun: Vector3 = sun.global_transform.basis.z
+		if to_sun.y > 0.03 and night_k < 0.6:
+			var far_p := fl_cam.global_position + to_sun * 1000.0
+			if not fl_cam.is_position_behind(far_p):
+				fl_uv = fl_cam.unproject_position(far_p) / get_viewport().get_visible_rect().size
+				fl_k = (1.0 - night_k) * smoothstep(0.03, 0.12, to_sun.y)
+	gm.set_shader_parameter("sun_uv", fl_uv)
+	gm.set_shader_parameter("flare", fl_k)
 	# water / dust on the lens: only on the default trail camera (user, 2026-11-24); on other views it is
 	# hidden and waits as it was
 	var lens_on: bool = Settings.get_v("lens_fx") and not scenic and cam.mode == "trail"
