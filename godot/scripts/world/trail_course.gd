@@ -81,6 +81,8 @@ const BOARD_EVERY := 41     # one every ~80 m, alternating sides
 var _M  # TerrainField (zc, landform, pitches, water)
 var _r: WorldRng
 var _x := 0.0
+var _sps := PackedFloat64Array()   # (_finish) each point's s along the route spine
+var _send := 0.0   # the route spine's s at the course's last point (how far it is laid out: _L is in s)
 var _z := 0.0
 var _h := 0.0
 var _cells := {}
@@ -120,19 +122,19 @@ static func make(rnd: WorldRng, field, hill_len: float, corridor: float, course_
 
 
 ## the furthest x laid out so far
-func end_x() -> float:
-	return _x
+func end_s() -> float:
+	return _send
 
 
 ## a copy of this course laid out on to x = to_x (field: the TerrainField to read the land from; call
 ## plan_marking(field) on the result once the field queries it). This course is not changed.
-func grown(field, to_x: float) -> TrailCourse:
+func grown(field, to_s: float) -> TrailCourse:
 	var c := TrailCourse.new()
 	c._M = field
 	c._r = WorldRng.new()
 	c._r.a = _r.a
 	c._hill = _hill
-	c._L = to_x
+	c._L = to_s
 	c._corr = _corr
 	c._mark_seed = _mark_seed
 	c._x = _x; c._z = _z; c._h = _h
@@ -174,8 +176,10 @@ func _clashes(from: int, gap: float = 19.0) -> bool:
 						var ddz := Z[i] - Z[j]
 						if sqrt(ddx * ddx + ddz * ddz) < gap:
 							return true
-		if absf(Z[i] - _M.zc(X[i])) > _corr + 15:
-			return true
+		if (i - from) % 2 == 0:
+			_M.spine_near(X[i], Z[i])
+			if _M.sp_ad > _corr + 15:
+				return true
 	return false
 
 
@@ -206,14 +210,28 @@ func _turn_to(target: float, R: float, kind: int) -> void:
 	_arc(wrap_angle(target - _h), R, kind)
 
 
+## how far along the route spine the turtle is (m: TerrainField.spine_near)
+func _sp() -> float:
+	_M.spine_near(_x, _z)
+	return _M.sp_s
+
+
+## a heading relative to the route spine's direction here (the trail follows its swings, whichever way it runs)
+func _rel(a: float) -> float:
+	_M.spine_near(_x, _z)
+	return _M.sp_dir + a
+
+
+## how far off the corridor's middle (the spine), square to it (+ = left of the way it runs)
 func _off() -> float:
-	return _z - _M.zc(_x)
+	_M.spine_near(_x, _z)
+	return _M.sp_d
 
 
 func _next_pitch() -> int:
 	var P: PackedFloat64Array = _M.pitches
 	for k in range(0, P.size(), 3):
-		if P[k] + P[k + 1] / 2 > _x:
+		if P[k] + P[k + 1] / 2 > _sp():
 			return k
 	return -1
 
@@ -235,7 +253,7 @@ func _run(sec: Array) -> void:
 		2: _esses(sec[1])
 		3: _chute(sec[1])
 		4: _jump_line()
-		5: _esses(_x + 50)
+		5: _esses(_sp() + 50)
 		6: _tech(sec[1])
 
 
@@ -248,7 +266,7 @@ func _attempt(fns: Array) -> bool:
 			return true
 		_undo(s)
 	var s2 := _snap()
-	_turn_to(0, 30, ROAD)
+	_turn_to(_rel(0.0), 30, ROAD)
 	_straight(24, ROAD)
 	_commit(s2[3])
 	return false
@@ -283,8 +301,9 @@ func _road(max_len: float) -> void:
 		var o := _off()
 		var lim := _corr - 30
 		var tgt := (_r.next() * 2 - 1) * 72 * D2R * sqrt(tw)
-		if absf(o) > lim * 0.5:
+		if absf(o) > lim * (0.5 if TerrainField.OLD_ROUTE else 0.75):   # (new: the trail uses more of the corridor's width)
 			tgt = -signf(o) * (22 + _r.next() * 44) * D2R
+		tgt = _rel(tgt)
 		var seg := minf(len - done, 18 + _r.next() * 40)
 		# often a tight bend instead of a sweeper
 		var R := (13 + _r.next() * 16) if _r.next() < minf(0.42 * tw, 0.95) else (34 + _r.next() * 56) / maxf(0.6, sqrt(tw))
@@ -294,7 +313,7 @@ func _road(max_len: float) -> void:
 		if used < seg:
 			_straight(seg - used, ROAD)
 		done += maxf(seg, used)
-		if _x > _L - 70:
+		if _sp() > _L - 70:
 			break
 
 
@@ -304,16 +323,16 @@ func _switchbacks(end_x: float) -> void:
 	var R := 7 + _r.next() * 2.5
 	var dir := first
 	var k := 0
-	_turn_to(dir * (PI / 2 - alpha), 11 + _r.next() * 4, SWITCH)
+	_turn_to(_rel(dir * (PI / 2 - alpha)), 11 + _r.next() * 4, SWITCH)
 	while k < 6:
 		var room := (_corr - 12 - dir * _off()) / cos(alpha)
 		_straight(maxf(14, minf(26 + _r.next() * 20, room)), SWITCH, 0.4)
-		if _x > end_x and k >= 2:
+		if _sp() > end_x and k >= 2:
 			break
 		dir = -dir
 		k += 1
-		_turn_to(dir * (PI / 2 - alpha), R, SWITCH)
-	_turn_to(0, 12 + _r.next() * 4, SWITCH)
+		_turn_to(_rel(dir * (PI / 2 - alpha)), R, SWITCH)
+	_turn_to(_rel(0.0), 12 + _r.next() * 4, SWITCH)
 	_straight(8, SWITCH)
 
 
@@ -325,13 +344,13 @@ func _esses(end_x: float, kind: int = ESSES) -> void:
 	while k < 9:
 		var ang := (38 + _r.next() * 34) * D2R
 		var R := 10 + _r.next() * 8
-		_turn_to(dir * ang, R, kind)
+		_turn_to(_rel(dir * ang), R, kind)
 		_straight(3 + _r.next() * 6, kind)
 		dir = -dir
 		k += 1
-		if _x > end_x and k >= 3:
+		if _sp() > end_x and k >= 3:
 			break
-	_turn_to(0, 14, kind)
+	_turn_to(_rel(0.0), 14, kind)
 
 
 ## a slow technical section: a stack of tight hairpins (5-6.5 m radius, about walking-to-jogging pace on a bike),
@@ -343,7 +362,7 @@ func _tech(end_x: float) -> void:
 	var alpha := (14 + _r.next() * 16) * D2R
 	var R := 5.0 + _r.next() * 1.5
 	var k := 0
-	_turn_to(dir * (PI / 2 - alpha), 8 + _r.next() * 3, SWITCH)
+	_turn_to(_rel(dir * (PI / 2 - alpha)), 8 + _r.next() * 3, SWITCH)
 	while k < 7:
 		var leg := 8 + _r.next() * 9
 		if _r.next() < 0.35:
@@ -353,22 +372,22 @@ func _tech(end_x: float) -> void:
 			_straight(leg * 0.3, SWITCH)
 		else:
 			_straight(leg, SWITCH, 0.3)
-		if _x > end_x and k >= 3:
+		if _sp() > end_x and k >= 3:
 			break
 		dir = -dir
 		k += 1
-		_turn_to(dir * (PI / 2 - alpha), R, SWITCH)
-	_turn_to(0, 9, SWITCH)
+		_turn_to(_rel(dir * (PI / 2 - alpha)), R, SWITCH)
+	_turn_to(_rel(0.0), 9, SWITCH)
 	_straight(6, SWITCH)
 
 
 func _chute(end_x: float) -> void:
-	_turn_to((_r.next() - .5) * 16 * D2R, 18, ROCKS)
-	_straight(maxf(26, end_x - _x + 6), ROCKS, 0.25)
+	_turn_to(_rel((_r.next() - .5) * 16 * D2R), 18, ROCKS)
+	_straight(maxf(26, end_x - _sp() + 6), ROCKS, 0.25)
 
 
 func _jump_line() -> void:
-	_turn_to((_r.next() - .5) * 14 * D2R, 40, ROAD)
+	_turn_to(_rel((_r.next() - .5) * 14 * D2R), 40, ROAD)
 	_straight(10, ROAD)
 	_straight(80 + _r.next() * 50, JUMP)
 	_straight(8, ROAD)
@@ -377,10 +396,11 @@ func _jump_line() -> void:
 func _build() -> void:
 	var guard := 0
 	var P: PackedFloat64Array = _M.pitches
-	while _x < _L - 80 and guard < 4000:
+	while _sp() < _L - 80 and guard < 4000:
 		guard += 1
+		var sh := _sp()
 		var pk := _next_pitch()
-		var to_pitch := (P[pk] - P[pk + 1] / 2 - _x) if pk >= 0 else INF
+		var to_pitch := (P[pk] - P[pk + 1] / 2 - sh) if pk >= 0 else INF
 		if to_pitch < 30:
 			var end_x: float = P[pk] + P[pk + 1] / 2 + 6
 			var pick := _r.next()
@@ -391,19 +411,20 @@ func _build() -> void:
 			else:
 				_attempt([[2, end_x], [1, end_x], [3, end_x]])
 			continue
-		var room := minf(to_pitch, _L - 80 - _x)
+		var room := minf(to_pitch, _L - 80 - sh)
 		var pick2 := _r.next()
 		var jst := _sv("jumps")
 		var tst := _sv("twist")
-		if pk < 0 and _x > _hill - 80:
+		if pk < 0 and sh > _hill - 80:
 			# past the mountain: the trail runs on through the hills, never long without a twist
 			_attempt([[0, 40 + _r.next() * 90]])
-			var end_x := _x + 50 + _r.next() * 70
+			sh = _sp()
+			var end_x := sh + 50 + _r.next() * 70
 			# what comes next depends on the mountain under it (TerrainField.range_at): its descent is where the slow
 			# technical riding is (tight hairpin stacks, switchbacks, rock chutes); no jump lines up a climb
-			_M.range_at(_x + 30.0)
+			_M.range_at(sh + 30.0)
 			var down: bool = _M.rg_down > 0.5
-			var climbing: bool = _M.hill(_x + 60.0, _M.zc(_x + 60.0)) > _M.hill(_x, _M.zc(_x)) + 1.5
+			var climbing: bool = _M.hill_top(sh + 60.0) > _M.hill_top(sh) + 1.5
 			# the style's twist: fewer / more of the tight sections (a low twist turns some of them into plain road, a high one
 			# adds hairpin sections); the jump-line pick follows the jumps style. twist 1 / jumps 1 = the original picks.
 			var swap := tst < 1.0 and fposmod(pick2 * 977.0, 1.0) < (1.0 - tst) * 0.9
@@ -446,6 +467,7 @@ func _build() -> void:
 		else:
 			_attempt([[0, maxf(40, to_pitch - 20)]])
 	n = X.size()
+	_send = _sp()
 
 
 # ---------------- derived data ----------------
@@ -463,6 +485,11 @@ func _avg(src: PackedFloat32Array, rad: int) -> PackedFloat32Array:
 
 
 func _finish() -> void:
+	# each point's place along the route spine (the mountain's end and the rolling land are measured along it)
+	_sps = PackedFloat64Array(); _sps.resize(n)
+	for i in n:
+		_M.spine_near(X[i], Z[i])
+		_sps[i] = _M.sp_s
 	TX.resize(n); TZ.resize(n)
 	var th := PackedFloat32Array(); th.resize(n)
 	for i in n:
@@ -494,7 +521,7 @@ func _finish() -> void:
 		# past the mountain the trail follows the rolling land (smoothed hard, so climbs stay gentle)
 		var fr := _avg(_avg(_avg(raw, 10), 10), 10)
 		for i in n:
-			var w := smooth(_hill + 60, _hill + 360, X[i])
+			var w := smooth(_hill + 60, _hill + 360, _sps[i])
 			if w > 0.0:
 				E[i] = E[i] + (fr[i] - E[i]) * w
 	_shape_profile()
@@ -624,7 +651,7 @@ func _shape_profile() -> void:
 	var roll := _sv("rolling")   # RouteStyle.rolling: how much the trail rolls (dips) and how many cliff drops
 	# rolling dips on the open trail (not in the mountain's steep section)
 	for i in n:
-		var w := smooth(_hill + 60, _hill + 360, X[i])
+		var w := smooth(_hill + 60, _hill + 360, _sps[i])
 		if w <= 0.0 or KD[i] != ROAD:
 			continue
 		var s := i * STEP

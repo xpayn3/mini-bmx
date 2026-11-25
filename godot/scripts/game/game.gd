@@ -2178,10 +2178,10 @@ func _feature_spawn(what: String) -> Vector3:
 				var gj := maxi(2, gi - (int(Env.s("BMX_FEAT_BACK")) if Env.s("BMX_FEAT_BACK") != "" else 30))
 				return Vector3(C.X[gj], -atan2(C.TZ[gj], C.TX[gj]), C.Z[gj])
 		return Vector3.ZERO
-	if what.begins_with("x") or what == "tech":   # x<metres>: that far along x; tech: the first tight hairpin stack past the first mountain
+	if what.begins_with("x") or what.begins_with("s") or what == "tech":   # s<metres> (or the old x<metres>): that far along the trail; tech: the first tight hairpin stack past the first mountain
 		var x0 := float(what.substr(1)) if what != "tech" else 1500.0
 		for i in C.n:
-			if C.X[i] >= x0 and (what != "tech" or absf(C.KAP[i]) > 0.1):
+			if i * TrailCourse.STEP >= x0 and (what != "tech" or absf(C.KAP[i]) > 0.1):
 				var j2 := maxi(2, i - (20 if what == "tech" else 0))
 				print("FEATSPAWN %s idx=%d at %.0f,%.0f" % [what, i, C.X[j2], C.Z[j2]])
 				return Vector3(C.X[j2], -atan2(C.TZ[j2], C.TX[j2]), C.Z[j2])

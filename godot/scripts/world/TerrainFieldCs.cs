@@ -534,6 +534,9 @@ internal sealed class TfShared
 	public Color[] red_bands, grey_bands;
 	public Godot.Collections.Dictionary col;
 	public GodotObject course;
+	public double[] sX, sZ, sS;
+	public long s_gx0, s_gz0, s_gnx, s_gnz;
+	public int[] s_start, s_items;
 
 	public TfShared Clone() => (TfShared)MemberwiseClone();
 }
@@ -751,6 +754,9 @@ public partial class TerrainFieldCs : RefCounted
 		sh.c_run_start = f.Get("c_run_start").AsInt32Array();
 		sh.c_runs = f.Get("c_runs").AsInt32Array();
 		sh.course = f.Get("course").AsGodotObject();
+		sh.sX = F64(f.Get("sX")); sh.sZ = F64(f.Get("sZ")); sh.sS = F64(f.Get("sS"));
+		sh.s_gx0 = f.Get("s_gx0").AsInt64(); sh.s_gz0 = f.Get("s_gz0").AsInt64(); sh.s_gnx = f.Get("s_gnx").AsInt64(); sh.s_gnz = f.Get("s_gnz").AsInt64();
+		sh.s_start = f.Get("s_start").AsInt32Array(); sh.s_items = f.Get("s_items").AsInt32Array();
 		var rf = f.Get("route_feats").AsGodotArray();
 		sh.route_feats = new TfFeat[rf.Count];
 		for (int i = 0; i < rf.Count; i++)
@@ -783,6 +789,8 @@ public partial class TerrainFieldCs : RefCounted
 		c_gx0 = sh.c_gx0; c_gz0 = sh.c_gz0; c_gnx = sh.c_gnx; c_gnz = sh.c_gnz;
 		c_seg = sh.c_seg; c_run_start = sh.c_run_start; c_runs = sh.c_runs;
 		_route = sh.route_feats;
+		sX = sh.sX; sZ = sh.sZ; sS = sh.sS; s_gx0 = sh.s_gx0; s_gz0 = sh.s_gz0; s_gnx = sh.s_gnx; s_gnz = sh.s_gnz;
+		s_start = sh.s_start; s_items = sh.s_items;
 		_index_canyons();
 		_col = sh.col.Duplicate();
 		_route_wrap = null;
@@ -803,6 +811,7 @@ public partial class TerrainFieldCs : RefCounted
 		q_x = double.NaN; q_z = double.NaN; q_d = double.PositiveInfinity;
 		_qp[0] = double.NaN; _qp[1] = double.NaN; _qp[2] = double.PositiveInfinity;
 		_fo_x = double.NaN; _gr_x = double.NaN; _pn_x = double.NaN; _mt_x = double.NaN; _zc_x = double.NaN; _bi_x = double.NaN; _g_x = double.NaN;
+		_sd_x = double.NaN; _sn_key.Clear(); _sn_n = 0;
 	}
 
 	// ---------------- Perlin (three.js ImprovedNoise, z fixed at sz) ----------------
@@ -967,6 +976,89 @@ public partial class TerrainFieldCs : RefCounted
 		return _zc_v;
 	}
 
+	// ---------------- the route spine (terrain_field.gd spine_sd / _sp_node, RouteSpine): s along, |d| across ----------------
+	private const double SP_NODE = 8.0, RS_R = 450.0, RS_CELL = 160.0;
+	private static readonly bool OLD_ROUTE = System.Environment.GetEnvironmentVariable("BMX_OLD_ROUTE") is { Length: > 0 };
+	private double[] sX, sZ, sS;
+	private long s_gx0, s_gz0, s_gnx, s_gnz;
+	private int[] s_start, s_items;
+	private readonly Dictionary<long, int> _sn_key = new();
+	private double[] _sn_buf = new double[256];
+	private int _sn_n;
+	private double _sd_x = double.NaN, _sd_z = double.NaN, r_s, r_ad;
+
+	/// (s, |d|) for the land: bilinear between SP_NODE lattice nodes -> r_s, r_ad
+	public void spine_sd(double x, double z)
+	{
+		if (x == _sd_x && z == _sd_z)
+			return;
+		_sd_x = x; _sd_z = z;
+		if (OLD_ROUTE)
+		{
+			r_s = x; r_ad = Math.Abs(z - zc(x));
+			return;
+		}
+		double fx = x / SP_NODE;
+		double fz = z / SP_NODE;
+		long ix = floori(fx);
+		long iz = floori(fz);
+		double tx = fx - ix;
+		double tz = fz - iz;
+		int a = _sp_node(ix, iz);
+		int b = _sp_node(ix + 1, iz);
+		int c = _sp_node(ix, iz + 1);
+		int d = _sp_node(ix + 1, iz + 1);
+		var B = _sn_buf;
+		r_s = (B[a] * (1.0 - tx) + B[b] * tx) * (1.0 - tz) + (B[c] * (1.0 - tx) + B[d] * tx) * tz;
+		r_ad = (B[a + 1] * (1.0 - tx) + B[b + 1] * tx) * (1.0 - tz) + (B[c + 1] * (1.0 - tx) + B[d + 1] * tx) * tz;
+	}
+
+	private int _sp_node(long ix, long iz)
+	{
+		long key = (ix + 1048576) * 2097152 + (iz + 1048576);
+		if (_sn_key.TryGetValue(key, out int at))
+			return at;
+		double px = ix * SP_NODE;
+		double pz = iz * SP_NODE;
+		const double R2 = RS_R * RS_R;
+		double best = R2;
+		double ws = 0.0;
+		double wsum = 0.0;
+		long cx = floori(px / RS_CELL) - s_gx0;
+		long cz = floori(pz / RS_CELL) - s_gz0;
+		if (sX != null && cx >= 0 && cz >= 0 && cx < s_gnx && cz < s_gnz)
+		{
+			long ci = cz * s_gnx + cx;
+			for (int k = s_start[ci]; k < s_start[ci + 1]; k++)
+			{
+				int i = s_items[k];
+				double ax = sX[i], az = sZ[i];
+				double vx = sX[i + 1] - ax, vz = sZ[i + 1] - az;
+				double t = ((px - ax) * vx + (pz - az) * vz) / (vx * vx + vz * vz);
+				t = t < 0.0 ? 0.0 : (t > 1.0 ? 1.0 : t);
+				double ex = px - (ax + vx * t), ez = pz - (az + vz * t);
+				double d2 = ex * ex + ez * ez;
+				if (d2 < best)
+					best = d2;
+				if (d2 < R2)
+				{
+					double q = 1.0 - d2 / R2;
+					double w = q * q / (d2 + 25.0);
+					ws += w * (sS[i] + t * (sS[i + 1] - sS[i]));
+					wsum += w;
+				}
+			}
+		}
+		at = _sn_n;
+		if (_sn_n + 2 > _sn_buf.Length)
+			Array.Resize(ref _sn_buf, _sn_buf.Length * 2);
+		_sn_buf[_sn_n] = wsum > 0.0 ? ws / wsum : 0.0;
+		_sn_buf[_sn_n + 1] = Math.Sqrt(best);
+		_sn_n += 2;
+		_sn_key[key] = at;
+		return at;
+	}
+
 	// ---------------- the mountains after the first (TerrainField.range_at) ----------------
 	public const double RANGE_X0 = 2100.0, RANGE_P = 2800.0, RANGE_UP = 0.042, RANGE_DOWN = 0.075;
 	private double _rg_x = double.NaN, _rg_h, _rg_m;
@@ -1006,15 +1098,19 @@ public partial class TerrainFieldCs : RefCounted
 		if (x == _mt_x && z == _mt_z)
 			return _mt_v;
 		double v = 0.0;
+		spine_sd(x, z);
+		double px = x;
+		x = r_s;
+		double ad = r_ad;
 		if (x > RANGE_X0)
 		{
 			range_at(x);
 			if (_rg_m > 0.0)
-				v = _rg_m * (1.0 - sm(MTN_W - 20, MTN_W + 90, Math.Abs(z - zc(x))));
+				v = _rg_m * (1.0 - sm(MTN_W - 20, MTN_W + 90, ad));
 		}
 		if (x > -300.0 && x < HILL_LEN + 150)
 		{
-			double t = (Math.Abs(z - zc(x)) - (MTN_W - 20)) / ((MTN_W + 90) - (MTN_W - 20));
+			double t = (ad - (MTN_W - 20)) / ((MTN_W + 90) - (MTN_W - 20));
 			if (t < 1.0)
 			{
 				t = t < 0.0 ? 0.0 : t;
@@ -1027,11 +1123,20 @@ public partial class TerrainFieldCs : RefCounted
 				v = a * (1.0 - t * t * (3.0 - 2.0 * t));
 			}
 		}
-		_mt_x = x; _mt_z = z; _mt_v = v;
+		_mt_x = px; _mt_z = z; _mt_v = v;
 		return v;
 	}
 
 	public double hill(double x, double z)
+	{
+		spine_sd(x, z);
+		double top = hill_top(r_s);
+		if (top <= 0.0)
+			return 0.0;
+		return top * (1.0 - sm(MTN_W, MTN_W + 260, r_ad));
+	}
+
+	public double hill_top(double x)
 	{
 		if (x <= -330.0)
 			return 0.0;
@@ -1063,9 +1168,7 @@ public partial class TerrainFieldCs : RefCounted
 			range_at(x);
 			top += _rg_h;
 		}
-		if (top <= 0.0)
-			return 0.0;
-		return top * (1.0 - sm(MTN_W, MTN_W + 260, Math.Abs(z - zc(x))));
+		return top;
 	}
 
 	public double route_dist(double x, double z)

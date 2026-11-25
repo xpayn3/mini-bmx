@@ -225,7 +225,11 @@ func _land_rows(f: TerrainField, C: TrailCourse, seed_in: int) -> Array:
 		_tcache = {}
 		_hseed = hk
 	var n := C.n
+	# the trail runs any way (the route spine): the map's box is the trail's own min / max
 	var x_start: float = C.X[0]
+	var x_end: float = C.X[0]
+	for i in n:
+		x_start = minf(x_start, C.X[i]); x_end = maxf(x_end, C.X[i])
 	var nrows := 1   # one continuous map of the whole trail
 	var zmin := PackedFloat64Array()
 	var zmax := PackedFloat64Array()
@@ -240,7 +244,7 @@ func _land_rows(f: TerrainField, C: TrailCourse, seed_in: int) -> Array:
 	for r in nrows:
 		var x0 := floorf((x_start - 260.0) / GRIDM) * GRIDM
 		var z0 := floorf((minf(zmin[r], zmax[r] - 100.0) - 420.0) / GRIDM) * GRIDM
-		var w := ceilf((C.X[n - 1] - x_start + 520.0) / GRIDM) * GRIDM
+		var w := ceilf((x_end - x_start + 520.0) / GRIDM) * GRIDM
 		var h := ceilf((maxf(zmax[r], zmin[r] + 100.0) + 420.0 - z0) / GRIDM) * GRIDM
 		var nx := int(w / GRIDM) + 1
 		var nz := int(h / GRIDM) + 1
@@ -547,24 +551,31 @@ func _draw() -> void:
 		emin = minf(emin, E[i]); emax = maxf(emax, E[i])
 	var er := maxf(20.0, emax - emin)
 	draw_rect(Rect2(ex0, ey, ew, STRIP_H), Color(INK, 0.06))
-	var xr := float(X[n - 1] - X[0])
+	var xr := float(maxi(n - 1, 1))   # the strip runs by distance along the trail (points are 2 m apart)
 	var prev := Vector2.ZERO
 	for i in range(0, n, 2):
-		var p := Vector2(ex0 + float(X[i] - X[0]) / xr * ew, ey + STRIP_H - 8.0 - (E[i] - emin) / er * (STRIP_H - 26.0))
+		var p := Vector2(ex0 + float(i) / xr * ew, ey + STRIP_H - 8.0 - (E[i] - emin) / er * (STRIP_H - 26.0))
 		var colg := _grade_col(G[i])
 		draw_line(Vector2(p.x, p.y), Vector2(p.x, ey + STRIP_H - 2.0), Color(colg.r, colg.g, colg.b, 0.22), 2.5)
 		if i > 0: draw_line(prev, p, colg.darkened(0.25), 2.0, true)
 		prev = p
 	for dr in data["drops"]:
-		var xi: float = (float(X[mini(n - 1, dr[1])]) - X[0]) / xr
+		var xi: float = float(mini(n - 1, dr[1])) / xr
 		draw_line(Vector2(ex0 + xi * ew, ey + 4), Vector2(ex0 + xi * ew, ey + STRIP_H - 2), Color(TRAIL_C, 0.7), 1.5)
 	draw_string(font, Vector2(ex0 + 4, ey + 14), "ELEVATION  %d – %d M   (red tick = cliff drop)" % [roundi(emin), roundi(emax)], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(INK, 0.7))
 	if view != null and view.size.x > 0.0 and zoom > 0.0:   # the part of the trail the map shows now
 		var rg: Dictionary = (data["rows"] as Array)[0]
 		var vx0: float = centre.x - view.size.x * 0.5 / zoom
 		var vx1: float = centre.x + view.size.x * 0.5 / zoom
-		var xa2 := clampf((vx0 - float(X[0])) / xr, 0.0, 1.0)
-		var xb2 := clampf((vx1 - float(X[0])) / xr, 0.0, 1.0)
+		var vz0: float = centre.y - view.size.y * 0.5 / zoom
+		var vz1: float = centre.y + view.size.y * 0.5 / zoom
+		var ia := n
+		var ib := -1
+		for i in range(0, n, 4):   # the stretch of trail inside the view
+			if X[i] >= vx0 and X[i] <= vx1 and Z[i] >= vz0 and Z[i] <= vz1:
+				ia = mini(ia, i); ib = maxi(ib, i)
+		var xa2 := clampf(float(ia) / xr, 0.0, 1.0)
+		var xb2 := clampf(float(ib) / xr, 0.0, 1.0) if ib >= 0 else xa2
 		draw_rect(Rect2(ex0 + xa2 * ew, ey, (xb2 - xa2) * ew, STRIP_H), Color(TRAIL_C, 0.1))
 		draw_rect(Rect2(ex0 + xa2 * ew, ey, (xb2 - xa2) * ew, STRIP_H), Color(TRAIL_C, 0.6), false, 1.5)
 	# legend (top right)

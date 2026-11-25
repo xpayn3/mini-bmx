@@ -420,6 +420,28 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   stored in course order). Chunks read rocks / stakes / fences from per-chunk buckets, route features are
   binary-searched — nothing scans the whole course. `tools/trail_grow_probe.gd` checks all of it.
 
+- **Route spine: the world runs any way, not along +x (2026-11-25, user: "use the landscape, really wavy, we have a square
+  map, sometimes go back, not uniform")**. `world/route_spine.gd` (`RouteSpine`): a 2D polyline every 20 m that the whole
+  world is laid out along. Everything that was x / `|z - zc(x)|` is now s (along the spine) / |d| (across it): the first
+  mountain, its pitches, the later ranges (`range_at(s)`), `mtn`, `hill` (`hill_top(s)` = the height on the spine's middle),
+  the trail's corridor (`TrailCourse._off/_rel/_sp`), the course length `_L`, `end_s()`, section ends, and growth
+  (`Terrain._update_grow` reads the rider's spine s via `TerrainField.spine_near`). Walker (GDScript only, C# copies the
+  arrays): straight +x from s -636 to 150 (s = x there: the start / title spot unchanged), then it heads for random
+  waypoints 1.2-4 km away (up to ~112 deg off its heading, inside |z| < `ZMAX` 7 km, at most 3.5 km back west of its
+  furthest east, a straight line to it clear of its own legs, the most open of 24 tries), with a random-walk wobble
+  (+-0.8 rad); each step picks of 9 headings (1.5 deg notches) the one that fits the BARE land best (`TerrainField.bare`:
+  landform without mtn / hill): not climbing into hills, not straight down a steep fall line, not over cliffs / into lakes,
+  >= `GAP` 1.1 km from its own legs older than 1.6 km. Grown with the walker's saved state (`grown`), built `SPINE_AHEAD`
+  4 km past the course. Land query `spine_sd(x, z)` -> `r_s`, `r_ad`: bilinear over an 8 m lattice of exact nodes; a node's
+  s is a weighted blend of every segment within `R` 450 m (w = (1 - d^2/R^2)^2 / (d^2 + 25)), so s never jumps on the
+  inside of a bend; |d| is the true distance (nodes cached per field instance, cleared in `_reset_caches`). Mirrored in
+  `TerrainFieldCs.spine_sd/_sp_node` (same op order): `terrain_cs_cmp` heights EXACT (only the C#-only fine-mesh chunk
+  arrays differ, as before). Measured over 16 km of course: seeds 4242 / 5 / 12 cover 11 x 7, 10.6 x 7.5, 15.5 x 8.5 km,
+  heading -x 11-35 % of the way, legs >= 1.04 km apart; 40 m stretches over 15 % grade 2.6 % (old 1.9 %), steepest the
+  same (drops apart). Demo AI 120 s on 4242 / 5: no crash, 135-145 fps. `BMX_OLD_ROUTE=1` = the old straight corridor.
+  Map: `-s res://tools/trail_map.gd -- out.png [seed] [course m] [m/px]`. Tests `BMX_TRAIL_FEAT=s<m>` (was x<m>) = that
+  far along the trail. Not changed yet: `biome_probe`, `land_probe`, `route_grade_probe` still sample round the old zc.
+
 - **Mountains for ever + technical sections** (2026-11-21, user: "add mountains ... some gentle climbs ... missing nice tight
   turns for slow speed, more technical parts"). `TerrainField.range_at(x)` (mirrored in `TerrainFieldCs`, integer hash of slot +
   seed, no table): from `RANGE_X0` 2100 m one mountain every `RANGE_P` 2800 m on the trail's corridor: a climb averaging
