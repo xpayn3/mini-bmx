@@ -258,6 +258,16 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   and rear-wheel limits shove the chest 1-2.6 cm in single frames, and right after the pop the stand-tall moves it
   3-5 cm a frame (no limit involved: the face / stand-tall pose blend). An acceleration cap on hips + chest (45 m/s^2)
   only took 76 -> 67 such frames on dtable_36: tried and removed. Not fixed.
+  **Reset after a crash: one crumpled frame (same day, F8 seed 799751)**: the race number (`BackNumber`) kept the
+  ragdoll's crumple for the first frame back on the bike. `Rider.reset_pose` now calls `BackNumber.restart()` (laid
+  flat, no carried-over speed). Tests: `BMX_BAIL=14 BMX_TAP_RESET=17 BMX_TAP_INPUT=1 BMX_TAP_SHOTS=prefix` (the bail
+  tap sent as a real input; 16 consecutive frames at 0.15x kept in memory, `SSHOT` lines with the camera; without
+  `BMX_TAP_INPUT` the reset runs mid-frame after the camera update and the first shot is a mix: not a game bug),
+  `BMX_CRASH_SHOTS=prefix` (the same from a crash's start), `BMX_RESET_DUMP=1`, `BMX_RAGSTART_DUMP=1` (ragdoll head /
+  chest / pelvis vs the bike, first 0.25 s). The F8 ride log now records the ragdoll's head / chest / pelvis
+  (relative to the bike's point, world axes) in the pelvis_* / chest_* / head_* columns while crashed (they held the
+  last riding pose). **Open: the user saw the whole upper body drawn offset in some fast hard crashes**; not
+  reproduced (a plain bail draws the ragdoll smoothly): press F8 right after one.
 - **Curbs / ledges: the rear rolls up, the tyres don't shiver at the edge (2026-11-24, user: "the rear always gets
   stuck on a curb")**. (1) `_step_move`'s edge check (at the bottom bracket) read the rise per physics step, so whether a
   curb was a wall at all depended on speed: at 6 km/h it never saw one (rolled up 30 cm), at 15 km/h a 20 cm curb was

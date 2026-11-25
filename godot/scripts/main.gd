@@ -2627,10 +2627,33 @@ func _autotest(seconds: float) -> void:
 		if Env.s("BMX_BAIL") != "" and el > float(Env.s("BMX_BAIL")) and not _probe.has("bailed"):   # tests: bail (crash) here
 			_probe["bailed"] = true
 			game.phys.crash_pending = "BAIL!"
+		# tests: consecutive frames of a crash start (BMX_CRASH_SHOTS) / a bail-tap reset (BMX_TAP_SHOTS), at 0.15x time,
+		# kept in memory and written after (a png a frame stalled ~0.1 s: the shots were far apart)
+		var ss_pre := Env.s("BMX_CRASH_SHOTS") if Env.s("BMX_CRASH_SHOTS") != "" else Env.s("BMX_TAP_SHOTS")
+		var ss_go: bool = (Env.s("BMX_CRASH_SHOTS") != "" and game.phys.crash_on) or (Env.s("BMX_TAP_SHOTS") != "" and _probe.has("tapped"))
+		if Env.s("BMX_RESET_DUMP") != "" and _probe.has("tapped") and int(_probe.get("rd_n", 0)) < 10:   # tests: camera / helmet cam right after the tap
+			_probe.rd_n = int(_probe.get("rd_n", 0)) + 1
+			var rc = game.rider.action_cam
+			var cm: Camera3D = get_viewport().get_camera_3d()
+			print("RESETDUMP f=%d cam=%s cam_to_rider=%.2f zoom=%.3f crash=%s helmetcam=%s vis=%s body=%s rider_par=%s" % [_probe.rd_n, cm.name if cm else "-", cm.global_position.distance_to(game.rider.global_position) if cm else -1.0, game.cam.crash_zoom, game.phys.crash_on, rc != null and is_instance_valid(rc), rc.visible if rc and is_instance_valid(rc) else false, rc.get_node_or_null("Body") != null if rc and is_instance_valid(rc) else false, game.rider.get_parent().name])
+		if ss_pre != "" and ss_go and not _probe.has("ss_done"):
+			if not _probe.has("ss_imgs"): _probe["ss_imgs"] = []; Engine.time_scale = 0.15
+			var imgs: Array = _probe["ss_imgs"]
+			imgs.append(get_viewport().get_texture().get_image())
+			var cm2: Camera3D = get_viewport().get_camera_3d()
+			print("SSHOT %d drawn=%d cam=%s rider=%s crash=%s" % [imgs.size(), Engine.get_frames_drawn(), str(cm2.global_position.snapped(Vector3.ONE * 0.01)) if cm2 else "-", str(game.rider.global_position.snapped(Vector3.ONE * 0.01)), game.phys.crash_on])
+			if imgs.size() >= 16:
+				for k in imgs.size(): (imgs[k] as Image).save_png("%s_%d.png" % [ss_pre, k + 1])
+				_probe["ss_done"] = true; Engine.time_scale = 1.0
 		if Env.s("BMX_TAP_RESET") != "" and el > float(Env.s("BMX_TAP_RESET")) and not _probe.has("tapped"):   # tests: tap bail -> back on the trail
 			_probe["tapped"] = true
 			var p0 := Vector3(game.phys.x, game.phys.y, game.phys.z)
-			game.reset_to_trail()
+			print("TAPRESET at drawn=%d" % Engine.get_frames_drawn())
+			if Env.s("BMX_TAP_INPUT") != "":   # (as a player does: a bail press + release, handled before the next frame)
+				for prs in [true, false]:
+					var evb := InputEventAction.new(); evb.action = "bail"; evb.pressed = prs
+					Input.parse_input_event(evb)
+			else: game.reset_to_trail()
 			var tc: TrailCourse = game.terrain.field.course
 			var dm := INF
 			for i in tc.n: dm = minf(dm, Vector2(tc.X[i] - game.phys.x, tc.Z[i] - game.phys.z).length())

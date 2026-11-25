@@ -286,6 +286,12 @@ func _reset() -> void:
 	_vs = Vector3.ZERO
 
 
+## back on the bike (get up, reset, respawn): the paper is laid flat on the back again, no carried-over speed
+func restart() -> void:
+	_have = false
+	_prev_o = Vector3.INF
+
+
 func _process(dt: float) -> void:
 	if _vp != null and _vp_frames >= 0:   # the face is drawn once (a few frames for fonts / layout), then frozen
 		_vp_frames += 1
