@@ -172,6 +172,31 @@ func _pill(text: String, cb: Callable, active := false, size := Tokens.T_LG, pri
 	b.add_theme_color_override("font_hover_color", Tokens.INK if lit else C_TXT)
 	return b
 
+# ---------------------------------------------------------------- a round check mark: a day ridden (yellow disc + check) or still to come (empty ring)
+class CheckDot extends Control:
+	var done := false
+	var dot := 30.0
+	func _init() -> void:
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+	func _ready() -> void:
+		custom_minimum_size = Vector2(dot, dot)
+	func _draw() -> void:
+		var c := Vector2(dot, dot) * 0.5
+		var r := dot * 0.5 - 1.5
+		if done:
+			draw_circle(c, r, Tokens.ACCENT)
+			draw_arc(c, r, 0.0, TAU, 40, Tokens.ACCENT_DOWN, 1.5, true)
+			var k := dot / 30.0
+			draw_polyline(PackedVector2Array([c + Vector2(-6.5, 0.5) * k, c + Vector2(-1.8, 5.2) * k, c + Vector2(6.8, -4.8) * k]), Tokens.INK, 3.0 * k, true)
+		else:
+			draw_arc(c, r, 0.0, TAU, 40, Tokens.LINE, 2.0, true)
+
+func _check_dot(done: bool, size := 30.0) -> Control:
+	var d := CheckDot.new()
+	d.done = done
+	d.dot = size
+	return d
+
 # ---------------------------------------------------------------- ring gauge
 class Ring extends Control:
 	var frac := 0.0:
@@ -496,7 +521,7 @@ func _page_overview() -> void:
 	_count(bl, float(ds), func(v: float): return "%d DAY%s" % [roundi(v), "" if roundi(v) == 1 else "S"], 0.15, 0.7)
 	var dots := HBoxContainer.new()
 	dots.add_theme_constant_override("separation", Tokens.S3)
-	for i in 7: dots.add_child(UITheme.display("▮", 22, ACC if i < mini(ds, 7) else C_LINE, 0.0, 700))
+	for i in 7: dots.add_child(_check_dot(i < mini(ds, 7), 24.0))
 	tc[1].add_child(dots)
 	tc[1].add_child(_cap("WEEK STREAK %d  ·  BEST %d DAYS" % [GameState.week_streak(), int(r.best_streak)], C_SOFT, Tokens.T_XS))
 	hero.add_child(b)
@@ -610,7 +635,7 @@ func _streak_card() -> Control:
 	var dots := HBoxContainer.new()
 	dots.add_theme_constant_override("separation", Tokens.S2)
 	dots.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	for i in 7: dots.add_child(UITheme.display("▮", 30, ACC if i < mini(n, 7) else C_LINE, 0.0, 700))
+	for i in 7: dots.add_child(_check_dot(i < mini(n, 7), 30.0))
 	row.add_child(dots)
 	var sp := Control.new(); sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL; row.add_child(sp)
 	var paid := GameState.claimed.has("d%d" % GameState.today())
