@@ -1,0 +1,5 @@
+blades.png = 16 grass blades straightened into 64 x 512 strips (a Texture2DArray, 1 x 16 slices), made by
+tools/make_grass_blades.py from:
+  ambientCG Foliage001 - https://ambientcg.com/a/Foliage001
+  ambientCG Foliage006 - https://ambientcg.com/a/Foliage006
+(2K-JPG: Color, Opacity, NormalGL). Licence: CC0 1.0 Universal (public domain), no credit needed.

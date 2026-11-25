@@ -41,6 +41,7 @@ var _win_k := Vector2i(1 << 30, 0)     # the window's centre chunk
 var _win_sig := ""                     # which chunks were copied in
 var _serial := -1
 var _mat: ShaderMaterial
+const BLADES := "res://assets/textures/grass_blade/blades.png"   # Texture2DArray (tools/make_grass_blades.py)
 var _near: MultiMeshInstance3D
 var _mid: MultiMeshInstance3D
 var _tile_buf := {}                    # MultiMesh -> PackedFloat32Array (reused)
@@ -88,6 +89,30 @@ func _process(dt: float) -> void:
 			_tr_dirty = false
 			_tr_up_ms = now_ms
 		update(get_viewport().get_camera_3d())
+		if _ab_on: _ab_step()
+
+
+# BMX_GRASS_AB=1: the photo blades switched off / on every AB_FRAMES frames, the main view's GPU time averaged for each
+# (interleaved, so other programs on the GPU load both the same); `GRASSAB off_ms= on_ms= diff_ms=` every 5 s
+var _ab_on := Env.s("BMX_GRASS_AB") != ""
+var _ab_n := 0
+var _ab_sum := [0.0, 0.0]
+var _ab_cnt := [0, 0]
+const AB_FRAMES := 30
+
+func _ab_step() -> void:
+	var vp := get_viewport().get_viewport_rid()
+	RenderingServer.viewport_set_measure_render_time(vp, true)
+	var k := (_ab_n / AB_FRAMES) % 2
+	if _ab_n % AB_FRAMES >= 5:   # skip the first frames after a switch (the time read is a frame or two behind)
+		_ab_sum[k] += RenderingServer.viewport_get_measured_render_time_gpu(vp)
+		_ab_cnt[k] += 1
+	_ab_n += 1
+	_mat.set_shader_parameter("blade_photo", float((_ab_n / AB_FRAMES) % 2))
+	if _ab_n % 300 == 0 and _ab_cnt[0] > 0 and _ab_cnt[1] > 0:
+		var a: float = _ab_sum[0] / _ab_cnt[0]
+		var b: float = _ab_sum[1] / _ab_cnt[1]
+		print("GRASSAB off_ms=%.3f on_ms=%.3f diff_ms=%.3f frames=%d" % [a, b, b - a, _ab_cnt[0] + _ab_cnt[1]])
 
 
 ## presses the grass down along the stroke from this id's last point to p (a tyre, a body part), in direction
@@ -169,6 +194,9 @@ func _ready() -> void:
 	_mat = ShaderMaterial.new()
 	_mat.shader = _shader
 	if Env.s("BMX_GRASS_OLD") != "": _mat.set_shader_parameter("look_v2", 0.0)   # tests: the grass look before 2026-11-24
+	# photographed blades on the near ring (shaders/grass_field.gdshader `grass_blades`); BMX_GRASS_PHOTO=0 = without
+	if Env.s("BMX_GRASS_PHOTO") == "0" or not ResourceLoader.exists(BLADES): _mat.set_shader_parameter("blade_photo", 0.0)
+	else: _mat.set_shader_parameter("grass_blades", load(BLADES))
 	_mat.set_shader_parameter("grass_col", _tex_c)
 	_mat.set_shader_parameter("grass_h", _tex_h)
 	_mat.set_shader_parameter("win_size", float(TEX))
