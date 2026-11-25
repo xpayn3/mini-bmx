@@ -3,20 +3,21 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://cg3nptfomwoj2"
-path="res://.godot/imported/paper_color.jpg-38c10be8708f242c5e1f8f83d3a44eae.ctex"
+path.bptc="res://.godot/imported/paper_color.jpg-38c10be8708f242c5e1f8f83d3a44eae.bptc.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
 }
 
 [deps]
 
 source_file="res://assets/textures/paper/paper_color.jpg"
-dest_files=["res://.godot/imported/paper_color.jpg-38c10be8708f242c5e1f8f83d3a44eae.ctex"]
+dest_files=["res://.godot/imported/paper_color.jpg-38c10be8708f242c5e1f8f83d3a44eae.bptc.ctex"]
 
 [params]
 
-compress/mode=0
-compress/high_quality=false
+compress/mode=2
+compress/high_quality=true
 compress/lossy_quality=0.7
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0

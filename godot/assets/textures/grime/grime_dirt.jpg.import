@@ -3,20 +3,21 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://c68x8b1ilk0x3"
-path="res://.godot/imported/grime_dirt.jpg-f16d68fb18df59f299d00ffe0069f616.ctex"
+path.bptc="res://.godot/imported/grime_dirt.jpg-f16d68fb18df59f299d00ffe0069f616.bptc.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
 }
 
 [deps]
 
 source_file="res://assets/textures/grime/grime_dirt.jpg"
-dest_files=["res://.godot/imported/grime_dirt.jpg-f16d68fb18df59f299d00ffe0069f616.ctex"]
+dest_files=["res://.godot/imported/grime_dirt.jpg-f16d68fb18df59f299d00ffe0069f616.bptc.ctex"]
 
 [params]
 
-compress/mode=0
-compress/high_quality=false
+compress/mode=2
+compress/high_quality=true
 compress/lossy_quality=0.7
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0

@@ -3,20 +3,21 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://c5g2p04627j14"
-path="res://.godot/imported/paper_rough.jpg-1634b34c331b98b93180df02748d072f.ctex"
+path.bptc="res://.godot/imported/paper_rough.jpg-1634b34c331b98b93180df02748d072f.bptc.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
 }
 
 [deps]
 
 source_file="res://assets/textures/paper/paper_rough.jpg"
-dest_files=["res://.godot/imported/paper_rough.jpg-1634b34c331b98b93180df02748d072f.ctex"]
+dest_files=["res://.godot/imported/paper_rough.jpg-1634b34c331b98b93180df02748d072f.bptc.ctex"]
 
 [params]
 
-compress/mode=0
-compress/high_quality=false
+compress/mode=2
+compress/high_quality=true
 compress/lossy_quality=0.7
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0
