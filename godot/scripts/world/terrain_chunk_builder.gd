@@ -873,7 +873,7 @@ func _dist_signs() -> void:
 		var post_c := TerrainField.lin(0x6b4a30)
 		const PLATE := 0.8      # m, square
 		const PLATE_T := 0.02   # plate thickness
-		const POLE := 0.07      # stick cross-section
+		const POLE := 0.05      # stick cross-section
 		const PLATE_Y := 1.45   # plate centre above the ground
 		var top := PLATE_Y + PLATE / 2 - 0.04
 		add.call("pole", Vector3(0, (top - 0.15) / 2, 0), Vector3(POLE, top + 0.15, POLE), post_c)   # ground (-0.15) .. just under the plate top
