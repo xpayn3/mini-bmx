@@ -1880,8 +1880,19 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 			print("PUDDLE at=(%.1f,%.1f,%.1f) t=%.2f rear damp=%.2f water=%.2f front damp=%.2f water=%.2f dust=%.0f->%.0f" % [rear.x, rear.y, rear.z, Time.get_ticks_msec() / 1000.0, wet_r.x, wet_r.y, wet_f.x, wet_f.y, rate, rate * dry_r])
 		# the dust trail: a GPU particle emitter at the rear tyre (fx/ride_dust.gd), thrown back and up,
 		# flung outward in a carve
-		var d_out := turn_dir * carve_k * 3.5
-		var d_back := va * 0.3 * (1 - carve_k * 0.55)
+		# the tread's real state: sideways slide (slip angle x speed) and wheelspin throw the spray harder / further out
+		var g_long0 := 0.0
+		if skid_fx: g_long0 = -va
+		elif st.a_drive > 6.0: g_long0 = clampf((st.a_drive - 6.0) * 0.8, 0.0, 7.0)
+		var slide_k := clampf(absf(va * sin(clampf(st.slip_w, -1.2, 1.2))) / 4.0, 0.0, 1.0)
+		var spin_k := clampf(g_long0 / 7.0, 0.0, 1.0)
+		var load_k := clampf(0.55 + 0.45 * st.n_rear / 9.81, 0.4, 1.2)   # a light rear (bouncing, unloaded) kicks up less
+		rate *= load_k * (1.0 + slide_k * 0.5 + spin_k * 0.4)
+		# the dust starts where each tyre really meets the ground (swung out by the lean, on the drawn ground), not under the frame
+		var rear_d := _dust_patch(rear, rig.wheel_r if rig != null else null, rig.wheel_rr if rig != null else 0.0)
+		var front_d := _dust_patch(front, rig.wheel_f if rig != null else null, rig.wheel_rf if rig != null else 0.0)
+		var d_out := turn_dir * (carve_k * 3.5 + slide_k * 2.5)
+		var d_back := va * 0.3 * (1 - carve_k * 0.55) + spin_k * 2.2
 		var d_ev := Vector3(-f.x * d_back + side.x * d_out, 0.7 + carve_k * 0.4 + dust_k * 1.4, -f.z * d_back + side.z * d_out)
 		var d_fan := rad_to_deg(atan2((1.6 + va * 0.18) * (1 - carve_k * 0.6) * 0.5, maxf(d_back, 0.6))) + dust_k * 25.0
 		var d_a := (0.62 if skid_fx else 0.45) if dirt else ((0.55 if skid_fx else 0.4) if sand else 0.26)
@@ -1894,7 +1905,7 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 		var g_lat := va * sin(clampf(st.slip_w, -1.2, 1.2))
 		var g_loose := (1.5 if sand else (1.0 if dirt else 0.35)) * (0.75 + 0.5 * clampf(st.loose, 0.0, 1.0))
 		dust.set_grit_state(f * st.v, f, g_long, g_lat, clampf(st.n_rear / 9.81, 0.0, 2.0), g_loose, clampf((absf(st.vw_r) - 2.5) / 3.5, 0.0, 1.0))
-		dust.feed(rear, d_ev, rate * fxd * dry_r, dcol, d_a, clampf(d_fan, 12.0, 70.0))
+		dust.feed(rear_d, d_ev, rate * fxd * dry_r, dcol, d_a, clampf(d_fan, 12.0, 70.0))
 		if Env.s("BMX_DUST_PROBE") != "":
 			_dprobe_t += dt
 			if _dprobe_t >= 2.0:
@@ -1905,7 +1916,7 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 		# the front tyre dusts too, less: it rolls (no drive / little skid), so it mostly lifts dust
 		# sideways and up as it carves
 		var f_ev := Vector3(-f.x * d_back * 0.4 + side.x * d_out * 0.6, 0.5 + carve_k * 0.3, -f.z * d_back * 0.4 + side.z * d_out * 0.6)
-		dust.feed_front(front, f_ev, 0.0 if st.front_air else rate * fxd * 0.35 * dry_f, d_a)   # none with the front up (wheelie)
+		dust.feed_front(front_d, f_ev, 0.0 if st.front_air else rate * fxd * 0.35 * dry_f, d_a)   # none with the front up (wheelie)
 		# through standing water: muddy drops thrown off both tyres instead of dust
 		if puddle_wake != null and va > 0.8:   # the tyres push the puddle (ripples: ground.gdshader)
 			var pk := clampf(va / 10.0, 0.0, 1.4) * 24.0 * dt
@@ -3919,6 +3930,19 @@ func _air_jerk_probe(inp: Dictionary) -> void:
 
 ## the lowest point of a drawn tyre: the axle + its radius straight down within the wheel's plane
 ## (laid over, that is out to the side of the axle, where the tyre really touches the ground)
+## a tyre's dust patch: the physics contact point moved sideways by how far the drawn tyre's lowest point sits out
+## from its axle (the lean), at the drawn ground's height there (rocks, ruts' lips and all)
+func _dust_patch(p: Vector3, wheel: Node3D, r: float) -> Vector3:
+	if wheel == null or not wheel.is_inside_tree(): return p
+	var b := _tyre_bottom(wheel, r)
+	# sideways only: where the drawn tyre's lowest point really is across the bike (the bike leans about the
+	# contact, so the axle's own offset must not be added again); along the travel the physics point stays (no lag)
+	var side := Vector3(-phys.fwd().z, 0.0, phys.fwd().x)
+	var lat := clampf((b.x - p.x) * side.x + (b.z - p.z) * side.z, -0.3, 0.3)
+	var q := Vector3(p.x + side.x * lat, 0.0, p.z + side.z * lat)
+	q.y = maxf(terrain.top_height(q.x, q.z), p.y - 0.03) + 0.03
+	return q
+
 static func _tyre_bottom(wheel: Node3D, r: float) -> Vector3:
 	var xf := wheel.global_transform
 	var ax := xf.basis.z.normalized()
