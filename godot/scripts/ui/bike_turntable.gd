@@ -23,6 +23,7 @@ var _keep_r := 1.0
 var _keep_h := 1.0
 var look_pitch := 0.0        # the standing rider's head pitch (hero shot: looks down at the camera)
 var _hero := false
+var style_extra := {}        # added to the standing pose (the hero shot turns the palms in)
 var clips_on := true         # false: no Mixamo clips (the hero shot keeps facing the lens)
 var fit_scale := 1.0         # > 1 pulls the camera back (more air round the rider)
 var spin := true             # false: holds still (the profile page)
@@ -145,6 +146,7 @@ func hero_stage(bg: Color, yaw: float) -> void:
 	plain_stage(bg, yaw)
 	_hero = true
 	clips_on = false
+	style_extra = {"palmIn": float(Env.s("BMX_WRIST")) if Env.s("BMX_WRIST") != "" else 1.5}   # arms hanging: palms to the thighs, thumbs forward
 	cam.fov = 66.0
 	_env.ambient_light_energy = 0.3
 	var key := DirectionalLight3D.new()
@@ -166,7 +168,9 @@ func show_rider(look: Dictionary) -> void:
 		_rider = Rider.new()
 		pivot.add_child(_rider)
 		_rider.set_look(look)
-		_rider.set_style(Garage.STAND_POSE)
+		var sp: Dictionary = Garage.STAND_POSE.duplicate()
+		sp.merge(style_extra, true)
+		_rider.set_style(sp)
 		_rider.use_helmet(str(look.get("helmet", "glory")))
 	else:
 		_rider.set_look(look)
