@@ -187,7 +187,13 @@ class CheckDot extends Control:
 			draw_circle(c, r, Tokens.ACCENT)
 			draw_arc(c, r, 0.0, TAU, 40, Tokens.ACCENT_DOWN, 1.5, true)
 			var k := dot / 30.0
-			draw_polyline(PackedVector2Array([c + Vector2(-6.5, 0.5) * k, c + Vector2(-1.8, 5.2) * k, c + Vector2(6.8, -4.8) * k]), Tokens.INK, 3.0 * k, true)
+			# the check, centred by its visual weight (a touch up and right of the box centre), round ends and joint
+			var o := Vector2(0.0, -1.3) * k
+			var p0 := c + o + Vector2(-6.4, 0.2) * k
+			var p1 := c + o + Vector2(-1.9, 4.7) * k
+			var p2 := c + o + Vector2(6.6, -4.9) * k
+			draw_polyline(PackedVector2Array([p0, p1, p2]), Tokens.INK, 3.0 * k, true)
+			for q in [p0, p1, p2]: draw_circle(q, 1.5 * k, Tokens.INK)
 		else:
 			draw_arc(c, r, 0.0, TAU, 40, Tokens.LINE, 2.0, true)
 
@@ -625,28 +631,48 @@ func _streak_card() -> Control:
 	row.add_theme_constant_override("separation", Tokens.S6)
 	card.add_child(row)
 	var n := GameState.day_streak()
-	var a := VBoxContainer.new()
-	a.add_theme_constant_override("separation", 0)
-	a.add_child(_cap("DAILY STREAK"))
+	# left: header, then one row: the number and its seven days, centred on the same line
+	var left := VBoxContainer.new()
+	left.add_theme_constant_override("separation", Tokens.S4)
+	left.add_child(_cap("DAILY STREAK", C_SOFT, Tokens.T_SM))
+	var lb := HBoxContainer.new()
+	lb.add_theme_constant_override("separation", Tokens.S5)
 	var big := _num("", 46)
-	a.add_child(big)
+	big.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	lb.add_child(big)
 	_count(big, float(n), func(v: float): return "%d DAY%s" % [roundi(v), "" if roundi(v) == 1 else "S"], 0.1, 0.7)
-	row.add_child(a)
 	var dots := HBoxContainer.new()
-	dots.add_theme_constant_override("separation", Tokens.S2)
+	dots.add_theme_constant_override("separation", Tokens.S3)
 	dots.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	for i in 7: dots.add_child(_check_dot(i < mini(n, 7), 30.0))
-	row.add_child(dots)
+	for i in 7: dots.add_child(_check_dot(i < mini(n, 7), 32.0))
+	lb.add_child(dots)
+	left.add_child(lb)
+	left.add_child(_cap("BEST  %d DAYS   ·   WEEK STREAK  %d" % [int(GameState.records.best_streak), GameState.week_streak()], C_SOFT, Tokens.T_XS))
+	row.add_child(left)
 	var sp := Control.new(); sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL; row.add_child(sp)
+	# right: the same structure, aligned to the right edge
 	var paid := GameState.claimed.has("d%d" % GameState.today())
-	var b := VBoxContainer.new()
-	b.alignment = BoxContainer.ALIGNMENT_CENTER
-	b.add_theme_constant_override("separation", 0)
-	var nxt := GameState.DAILY_BASE + GameState.DAILY_STEP * mini(n + (0 if paid else 1), 10)
-	b.add_child(_cap("TODAY'S BONUS PAID  ✓" if paid else "RIDE 200 M TODAY TO EARN", C_GREEN if paid else C_SOFT, Tokens.T_SM))
-	b.add_child(_num(_money(GameState.DAILY_BASE + GameState.DAILY_STEP * mini(n, 10)) if paid else _money(nxt), 34))
-	if paid: b.add_child(_cap("TOMORROW  " + _money(GameState.DAILY_BASE + GameState.DAILY_STEP * mini(n + 1, 10)), C_SOFT, Tokens.T_XS))
-	row.add_child(b)
+	var right := VBoxContainer.new()
+	right.add_theme_constant_override("separation", Tokens.S4)
+	var rh := HBoxContainer.new()
+	rh.alignment = BoxContainer.ALIGNMENT_END
+	rh.add_theme_constant_override("separation", Tokens.S2)
+	if paid:
+		var ck := _check_dot(true, 20.0)
+		ck.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		rh.add_child(ck)
+	rh.add_child(_cap("TODAY'S BONUS PAID" if paid else "RIDE 200 M TODAY TO EARN", C_GREEN if paid else C_SOFT, Tokens.T_SM))
+	right.add_child(rh)
+	var today_amt := GameState.DAILY_BASE + GameState.DAILY_STEP * mini(n + (0 if paid else 1), 10)
+	var amt := _num(_money(GameState.DAILY_BASE + GameState.DAILY_STEP * mini(n, 10)) if paid else _money(today_amt), 46)
+	amt.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	amt.size_flags_horizontal = Control.SIZE_SHRINK_END
+	right.add_child(amt)
+	var rf := _cap(("TOMORROW  " + _money(GameState.DAILY_BASE + GameState.DAILY_STEP * mini(n + 1, 10))) if paid else "BONUS FOR TODAY'S FIRST RIDE", C_SOFT, Tokens.T_XS)
+	rf.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	rf.size_flags_horizontal = Control.SIZE_SHRINK_END
+	right.add_child(rf)
+	row.add_child(right)
 	_appear([card], 0.0)
 	return card
 
