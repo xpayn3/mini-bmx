@@ -1061,13 +1061,56 @@ const WRIST_BACK := 0.062
 func _wrist(i: int, from: Vector3) -> Vector3:
 	var h: Vector3 = glove[i].position
 	var d := h - from
+	# the wrist sits back along the HAND's own axis (it is bent against the forearm gripping), so the forearm
+	# tube ends on the glove's cuff and the bend shows between them
+	var hx: Vector3 = glove[i].basis.x
+	if hx.length_squared() > 0.5: return h - hx.normalized() * minf(WRIST_BACK, d.length() * 0.5)
 	return h - d.normalized() * minf(WRIST_BACK, d.length() * 0.5) if d.length_squared() > 1e-8 else h
+
+## Grip + brake fingers on the bike. Every finger has its own curl: the ring / little finger and the thumb wrap the bar
+## (tighter with the load: a landing, a bump, hard braking), the INDEX and MIDDLE finger rest on the brake lever and
+## squeeze it with the brake (left hand = rear lever, right = front; both brakes together pull both). Standing: relaxed.
+var _lev_s := [0.0, 0.0]; var _pull_s := [0.0, 0.0]; var _grip_s := [0.0, 0.0]
+func _pose_fingers(i: int, standing: bool, dt: float, p: Dictionary, sty: Dictionary) -> void:
+	if skeleton == null: return
+	var step := clampf(dt if dt > 0.0 else 1.0 / 60.0, 0.0, 0.1)
+	var brake: float = clampf(_num(p, "brakeR") if i == 0 else _num(p, "brakeF"), 0.0, 1.0)
+	var load_k: float = clampf(_num(p, "landFold") * 0.8 + maxf(_num(p, "brakeF"), _num(p, "brakeR")) * 0.5, 0.0, 1.0)
+	_lev_s[i] = move_toward(_lev_s[i], 0.0 if standing else float(sty.get("leverFingers", 1.0)), step * 4.0)
+	_pull_s[i] = lerpf(_pull_s[i], brake, 1.0 - exp(-14.0 * step))   # (the squeeze follows the lever, a quick spring)
+	_grip_s[i] = lerpf(_grip_s[i], load_k, 1.0 - exp(-8.0 * step))
+	var tight: float = clampf(_grip_s[i] + _pk_grip, -1.0, 1.0)
+	var base: float = skeleton.curls[i]
+	# a light grip leaves the hand a touch looser than a fist; load squeezes it right round (the little finger a bit tighter)
+	var hold: float = clampf(0.9 + 0.1 * tight, 0.3, 1.0)
+	skeleton.fin[i] = [minf(base, hold), minf(base, hold - 0.02), minf(base, hold - 0.02), minf(base, hold), minf(base, hold + 0.02)]
+	skeleton.lever[i] = _lev_s[i]
+	skeleton.pull[i] = clampf(_pull_s[i] + _pk_lp, 0.0, 1.0)
 
 ## ease a hand's finger curl (GloveFingers: 0 open, 0.4 relaxed, 1 round the bar) toward `to`
 func _curl_to(i: int, to: float, step: float) -> void:
 	if skeleton: skeleton.curls[i] = move_toward(skeleton.curls[i], to, step)
 
 ## hand: +X along the forearm, +Z along the bar, +Y the back of the hand
+## Gripping, the hand is locked to the GRIP's own frame (as in other games: the IK target carries an orientation, the
+## hand never deviates from the bar), so the palm always lies square across the bar, turned with the steering; the
+## wrist is just the angle between that hand and the forearm coming from the elbow, which falls out of the arm IK.
+## `bend` / `yaw` are Pose Lab offsets on top (wrist up / sideways). The wrist's own range is capped at WRIST_MAX.
+const WRIST_BEND := 0.0
+const WRIST_MAX := 0.9    # rad, how far the hand may leave the forearm's line
+const GRIP_TILT := 0.12   # rad, the hand lies a little down the front of the bar
+static func orient_grip(n: Node3D, el: Vector3, at: Vector3, gx: Vector3, gz: Vector3, bend: float, yaw: float) -> void:
+	var z := gz.normalized()
+	var x := (gx - z * gx.dot(z)).normalized()
+	var up := z.cross(x)
+	x = (x * cos(GRIP_TILT + bend) - up * sin(GRIP_TILT + bend)).normalized()
+	if absf(yaw) > 1e-4: x = x.rotated(up, yaw)
+	var fore := (at - el).normalized()
+	var ang := fore.angle_to(x)
+	if ang > WRIST_MAX: x = fore.slerp(x, WRIST_MAX / ang)
+	var zz := (z - x * z.dot(x)).normalized()
+	n.basis = Basis(x, zz.cross(x), zz)
+
 static func orient_hand(n: Node3D, el: Vector3, at: Vector3, right: Vector3) -> void:
 	var x := (at - el).normalized()
 	var z := (right - x * right.dot(x)).normalized()
@@ -1234,6 +1277,7 @@ func _pose_from_points(P: Array, roots: Dictionary, orient: Dictionary) -> void:
 		else: orient_hand(glove[i], ha_from, ha[i], sh_r)
 		set_limb(fore_arm[i], ha_from, _wrist(i, ha_from))
 		_curl_to(i, float(orient.get("curl%d" % i, GloveFingers.RELAXED)), 3.6 * cdt)
+		if skeleton: skeleton.fin[i] = null; skeleton.lever[i] = 0.0; skeleton.pull[i] = 0.0   # (clips / ragdoll: no lever, one curl)
 		set_limb(thigh[i], kn_from, kn[i])
 		set_limb(shin[i], ft_from, ft[i])
 		knee[i].position = kn[i]
@@ -1245,6 +1289,7 @@ func _pose_from_points(P: Array, roots: Dictionary, orient: Dictionary) -> void:
 	_sync_skeleton(P)
 
 
+var _pk_wb := 0.0; var _pk_wt := 0.0; var _pk_grip := 0.0; var _pk_lp := 0.0   # Pose Lab wrist keys (extension / turn, rad)
 var _pk_tyaw := 0.0; var _pk_hp := 0.0; var _pk_hy := 0.0; var _pk_eo := 0.0; var _pk_ko := 0.0   # Pose Lab key values of this frame (see the hook in update_pose)
 var _curl_us := 0   # Time.get_ticks_usec() of the last _pose_from_points (finger curl easing)
 
@@ -2036,6 +2081,8 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var pk: Dictionary = p.get("pk", {}) as Dictionary
 	_pk_tyaw = float(pk.get("torso_yaw", 0.0)); _pk_hp = float(pk.get("head_pitch", 0.0)); _pk_hy = float(pk.get("head_yaw", 0.0))
 	_pk_eo = float(pk.get("elbows_out", 0.0)); _pk_ko = float(pk.get("knees_out", 0.0))
+	_pk_wb = float(pk.get("wrist_bend", 0.0)); _pk_wt = float(pk.get("wrist_turn", 0.0))
+	_pk_grip = float(pk.get("grip", 0.0)); _pk_lp = float(pk.get("lever_pull", 0.0))
 	if not pk.is_empty():
 		var hipd := Vector3(float(pk.get("hip_x", 0.0)), float(pk.get("hip_y", 0.0)), float(pk.get("hip_z", 0.0)))
 		pelvis += hipd
@@ -2278,13 +2325,19 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		elbow[i].position = ika[0]
 		hand = ika[1]   # out of reach: the hand stays at the end of the arm
 		glove[i].position = hand
-		orient_hand(glove[i], ika[0], hand, right)
+		var gx_v = p.get("gripX_L" if i == 0 else "gripX_R")
+		var gz_v = p.get("gripZ")
+		if standing or not (gx_v is Vector3 and gz_v is Vector3):
+			orient_hand(glove[i], ika[0], hand, right)
+		else:   # on the bike: the hand follows the grip (steering turns it with the bar); Pose Lab / style offsets on top
+			orient_grip(glove[i], ika[0], hand, gx_v, gz_v, float(sty.get("wristBend", WRIST_BEND)) + _pk_wb, _pk_wt * side)
 		if sty.wristRoll != 0.0:
 			glove[i].rotate_object_local(Vector3.RIGHT, side * float(sty.wristRoll))
 		if sty.get("palmIn", 0.0) != 0.0:   # mirrored per hand (the hero shot: arms hanging, both palms to the thighs)
 			glove[i].rotate_object_local(Vector3.RIGHT, float(sty.palmIn) * side * (float(Env.s("BMX_PALMSIDE")) if Env.s("BMX_PALMSIDE") != "" else 1.0))
 		set_limb(fore_arm[i], ika[0], _wrist(i, ika[0]))
 		_curl_to(i, GloveFingers.RELAXED if standing else 1.0, dt * 5.0)   # on the bike: wrapped round the grip
+		_pose_fingers(i, standing, dt, p, sty)
 		J[3 + i * 3] = shp
 		J[4 + i * 3] = ika[0]
 		J[5 + i * 3] = hand
