@@ -35,6 +35,16 @@ public partial class LensDropsCs : RefCounted
 	float[] _tbuf = Array.Empty<float>();
 	int _tn;
 	readonly bool[] _mov = new bool[MAX];
+	// each drop's own life: how long since it hit the glass, how long it clings there first (a splash drop sits
+	// still ~half a second, then lets go: user, 2026-11-25), and its own wander (a slow random turn + a phase for
+	// its stick-slip) so no two run the same straight line
+	readonly float[] _age = new float[MAX], _hold = new float[MAX], _wan = new float[MAX], _seed = new float[MAX];
+	readonly float[] _fx = new float[MAX], _fy = new float[MAX], _load = new float[MAX];   // the push's direction, how near it is to letting go (0..1)
+	readonly bool[] _splat = new bool[MAX];   // landed from a splash: drawn as an impact that pulls into a bead
+	const float HOLD_EASE = 0.3f;    // after its hold the grip lets go over this long (the drop wets out, sags, then goes)
+	const float WANDER = 0.75f;      // rad: how far a running drop's own wander turns it off the push
+	const float WANDER_RATE = 5f;    // 1/s: how quickly that wander changes
+	const float STUTTER = 0.8f;      // 0..1: a running drop's speed swings this much (catches on the glass, lets go)
 	int _n;
 	readonly Random _rng = new Random(1234);
 	float _rainAcc;
@@ -45,6 +55,8 @@ public partial class LensDropsCs : RefCounted
 	readonly int[] _next = new int[MAX];
 
 	public int Count() => _n;
+	/// test probe: (x, y, radius, age) of drop i
+	public Vector4 Get(int i) => i < _n ? new Vector4(_x[i], _y[i], _r[i], _age[i]) : Vector4.Zero;
 	public void Clear() { _n = 0; _rainAcc = 0f; }
 
 	float Rnd() => (float)_rng.NextDouble();
@@ -52,7 +64,9 @@ public partial class LensDropsCs : RefCounted
 	// drop sizes: many small, few big (power law)
 	float RandR(float rmin, float rmax) => (rmin + (rmax - rmin) * MathF.Pow(Rnd(), 2.6f)) * SIZE;
 
-	public void Add(float x, float y, float r)
+	public void Add(float x, float y, float r) => Add(x, y, r, 0f);
+
+	public void Add(float x, float y, float r, float hold)
 	{
 		if (r < R_MIN) return;
 		if (_n >= MAX)
@@ -60,14 +74,15 @@ public partial class LensDropsCs : RefCounted
 			int lo = _rng.Next(_n);
 			for (int k = 0; k < 6; k++) { int j = _rng.Next(_n); if (_r[j] < _r[lo]) lo = j; }
 			if (_r[lo] >= r) return;
-			Set(lo, x, y, r);
+			Set(lo, x, y, r, hold);
 			return;
 		}
-		Set(_n++, x, y, r);
+		Set(_n++, x, y, r, hold);
 	}
 
-	void Set(int i, float x, float y, float r)
+	void Set(int i, float x, float y, float r, float hold)
 	{
+		_age[i] = 0f; _hold[i] = hold; _fx[i] = 0f; _fy[i] = 1f; _load[i] = 0f; _splat[i] = hold > 0.25f; _wan[i] = (Rnd() - 0.5f) * WANDER; _seed[i] = Rnd() * 100f;
 		_x[i] = x; _y[i] = y; _px[i] = x; _py[i] = y; _r[i] = r; _vx[i] = 0f; _vy[i] = 0f; _trav[i] = 0f; _mov[i] = false;
 	}
 
@@ -75,7 +90,20 @@ public partial class LensDropsCs : RefCounted
 	public void Splash(int count, float aspect, float rmin, float rmax)
 	{
 		for (int k = 0; k < count; k++)
-			Add(Rnd() * aspect, 1f - MathF.Pow(Rnd(), 0.7f), RandR(rmin, rmax));
+		{
+			float x = Rnd() * aspect, y = 1f - MathF.Pow(Rnd(), 0.7f), r = RandR(rmin, rmax);
+			Add(x, y, r, 0.3f + 0.2f * Rnd());
+			// a big splat throws a ring of fine mist beads round it (they cling and dry; the odd one joins it)
+			if (r > 0.006f * SIZE)
+			{
+				int sat = 3 + _rng.Next(5);
+				for (int j = 0; j < sat; j++)
+				{
+					float a = Rnd() * MathF.Tau, d = r * (1.4f + 1.6f * Rnd());
+					Add(x + MathF.Cos(a) * d, y + MathF.Sin(a) * d, r * (0.1f + 0.14f * Rnd()), 0.6f);
+				}
+			}
+		}
 	}
 
 	static float Hash(int x, int y)
@@ -100,7 +128,7 @@ public partial class LensDropsCs : RefCounted
 	{
 		if (dt <= 0f) return;
 		_rainAcc += dt * rain * 140f;
-		while (_rainAcc >= 1f) { _rainAcc -= 1f; Add(Rnd() * aspect, Rnd(), RandR(0.0015f, 0.011f)); }
+		while (_rainAcc >= 1f) { _rainAcc -= 1f; Add(Rnd() * aspect, Rnd(), RandR(0.0015f, 0.011f), 0.1f + 0.25f * Rnd()); }
 
 		int born = _n;   // beads left this step are appended after this
 		for (int i = 0; i < born; i++)
@@ -121,7 +149,16 @@ public partial class LensDropsCs : RefCounted
 			float fa = AIR * u * u * r * r;
 			float Fx = fa * ax / al, Fy = fa * ay / al + G * m;
 			float F = MathF.Sqrt(Fx * Fx + Fy * Fy);
+			if (F > 1e-9f) { _fx[i] = Fx / F; _fy[i] = Fy / F; }
+			_age[i] += dt;
+			// the drop's own wander: a slow random walk of its heading (pulled back toward straight)
+			_wan[i] += ((Rnd() - 0.5f) * 2f * WANDER * MathF.Sqrt(WANDER_RATE * dt * 2f)) - _wan[i] * WANDER_RATE * dt * 0.5f;
+			_wan[i] = Math.Clamp(_wan[i], -1.2f * WANDER, 1.2f * WANDER);
 			float pin = PIN * r * (0.45f + 1.1f * Noise(_x[i] * 45f, _y[i] * 45f)) * (_mov[i] ? KINETIC : 1f);
+			// fresh on the glass it clings (held far past any push), then its grip eases off
+			float ho = _age[i] - _hold[i];
+			if (ho < HOLD_EASE) pin *= 1f + 40f * (ho <= 0f ? 1f : 1f - ho / HOLD_EASE) * (ho <= 0f ? 1f : 1f - ho / HOLD_EASE);
+			_load[i] += (Math.Clamp(F / (pin / (_mov[i] ? KINETIC : 1f) + 1e-12f), 0f, 1f) - _load[i]) * MathF.Min(1f, dt * 8f);
 			if (F <= pin)
 			{
 				_mov[i] = false;
@@ -132,11 +169,14 @@ public partial class LensDropsCs : RefCounted
 				_mov[i] = true;
 				float vt = MathF.Min((F - pin) / (FRICTION * r), V_MAX);   // runs at what glass friction lets it
 				// meander: the glass's own pattern turns it a little (both ways)
-				float turn = (Noise(_x[i] * 80f + 17f, _y[i] * 80f) - 0.5f) * 0.9f;
+				float turn = (Noise(_x[i] * 80f + 17f, _y[i] * 80f) - 0.5f) * 0.9f + _wan[i]
+					+ (Noise(_seed[i], _age[i] * 3f) - 0.5f) * 0.6f;
+				// stick-slip: it catches on the glass and lets go, faster / slower along its own path
+				vt *= 1f - STUTTER * Noise(_seed[i] + 31f, _age[i] * 4.5f) * Noise(_x[i] * 140f, _y[i] * 140f + _seed[i]);
 				float cx = Fx / F, cy = Fy / F;
 				float cs = MathF.Cos(turn), sn = MathF.Sin(turn);
 				float tx = (cx * cs - cy * sn) * vt, ty = (cx * sn + cy * cs) * vt;
-				float k = MathF.Min(1f, dt * 12f);
+				float k = MathF.Min(1f, dt * 9f);
 				_vx[i] += (tx - _vx[i]) * k; _vy[i] += (ty - _vy[i]) * k;
 			}
 			float sx = _vx[i] * dt, sy = _vy[i] * dt;
@@ -177,6 +217,8 @@ public partial class LensDropsCs : RefCounted
 	void Copy(int i, int w)
 	{
 		_px[w] = _px[i]; _py[w] = _py[i];
+		_age[w] = _age[i]; _hold[w] = _hold[i]; _wan[w] = _wan[i]; _seed[w] = _seed[i];
+		_fx[w] = _fx[i]; _fy[w] = _fy[i]; _load[w] = _load[i]; _splat[w] = _splat[i];
 		_x[w] = _x[i]; _y[w] = _y[i]; _r[w] = _r[i]; _vx[w] = _vx[i]; _vy[w] = _vy[i]; _trav[w] = _trav[i]; _mov[w] = _mov[i];
 	}
 
@@ -215,6 +257,7 @@ public partial class LensDropsCs : RefCounted
 					_vx[a] = (_vx[a] * va + _vx[b] * vb) / vs; _vy[a] = (_vy[a] * va + _vy[b] * vb) / vs;
 					_r[a] = MathF.Cbrt(vs);
 					_mov[a] = _mov[a] || _mov[b];
+					if (_mov[a]) _hold[a] = MathF.Min(_hold[a], _age[a]);   // swallowed into a runner: no new cling
 					_r[b] = 0f;
 				}
 			}
@@ -260,14 +303,26 @@ public partial class LensDropsCs : RefCounted
 			float r = _r[i];
 			float sp = MathF.Sqrt(_vx[i] * _vx[i] + _vy[i] * _vy[i]);
 			float k = Math.Clamp(sp * 1.1f, 0f, 1f);
-			float c = 1f, s = 0f;
+			float c = _fx[i], s = _fy[i];
 			if (sp > 1e-4f) { c = _vx[i] / sp; s = _vy[i] / sp; }
-			float len = 2f * r * (1f + 1.8f * k) * vpH;   // a running drop is drawn out along its path
-			float wid = 2f * r * (1f - 0.25f * k) * vpH;
+			// a still drop the push is nearly beating sags toward it (a teardrop about to go), like a sim's rain drops
+			float sag = _mov[i] ? 0f : 0.35f * MathF.Max(0f, _load[i] - 0.45f) / 0.55f;
+			k = MathF.Max(k, sag);
+			// a splash drop lands as a flat splat and pulls together into its bead with a little wobble
+			float spl = 1f, wsp = 1f, hk = 1f;
+			if (_splat[i] && _age[i] < 0.35f)
+			{
+				float e = MathF.Exp(-_age[i] * 14f);
+				spl = 1f + 0.75f * e * MathF.Cos(_age[i] * 38f);
+				wsp = 1f + 0.75f * e * MathF.Cos(_age[i] * 38f + 1.4f);   // out of step: it rings, not just shrinks
+				hk = 1f - 0.7f * e;
+			}
+			float len = 2f * r * (1f + 1.8f * k) * spl * vpH;   // a running drop is drawn out along its path
+			float wid = 2f * r * (1f - 0.25f * k) * wsp * vpH;
 			int o = i * 12;
 			_buf[o + 0] = c * len; _buf[o + 1] = -s * wid; _buf[o + 2] = 0f; _buf[o + 3] = _x[i] * vpH;
 			_buf[o + 4] = s * len; _buf[o + 5] = c * wid; _buf[o + 6] = 0f; _buf[o + 7] = _y[i] * vpH;
-			_buf[o + 8] = k; _buf[o + 9] = Math.Min(r * 12f, 1f); _buf[o + 10] = c; _buf[o + 11] = s;
+			_buf[o + 8] = k; _buf[o + 9] = Math.Min(r * 12f, 1f) * hk; _buf[o + 10] = c; _buf[o + 11] = s;
 		}
 		return _buf;
 	}

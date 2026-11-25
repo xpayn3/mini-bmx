@@ -124,6 +124,8 @@ func add_dust(k: float, col: Color) -> void:
 	dust_col = dust_col.lerp(col, clampf(k * 4.0, 0.02, 0.5))
 
 ## water thrown at the glass (a splash: 0.05 a few drops .. 1 soaked)
+var _se_t := 0.0
+
 func splash(k: float) -> void:
 	if not is_inside_tree(): _pend += k   # before the sim exists (the first respawn runs before _ready)
 	if drops == null or k <= 0.0: return
@@ -174,6 +176,13 @@ func update(dt: float, cam: Camera3D, vs: Vector2, focus: Vector2) -> void:
 	# water on the glass washes the dust off (each drop's own path is drawn clean in the shader too)
 	if dt > 0.0 and dust > 0.0:
 		dust = maxf(0.0, dust - dt * DUST_WASH * minf(float(drops.Count()) / 150.0 + rain, 1.5))
+	# test: BMX_LENS_SPLASH_EVERY=secs[,k] splashes the lens that often (to watch drops land, cling and run)
+	if dt > 0.0 and Env.s("BMX_LENS_SPLASH_EVERY") != "":
+		var se := Env.s("BMX_LENS_SPLASH_EVERY").split(",")
+		_se_t += dt
+		if _se_t >= float(se[0]):
+			_se_t = 0.0
+			splash(float(se[1]) if se.size() > 1 else 0.5)
 	if dt > 0.0:
 		drops.Step(minf(dt, 0.05), rain, wind, _aspect, fa.x, fa.y, 1.0, _flow.x, _flow.y)
 	var n: int = drops.Count()

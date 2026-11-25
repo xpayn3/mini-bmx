@@ -70,13 +70,21 @@ void fragment() {
 	vec2 uv = SCREEN_UV;
 	float aspect = SCREEN_PIXEL_SIZE.y / SCREEN_PIXEL_SIZE.x;
 	float lwet = 0.0, lspec = 0.0, lrim = 0.0;
+	vec2 lofs_k = vec2(0.0);
 	if (lens_water > 0.5) {
 		vec2 lofs;
 		lens_water_read(uv, aspect, lofs, lwet, lspec, lrim);
-		uv += lofs / vec2(aspect, 1.0);   // everything below reads the scene through the drops
+		uv += lofs / vec2(aspect, 1.0);
+		lofs_k = lofs;   // everything below reads the scene through the drops
 	}
 	// a drop millimetres from the glass is out of focus: what it shows is soft (game.gd turns the mips on)
 	vec4 c = lwet > 0.002 ? textureLod(screen_tex, uv, lwet * 1.5) : texture(screen_tex, uv);
+	if (lwet > 0.3 && lens_water > 0.5) {
+		// water disperses: red bends a little less than blue, so drops get faint colour fringes at their edges
+		vec2 dsp = lofs_k * 0.09 * smoothstep(0.3, 0.8, lwet) / vec2(aspect, 1.0);   // only where a drop really sits (not faint drying rivulets)
+		c.r = textureLod(screen_tex, uv - dsp, lwet * 1.5).r;
+		c.b = textureLod(screen_tex, uv + dsp, lwet * 1.5).b;
+	}
 	if (photo > 0.5 && p_ca > 0.001) {
 		vec2 dd = uv - 0.5;
 		vec2 off = dd * dot(dd, dd) * 0.035 * p_ca;

@@ -1963,6 +1963,15 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   (old-CRT rounded falloff), its own colour (smears / smudges = the ground's dust colour, specks paler, slow warm /
   cool drift), softening the view and glowing where light comes through; water on the glass cuts clean paths in it.
   `lens.rain` is ready for a weather system. Clean glass = viewports stopped, shader skips it. No C# = dust only.
+  **Spray drops, sim-style (2026-11-25, user: "a drop stays half a sec then runs away, irregular, like the PlayStation racing sims")**:
+  each drop has an age + a hold (`_hold`: splash 0.3-0.5 s, rain 0.1-0.35 s) during which its pinning is x41, easing off over
+  `HOLD_EASE` 0.3 s, so a splash drop lands, clings ~0.5 s, sags toward the push as it nears letting go (`_load`, drawn as a
+  teardrop), then runs. Running drops wander: their own random-walk heading (`WANDER` 0.75 rad, `WANDER_RATE`) + a time noise
+  on top of the glass pattern, and stick-slip speed (`STUTTER` 0.8: catch, let go). A splash drop lands as a flat splat that rings
+  into its bead (~0.3 s, drawn in `Buffer`), big ones throw a ring of fine mist beads. Shading: a caustic spot low inside each
+  drop, a thin meniscus ring inside the dark rim (`lens_fx.gdshaderinc`), faint colour dispersion where a drop sits
+  (`grade.gdshader`, only lwet > 0.3: faint drying rivulets drew fringes everywhere). Probe `-s res://tools/lens_drop_probe.gd
+  [-- wind=0.8]` (`DROP n starts_moving= heading_change_sum=`); `BMX_LENS_SPLASH_EVERY=secs[,k]` splashes on a timer.
   Tests: `BMX_LENS_RAIN=0..1`, `BMX_LENS_SPLASH=k`, `BMX_LENS_DUST=0..1`, `BMX_LENS_WIND=0..1` (else the camera's
   speed), `BMX_LENS_DUMP=file.png` (the normal map + `LENS ... flow=` line, 10 s in).
 - **Dust = a real 3D smoke simulation** (`fx/smoke_sim.gd` + compute shaders `shaders/smoke/*.glsl`): a
