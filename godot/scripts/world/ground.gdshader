@@ -373,6 +373,17 @@ void fragment() {
 			float gfar = 1.0 - smoothstep(grass_win_info.w - 24.0, grass_win_info.w, gd);
 			float under = gden * gfar * (1.0 - wd);
 			col = mix(col, col * vec3(0.66, 0.76, 0.56), under * 0.85);
+			// blade-scale texture on the floor between / under the blades: fine dark gaps, pale blade tips, tuft mottling
+			// (fades with distance so far ground stays calm, no shimmer)
+			float gn = under * (1.0 - smoothstep(6.0, 38.0, gd));
+			if (gn > 0.01) {
+				float g1 = gd_noise3(vec3(P.xz * 14.0, 1.7));
+				float g2 = gd_noise3(vec3(P.xz * 41.0, 5.1));
+				float g3 = gd_noise3(vec3(P.xz * 2.3, 8.8));
+				col *= mix(1.0, 0.62 + 0.8 * (g1 * 0.5 + g2 * 0.5), gn * 0.8);
+				col *= mix(1.0, 0.85 + 0.3 * g3, gn);
+				col = mix(col, col * vec3(1.35, 1.3, 0.85), smoothstep(0.72, 0.9, g2) * gn * 0.5);
+			}
 		}
 	}
 	float pud = m_puddle * wd;

@@ -210,7 +210,21 @@ void vertex() {
 }
 
 void fragment() {
-	ALBEDO = v_col;
+	// blade texture (2026-11-25, user: "now its just color, make it more realistic"): a darker midrib with paler flanks,
+	// edges a touch dark, fine grain along the blade; close blades only (v_round fades out with distance: no far shimmer)
+	float au = abs(v_u);
+	float rib = exp(-au * au * 40.0);
+	float vein = 0.5 + 0.5 * sin(v_u * 22.0);
+	// streaks run up the blade: sampled across its width (fine) and along it (stretched ~8x), blade-local so it follows the bend
+	float grain = gm_noise3(vec3(v_u * 9.0, v_t * 1.2, floor(v_world.x * 7.0 + v_world.z * 13.0)));
+	float tex_k = v_round;
+	vec3 bt = vec3(1.0);
+	bt *= 1.0 - 0.22 * rib;                       // midrib groove
+	bt *= 1.0 + 0.08 * (vein - 0.5);              // parallel veins
+	bt *= 1.0 - 0.18 * smoothstep(0.55, 1.0, au); // shaded edges
+	bt *= 0.88 + 0.24 * grain;                    // fine mottling
+	bt *= mix(vec3(1.0), vec3(1.06, 1.03, 0.82), smoothstep(0.7, 1.0, v_t) * grain); // sun-bleached, dry tips
+	ALBEDO = v_col * mix(vec3(1.0), bt, tex_k);
 	// rounded across the width (GoT): the normal tilts out towards each edge, so a flat blade shades like a curved one
 	vec3 wn = normalize(v_n + v_side * v_u * 0.6 * v_round);
 	NORMAL = normalize((VIEW_MATRIX * vec4(wn, 0.0)).xyz);
