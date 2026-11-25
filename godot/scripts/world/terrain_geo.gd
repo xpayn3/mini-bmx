@@ -39,6 +39,18 @@ static func ensure() -> void:
 	for k in fl:
 		MESH[k] = fl[k].to_mesh()
 	MESH["bush"] = _crown(11, 2, true).translate(0, 0.55, 0).scale(1, 0.7, 1).to_mesh(true)
+	# bushes are leaf cards (card_bush.gd): bush / bush1 / bush2 = green variants, bushdry = the dry biomes' shrub.
+	# BMX_OLD_BUSH=1 = the old blobs for all of them.
+	if OS.get_environment("BMX_OLD_BUSH") == "1":
+		for k in ["bush1", "bush2", "bushdry"]:
+			MESH[k] = MESH["bush"]
+		for k in ["leafCard", "leafCardDry"]:
+			MAT[k] = MAT["leafSoft"]
+	else:
+		for k in CardBush.VARIANTS:
+			MESH[k] = CardBush.mesh(k)
+		MAT["leafCard"] = CardBush.material("leaf")
+		MAT["leafCardDry"] = CardBush.material("dry")
 	var log_g := GeoBuf.merge([GeoBuf.cylinder(0.17, 0.21, 1, 7).rot_z(PI / 2),
 		GeoBuf.cylinder(0.035, 0.05, 0.4, 4).rot_z(-0.7).translate(0.18, 0.2, 0.05)])
 	MESH["log"] = log_g.to_mesh(false, _soft_normals(log_g))

@@ -12,7 +12,7 @@ const S := 48.0
 const JC := 34.0
 const SMALL := ["pebble", "grass", "daisy", "tulip", "spike", "stick", "fern", "mushroom"]
 const LIST_NAMES := ["trunk", "blob", "pine", "rock", "pebble", "grass", "daisy", "tulip", "spike", "cactus0", "cactus1", "cactus2", "cactus3", "cactus4",
-	"bush", "log", "stick", "fern", "mushroom", "weed", "plank", "beam", "post", "rail", "picket", "stake"]
+	"bush", "bush1", "bush2", "bushdry", "log", "stick", "fern", "mushroom", "weed", "plank", "beam", "post", "rail", "picket", "stake"]
 const SPAN := 2.4
 const TAPE_SEG := 30
 const TAPE_W := 0.075
@@ -1312,7 +1312,12 @@ func _nature(ox: float, oz: float) -> void:
 		if dry > 0.55:
 			if r < 0.08:
 				var sc := 0.25 + rn.next() * 0.25
-				put("weed", x, h + sc * 0.75, z, sc, sc * 0.85, sc, yaw, SCRUB[int(rn.next() * SCRUB.size())], 0.6)
+				var scrub_col: Color = SCRUB[int(rn.next() * SCRUB.size())]
+				if int(yaw * 10.0) % 2 == 0 and f.trail(x, z) <= 0.02:
+					# every other one is a leaf-card dry shrub (card_bush.gd), the rest stay the little weed blobs
+					put("bushdry", x, h - 0.05, z, sc * 1.9, sc * 1.5, sc * 1.9, yaw, scrub_col, 0.4)
+				else:
+					put("weed", x, h + sc * 0.75, z, sc, sc * 0.85, sc, yaw, scrub_col, 0.6)
 			elif r < 0.4:
 				var sx := 2 + rn.next() * 1.5
 				var sy := 1.4 + rn.next()
@@ -1383,7 +1388,7 @@ func _nature(ox: float, oz: float) -> void:
 				var sc := 0.5 + rn.next() * 0.6
 				var sx := sc * (1 + rn.next() * 0.4)
 				var sy := sc * (0.8 + rn.next() * 0.5)
-				put("bush", x, h - 0.08, z, sx, sy, sc, yaw, BUSHES[int(rn.next() * BUSHES.size())], 0.3)
+				put(_bush_kind(yaw), x, h - 0.08, z, sx, sy, sc, yaw, BUSHES[int(rn.next() * BUSHES.size())], 0.3)
 			continue
 		if r < 0.14:
 			var n := 1 + int(rn.next() * 3)
@@ -1400,10 +1405,15 @@ func _nature(ox: float, oz: float) -> void:
 				var sx := sc * (1 + rn.next() * 0.4)
 				var sy := sc * (0.7 + rn.next() * 0.5)
 				var yw := rn.next() * 6.28
-				put("bush", fx, hh, fz, sx, sy, sc, yw, colr * (0.85 + rn.next() * 0.3), 0.3)
+				put(_bush_kind(yw), fx, hh, fz, sx, sy, sc, yw, colr * (0.85 + rn.next() * 0.3), 0.3)
 		elif r < 0.2:
 			var l := 0.3 + rn.next() * 0.6
 			put("stick", x, h + 0.015, z, l, 0.8, 0.8, yaw, null, 0.15)
+
+
+## which green bush variant (round / low + wide / tall + loose): from the yaw, so no random numbers are used up
+static func _bush_kind(yaw: float) -> String:
+	return ["bush", "bush1", "bush2"][int(yaw * 10.0) % 3]
 
 
 # ---------------- wooden ramps / skinnies / bridges whose start lies in this chunk ----------------
