@@ -108,3 +108,60 @@ static func badge_glyph(id: String) -> String:
 			"jumps": return "▼"
 	if a[2] == "trick": return "★"
 	return "✓"
+
+# ---------------------------------------------------------------- looks: the CycleIQ card style (ported from its badges3d.js)
+## shape = circle | hexagon | diamond | star | shield, holo = the foil pattern drawn on the card (chevron, diamond, bolt, ripple, grid, wave, rays)
+static func badge_look(id: String) -> Dictionary:
+	var a: Array = Steam.ACHIEVEMENTS[id]
+	var shape := "shield"
+	var holo := "wave"
+	if a[2] == "rec":
+		match String(a[3]):
+			"top_speed": shape = "hexagon"; holo = "bolt"
+			"air", "highest": shape = "diamond"; holo = "chevron"
+			"longest": shape = "diamond"; holo = "wave"
+			"distance": shape = "circle"; holo = "ripple"
+			"jumps": shape = "shield"; holo = "grid"
+	elif a[2] == "trick":
+		shape = "star"; holo = "rays"
+	var col := badge_colour(id)
+	return {"shape": shape, "holo": holo, "color": col, "accent": col.lightened(0.4), "label": String(a[0]).to_upper(),
+		"glyph": badge_glyph(id), "desc": String(a[1]), "tag": "BADGE  ·  " + String(TIERS[badge_tier(id)][0])}
+
+static func card_look(id: String) -> Dictionary:
+	var c: Dictionary = CARDS[id]
+	var kind := String(c.kind)
+	var shape := "shield"
+	var holo := "chevron"
+	match kind:
+		"TRICK": shape = "star"; holo = "rays"
+		"STREAK": shape = "circle"; holo = "ripple"
+		"LEGEND": shape = "star"; holo = "diamond"
+		"BIKE": shape = "shield"; holo = "chevron"
+	var col: Color = RARITY[c.rarity].col
+	return {"shape": shape, "holo": holo, "color": col, "accent": col.lightened(0.4), "label": String(c.name),
+		"glyph": String(c.glyph), "desc": String(c.text), "tag": "%s  ·  %s" % [RARITY[c.rarity].name, kind], "need": String(c.need),
+		"strength": float(RARITY[c.rarity].holo)}
+
+## outline of a card shape in card units (the card is 1.8 x 2.6): the middle of the card, ~1.1 wide
+static func shape_points(shape: String, k := 1.0) -> PackedVector2Array:
+	var pts := PackedVector2Array()
+	match shape:
+		"circle":
+			for i in 48: pts.append(Vector2(cos(TAU * i / 48.0), sin(TAU * i / 48.0)) * 0.62)
+		"hexagon":
+			for i in 6: pts.append(Vector2(cos(TAU * i / 6.0 - PI / 6.0), sin(TAU * i / 6.0 - PI / 6.0)) * 0.62)
+		"diamond":
+			pts = PackedVector2Array([Vector2(0, 0.72), Vector2(0.56, 0), Vector2(0, -0.72), Vector2(-0.56, 0)])
+		"star":
+			for i in 10:
+				var r := 0.68 if i % 2 == 0 else 0.29
+				var a := TAU * i / 10.0 - PI / 2.0
+				pts.append(Vector2(cos(a), -sin(a)) * r)
+			pts.reverse()
+		_:   # shield
+			pts = PackedVector2Array([Vector2(0, 0.7), Vector2(0.55, 0.52), Vector2(0.58, -0.05), Vector2(0.4, -0.45), Vector2(0, -0.72),
+				Vector2(-0.4, -0.45), Vector2(-0.58, -0.05), Vector2(-0.55, 0.52)])
+	if k != 1.0:
+		for i in pts.size(): pts[i] *= k
+	return pts
