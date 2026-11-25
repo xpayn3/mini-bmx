@@ -3,25 +3,26 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://hx6u1tfo5oym"
-path="res://.godot/imported/paper_normal.jpg-e355c6973741aa33c33d31ae9865cc49.ctex"
+path.bptc="res://.godot/imported/paper_normal.jpg-e355c6973741aa33c33d31ae9865cc49.bptc.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
 }
 
 [deps]
 
 source_file="res://assets/textures/paper/paper_normal.jpg"
-dest_files=["res://.godot/imported/paper_normal.jpg-e355c6973741aa33c33d31ae9865cc49.ctex"]
+dest_files=["res://.godot/imported/paper_normal.jpg-e355c6973741aa33c33d31ae9865cc49.bptc.ctex"]
 
 [params]
 
-compress/mode=0
-compress/high_quality=false
+compress/mode=2
+compress/high_quality=true
 compress/lossy_quality=0.7
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0
 compress/hdr_compression=1
-compress/normal_map=1
+compress/normal_map=2
 compress/channel_pack=0
 mipmaps/generate=true
 mipmaps/limit=-1

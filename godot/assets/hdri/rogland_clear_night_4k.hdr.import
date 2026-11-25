@@ -3,19 +3,20 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://bwmbw31467ihl"
-path="res://.godot/imported/rogland_clear_night_4k.hdr-ac8d5e28c136f98779dd5321b86d3a9b.ctex"
+path.bptc="res://.godot/imported/rogland_clear_night_4k.hdr-ac8d5e28c136f98779dd5321b86d3a9b.bptc.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
 }
 
 [deps]
 
 source_file="res://assets/hdri/rogland_clear_night_4k.hdr"
-dest_files=["res://.godot/imported/rogland_clear_night_4k.hdr-ac8d5e28c136f98779dd5321b86d3a9b.ctex"]
+dest_files=["res://.godot/imported/rogland_clear_night_4k.hdr-ac8d5e28c136f98779dd5321b86d3a9b.bptc.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0

@@ -136,7 +136,28 @@ static func _build_materials() -> void:
 	var sb := ShaderMaterial.new()
 	sb.shader = preload("res://shaders/sign_board.gdshader")
 	sb.set_shader_parameter("board_tex", load("res://assets/signs/distance_board.png"))
+	sb.set_shader_parameter("grime_tex", load("res://assets/textures/grime/grime_dirt.jpg"))
+	sb.set_shader_parameter("grime_nrm", load("res://assets/textures/grime/grime_normal.jpg"))
+	sb.set_shader_parameter("dirt_tex", load("res://assets/textures/lens/lens_dirt.png"))
+	sb.set_shader_parameter("wood_col", load("res://assets/textures/wood_plank/wood_color.jpg"))
+	sb.set_shader_parameter("wood_nrm", load("res://assets/textures/wood_plank/wood_normal.jpg"))
 	MAT["signboard"] = sb
+	# wooden fences: the Wood049 scan (clean sawn-plank grain), grain along the rails / up the posts and pickets (white = painted)
+	for k in [["fenceRail", 0], ["fencePost", 1]]:
+		var fm := ShaderMaterial.new()
+		fm.shader = preload("res://shaders/wood_fence.gdshader")
+		fm.set_shader_parameter("grain_axis", k[1])
+		fm.set_shader_parameter("wood_col", load("res://assets/textures/wood_plank/wood_color.jpg"))
+		fm.set_shader_parameter("wood_nrm", load("res://assets/textures/wood_plank/wood_normal.jpg"))
+		fm.set_shader_parameter("wood_rgh", load("res://assets/textures/wood_plank/wood_rough.jpg"))
+		fm.set_shader_parameter("grime_tex", load("res://assets/textures/grime/grime_dirt.jpg"))
+		MAT[k[0]] = fm
+	var sp := ShaderMaterial.new()
+	sp.shader = preload("res://shaders/sign_pole.gdshader")
+	sp.set_shader_parameter("wood_col", load("res://assets/textures/wood_post/wood_color.jpg"))
+	sp.set_shader_parameter("wood_nrm", load("res://assets/textures/wood_post/wood_normal.jpg"))
+	sp.set_shader_parameter("wood_rgh", load("res://assets/textures/wood_post/wood_rough.jpg"))
+	MAT["signpole"] = sp
 	MAT["cactus"] = _mat(w, 0.7)
 	MAT["cactus"].set_shader_parameter("tint_own", true)
 	# what the wind moves (m of sway per m of height in a full gust) and how much sun shows through

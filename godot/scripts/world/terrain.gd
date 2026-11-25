@@ -223,7 +223,7 @@ func clear_dynamic() -> void:
 					var mm: MultiMesh = rec["meshes"].get(part["kind"])
 					if mm:
 						mm.set_instance_transform(part["i"], part["xform"])
-				if rec.has("flag") or rec.has("bb"):   # its flag / sponsor text was freed by the smash
+				if rec.has("flag") or rec.has("bb") or rec.has("plate"):   # its flag / sponsor text / sign plate was freed by the smash
 					var chf = chunks.get(b.get("chunk", Vector2i(1 << 30, 0)))
 					if chf != null and is_instance_valid(chf["node"]):
 						for lb in rec.get("labels", []):
@@ -820,9 +820,9 @@ const LIST_SPEC := {
 	"cactus3": ["cactus3", "cactus", true, false], "cactus4": ["cactus4", "cactus", true, false],
 	"plank": ["box", "wood", true, false], "beam": ["box", "wood", true, false],
 	# thin fence / tape parts: their shadows are a few pixels wide but each is a draw call in every cascade
-	"post": ["post", "fence", false, false], "rail": ["rail", "fence", false, false], "picket": ["picket", "fence", false, false],
+	"post": ["post", "fencePost", false, false], "rail": ["rail", "fenceRail", false, false], "picket": ["picket", "fencePost", false, false],
 	"stake": ["stake", "stake", false, false],
-	"pole": ["pole", "fence", true, false], "signboard": ["signboard", "signboard", true, false],
+	"pole": ["pole", "signpole", true, false], "signboard": ["signboard", "signboard", true, false],
 }
 
 
@@ -890,6 +890,13 @@ func _panel_labels(p: Dictionary, node: Node3D) -> void:
 		var fl := TrailGate.flag(p["flag"])
 		node.add_child(fl)
 		p["labels"].append(fl)
+	if p.has("plate"):   # distance sign / billboard: its printed plate (SignTex)
+		var pm := MeshInstance3D.new()
+		pm.mesh = TerrainGeo.MESH["signboard"]
+		pm.material_override = SignTex.for_plate(p["plate"])
+		pm.transform = p["plate"]["xform"]
+		node.add_child(pm)
+		p["labels"].append(pm)
 	if p.has("bb"):
 		var bbs: Array = [p["bb"]]
 		bbs.append_array(p.get("bb_more", []))
@@ -897,10 +904,6 @@ func _panel_labels(p: Dictionary, node: Node3D) -> void:
 			for s in ([1.0] if bb.get("one_side", false) else [1.0, -1.0]):
 				var bas: Basis = bb["basis"] if s > 0 else Basis(Vector3.UP, PI) * bb["basis"]
 				var lb := TrailGate.label(bb["text"], bb["col"], bb["w"], bb["h"], bas, bb["at"] + bb["nrm"] * float(bb.get("off", 0.055)) * s)
-				if bb.get("font", "") == "black":
-					lb.font = UITheme.font(true)
-					# h = cap height, w = the most it may span: 0.7 = Barlow Black's cap height, ~0.62 em a glyph
-					lb.pixel_size = minf(bb["h"] / 0.7, bb["w"] / (maxf(String(bb["text"]).length(), 3) * 0.62)) / 200.0
 				node.add_child(lb)
 				p["labels"].append(lb)
 

@@ -131,14 +131,13 @@ static func build(g: Dictionary) -> Node3D:
 	# top truss (two chords + the banner hanging under it)
 	_box(n, Vector3(half * 2.0 + 1.1, 0.28, 0.5), Vector3(0, ytop, 0), _steel)
 	_box(n, Vector3(half * 2.0 + 1.1, 0.2, 0.5), Vector3(0, ytop - bh - 0.4, 0), _steel)
-	var bmat := StandardMaterial3D.new()
-	bmat.albedo_color = TerrainField.lin(sp[1])
-	bmat.roughness = 0.8
+	# the banner: a printed, weathered panel (SignTex.banner), the sponsor on both sides
 	var by := ytop - 0.2 - bh / 2.0
-	_box(n, Vector3(bw, bh, 0.1), Vector3(0, by, 0), bmat)
-	var tc: Color = Color.html("#%06x" % sp[2])
-	n.add_child(label(sp[0], tc, bw, bh, Basis.IDENTITY, Vector3(0, by, 0.07)))
-	n.add_child(label(sp[0], tc, bw, bh, Basis(Vector3.UP, PI), Vector3(0, by, -0.07)))
+	var ban := MeshInstance3D.new()
+	ban.mesh = TerrainGeo.MESH["signboard"]
+	ban.material_override = SignTex.banner(sp, Vector2(snappedf(bw, 0.5), bh))
+	ban.transform = Transform3D(Basis.from_scale(Vector3(bw, bh, 0.1)), Vector3(0, by, 0))
+	n.add_child(ban)
 	# two floodlight boxes on the truss
 	for s in [-0.3, 0.3]:
 		_box(n, Vector3(0.5, 0.3, 0.4), Vector3(s * bw, ytop + 0.3, 0.1), _steel)
