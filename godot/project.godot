@@ -88,6 +88,14 @@ rut_tex={
 "type": "sampler2D",
 "value": ""
 }
+rut_tread_tex={
+"type": "sampler2D",
+"value": ""
+}
+rut_dir_tex={
+"type": "sampler2D",
+"value": ""
+}
 rut_win={
 "type": "vec4",
 "value": Vector4(0, 0, 0, 0)

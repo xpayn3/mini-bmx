@@ -1,18 +1,16 @@
 class_name FX
 extends Node3D
-## Riding effects (port of src/fx.js): soft dust smoke, tyre tracks drawn into the ground, and flying
-## dirt/rock chunks. All pools are fixed-size ring buffers; nothing is allocated per frame:
+## Riding effects (port of src/fx.js): soft dust smoke and flying dirt/rock chunks. All pools are fixed-size ring
+## buffers; nothing is allocated per frame (the tyre tracks are in the ground now: world/ruts.gd):
 ##  * dust: one MultiMeshInstance3D of camera-facing quads (shader: rotating, eroding, sun-lit puffs
 ##    from a 2x2 noise atlas); per-instance data in a PackedFloat32Array pushed with multimesh_set_buffer
 ##  * chunks: one MultiMeshInstance3D of flat-shaded tetrahedra that bounce on terrain.height()
-##  * tracks: one ArrayMesh ring buffer (two ribbons); each new segment uploads only its own bytes
 ##
 ## terrain: any object with height(x: float, z: float) -> float (null = flat ground at y 0).
 ## Colours are ordinary (sRGB) Godot Colors; they are converted to linear where three.js used linear.
 
 const DUST_MAX := 700
 const CHUNK_MAX := 180
-const SEG_MAX := 14000   # ~1 km of track per wheel, kept until recycled
 const DUST_STRIDE := 20  # transform 12 + color 4 + custom 4
 const CHUNK_STRIDE := 16 # transform 12 + color 4
 
@@ -98,23 +96,6 @@ var c_life := PackedFloat32Array()
 var c_rest := PackedByteArray()
 var chunk_next := 0
 
-# ---- tracks ----
-var track_mesh: ArrayMesh
-var track_mi: MeshInstance3D
-var seg_next := 0
-var seg_birth := PackedFloat32Array()
-var _pos_bytes := PackedByteArray()   # one segment's positions (6 verts)
-var _col_bytes := PackedByteArray()   # one segment's colours
-var _v_stride := 12
-var _a_stride := 4
-var _col_float := false
-var wheel_last := [Vector3.ZERO, Vector3.ZERO]
-var wheel_has := [false, false]
-var wheel_dist := [0.0, 0.0]   # metres of track laid per wheel: the tread pattern runs along it
-var _col_off := 0
-var _uv_off := 4
-var _uv_half := false
-
 static var _smoke_tex: ImageTexture
 
 
@@ -123,7 +104,6 @@ func _init(p_terrain = null) -> void:
 	terrain = p_terrain
 	_build_dust()
 	_build_chunks()
-	_build_tracks()
 
 
 func setup(p_terrain) -> void:
@@ -263,46 +243,6 @@ func _build_chunks() -> void:
 	RenderingServer.multimesh_set_buffer(chunk_mm.get_rid(), chunk_buf)
 
 
-func _build_tracks() -> void:
-	seg_birth.resize(SEG_MAX)
-	seg_birth.fill(-1e9)
-	var P := PackedVector3Array()
-	P.resize(SEG_MAX * 6)
-	var C := PackedColorArray()
-	C.resize(SEG_MAX * 6)
-	C.fill(Color(0, 0, 0, 0))
-	var UV := PackedVector2Array()
-	UV.resize(SEG_MAX * 6)
-	var arrs := []
-	arrs.resize(Mesh.ARRAY_MAX)
-	arrs[Mesh.ARRAY_VERTEX] = P
-	arrs[Mesh.ARRAY_COLOR] = C
-	arrs[Mesh.ARRAY_TEX_UV] = UV   # x: across the track (-1..1, +-2 = a skid smear), y: metres along it
-	track_mesh = ArrayMesh.new()
-	track_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrs)
-	var mat := ShaderMaterial.new()
-	mat.shader = preload("res://shaders/tyre_track.gdshader")
-	mat.render_priority = 1
-	track_mesh.surface_set_material(0, mat)
-	track_mi = MeshInstance3D.new()
-	track_mi.name = "tracks"
-	track_mi.mesh = track_mesh
-	track_mi.custom_aabb = AABB(Vector3(-1e5, -1e5, -1e5), Vector3(2e5, 2e5, 2e5))
-	track_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	track_mi.visible = Env.s("BMX_NO_TRACKS") == ""   # tests: hide the drawn tyre tracks (e.g. to judge the ruts alone)
-	add_child(track_mi)
-	# the surface's real byte layout (position stream / attribute stream with the colour)
-	var fmt := track_mesh.surface_get_format(0)
-	_v_stride = RenderingServer.mesh_surface_get_format_vertex_stride(fmt, SEG_MAX * 6)
-	_a_stride = RenderingServer.mesh_surface_get_format_attribute_stride(fmt, SEG_MAX * 6)
-	_col_off = RenderingServer.mesh_surface_get_format_offset(fmt, SEG_MAX * 6, Mesh.ARRAY_COLOR)
-	_uv_off = RenderingServer.mesh_surface_get_format_offset(fmt, SEG_MAX * 6, Mesh.ARRAY_TEX_UV)
-	_col_float = (_uv_off - _col_off) >= 16 if _uv_off > _col_off else _a_stride >= 16
-	_uv_half = (fmt & Mesh.ARRAY_FLAG_COMPRESS_ATTRIBUTES) != 0
-	_pos_bytes.resize(6 * _v_stride)
-	_col_bytes.resize(6 * _a_stride)
-
-
 # ======================================================================= emitters
 
 func puff(pos: Vector3, vel: Vector3, color: Color, size := 0.35, life := 1.4, alpha := 0.5) -> void:
@@ -343,77 +283,6 @@ func chunk(pos: Vector3, vel: Vector3, color: Color, size := 0.03, life := 2.2) 
 	var m := 0.75 + randf() * 0.4
 	var o := i * CHUNK_STRIDE + 12
 	chunk_buf[o] = color.r * m; chunk_buf[o + 1] = color.g * m; chunk_buf[o + 2] = color.b * m; chunk_buf[o + 3] = 1.0
-
-
-## lay tyre track. wheel 0 = front, 1 = rear. strength 0 = break the track. smear: a skid (no tread,
-## streaks along the track instead)
-func track(wheel: int, contact: Vector3, dir: Vector3, strength: float, color: Color, width := 0.055, smear := false) -> void:
-	if strength <= 0.0:
-		wheel_has[wheel] = false
-		return
-	# a hair above the ground; the shader pulls it toward the camera so it never flickers into the terrain
-	var p := Vector3(contact.x, _ground(contact.x, contact.z) + 0.015, contact.z)
-	if not wheel_has[wheel]:
-		wheel_last[wheel] = p
-		wheel_has[wheel] = true
-		return
-	var last: Vector3 = wheel_last[wheel]
-	var dx := p.x - last.x
-	var dz := p.z - last.z
-	var d2 := dx * dx + dz * dz
-	if d2 < 0.14 * 0.14:
-		return
-	if d2 > 1.5 * 1.5:   # teleport / respawn
-		wheel_last[wheel] = p
-		return
-	var i := seg_next
-	seg_next = (i + 1) % SEG_MAX
-	var ln := sqrt(d2)
-	var nx := -dz / ln * width * 0.5
-	var nz := dx / ln * width * 0.5
-	# two triangles: last-left, last-right, p-right / last-left, p-right, p-left
-	_put_pos(0, last.x + nx, last.y, last.z + nz)
-	_put_pos(1, last.x - nx, last.y, last.z - nz)
-	_put_pos(2, p.x - nx, p.y, p.z - nz)
-	_put_pos(3, last.x + nx, last.y, last.z + nz)
-	_put_pos(4, p.x - nx, p.y, p.z - nz)
-	_put_pos(5, p.x + nx, p.y, p.z + nz)
-	seg_birth[i] = t
-	# colour is written once; tracks don't fade with time, they're only recycled when the buffer wraps
-	var a := clampf(strength, 0.0, 1.0)
-	var d0: float = wheel_dist[wheel]
-	var d1 := d0 + ln
-	# wrap the distance (float precision) on a whole number of tread repeats (2 rows x 0.024 m in the
-	# shader), so the pattern carries on seamlessly into the next segment
-	wheel_dist[wheel] = d1 - 480.0 if d1 >= 480.0 else d1
-	var s := 2.0 if smear else 1.0
-	var uvs := [Vector2(s, d0), Vector2(-s, d0), Vector2(-s, d1), Vector2(s, d0), Vector2(-s, d1), Vector2(s, d1)]
-	for k in 6:
-		var o := k * _a_stride + _col_off
-		if _col_float:
-			_col_bytes.encode_float(o, color.r); _col_bytes.encode_float(o + 4, color.g)
-			_col_bytes.encode_float(o + 8, color.b); _col_bytes.encode_float(o + 12, a)
-		else:
-			_col_bytes[o] = color.r8; _col_bytes[o + 1] = color.g8; _col_bytes[o + 2] = color.b8
-			_col_bytes[o + 3] = roundi(a * 255.0)
-		var uo := k * _a_stride + _uv_off
-		var uv: Vector2 = uvs[k]
-		if _uv_half:
-			_col_bytes.encode_half(uo, uv.x); _col_bytes.encode_half(uo + 2, uv.y)
-		else:
-			_col_bytes.encode_float(uo, uv.x); _col_bytes.encode_float(uo + 4, uv.y)
-	# upload just this segment instead of the whole buffer
-	var rid := track_mesh.get_rid()
-	RenderingServer.mesh_surface_update_vertex_region(rid, 0, i * 6 * _v_stride, _pos_bytes)
-	RenderingServer.mesh_surface_update_attribute_region(rid, 0, i * 6 * _a_stride, _col_bytes)
-	wheel_last[wheel] = p
-
-
-func _put_pos(k: int, x: float, y: float, z: float) -> void:
-	var o := k * _v_stride
-	_pos_bytes.encode_float(o, x)
-	_pos_bytes.encode_float(o + 4, y)
-	_pos_bytes.encode_float(o + 8, z)
 
 
 # ======================================================================= simulation
@@ -502,15 +371,6 @@ func _update_chunks(dt: float) -> void:
 		chunk_buf[o + 8] = bx.z; chunk_buf[o + 9] = by.z; chunk_buf[o + 10] = bz.z; chunk_buf[o + 11] = c_pos[j + 2]
 	RenderingServer.multimesh_set_buffer(chunk_mm.get_rid(), chunk_buf)
 	_chunk_busy = alive   # a chunk on its last frame wrote scale 0 above
-
-
-func clear_tracks() -> void:
-	wheel_has[0] = false
-	wheel_has[1] = false
-	seg_birth.fill(-1e9)
-	var zero := PackedByteArray()
-	zero.resize(SEG_MAX * 6 * _a_stride)   # transparent everywhere (full re-upload)
-	RenderingServer.mesh_surface_update_attribute_region(track_mesh.get_rid(), 0, 0, zero)
 
 
 ## number of live dust puffs / chunks (debug / tests)

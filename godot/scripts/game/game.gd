@@ -32,8 +32,6 @@ var _dprobe_t := 0.0
 const DIRT_CHUNK := Color("7a5534")
 const ROCK_CHUNK := Color("8d8a84")
 const GRASS_CHUNK := Color("4f8a2e")
-const TRACK_DIRT := Color("4a3220")
-const TRACK_GRASS := Color("3d5a22")
 
 var terrain
 var fx
@@ -1965,24 +1963,29 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 			var ev := f * va * 0.85 + Vector3((randf() - 0.5) * 1.6, randf() * 1.4, (randf() - 0.5) * 1.6)
 			fx.chunk(bt * lp, ev, dc, randf_range(0.008, 0.02), 1.6)
 	var on_ground := not st.air and not bare and va > 0.2
-	var tc: Color = TRACK_DIRT if s == 1 else (dcol * 0.6 if sand else TRACK_GRASS)
+	# tyre prints, pressed into the ground (world/ruts.gd; the ground shaders draw them in the ground's own colour):
+	# how dark per surface, a skid's smear darker and wider; a tyre that rolled through blood prints red for a few metres
 	var ta := 0.85 if s == 1 else (0.75 if sand else 0.45)
-	# a tyre that rolled through blood prints red for a few metres (fx/blood.gd)
-	var tcf: Color = blood.tyre_color(0, front, tc) if blood and on_ground else tc
-	var tcr: Color = blood.tyre_color(1, rear, tc) if blood and on_ground else tc
-	fx.track(0, front, f, ta if on_ground else 0.0, tcf, 0.085)
-	fx.track(1, rear, f, (minf(1.0, ta + 0.2) if skid_fx else ta) if on_ground else 0.0, tcr, 0.12 if skid_fx else 0.095, skid_fx)
+	var bl_f := 0.0
+	var bl_r := 0.0
+	if blood and on_ground:
+		blood.tyre_color(0, front, Color.BLACK); blood.tyre_color(1, rear, Color.BLACK)   # (updates how bloody each tyre is)
+		bl_f = blood.tyre_blood(0); bl_r = blood.tyre_blood(1)
+	if ruts != null:
+		ruts.track(0, front, ta if on_ground else 0.0, 0.085, false, bl_f)
+		ruts.track(1, rear, ((minf(1.0, ta + 0.2) if skid_fx else ta) if on_ground else 0.0), 0.12 if skid_fx else 0.095, skid_fx, bl_r)
 	# the bike lays the grass down behind it (wheels + the frame / pedals sweeping over); it stands up again slowly
 	if grass and on_ground:
 		grass.trample(0, front, f, 0.26)
 		grass.trample(1, rear, f, 0.34 if skid_fx else 0.3)
 
 # ---------------------------------------------------------------- ride control
-var ruts = null    # world/ruts.gd (the test playground for now)
-## ruts: rides and the test playground (Settings › Gameplay › Ruts; BMX_RUTS=0 off, =1 on whatever the setting)
+var ruts = null    # world/ruts.gd: ruts + tyre prints in the ground
+## ruts + prints: rides, built levels and the test playground. Settings › Gameplay › Ruts switches only the digging
+## (BMX_RUTS=0 off, =1 on whatever the setting); the prints are always there (BMX_NO_TRACKS=1 hides them)
 func _make_ruts() -> void:
-	if Env.s("BMX_RUTS") == "0" or (Env.s("BMX_RUTS") != "1" and not bool(Settings.get_v("ruts"))): return
 	ruts = preload("res://scripts/world/ruts.gd").new(self)
+	ruts.dig = Env.s("BMX_RUTS") != "0" and (Env.s("BMX_RUTS") == "1" or bool(Settings.get_v("ruts")))
 	add_child(ruts)
 	if not ruts.active(): ruts.queue_free(); ruts = null
 var ghost = null   # game/ghost_rider.gd (rides of this world only, not the title / levels)
@@ -2009,7 +2012,6 @@ func respawn(new_world: bool) -> void:
 		if ruts: ruts.clear()
 		tumbleweeds.clear()
 		flash("New world #%d" % GameState.seed)
-	if fx.has_method("clear_tracks"): fx.clear_tracks()
 	if grass: grass.clear_trample()
 	if new_world: grime.clean()
 	if blood: blood.clear()
@@ -2142,7 +2144,6 @@ func reset_to_trail() -> void:
 	if flying_cam and is_instance_valid(flying_cam): flying_cam.queue_free()
 	flying_cam = null
 	if blood: blood.clear()
-	if fx.has_method("clear_tracks"): fx.clear_tracks()
 	if bd > 40.0 * 40.0: terrain.update_stream(tx, tz, INF)   # a long way: load it first
 	phys.reset_at(tx, tz, atan2(-tc.TZ[best], tc.TX[best]))
 	_out_of_crevasse()

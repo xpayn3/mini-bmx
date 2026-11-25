@@ -678,6 +678,10 @@ func blood_at(x: float, z: float) -> float:
 		if dx * dx + dz * dz < r * r: b = maxf(b, 0.8)
 	return b
 
+## how much blood is on a tyre now (0..1, as tyre_color last worked it out): the ground prints it (world/ruts.gd)
+func tyre_blood(wheel: int) -> float:
+	return clampf(_tyre_blood[wheel], 0.0, 1.0) if enabled else 0.0
+
 ## the colour a tyre prints: after rolling through blood, red, fading over ~10 m
 func tyre_color(wheel: int, contact: Vector3, base: Color) -> Color:
 	if not enabled: return base

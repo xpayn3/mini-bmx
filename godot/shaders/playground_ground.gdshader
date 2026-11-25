@@ -50,6 +50,10 @@ void fragment() {
 	// ruts: the grooves darker, their walls shaded from the dug depth's slope
 	float rd = rut_depth(wpos.xz);
 	c = rut_colour(c, rd);
+	// tyre prints (world/ruts.gd)
+	vec2 rks;
+	vec4 rpr = rut_prints(wpos.xz, length(fwidth(wpos.xz)) * 0.7, rks);
+	c = rut_print_colour(c, rpr);
 	if (rut_win.w > 0.5) NORMAL = normalize((VIEW_MATRIX * vec4(rut_normal(wpos.xz, normalize(wnrm)), 0.0)).xyz);
 	ALBEDO = c * (1.0 - dark);
 	ROUGHNESS = 0.92 - 0.12 * smoothstep(0.01, 0.06, rd);   // (packed groove bottom: a touch smoother)

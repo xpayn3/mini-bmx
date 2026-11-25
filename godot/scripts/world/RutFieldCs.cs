@@ -15,17 +15,41 @@ public partial class RutFieldCs : RefCounted
 	public const int MAX_TILES = 256;     // ~26 MB at most: a ride keeps its ruts ~2 km back
 
 	private readonly Dictionary<long, float[]> _tiles = new();
+	private readonly Dictionary<long, TrackTile> _tracks = new();   // tyre prints, per tile (made with the first print in it)
 	private readonly LinkedList<long> _age = new();   // most recently dug last
 	private readonly Dictionary<long, LinkedListNode<long>> _ageNode = new();
 	private readonly HashSet<long> _dirty = new();
 	private readonly Dictionary<int, Vector2> _last = new();   // wheel id -> last stamped point (x, z)
+	private readonly Dictionary<int, Vector2> _lastT = new();  // the same for the prints
+
+	/// Tyre prints (2026-11-25: the tracks moved from a mesh ribbon into the ground, off-road-game style). Per cell:
+	/// E = signed distance (m) to the edge of the prints (< 0 inside), kept as the UNION of every print (min), so it
+	/// interpolates cleanly between 5 cm cells even where prints overlap (a signed distance field, as font / decal
+	/// rendering draws crisp edges from coarse cells); then its strength, how much of it is a skid smear (0..1), blood on
+	/// the tyre and its direction as a doubled angle (cos 2a, sin 2a: continuous whichever way it ran). Everything is a
+	/// quantity that BLENDS between cells: the ground shader works the across position out of E, so where a skid crosses
+	/// the front print nothing jumps. The newest print wins inside its band; E stays the union. Half floats (~300 KB a tile).
+	/// (First versions kept one print's SIGNED offset, then its |offset| and a negative strength for skids: neighbouring
+	/// cells of overlapping prints held unrelated values and the bilinear blend drew saw-toothed edges, zigzag lines,
+	/// holes where + and - strength met, and the tread in 5 cm blocks.)
+	private sealed class TrackTile
+	{
+		public readonly Half[] E = new Half[TILE * TILE];
+		public readonly Half[] S = new Half[TILE * TILE];
+		public readonly Half[] M = new Half[TILE * TILE];
+		public readonly Half[] B = new Half[TILE * TILE];
+		public readonly Half[] C2 = new Half[TILE * TILE];
+		public readonly Half[] S2 = new Half[TILE * TILE];
+		public TrackTile() { Array.Fill(E, (Half)NO_E); }
+	}
+	public const float NO_E = 9f;         // "no print near this cell"
 	private float _minX = float.PositiveInfinity, _minZ = float.PositiveInfinity, _maxX = float.NegativeInfinity, _maxZ = float.NegativeInfinity;
 
 	private static long Key(int tx, int tz) => ((long)tx << 32) ^ (uint)tz;
 
 	public void Clear()
 	{
-		_tiles.Clear(); _age.Clear(); _ageNode.Clear(); _dirty.Clear(); _last.Clear();
+		_tiles.Clear(); _tracks.Clear(); _age.Clear(); _ageNode.Clear(); _dirty.Clear(); _last.Clear(); _lastT.Clear();
 		_minX = _minZ = float.PositiveInfinity; _maxX = _maxZ = float.NegativeInfinity;
 	}
 
@@ -48,7 +72,7 @@ public partial class RutFieldCs : RefCounted
 		if (_tiles.Count > MAX_TILES)
 		{
 			long old = _age.First.Value;
-			_age.RemoveFirst(); _ageNode.Remove(old); _tiles.Remove(old); _dirty.Remove(old);
+			_age.RemoveFirst(); _ageNode.Remove(old); _tiles.Remove(old); _tracks.Remove(old); _dirty.Remove(old);
 		}
 		float x0 = tx * TILE * CELL, z0 = tz * TILE * CELL, x1 = x0 + TILE * CELL, z1 = z0 + TILE * CELL;
 		_minX = Math.Min(_minX, x0); _minZ = Math.Min(_minZ, z0); _maxX = Math.Max(_maxX, x1); _maxZ = Math.Max(_maxZ, z1);
@@ -119,6 +143,82 @@ public partial class RutFieldCs : RefCounted
 			}
 	}
 
+	/// a tyre (id) printed its tread to (x, z): its stretch since the last call. halfW = half the print's width (m),
+	/// strength 0..1 (how dark), smear = a skid (no tread, streaks), blood 0..1 = red on the tyre. strength 0 = lifted
+	/// (the next call starts afresh); a jump > 1.5 m = a new start.
+	public void StampTrack(int id, float x, float z, float halfW, float strength, bool smear, float blood)
+	{
+		var p = new Vector2(x, z);
+		if (strength <= 0f) { _lastT.Remove(id); return; }
+		if (!_lastT.TryGetValue(id, out var a) || a.DistanceTo(p) > 1.5f) { _lastT[id] = p; return; }
+		Vector2 seg = p - a;
+		float len = seg.Length();
+		if (len < 0.02f) return;
+		_lastT[id] = p;
+		Vector2 dir = seg / len;
+		Vector2 nrm = new Vector2(-dir.Y, dir.X);
+		var c2 = (Half)(dir.X * dir.X - dir.Y * dir.Y);
+		var s2 = (Half)(2f * dir.X * dir.Y);
+		var sv = (Half)strength;
+		var mv = (Half)(smear ? 1f : 0f);
+		var bv = (Half)blood;
+		float reach = halfW + 2.2f * CELL;   // + two cells beside it: the edge interpolates crisply
+		int ix0 = (int)Math.Floor((Math.Min(a.X, p.X) - reach) / CELL), ix1 = (int)Math.Floor((Math.Max(a.X, p.X) + reach) / CELL);
+		int iz0 = (int)Math.Floor((Math.Min(a.Y, p.Y) - reach) / CELL), iz1 = (int)Math.Floor((Math.Max(a.Y, p.Y) + reach) / CELL);
+		for (int iz = iz0; iz <= iz1; iz++)
+			for (int ix = ix0; ix <= ix1; ix++)
+			{
+				var c = new Vector2((ix + 0.5f) * CELL, (iz + 0.5f) * CELL);
+				float t = (c - a).Dot(dir);
+				if (t <= 0f || t > len) continue;   // another tick's stretch
+				float off = (c - a).Dot(nrm);
+				if (Math.Abs(off) > reach) continue;
+				int tx = (int)Math.Floor((double)ix / TILE), tz = (int)Math.Floor((double)iz / TILE);
+				TileFor(tx, tz, true);
+				long k = Key(tx, tz);
+				if (!_tracks.TryGetValue(k, out var tt)) { tt = new TrackTile(); _tracks[k] = tt; }
+				int i = (iz - tz * TILE) * TILE + (ix - tx * TILE);
+				float ao = Math.Abs(off);
+				float e = ao - halfW;                     // this print's edge distance (< 0 inside)
+				float eo = (float)tt.E[i];
+				// the union of all prints keeps the smallest edge distance; the print's own data goes where it is inside
+				// its band (the newest wins there) or, beside it, where no print reaches nearer
+				if (e < 0f || e < eo)
+				{
+					tt.S[i] = sv; tt.M[i] = mv; tt.B[i] = bv; tt.C2[i] = c2; tt.S2[i] = s2;
+				}
+				if (e < eo) tt.E[i] = (Half)e;
+				_dirty.Add(k);
+			}
+	}
+
+	/// a tile for the ground shader's window: per cell 4 x uint32 = half pairs (depth, edge distance), (strength, blood),
+	/// (cos 2a, sin 2a), (smear, 0), row by row (shaders/rut_upload.glsl unpacks them); empty if the tile doesn't exist
+	public byte[] TilePack(int tx, int tz)
+	{
+		var d = TileFor(tx, tz, false);
+		if (d == null) return Array.Empty<byte>();
+		_tracks.TryGetValue(Key(tx, tz), out var tt);
+		var b = new byte[TILE * TILE * 16];
+		ushort he0 = BitConverter.HalfToUInt16Bits((Half)NO_E), ha0 = 0, z0 = 0;
+		for (int i = 0; i < d.Length; i++)
+		{
+			int o = 16 * i;
+			ushort h0 = BitConverter.HalfToUInt16Bits((Half)d[i]);
+			ushort h1 = tt != null ? BitConverter.HalfToUInt16Bits(tt.E[i]) : he0;
+			ushort h2 = tt != null ? BitConverter.HalfToUInt16Bits(tt.S[i]) : z0;
+			ushort h3 = tt != null ? BitConverter.HalfToUInt16Bits(tt.B[i]) : z0;
+			ushort h4 = tt != null ? BitConverter.HalfToUInt16Bits(tt.C2[i]) : z0;
+			ushort h5 = tt != null ? BitConverter.HalfToUInt16Bits(tt.S2[i]) : z0;
+			ushort h6 = tt != null ? BitConverter.HalfToUInt16Bits(tt.M[i]) : ha0;
+			b[o] = (byte)h0; b[o + 1] = (byte)(h0 >> 8); b[o + 2] = (byte)h1; b[o + 3] = (byte)(h1 >> 8);
+			b[o + 4] = (byte)h2; b[o + 5] = (byte)(h2 >> 8); b[o + 6] = (byte)h3; b[o + 7] = (byte)(h3 >> 8);
+			b[o + 8] = (byte)h4; b[o + 9] = (byte)(h4 >> 8); b[o + 10] = (byte)h5; b[o + 11] = (byte)(h5 >> 8);
+			b[o + 12] = (byte)h6; b[o + 13] = (byte)(h6 >> 8);
+		}
+		return b;
+	}
+
 	/// the tiles dug since the last call: (tx, tz) pairs
 	public int[] TakeDirty()
 	{
@@ -132,43 +232,35 @@ public partial class RutFieldCs : RefCounted
 		return o;
 	}
 
-	/// a tile's depths as 16-bit floats for an image (FORMAT_RH, row by row); empty if it doesn't exist
-	public byte[] TileRH(int tx, int tz)
-	{
-		var t = TileFor(tx, tz, false);
-		if (t == null) return Array.Empty<byte>();
-		var b = new byte[TILE * TILE * 2];
-		for (int i = 0; i < t.Length; i++)
-		{
-			ushort h = BitConverter.HalfToUInt16Bits((Half)t[i]);
-			b[2 * i] = (byte)(h & 0xff); b[2 * i + 1] = (byte)(h >> 8);
-		}
-		return b;
-	}
-
 	public const int FAR = 5;             // far layer: FAR x FAR cells -> one texel (25 cm)
 
-	/// the same tile for the far window: TILE/FAR x TILE/FAR texels, each the deepest of its cells (a 9 cm groove stays a
-	/// visible line from a long way off, only wider); 16-bit floats like TileRH; empty if the tile doesn't exist
-	public byte[] TileRHFar(int tx, int tz)
+	/// the same tile for the far window: TILE/FAR x TILE/FAR texels, 16-bit float pairs (FORMAT_RGH): r = the deepest of
+	/// its cells (a 9 cm groove stays a visible line from a long way off, only wider), g = how much of it tyre prints cover
+	/// (x their strength: from afar a print is its average shade); empty if the tile doesn't exist
+	public byte[] TileRGFar(int tx, int tz)
 	{
 		var t = TileFor(tx, tz, false);
 		if (t == null) return Array.Empty<byte>();
+		_tracks.TryGetValue(Key(tx, tz), out var tt);
 		int n = TILE / FAR;
-		var b = new byte[n * n * 2];
+		var b = new byte[n * n * 4];
 		for (int j = 0; j < n; j++)
 			for (int i = 0; i < n; i++)
 			{
-				float m = 0f;
+				float m = 0f, cov = 0f;
 				for (int dj = 0; dj < FAR; dj++)
 					for (int di = 0; di < FAR; di++)
 					{
-						float v = t[(j * FAR + dj) * TILE + i * FAR + di];
+						int c = (j * FAR + dj) * TILE + i * FAR + di;
+						float v = t[c];
 						if (v > m) m = v;
+						if (tt != null && (float)tt.E[c] < 0f)
+							cov += (float)tt.S[c] * Math.Min(-(float)tt.E[c] / 0.03f, 1f);
 					}
 				ushort h = BitConverter.HalfToUInt16Bits((Half)m);
-				int o = 2 * (j * n + i);
-				b[o] = (byte)(h & 0xff); b[o + 1] = (byte)(h >> 8);
+				ushort g = BitConverter.HalfToUInt16Bits((Half)(cov / (FAR * FAR)));
+				int o = 4 * (j * n + i);
+				b[o] = (byte)(h & 0xff); b[o + 1] = (byte)(h >> 8); b[o + 2] = (byte)(g & 0xff); b[o + 3] = (byte)(g >> 8);
 			}
 		return b;
 	}
