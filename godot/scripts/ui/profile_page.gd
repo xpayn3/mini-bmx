@@ -609,55 +609,15 @@ class WeekChart extends Control:
 		draw_line(Vector2(0, base), Vector2(size.x, base), Tokens.LINE, 1.0)
 
 # ---------------------------------------------------------------- SKILLS
-## the rider's skills like the motocross games' rider card: each is a level 1..10 earned from what has really been
-## done on the bike (records, tricks landed), with a segmented meter and what the next level needs.
-## [name, what it is read from, value, level thresholds (level n = n thresholds reached), formatter of a value]
-func _skills() -> Array:
-	var r: Dictionary = GameState.records
-	var mi: bool = Settings.get_v("units") == 1
-	var dk := 1.0 / 1609.344 if mi else 0.001
-	var du := "MI" if mi else "KM"
-	var sk := 0.621371 if mi else 1.0
-	var su := "MPH" if mi else "KM/H"
-	var m_fmt := func(v: float) -> String: return "%d M" % roundi(v)
-	return [
-		["TOP SPEED", "FASTEST YOU HAVE GONE", float(r.top_speed) * sk,
-			[0, 30, 45, 55, 65, 75, 85, 95, 105, 120].map(func(x): return x * sk), func(v: float) -> String: return "%d %s" % [roundi(v), su]],
-		["JUMPING", "LONGEST JUMP", float(r.longest),
-			[0, 5, 10, 15, 20, 30, 40, 50, 65, 80], m_fmt],
-		["BIG AIR", "HIGHEST ABOVE THE GROUND", float(r.highest),
-			[0, 0.5, 1, 2, 3, 4, 6, 8, 10, 12], func(v: float) -> String: return "%.1f M" % v],
-		["HANG TIME", "BEST TIME IN THE AIR", float(r.air),
-			[0, 0.5, 1, 1.5, 2, 2.5, 3, 4, 5, 6], func(v: float) -> String: return "%.1f S" % v],
-		["STYLE", "TRICKS LANDED", float(GameState.tricks_seen.size()),
-			[0, 1, 2, 3, 4, 5, 6, 7, 8, 9], func(v: float) -> String: return "%d OF %d" % [roundi(v), Collection.TRICK_KEYS.size()]],
-		["EXPERIENCE", "JUMPS LANDED", float(int(r.jumps)),
-			[0, 5, 20, 50, 100, 200, 400, 700, 1000, 2000], func(v: float) -> String: return str(roundi(v))],
-		["ENDURANCE", "TOTAL DISTANCE RIDDEN", float(r.distance) * dk,
-			[0, 5, 15, 30, 60, 100, 150, 250, 400, 600], func(v: float) -> String: return "%d %s" % [roundi(v), du]],
-		["CONSISTENCY", "DAYS IN A ROW", float(maxi(int(r.best_streak), GameState.day_streak())),
-			[0, 1, 2, 3, 5, 7, 10, 14, 21, 30], func(v: float) -> String: return "%d DAYS" % roundi(v)],
-	]
-
-## level 1..10 and the way to the next one (0..1) for a value against its thresholds
-static func _skill_level(v: float, th: Array) -> Array:
-	var lv := 0
-	for t in th:
-		if v + 1e-6 >= float(t): lv += 1
-	lv = clampi(lv, 1, th.size())
-	var frac := 1.0
-	if lv < th.size():
-		var a := float(th[lv - 1])
-		var b := float(th[lv])
-		frac = clampf((v - a) / maxf(b - a, 1e-6), 0.0, 1.0)
-	return [lv, frac]
-
-func _skill_card(s: Array, delay: float) -> Control:
-	var th: Array = s[3]
-	var fm: Callable = s[4]
-	var lf := _skill_level(float(s[2]), th)
-	var lv: int = lf[0]
-	var maxed := lv >= th.size()
+## the rider's skills like the motocross games' rider card: each collects XP while he rides (GameState.skill_xp, see
+## Skills for what pays) and levels up 1..10, with a segmented meter and the XP to the next level.
+func _skill_card(id: String, delay: float) -> Control:
+	var def: Array = Skills.DEFS[id]
+	var xp := float(GameState.skill_xp.get(id, 0.0))
+	var pr := Skills.progress(xp)
+	var lv: int = pr[0]
+	var maxed := lv >= Skills.MAX_LEVEL
+	var gain := float(GameState.skill_gain.get(id, 0.0))
 	var pc := _card(Tokens.S5, C_CARD)
 	pc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var col := VBoxContainer.new()
@@ -668,8 +628,12 @@ func _skill_card(s: Array, delay: float) -> Control:
 	var nm := VBoxContainer.new()
 	nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	nm.add_theme_constant_override("separation", -2)
-	nm.add_child(UITheme.display(String(s[0]), 30, C_TXT, 0.0, 900))
-	nm.add_child(_cap(String(s[1]), C_FAINT, Tokens.T_XS))
+	nm.add_child(UITheme.display(String(def[0]), 30, C_TXT, 0.0, 900))
+	var earns := _cap(String(def[1]), C_FAINT, Tokens.T_XS)
+	earns.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	earns.custom_minimum_size.x = 200
+	earns.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	nm.add_child(earns)
 	top.add_child(nm)
 	var lb := VBoxContainer.new()
 	lb.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -682,10 +646,10 @@ func _skill_card(s: Array, delay: float) -> Control:
 	ll.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	lb.add_child(ll)
 	top.add_child(lb)
-	# ten pips like a games' skill meter: full for each level reached, the next one filling
+	# ten pips like a games' skill meter: full for each level reached, the next one filling with the XP
 	var pips := HBoxContainer.new()
 	pips.add_theme_constant_override("separation", 4)
-	for i in th.size():
+	for i in Skills.MAX_LEVEL:
 		var p := ProgressBar.new()
 		p.show_percentage = false
 		p.min_value = 0.0; p.max_value = 1.0
@@ -694,28 +658,30 @@ func _skill_card(s: Array, delay: float) -> Control:
 		var fg := StyleBoxFlat.new(); fg.bg_color = ACC
 		var bgs := StyleBoxFlat.new(); bgs.bg_color = C_LINE
 		p.add_theme_stylebox_override("fill", fg); p.add_theme_stylebox_override("background", bgs)
-		var to := 1.0 if i < lv else (float(lf[1]) if i == lv else 0.0)
+		var to := 1.0 if i < lv else (float(pr[3]) if i == lv else 0.0)
 		var tw := p.create_tween()
 		tw.tween_interval(delay + 0.15 + i * 0.04)
 		tw.tween_property(p, "value", to, 0.45).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 		pips.add_child(p)
 	col.add_child(pips)
-	var info := "BEST  %s" % fm.call(float(s[2]))
-	info += "   ·   MAXED OUT" if maxed else "   ·   NEXT LEVEL  %s" % fm.call(float(th[lv]))
+	var info := "MAXED OUT  ·  %s XP" % _xp_text(xp) if maxed else "%s / %s XP TO LEVEL %d" % [_xp_text(float(pr[1])), _xp_text(float(pr[2])), lv + 1]
+	if gain >= 1.0: info += "   ·   +%s THIS RIDE" % _xp_text(gain)
 	col.add_child(_cap(info, C_SOFT, Tokens.T_XS))
 	return pc
 
+static func _xp_text(v: float) -> String:
+	return str(roundi(v))
+
 func _page_skills() -> void:
-	var sk := _skills()
 	var tot := 0
-	for s in sk: tot += int(_skill_level(float(s[2]), s[3])[0])
-	var ovr := roundi(float(tot) / sk.size() * 10.0)   # the average level, 10..100
+	for id in Skills.ORDER: tot += Skills.level_of(float(GameState.skill_xp.get(id, 0.0)))
+	var ovr := roundi(float(tot) / Skills.ORDER.size() * 10.0)   # the average level, 10..100
 	var top := HBoxContainer.new()
 	var head := VBoxContainer.new()
 	head.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_theme_constant_override("separation", 0)
 	head.add_child(UITheme.display("RIDER SKILLS", 46, C_TXT, 0.0, 900))
-	head.add_child(_cap("%s  ·  %s  ·  EVERY LEVEL IS EARNED BY RIDING" % [GameState.rider_name, String(LEVEL_NAMES[clampi(ovr / 17, 0, 5)])], C_SOFT, Tokens.T_MD))
+	head.add_child(_cap("%s  ·  %s  ·  XP COMES FROM RIDING" % [GameState.rider_name, String(LEVEL_NAMES[clampi(ovr / 17, 0, 5)])], C_SOFT, Tokens.T_MD))
 	top.add_child(head)
 	var ob := VBoxContainer.new()
 	ob.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -744,8 +710,8 @@ func _page_skills() -> void:
 	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	body.add_child(grid)
 	var cards: Array = []
-	for i in sk.size():
-		var c := _skill_card(sk[i], 0.05 + i * 0.05)
+	for i in Skills.ORDER.size():
+		var c := _skill_card(String(Skills.ORDER[i]), 0.05 + i * 0.05)
 		grid.add_child(c)
 		cards.append(c)
 	# the tricks: landed ones lit, the rest still to learn

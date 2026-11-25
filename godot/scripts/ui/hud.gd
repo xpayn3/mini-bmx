@@ -85,6 +85,7 @@ func _ready() -> void:
 	layer = 5
 	beep = preload("res://scripts/ui/garmin_beep.gd").new()
 	add_child(beep)
+	GameState.skill_leveled.connect(_on_skill_level)
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.theme = UITheme.get_theme()
@@ -243,6 +244,10 @@ func flash(text: String) -> void:
 	if beep and not (text.begins_with("BONK") or text.begins_with("OOF") or text.begins_with("OUCH") or text.begins_with("LOOPED") or text.begins_with("SKETCHY") or text.begins_with("SMASH") or text.begins_with("CRUNCH") or text.begins_with("SNAP")):
 		beep.tone("pickup" if text.begins_with("HEALTH") else "gain")
 
+## a skill reached a new level (GameState.skill_add): the achievement pop
+func _on_skill_level(id: String, lv: int) -> void:
+	flash("SKILL UP  ·  %s  LV %d" % [String((Skills.DEFS[id] as Array)[0]), lv])
+
 func gear_changed(at_end: bool = false) -> void:
 	if gauge: gauge.bump = 1.0; gauge.queue_redraw()
 	if at_end and beep: beep.tone("gear_end")      # now in the easiest / hardest gear
@@ -259,17 +264,20 @@ func on_landing(air_time: float, dist: float, height: float, impact: float) -> v
 	if air_time > 0.25 and not game.phys.crash_on:
 		jumps += 1
 		jump_last = Vector3(air_time, dist, height)
+		GameState.skill_landing(air_time, dist, height)
 		if jumps > 2 and air_time > 0.7 and air_time > jump_best.x: beep.tone("record")   # a new best jump today
 		jump_best = Vector3(maxf(jump_best.x, air_time), maxf(jump_best.y, dist), maxf(jump_best.z, height))
 
 ## style points for a landed jump (bike_physics._style_points): the popup chains them into a combo
 func on_style(points: int, label: String) -> void:
+	GameState.skill_style(points)
 	if style_pop: style_pop.add(points, label)
 	if beep: beep.tone("combo" if style_pop and style_pop.combo > 1 else "points")
 
 func on_trick(trick: String) -> void:
 	tricks += 1
 	trick_last = trick
+	GameState.skill_trick(trick)   # (before Steam.trick marks the family as seen: a new one pays extra)
 	Steam.trick(trick)
 
 ## a crash hurts by how fast the body was going: a slow tip-over ~15 %, 12 m/s+ ~70 %+
@@ -499,6 +507,7 @@ func _ride_stats(st: BikePhysics, dt: float) -> void:
 		var ds := absf(st.v) * dt
 		ride_dist += ds
 		GameState.add_distance(ds)   # total + today's log (title card: this week, streak)
+		GameState.skill_tick(st, dt)   # skill XP: speed, cornering, balance
 		if absf(st.v) > 0.5: moving_t += dt
 		max_v = maxf(max_v, absf(st.v))
 	if is_nan(_crank_last): _crank_last = st.crank

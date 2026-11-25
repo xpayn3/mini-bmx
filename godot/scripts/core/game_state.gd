@@ -144,6 +144,11 @@ func _ready() -> void:
 		if br is Dictionary: bikes_ridden = br
 		if cf.has_section("achievements"):
 			for k in cf.get_section_keys("achievements"): achieved[k] = int(cf.get_value("achievements", k, 0))
+		if cf.has_section("skills"):
+			for k in cf.get_section_keys("skills"): skill_xp[k] = float(cf.get_value("skills", k, 0.0))
+		else:   # a save from before the XP system: what the records had earned becomes the starting XP
+			skill_xp = Skills.seed_from_records(records, tricks_seen.size(), maxi(int(records.best_streak), day_streak()))
+		if OS.get_environment("BMX_SKILLS") == "fresh": skill_xp = {}   # tests: every skill from level 1
 		goggle_lens = String(cf.get_value("game", "lens", goggle_lens))
 		if not _GoggleLens.has(goggle_lens): goggle_lens = _GoggleLens.DEFAULT
 		_lens_saved = goggle_lens
@@ -189,6 +194,7 @@ func save() -> void:
 	cf.set_value("game", "tricks", tricks_seen)
 	cf.set_value("game", "bikes", bikes_ridden)
 	for id in achieved: cf.set_value("achievements", id, achieved[id])
+	for id in skill_xp: cf.set_value("skills", id, snappedf(float(skill_xp[id]), 0.01))
 	if OS.get_environment("BMX_LENS") == "": _lens_saved = goggle_lens
 	cf.set_value("game", "lens", _lens_saved)
 	cf.set_value("game", "bmx_tyre", bmx_tyre)
@@ -221,6 +227,55 @@ var tricks_seen := {}    # trick keys landed at least once (Collection.TRICK_KEY
 var bikes_ridden := {}   # bike id -> rides of at least ACTIVITY_M on it
 var achieved := {}
 
+## ---- skills (Skills): XP per skill id, collected while riding; a level up is announced by the HUD
+signal skill_leveled(id: String, level: int)
+var skill_xp := {}
+var skill_gain := {}     # XP gained since the last RIDE press (the profile shows it)
+var _skills_test := OS.get_environment("BMX_SKILLS") != ""
+
+func skill_level(id: String) -> int:
+	return Skills.level_of(float(skill_xp.get(id, 0.0)))
+
+## XP in: only for the player's own rides (tests: BMX_SKILLS=1 to try it, never saved)
+func skill_add(id: String, amount: float) -> void:
+	if amount <= 0.0 or not Skills.DEFS.has(id): return
+	if not _live and not _skills_test: return
+	var before := skill_level(id)
+	skill_xp[id] = float(skill_xp.get(id, 0.0)) + amount
+	skill_gain[id] = float(skill_gain.get(id, 0.0)) + amount
+	var after := skill_level(id)
+	if _skills_test and fmod(float(skill_gain[id]), 25.0) < amount: print("SKILLXP %s xp=%.1f lv=%d" % [id, float(skill_xp[id]), after])   # tests
+	if after > before:
+		skill_leveled.emit(id, after)
+		touch_records()
+
+## every ride step while the bike is up (HUD._ride_stats): speed, cornering, balance
+func skill_tick(st, dt: float) -> void:
+	if (not _live and not _skills_test) or st.crash_on or st.air: return
+	var kmh: float = absf(st.v) * 3.6
+	if kmh > Skills.SPEED_FROM: skill_add("speed", (kmh - Skills.SPEED_FROM) * Skills.SPEED_RATE * dt)
+	var ln: float = absf(st.lean)
+	if ln > Skills.CORNER_LEAN and absf(st.v) > Skills.CORNER_MIN_V:
+		skill_add("cornering", Skills.CORNER_RATE * clampf(ln / 0.8, 0.0, 1.5) * dt)
+	if (st.man_a > 0.12 or st.nose_a > 0.12) and absf(st.v) > 2.0:
+		skill_add("balance", Skills.BALANCE_RATE * dt)
+
+## a jump landed without a crash
+func skill_landing(air_time: float, dist: float, height: float) -> void:
+	skill_add("jumping", Skills.JUMP_BASE + dist * Skills.JUMP_PER_M)
+	skill_add("air", (pow(maxf(height, 0.0), 1.3) * Skills.AIR_PER_M if height > 0.3 else 0.0) + air_time * Skills.AIR_PER_S)
+
+## a trick landed (the first of its family pays extra), and the style points it scored
+func skill_trick(trick: String) -> void:
+	var fresh := false
+	var up := trick.to_upper()
+	for frag in Collection.TRICK_KEYS:
+		if up.contains(frag) and not tricks_seen.has(Collection.TRICK_KEYS[frag]): fresh = true
+	skill_add("style", Skills.TRICK_BONUS + (Skills.NEW_TRICK_BONUS if fresh else 0.0))
+
+func skill_style(points: int) -> void:
+	skill_add("style", float(points) * Skills.STYLE_PER_POINT)
+
 ## the rider's level from the total distance: one every 20 km
 static func level_for(metres: float) -> int:
 	return 1 + int(metres / 20000.0)
@@ -240,6 +295,7 @@ func begin_ride() -> void:
 	_live = not Settings._test_run
 	_ride_m = 0.0
 	_ride_counted = false
+	skill_gain.clear()
 
 func end_ride() -> void:
 	_live = false   # nothing more is logged until the next begin_ride
@@ -254,6 +310,7 @@ func add_distance(ds: float) -> void:
 	var e: Array = days.get(d, [0.0, 0])
 	e[0] = float(e[0]) + ds
 	_ride_m += ds
+	skill_add("endurance", ds / 1000.0 * Skills.ENDURANCE_PER_KM)
 	_pay_ride(ds)
 	if not _ride_counted and _ride_m >= ACTIVITY_M:
 		_ride_counted = true
@@ -285,6 +342,7 @@ func _daily_bonus(day: int) -> void:
 	claimed[key] = true
 	var n := day_streak()
 	earn(DAILY_BASE + DAILY_STEP * mini(n, 10), "Daily bonus · day %d" % n)
+	skill_add("consistency", Skills.DAILY_BASE + Skills.DAILY_STEP * mini(n, 10))
 
 ## days in a row with an activity, ending today (or yesterday while today has none yet)
 func day_streak() -> int:
