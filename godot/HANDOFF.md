@@ -435,6 +435,50 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
 
 - **Livelier trail** (`TrailCourse._shape_profile`, `trail_arch.gd`): roads bend more often and tighter; past the mountain the trail height gets rolling dips (~60 m); **ridge-and-cliff drops** (`drops`, ~1 per 3 km: the trail climbs ~4 % onto a ridge above the land, a short level run, then falls 3-6 m, and 2 % of slots 12-22 m: rare "gem" cliffs; route features skip them) and **rock tunnels / overhangs** (`chunk_arches`, merged blob-rock mesh, visual only, no collision). All deterministic by slot hash + seed, nothing near the laid-out end changes when the trail grows. **Gorge bridges** (route feature `gorge`, rare on straight road: a 36 m wooden bridge, deck on stilts, over a 9 m deep crevasse ~6.4 m wide; Wood kind 2 now takes its end from `u1`; mirrored in `TerrainFieldCs.cs`, `terrain_cs_cmp` must stay EXACT; HUD alert GORGE BRIDGE). Test: `BMX_TRAIL_FEAT=gorge` (try `BMX_SEED=5`), `BMX_TRAIL_FEAT=arch|<n>` spawns 80 m before the first arch / the n-th drop; `BMX_GATE_PROBE=1` prints `ARCHES` lines; `trail_grow_probe` prints `STATS`.
 
+- **Land shaping v3 + climate biomes + smart siting (2026-11-25, `docs/research/terrain_generation.md`)**. Research first (4 researchers: stateless
+  noise, hydrology / simulation, industry talks, biomes): simulation erosion (stream power, tile erosion) breaks the per-point contract, so the land
+  stays a pure function and gets smarter in place. `TerrainField.landform` (mirrored in `TerrainFieldCs.landform`, `terrain_cs_cmp` EXACT):
+  (1) **macro controls**: two 2.6 / 1.8 km noises through `spl()` (piecewise smoothstep knots) scale the detail amplitude (plains .. rough) and the
+  big-relief weights (regions you can tell apart); (2) **domain warp** of the 28 / 90 / 240 m octaves + the ridge term by a 170 m noise (`LAND_WARP`
+  38 m x calm); (3) **gradient-damped detail** (Quilez): `noise_d` (value + analytic gradient in `_ndx` / `_ndy`, matches finite differences to
+  6e-9, same lattice as `noise`) gives the slope of the 240 m octave + ridge term and the 90 m octave, which damp the detail (`LAND_DETAIL_S`,
+  `LAND_FINE_S`) and soften the steepest relief (`LAND_TALUS`); (4) **valley floors** from a 420 m control noise (`LAND_VALLEY_*`); (5) **strata**
+  in the rugged biome on sloping ground away from the trail (`LAND_STRATA*`: height pulled toward smooth 3.2 m steps). `BMX_OLD_LAND=1` = the
+  original land. Every world's trail / lakes past the first section are laid out differently. Probes: `tools/land_probe.gd` (slope / height stats old
+  vs new), `tools/land_map.gd` (shaded-relief map old | new), `tools/noise_d_probe.gd`. Measured: >25 deg ground -25 % on seed 4242, flats +2..6
+  points, results vary by seed (the regions differ). Not measured: height-call cost (a few extra noise reads), ridden feel.
+  **Climate biomes** (`TerrainField.biome()`, C# mirror; probe `tools/biome_probe.gd`, C# vs GD EXACT + shares per name): the old `b_dry` / `b_rug`
+  axes are unchanged; five new 0..1 weights from altitude-proxy / moisture / forest / patch noises (never the real height: the land is shaped by
+  the biome, a height-driven biome would be circular): `b_cold` (Alpine Peaks), `b_wet` (Wetlands), `b_forest` (Pine Forest), `b_sav` (Savanna),
+  `b_ash` (Ash Fields); a pinned RouteStyle biome keeps the old axes only. Shares over 6 seeds: alpine 8 %, forest 14 %, wet 6 %, ash 3.5 %,
+  savanna 4 %. Ground colours (`color_pre` / `color_post`, palette `needle marsh savanna frost ash ashLight`; `color_post` takes `cold` / `ash`,
+  `pre_b` has stride 4), snow lower with `b_cold`, no grass on ash (`DRY`). Decorations (GDScript `terrain_chunk_builder.gd`, not mirrored): dense pines
+  (forest), thin trees (alpine / wet / savanna / ash), flat-crowned savanna trees (`SAV_LEAVES`), reed tufts (`REEDS`), golden grass clumps, dead
+  snags + dark rubble on ash, more rock on alpine / ash. Not done: biome-specific height shaping (wetland flats, volcanic craters), wet / mud surface
+  grip, new meshes (acacia, reeds are the existing grass mesh scaled), area-banner art per biome.
+  **Smart siting** (user: "tables clip next to a steep hill"): measured with `tools/feat_site_probe.gd` (ground beside each jump's footprint vs its
+  plane): trail route jumps were fine (rise max 1.3 m: the trail bench), the **free-ride jumps out in the land** (`jump_at`) had 10 % with a
+  hill wall > 2 m (max 5 m). `jump_at` (GD + C# `_jump_at`) now skips a site whose ground at half + `SITE_SIDE` 3 m from the axis rises > `SITE_RISE`
+  1.3 m or falls > `SITE_DROP` 1.8 m against the plane, either side, at 11 spots: 3272 -> 2296 candidate sites, max rise 1.36 m.
+  `BMX_OLD_SITING=1` = no check.
+  **Fence + tape no longer side by side (2026-11-25, user: "fence and tape both beside the road look weird")**. Measured with `tools/tape_fence_probe.gd`
+  (stakes within 4 m of a course fence post: ~18 a seed, 110 over 6 seeds): the start / finish picket fences were not counted as fenced for the
+  tape (`plan_marking` only marked the ranch fences, and only on ROAD runs), and a ranch fence's gate gap let a short piece of tape in. Now picket
+  fences mark their side too, the gate gaps are marked, and any fenced side gets no tape (`TrailCourse.OLD_MARKING`, `BMX_OLD_MARKING=1` = before):
+  110 -> 1. The random **wild fences** along side paths (`_trail_fence` -> `_run_fence(.., wild)`) keep `WILD_FENCE_CLEAR` 6.5 m off the road's edge
+  (`_post_ok`), where the tape and course fences are. `trail_grow_probe` PASS (marks unchanged by growing). Not measured: how many wild fences
+  that removes (they are built per chunk).
+  **Berm v2 (2026-11-25, user: pebbles / rock on the edges, a grass lip, hollows worn into the lip by whips, tilted vs curved styles, "a good formula")**.
+  `TerrainField.berm_shape2` + `berm_style` (C# mirror, plain + * / - `sm()` only, no exp / log; `terrain_cs_cmp` EXACT; `BMX_OLD_BERM=1` = old). Cross-section
+  by the distance o from the centreline: entry (slope 0 -> tn = tan(bank), unchanged), FACE with slope tn to 0.9 m (so the racing line rides exactly the bank the
+  course asked for: `berm_probe` asked 22.4 deg, on the line 22.1 deg, old 21.7) then steepening by up to (1 + c) x tn to the rim at F (c 0 = tilted plane ..
+  0.75 = curved bowl: riders pick their height by speed, the physics bank = banked-turn tan(bank) = v^2 / (g R) as `TrailCourse._bank_need`), a rounded CAP of width
+  cw (crisp 0.3 tilted .. 0.8 bowl), a back slope falling to the ground over clamp(rim / 0.6, 2, 5) m (the old shape faded over 6 m with no defined rim), a LIP roll
+  on the rim (`bs_lip` up to 0.18 m on some berms: it sits at the trail's own width + 0..0.8 m, where the dirt fades to grass: the grass lip) and SCOOPS (`bs_scoop` up to
+  0.5 m, short stretches of some berms: the hollow worn into the lip). Style per arc length `q_s` from noises (period 70 / 45 / 90 / 130 / 11 m), side-path berms
+  from position. Rim pebbles / the odd rock: `_berm_clutter` (chunk builder, GDScript, `berm_style` gives the rim). Seen: relief maps `tools/berm_map.gd` (old | new: a
+  defined rim and back slope, contours); NOT seen cleanly in game (the follow rider leaves the trail at spawn, photo mode was blurred), lip / scoop / pebbles are
+  unchecked by eye. Demo AI 100 s seeds 4242 / 5: no crashes, same distance as old. Constants are the tuning knobs (`berm_style`, `berm_shape2`).
 - **Rope bridges** (route feature `rope`, `world/rope_bridge.gd` + C# `world/RopeBridgeSim.cs`): a 46 m feature, a swinging rope
   bridge tied round four big pines (two each end, 2.3 m apart: ride between them) over a **canyon cut across the land**
   (`TerrainField.canyon_rims` / `canyon_dig`, mirrored in `TerrainFieldCs._canyon_dig`: polynomials + integer hashes only, exact):

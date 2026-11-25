@@ -780,6 +780,9 @@ func runs() -> Array:
 
 
 # ---------------- fences and tape ----------------
+## BMX_OLD_MARKING=1 = tape also beside the start / finish picket fences and in a ranch fence's gate gaps (before 2026-11-25)
+static var OLD_MARKING := OS.get_environment("BMX_OLD_MARKING") != ""
+
 func plan_marking(field) -> void:
 	var r := WorldRng.new(_mark_seed)
 	var rr := runs()
@@ -845,6 +848,12 @@ func plan_marking(field) -> void:
 					posts = []
 					s += 2.4 * (1 + int(r.next() * 2))
 					gate_in = 8 + int(r.next() * 18)
+					# (the gate's gap is no place for a bit of tape: fence + tape side by side looked wrong)
+					if not OLD_MARKING:
+						var ge: int = at(minf(s, s_end))[4]
+						for j in range(maxi(0, i - 1), mini(n - 1, ge + 1) + 1):
+							if sd: fs1[j] = 1
+							else: fs0[j] = 1
 			if posts.size() >= 3:
 				fences.append({"posts": posts, "style": "ranch"})
 	for run in rr:
@@ -860,6 +869,11 @@ func plan_marking(field) -> void:
 				var p := at(s)
 				var o: float = W[p[4]] + 3.2
 				posts.append([p[0] - p[3] * o * sgn, p[1] + p[2] * o * sgn])
+				if not OLD_MARKING:
+					var pi: int = p[4]
+					for j in range(maxi(0, pi - 1), mini(n - 1, pi + 1) + 1):
+						if sgn < 0.0: fs1[j] = 1
+						else: fs0[j] = 1
 				s += 2.4
 			if posts.size() >= 3:
 				fences.append({"posts": posts, "style": "picket"})
@@ -877,7 +891,7 @@ func plan_marking(field) -> void:
 			var R := 1.0 / maxf(1e-4, absf(k))
 			var tside: int = tape1[i] if sd else tape0[i]
 			var fside: int = fs1[i] if sd else fs0[i]
-			var want := tside != 0 and not (fside != 0 and KD[i] == ROAD) and not (inside and R < o + 2.2)
+			var want := tside != 0 and not (fside != 0 and (KD[i] == ROAD or not OLD_MARKING)) and not (inside and R < o + 2.2)
 			if want:
 				var st := {"x": p[0] - p[3] * o * sgn, "z": p[1] + p[2] * o * sgn, "s": s, "side": sgn,
 					"caution": caution[i] != 0, "prev": -1}

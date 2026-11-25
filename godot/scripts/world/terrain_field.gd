@@ -25,6 +25,37 @@ const I90 := 1.0 / 90.0
 const I240 := 1.0 / 240.0
 const I150 := 1.0 / 150.0
 const I700 := 1.0 / 700.0
+
+## Land shaping v3 (2026-11-25, docs/research/terrain_generation.md items 2-6; mirrored in TerrainFieldCs.landform,
+## terrain_cs_cmp must stay EXACT). BMX_OLD_LAND=1 = the old land (tests). Measure: -s res://tools/land_probe.gd.
+##  - macro controls: two very large noises (LAND_CR 2.6 km, LAND_CM 1.8 km) go through splines (`spl`) to a detail
+##    amplitude (flat plains .. rough country) and a macro strength (low .. big hills / ridges): regions you can tell apart.
+##  - domain warp: the 28 / 90 / 240 m octaves and the ridge term are sampled at a position pushed by a 170 m noise
+##    (up to ~LAND_WARP m, less on the mountain).
+##  - gradient-damped detail (Quilez): the 240 m octave and the ridge term come with analytic gradients (noise_d); the
+##    90 m octave is damped by the big-scale slope, 1 / (1 + (s / LAND_DETAIL_S)^2), the 28 m octave by the slope of
+##    big + 90 m (LAND_FINE_S): bumpy flats, smooth faces. The big relief is also softened on steep ground (LAND_TALUS).
+##  - valleys: a 420 m control noise marks broad valleys; detail fades (LAND_VALLEY_FLAT), big relief flattens (LAND_VALLEY_MACRO).
+##  - strata: in the rugged biome on sloping ground away from the trail the height is pulled towards stepped bands
+##    (LAND_STRATA_STEP m, amount LAND_STRATA): caprock ledges and rock bands.
+const LAND_WARP := 38.0
+const LAND_TALUS := 0.30
+const LAND_DETAIL_S := 0.30
+const LAND_FINE_S := 0.55
+const LAND_VALLEY_FLAT := 0.65
+const LAND_VALLEY_MACRO := 0.40
+const LAND_VI := 1.0 / 420.0
+const LAND_CR := 1.0 / 2600.0
+const LAND_CM := 1.0 / 1800.0
+const LAND_STRATA_STEP := 3.2
+const LAND_STRATA := 0.7
+## biome climate noises (periods in m): altitude proxy, moisture, forest, ash patches (they never read the real height: the
+## land is shaped by the biome, a height-driven biome would be circular)
+const BIO_A := 1.0 / 1300.0
+const BIO_M := 1.0 / 1700.0
+const BIO_F := 1.0 / 900.0
+const BIO_S := 1.0 / 2200.0
+static var OLD_LAND := OS.get_environment("BMX_OLD_LAND") != ""
 const I28 := 1.0 / 28.0
 const I8 := 1.0 / 8.0
 const I1_5 := 1.0 / 1.5
@@ -169,6 +200,12 @@ var _zc_x: float = NAN
 var _zc_v: float = 0.0
 var b_dry: float = 0.0
 var b_rug: float = 0.0
+## climate biomes (2026-11-25, on top of the dry / rugged axes, which stay as they were): 0..1 weights, see biome()
+var b_cold: float = 0.0     # alpine: high + cold
+var b_wet: float = 0.0      # wetland: low + moist
+var b_forest: float = 0.0   # pine forest: moist, mild
+var b_sav: float = 0.0      # savanna: the semi-dry band between green land and desert
+var b_ash: float = 0.0      # ash fields: rare dark volcanic patches
 var _bi_x: float = NAN
 var _bi_z: float = NAN
 var _g_x: float = NAN
@@ -217,6 +254,7 @@ static func _ensure_colors() -> void:
 		"tuftGreen": 0x5e9e37, "tuftDry": 0xb59a4a,
 		"litter": 0x77703a, "clover": 0x4d9a3a, "gravel": 0xb9a98c,
 		"grey": 0x8d8a86, "greyDark": 0x5f5d5c, "greyLight": 0xb4b0a8, "snow": 0xf4f7f8, "alpine": 0x6f9a4a,
+		"needle": 0x5a5a32, "marsh": 0x6b8a3c, "savanna": 0xcdb056, "frost": 0x9db09c, "ash": 0x3b3937, "ashLight": 0x5a5652,
 	}
 	var c := {}
 	for k in d:
@@ -440,6 +478,44 @@ func noise(x: float, y: float) -> float:
 	return a + v * (c01 + u * (c11 - c01) - a)
 
 
+## noise() with its gradient: returns the value, the d/dx and d/dy (of the arguments) are left in _ndx / _ndy. Same lattice,
+## same operations as noise() (the value is identical); mirrored in TerrainFieldCs.noise_d.
+var _ndx := 0.0
+var _ndy := 0.0
+func noise_d(x: float, y: float) -> float:
+	var fx := floorf(x)
+	var fy := floorf(y)
+	var X := int(fx) & 255
+	var Y := int(fy) & 255
+	x -= fx
+	y -= fy
+	var u := x * x * x * (x * (x * 6.0 - 15.0) + 10.0)
+	var v := y * y * y * (y * (y * 6.0 - 15.0) + 10.0)
+	var X1 := (X + 1) & 255
+	var Y1 := (Y + 1) & 255
+	var i00 := ((X << 8) | Y) * 3
+	var i10 := ((X1 << 8) | Y) * 3
+	var i01 := ((X << 8) | Y1) * 3
+	var i11 := ((X1 << 8) | Y1) * 3
+	var x1 := x - 1.0
+	var y1 := y - 1.0
+	var c00: float = NT[i00] * x + NT[i00 + 1] * y + NT[i00 + 2]
+	var c10: float = NT[i10] * x1 + NT[i10 + 1] * y + NT[i10 + 2]
+	var c01: float = NT[i01] * x + NT[i01 + 1] * y1 + NT[i01 + 2]
+	var c11: float = NT[i11] * x1 + NT[i11 + 1] * y1 + NT[i11 + 2]
+	var du := 30.0 * x * x * x1 * x1
+	var dv := 30.0 * y * y * y1 * y1
+	var a := c00 + u * (c10 - c00)
+	var b := c01 + u * (c11 - c01)
+	var dax: float = NT[i00] + u * (NT[i10] - NT[i00]) + du * (c10 - c00)
+	var dbx: float = NT[i01] + u * (NT[i11] - NT[i01]) + du * (c11 - c01)
+	var day: float = NT[i00 + 1] + u * (NT[i10 + 1] - NT[i00 + 1])
+	var dby: float = NT[i01 + 1] + u * (NT[i11 + 1] - NT[i01 + 1])
+	_ndx = dax + v * (dbx - dax)
+	_ndy = day + v * (dby - day) + dv * (b - a)
+	return a + v * (b - a)
+
+
 func n(x: float, z: float, s: float) -> float:
 	return noise(x * s, z * s)
 
@@ -641,13 +717,86 @@ func berm_shape(o: float, tn: float) -> float:
 	return tn * (om + 0.8) * (1.0 - sm(edge - 0.5, edge + 6.5, o))
 
 
+## Berm v2 (2026-11-25, user: "make our berms more realistic: rocks / pebbles on the edges, a little grass lip, a deep depression in the
+## lip from riders whipping, tilted vs curved styles; find a good formula"). Cross-section by the distance o from the centreline on the
+## berm's side (o = -1.6 where it starts): an entry that eases into the bank (slope 0 -> tn = tan(bank), as before: the racing line at
+## ~0.9 m rides a face of exactly the bank the course asked for), then the FACE whose slope stays tn to 0.9 m and then steepens by up to
+## (1 + c) x tn towards the rim at F (c = 0 a tilted plane, c ~ 0.75 a curved bowl: riders pick their height by speed), a rounded CAP
+## of width cw where the slope eases to 0 (a defined rim), a back slope (the outside of the dirt) that falls to the ground over
+## clamp(rim / 0.6, 2, 5) m. On top: a small LIP roll along the rim (`bs_lip` m, only on some berms: the grass lip) and SCOOPS (`bs_scoop`
+## m deep, in short stretches of some berms: the hollow riders wear into the lip taking it fast / whipping it). Style per arc length from
+## noises (`berm_style`), so a berm differs from the next: tilted .. curved, rim at the trail's own width + 0 .. 0.8 m, lip or none,
+## scoop or none. Only + * / - sm() here (no exp / log): C# mirrors it exactly. BMX_OLD_BERM=1 = the old shape.
+static var OLD_BERM := OS.get_environment("BMX_OLD_BERM") != ""
+var bs_c := 0.0
+var bs_F := 2.7
+var bs_cw := 0.5
+var bs_lip := 0.0
+var bs_scoop := 0.0
+
+
+func berm_style(a: float, b: float, w: float) -> void:
+	var n1 := noise(a / 70.0 + 11.0, b / 70.0 + 5.3)
+	var n2 := noise(a / 45.0 - 3.1, b / 45.0 + 7.7)
+	var n3 := noise(a / 90.0 + 41.0, b / 90.0 - 9.0)
+	var g := sm(0.05, 0.4, noise(a / 130.0 + 71.0, b / 130.0 - 12.5))
+	var wn := sm(0.30, 0.55, noise(a / 11.0 - 5.0, b / 11.0 + 19.0))
+	bs_c = 0.75 * sm(-0.25, 0.3, n1)
+	bs_F = clampf(w + 0.1 + 0.8 * sm(-0.3, 0.3, n2), 2.0, 3.5)
+	bs_cw = 0.3 + 0.5 * (bs_c / 0.75)
+	bs_lip = 0.18 * sm(0.0, 0.35, n3)
+	bs_scoop = 0.5 * g * wn
+
+
+func berm_shape2(o: float, tn: float) -> float:
+	if o < -1.6:
+		return 0.0
+	if o < 0.0:
+		return tn * (o + 1.6) * (o + 1.6) / 3.2
+	var F := bs_F
+	var c := bs_c
+	var cw := bs_cw
+	var h0 := tn * 0.8
+	var fo := minf(o, F)
+	var g := 0.0
+	if fo > 0.9:
+		var t := (fo - 0.9) / (F - 0.9)
+		g = (F - 0.9) * (t * t * t - t * t * t * t * 0.5)
+	var hF := h0 + tn * (F + c * (F - 0.9) * 0.5)
+	var slope_f := tn * (1.0 + c)
+	var hrim := hF + slope_f * cw * 0.5
+	var h: float
+	if o <= F:
+		h = h0 + tn * (fo + c * g)
+	else:
+		var d := o - F
+		if d <= cw:
+			var tc := d / cw
+			h = hF + slope_f * (d - cw * (tc * tc * tc - tc * tc * tc * tc * 0.5))
+		else:
+			var lb := clampf(hrim / 0.6, 2.0, 5.0)
+			var t2 := sm(0.0, lb, d - cw)
+			h = hrim * (1.0 - t2)
+	# the lip roll on the rim
+	if bs_lip > 0.0:
+		h += bs_lip * (1.0 - sm(0.0, 0.7, absf(o - (F + cw * 0.6))))
+	# worn hollows in the lip
+	if bs_scoop > 0.0:
+		h -= bs_scoop * sm(F - 1.4, F, o) * (1.0 - sm(F + cw, F + cw + 1.2, o))
+	return maxf(h, 0.0)
+
+
 func berm(x: float, z: float) -> float:
 	var h := 0.0
 	query(x, z)
 	# q_bt is signed (> 0 left berm, < 0 right) and already smooth along the course
 	var bt := absf(q_bt) - 0.004
 	if q_d < 12.0 and bt > 0.0:
-		h = maxf(h, berm_shape(-q_a, bt) if q_bt > 0.0 else berm_shape(q_a, bt))
+		if OLD_BERM:
+			h = maxf(h, berm_shape(-q_a, bt) if q_bt > 0.0 else berm_shape(q_a, bt))
+		else:
+			berm_style(q_s, 0.0, q_w)
+			h = maxf(h, berm_shape2(-q_a if q_bt > 0.0 else q_a, bt))
 	var p := pathN(x, z)
 	if absf(p) < 0.2:
 		_grad_at(x, z)
@@ -677,7 +826,11 @@ func berm(x: float, z: float) -> float:
 		var tn := minf(0.55, 17 * ak) * sm(0.012, 0.03, ak) * (1.0 - sm(0.07, 0.1, ak)) * ok
 		if tn > 0.0 and absf(s) < 10.0:
 			var bon := sm(0.2, 0.36, noise((cx + 777) * I55, (cz - 333) * I55))
-			h = maxf(h, berm_shape(s * signf(kap), tn) * bon)
+			if OLD_BERM:
+				h = maxf(h, berm_shape(s * signf(kap), tn) * bon)
+			else:
+				berm_style(cx, cz, 1.9)
+				h = maxf(h, berm_shape2(s * signf(kap), tn) * bon)
 	return h
 
 
@@ -689,13 +842,80 @@ func landform(x: float, z: float) -> float:
 	var big := sm(-0.15, 0.3, noise((x + 2600) * I700, (z - 3100) * I700))
 	# sharp ridgelines with long crests in other regions (ridged noise, mean taken out so the land doesn't rise)
 	var rdg := sm(0.05, 0.35, noise((x - 4100) * I700, (z + 1500) * I700))
-	var rr := 1.0 - absf(noise((x + 820) * I150, (z - 2300) * I150))
-	var h := (noise(x * I90, z * I90) * 10 * relief + noise((x + 31.7) * I28, (z - 17.2) * I28) * 3.2 * (0.6 + 0.4 * relief)
-		+ noise((x - 1700) * I240, (z + 900) * I240) * 16 * big + (rr * rr - 0.45) * 14 * rdg) * calm + hill(x, z)
+	var h: float
+	var slt := 0.0
+	if OLD_LAND:
+		var rr := 1.0 - absf(noise((x + 820) * I150, (z - 2300) * I150))
+		h = (noise(x * I90, z * I90) * 10 * relief + noise((x + 31.7) * I28, (z - 17.2) * I28) * 3.2 * (0.6 + 0.4 * relief)
+			+ noise((x - 1700) * I240, (z + 900) * I240) * 16 * big + (rr * rr - 0.45) * 14 * rdg) * calm + hill(x, z)
+	else:
+		# macro controls: plains .. rough country (detail), low .. big hills / ridges (macro)
+		var kd := spl(noise((x + 4400.0) * LAND_CR, (z - 3700.0) * LAND_CR), -0.45, 0.45, -0.1, 0.75, 0.15, 1.0, 0.45, 1.4)
+		var km := spl(noise((x - 1300.0) * LAND_CM, (z + 2900.0) * LAND_CM), -0.4, 0.55, 0.0, 1.0, 0.2, 1.25, 0.45, 1.6)
+		big *= km
+		rdg *= km
+		var wk := LAND_WARP * calm
+		var wx := x + noise((x + 1900.0) * I170, (z - 640.0) * I170) * wk
+		var wz := z + noise((x - 2300.0) * I170, (z + 1100.0) * I170) * wk
+		# the big relief with its gradient (240 m octave + ridge term)
+		var n240 := noise_d((wx - 1700) * I240, (wz + 900) * I240)
+		var g240x := _ndx * I240
+		var g240z := _ndy * I240
+		var n150 := noise_d((wx + 820) * I150, (wz - 2300) * I150)
+		var g150x := _ndx * I150
+		var g150z := _ndy * I150
+		var rr := 1.0 - absf(n150)
+		var m0 := n240 * 16 * big + (rr * rr - 0.45) * 14 * rdg
+		var sg := signf(n150)
+		var mx := g240x * 16 * big - 2.0 * rr * sg * g150x * 14 * rdg
+		var mz := g240z * 16 * big - 2.0 * rr * sg * g150z * 14 * rdg
+		var sl := sqrt(mx * mx + mz * mz) * calm
+		var vk := sm(0.10, 0.40, -noise((x + 7100.0) * LAND_VI, (z - 2600.0) * LAND_VI))
+		var tk := (1.0 - LAND_VALLEY_MACRO * vk) / sqrt(1.0 + (sl / LAND_TALUS) * (sl / LAND_TALUS))
+		var ds := sl / LAND_DETAIL_S
+		var dk := (1.0 - LAND_VALLEY_FLAT * vk) / (1.0 + ds * ds)
+		var a90 := 10 * relief * kd * dk
+		var n90 := noise_d(wx * I90, wz * I90)
+		var g90x := _ndx * I90
+		var g90z := _ndy * I90
+		var tx := (mx * tk + g90x * a90) * calm
+		var tz := (mz * tk + g90z * a90) * calm
+		slt = sqrt(tx * tx + tz * tz)
+		var fs := slt / LAND_FINE_S
+		var a28 := 3.2 * (0.6 + 0.4 * relief) * kd * dk / (1.0 + fs * fs)
+		h = (n90 * a90 + noise((wx + 31.7) * I28, (wz - 17.2) * I28) * a28) * calm + m0 * tk * calm + hill(x, z)
 	var wm := wild_mask(x, z)
 	if wm == 0.0:
 		return h
-	return h + wild(x, z) * wm
+	h += wild(x, z) * wm
+	if not OLD_LAND:
+		var rug := b_rug
+		var sk := rug * sm(0.10, 0.35, slt) * sm(6.0, 30.0, trail_metres(x, z)) * LAND_STRATA
+		if sk > 0.0:
+			var ph := h / LAND_STRATA_STEP + noise((x + 3.3) * I60, (z - 8.1) * I60) * 0.4
+			var fl := floorf(ph)
+			var st := fl + sm(0.35, 0.65, ph - fl)
+			h += sk * LAND_STRATA_STEP * (st - ph)
+	return h
+
+
+## piecewise smoothstep through four (t, value) knots, flat outside: a spline control for the macro noises
+static func spl(t: float, a0: float, b0: float, a1: float, b1: float, a2: float, b2: float, a3: float, b3: float) -> float:
+	if t <= a0:
+		return b0
+	if t >= a3:
+		return b3
+	if t < a1:
+		return b0 + (b1 - b0) * sm(a0, a1, t)
+	if t < a2:
+		return b1 + (b2 - b1) * sm(a1, a2, t)
+	return b2 + (b3 - b2) * sm(a2, a3, t)
+
+
+## the big-scale relief of the land (240 m octave + ridge term), before calm / talus / floor
+func _macro(wx: float, wz: float, big: float, rdg: float) -> float:
+	var rr := 1.0 - absf(noise((wx + 820) * I150, (wz - 2300) * I150))
+	return noise((wx - 1700) * I240, (wz + 900) * I240) * 16 * big + (rr * rr - 0.45) * 14 * rdg
 
 
 func base(x: float, z: float) -> float:
@@ -741,13 +961,38 @@ func biome(x: float, z: float) -> void:
 	var wz := z + noise((x - 500) * I160, z * I160) * 60
 	b_dry = sm(-0.12, 0.16, noise((wx + 3000) * I380, (wz - 1200) * I380) + biome_dry)
 	b_rug = sm(-0.08, 0.2, noise((wx - 700) * I300, (wz + 2200) * I300) + biome_rug)
+	# climate: a Whittaker-style mix of an altitude proxy, moisture and forest noise with the two old axes, as weights
+	# (borders blend over a few hundred metres). A pinned biome (RouteStyle) keeps the old axes only.
+	var an := noise((wx + 1700.0) * BIO_A, (wz - 3100.0) * BIO_A)
+	var mn := noise((wx - 2500.0) * BIO_M, (wz + 900.0) * BIO_M)
+	var fn := noise((wx + 600.0) * BIO_F, (wz - 1400.0) * BIO_F)
+	var sn := noise((wx - 4300.0) * BIO_S, (wz + 2600.0) * BIO_S)
+	var pin := 1.0 if (biome_dry != 0.0 or biome_rug != 0.0) else 0.0
+	var a := an * 0.7 + b_rug * 0.45 - b_dry * 0.5
+	b_cold = sm(0.25, 0.55, a) * (1.0 - pin)
+	var w := mn * 0.8 - an * 0.5 - b_dry * 0.9 - b_rug * 0.5
+	b_wet = sm(0.10, 0.36, w) * (1.0 - b_cold) * (1.0 - pin)
+	var fo := fn * 0.7 + mn * 0.3 - b_dry * 1.0 - b_rug * 0.3
+	b_forest = sm(-0.30, 0.0, fo) * (1.0 - b_cold) * (1.0 - b_wet) * (1.0 - pin)
+	b_sav = sm(0.15, 0.3, b_dry) * (1.0 - sm(0.45, 0.65, b_dry)) * (1.0 - b_rug) * (1.0 - pin)
+	b_ash = sm(0.27, 0.39, sn) * (1.0 - b_dry * 0.7) * (1.0 - pin)
 	_bi_x = x; _bi_z = z
 
 
 func biome_name(x: float, z: float) -> String:
 	biome(x, z)
+	if b_ash > 0.5:
+		return "Ash Fields"
 	if b_dry > 0.6:
 		return "Red Canyons" if b_rug > 0.5 else "Dune Sea"
+	if b_cold > 0.5:
+		return "Alpine Peaks"
+	if b_wet > 0.5:
+		return "Wetlands"
+	if b_forest > 0.5:
+		return "Pine Forest"
+	if b_sav > 0.5:
+		return "Savanna"
 	if b_dry > 0.35:
 		return "Dry Plains"
 	return "Rocky Mountains" if b_rug > 0.5 else "Green Hills"
@@ -924,6 +1169,15 @@ func _build_route() -> void:
 	_index_canyons()
 
 
+## free-ride jumps out in the land: the natural ground beside the footprint (half + SITE_SIDE m from the axis) may rise at most
+## SITE_RISE / fall at most SITE_DROP m against the jump's plane, or the site is skipped (a table under a hillside clipped
+## into it). Mirrored in TerrainFieldCs._jump_at. BMX_OLD_SITING=1 = no check. Probe: tools/feat_site_probe.gd
+const SITE_SIDE := 3.0
+const SITE_RISE := 1.3
+const SITE_DROP := 1.8
+static var OLD_SITING := OS.get_environment("BMX_OLD_SITING") != ""
+
+
 func jump_at(cx: int, cz: int) -> Feat:
 	var key := cx * 1048576 + cz
 	if _jc.has(key):
@@ -963,6 +1217,7 @@ func jump_at(cx: int, cz: int) -> Feat:
 			var sx := bx - dx * len / 2
 			var szz := bz - dz * len / 2
 			var ok := absf(b1 - b0) / len < 0.14
+			var cand := make_feat(sx, szz, dx, dz, type, b0, b1, true)
 			var k := 0
 			while ok and k <= 10:
 				var f := k / 10.0
@@ -972,9 +1227,17 @@ func jump_at(cx: int, cz: int) -> Feat:
 				var pl := b0 + (b1 - b0) * f
 				if pl < WATER + 0.6 or absf(b - pl) > 1.8 or route_dist(px, pz) < 12:
 					ok = false
+				# smart siting (2026-11-25, "tables clip next to a steep hill"): beside the footprint the natural ground may
+				# neither rise into a wall (SITE_RISE) nor fall away (SITE_DROP) against the jump's plane, both sides
+				if ok and not OLD_SITING:
+					var sw := cand.half + SITE_SIDE
+					var d1 := base(px - dz * sw, pz + dx * sw) - pl
+					var d2 := base(px + dz * sw, pz - dx * sw) - pl
+					if d1 > SITE_RISE or d2 > SITE_RISE or -d1 > SITE_DROP or -d2 > SITE_DROP:
+						ok = false
 				k += 1
 			if ok and sqrt(sx * sx + szz * szz) > 34:
-				best = make_feat(sx, szz, dx, dz, type, b0, b1, true)
+				best = cand
 	_jc[key] = best
 	return best
 
@@ -1217,6 +1480,8 @@ func deck(x: float, z: float) -> float:
 # same order as the JS.
 var cp_dry: float = 0.0
 var cp_rug: float = 0.0
+var cp_cold: float = 0.0
+var cp_ash: float = 0.0
 
 
 ## part 1 (no normal needed): land colour up to the dunes -> cl_g, trail dirt -> cl_d (before the lake-bed tint); returns t
@@ -1228,10 +1493,16 @@ func color_pre(x: float, z: float) -> float:
 	var rug := b_rug
 	cp_dry = dry
 	cp_rug = rug
+	cp_cold = b_cold
+	cp_ash = b_ash
 	var g: Color = C["grassA"].lerp(C["grassB"], v)
 	var hh := _cp_h
 	g = g.lerp(C["meadow"], sm(3.5, 8, hh) * 0.8 * (1.0 - rug))
 	g = g.lerp(C["alpine"], rug * (1.0 - dry) * 0.6)
+	g = g.lerp(C["needle"], b_forest * 0.55)
+	g = g.lerp(C["marsh"], b_wet * 0.7)
+	g = g.lerp(C["savanna"], b_sav * 0.65)
+	g = g.lerp(C["frost"], b_cold * 0.55)
 	g = g.lerp(C["dryGrass"], sm(0.15, 0.55, dry))
 	var wd := sm(0.0, 0.35, noise((x + 400) * I38, z * I38)) * (1.0 - dry)
 	g = g.lerp(C["litter"], wd * 0.38 * (1.0 - rug * 0.5))
@@ -1239,6 +1510,7 @@ func color_pre(x: float, z: float) -> float:
 	g = g * (1.0 + noise((x + 17) * I2_3, (z - 29) * I2_3) * 0.08)
 	var dune: Color = C["dune"].lerp(C["duneDark"], v)
 	g = g.lerp(dune, sm(0.5, 0.85, dry))
+	g = g.lerp(C["ash"].lerp(C["ashLight"], sm(-0.2, 0.5, noise((x + 7.7) * I9, (z - 3.1) * I9))), b_ash * 0.92)
 	var tr := trail(x, z)
 	var t := maxf(tr, jump_mask(x, z))
 	var d: Color = C["dirt"].lerp(C["dirtDark"], sm(-0.4, 0.4, noise(x * I7, z * I7)) * 0.7).lerp(C["desertDirt"], dry * 0.6)
@@ -1262,11 +1534,13 @@ var _cp_h: float = 0.0
 
 
 ## part 2: snow, rock faces, beach sand, lake bed (needs h and the normal's y)
-func color_post(x: float, z: float, h: float, ny: float, dry: float, rug: float) -> void:
+func color_post(x: float, z: float, h: float, ny: float, dry: float, rug: float, cold := 0.0, ash := 0.0) -> void:
 	var C := col
 	var g := cl_g
-	if rug > 0.0 and dry < 1.0:
-		g = g.lerp(C["snow"], sm(11, 19, h - hill(x, z) + noise(x * I9, z * I9) * 3) * rug * (1.0 - dry) * sm(0.75, 0.9, ny))
+	var snow_k := maxf(rug, cold)
+	if snow_k > 0.0 and dry < 1.0:
+		var lo := 11.0 - 7.0 * cold
+		g = g.lerp(C["snow"], sm(lo, lo + 8.0, h - hill(x, z) + noise(x * I9, z * I9) * 3) * snow_k * (1.0 - dry) * sm(0.75, 0.9, ny))
 	var steep := sm(0.86, 0.6, ny)
 	if steep > 0.0:
 		var bh := h * 0.3 + noise(x * I40, z * I40) * 0.5
@@ -1289,7 +1563,7 @@ func color_post(x: float, z: float, h: float, ny: float, dry: float, rug: float)
 func color_layers(x: float, z: float, h: float, ny: float) -> float:
 	_cp_h = h
 	var t := color_pre(x, z)
-	color_post(x, z, h, ny, cp_dry, cp_rug)
+	color_post(x, z, h, ny, cp_dry, cp_rug, cp_cold, cp_ash)
 	return t
 
 
