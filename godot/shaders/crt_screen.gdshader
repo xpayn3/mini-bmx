@@ -10,7 +10,7 @@ uniform sampler2D albedo_tex : source_color, filter_linear_mipmap_anisotropic;
 uniform sampler2D normal_tex : hint_normal, filter_linear_mipmap_anisotropic;
 uniform sampler2D orm_tex : hint_default_white, filter_linear_mipmap_anisotropic;   // R occlusion, G roughness, B metallic
 uniform sampler2D text_tex : filter_linear_mipmap, repeat_disable;   // white lettering on black (R)
-uniform vec4 text_box = vec4(0.07, 0.33, 0.93, 0.67);   // where it sits on the glass: x0 y0 x1 y1
+uniform vec4 text_box = vec4(-0.145, 0.18267, 1.145, 0.81733);   // where it sits on the glass: x0 y0 x1 y1 (the lettering texture has a wide black border for its glow: CrtTv.LET_BOX)
 uniform vec4 island = vec4(0.680, 0.334, 0.891, 0.607);   // glass UV box: x0 y0 x1 y1
 uniform float vopen = 0.0;      // picture height 0..1 (tiny = the white line)
 uniform float hopen = 1.0;      // picture width 0..1 (switch-off squeezes it to a dot)
@@ -44,8 +44,10 @@ vec3 picture(vec2 p, float lod) {
 	}
 	float a = textureLod(text_tex, q, lod).r;
 	float halo = textureLod(text_tex, q, lod + 3.0).r;
-	vec3 hot = mix(vec3(1.0, 0.82, 0.74), vec3(0.85, 0.06, 0.04), smoothstep(0.15, 0.62, q.y));
-	return hot * a + vec3(0.6, 0.04, 0.02) * halo * 0.6;
+	// glowing red: hot orange-red at the top of the letters into saturated red below, a wide red bloom round them
+	vec3 hot = mix(vec3(1.0, 0.22, 0.10), vec3(0.95, 0.04, 0.02), smoothstep(0.12, 0.72, q.y));
+	float bloom = textureLod(text_tex, q, lod + 4.5).r;
+	return hot * a * 1.25 + vec3(1.0, 0.06, 0.02) * (halo * 0.8 + bloom * 0.7);
 }
 
 // TV snow: new grain every frame, heavier in bands that drift and change, grain size flickers between two scales
@@ -95,7 +97,7 @@ void fragment() {
 		col += mix(0.22, 0.07, card_color) * picture(tp - vec2(0.018, 0.0), lod) * vec3(0.6, 0.7, 1.0);   // ghost (faint on a card: it doubled the small print)
 		col *= 0.75 + 0.35 * vnoise(t * 11.0);                                  // the signal breathes
 		float st = static_at(vec2(p.x + tear * 0.5, p.y), t);
-		float lvl = mix(0.22, 0.07, card_color) + snow;   // a card (studio, mature notice) has to read: less standing snow under it
+		float lvl = mix(0.11, 0.07, card_color) + snow * mix(0.6, 1.0, card_color);   // faint standing snow so the name reads (a card: less still); power-on / glitch snow at 60 % on the name
 		col = col * (1.15 - 0.4 * lvl) + vec3(st) * lvl * vec3(0.85, 0.9, 1.0);
 		col += vec3(0.010, 0.014, 0.020);                          // a lit tube's black is never black
 		col *= 0.58 + 0.42 * pow(sin(p.y * PI * 240.0) * 0.5 + 0.5, 0.7);   // scanlines

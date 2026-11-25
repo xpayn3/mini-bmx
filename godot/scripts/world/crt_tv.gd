@@ -156,7 +156,7 @@ func show_card(tex: Texture2D) -> void:
 func show_lettering() -> void:
 	mat.set_shader_parameter("text_tex", _text)
 	mat.set_shader_parameter("card_color", 0.0)
-	mat.set_shader_parameter("text_box", Vector4(0.07, 0.33, 0.93, 0.67))
+	mat.set_shader_parameter("text_box", LET_BOX)
 
 func is_on() -> bool:
 	return _on_t >= 0.0 and _off_t < 0.0
@@ -341,11 +341,11 @@ func _text_texture() -> Texture2D:
 	_waiting.append(mat)
 	if _text: return _text
 	var vp := SubViewport.new()
-	vp.size = Vector2i(1024, 300)
+	vp.size = Vector2i(LET_W, LET_H)
 	vp.transparent_bg = false
 	vp.render_target_update_mode = SubViewport.UPDATE_ONCE
 	var lay := _Lettering.new()
-	lay.size = Vector2(1024, 300)
+	lay.size = Vector2(LET_W, LET_H)
 	vp.add_child(lay)
 	add_child(vp)
 	_text = vp.get_texture()
@@ -365,23 +365,33 @@ func _bake(vp: SubViewport) -> void:
 	_waiting.clear()
 	vp.queue_free()
 
+## the lettering's 1024 x 300 layout sits in a black border (LET_PAD) so its glow fades out inside the texture, not cut at its edge
+const LET_PAD := Vector2(256.0, 130.0)
+const LET_W := 1024 + 512
+const LET_H := 300 + 260
+const LET_BOX := Vector4(0.5 - 0.43 * LET_W / 1024.0, 0.5 - 0.17 * LET_H / 300.0, 0.5 + 0.43 * LET_W / 1024.0, 0.5 + 0.17 * LET_H / 300.0)
+
 class _Lettering extends Control:
 	func _draw() -> void:
 		draw_rect(Rect2(Vector2.ZERO, size), Color.BLACK)
+		draw_set_transform(LET_PAD)
+		var fw := 1024.0   # layout frame width (inside the border)
 		var f := UITheme.display_font(700)
 		var word := "RUNOUT"
 		var fs := 250
-		var asc := f.get_ascent(fs)
-		var gap := (size.x - 40.0) / word.length()
+		# placed by cap height (Barlow Condensed caps = 0.70 em), not the font's ascent: the ascent Godot reports
+		# (fallback fonts included) put the baseline ~100 px lower and cut the letters + tagline off the bottom
+		var base := 38.0 + fs * 0.70
+		var gap := (fw - 40.0) / word.length()
 		for i in word.length():
 			var ch := word[i]
 			var w := f.get_string_size(ch, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-			draw_string(f, Vector2(20.0 + gap * (i + 0.5) - w * 0.5, asc * 0.86), ch, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color.WHITE)
-		var tag := "D O W N H I L L    &    B M X"
+			draw_string(f, Vector2(20.0 + gap * (i + 0.5) - w * 0.5, base), ch, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color.WHITE)
+		var tag := "D O W N H I L L"
 		var tf := UITheme.display_font(600)
 		var tw := tf.get_string_size(tag, HORIZONTAL_ALIGNMENT_LEFT, -1, 30).x
-		draw_rect(Rect2(size.x * 0.5 - 90.0, 252.0, 180.0, 3.0), Color(1, 1, 1, 0.8))
-		draw_string(tf, Vector2((size.x - tw) * 0.5, 290.0), tag, HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1, 1, 1, 0.85))
+		draw_rect(Rect2(fw * 0.5 - 90.0, 252.0, 180.0, 3.0), Color(1, 1, 1, 0.8))
+		draw_string(tf, Vector2((fw - tw) * 0.5, 290.0), tag, HORIZONTAL_ALIGNMENT_LEFT, -1, 30, Color(1, 1, 1, 0.85))
 
 static func _ease_out_back(x: float) -> float:
 	var c1 := 1.4
