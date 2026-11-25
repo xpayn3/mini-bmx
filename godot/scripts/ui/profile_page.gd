@@ -8,17 +8,17 @@ extends Control
 
 var on_customize := Callable()
 const WEEKS := 12
-const C_BG := Color("08090b")
+const C_BG := Tokens.PAGE
 const C_STAGE := Color("171b26")
-const C_CARD := Color("111316")
-const C_CARD2 := Color("181b20")
-const C_LINE := Color("2a2d33")
-const C_TXT := Color("ebe8e2")
-const C_SOFT := Color("8a8d93")
-const C_FAINT := Color("55585e")
-const C_GREEN := Color("9db58a")
-const C_RED := Color("c9573f")
-const ACC := Color("ff5a1f")
+const C_CARD := Tokens.PAPER
+const C_CARD2 := Tokens.FILL
+const C_LINE := Tokens.LINE
+const C_TXT := Tokens.INK
+const C_SOFT := Tokens.INK_SOFT
+const C_FAINT := Tokens.INK_FAINT
+const C_GREEN := Color("2f9e63")
+const C_RED := Color("d64545")
+const ACC := Tokens.ACCENT
 const LEVEL_NAMES := ["ROOKIE", "SCRUB", "LOCAL", "SHREDDER", "PRO", "LEGEND"]
 const TABS := ["OVERVIEW", "GOALS", "BADGES", "WALLET"]
 var _tab := 0
@@ -116,8 +116,6 @@ func _card(pad := Tokens.S5, fill := C_CARD, _stroke := Color(0, 0, 0, 0)) -> Pa
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = fill
 	sb.set_corner_radius_all(3)
-	sb.border_color = C_LINE
-	sb.set_border_width_all(1)
 	sb.anti_aliasing = true
 	sb.content_margin_left = pad + 4; sb.content_margin_right = pad + 4
 	sb.content_margin_top = pad; sb.content_margin_bottom = pad
@@ -152,12 +150,12 @@ func _pill(text: String, cb: Callable, active := false, size := Tokens.T_LG, pri
 		return s
 	var lit := active or primary
 	b.add_theme_stylebox_override("normal", mk.call(ACC if lit else C_CARD))
-	b.add_theme_stylebox_override("hover", mk.call(Color("ff7a45") if lit else C_CARD2))
-	b.add_theme_stylebox_override("pressed", mk.call(Color("d94a14") if lit else C_LINE))
-	b.add_theme_stylebox_override("focus", mk.call(Color("ff7a45") if lit else C_CARD2))
+	b.add_theme_stylebox_override("hover", mk.call(Tokens.ACCENT_HOT if lit else Tokens.FILL))
+	b.add_theme_stylebox_override("pressed", mk.call(Tokens.ACCENT_DOWN if lit else Tokens.FILL_HOT))
+	b.add_theme_stylebox_override("focus", mk.call(Tokens.ACCENT_HOT if lit else Tokens.FILL))
 	for k in ["font_color", "font_pressed_color", "font_focus_color"]:
-		b.add_theme_color_override(k, Color("0a0a0a") if lit else C_SOFT)
-	b.add_theme_color_override("font_hover_color", Color("0a0a0a") if lit else C_TXT)
+		b.add_theme_color_override(k, Tokens.INK if lit else C_SOFT)
+	b.add_theme_color_override("font_hover_color", Tokens.INK if lit else C_TXT)
 	return b
 
 # ---------------------------------------------------------------- ring gauge
@@ -166,8 +164,8 @@ class Ring extends Control:
 		set(v):
 			frac = v
 			queue_redraw()
-	var col := Color("ff5a1f")
-	var track := Color(1, 1, 1, 0.12)
+	var col := Tokens.ACCENT
+	var track := Tokens.LINE
 	var width := 12.0
 	var big := ""
 	var small := ""
@@ -181,11 +179,11 @@ class Ring extends Control:
 		var f := UITheme.display_font(900, 0.0)
 		if big != "":
 			var w := f.get_string_size(big, HORIZONTAL_ALIGNMENT_LEFT, -1, big_size).x
-			draw_string(f, Vector2(c.x - w * 0.5, c.y + big_size * (0.22 if small == "" else 0.12)), big, HORIZONTAL_ALIGNMENT_LEFT, -1, big_size, Color("f2f4f8"))
+			draw_string(f, Vector2(c.x - w * 0.5, c.y + big_size * (0.22 if small == "" else 0.12)), big, HORIZONTAL_ALIGNMENT_LEFT, -1, big_size, Tokens.INK)
 		if small != "":
 			var f2 := UITheme.display_font(700)
 			var w2 := f2.get_string_size(small, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
-			draw_string(f2, Vector2(c.x - w2 * 0.5, c.y + big_size * 0.12 + 20.0), small, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("8e98b3"))
+			draw_string(f2, Vector2(c.x - w2 * 0.5, c.y + big_size * 0.12 + 20.0), small, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Tokens.INK_SOFT)
 
 func _ring(frac: float, size: float, w: float, big: String, small := "", col := ACC, bs := 36, delay := 0.0) -> Ring:
 	var r := Ring.new()
@@ -203,7 +201,7 @@ func _stage() -> Control:
 	st.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	st.clip_contents = false
 	var gr := Gradient.new()   # a warm soft light behind the rider, on the same page background as everything else
-	gr.colors = PackedColorArray([Color(0.8, 0.85, 0.95, 0.10), Color(0.8, 0.85, 0.95, 0.0)])
+	gr.colors = PackedColorArray([Color(1.0, 0.82, 0.12, 0.16), Color(1.0, 0.82, 0.12, 0.0)])
 	var gt := GradientTexture2D.new()
 	gt.gradient = gr; gt.fill = GradientTexture2D.FILL_RADIAL
 	gt.fill_from = Vector2(0.5, 0.5); gt.fill_to = Vector2(1.0, 0.5)
@@ -257,7 +255,7 @@ func _stage() -> Control:
 	_name_edit.text_submitted.connect(func(_t): _commit_name())
 	_name_edit.focus_exited.connect(_commit_name)
 	nc.add_child(_name_edit)
-	nc.add_child(_cap("%s%s" % [rank, ("  ·  " + Steam.player_name.to_upper()) if Steam.player_name != "" else ""], ACC))
+	nc.add_child(_cap("%s%s" % [rank, ("  ·  " + Steam.player_name.to_upper()) if Steam.player_name != "" else ""], C_SOFT))
 	var sp := Control.new(); sp.size_flags_vertical = Control.SIZE_EXPAND_FILL; sp.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vb.add_child(sp)
 	var cust := _pill("CUSTOMIZE RIDER", func(): if on_customize.is_valid(): on_customize.call(), false, Tokens.T_LG, true)
@@ -316,7 +314,7 @@ func _show(i: int) -> void:
 		var lit := k == i
 		for st in ["normal", "hover", "pressed", "focus"]:
 			var sb := StyleBoxFlat.new()
-			sb.bg_color = Color(1, 1, 1, 0.04) if st == "hover" else Color(0, 0, 0, 0)
+			sb.bg_color = Tokens.FILL if st == "hover" else Color(0, 0, 0, 0)
 			sb.set_corner_radius_all(0)
 			sb.border_width_bottom = 3
 			sb.border_color = ACC if lit else Color(0, 0, 0, 0)
@@ -340,7 +338,7 @@ func _refresh() -> void:   # after a claim: the wallet counts up, the page is bu
 	tw.tween_method(func(v: float): _wallet_l.text = _money(int(v)), float(from), float(GameState.money), 0.8).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	_show(_tab)
 
-const STROKES := [Color("ff5a1f")]
+const STROKES := [Tokens.ACCENT]
 
 func _tile(cap: String, count_to: float, fmt: Callable, delay := 0.0, idx := 0) -> Control:
 	var v := VBoxContainer.new()
@@ -400,7 +398,7 @@ func _page_overview() -> void:
 	head.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_theme_constant_override("separation", 0)
 	head.add_child(UITheme.display(msg, 46, C_TXT, 0.0, 900))
-	head.add_child(_cap(sub, ACC, Tokens.T_MD))
+	head.add_child(_cap(sub, C_SOFT, Tokens.T_MD))
 	top.add_child(head)
 	if cnt > 0:
 		var og := _pill("OPEN GOALS", func(): _show(1), false, Tokens.T_MD, true)
@@ -425,7 +423,7 @@ func _page_overview() -> void:
 	ob.alignment = BoxContainer.ALIGNMENT_CENTER
 	ob.add_theme_constant_override("separation", -22)
 	ob.add_child(_cap("OVERALL", C_SOFT, Tokens.T_SM))
-	var ol := UITheme.display("0", 84, ACC, 0.0, 900)
+	var ol := UITheme.display("0", 84, C_TXT, 0.0, 900)
 	ob.add_child(ol)
 	_count(ol, float(ovr), func(v: float): return str(roundi(v)), 0.1, 1.0)
 	var rank: String = LEVEL_NAMES[clampi(ovr / 17, 0, 5)]
@@ -441,7 +439,7 @@ func _page_overview() -> void:
 		var nm := _cap(String(attrs[i][0]), C_SOFT, Tokens.T_XS)
 		nm.custom_minimum_size.x = 112
 		rw.add_child(nm)
-		var br := _bar(float(attrs[i][1]) / 99.0, 0.2 + i * 0.07, 8, ACC if attrs[i][1] >= 70 else C_TXT)
+		var br := _bar(float(attrs[i][1]) / 99.0, 0.2 + i * 0.07, 8, ACC if attrs[i][1] >= 70 else Tokens.INK_SOFT)
 		br.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		rw.add_child(br)
 		var nv := _num("0", 24)
@@ -552,17 +550,17 @@ class WeekChart extends Control:
 			var h := (base - top) * vals[i] / mx * grow
 			var cur := i == n - 1
 			var rc := Rect2(i * bw + bw * 0.16, base - maxf(h, 3.0), bw * 0.68, maxf(h, 3.0))
-			draw_rect(rc, Color("ff5a1f") if cur else Color(1, 1, 1, 0.16))
+			draw_rect(rc, Tokens.ACCENT if cur else Tokens.LINE)
 			if vals[i] > 0.0 and grow > 0.85:
 				var s := "%.0f" % (vals[i] / unit)
 				var w := f.get_string_size(s, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
-				draw_string(f, Vector2(rc.position.x + (rc.size.x - w) * 0.5, rc.position.y - 5.0), s, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("f2f4f8") if cur else Color("8e98b3"))
+				draw_string(f, Vector2(rc.position.x + (rc.size.x - w) * 0.5, rc.position.y - 5.0), s, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Tokens.INK if cur else Tokens.INK_SOFT)
 			var back := n - 1 - i
 			var lab := "NOW" if cur else ("%dW" % back if back % 2 == 0 else "")
 			if lab != "":
 				var lw := f.get_string_size(lab, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
-				draw_string(f, Vector2(rc.position.x + (rc.size.x - lw) * 0.5, size.y - 5.0), lab, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("5b6480"))
-		draw_line(Vector2(0, base), Vector2(size.x, base), Color(1, 1, 1, 0.12), 1.0)
+				draw_string(f, Vector2(rc.position.x + (rc.size.x - lw) * 0.5, size.y - 5.0), lab, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Tokens.INK_FAINT)
+		draw_line(Vector2(0, base), Vector2(size.x, base), Tokens.LINE, 1.0)
 
 # ---------------------------------------------------------------- GOALS
 func _page_goals() -> void:
@@ -586,7 +584,7 @@ func _page_goals() -> void:
 	_appear(made, 0.07, 0.1)
 
 func _streak_card() -> Control:
-	var card := _card(Tokens.S5, C_CARD2, ACC)
+	var card := _card(Tokens.S5, C_CARD)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", Tokens.S6)
 	card.add_child(row)
@@ -618,7 +616,7 @@ func _streak_card() -> Control:
 
 func _goal_card(g: Dictionary, delay: float) -> Control:
 	var ready: bool = g.done and not g.claimed
-	var pc := _card(Tokens.S4, C_CARD2 if ready else C_CARD, C_GREEN if ready else (C_FAINT if g.claimed else ACC))
+	var pc := _card(Tokens.S4, Tokens.ACCENT_TINT if ready else C_CARD)
 	pc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	pc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	var row := HBoxContainer.new()
@@ -644,7 +642,7 @@ func _goal_card(g: Dictionary, delay: float) -> Control:
 	var key: String = g.key
 	if g.claimed: col.add_child(_cap("CLAIMED  ✓  " + _money(int(g.reward)), C_FAINT, Tokens.T_SM))
 	elif g.done: col.add_child(_pill("CLAIM  +" + _money(int(g.reward)), func(): if Goals.claim(key): _refresh(), false, Tokens.T_MD, true))
-	else: col.add_child(_cap("REWARD  " + _money(int(g.reward)), ACC, Tokens.T_SM))
+	else: col.add_child(_cap("REWARD  " + _money(int(g.reward)), C_TXT, Tokens.T_SM))
 	return pc
 
 # ---------------------------------------------------------------- BADGES (3D medals)
@@ -666,8 +664,8 @@ class BadgeCell extends Control:
 		if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT: picked.emit(id)
 	func _draw() -> void:
 		var c := Vector2(size.x * 0.5, 56.0)
-		var tier: Color = Collection.TIERS[Collection.badge_tier(id)][1] if got else Color("4a5164")
-		var enamel: Color = Collection.badge_colour(id) if got else Color("262c3b")
+		var tier: Color = Collection.TIERS[Collection.badge_tier(id)][1] if got else Color("c7ccd6")
+		var enamel: Color = Collection.badge_colour(id) if got else Color("e2e5ec")
 		var shp := String(Collection.badge_look(id).shape)
 		var sh := func(k: float, off := Vector2.ZERO) -> PackedVector2Array:
 			var pts := Collection.shape_points(shp, k)
@@ -682,11 +680,11 @@ class BadgeCell extends Control:
 		var g := Collection.badge_glyph(id) if got else "?"
 		var f := UITheme.font(true)
 		var w := f.get_string_size(g, HORIZONTAL_ALIGNMENT_LEFT, -1, 40).x
-		draw_string(f, Vector2(c.x - w * 0.5, c.y + 14), g, HORIZONTAL_ALIGNMENT_LEFT, -1, 40, tier.lightened(0.4) if got else Color("5b6480"))
+		draw_string(f, Vector2(c.x - w * 0.5, c.y + 14), g, HORIZONTAL_ALIGNMENT_LEFT, -1, 40, Color(1, 1, 1, 0.9) if got else Color("9aa0ad"))
 		var nm: String = String(Steam.ACHIEVEMENTS[id][0]).to_upper()
 		var f2 := UITheme.display_font(900)
 		var nw := f2.get_string_size(nm, HORIZONTAL_ALIGNMENT_LEFT, size.x, 15).x
-		draw_string(f2, Vector2((size.x - minf(nw, size.x)) * 0.5, 126.0), nm, HORIZONTAL_ALIGNMENT_LEFT, size.x, 15, Color("f2f4f8") if got else Color("5b6480"))
+		draw_string(f2, Vector2((size.x - minf(nw, size.x)) * 0.5, 126.0), nm, HORIZONTAL_ALIGNMENT_LEFT, size.x, 15, Tokens.INK if got else Tokens.INK_FAINT)
 
 func _fmt(rec: String, v: float) -> String:
 	match rec:
@@ -737,7 +735,7 @@ func _page_badges() -> void:
 	desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	side.add_child(desc)
-	var meta := _cap("", ACC, Tokens.T_SM)
+	var meta := _cap("", C_TXT, Tokens.T_SM)
 	meta.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	side.add_child(meta)
 	var cells: Array = []
