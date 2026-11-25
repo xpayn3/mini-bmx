@@ -201,10 +201,16 @@ func _stage() -> Control:
 	st.custom_minimum_size.x = 540
 	st.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	st.clip_contents = true
+	var back := ColorRect.new()   # the whole left panel in the colour the 3D backdrop renders as
+	back.color = Color(5.0 / 255.0, 10.0 / 255.0, 23.0 / 255.0)
+	back.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	back.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	st.add_child(back)
 	var hero := BikeTurntable.new()
 	hero.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	hero.offset_bottom = -172   # the picture ends above the button + XP bar: nothing covers the rider
 	st.add_child(hero)
-	hero.hero_stage(C_STAGE, float(Env.s("BMX_PROFILE_YAW")) if Env.s("BMX_PROFILE_YAW") != "" else -1.2)
+	hero.hero_stage(C_STAGE, float(Env.s("BMX_PROFILE_YAW")) if Env.s("BMX_PROFILE_YAW") != "" else -1.95)
 	hero.show_rider(RiderPanels.load_look())
 	hero.look_pitch = float(Env.s("BMX_PROFILE_LOOK")) if Env.s("BMX_PROFILE_LOOK") != "" else -0.5
 	var m := MarginContainer.new()
