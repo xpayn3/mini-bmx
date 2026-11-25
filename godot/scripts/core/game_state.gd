@@ -138,8 +138,6 @@ func _ready() -> void:
 		if wl is Array: wallet_log = wl
 		var cl = cf.get_value("shop", "claimed", {})
 		if cl is Dictionary: claimed = cl
-		var cd = cf.get_value("shop", "cards", {})
-		if cd is Dictionary: cards = cd
 		var ts = cf.get_value("game", "tricks", {})
 		if ts is Dictionary: tricks_seen = ts
 		var br = cf.get_value("game", "bikes", {})
@@ -190,7 +188,6 @@ func save() -> void:
 	cf.set_value("game", "name", rider_name)
 	cf.set_value("game", "tricks", tricks_seen)
 	cf.set_value("game", "bikes", bikes_ridden)
-	cf.set_value("shop", "cards", cards)
 	for id in achieved: cf.set_value("achievements", id, achieved[id])
 	if OS.get_environment("BMX_LENS") == "": _lens_saved = goggle_lens
 	cf.set_value("game", "lens", _lens_saved)
@@ -220,7 +217,6 @@ var days := {}
 ## the rider's profile (title menu, top right): a name and the achievements earned (id -> unix time; Steam.ACHIEVEMENTS
 ## has the list). Kept here whether or not Steam is running, Steam only mirrors it.
 var rider_name := "RIDER"
-var cards := {}          # collected cards (Collection.CARDS id -> unix time)
 var tricks_seen := {}    # trick keys landed at least once (Collection.TRICK_KEYS values)
 var bikes_ridden := {}   # bike id -> rides of at least ACTIVITY_M on it
 var achieved := {}
