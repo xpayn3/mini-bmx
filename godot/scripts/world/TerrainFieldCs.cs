@@ -1175,7 +1175,7 @@ public partial class TerrainFieldCs : RefCounted
 		double wn = sm(0.30, 0.55, noise(a / 11.0 - 5.0, b / 11.0 + 19.0));
 		bs_c = 0.75 * sm(-0.25, 0.3, n1);
 		bs_F = clampf(w + 0.1 + 0.8 * sm(-0.3, 0.3, n2), 2.0, 3.5);
-		bs_cw = 0.3 + 0.5 * (bs_c / 0.75);
+		bs_cw = 0.8 + 0.6 * (bs_c / 0.75);
 		bs_lip = 0.18 * sm(0.0, 0.35, n3);
 		bs_scoop = 0.5 * g * wn;
 	}
@@ -1213,13 +1213,13 @@ public partial class TerrainFieldCs : RefCounted
 			}
 			else
 			{
-				double lb = clampf(hrim / 0.6, 2.0, 5.0);
+				double lb = clampf(hrim / 0.5, 2.5, 6.0);
 				double t2 = sm(0.0, lb, d - cw);
 				h = hrim * (1.0 - t2);
 			}
 		}
 		if (bs_lip > 0.0)
-			h += bs_lip * (1.0 - sm(0.0, 0.7, Math.Abs(o - (F + cw * 0.6))));
+			h += bs_lip * (1.0 - sm(0.0, 1.1, Math.Abs(o - (F + cw * 0.6))));
 		if (bs_scoop > 0.0)
 			h -= bs_scoop * sm(F - 1.4, F, o) * (1.0 - sm(F + cw, F + cw + 1.2, o));
 		return maxf(h, 0.0);
@@ -2206,6 +2206,91 @@ public partial class TerrainFieldCs : RefCounted
 		}
 		finally { _approx = false; }
 		return o;
+	}
+
+	private static readonly bool NO_MICRO = System.Environment.GetEnvironmentVariable("BMX_NO_MICRO") is { Length: > 0 };
+
+	/// Imperfections of the ground, in metres, for the finer mesh only (visual: tyres and physics read the smooth ground, so it is kept to
+	/// a few cm): fine roughness near the trail (0.3 m and 1 m grain), washboard / braking ripples in bends (along the trail, 0.75 m apart,
+	/// stronger with the bend's load), now and then a pothole / washout on the road (hash of the 37 m stretch), a ragged dirt edge, and rills
+	/// running down banked faces. Zero away from the trail.
+	private double micro_detail(double x, double z)
+	{
+		query(x, z);
+		double w = q_w;
+		double dtr = q_d;
+		double near = 1.0 - sm(w + 5.0, w + 16.0, dtr);
+		if (near <= 0.0)
+			return 0.0;
+		double onT = 1.0 - sm(w, w + 1.5, dtr);
+		double qs = q_s, qa = q_a, qk = q_k, qbt = q_bt;
+		double d = (0.012 * noise(x * 3.1 + 7.7, z * 3.1 - 2.3) + 0.026 * noise(x * 0.9 + 3.1, z * 0.9 + 11.3)) * near * (0.35 + 0.65 * onT);
+		// washboard: ripples across the travel in the bends, deeper the harder the bend
+		double load = corner_load(qk);
+		if (load > 0.02 && onT > 0.0)
+			d += 0.022 * load * onT * Math.Sin(qs * (2.0 * Math.PI / 0.75) + noise(qs * 0.2, 5.5) * 3.0) * (0.5 + 0.5 * noise(qs * 0.07 + 9.0, 1.7));
+		// potholes / washouts on the road
+		double cell = Math.Floor(qs / 37.0);
+		double hh = ((long)(cell * 73856093.0 + seed_value * 19349663.0) & 0xffff) / 65536.0;
+		if (hh > 0.55 && onT > 0.0)
+		{
+			double h2 = ((long)(cell * 83492791.0 + seed_value * 73856093.0) & 0xffff) / 65536.0;
+			double h3 = ((long)(cell * 2654435761.0 + seed_value * 668265263.0) & 0xffff) / 65536.0;
+			double ds = qs - (cell + 0.15 + 0.7 * h2) * 37.0;
+			double da = qa - (h3 - 0.5) * 2.0 * minf(w - 0.3, 1.6);
+			double rad = 0.45 + 0.35 * hh;
+			double t = 1.0 - Math.Sqrt(ds * ds + da * da) / rad;
+			if (t > 0.0)
+				d -= (0.03 + 0.07 * h2) * t * t * (3.0 - 2.0 * t);
+		}
+		// ragged dirt edge
+		d += 0.03 * noise(x * 2.3 + 1.9, z * 2.3 - 6.1) * (1.0 - sm(0.0, 1.3, Math.Abs(dtr - w)));
+		// rills down banked faces
+		double bm = sm(0.08, 0.2, Math.Abs(qbt)) * (1.0 - sm(2.2, 3.4, dtr));
+		if (bm > 0.0)
+			d += 0.014 * bm * noise(qs * 0.45 + 4.0, qa * 5.0 + 2.0);
+		return d;
+	}
+
+	/// a finer ground mesh for the near chunks (terrain_chunk_builder.gd MESH_K): vertices / normals / uvs of an (N * K) grid over the
+	/// chunk, heights straight from ground(); the colour textures keep their N + 1 texels (uvs map onto them). Normals as build_ground.
+	public Godot.Collections.Dictionary fine_ground(double ox, double oz, long N, long K)
+	{
+		const double S = 48.0;
+		long M = N * K;
+		long MV = M + 1;
+		long W = M + 3;
+		double d = S / M;
+		long NV = N + 1;
+		var H = new float[W * W];
+		for (long iz = -1; iz < M + 2; iz++)
+			for (long ix = -1; ix < M + 2; ix++)
+				H[(iz + 1) * W + ix + 1] = (float)ground(ox - S / 2 + ix * d, oz - S / 2 + iz * d);
+		if (!NO_MICRO)
+		{
+			// micro detail the 0.5 m grid could not show: DRAWN ONLY (the physics ground stays smooth), centimetres
+			for (long iz = -1; iz < M + 2; iz++)
+				for (long ix = -1; ix < M + 2; ix++)
+					H[(iz + 1) * W + ix + 1] += (float)micro_detail(ox - S / 2 + ix * d, oz - S / 2 + iz * d);
+		}
+		var verts = new Vector3[MV * MV];
+		var norms = new Vector3[MV * MV];
+		var uvs = new Vector2[MV * MV];
+		for (long iz = 0; iz < MV; iz++)
+		{
+			for (long ix = 0; ix < MV; ix++)
+			{
+				long k = (iz + 1) * W + ix + 1;
+				long o = iz * MV + ix;
+				verts[o] = new Vector3((float)(-S / 2 + ix * d), H[k], (float)(-S / 2 + iz * d));
+				var nv = new Vector3((float)((double)H[k - 1] - H[k + 1]), (float)(2 * d), (float)((double)H[k - W] - H[k + W]));
+				float lsq = nv.X * nv.X + nv.Y * nv.Y + nv.Z * nv.Z;
+				float len = MathF.Sqrt(lsq);
+				norms[o] = lsq == 0f ? new Vector3(0, 0, 0) : new Vector3(nv.X / len, nv.Y / len, nv.Z / len);
+				uvs[o] = new Vector2((float)(((double)ix / K + 0.5) / NV), (float)(((double)iz / K + 0.5) / NV));
+			}
+		}
+		return new Godot.Collections.Dictionary { ["verts"] = verts, ["norms"] = norms, ["uvs"] = uvs };
 	}
 
 	public Godot.Collections.Dictionary build_ground(double ox, double oz, long N)
