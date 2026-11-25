@@ -6,9 +6,11 @@ extends RefCounted
 ## query() lives in TerrainField (per-thread result cache); this holds the immutable layout.
 
 const STEP := 2.0
-enum { START = 0, ROAD = 1, SWITCH = 2, ESSES = 3, ROCKS = 4, JUMP = 5, FINISH = 6 }
-const WIDTH := [3.0, 2.7, 1.35, 1.45, 1.7, 2.5, 3.0]
-const BERM := [0.0, 0.45, 1.0, 0.9, 0.3, 0.0, 0.0]
+enum { START = 0, ROAD = 1, SWITCH = 2, ESSES = 3, ROCKS = 4, JUMP = 5, FINISH = 6, FOREST = 7 }
+## (half-widths, m) FOREST = a narrow singletrack through the trees (2026-11-25, user reference: cut into a wooded
+## hillside, tight turns with tall narrow berms, trees right at the edge: precision riding)
+const WIDTH := [3.0, 2.7, 1.35, 1.45, 1.7, 2.5, 3.0, 0.35]
+const BERM := [0.0, 0.45, 1.0, 0.9, 0.3, 0.0, 0.0, 1.8]
 const CELL := 16.0
 const QR := 19.0
 const D2R := PI / 180.0
@@ -147,7 +149,7 @@ func grown(field, to_s: float) -> TrailCourse:
 	c._L = to_s
 	c._corr = _corr
 	c._mark_seed = _mark_seed
-	c._x = _x; c._z = _z; c._h = _h; c._v = _v; c._hv = _hv; c._lt = _lt
+	c._x = _x; c._z = _z; c._h = _h; c._v = _v; c._hv = _hv; c._lt = _lt; c._forest_end = _forest_end
 	c.X = X.duplicate(); c.Z = Z.duplicate(); c.KD = KD.duplicate()
 	c._cells = _cells.duplicate()
 	c._build()
@@ -299,6 +301,7 @@ func _run(sec: Array) -> void:
 		4: _jump_line()
 		5: _esses(_sp() + 50)
 		6: _tech(sec[1])
+		7: _forest(sec[1])
 
 
 func _attempt(fns: Array) -> bool:
@@ -438,6 +441,38 @@ func _tech(end_x: float) -> void:
 	_straight(6, SWITCH)
 
 
+## a forest singletrack (FOREST): snaking down the hillside through the trees in tight alternating turns (6-10 m radius)
+## with short legs between, each turn swinging 70-140 deg; the berms on them are tall and narrow (BERM[FOREST])
+func _forest(end_x: float) -> void:
+	var dir := 1 if _r.next() < 0.5 else -1
+	if absf(_off()) > 25:
+		dir = -int(signf(_off()))
+	_turn_to(_rel(dir * 0.4), 14, FOREST)
+	var k := 0
+	while k < 16:
+		_straight(5 + _r.next() * 9, FOREST, 0.5)
+		if _sp() > end_x and k >= 5:
+			break
+		dir = -dir
+		if absf(_off()) > _corr - 35:
+			dir = -int(signf(_off()))
+		_turn_to(_rel(dir * (35 + _r.next() * 35) * D2R), 6 + _r.next() * 4, FOREST)
+		k += 1
+	_turn_to(_rel(0.0), 12, FOREST)
+	_straight(6, FOREST)
+
+
+var _forest_end := -INF   # (spine s) where the last forest singletrack ended
+
+
+## a forest singletrack fits here: in a pine forest, on a hillside (the trail is cut into it), not right after another
+func _forest_here() -> bool:
+	if OLD_FLOW or _sp() < _forest_end + 250.0:
+		return false
+	_M.biome(_x, _z)
+	return _M.b_forest > 0.45 and _side_slope() > 0.03
+
+
 func _chute(end_x: float) -> void:
 	_turn_to(_rel((_r.next() - .5) * 16 * D2R), 18, ROCKS)
 	_straight(maxf(26, end_x - _sp() + 6), ROCKS, 0.25)
@@ -476,6 +511,10 @@ func _build() -> void:
 			# past the mountain: the trail runs on through the hills, never long without a twist
 			_attempt([[0, 40 + _r.next() * 90]])
 			sh = _sp()
+			if _forest_here() and fposmod(sh * 0.0137, 1.0) < 0.7:
+				_attempt([[7, sh + 140.0 + fposmod(sh * 0.731, 1.0) * 220.0]])
+				_forest_end = _sp()
+				continue
 			var end_x := sh + 50 + _r.next() * 70
 			# what comes next depends on the mountain under it (TerrainField.range_at): its descent is where the slow
 			# technical riding is (tight hairpin stacks, switchbacks, rock chutes); no jump lines up a climb
@@ -895,7 +934,9 @@ func plan_marking(field) -> void:
 		var i1: int = run[1]
 		var k: int = run[2]
 		for i in range(i0, i1 + 1):
-			if k != ROAD:
+			if k == FOREST:
+				pass   # the trees line it, no tape
+			elif k != ROAD:
 				tape0[i] = 1; tape1[i] = 1
 			else:
 				var near_end := i - i0 < lead or i1 - i < lead
@@ -1030,6 +1071,7 @@ func plan_marking(field) -> void:
 	for fc in fences:
 		(pick if fc["style"] == "picket" else rest).append(fc)
 	fences = pick + rest
+	_plan_bend_trees(field)
 	_bucket()
 
 
@@ -1050,8 +1092,37 @@ static func _add(d: Dictionary, k: int, v: int) -> void:
 	d[k] = l
 
 
+## a big old tree on the inside of a tight bend in the forest (user reference: a built berm wrapping round a tall trunk):
+## every forest singletrack turn, and now and then a tight road / esses bend where the land is pine forest. Indices into the
+## centreline (TerrainChunkBuilder._bend_trees places the trunk on the inside, square to the trail)
+var bend_trees := PackedInt32Array()
+var chunk_btrees := {}
+
+
+func _plan_bend_trees(field) -> void:
+	bend_trees = PackedInt32Array()
+	var seed_i: int = _mark_seed % 9973
+	for i in range(3, n - 3):
+		var k := absf(KAP[i])
+		if k < 1.0 / 22.0 or k < absf(KAP[i - 1]) or k < absf(KAP[i + 1]) or k <= absf(KAP[i - 2]):
+			continue   # (local peaks of tight bends only)
+		if KD[i] == FOREST:
+			if _hash(i, seed_i + 31) > 0.75: continue
+		elif KD[i] == ROAD or KD[i] == ESSES:
+			field.biome(X[i], Z[i])
+			if field.b_forest < 0.4 or _hash(i, seed_i + 37) > 0.35: continue
+		else:
+			continue
+		if bend_trees.size() > 0 and i - bend_trees[bend_trees.size() - 1] < 8:
+			continue
+		bend_trees.append(i)
+
+
 func _bucket() -> void:
 	chunk_rocks = {}; chunk_stakes = {}; chunk_fences = {}; chunk_gates = {}; chunk_boards = {}; chunk_arches = {}; chunk_signs = {}
+	chunk_btrees = {}
+	for i in bend_trees:
+		_add(chunk_btrees, _chunk_of(X[i], Z[i]), i)
 	var sign_every := SIGN_EVERY
 	if OS.get_environment("BMX_SIGN_EVERY") != "":
 		sign_every = maxi(20, int(OS.get_environment("BMX_SIGN_EVERY")))   # test: signs closer together

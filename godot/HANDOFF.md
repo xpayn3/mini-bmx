@@ -454,6 +454,29 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   steps, alternation, dips per km). Measured 10 km: curvature steps (99th pct) 40-45 -> 15-19, bend braking 2.2-3.5 ->
   1.7-2.4 m/s per km, dips 9 -> 12 per km. Demo AI 125 s seed 4242: braking 15 -> 13 % of the time, slide scrub -206 ->
   -95 J/kg, avg 46.4 -> 46.9 km/h, max 59 -> 63, no crash. Grow / rope / wood / C# probes pass. Not ridden by the user yet.
+- **Forest singletrack + tall forest (2026-11-25, Phase C part 1, user reference shots: a narrow trail cut into a wooded
+  hillside with tight high berms; a big berm wrapping round a tall trunk; "taller trunks, leaves start later, don't cover
+  the cam")**. New kind `TrailCourse.FOREST` = 7 (`WIDTH` 0.35 half-width = a ~0.7 m trail (user: "could be even narrower"), `BERM` 1.8; FOREST counts as "not road" for RD,
+  drops, billboards, arches). Section code 7 `_forest(end_s)`: alternating 70-140 deg turns at 6-10 m radius, 5-14 m legs.
+  Picked past the first mountain where `_forest_here()`: `b_forest` > 0.45, the hillside across > 3 %, 250 m+ after the
+  last one, 70 % by a hash of s (seeds 4242 / 12 get some in 12 km, seed 5 none). No tape along it. Berm rim close in for
+  narrow trails: `berm_style` `bs_F` floor min(2.0, w + 0.75) (GD + C#; every other trail kind unchanged). Bend trees
+  (`TrailCourse._plan_bend_trees` -> `bend_trees` / `chunk_btrees`; `TerrainChunkBuilder._bend_trees`): a big old pine on
+  the inside of local curvature peaks under 22 m radius on FOREST (75 %) and on road / esses bends in pine forest (35 %),
+  W + 1.6..2.8 m in (at most 0.7 x the radius). Trees beside a forest singletrack (`fe`: within QR of a FOREST point):
+  density 95 %, trunks allowed from W + 0.9 (~1.25 m from the line: at W + 0.55 the demo AI clipped trunks), always pines, crowns overhang. **Tall forest pines** (`fe` or `b_forest` >
+  0.5): bare trunk to `TALL_CROWN` 6.5 m+ (sc x 3.2, + 0-3 m), crown up there, 15 % bigger; bend trees 8.5 m+.
+  Test `BMX_TRAIL_FEAT=forest` (30 m before the first FOREST point; seed 12 has one at x 3544). Demo AI rides through it at
+  ~45 km/h, no crash. Not ridden by the user yet. Narrow trails look narrow: `trail()`'s dirt fade is min(1.2, 0.35 + q_w) m (GD + C#; 1.2 for every trail >= 0.85 m half-width, as before), and the chunk bake writes how narrow the trail is (`T5` = clamp(1.6 - q_w): trail3_tex B, now RGBA8; level terrains' RG8 reads 0), which scales the ground shader's and the road-detail bake's ragged-edge wander (x 0.2) and fade (x 0.35..1). Big bend trees get 4 stones round their roots on the side away from the trail.
+- **Bark scans on standing trunks (2026-11-25, user: "good light trunk texture, realistic", "use all")**: three CC0 scans
+  in `assets/textures/bark/` (1K colour / OpenGL normal / roughness, VRAM-compressed with mipmaps; `SOURCE.txt`):
+  `bark_light` (ambientCG Bark004, light grey-tan), `bark_pale` (ambientCG Bark007, birch-like), `bark_pine` (Poly Haven
+  Pine Bark, reddish). `deco.gdshader` `bark` path: u round the trunk in whole tiles (count from the instance's girth:
+  no seam), v up it, `bark_tile` 0.8 m, gradients from whichever cut is away from the pixel (no mip line at atan's
+  jump), normal map in a world round/up frame (`bark_relief`). Materials `TerrainGeo._bark_mat`: `trunk` = light,
+  `trunk_pale`, `trunk_pine` (lists in `Terrain.LIST_SPEC` / `TerrainChunkBuilder.LIST_NAMES`); logs and sticks lie down,
+  so they keep the plain `trunk_plain`. Which: pines 45 % pine bark / 55 % light, broadleaf 60 % pale / 40 % light, snags
+  pale, savanna + bend trees light. Not measured: GPU cost of the extra 3 samples on trunks (two more draw lists a chunk).
 
 - **Mountains for ever + technical sections** (2026-11-21, user: "add mountains ... some gentle climbs ... missing nice tight
   turns for slow speed, more technical parts"). `TerrainField.range_at(x)` (mirrored in `TerrainFieldCs`, integer hash of slot +

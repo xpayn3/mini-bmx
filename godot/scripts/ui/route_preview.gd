@@ -21,7 +21,7 @@ const GRIDM := 10.0      # height samples (m)
 const CI := 5.0          # contour interval (m)
 const PX_M := 0.25       # land picture: pixels per metre (4 m a pixel)
 const KIND_COL := [Color("ffffff"), Color("8fc2ff"), Color("ff9a45"), Color("d78cff"), Color("c9b08a"), Color("ffd21f"), Color("ffffff")]
-const KIND_NAME := ["START", "ROAD", "SWITCHBACKS", "ESSES", "ROCKS", "JUMP LINE", "FINISH"]
+const KIND_NAME := ["START", "ROAD", "SWITCHBACKS", "ESSES", "ROCKS", "JUMP LINE", "FINISH", "FOREST SINGLETRACK"]
 const JUMP_TYPES := ["table", "double", "kicker", "tableLine", "flow", "doubleLine", "woodKicker"]
 const BRIDGE_TYPES := ["bridge", "gorge", "rope", "skinny"]
 

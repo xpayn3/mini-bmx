@@ -81,9 +81,23 @@ static func _mat(albedo: Color, rough: float, metal: float = 0.0) -> ShaderMater
 	return m
 
 
+static func _bark_mat(id: String, tint: Color) -> ShaderMaterial:
+	var m := _mat(tint, 0.9)
+	m.set_shader_parameter("bark", true)
+	m.set_shader_parameter("bark_col", load("res://assets/textures/bark/%s_col.jpg" % id))
+	m.set_shader_parameter("bark_nrm", load("res://assets/textures/bark/%s_nrm.jpg" % id))
+	m.set_shader_parameter("bark_rgh", load("res://assets/textures/bark/%s_rgh.jpg" % id))
+	m.set_shader_parameter("specular", 0.25)
+	return m
+
+
 static func _build_materials() -> void:
 	var w := Color(1, 1, 1)
-	MAT["trunk"] = _mat(lin(0x7a5233), 0.9)
+	MAT["trunk_plain"] = _mat(lin(0x7a5233), 0.9)   # (logs, sticks: lying down, no bark wrap)
+	# standing trunks: three bark scans (assets/textures/bark, CC0): light grey-tan, pale (birch-like), reddish pine
+	MAT["trunk"] = _bark_mat("bark_light", Color(0.92, 0.88, 0.82))
+	MAT["trunk_pale"] = _bark_mat("bark_pale", Color(0.95, 0.95, 0.92))
+	MAT["trunk_pine"] = _bark_mat("bark_pine", Color(1.0, 0.95, 0.9))
 	MAT["wood"] = _mat(w, 0.85)
 	MAT["leaf"] = _mat(w, 0.8)
 	MAT["leafSoft"] = _mat(w, 0.85)

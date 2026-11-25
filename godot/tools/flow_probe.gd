@@ -28,7 +28,7 @@ func _init() -> void:
 			var n: int = mini(C.n, int(want / TrailCourse.STEP))
 			var brake := 0.0
 			var vs := 0.0
-			var bk := [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+			var bk := [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 			for i in range(1, n):
 				brake += maxf(0.0, C.VA[i - 1] - C.VA[i])
 				bk[C.KD[i]] += maxf(0.0, C.VA[i - 1] - C.VA[i])
@@ -58,7 +58,7 @@ func _init() -> void:
 						bcap += sqrt(v2) - sqrt(cap)
 						v2 = cap
 			print("FLOWBRAKE seed=%d %s bend braking %.1f m/s per km, climbing %.1f m per km" % [sd, "old" if old else "new", bcap / (n * TrailCourse.STEP / 1000.0), climb / (n * TrailCourse.STEP / 1000.0)])
-			print("FLOWKD seed=%d %s brake by kind (start road switch esses rocks jump finish): %s" % [sd, "old" if old else "new", str(bk.map(func(q): return snappedf(q, 1.0)))])
+			print("FLOWKD seed=%d %s brake by kind (start road switch esses rocks jump finish forest): %s" % [sd, "old" if old else "new", str(bk.map(func(q): return snappedf(q, 1.0)))])
 			var ks := PackedFloat32Array()
 			for i in range(1, n - 2):
 				var t0 := atan2(C.Z[i] - C.Z[i - 1], C.X[i] - C.X[i - 1])

@@ -1206,7 +1206,7 @@ public partial class TerrainFieldCs : RefCounted
 	{
 		double p = Math.Abs(pathN(x, z));
 		query(x, z);
-		double main = q_d < 12.0 ? (1.0 - sm(q_w, q_w + 1.2, q_d)) : 0.0;
+		double main = q_d < 12.0 ? (1.0 - sm(q_w, q_w + minf(1.2, 0.35 + q_w), q_d)) : 0.0;
 		double t = (p - 0.03) / (0.075 - 0.03);
 		if (t >= 1.0)
 			return maxf(0.0, main);
@@ -1277,7 +1277,7 @@ public partial class TerrainFieldCs : RefCounted
 		double g = sm(0.05, 0.4, noise(a / 130.0 + 71.0, b / 130.0 - 12.5));
 		double wn = sm(0.30, 0.55, noise(a / 11.0 - 5.0, b / 11.0 + 19.0));
 		bs_c = 0.75 * sm(-0.25, 0.3, n1);
-		bs_F = clampf(w + 0.1 + 0.8 * sm(-0.3, 0.3, n2), 2.0, 3.5);
+		bs_F = clampf(w + 0.1 + 0.8 * sm(-0.3, 0.3, n2), minf(2.0, w + 0.75), 3.5);
 		bs_cw = 0.8 + 0.6 * (bs_c / 0.75);
 		bs_lip = 0.18 * sm(0.0, 0.35, n3);
 		bs_scoop = 0.5 * g * wn;
@@ -2407,6 +2407,7 @@ public partial class TerrainFieldCs : RefCounted
 		var T2 = new float[NV * NV * 4];   // road, dry biome, built jump, run-off skid's strength
 		var T3 = new float[NV * NV];       // riders in the air over a jump here
 			var T4 = new float[NV * NV];       // corner load: how hard riders press the line here (0 straight .. 1 tight bend)
+		var T5 = new float[NV * NV];       // how narrow the trail is (0 a road .. 1 a forest singletrack)
 		for (long iz = -1; iz < N + 2; iz++)
 		{
 			for (long ix = -1; ix < N + 2; ix++)
@@ -2439,6 +2440,7 @@ public partial class TerrainFieldCs : RefCounted
 					T2[o * 4 + 2] = (float)jm;
 					T3[o] = (float)fo_air;
 						T4[o] = on ? (float)corner_load(q_k) : 0f;
+					T5[o] = on ? (float)Math.Clamp(1.6 - q_w, 0.0, 1.0) : 0f;
 					T2[o * 4 + 3] = (float)(on ? cROS[q_i] + (cROS[q_i + 1] - cROS[q_i]) * q_t : 0.0);
 						if (on)
 						{
@@ -2505,7 +2507,7 @@ public partial class TerrainFieldCs : RefCounted
 		return new Godot.Collections.Dictionary
 		{
 			["G"] = G, ["verts"] = verts, ["norms"] = norms, ["uvs"] = uvs,
-			["LG"] = LG, ["LD"] = LD, ["TW"] = TW, ["SW"] = SW, ["DRY"] = DRY, ["TR"] = TR, ["T2"] = T2, ["T3"] = T3, ["T4"] = T4,
+			["LG"] = LG, ["LD"] = LD, ["TW"] = TW, ["SW"] = SW, ["DRY"] = DRY, ["TR"] = TR, ["T2"] = T2, ["T3"] = T3, ["T4"] = T4, ["T5"] = T5,
 		};
 	}
 

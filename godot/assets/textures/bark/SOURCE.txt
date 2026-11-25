@@ -1,0 +1,4 @@
+﻿Tree bark scans, all CC0 (public domain, no attribution needed), downloaded 2026-11-25, packed to 1K (colour, OpenGL normal, roughness):
+bark_light = ambientCG Bark004 (https://ambientcg.com/view?id=Bark004)
+bark_pale  = ambientCG Bark007 (https://ambientcg.com/view?id=Bark007)
+bark_pine  = Poly Haven Pine Bark by Dimitrios Savva (https://polyhaven.com/a/pine_bark)

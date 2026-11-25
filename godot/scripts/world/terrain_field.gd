@@ -820,7 +820,7 @@ func _grad_at(x: float, z: float) -> void:
 func trail(x: float, z: float) -> float:
 	var p := absf(pathN(x, z))
 	query(x, z)
-	var main := (1.0 - sm(q_w, q_w + 1.2, q_d)) if q_d < 12.0 else 0.0
+	var main := (1.0 - sm(q_w, q_w + minf(1.2, 0.35 + q_w), q_d)) if q_d < 12.0 else 0.0   # (a narrow singletrack's dirt fades out quicker)
 	var t := (p - 0.03) / (0.075 - 0.03)
 	if t >= 1.0:
 		return maxf(0.0, main)
@@ -899,7 +899,7 @@ func berm_style(a: float, b: float, w: float) -> void:
 	var g := sm(0.05, 0.4, noise(a / 130.0 + 71.0, b / 130.0 - 12.5))
 	var wn := sm(0.30, 0.55, noise(a / 11.0 - 5.0, b / 11.0 + 19.0))
 	bs_c = 0.75 * sm(-0.25, 0.3, n1)
-	bs_F = clampf(w + 0.1 + 0.8 * sm(-0.3, 0.3, n2), 2.0, 3.5)
+	bs_F = clampf(w + 0.1 + 0.8 * sm(-0.3, 0.3, n2), minf(2.0, w + 0.75), 3.5)   # (a narrow forest singletrack: its rim close in, ~1.3 m out)
 	bs_cw = 0.8 + 0.6 * (bs_c / 0.75)
 	bs_lip = 0.18 * sm(0.0, 0.35, n3)
 	bs_scoop = 0.5 * g * wn

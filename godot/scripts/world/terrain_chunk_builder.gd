@@ -11,7 +11,7 @@ const WATER := TerrainField.WATER
 const S := 48.0
 const JC := 34.0
 const SMALL := ["pebble", "grass", "daisy", "tulip", "spike", "stick", "fern", "mushroom"]
-const LIST_NAMES := ["trunk", "blob", "pine", "rock", "pebble", "grass", "daisy", "tulip", "spike", "cactus0", "cactus1", "cactus2", "cactus3", "cactus4",
+const LIST_NAMES := ["trunk", "trunk_pale", "trunk_pine", "blob", "pine", "rock", "pebble", "grass", "daisy", "tulip", "spike", "cactus0", "cactus1", "cactus2", "cactus3", "cactus4",
 	"bush", "log", "stick", "fern", "mushroom", "weed", "plank", "beam", "post", "rail", "picket", "stake"]
 const SPAN := 2.4
 const TAPE_SEG := 30
@@ -207,6 +207,7 @@ func _build() -> void:
 		if k.has("tape"):
 			blocked.append([k["x"], k["z"], 0.9])
 	_stage("manmade")
+	_bend_trees()
 	_trees(ox, oz)
 	_rocks(ox, oz)
 	_stage("trees+rocks")
@@ -268,11 +269,14 @@ func _build() -> void:
 	out["trail2_img"] = Image.create_from_data(NV, NV, false, Image.FORMAT_RGBA8, pT)
 	var T3a: PackedFloat32Array = gs["T3"]
 	var T4a: PackedFloat32Array = gs["T4"]
-	var pA := PackedByteArray(); pA.resize(NV * NV * 2)   # R = riders in the air, G = corner load
+	var T5a: PackedFloat32Array = gs["T5"]
+	var pA := PackedByteArray(); pA.resize(NV * NV * 4)   # R = riders in the air, G = corner load, B = how narrow the trail is
 	for o in NV * NV:
-		pA[o * 2] = roundi(clampf(T3a[o], 0, 1) * 255)
-		pA[o * 2 + 1] = roundi(clampf(T4a[o], 0, 1) * 255)
-	out["trail3_img"] = Image.create_from_data(NV, NV, false, Image.FORMAT_RG8, pA)
+		pA[o * 4] = roundi(clampf(T3a[o], 0, 1) * 255)
+		pA[o * 4 + 1] = roundi(clampf(T4a[o], 0, 1) * 255)
+		pA[o * 4 + 2] = roundi(clampf(T5a[o], 0, 1) * 255)
+		pA[o * 4 + 3] = 255
+	out["trail3_img"] = Image.create_from_data(NV, NV, false, Image.FORMAT_RGBA8, pA)
 	# where puddles can be (world/trail_puddle.gd: tyre dust stops over them); empty for chunks with no wet road
 	out["pud"] = TrailPuddle.table(TRa, T2a, TW, norms, NV)
 	# ---- grass field data (world/grass_field.gd): the ground's own heights + land colour, density in alpha ----
@@ -335,6 +339,7 @@ func ground_stage(ox: float, oz: float) -> Dictionary:
 	var T2 := PackedFloat32Array(); T2.resize(NV * NV * 4)   # road, dry biome, built jump, run-off skid's strength
 	var T3 := PackedFloat32Array(); T3.resize(NV * NV)       # riders in the air over a jump here
 	var T4 := PackedFloat32Array(); T4.resize(NV * NV)       # corner load: how hard riders press the line (0 straight .. 1 tight bend)
+	var T5 := PackedFloat32Array(); T5.resize(NV * NV)       # how narrow the trail is (0 a road .. 1 a forest singletrack): the drawn edge wanders less
 	for iz in range(-1, N + 2):
 		for ix in range(-1, N + 2):
 			var x := ox - S / 2 + ix * d
@@ -365,6 +370,7 @@ func ground_stage(ox: float, oz: float) -> Dictionary:
 				T2[o * 4 + 2] = jm
 				T3[o] = f.fo_air
 				T4[o] = TerrainField.corner_load(f.q_k) if on else 0.0
+				T5[o] = clampf(1.6 - f.q_w, 0.0, 1.0) if on else 0.0
 				T2[o * 4 + 3] = (f.cROS[f.q_i] + (f.cROS[f.q_i + 1] - f.cROS[f.q_i]) * f.q_t) if on else 0.0
 				if on:
 					# same as the C# bake: average the distance to the 2 m-piece centreline over ~1 m (no facets in bends)
@@ -405,7 +411,7 @@ func ground_stage(ox: float, oz: float) -> Dictionary:
 			DRY[o] = maxf(pre_b[o * 4], pre_b[o * 4 + 3])   # (no grass on ash)
 			LG[o] = f.cl_g
 			LD[o] = f.cl_d
-	return {"G": G, "verts": verts, "norms": norms, "uvs": uvs, "LG": LG, "LD": LD, "TW": TW, "SW": SW, "DRY": DRY, "TR": TR, "T2": T2, "T3": T3, "T4": T4}
+	return {"G": G, "verts": verts, "norms": norms, "uvs": uvs, "LG": LG, "LD": LD, "TW": TW, "SW": SW, "DRY": DRY, "TR": TR, "T2": T2, "T3": T3, "T4": T4, "T5": T5}
 
 
 ## clears grass density (alpha of the grass_img bytes) within r of (x, z), soft over the outer 30 %
@@ -994,6 +1000,7 @@ func _tape() -> void:
 # ---------------- trees and cacti ----------------
 const TREE_TRIES := 100   # placement tries per chunk (90 read thin, 140 too dense: user 2026-11-22)
 const TREE_K := 1.4        # every tree this much bigger (they read small next to the rider)
+const TALL_CROWN := 6.5    # m: the lowest a tall forest pine's crown starts (over the trail camera)
 
 ## a crown of radius r at (x, z) stays clear of the trail and its paths (the trees' own spot check only tests the trunk)
 func _crown_clear(x: float, z: float, r: float) -> bool:
@@ -1003,6 +1010,39 @@ func _crown_clear(x: float, z: float, r: float) -> bool:
 		if f.trail(px, pz) > 0.02 or absf(f.pathN(px, pz)) < 0.1 or f.jump_mask(px, pz) > 0:
 			return false
 	return true
+
+## a big old pine on the inside of a tight forest bend (TrailCourse.bend_trees): the trail wraps round it
+func _bend_trees() -> void:
+	var C: TrailCourse = f.course
+	for i in C.chunk_btrees.get(TrailCourse.chunk_key(cx, cz), PackedInt32Array()):
+		var k: float = C.KAP[i]
+		var sg := signf(k)
+		var r := 1.0 / absf(k)
+		var off := minf(C.W[i] + 1.6 + TrailCourse._hash(i, 71) * 1.2, r * 0.7)
+		var x: float = C.X[i] - C.TZ[i] * off * sg
+		var z: float = C.Z[i] + C.TX[i] * off * sg
+		if f.jump_mask(x, z) > 0 or is_blocked(x, z, 0.5):
+			continue
+		var h := height(x, z)
+		if h < WATER + 0.6:
+			continue
+		var sc := (1.75 + TrailCourse._hash(i, 72) * 0.55) * TREE_K
+		var py := sc * (2.3 + TrailCourse._hash(i, 73) * 0.6)
+		var yaw := TrailCourse._hash(i, 74) * 6.28
+		var cb := maxf(TALL_CROWN + 2.0, sc * 3.6)   # an old giant: bare trunk high up, the crown over everything
+		put("trunk", x, h - 0.15, z, sc, cb + 0.3 + py * 0.2, sc, yaw)
+		put("pine", x, h + cb, z, sc * 1.05, py, sc * 1.05, yaw, PINES[int(TrailCourse._hash(i, 75) * PINES.size())])
+		colliders.append({"x": x, "z": z, "r": 0.16 * sc + 0.02, "ceil": h + cb + 2.8 * py})
+		blocked.append([x, z, 0.16 * sc + 0.4])
+		# a few stones round its roots, on the side away from the trail (visual: inside the trunk's own clearance)
+		for q in 4:
+			var a := atan2(C.TX[i] * sg, -C.TZ[i] * sg) + (TrailCourse._hash(i, 80 + q) - 0.5) * 2.4
+			var rr := 0.16 * sc + 0.35 + TrailCourse._hash(i, 90 + q) * 0.5
+			var rx := x + cos(a) * rr
+			var rz := z + sin(a) * rr
+			var rs := 0.12 + TrailCourse._hash(i, 100 + q) * 0.2
+			put("rock", rx, height(rx, rz) - rs * 0.3, rz, rs * 1.3, rs * 0.7, rs, TrailCourse._hash(i, 110 + q) * 6.28, null, 0.5)
+
 
 func _trees(ox: float, oz: float) -> void:
 	for i in TREE_TRIES:
@@ -1017,9 +1057,16 @@ func _trees(ox: float, oz: float) -> void:
 		if not roadside:
 			pf = maxf(pf, f.b_forest * 0.85)
 		pf *= (1.0 - 0.75 * f.b_cold) * (1.0 - 0.6 * f.b_wet) * (1.0 - 0.5 * f.b_sav) * (1.0 - 0.95 * f.b_ash)
+		# beside a forest singletrack the trees stand thick and right up to its edge (precision riding: user reference)
+		var tr: float = f.trail(x, z)
+		var fe: bool = f.q_d < TerrainField.QR and f.q_kind == TrailCourse.FOREST
+		if fe:
+			pf = maxf(pf, 0.95)
 		if rnd.next() > pf:
 			continue
-		if f.trail(x, z) > 0.02 or absf(f.pathN(x, z)) < 0.1 or f.jump_mask(x, z) > 0 or is_blocked(x, z, 0.8):
+		if fe and f.q_d > f.q_w + 0.9:   # (bars + lean need ~1.2 m from the line: closer, every wobble hit a trunk)
+			tr = 0.0
+		if tr > 0.02 or absf(f.pathN(x, z)) < 0.1 or f.jump_mask(x, z) > 0 or is_blocked(x, z, 0.8):
 			continue
 		var h := ok_spot(x, z)
 		if is_nan(h):
@@ -1031,7 +1078,7 @@ func _trees(ox: float, oz: float) -> void:
 		if f.b_ash > 0.4:
 			# a dead snag: a bare trunk
 			var snag := sc * TREE_K * (0.9 + rnd.next() * 0.8)
-			put("trunk", x, h - 0.1, z, snag * 1.0, snag * 1.5, snag * 1.0, yaw)
+			put("trunk_pale", x, h - 0.1, z, snag * 1.0, snag * 1.5, snag * 1.0, yaw)
 			colliders.append({"x": x, "z": z, "r": 0.14 * snag + 0.02, "ceil": h + snag * 1.5})
 			continue
 		if rnd.next() < dry * (1.0 - 0.9 * f.b_sav):
@@ -1047,15 +1094,24 @@ func _trees(ox: float, oz: float) -> void:
 			continue
 		var ceil_h := 0.0
 		sc *= TREE_K
-		if h > 4 or rnd.next() < 0.3 + rug * 0.6 + f.b_forest * 0.65 + f.b_cold * 0.5:
+		if fe or h > 4 or rnd.next() < 0.3 + rug * 0.6 + f.b_forest * 0.65 + f.b_cold * 0.5:
 			# pines: tall and slim, the odd one a real giant (up to ~13 m); smaller up in the alpine
 			sc *= 1.0 - 0.3 * f.b_cold
 			var py := sc * (1.5 + rnd.next() * 0.7 + pow(rnd.next(), 4.0) * 0.9)
-			if not _crown_clear(x, z, sc * 1.05):
+			# tall forest (strong pine forest, or beside a forest singletrack): long bare trunks, the crown high up, so riders
+			# (and the camera behind them) ride under the canopy, not through the branches (user, 2026-11-25)
+			var tall: bool = fe or f.b_forest > 0.5
+			var cb := sc * 0.6   # crown base above the ground
+			if tall:
+				cb = maxf(TALL_CROWN, sc * 3.2) + rnd.next() * 3.0
+				sc *= 1.15
+			if not fe and not tall and not _crown_clear(x, z, sc * 1.05):
 				continue
-			put("trunk", x, h - 0.1, z, sc, sc * 0.9 + py * 0.15, sc, yaw)
-			put("pine", x, h + sc * 0.6, z, sc * 1.1, py, sc * 1.1, yaw, PINES[int(rnd.next() * PINES.size())])
-			ceil_h = h + sc * 0.6 + 2.8 * py
+			if tall and not fe and not _crown_clear(x, z, sc * 0.5):
+				continue   # (a tall trunk only needs its trunk off the trail: its crown is overhead)
+			put("trunk_pine" if rnd.next() < 0.45 else "trunk", x, h - 0.1, z, sc, cb + 0.2 + py * 0.15, sc, yaw)
+			put("pine", x, h + cb, z, sc * (0.95 if tall else 1.1), py, sc * (0.95 if tall else 1.1), yaw, PINES[int(rnd.next() * PINES.size())])
+			ceil_h = h + cb + 2.8 * py
 		elif f.b_sav > 0.4:
 			# savanna: a thin trunk under a wide, flat crown
 			if not _crown_clear(x, z, sc * 2.4):
@@ -1069,7 +1125,7 @@ func _trees(ox: float, oz: float) -> void:
 				continue
 			var th := sc * (1.1 + rnd.next() * 0.6)
 			ceil_h = h + th + sc * 1.8
-			put("trunk", x, h - 0.1, z, sc, th + 0.3, sc, yaw)
+			put("trunk_pale" if rnd.next() < 0.6 else "trunk", x, h - 0.1, z, sc, th + 0.3, sc, yaw)
 			put("blob", x, h + th + sc * 0.7, z, sc * 1.2, sc * 1.05, sc * 1.2, yaw, LEAVES[int(rnd.next() * LEAVES.size())], 0.6)
 			if rnd.next() < 0.5:
 				var bx := x + (rnd.next() - .5) * sc

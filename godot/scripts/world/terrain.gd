@@ -813,11 +813,12 @@ func _unload(k: Vector2i) -> void:
 
 const LIST_SPEC := {
 	# name: [mesh, material, cast shadow, small clutter]
-	"trunk": ["trunk", "trunk", true, false], "blob": ["blob", "leafSoft", true, false], "pine": ["pine", "leaf", true, false],
+	"trunk": ["trunk", "trunk", true, false], "trunk_pale": ["trunk", "trunk_pale", true, false], "trunk_pine": ["trunk", "trunk_pine", true, false],
+	"blob": ["blob", "leafSoft", true, false], "pine": ["pine", "leaf", true, false],
 	"rock": ["rock", "rock", true, false], "pebble": ["pebble", "rock", false, true], "grass": ["grass", "flower", false, true],
 	"daisy": ["daisy", "flower", false, true], "tulip": ["tulip", "flower", false, true], "spike": ["spike", "flower", false, true],
-	"bush": ["bush", "leafSoft", true, false], "log": ["log", "trunk", true, false], "weed": ["weed", "tuft", false, false],
-	"stick": ["stick", "trunk", false, true], "fern": ["fern", "flower", false, true], "mushroom": ["mushroom", "flower", false, true],
+	"bush": ["bush", "leafSoft", true, false], "log": ["log", "trunk_plain", true, false], "weed": ["weed", "tuft", false, false],
+	"stick": ["stick", "trunk_plain", false, true], "fern": ["fern", "flower", false, true], "mushroom": ["mushroom", "flower", false, true],
 	"cactus0": ["cactus0", "cactus", true, false], "cactus1": ["cactus1", "cactus", true, false], "cactus2": ["cactus2", "cactus", true, false],
 	"cactus3": ["cactus3", "cactus", true, false], "cactus4": ["cactus4", "cactus", true, false],
 	"plank": ["box", "wood", true, false], "beam": ["box", "wood", true, false],
