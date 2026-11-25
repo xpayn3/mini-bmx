@@ -118,6 +118,9 @@ func _shadow_fit() -> void:
 ## (shaders/deco_fade.gdshaderinc): inside the 144 m the loaded chunks always cover, so chunks never pop in
 const DECO_FADE_IN := 100.0
 const DECO_FADE_OUT := 124.0
+## the ground crossfade: real chunk ground full until x, gone by y m from the rider. The loaded chunk square always covers
+## >= 144 m (Terrain.RADIUS 3 x 48 m, less the rider's offset in his chunk), so the band ends there. BMX_GROUND_FADE=in,out (0,0 = off)
+var _ground_band := Vector2(105.0, 144.0) if Env.s("BMX_GROUND_FADE") == "" else Vector2(float(Env.s("BMX_GROUND_FADE").split(",")[0]), float(Env.s("BMX_GROUND_FADE").split(",")[1]))
 var _deco_band := Vector2(DECO_FADE_IN, DECO_FADE_OUT) if Env.s("BMX_DECO_FADE") == "" 	else Vector2(float(Env.s("BMX_DECO_FADE").split(",")[0]), float(Env.s("BMX_DECO_FADE").split(",")[1]))   # test: in,out
 const MIST_DEEP := 2.0      # the mist top sits this far over the low ground round the rider's path
 const MIST_CLEAR_FULL := 8.0   # the rider this far above the mist top: full mist
@@ -3233,6 +3236,7 @@ func _exit_tree() -> void:
 	if ghost: ghost.end_run()   # (the run so far may be the new best)
 	Engine.time_scale = 1.0
 	RenderingServer.global_shader_parameter_set("deco_fade", Vector4.ZERO)   # no ride: decorations unfaded (garage)
+	RenderingServer.global_shader_parameter_set("ground_fade", Vector4.ZERO)
 	if rumble: rumble.stop()
 
 # tests (BMX_DAB_PROBE): per-frame shoe moves on the bike, the sole's lowest point vs the ground
@@ -3688,6 +3692,8 @@ func _process(dt: float) -> void:
 	terrain.shadow_reach = sun.directional_shadow_max_distance
 	# streamed decorations dissolve out / the far backdrop's trees in over this band round the rider (no pop-in)
 	RenderingServer.global_shader_parameter_set("deco_fade", Vector4(st.x, st.z, _deco_band.x, _deco_band.y))
+	# the real ground dissolves out / the far backdrop's ground in over this band (shaders/ground + far_hills.gd): no hard edge
+	RenderingServer.global_shader_parameter_set("ground_fade", Vector4(st.x, st.z, _ground_band.x, _ground_band.y) if _ground_band.y > 0.0 else Vector4.ZERO)
 	terrain.update_stream(st.x, st.z, 4.0)
 	_pk = _perf("terrain_stream", _pk)
 	if not phys.crash_on and hud and hud.life < 1.0:   # a full-health rider rolls past a pack and leaves it

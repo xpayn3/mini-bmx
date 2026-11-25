@@ -42,6 +42,8 @@ uniform float bake_near = 45.0;
 uniform int trail_debug = 0;       // 2..4 = the baked road (2 lines / grit / prints, 3 relief slope + stones, 4 which level); 1 = show the mask layers: r driven, g loose, b puddle (wet rim dimmer), white tyre prints, yellow run-off skids, magenta stray lines, cyan playful marks
 varying vec3 v_world;
 // the grass carpet's window (world/grass_field.gd): a = how much grass grows here; info = origin xz, texel, radius (0 = off)
+// the crossfade to the far backdrop (world/far_hills.gd draws the other half of every pixel): xy rider xz, z = full until, w = gone by
+global uniform vec4 ground_fade;
 global uniform sampler2D grass_win : filter_linear;
 global uniform vec4 grass_win_info;
 // ripples in the road's puddles (game.gd puddle_wake, the same compute wake as the lake): window centre xz, span m, cell m; z = 0 off
@@ -143,6 +145,11 @@ void vertex() {
 }
 
 void fragment() {
+	if (ground_fade.w > 0.0 && PROJECTION_MATRIX[3][3] < 0.5) {   // (the sun's shadow pass keeps the whole ground)
+		float gk = 1.0 - smoothstep(ground_fade.z, ground_fade.w, distance(v_world.xz, ground_fade.xy));
+		float gn = fract(52.9829189 * fract(dot(FRAGCOORD.xy, vec2(0.06711056, 0.00583715))));
+		if (gn >= gk) discard;   // far_hills.gd discards the exact opposite pixels: every pixel is drawn once
+	}
 	vec4 gA = texture(land_tex, UV), gB = texture(dirt_tex, UV);
 	vec3 P = v_world;
 	float gpx = length(fwidth(P.xz));

@@ -29,17 +29,31 @@ uniform float inner_half = 168.0;
 uniform float sink = 5.0;
 uniform float ridge_near = 420.0;
 uniform float ridge_far = 1500.0;
+global uniform vec4 ground_fade;   // xy rider xz, z = real ground full until, w = gone by (w <= 0: off, the old hard square)
+varying vec3 wp;
 void vertex() {
 	float k = smoothstep(ridge_near, ridge_far, length(VERTEX.xz - rider.xz));
 	VERTEX.y += k * CUSTOM0.w;
 	NORMAL = normalize(mix(CUSTOM0.xyz, NORMAL, k));
-	vec2 q = abs(VERTEX.xz - inner_c);
-	float qm = max(q.x, q.y);
-	// well inside the streamed square the real chunks are certainly there: go deep so no spike of the coarse
-	// copy (a thin ridge / causeway / cliff sampled on a 20 m grid) can ever show through the real ground
-	if (qm < inner_half) VERTEX.y -= sink + 60.0 * (1.0 - smoothstep(inner_half * 0.4, inner_half * 0.65, qm));
+	wp = VERTEX;
+	if (ground_fade.w > 0.0) {
+		// crossfade: no sink at all. Every pixel is drawn by either this copy or the real ground (opposite dither
+		// patterns in the band, this copy none inside it), and this copy casts no shadow, so it cannot show through
+		// (the old 5 m sink was the visible step at the edge of the loaded square)
+	} else {
+		vec2 q = abs(VERTEX.xz - inner_c);
+		float qm = max(q.x, q.y);
+		// well inside the streamed square the real chunks are certainly there: go deep so no spike of the coarse
+		// copy (a thin ridge / causeway / cliff sampled on a 20 m grid) can ever show through the real ground
+		if (qm < inner_half) VERTEX.y -= sink + 60.0 * (1.0 - smoothstep(inner_half * 0.4, inner_half * 0.65, qm));
+	}
 }
 void fragment() {
+	if (ground_fade.w > 0.0 && PROJECTION_MATRIX[3][3] < 0.5) {
+		float gk = 1.0 - smoothstep(ground_fade.z, ground_fade.w, distance(wp.xz, ground_fade.xy));
+		float gn = fract(52.9829189 * fract(dot(FRAGCOORD.xy, vec2(0.06711056, 0.00583715))));
+		if (gn < gk) discard;   // the real ground (shaders/ground) draws exactly these pixels
+	}
 	ALBEDO = COLOR.rgb;
 	ROUGHNESS = 1.0;
 }
