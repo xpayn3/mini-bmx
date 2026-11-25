@@ -262,6 +262,9 @@ func _rear_shock() -> bool:
 ## ...and a sprung fork to dive (a rigid fork, or no setup, doesn't)
 func _sprung_fork() -> bool:
 	return not sus.is_empty() and (host.susp == null or host.susp.has_f)
+const SHORT_FROM := 0.7; const SHORT_TO := 1.3   # s of whole flight: short below SHORT_FROM, as before from SHORT_TO
+const SHORT_DELAY := 0.25; const SHORT_RAMP := 0.3; const SHORT_HELP := 0.9; const SHORT_SPEED := 40.0   # (short flights: when / how fast / how firmly he aims)
+var _OLD_SHORTAIM := OS.get_environment("BMX_OLD_SHORTAIM") != ""   # (tests: the same slow hands-off aim on every flight)
 var _OLD_FADE := OS.get_environment("BMX_OLD_FADE") != ""       # (tests: before the brakes could fade)
 var _HEAT_HOLD := float(OS.get_environment("BMX_HEAT")) if OS.get_environment("BMX_HEAT") != "" else 0.0
 var _OLD_SUSPFX := OS.get_environment("BMX_OLD_SUSPFX") != ""   # (tests: before dive steering, pedal bob and kickback)
@@ -2291,11 +2294,23 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 					# landing (stiffer) only in the last moments
 					# (a bike that has turned well away from the landing slope is brought back at once)
 					var off_k := clampf((absf(tgt) - 0.3) / 0.3, 0.0, 1.0)
-					var aim_k: float = maxf(maxf(smooth01((air_time - float(T.get("airAimDelay", 1.0))) / 0.5), land_prep), off_k)
+					# a SHORT flight has no time for the slow hands-off aim (it held the take-off attitude for airAimDelay s and
+					# came down nose-up): the shorter the whole flight (so far + the predicted rest), the sooner, firmer and
+					# quicker he levels the bike. Flights over ~1.3 s are as before
+					var aim_delay: float = float(T.get("airAimDelay", 1.0))
+					var aim_ramp := 0.5
+					var short_k := 0.0
+					if not _OLD_SHORTAIM and not is_nan(_land_pitch) and _land_t > 0.0:
+						var tot: float = air_time + _land_t
+						short_k = (1.0 - smooth01((tot - SHORT_FROM) / (SHORT_TO - SHORT_FROM))) * clampf(float(T.get("shortAim", 0.0)), 0.0, 1.0)
+						aim_delay = lerpf(aim_delay, SHORT_DELAY * tot, short_k)
+						aim_ramp = lerpf(aim_ramp, SHORT_RAMP * tot, short_k)
+					var aim_k: float = maxf(maxf(smooth01((air_time - aim_delay) / maxf(aim_ramp, 0.05)), land_prep), off_k)
 					# (a pro flight: the pull-up owns the first part of it; the ground still under the bike just off the lip is
 					# the face / deck, "far from the landing slope" brought it straight back and cancelled the pull)
 					if pro_flight and not _OLD_PULLUP: aim_k = maxf(smooth01((air_time - PULL_HOLD) / 0.35), land_prep)
-					tgt *= aim_k * (maxf(air_help, 0.95 * (1.0 - _air_own)) if (pro_flight and not _OLD_PULLUP) else air_help)   # landing help: hands off only, airAssist of it (a pro flight: he puts it down himself)
+					var help_s: float = lerpf(air_help, maxf(air_help, SHORT_HELP * (1.0 - _air_own) * (1.0 if air_help > 0.0 else 0.0)), short_k)
+					tgt *= aim_k * (maxf(air_help, 0.95 * (1.0 - _air_own)) if (pro_flight and not _OLD_PULLUP) else help_s)   # landing help: hands off only, airAssist of it (a pro flight: he puts it down himself)
 					# (2026-11-23, slow motion of a pro, research/jump) a popped take-off: he pulls the bars to his waist as the
 					# legs straighten, the bike leaves pointing well above the lip (35-45 deg off a ~25 deg one) and he holds
 					# it there a moment before he levels it for the landing. AIR_PULL_UP x how good the pop was, gone as the
@@ -2304,7 +2319,7 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 					if not _OLD_PULLUP and _air_pop > 0.0:
 						_pull_k = smooth01((air_time - 0.02) / 0.12) * (1.0 - aim_k)
 						tgt += AIR_PULL_UP * _air_pop * _pull_k
-					kt_base = lerpf(lerpf(float(T.get("airAimSpeed", 14.0)), 45.0, off_k), 70.0, land_prep)
+					kt_base = lerpf(lerpf(lerpf(float(T.get("airAimSpeed", 14.0)), SHORT_SPEED, short_k), 45.0, off_k), 70.0, land_prep)
 				# (video 2: "curl the toes, scoop the back end up, level out the bike": hands off he may bring the nose further DOWN
 				# for the landing than the arms alone tilt it, SCOOP_TILT more. The front comes up off a lip now and short flights
 				# landed 40-55 deg nose up. BMX_OLD_LIPLOAD=1)

@@ -179,6 +179,7 @@ const DEFS := [
 		["airAimDelay", "Wait before aiming at the landing", 1.0, 0, 2, 0.05, "s"],
 		["airAimSpeed", "Aim at the landing: softness", 14, 4, 70, 1, ""],
 		["airAssist", "Landing help in the air, hands off (0 = all yours)", 0.6, 0, 1, 0.05, ""],
+		["shortAim", "Short hops: how much sooner he lines the bike up (0 = off)", 0.0, 0, 1, 0.05, ""],
 	]],
 	["Speed", [
 		["topSpeed", "Top speed", 1.2, 0.5, 2.0, 0.05, "×"],
