@@ -822,6 +822,7 @@ const LIST_SPEC := {
 	# thin fence / tape parts: their shadows are a few pixels wide but each is a draw call in every cascade
 	"post": ["post", "fence", false, false], "rail": ["rail", "fence", false, false], "picket": ["picket", "fence", false, false],
 	"stake": ["stake", "stake", false, false],
+	"pole": ["pole", "fence", true, false], "signboard": ["signboard", "signboard", true, false],
 }
 
 
@@ -893,9 +894,13 @@ func _panel_labels(p: Dictionary, node: Node3D) -> void:
 		var bbs: Array = [p["bb"]]
 		bbs.append_array(p.get("bb_more", []))
 		for bb: Dictionary in bbs:
-			for s in [1.0, -1.0]:
+			for s in ([1.0] if bb.get("one_side", false) else [1.0, -1.0]):
 				var bas: Basis = bb["basis"] if s > 0 else Basis(Vector3.UP, PI) * bb["basis"]
-				var lb := TrailGate.label(bb["text"], bb["col"], bb["w"], bb["h"], bas, bb["at"] + bb["nrm"] * 0.055 * s)
+				var lb := TrailGate.label(bb["text"], bb["col"], bb["w"], bb["h"], bas, bb["at"] + bb["nrm"] * float(bb.get("off", 0.055)) * s)
+				if bb.get("font", "") == "black":
+					lb.font = UITheme.font(true)
+					# h = cap height, w = the most it may span: 0.7 = Barlow Black's cap height, ~0.62 em a glyph
+					lb.pixel_size = minf(bb["h"] / 0.7, bb["w"] / (maxf(String(bb["text"]).length(), 3) * 0.62)) / 200.0
 				node.add_child(lb)
 				p["labels"].append(lb)
 

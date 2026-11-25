@@ -12,7 +12,7 @@ const S := 48.0
 const JC := 34.0
 const SMALL := ["pebble", "grass", "daisy", "tulip", "spike", "stick", "fern", "mushroom"]
 const LIST_NAMES := ["trunk", "blob", "pine", "rock", "pebble", "grass", "daisy", "tulip", "spike", "cactus0", "cactus1", "cactus2", "cactus3", "cactus4",
-	"bush", "bush1", "bush2", "bushdry", "log", "stick", "fern", "mushroom", "weed", "plank", "beam", "post", "rail", "picket", "stake"]
+	"bush", "bush1", "bush2", "bushdry", "log", "stick", "fern", "mushroom", "weed", "plank", "beam", "post", "rail", "picket", "stake", "pole", "signboard"]
 const SPAN := 2.4
 const TAPE_SEG := 30
 const TAPE_W := 0.075
@@ -821,7 +821,7 @@ func _boards() -> void:
 		panels.append(panel)
 
 
-## distance tables: a small square low-poly sign on a stick beside the road every 5 km, each leaning
+## distance tables: a square printed plate on a plain stick beside the road every 5 km, each leaning
 ## a little differently (smashable like the billboards)
 func _dist_signs() -> void:
 	var C: TrailCourse = f.course
@@ -864,30 +864,31 @@ func _dist_signs() -> void:
 		var panel := {"broken": false, "parts": [], "style": "billboard"}
 		var add := func(kind: String, off: Vector3, scl: Vector3, c: Color) -> void:
 			var bs := _scaled(rb, scl.x, scl.y, scl.z)
-			var pos: Vector3 = base + R * off
+			var pos: Vector3 = base + rb * off   # in the sign's own (yawed + leaning) frame
 			var k := _push(kind, bs, pos, c)
 			panel["parts"].append({"kind": kind, "i": k, "col": c, "xform": Transform3D(bs, pos), "scale": scl})
-		# design (Figma "table sign"): blue field with the distance in white, white strip with DISTANCE in dark grey
-		var white_c := TerrainField.lin(0xffffff)
-		white_c.a = 1.0
-		var blue_c := TerrainField.lin(0x0004ff)
-		blue_c.a = 1.0
+		# a plain square stick with a thin printed plate bolted to its front, like a real roadside sign. The plate
+		# carries the Figma "table sign" design (assets/signs/distance_board.png: blue field + DISTANCE strip);
+		# the km number is a Label3D on the blue field
 		var post_c := TerrainField.lin(0x6b4a30)
-		# the stick ends at the table's bottom edge (y 1.1): the table sits on top of it, nothing pokes through
-		# (mesh is 1.1 tall with a pointed top: 0.0 .. 1.1 + a tip hidden inside the board)
-		add.call("post", Vector3(0, 0.58, 0), Vector3(0.7, 1.1, 0.5), post_c)
-		add.call("rail", Vector3(0, 1.505, 0), Vector3(0.81, 0.81, 0.07), white_c)
-		add.call("rail", Vector3(0, 1.596, 0), Vector3(0.81, 0.628, 0.09), blue_c)
+		const PLATE := 0.8      # m, square
+		const PLATE_T := 0.02   # plate thickness
+		const POLE := 0.07      # stick cross-section
+		const PLATE_Y := 1.45   # plate centre above the ground
+		var top := PLATE_Y + PLATE / 2 - 0.04
+		add.call("pole", Vector3(0, (top - 0.15) / 2, 0), Vector3(POLE, top + 0.15, POLE), post_c)   # ground (-0.15) .. just under the plate top
+		var plate_z := POLE / 2 + PLATE_T / 2 + 0.002
+		add.call("signboard", Vector3(0, PLATE_Y, plate_z), Vector3(PLATE, PLATE, PLATE_T), Color.WHITE)
 		colliders.append({"x": bx, "z": bz, "r": 0.3, "fence": panel, "fence_style": "billboard"})
 		var nrm: Vector3 = R * Vector3(fx, 0, fz)
 		var km := int(round(float(i) * 2.0 / 1000.0))
 		panel["cx"] = bx
 		panel["cz"] = bz
 		var lb := R * Basis(Vector3(fz, 0, -fx), Vector3.UP, Vector3(fx, 0, fz))
-		panel["bb"] = {"text": "%dKM" % km, "col": Color.WHITE, "w": 0.74, "h": 0.34,
-			"basis": lb, "at": base + R * Vector3(0, 1.596, 0), "nrm": nrm}
-		panel["bb_more"] = [{"text": "DISTANCE", "col": Color.html("#313131"), "w": 0.7, "h": 0.1,
-			"basis": lb, "at": base + R * Vector3(0, 1.191, 0), "nrm": nrm}]
+		# the design's number: caps 26 % of the plate tall, centred 12.7 % above the middle, at most 90 % wide
+		panel["bb"] = {"text": "%dKM" % km, "col": Color.WHITE, "w": PLATE * 0.9, "h": PLATE * 0.26, "font": "black",
+			"one_side": true, "off": PLATE_T / 2 + 0.003,
+			"basis": lb, "at": base + rb * Vector3(0, PLATE_Y + PLATE * 0.127, plate_z), "nrm": nrm}
 		if OS.get_environment("BMX_GATE_PROBE") != "":
 			print("DISTSIGN i=", i, " at ", bx, ",", h, ",", bz)
 		panels.append(panel)
