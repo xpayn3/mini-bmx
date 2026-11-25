@@ -67,8 +67,7 @@ func _ready() -> void:
 		_svc = null
 
 func _process(dt: float) -> void:
-	if not on: return
-	_svc.Tick()
+	if on: _svc.Tick()
 	_poll += dt
 	if _poll > 1.0:
 		_poll = 0.0
@@ -79,15 +78,28 @@ func _exit_tree() -> void:
 	on = false
 
 func _check_records() -> void:
+	Collection.check()
 	for id in ACHIEVEMENTS:
 		var a: Array = ACHIEVEMENTS[id]
 		if a[2] == "rec" and float(GameState.records.get(a[3], 0.0)) >= float(a[4]):
 			unlock(id)
 
-## unlocks once; true if it was new
+## cash for earning an achievement (the big ones pay more)
+const REWARDS := {"FIRST_DROP": 100, "GARAGE": 150, "PHOTO": 150, "HEALTH_PACK": 150, "AIR_1S": 200, "FLIP": 300, "SPIN_360": 300,
+	"LONG_20": 300, "SPEED_60": 300, "WASTED": 150, "REVIVE": 250, "FAKIE": 400, "HIGH_8": 400, "AIR_3S": 600, "DIST_10K": 500,
+	"JUMPS_100": 600, "LONG_50": 800, "SPIN_720": 800, "SPEED_80": 1000, "DIST_100K": 2000}
+static func reward(id: String) -> int:
+	return int(REWARDS.get(id, 250))
+
+## unlocks once; true if it was new. Always kept in the player's own save (the profile page lists them), and on Steam too when it runs.
 func unlock(id: String) -> bool:
-	if not on or not ACHIEVEMENTS.has(id): return false
-	return _svc.Unlock(id)
+	if not ACHIEVEMENTS.has(id): return false
+	var fresh := not GameState.achieved.has(id)
+	if fresh:
+		GameState.achieved[id] = int(Time.get_unix_time_from_system())
+		GameState.earn(reward(id), "Achievement: " + String(ACHIEVEMENTS[id][0]))
+	var steam_new: bool = on and _svc.Unlock(id)
+	return fresh or steam_new
 
 ## an "event" achievement happened (safe to call every time)
 func event(id: String) -> void:
@@ -95,7 +107,7 @@ func event(id: String) -> void:
 
 ## a landed trick by its HUD name ("360 BACKFLIP", "FAKIE!"...)
 func trick(name: String) -> void:
-	if not on: return
+	Collection.note_trick(name)
 	var up := name.to_upper()
 	for id in ACHIEVEMENTS:
 		var a: Array = ACHIEVEMENTS[id]

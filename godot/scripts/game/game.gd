@@ -1299,35 +1299,28 @@ func _to_hilltop() -> void:
 	cam.snap_to(Vector3(sp.x, phys.y + 0.5, sp.y))
 	_title_heading = sp.z + TITLE_TURN   # the bike turned so the camera looks out over the long drop, away from the sun
 
-## title screen: the game's name as a Hollywood-style sign on the skyline behind the rider, in the camera's view
+## title screen: the game's name as a Hollywood-style sign close behind the rider, in the camera's view. The hill falls away
+## in front of the summit, so the letters stand on a gantry (beam + posts down to the hillside) at about the rider's height
+const SIGN_D := 170.0       # metres from the rider along the camera's view axis
+const SIGN_SIDE := 0.10     # sideways as a share of the distance (+ = right on screen)
+const SIGN_H := 0.075       # letter height as a share of the distance (the lookout lens is narrow: the whole word fits)
+const SIGN_UP := 7.0        # the letters' feet above the camera's eye
 func _make_title_sign(best: float) -> void:
 	if title_sign != null: title_sign.queue_free()
-	if Env.s("BMX_NO_SIGN") != "" or far_hills == null: return
+	if Env.s("BMX_NO_SIGN") != "": return
+	var d := SIGN_D; var side_k := SIGN_SIDE; var h_k := SIGN_H; var up := SIGN_UP
+	if Env.s("BMX_SIGN") != "":   # tests: distance, side share, height share, feet above the eye
+		var q := Env.s("BMX_SIGN").split_floats(",")
+		d = q[0]; side_k = q[1]; h_k = q[2]; up = q[3]
 	var yaw := best + float(CameraRig.VISTA.get("yaw_off", 0.0))
 	var dir := Vector3(cos(yaw), 0.0, -sin(yaw))
 	var right := Vector3(-dir.z, 0.0, dir.x)
-	var eye := Vector3(phys.x, phys.y + 1.2, phys.z)
-	var eye2 := Vector2(eye.x, eye.z)
-	var fh := far_hills
-	var ground := func(x: float, z: float) -> float: return fh.surface_h(x, z, eye2)
-	var side := 230.0; var frac := 0.10; var d_lo := 250.0; var d_hi := 1150.0
-	if Env.s("BMX_SIGN") != "":   # tests: side metres, share of the frame height, nearest + farthest distance
-		var q := Env.s("BMX_SIGN").split_floats(",")
-		side = q[0]; frac = q[1]; d_lo = q[2]; d_hi = q[3]
-	# the skyline along the view axis: the point with the highest angle above the eye
-	var best_d := d_lo; var best_a := -INF
-	var d := d_lo
-	while d <= d_hi:
-		var p := Vector2(eye.x, eye.z) + Vector2(dir.x, dir.z) * d + Vector2(right.x, right.z) * side
-		var a: float = (ground.call(p.x, p.y) - eye.y) / d
-		if a > best_a: best_a = a; best_d = d
-		d += 15.0
-	var c := Vector2(eye.x, eye.z) + Vector2(dir.x, dir.z) * best_d + Vector2(right.x, right.z) * side
-	var h := frac * 2.0 * best_d * tan(deg_to_rad(9.0))   # letter height: a share of the lookout lens's frame height there
+	var t: Terrain = terrain
+	var c := Vector2(phys.x, phys.z) + Vector2(dir.x, dir.z) * d + Vector2(right.x, right.z) * side_k * d
+	var ground := func(x: float, z: float) -> float: return t.height(x, z)
 	title_sign = TitleSign.new()
 	add_child(title_sign)
-	title_sign.build(ground, c, -dir, h)
-	if Env.s("BMX_SIGN_PROBE") != "": print("SIGN dist=", best_d, " h=", h, " ground=", ground.call(c.x, c.y), " eye_y=", eye.y)
+	title_sign.build(ground, c, -dir, h_k * d, phys.y + 1.2 + up)
 
 func _apply_settings() -> void:
 	terrain.set_view_scale(float(Settings.get_v("view_distance")))

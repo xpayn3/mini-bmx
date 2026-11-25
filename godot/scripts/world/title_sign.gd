@@ -11,7 +11,9 @@ const FONT_PX := 100
 const PIX := 0.01           # 100 px * 0.01 = a 1 m em: the mesh is scaled up to LETTER_H
 
 ## `center` = the middle of the sign on the ground (x, z); `to_cam` = unit vector (xz) from the sign to the camera
-func build(ground: Callable, center: Vector2, to_cam: Vector3, h: float) -> void:
+## `base_y` = height of the letters' feet (world y): the ground often falls away, so the letters stand on a steel beam
+## held up by posts that run down to the hillside (a billboard gantry)
+func build(ground: Callable, center: Vector2, to_cam: Vector3, h: float, base_y: float) -> void:
 	var font: Font = UITheme.file("BarlowCondensed-Black")
 	var yaw := atan2(to_cam.x, to_cam.z)
 	var right := Vector3(to_cam.z, 0.0, -to_cam.x)   # the sign's own +X (seen from the camera, left to right)
@@ -26,6 +28,16 @@ func build(ground: Callable, center: Vector2, to_cam: Vector3, h: float) -> void
 	steel.albedo_color = Color(0.32, 0.33, 0.36)
 	steel.roughness = 0.7
 	var n := WORD.length()
+	var span := (n - 1) * pitch + h * 0.7
+	var beam := MeshInstance3D.new()
+	var bmesh := BoxMesh.new()
+	bmesh.size = Vector3(span, 1.0, 1.6)
+	beam.mesh = bmesh
+	beam.material_override = steel
+	beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(beam)
+	beam.position = Vector3(center.x, base_y - 0.5, center.y)
+	beam.rotation.y = yaw
 	for i in n:
 		var off := (i - (n - 1) * 0.5) * pitch
 		var at := Vector3(center.x, 0.0, center.y) + right * off
@@ -53,17 +65,23 @@ func build(ground: Callable, center: Vector2, to_cam: Vector3, h: float) -> void
 		for s in 5:
 			var p := at + right * (s / 4.0 - 0.5) * w
 			low = minf(low, ground.call(p.x, p.z))
-		holder.position = Vector3(at.x, low - 0.6, at.z)
+		holder.position = Vector3(at.x, base_y, at.z)
 		add_child(holder)
+		# two posts from the hillside up to the beam under this letter, crossed by a brace
+		var foot_l: float = ground.call(at.x - right.x * w * 0.3, at.z - right.z * w * 0.3)
+		var foot_r: float = ground.call(at.x + right.x * w * 0.3, at.z + right.z * w * 0.3)
+		_strut(holder, steel, Vector3(-w * 0.3, 0.0, -SLAB), Vector3(-w * 0.3, foot_l - 1.0 - base_y, -SLAB), 0.9)
+		_strut(holder, steel, Vector3(w * 0.3, 0.0, -SLAB), Vector3(w * 0.3, foot_r - 1.0 - base_y, -SLAB), 0.9)
+		_strut(holder, steel, Vector3(-w * 0.3, (foot_l - base_y) * 0.15, -SLAB), Vector3(w * 0.3, (foot_r - base_y) * 0.55, -SLAB), 0.45)
 		holder.add_child(mi)
 		# two braces from the back of the letter down to the hill
 		for sx in [-0.28, 0.28]:
 			_strut(holder, steel, Vector3(sx * w, h * 0.72, -SLAB * 0.5), Vector3(sx * w * 1.2, 0.0, -h * 0.42))
 
-func _strut(parent: Node3D, m: Material, a: Vector3, b: Vector3) -> void:
+func _strut(parent: Node3D, m: Material, a: Vector3, b: Vector3, thick := 0.45) -> void:
 	var bm := BoxMesh.new()
 	var len := a.distance_to(b)
-	bm.size = Vector3(0.45, 0.45, len)
+	bm.size = Vector3(thick, thick, len)
 	var mi := MeshInstance3D.new()
 	mi.mesh = bm
 	mi.material_override = m

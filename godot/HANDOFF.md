@@ -1475,6 +1475,29 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   text). Never write a font name in code: go through `UITheme`. Specimen sheet of every face: `res://tools/font_specimen.tscn -- out.png`.
   Metrics differ from Bahnschrift: place display text by cap height (the title logo does), not by ascent. Credits lists all four OFL families.
 
+### Rider profile, wallet, goals, badges, cards (2026-11-25, user: "Strava / Zwift-like profile ... game logic that brings players back")
+- **Title menu**: the RIDER line and the RUNOUT logo are gone from the card. Top right: wallet chip (`Shop.fmt(GameState.money)`) + avatar button
+  (`ui/profile_icon.gd`, red dot = something to claim) + gear + QUIT; both open the profile. The game's name is a big white **hillside-style sign
+  behind the rider** (`world/title_sign.gd`, made by `Game._make_title_sign`: letters on a gantry at rider height, `BMX_NO_SIGN=1` off).
+- **Profile** (`ui/profile_page.gd`, `ProfilePage`, full screen, dark, `BMX_MENU_PAGE=profile BMX_PROFILE_TAB=0..4`): left = the rider as a magazine
+  hero shot (`BikeTurntable.hero_stage`: low close camera, wide lens, rim lights, standing idle), level ring + name (click to rename) on top,
+  CUSTOMIZE RIDER (opens the rider room) + XP bar at the bottom; wallet top right. Tabs: OVERVIEW (week ring, streaks, claimable, stats, 12 weeks),
+  GOALS, BADGES, CARDS, WALLET (ledger). Numbers count up / rings fill / cards fade in. LB / RB change tab on a pad.
+- **Money** (`GameState.earn / spend / wallet_log`, 60-entry ledger, `records.earned`): rides pay `RIDE_RATE` $0.03 / m as you go (one growing "Ride"
+  line), the day's first activity pays a **daily bonus** ($50 + $25 x streak day, max 10), goals + badges + cards pay on collecting; `buy()` logs
+  shop spends. Prices are the shop's ($6k-23k bikes), so a long ride is ~$300.
+- **Goals** (`core/goals.gd`): weekly (distance = 10 % over the last 4 weeks' average, 3 rides, 3 active days) and monthly (4x distance, 12 days,
+  20 rides), progress read from `GameState.days`; pay only when CLAIMED in the profile (`GameState.claimed`). `Goals.claimable()` drives the dot.
+- **Badges** = performance milestones (`Steam.ACHIEVEMENTS`, 20; now recorded locally in `GameState.achieved` whether or not Steam runs, each pays
+  `Steam.REWARDS`): drawn as medals (`Collection.badge_tier/colour/glyph`: bronze .. platinum by reward), click one -> 3D metal medal you drag to spin
+  (`ui/collect_stage.gd` `show_badge`). **Cards** = collectibles for variety (`core/collection.gd`, 18): a card per bike ridden, per trick family landed,
+  streaks (3 / 7 / 14 days, 4 / 12 weeks), a legendary for all badges; rarity common..legendary sets cash + foil strength; collected by
+  `Collection.check()` (runs with `Steam._check_records`). Card art = `ui/card_face.gd` (drawn once, cached); the viewer
+  (`CollectStage.show_card`) is a 3D quad with a holo foil shader (rainbow, sparkle, glare that follow the tilt toward the mouse). Tracking:
+  `GameState.tricks_seen / bikes_ridden / cards / records.best_streak`. Saved in save.cfg.
+- Not done: card pack / reveal animation, sound for claiming, per-biome cards, mouse tilt of the grid thumbnails, tests with a real mouse
+  (the tilt was checked by the shader's static look only), cloud save.
+
 ### Title screen (golden hour lookout)
 - `Game.set_scenic(true)` while the menu is up: a low warm sun ahead-right of the view, golden sky mode in
   `sky_hdri.gdshader` (`golden`: warm gradient + sun glow, the HDRI's clouds re-lit), warm long fog.

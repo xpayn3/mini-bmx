@@ -343,6 +343,34 @@ func _show_menu() -> void:
 	gear.offset_left = Tokens.S3; gear.offset_top = Tokens.S3; gear.offset_right = -Tokens.S3; gear.offset_bottom = -Tokens.S3
 	menu_settings.add_child(gear)
 	menu.add_child(menu_settings)
+	# PROFILE: the rider's avatar just left of the gear: the profile page (stats, rider look, achievements)
+	menu_profile = UITheme.make_button("", _open_profile, "secondary", Tokens.T_LG)
+	menu_profile.tooltip_text = "Rider profile"
+	menu_profile.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	menu_profile.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	menu_profile.offset_right = menu_settings.offset_left - Tokens.S3; menu_profile.offset_top = MENU_EDGE
+	menu_profile.offset_left = menu_profile.offset_right - bh; menu_profile.offset_bottom = MENU_EDGE + bh
+	var avatar := ProfileIcon.new()
+	avatar.set_anchors_preset(Control.PRESET_FULL_RECT)
+	avatar.offset_left = Tokens.S2; avatar.offset_top = Tokens.S2; avatar.offset_right = -Tokens.S2; avatar.offset_bottom = -Tokens.S2
+	menu_profile.add_child(avatar)
+	menu_avatar = avatar
+	menu.add_child(menu_profile)
+	# WALLET: the balance as a chip left of the avatar (opens the profile too)
+	menu_wallet = UITheme.make_button("", _open_profile, "secondary", Tokens.T_LG)
+	menu_wallet.tooltip_text = "Wallet"
+	menu_wallet.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	menu_wallet.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	menu_wallet.offset_right = menu_profile.offset_left - Tokens.S3; menu_wallet.offset_top = MENU_EDGE
+	menu_wallet.offset_left = menu_wallet.offset_right - 150; menu_wallet.offset_bottom = MENU_EDGE + bh
+	menu_wallet_l = UITheme.display("", Tokens.T_XL, Tokens.INK, Tokens.SLANT)
+	menu_wallet_l.set_anchors_preset(Control.PRESET_FULL_RECT)
+	menu_wallet_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	menu_wallet_l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	menu_wallet_l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	menu_wallet.add_child(menu_wallet_l)
+	menu.add_child(menu_wallet)
+	_update_profile_hud()
 	# version: small, bottom right of the screen, just left of the fullscreen button and centred on it
 	menu_version = UITheme.text("v%s  ·  Godot %s" % [ProjectSettings.get_setting("application/config/version", "1.0.0"), Engine.get_version_info().string], Color(1, 1, 1, 0.8), Tokens.T_XS)
 	menu_version.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
@@ -359,6 +387,7 @@ func _show_menu() -> void:
 	else: _menu_page_main()
 	_menu_after = ""
 	if Env.s("BMX_MENU_PAGE") == "setup": _menu_page_setup(int(Env.s("BMX_SETUP_STEP")))   # tests: the ride setup page (BMX_SETUP_STEP=0..3)
+	if Env.s("BMX_MENU_PAGE") == "profile": _open_profile.call_deferred()   # tests: the rider profile
 	if Env.s("BMX_MENU_PAGE") == "credits": _show_credits()   # tests: the credits window
 	if Env.s("BMX_MENU_PAGE") == "levels": _menu_page_levels()   # tests: the LEVELS page
 	if PartThumbs.BAKE != "" and not _baking:
@@ -393,6 +422,10 @@ func _bake_menu_thumbs() -> void:
 
 var menu_quit: Button
 var menu_settings: Button
+var menu_profile: Button
+var menu_avatar: ProfileIcon
+var menu_wallet: Button
+var menu_wallet_l: Label
 var menu_version: Label
 var menu_stats: Control
 
@@ -421,6 +454,25 @@ func _stats_card() -> Control:
 	stat.call("STREAK", "%d WK" % streak)
 	stat.call("TOTAL", "%d %s" % [roundi(float(GameState.records.distance) / unit), "MI" if mi else "KM"])
 	return card
+
+## the rider profile over the title menu (ui/profile_page.gd): a Strava-style overview, CUSTOMIZE RIDER, achievements
+## the balance chip and the claim dot on the avatar
+func _update_profile_hud() -> void:
+	Steam._check_records()
+	if is_instance_valid(menu_wallet_l): menu_wallet_l.text = Shop.fmt(GameState.money)
+	if is_instance_valid(menu_avatar):
+		menu_avatar.badge = Goals.claimable() > 0
+		menu_avatar.queue_redraw()
+
+func _open_profile() -> void:
+	if not is_instance_valid(menu) or menu.has_node("ProfilePage"): return
+	var pg := ProfilePage.new()
+	pg.name = "ProfilePage"
+	pg.on_customize = func(where := "rider"):
+		pg.queue_free()
+		_open_garage(where)
+	pg.tree_exited.connect(_update_profile_hud)
+	menu.add_child(pg)
 
 ## "Quit the game?" over the title menu: QUIT / CANCEL (B, Esc and a click beside it cancel)
 func _confirm_quit() -> void:
@@ -604,7 +656,6 @@ func _menu_page_main() -> void:
 	vb.add_child(_menu_button("REPLAYS", "", _menu_page_replays, false, true))
 	vb.add_child(_menu_button("SHOP", "", _open_garage.bind("shop"), false, true))
 	vb.add_child(_menu_button("GARAGE", "", _open_garage, false, true))
-	vb.add_child(_menu_button("RIDER", "", _open_garage.bind("rider"), false, true))
 	vb.add_child(UITheme.spacer(Tokens.S2))
 	var cred := UITheme.make_button("CREDITS", _show_credits, "link", Tokens.T_XL)
 	cred.alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -612,6 +663,9 @@ func _menu_page_main() -> void:
 	fill.call()
 	if is_instance_valid(menu_quit): menu_quit.visible = true
 	if is_instance_valid(menu_settings): menu_settings.visible = true
+	if is_instance_valid(menu_profile): menu_profile.visible = true
+	if is_instance_valid(menu_wallet): menu_wallet.visible = true
+	_update_profile_hud()
 	if is_instance_valid(menu_version): menu_version.visible = true
 	if is_instance_valid(menu_stats): menu_stats.visible = true
 	menu_focus = ride
@@ -876,6 +930,8 @@ func _menu_page_setup_build(step := 0) -> void:
 	menu_page = "setup"
 	if is_instance_valid(menu_quit): menu_quit.visible = false
 	if is_instance_valid(menu_settings): menu_settings.visible = false
+	if is_instance_valid(menu_profile): menu_profile.visible = false
+	if is_instance_valid(menu_wallet): menu_wallet.visible = false
 	if is_instance_valid(menu_version): menu_version.visible = false
 	if is_instance_valid(menu_stats): menu_stats.visible = false
 	if is_instance_valid(setup_screen): setup_screen.queue_free()
