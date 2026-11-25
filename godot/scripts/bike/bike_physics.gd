@@ -247,6 +247,24 @@ var lift_t := 0.0; var hop_block := false; var hop_held := false
 var prep := 0.0; var land_prep := 0.0; var pop_fired := false
 var lip_scan := 0; var lip_state := 0; var lip_last := 0.0   # lip_state: 0 unknown, 1 none in sight, 2 lip_last valid
 var y_prev := NAN; var pump_acc := 0.0; var brake_heat := 0.0
+# Brake fade (2026-11-25): hard braking heats the brakes (brake_heat, cools with HEAT_TAU); past FADE_FROM the levers
+# lose bite, up to `brakeFade` of their force by FADE_FULL. Fork dive shortens the wheelbase the bars steer about
+# (DIVE_L of it at a full fork); pedal bob = the shock moving with every stroke; kickback = the chain growing as the
+# rear compresses pushes the cranks back (and costs a little drive).
+const HEAT_TAU := 3.5; const FADE_FROM := 3.0; const FADE_FULL := 10.0
+const DIVE_L := 0.12; const BOB_K := 0.35; const CHAIN_GROWTH := 0.2; const CRANK_ARM := 0.17; const KICK_LOSS := 0.25
+var brake_fade := 0.0; var dive := 0.0; var _fade_warn := false; var _kick_k := 0.0
+var _BOB_PROBE := OS.get_environment("BMX_BOB_PROBE") != ""; var _bob_n := 0; var _bob_s := 0.0; var _bob_q := 0.0
+## a rear shock to bob / kick: the bike has a suspension setup AND its frame has a rear linkage (no setup = the BMX;
+## a hardtail frame has none). In a test harness with no drawn bike the setup alone counts
+func _rear_shock() -> bool:
+	return not sus.is_empty() and (host.susp == null or host.susp.has_r)
+## ...and a sprung fork to dive (a rigid fork, or no setup, doesn't)
+func _sprung_fork() -> bool:
+	return not sus.is_empty() and (host.susp == null or host.susp.has_f)
+var _OLD_FADE := OS.get_environment("BMX_OLD_FADE") != ""       # (tests: before the brakes could fade)
+var _HEAT_HOLD := float(OS.get_environment("BMX_HEAT")) if OS.get_environment("BMX_HEAT") != "" else 0.0
+var _OLD_SUSPFX := OS.get_environment("BMX_OLD_SUSPFX") != ""   # (tests: before dive steering, pedal bob and kickback)
 var foot_down := false    # set by Game: the rider's foot is on the ground (the bike stays put)
 var brake_stop := false  # braked to a standstill: held in place while the brake stays on
 var brake_back := false   # brake pressed fresh from a standstill: backs the bike up
@@ -910,6 +928,17 @@ func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_wa
 	var a_long := 0.0
 	var sp_k := sprint
 	var n_tot := n_load
+	# the brakes cool, and fade once they are hot enough (the rotor glow reads the same heat)
+	brake_heat *= exp(-dt / HEAT_TAU)
+	if _HEAT_HOLD > 0.0: brake_heat = maxf(brake_heat, _HEAT_HOLD)   # (tests: BMX_HEAT keeps the brakes that hot)
+	brake_fade = 0.0 if _OLD_FADE else smooth01((brake_heat - FADE_FROM) / (FADE_FULL - FADE_FROM))
+	if brake_fade > 0.3 and not _fade_warn:
+		_fade_warn = true
+		if host.msg_idle(): host.flash("BRAKES FADING")
+	elif brake_fade < 0.1:
+		_fade_warn = false
+	if Env.s("BMX_FADE_PROBE") != "" and int(Time.get_ticks_msec() / 500) != int((Time.get_ticks_msec() - 8) / 500):   # tests
+		print("FADE v=%.1f heat=%.2f fade=%.2f brake=%.2f/%.2f dive=%.2f kick=%.2f decel=%.2f" % [v, brake_heat, brake_fade, brake_f, brake_r, dive, _kick_k, _fb_f + _fb_r])
 	var mu_f: float = _mu_f * T.grip
 	var mu_r: float = _mu_r * T.grip
 	var mu: float = mu_r * SH_R + mu_f * (1.0 - SH_R)
@@ -928,6 +957,7 @@ func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_wa
 		var cad: float = v / (gk * T.pedalTop * ts * 0.7)
 		var grind := 1.0 if gear < 0 else 0.35 + 0.65 * smooth01((cad - 0.15) / 0.7)
 		var drive: float = (throttle if (rear_down and not (v < -0.3 and rev_cap > 3.0)) else 0.0) * minf(T.pedalLaunch * p_mul / ts / gk, T.pedalPower * p_mul / vp) * grind * clampf((p_top - v) / 2.5, 0, 1)
+		drive *= 1.0 - KICK_LOSS * _kick_k   # (a kicked-back crank costs a little of the stroke)
 		var drive_cap := mu_r * nR
 		# (the rear's grip follows its load only after a little rolling: a bump that unloads it for a few cm doesn't
 		# empty its friction circle. _nR_s is eased in _grip_step)
@@ -960,6 +990,10 @@ func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_wa
 		front_lock = move_toward(front_lock, clampf((fb_f - cap_f) / (0.25 * cap_f), 0.0, 1.0) if fb_f > cap_f else 0.0, dt * 8.0)
 		fb_r = lerpf(minf(fb_r, cap_r), cap_r * 0.8, rear_lock) if rear_down else 0.0
 		fb_f = lerpf(minf(fb_f, cap_f), cap_f * 0.8, front_lock)
+		# hot brakes: what the pads can still deliver (the levers had far more than the tyres could hold, so the
+		# fade is taken off the force that gets through, not off the lever)
+		var fade_k: float = 1.0 - float(T.get("brakeFade", 0.35)) * brake_fade
+		fb_r *= fade_k; fb_f *= fade_k
 		_fb_f = fb_f; _fb_r = fb_r
 		_a_rear = maxf(0.0, drive) + (fb_r if (brake and rear_down) else 0.0)   # what the REAR tyre carries along the bike
 		var b_all := fb_r + fb_f
@@ -1243,7 +1277,13 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 	if not air:
 		# front up: no steering, except in a balance manual / wheelie, where the rider carves on the back wheel by
 		# leaning and twisting the bike (manTurn of the normal turn); before, a manual into any bend went straight on
-		var yaw_cmd := v * tan(steer) / L
+		# a diving fork pulls the front axle back and up: a shorter wheelbase and a steeper head angle, so the bars turn
+		# the bike quicker (turn-in under the front brake). Only the bars' yaw reads it: the lean / grip limits don't
+		var dive_k := 0.0
+		if _sprung_fork() and not _OLD_SUSPFX:
+			dive_k = clampf((dg_xF - dg_sag) / maxf(dg_travel, 0.05), -0.3, 1.0)
+		dive += (dive_k - dive) * minf(1.0, dt * 20.0)
+		var yaw_cmd := v * tan(steer) / (L * (1.0 - DIVE_L * dive * float(T.get("diveSteer", 1.0))))
 		if front_air: yaw_cmd *= float(T.get("manTurn", 0.65)) if _balancing() else 0.0
 		# on the back wheel the bars do nothing: the turn is the lean (hips, knees), and a rider only leans a wheelie a
 		# little (manLean), so it carves wide arcs: at most the turn that lean gives at this speed
@@ -2007,6 +2047,20 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			var h_l: float = T.loadHeight / maxf(L, 0.5)   # (the same lever the weight transfer's pitch torque uses)
 			var a_sq: float = float(T.get("antiSquat", 0.9))
 			dvR = (((_fb_r * ANTI_RISE) if braking else 0.0) - maxf(0.0, a_drive) * a_sq) * h_l * geo
+			# pedal bob: the chain pulls hardest on the downstrokes (two a turn), and what the anti-squat doesn't
+			# cancel pumps the shock. Zero on average (the mean push is the squat above)
+			# (only a bike with a rear shock has any: a hardtail frame, or no setup at all, just rides stiff. The push goes
+			# through the shock's own spring and damper, so its sag, spacers, air / coil and low-speed compression decide
+			# how far it really moves: a firm, well-damped shock hardly bobs)
+			if pedal > 0.05 and a_drive > 0.3 and _rear_shock() and not _OLD_SUSPFX:
+				var stroke: float = (absf(sin(crank)) - 0.6366) / 0.6366
+				dvR += stroke * a_drive * (1.1 - 0.7 * a_sq) * h_l * BOB_K * float(T.get("pedalBob", 1.0))
+				if _BOB_PROBE:
+					_bob_n += 1; _bob_s += dg_xR; _bob_q += dg_xR * dg_xR
+					if _bob_n >= 600:
+						var m := _bob_s / _bob_n
+						print("BOB shock_rms=%.2f mm  mean=%.1f mm  sag=%.1f mm  zc=%.2f  drive=%.2f" % [1000.0 * sqrt(maxf(0.0, _bob_q / _bob_n - m * m)), 1000.0 * m, 1000.0 * dg_sag_r * trR / maxf(dg_travel, 0.01), float(_su[11]) if _su.size() > 11 else -1.0, a_drive])
+						_bob_n = 0; _bob_s = 0.0; _bob_q = 0.0
 			if Env.s("BMX_GEO_PROBE") != "" and int(since_land * 4.0) != int((since_land - dt) * 4.0) and (braking or a_drive > 1.0):   # tests
 				print("GEO v=%.1f brake f=%.2f r=%.2f drive=%.2f tan=%.2f AS=%.2f dive=%.2f rear=%+.2f fork=%d%% shock=%d%%" % [v, _fb_f if braking else 0.0, _fb_r if braking else 0.0, a_drive, tan_f, a_sq, dvF, dvR, roundi(100.0 * dg_xF / maxf(dg_travel, 0.01)), roundi(100.0 * dg_xR / maxf(dg_travel, 0.01))])
 		var bal_max: float = T.riderBalance * G * BB_REAR / IK
@@ -2953,6 +3007,14 @@ func _step_wheels(dt: float, f: Vector3, in_water: bool, va: float) -> void:
 	# --- wheels / cranks ---
 	var w := v / RWF
 	wheel_f += w * dt
+	# pedal kickback: as the rear compresses the chain grows and pulls the cranks back against the feet (the other way
+	# on the rebound), only while the legs are on the pedals
+	var kick_to := 0.0
+	if _rear_shock() and not air and pedal > 0.05 and not _OLD_SUSPFX:
+		var kk: float = float(T.get("pedalKick", 1.0))
+		crank -= clampf(dg_vR, -1.0, 2.0) * CHAIN_GROWTH / CRANK_ARM * kk * dt
+		kick_to = clampf(absf(dg_vR) * kk, 0.0, 1.5) / 1.5
+	_kick_k += (kick_to - _kick_k) * minf(1.0, dt * 25.0)
 	if not skid: wheel_r += v / RWR * dt
 	if v < -0.05 and not air and not skid:
 		# rolling backwards the freewheel's pawls catch: the chain turns the cranks back with the wheel
