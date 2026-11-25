@@ -6,11 +6,10 @@ extends SceneTree
 func _build(t: Terrain, f) -> Dictionary:
 	var fh := FarHills.new()
 	fh.setup(t)
-	fh._job = {"f": f, "cx": 0.0, "cz": 0.0}
+	var job := {"f": f, "cx": 0.0, "cz": 0.0, "half": FarHills.HALF, "step": FarHills.STEP, "trees": true, "ring": 0}
 	var t0 := Time.get_ticks_msec()
-	fh._run()
-	var out: Dictionary = fh._job.out
-	fh._job = {}
+	fh._run(job)
+	var out: Dictionary = job.out
 	out["ms"] = Time.get_ticks_msec() - t0
 	fh.free()
 	return out

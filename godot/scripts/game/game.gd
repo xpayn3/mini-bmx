@@ -3237,6 +3237,7 @@ func _exit_tree() -> void:
 	Engine.time_scale = 1.0
 	RenderingServer.global_shader_parameter_set("deco_fade", Vector4.ZERO)   # no ride: decorations unfaded (garage)
 	RenderingServer.global_shader_parameter_set("ground_fade", Vector4.ZERO)
+	FarHills.ground_crossfade = false
 	if rumble: rumble.stop()
 
 # tests (BMX_DAB_PROBE): per-frame shoe moves on the bike, the sole's lowest point vs the ground
@@ -3694,6 +3695,7 @@ func _process(dt: float) -> void:
 	RenderingServer.global_shader_parameter_set("deco_fade", Vector4(st.x, st.z, _deco_band.x, _deco_band.y))
 	# the real ground dissolves out / the far backdrop's ground in over this band (shaders/ground + far_hills.gd): no hard edge
 	RenderingServer.global_shader_parameter_set("ground_fade", Vector4(st.x, st.z, _ground_band.x, _ground_band.y) if _ground_band.y > 0.0 else Vector4.ZERO)
+	FarHills.ground_crossfade = _ground_band.y > 0.0
 	terrain.update_stream(st.x, st.z, 4.0)
 	_pk = _perf("terrain_stream", _pk)
 	if not phys.crash_on and hud and hud.life < 1.0:   # a full-health rider rolls past a pack and leaves it
