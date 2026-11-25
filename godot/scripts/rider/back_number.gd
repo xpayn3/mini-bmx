@@ -13,7 +13,8 @@ const T_TOP := 0.68             # on the spine: 0 hips .. 1 collar
 const T_BOT := 0.30
 const STAND := 0.009            # the paper floats this far off the jersey (the torso mesh is faceted)
 const MAX_STAND := 0.09        # nothing billows further off the jersey than this
-const TETHER := 0.12            # how far a bottom corner can lift off its pin spot
+const FLAT_HOLD := 0.22         # per sub-step pull of each point along the back towards its own spot (no folding)
+const TETHER := 0.05           # how far a bottom corner can lift off its pin spot
 const MAX_AWAY := 0.11          # and no point strays further than this from its spot on the back (can't fold up over the neck)
 const SUB := 2
 const ITER := 5
@@ -380,6 +381,10 @@ func _process(dt: float) -> void:
 			if d.length() > TETHER:
 				_P[j] = A[2 + k] + d.normalized() * TETHER
 		for i in n0:   # never through the body: stay outside the (curved) back surface under each point
+			# a pinned race number lies flat on the back: along the back each point is held near its own spot, so a
+			# bent-over or twisted spine (the pins come closer) can't crumple or fold it; only the flap (z) is free
+			_P[i].x = lerpf(_P[i].x, S[i].x, FLAT_HOLD)
+			_P[i].y = lerpf(_P[i].y, S[i].y, FLAT_HOLD)
 			var d := _P[i].z - S[i].z
 			if d < STAND:
 				_P[i].z += STAND - d
