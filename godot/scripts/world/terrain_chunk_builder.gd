@@ -868,8 +868,7 @@ func _dist_signs() -> void:
 			var k := _push(kind, bs, pos, c)
 			panel["parts"].append({"kind": kind, "i": k, "col": c, "xform": Transform3D(bs, pos), "scale": scl})
 		# a plain square stick with a thin printed plate bolted to its front, like a real roadside sign. The plate
-		# carries the Figma "table sign" design (assets/signs/distance_board.png: blue field + DISTANCE strip);
-		# the km number is a Label3D on the blue field
+		# carries the Figma "table sign" layout, printed per distance by SignTex (number + DISTANCE in the texture)
 		var post_c := TerrainField.lin(0x6b4a30)
 		const PLATE := 0.8      # m, square
 		const PLATE_T := 0.02   # plate thickness
@@ -878,17 +877,15 @@ func _dist_signs() -> void:
 		var top := PLATE_Y + PLATE / 2 - 0.04
 		add.call("pole", Vector3(0, (top - 0.15) / 2, 0), Vector3(POLE, top + 0.15, POLE), post_c)   # ground (-0.15) .. just under the plate top
 		var plate_z := POLE / 2 + PLATE_T / 2 + 0.002
-		add.call("signboard", Vector3(0, PLATE_Y, plate_z), Vector3(PLATE, PLATE, PLATE_T), Color.WHITE)
+		# the plate is its own mesh (Terrain._panel_labels) with this distance's printed texture (SignTex), not in a list
+		var plate_s := Vector3(PLATE, PLATE, PLATE_T)
+		var plate_x := Transform3D(_scaled(rb, PLATE, PLATE, PLATE_T), base + rb * Vector3(0, PLATE_Y, plate_z))
+		panel["parts"].append({"kind": "signboard", "i": -1, "col": Color.WHITE, "xform": plate_x, "scale": plate_s})
 		colliders.append({"x": bx, "z": bz, "r": 0.3, "fence": panel, "fence_style": "billboard"})
-		var nrm: Vector3 = R * Vector3(fx, 0, fz)
 		var km := int(round(float(i) * 2.0 / 1000.0))
 		panel["cx"] = bx
 		panel["cz"] = bz
-		var lb := R * Basis(Vector3(fz, 0, -fx), Vector3.UP, Vector3(fx, 0, fz))
-		# the design's number: caps 26 % of the plate tall, centred 12.7 % above the middle, at most 90 % wide
-		panel["bb"] = {"text": "%dKM" % km, "col": Color.WHITE, "w": PLATE * 0.9, "h": PLATE * 0.26, "font": "black",
-			"one_side": true, "off": PLATE_T / 2 + 0.003,
-			"basis": lb, "at": base + rb * Vector3(0, PLATE_Y + PLATE * 0.127, plate_z), "nrm": nrm}
+		panel["plate"] = {"km": km, "xform": plate_x}
 		if OS.get_environment("BMX_GATE_PROBE") != "":
 			print("DISTSIGN i=", i, " at ", bx, ",", h, ",", bz)
 		panels.append(panel)
