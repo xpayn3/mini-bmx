@@ -515,6 +515,16 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   mips: the colour now carries them, raise `stray` / `prints` if wanted). Not measured cleanly: GPU saving (another
   program held the GPU), main-thread cost ~0.2-0.4 ms a frame riding fast (tile scheduling). `trail_puddle.gd` (CPU
   puddle mirror) unchanged. Not done: stamping live marks (real tyre tracks, skids, blood) into the clipmap.
+  **Footprints** (same day, user: "add some footprints", then "random, more faint, random people over time", not
+  walkers in lines): bake layer `layer_footprints` (param `footprints`): shoe soles (ball + waist + heel, ~26 cm)
+  scattered in a jittered 0.55 m grid in the trail's frame (~22 % of cells at 1), each its own direction (mostly along
+  the trail either way +-35 deg, one in five any way) and age (fresh 0.75 .. old 0.12 strength), pressed up to 1 cm and
+  16 % darker, worn off the riders' line (x 1 - 0.7 line), none on built jumps / where riders fly.
+  `BMX_ROAD_SET=footprints=4` for lots, `BMX_TRAIL_DEBUG=5` shows them in the colour multiplier. Not done: the rider's own footprints
+  (a foot down at a stop, walking after a crash) as live stamps. **Built jumps less smoothed** (user: "jumps and rollers
+  have more blurred textures"): on `jm` the scan relief was x0.2 and the jump also counts as ridden line (~8 % left),
+  colour variation x0.45, grit / pebbles / scuffs / lumps off; now relief ~x0.65 x (1 - 0.6 x 0.4 ridden), colour x0.8,
+  grit x0.4, scuffs / lumps x0.5 / x0.6, in ground.gdshader and the bake alike.
 - **Land Lab: the land's knobs in the Godot editor (2026-11-25, user: "an editor for the procedural generation so I can
   tweak it easily with you"; user: not in the game, in the editor)**. Plugin `addons/land_lab` (enabled in project.godot):
   a main-screen tab **Land Lab** in the editor's top bar (next to 2D / 3D / Script). Left: seed, area (300 m .. 4.8 km),
