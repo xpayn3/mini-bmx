@@ -1022,7 +1022,17 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
     (`BMX_BOB_PROBE=1`, `BOB shock_rms`: LSC 0 -> 10 18 -> 15.6 mm, sag 20 -> 40 % 12.7 -> 19.8 mm). `BMX_OLD_FADE=1` / `BMX_OLD_SUSPFX=1` = before; `BMX_FADE_PROBE=1` prints `FADE` lines (heat, fade, dive,
     kick), `BMX_HEAT=n` holds the brakes that hot. Stress 56 / 56; suite vs the stale baseline: 13 changed with, 12
     without (the rest is old drift). Not ridden by the user yet.
-  - Open: the rear axle's path doesn't soak up square edges differently; the drawn head angle doesn't follow the dive. No shop / prices for
+  - **Short flights aim sooner, OFF by default (2026-11-25, slider `shortAim` Ride > Jumps, default 0: the user rode it at 1
+    and found it aligns the bike too much on short bumps; `BMX_OLD_SHORTAIM=1` also forces it off)** (`bike_physics.gd`, the hands-off landing aim): it held the take-off attitude for
+    `airAimDelay` 1 s before levelling, so short flights landed nose-up. Now the whole flight (`air_time` + `_land_t`) under
+    `SHORT_TO` 1.3 s pulls the delay down to `SHORT_DELAY` x flight, the ramp to `SHORT_RAMP` x flight, the assist up to
+    `SHORT_HELP` 0.9 and the aim speed to `SHORT_SPEED` 40 (full at under `SHORT_FROM` 0.7 s; longer flights as before; a
+    player's stick still wins: x `1 - _air_own`). Suite vs the old aim (`BMX_OLD_SHORTAIM=1`): landing pitch error
+    table_1.5 9.3 -> -0.2, stepup_1 15.9 -> 5.9, hip_20 14.8 -> 3.8, drop_2 -42 -> -4; 7 runs CLEAN -> PERFECT. The lab's
+    energy checks rise on some (the perfect-landing boost is speed) and fork / shock use is a little higher on matched
+    landings (table_1.5 72 -> 81 / 90 -> 98 %). Stress 56 / 56. Not ridden by the user yet.
+  - Open: the rear axle's path doesn't soak up square edges differently; the drawn head angle: the fork slides along the axis
+    and the frame pitches, only the steering geometry change isn't drawn. No shop / prices for
     shocks yet, shock models have no 3D model or card picture. Not ridden by the user yet. (`slope_stress` is 51 / 51
     again; its "brake grade -35 deg" check is a chaotic slide at the friction angle and flips with small changes.)
 - **Direct manual (2026-11-22, user: "too stiff, locks us in, going too far stops us, make it more manual"; then "fall if we pull too far", "turn
