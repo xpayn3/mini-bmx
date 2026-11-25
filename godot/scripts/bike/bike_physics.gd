@@ -135,6 +135,7 @@ const ANTI_RISE := 0.6     # how much of the rear's rise under its own brake the
 var _fb_r := 0.0           # the rear brake's deceleration this step (m/s2), like _fb_f
 const FRAME_PROG := 0.35   # the ramp-up the reference frame's linkage adds to its shock (BikeBuild.frame_mods scales it per frame)
 var _land_hit := 0.0   # the biggest hit of the landing being judged
+var _bog := 0.0; var _bog_rate := 0.0   # a bad landing's speed still to lose (m/s) + the rate it goes
 var _land_pe := 0.0   # the last touch-down's pitch against the ground (rad)
 var _land_up := false   # ... nose up (back wheel first)
 const LIP_SPARE := 0.15   # rad: how much steeper than the lip under the wheels a take-off may leave
@@ -396,7 +397,7 @@ func _reset_motion() -> void:
 	load = 0; compress = 0; compress_v = 0; prep = 0; land_prep = 0; pop_fired = false; spun_out = false; shake = 0
 	turn_off = 0.0; rev_cap = 3.0; _fakie_hold = 0.0
 	course = heading; slip = 0; slip_w = 0.0; bar_catch = 0.0; w_init = false; front_air = false; rear_air = false; pump_acc = 0; since_land = 1
-	pitch_v = 0; c_f = true; c_r = true; wheelie_up = 0.0
+	pitch_v = 0; c_f = true; c_r = true; wheelie_up = 0.0; _bog = 0.0
 	g_pitch = NAN
 	y = host.terrain.height(x, z); body_y = y; body_v = 0
 	# start lined up with the ground: a bike set down level on a steep slope had one wheel in the air and was
@@ -1879,6 +1880,10 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 	var _vt := Time.get_ticks_usec() if prof != null else 0
 	var terrain = host.terrain
 	# --- vertical + pitch: spring physics ---
+	if _bog > 0.0:
+		var take := minf(_bog, _bog_rate * dt)
+		_bog -= take
+		if absf(v) > take: v -= signf(v) * take
 	_sample(f)
 	if prof != null: _vt = _prof("v_sample", _vt)
 	var natural: bool
@@ -2706,7 +2711,12 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 				var bad: float = smooth01((land_err - LAND_ANGLE_FREE) / (deg_to_rad(35.0) - LAND_ANGLE_FREE))
 				if bad > 0.0:
 					var cut: float = absf(v) * float(T.get("landAngleCost", 0.25)) * bad
-					v -= signf(v) * cut
+					if _OLD_BOG: v -= signf(v) * cut
+					else:
+						# (2026-11-25, F8: a soft 34 deg nose-high landing took 16 km/h in ONE step. Now a soft one pays less, and
+						# the bike bogs over BOG_T instead of stopping dead)
+						cut *= lerpf(BOG_SOFT, 1.0, smooth01(impact / 4.0))
+						_bog = cut; _bog_rate = cut / BOG_T
 					if cut > 1.0 and host.msg_idle(): host.flash("BAD LANDING -%d km/h" % roundi(cut * 3.6))
 					if Env.s("BMX_LAND_PROBE") != "": print("LANDANGLE err=%.0fdeg cut=%.1f km/h" % [rad_to_deg(land_err), cut * 3.6])
 			if Env.s("BMX_TRICK") != "": print("LANDERR %.3f perfect=%s" % [land_err, land_perfect >= 1.0])   # tests
@@ -2834,7 +2844,9 @@ func _step_hop(dt: float, inp: Dictionary) -> void:
 		_bh_since += dt
 		if _bh_since > 0.3:
 			_bh_back = 0.0; _bh_peak = 0.0
-	var snapped: bool = _bh_back > 0.04 and body_in > 0.3 and _bh_since < 0.22 and float(T.get("stickHop", 1.0)) > 0.0
+	# (2026-11-25, F8: a thumb letting go of a stick held back springs it past centre to ~+0.35 for a moment; at 0.3 that
+	# read as a snap and popped a natural bump 1.5 m high. A real snap goes well past it. BMX_OLD_STICKPOP=1 = 0.3)
+	var snapped: bool = _bh_back > 0.04 and body_in > (0.3 if _OLD_STICKPOP else STICK_POP_FWD) and _bh_since < 0.22 and float(T.get("stickHop", 1.0)) > 0.0
 	var can_hop: bool = not air and not rear_air and not _nosing() and not (hop_t > 0) and kick_t <= 0.0
 	if snapped and can_hop and v > 1.0:
 		# (a slow snap is a weaker one; even a bare tap of the stick hops a little)
@@ -3311,6 +3323,11 @@ var land_vn := 0.0          # m/s: the predicted speed into the landing, square 
 var _vn_td := 0.0; var _reach_td := 1.0   # (tests: the last flight's, for the HIT line)
 var land_reach := 1.0       # 0.35..1: how far the legs reach for this landing (by land_vn)
 static var _OLD_LANDSPEED := OS.get_environment("BMX_OLD_LANDSPEED") != ""
+static var _OLD_STICKPOP := OS.get_environment("BMX_OLD_STICKPOP") != ""
+static var _OLD_BOG := OS.get_environment("BMX_OLD_BOG") != ""   # (tests: a bad landing's speed cut whole, in one step)
+const STICK_POP_FWD := 0.6   # how far forward the stick must snap (after being back) to pop
+const BOG_T := 0.4           # s a bad landing's speed cost is spread over
+const BOG_SOFT := 0.35       # share of that cost a soft landing (impact ~0) still pays; full from impact 4 m/s
 const LAND_ANGLE_FREE := 0.26   # rad (~15 deg) off the landing's slope that costs no speed
 static var _OLD_WHIP := OS.get_environment("BMX_OLD_WHIP") != ""
 const WHIP_WINDOW := 0.35   # s before the lip: the stick held to the side winds the whip up
