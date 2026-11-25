@@ -497,6 +497,20 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   Demo AI speeds `DemoPilot.FEAT_V` woodDrop 7, skinny 5.5 m/s. `BMX_TRAIL_FEAT=woodDrop` (seeds 2, 31, 123; also
   `skinny` / `woodKicker` / `bridge`). C# compare / wood_edge_probe unchanged. Not done: wooden berms, a wallride
   (the height-field physics can't ride a vertical wall), line choices + difficulty colours.
+- **A / B line choices (2026-11-25, Phase C part 4)**. `TerrainField._build_alts` (end of `_build_route`): about 70 % of
+  big built features (`ALT_TYPES`: table, kicker, tableLine, woodDrop, double, doubleLine, flow, woodKicker; by a hash of
+  s) get an easier B-line: it leaves the trail `ALT_IN` 22 m before the feature, swings out (half + 4.2..7.2 m, smoothstep
+  over 12 m at each end) to one side and joins again `ALT_OUT` 18 m after, at the trail's own height `cE` (no jump).
+  Flat arrays `alt_pts` (x, z, height) / `alt_lines` (first, count, bbox + `ALT_REACH`, side) / `alt_feats`
+  ([route feature, line]); `alt_near` / `alt_dist`. `base()` levels the ground to it (x (1 - q_mask): the main bench
+  wins), `trail()` makes it dirt (half-width `ALT_W` 0.9). Mirrored exactly in `TerrainFieldCs` (`alt_near`,
+  `alt_dist`; `alt_feats` public for the chunk builder, which may run on the C# fork): terrain_cs_cmp unchanged,
+  trail_grow_probe PASS. Chunk builder: tape stakes and course fence posts within 1.2 / 1.6 m of a B-line are left out (a
+  gap where it leaves / joins); `_line_signs` puts two table signs 6 m before the split, beside the trail past the tape on
+  the B-line's side: black A LINE + the feature (TABLE / KICKER / DROP / JUMP LINE), blue B LINE EASIER (`_table_sign`,
+  the distance sign's build). 5-11 B-lines per 4.5 km (seeds 4242 / 5 / 12 / 2). `BMX_OLD_LINES=1` = none. Not done:
+  difficulty colours per trail section, a HUD alert at the split, B-lines round drops off cliffs / gorges, the demo AI
+  never takes the B-line. Wooden features' planks now use the fences' material + ranch colours (user).
 - **Bark scans on standing trunks (2026-11-25, user: "good light trunk texture, realistic", "use all")**: three CC0 scans
   in `assets/textures/bark/` (1K colour / OpenGL normal / roughness, VRAM-compressed with mipmaps; `SOURCE.txt`):
   `bark_light` (ambientCG Bark004, light grey-tan), `bark_pale` (ambientCG Bark007, birch-like), `bark_pine` (Poly Haven

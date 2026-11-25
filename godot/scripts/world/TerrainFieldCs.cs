@@ -539,6 +539,8 @@ internal sealed class TfShared
 	public Godot.Collections.Dictionary col;
 	public GodotObject course;
 	public double[] sX, sZ, sS;
+	public double[] alt_pts, alt_lines;
+	public Godot.Collections.Array alt_feats;
 	public long s_gx0, s_gz0, s_gnx, s_gnz;
 	public int[] s_start, s_items;
 
@@ -761,6 +763,7 @@ public partial class TerrainFieldCs : RefCounted
 		sh.sX = F64(f.Get("sX")); sh.sZ = F64(f.Get("sZ")); sh.sS = F64(f.Get("sS"));
 		sh.s_gx0 = f.Get("s_gx0").AsInt64(); sh.s_gz0 = f.Get("s_gz0").AsInt64(); sh.s_gnx = f.Get("s_gnx").AsInt64(); sh.s_gnz = f.Get("s_gnz").AsInt64();
 		sh.s_start = f.Get("s_start").AsInt32Array(); sh.s_items = f.Get("s_items").AsInt32Array();
+		sh.alt_pts = F64(f.Get("alt_pts")); sh.alt_lines = F64(f.Get("alt_lines")); sh.alt_feats = f.Get("alt_feats").AsGodotArray().Duplicate(true);
 		var rf = f.Get("route_feats").AsGodotArray();
 		sh.route_feats = new TfFeat[rf.Count];
 		for (int i = 0; i < rf.Count; i++)
@@ -795,6 +798,7 @@ public partial class TerrainFieldCs : RefCounted
 		_route = sh.route_feats;
 		sX = sh.sX; sZ = sh.sZ; sS = sh.sS; s_gx0 = sh.s_gx0; s_gz0 = sh.s_gz0; s_gnx = sh.s_gnx; s_gnz = sh.s_gnz;
 		s_start = sh.s_start; s_items = sh.s_items;
+		alt_pts = sh.alt_pts; alt_lines = sh.alt_lines; alt_feats = sh.alt_feats ?? new();
 		_index_canyons();
 		_col = sh.col.Duplicate();
 		_route_wrap = null;
@@ -978,6 +982,53 @@ public partial class TerrainFieldCs : RefCounted
 		_zc_x = x;
 		_zc_v = rp_sg * 40.0 * (gd_sin(x / 260.0 + rp_a) - _sin_rp_a);
 		return _zc_v;
+	}
+
+	// ---------------- B-lines (terrain_field.gd _build_alts / alt_near) ----------------
+	private const double ALT_W = 0.9, ALT_REACH = 9.0;
+	private double[] alt_pts;
+	public double[] alt_lines;
+	public Godot.Collections.Array alt_feats = new();
+
+	/// distance to the nearest B-line (INF: none within ALT_REACH): the chunk builder leaves gaps in tape / fences there
+	public double alt_dist(double x, double z)
+	{
+		if (alt_lines == null || alt_lines.Length == 0)
+			return double.PositiveInfinity;
+		alt_near(x, z);
+		return a_d;
+	}
+	private double a_d = double.PositiveInfinity, a_e;
+
+	private void alt_near(double x, double z)
+	{
+		a_d = double.PositiveInfinity;
+		long nl = alt_lines.Length / 7;
+		for (long l = 0; l < nl; l++)
+		{
+			long o = l * 7;
+			if (x < alt_lines[o + 2] || z < alt_lines[o + 3] || x > alt_lines[o + 4] || z > alt_lines[o + 5])
+				continue;
+			long k0 = (long)alt_lines[o];
+			long k1 = k0 + (long)alt_lines[o + 1] - 1;
+			for (long k = k0; k < k1; k++)
+			{
+				double ax = alt_pts[k * 3], az = alt_pts[k * 3 + 1];
+				double vx = alt_pts[k * 3 + 3] - ax, vz = alt_pts[k * 3 + 4] - az;
+				double l2 = vx * vx + vz * vz;
+				if (l2 <= 0.0)
+					continue;
+				double t = ((x - ax) * vx + (z - az) * vz) / l2;
+				t = t < 0.0 ? 0.0 : (t > 1.0 ? 1.0 : t);
+				double ex = x - (ax + vx * t), ez = z - (az + vz * t);
+				double d = Math.Sqrt(ex * ex + ez * ez);
+				if (d < a_d)
+				{
+					a_d = d;
+					a_e = alt_pts[k * 3 + 2] + (alt_pts[k * 3 + 5] - alt_pts[k * 3 + 2]) * t;
+				}
+			}
+		}
 	}
 
 	// ---------------- the route spine (terrain_field.gd spine_sd / _sp_node, RouteSpine): s along, |d| across ----------------
@@ -1211,6 +1262,12 @@ public partial class TerrainFieldCs : RefCounted
 		double p = Math.Abs(pathN(x, z));
 		query(x, z);
 		double main = q_d < 12.0 ? (1.0 - sm(q_w, q_w + minf(1.2, 0.35 + q_w), q_d)) : 0.0;
+		if (alt_lines != null && alt_lines.Length > 0)
+		{
+			alt_near(x, z);
+			if (a_d < ALT_W + 0.9)
+				main = maxf(main, 1.0 - sm(ALT_W, ALT_W + 0.9, a_d));
+		}
 		double t = (p - 0.03) / (0.075 - 0.03);
 		if (t >= 1.0)
 			return maxf(0.0, main);
@@ -1508,6 +1565,15 @@ public partial class TerrainFieldCs : RefCounted
 		query(x, z);
 		if (q_mask > 0.0)
 			h += (q_bench - h) * q_mask;
+		if (alt_lines != null && alt_lines.Length > 0)
+		{
+			alt_near(x, z);
+			if (a_d < ALT_REACH)
+			{
+				double am = (1.0 - sm(ALT_W + 1.0, ALT_REACH, a_d)) * (1.0 - q_mask);
+				h += (a_e - h) * am;
+			}
+		}
 		h += noise((x - 5.3) * I8, (z + 9.1) * I8) * 0.5 * maxf(sm(2.5, 7, dist), sm(0.15, 0.25, ap)) * (1.0 - t);
 		h -= 0.15 * t;
 		if (t > 0.0)

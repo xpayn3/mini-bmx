@@ -347,6 +347,7 @@ func adopt_course(g: TerrainField) -> void:
 	c_gx0 = g.c_gx0; c_gz0 = g.c_gz0; c_gnx = g.c_gnx; c_gnz = g.c_gnz; c_start = g.c_start; c_items = g.c_items
 	c_seg = g.c_seg; c_run_start = g.c_run_start; c_runs = g.c_runs
 	route_feats = g.route_feats
+	alt_pts = g.alt_pts; alt_lines = g.alt_lines; alt_feats = g.alt_feats
 	_index_canyons()
 	_reset_caches()
 
@@ -377,6 +378,7 @@ func fork() -> TerrainField:
 		c.s = j.s
 		f.route_feats.append(c)
 	f._index_canyons()
+	f.alt_pts = alt_pts.duplicate(); f.alt_lines = alt_lines.duplicate(); f.alt_feats = alt_feats.duplicate()
 	return f
 
 
@@ -821,6 +823,10 @@ func trail(x: float, z: float) -> float:
 	var p := absf(pathN(x, z))
 	query(x, z)
 	var main := (1.0 - sm(q_w, q_w + minf(1.2, 0.35 + q_w), q_d)) if q_d < 12.0 else 0.0   # (a narrow singletrack's dirt fades out quicker)
+	if alt_lines.size() > 0:
+		alt_near(x, z)
+		if a_d < ALT_W + 0.9:
+			main = maxf(main, 1.0 - sm(ALT_W, ALT_W + 0.9, a_d))
 	var t := (p - 0.03) / (0.075 - 0.03)
 	if t >= 1.0:
 		return maxf(0.0, main)
@@ -1097,6 +1103,11 @@ func base(x: float, z: float) -> float:
 	query(x, z)
 	if q_mask > 0.0:
 		h += (q_bench - h) * q_mask
+	if alt_lines.size() > 0:
+		alt_near(x, z)
+		if a_d < ALT_REACH:
+			var am := (1.0 - sm(ALT_W + 1.0, ALT_REACH, a_d)) * (1.0 - q_mask)
+			h += (a_e - h) * am
 	h += noise((x - 5.3) * I8, (z + 9.1) * I8) * 0.5 * maxf(sm(2.5, 7, dist), sm(0.15, 0.25, ap)) * (1.0 - t)
 	h -= 0.15 * t
 	if t > 0.0:
@@ -1324,6 +1335,97 @@ func _build_route() -> void:
 				s += len + ((5 + rv * 8) if jmp else (70 + rv * 90) / jf)
 	route_feats = list
 	_index_canyons()
+	_build_alts()
+
+
+# ---------------- B-lines (line choices, 2026-11-25 Phase C) ----------------
+## an easier line round a big built feature: it leaves the trail ALT_IN m before the feature, swings ALT_OFF m out to one
+## side, rides past at the trail's own height (no jump) and joins again ALT_OUT m after it. Ground levelled + dirt along it
+## (base / trail, mirrored in TerrainFieldCs). Flat arrays for C#: alt_pts = (x, z, height) per point, alt_lines = (first
+## point, count, min x, min z, max x, max z, side) per line. BMX_OLD_LINES=1 = none
+const ALT_TYPES := ["table", "kicker", "tableLine", "woodDrop", "double", "doubleLine", "flow", "woodKicker"]
+const ALT_IN := 22.0
+const ALT_OUT := 18.0
+const ALT_W := 0.9      # half-width of a B-line
+const ALT_REACH := 9.0  # how far its ground shaping reaches
+static var OLD_LINES := OS.get_environment("BMX_OLD_LINES") != ""
+var alt_pts := PackedFloat64Array()
+var alt_lines := PackedFloat64Array()
+var alt_feats: Array = []   # [route feature index, line index] (signs, HUD)
+
+
+func _build_alts() -> void:
+	alt_pts = PackedFloat64Array(); alt_lines = PackedFloat64Array(); alt_feats = []
+	if OLD_LINES:
+		return
+	var C := course
+	var last_end := -INF
+	for fi in route_feats.size():
+		var f: Feat = route_feats[fi]
+		if not ALT_TYPES.has(f.type):
+			continue
+		var h0 := float(((int(f.s * 4.0) * 73856093) ^ (seed_value * 83492791)) & 0xffff) / 65536.0
+		if h0 > 0.7:
+			continue
+		var s0: float = f.s - ALT_IN
+		var s1: float = f.s + f.len + ALT_OUT
+		if s0 < last_end + 10.0 or s0 < 30.0 or s1 > (C.n - 20) * CSTEP:
+			continue
+		var side := 1.0 if h0 < 0.35 else -1.0
+		var off := f.half + 4.2 + h0 * 3.0
+		var first := alt_pts.size() / 3
+		var mnx := INF; var mnz := INF; var mxx := -INF; var mxz := -INF
+		var s := s0
+		while s <= s1:
+			var p := C.at(s)
+			var w := sm(0.0, 12.0, s - s0) * sm(0.0, 12.0, s1 - s)
+			var x: float = p[0] + float(-p[3]) * off * side * w
+			var z: float = p[1] + float(p[2]) * off * side * w
+			var i: int = p[4]
+			var e: float = cE[i] + (cE[mini(i + 1, C.n - 1)] - cE[i]) * (s / CSTEP - i)
+			alt_pts.append(x); alt_pts.append(z); alt_pts.append(e)
+			mnx = minf(mnx, x); mnz = minf(mnz, z); mxx = maxf(mxx, x); mxz = maxf(mxz, z)
+			s += CSTEP
+		var cnt := alt_pts.size() / 3 - first
+		alt_feats.append([fi, alt_lines.size() / 7])
+		for v in [first, cnt, mnx - ALT_REACH, mnz - ALT_REACH, mxx + ALT_REACH, mxz + ALT_REACH, side]:
+			alt_lines.append(v)
+		last_end = s1
+
+
+## distance to the nearest B-line (INF: none within ALT_REACH). Same in TerrainFieldCs
+func alt_dist(x: float, z: float) -> float:
+	if alt_lines.size() == 0:
+		return INF
+	alt_near(x, z)
+	return a_d
+
+
+## the nearest B-line point to (x, z) -> a_d (distance; INF none within ALT_REACH), a_e (its height there). Mirrored in C#
+var a_d: float = INF
+var a_e: float = 0.0
+func alt_near(x: float, z: float) -> void:
+	a_d = INF
+	var nl := alt_lines.size() / 7
+	for l in nl:
+		var o := l * 7
+		if x < alt_lines[o + 2] or z < alt_lines[o + 3] or x > alt_lines[o + 4] or z > alt_lines[o + 5]:
+			continue
+		var k0 := int(alt_lines[o])
+		var k1 := k0 + int(alt_lines[o + 1]) - 1
+		for k in range(k0, k1):
+			var ax := alt_pts[k * 3]; var az := alt_pts[k * 3 + 1]
+			var vx := alt_pts[k * 3 + 3] - ax; var vz := alt_pts[k * 3 + 4] - az
+			var l2 := vx * vx + vz * vz
+			if l2 <= 0.0:
+				continue
+			var t := ((x - ax) * vx + (z - az) * vz) / l2
+			t = 0.0 if t < 0.0 else (1.0 if t > 1.0 else t)
+			var ex := x - (ax + vx * t); var ez := z - (az + vz * t)
+			var d := sqrt(ex * ex + ez * ez)
+			if d < a_d:
+				a_d = d
+				a_e = alt_pts[k * 3 + 2] + (alt_pts[k * 3 + 5] - alt_pts[k * 3 + 2]) * t
 
 
 ## free-ride jumps out in the land: the natural ground beside the footprint (half + SITE_SIDE m from the axis) may rise at most

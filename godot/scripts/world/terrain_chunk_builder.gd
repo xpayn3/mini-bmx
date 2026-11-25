@@ -45,8 +45,9 @@ static func ensure_static() -> void:
 		return o
 	LEAVES = L.call([0x4f9a3a, 0x6cb544, 0x3f8a3f, 0x86c24a, 0x9bc94a, 0xe0a43a])
 	PINES = L.call([0x2f6e45, 0x3b7d4b, 0x2a5f44])
-	PLANKS = L.call([0xb98a55, 0xa87a48, 0xc49663, 0x9e6f40, 0xb0814e])
-	BEAM = TerrainField.lin(0x7a5332)
+	# the wooden features' planks in the ranch fences' weathered wood (user 2026-11-25: "same wood as the fence planks")
+	PLANKS = L.call([0x8b6a4a, 0x9a7650, 0x7d5e40, 0x85704f])
+	BEAM = TerrainField.lin(0x6e5236)
 	CACTI = L.call([0x4f8a3c, 0x5c9a45, 0x6b9e4a])
 	BUSHES = L.call([0x3f7f33, 0x4c8c38, 0x5a8f3a, 0x6a9a3e, 0x7a8f3a])
 	FERNS = L.call([0x3f8a35, 0x4f9a3c, 0x5ea544, 0x8a9a3a])
@@ -202,6 +203,7 @@ func _build() -> void:
 	_arches()
 	_boards()
 	_dist_signs()
+	_line_signs()
 	_tape()
 	for k in colliders:
 		if k.has("tape"):
@@ -648,6 +650,12 @@ func _course_fences(rs: WorldRng) -> void:
 		var P: Array = fc["posts"]
 		var cur := []
 		for k in P.size():
+			# a gap where a B-line crosses: the run ends before this post and starts again after it
+			if _on_bline(P[k][0], P[k][1], 1.6) or (k + 1 < P.size() and _on_bline((P[k][0] + P[k + 1][0]) * 0.5, (P[k][1] + P[k + 1][1]) * 0.5, 1.6)):
+				if cur.size() > 1:
+					_run_fence(cur, fc["style"], rs, 2)
+				cur = []
+				continue
 			if WorldRng.jround(P[k][0] / S) == cx and WorldRng.jround(P[k][1] / S) == cz:
 				if cur.is_empty():
 					cur.append(P[k])
@@ -838,6 +846,61 @@ func _boards() -> void:
 		panels.append(panel)
 
 
+## line-choice signs (B-lines, TerrainField.alt_feats): where a B-line leaves the trail, a sign on a post between the two
+## lines facing the riders: the A line (the built feature) black, the B line (round it) blue (trail difficulty colours)
+func _line_signs() -> void:
+	var C: TrailCourse = f.course
+	for af in f.alt_feats:
+		var rf = f.route_feats[af[0]]
+		var o: int = int(af[1]) * 7
+		var side: float = f.alt_lines[o + 6]
+		var s: float = rf.s - TerrainField.ALT_IN - 6.0   # 6 m before the split, beside the trail past the tape, on the B-line's side
+		var p := C.at(s)
+		var bx: float = p[0] + float(-p[3]) * side * (float(C.W[int(p[4])]) + 2.4)
+		var bz: float = p[1] + float(p[2]) * side * (float(C.W[int(p[4])]) + 2.4)
+		if WorldRng.jround(bx / S) != cx or WorldRng.jround(bz / S) != cz:
+			continue
+		var tx: float = p[2]
+		var tz: float = p[3]
+		var names := {"table": "TABLE", "kicker": "KICKER", "tableLine": "JUMP LINE", "woodDrop": "DROP", "double": "DOUBLE",
+			"doubleLine": "JUMP LINE", "flow": "KICKER", "woodKicker": "WOOD KICKER"}
+		_table_sign(bx, height(bx, bz), bz, -tx, -tz, "A LINE", str(names.get(rf.type, "JUMP")), TerrainField.lin(0x111111), -0.35 * side)
+		var b2x := bx + float(-p[3]) * side * 0.95
+		var b2z := bz + float(p[2]) * side * 0.95
+		_table_sign(b2x, height(b2x, b2z), b2z, -tx, -tz, "B LINE", "EASIER", TerrainField.lin(0x0057d8), 0.35 * side)
+		blocked.append([bx, bz, 1.2])
+
+
+## a small table sign on a stick (the distance sign's build): face looking along (px, pz), turned by tw, field colour
+## col, big text over a small one
+func _table_sign(bx: float, h: float, bz: float, px: float, pz: float, big: String, small_t: String, col: Color, tw: float) -> void:
+	var yaw := atan2(px, pz) + tw
+	var fx := sin(yaw)
+	var fz := cos(yaw)
+	var rb := Basis(Vector3.UP, yaw)
+	var base := Vector3(bx, h - 0.15, bz)
+	var panel := {"broken": false, "parts": [], "style": "billboard"}
+	var add := func(kind: String, off: Vector3, scl: Vector3, c: Color) -> void:
+		var bs := _scaled(rb, scl.x, scl.y, scl.z)
+		var pos: Vector3 = base + off
+		var k := _push(kind, bs, pos, c)
+		panel["parts"].append({"kind": kind, "i": k, "col": c, "xform": Transform3D(bs, pos), "scale": scl})
+	var white_c := TerrainField.lin(0xffffff)
+	white_c.a = 1.0
+	col.a = 1.0
+	add.call("post", Vector3(0, 0.58, 0), Vector3(0.7, 1.1, 0.5), TerrainField.lin(0x6b4a30))
+	add.call("rail", Vector3(0, 1.505, 0), Vector3(0.81, 0.81, 0.07), white_c)
+	add.call("rail", Vector3(0, 1.596, 0), Vector3(0.81, 0.628, 0.09), col)
+	colliders.append({"x": bx, "z": bz, "r": 0.3, "fence": panel, "fence_style": "billboard"})
+	var nrm := Vector3(fx, 0, fz)
+	var lb := Basis(Vector3(fz, 0, -fx), Vector3.UP, Vector3(fx, 0, fz))
+	panel["cx"] = bx
+	panel["cz"] = bz
+	panel["bb"] = {"text": big, "col": Color.WHITE, "w": 0.74, "h": 0.3, "basis": lb, "at": base + Vector3(0, 1.596, 0), "nrm": nrm}
+	panel["bb_more"] = [{"text": small_t, "col": Color.html("#313131"), "w": 0.7, "h": 0.1, "basis": lb, "at": base + Vector3(0, 1.191, 0), "nrm": nrm}]
+	panels.append(panel)
+
+
 ## a roadside board / sign fits at (bx, bz) running along (dx, dz) half m each way: dry, off the jumps, clear of fences (their
 ## colliders), other boards and signs (blocked) and the tape stakes, and on ground level enough that it isn't half buried
 ## (user 2026-11-25: boards / signs / fences overlapped, boards sat clipped into slopes)
@@ -962,7 +1025,14 @@ func _plant(st: Dictionary) -> Array:
 	f.jump_eval(x, z)
 	if h < -1.9 or f.fo_h > 0.05:
 		return []
+	if _on_bline(x, z, 1.2):   # (a gap in the tape where a B-line leaves / joins)
+		return []
 	return [x, z, h]
+
+
+## within r of a B-line (TerrainField.alt_near): tape and fences leave a gap there
+func _on_bline(x: float, z: float, r: float) -> bool:
+	return f.alt_dist(x, z) < TerrainField.ALT_W + r
 
 
 func _tape() -> void:

@@ -821,7 +821,7 @@ const LIST_SPEC := {
 	"stick": ["stick", "trunk_plain", false, true], "fern": ["fern", "flower", false, true], "mushroom": ["mushroom", "flower", false, true],
 	"cactus0": ["cactus0", "cactus", true, false], "cactus1": ["cactus1", "cactus", true, false], "cactus2": ["cactus2", "cactus", true, false],
 	"cactus3": ["cactus3", "cactus", true, false], "cactus4": ["cactus4", "cactus", true, false],
-	"plank": ["box", "wood", true, false], "beam": ["box", "wood", true, false],
+	"plank": ["box", "fence", true, false], "beam": ["box", "fence", true, false],   # (the fences' wood)
 	# thin fence / tape parts: their shadows are a few pixels wide but each is a draw call in every cascade
 	"post": ["post", "fence", false, false], "rail": ["rail", "fence", false, false], "picket": ["picket", "fence", false, false],
 	"stake": ["stake", "stake", false, false],
