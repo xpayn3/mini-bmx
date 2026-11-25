@@ -21,6 +21,13 @@ var _r := 1.0
 var _h := 1.0
 var _keep_r := 1.0
 var _keep_h := 1.0
+var look_pitch := 0.0        # the standing rider's head pitch (hero shot: looks down at the camera)
+var _hero := false
+var fit_scale := 1.0         # > 1 pulls the camera back (more air round the rider)
+var spin := true             # false: holds still (the profile page)
+var _pod: MeshInstance3D
+var _floor_m: StandardMaterial3D
+var _env: Environment
 var _built := {}   # bike id -> [rig, r, h]: every bike shown so far stays built (hidden), switching back is instant
 
 
@@ -39,6 +46,7 @@ func _init() -> void:
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = BACKDROP
+	_env = env
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	env.ambient_light_energy = 1.0
@@ -54,6 +62,7 @@ func _init() -> void:
 	var floor_m := StandardMaterial3D.new()
 	floor_m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	floor_m.albedo_color = BACKDROP
+	_floor_m = floor_m
 	var fl := MeshInstance3D.new()
 	var pm := PlaneMesh.new(); pm.size = Vector2(400, 400)
 	fl.mesh = pm; fl.material_override = floor_m
@@ -67,6 +76,7 @@ func _init() -> void:
 	cm.top_radius = 1.0; cm.bottom_radius = 1.0; cm.height = PODIUM_H; cm.radial_segments = 96
 	pod.mesh = cm; pod.material_override = pod_m
 	pod.position.y = -PODIUM_H * 0.5
+	_pod = pod
 	vp.add_child(pod)
 	var g := Gradient.new()
 	g.colors = PackedColorArray([Color(0, 0, 0, 0.45), Color(0, 0, 0, 0)])
@@ -117,6 +127,35 @@ static func _make_studio_hdri() -> ImageTexture:
 			img.set_pixel(x, y, Color(v, v, v * 1.02))
 	return ImageTexture.create_from_image(img)
 
+
+## a plain stage: no podium, no turning, no dragging, a grey-white backdrop and the rider turned `yaw` radians (the profile page)
+func plain_stage(bg: Color, yaw: float, scale_k := 1.0) -> void:
+	spin = false
+	fit_scale = scale_k
+	_pod.visible = false
+	_floor_m.albedo_color = bg
+	_env.background_color = bg
+	pivot.rotation.y = yaw
+	set_process_input(false)
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+## the magazine shot: dark stage, camera low and close under a wide lens so the rider towers, head down at the lens, rim lights from behind
+func hero_stage(bg: Color, yaw: float) -> void:
+	plain_stage(bg, yaw)
+	_hero = true
+	cam.fov = 66.0
+	_env.ambient_light_energy = 0.3
+	var key := DirectionalLight3D.new()
+	key.light_energy = 1.6; key.light_color = Color(1.0, 0.94, 0.84); key.rotation_degrees = Vector3(-26, 34, 0)
+	vp.add_child(key)
+	var rim := DirectionalLight3D.new()
+	rim.light_energy = 2.8; rim.light_color = Color(1.0, 0.8, 0.22); rim.rotation_degrees = Vector3(-16, 158, 0)
+	vp.add_child(rim)
+	var rim2 := DirectionalLight3D.new()
+	rim2.light_energy = 2.0; rim2.light_color = Color(0.45, 0.68, 1.0); rim2.rotation_degrees = Vector3(-12, -146, 0)
+	vp.add_child(rim2)
+	look_pitch = 0.0
+	_fit()
 
 ## a rider standing in place of the bike (the Rider step); look = a RiderPanels look dictionary
 func show_rider(look: Dictionary) -> void:
@@ -182,8 +221,11 @@ func set_bike(id: String, force := false) -> void:
 ## frame the whole bike, whatever the shape of the view and whichever way it is turned
 func _fit() -> void:
 	if _rig == null and _rider == null: return
+	if _hero:
+		cam.look_at_from_position(Vector3(0, 0.08, 2.05 * fit_scale), Vector3(0, _h * 0.52, 0))
+		return
 	var aspect := maxf(size.x, 1.0) / maxf(size.y, 1.0)
-	var ext := maxf(_h * 0.62, _r * 1.0 / aspect)   # half the height the view has to show
+	var ext := maxf(_h * 0.62, _r * 1.0 / aspect) * fit_scale   # half the height the view has to show
 	var dist := ext * 1.1 / tan(deg_to_rad(cam.fov * 0.5))
 	# (look_at_from_position: works while the view is between pages, out of the tree)
 	cam.look_at_from_position(Vector3(0, _h * 0.5 + dist * 0.14, dist), Vector3(0, _h * 0.45, 0))
@@ -192,7 +234,7 @@ func _fit() -> void:
 func _process(dt: float) -> void:
 	if not visible: return
 	if Env.s("BMX_TURN_YAW") != "": pivot.rotation.y = float(Env.s("BMX_TURN_YAW"))   # tests: hold the turntable at this angle
-	elif not _drag: pivot.rotation.y += SPIN * dt
+	elif spin and not _drag: pivot.rotation.y += SPIN * dt
 	if _rider != null and _rider.visible:
 		_hand_t += dt
 		if _rider.animate(dt): return   # Mixamo clips (RiderAnim), if there are any
@@ -201,7 +243,7 @@ func _process(dt: float) -> void:
 			"handL": Vector3(0.02, 0.83 + breathe, -0.29), "handR": Vector3(0.04, 0.83 + breathe, 0.29),
 			"v": 0.0, "lean": 0.0, "steer": 0.0, "yawRate": 0.0, "counter": 0.0, "rockRoll": 0.0, "headRoll": 0.0,
 			"absorb": breathe, "pitch": 0.0, "bodyLevel": 0.85, "attackDrop": 0.0, "pedal": 0.0, "sprint": 0.0,
-			"crank": 0.0, "air": 0.0, "compress": 0.0, "hipShift": 0.0, "t": _hand_t, "stand": 1.0, "relax": 1.0})
+			"crank": 0.0, "air": 0.0, "compress": 0.0, "hipShift": 0.0, "t": _hand_t, "stand": 1.0, "relax": 1.0, "lookPitch": look_pitch})
 
 
 func _gui_input(e: InputEvent) -> void:

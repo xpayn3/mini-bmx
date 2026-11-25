@@ -234,6 +234,7 @@ var _level_light_ver := -1
 ## before add_child: the title backdrop round a garage visit). See take_world().
 var reuse := {}
 var _title_heading := NAN
+var title_sign: TitleSign   # the hillside RUNOUT sign behind the rider on the title screen
 var scenic := false          # title screen: golden hour, a lookout camera, far hills to the horizon
 var far_hills: FarHills
 var grass: GrassField
@@ -655,6 +656,7 @@ func set_scenic(on: bool) -> void:
 		cam.far = 3500.0
 		cam.vista_yaw = best
 		cam.set_mode("vista")
+		_make_title_sign(best)
 		# the rider sits on the bike on the hilltop, facing out over the view, not moving
 		phys.heading = best
 		phys.course = best   # the physics rebuilds the heading from the course, or it swings round slowly
@@ -669,6 +671,9 @@ func set_scenic(on: bool) -> void:
 			add_child(title_life)
 	else:
 		atmos.gain = 1.0
+		if title_sign != null:
+			title_sign.queue_free()
+			title_sign = null
 		if title_life != null:
 			title_life.queue_free()
 			title_life = null
@@ -1293,6 +1298,29 @@ func _to_hilltop() -> void:
 	_snap_prev()
 	cam.snap_to(Vector3(sp.x, phys.y + 0.5, sp.y))
 	_title_heading = sp.z + TITLE_TURN   # the bike turned so the camera looks out over the long drop, away from the sun
+
+## title screen: the game's name as a Hollywood-style sign close behind the rider, in the camera's view. The hill falls away
+## in front of the summit, so the letters stand on a gantry (beam + posts down to the hillside) at about the rider's height
+const SIGN_D := 170.0       # metres from the rider along the camera's view axis
+const SIGN_SIDE := 0.10     # sideways as a share of the distance (+ = right on screen)
+const SIGN_H := 0.075       # letter height as a share of the distance (the lookout lens is narrow: the whole word fits)
+const SIGN_UP := 7.0        # the letters' feet above the camera's eye
+func _make_title_sign(best: float) -> void:
+	if title_sign != null: title_sign.queue_free()
+	if Env.s("BMX_NO_SIGN") != "": return
+	var d := SIGN_D; var side_k := SIGN_SIDE; var h_k := SIGN_H; var up := SIGN_UP
+	if Env.s("BMX_SIGN") != "":   # tests: distance, side share, height share, feet above the eye
+		var q := Env.s("BMX_SIGN").split_floats(",")
+		d = q[0]; side_k = q[1]; h_k = q[2]; up = q[3]
+	var yaw := best + float(CameraRig.VISTA.get("yaw_off", 0.0))
+	var dir := Vector3(cos(yaw), 0.0, -sin(yaw))
+	var right := Vector3(-dir.z, 0.0, dir.x)
+	var t: Terrain = terrain
+	var c := Vector2(phys.x, phys.z) + Vector2(dir.x, dir.z) * d + Vector2(right.x, right.z) * side_k * d
+	var ground := func(x: float, z: float) -> float: return t.height(x, z)
+	title_sign = TitleSign.new()
+	add_child(title_sign)
+	title_sign.build(ground, c, -dir, h_k * d, phys.y + 1.2 + up)
 
 func _apply_settings() -> void:
 	terrain.set_view_scale(float(Settings.get_v("view_distance")))

@@ -40,9 +40,13 @@ static func font(black := false) -> Font:
 		_font_black = _with_symbols("Barlow-Black")
 	return _font_black if black else _font
 
-static func _with_symbols(name: String) -> Font:
+static func _with_symbols(name: String) -> FontFile:
 	var f: FontFile = file(name).duplicate()
 	f.allow_system_fallback = false
+	# no hinting + subpixel positions: hinted glyphs snap to whole pixel rows, which with a slant (or any skew)
+	# left every letter on its own baseline
+	f.hinting = TextServer.HINTING_NONE
+	f.subpixel_positioning = TextServer.SUBPIXEL_POSITIONING_AUTO
 	f.fallbacks = [symbols()]
 	return f
 
@@ -53,12 +57,8 @@ static var _display := {}
 static func display_font(weight := 700, slant := 0.0) -> Font:
 	var key := "%d_%.2f" % [weight, slant]
 	if _display.has(key): return _display[key]
-	var out: Font = _with_symbols("BarlowCondensed-Black" if weight >= 800 else "BarlowCondensed-Bold")
-	if slant != 0.0:
-		var v := FontVariation.new()
-		v.base_font = out
-		v.variation_transform = Transform2D(Vector2(1, 0), Vector2(-slant, 1), Vector2.ZERO)
-		out = v
+	# a lean is a real italic file (a code skew left every letter on its own pixel row)
+	var out: Font = _with_symbols("BarlowCondensed-" + ("Black" if weight >= 800 else "Bold") + ("Italic" if slant != 0.0 else ""))
 	_display[key] = out
 	return out
 

@@ -137,6 +137,11 @@ func _start(x: float, z: float) -> void:
 func _ridge_h(x: float, z: float) -> float:
 	return ((_ridge.get_noise_2d(x, z) * 0.5 + 0.5) * 150.0 + (_roll.get_noise_2d(x, z) * 0.5 + 0.5) * 45.0) * ridge_gain
 
+## the drawn backdrop surface at (x, z) seen from `from` (ground + the ridge faded in with distance): for placing things on the skyline
+func surface_h(x: float, z: float, from: Vector2) -> float:
+	var d := Vector2(x, z).distance_to(from)
+	return _terrain.height(x, z) + _ridge_h(x, z) * smoothstep(RIDGE_NEAR, RIDGE_FAR, d)
+
 static func _cell_rand(ix: int, iz: int, k: int) -> float:
 	var h := (ix * 73856093) ^ (iz * 19349663) ^ (k * 83492791)
 	h = (h ^ (h >> 13)) * 1274126177

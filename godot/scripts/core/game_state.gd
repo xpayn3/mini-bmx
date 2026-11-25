@@ -48,7 +48,7 @@ var seed := 0
 ## from the garage / rider files. Empty = a normal ride
 var view := {}
 var level := ""   # "" = the procedural world; "playground" = the test playground (LEVELS menu, --level=, BMX_LEVEL). Not saved
-var records := {"longest": 0.0, "highest": 0.0, "air": 0.0, "top_speed": 0.0, "jumps": 0, "distance": 0.0}
+var records := {"longest": 0.0, "highest": 0.0, "air": 0.0, "top_speed": 0.0, "jumps": 0, "distance": 0.0, "earned": 0.0, "best_streak": 0, "best_wstreak": 0}
 ## The wallet + what the player owns (the SHOP, garage mode "shop"). owned: "kind:id" keys (Shop.price kinds:
 ## "edition:ghost_pepper", "frame:goat", "fork:dh38"...). A new save starts with STARTING_MONEY and the stock
 ## RUNOUT DH with the parts it is built with. Saved in save.cfg [shop]. Shop.UNLOCK_ALL still lets the garage use
@@ -56,6 +56,39 @@ var records := {"longest": 0.0, "highest": 0.0, "air": 0.0, "top_speed": 0.0, "j
 const STARTING_MONEY := 15000
 var money := STARTING_MONEY
 var owned := {}
+## the wallet's ledger, newest last: [unix time, amount (+ earned / - spent), what for]; kept to LEDGER_MAX
+var wallet_log: Array = []
+const LEDGER_MAX := 60
+var claimed := {}   # goals already paid (Goals keys)
+
+## cash in: logged, counted in the lifetime total
+func earn(amount: int, reason: String) -> void:
+	if amount <= 0: return
+	money += amount
+	records.earned = float(records.earned) + amount
+	_log(amount, reason)
+	touch_records()
+
+## cash out (the shop pays through buy()); false when it can't be afforded
+func spend(amount: int, reason: String) -> bool:
+	if amount > money: return false
+	money -= amount
+	_log(-amount, reason)
+	touch_records()
+	return true
+
+func _log(amount: int, reason: String) -> void:
+	wallet_log.append([int(Time.get_unix_time_from_system()), amount, reason])
+	while wallet_log.size() > LEDGER_MAX: wallet_log.pop_front()
+	_ride_log_idx = -1
+
+## earned in the last `days` days (from the ledger)
+func earned_since(days: int) -> int:
+	var t0 := int(Time.get_unix_time_from_system()) - days * 86400
+	var n := 0
+	for e in wallet_log:
+		if int(e[0]) >= t0 and int(e[1]) > 0: n += int(e[1])
+	return n
 
 func owns(key: String) -> bool:
 	return owned.has(key)
@@ -63,7 +96,7 @@ func owns(key: String) -> bool:
 ## pays and takes it home. False when it can't be afforded (or is owned already)
 func buy(key: String, price: int) -> bool:
 	if owned.has(key) or price > money: return false
-	money -= price
+	spend(price, "Bought " + key.replace(":", " ").capitalize())
 	owned[key] = Time.get_unix_time_from_system()
 	save()
 	return true
@@ -100,6 +133,19 @@ func _ready() -> void:
 				var e = cf.get_value("days", k, null)
 				if k.is_valid_int() and e is Array and e.size() == 2: days[int(k)] = [float(e[0]), int(e[1])]
 		computer_id = String(cf.get_value("game", "computer", computer_id))
+		rider_name = String(cf.get_value("game", "name", rider_name))
+		var wl = cf.get_value("shop", "log", [])
+		if wl is Array: wallet_log = wl
+		var cl = cf.get_value("shop", "claimed", {})
+		if cl is Dictionary: claimed = cl
+		var cd = cf.get_value("shop", "cards", {})
+		if cd is Dictionary: cards = cd
+		var ts = cf.get_value("game", "tricks", {})
+		if ts is Dictionary: tricks_seen = ts
+		var br = cf.get_value("game", "bikes", {})
+		if br is Dictionary: bikes_ridden = br
+		if cf.has_section("achievements"):
+			for k in cf.get_section_keys("achievements"): achieved[k] = int(cf.get_value("achievements", k, 0))
 		goggle_lens = String(cf.get_value("game", "lens", goggle_lens))
 		if not _GoggleLens.has(goggle_lens): goggle_lens = _GoggleLens.DEFAULT
 		_lens_saved = goggle_lens
@@ -141,6 +187,11 @@ func save() -> void:
 	var cf := ConfigFile.new()
 	cf.set_value("game", "bike", bike_id)
 	cf.set_value("game", "computer", computer_id)
+	cf.set_value("game", "name", rider_name)
+	cf.set_value("game", "tricks", tricks_seen)
+	cf.set_value("game", "bikes", bikes_ridden)
+	cf.set_value("shop", "cards", cards)
+	for id in achieved: cf.set_value("achievements", id, achieved[id])
 	if OS.get_environment("BMX_LENS") == "": _lens_saved = goggle_lens
 	cf.set_value("game", "lens", _lens_saved)
 	cf.set_value("game", "bmx_tyre", bmx_tyre)
@@ -150,6 +201,11 @@ func save() -> void:
 		cf.set_value("records", k, records[k])
 	cf.set_value("shop", "money", money)
 	cf.set_value("shop", "owned", owned)
+	cf.set_value("shop", "log", wallet_log)
+	var live_claims := {}
+	for k in claimed:   # old goals fall out (this week / month's keys carry their number)
+		live_claims[k] = true
+	cf.set_value("shop", "claimed", live_claims)
 	var oldest := today() - KEEP_DAYS
 	for d in days:
 		if int(d) >= oldest: cf.set_value("days", str(d), days[d])
@@ -161,12 +217,30 @@ func save() -> void:
 const ACTIVITY_M := 200.0
 const KEEP_DAYS := 800
 var days := {}
+## the rider's profile (title menu, top right): a name and the achievements earned (id -> unix time; Steam.ACHIEVEMENTS
+## has the list). Kept here whether or not Steam is running, Steam only mirrors it.
+var rider_name := "RIDER"
+var cards := {}          # collected cards (Collection.CARDS id -> unix time)
+var tricks_seen := {}    # trick keys landed at least once (Collection.TRICK_KEYS values)
+var bikes_ridden := {}   # bike id -> rides of at least ACTIVITY_M on it
+var achieved := {}
+
+## the rider's level from the total distance: one every 20 km
+static func level_for(metres: float) -> int:
+	return 1 + int(metres / 20000.0)
 var _ride_m := 0.0          # this ride so far
 var _live := false          # a ride of the player's (not the demo AI, the menu backdrop or a test run)
 var _ride_counted := true   # this ride is already an activity
 
 ## a new ride starts (RIDE / GO): its distance is logged, and it becomes an activity after ACTIVITY_M
+const RIDE_RATE := 0.03        # cash per metre ridden (a 10 km ride = $300)
+const DAILY_BASE := 50         # the day's first activity pays this + DAILY_STEP per day of the streak (up to 10)
+const DAILY_STEP := 25
+var _pending := 0.0            # earned cents not yet whole dollars
+var _ride_log_idx := -1        # this ride's entry in the ledger (grows as the ride goes on)
+
 func begin_ride() -> void:
+	_ride_log_idx = -1
 	_live = not Settings._test_run
 	_ride_m = 0.0
 	_ride_counted = false
@@ -184,10 +258,46 @@ func add_distance(ds: float) -> void:
 	var e: Array = days.get(d, [0.0, 0])
 	e[0] = float(e[0]) + ds
 	_ride_m += ds
+	_pay_ride(ds)
 	if not _ride_counted and _ride_m >= ACTIVITY_M:
 		_ride_counted = true
 		e[1] = int(e[1]) + 1
+		days[d] = e
+		bikes_ridden[bike_id] = int(bikes_ridden.get(bike_id, 0)) + 1
+		_daily_bonus(d)
 	days[d] = e
+
+## the ride pays as it goes: one growing "Ride" line in the ledger
+func _pay_ride(ds: float) -> void:
+	_pending += ds * RIDE_RATE
+	var n := int(_pending)
+	if n < 1: return
+	_pending -= n
+	money += n
+	records.earned = float(records.earned) + n
+	if _ride_log_idx >= 0 and _ride_log_idx < wallet_log.size():
+		wallet_log[_ride_log_idx][1] = int(wallet_log[_ride_log_idx][1]) + n
+	else:
+		wallet_log.append([int(Time.get_unix_time_from_system()), n, "Ride"])
+		while wallet_log.size() > LEDGER_MAX: wallet_log.pop_front()
+		_ride_log_idx = wallet_log.size() - 1
+
+## the first activity of a day pays a bonus that grows with the days in a row
+func _daily_bonus(day: int) -> void:
+	var key := "d%d" % day
+	if claimed.has(key): return
+	claimed[key] = true
+	var n := day_streak()
+	earn(DAILY_BASE + DAILY_STEP * mini(n, 10), "Daily bonus · day %d" % n)
+
+## days in a row with an activity, ending today (or yesterday while today has none yet)
+func day_streak() -> int:
+	var d := today()
+	if int(days.get(d, [0.0, 0])[1]) <= 0: d -= 1
+	var n := 0
+	while int(days.get(d, [0.0, 0])[1]) > 0:
+		n += 1; d -= 1
+	return n
 
 static func today() -> int:
 	var t := Time.get_datetime_dict_from_system()   # local date
