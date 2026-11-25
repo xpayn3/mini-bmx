@@ -528,6 +528,7 @@ internal sealed class TfShared
 	public int[] c_run_start, c_runs;
 	public TfFeat[] route_feats;
 	// colours (linear, float32 like Godot's Color)
+	public Color needle, marsh, savanna, frost, ash, ashLight;
 	public Color grassA, grassB, meadow, alpine, dryGrass, litter, clover, dune, duneDark, dirt, dirtDark, desertDirt,
 		gravel, greyDark, snow, sand, bed;
 	public Color[] red_bands, grey_bands;
@@ -556,6 +557,10 @@ public partial class TerrainFieldCs : RefCounted
 	private const double I90 = 1.0 / 90.0;
 	private const double I240 = 1.0 / 240.0;
 	private const double I150 = 1.0 / 150.0;
+	// land shaping v2 (terrain_field.gd LAND_*; BMX_OLD_LAND=1 = the old land)
+	private const double LAND_WARP = 38.0, LAND_TALUS = 0.30, LAND_DETAIL_S = 0.30, LAND_FINE_S = 0.55, LAND_VALLEY_FLAT = 0.65, LAND_VALLEY_MACRO = 0.40,
+		BIO_A = 1.0 / 1300.0, BIO_M = 1.0 / 1700.0, BIO_F = 1.0 / 900.0, BIO_S = 1.0 / 2200.0, LAND_VI = 1.0 / 420.0, LAND_CR = 1.0 / 2600.0, LAND_CM = 1.0 / 1800.0, LAND_STRATA_STEP = 3.2, LAND_STRATA = 0.7;
+	private static readonly bool OLD_LAND = System.Environment.GetEnvironmentVariable("BMX_OLD_LAND") is { Length: > 0 };
 	private const double I700 = 1.0 / 700.0;
 	private const double I28 = 1.0 / 28.0;
 	private const double I8 = 1.0 / 8.0;
@@ -615,13 +620,14 @@ public partial class TerrainFieldCs : RefCounted
 	private double _mt_x = double.NaN, _mt_z = double.NaN, _mt_v;
 	private double _zc_x = double.NaN, _zc_v;
 	public double b_dry, b_rug;
+	public double b_cold, b_wet, b_forest, b_sav, b_ash;   // climate biomes (terrain_field.gd biome())
 	private double _bi_x = double.NaN, _bi_z = double.NaN;
 	private double _g_x = double.NaN, _g_z = double.NaN, _g_v, _g_wood;
 	private bool _g_has_wood;
 	private double _gr_x = double.NaN, _gr_z = double.NaN, _gx, _gz;
 	public Color cl_g, cl_d;
 	public double cl_steep;
-	public double cp_dry, cp_rug;
+	public double cp_dry, cp_rug, cp_cold, cp_ash;
 	public double _cp_h;
 	private Godot.Collections.Dictionary _col;
 	private Godot.Collections.Array _route_wrap;
@@ -650,6 +656,7 @@ public partial class TerrainFieldCs : RefCounted
 	// ======================================================================
 	internal static double minf(double a, double b) => a < b ? a : b;
 	internal static double maxf(double a, double b) => a > b ? a : b;
+	internal static double clampf(double v, double lo, double hi) => v < lo ? lo : (v > hi ? hi : v);
 	private static double signf(double v) => v == 0 ? 0.0 : (v < 0 ? -1.0 : 1.0);
 	private static long floori(double v) => (long)Math.Floor(v);
 	private static long posmod(long a, long b)
@@ -709,6 +716,7 @@ public partial class TerrainFieldCs : RefCounted
 		var col = f.Get("col").AsGodotDictionary();
 		sh.col = col.Duplicate();
 		Color C(string k) => col[k].AsColor();
+		sh.needle = C("needle"); sh.marsh = C("marsh"); sh.savanna = C("savanna"); sh.frost = C("frost"); sh.ash = C("ash"); sh.ashLight = C("ashLight");
 		sh.grassA = C("grassA"); sh.grassB = C("grassB"); sh.meadow = C("meadow"); sh.alpine = C("alpine");
 		sh.dryGrass = C("dryGrass"); sh.litter = C("litter"); sh.clover = C("clover"); sh.dune = C("dune");
 		sh.duneDark = C("duneDark"); sh.dirt = C("dirt"); sh.dirtDark = C("dirtDark"); sh.desertDirt = C("desertDirt");
@@ -823,6 +831,44 @@ public partial class TerrainFieldCs : RefCounted
 		double c11 = nt[i11] * x1 + nt[i11 + 1] * y1 + nt[i11 + 2];
 		double a = c00 + u * (c10 - c00);
 		return a + v * (c01 + u * (c11 - c01) - a);
+	}
+
+	/// noise() with its gradient (d/dx, d/dy of the arguments in _ndx / _ndy); same lattice and operations as terrain_field.gd noise_d
+	public double _ndx, _ndy;
+	public double noise_d(double x, double y)
+	{
+		double fx = Math.Floor(x);
+		double fy = Math.Floor(y);
+		long X = (long)fx & 255;
+		long Y = (long)fy & 255;
+		x -= fx;
+		y -= fy;
+		double u = x * x * x * (x * (x * 6.0 - 15.0) + 10.0);
+		double v = y * y * y * (y * (y * 6.0 - 15.0) + 10.0);
+		long X1 = (X + 1) & 255;
+		long Y1 = (Y + 1) & 255;
+		long i00 = ((X << 8) | Y) * 3;
+		long i10 = ((X1 << 8) | Y) * 3;
+		long i01 = ((X << 8) | Y1) * 3;
+		long i11 = ((X1 << 8) | Y1) * 3;
+		double x1 = x - 1.0;
+		double y1 = y - 1.0;
+		var nt = NT;
+		double c00 = nt[i00] * x + nt[i00 + 1] * y + nt[i00 + 2];
+		double c10 = nt[i10] * x1 + nt[i10 + 1] * y + nt[i10 + 2];
+		double c01 = nt[i01] * x + nt[i01 + 1] * y1 + nt[i01 + 2];
+		double c11 = nt[i11] * x1 + nt[i11 + 1] * y1 + nt[i11 + 2];
+		double du = 30.0 * x * x * x1 * x1;
+		double dv = 30.0 * y * y * y1 * y1;
+		double a = c00 + u * (c10 - c00);
+		double b = c01 + u * (c11 - c01);
+		double dax = nt[i00] + u * (nt[i10] - nt[i00]) + du * (c10 - c00);
+		double dbx = nt[i01] + u * (nt[i11] - nt[i01]) + du * (c11 - c01);
+		double day = nt[i00 + 1] + u * (nt[i10 + 1] - nt[i00 + 1]);
+		double dby = nt[i01 + 1] + u * (nt[i11 + 1] - nt[i01 + 1]);
+		_ndx = dax + v * (dbx - dax);
+		_ndy = day + v * (dby - day) + dv * (b - a);
+		return a + v * (b - a);
 	}
 
 	public double n(double x, double z, double s) => noise(x * s, z * s);
@@ -1116,6 +1162,69 @@ public partial class TerrainFieldCs : RefCounted
 		return tn * (om + 0.8) * (1.0 - sm(edge - 0.5, edge + 6.5, o));
 	}
 
+	private static readonly bool OLD_BERM = System.Environment.GetEnvironmentVariable("BMX_OLD_BERM") is { Length: > 0 };
+	private double bs_c, bs_F = 2.7, bs_cw = 0.5, bs_lip, bs_scoop;
+
+	/// terrain_field.gd berm_style / berm_shape2 (berm v2)
+	private void berm_style(double a, double b, double w)
+	{
+		double n1 = noise(a / 70.0 + 11.0, b / 70.0 + 5.3);
+		double n2 = noise(a / 45.0 - 3.1, b / 45.0 + 7.7);
+		double n3 = noise(a / 90.0 + 41.0, b / 90.0 - 9.0);
+		double g = sm(0.05, 0.4, noise(a / 130.0 + 71.0, b / 130.0 - 12.5));
+		double wn = sm(0.30, 0.55, noise(a / 11.0 - 5.0, b / 11.0 + 19.0));
+		bs_c = 0.75 * sm(-0.25, 0.3, n1);
+		bs_F = clampf(w + 0.1 + 0.8 * sm(-0.3, 0.3, n2), 2.0, 3.5);
+		bs_cw = 0.3 + 0.5 * (bs_c / 0.75);
+		bs_lip = 0.18 * sm(0.0, 0.35, n3);
+		bs_scoop = 0.5 * g * wn;
+	}
+
+	private double berm_shape2(double o, double tn)
+	{
+		if (o < -1.6)
+			return 0.0;
+		if (o < 0.0)
+			return tn * (o + 1.6) * (o + 1.6) / 3.2;
+		double F = bs_F;
+		double c = bs_c;
+		double cw = bs_cw;
+		double h0 = tn * 0.8;
+		double fo = minf(o, F);
+		double g = 0.0;
+		if (fo > 0.9)
+		{
+			double t = (fo - 0.9) / (F - 0.9);
+			g = (F - 0.9) * (t * t * t - t * t * t * t * 0.5);
+		}
+		double hF = h0 + tn * (F + c * (F - 0.9) * 0.5);
+		double slope_f = tn * (1.0 + c);
+		double hrim = hF + slope_f * cw * 0.5;
+		double h;
+		if (o <= F)
+			h = h0 + tn * (fo + c * g);
+		else
+		{
+			double d = o - F;
+			if (d <= cw)
+			{
+				double tc = d / cw;
+				h = hF + slope_f * (d - cw * (tc * tc * tc - tc * tc * tc * tc * 0.5));
+			}
+			else
+			{
+				double lb = clampf(hrim / 0.6, 2.0, 5.0);
+				double t2 = sm(0.0, lb, d - cw);
+				h = hrim * (1.0 - t2);
+			}
+		}
+		if (bs_lip > 0.0)
+			h += bs_lip * (1.0 - sm(0.0, 0.7, Math.Abs(o - (F + cw * 0.6))));
+		if (bs_scoop > 0.0)
+			h -= bs_scoop * sm(F - 1.4, F, o) * (1.0 - sm(F + cw, F + cw + 1.2, o));
+		return maxf(h, 0.0);
+	}
+
 	public double berm(double x, double z)
 	{
 		double h = 0.0;
@@ -1123,7 +1232,15 @@ public partial class TerrainFieldCs : RefCounted
 		// q_bt is signed (> 0 left berm, < 0 right) and already smooth along the course
 		double bt = Math.Abs(q_bt) - 0.004;
 		if (q_d < 12.0 && bt > 0.0)
-			h = maxf(h, q_bt > 0.0 ? berm_shape(-q_a, bt) : berm_shape(q_a, bt));
+		{
+			if (OLD_BERM)
+				h = maxf(h, q_bt > 0.0 ? berm_shape(-q_a, bt) : berm_shape(q_a, bt));
+			else
+			{
+				berm_style(q_s, 0.0, q_w);
+				h = maxf(h, berm_shape2(q_bt > 0.0 ? -q_a : q_a, bt));
+			}
+		}
 		double p = pathN(x, z);
 		if (Math.Abs(p) < 0.2)
 		{
@@ -1155,7 +1272,13 @@ public partial class TerrainFieldCs : RefCounted
 			if (tn > 0.0 && Math.Abs(s) < 10.0)
 			{
 				double bon = sm(0.2, 0.36, noise((cx + 777) * I55, (cz - 333) * I55));
-				h = maxf(h, berm_shape(s * signf(kap), tn) * bon);
+				if (OLD_BERM)
+					h = maxf(h, berm_shape(s * signf(kap), tn) * bon);
+				else
+				{
+					berm_style(cx, cz, 1.9);
+					h = maxf(h, berm_shape2(s * signf(kap), tn) * bon);
+				}
 			}
 		}
 		return h;
@@ -1168,13 +1291,87 @@ public partial class TerrainFieldCs : RefCounted
 		double relief = 1.0 + 1.3 * sm(0.0, 0.35, noise((x + 5000) * I260, (z - 800) * I260));
 		double big = sm(-0.15, 0.3, noise((x + 2600) * I700, (z - 3100) * I700));
 		double rdg = sm(0.05, 0.35, noise((x - 4100) * I700, (z + 1500) * I700));
-		double rr = 1.0 - Math.Abs(noise((x + 820) * I150, (z - 2300) * I150));
-		double h = (noise(x * I90, z * I90) * 10 * relief + noise((x + 31.7) * I28, (z - 17.2) * I28) * 3.2 * (0.6 + 0.4 * relief)
-			+ noise((x - 1700) * I240, (z + 900) * I240) * 16 * big + (rr * rr - 0.45) * 14 * rdg) * calm + hill(x, z);
+		double h;
+		double slt = 0.0;
+		if (OLD_LAND)
+		{
+			double rr = 1.0 - Math.Abs(noise((x + 820) * I150, (z - 2300) * I150));
+			h = (noise(x * I90, z * I90) * 10 * relief + noise((x + 31.7) * I28, (z - 17.2) * I28) * 3.2 * (0.6 + 0.4 * relief)
+				+ noise((x - 1700) * I240, (z + 900) * I240) * 16 * big + (rr * rr - 0.45) * 14 * rdg) * calm + hill(x, z);
+		}
+		else
+		{
+			double kd = spl(noise((x + 4400.0) * LAND_CR, (z - 3700.0) * LAND_CR), -0.45, 0.45, -0.1, 0.75, 0.15, 1.0, 0.45, 1.4);
+			double km = spl(noise((x - 1300.0) * LAND_CM, (z + 2900.0) * LAND_CM), -0.4, 0.55, 0.0, 1.0, 0.2, 1.25, 0.45, 1.6);
+			big *= km;
+			rdg *= km;
+			double wk = LAND_WARP * calm;
+			double wx = x + noise((x + 1900.0) * I170, (z - 640.0) * I170) * wk;
+			double wz = z + noise((x - 2300.0) * I170, (z + 1100.0) * I170) * wk;
+			double n240 = noise_d((wx - 1700) * I240, (wz + 900) * I240);
+			double g240x = _ndx * I240;
+			double g240z = _ndy * I240;
+			double n150 = noise_d((wx + 820) * I150, (wz - 2300) * I150);
+			double g150x = _ndx * I150;
+			double g150z = _ndy * I150;
+			double rr = 1.0 - Math.Abs(n150);
+			double m0 = n240 * 16 * big + (rr * rr - 0.45) * 14 * rdg;
+			double sg = signf(n150);
+			double mx = g240x * 16 * big - 2.0 * rr * sg * g150x * 14 * rdg;
+			double mz = g240z * 16 * big - 2.0 * rr * sg * g150z * 14 * rdg;
+			double sl = Math.Sqrt(mx * mx + mz * mz) * calm;
+			double vk = sm(0.10, 0.40, -noise((x + 7100.0) * LAND_VI, (z - 2600.0) * LAND_VI));
+			double tk = (1.0 - LAND_VALLEY_MACRO * vk) / Math.Sqrt(1.0 + (sl / LAND_TALUS) * (sl / LAND_TALUS));
+			double ds = sl / LAND_DETAIL_S;
+			double dk = (1.0 - LAND_VALLEY_FLAT * vk) / (1.0 + ds * ds);
+			double a90 = 10 * relief * kd * dk;
+			double n90 = noise_d(wx * I90, wz * I90);
+			double g90x = _ndx * I90;
+			double g90z = _ndy * I90;
+			double tx = (mx * tk + g90x * a90) * calm;
+			double tz = (mz * tk + g90z * a90) * calm;
+			slt = Math.Sqrt(tx * tx + tz * tz);
+			double fs = slt / LAND_FINE_S;
+			double a28 = 3.2 * (0.6 + 0.4 * relief) * kd * dk / (1.0 + fs * fs);
+			h = (n90 * a90 + noise((wx + 31.7) * I28, (wz - 17.2) * I28) * a28) * calm + m0 * tk * calm + hill(x, z);
+		}
 		double wm = wild_mask(x, z);
 		if (wm == 0.0)
 			return h;
-		return h + wild(x, z) * wm;
+		h += wild(x, z) * wm;
+		if (!OLD_LAND)
+		{
+			double rug = b_rug;
+			double sk = rug * sm(0.10, 0.35, slt) * sm(6.0, 30.0, trail_metres(x, z)) * LAND_STRATA;
+			if (sk > 0.0)
+			{
+				double ph = h / LAND_STRATA_STEP + noise((x + 3.3) * I60, (z - 8.1) * I60) * 0.4;
+				double fl = Math.Floor(ph);
+				double st = fl + sm(0.35, 0.65, ph - fl);
+				h += sk * LAND_STRATA_STEP * (st - ph);
+			}
+		}
+		return h;
+	}
+
+	/// piecewise smoothstep through four (t, value) knots, flat outside (terrain_field.gd spl)
+	public static double spl(double t, double a0, double b0, double a1, double b1, double a2, double b2, double a3, double b3)
+	{
+		if (t <= a0)
+			return b0;
+		if (t >= a3)
+			return b3;
+		if (t < a1)
+			return b0 + (b1 - b0) * sm(a0, a1, t);
+		if (t < a2)
+			return b1 + (b2 - b1) * sm(a1, a2, t);
+		return b2 + (b3 - b2) * sm(a2, a3, t);
+	}
+
+	private double _macro(double wx, double wz, double big, double rdg)
+	{
+		double rr = 1.0 - Math.Abs(noise((wx + 820) * I150, (wz - 2300) * I150));
+		return noise((wx - 1700) * I240, (wz + 900) * I240) * 16 * big + (rr * rr - 0.45) * 14 * rdg;
 	}
 
 	public double @base(double x, double z)
@@ -1230,14 +1427,37 @@ public partial class TerrainFieldCs : RefCounted
 		double wz = z + noise((x - 500) * I160, z * I160) * 60;
 		b_dry = sm(-0.12, 0.16, noise((wx + 3000) * I380, (wz - 1200) * I380) + biome_dry);
 		b_rug = sm(-0.08, 0.2, noise((wx - 700) * I300, (wz + 2200) * I300) + biome_rug);
+		double an = noise((wx + 1700.0) * BIO_A, (wz - 3100.0) * BIO_A);
+		double mn = noise((wx - 2500.0) * BIO_M, (wz + 900.0) * BIO_M);
+		double fn = noise((wx + 600.0) * BIO_F, (wz - 1400.0) * BIO_F);
+		double sn = noise((wx - 4300.0) * BIO_S, (wz + 2600.0) * BIO_S);
+		double pin = (biome_dry != 0.0 || biome_rug != 0.0) ? 1.0 : 0.0;
+		double a = an * 0.7 + b_rug * 0.45 - b_dry * 0.5;
+		b_cold = sm(0.25, 0.55, a) * (1.0 - pin);
+		double w = mn * 0.8 - an * 0.5 - b_dry * 0.9 - b_rug * 0.5;
+		b_wet = sm(0.10, 0.36, w) * (1.0 - b_cold) * (1.0 - pin);
+		double fo = fn * 0.7 + mn * 0.3 - b_dry * 1.0 - b_rug * 0.3;
+		b_forest = sm(-0.30, 0.0, fo) * (1.0 - b_cold) * (1.0 - b_wet) * (1.0 - pin);
+		b_sav = sm(0.15, 0.3, b_dry) * (1.0 - sm(0.45, 0.65, b_dry)) * (1.0 - b_rug) * (1.0 - pin);
+		b_ash = sm(0.27, 0.39, sn) * (1.0 - b_dry * 0.7) * (1.0 - pin);
 		_bi_x = x; _bi_z = z;
 	}
 
 	public string biome_name(double x, double z)
 	{
 		biome(x, z);
+		if (b_ash > 0.5)
+			return "Ash Fields";
 		if (b_dry > 0.6)
 			return b_rug > 0.5 ? "Red Canyons" : "Dune Sea";
+		if (b_cold > 0.5)
+			return "Alpine Peaks";
+		if (b_wet > 0.5)
+			return "Wetlands";
+		if (b_forest > 0.5)
+			return "Pine Forest";
+		if (b_sav > 0.5)
+			return "Savanna";
 		if (b_dry > 0.35)
 			return "Dry Plains";
 		return b_rug > 0.5 ? "Rocky Mountains" : "Green Hills";
@@ -1345,6 +1565,9 @@ public partial class TerrainFieldCs : RefCounted
 		return f;
 	}
 
+	private const double SITE_SIDE = 3.0, SITE_RISE = 1.3, SITE_DROP = 1.8;
+	private static readonly bool OLD_SITING = System.Environment.GetEnvironmentVariable("BMX_OLD_SITING") is { Length: > 0 };
+
 	private TfFeat _jump_at(long cx, long cz)
 	{
 		long key = cx * 1048576 + cz;
@@ -1393,6 +1616,7 @@ public partial class TerrainFieldCs : RefCounted
 				double sx = bx - dx * len / 2;
 				double szz = bz - dz * len / 2;
 				bool ok = Math.Abs(b1 - b0) / len < 0.14;
+				var cand = make_feat(sx, szz, dx, dz, type, b0, b1, true);
 				long k = 0;
 				while (ok && k <= 10)
 				{
@@ -1403,10 +1627,19 @@ public partial class TerrainFieldCs : RefCounted
 					double pl = b0 + (b1 - b0) * f;
 					if (pl < WATER + 0.6 || Math.Abs(b - pl) > 1.8 || route_dist(px, pz) < 12)
 						ok = false;
+					// smart siting (terrain_field.gd SITE_*): no hill wall / drop-off beside the footprint
+					if (ok && !OLD_SITING)
+					{
+						double sw = cand.half + SITE_SIDE;
+						double d1 = @base(px - dz * sw, pz + dx * sw) - pl;
+						double d2 = @base(px + dz * sw, pz - dx * sw) - pl;
+						if (d1 > SITE_RISE || d2 > SITE_RISE || -d1 > SITE_DROP || -d2 > SITE_DROP)
+							ok = false;
+					}
 					k++;
 				}
 				if (ok && Math.Sqrt(sx * sx + szz * szz) > 34)
-					best = make_feat(sx, szz, dx, dz, type, b0, b1, true);
+					best = cand;
 			}
 		}
 		_jc[key] = best;
@@ -1815,10 +2048,16 @@ public partial class TerrainFieldCs : RefCounted
 		double rug = b_rug;
 		cp_dry = dry;
 		cp_rug = rug;
+		cp_cold = b_cold;
+		cp_ash = b_ash;
 		Color g = clerp(C.grassA, C.grassB, v);
 		double hh = _cp_h;
 		g = clerp(g, C.meadow, sm(3.5, 8, hh) * 0.8 * (1.0 - rug));
 		g = clerp(g, C.alpine, rug * (1.0 - dry) * 0.6);
+		g = clerp(g, C.needle, b_forest * 0.55);
+		g = clerp(g, C.marsh, b_wet * 0.7);
+		g = clerp(g, C.savanna, b_sav * 0.65);
+		g = clerp(g, C.frost, b_cold * 0.55);
 		g = clerp(g, C.dryGrass, sm(0.15, 0.55, dry));
 		double wd = sm(0.0, 0.35, noise((x + 400) * I38, z * I38)) * (1.0 - dry);
 		g = clerp(g, C.litter, wd * 0.38 * (1.0 - rug * 0.5));
@@ -1826,6 +2065,7 @@ public partial class TerrainFieldCs : RefCounted
 		g = cmul(g, 1.0 + noise((x + 17) * I2_3, (z - 29) * I2_3) * 0.08);
 		Color dune = clerp(C.dune, C.duneDark, v);
 		g = clerp(g, dune, sm(0.5, 0.85, dry));
+		g = clerp(g, clerp(C.ash, C.ashLight, sm(-0.2, 0.5, noise((x + 7.7) * I9, (z - 3.1) * I9))), b_ash * 0.92);
 		double tr = trail(x, z);
 		double t = maxf(tr, jump_mask(x, z));
 		Color d = clerp(clerp(C.dirt, C.dirtDark, sm(-0.4, 0.4, noise(x * I7, z * I7)) * 0.7), C.desertDirt, dry * 0.6);
@@ -1852,12 +2092,16 @@ public partial class TerrainFieldCs : RefCounted
 	}
 
 	/// part 2: snow, rock faces, beach sand, lake bed (needs h and the normal's y)
-	public void color_post(double x, double z, double h, double ny, double dry, double rug)
+	public void color_post(double x, double z, double h, double ny, double dry, double rug, double cold = 0.0, double ash = 0.0)
 	{
 		var C = _sh;
 		Color g = cl_g;
-		if (rug > 0.0 && dry < 1.0)
-			g = clerp(g, C.snow, sm(11, 19, h - hill(x, z) + noise(x * I9, z * I9) * 3) * rug * (1.0 - dry) * sm(0.75, 0.9, ny));
+		double snow_k = maxf(rug, cold);
+		if (snow_k > 0.0 && dry < 1.0)
+		{
+			double lo = 11.0 - 7.0 * cold;
+			g = clerp(g, C.snow, sm(lo, lo + 8.0, h - hill(x, z) + noise(x * I9, z * I9) * 3) * snow_k * (1.0 - dry) * sm(0.75, 0.9, ny));
+		}
 		double steep = sm(0.86, 0.6, ny);
 		if (steep > 0.0)
 		{
@@ -1885,7 +2129,7 @@ public partial class TerrainFieldCs : RefCounted
 	{
 		_cp_h = h;
 		double t = color_pre(x, z);
-		color_post(x, z, h, ny, cp_dry, cp_rug);
+		color_post(x, z, h, ny, cp_dry, cp_rug, cp_cold, cp_ash);
 		return t;
 	}
 
@@ -1974,7 +2218,7 @@ public partial class TerrainFieldCs : RefCounted
 		var pre_g = new Color[NV * NV];
 		var pre_d = new Color[NV * NV];
 		var pre_t = new float[NV * NV];
-		var pre_b = new double[NV * NV * 2];
+		var pre_b = new double[NV * NV * 4];
 		var TR = new float[NV * NV * 4];   // trail frame for ground.gdshader: across, line offset, along, run-off skid's place
 		var T2 = new float[NV * NV * 4];   // road, dry biome, built jump, run-off skid's strength
 		var T3 = new float[NV * NV];       // riders in the air over a jump here
@@ -1994,8 +2238,10 @@ public partial class TerrainFieldCs : RefCounted
 					pre_t[o] = (float)color_pre(x, z);
 					pre_g[o] = cl_g;
 					pre_d[o] = cl_d;
-					pre_b[o * 2] = cp_dry;
-					pre_b[o * 2 + 1] = cp_rug;
+					pre_b[o * 4] = cp_dry;
+					pre_b[o * 4 + 1] = cp_rug;
+					pre_b[o * 4 + 2] = cp_cold;
+					pre_b[o * 4 + 3] = cp_ash;
 					double jm = jump_mask(x, z);
 					double ac = across(x, z);
 					query(x, z);
@@ -2064,10 +2310,10 @@ public partial class TerrainFieldCs : RefCounted
 				uvs[o] = new Vector2((float)((ix + 0.5) / NV), (float)((iz + 0.5) / NV));
 				cl_g = pre_g[o];
 				cl_d = pre_d[o];
-				color_post(lx + ox, lz + oz, h, nv.Y, pre_b[o * 2], pre_b[o * 2 + 1]);
+				color_post(lx + ox, lz + oz, h, nv.Y, pre_b[o * 4], pre_b[o * 4 + 1], pre_b[o * 4 + 2], pre_b[o * 4 + 3]);
 				TW[o] = pre_t[o];
 				SW[o] = (float)cl_steep;
-				DRY[o] = (float)pre_b[o * 2];
+				DRY[o] = (float)maxf(pre_b[o * 4], pre_b[o * 4 + 3]);   // (no grass on ash)
 				LG[o] = cl_g;
 				LD[o] = cl_d;
 			}

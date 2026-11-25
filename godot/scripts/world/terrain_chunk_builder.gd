@@ -27,6 +27,8 @@ static var BUSHES: Array = []
 static var FERNS: Array = []
 static var SHROOMS: Array = []
 static var SCRUB: Array = []
+static var SAV_LEAVES: Array = []   # savanna umbrella trees
+static var REEDS: Array = []        # wetland reeds
 static var DAISIES: Array = []
 static var TULIPS: Array = []
 static var SPIKES: Array = []
@@ -50,6 +52,8 @@ static func ensure_static() -> void:
 	FERNS = L.call([0x3f8a35, 0x4f9a3c, 0x5ea544, 0x8a9a3a])
 	SHROOMS = L.call([0xc8382c, 0xb5652e, 0xd9b27a, 0xe8dcc0, 0x8a5a36])
 	SCRUB = L.call([0x9a7a48, 0xb08a52, 0x8c6c3e, 0x7f8a4a])
+	SAV_LEAVES = L.call([0x8a9a3a, 0x9aa844, 0x7a8a34, 0xa8a64a])
+	REEDS = L.call([0x7a9a3c, 0x8aa844, 0x6a8a38, 0xa0a850])
 	DAISIES = L.call([0xffffff, 0xfff6e0, 0xffd84a, 0xff9ec4, 0xf26d9b, 0xffb35c])
 	TULIPS = L.call([0xe8384a, 0xff6f61, 0xffc93c, 0xff8fb8, 0xf7f1ff, 0xd94f8c])
 	SPIKES = L.call([0x9b7bea, 0x7a8cff, 0xc79bff, 0xf4a6d7, 0xffffff])
@@ -202,6 +206,7 @@ func _build() -> void:
 	_tufts(ox, oz)
 	_stage("tufts")
 	_trail_clutter(ox, oz)
+	_berm_clutter(ox, oz)
 	_stage("clutter")
 	_grass(ox, oz)
 	_stage("grass")
@@ -318,7 +323,7 @@ func ground_stage(ox: float, oz: float) -> Dictionary:
 	var pre_g := PackedColorArray(); pre_g.resize(NV * NV)
 	var pre_d := PackedColorArray(); pre_d.resize(NV * NV)
 	var pre_t := PackedFloat32Array(); pre_t.resize(NV * NV)
-	var pre_b := PackedFloat64Array(); pre_b.resize(NV * NV * 2)
+	var pre_b := PackedFloat64Array(); pre_b.resize(NV * NV * 4)
 	var TR := PackedFloat32Array(); TR.resize(NV * NV * 4)   # trail frame for ground.gdshader: across, line offset, along, run-off skid's place
 	var T2 := PackedFloat32Array(); T2.resize(NV * NV * 4)   # road, dry biome, built jump, run-off skid's strength
 	var T3 := PackedFloat32Array(); T3.resize(NV * NV)       # riders in the air over a jump here
@@ -336,8 +341,10 @@ func ground_stage(ox: float, oz: float) -> Dictionary:
 				pre_t[o] = f.color_pre(x, z)
 				pre_g[o] = f.cl_g
 				pre_d[o] = f.cl_d
-				pre_b[o * 2] = f.cp_dry
-				pre_b[o * 2 + 1] = f.cp_rug
+				pre_b[o * 4] = f.cp_dry
+				pre_b[o * 4 + 1] = f.cp_rug
+				pre_b[o * 4 + 2] = f.cp_cold
+				pre_b[o * 4 + 3] = f.cp_ash
 				var jm: float = f.jump_mask(x, z)
 				var ac: float = f.across(x, z)
 				f.query(x, z)
@@ -385,10 +392,10 @@ func ground_stage(ox: float, oz: float) -> Dictionary:
 			uvs[o] = Vector2((ix + 0.5) / NV, (iz + 0.5) / NV)
 			f.cl_g = pre_g[o]
 			f.cl_d = pre_d[o]
-			f.color_post(lx + ox, lz + oz, h, nv.y, pre_b[o * 2], pre_b[o * 2 + 1])
+			f.color_post(lx + ox, lz + oz, h, nv.y, pre_b[o * 4], pre_b[o * 4 + 1], pre_b[o * 4 + 2], pre_b[o * 4 + 3])
 			TW[o] = pre_t[o]
 			SW[o] = f.cl_steep
-			DRY[o] = pre_b[o * 2]
+			DRY[o] = maxf(pre_b[o * 4], pre_b[o * 4 + 3])   # (no grass on ash)
 			LG[o] = f.cl_g
 			LD[o] = f.cl_d
 	return {"G": G, "verts": verts, "norms": norms, "uvs": uvs, "LG": LG, "LD": LD, "TW": TW, "SW": SW, "DRY": DRY, "TR": TR, "T2": T2, "T3": T3, "T4": T4}
@@ -490,19 +497,24 @@ func _shed_colliders(dsg: Dictionary, x: float, z: float, yaw: float) -> void:
 
 
 # ---------------- fences ----------------
-func _post_ok(x: float, z: float) -> float:
+## wild = a fence along a side path (not the course's own): it keeps WILD_FENCE_CLEAR m off the road's edge, where the tape and
+## the course fences are (a wild fence running beside the road next to the tape looked wrong). BMX_OLD_MARKING=1 = no such rule.
+const WILD_FENCE_CLEAR := 6.5
+func _post_ok(x: float, z: float, wild := false) -> float:
 	var h := height(x, z)
 	if h < WATER + 0.3 or sqrt(x * x + z * z) < 14 or f.trail(x, z) > 0.15 or f.jump_mask(x, z) > 0.02 or is_blocked(x, z, 0.5):
+		return NAN
+	if wild and not TrailCourse.OLD_MARKING and f.route_dist(x, z) < f.q_w + WILD_FENCE_CLEAR:
 		return NAN
 	return h
 
 
-func _run_fence(pts: Array, style: String, rs: WorldRng, mn: int = 3) -> void:
+func _run_fence(pts: Array, style: String, rs: WorldRng, mn: int = 3, wild := false) -> void:
 	var cur := []
 	for p in pts:
 		var x: float = p[0]
 		var z: float = p[1]
-		var h := _post_ok(x, z)
+		var h := _post_ok(x, z, wild)
 		if is_nan(h) or (cur.size() > 0 and absf(h - cur[cur.size() - 1][2]) > 0.9):
 			if cur.size() >= mn:
 				_build_fence(cur, style, rs)
@@ -607,7 +619,7 @@ func _trail_fence(rs: WorldRng, ox: float, oz: float) -> void:
 		var l := Vector2(st[0] - x, st[1] - z).length()
 		st[0] = x + (st[0] - x) / l * SPAN
 		st[1] = z + (st[1] - z) / l * SPAN
-	_run_fence(pts, "picket" if rs.next() < 0.35 else "ranch", rs)
+	_run_fence(pts, "picket" if rs.next() < 0.35 else "ranch", rs, 3, true)
 
 
 func _course_fences(rs: WorldRng) -> void:
@@ -992,7 +1004,13 @@ func _trees(ox: float, oz: float) -> void:
 		var forest: float = f.n(x + 400, z, TerrainField.I38)
 		# beside the trail (within ~14 m) trees grow whatever the forest mask says: the road gets lined now and then
 		var roadside: bool = TerrainField.trail_metres_of(f.pathN(x, z)) < 14.0 and f.n(x - 900, z + 300, TerrainField.I38) > -0.1
-		if rnd.next() > (0.4 if roadside else sm(-0.25, 0.25, forest) * 0.9 + 0.05):
+		# climate biomes (2026-11-25): pine forest is dense, alpine / wetland / savanna thin, ash fields nearly bare
+		f.biome(x, z)
+		var pf := 0.4 if roadside else sm(-0.25, 0.25, forest) * 0.9 + 0.05
+		if not roadside:
+			pf = maxf(pf, f.b_forest * 0.85)
+		pf *= (1.0 - 0.75 * f.b_cold) * (1.0 - 0.6 * f.b_wet) * (1.0 - 0.5 * f.b_sav) * (1.0 - 0.95 * f.b_ash)
+		if rnd.next() > pf:
 			continue
 		if f.trail(x, z) > 0.02 or absf(f.pathN(x, z)) < 0.1 or f.jump_mask(x, z) > 0 or is_blocked(x, z, 0.8):
 			continue
@@ -1001,10 +1019,15 @@ func _trees(ox: float, oz: float) -> void:
 			continue
 		var sc := 0.7 + rnd.next() * 0.8
 		var yaw := rnd.next() * 6.28
-		f.biome(x, z)
 		var dry: float = f.b_dry
 		var rug: float = f.b_rug
-		if rnd.next() < dry:
+		if f.b_ash > 0.4:
+			# a dead snag: a bare trunk
+			var snag := sc * TREE_K * (0.9 + rnd.next() * 0.8)
+			put("trunk", x, h - 0.1, z, snag * 1.0, snag * 1.5, snag * 1.0, yaw)
+			colliders.append({"x": x, "z": z, "r": 0.14 * snag + 0.02, "ceil": h + snag * 1.5})
+			continue
+		if rnd.next() < dry * (1.0 - 0.9 * f.b_sav):
 			if rnd.next() < 0.35:
 				var kind := CactusGeo.pick(rnd.next())
 				var cs := 0.75 + (sc - 0.7) * 0.45          # 0.75 .. 1.11: cacti vary less than trees
@@ -1017,14 +1040,23 @@ func _trees(ox: float, oz: float) -> void:
 			continue
 		var ceil_h := 0.0
 		sc *= TREE_K
-		if h > 4 or rnd.next() < 0.3 + rug * 0.6:
-			# pines: tall and slim, the odd one a real giant (up to ~13 m)
+		if h > 4 or rnd.next() < 0.3 + rug * 0.6 + f.b_forest * 0.65 + f.b_cold * 0.5:
+			# pines: tall and slim, the odd one a real giant (up to ~13 m); smaller up in the alpine
+			sc *= 1.0 - 0.3 * f.b_cold
 			var py := sc * (1.5 + rnd.next() * 0.7 + pow(rnd.next(), 4.0) * 0.9)
 			if not _crown_clear(x, z, sc * 1.05):
 				continue
 			put("trunk", x, h - 0.1, z, sc, sc * 0.9 + py * 0.15, sc, yaw)
 			put("pine", x, h + sc * 0.6, z, sc * 1.1, py, sc * 1.1, yaw, PINES[int(rnd.next() * PINES.size())])
 			ceil_h = h + sc * 0.6 + 2.8 * py
+		elif f.b_sav > 0.4:
+			# savanna: a thin trunk under a wide, flat crown
+			if not _crown_clear(x, z, sc * 2.4):
+				continue
+			var th := sc * (1.5 + rnd.next() * 0.8)
+			ceil_h = h + th + sc * 0.9
+			put("trunk", x, h - 0.1, z, sc * 0.8, th + 0.3, sc * 0.8, yaw)
+			put("blob", x, h + th + sc * 0.25, z, sc * 2.3, sc * 0.55, sc * 2.3, yaw, SAV_LEAVES[int(rnd.next() * SAV_LEAVES.size())], 0.6)
 		else:
 			if not _crown_clear(x, z, sc * 1.4):
 				continue
@@ -1052,7 +1084,7 @@ func _rocks(ox: float, oz: float) -> void:
 		var z := oz + (rnd.next() - .5) * S
 		if i >= 22:
 			f.biome(x, z)
-			if rnd.next() > f.b_rug:
+			if rnd.next() > maxf(f.b_rug, maxf(f.b_cold * 0.8, f.b_ash * 0.9)):
 				continue
 		if f.trail(x, z) > 0.02 or f.jump_mask(x, z) > 0 or is_blocked(x, z, 0.5):
 			continue
@@ -1092,7 +1124,7 @@ func _tufts(ox: float, oz: float) -> void:
 		f.biome(x, z)
 		var dry: float = f.b_dry
 		var rug: float = f.b_rug
-		if rnd.next() < dry * 0.85 or rnd.next() < rug * 0.3:
+		if rnd.next() < dry * 0.85 or rnd.next() < rug * 0.3 or rnd.next() < f.b_ash or rnd.next() < f.b_cold * 0.5:
 			continue
 		var tc := _tuft_col(dry)
 		if rnd.next() < 0.22 * (1 - dry):
@@ -1120,6 +1152,42 @@ func _tufts(ox: float, oz: float) -> void:
 			var sy := 0.7 + rnd.next() * 0.8
 			var szz := 1 + rnd.next()
 			put("grass", x, h - 0.03, z, sx, sy, szz, rnd.next() * 6.28, tc)
+
+
+## Berm rims (2026-11-25, "some rock on the edges, small pebbles"): pebbles in loose strips along the rim of a banked bend (where
+## `berm_style` puts it: F + the cap), scattered thinner down the back slope, the odd small rock. Not on the road itself.
+func _berm_clutter(ox: float, oz: float) -> void:
+	if TerrainField.OLD_BERM:
+		return
+	var rb := WorldRng.new(WorldRng.i32(cx * 1597334677) ^ WorldRng.i32(cz * 3812015801) ^ WorldRng.i32(f.seed_value * 668265263) ^ 0x1f83d9ab)
+	for i in 300:
+		var x := ox + (rb.next() - .5) * S
+		var z := oz + (rb.next() - .5) * S
+		f.query(x, z)
+		if f.q_d > f.q_w + 8.0 or absf(f.q_bt) < 0.08:
+			continue
+		var o: float = -f.q_a if f.q_bt > 0.0 else f.q_a
+		f.berm_style(f.q_s, 0.0, f.q_w)
+		var r: float = o - f.bs_F
+		if r < -1.4 or r > 3.0:
+			continue
+		var peak := 1.0 - sm(0.0, 2.0, absf(r - 0.5))
+		if rb.next() > 0.7 * peak + 0.06 or f.jump_mask(x, z) > 0.05 or is_blocked(x, z, 0.3):
+			continue
+		var h := height(x, z)
+		if h < WATER + 0.3:
+			continue
+		if rb.next() < 0.07 and r > 0.2:
+			var sc := 0.14 + rb.next() * 0.16
+			put("rock", x, h - sc * 0.25, z, sc * 1.2, sc * 0.7, sc, rb.next() * 6.28, null, 0.5)
+		else:
+			for k in 2 + int(rb.next() * 4):
+				var sc := 0.03 + rb.next() * rb.next() * 0.11
+				var a := rb.next() * 6.28
+				var d := rb.next() * 0.45
+				var px := x + cos(a) * d
+				var pz := z + sin(a) * d
+				put("pebble", px, height(px, pz) - sc * 0.3, pz, sc * 1.3, sc * 0.7, sc, rb.next() * 6.28, null, 0.5)
 
 
 func _trail_clutter(ox: float, oz: float) -> void:
@@ -1169,7 +1237,7 @@ func _grass(ox: float, oz: float) -> void:
 		f.biome(x, z)
 		var dry: float = f.b_dry
 		var rug: float = f.b_rug
-		if rg.next() < dry * 0.95 + rug * 0.5:
+		if rg.next() < dry * 0.95 + rug * 0.5 + f.b_ash + f.b_cold * 0.4:
 			continue
 		var n := 2 + int(rg.next() * 4)
 		var base: Color = C["tuftGreen"].lerp(C["grassB"], rg.next() * 0.6).lerp(C["tuftDry"], sm(0.1, 0.6, dry))
@@ -1202,9 +1270,35 @@ func _nature(ox: float, oz: float) -> void:
 		f.biome(x, z)
 		var dry: float = f.b_dry
 		var rug: float = f.b_rug
-		var wood := sm(-0.05, 0.3, f.n(x + 400, z, TerrainField.I38))
+		var wood := maxf(sm(-0.05, 0.3, f.n(x + 400, z, TerrainField.I38)), f.b_forest)
 		var r := rn.next()
 		var yaw := rn.next() * 6.28
+		if f.b_ash > 0.5:
+			# ash fields: dark rubble and the odd boulder, nothing grows
+			if r < 0.55:
+				for k in 5:
+					var sc := 0.06 + rn.next() * 0.2
+					var a := rn.next() * 6.28
+					var d := rn.next() * 1.4
+					put("pebble", x + cos(a) * d, h - sc * 0.3, z + sin(a) * d, sc * 1.4, sc * 0.8, sc, rn.next() * 6.28, null, 0.6)
+			continue
+		if f.b_wet > 0.4 and r < 0.5:
+			# wetland: tufts of tall reeds
+			var colr: Color = REEDS[int(rn.next() * REEDS.size())]
+			for k in 3 + int(rn.next() * 5):
+				var a := rn.next() * 6.28
+				var d := rn.next() * 0.7
+				var fx := x + cos(a) * d
+				var fz := z + sin(a) * d
+				var s2 := 1.1 + rn.next() * 0.8
+				put("grass", fx, height(fx, fz) - 0.03, fz, s2, s2 * (1.9 + rn.next() * 1.2), s2, rn.next() * 6.28, colr * (0.85 + rn.next() * 0.3), 0.2)
+			continue
+		if f.b_sav > 0.4 and r < 0.4:
+			# savanna: clumps of tall golden grass
+			var sx := 1.8 + rn.next() * 1.2
+			var sy := 1.3 + rn.next() * 1.1
+			put("grass", x, h - 0.03, z, sx, sy, sx, yaw, C["savanna"] * (0.8 + rn.next() * 0.3))
+			continue
 		if dry > 0.55:
 			if r < 0.08:
 				var sc := 0.25 + rn.next() * 0.25
@@ -1221,7 +1315,7 @@ func _nature(ox: float, oz: float) -> void:
 					var d := rn.next() * 0.8
 					put("pebble", x + cos(a) * d, h - sc * 0.3, z + sin(a) * d, sc * 1.3, sc * 0.7, sc, rn.next() * 6.28, null, 0.5)
 			continue
-		if rug > 0.55 and r < 0.35:
+		if (rug > 0.55 or f.b_cold > 0.5) and r < 0.35:
 			for k in 4:
 				var sc := 0.06 + rn.next() * 0.14
 				var a := rn.next() * 6.28
