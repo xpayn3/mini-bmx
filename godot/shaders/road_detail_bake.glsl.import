@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://gvhn5ysk3dwd"
+path="res://.godot/imported/road_detail_bake.glsl-12c5485daee1988c2de2a92c5eeb2e19.res"
+
+[deps]
+
+source_file="res://shaders/road_detail_bake.glsl"
+dest_files=["res://.godot/imported/road_detail_bake.glsl-12c5485daee1988c2de2a92c5eeb2e19.res"]
+
+[params]
+

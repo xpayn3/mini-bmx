@@ -1,6 +1,7 @@
 // Terrain ground (port of grounddetail.js): two baked layers -- land and trail dirt -- blended by
 // HEIGHT, not a soft fade, so trail edges come out ragged (stones poke through, grass creeps over the
-// dirt). Procedural world-space detail fades out before it gets smaller than a pixel.
+// dirt). Procedural world-space detail fades out before it gets smaller than a pixel. With the baked road on
+// (world/road_detail.gd, `vt`), the trail's marks come from its clipmap instead and blur with mips, never switched off.
 //   land_tex rgb = land colour (with baked AO)   a = dirt weight
 //   dirt_tex rgb = trail dirt colour (with AO)   a = rock-face weight
 shader_type spatial;
@@ -31,13 +32,14 @@ uniform float ground_detail = 1.0;    // off-trail fine relief from the dirt sca
 uniform float trail_relief = 1.0;   // depth of the worn lines / tyre prints / grit, x the real centimetres below
 uniform float trail_play = 0.34;   // share of 26 m stretches with a playful mark (donut, figure of eight, slalom, skid arc); test: 1 = all
 uniform float trail_puddles = 1.0;   // 0 = none, 1 = normal
+uniform float road_cavity = 1.0;     // the baked road: how much the averaged-away bumpiness darkens (cavity)
 // a built level's baked light (levels/editor/level_bake.gd): R = sun through hills / ramps / trees at the level's time of
 // day, G = sky openness. Past bake_near (the short real-time shadow's reach) the sun's shadow is the baked one; the
 // sky term darkens hollows everywhere. Off (0) on the world's chunks.
 uniform sampler2D bake_tex : filter_linear, repeat_disable;
 uniform float bake_on = 0.0;
 uniform float bake_near = 45.0;
-uniform int trail_debug = 0;       // 1 = show the mask layers: r driven, g loose, b puddle (wet rim dimmer), white tyre prints, yellow run-off skids, magenta stray lines, cyan playful marks
+uniform int trail_debug = 0;       // 2..4 = the baked road (2 lines / grit / prints, 3 relief slope + stones, 4 which level); 1 = show the mask layers: r driven, g loose, b puddle (wet rim dimmer), white tyre prints, yellow run-off skids, magenta stray lines, cyan playful marks
 varying vec3 v_world;
 // the grass carpet's window (world/grass_field.gd): a = how much grass grows here; info = origin xz, texel, radius (0 = off)
 global uniform sampler2D grass_win : filter_linear;
@@ -45,6 +47,17 @@ global uniform vec4 grass_win_info;
 // ripples in the road's puddles (game.gd puddle_wake, the same compute wake as the lake): window centre xz, span m, cell m; z = 0 off
 global uniform sampler2D puddle_wake : filter_linear, repeat_enable;
 global uniform vec4 puddle_wake_info;
+// the road's surface detail baked into a clipmap (world/road_detail.gd, shaders/road_detail_bake.glsl): three
+// camera-following windows (layers 0 fine .. 2 coarse), world-aligned and toroidal (sampled with repeat), each with mips,
+// so the trail's marks blur into their average with distance instead of being switched off. info = window min x, z
+// (m), cell (m), texels per side (0 = off: the per-pixel path below). A / B / C layout: road_detail.gd LAYOUT.
+global uniform sampler2DArray road_a : filter_linear_mipmap_anisotropic, repeat_enable;
+global uniform sampler2DArray road_b : filter_linear_mipmap_anisotropic, repeat_enable;
+global uniform sampler2DArray road_c : filter_linear_mipmap_anisotropic, repeat_enable;
+global uniform vec4 road_info0;
+global uniform vec4 road_info1;
+global uniform vec4 road_info2;
+global uniform vec4 road_info3;
 
 const float WATER_Y = -2.2;   // Terrain.WATER
 // sun-through-ripples light net (turbulent-water caustic, tiles every 2 pi), 0..1
@@ -101,6 +114,30 @@ vec3 gd_relief(sampler2D nt, vec2 p, vec2 dx, vec2 dy, vec2 a, float inv) {
 	return vec3(a * n.x - b * n.y, n.z);
 }
 
+// how much of a clipmap level holds this point: 0 outside its window, a soft border inside it
+float road_in(vec4 inf, vec2 p) {
+	if (inf.w <= 0.0) return 0.0;
+	vec2 q = (p - inf.xy) / (inf.z * inf.w);
+	float e = min(min(q.x, q.y), min(1.0 - q.x, 1.0 - q.y));
+	return smoothstep(0.015, 0.07, e);
+}
+// one level's three samples, weighted by how much of it is there (the window's border, and C.r = baked: tiles not baked
+// yet, or mips past a tile's own, read 0 and hand over to the next level)
+float road_level(vec4 inf, float layer, vec2 p, vec2 dx, vec2 dy, inout vec4 a, inout vec4 b, inout vec4 c, float rem) {
+	float w = road_in(inf, p);
+	if (w <= 0.0 || rem <= 0.001) return 0.0;
+	float span = inf.z * inf.w;
+	vec3 uv = vec3(p / span, layer);
+	vec2 gx = dx / span, gy = dy / span;
+	vec4 lc = textureGrad(road_c, uv, gx, gy);
+	float wt = w * smoothstep(0.55, 0.98, lc.r) * rem;
+	if (wt <= 0.0) return 0.0;
+	a += textureGrad(road_a, uv, gx, gy) * wt;
+	b += textureGrad(road_b, uv, gx, gy) * wt;
+	c += lc * wt;
+	return wt;
+}
+
 void vertex() {
 	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
@@ -112,6 +149,19 @@ void fragment() {
 	float f1 = 1.0 - smoothstep(0.012, 0.04, gpx);
 	float f2 = 1.0 - smoothstep(0.035, 0.12, gpx);
 	float f3 = 1.0 - smoothstep(0.1, 0.45, gpx);
+	// the baked road (road_detail.gd): finest level first, each coarser one fills what the finer didn't cover, the rest
+	// is plain dirt (A's k = 1 stored 0.5). vt = 0: the per-pixel path below, as before (also for the debug view)
+	vec2 rdx = dFdx(P.xz), rdy = dFdy(P.xz);
+	float vt = (road_info0.w > 0.0 && trail_debug != 1 && trail_fx > 0.0) ? 1.0 : 0.0;
+	vec4 ra = vec4(0.0), rb = vec4(0.0), rc = vec4(0.0);
+	if (vt > 0.0) {
+		float rem = 1.0;
+		rem -= road_level(road_info0, 0.0, P.xz, rdx, rdy, ra, rb, rc, rem);
+		rem -= road_level(road_info1, 1.0, P.xz, rdx, rdy, ra, rb, rc, rem);
+		rem -= road_level(road_info2, 2.0, P.xz, rdx, rdy, ra, rb, rc, rem);
+		rem -= road_level(road_info3, 3.0, P.xz, rdx, rdy, ra, rb, rc, rem);
+		ra += vec4(0.5, 0.0, 0.0, 0.0) * rem;   // nothing baked (yet / so far out): plain dirt
+	}
 	float t = gA.a, rockW = gB.a;
 	// the road's edge is never a ruler line (2026-11-25, user: "still too much like a straight line", "more random", "fading
 	// wider"): the baked weight (a ~1.2 m ramp) is sampled again through a warped UV, which slides the edge in / out, then
@@ -145,10 +195,10 @@ void fragment() {
 	float hG = mix(0.5, n1, f2) * 0.55 + mix(0.5, n2, f1) * 0.25 + n0 * 0.2;
 	// fine grit: ~6 cm cells, pebbles ~1-3 cm across. Gone before a pebble is ~2 px (past that they were
 	// single-pixel salt-and-pepper dots), and not worked out at all there
-	float peb_f = 1.0 - smoothstep(0.003, 0.009, gpx);
+	float peb_f = vt > 0.0 ? 0.0 : 1.0 - smoothstep(0.003, 0.009, gpx);
 	vec2 pb = vec2(0.0);
 	if (peb_f > 0.0) pb = gd_pebbles(P.xz * 16.0);
-	float peb = pb.x * peb_f;
+	float peb = vt > 0.0 ? rb.a : pb.x * peb_f;   // (baked: the pebble field's cover, averaged far off instead of gone)
 	float hD = peb * 0.6 + gd_noise3(P * 3.1 + 11.0) * 0.45 + gd_noise3(P * 0.9 + 2.0) * 0.3;
 	float a1 = (1.0 - t) + hG * 0.75, a2 = t + hD * 0.75;
 	float m = max(a1, a2) - 0.28;
@@ -174,7 +224,8 @@ void fragment() {
 	// ridden line and their tyre prints deeper there (a straight keeps ~1/7 of a tight bend's depth), and barely mark a straight
 	float depth_k = mix(0.2, 1.5, tf3.g);
 	float tnear = (1.0 - smoothstep(0.25, 0.7, gpx)) * trail_fx;   // far off it all averages out to the plain colour
-	if ((t > 0.004 || tf2.a > 0.01) && tnear > 0.0) {
+	float line = 0.0;
+	if ((t > 0.004 || tf2.a > 0.01) && (tnear > 0.0 || vt > 0.0)) {
 		// where the nearest trail switches (the course <-> a side path joining it) the baked frame jumps between two
 		// unrelated ones ('along' = the course's metres vs a world projection, 'across' / the line's place too), and the
 		// linear filter blends them over one texel: 'along' races through hundreds of metres in a few cm and every mark
@@ -190,6 +241,13 @@ void fragment() {
 		float tfk = 1.0 - smoothstep(1.8, 3.5, max(tspan.b, tspan.r + tspan.g));
 		float ac = tf.r, off = tf.g, sl = tf.b, rd = tf2.r, dry = tf2.g;
 		jm = tf2.b;
+		// puddles: only on roads, in the worn lines (the lowest ground), on level ground, not in dry country; they come in stretches
+		float lvl = smoothstep(0.988, 0.998, normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz).y);
+		if (vt > 0.0) {
+			// the baked road: masks straight from the clipmap (already filtered to the pixel by the mips)
+			m_driven = rc.g; m_loose = rc.b; m_tracks = ra.g; m_wet = ra.b * lvl; m_puddle = ra.a * lvl;
+			wd = max(wd, ra.g * 0.8 * f3 * step(0.01, tf2.a));   // a run-off skid cut into the grass (A.g holds it there)
+		} else {
 		// the run-off skid: two locked tyres' streaks, a little unsteady, cut into the grass past the trail's edge
 		float skf = (1.0 - smoothstep(0.06, 0.22, gpx)) * tf2.a * tfk;
 		if (skf > 0.0) {
@@ -207,7 +265,8 @@ void fragment() {
 		const float LG[9] = float[9](1.0, 1.0, 1.0, 1.0, 0.9, 1.15, 0.8, 0.55, 1.35);
 		const float LD[9] = float[9](0.0, 0.06, -0.07, 0.13, 0.22, 0.3, -0.28, -0.5, 0.55);
 		const float LW[9] = float[9](0.9, 0.8, 0.8, 0.65, 0.5, 0.5, 0.5, 0.4, 0.35);
-		float line = 0.0, alt = 0.0;
+		line = 0.0;
+		float alt = 0.0;
 		for (int i = 0; i < 9; i++) {
 			float fi = float(i);
 			float loose_k = abs(LD[i]) + abs(LG[i] - 1.0);
@@ -278,8 +337,6 @@ void fragment() {
 				m_play = (1.0 - smoothstep(0.022, 0.055, d)) * (0.6 + 0.4 * ph2.z) * stray_fade * (1.0 - jm) * (1.0 - t_air) * tfk;
 			}
 		}
-		// puddles: only on roads, in the worn lines (the lowest ground), on level ground, not in dry country; they come in stretches
-		float lvl = smoothstep(0.988, 0.998, normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz).y);
 		float zone = smoothstep(0.47, 0.62, gd_noise3(vec3(sl * 0.011, 21.0, 8.0)));
 		zone = max(zone, trail_puddles - 1.0);   // > 1 (tests): puddles on every wet road
 		float inrut = max(1.0 - smoothstep(0.15, 0.8, abs(ac - off)), line);
@@ -290,15 +347,26 @@ void fragment() {
 		float paa = gpx * 1.6;
 		m_wet = smoothstep(0.44 - paa, 0.56 + paa, pn) * pk;
 		m_puddle = smoothstep(0.565 - paa, 0.59 + paa, pn) * pk;
+		}   // (per-pixel marks)
+		float tn = vt > 0.0 ? trail_fx : tnear;
 		// fine relief from the scans: packed dirt at two sizes / turns mixed by a slow noise (no tile to see), gravel where it's loose
 		vec3 r0 = gd_relief(tr_nr0, P.xz, pdx, pdy, vec2(0.955, 0.296), 1.0 / 1.7);
 		vec3 r1 = gd_relief(tr_nr0, P.xz + 37.0, pdx, pdy, vec2(-0.416, 0.909), 1.0 / 2.9);
 		vec3 r2 = gd_relief(tr_nr1, P.xz, pdx, pdy, vec2(-0.904, 0.427), 1.0 / 2.6);
 		vec3 rl = mix(r0, r1, smoothstep(0.35, 0.65, gd_noise3(vec3(P.xz * 0.11, 1.7))));
 		rl = mix(rl, r2, clamp(m_loose * 1.2 + rd * 0.35, 0.0, 1.0) * (1.0 - m_driven));
-		float rfade = 1.0 - smoothstep(0.08, 0.35, gpx);
-		tbump = (1.0 - 0.6 * m_driven) * (1.0 - 0.8 * jm) * rfade * tnear;
+		// (the scans are textures with mips: with the baked road nothing fades them, distance does it the way it should)
+		float rfade = vt > 0.0 ? 1.0 : 1.0 - smoothstep(0.08, 0.35, gpx);
+		tbump = (1.0 - 0.6 * m_driven) * (1.0 - 0.8 * jm) * rfade * tn;
 		tslope = rl.xy * tbump;
+		if (vt > 0.0) {
+			// baked colour; the relief's hollows darken as below; the worn relief tilts the normal from B's slope (below).
+			// Cavity: the bumpiness the mips averaged (grooves, prints, grit edges: mean squared slope - squared mean)
+			// sits a little darker, the way a racing game's cavity / AO map keeps its grooves readable far off where
+			// their walls are smaller than a pixel and the normal alone would go flat
+			float cav = max(rb.z - dot(rb.xy, rb.xy), 0.0);
+			tcol = vec3(ra.r * 2.0 * (1.0 - 0.1 * length(rl.xy) * tbump) * (1.0 - min(cav * road_cavity, 0.3)));
+		} else {
 		// colour: all small steps. Driven dirt is tighter and a touch paler when dry (polished hardpack); loose grit is paler
 		// and speckled; streaks run along the trail; old scuffed patches; tyre prints press a little darker
 		float streak = (gd_noise3(vec3(ac * 9.0, sl * 0.3, 2.0)) - 0.5) * tfk;
@@ -323,9 +391,10 @@ void fragment() {
 		k *= 1.0 + jm * 0.04;                            // built jumps: raked, packed clay, more even
 		k = mix(k, 1.0 + (k - 1.0) * 0.45, jm);
 		tcol = vec3(mix(1.0, k, tnear));
+		}   // (per-pixel colour)
 		// dry dirt stays matte (>= 0.9 = no sun glint in light()): packed lines / prints at 0.74-0.8 glinted, so with a
 		// low sun the whole trail looked polished / wet (user: "why such a glossy track"). Only damp soil + puddles shine.
-		trough = mix(0.95, max(mix(rl.z, 0.8, 0.5 * m_driven + 0.3 * jm) - 0.06 * m_tracks, 0.9), rfade * tnear);
+		trough = mix(0.95, max(mix(rl.z, 0.8, 0.5 * m_driven + 0.3 * jm) - 0.06 * m_tracks, 0.9), rfade * tn);
 		// damp soil, then water
 		tcol *= mix(vec3(1.0), vec3(0.6, 0.58, 0.56), m_wet);
 		// (damp soil only darkens: no gloss. Only standing water shines; a shiny damp rim spread over the whole road)
@@ -358,6 +427,12 @@ void fragment() {
 	// slow light / dark drifts along the trail, so a long straight never reads as one flat band
 	float drift = 1.0 + (gd_noise3(vec3(P.xz * 0.05, 4.2)) - 0.5) * 0.1;
 	vec3 col = mix(landc, dirtc * tcol * drift, wd);
+	// stones along the trail's edges (baked: C.a): grey-brown, each its own shade, on dirt and grass alike
+	if (vt > 0.0 && rc.a > 0.002) {
+		float sh = gd_noise3(vec3(P.xz * 9.0, 2.6));
+		vec3 stone = mix(vec3(0.43, 0.41, 0.38), dirtc, 0.3) * (0.72 + 0.5 * sh);
+		col = mix(col, stone, clamp(rc.a * 1.15, 0.0, 1.0));
+	}
 	float rkw = rockW * (1.0 - wd) * f3;
 	if (rkw > 0.001) {
 		float rk = gd_noise3(P * 4.3 + 5.0) * 0.6 + (f2 > 0.0 ? gd_noise3(P * 13.0) * 0.4 * f2 : 0.0);
@@ -442,11 +517,14 @@ void fragment() {
 	float hh = thgt * wd * trail_relief;
 	vec3 dpx = dFdx(P), dpy = dFdy(P);
 	float dhx = dFdx(hh), dhy = dFdy(hh);
-	if (wd * tbump > 0.0 || pud > 0.0 || thgt != 0.0 || rd != 0.0 || ofl > 0.01) {
+	// the baked relief's slope (worn lines, prints, grit, edge stones): on the dirt, and the stones on the grass too
+	vec2 rsl = rb.xy * max(wd, rc.a) * trail_relief * vt;
+	if (wd * tbump > 0.0 || pud > 0.0 || thgt != 0.0 || rd != 0.0 || ofl > 0.01 || dot(rsl, rsl) > 0.0) {
 		vec3 nw = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
 		if (rd != 0.0) nw = rut_normal(P.xz, nw);   // (the groove's walls)
 		nw = normalize(nw + vec3(lslope.x, 0.0, lslope.y) * 0.5);
 		nw = normalize(nw + vec3(tslope.x, 0.0, tslope.y) * (wd * trail_bump));
+		nw = normalize(nw - vec3(clamp(rsl.x, -1.2, 1.2), 0.0, clamp(rsl.y, -1.2, 1.2)));
 		// the height above as a real slope of the surface (its screen-space gradient turned into the world)
 		vec3 r1 = cross(dpy, nw), r2 = cross(nw, dpx);
 		float det = dot(dpx, r1);
@@ -462,8 +540,25 @@ void fragment() {
 	// highlight instead of sparkling. Matters on the smooth parts (puddles, damp soil, packed lines)
 	vec3 dnx = dFdx(NORMAL), dny = dFdy(NORMAL);
 	float nvar = 0.25 * (dot(dnx, dnx) + dot(dny, dny));
-	float ra = ROUGHNESS * ROUGHNESS;
-	ROUGHNESS = sqrt(sqrt(clamp(ra * ra + min(2.0 * nvar, 0.18), 0.0, 1.0)));
+	// + the bumpiness the baked road's mips averaged away (mean squared slope - squared mean slope): far off, many little
+	// bumps in one pixel read as a rougher surface instead of vanishing (Toksvig / LEAN-style)
+	nvar += max(rb.z - dot(rb.xy, rb.xy), 0.0) * max(wd, rc.a) * trail_relief * vt * 0.5;
+	float rg2 = ROUGHNESS * ROUGHNESS;
+	ROUGHNESS = sqrt(sqrt(clamp(rg2 * rg2 + min(2.0 * nvar, 0.18), 0.0, 1.0)));
+	if (trail_debug >= 2 && road_info0.w > 0.0) {   // the baked road's channels (BMX_TRAIL_DEBUG=2..4)
+		float rem = 1.0;
+		vec4 a = vec4(0.0), b = vec4(0.0), c = vec4(0.0);
+		float w0 = road_level(road_info0, 0.0, P.xz, rdx, rdy, a, b, c, rem); rem -= w0;
+		float w1 = road_level(road_info1, 1.0, P.xz, rdx, rdy, a, b, c, rem); rem -= w1;
+		float w2 = road_level(road_info2, 2.0, P.xz, rdx, rdy, a, b, c, rem); rem -= w2;
+		w2 += road_level(road_info3, 3.0, P.xz, rdx, rdy, a, b, c, rem);
+		if (trail_debug == 2) ALBEDO = vec3(c.g, c.b, a.g);                         // ridden lines, grit, prints
+		else if (trail_debug == 3) ALBEDO = vec3(b.xy * 2.0 + 0.5, c.a);            // relief slope x / z, stones
+		else if (trail_debug == 4) ALBEDO = vec3(w0, w1, w2);                       // which level draws it
+		else if (trail_debug == 5) ALBEDO = vec3(clamp((a.r * 2.0 - 0.85) * 3.0, 0.0, 1.0));   // colour multiplier, stretched
+		else ALBEDO = vec3(a.g);                                                   // 6: tyre prints (+ run-off skids)
+		ROUGHNESS = 1.0;
+	}
 	if (trail_debug == 1) {
 		ALBEDO = vec3(m_driven, m_loose, max(m_puddle, m_wet * 0.4)) * wd + vec3(m_tracks) * 0.5 + vec3(m_skid, m_skid, 0.0) + vec3(m_stray, 0.0, m_stray) * wd + vec3(0.0, m_play, m_play) * wd;
 		ROUGHNESS = 1.0;

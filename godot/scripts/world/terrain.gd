@@ -1023,7 +1023,7 @@ func _finalize(k: Vector2i) -> void:
 	var colliders: Array = o["colliders"]
 	var rec := {"cx": k.x, "cz": k.y, "node": node, "colliders": colliders, "small": small, "deco_mi": deco_mi, "rock_keys": [],
 		"G": o["G"], "N": b.N, "mms": mms, "packs": [], "grass_img": o["grass_img"], "grass_h": o["grass_h"],
-		"pud": o.get("pud", PackedFloat32Array())}
+		"pud": o.get("pud", PackedFloat32Array()), "mat": mat}   # (mat: RoadDetail bakes from its trail textures)
 	chunk_serial += 1   # GrassField re-reads the chunks round the camera
 	for pp in o.get("packs", []):
 		var pkey := Vector2i(roundi(pp.x * 4.0), roundi(pp.z * 4.0))

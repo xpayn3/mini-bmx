@@ -484,9 +484,37 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   trail (`route_dist`) get a **0.25 m base mesh** (`TerrainFieldCs.fine_ground`, `TerrainChunkBuilder.MESH_K` 2, `BMX_MESH_K=1` = as before; needs the C# field): the old 0.5 m
   grid is its first LOD (`_ground_lods(.., n, mk)` keys 2 / 4 / 8 / 16 by real error), so flat or far chunks cost what they did. Measured once (stationary rider, seed
   4242 x3150): triangles / frame 4.45M -> 5.19M (+17 %), fps in the noise; the LODs may not drop early enough (tuning left). **Micro detail** (`micro_detail`, DRAWN ONLY, a few cm,
-  fine mesh only, `BMX_NO_MICRO=1` = off): 0.3 / 1 m grain near the trail, washboard ripples in bends (stronger with `corner_load`), a pothole / washout on the road in some 37 m
+  fine mesh only, `BMX_NO_MICRO=1` = off): 0.3 / 1 m grain near the trail (the 0.75 m washboard ripples in bends were removed 2026-11-25:
+  finer than the 0.25 m mesh, they aliased into ~2 m stripes across the trail; detail under ~1 m belongs in the shader's normal, not the mesh), a pothole / washout on the road in some 37 m
   stretches (hash), ragged dirt edge, rills down banked faces. The physics + tyre fit read the smooth ground, so a tyre can sit up to ~3 cm off the drawn surface. Berm rim
   rounded too (cap 0.8..1.4 m, lip 1.1 m half-width, back slope 2.5..6 m). Not re-checked: C# vs GD EXACT after the rim rounding, the rim's shadow edge up close.
+- **Baked road detail, racing-game style (2026-11-25, user: "racing games' roads look so nice, ours fades in a lot")**.
+  `world/road_detail.gd` (`RoadDetail`, made by `Game` for rides + built levels, not the title / playground) + compute
+  `shaders/road_detail_bake.glsl` / `road_detail_mip.glsl`. The trail's marks (ridden lines, prints, stray lines,
+  playful marks, skids, damp / puddle masks, grit, the worn relief) were per-pixel maths in ground.gdshader, switched off
+  by pixel size (`gpx`) before they aliased: a ring of detail followed the camera. Now they are baked once per texel
+  into a **clipmap**: 4 camera-following windows (cells 1.25 / 2.5 / 7.5 / 18.75 cm = 12.8 / 25.6 / 77 / 192 m at 1024²),
+  world-aligned + toroidal (sampled with repeat; moving a window only bakes the 64² tiles that came in), each tile
+  supersampled (2² / 3² samples) with every mark filtered to the sample spacing (`lineaa`), its own mips (64 -> 1). The
+  ground shader (`vt` path) reads the finest level that holds the pixel with anisotropic `textureGrad`, coarser levels
+  fill the rest; tiles not baked yet / mips past a tile's own read C.r = 0 and hand over. Layout (Texture2DArrayRD
+  globals `road_a/b/c`, `road_info0..3` = window min x z, cell, n): A rgba8 = k/2, prints (+ skids), damp, water;
+  B rgba16f = relief slope x z, mean squared slope, pebbles; C rgba8 = baked flag, ridden lines, loose grit, **edge
+  stones** (new layer, user: "more pebbles on edges": gravel + a few bigger stones on the drawn ragged edge and loose
+  shoulders, stone-coloured over dirt and grass, with relief). Racing-game tricks in it: virtual-texture clipmap with
+  mips, prefiltered marks, slopes that average in mips + the lost bumpiness as roughness (Toksvig / LEAN-style) and as
+  cavity darkening (`road_cavity`), a darker worn groove (`groove`), height-blended dirt edge (the baked pebbles), grit
+  swept off the packed line. **Extending**: bake knobs = `RoadDetail.PARAMS` (storage buffer, `set_param` re-bakes;
+  `BMX_ROAD_SET="edge_stones=2,stray=1.5"`); a new layer = a `layer_x()` in the bake shader (its header says how).
+  Settings › Graphics › Road detail (`road_detail` 0 off = the old per-pixel path, 1 low 512² ~22 MB, 2 high ~85 MB;
+  presets Low / Medium 1, High / Ultra 2); `BMX_ROAD=0|1|2`, `BMX_OLD_ROAD=1`, probe `BMX_ROAD_PROBE=1` (`ROAD baked=
+  cleared= pending= cpu_ms=` per second). Debug `BMX_TRAIL_DEBUG=2` lines / grit / prints, `3` slope + stones, `4` which
+  level, `5` colour multiplier, `6` prints (1 = the old per-pixel masks). Chunk records keep `mat` (the bake reads its
+  trail textures). Seen: far down the trail the lines / playful marks stay as soft marks (were plain dirt); from straight
+  above the thinnest stray lines are softer than the old per-pixel ones (their 1-3 cm groove walls average out in the
+  mips: the colour now carries them, raise `stray` / `prints` if wanted). Not measured cleanly: GPU saving (another
+  program held the GPU), main-thread cost ~0.2-0.4 ms a frame riding fast (tile scheduling). `trail_puddle.gd` (CPU
+  puddle mirror) unchanged. Not done: stamping live marks (real tyre tracks, skids, blood) into the clipmap.
 - **Rope bridges** (route feature `rope`, `world/rope_bridge.gd` + C# `world/RopeBridgeSim.cs`): a 46 m feature, a swinging rope
   bridge tied round four big pines (two each end, 2.3 m apart: ride between them) over a **canyon cut across the land**
   (`TerrainField.canyon_rims` / `canyon_dig`, mirrored in `TerrainFieldCs._canyon_dig`: polynomials + integer hashes only, exact):

@@ -107,6 +107,7 @@ const DEFAULTS := {
 	"vol_fog": true,         # volumetric fog: sun shafts in the haze, dust clouds you can see light through
 	"cloud_shadows": true,   # soft cloud shadows drifting over the land
 	"grass": 2,              # grass carpet round the camera: 0 off, 1 low, 2 medium, 3 high (world/grass_field.gd)
+	"road_detail": 2,        # trail surface baked into textures: 0 off (per pixel, fades by distance), 1 low, 2 high (world/road_detail.gd)
 	"wind": true,            # gusts rolling over the grass (and the bike parting it)
 	"grime": true,           # mud build-up, wet look and drips on bike and rider
 	"speed_fx": true,        # FOV boost and edge blur at speed
@@ -157,16 +158,16 @@ const DEFAULTS := {
 const PRESETS := {
 	0: {"render_scale": 0.75, "upscaler": 1, "msaa": 0, "fxaa": true, "taa": false, "shadows": 0, "ssao": false, "gi": 0,
 		"vol_fog": false, "ssr": false, "bloom": true, "tilt_shift": false, "view_distance": 0.7, "lod": 2.0, "fx_density": 0.6,
-		"aniso": 1, "grass": 1, "cloud_shadows": true, "wind": true, "grime": true, "speed_fx": true},
+		"aniso": 1, "grass": 1, "road_detail": 1, "cloud_shadows": true, "wind": true, "grime": true, "speed_fx": true},
 	1: {"render_scale": 1.0, "upscaler": 0, "msaa": 1, "fxaa": false, "taa": false, "shadows": 1, "ssao": true, "gi": 0,
 		"vol_fog": false, "ssr": false, "bloom": true, "tilt_shift": true, "view_distance": 1.0, "lod": 1.0, "fx_density": 1.0,
-		"aniso": 2, "grass": 2, "cloud_shadows": true, "wind": true, "grime": true, "speed_fx": true},
+		"aniso": 2, "grass": 2, "road_detail": 1, "cloud_shadows": true, "wind": true, "grime": true, "speed_fx": true},
 	2: {"render_scale": 1.0, "upscaler": 0, "msaa": 2, "fxaa": false, "taa": false, "shadows": 2, "ssao": true, "gi": 1,
 		"vol_fog": true, "ssr": false, "bloom": true, "tilt_shift": true, "view_distance": 1.0, "lod": 1.0, "fx_density": 1.0,
-		"aniso": 3, "grass": 2, "cloud_shadows": true, "wind": true, "grime": true, "speed_fx": true},
+		"aniso": 3, "grass": 2, "road_detail": 2, "cloud_shadows": true, "wind": true, "grime": true, "speed_fx": true},
 	3: {"render_scale": 1.0, "upscaler": 0, "msaa": 1, "fxaa": false, "taa": true, "shadows": 3, "ssao": true, "gi": 2,
 		"vol_fog": true, "ssr": true, "bloom": true, "tilt_shift": true, "view_distance": 1.4, "lod": 0.75, "fx_density": 1.2,
-		"aniso": 4, "grass": 3, "cloud_shadows": true, "wind": true, "grime": true, "speed_fx": true},
+		"aniso": 4, "grass": 3, "road_detail": 2, "cloud_shadows": true, "wind": true, "grime": true, "speed_fx": true},
 }
 const QUALITY_NAMES := ["Low", "Medium", "High", "Ultra", "Custom"]
 
