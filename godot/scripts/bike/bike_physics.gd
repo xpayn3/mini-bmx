@@ -614,6 +614,11 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	if prof != null: _pt = _prof("controls", _pt)
 	var brake := brake_k > 0.1
 	var roll_keys: float = 0.0 if (not air or air_lock_a) else steer_input   # A / D in the air, before the body stick is added
+	# (a steer held from the ground used to be dead for the whole flight - carving into a jump mustn't lean you - but over a bump
+	# of 0.1-0.3 s that left no control at all: "I was locked". Now it counts in a short hop and fades out between 0.3 and 0.6 s of
+	# air, so a held key into a real lip still doesn't throw the bike. BMX_OLD_AIRSTEER=1 = the old lock)
+	if air and air_lock_a and not _OLD_AIRSTEER:
+		roll_keys = steer_input * (1.0 - smooth01((air_time - AIR_LOCK_FROM) / AIR_LOCK_FADE))
 	var f := fwd()
 	_step_ground(dt, f)
 	if prof != null: _pt = _prof("ground", _pt)
@@ -1428,14 +1433,31 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 		# straight and throwing the stick does little, like the real thing. BMX_OLD_WHIP=1 = always airWhip)
 		var w_cap: float = float(T.get("airWhip", 1.5)) if _OLD_WHIP else lerpf(WHIP_AIR_ONLY, float(T.get("airWhip", 1.5)), absf(_whip_in))
 		var whip_t: float = clampf(air_stick.x / 0.8, -1.0, 1.0) * w_cap * (1.0 - float(T.get("whipReturn", 0.7)) * land_prep * float(T.get("airAssist", 0.6)))
-		var tw_lim: float = maxf(T.airTwist, absf(whip_t) + 0.05)
-		var tw_t := clampf(-sys_slip + whip_t, -tw_lim, tw_lim)
+		# steer in the air: the held steer turns the bike off the travel (eased in after take-off, less while spinning flat)
+		var st_t := 0.0
+		if not _OLD_AIRSTEER:
+			st_t = clampf(roll_keys, -1.0, 1.0) * float(T.get("airSteer", 0.6)) * smooth01((air_time - AIR_STEER_DELAY) / AIR_STEER_RAMP)
+			st_t *= 1.0 - clampf(absf(stick_yaw) / 1.2, 0.0, 1.0)
+		_air_steer_s += (st_t - _air_steer_s) * minf(1.0, dt * 12.0)
+		if _AIRSTEER_PROBE and int(air_time * 120.0) % 12 == 0: print("AIRSTEER t=%.2f steer=%.2f off=%.1fdeg aim_want=%.1fdeg aim=%.1fdeg lean=%.1fdeg slip=%.1fdeg" % [air_time, roll_keys, rad_to_deg(_air_steer_s), rad_to_deg(aim_off), rad_to_deg(_air_aim_s), rad_to_deg(lean), rad_to_deg(slip)])
+		# next-bend aim: hands off (no steer, no stick, not spinning flat) the rider points the bike where the trail goes after the
+		# landing, airAim of the way (0 = off). Any steer / stick of the player takes over at once (the aim fades in 7 /s)
+		var aim_t := 0.0
+		if not _OLD_AIRSTEER:
+			var own_k: float = (1.0 - _air_own) * (1.0 - clampf(absf(roll_keys) * 3.0, 0.0, 1.0)) * (1.0 - clampf(absf(stick_yaw) / 1.2, 0.0, 1.0))
+			aim_t = clampf(aim_off, -AIM_MAX, AIM_MAX) * float(T.get("airAim", 0.6)) * own_k * smooth01((air_time - 0.06) / 0.12)
+		_air_aim_s += (aim_t - _air_aim_s) * minf(1.0, dt * AIM_EASE)
+		var steered := _air_steer_s + _air_aim_s
+		var tw_lim: float = maxf(T.airTwist, absf(whip_t) + absf(steered) + 0.05)
+		var tw_t := clampf(-sys_slip + whip_t + steered, -tw_lim, tw_lim)
 		# a flat spin turns rider + bike as one: no whip, no hips holding the bike on the travel line (they made the
 		# bike snap out ~60 deg, hang while the body turned, then jump round ~130 deg in a tenth of a second)
 		tw_t *= 1.0 - clampf(absf(stick_yaw) / 1.2, 0.0, 1.0)
 		# (thrown out: quick; let go / brought back: it unwinds over ~0.4 s, not a snap)
 		var back_tw: bool = not _OLD_WHIP and absf(tw_t) < absf(air_tw) - 0.02
 		var k_tw: float = 22.0 if back_tw else 60.0
+		# (steering in the air answers fast: a small hop is over in 0.3-0.5 s, the usual hip spring would only get half way)
+		if absf(steered) > 0.05 and not _OLD_AIRSTEER: k_tw = maxf(k_tw, lerpf(60.0, AIR_STEER_K, clampf(absf(steered) / 0.3, 0.0, 1.0)))
 		var c_tw: float = 2.0 * sqrt(k_tw) * (1.0 if back_tw else 0.77)
 		air_tw_v += (k_tw * (tw_t - air_tw) - c_tw * air_tw_v) * dt
 		air_tw += air_tw_v * dt
@@ -1458,6 +1480,7 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 	# stick rarely goes past 0.8, so ~50 deg was the most)
 	var roll_t: float = roll_keys * T.airRoll + (air_stick.x * float(T.get("stickAirRoll", 0.75)) if _OLD_WHIP else clampf(air_stick.x / 0.8, -1.0, 1.0) * float(T.get("stickAirRoll", 1.25))) + clampf(air_stick.x / 0.8, -1.0, 1.0) * (float(T.get("airWhip", 1.5)) if _OLD_WHIP else lerpf(WHIP_AIR_ONLY, float(T.get("airWhip", 1.5)), absf(_whip_in))) * 0.3
 	if air: roll_t *= 1.0 - 0.6 * clampf(absf(stick_yaw) / 1.2, 0.0, 1.0)   # spinning flat: a stylish lean, not laid right over
+	if air and not _OLD_AIRSTEER: roll_t += (_air_steer_s + _air_aim_s) * float(T.get("airPrelean", 0.5))   # banks into the steered turn
 	var lean_t: float = (roll_t if absf(roll_t) > 0.03 else lean * 0.98) if air else clampf(atan(lat_a / G), -T.leanMax + minf(0.0, bk), T.leanMax + maxf(0.0, bk))
 	# (in the air: blended, not switched. The target jumped between the stick's roll and "hold the lean" at |roll| 0.03,
 	# the stiffness between leanIn / leanOut / 80 as the sticks crossed 0.01 / 0.02: with both sticks working the lean
@@ -1517,10 +1540,17 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 		gx_t += s_in * float(T.get("slowLean", 0.3)) * slow_k * smooth01(va / 1.2)
 		bank_t = float(T.get("bankLean", 0.6)) * bank
 		if whip > 0.0: gx_t += whip_side * float(T.get("whipLean", 0.22)) * whip * whip * (3.0 - 2.0 * whip)
-	var gx_rate := 1.2 if air else (3.0 if since_land < 0.35 else 60.0)
+	# (just landed: the drawn lean from the stick / slow steer / bank used to move at only 3 rad/s for 0.35 s and the bank part at
+	# bankLeanRate 1.5 - a berm-to-berm swap out of a hop felt heavy. Now landSwapRate for both in that window; Ride > Jumps >
+	# Landing. BMX_OLD_LANDSWAP=1 = the old numbers)
+	var swap_r: float = 3.0 if _OLD_LANDSWAP else float(T.get("landSwapRate", 7.0))
+	var post_land: bool = not air and since_land < 0.35
+	var gx_rate := 1.2 if air else (swap_r if post_land else 60.0)
 	_gx_lean = move_toward(_gx_lean, gx_t, gx_rate * dt)
 	# (the ground's share eases at most 1.5 rad/s: from one bank straight into the next it swings over, not snaps)
-	bank_lean = move_toward(bank_lean, bank_t, minf(gx_rate, float(T.get("bankLeanRate", 1.5))) * dt)
+	var bank_r: float = float(T.get("bankLeanRate", 1.5))
+	if post_land and not _OLD_LANDSWAP: bank_r = maxf(bank_r, swap_r)
+	bank_lean = move_toward(bank_lean, bank_t, minf(gx_rate, bank_r) * dt)
 	# rider + bike are two masses, not one block: the bike (~17 kg) is pushed over under the rider (~75 kg) first and
 	# the body follows. While the lean is changing the bike runs ahead of it by the roll speed (bikeLead s), the body's
 	# target (lean x bodyLean, see counter) doesn't, so in a swap the bike flicks across under a body that comes
@@ -2486,7 +2516,7 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			pitch_v = air_w + air_tilt_v
 			_flip_in = clampf(throw_v / maxf(float(T.flipRate), 0.1), -1.0, 1.0) if not _OLD_SPIN else 1.0
 			throw_v = 0.0
-			air_yaw = yaw_rate; air_tw = 0.0; air_tw_v = 0.0
+			air_yaw = yaw_rate; air_tw = 0.0; air_tw_v = 0.0; _air_steer_s = 0.0; _air_aim_s = 0.0
 			# a whip wound up at the lip leaves swinging out (the hips already throwing the rear round)
 			_whip_in = 0.0 if _OLD_WHIP else whip_load
 			air_tw_v = WHIP_KICK * _whip_in
@@ -2554,6 +2584,23 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			# The first few degrees (landYawFree) cost nothing. More than landYawCrash m/s caught at once is a highside.
 			# (It used to cost nothing at all up to 60 deg: 43 deg sideways at 47 km/h rode on at full speed)
 			land_yaw = 0.0
+			# landing carve: steered round in the air (A / D), a heading near the travel is turned INTO - the travel swings
+			# round to the heading (little speed lost) before the sideways rule sees what is left
+			var carve_k: float = float(T.get("landCarve", 0.8))
+			var a_c := wrapf(slip, -PI, PI)
+			if not _OLD_AIRSTEER and carve_k > 0.0 and not _graze and at > 0.1 and absf(v) > 3.0 and crash_pending == "" \
+					and absf(_air_steer_s + _air_aim_s) > 0.05 and signf(a_c) == signf(_air_steer_s + _air_aim_s) and absf(a_c) < CARVE_MAX:
+				var turn_c := a_c * carve_k
+				course += turn_c; slip -= turn_c; slip_w = 0.0
+				v *= 1.0 - CARVE_COST * minf(1.0, absf(sin(turn_c)))
+				carve_now = turn_c
+				# a reward for it (Ride > Jumps > Steer in the air > carveStyle, 0 = none): a few points + a notch of flow
+				var cs: float = float(T.get("carveStyle", 1.0))
+				if cs > 0.0 and absf(turn_c) >= CARVE_REWARD_MIN and host.has_method("on_style"):
+					host.on_style(roundi(120.0 * cs * clampf(absf(turn_c) / 0.4, 0.5, 1.5)), "CARVE")
+					flow_up()
+				if Env.s("BMX_AIRSTEER_PROBE") != "": print("CARVE angle=%.0fdeg turned=%.0fdeg v=%.1f" % [rad_to_deg(a_c), rad_to_deg(turn_c), v])
+			_air_steer_s = 0.0; _air_aim_s = 0.0
 			var a_y := wrapf(slip, -PI, PI)
 			var yaw_free: float = float(T.get("landYawFree", 0.12))
 			if not _graze and at > 0.2 and absf(v) > 2.0 and absf(a_y) > yaw_free and absf(a_y) < 1.35 and crash_pending == "":
@@ -3193,6 +3240,29 @@ const WHIP_WINDOW := 0.35   # s before the lip: the stick held to the side winds
 const WHIP_WIND := 0.2      # s of holding it to wind it right up
 const WHIP_KICK := 3.0      # rad/s the bike swings out with off the lip, fully wound
 const WHIP_AIR_ONLY := 0.4  # rad: the most a whip started in the air alone can throw the bike out
+# steer in the air (2026-11-25, user: "come out of a berm, pump, turn in the air to land square and ready for the opposite turn"):
+# A / D / the left stick turn the bike off its travel by up to airSteer rad (hips twist, like the whip's spring, no wind-up);
+# it banks with it (airPrelean) and at touch-down a heading within CARVE_MAX of the travel is turned into (landCarve).
+# BMX_OLD_AIRSTEER=1 = off
+static var _OLD_AIRSTEER := OS.get_environment("BMX_OLD_AIRSTEER") != ""
+static var _OLD_LANDSWAP := OS.get_environment("BMX_OLD_LANDSWAP") != ""
+static var _AIRSTEER_PROBE := OS.get_environment("BMX_AIRSTEER_PROBE") != ""
+const AIR_STEER_K := 190.0      # hip-twist spring while steering in the air (the whip's is 60)
+const AIR_LOCK_FROM := 0.3      # s: a steer held from the ground works in the air up to here...
+const AIR_LOCK_FADE := 0.3      # ...and fades out over this long (a real jump: it is the old lock again)
+const AIR_STEER_DELAY := 0.04   # s in the air before the steer counts
+const AIR_STEER_RAMP := 0.10    # s to full
+const CARVE_MAX := 0.7          # rad (~40 deg): past it the old sideways-landing rule alone
+const CARVE_COST := 0.15        # speed share lost at a sin(turn) of 1
+var _air_steer_s := 0.0         # the steered heading offset in use (rad, smoothed), kept for the landing
+# hands off, the rider points the bike where the trail goes after the landing (set by Game each step: the trail's direction at
+# the predicted touch-down + a few metres, minus the travel direction, rad, 0 = off the trail / no bend). It gives way to any steer.
+var aim_off := 0.0
+var _air_aim_s := 0.0           # the aim in use (rad, smoothed)
+const CARVE_REWARD_MIN := 0.12 # rad (~7 deg): a carve smaller than this earns nothing
+const AIM_MAX := 0.5           # rad: the most the next-bend aim turns the bike
+const AIM_EASE := 7.0           # /s: how quickly the aim comes in / goes out
+var carve_now := 0.0            # rad: how far the last landing's carve turned the travel (drawing: the bars bite into it, fades)
 var whip_load := 0.0        # -1..1: the whip wound up into the lip ahead (signed like the stick)
 var _whip_in := 0.0         # this flight's whip load
 static var _OLD_ABSORB := OS.get_environment("BMX_OLD_ABSORB") != ""
