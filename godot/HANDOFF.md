@@ -704,6 +704,14 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   normals rounded across the width (near, faded with distance), self-shadow down in the grass (faded from 8 m),
   edge-on near blades turned towards the camera, wrapped diffuse. Uniform `look_v2` (`BMX_GRASS_OLD=1` = 0 = before).
   GPU 0.59 -> 0.64 ms. Tile placement is C# (`world/GrassPlaceCs.cs`, `BMX_GRASS_GD=1` = the GDScript `_place`).
+  **Photographed blades (2026-11-25, user: "realistic texture for grass")**: near blades read one of 16 real grass blades
+  (`assets/textures/grass_blade/blades.png`, a Texture2DArray 1 x 16 slices of 64 x 512, BC7; made by root
+  `tools/make_grass_blades.py` from ambientCG Foliage001 + Foliage006, CC0: each blade straightened along its centre line):
+  r = brightness detail, g = dry / brown, b = inside the photo, a = across slope (veins). Detail only: the colour stays the
+  biome's; no alpha cut-out (the blade geometry is the outline, so no extra overdraw). Fades out from 55 % of the near ring.
+  Uniforms `blade_photo`, `blade_contrast` 1.7. `BMX_GRASS_PHOTO=0` = without. Cost, `BMX_GRASS_AB=1` (switches it every
+  30 frames, `GRASSAB off_ms= on_ms= diff_ms=`): camera down in the grass +0.25..0.34 ms GPU, riding view ~0 (measured with
+  other programs on the GPU). Not done: flowers / weeds from the other scans, the mid ring (too small to show).
 
 - **Leaf-card bushes (2026-11-25, user: "could we add Megascans bushes, or too heavy?" -> prototype from a procedural texture)**: bushes are no
   longer the lumpy blob. `world/card_bush.gd` (`CardBush`): ~30-46 upright quads (each folded in the middle, turned at random about the vertical, front

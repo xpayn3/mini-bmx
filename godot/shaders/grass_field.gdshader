@@ -35,6 +35,14 @@ varying float v_flat;
 varying vec3 v_side;    // the blade's width axis (world): the fragment rounds the normal across it
 varying float v_u;      // -1 .. 1 across the blade
 varying float v_round;  // how much rounding (near blades close up; gone with distance: no far shimmer)
+// photographed blades (2026-11-25, ambientCG Foliage001 / 006, CC0; tools/make_grass_blades.py): 16 straightened blades,
+// one per near blade (by its hash). r = brightness x0.5, g = dry / brown, b = inside the photo's blade, a = across slope.
+// Detail only: the colour stays the biome's. No alpha cut-out (the blade's own shape is the outline: no overdraw cost).
+uniform sampler2DArray grass_blades : filter_linear_mipmap_anisotropic, repeat_disable;
+uniform float blade_photo = 1.0;    // 0 = the procedural blade texture only (BMX_GRASS_PHOTO=0)
+uniform float blade_contrast = 1.7; // how strongly the photo's light / dark streaks show
+varying float v_layer;
+varying float v_photo;  // how much photo: near blades, fading out before the near ring ends
 
 // (2026-11-24, grass research: Ghost of Tsushima GDC 2021, 2Retr0 GodotGrass, AMD mesh-shader grass) clumps, rounded
 // normals, root self-shadow, edge-on blades turned to the camera, wrapped diffuse. `BMX_GRASS_OLD` = before (grass_field.gd)
@@ -112,7 +120,7 @@ void vertex() {
 	if (hgt <= 0.0) {   // no blade here (doesn't grow / faded out): collapse it, skip the wind, hashes and normal reads
 		VERTEX = vec3(0.0, -1.0e5, 0.0);
 		v_world = VERTEX; v_col = vec3(0.0); v_n = vec3(0.0, 1.0, 0.0); v_t = 0.0; v_gust = 0.0; v_flat = 0.0;
-		v_side = vec3(1.0, 0.0, 0.0); v_u = 0.0; v_round = 0.0;
+		v_side = vec3(1.0, 0.0, 0.0); v_u = 0.0; v_round = 0.0; v_layer = 0.0; v_photo = 0.0;
 	} else {   // (Godot shaders don't allow return in vertex())
 	float wid = near ? (0.03 + 0.025 * h2.x) : (0.09 + 0.05 * h2.x);
 	wid *= mix(0.4, 1.0, fade);
@@ -198,6 +206,8 @@ void vertex() {
 	v_col *= mix(1.0, ss, look_v2 * (1.0 - smoothstep(8.0, near_r + 4.0, dist)) * (1.0 - flat_k));
 	v_side = side; v_u = UV.x;
 	v_round = near ? look_v2 * (1.0 - smoothstep(6.0, near_r, dist)) : 0.0;
+	v_layer = floor(fract(h2.x * 7.31 + h1.w * 3.17) * 16.0);
+	v_photo = near ? blade_photo * (1.0 - smoothstep(near_r * 0.55, near_r - 2.0, dist)) : 0.0;
 	v_flat = flat_k;
 	// wind waves: a gust bends the blades over and their paler undersides catch the light, so the gust
 	// fronts roll across the field as lighter bands (the wind already moves them: wind_gust in atmos)
@@ -224,9 +234,20 @@ void fragment() {
 	bt *= 1.0 - 0.18 * smoothstep(0.55, 1.0, au); // shaded edges
 	bt *= 0.88 + 0.24 * grain;                    // fine mottling
 	bt *= mix(vec3(1.0), vec3(1.06, 1.03, 0.82), smoothstep(0.7, 1.0, v_t) * grain); // sun-bleached, dry tips
-	ALBEDO = v_col * mix(vec3(1.0), bt, tex_k);
-	// rounded across the width (GoT): the normal tilts out towards each edge, so a flat blade shades like a curved one
-	vec3 wn = normalize(v_n + v_side * v_u * 0.6 * v_round);
+	bt = mix(vec3(1.0), bt, tex_k);
+	float slope = 0.0;
+	if (v_photo > 0.002) {
+		vec4 s = texture(grass_blades, vec3(v_u * 0.5 + 0.5, 1.0 - v_t, v_layer));
+		vec3 pb = vec3(max(1.0 + (s.r * 2.0 - 1.0) * blade_contrast, 0.15));   // brightness of the photo blade
+		pb *= mix(vec3(1.0), vec3(1.5, 0.88, 0.36), min(s.g * 1.3, 1.0));      // brown spots, dead tips
+		pb *= mix(0.84, 1.0, s.b);                                  // past the photo's edge: a touch darker (the blade edge)
+		bt = mix(bt, pb, v_photo);
+		slope = (s.a * 2.0 - 1.0) * v_photo;
+	}
+	ALBEDO = v_col * bt;
+	// rounded across the width (GoT): the normal tilts out towards each edge, so a flat blade shades like a curved one;
+	// the photo's veins / midrib tilt it too
+	vec3 wn = normalize(v_n + v_side * (v_u * 0.6 * v_round + slope * 0.9));
 	NORMAL = normalize((VIEW_MATRIX * vec4(wn, 0.0)).xyz);
 	ROUGHNESS = 0.72 - 0.2 * v_gust * v_t - 0.3 * v_flat;   // gust-bent / laid-down blades: a soft sheen
 	AO = mix(mix(0.72, 1.0, v_t), 1.0, v_flat);
