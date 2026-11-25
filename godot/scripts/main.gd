@@ -2720,6 +2720,11 @@ func _autotest(seconds: float) -> void:
 		var cs: Dictionary = game.clip_stats
 		print("RIDE bottom_outs=%d body=%.2fg ground=%.2fg" % [st.probe_bottom, sqrt(st.probe_acc2 / maxi(st.probe_n, 1)) / 9.81, sqrt(st.probe_g2 / maxi(st.probe_n, 1)) / 9.81])
 		print("CLIP frames=%d lifted=%d deepest_before=%.1fcm deepest_after=%.2fcm frames_inside=%d" % [cs.frames, cs.fixed, cs.before * 100, cs.after * 100, cs.bad])
+	if game.gap_probe:
+		var keys: Array = game.gap_stats.keys(); keys.sort()
+		for k in keys:
+			var s: Array = game.gap_stats[k]
+			print("GAP %-16s frames=%5d mean=%.1fcm max=%.1fcm over1cm=%3d%% mesh-field=%+.1fcm lift=%.1fcm" % [k, s[0], s[1] / s[0] * 100, s[2] * 100, 100 * s[5] / s[0], s[3] / s[0] * 100, s[4] / s[0] * 100])
 	if Env.s("BMX_KNEE_PROBE") != "":
 		for row in game.rider.knee_dbg: print("KNEE ", row)
 	if game.rider.limb_probe:

@@ -1023,7 +1023,7 @@ func _finalize(k: Vector2i) -> void:
 	fin_parts[3] += (Time.get_ticks_usec() - tp) / 1000.0; tp = Time.get_ticks_usec()
 	var colliders: Array = o["colliders"]
 	var rec := {"cx": k.x, "cz": k.y, "node": node, "colliders": colliders, "small": small, "deco_mi": deco_mi, "rock_keys": [],
-		"G": o["G"], "N": b.N, "mms": mms, "packs": [], "grass_img": o["grass_img"], "grass_h": o["grass_h"],
+		"G": o["G"], "N": b.N, "MG": o.get("GF", o["G"]), "MN": o.get("MN", b.N), "mms": mms, "packs": [], "grass_img": o["grass_img"], "grass_h": o["grass_h"],
 		"pud": o.get("pud", PackedFloat32Array()), "mat": mat}   # (mat: RoadDetail bakes from its trail textures)
 	chunk_serial += 1   # GrassField re-reads the chunks round the camera
 	for pp in o.get("packs", []):
@@ -1084,7 +1084,8 @@ func _finalize(k: Vector2i) -> void:
 			if c.has("top"):
 				dd.append_array([c["x"], c["z"], c["r"], c["base"], c["top"], c.get("sink", 0.0)])
 		fcs.domes_add(_chunk_id(k), dd)
-		fcs.mesh_add(k.x, k.y, int(rec["N"]), rec["G"])   # for tyre_worst (the drawn tyres' fit, one call per tyre)
+		if OLD_TOPFIT: fcs.mesh_add(k.x, k.y, int(rec["N"]), rec["G"])
+		else: fcs.mesh_add(k.x, k.y, int(rec["MN"]), rec["MG"])   # for tyre_worst (the drawn tyres' fit, one call per tyre)
 	var ckeys := {}
 	for c in colliders:
 		c["chunk"] = k
@@ -1123,18 +1124,25 @@ func _rebuild_tape(rec: Dictionary) -> void:
 	(rec["tape_mi"] as MeshInstance3D).mesh = m
 
 
-## the ground exactly as drawn: the full-detail chunk mesh's own triangles (0.5 m grid, split along
-## the (x+1, z) - (x, z+1) diagonal like _grid_lod_indices). In hollows it sits above height(), which
-## is the smooth field. -INF where no chunk is loaded.
+## the ground exactly as drawn: the full-detail chunk mesh's own triangles (0.5 m grid, or the 0.25 m one
+## with its micro detail near the trail; split along the (x+1, z) - (x, z+1) diagonal like _grid_lod_indices).
+## It differs from height(), the smooth field, by up to a few cm. -INF where no chunk is loaded.
 func mesh_height(x: float, z: float) -> float:
+	return _mesh_h(x, z, false)
+
+## the chunk's 0.5 m grid only (what the old fit read: BMX_OLD_TOPFIT)
+func coarse_mesh_height(x: float, z: float) -> float:
+	return _mesh_h(x, z, true)
+
+func _mesh_h(x: float, z: float, coarse: bool) -> float:
 	var k := Vector2i(WorldRng.jround(x / SIZE), WorldRng.jround(z / SIZE))
 	var c = chunks.get(k)
 	if c == null:
 		return -INF
-	var N: int = c["N"]
+	var N: int = c["N"] if coarse else c.get("MN", c["N"])
 	var d := SIZE / N
 	var W := N + 3
-	var G: PackedFloat32Array = c["G"]
+	var G: PackedFloat32Array = c["G"] if coarse else c.get("MG", c["G"])
 	var gx := (x - (k.x * SIZE - SIZE / 2)) / d
 	var gz := (z - (k.y * SIZE - SIZE / 2)) / d
 	var ix := clampi(floori(gx), 0, N - 1)
@@ -1151,10 +1159,27 @@ func mesh_height(x: float, z: float) -> float:
 	return h11 + (h01 - h11) * (1.0 - tx) + (h10 - h11) * (1.0 - tz)
 
 
-## the highest solid thing drawn here: the ground mesh, a wooden deck, or a rock / log / stump dome
+## the highest solid thing drawn here: the ground mesh, a wooden deck, or a rock / log / stump dome.
+## The drawn ground is the mesh itself, also where it dips under the smooth field (micro detail, potholes): the
+## drawn tyres sit on what is drawn, not hover over it (the physics still rides the smooth field). A rock, log,
+## wooden deck or rope deck (height() above the plain ground) still counts where it stands up out of the mesh.
+## BMX_OLD_TOPFIT=1 = the old max(field, coarse mesh) (the bike hovered over every drawn dip)
+static var OLD_TOPFIT := OS.get_environment("BMX_OLD_TOPFIT") != ""
 func top_height(x: float, z: float) -> float:
+	if OLD_TOPFIT:
+		var r0 := rut_at(x, z)
+		return maxf(height(x, z) + r0, coarse_mesh_height(x, z)) - r0   # (the coarse drawn mesh, dug in too)
+	return drawn_height(x, z)
+
+## what is drawn here, whatever BMX_OLD_TOPFIT says (top_height without the old switch; probes measure against it)
+func drawn_height(x: float, z: float) -> float:
 	var r := rut_at(x, z)
-	return maxf(height(x, z) + r, mesh_height(x, z)) - r   # (the drawn mesh, dug in too)
+	var m := mesh_height(x, z)
+	var h := height(x, z) + r
+	if m == -INF:
+		return h - r
+	var g: float = fcs.ground(x, z) if fcs != null else field.ground(x, z)   # (cached by height's own read)
+	return (maxf(h, m) if h > g + 0.001 else m) - r
 
 ## BikeRig.tyre_depth's whole sample loop over top_height in one C# call (it was ~30-50 GDScript -> C# calls
 ## per tyre, up to ~22 tyres a frame). null = do it in GDScript (no C#, a rope bridge near, or a level with

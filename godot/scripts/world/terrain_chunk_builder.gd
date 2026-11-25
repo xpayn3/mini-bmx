@@ -185,6 +185,8 @@ func _build() -> void:
 		var fm: Dictionary = f.fine_ground(ox, oz, N, MESH_K)
 		verts = fm["verts"]; norms = fm["norms"]; uvs = fm["uvs"]
 		mk = MESH_K
+		out["GF"] = fm["H"]   # the drawn (fine) heights, for the drawn tyres' fit (Terrain.mesh_height)
+		out["MN"] = N * mk
 	_ground_lods(verts, norms, uvs, N * mk, mk)   # adds edge skirts to the vertex arrays
 	out["verts"] = verts
 	out["norms"] = norms

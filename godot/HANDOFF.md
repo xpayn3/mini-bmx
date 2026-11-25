@@ -290,6 +290,16 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   lies over; 3 points across the round casing, `tyre_hw`) against `Terrain.top_height` = max(exact mesh
   triangles `mesh_height`, `height` with domes / decks) and lifts / tilts the drawn bike until clear
   (the physics isn't touched). ~1–2 % frame time. Rock meshes are only as exact as their domes.
+  **The fit reads what is drawn (2026-11-25, user: "looks like we are floating a bit", manual on a bank)**: near the
+  trail the drawn ground is the 0.25 m mesh with `micro_detail` (grain, potholes, ragged edge, rills), but the fit read
+  the chunk's 0.5 m grid `G` and took max(smooth field, grid): the bike hovered over every drawn dip. Now the chunk
+  keeps the fine heights (`fine_ground` returns `H` -> chunk `MG` / `MN`, `mesh_add` gets them) and `top_height` =
+  the drawn mesh, even under the smooth field; a rock / log / deck sticking up out of the plain ground (height() >
+  ground() + 1 mm) still counts. Same in C# `tyre_worst`. The physics still rides the smooth field. `drawn_height`
+  = the same, whatever the switch; `BMX_OLD_TOPFIT=1` = before. Probe `BMX_GAP_PROBE=1` (`GAP <bank> <manual> <wheel>`
+  lines: air under each grounded tyre vs the drawn ground). Seed 4242, follow rider holding a manual: rear tyre gaps
+  > 1 cm 19 % -> 0 % of frames, worst 2.6 -> 1.1 cm (on banks too). Left: right after landings / rocks the lift eases
+  down at `LIFT_DOWN` 0.6 m/s, so the tyre can hang a few cm for a moment.
 - **Graded landing zone** (`LAND_CONE` 1.05 rad ~60 deg): heading within the cone of the travel = normal landing. Past it the tyres grab the
   nearer axis instead of a wash-out crash: < 90 deg = forward "SKETCHY!", > 90 deg = backwards "FAKIE!". The travel is dragged round to within
   0.9 x `slipMax` of the heading, speed scaled by cos(angle dragged), the rest decays as a slide. `BMX_FAKIE=<deg>` forces the angle.
