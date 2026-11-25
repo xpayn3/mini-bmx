@@ -1498,6 +1498,16 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
 - Not done: card pack / reveal animation, sound for claiming, per-biome cards, mouse tilt of the grid thumbnails, tests with a real mouse
   (the tilt was checked by the shader's static look only), cloud save.
 
+- **CycleIQ cards ported (2026-11-25, user: "find the project cycleiq ... 3d cards and badges ... convert to godot")**. Source: `C:\Users\Luka\Downloads\CyclingHub\js\badges3d.js`
+  (a Three.js PWA; its `BADGE_PROCEDURAL` table has shape / colour / accent / holo pattern per badge; `initBadgeCard3D` = the badge card, `initRiderCard3D` = the
+  athlete card with a giant level numeral + a calendar-date back). In the game: `ui/card_face.gd` draws the faces (dark dithered card + diagonal lattice,
+  ribbon repeating the name, the shape + glyph, name, text, EARNED / LOCKED; the rider card: name, rank, giant LEVEL numeral, XP bar, three stats; its back = today's
+  date) and the foil-pattern MASK per holo type (chevron / diamond / bolt / ripple / grid / wave / rays); `ui/collect_stage.gd` `show_card` shows it in 3D: a
+  rounded slab with a spatial holo shader (rainbow driven by the tilt, sparkle, glare, brighter where the mask is white), the real extruded shape + a glass inset +
+  the raised glyph floating over it reflecting CycleIQ's rainbow environment map (`_rainbow_tex`), a point light that follows the tilt. `Collection.badge_look` /
+  `card_look` / `shape_points` give each badge and card its shape + colours. Profile tabs: BADGES and CARDS use the cards, new RIDER CARD tab (drag to flip front / date back).
+  Not ported: the Half Year portal diorama, the glitter additive layer as its own pass, GLB badge models, the quality auto-downgrade, share-as-image.
+
 ### Title screen (golden hour lookout)
 - `Game.set_scenic(true)` while the menu is up: a low warm sun ahead-right of the view, golden sky mode in
   `sky_hdri.gdshader` (`golden`: warm gradient + sun glow, the HDRI's clouds re-lit), warm long fog.
