@@ -108,6 +108,20 @@ func _ready() -> void:
 	material_override = m
 
 
+var _bake_tries := 0
+
+## dark digits somewhere in the number's area of a drawn face?
+func _has_ink(img: Image) -> bool:
+	var w := img.get_width()
+	var h := img.get_height()
+	var n := 0
+	for yi in 16:
+		for xi in 24:
+			var c := img.get_pixel(int(w * (0.1 + 0.8 * xi / 23.0)), int(h * (0.25 + 0.45 * yi / 15.0)))
+			if c.get_luminance() < 0.3: n += 1
+	return n >= 4
+
+
 ## change what is printed (the number, the header line); the face is drawn again and baked again
 func set_content(n: String, h: String) -> void:
 	if n == number and h == header: return
@@ -115,6 +129,7 @@ func set_content(n: String, h: String) -> void:
 	header = h
 	if material_override == null: return   # not in the tree yet: _ready draws it with these
 	if _vp != null: _vp.queue_free()
+	_bake_tries = 0
 	_vp = _build_face()
 	add_child(_vp)
 	_vp_frames = 0
@@ -272,14 +287,21 @@ func _process(dt: float) -> void:
 		_vp_frames += 1
 		if _vp_frames > 4:   # bake it into a mipmapped texture (no shimmer from far away) and drop the viewport
 			var img := _vp.get_texture().get_image()
-			if img != null and not img.is_empty():
+			# (a face that has not really been drawn yet - the ride built behind the intro / menu sits in a viewport that
+			# is never shown - bakes as bare paper: wait until the digits are in the picture, the live texture shows meanwhile)
+			if img != null and not img.is_empty() and not _has_ink(img) and _bake_tries < 600:
+				_bake_tries += 1
+				_vp_frames = 0
+				if _vp.render_target_update_mode != SubViewport.UPDATE_ALWAYS: _vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+			elif img != null and not img.is_empty():
 				img.generate_mipmaps()
 				(material_override as ShaderMaterial).set_shader_parameter("tex", ImageTexture.create_from_image(img))
 				_vp.queue_free()
 				_vp = null
+				_vp_frames = -1
 			else:
 				_vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
-			_vp_frames = -1
+				_vp_frames = -1
 	var rider := get_parent() as Rider
 	if rider == null or rider.spine_skel == null or not rider.is_visible_in_tree() or not is_visible_in_tree() or dt <= 0.0:   # bib off = no cloth sim
 		return
