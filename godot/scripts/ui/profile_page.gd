@@ -20,7 +20,7 @@ const C_GREEN := Color("34d399")
 const C_RED := Color("ff5d5d")
 const ACC := Tokens.ACCENT
 const LEVEL_NAMES := ["ROOKIE", "SCRUB", "LOCAL", "SHREDDER", "PRO", "LEGEND"]
-const TABS := ["OVERVIEW", "GOALS", "BADGES", "CARDS", "WALLET"]
+const TABS := ["OVERVIEW", "GOALS", "BADGES", "CARDS", "RIDER CARD", "WALLET"]
 var _tab := 0
 var _content: VBoxContainer
 var _tab_btns: Array = []
@@ -288,12 +288,12 @@ func _top_bar() -> Control:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", Tokens.S2)
 	for i in TABS.size():
-		var b := _pill(TABS[i], func(): _show(i), i == 0, Tokens.T_LG)
+		var b := _pill(TABS[i], func(): _show(i), i == 0, Tokens.T_MD)
 		row.add_child(b)
 		_tab_btns.append(b)
 	var sp := Control.new(); sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL; row.add_child(sp)
 	# the wallet, top right corner
-	var w := _pill("", func(): _show(4), false, Tokens.T_LG)
+	var w := _pill("", func(): _show(5), false, Tokens.T_LG)
 	var wr := HBoxContainer.new()
 	wr.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	wr.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -329,7 +329,8 @@ func _show(i: int) -> void:
 		1: _page_goals()
 		2: _page_badges()
 		3: _page_cards()
-		4: _page_wallet()
+		4: _page_rider_card()
+		5: _page_wallet()
 
 func _refresh() -> void:   # after a claim: the wallet counts up, the page is built again
 	var from := _shown_money
@@ -699,7 +700,7 @@ func _page_badges() -> void:
 	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	left.add_theme_constant_override("separation", Tokens.S2)
 	row.add_child(left)
-	left.add_child(_cap("%d OF %d BADGES  ·  CLICK ONE, THEN DRAG IT TO SPIN" % [GameState.achieved.size(), Steam.ACHIEVEMENTS.size()]))
+	left.add_child(_cap("%d OF %d BADGES  ·  CLICK ONE, THEN MOVE THE MOUSE OVER IT" % [GameState.achieved.size(), Steam.ACHIEVEMENTS.size()]))
 	var sc := ScrollContainer.new()
 	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -718,7 +719,7 @@ func _page_badges() -> void:
 		if ea: return int(GameState.achieved[a]) > int(GameState.achieved[b])
 		return ids.find(a) < ids.find(b))
 	var side := VBoxContainer.new()
-	side.custom_minimum_size.x = 330
+	side.custom_minimum_size.x = 400
 	side.add_theme_constant_override("separation", Tokens.S2)
 	row.add_child(side)
 	var stage := CollectStage.new()
@@ -735,10 +736,17 @@ func _page_badges() -> void:
 	meta.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	side.add_child(meta)
 	var cells: Array = []
+	var back: Texture2D = await CardFace.texture("back", "back", true, self)
+	if not is_instance_valid(stage): return
 	var pick := func(id: String) -> void:
 		_sel_badge = id
 		var got := GameState.achieved.has(id)
-		stage.show_badge(id, got)
+		var look := Collection.badge_look(id)
+		var face: Texture2D = await CardFace.texture("badge", id, got, self)
+		var mask: Texture2D = await CardFace.texture("mask", String(look.holo), true, self)
+		if not is_instance_valid(stage): return
+		look["strength"] = 0.9
+		stage.show_card(look, got, face, back, mask)
 		var a: Array = Steam.ACHIEVEMENTS[id]
 		title.text = String(a[0]).to_upper()
 		desc.text = String(a[1])
@@ -787,14 +795,16 @@ func _page_cards() -> void:
 	var meta := _cap("", ACC, Tokens.T_SM)
 	meta.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	side.add_child(meta)
-	var back: Texture2D = await CardFace.texture("back", true, self)
+	var back: Texture2D = await CardFace.texture("back", "back", true, self)
 	if not is_instance_valid(stage): return
 	var show := func(id: String) -> void:
 		_sel_card = id
 		var got := Collection.owned(id)
-		var face: Texture2D = await CardFace.texture(id, got, self)
+		var look := Collection.card_look(id)
+		var face: Texture2D = await CardFace.texture("card", id, got, self)
+		var mask: Texture2D = await CardFace.texture("mask", String(look.holo), true, self)
 		if not is_instance_valid(stage): return
-		stage.show_card(id, got, face, back)
+		stage.show_card(look, got, face, back, mask)
 		var info: Dictionary = Collection.CARDS[id]
 		var rar: Dictionary = Collection.RARITY[info.rarity]
 		if got: meta.text = "%s  ·  COLLECTED %s" % [rar.name, Time.get_date_string_from_unix_time(int(GameState.cards[id]))]
@@ -823,9 +833,48 @@ func _page_cards() -> void:
 	_appear(made, 0.02)
 	show.call(_sel_card if _sel_card != "" and Collection.CARDS.has(_sel_card) else order[0])
 	for i in order.size():
-		var tex: Texture2D = await CardFace.texture(order[i], Collection.owned(order[i]), self)
+		var tex: Texture2D = await CardFace.texture("card", order[i], Collection.owned(order[i]), self)
 		if not is_instance_valid(made[i]): return
 		(made[i] as TextureRect).texture = tex
+
+# ---------------------------------------------------------------- RIDER CARD (the athlete card)
+func _page_rider_card() -> void:
+	var metres := float(GameState.records.distance)
+	var lvl := GameState.level_for(metres)
+	var mi: bool = Settings.get_v("units") == 1
+	CardFace.rider = {"name": GameState.rider_name, "level": lvl, "title": String(LEVEL_NAMES[mini(lvl / 5, LEVEL_NAMES.size() - 1)]),
+		"xp": (metres - float(lvl - 1) * 20000.0) / 20000.0,
+		"xp_text": "%d / %d KM" % [roundi((metres - float(lvl - 1) * 20000.0) / 1000.0), 20],
+		"stats": [[str(_rides_total()), "RIDES"], [str(roundi(metres / (1609.344 if mi else 1000.0))), "MI" if mi else "KM"],
+			[str(roundi(float(GameState.records.top_speed) * (0.621371 if mi else 1.0))), "MPH" if mi else "KM/H"]]}
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", Tokens.S6)
+	row.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_content.add_child(row)
+	var stage := CollectStage.new()
+	stage.custom_minimum_size.x = 520
+	stage.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	row.add_child(stage)
+	var side := VBoxContainer.new()
+	side.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	side.alignment = BoxContainer.ALIGNMENT_CENTER
+	side.add_theme_constant_override("separation", Tokens.S3)
+	row.add_child(side)
+	side.add_child(UITheme.display("YOUR RIDER CARD", 44, C_TXT, 0.0, 900))
+	var rd := _body("Level, name, XP and your numbers on a holo card. Move the mouse over it to catch the light, drag it sideways to flip it over to today's date.", C_SOFT, Tokens.T_LG)
+	rd.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	side.add_child(rd)
+	side.add_child(_cap("THE FOIL IS THE LEVEL NUMBER AND THE XP BAR", ACC, Tokens.T_SM))
+	var front: Texture2D = await CardFace.texture("rider", "rider", true, self)
+	var back: Texture2D = await CardFace.texture("rider_back", "rider", true, self)
+	var mask: Texture2D = await CardFace.texture("rider_mask", "rider", true, self)
+	if not is_instance_valid(stage): return
+	stage.show_card({"color": Color("ffd21f"), "accent": Color("ffe680"), "strength": 1.0, "shape": ""}, true, front, back, mask, true)
+
+func _rides_total() -> int:
+	var n := 0
+	for d in GameState.days: n += int(GameState.days[d][1])
+	return n
 
 # ---------------------------------------------------------------- WALLET
 func _page_wallet() -> void:
