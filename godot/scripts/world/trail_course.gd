@@ -72,7 +72,8 @@ const GATE_EVERY := 150     # one every 300 m
 var chunk_arches := {}   # key -> PackedInt32Array of (centreline index * 2 + TrailArch kind)
 var chunk_boards := {}  # key -> PackedInt32Array of centreline indices with a roadside billboard
 var chunk_signs := {}   # key -> PackedInt32Array of centreline indices with a distance table (small leaning sign)
-const SIGN_EVERY := 2500    # one every 5 km (centreline points are ~2 m apart)
+const SIGN_FIRST := 500      # first sign at 1 km
+const SIGN_EVERY := 2500   # one every 5 km (centreline points are ~2 m apart)
 const BOARD_FIRST := 18
 const BOARD_EVERY := 41     # one every ~80 m, alternating sides
 
@@ -941,6 +942,8 @@ func _bucket() -> void:
 	var sign_every := SIGN_EVERY
 	if OS.get_environment("BMX_SIGN_EVERY") != "":
 		sign_every = maxi(20, int(OS.get_environment("BMX_SIGN_EVERY")))   # test: signs closer together
+	if sign_every == SIGN_EVERY and SIGN_FIRST < n - 2:
+		_add(chunk_signs, _chunk_of(X[SIGN_FIRST], Z[SIGN_FIRST]), SIGN_FIRST)   # an early one at 1 km, then every 5 km
 	for i in range(sign_every, n - 2, sign_every):
 		_add(chunk_signs, _chunk_of(X[i], Z[i]), i)
 	for i in range(BOARD_FIRST, n - 2, BOARD_EVERY):
