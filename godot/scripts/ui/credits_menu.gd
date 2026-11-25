@@ -7,6 +7,11 @@ extends MenuBase
 const GAME := "RUNOUT"
 const STUDIO := ""   # your name / studio as it should appear (before release)
 
+const COPYRIGHT := "© 2026 Luka Grcar. All rights reserved."
+
+## shown first on the Licences page
+const NOTICE := "RUNOUT is proprietary software. All rights reserved. This game is not free software and is not supposed to be copied, shared, resold or distributed in any form, in whole or in part, without written permission from the author. Third-party components listed here stay under their own licences."
+
 ## [section, [[what, who / where, licence], ...]]
 const CREDITS := [
 	["3D MODELS", [
@@ -62,6 +67,7 @@ func _credits() -> Control:
 	var p := _page("Credits")
 	_section(p, GAME)
 	_hint(p, ("Made by " + STUDIO) if STUDIO != "" else "Made with Godot Engine.")
+	_hint(p, COPYRIGHT)
 	for sec in CREDITS:
 		_section(p, sec[0])
 		for it in sec[1]:
@@ -75,6 +81,11 @@ func _credits() -> Control:
 
 func _licences() -> Control:
 	var p := _page("Licences")
+	_section(p, "NOT FOR DISTRIBUTION")
+	_hint(p, COPYRIGHT)
+	_hint(p, NOTICE)
+	_section(p, "END USER LICENCE AGREEMENT")
+	_hint(p, _read("res://EULA.txt"))
 	for lf in LICENSE_FILES:
 		_section(p, String(lf[0]).to_upper())
 		_hint(p, _read(lf[1]))

@@ -1,0 +1,40 @@
+RUNOUT - END USER LICENCE AGREEMENT
+
+Copyright (c) 2026 Luka Grcar. All rights reserved.
+
+By installing or playing RUNOUT ("the Game") you agree to this agreement.
+
+1. LICENCE
+You are granted a personal, non-exclusive, non-transferable, revocable licence
+to install and play the Game for your own non-commercial entertainment. The
+Game is licensed, not sold.
+
+2. WHAT YOU MAY NOT DO
+You may not, without written permission from the author:
+  - copy, share, resell, rent, lend, upload or otherwise distribute the Game
+    or any part of it (code, models, textures, sounds, music, tools);
+  - modify the Game, or build other products from its content;
+  - decompile, disassemble or reverse engineer the Game, except where the law
+    allows it despite this restriction;
+  - remove or change any copyright or licence notice.
+
+3. OWNERSHIP
+The Game and its content belong to the author or the third parties credited in
+the in-game Credits and Licences screens. Those third-party components stay
+under their own licences. All rights not granted here are reserved.
+
+4. VIDEOS AND SCREENSHOTS
+You may record and share videos and screenshots of your gameplay, including on
+streaming and social sites, as long as it is not a way to distribute the Game
+itself.
+
+5. NO WARRANTY
+The Game is provided "as is", without warranty of any kind. To the extent the
+law allows, the author is not liable for any loss or damage from using it.
+
+6. TERMINATION
+This licence ends automatically if you break these terms. Then you must stop
+using the Game and delete all copies.
+
+7. STEAM
+If you got the Game through Steam, the Steam Subscriber Agreement also applies.

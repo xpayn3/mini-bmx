@@ -372,7 +372,7 @@ func _show_menu() -> void:
 	menu.add_child(menu_wallet)
 	_update_profile_hud()
 	# version: small, bottom right of the screen, just left of the fullscreen button and centred on it
-	menu_version = UITheme.text("v%s  ·  Godot %s" % [ProjectSettings.get_setting("application/config/version", "1.0.0"), Engine.get_version_info().string], Color(1, 1, 1, 0.8), Tokens.T_XS)
+	menu_version = UITheme.text("© 2026 Luka Grcar. All rights reserved.  ·  v%s  ·  Godot %s" % [ProjectSettings.get_setting("application/config/version", "1.0.0"), Engine.get_version_info().string], Color(1, 1, 1, 0.8), Tokens.T_XS)
 	menu_version.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
 	menu_version.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	menu_version.grow_vertical = Control.GROW_DIRECTION_BEGIN
