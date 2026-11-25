@@ -150,7 +150,7 @@ func grown(field, to_s: float) -> TrailCourse:
 	c._corr = _corr
 	c._mark_seed = _mark_seed
 	c._x = _x; c._z = _z; c._h = _h; c._v = _v; c._hv = _hv; c._lt = _lt; c._forest_end = _forest_end
-	c.X = X.duplicate(); c.Z = Z.duplicate(); c.KD = KD.duplicate()
+	c.X = X.duplicate(); c.Z = Z.duplicate(); c.KD = KD.duplicate(); c.flow_starts = flow_starts.duplicate()
 	c._cells = _cells.duplicate()
 	c._build()
 	c._finish()
@@ -289,6 +289,8 @@ func _snap() -> Array:
 func _undo(s: Array) -> void:
 	_x = s[0]; _z = s[1]; _h = s[2]; _v = s[4]; _hv = s[5]; _lt = s[6]
 	X.resize(s[3]); Z.resize(s[3]); KD.resize(s[3])
+	while flow_starts.size() > 0 and flow_starts[flow_starts.size() - 1] >= s[3]:
+		flow_starts.resize(flow_starts.size() - 1)
 
 
 # sections: [code, arg]  code 0 road(maxLen) 1 switchbacks(endX) 2 esses(endX) 3 chute(endX) 4 jumpLine 5 esses(x+50)
@@ -302,6 +304,7 @@ func _run(sec: Array) -> void:
 		5: _esses(_sp() + 50)
 		6: _tech(sec[1])
 		7: _forest(sec[1])
+		8: _flow_trail(sec[1])
 
 
 func _attempt(fns: Array) -> bool:
@@ -478,6 +481,43 @@ func _chute(end_x: float) -> void:
 	_straight(maxf(26, end_x - _sp() + 6), ROCKS, 0.25)
 
 
+## a flow jump trail (A-Line style, 2026-11-25 Phase C): banked turns linked by straight jump runs, berm -> jump ->
+## berm -> jump. The runs are JUMP kind, so TerrainField._build_route fills each with its rhythm beats (rollers to build, a
+## speed-sized table / kicker to release, a rest), the turns are bermed ESSES at 16-24 m radius, alternating sides
+var flow_starts := PackedInt32Array()   # centreline index where each flow jump trail starts (tests: BMX_TRAIL_FEAT=flowtrail)
+
+
+func _flow_trail(end_x: float) -> void:
+	flow_starts.append(X.size())
+	var dir := 1 if _r.next() < 0.5 else -1
+	if absf(_off()) > 30:
+		dir = -int(signf(_off()))
+	_turn_to(_rel(dir * 0.3), 30, ROAD)
+	_straight(8, ROAD)
+	var k := 0
+	while k < 9:
+		_straight(36 + _r.next() * 24, JUMP)
+		_straight(6, ROAD)   # (settle after the landing before the next berm)
+		if _sp() > end_x and k >= 3:
+			break
+		if absf(_off()) > _corr - 40:
+			dir = -int(signf(_off()))
+		_turn_to(_rel(dir * (28 + _r.next() * 28) * D2R), 16 + _r.next() * 8, ESSES)
+		_straight(4, ESSES)
+		dir = -dir
+		k += 1
+	_turn_to(_rel(0.0), 25, ROAD)
+	_straight(8, ROAD)
+
+
+## a jump line, or (half the time past the first mountain, by a hash of s) a flow jump trail
+func _jump_pick(sh: float) -> void:
+	if not OLD_FLOW and fposmod(sh * 0.917, 1.0) < 0.55:
+		_attempt([[8, sh + 200.0 + fposmod(sh * 0.371, 1.0) * 180.0], [4, 0.0]])
+	else:
+		_attempt([[4, 0.0]])
+
+
 func _jump_line() -> void:
 	_turn_to(_rel((_r.next() - .5) * 14 * D2R), 40, ROAD)
 	_straight(10, ROAD)
@@ -536,12 +576,12 @@ func _build() -> void:
 				elif pick2 < jcut:
 					_section([[3, end_x], [2, end_x], [1, end_x]], swap)
 				else:
-					_attempt([[4, 0.0]])
+					_jump_pick(sh)
 					did_jump = true
 			else:
 				var q := _jump_remap(pick2, jst, 0.3)
 				if q < 0.3 and not climbing:
-					_attempt([[4, 0.0]])
+					_jump_pick(sh)
 					did_jump = true
 				elif q < 0.55:
 					_section([[2, end_x], [1, end_x], [3, end_x]], swap)
@@ -1097,11 +1137,21 @@ static func _add(d: Dictionary, k: int, v: int) -> void:
 ## centreline (TerrainChunkBuilder._bend_trees places the trunk on the inside, square to the trail)
 var bend_trees := PackedInt32Array()
 var chunk_btrees := {}
+## roots across a forest singletrack (natural tech, Phase C): centreline indices, every 5-12 m along FOREST (chunk_roots)
+var roots := PackedInt32Array()
+var chunk_roots := {}
 
 
 func _plan_bend_trees(field) -> void:
 	bend_trees = PackedInt32Array()
 	var seed_i: int = _mark_seed % 9973
+	roots = PackedInt32Array()
+	var next_root := 0
+	for i in range(3, n - 3):
+		if KD[i] != FOREST or i < next_root:
+			continue
+		roots.append(i)
+		next_root = i + 3 + int(_hash(i, seed_i + 41) * 3.5)
 	for i in range(3, n - 3):
 		var k := absf(KAP[i])
 		if k < 1.0 / 22.0 or k < absf(KAP[i - 1]) or k < absf(KAP[i + 1]) or k <= absf(KAP[i - 2]):
@@ -1121,6 +1171,9 @@ func _plan_bend_trees(field) -> void:
 func _bucket() -> void:
 	chunk_rocks = {}; chunk_stakes = {}; chunk_fences = {}; chunk_gates = {}; chunk_boards = {}; chunk_arches = {}; chunk_signs = {}
 	chunk_btrees = {}
+	chunk_roots = {}
+	for i in roots:
+		_add(chunk_roots, _chunk_of(X[i], Z[i]), i)
 	for i in bend_trees:
 		_add(chunk_btrees, _chunk_of(X[i], Z[i]), i)
 	var sign_every := SIGN_EVERY

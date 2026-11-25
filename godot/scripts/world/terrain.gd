@@ -817,7 +817,7 @@ const LIST_SPEC := {
 	"blob": ["blob", "leafSoft", true, false], "pine": ["pine", "leaf", true, false],
 	"rock": ["rock", "rock", true, false], "pebble": ["pebble", "rock", false, true], "grass": ["grass", "flower", false, true],
 	"daisy": ["daisy", "flower", false, true], "tulip": ["tulip", "flower", false, true], "spike": ["spike", "flower", false, true],
-	"bush": ["bush", "leafSoft", true, false], "log": ["log", "trunk_plain", true, false], "weed": ["weed", "tuft", false, false],
+	"bush": ["bush", "leafSoft", true, false], "log": ["log", "trunk_plain", true, false], "root": ["root", "root", true, false], "weed": ["weed", "tuft", false, false],
 	"stick": ["stick", "trunk_plain", false, true], "fern": ["fern", "flower", false, true], "mushroom": ["mushroom", "flower", false, true],
 	"cactus0": ["cactus0", "cactus", true, false], "cactus1": ["cactus1", "cactus", true, false], "cactus2": ["cactus2", "cactus", true, false],
 	"cactus3": ["cactus3", "cactus", true, false], "cactus4": ["cactus4", "cactus", true, false],
@@ -1013,6 +1013,13 @@ func _finalize(k: Vector2i) -> void:
 	if o.has("arches"):
 		for a in o["arches"]:
 			node.add_child(TrailArch.build(a))
+	if o.has("roots"):   # tree roots across a forest singletrack, grown along the ground (TerrainChunkBuilder._root_system)
+		var rm := ArrayMesh.new()
+		rm.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, o["roots"])
+		var rmi := MeshInstance3D.new()
+		rmi.mesh = rm
+		rmi.material_override = TerrainGeo.MAT["root_world"]
+		node.add_child(rmi)
 	var sheds: Array = o["sheds"]
 	for i in sheds.size():
 		var buf: PackedFloat32Array = sheds[i]

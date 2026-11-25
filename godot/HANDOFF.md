@@ -468,6 +468,28 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   0.5): bare trunk to `TALL_CROWN` 6.5 m+ (sc x 3.2, + 0-3 m), crown up there, 15 % bigger; bend trees 8.5 m+.
   Test `BMX_TRAIL_FEAT=forest` (30 m before the first FOREST point; seed 12 has one at x 3544). Demo AI rides through it at
   ~45 km/h, no crash. Not ridden by the user yet. Narrow trails look narrow: `trail()`'s dirt fade is min(1.2, 0.35 + q_w) m (GD + C#; 1.2 for every trail >= 0.85 m half-width, as before), and the chunk bake writes how narrow the trail is (`T5` = clamp(1.6 - q_w): trail3_tex B, now RGBA8; level terrains' RG8 reads 0), which scales the ground shader's and the road-detail bake's ragged-edge wander (x 0.2) and fade (x 0.35..1). Big bend trees get 4 stones round their roots on the side away from the trail.
+- **Flow jump trails, grown tree roots, tidy roadside boards (2026-11-25, Phase C part 2)**.
+  (1) Flow jump trail (`TrailCourse._flow_trail`, section code 8, via `_jump_pick`: half the jump-line picks past the first
+  mountain, by a hash of s): bermed ESSES turns (16-24 m) linked by 36-60 m JUMP runs, which `_build_route` fills with its
+  rhythm beats (rollers / a speed-sized table or kicker / rest). `flow_starts` = where each starts; test
+  `BMX_TRAIL_FEAT=flowtrail` (seed 12, 4242 have one). Demo AI lands the built jumps on their landings.
+  (2) Roots across forest singletracks, grown (user: "spread splines along the terrain with root math, a simple sweep that
+  follows the terrain, a smart rooting system", "no poking"). `TrailCourse.roots` = spots every 6-13 m of FOREST
+  (`chunk_roots`); `TerrainChunkBuilder._root_system`: a pine 2.6-3.8 m off the trail (outside of tight bends, +1 m
+  there), 4-6 main roots out of its foot (2-3 across the trail, long enough to reach the far side), each a random walk with
+  a smoothly wandering curvature (`_grow_root`, 12 cm steps), tapering, branching (prob 4.5 % a step, two levels);
+  `_sweep` = a 7-sided tube along each path with every ring ON the ground under it (turned to the ground's slope, top
+  0.4-0.75 x its radius proud, flaring at the trunk, + 3.5 cm for the drawn ground's micro detail). All roots of a chunk
+  are one mesh (`out["roots"]` -> `Terrain._finalize`, material `root_world` = bark_pine along the root via UV:
+  `deco.gdshader` `bark_uv`). Where a root crosses the trail: low domes (<= 7 cm, r 0.2) the tyres feel. Earlier instanced
+  root meshes (`TerrainGeo._root_mesh`, list `root`) are still built but unused. Trees / stumps / logs beside a FOREST
+  trail keep `_forest_clear()` = W + 1.3 m (W + 1.6 in bends tighter than 25 m; the check was inverted at first and the
+  narrower dirt fade let trunks in at ~1 m: the demo AI went over the bars). 5 seeds' singletracks: no crash.
+  (3) Billboards / distance signs (user: "overlap with signs and fences, boards on slopes clipped"): `_sign_spot_ok` /
+  `_sign_spot_why` checks 5 points along the board's width: dry, off jumps, off the trail and >= W + 2.4 m out (the tape
+  line), >= 0.9 m from any fence / tape collider, not in `blocked`, ground within 0.45 m along it and 0.5 m front to back.
+  Planks sit over the highest ground under them; each board / sign reserves its spot in `blocked`. Seed 4242's first 6
+  boards: 4 placed (2 had no clear spot). `BMX_GATE_PROBE=1` prints `SIGNSPOT no: <why>`.
 - **Bark scans on standing trunks (2026-11-25, user: "good light trunk texture, realistic", "use all")**: three CC0 scans
   in `assets/textures/bark/` (1K colour / OpenGL normal / roughness, VRAM-compressed with mipmaps; `SOURCE.txt`):
   `bark_light` (ambientCG Bark004, light grey-tan), `bark_pale` (ambientCG Bark007, birch-like), `bark_pine` (Poly Haven

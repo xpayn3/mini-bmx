@@ -32,7 +32,9 @@ uniform sampler2D bark_nrm : hint_normal, filter_linear_mipmap_anisotropic, repe
 uniform sampler2D bark_rgh : hint_default_white, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform float bark_tile = 0.8;     // m of bark per tile
 uniform float bark_relief = 0.9;
+uniform bool bark_uv = false;   // roots (lying down): the mesh's own UV (round it, along it in its lengths) instead of the wrap
 varying flat float v_bark_n;   // tiles round the trunk
+varying flat float v_len;      // (bark_uv) the instance's length along its x
 varying vec3 v_col;
 varying flat vec3 v_origin;   // the instance's base (distance fade)
 varying vec3 v_world;
@@ -50,6 +52,7 @@ void vertex() {
 	v_origin = MODEL_MATRIX[3].xyz;
 	// the trunk mesh's mean radius is 0.13 m at scale 1: whole tiles round it, so u meets itself
 	v_bark_n = max(1.0, round(TAU * 0.13 * length(MODEL_MATRIX[0].xyz) / bark_tile));
+	v_len = length(MODEL_MATRIX[0].xyz);   // (roots: UV.y is metres of the 2 m mesh; this is its stretch)
 	if (sway > 0.0) {
 		vec3 base = MODEL_MATRIX[3].xyz;
 		float h = max(VERTEX.y - base.y, 0.0);
@@ -95,7 +98,13 @@ void fragment() {
 	ROUGHNESS = roughness;
 	METALLIC = metallic;
 	SPECULAR = specular;
-	if (bark) {
+	if (bark && bark_uv) {
+		vec2 uv = vec2(UV.x, UV.y * v_len / bark_tile);
+		ALBEDO = v_col * texture(bark_col, uv).rgb;
+		ROUGHNESS = texture(bark_rgh, uv).r;
+		NORMAL_MAP = texture(bark_nrm, uv).rgb;
+		NORMAL_MAP_DEPTH = bark_relief;
+	} else if (bark) {
 		vec2 rel = v_world.xz - v_origin.xz;
 		float ang = atan(rel.y, rel.x);
 		vec2 uv = vec2(ang / TAU * v_bark_n, (v_world.y - v_origin.y) / bark_tile);

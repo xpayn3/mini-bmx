@@ -2178,6 +2178,13 @@ func _feature_spawn(what: String) -> Vector3:
 				var gj := maxi(2, gi - (int(Env.s("BMX_FEAT_BACK")) if Env.s("BMX_FEAT_BACK") != "" else 30))
 				return Vector3(C.X[gj], -atan2(C.TZ[gj], C.TX[gj]), C.Z[gj])
 		return Vector3.ZERO
+	if what == "flowtrail":   # 30 m before the first flow jump trail
+		if C.flow_starts.size() > 0:
+			var j4 := maxi(2, C.flow_starts[0] - 15)
+			print("FEATSPAWN flowtrail idx=%d at %.0f,%.0f" % [C.flow_starts[0], C.X[j4], C.Z[j4]])
+			return Vector3(C.X[j4], -atan2(C.TZ[j4], C.TX[j4]), C.Z[j4])
+		print("FEATSPAWN flowtrail none")
+		return Vector3.ZERO
 	if what == "forest":   # 30 m before the first forest singletrack (TrailCourse.FOREST)
 		for i in C.n:
 			if C.KD[i] == TrailCourse.FOREST:
