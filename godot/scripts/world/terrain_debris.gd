@@ -258,7 +258,8 @@ func smash_fence(panel: Dictionary, vel: Vector3, hit: Vector2, chunk = null) ->
 		var v := Vector3(vel.x * fling + _rs() * 1.2, maxf(0, vel.y) * 0.4 + 0.8 + randf() * (1 + sp * 0.18) * near, vel.z * fling + _rs() * 1.2)
 		var spin := 2 + sp * 0.9 * near
 		var w := Vector3(_rs() * spin, _rs() * spin, _rs() * spin)
-		spawn(TerrainGeo.MESH[kind], scl, part["col"], Transform3D(rot, mp), base_size * scl, v, w, 0.6)
+		spawn(TerrainGeo.MESH[kind], scl, part["col"], Transform3D(rot, mp), base_size * scl, v, w, 0.6, 0.05, 1.0, null,
+			TerrainGeo.MAT["signboard"] if kind == "signboard" else null)
 	return _spawned - n0
 
 

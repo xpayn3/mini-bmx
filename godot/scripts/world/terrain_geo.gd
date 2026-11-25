@@ -63,7 +63,11 @@ static func ensure() -> void:
 	MESH["post"] = post.to_mesh()
 	MESH["rail"] = GeoBuf.box(1, 1, 1).to_mesh()
 	MESH["picket"] = picket.to_mesh()
-	FENCE_SIZE = {"post": Vector3(0.13, 1.1, 0.13), "rail": Vector3(1, 1, 1), "picket": Vector3(0.085, 1.0, 0.03)}
+	# distance sign: a plain square stick (unit box, scaled) and the printed plate (unit box, the design on +Z)
+	MESH["pole"] = MESH["rail"]
+	MESH["signboard"] = _sign_board()
+	FENCE_SIZE = {"post": Vector3(0.13, 1.1, 0.13), "rail": Vector3(1, 1, 1), "picket": Vector3(0.085, 1.0, 0.03),
+		"pole": Vector3(1, 1, 1), "signboard": Vector3(1, 1, 1)}
 	# tape stake: thin white fibreglass stake with an orange cap, 0.2 m in the ground
 	MESH["stake"] = GeoBuf.merge([GeoBuf.cylinder(0.018, 0.022, 1.15, 5).translate(0, 0.575 - 0.2, 0).paint(lin(0xe9e6dc)),
 		GeoBuf.cylinder(0.024, 0.024, 0.12, 5).translate(0, 0.9, 0).paint(lin(0xff6a1a))]).to_mesh()
@@ -82,6 +86,31 @@ static func ensure() -> void:
 	lm.roughness = 0.6
 	MAT["stake_loose"] = lm
 	_build_sheds()
+
+
+## a 1 x 1 x 1 box whose +Z face carries the whole sign texture (UV 0..1, upright); the back and the edges read
+## a plain white texel of the design's bottom strip
+static func _sign_board() -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var plain := Vector2(0.5, 0.995)
+	# [normal, u axis, v axis (down)]: each face = centre n/2, corners +-u/2 +-v/2
+	var faces := [[Vector3(0, 0, 1), Vector3(1, 0, 0), Vector3(0, -1, 0)], [Vector3(0, 0, -1), Vector3(-1, 0, 0), Vector3(0, -1, 0)],
+		[Vector3(1, 0, 0), Vector3(0, 0, -1), Vector3(0, -1, 0)], [Vector3(-1, 0, 0), Vector3(0, 0, 1), Vector3(0, -1, 0)],
+		[Vector3(0, 1, 0), Vector3(1, 0, 0), Vector3(0, 0, 1)], [Vector3(0, -1, 0), Vector3(1, 0, 0), Vector3(0, 0, -1)]]
+	for fi in faces.size():
+		var n: Vector3 = faces[fi][0]
+		var u: Vector3 = faces[fi][1]
+		var v: Vector3 = faces[fi][2]
+		var c := [Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1)]
+		var p := []
+		for q: Vector2 in c:
+			p.append(n * 0.5 + u * (q.x - 0.5) + v * (q.y - 0.5))
+		for k in [0, 1, 2, 0, 2, 3]:   # clockwise seen from outside = Godot's front face
+			st.set_normal(n)
+			st.set_uv(c[k] if fi == 0 else plain)
+			st.add_vertex(p[k])
+	return st.commit()
 
 
 static func _mat(albedo: Color, rough: float, metal: float = 0.0) -> ShaderMaterial:
@@ -104,6 +133,10 @@ static func _build_materials() -> void:
 	MAT["shed"] = _mat(w, 0.85)
 	MAT["fence"] = _mat(w, 0.9)
 	MAT["stake"] = _mat(w, 0.6)
+	var sb := ShaderMaterial.new()
+	sb.shader = preload("res://shaders/sign_board.gdshader")
+	sb.set_shader_parameter("board_tex", load("res://assets/signs/distance_board.png"))
+	MAT["signboard"] = sb
 	MAT["cactus"] = _mat(w, 0.7)
 	MAT["cactus"].set_shader_parameter("tint_own", true)
 	# what the wind moves (m of sway per m of height in a full gust) and how much sun shows through

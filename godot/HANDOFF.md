@@ -714,6 +714,12 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   ring's water), a third ring to push the 20 m backdrop further out, geomorphing instead of dithering, not measured on a slow GPU.
 - **Sponsor props** (`TrailCourse.chunk_gates` / `chunk_boards`, fixed spacing by centreline index so growing never moves them): a huge steel gantry with a sponsor banner over the trail every 300 m (`TrailGate.build`, made-up brands in `TrailGate.SPONSORS`, no collision, skipped on jumps) and breakable wooden roadside billboards every ~80 m (fence-style panel in `TerrainChunkBuilder._boards`, so the bike smashes them; the Label3D text is freed on smash). Probe: `BMX_GATE_PROBE=1`.
 
+- **Distance signs** (`TerrainChunkBuilder._dist_signs`, at 1 km then every 5 km, smashable): a plain square stick (`pole`) with a thin
+  printed plate on its front (`signboard`, `TerrainGeo._sign_board`: the design on +Z, `shaders/sign_board.gdshader`). The plate texture
+  `assets/signs/distance_board.png` = the Figma "table sign" (file qDRfS2eOv3e3e9wO1u8W5e, node 39:74): blue field + the DISTANCE strip
+  exported from node 39:75 at 2x; the km number is a Label3D on the blue field (Barlow Black; the design's number font is Iosevka
+  Charon Bold, not in the game). Re-export the strip from Figma when the design changes. Find one: `BMX_GATE_PROBE=1` prints `DISTSIGN`.
+
 - **Health packs** (`world/health_pack.gd`): a GTA-style floating, spinning red backpack with a white cross and a glow ring, one outside the door of each roadside shed (`TerrainChunkBuilder._sheds` -> `out["packs"]`, made in `Terrain._finalize`). Ride within 1.6 m (`Terrain.take_pack`, called from `Game._process`) and `hud.on_health_pack` gives back `HealthPack.HEAL` (45 %); full-health riders leave it. Taken ones stay gone until a new seed. Tests: `BMX_PACK_PROBE=1` (`PACK at` lines), `BMX_PACK_SPAWN=x,z` (start 9 m before a pack), `BMX_LIFE=0.3 BMX_LIFE_PROBE=1`.
 
 ### Rider
