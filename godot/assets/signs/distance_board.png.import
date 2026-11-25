@@ -3,19 +3,20 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://b3lrglt2fo4ew"
-path="res://.godot/imported/distance_board.png-2b54811f0a9657694f9480fecab8970b.ctex"
+path.s3tc="res://.godot/imported/distance_board.png-2b54811f0a9657694f9480fecab8970b.s3tc.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
 }
 
 [deps]
 
 source_file="res://assets/signs/distance_board.png"
-dest_files=["res://.godot/imported/distance_board.png-2b54811f0a9657694f9480fecab8970b.ctex"]
+dest_files=["res://.godot/imported/distance_board.png-2b54811f0a9657694f9480fecab8970b.s3tc.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0

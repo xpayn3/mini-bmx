@@ -790,7 +790,6 @@ func _boards() -> void:
 			pz = -pz   # face normal points back up the trail, at the riders
 		var spn := TrailGate.sponsor(i + 5)
 		var panel := {"broken": false, "parts": [], "style": "billboard"}
-		var wood := TerrainField.lin(spn[1])
 		var W := 3.6
 		var add := func(kind: String, pos: Vector3, b: Basis, scl: Vector3, c: Color) -> void:
 			var bs := _scaled(b, scl.x, scl.y, scl.z)
@@ -804,20 +803,18 @@ func _boards() -> void:
 			var ppz: float = bz + dz * s * (W / 2 - 0.2) - pz * 0.12
 			var gh := height(ppx, ppz)
 			add.call("post", Vector3(ppx, gh + 2.5 / 2 - 0.18, ppz), euler_xyz(0, yaw, 0), Vector3(1, 2.5, 1), postc)
+		# the face: one painted plank board (3 planks, the sponsor printed on, both sides: SignTex.billboard), its
+		# own mesh like the distance sign's plate (Terrain._panel_labels), smashed off in one piece
 		var y0: float = h + 0.55
-		for r in 3:
-			var cc := wood * (0.94 + 0.06 * r)
-			cc.a = 1.0
-			add.call("rail", Vector3(bx, y0 + 0.25 + r * 0.5, bz), rb, Vector3(W, 0.47, 0.06), cc)
+		var plate_x := Transform3D(_scaled(rb, W, 1.5, 0.06), Vector3(bx, y0 + 0.75, bz))
+		panel["parts"].append({"kind": "signboard", "i": -1, "col": Color.WHITE, "xform": plate_x, "scale": Vector3(W, 1.5, 0.06)})
+		panel["plate"] = {"sp": spn, "size": Vector2(W, 1.5), "planks": 3, "xform": plate_x}
 		var m := ceili(W / 0.45)
 		for k in m + 1:
 			var t := float(k) / m - 0.5
 			colliders.append({"x": bx + dx * W * t, "z": bz + dz * W * t, "r": 0.3, "fence": panel, "fence_style": "billboard"})
 		panel["cx"] = bx
 		panel["cz"] = bz
-		panel["bb"] = {"text": spn[0], "col": Color.html("#%06x" % spn[2]), "w": W, "h": 1.5,
-			"basis": Basis(Vector3(pz, 0, -px), Vector3.UP, Vector3(px, 0, pz)),
-			"at": Vector3(bx, y0 + 0.75, bz), "nrm": Vector3(px, 0, pz)}
 		panels.append(panel)
 
 

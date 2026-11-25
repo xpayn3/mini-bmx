@@ -820,7 +820,7 @@ const LIST_SPEC := {
 	"cactus3": ["cactus3", "cactus", true, false], "cactus4": ["cactus4", "cactus", true, false],
 	"plank": ["box", "wood", true, false], "beam": ["box", "wood", true, false],
 	# thin fence / tape parts: their shadows are a few pixels wide but each is a draw call in every cascade
-	"post": ["post", "fence", false, false], "rail": ["rail", "fence", false, false], "picket": ["picket", "fence", false, false],
+	"post": ["post", "fencePost", false, false], "rail": ["rail", "fenceRail", false, false], "picket": ["picket", "fencePost", false, false],
 	"stake": ["stake", "stake", false, false],
 	"pole": ["pole", "signpole", true, false], "signboard": ["signboard", "signboard", true, false],
 }
@@ -890,10 +890,10 @@ func _panel_labels(p: Dictionary, node: Node3D) -> void:
 		var fl := TrailGate.flag(p["flag"])
 		node.add_child(fl)
 		p["labels"].append(fl)
-	if p.has("plate"):   # distance sign: its plate, printed with its own distance (SignTex)
+	if p.has("plate"):   # distance sign / billboard: its printed plate (SignTex)
 		var pm := MeshInstance3D.new()
 		pm.mesh = TerrainGeo.MESH["signboard"]
-		pm.material_override = SignTex.material(p["plate"]["km"])
+		pm.material_override = SignTex.for_plate(p["plate"])
 		pm.transform = p["plate"]["xform"]
 		node.add_child(pm)
 		p["labels"].append(pm)

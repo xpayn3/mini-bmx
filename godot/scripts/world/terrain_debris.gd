@@ -202,6 +202,15 @@ static func _rs() -> float:
 	return randf() - 0.5
 
 
+## the debris piece's material: printed plates / the sign stick keep their look (null = a plain colour material;
+## fence pieces fly in their own colour: their wood shader reads its tint from the MultiMesh)
+static func _part_mat(panel: Dictionary, kind: String) -> Material:
+	match kind:
+		"signboard": return SignTex.for_plate(panel["plate"])
+		"pole": return TerrainGeo.MAT["signpole"]
+	return null
+
+
 ## a smashed fence span: rails and pickets go, a post only when the hit was right at it
 static func fence_part_goes(part: Dictionary, hit: Vector2) -> bool:
 	if part["kind"] != "post":
@@ -259,7 +268,7 @@ func smash_fence(panel: Dictionary, vel: Vector3, hit: Vector2, chunk = null) ->
 		var spin := 2 + sp * 0.9 * near
 		var w := Vector3(_rs() * spin, _rs() * spin, _rs() * spin)
 		spawn(TerrainGeo.MESH[kind], scl, part["col"], Transform3D(rot, mp), base_size * scl, v, w, 0.6, 0.05, 1.0, null,
-			SignTex.material(panel["plate"]["km"]) if kind == "signboard" else (TerrainGeo.MAT["signpole"] if kind == "pole" else null))
+			_part_mat(panel, kind))
 	return _spawned - n0
 
 
