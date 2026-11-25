@@ -1,5 +1,5 @@
 extends SceneTree
-## FX: 500 puffs + 500 chunks + tracks on a bumpy terrain, 300 frames.
+## FX: 500 puffs + 500 chunks on a bumpy terrain, 300 frames (tyre tracks are in the ground now: world/ruts.gd).
 class Terrain:
 	func height(x: float, z: float) -> float:
 		return 0.3 * sin(x * 0.5) + 0.2 * cos(z * 0.7)
@@ -8,7 +8,7 @@ func _initialize() -> void:
 	var t0 := Time.get_ticks_usec()
 	var fx := FX.new(Terrain.new())
 	get_root().add_child(fx)
-	print("fx built in %.1f ms (track strides v=%d a=%d float_col=%s)" % [(Time.get_ticks_usec() - t0) / 1000.0, fx._v_stride, fx._a_stride, fx._col_float])
+	print("fx built in %.1f ms" % [(Time.get_ticks_usec() - t0) / 1000.0])
 	var dust := Color8(0xc8, 0xa8, 0x7a)
 	var rock := Color8(0x80, 0x78, 0x70)
 	for i in 500:
@@ -21,9 +21,6 @@ func _initialize() -> void:
 	var x := 0.0
 	for f in 300:
 		x += 0.2
-		var s := 0.0 if f == 150 else 0.6   # one break in the tracks
-		fx.track(0, Vector3(x + 1.2, 0, 0.1 * sin(x)), Vector3.RIGHT, s, Color8(0x5a, 0x48, 0x38), 0.06)
-		fx.track(1, Vector3(x, 0, 0.1 * sin(x - 1.2)), Vector3.RIGHT, s, Color8(0x5a, 0x48, 0x38), 0.065)
 		if f % 10 == 0:
 			fx.puff(Vector3(x, 0.2, 0), Vector3(0, 0.5, 0), dust)
 			fx.chunk(Vector3(x, 0.3, 0), Vector3(0.5, 2.0, 0.3), rock)
@@ -33,7 +30,7 @@ func _initialize() -> void:
 		tsum += us
 		worst = maxf(worst, us)
 		if f == 299 or f % 100 == 0:
-			print("frame %d live=%s segs=%d" % [f, fx.live_counts(), fx.seg_next])
+			print("frame %d live=%s" % [f, fx.live_counts()])
 	# chunks must not sink into the ground
 	var below := 0
 	for i in FX.CHUNK_MAX:
@@ -44,9 +41,8 @@ func _initialize() -> void:
 	var finite := true
 	for v in fx.d_pos:
 		if not is_finite(v): finite = false
-	fx.clear_tracks()
 	print("update avg %.3f ms, worst %.3f ms; chunks below ground=%d finite=%s" % [tsum / 300000.0, worst / 1000.0, below, finite])
-	var ok := below == 0 and finite and fx.seg_next > 100
+	var ok := below == 0 and finite
 	print("FX_TEST ", "PASS" if ok else "FAIL")
 	fx.queue_free()
 	quit(0 if ok else 1)

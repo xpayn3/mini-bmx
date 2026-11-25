@@ -112,7 +112,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
 | `scripts/garage/garage.gd` | the garage scene (room, open roller door with the real world outside, rollers, standing rider, all tabs) |
 | `scripts/ui/` | `hud.gd`, `settings_menu.gd`, `tune_card.gd` (the one tuning card: Ride / Rider / Look / Sound tabs, each with category tabs), `quick_tune.gd`, `rider_panels.gd` (`POSE_DEFS`, `KITS`, `LOOK_ROWS` + saving), `ui_theme.gd` |
 | `scripts/fx/` | `fx.gd` (dust puffs, dirt chunks, **tyre tracks**), `ride_dust.gd` (GPU dust trail, FogVolume clouds) |
-| `shaders/` | `sky_hdri.gdshader`, `grade.gdshader`, `grime_mud/wet`, **`tyre_track.gdshader`** |
+| `shaders/` | `sky_hdri.gdshader`, `grade.gdshader`, `grime_mud/wet`, `ruts.gdshaderinc` (ruts + tyre prints) |
 | `assets/` | `dh.glb`, `helmet.glb`, BMX model, decals (Fox, Cinelli, Glory, Maxxis…), `hdri/` (Poly Haven **Kloofendal 4K**), `textures/painted_concrete_02` (garage floor), `textures/broken_brick_wall`, `fonts/Doto.ttf` (Google Fonts dot-matrix, OFL — the HUD bike computer via `UITheme.lcd_font()`) |
 | `tools/*.gd` | one-off headless test / measure scripts (`terrain_cs_cmp.gd` is the important one) |
 | `docs/GRAPHICS.md` | quality presets, frame times, features, what was left out and why |
@@ -1960,9 +1960,8 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   tie-dye, flames, lightning). Look keys `pantsFabric` / `pantsPattern` / `pantsPrint` (kept when a kit is picked:
   `RiderPanels.NON_KIT`). Picked in the ride setup CHARACTER step's PANTS tab, the rider room Kit tab and the tuning
   card Look > Kit. Test: `BMX_LOOK=pantsFabric=corduroy,pantsPattern=tiger,pantsPrint=#111215`, `BMX_CHAR_TAB=pants`.
-- Dirt chunks, **tyre tracks**: one ring-buffer ArrayMesh
-  (14 000 segments ≈ 1 km/wheel, one draw call, each segment uploads only its own bytes) drawn by
-  `tyre_track.gdshader` — lit, knob-tread dimples bump-mapped, soft edges + soil lip, skid streaks, distance fade.
+- Dirt chunks. **Tyre tracks** are in the ground since 2026-11-25 (stamped into the rut field, drawn by the ground
+  shaders: see "Tyre prints in the ground" under Ruts); the old ring-buffer mesh + `tyre_track.gdshader` are gone.
 - Grime: mud builds up (slow: `Grime.MUD_RATE` 0.25) and washes off in water; wet gloss + drips. **Dust first** (2026-11-20): riding dirt / sand
   lays a see-through film of the ground's colour (`Grime.dust`, global `grime_dust`, ~30 s to full, thickest low down, drawn by the
   same `grime_mud` pass, now a transparent pass); mud only piles up once the bike is dusty (`smoothstep(0.4, 0.95, dust)`) or
@@ -2417,7 +2416,51 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   MB, ~2 km of ride); they stay when you go back to the start (Backspace), a new world clears them. A trail pass on
   dirt leaves ~2-10 mm (skids / landings more). Seed 4242 follow ride: 130.7 fps off / 129.5 on, the same crash either
   way. Setting `ruts` (from the next ride), `BMX_RUTS=0|1` overrides.
-- Not done: the drawn tyre tracks lying down in the rut, drying / filling in over time, ruts from AI riders / ghosts.
+- Not done: drying / filling in over time, ruts from AI riders / ghosts.
+- **Tyre prints in the ground (2026-11-25, user: "industry standard, tidier")**: the tyre tracks were a mesh ribbon
+  laid over the ground (fx.gd, 14 000 segments, `tyre_track.gdshader`, faded 55-110 m). They are now stamped into the
+  rut field like off-road games do (SnowRunner / Dirt Rally / MX vs ATV: tyres mark a world-space layer the terrain
+  shader reads). `RutFieldCs.StampTrack(wheel, x, z, halfW, strength, smear, blood)` (per drawn frame from
+  `Game.ride_fx` -> `Ruts.track`): per 5 cm cell E = signed distance to the prints' edge (m, < 0 inside, `NO_E` 9 =
+  none) kept as the UNION of all prints (min): a signed distance field, so the edge interpolates crisply from bilinear
+  cells even where front and rear prints overlap (cells 2 beside a print are written too); strength, skid smear 0..1,
+  blood (`Blood.tyre_blood`), direction as a doubled angle (cos 2a, sin 2a): every stored value is one that BLENDS
+  between cells; the across position for the tread is worked out from E in the shader (`au = 1 + E / 4.5 cm`). Half
+  floats, ~300 KB a tile, the newest print wins inside its band (E stays the union). (Two earlier versions the same
+  day, from user screenshots: one print's SIGNED offset per cell drew saw-toothed edges + a false zigzag line where
+  front / rear prints overlapped; then |offset| + a negative strength for skids punched holes where + and - met and
+  drew the tread in 5 cm blocks where a skid crossed a print.) **The knobs come from a mipmapped tread texture**
+  (`Ruts.tread_texture()`, 64 x 128 R8, global `rut_tread_tex`, `textureGrad` with the pixel's size): crisp as far as
+  a pixel resolves them, their average beyond, no shimmer (procedural knobs had to be faded out early and the tread was
+  lost: user, same day). The tread is SYMMETRIC along the print, and the noises read |v| / |across|: the direction comes
+  from a doubled angle whose half flips sign between neighbouring cells where a print runs along world z, which drew
+  the knobs (and the print's blotch noise) as a zigzag. **Nothing in a print is drawn per pixel unfiltered** (user,
+  repeatedly: "shimmer"): the knobs' colour AND relief come from the mipmapped tread texture (the relief = its slope
+  along the print from two filtered samples a pixel apart, `rut_prints(.., out kslope)` -> ground.gdshader's `rsl`; a
+  per-pixel screen-space bump flickered, without any bump the knobs looked flat: user), the pushed-out soil at the edge is
+  a broad soft band (a 1 cm lip line flickered), colours as the old mesh tracks (pressed soil x0.62, dimples darker,
+  lip lighter). A skid = a plain pressed-in band, no knobs (user: "when skidding we don't leave knob marks, just a
+  depression"); the knobs fade out as a skid comes in (sine stripes, then drag-line noise were tried: they swam). The
+  near window is read with a bilinear blend in the shader (`rut_bilerp`, four texelFetch, toroidal): through the GPU
+  sampler the print's distance field drew a staircase of 5 cm cells. `BMX_TRAIL_DEBUG=7` print cover / knobs / lip,
+  `8` the edge distance as contours. Skid close-up test: `BMX_SEED=4242 BMX_STRAIGHT=1 BMX_SKID=10 BMX_PHOTO=13
+  BMX_PHOTO_AT=21.5,105.2,1.6,22.5,103.5,0 BMX_PHOTO_SNAP=1 --autotest=16` (where the bike stops varies run to run,
+  photo mode's focus may blur it). Not confirmed shimmer-free by the user yet. **The near window is a toroidal GPU texture now** (11 x 11 tiles = 88 m,
+  `shaders/rut_upload.glsl` copies only the tiles that come in or changed, `TilePack` = 4 half pairs a cell, budget 24
+  a 10 Hz update; globals `rut_tex` rgba16f depth / edge distance / strength / blood + `rut_dir_tex` rgba8 |u| / 2 +
+  direction, `rut_win` = its place);
+  near fade 26-34 m from the rider (was 12-20), the far layer (`TileRGFar`, RGH: deepest cell + prints' cover) to 75-90
+  m. `ruts.gdshaderinc` `rut_prints(xz, px)` = the old tread (two alternating knob rows along `dot(xz, dir)`, skid
+  streaks, noise), knobs fade to their average below a pixel, a print narrower than the pixel is drawn wider and fainter
+  (no shimmer); `rut_print_colour` = the ground's own colour pressed darker (no fixed track colours), blood red; the
+  dimples go into ground.gdshader's relief height (`hh`). Both ground shaders draw them. **Ruts and prints are one
+  system**: `Game._make_ruts` always makes the field (C# needed); Settings › Gameplay › Ruts now switches only the
+  digging (`Ruts.dig`); prints are always on (`BMX_NO_TRACKS=1` hides them). They stay on Backspace like the ruts (were
+  cleared), a new world clears them. Removed: fx.gd's track ring buffer, `tyre_track.gdshader`, the replay's
+  hide-newer-tracks trick (`_tracks*`: prints laid after the replayed moment now show in the replay). Cost (seed 4242
+  follow ride): stamping 22 us a physics tick, the window's upkeep ~0.18 ms a frame on average (one ~4.5 ms frame
+  filling the empty window at the start), RAM up to ~90 MB at 256 tiles. Not done: per-dirty-rect uploads (a printed
+  tile re-copies all of its 160 x 160 cells), prints of AI riders / ghosts, a print lying down in a deep rut's walls.
 
 ### Level builder in the Godot editor (2026-11-24, step 1 of 4: `addons/level_builder`, `scripts/levels/editor/`)
 - Developer-side level editor for hand-built downhill levels (plan: 1 slope + trail + ride from the editor, 2 pieces:

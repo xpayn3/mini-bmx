@@ -488,6 +488,12 @@ void fragment() {
 	// ruts (world/ruts.gd): the dug groove darker, its lip lighter
 	float rd = rut_depth(P.xz);
 	col = rut_colour(col, rd);
+	// tyre prints, in the ground (world/ruts.gd: they were a mesh ribbon laid over it); none under standing water
+	vec2 rks;   // the prints' knob relief (slope, world xz)
+	vec4 rpr = rut_prints(P.xz, gpx * 0.7, rks);
+	rks *= 1.0 - pud;
+	rpr.x *= 1.0 - pud;
+	col = rut_print_colour(col, rpr);
 	// light rays on the lake floor: the sun focused by the waves into drifting bright nets (fake caustics, a
 	// brightening of what is already lit), strongest in the shallows and gone by ~5 m down, dimmed under cloud
 	float cw = WATER_Y - P.y;
@@ -515,11 +521,12 @@ void fragment() {
 	// screen derivatives here, in uniform control flow: inside the branch below they are undefined wherever the
 	// branch differs between neighbouring pixels (trail / puddle edges), which flickered in 2x2 blocks
 	float hh = thgt * wd * trail_relief;
+	// (the prints' knobs are colour only, from the mipmapped tread texture: lit as a bump per pixel they shimmered)
 	vec3 dpx = dFdx(P), dpy = dFdy(P);
 	float dhx = dFdx(hh), dhy = dFdy(hh);
 	// the baked relief's slope (worn lines, prints, grit, edge stones): on the dirt, and the stones on the grass too
-	vec2 rsl = rb.xy * max(wd, rc.a) * trail_relief * vt;
-	if (wd * tbump > 0.0 || pud > 0.0 || thgt != 0.0 || rd != 0.0 || ofl > 0.01 || dot(rsl, rsl) > 0.0) {
+	vec2 rsl = rb.xy * max(wd, rc.a) * trail_relief * vt + rks;
+	if (wd * tbump > 0.0 || pud > 0.0 || hh != 0.0 || rd != 0.0 || ofl > 0.01 || dot(rsl, rsl) > 0.0) {
 		vec3 nw = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
 		if (rd != 0.0) nw = rut_normal(P.xz, nw);   // (the groove's walls)
 		nw = normalize(nw + vec3(lslope.x, 0.0, lslope.y) * 0.5);
@@ -559,6 +566,8 @@ void fragment() {
 		else ALBEDO = vec3(a.g);                                                   // 6: tyre prints (+ run-off skids)
 		ROUGHNESS = 1.0;
 	}
+	if (trail_debug == 8 && rut_win.w > 0.5) { ALBEDO = vec3(fract(rut_bilerp(rut_tex, P.xz).g * 40.0)); ROUGHNESS = 1.0; }   // print edge distance as contours (2.5 cm)
+	if (trail_debug == 7) { ALBEDO = vec3(rpr.x, rpr.y * rpr.x, rpr.z); ROUGHNESS = 1.0; }   // tyre prints: cover, knobs, lip
 	if (trail_debug == 1) {
 		ALBEDO = vec3(m_driven, m_loose, max(m_puddle, m_wet * 0.4)) * wd + vec3(m_tracks) * 0.5 + vec3(m_skid, m_skid, 0.0) + vec3(m_stray, 0.0, m_stray) * wd + vec3(0.0, m_play, m_play) * wd;
 		ROUGHNESS = 1.0;

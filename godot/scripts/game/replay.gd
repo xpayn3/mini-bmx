@@ -40,7 +40,7 @@ var frames: Array = []        # [t, seg, data, m (moving nodes stored), focus, f
 var aev: Array = []           # one-shot sounds as they played: [t, kind, args] (RideAudio._rec)
 var dev: Array = []           # dust bursts as they happened: [t, target ("sim" / "dust"), method, args]
 var _dfeed: Array = [[], []]  # the latest rear / front tyre dust feed (RideDust.feed / feed_front args), per sample
-const DROW := 9               # frames[DROW] = [rear feed, front feed]; frames[DROW + 1] = fx.t (tyre tracks' clock)
+const DROW := 9               # frames[DROW] = [rear feed, front feed]; frames[DROW + 1] = fx.t (was the tyre tracks' clock; kept so frame layouts / saved files stay as they are)
 ## what the ride sound reads from the physics, per sample: speed, air, crashed, surface, skid, pedal key, pedal, cranks
 const AROW := 8
 var _astate := AudioState.new()
@@ -659,7 +659,6 @@ func open() -> void:
 	# the live state, to put back on leaving
 	_snap = _live()
 	_ap_seg = null
-	_tracks_open()
 	if game.dust and game.dust.sim: game.dust.sim.reset()
 	_hidden.clear()
 	# the rider's cloth sims (race number, hair, helmet flap, strap tails) step themselves in _process, which gets
@@ -716,7 +715,6 @@ func close() -> void:
 	if _snap != null:
 		_restore(_snap)
 		_snap = null
-	_tracks_close()
 	if game.dust and game.dust.sim: game.dust.sim.reset()
 	_ap_seg = null
 	for h in _hidden:
@@ -1053,7 +1051,6 @@ func update(rdt: float) -> void:
 	_focus_now = focus_at(tp)
 	_sound(prev_tp, rdt, fk)
 	_dust(prev_tp, fk)
-	_tracks(fk)
 	if probe: _vis_probe()
 	# (as much sim time as the replay moved, so slow motion is slow for the paper too; a little while paused so it
 	# settles on the body; a big jump resets them by itself)
@@ -1078,7 +1075,7 @@ func update(rdt: float) -> void:
 			_shots_t = 0.0
 			var path := "%s_%02d.png" % [Env.s("BMX_REPLAY_SHOTS"), _shots_i]
 			get_viewport().get_texture().get_image().save_png(path)
-			print("REPLAYSHOT %s tp=%.2f cam=%s speed=%.2f kmh=%.0f fps=%.0f tracks_hidden=%d dust_events=%d sound_events=%d" % [path, tp - t1(), CAMS[cam_i], SPEEDS[speed_i], _kmh_at(tp), Engine.get_frames_per_second(), _trk_hid, dev.size(), aev.size()])
+			print("REPLAYSHOT %s tp=%.2f cam=%s speed=%.2f kmh=%.0f fps=%.0f dust_events=%d sound_events=%d" % [path, tp - t1(), CAMS[cam_i], SPEEDS[speed_i], _kmh_at(tp), Engine.get_frames_per_second(), dev.size(), aev.size()])
 			_shots_i += 1
 			if viewer and _shots_i >= int(Env.s("BMX_REPLAY_NSHOTS") if Env.s("BMX_REPLAY_NSHOTS") != "" else "16"): game.exit_replay()   # (tests: BMX_REPLAY_WATCH)
 
@@ -1136,51 +1133,6 @@ func _dust(prev_tp: float, fk: Array) -> void:
 ## tyre tracks: the marks laid after the replayed moment are hidden (their colour bytes zeroed, the ring's newest
 ## segments), so they appear behind the bike as it rides; all put back on leaving. Not for a saved replay (a fresh
 ## world has none)
-var _trk_attr := PackedByteArray()   # the tracks' whole attribute buffer as the ride left it
-var _trk_hid := 0                    # how many of the newest segments are hidden now
-func _tracks(fk: Array) -> void:
-	var fx = game.fx
-	if fx == null or viewer or _trk_attr.is_empty(): return
-	var a: Array = fk[0]
-	if a.size() <= DROW + 1: return
-	var cut := float(a[DROW + 1])
-	if fk[1] != null and (fk[1] as Array).size() > DROW + 1: cut = lerpf(cut, float(fk[1][DROW + 1]), fk[2])
-	# the newest segment is at seg_next - 1, older ones behind it: find how many are newer than the cut
-	var n: int = fx.SEG_MAX
-	var lo := 0
-	var hi := n
-	while lo < hi:   # smallest k whose segment is no newer than the cut
-		var mid := (lo + hi) >> 1
-		if float(fx.seg_birth[posmod(int(fx.seg_next) - 1 - mid, n)]) > cut: lo = mid + 1
-		else: hi = mid
-	var h := lo
-	if h == _trk_hid: return
-	var rid: RID = fx.track_mesh.get_rid()
-	var sb: int = 6 * int(fx._a_stride)
-	var k0 := mini(h, _trk_hid)
-	var k1 := maxi(h, _trk_hid)
-	var zero := PackedByteArray()
-	if h > _trk_hid: zero.resize(sb)
-	for k in range(k0, k1):   # (a few segments a frame at riding speed)
-		var i := posmod(int(fx.seg_next) - 1 - k, n)
-		RenderingServer.mesh_surface_update_attribute_region(rid, 0, i * sb, zero if h > _trk_hid else _trk_attr.slice(i * sb, (i + 1) * sb))
-	_trk_hid = h
-
-func _tracks_open() -> void:
-	_trk_hid = 0
-	_trk_attr = PackedByteArray()
-	var fx = game.fx
-	if fx == null or viewer or fx.track_mesh == null: return
-	var sd: Dictionary = RenderingServer.mesh_get_surface(fx.track_mesh.get_rid(), 0)
-	_trk_attr = sd.get("attribute_data", PackedByteArray())
-
-func _tracks_close() -> void:
-	var fx = game.fx
-	if fx != null and not _trk_attr.is_empty() and _trk_hid > 0:
-		RenderingServer.mesh_surface_update_attribute_region(fx.track_mesh.get_rid(), 0, 0, _trk_attr)
-	_trk_attr = PackedByteArray()
-	_trk_hid = 0
-
 ## tests: frames where the rider (or a big part of him) isn't drawn while the replay plays
 var _vis_bad := 0
 var _vis_live := {}
