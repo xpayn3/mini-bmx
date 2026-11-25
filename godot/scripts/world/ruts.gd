@@ -130,7 +130,7 @@ func _gpu_create() -> void:
 	var fa := RDTextureFormat.new()
 	fa.width = n; fa.height = n
 	fa.format = RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT
-	fa.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice.TEXTURE_USAGE_STORAGE_BIT | RenderingDevice.TEXTURE_USAGE_CAN_UPDATE_BIT | RenderingDevice.TEXTURE_USAGE_CAN_COPY_TO_BIT
+	fa.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice.TEXTURE_USAGE_STORAGE_BIT | RenderingDevice.TEXTURE_USAGE_CAN_UPDATE_BIT | RenderingDevice.TEXTURE_USAGE_CAN_COPY_TO_BIT | RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT
 	_ta = _rd.texture_create(fa, RDTextureView.new(), [])
 	var fb := RDTextureFormat.new()
 	fb.width = n; fb.height = n
@@ -342,3 +342,23 @@ func step(st) -> void:
 			print("RUTS tiles=%d stamp_us=%.1f under_rear=%.1f mm under_front=%.1f mm knock=%.3f v=%.1f win_copies=%d" % [field.TileCount(), float(_us) / maxi(_n, 1),
 				field.Depth(rx, rz) * 1000.0, field.Depth(st.x + f.x * (st.L - st.BB_REAR), st.z + f.z * (st.L - st.BB_REAR)) * 1000.0, st.knock, st.v, _win_count])
 			_us = 0; _n = 0; _win_count = 0
+			_gpu_probe_n += 1
+			if _gpu_probe_n % 4 == 0 and _ok:
+				var bx: float = rx - f.x * 3.0; var bz: float = rz - f.z * 3.0
+				var cpu: Vector4 = field.TrackNear(bx, bz, 3)
+				RenderingServer.call_on_render_thread(_gpu_probe.bind(bx, bz, cpu, _win_tile))
+
+var _gpu_probe_n := 0
+func _gpu_probe(bx: float, bz: float, cpu: Vector4, corner: Vector2i) -> void:
+	var data := _rd.texture_get_data(_ta, 0)
+	var n := WT * T
+	var cx := floori(bx / 0.05); var cz := floori(bz / 0.05)
+	var be := 9.0; var bs := 0.0
+	for dz in range(-3, 4):
+		for dx in range(-3, 4):
+			var o := (posmod(cz + dz, n) * n + posmod(cx + dx, n)) * 8
+			var e := data.decode_half(o + 2)
+			if e < be: be = e; bs = data.decode_half(o + 4)
+	var tile := Vector2i(floori(bx / 8.0), floori(bz / 8.0))
+	var inwin := tile.x >= corner.x and tile.y >= corner.y and tile.x < corner.x + WT and tile.y < corner.y + WT
+	print("RUTSGPU at=(%.0f,%.0f) cpu_e=%.3f cpu_s=%.2f tile=%d track=%d | gpu_e=%.3f gpu_s=%.2f in_win=%s tiles=%d" % [bx, bz, cpu.x, cpu.y, cpu.z, cpu.w, be, bs, inwin, field.TileCount()])

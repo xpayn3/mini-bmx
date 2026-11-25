@@ -194,12 +194,16 @@ public partial class RutFieldCs : RefCounted
 
 	/// a tile for the ground shader's window: per cell 4 x uint32 = half pairs (depth, edge distance), (strength, blood),
 	/// (cos 2a, sin 2a), (smear, 0), row by row (shaders/rut_upload.glsl unpacks them); empty if the tile doesn't exist
+	private byte[] _pack;
 	public byte[] TilePack(int tx, int tz)
 	{
 		var d = TileFor(tx, tz, false);
 		if (d == null) return Array.Empty<byte>();
 		_tracks.TryGetValue(Key(tx, tz), out var tt);
-		var b = new byte[TILE * TILE * 16];
+		// one buffer reused for every tile: Godot copies it into a PackedByteArray on return, so it is free again at once.
+		// (A fresh 410 KB array per copy, ~30 a second, all went to the large-object heap: gen-2 collections over a
+		// heap that grows with the ride = a hitch every so often, worse the longer the ride.)
+		var b = _pack ??= new byte[TILE * TILE * 16];
 		ushort he0 = BitConverter.HalfToUInt16Bits((Half)NO_E), ha0 = 0, z0 = 0;
 		for (int i = 0; i < d.Length; i++)
 		{
@@ -217,6 +221,26 @@ public partial class RutFieldCs : RefCounted
 			b[o + 12] = (byte)h6; b[o + 13] = (byte)(h6 >> 8);
 		}
 		return b;
+	}
+
+	/// probe: the strongest print within r cells of (x, z) as (min edge distance, strength there, tile exists 0/1, track tile 0/1)
+	public Vector4 TrackNear(float x, float z, int r)
+	{
+		int cx = (int)Math.Floor(x / CELL), cz = (int)Math.Floor(z / CELL);
+		float be = NO_E, bs = 0f; bool any = false, anyT = false;
+		for (int iz = cz - r; iz <= cz + r; iz++)
+			for (int ix = cx - r; ix <= cx + r; ix++)
+			{
+				int tx = (int)Math.Floor((double)ix / TILE), tz = (int)Math.Floor((double)iz / TILE);
+				if (TileFor(tx, tz, false) == null) continue;
+				any = true;
+				if (!_tracks.TryGetValue(Key(tx, tz), out var tt)) continue;
+				anyT = true;
+				int i = (iz - tz * TILE) * TILE + (ix - tx * TILE);
+				float e = (float)tt.E[i];
+				if (e < be) { be = e; bs = (float)tt.S[i]; }
+			}
+		return new Vector4(be, bs, any ? 1 : 0, anyT ? 1 : 0);
 	}
 
 	/// the tiles dug since the last call: (tx, tz) pairs
