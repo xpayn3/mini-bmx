@@ -252,12 +252,22 @@ var puddle_wake: WaterWake = null
 var _pw_info := Vector4.ZERO
 static var _pw_owner := 0   # the Game whose wake the puddle_wake globals point at
 
+## the road's surface baked into a camera-following texture window (world/road_detail.gd); the ground shader reads it
+## through the globals road_a / road_b / road_c / road_info0..2 (info.w = 0: its old per-pixel path)
+var road: RoadDetail = null
+var _road_info: Array[Vector4] = [Vector4.ZERO, Vector4.ZERO, Vector4.ZERO, Vector4.ZERO]
+static var _road_owner := 0
+
 ## freed (not just moved: a prebuilt ride's reparent fires _exit_tree): switch the puddle ripples off, or the title /
 ## garage / next ride's ground would read this Game's freed wake texture through a live window
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_PREDELETE and _pw_owner == get_instance_id():
 		_pw_owner = 0
 		RenderingServer.global_shader_parameter_set("puddle_wake_info", Vector4.ZERO)   # (z = 0: ground.gdshader never samples it)
+	if what == NOTIFICATION_PREDELETE and _road_owner == get_instance_id():   # (the same for the baked road)
+		_road_owner = 0
+		for l in RoadDetail.CELLS.size(): RenderingServer.global_shader_parameter_set("road_info%d" % l, Vector4.ZERO)
+		if road != null: road.free_gpu()
 
 func _ready() -> void:
 	if not title_world and level == "":
@@ -303,6 +313,18 @@ func _ready() -> void:
 		terrain._tapes.torn.connect(_on_tape_torn)
 	terrain.view_scale = float(Settings.get_v("view_distance"))   # before the first chunks are built
 	terrain.update_stream(0, 0, INF)
+	# the baked road (not on the title backdrop, not the playground: its ground has its own shader)
+	if not title_world and level != "playground":
+		var rq := int(Env.s("BMX_ROAD")) if Env.s("BMX_ROAD") != "" else int(Settings.get_v("road_detail"))
+		if Env.s("BMX_OLD_ROAD") != "": rq = 0
+		road = RoadDetail.new(rq)
+		if road.ok:
+			RenderingServer.global_shader_parameter_set("road_a", road.tex_a)
+			RenderingServer.global_shader_parameter_set("road_b", road.tex_b)
+			RenderingServer.global_shader_parameter_set("road_c", road.tex_c)
+			_road_owner = get_instance_id()
+		else:
+			road = null
 	if reuse.has("far_hills"):
 		far_hills = reuse.far_hills
 	elif level != "":
@@ -3803,6 +3825,14 @@ func _process(dt: float) -> void:
 			_pw_info = pwi
 			RenderingServer.global_shader_parameter_set("puddle_wake_info", pwi)
 	_pk = _perf("water", _pk)
+	if road != null and _road_owner == get_instance_id():
+		var cf := -cam.global_basis.z
+		road.update(dt, Vector2(st.x, st.z), Vector2(cf.x, cf.z), terrain)
+		for l in RoadDetail.CELLS.size():
+			if road.info[l] != _road_info[l]:   # (a global set re-uploads them all: only when a window moved a tile)
+				_road_info[l] = road.info[l]
+				RenderingServer.global_shader_parameter_set("road_info%d" % l, road.info[l])
+	_pk = _perf("road", _pk)
 	if fx.has_method("update"): fx.update(dt, cam)
 	_pk = _perf("fx_tracks", _pk)
 	if msg_t > 0: msg_t -= dt

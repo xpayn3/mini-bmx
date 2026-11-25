@@ -248,4 +248,4 @@ func _chunk_nodes(k: Vector2i, data: Dictionary, shader: Shader, scans: Array) -
 	node.add_child(gi3)
 	var gh: PackedFloat32Array = data.gh
 	chunks[k] = {"node": node, "grass_img": Image.create_from_data(NV, NV, false, Image.FORMAT_RGBA8, data.grass),
-		"grass_h": Image.create_from_data(NV, NV, false, Image.FORMAT_RF, gh.to_byte_array()), "pud": PackedFloat32Array()}
+		"grass_h": Image.create_from_data(NV, NV, false, Image.FORMAT_RF, gh.to_byte_array()), "pud": PackedFloat32Array(), "mat": mat}

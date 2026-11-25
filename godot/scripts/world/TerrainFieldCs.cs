@@ -2211,8 +2211,7 @@ public partial class TerrainFieldCs : RefCounted
 	private static readonly bool NO_MICRO = System.Environment.GetEnvironmentVariable("BMX_NO_MICRO") is { Length: > 0 };
 
 	/// Imperfections of the ground, in metres, for the finer mesh only (visual: tyres and physics read the smooth ground, so it is kept to
-	/// a few cm): fine roughness near the trail (0.3 m and 1 m grain), washboard / braking ripples in bends (along the trail, 0.75 m apart,
-	/// stronger with the bend's load), now and then a pothole / washout on the road (hash of the 37 m stretch), a ragged dirt edge, and rills
+	/// a few cm): fine roughness near the trail (0.3 m and 1 m grain), now and then a pothole / washout on the road (hash of the 37 m stretch), a ragged dirt edge, and rills
 	/// running down banked faces. Zero away from the trail.
 	private double micro_detail(double x, double z)
 	{
@@ -2225,10 +2224,7 @@ public partial class TerrainFieldCs : RefCounted
 		double onT = 1.0 - sm(w, w + 1.5, dtr);
 		double qs = q_s, qa = q_a, qk = q_k, qbt = q_bt;
 		double d = (0.012 * noise(x * 3.1 + 7.7, z * 3.1 - 2.3) + 0.026 * noise(x * 0.9 + 3.1, z * 0.9 + 11.3)) * near * (0.35 + 0.65 * onT);
-		// washboard: ripples across the travel in the bends, deeper the harder the bend
-		double load = corner_load(qk);
-		if (load > 0.02 && onT > 0.0)
-			d += 0.022 * load * onT * Math.Sin(qs * (2.0 * Math.PI / 0.75) + noise(qs * 0.2, 5.5) * 3.0) * (0.5 + 0.5 * noise(qs * 0.07 + 9.0, 1.7));
+		// (no washboard: a 0.75 m ripple is finer than this 0.25 m mesh can carry and aliased into ~2 m stripes across the trail)
 		// potholes / washouts on the road
 		double cell = Math.Floor(qs / 37.0);
 		double hh = ((long)(cell * 73856093.0 + seed_value * 19349663.0) & 0xffff) / 65536.0;

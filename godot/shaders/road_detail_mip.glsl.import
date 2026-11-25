@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://cxyeusagqmxur"
+path="res://.godot/imported/road_detail_mip.glsl-52339bce616bfc1679199d5a903d371b.res"
+
+[deps]
+
+source_file="res://shaders/road_detail_mip.glsl"
+dest_files=["res://.godot/imported/road_detail_mip.glsl-52339bce616bfc1679199d5a903d371b.res"]
+
+[params]
+
