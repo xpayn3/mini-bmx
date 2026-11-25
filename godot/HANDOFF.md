@@ -236,6 +236,28 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   stay under the peak, a locked rear has almost no side grip anyway): `slide=1` now also prints `SKIDTURN` (rear lever
   locked through a turn on grass / trail / sand). Stress: the brake-hold check accepts either result within 10 % of the
   friction limit (56 / 56).
+- **Stick spring-back is not a pop; bad landings bog, not stop (2026-11-25, F8 seed 642455: "jump when I hit some bump was
+  very weird")**. Ride log: right stick held back into a natural crest at 68 km/h, let go just before it: the thumbstick
+  sprang past centre to +0.30..0.35 for 0.07 s, which passed the stick-hop's "snapped forward past 0.3" test, so a pop was
+  queued for the lip (+1.6 m/s up in one step, 1.5 m high, and as the player's own pop it got the pro nose-up pull); the
+  stick back again in the air took it to 40 deg; the landing on flat at 34 deg nose up lost 16 km/h in ONE step. Now:
+  the snap must pass `STICK_POP_FWD` 0.6 (`BMX_OLD_STICKPOP=1` = 0.3); the landing-angle cost (`landAngleCost`) is
+  x lerp(`BOG_SOFT` 0.35, 1, impact / 4 m/s) and taken off over `BOG_T` 0.4 s (`_bog`; `BMX_OLD_BOG=1` = whole, at once).
+  Test `BMX_PAD=1 BMX_STRAIGHT=1 BMX_BODY=springback[:x] BMX_FORGIVE_PROBE=1` (held back, then a 0.07 s overshoot of x,
+  default 0.35, every 2.5 s): 0.45 -> 7 STICKHOPs old, 0 new; 0.9 still pops. A limit on how fast the front falls after a
+  back-wheel landing was tried and dropped (user: "awful"). Note: `BMX_PG_PILOT_PITCH` snaps the pitch in one frame
+  in the air (a test aid: looks like a glitch in the window).
+  **Touch-down pop of the drawn bike (same day, user: "weird frame jump before landing")**: `Game`'s AIR_SHARE offset
+  (the bike moving against the rider's hips in the air) had its downward part clamped off on the touch-down frame, so
+  the drawn bike popped 7-8 cm up against its fall in one frame on every landing. It now eases to the clamped value
+  over `AIR_SHARE_EASE` 0.08 s (`_air_dlt`; `BMX_OLD_AIRSHARE_SNAP=1` = the clamp). Measured with `BMX_JITTER_ALL=1
+  BMX_JDUMP=file.csv` (rows now end with the drawn bike's world x y z, pitch, air, physics pitch / y, physics frame,
+  drawn pitch, pitch_draw): touch-down excess 0.066-0.082 m -> ~0.01. User: "now its super smooth".
+  **Open: twitch while loading a lip** (user: "the only twitchiness is on jump, before he pops"). `BMX_POSE_PROBE=1` now
+  prints `POSETWITCH` (chest 2nd difference > 1 cm in a frame + which limits moved it): during the preload the bar
+  and rear-wheel limits shove the chest 1-2.6 cm in single frames, and right after the pop the stand-tall moves it
+  3-5 cm a frame (no limit involved: the face / stand-tall pose blend). An acceleration cap on hips + chest (45 m/s^2)
+  only took 76 -> 67 such frames on dtable_36: tried and removed. Not fixed.
 - **Curbs / ledges: the rear rolls up, the tyres don't shiver at the edge (2026-11-24, user: "the rear always gets
   stuck on a curb")**. (1) `_step_move`'s edge check (at the bottom bracket) read the rise per physics step, so whether a
   curb was a wall at all depended on speed: at 6 km/h it never saw one (rolled up 30 cm), at 15 km/h a 20 cm curb was

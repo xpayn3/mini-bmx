@@ -2366,13 +2366,14 @@ var _pp_ref := [Vector3.ZERO, Vector3.ZERO]
 var _pp_st := {}   # stage -> [frames moved, sum sq, max]
 var _pp_jt := {}   # joint -> [n, sum sq, max, over 3 mm, prev, prev2]
 var _pp_t := 0
-var _pp_jumps := 0; var _pp_air := 0.0; var _pp_why := ""
+var _pp_jumps := 0; var _pp_air := 0.0; var _pp_why := ""; var _pp_frame := ""
 func _pp_mark(k: int, pel: Vector3, ch: Vector3) -> void:
 	if k > 0:
 		var nm: String = _PP_STAGES[k - 1]
 		var mv := maxf((pel - _pp_ref[0]).length(), (ch - _pp_ref[1]).length())
 		var s: Array = _pp_st.get(nm, [0, 0.0, 0.0])
 		if mv > 0.002: s[0] += 1
+		if mv > 0.002: _pp_frame += " %s=%.0fmm" % [nm, mv * 1000.0]
 		s[1] += mv * mv; s[2] = maxf(s[2], mv)
 		_pp_st[nm] = s
 	_pp_ref = [pel, ch]
@@ -2389,12 +2390,14 @@ func _pp_joints() -> void:
 			if a < 0.3:   # (a teleport / reset is not motion)
 				s[0] += 1; s[1] += a * a; s[2] = maxf(s[2], a)
 				if a > 0.003: s[3] += 1
+				if a > 0.01 and jn[1] == "chest": print("POSETWITCH frame=%d chest 2nd diff=%.0fmm stages:%s | %s" % [_pp_t, a * 1000.0, _pp_frame, _pp_why])
 				if a > 0.04 and jn[1] == "pelvis" and _pp_jumps < 30:
 					_pp_jumps += 1
 					print("POSEJUMP frame=%d pelvis 2nd diff=%.0fmm  air=%.2f pitch=%.2f %s" % [_pp_t, a * 1000.0, _pp_air, _probe_pitch, _pp_why])
 		s[5] = s[4]; s[4] = x
 		_pp_jt[jn[1]] = s
 	_pp_t += 1
+	_pp_frame = ""
 	if _pp_t % 120 == 0: pose_probe_print()
 
 func pose_probe_print() -> void:

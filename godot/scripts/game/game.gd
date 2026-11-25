@@ -2432,6 +2432,9 @@ var _log_lift := 0.0
 const LIFT_UP := 2.4     # m/s the drawn bike may rise to clear its tyres off the ground (4 cm a frame at 60 fps)
 const LIFT_DOWN := 0.6   # m/s it settles back
 var _lift_s := 0.0       # the eased tyre-unclip lift
+const AIR_SHARE_EASE := 0.08   # s: back on the ground the air offset eases out (it popped the bike up in one frame)
+var _air_dlt := Vector3.ZERO
+static var _OLD_AIRSHARE_SNAP := OS.get_environment("BMX_OLD_AIRSHARE_SNAP") != ""
 const AIR_SHARE := 0.8   # in the air the drawn bike moves this share of the rider's hip moves against it (the bike is ~1/6 of the weight)
 static var _OLD_AIRSHARE := OS.get_environment("BMX_OLD_AIRSHARE") != ""
 var _frame_y := NAN      # where the physics put the frame this frame (before the lift): what the rider's legs feel
@@ -3513,11 +3516,17 @@ func _process(dt: float) -> void:
 		# in the air the rider's hip moves against the bike move the BIKE (it is ~1/6 of the weight; the pair's centre of
 		# mass flies the arc): AIR_SHARE of Rider.body_off the other way (last frame's: the rider is posed after the bike).
 		# Back on the ground it eases out, never pushing the bike down into the ground. BMX_OLD_AIRSHARE=1 = off
+		# (2026-11-25, user: "weird frame jump before landing": on the touch-down frame the clamp dropped the offset's
+		# downward part at once and the bike popped up 7-8 cm against its fall. On the ground it now eases to the clamped
+		# value over ~AIR_SHARE_EASE s. BMX_OLD_AIRSHARE_SNAP=1 = the old clamp)
+		var dlt := Vector3.ZERO
 		if not st.crash_on and rider != null and not _OLD_AIRSHARE and rider.body_off.length_squared() > 1e-8:
 			var bo: Vector2 = rider.body_off
-			var dlt: Vector3 = -AIR_SHARE * (1.0 - st.land_prep) * (rig.global_transform.basis * Vector3(bo.x, bo.y, 0.0))
+			dlt = -AIR_SHARE * (1.0 - st.land_prep) * (rig.global_transform.basis * Vector3(bo.x, bo.y, 0.0))
 			if not st.air: dlt.y = maxf(0.0, dlt.y)
-			rig.global_position += dlt
+		if st.air or st.crash_on or _OLD_AIRSHARE_SNAP: _air_dlt = dlt
+		else: _air_dlt = dlt + (_air_dlt - dlt) * exp(-mdt / AIR_SHARE_EASE)
+		if _air_dlt.length_squared() > 1e-10: rig.global_position += _air_dlt
 		_frame_y = _pre_y
 		if st.bank_probe and was > 0.05 and not st.air:   # tests: the drawn bike lifted a lot (it "shoots up")
 			print("BASE over ground=%.3f  axleF over base=%.3f  susp xF=%.3f xR=%.3f  y_draw-y=%.3f" % [_base_over, _axF_over_base, rig.susp.xF if rig.susp else 0.0, rig.susp.xR if rig.susp else 0.0, y_draw - st.y])
@@ -3743,6 +3752,9 @@ func _process(dt: float) -> void:
 				for jq in rider.J.size():
 					var jv: Vector3 = rider.J[jq]
 					row += ",%.5f,%.5f,%.5f" % [jv.x, jv.y, jv.z]
+				# + the drawn bike in the world (frame jumps through take-offs / landings) and the physics' air / pitch
+				var rgt: Transform3D = rig.global_transform
+				row += ",%.4f,%.4f,%.4f,%.4f,%d,%.4f,%.4f,%.4f,%.4f,%.4f" % [rgt.origin.x, rgt.origin.y, rgt.origin.z, asin(clampf(rgt.basis.x.normalized().y, -1.0, 1.0)), int(st.air), st.pitch, st.y, Engine.get_physics_frames(), float(pi["pitch"]), st.pitch_draw]
 				_jdump.append(row)
 	_pk = _perf("rider_pose", _pk)
 	if replay and input_enabled and not scenic and not title_world: replay.capture(t)   # (real rides only, not the title backdrop)
