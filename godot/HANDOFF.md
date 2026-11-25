@@ -663,6 +663,18 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   edge-on near blades turned towards the camera, wrapped diffuse. Uniform `look_v2` (`BMX_GRASS_OLD=1` = 0 = before).
   GPU 0.59 -> 0.64 ms. Tile placement is C# (`world/GrassPlaceCs.cs`, `BMX_GRASS_GD=1` = the GDScript `_place`).
 
+- **Leaf-card bushes (2026-11-25, user: "could we add Megascans bushes, or too heavy?" -> prototype from a procedural texture)**: bushes are no
+  longer the lumpy blob. `world/card_bush.gd` (`CardBush`): ~30-46 upright quads (each folded in the middle, turned at random about the vertical, front
+  facing away from the bush's middle: tilted cards looked wrong, user) on a dome, each with a leaf-cluster texture drawn in code (`texture("leaf" | "dry")`,
+  256 px, alpha cut-out, mipmaps; no downloaded asset), normals bent toward the dome, baked "inside is darker" vertex-colour AO, ~120-180 triangles
+  (the blob was 320). Shader `world/deco_cards.gdshader` (cull off, alpha scissor, deco_fade + sway + flutter + backlit scatter like `deco.gdshader`;
+  materials `MAT["leafCard"]` / `["leafCardDry"]`). Variants = list names: `bush` (round), `bush1` (low + wide), `bush2` (tall + loose), picked from the
+  yaw (`TerrainChunkBuilder._bush_kind`, uses no random numbers: other decorations didn't move), and `bushdry` (small grey leaves + twigs, tinted with
+  the SCRUB colours) which replaces every other weed blob in the dry biomes. Anything else that draws `MESH["bush"]` must use the `leafCard` material
+  (`level_visuals.gd`, `lens_scene.gd` do). `BMX_OLD_BUSH=1` = the old blobs. Preview: `res://tools/bush_gallery.tscn -- out.png [dist=m yaw=deg sun=deg]` (old blobs
+  at the back, the four variants in front). Seen: close-ups + two rides (seeds 4242, 80019), no script errors; NOT measured: frame time with many bushes in
+  view, the wind sway, how distant leaves thin out (mip alpha). Poly Haven's `searsia_burchellii` (1.4M polygons, ~35 MB glTF) was looked at as a scan source
+  and not used: it would have to be decimated + baked to cards first.
 - **Sponsor props** (`TrailCourse.chunk_gates` / `chunk_boards`, fixed spacing by centreline index so growing never moves them): a huge steel gantry with a sponsor banner over the trail every 300 m (`TrailGate.build`, made-up brands in `TrailGate.SPONSORS`, no collision, skipped on jumps) and breakable wooden roadside billboards every ~80 m (fence-style panel in `TerrainChunkBuilder._boards`, so the bike smashes them; the Label3D text is freed on smash). Probe: `BMX_GATE_PROBE=1`.
 
 - **Health packs** (`world/health_pack.gd`): a GTA-style floating, spinning red backpack with a white cross and a glow ring, one outside the door of each roadside shed (`TerrainChunkBuilder._sheds` -> `out["packs"]`, made in `Terrain._finalize`). Ride within 1.6 m (`Terrain.take_pack`, called from `Game._process`) and `hud.on_health_pack` gives back `HealthPack.HEAL` (45 %); full-health riders leave it. Taken ones stay gone until a new seed. Tests: `BMX_PACK_PROBE=1` (`PACK at` lines), `BMX_PACK_SPAWN=x,z` (start 9 m before a pack), `BMX_LIFE=0.3 BMX_LIFE_PROBE=1`.

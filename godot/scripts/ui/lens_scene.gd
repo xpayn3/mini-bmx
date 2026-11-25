@@ -379,7 +379,7 @@ static func _compute_props() -> Dictionary:
 		if d < 300.0: far_trunks.append([_xf(Vector3(x, y - 0.1, z), Vector3(sc, sc * 0.9, sc), 0.0), Color(1, 1, 1)])
 	var out := {}
 	for e in [["trunks", "trunk", "trunk", trunks, true], ["pines", "pine", "leaf", pines, true], ["blobs", "blob", "leafSoft", blobs, true],
-			["bushes", "bush", "leafSoft", bushes, true], ["rocks", "rock", "rock", rocks, true], ["grass", "grass", "flower", grass, false],
+			["bushes", "bush", "leafCard", bushes, true], ["rocks", "rock", "rock", rocks, true], ["grass", "grass", "flower", grass, false],
 			["roots", "log", "trunk", roots, true], ["far_pines", "pine", "leaf", far_pines, false], ["far_trunks", "trunk", "trunk", far_trunks, false]]:
 		out[e[0]] = {"mesh": e[1], "mat": e[2], "buf": _pack(e[3]), "count": (e[3] as Array).size(), "cast": e[4]}
 	return out

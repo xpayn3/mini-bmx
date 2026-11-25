@@ -124,7 +124,7 @@ static func _trees(f: LevelField, parent: Node3D, internal: bool) -> void:
 				lists.blob.append([p + Vector3(0, h + th + sc * 0.7, 0), Vector3(sc * 1.2, sc * 1.05, sc * 1.2), yaw, _lin(LEAF_COLS[t.ci])])
 			_:
 				lists.bush.append([p + Vector3(0, h - 0.08, 0), Vector3(sc * 0.9, sc * 0.6, sc * 0.9), yaw, _lin(BUSH_COLS[t.ci])])
-	var spec := {"trunk": ["trunk", "trunk"], "pine": ["pine", "leaf"], "blob": ["blob", "leafSoft"], "bush": ["bush", "leafSoft"]}
+	var spec := {"trunk": ["trunk", "trunk"], "pine": ["pine", "leaf"], "blob": ["blob", "leafSoft"], "bush": ["bush", "leafCard"]}
 	for nm in lists:
 		var arr: Array = lists[nm]
 		if arr.is_empty(): continue
