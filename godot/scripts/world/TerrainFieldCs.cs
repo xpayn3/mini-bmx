@@ -158,6 +158,8 @@ internal sealed class TfWood
 				return 0.85;
 			return skin.ev(TerrainFieldCs.maxf(0.001, 19.0 - u));
 		}
+		if (kind == 4)   // (trail_features.gd Wood.top: a wooden drop)
+			return u < 5.0 ? ease(0.0, 5.0, 0.02, 1.0, u) : 1.0;
 		if (kind == 3)
 		{
 			double t = (u - 2.0) / 5.5;
@@ -247,6 +249,7 @@ internal static class TfSet
 			["doubleLine"] = new TfLine(dbl, 3.0, kicker),
 			["woodKicker"] = new TfHermite(new[] { new[] { 0.0, 0, 0 }, new[] { 4.6, 0, 0 }, new[] { 6.4, 0.9, 0.1, 0 }, new[] { 7.4, 0.9, 0, 0 }, new[] { 10.0, 0.72, -0.17 }, new[] { 20.0, 0.14, -0.08 }, new[] { 26.0, 0, 0 } }),
 			["skinny"] = new TfFlat(19.0),
+			["woodDrop"] = new TfFlat(14.0),
 			["bridge"] = new TfFlat(15.0),
 			["gorge"] = new TfFlat(36.0),
 			["rope"] = new TfFlat(72.0),
@@ -258,6 +261,7 @@ internal static class TfSet
 		{
 			["woodKicker"] = new TfWood(0, 0.0, 3.8, 0.85, true, kick, skin),
 			["skinny"] = new TfWood(1, 0.0, 19.0, 0.33, false, kick, skin),
+			["woodDrop"] = new TfWood(4, 0.0, 9.0, 0.9, true, kick, skin),
 			["bridge"] = new TfWood(2, 0.0, 15.0, 1.0, false, kick, skin),
 			["bridgeW"] = new TfWood(3, 0.0, 15.0, 1.0, false, kick, skin),
 			["gorge"] = new TfWood(2, 0.0, 36.0, 1.4, false, kick, skin),
@@ -1611,7 +1615,7 @@ public partial class TerrainFieldCs : RefCounted
 	private static readonly System.Collections.Generic.Dictionary<string, double[]> AIR = new()
 	{
 		["table"] = new[] { 15.85, 31.99 }, ["double"] = new[] { 15.85, 31.99 }, ["kicker"] = new[] { 11.45, 25.63 },
-		["woodKicker"] = new[] { 3.8, 9.0 }, ["tableLine"] = new[] { 15.85, 31.99, 52.2, 66.38 }, ["flow"] = new[] { 11.45, 25.63 },
+		["woodKicker"] = new[] { 3.8, 9.0 }, ["woodDrop"] = new[] { 9.0, 12.5 }, ["tableLine"] = new[] { 15.85, 31.99, 52.2, 66.38 }, ["flow"] = new[] { 11.45, 25.63 },
 		["doubleLine"] = new[] { 15.85, 31.99, 52.2, 66.38 },
 	};
 

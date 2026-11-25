@@ -12,7 +12,7 @@ extends RefCounted
 const DECEL := 5.5          # m/s^2 it plans to brake with (the bike can do more: brakeForce)
 const A_LAT := 7.0          # m/s^2 of sideways grip it plans a bend with, at pace 1
 ## m/s over each kind of route feature at pace 1 (wood is steep and hard, so slowest)
-const FEAT_V := {"table": 14.0, "tableLine": 14.0, "kicker": 12.0, "rhythm": 13.0, "flow": 14.0, "woodKicker": 8.5, "bridge": 11.0}
+const FEAT_V := {"table": 14.0, "tableLine": 14.0, "kicker": 12.0, "rhythm": 13.0, "flow": 14.0, "woodKicker": 8.5, "bridge": 11.0, "woodDrop": 7.0, "skinny": 5.5}
 ## the least speed a feature wants (m/s): tabletops have a gap to clear
 const FEAT_MIN := {"table": 9.5, "tableLine": 9.5, "kicker": 7.5, "rhythm": 6.0, "woodKicker": 7.5}
 const ROCK_V := 9.0         # m/s through a rock garden at pace 1

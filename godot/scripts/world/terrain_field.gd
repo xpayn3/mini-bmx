@@ -1238,7 +1238,7 @@ func make_feat(x: float, z: float, dx: float, dz: float, type: String, b0: float
 ## line) to release it, then a rest (a bridge or plain trail) before the next build. BMX_OLD_RHYTHM=1 = the old random picks (tests)
 ## ("" = plain trail for that beat). Jump lines draw from their own random stream (seeded by where they start), so the
 ## road features after them are laid out exactly as before
-const RHYTHM := [["rhythm", "flow", "rhythm"], ["kicker", "table", "kicker", "tableLine", "kicker", "flow", "woodKicker"], ["bridge", "bridge", ""]]   # (more kickers: 2026-11-23, user)
+const RHYTHM := [["rhythm", "flow", "rhythm"], ["kicker", "table", "kicker", "tableLine", "kicker", "flow", "woodKicker", "woodDrop"], ["bridge", "skinny", ""]]   # (wood drop + north-shore skinny: 2026-11-25)   # (more kickers: 2026-11-23, user)
 static var OLD_RHYTHM := OS.get_environment("BMX_OLD_RHYTHM") != ""
 func _build_route() -> void:
 	var C := course

@@ -490,6 +490,13 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   line), >= 0.9 m from any fence / tape collider, not in `blocked`, ground within 0.45 m along it and 0.5 m front to back.
   Planks sit over the highest ground under them; each board / sign reserves its spot in `blocked`. Seed 4242's first 6
   boards: 4 placed (2 had no clear spot). `BMX_GATE_PROBE=1` prints `SIGNSPOT no: <why>`.
+- **Wooden drop + skinny in jump lines (2026-11-25, Phase C part 3)**: Wood kind 4 `woodDrop` (GD `TrailFeatures.Wood.top`,
+  C# `TfWood.top`): a plank ramp eased up over 5 m to a 1 m deck, deck to u1 9 m, square end (`back_wall`), you drop onto
+  the ground (profile `Flat` 14 m; `AIR` 9 .. 12.5). `TerrainField.RHYTHM`: release beats can be a woodDrop, rest beats
+  a north-shore `skinny` (19 m, 0.66 m wide, 0.85 m up; it rarely fits a rest beat: 0 in 12 worlds x 4 km, woodDrop 3).
+  Demo AI speeds `DemoPilot.FEAT_V` woodDrop 7, skinny 5.5 m/s. `BMX_TRAIL_FEAT=woodDrop` (seeds 2, 31, 123; also
+  `skinny` / `woodKicker` / `bridge`). C# compare / wood_edge_probe unchanged. Not done: wooden berms, a wallride
+  (the height-field physics can't ride a vertical wall), line choices + difficulty colours.
 - **Bark scans on standing trunks (2026-11-25, user: "good light trunk texture, realistic", "use all")**: three CC0 scans
   in `assets/textures/bark/` (1K colour / OpenGL normal / roughness, VRAM-compressed with mipmaps; `SOURCE.txt`):
   `bark_light` (ambientCG Bark004, light grey-tan), `bark_pale` (ambientCG Bark007, birch-like), `bark_pine` (Poly Haven

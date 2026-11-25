@@ -2168,7 +2168,7 @@ func level_reset_to(sp: Vector3) -> void:
 func _feature_spawn(what: String) -> Vector3:
 	var C: TrailCourse = terrain.field.course
 	var idx := -1
-	if what == "gorge" or what == "rope":
+	if what in ["gorge", "rope", "woodDrop", "skinny", "woodKicker", "bridge"]:
 		for rf in terrain.field.route_feats:
 			if rf.type == what:
 				var gi := int(rf.s / TrailCourse.STEP)
