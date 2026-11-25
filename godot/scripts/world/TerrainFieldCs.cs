@@ -558,8 +558,23 @@ public partial class TerrainFieldCs : RefCounted
 	private const double I240 = 1.0 / 240.0;
 	private const double I150 = 1.0 / 150.0;
 	// land shaping v2 (terrain_field.gd LAND_*; BMX_OLD_LAND=1 = the old land)
-	private const double LAND_WARP = 38.0, LAND_TALUS = 0.30, LAND_DETAIL_S = 0.30, LAND_FINE_S = 0.55, LAND_VALLEY_FLAT = 0.65, LAND_VALLEY_MACRO = 0.40,
-		BIO_A = 1.0 / 1300.0, BIO_M = 1.0 / 1700.0, BIO_F = 1.0 / 900.0, BIO_S = 1.0 / 2200.0, LAND_VI = 1.0 / 420.0, LAND_CR = 1.0 / 2600.0, LAND_CM = 1.0 / 1800.0, LAND_STRATA_STEP = 3.2, LAND_STRATA = 0.7;
+	private const double BIO_A = 1.0 / 1300.0, BIO_M = 1.0 / 1700.0, BIO_F = 1.0 / 900.0, BIO_S = 1.0 / 2200.0;
+	// the Land Lab's knobs (land_params.gd): set from the GDScript field in setup_from (land_get); defaults = terrain_field.gd's
+	private static double LAND_WARP = 38.0, LAND_TALUS = 0.30, LAND_DETAIL_S = 0.30, LAND_FINE_S = 0.55, LAND_VALLEY_FLAT = 0.65, LAND_VALLEY_MACRO = 0.40,
+		LAND_VI = 1.0 / 420.0, LAND_CR = 1.0 / 2600.0, LAND_CM = 1.0 / 1800.0, LAND_STRATA_STEP = 3.2, LAND_STRATA = 0.7,
+		L_A240 = 16.0, L_ARDG = 14.0, L_A90 = 10.0, L_A28 = 3.2, L_REL = 1.3,
+		L_I240 = 1.0 / 240.0, L_I150 = 1.0 / 150.0, L_I90 = 1.0 / 90.0, L_I28 = 1.0 / 28.0, L_I700 = 1.0 / 700.0, L_I260 = 1.0 / 260.0, L_I170 = 1.0 / 170.0;
+	private static void _land_from(Godot.Collections.Dictionary d)
+	{
+		double G(string k, double v) => d.ContainsKey(k) ? d[k].AsDouble() : v;
+		LAND_WARP = G("LAND_WARP", 38.0); LAND_TALUS = G("LAND_TALUS", 0.30); LAND_DETAIL_S = G("LAND_DETAIL_S", 0.30);
+		LAND_FINE_S = G("LAND_FINE_S", 0.55); LAND_VALLEY_FLAT = G("LAND_VALLEY_FLAT", 0.65); LAND_VALLEY_MACRO = G("LAND_VALLEY_MACRO", 0.40);
+		LAND_VI = G("LAND_VI", 1.0 / 420.0); LAND_CR = G("LAND_CR", 1.0 / 2600.0); LAND_CM = G("LAND_CM", 1.0 / 1800.0);
+		LAND_STRATA_STEP = G("LAND_STRATA_STEP", 3.2); LAND_STRATA = G("LAND_STRATA", 0.7);
+		L_A240 = G("L_A240", 16.0); L_ARDG = G("L_ARDG", 14.0); L_A90 = G("L_A90", 10.0); L_A28 = G("L_A28", 3.2); L_REL = G("L_REL", 1.3);
+		L_I240 = G("L_I240", 1.0 / 240.0); L_I150 = G("L_I150", 1.0 / 150.0); L_I90 = G("L_I90", 1.0 / 90.0); L_I28 = G("L_I28", 1.0 / 28.0);
+		L_I700 = G("L_I700", 1.0 / 700.0); L_I260 = G("L_I260", 1.0 / 260.0); L_I170 = G("L_I170", 1.0 / 170.0);
+	}
 	private static readonly bool OLD_LAND = System.Environment.GetEnvironmentVariable("BMX_OLD_LAND") is { Length: > 0 };
 	private const double I700 = 1.0 / 700.0;
 	private const double I28 = 1.0 / 28.0;
@@ -703,6 +718,7 @@ public partial class TerrainFieldCs : RefCounted
 	public void setup_from(GodotObject f)
 	{
 		var sh = new TfShared();
+		if (f.HasMethod("land_get")) _land_from(f.Call("land_get").AsGodotDictionary());
 		sh.seed_value = f.Get("seed_value").AsInt64();
 		sh.sz = f.Get("sz").AsDouble();
 		sh.NT = F64(f.Get("NT"));
@@ -1287,71 +1303,74 @@ public partial class TerrainFieldCs : RefCounted
 	// ---------------- the land ----------------
 	public double landform(double x, double z)
 	{
-		double calm = 1.0 - 0.85 * mtn(x, z);
-		double relief = 1.0 + 1.3 * sm(0.0, 0.35, noise((x + 5000) * I260, (z - 800) * I260));
-		double big = sm(-0.15, 0.3, noise((x + 2600) * I700, (z - 3100) * I700));
-		double rdg = sm(0.05, 0.35, noise((x - 4100) * I700, (z + 1500) * I700));
-		double h;
-		double slt = 0.0;
 		if (OLD_LAND)
-		{
-			double rr = 1.0 - Math.Abs(noise((x + 820) * I150, (z - 2300) * I150));
-			h = (noise(x * I90, z * I90) * 10 * relief + noise((x + 31.7) * I28, (z - 17.2) * I28) * 3.2 * (0.6 + 0.4 * relief)
-				+ noise((x - 1700) * I240, (z + 900) * I240) * 16 * big + (rr * rr - 0.45) * 14 * rdg) * calm + hill(x, z);
-		}
-		else
-		{
-			double kd = spl(noise((x + 4400.0) * LAND_CR, (z - 3700.0) * LAND_CR), -0.45, 0.45, -0.1, 0.75, 0.15, 1.0, 0.45, 1.4);
-			double km = spl(noise((x - 1300.0) * LAND_CM, (z + 2900.0) * LAND_CM), -0.4, 0.55, 0.0, 1.0, 0.2, 1.25, 0.45, 1.6);
-			big *= km;
-			rdg *= km;
-			double wk = LAND_WARP * calm;
-			double wx = x + noise((x + 1900.0) * I170, (z - 640.0) * I170) * wk;
-			double wz = z + noise((x - 2300.0) * I170, (z + 1100.0) * I170) * wk;
-			double n240 = noise_d((wx - 1700) * I240, (wz + 900) * I240);
-			double g240x = _ndx * I240;
-			double g240z = _ndy * I240;
-			double n150 = noise_d((wx + 820) * I150, (wz - 2300) * I150);
-			double g150x = _ndx * I150;
-			double g150z = _ndy * I150;
-			double rr = 1.0 - Math.Abs(n150);
-			double m0 = n240 * 16 * big + (rr * rr - 0.45) * 14 * rdg;
-			double sg = signf(n150);
-			double mx = g240x * 16 * big - 2.0 * rr * sg * g150x * 14 * rdg;
-			double mz = g240z * 16 * big - 2.0 * rr * sg * g150z * 14 * rdg;
-			double sl = Math.Sqrt(mx * mx + mz * mz) * calm;
-			double vk = sm(0.10, 0.40, -noise((x + 7100.0) * LAND_VI, (z - 2600.0) * LAND_VI));
-			double tk = (1.0 - LAND_VALLEY_MACRO * vk) / Math.Sqrt(1.0 + (sl / LAND_TALUS) * (sl / LAND_TALUS));
-			double ds = sl / LAND_DETAIL_S;
-			double dk = (1.0 - LAND_VALLEY_FLAT * vk) / (1.0 + ds * ds);
-			double a90 = 10 * relief * kd * dk;
-			double n90 = noise_d(wx * I90, wz * I90);
-			double g90x = _ndx * I90;
-			double g90z = _ndy * I90;
-			double tx = (mx * tk + g90x * a90) * calm;
-			double tz = (mz * tk + g90z * a90) * calm;
-			slt = Math.Sqrt(tx * tx + tz * tz);
-			double fs = slt / LAND_FINE_S;
-			double a28 = 3.2 * (0.6 + 0.4 * relief) * kd * dk / (1.0 + fs * fs);
-			h = (n90 * a90 + noise((wx + 31.7) * I28, (wz - 17.2) * I28) * a28) * calm + m0 * tk * calm + hill(x, z);
-		}
+			return _landform_old(x, z);
+		double calm = 1.0 - 0.85 * mtn(x, z);
+		double relief = 1.0 + L_REL * sm(0.0, 0.35, noise((x + 5000) * L_I260, (z - 800) * L_I260));
+		double big = sm(-0.15, 0.3, noise((x + 2600) * L_I700, (z - 3100) * L_I700));
+		double rdg = sm(0.05, 0.35, noise((x - 4100) * L_I700, (z + 1500) * L_I700));
+		double kd = spl(noise((x + 4400.0) * LAND_CR, (z - 3700.0) * LAND_CR), -0.45, 0.45, -0.1, 0.75, 0.15, 1.0, 0.45, 1.4);
+		double km = spl(noise((x - 1300.0) * LAND_CM, (z + 2900.0) * LAND_CM), -0.4, 0.55, 0.0, 1.0, 0.2, 1.25, 0.45, 1.6);
+		big *= km;
+		rdg *= km;
+		double wk = LAND_WARP * calm;
+		double wx = x + noise((x + 1900.0) * L_I170, (z - 640.0) * L_I170) * wk;
+		double wz = z + noise((x - 2300.0) * L_I170, (z + 1100.0) * L_I170) * wk;
+		double n240 = noise_d((wx - 1700) * L_I240, (wz + 900) * L_I240);
+		double g240x = _ndx * L_I240;
+		double g240z = _ndy * L_I240;
+		double n150 = noise_d((wx + 820) * L_I150, (wz - 2300) * L_I150);
+		double g150x = _ndx * L_I150;
+		double g150z = _ndy * L_I150;
+		double rr = 1.0 - Math.Abs(n150);
+		double m0 = n240 * L_A240 * big + (rr * rr - 0.45) * L_ARDG * rdg;
+		double sg = signf(n150);
+		double mx = g240x * L_A240 * big - 2.0 * rr * sg * g150x * L_ARDG * rdg;
+		double mz = g240z * L_A240 * big - 2.0 * rr * sg * g150z * L_ARDG * rdg;
+		double sl = Math.Sqrt(mx * mx + mz * mz) * calm;
+		double vk = sm(0.10, 0.40, -noise((x + 7100.0) * LAND_VI, (z - 2600.0) * LAND_VI));
+		double tk = (1.0 - LAND_VALLEY_MACRO * vk) / Math.Sqrt(1.0 + (sl / LAND_TALUS) * (sl / LAND_TALUS));
+		double ds = sl / LAND_DETAIL_S;
+		double dk = (1.0 - LAND_VALLEY_FLAT * vk) / (1.0 + ds * ds);
+		double a90 = L_A90 * relief * kd * dk;
+		double n90 = noise_d(wx * L_I90, wz * L_I90);
+		double g90x = _ndx * L_I90;
+		double g90z = _ndy * L_I90;
+		double tx = (mx * tk + g90x * a90) * calm;
+		double tz = (mz * tk + g90z * a90) * calm;
+		double slt = Math.Sqrt(tx * tx + tz * tz);
+		double fs = slt / LAND_FINE_S;
+		double a28 = L_A28 * (0.6 + 0.4 * relief) * kd * dk / (1.0 + fs * fs);
+		double h = (n90 * a90 + noise((wx + 31.7) * L_I28, (wz - 17.2) * L_I28) * a28) * calm + m0 * tk * calm + hill(x, z);
 		double wm = wild_mask(x, z);
 		if (wm == 0.0)
 			return h;
 		h += wild(x, z) * wm;
-		if (!OLD_LAND)
+		double rug = b_rug;
+		double sk = rug * sm(0.10, 0.35, slt) * sm(6.0, 30.0, trail_metres(x, z)) * LAND_STRATA;
+		if (sk > 0.0)
 		{
-			double rug = b_rug;
-			double sk = rug * sm(0.10, 0.35, slt) * sm(6.0, 30.0, trail_metres(x, z)) * LAND_STRATA;
-			if (sk > 0.0)
-			{
-				double ph = h / LAND_STRATA_STEP + noise((x + 3.3) * I60, (z - 8.1) * I60) * 0.4;
-				double fl = Math.Floor(ph);
-				double st = fl + sm(0.35, 0.65, ph - fl);
-				h += sk * LAND_STRATA_STEP * (st - ph);
-			}
+			double ph = h / LAND_STRATA_STEP + noise((x + 3.3) * I60, (z - 8.1) * I60) * 0.4;
+			double fl = Math.Floor(ph);
+			double st = fl + sm(0.35, 0.65, ph - fl);
+			h += sk * LAND_STRATA_STEP * (st - ph);
 		}
 		return h;
+	}
+
+	private double _landform_old(double x, double z)
+	{
+		double calm = 1.0 - 0.85 * mtn(x, z);
+		double relief = 1.0 + 1.3 * sm(0.0, 0.35, noise((x + 5000) * I260, (z - 800) * I260));
+		double big = sm(-0.15, 0.3, noise((x + 2600) * I700, (z - 3100) * I700));
+		double rdg = sm(0.05, 0.35, noise((x - 4100) * I700, (z + 1500) * I700));
+		double rr = 1.0 - Math.Abs(noise((x + 820) * I150, (z - 2300) * I150));
+		double h = (noise(x * I90, z * I90) * 10 * relief + noise((x + 31.7) * I28, (z - 17.2) * I28) * 3.2 * (0.6 + 0.4 * relief)
+			+ noise((x - 1700) * I240, (z + 900) * I240) * 16 * big + (rr * rr - 0.45) * 14 * rdg) * calm + hill(x, z);
+		double wm = wild_mask(x, z);
+		if (wm == 0.0)
+			return h;
+		return h + wild(x, z) * wm;
 	}
 
 	/// piecewise smoothstep through four (t, value) knots, flat outside (terrain_field.gd spl)

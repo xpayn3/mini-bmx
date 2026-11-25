@@ -38,17 +38,34 @@ const I700 := 1.0 / 700.0
 ##  - valleys: a 420 m control noise marks broad valleys; detail fades (LAND_VALLEY_FLAT), big relief flattens (LAND_VALLEY_MACRO).
 ##  - strata: in the rugged biome on sloping ground away from the trail the height is pulled towards stepped bands
 ##    (LAND_STRATA_STEP m, amount LAND_STRATA): caprock ledges and rock bands.
-const LAND_WARP := 38.0
-const LAND_TALUS := 0.30
-const LAND_DETAIL_S := 0.30
-const LAND_FINE_S := 0.55
-const LAND_VALLEY_FLAT := 0.65
-const LAND_VALLEY_MACRO := 0.40
-const LAND_VI := 1.0 / 420.0
-const LAND_CR := 1.0 / 2600.0
-const LAND_CM := 1.0 / 1800.0
-const LAND_STRATA_STEP := 3.2
-const LAND_STRATA := 0.7
+## These are the Land Lab's knobs (scripts/world/land_params.gd `LandParams`, data/land_params.json): static vars set by
+## LandParams.apply() before a field is set up, the same values handed to the C# field in setup_from (land_get).
+## Defaults = the hand-tuned values (the L_I* periods are the I* constants), so with no file nothing changes.
+static var LAND_WARP := 38.0
+static var LAND_TALUS := 0.30
+static var LAND_DETAIL_S := 0.30
+static var LAND_FINE_S := 0.55
+static var LAND_VALLEY_FLAT := 0.65
+static var LAND_VALLEY_MACRO := 0.40
+static var LAND_VI := 1.0 / 420.0
+static var LAND_CR := 1.0 / 2600.0
+static var LAND_CM := 1.0 / 1800.0
+static var LAND_STRATA_STEP := 3.2
+static var LAND_STRATA := 0.7
+static var L_A240 := 16.0     # rolling hills height
+static var L_ARDG := 14.0     # ridges height
+static var L_A90 := 10.0      # 90 m bumps height
+static var L_A28 := 3.2       # 28 m bumps height
+static var L_REL := 1.3       # extra relief in rough patches
+static var L_I240 := 1.0 / 240.0
+static var L_I150 := 1.0 / 150.0
+static var L_I90 := 1.0 / 90.0
+static var L_I28 := 1.0 / 28.0
+static var L_I700 := 1.0 / 700.0
+static var L_I260 := 1.0 / 260.0
+static var L_I170 := 1.0 / 170.0
+func land_get() -> Dictionary:   # for TerrainFieldCs.setup_from
+	return LandParams.cs_dict()
 ## biome climate noises (periods in m): altitude proxy, moisture, forest, ash patches (they never read the real height: the
 ## land is shaped by the biome, a height-driven biome would be circular)
 const BIO_A := 1.0 / 1300.0
@@ -280,6 +297,7 @@ var biome_rug: float = 0.0
 var grade_k: float = 1.0   # RouteStyle.grade: the mountains' height x this (their lengths stay), so every fall is this much steeper (1 = as before)
 
 func setup(seed_in: int, style_in: Dictionary = {}) -> void:
+	LandParams.ensure()   # the Land Lab's knobs (data/land_params.json), once
 	style = style_in.duplicate() if not style_in.is_empty() else RouteStyle.snapshot()
 	grade_k = clampf(float(style.get("grade", 1.0)), 0.5, 1.7)
 	var pick: Array = RouteStyle.BIOMES[clampi(roundi(float(style.get("biome", 0.0))), 0, RouteStyle.BIOMES.size() - 1)]
@@ -836,67 +854,76 @@ func berm(x: float, z: float) -> float:
 
 # ---------------- the land ----------------
 func landform(x: float, z: float) -> float:
-	var calm := 1.0 - 0.85 * mtn(x, z)
-	var relief := 1.0 + 1.3 * sm(0.0, 0.35, noise((x + 5000) * I260, (z - 800) * I260))
-	# big rolling hills (~240 m) in some regions, open flats in others: the land changes character as you ride
-	var big := sm(-0.15, 0.3, noise((x + 2600) * I700, (z - 3100) * I700))
-	# sharp ridgelines with long crests in other regions (ridged noise, mean taken out so the land doesn't rise)
-	var rdg := sm(0.05, 0.35, noise((x - 4100) * I700, (z + 1500) * I700))
-	var h: float
-	var slt := 0.0
 	if OLD_LAND:
-		var rr := 1.0 - absf(noise((x + 820) * I150, (z - 2300) * I150))
-		h = (noise(x * I90, z * I90) * 10 * relief + noise((x + 31.7) * I28, (z - 17.2) * I28) * 3.2 * (0.6 + 0.4 * relief)
-			+ noise((x - 1700) * I240, (z + 900) * I240) * 16 * big + (rr * rr - 0.45) * 14 * rdg) * calm + hill(x, z)
-	else:
-		# macro controls: plains .. rough country (detail), low .. big hills / ridges (macro)
-		var kd := spl(noise((x + 4400.0) * LAND_CR, (z - 3700.0) * LAND_CR), -0.45, 0.45, -0.1, 0.75, 0.15, 1.0, 0.45, 1.4)
-		var km := spl(noise((x - 1300.0) * LAND_CM, (z + 2900.0) * LAND_CM), -0.4, 0.55, 0.0, 1.0, 0.2, 1.25, 0.45, 1.6)
-		big *= km
-		rdg *= km
-		var wk := LAND_WARP * calm
-		var wx := x + noise((x + 1900.0) * I170, (z - 640.0) * I170) * wk
-		var wz := z + noise((x - 2300.0) * I170, (z + 1100.0) * I170) * wk
-		# the big relief with its gradient (240 m octave + ridge term)
-		var n240 := noise_d((wx - 1700) * I240, (wz + 900) * I240)
-		var g240x := _ndx * I240
-		var g240z := _ndy * I240
-		var n150 := noise_d((wx + 820) * I150, (wz - 2300) * I150)
-		var g150x := _ndx * I150
-		var g150z := _ndy * I150
-		var rr := 1.0 - absf(n150)
-		var m0 := n240 * 16 * big + (rr * rr - 0.45) * 14 * rdg
-		var sg := signf(n150)
-		var mx := g240x * 16 * big - 2.0 * rr * sg * g150x * 14 * rdg
-		var mz := g240z * 16 * big - 2.0 * rr * sg * g150z * 14 * rdg
-		var sl := sqrt(mx * mx + mz * mz) * calm
-		var vk := sm(0.10, 0.40, -noise((x + 7100.0) * LAND_VI, (z - 2600.0) * LAND_VI))
-		var tk := (1.0 - LAND_VALLEY_MACRO * vk) / sqrt(1.0 + (sl / LAND_TALUS) * (sl / LAND_TALUS))
-		var ds := sl / LAND_DETAIL_S
-		var dk := (1.0 - LAND_VALLEY_FLAT * vk) / (1.0 + ds * ds)
-		var a90 := 10 * relief * kd * dk
-		var n90 := noise_d(wx * I90, wz * I90)
-		var g90x := _ndx * I90
-		var g90z := _ndy * I90
-		var tx := (mx * tk + g90x * a90) * calm
-		var tz := (mz * tk + g90z * a90) * calm
-		slt = sqrt(tx * tx + tz * tz)
-		var fs := slt / LAND_FINE_S
-		var a28 := 3.2 * (0.6 + 0.4 * relief) * kd * dk / (1.0 + fs * fs)
-		h = (n90 * a90 + noise((wx + 31.7) * I28, (wz - 17.2) * I28) * a28) * calm + m0 * tk * calm + hill(x, z)
+		return _landform_old(x, z)
+	var calm := 1.0 - 0.85 * mtn(x, z)
+	var relief := 1.0 + L_REL * sm(0.0, 0.35, noise((x + 5000) * L_I260, (z - 800) * L_I260))
+	# big rolling hills (~240 m) in some regions, open flats in others: the land changes character as you ride
+	var big := sm(-0.15, 0.3, noise((x + 2600) * L_I700, (z - 3100) * L_I700))
+	# sharp ridgelines with long crests in other regions (ridged noise, mean taken out so the land doesn't rise)
+	var rdg := sm(0.05, 0.35, noise((x - 4100) * L_I700, (z + 1500) * L_I700))
+	# macro controls: plains .. rough country (detail), low .. big hills / ridges (macro)
+	var kd := spl(noise((x + 4400.0) * LAND_CR, (z - 3700.0) * LAND_CR), -0.45, 0.45, -0.1, 0.75, 0.15, 1.0, 0.45, 1.4)
+	var km := spl(noise((x - 1300.0) * LAND_CM, (z + 2900.0) * LAND_CM), -0.4, 0.55, 0.0, 1.0, 0.2, 1.25, 0.45, 1.6)
+	big *= km
+	rdg *= km
+	var wk := LAND_WARP * calm
+	var wx := x + noise((x + 1900.0) * L_I170, (z - 640.0) * L_I170) * wk
+	var wz := z + noise((x - 2300.0) * L_I170, (z + 1100.0) * L_I170) * wk
+	# the big relief with its gradient (240 m octave + ridge term)
+	var n240 := noise_d((wx - 1700) * L_I240, (wz + 900) * L_I240)
+	var g240x := _ndx * L_I240
+	var g240z := _ndy * L_I240
+	var n150 := noise_d((wx + 820) * L_I150, (wz - 2300) * L_I150)
+	var g150x := _ndx * L_I150
+	var g150z := _ndy * L_I150
+	var rr := 1.0 - absf(n150)
+	var m0 := n240 * L_A240 * big + (rr * rr - 0.45) * L_ARDG * rdg
+	var sg := signf(n150)
+	var mx := g240x * L_A240 * big - 2.0 * rr * sg * g150x * L_ARDG * rdg
+	var mz := g240z * L_A240 * big - 2.0 * rr * sg * g150z * L_ARDG * rdg
+	var sl := sqrt(mx * mx + mz * mz) * calm
+	var vk := sm(0.10, 0.40, -noise((x + 7100.0) * LAND_VI, (z - 2600.0) * LAND_VI))
+	var tk := (1.0 - LAND_VALLEY_MACRO * vk) / sqrt(1.0 + (sl / LAND_TALUS) * (sl / LAND_TALUS))
+	var ds := sl / LAND_DETAIL_S
+	var dk := (1.0 - LAND_VALLEY_FLAT * vk) / (1.0 + ds * ds)
+	var a90 := L_A90 * relief * kd * dk
+	var n90 := noise_d(wx * L_I90, wz * L_I90)
+	var g90x := _ndx * L_I90
+	var g90z := _ndy * L_I90
+	var tx := (mx * tk + g90x * a90) * calm
+	var tz := (mz * tk + g90z * a90) * calm
+	var slt := sqrt(tx * tx + tz * tz)
+	var fs := slt / LAND_FINE_S
+	var a28 := L_A28 * (0.6 + 0.4 * relief) * kd * dk / (1.0 + fs * fs)
+	var h := (n90 * a90 + noise((wx + 31.7) * L_I28, (wz - 17.2) * L_I28) * a28) * calm + m0 * tk * calm + hill(x, z)
 	var wm := wild_mask(x, z)
 	if wm == 0.0:
 		return h
 	h += wild(x, z) * wm
-	if not OLD_LAND:
-		var rug := b_rug
-		var sk := rug * sm(0.10, 0.35, slt) * sm(6.0, 30.0, trail_metres(x, z)) * LAND_STRATA
-		if sk > 0.0:
-			var ph := h / LAND_STRATA_STEP + noise((x + 3.3) * I60, (z - 8.1) * I60) * 0.4
-			var fl := floorf(ph)
-			var st := fl + sm(0.35, 0.65, ph - fl)
-			h += sk * LAND_STRATA_STEP * (st - ph)
+	var rug := b_rug
+	var sk := rug * sm(0.10, 0.35, slt) * sm(6.0, 30.0, trail_metres(x, z)) * LAND_STRATA
+	if sk > 0.0:
+		var ph := h / LAND_STRATA_STEP + noise((x + 3.3) * I60, (z - 8.1) * I60) * 0.4
+		var fl := floorf(ph)
+		var st := fl + sm(0.35, 0.65, ph - fl)
+		h += sk * LAND_STRATA_STEP * (st - ph)
 	return h
+
+
+## the original land (BMX_OLD_LAND=1, tests only: never reads the Land Lab's knobs)
+func _landform_old(x: float, z: float) -> float:
+	var calm := 1.0 - 0.85 * mtn(x, z)
+	var relief := 1.0 + 1.3 * sm(0.0, 0.35, noise((x + 5000) * I260, (z - 800) * I260))
+	var big := sm(-0.15, 0.3, noise((x + 2600) * I700, (z - 3100) * I700))
+	var rdg := sm(0.05, 0.35, noise((x - 4100) * I700, (z + 1500) * I700))
+	var rr := 1.0 - absf(noise((x + 820) * I150, (z - 2300) * I150))
+	var h := (noise(x * I90, z * I90) * 10 * relief + noise((x + 31.7) * I28, (z - 17.2) * I28) * 3.2 * (0.6 + 0.4 * relief)
+		+ noise((x - 1700) * I240, (z + 900) * I240) * 16 * big + (rr * rr - 0.45) * 14 * rdg) * calm + hill(x, z)
+	var wm := wild_mask(x, z)
+	if wm == 0.0:
+		return h
+	return h + wild(x, z) * wm
 
 
 ## piecewise smoothstep through four (t, value) knots, flat outside: a spline control for the macro noises

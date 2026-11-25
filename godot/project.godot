@@ -200,4 +200,4 @@ grime_root={
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/level_builder/plugin.cfg")
+enabled=PackedStringArray("res://addons/level_builder/plugin.cfg", "res://addons/land_lab/plugin.cfg")
