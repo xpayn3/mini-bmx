@@ -23,6 +23,9 @@ var _keep_r := 1.0
 var _keep_h := 1.0
 var look_pitch := 0.0        # the standing rider's head pitch (hero shot: looks down at the camera)
 var _hero := false
+var follow_mouse := false     # the hero rider turns a little toward the mouse (the profile)
+var _base_yaw := 0.0
+var _floor_mi: MeshInstance3D
 var style_extra := {}        # added to the standing pose (the hero shot turns the palms in)
 var clips_on := true         # false: no Mixamo clips (the hero shot keeps facing the lens)
 var fit_scale := 1.0         # > 1 pulls the camera back (more air round the rider)
@@ -69,6 +72,7 @@ func _init() -> void:
 	var pm := PlaneMesh.new(); pm.size = Vector2(400, 400)
 	fl.mesh = pm; fl.material_override = floor_m
 	fl.position.y = -PODIUM_H
+	_floor_mi = fl
 	vp.add_child(fl)
 	var pod_m := StandardMaterial3D.new()
 	pod_m.albedo_color = Color(0.93, 0.91, 0.88)
@@ -146,6 +150,11 @@ func hero_stage(bg: Color, yaw: float) -> void:
 	plain_stage(bg, yaw)
 	_hero = true
 	clips_on = false
+	follow_mouse = true
+	_base_yaw = yaw
+	vp.transparent_bg = true              # the page's own panel shows behind the rider
+	_env.background_mode = Environment.BG_CLEAR_COLOR
+	_floor_mi.visible = false
 	style_extra = {"palmIn": float(Env.s("BMX_WRIST")) if Env.s("BMX_WRIST") != "" else 1.5}   # arms hanging: palms to the thighs, thumbs forward
 	cam.fov = 66.0
 	_env.ambient_light_energy = 0.3
@@ -240,6 +249,9 @@ func _fit() -> void:
 func _process(dt: float) -> void:
 	if not visible: return
 	if Env.s("BMX_TURN_YAW") != "": pivot.rotation.y = float(Env.s("BMX_TURN_YAW"))   # tests: hold the turntable at this angle
+	elif follow_mouse:
+		var nx := get_viewport().get_mouse_position().x / maxf(get_viewport_rect().size.x, 1.0)
+		pivot.rotation.y = lerp_angle(pivot.rotation.y, _base_yaw + (nx - 0.4) * 0.9, minf(1.0, dt * 3.0))
 	elif spin and not _drag: pivot.rotation.y += SPIN * dt
 	if _rider != null and _rider.visible:
 		_hand_t += dt
