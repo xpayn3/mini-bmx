@@ -15,14 +15,15 @@ func _init() -> void:
 	var t0 := Time.get_ticks_msec()
 	var f := TerrainField.new()
 	f.setup(seed)
-	print("setup %d ms, course to x=%.0f, n=%d" % [Time.get_ticks_msec() - t0, f.course.end_x(), f.course.n])
+	print("setup %d ms, course to s=%.0f, n=%d" % [Time.get_ticks_msec() - t0, f.course.end_s(), f.course.n])
 	var cs = load("res://scripts/world/TerrainFieldCs.cs").new()
 	cs.setup_from(f)
 	var bad := 0
 	for g in GROWS:
 		var old: TrailCourse = f.course
 		var old_feats: Array = f.route_feats
-		var old_end := old.end_x()
+		var old_end := old.end_s()
+		var cut := old.n - int(SAFE / TrailCourse.STEP)   # course points before this index must not change
 		t0 = Time.get_ticks_msec()
 		var k := f.fork()
 		k.grow_course(old_end + Terrain.GROW_STEP)
@@ -40,12 +41,22 @@ func _init() -> void:
 		# derived values and marking well behind the old end
 		var der := 0
 		for i in old.n:
-			if old.X[i] > old_end - SAFE:
+			if i > cut:
 				continue
 			if c.E[i] != old.E[i] or c.W[i] != old.W[i] or c.BT[i] != old.BT[i] or c.KAP[i] != old.KAP[i]:
 				der += 1
-		var mk := _marks(old, old_end - SAFE) != _marks(c, old_end - SAFE)
-		var rf := _feats(old_feats, old_end - SAFE) != _feats(f.route_feats, old_end - SAFE)
+		_grown = c
+		var ma := _marks(old, old, cut)
+		var mb := _marks(c, old, cut)
+		var mk := ma != mb
+		if mk:
+			var la := ma.split(";"); var lb := mb.split(";")
+			for q in mini(la.size(), lb.size()):
+				if la[q] != lb[q]:
+					print("  MARKDIFF %d: %s  vs  %s" % [q, la[q], lb[q]])
+					break
+			print("  MARKS %d vs %d" % [la.size(), lb.size()])
+		var rf := _feats(old_feats, cut * TrailCourse.STEP) != _feats(f.route_feats, cut * TrailCourse.STEP)
 		# C# vs GDScript on the new stretch (and a bit before it)
 		var r := WorldRng.new(seed + g)
 		var cmp := 0
@@ -62,8 +73,8 @@ func _init() -> void:
 		var ok := lay == 0 and der == 0 and not mk and not rf and miss == 0
 		if not ok:
 			bad += 1
-		print("GROW %d: to x=%.0f n=%d  grow %d ms  adopt %d ms | layout changed %d, derived changed %d, marks changed %s, route feats changed %s | C# vs GD %d/%d mismatches  %s" % [
-			g + 1, c.end_x(), c.n, t_grow, t_adopt, lay, der, mk, rf, miss, cmp, "OK" if ok else "FAIL"])
+		print("GROW %d: to s=%.0f n=%d  grow %d ms  adopt %d ms | layout changed %d, derived changed %d, marks changed %s, route feats changed %s | C# vs GD %d/%d mismatches  %s" % [
+			g + 1, c.end_s(), c.n, t_grow, t_adopt, lay, der, mk, rf, miss, cmp, "OK" if ok else "FAIL"])
 	var cc: TrailCourse = f.course
 	var na := 0
 	for kk in cc.chunk_arches:
@@ -77,22 +88,40 @@ func _init() -> void:
 	quit()
 
 
-func _marks(c: TrailCourse, xmax: float) -> String:
+## fences / stakes well behind the old end: not within 150 m of any course point past index cut
+func _behind(o: TrailCourse, cut: int, x: float, z: float) -> bool:
+	var near := false
+	for i in range(0, mini(cut, o.n), 3):
+		if Vector2(o.X[i] - x, o.Z[i] - z).length() < 60.0:
+			near = true
+			break
+	if not near:
+		return false
+	for i in range(maxi(cut, 0), _grown.n, 3):
+		if Vector2(_grown.X[i] - x, _grown.Z[i] - z).length() < 150.0:
+			return false
+	return true
+
+
+var _grown: TrailCourse
+
+
+func _marks(c: TrailCourse, o: TrailCourse, cut: int) -> String:
 	var parts := PackedStringArray()
 	for fc in c.fences:
 		var p0: Array = fc["posts"][0]
 		var p1: Array = fc["posts"][fc["posts"].size() - 1]
-		if p1[0] < xmax:
+		if _behind(o, cut, p0[0], p0[1]) and _behind(o, cut, p1[0], p1[1]):
 			parts.append("%s,%s,%s,%d" % [p0, p1, fc["style"], fc["posts"].size()])
 	for st in c.stakes:
-		if st["x"] < xmax:
+		if _behind(o, cut, st["x"], st["z"]):
 			parts.append("%.6f,%.6f,%d,%s" % [st["x"], st["z"], st["prev"], st["caution"]])
 	return ";".join(parts)
 
 
-func _feats(list: Array, xmax: float) -> String:
+func _feats(list: Array, smax: float) -> String:
 	var parts := PackedStringArray()
 	for j in list:
-		if j.x < xmax - 60:
+		if j.s < smax - 60:
 			parts.append("%.6f,%.6f,%s,%.6f" % [j.x, j.z, j.type, j.s])
 	return ";".join(parts)

@@ -2206,7 +2206,7 @@ func level_reset_to(sp: Vector3) -> void:
 func _feature_spawn(what: String) -> Vector3:
 	var C: TrailCourse = terrain.field.course
 	var idx := -1
-	if what == "gorge" or what == "rope":
+	if what in ["gorge", "rope", "woodDrop", "skinny", "woodKicker", "bridge"]:
 		for rf in terrain.field.route_feats:
 			if rf.type == what:
 				var gi := int(rf.s / TrailCourse.STEP)
@@ -2216,10 +2216,25 @@ func _feature_spawn(what: String) -> Vector3:
 				var gj := maxi(2, gi - (int(Env.s("BMX_FEAT_BACK")) if Env.s("BMX_FEAT_BACK") != "" else 30))
 				return Vector3(C.X[gj], -atan2(C.TZ[gj], C.TX[gj]), C.Z[gj])
 		return Vector3.ZERO
-	if what.begins_with("x") or what == "tech":   # x<metres>: that far along x; tech: the first tight hairpin stack past the first mountain
+	if what == "flowtrail":   # 30 m before the first flow jump trail
+		if C.flow_starts.size() > 0:
+			var j4 := maxi(2, C.flow_starts[0] - 15)
+			print("FEATSPAWN flowtrail idx=%d at %.0f,%.0f" % [C.flow_starts[0], C.X[j4], C.Z[j4]])
+			return Vector3(C.X[j4], -atan2(C.TZ[j4], C.TX[j4]), C.Z[j4])
+		print("FEATSPAWN flowtrail none")
+		return Vector3.ZERO
+	if what == "forest":   # 30 m before the first forest singletrack (TrailCourse.FOREST)
+		for i in C.n:
+			if C.KD[i] == TrailCourse.FOREST:
+				var j3 := maxi(2, i - 15)
+				print("FEATSPAWN forest idx=%d at %.0f,%.0f" % [i, C.X[j3], C.Z[j3]])
+				return Vector3(C.X[j3], -atan2(C.TZ[j3], C.TX[j3]), C.Z[j3])
+		print("FEATSPAWN forest none")
+		return Vector3.ZERO
+	if what.begins_with("x") or what.begins_with("s") or what == "tech":   # s<metres> (or the old x<metres>): that far along the trail; tech: the first tight hairpin stack past the first mountain
 		var x0 := float(what.substr(1)) if what != "tech" else 1500.0
 		for i in C.n:
-			if C.X[i] >= x0 and (what != "tech" or absf(C.KAP[i]) > 0.1):
+			if i * TrailCourse.STEP >= x0 and (what != "tech" or absf(C.KAP[i]) > 0.1):
 				var j2 := maxi(2, i - (20 if what == "tech" else 0))
 				print("FEATSPAWN %s idx=%d at %.0f,%.0f" % [what, i, C.X[j2], C.Z[j2]])
 				return Vector3(C.X[j2], -atan2(C.TZ[j2], C.TX[j2]), C.Z[j2])

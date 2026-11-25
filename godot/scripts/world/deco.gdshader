@@ -24,6 +24,17 @@ uniform float scatter_rim = 0.0;   // > 0: only the silhouette glows (thick cact
 uniform float dapple = 0.0;
 uniform float dapple_size = 0.55;  // m, the size of a gap in the leaves
 uniform bool tint_own = false;   // cacti: UV.x = 1 keeps the vertex colour (spines, flowers, cut flesh)
+// tree trunks (2026-11-25): a bark scan (assets/textures/bark, CC0) wrapped round the upright trunk at real size: u round it in
+// whole tiles (no seam: the count comes from the instance's girth), v up it; its normal map lights the grooves
+uniform bool bark = false;
+uniform sampler2D bark_col : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D bark_nrm : hint_normal, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D bark_rgh : hint_default_white, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform float bark_tile = 0.8;     // m of bark per tile
+uniform float bark_relief = 0.9;
+uniform bool bark_uv = false;   // roots (lying down): the mesh's own UV (round it, along it in its lengths) instead of the wrap
+varying flat float v_bark_n;   // tiles round the trunk
+varying flat float v_len;      // (bark_uv) the instance's length along its x
 varying vec3 v_col;
 varying flat vec3 v_origin;   // the instance's base (distance fade)
 varying vec3 v_world;
@@ -39,6 +50,9 @@ void vertex() {
 	if (tint_own) v_col = mix(v_col, COLOR.rgb, clamp(UV.x, 0.0, 1.0));
 	v_rest = VERTEX;
 	v_origin = MODEL_MATRIX[3].xyz;
+	// the trunk mesh's mean radius is 0.13 m at scale 1: whole tiles round it, so u meets itself
+	v_bark_n = max(1.0, round(TAU * 0.13 * length(MODEL_MATRIX[0].xyz) / bark_tile));
+	v_len = length(MODEL_MATRIX[0].xyz);   // (roots: UV.y is metres of the 2 m mesh; this is its stretch)
 	if (sway > 0.0) {
 		vec3 base = MODEL_MATRIX[3].xyz;
 		float h = max(VERTEX.y - base.y, 0.0);
@@ -84,6 +98,28 @@ void fragment() {
 	ROUGHNESS = roughness;
 	METALLIC = metallic;
 	SPECULAR = specular;
+	if (bark && bark_uv) {
+		vec2 uv = vec2(UV.x, UV.y * v_len / bark_tile);
+		ALBEDO = v_col * texture(bark_col, uv).rgb;
+		ROUGHNESS = texture(bark_rgh, uv).r;
+		NORMAL_MAP = texture(bark_nrm, uv).rgb;
+		NORMAL_MAP_DEPTH = bark_relief;
+	} else if (bark) {
+		vec2 rel = v_world.xz - v_origin.xz;
+		float ang = atan(rel.y, rel.x);
+		vec2 uv = vec2(ang / TAU * v_bark_n, (v_world.y - v_origin.y) / bark_tile);
+		// the gradients from whichever of two cuts round the trunk is away from this pixel (atan jumps at -pi)
+		vec2 uv2 = vec2(fract(ang / TAU + 0.5) * v_bark_n, uv.y);
+		vec2 gx = dFdx(uv), gy = dFdy(uv);
+		vec2 gx2 = dFdx(uv2), gy2 = dFdy(uv2);
+		if (abs(gx2.x) + abs(gy2.x) < abs(gx.x) + abs(gy.x)) { gx = gx2; gy = gy2; }
+		ALBEDO = v_col * textureGrad(bark_col, uv, gx, gy).rgb;
+		ROUGHNESS = textureGrad(bark_rgh, uv, gx, gy).r;
+		vec3 nt = textureGrad(bark_nrm, uv, gx, gy).rgb * 2.0 - 1.0;
+		vec3 tv = (VIEW_MATRIX * vec4(-sin(ang), 0.0, cos(ang), 0.0)).xyz;   // round the trunk
+		vec3 bv = (VIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz;               // up it (the image runs down: -y)
+		NORMAL = normalize(NORMAL + (tv * nt.x - bv * nt.y) * bark_relief);
+	}
 }
 
 void light() {

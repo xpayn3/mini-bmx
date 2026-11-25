@@ -11,8 +11,8 @@ const WATER := TerrainField.WATER
 const S := 48.0
 const JC := 34.0
 const SMALL := ["pebble", "grass", "daisy", "tulip", "spike", "stick", "fern", "mushroom"]
-const LIST_NAMES := ["trunk", "blob", "pine", "rock", "pebble", "grass", "daisy", "tulip", "spike", "cactus0", "cactus1", "cactus2", "cactus3", "cactus4",
-	"bush", "bush1", "bush2", "bushdry", "log", "stick", "fern", "mushroom", "weed", "plank", "beam", "post", "rail", "picket", "stake", "pole", "signboard"]
+const LIST_NAMES := ["trunk", "trunk_pale", "trunk_pine", "blob", "pine", "rock", "pebble", "grass", "daisy", "tulip", "spike", "cactus0", "cactus1", "cactus2", "cactus3", "cactus4",
+	"bush", "bush1", "bush2", "bushdry", "log", "root", "stick", "fern", "mushroom", "weed", "plank", "beam", "post", "rail", "picket", "stake", "pole", "signboard"]
 const SPAN := 2.4
 const TAPE_SEG := 30
 const TAPE_W := 0.075
@@ -45,8 +45,9 @@ static func ensure_static() -> void:
 		return o
 	LEAVES = L.call([0x4f9a3a, 0x6cb544, 0x3f8a3f, 0x86c24a, 0x9bc94a, 0xe0a43a])
 	PINES = L.call([0x2f6e45, 0x3b7d4b, 0x2a5f44])
-	PLANKS = L.call([0xb98a55, 0xa87a48, 0xc49663, 0x9e6f40, 0xb0814e])
-	BEAM = TerrainField.lin(0x7a5332)
+	# the wooden features' planks in the ranch fences' weathered wood (user 2026-11-25: "same wood as the fence planks")
+	PLANKS = L.call([0x8b6a4a, 0x9a7650, 0x7d5e40, 0x85704f])
+	BEAM = TerrainField.lin(0x6e5236)
 	CACTI = L.call([0x4f8a3c, 0x5c9a45, 0x6b9e4a])
 	BUSHES = L.call([0x3f7f33, 0x4c8c38, 0x5a8f3a, 0x6a9a3e, 0x7a8f3a])
 	FERNS = L.call([0x3f8a35, 0x4f9a3c, 0x5ea544, 0x8a9a3a])
@@ -204,11 +205,19 @@ func _build() -> void:
 	_arches()
 	_boards()
 	_dist_signs()
+	_line_signs()
 	_tape()
 	for k in colliders:
 		if k.has("tape"):
 			blocked.append([k["x"], k["z"], 0.9])
 	_stage("manmade")
+	_bend_trees()
+	_roots()
+	if _root_st != null:
+		_root_st.generate_normals()
+		_root_st.generate_tangents()
+		out["roots"] = _root_st.commit_to_arrays()
+		_root_st = null
 	_trees(ox, oz)
 	_rocks(ox, oz)
 	_stage("trees+rocks")
@@ -270,11 +279,14 @@ func _build() -> void:
 	out["trail2_img"] = Image.create_from_data(NV, NV, false, Image.FORMAT_RGBA8, pT)
 	var T3a: PackedFloat32Array = gs["T3"]
 	var T4a: PackedFloat32Array = gs["T4"]
-	var pA := PackedByteArray(); pA.resize(NV * NV * 2)   # R = riders in the air, G = corner load
+	var T5a: PackedFloat32Array = gs["T5"]
+	var pA := PackedByteArray(); pA.resize(NV * NV * 4)   # R = riders in the air, G = corner load, B = how narrow the trail is
 	for o in NV * NV:
-		pA[o * 2] = roundi(clampf(T3a[o], 0, 1) * 255)
-		pA[o * 2 + 1] = roundi(clampf(T4a[o], 0, 1) * 255)
-	out["trail3_img"] = Image.create_from_data(NV, NV, false, Image.FORMAT_RG8, pA)
+		pA[o * 4] = roundi(clampf(T3a[o], 0, 1) * 255)
+		pA[o * 4 + 1] = roundi(clampf(T4a[o], 0, 1) * 255)
+		pA[o * 4 + 2] = roundi(clampf(T5a[o], 0, 1) * 255)
+		pA[o * 4 + 3] = 255
+	out["trail3_img"] = Image.create_from_data(NV, NV, false, Image.FORMAT_RGBA8, pA)
 	# where puddles can be (world/trail_puddle.gd: tyre dust stops over them); empty for chunks with no wet road
 	out["pud"] = TrailPuddle.table(TRa, T2a, TW, norms, NV)
 	# ---- grass field data (world/grass_field.gd): the ground's own heights + land colour, density in alpha ----
@@ -337,6 +349,7 @@ func ground_stage(ox: float, oz: float) -> Dictionary:
 	var T2 := PackedFloat32Array(); T2.resize(NV * NV * 4)   # road, dry biome, built jump, run-off skid's strength
 	var T3 := PackedFloat32Array(); T3.resize(NV * NV)       # riders in the air over a jump here
 	var T4 := PackedFloat32Array(); T4.resize(NV * NV)       # corner load: how hard riders press the line (0 straight .. 1 tight bend)
+	var T5 := PackedFloat32Array(); T5.resize(NV * NV)       # how narrow the trail is (0 a road .. 1 a forest singletrack): the drawn edge wanders less
 	for iz in range(-1, N + 2):
 		for ix in range(-1, N + 2):
 			var x := ox - S / 2 + ix * d
@@ -367,6 +380,7 @@ func ground_stage(ox: float, oz: float) -> Dictionary:
 				T2[o * 4 + 2] = jm
 				T3[o] = f.fo_air
 				T4[o] = TerrainField.corner_load(f.q_k) if on else 0.0
+				T5[o] = clampf(1.6 - f.q_w, 0.0, 1.0) if on else 0.0
 				T2[o * 4 + 3] = (f.cROS[f.q_i] + (f.cROS[f.q_i + 1] - f.cROS[f.q_i]) * f.q_t) if on else 0.0
 				if on:
 					# same as the C# bake: average the distance to the 2 m-piece centreline over ~1 m (no facets in bends)
@@ -407,7 +421,7 @@ func ground_stage(ox: float, oz: float) -> Dictionary:
 			DRY[o] = maxf(pre_b[o * 4], pre_b[o * 4 + 3])   # (no grass on ash)
 			LG[o] = f.cl_g
 			LD[o] = f.cl_d
-	return {"G": G, "verts": verts, "norms": norms, "uvs": uvs, "LG": LG, "LD": LD, "TW": TW, "SW": SW, "DRY": DRY, "TR": TR, "T2": T2, "T3": T3, "T4": T4}
+	return {"G": G, "verts": verts, "norms": norms, "uvs": uvs, "LG": LG, "LD": LD, "TW": TW, "SW": SW, "DRY": DRY, "TR": TR, "T2": T2, "T3": T3, "T4": T4, "T5": T5}
 
 
 ## clears grass density (alpha of the grass_img bytes) within r of (x, z), soft over the outer 30 %
@@ -638,6 +652,12 @@ func _course_fences(rs: WorldRng) -> void:
 		var P: Array = fc["posts"]
 		var cur := []
 		for k in P.size():
+			# a gap where a B-line crosses: the run ends before this post and starts again after it
+			if _on_bline(P[k][0], P[k][1], 1.6) or (k + 1 < P.size() and _on_bline((P[k][0] + P[k + 1][0]) * 0.5, (P[k][1] + P[k + 1][1]) * 0.5, 1.6)):
+				if cur.size() > 1:
+					_run_fence(cur, fc["style"], rs, 2)
+				cur = []
+				continue
 			if WorldRng.jround(P[k][0] / S) == cx and WorldRng.jround(P[k][1] / S) == cz:
 				if cur.is_empty():
 					cur.append(P[k])
@@ -769,8 +789,9 @@ func _boards() -> void:
 			if sqrt(bx * bx + bz * bz) < 12:
 				continue
 			h = height(bx, bz)
-			f.jump_eval(bx, bz)
-			if h >= WATER + 0.4 and f.fo_h <= 0.05 and not is_blocked(bx, bz, -0.4):
+			# (the board runs across the trail, turned ~25 deg: the same direction as below)
+			var a2 := 0.45 * side
+			if _sign_spot_ok(bx, bz, nx * cos(a2) - nz * sin(a2), nx * sin(a2) + nz * cos(a2), 1.9):
 				found = true
 				break
 		if OS.get_environment("BMX_GATE_PROBE") != "":
@@ -804,8 +825,14 @@ func _boards() -> void:
 			var gh := height(ppx, ppz)
 			add.call("post", Vector3(ppx, gh + 2.5 / 2 - 0.18, ppz), euler_xyz(0, yaw, 0), Vector3(1, 2.5, 1), postc)
 		# the face: one painted plank board (3 planks, the sponsor printed on, both sides: SignTex.billboard), its
-		# own mesh like the distance sign's plate (Terrain._panel_labels), smashed off in one piece
-		var y0: float = h + 0.55
+		# own mesh like the distance sign's plate (Terrain._panel_labels), smashed off in one piece. Over the HIGHEST
+		# ground under it (on a slope the centre's height buried one end; user 2026-11-25)
+		var hmax := h
+		for s2 in [-1.0, -0.5, 0.5, 1.0]:
+			hmax = maxf(hmax, height(bx + dx * s2 * W / 2, bz + dz * s2 * W / 2))
+		var y0: float = hmax + 0.55
+		for s3 in [-1.0, 0.0, 1.0]:   # (nothing else stands here now: signs, other boards)
+			blocked.append([bx + dx * s3 * W * 0.4, bz + dz * s3 * W * 0.4, 1.1])
 		var plate_x := Transform3D(_scaled(rb, W, 1.5, 0.06), Vector3(bx, y0 + 0.75, bz))
 		panel["parts"].append({"kind": "signboard", "i": -1, "col": Color.WHITE, "xform": plate_x, "scale": Vector3(W, 1.5, 0.06)})
 		panel["plate"] = {"sp": spn, "size": Vector2(W, 1.5), "planks": 3, "xform": plate_x}
@@ -817,6 +844,103 @@ func _boards() -> void:
 		panel["cz"] = bz
 		panels.append(panel)
 
+
+## line-choice signs (B-lines, TerrainField.alt_feats): where a B-line leaves the trail, a sign on a post between the two
+## lines facing the riders: the A line (the built feature) black, the B line (round it) blue (trail difficulty colours)
+func _line_signs() -> void:
+	var C: TrailCourse = f.course
+	for af in f.alt_feats:
+		var rf = f.route_feats[af[0]]
+		var o: int = int(af[1]) * 7
+		var side: float = f.alt_lines[o + 6]
+		var s: float = rf.s - TerrainField.ALT_IN - 6.0   # 6 m before the split, beside the trail past the tape, on the B-line's side
+		var p := C.at(s)
+		var bx: float = p[0] + float(-p[3]) * side * (float(C.W[int(p[4])]) + 2.4)
+		var bz: float = p[1] + float(p[2]) * side * (float(C.W[int(p[4])]) + 2.4)
+		if WorldRng.jround(bx / S) != cx or WorldRng.jround(bz / S) != cz:
+			continue
+		var tx: float = p[2]
+		var tz: float = p[3]
+		var names := {"table": "TABLE", "kicker": "KICKER", "tableLine": "JUMP LINE", "woodDrop": "DROP", "double": "DOUBLE",
+			"doubleLine": "JUMP LINE", "flow": "KICKER", "woodKicker": "WOOD KICKER"}
+		_table_sign(bx, height(bx, bz), bz, -tx, -tz, "A LINE", str(names.get(rf.type, "JUMP")), TerrainField.lin(0x111111), -0.35 * side)
+		var b2x := bx + float(-p[3]) * side * 0.95
+		var b2z := bz + float(p[2]) * side * 0.95
+		_table_sign(b2x, height(b2x, b2z), b2z, -tx, -tz, "B LINE", "EASIER", TerrainField.lin(0x0057d8), 0.35 * side)
+		blocked.append([bx, bz, 1.2])
+
+
+## a small table sign on a stick (the distance sign's build): face looking along (px, pz), turned by tw, field colour
+## col, big text over a small one
+func _table_sign(bx: float, h: float, bz: float, px: float, pz: float, big: String, small_t: String, col: Color, tw: float) -> void:
+	var yaw := atan2(px, pz) + tw
+	var fx := sin(yaw)
+	var fz := cos(yaw)
+	var rb := Basis(Vector3.UP, yaw)
+	var base := Vector3(bx, h - 0.15, bz)
+	var panel := {"broken": false, "parts": [], "style": "billboard"}
+	var add := func(kind: String, off: Vector3, scl: Vector3, c: Color) -> void:
+		var bs := _scaled(rb, scl.x, scl.y, scl.z)
+		var pos: Vector3 = base + off
+		var k := _push(kind, bs, pos, c)
+		panel["parts"].append({"kind": kind, "i": k, "col": c, "xform": Transform3D(bs, pos), "scale": scl})
+	var white_c := TerrainField.lin(0xffffff)
+	white_c.a = 1.0
+	col.a = 1.0
+	add.call("post", Vector3(0, 0.58, 0), Vector3(0.7, 1.1, 0.5), TerrainField.lin(0x6b4a30))
+	add.call("rail", Vector3(0, 1.505, 0), Vector3(0.81, 0.81, 0.07), white_c)
+	add.call("rail", Vector3(0, 1.596, 0), Vector3(0.81, 0.628, 0.09), col)
+	colliders.append({"x": bx, "z": bz, "r": 0.3, "fence": panel, "fence_style": "billboard"})
+	var nrm := Vector3(fx, 0, fz)
+	var lb := Basis(Vector3(fz, 0, -fx), Vector3.UP, Vector3(fx, 0, fz))
+	panel["cx"] = bx
+	panel["cz"] = bz
+	panel["bb"] = {"text": big, "col": Color.WHITE, "w": 0.74, "h": 0.3, "basis": lb, "at": base + Vector3(0, 1.596, 0), "nrm": nrm}
+	panel["bb_more"] = [{"text": small_t, "col": Color.html("#313131"), "w": 0.7, "h": 0.1, "basis": lb, "at": base + Vector3(0, 1.191, 0), "nrm": nrm}]
+	panels.append(panel)
+
+
+## a roadside board / sign fits at (bx, bz) running along (dx, dz) half m each way: dry, off the jumps, clear of fences (their
+## colliders), other boards and signs (blocked) and the tape stakes, and on ground level enough that it isn't half buried
+## (user 2026-11-25: boards / signs / fences overlapped, boards sat clipped into slopes)
+func _sign_spot_ok(bx: float, bz: float, dx: float, dz: float, half: float) -> bool:
+	var why := _sign_spot_why(bx, bz, dx, dz, half)
+	if why != "" and OS.get_environment("BMX_GATE_PROBE") != "":
+		print("SIGNSPOT no: ", why)
+	return why == ""
+
+
+func _sign_spot_why(bx: float, bz: float, dx: float, dz: float, half: float) -> String:
+	var hs := []
+	for s: float in [-1.0, -0.5, 0.0, 0.5, 1.0]:
+		var x: float = bx + dx * s * half
+		var z: float = bz + dz * s * half
+		var h := height(x, z)
+		if h < WATER + 0.4:
+			return "water"
+		f.jump_eval(x, z)
+		if f.fo_h > 0.05:
+			return "jump"
+		if is_blocked(x, z, -0.6):   # (fence panels reserve a generous 1.6 m: their posts are checked exactly below)
+			return "blocked"
+		if f.trail(x, z) > 0.05:
+			return "trail"
+		if f.q_d < f.q_w + 2.4:   # (the race tape runs W + 1.7 out: planted after the boards)
+			return "tape line"
+		for c in colliders:
+			if c.has("fence") or c.has("tape"):
+				var ex: float = c.x - x
+				var ez: float = c.z - z
+				if ex * ex + ez * ez < 0.9 * 0.9:
+					return "fence"
+		hs.append(h)
+	if hs.max() - hs.min() > 0.45:
+		return "slope along %.2f" % (hs.max() - hs.min())
+	# and not on a steep bank front to back
+	var fbx := -dz * 0.7
+	var fbz := dx * 0.7
+	var fb := absf(height(bx + fbx, bz + fbz) - height(bx - fbx, bz - fbz))
+	return "" if fb < 0.5 else "slope across %.2f" % fb
 
 ## distance tables: a square printed plate on a plain stick beside the road every 5 km, each leaning
 ## a little differently (smashable like the billboards)
@@ -840,12 +964,12 @@ func _dist_signs() -> void:
 			bx = C.X[i] + nx * (C.W[i] + cand[1])
 			bz = C.Z[i] + nz * (C.W[i] + cand[1])
 			h = height(bx, bz)
-			f.jump_eval(bx, bz)
-			if h >= WATER + 0.4 and f.fo_h <= 0.05 and not is_blocked(bx, bz, -0.4):
+			if _sign_spot_ok(bx, bz, tx, tz, 0.45):
 				found = true
 				break
 		if not found:
 			continue
+		blocked.append([bx, bz, 1.0])
 		# the face looks back up the trail at the riders
 		var px := -tx
 		var pz := -tz
@@ -898,7 +1022,14 @@ func _plant(st: Dictionary) -> Array:
 	f.jump_eval(x, z)
 	if h < -1.9 or f.fo_h > 0.05:
 		return []
+	if _on_bline(x, z, 1.2):   # (a gap in the tape where a B-line leaves / joins)
+		return []
 	return [x, z, h]
+
+
+## within r of a B-line (TerrainField.alt_near): tape and fences leave a gap there
+func _on_bline(x: float, z: float, r: float) -> bool:
+	return f.alt_dist(x, z) < TerrainField.ALT_W + r
 
 
 func _tape() -> void:
@@ -991,6 +1122,7 @@ func _tape() -> void:
 # ---------------- trees and cacti ----------------
 const TREE_TRIES := 100   # placement tries per chunk (90 read thin, 140 too dense: user 2026-11-22)
 const TREE_K := 1.4        # every tree this much bigger (they read small next to the rider)
+const TALL_CROWN := 6.5    # m: the lowest a tall forest pine's crown starts (over the trail camera)
 
 ## a crown of radius r at (x, z) stays clear of the trail and its paths (the trees' own spot check only tests the trunk)
 func _crown_clear(x: float, z: float, r: float) -> bool:
@@ -1000,6 +1132,168 @@ func _crown_clear(x: float, z: float, r: float) -> bool:
 		if f.trail(px, pz) > 0.02 or absf(f.pathN(px, pz)) < 0.1 or f.jump_mask(px, pz) > 0:
 			return false
 	return true
+
+## tree roots across a forest singletrack (TrailCourse.roots; user: "spread splines along the terrain with some root math,
+## then a simple sweep that follows the terrain, a smart rooting system"). At each spot a pine stands 1.9-3 m off the trail
+## and its roots GROW out of its foot: 4-6 main roots (2-3 aimed across the trail, long enough to reach the far side, the
+## rest round the tree), each a random walk with a smooth wandering curvature, tapering, branching now and then (two
+## levels); every root is then swept as a tube whose rings sit ON the ground under them (_sweep). Where a root crosses the
+## trail the tyres feel it (a chain of low domes)
+var _root_st: SurfaceTool = null   # this chunk's roots (out["roots"]: Terrain makes one mesh)
+
+
+func _roots() -> void:
+	var C: TrailCourse = f.course
+	for i in C.chunk_roots.get(TrailCourse.chunk_key(cx, cz), PackedInt32Array()):
+		_root_system(C, i)
+
+
+func _root_system(C: TrailCourse, i: int) -> void:
+	var rr := WorldRng.new(f.seed_value * 7919 + i * 104729 + 17)
+	var nx: float = -C.TZ[i]
+	var nz: float = C.TX[i]
+	var k: float = C.KAP[i]
+	var side := 1.0 if rr.next() < 0.5 else -1.0
+	if absf(k) > 1.0 / 25.0:
+		side = -signf(k)   # in a tight bend the tree stands on the outside (riders cut the inside)
+	var off: float = C.W[i] + 2.2 + rr.next() * 1.2 + (1.0 if absf(k) > 1.0 / 25.0 else 0.0)   # (closer, riders swinging through the turns hit the trunk)
+	var tx: float = C.X[i] + nx * off * side
+	var tz: float = C.Z[i] + nz * off * side
+	if f.jump_mask(tx, tz) > 0 or is_blocked(tx, tz, 0.6):
+		return
+	var h := height(tx, tz)
+	if h < WATER + 0.6:
+		return
+	# the tree
+	var sc := (1.1 + rr.next() * 0.45) * TREE_K
+	var py := sc * (1.6 + rr.next() * 0.6)
+	var cb := maxf(TALL_CROWN, sc * 3.2) + rr.next() * 2.5
+	var yaw := rr.next() * 6.28
+	put("trunk_pine" if rr.next() < 0.45 else "trunk", tx, h - 0.1, tz, sc, cb + 0.2 + py * 0.15, sc, yaw)
+	put("pine", tx, h + cb, tz, sc * 0.95, py, sc * 0.95, yaw, PINES[int(rr.next() * PINES.size())])
+	var tr := 0.13 * sc   # the trunk's radius at its foot
+	colliders.append({"x": tx, "z": tz, "r": tr + 0.03, "ceil": h + cb + 2.8 * py})
+	blocked.append([tx, tz, tr + 0.4])
+	# its roots
+	if _root_st == null:
+		_root_st = SurfaceTool.new()
+		_root_st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var tint := Color(0.85 + rr.next() * 0.3, 0.82 + rr.next() * 0.25, 0.8 + rr.next() * 0.2)
+	var toward := atan2(-nz * side, -nx * side)   # from the tree across the trail
+	var cross := 2 + int(rr.next() * 2.0)
+	var count := cross + 2 + int(rr.next() * 2.0)
+	for q in count:
+		var head: float
+		var len: float
+		if q < cross:
+			head = toward + (rr.next() - 0.5) * 1.1
+			len = off + 1.2 + rr.next() * 1.6   # past the far edge of the trail
+		else:
+			head = toward + PI * (0.35 + rr.next() * 1.3) * (1.0 if rr.next() < 0.5 else -1.0)
+			len = 1.0 + rr.next() * 1.4
+		var st := Vector2(tx, tz) + Vector2(cos(head), sin(head)) * tr * 0.8
+		_grow_root(st, head, len, (0.15 + rr.next() * 0.07) * sc / TREE_K, 0, rr, tint)
+
+
+func _grow_root(p: Vector2, head: float, len: float, r0: float, depth: int, rr: WorldRng, tint: Color) -> void:
+	const STEP := 0.12
+	var n := maxi(3, int(len / STEP))
+	var path := PackedVector2Array([p])
+	var hd := head
+	var curv := (rr.next() - 0.5) * 0.3
+	for s in n:
+		curv = curv * 0.86 + (rr.next() - 0.5) * 0.32   # a smooth wander: roots bend, never kink
+		hd += curv * 0.22
+		p += Vector2(cos(hd), sin(hd)) * STEP
+		path.append(p)
+		if depth < 2 and s > n * 0.2 and s < n * 0.8 and rr.next() < 0.045:
+			var tb := float(s) / n
+			var rb := lerpf(r0, r0 * 0.35, tb) * 0.75
+			if rb > 0.015:
+				_grow_root(p, hd + (0.45 + rr.next() * 0.6) * (1.0 if rr.next() < 0.5 else -1.0), (len - s * STEP) * (0.35 + rr.next() * 0.35), rb, depth + 1, rr, tint)
+	_sweep(path, r0, maxf(0.025, r0 * 0.35), rr.next() * 6.28, tint, depth == 0)
+
+
+## a tube along a path ON the ground: every ring at the ground's height under it, turned to its slope, its top 0.25-0.6 x
+## its radius proud (more at the tree, where it flares); where it crosses the trail, low domes the tyres feel
+func _sweep(path: PackedVector2Array, r0: float, r1: float, ph: float, tint: Color, main: bool) -> void:
+	const NR := 7
+	var m := path.size()
+	var rings := []
+	var vlen := 0.0
+	for i in m:
+		var t := float(i) / (m - 1)
+		var c2 := path[i]
+		var d2 := (path[mini(i + 1, m - 1)] - path[maxi(i - 1, 0)]).normalized()
+		if i > 0: vlen += (path[i] - path[i - 1]).length()
+		var g := height(c2.x, c2.y)
+		var nrm := Vector3(height(c2.x - 0.15, c2.y) - height(c2.x + 0.15, c2.y), 0.3, height(c2.x, c2.y - 0.15) - height(c2.x, c2.y + 0.15)).normalized()
+		var flare := 1.0 + 0.7 * maxf(0.0, 1.0 - t * 8.0)   # thick where it leaves the trunk
+		var r := lerpf(r0, r1, pow(t, 1.3)) * flare * (1.0 + 0.14 * sin(t * 23.0 + ph) + 0.07 * sin(t * 57.0 + ph))
+		var proud := r * (0.4 + 0.3 * (0.5 + 0.5 * sin(t * 7.3 + ph)) + 0.35 * maxf(0.0, 1.0 - t * 6.0))
+		# (+3.5 cm: the drawn ground carries a few cm of micro detail over the smooth height it reads; without it the roots
+		# sank into it and read as thin cracks)
+		var c := Vector3(c2.x, g, c2.y) + nrm * (proud - r * 0.7 + 0.035)
+		var sd := Vector3(-d2.y, 0, d2.x)
+		sd = (sd - nrm * sd.dot(nrm)).normalized()
+		var ring := []
+		for k in NR:
+			var an := TAU * k / NR
+			ring.append(c + sd * cos(an) * r + nrm * sin(an) * r * 0.7)
+		rings.append([ring, vlen])
+		if main and i % 3 == 1 and f.trail(c2.x, c2.y) > 0.25:
+			colliders.append({"x": c2.x, "z": c2.y, "r": 0.2, "top": g + minf(0.07, proud), "base": g, "sink": 0.05})
+	var st := _root_st
+	for i in m - 1:
+		var ra: Array = rings[i][0]; var rb: Array = rings[i + 1][0]
+		var va: float = rings[i][1]; var vb: float = rings[i + 1][1]
+		for k in NR:
+			var k2 := (k + 1) % NR
+			var u0 := float(k) / NR
+			var u1 := float(k + 1) / NR
+			for q in [[ra[k], u0, va], [rb[k], u0, vb], [rb[k2], u1, vb], [ra[k], u0, va], [rb[k2], u1, vb], [ra[k2], u1, va]]:
+				st.set_color(tint)
+				st.set_uv(Vector2(q[1], q[2]))
+				st.add_vertex(q[0])
+
+## how far from the centreline a tree / stump / log may stand beside a forest singletrack (the last query's point):
+## the narrow trail's dirt fades out within ~0.7 m, closer than a rider needs (bars, lean, running wide)
+func _forest_clear() -> float:
+	return f.q_w + (1.6 if absf(f.q_k) > 1.0 / 25.0 else 1.3)
+
+
+## a big old pine on the inside of a tight forest bend (TrailCourse.bend_trees): the trail wraps round it
+func _bend_trees() -> void:
+	var C: TrailCourse = f.course
+	for i in C.chunk_btrees.get(TrailCourse.chunk_key(cx, cz), PackedInt32Array()):
+		var k: float = C.KAP[i]
+		var sg := signf(k)
+		var r := 1.0 / absf(k)
+		var off := minf(C.W[i] + 1.6 + TrailCourse._hash(i, 71) * 1.2, r * 0.7)
+		var x: float = C.X[i] - C.TZ[i] * off * sg
+		var z: float = C.Z[i] + C.TX[i] * off * sg
+		if f.jump_mask(x, z) > 0 or is_blocked(x, z, 0.5):
+			continue
+		var h := height(x, z)
+		if h < WATER + 0.6:
+			continue
+		var sc := (1.75 + TrailCourse._hash(i, 72) * 0.55) * TREE_K
+		var py := sc * (2.3 + TrailCourse._hash(i, 73) * 0.6)
+		var yaw := TrailCourse._hash(i, 74) * 6.28
+		var cb := maxf(TALL_CROWN + 2.0, sc * 3.6)   # an old giant: bare trunk high up, the crown over everything
+		put("trunk", x, h - 0.15, z, sc, cb + 0.3 + py * 0.2, sc, yaw)
+		put("pine", x, h + cb, z, sc * 1.05, py, sc * 1.05, yaw, PINES[int(TrailCourse._hash(i, 75) * PINES.size())])
+		colliders.append({"x": x, "z": z, "r": 0.16 * sc + 0.02, "ceil": h + cb + 2.8 * py})
+		blocked.append([x, z, 0.16 * sc + 0.4])
+		# a few stones round its roots, on the side away from the trail (visual: inside the trunk's own clearance)
+		for q in 4:
+			var a := atan2(C.TX[i] * sg, -C.TZ[i] * sg) + (TrailCourse._hash(i, 80 + q) - 0.5) * 2.4
+			var rr := 0.16 * sc + 0.35 + TrailCourse._hash(i, 90 + q) * 0.5
+			var rx := x + cos(a) * rr
+			var rz := z + sin(a) * rr
+			var rs := 0.12 + TrailCourse._hash(i, 100 + q) * 0.2
+			put("rock", rx, height(rx, rz) - rs * 0.3, rz, rs * 1.3, rs * 0.7, rs, TrailCourse._hash(i, 110 + q) * 6.28, null, 0.5)
+
 
 func _trees(ox: float, oz: float) -> void:
 	for i in TREE_TRIES:
@@ -1014,9 +1308,18 @@ func _trees(ox: float, oz: float) -> void:
 		if not roadside:
 			pf = maxf(pf, f.b_forest * 0.85)
 		pf *= (1.0 - 0.75 * f.b_cold) * (1.0 - 0.6 * f.b_wet) * (1.0 - 0.5 * f.b_sav) * (1.0 - 0.95 * f.b_ash)
+		# beside a forest singletrack the trees stand thick and right up to its edge (precision riding: user reference)
+		var tr: float = f.trail(x, z)
+		var fe: bool = f.q_d < TerrainField.QR and f.q_kind == TrailCourse.FOREST
+		if fe:
+			pf = maxf(pf, 0.95)
 		if rnd.next() > pf:
 			continue
-		if f.trail(x, z) > 0.02 or absf(f.pathN(x, z)) < 0.1 or f.jump_mask(x, z) > 0 or is_blocked(x, z, 0.8):
+		# (bars + lean need ~1.2 m from the line on straights; in a tight bend riders cut in and lean ~40 deg: there the front
+		# wheel met trunks 1.25 m off the line, so 1.6 m more room)
+		if fe:   # a trunk needs this much room from the line (1.3: running a metre wide out of a turn met trunks at 0.9)
+			tr = 0.0 if f.q_d > _forest_clear() else 1.0
+		if tr > 0.02 or absf(f.pathN(x, z)) < 0.1 or f.jump_mask(x, z) > 0 or is_blocked(x, z, 0.8):
 			continue
 		var h := ok_spot(x, z)
 		if is_nan(h):
@@ -1028,7 +1331,7 @@ func _trees(ox: float, oz: float) -> void:
 		if f.b_ash > 0.4:
 			# a dead snag: a bare trunk
 			var snag := sc * TREE_K * (0.9 + rnd.next() * 0.8)
-			put("trunk", x, h - 0.1, z, snag * 1.0, snag * 1.5, snag * 1.0, yaw)
+			put("trunk_pale", x, h - 0.1, z, snag * 1.0, snag * 1.5, snag * 1.0, yaw)
 			colliders.append({"x": x, "z": z, "r": 0.14 * snag + 0.02, "ceil": h + snag * 1.5})
 			continue
 		if rnd.next() < dry * (1.0 - 0.9 * f.b_sav):
@@ -1044,15 +1347,24 @@ func _trees(ox: float, oz: float) -> void:
 			continue
 		var ceil_h := 0.0
 		sc *= TREE_K
-		if h > 4 or rnd.next() < 0.3 + rug * 0.6 + f.b_forest * 0.65 + f.b_cold * 0.5:
+		if fe or h > 4 or rnd.next() < 0.3 + rug * 0.6 + f.b_forest * 0.65 + f.b_cold * 0.5:
 			# pines: tall and slim, the odd one a real giant (up to ~13 m); smaller up in the alpine
 			sc *= 1.0 - 0.3 * f.b_cold
 			var py := sc * (1.5 + rnd.next() * 0.7 + pow(rnd.next(), 4.0) * 0.9)
-			if not _crown_clear(x, z, sc * 1.05):
+			# tall forest (strong pine forest, or beside a forest singletrack): long bare trunks, the crown high up, so riders
+			# (and the camera behind them) ride under the canopy, not through the branches (user, 2026-11-25)
+			var tall: bool = fe or f.b_forest > 0.5
+			var cb := sc * 0.6   # crown base above the ground
+			if tall:
+				cb = maxf(TALL_CROWN, sc * 3.2) + rnd.next() * 3.0
+				sc *= 1.15
+			if not fe and not tall and not _crown_clear(x, z, sc * 1.05):
 				continue
-			put("trunk", x, h - 0.1, z, sc, sc * 0.9 + py * 0.15, sc, yaw)
-			put("pine", x, h + sc * 0.6, z, sc * 1.1, py, sc * 1.1, yaw, PINES[int(rnd.next() * PINES.size())])
-			ceil_h = h + sc * 0.6 + 2.8 * py
+			if tall and not fe and not _crown_clear(x, z, sc * 0.5):
+				continue   # (a tall trunk only needs its trunk off the trail: its crown is overhead)
+			put("trunk_pine" if rnd.next() < 0.45 else "trunk", x, h - 0.1, z, sc, cb + 0.2 + py * 0.15, sc, yaw)
+			put("pine", x, h + cb, z, sc * (0.95 if tall else 1.1), py, sc * (0.95 if tall else 1.1), yaw, PINES[int(rnd.next() * PINES.size())])
+			ceil_h = h + cb + 2.8 * py
 		elif f.b_sav > 0.4:
 			# savanna: a thin trunk under a wide, flat crown
 			if not _crown_clear(x, z, sc * 2.4):
@@ -1066,7 +1378,7 @@ func _trees(ox: float, oz: float) -> void:
 				continue
 			var th := sc * (1.1 + rnd.next() * 0.6)
 			ceil_h = h + th + sc * 1.8
-			put("trunk", x, h - 0.1, z, sc, th + 0.3, sc, yaw)
+			put("trunk_pale" if rnd.next() < 0.6 else "trunk", x, h - 0.1, z, sc, th + 0.3, sc, yaw)
 			put("blob", x, h + th + sc * 0.7, z, sc * 1.2, sc * 1.05, sc * 1.2, yaw, LEAVES[int(rnd.next() * LEAVES.size())], 0.6)
 			if rnd.next() < 0.5:
 				var bx := x + (rnd.next() - .5) * sc
@@ -1270,6 +1582,8 @@ func _nature(ox: float, oz: float) -> void:
 		var x := ox + (rn.next() - .5) * S
 		var z := oz + (rn.next() - .5) * S
 		if f.trail(x, z) > 0.03 or f.jump_mask(x, z) > 0 or is_blocked(x, z, 0.6) or sqrt(x * x + z * z) < 10:
+			continue
+		if f.q_d < TerrainField.QR and f.q_kind == TrailCourse.FOREST and f.q_d < _forest_clear():
 			continue
 		var h := ok_spot(x, z, WATER + 0.5)
 		if is_nan(h):

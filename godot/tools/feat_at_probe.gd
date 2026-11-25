@@ -7,12 +7,11 @@ func _init() -> void:
 	var sd := int(args[0])
 	var f := TerrainField.new()
 	f.setup(sd)
-	var want_x := 0.0
-	for a in args.slice(1): want_x = maxf(want_x, float(a.split(",")[0]))
+	# grow until every point asked about is on the trail (the trail runs any way: x says nothing)
 	var guard := 0
-	while f.course.end_x() < want_x + 200.0 and guard < 10:
+	while guard < 10 and args.slice(1).any(func(a): var q: PackedStringArray = a.split(","); return f.route_dist(float(q[0]), float(q[1])) > 30.0):
 		var k = f.fork()
-		k.grow_course(f.course.end_x() + Terrain.GROW_STEP)
+		k.grow_course(f.course.end_s() + Terrain.GROW_STEP)
 		f.adopt_course(k)
 		guard += 1
 	for a in args.slice(1):

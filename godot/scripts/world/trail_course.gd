@@ -6,9 +6,11 @@ extends RefCounted
 ## query() lives in TerrainField (per-thread result cache); this holds the immutable layout.
 
 const STEP := 2.0
-enum { START = 0, ROAD = 1, SWITCH = 2, ESSES = 3, ROCKS = 4, JUMP = 5, FINISH = 6 }
-const WIDTH := [3.0, 2.7, 1.35, 1.45, 1.7, 2.5, 3.0]
-const BERM := [0.0, 0.45, 1.0, 0.9, 0.3, 0.0, 0.0]
+enum { START = 0, ROAD = 1, SWITCH = 2, ESSES = 3, ROCKS = 4, JUMP = 5, FINISH = 6, FOREST = 7 }
+## (half-widths, m) FOREST = a narrow singletrack through the trees (2026-11-25, user reference: cut into a wooded
+## hillside, tight turns with tall narrow berms, trees right at the edge: precision riding)
+const WIDTH := [3.0, 2.7, 1.35, 1.45, 1.7, 2.5, 3.0, 0.35]
+const BERM := [0.0, 0.45, 1.0, 0.9, 0.3, 0.0, 0.0, 1.8]
 const CELL := 16.0
 const QR := 19.0
 const D2R := PI / 180.0
@@ -81,6 +83,18 @@ const BOARD_EVERY := 41     # one every ~80 m, alternating sides
 var _M  # TerrainField (zc, landform, pitches, water)
 var _r: WorldRng
 var _x := 0.0
+var _sps := PackedFloat64Array()   # (_finish) each point's s along the route spine
+var _send := 0.0
+## flow rules (2026-11-25, Phase B): while laying out, the turtle keeps an estimate of the speed a rider carries here (_v,
+## from the land's fall: gravity in, rolling + air drag out, pedalling when slow, capped by every bend it lays) and sizes bends
+## to it, eases into and out of every bend, alternates bends, spaces them by time, and only lays the tight sections on
+## steep hillsides. BMX_OLD_FLOW=1 = the layout before (tests).
+static var OLD_FLOW := OS.get_environment("BMX_OLD_FLOW") != ""
+const A_BEND := 9.4      # m/s^2 a rider takes a bend with (A_RIDE + a modest berm's share of g)
+const CLO_MAX := 6       # steps (12 m): the most an arc's curvature ramps in / out over
+var _v := 4.0           # m/s: the speed estimate at the turtle
+var _hv := NAN          # the land's height at the last point it laid
+var _lt := 1.0          # the side of the last road bend (+1 / -1)   # the route spine's s at the course's last point (how far it is laid out: _L is in s)
 var _z := 0.0
 var _h := 0.0
 var _cells := {}
@@ -120,23 +134,23 @@ static func make(rnd: WorldRng, field, hill_len: float, corridor: float, course_
 
 
 ## the furthest x laid out so far
-func end_x() -> float:
-	return _x
+func end_s() -> float:
+	return _send
 
 
 ## a copy of this course laid out on to x = to_x (field: the TerrainField to read the land from; call
 ## plan_marking(field) on the result once the field queries it). This course is not changed.
-func grown(field, to_x: float) -> TrailCourse:
+func grown(field, to_s: float) -> TrailCourse:
 	var c := TrailCourse.new()
 	c._M = field
 	c._r = WorldRng.new()
 	c._r.a = _r.a
 	c._hill = _hill
-	c._L = to_x
+	c._L = to_s
 	c._corr = _corr
 	c._mark_seed = _mark_seed
-	c._x = _x; c._z = _z; c._h = _h
-	c.X = X.duplicate(); c.Z = Z.duplicate(); c.KD = KD.duplicate()
+	c._x = _x; c._z = _z; c._h = _h; c._v = _v; c._hv = _hv; c._lt = _lt; c._forest_end = _forest_end
+	c.X = X.duplicate(); c.Z = Z.duplicate(); c.KD = KD.duplicate(); c.flow_starts = flow_starts.duplicate()
 	c._cells = _cells.duplicate()
 	c._build()
 	c._finish()
@@ -174,15 +188,30 @@ func _clashes(from: int, gap: float = 19.0) -> bool:
 						var ddz := Z[i] - Z[j]
 						if sqrt(ddx * ddx + ddz * ddz) < gap:
 							return true
-		if absf(Z[i] - _M.zc(X[i])) > _corr + 15:
-			return true
+		if (i - from) % 2 == 0:
+			_M.spine_near(X[i], Z[i])
+			if _M.sp_ad > _corr + 15:
+				return true
 	return false
 
 
-func _emit(kind: int) -> void:
+func _emit(kind: int, dh: float = 0.0) -> void:
 	_x += cos(_h) * STEP
 	_z += sin(_h) * STEP
 	X.append(_x); Z.append(_z); KD.append(kind)
+	if OLD_FLOW:
+		return
+	var h: float = _M.landform(_x, _z)
+	var v2 := _v * _v
+	if not is_nan(_hv):
+		v2 += 2.0 * 9.81 * (_hv - h)
+	v2 -= 2.0 * STEP * (VA_ROLL + VA_DRAG * v2)
+	if _v < VA_PED_TOP:
+		v2 += 2.0 * VA_PEDAL * STEP
+	if absf(dh) > 1e-6:
+		v2 = minf(v2, A_BEND * STEP / absf(dh))   # a bend of radius STEP / dh: no faster than its grip allows
+	_v = clampf(sqrt(maxf(v2, 0.0)), VA_START, VA_MAX)
+	_hv = h
 
 
 func _straight(len: float, kind: int, wob: float = 0.0) -> void:
@@ -194,11 +223,25 @@ func _straight(len: float, kind: int, wob: float = 0.0) -> void:
 
 
 func _arc(ang: float, R: float, kind: int) -> void:
-	var cnt: int = maxi(1, WorldRng.jround(absf(ang) * R / STEP))
-	var dh := ang / cnt
+	var cnt0: int = maxi(1, WorldRng.jround(absf(ang) * R / STEP))
+	if OLD_FLOW or cnt0 < 4:
+		var dh := ang / cnt0
+		for i in cnt0:
+			_h += dh / 2
+			_emit(kind, dh)
+			_h += dh / 2
+		return
+	# eased: the curvature ramps up over m steps, holds (at radius R), ramps down (a clothoid-like entry / exit:
+	# no straight-to-arc corner the bars have to snap into). The ramps add m steps, so the peak radius stays R
+	var m := mini(CLO_MAX, maxi(1, WorldRng.jround(cnt0 * 0.25)))
+	var cnt := cnt0 + m
+	var wsum := 0.0
 	for i in cnt:
+		wsum += minf(1.0, minf((i + 0.5) / m, (cnt - i - 0.5) / m))
+	for i in cnt:
+		var dh := ang * minf(1.0, minf((i + 0.5) / m, (cnt - i - 0.5) / m)) / wsum
 		_h += dh / 2
-		_emit(kind)
+		_emit(kind, dh)
 		_h += dh / 2
 
 
@@ -206,25 +249,48 @@ func _turn_to(target: float, R: float, kind: int) -> void:
 	_arc(wrap_angle(target - _h), R, kind)
 
 
+## how steep the land is here across the way the trail runs (rise over run, 40 m each side, the land with its mountains)
+func _side_slope() -> float:
+	var nx := -sin(_h)
+	var nz := cos(_h)
+	return absf(_M.landform(_x + nx * 40.0, _z + nz * 40.0) - _M.landform(_x - nx * 40.0, _z - nz * 40.0)) / 80.0
+
+
+## how far along the route spine the turtle is (m: TerrainField.spine_near)
+func _sp() -> float:
+	_M.spine_near(_x, _z)
+	return _M.sp_s
+
+
+## a heading relative to the route spine's direction here (the trail follows its swings, whichever way it runs)
+func _rel(a: float) -> float:
+	_M.spine_near(_x, _z)
+	return _M.sp_dir + a
+
+
+## how far off the corridor's middle (the spine), square to it (+ = left of the way it runs)
 func _off() -> float:
-	return _z - _M.zc(_x)
+	_M.spine_near(_x, _z)
+	return _M.sp_d
 
 
 func _next_pitch() -> int:
 	var P: PackedFloat64Array = _M.pitches
 	for k in range(0, P.size(), 3):
-		if P[k] + P[k + 1] / 2 > _x:
+		if P[k] + P[k + 1] / 2 > _sp():
 			return k
 	return -1
 
 
 func _snap() -> Array:
-	return [_x, _z, _h, X.size()]
+	return [_x, _z, _h, X.size(), _v, _hv, _lt]
 
 
 func _undo(s: Array) -> void:
-	_x = s[0]; _z = s[1]; _h = s[2]
+	_x = s[0]; _z = s[1]; _h = s[2]; _v = s[4]; _hv = s[5]; _lt = s[6]
 	X.resize(s[3]); Z.resize(s[3]); KD.resize(s[3])
+	while flow_starts.size() > 0 and flow_starts[flow_starts.size() - 1] >= s[3]:
+		flow_starts.resize(flow_starts.size() - 1)
 
 
 # sections: [code, arg]  code 0 road(maxLen) 1 switchbacks(endX) 2 esses(endX) 3 chute(endX) 4 jumpLine 5 esses(x+50)
@@ -235,8 +301,10 @@ func _run(sec: Array) -> void:
 		2: _esses(sec[1])
 		3: _chute(sec[1])
 		4: _jump_line()
-		5: _esses(_x + 50)
+		5: _esses(_sp() + 50)
 		6: _tech(sec[1])
+		7: _forest(sec[1])
+		8: _flow_trail(sec[1])
 
 
 func _attempt(fns: Array) -> bool:
@@ -248,7 +316,7 @@ func _attempt(fns: Array) -> bool:
 			return true
 		_undo(s)
 	var s2 := _snap()
-	_turn_to(0, 30, ROAD)
+	_turn_to(_rel(0.0), 30, ROAD)
 	_straight(24, ROAD)
 	_commit(s2[3])
 	return false
@@ -271,6 +339,10 @@ static func _jump_remap(p: float, j: float, old_band: float) -> float:
 
 ## a section of the course; swap = a plain stretch of road instead of the tight sections (RouteStyle.twist below 1)
 func _section(fns: Array, swap: bool) -> void:
+	# switchbacks / hairpin stacks exist because a hillside is too steep to ride straight down: on gentle land they
+	# make no sense, a flowing road does instead
+	if not OLD_FLOW and (fns[0][0] == 1 or fns[0][0] == 6) and _side_slope() < 0.10:
+		swap = true
 	if swap: _attempt([[0, 50.0 + fposmod(_x * 0.37, 1.0) * 80.0]])
 	else: _attempt(fns)
 
@@ -283,18 +355,28 @@ func _road(max_len: float) -> void:
 		var o := _off()
 		var lim := _corr - 30
 		var tgt := (_r.next() * 2 - 1) * 72 * D2R * sqrt(tw)
-		if absf(o) > lim * 0.5:
+		if not OLD_FLOW:   # rhythm: mostly the other way from the last bend (left-right-left), now and then the same way again
+			var mag := absf(tgt)
+			_lt = -_lt if _r.next() < 0.75 else _lt
+			tgt = _lt * maxf(mag, 18.0 * D2R)
+		if absf(o) > lim * (0.5 if TerrainField.OLD_ROUTE else 0.75):   # (new: the trail uses more of the corridor's width)
 			tgt = -signf(o) * (22 + _r.next() * 44) * D2R
+			_lt = signf(tgt)
+		tgt = _rel(tgt)
 		var seg := minf(len - done, 18 + _r.next() * 40)
+		if not OLD_FLOW:   # the next bend 1.5-3 s on at the speed riders carry here
+			seg = minf(len - done, clampf(_v * (1.5 + _r.next() * 1.5), 15.0, 70.0))
 		# often a tight bend instead of a sweeper
 		var R := (13 + _r.next() * 16) if _r.next() < minf(0.42 * tw, 0.95) else (34 + _r.next() * 56) / maxf(0.6, sqrt(tw))
+		if not OLD_FLOW:   # never tighter than the speed riders arrive at can take (a tight one waits for a slow stretch)
+			R = maxf(R, _v * _v / A_BEND)
 		var n0 := X.size()
 		_turn_to(tgt, R, ROAD)
 		var used := (X.size() - n0) * STEP
 		if used < seg:
 			_straight(seg - used, ROAD)
 		done += maxf(seg, used)
-		if _x > _L - 70:
+		if _sp() > _L - 70:
 			break
 
 
@@ -304,16 +386,16 @@ func _switchbacks(end_x: float) -> void:
 	var R := 7 + _r.next() * 2.5
 	var dir := first
 	var k := 0
-	_turn_to(dir * (PI / 2 - alpha), 11 + _r.next() * 4, SWITCH)
+	_turn_to(_rel(dir * (PI / 2 - alpha)), 11 + _r.next() * 4, SWITCH)
 	while k < 6:
 		var room := (_corr - 12 - dir * _off()) / cos(alpha)
 		_straight(maxf(14, minf(26 + _r.next() * 20, room)), SWITCH, 0.4)
-		if _x > end_x and k >= 2:
+		if _sp() > end_x and k >= 2:
 			break
 		dir = -dir
 		k += 1
-		_turn_to(dir * (PI / 2 - alpha), R, SWITCH)
-	_turn_to(0, 12 + _r.next() * 4, SWITCH)
+		_turn_to(_rel(dir * (PI / 2 - alpha)), R, SWITCH)
+	_turn_to(_rel(0.0), 12 + _r.next() * 4, SWITCH)
 	_straight(8, SWITCH)
 
 
@@ -325,13 +407,13 @@ func _esses(end_x: float, kind: int = ESSES) -> void:
 	while k < 9:
 		var ang := (38 + _r.next() * 34) * D2R
 		var R := 10 + _r.next() * 8
-		_turn_to(dir * ang, R, kind)
+		_turn_to(_rel(dir * ang), R, kind)
 		_straight(3 + _r.next() * 6, kind)
 		dir = -dir
 		k += 1
-		if _x > end_x and k >= 3:
+		if _sp() > end_x and k >= 3:
 			break
-	_turn_to(0, 14, kind)
+	_turn_to(_rel(0.0), 14, kind)
 
 
 ## a slow technical section: a stack of tight hairpins (5-6.5 m radius, about walking-to-jogging pace on a bike),
@@ -343,7 +425,7 @@ func _tech(end_x: float) -> void:
 	var alpha := (14 + _r.next() * 16) * D2R
 	var R := 5.0 + _r.next() * 1.5
 	var k := 0
-	_turn_to(dir * (PI / 2 - alpha), 8 + _r.next() * 3, SWITCH)
+	_turn_to(_rel(dir * (PI / 2 - alpha)), 8 + _r.next() * 3, SWITCH)
 	while k < 7:
 		var leg := 8 + _r.next() * 9
 		if _r.next() < 0.35:
@@ -353,22 +435,91 @@ func _tech(end_x: float) -> void:
 			_straight(leg * 0.3, SWITCH)
 		else:
 			_straight(leg, SWITCH, 0.3)
-		if _x > end_x and k >= 3:
+		if _sp() > end_x and k >= 3:
 			break
 		dir = -dir
 		k += 1
-		_turn_to(dir * (PI / 2 - alpha), R, SWITCH)
-	_turn_to(0, 9, SWITCH)
+		_turn_to(_rel(dir * (PI / 2 - alpha)), R, SWITCH)
+	_turn_to(_rel(0.0), 9, SWITCH)
 	_straight(6, SWITCH)
 
 
+## a forest singletrack (FOREST): snaking down the hillside through the trees in tight alternating turns (6-10 m radius)
+## with short legs between, each turn swinging 70-140 deg; the berms on them are tall and narrow (BERM[FOREST])
+func _forest(end_x: float) -> void:
+	var dir := 1 if _r.next() < 0.5 else -1
+	if absf(_off()) > 25:
+		dir = -int(signf(_off()))
+	_turn_to(_rel(dir * 0.4), 14, FOREST)
+	var k := 0
+	while k < 16:
+		_straight(5 + _r.next() * 9, FOREST, 0.5)
+		if _sp() > end_x and k >= 5:
+			break
+		dir = -dir
+		if absf(_off()) > _corr - 35:
+			dir = -int(signf(_off()))
+		_turn_to(_rel(dir * (35 + _r.next() * 35) * D2R), 6 + _r.next() * 4, FOREST)
+		k += 1
+	_turn_to(_rel(0.0), 12, FOREST)
+	_straight(6, FOREST)
+
+
+var _forest_end := -INF   # (spine s) where the last forest singletrack ended
+
+
+## a forest singletrack fits here: in a pine forest, on a hillside (the trail is cut into it), not right after another
+func _forest_here() -> bool:
+	if OLD_FLOW or _sp() < _forest_end + 250.0:
+		return false
+	_M.biome(_x, _z)
+	return _M.b_forest > 0.45 and _side_slope() > 0.03
+
+
 func _chute(end_x: float) -> void:
-	_turn_to((_r.next() - .5) * 16 * D2R, 18, ROCKS)
-	_straight(maxf(26, end_x - _x + 6), ROCKS, 0.25)
+	_turn_to(_rel((_r.next() - .5) * 16 * D2R), 18, ROCKS)
+	_straight(maxf(26, end_x - _sp() + 6), ROCKS, 0.25)
+
+
+## a flow jump trail (A-Line style, 2026-11-25 Phase C): banked turns linked by straight jump runs, berm -> jump ->
+## berm -> jump. The runs are JUMP kind, so TerrainField._build_route fills each with its rhythm beats (rollers to build, a
+## speed-sized table / kicker to release, a rest), the turns are bermed ESSES at 16-24 m radius, alternating sides
+var flow_starts := PackedInt32Array()   # centreline index where each flow jump trail starts (tests: BMX_TRAIL_FEAT=flowtrail)
+
+
+func _flow_trail(end_x: float) -> void:
+	flow_starts.append(X.size())
+	var dir := 1 if _r.next() < 0.5 else -1
+	if absf(_off()) > 30:
+		dir = -int(signf(_off()))
+	_turn_to(_rel(dir * 0.3), 30, ROAD)
+	_straight(8, ROAD)
+	var k := 0
+	while k < 9:
+		_straight(36 + _r.next() * 24, JUMP)
+		_straight(6, ROAD)   # (settle after the landing before the next berm)
+		if _sp() > end_x and k >= 3:
+			break
+		if absf(_off()) > _corr - 40:
+			dir = -int(signf(_off()))
+		_turn_to(_rel(dir * (28 + _r.next() * 28) * D2R), 16 + _r.next() * 8, ESSES)
+		_straight(4, ESSES)
+		dir = -dir
+		k += 1
+	_turn_to(_rel(0.0), 25, ROAD)
+	_straight(8, ROAD)
+
+
+## a jump line, or (half the time past the first mountain, by a hash of s) a flow jump trail
+func _jump_pick(sh: float) -> void:
+	if not OLD_FLOW and fposmod(sh * 0.917, 1.0) < 0.55:
+		_attempt([[8, sh + 200.0 + fposmod(sh * 0.371, 1.0) * 180.0], [4, 0.0]])
+	else:
+		_attempt([[4, 0.0]])
 
 
 func _jump_line() -> void:
-	_turn_to((_r.next() - .5) * 14 * D2R, 40, ROAD)
+	_turn_to(_rel((_r.next() - .5) * 14 * D2R), 40, ROAD)
 	_straight(10, ROAD)
 	_straight(80 + _r.next() * 50, JUMP)
 	_straight(8, ROAD)
@@ -377,10 +528,11 @@ func _jump_line() -> void:
 func _build() -> void:
 	var guard := 0
 	var P: PackedFloat64Array = _M.pitches
-	while _x < _L - 80 and guard < 4000:
+	while _sp() < _L - 80 and guard < 4000:
 		guard += 1
+		var sh := _sp()
 		var pk := _next_pitch()
-		var to_pitch := (P[pk] - P[pk + 1] / 2 - _x) if pk >= 0 else INF
+		var to_pitch := (P[pk] - P[pk + 1] / 2 - sh) if pk >= 0 else INF
 		if to_pitch < 30:
 			var end_x: float = P[pk] + P[pk + 1] / 2 + 6
 			var pick := _r.next()
@@ -391,19 +543,24 @@ func _build() -> void:
 			else:
 				_attempt([[2, end_x], [1, end_x], [3, end_x]])
 			continue
-		var room := minf(to_pitch, _L - 80 - _x)
+		var room := minf(to_pitch, _L - 80 - sh)
 		var pick2 := _r.next()
 		var jst := _sv("jumps")
 		var tst := _sv("twist")
-		if pk < 0 and _x > _hill - 80:
+		if pk < 0 and sh > _hill - 80:
 			# past the mountain: the trail runs on through the hills, never long without a twist
 			_attempt([[0, 40 + _r.next() * 90]])
-			var end_x := _x + 50 + _r.next() * 70
+			sh = _sp()
+			if _forest_here() and fposmod(sh * 0.0137, 1.0) < 0.7:
+				_attempt([[7, sh + 140.0 + fposmod(sh * 0.731, 1.0) * 220.0]])
+				_forest_end = _sp()
+				continue
+			var end_x := sh + 50 + _r.next() * 70
 			# what comes next depends on the mountain under it (TerrainField.range_at): its descent is where the slow
 			# technical riding is (tight hairpin stacks, switchbacks, rock chutes); no jump lines up a climb
-			_M.range_at(_x + 30.0)
+			_M.range_at(sh + 30.0)
 			var down: bool = _M.rg_down > 0.5
-			var climbing: bool = _M.hill(_x + 60.0, _M.zc(_x + 60.0)) > _M.hill(_x, _M.zc(_x)) + 1.5
+			var climbing: bool = _M.hill_top(sh + 60.0) > _M.hill_top(sh) + 1.5
 			# the style's twist: fewer / more of the tight sections (a low twist turns some of them into plain road, a high one
 			# adds hairpin sections); the jump-line pick follows the jumps style. twist 1 / jumps 1 = the original picks.
 			var swap := tst < 1.0 and fposmod(pick2 * 977.0, 1.0) < (1.0 - tst) * 0.9
@@ -419,12 +576,12 @@ func _build() -> void:
 				elif pick2 < jcut:
 					_section([[3, end_x], [2, end_x], [1, end_x]], swap)
 				else:
-					_attempt([[4, 0.0]])
+					_jump_pick(sh)
 					did_jump = true
 			else:
 				var q := _jump_remap(pick2, jst, 0.3)
 				if q < 0.3 and not climbing:
-					_attempt([[4, 0.0]])
+					_jump_pick(sh)
 					did_jump = true
 				elif q < 0.55:
 					_section([[2, end_x], [1, end_x], [3, end_x]], swap)
@@ -446,6 +603,7 @@ func _build() -> void:
 		else:
 			_attempt([[0, maxf(40, to_pitch - 20)]])
 	n = X.size()
+	_send = _sp()
 
 
 # ---------------- derived data ----------------
@@ -463,6 +621,11 @@ func _avg(src: PackedFloat32Array, rad: int) -> PackedFloat32Array:
 
 
 func _finish() -> void:
+	# each point's place along the route spine (the mountain's end and the rolling land are measured along it)
+	_sps = PackedFloat64Array(); _sps.resize(n)
+	for i in n:
+		_M.spine_near(X[i], Z[i])
+		_sps[i] = _M.sp_s
 	TX.resize(n); TZ.resize(n)
 	var th := PackedFloat32Array(); th.resize(n)
 	for i in n:
@@ -494,7 +657,7 @@ func _finish() -> void:
 		# past the mountain the trail follows the rolling land (smoothed hard, so climbs stay gentle)
 		var fr := _avg(_avg(_avg(raw, 10), 10), 10)
 		for i in n:
-			var w := smooth(_hill + 60, _hill + 360, X[i])
+			var w := smooth(_hill + 60, _hill + 360, _sps[i])
 			if w > 0.0:
 				E[i] = E[i] + (fr[i] - E[i]) * w
 	_shape_profile()
@@ -624,12 +787,27 @@ func _shape_profile() -> void:
 	var roll := _sv("rolling")   # RouteStyle.rolling: how much the trail rolls (dips) and how many cliff drops
 	# rolling dips on the open trail (not in the mountain's steep section)
 	for i in n:
-		var w := smooth(_hill + 60, _hill + 360, X[i])
+		var w := smooth(_hill + 60, _hill + 360, _sps[i])
 		if w <= 0.0 or KD[i] != ROAD:
 			continue
 		var s := i * STEP
 		var amp := (0.3 + 1.5 * (0.5 + 0.5 * sin(s / 310.0 + seed_i))) * roll
 		E[i] += w * amp * sin(s * TAU / 60.0 + 0.7 * sin(s / 140.0))
+	if not OLD_FLOW:
+		# grade reversals: on a descent, a gentle dip-and-rise every 25-45 m (a 0.3-0.6 m wave on top of the fall). Where trail
+		# builders put them for drainage riders pump them; the trail never just runs one straight slope down. Phase summed
+		# from the start, so growing the trail never changes the part already laid out
+		var e0 := E.duplicate()
+		var ph := 0.0
+		for i in n:
+			var s := i * STEP
+			ph += TAU * STEP / (35.0 + 10.0 * sin(s / 170.0 + seed_i * 0.37))
+			if i < 10 or i >= n - 10 or KD[i] == JUMP or KD[i] == ROCKS or KD[i] == START or KD[i] == FINISH:
+				continue
+			var gr := (e0[i + 10] - e0[i - 10]) / (20.0 * STEP)
+			var w := smooth(0.03, 0.07, -gr)
+			if w > 0.0:
+				E[i] += w * (0.45 + 0.15 * sin(s / 230.0 + seed_i)) * sin(ph)
 	drops = []
 	var last_end := 0
 	var SLOT := 80
@@ -796,7 +974,9 @@ func plan_marking(field) -> void:
 		var i1: int = run[1]
 		var k: int = run[2]
 		for i in range(i0, i1 + 1):
-			if k != ROAD:
+			if k == FOREST:
+				pass   # the trees line it, no tape
+			elif k != ROAD:
 				tape0[i] = 1; tape1[i] = 1
 			else:
 				var near_end := i - i0 < lead or i1 - i < lead
@@ -931,6 +1111,7 @@ func plan_marking(field) -> void:
 	for fc in fences:
 		(pick if fc["style"] == "picket" else rest).append(fc)
 	fences = pick + rest
+	_plan_bend_trees(field)
 	_bucket()
 
 
@@ -951,8 +1132,50 @@ static func _add(d: Dictionary, k: int, v: int) -> void:
 	d[k] = l
 
 
+## a big old tree on the inside of a tight bend in the forest (user reference: a built berm wrapping round a tall trunk):
+## every forest singletrack turn, and now and then a tight road / esses bend where the land is pine forest. Indices into the
+## centreline (TerrainChunkBuilder._bend_trees places the trunk on the inside, square to the trail)
+var bend_trees := PackedInt32Array()
+var chunk_btrees := {}
+## roots across a forest singletrack (natural tech, Phase C): centreline indices, every 5-12 m along FOREST (chunk_roots)
+var roots := PackedInt32Array()
+var chunk_roots := {}
+
+
+func _plan_bend_trees(field) -> void:
+	bend_trees = PackedInt32Array()
+	var seed_i: int = _mark_seed % 9973
+	roots = PackedInt32Array()
+	var next_root := 0
+	for i in range(3, n - 3):
+		if KD[i] != FOREST or i < next_root:
+			continue
+		roots.append(i)
+		next_root = i + 3 + int(_hash(i, seed_i + 41) * 3.5)
+	for i in range(3, n - 3):
+		var k := absf(KAP[i])
+		if k < 1.0 / 22.0 or k < absf(KAP[i - 1]) or k < absf(KAP[i + 1]) or k <= absf(KAP[i - 2]):
+			continue   # (local peaks of tight bends only)
+		if KD[i] == FOREST:
+			if _hash(i, seed_i + 31) > 0.75: continue
+		elif KD[i] == ROAD or KD[i] == ESSES:
+			field.biome(X[i], Z[i])
+			if field.b_forest < 0.4 or _hash(i, seed_i + 37) > 0.35: continue
+		else:
+			continue
+		if bend_trees.size() > 0 and i - bend_trees[bend_trees.size() - 1] < 8:
+			continue
+		bend_trees.append(i)
+
+
 func _bucket() -> void:
 	chunk_rocks = {}; chunk_stakes = {}; chunk_fences = {}; chunk_gates = {}; chunk_boards = {}; chunk_arches = {}; chunk_signs = {}
+	chunk_btrees = {}
+	chunk_roots = {}
+	for i in roots:
+		_add(chunk_roots, _chunk_of(X[i], Z[i]), i)
+	for i in bend_trees:
+		_add(chunk_btrees, _chunk_of(X[i], Z[i]), i)
 	var sign_every := SIGN_EVERY
 	if OS.get_environment("BMX_SIGN_EVERY") != "":
 		sign_every = maxi(20, int(OS.get_environment("BMX_SIGN_EVERY")))   # test: signs closer together

@@ -54,6 +54,7 @@ static func ensure() -> void:
 	var log_g := GeoBuf.merge([GeoBuf.cylinder(0.17, 0.21, 1, 7).rot_z(PI / 2),
 		GeoBuf.cylinder(0.035, 0.05, 0.4, 4).rot_z(-0.7).translate(0.18, 0.2, 0.05)])
 	MESH["log"] = log_g.to_mesh(false, _soft_normals(log_g))
+	MESH["root"] = _root_mesh()
 	var stick := GeoBuf.cylinder(0.012, 0.02, 1, 4).rot_z(PI / 2)
 	MESH["stick"] = stick.to_mesh(false, _soft_normals(stick))
 	MESH["weed"] = _jitter(GeoBuf.ico(1, 1), 0.45, 23).to_mesh()
@@ -122,9 +123,76 @@ static func _mat(albedo: Color, rough: float, metal: float = 0.0) -> ShaderMater
 	return m
 
 
+static func _bark_mat(id: String, tint: Color) -> ShaderMaterial:
+	var m := _mat(tint, 0.9)
+	m.set_shader_parameter("bark", true)
+	m.set_shader_parameter("bark_col", load("res://assets/textures/bark/%s_col.jpg" % id))
+	m.set_shader_parameter("bark_nrm", load("res://assets/textures/bark/%s_nrm.jpg" % id))
+	m.set_shader_parameter("bark_rgh", load("res://assets/textures/bark/%s_rgh.jpg" % id))
+	m.set_shader_parameter("specular", 0.25)
+	return m
+
+
+## a tree root running across the ground (forest singletrack roots, 2026-11-25, user: "more like a root, realistic"), at real
+## size: 2 m long along x (-1 .. 1), 9 cm radius at the thick end tapering to ~3 cm, winding ~20 cm side to side, dipping
+## under the dirt and coming up again, knobbly, a little flattened, with two thinner side roots. UV = (round it, along it in
+## metres): the bark scan runs along it (deco.gdshader bark_uv). TerrainChunkBuilder._roots scales it to each root
+static func _root_mesh() -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var main := _root_tube(st, Vector3(-1.0, 0, 0), Vector3(1, 0, 0), 2.0, 0.09, 0.028, 0.0, 1.7)
+	# side roots: off the main one at 30 % (one side) and 62 % (the other), each smaller
+	_root_tube(st, main[int(0.3 * ROOT_NS)] + Vector3(0, -0.01, 0), Vector3(0.7, 0, 0.71).normalized(), 0.8, 0.05, 0.014, 0.6, 4.3)
+	_root_tube(st, main[int(0.62 * ROOT_NS)] + Vector3(0, -0.01, 0), Vector3(0.8, 0, -0.6).normalized(), 0.55, 0.034, 0.011, 1.25, 2.9)
+	st.generate_normals()
+	st.generate_tangents()
+	return st.commit()
+
+
+const ROOT_NS := 24   # rings along a root
+
+## one tapered, winding tube from a along dir; returns its centre points (side roots branch from them)
+static func _root_tube(st: SurfaceTool, a: Vector3, dir: Vector3, len: float, r0: float, r1: float, v0: float, ph: float) -> PackedVector3Array:
+	const NR := 8
+	var side := Vector3(-dir.z, 0, dir.x)
+	var rings := []
+	var cs := PackedVector3Array()
+	for i in ROOT_NS + 1:
+		var t := float(i) / ROOT_NS
+		var w := minf(1.0, t * 6.0)   # (starts on its line: a side root grows out of the main one)
+		var c := a + dir * len * t + side * (0.1 * sin(t * 4.7 + ph) + 0.03 * sin(t * 13.0 + ph * 2.0)) * len * 0.5 * w
+		c.y += (0.035 * sin(t * 8.3 + ph) - 0.012) * w   # in and out of the dirt
+		cs.append(c)
+		var r := lerpf(r0, r1, pow(t, 0.75)) * (1.0 + 0.16 * sin(t * 27.0 + ph) + 0.08 * sin(t * 61.0 + ph))
+		var ring := []
+		for k in NR:
+			var ang := TAU * k / NR
+			ring.append(c + side * cos(ang) * r + Vector3.UP * sin(ang) * r * 0.78)
+		rings.append([ring, v0 + t * len])
+	for i in ROOT_NS:
+		var ra: Array = rings[i][0]; var rb: Array = rings[i + 1][0]
+		var va: float = rings[i][1]; var vb: float = rings[i + 1][1]
+		for k in NR:
+			var k2 := (k + 1) % NR
+			var u0 := float(k) / NR
+			var u1 := float(k + 1) / NR
+			for q in [[ra[k], u0, va], [rb[k], u0, vb], [rb[k2], u1, vb], [ra[k], u0, va], [rb[k2], u1, vb], [ra[k2], u1, va]]:
+				st.set_uv(Vector2(q[1], q[2]))
+				st.add_vertex(q[0])
+	return cs
+
 static func _build_materials() -> void:
 	var w := Color(1, 1, 1)
-	MAT["trunk"] = _mat(lin(0x7a5233), 0.9)
+	MAT["trunk_plain"] = _mat(lin(0x7a5233), 0.9)   # (logs, sticks: lying down, no bark wrap)
+	# standing trunks: three bark scans (assets/textures/bark, CC0): light grey-tan, pale (birch-like), reddish pine
+	MAT["trunk"] = _bark_mat("bark_light", Color(0.92, 0.88, 0.82))
+	MAT["trunk_pale"] = _bark_mat("bark_pale", Color(0.95, 0.95, 0.92))
+	MAT["trunk_pine"] = _bark_mat("bark_pine", Color(1.0, 0.95, 0.9))
+	MAT["root"] = _bark_mat("bark_pine", Color(0.72, 0.62, 0.55))   # (darker: earthy, worn by tyres)
+	MAT["root"].set_shader_parameter("bark_uv", true)
+	MAT["root"].set_shader_parameter("bark_tile", 0.35)
+	MAT["root_world"] = MAT["root"].duplicate()   # (draped roots: one plain mesh per chunk, no instance data)
+	MAT["root_world"].set_shader_parameter("use_instance", false)
 	MAT["wood"] = _mat(w, 0.85)
 	MAT["leaf"] = _mat(w, 0.8)
 	MAT["leafSoft"] = _mat(w, 0.85)

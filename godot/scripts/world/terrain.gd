@@ -83,7 +83,7 @@ var _wind_t: float = float(Env.s("BMX_WIND_T0")) if Env.s("BMX_WIND_T0") != "" e
 var _wind_ph: float = 0.0
 var _wind_dir := Vector3(0.8, 0, 0.6)
 var _wind_ws: float = 6.0
-## the endless trail: once the rider is within GROW_AHEAD m (along x) of the end of the course laid out
+## the endless trail: once the rider is within GROW_AHEAD m (along the route spine) of the end of the course laid out
 ## so far, a worker lays out GROW_STEP m more on a fork of the field; the main thread then takes it over
 const GROW_AHEAD := 2000.0
 const GROW_STEP := 3000.0
@@ -589,7 +589,7 @@ func update_stream(px: float, pz: float, budget_ms: float = 4.0, sync_r := -1) -
 	last_finalized = 0
 	fin_parts.fill(0.0)
 	_focus = Vector2(px, pz)
-	_update_grow(px)
+	_update_grow(px, pz)
 	var ccx := WorldRng.jround(px / SIZE)
 	var ccz := WorldRng.jround(pz / SIZE)
 	var R := RADIUS
@@ -704,7 +704,7 @@ func _dispatch(k: Vector2i, urgent: bool = false) -> void:
 	_jobs[k] = {"task": task, "builder": b}
 
 
-func _update_grow(px: float) -> void:
+func _update_grow(px: float, pz: float) -> void:
 	if _grow_task >= 0:
 		if not WorkerThreadPool.is_task_completed(_grow_task):
 			return
@@ -715,12 +715,15 @@ func _update_grow(px: float) -> void:
 			field.adopt_course(_grow_box[0])
 			if fcs != null:
 				fcs.rebind_course(field)
-			print_verbose("TRAIL grown to x=%.0f (%d points), adopted in %.1f ms" % [field.course.end_x(), field.course.n,
+			print_verbose("TRAIL grown to s=%.0f (%d points), adopted in %.1f ms" % [field.course.end_s(), field.course.n,
 				(Time.get_ticks_usec() - t0) / 1000.0])
 		_grow_box = []
 		return
-	var end := field.course.end_x()
-	if px < end - GROW_AHEAD:
+	# how far along the route the rider is (the route can run any way: x says nothing). Off the route (beyond its reach)
+	# nothing grows until they are back near it
+	var end := field.course.end_s()
+	field.spine_near(px, pz)
+	if field.sp_ad >= RouteSpine.R or field.sp_s < end - GROW_AHEAD:
 		return
 	var g := field.fork()   # forked here: fork() reads the live field, which the main thread keeps changing
 	var to := end + GROW_STEP
@@ -810,15 +813,17 @@ func _unload(k: Vector2i) -> void:
 
 const LIST_SPEC := {
 	# name: [mesh, material, cast shadow, small clutter]
-	"trunk": ["trunk", "trunk", true, false], "blob": ["blob", "leafSoft", true, false], "pine": ["pine", "leaf", true, false],
+	"trunk": ["trunk", "trunk", true, false], "trunk_pale": ["trunk", "trunk_pale", true, false], "trunk_pine": ["trunk", "trunk_pine", true, false],
+	"blob": ["blob", "leafSoft", true, false], "pine": ["pine", "leaf", true, false],
 	"rock": ["rock", "rock", true, false], "pebble": ["pebble", "rock", false, true], "grass": ["grass", "flower", false, true],
 	"daisy": ["daisy", "flower", false, true], "tulip": ["tulip", "flower", false, true], "spike": ["spike", "flower", false, true],
 	"bush": ["bush", "leafCard", true, false], "bush1": ["bush1", "leafCard", true, false], "bush2": ["bush2", "leafCard", true, false],
-	"bushdry": ["bushdry", "leafCardDry", true, false], "log": ["log", "trunk", true, false], "weed": ["weed", "tuft", false, false],
-	"stick": ["stick", "trunk", false, true], "fern": ["fern", "flower", false, true], "mushroom": ["mushroom", "flower", false, true],
+	"bushdry": ["bushdry", "leafCardDry", true, false], "log": ["log", "trunk_plain", true, false], "root": ["root", "root", true, false],
+	"weed": ["weed", "tuft", false, false],
+	"stick": ["stick", "trunk_plain", false, true], "fern": ["fern", "flower", false, true], "mushroom": ["mushroom", "flower", false, true],
 	"cactus0": ["cactus0", "cactus", true, false], "cactus1": ["cactus1", "cactus", true, false], "cactus2": ["cactus2", "cactus", true, false],
 	"cactus3": ["cactus3", "cactus", true, false], "cactus4": ["cactus4", "cactus", true, false],
-	"plank": ["box", "wood", true, false], "beam": ["box", "wood", true, false],
+	"plank": ["box", "fence", true, false], "beam": ["box", "fence", true, false],   # (the fences' wood)
 	# thin fence / tape parts: their shadows are a few pixels wide but each is a draw call in every cascade
 	"post": ["post", "fencePost", false, false], "rail": ["rail", "fenceRail", false, false], "picket": ["picket", "fencePost", false, false],
 	"stake": ["stake", "stake", false, false],
@@ -1018,6 +1023,13 @@ func _finalize(k: Vector2i) -> void:
 	if o.has("arches"):
 		for a in o["arches"]:
 			node.add_child(TrailArch.build(a))
+	if o.has("roots"):   # tree roots across a forest singletrack, grown along the ground (TerrainChunkBuilder._root_system)
+		var rm := ArrayMesh.new()
+		rm.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, o["roots"])
+		var rmi := MeshInstance3D.new()
+		rmi.mesh = rm
+		rmi.material_override = TerrainGeo.MAT["root_world"]
+		node.add_child(rmi)
 	var sheds: Array = o["sheds"]
 	for i in sheds.size():
 		var buf: PackedFloat32Array = sheds[i]

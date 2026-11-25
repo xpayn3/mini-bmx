@@ -22,7 +22,7 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 layout(set = 0, binding = 0) uniform sampler2D trail_tex;    // r across (m, signed), g ridden line place, b along (m), a run-off skid place
 layout(set = 0, binding = 1) uniform sampler2D trail2_tex;   // r road, g dry biome, b built jump, a skid strength
-layout(set = 0, binding = 2) uniform sampler2D trail3_tex;   // r riders in the air, g corner load
+layout(set = 0, binding = 2) uniform sampler2D trail3_tex;   // r riders in the air, g corner load, b how narrow the trail is
 layout(set = 0, binding = 3) uniform sampler2D land_tex;     // a = trail dirt weight
 layout(set = 0, binding = 4, rgba8) uniform restrict writeonly image2D out_a;
 layout(set = 0, binding = 5, rgba16f) uniform restrict writeonly image2D out_b;
@@ -124,11 +124,12 @@ float warped_t(vec2 P, vec2 UV, float t0, float f3) {
 	vec2 w2 = vec2(gd_noise3(vec3(q0 * 0.11, 2.1)), gd_noise3(vec3(q0 * 0.11 + 31.0, 4.4))) - 0.5;
 	vec2 w3 = vec2(gd_noise3(vec3(q0 * 0.55, 1.1)), gd_noise3(vec3(q0 * 0.55 + 9.0, 5.5))) - 0.5;
 	float loose = 0.45 + 1.1 * gd_noise3(vec3(q0 * 0.017, 8.8));
-	vec2 wm = (w1 * 4.4 + w2 * 2.2 + w3 * 1.0 * f3) * loose * P_EDGE_VAR * (1.0 - jmk);
+	float nar = 1.0 - 0.8 * textureLod(trail3_tex, UV, 0.0).b;   // (a narrow singletrack keeps its edge close)
+	vec2 wm = (w1 * 4.4 + w2 * 2.2 + w3 * 1.0 * f3) * loose * P_EDGE_VAR * (1.0 - jmk) * nar;
 	vec2 bd = min(UV, 1.0 - UV);
 	float bk = smoothstep(0.0, 0.05, min(bd.x, bd.y));
 	wm *= bk;
-	float sp = (0.9 + 0.5 * P_EDGE_FADE) * bk * (1.0 - jmk) / 48.0;
+	float sp = (0.9 + 0.5 * P_EDGE_FADE) * bk * (1.0 - jmk) * mix(0.35, 1.0, nar) / 48.0;
 	vec2 u0 = UV + wm / 48.0;
 	float ta = textureLod(land_tex, u0 + vec2(sp, sp * 0.4), 0.0).a + textureLod(land_tex, u0 + vec2(-sp, -sp * 0.4), 0.0).a
 		+ textureLod(land_tex, u0 + vec2(-sp * 0.4, sp), 0.0).a + textureLod(land_tex, u0 + vec2(sp * 0.4, -sp), 0.0).a;

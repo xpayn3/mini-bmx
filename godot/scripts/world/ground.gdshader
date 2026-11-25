@@ -185,11 +185,13 @@ void fragment() {
 		vec2 w2 = vec2(gd_noise3(vec3(q0 * 0.11, 2.1)), gd_noise3(vec3(q0 * 0.11 + 31.0, 4.4))) - 0.5;
 		vec2 w3 = vec2(gd_noise3(vec3(q0 * 0.55, 1.1)), gd_noise3(vec3(q0 * 0.55 + 9.0, 5.5))) - 0.5;
 		float loose = 0.45 + 1.1 * gd_noise3(vec3(q0 * 0.017, 8.8));   // how wild this stretch is
-		vec2 wm = (w1 * 4.4 + w2 * 2.2 + w3 * 1.0 * f3) * loose * trail_edge_var * (1.0 - jmk);
+		// a narrow trail (a forest singletrack: trail3 B) keeps its edge close: the wander and the fade x up to a fifth
+		float nar = 1.0 - 0.8 * texture(trail3_tex, UV).b;
+		vec2 wm = (w1 * 4.4 + w2 * 2.2 + w3 * 1.0 * f3) * loose * trail_edge_var * (1.0 - jmk) * nar;
 		vec2 bd = min(UV, 1.0 - UV);
 		float bk = smoothstep(0.0, 0.05, min(bd.x, bd.y));
 		wm *= bk;
-		float sp = (0.9 + 0.5 * trail_edge_fade) * bk * (1.0 - jmk) / 48.0;   // tap spread in UV (the fade's width)
+		float sp = (0.9 + 0.5 * trail_edge_fade) * bk * (1.0 - jmk) * mix(0.35, 1.0, nar) / 48.0;   // tap spread in UV (the fade's width)
 		vec2 u0 = UV + wm / 48.0;
 		float ta = texture(land_tex, u0 + vec2(sp, sp * 0.4)).a + texture(land_tex, u0 + vec2(-sp, -sp * 0.4)).a
 			+ texture(land_tex, u0 + vec2(-sp * 0.4, sp)).a + texture(land_tex, u0 + vec2(sp * 0.4, -sp)).a;

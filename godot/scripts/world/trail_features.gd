@@ -115,6 +115,10 @@ class Wood:
 			if u < 15.0:
 				return 0.85
 			return skin.ev(maxf(0.001, 19.0 - u))
+		elif kind == 4:
+			# a wooden drop (2026-11-25): a plank ramp up to a 1 m deck, then the deck ends square (back_wall) and you drop
+			# onto the ground beyond u1
+			return _ease(0.0, 5.0, 0.02, 1.0, u) if u < 5.0 else 1.0
 		elif kind == 3:
 			# wavy bridge: the deck rolls over normal ground (two humps), ramps on / off like the flat one
 			var t := fposmod((u - 2.0) / 5.5, 1.0)
@@ -160,7 +164,7 @@ const WHOOP := [[0, 0, 0], [1.6, 0.3, 0.3], [2.6, 0.48, 0], [8.6, 0.08, -0.09], 
 
 ## where riders are in the air over each feature: [from, to, ...] along it (m), the lip to about where they come
 ## down. The ground shader draws no ridden lines there (ground.gdshader, via TerrainField.fo_air; mirrored in C#)
-const AIR := {"table": [15.85, 31.99], "double": [15.85, 31.99], "kicker": [11.45, 25.63], "woodKicker": [3.8, 9.0],
+const AIR := {"woodDrop": [9.0, 12.5], "table": [15.85, 31.99], "double": [15.85, 31.99], "kicker": [11.45, 25.63], "woodKicker": [3.8, 9.0],
 	"tableLine": [15.85, 31.99, 52.2, 66.38], "flow": [11.45, 25.63], "doubleLine": [15.85, 31.99, 52.2, 66.38]}
 const AIR_S := {"table": [7.4, 16.88], "double": [7.15, 16.39], "kicker": [4.85, 11.45],
 	"tableLine": [7.4, 16.88, 26.35, 32.95], "flow": [4.85, 11.45], "doubleLine": [7.15, 16.39, 25.8, 32.4]}
@@ -197,6 +201,7 @@ static func make_set() -> Dictionary:
 		"doubleLine": Line.new([dbl, 3.0, kicker]),
 		"woodKicker": Hermite.new([[0, 0, 0], [4.6, 0, 0], [6.4, 0.9, 0.1, 0], [7.4, 0.9, 0, 0], [10, 0.72, -0.17], [20, 0.14, -0.08], [26, 0, 0]]),
 		"skinny": Flat.new(19.0),
+		"woodDrop": Flat.new(14.0),
 		"bridge": Flat.new(15.0),
 		"gorge": Flat.new(36.0),
 		"rope": Flat.new(72.0),
@@ -206,6 +211,7 @@ static func make_set() -> Dictionary:
 	var wood := {
 		"woodKicker": Wood.new(0, 0.0, 3.8, 0.85, true, kick, skin),
 		"skinny": Wood.new(1, 0.0, 19.0, 0.33, false, kick, skin),
+		"woodDrop": Wood.new(4, 0.0, 9.0, 0.9, true, kick, skin),
 		"bridge": Wood.new(2, 0.0, 15.0, 1.0, false, kick, skin),
 		"bridgeW": Wood.new(3, 0.0, 15.0, 1.0, false, kick, skin),   # picked for some bridges by TerrainField.make_feat
 		"gorge": Wood.new(2, 0.0, 36.0, 1.4, false, kick, skin),

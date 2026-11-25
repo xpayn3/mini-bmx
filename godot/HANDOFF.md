@@ -452,6 +452,107 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   stored in course order). Chunks read rocks / stakes / fences from per-chunk buckets, route features are
   binary-searched — nothing scans the whole course. `tools/trail_grow_probe.gd` checks all of it.
 
+- **Route spine: the world runs any way, not along +x (2026-11-25, user: "use the landscape, really wavy, we have a square
+  map, sometimes go back, not uniform")**. `world/route_spine.gd` (`RouteSpine`): a 2D polyline every 20 m that the whole
+  world is laid out along. Everything that was x / `|z - zc(x)|` is now s (along the spine) / |d| (across it): the first
+  mountain, its pitches, the later ranges (`range_at(s)`), `mtn`, `hill` (`hill_top(s)` = the height on the spine's middle),
+  the trail's corridor (`TrailCourse._off/_rel/_sp`), the course length `_L`, `end_s()`, section ends, and growth
+  (`Terrain._update_grow` reads the rider's spine s via `TerrainField.spine_near`). Walker (GDScript only, C# copies the
+  arrays): straight +x from s -636 to 150 (s = x there: the start / title spot unchanged), then it heads for random
+  waypoints 1.2-4 km away (up to ~112 deg off its heading, inside |z| < `ZMAX` 7 km, at most 3.5 km back west of its
+  furthest east, a straight line to it clear of its own legs, the most open of 24 tries), with a random-walk wobble
+  (+-0.8 rad); each step picks of 9 headings (1.5 deg notches) the one that fits the BARE land best (`TerrainField.bare`:
+  landform without mtn / hill): not climbing into hills, not straight down a steep fall line, not over cliffs / into lakes,
+  >= `GAP` 1.1 km from its own legs older than 1.6 km. Grown with the walker's saved state (`grown`), built `SPINE_AHEAD`
+  4 km past the course. Land query `spine_sd(x, z)` -> `r_s`, `r_ad`: bilinear over an 8 m lattice of exact nodes; a node's
+  s is a weighted blend of every segment within `R` 450 m (w = (1 - d^2/R^2)^2 / (d^2 + 25)), so s never jumps on the
+  inside of a bend; |d| is the true distance (nodes cached per field instance, cleared in `_reset_caches`). Mirrored in
+  `TerrainFieldCs.spine_sd/_sp_node` (same op order): `terrain_cs_cmp` heights EXACT (only the C#-only fine-mesh chunk
+  arrays differ, as before). Measured over 16 km of course: seeds 4242 / 5 / 12 cover 11 x 7, 10.6 x 7.5, 15.5 x 8.5 km,
+  heading -x 11-35 % of the way, legs >= 1.04 km apart; 40 m stretches over 15 % grade 2.6 % (old 1.9 %), steepest the
+  same (drops apart). Demo AI 120 s on 4242 / 5: no crash, 135-145 fps. `BMX_OLD_ROUTE=1` = the old straight corridor.
+  Map: `-s res://tools/trail_map.gd -- out.png [seed] [course m] [m/px]`. Tests `BMX_TRAIL_FEAT=s<m>` (was x<m>) = that
+  far along the trail. Not changed yet: `biome_probe`, `land_probe`, `route_grade_probe` still sample round the old zc.
+- **Flow rules in the trail's layout (2026-11-25, Phase B, `trail_course.gd`)**. While laying out, the turtle keeps an
+  estimate of a rider's speed (`_v`: the land's fall in, rolling + air drag out, pedalling when slow, capped by every bend
+  at `A_BEND` 9.4 m/s^2; `_emit` reads `landform` per point). (1) Road bends never tighter than v^2 / A_BEND (a tight one
+  waits for a slow stretch). (2) Every arc of 4+ steps eases in / out: its curvature ramps over m = 25 % of it (max
+  `CLO_MAX` 6 steps = 12 m) and m steps are added so the peak radius stays R (clothoid-like: no straight-to-arc corner).
+  (3) Road bends alternate side (75 %, `_lt`) and the next one comes 1.5-3 s on at `_v` (15-70 m). (4) Grade reversals:
+  on descents steeper than ~3-7 % a 0.3-0.6 m dip-and-rise every 25-45 m (`_shape_profile`, phase summed from the start:
+  growing never changes it). (5) Switchbacks / hairpin stacks only where the hillside across the trail is steeper than
+  10 % (`_side_slope`), else plain road. `_snap` / `_undo` / `grown` carry `_v`, `_hv`, `_lt`. `BMX_OLD_FLOW=1` = before.
+  Probe `-s res://tools/flow_probe.gd -- [len] [seeds]` (old vs new: `FLOWBRAKE` bend braking / climbing per km, curvature
+  steps, alternation, dips per km). Measured 10 km: curvature steps (99th pct) 40-45 -> 15-19, bend braking 2.2-3.5 ->
+  1.7-2.4 m/s per km, dips 9 -> 12 per km. Demo AI 125 s seed 4242: braking 15 -> 13 % of the time, slide scrub -206 ->
+  -95 J/kg, avg 46.4 -> 46.9 km/h, max 59 -> 63, no crash. Grow / rope / wood / C# probes pass. Not ridden by the user yet.
+- **Forest singletrack + tall forest (2026-11-25, Phase C part 1, user reference shots: a narrow trail cut into a wooded
+  hillside with tight high berms; a big berm wrapping round a tall trunk; "taller trunks, leaves start later, don't cover
+  the cam")**. New kind `TrailCourse.FOREST` = 7 (`WIDTH` 0.35 half-width = a ~0.7 m trail (user: "could be even narrower"), `BERM` 1.8; FOREST counts as "not road" for RD,
+  drops, billboards, arches). Section code 7 `_forest(end_s)`: alternating 70-140 deg turns at 6-10 m radius, 5-14 m legs.
+  Picked past the first mountain where `_forest_here()`: `b_forest` > 0.45, the hillside across > 3 %, 250 m+ after the
+  last one, 70 % by a hash of s (seeds 4242 / 12 get some in 12 km, seed 5 none). No tape along it. Berm rim close in for
+  narrow trails: `berm_style` `bs_F` floor min(2.0, w + 0.75) (GD + C#; every other trail kind unchanged). Bend trees
+  (`TrailCourse._plan_bend_trees` -> `bend_trees` / `chunk_btrees`; `TerrainChunkBuilder._bend_trees`): a big old pine on
+  the inside of local curvature peaks under 22 m radius on FOREST (75 %) and on road / esses bends in pine forest (35 %),
+  W + 1.6..2.8 m in (at most 0.7 x the radius). Trees beside a forest singletrack (`fe`: within QR of a FOREST point):
+  density 95 %, trunks allowed from W + 0.9 (~1.25 m from the line: at W + 0.55 the demo AI clipped trunks), always pines, crowns overhang. **Tall forest pines** (`fe` or `b_forest` >
+  0.5): bare trunk to `TALL_CROWN` 6.5 m+ (sc x 3.2, + 0-3 m), crown up there, 15 % bigger; bend trees 8.5 m+.
+  Test `BMX_TRAIL_FEAT=forest` (30 m before the first FOREST point; seed 12 has one at x 3544). Demo AI rides through it at
+  ~45 km/h, no crash. Not ridden by the user yet. Narrow trails look narrow: `trail()`'s dirt fade is min(1.2, 0.35 + q_w) m (GD + C#; 1.2 for every trail >= 0.85 m half-width, as before), and the chunk bake writes how narrow the trail is (`T5` = clamp(1.6 - q_w): trail3_tex B, now RGBA8; level terrains' RG8 reads 0), which scales the ground shader's and the road-detail bake's ragged-edge wander (x 0.2) and fade (x 0.35..1). Big bend trees get 4 stones round their roots on the side away from the trail.
+- **Flow jump trails, grown tree roots, tidy roadside boards (2026-11-25, Phase C part 2)**.
+  (1) Flow jump trail (`TrailCourse._flow_trail`, section code 8, via `_jump_pick`: half the jump-line picks past the first
+  mountain, by a hash of s): bermed ESSES turns (16-24 m) linked by 36-60 m JUMP runs, which `_build_route` fills with its
+  rhythm beats (rollers / a speed-sized table or kicker / rest). `flow_starts` = where each starts; test
+  `BMX_TRAIL_FEAT=flowtrail` (seed 12, 4242 have one). Demo AI lands the built jumps on their landings.
+  (2) Roots across forest singletracks, grown (user: "spread splines along the terrain with root math, a simple sweep that
+  follows the terrain, a smart rooting system", "no poking"). `TrailCourse.roots` = spots every 6-13 m of FOREST
+  (`chunk_roots`); `TerrainChunkBuilder._root_system`: a pine 2.6-3.8 m off the trail (outside of tight bends, +1 m
+  there), 4-6 main roots out of its foot (2-3 across the trail, long enough to reach the far side), each a random walk with
+  a smoothly wandering curvature (`_grow_root`, 12 cm steps), tapering, branching (prob 4.5 % a step, two levels);
+  `_sweep` = a 7-sided tube along each path with every ring ON the ground under it (turned to the ground's slope, top
+  0.4-0.75 x its radius proud, flaring at the trunk, + 3.5 cm for the drawn ground's micro detail). All roots of a chunk
+  are one mesh (`out["roots"]` -> `Terrain._finalize`, material `root_world` = bark_pine along the root via UV:
+  `deco.gdshader` `bark_uv`). Where a root crosses the trail: low domes (<= 7 cm, r 0.2) the tyres feel. Earlier instanced
+  root meshes (`TerrainGeo._root_mesh`, list `root`) are still built but unused. Trees / stumps / logs beside a FOREST
+  trail keep `_forest_clear()` = W + 1.3 m (W + 1.6 in bends tighter than 25 m; the check was inverted at first and the
+  narrower dirt fade let trunks in at ~1 m: the demo AI went over the bars). 5 seeds' singletracks: no crash.
+  (3) Billboards / distance signs (user: "overlap with signs and fences, boards on slopes clipped"): `_sign_spot_ok` /
+  `_sign_spot_why` checks 5 points along the board's width: dry, off jumps, off the trail and >= W + 2.4 m out (the tape
+  line), >= 0.9 m from any fence / tape collider, not in `blocked`, ground within 0.45 m along it and 0.5 m front to back.
+  Planks sit over the highest ground under them; each board / sign reserves its spot in `blocked`. Seed 4242's first 6
+  boards: 4 placed (2 had no clear spot). `BMX_GATE_PROBE=1` prints `SIGNSPOT no: <why>`.
+- **Wooden drop + skinny in jump lines (2026-11-25, Phase C part 3)**: Wood kind 4 `woodDrop` (GD `TrailFeatures.Wood.top`,
+  C# `TfWood.top`): a plank ramp eased up over 5 m to a 1 m deck, deck to u1 9 m, square end (`back_wall`), you drop onto
+  the ground (profile `Flat` 14 m; `AIR` 9 .. 12.5). `TerrainField.RHYTHM`: release beats can be a woodDrop, rest beats
+  a north-shore `skinny` (19 m, 0.66 m wide, 0.85 m up; it rarely fits a rest beat: 0 in 12 worlds x 4 km, woodDrop 3).
+  Demo AI speeds `DemoPilot.FEAT_V` woodDrop 7, skinny 5.5 m/s. `BMX_TRAIL_FEAT=woodDrop` (seeds 2, 31, 123; also
+  `skinny` / `woodKicker` / `bridge`). C# compare / wood_edge_probe unchanged. Not done: wooden berms, a wallride
+  (the height-field physics can't ride a vertical wall), line choices + difficulty colours.
+- **A / B line choices (2026-11-25, Phase C part 4)**. `TerrainField._build_alts` (end of `_build_route`): about 70 % of
+  big built features (`ALT_TYPES`: table, kicker, tableLine, woodDrop, double, doubleLine, flow, woodKicker; by a hash of
+  s) get an easier B-line: it leaves the trail `ALT_IN` 22 m before the feature, swings out (half + 4.2..7.2 m, smoothstep
+  over 12 m at each end) to one side and joins again `ALT_OUT` 18 m after, at the trail's own height `cE` (no jump).
+  Flat arrays `alt_pts` (x, z, height) / `alt_lines` (first, count, bbox + `ALT_REACH`, side) / `alt_feats`
+  ([route feature, line]); `alt_near` / `alt_dist`. `base()` levels the ground to it (x (1 - q_mask): the main bench
+  wins), `trail()` makes it dirt (half-width `ALT_W` 0.9). Mirrored exactly in `TerrainFieldCs` (`alt_near`,
+  `alt_dist`; `alt_feats` public for the chunk builder, which may run on the C# fork): terrain_cs_cmp unchanged,
+  trail_grow_probe PASS. Chunk builder: tape stakes and course fence posts within 1.2 / 1.6 m of a B-line are left out (a
+  gap where it leaves / joins); `_line_signs` puts two table signs 6 m before the split, beside the trail past the tape on
+  the B-line's side: black A LINE + the feature (TABLE / KICKER / DROP / JUMP LINE), blue B LINE EASIER (`_table_sign`,
+  the distance sign's build). 5-11 B-lines per 4.5 km (seeds 4242 / 5 / 12 / 2). `BMX_OLD_LINES=1` = none. Not done:
+  difficulty colours per trail section, a HUD alert at the split, B-lines round drops off cliffs / gorges, the demo AI
+  never takes the B-line. Wooden features' planks now use the fences' material + ranch colours (user).
+- **Bark scans on standing trunks (2026-11-25, user: "good light trunk texture, realistic", "use all")**: three CC0 scans
+  in `assets/textures/bark/` (1K colour / OpenGL normal / roughness, VRAM-compressed with mipmaps; `SOURCE.txt`):
+  `bark_light` (ambientCG Bark004, light grey-tan), `bark_pale` (ambientCG Bark007, birch-like), `bark_pine` (Poly Haven
+  Pine Bark, reddish). `deco.gdshader` `bark` path: u round the trunk in whole tiles (count from the instance's girth:
+  no seam), v up it, `bark_tile` 0.8 m, gradients from whichever cut is away from the pixel (no mip line at atan's
+  jump), normal map in a world round/up frame (`bark_relief`). Materials `TerrainGeo._bark_mat`: `trunk` = light,
+  `trunk_pale`, `trunk_pine` (lists in `Terrain.LIST_SPEC` / `TerrainChunkBuilder.LIST_NAMES`); logs and sticks lie down,
+  so they keep the plain `trunk_plain`. Which: pines 45 % pine bark / 55 % light, broadleaf 60 % pale / 40 % light, snags
+  pale, savanna + bend trees light. Not measured: GPU cost of the extra 3 samples on trunks (two more draw lists a chunk).
+
 - **Mountains for ever + technical sections** (2026-11-21, user: "add mountains ... some gentle climbs ... missing nice tight
   turns for slow speed, more technical parts"). `TerrainField.range_at(x)` (mirrored in `TerrainFieldCs`, integer hash of slot +
   seed, no table): from `RANGE_X0` 2100 m one mountain every `RANGE_P` 2800 m on the trail's corridor: a climb averaging

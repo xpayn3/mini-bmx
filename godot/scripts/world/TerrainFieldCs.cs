@@ -158,6 +158,8 @@ internal sealed class TfWood
 				return 0.85;
 			return skin.ev(TerrainFieldCs.maxf(0.001, 19.0 - u));
 		}
+		if (kind == 4)   // (trail_features.gd Wood.top: a wooden drop)
+			return u < 5.0 ? ease(0.0, 5.0, 0.02, 1.0, u) : 1.0;
 		if (kind == 3)
 		{
 			double t = (u - 2.0) / 5.5;
@@ -247,6 +249,7 @@ internal static class TfSet
 			["doubleLine"] = new TfLine(dbl, 3.0, kicker),
 			["woodKicker"] = new TfHermite(new[] { new[] { 0.0, 0, 0 }, new[] { 4.6, 0, 0 }, new[] { 6.4, 0.9, 0.1, 0 }, new[] { 7.4, 0.9, 0, 0 }, new[] { 10.0, 0.72, -0.17 }, new[] { 20.0, 0.14, -0.08 }, new[] { 26.0, 0, 0 } }),
 			["skinny"] = new TfFlat(19.0),
+			["woodDrop"] = new TfFlat(14.0),
 			["bridge"] = new TfFlat(15.0),
 			["gorge"] = new TfFlat(36.0),
 			["rope"] = new TfFlat(72.0),
@@ -258,6 +261,7 @@ internal static class TfSet
 		{
 			["woodKicker"] = new TfWood(0, 0.0, 3.8, 0.85, true, kick, skin),
 			["skinny"] = new TfWood(1, 0.0, 19.0, 0.33, false, kick, skin),
+			["woodDrop"] = new TfWood(4, 0.0, 9.0, 0.9, true, kick, skin),
 			["bridge"] = new TfWood(2, 0.0, 15.0, 1.0, false, kick, skin),
 			["bridgeW"] = new TfWood(3, 0.0, 15.0, 1.0, false, kick, skin),
 			["gorge"] = new TfWood(2, 0.0, 36.0, 1.4, false, kick, skin),
@@ -535,6 +539,11 @@ internal sealed class TfShared
 	public Color[] red_bands, grey_bands;
 	public Godot.Collections.Dictionary col;
 	public GodotObject course;
+	public double[] sX, sZ, sS;
+	public double[] alt_pts, alt_lines;
+	public Godot.Collections.Array alt_feats;
+	public long s_gx0, s_gz0, s_gnx, s_gnz;
+	public int[] s_start, s_items;
 
 	public TfShared Clone() => (TfShared)MemberwiseClone();
 }
@@ -778,6 +787,10 @@ public partial class TerrainFieldCs : RefCounted
 		sh.c_far_x0 = f.Get("c_far_x0").AsInt64(); sh.c_far_z0 = f.Get("c_far_z0").AsInt64();
 		sh.c_far_nx = f.Get("c_far_nx").AsInt64(); sh.c_far_nz = f.Get("c_far_nz").AsInt64();
 		sh.course = f.Get("course").AsGodotObject();
+		sh.sX = F64(f.Get("sX")); sh.sZ = F64(f.Get("sZ")); sh.sS = F64(f.Get("sS"));
+		sh.s_gx0 = f.Get("s_gx0").AsInt64(); sh.s_gz0 = f.Get("s_gz0").AsInt64(); sh.s_gnx = f.Get("s_gnx").AsInt64(); sh.s_gnz = f.Get("s_gnz").AsInt64();
+		sh.s_start = f.Get("s_start").AsInt32Array(); sh.s_items = f.Get("s_items").AsInt32Array();
+		sh.alt_pts = F64(f.Get("alt_pts")); sh.alt_lines = F64(f.Get("alt_lines")); sh.alt_feats = f.Get("alt_feats").AsGodotArray().Duplicate(true);
 		var rf = f.Get("route_feats").AsGodotArray();
 		sh.route_feats = new TfFeat[rf.Count];
 		for (int i = 0; i < rf.Count; i++)
@@ -811,6 +824,9 @@ public partial class TerrainFieldCs : RefCounted
 		c_seg = sh.c_seg; c_run_start = sh.c_run_start; c_runs = sh.c_runs;
 		c_far = sh.c_far; c_far_x0 = sh.c_far_x0; c_far_z0 = sh.c_far_z0; c_far_nx = sh.c_far_nx; c_far_nz = sh.c_far_nz;
 		_route = sh.route_feats;
+		sX = sh.sX; sZ = sh.sZ; sS = sh.sS; s_gx0 = sh.s_gx0; s_gz0 = sh.s_gz0; s_gnx = sh.s_gnx; s_gnz = sh.s_gnz;
+		s_start = sh.s_start; s_items = sh.s_items;
+		alt_pts = sh.alt_pts; alt_lines = sh.alt_lines; alt_feats = sh.alt_feats ?? new();
 		_index_canyons();
 		_col = sh.col.Duplicate();
 		_route_wrap = null;
@@ -831,6 +847,7 @@ public partial class TerrainFieldCs : RefCounted
 		q_x = double.NaN; q_z = double.NaN; q_d = double.PositiveInfinity;
 		_qp[0] = double.NaN; _qp[1] = double.NaN; _qp[2] = double.PositiveInfinity;
 		_fo_x = double.NaN; _gr_x = double.NaN; _pn_x = double.NaN; _mt_x = double.NaN; _zc_x = double.NaN; _bi_x = double.NaN; _g_x = double.NaN;
+		_sd_x = double.NaN; _sn_key.Clear(); _sn_n = 0;
 	}
 
 	// ---------------- Perlin (three.js ImprovedNoise, z fixed at sz) ----------------
@@ -995,6 +1012,136 @@ public partial class TerrainFieldCs : RefCounted
 		return _zc_v;
 	}
 
+	// ---------------- B-lines (terrain_field.gd _build_alts / alt_near) ----------------
+	private const double ALT_W = 0.9, ALT_REACH = 9.0;
+	private double[] alt_pts;
+	public double[] alt_lines;
+	public Godot.Collections.Array alt_feats = new();
+
+	/// distance to the nearest B-line (INF: none within ALT_REACH): the chunk builder leaves gaps in tape / fences there
+	public double alt_dist(double x, double z)
+	{
+		if (alt_lines == null || alt_lines.Length == 0)
+			return double.PositiveInfinity;
+		alt_near(x, z);
+		return a_d;
+	}
+	private double a_d = double.PositiveInfinity, a_e;
+
+	private void alt_near(double x, double z)
+	{
+		a_d = double.PositiveInfinity;
+		long nl = alt_lines.Length / 7;
+		for (long l = 0; l < nl; l++)
+		{
+			long o = l * 7;
+			if (x < alt_lines[o + 2] || z < alt_lines[o + 3] || x > alt_lines[o + 4] || z > alt_lines[o + 5])
+				continue;
+			long k0 = (long)alt_lines[o];
+			long k1 = k0 + (long)alt_lines[o + 1] - 1;
+			for (long k = k0; k < k1; k++)
+			{
+				double ax = alt_pts[k * 3], az = alt_pts[k * 3 + 1];
+				double vx = alt_pts[k * 3 + 3] - ax, vz = alt_pts[k * 3 + 4] - az;
+				double l2 = vx * vx + vz * vz;
+				if (l2 <= 0.0)
+					continue;
+				double t = ((x - ax) * vx + (z - az) * vz) / l2;
+				t = t < 0.0 ? 0.0 : (t > 1.0 ? 1.0 : t);
+				double ex = x - (ax + vx * t), ez = z - (az + vz * t);
+				double d = Math.Sqrt(ex * ex + ez * ez);
+				if (d < a_d)
+				{
+					a_d = d;
+					a_e = alt_pts[k * 3 + 2] + (alt_pts[k * 3 + 5] - alt_pts[k * 3 + 2]) * t;
+				}
+			}
+		}
+	}
+
+	// ---------------- the route spine (terrain_field.gd spine_sd / _sp_node, RouteSpine): s along, |d| across ----------------
+	private const double SP_NODE = 8.0, RS_R = 450.0, RS_CELL = 160.0;
+	private static readonly bool OLD_ROUTE = System.Environment.GetEnvironmentVariable("BMX_OLD_ROUTE") is { Length: > 0 };
+	private double[] sX, sZ, sS;
+	private long s_gx0, s_gz0, s_gnx, s_gnz;
+	private int[] s_start, s_items;
+	private readonly Dictionary<long, int> _sn_key = new();
+	private double[] _sn_buf = new double[256];
+	private int _sn_n;
+	private double _sd_x = double.NaN, _sd_z = double.NaN, r_s, r_ad;
+
+	/// (s, |d|) for the land: bilinear between SP_NODE lattice nodes -> r_s, r_ad
+	public void spine_sd(double x, double z)
+	{
+		if (x == _sd_x && z == _sd_z)
+			return;
+		_sd_x = x; _sd_z = z;
+		if (OLD_ROUTE)
+		{
+			r_s = x; r_ad = Math.Abs(z - zc(x));
+			return;
+		}
+		double fx = x / SP_NODE;
+		double fz = z / SP_NODE;
+		long ix = floori(fx);
+		long iz = floori(fz);
+		double tx = fx - ix;
+		double tz = fz - iz;
+		int a = _sp_node(ix, iz);
+		int b = _sp_node(ix + 1, iz);
+		int c = _sp_node(ix, iz + 1);
+		int d = _sp_node(ix + 1, iz + 1);
+		var B = _sn_buf;
+		r_s = (B[a] * (1.0 - tx) + B[b] * tx) * (1.0 - tz) + (B[c] * (1.0 - tx) + B[d] * tx) * tz;
+		r_ad = (B[a + 1] * (1.0 - tx) + B[b + 1] * tx) * (1.0 - tz) + (B[c + 1] * (1.0 - tx) + B[d + 1] * tx) * tz;
+	}
+
+	private int _sp_node(long ix, long iz)
+	{
+		long key = (ix + 1048576) * 2097152 + (iz + 1048576);
+		if (_sn_key.TryGetValue(key, out int at))
+			return at;
+		double px = ix * SP_NODE;
+		double pz = iz * SP_NODE;
+		const double R2 = RS_R * RS_R;
+		double best = R2;
+		double ws = 0.0;
+		double wsum = 0.0;
+		long cx = floori(px / RS_CELL) - s_gx0;
+		long cz = floori(pz / RS_CELL) - s_gz0;
+		if (sX != null && cx >= 0 && cz >= 0 && cx < s_gnx && cz < s_gnz)
+		{
+			long ci = cz * s_gnx + cx;
+			for (int k = s_start[ci]; k < s_start[ci + 1]; k++)
+			{
+				int i = s_items[k];
+				double ax = sX[i], az = sZ[i];
+				double vx = sX[i + 1] - ax, vz = sZ[i + 1] - az;
+				double t = ((px - ax) * vx + (pz - az) * vz) / (vx * vx + vz * vz);
+				t = t < 0.0 ? 0.0 : (t > 1.0 ? 1.0 : t);
+				double ex = px - (ax + vx * t), ez = pz - (az + vz * t);
+				double d2 = ex * ex + ez * ez;
+				if (d2 < best)
+					best = d2;
+				if (d2 < R2)
+				{
+					double q = 1.0 - d2 / R2;
+					double w = q * q / (d2 + 25.0);
+					ws += w * (sS[i] + t * (sS[i + 1] - sS[i]));
+					wsum += w;
+				}
+			}
+		}
+		at = _sn_n;
+		if (_sn_n + 2 > _sn_buf.Length)
+			Array.Resize(ref _sn_buf, _sn_buf.Length * 2);
+		_sn_buf[_sn_n] = wsum > 0.0 ? ws / wsum : 0.0;
+		_sn_buf[_sn_n + 1] = Math.Sqrt(best);
+		_sn_n += 2;
+		_sn_key[key] = at;
+		return at;
+	}
+
 	// ---------------- the mountains after the first (TerrainField.range_at) ----------------
 	public const double RANGE_X0 = 2100.0, RANGE_P = 2800.0, RANGE_UP = 0.042, RANGE_DOWN = 0.075;
 	private double _rg_x = double.NaN, _rg_h, _rg_m;
@@ -1034,15 +1181,19 @@ public partial class TerrainFieldCs : RefCounted
 		if (x == _mt_x && z == _mt_z)
 			return _mt_v;
 		double v = 0.0;
+		spine_sd(x, z);
+		double px = x;
+		x = r_s;
+		double ad = r_ad;
 		if (x > RANGE_X0)
 		{
 			range_at(x);
 			if (_rg_m > 0.0)
-				v = _rg_m * (1.0 - sm(MTN_W - 20, MTN_W + 90, Math.Abs(z - zc(x))));
+				v = _rg_m * (1.0 - sm(MTN_W - 20, MTN_W + 90, ad));
 		}
 		if (x > -300.0 && x < HILL_LEN + 150)
 		{
-			double t = (Math.Abs(z - zc(x)) - (MTN_W - 20)) / ((MTN_W + 90) - (MTN_W - 20));
+			double t = (ad - (MTN_W - 20)) / ((MTN_W + 90) - (MTN_W - 20));
 			if (t < 1.0)
 			{
 				t = t < 0.0 ? 0.0 : t;
@@ -1055,11 +1206,20 @@ public partial class TerrainFieldCs : RefCounted
 				v = a * (1.0 - t * t * (3.0 - 2.0 * t));
 			}
 		}
-		_mt_x = x; _mt_z = z; _mt_v = v;
+		_mt_x = px; _mt_z = z; _mt_v = v;
 		return v;
 	}
 
 	public double hill(double x, double z)
+	{
+		spine_sd(x, z);
+		double top = hill_top(r_s);
+		if (top <= 0.0)
+			return 0.0;
+		return top * (1.0 - sm(MTN_W, MTN_W + 260, r_ad));
+	}
+
+	public double hill_top(double x)
 	{
 		if (x <= -330.0)
 			return 0.0;
@@ -1091,9 +1251,7 @@ public partial class TerrainFieldCs : RefCounted
 			range_at(x);
 			top += _rg_h;
 		}
-		if (top <= 0.0)
-			return 0.0;
-		return top * (1.0 - sm(MTN_W, MTN_W + 260, Math.Abs(z - zc(x))));
+		return top;
 	}
 
 	public double route_dist(double x, double z)
@@ -1131,7 +1289,13 @@ public partial class TerrainFieldCs : RefCounted
 	{
 		double p = Math.Abs(pathN(x, z));
 		query(x, z);
-		double main = q_d < 12.0 ? (1.0 - sm(q_w, q_w + 1.2, q_d)) : 0.0;
+		double main = q_d < 12.0 ? (1.0 - sm(q_w, q_w + minf(1.2, 0.35 + q_w), q_d)) : 0.0;
+		if (alt_lines != null && alt_lines.Length > 0)
+		{
+			alt_near(x, z);
+			if (a_d < ALT_W + 0.9)
+				main = maxf(main, 1.0 - sm(ALT_W, ALT_W + 0.9, a_d));
+		}
 		double t = (p - 0.03) / (0.075 - 0.03);
 		if (t >= 1.0)
 			return maxf(0.0, main);
@@ -1202,7 +1366,7 @@ public partial class TerrainFieldCs : RefCounted
 		double g = sm(0.05, 0.4, noise(a / 130.0 + 71.0, b / 130.0 - 12.5));
 		double wn = sm(0.30, 0.55, noise(a / 11.0 - 5.0, b / 11.0 + 19.0));
 		bs_c = 0.75 * sm(-0.25, 0.3, n1);
-		bs_F = clampf(w + 0.1 + 0.8 * sm(-0.3, 0.3, n2), 2.0, 3.5);
+		bs_F = clampf(w + 0.1 + 0.8 * sm(-0.3, 0.3, n2), minf(2.0, w + 0.75), 3.5);
 		bs_cw = 0.8 + 0.6 * (bs_c / 0.75);
 		bs_lip = 0.18 * sm(0.0, 0.35, n3);
 		bs_scoop = 0.5 * g * wn;
@@ -1568,6 +1732,15 @@ public partial class TerrainFieldCs : RefCounted
 		query(x, z);
 		if (q_mask > 0.0)
 			h += (q_bench - h) * q_mask;
+		if (alt_lines != null && alt_lines.Length > 0)
+		{
+			alt_near(x, z);
+			if (a_d < ALT_REACH)
+			{
+				double am = (1.0 - sm(ALT_W + 1.0, ALT_REACH, a_d)) * (1.0 - q_mask);
+				h += (a_e - h) * am;
+			}
+		}
 		h += noise((x - 5.3) * I8, (z + 9.1) * I8) * 0.5 * maxf(sm(2.5, 7, dist), sm(0.15, 0.25, ap)) * (1.0 - t);
 		h -= 0.15 * t;
 		if (t > 0.0)
@@ -1675,7 +1848,7 @@ public partial class TerrainFieldCs : RefCounted
 	private static readonly System.Collections.Generic.Dictionary<string, double[]> AIR = new()
 	{
 		["table"] = new[] { 15.85, 31.99 }, ["double"] = new[] { 15.85, 31.99 }, ["kicker"] = new[] { 11.45, 25.63 },
-		["woodKicker"] = new[] { 3.8, 9.0 }, ["tableLine"] = new[] { 15.85, 31.99, 52.2, 66.38 }, ["flow"] = new[] { 11.45, 25.63 },
+		["woodKicker"] = new[] { 3.8, 9.0 }, ["woodDrop"] = new[] { 9.0, 12.5 }, ["tableLine"] = new[] { 15.85, 31.99, 52.2, 66.38 }, ["flow"] = new[] { 11.45, 25.63 },
 		["doubleLine"] = new[] { 15.85, 31.99, 52.2, 66.38 },
 	};
 
@@ -2479,6 +2652,7 @@ public partial class TerrainFieldCs : RefCounted
 		var T2 = new float[NV * NV * 4];   // road, dry biome, built jump, run-off skid's strength
 		var T3 = new float[NV * NV];       // riders in the air over a jump here
 			var T4 = new float[NV * NV];       // corner load: how hard riders press the line here (0 straight .. 1 tight bend)
+		var T5 = new float[NV * NV];       // how narrow the trail is (0 a road .. 1 a forest singletrack)
 		for (long iz = -1; iz < N + 2; iz++)
 		{
 			for (long ix = -1; ix < N + 2; ix++)
@@ -2511,6 +2685,7 @@ public partial class TerrainFieldCs : RefCounted
 					T2[o * 4 + 2] = (float)jm;
 					T3[o] = (float)fo_air;
 						T4[o] = on ? (float)corner_load(q_k) : 0f;
+					T5[o] = on ? (float)Math.Clamp(1.6 - q_w, 0.0, 1.0) : 0f;
 					T2[o * 4 + 3] = (float)(on ? cROS[q_i] + (cROS[q_i + 1] - cROS[q_i]) * q_t : 0.0);
 						if (on)
 						{
@@ -2577,7 +2752,7 @@ public partial class TerrainFieldCs : RefCounted
 		return new Godot.Collections.Dictionary
 		{
 			["G"] = G, ["verts"] = verts, ["norms"] = norms, ["uvs"] = uvs,
-			["LG"] = LG, ["LD"] = LD, ["TW"] = TW, ["SW"] = SW, ["DRY"] = DRY, ["TR"] = TR, ["T2"] = T2, ["T3"] = T3, ["T4"] = T4,
+			["LG"] = LG, ["LD"] = LD, ["TW"] = TW, ["SW"] = SW, ["DRY"] = DRY, ["TR"] = TR, ["T2"] = T2, ["T3"] = T3, ["T4"] = T4, ["T5"] = T5,
 		};
 	}
 

@@ -12,6 +12,11 @@ const HILL_LEN := 1400.0
 ## out at setup; Terrain grows it (grow_course) on a worker thread well before the rider gets near the end.
 const COURSE_LEN := 4000.0
 const MTN_W := 150.0
+## the world's route (RouteSpine, 2026-11-25): the mountains and the trail's corridor are measured along it (s) and
+## across it (d). BMX_OLD_ROUTE=1 = the old straight corridor along +x (s = x, d = z - zc(x)).
+static var OLD_ROUTE := OS.get_environment("BMX_OLD_ROUTE") != ""
+const SPINE_AHEAD := 4000.0   # m of spine laid out past the course's end (the land there already follows it)
+const SP_NODE := 8.0          # m: the (s, |d|) lattice the land reads, bilinear between nodes (exact nodes, same in C#)
 const QR := 19.0
 const CELL := 16.0
 const CSTEP := 2.0
@@ -349,6 +354,9 @@ func setup(seed_in: int, style_in: Dictionary = {}) -> void:
 		x += len + 190 + r.next() * 170
 		k += 1
 	_reset_caches()
+	spine = RouteSpine.make(self, seed_in, COURSE_LEN + SPINE_AHEAD)
+	_bind_spine()
+	_reset_caches()
 	var crng := WorldRng.new(seed_in * 31337 + 5)
 	course = TrailCourse.make(crng, self, HILL_LEN, MTN_W - 40, COURSE_LEN, seed_in * 6151 + 3)
 	_bind_course()
@@ -359,8 +367,11 @@ func setup(seed_in: int, style_in: Dictionary = {}) -> void:
 
 ## (worker thread, on a fork) lay the course out on to to_x: this fork gets the grown course, its
 ## query tables, marking and route features; the main field takes them over with adopt_course()
-func grow_course(to_x: float) -> void:
-	course = course.grown(self, to_x)
+func grow_course(to_s: float) -> void:
+	spine = spine.grown(self, to_s + SPINE_AHEAD)
+	_bind_spine()
+	_reset_caches()
+	course = course.grown(self, to_s)
 	_reset_caches()
 	_bind_course()
 	course.plan_marking(self)
@@ -372,12 +383,15 @@ func grow_course(to_x: float) -> void:
 ## (main thread) take over a course grown on a fork by grow_course()
 func adopt_course(g: TerrainField) -> void:
 	course = g.course
+	spine = g.spine
+	_bind_spine()
 	cX = g.cX; cZ = g.cZ; cKD = g.cKD; cTX = g.cTX; cTZ = g.cTZ; cKAP = g.cKAP; cW = g.cW; cBT = g.cBT; cE = g.cE
 	cRD = g.cRD; cRK = g.cRK; cLN = g.cLN; cRO = g.cRO; cROS = g.cROS
 	c_gx0 = g.c_gx0; c_gz0 = g.c_gz0; c_gnx = g.c_gnx; c_gnz = g.c_gnz; c_start = g.c_start; c_items = g.c_items
 	c_seg = g.c_seg; c_run_start = g.c_run_start; c_runs = g.c_runs
 	c_far = g.c_far; c_far_x0 = g.c_far_x0; c_far_z0 = g.c_far_z0; c_far_nx = g.c_far_nx; c_far_nz = g.c_far_nz
 	route_feats = g.route_feats
+	alt_pts = g.alt_pts; alt_lines = g.alt_lines; alt_feats = g.alt_feats
 	_index_canyons()
 	_reset_caches()
 
@@ -399,6 +413,8 @@ func fork() -> TerrainField:
 	f.seed_value = seed_value; f.sz = sz; f.NT = NT.duplicate()   # private copies: no shared refcounts across threads
 	f.rp_a = rp_a; f.rp_sg = rp_sg; f.pitches = pitches.duplicate(); f.pitch_share = pitch_share
 	f.course = course
+	f.spine = spine
+	f._bind_spine(true)
 	f._bind_course(true)
 	f.route_feats = []
 	for j in route_feats:
@@ -406,6 +422,7 @@ func fork() -> TerrainField:
 		c.s = j.s
 		f.route_feats.append(c)
 	f._index_canyons()
+	f.alt_pts = alt_pts.duplicate(); f.alt_lines = alt_lines.duplicate(); f.alt_feats = alt_feats.duplicate()
 	return f
 
 
@@ -460,6 +477,7 @@ func _reset_caches() -> void:
 	q_x = NAN; q_z = NAN; q_d = INF
 	_qp.resize(15); _qp[0] = NAN; _qp[1] = NAN; _qp[2] = INF
 	_fo_x = NAN; _gr_x = NAN; _pn_x = NAN; _mt_x = NAN; _zc_x = NAN; _bi_x = NAN; _g_x = NAN; _rg_x = NAN
+	_sd_x = NAN; _sn_key = {}; _sn_buf = PackedFloat64Array()
 
 
 # ---------------- Perlin (three.js ImprovedNoise, z fixed at sz) ----------------
@@ -576,6 +594,132 @@ func zc(x: float) -> float:
 	return _zc_v
 
 
+# ---------------- the route spine (RouteSpine): s along, d across ----------------
+var spine: RouteSpine
+var bare := false   # (RouteSpine's walker) the land without the mountains it carries: mtn / hill = 0
+var sX := PackedFloat64Array()
+var sZ := PackedFloat64Array()
+var sS := PackedFloat64Array()
+var s_gx0: int = 0
+var s_gz0: int = 0
+var s_gnx: int = 0
+var s_gnz: int = 0
+var s_start := PackedInt32Array()
+var s_items := PackedInt32Array()
+# the lattice's nodes, computed when first read: key -> index into _sn_buf (s, |d|)
+var _sn_key := {}
+var _sn_buf := PackedFloat64Array()
+var _sd_x: float = NAN
+var _sd_z: float = NAN
+var r_s: float = 0.0     # spine_sd(): smooth s
+var r_ad: float = 0.0    # spine_sd(): |d|
+# spine_near(): the exact nearest point
+var sp_s: float = 0.0
+var sp_d: float = 0.0
+var sp_ad: float = 0.0
+var sp_dir: float = 0.0
+
+
+func _bind_spine(private: bool = false) -> void:
+	var sp := spine
+	sX = sp.X; sZ = sp.Z; sS = sp.S
+	s_gx0 = sp.gx0; s_gz0 = sp.gz0; s_gnx = sp.gnx; s_gnz = sp.gnz; s_start = sp.cell_start; s_items = sp.cell_items
+	if private:
+		sX = sX.duplicate(); sZ = sZ.duplicate(); sS = sS.duplicate(); s_start = s_start.duplicate(); s_items = s_items.duplicate()
+
+
+## the exact nearest point of the spine (within RouteSpine.R) -> sp_s, sp_d (signed: + = the +z side heading +x),
+## sp_ad, sp_dir. GDScript only (the trail's layout, growth, tools)
+func spine_near(x: float, z: float) -> void:
+	if OLD_ROUTE:
+		sp_s = x; sp_d = z - zc(x); sp_ad = absf(sp_d); sp_dir = 0.0
+		return
+	sp_ad = RouteSpine.R; sp_d = RouteSpine.R; sp_s = 0.0; sp_dir = 0.0
+	var cx := floori(x / RouteSpine.CELL) - s_gx0
+	var cz := floori(z / RouteSpine.CELL) - s_gz0
+	if cx < 0 or cz < 0 or cx >= s_gnx or cz >= s_gnz:
+		return
+	var ci := cz * s_gnx + cx
+	var best := RouteSpine.R * RouteSpine.R
+	for k in range(s_start[ci], s_start[ci + 1]):
+		var i: int = s_items[k]
+		var ax := sX[i]; var az := sZ[i]
+		var vx := sX[i + 1] - ax; var vz := sZ[i + 1] - az
+		var l2 := vx * vx + vz * vz
+		var t := ((x - ax) * vx + (z - az) * vz) / l2
+		t = 0.0 if t < 0.0 else (1.0 if t > 1.0 else t)
+		var ex := x - (ax + vx * t); var ez := z - (az + vz * t)
+		var d2 := ex * ex + ez * ez
+		if d2 < best:
+			best = d2
+			var l := sqrt(l2)
+			sp_ad = sqrt(d2)
+			sp_d = ex * (-vz / l) + ez * (vx / l)
+			sp_s = sS[i] + t * (sS[i + 1] - sS[i])
+			sp_dir = atan2(vz, vx)
+
+
+## (s, |d|) for the land (mtn / hill): bilinear between SP_NODE lattice nodes -> r_s, r_ad. A node's s is a weighted
+## blend of every segment within reach (not just the nearest), so it never jumps on the inside of a bend; |d| is
+## the true distance. Mirrored exactly in TerrainFieldCs.spine_sd.
+func spine_sd(x: float, z: float) -> void:
+	if x == _sd_x and z == _sd_z:
+		return
+	_sd_x = x; _sd_z = z
+	if OLD_ROUTE:
+		r_s = x; r_ad = absf(z - zc(x))
+		return
+	var fx := x / SP_NODE
+	var fz := z / SP_NODE
+	var ix := floori(fx)
+	var iz := floori(fz)
+	var tx := fx - ix
+	var tz := fz - iz
+	var a := _sp_node(ix, iz)
+	var b := _sp_node(ix + 1, iz)
+	var c := _sp_node(ix, iz + 1)
+	var d := _sp_node(ix + 1, iz + 1)
+	r_s = (_sn_buf[a] * (1.0 - tx) + _sn_buf[b] * tx) * (1.0 - tz) + (_sn_buf[c] * (1.0 - tx) + _sn_buf[d] * tx) * tz
+	r_ad = (_sn_buf[a + 1] * (1.0 - tx) + _sn_buf[b + 1] * tx) * (1.0 - tz) + (_sn_buf[c + 1] * (1.0 - tx) + _sn_buf[d + 1] * tx) * tz
+
+
+func _sp_node(ix: int, iz: int) -> int:
+	var key := (ix + 1048576) * 2097152 + (iz + 1048576)
+	var at = _sn_key.get(key)
+	if at != null:
+		return at
+	var px := ix * SP_NODE
+	var pz := iz * SP_NODE
+	var R2 := RouteSpine.R * RouteSpine.R
+	var best := R2
+	var ws := 0.0
+	var wsum := 0.0
+	var cx := floori(px / RouteSpine.CELL) - s_gx0
+	var cz := floori(pz / RouteSpine.CELL) - s_gz0
+	if cx >= 0 and cz >= 0 and cx < s_gnx and cz < s_gnz:
+		var ci := cz * s_gnx + cx
+		for k in range(s_start[ci], s_start[ci + 1]):
+			var i: int = s_items[k]
+			var ax := sX[i]; var az := sZ[i]
+			var vx := sX[i + 1] - ax; var vz := sZ[i + 1] - az
+			var t := ((px - ax) * vx + (pz - az) * vz) / (vx * vx + vz * vz)
+			t = 0.0 if t < 0.0 else (1.0 if t > 1.0 else t)
+			var ex := px - (ax + vx * t); var ez := pz - (az + vz * t)
+			var d2 := ex * ex + ez * ez
+			if d2 < best:
+				best = d2
+			if d2 < R2:
+				var q := 1.0 - d2 / R2
+				var w := q * q / (d2 + 25.0)
+				ws += w * (sS[i] + t * (sS[i + 1] - sS[i]))
+				wsum += w
+	at = _sn_buf.size()
+	_sn_buf.append(ws / wsum if wsum > 0.0 else 0.0)
+	_sn_buf.append(sqrt(best))
+	_sn_key[key] = at
+	return at
+
+
 # ---------------- the mountains after the first: one every RANGE_P m, for ever ----------------
 ## Each is a gentle climb (about 4 % on average) up the back of a ridge that follows the trail's corridor, a short
 ## level top, then the descent (about 7.5 %). Height, lengths and where it sits in its slot come from an integer
@@ -623,13 +767,19 @@ func mtn(x: float, z: float) -> float:
 	if x == _mt_x and z == _mt_z:
 		return _mt_v
 	var v := 0.0
+	if bare:
+		return 0.0
+	spine_sd(x, z)
+	var px := x
+	x = r_s   # (along the route; the windows below were written in x when the route ran along +x)
+	var ad := r_ad
 	if x > RANGE_X0:
 		range_at(x)
 		if _rg_m > 0.0:
-			v = _rg_m * (1.0 - sm(MTN_W - 20, MTN_W + 90, absf(z - zc(x))))
+			v = _rg_m * (1.0 - sm(MTN_W - 20, MTN_W + 90, ad))
 	if x > -300.0 and x < HILL_LEN + 150:
 		# (1 - sm(MTN_W - 20, MTN_W + 90, |z - zc|)) * sm(-300, -170, x) * (1 - sm(HILL_LEN, HILL_LEN + 150, x))
-		var t := (absf(z - zc(x)) - (MTN_W - 20)) / ((MTN_W + 90) - (MTN_W - 20))
+		var t := (ad - (MTN_W - 20)) / ((MTN_W + 90) - (MTN_W - 20))
 		if t < 1.0:
 			t = 0.0 if t < 0.0 else t
 			var a := 1.0 - t * t * (3.0 - 2.0 * t)
@@ -639,11 +789,22 @@ func mtn(x: float, z: float) -> float:
 			t = (x - HILL_LEN) / ((HILL_LEN + 150) - HILL_LEN)
 			t = 0.0 if t < 0.0 else t
 			v = a * (1.0 - t * t * (3.0 - 2.0 * t))
-	_mt_x = x; _mt_z = z; _mt_v = v
+	_mt_x = px; _mt_z = z; _mt_v = v
 	return v
 
 
 func hill(x: float, z: float) -> float:
+	if bare:
+		return 0.0
+	spine_sd(x, z)
+	var top := hill_top(r_s)
+	if top <= 0.0:
+		return 0.0
+	return top * (1.0 - sm(MTN_W, MTN_W + 260, r_ad))
+
+
+## the mountain's height on the route's middle at s along it (the first mountain, its pitches, the ranges)
+func hill_top(x: float) -> float:
 	if x <= -330.0:
 		return 0.0
 	var steep := 0.0
@@ -669,9 +830,7 @@ func hill(x: float, z: float) -> float:
 	if x > RANGE_X0:
 		range_at(x)
 		top += _rg_h
-	if top <= 0.0:
-		return 0.0
-	return top * (1.0 - sm(MTN_W, MTN_W + 260, absf(z - zc(x))))
+	return top
 
 
 func route_dist(x: float, z: float) -> float:
@@ -708,7 +867,11 @@ func _grad_at(x: float, z: float) -> void:
 func trail(x: float, z: float) -> float:
 	var p := absf(pathN(x, z))
 	query(x, z)
-	var main := (1.0 - sm(q_w, q_w + 1.2, q_d)) if q_d < 12.0 else 0.0
+	var main := (1.0 - sm(q_w, q_w + minf(1.2, 0.35 + q_w), q_d)) if q_d < 12.0 else 0.0   # (a narrow singletrack's dirt fades out quicker)
+	if alt_lines.size() > 0:
+		alt_near(x, z)
+		if a_d < ALT_W + 0.9:
+			main = maxf(main, 1.0 - sm(ALT_W, ALT_W + 0.9, a_d))
 	var t := (p - 0.03) / (0.075 - 0.03)
 	if t >= 1.0:
 		return maxf(0.0, main)
@@ -787,7 +950,7 @@ func berm_style(a: float, b: float, w: float) -> void:
 	var g := sm(0.05, 0.4, noise(a / 130.0 + 71.0, b / 130.0 - 12.5))
 	var wn := sm(0.30, 0.55, noise(a / 11.0 - 5.0, b / 11.0 + 19.0))
 	bs_c = 0.75 * sm(-0.25, 0.3, n1)
-	bs_F = clampf(w + 0.1 + 0.8 * sm(-0.3, 0.3, n2), 2.0, 3.5)
+	bs_F = clampf(w + 0.1 + 0.8 * sm(-0.3, 0.3, n2), minf(2.0, w + 0.75), 3.5)   # (a narrow forest singletrack: its rim close in, ~1.3 m out)
 	bs_cw = 0.8 + 0.6 * (bs_c / 0.75)
 	bs_lip = 0.18 * sm(0.0, 0.35, n3)
 	bs_scoop = 0.5 * g * wn
@@ -1164,6 +1327,11 @@ func base(x: float, z: float) -> float:
 	query(x, z)
 	if q_mask > 0.0:
 		h += (q_bench - h) * q_mask
+	if alt_lines.size() > 0:
+		alt_near(x, z)
+		if a_d < ALT_REACH:
+			var am := (1.0 - sm(ALT_W + 1.0, ALT_REACH, a_d)) * (1.0 - q_mask)
+			h += (a_e - h) * am
 	h += noise((x - 5.3) * I8, (z + 9.1) * I8) * 0.5 * maxf(sm(2.5, 7, dist), sm(0.15, 0.25, ap)) * (1.0 - t)
 	h -= 0.15 * t
 	if t > 0.0:
@@ -1305,7 +1473,7 @@ func make_feat(x: float, z: float, dx: float, dz: float, type: String, b0: float
 ## line) to release it, then a rest (a bridge or plain trail) before the next build. BMX_OLD_RHYTHM=1 = the old random picks (tests)
 ## ("" = plain trail for that beat). Jump lines draw from their own random stream (seeded by where they start), so the
 ## road features after them are laid out exactly as before
-const RHYTHM := [["rhythm", "flow", "rhythm"], ["kicker", "table", "kicker", "tableLine", "kicker", "flow", "woodKicker"], ["bridge", "bridge", ""]]   # (more kickers: 2026-11-23, user)
+const RHYTHM := [["rhythm", "flow", "rhythm"], ["kicker", "table", "kicker", "tableLine", "kicker", "flow", "woodKicker", "woodDrop"], ["bridge", "skinny", ""]]   # (wood drop + north-shore skinny: 2026-11-25)   # (more kickers: 2026-11-23, user)
 static var OLD_RHYTHM := OS.get_environment("BMX_OLD_RHYTHM") != ""
 func _build_route() -> void:
 	var C := course
@@ -1391,6 +1559,97 @@ func _build_route() -> void:
 				s += len + ((5 + rv * 8) if jmp else (70 + rv * 90) / jf)
 	route_feats = list
 	_index_canyons()
+	_build_alts()
+
+
+# ---------------- B-lines (line choices, 2026-11-25 Phase C) ----------------
+## an easier line round a big built feature: it leaves the trail ALT_IN m before the feature, swings ALT_OFF m out to one
+## side, rides past at the trail's own height (no jump) and joins again ALT_OUT m after it. Ground levelled + dirt along it
+## (base / trail, mirrored in TerrainFieldCs). Flat arrays for C#: alt_pts = (x, z, height) per point, alt_lines = (first
+## point, count, min x, min z, max x, max z, side) per line. BMX_OLD_LINES=1 = none
+const ALT_TYPES := ["table", "kicker", "tableLine", "woodDrop", "double", "doubleLine", "flow", "woodKicker"]
+const ALT_IN := 22.0
+const ALT_OUT := 18.0
+const ALT_W := 0.9      # half-width of a B-line
+const ALT_REACH := 9.0  # how far its ground shaping reaches
+static var OLD_LINES := OS.get_environment("BMX_OLD_LINES") != ""
+var alt_pts := PackedFloat64Array()
+var alt_lines := PackedFloat64Array()
+var alt_feats: Array = []   # [route feature index, line index] (signs, HUD)
+
+
+func _build_alts() -> void:
+	alt_pts = PackedFloat64Array(); alt_lines = PackedFloat64Array(); alt_feats = []
+	if OLD_LINES:
+		return
+	var C := course
+	var last_end := -INF
+	for fi in route_feats.size():
+		var f: Feat = route_feats[fi]
+		if not ALT_TYPES.has(f.type):
+			continue
+		var h0 := float(((int(f.s * 4.0) * 73856093) ^ (seed_value * 83492791)) & 0xffff) / 65536.0
+		if h0 > 0.7:
+			continue
+		var s0: float = f.s - ALT_IN
+		var s1: float = f.s + f.len + ALT_OUT
+		if s0 < last_end + 10.0 or s0 < 30.0 or s1 > (C.n - 20) * CSTEP:
+			continue
+		var side := 1.0 if h0 < 0.35 else -1.0
+		var off := f.half + 4.2 + h0 * 3.0
+		var first := alt_pts.size() / 3
+		var mnx := INF; var mnz := INF; var mxx := -INF; var mxz := -INF
+		var s := s0
+		while s <= s1:
+			var p := C.at(s)
+			var w := sm(0.0, 12.0, s - s0) * sm(0.0, 12.0, s1 - s)
+			var x: float = p[0] + float(-p[3]) * off * side * w
+			var z: float = p[1] + float(p[2]) * off * side * w
+			var i: int = p[4]
+			var e: float = cE[i] + (cE[mini(i + 1, C.n - 1)] - cE[i]) * (s / CSTEP - i)
+			alt_pts.append(x); alt_pts.append(z); alt_pts.append(e)
+			mnx = minf(mnx, x); mnz = minf(mnz, z); mxx = maxf(mxx, x); mxz = maxf(mxz, z)
+			s += CSTEP
+		var cnt := alt_pts.size() / 3 - first
+		alt_feats.append([fi, alt_lines.size() / 7])
+		for v in [first, cnt, mnx - ALT_REACH, mnz - ALT_REACH, mxx + ALT_REACH, mxz + ALT_REACH, side]:
+			alt_lines.append(v)
+		last_end = s1
+
+
+## distance to the nearest B-line (INF: none within ALT_REACH). Same in TerrainFieldCs
+func alt_dist(x: float, z: float) -> float:
+	if alt_lines.size() == 0:
+		return INF
+	alt_near(x, z)
+	return a_d
+
+
+## the nearest B-line point to (x, z) -> a_d (distance; INF none within ALT_REACH), a_e (its height there). Mirrored in C#
+var a_d: float = INF
+var a_e: float = 0.0
+func alt_near(x: float, z: float) -> void:
+	a_d = INF
+	var nl := alt_lines.size() / 7
+	for l in nl:
+		var o := l * 7
+		if x < alt_lines[o + 2] or z < alt_lines[o + 3] or x > alt_lines[o + 4] or z > alt_lines[o + 5]:
+			continue
+		var k0 := int(alt_lines[o])
+		var k1 := k0 + int(alt_lines[o + 1]) - 1
+		for k in range(k0, k1):
+			var ax := alt_pts[k * 3]; var az := alt_pts[k * 3 + 1]
+			var vx := alt_pts[k * 3 + 3] - ax; var vz := alt_pts[k * 3 + 4] - az
+			var l2 := vx * vx + vz * vz
+			if l2 <= 0.0:
+				continue
+			var t := ((x - ax) * vx + (z - az) * vz) / l2
+			t = 0.0 if t < 0.0 else (1.0 if t > 1.0 else t)
+			var ex := x - (ax + vx * t); var ez := z - (az + vz * t)
+			var d := sqrt(ex * ex + ez * ez)
+			if d < a_d:
+				a_d = d
+				a_e = alt_pts[k * 3 + 2] + (alt_pts[k * 3 + 5] - alt_pts[k * 3 + 2]) * t
 
 
 ## free-ride jumps out in the land: the natural ground beside the footprint (half + SITE_SIDE m from the axis) may rise at most
