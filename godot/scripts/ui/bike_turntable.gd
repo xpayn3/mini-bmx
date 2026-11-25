@@ -162,10 +162,10 @@ func hero_stage(bg: Color, yaw: float) -> void:
 	key.light_energy = 1.6; key.light_color = Color(1.0, 0.94, 0.84); key.rotation_degrees = Vector3(-26, 34, 0)
 	vp.add_child(key)
 	var rim := DirectionalLight3D.new()
-	rim.light_energy = 2.8; rim.light_color = Color(1.0, 0.8, 0.22); rim.rotation_degrees = Vector3(-16, 158, 0)
+	rim.light_energy = 2.8; rim.light_color = Color(1.0, 0.92, 0.84); rim.rotation_degrees = Vector3(-16, 158, 0)
 	vp.add_child(rim)
 	var rim2 := DirectionalLight3D.new()
-	rim2.light_energy = 2.0; rim2.light_color = Color(0.45, 0.68, 1.0); rim2.rotation_degrees = Vector3(-12, -146, 0)
+	rim2.light_energy = 2.0; rim2.light_color = Color(0.62, 0.72, 0.85); rim2.rotation_degrees = Vector3(-12, -146, 0)
 	vp.add_child(rim2)
 	look_pitch = 0.0
 	_fit()
