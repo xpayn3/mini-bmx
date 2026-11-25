@@ -117,8 +117,12 @@ func follow(px: float, pz: float, t: float) -> void:
 	position =Vector3(roundf(px / MESH_SNAP) * MESH_SNAP, Terrain.WATER, roundf(pz / MESH_SNAP) * MESH_SNAP)
 	var c := Vector2(roundf(px / BAKE_SNAP) * BAKE_SNAP, roundf(pz / BAKE_SNAP) * BAKE_SNAP)
 	if not is_finite(_center.x):
-		_start(c)
-		_bake(INF)
+		# the first lake of a ride: baked a few rows a frame like every later one, shown once done (all at once it was
+		# a ~35 ms frame mid-ride, the first time water came within reach)
+		if _job_row < 0: _start(c)
+		_show_after = true
+		visible = false
+		_bake(BAKE_MS)
 		return
 	_dirty_t += get_process_delta_time()
 	if _job_row < 0:

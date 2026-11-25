@@ -1630,6 +1630,7 @@ func _end_crash() -> void:
 	if wasted: wasted.stop()
 
 func get_up() -> void:
+	_jw_prev = Vector2(INF, INF)
 	var _gt := Time.get_ticks_usec()   # (its parts are "getup.*" in the frame profiler, F10)
 	if getup_anim is ClipGetUp: getup_anim.free_clips()   # (Backspace while standing dizzy)
 	getup_anim = null
@@ -2027,6 +2028,7 @@ func _make_ruts() -> void:
 var ghost = null   # game/ghost_rider.gd (rides of this world only, not the title / levels)
 
 func respawn(new_world: bool) -> void:
+	_jw_prev = Vector2(INF, INF)   # (a respawn moves the bike on purpose: not a jump)
 	exit_replay()
 	if replay: replay.clear()
 	_line_reset()
@@ -2979,6 +2981,7 @@ func _physics_process(dt: float) -> void:
 	elif phys.crash_on:
 		rider.pose_ragdoll(ragdoll.p, _ragdoll_roots())
 	_pk = _perf("p_ragdoll_pose", _pk)
+	_jump_watch(dt)
 	if not phys.is_sane():
 		push_warning("physics went non-finite; restoring last good state")
 		for k in _last_good: phys.set(k, _last_good[k])
@@ -2995,6 +2998,35 @@ func _physics_process(dt: float) -> void:
 	# speed feel's surge: the bike's acceleration per physics step (per drawn frame it came out 3-4x weaker at 400 fps)
 	_acc_fx = (absf(phys.v) - _v_prev_fx) / dt
 	_v_prev_fx = absf(phys.v)
+
+## Hitch / jump watch (2026-11-25, user: "every couple of times the level lags and the rider gets teleported a couple
+## of metres in one frame"): always on in rides, writes into the session log (crashlogs/run_*.log, F8 reports) so a
+## real ride tells which it is. HITCH = a drawn frame longer than HITCH_MS (wall clock, with the physics ticks it ran:
+## the physics runs at most 12 ticks a frame, so a 150 ms freeze shows as the rider jumping ~1.5-2 m); JUMP = the
+## bike moved further in ONE physics step than its speed explains (something set its position).
+const HITCH_MS := 80.0
+var _hw_last := 0
+var _hw_ticks := 0
+var _jw_prev := Vector2(INF, INF)
+var _jw_crash := false
+func _hitch_watch() -> void:
+	var now := Time.get_ticks_usec()
+	var ms := (now - _hw_last) / 1000.0
+	if _hw_last > 0 and ms > HITCH_MS and Engine.get_process_frames() > 300 and input_enabled and not scenic and not title_world and not photo and not get_tree().paused:
+		CrashLog.note("HITCH frame_ms=%.0f phys_ticks=%d pos=(%.1f, %.1f) v=%.1f crashed=%s fps=%d" % [ms, _hw_ticks, phys.x, phys.z, phys.v, phys.crash_on, Engine.get_frames_per_second()])
+	_hw_last = now
+	_hw_ticks = 0
+
+func _jump_watch(dt: float) -> void:
+	_hw_ticks += 1
+	var p := Vector2(phys.x, phys.z)
+	if is_finite(_jw_prev.x) and phys.crash_on == _jw_crash:
+		var d := p.distance_to(_jw_prev)
+		var expect := absf(phys.v) * dt
+		if d > expect * 2.0 + 0.25 and input_enabled and not scenic:
+			CrashLog.note("JUMP %.2f m in one step (speed allows %.2f) from (%.1f, %.1f) to (%.1f, %.1f) v=%.1f air=%s crashed=%s" % [d, expect, _jw_prev.x, _jw_prev.y, p.x, p.y, phys.v, phys.air, phys.crash_on])
+	_jw_prev = p
+	_jw_crash = phys.crash_on
 
 ## rope bridges: the rider's weight (with every bump / landing: the ground's push n_load) and sideways push
 ## (the turn's reaction) go into the deck, the decks step, then the deck's sideways swing carries the bike
@@ -3392,6 +3424,7 @@ func _lerp_k(k: String) -> float:
 	return lerpf(_prev[k], phys.get(k), _lerp_a)
 
 func _process(dt: float) -> void:
+	_hitch_watch()
 	if photo:
 		# time stands still; the camera moves on real time
 		var now := Time.get_ticks_usec()
