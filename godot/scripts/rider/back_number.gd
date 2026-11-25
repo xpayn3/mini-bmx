@@ -185,8 +185,12 @@ func _build_face() -> SubViewport:
 	_label(root, header, Rect2(5, 5, PX_W - 10, 50), 25 if header.length() <= 24 else maxi(13, int(25.0 * 24.0 / header.length())), Color.WHITE)
 	var nfs := 178 if number.length() <= 2 else 124
 	# the number: a soft grey offset behind it, then the black digits
-	_label(root, number, Rect2(6, 54, PX_W, 166), nfs, Color(0, 0, 0, 0.16))
-	_label(root, number, Rect2(0, 50, PX_W, 166), nfs, ink)
+	# (the label's line box is taller than the 166 px band, so the digits sit well below its top edge: measured, the cap
+	# top lands 0.7467 x size under it, the digits are 0.7 x size tall. Put their middle in the middle of the free
+	# band between the header (55) and the class line (212)
+	var ny := 133.0 - 1.0967 * nfs
+	_label(root, number, Rect2(3, ny + 3, PX_W, nfs * 1.7), nfs, Color(0, 0, 0, 0.12))
+	_label(root, number, Rect2(0, ny, PX_W, nfs * 1.7), nfs, ink)
 	_label(root, class_line, Rect2(0, 212, PX_W, 24), 17, Color("#3a3d44"))
 	# sponsor row
 	_box(root, Rect2(12, 240, PX_W - 24, 2), ink, ink, 0, 0)
