@@ -38,7 +38,7 @@ static func texture(id: String, owned: bool, host: Node) -> Texture2D:
 	return tex
 
 func _draw() -> void:
-	var disp := UITheme.display_font(900, Tokens.SLANT)
+	var disp := UITheme.display_font(900, 0.0)
 	var disp0 := UITheme.display_font(900)
 	var body := UITheme.font(false)
 	var sym := UITheme.symbols()
