@@ -12,7 +12,7 @@ static func note_trick(name: String) -> void:
 	for frag in TRICK_KEYS:
 		if up.contains(frag): GameState.tricks_seen[TRICK_KEYS[frag]] = true
 
-const TIERS := [["BRONZE", Color("c98a4a")], ["SILVER", Color("cfd6df")], ["GOLD", Color("ffc83a")], ["PLATINUM", Color("9be8ff")]]
+const TIERS := [["BRONZE", Color("8a6a48")], ["SILVER", Color("a3a8af")], ["GOLD", Color("b39a52")], ["PLATINUM", Color("c4ccd2")]]
 
 static func badge_tier(id: String) -> int:
 	var cash := Steam.reward(id)
@@ -23,6 +23,9 @@ static func badge_tier(id: String) -> int:
 
 ## enamel colour by what it is for
 static func badge_colour(id: String) -> Color:
+	return _raw_colour(id).lerp(Color("23262c"), 0.52)   # muted: dark enamel, not toy colours
+
+static func _raw_colour(id: String) -> Color:
 	var a: Array = Steam.ACHIEVEMENTS[id]
 	if a[2] == "rec":
 		match String(a[3]):

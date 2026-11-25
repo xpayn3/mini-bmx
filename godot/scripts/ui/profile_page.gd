@@ -8,17 +8,17 @@ extends Control
 
 var on_customize := Callable()
 const WEEKS := 12
-const C_BG := Color("0b0d13")
+const C_BG := Color("08090b")
 const C_STAGE := Color("171b26")
-const C_CARD := Color(1, 1, 1, 0.055)
-const C_CARD2 := Color(1, 1, 1, 0.10)
-const C_LINE := Color(1, 1, 1, 0.10)
-const C_TXT := Color("f2f4f8")
-const C_SOFT := Color("9aa3b8")
-const C_FAINT := Color("5b6480")
-const C_GREEN := Color("34d399")
-const C_RED := Color("ff5d5d")
-const ACC := Tokens.ACCENT
+const C_CARD := Color("111316")
+const C_CARD2 := Color("181b20")
+const C_LINE := Color("2a2d33")
+const C_TXT := Color("ebe8e2")
+const C_SOFT := Color("8a8d93")
+const C_FAINT := Color("55585e")
+const C_GREEN := Color("9db58a")
+const C_RED := Color("c9573f")
+const ACC := Color("ff5a1f")
 const LEVEL_NAMES := ["ROOKIE", "SCRUB", "LOCAL", "SHREDDER", "PRO", "LEGEND"]
 const TABS := ["OVERVIEW", "GOALS", "BADGES", "WALLET"]
 var _tab := 0
@@ -115,8 +115,8 @@ func _card(pad := Tokens.S5, fill := C_CARD, _stroke := Color(0, 0, 0, 0)) -> Pa
 	var pc := PanelContainer.new()
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = fill
-	sb.set_corner_radius_all(22)
-	sb.border_color = Color(1, 1, 1, 0.09)
+	sb.set_corner_radius_all(3)
+	sb.border_color = C_LINE
 	sb.set_border_width_all(1)
 	sb.anti_aliasing = true
 	sb.content_margin_left = pad + 4; sb.content_margin_right = pad + 4
@@ -147,17 +147,17 @@ func _pill(text: String, cb: Callable, active := false, size := Tokens.T_LG, pri
 	b.add_theme_font_override("font", UITheme.display_font(900, 0.0))
 	b.add_theme_font_size_override("font_size", size)
 	var mk := func(fill: Color) -> StyleBoxFlat:
-		var s := StyleBoxFlat.new(); s.bg_color = fill; s.set_corner_radius_all(16); s.anti_aliasing = true
+		var s := StyleBoxFlat.new(); s.bg_color = fill; s.set_corner_radius_all(2); s.anti_aliasing = true
 		s.content_margin_left = 22; s.content_margin_right = 22; s.content_margin_top = 10; s.content_margin_bottom = 10
 		return s
 	var lit := active or primary
 	b.add_theme_stylebox_override("normal", mk.call(ACC if lit else C_CARD))
-	b.add_theme_stylebox_override("hover", mk.call(Tokens.ACCENT_HOT if lit else C_CARD2))
-	b.add_theme_stylebox_override("pressed", mk.call(Tokens.ACCENT_DOWN if lit else C_LINE))
-	b.add_theme_stylebox_override("focus", mk.call(Tokens.ACCENT_HOT if lit else C_CARD2))
+	b.add_theme_stylebox_override("hover", mk.call(Color("ff7a45") if lit else C_CARD2))
+	b.add_theme_stylebox_override("pressed", mk.call(Color("d94a14") if lit else C_LINE))
+	b.add_theme_stylebox_override("focus", mk.call(Color("ff7a45") if lit else C_CARD2))
 	for k in ["font_color", "font_pressed_color", "font_focus_color"]:
-		b.add_theme_color_override(k, Tokens.INK if lit else C_SOFT)
-	b.add_theme_color_override("font_hover_color", Tokens.INK if lit else C_TXT)
+		b.add_theme_color_override(k, Color("0a0a0a") if lit else C_SOFT)
+	b.add_theme_color_override("font_hover_color", Color("0a0a0a") if lit else C_TXT)
 	return b
 
 # ---------------------------------------------------------------- ring gauge
@@ -166,7 +166,7 @@ class Ring extends Control:
 		set(v):
 			frac = v
 			queue_redraw()
-	var col := Tokens.ACCENT
+	var col := Color("ff5a1f")
 	var track := Color(1, 1, 1, 0.12)
 	var width := 12.0
 	var big := ""
@@ -190,7 +190,7 @@ class Ring extends Control:
 func _ring(frac: float, size: float, w: float, big: String, small := "", col := ACC, bs := 36, delay := 0.0) -> Ring:
 	var r := Ring.new()
 	r.custom_minimum_size = Vector2(size, size)
-	r.col = col; r.width = w; r.big = big; r.small = small; r.big_size = bs
+	r.col = col; r.width = minf(w, 5.0); r.big = big; r.small = small; r.big_size = bs
 	var tw := r.create_tween()
 	tw.tween_interval(delay)
 	tw.tween_property(r, "frac", clampf(frac, 0.0, 1.0), 0.9).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
@@ -203,7 +203,7 @@ func _stage() -> Control:
 	st.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	st.clip_contents = false
 	var gr := Gradient.new()   # a warm soft light behind the rider, on the same page background as everything else
-	gr.colors = PackedColorArray([Color(1.0, 0.78, 0.45, 0.20), Color(1.0, 0.78, 0.45, 0.0)])
+	gr.colors = PackedColorArray([Color(0.8, 0.85, 0.95, 0.10), Color(0.8, 0.85, 0.95, 0.0)])
 	var gt := GradientTexture2D.new()
 	gt.gradient = gr; gt.fill = GradientTexture2D.FILL_RADIAL
 	gt.fill_from = Vector2(0.5, 0.5); gt.fill_to = Vector2(1.0, 0.5)
@@ -299,10 +299,9 @@ func _top_bar() -> Control:
 	wr.alignment = BoxContainer.ALIGNMENT_CENTER
 	wr.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	wr.add_theme_constant_override("separation", Tokens.S2)
-	wr.add_child(UITheme.display("●", Tokens.T_XL, ACC, 0.0, 700))
-	_wallet_l = _num(_money(GameState.money), Tokens.T_2XL)
+	_wallet_l = _num(_money(GameState.money), Tokens.T_XL)
 	wr.add_child(_wallet_l)
-	w.custom_minimum_size = Vector2(210, 54)
+	w.custom_minimum_size = Vector2(190, 46)
 	w.add_child(wr)
 	row.add_child(w)
 	_shown_money = GameState.money
@@ -316,12 +315,16 @@ func _show(i: int) -> void:
 		var b: Button = _tab_btns[k]
 		var lit := k == i
 		for st in ["normal", "hover", "pressed", "focus"]:
-			var s: StyleBoxFlat = (b.get_theme_stylebox(st) as StyleBoxFlat).duplicate()
-			s.bg_color = (Color.WHITE if st != "hover" else Color(1, 1, 1, 0.9)) if lit else (Color(1, 1, 1, 0.0) if st != "hover" else C_CARD2)
-			b.add_theme_stylebox_override(st, s)
+			var sb := StyleBoxFlat.new()
+			sb.bg_color = Color(1, 1, 1, 0.04) if st == "hover" else Color(0, 0, 0, 0)
+			sb.set_corner_radius_all(0)
+			sb.border_width_bottom = 3
+			sb.border_color = ACC if lit else Color(0, 0, 0, 0)
+			sb.content_margin_left = 18; sb.content_margin_right = 18; sb.content_margin_top = 12; sb.content_margin_bottom = 10
+			b.add_theme_stylebox_override(st, sb)
 		for fk in ["font_color", "font_pressed_color", "font_focus_color"]:
-			b.add_theme_color_override(fk, Tokens.INK if lit else C_SOFT)
-		b.add_theme_color_override("font_hover_color", Tokens.INK if lit else C_TXT)
+			b.add_theme_color_override(fk, C_TXT if lit else C_SOFT)
+		b.add_theme_color_override("font_hover_color", C_TXT)
 	for c in _content.get_children():
 		_content.remove_child(c); c.queue_free()
 	match i:
@@ -337,7 +340,7 @@ func _refresh() -> void:   # after a claim: the wallet counts up, the page is bu
 	tw.tween_method(func(v: float): _wallet_l.text = _money(int(v)), float(from), float(GameState.money), 0.8).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	_show(_tab)
 
-const STROKES := [Color("ffd21f"), Color("4aa3ff"), Color("34d399"), Color("ff8a4a"), Color("b45cff"), Color("ff5d8a")]
+const STROKES := [Color("ff5a1f")]
 
 func _tile(cap: String, count_to: float, fmt: Callable, delay := 0.0, idx := 0) -> Control:
 	var v := VBoxContainer.new()
@@ -381,17 +384,17 @@ func _page_overview() -> void:
 	var r: Dictionary = GameState.records
 	# a headline that says something about today (+ a button when cash waits)
 	var cnt := Goals.claimable()
-	var msg := "LET'S RIDE"
+	var msg := "RIDER STATUS"
 	var sub := "%s  ·  LEVEL %d" % [GameState.rider_name, GameState.level_for(float(r.distance))]
 	if cnt > 0:
-		msg = "CASH IS WAITING"
+		msg = "REWARDS AVAILABLE"
 		sub = "%d GOAL%s READY TO CLAIM" % [cnt, "" if cnt == 1 else "S"]
 	elif GameState.day_streak() > 0 and not GameState.claimed.has("d%d" % GameState.today()):
-		msg = "KEEP THE STREAK ALIVE"
-		sub = "%d DAYS IN A ROW  ·  RIDE TODAY FOR YOUR BONUS" % GameState.day_streak()
+		msg = "STREAK ACTIVE"
+		sub = "%d DAYS IN A ROW  ·  RIDE TODAY TO HOLD IT" % GameState.day_streak()
 	elif GameState.day_streak() > 0:
-		msg = "NICE ONE, %s" % GameState.rider_name
-		sub = "%d DAYS IN A ROW  ·  TODAY'S BONUS IS IN" % GameState.day_streak()
+		msg = "ON TRACK"
+		sub = "%d DAYS IN A ROW  ·  TODAY'S RIDE LOGGED" % GameState.day_streak()
 	var top := HBoxContainer.new()
 	var head := VBoxContainer.new()
 	head.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -438,7 +441,7 @@ func _page_overview() -> void:
 		var nm := _cap(String(attrs[i][0]), C_SOFT, Tokens.T_XS)
 		nm.custom_minimum_size.x = 112
 		rw.add_child(nm)
-		var br := _bar(float(attrs[i][1]) / 99.0, 0.2 + i * 0.07, 8, ACC if attrs[i][1] >= 70 else Color.WHITE)
+		var br := _bar(float(attrs[i][1]) / 99.0, 0.2 + i * 0.07, 8, ACC if attrs[i][1] >= 70 else C_TXT)
 		br.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		rw.add_child(br)
 		var nv := _num("0", 24)
@@ -483,7 +486,7 @@ func _page_overview() -> void:
 	_count(bl, float(ds), func(v: float): return "%d DAY%s" % [roundi(v), "" if roundi(v) == 1 else "S"], 0.15, 0.7)
 	var dots := HBoxContainer.new()
 	dots.add_theme_constant_override("separation", Tokens.S2)
-	for i in 7: dots.add_child(UITheme.display("●", 22, ACC if i < mini(ds, 7) else C_LINE, 0.0, 700))
+	for i in 7: dots.add_child(UITheme.display("▮", 22, ACC if i < mini(ds, 7) else C_LINE, 0.0, 700))
 	bv.add_child(dots)
 	bv.add_child(_cap("WEEK STREAK %d  ·  BEST %d DAYS" % [GameState.week_streak(), int(r.best_streak)], C_SOFT, Tokens.T_XS))
 	b.add_child(bv)
@@ -549,7 +552,7 @@ class WeekChart extends Control:
 			var h := (base - top) * vals[i] / mx * grow
 			var cur := i == n - 1
 			var rc := Rect2(i * bw + bw * 0.16, base - maxf(h, 3.0), bw * 0.68, maxf(h, 3.0))
-			draw_rect(rc, Tokens.ACCENT if cur else Color(1, 1, 1, 0.16))
+			draw_rect(rc, Color("ff5a1f") if cur else Color(1, 1, 1, 0.16))
 			if vals[i] > 0.0 and grow > 0.85:
 				var s := "%.0f" % (vals[i] / unit)
 				var w := f.get_string_size(s, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
@@ -598,7 +601,7 @@ func _streak_card() -> Control:
 	var dots := HBoxContainer.new()
 	dots.add_theme_constant_override("separation", Tokens.S2)
 	dots.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	for i in 7: dots.add_child(UITheme.display("●", 30, ACC if i < mini(n, 7) else C_LINE, 0.0, 700))
+	for i in 7: dots.add_child(UITheme.display("▮", 30, ACC if i < mini(n, 7) else C_LINE, 0.0, 700))
 	row.add_child(dots)
 	var sp := Control.new(); sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL; row.add_child(sp)
 	var paid := GameState.claimed.has("d%d" % GameState.today())

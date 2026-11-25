@@ -2,7 +2,7 @@ class_name CollectStage
 extends SubViewportContainer
 ## The 3D badge viewer on the profile's BADGES tab, after CycleIQ's badges: `show_badge(id, got)` = the badge's own shape (circle, hexagon, diamond, star or
 ## shield: `Collection.badge_look`) extruded in tier metal (bronze .. platinum), a glassy enamel inset in the badge's colour and its symbol raised on both
-## faces, reflecting CycleIQ's rainbow environment map so it flashes holo colours as it turns. Drag to spin it (it carries on turning, then settles
+## faces, in a plain studio environment. Drag to spin it (it carries on turning, then settles
 ## into a slow turn). One shared viewport with a transparent background.
 
 var vp := SubViewport.new()
@@ -11,7 +11,6 @@ var holder := Node3D.new()
 var _drag := false
 var _spin := 0.0          # rad/s of the free spin
 var _t := 0.0
-static var _rainbow: ImageTexture
 
 func _init() -> void:
 	stretch = true
@@ -23,7 +22,7 @@ func _init() -> void:
 	add_child(vp)
 	var sky := Sky.new()
 	var pm := PanoramaSkyMaterial.new()
-	pm.panorama = _rainbow_tex()
+	pm.panorama = BikeTurntable._studio_hdri()
 	sky.sky_material = pm
 	var env := Environment.new()
 	env.background_mode = Environment.BG_CLEAR_COLOR
@@ -41,33 +40,6 @@ func _init() -> void:
 	vp.add_child(cam)
 	cam.look_at_from_position(Vector3(0, 0, 6.2), Vector3.ZERO)
 	vp.add_child(holder)
-
-## CycleIQ's reflection map: three cycles of spectrum over near-black, a bright studio hot spot, fine scanlines; made once
-static func _rainbow_tex() -> ImageTexture:
-	if _rainbow != null: return _rainbow
-	var w := 512
-	var h := 256
-	var img := Image.create(w, h, false, Image.FORMAT_RGB8)
-	img.fill(Color("080808"))
-	var spec := [Color("ff2a6d"), Color("ff8c00"), Color("f5d300"), Color("01ff89"), Color("05d9e8"), Color("4a9eff"), Color("9b59ff"), Color("ff2a6d")]
-	for x in w:
-		var t := fmod(float(x) / w * 3.0, 1.0) * (spec.size() - 1)
-		var i := mini(int(t), spec.size() - 2)
-		var c: Color = (spec[i] as Color).lerp(spec[i + 1], t - i)
-		img.fill_rect(Rect2i(x, 0, 1, h), Color("080808").lerp(c, 0.55))
-	var cx := int(w * 0.43)
-	var cy := int(h * 0.43)
-	var rad := int(w * 0.16)
-	for y in range(maxi(0, cy - rad), mini(h, cy + rad)):
-		for x in range(maxi(0, cx - rad), mini(w, cx + rad)):
-			var k := 1.0 - Vector2(x - cx, y - cy).length() / rad
-			if k > 0.0: img.set_pixel(x, y, img.get_pixel(x, y).lerp(Color.WHITE, k * k))
-	for y in range(0, h, 4):
-		for x in w:
-			var c2 := img.get_pixel(x, y)
-			img.set_pixel(x, y, c2.lerp(Color.BLACK if y % 8 == 0 else Color.WHITE, 0.10))
-	_rainbow = ImageTexture.create_from_image(img)
-	return _rainbow
 
 ## an extruded shape (front, back, walls) from an outline
 func _extrude(pts: PackedVector2Array, depth: float) -> ArrayMesh:
