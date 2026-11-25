@@ -13,7 +13,8 @@ const T_TOP := 0.68             # on the spine: 0 hips .. 1 collar
 const T_BOT := 0.30
 const STAND := 0.009            # the paper floats this far off the jersey (the torso mesh is faceted)
 const MAX_STAND := 0.09        # nothing billows further off the jersey than this
-const TETHER := 0.12            # how far a bottom corner can lift off its pin spot
+const FLAT_HOLD := 0.22         # per sub-step pull of each point along the back towards its own spot (no folding)
+const TETHER := 0.05           # how far a bottom corner can lift off its pin spot
 const MAX_AWAY := 0.11          # and no point strays further than this from its spot on the back (can't fold up over the neck)
 const SUB := 2
 const ITER := 5
@@ -107,6 +108,20 @@ func _ready() -> void:
 	material_override = m
 
 
+var _bake_tries := 0
+
+## dark digits somewhere in the number's area of a drawn face?
+func _has_ink(img: Image) -> bool:
+	var w := img.get_width()
+	var h := img.get_height()
+	var n := 0
+	for yi in 16:
+		for xi in 24:
+			var c := img.get_pixel(int(w * (0.1 + 0.8 * xi / 23.0)), int(h * (0.25 + 0.45 * yi / 15.0)))
+			if c.get_luminance() < 0.3: n += 1
+	return n >= 4
+
+
 ## change what is printed (the number, the header line); the face is drawn again and baked again
 func set_content(n: String, h: String) -> void:
 	if n == number and h == header: return
@@ -114,6 +129,7 @@ func set_content(n: String, h: String) -> void:
 	header = h
 	if material_override == null: return   # not in the tree yet: _ready draws it with these
 	if _vp != null: _vp.queue_free()
+	_bake_tries = 0
 	_vp = _build_face()
 	add_child(_vp)
 	_vp_frames = 0
@@ -169,8 +185,12 @@ func _build_face() -> SubViewport:
 	_label(root, header, Rect2(5, 5, PX_W - 10, 50), 25 if header.length() <= 24 else maxi(13, int(25.0 * 24.0 / header.length())), Color.WHITE)
 	var nfs := 178 if number.length() <= 2 else 124
 	# the number: a soft grey offset behind it, then the black digits
-	_label(root, number, Rect2(6, 54, PX_W, 166), nfs, Color(0, 0, 0, 0.16))
-	_label(root, number, Rect2(0, 50, PX_W, 166), nfs, ink)
+	# (the label's line box is taller than the 166 px band, so the digits sit well below its top edge: measured, the cap
+	# top lands 0.7467 x size under it, the digits are 0.7 x size tall. Put their middle in the middle of the free
+	# band between the header (55) and the class line (212)
+	var ny := 133.0 - 1.0967 * nfs
+	_label(root, number, Rect2(3, ny + 3, PX_W, nfs * 1.7), nfs, Color(0, 0, 0, 0.12))
+	_label(root, number, Rect2(0, ny, PX_W, nfs * 1.7), nfs, ink)
 	_label(root, class_line, Rect2(0, 212, PX_W, 24), 17, Color("#3a3d44"))
 	# sponsor row
 	_box(root, Rect2(12, 240, PX_W - 24, 2), ink, ink, 0, 0)
@@ -271,14 +291,21 @@ func _process(dt: float) -> void:
 		_vp_frames += 1
 		if _vp_frames > 4:   # bake it into a mipmapped texture (no shimmer from far away) and drop the viewport
 			var img := _vp.get_texture().get_image()
-			if img != null and not img.is_empty():
+			# (a face that has not really been drawn yet - the ride built behind the intro / menu sits in a viewport that
+			# is never shown - bakes as bare paper: wait until the digits are in the picture, the live texture shows meanwhile)
+			if img != null and not img.is_empty() and not _has_ink(img) and _bake_tries < 600:
+				_bake_tries += 1
+				_vp_frames = 0
+				if _vp.render_target_update_mode != SubViewport.UPDATE_ALWAYS: _vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+			elif img != null and not img.is_empty():
 				img.generate_mipmaps()
 				(material_override as ShaderMaterial).set_shader_parameter("tex", ImageTexture.create_from_image(img))
 				_vp.queue_free()
 				_vp = null
+				_vp_frames = -1
 			else:
 				_vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
-			_vp_frames = -1
+				_vp_frames = -1
 	var rider := get_parent() as Rider
 	if rider == null or rider.spine_skel == null or not rider.is_visible_in_tree() or not is_visible_in_tree() or dt <= 0.0:   # bib off = no cloth sim
 		return
@@ -380,6 +407,10 @@ func _process(dt: float) -> void:
 			if d.length() > TETHER:
 				_P[j] = A[2 + k] + d.normalized() * TETHER
 		for i in n0:   # never through the body: stay outside the (curved) back surface under each point
+			# a pinned race number lies flat on the back: along the back each point is held near its own spot, so a
+			# bent-over or twisted spine (the pins come closer) can't crumple or fold it; only the flap (z) is free
+			_P[i].x = lerpf(_P[i].x, S[i].x, FLAT_HOLD)
+			_P[i].y = lerpf(_P[i].y, S[i].y, FLAT_HOLD)
 			var d := _P[i].z - S[i].z
 			if d < STAND:
 				_P[i].z += STAND - d

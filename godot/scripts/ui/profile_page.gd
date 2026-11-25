@@ -21,7 +21,10 @@ const C_GREEN := Color("2f9e63")
 const C_RED := Color("d64545")
 const ACC := Tokens.ACCENT
 const LEVEL_NAMES := ["ROOKIE", "SCRUB", "LOCAL", "SHREDDER", "PRO", "LEGEND"]
-const TABS := ["OVERVIEW", "GOALS", "BADGES", "WALLET"]
+const TABS := ["OVERVIEW", "SKILLS", "GOALS", "BADGES", "WALLET"]
+const T_SKILLS := 1
+const T_GOALS := 2
+const T_WALLET := 4
 var _tab := 0
 var _content: VBoxContainer
 var _tab_btns: Array = []
@@ -336,7 +339,7 @@ func _top_bar() -> Control:
 		_tab_btns.append(b)
 	var sp := Control.new(); sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL; row.add_child(sp)
 	# the wallet, top right corner
-	var w := _pill("", func(): _show(3), false, Tokens.T_LG)
+	var w := _pill("", func(): _show(T_WALLET), false, Tokens.T_LG)
 	var wr := HBoxContainer.new()
 	wr.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	wr.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -372,9 +375,10 @@ func _show(i: int) -> void:
 		_content.remove_child(c); c.queue_free()
 	match i:
 		0: _page_overview()
-		1: _page_goals()
-		2: _page_badges()
-		3: _page_wallet()
+		T_SKILLS: _page_skills()
+		T_GOALS: _page_goals()
+		3: _page_badges()
+		T_WALLET: _page_wallet()
 
 func _refresh() -> void:   # after a claim: the wallet counts up, the page is built again
 	var from := _shown_money
@@ -446,7 +450,7 @@ func _page_overview() -> void:
 	head.add_child(_cap(sub, C_SOFT, Tokens.T_MD))
 	top.add_child(head)
 	if cnt > 0:
-		var og := _pill("OPEN GOALS", func(): _show(1), false, Tokens.T_MD, true)
+		var og := _pill("OPEN GOALS", func(): _show(T_GOALS), false, Tokens.T_MD, true)
 		og.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		top.add_child(og)
 	_content.add_child(top)
@@ -603,6 +607,131 @@ class WeekChart extends Control:
 				var lw := f.get_string_size(lab, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
 				draw_string(f, Vector2(rc.position.x + (rc.size.x - lw) * 0.5, size.y - 5.0), lab, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Tokens.INK_FAINT)
 		draw_line(Vector2(0, base), Vector2(size.x, base), Tokens.LINE, 1.0)
+
+# ---------------------------------------------------------------- SKILLS
+## the rider's skills like the motocross games' rider card: each collects XP while he rides (GameState.skill_xp, see
+## Skills for what pays) and levels up 1..10, with a segmented meter and the XP to the next level.
+func _skill_card(id: String, delay: float) -> Control:
+	var def: Array = Skills.DEFS[id]
+	var xp := float(GameState.skill_xp.get(id, 0.0))
+	var pr := Skills.progress(xp)
+	var lv: int = pr[0]
+	var maxed := lv >= Skills.MAX_LEVEL
+	var gain := float(GameState.skill_gain.get(id, 0.0))
+	var pc := _card(Tokens.S5, C_CARD)
+	pc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", Tokens.S2)
+	pc.add_child(col)
+	var top := HBoxContainer.new()
+	col.add_child(top)
+	var nm := VBoxContainer.new()
+	nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	nm.add_theme_constant_override("separation", -2)
+	nm.add_child(UITheme.display(String(def[0]), 30, C_TXT, 0.0, 900))
+	var earns := _cap(String(def[1]), C_FAINT, Tokens.T_XS)
+	earns.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	earns.custom_minimum_size.x = 200
+	earns.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	nm.add_child(earns)
+	top.add_child(nm)
+	var lb := VBoxContainer.new()
+	lb.alignment = BoxContainer.ALIGNMENT_CENTER
+	lb.add_theme_constant_override("separation", -6)
+	var ln := _num("0", 44, ACC if lv >= 7 else C_TXT)
+	ln.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	lb.add_child(ln)
+	_count(ln, float(lv), func(v: float): return str(roundi(v)), delay + 0.1, 0.7)
+	var ll := _cap("MAX LEVEL" if maxed else "LEVEL", C_SOFT, Tokens.T_XS)
+	ll.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	lb.add_child(ll)
+	top.add_child(lb)
+	# ten pips like a games' skill meter: full for each level reached, the next one filling with the XP
+	var pips := HBoxContainer.new()
+	pips.add_theme_constant_override("separation", 4)
+	for i in Skills.MAX_LEVEL:
+		var p := ProgressBar.new()
+		p.show_percentage = false
+		p.min_value = 0.0; p.max_value = 1.0
+		p.custom_minimum_size = Vector2(0, 12)
+		p.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var fg := StyleBoxFlat.new(); fg.bg_color = ACC
+		var bgs := StyleBoxFlat.new(); bgs.bg_color = C_LINE
+		p.add_theme_stylebox_override("fill", fg); p.add_theme_stylebox_override("background", bgs)
+		var to := 1.0 if i < lv else (float(pr[3]) if i == lv else 0.0)
+		var tw := p.create_tween()
+		tw.tween_interval(delay + 0.15 + i * 0.04)
+		tw.tween_property(p, "value", to, 0.45).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		pips.add_child(p)
+	col.add_child(pips)
+	var info := "MAXED OUT  ·  %s XP" % _xp_text(xp) if maxed else "%s / %s XP TO LEVEL %d" % [_xp_text(float(pr[1])), _xp_text(float(pr[2])), lv + 1]
+	if gain >= 1.0: info += "   ·   +%s THIS RIDE" % _xp_text(gain)
+	col.add_child(_cap(info, C_SOFT, Tokens.T_XS))
+	return pc
+
+static func _xp_text(v: float) -> String:
+	return str(roundi(v))
+
+func _page_skills() -> void:
+	var tot := 0
+	for id in Skills.ORDER: tot += Skills.level_of(float(GameState.skill_xp.get(id, 0.0)))
+	var ovr := roundi(float(tot) / Skills.ORDER.size() * 10.0)   # the average level, 10..100
+	var top := HBoxContainer.new()
+	var head := VBoxContainer.new()
+	head.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_theme_constant_override("separation", 0)
+	head.add_child(UITheme.display("RIDER SKILLS", 46, C_TXT, 0.0, 900))
+	head.add_child(_cap("%s  ·  %s  ·  XP COMES FROM RIDING" % [GameState.rider_name, String(LEVEL_NAMES[clampi(ovr / 17, 0, 5)])], C_SOFT, Tokens.T_MD))
+	top.add_child(head)
+	var ob := VBoxContainer.new()
+	ob.alignment = BoxContainer.ALIGNMENT_CENTER
+	ob.add_theme_constant_override("separation", -8)
+	var ov := UITheme.display("0", 64, ACC, 0.0, 900)
+	ov.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	ob.add_child(ov)
+	_count(ov, float(ovr), func(v: float): return str(roundi(v)), 0.1, 1.0)
+	var oc := _cap("OVERALL", C_SOFT, Tokens.T_XS)
+	oc.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	ob.add_child(oc)
+	top.add_child(ob)
+	_content.add_child(top)
+	var sc := ScrollContainer.new()
+	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_content.add_child(sc)
+	var body := VBoxContainer.new()
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	body.add_theme_constant_override("separation", Tokens.S4)
+	sc.add_child(body)
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", Tokens.S4)
+	grid.add_theme_constant_override("v_separation", Tokens.S4)
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	body.add_child(grid)
+	var cards: Array = []
+	for i in Skills.ORDER.size():
+		var c := _skill_card(String(Skills.ORDER[i]), 0.05 + i * 0.05)
+		grid.add_child(c)
+		cards.append(c)
+	# the tricks: landed ones lit, the rest still to learn
+	var tt := _titled("TRICKS  ·  %d OF %d LANDED" % [GameState.tricks_seen.size(), Collection.TRICK_KEYS.size()])
+	var tc: PanelContainer = tt[0]
+	tc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	body.add_child(tc)
+	var chips := HFlowContainer.new()
+	chips.add_theme_constant_override("h_separation", Tokens.S2)
+	chips.add_theme_constant_override("v_separation", Tokens.S2)
+	const NAMES := {"back": "BACKFLIP", "front": "FRONTFLIP", "flip": "FLIP", "360": "360", "720": "720", "whip": "WHIP", "table": "TABLETOP", "scrub": "SCRUB"}
+	for key in Collection.TRICK_KEYS.values():
+		var got: bool = GameState.tricks_seen.has(key)
+		var chip := _card(Tokens.S3, ACC if got else C_CARD2)
+		var cl := UITheme.display(String(NAMES.get(key, String(key).to_upper())), 22, C_TXT if got else C_FAINT, 0.0, 900)
+		chip.add_child(cl)
+		chips.add_child(chip)
+	tt[1].add_child(chips)
+	cards.append(tc)
+	_appear(cards, 0.04, 0.05)
 
 # ---------------------------------------------------------------- GOALS
 func _page_goals() -> void:

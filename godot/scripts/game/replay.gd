@@ -428,12 +428,36 @@ func _apply(a: Array, b, k: float) -> void:
 					tr = Transform3D(Basis(tr.basis.x.lerp(t2.basis.x, k), tr.basis.y.lerp(t2.basis.y, k), tr.basis.z.lerp(t2.basis.z, k)), tr.origin.lerp(t2.origin, k))
 				sk.set_bone_pose(bi, tr)
 				i += BW; i2 += BW
+			_fit_skin_boxes(sk)
 		else:
 			i += nb * BW; i2 += nb * BW
 	# the chain redraws itself every frame from the replayed parts; it only needs the crank angle (BikeChain)
 	if game.rig and game.rig.crank_n: game.rig.crank_angle = -game.rig.crank_n.rotation.z
 	if probe:
 		_app_us += Time.get_ticks_usec() - t0; _app_n += 1
+
+## skinned meshes' culling boxes sit in the mesh's own space and were set for where the LIVE body is (Rider.set_spine,
+## fingers); a replayed body can be elsewhere (a crash far back, a saved replay), so the torso got culled = "body missing".
+## Box the bones' own spot each time they are replayed.
+var _skin_meshes := {}
+func _fit_skin_boxes(sk: Skeleton3D) -> void:
+	var key := sk.get_instance_id()
+	if not _skin_meshes.has(key):
+		var list: Array = []
+		var par := sk.get_parent()
+		if par:
+			for c in par.get_children():
+				if c is MeshInstance3D and (c as MeshInstance3D).skeleton != NodePath() and c.get_node_or_null((c as MeshInstance3D).skeleton) == sk:
+					list.append(c)
+		_skin_meshes[key] = list
+	var list2: Array = _skin_meshes[key]
+	var n := sk.get_bone_count()
+	if list2.is_empty() or n == 0: return
+	var ctr := Vector3.ZERO
+	for bi in n: ctr += sk.get_bone_pose(bi).origin
+	ctr /= n
+	for mi in list2:
+		if is_instance_valid(mi): mi.custom_aabb = AABB(ctr - Vector3(3, 3, 3), Vector3(6, 6, 6))
 
 ## the live state (to put back on leaving): every node of a fresh segment + the bones
 func _live() -> Array:

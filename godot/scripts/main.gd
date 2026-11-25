@@ -1944,7 +1944,9 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and state == RIDING and Settings.get_v("pause_unfocused") and OS.get_cmdline_user_args().is_empty():
 		# (deferred: focus can go while this node is busy adding children - the ride moving in - and the leaflet's
 		# add_child then failed, 80 errors and no pause menu)
-		_pause_unfocused.call_deferred()
+		_pause_greyed.call_deferred()
+	elif what == NOTIFICATION_APPLICATION_FOCUS_IN and _grey_dim != null:
+		_resume.call_deferred()   # back in the window: straight on where it was
 
 ## the controller the player was riding with went away (battery, cable): pause, so the bike doesn't carry on with no
 ## hands on it. Only when a pad was the active device (a keyboard rider unplugging a spare pad isn't interrupted).
@@ -1957,11 +1959,22 @@ func _on_pad_connection(_device: int, connected: bool) -> void:
 func _pause_unfocused() -> void:
 	if state == RIDING: _pause()
 
+## window lost focus: freeze the ride and grey the screen, no pause menu; coming back resumes (FOCUS_IN above)
+var _grey_dim: ColorRect = null
+func _pause_greyed() -> void:
+	if state != RIDING: return
+	_pause(false)
+	_grey_dim = ColorRect.new()
+	_grey_dim.color = Color(0.42, 0.42, 0.42, 0.62)
+	_grey_dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_grey_dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	ui.add_child(_grey_dim)
+
 ## paused during the crash slow motion: the menus (leaflet, its sounds, the tuning card) run at normal speed and
 ## pitch; the slow motion comes back on resume
 var _held_time_scale := -1.0
 var _held_audio_speed := -1.0
-func _pause() -> void:
+func _pause(menu := true) -> void:
 	if game: game.exit_photo()
 	state = PAUSED
 	if _held_time_scale < 0.0:
@@ -1973,6 +1986,7 @@ func _pause() -> void:
 	var shot := get_viewport().get_texture().get_image()
 	get_tree().paused = true
 	_close_pause(true)
+	if not menu: return
 	# the pause menu replaces any side card (tuning, P / K / L): with it still up, its menu took the pad cursor
 	# and the leaflet had no highlight. Pause > Tuning brings it back.
 	_tuning_paused = false   # (else closing the card would resume the ride)
@@ -2025,6 +2039,10 @@ func _tuning_shown() -> void:
 	if not game.hud.card.visible and _tuning_paused and state == PAUSED: _resume()
 
 func _resume() -> void:
+	if _grey_dim != null:
+		if is_instance_valid(_grey_dim): _grey_dim.queue_free()
+		_grey_dim = null
+	if state != PAUSED: return
 	if _tuning_paused:
 		_tuning_paused = false
 		if game and game.hud.card and game.hud.card.visible: game.hud.close_sides()
