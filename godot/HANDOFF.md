@@ -328,7 +328,13 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   ground). Off for good: only `BMX_WEAVE=1` turns the code on (no slider: a saved `weave` in tune.cfg kept it on after its
   default went to 0). A real weave needs the bike to steer along a snaking line. Hands-off straight coast now: bike lean spread
   1.6 deg (the pedal rock), head sideways 1.9 cm (`BMX_SWAY_PROBE=1`: `SWAY head_sd hips_sd`). **Berm lock-in** only while
-  steering into the tilt, held `LOCK_HOLD` 1 s after letting go (`_lock_hold`): hands off down a hillside it fed a slalom.
+  steering into the tilt, held `LOCK_HOLD` 1 s after letting go (`_lock_hold`): hands off down a hillside it fed a slalom.
+  **Step 3, air tuck** (`tuckPull` 0.32 m, Ride > Jumps; `BMX_OLD_TUCK=1` = before): hop held in the air pulls the bike up into
+  the body by `tuckPull` (was `legComp` x 0.85, ~0.25 m) on ANY jump, and the drawn tuck (`airPull` pose input) shows for a held
+  tuck too (it was only after a timed pop). Measured, dtable_43 at 43 km/h: legs pulled 36 cm at the peak, wheels clear the
+  ground 2-5 cm more than hands off (7 cm more than the old tuck); air time the same (+0.01 s): pulling the bike up can't
+  change the shared centre of mass's flight, only clearance. Test rider `BMX_PG_PILOT_AIRTUCK=1` holds hop in the air.
+  Stress 56 / 56. Not ridden by the user yet.
 - **Curbs / ledges: the rear rolls up, the tyres don't shiver at the edge (2026-11-24, user: "the rear always gets
   stuck on a curb")**. (1) `_step_move`'s edge check (at the bottom bracket) read the rise per physics step, so whether a
   curb was a wall at all depended on speed: at 6 km/h it never saw one (rolled up 30 cm), at 15 km/h a 20 cm curb was
