@@ -323,6 +323,12 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   0.22 rad x three slow sines (0.9 / 1.7 / 2.9 Hz) + 0.5 x the front-wheel knock, x speed (3 -> 10 m/s), fading past ~0.15-0.55
   rad of lean and in the air. Straight run: bike lean spread 2.0 -> 4.6 deg (peaks ~10 deg), body 1.6 -> 1.8, head roll rate
   0.04 -> 0.07 rad/s. Stress 56/56.
+  **Weave removed again** (user: "the whole rider pivots, seasick, even not pedalling"): as a drawn bike roll it rocked the body
+  too (the body rules read the total bike lean; then pivoting the drawn bike about the hips slid the tyres sideways over the
+  ground). Off for good: only `BMX_WEAVE=1` turns the code on (no slider: a saved `weave` in tune.cfg kept it on after its
+  default went to 0). A real weave needs the bike to steer along a snaking line. Hands-off straight coast now: bike lean spread
+  1.6 deg (the pedal rock), head sideways 1.9 cm (`BMX_SWAY_PROBE=1`: `SWAY head_sd hips_sd`). **Berm lock-in** only while
+  steering into the tilt, held `LOCK_HOLD` 1 s after letting go (`_lock_hold`): hands off down a hillside it fed a slalom.
 - **Curbs / ledges: the rear rolls up, the tyres don't shiver at the edge (2026-11-24, user: "the rear always gets
   stuck on a curb")**. (1) `_step_move`'s edge check (at the bottom bracket) read the rise per physics step, so whether a
   curb was a wall at all depended on speed: at 6 km/h it never saw one (rolled up 30 cm), at 15 km/h a 20 cm curb was

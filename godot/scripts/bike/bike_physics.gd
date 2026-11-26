@@ -219,6 +219,9 @@ var surf_f := 0; var surf_r := 0; var _mu_f := NAN; var _mu_r := NAN   # the gro
 var _bmu_f := NAN; var _bmu_r := NAN   # ...and its eased braking grip (BRAKE_MU)
 var _OLD_BRAKE := OS.get_environment("BMX_OLD_BRAKE") != ""   # (tests: the lever-limited brakes before 2026-11-23)
 var _gx_lean := 0.0    # the rest of the ground's drawn lean (body stick, slow steer, whip), eased through jumps
+var _lock_hold := 0.0   # steering into tilted ground, held LOCK_HOLD s after letting go (bankLock)
+const LOCK_HOLD := 1.0
+var weave_lean := 0.0   # the weave's share of bike_lean this step (read by Game)
 var _weave := 0.0; var _wv_t := 0.0   # the bike's own small roll under the rider (step 2)
 var _bike_lead := 0.0  # how far the bike runs ahead of the rider's lean while it changes (two masses)
 var _lean_peak := 0.0  # this jump's biggest lay-over in the air (tabletop, rad)
@@ -1492,7 +1495,12 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 			# across a side slope (no lean into it) only camberPull, so a line across a hill can still be held. BMX_OLD_BANKLOCK=1)
 			var c_pull: float = float(T.get("camberPull", 0.22))
 			if not _OLD_BANKLOCK:
-				c_pull += float(T.get("bankLock", 0.6)) * smooth01((signf(bk) * lean - 0.05) / 0.3)
+				# (only while steering INTO the tilt, held ~1 s after letting go: a berm you're turning in locks you in, a whip in it
+				# with the steer released stays locked; hands off down a hillside it fed itself into a slalom (leaned -> pulled down ->
+				# leaned more -> over the fall line -> the other way), F8 2026-11-26: "if I just let it roll down the hill we slide
+				# left and right")
+				_lock_hold = maxf(smooth01((b_in - 0.05) / 0.2), _lock_hold - dt / LOCK_HOLD)
+				c_pull += float(T.get("bankLock", 0.6)) * smooth01((signf(bk) * lean - 0.05) / 0.3) * _lock_hold
 			course_rate += c_pull * G * sin(bk) / maxf(va, 3.0) * smooth01((v - 0.5) / 2.0)
 		# the front tyre is knocked off its line by whatever slopes sideways under it that isn't the land's own tilt:
 		# a rock's flank, a root, a rut's wall (ruts hold the wheel in, rocks kick it out). Not over a smooth berm
@@ -1710,10 +1718,10 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 	# body's target doesn't see it, so the rider stays and the bike moves under him. Grows with speed, fades in deep turns and in
 	# the air. Drawing only (the turn follows `lean`). Ride > Body: weave. BMX_OLD_WEAVE=1 = none)
 	var wv_t := 0.0
-	if not _OLD_WEAVE and gnd > 0.0:
+	if WEAVE_ON and gnd > 0.0:   # (off: it rocked the whole rider, 2026-11-26; experiments only, BMX_WEAVE=1)
 		_wv_t += dt
 		var wn: float = 0.55 * sin(_wv_t * TAU * 0.9) + 0.3 * sin(_wv_t * TAU * 1.7 + 1.1) + 0.15 * sin(_wv_t * TAU * 2.9 + 2.3)
-		var wk: float = float(T.get("weave", 1.0)) * smooth01((va - 3.0) / 7.0) * (1.0 - smooth01((absf(lean) - 0.15) / 0.4))
+		var wk: float = float(T.get("weave", 0.0)) * smooth01((va - 3.0) / 7.0) * (1.0 - smooth01((absf(lean) - 0.45) / 0.45))
 		wv_t = (0.22 * wn + 0.5 * clampf(knock, -0.4, 0.4)) * wk * gnd
 	_weave += (wv_t - _weave) * minf(1.0, dt * 8.0)
 	var bl: float = lean * T.bikeLeanMul + _gx_lean + bank_lean + _bike_lead + _weave
@@ -1772,22 +1780,28 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 	# (signed: where the ground / the soft cap holds the bike more upright than the body's own target, the body stays
 	# 20 % inside the bike. The absolute difference used to flip it: bike held at 31 deg with the body wanting 55 gave a
 	# body at 7 deg, or leaning the wrong way - the rider stood up out of every steep berm)
-	var b_sg := signf(bike_lean)
+	# (step 2 fix, 2026-11-26, user: "the whole rider wobbles side to side, head too": the body's rules below read the bike's TOTAL
+	# lean, so the weave leaked into the body. They now read the bike's lean without the weave (bl_nw) and the weave's share is
+	# added to the counter at the end: the bike tilts under a body that stays where it was)
+	var w_part: float = 0.0 if _OLD_WEAVE else cap_b * (tanh(bl / cap_b) - tanh((bl - _weave) / cap_b))
+	weave_lean = w_part   # (Game pivots the drawn bike about the rider's hips for this share)
+	var bl_nw: float = bike_lean - w_part
+	var b_sg := signf(bl_nw)
 	if _OLD_LEANDRAW:
-		counter = maxf((bike_lean - (lean + bank_lean) * T.bodyLean) * b_sg, absf(bike_lean) * 0.2) * b_sg
+		counter = maxf((bl_nw - (lean + bank_lean) * T.bodyLean) * b_sg, absf(bl_nw) * 0.2) * b_sg
 	else:
 		# (2026-11-26, F8 seed 876814 vs a pro's slow-motion: his lean changes are one smooth curve; ours jumped 0.1-0.3 rad in a
 		# tick at every swap. The clamp above holds the body to 80 % of the bike's lean on the bike's side only, so as the bike
 		# crossed upright it flipped sides and the body jumped by its whole target. Now the clamp fades in over the first
 		# ~0.3 rad of bike lean: the body passes upright continuously. BMX_OLD_LEANDRAW=1 = before)
 		var b_t: float = (lean + bank_lean) * T.bodyLean
-		var w_c: float = smooth01(absf(bike_lean) / 0.3)
+		var w_c: float = smooth01(absf(bl_nw) / 0.3)
 		# (2026-11-26, Project X reference: in a deep turn the bike goes out to ~65 deg, the rider stays at ~30-35 deg and drops low
 		# to the inside. Ours kept the body at 74-76 % of the bike's lean there (52 deg at 69). The body's share now falls from 80 %
 		# in gentle turns to 50 % from ~0.5 to 1.1 rad of bike lean. BMX_OLD_CORNERBODY=1 = always 80 %)
-		var sh_max: float = 0.8 if _OLD_CORNERBODY else lerpf(0.8, float(T.get("cornerBody", 0.5)), smooth01((absf(bike_lean) - 0.5) / 0.6))
-		var body_l: float = b_t - w_c * b_sg * maxf(0.0, (b_t - sh_max * bike_lean) * b_sg)
-		counter = bike_lean - body_l
+		var sh_max: float = 0.8 if _OLD_CORNERBODY else lerpf(0.8, float(T.get("cornerBody", 0.5)), smooth01((absf(bl_nw) - 0.5) / 0.6))
+		var body_l: float = b_t - w_c * b_sg * maxf(0.0, (b_t - sh_max * bl_nw) * b_sg)
+		counter = bl_nw - body_l
 	# on a bank the rider goes WITH the bike (drawn only). "Bike under an upright body" is flat-corner technique; in a
 	# berm rider and bike are one line, square to its face. The body's target above is measured against gravity, and
 	# the body stick's throw (flickLean) goes to the bike alone, so on banked ground with both sticks he stood up out
@@ -1796,21 +1810,21 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 	var sq_t := 0.0
 	if _OLD_AIRBLEND:
 		if not air:
-			sq_t = float(T.get("bankBody", 0.7)) * smooth01((bank * signf(bike_lean) - 0.03) / 0.12)
+			sq_t = float(T.get("bankBody", 0.7)) * smooth01((bank * signf(bl_nw) - 0.03) / 0.12)
 		bank_sq = move_toward(bank_sq, sq_t, (1.2 if air else 3.0) * dt)
 	else:   # the held ground bank through a skip, faded out by the air blend on a real flight
-		sq_t = float(T.get("bankBody", 0.7)) * smooth01(((_bank_hold if air else bank) * signf(bike_lean) - 0.03) / 0.12) * gnd
+		sq_t = float(T.get("bankBody", 0.7)) * smooth01(((_bank_hold if air else bank) * signf(bl_nw) - 0.03) / 0.12) * gnd
 		bank_sq = move_toward(bank_sq, sq_t, 3.0 * dt)
 	if bank_sq > 0.0:
 		if _OLD_CORNERBODY:
-			counter = lerpf(counter, bike_lean * 0.2, bank_sq)
+			counter = lerpf(counter, bl_nw * 0.2, bank_sq)
 		else:
 			# (2026-11-26, Project X berms: bank ~35 deg, bike ~60, body ~35-40: the body square to the berm's FACE, the bike leaned
 			# further past it. It used to go to 80 % of the bike's lean on any bank. Now the body leans as far as the bank, at least
 			# half the bike's lean and at most 80 % of it)
-			var sh_b: float = lerpf(0.8, float(T.get("cornerBody", 0.5)), smooth01((absf(bike_lean) - 0.5) / 0.6))
-			var body_b: float = minf(maxf(0.8, sh_b) * absf(bike_lean), maxf(absf(bank) * minf(1.0, sh_b / 0.5), sh_b * absf(bike_lean)))
-			counter = lerpf(counter, bike_lean - signf(bike_lean) * body_b, bank_sq)
+			var sh_b: float = lerpf(0.8, float(T.get("cornerBody", 0.5)), smooth01((absf(bl_nw) - 0.5) / 0.6))
+			var body_b: float = minf(maxf(0.8, sh_b) * absf(bl_nw), maxf(absf(bank) * minf(1.0, sh_b / 0.5), sh_b * absf(bl_nw)))
+			counter = lerpf(counter, bl_nw - signf(bl_nw) * body_b, bank_sq)
 	# in the air the stick's lean is the rider's doing: they push the bike over with the legs and arms and
 	# their body goes the other way a little (counter-lean), staying over the centre of mass. It comes in with the air
 	# blend (air_k): a short skip keeps the ground pose, and after touch-down it eases back out (the stick share is
@@ -1820,9 +1834,10 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 	# now. BMX_OLD_LEANDRAW=1 = at once)
 	if air: _air_wl = clampf(absf(air_stick.x) * 2.5, 0.0, 1.0) if _OLD_LEANDRAW else move_toward(_air_wl, clampf(absf(air_stick.x) * 2.5, 0.0, 1.0), 4.0 * dt)
 	if _OLD_AIRBLEND:
-		if air: counter = lerpf(counter, bike_lean * (1.0 + float(T.get("stickBodyCounter", 0.25))), _air_wl)
+		if air: counter = lerpf(counter, bl_nw * (1.0 + float(T.get("stickBodyCounter", 0.25))), _air_wl)
 	elif air_k > 0.0:
-		counter = lerpf(counter, bike_lean * (1.0 + float(T.get("stickBodyCounter", 0.25))), _air_wl * air_k)
+		counter = lerpf(counter, bl_nw * (1.0 + float(T.get("stickBodyCounter", 0.25))), _air_wl * air_k)
+	counter += w_part
 	rock = pedal_rock(crank, sprint, pedal, va, bike_rock)
 	return va
 
@@ -3466,7 +3481,8 @@ func _pop_along(dv: float) -> void:
 	v *= k; vy *= k
 
 static var _OLD_SPIN := OS.get_environment("BMX_OLD_SPIN") != ""
-static var _OLD_WEAVE := OS.get_environment("BMX_OLD_WEAVE") != ""   # no bike weave under the rider
+static var _OLD_WEAVE := OS.get_environment("BMX_OLD_WEAVE") != ""
+static var WEAVE_ON := OS.get_environment("BMX_WEAVE") != ""   # the bike weave, off (rocked the whole rider)   # no bike weave under the rider
 static var _OLD_CORNERBODY := OS.get_environment("BMX_OLD_CORNERBODY") != ""   # body at up to 80 % of the bike's lean in deep turns
 static var _OLD_BANKLOCK := OS.get_environment("BMX_OLD_BANKLOCK") != ""   # leaned into tilted ground: only camberPull
 static var _OLD_SLOW := OS.get_environment("BMX_OLD_SLOW") != ""   # slow-riding / reverse as before 2026-11-26

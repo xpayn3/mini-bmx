@@ -150,7 +150,6 @@ const DEFS := [
 		["bikeLead", "Bike goes over before the body (two masses)", 0.08, 0, 0.2, 0.005, "s"],
 		["bodyLean", "Body leans with bike", 0.8, 0.3, 1.0, 0.01, "×"],
 		["cornerBody", "Deep turns: body's share of the bike's lean", 0.5, 0.2, 0.9, 0.01, "×"],
-		["weave", "Bike weaves under the rider on straights (drawing)", 1.0, 0.0, 3.0, 0.05, "×"],
 		["groundLeanMax", "Max lean against the ground (off-camber)", 1.05, 0.6, 1.4, 0.01, "rad"],
 	]],
 	["Legs & body", [

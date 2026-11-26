@@ -2538,6 +2538,7 @@ const LIFT_DOWN := 0.6   # m/s it settles back
 var _lift_s := 0.0       # the eased tyre-unclip lift
 const AIR_SHARE_EASE := 0.08   # s: back on the ground the air offset eases out (it popped the bike up in one frame)
 var _air_dlt := Vector3.ZERO
+var _sway: Array[Vector2] = []   # tests (BMX_SWAY_PROBE)
 var _slip_k := 0.0   # share of a small unasked slip drawn along the travel
 static var _OLD_SLIPDRAW := OS.get_environment("BMX_OLD_SLIPDRAW") != ""
 var _piv_c := 0.0; var _piv_w := 0.5   # drawn pitch pivot correction (m) and its rear share
@@ -3889,6 +3890,17 @@ func _process(dt: float) -> void:
 		pi["pedalTop"] = rig.pedal_top_in(rider)
 		_pose_keys_apply(dt, st, pi, lt)
 		rider.update_pose(dt, pi)
+		if Env.s("BMX_SWAY_PROBE") != "" and not st.air and not st.crash_on and rider.J.size() > 0:   # tests: head / hips sideways in the world vs the bike's line
+			var fwd := Vector3(cos(st.heading), 0.0, -sin(st.heading)); var lft := Vector3(fwd.z, 0.0, -fwd.x)
+			var hw: Vector3 = rider.to_global(rider.J[Ragdoll.HEAD]); var pw: Vector3 = rider.to_global(rider.J[Ragdoll.PELVIS])
+			_sway.append(Vector2((hw - drawn_pos).dot(lft), (pw - drawn_pos).dot(lft)))
+			if _sway.size() == 1200:
+				var mh := 0.0; var mp := 0.0
+				for sv in _sway: mh += sv.x; mp += sv.y
+				mh /= _sway.size(); mp /= _sway.size()
+				var sh := 0.0; var spp := 0.0
+				for sv in _sway: sh += (sv.x - mh) * (sv.x - mh); spp += (sv.y - mp) * (sv.y - mp)
+				print("SWAY head_sd=%.1f cm hips_sd=%.1f cm (sideways in the world, %d frames)" % [sqrt(sh / _sway.size()) * 100.0, sqrt(spp / _sway.size()) * 100.0, _sway.size()])
 		# the pedals turn with the feet (ankling): flat pedals tip under the shoe, about their axle (the foot's place
 		# doesn't move, so this frame's pose stays right)
 		if rig.pedal_pivots.size() == 2:
