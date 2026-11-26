@@ -877,7 +877,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
 
 - **Trees by nature's rules (2026-11-26, user: "trees and bushes seem random, make rules like other world builders, follow
   nature's rules, if we miss a vegetation type make it"; research `docs/research/vegetation.md`, from recall, links unchecked)**.
-  `TerrainChunkBuilder._trees` (`BMX_OLD_TREES=1` = the old 100 random throws, `_trees_old`): one candidate per `ECO_CELL`
+  `TerrainChunkBuilder._trees` (`BMX_OLD_PLACE=1` = the old 100 random throws, `_trees_old`): one candidate per `ECO_CELL`
   3.6 m world cell, jittered `ECO_JIT` 0.34 (natural minimum spacing, no chunk seams; Horizon Zero Dawn-style density
   placement; own `WorldRng` per cell), kept with probability (`_eco_tree`): stands + clearings (38 m forest noise + 115 m
   grove noise), slope (thinning 25 -> 38 deg; on cliffs a 3 % stunted tree), hollows (`_eco_land`: height vs the ring 12 m

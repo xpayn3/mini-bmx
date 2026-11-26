@@ -1307,15 +1307,15 @@ func _bend_trees() -> void:
 ## slope (thinning from ~25 deg, none past ~38), hollows (wetter: broadleaf, denser) vs ridges / convex shoulders (sparser,
 ## shorter, wind-leaning pines), shaded north slopes (denser conifers), the waterside band (willow / alder), the biome.
 ## Stand edges grow smaller, younger trees; mature trees seed saplings round them; the cold biome stunts and leans them
-## (treeline krummholz); forests have the odd standing dead tree. BMX_OLD_TREES=1 = the old random scatter.
+## (treeline krummholz); forests have the odd standing dead tree. BMX_OLD_PLACE=1 = the old random scatter.
 const ECO_CELL := 3.6
 const ECO_JIT := 0.34      # jitter, x the cell (min spacing ~1.1 m between candidates)
 const ECO_K := 0.47        # overall: about the old tree count in the same land (saplings + waterside trees included)
-static var OLD_TREES := OS.get_environment("BMX_OLD_TREES") != ""
+static var OLD_PLACE := OS.get_environment("BMX_OLD_PLACE") != ""
 
 
 func _trees(ox: float, oz: float) -> void:
-	if OLD_TREES:
+	if OLD_PLACE:
 		_trees_old(ox, oz)
 		return
 	var x0 := ox - S * 0.5
@@ -1826,7 +1826,7 @@ func _nature(ox: float, oz: float) -> void:
 					var d := rn.next() * 1.4
 					put("pebble", x + cos(a) * d, h - sc * 0.3, z + sin(a) * d, sc * 1.4, sc * 0.8, sc, rn.next() * 6.28, null, 0.6)
 			continue
-		if not OLD_TREES:
+		if not OLD_PLACE:
 			var hw := h - WATER
 			if hw < 2.2 and f.b_dry < 0.5 and r < 0.45 and _shore(x, z, h) > 0.2:
 				# the waterside: reeds with cattail heads at the water's edge, willow-green shrubs a little higher up
