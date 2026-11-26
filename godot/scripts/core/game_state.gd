@@ -6,7 +6,7 @@ const SAVE := "user://save.cfg"
 
 ## Bikes. `ride` multiplies the tuning values (see Tune); `pose` is handed to the rider.
 ## the GLORY DH rider pose / ride feel, shared by the downhill frames
-const DH_POSE := {"hipX": -0.07, "hipY": 0.075, "lean": 0.22, "elbowsOut": 0.0, "shoulders": 0.19, "torso": 0.5, "hipSway": 0.035, "kneesOut": 0.25, "stance": -0.035, "seatFloor": true,
+const DH_POSE := {"hipX": -0.07, "hipY": 0.075, "lean": 0.22, "elbowsOut": 0.0, "shoulders": 0.19, "torso": 0.52, "hipSway": 0.035, "kneesOut": 0.25, "stance": -0.035, "seatFloor": true,
 	"headTilt": 0.12, "headTurn": 1.05, "hipZ": 0.005, "spineCurve": 0.24, "spineLow": 0.31,
 	"chestUp": -0.005, "chestSide": 0.005, "headRoll": -0.01, "shoulderFwd": 0.005,
 	"wristRoll": 0.02, "kneesFwd": 0.05, "footAngle": 0.01}

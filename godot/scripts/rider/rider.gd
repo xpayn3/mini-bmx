@@ -78,8 +78,8 @@ const GOGGLE_FIT := {x = 0.15, y = 0.025, tilt = 0.25, w = 0.23, h = 0.087, R = 
 
 const L_THIGH := 0.44
 const L_SHIN := 0.44
-const L_UARM := 0.31
-const L_FARM := 0.29
+static var L_UARM: float = 0.31 if OS.get_environment("BMX_OLD_BODYSIZE") != "" else 0.32   # (2026-11-27: real arm, ~1.79 m rider; was 0.31)
+static var L_FARM: float = 0.29 if OS.get_environment("BMX_OLD_BODYSIZE") != "" else 0.32   # (elbow to the middle of the grip; was 0.29)
 static var _LIMBLEN := OS.get_environment("BMX_LIMBLEN") != ""
 var _ll := {}; var _ll_t := 0.0; var _ll_air := false
 func _ll_note(k: String, d: float) -> void:
@@ -193,6 +193,13 @@ func _init() -> void:
 		mi.material_override = m
 		add_child(mi)
 		return mi
+	var shaped := func(prof: Array, rt: float, rb: float, m: Material) -> MeshInstance3D:
+		if _OLD_LIMBSHAPE: return cyl.call(rt, rb, m)
+		var mi := MeshInstance3D.new()
+		mi.mesh = limb_mesh(prof)
+		mi.material_override = m
+		add_child(mi)
+		return mi
 	var sph := func(r: float, m: Material, ws := 16, hs := 12) -> MeshInstance3D:
 		var s := SphereMesh.new()
 		s.radius = r
@@ -229,8 +236,8 @@ func _init() -> void:
 	shoulder_sph.assign([sph.call(0.075, mCoral), sph.call(0.075, mCoral)])
 
 	# legs (0 = left, 1 = right)
-	thigh.assign([cyl.call(0.075, 0.062, mNavy), cyl.call(0.075, 0.062, mNavy)])
-	shin.assign([cyl.call(0.062, 0.05, mNavy), cyl.call(0.062, 0.05, mNavy)])
+	thigh.assign([shaped.call(THIGH_PROF, 0.075, 0.062, mNavy), shaped.call(THIGH_PROF, 0.075, 0.062, mNavy)])
+	shin.assign([shaped.call(SHIN_PROF, 0.062, 0.05, mNavy), shaped.call(SHIN_PROF, 0.062, 0.05, mNavy)])
 	knee.assign([sph.call(0.07, mNavyLight), sph.call(0.07, mNavyLight)])
 	for i in 2:   # downhill knee pads over the knees (articulated: cap on the bend, plates on thigh + shin)
 		knee[i].visible = false
@@ -269,8 +276,8 @@ func _init() -> void:
 		shoe.append(s)
 
 	# arms
-	upper_arm.assign([cyl.call(0.055, 0.047, mCoral), cyl.call(0.055, 0.047, mCoral)])
-	fore_arm.assign([cyl.call(0.047, 0.04, mCoral), cyl.call(0.047, 0.04, mCoral)])
+	upper_arm.assign([shaped.call(UARM_PROF, 0.055, 0.047, mCoral), shaped.call(UARM_PROF, 0.055, 0.047, mCoral)])
+	fore_arm.assign([shaped.call(FARM_PROF, 0.047, 0.04, mCoral), shaped.call(FARM_PROF, 0.047, 0.04, mCoral)])
 	elbow.assign([sph.call(0.055, mCoralDark), sph.call(0.055, mCoralDark)])
 	var dark := mat("#1b1d22", 0.85)
 	hand_mats = {glove = mYellow, knuckle = dark, palm = dark, cuff = dark}
@@ -785,6 +792,67 @@ func set_style(s: Dictionary) -> void:
 # ---------------- posing helpers ----------------
 
 ## unit-height (+Y) cylinder between a and b
+## (2026-11-27, user: "make the shin like a shin, not cylinders") a limb shaped from cross-sections like the torso:
+## prof = [[t, half-width (sideways, local z), front depth (local -x), back depth (local +x)], ...], t 0 at the
+## limb's root (local y -0.5, set_limb's a) .. 1 at its tip (+0.5, b). Unit height, closed ends, UVs like a
+## CylinderMesh (u round, v 0 at the tip), tangents for the fabric's normal map. BMX_OLD_LIMBSHAPE=1 = cylinders
+static func limb_mesh(prof: Array, seg := 20, rows := 16) -> ArrayMesh:
+	var at := func(t: float) -> Vector3:
+		var i := 0
+		while i < prof.size() - 2 and float(prof[i + 1][0]) < t: i += 1
+		var pa: Array = prof[i]; var pb: Array = prof[i + 1]
+		var u: float = clampf((t - float(pa[0])) / maxf(1e-4, float(pb[0]) - float(pa[0])), 0.0, 1.0)
+		var sm := u * u * (3.0 - 2.0 * u)
+		return Vector3(lerpf(pa[1], pb[1], sm), lerpf(pa[2], pb[2], sm), lerpf(pa[3], pb[3], sm))
+	var pt := func(t: float, ang: float) -> Vector3:
+		var r: Vector3 = at.call(t)
+		var c := cos(ang)
+		return Vector3(c * (r.z if c > 0.0 else r.y), t - 0.5, sin(ang) * r.x)
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var e := 1e-3
+	for j in rows + 1:
+		var t := float(j) / rows
+		for k in seg + 1:
+			var ang := TAU * float(k) / seg
+			var p0: Vector3 = pt.call(t, ang)
+			var du: Vector3 = pt.call(t, ang + e) - pt.call(t, ang - e)
+			var dv: Vector3 = pt.call(minf(1.0, t + e), ang) - pt.call(maxf(0.0, t - e), ang)
+			var n := du.cross(dv).normalized()
+			if n.dot(Vector3(p0.x, 0.0, p0.z)) < 0.0: n = -n
+			st.set_normal(n)
+			st.set_uv(Vector2(float(k) / seg, 1.0 - t))
+			st.add_vertex(p0)
+	for j in rows:
+		for k in seg:
+			var a0 := j * (seg + 1) + k
+			var b0 := a0 + seg + 1
+			st.add_index(a0); st.add_index(a0 + 1); st.add_index(b0)
+			st.add_index(a0 + 1); st.add_index(b0 + 1); st.add_index(b0)
+	# closed ends (they sit in the joints, but never show a hole)
+	for end in 2:
+		var t := float(end)
+		var base := (rows + 1) * (seg + 1) + end * (seg + 2)
+		var ny := 1.0 if end == 1 else -1.0
+		st.set_normal(Vector3(0, ny, 0)); st.set_uv(Vector2(0.5, 1.0 - t)); st.add_vertex(Vector3(0, t - 0.5, 0))
+		for k in seg + 1:
+			st.set_normal(Vector3(0, ny, 0)); st.set_uv(Vector2(float(k) / seg, 1.0 - t)); st.add_vertex(pt.call(t, TAU * float(k) / seg))
+		for k in seg:
+			if end == 1:
+				st.add_index(base); st.add_index(base + 1 + k); st.add_index(base + 2 + k)
+			else:
+				st.add_index(base); st.add_index(base + 2 + k); st.add_index(base + 1 + k)
+	st.generate_tangents()
+	return st.commit()
+
+# the limbs' shapes (m): thigh hip -> knee, shin knee -> ankle (calf at the back), upper arm shoulder -> elbow (biceps
+# front, triceps back), forearm elbow -> wrist (full under the elbow). Loose riding pants / sleeves over them
+const THIGH_PROF := [[0.0, 0.074, 0.072, 0.076], [0.25, 0.076, 0.075, 0.080], [0.6, 0.068, 0.068, 0.070], [0.88, 0.060, 0.058, 0.060], [1.0, 0.060, 0.057, 0.058]]
+const SHIN_PROF := [[0.0, 0.056, 0.052, 0.056], [0.14, 0.055, 0.050, 0.066], [0.32, 0.053, 0.048, 0.070], [0.62, 0.046, 0.043, 0.052], [0.86, 0.040, 0.040, 0.040], [1.0, 0.040, 0.040, 0.040]]
+const UARM_PROF := [[0.0, 0.050, 0.050, 0.050], [0.35, 0.049, 0.054, 0.052], [0.62, 0.046, 0.050, 0.049], [0.9, 0.043, 0.043, 0.045], [1.0, 0.043, 0.043, 0.045]]
+const FARM_PROF := [[0.0, 0.044, 0.043, 0.045], [0.22, 0.047, 0.046, 0.047], [0.6, 0.039, 0.037, 0.037], [0.9, 0.032, 0.030, 0.030], [1.0, 0.032, 0.030, 0.030]]
+static var _OLD_LIMBSHAPE := OS.get_environment("BMX_OLD_LIMBSHAPE") != ""
+
 static func set_limb(n: Node3D, a: Vector3, b: Vector3) -> void:
 	var d := b - a
 	var l := d.length()

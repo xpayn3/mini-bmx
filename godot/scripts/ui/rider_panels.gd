@@ -136,10 +136,11 @@ const BUCKLE_SW := ["#c9ccd1", "#9aa0a8", "#55595f", "#1a1b1e", "#b8893c", "#d9b
 # ---------------------------------------------------------------- persistence
 ## bump POSE_VER when a bike's default pose is retuned: a pose saved before keeps every value except the
 ## RETUNED ones that still hold the OLD default (a slider the player moved stays theirs)
-const POSE_VER := 4
+const POSE_VER := 5
 const POSE_RETUNED := {"elbowsOut": -0.25, "elbowOutR": -0.05, "hipSway": 0.015, "shoulders": 0.14, "torso": 0.46}
 ## retuned in version 4 (2026-11-26: the arms' bend); only these move for a version-3 save
 const POSE_RETUNED_4 := {"armBend": 0.0}
+const POSE_RETUNED_5 := {"torso": 0.5}   # (2026-11-27: real proportions, the DH pose's torso 0.5 -> 0.52)
 
 static func load_pose(bike_id: String, bike_pose: Dictionary) -> Dictionary:
 	var p: Dictionary = Rider.NEUTRAL.duplicate()
@@ -156,6 +157,8 @@ static func load_pose(bike_id: String, bike_pose: Dictionary) -> Dictionary:
 			if old and POSE_RETUNED.has(k) and absf(float(val) - float(POSE_RETUNED[k])) < 1e-3:
 				continue   # still the old default: take the new one
 			if ver < 4 and POSE_RETUNED_4.has(k) and absf(float(val) - float(POSE_RETUNED_4[k])) < 1e-3:
+				continue
+			if ver < 5 and POSE_RETUNED_5.has(k) and absf(float(val) - float(POSE_RETUNED_5[k])) < 1e-3 and OS.get_environment("BMX_OLD_BODYSIZE") == "":
 				continue
 			p[k] = val
 	return p

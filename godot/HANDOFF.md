@@ -349,6 +349,15 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   chest folded +0.22 rad, the saddle floor drops 0.14 x preload, all handing over to the drive as the legs extend (`j_ext`).
   dtable_43 hands off: crouch into the transition, stand tall off the lip, tuck in the air (`BMX_LIP_SHOT`). Body clip on
   a 50 s trail ride the same as before.
+  **Body check (2026-11-27)**: `BMX_LIMBLEN=1` prints every 2 s each limb's drawn length vs its own (thigh, shin, upper arm,
+  forearm, torso) and how far a hand / foot is off its grip / pedal. Limbs never changed length; the torso was let stretch to
+  108 % (4 cm in every flight): now capped at 100 % (it only shortens as the back bends). In-air lay-over: the hips stay on
+  the bike (counter x `AIR_HIP_SHARE` 0.3), the upper body turns about the hips (cap `AIR_CHEST_CAP`; the chest pivot put the
+  hips ~0.4 m off the bike, legs straight; `BMX_OLD_AIRTILT=1`), stick lay-over `stickAirRoll` 1.25 -> 0.8 rad (Tune VER 34).
+  Proportions vs a ~1.79 m adult: legs / shoulders were right, arms ~6 cm short, torso ~3 cm: `L_UARM` 0.31 -> 0.32, `L_FARM`
+  0.29 -> 0.32, DH pose torso 0.5 -> 0.52 (RiderPanels POSE_VER 5 moves saves still at 0.5); `BMX_OLD_BODYSIZE=1`. Limbs are
+  shaped tubes (`Rider.limb_mesh`, profiles `THIGH_PROF` / `SHIN_PROF` (calf at the back) / `UARM_PROF` / `FARM_PROF`), not
+  cones; `BMX_OLD_LIMBSHAPE=1`. Not done: checking reach / stack against each frame's geometry.
 - **Curbs / ledges: the rear rolls up, the tyres don't shiver at the edge (2026-11-24, user: "the rear always gets
   stuck on a curb")**. (1) `_step_move`'s edge check (at the bottom bracket) read the rise per physics step, so whether a
   curb was a wall at all depended on speed: at 6 km/h it never saw one (rolled up 30 cm), at 15 km/h a 20 cm curb was
