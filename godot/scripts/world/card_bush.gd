@@ -32,7 +32,10 @@ static func material(kind: String = "leaf") -> ShaderMaterial:
 	if kind == "leaf":
 		m.set_shader_parameter("albedo", Vector3.ONE * leaf_gain())
 		var tiles := tile_textures()
-		if not tiles.is_empty():
+		if ResourceLoader.exists(SPRAY_PNG) and OS.get_environment("BMX_OLD_TREES_TEX") != "1":
+			# the airy look the user picked (like the dry shrub): one twig spray of small real leaves per card
+			m.set_shader_parameter("leaf_tex", load(SPRAY_PNG))
+		elif not tiles.is_empty():
 			# real leaf size: the seamless foliage patch repeated by each card's size (COLOR.a x the bush's scale), with a
 			# ragged oval outline (user: "leaves scale is way off, too big")
 			m.set_shader_parameter("leaf_tex", tiles[0])
@@ -69,6 +72,10 @@ static func _photo_leaf() -> bool:
 
 static func _beech() -> bool:
 	return ResourceLoader.exists(BEECH_PNG) and ResourceLoader.exists(BEECH_N_PNG) and OS.get_environment("BMX_NO_BEECH") != "1"
+
+## the airy twig spray (twigs + small real LeafSet005 leaves, tools/make_tree_cards.py spray(); user 2026-11-26: "all must
+## be like the dry shrub, this style"): green bushes and the leafy trees' clusters
+const SPRAY_PNG := "res://assets/textures/tree_cards/leaf_spray.png"
 
 ## the leafy crowns' card: the same foliage as a dense seamless patch (repeated across big cards, deco_cards tile_m)
 const TILE_PNG := "res://assets/textures/tree_cards/leaf_tile.png"

@@ -243,7 +243,11 @@ static func material(kind: String) -> ShaderMaterial:
 		m.set_shader_parameter("albedo", Vector3(1.2, 1.2, 1.2))
 	else:
 		var tiles := CardBush.tile_textures()
-		if tiles.is_empty():   # (no photo patch: the bushes' clump card, one per card)
+		if ResourceLoader.exists(CardBush.SPRAY_PNG) and OS.get_environment("BMX_OLD_TREES_TEX") != "1":
+			# the airy twig spray, one per cluster card (real leaf size: card_ref)
+			m.set_shader_parameter("leaf_tex", load(CardBush.SPRAY_PNG))
+			m.set_shader_parameter("card_ref", float(GrownTree.info("leafy").top))
+		elif tiles.is_empty():   # (no photo patch: the bushes' clump card, one per card)
 			m.set_shader_parameter("leaf_tex", CardBush.texture("leaf"))
 		else:
 			m.set_shader_parameter("leaf_tex", tiles[0])
