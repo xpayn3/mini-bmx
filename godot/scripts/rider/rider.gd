@@ -6,11 +6,12 @@ extends Node3D
 
 const G := preload("res://scripts/rider/rider_geo.gd")
 static var _OLD_JUMPPOSE := OS.get_environment("BMX_OLD_JUMPPOSE") != ""
+static var _OLD_SPEEDTUCK := OS.get_environment("BMX_OLD_SPEEDTUCK") != ""
 const GEAR := preload("res://scripts/rider/rider_gear.gd")
 
 ## neutral riding style (posepanel.js NEUTRAL): BMX = all of these
 const NEUTRAL := {hipX = 0.0, hipY = 0.0, lean = 0.0, elbowsOut = 0.0, kneesOut = 0.0, stance = 0.0, seatFloor = false,
-	crouch = 1.0, standPedal = 1.0, aero = 1.0, sway = 1.0, bikeRock = 1.0, upright = 1.0, hipSway = 0.015, torso = 0.46, attackStand = 1.0, kneeOpen = 1.0, bumpAbsorb = 2.0, bodyBounce = 0.4, leanFollow = 1.0, leanSwing = 1.0, leanUnweight = 1.0, leanLively = 1.0, leanBalance = 1.0, leanBumps = 1.0, leanLoad = 1.0, bodyBob = 1.0,
+	crouch = 1.0, standPedal = 1.0, aero = 1.0, speedTuckPose = 1.0, sway = 1.0, bikeRock = 1.0, upright = 1.0, hipSway = 0.015, torso = 0.46, attackStand = 1.0, kneeOpen = 1.0, bumpAbsorb = 2.0, bodyBounce = 0.4, leanFollow = 1.0, leanSwing = 1.0, leanUnweight = 1.0, leanLively = 1.0, leanBalance = 1.0, leanBumps = 1.0, leanLoad = 1.0, bodyBob = 1.0,
 	flowBend = 1.0, flowLead = 1.0, flowSink = 1.0,   # pro flow through lean changes: spine bend, shoulders / eyes lead, sink into the turn
 	headSteady = 1.0, ankling = 1.0, heelsDown = 1.0,   # head held steady against the bike's kicks; ankle swing pedalling; heels drop coasting / landing
 	# style (Rider > Style): the numbers the riding pose is built from
@@ -1344,6 +1345,7 @@ var _sink := 0.0; var sm_airst := 0.0; var _abs_p := 0.0; var _abs_c := 0.0
 var sm_pre := 0.0; var sm_ext := 0.0; var sm_popfx := 0.0; var sm_squash := 0.0; var sm_lip := 0.0   # the jump (see update_pose)
 var sm_tuck := 0.0   # the air tuck (bike pulled up into the body), eased
 var tuck_out := 0.0  # this frame's tuck (0..1)
+var speed_tuck_k := 0.0   # this frame's speed tuck (0..1, after the jump / trick poses took their share)
 var body_off := Vector2.ZERO   # in the air: the hips (x fwd, y up, bike frame) against take-off; Game moves the bike against it
 var _air_ref := Vector2.ZERO; var _air_ref_ok := false
 var sm_effort := 0.0
@@ -1366,6 +1368,12 @@ var sm_wheelie := 0.0   # the slope the body levels against, rate-limited
 const PITCH_LEVEL_RATE := 2.5   # rad/s
 const FACE_SINK := 0.35  # share of the legs' sink drawn on a jump face (firm legs loading the lip)
 var _face_k := 0.0        # this frame's blend into the jump-face pose (0..1)
+# speed tuck pose (a downhill speed record rider, side view): back ~70 deg from upright, hips ~16 cm further back and
+# ~10 cm lower than the attack stance, head low and forward (chin just behind the bars)
+const TUCK_ANG := 1.2
+const TUCK_HIP_BACK := 0.16
+const TUCK_HIP_DOWN := 0.10
+const TUCK_HEAD := Vector2(0.07, -0.08)
 const FLIP_LEAN := 0.7    # rad he lies back throwing a back flip (video: ~45 deg back, legs and arms straight)
 const FLIP_ARCH := 0.5    # the spine's arch at the start of a back flip (set_spine curve, - = arched)
 const FACE_REACH := 0.96  # arms on a jump face / popped: nearly straight (share of their length)
@@ -1552,6 +1560,20 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# lean also lifted the hips and threw them forward, so the torso came UP instead of down
 	var aero_g: float = aero * (1.0 - air)
 	var aero_a: float = aero * air
+	# speed tuck (2026-11-26, a downhill speed record pose: hips right back over the rear wheel and low, the back flat,
+	# head low and forward behind the bars, arms long and in): the physics' speed_tuck (by itself at speed, or a light
+	# pull back on the right stick). The jump / landing / trick poses own the body while they play: it gives way to them
+	var stk: float = clampf(_num(p, "speedTuck"), 0.0, 1.0) * float(sty.get("speedTuckPose", 1.0))
+	stk *= 1.0 - clampf(maxf(maxf(sm_pre, sm_ext), maxf(sm_popfx * air, sm_squash)) * 1.5, 0.0, 1.0)
+	stk *= 1.0 - clampf(maxf(maxf(sm_reach, sm_fold), clampf(_num(p, "airPull"), 0.0, 1.0) * air) * 1.5, 0.0, 1.0)
+	stk *= (1.0 - smoothstep(0.5, 2.0, absf(_num(p, "airSpin")))) * (1.0 - clampf(_num(p, "flipExt") + _num(p, "flipArch"), 0.0, 1.0))
+	stk *= 1.0 - clampf(maxf(_num(p, "tall"), _num(p, "relax")), 0.0, 1.0)
+	# (the light pull back that makes the tuck is not also the stick's sit-up / weight-back pose: that starts past it)
+	var stk_stick: float = 0.0
+	if not _OLD_SPEEDTUCK and _num(p, "tall") < 0.5:
+		var bb: float = clampf(-bstick, 0.0, 1.0)
+		stk_stick = smoothstep(0.05, 0.3, bb) * (1.0 - smoothstep(0.55, 0.95, bb))
+	speed_tuck_k = stk
 
 	# attack position: rolling, a downhill rider stands off the saddle (knees and elbows soft, ready),
 	# not only while pedalling
@@ -1614,6 +1636,8 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# chest
 	# (pedalling out of the saddle the chest stays forward over the bars)
 	var ang: float = 0.52 - 0.2 * clampf(-bstick, 0.0, 1.0) - float(sty.pedalChest) * pedal + 0.12 * spr + 0.3 * eff + 0.18 * fat +0.15 * (comp / 0.3) + 0.08 * air + sty.lean * (1 - 0.5 * pedal) + 0.32 * aero_a + 0.6 * aero_g
+	ang += 0.2 * clampf(-bstick, 0.0, 1.0) * stk_stick   # (the light pull is the tuck, not sitting up)
+	ang = lerpf(ang, TUCK_ANG, stk)   # speed tuck: the back near flat
 	ang -= FLIP_LEAN * clampf(_num(p, "flipArch"), 0.0, 1.0)   # (a back flip's arch: he lies back, chest out)
 	ang += (0.3 if _OLD_JUMPPOSE else 0.12) * j_pre - 0.3 * j_ext + (0.06 if _OLD_JUMPPOSE else 0.38) * j_sq - (0.0 if _OLD_JUMPPOSE else 0.35) * sm_popfx * air + (0.12 if old_lp else -0.22) * sm_popfx * air + 0.28 * j_tuck + 0.42 * j_fold - 0.18 * sm_reach
 	# spinning in the air: tall and compact over the bike (chest up, knees in), the head and shoulders lead
@@ -1691,7 +1715,11 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# body stick (gamepad right stick): forward = chest low over the bars, back = hips dropped behind the
 	# saddle with the arms long (manuals)
 	var bs := bstick
+	if bs < 0.0: bs *= 1.0 - stk_stick   # (inside the light pull: the tuck below, not the weight-back pose)
 	var back_k := clampf(-bs, 0.0, 1.0)
+	# the speed tuck: hips back over the rear wheel and down, the chest follows (the back flat: `ang` above)
+	pelvis.x -= TUCK_HIP_BACK * stk; pelvis.y -= TUCK_HIP_DOWN * stk
+	chest.x -= TUCK_HIP_BACK * stk; chest.y -= TUCK_HIP_DOWN * stk
 	chest.x -= 0.06 * back_k   # back: the chest stays over the hips, arms long
 	# side (stick left / right, or the stick's lean in the air): the bike tips under the rider, the hips go to
 	# the outside of it and the upper body stays up over the bike's contact line
@@ -2177,7 +2205,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 
 	# neck / head
 	var neck := chest
-	var head_p := Vector3(neck.x + 0.05 + sty.lookAhead + 0.04 * aero, neck.y + 0.2 + sty.neck, neck.z)   # (forward: chin over the bars)
+	var head_p := Vector3(neck.x + 0.05 + sty.lookAhead + 0.04 * aero + TUCK_HEAD.x * speed_tuck_k, neck.y + 0.2 + sty.neck + TUCK_HEAD.y * speed_tuck_k, neck.z)   # (forward: chin over the bars)
 	# head stabilisation (see _hp_s): how much, and what the head follows
 	var steady: float = clampf(float(sty.get("headSteady", 1.0)), 0.0, 2.0) * (0.0 if standing else 1.0)
 	var flip_k: float = 1.0 - smoothstep(0.7, 1.3, absf(raw_p))   # mid-flip the head goes round with the body
@@ -2465,7 +2493,7 @@ func _constrain(pelvis: Vector3, chest: Vector3, p: Dictionary, sty: Dictionary,
 	# The limits below (rear wheel, torso angle and length) still have the last word
 	if handL is Vector3 and handR is Vector3 and not standing:
 		var bar_c: Vector3 = (handL + handR) * 0.5
-		var head_off := Vector2(0.05 + float(sty.lookAhead) + 0.04 * aero, 0.2 + float(sty.neck))
+		var head_off := Vector2(0.05 + float(sty.lookAhead) + 0.04 * aero + TUCK_HEAD.x * speed_tuck_k, 0.2 + float(sty.neck) + TUCK_HEAD.y * speed_tuck_k)
 		var push := Vector2.ZERO
 		var deep := 0.0
 		for pass_i in 2:

@@ -228,6 +228,10 @@ const DEFS := [
 		["stickBodyTilt", "Air: body stays as the bike tilts", 0.6, 0, 1, 0.05, "×"],
 		["tuckDrag", "Tuck: air drag cut (stick forward)", 0.42, 0, 0.8, 0.02, "×"],
 		["upDrag", "Sit up: extra air drag (stick back)", 0.3, 0, 1, 0.05, "×"],
+		["speedTuck", "Speed tuck: how far he tucks by himself at speed (0 = only with the stick)", 1.0, 0, 1, 0.05, "×"],
+		["speedTuckFrom", "Speed tuck: starts at", 11.0, 4, 25, 0.5, "m/s"],
+		["speedTuckFull", "Speed tuck: full at", 18.0, 6, 30, 0.5, "m/s"],
+		["speedTuckDrag", "Speed tuck: drag cut of the automatic tuck (x the stick tuck's)", 0.5, 0, 1, 0.05, "×"],
 	]],
 	# side-on BMX game feel: the manual / wheelie is a balance you work, holding hop on the downhills pumps speed,
 	# a landing in line with the ground gives speed back
