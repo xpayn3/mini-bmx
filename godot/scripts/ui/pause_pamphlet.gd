@@ -55,6 +55,7 @@ func _ready() -> void:
 	content.add_child(tips)
 	_tips = tips
 	var cover := Cover.new()
+	_cover = cover
 	cover.owner_p = self
 	cover.position = Vector2(0, COVER_Y)
 	cover.size = Vector2(CW, CH)
@@ -66,6 +67,24 @@ func _ready() -> void:
 	_list.add_theme_constant_override("separation", 0)
 	content.add_child(_list)
 
+
+var _cover: Control
+
+## ready it for another pause (main keeps one leaflet for the whole session: building it every Esc cost
+## ~20-110 ms plus a 40-70 ms first frame for its fresh render targets): new cover photo, no menu lines yet
+func prepare(shot: Image, place_s: String, no: int) -> void:
+	photo = shot
+	place = place_s
+	sheet_no = no
+	_cover._photo_tex = null
+	_cover.queue_redraw()
+	if is_instance_valid(_inside_menu): _inside_menu.queue_free(); _inside_menu = null
+	unfold = false
+	_cover_focus(true)
+	for c in _list.get_children():
+		_list.remove_child(c); c.queue_free()
+	_items = 0
+	_spin_t = 0.0; _spin_v = 0.0; spin = 0.0; _spin_side = 0
 
 ## a menu line: "01  Resume"
 func add_item(text: String, cb: Callable) -> Button:
@@ -191,6 +210,7 @@ func focus_first() -> void:
 class Cover extends Control:
 	var owner_p
 	var _photo_tex: ImageTexture
+	var _photo_src := Rect2()
 	func _draw() -> void:
 		var p = owner_p
 		var W := size.x; var H := size.y
@@ -204,11 +224,12 @@ class Cover extends Control:
 			ch = int(cw / want)
 			var cx := (im.get_width() - cw) / 2
 			var cy := int((im.get_height() - ch) * 0.62)   # a bit lower: the area banner (top centre of the HUD) used to show clipped at the top
-			var crop := im.get_region(Rect2i(cx, cy, cw, ch))
-			crop.resize(int(W), PHOTO_H, Image.INTERPOLATE_LANCZOS)
-			_photo_tex = ImageTexture.create_from_image(crop)
+			# the whole frame uploaded as it is, the crop + scale done by the GPU as it draws (a CPU Lanczos crop +
+			# resize cost ~11 ms in the opening frame)
+			_photo_src = Rect2(cx, cy, cw, ch)
+			_photo_tex = ImageTexture.create_from_image(im)
 		if _photo_tex:
-			draw_texture_rect(_photo_tex, Rect2(0, 0, W, PHOTO_H), false, Color(1.04, 1.0, 0.94))
+			draw_texture_rect_region(_photo_tex, Rect2(0, 0, W, PHOTO_H), _photo_src, Color(1.04, 1.0, 0.94))
 		else:
 			draw_rect(Rect2(0, 0, W, PHOTO_H), Color("3d6b54"))
 		# a dark fade under the title

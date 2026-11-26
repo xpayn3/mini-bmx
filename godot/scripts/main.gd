@@ -32,9 +32,59 @@ func _ready() -> void:
 		var plain := true   # only a plain launch (or a title screenshot) gets the title backdrop; tests ride the real world
 		for a in OS.get_cmdline_user_args():
 			if not a.begins_with("--shot="): plain = false
+		var tt0 := Time.get_ticks_usec()
 		_new_game(plain)
+		var tt1 := Time.get_ticks_usec()
 		_show_menu()
+		if Env.s("BMX_TITLE_PROBE") != "":   # tests: what the title backdrop costs to build, and its frame time
+			print("TITLEPROBE build game=%.0f ms menu=%.0f ms" % [(tt1 - tt0) / 1000.0, (Time.get_ticks_usec() - tt1) / 1000.0])
+			(func() -> void:
+				for i in 120: await get_tree().process_frame   # (settled)
+				var w := 0.0; var s := 0.0; var last := Time.get_ticks_usec()
+				for i in 300:
+					await get_tree().process_frame
+					var now := Time.get_ticks_usec(); var d := (now - last) / 1000.0; last = now
+					w = maxf(w, d); s += d
+				print("TITLEPROBE frames avg=%.2f ms worst=%.1f ms  draws=%d prims=%d  static_mem=%.0f MB vram=%.0f MB" % [s / 300.0, w,
+					RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME),
+					RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_PRIMITIVES_IN_FRAME),
+					OS.get_static_memory_usage() / 1048576.0,
+					RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_VIDEO_MEM_USED) / 1048576.0])
+				if Env.s("BMX_TITLE_PROBE_SHOT") != "": get_viewport().get_texture().get_image().save_png(Env.s("BMX_TITLE_PROBE_SHOT"))
+				GameState.quit()).call()
 	create_tween().set_ignore_time_scale().tween_property(fade, "modulate:a", 0.0, 0.8)
+	if Env.s("BMX_PAUSE_PROBE") != "":   # tests: Esc every 4 s from 6 s, resume after 2.5 s, 4 times; plus riding frame times
+		for i in 4:
+			get_tree().create_timer(6.0 + i * 4.0, true, false, true).timeout.connect(func() -> void:
+				var worst := 0.0; var sum := 0.0; var last := Time.get_ticks_usec()
+				for f in 30:
+					await get_tree().process_frame
+					var now := Time.get_ticks_usec(); var d := (now - last) / 1000.0; last = now
+					worst = maxf(worst, d); sum += d
+				print("PAUSEPROBE riding 30 frames worst=%.1f avg=%.1f ms" % [worst, sum / 30.0])
+				_pause()
+				await get_tree().create_timer(2.5, true, false, true).timeout
+				_resume())
+	# tests: from the title (launch with only --shot=...@999): RIDE at a, pause > Main menu at b, RIDE again at c, quit at d
+	# (BMX_MENU_LOOP=a,b,c,d), each timed: MENULOOP lines. With --ride only b (BMX_MENU_AT) works: Main menu from a ride
+	var loop := Env.s("BMX_MENU_LOOP").split_floats(",") if Env.s("BMX_MENU_LOOP") != "" else PackedFloat64Array()
+	if Env.s("BMX_MENU_AT") != "": loop = PackedFloat64Array([-1.0, float(Env.s("BMX_MENU_AT")), -1.0, -1.0])
+	var steps := [["ride", _start_ride], ["menu", _menu_from_ride], ["ride_again", _start_ride], ["quit", func(): GameState.quit()]]
+	for i in mini(loop.size(), 4):
+		if loop[i] < 0.0: continue
+		var st: Array = steps[i]
+		get_tree().create_timer(loop[i], true, false, true).timeout.connect(func() -> void:
+			var t0 := Time.get_ticks_usec()
+			if st[0] == "ride" or st[0] == "ride_again": _prebuilt_taken = false
+			await st[1].call()
+			print("MENULOOP %s ms=%.0f title=%s parked_title=%s parked_ride=%s reused=%s at=%s" % [st[0], (Time.get_ticks_usec() - t0) / 1000.0,
+				game.title_world if game else "-", is_instance_valid(title_parked), is_instance_valid(ride_ready), _prebuilt_taken,
+				str(Vector2(game.phys.x, game.phys.z)) if game else "-"])
+			var f0 := Engine.get_frames_drawn()
+			var w0 := Time.get_ticks_msec()
+			await get_tree().create_timer(3.0, true, false, true).timeout
+			print("MENULOOP   frames drawn after: %d in %d ms" % [Engine.get_frames_drawn() - f0, Time.get_ticks_msec() - w0])
+			if Env.s("BMX_MENU_LOOP_SHOT") != "": get_viewport().get_texture().get_image().save_png("%s_%s.png" % [Env.s("BMX_MENU_LOOP_SHOT"), st[0]]))
 	# boot intro (the CRT TV): a plain launch only, or BMX_INTRO=1
 	if (OS.get_cmdline_user_args().is_empty() or OS.get_environment("BMX_INTRO") != "") and CrtTv.assets_ok():   # (no TV files: no intro, straight to the menu)
 		var intro := CrtIntro.new()
@@ -173,6 +223,11 @@ var _rebuilding := false   # _new_game is between freeing the old Game and addin
 func _new_game(title := false) -> void:
 	while _rebuilding: await get_tree().process_frame   # two quick restarts: one after the other, never two Games
 	_rebuilding = true
+	if title and _unpark_title():   # the title backdrop parked while riding: back in at once, nothing rebuilt
+		_rebuilding = false
+		return
+	if not title and game and game.title_world and _park_title(game):   # leaving the title for a ride: kept for the way back
+		game = null
 	if game:
 		game.queue_free()
 		await game.tree_exited
@@ -189,6 +244,59 @@ func _new_game(title := false) -> void:
 
 ## the title world's terrain + far hills, out of the tree while the garage is open (Game.take_world)
 var _title_keep := {}
+
+## The title backdrop Game, parked whole (out of view, not processing, its sound paused) while a ride is on, and the
+## ride parked the same way while the menu is up (as ride_ready, which RIDE takes back). Main menu from a ride used to
+## move the rider to TITLE_SPOT on the ride's own world and build every chunk there in one frame: 0.7-2 s the further
+## you had ridden. Swapping the parked worlds is a few ms. Costs: the memory of the other world while it waits.
+var title_parked: Game
+var _title_park: SubViewport
+
+func _park_title(g: Game) -> bool:
+	if Env.s("BMX_NO_TITLE_PARK") != "": return false   # tests: the old way (the title world freed, rebuilt on the way back)
+	if is_instance_valid(title_parked): return false
+	g.exit_photo()
+	_title_park = SubViewport.new()
+	_title_park.own_world_3d = true
+	_title_park.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	_title_park.size = Vector2i(get_viewport().get_visible_rect().size)
+	add_child(_title_park)
+	g.process_mode = Node.PROCESS_MODE_DISABLED   # (players in it pause with it)
+	g.reparent(_title_park, false)
+	title_parked = g
+	return true
+
+func _unpark_title() -> bool:
+	if not is_instance_valid(title_parked): return false
+	var t := title_parked
+	title_parked = null
+	if game and game != t:
+		if game.level == "" and _park_ride(game): pass   # the ride waits for RIDE (ride_ready / _take_prebuilt)
+		else: game.queue_free()
+	t.reparent(self, false)
+	move_child(t, 0)
+	t.process_mode = Node.PROCESS_MODE_PAUSABLE
+	t.cam.current = true
+	game = t
+	if is_instance_valid(_title_park): _title_park.queue_free()
+	_title_park = null
+	return true
+
+## the ride behind the menu, parked like the intro's pre-built one: RIDE moves it back in if nothing it was built from changed
+func _park_ride(g: Game) -> bool:
+	g.exit_photo()
+	if is_instance_valid(ride_ready) and ride_ready != g: ride_ready.queue_free()   # (an unused intro one)
+	if not is_instance_valid(_ride_park):
+		_ride_park = SubViewport.new()
+		_ride_park.own_world_3d = true
+		_ride_park.render_target_update_mode = SubViewport.UPDATE_DISABLED
+		_ride_park.size = Vector2i(get_viewport().get_visible_rect().size)
+		add_child(_ride_park)
+	g.process_mode = Node.PROCESS_MODE_DISABLED
+	g.reparent(_ride_park, false)
+	ride_ready = g
+	_ride_sig = _ride_sig_now()
+	return true
 
 func _free_title_keep() -> void:
 	for n in _title_keep.values():
@@ -216,6 +324,7 @@ func _set_riding(riding: bool) -> void:
 	game.set_scenic(not riding)   # title screen: golden hour over the hills
 	if riding:
 		game.cam.set_mode(game.cam.default_mode())
+		_leaflet_warm.call_deferred()
 
 # ---------------------------------------------------------------- the ride, built during the boot intro
 var ride_ready: Game            # the player's own world, built off-screen while the intro holds on black
@@ -268,7 +377,7 @@ func _take_prebuilt() -> bool:
 		_ride_park.queue_free()
 		_ride_park = null
 		return false
-	if game: game.queue_free()
+	if game and not (game.title_world and _park_title(game)): game.queue_free()   # (the title backdrop waits for Main menu)
 	g.reparent(self, false)
 	move_child(g, 0)
 	g.process_mode = Node.PROCESS_MODE_PAUSABLE
@@ -1982,8 +2091,10 @@ func _pause(menu := true) -> void:
 		_held_audio_speed = AudioServer.playback_speed_scale
 	Engine.time_scale = 1.0
 	AudioServer.playback_speed_scale = 1.0
+	var pt0 := Time.get_ticks_usec()
 	# the cover photo: the ride as it is now (the last frame drawn, before the leaflet is over it)
 	var shot := get_viewport().get_texture().get_image()
+	var pt1 := Time.get_ticks_usec()
 	get_tree().paused = true
 	_close_pause(true)
 	if not menu: return
@@ -1991,16 +2102,9 @@ func _pause(menu := true) -> void:
 	# and the leaflet had no highlight. Pause > Tuning brings it back.
 	_tuning_paused = false   # (else closing the card would resume the ride)
 	if game and game.hud.card and game.hud.card.visible: game.hud.close_sides()
-	var pm := PausePamphlet.new()
-	pm.photo = shot
-	if game:
-		pm.place = game.terrain.biome_name(game.phys.x, game.phys.z)
-		pm.sheet_no = GameState.seed
-	add_child(pm)
-	pm.close_requested.connect(func():   # Esc / B: an open leaflet folds back to its cover first
-		if state != PAUSED or pause_menu != pm: return
-		if pm.is_unfolded(): pm.fold_inside()
-		else: _resume())
+	var pm := _leaflet_get()
+	pm.prepare(shot, game.terrain.biome_name(game.phys.x, game.phys.z) if game else "", GameState.seed)
+	var pt2 := Time.get_ticks_usec()
 	pm.add_item("Resume", _resume)
 	pm.add_item("Back to start", func(): _resume(); game.respawn(false))
 	if game == null or game.level == "": pm.add_item("New world", func(): _resume(); game.respawn(true))
@@ -2009,20 +2113,56 @@ func _pause(menu := true) -> void:
 	if game and game.replay and game.replay.ready_to_play():
 		pm.add_item("Replay", func(): _resume(); game.open_replay())
 	pm.add_item("Settings", _open_settings)
-	pm.add_item("Main menu", func(): _close_pause(true); GameState.save(); _show_menu())
+	pm.add_item("Main menu", _menu_from_ride)
 	pm.add_item("Quit to desktop", func(): GameState.save(); GameState.quit())
 	pause_menu = pm
 	pm.open()
 	pm.focus_first.call_deferred()
+	if Env.s("BMX_PAUSE_PROBE") != "":   # tests: what opening the leaflet costs (sync parts + the frames after)
+		var pt3 := Time.get_ticks_usec()
+		var worst := 0.0; var sum := 0.0; var n := 0
+		var last := Time.get_ticks_usec()
+		while n < 60:
+			await get_tree().process_frame
+			var now := Time.get_ticks_usec()
+			var d := (now - last) / 1000.0; last = now
+			worst = maxf(worst, d); sum += d; n += 1
+		print("PAUSEPROBE photo=%.1f build=%.1f items+open=%.1f ms | next 60 frames worst=%.1f avg=%.1f ms" % [(pt1 - pt0) / 1000.0, (pt2 - pt1) / 1000.0, (pt3 - pt2) / 1000.0, worst, sum / n])
 
-## fold the leaflet away (now = gone at once: menus, a new ride)
+## pause > Main menu: the parked title world back in (instant); without one, the menu over the ride's own world as before
+func _menu_from_ride() -> void:
+	_close_pause(true)
+	GameState.save()
+	get_tree().paused = false
+	if is_instance_valid(title_parked): await _new_game(true)
+	_show_menu()
+
+## fold the leaflet away (now = gone at once: menus, a new ride). It is kept (hidden, its render targets
+## stopped) for the next pause: see _leaflet_get
 func _close_pause(now := false) -> void:
 	if not is_instance_valid(pause_menu): pause_menu = null; return
 	var pm = pause_menu
 	pause_menu = null
-	if pm.state == 0: pm.queue_free(); return
-	pm.closed.connect(pm.queue_free)
-	pm.close(now)
+	if is_instance_valid(pm._inside_menu): pm._inside_menu.queue_free()   # (Settings / Controls printed inside: gone with it, as when it was freed)
+	if pm.state != 0: pm.close(now)
+
+## the one pause leaflet of the session, built on first use (or by _leaflet_warm at a ride's start)
+var _leaflet: PausePamphlet
+func _leaflet_get() -> PausePamphlet:
+	if not is_instance_valid(_leaflet):
+		_leaflet = PausePamphlet.new()
+		add_child(_leaflet)
+		_leaflet.close_requested.connect(func():   # Esc / B: an open leaflet folds back to its cover first
+			if state != PAUSED or pause_menu != _leaflet: return
+			if _leaflet.is_unfolded(): _leaflet.fold_inside()
+			else: _resume())
+	return _leaflet
+
+## a ride started: the leaflet built now (~95 ms, behind the ride's own start), so the first Esc only shows it.
+## (Drawing its render targets once here as well was tried: frames while paused went 6 -> 14 ms. Not done.)
+func _leaflet_warm() -> void:
+	if is_instance_valid(_leaflet) or Env.s("BMX_NO_LEAFLET_WARM") != "": return
+	_leaflet_get()
 
 ## pause > Tuning: the tuning card over the paused ride (the pad drives it); closing it rides on
 var _tuning_paused := false

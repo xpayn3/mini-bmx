@@ -1818,6 +1818,49 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   it's dropped and RIDE builds the normal way. Moving a Game fires `_exit_tree` on all its nodes: never tear down
   state there that a living node still needs (`ride_audio` frees its C# synths on PREDELETE for that reason).
   `BMX_NO_PREBUILD=1` = the old way.
+- **Main menu from a ride is a swap (2026-11-26, user: "main menu sometimes takes a long time, it should be instant")**:
+  RIDE no longer frees the title backdrop Game: it is parked whole (`main._park_title`: its own never-drawn SubViewport,
+  process disabled, its sounds paused). Pause > Main menu (`_menu_from_ride`) parks the ride the same way as
+  `ride_ready` (`_park_ride`) and moves the title world back in (`_unpark_title`); RIDE then takes the ride back via
+  `_take_prebuilt` (rebuilt if seed / bike / build / rider changed). Before: the menu moved the rider to `TITLE_SPOT` on
+  the ride's own world and built every chunk there in one frame (`_to_hilltop`, 0.7-2 s, longer the further you had
+  ridden). Also: `FarHills` joined its backdrop build on `_exit_tree`, so every move of a world between viewports
+  waited for it (~0.85 s); it now joins on PREDELETE. Now: Main menu ~19 ms, RIDE again ~19 ms, RIDE from the title
+  ~47 ms. Cost: the other world stays in memory (not measured). `BMX_NO_TITLE_PARK=1` = the old way. Test:
+  `BMX_SEED=4242 [BMX_INTRO=still] BMX_MENU_LOOP=ride,menu,ride_again,quit (seconds) [BMX_MENU_LOOP_SHOT=prefix]`
+  + `-- --shot=x.png@999` (title launch): `MENULOOP <step> ms= ... reused=` and frames drawn after each step;
+  `BMX_MENU_AT=secs` with `--ride` = Main menu only.
+- **The title is a fixed place loaded from a file (2026-11-26, user: "in my menu no random chunk generation, a small
+  specific level, the same all the time, fast load, ultra light"; the sign behind the rider stays)**. `world/title_terrain.gd`
+  (`TitleTerrain extends Terrain`, like the playground's): loads `assets/title/title_land.bin` (zstd `store_var`: the 7 x 7
+  chunks round `Game.TITLE_SPOT` of `TITLE_SEED` exactly as the chunk builder made them + the far hills' 20 m ring arrays) and
+  turns them into nodes once (`Terrain._finalize_out`, split out of `_finalize`). No `TerrainField.setup` (an empty field
+  with an empty trail), no chunk building / streaming / worker threads, no rebuilding far hills (`FarHills.load_baked`,
+  `baked`), no sheep. Heights = the saved drawn grids + rock domes. Made by `res://tools/bake_title.tscn` (a scene, not
+  `-s`: Terrain needs the autoloads); **re-bake when the chunk builder / terrain field / far hills change** (it prints the
+  biggest parts of the data). Measured: title build 6.0 -> 2.9 s (land 4.1 -> 0.75 s: file 0.5 s, nodes 0.2 s), menu
+  step 0.64 -> 0.13 s; frame time, draw calls, triangles about the same (4.5 ms, ~620 draws, 3.4M triangles). Left: the
+  player's bike is now the biggest part (~1.2 s); the file is 30 MB (most of it the full-detail ground mesh: the
+  narrow menu lens sees far chunks large, so coarser LODs were not tried); the title still runs the ride's other
+  systems (HUD, dust sim, blood, replay: ~0.4 s). `BMX_TITLE_PROC=1` = the old generated title. Export includes
+  `assets/title/*.bin`. Probe: `BMX_TITLE_PROBE=1 [BMX_TITLE_PROBE_SHOT=png]` + `-- --shot=x.png@99` (`TITLEPROBE build
+  game= menu=` and frame time / draws / memory, then quits).
+- **The RUNOUT sign is back in view (same day, user: "where is our runout sign?", "hand placed level, make it perfect")**:
+  the 2026-11-25 land work (mountains / erosion) raised a ridge 58 m high 120 m in front of the old title view, and the
+  sign (170 m out, feet at eye + 7 m) stood inside it; the old generated title had it too. A survey of every direction from
+  the lookout (land drops 70-110 m almost everywhere except that ridge) picked 260 deg: `TITLE_SPOT` heading 1.4399 ->
+  4.0379 (camera, rider, sun and sign turn together). Sign placed by eye: `SIGN_D` 80 m, `SIGN_SIDE` 0.06, `SIGN_H` 0.058,
+  `SIGN_UP` 8.2 m (letters clear above the helmet, beam behind it, between the menu card and the top-right buttons); its
+  materials ignore fog and the letters glow a clean white (`title_sign.gd`: haze had washed them into the sky). Check:
+  `BMX_SIGN_PROBE=1` (ground along the view to the sign vs its feet), `BMX_SIGN=d,side,h,up` / `BMX_TITLE_SPOT=x,z,heading`
+  to try others. The land bake doesn't depend on the heading (no re-bake needed).
+- **Pause leaflet opens instantly (same day, user: "the pause menu pamphlet was heavy")**: one `PausePamphlet` for the
+  session (`main._leaflet_get`), built when a ride starts (`_leaflet_warm`), refilled per pause (`PausePamphlet.prepare`:
+  photo, place, menu lines), put away instead of freed. Its cover photo is drawn from the whole frame with a source rect
+  (the GPU scales it; the CPU Lanczos crop + resize was ~11 ms). Before: every Esc built it (first ~107 ms + a 72 ms frame,
+  later ~17 ms + a 20-55 ms frame). Now: ~4-12 ms on the press (the frame readback is most of it), first Esc of a ride one
+  25 ms frame (paper shaders), later worst 7-11 ms. Drawing its render targets once at ride start was tried: paused frames
+  went 6 -> 14 ms, not done. Probe `BMX_PAUSE_PROBE=1` (+ `--ride --autotest=24`): Esc every 4 s, `PAUSEPROBE` lines.
 - **`CrtTv`** (`scripts/world/crt_tv.gd`): the user's TV model (`assets/tv/tv.fbx` + `tv_albedo.jpg`, `tv_normal.png`,
   `tv_orm.png` made from the download's TGA maps: Unity MaskMap R metal / G AO / A smoothness -> ORM), ~38 cm wide, origin
   on the floor, glass +Z. `shaders/crt_screen.gdshader` draws the model's maps and, on the glass UV island (rotated in the
