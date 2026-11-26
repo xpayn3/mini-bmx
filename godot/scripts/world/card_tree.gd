@@ -4,8 +4,8 @@ extends RefCounted
 ## drooping quads with an alpha cut-out photo texture. Three levels, all from the same trees (user: "no low poly trees,
 ## use our new ones and make LODs from them"):
 ##   LOD0 pineCard / blobCard        near: full cards (fade_mode 4: full to 36 m from the rider, gone by 48 m)
-##   LOD1 pineCardLod1 / blobCardLod1 the rest of the way: ~1/3 the cards, bigger (fade_mode 3), and THE shadow caster
-##                                   at every distance (LOD0 casts none: one alpha-tested crown per tree in the cascades)
+##   LOD1 pineCardLod1 / blobCardLod1 the rest of the way: ~1/3 the cards, bigger (fade_mode 3)
+##   (no card casts a shadow: an invisible solid crown does, add_shadow_proxy)
 ##   LOD2 billboards                 from ~72-88 m: one quad per crown with a crown-only cell of impostors.png (baked from
 ##                                   LOD0 by tools/bake_tree_impostors.tscn; tree_billboard.gdshader, fade_mode 5); past the
 ##                                   loaded chunks the backdrop's whole-tree billboards take over (world/far_hills.gd)
@@ -25,11 +25,14 @@ const TEX_H := 128
 ## pine crown: whorls of drooping branch cards up the axis
 const PINE_TOP := 2.85
 ## [whorls, branches x, card width x, seed, droop x]: LOD0 / LOD1
-const PINE_LOD := [[15, 1.0, 1.0, 1979, 1.0], [10, 0.45, 1.5, 1980, 1.7]]
+const PINE_LOD := [[24, 1.0, 1.0, 1979, 1.0], [14, 0.5, 1.5, 1980, 1.7]]
 ## leafy crown: cards in a ball (CardBush's recipe without the ground)
-const BLOB := {"cards": 58, "r": Vector3(1.0, 0.95, 1.0), "s0": 0.6, "s1": 0.95, "seed": 4242}
+const BLOB := {"cards": 130, "r": Vector3(1.0, 0.95, 1.0), "s0": 0.34, "s1": 0.55, "seed": 4242}
+## metres of foliage one leaf picture covers (leaf_cluster / leaf_beech are made at real leaf size for this): a leafy
+## crown's card repeats it round(card size / this) times each way (deco_cards tile_m; card size from COLOR.a x the crown)
+const LEAF_TILE_M := 0.8
 ## LOD1: this many cards, this much bigger
-const BLOB_LOD1 := [22, 1.45]
+const BLOB_LOD1 := [48, 1.5]
 
 static var _tex := {}
 static var _mat := {}
@@ -75,10 +78,38 @@ static func add_twin(solid: MultiMeshInstance3D, solid_mesh: String, vis := 0.0)
 		mi.visibility_range_end = vis
 	solid.set_instance_shader_parameter("fade_mode", 3.0)
 	mi.set_instance_shader_parameter("fade_mode", 4.0)
-	if solid_mesh == "pine":
-		add_spire(solid)
+	add_spire(solid, solid_mesh)
 	add_billboard(solid, solid_mesh)
+	add_shadow_proxy(solid, solid_mesh)
 	return mi
+
+
+## The trees' sun shadow (2026-11-26): at real size, casting it from the LOD1 cards (layers of alpha-tested quads in
+## every cascade) cost ~4-5 ms of GPU; instead the crown list casts nothing and an invisible solid crown (the old
+## low-poly one, shadows only, with its dappled holes: deco.gdshader `dapple`) throws each tree's shadow.
+static func add_shadow_proxy(crown: MultiMeshInstance3D, solid_mesh: String) -> MultiMeshInstance3D:
+	if not solid_mesh in ["pine", "blob"]:
+		return null
+	TerrainGeo.ensure()
+	var pm := MultiMesh.new()
+	pm.transform_format = MultiMesh.TRANSFORM_3D
+	pm.use_custom_data = crown.multimesh.use_custom_data
+	pm.use_colors = crown.multimesh.use_colors
+	pm.mesh = TerrainGeo.MESH["pineSolid" if solid_mesh == "pine" else "blobSolid"]
+	pm.instance_count = crown.multimesh.instance_count
+	pm.buffer = crown.multimesh.buffer
+	var pi := MultiMeshInstance3D.new()
+	pi.name = String(crown.name) + "_shadow"
+	pi.multimesh = pm
+	pi.material_override = TerrainGeo.MAT["leafSolid" if solid_mesh == "pine" else "leafSoftSolid"]
+	pi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY
+	crown.get_parent().add_child(pi)
+	pi.transform = crown.transform
+	pi.set_instance_shader_parameter("fade_mode", 1.0)
+	pi.set_meta("cast_on", GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY)   # (Terrain's far-shadow switch)
+	crown.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	crown.set_meta("shadow_proxy", pi)
+	return pi
 
 
 const IMPOSTOR_PNG := "res://assets/textures/tree_cards/impostors.png"
@@ -154,20 +185,22 @@ static func _billboard(solid_mesh: String) -> Array:
 
 ## a pine crown list's trunk up through its see-through crown, tapering to the tip (it stopped at the crown's foot: the
 ## crown floated on a stump). Drawn with both card levels (fade_mode 1: the decorations' far fade), no shadow.
-static func add_spire(crown: MultiMeshInstance3D, internal := false) -> MultiMeshInstance3D:
-	if not enabled():
+## (blob crowns: their branches, blobLimbs)
+static func add_spire(crown: MultiMeshInstance3D, solid_mesh := "pine", internal := false) -> MultiMeshInstance3D:
+	if not enabled() or not solid_mesh in ["pine", "blob"]:
 		return null
 	var sm := MultiMesh.new()
 	sm.transform_format = MultiMesh.TRANSFORM_3D
 	sm.use_custom_data = crown.multimesh.use_custom_data
 	sm.use_colors = crown.multimesh.use_colors
-	sm.mesh = mesh("pineSpire")
+	sm.mesh = mesh("pineSpire" if solid_mesh == "pine" else "blobLimbs")
+	var limb_mat := material("spire" if solid_mesh == "pine" else "limbs")
 	sm.instance_count = crown.multimesh.instance_count
 	sm.buffer = crown.multimesh.buffer
 	var si := MultiMeshInstance3D.new()
 	si.name = String(crown.name) + "_spire"
 	si.multimesh = sm
-	si.material_override = material("spire")
+	si.material_override = limb_mat
 	si.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	if internal:
 		crown.get_parent().add_child(si, false, Node.INTERNAL_MODE_BACK)
@@ -181,9 +214,9 @@ static func add_spire(crown: MultiMeshInstance3D, internal := false) -> MultiMes
 static func material(kind: String) -> ShaderMaterial:
 	if _mat.has(kind):
 		return _mat[kind]
-	if kind == "spire":   # the pine bark, without the crown's green instance colour
+	if kind == "spire" or kind == "limbs":   # the pine / leafy bark, without the crown's green instance colour
 		TerrainGeo.ensure()
-		var b: ShaderMaterial = TerrainGeo.MAT["trunk_pine"].duplicate()
+		var b: ShaderMaterial = TerrainGeo.MAT["trunk_pine" if kind == "spire" else "trunk"].duplicate()
 		b.set_shader_parameter("use_instance", false)
 		_mat[kind] = b
 		return b
@@ -201,7 +234,15 @@ static func material(kind: String) -> ShaderMaterial:
 		m.set_shader_parameter("cutoff", 0.45)
 		m.set_shader_parameter("albedo", Vector3(1.2, 1.2, 1.2))
 	else:
-		m.set_shader_parameter("leaf_tex", CardBush.texture("leaf"))
+		var tiles := CardBush.tile_textures()
+		if tiles.is_empty():   # (no photo patch: the bushes' clump card, one per card)
+			m.set_shader_parameter("leaf_tex", CardBush.texture("leaf"))
+		else:
+			m.set_shader_parameter("leaf_tex", tiles[0])
+			m.set_shader_parameter("tile_m", LEAF_TILE_M)
+			if tiles[1]:
+				m.set_shader_parameter("nrm_tex", tiles[1])
+				m.set_shader_parameter("use_nrm", true)
 		m.set_shader_parameter("sway", 0.035)
 		m.set_shader_parameter("flutter", 0.006)
 		m.set_shader_parameter("backlight", 0.35)
@@ -298,6 +339,8 @@ static func mesh(name: String) -> ArrayMesh:
 			"pineCard": _mesh[name] = _pine(PINE_LOD[0])
 			"pineCardLod1": _mesh[name] = _pine(PINE_LOD[1])
 			"blobCardLod1": _mesh[name] = _blob(int(BLOB_LOD1[0]), float(BLOB_LOD1[1]))
+			"trunkFlare": _mesh[name] = _trunk_flare()
+			"blobLimbs": _mesh[name] = _blob_limbs()
 			"pineSpire":   # crown-space trunk: from just under the crown's foot to its tip (radius as the trunk's top / crown scale)
 				var g := GeoBuf.cylinder(0.006, 0.09, PINE_TOP + 0.15, 6).translate(0, (PINE_TOP + 0.15) * 0.5 - 0.1, 0)
 				_mesh[name] = g.to_mesh(false, TerrainGeo._soft_normals(g))
@@ -320,8 +363,31 @@ class _Buf:
 	var col := PackedColorArray()
 	var uv := PackedVector2Array()
 
-	func vert(p: Vector3, n: Vector3, ao: float, t: Vector2) -> void:
-		pos.append(p); nor.append(n); col.append(Color(ao, ao, ao)); uv.append(t)
+	## size: the card's size in the mesh's units (COLOR.a: leafy crowns repeat their foliage picture by it, deco_cards tile_m)
+	func vert(p: Vector3, n: Vector3, ao: float, t: Vector2, size := 1.0) -> void:
+		pos.append(p); nor.append(n); col.append(Color(ao, ao, ao, size)); uv.append(t)
+
+	## a tapering tube along pts (radii per point), `sides` round, bark-ready (the deco shader maps bark in world space)
+	func tube(pts: Array, radii: Array, sides: int, ao0: float, ao1: float) -> void:
+		var rings := []
+		for i in pts.size():
+			var d: Vector3 = (pts[mini(i + 1, pts.size() - 1)] - pts[maxi(i - 1, 0)]).normalized()
+			var a := Vector3.RIGHT if absf(d.dot(Vector3.UP)) > 0.9 else Vector3.UP
+			var u := d.cross(a).normalized()
+			var v := d.cross(u)
+			var ring := []
+			for k in sides:
+				var t := TAU * k / sides
+				var n := u * cos(t) + v * sin(t)
+				ring.append([pts[i] + n * float(radii[i]), n])
+			rings.append(ring)
+		for i in pts.size() - 1:
+			var ao := lerpf(ao0, ao1, float(i) / maxf(pts.size() - 2, 1))
+			for k in sides:
+				var k2 := (k + 1) % sides
+				for e in [[i, k], [i + 1, k2], [i + 1, k], [i, k], [i, k2], [i + 1, k2]]:
+					var q: Array = rings[e[0]][e[1]]
+					vert(q[0], q[1], ao, Vector2(float(e[1]) / sides, float(e[0])))
 
 	func commit() -> ArrayMesh:
 		var arr := []
@@ -330,9 +396,10 @@ class _Buf:
 		arr[Mesh.ARRAY_NORMAL] = nor
 		arr[Mesh.ARRAY_COLOR] = col
 		arr[Mesh.ARRAY_TEX_UV] = uv
-		var m := ArrayMesh.new()
-		m.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
-		return m
+		var st := SurfaceTool.new()
+		st.create_from_arrays(arr)
+		st.generate_tangents()   # (the leaf card's normal map)
+		return st.commit()
 
 
 ## whorls of branch cards: each from the trunk out to the crown's outline, drooping, folded along its stem (a shallow V,
@@ -431,5 +498,136 @@ static func _blob(cards: int, size_k: float) -> ArrayMesh:
 					var o := q / R
 					var depth := clampf(o.length(), 0.0, 1.0)
 					var ao := (0.4 + 0.6 * smoothstep(0.05, 1.0, depth)) * (0.7 + 0.3 * clampf(o.y * 0.5 + 0.5, 0.0, 1.0))
-					b.vert(q, (o.normalized() * 0.75 + d * 0.25).normalized(), ao, Vector2(e.x * 0.5, 1.0 - e.y))
+					b.vert(q, (o.normalized() * 0.75 + d * 0.25).normalized(), ao, Vector2(e.x * 0.5, 1.0 - e.y), s)
 	return b.commit()
+
+
+## the trunk (TerrainGeo "trunk": unit height, radius 0.16 at the foot .. 0.1 at the top, like the old cylinder) with its
+## foot flaring out into ROOT_LOBES buttress roots (user: "roots on the bottom, it flares out"): over the lowest FLARE_H of
+## its height the radius grows to ~2.6x at the ground, most of it in ridges running out from the trunk. The flare scales
+## with the trunk's height (a tall forest pine gets a bigger one). Every tree's trunk uses it (BMX_OLD_TREES=1: not).
+const ROOT_LOBES := 5
+const FLARE_H := 0.1
+const TRUNK_RINGS := [0.0, 0.01, 0.025, 0.05, 0.08, 0.12, 0.4, 1.0]
+const TRUNK_SIDES := 15
+
+static func _trunk_r(y: float, th: float) -> float:
+	var r := lerpf(0.16, 0.1, y)
+	var f := pow(maxf(0.0, 1.0 - y / FLARE_H), 2.0)
+	var lobe := pow(maxf(0.0, cos(ROOT_LOBES * th + 0.7)), 2.5)
+	return r * (1.0 + f * (0.7 + 2.3 * lobe))
+
+static func _trunk_flare() -> ArrayMesh:
+	var b := _Buf.new()
+	var P := func(y: float, th: float) -> Vector3:
+		var r := _trunk_r(y, th)
+		return Vector3(sin(th) * r, y, cos(th) * r)
+	var N := func(y: float, th: float) -> Vector3:
+		var dth := 0.01
+		var dy := 0.004
+		var tth: Vector3 = P.call(y, th + dth) - P.call(y, th - dth)
+		var ty: Vector3 = P.call(minf(y + dy, 1.0), th) - P.call(maxf(y - dy, 0.0), th)
+		return ty.cross(tth).normalized()
+	for i in TRUNK_RINGS.size() - 1:
+		var y0: float = TRUNK_RINGS[i]
+		var y1: float = TRUNK_RINGS[i + 1]
+		for k in TRUNK_SIDES:
+			var t0 := TAU * k / TRUNK_SIDES
+			var t1 := TAU * (k + 1) / TRUNK_SIDES
+			for e in [[y0, t0], [y1, t1], [y1, t0], [y0, t0], [y0, t1], [y1, t1]]:
+				var y: float = e[0]
+				var ao := 0.72 + 0.28 * smoothstep(0.0, FLARE_H, y)   # the ground's shade in the root hollows
+				b.vert(P.call(y, e[1]), N.call(y, e[1]), ao, Vector2(e[1] / TAU, y))
+	return b.commit()
+
+
+## branches inside a leafy crown (TerrainGeo "blob" space: a ball of radius ~1 round the origin; user: "some branches for
+## the leaf types"): the trunk carried up into the crown, splitting into LIMBS limbs reaching out toward the shell, each
+## with a twig or two. Seen through the gaps of the card crowns. Bark like the trunk (CardTree material "spire").
+const LIMBS := 5
+
+static func _blob_limbs() -> ArrayMesh:
+	var b := _Buf.new()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 6061
+	# the leader: from below the crown (where the trunk mesh ends) up past the middle
+	var lead := [Vector3(0, -1.05, 0), Vector3(0.02, -0.6, 0.01), Vector3(-0.03, -0.1, 0.02), Vector3(0.0, 0.45, -0.02)]
+	b.tube(lead, [0.07, 0.06, 0.045, 0.018], 6, 0.55, 0.85)
+	for l in LIMBS:
+		var a := TAU * (l + rng.randf_range(-0.2, 0.2)) / LIMBS
+		var out := Vector3(cos(a), 0, sin(a))
+		var y0 := rng.randf_range(-0.7, -0.15)
+		var reach := rng.randf_range(0.65, 0.85)
+		var rise := rng.randf_range(0.35, 0.7)
+		var p0 := Vector3(0, y0, 0)
+		var pts := []
+		var n := 4
+		for i in n + 1:
+			var t := float(i) / n
+			# out and up, bending outward (a limb flattens as it reaches out)
+			pts.append(p0 + out * reach * t + Vector3(0, rise * sqrt(t), 0))
+		var r0 := rng.randf_range(0.045, 0.06)
+		b.tube(pts, [r0, r0 * 0.8, r0 * 0.6, r0 * 0.4, 0.008], 5, 0.6, 0.9)
+		# a twig or two off it
+		for k in 1 + int(rng.randf() < 0.6):
+			var t := rng.randf_range(0.4, 0.75)
+			var s0: Vector3 = p0 + out * reach * t + Vector3(0, rise * sqrt(t), 0)
+			var side := out.rotated(Vector3.UP, rng.randf_range(0.6, 1.1) * (1.0 if k == 0 else -1.0))
+			var e := s0 + side * rng.randf_range(0.3, 0.45) + Vector3(0, rng.randf_range(0.1, 0.3), 0)
+			b.tube([s0, s0.lerp(e, 0.5) + Vector3(0, 0.04, 0), e], [r0 * 0.45, r0 * 0.3, 0.006], 4, 0.7, 0.9)
+	return b.commit()
+
+
+
+## Real-world tree sizes (2026-11-26, user: "leaves too big, realistic scales, trunk thickness and height, can vary").
+## One place for the proportions every tree placer uses (world chunks, levels, the far backdrop). r1..r4 = random 0..1.
+## Returns metres: "H" total height, "cb" where the crown starts, "R" crown radius, "rt" trunk radius at the foot (above
+## the root flare), and the instance scales for TerrainGeo's unit meshes:
+##   "trunk" = Vector3 scale of the trunk mesh (unit height, radius 0.16 at the foot), from the ground
+##   "crown" = Vector3 scale of the crown mesh, "crown_y" = its origin above the ground (pine: crown foot, blob: middle)
+## Pines (Scots pine / spruce): 9-22 m, a tall forest's 18-30 m with the crown in the top ~half, young ones 4-8 m; crown
+## radius ~0.22-0.30 of its length. Leafy (beech-like): 10-20 m, young 4-8 m, crown 0.45-0.65 of the height wide.
+## Trunk radius ~1.1-2 % of the height (a 20 m pine ~0.5 m across). Savanna: 5-9 m flat-topped. Snag: a dead pole.
+static func dims(kind: String, r1: float, r2: float, r3: float, r4: float, tall := false, shrink := 0.0) -> Dictionary:
+	var d := {}
+	match kind:
+		"pine":
+			var young := r1 < 0.18 and not tall
+			var H := lerpf(4.0, 8.0, r2) if young else (lerpf(18.0, 30.0, r2) if tall else lerpf(9.0, 22.0, pow(r2, 1.3)))
+			H *= 1.0 - shrink
+			var cbf := lerpf(0.45, 0.62, r3) if tall else (lerpf(0.05, 0.15, r3) if young else lerpf(0.15, 0.35, r3))
+			var cb := H * cbf
+			var L := H - cb
+			var R := L * lerpf(0.22, 0.3, r4)
+			var rt := H * lerpf(0.011, 0.016, r4) + 0.03
+			d = {"H": H, "cb": cb, "R": R, "rt": rt, "trunk": Vector3(rt / 0.16, cb + L * 0.2, rt / 0.16),
+				"crown": Vector3(R / 1.1, L / PINE_TOP, R / 1.1), "crown_y": cb}
+		"leafy":
+			var young := r1 < 0.2
+			var H := lerpf(4.0, 8.0, r2) if young else lerpf(10.0, 20.0, pow(r2, 1.2))
+			H *= 1.0 - shrink
+			var a := H * lerpf(0.24, 0.32, r3)          # crown's vertical half-size
+			var R := H * lerpf(0.22, 0.32, r4)          # crown radius
+			var cy := H - a
+			var rt := H * lerpf(0.014, 0.02, r4) + 0.03
+			d = {"H": H, "cb": cy - a, "R": R, "rt": rt, "trunk": Vector3(rt / 0.16, cy - a * 0.3, rt / 0.16),
+				"crown": Vector3(R / 1.3, a / 1.3, R / 1.3), "crown_y": cy}
+		"savanna":
+			var H := lerpf(5.0, 9.0, r2)
+			var a := lerpf(0.8, 1.3, r3)
+			var R := lerpf(3.0, 5.0, r4)
+			var rt := lerpf(0.12, 0.2, r1)
+			d = {"H": H, "cb": H - 2.0 * a, "R": R, "rt": rt, "trunk": Vector3(rt / 0.16, H - a, rt / 0.16),
+				"crown": Vector3(R / 1.3, a / 1.3, R / 1.3), "crown_y": H - a}
+		_:   # snag: a dead, bare pole
+			var H := lerpf(6.0, 14.0, r2)
+			var rt := H * 0.012 + 0.04
+			d = {"H": H, "cb": H, "R": 0.0, "rt": rt, "trunk": Vector3(rt / 0.16, H, rt / 0.16), "crown": Vector3.ZERO, "crown_y": H}
+	return d
+
+
+## dims() for a tree known by its place (level trees, the far backdrop): the four random numbers hashed from x, z
+static func dims_at(kind: String, x: float, z: float, tall := false) -> Dictionary:
+	var h := func(k: float) -> float:
+		return fposmod(sin(x * 12.9898 + z * 78.233 + k * 37.719) * 43758.5453, 1.0)
+	return dims(kind, h.call(1.0), h.call(2.0), h.call(3.0), h.call(4.0), tall)

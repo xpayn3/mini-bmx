@@ -1165,14 +1165,14 @@ func _root_system(C: TrailCourse, i: int) -> void:
 	if h < WATER + 0.6:
 		return
 	# the tree
-	var sc := (1.1 + rr.next() * 0.45) * TREE_K
-	var py := sc * (1.6 + rr.next() * 0.6)
-	var cb := maxf(TALL_CROWN, sc * 3.2) + rr.next() * 2.5
+	var dm := CardTree.dims("pine", 1.0, rr.next(), rr.next(), rr.next(), true)   # (a tall forest pine, real size)
 	var yaw := rr.next() * 6.28
-	put("trunk_pine" if rr.next() < 0.45 else "trunk", tx, h - 0.1, tz, sc, cb + 0.2 + py * 0.15, sc, yaw)
-	put("pine", tx, h + cb, tz, sc * 0.95, py, sc * 0.95, yaw, PINES[int(rr.next() * PINES.size())])
-	var tr := 0.13 * sc   # the trunk's radius at its foot
-	colliders.append({"x": tx, "z": tz, "r": tr + 0.03, "ceil": h + cb + 2.8 * py})
+	var ts: Vector3 = dm.trunk
+	var cs: Vector3 = dm.crown
+	put("trunk_pine" if rr.next() < 0.45 else "trunk", tx, h - 0.1, tz, ts.x, ts.y + 0.1, ts.z, yaw)
+	put("pine", tx, h + float(dm.crown_y), tz, cs.x, cs.y, cs.z, yaw, PINES[int(rr.next() * PINES.size())])
+	var tr: float = dm.rt   # the trunk's radius at its foot
+	colliders.append({"x": tx, "z": tz, "r": tr + 0.03, "ceil": h + float(dm.H)})
 	blocked.append([tx, tz, tr + 0.4])
 	# its roots
 	if _root_st == null:
@@ -1192,7 +1192,7 @@ func _root_system(C: TrailCourse, i: int) -> void:
 			head = toward + PI * (0.35 + rr.next() * 1.3) * (1.0 if rr.next() < 0.5 else -1.0)
 			len = 1.0 + rr.next() * 1.4
 		var st := Vector2(tx, tz) + Vector2(cos(head), sin(head)) * tr * 0.8
-		_grow_root(st, head, len, (0.15 + rr.next() * 0.07) * sc / TREE_K, 0, rr, tint)
+		_grow_root(st, head, len, (0.65 + rr.next() * 0.3) * tr, 0, rr, tint)   # (as thick as ~2/3 .. all of the trunk where it leaves it)
 
 
 func _grow_root(p: Vector2, head: float, len: float, r0: float, depth: int, rr: WorldRng, tint: Color) -> void:
@@ -1277,14 +1277,17 @@ func _bend_trees() -> void:
 		var h := height(x, z)
 		if h < WATER + 0.6:
 			continue
-		var sc := (1.75 + TrailCourse._hash(i, 72) * 0.55) * TREE_K
-		var py := sc * (2.3 + TrailCourse._hash(i, 73) * 0.6)
+		# an old giant: 26-34 m, a thick trunk, bare high up, the crown over everything
+		var dm := CardTree.dims("pine", 1.0, 0.7 + TrailCourse._hash(i, 72) * 0.3, TrailCourse._hash(i, 73), TrailCourse._hash(i, 76), true)
 		var yaw := TrailCourse._hash(i, 74) * 6.28
-		var cb := maxf(TALL_CROWN + 2.0, sc * 3.6)   # an old giant: bare trunk high up, the crown over everything
-		put("trunk", x, h - 0.15, z, sc, cb + 0.3 + py * 0.2, sc, yaw)
-		put("pine", x, h + cb, z, sc * 1.05, py, sc * 1.05, yaw, PINES[int(TrailCourse._hash(i, 75) * PINES.size())])
-		colliders.append({"x": x, "z": z, "r": 0.16 * sc + 0.02, "ceil": h + cb + 2.8 * py})
-		blocked.append([x, z, 0.16 * sc + 0.4])
+		var rt: float = float(dm.rt) * 1.35
+		var ts: Vector3 = dm.trunk
+		var cs: Vector3 = dm.crown
+		put("trunk", x, h - 0.15, z, rt / 0.16, ts.y + 0.15, rt / 0.16, yaw)
+		put("pine", x, h + float(dm.crown_y), z, cs.x, cs.y, cs.z, yaw, PINES[int(TrailCourse._hash(i, 75) * PINES.size())])
+		colliders.append({"x": x, "z": z, "r": rt + 0.02, "ceil": h + float(dm.H)})
+		blocked.append([x, z, rt + 0.4])
+		var sc := rt / 0.16   # (the stones below are placed by it)
 		# a few stones round its roots, on the side away from the trail (visual: inside the trunk's own clearance)
 		for q in 4:
 			var a := atan2(C.TX[i] * sg, -C.TZ[i] * sg) + (TrailCourse._hash(i, 80 + q) - 0.5) * 2.4
@@ -1330,9 +1333,10 @@ func _trees(ox: float, oz: float) -> void:
 		var rug: float = f.b_rug
 		if f.b_ash > 0.4:
 			# a dead snag: a bare trunk
-			var snag := sc * TREE_K * (0.9 + rnd.next() * 0.8)
-			put("trunk_pale", x, h - 0.1, z, snag * 1.0, snag * 1.5, snag * 1.0, yaw)
-			colliders.append({"x": x, "z": z, "r": 0.14 * snag + 0.02, "ceil": h + snag * 1.5})
+			var dn := CardTree.dims("snag", rnd.next(), rnd.next(), 0.0, 0.0)
+			var tn: Vector3 = dn.trunk
+			put("trunk_pale", x, h - 0.1, z, tn.x, tn.y, tn.z, yaw)
+			colliders.append({"x": x, "z": z, "r": float(dn.rt) + 0.02, "ceil": h + float(dn.H)})
 			continue
 		if rnd.next() < dry * (1.0 - 0.9 * f.b_sav):
 			if rnd.next() < 0.35:
@@ -1345,46 +1349,55 @@ func _trees(ox: float, oz: float) -> void:
 				colliders.append({"x": x, "z": z, "r": CactusGeo.HIT_R[kind] * cs, "ceil": h - 0.03 + CactusGeo.HEIGHT[kind] * cy,
 					"cactus": {"i": idx, "kind": kind, "broken": false, "col": cc, "xform": _last_xform(nm)}})
 			continue
+		# real-size trees (CardTree.dims: heights, crowns and trunk thickness from real pines / beeches, varied)
 		var ceil_h := 0.0
-		sc *= TREE_K
+		var rt := 0.15
 		if fe or h > 4 or rnd.next() < 0.3 + rug * 0.6 + f.b_forest * 0.65 + f.b_cold * 0.5:
-			# pines: tall and slim, the odd one a real giant (up to ~13 m); smaller up in the alpine
-			sc *= 1.0 - 0.3 * f.b_cold
-			var py := sc * (1.5 + rnd.next() * 0.7 + pow(rnd.next(), 4.0) * 0.9)
 			# tall forest (strong pine forest, or beside a forest singletrack): long bare trunks, the crown high up, so riders
 			# (and the camera behind them) ride under the canopy, not through the branches (user, 2026-11-25)
 			var tall: bool = fe or f.b_forest > 0.5
-			var cb := sc * 0.6   # crown base above the ground
-			if tall:
-				cb = maxf(TALL_CROWN, sc * 3.2) + rnd.next() * 3.0
-				sc *= 1.15
-			if not fe and not tall and not _crown_clear(x, z, sc * 1.05):
+			var dm := CardTree.dims("pine", rnd.next(), rnd.next(), rnd.next(), rnd.next(), tall, 0.3 * f.b_cold)
+			if tall and float(dm.cb) < TALL_CROWN:
+				dm = CardTree.dims("pine", 1.0, 0.6 + rnd.next() * 0.4, 0.5 + rnd.next() * 0.5, rnd.next(), true)
+			var R: float = dm.R
+			if not fe and not tall and not _crown_clear(x, z, R * 1.05):
 				continue
-			if tall and not fe and not _crown_clear(x, z, sc * 0.5):
+			if tall and not fe and not _crown_clear(x, z, float(dm.rt) + 0.5):
 				continue   # (a tall trunk only needs its trunk off the trail: its crown is overhead)
-			put("trunk_pine" if rnd.next() < 0.45 else "trunk", x, h - 0.1, z, sc, cb + 0.2 + py * 0.15, sc, yaw)
-			put("pine", x, h + cb, z, sc * (0.95 if tall else 1.1), py, sc * (0.95 if tall else 1.1), yaw, PINES[int(rnd.next() * PINES.size())])
-			ceil_h = h + cb + 2.8 * py
+			var ts: Vector3 = dm.trunk
+			var cs: Vector3 = dm.crown
+			put("trunk_pine" if rnd.next() < 0.45 else "trunk", x, h - 0.1, z, ts.x, ts.y + 0.1, ts.z, yaw)
+			put("pine", x, h + float(dm.crown_y), z, cs.x, cs.y, cs.z, yaw, PINES[int(rnd.next() * PINES.size())])
+			ceil_h = h + float(dm.H)
+			rt = dm.rt
 		elif f.b_sav > 0.4:
 			# savanna: a thin trunk under a wide, flat crown
-			if not _crown_clear(x, z, sc * 2.4):
+			var dm := CardTree.dims("savanna", rnd.next(), rnd.next(), rnd.next(), rnd.next())
+			if not _crown_clear(x, z, float(dm.R)):
 				continue
-			var th := sc * (1.5 + rnd.next() * 0.8)
-			ceil_h = h + th + sc * 0.9
-			put("trunk", x, h - 0.1, z, sc * 0.8, th + 0.3, sc * 0.8, yaw)
-			put("blob", x, h + th + sc * 0.25, z, sc * 2.3, sc * 0.55, sc * 2.3, yaw, SAV_LEAVES[int(rnd.next() * SAV_LEAVES.size())], 0.6)
+			var ts: Vector3 = dm.trunk
+			var cs: Vector3 = dm.crown
+			put("trunk", x, h - 0.1, z, ts.x, ts.y + 0.1, ts.z, yaw)
+			put("blob", x, h + float(dm.crown_y), z, cs.x, cs.y, cs.z, yaw, SAV_LEAVES[int(rnd.next() * SAV_LEAVES.size())], 0.3)
+			ceil_h = h + float(dm.H)
+			rt = dm.rt
 		else:
-			if not _crown_clear(x, z, sc * 1.4):
+			# leafy (beech-like): a big rounded crown, sometimes a second lobe beside it
+			var dm := CardTree.dims("leafy", rnd.next(), rnd.next(), rnd.next(), rnd.next())
+			if not _crown_clear(x, z, float(dm.R) * 0.9):
 				continue
-			var th := sc * (1.1 + rnd.next() * 0.6)
-			ceil_h = h + th + sc * 1.8
-			put("trunk_pale" if rnd.next() < 0.6 else "trunk", x, h - 0.1, z, sc, th + 0.3, sc, yaw)
-			put("blob", x, h + th + sc * 0.7, z, sc * 1.2, sc * 1.05, sc * 1.2, yaw, LEAVES[int(rnd.next() * LEAVES.size())], 0.6)
+			var ts: Vector3 = dm.trunk
+			var cs: Vector3 = dm.crown
+			put("trunk_pale" if rnd.next() < 0.6 else "trunk", x, h - 0.1, z, ts.x, ts.y + 0.1, ts.z, yaw)
+			put("blob", x, h + float(dm.crown_y), z, cs.x, cs.y, cs.z, yaw, LEAVES[int(rnd.next() * LEAVES.size())], 0.3)
 			if rnd.next() < 0.5:
-				var bx := x + (rnd.next() - .5) * sc
-				var bz := z + (rnd.next() - .5) * sc
-				put("blob", bx, h + th + sc * 1.4, bz, sc * .8, sc * .75, sc * .8, yaw, LEAVES[int(rnd.next() * LEAVES.size())], 0.6)
-		colliders.append({"x": x, "z": z, "r": 0.16 * sc + 0.02, "ceil": ceil_h})
+				var R: float = dm.R
+				var bx := x + (rnd.next() - .5) * R
+				var bz := z + (rnd.next() - .5) * R
+				put("blob", bx, h + float(dm.crown_y) + cs.y * 0.5, bz, cs.x * 0.7, cs.y * 0.7, cs.z * 0.7, yaw, LEAVES[int(rnd.next() * LEAVES.size())], 0.3)
+			ceil_h = h + float(dm.H)
+			rt = dm.rt
+		colliders.append({"x": x, "z": z, "r": rt + 0.02, "ceil": ceil_h})
 
 
 func _last_xform(name: String) -> Transform3D:

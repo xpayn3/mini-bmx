@@ -203,6 +203,7 @@ func setup(terrain) -> void:
 	_roll.seed = _seed + 7
 	_roll.frequency = 1.0 / 420.0
 	_roll.fractal_octaves = 3
+	_impostors()   # (loads the atlas here on the main thread: the grid's worker asks it too)
 	if _ground_sh == null:
 		_ground_sh = Shader.new(); _ground_sh.code = GROUND_SHADER
 		_tree_sh = Shader.new(); _tree_sh.code = TREE_SHADER
@@ -394,6 +395,10 @@ func _run(job: Dictionary) -> void:
 				var shade := 0.75 + _cell_rand(gx, gz, 6) * 0.35
 				var tw := sc * (1.5 if pine else 2.1)
 				var ht := sc * (6.5 if pine else 4.2)
+				if _impostors():   # real-size trees (CardTree.dims), as the chunks draw them
+					var dm := CardTree.dims_at("pine" if pine else "leafy", x, z, h > 4.0 and pine and r2 < 0.15)
+					ht = float(dm.H)
+					tw = float(dm.R) * 2.0
 				# Transform3D rows (round shapes: no yaw), colour, custom (x = ridge height under the tree).
 				# The origin is the base; the mesh is lifted inside the transform so it stands on it.
 				var rmv := rm[clampi(int(roundf((z - z0) / RM_STEP)), 0, nr - 1) * nr + clampi(int(roundf((x - x0) / RM_STEP)), 0, nr - 1)]
