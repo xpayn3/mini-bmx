@@ -591,7 +591,12 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   `Terrain.GROW_AHEAD` (2 km), a worker grows it by `GROW_STEP` (3 km) into a NEW `TrailCourse` on a fork
   (`grow_course`, ~0.1–0.4 s), the main thread swaps it in (`adopt_course` + C# `rebind_course`, ~1 ms).
   Already laid-out trail, marking and route features never change (marking has its own RNG; stakes are
-  stored in course order). Chunks read rocks / stakes / fences from per-chunk buckets, route features are
+  stored in course order). **But the land can** (2026-11-26, F8 seed 13249: crashed rider "clipped through the world"):
+  the relief layers fade in by the distance from the WHOLE trail (`trail_far`), so a grown trail changed the ground
+  under chunks already built (one was drawn ~30 m above the physics ground). After adopting, `_restale_after_grow`
+  restarts chunk jobs that read the old trail and queues every loaded chunk for `_land_check_step` (4 a frame: its
+  0.5 m grid vs `ground()` at 7 x 7 nodes, > `LAND_REDO_TOL` 0.15 m = rebuilt; `_finalize` swaps the old chunk out).
+  Normal rides: 0 rebuilt (seeds 4242 / 5 / 13249). `BMX_GROW_PROBE=1` prints it, `BMX_OLD_GROWLAND=1` = before. Chunks read rocks / stakes / fences from per-chunk buckets, route features are
   binary-searched — nothing scans the whole course. `tools/trail_grow_probe.gd` checks all of it.
 
 - **Route spine: the world runs any way, not along +x (2026-11-25, user: "use the landscape, really wavy, we have a square

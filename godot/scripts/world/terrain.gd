@@ -590,6 +590,7 @@ func update_stream(px: float, pz: float, budget_ms: float = 4.0, sync_r := -1) -
 	fin_parts.fill(0.0)
 	_focus = Vector2(px, pz)
 	_update_grow(px, pz)
+	_land_check_step()
 	var ccx := WorldRng.jround(px / SIZE)
 	var ccz := WorldRng.jround(pz / SIZE)
 	var R := RADIUS
@@ -715,8 +716,11 @@ func _update_grow(px: float, pz: float) -> void:
 			field.adopt_course(_grow_box[0])
 			if fcs != null:
 				fcs.rebind_course(field)
-			print_verbose("TRAIL grown to s=%.0f (%d points), adopted in %.1f ms" % [field.course.end_s(), field.course.n,
-				(Time.get_ticks_usec() - t0) / 1000.0])
+			var redo := _restale_after_grow()
+			var msg := "TRAIL grown to s=%.0f (%d points), adopted in %.1f ms, %d chunks to check" % [field.course.end_s(), field.course.n,
+				(Time.get_ticks_usec() - t0) / 1000.0, redo]
+			if Env.s("BMX_GROW_PROBE") != "": print(msg)
+			else: print_verbose(msg)
 		_grow_box = []
 		return
 	# how far along the route the rider is (the route can run any way: x says nothing). Off the route (beyond its reach)
@@ -735,6 +739,62 @@ func _update_grow(px: float, pz: float) -> void:
 		g.grow_course(to)
 		box.append(g)
 		print_verbose("TRAIL grow on worker: %.0f ms" % ((Time.get_ticks_usec() - t0) / 1000.0)), false, "trail grow")
+
+
+## The land depends on the whole trail (the relief layers fade in by the distance from it: TerrainField.trail_far), so a
+## grown trail can change the ground of chunks already built (2026-11-26, F8 seed 13249: a chunk drawn ~30 m above the
+## physics ground, the crashed rider slid into it and vanished "through the world"). After adopting it: chunks still
+## being built read the old trail (dropped, built again), loaded ones whose drawn grid no longer matches the field are
+## built again (the old one stays drawn until the new one is in: _finalize). Returns how many are queued to check (a few a frame: _land_check_step). BMX_OLD_GROWLAND=1 = before
+static var OLD_GROWLAND := OS.get_environment("BMX_OLD_GROWLAND") != ""
+const LAND_REDO_TOL := 0.15   # m: drawn grid vs the field's ground at a node (micro detail is only in the fine grid MG)
+func _restale_after_grow() -> int:
+	if OLD_GROWLAND:
+		return 0
+	for k in _jobs.keys():
+		_stale_tasks.append(_jobs[k]["task"])
+		_jobs.erase(k)
+	_land_check = chunks.keys()   # (checked a few a frame: all at once was a 6-14 ms frame, _land_check_step)
+	return _land_check.size()
+
+var _land_check: Array = []   # loaded chunks still to compare with the grown trail's land
+const LAND_CHECK_PER_FRAME := 4   # ~0.15 ms a chunk (49 C# height reads)
+func _land_check_step() -> void:
+	if _land_check.is_empty():
+		return
+	var q = query_field()
+	var redone := 0
+	for i in LAND_CHECK_PER_FRAME:
+		if _land_check.is_empty():
+			break
+		var k: Vector2i = _land_check.pop_back()
+		if chunks.has(k) and not _jobs.has(k) and _land_changed(k, q):
+			_dispatch(k, true)
+			redone += 1
+	if redone > 0 and Env.s("BMX_GROW_PROBE") != "":
+		print("TRAIL land changed: %d chunks rebuilt (%d left to check)" % [redone, _land_check.size()])
+
+func _land_changed(k: Vector2i, q) -> bool:
+	var c: Dictionary = chunks[k]
+	if not c.has("G") or not c.has("N"):
+		return false
+	var G: PackedFloat32Array = c["G"]
+	var N: int = c["N"]
+	var W := N + 3
+	var d := SIZE / N
+	var x0 := k.x * SIZE - SIZE / 2
+	var z0 := k.y * SIZE - SIZE / 2
+	var S := 6   # 7 x 7 nodes a chunk (8 m apart)
+	for j in S + 1:
+		var iz := j * N / S
+		for i in S + 1:
+			var ix := i * N / S
+			var b := (iz + 1) * W + ix + 1
+			if b >= G.size():
+				continue
+			if absf(G[b] - float(q.ground(x0 + ix * d, z0 + iz * d))) > LAND_REDO_TOL:
+				return true
+	return false
 
 
 func _reap_stale(block: bool) -> void:
@@ -959,6 +1019,8 @@ func _finalize(k: Vector2i) -> void:
 		return
 	last_build_ms = b.ms_used
 	if keep_outs: outs[k] = {"o": b.out.duplicate(true), "N": b.N}   # (before _finalize_out adds node references to it)
+	if chunks.has(k):
+		_unload(k)   # (a rebuild after the trail grew: _restale_after_grow)
 	_finalize_out(k, b.out, b.N)
 
 ## a chunk's built data (TerrainChunkBuilder.out, grid size chunk_n) turned into its nodes, records and lookups
