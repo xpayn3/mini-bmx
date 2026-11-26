@@ -333,6 +333,35 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   default went to 0). A real weave needs the bike to steer along a snaking line. Hands-off straight coast now: bike lean spread
   1.6 deg (the pedal rock), head sideways 1.9 cm (`BMX_SWAY_PROBE=1`: `SWAY head_sd hips_sd`). **Berm lock-in** only while
   steering into the tilt, held `LOCK_HOLD` 1 s after letting go (`_lock_hold`): hands off down a hillside it fed a slalom.
+  **Step 3, air tuck** (`tuckPull` 0.32 m, Ride > Jumps; `BMX_OLD_TUCK=1` = before): hop held in the air pulls the bike up into
+  the body by `tuckPull` (was `legComp` x 0.85, ~0.25 m) on ANY jump, and the drawn tuck (`airPull` pose input) shows for a held
+  tuck too (it was only after a timed pop). Measured, dtable_43 at 43 km/h: legs pulled 36 cm at the peak, wheels clear the
+  ground 2-5 cm more than hands off (7 cm more than the old tuck); air time the same (+0.01 s): pulling the bike up can't
+  change the shared centre of mass's flight, only clearance. Test rider `BMX_PG_PILOT_AIRTUCK=1` holds hop in the air.
+  Stress 56 / 56. Not ridden by the user yet.
+  **The tuck is normal jump behaviour** (same day, user: "no special move", Project X frames: their rider holds the bike up
+  under him all flight, knees bent, pushes it down for the landing): every real flight (`air_k`) tucks by itself to
+  `autoTuck` 0.7 of the full tuck, held, let down with `land_prep`; right stick back = all of it, forward = none (bike pushed
+  away); hop held = all of it. `air_pull` follows a critically damped spring (SmoothDamp, exact step, half-life `tuckEase`
+  0.09 s; was a plain lag with a speed jump at each change). Sliders Ride > Jumps: Tuck on every jump, Tuck smoothness.
+  `BMX_OLD_AUTOTUCK=1` = before. dtable_43 hands off at 43 km/h: clearance 1.07 -> 1.18 m, air 0.88 -> 0.91 s, legs pulled
+  19 cm at the peak; the tuck curve is one smooth bell (accel <= 26 /s^2). Body clip on a trail ride as before.
+  **Visible preload into a lip** (same day, user: "I can't see the rider preloading with legs and hips"; `BMX_OLD_PRELOAD=1`
+  = before): the drawn hips were held 8.5 cm over the saddle (saddle floor) whatever the preload, only 35 % of the legs'
+  sink was drawn on any jump face (`FACE_SINK`, meant for slow steep dirt-jump lips: now only there, `fs_k`), and hands off
+  the preload was cut the moment the auto pop waited for the edge (the deepest moment). Now: preload hips -0.17 m / -0.06 m,
+  chest folded +0.22 rad, the saddle floor drops 0.14 x preload, all handing over to the drive as the legs extend (`j_ext`).
+  dtable_43 hands off: crouch into the transition, stand tall off the lip, tuck in the air (`BMX_LIP_SHOT`). Body clip on
+  a 50 s trail ride the same as before.
+  **Body check (2026-11-27)**: `BMX_LIMBLEN=1` prints every 2 s each limb's drawn length vs its own (thigh, shin, upper arm,
+  forearm, torso) and how far a hand / foot is off its grip / pedal. Limbs never changed length; the torso was let stretch to
+  108 % (4 cm in every flight): now capped at 100 % (it only shortens as the back bends). In-air lay-over: the hips stay on
+  the bike (counter x `AIR_HIP_SHARE` 0.3), the upper body turns about the hips (cap `AIR_CHEST_CAP`; the chest pivot put the
+  hips ~0.4 m off the bike, legs straight; `BMX_OLD_AIRTILT=1`), stick lay-over `stickAirRoll` 1.25 -> 0.8 rad (Tune VER 34).
+  Proportions vs a ~1.79 m adult: legs / shoulders were right, arms ~6 cm short, torso ~3 cm: `L_UARM` 0.31 -> 0.32, `L_FARM`
+  0.29 -> 0.32, DH pose torso 0.5 -> 0.52 (RiderPanels POSE_VER 5 moves saves still at 0.5); `BMX_OLD_BODYSIZE=1`. Limbs are
+  shaped tubes (`Rider.limb_mesh`, profiles `THIGH_PROF` / `SHIN_PROF` (calf at the back) / `UARM_PROF` / `FARM_PROF`), not
+  cones; `BMX_OLD_LIMBSHAPE=1`. Not done: checking reach / stack against each frame's geometry.
 - **Curbs / ledges: the rear rolls up, the tyres don't shiver at the edge (2026-11-24, user: "the rear always gets
   stuck on a curb")**. (1) `_step_move`'s edge check (at the bottom bracket) read the rise per physics step, so whether a
   curb was a wall at all depended on speed: at 6 km/h it never saw one (rolled up 30 cm), at 15 km/h a 20 cm curb was

@@ -22,7 +22,7 @@ const LABELS := {
 	"balanceSim": "Balanced bike", "balanceFall": "Falls in past the grip", "lowsideAngle": "Lowside margin",
 	"gyroStable": "Steady at speed", "frontWashAt": "Front wash-out point", "frontWashTime": "Wash-out time",
 	"brakeFront": "Front brake", "brakeRear": "Rear brake", "brakeFrontMix": "Brake key: front share",
-	"brakeSkid": "Brake key: rear skid", "camberPull": "Side-slope pull", "bankLock": "Berm lock-in", "cornerBody": "Deep-turn body lean", "cornerLoad": "Turns press you down",
+	"brakeSkid": "Brake key: rear skid", "camberPull": "Side-slope pull", "bankLock": "Berm lock-in", "tuckPull": "Air tuck", "autoTuck": "Tuck on every jump", "tuckEase": "Tuck smoothness", "cornerBody": "Deep-turn body lean", "cornerLoad": "Turns press you down",
 	"groundKnock": "Rocks & ruts knock", "leanLead": "Tip in with the steer", "slowRoll": "Quicker roll when slow",
 	"slowLean": "Bike thrown under (slow)", "damperKnee": "Shock blow-off speed", "damperBlow": "Harshness past blow-off",
 	"wheelMass": "Wheel weight", "airArcade": "Arcade air control", "airSpinRate": "Air tilt speed",
@@ -290,6 +290,9 @@ const PAGES := [
 			["prepTime", "Spots the lip ahead.", "Late", "Early"],
 			["prepDepth", "Crouch into the lip.", "Little", "Deep"],
 			["airLift", "Lifts the bike after take-off.", "No", "Lots"],
+			["tuckPull", "How far the full tuck pulls the bike up to you (knees to chest): right stick back or hop held in the air.", "A little", "Knees to chest"],
+			["*autoTuck", "Every jump the rider tucks the bike up under him by himself, this share of the full tuck. Right stick back = all of it, forward = none.", "Stays long", "Full tuck"],
+			["tuckEase", "How softly the bike comes up into the tuck and goes back down for the landing.", "Snappy", "Floaty"],
 		]],
 		["In the air", [
 			["*airArcade", "Arcade air control (0 = real momentum physics).", "Physics", "Arcade"],

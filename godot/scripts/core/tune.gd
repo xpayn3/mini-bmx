@@ -177,6 +177,9 @@ const DEFS := [
 		["popWindow", "Pop window before a lip", 0.24, 0.1, 0.5, 0.01, "s"],
 		["squashPower", "Squash a lip (stick forward)", 1.0, 0, 1.5, 0.05, "×"],
 		["airLift", "Lifts the bike after take-off", 0.6, 0, 1, 0.05, ""],
+		["tuckPull", "Air tuck: how far holding hop pulls the bike up", 0.32, 0.1, 0.5, 0.01, "m"],
+		["autoTuck", "Tuck on every jump (share of the full tuck)", 0.7, 0, 1, 0.05, ""],
+		["tuckEase", "How smoothly the tuck comes and goes (half-life)", 0.09, 0.03, 0.3, 0.01, "s"],
 		["landPrepTime", "Reach for landing", 0.35, 0.05, 1, 0.05, "s"],
 		["airAimDelay", "Wait before aiming at the landing", 1.0, 0, 2, 0.05, "s"],
 		["airAimSpeed", "Aim at the landing: softness", 14, 4, 70, 1, ""],
@@ -219,7 +222,7 @@ const DEFS := [
 		["whipGlide", "Whip held: bumps knock it about less", 0.6, 0, 1, 0.05, ""],
 		["whipStyle", "Straight whip: style points", 1.0, 0, 3, 0.1, "×"],
 		["stickAirTilt", "Air: stick tilts the nose", 0.55, 0, 1.2, 0.05, "rad"],
-		["stickAirRoll", "Air: stick lays the bike over (tabletop, at 0.8 of stick)", 1.25, 0, 1.5, 0.05, "rad"],
+		["stickAirRoll", "Air: stick lays the bike over (tabletop, at 0.8 of stick)", 0.8, 0, 1.5, 0.05, "rad"],
 		["airSteer", "Air: steer (A / D, left stick) turns the bike towards the next line", 0.6, 0, 1.0, 0.02, "rad"],
 		["airAim", "Air: hands off, the bike points where the trail goes after the landing (0 = off)", 0.6, 0, 1.0, 0.05, "×"],
 		["carveStyle", "Landing carve: style points + flow (0 = none)", 1.0, 0, 3.0, 0.1, "×"],
@@ -334,10 +337,10 @@ const DEFS := [
 
 const PATH := "user://tune.cfg"
 ## bump VER when defaults are retuned: saved values of the RETUNED keys are dropped once
-const VER := 33
+const VER := 34
 ## later retunes, per version: only these keys are dropped for saves older than that version (bumping VER
 ## with one shared list would reset every earlier retuned key again)
-const RETUNED_AT := {8: ["manualFrom", "stickAirRoll", "stickSpinBuild", "stickYawRate"], 9: ["leanMax"], 11: ["leanIn", "leanOut", "flickSpeed"], 12: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 13: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 14: ["sprintRock"], 15: ["dustWidth"], 16: ["bodyLean"], 17: ["stickAirEase"], 18: ["manualFrom"], 19: ["manBothSticks"], 22: ["popKick"], 23: ["damperBlow"], 24: ["landHeavy"], 25: ["autoAbsorb"], 26: ["autoPump", "prepTime", "prepDepth"], 27: ["airWhip"], 28: ["airAssist"], 29: ["airAssist"], 30: ["stickAirRoll"], 31: ["flickSteer", "flickLean", "flickKick"], 32: ["airBodyOut"], 33: ["slowSteer"], 20: ["manBothSticks"], 21: ["frontWashAt", "frontWashTime"]}
+const RETUNED_AT := {8: ["manualFrom", "stickAirRoll", "stickSpinBuild", "stickYawRate"], 9: ["leanMax"], 11: ["leanIn", "leanOut", "flickSpeed"], 12: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 13: ["leanIn", "leanOut", "flickSpeed", "steerEase", "leanRate"], 14: ["sprintRock"], 15: ["dustWidth"], 16: ["bodyLean"], 17: ["stickAirEase"], 18: ["manualFrom"], 19: ["manBothSticks"], 22: ["popKick"], 23: ["damperBlow"], 24: ["landHeavy"], 25: ["autoAbsorb"], 26: ["autoPump", "prepTime", "prepDepth"], 27: ["airWhip"], 28: ["airAssist"], 29: ["airAssist"], 30: ["stickAirRoll"], 31: ["flickSteer", "flickLean", "flickKick"], 32: ["airBodyOut"], 33: ["slowSteer"], 34: ["stickAirRoll"], 20: ["manBothSticks"], 21: ["frontWashAt", "frontWashTime"]}
 const RETUNED := ["steerRate", "steerRelease", "steerCurve", "turnFloor", "steerMax", "slowSteer",
 	"barSpeed", "grip", "slipRecover", "slipMax", "turnWeight", "leanMax", "leanIn", "leanOut", "leanDamp", "bikeLeanMul", "bikeLeanCap", "flipAccel", "flipRate", "airTwist", "landBack", "travel", "popKick"]
 var defaults := {}

@@ -6,6 +6,7 @@ extends Node3D
 
 const G := preload("res://scripts/rider/rider_geo.gd")
 static var _OLD_JUMPPOSE := OS.get_environment("BMX_OLD_JUMPPOSE") != ""
+static var _OLD_PRELOAD := OS.get_environment("BMX_OLD_PRELOAD") != ""
 static var _OLD_SPEEDTUCK := OS.get_environment("BMX_OLD_SPEEDTUCK") != ""
 static var _OLD_STICKBIKE := OS.get_environment("BMX_OLD_STICKBIKE") != ""   # body stick side lean = hips out over a tipped bike
 const LAT_HIP := 0.06     # ground: hips slide this far towards the stick's side (m)
@@ -77,8 +78,23 @@ const GOGGLE_FIT := {x = 0.15, y = 0.025, tilt = 0.25, w = 0.23, h = 0.087, R = 
 
 const L_THIGH := 0.44
 const L_SHIN := 0.44
-const L_UARM := 0.31
-const L_FARM := 0.29
+static var L_UARM: float = 0.31 if OS.get_environment("BMX_OLD_BODYSIZE") != "" else 0.32   # (2026-11-27: real arm, ~1.79 m rider; was 0.31)
+static var L_FARM: float = 0.29 if OS.get_environment("BMX_OLD_BODYSIZE") != "" else 0.32   # (elbow to the middle of the grip; was 0.29)
+static var _LIMBLEN := OS.get_environment("BMX_LIMBLEN") != ""
+var _ll := {}; var _ll_t := 0.0; var _ll_air := false
+func _ll_note(k: String, d: float) -> void:
+	var r: Array = _ll.get(k, [INF, -INF, 0])
+	r[0] = minf(r[0], d); r[1] = maxf(r[1], d)
+	if absf(d) > 0.005: r[2] = int(r[2]) + 1
+	_ll[k] = r
+func _ll_tick(dt: float, air: float) -> void:
+	_ll_t += dt
+	_ll_air = _ll_air or air > 0.5
+	if _ll_t < 2.0: return
+	var parts := []
+	for k in _ll: parts.append("%s %+.1f..%+.1f cm (%d)" % [k, _ll[k][0] * 100.0, _ll[k][1] * 100.0, _ll[k][2]])
+	print("LIMBLEN air=%s | %s" % [str(_ll_air), " | ".join(parts)])
+	_ll = {}; _ll_t = 0.0; _ll_air = false
 
 var style: Dictionary = {}
 var look: Dictionary = {}
@@ -177,6 +193,13 @@ func _init() -> void:
 		mi.material_override = m
 		add_child(mi)
 		return mi
+	var shaped := func(prof: Array, rt: float, rb: float, m: Material) -> MeshInstance3D:
+		if _OLD_LIMBSHAPE: return cyl.call(rt, rb, m)
+		var mi := MeshInstance3D.new()
+		mi.mesh = limb_mesh(prof)
+		mi.material_override = m
+		add_child(mi)
+		return mi
 	var sph := func(r: float, m: Material, ws := 16, hs := 12) -> MeshInstance3D:
 		var s := SphereMesh.new()
 		s.radius = r
@@ -213,8 +236,8 @@ func _init() -> void:
 	shoulder_sph.assign([sph.call(0.075, mCoral), sph.call(0.075, mCoral)])
 
 	# legs (0 = left, 1 = right)
-	thigh.assign([cyl.call(0.075, 0.062, mNavy), cyl.call(0.075, 0.062, mNavy)])
-	shin.assign([cyl.call(0.062, 0.05, mNavy), cyl.call(0.062, 0.05, mNavy)])
+	thigh.assign([shaped.call(THIGH_PROF, 0.075, 0.062, mNavy), shaped.call(THIGH_PROF, 0.075, 0.062, mNavy)])
+	shin.assign([shaped.call(SHIN_PROF, 0.062, 0.05, mNavy), shaped.call(SHIN_PROF, 0.062, 0.05, mNavy)])
 	knee.assign([sph.call(0.07, mNavyLight), sph.call(0.07, mNavyLight)])
 	for i in 2:   # downhill knee pads over the knees (articulated: cap on the bend, plates on thigh + shin)
 		knee[i].visible = false
@@ -253,8 +276,8 @@ func _init() -> void:
 		shoe.append(s)
 
 	# arms
-	upper_arm.assign([cyl.call(0.055, 0.047, mCoral), cyl.call(0.055, 0.047, mCoral)])
-	fore_arm.assign([cyl.call(0.047, 0.04, mCoral), cyl.call(0.047, 0.04, mCoral)])
+	upper_arm.assign([shaped.call(UARM_PROF, 0.055, 0.047, mCoral), shaped.call(UARM_PROF, 0.055, 0.047, mCoral)])
+	fore_arm.assign([shaped.call(FARM_PROF, 0.047, 0.04, mCoral), shaped.call(FARM_PROF, 0.047, 0.04, mCoral)])
 	elbow.assign([sph.call(0.055, mCoralDark), sph.call(0.055, mCoralDark)])
 	var dark := mat("#1b1d22", 0.85)
 	hand_mats = {glove = mYellow, knuckle = dark, palm = dark, cuff = dark}
@@ -769,6 +792,67 @@ func set_style(s: Dictionary) -> void:
 # ---------------- posing helpers ----------------
 
 ## unit-height (+Y) cylinder between a and b
+## (2026-11-27, user: "make the shin like a shin, not cylinders") a limb shaped from cross-sections like the torso:
+## prof = [[t, half-width (sideways, local z), front depth (local -x), back depth (local +x)], ...], t 0 at the
+## limb's root (local y -0.5, set_limb's a) .. 1 at its tip (+0.5, b). Unit height, closed ends, UVs like a
+## CylinderMesh (u round, v 0 at the tip), tangents for the fabric's normal map. BMX_OLD_LIMBSHAPE=1 = cylinders
+static func limb_mesh(prof: Array, seg := 20, rows := 16) -> ArrayMesh:
+	var at := func(t: float) -> Vector3:
+		var i := 0
+		while i < prof.size() - 2 and float(prof[i + 1][0]) < t: i += 1
+		var pa: Array = prof[i]; var pb: Array = prof[i + 1]
+		var u: float = clampf((t - float(pa[0])) / maxf(1e-4, float(pb[0]) - float(pa[0])), 0.0, 1.0)
+		var sm := u * u * (3.0 - 2.0 * u)
+		return Vector3(lerpf(pa[1], pb[1], sm), lerpf(pa[2], pb[2], sm), lerpf(pa[3], pb[3], sm))
+	var pt := func(t: float, ang: float) -> Vector3:
+		var r: Vector3 = at.call(t)
+		var c := cos(ang)
+		return Vector3(c * (r.z if c > 0.0 else r.y), t - 0.5, sin(ang) * r.x)
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var e := 1e-3
+	for j in rows + 1:
+		var t := float(j) / rows
+		for k in seg + 1:
+			var ang := TAU * float(k) / seg
+			var p0: Vector3 = pt.call(t, ang)
+			var du: Vector3 = pt.call(t, ang + e) - pt.call(t, ang - e)
+			var dv: Vector3 = pt.call(minf(1.0, t + e), ang) - pt.call(maxf(0.0, t - e), ang)
+			var n := du.cross(dv).normalized()
+			if n.dot(Vector3(p0.x, 0.0, p0.z)) < 0.0: n = -n
+			st.set_normal(n)
+			st.set_uv(Vector2(float(k) / seg, 1.0 - t))
+			st.add_vertex(p0)
+	for j in rows:
+		for k in seg:
+			var a0 := j * (seg + 1) + k
+			var b0 := a0 + seg + 1
+			st.add_index(a0); st.add_index(a0 + 1); st.add_index(b0)
+			st.add_index(a0 + 1); st.add_index(b0 + 1); st.add_index(b0)
+	# closed ends (they sit in the joints, but never show a hole)
+	for end in 2:
+		var t := float(end)
+		var base := (rows + 1) * (seg + 1) + end * (seg + 2)
+		var ny := 1.0 if end == 1 else -1.0
+		st.set_normal(Vector3(0, ny, 0)); st.set_uv(Vector2(0.5, 1.0 - t)); st.add_vertex(Vector3(0, t - 0.5, 0))
+		for k in seg + 1:
+			st.set_normal(Vector3(0, ny, 0)); st.set_uv(Vector2(float(k) / seg, 1.0 - t)); st.add_vertex(pt.call(t, TAU * float(k) / seg))
+		for k in seg:
+			if end == 1:
+				st.add_index(base); st.add_index(base + 1 + k); st.add_index(base + 2 + k)
+			else:
+				st.add_index(base); st.add_index(base + 2 + k); st.add_index(base + 1 + k)
+	st.generate_tangents()
+	return st.commit()
+
+# the limbs' shapes (m): thigh hip -> knee, shin knee -> ankle (calf at the back), upper arm shoulder -> elbow (biceps
+# front, triceps back), forearm elbow -> wrist (full under the elbow). Loose riding pants / sleeves over them
+const THIGH_PROF := [[0.0, 0.074, 0.072, 0.076], [0.25, 0.076, 0.075, 0.080], [0.6, 0.068, 0.068, 0.070], [0.88, 0.060, 0.058, 0.060], [1.0, 0.060, 0.057, 0.058]]
+const SHIN_PROF := [[0.0, 0.056, 0.052, 0.056], [0.14, 0.055, 0.050, 0.066], [0.32, 0.053, 0.048, 0.070], [0.62, 0.046, 0.043, 0.052], [0.86, 0.040, 0.040, 0.040], [1.0, 0.040, 0.040, 0.040]]
+const UARM_PROF := [[0.0, 0.050, 0.050, 0.050], [0.35, 0.049, 0.054, 0.052], [0.62, 0.046, 0.050, 0.049], [0.9, 0.043, 0.043, 0.045], [1.0, 0.043, 0.043, 0.045]]
+const FARM_PROF := [[0.0, 0.044, 0.043, 0.045], [0.22, 0.047, 0.046, 0.047], [0.6, 0.039, 0.037, 0.037], [0.9, 0.032, 0.030, 0.030], [1.0, 0.032, 0.030, 0.030]]
+static var _OLD_LIMBSHAPE := OS.get_environment("BMX_OLD_LIMBSHAPE") != ""
+
 static func set_limb(n: Node3D, a: Vector3, b: Vector3) -> void:
 	var d := b - a
 	var l := d.length()
@@ -905,6 +989,9 @@ const LIMB_BAR := 0.12      # m: knees keep this clear of the handlebar line in 
 const AIR_FACE := 0.7       # in a whip the torso's lean turns back this share of the bike's yaw (faces the flight)
 const AIR_HIP_SIDE := 0.5   # m: the hips' sideways room in the bike's frame in the air (ground: 0.22)
 const AIR_SIDE := 1.2       # rad: ... the torso bent sideways from the bike's up (ground: 0.6)
+const AIR_HIP_SHARE := 0.3   # in the air the hips counter only this share of the bike's lay-over (they stay on the bike)
+const AIR_CHEST_CAP := 0.75  # rad: the upper body stays at most this much more upright than the bike in the air
+static var _OLD_AIRTILT := OS.get_environment("BMX_OLD_AIRTILT") != ""
 static var _ROLL_PROBE := OS.get_environment("BMX_ROLL_PROBE") != ""
 static var _OLD_AIRBODY := OS.get_environment("BMX_OLD_AIRBODY") != ""
 const BAR_CHEST := 0.32   # m: the chest joint stays this far from the middle of the bar (side view)
@@ -1639,8 +1726,12 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		pelvis.x += -0.06 * j_pre + 0.10 * j_ext - 0.13 * j_sq - 0.07 * j_fold - 0.02 * sm_reach
 		pelvis.y += -0.08 * j_pre + 0.13 * j_ext - 0.03 * j_sq - (0.09 if old_lp else 0.13) * j_fold + (0.06 if old_lp else 0.09) * sm_reach
 	else:
-		pelvis.x += -0.06 * j_pre + 0.10 * j_ext - 0.16 * j_sq - 0.07 * j_fold - 0.02 * sm_reach
-		pelvis.y += -0.07 * j_pre + 0.17 * j_ext - 0.12 * j_sq - (0.09 if old_lp else 0.13) * j_fold + (0.06 if old_lp else 0.09) * sm_reach
+		# (2026-11-26, user: "I can't see the rider preloading with legs and hips"; Project X frames: knees well bent, hips
+		# down and back over the rear wheel into the transition, then the legs drive straight at the lip. The old 7 cm
+		# didn't read. The preload hands over to the drive as the legs extend)
+		var jp: float = j_pre if _OLD_PRELOAD else j_pre * (1.0 - clampf(j_ext * 1.5, 0.0, 1.0))
+		pelvis.x += (-0.06 if _OLD_PRELOAD else -0.06) * jp + 0.10 * j_ext - 0.16 * j_sq - 0.07 * j_fold - 0.02 * sm_reach
+		pelvis.y += (-0.07 if _OLD_PRELOAD else -0.17) * jp + 0.17 * j_ext - 0.12 * j_sq - (0.09 if old_lp else 0.13) * j_fold + (0.06 if old_lp else 0.09) * sm_reach
 		# popped off the lip (video 2 slow frames): he stands up BEHIND the steep bike - hips back over the rear wheel and
 		# up, torso upright, arms straight out to the bars - for ~half a second before the knees come up into the tuck
 		var j_up: float = sm_popfx * air
@@ -1652,7 +1743,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	ang += 0.2 * clampf(-bstick, 0.0, 1.0) * stk_stick   # (the light pull is the tuck, not sitting up)
 	ang = lerpf(ang, TUCK_ANG, stk)   # speed tuck: the back near flat
 	ang -= FLIP_LEAN * clampf(_num(p, "flipArch"), 0.0, 1.0)   # (a back flip's arch: he lies back, chest out)
-	ang += (0.3 if _OLD_JUMPPOSE else 0.12) * j_pre - 0.3 * j_ext + (0.06 if _OLD_JUMPPOSE else 0.38) * j_sq - (0.0 if _OLD_JUMPPOSE else 0.35) * sm_popfx * air + (0.12 if old_lp else -0.22) * sm_popfx * air + 0.28 * j_tuck + 0.42 * j_fold - 0.18 * sm_reach
+	ang += (0.3 if _OLD_JUMPPOSE else (0.12 if _OLD_PRELOAD else 0.22 * (1.0 - clampf(j_ext * 1.5, 0.0, 1.0)))) * j_pre - 0.3 * j_ext + (0.06 if _OLD_JUMPPOSE else 0.38) * j_sq - (0.0 if _OLD_JUMPPOSE else 0.35) * sm_popfx * air + (0.12 if old_lp else -0.22) * sm_popfx * air + 0.28 * j_tuck + 0.42 * j_fold - 0.18 * sm_reach
 	# spinning in the air: tall and compact over the bike (chest up, knees in), the head and shoulders lead
 	var spin_style: float = smoothstep(0.8, 3.5, absf(_num(p, "airSpin"))) * air * (1.0 - clampf(_num(p, "flipExt"), 0.0, 1.0))   # (a flip hangs long, not compact)
 	ang = lerpf(ang, 0.42, 0.7 * spin_style)
@@ -1696,7 +1787,10 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# (2026-11-24, overlaid on video 2: on a lip's face he loads it with firm legs - "put force through your feet" - his
 	# hips stay ~0.3 m higher than ours, which sank with the physics legs pressed in ~20 cm by a tight transition. On a
 	# jump face only FACE_SINK of that sink is drawn)
-	if not _OLD_JUMPPOSE and absorb < 0.0: absorb *= 1.0 - (1.0 - FACE_SINK) * clampf(sm_lip, 0.0, 1.0) * (1.0 - air)
+	# (2026-11-26: only on the steep slow dirt-jump lip it was measured on; a fast lip he rides into with his legs soaking the
+	# transition: all of it drawn, so the preload shows)
+	var fs_k: float = 1.0 if _OLD_PRELOAD else smoothstep(0.25, 0.55, clampf(wrapf(_num(p, "pitch"), -PI, PI), 0.0, 1.2)) * (1.0 - smoothstep(6.5, 9.5, absf(_num(p, "v"))))
+	if not _OLD_JUMPPOSE and absorb < 0.0: absorb *= 1.0 - (1.0 - FACE_SINK) * clampf(sm_lip, 0.0, 1.0) * (1.0 - air) * fs_k
 	absorb = lerpf(absorb, maxf(absorb, 0.08), j_ext)   # driving through the lip the legs are straight, however hard it presses
 	# the crouches don't stack past what a rider gets down to (the lip's crouch + the preload + the legs pressed in by a
 	# transition came to 35 cm: sat on the rear tyre with the bars at his chin)
@@ -1910,6 +2004,16 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# laid-over bike: a tabletop / whip. Turned about the pedals the chest went ~0.5 m out from the bars, the arm-reach
 	# limit pulled it straight back and the rider lay over with the bike. Ground: unchanged)
 	var air_piv: float = 0.0 if _OLD_AIRBODY else air
+	# (2026-11-27, user: laying the bike over in the air "total unnatural, the legs get extended like crazy": swung about the
+	# chest the hips went far off the bike and the legs stretched to the pedals. A real tabletop (and Project X): the hips
+	# stay on the bike and go over with it, the knees take it, only the upper body stays nearer upright, turned about the
+	# hips. BMX_OLD_AIRTILT=1 = the chest pivot)
+	var air_hip_piv: bool = not _OLD_AIRTILT and not _OLD_AIRBODY and air > 0.0
+	if air_hip_piv:
+		cr *= lerpf(1.0, AIR_HIP_SHARE, air)
+		var cc_air: float = lerpf(ch_cap, AIR_CHEST_CAP, air)
+		cr_c = clampf(cr_c, -cc_air, cc_air)
+		air_piv = 0.0
 	var pel0 := pelvis
 	var ch0 := chest
 	if cr != 0.0 or cr_c != 0.0:
@@ -1936,6 +2040,13 @@ func update_pose(dt: float, p: Dictionary) -> void:
 			var pel_a := Vector3(pel0.x, ch_a.y + ty * ca - tz * sa, ch_a.z + ty * sa + tz * ca)
 			pelvis = pelvis.lerp(pel_a, air_piv)
 			chest = chest.lerp(ch_a, air_piv)
+		if air_hip_piv:
+			var ca2 := cos(cr_c)
+			var sa2 := sin(cr_c)
+			var ty2: float = ch0.y - pel0.y
+			var tz2: float = ch0.z - pel0.z
+			var ch_h := pelvis + Vector3(ch0.x - pel0.x, ty2 * ca2 - tz2 * sa2, ty2 * sa2 + tz2 * ca2)
+			chest = chest.lerp(ch_h, air)
 		pelvis.y -= absf(cr) * 0.12 * float(sty.turnLow)
 		# (2026-11-26, Project X reference: with the bike laid out under him the rider crouches into the turn, hips dropped, chest
 		# low and forward over the bars. A deeper crouch the further the bike is out from under the body, on the ground only.
@@ -1976,6 +2087,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	if sty.seatFloor and seat != null:
 		var over := clampf((pelvis.x - (float(seat.rear) - 0.18)) / 0.08, 0, 1)
 		var floor_y: float = float(seat.top) + 0.085 - 0.3 * _sink   # (sinking into a landing the thighs come down onto it)
+		if not _OLD_PRELOAD: floor_y -= 0.14 * j_pre * (1.0 - clampf(j_ext * 1.5, 0.0, 1.0)) * (1.0 - air)   # (loading a lip: hips down over the saddle, thighs on it)
 		if pelvis.y < floor_y:
 			pelvis.y += (floor_y - pelvis.y) * over
 		if chest.y < pelvis.y + 0.15:
@@ -2378,6 +2490,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 			shoulder_sph[i].position = shp   # (the shoulder ball goes with it: the arm's IK starts here)
 		if standing: pole_a = Vector3(-1.0, 0.0, side * 0.25).normalized()   # arms hanging: elbows point back
 		if _pk_eo != 0.0: pole_a = (pole_a + Vector3(0, 0, side * _pk_eo)).normalized()   # (Pose Lab: elbows out / in)
+		var hand_t: Vector3 = hand
 		var ika := limb_ik(shp, hand, L_UARM, L_FARM, pole_a, Vector3(0, -0.5, side), ELBOW_MIN, ELBOW_MAX, _bd_prev[2 + i], max_turn)
 		_bd_prev[2 + i] = ika[2]
 		# arms never through the leg on their side (a deep lean, braking hard into a turn): the elbow goes out round it
@@ -2406,6 +2519,17 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		J[3 + i * 3] = shp
 		J[4 + i * 3] = ika[0]
 		J[5 + i * 3] = hand
+		if _LIMBLEN:   # tests (BMX_LIMBLEN=1): drawn segment lengths vs their own, hands / feet off their grip / pedal
+			_ll_note("thigh", hp.distance_to(ik[0]) - L_THIGH)
+			_ll_note("shin", (ik[0] as Vector3).distance_to(ik[1]) - L_SHIN)
+			_ll_note("uarm", shp.distance_to(ika[0]) - L_UARM)
+			_ll_note("farm", (ika[0] as Vector3).distance_to(ika[1]) - L_FARM)
+			if not standing:
+				_ll_note("foot_off_pedal", (ik[1] as Vector3).distance_to(ankle))
+				_ll_note("hand_off_grip", (ika[1] as Vector3).distance_to(hand_t))
+			if i == 1:
+				_ll_note("torso", pelvis.distance_to(chest) - float(sty.torso))
+				_ll_tick(dt, air)
 		if limb_probe:
 			_probe_limb("elbow%d" % i, shp, ika[0], hand, dt, air)
 			_probe_limb("knee%d" % i, hp, ik[0], ik[1], dt, air)
@@ -2584,7 +2708,7 @@ func _constrain(pelvis: Vector3, chest: Vector3, p: Dictionary, sty: Dictionary,
 	# the torso never stretches or squashes: past its length range the hips follow the chest
 	var tv := chest - pelvis
 	var tl := tv.length()
-	var t_max: float = sty.torso * 1.08
+	var t_max: float = sty.torso * (1.08 if _OLD_AIRTILT else 1.0)   # (2026-11-27: a spine bends - shorter chord - it never stretches)
 	var t_min: float = sty.torso * 0.75
 	torso_ratio = tl / maxf(float(sty.torso), 1e-4)
 	if tl > t_max:
