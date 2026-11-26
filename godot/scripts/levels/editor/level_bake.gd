@@ -7,7 +7,7 @@ extends RefCounted
 ## hills, ramps and tree crowns + sky openness). LevelTerrain loads it when its signature matches the scene (else it
 ## works the level out live, no baked light). Also runs the level's checks (what a rider will meet).
 
-const VER := 2   # (2: real-size trees, 2026-11-26)
+const VER := 3   # (2: real-size trees, 3: grown trees, 2026-11-26)
 
 
 static func bake_path(scene_path: String) -> String:
