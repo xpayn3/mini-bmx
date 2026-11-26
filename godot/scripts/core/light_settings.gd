@@ -16,16 +16,16 @@ const PARAMS := [
 	["moon", "Moonlight", 1.0, 0.0, 3.0, 0.05, "×"],
 	["exposure", "Exposure", 1.0, 0.5, 2.0, 0.02, "×"],
 	["haze", "Haze / fog", 1.0, 0.0, 3.0, 0.05, "×"],
-	["rider_match", "Rider in the scene's light (low sun)", 1.0, 0.0, 2.0, 0.05, "×"],
-	["rim", "Rim light (rider + bike edge glow)", 1.0, 0.0, 4.0, 0.05, "×"],
+	["rider_match", "Rider in the scene's light (low sun)", 0.0, 0.0, 2.0, 0.05, "×"],
+	["rim", "Rim light (rider + bike edge glow)", 0.0, 0.0, 4.0, 0.05, "×"],
 	["rim_spec", "Rim light glints", 1.0, 0.0, 3.0, 0.05, "×"],
 	["rim_side", "Rim light from the side", 1.0, 0.0, 2.0, 0.05, "×"],
 	["bloom", "Bloom / glow", 1.0, 0.0, 3.0, 0.05, "×"],
-	["glare", "Glare guard (facing the sun)", 1.0, 0.0, 1.0, 0.05, "×"],
+	["glare", "Glare guard (facing the sun)", 0.5, 0.0, 1.0, 0.05, "×"],
 	["mist", "Morning mist", 1.0, 0.0, 3.0, 0.05, "×"],
 	["shadow_soft", "Shadow softness", 1.0, 0.0, 3.0, 0.05, "×"],
-	["saturation", "Saturation", 1.22, 0.6, 1.8, 0.01, ""],
-	["contrast", "Contrast", 1.12, 0.8, 1.5, 0.01, ""],
+	["saturation", "Saturation", 1.0, 0.6, 1.8, 0.01, ""],
+	["contrast", "Contrast", 1.0, 0.8, 1.5, 0.01, ""],
 ]
 
 ## built-in times of day: only what differs from the defaults (the default is golden hour)
@@ -33,13 +33,17 @@ const BUILTIN := {
 	"Golden hour": {},
 	"Sunrise": {"time": 6.55, "haze": 0.85},
 	"Morning": {"time": 9.0},
-	"Noon": {"time": 13.0, "warmth": 0.8},
+	"Noon": {"time": 13.0},
 	"Afternoon": {"time": 16.0},
 	"Dusk": {"time": 20.1, "haze": 1.1},
 	"Night": {"time": 23.5},
 	"Day / night cycle": {"time": 8.0, "cycle": 1.0},
 }
 const PATH := "user://light.cfg"
+## 2: the realistic light (2026-11-26): the light's strength / colour now come from physics (SunSky), so old saves' look
+## sliders (tuned against the hand-made light) go back to the new defaults once; time of day, cycle, haze, mist are kept
+const VER := 2
+const RESET_V2 := ["sun", "warmth", "sky", "moon", "exposure", "rider_match", "rim", "rim_spec", "rim_side", "bloom", "glare", "saturation", "contrast"]
 
 static var current := {}
 static var active := "Golden hour"
@@ -71,6 +75,11 @@ static func ensure_loaded() -> void:
 		var c: Dictionary = cf.get_value("light", "customs", {})
 		for n in c: customs[n] = _complete(c[n])
 		current = _complete(cf.get_value("light", "current", {}))
+		if int(cf.get_value("light", "ver", 1)) < VER:
+			var d := defaults()
+			for k in RESET_V2:
+				current[k] = d[k]
+				for n in customs: customs[n][k] = d[k]
 	if not (active in BUILTIN or active in customs): active = "Golden hour"
 	# tests: BMX_LIGHT=time=12,haze=2 / BMX_LIGHT_PRESET=Night (not saved unless a slider is touched)
 	var ep := OS.get_environment("BMX_LIGHT_PRESET")
@@ -85,6 +94,7 @@ static func ensure_loaded() -> void:
 static func save() -> void:
 	if OS.get_environment("BMX_PADSEQ") != "": return   # menu tests: never into the player\'s files
 	var cf := ConfigFile.new()
+	cf.set_value("light", "ver", VER)
 	cf.set_value("light", "active", active)
 	cf.set_value("light", "current", current)
 	cf.set_value("light", "customs", customs)

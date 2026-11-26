@@ -4,6 +4,9 @@ class_name BikeLight
 ## (turns with the bars, lights the haze); on when it's dark (`BikeRig.set_lights_on`, from Game by the time
 ## of day). Model space: +X forward, +Y up, +Z right; the bar runs along Z.
 
+## 2026-11-26 realistic light: the ride's exposure is one constant (1.2) instead of 3.3 at night, so the beams x 2.75 keep the
+## brightness they were tuned at, against a moonlit world that is now really dark (SunSky)
+const BEAM_GAIN := 2.75
 ## id -> look + beam. lm = the box's lumens (shown on the card); energy / range / angle = the spot light;
 ## size = the lamp body's radius; heads = how many lamp heads; kind: pod / can / finned / twin / bar
 const MODELS := {
@@ -150,9 +153,9 @@ static func build(id: String, bar_r: float) -> Dictionary:
 	for h in heads: hc += h
 	hc /= maxf(heads.size(), 1)
 	var sp := SpotLight3D.new()
-	sp.name = "Beam"
+	sp.name = "Beam"   # (BEAM_GAIN below)
 	sp.light_color = LAMP_COL
-	sp.light_energy = m.energy
+	sp.light_energy = m.energy * BEAM_GAIN
 	sp.spot_range = m.range
 	sp.spot_angle = m.angle
 	sp.spot_angle_attenuation = m.atten
