@@ -335,6 +335,13 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   ground 2-5 cm more than hands off (7 cm more than the old tuck); air time the same (+0.01 s): pulling the bike up can't
   change the shared centre of mass's flight, only clearance. Test rider `BMX_PG_PILOT_AIRTUCK=1` holds hop in the air.
   Stress 56 / 56. Not ridden by the user yet.
+  **The tuck is normal jump behaviour** (same day, user: "no special move", Project X frames: their rider holds the bike up
+  under him all flight, knees bent, pushes it down for the landing): every real flight (`air_k`) tucks by itself to
+  `autoTuck` 0.7 of the full tuck, held, let down with `land_prep`; right stick back = all of it, forward = none (bike pushed
+  away); hop held = all of it. `air_pull` follows a critically damped spring (SmoothDamp, exact step, half-life `tuckEase`
+  0.09 s; was a plain lag with a speed jump at each change). Sliders Ride > Jumps: Tuck on every jump, Tuck smoothness.
+  `BMX_OLD_AUTOTUCK=1` = before. dtable_43 hands off at 43 km/h: clearance 1.07 -> 1.18 m, air 0.88 -> 0.91 s, legs pulled
+  19 cm at the peak; the tuck curve is one smooth bell (accel <= 26 /s^2). Body clip on a trail ride as before.
 - **Curbs / ledges: the rear rolls up, the tyres don't shiver at the edge (2026-11-24, user: "the rear always gets
   stuck on a curb")**. (1) `_step_move`'s edge check (at the bottom bracket) read the rise per physics step, so whether a
   curb was a wall at all depended on speed: at 6 km/h it never saw one (rolled up 30 cm), at 15 km/h a 20 cm curb was
