@@ -219,6 +219,7 @@ var surf_f := 0; var surf_r := 0; var _mu_f := NAN; var _mu_r := NAN   # the gro
 var _bmu_f := NAN; var _bmu_r := NAN   # ...and its eased braking grip (BRAKE_MU)
 var _OLD_BRAKE := OS.get_environment("BMX_OLD_BRAKE") != ""   # (tests: the lever-limited brakes before 2026-11-23)
 var _gx_lean := 0.0    # the rest of the ground's drawn lean (body stick, slow steer, whip), eased through jumps
+var _weave := 0.0; var _wv_t := 0.0   # the bike's own small roll under the rider (step 2)
 var _bike_lead := 0.0  # how far the bike runs ahead of the rider's lean while it changes (two masses)
 var _lean_peak := 0.0  # this jump's biggest lay-over in the air (tabletop, rad)
 var _scrub_k := 0.0    # this take-off was soaked (squash / absorb) - with a lay-over or whip: a scrub
@@ -451,7 +452,7 @@ func _reset_ground_sim() -> void:
 	front_use = 0.0; front_push = 0.0; rear_lock = 0.0; front_lock = 0.0; _fb_f = 0.0
 	corner_g = 0.0; weight_in = 0.0; lean_err = 0.0; knock = 0.0; _amax = 99.0; _amin = -99.0; bal_k = 0.0
 	_b_prev = 0.0; _f_prev = 0.0; _circ_f = 1.0; bank_lean = 0.0; bank_sq = 0.0; _gx_lean = 0.0; berm_k = 0.0
-	_mu_f = NAN; _mu_r = NAN; _bmu_f = NAN; _bmu_r = NAN; bank_v = 0.0; _load_s = NAN; _share_f = NAN; _bike_lead = 0.0
+	_mu_f = NAN; _mu_r = NAN; _bmu_f = NAN; _bmu_r = NAN; bank_v = 0.0; _load_s = NAN; _share_f = NAN; _bike_lead = 0.0; _weave = 0.0
 	_risk.clear(); risk = 0.0; _risk_peak = 0.0
 
 func begin_crash() -> void:
@@ -1704,7 +1705,18 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 	# after it, and settles back as the lean holds. Drawn only (the turn follows the shared lean as before)
 	var lead_t: float = clampf(lean_v * T.bikeLeanMul * float(T.get("bikeLead", 0.08)), -0.35, 0.35) * gnd
 	_bike_lead += (lead_t - _bike_lead) * minf(1.0, dt * 20.0)
-	var bl: float = lean * T.bikeLeanMul + _gx_lean + bank_lean + _bike_lead
+	# (2026-11-26, Project X reference, step 2: on plain trail their bike rocks ~+-10 deg under a rider whose head hardly moves: a
+	# slow uneven weave (the line, small corrections) and kicks from whatever knocks the front wheel. Bike only, like _bike_lead: the
+	# body's target doesn't see it, so the rider stays and the bike moves under him. Grows with speed, fades in deep turns and in
+	# the air. Drawing only (the turn follows `lean`). Ride > Body: weave. BMX_OLD_WEAVE=1 = none)
+	var wv_t := 0.0
+	if not _OLD_WEAVE and gnd > 0.0:
+		_wv_t += dt
+		var wn: float = 0.55 * sin(_wv_t * TAU * 0.9) + 0.3 * sin(_wv_t * TAU * 1.7 + 1.1) + 0.15 * sin(_wv_t * TAU * 2.9 + 2.3)
+		var wk: float = float(T.get("weave", 1.0)) * smooth01((va - 3.0) / 7.0) * (1.0 - smooth01((absf(lean) - 0.15) / 0.4))
+		wv_t = (0.22 * wn + 0.5 * clampf(knock, -0.4, 0.4)) * wk * gnd
+	_weave += (wv_t - _weave) * minf(1.0, dt * 8.0)
+	var bl: float = lean * T.bikeLeanMul + _gx_lean + bank_lean + _bike_lead + _weave
 	if not air:
 		var cb_t: float = 0.0 if signf(bk) != signf(bl) else absf(bk)
 		# (eased: it switched on / off in one step as the bank or the lean changed side, and the tanh cap below stepped the drawn
@@ -3454,6 +3466,7 @@ func _pop_along(dv: float) -> void:
 	v *= k; vy *= k
 
 static var _OLD_SPIN := OS.get_environment("BMX_OLD_SPIN") != ""
+static var _OLD_WEAVE := OS.get_environment("BMX_OLD_WEAVE") != ""   # no bike weave under the rider
 static var _OLD_CORNERBODY := OS.get_environment("BMX_OLD_CORNERBODY") != ""   # body at up to 80 % of the bike's lean in deep turns
 static var _OLD_BANKLOCK := OS.get_environment("BMX_OLD_BANKLOCK") != ""   # leaned into tilted ground: only camberPull
 static var _OLD_SLOW := OS.get_environment("BMX_OLD_SLOW") != ""   # slow-riding / reverse as before 2026-11-26
@@ -3875,5 +3888,5 @@ func reset_body() -> void:
 	man_a = 0.0; man_w = 0.0; bank = 0.0; _bank_hold = 0.0; bank_v = 0.0; corner_g = 0.0
 	nose_a = 0.0; nose_w = 0.0; gest_hop = 0.0; _hop_buf = 0.0; _pop_miss = 0.0
 	# (is_sane checks slip_w / steer_in too: left NaN they failed every later step and froze the bike until a respawn)
-	slip_w = 0.0; steer_in = 0.0; knock = 0.0; _gx_lean = 0.0; bank_lean = 0.0; bank_sq = 0.0; _bike_lead = 0.0
+	slip_w = 0.0; steer_in = 0.0; knock = 0.0; _gx_lean = 0.0; bank_lean = 0.0; bank_sq = 0.0; _bike_lead = 0.0; _weave = 0.0
 	_amax = 99.0; _amin = -99.0; yaw_rate = 0.0

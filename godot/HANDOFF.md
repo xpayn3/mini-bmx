@@ -318,6 +318,11 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   before, 34 now. **Chase camera** = Project X framing (dist 4.2, pitch 17, FOV 50 vertical ~78 horizontal, rate 4.5; was 7 / 16 /
   42 / 3.2). Plan next (agreed with the user): step 2 = the bike weaving under a still head on straights (also the rock twitch),
   step 3 = pull the bike up in the air on every jump (physics: more clearance = more air time), lip prep.
+  Sliders: `cornerBody` (Ride > Body, deep-turn body share, 0.5) and `cornerCrouch` (Rider > Motion). **Step 2, weave**
+  (`weave` 1, Ride > Body, `BMX_OLD_WEAVE=1`): a bike-only roll `_weave` (like `_bike_lead`, the body target never sees it) =
+  0.22 rad x three slow sines (0.9 / 1.7 / 2.9 Hz) + 0.5 x the front-wheel knock, x speed (3 -> 10 m/s), fading past ~0.15-0.55
+  rad of lean and in the air. Straight run: bike lean spread 2.0 -> 4.6 deg (peaks ~10 deg), body 1.6 -> 1.8, head roll rate
+  0.04 -> 0.07 rad/s. Stress 56/56.
 - **Curbs / ledges: the rear rolls up, the tyres don't shiver at the edge (2026-11-24, user: "the rear always gets
   stuck on a curb")**. (1) `_step_move`'s edge check (at the bottom bracket) read the rise per physics step, so whether a
   curb was a wall at all depended on speed: at 6 km/h it never saw one (rolled up 30 cm), at 15 km/h a 20 cm curb was
