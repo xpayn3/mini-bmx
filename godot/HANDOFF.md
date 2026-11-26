@@ -1713,6 +1713,28 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   -- out.png [cam=close yaw=-0.6] [design=race]`.
 
 ### Ride light (time of day)
+- **Realistic light (2026-11-26, user: "overblown at some times of day, use realistic values"; research + numbers in
+  `docs/research/lighting.md`)**. Supersedes the energies / exposures / AE bands / ambient colours below. The light comes
+  from physics: `world/sun_sky.gd` (`SunSky.state(el, L)`): the sun's direct light + colour per RGB channel through the air
+  (Kasten-Young airmass x optical depths: a low sun is DIMMER and redder; the old code made it brighter), the clear sky's
+  light (IES fit; ~10x per 2.6 deg of twilight), moon 0.15 lux + stars, exposure from that illuminance (Ghost of Tsushima)
+  with full adaptation by day, darker toward sunset and ~4 stops under at night, folded into the light energies so
+  `env.tonemap_exposure` is one constant (`Game.RIDE_EXPOSURE` 1.2; no auto exposure in rides). The sky's brightness is
+  measured: `world/sky_meter.gd` (`SkyMeter`, a 2 x 1 px view in its own world, a white card lit by the same sky material)
+  and `light_energy` = `energy` (one sky for view, ambient, reflections, fog) set so its light is what SunSky says
+  (`Game._sky_level` / `_sky_meter_*`; runs only on a light change, every 2 s with the cycle). Ambient = the sky alone
+  (contribution 1), fog colour from the sky (aerial perspective 1), haze lit 1x the sun (was 2.6-3x), volumetric ambient
+  0.2, bloom = 4 % mix with no threshold (was softlight), grade neutral, AgX contrast 1.25. The painted sunset sky only
+  under ~10 deg. Light tab defaults: rim 0, rider match 0, glare 0.5, saturation / contrast 1 (old saves reset once,
+  `LightSettings.VER` 2). Bike beams x2.75 (`BikeLight.BEAM_GAIN`). The RACE-step preview (`ui/lens_scene.gd`) uses the
+  same model + its own meter. The title screen keeps its old look. Tests: `BMX_LIGHT_SWEEP=1|h1,h2..`
+  (+ `BMX_LIGHT_SWEEP_SHOTS=dir/prefix`, `BMX_IDLE=1`, `--autotest=` ~3.5 s an hour; `game/light_sweep.gd`: `LSWEEP` frame /
+  rider mean, p98, % clipped / crushed, the light's numbers), `BMX_LIGHT_PROBE=1` (`SKYMETER` lines), `-s
+  res://tools/sky_meter_probe.gd` (needs a window: the card must follow the sky 1:1). Not done: cloud cover / weather in
+  the model (clear sky only), the title screen, a per-HDRI sun-clamp review.
+- **Goggle lenses = film grades (same day, user: "like the artsy downhill films")**: `rider/goggle_lens.gd` grades have a
+  matte black, pivoted S-curve, hue bands (`bands`: hue / width / shift / sat / val), film saturation fall-off
+  (`sat_fall`), split toning, shoulder; 33^3 LUT. New lens Red Line (`cine`); every lens regraded (see the research doc).
 - **Default: golden hour** (19:20, sun ~10° up). Everything comes from the clock: `Game._apply_light(hour, LightSettings.current)`
   sets the sun (or the **moon** at night, opposite it), sun colour / strength, shadow bias + softness, the sky mode
   (`sky_hdri.gdshader`: `sunny` by day, `golden` low, `night` = stars + moon + dark clouds), ambient, fog colour,
