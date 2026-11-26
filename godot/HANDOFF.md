@@ -961,6 +961,19 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   30 frames, `GRASSAB off_ms= on_ms= diff_ms=`): camera down in the grass +0.25..0.34 ms GPU, riding view ~0 (measured with
   other programs on the GPU). Not done: flowers / weeds from the other scans, the mid ring (too small to show).
 
+- **Grass to the trail's edge, a raised verge, grass under jumps (2026-11-26, user: "grass more to the edge of the road like in
+  real life, a grass edge and then a depressed road; on longer jumps grass under it")**. (1) `TerrainChunkBuilder` grass density
+  = 1 - sm(0.62, 0.9, TW) (was sm(0.04, 0.4): grass stopped ~0.75 m past the dirt, where its fade only began): now half density
+  0.25 m past the trail edge, full by ~0.5 m. (2) Under a built jump where riders fly (`T3` = `fo_air`, 0 at lip / landing)
+  the dirt weight is taken down (x 1 - 0.9 sm(0.35, 0.85, air)) so grass grows over the gap / deck middle (drawing only; the
+  ground colour stays dirt under it). (3) `TerrainFieldCs.micro_detail` (drawn fine mesh only, physics untouched) lifts a 3.5-7 cm
+  grass verge just outside the trail (w + 0.05..0.3 x the dirt fade, back to the land over ~1.5 m, none on built jumps): the
+  trail reads as ridden down into the land. `BMX_OLD_VERGE=1` = before. Probe `-s res://tools/verge_probe.gd -- seed [n]` (first n
+  jumps in green land: mean grass by distance past the trail edge, grass + air along the jump); seed 4242 kicker s=514: grass at
+  0.25 / 0.5 m past the edge 0.00 / 0.09 -> 0.49 / 0.91, over its 12 m flight 0 -> 1. **Tests on the user's machine: their
+  `route.cfg` pins the Dune Sea biome (no grass anywhere); run tests with `APPDATA=<temp dir>`.** `BMX_TRAIL_FEAT` also takes
+  table / kicker / tableLine / flow / double now. Not seen in game: grass under a jump (no green jump found in a test ride), the
+  verge lip up close.
 - **Trees by nature's rules (2026-11-26, user: "trees and bushes seem random, make rules like other world builders, follow
   nature's rules, if we miss a vegetation type make it"; research `docs/research/vegetation.md`, from recall, links unchecked)**.
   `TerrainChunkBuilder._trees` (`BMX_OLD_PLACE=1` = the old 100 random throws, `_trees_old`): one candidate per `ECO_CELL`

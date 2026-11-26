@@ -2738,6 +2738,7 @@ public partial class TerrainFieldCs : RefCounted
 	}
 
 	private static readonly bool NO_MICRO = System.Environment.GetEnvironmentVariable("BMX_NO_MICRO") is { Length: > 0 };
+	private static readonly bool OLD_VERGE = System.Environment.GetEnvironmentVariable("BMX_OLD_VERGE") is { Length: > 0 };
 
 	/// Imperfections of the ground, in metres, for the finer mesh only (visual: tyres and physics read the smooth ground, so it is kept to
 	/// a few cm): fine roughness near the trail (0.3 m and 1 m grain), now and then a pothole / washout on the road (hash of the 37 m stretch), a ragged dirt edge, and rills
@@ -2783,6 +2784,21 @@ public partial class TerrainFieldCs : RefCounted
 		double bm = sm(0.08, 0.2, Math.Abs(qbt)) * (1.0 - sm(2.2, 3.4, dtr));
 		if (bm > 0.0)
 			d += 0.014 * bm * noise(qs * 0.45 + 4.0, qa * 5.0 + 2.0) * (1.0 - 0.9 * wear) * rf;
+		// the grass verge stands a few cm above the worn trail (the trail is ridden down into the land): a lip where the
+		// grass begins (terrain_chunk_builder grows it from ~w + 0.15 x the dirt fade), easing back to the land over ~1.5 m.
+		// Outside the trail only, so the ridden surface stays the physics ground; none on built jumps.
+		if (!OLD_VERGE)
+		{
+			double fade = Math.Min(1.2, 0.35 + w);
+			double e0 = w + 0.05 * fade;
+			double vg = sm(e0, e0 + 0.25 * fade + 0.08, dtr) * (1.0 - sm(e0 + 0.6, e0 + 2.2, dtr));
+			if (vg > 0.0)
+			{
+				double lip = (0.035 + 0.035 * Math.Min(1.0, w / 1.2)) * (0.75 + 0.5 * sm(-0.4, 0.4, noise((x - 5.3) * 0.31, (z + 8.9) * 0.31)));
+				double jm = jump_mask(x, z);
+				d += lip * vg * (1.0 - jm);
+			}
+		}
 		return d;
 	}
 

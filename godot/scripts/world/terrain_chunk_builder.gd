@@ -17,6 +17,7 @@ const LIST_NAMES := ["trunk", "trunk_pale", "trunk_pine", "blob", "pine", "rock"
 	"rock_tundra0", "rock_tundra1", "pebble_tundra", "rock_basalt0", "rock_basalt1", "pebble_basalt"]
 const SPAN := 2.4
 static var OLD_WEED := OS.get_environment("BMX_OLD_WEED") == "1"
+static var OLD_VERGE := OS.get_environment("BMX_OLD_VERGE") != ""   # grass stops ~1 m off the dirt, none under jumps
 const TAPE_SEG := 30
 const TAPE_W := 0.075
 const TAPE_H := 0.85
@@ -332,6 +333,7 @@ func _build() -> void:
 	out["pud"] = TrailPuddle.table(TRa, T2a, TW, norms, NV)
 	# ---- grass field data (world/grass_field.gd): the ground's own heights + land colour, density in alpha ----
 	var DRY: PackedFloat32Array = gs["DRY"]
+	var AIR: PackedFloat32Array = gs["T3"]
 	var pK := PackedByteArray(); pK.resize(NV * NV * 4)
 	var gh := PackedFloat32Array(); gh.resize(NV * NV)
 	for iz in NV:
@@ -341,7 +343,15 @@ func _build() -> void:
 			gh[o] = h
 			var g: Color = LG[o]
 			var snow := clampf((minf(g.r, minf(g.g, g.b)) - 0.45) * 4.0, 0.0, 1.0)
-			var den := (1.0 - sm(0.04, 0.4, TW[o])) * (1.0 - sm(0.1, 0.6, SW[o])) * sm(WATER + 0.25, WATER + 0.8, h)
+			var den: float
+			if OLD_VERGE:
+				den = 1.0 - sm(0.04, 0.4, TW[o])
+			else:
+				# grass right up to the dirt's edge (it stopped ~1 m out, where the dirt only began to fade), and over the
+				# stretch of a jump riders fly over (the gap / deck middle nobody rolls on: AIR is 0 at the lip and landing)
+				var tw: float = TW[o] * (1.0 - 0.9 * sm(0.35, 0.85, AIR[o]))
+				den = 1.0 - sm(0.62, 0.9, tw)
+			den *= (1.0 - sm(0.1, 0.6, SW[o])) * sm(WATER + 0.25, WATER + 0.8, h)
 			den *= (1.0 - sm(0.7, 0.97, DRY[o])) * (1.0 - snow) * (0.55 + 0.45 * ao[o])
 			pK[o * 4] = pG[o * 4]; pK[o * 4 + 1] = pG[o * 4 + 1]; pK[o * 4 + 2] = pG[o * 4 + 2]
 			pK[o * 4 + 3] = roundi(clampf(den, 0, 1) * 255)
