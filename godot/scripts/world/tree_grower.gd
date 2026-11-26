@@ -19,8 +19,8 @@ const SPECIES := {
 	# schema.js "Pine" / "ScotsPine" mix (conifer: L0 = branches, L1 = twigs; the prune ellipsoid makes the cone):
 	# a bare trunk, the crown in the upper ~55 % (user reference: realistic pines)
 	"pine": {
-		"height": 14.0, "trunk_steps": 10, "jitter": 0.05, "base_radius": 0.3, "tip_radius": 0.01, "taper_exp": 1.6,
-		"root_flare": 0.8, "shape": "conical", "base_size": 0.42, "min_len": 0.35, "gravity": 0.2, "stiffness": 0.6,
+		"height": 14.0, "trunk_steps": 12, "jitter": 0.12, "base_radius": 0.2, "tip_radius": 0.01, "taper_exp": 1.6,
+		"trunk_taper": 0.7, "root_flare": 0.6, "shape": "conical", "base_size": 0.42, "min_len": 0.35, "gravity": 0.2, "stiffness": 0.6,
 		"prune": [5.2, 6.8, 10.3],   # ellipsoid radius xz, half height, centre y
 		"levels": [
 			{"children": 46, "len_ratio": 0.5, "angle": 1.25, "angle_var": 0.15, "start": 0.42, "end": 0.99, "apical": 0.55,
@@ -32,8 +32,8 @@ const SPECIES := {
 	},
 	# schema.js "Beech" (broadleaf; its 4th level is left to the leaf clusters)
 	"leafy": {
-		"height": 13.0, "trunk_steps": 9, "jitter": 0.06, "base_radius": 0.35, "tip_radius": 0.012, "taper_exp": 1.6,
-		"root_flare": 1.0, "shape": "spherical", "base_size": 0.35, "min_len": 0.35, "gravity": 0.35, "stiffness": 0.7,
+		"height": 13.0, "trunk_steps": 11, "jitter": 0.14, "base_radius": 0.24, "tip_radius": 0.012, "taper_exp": 1.6,
+		"trunk_taper": 0.8, "root_flare": 0.6, "shape": "spherical", "base_size": 0.35, "min_len": 0.35, "gravity": 0.35, "stiffness": 0.7,
 		"prune": [],
 		"levels": [
 			{"children": 11, "len_ratio": 0.62, "angle": 1.05, "angle_var": 0.3, "start": 0.35, "end": 1.0, "apical": 0.0,
@@ -111,7 +111,8 @@ func _build() -> void:
 	for i in steps:
 		var tn := (i + 0.5) / steps
 		var a := smoothstep(0.0, 0.15, tn)
-		var d := Vector3(sn(phi + tn * 3.2) * jamp * 0.15 * a, 1.0, sn(phi + tn * 3.2 + 17.3) * jamp * 0.15 * a) + lean
+		var d := Vector3((sn(phi + tn * 3.2) + sn(phi + tn * 9.7 + 11.1) * 0.3) * jamp * 0.15 * a, 1.0,
+			(sn(phi + tn * 3.2 + 17.3) + sn(phi + tn * 9.7 + 29.4) * 0.3) * jamp * 0.15 * a) + lean
 		p += d.normalized() * seg
 		trunk.append(_add(p, trunk[trunk.size() - 1], -1, (i + 1.0) / steps))
 	chains.append(trunk); chain_level.append(-1); chain_len.append(height)
@@ -225,14 +226,17 @@ func _radii() -> void:
 		var ch: PackedInt32Array = chains[ci]
 		var lv: int = chain_level[ci]
 		var cb := base_r
+		var te := tex
 		if lv >= 0:
 			cb = maxf(tip, radius[ch[0]] * float(sp.levels[lv].radius_ratio))
+		else:
+			te = float(sp.get("trunk_taper", tex))   # (a real trunk keeps its girth, then thins near the top: no cone)
 		chain_base[ci] = cb
 		for k in range(0 if lv < 0 else 1, ch.size()):
 			var n: int = ch[k]
-			radius[n] = tip + (cb - tip) * pow(1.0 - bt[n], tex)
+			radius[n] = tip + (cb - tip) * pow(1.0 - bt[n], te)
 	var fl: float = sp.root_flare
-	var fh := 3.8 * height / 11.0
+	var fh := 1.1   # (the flare stays in the bottom metre or so; the app's 3.8 m read as a cone)
 	for i in pos.size():
 		if level[i] < 0 and pos[i].y < fh:
 			var u := 1.0 - pos[i].y / fh

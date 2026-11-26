@@ -233,6 +233,7 @@ static func material(kind: String) -> ShaderMaterial:
 	m.set_shader_parameter("specular", 0.1)
 	if kind == "needle":
 		m.set_shader_parameter("leaf_tex", texture("needle"))
+		m.set_shader_parameter("card_ref", float(GrownTree.info("pine").top))   # (tufts keep their real size on any tree)
 		m.set_shader_parameter("sway", SWAY)
 		m.set_shader_parameter("flutter", 0.001)
 		m.set_shader_parameter("backlight", 0.25)
@@ -247,6 +248,7 @@ static func material(kind: String) -> ShaderMaterial:
 		else:
 			m.set_shader_parameter("leaf_tex", tiles[0])
 			m.set_shader_parameter("tile_m", LEAF_TILE_M)
+			m.set_shader_parameter("card_ref", float(GrownTree.info("leafy").top))
 			if tiles[1]:
 				m.set_shader_parameter("nrm_tex", tiles[1])
 				m.set_shader_parameter("use_nrm", true)
@@ -357,10 +359,18 @@ class _Buf:
 	var nor := PackedVector3Array()
 	var col := PackedColorArray()
 	var uv := PackedVector2Array()
+	var anc := PackedVector3Array()   # (cards: their anchor, CUSTOM0: deco_cards card_ref keeps them real size)
+	var anchor := Vector3.ZERO
+	var has_anchor := false
+
+	## the anchor of the next cards' vertices (the point a card shrinks / grows about)
+	func set_anchor(a: Vector3) -> void:
+		anchor = a
+		has_anchor = true
 
 	## size: the card's size in the mesh's units (COLOR.a: leafy crowns repeat their foliage picture by it, deco_cards tile_m)
 	func vert(p: Vector3, n: Vector3, ao: float, t: Vector2, size := 1.0) -> void:
-		pos.append(p); nor.append(n); col.append(Color(ao, ao, ao, size)); uv.append(t)
+		pos.append(p); nor.append(n); col.append(Color(ao, ao, ao, size)); uv.append(t); anc.append(anchor)
 
 	## a tapering tube along pts (radii per point), `sides` round, bark-ready (the deco shader maps bark in world space)
 	func tube(pts: Array, radii: Array, sides: int, ao0: float, ao1: float) -> void:
@@ -385,6 +395,16 @@ class _Buf:
 					vert(q[0], q[1], ao, Vector2(float(e[1]) / sides, float(e[0])))
 
 	func commit() -> ArrayMesh:
+		if has_anchor:
+			var st2 := SurfaceTool.new()
+			st2.begin(Mesh.PRIMITIVE_TRIANGLES)
+			st2.set_custom_format(0, SurfaceTool.CUSTOM_RGBA_FLOAT)
+			for i in pos.size():
+				st2.set_normal(nor[i]); st2.set_color(col[i]); st2.set_uv(uv[i])
+				st2.set_custom(0, Color(anc[i].x, anc[i].y, anc[i].z, 1.0))
+				st2.add_vertex(pos[i])
+			st2.generate_tangents()
+			return st2.commit()
 		var arr := []
 		arr.resize(Mesh.ARRAY_MAX)
 		arr[Mesh.ARRAY_VERTEX] = pos

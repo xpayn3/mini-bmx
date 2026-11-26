@@ -31,10 +31,20 @@ static func material(kind: String = "leaf") -> ShaderMaterial:
 	m.set_shader_parameter("leaf_tex", texture(kind))
 	if kind == "leaf":
 		m.set_shader_parameter("albedo", Vector3.ONE * leaf_gain())
-		var nt := leaf_normal()
-		if nt:
-			m.set_shader_parameter("nrm_tex", nt)
-			m.set_shader_parameter("use_nrm", true)
+		var tiles := tile_textures()
+		if not tiles.is_empty():
+			# real leaf size: the seamless foliage patch repeated by each card's size (COLOR.a x the bush's scale), with a
+			# ragged oval outline (user: "leaves scale is way off, too big")
+			m.set_shader_parameter("leaf_tex", tiles[0])
+			m.set_shader_parameter("tile_m", 0.8)
+			if tiles[1]:
+				m.set_shader_parameter("nrm_tex", tiles[1])
+				m.set_shader_parameter("use_nrm", true)
+		else:
+			var nt := leaf_normal()
+			if nt:
+				m.set_shader_parameter("nrm_tex", nt)
+				m.set_shader_parameter("use_nrm", true)
 	if kind == "dry":
 		m.set_shader_parameter("roughness", 0.9)
 		m.set_shader_parameter("sway", 0.02)
@@ -204,7 +214,7 @@ static func mesh(variant: String = "bush") -> ArrayMesh:
 				var ao := (0.4 + 0.6 * smoothstep(0.05, 1.0, depth)) * (0.72 + 0.28 * clampf(q.y / 0.9, 0.0, 1.0))
 				pos.append(q)
 				nor.append((out.normalized() * 0.7 + d * 0.3).normalized())
-				col.append(Color(ao, ao, ao))
+				col.append(Color(ao, ao, ao, s))   # (a = the card's size: deco_cards tile_m repeats the leaf patch by it)
 				uv.append(Vector2(e.x * 0.5, 1.0 - e.y))
 		for cx in 2:
 			quad.call(Vector2i(cx, 0), Vector2i(cx + 1, 0), Vector2i(cx + 1, 1))

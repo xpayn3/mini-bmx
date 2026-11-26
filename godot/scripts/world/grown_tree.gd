@@ -129,6 +129,7 @@ static func _ao(p: Vector3) -> float:
 
 ## a needle tuft: the fan laid along `fwd` (its root at u ~ 0.1), one card lying flat-ish, one upright
 static func _tuft(b, at: Vector3, fwd: Vector3, size: float, rng: RandomNumberGenerator) -> void:
+	b.set_anchor(at)
 	var side := fwd.cross(Vector3.UP)
 	if side.length() < 0.2: side = Vector3.RIGHT
 	side = side.normalized()
@@ -148,6 +149,7 @@ static func _tuft(b, at: Vector3, fwd: Vector3, size: float, rng: RandomNumberGe
 
 ## a leaf cluster: a folded card standing at `at`, facing out from the trunk (turned a little at random)
 static func _cluster(b, at: Vector3, size: float, rng: RandomNumberGenerator) -> void:
+	b.set_anchor(at)
 	var out := Vector3(at.x, 0, at.z)
 	if out.length() < 0.001: out = Vector3(1, 0, 0)
 	out = out.normalized().rotated(Vector3.UP, rng.randf_range(-0.9, 0.9))
@@ -195,6 +197,15 @@ static func _wood(g: TreeGrower, kind: String, lod: int) -> ArrayMesh:
 			pts.append(g.pos[n] * s)
 			# (a branch's first ring sits inside its parent, at the branch's own base radius)
 			radii.append((g.radius[ch[1]] if k == 0 and lv >= 0 else g.radius[n]) * s)
+			if lv < 0 and k == 0 and ch.size() > 1:
+				# the trunk's foot: extra rings low down (0.15 m, 0.5 m) so the root flare is short and curved, not a cone
+				var a: Vector3 = g.pos[ch[0]]
+				var b2: Vector3 = g.pos[ch[1]]
+				for hm in [0.15, 0.5]:
+					var t: float = float(hm) / maxf(b2.y - a.y, 0.01)
+					if t < 0.9:
+						pts.append(a.lerp(b2, t) * s)
+						radii.append(lerpf(g.radius[ch[0]], g.radius[ch[1]], t) * s * (1.0 + 0.25 * (1.0 - float(hm))))
 		_tube(b, pts, radii, int(lv_sides[lv]), lv < 0, h0)
 	return b.commit()
 
@@ -219,7 +230,7 @@ static func _tube(b, pts: Array, radii: Array, sides: int, trunk: bool, h0: floa
 			var n := u * cos(th) + w * sin(th)
 			var r: float = radii[i]
 			if trunk and i < 3:   # buttress roots: lobes spreading at the ground
-				var f: float = [0.6, 0.25, 0.06][i]
+				var f: float = [0.45, 0.14, 0.0][i]
 				var lobe := pow(maxf(0.0, cos(CardTree.ROOT_LOBES * th + 0.7)), 2.5)
 				r *= 1.0 + f * (0.5 + 1.6 * lobe)
 			ring.append([pts[i] + n * r, n])
