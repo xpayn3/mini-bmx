@@ -66,15 +66,16 @@ var light_ver := -1          # LightSettings.version last applied
 var _light_time := NAN       # the Light tab's time / cycle last applied (only a change of these resets the clock)
 var _light_cycle := false
 var light_t := 0.0
-var light_note := ""         # what the light model chose (LSWEEP / BMX_LIGHT_PROBE lines)
+var light_note := ""
+var _lab_ver := -1           # LightLab.version last applied (dev knobs)         # what the light model chose (LSWEEP / BMX_LIGHT_PROBE lines)
 const GoggleLens = preload("res://scripts/rider/goggle_lens.gd")
 const RIM_LAYER := 1 << 11   # render layer 12: the rider + bike (only the rim light uses it)
 const AGX_CONTRAST := 1.35        # the title screen's look
 ## a ride (2026-11-26 realistic light): AgX at Godot's own contrast, white 12 (docs: >= 6 for real light), a neutral grade,
-## the exposure one constant (SunSky puts the day's adaptation into the light itself)
+## the exposure one constant (SunSky puts the day's adaptation into the light itself). These are the start values; the
+## dev knobs (exposure 1.2, haze sky light 0.2, bloom mix ...) are LightLab's (res://data/light_lab.json)
 const AGX_CONTRAST_RIDE := 1.25
 const AGX_WHITE := 12.0
-const RIDE_EXPOSURE := 1.2
 const GLOW_MIX := 0.04
 const MOON_COL := Color(0.72, 0.8, 1.0)   # moonlight is sunlight, but night vision (rods) sees it blue-grey
 ## CameraAttributesPractical turns sensitivity (ISO) into a luminance clamp as ISO x 12.5 / 100 / 100, and the
@@ -1023,7 +1024,10 @@ func _update_light(dt: float) -> void:
 			else:
 				L = LightSettings.preset("Noon")
 				L.haze = 0.3; L.mist = 0.0; L.cycle = 0.0
-	var changed := light_ver != LightSettings.version
+	var changed := light_ver != LightSettings.version or _lab_ver != LightLab.version
+	if _lab_ver != LightLab.version:   # a Lab knob moved (dev): the lens grade may have changed too
+		_lab_ver = LightLab.version
+		env.adjustment_color_correction = GoggleLens.lut(_lens_now)
 	if changed:
 		light_ver = LightSettings.version
 		# the clock only jumps when the time (or the cycle switch) itself changed: any other Light slider used to
@@ -1087,7 +1091,7 @@ func _apply_light(h: float, L: Dictionary) -> void:
 	var day := 1.0 - n
 	# the painted sunset sky only round sunset itself: above ~10 deg a real sky is still blue overhead (the low-sun photos
 	# show it); painted from 9 deg up it tinted all the shade pink and the scene went milky
-	var gw := clampf((1.0 - smoothstep(0.0, 10.0, el_deg)) * day, 0.0, 1.0)
+	var gw := clampf((1.0 - smoothstep(0.0, LightLab.v("golden_below"), el_deg)) * day, 0.0, 1.0)
 	var tw := smoothstep(1.0, -4.0, el_deg) * day        # twilight: the sun just under the horizon, the sky still glowing
 	# the light itself: physics (scripts/world/sun_sky.gd). Only what a real clear day gives, the sun dimmer + redder low down
 	var S := SunSky.state(el_deg, L)
@@ -1110,7 +1114,7 @@ func _apply_light(h: float, L: Dictionary) -> void:
 	sun.shadow_normal_bias = lerpf(1.2, 2.0, g)
 	sun.shadow_blur = lerpf(lerpf(0.8, 1.2, g), 2.6, n) * float(L.shadow_soft)
 	# the haze scatters the light it is lit by: 1 = what the light really is (it was 2.6-3x: a white veil into a low sun)
-	sun.light_volumetric_fog_energy = 1.0
+	sun.light_volumetric_fog_energy = LightLab.v("sun_haze")
 	_gg_vol = sun.light_volumetric_fog_energy
 	# sky: blue + white clouds by day, golden low, stars at night; its photographed sun follows ours
 	_pick_sky_hdri(el_deg, atan2(dirv.x, -dirv.z))
@@ -1130,18 +1134,22 @@ func _apply_light(h: float, L: Dictionary) -> void:
 	_ride_fog()
 	env.fog_density *= float(L.haze) * lerpf(1.0, 1.35, n) * lerpf(1.0, 0.6, gw)   # golden: clear air, not milk
 	env.fog_light_color = RIDE_FOG.lerp(Color(0.95, 0.64, 0.46), g * day).lerp(Color(0.4, 0.3, 0.46), tw).lerp(Color(0.012, 0.016, 0.03), n)
-	env.fog_sun_scatter = 0.02 * day   # (scales with the sun's energy: 0.06 lit a white veil round a low sun)
+	env.fog_sun_scatter = LightLab.v("sun_scatter") * day   # (scales with the sun's energy: 0.06 lit a white veil round a low sun)
 	_gg_scat = env.fog_sun_scatter
 	_gg_k = -1.0   # re-apply the guard on top of the new values
 	env.volumetric_fog_anisotropy = 0.7   # aerosol (Mie) forward scattering
 	env.volumetric_fog_albedo = Color(0.9, 0.9, 0.9)   # grey: its colour comes from the light it scatters
 	# less aerosol low in the sky's light (a low sun lit a thick haze into a white veil); the night's own thin mist
-	env.volumetric_fog_density = VOL_DENSITY * float(L.haze) * lerpf(1.0, 0.4, gw) * lerpf(1.0, 1.5, n)
-	env.volumetric_fog_ambient_inject = VOL_AMBIENT   # the haze is lit by the sky too (0 left it black between the rays)
+	env.volumetric_fog_density = VOL_DENSITY * LightLab.v("vol_density") * float(L.haze) * lerpf(1.0, 0.4, gw) * lerpf(1.0, 1.5, n)
+	env.volumetric_fog_ambient_inject = LightLab.v("vol_ambient")
+	env.fog_aerial_perspective = LightLab.v("fog_aerial")
+	env.tonemap_agx_contrast = LightLab.v("agx_contrast")
+	env.tonemap_agx_white = LightLab.v("agx_white")
+	env.glow_mix = LightLab.v("bloom_mix")   # the haze is lit by the sky too (0 left it black between the rays)
 	# one exposure all day (the day's adaptation is in the light: SunSky); the Light tab's Exposure on top
-	env.tonemap_exposure = RIDE_EXPOSURE * float(L.exposure)
+	env.tonemap_exposure = LightLab.v("expo") * float(L.exposure)
 	# night vision: colour fades (rods)
-	env.adjustment_saturation = float(L.saturation) * lerpf(1.0, 0.5, n)
+	env.adjustment_saturation = float(L.saturation) * lerpf(1.0, LightLab.v("night_sat"), n)
 	env.adjustment_contrast = float(L.contrast)
 	env.adjustment_brightness = float(Settings.get_v("brightness"))   # Settings › Brightness on top
 	if cam_attr and cam_attr.auto_exposure_enabled:   # (a title Game turned into a ride: pinned = as if off)
@@ -1178,7 +1186,6 @@ func _apply_light(h: float, L: Dictionary) -> void:
 ## card in the shade; light_energy = SunSky's sky light / f. The meter re-measures after every light change (the sky's
 ## photo / procedural mode / clouds change f), so any HDRI or sky look gives the real sun : sky ratio.
 const SKY_F0 := 1.0             # f before the first reading (no RenderingDevice: stays this)
-const VOL_AMBIENT := 0.2   # the haze lit by the sky (0.6 made a milky veil with the measured sky)
 var _sun_state := {}
 var _sky_f := SKY_F0
 var _sky_le := 0.3

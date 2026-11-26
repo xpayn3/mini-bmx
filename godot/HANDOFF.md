@@ -1732,6 +1732,13 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   rider mean, p98, % clipped / crushed, the light's numbers), `BMX_LIGHT_PROBE=1` (`SKYMETER` lines), `-s
   res://tools/sky_meter_probe.gd` (needs a window: the card must follow the sky 1:1). Not done: cloud cover / weather in
   the model (clear sky only), the title screen, a per-HDRI sun-clamp review.
+- **Light Lab (DEV ONLY, same day, user: "sliders so we can adjust ... strictly developer stuff")**: `core/light_lab.gd`
+  (`LightLab.v(key)`), tuning card Light > **Lab**: exposure (base 1.2, EV of full adaptation, dusk / night darkening),
+  sun + sky (air haziness = aerosol turbidity, sky vs sun, moon lux, painted-sunset cut-off), haze (sun in haze, sky light
+  in haze, density, glow round the sun, aerial perspective), tone (AgX contrast / white, bloom mix, night colour), lens
+  grade strength. Live; SAVE writes `res://data/light_lab.json` (only changed values; the game reads it at start, so
+  saved values ship as the defaults; players have no way to change them). Tests: `BMX_LIGHT_LAB="k=v,..."`,
+  `BMX_LIGHT_LAB_FILE=0`, `BMX_PANEL=light BMX_PANEL_CAT=2`. Belongs with the dev tools for the release pack check.
 - **Goggle lenses = film grades (same day, user: "like the artsy downhill films")**: `rider/goggle_lens.gd` grades have a
   matte black, pivoted S-curve, hue bands (`bands`: hue / width / shift / sat / val), film saturation fall-off
   (`sat_fall`), split toning, shoulder; 33^3 LUT. New lens Red Line (`cine`); every lens regraded (see the research doc).
