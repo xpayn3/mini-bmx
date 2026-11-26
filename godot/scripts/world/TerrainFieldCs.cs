@@ -1496,6 +1496,7 @@ public partial class TerrainFieldCs : RefCounted
 	}
 
 	private static readonly bool OLD_BERM = System.Environment.GetEnvironmentVariable("BMX_OLD_BERM") is { Length: > 0 };
+	private static readonly bool OLD_NARROWBERM = System.Environment.GetEnvironmentVariable("BMX_OLD_NARROWBERM") is { Length: > 0 };
 	private static readonly bool OLD_WEAR = System.Environment.GetEnvironmentVariable("BMX_OLD_WEAR") is { Length: > 0 };
 	private double bs_c, bs_F = 2.7, bs_cw = 0.5, bs_lip, bs_scoop;
 
@@ -1512,6 +1513,17 @@ public partial class TerrainFieldCs : RefCounted
 		bs_cw = 0.8 + 0.6 * (bs_c / 0.75);
 		bs_lip = 0.18 * sm(0.0, 0.35, n3);
 		bs_scoop = 0.5 * g * wn;
+		if (!OLD_NARROWBERM)   // narrow trails: rim further out, curved face, no scoop (terrain_field.gd berm_style)
+		{
+			double nk = 1.0 - sm(0.35, 0.85, w);
+			if (nk > 0.0)
+			{
+				bs_F = Math.Max(bs_F, w + 0.75 + 0.6 * nk);
+				bs_c = Math.Max(bs_c, 0.4 * nk);
+				bs_cw = Math.Max(bs_cw, 0.8 + 0.4 * nk);
+				bs_scoop = bs_scoop * (1.0 - nk);
+			}
+		}
 	}
 
 	private double berm_shape2(double o, double tn)

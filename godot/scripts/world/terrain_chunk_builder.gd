@@ -1181,6 +1181,7 @@ func _crown_clear(x: float, z: float, r: float) -> bool:
 ## levels); every root is then swept as a tube whose rings sit ON the ground under them (_sweep). Where a root crosses the
 ## trail the tyres feel it (a chain of low domes)
 var _root_st: SurfaceTool = null   # this chunk's roots (out["roots"]: Terrain makes one mesh)
+static var _OLD_ROOTS := OS.get_environment("BMX_OLD_ROOTS") != ""   # the old trunk-thick roots
 
 
 func _roots() -> void:
@@ -1233,7 +1234,11 @@ func _root_system(C: TrailCourse, i: int) -> void:
 			head = toward + PI * (0.35 + rr.next() * 1.3) * (1.0 if rr.next() < 0.5 else -1.0)
 			len = 1.0 + rr.next() * 1.4
 		var st := Vector2(tx, tz) + Vector2(cos(head), sin(head)) * tr * 0.8
-		_grow_root(st, head, len, (0.65 + rr.next() * 0.3) * tr, 0, rr, tint)   # (as thick as ~2/3 .. all of the trunk where it leaves it)
+		# (2026-11-26, user: "the roots are awful": sized 0.65-0.95 x the trunk, which since the real-size trees is 0.23-0.5 m, so
+		# 15-48 cm thick logs lay across a 0.7 m trail while the tyres felt 7 cm domes. Real trail roots are 5-15 cm across:
+		# 0.28-0.4 x the trunk, 6-13 cm radius at the trunk (+ its flare), ~4-9 cm where they cross. BMX_OLD_ROOTS=1 = before)
+		var rk := rr.next()
+		_grow_root(st, head, len, (0.65 + rk * 0.3) * tr if _OLD_ROOTS else clampf((0.28 + rk * 0.12) * tr, 0.06, 0.13), 0, rr, tint)
 
 
 func _grow_root(p: Vector2, head: float, len: float, r0: float, depth: int, rr: WorldRng, tint: Color) -> void:
@@ -1300,7 +1305,8 @@ func _sweep(path: PackedVector2Array, r0: float, r1: float, ph: float, tint: Col
 ## how far from the centreline a tree / stump / log may stand beside a forest singletrack (the last query's point):
 ## the narrow trail's dirt fades out within ~0.7 m, closer than a rider needs (bars, lean, running wide)
 func _forest_clear() -> float:
-	return f.q_w + (1.6 if absf(f.q_k) > 1.0 / 25.0 else 1.3)
+	# (tight bends 1.6 -> 2.4 since 2026-11-26: the narrow trails' berms reach ~1.7 m + their cap; trunks stood in the berm)
+	return f.q_w + ((1.6 if TerrainField.OLD_NARROWBERM else 2.4) if absf(f.q_k) > 1.0 / 25.0 else 1.3)
 
 
 ## a big old pine on the inside of a tight forest bend (TrailCourse.bend_trees): the trail wraps round it
