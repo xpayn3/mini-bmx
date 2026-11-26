@@ -80,6 +80,21 @@ const L_THIGH := 0.44
 const L_SHIN := 0.44
 const L_UARM := 0.31
 const L_FARM := 0.29
+static var _LIMBLEN := OS.get_environment("BMX_LIMBLEN") != ""
+var _ll := {}; var _ll_t := 0.0; var _ll_air := false
+func _ll_note(k: String, d: float) -> void:
+	var r: Array = _ll.get(k, [INF, -INF, 0])
+	r[0] = minf(r[0], d); r[1] = maxf(r[1], d)
+	if absf(d) > 0.005: r[2] = int(r[2]) + 1
+	_ll[k] = r
+func _ll_tick(dt: float, air: float) -> void:
+	_ll_t += dt
+	_ll_air = _ll_air or air > 0.5
+	if _ll_t < 2.0: return
+	var parts := []
+	for k in _ll: parts.append("%s %+.1f..%+.1f cm (%d)" % [k, _ll[k][0] * 100.0, _ll[k][1] * 100.0, _ll[k][2]])
+	print("LIMBLEN air=%s | %s" % [str(_ll_air), " | ".join(parts)])
+	_ll = {}; _ll_t = 0.0; _ll_air = false
 
 var style: Dictionary = {}
 var look: Dictionary = {}
@@ -906,6 +921,9 @@ const LIMB_BAR := 0.12      # m: knees keep this clear of the handlebar line in 
 const AIR_FACE := 0.7       # in a whip the torso's lean turns back this share of the bike's yaw (faces the flight)
 const AIR_HIP_SIDE := 0.5   # m: the hips' sideways room in the bike's frame in the air (ground: 0.22)
 const AIR_SIDE := 1.2       # rad: ... the torso bent sideways from the bike's up (ground: 0.6)
+const AIR_HIP_SHARE := 0.3   # in the air the hips counter only this share of the bike's lay-over (they stay on the bike)
+const AIR_CHEST_CAP := 0.75  # rad: the upper body stays at most this much more upright than the bike in the air
+static var _OLD_AIRTILT := OS.get_environment("BMX_OLD_AIRTILT") != ""
 static var _ROLL_PROBE := OS.get_environment("BMX_ROLL_PROBE") != ""
 static var _OLD_AIRBODY := OS.get_environment("BMX_OLD_AIRBODY") != ""
 const BAR_CHEST := 0.32   # m: the chest joint stays this far from the middle of the bar (side view)
@@ -1918,6 +1936,16 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# laid-over bike: a tabletop / whip. Turned about the pedals the chest went ~0.5 m out from the bars, the arm-reach
 	# limit pulled it straight back and the rider lay over with the bike. Ground: unchanged)
 	var air_piv: float = 0.0 if _OLD_AIRBODY else air
+	# (2026-11-27, user: laying the bike over in the air "total unnatural, the legs get extended like crazy": swung about the
+	# chest the hips went far off the bike and the legs stretched to the pedals. A real tabletop (and Project X): the hips
+	# stay on the bike and go over with it, the knees take it, only the upper body stays nearer upright, turned about the
+	# hips. BMX_OLD_AIRTILT=1 = the chest pivot)
+	var air_hip_piv: bool = not _OLD_AIRTILT and not _OLD_AIRBODY and air > 0.0
+	if air_hip_piv:
+		cr *= lerpf(1.0, AIR_HIP_SHARE, air)
+		var cc_air: float = lerpf(ch_cap, AIR_CHEST_CAP, air)
+		cr_c = clampf(cr_c, -cc_air, cc_air)
+		air_piv = 0.0
 	var pel0 := pelvis
 	var ch0 := chest
 	if cr != 0.0 or cr_c != 0.0:
@@ -1944,6 +1972,13 @@ func update_pose(dt: float, p: Dictionary) -> void:
 			var pel_a := Vector3(pel0.x, ch_a.y + ty * ca - tz * sa, ch_a.z + ty * sa + tz * ca)
 			pelvis = pelvis.lerp(pel_a, air_piv)
 			chest = chest.lerp(ch_a, air_piv)
+		if air_hip_piv:
+			var ca2 := cos(cr_c)
+			var sa2 := sin(cr_c)
+			var ty2: float = ch0.y - pel0.y
+			var tz2: float = ch0.z - pel0.z
+			var ch_h := pelvis + Vector3(ch0.x - pel0.x, ty2 * ca2 - tz2 * sa2, ty2 * sa2 + tz2 * ca2)
+			chest = chest.lerp(ch_h, air)
 		pelvis.y -= absf(cr) * 0.12 * float(sty.turnLow)
 		# (2026-11-26, Project X reference: with the bike laid out under him the rider crouches into the turn, hips dropped, chest
 		# low and forward over the bars. A deeper crouch the further the bike is out from under the body, on the ground only.
@@ -2387,6 +2422,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 			shoulder_sph[i].position = shp   # (the shoulder ball goes with it: the arm's IK starts here)
 		if standing: pole_a = Vector3(-1.0, 0.0, side * 0.25).normalized()   # arms hanging: elbows point back
 		if _pk_eo != 0.0: pole_a = (pole_a + Vector3(0, 0, side * _pk_eo)).normalized()   # (Pose Lab: elbows out / in)
+		var hand_t: Vector3 = hand
 		var ika := limb_ik(shp, hand, L_UARM, L_FARM, pole_a, Vector3(0, -0.5, side), ELBOW_MIN, ELBOW_MAX, _bd_prev[2 + i], max_turn)
 		_bd_prev[2 + i] = ika[2]
 		# arms never through the leg on their side (a deep lean, braking hard into a turn): the elbow goes out round it
@@ -2415,6 +2451,17 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		J[3 + i * 3] = shp
 		J[4 + i * 3] = ika[0]
 		J[5 + i * 3] = hand
+		if _LIMBLEN:   # tests (BMX_LIMBLEN=1): drawn segment lengths vs their own, hands / feet off their grip / pedal
+			_ll_note("thigh", hp.distance_to(ik[0]) - L_THIGH)
+			_ll_note("shin", (ik[0] as Vector3).distance_to(ik[1]) - L_SHIN)
+			_ll_note("uarm", shp.distance_to(ika[0]) - L_UARM)
+			_ll_note("farm", (ika[0] as Vector3).distance_to(ika[1]) - L_FARM)
+			if not standing:
+				_ll_note("foot_off_pedal", (ik[1] as Vector3).distance_to(ankle))
+				_ll_note("hand_off_grip", (ika[1] as Vector3).distance_to(hand_t))
+			if i == 1:
+				_ll_note("torso", pelvis.distance_to(chest) - float(sty.torso))
+				_ll_tick(dt, air)
 		if limb_probe:
 			_probe_limb("elbow%d" % i, shp, ika[0], hand, dt, air)
 			_probe_limb("knee%d" % i, hp, ik[0], ik[1], dt, air)
@@ -2593,7 +2640,7 @@ func _constrain(pelvis: Vector3, chest: Vector3, p: Dictionary, sty: Dictionary,
 	# the torso never stretches or squashes: past its length range the hips follow the chest
 	var tv := chest - pelvis
 	var tl := tv.length()
-	var t_max: float = sty.torso * 1.08
+	var t_max: float = sty.torso * (1.08 if _OLD_AIRTILT else 1.0)   # (2026-11-27: a spine bends - shorter chord - it never stretches)
 	var t_min: float = sty.torso * 0.75
 	torso_ratio = tl / maxf(float(sty.torso), 1e-4)
 	if tl > t_max:
