@@ -43,6 +43,7 @@ const TABS := [
 	["light", "Light", [
 		["Time", ["W:time"]],
 		["Light", ["W:light"]],
+		["Lab", ["W:lab"]],
 	]],
 	["dust", "Dust", [
 		["Look", ["T:Dust look"]],
@@ -554,6 +555,9 @@ var _clock_l: Label
 var _time_s: HSlider   # follows the clock while the cycle runs
 
 func _light_group(which: String) -> void:
+	if which == "lab":
+		_light_lab()
+		return
 	LightSettings.ensure_loaded()
 	_preset_bar(LightSettings, "Light preset")
 	var base := LightSettings.preset(LightSettings.get_active())
@@ -581,6 +585,40 @@ func _light_group(which: String) -> void:
 				LightSettings.set_value(key, v)
 				_refresh_mod(LightSettings))
 		if key == "time": _time_s = sl
+
+
+## DEV ONLY: the light model's own knobs (LightLab): live, SAVE writes res://data/light_lab.json (shipped as the defaults)
+func _light_lab() -> void:
+	LightLab.ensure()
+	var note := UITheme.label("Developer knobs of the light model (SunSky, sky meter, lens grades). Live; SAVE bakes them into the game.", 12, UITheme.MUTED)
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	list.add_child(note)
+	var hb := HBoxContainer.new()
+	var st := UITheme.label("", 12, UITheme.MUTED)
+	st.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var save := Button.new()
+	save.text = "SAVE"
+	save.pressed.connect(func():
+		var path := LightLab.save()
+		st.text = ("saved " + path.get_file()) if path != "" else "could not save")
+	var rel := Button.new()
+	rel.text = "RELOAD"
+	rel.pressed.connect(func():
+		LightLab.reload()
+		_fill.call_deferred())
+	hb.add_child(st); hb.add_child(rel); hb.add_child(save)
+	list.add_child(hb)
+	var grp := ""
+	for row in LightLab.DEFS:
+		if row[6] != grp:
+			grp = row[6]
+			_header(grp)
+		var key: String = row[0]
+		var stp: float = row[5]
+		_slider(row[1], row[3], row[4], stp, LightLab.v(key), float(row[2]), func(v): return _fmt_step(v, stp, ""),
+			func(v):
+				LightLab.set_value(key, v)
+				st.text = "changed (not saved)")
 
 
 func _tick_clock() -> void:
@@ -651,6 +689,8 @@ func _reset_category() -> void:
 			look = Rider.DEFAULT_LOOK.duplicate(); look_touched = true
 		elif src == "F:freewheel":
 			FreewheelSound.reset()
+		elif src == "W:lab":
+			LightLab.reset()
 		elif src.begins_with("W:"):
 			LightSettings.reset()
 		elif src == "L:actioncam":

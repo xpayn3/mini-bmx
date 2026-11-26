@@ -29,6 +29,8 @@ static func material(kind: String = "leaf") -> ShaderMaterial:
 	var m := ShaderMaterial.new()
 	m.shader = preload("res://scripts/world/deco_cards.gdshader")
 	m.set_shader_parameter("leaf_tex", texture(kind))
+	if kind == "leaf":
+		m.set_shader_parameter("albedo", Vector3.ONE * leaf_gain())
 	if kind == "dry":
 		m.set_shader_parameter("roughness", 0.9)
 		m.set_shader_parameter("sway", 0.02)
@@ -39,8 +41,22 @@ static func material(kind: String = "leaf") -> ShaderMaterial:
 
 
 ## leaves on transparent ground (grey-green so the instance colour tints them); "dry" = small narrow leaves + twigs
-static func texture(kind: String) -> ImageTexture:
+## the green leaf card from photos (assets/textures/tree_cards/leaf_cluster.png: ambientCG LeafSet005 leaves composed by
+## root tools/make_tree_cards.py, BC7 + mipmaps; shared with the leafy card-tree crowns); without it, drawn here
+const LEAF_PNG := "res://assets/textures/tree_cards/leaf_cluster.png"
+
+static func _photo_leaf() -> bool:
+	return ResourceLoader.exists(LEAF_PNG) and OS.get_environment("BMX_OLD_TREES_TEX") != "1"
+
+## the photo card is brighter than the drawn one: this keeps the bushes' / crowns' overall tone
+static func leaf_gain() -> float:
+	return 0.72 if _photo_leaf() else 1.0
+
+static func texture(kind: String) -> Texture2D:
 	if _tex.has(kind):
+		return _tex[kind]
+	if kind == "leaf" and _photo_leaf():
+		_tex[kind] = load(LEAF_PNG)
 		return _tex[kind]
 	var img := Image.create(TEX, TEX, true, Image.FORMAT_RGBA8)
 	var rng := RandomNumberGenerator.new()
@@ -54,6 +70,7 @@ static func texture(kind: String) -> ImageTexture:
 		rng.seed = 90210
 		_leaves(img, rng, 120, 0.085, 0.145, 0.34, 0.48, 0.36, 0.62, 0.5, Vector3(1.0, 1.0, 0.9))
 	img.generate_mipmaps()
+	img.compress(Image.COMPRESS_S3TC)   # (DXT5 with its mips: a quarter of the memory of raw RGBA)
 	var t := ImageTexture.create_from_image(img)
 	_tex[kind] = t
 	return t

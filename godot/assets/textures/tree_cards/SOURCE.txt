@@ -1,0 +1,6 @@
+Tree / bush leaf cards, made by root tools/make_tree_cards.py from CC0 scans (public domain, no attribution needed),
+downloaded 2026-11-26 (2K-JPG zips: Color + Opacity used):
+needle_branch.png = ambientCG PineNeedles001 needle bundles stamped along a drawn twig (https://ambientcg.com/view?id=PineNeedles001)
+leaf_cluster.png  = ambientCG LeafSet005 leaves in a cluster (https://ambientcg.com/view?id=LeafSet005)
+impostors.png     = our own card trees rendered side-on by tools/bake_tree_impostors.tscn (far-view trees, world/far_hills.gd)
+All three: BC7 + mipmaps on import.

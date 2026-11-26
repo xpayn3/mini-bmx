@@ -913,19 +913,28 @@ func _panel_labels(p: Dictionary, node: Node3D) -> void:
 				p["labels"].append(lb)
 
 
+## tools/bake_title.gd: keep every built chunk's data ({k: {"o": out, "N": n}}) to save as the title's fixed land
+var keep_outs := false
+var outs := {}
+
 func _finalize(k: Vector2i) -> void:
 	var job: Dictionary = _jobs[k]
 	_jobs.erase(k)
-	_clutter_dirty = true
-	_shadow_dirty = true
 	var b: TerrainChunkBuilder = job["builder"]
 	if b.gen != _gen:
 		return
+	last_build_ms = b.ms_used
+	if keep_outs: outs[k] = {"o": b.out.duplicate(true), "N": b.N}   # (before _finalize_out adds node references to it)
+	_finalize_out(k, b.out, b.N)
+
+## a chunk's built data (TerrainChunkBuilder.out, grid size chunk_n) turned into its nodes, records and lookups
+## (TitleTerrain feeds it saved data)
+func _finalize_out(k: Vector2i, o: Dictionary, chunk_n: int) -> void:
+	_clutter_dirty = true
+	_shadow_dirty = true
 	var t0 := Time.get_ticks_usec()
 	var tp := t0
 	last_finalized += 1
-	last_build_ms = b.ms_used
-	var o: Dictionary = b.out
 	var ox := k.x * SIZE
 	var oz := k.y * SIZE
 	var node := Node3D.new()
@@ -1013,6 +1022,7 @@ func _finalize(k: Vector2i) -> void:
 		mms[name] = mm
 		var dmi := node.get_child(node.get_child_count() - 1)
 		dmi.set_instance_shader_parameter("fade_mode", 2.0 if spec[3] else 1.0)   # deco_fade.gdshaderinc
+		CardTree.add_twin(dmi, spec[0], CardTree.CHUNK_VIS)   # tree crowns: leaf cards near the rider (card_tree.gd), sets both fade modes
 		if spec[2]:
 			deco_mi.append(dmi)
 		if spec[3]:
@@ -1043,7 +1053,7 @@ func _finalize(k: Vector2i) -> void:
 	fin_parts[3] += (Time.get_ticks_usec() - tp) / 1000.0; tp = Time.get_ticks_usec()
 	var colliders: Array = o["colliders"]
 	var rec := {"cx": k.x, "cz": k.y, "node": node, "colliders": colliders, "small": small, "deco_mi": deco_mi, "rock_keys": [],
-		"G": o["G"], "N": b.N, "MG": o.get("GF", o["G"]), "MN": o.get("MN", b.N), "mms": mms, "packs": [], "grass_img": o["grass_img"], "grass_h": o["grass_h"],
+		"G": o["G"], "N": chunk_n, "MG": o.get("GF", o["G"]), "MN": o.get("MN", chunk_n), "mms": mms, "packs": [], "grass_img": o["grass_img"], "grass_h": o["grass_h"],
 		"pud": o.get("pud", PackedFloat32Array()), "mat": mat}   # (mat: RoadDetail bakes from its trail textures)
 	chunk_serial += 1   # GrassField re-reads the chunks round the camera
 	for pp in o.get("packs", []):

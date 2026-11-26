@@ -46,8 +46,8 @@ const SLOTS := {
 ## the logo library. Images that come with the game, plus text logos (our own wordmarks)
 const LOGOS := {
 	"none":    {"label": "None"},
-	"cinelli": {"label": "MONTELLI", "text": "MONTELLI"},   # key kept for saves (was the Cinelli PNG, assets/decals/cinelli.png, now unused)
-	"fox":     {"label": "KOMODO", "text": "KOMODO"},   # key kept for saves (was the Fox PNGs, assets/decals/fox_*.png, now unused)
+	"cinelli": {"label": "MONTELLI", "text": "MONTELLI"},   # key kept for saves (was the Cinelli PNG, assets/decals/cinelli.png, removed 2026-11-26)
+	"fox":     {"label": "KOMODO", "text": "KOMODO"},   # key kept for saves (was the Fox PNGs, assets/decals/fox_*.png, removed 2026-11-26)
 	"glory":   {"label": "RUNOUT", "text": "RUNOUT"},
 	"minibmx": {"label": "MINI BMX", "text": "MINI BMX"},
 	"gravity": {"label": "FREEFALL", "text": "FREEFALL"},

@@ -143,3 +143,7 @@ static func _trees(f: LevelField, parent: Node3D, internal: bool) -> void:
 		mi.material_override = TerrainGeo.MAT[spec[nm][1]]
 		_add(parent, mi, internal)
 		mi.set_instance_shader_parameter("fade_mode", 1.0)
+		if not internal:   # (the editor preview has no fade band: LOD1 cards only, nothing extra saved into the scene)
+			CardTree.add_twin(mi, spec[nm][0])   # (full leaf cards near the rider: card_tree.gd)
+		elif nm == "pine":
+			CardTree.add_spire(mi, true)

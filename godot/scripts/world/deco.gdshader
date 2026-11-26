@@ -5,7 +5,7 @@ shader_type spatial;
 render_mode blend_mix, depth_draw_opaque, cull_back, diffuse_burley, specular_schlick_ggx, world_vertex_coords;
 #include "res://shaders/atmos.gdshaderinc"
 #include "res://shaders/deco_fade.gdshaderinc"
-instance uniform float fade_mode = 0.0;   // deco_fade.gdshaderinc: 1 world decorations, 2 small clutter (Terrain sets it)
+instance uniform float fade_mode = 0.0;   // deco_fade.gdshaderinc: 1 world decorations, 2 small clutter, 3 solid crown of a card tree (Terrain sets it)
 
 uniform vec3 albedo = vec3(1.0);
 uniform float roughness = 0.85;
@@ -59,6 +59,7 @@ void vertex() {
 		vec3 o = wind_bend(base, 1.0, 1.0, 0.0);
 		VERTEX.xz += o.xz * h * sway;
 	}
+	if (deco_fold(v_origin, fade_mode, PROJECTION_MATRIX[3][3] > 0.5)) VERTEX = v_origin;   // (card trees: the twin shows here)
 	v_world = VERTEX;
 }
 
@@ -75,7 +76,7 @@ float dap_noise(vec3 x) {
 }
 
 void fragment() {
-	if (deco_cut(v_origin, fade_mode, FRAGCOORD.xy, PROJECTION_MATRIX[3][3] > 0.5)) discard;   // ortho = the sun's shadow pass
+	if (deco_cut_pair(v_origin, fade_mode, FRAGCOORD.xy, PROJECTION_MATRIX[3][3] > 0.5)) discard;   // ortho = the sun's shadow pass
 	// the sun's shadow pass (orthographic; every view camera is perspective): leaf gaps. Only within ~40 m of
 	// the ride camera (cam_eye): further out the flecks are below a shadow texel of the far cascades, and the
 	// discard + noise ran for every crown in every cascade

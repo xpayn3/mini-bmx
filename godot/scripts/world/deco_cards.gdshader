@@ -1,4 +1,4 @@
-// Leaf-card plants (bushes): flat cards carrying a leaf-cluster texture with an alpha cut-out, normals bent
+// Leaf-card plants (bushes, card tree crowns: world/card_tree.gd): flat cards carrying a leaf-cluster texture with an alpha cut-out, normals bent
 // toward a dome so the whole bush lights like one soft volume. Same fade / sway / glow as deco.gdshader.
 shader_type spatial;
 render_mode blend_mix, depth_draw_opaque, cull_disabled, diffuse_burley, specular_schlick_ggx, world_vertex_coords;
@@ -14,6 +14,10 @@ uniform float sway = 0.035;
 uniform float backlight = 0.35;
 uniform float scatter = 0.9;
 uniform float cutoff = 0.5;
+// card trees: light the crown as one volume from both sides (Godot flips NORMAL on back faces of a two-sided card,
+// which turned the dome's normals inside out on every card seen from behind)
+uniform bool volume_normals = false;
+uniform float flutter = 0.012;
 varying vec3 v_col;
 varying flat vec3 v_origin;
 varying vec3 v_world;
@@ -27,13 +31,15 @@ void vertex() {
 	float h = max(VERTEX.y - base.y, 0.0);
 	vec3 o = wind_bend(base, 1.0, 1.0, 0.0);
 	// leaves flutter a little on top of the bush's sway
-	float fl = sin(atm_wind.z * 3.1 + VERTEX.x * 5.0 + VERTEX.z * 4.0) * 0.012 * h;
+	float fl = sin(atm_wind.z * 3.1 + VERTEX.x * 5.0 + VERTEX.z * 4.0) * flutter * h;
 	VERTEX.xz += o.xz * h * sway + vec2(fl);
+	if (deco_fold(v_origin, fade_mode, PROJECTION_MATRIX[3][3] > 0.5)) VERTEX = v_origin;   // (card tree out of its band)
 	v_world = VERTEX;
 }
 
 void fragment() {
-	if (deco_cut(v_origin, fade_mode, FRAGCOORD.xy, PROJECTION_MATRIX[3][3] > 0.5)) discard;
+	if (deco_cut_pair(v_origin, fade_mode, FRAGCOORD.xy, PROJECTION_MATRIX[3][3] > 0.5)) discard;
+	if (volume_normals && !FRONT_FACING) NORMAL = -NORMAL;
 	vec4 t = texture(leaf_tex, UV);
 	ALPHA = t.a;
 	ALPHA_SCISSOR_THRESHOLD = cutoff;

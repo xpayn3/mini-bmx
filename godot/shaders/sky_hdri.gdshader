@@ -109,7 +109,9 @@ vec3 golden_sky(vec3 d, vec3 hd) {
 	vec3 hor_sun = mix(gold_horizon * vec3(1.0, 0.95, 0.85), vec3(1.0, 0.3, 0.1), below);
 	vec3 hor_away = mix(vec3(0.95, 0.6, 0.68), vec3(0.7, 0.4, 0.62), below);
 	vec3 horizon = mix(hor_away, hor_sun, pow(toward, 1.6));
-	vec3 sky = mix(zen, mid, pow(1.0 - up, 2.4) * 0.75);
+	// (2026-11-26) the warm band hugs the horizon: overhead a sunset sky stays blue (it lights the shade: cool shade, warm
+	// light); the peach band used to reach high up and tinted all the shade pink
+	vec3 sky = mix(zen, mid, pow(1.0 - up, 4.0) * 0.6);
 	sky = mix(sky, horizon, hz);
 	// the earth's shadow: a blue-grey band low in the sky opposite the sun, the pink belt just above it
 	float away = smoothstep(0.55, 1.0, 1.0 - toward);

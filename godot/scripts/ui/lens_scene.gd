@@ -105,6 +105,7 @@ func _process(dt: float) -> void:
 	elif not _made and _task < 0 and not _data.is_empty():
 		_make(_data)
 	if not is_visible_in_tree(): return
+	_meter_step()
 	_t += dt
 	# on the ridge top, at riding height, a slow look round over the valley + a little handheld sway
 	var z := -sin(_t * 0.1) * 1.2
@@ -380,7 +381,8 @@ static func _compute_props() -> Dictionary:
 	var out := {}
 	for e in [["trunks", "trunk", "trunk", trunks, true], ["pines", "pine", "leaf", pines, true], ["blobs", "blob", "leafSoft", blobs, true],
 			["bushes", "bush", "leafCard", bushes, true], ["rocks", "rock", "rock", rocks, true], ["grass", "grass", "flower", grass, false],
-			["roots", "log", "trunk", roots, true], ["far_pines", "pine", "leaf", far_pines, false], ["far_trunks", "trunk", "trunk", far_trunks, false]]:
+			["roots", "log", "trunk", roots, true], ["far_pines", "pine", "leaf", far_pines, false], ["far_trunks", "trunk", "trunk", far_trunks, false],
+			["spires", "pineSpire", "spire", pines, false], ["far_spires", "pineSpire", "spire", far_pines, false]]:   # (card pines: the trunk up through the crown)
 		out[e[0]] = {"mesh": e[1], "mat": e[2], "buf": _pack(e[3]), "count": (e[3] as Array).size(), "cast": e[4]}
 	return out
 
@@ -397,8 +399,8 @@ func _build_env() -> void:
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	env.tonemap_mode = Environment.TONE_MAPPER_AGX
-	env.tonemap_agx_contrast = Game.AGX_CONTRAST
-	env.tonemap_agx_white = 12.0
+	env.tonemap_agx_contrast = Game.AGX_CONTRAST_RIDE
+	env.tonemap_agx_white = Game.AGX_WHITE
 	env.fog_enabled = true
 	env.fog_mode = Environment.FOG_MODE_DEPTH
 	env.fog_depth_curve = 1.6
@@ -417,12 +419,13 @@ func _build_env() -> void:
 	env.ssil_radius = 4.0
 	env.ssil_intensity = 0.7
 	env.glow_enabled = true
-	env.glow_intensity = 0.25
-	env.glow_strength = 0.9
-	env.glow_bloom = 0.02
-	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_SOFTLIGHT
-	env.set_glow_level(0, 0.0); env.set_glow_level(1, 0.6); env.set_glow_level(2, 1.0)
-	env.set_glow_level(3, 0.6); env.set_glow_level(4, 0.3)
+	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_MIX
+	env.glow_mix = Game.GLOW_MIX
+	env.glow_intensity = 1.0
+	env.glow_strength = 1.0
+	env.glow_bloom = 0.0
+	env.glow_hdr_threshold = 0.0
+	for i in 7: env.set_glow_level(i, [0.0, 0.0, 0.5, 1.0, 1.0, 0.8, 0.5][i])
 	env.volumetric_fog_enabled = true
 	env.volumetric_fog_density = Game.VOL_DENSITY
 	env.volumetric_fog_anisotropy = 0.78
@@ -433,12 +436,8 @@ func _build_env() -> void:
 	env.volumetric_fog_temporal_reprojection_amount = 0.9
 	env.adjustment_enabled = true
 	we.environment = env
-	# the eye adapting, as in the ride (off at night)
-	cam_attr.auto_exposure_enabled = true
-	cam_attr.auto_exposure_scale = 0.4
-	cam_attr.auto_exposure_speed = 0.7
-	cam_attr.auto_exposure_min_sensitivity = 80.0
-	cam_attr.auto_exposure_max_sensitivity = 140.0
+	# exposure from the light, as in the ride (SunSky): no auto exposure
+	cam_attr.auto_exposure_enabled = false
 	we.camera_attributes = cam_attr
 	_root.add_child(we)
 	# the ride's colour grade (split tone + vignette, shaders/grade.gdshader) over this view too
@@ -460,7 +459,7 @@ func _build_env() -> void:
 	sun.shadow_normal_bias = 1.5
 	_root.add_child(sun)
 	lamp.light_color = Color(1.0, 0.97, 0.9)
-	lamp.light_energy = 3.0
+	lamp.light_energy = 3.0 * 2.75   # (BikeLight.BEAM_GAIN: the ride's constant exposure)
 	lamp.spot_range = 34.0
 	lamp.spot_angle = 26.0
 	lamp.spot_angle_attenuation = 1.4
@@ -472,33 +471,32 @@ func _build_env() -> void:
 	lamp.rotation = Vector3(-0.09, 0, 0)
 
 func _apply_light(h: float) -> void:
+	# the ride's light model (SunSky, Game._apply_light): physical sun / sky / moon, one exposure, the sky measured
 	var L: Dictionary = LightSettings.current
 	var el := Game.sun_elev_deg(h)
 	var g := 1.0 - smoothstep(8.0, 30.0, el)
 	var n := 1.0 - smoothstep(-11.0, -3.5, el)
 	var day := 1.0 - n
-	var gw := clampf(g * day * float(L.get("warmth", 1.0)), 0.0, 1.0)
-	var tw := smoothstep(1.0, -4.0, el) * day
-	var low := 1.0 - smoothstep(1.0, 12.0, el)
+	var gw := clampf((1.0 - smoothstep(0.0, LightLab.v("golden_below"), el)) * day, 0.0, 1.0)
+	var S := SunSky.state(el, L)
+	_sun_state = S
 	# the sun sweeps across the view: rising front-right, high behind at noon, setting front-left (backlit trail)
 	var u := clampf((h - 6.0) / 14.0, 0.0, 1.0)
-	var yaw := lerpf(-PI * 0.5 + 0.32, -PI * 0.5 - 0.32 + TAU, u) if el > -3.0 else 0.0   # 0 = +X; -PI/2 = ahead (-Z)
+	var yaw := lerpf(-PI * 0.5 + 0.32, -PI * 0.5 - 0.32 + TAU, u) if S.sun_on else 0.0   # 0 = +X; -PI/2 = ahead (-Z)
 	var dirv: Vector3
-	var sun_e: float
-	if el > -3.0:
-		var e := deg_to_rad(maxf(el, 2.5))
+	if S.sun_on:
+		var e := deg_to_rad(maxf(el, 1.0))
 		dirv = Vector3(cos(yaw) * cos(e), sin(e), sin(yaw) * cos(e))
-		sun.light_color = Color(1.0, 0.95, 0.87).lerp(Color(1.0, 0.62, 0.36), gw).lerp(Color(1.0, 0.5, 0.26), low * gw)
-		sun_e = lerpf(Game.RIDE_SUN, 2.2, g) * smoothstep(-3.0, 5.0, el)
+		sun.light_color = S.sun_color
+		sun.light_energy = S.sun_energy
 	else:
-		var e := deg_to_rad(15.0)
+		var e := deg_to_rad(SunSky.MOON_EL)
 		dirv = Vector3(cos(-PI * 0.5 + 0.7), sin(e), sin(-PI * 0.5 + 0.7)).normalized()   # the moon ahead-right
-		sun.light_color = Color(0.55, 0.66, 0.95)
-		sun_e = 0.3 * smoothstep(-3.0, -10.0, el)
-	sun.light_energy = sun_e * float(L.get("sun", 1.0)) if el > -3.0 else sun_e * float(L.get("moon", 1.0))
+		sun.light_color = Game.MOON_COL
+		sun.light_energy = S.moon_energy
 	sun.look_at_from_position(dirv, Vector3.ZERO, Vector3.UP)
 	sun.shadow_blur = lerpf(lerpf(1.0, 2.0, g), 2.6, n)
-	sun.light_volumetric_fog_energy = lerpf(lerpf(2.0, 2.4, gw), 0.12, n)
+	sun.light_volumetric_fog_energy = LightLab.v("sun_haze")
 	# sky: the photo for this sun height, golden / twilight / night modes, the true sun
 	var hd: Array = Game.HDRI_DAY[0] if el >= 14.0 else (Game.HDRI_LOW[0] if el >= -6.0 else Game.HDRI_NIGHT)
 	sky_mat.set_shader_parameter("hdri", load(Game.HDRI_DIR + String(hd[0])))
@@ -506,33 +504,51 @@ func _apply_light(h: float) -> void:
 	sky_mat.set_shader_parameter("mix_b", 0.0)
 	sky_mat.set_shader_parameter("golden", gw)
 	var se := deg_to_rad(el)
-	sky_mat.set_shader_parameter("sun_vec", Vector3(cos(yaw) * cos(se), sin(se), sin(yaw) * cos(se)) if el > -3.0 else Vector3.ZERO)
+	sky_mat.set_shader_parameter("sun_vec", Vector3(cos(yaw) * cos(se), sin(se), sin(yaw) * cos(se)) if S.sun_on else Vector3.ZERO)
 	sky_mat.set_shader_parameter("sunny", day * (1.0 - gw))
 	sky_mat.set_shader_parameter("night", n)
-	sky_mat.set_shader_parameter("energy", lerpf(1.0, 0.55, n))
-	sky_mat.set_shader_parameter("light_energy", lerpf(lerpf(0.55, 0.85, g), 0.2, n))
-	env.ambient_light_sky_contribution = lerpf(0.8, 0.5, n)
-	env.ambient_light_energy = 0.36 * float(L.get("sky", 1.0)) * lerpf(1.0, 0.3, n) * (1.0 + 0.6 * tw)
-	env.ambient_light_color = Color(0.55, 0.68, 0.9).lerp(Color(0.62, 0.55, 0.78), gw * 0.6).lerp(Color(0.55, 0.45, 0.72), tw).lerp(Color(0.16, 0.22, 0.42), n)
+	_sky_level()
+	if _meter == null and RenderingServer.get_rendering_device() != null:
+		_meter = SkyMeter.new(sky_mat)
+		add_child(_meter)
+	_meter_due = _meter != null
+	env.ambient_light_sky_contribution = 1.0
 	env.fog_density = 0.6 * lerpf(1.0, 1.35, n) * lerpf(1.0, 0.6, gw)
-	env.fog_light_color = Game.RIDE_FOG.lerp(Color(0.95, 0.64, 0.46), g * day).lerp(Color(0.4, 0.3, 0.46), tw).lerp(Color(0.012, 0.016, 0.03), n)
-	env.fog_aerial_perspective = 0.75 * (1.0 - n)
-	env.fog_sun_scatter = 0.1 * gw * (1.0 - tw) * (1.0 - 0.6 * low)
-	env.volumetric_fog_albedo = Color(0.86, 0.9, 0.95).lerp(Color(1.0, 0.8, 0.6), g * day).lerp(Color(0.7, 0.75, 0.85), n)
-	env.volumetric_fog_density = Game.VOL_DENSITY * lerpf(1.0, 0.25, g * day) * lerpf(1.0, 2.2, n)
-	env.volumetric_fog_ambient_inject = lerpf(lerpf(0.12, 0.03, gw), 0.0, n)
-	env.tonemap_exposure = lerpf(lerpf(Game.AGX_EXP_DAY, Game.AGX_EXP_GOLD, g) + 0.75 * tw, Game.AGX_EXP_NIGHT, n) * float(L.get("exposure", 1.0))
-	env.adjustment_saturation = float(L.get("saturation", 1.22)) * lerpf(1.0, 1.06, gw) * lerpf(1.0, 0.42, n)
-	env.adjustment_contrast = float(L.get("contrast", 1.12)) * lerpf(1.0, 1.07, gw) * lerpf(1.0, 1.08, n)
-	cam_attr.auto_exposure_enabled = n < 0.5
-	cam_attr.auto_exposure_min_sensitivity = lerpf(80.0, 40.0, gw)
-	cam_attr.auto_exposure_max_sensitivity = lerpf(140.0, 95.0, gw)
-	env.adjustment_brightness = lerpf(1.0, 0.94, n)
-	env.glow_hdr_threshold = lerpf(lerpf(0.92, 0.85, gw), 0.7, n)
+	env.fog_aerial_perspective = LightLab.v("fog_aerial")
+	env.fog_sun_scatter = LightLab.v("sun_scatter") * day
+	env.volumetric_fog_anisotropy = 0.7
+	env.volumetric_fog_albedo = Color(0.9, 0.9, 0.9)
+	env.volumetric_fog_density = Game.VOL_DENSITY * LightLab.v("vol_density") * lerpf(1.0, 0.4, gw) * lerpf(1.0, 1.5, n)
+	env.volumetric_fog_ambient_inject = LightLab.v("vol_ambient")
+	env.tonemap_agx_contrast = LightLab.v("agx_contrast")
+	env.tonemap_agx_white = LightLab.v("agx_white")
+	env.glow_mix = LightLab.v("bloom_mix")
+	env.tonemap_exposure = LightLab.v("expo") * float(L.get("exposure", 1.0))
+	env.adjustment_saturation = float(L.get("saturation", 1.0)) * lerpf(1.0, LightLab.v("night_sat"), n)
+	env.adjustment_contrast = float(L.get("contrast", 1.0))
+	env.adjustment_brightness = 1.0
 	lamp.visible = n > 0.35
-	# the ride's glare guard (Game._glare_guard): this view always faces a low sun, so the same easing applies
-	var k := (1.0 - smoothstep(20.0, 40.0, el)) * smoothstep(-6.0, 0.0, el)
-	sun.light_volumetric_fog_energy *= 1.0 - 0.8 * k
-	env.fog_sun_scatter *= 1.0 - k
-	env.glow_intensity = 0.25 * (1.0 - 0.65 * k)
-	sky_mat.set_shader_parameter("energy", lerpf(1.0, 0.55, n) * (1.0 - 0.38 * k))
+
+var _sun_state := {}
+var _f := Game.SKY_F0
+var _le := 0.3
+var _meter: SkyMeter
+var _meter_due := false
+
+func _sky_level() -> void:
+	_le = clampf(float(_sun_state.get("sky_irr", 0.3)) / maxf(_f, 1e-4), 0.002, 20.0)
+	sky_mat.set_shader_parameter("light_energy", _le)
+	sky_mat.set_shader_parameter("energy", _le)
+
+func _meter_step() -> void:
+	if not _meter_due or _meter == null or _meter.busy(): return
+	_meter_due = false
+	var le := _le
+	_meter.measure(sun.global_basis.z, func(c: Color) -> void:
+		var a := 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
+		if a <= 0.0 or le <= 1e-5: return
+		var f := a / le
+		if f > 1e-3 and f < 1e3 and absf(f - _f) > 0.02 * _f:
+			_f = f
+			_sky_level()
+			_meter_due = true)

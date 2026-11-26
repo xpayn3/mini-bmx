@@ -113,7 +113,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
 | `scripts/ui/` | `hud.gd`, `settings_menu.gd`, `tune_card.gd` (the one tuning card: Ride / Rider / Look / Sound tabs, each with category tabs), `quick_tune.gd`, `rider_panels.gd` (`POSE_DEFS`, `KITS`, `LOOK_ROWS` + saving), `ui_theme.gd` |
 | `scripts/fx/` | `fx.gd` (dust puffs, dirt chunks, **tyre tracks**), `ride_dust.gd` (GPU dust trail, FogVolume clouds) |
 | `shaders/` | `sky_hdri.gdshader`, `grade.gdshader`, `grime_mud/wet`, `ruts.gdshaderinc` (ruts + tyre prints) |
-| `assets/` | `dh.glb`, `helmet.glb`, BMX model, decals (Fox, Cinelli, Glory, Maxxis…), `hdri/` (Poly Haven **Kloofendal 4K**), `textures/painted_concrete_02` (garage floor), `textures/broken_brick_wall`, `fonts/Doto.ttf` (Google Fonts dot-matrix, OFL — the HUD bike computer via `UITheme.lcd_font()`) |
+| `assets/` | `dh.glb`, `helmet.glb`, BMX model, `hdri/` (Poly Haven **Kloofendal 4K**), `textures/painted_concrete_02` (garage floor), `textures/broken_brick_wall`, `fonts/Doto.ttf` (Google Fonts dot-matrix, OFL — the HUD bike computer via `UITheme.lcd_font()`) |
 | `tools/*.gd` | one-off headless test / measure scripts (`terrain_cs_cmp.gd` is the important one) |
 | `docs/GRAPHICS.md` | quality presets, frame times, features, what was left out and why |
 | repo root `tools/` | Houdini exporters `export_dh.py`, `export_bmx.py`, `export_helmet.py` → write into `godot/assets/` |
@@ -905,6 +905,35 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   at the back, the four variants in front). Seen: close-ups + two rides (seeds 4242, 80019), no script errors; NOT measured: frame time with many bushes in
   view, the wind sway, how distant leaves thin out (mip alpha). Poly Haven's `searsia_burchellii` (1.4M polygons, ~35 MB glTF) was looked at as a scan source
   and not used: it would have to be decimated + baked to cards first.
+- **Card trees (2026-11-26, user: "same trick as the bushes for trees", then "no low poly trees, use our new ones and make
+  LODs from them", "far LOD as a baked PNG billboard")**: `world/card_tree.gd` (`CardTree`). No solid crowns anywhere
+  (`BMX_OLD_TREES=1` brings the old cones / balls back). Every crown list ("pine" / "blob") is drawn four ways from the SAME
+  instance buffer, swapped by distance from the rider with one dither value per pixel (`shaders/deco_fade.gdshaderinc`):
+  | LOD | what | distance | fade_mode |
+  |---|---|---|---|
+  | 0 | `pineCard` (15 whorls of drooping folded branch cards) / `blobCard` (58 cards in a ball) | to 36, gone by 48 m | 4 |
+  | 1 | `pineCardLod1` (10 whorls, ~45 % branches, wider + droopier) / `blobCardLod1` (22 cards, 1.45x) | 48 .. 72-88 m; casts EVERY tree's sun shadow | 3 |
+  | 2 | crown billboard (`tree_billboard.gdshader`, crown-only cells 4-7 of `impostors.png`, tinted by the instance colour) | 72-88 .. 124 m | 5 |
+  | 3 | backdrop billboard (`FarHills` `IMPOSTOR_SHADER`, whole-tree cells 0-3) | 100 m .. 1.9 km | -1 |
+  TerrainGeo's `MESH["pine"/"blob"]` + `MAT["leaf"/"leafSoft"]` ARE LOD1 (so the level editor preview and the ride-setup
+  scene draw cards too); `CardTree.add_twin` (from `Terrain._finalize`, `LevelVisuals._trees`) adds LOD0 (cut past
+  `CHUNK_VIS` 100 m from the camera in world chunks), the pine trunk up through the crown (`pineSpire`, `add_spire`, mode 1,
+  user: "trunk must not stop at the bottom") and the LOD2 billboard (`add_billboard`, quad size per kind from impostors.json:
+  y0 / h / w in the crown instance's own units: the crown cells are baked at unit height with the width squeezed by
+  `PINE_A` / `BLOB_A`, so the shader stretches each billboard by the instance's x / y scale like the 3D crown). Instances
+  that can't show are folded onto their base in the vertex stage (`deco_fold`). `volume_normals` in `deco_cards.gdshader`
+  lights two-sided cards as one volume. **Textures** (all BC7 + mipmaps): `assets/textures/tree_cards/needle_branch.png`
+  (ambientCG PineNeedles001 bundles stamped along a drawn twig), `leaf_cluster.png` (LeafSet005; the green BUSHES use it too,
+  `CardBush.LEAF_PNG`, brightness by `CardBush.leaf_gain()`), both made by root `tools/make_tree_cards.py <PineNeedles001 dir>
+  <LeafSet005 dir> godot/assets/textures/tree_cards` (CC0, SOURCE.txt, credits); `impostors.png` (8 cells 256 x 512) +
+  `impostors.json` baked by `res://tools/bake_tree_impostors.tscn` from LOD0: **re-run it (then `--import`) after changing
+  the card trees**. Its camera is a 1 deg perspective lens: an orthographic camera reads as the shadow pass in the deco
+  shaders (the shadow LOD stays on). `BMX_OLD_TREES_TEX=1` = code-drawn leaf textures (DXT5 at runtime). Gallery:
+  `res://tools/tree_gallery.tscn -- out.png [dist= yaw= h= look= sun=]` (back row LOD1, front LOD0). **Cost** (seed 4242
+  x2100 idle, render probe, alternating runs): GPU 4.66 vs old 4.76-5.02 ms, sun shadows 1.03 vs 1.17 ms, render CPU
+  +0.5 ms (more MultiMeshes a chunk); demo_descent level GPU 3.14 vs 2.90. **Don't measure with another Godot window open**
+  (one took ~50 % of the GPU and doubled the numbers). Not done: leafy trees' trunk up through the crown, the LOD bands show
+  as a stipple, billboards have two baked angles (no per-angle cells).
 - **Ground crossfade + middle ring (2026-11-25, user: "the mountains pop really late and bad", "a lot of popping, a nice crossfade like big games")**.
   Before: the real chunk ground ended at a hard edge (the loaded square, 144-168 m, jumping 48 m at each chunk line) and the 20 m backdrop (`FarHills`)
   sat 5 m UNDER it, which showed as a step; past it the backdrop is smooth, pale, has no lakes. (Its heights are the field's own: `tools/far_vs_ground.gd`
@@ -1782,6 +1811,35 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   -- out.png [cam=close yaw=-0.6] [design=race]`.
 
 ### Ride light (time of day)
+- **Realistic light (2026-11-26, user: "overblown at some times of day, use realistic values"; research + numbers in
+  `docs/research/lighting.md`)**. Supersedes the energies / exposures / AE bands / ambient colours below. The light comes
+  from physics: `world/sun_sky.gd` (`SunSky.state(el, L)`): the sun's direct light + colour per RGB channel through the air
+  (Kasten-Young airmass x optical depths: a low sun is DIMMER and redder; the old code made it brighter), the clear sky's
+  light (IES fit; ~10x per 2.6 deg of twilight), moon 0.15 lux + stars, exposure from that illuminance (Ghost of Tsushima)
+  with full adaptation by day, darker toward sunset and ~4 stops under at night, folded into the light energies so
+  `env.tonemap_exposure` is one constant (`Game.RIDE_EXPOSURE` 1.2; no auto exposure in rides). The sky's brightness is
+  measured: `world/sky_meter.gd` (`SkyMeter`, a 2 x 1 px view in its own world, a white card lit by the same sky material)
+  and `light_energy` = `energy` (one sky for view, ambient, reflections, fog) set so its light is what SunSky says
+  (`Game._sky_level` / `_sky_meter_*`; runs only on a light change, every 2 s with the cycle). Ambient = the sky alone
+  (contribution 1), fog colour from the sky (aerial perspective 1), haze lit 1x the sun (was 2.6-3x), volumetric ambient
+  0.2, bloom = 4 % mix with no threshold (was softlight), grade neutral, AgX contrast 1.25. The painted sunset sky only
+  under ~10 deg. Light tab defaults: rim 0, rider match 0, glare 0.5, saturation / contrast 1 (old saves reset once,
+  `LightSettings.VER` 2). Bike beams x2.75 (`BikeLight.BEAM_GAIN`). The RACE-step preview (`ui/lens_scene.gd`) uses the
+  same model + its own meter. The title screen keeps its old look. Tests: `BMX_LIGHT_SWEEP=1|h1,h2..`
+  (+ `BMX_LIGHT_SWEEP_SHOTS=dir/prefix`, `BMX_IDLE=1`, `--autotest=` ~3.5 s an hour; `game/light_sweep.gd`: `LSWEEP` frame /
+  rider mean, p98, % clipped / crushed, the light's numbers), `BMX_LIGHT_PROBE=1` (`SKYMETER` lines), `-s
+  res://tools/sky_meter_probe.gd` (needs a window: the card must follow the sky 1:1). Not done: cloud cover / weather in
+  the model (clear sky only), the title screen, a per-HDRI sun-clamp review.
+- **Light Lab (DEV ONLY, same day, user: "sliders so we can adjust ... strictly developer stuff")**: `core/light_lab.gd`
+  (`LightLab.v(key)`), tuning card Light > **Lab**: exposure (base 1.2, EV of full adaptation, dusk / night darkening),
+  sun + sky (air haziness = aerosol turbidity, sky vs sun, moon lux, painted-sunset cut-off), haze (sun in haze, sky light
+  in haze, density, glow round the sun, aerial perspective), tone (AgX contrast / white, bloom mix, night colour), lens
+  grade strength. Live; SAVE writes `res://data/light_lab.json` (only changed values; the game reads it at start, so
+  saved values ship as the defaults; players have no way to change them). Tests: `BMX_LIGHT_LAB="k=v,..."`,
+  `BMX_LIGHT_LAB_FILE=0`, `BMX_PANEL=light BMX_PANEL_CAT=2`. Belongs with the dev tools for the release pack check.
+- **Goggle lenses = film grades (same day, user: "like the artsy downhill films")**: `rider/goggle_lens.gd` grades have a
+  matte black, pivoted S-curve, hue bands (`bands`: hue / width / shift / sat / val), film saturation fall-off
+  (`sat_fall`), split toning, shoulder; 33^3 LUT. New lens Red Line (`cine`); every lens regraded (see the research doc).
 - **Default: golden hour** (19:20, sun ~10° up). Everything comes from the clock: `Game._apply_light(hour, LightSettings.current)`
   sets the sun (or the **moon** at night, opposite it), sun colour / strength, shadow bias + softness, the sky mode
   (`sky_hdri.gdshader`: `sunny` by day, `golden` low, `night` = stars + moon + dark clouds), ambient, fog colour,
@@ -1887,6 +1945,49 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   it's dropped and RIDE builds the normal way. Moving a Game fires `_exit_tree` on all its nodes: never tear down
   state there that a living node still needs (`ride_audio` frees its C# synths on PREDELETE for that reason).
   `BMX_NO_PREBUILD=1` = the old way.
+- **Main menu from a ride is a swap (2026-11-26, user: "main menu sometimes takes a long time, it should be instant")**:
+  RIDE no longer frees the title backdrop Game: it is parked whole (`main._park_title`: its own never-drawn SubViewport,
+  process disabled, its sounds paused). Pause > Main menu (`_menu_from_ride`) parks the ride the same way as
+  `ride_ready` (`_park_ride`) and moves the title world back in (`_unpark_title`); RIDE then takes the ride back via
+  `_take_prebuilt` (rebuilt if seed / bike / build / rider changed). Before: the menu moved the rider to `TITLE_SPOT` on
+  the ride's own world and built every chunk there in one frame (`_to_hilltop`, 0.7-2 s, longer the further you had
+  ridden). Also: `FarHills` joined its backdrop build on `_exit_tree`, so every move of a world between viewports
+  waited for it (~0.85 s); it now joins on PREDELETE. Now: Main menu ~19 ms, RIDE again ~19 ms, RIDE from the title
+  ~47 ms. Cost: the other world stays in memory (not measured). `BMX_NO_TITLE_PARK=1` = the old way. Test:
+  `BMX_SEED=4242 [BMX_INTRO=still] BMX_MENU_LOOP=ride,menu,ride_again,quit (seconds) [BMX_MENU_LOOP_SHOT=prefix]`
+  + `-- --shot=x.png@999` (title launch): `MENULOOP <step> ms= ... reused=` and frames drawn after each step;
+  `BMX_MENU_AT=secs` with `--ride` = Main menu only.
+- **The title is a fixed place loaded from a file (2026-11-26, user: "in my menu no random chunk generation, a small
+  specific level, the same all the time, fast load, ultra light"; the sign behind the rider stays)**. `world/title_terrain.gd`
+  (`TitleTerrain extends Terrain`, like the playground's): loads `assets/title/title_land.bin` (zstd `store_var`: the 7 x 7
+  chunks round `Game.TITLE_SPOT` of `TITLE_SEED` exactly as the chunk builder made them + the far hills' 20 m ring arrays) and
+  turns them into nodes once (`Terrain._finalize_out`, split out of `_finalize`). No `TerrainField.setup` (an empty field
+  with an empty trail), no chunk building / streaming / worker threads, no rebuilding far hills (`FarHills.load_baked`,
+  `baked`), no sheep. Heights = the saved drawn grids + rock domes. Made by `res://tools/bake_title.tscn` (a scene, not
+  `-s`: Terrain needs the autoloads); **re-bake when the chunk builder / terrain field / far hills change** (it prints the
+  biggest parts of the data). Measured: title build 6.0 -> 2.9 s (land 4.1 -> 0.75 s: file 0.5 s, nodes 0.2 s), menu
+  step 0.64 -> 0.13 s; frame time, draw calls, triangles about the same (4.5 ms, ~620 draws, 3.4M triangles). Left: the
+  player's bike is now the biggest part (~1.2 s); the file is 30 MB (most of it the full-detail ground mesh: the
+  narrow menu lens sees far chunks large, so coarser LODs were not tried); the title still runs the ride's other
+  systems (HUD, dust sim, blood, replay: ~0.4 s). `BMX_TITLE_PROC=1` = the old generated title. Export includes
+  `assets/title/*.bin`. Probe: `BMX_TITLE_PROBE=1 [BMX_TITLE_PROBE_SHOT=png]` + `-- --shot=x.png@99` (`TITLEPROBE build
+  game= menu=` and frame time / draws / memory, then quits).
+- **The RUNOUT sign is back in view (same day, user: "where is our runout sign?", "hand placed level, make it perfect")**:
+  the 2026-11-25 land work (mountains / erosion) raised a ridge 58 m high 120 m in front of the old title view, and the
+  sign (170 m out, feet at eye + 7 m) stood inside it; the old generated title had it too. A survey of every direction from
+  the lookout (land drops 70-110 m almost everywhere except that ridge) picked 260 deg: `TITLE_SPOT` heading 1.4399 ->
+  4.0379 (camera, rider, sun and sign turn together). Sign placed by eye: `SIGN_D` 80 m, `SIGN_SIDE` 0.06, `SIGN_H` 0.058,
+  `SIGN_UP` 8.2 m (letters clear above the helmet, beam behind it, between the menu card and the top-right buttons); its
+  materials ignore fog and the letters glow a clean white (`title_sign.gd`: haze had washed them into the sky). Check:
+  `BMX_SIGN_PROBE=1` (ground along the view to the sign vs its feet), `BMX_SIGN=d,side,h,up` / `BMX_TITLE_SPOT=x,z,heading`
+  to try others. The land bake doesn't depend on the heading (no re-bake needed).
+- **Pause leaflet opens instantly (same day, user: "the pause menu pamphlet was heavy")**: one `PausePamphlet` for the
+  session (`main._leaflet_get`), built when a ride starts (`_leaflet_warm`), refilled per pause (`PausePamphlet.prepare`:
+  photo, place, menu lines), put away instead of freed. Its cover photo is drawn from the whole frame with a source rect
+  (the GPU scales it; the CPU Lanczos crop + resize was ~11 ms). Before: every Esc built it (first ~107 ms + a 72 ms frame,
+  later ~17 ms + a 20-55 ms frame). Now: ~4-12 ms on the press (the frame readback is most of it), first Esc of a ride one
+  25 ms frame (paper shaders), later worst 7-11 ms. Drawing its render targets once at ride start was tried: paused frames
+  went 6 -> 14 ms, not done. Probe `BMX_PAUSE_PROBE=1` (+ `--ride --autotest=24`): Esc every 4 s, `PAUSEPROBE` lines.
 - **`CrtTv`** (`scripts/world/crt_tv.gd`): the user's TV model (`assets/tv/tv.fbx` + `tv_albedo.jpg`, `tv_normal.png`,
   `tv_orm.png` made from the download's TGA maps: Unity MaskMap R metal / G AO / A smoothness -> ORM), ~38 cm wide, origin
   on the floor, glass +Z. `shaders/crt_screen.gdshader` draws the model's maps and, on the glass UV island (rotated in the
