@@ -267,6 +267,16 @@ const SHORT_FROM := 0.7; const SHORT_TO := 1.3   # s of whole flight: short belo
 const SHORT_DELAY := 0.25; const SHORT_RAMP := 0.3; const SHORT_HELP := 0.9; const SHORT_SPEED := 40.0   # (short flights: when / how fast / how firmly he aims)
 var _OLD_SHORTAIM := OS.get_environment("BMX_OLD_SHORTAIM") != ""   # (tests: the same slow hands-off aim on every flight)
 var _OLD_FADE := OS.get_environment("BMX_OLD_FADE") != ""       # (tests: before the brakes could fade)
+# speed tuck (2026-11-26, user: a downhill speed record rider - hips right back over the rear wheel, back flat, head
+# low behind the bars): coasting fast he tucks by himself, more the faster (speedTuckFrom .. speedTuckFull), and a
+# LIGHT pull back on the right stick tucks him at any speed; pulled further it goes over into the weight-back /
+# manual as before. speed_tuck 0..1 goes to the rider's pose (`speedTuck`) and cuts the drag (the stick's tuck by
+# tuckDrag, the automatic one by speedTuckDrag of that). BMX_OLD_SPEEDTUCK=1 = before (stick back = sat up)
+var _OLD_SPEEDTUCK := OS.get_environment("BMX_OLD_SPEEDTUCK") != ""
+var speed_tuck := 0.0        # 0..1, eased: how far into the speed tuck
+var speed_tuck_auto := 0.0   # the automatic part (by speed)
+const TUCK_BACK_IN := Vector2(0.05, 0.3)     # stick back: tuck ramps in over this
+const TUCK_BACK_OUT := Vector2(0.55, 0.95)   # ...and gives way to the weight-back pose / sit up over this
 var _HEAT_HOLD := float(OS.get_environment("BMX_HEAT")) if OS.get_environment("BMX_HEAT") != "" else 0.0
 var _OLD_SUSPFX := OS.get_environment("BMX_OLD_SUSPFX") != ""   # (tests: before dive steering, pedal bob and kickback)
 var foot_down := false    # set by Game: the rider's foot is on the ground (the bike stays put)
@@ -928,10 +938,45 @@ func _step_loads(dt: float) -> void:
 
 ## stage 5: along the bike: pedalling, the two brakes (sets skid), pumping, drag, speed. Returns a_long, how much of
 ## the tyres' grip driving / braking is using (m/s2)
+## the speed tuck's level this step (see _OLD_SPEEDTUCK)
+func _speed_tuck_step(dt: float, throttle: float) -> void:
+	if _OLD_SPEEDTUCK:
+		speed_tuck = 0.0; speed_tuck_auto = 0.0
+		return
+	var b: float = clampf(-body_in_s, 0.0, 1.0)
+	var stick: float = smoothstep(TUCK_BACK_IN.x, TUCK_BACK_IN.y, b) * (1.0 - smoothstep(TUCK_BACK_OUT.x, TUCK_BACK_OUT.y, b))
+	# automatic: by speed, coasting (pedalling stands him up), not with the stick pushed forward (that is the other tuck)
+	# or pulled well back, nor while balancing a manual / nose manual
+	var auto: float = smoothstep(float(T.get("speedTuckFrom", 11.0)), float(T.get("speedTuckFull", 18.0)), absf(v)) * float(T.get("speedTuck", 1.0))
+	auto *= (1.0 - clampf(throttle * 1.5, 0.0, 1.0)) * (1.0 - clampf(body_in_s * 2.0, 0.0, 1.0)) * (1.0 - smoothstep(TUCK_BACK_OUT.x, TUCK_BACK_OUT.y, b))
+	var bal: float = clampf(maxf(man_a, nose_a) / 0.15, 0.0, 1.0)
+	auto *= 1.0 - bal; stick *= 1.0 - bal
+	auto = clampf(auto, 0.0, 1.0)
+	var want: float = maxf(auto, stick)
+	var k: float = 1.0 - exp(-(5.0 if want > speed_tuck else 3.0) * dt)
+	speed_tuck += (want - speed_tuck) * k
+	speed_tuck_auto += (auto - speed_tuck_auto) * k
+
+## air drag scale from the body: forward stick = race tuck over the bars, the speed tuck (light pull back / by itself
+## at speed), pulled all the way back = sat up tall (an air brake)
+func _aero_update(throttle: float) -> void:
+	# aerodynamics: the drag is the rider's frontal area. Folded down over the bars (right stick forward)
+	# it drops (~40 %: an upright downhill rider vs a race tuck), so the bike runs on and tops out faster;
+	# sat up tall (stick back) it catches the wind like an air brake. Pedalling hard spoils the tuck a bit
+	var tuck: float = clampf(body_in_s, 0.0, 1.0) * (1.0 - 0.5 * clampf(throttle, 0.0, 1.0))
+	var sit_up: float = clampf(-body_in_s, 0.0, 1.0)
+	if not _OLD_SPEEDTUCK:
+		# the stick's part of the speed tuck counts fully, the automatic part speedTuckDrag of it
+		var st_stick: float = maxf(0.0, speed_tuck - speed_tuck_auto)
+		tuck = maxf(tuck, st_stick + speed_tuck_auto * float(T.get("speedTuckDrag", 0.5)))
+		sit_up = smoothstep(TUCK_BACK_OUT.x, TUCK_BACK_OUT.y, sit_up)
+	aero_k = 1.0 - float(T.get("tuckDrag", 0.42)) * tuck + float(T.get("upDrag", 0.3)) * sit_up
+
 func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_water: bool, slope: float, rear_down: bool, nR: float, nF: float) -> float:
 	var a_long := 0.0
 	var sp_k := sprint
 	var n_tot := n_load
+	_speed_tuck_step(dt, throttle)
 	# the brakes cool, and fade once they are hot enough (the rotor glow reads the same heat)
 	brake_heat *= exp(-dt / HEAT_TAU)
 	if _HEAT_HOLD > 0.0: brake_heat = maxf(brake_heat, _HEAT_HOLD)   # (tests: BMX_HEAT keeps the brakes that hot)
@@ -1086,9 +1131,7 @@ func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_wa
 		# aerodynamics: the drag is the rider's frontal area. Folded down over the bars (right stick forward)
 		# it drops (~40 %: an upright downhill rider vs a race tuck), so the bike runs on and tops out faster;
 		# sat up tall (stick back) it catches the wind like an air brake. Pedalling hard spoils the tuck a bit
-		var tuck: float = clampf(body_in_s, 0.0, 1.0) * (1.0 - 0.5 * clampf(throttle, 0.0, 1.0))
-		var sit_up: float = clampf(-body_in_s, 0.0, 1.0)
-		aero_k = 1.0 - float(T.get("tuckDrag", 0.42)) * tuck + float(T.get("upDrag", 0.3)) * sit_up
+		_aero_update(throttle)
 		a -= (roll + T.airDrag / (ts * ts) * v * absf(v) * aero_k) * carry
 		if _EPROBE: _e_add("rolling", -roll * carry * v * dt); _e_add("air", -T.airDrag / (ts * ts) * v * absf(v) * aero_k * carry * v * dt)
 		if in_water: a -= 0.06 * v   # (was 0.7: the water dragged a rider to a halt)
@@ -1115,6 +1158,7 @@ func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_wa
 		pleg = clampf(clampf((body_in - 0.12) / 0.6, 0.0, 1.0) - _bend_in, -1.0, 1.0)   # (the legs' length carried to the landing)
 		# air drag doesn't stop at the lip: the same body area slows the flight (on the full speed, along it).
 		# Small (~0.5 m/s off a 1 s jump at 55 km/h) but it was missing, so jumps flew a touch long and fast
+		if not _OLD_SPEEDTUCK: _aero_update(throttle)   # (the flight tucks too: it kept the last ground value)
 		var k_air: float = T.airDrag / (T.topSpeed * T.topSpeed) * aero_k
 		var sp_air := sqrt(v * v + vy * vy)
 		if _EPROBE: _e_add("air", -k_air * sp_air * (v * v + vy * vy) * dt)

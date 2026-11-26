@@ -143,7 +143,11 @@ const PAGES := [
 			["pedalTop", "Speed you can pedal to.", "Low", "High"],
 			["airDrag", "Air drag.", "None", "Lots"],
 			["tuckDrag", "Tuck (right stick forward) cuts the drag.", "Little", "Lots"],
-			["upDrag", "Sat up (stick back) catches the wind.", "Little", "Lots"],
+			["upDrag", "Sat up (stick pulled right back) catches the wind.", "Little", "Lots"],
+			["*speedTuck", "Fast and coasting he tucks by himself (a light pull back tucks him anyway).", "Never", "Fully"],
+			["speedTuckFrom", "Speed the tuck starts.", "Slow", "Fast"],
+			["speedTuckFull", "Speed he is fully tucked.", "Slow", "Fast"],
+			["speedTuckDrag", "How much the automatic tuck cuts the drag.", "None", "Like the stick"],
 		]],
 		["Sprint", [
 			["*sprintPower", "Sprint power.", "Weak", "Strong"],

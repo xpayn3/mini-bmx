@@ -3779,6 +3779,7 @@ func _process(dt: float) -> void:
 		pi["brakeF"] = st.brake_f; pi["brakeR"] = st.brake_r   # the levers (the index + middle fingers pull them)
 		pi["hipShift"] = _mcap("hip_shift", st.hip_shift, pdt)
 		pi["bodyStick"] = -0.55 if scenic else _mcap("body_stick", st.body_in_s, pdt)
+		pi["speedTuck"] = 0.0 if scenic else st.speed_tuck   # (the speed record tuck: hips back, back flat, head low)
 		pi["relax"] = 1.0 if scenic else 0.85 * dab_k   # foot down = calm: sat up, back straight, chin up
 		pi["tall"] = 1.0 if scenic else 0.0
 		pi["lookYaw"] = _look_yaw

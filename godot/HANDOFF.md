@@ -1469,6 +1469,14 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
 - **Posture is the player's**: neutral (stick centred) is an upright attack position (torso ~30 deg from vertical);
   the right stick forward folds the rider down into the full tuck (`aero` in `rider.gd`, nothing tucks by itself at
   speed any more), back sits up tall and back.
+- **Speed tuck (2026-11-26, user: a downhill speed-record rider's pose)**: `BikePhysics.speed_tuck` (0..1, `_speed_tuck_step`)
+  = by itself coasting fast (`speedTuckFrom` 11 .. `speedTuckFull` 18 m/s, x `speedTuck`; pedalling, stick forward, a
+  manual cancel it) or a LIGHT pull back on the right stick (0.05-0.3 in, gives way over 0.55-0.95 to the weight-back /
+  sit-up pose; the manual still arms from a quick pull). Drag (`_aero_update`, now also in flight): the stick's tuck cuts
+  `tuckDrag` fully, the automatic one `speedTuckDrag` 0.5 of it; the air brake (`upDrag`) only from ~0.55 back. Pose
+  (`rider.gd`, input `speedTuck`, style `speedTuckPose`): back to `TUCK_ANG` 1.2 rad, hips `TUCK_HIP_BACK` 0.16 m back /
+  `TUCK_HIP_DOWN` 0.10 down, head `TUCK_HEAD` forward + low; jump / landing / spin / flip poses fade it out. Sliders Ride >
+  Speed > Pedalling. `BMX_OLD_SPEEDTUCK=1` = before. Not ridden by the user; playground suite not re-run.
 - **Full-body leans** (right stick, `rider.gd`): forward = hips forward and up (legs extend), chest out over the bars,
   chin forward, elbows up and out; back = hips behind and down, chest over the hips, arms long, elbows in; side
   (`bodyLat` = `flick` on the ground / `air_stick.x` in the air) = the hips go to the outside of the leaning bike; in
