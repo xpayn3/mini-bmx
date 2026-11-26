@@ -27,7 +27,7 @@ const NEUTRAL := {hipX = 0.0, hipY = 0.0, lean = 0.0, elbowsOut = 0.0, kneesOut 
 	spineCurve = 0.0, spineSide = 0.0, spineLow = 0.5, chestFwd = 0.0, chestUp = 0.0, chestSide = 0.0, twist = 0.0,
 	neck = 0.0, headYaw = 0.0, headRoll = 0.0,
 	shoulderFwd = 0.0, shoulderUp = 0.0, elbowsDown = 0.0, elbowOutL = 0.0, elbowOutR = 0.0, wristRoll = 0.0,
-	elbowsBack = 0.0, armBend = 0.0,
+	elbowsBack = 0.0, armBend = 0.6,   # (armBend 0 -> 0.6 on 2026-11-26: ~100 deg elbows, the attack position; RiderPanels migrates old saves)
 	kneesFwd = 0.0, kneeOutL = 0.0, kneeOutR = 0.0, heelFwd = 0.0, heelUp = 0.0, footAngle = 0.0, footOut = 0.0, footSlide = 0.025}
 ## lookpanel.js DEFAULT_LOOK
 const DEFAULT_LOOK := {shell = "#16171a", peak = "#ececec", goggleFrame = "#f2f2ee", lens = "#ff7a2a", strap = "#ff6a4d",
@@ -757,7 +757,13 @@ func set_style(s: Dictionary) -> void:
 		var eo: float = elbowsOut + float(style.elbowOutL if sd < 0 else style.elbowOutR)
 		poles_leg.append(Vector3(1 + float(style.kneesFwd), 0.1 - 0.5 * float(style.kneesFwd), sd * (0.1 + 0.3 * ko)).normalized())
 		# elbows bend back and down, only a little out to the side (more with Elbows out)
-		poles_arm.append(Vector3(-0.4 + 0.25 * eo - float(style.elbowsBack), -0.5 + 0.4 * eo - float(style.elbowsDown), sd * clampf(0.35 + 0.65 * eo, 0.1, 1.2)).normalized())
+		# (2026-11-26, user: "arms and elbows look wrong, jumbled", compared with a pro downhill video: his elbows point out to the
+		# side and a little back, forearms about level with the bars. Ours pointed mostly back and down: the "rowing" arms.
+		# Now mostly out, some back, a little down. BMX_OLD_ARMS=1 = before)
+		if _OLD_ARMS:
+			poles_arm.append(Vector3(-0.4 + 0.25 * eo - float(style.elbowsBack), -0.5 + 0.4 * eo - float(style.elbowsDown), sd * clampf(0.35 + 0.65 * eo, 0.1, 1.2)).normalized())
+		else:
+			poles_arm.append(Vector3(-0.3 + 0.2 * eo - float(style.elbowsBack), -0.25 + 0.3 * eo - float(style.elbowsDown), sd * clampf(0.75 + 0.5 * eo, 0.1, 1.3)).normalized())
 
 
 # ---------------- posing helpers ----------------
@@ -1350,6 +1356,8 @@ var sm_pre := 0.0; var sm_ext := 0.0; var sm_popfx := 0.0; var sm_squash := 0.0;
 var sm_tuck := 0.0   # the air tuck (bike pulled up into the body), eased
 var tuck_out := 0.0  # this frame's tuck (0..1)
 var speed_tuck_k := 0.0   # this frame's speed tuck (0..1, after the jump / trick poses took their share)
+static var _OLD_ARMS := OS.get_environment("BMX_OLD_ARMS") != ""   # elbows back + down, arms nearly straight
+static var _OLD_TWIST := OS.get_environment("BMX_OLD_TWIST") != ""   # the shoulders twisted up to 0.6 rad into a turn
 var body_off := Vector2.ZERO   # in the air: the hips (x fwd, y up, bike frame) against take-off; Game moves the bike against it
 var _air_ref := Vector2.ZERO; var _air_ref_ok := false
 var sm_effort := 0.0
@@ -2183,7 +2191,13 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# bike's frame, so it turns back against it - the hips half way (they're on the saddle / pedals), the shoulders
 	# nearly all the way: the rider keeps facing where they fly while the bike hangs out sideways
 	var awhip: float = clampf(_num(p, "airWhip"), -1.4, 1.4) * air
-	var tw_base: float = _pk_tyaw + float(sty.twist) + clampf(_num(p, "airSpin") * 0.07 + sm_turn * 0.13 * float(sty.turnTwist) + lead, -0.6, 0.6) + _num(p, "flipTwist")   # (a flip: the shoulders turn to spot the landing)
+	# (2026-11-26, a pro's slow-motion berms: his chest stays square over the bars, the head turns into the corner. Ours twisted
+	# the shoulders up to 0.6 rad with the hands on the grips: the race number faced the camera, the arms splayed. Turn share
+	# 0.13 -> 0.07, lead +-0.35 -> +-0.18, total +-0.6 -> +-0.3 (the eyes still lead: head below). BMX_OLD_TWIST=1 = before)
+	var tw_k: float = 0.13 if _OLD_TWIST else 0.07
+	if not _OLD_TWIST: lead = clampf(lead, -0.18, 0.18)
+	var tw_cap: float = 0.6 if _OLD_TWIST else lerpf(0.3, 0.6, air)   # (an air spin keeps its old room)
+	var tw_base: float = _pk_tyaw + float(sty.twist) + clampf(_num(p, "airSpin") * 0.07 + sm_turn * tw_k * float(sty.turnTwist) + lead, -tw_cap, tw_cap) + _num(p, "flipTwist")   # (a flip: the shoulders turn to spot the landing)
 	var tw_air: float = -0.22 * tab - 0.85 * awhip
 	var tw := Basis(tw_axis, tw_base + tw_air)
 	# (2026-11-23, user: "the shoulder pops off") the shoulders' twist (a whip, a tabletop) is held to what both arms can
@@ -2345,7 +2359,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		# Gregor 2000 / Millet 2002: standing sprints are 25-30 % more powerful, the arms pull to counter the push)
 		# (eased in and out; spinning fast the elbows tuck in a little and drop a touch: a quicker, tighter sprint pose)
 		if _spr_arm > 0.01 and not standing and air < 0.3:
-			var wide := Vector3(-0.1, 0.05, side * 1.0).normalized().lerp(Vector3(-0.25, -0.15, side * 0.7).normalized(), 0.8 * cad_k).normalized()
+			var wide := (Vector3(-0.1, 0.05, side * 1.0) if _OLD_ARMS else Vector3(-0.15, -0.15, side * 1.0)).normalized().lerp(Vector3(-0.25, -0.15, side * 0.7).normalized(), 0.8 * cad_k).normalized()   # (sprint elbows out, a touch under the shoulders)
 			pole_a = pole_a.lerp(wide, 0.85 * _spr_arm * (1.0 - 0.4 * fat)).normalized()
 		if _inhale > 0.01 and not standing:
 			# a deep breath is mostly rib flare: the ribcage widens, so the shoulders and elbows spread out a touch (not up)

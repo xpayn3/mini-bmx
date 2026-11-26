@@ -238,7 +238,10 @@ static func _build_materials() -> void:
 	MAT["trunk"] = _bark_mat("bark_light", Color(0.92, 0.88, 0.82))
 	MAT["trunk_pale"] = _bark_mat("bark_pale", Color(0.95, 0.95, 0.92))
 	MAT["trunk_pine"] = _bark_mat("bark_pine", Color(1.0, 0.95, 0.9))
-	MAT["root"] = _bark_mat("bark_pine", Color(0.72, 0.62, 0.55))   # (darker: earthy, worn by tyres)
+	# (2026-11-26, user: "the roots are awful": the dark pine scan x a dark tint read as black cracks across the dirt. Exposed
+	# trail roots are worn pale grey-brown on top: the light bark scan, warm tint. BMX_OLD_ROOTS=1 = before)
+	if OS.get_environment("BMX_OLD_ROOTS") != "": MAT["root"] = _bark_mat("bark_pine", Color(0.72, 0.62, 0.55))
+	else: MAT["root"] = _bark_mat("bark_light", Color(1.0, 0.88, 0.74))
 	MAT["root"].set_shader_parameter("bark_uv", true)
 	MAT["root"].set_shader_parameter("bark_tile", 0.35)
 	MAT["root_world"] = MAT["root"].duplicate()   # (draped roots: one plain mesh per chunk, no instance data)

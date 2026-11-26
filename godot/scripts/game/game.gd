@@ -2538,6 +2538,9 @@ const LIFT_DOWN := 0.6   # m/s it settles back
 var _lift_s := 0.0       # the eased tyre-unclip lift
 const AIR_SHARE_EASE := 0.08   # s: back on the ground the air offset eases out (it popped the bike up in one frame)
 var _air_dlt := Vector3.ZERO
+var _piv_c := 0.0; var _piv_w := 0.5   # drawn pitch pivot correction (m) and its rear share
+const LIFT_AIR := 1.5   # m/s: the tyre-unclip lift lets go in the air
+static var _OLD_PIVOT := OS.get_environment("BMX_OLD_PIVOT") != ""
 static var _OLD_AIRSHARE_SNAP := OS.get_environment("BMX_OLD_AIRSHARE_SNAP") != ""
 const AIR_SHARE := 0.8   # in the air the drawn bike moves this share of the rider's hip moves against it (the bike is ~1/6 of the weight)
 static var _OLD_AIRSHARE := OS.get_environment("BMX_OLD_AIRSHARE") != ""
@@ -3596,6 +3599,29 @@ func _process(dt: float) -> void:
 	_steer_c = _mcap("steer", _bar_draw(st, mdt, dab_lean) + st.bar_catch, mdt)
 	rig.pose(drawn_pos.x, y_draw + (1.5 if Env.s("BMX_PITCH_POSE") != "" else 0.0), drawn_pos.z, hd, p_draw, st.hop_nose,
 		_lean_c + st.rock + wobble + dab_lean, _steer_c - wobble * 1.5 + _pk_bar, st.wheel_f, st.wheel_r, st.crank)
+	# (2026-11-26, F8 seed 876814: "jumps from the back wheel are glitchy as hell": the drawn bike pitches about its own origin,
+	# its rear axle 0.44 m behind and 0.45 m above it, while the physics puts the rear axle 0.33 m behind its point with no
+	# height. Flat that is invisible; 0.9 rad up on the back wheel the drawn rear wheel sat ~25 cm under the physics' one, inside
+	# the ground, and the tyre unclip shoved the whole bike up 25-32 cm and let it down again in the air. Now the drawn bike is
+	# moved so the axle carrying it is where the physics has it: the rear on the back wheel, the front on the nose, the mean on
+	# both (tiny then), in the air the end the pitch lands on; eased, never stepped. BMX_OLD_PIVOT=1 = before)
+	if not _OLD_PIVOT and not st.crash_on and Env.s("BMX_PITCH_POSE") == "":
+		var lr: Vector3 = rig.pitch_g.to_local(rig.wheel_r.global_position)
+		var lf: Vector3 = rig.pitch_g.to_local(rig.wheel_f.global_position)
+		var sp := sin(p_draw); var cp := cos(p_draw)
+		var c_r: float = (-phys.BB_REAR * sp + lr.y) - (lr.x * sp + lr.y * cp)
+		var c_f: float = ((phys.L - phys.BB_REAR) * sp + lf.y) - (lf.x * sp + lf.y * cp)
+		var w_t: float = 0.5
+		if st.air: w_t = clampf(0.5 + p_draw * 2.0, 0.0, 1.0)
+		elif st.front_air and not st.rear_air: w_t = 1.0
+		elif st.rear_air and not st.front_air: w_t = 0.0
+		_piv_w = move_toward(_piv_w, w_t, 6.0 * mdt)
+		var c_t: float = lerpf(c_f, c_r, _piv_w)
+		if absf(p_draw) > 1.3: c_t = 0.0   # (a flip: no ground to match)
+		_piv_c = move_toward(_piv_c, c_t, 2.5 * mdt) if absf(c_t - _piv_c) < 0.6 else c_t
+		rig.position.y += _piv_c
+	else:
+		_piv_c = 0.0
 	_pk = _perf("bike_pose", _pk)
 	DebugOverlay.draw(self, st, drawn_pos, hd)
 	# the physics' tyres are soft and follow the smooth height field; the drawn ground is a triangle mesh
@@ -3622,7 +3648,10 @@ func _process(dt: float) -> void:
 		# LIFT_DOWN. Taken at once it popped the whole bike and rider 5-20 cm in one frame and dropped them the
 		# next, over any rock the suspension's drawn travel couldn't take
 		var need: float = rig.position.y - _pre_y
-		if st.air or st.crash_on or absf(need - _lift_s) > 0.5: _lift_s = need
+		# (in the air it used to be taken at once: off the back wheel of a manual the lift jumped 0.19 -> 0.32 m in a tick and fell
+		# to 0 in five. Now eased there too, down at LIFT_AIR; BMX_OLD_PIVOT=1 = the snap)
+		if st.crash_on or absf(need - _lift_s) > 0.5 or (st.air and _OLD_PIVOT): _lift_s = need
+		elif st.air and need < _lift_s: _lift_s = maxf(need, _lift_s - LIFT_AIR * mdt)
 		elif need > _lift_s: _lift_s = minf(need, _lift_s + LIFT_UP * mdt)
 		else: _lift_s = maxf(need, _lift_s - LIFT_DOWN * mdt)
 		rig.position.y = _pre_y + _lift_s
@@ -3728,15 +3757,20 @@ func _process(dt: float) -> void:
 		# the pose inputs that switch on / off with the bike leaving / touching the ground are eased, never stepped
 		# (a corner's turn pose used to snap to zero on the first air frame, a stick tilt off on landing)
 		var ek := 1.0 - exp(-dt * 8.0)
+		# (2026-11-26, F8 seed 876814: "over a small hill, lifted a bit, a weird swing of the whole rider mid-air, and on landing
+		# it swung side to side": a run of 0.03-0.12 s skips flipped these between their air and ground values every few ticks
+		# (stick held back = the air tilt pose in the air, the lean-back pose on the ground). They follow air_k now (1 only for a
+		# real flight, eased in / out: BikePhysics._air_blend), like the counter-lean. BMX_OLD_AIRBLEND=1 = the raw flag)
+		var ak: float = (1.0 if st.air else 0.0) if phys._OLD_AIRBLEND else st.air_k
 		_yaw_s += (st.yaw_rate - _yaw_s) * (1.0 - exp(-dt * 14.0))   # (the tyre sim's bump nudges are not the rider's business)
-		_turn_s += ((0.0 if st.air else st.yaw_rate * clampf(absf(st.v) / 3.0, 0.3, 1.0)) - _turn_s) * (1.0 - exp(-dt * 5.0))
-		_aspin_s += ((st.yaw_rate if st.air else 0.0) - _aspin_s) * ek
-		_atilt_s += ((st.air_tilt * float(T.get("stickBodyTilt", 0.6)) * clampf(st.air_stick.length() * 3.0 + absf(st.edge_s) * 2.0, 0.0, 1.0) if st.air else 0.0) - _atilt_s) * ek
+		_turn_s += ((1.0 - ak) * st.yaw_rate * clampf(absf(st.v) / 3.0, 0.3, 1.0) - _turn_s) * (1.0 - exp(-dt * 5.0))
+		_aspin_s += (ak * st.yaw_rate - _aspin_s) * ek
+		_atilt_s += ((st.air_tilt * float(T.get("stickBodyTilt", 0.6)) * clampf(st.air_stick.length() * 3.0 + absf(st.edge_s) * 2.0, 0.0, 1.0) * ak if st.air else 0.0) - _atilt_s) * ek
 		# (on a bank the stick leans the body with the bike: no hips to the outside there, see bank_sq)
 		# (since 2026-11-26 the stick leans the body itself, also on banks: no fade. BMX_OLD_STICKBIKE=1 = before)
-		_blat_s += ((st.air_stick.x if st.air else st.flick * (1.0 - (st.bank_sq if BikePhysics._OLD_STICKBIKE else 0.0))) - _blat_s) * ek
+		_blat_s += (lerpf(st.flick * (1.0 - (st.bank_sq if BikePhysics._OLD_STICKBIKE else 0.0)), st.air_stick.x if st.air else 0.0, ak) - _blat_s) * ek
 		# the bike's twist against the body in the air (an air whip): the body turns back against it
-		_awhip_s += ((st.air_tw if st.air else 0.0) - _awhip_s) * (1.0 - exp(-dt * 16.0))
+		_awhip_s += ((st.air_tw * ak if st.air else 0.0) - _awhip_s) * (1.0 - exp(-dt * 16.0))
 		var pi := _pose_in   # one dictionary filled in place every frame (update_pose doesn't keep it)
 		pi["footL"] = lt.footL
 		pi["footR"] = lt.footR
@@ -3772,15 +3806,15 @@ func _process(dt: float) -> void:
 		pi["extend"] = maxf(0.0, st.compress)
 		# (hands off he winds up into the lip himself: autoPump = his skill, see BikePhysics._step_lip)
 		var auto_pre: float = 0.0 if (st.pop_wait > 0.0 or st.squash > 0.2) else st.prep * float(phys.T.autoPump) * (1.0 - st.auto_absorb)
-		pi["preload"] = maxf(st.crouch, auto_pre) * (0.0 if st.air else 1.0)
+		pi["preload"] = maxf(st.crouch, auto_pre) * (1.0 - ak)
 		# (the stand-tall + pull-up of a pro: only after the player's own pump; hands off he rides it plainly)
 		pi["popFx"] = st.pop_fx * minf(1.0, st.pop_q) * (1.0 if st.pro_flight else 0.35)
 		pi["airPull"] = st.air_pull if (st.air and st.pro_flight) else 0.0   # the bike pulled up into the body after the pop (the tuck)
 		pi["squash"] = maxf(maxf(st.squash, st.auto_absorb) * st.prep, st.squash_fx)   # (hands off he soaks small / fast lips: auto_absorb)
 		pi["lipK"] = maxf(st.prep, 1.0 if (st.pop_wait > 0.0 or st.hop_t > 0.0) else 0.0)
-		pi["landFold"] = 0.0 if st.air else st.land_fold   # folded up by a landing, gathering himself again
+		pi["landFold"] = st.land_fold * (1.0 - ak)   # folded up by a landing, gathering himself again
 		pi["landReach"] = st.land_prep * st.land_reach     # legs reaching down for the ground (as far as this landing needs)
-		pi["inAir"] = 1.0 if st.air else 0.0
+		pi["inAir"] = 1.0 if ak > 0.5 else 0.0
 		pi["brakeF"] = st.brake_f; pi["brakeR"] = st.brake_r   # the levers (the index + middle fingers pull them)
 		pi["hipShift"] = _mcap("hip_shift", st.hip_shift, pdt)
 		pi["bodyStick"] = -0.55 if scenic else _mcap("body_stick", st.body_in_s, pdt)

@@ -1076,6 +1076,7 @@ func berm_shape(o: float, tn: float) -> float:
 ## noises (`berm_style`), so a berm differs from the next: tilted .. curved, rim at the trail's own width + 0 .. 0.8 m, lip or none,
 ## scoop or none. Only + * / - sm() here (no exp / log): C# mirrors it exactly. BMX_OLD_BERM=1 = the old shape.
 static var OLD_BERM := OS.get_environment("BMX_OLD_BERM") != ""
+static var OLD_NARROWBERM := OS.get_environment("BMX_OLD_NARROWBERM") != ""   # narrow trails' berms with the rim close in
 ## the trail's bumps the same across it and along the route, the line bumpier (before 2026-11-26). BMX_OLD_WEAR=1
 static var OLD_WEAR := OS.get_environment("BMX_OLD_WEAR") != ""
 var bs_c := 0.0
@@ -1096,6 +1097,18 @@ func berm_style(a: float, b: float, w: float) -> void:
 	bs_cw = 0.8 + 0.6 * (bs_c / 0.75)
 	bs_lip = 0.18 * sm(0.0, 0.35, n3)
 	bs_scoop = 0.5 * g * wn
+	# (2026-11-26, F8 seed 876814, user: "on top of berms weird interactions, we slide over"): on a forest singletrack (half-width
+	# 0.35) the rim sat 1.1-1.25 m out with a 0.3-0.8 m cap: leaned ~45 deg at 30-35 km/h, a little wide put the tyres on the crest,
+	# they unloaded (rear off 0.35-0.42 s, no hop) and the bike floated over the top. Narrow trails (nk 1 at 0.35, 0 from 0.85: the
+	# others unchanged): rim further out, the face curving up (running wide catches you), no worn scoop dug into the face.
+	# BMX_OLD_NARROWBERM=1 = before
+	if not OLD_NARROWBERM:
+		var nk := 1.0 - sm(0.35, 0.85, w)
+		if nk > 0.0:
+			bs_F = maxf(bs_F, w + 0.75 + 0.6 * nk)
+			bs_c = maxf(bs_c, 0.4 * nk)
+			bs_cw = maxf(bs_cw, 0.8 + 0.4 * nk)
+			bs_scoop = bs_scoop * (1.0 - nk)
 
 
 func berm_shape2(o: float, tn: float) -> float:
