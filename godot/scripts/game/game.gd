@@ -1366,7 +1366,7 @@ func _rocks_near(x: float, z: float, reach: float) -> Array:
 			if mm == null:
 				continue
 			var is_cactus := mm.mesh in cacti
-			if mm.mesh != rock and not is_cactus:
+			if mm.mesh != rock and not is_cactus and not mi.has_meta("rock"):
 				continue
 			for i in mm.instance_count:
 				var xf: Transform3D = mm.get_instance_transform(i)

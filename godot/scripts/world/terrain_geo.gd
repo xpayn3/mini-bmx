@@ -29,8 +29,19 @@ static func ensure() -> void:
 	MESH["blob"] = _crown(7, 2, false).to_mesh(true)
 	MESH["pine"] = GeoBuf.merge([GeoBuf.cone(1, 1.6, 6).translate(0, 0.8, 0), GeoBuf.cone(0.75, 1.3, 6).translate(0, 1.6, 0),
 		GeoBuf.cone(0.45, 1.0, 6).translate(0, 2.3, 0)]).to_mesh()
-	MESH["rock"] = _boulder(3, 1).to_mesh()
-	MESH["pebble"] = _boulder(3, 0).to_mesh()
+	# rocks (rock_gen.gd): a shape per biome rock type, 2 variants, LOD1 (the list's mesh) + LOD0 (its near twin);
+	# "rock" / "pebble" = the granite ones (levels, playground). BMX_OLD_ROCKS=1 = the old icosphere boulders everywhere.
+	if old_rocks():
+		MESH["rock"] = _boulder(3, 1).to_mesh()
+		MESH["pebble"] = _boulder(3, 0).to_mesh()
+	else:
+		for t in RockGen.TYPES:
+			for v in RockGen.VARIANTS:
+				MESH[RockGen.list_name(t, v)] = RockGen.mesh(t, v, 1)
+				MESH[RockGen.list_name(t, v) + "_lod0"] = RockGen.mesh(t, v, 0)
+			MESH["pebble_" + t] = RockGen.mesh(t, 1, -1)
+		MESH["rock"] = MESH["rock_granite0"]
+		MESH["pebble"] = MESH["pebble_granite"]
 	MESH["box"] = GeoBuf.box(1, 1, 1).to_mesh()
 	CactusGeo.ensure()
 	for k in CactusGeo.KINDS:
@@ -132,6 +143,27 @@ static func _sign_board() -> ArrayMesh:
 	return st.commit()
 
 
+static func old_rocks() -> bool:
+	return OS.get_environment("BMX_OLD_ROCKS") == "1"
+
+
+static func _rock_mat(id: String, tint: Color, tile: float, relief: float, moss: float) -> ShaderMaterial:
+	var m := ShaderMaterial.new()
+	m.shader = preload("res://shaders/rock.gdshader")
+	var d := "res://assets/textures/rock/rock_%s_%s.jpg"
+	m.set_shader_parameter("rock_col", load(d % [id, "col"]))
+	m.set_shader_parameter("rock_nrm", load(d % [id, "nrm"]))
+	m.set_shader_parameter("rock_rgh", load(d % [id, "rgh"]))
+	m.set_shader_parameter("moss_col", load(d % ["moss", "col"]))
+	m.set_shader_parameter("moss_nrm", load(d % ["moss", "nrm"]))
+	m.set_shader_parameter("moss_rgh", load(d % ["moss", "rgh"]))
+	m.set_shader_parameter("tint", Vector3(tint.r, tint.g, tint.b))
+	m.set_shader_parameter("tile", tile)
+	m.set_shader_parameter("relief", relief)
+	m.set_shader_parameter("moss_k", moss)
+	return m
+
+
 static func _mat(albedo: Color, rough: float, metal: float = 0.0) -> ShaderMaterial:
 	var m := ShaderMaterial.new()
 	m.shader = preload("res://scripts/world/deco.gdshader")
@@ -214,7 +246,18 @@ static func _build_materials() -> void:
 	MAT["wood"] = _mat(w, 0.85)
 	MAT["leaf"] = _mat(w, 0.8)
 	MAT["leafSoft"] = _mat(w, 0.85)
-	MAT["rock"] = _mat(lin(0xa8a39a), 0.82, 0.02)
+	if old_rocks():
+		MAT["rock"] = _mat(lin(0xa8a39a), 0.82, 0.02)
+	else:
+		# scan per type: [texture, tint, tile m, relief, moss x, saturation]
+		var RS := {"granite": ["granite", Color(1.25, 1.25, 1.3), 1.6, 1.0, 1.0, 0.18], "desert": ["desert", Color(0.92, 0.86, 0.8), 1.8, 1.0, 0.0, 0.85],
+			"tundra": ["lichen", Color(1.05, 1.05, 1.08), 1.5, 1.1, 0.5, 0.8], "basalt": ["basalt", Color(0.95, 0.95, 0.97), 1.3, 1.0, 0.3, 0.7]}
+		for t in RS:
+			MAT["rock_" + t] = _rock_mat(RS[t][0], RS[t][1], RS[t][2], RS[t][3], RS[t][4])
+			MAT["rock_" + t].set_shader_parameter("saturation", RS[t][5])
+		MAT["rock"] = MAT["rock_granite"]
+		MAT["rock_plain"] = MAT["rock_granite"].duplicate()   # (a single MeshInstance: no instance data)
+		MAT["rock_plain"].set_shader_parameter("use_instance", false)
 	MAT["tuft"] = _mat(w, 0.9)
 	MAT["shed"] = _mat(w, 0.85)
 	MAT["fence"] = _mat(w, 0.9)

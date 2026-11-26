@@ -958,6 +958,27 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   LESSON: `f.q_*` (trail lookup state) is overwritten by any height / land read: take a trail verdict right after `trail()`
   (the forest clearance read late let a trunk 1 m off a singletrack: BONK on seed 12). Seen from above (seeds 4242, 12);
   NOT seen: cattails, heather, willows on a green-biome shore, the treeline krummholz.
+- **Rocks: generated shapes per biome, scan textures, LODs (2026-11-26, user: "realistic rock textures, desert rock and
+  mossy where forest / green", "realistic shapes, different types by biome, nice LODs")**. `world/rock_gen.gd` (`RockGen`):
+  each rock = a convex block (soft p-norm minimum of N random fracture planes: p small = weathered round, large = crisp
+  frost-split) + per-type weathering + fbm along the normal + a few concave dents, sunk foot, normalised to the old rock's
+  size (colliders / domes unchanged). Types: **granite** (rounded joint blocks; green land / forest), **desert**
+  (sandstone: flat top, bedding ledges, undercut foot, tafoni pits), **tundra** (frost-shattered slabs / blocks, sharp),
+  **basalt** (hex column cut by a tilted fracture, vesicles; ash fields); 2 variants each. Surface = star-shaped function
+  of direction, so every LOD is the same rock on a finer / coarser icosphere: LOD0 3380 tris (list `rock_<type><v>_lod0`,
+  deco_fade mode 4, near the rider), LOD1 500 tris (the list itself, mode 3 elsewhere + the shadow caster), pebbles 320
+  (`pebble_<type>`). Meshes cached on disk (`user://cache/rocks`, bump `RockGen.VER` when shapes change; ~0.6 s to build).
+  The chunk builder's `put("rock" | "pebble")` is rerouted in `_push` -> `_rock_type(x, z)` (biome weights, hash-mixed at
+  borders; saves / restores `f.b_*`), custom data rgb = brightness, a = moss (forest / wet / a little on green land, none
+  on ash / desert, less when cold). Shader `shaders/rock.gdshader`: Poly Haven CC0 scans (`assets/textures/rock`, 1K,
+  `SOURCE.txt`: desert rock_boulder_cracked, granite rock_face greyed (`saturation` 0.18), tundra lichen_rock, basalt
+  dark_rock_02, moss mossy_rock) triplanar in world metres with whiteout normal blending, a per-rock offset into the scan,
+  moss scan on up-facing faces in patches by the moss amount. Project setting `global_shader_variables/buffer_size`
+  65536 -> 131072 (the extra rock MultiMeshes ran out of instance-uniform slots). Title land re-baked. Gallery:
+  `res://tools/rock_gallery.tscn -- out.png [dist= yaw= h= sun= wire=1]`. `BMX_OLD_ROCKS=1` = the old icosphere boulders.
+  Seed 4242 desert lake: triangles 4.26M -> 4.71M a frame, draw calls 792 -> 856 (fps in the noise with other GPU apps).
+  Not done: the dry biomes' flat-shaded "weed" blob still reads like a fake low-poly rock; sandstone ledges are subtle;
+  the rope-bridge canyon rocks and arches still use the old blob.
 - **Leaf-card bushes (2026-11-25, user: "could we add Megascans bushes, or too heavy?" -> prototype from a procedural texture)**: bushes are no
   longer the lumpy blob. `world/card_bush.gd` (`CardBush`): ~30-46 upright quads (each folded in the middle, turned at random about the vertical, front
   facing away from the bush's middle: tilted cards looked wrong, user) on a dome, each with a leaf-cluster texture drawn in code (`texture("leaf" | "dry")`,

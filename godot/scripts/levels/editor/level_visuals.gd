@@ -49,7 +49,7 @@ static func _rocks(f: LevelField, parent: Node3D, in_game: bool, internal: bool)
 	mm.mesh = mesh
 	mm.instance_count = f.rocks.size()
 	for i in f.rocks.size():
-		if in_game: mm.set_instance_custom_data(i, Color(1, 1, 1, 1))
+		if in_game: mm.set_instance_custom_data(i, Color(1, 1, 1, 0.35))   # (a = moss: rock.gdshader)
 		var c: Dictionary = f.rocks[i]
 		var s := Vector3(c.sx, c.sy, c.sc) if in_game else Vector3(c.sx, c.sy, c.sc) * 0.9
 		mm.set_instance_transform(i, Transform3D(Basis(Vector3.UP, c.yaw).scaled_local(s), Vector3(c.x, float(c.base) - c.sc * 0.3, c.z)))
