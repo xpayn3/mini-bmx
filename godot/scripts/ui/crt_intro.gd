@@ -69,10 +69,10 @@ func _ready() -> void:
 	_born = Time.get_ticks_msec()
 	CrtTv.mute_world = true
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	if OS.get_environment("BMX_INTRO_AT") != "": _freeze = float(OS.get_environment("BMX_INTRO_AT"))
+	if Env.raw("BMX_INTRO_AT") != "": _freeze = float(Env.raw("BMX_INTRO_AT"))
 	if still: _freeze = STILL_T
-	_shots = OS.get_environment("BMX_INTRO_SHOTS")
-	if OS.get_environment("BMX_INTRO_SHOT_FROM") != "": _next_shot = float(OS.get_environment("BMX_INTRO_SHOT_FROM"))
+	_shots = Env.raw("BMX_INTRO_SHOTS")
+	if Env.raw("BMX_INTRO_SHOT_FROM") != "": _next_shot = float(Env.raw("BMX_INTRO_SHOT_FROM"))
 	root = Control.new()
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -164,7 +164,7 @@ func _process(delta: float) -> void:
 	_poll_skip()
 	if _skip >= 0.0: _skip += dt
 	if _shots != "" and (t >= _next_shot or (still and _still_frames == 12)) and t < T_END:
-		_next_shot += float(OS.get_environment("BMX_INTRO_SHOT_STEP")) if OS.get_environment("BMX_INTRO_SHOT_STEP") != "" else 0.5
+		_next_shot += float(Env.raw("BMX_INTRO_SHOT_STEP")) if Env.raw("BMX_INTRO_SHOT_STEP") != "" else 0.5
 		var img := get_viewport().get_texture().get_image()
 		img.save_png("%s_%05.2f.png" % [_shots, t])
 		var voices := 0

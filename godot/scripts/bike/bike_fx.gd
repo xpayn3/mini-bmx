@@ -425,7 +425,7 @@ class RotorGlow:
 
 	## Call once the rotor's final mesh + material are set (after MetalFinish.dress_rotor). BMX_ROTOR_LOD=0 off, 1 = always the quad.
 	func build_lod() -> void:
-		var force := OS.get_environment("BMX_ROTOR_LOD")
+		var force := Env.raw("BMX_ROTOR_LOD")
 		if force == "0" or mesh_instance == null or not (mesh_instance.mesh is ArrayMesh) or mesh_instance.get_parent() == null:
 			return
 		var arr: Array = (mesh_instance.mesh as ArrayMesh).surface_get_arrays(0)

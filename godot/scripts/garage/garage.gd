@@ -1104,7 +1104,7 @@ func _process(dt: float) -> void:
 		focus_t = stand_rider.head.global_position + Vector3(0, -0.1, 0)
 	elif stand_rider and head_env != "":   # tests: frame the standing rider's helmet
 		focus_t = stand_rider.head.global_position + Vector3(0, 0.15, 0)
-	var aim := OS.get_environment("BMX_GARAGE_AIM").split(",", false)   # tests: "x,y,z" = look at this point
+	var aim := Env.raw("BMX_GARAGE_AIM").split(",", false)   # tests: "x,y,z" = look at this point
 	if aim.size() == 3: focus_t = Vector3(float(aim[0]), float(aim[1]), float(aim[2]))
 	focus = focus.lerp(focus_t, minf(1.0, dt * 4))
 	var p := deg_to_rad(pitch)
@@ -1141,7 +1141,7 @@ func _process(dt: float) -> void:
 			and (door_open >= 1.0 or _door_hold) and _dirty <= 0.0
 
 func _unhandled_input(e: InputEvent) -> void:
-	if mode == "rider" and e is InputEventKey and e.pressed and not e.echo and e.keycode == KEY_INSERT:
+	if Dev.on and mode == "rider" and e is InputEventKey and e.pressed and not e.echo and e.keycode == KEY_INSERT:
 		anim_requested.emit()
 		return
 	if e is InputEventMouseButton or (e is InputEventMouseMotion and dragging):

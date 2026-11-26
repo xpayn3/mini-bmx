@@ -217,14 +217,14 @@ static func auto_quality() -> int:
 var data := DEFAULTS.duplicate()
 var bindings := {}   # action -> Array[InputEvent]
 var _had_quality := false
-var _test_run: bool = OS.get_environment("BMX_PADSEQ") != "" or Array(OS.get_cmdline_user_args()).any(func(a): return a.begins_with("--autotest") or a.begins_with("--bench") or a.begins_with("--hitch") or a.begins_with("--showcase"))
+var _test_run: bool = Env.raw("BMX_PADSEQ") != "" or Array(OS.get_cmdline_user_args()).any(func(a): return a.begins_with("--autotest") or a.begins_with("--bench") or a.begins_with("--hitch") or a.begins_with("--showcase"))
 var _overridden := false   # --set= / --quality= on the command line: this session's settings are not the player's
 ## nothing this session changes reaches the player's files: test runs, plus shot / minimised / headless runs
-var _no_save: bool = _test_run or OS.get_environment("BMX_MIN") != "" or OS.get_environment("BMX_OFFSCREEN") != "" or DisplayServer.get_name() == "headless" or Array(OS.get_cmdline_user_args()).any(func(a): return a.begins_with("--shot"))
+var _no_save: bool = _test_run or Env.raw("BMX_MIN") != "" or Env.raw("BMX_OFFSCREEN") != "" or DisplayServer.get_name() == "headless" or Array(OS.get_cmdline_user_args()).any(func(a): return a.begins_with("--shot"))
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	if OS.get_environment("BMX_PAD") != "": pad_active = true   # tests: as if the player were on a gamepad
+	if Env.raw("BMX_PAD") != "": pad_active = true   # tests: as if the player were on a gamepad
 	add_child(preload("res://scripts/ui/pad_toast.gd").new())   # "controller connected / disconnected" notice
 	load_settings()
 	if not FileAccess.file_exists(PATH):   # first launch on this PC: pick the preset from its GPU
@@ -283,7 +283,7 @@ func _install_bindings() -> void:
 			InputMap.action_add_event(action, e)
 	# Godot's built-in menu actions have no pad buttons: A = press the focused button, B = back
 	# (the pause leaflet, title menu, settings). Test runs skip real pads (see above) unless BMX_PAD.
-	if not _test_run or OS.get_environment("BMX_PAD") != "":
+	if not _test_run or Env.raw("BMX_PAD") != "":
 		for pair in [[&"ui_accept", JOY_BUTTON_A], [&"ui_cancel", JOY_BUTTON_B]]:
 			var has := false
 			for e in InputMap.action_get_events(pair[0]):
@@ -497,11 +497,11 @@ func apply() -> void:
 	if not headless and mon >= 0 and mon < DisplayServer.get_screen_count() and DisplayServer.window_get_current_screen() != mon:
 		DisplayServer.window_set_current_screen(mon)
 	var mode: int = get_v("window_mode")
-	if _test_run and OS.get_environment("BMX_FULLSCREEN") == "": mode = 0   # tests: a normal window, never fullscreen (user, 2026-11-23)
+	if _test_run and Env.raw("BMX_FULLSCREEN") == "": mode = 0   # tests: a normal window, never fullscreen (user, 2026-11-23)
 	var want := DisplayServer.WINDOW_MODE_WINDOWED
 	if mode == 1: want = DisplayServer.WINDOW_MODE_FULLSCREEN
 	elif mode == 2: want = DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN
-	if _test_run and OS.get_environment("BMX_MIN") != "": want = DisplayServer.WINDOW_MODE_MINIMIZED   # tests: out of the user's way
+	if _test_run and Env.raw("BMX_MIN") != "": want = DisplayServer.WINDOW_MODE_MINIMIZED   # tests: out of the user's way
 	if DisplayServer.get_name() != "headless" and DisplayServer.window_get_mode() != want:
 		DisplayServer.window_set_mode(want)
 	var res: String = get_v("resolution")
@@ -514,7 +514,7 @@ func apply() -> void:
 				DisplayServer.window_set_position(scr.position + (scr.size - sz) / 2)
 	if not headless and want == DisplayServer.WINDOW_MODE_WINDOWED:
 		_fit_window()
-	if _test_run and OS.get_environment("BMX_OFFSCREEN") != "" and not headless:   # tests: a normal window parked off the screens
+	if _test_run and Env.raw("BMX_OFFSCREEN") != "" and not headless:   # tests: a normal window parked off the screens
 		DisplayServer.window_set_position(Vector2i(-20000, 0))                       # (minimised windows draw late)
 	if not headless:
 		get_window().content_scale_factor = float(get_v("ui_scale"))

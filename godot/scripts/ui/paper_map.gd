@@ -45,7 +45,7 @@ func _ready() -> void:
 	super._ready()
 	cols = 4; rows = 2
 	panel = Vector2(0.21, 0.2625)    # 0.84 x 0.525 m, the aspect of the print
-	shots = OS.get_environment("BMX_MAP_SHOTS")
+	shots = Env.raw("BMX_MAP_SHOTS")
 	sound_stream = load("res://assets/audio/paper_unfold.mp3")   # the user's crumpling paper recording
 	sound_db = -4.0
 	tempo = 0.36                      # unfolds at an easy pace (~2 s), still springy
@@ -66,8 +66,8 @@ func _ready() -> void:
 	_world.size = Vector2(C_IW, C_IH)
 	_world.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	_world_vp.add_child(_world)
-	if OS.get_environment("BMX_MAP_SCROLL") != "":
-		var sv := OS.get_environment("BMX_MAP_SCROLL").split(",")
+	if Env.raw("BMX_MAP_SCROLL") != "":
+		var sv := Env.raw("BMX_MAP_SCROLL").split(",")
 		test_scroll = Vector2(float(sv[0]), float(sv[1]))
 
 
@@ -90,7 +90,7 @@ func show_map() -> void:
 		_printing = false
 		hold_flap = false
 		print("PAPERMAP world printed in %.0f ms (while unfolding)" % ((Time.get_ticks_usec() - t0) / 1000.0))
-	if OS.get_environment("BMX_MAP_ZOOM") != "": _zoom_t = clampf(float(OS.get_environment("BMX_MAP_ZOOM")), zoom_min, ZOOM_MAX)
+	if Env.raw("BMX_MAP_ZOOM") != "": _zoom_t = clampf(float(Env.raw("BMX_MAP_ZOOM")), zoom_min, ZOOM_MAX)
 	_update_rect()
 
 

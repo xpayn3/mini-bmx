@@ -67,13 +67,13 @@ static func ensure_loaded() -> void:
 		current = _complete(cf.get_value("fw", "current", {}))
 	if not (active in BUILTIN or active in customs): active = "Stock"
 	# tests: BMX_FW_PRESET=<name> and BMX_FW=pitch=1.3,poe=60 (not saved unless a slider is touched)
-	var ep := OS.get_environment("BMX_FW_PRESET")
+	var ep := Env.raw("BMX_FW_PRESET")
 	if ep in BUILTIN or ep in customs:
 		active = ep; current = preset(ep)
-	for kv in OS.get_environment("BMX_FW").split(",", false):
+	for kv in Env.raw("BMX_FW").split(",", false):
 		var p := kv.split("=")
 		if p.size() == 2 and current.has(p[0]): current[p[0]] = float(p[1])
-	preview_speed = float(OS.get_environment("BMX_FW_PREVIEW"))   # tests: Preview on at this speed
+	preview_speed = float(Env.raw("BMX_FW_PREVIEW"))   # tests: Preview on at this speed
 	version += 1
 
 
@@ -85,7 +85,7 @@ static func _complete(d: Dictionary) -> Dictionary:
 
 
 static func save() -> void:
-	if OS.get_environment("BMX_PADSEQ") != "": return   # menu tests: never into the player\'s files
+	if Env.raw("BMX_PADSEQ") != "": return   # menu tests: never into the player\'s files
 	var cf := ConfigFile.new()
 	cf.set_value("fw", "active", active)
 	cf.set_value("fw", "current", current)

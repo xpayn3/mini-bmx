@@ -37,6 +37,7 @@ func _fill_bindings() -> void:
 		var h := _lbl(t, 12, MUTED, true); h.custom_minimum_size.x = _f(160)
 		grid.add_child(h)
 	for action in Settings.ACTIONS:
+		if not Dev.on and action in Dev.ACTIONS: continue   # developer tools: not offered in release builds
 		var l := _lbl(Settings.ACTIONS[action][0], 15)
 		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		l.size_flags_vertical = Control.SIZE_SHRINK_CENTER

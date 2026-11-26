@@ -2,6 +2,8 @@
 #   .\steam\upload.ps1 -User <steam build account>            # export + upload
 #   .\steam\upload.ps1 -SkipExport -User <account>              # upload the last export
 #   .\steam\upload.ps1 -ExportOnly                              # just export to build\steam\windows
+# The release ("Windows Desktop" preset) leaves every dev tool out and is checked by steam\check_release.py. A build
+# WITH the dev tools for testers: godot --headless --path godot --export-debug "Windows Dev" ..\build\dev\windows\Runout.exe
 # Needs: Godot .NET export templates installed, and steamcmd (Steamworks SDK > tools\ContentBuilder\builder\steamcmd.exe,
 # or https://developer.valvesoftware.com/wiki/SteamCMD) at $SteamCmd. Steam Guard asks for a code the first time.
 param(
@@ -26,6 +28,9 @@ if (-not $SkipExport) {
 	Pop-Location
 	if ($code -ne 0 -or -not (Test-Path "$out\Runout.exe")) { throw "Godot export failed ($code)" }
 	Get-ChildItem $out -Recurse -Filter *.pdb | Remove-Item -Force
+	# release gate: no developer tool may ship (res://dev/, editor addons, tools/, the overlay's library)
+	python (Join-Path $PSScriptRoot "check_release.py") "$out\Runout.exe"
+	if ($LASTEXITCODE -ne 0) { throw "Release check failed: dev files in the build (see RELEASECHECK lines)" }
 	Write-Host "Exported to $out"
 }
 if ($ExportOnly) { exit 0 }

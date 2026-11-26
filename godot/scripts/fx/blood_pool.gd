@@ -95,7 +95,7 @@ func _setup_step() -> void:
 			m.next_pass = _halo
 			_stage = 4
 			if _wiped: _apply_wipe()
-	if OS.get_environment("BMX_BLOOD_PROBE") != "": print("BLOOD pool setup stage %d %.1f ms" % [_stage, (Time.get_ticks_usec() - t0) / 1000.0])
+	if Env.raw("BMX_BLOOD_PROBE") != "": print("BLOOD pool setup stage %d %.1f ms" % [_stage, (Time.get_ticks_usec() - t0) / 1000.0])
 
 ## the ground under the grid, draped (+1.6 cm so it never flickers into it)
 func _build_mesh(gr: PackedFloat32Array) -> void:
@@ -140,7 +140,7 @@ func _process(dt: float) -> void:
 	_sim.Step(add, N / 2, N / 2, ITERS)
 	if not hit_edge and _sim.AtEdge():
 		hit_edge = true
-		if OS.get_environment("BMX_BLOOD_PROBE") != "": print("BLOOD pool reached its grid edge at t=%.1f" % t)
+		if Env.raw("BMX_BLOOD_PROBE") != "": print("BLOOD pool reached its grid edge at t=%.1f" % t)
 	_upl -= dt
 	if _upl <= 0.0:
 		_tex.update(_sim.MakeImage())

@@ -14,7 +14,7 @@ const COURSE_LEN := 4000.0
 const MTN_W := 150.0
 ## the world's route (RouteSpine, 2026-11-25): the mountains and the trail's corridor are measured along it (s) and
 ## across it (d). BMX_OLD_ROUTE=1 = the old straight corridor along +x (s = x, d = z - zc(x)).
-static var OLD_ROUTE := OS.get_environment("BMX_OLD_ROUTE") != ""
+static var OLD_ROUTE := Env.raw("BMX_OLD_ROUTE") != ""
 const SPINE_AHEAD := 4000.0   # m of spine laid out past the course's end (the land there already follows it)
 const SP_NODE := 8.0          # m: the (s, |d|) lattice the land reads, bilinear between nodes (exact nodes, same in C#)
 const QR := 19.0
@@ -91,7 +91,7 @@ const BIO_A := 1.0 / 1300.0
 const BIO_M := 1.0 / 1700.0
 const BIO_F := 1.0 / 900.0
 const BIO_S := 1.0 / 2200.0
-static var OLD_LAND := OS.get_environment("BMX_OLD_LAND") != ""
+static var OLD_LAND := Env.raw("BMX_OLD_LAND") != ""
 const I28 := 1.0 / 28.0
 const I8 := 1.0 / 8.0
 const I1_5 := 1.0 / 1.5
@@ -271,7 +271,7 @@ var grey_bands := PackedColorArray()
 var profiles := {}
 var sized := {}   # TrailFeatures.make_set()["sized"]: type -> [profile per speed size]
 ## (2026-11-24) route jumps sized to the speed riders arrive at (TrailCourse.VA); BMX_OLD_JUMPSIZE=1 = always the big one
-static var OLD_JUMPSIZE := OS.get_environment("BMX_OLD_JUMPSIZE") != ""
+static var OLD_JUMPSIZE := Env.raw("BMX_OLD_JUMPSIZE") != ""
 ## the AI's planned speed / least speed as a share of a size's design speed, per type (DemoPilot.FEAT_V / FEAT_MIN at size 3)
 ## (a smaller kicker at its full design speed, never under 90 % of it: slower, the AI rolled off its open back nose first)
 const SIZE_V_K := {"table": [0.9, 0.8], "tableLine": [0.9, 0.8], "kicker": [1.0, 0.9], "flow": [0.93, 0.0]}
@@ -935,7 +935,7 @@ func berm_shape(o: float, tn: float) -> float:
 ## m deep, in short stretches of some berms: the hollow riders wear into the lip taking it fast / whipping it). Style per arc length from
 ## noises (`berm_style`), so a berm differs from the next: tilted .. curved, rim at the trail's own width + 0 .. 0.8 m, lip or none,
 ## scoop or none. Only + * / - sm() here (no exp / log): C# mirrors it exactly. BMX_OLD_BERM=1 = the old shape.
-static var OLD_BERM := OS.get_environment("BMX_OLD_BERM") != ""
+static var OLD_BERM := Env.raw("BMX_OLD_BERM") != ""
 var bs_c := 0.0
 var bs_F := 2.7
 var bs_cw := 0.5
@@ -1474,7 +1474,7 @@ func make_feat(x: float, z: float, dx: float, dz: float, type: String, b0: float
 ## ("" = plain trail for that beat). Jump lines draw from their own random stream (seeded by where they start), so the
 ## road features after them are laid out exactly as before
 const RHYTHM := [["rhythm", "flow", "rhythm"], ["kicker", "table", "kicker", "tableLine", "kicker", "flow", "woodKicker", "woodDrop"], ["bridge", "skinny", ""]]   # (wood drop + north-shore skinny: 2026-11-25)   # (more kickers: 2026-11-23, user)
-static var OLD_RHYTHM := OS.get_environment("BMX_OLD_RHYTHM") != ""
+static var OLD_RHYTHM := Env.raw("BMX_OLD_RHYTHM") != ""
 func _build_route() -> void:
 	var C := course
 	var r := WorldRng.new(seed_value * 104729 + 7)
@@ -1572,7 +1572,7 @@ const ALT_IN := 22.0
 const ALT_OUT := 18.0
 const ALT_W := 0.9      # half-width of a B-line
 const ALT_REACH := 9.0  # how far its ground shaping reaches
-static var OLD_LINES := OS.get_environment("BMX_OLD_LINES") != ""
+static var OLD_LINES := Env.raw("BMX_OLD_LINES") != ""
 var alt_pts := PackedFloat64Array()
 var alt_lines := PackedFloat64Array()
 var alt_feats: Array = []   # [route feature index, line index] (signs, HUD)
@@ -1658,7 +1658,7 @@ func alt_near(x: float, z: float) -> void:
 const SITE_SIDE := 3.0
 const SITE_RISE := 1.3
 const SITE_DROP := 1.8
-static var OLD_SITING := OS.get_environment("BMX_OLD_SITING") != ""
+static var OLD_SITING := Env.raw("BMX_OLD_SITING") != ""
 
 
 func jump_at(cx: int, cz: int) -> Feat:

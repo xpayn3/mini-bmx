@@ -74,7 +74,7 @@ static func ensure() -> void:
 		return
 	_loaded = true
 	load_values()
-	var ov := OS.get_environment("BMX_LAND")
+	var ov := Env.raw("BMX_LAND")
 	for kv in ov.split(",", false):
 		var p := kv.split("=")
 		if p.size() == 2 and values.has(p[0].strip_edges()):
@@ -85,7 +85,7 @@ static func ensure() -> void:
 ## values = defaults + the file (no apply: the Land Lab editor tab uses this, TerrainField can't run in the editor)
 static func load_values() -> void:
 	values = defaults()
-	if OS.get_environment("BMX_LAND_FILE") == "0":
+	if Env.raw("BMX_LAND_FILE") == "0":
 		return
 	var path := USER_FILE if FileAccess.file_exists(USER_FILE) else FILE
 	if FileAccess.file_exists(path):

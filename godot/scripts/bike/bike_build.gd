@@ -440,7 +440,7 @@ static func load_build(frame := "") -> Dictionary:
 			rebrand(b)
 	if not painted: b.wheels.sidewall = _factory_look(frame).sidewall
 	# tests: BMX_BUILD="wheels.rim_model=deemax;bars.width=820;..." (models applied through their presets)
-	for kv in OS.get_environment("BMX_BUILD").split(";", false):
+	for kv in Env.raw("BMX_BUILD").split(";", false):
 		var p := kv.split("=")
 		if p.size() != 2: continue
 		var path := p[0].split(".")
@@ -488,7 +488,7 @@ static func _merge(dst: Dictionary, src: Dictionary) -> void:
 
 ## save a build; its paint is kept as `frame`'s ("" = the frame in use), the other frames' paints stay
 static func save_build(b: Dictionary, frame := "") -> void:
-	if OS.get_environment("BMX_PADSEQ") != "": return   # menu tests: never into the player\'s files
+	if Env.raw("BMX_PADSEQ") != "": return   # menu tests: never into the player\'s files
 	if frame == "": frame = GameState.bike_id
 	var paints := {}
 	if FileAccess.file_exists(PATH):
@@ -527,7 +527,7 @@ static var _mat_cache := {}
 const BLACK_FLOOR := 0.15   # the darkest a paint's brightest channel may be (sRGB); a "black" swatch of 0.07 shaded to a flat hole
 ## Nothing real is 0 % black: lifts very dark paint to a deep charcoal, keeping its hue, so the lighting still shapes it
 static func lift_black(c: Color) -> Color:
-	var f := float(OS.get_environment("BMX_BLACK_FLOOR")) if OS.get_environment("BMX_BLACK_FLOOR") != "" else BLACK_FLOOR
+	var f := float(Env.raw("BMX_BLACK_FLOOR")) if Env.raw("BMX_BLACK_FLOOR") != "" else BLACK_FLOOR
 	var mx := maxf(c.r, maxf(c.g, c.b))
 	if mx >= f: return c
 	if mx < 0.005: return Color(f, f, f * 1.03, c.a)
@@ -595,7 +595,7 @@ static func _model_off(model: Node3D, mi: Node3D) -> Vector3:
 ## paint every part of a rig's bike model
 static func apply_paint(model: Node3D, b: Dictionary) -> void:
 	var box := _frame_box(model)
-	var test_lv := OS.get_environment("BMX_LIVERY")   # test: "fade_x:1a1a1c" = that livery + colour on the frame
+	var test_lv := Env.raw("BMX_LIVERY")   # test: "fade_x:1a1a1c" = that livery + colour on the frame
 	for part in PARTS:
 		var pp: Dictionary = b.paint[part]
 		if part == "stanchions": pp = stanchion_paint(pp)

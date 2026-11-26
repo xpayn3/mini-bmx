@@ -124,7 +124,7 @@ func _ready() -> void:
 	else:   # a new player (or a save from before the shop): the stock RUNOUT DH as it is built
 		for k in build_keys("dh", BikeBuild.load_build("dh")): owned[k] = 0
 		for k in Catalog.STARTER: owned[k] = 0
-	if OS.get_environment("BMX_MONEY") != "": money = int(OS.get_environment("BMX_MONEY"))
+	if Env.raw("BMX_MONEY") != "": money = int(Env.raw("BMX_MONEY"))
 	if loaded:
 		for k in records:
 			records[k] = cf.get_value("records", k, records[k])
@@ -148,7 +148,7 @@ func _ready() -> void:
 			for k in cf.get_section_keys("skills"): skill_xp[k] = float(cf.get_value("skills", k, 0.0))
 		else:   # a save from before the XP system: what the records had earned becomes the starting XP
 			skill_xp = Skills.seed_from_records(records, tricks_seen.size(), maxi(int(records.best_streak), day_streak()))
-		if OS.get_environment("BMX_SKILLS") == "fresh": skill_xp = {}   # tests: every skill from level 1
+		if Env.raw("BMX_SKILLS") == "fresh": skill_xp = {}   # tests: every skill from level 1
 		goggle_lens = String(cf.get_value("game", "lens", goggle_lens))
 		if not _GoggleLens.has(goggle_lens): goggle_lens = _GoggleLens.DEFAULT
 		_lens_saved = goggle_lens
@@ -158,10 +158,10 @@ func _ready() -> void:
 		for id in ComputerUnits.UNITS:
 			var c = cf.get_value("computer_" + id, "cfg", {})
 			if c is Dictionary: computer_cfg[id] = c
-	if BIKES.has(OS.get_environment("BMX_BIKE")): bike_id = OS.get_environment("BMX_BIKE")   # tests: ride this frame
-	if BikeBuild.TYRE_MODELS.has(OS.get_environment("BMX_TYRE")): bmx_tyre = OS.get_environment("BMX_TYRE")   # tests: this tyre on the BMX
-	if _GoggleLens.has(OS.get_environment("BMX_LENS")): goggle_lens = OS.get_environment("BMX_LENS")   # tests: ride with this lens
-	if OS.get_environment("BMX_COMPUTER") != "": computer_id = OS.get_environment("BMX_COMPUTER")   # tests: mount this unit
+	if BIKES.has(Env.raw("BMX_BIKE")): bike_id = Env.raw("BMX_BIKE")   # tests: ride this frame
+	if BikeBuild.TYRE_MODELS.has(Env.raw("BMX_TYRE")): bmx_tyre = Env.raw("BMX_TYRE")   # tests: this tyre on the BMX
+	if _GoggleLens.has(Env.raw("BMX_LENS")): goggle_lens = Env.raw("BMX_LENS")   # tests: ride with this lens
+	if Env.raw("BMX_COMPUTER") != "": computer_id = Env.raw("BMX_COMPUTER")   # tests: mount this unit
 
 ## the bike to ride: the downhill bike carries the player's garage build (parts change the ride)
 func bike_config() -> Dictionary:
@@ -195,7 +195,7 @@ func save() -> void:
 	cf.set_value("game", "bikes", bikes_ridden)
 	for id in achieved: cf.set_value("achievements", id, achieved[id])
 	for id in skill_xp: cf.set_value("skills", id, snappedf(float(skill_xp[id]), 0.01))
-	if OS.get_environment("BMX_LENS") == "": _lens_saved = goggle_lens
+	if Env.raw("BMX_LENS") == "": _lens_saved = goggle_lens
 	cf.set_value("game", "lens", _lens_saved)
 	cf.set_value("game", "bmx_tyre", bmx_tyre)
 	for id in computer_cfg:
@@ -231,7 +231,7 @@ var achieved := {}
 signal skill_leveled(id: String, level: int)
 var skill_xp := {}
 var skill_gain := {}     # XP gained since the last RIDE press (the profile shows it)
-var _skills_test := OS.get_environment("BMX_SKILLS") != ""
+var _skills_test := Env.raw("BMX_SKILLS") != ""
 
 func skill_level(id: String) -> int:
 	return Skills.level_of(float(skill_xp.get(id, 0.0)))

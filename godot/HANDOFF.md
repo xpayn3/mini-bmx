@@ -56,8 +56,25 @@ repo, see above — never develop it).
 dotnet build   # in godot/
 ```
 
-Standalone export: install export templates once (Editor → Manage Export Templates), then
-`..._console.exe --headless --path godot --export-release "Windows Desktop" build/windows/MiniBMX.exe`.
+Standalone export: install export templates once (Editor → Manage Export Templates). **Build only when the user asks.**
+
+**Release builds carry NO developer tools (user rule, 2026-11-26).** How it works (the industry "shipping build" split):
+- Every dev-only script lives in **`godot/dev/`**: tuning cards (`dev/tune/`: P / K / L, quick tune, pause > Tuning),
+  Pose Lab, Style Inspector, Anim Studio, frame profiler, physics overlay, render probe, demo AI, the test playground
+  (`dev/playground/`: course, terrain, probe, pilot, lab, suite, ramp editor, ride diag) and the **test harness**
+  (`dev/main_dev.gd` extends `scripts/main.gd` with `_autotest`, `_bench`, `_showcase`, `_hitch`, `_pad_seq`, `_shot`...).
+- Game code never names a dev class: it goes through **`Dev`** (`scripts/core/dev.gd`): `Dev.on`, `Dev.make("pose_lab.gd",
+  [args])`, `Dev.script(...)`, `Dev.overlay()`; dev objects sit in untyped vars and are null-checked. `Dev.on` = editor
+  binary or the `dev` feature tag (`BMX_DEV=0` = off in the editor, to see a release). New dev tools go in `dev/` the same way.
+- `run/main_scene.editor` / `.dev` = `res://dev/main_dev.tscn` (main + test harness); a release runs `scenes/main.tscn`.
+  Unknown command-line switches go to `main._dev_cmd` (empty in release).
+- Test flags are dead in release: `Env.s` / `Env.raw` (GDScript) and `DevFlags.Env` (C#) return "" / null when off. Read
+  BMX_* flags only through them (never `OS.get_environment` directly).
+- Export presets: **"Windows Desktop"** = release (excludes `dev/*`, `tools/*`, `docs/*`, `addons/debug_draw_3d/*`,
+  `addons/land_lab/*`, `addons/level_builder/*`; the csproj drops `addons/debug_draw_3d/**` + `dev/**` from ExportRelease
+  C#); **"Windows Dev"** = feature `dev`, tools in (`--export-debug "Windows Dev" ../build/dev/windows/Runout.exe`).
+- `steam/upload.ps1 -ExportOnly` = bake card pictures, export release, then **`steam/check_release.py`** reads the pack inside
+  the exe and fails the build if any dev file / the overlay dll is in it (`--list` prints every packed file).
 
 Player data: `%APPDATA%\Mini BMX\` (custom user dir) — `crashlogs/` (see Crash logs), `settings.cfg`, `tune.cfg`, `save.cfg`,
 `rider.cfg`, `garage.json`, `logos/`, `screenshots/` (F12).
@@ -114,6 +131,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
 | `scripts/fx/` | `fx.gd` (dust puffs, dirt chunks, **tyre tracks**), `ride_dust.gd` (GPU dust trail, FogVolume clouds) |
 | `shaders/` | `sky_hdri.gdshader`, `grade.gdshader`, `grime_mud/wet`, `ruts.gdshaderinc` (ruts + tyre prints) |
 | `assets/` | `dh.glb`, `helmet.glb`, BMX model, decals (Fox, Cinelli, Glory, Maxxis…), `hdri/` (Poly Haven **Kloofendal 4K**), `textures/painted_concrete_02` (garage floor), `textures/broken_brick_wall`, `fonts/Doto.ttf` (Google Fonts dot-matrix, OFL — the HUD bike computer via `UITheme.lcd_font()`) |
+| `dev/` | **developer tools only, never in a release export** (see "Release builds" in section 2); older notes below may still say `scripts/ui/tune_card.gd`, `scripts/levels/playground_*.gd`, `scripts/game/frame_profiler.gd` etc.: they are in `dev/` now |
 | `tools/*.gd` | one-off headless test / measure scripts (`terrain_cs_cmp.gd` is the important one) |
 | `docs/GRAPHICS.md` | quality presets, frame times, features, what was left out and why |
 | repo root `tools/` | Houdini exporters `export_dh.py`, `export_bmx.py`, `export_helmet.py` → write into `godot/assets/` |

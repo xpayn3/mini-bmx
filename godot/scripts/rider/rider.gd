@@ -5,7 +5,7 @@ extends Node3D
 ## +Y up, +Z the rider's right; the bottom bracket sits near the origin (0.297 up on the BMX).
 
 const G := preload("res://scripts/rider/rider_geo.gd")
-static var _OLD_JUMPPOSE := OS.get_environment("BMX_OLD_JUMPPOSE") != ""
+static var _OLD_JUMPPOSE := Env.raw("BMX_OLD_JUMPPOSE") != ""
 const GEAR := preload("res://scripts/rider/rider_gear.gd")
 
 ## neutral riding style (posepanel.js NEUTRAL): BMX = all of these
@@ -894,8 +894,8 @@ const LIMB_BAR := 0.12      # m: knees keep this clear of the handlebar line in 
 const AIR_FACE := 0.7       # in a whip the torso's lean turns back this share of the bike's yaw (faces the flight)
 const AIR_HIP_SIDE := 0.5   # m: the hips' sideways room in the bike's frame in the air (ground: 0.22)
 const AIR_SIDE := 1.2       # rad: ... the torso bent sideways from the bike's up (ground: 0.6)
-static var _ROLL_PROBE := OS.get_environment("BMX_ROLL_PROBE") != ""
-static var _OLD_AIRBODY := OS.get_environment("BMX_OLD_AIRBODY") != ""
+static var _ROLL_PROBE := Env.raw("BMX_ROLL_PROBE") != ""
+static var _OLD_AIRBODY := Env.raw("BMX_OLD_AIRBODY") != ""
 const BAR_CHEST := 0.32   # m: the chest joint stays this far from the middle of the bar (side view)
 const BAR_HEAD := 0.31    # m: and the head's centre this far (helmet + chin bar)
 var bar_stats := [0.0, 0.0, 0.0, 9.0, 9.0]   # tests: deepest it was held out of the bar, frames held, frames, least chest / head distance

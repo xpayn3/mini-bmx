@@ -43,8 +43,8 @@ var _lights := {}          # Light3D -> [clean Transform3D, applied Transform3D]
 var _taa_saved := false
 var _proj_saved := Camera3D.PROJECTION_PERSPECTIVE
 var _size_seen := Vector2i.ZERO
-var _probe := OS.get_environment("BMX_HQ_PROBE") != ""
-var _hq_off := OS.get_environment("BMX_HQ") == "0"   # tests: never (before / after shots)
+var _probe := Env.raw("BMX_HQ_PROBE") != ""
+var _hq_off := Env.raw("BMX_HQ") == "0"   # tests: never (before / after shots)
 var _t0 := 0
 var _badge: Label = null
 var _badge_a := 0.0
@@ -52,7 +52,7 @@ var _badge_a := 0.0
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS   # photo mode freezes time
 	process_priority = 100000                 # after every owner has placed the camera this frame
-	var e := OS.get_environment("BMX_HQ_SAMPLES")
+	var e := Env.raw("BMX_HQ_SAMPLES")
 	if e != "": samples = maxi(1, int(e))
 	effect = HqAccumEffect.new()
 	if cam:

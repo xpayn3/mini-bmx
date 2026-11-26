@@ -41,7 +41,7 @@ static func ensure() -> void:
 	MESH["bush"] = _crown(11, 2, true).translate(0, 0.55, 0).scale(1, 0.7, 1).to_mesh(true)
 	# bushes are leaf cards (card_bush.gd): bush / bush1 / bush2 = green variants, bushdry = the dry biomes' shrub.
 	# BMX_OLD_BUSH=1 = the old blobs for all of them.
-	if OS.get_environment("BMX_OLD_BUSH") == "1":
+	if Env.raw("BMX_OLD_BUSH") == "1":
 		for k in ["bush1", "bush2", "bushdry"]:
 			MESH[k] = MESH["bush"]
 		for k in ["leafCard", "leafCardDry"]:

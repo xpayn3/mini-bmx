@@ -154,7 +154,7 @@ static func load_pose(bike_id: String, bike_pose: Dictionary) -> Dictionary:
 	return p
 
 static func save_pose(bike_id: String, p: Dictionary) -> void:
-	if OS.get_environment("BMX_PADSEQ") != "": return   # menu tests: never into the player\'s files
+	if Env.raw("BMX_PADSEQ") != "": return   # menu tests: never into the player\'s files
 	var cf := ConfigFile.new(); cf.load(PATH)
 	if cf.has_section("pose_" + bike_id): cf.erase_section("pose_" + bike_id)
 	for k in p: cf.set_value("pose_" + bike_id, k, p[k])
@@ -167,13 +167,13 @@ static func load_look() -> Dictionary:
 	if cf.load(PATH) == OK and cf.has_section("look"):
 		for k in cf.get_section_keys("look"):
 			if l.has(k): l[k] = str(cf.get_value("look", k))
-	for kv in OS.get_environment("BMX_LOOK").split(",", false):   # tests: BMX_LOOK=padStyle=race,pads=#f4f4f0
+	for kv in Env.raw("BMX_LOOK").split(",", false):   # tests: BMX_LOOK=padStyle=race,pads=#f4f4f0
 		var p := kv.split("=")
 		if p.size() == 2 and l.has(p[0]): l[p[0]] = p[1]
 	return l
 
 static func save_look(l: Dictionary) -> void:
-	if OS.get_environment("BMX_PADSEQ") != "": return   # menu tests: never into the player\'s files
+	if Env.raw("BMX_PADSEQ") != "": return   # menu tests: never into the player\'s files
 	var cf := ConfigFile.new(); cf.load(PATH)
 	for k in l: cf.set_value("look", k, l[k])
 	cf.save(PATH)

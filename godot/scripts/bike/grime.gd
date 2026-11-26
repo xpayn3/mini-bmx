@@ -62,7 +62,7 @@ var dry := 0.0                    # 0 fresh, wet mud .. 1 a dry crust (shader: p
 var flake := 0.0                  # how much of the dry crust has been knocked off, 0..1
 var _shed := 0.0                  # dry chunks waiting to fly off the bike (take_shed)
 const DRY_T := 90.0               # seconds for fresh mud to dry out
-static var _PROBE := OS.get_environment("BMX_GRIME_PROBE") != ""
+static var _PROBE := Env.raw("BMX_GRIME_PROBE") != ""
 var _vw := Vector2(NAN, NAN)      # last wheel vertical speeds (rattle)
 const GROUND_FOLLOW := 6.0   # s of riding new ground until the dust film has its colour (mud: 2.5x)
 var dust_col := Color(0.6, 0.53, 0.43)
@@ -88,11 +88,11 @@ var warm_frames := 0              # > 0: passes attached (but invisible) so thei
 
 func _init() -> void:
 	name = "Grime"
-	if OS.get_environment("BMX_BLOOD_COAT") != "": blood = float(OS.get_environment("BMX_BLOOD_COAT"))   # tests: start bloody
-	if OS.get_environment("BMX_DUST_COAT") != "": dust = float(OS.get_environment("BMX_DUST_COAT"))   # tests: start dusty
-	if OS.get_environment("BMX_MUD_DRY") != "": dry = float(OS.get_environment("BMX_MUD_DRY"))   # tests: start dried
-	if OS.get_environment("BMX_MUD_FLAKE") != "": flake = float(OS.get_environment("BMX_MUD_FLAKE"))
-	if OS.get_environment("BMX_MUD_COAT") != "": mud = float(OS.get_environment("BMX_MUD_COAT"))   # start muddy (not held)
+	if Env.raw("BMX_BLOOD_COAT") != "": blood = float(Env.raw("BMX_BLOOD_COAT"))   # tests: start bloody
+	if Env.raw("BMX_DUST_COAT") != "": dust = float(Env.raw("BMX_DUST_COAT"))   # tests: start dusty
+	if Env.raw("BMX_MUD_DRY") != "": dry = float(Env.raw("BMX_MUD_DRY"))   # tests: start dried
+	if Env.raw("BMX_MUD_FLAKE") != "": flake = float(Env.raw("BMX_MUD_FLAKE"))
+	if Env.raw("BMX_MUD_COAT") != "": mud = float(Env.raw("BMX_MUD_COAT"))   # start muddy (not held)
 	_wet_mat = ShaderMaterial.new()
 	_wet_mat.shader = WET_SHADER
 	_wet_mat.render_priority = 4   # last: over the mud, the stickers and the blood
@@ -343,7 +343,7 @@ func _cav_poll() -> void:
 		cav_tex.create(Image.FORMAT_R8, d.x, d.y, d.z, false, _cav_out["images"])
 		cav_min = _cav_out["min"]
 		cav_size = _cav_out["size"]
-		if OS.get_environment("BMX_GRIME_PROBE") != "":
+		if Env.raw("BMX_GRIME_PROBE") != "":
 			print("GRIME cavity %dx%dx%d in %d ms, parts=%d min=%s size=%s" % [d.x, d.y, d.z, _cav_out["ms"], _bike_parts.size(), cav_min, cav_size])
 			var rig := _bike_root as BikeRig
 			var inv := _bike_root.global_transform.affine_inverse()
@@ -442,7 +442,7 @@ func _new_mud(bias: float, tyre: bool, wheel: bool, decal := false) -> ShaderMat
 	bm.render_priority = 3   # see-through like the stickers: drawn after them
 	m.set_meta("blood", bm)
 	_cav_apply(m)
-	if OS.get_environment("BMX_GRIME_MAP") != "": m.set_shader_parameter("debug_map", true)
+	if Env.raw("BMX_GRIME_MAP") != "": m.set_shader_parameter("debug_map", true)
 	return m
 
 ## a sticker (logo / lettering decal, bike/decals.gd): see-through, drawn over its part, so the part's own

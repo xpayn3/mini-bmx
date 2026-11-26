@@ -22,7 +22,7 @@ var _last := Vector3.ZERO
 var _vs := Vector3.ZERO         # smoothed velocity of the head through the air
 var _t := 0.0
 var _back := Vector3.DOWN   # which way "behind the rider" is (from the travel), kept while slow
-var probe := OS.get_environment("BMX_FLAP_PROBE") != ""
+var probe := Env.raw("BMX_FLAP_PROBE") != ""
 var _probe_k := -1
 
 

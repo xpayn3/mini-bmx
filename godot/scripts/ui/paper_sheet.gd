@@ -51,7 +51,7 @@ var cover_size := Vector2i.ZERO
 var state := 0                       # 0 put away, 1 unfolding, 2 open, 3 folding
 var k := 0.0                         # 0 put away .. 1 open
 var shots := ""                      # tests: dir/prefix -> its own render while it unfolds
-var freeze_at := float(OS.get_environment("BMX_PAPER_AT")) if OS.get_environment("BMX_PAPER_AT") != "" else -1.0   # tests: stop the animation at t s
+var freeze_at := float(Env.raw("BMX_PAPER_AT")) if Env.raw("BMX_PAPER_AT") != "" else -1.0   # tests: stop the animation at t s
 
 const EPS_C := 0.09                 # the folds never shut completely: the stack fans a little (rad)
 const EPS_R := 0.006

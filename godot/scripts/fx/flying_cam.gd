@@ -62,7 +62,7 @@ static func _bounds(body: Node3D) -> AABB:
 		first = false
 	return out
 
-static var _PROBE := OS.get_environment("BMX_GOPRO_PROBE") != ""
+static var _PROBE := Env.raw("BMX_GOPRO_PROBE") != ""
 
 func _physics_process(dt: float) -> void:
 	t += dt
