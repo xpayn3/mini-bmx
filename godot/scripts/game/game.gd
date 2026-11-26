@@ -3856,7 +3856,7 @@ func _process(dt: float) -> void:
 		pi["preload"] = maxf(st.crouch, auto_pre) * (1.0 - ak)
 		# (the stand-tall + pull-up of a pro: only after the player's own pump; hands off he rides it plainly)
 		pi["popFx"] = st.pop_fx * minf(1.0, st.pop_q) * (1.0 if st.pro_flight else 0.35)
-		pi["airPull"] = st.air_pull if (st.air and (st.pro_flight or (st._tuck_in and not BikePhysics._OLD_TUCK))) else 0.0   # (the held tuck on any jump too, step 3)   # the bike pulled up into the body after the pop (the tuck)
+		pi["airPull"] = st.air_pull if (st.air and (st.pro_flight or not BikePhysics._OLD_AUTOTUCK or (st._tuck_in and not BikePhysics._OLD_TUCK))) else 0.0   # (the held tuck on any jump too, step 3)   # the bike pulled up into the body after the pop (the tuck)
 		pi["squash"] = maxf(maxf(st.squash, st.auto_absorb) * st.prep, st.squash_fx)   # (hands off he soaks small / fast lips: auto_absorb)
 		pi["lipK"] = maxf(st.prep, 1.0 if (st.pop_wait > 0.0 or st.hop_t > 0.0) else 0.0)
 		pi["landFold"] = st.land_fold * (1.0 - ak)   # folded up by a landing, gathering himself again

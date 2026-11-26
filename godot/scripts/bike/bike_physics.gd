@@ -431,7 +431,7 @@ func _reset_motion() -> void:
 	_sample(fwd()); pitch = _g_pitch; g_pitch = _g_pitch; _gpc_last = NAN
 	n_f = NAN; n_r = NAN; n_ref = NAN; lip_state = 0; hf_prev = NAN; hr_prev = NAN; zw_f = NAN; zw_r = NAN
 	bank = 0; _bank_hold = 0.0; _air_wl = 0.0; body_x = 0; hip_shift = 0; spin = 0; a_drive = 0; charge = 0; hop_charge = 0; lift_t = 0
-	body_xv = 0; hip_v = 0; v_last = NAN; air_lean = 0; air_pull = 0; flip_acc = 0; spin_acc = 0; flip_in = 0
+	body_xv = 0; hip_v = 0; v_last = NAN; air_lean = 0; air_pull = 0; _air_pull_v = 0.0; flip_acc = 0; spin_acc = 0; flip_in = 0
 	body_pw = 0; throw_v = 0; air_w = 0; air_inertia = 1; air_tilt = 0; air_tilt_v = 0; air_yaw = 0; air_tw = 0; air_tw_v = 0; whip_load = 0; _whip_in = 0; spin_load = 0; _spin_in = 0; _flip_in = 0; land_jolt = 0
 	pivot = 0; pivot_acc = 0; body_in_s = 0; flick = 0; flick_v = 0; _flick_arm = 0; _flick_side = 0; flick_kick = 0
 	nose_a = 0.0; nose_w = 0.0; nose_zone = false; nose_lock = 0.0; nose_push = 0.0; nose_time = 0.0; nose_brake_t = 0.0; _nose_grace = 0.0
@@ -813,7 +813,25 @@ func _step_controls(dt: float, inp: Dictionary, throttle: float, steer_input: fl
 		# back down the far side
 		pull_t = maxf(pull_t, minf(1.0, 0.55 + 0.45 * pop_q) * smooth01((air_time - 0.02) / 0.08) * smooth01(pop_fx / 0.35) * (1.0 - land_prep) * (1.0 if (pro_flight or _OLD_PULLUP) else 0.0))
 		pull_t = maxf(pull_t, squash_fx * (1.0 - land_prep))
-	air_pull += (pull_t - air_pull) * minf(1.0, dt * 8)
+		# (2026-11-26) the tuck is part of every real jump (user: "no special move, normal jump behaviour"): once the flight is
+		# a real one (air_k) the rider pulls the bike up under him by autoTuck, holds it, lets it down for the landing. The
+		# right stick shapes it: back = all of it, forward = the bike pushed away (no tuck)
+		if not _OLD_AUTOTUCK:
+			var sy: float = air_stick.y
+			var auto_t: float = float(T.get("autoTuck", 0.7)) * smooth01((air_time - 0.04) / 0.14) * air_k
+			auto_t = lerpf(auto_t, 1.0, smooth01((sy - 0.3) / 0.5))
+			auto_t *= 1.0 - smooth01((-sy - 0.2) / 0.5)
+			pull_t = maxf(pull_t, auto_t * (1.0 - land_prep))
+	if _OLD_AUTOTUCK: air_pull += (pull_t - air_pull) * minf(1.0, dt * 8)
+	else:
+		# critically damped spring (SmoothDamp, exact step): eases out of rest and into the target with no kink in its
+		# speed, the way games blend a pose (a plain lag starts at full speed the instant the target moves)
+		var yk: float = 2.0 * 0.6931472 / maxf(0.02, float(T.get("tuckEase", 0.09)))
+		var j0: float = air_pull - pull_t
+		var j1: float = _air_pull_v + j0 * yk
+		var ek: float = exp(-yk * dt)
+		air_pull = ek * (j0 + j1 * dt) + pull_t
+		_air_pull_v = ek * (_air_pull_v - j1 * yk * dt)
 	# the lip throw: W / S pressed fresh as the bike leaves a lip (a jump spotted just ahead, or one wheel
 	# already off) throw the rider back / forward, pushing against the bike and through it the ground. That
 	# is the only way to start a flip (keys held from before don't count; S there pulls back, it doesn't brake)
@@ -3485,7 +3503,9 @@ func _pop_along(dv: float) -> void:
 	v *= k; vy *= k
 
 static var _OLD_SPIN := OS.get_environment("BMX_OLD_SPIN") != ""
-static var _OLD_TUCK := OS.get_environment("BMX_OLD_TUCK") != ""   # tuck reach 0.17 m, drawn only after a timed pop
+static var _OLD_TUCK := OS.get_environment("BMX_OLD_TUCK") != ""
+var _air_pull_v := 0.0   # air_pull's speed (its spring)
+static var _OLD_AUTOTUCK := OS.get_environment("BMX_OLD_AUTOTUCK") != ""   # tuck reach 0.17 m, drawn only after a timed pop
 static var _OLD_WEAVE := OS.get_environment("BMX_OLD_WEAVE") != ""
 static var WEAVE_ON := OS.get_environment("BMX_WEAVE") != ""   # the bike weave, off (rocked the whole rider)   # no bike weave under the rider
 static var _OLD_CORNERBODY := OS.get_environment("BMX_OLD_CORNERBODY") != ""   # body at up to 80 % of the bike's lean in deep turns
@@ -3904,7 +3924,7 @@ func is_sane() -> bool:
 ## after a bad step: zero the body / rider state so a NaN there can't keep poisoning the ride
 func reset_body() -> void:
 	body_v = 0; body_y = y; body_x = 0; body_xv = 0; hip_shift = 0; hip_v = 0; v_last = NAN
-	air_lean = 0; air_pull = 0; a_drive = 0; pitch_v = 0; compress_v = 0; lean_v = 0; steer_in_v = 0
+	air_lean = 0; air_pull = 0; _air_pull_v = 0.0; a_drive = 0; pitch_v = 0; compress_v = 0; lean_v = 0; steer_in_v = 0
 	air_w = 0; air_tilt = 0; air_tilt_v = 0; flick = 0; flick_v = 0; bike_lean = 0; counter = 0
 	man_a = 0.0; man_w = 0.0; bank = 0.0; _bank_hold = 0.0; bank_v = 0.0; corner_g = 0.0
 	nose_a = 0.0; nose_w = 0.0; gest_hop = 0.0; _hop_buf = 0.0; _pop_miss = 0.0
