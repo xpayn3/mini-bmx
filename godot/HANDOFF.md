@@ -281,6 +281,22 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   below, a crash). Playground suite identical with / without. Not fully drawing-only: the physics reads `bike_lean` in 3 places.
   **Open**: `counter` jumps ~0.25 rad when `bike_lean` crosses 0 (sign of the max() flips). Test spawn: `BMX_SPAWN_AT=x,z,heading`
   (from an F8 log; Backspace returns there), e.g. `BMX_SEED=34229 BMX_SPAWN_AT=360.98,-28.99,-0.6224 BMX_START_V=17`.
+- **Forest berms, roots, smooth drawn lean, arms, back-wheel hops (2026-11-26, F8 seed 876814 + a pro's Red Bull downhill video,
+  `Documents/GameResearch/You-ve-never-seen-Downhill-Riding-like-this_003_1080p.mp4`)**. (1) Narrow trails' berms (`berm_style`, GD + C#,
+  half-width 0.35..0.85 only): rim ~1.7 m out (was 1.1), face curving up, no scoop dug into the face; trees in tight forest bends from
+  W + 2.4 m. It was: leaned ~45 deg a little wide, the tyres hit the crest and the bike floated over (`BMX_OLD_NARROWBERM=1`). (2) Roots
+  real size (0.28-0.4 x the trunk, 6-13 cm; were trunk-thick since the real-size trees), light bark (`BMX_OLD_ROOTS=1`). (3) The physics
+  lean is as smooth as the pro's (top ~2.5 rad/s); the DRAWN one jumped: `counter`'s 80 % clamp flipped sides as the bike crossed
+  upright (one-tick body jumps of 0.1-0.3 rad, the open item above): now faded in over the first 0.3 rad; `cap_bank` eased
+  (`BMX_OLD_LEANDRAW=1`). Drawn pose inputs that read the raw air flag (`_atilt_s`, `_blat_s`, `_aspin_s`, `_awhip_s`, `_turn_s`,
+  preload, landFold, inAir) follow `air_k` (`BMX_OLD_AIRBLEND=1`). (4) Shoulder twist into turns halved (cap 0.3 rad on the ground,
+  `BMX_OLD_TWIST=1`). (5) Arms: elbow pole mostly out + a little back / down (was back + down: "rowing"), `armBend` default 0.6
+  (~100 deg elbows; RiderPanels POSE_VER 4 moves saves still at 0), sprint elbows a touch lower (`BMX_OLD_ARMS=1`). (6) Back-wheel
+  hops: the drawn rig pitches about its origin with the rear axle 0.44 m behind / 0.45 m above it, the physics with it 0.33 m behind
+  and level: on the back wheel the drawn tyre sank up to ~25 cm and the unclip lift shoved the bike up then snapped down off the
+  lip. `Game` moves the drawn bike so the carrying axle is where the physics has it (`_piv_c`), and the lift eases down in the air
+  (`LIFT_AIR` 1.5 m/s) (`BMX_OLD_PIVOT=1`). Left: the physics rear compresses further than the drawn swingarm shows (part of the
+  lift stays); the torso still rides rock hits stiffly (needs its own world-space path). The user rode it: "smooth".
 - **Curbs / ledges: the rear rolls up, the tyres don't shiver at the edge (2026-11-24, user: "the rear always gets
   stuck on a curb")**. (1) `_step_move`'s edge check (at the bottom bracket) read the rise per physics step, so whether a
   curb was a wall at all depended on speed: at 6 km/h it never saw one (rolled up 30 cm), at 15 km/h a 20 cm curb was

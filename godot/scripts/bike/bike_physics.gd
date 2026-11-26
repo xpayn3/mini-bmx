@@ -1687,7 +1687,10 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 	_bike_lead += (lead_t - _bike_lead) * minf(1.0, dt * 20.0)
 	var bl: float = lean * T.bikeLeanMul + _gx_lean + bank_lean + _bike_lead
 	if not air:
-		cap_bank = 0.0 if signf(bk) != signf(bl) else absf(bk)
+		var cb_t: float = 0.0 if signf(bk) != signf(bl) else absf(bk)
+		# (eased: it switched on / off in one step as the bank or the lean changed side, and the tanh cap below stepped the drawn
+		# bike up to 0.1 rad in a tick near the cap. BMX_OLD_LEANDRAW=1 = the switch)
+		cap_bank = cb_t if _OLD_LEANDRAW else move_toward(cap_bank, cb_t, 2.0 * dt)
 	else:   # the bank's extra room is carried off the lip, fading over 2 s (the lean must not snap at take-off)
 		cap_bank = maxf(0.0, cap_bank - dt * 0.5)
 	var cap_b: float = T.bikeLeanCap + cap_bank
@@ -1739,7 +1742,17 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 	# 20 % inside the bike. The absolute difference used to flip it: bike held at 31 deg with the body wanting 55 gave a
 	# body at 7 deg, or leaning the wrong way - the rider stood up out of every steep berm)
 	var b_sg := signf(bike_lean)
-	counter = maxf((bike_lean - (lean + bank_lean) * T.bodyLean) * b_sg, absf(bike_lean) * 0.2) * b_sg
+	if _OLD_LEANDRAW:
+		counter = maxf((bike_lean - (lean + bank_lean) * T.bodyLean) * b_sg, absf(bike_lean) * 0.2) * b_sg
+	else:
+		# (2026-11-26, F8 seed 876814 vs a pro's slow-motion: his lean changes are one smooth curve; ours jumped 0.1-0.3 rad in a
+		# tick at every swap. The clamp above holds the body to 80 % of the bike's lean on the bike's side only, so as the bike
+		# crossed upright it flipped sides and the body jumped by its whole target. Now the clamp fades in over the first
+		# ~0.3 rad of bike lean: the body passes upright continuously. BMX_OLD_LEANDRAW=1 = before)
+		var b_t: float = (lean + bank_lean) * T.bodyLean
+		var w_c: float = smooth01(absf(bike_lean) / 0.3)
+		var body_l: float = b_t - w_c * b_sg * maxf(0.0, (b_t - 0.8 * bike_lean) * b_sg)
+		counter = bike_lean - body_l
 	# on a bank the rider goes WITH the bike (drawn only). "Bike under an upright body" is flat-corner technique; in a
 	# berm rider and bike are one line, square to its face. The body's target above is measured against gravity, and
 	# the body stick's throw (flickLean) goes to the bike alone, so on banked ground with both sticks he stood up out
@@ -3407,6 +3420,7 @@ func _pop_along(dv: float) -> void:
 	v *= k; vy *= k
 
 static var _OLD_SPIN := OS.get_environment("BMX_OLD_SPIN") != ""
+static var _OLD_LEANDRAW := OS.get_environment("BMX_OLD_LEANDRAW") != ""   # the drawn body / bike lean with its one-tick jumps
 static var _OLD_STRAIGHTWHIP := OS.get_environment("BMX_OLD_STRAIGHTWHIP") != ""   # the whip only in corners (both sticks)
 static var _OLD_STICKBIKE := OS.get_environment("BMX_OLD_STICKBIKE") != ""   # right stick side lean throws the bike (before 2026-11-26)
 const SPIN_EDGE := 0.85     # stick to the side this far into a lip = a spin wound up (less = a whip)

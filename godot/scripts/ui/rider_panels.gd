@@ -135,8 +135,10 @@ const BUCKLE_SW := ["#c9ccd1", "#9aa0a8", "#55595f", "#1a1b1e", "#b8893c", "#d9b
 # ---------------------------------------------------------------- persistence
 ## bump POSE_VER when a bike's default pose is retuned: a pose saved before keeps every value except the
 ## RETUNED ones that still hold the OLD default (a slider the player moved stays theirs)
-const POSE_VER := 3
+const POSE_VER := 4
 const POSE_RETUNED := {"elbowsOut": -0.25, "elbowOutR": -0.05, "hipSway": 0.015, "shoulders": 0.14, "torso": 0.46}
+## retuned in version 4 (2026-11-26: the arms' bend); only these move for a version-3 save
+const POSE_RETUNED_4 := {"armBend": 0.0}
 
 static func load_pose(bike_id: String, bike_pose: Dictionary) -> Dictionary:
 	var p: Dictionary = Rider.NEUTRAL.duplicate()
@@ -144,13 +146,16 @@ static func load_pose(bike_id: String, bike_pose: Dictionary) -> Dictionary:
 	var cf := ConfigFile.new()
 	var sec := "pose_" + bike_id
 	if cf.load(PATH) == OK and cf.has_section(sec):
-		var old := int(cf.get_value(sec, "_ver", 1)) < POSE_VER
+		var ver := int(cf.get_value(sec, "_ver", 1))
+		var old := ver < 3
 		for k in cf.get_section_keys(sec):
 			var val = cf.get_value(sec, k)
 			if not p.has(k) or not typeof(val) in [TYPE_FLOAT, TYPE_INT, TYPE_BOOL]:
 				continue
 			if old and POSE_RETUNED.has(k) and absf(float(val) - float(POSE_RETUNED[k])) < 1e-3:
 				continue   # still the old default: take the new one
+			if ver < 4 and POSE_RETUNED_4.has(k) and absf(float(val) - float(POSE_RETUNED_4[k])) < 1e-3:
+				continue
 			p[k] = val
 	return p
 
