@@ -88,6 +88,8 @@ const SHADOW_MAX := 150.0
 ## are drawn to DECO_FADE_OUT (124 m): High reaches past them, so every tree you see has its shadow.
 const SHADOW_REACH := [100.0, 140.0, 170.0, 200.0]
 var _shadow_zoom := -1.0
+var _old_shadows := Env.s("BMX_OLD_SHADOWS") == "1"   # the shadows before 2026-11-26 (cascades, far casters)
+var _no_far_shadow := Env.s("BMX_FAR_SHADOW") == "0"   # test: the backdrop trees cast nothing (the cascades stay new)
 ## the cascades sit where the picture is: the first one ends just past the rider (the follow cameras are 5-25 m
 ## behind), the second over the trail ahead, the third out to the trees. Fixed shares of the reach put the rider in
 ## a coarse middle cascade. Redone only when the zoom you set changes (not with the speed dolly).
@@ -101,7 +103,8 @@ func _two_splits() -> bool:
 	if forced != "": return forced != "4"
 	# 2026-11-25 (realism pass): only the top shadow quality pays for the 4 cascades again (sharper mid-distance tree shadows,
 	# ~-8 % fps measured when it was dropped); every other preset keeps the cheap 2
-	return int(Settings.get_v("shadows")) < 3
+	# 2026-11-26 (user: "make best shadows", a blurry shadow turning crisp right in front of the bike): High gets the 4 too
+	return int(Settings.get_v("shadows")) < (3 if _old_shadows else 2)
 
 func _shadow_fit() -> void:
 	var sq := int(Settings.get_v("shadows"))
@@ -120,9 +123,19 @@ func _shadow_fit() -> void:
 		if Env.s("BMX_SHADOW_S1") != "": s1 = float(Env.s("BMX_SHADOW_S1"))   # tests
 		sun.directional_shadow_split_1 = clampf((zoom + s1) / reach, 0.03, 0.5)
 		return
-	sun.directional_shadow_split_1 = clampf((zoom + 6.0) / reach, 0.04, 0.3)
-	sun.directional_shadow_split_2 = clampf((zoom + 22.0) / reach, sun.directional_shadow_split_1 + 0.05, 0.5)
-	sun.directional_shadow_split_3 = clampf((zoom + 55.0) / reach, sun.directional_shadow_split_2 + 0.08, 0.75)
+	if _old_shadows:
+		sun.directional_shadow_split_1 = clampf((zoom + 6.0) / reach, 0.04, 0.3)
+		sun.directional_shadow_split_2 = clampf((zoom + 22.0) / reach, sun.directional_shadow_split_1 + 0.05, 0.5)
+		sun.directional_shadow_split_3 = clampf((zoom + 55.0) / reach, sun.directional_shadow_split_2 + 0.08, 0.75)
+		return
+	# 2026-11-26: the sharp cascade ended 6 m past the rider, so the ground he rode onto went crisp only at his front
+	# wheel. Now each cascade ~2x the one before (between log and even: no cascade much coarser than its neighbour, so
+	# the blended hand-overs don't show): sharp to 18 m past the rider, then the trail ahead, then the trees, then the rest
+	var s1 := 18.0
+	if Env.s("BMX_SHADOW_S1") != "": s1 = float(Env.s("BMX_SHADOW_S1"))   # tests
+	sun.directional_shadow_split_1 = clampf((zoom + s1) / reach, 0.04, 0.3)
+	sun.directional_shadow_split_2 = clampf((zoom + s1 * 2.6) / reach, sun.directional_shadow_split_1 + 0.06, 0.5)
+	sun.directional_shadow_split_3 = clampf((zoom + s1 * 5.4) / reach, sun.directional_shadow_split_2 + 0.1, 0.8)
 
 ## the band (m from the rider) the streamed trees / rocks dissolve out over and the far backdrop's trees in
 ## (shaders/deco_fade.gdshaderinc): inside the 144 m the loaded chunks always cover, so chunks never pop in
@@ -3950,6 +3963,13 @@ func _process(dt: float) -> void:
 	terrain.shadow_reach = sun.directional_shadow_max_distance
 	# streamed decorations dissolve out / the far backdrop's trees in over this band round the rider (no pop-in)
 	RenderingServer.global_shader_parameter_set("deco_fade", Vector4(st.x, st.z, _deco_band.x, _deco_band.y))
+	# far trees' sun shadows (shaders/deco_fade.gdshaderinc deco_shadow): the backdrop impostors cast out to where a shadow
+	# (CASTER_H tall, as long as the sun's height throws it) can still land inside the shadow reach round the camera
+	var ss: Vector3 = terrain.shadow_sun
+	var sweep := minf(Terrain.CASTER_H * Vector2(ss.x, ss.z).length() / maxf(ss.y, 0.05), 320.0)
+	var cam_off := Vector2(terrain.shadow_eye.x - st.x, terrain.shadow_eye.z - st.z).length()
+	if _old_shadows: RenderingServer.global_shader_parameter_set("deco_shadow", Vector4(6.0, 20.0, 0.0, 0.0))
+	else: RenderingServer.global_shader_parameter_set("deco_shadow", Vector4(0.0, 0.0, 0.0 if _no_far_shadow else 1.0, terrain.shadow_reach + sweep + cam_off + 30.0))
 	# the real ground dissolves out / the far backdrop's ground in over this band (shaders/ground + far_hills.gd): no hard edge
 	RenderingServer.global_shader_parameter_set("ground_fade", Vector4(st.x, st.z, _ground_band.x, _ground_band.y) if _ground_band.y > 0.0 else Vector4.ZERO)
 	FarHills.ground_crossfade = _ground_band.y > 0.0

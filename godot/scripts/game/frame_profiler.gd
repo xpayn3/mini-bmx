@@ -215,7 +215,10 @@ func _close_frame(wall_ms: float) -> void:
 	_rcpu[r] = RenderingServer.viewport_get_measured_render_time_cpu(_vp_rid) + RenderingServer.get_frame_setup_time_cpu()
 	_draws[r] = RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME)
 	_prims[r] = RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_PRIMITIVES_IN_FRAME)
-	var c := RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_DRAW)
+	if _frame > 60 and _AVG:   # (PROF AVG: GPU / render CPU in ms, draws / primitives in thousands)
+		_avg_add("GPU", _gpu[r]); _avg_add("RCPU", _rcpu[r])
+		_avg_add("DRAWS_k", _draws[r] / 1000.0); _avg_add("PRIMS_k", _prims[r] / 1000.0)
+	var c :=RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_PIPELINE_COMPILATIONS_DRAW)
 	_comp[r] = maxi(c - _comp_last, 0) if _comp_last >= 0 else 0
 	_comp_last = c
 	_ticks[r] = ticks
