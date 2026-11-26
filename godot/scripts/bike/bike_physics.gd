@@ -219,6 +219,10 @@ var surf_f := 0; var surf_r := 0; var _mu_f := NAN; var _mu_r := NAN   # the gro
 var _bmu_f := NAN; var _bmu_r := NAN   # ...and its eased braking grip (BRAKE_MU)
 var _OLD_BRAKE := OS.get_environment("BMX_OLD_BRAKE") != ""   # (tests: the lever-limited brakes before 2026-11-23)
 var _gx_lean := 0.0    # the rest of the ground's drawn lean (body stick, slow steer, whip), eased through jumps
+var _lock_hold := 0.0   # steering into tilted ground, held LOCK_HOLD s after letting go (bankLock)
+const LOCK_HOLD := 1.0
+var weave_lean := 0.0   # the weave's share of bike_lean this step (read by Game)
+var _weave := 0.0; var _wv_t := 0.0   # the bike's own small roll under the rider (step 2)
 var _bike_lead := 0.0  # how far the bike runs ahead of the rider's lean while it changes (two masses)
 var _lean_peak := 0.0  # this jump's biggest lay-over in the air (tabletop, rad)
 var _scrub_k := 0.0    # this take-off was soaked (squash / absorb) - with a lay-over or whip: a scrub
@@ -289,6 +293,10 @@ var _HEAT_HOLD := float(OS.get_environment("BMX_HEAT")) if OS.get_environment("B
 var _OLD_SUSPFX := OS.get_environment("BMX_OLD_SUSPFX") != ""   # (tests: before dive steering, pedal bob and kickback)
 var foot_down := false    # set by Game: the rider's foot is on the ground (the bike stays put)
 var brake_stop := false  # braked to a standstill: held in place while the brake stays on
+var _rev_hold := 0.0   # s the brake has been held at a stop (reverse after REV_HOLD)
+const REV_HOLD := 1.0
+const REV_SLOPE := 0.14   # rad: hold-to-reverse only on ground flatter than this
+var rev_on_hold := true   # (tests that hold the brake to check friction turn it off)
 var brake_back := false   # brake pressed fresh from a standstill: backs the bike up
 var chunk_acc := 0.0
 var joint_rock = null
@@ -436,7 +444,7 @@ func _reset_motion() -> void:
 	pump_push = 0.0; pump_gain = 0.0; pump_idle = 0.0; pump_press_t = 0.0; _pump_release = 0.0; pump_on = false; pleg = 0.0; pump_lift = 0.0; land_perfect = 0.0
 	wheelie_time = 0.0; wheelie_pedal = false; whip = 0; whip_hold = 0; whip_side = 0.0; _whip_arm = 0; _whip_t = 0; _whip_flashed = false; _whip_straight = false; _whip_ang = 0.0; _whip_peak = 0.0
 	edge_s = 0.0; spin_hold = 0.0; spin_k = 1.0; yaw_edge_s = 0.0; yaw_hold = 0.0; stick_yaw = 0.0; air_stick = Vector2.ZERO; style_air = 0.0
-	brake_stop = false; brake_back = false; lean_lim = 9.0; lean_room = NAN
+	brake_stop = false; brake_back = false; _rev_hold = 0.0; lean_lim = 9.0; lean_room = NAN
 	sprint = 0; flow = 0; flow_t = 0; lat_m = 0; carve = 0; carve_acc = 0; carve_berm = false
 	y_draw = y; pitch_draw = pitch; nose_ref = NAN; pitch_w = NAN; y_prev = NAN; kick_t = 0
 	w_f = y; w_r = y
@@ -447,7 +455,7 @@ func _reset_ground_sim() -> void:
 	front_use = 0.0; front_push = 0.0; rear_lock = 0.0; front_lock = 0.0; _fb_f = 0.0
 	corner_g = 0.0; weight_in = 0.0; lean_err = 0.0; knock = 0.0; _amax = 99.0; _amin = -99.0; bal_k = 0.0
 	_b_prev = 0.0; _f_prev = 0.0; _circ_f = 1.0; bank_lean = 0.0; bank_sq = 0.0; _gx_lean = 0.0; berm_k = 0.0
-	_mu_f = NAN; _mu_r = NAN; _bmu_f = NAN; _bmu_r = NAN; bank_v = 0.0; _load_s = NAN; _share_f = NAN; _bike_lead = 0.0
+	_mu_f = NAN; _mu_r = NAN; _bmu_f = NAN; _bmu_r = NAN; bank_v = 0.0; _load_s = NAN; _share_f = NAN; _bike_lead = 0.0; _weave = 0.0
 	_risk.clear(); risk = 0.0; _risk_peak = 0.0
 
 func begin_crash() -> void:
@@ -1151,6 +1159,14 @@ func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_wa
 			brake_stop = false; brake_back = absf(v) < 0.3
 		elif absf(v) <= 0.3 and not brake_back:
 			brake_stop = true
+		# reverse like bike / moto games: the brake held at a stop for REV_HOLD s backs the bike up (a fresh press still does at
+		# once). BMX_OLD_SLOW=1 = only the fresh press
+		# (only on ground flatter than ~8 deg: on a real slope the held brake keeps you parked; a fresh tap still reverses anywhere)
+		if brake and brake_stop and throttle < 0.1 and rev_on_hold and absf(_g_pitch) < REV_SLOPE and not _OLD_SLOW:
+			_rev_hold += dt
+			if _rev_hold > REV_HOLD: brake_stop = false; brake_back = true
+		else:
+			_rev_hold = 0.0
 		# ...but only where the tyres can: past the friction angle (or the brake's own limit) the locked bike
 		# slides down the slope like a real one (normal trail grades hold as before)
 		if brake_stop and G * absf(sin(slope)) > minf(T.brakeForce * (float(T.get("brakeRear", 0.6)) * brake_r + float(T.get("brakeFront", 0.75)) * brake_f), 0.85 * mu * n_tot):
@@ -1473,7 +1489,19 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 		# a side slope pulls the bike down it: the front wheel falls to the low side (gravity on the trail of the
 		# fork), gently, more when slow. On a berm that's into the turn: it draws you round. Steer to hold a line
 		if v > 0.5:
-			course_rate += float(T.get("camberPull", 0.22)) * G * sin(bk) / maxf(va, 3.0) * smooth01((v - 0.5) / 2.0)
+			# (2026-11-26, user: "berms are known for pulling in and locking you in, a global formula by angle, not just berms": leaned
+			# WITH the tilt (into a berm, a banked bend, the inside of any slope) the pull down it is stronger, bankLock: the bike is
+			# steered back down the face and settles higher at speed instead of riding straight up and over the rim. Ridden straight
+			# across a side slope (no lean into it) only camberPull, so a line across a hill can still be held. BMX_OLD_BANKLOCK=1)
+			var c_pull: float = float(T.get("camberPull", 0.22))
+			if not _OLD_BANKLOCK:
+				# (only while steering INTO the tilt, held ~1 s after letting go: a berm you're turning in locks you in, a whip in it
+				# with the steer released stays locked; hands off down a hillside it fed itself into a slalom (leaned -> pulled down ->
+				# leaned more -> over the fall line -> the other way), F8 2026-11-26: "if I just let it roll down the hill we slide
+				# left and right")
+				_lock_hold = maxf(smooth01((b_in - 0.05) / 0.2), _lock_hold - dt / LOCK_HOLD)
+				c_pull += float(T.get("bankLock", 0.6)) * smooth01((signf(bk) * lean - 0.05) / 0.3) * _lock_hold
+			course_rate += c_pull * G * sin(bk) / maxf(va, 3.0) * smooth01((v - 0.5) / 2.0)
 		# the front tyre is knocked off its line by whatever slopes sideways under it that isn't the land's own tilt:
 		# a rock's flank, a root, a rut's wall (ruts hold the wheel in, rocks kick it out). Not over a smooth berm
 		var kn: float = float(T.get("groundKnock", 0.6))
@@ -1685,7 +1713,18 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 	# after it, and settles back as the lean holds. Drawn only (the turn follows the shared lean as before)
 	var lead_t: float = clampf(lean_v * T.bikeLeanMul * float(T.get("bikeLead", 0.08)), -0.35, 0.35) * gnd
 	_bike_lead += (lead_t - _bike_lead) * minf(1.0, dt * 20.0)
-	var bl: float = lean * T.bikeLeanMul + _gx_lean + bank_lean + _bike_lead
+	# (2026-11-26, Project X reference, step 2: on plain trail their bike rocks ~+-10 deg under a rider whose head hardly moves: a
+	# slow uneven weave (the line, small corrections) and kicks from whatever knocks the front wheel. Bike only, like _bike_lead: the
+	# body's target doesn't see it, so the rider stays and the bike moves under him. Grows with speed, fades in deep turns and in
+	# the air. Drawing only (the turn follows `lean`). Ride > Body: weave. BMX_OLD_WEAVE=1 = none)
+	var wv_t := 0.0
+	if WEAVE_ON and gnd > 0.0:   # (off: it rocked the whole rider, 2026-11-26; experiments only, BMX_WEAVE=1)
+		_wv_t += dt
+		var wn: float = 0.55 * sin(_wv_t * TAU * 0.9) + 0.3 * sin(_wv_t * TAU * 1.7 + 1.1) + 0.15 * sin(_wv_t * TAU * 2.9 + 2.3)
+		var wk: float = float(T.get("weave", 0.0)) * smooth01((va - 3.0) / 7.0) * (1.0 - smooth01((absf(lean) - 0.45) / 0.45))
+		wv_t = (0.22 * wn + 0.5 * clampf(knock, -0.4, 0.4)) * wk * gnd
+	_weave += (wv_t - _weave) * minf(1.0, dt * 8.0)
+	var bl: float = lean * T.bikeLeanMul + _gx_lean + bank_lean + _bike_lead + _weave
 	if not air:
 		var cb_t: float = 0.0 if signf(bk) != signf(bl) else absf(bk)
 		# (eased: it switched on / off in one step as the bank or the lean changed side, and the tanh cap below stepped the drawn
@@ -1741,18 +1780,28 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 	# (signed: where the ground / the soft cap holds the bike more upright than the body's own target, the body stays
 	# 20 % inside the bike. The absolute difference used to flip it: bike held at 31 deg with the body wanting 55 gave a
 	# body at 7 deg, or leaning the wrong way - the rider stood up out of every steep berm)
-	var b_sg := signf(bike_lean)
+	# (step 2 fix, 2026-11-26, user: "the whole rider wobbles side to side, head too": the body's rules below read the bike's TOTAL
+	# lean, so the weave leaked into the body. They now read the bike's lean without the weave (bl_nw) and the weave's share is
+	# added to the counter at the end: the bike tilts under a body that stays where it was)
+	var w_part: float = 0.0 if _OLD_WEAVE else cap_b * (tanh(bl / cap_b) - tanh((bl - _weave) / cap_b))
+	weave_lean = w_part   # (Game pivots the drawn bike about the rider's hips for this share)
+	var bl_nw: float = bike_lean - w_part
+	var b_sg := signf(bl_nw)
 	if _OLD_LEANDRAW:
-		counter = maxf((bike_lean - (lean + bank_lean) * T.bodyLean) * b_sg, absf(bike_lean) * 0.2) * b_sg
+		counter = maxf((bl_nw - (lean + bank_lean) * T.bodyLean) * b_sg, absf(bl_nw) * 0.2) * b_sg
 	else:
 		# (2026-11-26, F8 seed 876814 vs a pro's slow-motion: his lean changes are one smooth curve; ours jumped 0.1-0.3 rad in a
 		# tick at every swap. The clamp above holds the body to 80 % of the bike's lean on the bike's side only, so as the bike
 		# crossed upright it flipped sides and the body jumped by its whole target. Now the clamp fades in over the first
 		# ~0.3 rad of bike lean: the body passes upright continuously. BMX_OLD_LEANDRAW=1 = before)
 		var b_t: float = (lean + bank_lean) * T.bodyLean
-		var w_c: float = smooth01(absf(bike_lean) / 0.3)
-		var body_l: float = b_t - w_c * b_sg * maxf(0.0, (b_t - 0.8 * bike_lean) * b_sg)
-		counter = bike_lean - body_l
+		var w_c: float = smooth01(absf(bl_nw) / 0.3)
+		# (2026-11-26, Project X reference: in a deep turn the bike goes out to ~65 deg, the rider stays at ~30-35 deg and drops low
+		# to the inside. Ours kept the body at 74-76 % of the bike's lean there (52 deg at 69). The body's share now falls from 80 %
+		# in gentle turns to 50 % from ~0.5 to 1.1 rad of bike lean. BMX_OLD_CORNERBODY=1 = always 80 %)
+		var sh_max: float = 0.8 if _OLD_CORNERBODY else lerpf(0.8, float(T.get("cornerBody", 0.5)), smooth01((absf(bl_nw) - 0.5) / 0.6))
+		var body_l: float = b_t - w_c * b_sg * maxf(0.0, (b_t - sh_max * bl_nw) * b_sg)
+		counter = bl_nw - body_l
 	# on a bank the rider goes WITH the bike (drawn only). "Bike under an upright body" is flat-corner technique; in a
 	# berm rider and bike are one line, square to its face. The body's target above is measured against gravity, and
 	# the body stick's throw (flickLean) goes to the bike alone, so on banked ground with both sticks he stood up out
@@ -1761,13 +1810,21 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 	var sq_t := 0.0
 	if _OLD_AIRBLEND:
 		if not air:
-			sq_t = float(T.get("bankBody", 0.7)) * smooth01((bank * signf(bike_lean) - 0.03) / 0.12)
+			sq_t = float(T.get("bankBody", 0.7)) * smooth01((bank * signf(bl_nw) - 0.03) / 0.12)
 		bank_sq = move_toward(bank_sq, sq_t, (1.2 if air else 3.0) * dt)
 	else:   # the held ground bank through a skip, faded out by the air blend on a real flight
-		sq_t = float(T.get("bankBody", 0.7)) * smooth01(((_bank_hold if air else bank) * signf(bike_lean) - 0.03) / 0.12) * gnd
+		sq_t = float(T.get("bankBody", 0.7)) * smooth01(((_bank_hold if air else bank) * signf(bl_nw) - 0.03) / 0.12) * gnd
 		bank_sq = move_toward(bank_sq, sq_t, 3.0 * dt)
 	if bank_sq > 0.0:
-		counter = lerpf(counter, bike_lean * 0.2, bank_sq)
+		if _OLD_CORNERBODY:
+			counter = lerpf(counter, bl_nw * 0.2, bank_sq)
+		else:
+			# (2026-11-26, Project X berms: bank ~35 deg, bike ~60, body ~35-40: the body square to the berm's FACE, the bike leaned
+			# further past it. It used to go to 80 % of the bike's lean on any bank. Now the body leans as far as the bank, at least
+			# half the bike's lean and at most 80 % of it)
+			var sh_b: float = lerpf(0.8, float(T.get("cornerBody", 0.5)), smooth01((absf(bl_nw) - 0.5) / 0.6))
+			var body_b: float = minf(maxf(0.8, sh_b) * absf(bl_nw), maxf(absf(bank) * minf(1.0, sh_b / 0.5), sh_b * absf(bl_nw)))
+			counter = lerpf(counter, bl_nw - signf(bl_nw) * body_b, bank_sq)
 	# in the air the stick's lean is the rider's doing: they push the bike over with the legs and arms and
 	# their body goes the other way a little (counter-lean), staying over the centre of mass. It comes in with the air
 	# blend (air_k): a short skip keeps the ground pose, and after touch-down it eases back out (the stick share is
@@ -1777,9 +1834,10 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 	# now. BMX_OLD_LEANDRAW=1 = at once)
 	if air: _air_wl = clampf(absf(air_stick.x) * 2.5, 0.0, 1.0) if _OLD_LEANDRAW else move_toward(_air_wl, clampf(absf(air_stick.x) * 2.5, 0.0, 1.0), 4.0 * dt)
 	if _OLD_AIRBLEND:
-		if air: counter = lerpf(counter, bike_lean * (1.0 + float(T.get("stickBodyCounter", 0.25))), _air_wl)
+		if air: counter = lerpf(counter, bl_nw * (1.0 + float(T.get("stickBodyCounter", 0.25))), _air_wl)
 	elif air_k > 0.0:
-		counter = lerpf(counter, bike_lean * (1.0 + float(T.get("stickBodyCounter", 0.25))), _air_wl * air_k)
+		counter = lerpf(counter, bl_nw * (1.0 + float(T.get("stickBodyCounter", 0.25))), _air_wl * air_k)
+	counter += w_part
 	rock = pedal_rock(crank, sprint, pedal, va, bike_rock)
 	return va
 
@@ -3423,6 +3481,11 @@ func _pop_along(dv: float) -> void:
 	v *= k; vy *= k
 
 static var _OLD_SPIN := OS.get_environment("BMX_OLD_SPIN") != ""
+static var _OLD_WEAVE := OS.get_environment("BMX_OLD_WEAVE") != ""
+static var WEAVE_ON := OS.get_environment("BMX_WEAVE") != ""   # the bike weave, off (rocked the whole rider)   # no bike weave under the rider
+static var _OLD_CORNERBODY := OS.get_environment("BMX_OLD_CORNERBODY") != ""   # body at up to 80 % of the bike's lean in deep turns
+static var _OLD_BANKLOCK := OS.get_environment("BMX_OLD_BANKLOCK") != ""   # leaned into tilted ground: only camberPull
+static var _OLD_SLOW := OS.get_environment("BMX_OLD_SLOW") != ""   # slow-riding / reverse as before 2026-11-26
 static var _OLD_LEANDRAW := OS.get_environment("BMX_OLD_LEANDRAW") != ""   # the drawn body / bike lean with its one-tick jumps
 static var _OLD_STRAIGHTWHIP := OS.get_environment("BMX_OLD_STRAIGHTWHIP") != ""   # the whip only in corners (both sticks)
 static var _OLD_STICKBIKE := OS.get_environment("BMX_OLD_STICKBIKE") != ""   # right stick side lean throws the bike (before 2026-11-26)
@@ -3646,6 +3709,9 @@ func _style_points(at: float, flips: int, turns: int) -> void:
 ## Pivot (pirouette): slow, brake held and steering -> the rear swings round the front wheel, as far as you like
 func _pivot_step(dt: float, steer_input: float, brake_k: float) -> void:
 	var on := absf(v) < 2.5 and brake_k > 0.3 and absf(steer_input) > 0.1 and not front_air and not rear_air
+	# (2026-11-26, user: "holding reverse and turning, the rear just slides left and right round the front tyre, not how it works"):
+	# only a forward-rolling nose pivot now, never stopped or backing up (that's reverse, it steers like a bike). BMX_OLD_SLOW=1
+	if not _OLD_SLOW: on = on and v > 0.5 and not brake_back
 	if not on:
 		pivot = maxf(0.0, pivot - dt * 5)
 		if pivot == 0.0: pivot_acc = 0.0
@@ -3838,5 +3904,5 @@ func reset_body() -> void:
 	man_a = 0.0; man_w = 0.0; bank = 0.0; _bank_hold = 0.0; bank_v = 0.0; corner_g = 0.0
 	nose_a = 0.0; nose_w = 0.0; gest_hop = 0.0; _hop_buf = 0.0; _pop_miss = 0.0
 	# (is_sane checks slip_w / steer_in too: left NaN they failed every later step and froze the bike until a respawn)
-	slip_w = 0.0; steer_in = 0.0; knock = 0.0; _gx_lean = 0.0; bank_lean = 0.0; bank_sq = 0.0; _bike_lead = 0.0
+	slip_w = 0.0; steer_in = 0.0; knock = 0.0; _gx_lean = 0.0; bank_lean = 0.0; bank_sq = 0.0; _bike_lead = 0.0; _weave = 0.0
 	_amax = 99.0; _amin = -99.0; yaw_rate = 0.0

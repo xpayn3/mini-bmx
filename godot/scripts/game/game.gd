@@ -2571,6 +2571,9 @@ const LIFT_DOWN := 0.6   # m/s it settles back
 var _lift_s := 0.0       # the eased tyre-unclip lift
 const AIR_SHARE_EASE := 0.08   # s: back on the ground the air offset eases out (it popped the bike up in one frame)
 var _air_dlt := Vector3.ZERO
+var _sway: Array[Vector2] = []   # tests (BMX_SWAY_PROBE)
+var _slip_k := 0.0   # share of a small unasked slip drawn along the travel
+static var _OLD_SLIPDRAW := OS.get_environment("BMX_OLD_SLIPDRAW") != ""
 var _piv_c := 0.0; var _piv_w := 0.5   # drawn pitch pivot correction (m) and its rear share
 const LIFT_AIR := 1.5   # m/s: the tyre-unclip lift lets go in the air
 static var _OLD_PIVOT := OS.get_environment("BMX_OLD_PIVOT") != ""
@@ -3619,6 +3622,17 @@ func _process(dt: float) -> void:
 	var p_draw: float = wrapf(_prev[pk] + BikePhysics.ang_diff(st.get(pk), _prev[pk]) * a, -PI, PI)
 	if Env.s("BMX_PITCH_POSE") != "": p_draw = wrapf(t * 4.0, -PI, PI) if Env.s("BMX_PITCH_POSE") == "sweep" else float(Env.s("BMX_PITCH_POSE"))   # tests: draw at a fixed pitch (flip poses)
 	var hd: float = _prev.heading + BikePhysics.ang_diff(st.heading, _prev.heading) * a
+	# (2026-11-26, F8: "we slide with the tyres on the landscape, no lean, the whole unit slides, very off-putting": hands off across
+	# a 17-31 deg side slope the tyres hold the bike with ~5 deg of slip angle, so it pointed 5 deg off where it went and crabbed
+	# sideways ~0.6 m/s. Real tyres do that, but on screen it reads as sliding on ice; racing games draw small slip along the
+	# travel. A small slip nobody asked for (no whip, no locked rear) is drawn 80 % along the travel; real slides / whips in full.
+	# Drawing only. BMX_OLD_SLIPDRAW=1 = before)
+	if not _OLD_SLIPDRAW:
+		var sk_t: float = 0.0
+		if not st.air and not st.crash_on:
+			sk_t = (1.0 - smoothstep(0.10, 0.20, absf(st.slip))) * (1.0 - clampf(st.whip * 3.0, 0.0, 1.0)) * (1.0 - clampf(st.rear_lock / 0.15, 0.0, 1.0))
+		_slip_k = move_toward(_slip_k, sk_t, 4.0 * minf(dt, 0.05))
+		hd -= clampf(st.slip, -0.25, 0.25) * 0.8 * _slip_k
 	drawn_pos = Vector3(_lerp_k("x"), _lerp_k("y"), _lerp_k("z"))
 	var body_y: float = _lerp_k("body_y")
 	_update_dab(dt, st)
@@ -3909,6 +3923,17 @@ func _process(dt: float) -> void:
 		pi["pedalTop"] = rig.pedal_top_in(rider)
 		_pose_keys_apply(dt, st, pi, lt)
 		rider.update_pose(dt, pi)
+		if Env.s("BMX_SWAY_PROBE") != "" and not st.air and not st.crash_on and rider.J.size() > 0:   # tests: head / hips sideways in the world vs the bike's line
+			var fwd := Vector3(cos(st.heading), 0.0, -sin(st.heading)); var lft := Vector3(fwd.z, 0.0, -fwd.x)
+			var hw: Vector3 = rider.to_global(rider.J[Ragdoll.HEAD]); var pw: Vector3 = rider.to_global(rider.J[Ragdoll.PELVIS])
+			_sway.append(Vector2((hw - drawn_pos).dot(lft), (pw - drawn_pos).dot(lft)))
+			if _sway.size() == 1200:
+				var mh := 0.0; var mp := 0.0
+				for sv in _sway: mh += sv.x; mp += sv.y
+				mh /= _sway.size(); mp /= _sway.size()
+				var sh := 0.0; var spp := 0.0
+				for sv in _sway: sh += (sv.x - mh) * (sv.x - mh); spp += (sv.y - mp) * (sv.y - mp)
+				print("SWAY head_sd=%.1f cm hips_sd=%.1f cm (sideways in the world, %d frames)" % [sqrt(sh / _sway.size()) * 100.0, sqrt(spp / _sway.size()) * 100.0, _sway.size()])
 		# the pedals turn with the feet (ankling): flat pedals tip under the shoe, about their axle (the foot's place
 		# doesn't move, so this frame's pose stays right)
 		if rig.pedal_pivots.size() == 2:
