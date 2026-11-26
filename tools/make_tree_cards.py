@@ -1,12 +1,20 @@
 """Makes the card trees' two leaf textures (godot/scripts/world/card_tree.gd) from photographed foliage:
-  needle_branch.png  512 x 256  a pine branch: stem along x (0 = the trunk end .. 1 = the tip), side shoots, and real
-                     needle bundles stamped along both, angled forward
-  leaf_cluster.png   512 x 512  a rounded cluster of real leaves (the bush / leafy-crown card)
+  needle_branch.png  2048 x 1024  a pine branch at real scale (~2-3 m: needle bundles 4-6 cm): stem along x (0 = the trunk
+                     end .. 1 = the tip), side shoots, small twigs off them, real needle bundles stamped along all of them
+  leaf_cluster.png   1024 x 1024  a clump of real leaves at real size (~0.8 m: the bushes' card)
+  leaf_tile.png      1024 x 1024  the same leaves as a dense SEAMLESS patch: the leafy crowns repeat it across their cards
 RGBA, transparent texels carry the foliage colour (no dark fringe in the mips). Colours are light and only slightly
 green: the card shader multiplies them by each tree's own instance colour, so every biome keeps its greens; the photos
 give the detail (needle strands, leaf veins, the light / dark between leaves).
 Sources: ambientCG PineNeedles001 + LeafSet005 (CC0), the 2K-JPG zips (Color, Opacity).
-Run: python tools/make_tree_cards.py <PineNeedles001 folder> <LeafSet005 folder> <out folder>
+Run: python tools/make_tree_cards.py <PineNeedles001 folder> <LeafSet005 folder> <out folder> [<beech prefix>]
+Optional 4th argument: the textures.com "3D Scanned European Beech Tree Leaves Atlas 01" maps, as their common path prefix
+(e.g. C:/Users/Luka/Downloads/TCom_Leaves_EuropeanBeech01_2K_ -> ..._albedo.tif, _alpha, _normal, _translucency): makes
+  leaf_beech.png    1024 x 1024  real beech twigs in a clump (the bushes; preferred over leaf_cluster.png when it exists)
+  leaf_beech_n.png  1024 x 1024  the same layout: RGB = tangent-space normal (OpenGL), A = translucency
+  leaf_beech_tile.png / _tile_n.png  the twigs as a dense seamless patch (the leafy crowns; over leaf_tile.png)
+textures.com licence: may ship inside the game, may NOT be redistributed as files: both are gitignored (the repo is public),
+so a fresh clone uses leaf_cluster.png until this is run with the atlas.
 """
 import math
 import random
@@ -48,7 +56,7 @@ def load(folder, name):
     return c, o
 
 
-def sprite(c, o, b, tint, lum_mean, grow=0, shrink=0):
+def sprite(c, o, b, tint, lum_mean, grow=0, shrink=0, rel_max=1.8):
     """One cut-out (RGBA PIL image): the photo's brightness detail x a light tint. grow: thicken the opacity by that many
     pixels (needle strands are ~3 px at 2K and would vanish once scaled down onto a card); shrink: trim the edge (the
     scan's leaves carry a light halo)."""
@@ -69,7 +77,7 @@ def sprite(c, o, b, tint, lum_mean, grow=0, shrink=0):
     inside = oo > 0.5
     m = float(lum[inside].mean()) if inside.any() else 0.5
     # keep a little of the photo's own hue (yellow midribs, red stalks) around the tint
-    rel = np.clip(lum / max(m, 1e-3), 0.0, 1.8)
+    rel = np.clip(lum / max(m, 1e-3), 0.0, rel_max)
     hue = cc / np.maximum(lum[..., None], 1e-3)
     col = rel[..., None] * lum_mean * (np.array(tint, np.float32) * 0.8 + hue * 0.2)
     rgba = np.dstack([np.clip(col, 0, 1), oo])
@@ -113,69 +121,73 @@ def bleed(img, fill):
 
 
 def needles(folder, out):
+    """A pine branch at real scale: the card spans a branch of ~2-3 m (2048 px), so a 4-6 cm needle bundle is ~35-45 px.
+    Main stem, side shoots, small side twigs off those, needle bundles all along them."""
     c, o = load(folder, "PineNeedles001")
     bs = [b for b in boxes(o > 0.4) if (b[3] - b[2]) > 300]
     rng = random.Random(2611)
     tint = (0.82, 1.0, 0.74)
     spr = []
     for b in bs:
-        s = sprite(c, o, b, tint, 0.8, grow=6)
-        # the bundle's base: its left end (they all grow left -> right in the scan); anchor at the base's height
+        s = sprite(c, o, b, tint, 0.8, grow=14)
         a = np.asarray(s)[..., 3]
         cols = np.nonzero(a.max(axis=0) > 100)[0]
         x0 = cols[0] if len(cols) else 0
         rows = np.nonzero(a[:, x0:x0 + 12].max(axis=1) > 100)[0]
         y0 = rows.mean() if len(rows) else a.shape[0] / 2
+        # pre-shrink to stamp size (the stamps are ~25-45 px long)
+        k = 64.0 / s.size[0]
+        s = s.resize((64, max(2, int(s.size[1] * k))), Image.LANCZOS)
         spr.append((s, (x0 / a.shape[1], y0 / a.shape[0])))
-    W, H = 512, 256
+    W, H = 2048, 1024
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    # stem, wandering a little; side shoots off it
-    stem = []
-    p = [4.0, H * 0.5]; ang = 0.0
-    while p[0] < W - 10:
-        stem.append(tuple(p))
-        ang = max(-0.1, min(0.1, ang + rng.uniform(-0.04, 0.04)))
-        p = [p[0] + math.cos(ang), p[1] + math.sin(ang)]
-    shoots = [(stem, 1.0)]
-    for i in range(16):
-        t = 0.08 + i / 16 * 0.85 + rng.uniform(-0.02, 0.02)
-        s0 = stem[int(t * (len(stem) - 1))]
-        sd = 1 if i % 2 == 0 else -1
-        a = sd * rng.uniform(0.5, 0.85)
-        ln = H * 0.5 * (1 - t * 0.65) * rng.uniform(0.75, 1.05)
-        pts = []; q = list(s0)
+
+    def grow(p0, ang, ln, curl, wander):
+        pts = []; q = list(p0); a = ang
         for _ in range(int(ln)):
             pts.append(tuple(q))
-            a -= sd * 0.01
+            a += curl + rng.uniform(-wander, wander)
             q = [q[0] + math.cos(a), q[1] + math.sin(a)]
-            if q[1] < 6 or q[1] > H - 6 or q[0] > W - 6:
+            if q[1] < 8 or q[1] > H - 8 or q[0] > W - 8 or q[0] < 2:
                 break
-        shoots.append((pts, 0.65))
-    # needle bundles along every stem (back to front: inner ones darker)
+        return pts
+    stem = grow([4.0, H * 0.5], 0.0, W - 14, 0.0, 0.01)
+    shoots = [(stem, 1.0)]
+    n_side = 30
+    for i in range(n_side):
+        t = 0.04 + i / n_side * 0.9 + rng.uniform(-0.01, 0.01)
+        s0 = stem[int(t * (len(stem) - 1))]
+        sd = 1 if i % 2 == 0 else -1
+        side = grow(list(s0), sd * rng.uniform(0.55, 0.9), H * 0.46 * (1 - t * 0.6) * rng.uniform(0.8, 1.05), -sd * 0.0015, 0.01)
+        shoots.append((side, 0.7))
+        # small twigs off the side shoot
+        for j in range(25, len(side) - 30, 55):
+            sd2 = 1 if (j // 55) % 2 == 0 else -1
+            p = side[j]
+            pa = math.atan2(side[j + 2][1] - p[1], side[j + 2][0] - p[0])
+            tw = grow(list(p), pa + sd2 * rng.uniform(0.6, 0.95), rng.uniform(70, 130) * (1 - j / len(side) * 0.5), 0.0, 0.02)
+            shoots.append((tw, 0.45))
     stamps = []
     for pts, k in shoots:
-        for j in range(0, len(pts) - 2, 3):
+        step = 5 if k > 0.9 else 6
+        for j in range(0, len(pts) - 2, step):
             x, y = pts[j]
             x2, y2 = pts[min(j + 2, len(pts) - 1)]
             d = math.degrees(math.atan2(y2 - y, x2 - x))
             tt = j / max(len(pts), 1)
             for side in (-1, 1):
-                ln = rng.uniform(75, 115) * (0.55 + 0.45 * k) * (1 - 0.35 * tt)
-                spread = rng.uniform(25, 60)
-                stamps.append((rng.random(), (x, y), d + side * spread, ln, rng.uniform(0.75, 1.05)))
+                ln = rng.uniform(34, 46) * (0.7 + 0.3 * k) * (1 - 0.3 * tt)
+                stamps.append((rng.random(), (x, y), d + side * rng.uniform(28, 62), ln, rng.uniform(0.72, 1.06)))
     stamps.sort(key=lambda s: s[0])
     for _, at, deg, ln, shade in stamps:
         s, anc = rng.choice(spr)
-        scale = ln / s.size[0]
-        # PIL turns counter-clockwise with y down: our angle is in image coordinates (y down), so negate
-        paste(img, s, at, -deg, scale, shade, anc)
-    # the stems over the needles (the twig the needles grow from)
+        paste(img, s, at, -deg, ln / s.size[0], shade, anc)
     from PIL import ImageDraw
     dr = ImageDraw.Draw(img)
     for pts, k in shoots:
         for j in range(len(pts) - 1):
-            w = (3 if k > 0.9 else 2) * (1 - j / len(pts) * 0.5)
-            dr.line([pts[j], pts[j + 1]], fill=(118, 104, 74, 255), width=max(1, int(round(w))))
+            w = (7 if k > 0.9 else 4 if k > 0.6 else 2) * (1 - j / len(pts) * 0.5)
+            dr.line([pts[j], pts[j + 1]], fill=(112, 98, 70, 255), width=max(1, int(round(w))))
     bleed(img, (0.62, 0.72, 0.55)).save(f"{out}/needle_branch.png")
 
 
@@ -191,24 +203,139 @@ def leaves(folder, out):
         s = sprite(c, o, b, tint, 0.72, shrink=3)
         spr.append((s, (0.5, 0.97), (b[3] - b[2]) > (b[1] - b[0]) * 0.6))   # (anchor: the stalk at the bottom; twig cluster?)
     singles = [s for s in spr if not s[2]] or spr
-    S = 512
+    # real scale: the card holds ~0.8 m of foliage (the leafy crowns repeat it across big cards), a leaf ~6-10 cm
+    S = 1024
     img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     rng = random.Random(90210)
     items = []
-    for i in range(46):
+    for i in range(95):
         a = rng.random() * math.tau
-        r = math.sqrt(rng.random()) * S * 0.33
+        r = math.sqrt(rng.random()) * S * 0.36
         at = (S / 2 + math.cos(a) * r, S / 2 + math.sin(a) * r)
         depth = rng.random()
-        items.append((depth, at, rng.uniform(0, 360), rng.uniform(95, 140), 0.68 + 0.4 * depth))
+        items.append((depth, at, rng.uniform(0, 360), rng.uniform(80, 125), 0.68 + 0.4 * depth))
     items.sort(key=lambda t: t[0])
     for _, at, deg, ln, shade in items:
         s, anc, _ = rng.choice(singles)
         paste(img, s, at, deg, ln / s.size[1], shade, anc)
     bleed(img, (0.6, 0.72, 0.48)).save(f"{out}/leaf_cluster.png")
+    # the crowns' version: a dense seamless patch (~0.8 m of foliage at real leaf size)
+    T = 3 * S
+    acc = Image.new("RGBA", (T, T), (0, 0, 0, 0))
+    rng = random.Random(90211)
+    items = sorted([(rng.random(), (rng.random() * S, rng.random() * S), rng.uniform(0, 360), rng.uniform(80, 125)) for _ in range(190)], key=lambda t: t[0])
+    for depth, at, deg, ln in items:
+        s_, anc, _ = rng.choice(singles)
+        _tile_paste(lambda a, sp=s_, d=deg, l=ln, sh=0.68 + 0.4 * depth, an=anc: paste(acc, sp, a, d, l / sp.size[1], sh, an), S, at)
+    bleed(acc.crop((S, S, 2 * S, 2 * S)), (0.6, 0.72, 0.48)).save(f"{out}/leaf_tile.png")
+
+
+def _tile_paste(paste_fn, S, at, *args):
+    """Paste at `at` and at every wrapped copy one tile over, onto a 3S x 3S canvas (crop the middle S x S: seamless)."""
+    for oy in (-1, 0, 1):
+        for ox in (-1, 0, 1):
+            paste_fn((at[0] + S + ox * S, at[1] + S + oy * S), *args)
+
+
+def beech(prefix, out):
+    c = np.asarray(Image.open(prefix + "albedo.tif").convert("RGB"), np.float32) / 255.0
+    o = np.asarray(Image.open(prefix + "alpha.tif").convert("L"), np.float32) / 255.0
+    nm = np.asarray(Image.open(prefix + "normal.tif").convert("RGB"), np.float32) / 255.0
+    tr = np.asarray(Image.open(prefix + "translucency.tif").convert("L"), np.float32) / 255.0
+    bs = [b for b in boxes(o > 0.4) if (b[1] - b[0]) * (b[3] - b[2]) > 200 * 200]
+    tint = (0.86, 1.0, 0.72)
+    pieces = []
+    for b in bs:
+        y1, y2, x1, x2 = [max(0, v) for v in b]
+        col = sprite(c, o, b, tint, 0.72, shrink=1, rel_max=1.25)
+        # the normal + translucency sprite of the same box (alpha = the twig's opacity, to composite with)
+        n4 = np.dstack([nm[y1:y2, x1:x2], tr[y1:y2, x1:x2], o[y1:y2, x1:x2]])
+        big = (y2 - y1) * (x2 - x1) > 500 * 500
+        pieces.append((col, n4, big))
+    S = 1024
+    acc = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    nrm = np.zeros((S, S, 4), np.float32); nrm[..., 0:3] = (0.5, 0.5, 1.0)   # (flat normal, no translucency)
+    ncov = np.zeros((S, S), np.float32)
+    rng = random.Random(1880)
+    items = []
+    for i in range(11):
+        a = rng.random() * math.tau
+        r = math.sqrt(rng.random()) * S * 0.3
+        depth = rng.random()
+        items.append((depth, (S / 2 + math.cos(a) * r, S / 2 + math.sin(a) * r), rng.uniform(0, 360), 0.68 + 0.4 * depth, rng.random()))
+    items.sort(key=lambda t: t[0])
+    for _, at, deg, shade, pick in items:
+        col, n4, big = pieces[int(pick * len(pieces)) % len(pieces)]
+        size = (rng.uniform(0.4, 0.5) if big else rng.uniform(0.24, 0.3)) * S
+        scale = size / max(col.size)
+        # (the crowns repeat this picture: keep every twig inside its border, or repeats show straight cut edges)
+        lim = S / 2 - size / 2 - 12
+        dx, dy = at[0] - S / 2, at[1] - S / 2
+        dl = math.hypot(dx, dy)
+        if dl > lim:
+            at = (S / 2 + dx / dl * max(lim, 0), S / 2 + dy / dl * max(lim, 0))
+        paste(acc, col, at, deg, scale, shade, (0.5, 0.5))
+        _paste_normal(nrm, ncov, n4, at, deg, scale)
+    bleed(acc, (0.6, 0.72, 0.48)).save(f"{out}/leaf_beech.png")
+    # where no twig covers, keep the flat normal; the normal's alpha = translucency
+    img = Image.fromarray((np.clip(nrm, 0, 1) * 255).astype(np.uint8), "RGBA")
+    img.save(f"{out}/leaf_beech_n.png")
+    # the crowns' version: a dense SEAMLESS patch of twigs (~0.8 m of foliage), repeated across a crown's cards
+    T = 3 * S
+    acc = Image.new("RGBA", (T, T), (0, 0, 0, 0))
+    nrm = np.zeros((T, T, 4), np.float32); nrm[..., 0:3] = (0.5, 0.5, 1.0)
+    ncov = np.zeros((T, T), np.float32)
+    rng = random.Random(1881)
+    items = []
+    for i in range(34):
+        items.append((rng.random(), (rng.random() * S, rng.random() * S), rng.uniform(0, 360), rng.random()))
+    items.sort(key=lambda t: t[0])
+    for depth, at, deg, pick in items:
+        col, n4, big = pieces[int(pick * len(pieces)) % len(pieces)]
+        size = (rng.uniform(0.4, 0.5) if big else rng.uniform(0.24, 0.3)) * S
+        scale = size / max(col.size)
+        shade = 0.68 + 0.4 * depth
+        _tile_paste(lambda a, c=col, d=deg, sc=scale, sh=shade: paste(acc, c, a, d, sc, sh, (0.5, 0.5)), S, at)
+        _tile_paste(lambda a, n=n4, d=deg, sc=scale: _paste_normal(nrm, ncov, n, a, d, sc), S, at)
+    bleed(acc.crop((S, S, 2 * S, 2 * S)), (0.6, 0.72, 0.48)).save(f"{out}/leaf_beech_tile.png")
+    Image.fromarray((np.clip(nrm[S:2 * S, S:2 * S], 0, 1) * 255).astype(np.uint8), "RGBA").save(f"{out}/leaf_beech_tile_n.png")
+
+
+def _paste_normal(dst, cov, n4, at, deg, scale):
+    """Rotate + scale a [normal rgb, translucency, opacity] sprite like paste() and write it over dst where opaque.
+    The normals' x / y turn with the picture (tangent space, y up): a CCW image turn of deg turns them by deg."""
+    h, w = n4.shape[:2]
+    t = math.radians(deg)
+    nx = n4[..., 0] * 2 - 1; ny = n4[..., 1] * 2 - 1
+    rx = nx * math.cos(t) - ny * math.sin(t)
+    ry = nx * math.sin(t) + ny * math.cos(t)
+    rgba = np.dstack([rx * 0.5 + 0.5, ry * 0.5 + 0.5, n4[..., 2], n4[..., 4]])   # (blue dropped: rebuilt below)
+    img = Image.fromarray((np.clip(rgba, 0, 1) * 255).astype(np.uint8), "RGBA")
+    tr = Image.fromarray((np.clip(n4[..., 3], 0, 1) * 255).astype(np.uint8), "L")
+    sw, sh = max(1, int(w * scale)), max(1, int(h * scale))
+    img = img.resize((sw, sh), Image.LANCZOS).rotate(deg, resample=Image.BICUBIC, expand=True)
+    tr = tr.resize((sw, sh), Image.LANCZOS).rotate(deg, resample=Image.BICUBIC, expand=True)
+    px = int(at[0] - img.size[0] / 2); py = int(at[1] - img.size[1] / 2)
+    a = np.asarray(img, np.float32) / 255.0
+    tt = np.asarray(tr, np.float32) / 255.0
+    H, W = dst.shape[:2]
+    x0, y0 = max(0, px), max(0, py)
+    x1, y1 = min(W, px + a.shape[1]), min(H, py + a.shape[0])
+    if x1 <= x0 or y1 <= y0:
+        return
+    sa = a[y0 - py:y1 - py, x0 - px:x1 - px]
+    st = tt[y0 - py:y1 - py, x0 - px:x1 - px]
+    m = sa[..., 3:4] > 0.5
+    nx = sa[..., 0] * 2 - 1; ny = sa[..., 1] * 2 - 1
+    nz = np.sqrt(np.clip(1 - nx * nx - ny * ny, 0, 1))
+    new = np.dstack([sa[..., 0], sa[..., 1], nz * 0.5 + 0.5, st])
+    reg = dst[y0:y1, x0:x1]
+    dst[y0:y1, x0:x1] = np.where(m, new, reg)
 
 
 if __name__ == "__main__":
     needles(sys.argv[1], sys.argv[3])
     leaves(sys.argv[2], sys.argv[3])
+    if len(sys.argv) > 4:
+        beech(sys.argv[4], sys.argv[3])
     print("done")

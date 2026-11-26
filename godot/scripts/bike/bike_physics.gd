@@ -147,6 +147,13 @@ const SCOOP_TILT := 0.4     # rad: hands off, the toes scoop the rear up: the no
 const LIP_SPARE_OWN := 0.05   # rad: the same, hands off (the rider rides with the lip)
 const EDGE_BASE := 0.06   # m: an edge under the frame is read over at least this much ground, whatever the speed
 const REAR_ROLL := 0.65   # x the rear wheel's radius: the tallest edge the rear rolls up (the front already on top)
+var _OLD_AIRBLEND := OS.get_environment("BMX_OLD_AIRBLEND") != ""   # (tests: air_k + the drawn parts' raw air flag before 2026-11-26)
+const AIR_BODY_MIN := 0.25    # s: a flight predicted at least this long (air_time + _land_t) gets the air pose (see _air_blend)
+const AIR_BODY_FROM := 0.15   # s of air before it, when no landing is predicted
+const AIR_BODY_IN := 0.18     # s: the air pose eases in (time constant; 0.1 swung the body 0.1 rad a tick off a lip)
+const AIR_BODY_OUT := 0.12    # s: and back out after touch-down
+var _air_wl := 0.0           # drawing: the air stick's share of the body counter-lean, held after touch-down while it eases out
+var _bank_hold := 0.0         # drawing: the bank last read on the ground, held through a skip (the physics' bank falls to flat in the air)
 var _OLD_CURB := OS.get_environment("BMX_OLD_CURB") != ""   # (tests: the old per-step edge check, rear stops dead)
 const RIM_CLIMB := 4.0  # m/s: the most upward speed a rim strike on a rising edge gives the frame
 const TYRE_MAX := 0.045   # m: a tyre squashed this far is on its rim
@@ -267,6 +274,16 @@ const SHORT_FROM := 0.7; const SHORT_TO := 1.3   # s of whole flight: short belo
 const SHORT_DELAY := 0.25; const SHORT_RAMP := 0.3; const SHORT_HELP := 0.9; const SHORT_SPEED := 40.0   # (short flights: when / how fast / how firmly he aims)
 var _OLD_SHORTAIM := OS.get_environment("BMX_OLD_SHORTAIM") != ""   # (tests: the same slow hands-off aim on every flight)
 var _OLD_FADE := OS.get_environment("BMX_OLD_FADE") != ""       # (tests: before the brakes could fade)
+# speed tuck (2026-11-26, user: a downhill speed record rider - hips right back over the rear wheel, back flat, head
+# low behind the bars): coasting fast he tucks by himself, more the faster (speedTuckFrom .. speedTuckFull), and a
+# LIGHT pull back on the right stick tucks him at any speed; pulled further it goes over into the weight-back /
+# manual as before. speed_tuck 0..1 goes to the rider's pose (`speedTuck`) and cuts the drag (the stick's tuck by
+# tuckDrag, the automatic one by speedTuckDrag of that). BMX_OLD_SPEEDTUCK=1 = before (stick back = sat up)
+var _OLD_SPEEDTUCK := OS.get_environment("BMX_OLD_SPEEDTUCK") != ""
+var speed_tuck := 0.0        # 0..1, eased: how far into the speed tuck
+var speed_tuck_auto := 0.0   # the automatic part (by speed)
+const TUCK_BACK_IN := Vector2(0.05, 0.3)     # stick back: tuck ramps in over this
+const TUCK_BACK_OUT := Vector2(0.55, 0.95)   # ...and gives way to the weight-back pose / sit up over this
 var _HEAT_HOLD := float(OS.get_environment("BMX_HEAT")) if OS.get_environment("BMX_HEAT") != "" else 0.0
 var _OLD_SUSPFX := OS.get_environment("BMX_OLD_SUSPFX") != ""   # (tests: before dive steering, pedal bob and kickback)
 var foot_down := false    # set by Game: the rider's foot is on the ground (the bike stays put)
@@ -404,7 +421,7 @@ func _reset_motion() -> void:
 	# judged LOOPED OUT / NOSE DIVE on its first step (a spawn or a get-up on anything past ~35 deg)
 	_sample(fwd()); pitch = _g_pitch; g_pitch = _g_pitch; _gpc_last = NAN
 	n_f = NAN; n_r = NAN; n_ref = NAN; lip_state = 0; hf_prev = NAN; hr_prev = NAN; zw_f = NAN; zw_r = NAN
-	bank = 0; body_x = 0; hip_shift = 0; spin = 0; a_drive = 0; charge = 0; hop_charge = 0; lift_t = 0
+	bank = 0; _bank_hold = 0.0; _air_wl = 0.0; body_x = 0; hip_shift = 0; spin = 0; a_drive = 0; charge = 0; hop_charge = 0; lift_t = 0
 	body_xv = 0; hip_v = 0; v_last = NAN; air_lean = 0; air_pull = 0; flip_acc = 0; spin_acc = 0; flip_in = 0
 	body_pw = 0; throw_v = 0; air_w = 0; air_inertia = 1; air_tilt = 0; air_tilt_v = 0; air_yaw = 0; air_tw = 0; air_tw_v = 0; whip_load = 0; _whip_in = 0; spin_load = 0; _spin_in = 0; _flip_in = 0; land_jolt = 0
 	pivot = 0; pivot_acc = 0; body_in_s = 0; flick = 0; flick_v = 0; _flick_arm = 0; _flick_side = 0; flick_kick = 0
@@ -928,10 +945,45 @@ func _step_loads(dt: float) -> void:
 
 ## stage 5: along the bike: pedalling, the two brakes (sets skid), pumping, drag, speed. Returns a_long, how much of
 ## the tyres' grip driving / braking is using (m/s2)
+## the speed tuck's level this step (see _OLD_SPEEDTUCK)
+func _speed_tuck_step(dt: float, throttle: float) -> void:
+	if _OLD_SPEEDTUCK:
+		speed_tuck = 0.0; speed_tuck_auto = 0.0
+		return
+	var b: float = clampf(-body_in_s, 0.0, 1.0)
+	var stick: float = smoothstep(TUCK_BACK_IN.x, TUCK_BACK_IN.y, b) * (1.0 - smoothstep(TUCK_BACK_OUT.x, TUCK_BACK_OUT.y, b))
+	# automatic: by speed, coasting (pedalling stands him up), not with the stick pushed forward (that is the other tuck)
+	# or pulled well back, nor while balancing a manual / nose manual
+	var auto: float = smoothstep(float(T.get("speedTuckFrom", 11.0)), float(T.get("speedTuckFull", 18.0)), absf(v)) * float(T.get("speedTuck", 1.0))
+	auto *= (1.0 - clampf(throttle * 1.5, 0.0, 1.0)) * (1.0 - clampf(body_in_s * 2.0, 0.0, 1.0)) * (1.0 - smoothstep(TUCK_BACK_OUT.x, TUCK_BACK_OUT.y, b))
+	var bal: float = clampf(maxf(man_a, nose_a) / 0.15, 0.0, 1.0)
+	auto *= 1.0 - bal; stick *= 1.0 - bal
+	auto = clampf(auto, 0.0, 1.0)
+	var want: float = maxf(auto, stick)
+	var k: float = 1.0 - exp(-(5.0 if want > speed_tuck else 3.0) * dt)
+	speed_tuck += (want - speed_tuck) * k
+	speed_tuck_auto += (auto - speed_tuck_auto) * k
+
+## air drag scale from the body: forward stick = race tuck over the bars, the speed tuck (light pull back / by itself
+## at speed), pulled all the way back = sat up tall (an air brake)
+func _aero_update(throttle: float) -> void:
+	# aerodynamics: the drag is the rider's frontal area. Folded down over the bars (right stick forward)
+	# it drops (~40 %: an upright downhill rider vs a race tuck), so the bike runs on and tops out faster;
+	# sat up tall (stick back) it catches the wind like an air brake. Pedalling hard spoils the tuck a bit
+	var tuck: float = clampf(body_in_s, 0.0, 1.0) * (1.0 - 0.5 * clampf(throttle, 0.0, 1.0))
+	var sit_up: float = clampf(-body_in_s, 0.0, 1.0)
+	if not _OLD_SPEEDTUCK:
+		# the stick's part of the speed tuck counts fully, the automatic part speedTuckDrag of it
+		var st_stick: float = maxf(0.0, speed_tuck - speed_tuck_auto)
+		tuck = maxf(tuck, st_stick + speed_tuck_auto * float(T.get("speedTuckDrag", 0.5)))
+		sit_up = smoothstep(TUCK_BACK_OUT.x, TUCK_BACK_OUT.y, sit_up)
+	aero_k = 1.0 - float(T.get("tuckDrag", 0.42)) * tuck + float(T.get("upDrag", 0.3)) * sit_up
+
 func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_water: bool, slope: float, rear_down: bool, nR: float, nF: float) -> float:
 	var a_long := 0.0
 	var sp_k := sprint
 	var n_tot := n_load
+	_speed_tuck_step(dt, throttle)
 	# the brakes cool, and fade once they are hot enough (the rotor glow reads the same heat)
 	brake_heat *= exp(-dt / HEAT_TAU)
 	if _HEAT_HOLD > 0.0: brake_heat = maxf(brake_heat, _HEAT_HOLD)   # (tests: BMX_HEAT keeps the brakes that hot)
@@ -1086,9 +1138,7 @@ func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_wa
 		# aerodynamics: the drag is the rider's frontal area. Folded down over the bars (right stick forward)
 		# it drops (~40 %: an upright downhill rider vs a race tuck), so the bike runs on and tops out faster;
 		# sat up tall (stick back) it catches the wind like an air brake. Pedalling hard spoils the tuck a bit
-		var tuck: float = clampf(body_in_s, 0.0, 1.0) * (1.0 - 0.5 * clampf(throttle, 0.0, 1.0))
-		var sit_up: float = clampf(-body_in_s, 0.0, 1.0)
-		aero_k = 1.0 - float(T.get("tuckDrag", 0.42)) * tuck + float(T.get("upDrag", 0.3)) * sit_up
+		_aero_update(throttle)
 		a -= (roll + T.airDrag / (ts * ts) * v * absf(v) * aero_k) * carry
 		if _EPROBE: _e_add("rolling", -roll * carry * v * dt); _e_add("air", -T.airDrag / (ts * ts) * v * absf(v) * aero_k * carry * v * dt)
 		if in_water: a -= 0.06 * v   # (was 0.7: the water dragged a rider to a halt)
@@ -1115,6 +1165,7 @@ func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_wa
 		pleg = clampf(clampf((body_in - 0.12) / 0.6, 0.0, 1.0) - _bend_in, -1.0, 1.0)   # (the legs' length carried to the landing)
 		# air drag doesn't stop at the lip: the same body area slows the flight (on the full speed, along it).
 		# Small (~0.5 m/s off a 1 s jump at 55 km/h) but it was missing, so jumps flew a touch long and fast
+		if not _OLD_SPEEDTUCK: _aero_update(throttle)   # (the flight tucks too: it kept the last ground value)
 		var k_air: float = T.airDrag / (T.topSpeed * T.topSpeed) * aero_k
 		var sp_air := sqrt(v * v + vy * vy)
 		if _EPROBE: _e_add("air", -k_air * sp_air * (v * v + vy * vy) * dt)
@@ -1215,6 +1266,7 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 		bank_v += ((clampf(b, -0.9, 0.9) - b0) * bw_n * bw_n - 2.0 * bw_n * bank_v) * dt
 		bank_v = clampf(bank_v, -3.0, 3.0)
 		bank = b0 + bank_v * dt
+	if not air: _bank_hold = bank
 	var bk := bank
 	var carving := not air and absf(steer_eff) > 0.01 and va > 4 and not skid and absf(slip) < 0.3
 	carve = minf(1.0, carve + dt * 2) if carving else maxf(0.0, carve - dt * 5)
@@ -1579,11 +1631,15 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 	# a snap of the bike + rider), and on landing it eases back in
 	var gx_t := 0.0
 	var bank_t := 0.0
-	if not air:
+	# (gnd = 1 - air_k, the ground share of the drawing: a short skip keeps the ground lean, the bank held from the
+	# ground; a real flight fades them out as before. See _air_blend)
+	var gnd: float = (0.0 if air else 1.0) if _OLD_AIRBLEND else 1.0 - air_k
+	if gnd > 0.0:
 		gx_t = flick * float(T.get("flickLean", 0.35)) * smooth01(va / 1.5)
 		gx_t += s_in * float(T.get("slowLean", 0.3)) * slow_k * smooth01(va / 1.2)
-		bank_t = float(T.get("bankLean", 0.6)) * bank
+		bank_t = float(T.get("bankLean", 0.6)) * (_bank_hold if air else bank)
 		if whip > 0.0: gx_t += whip_side * float(T.get("whipLean", 0.22)) * whip * whip * (3.0 - 2.0 * whip)
+		gx_t *= gnd; bank_t *= gnd
 	# (just landed: the drawn lean from the stick / slow steer / bank used to move at only 3 rad/s for 0.35 s and the bank part at
 	# bankLeanRate 1.5 - a berm-to-berm swap out of a hop felt heavy. Now landSwapRate for both in that window; Ride > Jumps >
 	# Landing. BMX_OLD_LANDSWAP=1 = the old numbers)
@@ -1599,7 +1655,7 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 	# the body follows. While the lean is changing the bike runs ahead of it by the roll speed (bikeLead s), the body's
 	# target (lean x bodyLean, see counter) doesn't, so in a swap the bike flicks across under a body that comes
 	# after it, and settles back as the lean holds. Drawn only (the turn follows the shared lean as before)
-	var lead_t: float = 0.0 if air else clampf(lean_v * T.bikeLeanMul * float(T.get("bikeLead", 0.08)), -0.35, 0.35)
+	var lead_t: float = clampf(lean_v * T.bikeLeanMul * float(T.get("bikeLead", 0.08)), -0.35, 0.35) * gnd
 	_bike_lead += (lead_t - _bike_lead) * minf(1.0, dt * 20.0)
 	var bl: float = lean * T.bikeLeanMul + _gx_lean + bank_lean + _bike_lead
 	if not air:
@@ -1662,16 +1718,24 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 	# of a laid-over bike. bank_sq (0 flat .. bankBody on banks toward the lean) takes the body that share
 	# of the way into line with the bike (the trail's banked bends are only ~4-10 deg: full from ~8.5); game.gd fades the stick's hips-to-the-outside shift by it too
 	var sq_t := 0.0
-	if not air:
-		sq_t = float(T.get("bankBody", 0.7)) * smooth01((bank * signf(bike_lean) - 0.03) / 0.12)
-	bank_sq = move_toward(bank_sq, sq_t, (1.2 if air else 3.0) * dt)
+	if _OLD_AIRBLEND:
+		if not air:
+			sq_t = float(T.get("bankBody", 0.7)) * smooth01((bank * signf(bike_lean) - 0.03) / 0.12)
+		bank_sq = move_toward(bank_sq, sq_t, (1.2 if air else 3.0) * dt)
+	else:   # the held ground bank through a skip, faded out by the air blend on a real flight
+		sq_t = float(T.get("bankBody", 0.7)) * smooth01(((_bank_hold if air else bank) * signf(bike_lean) - 0.03) / 0.12) * gnd
+		bank_sq = move_toward(bank_sq, sq_t, 3.0 * dt)
 	if bank_sq > 0.0:
 		counter = lerpf(counter, bike_lean * 0.2, bank_sq)
 	# in the air the stick's lean is the rider's doing: they push the bike over with the legs and arms and
-	# their body goes the other way a little (counter-lean), staying over the centre of mass
-	if air:
-		var wl := clampf(absf(air_stick.x) * 2.5, 0.0, 1.0)
-		counter = lerpf(counter, bike_lean * (1.0 + float(T.get("stickBodyCounter", 0.25))), wl)
+	# their body goes the other way a little (counter-lean), staying over the centre of mass. It comes in with the air
+	# blend (air_k): a short skip keeps the ground pose, and after touch-down it eases back out (the stick share is
+	# held from the air, the ground doesn't read air_stick)
+	if air: _air_wl = clampf(absf(air_stick.x) * 2.5, 0.0, 1.0)
+	if _OLD_AIRBLEND:
+		if air: counter = lerpf(counter, bike_lean * (1.0 + float(T.get("stickBodyCounter", 0.25))), _air_wl)
+	elif air_k > 0.0:
+		counter = lerpf(counter, bike_lean * (1.0 + float(T.get("stickBodyCounter", 0.25))), _air_wl * air_k)
 	rock = pedal_rock(crank, sprint, pedal, va, bike_rock)
 	return va
 
@@ -2914,6 +2978,25 @@ func _landing_slope(terrain) -> float:
 			return atan2(hf - hb, 1.2)
 	return NAN
 
+## (2026-11-26) air_k = THE ground -> air blend for everything drawn (rider pose, body counter-lean, the body lining up
+## with a bank, the bike's lead, the drawn ground lean, the bars' tabletop). The raw `air` flag flips on every little
+## skip: off a fast berm face the bike left the ground 4 times in 0.35 s for 0.07-0.11 s each (F8 log), and each part
+## reading `air` swung the body ~30 deg between its berm and air pose at ~8 Hz. Now: 1 once the flight is a real one
+## (the predicted whole flight, air_time + _land_t, at least AIR_BODY_MIN; with no prediction, AIR_BODY_FROM of air),
+## eased in over ~AIR_BODY_IN and back out over ~AIR_BODY_OUT after touch-down (it snapped at landings). The physics
+## keeps reading `air`. BMX_OLD_AIRBLEND=1 = the old air_k (air_time > 0.12, 6 /s) and the raw flag in the drawn parts
+func _air_blend(dt: float) -> void:
+	if _OLD_AIRBLEND:
+		air_k += ((1.0 if (air and air_time > 0.12) else 0.0) - air_k) * minf(1.0, dt * 6)
+		return
+	var a_min: float = float(T.get("airBodyMin", AIR_BODY_MIN))
+	var real := false
+	if air:
+		if not is_nan(_land_pitch): real = air_time + _land_t >= a_min or air_time > a_min
+		else: real = air_time > maxf(a_min, AIR_BODY_FROM)
+	var k_t := 1.0 if real else 0.0
+	air_k += (k_t - air_k) * minf(1.0, dt / maxf(0.01, float(T.get("airBodyIn", AIR_BODY_IN)) if k_t > air_k else float(T.get("airBodyOut", AIR_BODY_OUT))))
+
 ## stage 10: reading the trail (a lip ahead: crouch, pop), the legs' compression
 func _step_lip(dt: float, f: Vector3, brake: bool) -> void:
 	var terrain = host.terrain
@@ -3023,7 +3106,7 @@ func _step_lip(dt: float, f: Vector3, brake: bool) -> void:
 	else: cT = -0.15 * crouch - 0.06 * carve - T.prepDepth * prep * (1.0 - 0.7 * crouch) - 0.08 * squash
 	compress_v += ((cT - compress) * 120 - compress_v * 14) * dt
 	compress = clampf(compress + compress_v * dt, -0.28, 0.1)
-	air_k += ((1.0 if (air and air_time > 0.12) else 0.0) - air_k) * minf(1.0, dt * 6)
+	_air_blend(dt)
 	if host.susp != null and not host.susp.wheels_follow:   # in a ride the tyres follow the ground (BikeRig.fit_wheels)
 		var sp := sin(pitch)
 		host.susp.update(dt, {"air": air, "load": maxf(load, -compress * 2.5), "brake": 1.0 if (brake and not air) else 0.0,
@@ -3701,7 +3784,7 @@ func reset_body() -> void:
 	body_v = 0; body_y = y; body_x = 0; body_xv = 0; hip_shift = 0; hip_v = 0; v_last = NAN
 	air_lean = 0; air_pull = 0; a_drive = 0; pitch_v = 0; compress_v = 0; lean_v = 0; steer_in_v = 0
 	air_w = 0; air_tilt = 0; air_tilt_v = 0; flick = 0; flick_v = 0; bike_lean = 0; counter = 0
-	man_a = 0.0; man_w = 0.0; bank = 0.0; bank_v = 0.0; corner_g = 0.0
+	man_a = 0.0; man_w = 0.0; bank = 0.0; _bank_hold = 0.0; bank_v = 0.0; corner_g = 0.0
 	nose_a = 0.0; nose_w = 0.0; gest_hop = 0.0; _hop_buf = 0.0; _pop_miss = 0.0
 	# (is_sane checks slip_w / steer_in too: left NaN they failed every later step and froze the bike until a respawn)
 	slip_w = 0.0; steer_in = 0.0; knock = 0.0; _gx_lean = 0.0; bank_lean = 0.0; bank_sq = 0.0; _bike_lead = 0.0

@@ -2153,6 +2153,10 @@ func respawn(new_world: bool) -> void:
 		var pxz := Env.s("BMX_PACK_SPAWN").split(",")
 		sp = Vector3(float(pxz[0]) - 9.0, 0.0, float(pxz[1]))
 		phys.reset_at(sp.x, sp.z, sp.y)
+	if Env.s("BMX_SPAWN_AT") != "":   # tests: "x,z,heading" (e.g. read off an F8 ride log) -> start there; Backspace comes back here
+		var sxz := Env.s("BMX_SPAWN_AT").split(",")
+		sp = Vector3(float(sxz[0]), float(sxz[2]) if sxz.size() > 2 else 0.0, float(sxz[1]))
+		phys.reset_at(sp.x, sp.z, sp.y)
 	if sp != Vector3.ZERO: terrain.update_stream(sp.x, sp.z, INF)
 	if Env.s("BMX_START_V") != "": phys.v = float(Env.s("BMX_START_V"))   # tests: roll in at this speed
 	rider.reset_pose()
@@ -3779,6 +3783,7 @@ func _process(dt: float) -> void:
 		pi["brakeF"] = st.brake_f; pi["brakeR"] = st.brake_r   # the levers (the index + middle fingers pull them)
 		pi["hipShift"] = _mcap("hip_shift", st.hip_shift, pdt)
 		pi["bodyStick"] = -0.55 if scenic else _mcap("body_stick", st.body_in_s, pdt)
+		pi["speedTuck"] = 0.0 if scenic else st.speed_tuck   # (the speed record tuck: hips back, back flat, head low)
 		pi["relax"] = 1.0 if scenic else 0.85 * dab_k   # foot down = calm: sat up, back straight, chin up
 		pi["tall"] = 1.0 if scenic else 0.0
 		pi["lookYaw"] = _look_yaw

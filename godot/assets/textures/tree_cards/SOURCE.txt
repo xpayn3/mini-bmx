@@ -1,6 +1,11 @@
-Tree / bush leaf cards, made by root tools/make_tree_cards.py from CC0 scans (public domain, no attribution needed),
-downloaded 2026-11-26 (2K-JPG zips: Color + Opacity used):
-needle_branch.png = ambientCG PineNeedles001 needle bundles stamped along a drawn twig (https://ambientcg.com/view?id=PineNeedles001)
-leaf_cluster.png  = ambientCG LeafSet005 leaves in a cluster (https://ambientcg.com/view?id=LeafSet005)
-impostors.png     = our own card trees rendered side-on by tools/bake_tree_impostors.tscn (far-view trees, world/far_hills.gd)
-All three: BC7 + mipmaps on import.
+Tree / bush leaf cards, made by root tools/make_tree_cards.py (see its header for the command), downloaded 2026-11-26.
+needle_branch.png  = ambientCG PineNeedles001 (CC0) needle bundles stamped along drawn twigs, at real scale
+                     (https://ambientcg.com/view?id=PineNeedles001)
+leaf_cluster.png   = ambientCG LeafSet005 (CC0) leaves in a clump (bushes)   (https://ambientcg.com/view?id=LeafSet005)
+leaf_tile.png      = the same leaves as a seamless patch (leafy crowns)
+leaf_beech*.png    = Textures.com "3D Scanned European Beech Tree Leaves Atlas 01" (albedo, alpha, normal,
+                     translucency). Textures.com licence: may be used inside the game, may NOT be redistributed as
+                     files, so these are gitignored (the repo is public): run make_tree_cards.py with the atlas to make
+                     them. Without them the game uses leaf_cluster / leaf_tile.
+impostors.png/json = our own card trees rendered side-on by tools/bake_tree_impostors.tscn (billboards)
+All: BC7 + mipmaps on import.

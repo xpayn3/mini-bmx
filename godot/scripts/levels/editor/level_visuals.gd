@@ -115,13 +115,15 @@ static func _trees(f: LevelField, parent: Node3D, internal: bool) -> void:
 		var yaw: float = t.yaw
 		var p := Vector3(t.x, 0, t.z)
 		match str(t.kind):
-			"pine":
-				lists.trunk.append([p + Vector3(0, h - 0.1, 0), Vector3(sc, sc * 0.9 + float(t.py) * 0.15, sc), yaw, Color(1, 1, 1)])
-				lists.pine.append([p + Vector3(0, h + sc * 0.6, 0), Vector3(sc * 1.1, t.py, sc * 1.1), yaw, _lin(PINE_COLS[t.ci])])
-			"leafy":
-				var th := sc * 1.3
-				lists.trunk.append([p + Vector3(0, h - 0.1, 0), Vector3(sc, th + 0.3, sc), yaw, Color(1, 1, 1)])
-				lists.blob.append([p + Vector3(0, h + th + sc * 0.7, 0), Vector3(sc * 1.2, sc * 1.05, sc * 1.2), yaw, _lin(LEAF_COLS[t.ci])])
+			"pine", "leafy":   # real-size trees (CardTree.dims, varied by place)
+				var dm := CardTree.dims_at(str(t.kind), t.x, t.z)
+				var ts: Vector3 = dm.trunk
+				lists.trunk.append([p + Vector3(0, h - 0.1, 0), ts + Vector3(0, 0.1, 0), yaw, Color(1, 1, 1)])
+				var crown := p + Vector3(0, h + float(dm.crown_y), 0)
+				if t.kind == "pine":
+					lists.pine.append([crown, dm.crown, yaw, _lin(PINE_COLS[t.ci])])
+				else:
+					lists.blob.append([crown, dm.crown, yaw, _lin(LEAF_COLS[t.ci])])
 			_:
 				lists.bush.append([p + Vector3(0, h - 0.08, 0), Vector3(sc * 0.9, sc * 0.6, sc * 0.9), yaw, _lin(BUSH_COLS[t.ci])])
 	var spec := {"trunk": ["trunk", "trunk"], "pine": ["pine", "leaf"], "blob": ["blob", "leafSoft"], "bush": ["bush", "leafCard"]}
@@ -145,5 +147,5 @@ static func _trees(f: LevelField, parent: Node3D, internal: bool) -> void:
 		mi.set_instance_shader_parameter("fade_mode", 1.0)
 		if not internal:   # (the editor preview has no fade band: LOD1 cards only, nothing extra saved into the scene)
 			CardTree.add_twin(mi, spec[nm][0])   # (full leaf cards near the rider: card_tree.gd)
-		elif nm == "pine":
-			CardTree.add_spire(mi, true)
+		elif nm == "pine" or nm == "blob":
+			CardTree.add_spire(mi, nm, true)

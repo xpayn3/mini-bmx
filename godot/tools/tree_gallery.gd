@@ -13,12 +13,14 @@ func _ready() -> void:
 	var sun := 22.0
 	var ch := 4.0
 	var look := 4.0
+	var at := Vector2.ZERO   # at=x,z: orbit round this point
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("yaw="): yaw = float(a.substr(4))
 		elif a.begins_with("dist="): dist = float(a.substr(5))
 		elif a.begins_with("sun="): sun = float(a.substr(4))
 		elif a.begins_with("h="): ch = float(a.substr(2))
 		elif a.begins_with("look="): look = float(a.substr(5))
+		elif a.begins_with("at="): at = Vector2(float(a.substr(3).split(",")[0]), float(a.substr(3).split(",")[1]))
 		elif not a.contains("="): out = a
 	TerrainGeo.ensure()
 	# the near-card band round the origin (deco_fade.gdshaderinc): front row is inside it
@@ -56,22 +58,16 @@ func _ready() -> void:
 			var pine := i < 4
 			var sc := (0.7 + rng.randf() * 0.8) * 1.4
 			var yaw_t := rng.randf() * TAU
-			var x := (i - 2.5) * 6.0
-			var z := -6.0 if row == 0 else 4.0
+			var x := (i - 2.5) * 11.0
+			var z := -12.0 if row == 0 else 8.0
 			var col: Color
 			var crown: Transform3D
 			var trunk: Transform3D
-			if pine:
-				var py := sc * (1.5 + rng.randf() * 0.7)
-				var cb := sc * 0.6
-				trunk = Transform3D(Basis(Vector3.UP, yaw_t).scaled(Vector3(sc, cb + 0.2 + py * 0.15, sc)), Vector3(x, -0.1, z))
-				crown = Transform3D(Basis(Vector3.UP, yaw_t).scaled(Vector3(sc * 1.1, py, sc * 1.1)), Vector3(x, cb, z))
-				col = TerrainGeo.lin(PINES[i % 3])
-			else:
-				var th := sc * (1.1 + rng.randf() * 0.6)
-				trunk = Transform3D(Basis(Vector3.UP, yaw_t).scaled(Vector3(sc, th + 0.3, sc)), Vector3(x, -0.1, z))
-				crown = Transform3D(Basis(Vector3.UP, yaw_t).scaled(Vector3(sc * 1.2, sc * 1.05, sc * 1.2)), Vector3(x, th + sc * 0.7, z))
-				col = TerrainGeo.lin(LEAVES[i % 4])
+			# real-size trees (CardTree.dims), a different shape per tree
+			var dm := CardTree.dims("pine" if pine else "leafy", rng.randf(), rng.randf(), rng.randf(), rng.randf())
+			trunk = Transform3D(Basis(Vector3.UP, yaw_t).scaled(dm.trunk), Vector3(x, -0.1, z))
+			crown = Transform3D(Basis(Vector3.UP, yaw_t).scaled(dm.crown), Vector3(x, float(dm.crown_y), z))
+			col = TerrainGeo.lin(PINES[i % 3] if pine else LEAVES[i % 4])
 			_one(TerrainGeo.MESH["trunk"], TerrainGeo.MAT["trunk_pine" if pine else "trunk"], trunk, Color(1, 1, 1), 1.0, true)
 			var solid: Mesh = TerrainGeo.MESH["pine" if pine else "blob"]
 			var smat: Material = TerrainGeo.MAT["leaf" if pine else "leafSoft"]
@@ -85,8 +81,8 @@ func _ready() -> void:
 	cam.fov = 45
 	add_child(cam)
 	var yr := deg_to_rad(yaw)
-	cam.position = Vector3(sin(yr) * dist, ch, cos(yr) * dist)
-	cam.look_at(Vector3(0, look, 0.0))
+	cam.position = Vector3(at.x + sin(yr) * dist, ch, at.y + cos(yr) * dist)
+	cam.look_at(Vector3(at.x, look, at.y))
 	for i in 14:
 		await get_tree().process_frame
 	get_viewport().get_texture().get_image().save_png(out)
