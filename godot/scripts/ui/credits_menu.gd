@@ -24,6 +24,7 @@ const CREDITS := [
 		["Denim Fabric 06, Poly Wool Herringbone, Ribbed Corduroy, Rough Linen and Cotton Jersey textures", "Poly Haven, polyhaven.com", "CC0"],
 		["Broken Brick Wall", "Amal Kumar / Poly Haven, polyhaven.com", "CC0"],
 		["Paper003, Metal009, Rubber004", "ambientCG, ambientcg.com", "CC0"],
+		["PineNeedles001, LeafSet005 (tree and bush leaves)", "ambientCG, ambientcg.com", "CC0"],
 	]],
 	["SOUND", [
 		["Tires on gravel road", "freesound_community via Pixabay", "Pixabay Content License"],
