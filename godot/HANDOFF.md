@@ -614,6 +614,29 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   so they keep the plain `trunk_plain`. Which: pines 45 % pine bark / 55 % light, broadleaf 60 % pale / 40 % light, snags
   pale, savanna + bend trees light. Not measured: GPU cost of the extra 3 samples on trunks (two more draw lists a chunk).
 
+- **Start on a big peak, ride down (2026-11-26, user: Riders Republic screenshots, "very steep mountains, vast", "we always start
+  on peaks", "and descend, this game is downhill")**. `TerrainField` (C# mirrored, `BMX_OLD_PEAK=1` = the 105 m / 1.4 km
+  mountain): `HILL_TOP` 450 m, `HILL_LEN` 2.8 km, `PITCH_N` 9 pitches x `PITCH_K` (5-8 m each), the descent profile concave
+  (0.65 linear + 0.35 (1 - (1 - t)^2): ~22 % from the start easing to ~10 %), `RANGE_X0` 3.5 km. The peak is a **massif round
+  its ridge line** (`_massif`): ridge points every 40 m of the spine from s 0 to `HILL_LEN` + 150 (its own nodes), each a cone:
+  `MASSIF_CREST` 45 m flat, then a concave fall top x (1 - t)^1.5 over 150 + 2.2 x top m (+-25 % by a noise along the ridge:
+  spurs, gullies); the land is the highest cone. (A first version read the spine's s per point and spread the flank to ~1.4 km:
+  past `RouteSpine.R` 450 m s jumps between legs: 260 m walls in one 20 m step, and growth changed built land.) Later ranges
+  as before. Snowline `SNOW_H` 280 m in `color_post` (+-25 m noise, patches that join toward the summit, not on > ~40 deg,
+  none on dry land). Peaks of the relief layer: rounded crests (smooth |n|) + the fine octave 0.45 -> `RIDGE_K2` 0.2
+  (`BMX_OLD_RIDGE=1`): the user saw wall-like faces (main, seed 34229 x1873): > 50 deg cells in a 3 km square 20 -> 6.
+  Bridges / rope bridges / skinnies only on trail flatter than `FLAT_MAX` 8 % (a gorge bridge on 25 %: "hit the cliff").
+  Fence gates: each side of a run has its own random stream (`plan_marking`): drawn from one, the first side's gates used as
+  many numbers as the run is long, so growing the open last run moved the other side's fence (`trail_grow_probe` FAIL).
+  Measured (`tools/peak_probe.gd -- seed`: summit, trail height every 200 m, steepest 50 m, flanks; `tools/wall_probe.gd -- seed
+  x z r`: > 50 deg cells and which layer): trail 449 m -> ~40 m over 3.2 km; > 25 % 50-370 m per run; walls round the start
+  seed 12: 648 -> 0. terrain_cs_cmp EXACT, trail_grow / rope_find PASS, wood walls=0, spur_cmp 0.
+  **Open**: (1) speed: the trail's design speed (`TrailCourse.VA`, which sizes the jumps) is free rolling, ~80 km/h on these
+  grades; the demo AI goes over the bars at 70 km/h where a flat stretch drops into 33 % (seed 4242 s 538) and slams out of a
+  berm (s 890): riders must brake on big descents (cap VA, demo AI braking, brake zones before steep pitches). (2) From the
+  summit the far land's end shows as a flat band on the horizon (`FarHills` ~2.6 km): push the far rings out. (3) After the
+  bottom the world still climbs the next ranges (4.2 %): the user's call (a lift to the next peak? endless descent?).
+  (4) Snow reads uniform white on the summit plateau. Not ridden by the user yet.
 - **Mountains for ever + technical sections** (2026-11-21, user: "add mountains ... some gentle climbs ... missing nice tight
   turns for slow speed, more technical parts"). `TerrainField.range_at(x)` (mirrored in `TerrainFieldCs`, integer hash of slot +
   seed, no table): from `RANGE_X0` 2100 m one mountain every `RANGE_P` 2800 m on the trail's corridor: a climb averaging

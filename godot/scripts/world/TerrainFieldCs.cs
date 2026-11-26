@@ -554,8 +554,12 @@ public partial class TerrainFieldCs : RefCounted
 {
 	public const double WATER = -2.2;
 	public const double JC = 34.0;
-	public const double HILL_TOP = 105.0;
-	public const double HILL_LEN = 1400.0;
+	private static readonly bool OLD_RIDGE = System.Environment.GetEnvironmentVariable("BMX_OLD_RIDGE") is { Length: > 0 };
+	private const double RIDGE_E2 = 0.01, RIDGE_TOP = 1.1, RIDGE_K2 = 0.2;
+	public static readonly bool OLD_PEAK = System.Environment.GetEnvironmentVariable("BMX_OLD_PEAK") is { Length: > 0 };
+	public static readonly double HILL_TOP = OLD_PEAK ? 105.0 : 450.0;   // (TerrainField: the start peak)
+	public static readonly double HILL_LEN = OLD_PEAK ? 1400.0 : 2800.0;
+	private const double SNOW_H = 280.0;
 	public const double MTN_W = 150.0;
 	public const double QR = 19.0;
 	public const double CELL = 16.0;
@@ -1148,7 +1152,8 @@ public partial class TerrainFieldCs : RefCounted
 	}
 
 	// ---------------- the mountains after the first (TerrainField.range_at) ----------------
-	public const double RANGE_X0 = 2100.0, RANGE_P = 2800.0, RANGE_UP = 0.042, RANGE_DOWN = 0.075;
+	public static readonly double RANGE_X0 = OLD_PEAK ? 2100.0 : 3500.0;
+	public const double RANGE_P = 2800.0, RANGE_UP = 0.042, RANGE_DOWN = 0.075;
 	private double _rg_x = double.NaN, _rg_h, _rg_m;
 	public double rg_down;
 
@@ -1218,10 +1223,76 @@ public partial class TerrainFieldCs : RefCounted
 	public double hill(double x, double z)
 	{
 		spine_sd(x, z);
+		if (!OLD_PEAK)
+		{
+			double hm = _massif(x, z);
+			if (r_s > RANGE_X0)
+			{
+				range_at(r_s);
+				if (_rg_h > 0.0)
+					hm = maxf(hm, _rg_h * (1.0 - sm(MTN_W, MTN_W + 260, r_ad)));
+			}
+			return hm;
+		}
 		double top = hill_top(r_s);
 		if (top <= 0.0)
 			return 0.0;
 		return top * (1.0 - sm(MTN_W, MTN_W + 260, r_ad));
+	}
+
+	// (TerrainField._massif: the start peak round its ridge line, same operation order)
+	private const double MASSIF_CREST = 45.0;
+	private double[] _pk_x, _pk_z, _pk_top, _pk_fall, _pk_box;
+	private double[] _pk_src;   // (the spine array they were built from)
+	private void _massif_build()
+	{
+		var lx = new System.Collections.Generic.List<double>(); var lz = new System.Collections.Generic.List<double>();
+		var lt = new System.Collections.Generic.List<double>(); var lf = new System.Collections.Generic.List<double>();
+		double mnx = double.PositiveInfinity, mnz = double.PositiveInfinity, mxx = double.NegativeInfinity, mxz = double.NegativeInfinity;
+		for (int i = 0; i < sS.Length; i++)
+		{
+			double sv = sS[i];
+			if (sv < 0.0 || sv > HILL_LEN + 150.0 || i % 2 != 0)
+				continue;
+			double top = hill_top(sv);
+			if (top <= 0.0)
+				continue;
+			double fall = (150.0 + 2.2 * top) * (1.0 + 0.25 * noise((sv + 37.1) * I115, 3.7));
+			lx.Add(sX[i]); lz.Add(sZ[i]); lt.Add(top); lf.Add(fall);
+			double rr = MASSIF_CREST + fall;
+			mnx = minf(mnx, sX[i] - rr); mnz = minf(mnz, sZ[i] - rr); mxx = maxf(mxx, sX[i] + rr); mxz = maxf(mxz, sZ[i] + rr);
+		}
+		_pk_x = lx.ToArray(); _pk_z = lz.ToArray(); _pk_top = lt.ToArray(); _pk_fall = lf.ToArray();
+		_pk_box = new[] { mnx, mnz, mxx, mxz };
+		_pk_src = sS;
+	}
+
+	private double _massif(double x, double z)
+	{
+		if (_pk_box == null || !ReferenceEquals(_pk_src, sS))
+			_massif_build();
+		if (_pk_x.Length == 0 || x < _pk_box[0] || z < _pk_box[1] || x > _pk_box[2] || z > _pk_box[3])
+			return 0.0;
+		double best = 0.0;
+		for (int i = 0; i < _pk_x.Length; i++)
+		{
+			double top = _pk_top[i];
+			if (top <= best)
+				continue;
+			double dx = x - _pk_x[i];
+			double dz = z - _pk_z[i];
+			double rr = MASSIF_CREST + _pk_fall[i];
+			double d2 = dx * dx + dz * dz;
+			if (d2 >= rr * rr)
+				continue;
+			double t = (Math.Sqrt(d2) - MASSIF_CREST) / _pk_fall[i];
+			t = t < 0.0 ? 0.0 : t;
+			double u = 1.0 - t;
+			double v = top * u * Math.Sqrt(u);
+			if (v > best)
+				best = v;
+		}
+		return best;
 	}
 
 	public double hill_top(double x)
@@ -1250,6 +1321,11 @@ public partial class TerrainFieldCs : RefCounted
 		t = (x - -330.0) / (-90.0 - -330.0);
 		t = t > 1.0 ? 1.0 : t;
 		double along = (1.0 - steep - (1.0 - pitch_share) * (0.6 * s1 + 0.4 * lin_)) * (t * t * (3.0 - 2.0 * t));
+		if (!OLD_PEAK)
+		{
+			double cv = 1.0 - (1.0 - lin_) * (1.0 - lin_);
+			along = (1.0 - steep - (1.0 - pitch_share) * (0.65 * lin_ + 0.35 * cv)) * (t * t * (3.0 - 2.0 * t));
+		}
 		double top = along > 0.0 ? HILL_TOP * along * grade_k : 0.0;
 		if (x > RANGE_X0)
 		{
@@ -1673,19 +1749,23 @@ public partial class TerrainFieldCs : RefCounted
 					double n1 = noise_d((x - 3300.0) * PK_I, (z + 1700.0) * PK_I);
 					double g1x = _ndx * PK_I;
 					double g1z = _ndy * PK_I;
-					double r1 = 1.0 - Math.Abs(n1);
-					double s1 = signf(n1);
+					// (TerrainField._relief: rounded crests, quieter fine octave; BMX_OLD_RIDGE)
+					double an1 = OLD_RIDGE ? Math.Abs(n1) : Math.Sqrt(n1 * n1 + RIDGE_E2);
+					double r1 = OLD_RIDGE ? 1.0 - an1 : RIDGE_TOP - an1;
+					double s1 = OLD_RIDGE ? signf(n1) : n1 / an1;
 					double n2 = noise_d((x + 2100.0) * PK_I * 2.17, (z - 600.0) * PK_I * 2.17);
 					double g2x = _ndx * PK_I * 2.17;
 					double g2z = _ndy * PK_I * 2.17;
-					double r2 = 1.0 - Math.Abs(n2);
-					double s2 = signf(n2);
+					double an2 = OLD_RIDGE ? Math.Abs(n2) : Math.Sqrt(n2 * n2 + RIDGE_E2);
+					double r2 = OLD_RIDGE ? 1.0 - an2 : RIDGE_TOP - an2;
+					double s2 = OLD_RIDGE ? signf(n2) : n2 / an2;
+					double k2 = OLD_RIDGE ? 0.45 : RIDGE_K2;
 					double r1q = r1 * r1;
-					double pk = r1q * (1.0 + 0.45 * r2 * r2);
+					double pk = r1q * (1.0 + k2 * r2 * r2);
 					double a = PK_H * fk * reg;
 					h += a * (pk - 0.3);
-					gx += a * (-2.0 * r1 * s1 * g1x * (1.0 + 0.45 * r2 * r2) + r1q * 0.9 * r2 * -s2 * g2x);
-					gz += a * (-2.0 * r1 * s1 * g1z * (1.0 + 0.45 * r2 * r2) + r1q * 0.9 * r2 * -s2 * g2z);
+					gx += a * (-2.0 * r1 * s1 * g1x * (1.0 + k2 * r2 * r2) + r1q * 2.0 * k2 * r2 * -s2 * g2x);
+					gz += a * (-2.0 * r1 * s1 * g1z * (1.0 + k2 * r2 * r2) + r1q * 2.0 * k2 * r2 * -s2 * g2z);
 				}
 			}
 		}
@@ -2525,6 +2605,14 @@ public partial class TerrainFieldCs : RefCounted
 		{
 			double lo = 11.0 - 7.0 * cold;
 			g = clerp(g, C.snow, sm(lo, lo + 8.0, h - hill(x, z) + noise(x * I9, z * I9) * 3) * snow_k * (1.0 - dry) * sm(0.75, 0.9, ny));
+		}
+		if (!OLD_PEAK && h > SNOW_H - 40.0 && dry < 1.0)
+		{
+			// (TerrainField.color_post: the high peaks' snowline)
+			double sh = h + noise(x * I40, z * I40) * 25.0 + noise(x * I9, z * I9) * 4.0;
+			double sk = sm(SNOW_H, SNOW_H + 60.0, sh) * sm(0.72, 0.88, ny) * (1.0 - dry);
+			sk *= sm(-0.25, 0.15, noise((x + 77.0) * I26, (z - 31.0) * I26) + sm(SNOW_H, SNOW_H + 150.0, h) * 0.6);
+			g = clerp(g, C.snow, sk);
 		}
 		double steep = sm(0.86, 0.6, ny);
 		if (steep > 0.0)

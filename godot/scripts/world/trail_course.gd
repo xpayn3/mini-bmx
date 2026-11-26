@@ -1079,7 +1079,10 @@ func plan_marking(field) -> void:
 			var sgn := -1.0 if sd else 1.0
 			var posts := []
 			var s := (i0 + lead + 2) * STEP
-			var gate_in: int = 8 + int(r.next() * 16)
+			# (each side's gates from its own stream, seeded by where the run starts: drawn from r, the first side's gates
+			# took as many numbers as the run is long, so when the trail grew the open last run, the other side's fence moved)
+			var rg := r if OLD_MARKING else WorldRng.new(WorldRng.i32(_mark_seed * 2654435761) ^ WorldRng.i32(i0 * 7919) ^ (sd * 0x51ed27))
+			var gate_in: int = 8 + int(rg.next() * 16)
 			var s_end := (i1 - lead - 2) * STEP
 			while s < s_end:
 				var p := at(s)
@@ -1096,8 +1099,8 @@ func plan_marking(field) -> void:
 					if posts.size() >= 3:
 						fences.append({"posts": posts, "style": "ranch"})
 					posts = []
-					s += 2.4 * (1 + int(r.next() * 2))
-					gate_in = 8 + int(r.next() * 18)
+					s += 2.4 * (1 + int(rg.next() * 2))
+					gate_in = 8 + int(rg.next() * 18)
 					# (the gate's gap is no place for a bit of tape: fence + tape side by side looked wrong)
 					if not OLD_MARKING:
 						var ge: int = at(minf(s, s_end))[4]

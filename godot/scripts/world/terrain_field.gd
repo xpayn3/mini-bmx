@@ -6,8 +6,15 @@ extends RefCounted
 
 const WATER := -2.2
 const JC := 34.0
-const HILL_TOP := 105.0
-const HILL_LEN := 1400.0
+## the start peak (2026-11-26, user: "Riders Republic: very steep mountains, vast; we always start on peaks and descend, this
+## game is downhill"): a 450 m peak, a 2.8 km descent (~16 % on average, steeper pitches), a narrower crest whose flanks fall
+## ~2 x its height to the land (spurs and gullies). BMX_OLD_PEAK=1 = the 105 m / 1.4 km mountain. Mirrored in TerrainFieldCs
+static var OLD_PEAK := OS.get_environment("BMX_OLD_PEAK") != ""
+static var HILL_TOP := 105.0 if OLD_PEAK else 450.0
+static var HILL_LEN := 1400.0 if OLD_PEAK else 2800.0
+static var PITCH_N := 5 if OLD_PEAK else 9
+const SNOW_H := 280.0      # m: the high peaks' snowline   # m: how far the start peak's flanks may fall (+ the crest: < 1 km)
+static var PITCH_K := 1.0 if OLD_PEAK else 105.0 / 450.0 * 0.8   # (a pitch: ~5-8 m of drop over 34-58 m)
 ## the trail never ends: it runs on through the hills after the mountain. The first COURSE_LEN m are laid
 ## out at setup; Terrain grows it (grow_course) on a worker thread well before the rider gets near the end.
 const COURSE_LEN := 4000.0
@@ -348,9 +355,9 @@ func setup(seed_in: int, style_in: Dictionary = {}) -> void:
 	pitch_share = 0.0
 	var x := 170 + r.next() * 80
 	var k := 0
-	while k < 5 and x < HILL_LEN - 140:
+	while k < PITCH_N and x < HILL_LEN - 140:
 		var len := 34 + r.next() * 24
-		var sh := 0.06 + r.next() * 0.03
+		var sh := (0.06 + r.next() * 0.03) * PITCH_K
 		pitches.append(x); pitches.append(len); pitches.append(sh)
 		pitch_share += sh
 		x += len + 190 + r.next() * 170
@@ -641,6 +648,7 @@ func _bind_spine(private: bool = false) -> void:
 	s_gx0 = sp.gx0; s_gz0 = sp.gz0; s_gnx = sp.gnx; s_gnz = sp.gnz; s_start = sp.cell_start; s_items = sp.cell_items
 	if private:
 		sX = sX.duplicate(); sZ = sZ.duplicate(); sS = sS.duplicate(); s_start = s_start.duplicate(); s_items = s_items.duplicate()
+	_pk_box = PackedFloat64Array()   # (the massif's ridge points come from the spine: rebuilt on first use)
 
 
 ## the exact nearest point of the spine (within RouteSpine.R) -> sp_s, sp_d (signed: + = the +z side heading +x),
@@ -739,7 +747,7 @@ func _sp_node(ix: int, iz: int) -> int:
 ## Each is a gentle climb (about 4 % on average) up the back of a ridge that follows the trail's corridor, a short
 ## level top, then the descent (about 7.5 %). Height, lengths and where it sits in its slot come from an integer
 ## hash of the slot + seed (no table: any x can be asked, the trail can grow for ever). Mirrored in TerrainFieldCs.
-const RANGE_X0 := 2100.0    # the first one's slot starts here (the first mountain ends at HILL_LEN)
+static var RANGE_X0 := 2100.0 if OLD_PEAK else 3500.0    # the first one's slot starts here (the first mountain ends at HILL_LEN)
 const RANGE_P := 2800.0
 const RANGE_UP := 0.042     # mean grade of the climb
 const RANGE_DOWN := 0.075   # ... of the descent
@@ -812,10 +820,71 @@ func hill(x: float, z: float) -> float:
 	if bare:
 		return 0.0
 	spine_sd(x, z)
+	if not OLD_PEAK:
+		# the start peak = a massif round its ridge line (_massif), the later ranges as before
+		var hm := _massif(x, z)
+		if r_s > RANGE_X0:
+			range_at(r_s)
+			if _rg_h > 0.0:
+				hm = maxf(hm, _rg_h * (1.0 - sm(MTN_W, MTN_W + 260, r_ad)))
+		return hm
 	var top := hill_top(r_s)
 	if top <= 0.0:
 		return 0.0
 	return top * (1.0 - sm(MTN_W, MTN_W + 260, r_ad))
+
+
+## The start peak as real terrain round its ridge line (2026-11-26): ridge points every 40 m of the route from the start to
+## HILL_LEN + 150 (the spine's own nodes, so no table to keep in step), each with the descent's height there (hill_top) and a
+## cone round it: a MASSIF_CREST m flat crest, then a concave fall (steep near the crest, easing to the valley) over
+## 150 + 2.2 x its height m, +-25 % along the ridge (spurs and gullies). The land is the highest cone: continuous everywhere (the
+## spine's s, read per point, jumps far from the route: 260 m walls). Mirrored in TerrainFieldCs._massif
+const MASSIF_CREST := 45.0
+var _pk_x := PackedFloat64Array()
+var _pk_z := PackedFloat64Array()
+var _pk_top := PackedFloat64Array()
+var _pk_fall := PackedFloat64Array()
+var _pk_box := PackedFloat64Array()
+func _massif_build() -> void:
+	_pk_x = PackedFloat64Array(); _pk_z = PackedFloat64Array(); _pk_top = PackedFloat64Array(); _pk_fall = PackedFloat64Array()
+	var mnx := INF; var mnz := INF; var mxx := -INF; var mxz := -INF
+	for i in sS.size():
+		var sv: float = sS[i]
+		if sv < 0.0 or sv > HILL_LEN + 150.0 or i % 2 != 0:
+			continue
+		var top := hill_top(sv)
+		if top <= 0.0:
+			continue
+		var fall := (150.0 + 2.2 * top) * (1.0 + 0.25 * noise((sv + 37.1) * I115, 3.7))
+		_pk_x.append(sX[i]); _pk_z.append(sZ[i]); _pk_top.append(top); _pk_fall.append(fall)
+		var rr := MASSIF_CREST + fall
+		mnx = minf(mnx, sX[i] - rr); mnz = minf(mnz, sZ[i] - rr); mxx = maxf(mxx, sX[i] + rr); mxz = maxf(mxz, sZ[i] + rr)
+	_pk_box = PackedFloat64Array([mnx, mnz, mxx, mxz])
+
+
+func _massif(x: float, z: float) -> float:
+	if _pk_box.size() == 0:
+		_massif_build()
+	if _pk_x.size() == 0 or x < _pk_box[0] or z < _pk_box[1] or x > _pk_box[2] or z > _pk_box[3]:
+		return 0.0
+	var best := 0.0
+	for i in _pk_x.size():
+		var top: float = _pk_top[i]
+		if top <= best:
+			continue
+		var dx: float = x - _pk_x[i]
+		var dz: float = z - _pk_z[i]
+		var rr: float = MASSIF_CREST + _pk_fall[i]
+		var d2 := dx * dx + dz * dz
+		if d2 >= rr * rr:
+			continue
+		var t := (sqrt(d2) - MASSIF_CREST) / _pk_fall[i]
+		t = 0.0 if t < 0.0 else t
+		var u := 1.0 - t
+		var v := top * u * sqrt(u)
+		if v > best:
+			best = v
+	return best
 
 
 ## the mountain's height on the route's middle at s along it (the first mountain, its pitches, the ranges)
@@ -841,6 +910,10 @@ func hill_top(x: float) -> float:
 	t = (x - -330.0) / (-90.0 - -330.0)
 	t = 1.0 if t > 1.0 else t
 	var along := (1.0 - steep - (1.0 - pitch_share) * (0.6 * s1 + 0.4 * lin_)) * (t * t * (3.0 - 2.0 * t))
+	if not OLD_PEAK:
+		# (concave, like a real peak: steepest from the start, easing toward the valley; ~22 % -> ~10 % at grade 1)
+		var cv := 1.0 - (1.0 - lin_) * (1.0 - lin_)
+		along = (1.0 - steep - (1.0 - pitch_share) * (0.65 * lin_ + 0.35 * cv)) * (t * t * (3.0 - 2.0 * t))
 	var top := HILL_TOP * along * grade_k if along > 0.0 else 0.0
 	if x > RANGE_X0:
 		range_at(x)
@@ -1269,6 +1342,10 @@ func _gully(x: float, z: float, ux: float, uz: float, c: float, ch: int) -> floa
 ## the relief layers (Land Lab: Mountains, Erosion, Valleys) added to the land in base(): never on the course
 ## (they fade in from a few metres off it: course heights, berms, jumps are untouched) nor on the side paths, the spawn
 ## or the first mountain (wild_mask). Mirrored in TerrainFieldCs._relief.
+static var OLD_RIDGE := OS.get_environment("BMX_OLD_RIDGE") != ""
+const RIDGE_E2 := 0.01        # smooth |n|: crest rounding (0.1 of noise)
+const RIDGE_TOP := 1.1        # 1 + sqrt(RIDGE_E2): a crest stays at 1
+const RIDGE_K2 := 0.2         # the fine octave's share (was 0.45)
 func _relief(x: float, z: float) -> float:
 	var gx := _lf_gx
 	var gz := _lf_gz
@@ -1287,20 +1364,25 @@ func _relief(x: float, z: float) -> float:
 				var n1 := noise_d((x - 3300.0) * PK_I, (z + 1700.0) * PK_I)
 				var g1x := _ndx * PK_I
 				var g1z := _ndy * PK_I
-				var r1 := 1.0 - absf(n1)
-				var s1 := signf(n1)
+				# (rounded crests + a quieter fine octave since 2026-11-26: the sharp crease and the 0.45 octave made 55+ deg faces that
+				# read as walls; BMX_OLD_RIDGE=1 = before. Smooth |n| = sqrt(n^2 + RIDGE_E2), shifted so a crest is still 1)
+				var an1 := absf(n1) if OLD_RIDGE else sqrt(n1 * n1 + RIDGE_E2)
+				var r1 := 1.0 - an1 if OLD_RIDGE else RIDGE_TOP - an1
+				var s1 := signf(n1) if OLD_RIDGE else n1 / an1
 				var n2 := noise_d((x + 2100.0) * PK_I * 2.17, (z - 600.0) * PK_I * 2.17)
 				var g2x := _ndx * PK_I * 2.17
 				var g2z := _ndy * PK_I * 2.17
-				var r2 := 1.0 - absf(n2)
-				var s2 := signf(n2)
+				var an2 := absf(n2) if OLD_RIDGE else sqrt(n2 * n2 + RIDGE_E2)
+				var r2 := 1.0 - an2 if OLD_RIDGE else RIDGE_TOP - an2
+				var s2 := signf(n2) if OLD_RIDGE else n2 / an2
+				var k2 := 0.45 if OLD_RIDGE else RIDGE_K2
 				var r1q := r1 * r1
-				var pk := r1q * (1.0 + 0.45 * r2 * r2)
+				var pk := r1q * (1.0 + k2 * r2 * r2)
 				var a := PK_H * fk * reg
 				h += a * (pk - 0.3)
 				# its slope (the regions' and the fade's slopes left out): for the erosion below
-				gx += a * (-2.0 * r1 * s1 * g1x * (1.0 + 0.45 * r2 * r2) + r1q * 0.9 * r2 * -s2 * g2x)
-				gz += a * (-2.0 * r1 * s1 * g1z * (1.0 + 0.45 * r2 * r2) + r1q * 0.9 * r2 * -s2 * g2z)
+				gx += a * (-2.0 * r1 * s1 * g1x * (1.0 + k2 * r2 * r2) + r1q * 2.0 * k2 * r2 * -s2 * g2x)
+				gz += a * (-2.0 * r1 * s1 * g1z * (1.0 + k2 * r2 * r2) + r1q * 2.0 * k2 * r2 * -s2 * g2z)
 	# valleys: long winding channels (where a warped noise crosses zero) with a riverbed in the floor
 	if VL_D > 0.0:
 		var vf := sm(15.0, 60.0, far) * side * wm
@@ -1556,6 +1638,8 @@ static var OLD_RHYTHM := OS.get_environment("BMX_OLD_RHYTHM") != ""
 const AIR_TYPES := ["table", "kicker", "tableLine", "woodKicker", "woodDrop", "double", "doubleLine", "flow"]
 const UPHILL_MAX := 0.01
 const SLOW_K := 0.85
+const FLAT_TYPES := ["gorge", "rope", "bridge", "skinny"]
+const FLAT_MAX := 0.08     # the steepest trail grade a bridge / skinny is built on
 const SKINNY_VMAX := 8.0   # m/s riders may arrive at a north-shore skinny
 const SKINNY_GAP := 25.0   # m clear after the feature before it
 static var OLD_UPHILL := OS.get_environment("BMX_OLD_UPHILL") != ""
@@ -1688,6 +1772,9 @@ func _build_route() -> void:
 				continue
 			var dx := ddx / l
 			var dz := ddz / l
+			if not OLD_UPHILL and FLAT_TYPES.has(type) and absf(_course_e(s + len) - _course_e(s)) / len > FLAT_MAX:
+				s += 12.0   # (a bridge / skinny needs level trail: on a steep descent its deck ramps became a wall)
+				continue
 			if type == "rope" and not _canyon_clear(x, z, dx, dz, s, len):
 				s += 8   # its canyon would cut the trail elsewhere (a bend, a switchback): not here
 				continue
@@ -2174,6 +2261,13 @@ func color_post(x: float, z: float, h: float, ny: float, dry: float, rug: float,
 	if snow_k > 0.0 and dry < 1.0:
 		var lo := 11.0 - 7.0 * cold
 		g = g.lerp(C["snow"], sm(lo, lo + 8.0, h - hill(x, z) + noise(x * I9, z * I9) * 3) * snow_k * (1.0 - dry) * sm(0.75, 0.9, ny))
+	if not OLD_PEAK and h > SNOW_H - 40.0 and dry < 1.0:
+		# the high peaks' snowline (2026-11-26): from ~SNOW_H up, wandering +-25 m, in patches that join up toward the summit,
+		# not on faces too steep to hold it, none on dry land
+		var sh := h + noise(x * I40, z * I40) * 25.0 + noise(x * I9, z * I9) * 4.0
+		var sk := sm(SNOW_H, SNOW_H + 60.0, sh) * sm(0.72, 0.88, ny) * (1.0 - dry)
+		sk *= sm(-0.25, 0.15, noise((x + 77.0) * I26, (z - 31.0) * I26) + sm(SNOW_H, SNOW_H + 150.0, h) * 0.6)
+		g = g.lerp(C["snow"], sk)
 	var steep := sm(0.86, 0.6, ny)
 	if steep > 0.0:
 		var bh := h * 0.3 + noise(x * I40, z * I40) * 0.5
