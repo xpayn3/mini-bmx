@@ -6,6 +6,7 @@ extends Node3D
 
 const G := preload("res://scripts/rider/rider_geo.gd")
 static var _OLD_JUMPPOSE := OS.get_environment("BMX_OLD_JUMPPOSE") != ""
+static var _OLD_PRELOAD := OS.get_environment("BMX_OLD_PRELOAD") != ""
 static var _OLD_SPEEDTUCK := OS.get_environment("BMX_OLD_SPEEDTUCK") != ""
 static var _OLD_STICKBIKE := OS.get_environment("BMX_OLD_STICKBIKE") != ""   # body stick side lean = hips out over a tipped bike
 const LAT_HIP := 0.06     # ground: hips slide this far towards the stick's side (m)
@@ -1639,8 +1640,12 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		pelvis.x += -0.06 * j_pre + 0.10 * j_ext - 0.13 * j_sq - 0.07 * j_fold - 0.02 * sm_reach
 		pelvis.y += -0.08 * j_pre + 0.13 * j_ext - 0.03 * j_sq - (0.09 if old_lp else 0.13) * j_fold + (0.06 if old_lp else 0.09) * sm_reach
 	else:
-		pelvis.x += -0.06 * j_pre + 0.10 * j_ext - 0.16 * j_sq - 0.07 * j_fold - 0.02 * sm_reach
-		pelvis.y += -0.07 * j_pre + 0.17 * j_ext - 0.12 * j_sq - (0.09 if old_lp else 0.13) * j_fold + (0.06 if old_lp else 0.09) * sm_reach
+		# (2026-11-26, user: "I can't see the rider preloading with legs and hips"; Project X frames: knees well bent, hips
+		# down and back over the rear wheel into the transition, then the legs drive straight at the lip. The old 7 cm
+		# didn't read. The preload hands over to the drive as the legs extend)
+		var jp: float = j_pre if _OLD_PRELOAD else j_pre * (1.0 - clampf(j_ext * 1.5, 0.0, 1.0))
+		pelvis.x += (-0.06 if _OLD_PRELOAD else -0.06) * jp + 0.10 * j_ext - 0.16 * j_sq - 0.07 * j_fold - 0.02 * sm_reach
+		pelvis.y += (-0.07 if _OLD_PRELOAD else -0.17) * jp + 0.17 * j_ext - 0.12 * j_sq - (0.09 if old_lp else 0.13) * j_fold + (0.06 if old_lp else 0.09) * sm_reach
 		# popped off the lip (video 2 slow frames): he stands up BEHIND the steep bike - hips back over the rear wheel and
 		# up, torso upright, arms straight out to the bars - for ~half a second before the knees come up into the tuck
 		var j_up: float = sm_popfx * air
@@ -1652,7 +1657,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	ang += 0.2 * clampf(-bstick, 0.0, 1.0) * stk_stick   # (the light pull is the tuck, not sitting up)
 	ang = lerpf(ang, TUCK_ANG, stk)   # speed tuck: the back near flat
 	ang -= FLIP_LEAN * clampf(_num(p, "flipArch"), 0.0, 1.0)   # (a back flip's arch: he lies back, chest out)
-	ang += (0.3 if _OLD_JUMPPOSE else 0.12) * j_pre - 0.3 * j_ext + (0.06 if _OLD_JUMPPOSE else 0.38) * j_sq - (0.0 if _OLD_JUMPPOSE else 0.35) * sm_popfx * air + (0.12 if old_lp else -0.22) * sm_popfx * air + 0.28 * j_tuck + 0.42 * j_fold - 0.18 * sm_reach
+	ang += (0.3 if _OLD_JUMPPOSE else (0.12 if _OLD_PRELOAD else 0.22 * (1.0 - clampf(j_ext * 1.5, 0.0, 1.0)))) * j_pre - 0.3 * j_ext + (0.06 if _OLD_JUMPPOSE else 0.38) * j_sq - (0.0 if _OLD_JUMPPOSE else 0.35) * sm_popfx * air + (0.12 if old_lp else -0.22) * sm_popfx * air + 0.28 * j_tuck + 0.42 * j_fold - 0.18 * sm_reach
 	# spinning in the air: tall and compact over the bike (chest up, knees in), the head and shoulders lead
 	var spin_style: float = smoothstep(0.8, 3.5, absf(_num(p, "airSpin"))) * air * (1.0 - clampf(_num(p, "flipExt"), 0.0, 1.0))   # (a flip hangs long, not compact)
 	ang = lerpf(ang, 0.42, 0.7 * spin_style)
@@ -1696,7 +1701,10 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# (2026-11-24, overlaid on video 2: on a lip's face he loads it with firm legs - "put force through your feet" - his
 	# hips stay ~0.3 m higher than ours, which sank with the physics legs pressed in ~20 cm by a tight transition. On a
 	# jump face only FACE_SINK of that sink is drawn)
-	if not _OLD_JUMPPOSE and absorb < 0.0: absorb *= 1.0 - (1.0 - FACE_SINK) * clampf(sm_lip, 0.0, 1.0) * (1.0 - air)
+	# (2026-11-26: only on the steep slow dirt-jump lip it was measured on; a fast lip he rides into with his legs soaking the
+	# transition: all of it drawn, so the preload shows)
+	var fs_k: float = 1.0 if _OLD_PRELOAD else smoothstep(0.25, 0.55, clampf(wrapf(_num(p, "pitch"), -PI, PI), 0.0, 1.2)) * (1.0 - smoothstep(6.5, 9.5, absf(_num(p, "v"))))
+	if not _OLD_JUMPPOSE and absorb < 0.0: absorb *= 1.0 - (1.0 - FACE_SINK) * clampf(sm_lip, 0.0, 1.0) * (1.0 - air) * fs_k
 	absorb = lerpf(absorb, maxf(absorb, 0.08), j_ext)   # driving through the lip the legs are straight, however hard it presses
 	# the crouches don't stack past what a rider gets down to (the lip's crouch + the preload + the legs pressed in by a
 	# transition came to 35 cm: sat on the rear tyre with the bars at his chin)
@@ -1976,6 +1984,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	if sty.seatFloor and seat != null:
 		var over := clampf((pelvis.x - (float(seat.rear) - 0.18)) / 0.08, 0, 1)
 		var floor_y: float = float(seat.top) + 0.085 - 0.3 * _sink   # (sinking into a landing the thighs come down onto it)
+		if not _OLD_PRELOAD: floor_y -= 0.14 * j_pre * (1.0 - clampf(j_ext * 1.5, 0.0, 1.0)) * (1.0 - air)   # (loading a lip: hips down over the saddle, thighs on it)
 		if pelvis.y < floor_y:
 			pelvis.y += (floor_y - pelvis.y) * over
 		if chest.y < pelvis.y + 0.15:

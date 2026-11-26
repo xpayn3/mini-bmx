@@ -342,6 +342,13 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   0.09 s; was a plain lag with a speed jump at each change). Sliders Ride > Jumps: Tuck on every jump, Tuck smoothness.
   `BMX_OLD_AUTOTUCK=1` = before. dtable_43 hands off at 43 km/h: clearance 1.07 -> 1.18 m, air 0.88 -> 0.91 s, legs pulled
   19 cm at the peak; the tuck curve is one smooth bell (accel <= 26 /s^2). Body clip on a trail ride as before.
+  **Visible preload into a lip** (same day, user: "I can't see the rider preloading with legs and hips"; `BMX_OLD_PRELOAD=1`
+  = before): the drawn hips were held 8.5 cm over the saddle (saddle floor) whatever the preload, only 35 % of the legs'
+  sink was drawn on any jump face (`FACE_SINK`, meant for slow steep dirt-jump lips: now only there, `fs_k`), and hands off
+  the preload was cut the moment the auto pop waited for the edge (the deepest moment). Now: preload hips -0.17 m / -0.06 m,
+  chest folded +0.22 rad, the saddle floor drops 0.14 x preload, all handing over to the drive as the legs extend (`j_ext`).
+  dtable_43 hands off: crouch into the transition, stand tall off the lip, tuck in the air (`BMX_LIP_SHOT`). Body clip on
+  a 50 s trail ride the same as before.
 - **Curbs / ledges: the rear rolls up, the tyres don't shiver at the edge (2026-11-24, user: "the rear always gets
   stuck on a curb")**. (1) `_step_move`'s edge check (at the bottom bracket) read the rise per physics step, so whether a
   curb was a wall at all depended on speed: at 6 km/h it never saw one (rolled up 30 cm), at 15 km/h a 20 cm curb was

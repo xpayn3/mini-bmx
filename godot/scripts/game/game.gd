@@ -3852,7 +3852,7 @@ func _process(dt: float) -> void:
 		# (the tuck after it), a lip being squashed, and how close a lip is (he rides it centred, not like a climb)
 		pi["extend"] = maxf(0.0, st.compress)
 		# (hands off he winds up into the lip himself: autoPump = his skill, see BikePhysics._step_lip)
-		var auto_pre: float = 0.0 if (st.pop_wait > 0.0 or st.squash > 0.2) else st.prep * float(phys.T.autoPump) * (1.0 - st.auto_absorb)
+		var auto_pre: float = 0.0 if ((st.pop_wait > 0.0 and Rider._OLD_PRELOAD) or st.squash > 0.2) else st.prep * float(phys.T.autoPump) * (1.0 - st.auto_absorb)
 		pi["preload"] = maxf(st.crouch, auto_pre) * (1.0 - ak)
 		# (the stand-tall + pull-up of a pro: only after the player's own pump; hands off he rides it plainly)
 		pi["popFx"] = st.pop_fx * minf(1.0, st.pop_q) * (1.0 if st.pro_flight else 0.35)
