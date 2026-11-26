@@ -2543,6 +2543,15 @@ func _autotest(seconds: float) -> void:
 					if absf(ph3.flick_kick) > 0.01: _probe.thumb_kick = int(_probe.get("thumb_kick", 0)) + 1
 					var dp: float = absf(ph3.body_in_s - float(_probe.get("thumb_bs", 0.0)))
 					_probe.thumb_bs = ph3.body_in_s; _probe.thumb_bsj = float(_probe.get("thumb_bsj", 0.0)) + dp
+			elif body_t == "swhip":   # straight whips: thrown left 1.6 s, let go 1.4 s, right 1.6 s, let go (5.0 s cycle)
+				var ph_w := fmod(el, 6.0)
+				var wl := ph_w < 1.6
+				var wr := ph_w >= 3.0 and ph_w < 4.6
+				if Env.s("BMX_SWHIP_HOLD") != "":   # held left from 2 s on (into a jump / over bumps)
+					wl = el > float(Env.s("BMX_SWHIP_HOLD")); wr = false
+				Input.action_press("body_left", 1.0) if wl else Input.action_release("body_left")
+				Input.action_press("body_right", 1.0) if wr else Input.action_release("body_right")
+				if int(el * 20) % 2 == 0: print("SWHIP t=%.2f whip=%.2f hold=%.2f straight=%s slip=%+.0fdeg course=%+.1fdeg v=%.1f air=%s bike_lean=%+.0fdeg" % [el, ph2.whip, ph2.whip_hold, ph2._whip_straight, rad_to_deg(ph2.slip), rad_to_deg(ph2.course), ph2.v, ph2.air, rad_to_deg(ph2.bike_lean)])
 			elif body_t == "flick":
 				var side := int(el * 1.5) % 2 == 0
 				Input.action_press("body_left", 1.0) if side else Input.action_release("body_left")

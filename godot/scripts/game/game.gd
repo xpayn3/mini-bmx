@@ -3733,7 +3733,8 @@ func _process(dt: float) -> void:
 		_aspin_s += ((st.yaw_rate if st.air else 0.0) - _aspin_s) * ek
 		_atilt_s += ((st.air_tilt * float(T.get("stickBodyTilt", 0.6)) * clampf(st.air_stick.length() * 3.0 + absf(st.edge_s) * 2.0, 0.0, 1.0) if st.air else 0.0) - _atilt_s) * ek
 		# (on a bank the stick leans the body with the bike: no hips to the outside there, see bank_sq)
-		_blat_s += ((st.air_stick.x if st.air else st.flick * (1.0 - st.bank_sq)) - _blat_s) * ek
+		# (since 2026-11-26 the stick leans the body itself, also on banks: no fade. BMX_OLD_STICKBIKE=1 = before)
+		_blat_s += ((st.air_stick.x if st.air else st.flick * (1.0 - (st.bank_sq if BikePhysics._OLD_STICKBIKE else 0.0))) - _blat_s) * ek
 		# the bike's twist against the body in the air (an air whip): the body turns back against it
 		_awhip_s += ((st.air_tw if st.air else 0.0) - _awhip_s) * (1.0 - exp(-dt * 16.0))
 		var pi := _pose_in   # one dictionary filled in place every frame (update_pose doesn't keep it)

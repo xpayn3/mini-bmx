@@ -368,6 +368,29 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   (`gripCatch`, drawn countersteer `bar_catch`). Locked rear = fishtail (`gripRearLock`), wheelspin in a turn steps out
   (`gripPower`), pedal stamps / bumps (`gripBumps`) / chatter nudge it, tyres run a few degrees of slip angle in turns
   (`gripSquirm`), the rear swings round the front (`gripPivot`). Probe: `BMX_GRIP_PROBE=1` (`GRIP` lines).
+- **Right stick side = the body, not the bike (2026-11-26, user: "leaning the stick also leans the bike, a double effect, it
+  swings violently into the next corner", "make it like MX vs ATV")**. On the ground the side lean no longer steers
+  (`flickSteer` 0, was 0.5 = half lock), no longer tips the drawn bike (`flickLean` 0, was 0.35 rad) and a flick no longer
+  kicks the yaw (`flickKick` 0, was 0.16); Tune VER 31 resets those three in old saves (sliders still there, Ride > Body).
+  It is a modifier of the left stick's turn: with it = tighter + grippier (`agree`, `flickGrip`), against it = wider
+  (new `flickWide` 3 m/s^2 off the turn limit) + looser (`weightInside`). The deliberate throw + steer still starts the
+  corner whip. Drawn (`rider.gd` `LAT_HIP` 0.06 / `LAT_CHEST` 0.22 / `LAT_DROP`): the rider's hips + upper body lean to the
+  stick's side over the upright bike, also on banks (no `bank_sq` fade). The air is unchanged (stick lays the bike over /
+  whips / spins against the body, as MX vs ATV). `feel=1` FEEL LEAN: stick alone yaw 0.66-1.1 -> 0.0; with the steer
+  unchanged; against at 50 km/h 1.04 -> 0.85. `BMX_OLD_STICKBIKE=1` = before. Stress 56 / 56; demo AI 60 s no crash.
+  Not ridden by the user yet.
+- **Whip on the straight (2026-11-26, user: "whip on the straight whenever we want, for style points, glide over bumps, flowy")**.
+  A deliberate throw of the right stick (centre -> edge within `FLICK_WINDOW`) with the steer centred starts the whip too
+  (`_whip_straight`): the rear swings out to the stick's side (~16-20 deg, same `whipDrift` / slipMax cap), the bike tips
+  ~12 deg, the travel stays on its line (course drift < 1 deg in 1.6 s). Held while the stick stays out (steer centred or the
+  same way); eased in at `whipFlowIn` 2.5 /s and out at `whipFlowOut` 1.8 /s (flowy; the corner whip keeps 4 / 3). Held
+  through skips under 0.3 s; held off any take-off (natural bumps too) it becomes an air whip (`whip_load` = 0.8 x whip:
+  table_1.5 -> 60 deg in the air). While held the grip sim's bump nudges are x (1 - `whipGlide` 0.6 x whip_hold). Brought
+  back straight after > 0.45 s and > ~9 deg: style "WHIP n°" / "BIG WHIP" (> 28 deg), 160 x time x angle x `whipStyle`.
+  Size: `whipStraight` (x the drift and the whip's tip, 0 = off). Sliders Ride > Body > Corner whip. Test `BMX_PAD=1 BMX_BODY=swhip [BMX_SWHIP_HOLD=secs] BMX_TRICK=none` (`SWHIP`, `STYLE`
+  lines). `BMX_OLD_STRAIGHTWHIP=1` = corners only. Playground washboard / rough / rollers at 35 km/h: no crash. Stress 56 / 56.
+  Seen: a stick held through a whole flight lands sideways (the landing carve turns the travel ~36 deg) and, as the stick
+  reaches the ground again, starts a new ground whip at once. Not ridden by the user yet.
 - **Right-stick lean is filtered** (so both sticks together don't glitch): `Game._read_input` fades the off axis near an axis
   (a side lean within ~15-35 deg of sideways carries no fore / aft: no accidental manual / tuck) + a 0.1 round deadzone; the
   physics follows the stick on a critically damped spring (`flickSpeed`, top speed `FLICK_VMAX`); the lean-with-steer bonus

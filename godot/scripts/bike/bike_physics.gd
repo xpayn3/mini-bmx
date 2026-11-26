@@ -167,7 +167,8 @@ var _tuck_in := false   # the tuck is held (hop, in the air)
 var _graze := false   # the last "landing" was a tyre brushing the lip on the way up
 var air_peak := 0.0   # this flight: the highest the bike got over the ground under it (m)
 var pop_fx := 0.0; var squash_fx := 0.0; var pop_q := 0.0; var pop_time := 0.0; var _pop_used := 0.0
-var whip := 0.0; var whip_hold := 0.0; var whip_side := 0.0; var _whip_t := 0.0; var _whip_flashed := false; var _whip_arm := 0.0   # corner whip / drift (both sticks one way)
+var whip := 0.0; var whip_hold := 0.0; var whip_side := 0.0; var _whip_t := 0.0; var _whip_flashed := false; var _whip_arm := 0.0
+var _whip_straight := false; var _whip_ang := 0.0   # this whip started on the straight (no steer) / its widest slip   # corner whip / drift (both sticks one way)
 var flick_v := 0.0; var _flick_arm := 0.0; var _flick_side := 0.0   # flick spring speed, deliberate-flick detector
 const FLICK_VMAX := 6.0      # the bike can be thrown over at most this fast (stick units / s)
 const FLICK_WINDOW := 0.18   # centre -> edge within this long = a deliberate flick
@@ -433,7 +434,7 @@ func _reset_motion() -> void:
 	land_heavy = 0.0; land_fold = 0.0; _land_hit = 0.0; _land_pe = 0.0; _stun = 0.0; land_yaw = 0.0; _rim_hit = 0.0; _ty_f = 0.0; _ty_r = 0.0; _tuck_in = false
 	man_a = 0.0; man_w = 0.0; man_zone = false; man_lock = 0.0; man_zone_t = 0.0; man_pull = 0.0; _man_over = 0.0; _man_armed = false; _pull_age = 0.0; _man_pw = 0.0; _man_grace = 0.0; _sprint_lift = 0.0
 	pump_push = 0.0; pump_gain = 0.0; pump_idle = 0.0; pump_press_t = 0.0; _pump_release = 0.0; pump_on = false; pleg = 0.0; pump_lift = 0.0; land_perfect = 0.0
-	wheelie_time = 0.0; wheelie_pedal = false; whip = 0; whip_hold = 0; whip_side = 0.0; _whip_arm = 0; _whip_t = 0; _whip_flashed = false; _whip_peak = 0.0
+	wheelie_time = 0.0; wheelie_pedal = false; whip = 0; whip_hold = 0; whip_side = 0.0; _whip_arm = 0; _whip_t = 0; _whip_flashed = false; _whip_straight = false; _whip_ang = 0.0; _whip_peak = 0.0
 	edge_s = 0.0; spin_hold = 0.0; spin_k = 1.0; yaw_edge_s = 0.0; yaw_hold = 0.0; stick_yaw = 0.0; air_stick = Vector2.ZERO; style_air = 0.0
 	brake_stop = false; brake_back = false; lean_lim = 9.0; lean_room = NAN
 	sprint = 0; flow = 0; flow_t = 0; lat_m = 0; carve = 0; carve_acc = 0; carve_berm = false
@@ -1213,15 +1214,20 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 		_flick_arm += dt
 		if absf(flick_in) > 0.85 and signf(flick_in) == _flick_side:
 			if _flick_arm < FLICK_WINDOW and not air and va > 2.0:
-				flick_kick += _flick_side * float(T.get("flickKick", 0.16)) * smooth01((va - 2.0) / 5.0)
+				flick_kick += _flick_side * (0.16 if _OLD_STICKBIKE else float(T.get("flickKick", 0.0))) * smooth01((va - 2.0) / 5.0)
 				flick_thrown = _flick_side
 			_flick_arm = -1.0   # spent until the stick comes back towards the centre
 	# the side lean steers too (the bike leaned under you turns that way), but held AGAINST the steer it's the body
 	# hanging off the inside: that costs grip (weight_in below), it hardly undoes the turn (it used to halve it)
 	var fs_k := 1.0 if (absf(steer_input) < 0.2 or signf(flick) == signf(steer_input)) else 0.25
-	var steer_eff := clampf(steer_input + flick * float(T.get("flickSteer", 0.5)) * fs_k, -1.0, 1.0)
+	# (2026-11-26, MX vs ATV style, user: "the right stick leans the body, not the whole bike": by default the side lean no
+	# longer steers on its own (flickSteer 0) nor throws the bike over (flickLean 0) nor kicks it round (flickKick 0). It
+	# changes the turn the left stick asks for: with it = tighter + grippier (agree), against it = wider + looser (oppose).
+	# BMX_OLD_STICKBIKE=1 = the old 0.5 / 0.35 / 0.16)
+	var steer_eff := clampf(steer_input + flick * (0.5 if _OLD_STICKBIKE else float(T.get("flickSteer", 0.0))) * fs_k, -1.0, 1.0)
 	# leaning with the steer: how much the two agree, smooth through zero (no on / off as the steer crosses)
 	var agree := clampf(flick * steer_eff * 2.0, 0.0, 1.0) * absf(flick)
+	var oppose := 0.0 if _OLD_STICKBIKE else clampf(-flick * steer_eff * 2.0, 0.0, 1.0) * absf(flick)
 	# corner whip: both sticks thrown the same way (steer + body lean) in a tight corner. The rider whips the bike
 	# over and the rear steps out into a drift held as long as both stay there (Ride › Body: whip*); let go and
 	# the tyres catch it. The lean / drift build in over ~0.25 s and ease out, nothing snaps
@@ -1231,19 +1237,40 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 	# held the same way: leaning the body into a corner with the stick, however far, just turns harder (it used to
 	# start a 20-25 deg drift whenever both sticks passed whipTrigger: "we slide weird when leaning"). Once going
 	# it is held while both stay past whipTrigger
-	if flick_thrown != 0.0 and absf(steer_input) > wtr and signf(steer_input) == flick_thrown: _whip_arm = 0.25
+	# (2026-11-26, user: "whip on the straight whenever we want, for style, flowy, glide over bumps") the throw alone starts it too,
+	# steer centred: the rear swings out to the stick's side and the bike rides on down its line sideways; held as long as the
+	# stick stays out (steer centred or the same way), eased in / out slower than the corner whip (flowy). Through a short skip
+	# off a bump it is held (a longer flight takes it into an air whip, see the take-off). BMX_OLD_STRAIGHTWHIP=1 = corner only
+	var straight_ok: bool = not _OLD_STRAIGHTWHIP and absf(steer_input) < wtr
+	var whip_dir: float = signf(flick_in) if straight_ok else signf(steer_input)
+	var skip_ok: bool = not air or (not _OLD_STRAIGHTWHIP and air_time < 0.3 and whip > 0.05)
+	if straight_ok:
+		whip_want = skip_ok and float(T.get("whipStraight", 1.0)) > 0.0 and va > float(T.get("whipMinSpeed", 4.0)) and absf(flick_in) > wtr and (absf(steer_input) < 0.05 or signf(steer_input) == signf(flick_in)) and float(T.get("whipDrift", 0.42)) > 0.0
+	elif skip_ok and whip > 0.05 and not _OLD_STRAIGHTWHIP:
+		whip_want = whip_want or (air and absf(flick_in) > wtr and signf(flick_in) == whip_side)
+	if flick_thrown != 0.0 and ((absf(steer_input) > wtr and signf(steer_input) == flick_thrown) or straight_ok): _whip_arm = 0.25
 	else: _whip_arm = maxf(0.0, _whip_arm - dt)
 	if whip < 0.05 and _whip_arm <= 0.0: whip_want = false
-	if whip_want and whip < 0.05: whip_side = signf(steer_input)
-	if whip_want and signf(steer_input) != whip_side: whip_want = false
-	whip = minf(1.0, whip + dt * 4.0) if whip_want else maxf(0.0, whip - dt * 3.0)
+	if whip_want and whip < 0.05:
+		whip_side = whip_dir; _whip_straight = straight_ok
+	if whip_want and whip_dir != whip_side: whip_want = false
+	var w_in: float = float(T.get("whipFlowIn", 2.5)) if _whip_straight else 4.0
+	var w_out: float = float(T.get("whipFlowOut", 1.8)) if _whip_straight else 3.0
+	whip = minf(1.0, whip + dt * w_in) if whip_want else maxf(0.0, whip - dt * w_out)
 	if whip_want:
 		_whip_t += dt
+		_whip_ang = maxf(_whip_ang, absf(slip))
 		if _whip_t > 0.3 and not _whip_flashed:
 			_whip_flashed = true
-			if host.msg_idle(): host.flash("WHIP!")
+			if host.msg_idle() and not _whip_straight: host.flash("WHIP!")
 	elif whip <= 0.0:
-		_whip_t = 0.0; _whip_flashed = false
+		# a ground whip held a while, then brought back straight: style (the corner whip's speed is its reward, the straight one
+		# is all show). More the longer and further out it was held
+		if _whip_straight and _whip_t > 0.45 and _whip_ang > 0.15 and not crash_on:
+			var deg := rad_to_deg(_whip_ang)
+			host.on_style(roundi(float(T.get("whipStyle", 1.0)) * 160.0 * clampf(_whip_t, 0.45, 2.5) * clampf(_whip_ang / 0.35, 0.5, 1.5)),
+				"%s %.0f°" % ["BIG WHIP" if deg > 28.0 else "WHIP", deg])
+		_whip_t = 0.0; _whip_flashed = false; _whip_ang = 0.0; _whip_straight = false
 	# the bars follow the input on a critically damped spring (steerEase = its natural rate), capped at the
 	# build-up / release rate: a key press or a stick push starts turning gently and builds (an S-curve, no
 	# instant full lock), and a swap from full left to full right swings through over ~0.5 s
@@ -1282,7 +1309,7 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 	# (the turn-force limit: in practice turnFloor below always wins and the grip decides how tight it turns - a
 	# slider sweep, 2026-11-20, found its old sliders turnSlow / turnFast / carveBite / flickTurn moved nothing, so
 	# they're fixed numbers now)
-	var a_lat_lim: float = maxf(1.2, 9.0 + spd_k * 4.0 + G * tan(bk) * signf(s_in) * smooth01(va / 3.0) + carve_f * 2.0 + agree * 4.0 * spd_k)
+	var a_lat_lim: float = maxf(1.2, 9.0 + spd_k * 4.0 + G * tan(bk) * signf(s_in) * smooth01(va / 3.0) + carve_f * 2.0 + agree * 4.0 * spd_k - oppose * float(T.get("flickWide", 3.0)) * spd_k)
 	var lock: float = T.steerMax + maxf(0.0, T.slowSteer - T.steerMax) * (1 - smooth01(va / maxf(0.5, T.slowSteerFade)))
 	var d_max: float = minf(lock, maxf(atan(a_lat_lim * L / maxf(va * va, 0.01)), atan(T.turnFloor * L / maxf(va, 0.1))))
 	var cmd: float = s_in * d_max
@@ -1435,6 +1462,7 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 		var slip_rate := (excess * share + slip_w) * (1.0 - 0.75 * whip_hold) - (slip - _squirm) * catch_k
 		if whip_hold > 0.0:
 			var drift_t: float = whip_side * minf(float(T.get("whipDrift", 0.42)), T.slipMax * 0.6) * smooth01((va - 3.0) / 4.0) * wk
+			if _whip_straight: drift_t *= float(T.get("whipStraight", 1.0))   # (the straight whip's own size; 0 = off)
 			slip_rate += clampf((drift_t - slip) * float(T.get("whipSnap", 5.0)), -2.2, 2.2) * whip_hold
 		# on the front wheel (nose manual / stoppie) the rear, light or in the air, just trails the front: the bike
 		# pivots round the front wheel where the bars point, nothing slides out
@@ -1635,10 +1663,10 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 	# ground; a real flight fades them out as before. See _air_blend)
 	var gnd: float = (0.0 if air else 1.0) if _OLD_AIRBLEND else 1.0 - air_k
 	if gnd > 0.0:
-		gx_t = flick * float(T.get("flickLean", 0.35)) * smooth01(va / 1.5)
+		gx_t = flick * (0.35 if _OLD_STICKBIKE else float(T.get("flickLean", 0.0))) * smooth01(va / 1.5)
 		gx_t += s_in * float(T.get("slowLean", 0.3)) * slow_k * smooth01(va / 1.2)
 		bank_t = float(T.get("bankLean", 0.6)) * (_bank_hold if air else bank)
-		if whip > 0.0: gx_t += whip_side * float(T.get("whipLean", 0.22)) * whip * whip * (3.0 - 2.0 * whip)
+		if whip > 0.0: gx_t += whip_side * float(T.get("whipLean", 0.22)) * whip * whip * (3.0 - 2.0 * whip) * (minf(1.5, float(T.get("whipStraight", 1.0))) if _whip_straight else 1.0)
 		gx_t *= gnd; bank_t *= gnd
 	# (just landed: the drawn lean from the stick / slow steer / bank used to move at only 3 rad/s for 0.35 s and the bank part at
 	# bankLeanRate 1.5 - a berm-to-berm swap out of a hop felt heavy. Now landSwapRate for both in that window; Ride > Jumps >
@@ -2656,6 +2684,8 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			throw_v = 0.0
 			air_yaw = yaw_rate; air_tw = 0.0; air_tw_v = 0.0; _air_steer_s = 0.0; _air_aim_s = 0.0
 			# a whip wound up at the lip leaves swinging out (the hips already throwing the rear round)
+			# (a ground whip held off any lip or bump, natural ones too, carries into the air: the hips are already throwing it)
+			if not _OLD_STRAIGHTWHIP and whip > 0.3 and absf(whip_load) < whip * 0.8: whip_load = whip_side * whip * 0.8
 			_whip_in = 0.0 if _OLD_WHIP else whip_load
 			air_tw_v = WHIP_KICK * _whip_in
 			whip_load = 0.0
@@ -3377,6 +3407,8 @@ func _pop_along(dv: float) -> void:
 	v *= k; vy *= k
 
 static var _OLD_SPIN := OS.get_environment("BMX_OLD_SPIN") != ""
+static var _OLD_STRAIGHTWHIP := OS.get_environment("BMX_OLD_STRAIGHTWHIP") != ""   # the whip only in corners (both sticks)
+static var _OLD_STICKBIKE := OS.get_environment("BMX_OLD_STICKBIKE") != ""   # right stick side lean throws the bike (before 2026-11-26)
 const SPIN_EDGE := 0.85     # stick to the side this far into a lip = a spin wound up (less = a whip)
 const SPIN_AIR_ONLY := 0.35 # share of the spin rate the stick gives from the air alone (no wind-up at the lip)
 const SPIN_OPEN := 3.5      # /s: let go of a wound spin, it eases out this fast (the rider opens up)
@@ -3751,6 +3783,8 @@ func _grip_step(dt: float, va: float, mu: float, nR: float, u_lat_in: float) -> 
 	# twitch about on rocky ground). The bump's real effect is already in load_r: an unloaded rear grips less
 	# weight over the outside pedal keeps the rear planted over bumps; hanging inside it skips about more
 	var bmp: float = float(T.get("gripBumps", 1.0)) * (1.0 - float(T.get("weightSteady", 0.5)) * maxf(0.0, weight_in) + 0.5 * maxf(0.0, -weight_in))
+	# (a held whip: the rider has the rear light and floats it over the bumps - they knock the drift about less)
+	if not _OLD_STRAIGHTWHIP: bmp *= 1.0 - float(T.get("whipGlide", 0.6)) * whip_hold
 	var jolt := minf(absf(compress_v - _grip_cv) / maxf(dt, 1e-4), 60.0)
 	_grip_cv = compress_v
 	_grip_rough += (jolt - _grip_rough) * minf(1.0, dt * 5.0)

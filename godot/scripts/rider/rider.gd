@@ -7,6 +7,10 @@ extends Node3D
 const G := preload("res://scripts/rider/rider_geo.gd")
 static var _OLD_JUMPPOSE := OS.get_environment("BMX_OLD_JUMPPOSE") != ""
 static var _OLD_SPEEDTUCK := OS.get_environment("BMX_OLD_SPEEDTUCK") != ""
+static var _OLD_STICKBIKE := OS.get_environment("BMX_OLD_STICKBIKE") != ""   # body stick side lean = hips out over a tipped bike
+const LAT_HIP := 0.06     # ground: hips slide this far towards the stick's side (m)
+const LAT_CHEST := 0.22   # ground: chest this far over (m)
+const LAT_DROP := 0.03    # ground: chest drops a little as he leans over
 const GEAR := preload("res://scripts/rider/rider_gear.gd")
 
 ## neutral riding style (posepanel.js NEUTRAL): BMX = all of these
@@ -1724,8 +1728,17 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# side (stick left / right, or the stick's lean in the air): the bike tips under the rider, the hips go to
 	# the outside of it and the upper body stays up over the bike's contact line
 	var lat := clampf(_num(p, "bodyLat"), -1.0, 1.0)
-	pelvis.z += 0.07 * lat * (1.0 - 0.6 * air)
-	chest.z += 0.035 * lat
+	if _OLD_STICKBIKE:
+		pelvis.z += 0.07 * lat * (1.0 - 0.6 * air)
+		chest.z += 0.035 * lat
+	else:
+		# (2026-11-26, MX vs ATV style: on the ground the stick no longer tips the bike, it is the body that leans. Stick
+		# left (+lat) = the rider throws his weight to the left over the bike: hips slide a little that way, the upper body
+		# well over (+z = right), dropping a touch. In the air: the old hips-out-against-the-bike tabletop pose)
+		var g_l := 1.0 - air
+		pelvis.z += lat * (0.07 * 0.4 * air - LAT_HIP * g_l)
+		chest.z += lat * (0.035 * air - LAT_CHEST * g_l)
+		chest.y -= LAT_DROP * absf(lat) * g_l
 	# a tabletop in the air: knees bend deep and the hips drop so both feet stay on the pedals of the
 	# laid-over bike
 	pelvis.y -= 0.12 * absf(lat) * air

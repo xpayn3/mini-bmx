@@ -11,7 +11,7 @@ const LABELS := {
 	"bikeLeanMul": "Bike under the body", "legStiff": "Leg spring", "steerCurve": "Soft centre",
 	"flickGrip": "Lean in: grips harder", "weightInside": "Hanging inside",
 	"weightSteady": "Outside pedal", "flickSteer": "Side lean steers", "flickLean": "Bike thrown under",
-	"flickSpeed": "Bike follows the stick", "flickKick": "Flick whips round",
+	"flickSpeed": "Bike follows the stick", "flickKick": "Flick whips round", "flickWide": "Lean out: wider",
 	"whipDrift": "Whip: drift angle", "whipSnap": "Whip: swing-out speed", "whipLean": "Whip: bike thrown over",
 	"whipCarry": "Whip: keeps speed", "whipMinSpeed": "Whip: from speed", "whipTrigger": "Whip: stick travel",
 	"whipCatch": "Whip: catch time", "stickShift": "Fore / aft reach", "leanTraction": "Weight shifts grip",
@@ -165,6 +165,7 @@ const PAGES := [
 		["Weight in turns", [
 			["*flickGrip", "...and grips harder (weight on the outside pedal).", "None", "Lots"],
 			["*weightInside", "Stick against the turn (hanging inside): the tyres lose bite.", "No cost", "Costly"],
+			["*flickWide", "Stick against the turn: the bike runs wider.", "No", "Lots"],
 			["weightSteady", "Weight on the outside pedal keeps the rear planted over bumps.", "None", "Planted"],
 			["flickSteer", "The side lean steers the bike on its own too.", "No", "Lots"],
 			["flickLean", "How far the bike is thrown under the body.", "Little", "Lots"],
@@ -186,6 +187,11 @@ const PAGES := [
 		["Corner whip (flick the stick with the steer)", [
 			["*whipDrift", "How far the rear swings out, how fast, and how far the bike is thrown over.", "Small", "Big"],
 			["whipTrigger", "How far both sticks must go.", "A little", "All the way"],
+			["*whipStraight", "Throw the stick on a straight: how far the rear swings out (0 = off).", "Off", "Big"],
+			["*whipFlowIn", "Throw the stick on a straight: how fast the rear swings out.", "Floaty", "Snappy"],
+			["whipFlowOut", "...and how fast it comes back when you let go.", "Floaty", "Snappy"],
+			["whipGlide", "Held, the rear is light: bumps knock it about less.", "None", "Glides"],
+			["whipStyle", "Style points for a straight whip.", "None", "Lots"],
 		]],
 		["Legs", [
 			["*legStiff", "How hard the legs hold the body up.", "Soft", "Stiff"],
