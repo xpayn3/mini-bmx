@@ -90,10 +90,33 @@ static func tint(id: String) -> Color:
 ## the 3D LUT for Environment.adjustment_color_correction, or null (neutral / unknown id = leave the image alone)
 static func lut(id: String) -> Texture3D:
 	if not LENSES.has(id) or (LENSES[id].grade as Dictionary).is_empty(): return null
-	if _cache.has(id): return _cache[id]
-	var t := make_lut(LENSES[id].grade)
-	_cache[id] = t
+	var amt := LightLab.v("lens_amount")   # (dev knob: the grade's strength, 1 = as designed)
+	if amt <= 0.001: return null
+	var key := "%s@%.3f" % [id, amt]
+	if _cache.has(key): return _cache[key]
+	var t := make_lut(scaled(LENSES[id].grade, amt))
+	_cache[key] = t
 	return t
+
+## a grade at a strength: every number eased from "does nothing" (k 0) to as designed (1), or past it
+static func scaled(g: Dictionary, k: float) -> Dictionary:
+	if is_equal_approx(k, 1.0): return g
+	const ONE := ["gain", "gamma", "sat"]
+	var o := {}
+	for key in g:
+		var x = g[key]
+		if key == "pivot": o[key] = x
+		elif key == "tint": o[key] = Color(1, 1, 1).lerp(x, k)
+		elif x is Color: o[key] = Color((x as Color).r * k, (x as Color).g * k, (x as Color).b * k)
+		elif key == "bands":
+			var bs := []
+			for bd in x:
+				bs.append({"hue": bd.hue, "width": bd.width, "shift": float(bd.get("shift", 0.0)) * k,
+					"sat": lerpf(1.0, float(bd.get("sat", 1.0)), k), "val": lerpf(1.0, float(bd.get("val", 1.0)), k)})
+			o[key] = bs
+		elif key in ONE: o[key] = lerpf(1.0, float(x), k)
+		else: o[key] = float(x) * k
+	return o
 
 ## builds a LUT from a grade dictionary (an empty one = the identity LUT, used by the probe).
 ## Texel i along an axis is read at coordinate (i + 0.5) / N; the two end texels hold the exact 0 / 1 values

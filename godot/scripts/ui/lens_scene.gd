@@ -476,7 +476,7 @@ func _apply_light(h: float) -> void:
 	var g := 1.0 - smoothstep(8.0, 30.0, el)
 	var n := 1.0 - smoothstep(-11.0, -3.5, el)
 	var day := 1.0 - n
-	var gw := clampf((1.0 - smoothstep(0.0, 10.0, el)) * day, 0.0, 1.0)
+	var gw := clampf((1.0 - smoothstep(0.0, LightLab.v("golden_below"), el)) * day, 0.0, 1.0)
 	var S := SunSky.state(el, L)
 	_sun_state = S
 	# the sun sweeps across the view: rising front-right, high behind at noon, setting front-left (backlit trail)
@@ -495,7 +495,7 @@ func _apply_light(h: float) -> void:
 		sun.light_energy = S.moon_energy
 	sun.look_at_from_position(dirv, Vector3.ZERO, Vector3.UP)
 	sun.shadow_blur = lerpf(lerpf(1.0, 2.0, g), 2.6, n)
-	sun.light_volumetric_fog_energy = 1.0
+	sun.light_volumetric_fog_energy = LightLab.v("sun_haze")
 	# sky: the photo for this sun height, golden / twilight / night modes, the true sun
 	var hd: Array = Game.HDRI_DAY[0] if el >= 14.0 else (Game.HDRI_LOW[0] if el >= -6.0 else Game.HDRI_NIGHT)
 	sky_mat.set_shader_parameter("hdri", load(Game.HDRI_DIR + String(hd[0])))
@@ -513,14 +513,17 @@ func _apply_light(h: float) -> void:
 	_meter_due = _meter != null
 	env.ambient_light_sky_contribution = 1.0
 	env.fog_density = 0.6 * lerpf(1.0, 1.35, n) * lerpf(1.0, 0.6, gw)
-	env.fog_aerial_perspective = 1.0
-	env.fog_sun_scatter = 0.02 * day
+	env.fog_aerial_perspective = LightLab.v("fog_aerial")
+	env.fog_sun_scatter = LightLab.v("sun_scatter") * day
 	env.volumetric_fog_anisotropy = 0.7
 	env.volumetric_fog_albedo = Color(0.9, 0.9, 0.9)
-	env.volumetric_fog_density = Game.VOL_DENSITY * lerpf(1.0, 0.4, gw) * lerpf(1.0, 1.5, n)
-	env.volumetric_fog_ambient_inject = Game.VOL_AMBIENT
-	env.tonemap_exposure = Game.RIDE_EXPOSURE * float(L.get("exposure", 1.0))
-	env.adjustment_saturation = float(L.get("saturation", 1.0)) * lerpf(1.0, 0.5, n)
+	env.volumetric_fog_density = Game.VOL_DENSITY * LightLab.v("vol_density") * lerpf(1.0, 0.4, gw) * lerpf(1.0, 1.5, n)
+	env.volumetric_fog_ambient_inject = LightLab.v("vol_ambient")
+	env.tonemap_agx_contrast = LightLab.v("agx_contrast")
+	env.tonemap_agx_white = LightLab.v("agx_white")
+	env.glow_mix = LightLab.v("bloom_mix")
+	env.tonemap_exposure = LightLab.v("expo") * float(L.get("exposure", 1.0))
+	env.adjustment_saturation = float(L.get("saturation", 1.0)) * lerpf(1.0, LightLab.v("night_sat"), n)
 	env.adjustment_contrast = float(L.get("contrast", 1.0))
 	env.adjustment_brightness = 1.0
 	lamp.visible = n > 0.35
