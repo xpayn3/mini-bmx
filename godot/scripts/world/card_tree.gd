@@ -25,7 +25,7 @@ const TEX_H := 128
 ## pine crown: whorls of drooping branch cards up the axis
 const PINE_TOP := 2.85
 ## [whorls, branches x, card width x, seed, droop x]: LOD0 / LOD1
-const PINE_LOD := [[24, 1.0, 1.0, 1979, 1.0], [14, 0.5, 1.5, 1980, 1.7]]
+const PINE_LOD := [[24, 1.0, 1.0, 1979, 1.0], [14, 0.5, 1.5, 1980, 1.7]]   # ([0] < 20 = LOD1: tip tufts only)
 ## leafy crown: cards in a ball (CardBush's recipe without the ground)
 const BLOB := {"cards": 130, "r": Vector3(1.0, 0.95, 1.0), "s0": 0.34, "s1": 0.55, "seed": 4242}
 ## metres of foliage one leaf picture covers (leaf_cluster / leaf_beech are made at real leaf size for this): a leafy
@@ -255,7 +255,7 @@ static func material(kind: String) -> ShaderMaterial:
 ## a pine branch on a transparent card: the stem along u (0 at the trunk .. 1 at the tip), side shoots, needles
 ## the photo branch (assets/textures/tree_cards/needle_branch.png: ambientCG PineNeedles001 needle bundles stamped along a
 ## twig by root tools/make_tree_cards.py, BC7 + mipmaps); without the file, drawn here
-const NEEDLE_PNG := "res://assets/textures/tree_cards/needle_branch.png"
+const NEEDLE_PNG := "res://assets/textures/tree_cards/needle_tuft.png"   # (a fan of needle twigs: the pines' tufts)
 
 static func texture(kind: String) -> Texture2D:
 	if _tex.has(kind):
@@ -341,9 +341,7 @@ static func mesh(name: String) -> ArrayMesh:
 			"blobCardLod1": _mesh[name] = _blob(int(BLOB_LOD1[0]), float(BLOB_LOD1[1]))
 			"trunkFlare": _mesh[name] = _trunk_flare()
 			"blobLimbs": _mesh[name] = _blob_limbs()
-			"pineSpire":   # crown-space trunk: from just under the crown's foot to its tip (radius as the trunk's top / crown scale)
-				var g := GeoBuf.cylinder(0.006, 0.09, PINE_TOP + 0.15, 6).translate(0, (PINE_TOP + 0.15) * 0.5 - 0.1, 0)
-				_mesh[name] = g.to_mesh(false, TerrainGeo._soft_normals(g))
+			"pineSpire": _mesh[name] = _pine_wood()
 			_: _mesh[name] = _blob(int(BLOB.cards), 1.0)
 	return _mesh[name]
 
@@ -402,82 +400,128 @@ class _Buf:
 		return st.commit()
 
 
-## whorls of branch cards: each from the trunk out to the crown's outline, drooping, folded along its stem (a shallow V,
-## so it has body from the side too), normals bent out from the axis (the crown lights like the cone it replaces)
+## A pine crown as real branches carrying needle TUFTS (2026-11-26, user: realistic pines with clumped foliage, sky and
+## trunk showing between the clumps, ragged outline): PINE_BRANCHES spiral up the crown (golden angle), each of random
+## length / droop / rise, ~18 % missing (gaps); along its outer half 2-4 tufts (the needle_tuft fan, laid along the branch:
+## one card lying flat, one upright, so a tuft reads from every side). The branches themselves are bark tubes in the
+## trunk mesh (pineSpire). LOD1: the same branches, only the tip tuft, larger. The crown instance is stretched taller than
+## wide (y scale / x scale ~ ASPECT for real crowns), so vertical sizes are pre-squeezed by it (tufts come out undistorted).
+const PINE_BRANCHES := 90
+const ASPECT := 1.5
+const PINE_LOD_SEED := 1979
+
+## the crown's outline: radius (unit space) at height y, ragged by branch
+static func pine_env(y: float) -> float:
+	return 1.25 * pow(maxf(0.0, 1.0 - y / 2.95), 0.95)
+
+## the branch layout both the tufts and the bark limbs use: [root, dir (unit, horizontal-ish), length, pitch]
+static func pine_branches() -> Array:
+	if _mesh.has("_branches"):
+		return _mesh["_branches"]
+	var out := []
+	var rng := RandomNumberGenerator.new()
+	rng.seed = PINE_LOD_SEED
+	for k in PINE_BRANCHES:
+		var t := (k + 0.5) / PINE_BRANCHES
+		var y := 0.03 + t * 2.55 + rng.randf_range(-0.03, 0.03)
+		var gone := rng.randf() < 0.12 and t < 0.85
+		var a := k * 2.39996 + rng.randf_range(-0.3, 0.3)
+		var ln := pine_env(y) * rng.randf_range(0.6, 1.15)
+		var pitch := lerpf(-0.35, 0.35, t) + rng.randf_range(-0.18, 0.18)   # low ones droop, high ones reach up
+		if not gone:
+			out.append([Vector3(0, y, 0), Vector3(cos(a), 0, sin(a)), maxf(ln, 0.12), pitch])
+	_mesh["_branches"] = out
+	return out
+
+## where along a branch (0 root .. 1 tip) it is: gently curving (out, then the tip turning up)
+static func branch_point(br: Array, t: float) -> Vector3:
+	var root: Vector3 = br[0]
+	var d: Vector3 = br[1]
+	var ln: float = br[2]
+	var pitch: float = br[3]
+	var up := (sin(pitch) * t + 0.12 * t * t) * ln / ASPECT
+	return root + d * cos(pitch) * ln * t + Vector3(0, up, 0)
+
 static func _pine(lod: Array) -> ArrayMesh:
 	var b := _Buf.new()
 	var rng := RandomNumberGenerator.new()
 	rng.seed = int(lod[3])
-	var whorls: int = lod[0]
-	for w in whorls:
-		var t := (w + 0.5) / whorls
-		var y := 0.04 + t * 2.45 + rng.randf_range(-0.05, 0.05)
-		var R := maxf(pine_radius(y + 0.1) * 1.25, 0.2)
-		var n := clampi(int(round((5.0 + R * 5.0) * float(lod[1]))), 3, 10)
-		var a0 := rng.randf() * TAU
-		for k in n:
-			var a := a0 + TAU * (k + rng.randf_range(-0.25, 0.25)) / n
-			var out := Vector3(cos(a), 0, sin(a))
-			var side := Vector3(-out.z, 0, out.x)
-			var len := R * rng.randf_range(0.9, 1.08)
-			var droop := rng.randf_range(0.18, 0.38) * (1.0 - 0.4 * t) * len * float(lod[4])
-			var width := (len * 0.8 + 0.2) * float(lod[2])
-			var root := Vector3(0, y + 0.05, 0) + out * 0.04
-			var tip := root + out * len + Vector3(0, -droop, 0)
-			var mid := root.lerp(tip, 0.5) + Vector3(0, droop * 0.18, 0)   # arched stem
-			_branch(b, root, mid, tip, side, width, y)
-	# the leader: two crossed upright cards at the top
-	for k in 2:
-		var a := k * PI / 2.0 + 0.3
-		var side := Vector3(cos(a), 0, sin(a))
-		var y0 := 2.35
-		var q := [Vector3(0, y0, 0) - side * 0.3, Vector3(0, y0, 0) + side * 0.3, Vector3(0, PINE_TOP, 0) + side * 0.06, Vector3(0, PINE_TOP, 0) - side * 0.06]
-		var nn := Vector3(side.z, 0.5, -side.x).normalized()
-		var uvs := [Vector2(0, 0), Vector2(0, 1), Vector2(1, 0.6), Vector2(1, 0.4)]   # stem up the card (u along it)
-		for e in [0, 2, 1, 0, 3, 2]:
-			b.vert(q[e], nn, 0.95, uvs[e])
+	var lod1: bool = int(lod[0]) < 20
+	for br in pine_branches():
+		var ln: float = br[2]
+		var n := 2 if lod1 else clampi(int(round(2.0 + ln * 3.5)), 3, 6)
+		for q in n:
+			var t := 1.0 - float(q) / maxf(n, 1) * 0.7
+			var at := branch_point(br, t)
+			var fwd := (branch_point(br, minf(t + 0.05, 1.0)) - branch_point(br, maxf(t - 0.05, 0.0))).normalized()
+			if fwd.length() < 0.5: fwd = br[1]
+			var size := ln * rng.randf_range(0.6, 0.85) * (1.0 - 0.3 * (1.0 - t)) * (1.4 if lod1 else 1.0)
+			size = clampf(size, 0.2, 0.95)
+			# (tufts off the branch's sides too, not all on its line)
+			var side := fwd.cross(Vector3.UP).normalized() * rng.randf_range(-0.12, 0.12) * ln
+			_tuft(b, at + side, (fwd + side * 0.8).normalized(), size, rng, at.y)
+	# the leader: tufts pointing up at the top
+	for k in (2 if lod1 else 3):
+		var a := k * TAU / 3.0 + 0.4
+		var fwd := Vector3(cos(a) * 0.35, 1.0, sin(a) * 0.35).normalized()
+		_tuft(b, Vector3(0, 2.45, 0), fwd, 0.42, rng, 2.6)
 	return b.commit()
 
 
-## one branch card: u along the stem (root .. tip), v across; folded up along the stem
-static func _branch(b: _Buf, root: Vector3, mid: Vector3, tip: Vector3, side: Vector3, width: float, y: float) -> void:
-	var fold := Vector3(0, width * 0.12, 0)
-	# 3 x 3 grid: rows along the stem (root, mid, tip), columns across (-1, 0 = stem, +1)
-	var spine := [root, mid, tip]
-	var wk := [0.45, 1.0, 0.7]   # narrow at the trunk and the tip
-	var g: Array = []
-	for r in 3:
-		var row: Array = []
-		for c in 3:
-			var off: Vector3 = side * (c - 1) * 0.5 * width * wk[r]
-			var p: Vector3 = spine[r] + off + (fold if c == 1 else -fold * 0.3)
-			row.append(p)
-		g.append(row)
-	for r in 2:
-		for c in 2:
-			var quad := [Vector2i(c, r), Vector2i(c + 1, r), Vector2i(c + 1, r + 1), Vector2i(c, r + 1)]
-			for e in [0, 2, 1, 0, 3, 2]:
-				var ix: Vector2i = quad[e]
-				var p: Vector3 = g[ix.y][ix.x]
-				var radial := Vector3(p.x, 0, p.z)
-				var rl := radial.length()
-				# normal: out from the axis and up a bit (the cone's), the card's own up mixed in
-				var nrm := (radial / maxf(rl, 0.001) * 0.75 + Vector3(0, 0.55, 0)).normalized()
-				var reach := clampf(rl / maxf(pine_radius(y) + 0.1, 0.2), 0.0, 1.0)
-				var ao := (0.45 + 0.55 * smoothstep(0.0, 0.9, reach)) * (0.75 + 0.25 * clampf(p.y / PINE_TOP, 0.0, 1.0))
-				b.vert(p, nrm, ao, Vector2(ix.y * 0.5, 1.0 - ix.x * 0.5))
+## one tuft: two cards laid along `fwd` from `at` (the fan's root at u ~ 0.1): one lying flat-ish, one upright
+static func _tuft(b: _Buf, at: Vector3, fwd: Vector3, size: float, rng: RandomNumberGenerator, y: float) -> void:
+	var side := fwd.cross(Vector3.UP)
+	if side.length() < 0.2: side = Vector3.RIGHT
+	side = side.normalized()
+	var up := side.cross(fwd).normalized()
+	var roll := rng.randf_range(-0.45, 0.45)
+	var flat := (side * cos(roll) + up * sin(roll)).normalized()   # the lying card's across
+	for across in [flat, up]:
+		var p0 := at - fwd * size * 0.1
+		var p1 := at + fwd * size * 0.9
+		var h: Vector3 = across * size * 0.5
+		var corners := [p0 - h, p1 - h, p1 + h, p0 + h]
+		var uvs := [Vector2(0, 1), Vector2(1, 1), Vector2(1, 0), Vector2(0, 0)]
+		var cn: Vector3 = fwd.cross(across).normalized()
+		for e in [0, 2, 1, 0, 3, 2]:
+			var p: Vector3 = corners[e]
+			p.y = at.y + (p.y - at.y) / ASPECT
+			var radial := Vector3(p.x, 0, p.z)
+			var rl := radial.length()
+			var nrm := (radial / maxf(rl, 0.001) * 0.6 + Vector3(0, 0.5, 0) + cn * 0.25 * (1.0 if cn.y >= 0 else -1.0)).normalized()
+			var reach := clampf(rl / maxf(pine_env(y), 0.2), 0.0, 1.0)
+			var ao := (0.5 + 0.5 * smoothstep(0.0, 0.85, reach)) * (0.78 + 0.22 * clampf(p.y / PINE_TOP, 0.0, 1.0))
+			b.vert(p, nrm, ao, uvs[e])
 
 
 ## a leafy crown: CardBush's upright folded cards in a ball (no ground clamp), dome normals, inside darker
+## a leafy crown's clumps (unit ball space): [centre, radius]: one big middle-top lobe and 4 round it, overlapping, so the
+## outline is lumpy like a real broadleaf crown; the branches (blobLimbs) run into them
+static func blob_lobes() -> Array:
+	if _mesh.has("_lobes"):
+		return _mesh["_lobes"]
+	var out := [[Vector3(0, 0.25, 0), 0.62]]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 5150
+	for k in 5:
+		var a := k * TAU / 5.0 + rng.randf_range(-0.35, 0.35)
+		var r := rng.randf_range(0.45, 0.58)
+		out.append([Vector3(cos(a) * (1.0 - r) * 1.05, rng.randf_range(-0.35, 0.2), sin(a) * (1.0 - r) * 1.05), r])
+	_mesh["_lobes"] = out
+	return out
+
 static func _blob(cards: int, size_k: float) -> ArrayMesh:
 	var b := _Buf.new()
 	var rng := RandomNumberGenerator.new()
 	rng.seed = BLOB.seed
 	var R: Vector3 = BLOB.r
+	var lobes := blob_lobes()
 	for k in cards:
-		var dir := Vector3(rng.randf_range(-1, 1), rng.randf_range(-0.75, 1), rng.randf_range(-1, 1)).normalized()
-		var rad := 0.3 + 0.7 * pow(rng.randf(), 0.5)
-		var p := dir * rad * R
+		# a point in one of the lobes (weighted by size), mostly towards its shell
+		var lb: Array = lobes[k % lobes.size()]
+		var dir := Vector3(rng.randf_range(-1, 1), rng.randf_range(-0.6, 1), rng.randf_range(-1, 1)).normalized()
+		var rad := 0.35 + 0.65 * pow(rng.randf(), 0.5)
+		var p: Vector3 = (lb[0] as Vector3) + dir * rad * float(lb[1]) * R
 		var yaw := rng.randf() * TAU
 		var d := Vector3(cos(yaw), 0, sin(yaw))
 		if d.dot(Vector3(dir.x, 0, dir.z)) < 0.0:
@@ -550,31 +594,21 @@ static func _blob_limbs() -> ArrayMesh:
 	var b := _Buf.new()
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 6061
-	# the leader: from below the crown (where the trunk mesh ends) up past the middle
-	var lead := [Vector3(0, -1.05, 0), Vector3(0.02, -0.6, 0.01), Vector3(-0.03, -0.1, 0.02), Vector3(0.0, 0.45, -0.02)]
+	# the leader: from below the crown (where the trunk mesh ends) up into the middle lobe
+	var lead := [Vector3(0, -1.05, 0), Vector3(0.02, -0.6, 0.01), Vector3(-0.03, -0.15, 0.02), Vector3(0.0, 0.4, -0.02)]
 	b.tube(lead, [0.07, 0.06, 0.045, 0.018], 6, 0.55, 0.85)
-	for l in LIMBS:
-		var a := TAU * (l + rng.randf_range(-0.2, 0.2)) / LIMBS
-		var out := Vector3(cos(a), 0, sin(a))
-		var y0 := rng.randf_range(-0.7, -0.15)
-		var reach := rng.randf_range(0.65, 0.85)
-		var rise := rng.randf_range(0.35, 0.7)
-		var p0 := Vector3(0, y0, 0)
-		var pts := []
-		var n := 4
-		for i in n + 1:
-			var t := float(i) / n
-			# out and up, bending outward (a limb flattens as it reaches out)
-			pts.append(p0 + out * reach * t + Vector3(0, rise * sqrt(t), 0))
-		var r0 := rng.randf_range(0.045, 0.06)
-		b.tube(pts, [r0, r0 * 0.8, r0 * 0.6, r0 * 0.4, 0.008], 5, 0.6, 0.9)
-		# a twig or two off it
-		for k in 1 + int(rng.randf() < 0.6):
-			var t := rng.randf_range(0.4, 0.75)
-			var s0: Vector3 = p0 + out * reach * t + Vector3(0, rise * sqrt(t), 0)
-			var side := out.rotated(Vector3.UP, rng.randf_range(0.6, 1.1) * (1.0 if k == 0 else -1.0))
-			var e := s0 + side * rng.randf_range(0.3, 0.45) + Vector3(0, rng.randf_range(0.1, 0.3), 0)
-			b.tube([s0, s0.lerp(e, 0.5) + Vector3(0, 0.04, 0), e], [r0 * 0.45, r0 * 0.3, 0.006], 4, 0.7, 0.9)
+	# a limb into every side lobe, forking into twigs inside it
+	var lobes := blob_lobes()
+	for l in range(1, lobes.size()):
+		var c: Vector3 = lobes[l][0]
+		var p0 := Vector3(0, rng.randf_range(-0.7, -0.35), 0)
+		var mid := p0.lerp(c, 0.5) + Vector3(0, 0.08, 0)
+		var r0 := rng.randf_range(0.04, 0.055)
+		b.tube([p0, mid, c], [r0, r0 * 0.7, r0 * 0.4], 5, 0.6, 0.9)
+		for k in 3:
+			var a := rng.randf() * TAU
+			var e := c + Vector3(cos(a), rng.randf_range(0.0, 0.6), sin(a)).normalized() * float(lobes[l][1]) * rng.randf_range(0.5, 0.8)
+			b.tube([c, c.lerp(e, 0.5) + Vector3(0, 0.03, 0), e], [r0 * 0.35, r0 * 0.22, 0.005], 4, 0.7, 0.9)
 	return b.commit()
 
 
@@ -631,3 +665,18 @@ static func dims_at(kind: String, x: float, z: float, tall := false) -> Dictiona
 	var h := func(k: float) -> float:
 		return fposmod(sin(x * 12.9898 + z * 78.233 + k * 37.719) * 43758.5453, 1.0)
 	return dims(kind, h.call(1.0), h.call(2.0), h.call(3.0), h.call(4.0), tall)
+
+
+
+## the pine's wood inside its crown (crown space): the trunk carried up to the tip and every branch of pine_branches()
+## out to its last tuft, tapering (bark, CardTree material "spire")
+static func _pine_wood() -> ArrayMesh:
+	var b := _Buf.new()
+	b.tube([Vector3(0, -0.1, 0), Vector3(0, 0.8, 0), Vector3(0, 1.8, 0), Vector3(0, PINE_TOP, 0)], [0.09, 0.07, 0.04, 0.006], 6, 0.6, 0.9)
+	for br in pine_branches():
+		var pts := []
+		for k in 4:
+			pts.append(branch_point(br, k / 3.0 * 0.95))
+		var r0: float = clampf(float(br[2]) * 0.02, 0.008, 0.022)
+		b.tube(pts, [r0, r0 * 0.7, r0 * 0.45, r0 * 0.2], 4, 0.55, 0.85)
+	return b.commit()

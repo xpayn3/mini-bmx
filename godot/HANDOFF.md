@@ -846,12 +846,19 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   **LODs**, all from the same instance buffer, swapped per pixel by one dither (`shaders/deco_fade.gdshaderinc`):
   | LOD | what | distance | fade_mode |
   |---|---|---|---|
-  | 0 | `pineCard` (24 whorls of folded branch cards) / `blobCard` (130 small cards) | to 36, gone by 48 m | 4 |
-  | 1 | `pineCardLod1` (14 whorls) / `blobCardLod1` (48 cards) = TerrainGeo "pine" / "blob" | 48 .. 72-88 m | 3 |
+  | 0 | `pineCard` (~80 branches x 3-6 needle tufts) / `blobCard` (130 small cards in 6 lobes) | to 36, gone by 48 m | 4 |
+  | 1 | `pineCardLod1` (the same branches, 2 bigger tufts each) / `blobCardLod1` (48 cards) = TerrainGeo "pine" / "blob" | 48 .. 72-88 m | 3 |
   | 2 | crown billboard (`tree_billboard.gdshader`, crown-only cells 4-7 of `impostors.png`) | 72-88 .. 124 m | 5 |
   | 3 | backdrop billboard (`FarHills` `IMPOSTOR_SHADER`, whole-tree cells 0-3) | 100 m .. 1.9 km | -1 |
+  **Pine = real branches with needle tufts** (user reference: a realistic pine forest; "realism, no low-poly stylisation"):
+  `pine_branches()` = `PINE_BRANCHES` 90 branches spiralling up the crown (golden angle), random length / droop / rise,
+  12 % missing; `_tuft` = two cards (one lying, one upright) of the `needle_tuft.png` fan (needle twigs from the
+  PineNeedles001 scan) along each branch's outer 70 %; vertical sizes pre-squeezed by `ASPECT` 1.5 (crowns are scaled
+  taller than wide). `_pine_wood` = trunk + every branch as bark tubes (`pineSpire`). Leafy crowns = `blob_lobes()` (a big
+  middle lobe + 5 round it), the cards spread over them, `blobLimbs` = a leader + a limb into each lobe forking into twigs.
+  (`needle_branch.png` is still made but no longer used.)
   `CardTree.add_twin` (from `Terrain._finalize`, `LevelVisuals._trees`) adds LOD0, the trunk / branches inside the crown
-  (`add_spire`: `pineSpire`, `blobLimbs` = a leader + 5 limbs + twigs, mode 1), the LOD2 billboard (`add_billboard`) and the
+  (`add_spire`: `pineSpire`, `blobLimbs`, mode 1), the LOD2 billboard (`add_billboard`) and the
   **shadow stand-in** (`add_shadow_proxy`: the old solid crown, `SHADOWS_ONLY`, with its dapple holes; no card casts a
   shadow: real-size card crowns in the cascades cost ~4-5 ms GPU; Terrain's far-shadow switch flips the stand-in, meta
   `cast_on`). Every trunk is `trunkFlare` (5 buttress roots over the lowest 10 % of its height). **Leaves at real size**:
