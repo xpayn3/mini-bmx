@@ -10,11 +10,13 @@ const JC := 34.0
 ## game is downhill"): a 450 m peak, a 2.8 km descent (~16 % on average, steeper pitches), a narrower crest whose flanks fall
 ## ~2 x its height to the land (spurs and gullies). BMX_OLD_PEAK=1 = the 105 m / 1.4 km mountain. Mirrored in TerrainFieldCs
 static var OLD_PEAK := OS.get_environment("BMX_OLD_PEAK") != ""
-static var HILL_TOP := 105.0 if OLD_PEAK else 450.0
-static var HILL_LEN := 1400.0 if OLD_PEAK else 2800.0
-static var PITCH_N := 5 if OLD_PEAK else 9
-const SNOW_H := 280.0      # m: the high peaks' snowline   # m: how far the start peak's flanks may fall (+ the crest: < 1 km)
-static var PITCH_K := 1.0 if OLD_PEAK else 105.0 / 450.0 * 0.8   # (a pitch: ~5-8 m of drop over 34-58 m)
+## set by LandParams.apply (the Land Lab's "Start peak" knobs; these are the defaults = start_peak 1)
+static var START_K := 1.0      # 0 = the previous mountain exactly, 1 = the big peak (massif, concave descent)
+static var HILL_TOP := 450.0
+static var HILL_LEN := 2800.0
+static var PITCH_N := 9
+static var PITCH_K := 84.0 / 450.0   # (a pitch: ~5-8 m of drop over 34-58 m)
+const SNOW_H := 280.0      # m: the high peaks' snowline
 ## the trail never ends: it runs on through the hills after the mountain. The first COURSE_LEN m are laid
 ## out at setup; Terrain grows it (grow_course) on a worker thread well before the rider gets near the end.
 const COURSE_LEN := 4000.0
@@ -747,7 +749,7 @@ func _sp_node(ix: int, iz: int) -> int:
 ## Each is a gentle climb (about 4 % on average) up the back of a ridge that follows the trail's corridor, a short
 ## level top, then the descent (about 7.5 %). Height, lengths and where it sits in its slot come from an integer
 ## hash of the slot + seed (no table: any x can be asked, the trail can grow for ever). Mirrored in TerrainFieldCs.
-static var RANGE_X0 := 2100.0 if OLD_PEAK else 3500.0    # the first one's slot starts here (the first mountain ends at HILL_LEN)
+static var RANGE_X0 := 3500.0    # the first one's slot starts here (the first mountain ends at HILL_LEN; LandParams sets it)
 const RANGE_P := 2800.0
 const RANGE_UP := 0.042     # mean grade of the climb
 const RANGE_DOWN := 0.075   # ... of the descent
@@ -820,18 +822,22 @@ func hill(x: float, z: float) -> float:
 	if bare:
 		return 0.0
 	spine_sd(x, z)
-	if not OLD_PEAK:
-		# the start peak = a massif round its ridge line (_massif), the later ranges as before
-		var hm := _massif(x, z)
-		if r_s > RANGE_X0:
-			range_at(r_s)
-			if _rg_h > 0.0:
-				hm = maxf(hm, _rg_h * (1.0 - sm(MTN_W, MTN_W + 260, r_ad)))
-		return hm
-	var top := hill_top(r_s)
-	if top <= 0.0:
-		return 0.0
-	return top * (1.0 - sm(MTN_W, MTN_W + 260, r_ad))
+	var ho := 0.0
+	if START_K < 1.0:   # the previous mountain's cross-section
+		var top := hill_top(r_s)
+		if top > 0.0:
+			ho = top * (1.0 - sm(MTN_W, MTN_W + 260, r_ad))
+		if START_K <= 0.0:
+			return ho
+	# the start peak = a massif round its ridge line (_massif), the later ranges as before
+	var hm := _massif(x, z)
+	if r_s > RANGE_X0:
+		range_at(r_s)
+		if _rg_h > 0.0:
+			hm = maxf(hm, _rg_h * (1.0 - sm(MTN_W, MTN_W + 260, r_ad)))
+	if START_K < 1.0:
+		return ho + (hm - ho) * START_K
+	return hm
 
 
 ## The start peak as real terrain round its ridge line (2026-11-26): ridge points every 40 m of the route from the start to
@@ -910,10 +916,11 @@ func hill_top(x: float) -> float:
 	t = (x - -330.0) / (-90.0 - -330.0)
 	t = 1.0 if t > 1.0 else t
 	var along := (1.0 - steep - (1.0 - pitch_share) * (0.6 * s1 + 0.4 * lin_)) * (t * t * (3.0 - 2.0 * t))
-	if not OLD_PEAK:
+	if START_K > 0.0:
 		# (concave, like a real peak: steepest from the start, easing toward the valley; ~22 % -> ~10 % at grade 1)
 		var cv := 1.0 - (1.0 - lin_) * (1.0 - lin_)
-		along = (1.0 - steep - (1.0 - pitch_share) * (0.65 * lin_ + 0.35 * cv)) * (t * t * (3.0 - 2.0 * t))
+		var an := (1.0 - steep - (1.0 - pitch_share) * (0.65 * lin_ + 0.35 * cv)) * (t * t * (3.0 - 2.0 * t))
+		along = an if START_K >= 1.0 else along + (an - along) * START_K
 	var top := HILL_TOP * along * grade_k if along > 0.0 else 0.0
 	if x > RANGE_X0:
 		range_at(x)

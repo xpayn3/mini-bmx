@@ -11,6 +11,9 @@ const USER_FILE := "user://land_params.json"   # where the editor saves when res
 
 ## key, default, min, max, group, what it does
 const DEFS := [
+	["start_peak", 1.0, 0.0, 1.0, "Start peak", "0 = the previous start mountain (105 m, 1.4 km), 1 = the big peak, between = a blend"],
+	["start_top", 450.0, 105.0, 800.0, "Start peak", "big peak: height (m)"],
+	["start_len", 2800.0, 1400.0, 4500.0, "Start peak", "big peak: length of the descent (m)"],
 	["land_scale", 1.0, 0.0, 2.5, "Overall", "every hill and bump higher / lower (not the mountains)"],
 	["big_h", 16.0, 0.0, 45.0, "Big shapes", "rolling hills: height (m)"],
 	["big_p", 240.0, 80.0, 700.0, "Big shapes", "rolling hills: size across (m)"],
@@ -139,6 +142,14 @@ static func apply() -> void:
 	TerrainField.VL_I = 1.0 / v.valley_sp
 	TerrainField.VL_BD = v.bed_d
 	TerrainField.VL_BW = v.bed_w
+	# the start peak: 0 = the previous mountain exactly, 1 = the big peak (BMX_OLD_PEAK=1 forces 0)
+	var sk: float = 0.0 if TerrainField.OLD_PEAK else clampf(v.start_peak, 0.0, 1.0)
+	TerrainField.START_K = sk
+	TerrainField.HILL_TOP = lerpf(105.0, v.start_top, sk)
+	TerrainField.HILL_LEN = lerpf(1400.0, v.start_len, sk)
+	TerrainField.RANGE_X0 = lerpf(2100.0, v.start_len + 700.0, sk)
+	TerrainField.PITCH_N = roundi(lerpf(5.0, 9.0, sk))
+	TerrainField.PITCH_K = lerpf(1.0, 84.0 / v.start_top, sk)   # (a pitch keeps ~5-8 m of drop on a big peak)
 
 
 ## what the C# field needs (TerrainFieldCs._land_from: the same names as the static vars)
@@ -147,7 +158,7 @@ static func cs_dict() -> Dictionary:
 	for n in ["LAND_WARP", "LAND_TALUS", "LAND_DETAIL_S", "LAND_FINE_S", "LAND_VALLEY_FLAT", "LAND_VALLEY_MACRO", "LAND_VI",
 			"LAND_CR", "LAND_CM", "LAND_STRATA_STEP", "LAND_STRATA", "L_A240", "L_ARDG", "L_A90", "L_A28", "L_REL",
 			"L_I240", "L_I150", "L_I90", "L_I28", "L_I700", "L_I260", "L_I170", "PK_H", "PK_I", "PK_RI", "PK_NEAR", "PK_FAR",
-			"ER_H", "ER_C", "ER_SP", "VL_D", "VL_W", "VL_I", "VL_BD", "VL_BW"]:
+			"ER_H", "ER_C", "ER_SP", "VL_D", "VL_W", "VL_I", "VL_BD", "VL_BW", "HILL_TOP", "HILL_LEN", "RANGE_X0", "START_K"]:
 		d[n] = _static(n)
 	return d
 
@@ -190,6 +201,10 @@ static func _static(n: String) -> float:
 		"VL_I": return TerrainField.VL_I
 		"VL_BD": return TerrainField.VL_BD
 		"VL_BW": return TerrainField.VL_BW
+		"HILL_TOP": return TerrainField.HILL_TOP
+		"HILL_LEN": return TerrainField.HILL_LEN
+		"RANGE_X0": return TerrainField.RANGE_X0
+		"START_K": return TerrainField.START_K
 	return 0.0
 
 

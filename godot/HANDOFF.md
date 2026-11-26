@@ -644,6 +644,12 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   Measured (`tools/peak_probe.gd -- seed`: summit, trail height every 200 m, steepest 50 m, flanks; `tools/wall_probe.gd -- seed
   x z r`: > 50 deg cells and which layer): trail 449 m -> ~40 m over 3.2 km; > 25 % 50-370 m per run; walls round the start
   seed 12: 648 -> 0. terrain_cs_cmp EXACT, trail_grow / rope_find PASS, wood walls=0, spur_cmp 0.
+  **Land Lab knobs (same day, user: "keep the previous mountain, adjust from this to our previous in the world editor")**:
+  group **Start peak** at the top of Land Lab (`LandParams` `start_peak` 0..1, `start_top` 105..800 m, `start_len` 1.4..4.5 km):
+  0 = the previous mountain exactly (same numbers as `BMX_OLD_PEAK=1`), 1 = the big peak, between = a blend (`hill()` mixes the
+  old cross-section with the massif, `hill_top` the two descent profiles, `HILL_TOP` / `HILL_LEN` / `RANGE_X0` / pitches
+  lerped; `START_K` + those three handed to C# through `land_get`). Saved in `data/land_params.json` like every knob;
+  `BMX_LAND=start_peak=0.5,start_top=600` for tests. terrain_cs_cmp EXACT (also `BMX_MESH_K=1`) with default and a blend.
   **Open**: (1) speed: the trail's design speed (`TrailCourse.VA`, which sizes the jumps) is free rolling, ~80 km/h on these
   grades; the demo AI goes over the bars at 70 km/h where a flat stretch drops into 33 % (seed 4242 s 538) and slams out of a
   berm (s 890): riders must brake on big descents (cap VA, demo AI braking, brake zones before steep pitches). (2) From the

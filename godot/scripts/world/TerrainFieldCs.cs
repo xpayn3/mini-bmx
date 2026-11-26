@@ -557,8 +557,7 @@ public partial class TerrainFieldCs : RefCounted
 	private static readonly bool OLD_RIDGE = System.Environment.GetEnvironmentVariable("BMX_OLD_RIDGE") is { Length: > 0 };
 	private const double RIDGE_E2 = 0.01, RIDGE_TOP = 1.1, RIDGE_K2 = 0.2;
 	public static readonly bool OLD_PEAK = System.Environment.GetEnvironmentVariable("BMX_OLD_PEAK") is { Length: > 0 };
-	public static readonly double HILL_TOP = OLD_PEAK ? 105.0 : 450.0;   // (TerrainField: the start peak)
-	public static readonly double HILL_LEN = OLD_PEAK ? 1400.0 : 2800.0;
+	public static double HILL_TOP = 450.0, HILL_LEN = 2800.0, START_K = 1.0;   // (TerrainField: the start peak; set in _land_from)
 	private const double SNOW_H = 280.0;
 	public const double MTN_W = 150.0;
 	public const double QR = 19.0;
@@ -594,6 +593,7 @@ public partial class TerrainFieldCs : RefCounted
 		PK_H = G("PK_H", 140.0); PK_I = G("PK_I", 1.0 / 700.0); PK_RI = G("PK_RI", 1.0 / 3000.0); PK_NEAR = G("PK_NEAR", 60.0); PK_FAR = G("PK_FAR", 300.0);
 		ER_H = G("ER_H", 6.0); ER_C = G("ER_C", 48.0); ER_SP = G("ER_SP", 0.5);
 		VL_D = G("VL_D", 10.0); VL_W = G("VL_W", 45.0); VL_I = G("VL_I", 1.0 / 1100.0); VL_BD = G("VL_BD", 1.2); VL_BW = G("VL_BW", 4.0);
+		HILL_TOP = G("HILL_TOP", 450.0); HILL_LEN = G("HILL_LEN", 2800.0); RANGE_X0 = G("RANGE_X0", 3500.0); START_K = G("START_K", 1.0);
 	}
 	private static readonly bool OLD_LAND = System.Environment.GetEnvironmentVariable("BMX_OLD_LAND") is { Length: > 0 };
 	private const double I700 = 1.0 / 700.0;
@@ -1152,7 +1152,7 @@ public partial class TerrainFieldCs : RefCounted
 	}
 
 	// ---------------- the mountains after the first (TerrainField.range_at) ----------------
-	public static readonly double RANGE_X0 = OLD_PEAK ? 2100.0 : 3500.0;
+	public static double RANGE_X0 = 3500.0;
 	public const double RANGE_P = 2800.0, RANGE_UP = 0.042, RANGE_DOWN = 0.075;
 	private double _rg_x = double.NaN, _rg_h, _rg_m;
 	public double rg_down;
@@ -1223,21 +1223,25 @@ public partial class TerrainFieldCs : RefCounted
 	public double hill(double x, double z)
 	{
 		spine_sd(x, z);
-		if (!OLD_PEAK)
+		double ho = 0.0;
+		if (START_K < 1.0)
 		{
-			double hm = _massif(x, z);
-			if (r_s > RANGE_X0)
-			{
-				range_at(r_s);
-				if (_rg_h > 0.0)
-					hm = maxf(hm, _rg_h * (1.0 - sm(MTN_W, MTN_W + 260, r_ad)));
-			}
-			return hm;
+			double top = hill_top(r_s);
+			if (top > 0.0)
+				ho = top * (1.0 - sm(MTN_W, MTN_W + 260, r_ad));
+			if (START_K <= 0.0)
+				return ho;
 		}
-		double top = hill_top(r_s);
-		if (top <= 0.0)
-			return 0.0;
-		return top * (1.0 - sm(MTN_W, MTN_W + 260, r_ad));
+		double hm = _massif(x, z);
+		if (r_s > RANGE_X0)
+		{
+			range_at(r_s);
+			if (_rg_h > 0.0)
+				hm = maxf(hm, _rg_h * (1.0 - sm(MTN_W, MTN_W + 260, r_ad)));
+		}
+		if (START_K < 1.0)
+			return ho + (hm - ho) * START_K;
+		return hm;
 	}
 
 	// (TerrainField._massif: the start peak round its ridge line, same operation order)
@@ -1321,10 +1325,11 @@ public partial class TerrainFieldCs : RefCounted
 		t = (x - -330.0) / (-90.0 - -330.0);
 		t = t > 1.0 ? 1.0 : t;
 		double along = (1.0 - steep - (1.0 - pitch_share) * (0.6 * s1 + 0.4 * lin_)) * (t * t * (3.0 - 2.0 * t));
-		if (!OLD_PEAK)
+		if (START_K > 0.0)
 		{
 			double cv = 1.0 - (1.0 - lin_) * (1.0 - lin_);
-			along = (1.0 - steep - (1.0 - pitch_share) * (0.65 * lin_ + 0.35 * cv)) * (t * t * (3.0 - 2.0 * t));
+			double an = (1.0 - steep - (1.0 - pitch_share) * (0.65 * lin_ + 0.35 * cv)) * (t * t * (3.0 - 2.0 * t));
+			along = START_K >= 1.0 ? an : along + (an - along) * START_K;
 		}
 		double top = along > 0.0 ? HILL_TOP * along * grade_k : 0.0;
 		if (x > RANGE_X0)
