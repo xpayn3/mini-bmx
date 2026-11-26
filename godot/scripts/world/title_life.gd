@@ -330,7 +330,7 @@ func _pick_bushes(cam: Camera3D, t) -> void:
 			if not (mi is MultiMeshInstance3D):
 				continue
 			var mm: MultiMesh = (mi as MultiMeshInstance3D).multimesh
-			if mm == null or mm.mesh != weed:
+			if mm == null or (mm.mesh != weed and mm.mesh != TerrainGeo.MESH.get("bushdry")):
 				continue
 			for i in mm.instance_count:
 				var xf: Transform3D = (mi as MultiMeshInstance3D).global_transform * mm.get_instance_transform(i)
