@@ -268,6 +268,19 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   (relative to the bike's point, world axes) in the pelvis_* / chest_* / head_* columns while crashed (they held the
   last riding pose). **Open: the user saw the whole upper body drawn offset in some fast hard crashes**; not
   reproduced (a plain bail draws the ragdoll smoothly): press F8 right after one.
+- **One ground -> air blend for the drawn body (2026-11-26, F8 seed 34229: "on a right berm the whole rider wobbled, like an assist
+  aligning it to something")**. At 63-70 km/h onto a berm face the bike skipped off the ground 4 times in 0.35 s (0.07-0.11 s each);
+  every drawn part that read the raw `air` flag flipped with it: the in-air body counter-lean (stick to the side, counter = 1.25 x
+  bike lean) vs the berm pose (counter = 0.2 x bike lean), so the body swung ~30 deg at ~8 Hz, and the bank read for the drawing fell
+  toward flat in each skip. Now `BikePhysics._air_blend` sets `air_k` (the rider's "air" input already used it) = 1 only for a real
+  flight (predicted whole flight `air_time + _land_t` >= `airBodyMin` 0.25 s; no prediction: 0.15 s of air), eased in over `airBodyIn`
+  0.18 s, out over `airBodyOut` 0.12 s after touch-down (the counter snapped back in one tick before). The counter-lean, the body
+  lining up with a bank (`bank_sq`), the bike's lead (`_bike_lead`) and the drawn ground lean (`_gx_lean`, `bank_lean`) use it
+  (`gnd` = 1 - air_k); through a skip the drawing keeps the last ground bank (`_bank_hold`). Sliders Ride > Jumps > Landing.
+  `BMX_OLD_AIRBLEND=1` = before. Same berms, test rider: counter steps > 0.1 rad a tick 29 -> 13 (the rest: the zero-crossing flip
+  below, a crash). Playground suite identical with / without. Not fully drawing-only: the physics reads `bike_lean` in 3 places.
+  **Open**: `counter` jumps ~0.25 rad when `bike_lean` crosses 0 (sign of the max() flips). Test spawn: `BMX_SPAWN_AT=x,z,heading`
+  (from an F8 log; Backspace returns there), e.g. `BMX_SEED=34229 BMX_SPAWN_AT=360.98,-28.99,-0.6224 BMX_START_V=17`.
 - **Curbs / ledges: the rear rolls up, the tyres don't shiver at the edge (2026-11-24, user: "the rear always gets
   stuck on a curb")**. (1) `_step_move`'s edge check (at the bottom bracket) read the rise per physics step, so whether a
   curb was a wall at all depended on speed: at 6 km/h it never saw one (rolled up 30 cm), at 15 km/h a 20 cm curb was
