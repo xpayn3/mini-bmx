@@ -51,6 +51,15 @@ static func ensure() -> void:
 			MESH[k] = CardBush.mesh(k)
 		MAT["leafCard"] = CardBush.material("leaf")
 		MAT["leafCardDry"] = CardBush.material("dry")
+	# tree crowns are leaf cards (card_tree.gd): "pine" / "blob" + "leaf" / "leafSoft" are the cards' LOD1 everywhere they
+	# are drawn (world chunks add the LOD0 twin near the rider); BMX_OLD_TREES=1 = the solid low-poly crowns above
+	if CardTree.enabled():
+		MESH["pine"] = CardTree.mesh("pineCardLod1")
+		MESH["blob"] = CardTree.mesh("blobCardLod1")
+		MAT["leaf"] = CardTree.material("needle")
+		MAT["leafSoft"] = CardTree.material("leaf")
+	MESH["pineSpire"] = CardTree.mesh("pineSpire")
+	MAT["spire"] = CardTree.material("spire")
 	var log_g := GeoBuf.merge([GeoBuf.cylinder(0.17, 0.21, 1, 7).rot_z(PI / 2),
 		GeoBuf.cylinder(0.035, 0.05, 0.4, 4).rot_z(-0.7).translate(0.18, 0.2, 0.05)])
 	MESH["log"] = log_g.to_mesh(false, _soft_normals(log_g))
