@@ -16,6 +16,7 @@ const LIST_NAMES := ["trunk", "trunk_pale", "trunk_pine", "blob", "pine", "rock"
 	"rock_granite0", "rock_granite1", "pebble_granite", "rock_desert0", "rock_desert1", "pebble_desert",
 	"rock_tundra0", "rock_tundra1", "pebble_tundra", "rock_basalt0", "rock_basalt1", "pebble_basalt"]
 const SPAN := 2.4
+static var OLD_WEED := OS.get_environment("BMX_OLD_WEED") == "1"
 const TAPE_SEG := 30
 const TAPE_W := 0.075
 const TAPE_H := 0.85
@@ -1950,11 +1951,13 @@ func _nature(ox: float, oz: float) -> void:
 			if r < 0.08:
 				var sc := 0.25 + rn.next() * 0.25
 				var scrub_col: Color = SCRUB[int(rn.next() * SCRUB.size())]
-				if int(yaw * 10.0) % 2 == 0 and f.trail(x, z) <= 0.02:
-					# every other one is a leaf-card dry shrub (card_bush.gd), the rest stay the little weed blobs
-					put("bushdry", x, h - 0.05, z, sc * 1.9, sc * 1.5, sc * 1.9, yaw, scrub_col, 0.4)
-				else:
+				# leaf-card dry shrubs (card_bush.gd). Until 2026-11-26 every other one was the old "weed" blob (a flat-shaded
+				# 80-triangle ball, read as a low-poly bush / fake rock); BMX_OLD_WEED=1 brings that back
+				if OLD_WEED and int(yaw * 10.0) % 2 != 0:
 					put("weed", x, h + sc * 0.75, z, sc, sc * 0.85, sc, yaw, scrub_col, 0.6)
+				elif f.trail(x, z) <= 0.02:
+					var k := 0.8 + 0.4 * fmod(absf(yaw) * 3.7, 1.0)   # (a size spread: the blobs' half were smaller)
+					put("bushdry", x, h - 0.05, z, sc * 1.9 * k, sc * 1.5 * k, sc * 1.9 * k, yaw, scrub_col, 0.4)
 			elif r < 0.4:
 				var sx := 2 + rn.next() * 1.5
 				var sy := 1.4 + rn.next()

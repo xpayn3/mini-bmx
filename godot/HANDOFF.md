@@ -977,7 +977,9 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   65536 -> 131072 (the extra rock MultiMeshes ran out of instance-uniform slots). Title land re-baked. Gallery:
   `res://tools/rock_gallery.tscn -- out.png [dist= yaw= h= sun= wire=1]`. `BMX_OLD_ROCKS=1` = the old icosphere boulders.
   Seed 4242 desert lake: triangles 4.26M -> 4.71M a frame, draw calls 792 -> 856 (fps in the noise with other GPU apps).
-  Not done: the dry biomes' flat-shaded "weed" blob still reads like a fake low-poly rock; sandstone ledges are subtle;
+  Same day: the dry biomes' "weed" blob (a flat-shaded 80-triangle ball, half of every desert shrub: user "why do I still
+  see low poly bushes") is gone, every one is the leaf-card `bushdry` now (`BMX_OLD_WEED=1` = before; the tumbleweeds have
+  their own twig mesh, the title's wind puffs find `bushdry` too). Not done: sandstone ledges are subtle;
   the rope-bridge canyon rocks and arches still use the old blob.
 - **Leaf-card bushes (2026-11-25, user: "could we add Megascans bushes, or too heavy?" -> prototype from a procedural texture)**: bushes are no
   longer the lumpy blob. `world/card_bush.gd` (`CardBush`): ~30-46 upright quads (each folded in the middle, turned at random about the vertical, front
