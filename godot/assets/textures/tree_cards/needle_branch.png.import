@@ -2,21 +2,22 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://dtlasmbeby3k1"
-path="res://.godot/imported/fox_left.png-6045c63576d2dcd2b8bec309edb3994c.ctex"
+uid="uid://jl601y6nh1na"
+path.bptc="res://.godot/imported/needle_branch.png-ba188b6a88db6ba6b5c0a955df400310.bptc.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc"],
+"vram_texture": true
 }
 
 [deps]
 
-source_file="res://assets/decals/fox_left.png"
-dest_files=["res://.godot/imported/fox_left.png-6045c63576d2dcd2b8bec309edb3994c.ctex"]
+source_file="res://assets/textures/tree_cards/needle_branch.png"
+dest_files=["res://.godot/imported/needle_branch.png-ba188b6a88db6ba6b5c0a955df400310.bptc.ctex"]
 
 [params]
 
-compress/mode=0
-compress/high_quality=false
+compress/mode=2
+compress/high_quality=true
 compress/lossy_quality=0.7
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0
@@ -37,4 +38,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=1
+detect_3d/compress_to=0

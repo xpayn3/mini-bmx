@@ -1013,6 +1013,7 @@ func _finalize(k: Vector2i) -> void:
 		mms[name] = mm
 		var dmi := node.get_child(node.get_child_count() - 1)
 		dmi.set_instance_shader_parameter("fade_mode", 2.0 if spec[3] else 1.0)   # deco_fade.gdshaderinc
+		CardTree.add_twin(dmi, spec[0], CardTree.CHUNK_VIS)   # tree crowns: leaf cards near the rider (card_tree.gd), sets both fade modes
 		if spec[2]:
 			deco_mi.append(dmi)
 		if spec[3]:

@@ -31,3 +31,40 @@ bool deco_cut(vec3 origin, float mode, vec2 frag, bool shadow_pass) {
 	float n = fract(52.9829189 * fract(dot(frag, vec2(0.06711056, 0.00583715))) + h);
 	return n >= a;
 }
+
+// Card trees (2026-11-26, world/card_tree.gd): every tree crown is drawn twice from the same instances: mode 4 = its
+// leaf-card crown, only near the rider (full to CARD_IN, gone by CARD_OUT), mode 3 = the solid low-poly crown, the rest
+// of the way out. In the band the two use the SAME dither value per pixel, so each pixel shows exactly one of them. The
+// solid crown always casts the sun shadow (cheap: no alpha cut-out in the shadow pass); the card crown casts none.
+// No fade band (deco_fade.w <= 0: garage, editor): solid crowns only.
+const float CARD_IN = 36.0;
+const float CARD_OUT = 48.0;
+
+// 0 = solid crown, 1 = card crown at this tree
+float deco_cardness(vec3 origin) {
+	if (deco_fade.w <= 0.0) return 0.0;
+	return 1.0 - smoothstep(CARD_IN, CARD_OUT, distance(origin.xz, deco_fade.xy));
+}
+float deco_dither(vec3 origin, vec2 frag) {
+	float h = fract(sin(dot(floor(origin.xz * 4.0), vec2(12.9898, 78.233))) * 43758.5453);
+	return fract(52.9829189 * fract(dot(frag, vec2(0.06711056, 0.00583715))) + h);
+}
+// the pair's own cut (modes 3 / 4), on top of deco_cut's far fade (mode 3 is a mode 1 decoration out there)
+bool deco_cut_pair(vec3 origin, float mode, vec2 frag, bool shadow_pass) {
+	if (mode < 2.5) return deco_cut(origin, mode, frag, shadow_pass);
+	if (mode < 3.5) {
+		if (deco_cut(origin, 1.0, frag, shadow_pass)) return true;
+		if (shadow_pass) return false;
+		float c = deco_cardness(origin);
+		return c > 0.0 && deco_dither(origin, frag) < c;
+	}
+	float c = deco_cardness(origin);
+	return c <= 0.0 || deco_dither(origin, frag) >= c;
+}
+// a whole instance that can't show in this pass: its vertices are folded onto its base (no pixels to shade at all)
+bool deco_fold(vec3 origin, float mode, bool shadow_pass) {
+	if (mode < 2.5 || deco_fade.w <= 0.0 && mode < 3.5) return false;
+	float c = deco_cardness(origin);
+	if (mode > 3.5) return c <= 0.0;
+	return !shadow_pass && c >= 1.0;
+}

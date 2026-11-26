@@ -110,6 +110,73 @@ void fragment() {
 }
 """
 
+## Far trees as impostors (2026-11-26, user: "a PNG of our trees for the furthest view"): each far tree is a quad turned
+## to the camera about its upright axis, showing one cell of assets/textures/tree_cards/impostors.png (our card trees
+## rendered side-on by tools/bake_tree_impostors.tscn; cells 0-1 pines, 2-3 leafy trees, picked per tree by a hash of
+## its place). Lit with a rounded normal (out of the quad's middle, toward the camera, a little up) so it shades like
+## a volume. The cut-out's alpha is raised in the small mips (no thinning out with distance). Without the atlas, or
+## BMX_OLD_TREES=1: the old cones and balls.
+const IMPOSTOR_PNG := "res://assets/textures/tree_cards/impostors.png"
+const IMPOSTOR_SHADER := """
+shader_type spatial;
+render_mode world_vertex_coords, cull_disabled, diffuse_burley, specular_schlick_ggx;
+uniform vec3 rider;
+uniform vec2 inner_c;
+uniform float inner_half = 168.0;
+uniform float ridge_near = 420.0;
+uniform float ridge_far = 1500.0;
+uniform vec3 albedo : source_color;
+uniform sampler2D atlas : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
+uniform float cells = 4.0;
+uniform float cell0 = 0.0;     // this kind's first cell
+uniform float variants = 2.0;  // cells of this kind
+uniform float fill = 1.0;      // how much of a cell's height the tree covers (the quad grows by 1 / fill)
+#include "res://shaders/deco_fade.gdshaderinc"
+varying flat vec3 v_origin;
+varying flat float v_cell;
+varying vec3 v_right;
+varying vec3 v_fwd;
+void vertex() {
+	vec3 o = MODEL_MATRIX[3].xyz;   // the tree's base
+	v_origin = o;
+	float h = length(MODEL_MATRIX[1].xyz) / fill;
+	vec3 to = CAMERA_POSITION_WORLD - o;
+	to.y = 0.0;
+	vec3 f = normalize(to + vec3(1e-4, 0.0, 0.0));
+	vec3 r = vec3(f.z, 0.0, -f.x);
+	VERTEX = o + r * (UV.x - 0.5) * h * 0.5 + vec3(0.0, (1.0 - UV.y) * h, 0.0);
+	NORMAL = f;
+	v_right = r;
+	v_fwd = f;
+	v_cell = cell0 + min(floor(fract(sin(dot(o.xz, vec2(12.9898, 78.233))) * 43758.5453) * variants), variants - 1.0);
+	float k = smoothstep(ridge_near, ridge_far, length(o.xz - rider.xz));
+	VERTEX.y += k * INSTANCE_CUSTOM.x;
+	if (deco_fade.w > 0.0) {
+		if (distance(o.xz, deco_fade.xy) < deco_fade.z - 1.0) VERTEX = o - vec3(0.0, 50.0, 0.0);
+	} else {
+		vec2 q = abs(o.xz - inner_c);
+		if (max(q.x, q.y) < inner_half + 4.0) VERTEX = o - vec3(0.0, 50.0, 0.0);   // the real trees are there
+	}
+}
+void fragment() {
+	if (deco_cut(v_origin, -1.0, FRAGCOORD.xy, false)) discard;
+	vec2 uv = vec2((v_cell + clamp(UV.x, 0.002, 0.998)) / cells, UV.y);
+	vec4 t = texture(atlas, uv);
+	float lod = textureQueryLod(atlas, uv).x;
+	ALPHA = clamp(t.a * (1.0 + max(lod, 0.0) * 0.3), 0.0, 1.0);
+	ALPHA_SCISSOR_THRESHOLD = 0.5;
+	ALBEDO = t.rgb * COLOR.rgb;
+	vec3 nw = normalize(v_right * (UV.x - 0.5) * 1.6 + v_fwd * 0.75 + vec3(0.0, 0.3, 0.0));
+	NORMAL = normalize((VIEW_MATRIX * vec4(nw, 0.0)).xyz);
+	ROUGHNESS = 1.0;
+	SPECULAR = 0.1;
+}
+"""
+static var _imp_sh: Shader
+static var _imp_tex: Texture2D
+static var _imp_meta := {}
+static var _imp_quad: ArrayMesh
+
 static var ground_crossfade := false   # Game: the ground crossfade (global ground_fade) is on, so the middle ring is used
 static var _ground_sh: Shader
 static var _tree_sh: Shader
@@ -374,8 +441,12 @@ func _swap(i: int) -> void:
 		cone.radial_segments = 6; cone.rings = 0; cone.cap_bottom = false
 		var ball := SphereMesh.new()
 		ball.radius = 0.5; ball.height = 1.0; ball.radial_segments = 7; ball.rings = 3
-		_trees(r, _lifted(cone, 0.5), o.pines, Color("2f6247"))
-		_trees(r, _lifted(ball, 0.75), o.blobs, Color("4f7d34"))
+		if _impostors():
+			_trees(r, _imp_quad, o.pines, Color("2f6247"), "pine")
+			_trees(r, _imp_quad, o.blobs, Color("4f7d34"), "leafy")
+		else:
+			_trees(r, _lifted(cone, 0.5), o.pines, Color("2f6247"))
+			_trees(r, _lifted(ball, 0.75), o.blobs, Color("4f7d34"))
 	follow(_last)
 
 ## the mesh with its base at the origin (y + lift), so the instance origin is where it meets the ground
@@ -388,7 +459,27 @@ func _lifted(src: PrimitiveMesh, lift: float) -> ArrayMesh:
 	m.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, a)
 	return m
 
-func _trees(r: Dictionary, mesh: Mesh, buf: PackedFloat32Array, col: Color) -> void:
+## the impostor atlas + its cells (impostors.json), loaded once; false = draw the old cones / balls
+static func _impostors() -> bool:
+	if OS.get_environment("BMX_OLD_TREES") == "1" or not ResourceLoader.exists(IMPOSTOR_PNG):
+		return false
+	if _imp_sh == null:
+		_imp_sh = Shader.new(); _imp_sh.code = IMPOSTOR_SHADER
+		_imp_tex = load(IMPOSTOR_PNG)
+		var j = JSON.parse_string(FileAccess.get_file_as_string(IMPOSTOR_PNG.get_basename() + ".json"))
+		_imp_meta = j if j is Dictionary else {"cells": 4, "trees": []}
+		# a quad of UVs (the shader places it); its box covers a tree for culling (+ extra_cull_margin)
+		var a := []
+		a.resize(Mesh.ARRAY_MAX)
+		a[Mesh.ARRAY_VERTEX] = PackedVector3Array([Vector3(-0.6, 0, 0), Vector3(0.6, 0, 0), Vector3(0.6, 2.0, 0), Vector3(-0.6, 2.0, 0)])
+		a[Mesh.ARRAY_TEX_UV] = PackedVector2Array([Vector2(0, 1), Vector2(1, 1), Vector2(1, 0), Vector2(0, 0)])
+		a[Mesh.ARRAY_NORMAL] = PackedVector3Array([Vector3.BACK, Vector3.BACK, Vector3.BACK, Vector3.BACK])
+		a[Mesh.ARRAY_INDEX] = PackedInt32Array([0, 2, 1, 0, 3, 2])
+		_imp_quad = ArrayMesh.new()
+		_imp_quad.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, a)
+	return true
+
+func _trees(r: Dictionary, mesh: Mesh, buf: PackedFloat32Array, col: Color, imp_kind := "") -> void:
 	var count := buf.size() / 20
 	if count == 0: return
 	var mm := MultiMesh.new()
@@ -401,6 +492,22 @@ func _trees(r: Dictionary, mesh: Mesh, buf: PackedFloat32Array, col: Color) -> v
 	var mat := ShaderMaterial.new()
 	mat.shader = _tree_sh
 	mat.set_shader_parameter("albedo", col)
+	if imp_kind != "":
+		mat.shader = _imp_sh
+		mat.set_shader_parameter("atlas", _imp_tex)
+		var cells: Array = _imp_meta.get("trees", [])
+		var first := -1
+		var n := 0
+		var fill := 0.0
+		for i in cells.size():
+			if cells[i].kind == imp_kind:
+				if first < 0: first = i
+				n += 1
+				fill += float(cells[i].fill)
+		mat.set_shader_parameter("cells", float(_imp_meta.get("cells", 4)))
+		mat.set_shader_parameter("cell0", float(maxi(first, 0)))
+		mat.set_shader_parameter("variants", float(maxi(n, 1)))
+		mat.set_shader_parameter("fill", fill / maxi(n, 1) if n > 0 else 1.0)
 	r.mats.append(mat)
 	var mi := MultiMeshInstance3D.new()
 	mi.multimesh = mm

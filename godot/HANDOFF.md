@@ -113,7 +113,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
 | `scripts/ui/` | `hud.gd`, `settings_menu.gd`, `tune_card.gd` (the one tuning card: Ride / Rider / Look / Sound tabs, each with category tabs), `quick_tune.gd`, `rider_panels.gd` (`POSE_DEFS`, `KITS`, `LOOK_ROWS` + saving), `ui_theme.gd` |
 | `scripts/fx/` | `fx.gd` (dust puffs, dirt chunks, **tyre tracks**), `ride_dust.gd` (GPU dust trail, FogVolume clouds) |
 | `shaders/` | `sky_hdri.gdshader`, `grade.gdshader`, `grime_mud/wet`, `ruts.gdshaderinc` (ruts + tyre prints) |
-| `assets/` | `dh.glb`, `helmet.glb`, BMX model, decals (Fox, Cinelli, Glory, Maxxis…), `hdri/` (Poly Haven **Kloofendal 4K**), `textures/painted_concrete_02` (garage floor), `textures/broken_brick_wall`, `fonts/Doto.ttf` (Google Fonts dot-matrix, OFL — the HUD bike computer via `UITheme.lcd_font()`) |
+| `assets/` | `dh.glb`, `helmet.glb`, BMX model, `hdri/` (Poly Haven **Kloofendal 4K**), `textures/painted_concrete_02` (garage floor), `textures/broken_brick_wall`, `fonts/Doto.ttf` (Google Fonts dot-matrix, OFL — the HUD bike computer via `UITheme.lcd_font()`) |
 | `tools/*.gd` | one-off headless test / measure scripts (`terrain_cs_cmp.gd` is the important one) |
 | `docs/GRAPHICS.md` | quality presets, frame times, features, what was left out and why |
 | repo root `tools/` | Houdini exporters `export_dh.py`, `export_bmx.py`, `export_helmet.py` → write into `godot/assets/` |
@@ -836,6 +836,35 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   at the back, the four variants in front). Seen: close-ups + two rides (seeds 4242, 80019), no script errors; NOT measured: frame time with many bushes in
   view, the wind sway, how distant leaves thin out (mip alpha). Poly Haven's `searsia_burchellii` (1.4M polygons, ~35 MB glTF) was looked at as a scan source
   and not used: it would have to be decimated + baked to cards first.
+- **Card trees (2026-11-26, user: "same trick as the bushes for trees, we have a lot of trees")**: `world/card_tree.gd`
+  (`CardTree`). Every pine / leafy crown ("pine" / "blob" lists) gets a TWIN MultiMesh on the same instance buffer
+  (`CardTree.add_twin`, from `Terrain._finalize` and `LevelVisuals._trees`): `pineCard` = whorls of drooping, folded
+  branch cards (needle-branch texture drawn in code, `texture("needle")`) + `pineSpire` = the trunk carried on up through
+  the crown to the tip (bark material without the instance colour; user: "trunk must not stop at the bottom");
+  `blobCard` = the bush recipe as a ball. Same unit space as the solid meshes, so nothing in the chunk builder changed.
+  `deco_fade.gdshaderinc`: fade_mode 4 = cards, full to `CARD_IN` 36 m from the rider, gone by `CARD_OUT` 48 m; mode 3
+  = the solid crown, the rest of the way; in the band both use the SAME dither value per pixel (each pixel shows one of
+  them); an instance that can't show is folded onto its base in the vertex stage (`deco_fold`). The solid crown keeps
+  casting the sun shadow everywhere (no alpha cut-out in the shadow cascades), the cards cast none. No fade band
+  (garage, editor preview) = solid only; the editor preview adds no twins. World chunks' twins stop past
+  `CHUNK_VIS` 100 m from the camera. `volume_normals` in `deco_cards.gdshader` (cards lit as one volume from behind
+  too) is on for trees only. `BMX_OLD_TREES=1` = no twins. Gallery: `res://tools/tree_gallery.tscn -- out.png [dist=
+  yaw= h= look= sun=]` (back row solid, front row cards). Cost (demo_descent level, start, idle, render probe): GPU
+  2.90 -> 3.11 ms, 160 -> 153 fps (level trees are one MultiMesh, so every far twin still runs its vertices; the world
+  has the chunk cut-off). World follow ride seed 4242: ~106 fps vs 108-114 old (the twins' draw calls; GPU unchanged).
+  **Photo leaves** (same day): `assets/textures/tree_cards/needle_branch.png` (ambientCG PineNeedles001 needle bundles
+  stamped along a drawn twig) and `leaf_cluster.png` (LeafSet005 leaves; also the green BUSHES' card now, `CardBush.LEAF_PNG`,
+  brightness kept by `CardBush.leaf_gain()`), made by root `tools/make_tree_cards.py <PineNeedles001 dir> <LeafSet005 dir>
+  godot/assets/textures/tree_cards` (CC0, SOURCE.txt; credits list them). `BMX_OLD_TREES_TEX=1` = the code-drawn ones (now
+  DXT5-compressed at runtime). **Far-view impostors**: `FarHills` draws its far trees (100 m .. 1.9 km) as camera-facing
+  quads from `impostors.png` (4 cells 256 x 512: 2 pines, 2 leafy; our card trees rendered side-on, albedo, by
+  `res://tools/bake_tree_impostors.tscn`, which also writes `impostors.json` = each cell's kind / height fill: re-run it
+  after changing the card trees), lit with a rounded normal, alpha raised in the small mips (`IMPOSTOR_SHADER`;
+  `BMX_OLD_TREES=1` = the old cones / balls). Same GPU time as the cones (4.43 vs 4.56 ms). All three PNGs BC7 + mipmaps.
+  Compression audit: every 3D texture is GPU-compressed; left lossless on purpose: 2D UI (splash, pad picture, level maps,
+  docs). The three unused real-brand decal PNGs (`assets/decals/fox_*.png`, `cinelli.png`) were deleted.
+  Not done: leafy trees' trunk through the crown, the 36-48 m swap shows as a stipple, impostors have one side view (no
+  per-angle cells), the bake camera must stay perspective (an orthographic one reads as the shadow pass in the shaders).
 - **Ground crossfade + middle ring (2026-11-25, user: "the mountains pop really late and bad", "a lot of popping, a nice crossfade like big games")**.
   Before: the real chunk ground ended at a hard edge (the loaded square, 144-168 m, jumping 48 m at each chunk line) and the 20 m backdrop (`FarHills`)
   sat 5 m UNDER it, which showed as a step; past it the backdrop is smooth, pale, has no lakes. (Its heights are the field's own: `tools/far_vs_ground.gd`
