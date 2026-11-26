@@ -69,7 +69,9 @@ static func _print(px: Vector2i, draw: Callable, m: ShaderMaterial) -> void:
 	if Env.s("BMX_SIGN_DUMP") != "":   # test: the printed faces as PNGs (dir)
 		img.save_png("%s/sign_%d.png" % [Env.s("BMX_SIGN_DUMP"), _mats.size()])
 	img.generate_mipmaps()
-	if Env.s("BMX_SIGN_RAW") == "":
+	# the BC compressor only exists in editor builds of Godot: export templates have none (it logged an error and
+	# a crash report on every launch of the released game), so there the print stays plain RGB8 with mipmaps
+	if Env.s("BMX_SIGN_RAW") == "" and OS.has_feature("editor"):
 		img.compress(Image.COMPRESS_S3TC, Image.COMPRESS_SOURCE_SRGB)
 	m.set_shader_parameter("board_tex", ImageTexture.create_from_image(img))
 
