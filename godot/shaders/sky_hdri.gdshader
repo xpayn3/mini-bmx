@@ -22,6 +22,12 @@ uniform vec3 gold_sun : source_color = vec3(1.0, 0.56, 0.24);
 // night > 0: a dark blue sky with stars, the HDRI's clouds dimmed, and the moon where the light is
 // (at night the DirectionalLight3D is the moon)
 uniform float night = 0.0;
+// dusty / hazy air (2026-11-26, LightLab "Atmosphere"): the sky toward the horizon turns the haze's colour (brightness
+// kept), so the distance fog (aerial perspective reads this sky) and the far hills melt into one warm veil
+uniform float haze_amt = 0.0;
+uniform vec3 haze_col = vec3(1.0, 0.82, 0.66);
+uniform float haze_height = 0.35;     // how far up the sky the veil reaches (sin of the elevation)
+uniform float haze_lum = 0.0;         // > 0: the veil's brightness before light_energy / energy = the distance fog's (seamless)
 
 float hash3(vec3 p) {
 	p = fract(p * vec3(443.897, 441.423, 437.195));
@@ -185,6 +191,16 @@ void sky() {
 		vec3 clear_c = bc * (lum * 1.15 / max(dot(bc, lw), 1e-3));
 		vec3 cloud_c = vec3(1.0, 0.99, 0.97) * (lum * 1.35 + 0.08);
 		c = mix(c, mix(clear_c, cloud_c, cloud), sunny);
+	}
+	if (haze_amt > 0.0) {
+		vec3 lw = vec3(0.2126, 0.7152, 0.0722);
+		float w = haze_amt * (0.2 + 0.8 * (1.0 - smoothstep(-0.05, haze_height, d.y)));
+		float hl = haze_lum > 0.0 ? mix(dot(c, lw), haze_lum, 1.0 - smoothstep(0.0, haze_height, d.y)) : dot(c, lw);
+		vec3 hz = haze_col * (hl / max(dot(haze_col, lw), 1e-4));
+		// a hazy sky is milkier: the veil is a touch brighter than the blue it covers, and the glow round the sun widens
+		float m = max(dot(d, sun_true()), 0.0);
+		hz *= (haze_lum > 0.0 ? 1.0 : 1.08) + 0.6 * pow(m, 6.0) * (1.0 - night);
+		c = mix(c, hz, clamp(w, 0.0, 1.0));
 	}
 	if (AT_CUBEMAP_PASS) {
 		c = min(c, vec3(sun_clamp)) * light_energy;

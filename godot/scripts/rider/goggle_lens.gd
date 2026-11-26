@@ -89,12 +89,17 @@ static func tint(id: String) -> Color:
 
 ## the 3D LUT for Environment.adjustment_color_correction, or null (neutral / unknown id = leave the image alone)
 static func lut(id: String) -> Texture3D:
-	if not LENSES.has(id) or (LENSES[id].grade as Dictionary).is_empty(): return null
-	var amt := LightLab.v("lens_amount")   # (dev knob: the grade's strength, 1 = as designed)
-	if amt <= 0.001: return null
-	var key := "%s@%.3f" % [id, amt]
+	if not LENSES.has(id): id = DEFAULT
+	var amt := LightLab.v("lens_amount")   # (dev knobs: the grade's strength, 1 = as designed; the camera's white balance)
+	var wb := LightLab.v("wb_warm")
+	var g: Dictionary = LENSES[id].grade
+	if amt <= 0.001: g = {}
+	if g.is_empty() and absf(wb) < 0.001: return null
+	var key := "%s@%.3f@%.3f" % [id, amt, wb]
 	if _cache.has(key): return _cache[key]
-	var t := make_lut(scaled(LENSES[id].grade, amt))
+	var gg := scaled(g, amt).duplicate()
+	if absf(wb) >= 0.001: gg["wb"] = Color(1.0 + 0.12 * wb, 1.0 + 0.02 * wb, 1.0 - 0.17 * wb)   # warm = less blue, like a photo's white balance
+	var t := make_lut(gg)
 	_cache[key] = t
 	return t
 
@@ -106,7 +111,7 @@ static func scaled(g: Dictionary, k: float) -> Dictionary:
 	for key in g:
 		var x = g[key]
 		if key == "pivot": o[key] = x
-		elif key == "tint": o[key] = Color(1, 1, 1).lerp(x, k)
+		elif key == "tint" or key == "wb": o[key] = Color(1, 1, 1).lerp(x, k) if key == "tint" else x
 		elif x is Color: o[key] = Color((x as Color).r * k, (x as Color).g * k, (x as Color).b * k)
 		elif key == "bands":
 			var bs := []
@@ -159,6 +164,9 @@ static func _at(i: int) -> float:
 
 ## one channel (ch 0..2) through the per-channel part of a grade
 static func _chan(x: float, ch: int, g: Dictionary) -> float:
+	if g.has("wb"):
+		var w: Color = g.wb
+		x *= w[ch] / (w.r * 0.2126 + w.g * 0.7152 + w.b * 0.0722)   # the camera's white balance, brightness kept
 	x *= float(g.get("gain", 1.0))
 	if g.has("tint"):
 		var t: Color = g.tint

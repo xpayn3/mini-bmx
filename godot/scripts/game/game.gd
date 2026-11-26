@@ -67,7 +67,8 @@ var _light_time := NAN       # the Light tab's time / cycle last applied (only a
 var _light_cycle := false
 var light_t := 0.0
 var light_note := ""
-var _lab_ver := -1           # LightLab.version last applied (dev knobs)         # what the light model chose (LSWEEP / BMX_LIGHT_PROBE lines)
+var _lab_ver := -1           # LightLab.version last applied (dev knobs)
+var mblur: MotionBlur        # camera motion blur (fx/motion_blur.gd), a ride's compositor effect         # what the light model chose (LSWEEP / BMX_LIGHT_PROBE lines)
 const GoggleLens = preload("res://scripts/rider/goggle_lens.gd")
 const RIM_LAYER := 1 << 11   # render layer 12: the rider + bike (only the rim light uses it)
 const AGX_CONTRAST := 1.35        # the title screen's look
@@ -448,9 +449,15 @@ func _ready() -> void:
 	if dust.sim != null: dust.sim.recorder = replay
 	motes = AmbientMotes.new()
 	add_child(motes)
+	var effects: Array[CompositorEffect] = []
 	if dust.sim != null and dust.sim.compositor != null:   # the dust is drawn as a compositor effect
+		effects.append(dust.sim.compositor)
+	if not title_world and Env.s("BMX_MBLUR") != "0" and RenderingServer.get_rendering_device() != null:
+		mblur = MotionBlur.new()   # camera motion blur along the motion vectors (after the dust, before the tonemapper)
+		effects.append(mblur)
+	if not effects.is_empty():
 		var comp := Compositor.new()
-		comp.compositor_effects = [dust.sim.compositor]
+		comp.compositor_effects = effects
 		cam.compositor = comp
 	audio = load("res://scripts/game/ride_audio.gd").new()
 	audio.game = self
@@ -713,6 +720,7 @@ func set_scenic(on: bool) -> void:
 		_sky_set("sunny", 0.0)
 		_sky_set("light_energy", 0.85)
 		env.fog_light_color = Color(0.93, 0.70, 0.52)
+		env.fog_light_energy = 1.0
 		env.fog_aerial_perspective = 0.0
 		env.fog_sun_scatter = 0.35
 		env.fog_sky_affect = 0.0
@@ -1132,8 +1140,22 @@ func _apply_light(h: float, L: Dictionary) -> void:
 	# ambient = the sky alone (sky contribution 1, set up in _build_environment: ambient_light_energy no longer counts)
 	# fog / haze: distance fog takes its colour from the sky itself (aerial perspective); a thin aerosol haze in the air
 	_ride_fog()
-	env.fog_density *= float(L.haze) * lerpf(1.0, 1.35, n) * lerpf(1.0, 0.6, gw)   # golden: clear air, not milk
-	env.fog_light_color = RIDE_FOG.lerp(Color(0.95, 0.64, 0.46), g * day).lerp(Color(0.4, 0.3, 0.46), tw).lerp(Color(0.012, 0.016, 0.03), n)
+	# far fog (LightLab Atmosphere): thick in the distance, starting thin close by (falloff < 1), so the far low-poly hills
+	# dissolve into the haze while the trail stays clear
+	env.fog_density = clampf(LightLab.v("far_fog") * float(L.haze) * lerpf(1.0, 1.1, n) * lerpf(1.0, 0.9, gw), 0.0, 1.0)
+	env.fog_depth_curve = LightLab.v("fog_curve")
+	# the dusty horizon: the sky toward the horizon takes the haze's colour, so the fog (which reads this sky) and the
+	# far hills melt into one veil; warm dust by day, grey-blue at night
+	var hz_c := hazy_colour(n)
+	_sky_set("haze_amt", clampf(LightLab.v("dust_haze") * float(L.haze), 0.0, 1.0))
+	_sky_set("haze_col", Vector3(hz_c.r, hz_c.g, hz_c.b))
+	_sky_set("haze_height", LightLab.v("haze_height"))
+	# the haze is lit: its brightness = what the sky and the sun put into it (SunSky's numbers), not the blurred average of
+	# the sky (aerial perspective alone made the far hills dark grey silhouettes)
+	env.fog_light_color = hz_c
+	env.fog_light_energy = haze_light(S, el_deg)
+	_haze_e = env.fog_light_energy * hz_c.srgb_to_linear().get_luminance()   # the fog's brightness: the horizon sky matches it
+	_sky_set("haze_lum", _haze_e / _sky_le)
 	env.fog_sun_scatter = LightLab.v("sun_scatter") * day   # (scales with the sun's energy: 0.06 lit a white veil round a low sun)
 	_gg_scat = env.fog_sun_scatter
 	_gg_k = -1.0   # re-apply the guard on top of the new values
@@ -1193,11 +1215,22 @@ var _sky_meter: SkyMeter
 var _sky_meter_due := false
 var _sky_meter_t := 0.0
 
+## the haze's colour: clean grey-blue .. warm dust (LightLab haze_warmth), grey-blue at night
+static func hazy_colour(n: float) -> Color:
+	return Color(0.84, 0.88, 0.94).lerp(Color(1.0, 0.75, 0.54), LightLab.v("haze_warmth")).lerp(Color(0.62, 0.68, 0.82), n)
+
+## the haze's brightness (fog_light_energy): the sky's light plus a share of the sun's (side-scattered by dust), engine units
+static func haze_light(S: Dictionary, el: float) -> float:
+	var sun := float(S.sun_energy) * clampf(sin(deg_to_rad(maxf(el, 0.0))) * 0.5 + 0.15, 0.0, 1.0) if S.sun_on else float(S.moon_energy) * 0.2
+	return (float(S.sky_irr) * 1.3 + sun * 0.2) * LightLab.v("haze_bright")
+
+var _haze_e := 0.0
 func _sky_level() -> void:
 	if _sun_state.is_empty(): return
 	_sky_le = clampf(float(_sun_state.sky_irr) / maxf(_sky_f, 1e-4), 0.002, 20.0)
 	_sky_set("light_energy", _sky_le)
 	_sky_set("energy", _sky_le)
+	_sky_set("haze_lum", _haze_e / _sky_le)
 
 func _sky_meter_ask() -> void:
 	if scenic or RenderingServer.get_rendering_device() == null: return
@@ -3950,7 +3983,12 @@ func _process(dt: float) -> void:
 	cam.speed_feel = speed_k
 	var gm := grade_rect.material as ShaderMaterial
 	var blur_k: float = speed_k * (0.4 + 0.6 * speed_k) * float(Settings.get_v("sfx_blur"))
+	blur_k *= LightLab.v("blur_amount")   # (dev knobs: strength, sides-only .. all-round zoom blur, lens fringes)
 	gm.set_shader_parameter("blur", blur_k)
+	gm.set_shader_parameter("lens_ca", LightLab.v("lens_ca"))
+	if mblur:   # the real motion blur (LightLab: shutter share, longest smear); off in photo mode / replays
+		mblur.shutter = 0.0 if photo or replay_on else LightLab.v("motion_blur")
+		mblur.max_len = LightLab.v("motion_max")
 	gm.set_shader_parameter("fx_lines", float(Settings.get_v("sfx_lines")))
 	gm.set_shader_parameter("fx_fringe", float(Settings.get_v("sfx_fringe")))
 	gm.set_shader_parameter("fx_vig", float(Settings.get_v("sfx_vignette")))
@@ -3988,7 +4026,7 @@ func _process(dt: float) -> void:
 	else:
 		# 2026-11-24 (user: "a little more fog to hide pop-ups, subtle"): starts 20 m earlier and ends 10 m sooner (was +55 / +130)
 		env.fog_depth_begin = (cam.dist + 35) * vd   # (+75: too thin over the 100-124 m hand-over, pop-in showed)
-		env.fog_depth_end = (cam.dist * 1.6 + 120) * vd
+		env.fog_depth_end = maxf(cam.dist * 1.6 + 120, LightLab.v("fog_far")) * vd   # (LightLab: the far haze is full this far out)
 		_shadow_fit()
 	if cam_attr.dof_blur_far_enabled and scenic:   # lookout: keep the view sharp, soften only the horizon
 		cam_attr.dof_blur_far_distance = 9.0     # the cyclist sharp, the landscape behind softly out of focus

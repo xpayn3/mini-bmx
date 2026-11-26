@@ -1739,6 +1739,19 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   grade strength. Live; SAVE writes `res://data/light_lab.json` (only changed values; the game reads it at start, so
   saved values ship as the defaults; players have no way to change them). Tests: `BMX_LIGHT_LAB="k=v,..."`,
   `BMX_LIGHT_LAB_FILE=0`, `BMX_PANEL=light BMX_PANEL_CAT=2`. Belongs with the dev tools for the release pack check.
+- **Dusty atmosphere, warm photo white balance, lens fringes, real motion blur (same day, user: a Riders Republic shot:
+  "far fog like that to hide distant low-poly mountains", "nice warm light like a photo", "chromatic aberration",
+  "no fixed side blur, just motion blur from the environment")**. All Light Lab knobs. (1) The sky toward the horizon
+  turns the haze colour (`sky_hdri.gdshader` `haze_amt` / `haze_col` / `haze_height` / `haze_lum`) at exactly the
+  distance fog's brightness, so far hills melt into the sky with no edge; the fog is lit by the model
+  (`Game.haze_light`: sky light x1.3 + a share of the sun, x `haze_bright`; `Game.hazy_colour`), not the blurred sky
+  (aerial perspective alone made them dark grey silhouettes); fog full at `fog_far` 450 m, falloff `fog_curve` 0.85,
+  thickness `far_fog` 0.97. (2) `wb_warm` 0.18: a camera white balance in the lens LUT (also with the Clear lens).
+  (3) `lens_ca` 0.22: corner colour fringes in `grade.gdshader`. (4) `fx/motion_blur.gd` (`MotionBlur`, compositor
+  effect, `shaders/post/motion_copy.glsl` + `motion_blur.glsl`): each pixel smeared along Godot's motion vectors
+  (shutter `motion_blur` 0.35, max `motion_max` 32 px, 12 taps, pixels under 1.5 px and slow samples left sharp: the
+  rider), off in photo mode / replays, `BMX_MBLUR=0` = none. The old fixed side blur is `blur_amount` 0 now. Not measured:
+  the motion blur's GPU cost (other programs held the GPU); the haze is the same in every biome.
 - **Goggle lenses = film grades (same day, user: "like the artsy downhill films")**: `rider/goggle_lens.gd` grades have a
   matte black, pivoted S-curve, hue bands (`bands`: hue / width / shift / sat / val), film saturation fall-off
   (`sat_fall`), split toning, shoulder; 33^3 LUT. New lens Red Line (`cine`); every lens regraded (see the research doc).

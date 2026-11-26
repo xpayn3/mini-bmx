@@ -506,6 +506,10 @@ func _apply_light(h: float) -> void:
 	sky_mat.set_shader_parameter("sun_vec", Vector3(cos(yaw) * cos(se), sin(se), sin(yaw) * cos(se)) if S.sun_on else Vector3.ZERO)
 	sky_mat.set_shader_parameter("sunny", day * (1.0 - gw))
 	sky_mat.set_shader_parameter("night", n)
+	var hz_c := Game.hazy_colour(n)
+	sky_mat.set_shader_parameter("haze_amt", LightLab.v("dust_haze"))
+	sky_mat.set_shader_parameter("haze_col", Vector3(hz_c.r, hz_c.g, hz_c.b))
+	sky_mat.set_shader_parameter("haze_height", LightLab.v("haze_height"))
 	_sky_level()
 	if _meter == null and RenderingServer.get_rendering_device() != null:
 		_meter = SkyMeter.new(sky_mat)
@@ -514,6 +518,8 @@ func _apply_light(h: float) -> void:
 	env.ambient_light_sky_contribution = 1.0
 	env.fog_density = 0.6 * lerpf(1.0, 1.35, n) * lerpf(1.0, 0.6, gw)
 	env.fog_aerial_perspective = LightLab.v("fog_aerial")
+	env.fog_light_color = hz_c
+	env.fog_light_energy = Game.haze_light(S, el)
 	env.fog_sun_scatter = LightLab.v("sun_scatter") * day
 	env.volumetric_fog_anisotropy = 0.7
 	env.volumetric_fog_albedo = Color(0.9, 0.9, 0.9)
