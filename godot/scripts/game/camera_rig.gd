@@ -55,6 +55,7 @@ var orbit_t := 0.0
 var cam_pitch := 36.0
 var cam_pitch_t := 36.0
 var cam_yaw := 0.0
+static var _OLD_CAMHEAD := OS.get_environment("BMX_OLD_CAMHEAD") != ""
 var _hd_s := NAN   # the view's heading, turned at most camHeadingRate rad/s (smooths the air -> ground switch)
 var _cy_prev := NAN; var _cy_max := 0.0   # tests: BMX_CAMYAW_PROBE
 var cam_fov := 34.0
@@ -219,13 +220,23 @@ func update_cam(dt: float) -> void:
 	# in the air the camera goes the way the rider is flying (course), never the way the bike points:
 	# a flat 180 / 360 spin turns the bike, not the view
 	var hd: float = st.course if st.air and not is_nan(st.course) else st.heading
+	# (2026-11-26, F8 seed 876814: "the last landing was a weird jolt": steer held in the air turned the bike 19 deg off its travel,
+	# the view followed the travel, and at touch-down (the landing carve) it swung the 19 deg in ~0.1 s. A steered offset is the
+	# rider's turn, not a spin: the view leans into it in the air (fading out past ~0.5 rad of slip and while a spin is held), so
+	# there's nothing left to swing on landing. BMX_OLD_CAMHEAD=1 = before)
+	if st.air and not is_nan(st.course) and not _OLD_CAMHEAD:
+		var sl: float = BikePhysics.ang_diff(st.heading, st.course)
+		var w_s: float = (1.0 - smoothstep(0.45, 0.8, absf(sl))) * (1.0 - clampf(absf(st.stick_yaw), 0.0, 1.0))
+		hd = st.course + sl * w_s
 	# (the switch between "the way he flies" in the air and "the way the bike points" on the ground used to jump by the whole
 	# slip at touch-down: with steering in the air that is up to ~35 deg in one frame. Now the view's heading turns at most
 	# camHeadingRate rad/s; 0 = the old jump. A jump past ~90 deg (respawn, a fakie landing) is taken at once)
 	var hd_rate: float = float(Tune.v.get("camHeadingRate", 3.0))
 	if hd_rate > 0.0 and not st.crash_on and Env.s("BMX_OLD_AIRSTEER") == "":
 		if is_nan(_hd_s) or absf(BikePhysics.ang_diff(hd, _hd_s)) > 1.6: _hd_s = hd
-		_hd_s += clampf(BikePhysics.ang_diff(hd, _hd_s), -hd_rate * dt, hd_rate * dt)
+		var hd_d: float = BikePhysics.ang_diff(hd, _hd_s)
+		if not _OLD_CAMHEAD: hd_d *= 1.0 - exp(-10.0 * dt)   # (eased in, settles instead of stopping dead at the cap)
+		_hd_s += clampf(hd_d, -hd_rate * dt, hd_rate * dt)
 		hd = _hd_s
 	else:
 		_hd_s = hd

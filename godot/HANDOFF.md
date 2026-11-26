@@ -297,6 +297,11 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   lip. `Game` moves the drawn bike so the carrying axle is where the physics has it (`_piv_c`), and the lift eases down in the air
   (`LIFT_AIR` 1.5 m/s) (`BMX_OLD_PIVOT=1`). Left: the physics rear compresses further than the drawn swingarm shows (part of the
   lift stays); the torso still rides rock hits stiffly (needs its own world-space path). The user rode it: "smooth".
+  Then (same day, F8: "a weird jolt of the rider's lean on the last landing"): the stick pushed sideways just before touch-down
+  snapped the air counter-lean in at once and the landing took it out in 0.12 s (hips 18 cm sideways): `_air_wl` follows the
+  stick at 4 /s (`BMX_OLD_LEANDRAW=1`), `airBodyOut` 0.12 -> 0.25 s (Tune VER 32). Camera: in the air it leans into a STEERED
+  turn (slip fading out past ~0.5 rad and while a spin is held), so the landing carve no longer swings the view ~19 deg in 0.1 s;
+  its rate cap eases in (`BMX_OLD_CAMHEAD=1`). Test rider, stick sideways in the air: worst hip jump sideways 19 -> 0.6 cm.
 - **Curbs / ledges: the rear rolls up, the tyres don't shiver at the edge (2026-11-24, user: "the rear always gets
   stuck on a curb")**. (1) `_step_move`'s edge check (at the bottom bracket) read the rise per physics step, so whether a
   curb was a wall at all depended on speed: at 6 km/h it never saw one (rolled up 30 cm), at 15 km/h a 20 cm curb was
