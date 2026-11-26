@@ -157,6 +157,7 @@ func follow(p: Vector3) -> void:
 		var r: Dictionary = _rings[i]
 		if i == 1 and not fade_on:
 			continue   # the middle ring only exists in the crossfade mode
+		if baked: continue   # the title's fixed backdrop: never rebuilt
 		if r.task < 0 and Vector2(p.x, p.z).distance_to(r.center) > r.rebuild:
 			_start(i, p.x, p.z)
 
@@ -168,11 +169,29 @@ func _process(_dt: float) -> void:
 			r.task = -1
 			_swap(i)
 
-func _exit_tree() -> void:
-	for r in _rings:
-		if r.task >= 0:
-			WorkerThreadPool.wait_for_task_completion(r.task)
-			r.task = -1
+## a build still running is waited for only when this is freed (it works on its own field fork + job, and _process
+## picks the result up whenever this is back in the tree). Joining on _exit_tree made every move between worlds (the
+## title world parked for a ride, the ride parked behind the menu) wait for it: ~0.85 s on Main menu
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE:
+		for r in _rings:
+			if r.task >= 0:
+				WorkerThreadPool.wait_for_task_completion(r.task)
+				r.task = -1
+
+## the title's fixed backdrop (world/title_terrain.gd): the 20 m ring built from saved arrays, never rebuilt
+var baked := false
+func load_baked(o: Dictionary) -> void:
+	baked = true
+	_rings[0].job = {"out": o}
+	_swap(0)
+
+## tools/bake_title.gd: the 20 m ring's arrays round (x, z), built now on this thread
+func build_now(x: float, z: float) -> Dictionary:
+	_start(0, x, z)
+	WorkerThreadPool.wait_for_task_completion(_rings[0].task)
+	_rings[0].task = -1
+	return _rings[0].job.out
 
 func _start(i: int, x: float, z: float) -> void:
 	var r: Dictionary = _rings[i]

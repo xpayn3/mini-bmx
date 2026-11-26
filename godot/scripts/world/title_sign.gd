@@ -22,11 +22,13 @@ func build(ground: Callable, center: Vector2, to_cam: Vector3, h: float, base_y:
 	mat.albedo_color = Color(0.95, 0.94, 0.9)
 	mat.roughness = 0.85
 	mat.emission_enabled = true
-	mat.emission = Color(1.0, 0.86, 0.7)
-	mat.emission_energy_multiplier = 0.5   # the sun is ahead of the camera, so the face is in shade: a little glow keeps it readable
+	mat.emission = Color(1.0, 0.95, 0.88)
+	mat.emission_energy_multiplier = 1.1   # the sun is ahead of the camera, so the face is in shade: the glow keeps it a clean white against the golden sky
+	mat.disable_fog = true   # the golden-hour haze washed the white letters into the sky; the sign is the title, it reads crisp
 	var steel := StandardMaterial3D.new()
 	steel.albedo_color = Color(0.32, 0.33, 0.36)
 	steel.roughness = 0.7
+	steel.disable_fog = true
 	var n := WORD.length()
 	var span := (n - 1) * pitch + h * 0.7
 	var beam := MeshInstance3D.new()

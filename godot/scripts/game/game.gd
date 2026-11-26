@@ -247,7 +247,10 @@ const TITLE_SEED := 37   # a desert summit with rolling hills far below, picked 
 ## the bike is turned this far from the hand-picked heading: the camera (yaw_off -1.95 from it: the bike faces three-quarters towards the camera) then looks ~0.5 rad round
 ## from the original view, across the valley the hill falls into, instead of into the sun
 const TITLE_TURN := 2.45
-const TITLE_SPOT := Vector3(30.0, -120.0, 1.4399)   # x, z, heading (rad) of the bike on that summit
+## x, z, heading (rad) of the bike on that summit. The heading was 1.4399 until 2026-11-26: the land changed under it
+## (2026-11-25 mountains / erosion) and the view looked into a ridge 58 m high, burying the sign. Now the camera looks
+## west-south-west (260 deg) over the open plateau to the mountains (picked from a survey of every direction here)
+const TITLE_SPOT := Vector3(30.0, -120.0, 4.0379)
 var title_world := false
 ## a test level instead of the procedural world (main sets it before add_child from GameState.level): "playground" =
 ## the test playground (scripts/levels: PlaygroundTerrain + PlaygroundProbe, which measures every jump)
@@ -329,6 +332,8 @@ func _ready() -> void:
 		terrain = PlaygroundTerrain.new(GameState.seed)
 	elif level.ends_with(".tscn"):   # a level built in the editor (the level builder, res://levels/)
 		terrain = LevelTerrain.new(level, GameState.seed)
+	elif title_world and TitleTerrain.available() and Env.s("BMX_TITLE_PROC") == "" and Env.s("BMX_TITLE_SEED") == "":
+		terrain = TitleTerrain.new(TITLE_SEED)   # the title: a small fixed place loaded from a file, nothing generated
 	else:
 		terrain = load("res://scripts/world/terrain.gd").new((int(Env.s("BMX_TITLE_SEED")) if Env.s("BMX_TITLE_SEED") != "" else TITLE_SEED) if title_world else GameState.seed)
 	add_child(terrain)
@@ -357,10 +362,12 @@ func _ready() -> void:
 		if title_world: far_hills.ridge_gain = 1.4   # the title view: real mountains on the horizon
 		far_hills.setup(terrain)
 	if far_hills: add_child(far_hills)
+	if far_hills and terrain is TitleTerrain and not (terrain as TitleTerrain).far.is_empty():
+		far_hills.load_baked((terrain as TitleTerrain).far)   # the backdrop as baked, never rebuilt
 	reuse = {}
 	grass = GrassField.new(terrain)   # the grass carpet round the camera (Settings "grass")
 	add_child(grass)
-	sheep = CrashLog.cs_new("res://scripts/world/SheepHerdCs.cs")   # woolly flocks that graze and run from the bike (C#; none without it)
+	sheep = null if terrain is TitleTerrain else CrashLog.cs_new("res://scripts/world/SheepHerdCs.cs")   # woolly flocks that graze and run from the bike (C#; none without it; none on the fixed title)
 	if sheep != null:
 		sheep.name = "Sheep"
 		add_child(sheep)
@@ -1340,7 +1347,7 @@ func _to_hilltop() -> void:
 	if Env.s("BMX_TITLE_SPOT") != "":   # tests / picking a new spot: x,z,heading
 		var q := Env.s("BMX_TITLE_SPOT").split_floats(",")
 		sp = Vector3(q[0], q[1], q[2])
-	terrain.update_stream(sp.x, sp.y, INF)
+	terrain.update_stream(sp.x, sp.y, INF)   # (a ride's own world, far from here: every chunk built now. main parks the title world to avoid it)
 	var clear := _clear_spot(sp.x, sp.y, sp.z + TITLE_TURN)   # never on a rock: the nearest bare ground to the picked spot
 	sp = Vector3(clear.x, clear.y, sp.z)
 	phys.reset_at(sp.x, sp.y, 0.0)
@@ -1350,10 +1357,12 @@ func _to_hilltop() -> void:
 
 ## title screen: the game's name as a Hollywood-style sign close behind the rider, in the camera's view. The hill falls away
 ## in front of the summit, so the letters stand on a gantry (beam + posts down to the hillside) at about the rider's height
-const SIGN_D := 170.0       # metres from the rider along the camera's view axis
-const SIGN_SIDE := 0.10     # sideways as a share of the distance (+ = right on screen)
-const SIGN_H := 0.075       # letter height as a share of the distance (the lookout lens is narrow: the whole word fits)
-const SIGN_UP := 7.0        # the letters' feet above the camera's eye
+## Placed by eye on the fixed title land (2026-11-26): the letters clear above the helmet, the beam behind it, the word
+## between the menu card and the top-right buttons; close enough (80 m) that the haze doesn't wash it out
+const SIGN_D := 80.0        # metres from the rider along the camera's view axis
+const SIGN_SIDE := 0.06     # sideways as a share of the distance (+ = right on screen)
+const SIGN_H := 0.058       # letter height as a share of the distance (the lookout lens is narrow: the whole word fits)
+const SIGN_UP := 8.2        # the letters' feet above the camera's eye
 func _make_title_sign(best: float) -> void:
 	if title_sign != null: title_sign.queue_free()
 	if Env.s("BMX_NO_SIGN") != "": return
@@ -1370,6 +1379,13 @@ func _make_title_sign(best: float) -> void:
 	title_sign = TitleSign.new()
 	add_child(title_sign)
 	title_sign.build(ground, c, -dir, h_k * d, phys.y + 1.2 + up)
+	if Env.s("BMX_SIGN_PROBE") != "":   # tests: the land between the camera and the sign (it was buried in a hill once)
+		var eye := Vector2(phys.x, phys.z) - Vector2(dir.x, dir.z) * 10.5
+		var s := ""
+		for i in 13:
+			var q := eye.lerp(c, i / 12.0)
+			s += " %.0fm:%.1f" % [eye.distance_to(q), t.height(q.x, q.y)]
+		print("SIGNPROBE rider_y=%.1f eye~%.1f feet=%.1f top=%.1f | ground along the view:%s" % [phys.y, phys.y + 1.0, phys.y + 1.2 + up, phys.y + 1.2 + up + h_k * d, s])
 
 func _apply_settings() -> void:
 	terrain.set_view_scale(float(Settings.get_v("view_distance")))
