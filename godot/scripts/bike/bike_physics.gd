@@ -1773,7 +1773,7 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 		# (2026-11-26, Project X reference: in a deep turn the bike goes out to ~65 deg, the rider stays at ~30-35 deg and drops low
 		# to the inside. Ours kept the body at 74-76 % of the bike's lean there (52 deg at 69). The body's share now falls from 80 %
 		# in gentle turns to 50 % from ~0.5 to 1.1 rad of bike lean. BMX_OLD_CORNERBODY=1 = always 80 %)
-		var sh_max: float = 0.8 if _OLD_CORNERBODY else lerpf(0.8, 0.5, smooth01((absf(bike_lean) - 0.5) / 0.6))
+		var sh_max: float = 0.8 if _OLD_CORNERBODY else lerpf(0.8, float(T.get("cornerBody", 0.5)), smooth01((absf(bike_lean) - 0.5) / 0.6))
 		var body_l: float = b_t - w_c * b_sg * maxf(0.0, (b_t - sh_max * bike_lean) * b_sg)
 		counter = bike_lean - body_l
 	# on a bank the rider goes WITH the bike (drawn only). "Bike under an upright body" is flat-corner technique; in a
@@ -1796,8 +1796,8 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 			# (2026-11-26, Project X berms: bank ~35 deg, bike ~60, body ~35-40: the body square to the berm's FACE, the bike leaned
 			# further past it. It used to go to 80 % of the bike's lean on any bank. Now the body leans as far as the bank, at least
 			# half the bike's lean and at most 80 % of it)
-			var sh_b: float = lerpf(0.8, 0.5, smooth01((absf(bike_lean) - 0.5) / 0.6))
-			var body_b: float = minf(0.8 * absf(bike_lean), maxf(absf(bank), sh_b * absf(bike_lean)))
+			var sh_b: float = lerpf(0.8, float(T.get("cornerBody", 0.5)), smooth01((absf(bike_lean) - 0.5) / 0.6))
+			var body_b: float = minf(maxf(0.8, sh_b) * absf(bike_lean), maxf(absf(bank) * minf(1.0, sh_b / 0.5), sh_b * absf(bike_lean)))
 			counter = lerpf(counter, bike_lean - signf(bike_lean) * body_b, bank_sq)
 	# in the air the stick's lean is the rider's doing: they push the bike over with the legs and arms and
 	# their body goes the other way a little (counter-lean), staying over the centre of mass. It comes in with the air

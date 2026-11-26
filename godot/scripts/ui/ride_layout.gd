@@ -22,7 +22,7 @@ const LABELS := {
 	"balanceSim": "Balanced bike", "balanceFall": "Falls in past the grip", "lowsideAngle": "Lowside margin",
 	"gyroStable": "Steady at speed", "frontWashAt": "Front wash-out point", "frontWashTime": "Wash-out time",
 	"brakeFront": "Front brake", "brakeRear": "Rear brake", "brakeFrontMix": "Brake key: front share",
-	"brakeSkid": "Brake key: rear skid", "camberPull": "Side-slope pull", "bankLock": "Berm lock-in", "cornerLoad": "Turns press you down",
+	"brakeSkid": "Brake key: rear skid", "camberPull": "Side-slope pull", "bankLock": "Berm lock-in", "cornerBody": "Deep-turn body lean", "cornerLoad": "Turns press you down",
 	"groundKnock": "Rocks & ruts knock", "leanLead": "Tip in with the steer", "slowRoll": "Quicker roll when slow",
 	"slowLean": "Bike thrown under (slow)", "damperKnee": "Shock blow-off speed", "damperBlow": "Harshness past blow-off",
 	"wheelMass": "Wheel weight", "airArcade": "Arcade air control", "airSpinRate": "Air tilt speed",
@@ -67,6 +67,7 @@ const PAGES := [
 			["leanMax", "Deepest lean.", "Shallow", "Deep"],
 			["bikeLeanCap", "Bike lean soft limit.", "Low", "High"],
 			["bodyLean", "How much of the lean the body takes.", "Upright", "Leans with it"],
+			["cornerBody", "In a deep turn the body takes this share of the bike's lean (0.5 = Project X, 0.8 = before). Lower = the bike further out under you.", "Bike way out", "Leans with it"],
 			["groundLeanMax", "Max lean towards ground rising beside you (off-camber).", "Careful", "Deep"],
 		]],
 		["Slow riding", [

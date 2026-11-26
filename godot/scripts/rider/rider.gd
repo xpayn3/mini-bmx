@@ -15,7 +15,7 @@ const GEAR := preload("res://scripts/rider/rider_gear.gd")
 
 ## neutral riding style (posepanel.js NEUTRAL): BMX = all of these
 const NEUTRAL := {hipX = 0.0, hipY = 0.0, lean = 0.0, elbowsOut = 0.0, kneesOut = 0.0, stance = 0.0, seatFloor = false,
-	crouch = 1.0, standPedal = 1.0, aero = 1.0, speedTuckPose = 1.0, sway = 1.0, bikeRock = 1.0, upright = 1.0, hipSway = 0.015, torso = 0.46, attackStand = 1.0, kneeOpen = 1.0, bumpAbsorb = 2.0, bodyBounce = 0.4, leanFollow = 1.0, leanSwing = 1.0, leanUnweight = 1.0, leanLively = 1.0, leanBalance = 1.0, leanBumps = 1.0, leanLoad = 1.0, bodyBob = 1.0,
+	crouch = 1.0, standPedal = 1.0, aero = 1.0, speedTuckPose = 1.0, sway = 1.0, bikeRock = 1.0, upright = 1.0, hipSway = 0.015, torso = 0.46, attackStand = 1.0, kneeOpen = 1.0, bumpAbsorb = 2.0, bodyBounce = 0.4, leanFollow = 1.0, leanSwing = 1.0, leanUnweight = 1.0, leanLively = 1.0, leanBalance = 1.0, leanBumps = 1.0, leanLoad = 1.0, cornerCrouch = 1.0, bodyBob = 1.0,
 	flowBend = 1.0, flowLead = 1.0, flowSink = 1.0,   # pro flow through lean changes: spine bend, shoulders / eyes lead, sink into the turn
 	headSteady = 1.0, ankling = 1.0, heelsDown = 1.0,   # head held steady against the bike's kicks; ankle swing pedalling; heels drop coasting / landing
 	# style (Rider > Style): the numbers the riding pose is built from
@@ -1941,7 +1941,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		# low and forward over the bars. A deeper crouch the further the bike is out from under the body, on the ground only.
 		# BMX_OLD_CORNERBODY=1 = off)
 		if not _OLD_CORNERCROUCH:
-			var crk: float = smoothstep(0.15, 0.7, absf(cr)) * (1.0 - air) * float(sty.turnLow)
+			var crk: float = smoothstep(0.15, 0.7, absf(cr)) * (1.0 - air) * float(sty.turnLow) * float(sty.get("cornerCrouch", 1.0))
 			pelvis.y -= 0.07 * crk
 			chest.y -= 0.12 * crk
 			chest.x += 0.05 * crk

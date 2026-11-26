@@ -88,6 +88,7 @@ const POSE_DEFS := [
 		["leanBalance", "Corner life: balance sway", 0.0, 3.0, 0.05, "×"],
 		["leanBumps", "Corner life: bumps rock the body", 0.0, 3.0, 0.05, "×"],
 		["leanLoad", "Corner life: turn presses the rider down", 0.0, 3.0, 0.05, "×"],
+		["cornerCrouch", "Corner crouch: sinks low as the bike goes out under him", 0.0, 3.0, 0.05, "×"],
 	]],
 	["Style", [
 		["hipSteady", "Hips steady (up / down)", 20.0, 400.0, 5.0, ""],
