@@ -12,7 +12,10 @@ const PRESETS := {
 	"helmet":    {"label": "Helmet",  "mode": "helmet", "fov": 88.0},
 	# POV from the action cam on the bike (BikeRig.action_cam: handlebar / fork leg), only in the cycle when one is mounted
 	"bikecam":   {"label": "Bike", "mode": "helmet", "src": "bike", "fov": 92.0},
-	"chase":     {"label": "Chase",      "dist": 7.0,  "pitch": 16.0, "follow": true,  "fov": 42.0, "rate": 3.2},
+	# (2026-11-26, user: "our chase camera the same setup as Project X: zoom, FOV, framing, how it travels". Measured off their
+	# footage: right behind, the rider centred and ~1/3 of the frame's height, ~1.7 m up looking ~12 deg down, ~78 deg wide (50
+	# vertical at 16:9), swinging round with the bike quickly. Was 7 m / 16 deg / FOV 42 / rate 3.2)
+	"chase":     {"label": "Chase",      "dist": 4.2,  "pitch": 17.0, "follow": true,  "fov": 50.0, "rate": 4.5},
 	# a camera drone: slow + floaty, banks into turns, pitches with speed, hovers in the wind, OSD overlay
 	"drone":     {"label": "Drone",      "dist": 22.0, "pitch": 36.0, "follow": true,  "fov": 34.0, "rate": 0.55, "lag": 1.4, "drift": true, "drone": true},
 	"side":      {"label": "Side",       "dist": 14.0, "pitch": 10.0, "follow": true,  "fov": 28.0, "orbit": PI / 2, "rate": 2.5},

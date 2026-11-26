@@ -1485,7 +1485,14 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 		# a side slope pulls the bike down it: the front wheel falls to the low side (gravity on the trail of the
 		# fork), gently, more when slow. On a berm that's into the turn: it draws you round. Steer to hold a line
 		if v > 0.5:
-			course_rate += float(T.get("camberPull", 0.22)) * G * sin(bk) / maxf(va, 3.0) * smooth01((v - 0.5) / 2.0)
+			# (2026-11-26, user: "berms are known for pulling in and locking you in, a global formula by angle, not just berms": leaned
+			# WITH the tilt (into a berm, a banked bend, the inside of any slope) the pull down it is stronger, bankLock: the bike is
+			# steered back down the face and settles higher at speed instead of riding straight up and over the rim. Ridden straight
+			# across a side slope (no lean into it) only camberPull, so a line across a hill can still be held. BMX_OLD_BANKLOCK=1)
+			var c_pull: float = float(T.get("camberPull", 0.22))
+			if not _OLD_BANKLOCK:
+				c_pull += float(T.get("bankLock", 0.6)) * smooth01((signf(bk) * lean - 0.05) / 0.3)
+			course_rate += c_pull * G * sin(bk) / maxf(va, 3.0) * smooth01((v - 0.5) / 2.0)
 		# the front tyre is knocked off its line by whatever slopes sideways under it that isn't the land's own tilt:
 		# a rock's flank, a root, a rut's wall (ruts hold the wheel in, rocks kick it out). Not over a smooth berm
 		var kn: float = float(T.get("groundKnock", 0.6))
@@ -1763,7 +1770,11 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 		# ~0.3 rad of bike lean: the body passes upright continuously. BMX_OLD_LEANDRAW=1 = before)
 		var b_t: float = (lean + bank_lean) * T.bodyLean
 		var w_c: float = smooth01(absf(bike_lean) / 0.3)
-		var body_l: float = b_t - w_c * b_sg * maxf(0.0, (b_t - 0.8 * bike_lean) * b_sg)
+		# (2026-11-26, Project X reference: in a deep turn the bike goes out to ~65 deg, the rider stays at ~30-35 deg and drops low
+		# to the inside. Ours kept the body at 74-76 % of the bike's lean there (52 deg at 69). The body's share now falls from 80 %
+		# in gentle turns to 50 % from ~0.5 to 1.1 rad of bike lean. BMX_OLD_CORNERBODY=1 = always 80 %)
+		var sh_max: float = 0.8 if _OLD_CORNERBODY else lerpf(0.8, 0.5, smooth01((absf(bike_lean) - 0.5) / 0.6))
+		var body_l: float = b_t - w_c * b_sg * maxf(0.0, (b_t - sh_max * bike_lean) * b_sg)
 		counter = bike_lean - body_l
 	# on a bank the rider goes WITH the bike (drawn only). "Bike under an upright body" is flat-corner technique; in a
 	# berm rider and bike are one line, square to its face. The body's target above is measured against gravity, and
@@ -1779,7 +1790,15 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 		sq_t = float(T.get("bankBody", 0.7)) * smooth01(((_bank_hold if air else bank) * signf(bike_lean) - 0.03) / 0.12) * gnd
 		bank_sq = move_toward(bank_sq, sq_t, 3.0 * dt)
 	if bank_sq > 0.0:
-		counter = lerpf(counter, bike_lean * 0.2, bank_sq)
+		if _OLD_CORNERBODY:
+			counter = lerpf(counter, bike_lean * 0.2, bank_sq)
+		else:
+			# (2026-11-26, Project X berms: bank ~35 deg, bike ~60, body ~35-40: the body square to the berm's FACE, the bike leaned
+			# further past it. It used to go to 80 % of the bike's lean on any bank. Now the body leans as far as the bank, at least
+			# half the bike's lean and at most 80 % of it)
+			var sh_b: float = lerpf(0.8, 0.5, smooth01((absf(bike_lean) - 0.5) / 0.6))
+			var body_b: float = minf(0.8 * absf(bike_lean), maxf(absf(bank), sh_b * absf(bike_lean)))
+			counter = lerpf(counter, bike_lean - signf(bike_lean) * body_b, bank_sq)
 	# in the air the stick's lean is the rider's doing: they push the bike over with the legs and arms and
 	# their body goes the other way a little (counter-lean), staying over the centre of mass. It comes in with the air
 	# blend (air_k): a short skip keeps the ground pose, and after touch-down it eases back out (the stick share is
@@ -3435,6 +3454,8 @@ func _pop_along(dv: float) -> void:
 	v *= k; vy *= k
 
 static var _OLD_SPIN := OS.get_environment("BMX_OLD_SPIN") != ""
+static var _OLD_CORNERBODY := OS.get_environment("BMX_OLD_CORNERBODY") != ""   # body at up to 80 % of the bike's lean in deep turns
+static var _OLD_BANKLOCK := OS.get_environment("BMX_OLD_BANKLOCK") != ""   # leaned into tilted ground: only camberPull
 static var _OLD_SLOW := OS.get_environment("BMX_OLD_SLOW") != ""   # slow-riding / reverse as before 2026-11-26
 static var _OLD_LEANDRAW := OS.get_environment("BMX_OLD_LEANDRAW") != ""   # the drawn body / bike lean with its one-tick jumps
 static var _OLD_STRAIGHTWHIP := OS.get_environment("BMX_OLD_STRAIGHTWHIP") != ""   # the whip only in corners (both sticks)

@@ -46,6 +46,11 @@ class Ground:
 				return -tan(a) * minf(s, 0.0) if s < 0.0 else 0.0
 			"noise":
 				return noise.get_noise_2d(x, z) * a
+			"bowl":   # a round berm of radius b (centre to the rider's left, at (0, -b)) banked at a, rim 3 m up the face
+				var d := Vector2(x, z + b).length() - b
+				if d < -1.5: return -tan(a) * 1.5
+				if d < 3.0: return tan(a) * d
+				return tan(a) * 3.0 - (d - 3.0) * 0.6
 			"rough":   # a trail-like descent: grade a (rad, < 0 = down) + crests and dips 4-23 m long, b x their trail size
 				var s := x - x0
 				if s <= 0.0: return 0.0
@@ -133,6 +138,10 @@ func _ready() -> void:
 		return
 	if feel:
 		_feel()
+		get_tree().quit(0)
+		return
+	if "bermwhip=1" in OS.get_cmdline_user_args():
+		_berm_whip(cfg)
 		get_tree().quit(0)
 		return
 	if "sim=1" in OS.get_cmdline_user_args():
@@ -336,6 +345,38 @@ func _feel() -> void:
 					if i * DT > 1.0: yaw_sum += absf(p.yaw_rate); n += 1
 					if r[1].crash != "": crash = r[1].crash; break
 				print("FEEL LEAN  %2d km/h %-5s %-10s yaw=%.2f slip_max=%.0fdeg whip=%.2f v_end=%.1f %s" % [kmh, gk, mode[0], yaw_sum / maxf(1, n), rad_to_deg(smax), wmax, p.v * 3.6, crash])
+
+## bermwhip=1: a round banked bowl (10 m radius, rim 3 m up the face) ridden at its design speed and 1.2x, holding
+## the turn; at 1 s a corner whip is thrown (stick flicked centre -> edge with the steer) and held 1.5 s, with the steer
+## held ("hold") or let go 0.5 s in ("release", what the player did in the F8 log). BERMWHIP: how far up the face it
+## climbs (m out from the line it entered on), whether it left over the rim, speed kept
+func _berm_whip(cfg: Dictionary) -> void:
+	var R := 10.0
+	for deg in [20.0, 35.0]:
+		var th := deg_to_rad(deg)
+		var vd := sqrt(9.81 * R * tan(th))
+		for vk in [1.0, 1.2]:
+			for mode in ["none", "hold", "release"]:
+				var r := _make(cfg, "bowl", th, R); var p: BikePhysics = r[0]
+				p.reset_at(0.0, 0.0, 0.0); p.v = vd * vk
+				var tv: float = vd * vk
+				var out_max := -9.0; var over := false; var t_over := -1.0; var wmax := 0.0
+				var n := int(3.0 / DT)
+				for i in n:
+					var t := i * DT
+					var inp := _inp(clampf((tv - p.v) * 2.0, 0.0, 1.0), 0.0, 0.35)
+					if mode != "none" and t >= 1.0 and t < 2.5:
+						inp.steer = 0.0 if (mode == "release" and t >= 1.5) else 0.8
+						inp.body_lean = clampf((t - 1.0) / 0.05, 0.0, 1.0)
+						inp.throttle = 0.0
+					p.step(DT, inp)
+					var d := Vector2(p.x, p.z + R).length() - R
+					out_max = maxf(out_max, d)
+					wmax = maxf(wmax, p.whip)
+					if d > 3.0 and not over:
+						over = true; t_over = t
+					if r[1].crash != "": break
+				print("BERMWHIP %2.0fdeg v=%4.1fkm/h(x%.1f) %-7s climbed=%5.2fm over_rim=%-5s at=%.2fs v_end=%4.1f whip_max=%.2f crash=%s" % [deg, tv * 3.6, vk, mode, out_max, over, t_over, p.v * 3.6, wmax, r[1].crash])
 
 ## sim=1: the ground sim in numbers (SIM lines). Side slopes ridden straight hands off, a berm turn (how far the
 ## rider sinks, the turn's load), brakes from 40 km/h (front / rear / both: distance, locks), braking hard in a

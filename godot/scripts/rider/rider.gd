@@ -1357,6 +1357,7 @@ var sm_tuck := 0.0   # the air tuck (bike pulled up into the body), eased
 var tuck_out := 0.0  # this frame's tuck (0..1)
 var speed_tuck_k := 0.0   # this frame's speed tuck (0..1, after the jump / trick poses took their share)
 static var _OLD_ARMS := OS.get_environment("BMX_OLD_ARMS") != ""   # elbows back + down, arms nearly straight
+static var _OLD_CORNERCROUCH := OS.get_environment("BMX_OLD_CORNERBODY") != ""   # no extra crouch into deep turns
 static var _OLD_TWIST := OS.get_environment("BMX_OLD_TWIST") != ""   # the shoulders twisted up to 0.6 rad into a turn
 var body_off := Vector2.ZERO   # in the air: the hips (x fwd, y up, bike frame) against take-off; Game moves the bike against it
 var _air_ref := Vector2.ZERO; var _air_ref_ok := false
@@ -1936,6 +1937,14 @@ func update_pose(dt: float, p: Dictionary) -> void:
 			pelvis = pelvis.lerp(pel_a, air_piv)
 			chest = chest.lerp(ch_a, air_piv)
 		pelvis.y -= absf(cr) * 0.12 * float(sty.turnLow)
+		# (2026-11-26, Project X reference: with the bike laid out under him the rider crouches into the turn, hips dropped, chest
+		# low and forward over the bars. A deeper crouch the further the bike is out from under the body, on the ground only.
+		# BMX_OLD_CORNERBODY=1 = off)
+		if not _OLD_CORNERCROUCH:
+			var crk: float = smoothstep(0.15, 0.7, absf(cr)) * (1.0 - air) * float(sty.turnLow)
+			pelvis.y -= 0.07 * crk
+			chest.y -= 0.12 * crk
+			chest.x += 0.05 * crk
 	# (in a whip the bike is yawed under him; his torso keeps facing the flight: its lean turns back against the bike's
 	# yaw, AIR_FACE of it, about the bike's up through the hips. The shoulders' own twist (below) does the rest)
 	var awh_pos: float = clampf(_num(p, "airWhip"), -1.4, 1.4) * air * (0.0 if _OLD_AIRBODY else AIR_FACE)

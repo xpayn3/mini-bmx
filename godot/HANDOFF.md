@@ -302,6 +302,22 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   stick at 4 /s (`BMX_OLD_LEANDRAW=1`), `airBodyOut` 0.12 -> 0.25 s (Tune VER 32). Camera: in the air it leans into a STEERED
   turn (slip fading out past ~0.5 rad and while a spin is held), so the landing carve no longer swings the view ~19 deg in 0.1 s;
   its rate cap eases in (`BMX_OLD_CAMHEAD=1`). Test rider, stick sideways in the air: worst hip jump sideways 19 -> 0.6 cm.
+  Later (same day): **slow riding** (`BMX_OLD_SLOW=1`): `slowSteer` 1.2 -> 0.85 rad (Tune VER 33; bars ~49 deg stopped, was 69), hold
+  the brake 1 s at a stop on ground flatter than `REV_SLOPE` 0.14 rad = reverse (steers like a bike; `rev_on_hold`, off in the
+  slope_stress brake checks), the pirouette only rolling forward (> 0.5 m/s). Small unasked slip (< ~0.1-0.2 rad, no whip / locked
+  rear) is drawn 80 % along the travel (`Game._slip_k`, `BMX_OLD_SLIPDRAW=1`): hands off across a 30 deg slope it crabbed 5 deg.
+  **Berm lock-in** (`bankLock` 0.6, Ride > Ground, `BMX_OLD_BANKLOCK=1`): leaned WITH tilted ground (any berm / bank / slope),
+  the pull down it (camberPull 0.22) gets + bankLock: research (banked-turn physics, MTB berm technique) + a new test
+  `slope_stress.tscn -- bermwhip=1` (round 10 m bowl, 20 / 35 deg, design speed and 1.2x, whip thrown / held / steer let go,
+  `BERMWHIP climbed= over_rim=`): at 1.2x on 35 deg the bike climbed 9.4 m and left over the rim with a light steer; now 0.9 m
+  (1.2 was too sticky). The whip itself was not what threw riders out. sim=1: side slopes ridden straight unchanged, a light steer
+  into a berm turns ~45 % more. **Project X corners** (Mash Games; videos in GameResearch, frames analysed): in a deep turn the bike
+  goes out to ~65 deg under a rider at ~30-35 deg, crouched; in berms the body is square to the FACE. `counter`: body share 80 % ->
+  50 % from 0.5 to 1.1 rad of bike lean, on banks the body leans as far as the bank (>= half the bike, <= 80 %); rider.gd crouches
+  hips -7 / chest -12 cm (+5 cm forward) as the bike goes out (`BMX_OLD_CORNERBODY=1`). Forest berms: bike 69 deg -> body 54 deg
+  before, 34 now. **Chase camera** = Project X framing (dist 4.2, pitch 17, FOV 50 vertical ~78 horizontal, rate 4.5; was 7 / 16 /
+  42 / 3.2). Plan next (agreed with the user): step 2 = the bike weaving under a still head on straights (also the rock twitch),
+  step 3 = pull the bike up in the air on every jump (physics: more clearance = more air time), lip prep.
 - **Curbs / ledges: the rear rolls up, the tyres don't shiver at the edge (2026-11-24, user: "the rear always gets
   stuck on a curb")**. (1) `_step_move`'s edge check (at the bottom bracket) read the rise per physics step, so whether a
   curb was a wall at all depended on speed: at 6 km/h it never saw one (rolled up 30 cm), at 15 km/h a 20 cm curb was
