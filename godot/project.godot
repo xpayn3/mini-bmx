@@ -162,6 +162,10 @@ deco_fade={
 "type": "vec4",
 "value": Vector4(0, 0, 0, 0)
 }
+deco_shadow={
+"type": "vec4",
+"value": Vector4(0, 0, 1, 520)
+}
 ground_fade={
 "type": "vec4",
 "value": Vector4(0, 0, 0, 0)

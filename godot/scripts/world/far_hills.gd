@@ -140,7 +140,9 @@ void vertex() {
 	vec3 o = MODEL_MATRIX[3].xyz;   // the tree's base
 	v_origin = o;
 	float h = length(MODEL_MATRIX[1].xyz) / fill;
-	vec3 to = CAMERA_POSITION_WORLD - o;
+	// the sun's shadow pass (orthographic): the card faces the sun, so it casts the tree's full outline
+	bool shadow_pass = PROJECTION_MATRIX[3][3] > 0.5;
+	vec3 to = shadow_pass ? -CAMERA_DIRECTION_WORLD : CAMERA_POSITION_WORLD - o;
 	to.y = 0.0;
 	vec3 f = normalize(to + vec3(1e-4, 0.0, 0.0));
 	vec3 r = vec3(f.z, 0.0, -f.x);
@@ -152,14 +154,18 @@ void vertex() {
 	float k = smoothstep(ridge_near, ridge_far, length(o.xz - rider.xz));
 	VERTEX.y += k * INSTANCE_CUSTOM.x;
 	if (deco_fade.w > 0.0) {
-		if (distance(o.xz, deco_fade.xy) < deco_fade.z - 1.0) VERTEX = o - vec3(0.0, 50.0, 0.0);
+		float dr = distance(o.xz, deco_fade.xy);
+		if (dr < deco_fade.z - 1.0) VERTEX = o - vec3(0.0, 50.0, 0.0);
+		// shadow pass: only trees whose shadow can reach the shadowed view (the rest cost nothing: folded away)
+		if (shadow_pass && (deco_shadow.z < 0.5 || dr > deco_shadow.w)) VERTEX = o - vec3(0.0, 50.0, 0.0);
 	} else {
 		vec2 q = abs(o.xz - inner_c);
 		if (max(q.x, q.y) < inner_half + 4.0) VERTEX = o - vec3(0.0, 50.0, 0.0);   // the real trees are there
+		if (shadow_pass) VERTEX = o - vec3(0.0, 50.0, 0.0);   // (no ride band: no backdrop shadows)
 	}
 }
 void fragment() {
-	if (deco_cut(v_origin, -1.0, FRAGCOORD.xy, false)) discard;
+	if (deco_cut(v_origin, -1.0, FRAGCOORD.xy, PROJECTION_MATRIX[3][3] > 0.5)) discard;
 	vec2 uv = vec2((v_cell + clamp(UV.x, 0.002, 0.998)) / cells, UV.y);
 	vec4 t = texture(atlas, uv);
 	float lod = textureQueryLod(atlas, uv).x;
@@ -537,6 +543,8 @@ func _trees(r: Dictionary, mesh: Mesh, buf: PackedFloat32Array, col: Color, imp_
 	mi.multimesh = mm
 	mi.material_override = mat
 	mi.extra_cull_margin = 220.0
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# impostor trees cast the sun's shadow past the streamed trees (deco_shadow in shaders/deco_fade.gdshaderinc folds
+	# away those that can't reach the view; title screen: none, it has no deco band)
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if imp_kind != "" else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mi)
 	r.parts.append(mi)

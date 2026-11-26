@@ -488,7 +488,10 @@ func apply_render_quality() -> void:
 	if vp: vp.mesh_lod_threshold = float(get_v("lod"))
 	var sq: int = get_v("shadows")
 	# (ultra = 4096 + the softest filter: an 8192 atlas cost far more than it showed)
-	RenderingServer.directional_shadow_atlas_set_size([2048, 4096, 4096, 8192][sq], true)
+	# 2026-11-26: High has 4 cascades too (Game._two_splits): a 4096 atlas gave each a 2048 quarter, softer than the
+	# 2-cascade near map it replaced (4096 x 2048), so High gets the 8192 (each cascade 4096). BMX_OLD_SHADOWS=1 = before
+	var old_sh := OS.get_environment("BMX_OLD_SHADOWS") == "1"
+	RenderingServer.directional_shadow_atlas_set_size(([2048, 4096, 4096, 8192] if old_sh else [2048, 4096, 8192, 8192])[sq], true)
 	RenderingServer.directional_soft_shadow_filter_set_quality([RenderingServer.SHADOW_QUALITY_HARD, RenderingServer.SHADOW_QUALITY_SOFT_LOW, RenderingServer.SHADOW_QUALITY_SOFT_HIGH, RenderingServer.SHADOW_QUALITY_SOFT_ULTRA][sq])
 
 func apply() -> void:

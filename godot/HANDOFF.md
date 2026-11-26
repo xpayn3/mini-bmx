@@ -496,6 +496,21 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   (`reflection_mask = RIM_LAYER`): its 160 m box lit near trees / ground with gloss that popped as it jumped 30 m.
   Foliage `specular` 0.1. Shadow range follows the zoom you set, not the speed dolly (cascades re-fitted every frame).
   Trees ~30 % fewer (`TREE_TRIES` 100). Test `BMX_DECO_FADE=20,30` pulls the band in to see it work.
+  **Best shadows (2026-11-26, user: "a blurry shadow turns crisp right in front of the bike", "a long golden-hour tree
+  shadow shows up at once", "fix all, make best shadows")**. Supersedes the cascade notes below. (1) High and Ultra get 4
+  cascades (Low / Medium 2), each about 2.6x the one before: sharp to zoom + 18 m, then zoom + 47, zoom + 97, then the
+  reach (`_shadow_fit`; `BMX_SHADOW_S1=m` scales them), blended. (2) High's atlas 4096 -> 8192
+  (`Settings.apply_render_quality`; with 4 cascades in 4096 each got a 2048 quarter, softer than the old 2-cascade near map):
+  the rider's shadow is now sharper than before (legs apart). (3) Far trees keep their shadow: the far backdrop's tree
+  impostors (`FarHills` IMPOSTOR_SHADER) cast too, the card turned to the sun in the shadow pass, folded away past
+  `deco_shadow.w` (shadow reach + how far CASTER_H throws a shadow at this sun height + the camera's offset + 30 m;
+  set every frame by `Game`). The streamed trees' casters now hand over in the SAME 100-124 m band as the drawn ones
+  (they cast 20 m further before), so each tree casts the shadow of the version you see, at any distance. Global
+  `deco_shadow` (project.godot) in `shaders/deco_fade.gdshaderinc`. Cost (seed 4242 start, standing): primitives 6.3 M ->
+  8.4 M, draws 1.14 k -> 1.54 k (all of it the 4 cascades; the impostor casters add ~0); GPU not measured cleanly (another
+  game window was on the GPU), earlier quieter runs +0.3 ms. `BMX_OLD_SHADOWS=1` = all of it as before, `BMX_FAR_SHADOW=0`
+  = no backdrop casters. Test aids: `BMX_ROUTE_BIOME=0..4` overrides the saved route biome (the user's route.cfg pins
+  DUNE SEA: no trees), `BMX_PROF_AVG=1` now also prints GPU / RCPU / DRAWS_k / PRIMS_k. Not ridden by the user yet.
   **2 cascades at every quality (2026-11-24, `Game._two_splits`)**: with 4, everything near the camera (the rider + bike:
   409 of the 889 shadow draws) was drawn into 3-4 cascade maps. Now 2, the near one still ending zoom + 6 m (Low: + 12):
   shadow draws 887 -> 539, render CPU -0.15 ms, GPU -0.13 ms at the start, the 30 s follow ride 141 -> 156 fps; the

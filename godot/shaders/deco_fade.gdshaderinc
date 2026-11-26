@@ -8,17 +8,19 @@ global uniform vec4 deco_fade;   // xy = rider xz, z = full until (m), w = gone 
 const float SMALL_IN = 30.0;
 const float SMALL_OUT = 44.0;
 
-// the sun's shadow pass keeps the world decorations casting further out than they are drawn: a low sun throws a tree's
-// shadow 100+ m, so a tree past the band still darkens the trail in view. Still inside the always-loaded 144 m.
-const float SHADOW_EXTRA_IN = 6.0;
-const float SHADOW_EXTRA_OUT = 20.0;
+// Sun shadows of far trees (2026-11-26, user: a golden-hour tree shadow 100+ m long "shows up at once"): the far
+// backdrop's tree impostors (world/far_hills.gd) cast too, so a tree keeps a shadow at every distance, and the shadow
+// casters hand over in the SAME band as the drawn trees (each tree casts the shadow of the version you see).
+// deco_shadow: x / y = how much further out than drawn the streamed decorations keep casting (0 / 0 now;
+// BMX_OLD_SHADOWS=1: 6 / 20 m and the backdrop casts nothing, z = 0); w = backdrop casters end (m from the rider).
+global uniform vec4 deco_shadow;
 
 // 1 = drawn, 0 = gone: mode 1 world decorations, 2 small clutter, -1 the far backdrop (the other side of the band)
 float deco_keep(vec3 origin, float mode, bool shadow_pass) {
 	if (deco_fade.w <= 0.0 || mode == 0.0) return 1.0;
 	float d = distance(origin.xz, deco_fade.xy);
 	if (mode > 1.5) return 1.0 - smoothstep(SMALL_IN, SMALL_OUT, d);
-	if (shadow_pass && mode > 0.0) return 1.0 - smoothstep(deco_fade.w + SHADOW_EXTRA_IN, deco_fade.w + SHADOW_EXTRA_OUT, d);
+	if (shadow_pass && mode > 0.0 && deco_shadow.y > 0.0) return 1.0 - smoothstep(deco_fade.w + deco_shadow.x, deco_fade.w + deco_shadow.y, d);
 	float k = smoothstep(deco_fade.z, deco_fade.w, d);
 	return mode < 0.0 ? k : 1.0 - k;
 }
