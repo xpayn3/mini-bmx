@@ -828,12 +828,21 @@ const LIST_SPEC := {
 	"post": ["post", "fencePost", false, false], "rail": ["rail", "fenceRail", false, false], "picket": ["picket", "fencePost", false, false],
 	"stake": ["stake", "stake", false, false],
 	"pole": ["pole", "signpole", true, false], "signboard": ["signboard", "signboard", true, false],
+	# rocks by type (rock_gen.gd): the list draws LOD1 (and casts the shadow), _rock_twin adds LOD0 near the rider
+	"rock_granite0": ["rock_granite0", "rock_granite", true, false], "rock_granite1": ["rock_granite1", "rock_granite", true, false],
+	"pebble_granite": ["pebble_granite", "rock_granite", false, true],
+	"rock_desert0": ["rock_desert0", "rock_desert", true, false], "rock_desert1": ["rock_desert1", "rock_desert", true, false],
+	"pebble_desert": ["pebble_desert", "rock_desert", false, true],
+	"rock_tundra0": ["rock_tundra0", "rock_tundra", true, false], "rock_tundra1": ["rock_tundra1", "rock_tundra", true, false],
+	"pebble_tundra": ["pebble_tundra", "rock_tundra", false, true],
+	"rock_basalt0": ["rock_basalt0", "rock_basalt", true, false], "rock_basalt1": ["rock_basalt1", "rock_basalt", true, false],
+	"pebble_basalt": ["pebble_basalt", "rock_basalt", false, true],
 }
 
 
 ## how far (m, camera to the chunk's centre) each kind of decoration is drawn; past the fog they fade
 ## out. Small ground clutter is also limited to the 3x3 chunks round the rider (update_stream).
-const VIS_RANGE := {"pebble": 90.0, "grass": 90.0, "daisy": 90.0, "tulip": 90.0, "spike": 90.0, "stick": 90.0,
+const VIS_RANGE := {"pebble": 90.0, "pebble_granite": 90.0, "pebble_desert": 90.0, "pebble_tundra": 90.0, "pebble_basalt": 90.0, "grass": 90.0, "daisy": 90.0, "tulip": 90.0, "spike": 90.0, "stick": 90.0,
 	"fern": 90.0, "mushroom": 90.0}
 ## everything else (trees, rocks, bushes, logs, weeds, fence wood, sheds) has no per-chunk range: it dissolves by
 ## its own distance from the rider (shaders/deco_fade.gdshaderinc, the band set by Game: FADE_IN .. FADE_OUT),
@@ -850,6 +859,31 @@ func set_view_scale(s: float) -> void:
 		for mi in (n as Node).find_children("*", "MultiMeshInstance3D", true, false):
 			if mi.has_meta("vis"):
 				mi.visibility_range_end = float(mi.get_meta("vis")) * view_scale
+
+
+## a rock list's LOD0 (rock_gen.gd): the same instances drawn with the fine mesh near the rider (deco_fade mode 4),
+## the list itself becomes LOD1 + the shadow caster at every distance (mode 3)
+static func _rock_twin(lod1: MultiMeshInstance3D, mesh_name: String) -> void:
+	if not TerrainGeo.MESH.has(mesh_name + "_lod0"):
+		return
+	lod1.set_meta("rock", true)
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_custom_data = lod1.multimesh.use_custom_data
+	mm.use_colors = lod1.multimesh.use_colors
+	mm.mesh = TerrainGeo.MESH[mesh_name + "_lod0"]
+	mm.instance_count = lod1.multimesh.instance_count
+	mm.buffer = lod1.multimesh.buffer
+	var mi := MultiMeshInstance3D.new()
+	mi.name = String(lod1.name) + "_lod0"
+	mi.multimesh = mm
+	mi.material_override = lod1.material_override
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	lod1.get_parent().add_child(mi)
+	mi.transform = lod1.transform
+	mi.visibility_range_end = 70.0
+	lod1.set_instance_shader_parameter("fade_mode", 3.0)
+	mi.set_instance_shader_parameter("fade_mode", 4.0)
 
 
 func _multimesh(parent: Node3D, mesh: Mesh, mat: Material, buf: PackedFloat32Array, count: int, cast: bool, vis := 0.0) -> MultiMesh:
@@ -1022,6 +1056,7 @@ func _finalize_out(k: Vector2i, o: Dictionary, chunk_n: int) -> void:
 		mms[name] = mm
 		var dmi := node.get_child(node.get_child_count() - 1)
 		dmi.set_instance_shader_parameter("fade_mode", 2.0 if spec[3] else 1.0)   # deco_fade.gdshaderinc
+		_rock_twin(dmi, spec[0])
 		CardTree.add_twin(dmi, spec[0], CardTree.CHUNK_VIS)   # tree crowns: leaf cards near the rider (card_tree.gd), sets both fade modes
 		if spec[2]:
 			# (a card crown casts through its invisible shadow stand-in: that is what the far-shadow rule switches)

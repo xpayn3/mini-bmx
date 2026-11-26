@@ -1,0 +1,7 @@
+Rock scans, Poly Haven (polyhaven.com), CC0. 1K JPG: _col = diffuse, _nrm = normal (OpenGL), _rgh = roughness.
+rock_desert_*  = rock_boulder_cracked
+rock_moss_*    = mossy_rock
+rock_lichen_*  = lichen_rock
+rock_granite_* = rock_face
+rock_basalt_*  = dark_rock_02
+Downloaded 2026-11-26. Used by shaders/rock.gdshader (TerrainGeo._rock_mat).

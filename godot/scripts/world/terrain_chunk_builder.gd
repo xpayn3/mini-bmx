@@ -10,9 +10,11 @@ extends RefCounted
 const WATER := TerrainField.WATER
 const S := 48.0
 const JC := 34.0
-const SMALL := ["pebble", "grass", "daisy", "tulip", "spike", "stick", "fern", "mushroom"]
+const SMALL := ["pebble", "pebble_granite", "pebble_desert", "pebble_tundra", "pebble_basalt", "grass", "daisy", "tulip", "spike", "stick", "fern", "mushroom"]
 const LIST_NAMES := ["trunk", "trunk_pale", "trunk_pine", "blob", "pine", "rock", "pebble", "grass", "daisy", "tulip", "spike", "cactus0", "cactus1", "cactus2", "cactus3", "cactus4",
-	"bush", "bush1", "bush2", "bushdry", "log", "root", "stick", "fern", "mushroom", "weed", "plank", "beam", "post", "rail", "picket", "stake", "pole", "signboard"]
+	"bush", "bush1", "bush2", "bushdry", "log", "root", "stick", "fern", "mushroom", "weed", "plank", "beam", "post", "rail", "picket", "stake", "pole", "signboard",
+	"rock_granite0", "rock_granite1", "pebble_granite", "rock_desert0", "rock_desert1", "pebble_desert",
+	"rock_tundra0", "rock_tundra1", "pebble_tundra", "rock_basalt0", "rock_basalt1", "pebble_basalt"]
 const SPAN := 2.4
 const TAPE_SEG := 30
 const TAPE_W := 0.075
@@ -108,12 +110,44 @@ func run() -> void:
 
 # ---------------- instance lists ----------------
 func _push(name: String, b: Basis, p: Vector3, c: Color) -> int:
+	if (name == "rock" or name == "pebble") and not TerrainGeo.old_rocks():
+		var rt := _rock_type(p.x, p.z)
+		name = ("pebble_" + rt[0]) if name == "pebble" else RockGen.list_name(rt[0], rt[1])
+		c = Color(c.r * rt[2].r, c.g * rt[2].g, c.b * rt[2].b, rt[3])
 	var arr: PackedFloat32Array = lists[name]
 	lists[name] = PackedFloat32Array()   # drop the dict's reference so the append grows arr in place (no copy of the whole list)
 	arr.append_array([b.x.x, b.y.x, b.z.x, p.x, b.x.y, b.y.y, b.z.y, p.y, b.x.z, b.y.z, b.z.z, p.z, c.r, c.g, c.b, 1.0])
 	lists[name] = arr
 	counts[name] += 1
 	return counts[name] - 1
+
+
+## which rock grows here (2026-11-26): [type, variant, tint, moss 0..1] from the biome. Types blend over a border by a
+## hash of the spot (a mix of both near it), the moss follows forest / wetland / green land. Saves and puts back the
+## field's biome state: callers keep reading f.b_* after put().
+func _rock_type(x: float, z: float) -> Array:
+	var keep := [f.b_dry, f.b_rug, f.b_cold, f.b_wet, f.b_forest, f.b_sav, f.b_ash, f._bi_x, f._bi_z]
+	f.biome(x, z)
+	var w_basalt: float = f.b_ash * 1.6
+	var w_desert: float = f.b_dry * 1.3 + f.b_sav * 0.5
+	var w_tundra: float = f.b_cold * 1.4 + f.b_rug * 0.35 * (1.0 - f.b_dry)
+	var w_granite: float = 0.35 + f.b_forest * 0.6 + f.b_wet * 0.4
+	var green: float = (1.0 - f.b_dry) * (1.0 - f.b_ash) * (1.0 - f.b_cold * 0.6)
+	var moss: float = clampf(0.15 * green + f.b_forest * 0.75 + f.b_wet * 0.6 - f.b_sav * 0.3, 0.0, 1.0) * (1.0 - f.b_ash) * (1.0 - 0.7 * f.b_cold)
+	f.b_dry = keep[0]; f.b_rug = keep[1]; f.b_cold = keep[2]; f.b_wet = keep[3]; f.b_forest = keep[4]
+	f.b_sav = keep[5]; f.b_ash = keep[6]; f._bi_x = keep[7]; f._bi_z = keep[8]
+	var hx := sin(x * 12.9898 + z * 78.233) * 43758.5453
+	var h := hx - floorf(hx)
+	var hv := sin(x * 39.346 + z * 11.135) * 24634.6345
+	var v := 0 if hv - floorf(hv) < 0.5 else 1
+	var sum: float = w_basalt + w_desert + w_tundra + w_granite
+	var pick: float = h * sum
+	var t := "granite"
+	if pick < w_basalt: t = "basalt"
+	elif pick < w_basalt + w_desert: t = "desert"
+	elif pick < w_basalt + w_desert + w_tundra: t = "tundra"
+	var b := 0.88 + 0.24 * fmod(h * 7.31, 1.0)   # a little brightness per rock
+	return [t, v, Color(b, b, b), moss if t != "desert" else 0.0]
 
 
 static func _scaled(b: Basis, sx: float, sy: float, sz: float) -> Basis:

@@ -160,7 +160,7 @@ func _build_rocks() -> void:
 		var mi := MeshInstance3D.new()
 		var nm := "pebble" if c.sc < 0.2 else "rock"
 		mi.mesh = TerrainGeo.MESH[nm]
-		mi.material_override = TerrainGeo.MAT.get(nm, TerrainGeo.MAT["rock"])
+		mi.material_override = TerrainGeo.MAT.get("rock_plain", TerrainGeo.MAT["rock"])
 		mi.transform = Transform3D(Basis(Vector3.UP, c.yaw).scaled_local(Vector3(c.sx, c.sy, c.sc)), Vector3(c.x, -c.sc * 0.3, c.z))
 		root.add_child(mi)
 
