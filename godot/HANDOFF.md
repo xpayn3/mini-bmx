@@ -316,7 +316,11 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   50 % from 0.5 to 1.1 rad of bike lean, on banks the body leans as far as the bank (>= half the bike, <= 80 %); rider.gd crouches
   hips -7 / chest -12 cm (+5 cm forward) as the bike goes out (`BMX_OLD_CORNERBODY=1`). Forest berms: bike 69 deg -> body 54 deg
   before, 34 now. **Chase camera** = Project X framing (dist 4.2, pitch 17, FOV 50 vertical ~78 horizontal, rate 4.5; was 7 / 16 /
-  42 / 3.2). Plan next (agreed with the user): step 2 = the bike weaving under a still head on straights (also the rock twitch),
+  42 / 3.2). **Chase follows the slope** (2026-11-26, user: "descents / ascents we can't see in front"; `CameraRig._ground_slope`,
+  `SLOPE_*`): its pitch was from the horizon, so down a 33 deg slope it sat inside the ground behind, the occlusion lift took
+  it to ~63 deg and it looked straight down. Now (like Descenders / Lonely Mountains) a descent puts it `SLOPE_CLEAR` 8 deg
+  above the ground behind and lifts the aim 0.4 x the slope (looks down the trail); a climb drops it 0.65 x the slope and
+  tips the view up 0.75 x it. Flat ground unchanged. `BMX_OLD_CHASE=1` = before. Plan next (agreed with the user): step 2 = the bike weaving under a still head on straights (also the rock twitch),
   step 3 = pull the bike up in the air on every jump (physics: more clearance = more air time), lip prep.
   Sliders: `cornerBody` (Ride > Body, deep-turn body share, 0.5) and `cornerCrouch` (Rider > Motion). **Step 2, weave**
   (`weave` 1, Ride > Body, `BMX_OLD_WEAVE=1`): a bike-only roll `_weave` (like `_bike_lead`, the body target never sees it) =

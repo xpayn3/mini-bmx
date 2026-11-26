@@ -15,7 +15,7 @@ const PRESETS := {
 	# (2026-11-26, user: "our chase camera the same setup as Project X: zoom, FOV, framing, how it travels". Measured off their
 	# footage: right behind, the rider centred and ~1/3 of the frame's height, ~1.7 m up looking ~12 deg down, ~78 deg wide (50
 	# vertical at 16:9), swinging round with the bike quickly. Was 7 m / 16 deg / FOV 42 / rate 3.2)
-	"chase":     {"label": "Chase",      "dist": 4.2,  "pitch": 17.0, "follow": true,  "fov": 50.0, "rate": 4.5},
+	"chase":     {"label": "Chase",      "dist": 4.2,  "pitch": 17.0, "follow": true,  "fov": 50.0, "rate": 4.5, "slope": true},
 	# a camera drone: slow + floaty, banks into turns, pitches with speed, hovers in the wind, OSD overlay
 	"drone":     {"label": "Drone",      "dist": 22.0, "pitch": 36.0, "follow": true,  "fov": 34.0, "rate": 0.55, "lag": 1.4, "drift": true, "drone": true},
 	"side":      {"label": "Side",       "dist": 14.0, "pitch": 10.0, "follow": true,  "fov": 28.0, "orbit": PI / 2, "rate": 2.5},
@@ -172,6 +172,33 @@ func _smooth_y(y: float, dt: float) -> float:
 	_ys2 += (_ys1 - _ys2) * k
 	return 2.0 * _ys1 - _ys2
 
+## Slope-following chase (2026-11-26, user: "on descents / climbs we can't see anything in front"). The chase pitch was
+## from the horizon and it aimed level: down a 33 deg slope the camera sat level with the ground behind the rider, the
+## occlusion lift pushed it up to ~60 deg and it looked straight down; up a climb the slope filled the frame. Like
+## Descenders / Lonely Mountains / Riders Republic, the camera follows the GROUND's slope: down a descent it sits just
+## SLOPE_CLEAR deg above the ground behind the rider (never higher than the preset pitch asks) and aims SLOPE_LOOK_DN of
+## the slope higher, so you look down the trail, not at the rider's back; up a climb it drops SLOPE_POS of the slope and
+## its view tips up SLOPE_LOOK_UP of it. The slope = the land's rise over +-SLOPE_SPAN m along the heading, smoothed
+## (SLOPE_TAU, slower in the air so a jump's landing hill doesn't yank the view). BMX_OLD_CHASE=1 = before
+const SLOPE_SPAN := 5.0
+const SLOPE_TAU := 0.35
+const SLOPE_TAU_AIR := 1.2
+const SLOPE_CLEAR := 8.0      # deg above the ground behind, on a descent
+const SLOPE_POS := 0.65       # share of a climb the camera drops by
+const SLOPE_LOOK_DN := 0.4    # share of a descent the view lifts by (looks further down the trail)
+const SLOPE_LOOK_UP := 0.75   # share of a climb the view tips up by
+const SLOPE_MAX := 0.75   # rad (~43 deg)
+var _OLD_CHASE := Env.s("BMX_OLD_CHASE") != ""
+var _slope_s := 0.0; var _slope_init := false
+func _ground_slope(p: Vector3, f: Vector3, air: bool, dt: float) -> float:
+	var t_ = game.terrain
+	var ha: float = t_.deck_height(p.x + f.x * SLOPE_SPAN, p.z + f.z * SLOPE_SPAN)
+	var hb: float = t_.deck_height(p.x - f.x * SLOPE_SPAN, p.z - f.z * SLOPE_SPAN)
+	var g := clampf(atan2(ha - hb, 2.0 * SLOPE_SPAN), -SLOPE_MAX, SLOPE_MAX)
+	if not _slope_init: _slope_s = g; _slope_init = true
+	_slope_s += (g - _slope_s) * (1.0 - exp(-dt / (SLOPE_TAU_AIR if air else SLOPE_TAU)))
+	return _slope_s
+
 func _unhandled_input(e: InputEvent) -> void:
 	if get_tree().paused or (game and (game.photo or game.replay_on)): return   # photo mode drives the camera itself
 	var sens: float = Settings.get_v("mouse_sens")
@@ -246,6 +273,9 @@ func update_cam(dt: float) -> void:
 	var f := Vector3(cos(hd), 0, -sin(hd))
 	var drawn: Vector3 = game.drawn_pos
 	var ys := _smooth_y(drawn.y, dt)   # the bike's height without its bumps (see _smooth_y)
+	var slope_on: bool = P.get("slope", false) and not _OLD_CHASE and not st.crash_on
+	var gs := _ground_slope(drawn, f, st.air, dt) if slope_on else 0.0   # + = the trail climbs ahead
+	if not slope_on: _slope_init = false
 	var want: Vector3
 	if st.crash_on and game.ragdoll:
 		want = (game.ragdoll.p[Ragdoll.PELVIS] as Vector3) + Vector3(0, 0.3, 0)   # the body itself (the bike slides off on its own)
@@ -330,6 +360,10 @@ func update_cam(dt: float) -> void:
 			if int(t) != int(t - dt):
 				print("CAMYAW max_step_deg=%.2f" % rad_to_deg(_cy_max)); _cy_max = 0.0
 		var pit := clampf(cam_pitch + float(Settings.get_v("cam_height")) - 4.0 * speed_feel, 2.0, 84.0)
+		# above the slope behind the rider, not the horizon (descent: higher, climb: lower; the ground clamp below holds it up)
+		if slope_on:
+			if gs < 0.0: pit = clampf(maxf(pit, -rad_to_deg(gs) + SLOPE_CLEAR), 2.0, 84.0)   # descent: hug the slope behind
+			else: pit = clampf(pit - rad_to_deg(gs) * SLOPE_POS, -35.0, 84.0)                # climb: drop with it
 		if P.get("square", false): pit = cam_pitch   # (level: no Settings height, no speed dip)
 		var dist0 := dist
 		# speed: in closer while the FOV widens (the rider stays the same size, the world rushes past)
@@ -393,6 +427,10 @@ func update_cam(dt: float) -> void:
 			if st.shake > 0.0: _psh += 1
 		_pp2 = _pp1; _pp1 = po; _pa2 = _pa1; _pa1 = target; _pn += 1
 	var aim := target
+	if slope_on:   # lift the view: up the slope on a climb, out down the trail on a descent
+		# (shift the aim by the slope's rise over the camera's own reach: the view turns by about that angle, the rider stays framed)
+		var hd_c := Vector2(target.x - global_position.x, target.z - global_position.z).length()
+		aim.y += tan(absf(gs) * (SLOPE_LOOK_UP if gs > 0.0 else SLOPE_LOOK_DN)) * maxf(hd_c, 1.0)
 	if bool(Settings.get_v("cam_keep")) and not (st.crash_on and game.ragdoll):
 		aim = _keep_rider_in_view(target, drawn + Vector3(0, 0.9, 0))
 	if P.get("square", false) and not st.crash_on:
