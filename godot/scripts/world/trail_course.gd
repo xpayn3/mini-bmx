@@ -52,6 +52,7 @@ const BERM_LINE := 0.9      # m out from the centreline the line rides a berm (o
 const BERM_LINE_FROM := 0.08; const BERM_LINE_FULL := 0.22   # |BT| (tan of the bank) where the line moves onto the berm
 var length: float = 0.0
 var drops: Array = []   # [[i0, i1]] centreline index ranges of drop-offs / cliffs (no route features there)
+var DL := PackedFloat32Array()   # how far each point was lifted for a drop's ridge (the land is lifted with it: TerrainField._spur)
 # dense spatial hash of segments by midpoint
 var gx0: int = 0
 var gz0: int = 0
@@ -90,6 +91,13 @@ var _send := 0.0
 ## to it, eases into and out of every bend, alternates bends, spaces them by time, and only lays the tight sections on
 ## steep hillsides. BMX_OLD_FLOW=1 = the layout before (tests).
 static var OLD_FLOW := OS.get_environment("BMX_OLD_FLOW") != ""
+## the rolling dips / grade reversals eased in and out between section kinds (no ledges). BMX_OLD_LEDGES=1 = switched per point
+static var OLD_LEDGES := OS.get_environment("BMX_OLD_LEDGES") != ""
+## straight run-in / run-out round jump runs (trail builders: ~1.5 s straight into a lip, ~1 s after the landing; with
+## TerrainField._jump_site_ok). BMX_OLD_RUNIN=1 = the old 4-10 m / 6-8 m
+const RUNIN := 20.0
+const RUNOUT := 16.0
+static var OLD_RUNIN := OS.get_environment("BMX_OLD_RUNIN") != ""
 const A_BEND := 9.4      # m/s^2 a rider takes a bend with (A_RIDE + a modest berm's share of g)
 const CLO_MAX := 6       # steps (12 m): the most an arc's curvature ramps in / out over
 var _v := 4.0           # m/s: the speed estimate at the turtle
@@ -496,8 +504,9 @@ func _flow_trail(end_x: float) -> void:
 	_straight(8, ROAD)
 	var k := 0
 	while k < 9:
+		if not OLD_RUNIN: _straight(RUNIN, ROAD)   # (a straight run-in out of the berm before the first lip)
 		_straight(36 + _r.next() * 24, JUMP)
-		_straight(6, ROAD)   # (settle after the landing before the next berm)
+		_straight(RUNOUT if not OLD_RUNIN else 6.0, ROAD)   # (settle after the landing before the next berm)
 		if _sp() > end_x and k >= 3:
 			break
 		if absf(_off()) > _corr - 40:
@@ -518,11 +527,38 @@ func _jump_pick(sh: float) -> void:
 		_attempt([[4, 0.0]])
 
 
+## a jump zone's heading: within +-FALL_SPREAD of the way the trail runs (and within the corridor's swing of the spine), the one
+## along which the land falls the most over 150 m, steadily (never rising > 0.6 m between 50 m samples); NAN when none falls at
+## least ~0.3 % on average (trail builders: jumps go on falling ground, a straight run in and out)
+const FALL_SPREAD := 0.7
+func _fall_heading() -> float:
+	var l0: float = _M.landform(_x, _z)
+	_M.spine_near(_x, _z)
+	var sd: float = _M.sp_dir
+	var best := NAN
+	var best_drop := 0.45   # m over 150 m
+	for k in range(-7, 8):
+		var hh := _h + k * FALL_SPREAD / 7.0
+		if absf(wrap_angle(hh - sd)) > 1.0: continue
+		var prev := l0
+		var ok := true
+		for d in [50.0, 100.0, 150.0]:
+			var ld: float = _M.landform(_x + cos(hh) * d, _z + sin(hh) * d)
+			if ld > prev + 0.6: ok = false; break
+			prev = ld
+		if ok and l0 - prev > best_drop:
+			best_drop = l0 - prev
+			best = hh
+	return best
+
+
 func _jump_line() -> void:
-	_turn_to(_rel((_r.next() - .5) * 14 * D2R), 40, ROAD)
-	_straight(10, ROAD)
-	_straight(80 + _r.next() * 50, JUMP)
-	_straight(8, ROAD)
+	var fh := NAN if OLD_RUNIN else _fall_heading()
+	if is_nan(fh): _turn_to(_rel((_r.next() - .5) * 14 * D2R), 40, ROAD)
+	else: _turn_to(fh, 40, ROAD)
+	_straight(10.0 if OLD_RUNIN else RUNIN, ROAD)
+	_straight((80 + _r.next() * 50) if OLD_RUNIN else (110 + _r.next() * 60), JUMP)
+	_straight(8.0 if OLD_RUNIN else RUNOUT, ROAD)
 
 
 func _build() -> void:
@@ -561,26 +597,34 @@ func _build() -> void:
 			_M.range_at(sh + 30.0)
 			var down: bool = _M.rg_down > 0.5
 			var climbing: bool = _M.hill_top(sh + 60.0) > _M.hill_top(sh) + 1.5
+			if not OLD_RUNIN:
+				climbing = is_nan(_fall_heading())
 			# the style's twist: fewer / more of the tight sections (a low twist turns some of them into plain road, a high one
 			# adds hairpin sections); the jump-line pick follows the jumps style. twist 1 / jumps 1 = the original picks.
 			var swap := tst < 1.0 and fposmod(pick2 * 977.0, 1.0) < (1.0 - tst) * 0.9
 			var jcut := 0.92 if jst == 1.0 else clampf(1.0 - 0.08 * jst, 0.81, 1.0)
 			var did_jump := false
+			# (a mountain's descent: technical sections mostly, and jump lines (bike parks put them on the descents) on ~22 %
+			# of it where the ground falls straight enough; it was 8 %)
+			var c_es := 0.8 if OLD_RUNIN else 0.7
+			var c_ch := jcut if OLD_RUNIN else 1.0 - 0.22 * clampf(jst, 0.0, 2.0)
 			if down:
 				if pick2 < 0.4:
 					_section([[6, end_x], [1, end_x], [2, end_x]], swap)
 				elif pick2 < 0.62:
 					_section([[1, end_x], [6, end_x], [2, end_x]], swap)
-				elif pick2 < 0.8:
+				elif pick2 < c_es:
 					_section([[2, end_x], [1, end_x], [3, end_x]], swap)
-				elif pick2 < jcut:
+				elif pick2 < c_ch or (climbing and not OLD_RUNIN):
 					_section([[3, end_x], [2, end_x], [1, end_x]], swap)
 				else:
 					_jump_pick(sh)
 					did_jump = true
 			else:
 				var q := _jump_remap(pick2, jst, 0.3)
-				if q < 0.3 and not climbing:
+				# (jump lines only where the land falls; where it does they are picked more often, so a world keeps about as many)
+				var jq := 0.3 if OLD_RUNIN else 0.45
+				if q < jq and not climbing:
 					_jump_pick(sh)
 					did_jump = true
 				elif q < 0.55:
@@ -596,7 +640,7 @@ func _build() -> void:
 			continue
 		if room > 230 and pick2 < 0.7 * clampf(jst, 0.0, 1.35):
 			_attempt([[0, maxf(50, room - 190)]])
-			_attempt([[4, 0.0]] if jst > 0.05 else [[5, 0.0]])
+			_attempt([[4, 0.0]] if jst > 0.05 and (OLD_RUNIN or not is_nan(_fall_heading())) else [[5, 0.0]])
 		elif room > 150 and pick2 < 0.85:
 			_attempt([[0, maxf(50, room - 110)]])
 			_attempt([[5, 0.0]])
@@ -607,6 +651,20 @@ func _build() -> void:
 
 
 # ---------------- derived data ----------------
+## A 0 / 1 mask made smooth without growing: shrunk by rad points (min), then averaged over rad, so it is still 0 on every
+## point that was 0 and ramps from 0 to 1 over 2 x rad points next to them.
+func _fade_mask(m: PackedFloat32Array, rad: int) -> PackedFloat32Array:
+	var lo := PackedFloat32Array(); lo.resize(n)
+	for i in n:
+		var v := 1.0
+		for k in range(maxi(0, i - rad), mini(n - 1, i + rad) + 1):
+			v = minf(v, m[k])
+		lo[i] = v
+	var out := _avg(lo, rad)
+	for i in n: out[i] = smooth(0.0, 1.0, out[i])
+	return out
+
+
 func _avg(src: PackedFloat32Array, rad: int) -> PackedFloat32Array:
 	var out := PackedFloat32Array()
 	out.resize(n)
@@ -785,10 +843,14 @@ static func _hash(k: int, salt: int) -> float:
 func _shape_profile() -> void:
 	var seed_i: int = _mark_seed % 9973
 	var roll := _sv("rolling")   # RouteStyle.rolling: how much the trail rolls (dips) and how many cliff drops
-	# rolling dips on the open trail (not in the mountain's steep section)
+	# rolling dips on the open trail (not in the mountain's steep section). Only on ROAD, but eased in / out over ~24 m
+	# where a road section meets another kind: switched per point it was a 0.5-1.8 m step in 2 m (a ledge across the trail)
+	var on_road := PackedFloat32Array(); on_road.resize(n)
+	for i in n: on_road[i] = 1.0 if KD[i] == ROAD else 0.0
+	if not OLD_LEDGES: on_road = _fade_mask(on_road, 6)
 	for i in n:
-		var w := smooth(_hill + 60, _hill + 360, _sps[i])
-		if w <= 0.0 or KD[i] != ROAD:
+		var w := smooth(_hill + 60, _hill + 360, _sps[i]) * on_road[i]
+		if w <= 0.0:
 			continue
 		var s := i * STEP
 		var amp := (0.3 + 1.5 * (0.5 + 0.5 * sin(s / 310.0 + seed_i))) * roll
@@ -799,16 +861,22 @@ func _shape_profile() -> void:
 		# from the start, so growing the trail never changes the part already laid out
 		var e0 := E.duplicate()
 		var ph := 0.0
+		var ok_k := PackedFloat32Array(); ok_k.resize(n)   # (not on jumps / rocks / start / finish: eased, not switched)
+		for i in n:
+			var k: int = KD[i]
+			ok_k[i] = 0.0 if (i < 10 or i >= n - 10 or k == JUMP or k == ROCKS or k == START or k == FINISH) else 1.0
+		if not OLD_LEDGES: ok_k = _fade_mask(ok_k, 6)
 		for i in n:
 			var s := i * STEP
 			ph += TAU * STEP / (35.0 + 10.0 * sin(s / 170.0 + seed_i * 0.37))
-			if i < 10 or i >= n - 10 or KD[i] == JUMP or KD[i] == ROCKS or KD[i] == START or KD[i] == FINISH:
+			if ok_k[i] <= 0.0:
 				continue
 			var gr := (e0[i + 10] - e0[i - 10]) / (20.0 * STEP)
-			var w := smooth(0.03, 0.07, -gr)
+			var w := smooth(0.03, 0.07, -gr) * ok_k[i]
 			if w > 0.0:
 				E[i] += w * (0.45 + 0.15 * sin(s / 230.0 + seed_i)) * sin(ph)
 	drops = []
+	DL = PackedFloat32Array(); DL.resize(n)
 	var last_end := 0
 	var SLOT := 80
 	var k := 1
@@ -851,6 +919,7 @@ func _shape_profile() -> void:
 				if OLD_DROPS: lift = hh * (1.0 - smooth(0.0, 1.0, float(q - (a + hold)) / dl))
 				else: lift = hh - _drop_at(prof, (q - (a + hold)) * STEP)
 			E[q] += lift
+			DL[q] = lift
 		drops.append([a - ramp, e])
 		last_end = e
 

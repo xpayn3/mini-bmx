@@ -483,6 +483,57 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   same (drops apart). Demo AI 120 s on 4242 / 5: no crash, 135-145 fps. `BMX_OLD_ROUTE=1` = the old straight corridor.
   Map: `-s res://tools/trail_map.gd -- out.png [seed] [course m] [m/px]`. Tests `BMX_TRAIL_FEAT=s<m>` (was x<m>) = that
   far along the trail. Not changed yet: `biome_probe`, `land_probe`, `route_grade_probe` still sample round the old zc.
+- **No ledges between sections, the ridden line worn smooth (2026-11-26, user: "little steps / ledges on the road ruin our flow",
+  "the perfect line must be smooth, the mesh is wavy in banks", "more randomness in the bumpiness and the groove depth")**.
+  (1) `TrailCourse._shape_profile`: the rolling dips (ROAD only, up to +-1.8 m) and grade reversals (+-0.6 m, not on jump /
+  rocks / start / finish) were switched per 2 m point by section kind: a 0.5-1 m step wherever the kind changed. Now their
+  weight is `_fade_mask` (0 / 1 mask shrunk then averaged over 6 points: still 0 on every excluded point, ramps over ~24 m).
+  `BMX_OLD_LEDGES=1` = before. Probe `-s res://tools/road_step_probe.gd -- [seed] [m]` (`STEP` = slope change > 0.25 in
+  0.5 m along the centreline, `BANKUP` = trail > 3 m above the land 14-28 m out on both sides, `ROADSUM`): off-jump kinks on
+  seeds 4242 / 5 / 12: 3 / 9 / 2 -> 0 (what's left is jump lips). (2) `base()` (GD + C#, physics too): the 1.5 / 3.4 m trail
+  bumps are x (1 - 0.8 wear) (`wear` = 1 within 0.35 m of the ridden line, 0 by 1.5 m; they used to be BIGGER on the line), x a
+  60 m noise `rf` 0.25..1.75 along the route; the worn groove's depth 1.5..6.5 cm by a 95 m noise (was 3.5 cm everywhere).
+  `micro_detail` (drawn mesh): grain + bank rills x (1 - 0.85 / 0.9 wear) x rf, potholes x (1 - 0.6 wear). Off the line
+  unchanged. `BMX_OLD_WEAR=1` = before. Probe `-s res://tools/wear_probe.gd -- [seed] [m]` (bumps along the line vs 1.2 m beside
+  it, jumps left out; ~4.5 mm of it is the probe's chord over curved berms, not bumps): line 6.1 -> 4.9 mm (4242), 6.0 -> 4.5
+  (5), the smoothest 10 % of 50 m stretches 1.3 -> 0.9 mm. terrain_cs_cmp heights EXACT, trail_grow_probe PASS, demo AI no
+  crash. Tried and dropped: Catmull-Rom between the 2 m course points (smooths the whole trail, user: only the line; no gain).
+  **Raised road fixed (same day, user: "a road 10 m higher than the land with a fall each side")**: `road_step_probe`
+  BANKUP showed every raised stretch was a ridge-and-cliff drop (`TrailCourse.drops`): only the trail was lifted 3-6 m, the
+  land beside stayed (a causeway; its side drawn as a grey rock wall). Elsewhere the trail sits on the land (seed 4242 0.1 %).
+  Now `TrailCourse.DL` = each point's lift, the field keeps `cDL` + `c_drops` (first / last point + bbox per drop, built in
+  `_bind_course`, copied to C#), and `base()` adds `_spur(x, z)` before the bench: the nearest drop point's lift x (1 -
+  sm(3, SPUR_R 36 m x (1 +- 0.25 noise), distance)): the land rises into a spur you ride along and drop off the end of.
+  BANKUP 2.7-4.2 % -> 0 on seeds 5 / 12 / 2. GD + C# identical (`-s res://tools/spur_cmp.gd -- seed`: 46k points over the
+  spurs, 0 mismatches), terrain_cs_cmp heights EXACT, trail_grow / rope_find PASS, wood walls=0. `BMX_OLD_SPUR=1` = before.
+  Not done: the general cut / fill cap (the trail's 120 m smoothing has no limit, but measured it doesn't leave the land >3 m
+  outside drops), a cut through a crest (trench) isn't measured. Seen: seed 12 s ~2230-2300 is a jump line climbing ~8 m out
+  of a lake-level flat; the demo AI crawls up it at ~5 m/s and with the new ground sometimes stops on it (chaotic, the
+  ground there is the same to 2 cm): a layout issue (uphill jump lines), not fixed. `tools/profile_probe.gd -- seed s0 s1 ds`
+  prints the centreline ground.
+- **Jumps only where builders would put them (2026-11-26, user: "no jumps uphill, check what other rules riders have when
+  laying tracks")**. `TerrainField._build_route` skips a built jump slot (it slides on 10 m and tries again) unless: the trail
+  from 15 m before the lip to the landing's end climbs <= `UPHILL_MAX` 1 %, riders arrive at >= `SLOW_K` 0.85 x the smallest
+  size's design speed, no bend tighter than `JUMP_STRAIGHT_R` 60 m in the `RUNIN_T` 1.5 s before the lip or the `RUNOUT_T` 1 s
+  after the landing, no crest over the sight line in the 25 m before the lip (`BLIND_H` 0.5 m) (`AIR_TYPES`, `_jump_site_why`,
+  `REJECTS` counts them; `BMX_REJ_PRINT=1` lists uphill skips). Layout (`TrailCourse`): `RUNIN` 20 m / `RUNOUT` 16 m straight
+  round jump runs (were 4-10 / 6-8), jump lines not laid where `_land_rises_ahead()` (land 120 / 240 m along the heading climbs
+  > 0.5 %) in both pickers, past the mountain a jump line is picked a bit more often on falling land (0.45, was 0.3), road
+  jump slots tried every 45-105 m (were 70-160). `BMX_OLD_UPHILL=1` + `BMX_OLD_RUNIN=1` = before. Every world's route features
+  change. Measured, 5 seeds (`-s res://tools/uphill_jump_probe.gd`, `-s res://tools/trail_rules_probe.gd`): before 44 jumps, 14
+  of them on climbs (up to 14 %, riders arriving at 10 km/h), 4 with a bend in the run-in, 6 landing into a bend, 5 blind lips;
+  **Jump zones** (same day): `TrailCourse._fall_heading()` = of headings within +-`FALL_SPREAD` 0.7 rad (and 1 rad of the spine)
+  the one the land falls most along over 150 m (never rising > 0.6 m between 50 m samples, >= 0.45 m in all; NAN = none);
+  `_jump_line` turns onto it and runs 110-170 m (was 80-130); both pickers lay a jump line only when one exists; on a
+  mountain's descent jump lines are ~22 % of the sections (were 8 %); short jump runs (< 120 m: flow trails) start on the
+  release beat (rollers left no room). Skinnies only where riders arrive under `SKINNY_VMAX` 8 m/s and `SKINNY_GAP` 25 m after
+  the last feature (one 10 m after a kicker's landing: the demo AI hit it, seed 31). Now 30 jumps on 5 seeds, every rule met
+  (seeds 5 / 12 climb the second mountain most of their first 4.5 km: few jumps, correctly). Demo AI seeds 31 / 4242 / 2: no
+  crash. The crash note in the session log now ends `at=x,y,z`. Probes: `jumprun_probe.gd -- seed` (each jump run: grades,
+  what was built), `spot_probe.gd -- seed x z` (what is on the trail near a spot). Other rules measured, not done: hard
+  braking zones (~1.2 per km, e.g. 48 -> 10 km/h in 30 m before hairpin stacks), ~17 % of the trail steeper than 8 % and than
+  half the hillside (IMBA half rule), ~450 m in 20 km steeper than 15 % over 50 m, no outslope on straights, trail can run at
+  lake level (wet flats), no clear zone checked on the outside of fast bends / landings.
 - **Flow rules in the trail's layout (2026-11-25, Phase B, `trail_course.gd`)**. While laying out, the turtle keeps an
   estimate of a rider's speed (`_v`: the land's fall in, rolling + air drag out, pedalling when slow, capped by every bend
   at `A_BEND` 9.4 m/s^2; `_emit` reads `landform` per point). (1) Road bends never tighter than v^2 / A_BEND (a tight one
@@ -824,6 +875,24 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   30 frames, `GRASSAB off_ms= on_ms= diff_ms=`): camera down in the grass +0.25..0.34 ms GPU, riding view ~0 (measured with
   other programs on the GPU). Not done: flowers / weeds from the other scans, the mid ring (too small to show).
 
+- **Trees by nature's rules (2026-11-26, user: "trees and bushes seem random, make rules like other world builders, follow
+  nature's rules, if we miss a vegetation type make it"; research `docs/research/vegetation.md`, from recall, links unchecked)**.
+  `TerrainChunkBuilder._trees` (`BMX_OLD_TREES=1` = the old 100 random throws, `_trees_old`): one candidate per `ECO_CELL`
+  3.6 m world cell, jittered `ECO_JIT` 0.34 (natural minimum spacing, no chunk seams; Horizon Zero Dawn-style density
+  placement; own `WorldRng` per cell), kept with probability (`_eco_tree`): stands + clearings (38 m forest noise + 115 m
+  grove noise), slope (thinning 25 -> 38 deg; on cliffs a 3 % stunted tree), hollows (`_eco_land`: height vs the ring 12 m
+  round: wetter, denser, broadleaf) vs ridges (sparser, shorter, wind-leaning pines), shaded north-facing slopes (denser,
+  more pines), the shore (`_shore`: < 3 m above the water AND water within 16 m: willow / alder `kind 3`, pale lobed crowns),
+  biome as before, x `ECO_K` 0.47 (= the old count). Stand edges grow smaller trees; mature trees seed 1-3 saplings 3-8 m
+  round (30 %); the cold biome stunts (to 0.4x) and leans them (krummholz); forests have 3 % standing dead trees. `_put_tree`
+  = one tree of a kind (0 pine, 1 broadleaf, 2 savanna, 3 willow). `_nature` adds: reeds with cattail heads (`spike` mesh,
+  `CATTAIL` browns) at the water's edge, willow-green shrubs a little higher, alpine heather / dwarf shrub mats (`bush1`,
+  `HEATHER`), a shrub belt where stands thin into meadow. Measured (`deco_probe.gd`, which now picks its chunks before the
+  ride test: it used to measure different chunks whenever the trees changed): trees/ha 79 -> 80, trunks < 1.5 m apart
+  19 % -> 9 %, < 2.5 m 44 -> 25 %, free ride in forest 31 -> 35 m. Chunk build 101 -> 104 ms (`tools/chunk_cost.gd`).
+  LESSON: `f.q_*` (trail lookup state) is overwritten by any height / land read: take a trail verdict right after `trail()`
+  (the forest clearance read late let a trunk 1 m off a singletrack: BONK on seed 12). Seen from above (seeds 4242, 12);
+  NOT seen: cattails, heather, willows on a green-biome shore, the treeline krummholz.
 - **Leaf-card bushes (2026-11-25, user: "could we add Megascans bushes, or too heavy?" -> prototype from a procedural texture)**: bushes are no
   longer the lumpy blob. `world/card_bush.gd` (`CardBush`): ~30-46 upright quads (each folded in the middle, turned at random about the vertical, front
   facing away from the bush's middle: tilted cards looked wrong, user) on a dome, each with a leaf-cluster texture drawn in code (`texture("leaf" | "dry")`,

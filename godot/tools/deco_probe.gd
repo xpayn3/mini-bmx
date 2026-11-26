@@ -19,8 +19,10 @@ func _init() -> void:
 		tg.use_cs = false
 		tg.set_seed(sd)
 		var rng := RandomNumberGenerator.new(); rng.seed = 991 + sd
+		var spots := []   # (chosen first: the free-ride test below draws from rng too, so the chunks used to depend on the trees)
+		for bi in blocks: spots.append(Vector2i(rng.randi_range(4, 40), rng.randi_range(-12, 12)))
 		for bi in blocks:
-			var ccx := rng.randi_range(4, 40); var ccz := rng.randi_range(-12, 12)
+			var ccx: int = spots[bi].x; var ccz: int = spots[bi].y
 			var trees := []; var rocks := []; var mid := []
 			for dz in [-1, 0, 1]:
 				for dx in [-1, 0, 1]:

@@ -3560,7 +3560,7 @@ func _crash(reason: String) -> void:
 		crash_pending = reason
 		# (into the session log, so an F8 / crash report says why: v, climb, pitch vs the ground, which wheels were down,
 		# the legs, the body stick)
-		CrashLog.note("CRASH %s v=%.1f vy=%.1f pitch=%.2f ground=%.2f air=%s front_air=%s rear_air=%s legs=%.2f stick=%.2f man=%.2f armed=%s pw=%.2f" % [reason, v, vy, pitch, _g_pitch, air, front_air, rear_air, body_y - y, body_in_s, man_a, _man_armed, _man_pw])
+		CrashLog.note("CRASH %s v=%.1f vy=%.1f pitch=%.2f ground=%.2f air=%s front_air=%s rear_air=%s legs=%.2f stick=%.2f man=%.2f armed=%s pw=%.2f at=%.1f,%.1f,%.1f" % [reason, v, vy, pitch, _g_pitch, air, front_air, rear_air, body_y - y, body_in_s, man_a, _man_armed, _man_pw, x, y, z])
 		if prof != null: _prof("crash_note", _ct)
 
 ## once a step, after every _danger: the biggest meter (risk) and a SAVED! when a real scare was fought off

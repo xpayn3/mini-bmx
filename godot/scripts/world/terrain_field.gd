@@ -175,6 +175,8 @@ var cKAP := PackedFloat32Array()
 var cW := PackedFloat32Array()
 var cBT := PackedFloat32Array()
 var cE := PackedFloat32Array()
+var cDL := PackedFloat32Array()      # (course.DL) the drops' ridge lift per point
+var c_drops := PackedFloat64Array()  # per drop: first, last point, bbox min x, min z, max x, max z (+ SPUR_R)
 var cRD := PackedFloat32Array()
 var cRK := PackedFloat32Array()
 var cLN := PackedFloat32Array()    # the racing line (TrailCourse.LN)
@@ -387,6 +389,7 @@ func adopt_course(g: TerrainField) -> void:
 	_bind_spine()
 	cX = g.cX; cZ = g.cZ; cKD = g.cKD; cTX = g.cTX; cTZ = g.cTZ; cKAP = g.cKAP; cW = g.cW; cBT = g.cBT; cE = g.cE
 	cRD = g.cRD; cRK = g.cRK; cLN = g.cLN; cRO = g.cRO; cROS = g.cROS
+	cDL = g.cDL; c_drops = g.c_drops
 	c_gx0 = g.c_gx0; c_gz0 = g.c_gz0; c_gnx = g.c_gnx; c_gnz = g.c_gnz; c_start = g.c_start; c_items = g.c_items
 	c_seg = g.c_seg; c_run_start = g.c_run_start; c_runs = g.c_runs
 	c_far = g.c_far; c_far_x0 = g.c_far_x0; c_far_z0 = g.c_far_z0; c_far_nx = g.c_far_nx; c_far_nz = g.c_far_nz
@@ -430,6 +433,17 @@ func _bind_course(private: bool = false) -> void:
 	var c := course
 	cX = c.X; cZ = c.Z; cKD = c.KD; cTX = c.TX; cTZ = c.TZ; cKAP = c.KAP; cW = c.W; cBT = c.BT; cE = c.E
 	cRD = c.RD; cRK = c.RK; cLN = c.LN; cRO = c.RO; cROS = c.ROS
+	cDL = c.DL
+	if cDL.size() != c.n:
+		cDL = PackedFloat32Array(); cDL.resize(c.n)
+	c_drops = PackedFloat64Array()
+	for dr in c.drops:
+		var a0: int = dr[0]; var a1: int = mini(dr[1], c.n - 1)
+		var mnx := INF; var mnz := INF; var mxx := -INF; var mxz := -INF
+		for i in range(a0, a1 + 1):
+			mnx = minf(mnx, cX[i]); mnz = minf(mnz, cZ[i]); mxx = maxf(mxx, cX[i]); mxz = maxf(mxz, cZ[i])
+		var r := SPUR_R * 1.25 + 1.0
+		c_drops.append_array([a0, a1, mnx - r, mnz - r, mxx + r, mxz + r])
 	c_gx0 = c.gx0; c_gz0 = c.gz0; c_gnx = c.gnx; c_gnz = c.gnz; c_start = c.cell_start; c_items = c.cell_items
 	c_seg = PackedFloat64Array()
 	c_seg.resize(maxi(0, c.n - 1) * 6)
@@ -468,6 +482,7 @@ func _bind_course(private: bool = false) -> void:
 		cX = cX.duplicate(); cZ = cZ.duplicate(); cKD = cKD.duplicate(); cTX = cTX.duplicate(); cTZ = cTZ.duplicate()
 		cKAP = cKAP.duplicate(); cW = cW.duplicate(); cBT = cBT.duplicate(); cE = cE.duplicate(); cRD = cRD.duplicate()
 		cRK = cRK.duplicate(); cLN = cLN.duplicate(); cRO = cRO.duplicate(); cROS = cROS.duplicate(); c_start = c_start.duplicate(); c_items = c_items.duplicate()
+		cDL = cDL.duplicate(); c_drops = c_drops.duplicate()
 	_qp.resize(15)
 	_qp[0] = NAN; _qp[1] = NAN; _qp[2] = INF
 
@@ -907,6 +922,51 @@ func line_off(x: float, z: float) -> float:
 	return wob * 1.5
 
 
+## A drop's ridge is part of the land: the trail was lifted onto it (TrailCourse DL, up to 3-6 m, 12-22 m cliffs), and the land
+## round it is lifted by the same amount near the trail, falling away over SPUR_R (ragged by a noise) to the sides: a spur
+## you ride along and drop off the end of. Before, only the trail was lifted: a causeway with a fall on each side.
+const SPUR_R := 36.0
+static var OLD_SPUR := OS.get_environment("BMX_OLD_SPUR") != ""
+
+func _spur(x: float, z: float) -> float:
+	var best := 0.0
+	var k := 0
+	while k < c_drops.size():
+		if x >= c_drops[k + 2] and x <= c_drops[k + 4] and z >= c_drops[k + 3] and z <= c_drops[k + 5]:
+			var bd := INF
+			var bl := 0.0
+			for i in range(int(c_drops[k]), int(c_drops[k + 1])):
+				var ax := cX[i]
+				var az := cZ[i]
+				var bx := cX[i + 1] - ax
+				var bz := cZ[i + 1] - az
+				var l2 := bx * bx + bz * bz
+				var t := 0.0
+				if l2 > 0.0:
+					t = ((x - ax) * bx + (z - az) * bz) / l2
+					t = 0.0 if t < 0.0 else (1.0 if t > 1.0 else t)
+				var ex := x - ax - bx * t
+				var ez := z - az - bz * t
+				var d2 := ex * ex + ez * ez
+				if d2 < bd:
+					bd = d2
+					bl = cDL[i] + (cDL[i + 1] - cDL[i]) * t
+			if bl > 0.0:
+				var r := SPUR_R * (1.0 + 0.25 * noise((x + 13.7) * I23, (z - 5.1) * I23))
+				var v := bl * (1.0 - sm(3.0, r, sqrt(bd)))
+				if v > best:
+					best = v
+		k += 6
+	return best
+
+
+## metres from the ridden line across the trail
+func line_dist(x: float, z: float) -> float:
+	var off := line_off(x, z)
+	var a := across(x, z)
+	return absf(a - off)
+
+
 func line(x: float, z: float) -> float:
 	var off := line_off(x, z)
 	var a := across(x, z)
@@ -936,6 +996,8 @@ func berm_shape(o: float, tn: float) -> float:
 ## noises (`berm_style`), so a berm differs from the next: tilted .. curved, rim at the trail's own width + 0 .. 0.8 m, lip or none,
 ## scoop or none. Only + * / - sm() here (no exp / log): C# mirrors it exactly. BMX_OLD_BERM=1 = the old shape.
 static var OLD_BERM := OS.get_environment("BMX_OLD_BERM") != ""
+## the trail's bumps the same across it and along the route, the line bumpier (before 2026-11-26). BMX_OLD_WEAR=1
+static var OLD_WEAR := OS.get_environment("BMX_OLD_WEAR") != ""
 var bs_c := 0.0
 var bs_F := 2.7
 var bs_cw := 0.5
@@ -1324,6 +1386,8 @@ func base(x: float, z: float) -> float:
 			var cz := z - sd * gz / g
 			var d := (landform(cx, cz) - h) * bench
 			h += d / (1.0 + absf(d) / 1.1)
+	if not OLD_SPUR and c_drops.size() > 0:
+		h += _spur(x, z)
 	query(x, z)
 	if q_mask > 0.0:
 		h += (q_bench - h) * q_mask
@@ -1335,8 +1399,19 @@ func base(x: float, z: float) -> float:
 	h += noise((x - 5.3) * I8, (z + 9.1) * I8) * 0.5 * maxf(sm(2.5, 7, dist), sm(0.15, 0.25, ap)) * (1.0 - t)
 	h -= 0.15 * t
 	if t > 0.0:
-		var ln := line(x, z)
-		h += t * (noise((x + 7.1) * I1_5, (z + 3.3) * I1_5) * 0.028 + noise((x - 2.9) * I3_4, (z + 8.4) * I3_4) * 0.04 * (0.6 + 0.6 * ln) - 0.035 * ln)
+		if OLD_WEAR:
+			var ln := line(x, z)
+			h += t * (noise((x + 7.1) * I1_5, (z + 3.3) * I1_5) * 0.028 + noise((x - 2.9) * I3_4, (z + 8.4) * I3_4) * 0.04 * (0.6 + 0.6 * ln) - 0.035 * ln)
+		else:
+			# the ridden line is worn smooth (bumps mostly gone on it, more off it and at the edges), the bumpiness and the worn
+			# groove's depth change along the route (slow noises: some stretches rough, some smooth, the groove deeper or shallower)
+			var ld := line_dist(x, z)
+			var ln := 1.0 - sm(0.25, 0.7, ld)
+			var wear := 1.0 - sm(0.35, 1.5, ld)
+			var rf := 0.25 + 1.5 * sm(-0.35, 0.45, noise((x + 31.7) * I60, (z - 12.9) * I60))
+			var gk := 0.015 + 0.05 * sm(-0.4, 0.4, noise((x - 17.3) * I95, (z + 41.1) * I95))
+			var bump := noise((x + 7.1) * I1_5, (z + 3.3) * I1_5) * 0.028 + noise((x - 2.9) * I3_4, (z + 8.4) * I3_4) * 0.04
+			h += t * (bump * rf * (1.0 - 0.8 * wear) - gk * (0.6 * ln + 0.4 * wear))
 	var dry := WATER + 0.5
 	if h < dry:
 		query(x, z)
@@ -1475,6 +1550,56 @@ func make_feat(x: float, z: float, dx: float, dz: float, type: String, b0: float
 ## road features after them are laid out exactly as before
 const RHYTHM := [["rhythm", "flow", "rhythm"], ["kicker", "table", "kicker", "tableLine", "kicker", "flow", "woodKicker", "woodDrop"], ["bridge", "skinny", ""]]   # (wood drop + north-shore skinny: 2026-11-25)   # (more kickers: 2026-11-23, user)
 static var OLD_RHYTHM := OS.get_environment("BMX_OLD_RHYTHM") != ""
+## built jumps only on level / falling trail (grade from 15 m before the lip to the landing's end <= UPHILL_MAX), where riders
+## arrive at >= SLOW_K x the smallest jump's design speed, with a straight run-in / run-out and no blind lip (_jump_site_ok).
+## BMX_OLD_UPHILL=1 = anywhere (before 2026-11-26)
+const AIR_TYPES := ["table", "kicker", "tableLine", "woodKicker", "woodDrop", "double", "doubleLine", "flow"]
+const UPHILL_MAX := 0.01
+const SLOW_K := 0.85
+const SKINNY_VMAX := 8.0   # m/s riders may arrive at a north-shore skinny
+const SKINNY_GAP := 25.0   # m clear after the feature before it
+static var OLD_UPHILL := OS.get_environment("BMX_OLD_UPHILL") != ""
+
+
+## more builders' rules for a jump at s (len long, riders arriving at v): a straight run-in (no bend tighter than JUMP_STRAIGHT_R in
+## the RUNIN_T s before the lip), a straight run-out (none in the RUNOUT_T s after the landing: never land into a turn) and no
+## blind lip (the trail in the 25 m before it never rises over the sight line from 25 m back to the lip by more than BLIND_H)
+const JUMP_STRAIGHT_R := 60.0
+const RUNIN_T := 1.5
+const RUNOUT_T := 1.0
+const BLIND_H := 0.5
+static var REJECTS := {}
+func _hill_s() -> float: return float(course.get("_hill")) if course.get("_hill") != null else 0.0   # (probes: why jump slots were skipped)
+func _jump_site_ok(s: float, len: float, v: float) -> bool:
+	return _jump_site_why(s, len, v) == ""
+
+
+func _jump_site_why(s: float, len: float, v: float) -> String:
+	var C := course
+	var kmax := 1.0 / JUMP_STRAIGHT_R
+	var a := maxf(0.0, s - v * RUNIN_T)
+	while a <= s:
+		if absf(C.KAP[clampi(int(a / CSTEP), 0, C.n - 1)]) > kmax: return "runin"
+		a += CSTEP
+	a = s + len
+	while a <= s + len + v * RUNOUT_T:
+		if absf(C.KAP[clampi(int(a / CSTEP), 0, C.n - 1)]) > kmax: return "runout"
+		a += CSTEP
+	var e0 := _course_e(s - 25.0)
+	var e1 := _course_e(s)
+	for k in range(1, 25):
+		if _course_e(s - 25.0 + k) - (e0 + (e1 - e0) * k / 25.0) > BLIND_H: return "blind"
+	return ""
+
+
+## the trail's height at arc length s (course.E, linear between points)
+func _course_e(s: float) -> float:
+	var n := course.n
+	var f := clampf(s / CSTEP, 0.0, n - 1.001)
+	var i := floori(f)
+	return cE[i] + (cE[i + 1] - cE[i]) * (f - i)
+
+
 func _build_route() -> void:
 	var C := course
 	var r := WorldRng.new(seed_value * 104729 + 7)
@@ -1492,6 +1617,8 @@ func _build_route() -> void:
 		if not jmp:
 			s += r.next() * 60
 		var beat := 0   # jump lines in rhythm (Smith et al. 2009): build (rollers) -> release, release -> rest, again
+		if jmp and not OLD_UPHILL and (i1 - i0) * CSTEP < 120.0:
+			beat = 1   # (a short run, e.g. a flow trail's between two berms: the jump first, rollers have no room before it)
 		var rr: WorldRng = WorldRng.new(seed_value * 15485863 + i0 * 7919 + 3) if jmp and not OLD_RHYTHM else r
 		while s < s_end:
 			var in_drop := false
@@ -1505,6 +1632,11 @@ func _build_route() -> void:
 			var types: Array = TrailFeatures.ROUTE_TYPES if jmp else ["rhythm", "kicker", "table", "kicker"]
 			if jmp and not OLD_RHYTHM: types = RHYTHM[beat % RHYTHM.size()]
 			var type: String = types[int(rr.next() * types.size())]
+			if type == "skinny" and not OLD_UPHILL:
+				# (a skinny is technical: riders must arrive slow with room to line up, never straight off a landing)
+				var vs: float = C.VA[clampi(int((s + 6.0) / CSTEP), 0, C.n - 1)] * RIDER_K
+				var since: float = s - ((list[list.size() - 1].s + list[list.size() - 1].len) if list.size() > 0 else -INF)
+				if vs > SKINNY_VMAX or since < SKINNY_GAP: type = ""
 			if type == "":   # a rest beat on plain trail
 				s += 10.0 + rr.next() * 6.0; beat += 1
 				continue
@@ -1528,6 +1660,22 @@ func _build_route() -> void:
 			var len: float = (sized[type][size] if size < 3 else profiles[type]).length
 			if s + len > s_end:
 				break
+			# trail builders' rule: never a jump up a climb (no speed at the lip, a landing higher than the take-off) or where
+			# riders can't carry the speed even the smallest size needs. The jump waits for ground that suits it
+			if not OLD_UPHILL and AIR_TYPES.has(type):
+				var e0 := _course_e(s - 15.0)
+				var e1 := _course_e(s + len)
+				var vin: float = C.VA[clampi(int((s + 12.0) / CSTEP), 0, C.n - 1)] * RIDER_K
+				var why := ""
+				if (e1 - e0) / (len + 15.0) > UPHILL_MAX:
+					why = "uphill"
+					if OS.get_environment("BMX_REJ_PRINT") != "": print("REJ uphill seed=%d s=%.0f grade=%.1f%% %s mtn=%s" % [seed_value, s, 100.0 * (e1 - e0) / (len + 15.0), type, str(s < _hill_s())])
+				elif vin < float(TrailJumpSizes.V[0]) * SLOW_K: why = "slow"
+				else: why = _jump_site_why(s, len, vin)
+				if why != "":
+					REJECTS[why] = int(REJECTS.get(why, 0)) + 1
+					s += 10.0
+					continue
 			var p0 := C.at(s)
 			var p1 := C.at(s + len)
 			var x: float = p0[0]
@@ -1556,7 +1704,9 @@ func _build_route() -> void:
 				s += len + gap
 				beat += 1
 			else:
-				s += len + ((5 + rv * 8) if jmp else (70 + rv * 90) / jf)
+				# (road: a slot every 70-160 m; with the site rules skipping the bad ones they are tried every 45-105 m, so a
+				# world keeps about as many jumps, just on ground that suits them)
+				s += len + ((5 + rv * 8) if jmp else ((70 + rv * 90) if OLD_UPHILL else (45 + rv * 60)) / jf)
 	route_feats = list
 	_index_canyons()
 	_build_alts()

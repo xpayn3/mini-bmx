@@ -526,6 +526,7 @@ internal sealed class TfShared
 	public double grade_k = 1.0;
 	public double biome_dry, biome_rug;
 	public double[] cX, cZ, cTX, cTZ, cKAP, cW, cBT, cE, cRD, cRK, cLN, cRO, cROS;
+	public double[] cDL, c_drops;
 	public int[] cKD;
 	public long c_gx0, c_gz0, c_gnx, c_gnz;
 	public double[] c_seg;
@@ -625,6 +626,7 @@ public partial class TerrainFieldCs : RefCounted
 	private double biome_dry, biome_rug;   // RouteStyle.biome (TerrainField.biome_dry / biome_rug)
 	private double grade_k = 1.0;   // RouteStyle.grade (TerrainField.grade_k)
 	private double[] cX, cZ, cTX, cTZ, cKAP, cW, cBT, cE, cRD, cRK, cLN, cRO, cROS;
+	private double[] cDL, c_drops;
 	private int[] cKD;
 	private long c_gx0, c_gz0, c_gnx, c_gnz;
 	private double[] c_seg;
@@ -776,6 +778,8 @@ public partial class TerrainFieldCs : RefCounted
 		sh.cLN = F32(f.Get("cLN"));
 		sh.cRO = F32(f.Get("cRO"));
 		sh.cROS = F32(f.Get("cROS"));
+		sh.cDL = F32(f.Get("cDL"));
+		sh.c_drops = F64(f.Get("c_drops"));
 		sh.c_gx0 = f.Get("c_gx0").AsInt64();
 		sh.c_gz0 = f.Get("c_gz0").AsInt64();
 		sh.c_gnx = f.Get("c_gnx").AsInt64();
@@ -820,6 +824,7 @@ public partial class TerrainFieldCs : RefCounted
 		pitches = sh.pitches; pitch_share = sh.pitch_share; grade_k = sh.grade_k; biome_dry = sh.biome_dry; biome_rug = sh.biome_rug;
 		cX = sh.cX; cZ = sh.cZ; cKD = sh.cKD; cTX = sh.cTX; cTZ = sh.cTZ; cKAP = sh.cKAP; cW = sh.cW; cBT = sh.cBT;
 		cE = sh.cE; cRD = sh.cRD; cRK = sh.cRK; cLN = sh.cLN; cRO = sh.cRO; cROS = sh.cROS;
+		cDL = sh.cDL; c_drops = sh.c_drops;
 		c_gx0 = sh.c_gx0; c_gz0 = sh.c_gz0; c_gnx = sh.c_gnx; c_gnz = sh.c_gnz;
 		c_seg = sh.c_seg; c_run_start = sh.c_run_start; c_runs = sh.c_runs;
 		c_far = sh.c_far; c_far_x0 = sh.c_far_x0; c_far_z0 = sh.c_far_z0; c_far_nx = sh.c_far_nx; c_far_nz = sh.c_far_nz;
@@ -1334,6 +1339,61 @@ public partial class TerrainFieldCs : RefCounted
 		return wob * 1.5;
 	}
 
+	/// (TerrainField._spur: the land lifted round a drop's ridge, same operation order)
+	private const double SPUR_R = 36.0;
+	private static readonly bool OLD_SPUR = System.Environment.GetEnvironmentVariable("BMX_OLD_SPUR") is { Length: > 0 };
+
+	private double _spur(double x, double z)
+	{
+		double best = 0.0;
+		for (long k = 0; k < c_drops.Length; k += 6)
+		{
+			if (x >= c_drops[k + 2] && x <= c_drops[k + 4] && z >= c_drops[k + 3] && z <= c_drops[k + 5])
+			{
+				double bd = double.PositiveInfinity;
+				double bl = 0.0;
+				long i1 = (long)c_drops[k + 1];
+				for (long i = (long)c_drops[k]; i < i1; i++)
+				{
+					double ax = cX[i];
+					double az = cZ[i];
+					double bx = cX[i + 1] - ax;
+					double bz = cZ[i + 1] - az;
+					double l2 = bx * bx + bz * bz;
+					double t = 0.0;
+					if (l2 > 0.0)
+					{
+						t = ((x - ax) * bx + (z - az) * bz) / l2;
+						t = t < 0.0 ? 0.0 : (t > 1.0 ? 1.0 : t);
+					}
+					double ex = x - ax - bx * t;
+					double ez = z - az - bz * t;
+					double d2 = ex * ex + ez * ez;
+					if (d2 < bd)
+					{
+						bd = d2;
+						bl = cDL[i] + (cDL[i + 1] - cDL[i]) * t;
+					}
+				}
+				if (bl > 0.0)
+				{
+					double r = SPUR_R * (1.0 + 0.25 * noise((x + 13.7) * I23, (z - 5.1) * I23));
+					double v = bl * (1.0 - sm(3.0, r, Math.Sqrt(bd)));
+					if (v > best)
+						best = v;
+				}
+			}
+		}
+		return best;
+	}
+
+	public double line_dist(double x, double z)
+	{
+		double off = line_off(x, z);
+		double a = across(x, z);
+		return Math.Abs(a - off);
+	}
+
 	public double line(double x, double z)
 	{
 		double off = line_off(x, z);
@@ -1355,6 +1415,7 @@ public partial class TerrainFieldCs : RefCounted
 	}
 
 	private static readonly bool OLD_BERM = System.Environment.GetEnvironmentVariable("BMX_OLD_BERM") is { Length: > 0 };
+	private static readonly bool OLD_WEAR = System.Environment.GetEnvironmentVariable("BMX_OLD_WEAR") is { Length: > 0 };
 	private double bs_c, bs_F = 2.7, bs_cw = 0.5, bs_lip, bs_scoop;
 
 	/// terrain_field.gd berm_style / berm_shape2 (berm v2)
@@ -1729,6 +1790,8 @@ public partial class TerrainFieldCs : RefCounted
 				h += d / (1.0 + Math.Abs(d) / 1.1);
 			}
 		}
+		if (!OLD_SPUR && c_drops != null && c_drops.Length > 0)
+			h += _spur(x, z);
 		query(x, z);
 		if (q_mask > 0.0)
 			h += (q_bench - h) * q_mask;
@@ -1745,8 +1808,22 @@ public partial class TerrainFieldCs : RefCounted
 		h -= 0.15 * t;
 		if (t > 0.0)
 		{
-			double ln = line(x, z);
-			h += t * (noise((x + 7.1) * I1_5, (z + 3.3) * I1_5) * 0.028 + noise((x - 2.9) * I3_4, (z + 8.4) * I3_4) * 0.04 * (0.6 + 0.6 * ln) - 0.035 * ln);
+			if (OLD_WEAR)
+			{
+				double ln = line(x, z);
+				h += t * (noise((x + 7.1) * I1_5, (z + 3.3) * I1_5) * 0.028 + noise((x - 2.9) * I3_4, (z + 8.4) * I3_4) * 0.04 * (0.6 + 0.6 * ln) - 0.035 * ln);
+			}
+			else
+			{
+				// (TerrainField.base: the line worn smooth, bumpiness + groove depth varying along the route)
+				double ld = line_dist(x, z);
+				double ln = 1.0 - sm(0.25, 0.7, ld);
+				double wear = 1.0 - sm(0.35, 1.5, ld);
+				double rf = 0.25 + 1.5 * sm(-0.35, 0.45, noise((x + 31.7) * I60, (z - 12.9) * I60));
+				double gk = 0.015 + 0.05 * sm(-0.4, 0.4, noise((x - 17.3) * I95, (z + 41.1) * I95));
+				double bump = noise((x + 7.1) * I1_5, (z + 3.3) * I1_5) * 0.028 + noise((x - 2.9) * I3_4, (z + 8.4) * I3_4) * 0.04;
+				h += t * (bump * rf * (1.0 - 0.8 * wear) - gk * (0.6 * ln + 0.4 * wear));
+			}
 		}
 		double dry = WATER + 0.5;
 		if (h < dry)
@@ -2570,7 +2647,16 @@ public partial class TerrainFieldCs : RefCounted
 			return 0.0;
 		double onT = 1.0 - sm(w, w + 1.5, dtr);
 		double qs = q_s, qa = q_a, qk = q_k, qbt = q_bt;
-		double d = (0.012 * noise(x * 3.1 + 7.7, z * 3.1 - 2.3) + 0.026 * noise(x * 0.9 + 3.1, z * 0.9 + 11.3)) * near * (0.35 + 0.65 * onT);
+		// the ridden line worn smooth (grain, rills mostly gone on it) and the grain varying along the route (as TerrainField.base)
+		double wear = 0.0, rf = 1.0;
+		if (!OLD_WEAR)
+		{
+			wear = 1.0 - sm(0.35, 1.5, line_dist(x, z));
+			rf = 0.25 + 1.5 * sm(-0.35, 0.45, noise((x + 31.7) * I60, (z - 12.9) * I60));
+			query(x, z);
+		}
+		double keep = (1.0 - 0.85 * wear) * rf;
+		double d = (0.012 * noise(x * 3.1 + 7.7, z * 3.1 - 2.3) + 0.026 * noise(x * 0.9 + 3.1, z * 0.9 + 11.3)) * near * (0.35 + 0.65 * onT) * keep;
 		// (no washboard: a 0.75 m ripple is finer than this 0.25 m mesh can carry and aliased into ~2 m stripes across the trail)
 		// potholes / washouts on the road
 		double cell = Math.Floor(qs / 37.0);
@@ -2584,14 +2670,14 @@ public partial class TerrainFieldCs : RefCounted
 			double rad = 0.45 + 0.35 * hh;
 			double t = 1.0 - Math.Sqrt(ds * ds + da * da) / rad;
 			if (t > 0.0)
-				d -= (0.03 + 0.07 * h2) * t * t * (3.0 - 2.0 * t);
+				d -= (0.03 + 0.07 * h2) * t * t * (3.0 - 2.0 * t) * (1.0 - 0.6 * wear);
 		}
 		// ragged dirt edge
 		d += 0.03 * noise(x * 2.3 + 1.9, z * 2.3 - 6.1) * (1.0 - sm(0.0, 1.3, Math.Abs(dtr - w)));
 		// rills down banked faces
 		double bm = sm(0.08, 0.2, Math.Abs(qbt)) * (1.0 - sm(2.2, 3.4, dtr));
 		if (bm > 0.0)
-			d += 0.014 * bm * noise(qs * 0.45 + 4.0, qa * 5.0 + 2.0);
+			d += 0.014 * bm * noise(qs * 0.45 + 4.0, qa * 5.0 + 2.0) * (1.0 - 0.9 * wear) * rf;
 		return d;
 	}
 

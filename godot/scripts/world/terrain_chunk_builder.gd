@@ -29,6 +29,9 @@ static var SHROOMS: Array = []
 static var SCRUB: Array = []
 static var SAV_LEAVES: Array = []   # savanna umbrella trees
 static var REEDS: Array = []        # wetland reeds
+static var WILLOW: Array = []
+static var HEATHER: Array = []
+static var CATTAIL: Array = []
 static var DAISIES: Array = []
 static var TULIPS: Array = []
 static var SPIKES: Array = []
@@ -55,6 +58,9 @@ static func ensure_static() -> void:
 	SCRUB = L.call([0x9a7a48, 0xb08a52, 0x8c6c3e, 0x7f8a4a])
 	SAV_LEAVES = L.call([0x8a9a3a, 0x9aa844, 0x7a8a34, 0xa8a64a])
 	REEDS = L.call([0x7a9a3c, 0x8aa844, 0x6a8a38, 0xa0a850])
+	WILLOW = L.call([0x8fae5a, 0x9cb866, 0x7f9f52, 0xa6bd70])   # waterside willow / alder: paler, silvery greens
+	HEATHER = L.call([0x8a5a78, 0x7a6a4a, 0x9a6a5a, 0x6a7a44])  # alpine dwarf shrubs: heather purples, rusty browns
+	CATTAIL = L.call([0x5a3a22, 0x6a4428, 0x4e3420])
 	DAISIES = L.call([0xffffff, 0xfff6e0, 0xffd84a, 0xff9ec4, 0xf26d9b, 0xffb35c])
 	TULIPS = L.call([0xe8384a, 0xff6f61, 0xffc93c, 0xff8fb8, 0xf7f1ff, 0xd94f8c])
 	SPIKES = L.call([0x9b7bea, 0x7a8cff, 0xc79bff, 0xf4a6d7, 0xffffff])
@@ -1295,7 +1301,224 @@ func _bend_trees() -> void:
 			put("rock", rx, height(rx, rz) - rs * 0.3, rz, rs * 1.3, rs * 0.7, rs, TrailCourse._hash(i, 110 + q) * 6.28, null, 0.5)
 
 
+## Trees by nature's rules (2026-11-26, docs/research/vegetation.md; user: "it all seems random, follow nature's rules"):
+## candidates on a world-space jittered grid (one per ECO_CELL cell, so a natural minimum spacing and no chunk seams: the
+## density-map placement of Horizon Zero Dawn), each kept with a probability from: stands + clearings (38 m and 115 m noises),
+## slope (thinning from ~25 deg, none past ~38), hollows (wetter: broadleaf, denser) vs ridges / convex shoulders (sparser,
+## shorter, wind-leaning pines), shaded north slopes (denser conifers), the waterside band (willow / alder), the biome.
+## Stand edges grow smaller, younger trees; mature trees seed saplings round them; the cold biome stunts and leans them
+## (treeline krummholz); forests have the odd standing dead tree. BMX_OLD_TREES=1 = the old random scatter.
+const ECO_CELL := 3.6
+const ECO_JIT := 0.34      # jitter, x the cell (min spacing ~1.1 m between candidates)
+const ECO_K := 0.47        # overall: about the old tree count in the same land (saplings + waterside trees included)
+static var OLD_TREES := OS.get_environment("BMX_OLD_TREES") != ""
+
+
 func _trees(ox: float, oz: float) -> void:
+	if OLD_TREES:
+		_trees_old(ox, oz)
+		return
+	var x0 := ox - S * 0.5
+	var z0 := oz - S * 0.5
+	for gx in range(floori(x0 / ECO_CELL), floori((x0 + S) / ECO_CELL) + 1):
+		for gz in range(floori(z0 / ECO_CELL), floori((z0 + S) / ECO_CELL) + 1):
+			var hr := WorldRng.new(WorldRng.i32(gx * 73856093) ^ WorldRng.i32(gz * 19349663) ^ WorldRng.i32(f.seed_value * 83492791) ^ 0x2545f491)
+			var x := (gx + 0.5 + (hr.next() - 0.5) * 2.0 * ECO_JIT) * ECO_CELL
+			var z := (gz + 0.5 + (hr.next() - 0.5) * 2.0 * ECO_JIT) * ECO_CELL
+			if x < x0 or x >= x0 + S or z < z0 or z >= z0 + S:
+				continue
+			_eco_tree(x, z, hr)
+
+
+## the land round a spot: slope (rise over run), hollow (> 0: lower than the land 12 m round, wetter; < 0: a ridge / shoulder),
+## shade (0..1: a slope facing north, -z), height above the water
+var _e_slope := 0.0
+var _e_hollow := 0.0
+var _e_shade := 0.0
+func _eco_land(x: float, z: float, h: float) -> void:
+	var sx := (height(x + 1.5, z) - height(x - 1.5, z)) / 3.0
+	var sz := (height(x, z + 1.5) - height(x, z - 1.5)) / 3.0
+	_e_slope = sqrt(sx * sx + sz * sz)
+	var ring := (height(x + 12.0, z) + height(x - 12.0, z) + height(x, z + 12.0) + height(x, z - 12.0)) * 0.25
+	_e_hollow = clampf((ring - h) / 1.5, -1.0, 1.0)
+	_e_shade = clampf(sz / (_e_slope + 0.001), 0.0, 1.0) * sm(0.05, 0.2, _e_slope)
+
+
+func _eco_tree(x: float, z: float, hr: WorldRng) -> void:
+	var acc := hr.next()
+	var forest: float = f.n(x + 400, z, TerrainField.I38)
+	var grove: float = f.n(x - 1700, z + 800, TerrainField.I115)
+	var stand := sm(-0.3, 0.3, 0.65 * forest + 0.55 * grove)   # 0 meadow / clearing .. 1 the heart of a stand
+	var roadside: bool = TerrainField.trail_metres_of(f.pathN(x, z)) < 14.0 and f.n(x - 900, z + 300, TerrainField.I38) > -0.1
+	f.biome(x, z)
+	var pf := 0.4 if roadside else stand * 0.9 + 0.04
+	if not roadside:
+		pf = maxf(pf, f.b_forest * 0.85 * (0.55 + 0.45 * stand))
+	pf *= (1.0 - 0.75 * f.b_cold) * (1.0 - 0.6 * f.b_wet) * (1.0 - 0.5 * f.b_sav) * (1.0 - 0.95 * f.b_ash)
+	var tr: float = f.trail(x, z)
+	var fe: bool = f.q_d < TerrainField.QR and f.q_kind == TrailCourse.FOREST
+	var fe_close: bool = fe and f.q_d <= _forest_clear()   # (read now: the land reads below run other trail lookups)
+	if fe:
+		pf = maxf(pf, 0.95)
+	if acc > pf * 1.6:   # (cheap early out before reading the land)
+		return
+	var h := height(x, z)
+	if h < WATER + 0.6 or sqrt(x * x + z * z) < 9:
+		return
+	_eco_land(x, z, h)
+	var ridge := maxf(0.0, -_e_hollow)
+	var hollow := maxf(0.0, _e_hollow)
+	var water := _shore(x, z, h)   # the waterside band
+	var cliff := _e_slope > 0.8
+	pf *= 1.0 - sm(0.47, 0.8, _e_slope)   # ~25 .. 38 deg
+	pf *= (1.0 - 0.3 * ridge) * (1.0 + 0.25 * hollow) * (1.0 + 0.2 * _e_shade)
+	pf = maxf(pf, water * 0.45 * (1.0 - f.b_ash) * (1.0 - f.b_dry))   # trees line the water
+	if cliff:
+		pf = 0.03 * (1.0 - f.b_ash)   # the odd stunted tree in a crack of steep rock
+	if acc > pf * ECO_K * (1.0 / ECO_K if fe else 1.0):
+		return
+	if fe:
+		tr = 1.0 if fe_close else 0.0
+	if tr > 0.02 or absf(f.pathN(x, z)) < 0.1 or f.jump_mask(x, z) > 0 or is_blocked(x, z, 0.8):
+		return
+	if not cliff and absf(height(x + 0.8, z) - h) + absf(height(x, z + 0.8) - h) > 0.7:
+		return
+	var sc := 0.7 + hr.next() * 0.8
+	var yaw := hr.next() * 6.28
+	var edge := 1.0 - sm(0.2, 0.65, stand) if not roadside else 0.0   # a stand's edge: younger, smaller trees
+	sc *= (1.0 - 0.3 * edge) * (1.0 - 0.2 * ridge)
+	var cold := sm(0.45, 0.9, f.b_cold)
+	sc *= 1.0 - 0.6 * cold   # toward the treeline: stunted (krummholz)
+	if cliff: sc *= 0.55
+	var lean := 0.04 + 0.14 * ridge + 0.3 * cold + (0.2 if cliff else 0.0)   # wind on ridges / the treeline
+	if f.b_ash > 0.4:
+		var snag := sc * TREE_K * (0.9 + hr.next() * 0.8)
+		put("trunk_pale", x, h - 0.1, z, snag * 1.0, snag * 1.5, snag * 1.0, yaw)
+		colliders.append({"x": x, "z": z, "r": 0.14 * snag + 0.02, "ceil": h + snag * 1.5})
+		return
+	if hr.next() < f.b_dry * (1.0 - 0.9 * f.b_sav) and water < 0.3:
+		if hr.next() < 0.35:
+			var kind := CactusGeo.pick(hr.next())
+			var cs := 0.75 + (sc - 0.7) * 0.45
+			var cy := cs * (0.85 + hr.next() * 0.35)
+			var cc: Color = CACTI[int(hr.next() * CACTI.size())]
+			var nm := "cactus%d" % kind
+			var idx := put(nm, x, h - 0.03, z, cs, cy, cs, yaw, cc, 0.08)
+			colliders.append({"x": x, "z": z, "r": CactusGeo.HIT_R[kind] * cs, "ceil": h - 0.03 + CactusGeo.HEIGHT[kind] * cy,
+				"cactus": {"i": idx, "kind": kind, "broken": false, "col": cc, "xform": _last_xform(nm)}})
+		return
+	# which tree: waterside willow / alder, else pine or broadleaf (pines on ridges, shade, rugged / cold / forest land;
+	# broadleaf in the wet hollows), savanna's flat crowns; and in a forest the odd standing dead tree
+	var kind := 1
+	if water > 0.5 and f.b_cold < 0.5 and f.b_sav < 0.4 and not fe:
+		kind = 3
+	elif fe or h > 4 or hr.next() < 0.3 + f.b_rug * 0.6 + f.b_forest * 0.65 + f.b_cold * 0.5 + 0.3 * ridge + 0.25 * _e_shade - 0.35 * hollow:
+		kind = 0
+	elif f.b_sav > 0.4:
+		kind = 2
+	if (f.b_forest > 0.3 or stand > 0.7) and hr.next() < 0.03 and not fe:
+		var snag2 := sc * TREE_K * (1.1 + hr.next() * 0.6)
+		put("trunk_pale", x, h - 0.1, z, snag2 * 0.8, snag2 * 2.2, snag2 * 0.8, yaw, null, 0.08)
+		colliders.append({"x": x, "z": z, "r": 0.12 * snag2 + 0.02, "ceil": h + snag2 * 2.2})
+		return
+	if not _put_tree(kind, x, z, h, sc, yaw, fe, lean, hr):
+		return
+	# seed spread: a few saplings round a mature tree (not in the cold, on cliffs or by the water)
+	if hr.next() < 0.3 * (1.0 - cold) and not cliff and kind != 3 and sc > 0.8:
+		for k in 1 + int(hr.next() * 3):
+			var a := hr.next() * 6.28
+			var d := 3.0 + hr.next() * 5.0
+			var px := x + cos(a) * d
+			var pz := z + sin(a) * d
+			if px < ox_min() or px >= ox_min() + S or pz < oz_min() or pz >= oz_min() + S:
+				continue
+			if f.trail(px, pz) > 0.0 or absf(f.pathN(px, pz)) < 0.1 or f.jump_mask(px, pz) > 0 or is_blocked(px, pz, 0.6):
+				continue
+			f.query(px, pz)
+			if f.q_d < TerrainField.QR and (f.q_kind == TrailCourse.FOREST and f.q_d < _forest_clear() or f.q_d < f.q_w + 1.2):
+				continue   # (a forest singletrack's trunk clearance, and never right at any trail's edge)
+			var ph := height(px, pz)
+			if ph < WATER + 0.6 or absf(height(px + 0.8, pz) - ph) + absf(height(px, pz + 0.8) - ph) > 0.7:
+				continue
+			_put_tree(kind, px, pz, ph, sc * (0.28 + hr.next() * 0.25), hr.next() * 6.28, fe, lean, hr)
+
+
+## 0..1: how much a spot is on the shore: low above the water (full under 1 m, none past 3 m) AND water within ~16 m
+## (low flat land far from a lake is not a waterside)
+func _shore(x: float, z: float, h: float) -> float:
+	var low := 1.0 - sm(1.0, 3.0, h - WATER)
+	if low <= 0.0:
+		return 0.0
+	for r: float in [6.0, 11.0, 16.0]:
+		for k in 6:
+			var a: float = k * TAU / 6.0 + r
+			if height(x + cos(a) * r, z + sin(a) * r) < WATER:
+				return low * (1.0 - sm(6.0, 17.0, r))
+	return 0.0
+
+
+func ox_min() -> float: return cx * S - S * 0.5
+func oz_min() -> float: return cz * S - S * 0.5
+
+
+## one tree of a kind (0 pine, 1 broadleaf, 2 savanna flat crown, 3 waterside willow / alder) at a spot: false if its crown
+## would hang over the trail
+func _put_tree(kind: int, x: float, z: float, h: float, sc: float, yaw: float, fe: bool, lean: float, hr: WorldRng) -> bool:
+	var ceil_h := 0.0
+	sc *= TREE_K
+	if kind == 0:
+		var py := sc * (1.5 + hr.next() * 0.7 + pow(hr.next(), 4.0) * 0.9)
+		var tall: bool = (fe or f.b_forest > 0.5) and sc > 0.9 * TREE_K
+		var cb := sc * 0.6
+		if tall:
+			cb = maxf(TALL_CROWN, sc * 3.2) + hr.next() * 3.0
+			sc *= 1.15
+		if not fe and not tall and not _crown_clear(x, z, sc * 1.05):
+			return false
+		if tall and not fe and not _crown_clear(x, z, sc * 0.5):
+			return false
+		var tb := euler_xyz(lean * (hr.next() - 0.5), yaw, lean * (hr.next() - 0.5))
+		_push("trunk_pine" if hr.next() < 0.45 else "trunk", _scaled(tb, sc, cb + 0.2 + py * 0.15, sc), Vector3(x, h - 0.1, z), Color(1, 1, 1))
+		var top := Vector3(x, h - 0.1, z) + tb.y * (cb + 0.1)
+		_push("pine", _scaled(tb, sc * (0.95 if tall else 1.1), py, sc * (0.95 if tall else 1.1)), top, PINES[int(hr.next() * PINES.size())])
+		ceil_h = h + cb + 2.8 * py
+	elif kind == 2:
+		if not _crown_clear(x, z, sc * 2.4):
+			return false
+		var th := sc * (1.5 + hr.next() * 0.8)
+		ceil_h = h + th + sc * 0.9
+		put("trunk", x, h - 0.1, z, sc * 0.8, th + 0.3, sc * 0.8, yaw)
+		put("blob", x, h + th + sc * 0.25, z, sc * 2.3, sc * 0.55, sc * 2.3, yaw, SAV_LEAVES[int(hr.next() * SAV_LEAVES.size())], 0.6)
+	elif kind == 3:
+		# willow / alder: a short, often leaning trunk under a wide, loose, pale crown (two or three lobes)
+		if not _crown_clear(x, z, sc * 1.7):
+			return false
+		var th := sc * (0.8 + hr.next() * 0.5)
+		ceil_h = h + th + sc * 1.6
+		var tb := euler_xyz((0.1 + lean) * (hr.next() - 0.5) * 2.0, yaw, (0.1 + lean) * (hr.next() - 0.5) * 2.0)
+		_push("trunk_pale" if hr.next() < 0.5 else "trunk", _scaled(tb, sc * 1.1, th + 0.3, sc * 1.1), Vector3(x, h - 0.1, z), Color(1, 1, 1))
+		var top := Vector3(x, h - 0.1, z) + tb.y * th
+		var wc: Color = WILLOW[int(hr.next() * WILLOW.size())]
+		for k in 2 + int(hr.next() * 2):
+			var a := hr.next() * 6.28
+			var o := sc * (0.3 + hr.next() * 0.5)
+			put("blob", top.x + cos(a) * o, top.y + sc * (0.4 + hr.next() * 0.4), top.z + sin(a) * o, sc * 1.25, sc * 0.95, sc * 1.25, hr.next() * 6.28, wc * (0.9 + hr.next() * 0.2), 0.5)
+	else:
+		if not _crown_clear(x, z, sc * 1.4):
+			return false
+		var th := sc * (1.1 + hr.next() * 0.6)
+		ceil_h = h + th + sc * 1.8
+		put("trunk_pale" if hr.next() < 0.6 else "trunk", x, h - 0.1, z, sc, th + 0.3, sc, yaw)
+		put("blob", x, h + th + sc * 0.7, z, sc * 1.2, sc * 1.05, sc * 1.2, yaw, LEAVES[int(hr.next() * LEAVES.size())], 0.6)
+		if hr.next() < 0.5:
+			var bx := x + (hr.next() - .5) * sc
+			var bz := z + (hr.next() - .5) * sc
+			put("blob", bx, h + th + sc * 1.4, bz, sc * .8, sc * .75, sc * .8, yaw, LEAVES[int(hr.next() * LEAVES.size())], 0.6)
+	colliders.append({"x": x, "z": z, "r": 0.16 * sc + 0.02, "ceil": ceil_h})
+	return true
+
+
+func _trees_old(ox: float, oz: float) -> void:
 	for i in TREE_TRIES:
 		var x := ox + (rnd.next() - .5) * S
 		var z := oz + (rnd.next() - .5) * S
@@ -1603,6 +1826,62 @@ func _nature(ox: float, oz: float) -> void:
 					var d := rn.next() * 1.4
 					put("pebble", x + cos(a) * d, h - sc * 0.3, z + sin(a) * d, sc * 1.4, sc * 0.8, sc, rn.next() * 6.28, null, 0.6)
 			continue
+		if not OLD_TREES:
+			var hw := h - WATER
+			if hw < 2.2 and f.b_dry < 0.5 and r < 0.45 and _shore(x, z, h) > 0.2:
+				# the waterside: reeds with cattail heads at the water's edge, willow-green shrubs a little higher up
+				if hw < 1.2:
+					var colr2: Color = REEDS[int(rn.next() * REEDS.size())]
+					for k in 4 + int(rn.next() * 6):
+						var a := rn.next() * 6.28
+						var d := rn.next() * 0.9
+						var fx := x + cos(a) * d
+						var fz := z + sin(a) * d
+						var fh := height(fx, fz)
+						var s2 := 1.0 + rn.next() * 0.7
+						var sy := s2 * (2.0 + rn.next() * 1.0)
+						put("grass", fx, fh - 0.03, fz, s2, sy, s2, rn.next() * 6.28, colr2 * (0.85 + rn.next() * 0.3), 0.15)
+						if rn.next() < 0.45:   # a cattail: a dark brown head on a stalk among the reeds
+							put("spike", fx, fh + sy * 0.32, fz, 0.9, 1.3 + rn.next() * 0.5, 0.9, rn.next() * 6.28, CATTAIL[int(rn.next() * CATTAIL.size())], 0.1)
+				else:
+					var wc: Color = WILLOW[int(rn.next() * WILLOW.size())]
+					for k in 1 + int(rn.next() * 3):
+						var a := rn.next() * 6.28
+						var d := (0.6 + rn.next() * 0.8) if k else 0.0
+						var fx := x + cos(a) * d
+						var fz := z + sin(a) * d
+						if f.trail(fx, fz) > 0.02: continue
+						var sc := 0.45 + rn.next() * 0.5
+						var yw := rn.next() * 6.28
+						put(_bush_kind(yw), fx, height(fx, fz) - 0.08, fz, sc * 1.3, sc * (0.8 + rn.next() * 0.5), sc * 1.3, yw, wc * (0.85 + rn.next() * 0.3), 0.3)
+				continue
+			if f.b_cold > 0.5 and r < 0.22:
+				# above / near the treeline: low mats of heather and dwarf shrubs, in patches
+				var hc: Color = HEATHER[int(rn.next() * HEATHER.size())]
+				for k in 2 + int(rn.next() * 4):
+					var a := rn.next() * 6.28
+					var d := (0.4 + rn.next() * 1.4) if k else 0.0
+					var fx := x + cos(a) * d
+					var fz := z + sin(a) * d
+					if f.trail(fx, fz) > 0.02: continue
+					var sc := 0.3 + rn.next() * 0.35
+					var yw := rn.next() * 6.28
+					put("bush1", fx, height(fx, fz) - 0.06, fz, sc * 1.6, sc * 0.45, sc * 1.6, yw, hc * (0.85 + rn.next() * 0.3), 0.2)
+				continue
+			# a stand's edge: a belt of shrubs where the trees thin out into the meadow
+			var stand := sm(-0.3, 0.3, 0.65 * f.n(x + 400, z, TerrainField.I38) + 0.55 * f.n(x - 1700, z + 800, TerrainField.I115))
+			if stand > 0.12 and stand < 0.5 and f.b_dry < 0.55 and f.b_ash < 0.4 and r < 0.3:
+				var colb: Color = BUSHES[int(rn.next() * BUSHES.size())]
+				for k in 1 + int(rn.next() * 3):
+					var a := rn.next() * 6.28
+					var d := (0.5 + rn.next() * 0.9) if k else 0.0
+					var fx := x + cos(a) * d
+					var fz := z + sin(a) * d
+					if f.trail(fx, fz) > 0.02: continue
+					var sc := 0.4 + rn.next() * 0.6
+					var yw := rn.next() * 6.28
+					put(_bush_kind(yw), fx, height(fx, fz) - 0.08, fz, sc * (1 + rn.next() * 0.4), sc * (0.7 + rn.next() * 0.5), sc, yw, colb * (0.85 + rn.next() * 0.3), 0.3)
+				continue
 		if f.b_wet > 0.4 and r < 0.5:
 			# wetland: tufts of tall reeds
 			var colr: Color = REEDS[int(rn.next() * REEDS.size())]
