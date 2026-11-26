@@ -292,6 +292,8 @@ func _mm(mesh_name: String, mat_name: String, buf: PackedFloat32Array, count: in
 	mmi.material_override = TerrainGeo.MAT[mat_name]
 	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if cast else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_root.add_child(mmi)
+	if mesh_name.ends_with("Billboard"):
+		mmi.set_instance_shader_parameter("fade_mode", 0.0)   # (no LOD band here: always the billboard)
 
 ## [transform, colour] items -> a MultiMesh buffer (3x4 basis+origin rows, then the custom colour): 16 floats each
 static func _pack(items: Array) -> PackedFloat32Array:
@@ -325,10 +327,10 @@ static func _compute_props() -> Dictionary:
 		var side := -1.0 if i % 4 != 0 else 1.0
 		var x := _cx(z) + side * (11.0 + rng.randf() * 10.0)
 		if absf(x - _cx(z)) < 9.0 + maxf(-z - 10.0, 0.0) * 0.3: continue   # the trees frame the view, they don't block it
-		var sc := 1.6 + rng.randf() * 1.6
 		var y := G(x, z)
-		trunks.append([_xf(Vector3(x, y - 0.1, z), Vector3(sc, sc * 0.9, sc), 0.0), Color(1, 1, 1)])
-		pines.append([_xf(Vector3(x, y + sc * 0.6, z), Vector3(sc * 1.1, sc * (1.5 + rng.randf() * 0.7), sc * 1.1), rng.randf() * TAU), P[i % P.size()]])
+		# a whole grown tree from the ground (CardTree.dims: real size)
+		var dm := CardTree.dims("pine", 0.5, rng.randf(), rng.randf(), rng.randf())
+		pines.append([_xf(Vector3(x, y - 0.1, z), dm.scale, rng.randf() * TAU), P[i % P.size()]])
 	for spot in []:
 		var z: float = spot[1]
 		var x := _cx(z) + float(spot[0])
@@ -375,14 +377,15 @@ static func _compute_props() -> Dictionary:
 		if absf(x - _cx(z)) < 6.0: continue
 		if d < 420.0 and absf(x) < d * 0.55: continue   # keep the view down into the valley open
 		var sc := (2.2 + rng.randf() * 2.0) * (1.0 + d / 1500.0)   # far trees a bit bigger so the forests read
-		far_pines.append([_xf(Vector3(x, y + sc * 0.5, z), Vector3(sc * 1.2, sc * (1.6 + rng.randf() * 0.8), sc * 1.2), rng.randf() * TAU), P[rng.randi() % P.size()]])
-		if d < 300.0: far_trunks.append([_xf(Vector3(x, y - 0.1, z), Vector3(sc, sc * 0.9, sc), 0.0), Color(1, 1, 1)])
+		# (billboards of our grown pine: a whole tree from the ground, ~6 x sc tall)
+		var hh := sc * (5.5 + rng.randf() * 1.8)
+		far_pines.append([_xf(Vector3(x, y - 0.1, z), Vector3(hh * 0.9, hh, hh * 0.9), rng.randf() * TAU), P[rng.randi() % P.size()]])
 	var out := {}
 	for e in [["trunks", "trunk", "trunk", trunks, true], ["pines", "pine", "leaf", pines, true], ["blobs", "blob", "leafSoft", blobs, true],
 			["bushes", "bush", "leafCard", bushes, true], ["rocks", "rock", "rock", rocks, true], ["grass", "grass", "flower", grass, false],
-			["roots", "log", "trunk", roots, true], ["far_pines", "pine", "leaf", far_pines, false], ["far_trunks", "trunk", "trunk", far_trunks, false],
-			["spires", "pineSpire", "spire", pines, false], ["far_spires", "pineSpire", "spire", far_pines, false],
-			["limbs", "blobLimbs", "limbs", blobs, false]]:   # (card pines: the trunk up through the crown)
+			["roots", "log", "trunk", roots, true], ["far_pines", "pineBillboard", "pineBillboard", far_pines, false],
+			["far_trunks", "trunk", "trunk", far_trunks, false],
+			["wood", "pineWood0", "wood_pine", pines, false], ["limbs", "leafyWood0", "wood_leafy", blobs, false]]:   # (grown trees' wood)
 		out[e[0]] = {"mesh": e[1], "mat": e[2], "buf": _pack(e[3]), "count": (e[3] as Array).size(), "cast": e[4]}
 	return out
 

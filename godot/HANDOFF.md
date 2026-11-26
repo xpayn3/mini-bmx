@@ -850,13 +850,21 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   | 1 | `pineCardLod1` (the same branches, 2 bigger tufts each) / `blobCardLod1` (48 cards) = TerrainGeo "pine" / "blob" | 48 .. 72-88 m | 3 |
   | 2 | crown billboard (`tree_billboard.gdshader`, crown-only cells 4-7 of `impostors.png`) | 72-88 .. 124 m | 5 |
   | 3 | backdrop billboard (`FarHills` `IMPOSTOR_SHADER`, whole-tree cells 0-3) | 100 m .. 1.9 km | -1 |
-  **Pine = real branches with needle tufts** (user reference: a realistic pine forest; "realism, no low-poly stylisation"):
-  `pine_branches()` = `PINE_BRANCHES` 90 branches spiralling up the crown (golden angle), random length / droop / rise,
-  12 % missing; `_tuft` = two cards (one lying, one upright) of the `needle_tuft.png` fan (needle twigs from the
-  PineNeedles001 scan) along each branch's outer 70 %; vertical sizes pre-squeezed by `ASPECT` 1.5 (crowns are scaled
-  taller than wide). `_pine_wood` = trunk + every branch as bark tubes (`pineSpire`). Leafy crowns = `blob_lobes()` (a big
-  middle lobe + 5 round it), the cards spread over them, `blobLimbs` = a leader + a limb into each lobe forking into twigs.
-  (`needle_branch.png` is still made but no longer used.)
+  **Trees are GROWN with the user's own tree app's logic** (2026-11-26, `Downloads/webgpu-tree` growth-engine.js, Weber-Penn
+  style; user: "we did this app, take its logic for trees"): `world/tree_grower.gd` (`TreeGrower`: trunk walk, LEVELS of
+  children spawned along their parent with angle / spiral roll / length ratio x crown shape x apical dominance, each walked
+  in kink steps with noise distortion + curve-back + phototropism + floor avoidance, conifer prune ellipsoid, Weber-Penn
+  top-down radii, root flare, cumulative gravity sag; presets "pine" (Pine / ScotsPine mix: bare trunk, conical crown in
+  the upper ~55 %) and "leafy" (Beech, its 4th level left to the leaf cards); own seeded RNG, not bit-identical to the app).
+  `world/grown_tree.gd` (`GrownTree`): each species grown once, NORMALISED (root at 0, top at 1): `pineCards0/1`,
+  `leafyCards0/1` (LOD0 = a needle tuft / leaf cluster at every twig, LOD1 = bigger ones along the limbs), `*Wood0/1`
+  (bark tubes along the chains: LOD0 trunk + limbs + twigs, LOD1 trunk + main limbs; buttress roots at the trunk's foot;
+  bark UVs), `*Proxy` (shadow stand-in: trunk + a blob per main limb). So a tree is ONE instance from the ground, scale
+  `CardTree.dims(...).scale` = (H x k, H, H x k) (savanna = the leafy tree squat and wide); `dims` also gives R / rt / cb
+  for colliders, levels, the backdrop. Placement (chunk builder, levels, ride-setup scene, gallery, bake) uses that; the
+  separate trunk list is only snags now. Billboard cells are the same normalised trees (crown cells squeezed by A, json
+  y0 / h / w). Wood material = bark with `bark_uv` (CardTree "wood_pine" / "wood_leafy"); foliage and wood share `SWAY`.
+  Tune a species in `TreeGrower.SPECIES`, then re-run the impostor bake.
   `CardTree.add_twin` (from `Terrain._finalize`, `LevelVisuals._trees`) adds LOD0, the trunk / branches inside the crown
   (`add_spire`: `pineSpire`, `blobLimbs`, mode 1), the LOD2 billboard (`add_billboard`) and the
   **shadow stand-in** (`add_shadow_proxy`: the old solid crown, `SHADOWS_ONLY`, with its dapple holes; no card casts a

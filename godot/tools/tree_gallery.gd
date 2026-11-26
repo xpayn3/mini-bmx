@@ -62,17 +62,15 @@ func _ready() -> void:
 			var z := -12.0 if row == 0 else 8.0
 			var col: Color
 			var crown: Transform3D
-			var trunk: Transform3D
-			# real-size trees (CardTree.dims), a different shape per tree
-			var dm := CardTree.dims("pine" if pine else "leafy", rng.randf(), rng.randf(), rng.randf(), rng.randf())
-			trunk = Transform3D(Basis(Vector3.UP, yaw_t).scaled(dm.trunk), Vector3(x, -0.1, z))
-			crown = Transform3D(Basis(Vector3.UP, yaw_t).scaled(dm.crown), Vector3(x, float(dm.crown_y), z))
+			# real-size grown trees (CardTree.dims): one instance from the ground
+			var dm := CardTree.dims("pine" if pine else "leafy", 0.5, rng.randf(), rng.randf(), rng.randf())
+			crown = Transform3D(Basis(Vector3.UP, yaw_t).scaled(dm.scale), Vector3(x, -0.1, z))
 			col = TerrainGeo.lin(PINES[i % 3] if pine else LEAVES[i % 4])
-			_one(TerrainGeo.MESH["trunk"], TerrainGeo.MAT["trunk_pine" if pine else "trunk"], trunk, Color(1, 1, 1), 1.0, true)
 			var solid: Mesh = TerrainGeo.MESH["pine" if pine else "blob"]
 			var smat: Material = TerrainGeo.MAT["leaf" if pine else "leafSoft"]
-			if row == 0:
-				_one(solid, smat, crown, col, 1.0, true)
+			if row == 0:   # (back row: LOD1 + its wood)
+				var b := _one(solid, smat, crown, col, 1.0, true)
+				CardTree.add_spire(b, "pine" if pine else "blob", true)
 			else:
 				# the world's pair: solid (casts the shadow, hidden near) + its card twin
 				var smi := _one(solid, smat, crown, col, 1.0, true)
