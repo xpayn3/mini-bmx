@@ -21,6 +21,7 @@ uniform vec2 sun_uv = vec2(-1.0);
 uniform float flare = 0.0;
 // photo mode (scripts/game/photo_mode.gd): filters, white balance, fade, vignette, grain, lens fringing, frame
 uniform float photo = 0.0;
+uniform float lens_ca = 0.0;   // the ride lens's own colour fringes toward the corners (LightLab "lens_ca"; photo mode has p_ca)
 uniform int p_filter = 0;          // 0 none, 1 B&W, 2 sepia, 3 vintage, 4 teal & orange, 5 noir, 6 golden, 7 cross process, 8 bleach bypass
 uniform float p_filter_amt = 1.0;
 uniform float p_temp = 0.0;        // -1 cool .. 1 warm
@@ -85,9 +86,11 @@ void fragment() {
 		c.r = textureLod(screen_tex, uv - dsp, lwet * 1.5).r;
 		c.b = textureLod(screen_tex, uv + dsp, lwet * 1.5).b;
 	}
-	if (photo > 0.5 && p_ca > 0.001) {
+	float ca = photo > 0.5 ? p_ca * 0.035 : lens_ca * 0.012;
+	if (ca > 0.00001) {
+		// lateral chromatic aberration: red lands a little further out than blue, growing toward the corners
 		vec2 dd = uv - 0.5;
-		vec2 off = dd * dot(dd, dd) * 0.035 * p_ca;
+		vec2 off = dd * dot(dd, dd) * ca;
 		c.r = texture(screen_tex, uv + off).r;
 		c.b = texture(screen_tex, uv - off).b;
 	}
