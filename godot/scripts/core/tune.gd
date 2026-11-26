@@ -177,6 +177,7 @@ const DEFS := [
 		["popWindow", "Pop window before a lip", 0.24, 0.1, 0.5, 0.01, "s"],
 		["squashPower", "Squash a lip (stick forward)", 1.0, 0, 1.5, 0.05, "×"],
 		["airLift", "Lifts the bike after take-off", 0.6, 0, 1, 0.05, ""],
+		["tuckPull", "Air tuck: how far holding hop pulls the bike up", 0.32, 0.1, 0.5, 0.01, "m"],
 		["landPrepTime", "Reach for landing", 0.35, 0.05, 1, 0.05, "s"],
 		["airAimDelay", "Wait before aiming at the landing", 1.0, 0, 2, 0.05, "s"],
 		["airAimSpeed", "Aim at the landing: softness", 14, 4, 70, 1, ""],

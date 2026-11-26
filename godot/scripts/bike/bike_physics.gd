@@ -3248,7 +3248,11 @@ func _step_wheels(dt: float, f: Vector3, in_water: bool, va: float) -> void:
 		crank += (tgt - crank) * minf(1.0, dt * 3.5)
 	if air:
 		# legs reach for the landing; holding Space tucks the bike up into the body instead
-		var rel_t: float = T.legExt * land_prep * land_reach - (T.legComp * 0.85 + 0.07 * smooth01(pop_fx / 0.35) * pop_q) * air_pull * (1 - land_prep)
+		# (2026-11-26, Project X reference, step 3: the rider pulls the bike right up to himself, knees nearly to the chest. The
+		# tuck's reach was 0.85 x legComp = 0.17 m of leg (the bike rose ~13 cm about the shared centre of mass); tuckPull 0.32
+		# m: ~24 cm, so the wheels clear the ground longer. BMX_OLD_TUCK=1 = before)
+		var tk_r: float = T.legComp * 0.85 if _OLD_TUCK else float(T.get("tuckPull", 0.32))
+		var rel_t: float = T.legExt * land_prep * land_reach - (tk_r + 0.07 * smooth01(pop_fx / 0.35) * pop_q) * air_pull * (1 - land_prep)
 		# on the take-off step the leg spring already moved body_y alongside y; after that body_y is
 		# last step's bike height + rel
 		var rel := _or(body_y, y) - (y if air_time <= dt * 1.5 else _or(y_prev, y))
@@ -3481,6 +3485,7 @@ func _pop_along(dv: float) -> void:
 	v *= k; vy *= k
 
 static var _OLD_SPIN := OS.get_environment("BMX_OLD_SPIN") != ""
+static var _OLD_TUCK := OS.get_environment("BMX_OLD_TUCK") != ""   # tuck reach 0.17 m, drawn only after a timed pop
 static var _OLD_WEAVE := OS.get_environment("BMX_OLD_WEAVE") != ""
 static var WEAVE_ON := OS.get_environment("BMX_WEAVE") != ""   # the bike weave, off (rocked the whole rider)   # no bike weave under the rider
 static var _OLD_CORNERBODY := OS.get_environment("BMX_OLD_CORNERBODY") != ""   # body at up to 80 % of the bike's lean in deep turns
