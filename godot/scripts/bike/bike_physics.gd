@@ -151,7 +151,7 @@ var _OLD_AIRBLEND := OS.get_environment("BMX_OLD_AIRBLEND") != ""   # (tests: ai
 const AIR_BODY_MIN := 0.25    # s: a flight predicted at least this long (air_time + _land_t) gets the air pose (see _air_blend)
 const AIR_BODY_FROM := 0.15   # s of air before it, when no landing is predicted
 const AIR_BODY_IN := 0.18     # s: the air pose eases in (time constant; 0.1 swung the body 0.1 rad a tick off a lip)
-const AIR_BODY_OUT := 0.12    # s: and back out after touch-down
+const AIR_BODY_OUT := 0.25    # s: and back out after touch-down
 var _air_wl := 0.0           # drawing: the air stick's share of the body counter-lean, held after touch-down while it eases out
 var _bank_hold := 0.0         # drawing: the bank last read on the ground, held through a skip (the physics' bank falls to flat in the air)
 var _OLD_CURB := OS.get_environment("BMX_OLD_CURB") != ""   # (tests: the old per-step edge check, rear stops dead)
@@ -1772,7 +1772,10 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 	# their body goes the other way a little (counter-lean), staying over the centre of mass. It comes in with the air
 	# blend (air_k): a short skip keeps the ground pose, and after touch-down it eases back out (the stick share is
 	# held from the air, the ground doesn't read air_stick)
-	if air: _air_wl = clampf(absf(air_stick.x) * 2.5, 0.0, 1.0)
+	# (2026-11-26, F8: "a weird jolt of the rider's lean on landing": the stick pushed sideways just before touch-down snapped the
+	# body into this counter-lean over 3 ticks and the landing took it straight out. The weight follows the stick over ~0.25 s
+	# now. BMX_OLD_LEANDRAW=1 = at once)
+	if air: _air_wl = clampf(absf(air_stick.x) * 2.5, 0.0, 1.0) if _OLD_LEANDRAW else move_toward(_air_wl, clampf(absf(air_stick.x) * 2.5, 0.0, 1.0), 4.0 * dt)
 	if _OLD_AIRBLEND:
 		if air: counter = lerpf(counter, bike_lean * (1.0 + float(T.get("stickBodyCounter", 0.25))), _air_wl)
 	elif air_k > 0.0:
