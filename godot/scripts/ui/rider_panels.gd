@@ -70,7 +70,7 @@ const POSE_DEFS := [
 		["aero", "Speed tuck (aero)", 0.0, 2.0, 0.05, "×"],
 		["speedTuckPose", "Speed tuck: hips back, back flat (fast / light pull back)", 0.0, 1.5, 0.05, "×"],
 		["sway", "Body sway", 0.0, 2.0, 0.05, "×"],
-		["bikeRock", "Bike rock (sprint)", 0.0, 2.0, 0.05, "×"],
+		["bikeRock", "Bike sways under you pedalling standing", 0.0, 3.0, 0.05, "×"],
 		["upright", "Torso stays upright", 0.0, 1.0, 0.05, ""],
 		["hipSway", "Hip sway", 0.0, 0.12, 0.005, "m"],
 		["bodyBob", "Body bob (up / down)", 0.0, 4.0, 0.05, "×"],
