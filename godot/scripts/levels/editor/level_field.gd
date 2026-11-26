@@ -944,7 +944,9 @@ func _index_colliders() -> void:
 	_rock_cells = {}
 	var all: Array = rocks.duplicate()
 	for t in tree_list:
-		if t.kind != "bush": all.append({"x": t.x, "z": t.z, "r": 0.16 * float(t.sc) + 0.02, "ceil": float(t.h) + 6.0 * float(t.sc)})
+		if t.kind != "bush":
+			var dm := CardTree.dims_at(str(t.kind), t.x, t.z)   # (real-size trees, as LevelVisuals draws them)
+			all.append({"x": t.x, "z": t.z, "r": float(dm.rt) + 0.02, "ceil": float(t.h) + float(dm.H)})
 	for c in all:
 		for gx in range(floori((c.x - c.r) / ROCK_CELL), floori((c.x + c.r) / ROCK_CELL) + 1):
 			for gz in range(floori((c.z - c.r) / ROCK_CELL), floori((c.z + c.r) / ROCK_CELL) + 1):

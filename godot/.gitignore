@@ -6,3 +6,8 @@
 bin/
 obj/
 .mono/
+
+# textures.com beech leaf atlas (licence: may ship in the game, not be redistributed; the repo is public).
+# Made locally by root tools/make_tree_cards.py from the downloaded atlas; a clone without them uses leaf_cluster.png.
+assets/textures/tree_cards/leaf_beech*.png
+assets/textures/tree_cards/leaf_beech*.png.import

@@ -7,7 +7,7 @@ extends RefCounted
 ## hills, ramps and tree crowns + sky openness). LevelTerrain loads it when its signature matches the scene (else it
 ## works the level out live, no baked light). Also runs the level's checks (what a rider will meet).
 
-const VER := 1
+const VER := 2   # (2: real-size trees, 2026-11-26)
 
 
 static func bake_path(scene_path: String) -> String:
@@ -68,8 +68,9 @@ static func _light(f: LevelField, to_sun: Vector3) -> PackedByteArray:
 	for t in f.tree_list:
 		var sc := float(t.sc); var h := float(t.h)
 		match str(t.kind):
-			"pine": crowns.append_array([t.x, t.z, sc * 1.0, h + sc * 0.6, h + sc * 0.6 + float(t.py) * 2.6])
-			"leafy": crowns.append_array([t.x, t.z, sc * 1.25, h + sc * 1.3, h + sc * 3.1])
+			"pine", "leafy":   # (real-size crowns: CardTree.dims, as LevelVisuals draws them)
+				var dm := CardTree.dims_at(str(t.kind), t.x, t.z)
+				crowns.append_array([t.x, t.z, float(dm.R), h + float(dm.cb), h + float(dm.H)])
 			_: crowns.append_array([t.x, t.z, sc * 0.8, h, h + sc * 0.9])
 	return cs.Bake(f.H, f.nx, f.nz, f.x0, f.z0, f.step, to_sun, crowns, 2)
 

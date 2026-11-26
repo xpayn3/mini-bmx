@@ -25,6 +25,7 @@ const CREDITS := [
 		["Broken Brick Wall", "Amal Kumar / Poly Haven, polyhaven.com", "CC0"],
 		["Paper003, Metal009, Rubber004", "ambientCG, ambientcg.com", "CC0"],
 		["PineNeedles001, LeafSet005 (tree and bush leaves)", "ambientCG, ambientcg.com", "CC0"],
+		["3D Scanned European Beech Tree Leaves Atlas 01 (tree and bush leaves)", "Textures.com, textures.com", "Textures.com license"],
 	]],
 	["SOUND", [
 		["Tires on gravel road", "freesound_community via Pixabay", "Pixabay Content License"],

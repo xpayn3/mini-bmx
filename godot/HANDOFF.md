@@ -905,35 +905,41 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   at the back, the four variants in front). Seen: close-ups + two rides (seeds 4242, 80019), no script errors; NOT measured: frame time with many bushes in
   view, the wind sway, how distant leaves thin out (mip alpha). Poly Haven's `searsia_burchellii` (1.4M polygons, ~35 MB glTF) was looked at as a scan source
   and not used: it would have to be decimated + baked to cards first.
-- **Card trees (2026-11-26, user: "same trick as the bushes for trees", then "no low poly trees, use our new ones and make
-  LODs from them", "far LOD as a baked PNG billboard")**: `world/card_tree.gd` (`CardTree`). No solid crowns anywhere
-  (`BMX_OLD_TREES=1` brings the old cones / balls back). Every crown list ("pine" / "blob") is drawn four ways from the SAME
-  instance buffer, swapped by distance from the rider with one dither value per pixel (`shaders/deco_fade.gdshaderinc`):
+- **Card trees (2026-11-26, user: "same trick as the bushes for trees", "no low poly trees, make LODs from our new ones",
+  "far LOD as a baked PNG billboard", "roots flare at the bottom, branches for the leafy ones", "leaves too big, realistic
+  scales, trunk thickness and height, can vary")**: `world/card_tree.gd` (`CardTree`). `BMX_OLD_TREES=1` = the old small
+  solid trees. **Sizes** = `CardTree.dims(kind, r1..r4, tall, shrink)` (one place, used by the world chunks, levels via
+  `dims_at(kind, x, z)`, the far backdrop, the bake): pines 9-22 m (tall forest 18-30, crown in the top ~45 %), leafy
+  (beech-like) 10-20 m, young trees 4-8 m, savanna 5-9 m flat-topped, snags 6-14 m; trunk radius ~1.1-2 % of the height;
+  bend-tree giants 26-34 m with 1.35x trunks. Colliders follow (`rt`, ceil = top). `Terrain.CASTER_H` 32 m.
+  **LODs**, all from the same instance buffer, swapped per pixel by one dither (`shaders/deco_fade.gdshaderinc`):
   | LOD | what | distance | fade_mode |
   |---|---|---|---|
-  | 0 | `pineCard` (15 whorls of drooping folded branch cards) / `blobCard` (58 cards in a ball) | to 36, gone by 48 m | 4 |
-  | 1 | `pineCardLod1` (10 whorls, ~45 % branches, wider + droopier) / `blobCardLod1` (22 cards, 1.45x) | 48 .. 72-88 m; casts EVERY tree's sun shadow | 3 |
-  | 2 | crown billboard (`tree_billboard.gdshader`, crown-only cells 4-7 of `impostors.png`, tinted by the instance colour) | 72-88 .. 124 m | 5 |
+  | 0 | `pineCard` (24 whorls of folded branch cards) / `blobCard` (130 small cards) | to 36, gone by 48 m | 4 |
+  | 1 | `pineCardLod1` (14 whorls) / `blobCardLod1` (48 cards) = TerrainGeo "pine" / "blob" | 48 .. 72-88 m | 3 |
+  | 2 | crown billboard (`tree_billboard.gdshader`, crown-only cells 4-7 of `impostors.png`) | 72-88 .. 124 m | 5 |
   | 3 | backdrop billboard (`FarHills` `IMPOSTOR_SHADER`, whole-tree cells 0-3) | 100 m .. 1.9 km | -1 |
-  TerrainGeo's `MESH["pine"/"blob"]` + `MAT["leaf"/"leafSoft"]` ARE LOD1 (so the level editor preview and the ride-setup
-  scene draw cards too); `CardTree.add_twin` (from `Terrain._finalize`, `LevelVisuals._trees`) adds LOD0 (cut past
-  `CHUNK_VIS` 100 m from the camera in world chunks), the pine trunk up through the crown (`pineSpire`, `add_spire`, mode 1,
-  user: "trunk must not stop at the bottom") and the LOD2 billboard (`add_billboard`, quad size per kind from impostors.json:
-  y0 / h / w in the crown instance's own units: the crown cells are baked at unit height with the width squeezed by
-  `PINE_A` / `BLOB_A`, so the shader stretches each billboard by the instance's x / y scale like the 3D crown). Instances
-  that can't show are folded onto their base in the vertex stage (`deco_fold`). `volume_normals` in `deco_cards.gdshader`
-  lights two-sided cards as one volume. **Textures** (all BC7 + mipmaps): `assets/textures/tree_cards/needle_branch.png`
-  (ambientCG PineNeedles001 bundles stamped along a drawn twig), `leaf_cluster.png` (LeafSet005; the green BUSHES use it too,
-  `CardBush.LEAF_PNG`, brightness by `CardBush.leaf_gain()`), both made by root `tools/make_tree_cards.py <PineNeedles001 dir>
-  <LeafSet005 dir> godot/assets/textures/tree_cards` (CC0, SOURCE.txt, credits); `impostors.png` (8 cells 256 x 512) +
-  `impostors.json` baked by `res://tools/bake_tree_impostors.tscn` from LOD0: **re-run it (then `--import`) after changing
-  the card trees**. Its camera is a 1 deg perspective lens: an orthographic camera reads as the shadow pass in the deco
-  shaders (the shadow LOD stays on). `BMX_OLD_TREES_TEX=1` = code-drawn leaf textures (DXT5 at runtime). Gallery:
-  `res://tools/tree_gallery.tscn -- out.png [dist= yaw= h= look= sun=]` (back row LOD1, front LOD0). **Cost** (seed 4242
-  x2100 idle, render probe, alternating runs): GPU 4.66 vs old 4.76-5.02 ms, sun shadows 1.03 vs 1.17 ms, render CPU
-  +0.5 ms (more MultiMeshes a chunk); demo_descent level GPU 3.14 vs 2.90. **Don't measure with another Godot window open**
-  (one took ~50 % of the GPU and doubled the numbers). Not done: leafy trees' trunk up through the crown, the LOD bands show
-  as a stipple, billboards have two baked angles (no per-angle cells).
+  `CardTree.add_twin` (from `Terrain._finalize`, `LevelVisuals._trees`) adds LOD0, the trunk / branches inside the crown
+  (`add_spire`: `pineSpire`, `blobLimbs` = a leader + 5 limbs + twigs, mode 1), the LOD2 billboard (`add_billboard`) and the
+  **shadow stand-in** (`add_shadow_proxy`: the old solid crown, `SHADOWS_ONLY`, with its dapple holes; no card casts a
+  shadow: real-size card crowns in the cascades cost ~4-5 ms GPU; Terrain's far-shadow switch flips the stand-in, meta
+  `cast_on`). Every trunk is `trunkFlare` (5 buttress roots over the lowest 10 % of its height). **Leaves at real size**:
+  needle card 2048 x 1024 = a ~2-3 m branch (needles ~5 cm); leafy crowns repeat a seamless ~0.8 m foliage patch across each
+  card (`deco_cards` `tile_m` = `LEAF_TILE_M`, card size in COLOR.a x the instance scale, ragged oval outline); bushes keep a
+  single clump card. **Textures** (`assets/textures/tree_cards/`, all BC7 + mipmaps): `needle_branch`, `leaf_cluster` /
+  `leaf_tile` (ambientCG CC0) and, preferred when present, `leaf_beech` / `leaf_beech_n` / `leaf_beech_tile` /
+  `leaf_beech_tile_n` (Textures.com European Beech atlas: albedo + normal (RGB) + translucency (A); **gitignored**: the
+  licence forbids redistributing the files and the repo is public; make them with root `tools/make_tree_cards.py
+  <PineNeedles001 dir> <LeafSet005 dir> godot/assets/textures/tree_cards <...Downloads/TCom_Leaves_EuropeanBeech01_2K_>`,
+  then `--import` and set the new .import files to `compress/mode=2`). `deco_cards`: `use_nrm` / `nrm_tex` (normal map +
+  translucency into the backlight / scatter; card meshes have tangents), `volume_normals`. `impostors.png` + `.json` baked by
+  `res://tools/bake_tree_impostors.tscn` (re-run, then `--import`, after any card-tree change; its camera is a 1 deg
+  perspective lens: an orthographic one reads as the shadow pass). Level bakes `LevelBake.VER` 2 (re-baked). Gallery:
+  `res://tools/tree_gallery.tscn -- out.png [dist= yaw= h= look= sun= at=x,z]` (back row LOD1, front LOD0). **Cost: not
+  measured cleanly** (the user's own game window held 74-95 % of the GPU during every run): under that load real-size trees
+  were ~+2 ms GPU vs the old small trees; measure again with no other Godot window open (seed 4242 x2100, `BMX_RENDER_PROBE`).
+  Not done: the LOD bands show as a stipple, billboards have two baked angles, BMX_OLD_TREES=1 still draws the new trunks /
+  sizes only partly (old crowns on real-size placements).
 - **Ground crossfade + middle ring (2026-11-25, user: "the mountains pop really late and bad", "a lot of popping, a nice crossfade like big games")**.
   Before: the real chunk ground ended at a hard edge (the loaded square, 144-168 m, jumping 48 m at each chunk line) and the 20 m backdrop (`FarHills`)
   sat 5 m UNDER it, which showed as a step; past it the backdrop is smooth, pale, has no lakes. (Its heights are the field's own: `tools/far_vs_ground.gd`

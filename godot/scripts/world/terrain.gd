@@ -523,7 +523,7 @@ func _max_jobs() -> int:
 
 ## budget_ms INF = build everything round (px, pz) now; sync_r >= 0 then limits that to the chunks within sync_r of
 ## it (the rest streams in later calls with a normal budget)
-const CASTER_H := 26.0        # the tallest decoration (tall pines) whose shadow counts
+const CASTER_H := 32.0        # the tallest decoration (real-size tall pines, CardTree.dims) whose shadow counts
 const SHADOW_MARGIN := 16.0   # m beyond the shadow reach a chunk still casts (camera lead, crown width)
 const SHADOW_HYST := 12.0     # ... and this much more before a casting chunk stops (no flicker on the line)
 
@@ -577,7 +577,7 @@ func _update_far_shadows() -> void:
 		c["shadow_far"] = fk
 		for mi in c.get("deco_mi", []):
 			if is_instance_valid(mi):
-				mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF if far else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+				mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF if far else mi.get_meta("cast_on", GeometryInstance3D.SHADOW_CASTING_SETTING_ON)
 		if _shadow_probe and was != -1:
 			_shadow_flips += 1
 			print("SHADOWFLIP t=%.1f chunk=%s %s d=%.0f reach=%.0f sweep=%.0f flips=%d" % [
@@ -1024,7 +1024,8 @@ func _finalize_out(k: Vector2i, o: Dictionary, chunk_n: int) -> void:
 		dmi.set_instance_shader_parameter("fade_mode", 2.0 if spec[3] else 1.0)   # deco_fade.gdshaderinc
 		CardTree.add_twin(dmi, spec[0], CardTree.CHUNK_VIS)   # tree crowns: leaf cards near the rider (card_tree.gd), sets both fade modes
 		if spec[2]:
-			deco_mi.append(dmi)
+			# (a card crown casts through its invisible shadow stand-in: that is what the far-shadow rule switches)
+			deco_mi.append(dmi.get_meta("shadow_proxy") if dmi.has_meta("shadow_proxy") else dmi)
 		if spec[3]:
 			small.append(dmi)
 	if o.has("gates"):
