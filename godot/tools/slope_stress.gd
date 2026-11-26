@@ -587,6 +587,7 @@ func _run_all(cfg: Dictionary) -> void:
 		var p: BikePhysics = r[0]; var h: Host = r[1]
 		h.terrain.x0 = -10.0   # on the grade from the start
 		p.reset_at(10.0, 0.0, 0.0); p.v = 8.0; p.vy = 8.0 * sin(th)   # rolling down it, not launched off it
+		p.rev_on_hold = false   # (this checks the tyres hold the bike: holding the brake must not mean "reverse" here)
 		_ride(p, h, 0.5, nothing)   # settle onto the slope
 		var x_b := p.x
 		var st := _ride(p, h, 6.0, func(_t, _p): return _inp(0.0, 1.0))

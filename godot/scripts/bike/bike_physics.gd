@@ -289,6 +289,10 @@ var _HEAT_HOLD := float(OS.get_environment("BMX_HEAT")) if OS.get_environment("B
 var _OLD_SUSPFX := OS.get_environment("BMX_OLD_SUSPFX") != ""   # (tests: before dive steering, pedal bob and kickback)
 var foot_down := false    # set by Game: the rider's foot is on the ground (the bike stays put)
 var brake_stop := false  # braked to a standstill: held in place while the brake stays on
+var _rev_hold := 0.0   # s the brake has been held at a stop (reverse after REV_HOLD)
+const REV_HOLD := 1.0
+const REV_SLOPE := 0.14   # rad: hold-to-reverse only on ground flatter than this
+var rev_on_hold := true   # (tests that hold the brake to check friction turn it off)
 var brake_back := false   # brake pressed fresh from a standstill: backs the bike up
 var chunk_acc := 0.0
 var joint_rock = null
@@ -436,7 +440,7 @@ func _reset_motion() -> void:
 	pump_push = 0.0; pump_gain = 0.0; pump_idle = 0.0; pump_press_t = 0.0; _pump_release = 0.0; pump_on = false; pleg = 0.0; pump_lift = 0.0; land_perfect = 0.0
 	wheelie_time = 0.0; wheelie_pedal = false; whip = 0; whip_hold = 0; whip_side = 0.0; _whip_arm = 0; _whip_t = 0; _whip_flashed = false; _whip_straight = false; _whip_ang = 0.0; _whip_peak = 0.0
 	edge_s = 0.0; spin_hold = 0.0; spin_k = 1.0; yaw_edge_s = 0.0; yaw_hold = 0.0; stick_yaw = 0.0; air_stick = Vector2.ZERO; style_air = 0.0
-	brake_stop = false; brake_back = false; lean_lim = 9.0; lean_room = NAN
+	brake_stop = false; brake_back = false; _rev_hold = 0.0; lean_lim = 9.0; lean_room = NAN
 	sprint = 0; flow = 0; flow_t = 0; lat_m = 0; carve = 0; carve_acc = 0; carve_berm = false
 	y_draw = y; pitch_draw = pitch; nose_ref = NAN; pitch_w = NAN; y_prev = NAN; kick_t = 0
 	w_f = y; w_r = y
@@ -1151,6 +1155,14 @@ func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_wa
 			brake_stop = false; brake_back = absf(v) < 0.3
 		elif absf(v) <= 0.3 and not brake_back:
 			brake_stop = true
+		# reverse like bike / moto games: the brake held at a stop for REV_HOLD s backs the bike up (a fresh press still does at
+		# once). BMX_OLD_SLOW=1 = only the fresh press
+		# (only on ground flatter than ~8 deg: on a real slope the held brake keeps you parked; a fresh tap still reverses anywhere)
+		if brake and brake_stop and throttle < 0.1 and rev_on_hold and absf(_g_pitch) < REV_SLOPE and not _OLD_SLOW:
+			_rev_hold += dt
+			if _rev_hold > REV_HOLD: brake_stop = false; brake_back = true
+		else:
+			_rev_hold = 0.0
 		# ...but only where the tyres can: past the friction angle (or the brake's own limit) the locked bike
 		# slides down the slope like a real one (normal trail grades hold as before)
 		if brake_stop and G * absf(sin(slope)) > minf(T.brakeForce * (float(T.get("brakeRear", 0.6)) * brake_r + float(T.get("brakeFront", 0.75)) * brake_f), 0.85 * mu * n_tot):
@@ -3423,6 +3435,7 @@ func _pop_along(dv: float) -> void:
 	v *= k; vy *= k
 
 static var _OLD_SPIN := OS.get_environment("BMX_OLD_SPIN") != ""
+static var _OLD_SLOW := OS.get_environment("BMX_OLD_SLOW") != ""   # slow-riding / reverse as before 2026-11-26
 static var _OLD_LEANDRAW := OS.get_environment("BMX_OLD_LEANDRAW") != ""   # the drawn body / bike lean with its one-tick jumps
 static var _OLD_STRAIGHTWHIP := OS.get_environment("BMX_OLD_STRAIGHTWHIP") != ""   # the whip only in corners (both sticks)
 static var _OLD_STICKBIKE := OS.get_environment("BMX_OLD_STICKBIKE") != ""   # right stick side lean throws the bike (before 2026-11-26)
@@ -3646,6 +3659,9 @@ func _style_points(at: float, flips: int, turns: int) -> void:
 ## Pivot (pirouette): slow, brake held and steering -> the rear swings round the front wheel, as far as you like
 func _pivot_step(dt: float, steer_input: float, brake_k: float) -> void:
 	var on := absf(v) < 2.5 and brake_k > 0.3 and absf(steer_input) > 0.1 and not front_air and not rear_air
+	# (2026-11-26, user: "holding reverse and turning, the rear just slides left and right round the front tyre, not how it works"):
+	# only a forward-rolling nose pivot now, never stopped or backing up (that's reverse, it steers like a bike). BMX_OLD_SLOW=1
+	if not _OLD_SLOW: on = on and v > 0.5 and not brake_back
 	if not on:
 		pivot = maxf(0.0, pivot - dt * 5)
 		if pivot == 0.0: pivot_acc = 0.0

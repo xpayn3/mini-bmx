@@ -2538,6 +2538,8 @@ const LIFT_DOWN := 0.6   # m/s it settles back
 var _lift_s := 0.0       # the eased tyre-unclip lift
 const AIR_SHARE_EASE := 0.08   # s: back on the ground the air offset eases out (it popped the bike up in one frame)
 var _air_dlt := Vector3.ZERO
+var _slip_k := 0.0   # share of a small unasked slip drawn along the travel
+static var _OLD_SLIPDRAW := OS.get_environment("BMX_OLD_SLIPDRAW") != ""
 var _piv_c := 0.0; var _piv_w := 0.5   # drawn pitch pivot correction (m) and its rear share
 const LIFT_AIR := 1.5   # m/s: the tyre-unclip lift lets go in the air
 static var _OLD_PIVOT := OS.get_environment("BMX_OLD_PIVOT") != ""
@@ -3586,6 +3588,17 @@ func _process(dt: float) -> void:
 	var p_draw: float = wrapf(_prev[pk] + BikePhysics.ang_diff(st.get(pk), _prev[pk]) * a, -PI, PI)
 	if Env.s("BMX_PITCH_POSE") != "": p_draw = wrapf(t * 4.0, -PI, PI) if Env.s("BMX_PITCH_POSE") == "sweep" else float(Env.s("BMX_PITCH_POSE"))   # tests: draw at a fixed pitch (flip poses)
 	var hd: float = _prev.heading + BikePhysics.ang_diff(st.heading, _prev.heading) * a
+	# (2026-11-26, F8: "we slide with the tyres on the landscape, no lean, the whole unit slides, very off-putting": hands off across
+	# a 17-31 deg side slope the tyres hold the bike with ~5 deg of slip angle, so it pointed 5 deg off where it went and crabbed
+	# sideways ~0.6 m/s. Real tyres do that, but on screen it reads as sliding on ice; racing games draw small slip along the
+	# travel. A small slip nobody asked for (no whip, no locked rear) is drawn 80 % along the travel; real slides / whips in full.
+	# Drawing only. BMX_OLD_SLIPDRAW=1 = before)
+	if not _OLD_SLIPDRAW:
+		var sk_t: float = 0.0
+		if not st.air and not st.crash_on:
+			sk_t = (1.0 - smoothstep(0.10, 0.20, absf(st.slip))) * (1.0 - clampf(st.whip * 3.0, 0.0, 1.0)) * (1.0 - clampf(st.rear_lock / 0.15, 0.0, 1.0))
+		_slip_k = move_toward(_slip_k, sk_t, 4.0 * minf(dt, 0.05))
+		hd -= clampf(st.slip, -0.25, 0.25) * 0.8 * _slip_k
 	drawn_pos = Vector3(_lerp_k("x"), _lerp_k("y"), _lerp_k("z"))
 	var body_y: float = _lerp_k("body_y")
 	_update_dab(dt, st)
