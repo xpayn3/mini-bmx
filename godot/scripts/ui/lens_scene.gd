@@ -380,7 +380,8 @@ static func _compute_props() -> Dictionary:
 	var out := {}
 	for e in [["trunks", "trunk", "trunk", trunks, true], ["pines", "pine", "leaf", pines, true], ["blobs", "blob", "leafSoft", blobs, true],
 			["bushes", "bush", "leafCard", bushes, true], ["rocks", "rock", "rock", rocks, true], ["grass", "grass", "flower", grass, false],
-			["roots", "log", "trunk", roots, true], ["far_pines", "pine", "leaf", far_pines, false], ["far_trunks", "trunk", "trunk", far_trunks, false]]:
+			["roots", "log", "trunk", roots, true], ["far_pines", "pine", "leaf", far_pines, false], ["far_trunks", "trunk", "trunk", far_trunks, false],
+			["spires", "pineSpire", "spire", pines, false], ["far_spires", "pineSpire", "spire", far_pines, false]]:   # (card pines: the trunk up through the crown)
 		out[e[0]] = {"mesh": e[1], "mat": e[2], "buf": _pack(e[3]), "count": (e[3] as Array).size(), "cast": e[4]}
 	return out
 

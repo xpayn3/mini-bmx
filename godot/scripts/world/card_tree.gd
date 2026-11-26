@@ -1,14 +1,19 @@
 class_name CardTree
 extends RefCounted
-## Card trees (2026-11-26): the near-ring look of the tree crowns, built like the bushes (card_bush.gd) from upright /
-## drooping quads with an alpha cut-out texture. Each crown is drawn twice from the SAME instance buffer (Terrain /
-## LevelVisuals add the twin): within ~36-48 m of the rider these cards, further out the old solid low-poly crown, the
-## two swapped per pixel by one dither (shaders/deco_fade.gdshaderinc, fade_mode 4 = cards, 3 = solid). The solid crown
-## always casts the sun shadow; the cards cast none (an alpha cut-out in every shadow cascade is the expensive part of
-## leaf cards). Both meshes fill the same unit space as the solid ones, so instance transforms are shared:
-##   pineCard = TerrainGeo "pine": base radius ~1 at y 0, tip at y 2.8 (three stacked cones)
-##   blobCard = TerrainGeo "blob": a lumpy ball of radius ~1 round the origin
-## BMX_OLD_TREES=1 = no twins (solid crowns everywhere, as before).
+## Card trees (2026-11-26): every tree crown is leaf cards, built like the bushes (card_bush.gd) from upright /
+## drooping quads with an alpha cut-out photo texture. Three levels, all from the same trees (user: "no low poly trees,
+## use our new ones and make LODs from them"):
+##   LOD0 pineCard / blobCard        near: full cards (fade_mode 4: full to 36 m from the rider, gone by 48 m)
+##   LOD1 pineCardLod1 / blobCardLod1 the rest of the way: ~1/3 the cards, bigger (fade_mode 3), and THE shadow caster
+##                                   at every distance (LOD0 casts none: one alpha-tested crown per tree in the cascades)
+##   LOD2 billboards                 from ~72-88 m: one quad per crown with a crown-only cell of impostors.png (baked from
+##                                   LOD0 by tools/bake_tree_impostors.tscn; tree_billboard.gdshader, fade_mode 5); past the
+##                                   loaded chunks the backdrop's whole-tree billboards take over (world/far_hills.gd)
+## TerrainGeo's "pine" / "blob" meshes and "leaf" / "leafSoft" materials ARE LOD1 (every crown list draws it), and
+## Terrain / LevelVisuals add the LOD0 twin on the same instance buffer; LOD0 and LOD1 swap per pixel by one dither
+## (shaders/deco_fade.gdshaderinc). All meshes fill the old solid crowns' unit space, so instance transforms are shared:
+##   pine: base radius ~1 at y 0, tip at y 2.8      blob: a ball of radius ~1 round the origin
+## Pines also get their trunk up through the crown (pineSpire). BMX_OLD_TREES=1 = the old solid crowns, no cards.
 
 ## a chunk's card twins are drawn only while the camera is this close to the chunk's middle: the card band's end (48 m,
 ## deco_fade.gdshaderinc CARD_OUT) + half a chunk's diagonal (34 m) + the camera's distance from the rider
@@ -19,9 +24,12 @@ const TEX_H := 128
 
 ## pine crown: whorls of drooping branch cards up the axis
 const PINE_TOP := 2.85
-const PINE_WHORLS := 15
+## [whorls, branches x, card width x, seed, droop x]: LOD0 / LOD1
+const PINE_LOD := [[15, 1.0, 1.0, 1979, 1.0], [10, 0.45, 1.5, 1980, 1.7]]
 ## leafy crown: cards in a ball (CardBush's recipe without the ground)
 const BLOB := {"cards": 58, "r": Vector3(1.0, 0.95, 1.0), "s0": 0.6, "s1": 0.95, "seed": 4242}
+## LOD1: this many cards, this much bigger
+const BLOB_LOD1 := [22, 1.45]
 
 static var _tex := {}
 static var _mat := {}
@@ -68,26 +76,106 @@ static func add_twin(solid: MultiMeshInstance3D, solid_mesh: String, vis := 0.0)
 	solid.set_instance_shader_parameter("fade_mode", 3.0)
 	mi.set_instance_shader_parameter("fade_mode", 4.0)
 	if solid_mesh == "pine":
-		# the trunk carries on up through the see-through crown, tapering to the tip (it stopped at the crown's foot:
-		# the crown floated on a stump). Only with the cards: the solid cone hides it anyway.
-		var sm := MultiMesh.new()
-		sm.transform_format = MultiMesh.TRANSFORM_3D
-		sm.use_custom_data = mm.use_custom_data
-		sm.use_colors = mm.use_colors
-		sm.mesh = mesh("pineSpire")
-		sm.instance_count = mm.instance_count
-		sm.buffer = mm.buffer
-		var si := MultiMeshInstance3D.new()
-		si.name = String(solid.name) + "_spire"
-		si.multimesh = sm
-		si.material_override = material("spire")
-		si.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		solid.get_parent().add_child(si)
-		si.transform = solid.transform
-		if vis > 0.0:
-			si.visibility_range_end = vis
-		si.set_instance_shader_parameter("fade_mode", 4.0)
+		add_spire(solid)
+	add_billboard(solid, solid_mesh)
 	return mi
+
+
+const IMPOSTOR_PNG := "res://assets/textures/tree_cards/impostors.png"
+static var _bb := {}   # kind -> [quad mesh, material]
+
+## the crown list's billboard LOD (fade_mode 5): same instance buffer, no shadow (LOD1 casts it)
+static func add_billboard(crown: MultiMeshInstance3D, solid_mesh: String) -> MultiMeshInstance3D:
+	var b := _billboard(solid_mesh)
+	if b.is_empty():
+		return null
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_custom_data = crown.multimesh.use_custom_data
+	mm.use_colors = crown.multimesh.use_colors
+	mm.mesh = b[0]
+	mm.instance_count = crown.multimesh.instance_count
+	mm.buffer = crown.multimesh.buffer
+	var mi := MultiMeshInstance3D.new()
+	mi.name = String(crown.name) + "_billboard"
+	mi.multimesh = mm
+	mi.material_override = b[1]
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	crown.get_parent().add_child(mi)
+	mi.transform = crown.transform
+	mi.set_instance_shader_parameter("fade_mode", 5.0)
+	return mi
+
+
+## [quad mesh, material] for "pine" / "blob" crowns from the atlas' crown cells, [] without them
+static func _billboard(solid_mesh: String) -> Array:
+	var kind := "pine_crown" if solid_mesh == "pine" else "leafy_crown"
+	if _bb.has(kind):
+		return _bb[kind]
+	_bb[kind] = []
+	if not ResourceLoader.exists(IMPOSTOR_PNG):
+		return []
+	var j = JSON.parse_string(FileAccess.get_file_as_string(IMPOSTOR_PNG.get_basename() + ".json"))
+	if not j is Dictionary:
+		return []
+	var first := -1
+	var n := 0
+	var q := Vector3.ZERO
+	var cells: Array = j.get("trees", [])
+	for i in cells.size():
+		if cells[i].kind == kind:
+			if first < 0: first = i
+			n += 1
+			q += Vector3(float(cells[i].y0), float(cells[i].h), float(cells[i].w))
+	if n == 0:
+		return []
+	q /= n
+	# the quad's box in the instance's own units (the shader places it; this is what the culling sees)
+	var a := []
+	a.resize(Mesh.ARRAY_MAX)
+	a[Mesh.ARRAY_VERTEX] = PackedVector3Array([Vector3(-q.z * 0.5, q.x, -q.z * 0.5), Vector3(q.z * 0.5, q.x, q.z * 0.5),
+		Vector3(q.z * 0.5, q.x + q.y, q.z * 0.5), Vector3(-q.z * 0.5, q.x + q.y, -q.z * 0.5)])
+	a[Mesh.ARRAY_TEX_UV] = PackedVector2Array([Vector2(0, 1), Vector2(1, 1), Vector2(1, 0), Vector2(0, 0)])
+	a[Mesh.ARRAY_NORMAL] = PackedVector3Array([Vector3.BACK, Vector3.BACK, Vector3.BACK, Vector3.BACK])
+	a[Mesh.ARRAY_INDEX] = PackedInt32Array([0, 2, 1, 0, 3, 2])
+	var m := ArrayMesh.new()
+	m.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, a)
+	var mat := ShaderMaterial.new()
+	mat.shader = preload("res://scripts/world/tree_billboard.gdshader")
+	mat.set_shader_parameter("atlas", load(IMPOSTOR_PNG))
+	mat.set_shader_parameter("cells", float(j.get("cells", 8)))
+	mat.set_shader_parameter("cell0", float(first))
+	mat.set_shader_parameter("variants", float(n))
+	mat.set_shader_parameter("quad", q)
+	mat.set_shader_parameter("sway", 0.02 if solid_mesh == "pine" else 0.035)
+	_bb[kind] = [m, mat]
+	return _bb[kind]
+
+
+## a pine crown list's trunk up through its see-through crown, tapering to the tip (it stopped at the crown's foot: the
+## crown floated on a stump). Drawn with both card levels (fade_mode 1: the decorations' far fade), no shadow.
+static func add_spire(crown: MultiMeshInstance3D, internal := false) -> MultiMeshInstance3D:
+	if not enabled():
+		return null
+	var sm := MultiMesh.new()
+	sm.transform_format = MultiMesh.TRANSFORM_3D
+	sm.use_custom_data = crown.multimesh.use_custom_data
+	sm.use_colors = crown.multimesh.use_colors
+	sm.mesh = mesh("pineSpire")
+	sm.instance_count = crown.multimesh.instance_count
+	sm.buffer = crown.multimesh.buffer
+	var si := MultiMeshInstance3D.new()
+	si.name = String(crown.name) + "_spire"
+	si.multimesh = sm
+	si.material_override = material("spire")
+	si.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	if internal:
+		crown.get_parent().add_child(si, false, Node.INTERNAL_MODE_BACK)
+	else:
+		crown.get_parent().add_child(si)
+	si.transform = crown.transform
+	si.set_instance_shader_parameter("fade_mode", 1.0)
+	return si
 
 
 static func material(kind: String) -> ShaderMaterial:
@@ -105,20 +193,20 @@ static func material(kind: String) -> ShaderMaterial:
 	m.set_shader_parameter("specular", 0.1)
 	if kind == "needle":
 		m.set_shader_parameter("leaf_tex", texture("needle"))
-		m.set_shader_parameter("sway", 0.02)       # = TerrainGeo "leaf" (the solid pine): the twins sway together
+		m.set_shader_parameter("sway", 0.02)
 		m.set_shader_parameter("flutter", 0.003)
 		m.set_shader_parameter("backlight", 0.25)
 		m.set_shader_parameter("scatter", 0.6)
 		m.set_shader_parameter("roughness", 0.85)
 		m.set_shader_parameter("cutoff", 0.45)
-		m.set_shader_parameter("albedo", Vector3(1.2, 1.2, 1.2))   # (cards read darker than the cone: self-shading)
+		m.set_shader_parameter("albedo", Vector3(1.2, 1.2, 1.2))
 	else:
 		m.set_shader_parameter("leaf_tex", CardBush.texture("leaf"))
-		m.set_shader_parameter("sway", 0.035)      # = "leafSoft" (the solid blob)
+		m.set_shader_parameter("sway", 0.035)
 		m.set_shader_parameter("flutter", 0.006)
 		m.set_shader_parameter("backlight", 0.35)
 		m.set_shader_parameter("scatter", 0.85)
-		m.set_shader_parameter("albedo", CardBush.leaf_gain() * Vector3(1.25, 1.18, 1.3))   # (the leaf card is darker than the solid crown's white)
+		m.set_shader_parameter("albedo", CardBush.leaf_gain() * Vector3(1.25, 1.18, 1.3))   # (the bushes' card, a little brighter for crowns)
 	_mat[kind] = m
 	return m
 
@@ -207,11 +295,13 @@ static func _line(img: Image, a: Vector2, b: Vector2, c: Color, w: float) -> voi
 static func mesh(name: String) -> ArrayMesh:
 	if not _mesh.has(name):
 		match name:
-			"pineCard": _mesh[name] = _pine()
+			"pineCard": _mesh[name] = _pine(PINE_LOD[0])
+			"pineCardLod1": _mesh[name] = _pine(PINE_LOD[1])
+			"blobCardLod1": _mesh[name] = _blob(int(BLOB_LOD1[0]), float(BLOB_LOD1[1]))
 			"pineSpire":   # crown-space trunk: from just under the crown's foot to its tip (radius as the trunk's top / crown scale)
 				var g := GeoBuf.cylinder(0.006, 0.09, PINE_TOP + 0.15, 6).translate(0, (PINE_TOP + 0.15) * 0.5 - 0.1, 0)
 				_mesh[name] = g.to_mesh(false, TerrainGeo._soft_normals(g))
-			_: _mesh[name] = _blob()
+			_: _mesh[name] = _blob(int(BLOB.cards), 1.0)
 	return _mesh[name]
 
 
@@ -247,23 +337,24 @@ class _Buf:
 
 ## whorls of branch cards: each from the trunk out to the crown's outline, drooping, folded along its stem (a shallow V,
 ## so it has body from the side too), normals bent out from the axis (the crown lights like the cone it replaces)
-static func _pine() -> ArrayMesh:
+static func _pine(lod: Array) -> ArrayMesh:
 	var b := _Buf.new()
 	var rng := RandomNumberGenerator.new()
-	rng.seed = 1979
-	for w in PINE_WHORLS:
-		var t := (w + 0.5) / PINE_WHORLS
+	rng.seed = int(lod[3])
+	var whorls: int = lod[0]
+	for w in whorls:
+		var t := (w + 0.5) / whorls
 		var y := 0.04 + t * 2.45 + rng.randf_range(-0.05, 0.05)
 		var R := maxf(pine_radius(y + 0.1) * 1.25, 0.2)
-		var n := clampi(int(round(5.0 + R * 5.0)), 4, 10)
+		var n := clampi(int(round((5.0 + R * 5.0) * float(lod[1]))), 3, 10)
 		var a0 := rng.randf() * TAU
 		for k in n:
 			var a := a0 + TAU * (k + rng.randf_range(-0.25, 0.25)) / n
 			var out := Vector3(cos(a), 0, sin(a))
 			var side := Vector3(-out.z, 0, out.x)
 			var len := R * rng.randf_range(0.9, 1.08)
-			var droop := rng.randf_range(0.18, 0.38) * (1.0 - 0.4 * t) * len
-			var width := len * 0.8 + 0.2
+			var droop := rng.randf_range(0.18, 0.38) * (1.0 - 0.4 * t) * len * float(lod[4])
+			var width := (len * 0.8 + 0.2) * float(lod[2])
 			var root := Vector3(0, y + 0.05, 0) + out * 0.04
 			var tip := root + out * len + Vector3(0, -droop, 0)
 			var mid := root.lerp(tip, 0.5) + Vector3(0, droop * 0.18, 0)   # arched stem
@@ -311,12 +402,12 @@ static func _branch(b: _Buf, root: Vector3, mid: Vector3, tip: Vector3, side: Ve
 
 
 ## a leafy crown: CardBush's upright folded cards in a ball (no ground clamp), dome normals, inside darker
-static func _blob() -> ArrayMesh:
+static func _blob(cards: int, size_k: float) -> ArrayMesh:
 	var b := _Buf.new()
 	var rng := RandomNumberGenerator.new()
 	rng.seed = BLOB.seed
 	var R: Vector3 = BLOB.r
-	for k in int(BLOB.cards):
+	for k in cards:
 		var dir := Vector3(rng.randf_range(-1, 1), rng.randf_range(-0.75, 1), rng.randf_range(-1, 1)).normalized()
 		var rad := 0.3 + 0.7 * pow(rng.randf(), 0.5)
 		var p := dir * rad * R
@@ -325,7 +416,7 @@ static func _blob() -> ArrayMesh:
 		if d.dot(Vector3(dir.x, 0, dir.z)) < 0.0:
 			d = -d
 		var u2 := Vector3.UP.cross(d).normalized()
-		var s: float = BLOB.s0 + rng.randf() * (BLOB.s1 - BLOB.s0)
+		var s: float = (BLOB.s0 + rng.randf() * (BLOB.s1 - BLOB.s0)) * size_k
 		var fold := 0.1 * s
 		var vt: Array = []
 		for ry in 2:

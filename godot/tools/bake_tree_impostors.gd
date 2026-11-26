@@ -2,7 +2,10 @@ extends Node3D
 ## Bakes the far-view tree impostors (world/far_hills.gd): our card trees (card_tree.gd) rendered side-on, albedo only
 ## (unshaded, so the far shader lights them), on a transparent background, into one atlas of CELLS cells
 ## (assets/textures/tree_cards/impostors.png, BC7 + mipmaps on import) + impostors.json (per cell: kind, how much of the
-## cell's height the tree fills, its width). Cells 0-1 pines, 2-3 leafy trees. Re-run after changing the card trees:
+## cell's height the tree fills, its width). Cells 0-1 pines, 2-3 leafy trees (whole trees, coloured: the backdrop);
+## cells 4-5 pine crowns, 6-7 leafy crowns (crown only, white: the world chunks' billboard LOD, card_tree.gd, tinted by
+## each tree's own colour; their json entries carry y0 / h / w = the cell's quad in the crown instance's own units).
+## Re-run after changing the card trees:
 ##   godot --path godot res://tools/bake_tree_impostors.tscn
 
 const CW := 256          # one cell
@@ -10,7 +13,12 @@ const CH := 512
 const SS := 2            # rendered at this many times the cell size, then filtered down (smooth edges)
 const OUT := "res://assets/textures/tree_cards/impostors.png"
 ## [kind, crown size (py for a pine, sc for a leafy tree), instance colour]
-const VARIANTS := [["pine", 1.75, 0x3b7d4b], ["pine", 2.15, 0x2f6e45], ["leafy", 1.0, 0x6cb544], ["leafy", 1.2, 0x4f9a3a]]
+const VARIANTS := [["pine", 1.75, 0x3b7d4b], ["pine", 2.15, 0x2f6e45], ["leafy", 1.0, 0x6cb544], ["leafy", 1.2, 0x4f9a3a],
+	["pine_crown", 0.0, 0xffffff], ["pine_crown", 1.9, 0xffffff], ["leafy_crown", 0.0, 0xffffff], ["leafy_crown", 2.3, 0xffffff]]
+## crown cells: the crown at unit height (instance scale (A, 1, A)), its width squeezed by A into the 1 : 2 cell, so the
+## billboard is stretched by the world instance's own x / y scale exactly like the 3D crown (crown v[1] = the yaw)
+const PINE_A := 0.6
+const BLOB_A := 0.533
 
 
 func _ready() -> void:
@@ -45,7 +53,16 @@ func _ready() -> void:
 		vp.add_child(root)
 		var col := TerrainGeo.lin(int(v[2]))
 		var H: float
-		if v[0] == "pine":
+		var crown := {}   # crown cells: frame bottom / height in world units, the instance's scale
+		if v[0] == "pine_crown":
+			var smi := _one(root, TerrainGeo.MESH["pine"], TerrainGeo.MAT["leaf"], Transform3D(Basis(Vector3.UP, float(v[1])).scaled(Vector3(PINE_A, 1, PINE_A)), Vector3.ZERO), col)
+			CardTree.add_twin(smi, "pine")
+			crown = {"yb": -0.45, "fh": 3.45, "a": PINE_A}
+		elif v[0] == "leafy_crown":
+			var smi := _one(root, TerrainGeo.MESH["blob"], TerrainGeo.MAT["leafSoft"], Transform3D(Basis(Vector3.UP, float(v[1])).scaled(Vector3(BLOB_A, 1, BLOB_A)), Vector3.ZERO), col)
+			CardTree.add_twin(smi, "blob")
+			crown = {"yb": -1.6, "fh": 3.2, "a": BLOB_A}
+		elif v[0] == "pine":
 			var sc := 1.0
 			var py: float = v[1]
 			var cb := sc * 0.6
@@ -62,7 +79,11 @@ func _ready() -> void:
 			H = th + sc * 0.7 + sc * 1.05 * 1.45
 		# frame: the cell is 1 : 2; a tree fits by its height, a wide one by its width (frame width = 2.9 x its scale)
 		var fh := maxf(H * 1.06, (3.2 * float(v[1]) if v[0] == "leafy" else 0.0) * 2.0)
-		cam.position = Vector3(0, fh * 0.5 - 0.02, fh * 0.5 / tan(deg_to_rad(cam.fov * 0.5)))
+		var yb := -0.02
+		if not crown.is_empty():
+			fh = crown.fh
+			yb = crown.yb
+		cam.position = Vector3(0, yb + fh * 0.5, fh * 0.5 / tan(deg_to_rad(cam.fov * 0.5)))
 		for f in 8:
 			await RenderingServer.frame_post_draw
 		var img := vp.get_texture().get_image()
@@ -77,7 +98,12 @@ func _ready() -> void:
 			for x in CW:
 				if img.get_pixel(x, y).a > 0.5:
 					top = mini(top, y); x0 = mini(x0, x); x1 = maxi(x1, x)
-		meta.append({"kind": v[0], "fill": float(CH - top) / CH, "width": float(x1 - x0 + 1) / CW})
+		var m := {"kind": v[0], "fill": float(CH - top) / CH, "width": float(x1 - x0 + 1) / CW}
+		if not crown.is_empty():
+			m["y0"] = crown.yb
+			m["h"] = crown.fh
+			m["w"] = crown.fh * 0.5 / crown.a
+		meta.append(m)
 		root.queue_free()
 		await get_tree().process_frame
 	atlas.save_png(OUT)
