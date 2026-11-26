@@ -2153,6 +2153,10 @@ func respawn(new_world: bool) -> void:
 		var pxz := Env.s("BMX_PACK_SPAWN").split(",")
 		sp = Vector3(float(pxz[0]) - 9.0, 0.0, float(pxz[1]))
 		phys.reset_at(sp.x, sp.z, sp.y)
+	if Env.s("BMX_SPAWN_AT") != "":   # tests: "x,z,heading" (e.g. read off an F8 ride log) -> start there; Backspace comes back here
+		var sxz := Env.s("BMX_SPAWN_AT").split(",")
+		sp = Vector3(float(sxz[0]), float(sxz[2]) if sxz.size() > 2 else 0.0, float(sxz[1]))
+		phys.reset_at(sp.x, sp.z, sp.y)
 	if sp != Vector3.ZERO: terrain.update_stream(sp.x, sp.z, INF)
 	if Env.s("BMX_START_V") != "": phys.v = float(Env.s("BMX_START_V"))   # tests: roll in at this speed
 	rider.reset_pose()

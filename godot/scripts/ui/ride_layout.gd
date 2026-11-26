@@ -315,6 +315,9 @@ const PAGES := [
 		["Landing", [
 			["*landSwapRate", "How quickly the bike and rider swing over to the next turn in the first third of a second after touch-down. Low = heavy, high = snappy.", "Heavy", "Snappy"],
 			["camHeadingRate", "The camera does not jump round when you land turned: its heading turns at most this fast. Low = floaty, high / 0 = the old snap.", "Floaty", "Snap"],
+			["*airBodyMin", "Skips shorter than this (a fast bike bouncing off a berm face) keep the rider's ground pose; only longer flights get the air pose. 0 = every skip switches (the old wobble).", "Every skip", "Only big air"],
+			["airBodyIn", "How long the rider takes to go into the air pose off a lip.", "Snappy", "Smooth"],
+			["airBodyOut", "How long the rider takes to go back to the ground pose after touch-down.", "Snappy", "Smooth"],
 			["*landSlide", "Land on ground tilted sideways: the hit is softer, the rest slides you towards its low side.", "Sticks", "Slides"],
 			["*slamJolt", "The hit that throws him down (what gets through suspension, tyres and legs).", "Fragile", "Tough"],
 			["*landHeavy", "From this share of that, a landing is heavy: speed lost, a moment to recover.", "Soon", "Rarely"],
