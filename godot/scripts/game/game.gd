@@ -242,6 +242,21 @@ var _last_good := {}
 var dab_lin := 0.0
 var dab_k := 0.0
 var dab_side := -1.0
+## IDLE LIFE (2026-11-27, user + Riders Republic: "the bike is alive, moving all the time with micro movements when he stands"):
+## settled at a stop the rider never freezes - he shifts his weight (the bike tips onto the foot and back), turns the bars
+## and holds them. Drawing only, all eased. (A suspension bob - pushing the bike down - read as a landing every few seconds:
+## removed, user)
+## IDLE_* = how big; fades in over IDLE_IN s once settled. BMX_OLD_IDLE=1 = off, BMX_IDLE_PROBE=1 = IDLELIFE lines
+const IDLE_SHIFT := 0.07      # rad: the most a weight shift tips the bike more onto / off the foot
+const IDLE_BAR := 0.24        # rad: the most he turns the bars and holds them
+const IDLE_BAR_DRIFT := 0.05  # rad: the bars' slow wander between
+const IDLE_IN := 0.8          # s: fades in over this once settled on the foot
+var _OLD_IDLE := Env.raw("BMX_OLD_IDLE") != ""
+var _idle_k := 0.0
+var _idle_rng := RandomNumberGenerator.new()
+var _idle_shift := 0.0; var _idle_shift_v := 0.0; var _idle_shift_t := 0.0; var _idle_shift_next := 0.0
+var _idle_bar := 0.0; var _idle_bar_v := 0.0; var _idle_bar_t := 0.0; var _idle_bar_next := 0.0
+var _idle_lean := 0.0; var _idle_steer := 0.0
 const DAB_LEAN := 0.24       # rad (~14 deg) the bike leans onto the foot: a relaxed, stylish lean, the body stays upright
 const DAB_OUT := 0.36        # m from the bike's centre line to the foot on the ground
 const DAB_FWD := 0.10        # m ahead of the bottom bracket the foot goes down (a little forward, braced)
@@ -3896,6 +3911,32 @@ func _pedal_probe() -> void:
 
 ## Stopped with a foot down the rider is calm: now and then he looks round (off to the side, back up the
 ## trail over a shoulder, down at the foot, out ahead), holding each glance a while. Feeds lookYaw / lookPitch.
+## see IDLE_*: weight shifts and bars while settled at a stop (critically damped springs: no snaps)
+func _idle_life(dt: float) -> void:
+	var on: bool = not _OLD_IDLE and dab_k > 0.5 and _dab_hold > 0.4
+	_idle_k = move_toward(_idle_k, 1.0 if on else 0.0, dt / (IDLE_IN if on else 0.3))
+	var k := smoothstep(0.0, 1.0, _idle_k)
+	var h := minf(dt, 0.05)
+	if on:
+		_idle_shift_next -= h
+		if _idle_shift_next <= 0.0:   # a new weight shift: onto the foot (+) or toward the bike (-), held 1.5-5 s
+			_idle_shift_t = _idle_rng.randf_range(-1.0, 1.0)
+			_idle_shift_next = _idle_rng.randf_range(1.5, 5.0)
+		_idle_bar_next -= h
+		if _idle_bar_next <= 0.0:   # turn the bars somewhere and hold them, or back to straight
+			_idle_bar_t = 0.0 if _idle_rng.randf() < 0.35 else _idle_rng.randf_range(-1.0, 1.0)
+			_idle_bar_next = _idle_rng.randf_range(1.2, 4.0)
+	else:
+		_idle_shift_t = 0.0; _idle_bar_t = 0.0
+	var ss := Rider.crit_spring(_idle_shift, _idle_shift_v, _idle_shift_t, 0.35, h)
+	_idle_shift = ss.x; _idle_shift_v = ss.y
+	var bs := Rider.crit_spring(_idle_bar, _idle_bar_v, _idle_bar_t, 0.25, h)
+	_idle_bar = bs.x; _idle_bar_v = bs.y
+	_idle_lean = IDLE_SHIFT * _idle_shift * k
+	_idle_steer = (IDLE_BAR * _idle_bar + IDLE_BAR_DRIFT * sin(t * 0.37 + 1.3) * sin(t * 0.19)) * k
+	if Env.s("BMX_IDLE_PROBE") != "" and Engine.get_process_frames() % 15 == 0 and k > 0.0:
+		print("IDLELIFE k=%.2f lean=%.3f bars=%.3f stroke=%.4f y=%.3f" % [k, _idle_lean, _idle_steer, rig.susp.last_stroke if rig and rig.susp else 0.0, rig.global_position.y if rig else 0.0])
+
 func _idle_look(dt: float) -> void:
 	if dab_k < 0.5 or _dab_hold < 0.6:
 		_idle_tgt = Vector2.ZERO
@@ -4000,15 +4041,16 @@ func _process(dt: float) -> void:
 	drawn_pos = Vector3(_lerp_k("x"), _lerp_k("y"), _lerp_k("z"))
 	var body_y: float = _lerp_k("body_y")
 	_update_dab(dt, st)
+	_idle_life(dt)
 	_update_footout(dt, st)
 	_update_look(dt)
 	var wobble := sin(t * 2.3) * 0.025 * maxf(0.0, 1 - absf(st.v) / 2) * (1.0 - dab_k)
-	var dab_lean := -dab_side * _dab_lean_s * dab_k   # bike_lean > 0 tips the top to the rider's left
+	var dab_lean := -dab_side * (_dab_lean_s + _idle_lean) * dab_k   # bike_lean > 0 tips the top to the rider's left (+ idle weight shifts)
 	if rig.chain and phys.geared and phys.gear >= 0: rig.chain.set_gear(phys.gear, phys.cogs)
 	if st.crash_on: _mc.clear()   # (the motion cap starts fresh after a crash / get-up)
 	var mdt := minf(get_process_delta_time(), 0.05)
 	_lean_c = _mcap("bike_lean", st.bike_lean, mdt)
-	_steer_c = _mcap("steer", _bar_draw(st, mdt, dab_lean) + st.bar_catch, mdt)
+	_steer_c = _mcap("steer", _bar_draw(st, mdt, dab_lean) + st.bar_catch + _idle_steer, mdt)
 	var cb_on: bool = st.crash_on and st.crash_sim != null
 	if cb_on:   # the crashed bike's own body (CrashBikeCs): drawn between its last two steps
 		var cs = st.crash_sim
