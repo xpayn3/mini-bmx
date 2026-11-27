@@ -159,6 +159,8 @@ var pel_v := Vector3.ZERO
 var ch_s := Vector3.ZERO
 var ch_v := Vector3.ZERO
 var spring_init := false
+var _roll_dp := Vector3.ZERO; var _roll_dc := Vector3.ZERO   # how far the counter-roll moved the hips / chest this frame
+var _roll_dp_prev := Vector3.ZERO; var _roll_dc_prev := Vector3.ZERO   # ... last frame (see the body springs)
 
 
 static func mat(color: Variant, roughness := 0.75, metal := 0.0) -> StandardMaterial3D:
@@ -998,6 +1000,22 @@ const LIMB_BAR := 0.12      # m: knees keep this clear of the handlebar line in 
 const AIR_FACE := 0.7       # in a whip the torso's lean turns back this share of the bike's yaw (faces the flight)
 const AIR_HIP_SIDE := 0.5   # m: the hips' sideways room in the bike's frame in the air (ground: 0.22)
 const AIR_SIDE := 1.2       # rad: ... the torso bent sideways from the bike's up (ground: 0.6)
+# (2026-11-27, Project X slow corners, user: "he leans the bike, he is more or less straight; the upper body must not move";
+# "not so seated, legs extended when slow"). Slow (`slow_up` 1 below SLOW_FROM m/s .. 0 by SLOW_TO): the upright body turns about
+# a point SLOW_PIVOT up the bike (fast: 0.3 m, the pedals) so it stays put in the world while the bike tips under it, the turn crouches are
+# left out and he rides tall (legs out, stands from walking pace). BMX_OLD_SLOWBODY=1 = before
+const SLOW_FROM := 4.0; const SLOW_TO := 11.0
+const SLOW_PIVOT := 0.18     # m up the bike the slow upright body turns about (fast: 0.3)
+const LEAN_REACH := 0.97    # share of the arm's length the arms may reach to, leaned with the body countered (see _constrain)
+const HIP_SIDE := 0.22      # m: the hips' room off the bike's middle sideways on the ground (the hips box)
+const CORNER_HIP := 0.07    # m: the hips drop into a deep turn (one crouch, see update_pose)
+const CORNER_CHEST := 0.08  # m: the chest drops (and goes 4 cm forward)
+const OUT_ELBOW_DOWN := 0.7  # how far the outside (higher) grip's elbow is turned down + back, fully leaned (see the arms)
+const SLOW_TALL := 0.05      # m: the hips higher (legs extended) riding slow
+static var _OLD_SLOWBODY := Env.raw("BMX_OLD_SLOWBODY") != ""
+var slow_up := 0.0           # 0..1, see SLOW_*: eased, ground only
+var _body_roll := 0.0        # the body's counter-roll against the bike on the ground (rad): the torso's sideways limit is
+                             # measured from it, not from the bike's up
 const AIR_HIP_SHARE := 0.3   # in the air the hips counter only this share of the bike's lay-over (they stay on the bike)
 const AIR_CHEST_CAP := 0.75  # rad: the upper body stays at most this much more upright than the bike in the air
 static var _OLD_AIRTILT := Env.raw("BMX_OLD_AIRTILT") != ""
@@ -1781,6 +1799,8 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# (the idle balance wobble is gone once the rider commits to a sprint: no random drifting)
 	var wig: float = clampf(1 - absf(v) / 3, 0, 1) * sty.sway * float(sty.slowWobble) * (1.0 - 0.9 * clampf(eff * 1.5, 0.0, 1.0))
 	var air := _num(p, "air")
+	var su_t: float = 0.0 if _OLD_SLOWBODY else (1.0 - smoothstep(SLOW_FROM, SLOW_TO, absf(v))) * (1.0 - clampf(air, 0.0, 1.0))
+	slow_up += (su_t - slow_up) * (1.0 - exp(-4.0 * minf(dt, 0.05)))
 	var comp: float = _num(p, "compress") * sty.crouch
 	var old_lp := Env.s("BMX_OLD_LANDPOSE") != ""
 	# the jump, like a rider who knows how. Preload: he sinks low and back over the rear wheel, chest down over the bars,
@@ -1847,12 +1867,12 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	if not spring_init: sm_airst = air_tg
 	var air_st: float = air if old_lp else sm_airst
 	if not old_lp: comp *= 1.0 - sm_reach * air
-	var stand: float = maxf(pedal, clampf(0.85 * float(sty.attackStand), 0.0, 1.3) * smoothstep(1.5, 5.0, absf(v)) * (1.0 - air_st))
+	var stand: float = maxf(pedal, clampf(0.85 * float(sty.attackStand), 0.0, 1.3) * (smoothstep(1.5, 5.0, absf(v)) if _OLD_SLOWBODY else smoothstep(0.6, 2.2, absf(v))) * (1.0 - air_st))
 
 	# pelvis
 	var pelvis := Vector3(
 		-0.16 - 0.07 * air * float(sty.airCrouch) + 0.06 * pedal * sty.standPedal - float(sty.standBack) * stand - comp * 0.25,
-		0.80 - comp + (float(sty.standHeight) * stand + 0.05 * spr) * sty.standPedal + 0.035 * bob + 0.14 * aero_a - 0.07 * aero_g,   # (forward: in the air legs extend; on the ground knees bend into the tuck)
+		0.80 - comp + (float(sty.standHeight) * stand + 0.05 * spr + SLOW_TALL * slow_up * stand) * sty.standPedal + 0.035 * bob + 0.14 * aero_a - 0.07 * aero_g,   # (forward: in the air legs extend; on the ground knees bend into the tuck)
 		sway * sty.hipSway + hip_rock + shift * 0.3 + sin(t * 2.1) * 0.02 * wig) + fit
 	pelvis.x += sty.hipX * (1 - 0.5 * pedal) + 0.10 * aero_a - 0.05 * aero_g - 0.03 * eff   # sprint start: hips stay back over the saddle nose, the chest goes forward instead; forward over the cranks (air stick: hips forward; ground tuck: a touch back)
 	pelvis.y += 0.02 * eff                                               # up tall to stamp down
@@ -2180,10 +2200,12 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		air_piv = 0.0
 	var pel0 := pelvis
 	var ch0 := chest
+	var roll_piv: float = lerpf(0.3, SLOW_PIVOT, slow_up)   # (slow: low, so the upright body stays put in the world, see SLOW_*)
+	_roll_dp = Vector3.ZERO; _roll_dc = Vector3.ZERO
 	if cr != 0.0 or cr_c != 0.0:
 		var c := cos(cr)
 		var sn := sin(cr)
-		var y0 := 0.3
+		var y0: float = roll_piv
 		var dy := pelvis.y - y0
 		var dz := pelvis.z
 		pelvis.y = y0 + dy * c - dz * sn
@@ -2194,6 +2216,16 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		dz = chest.z
 		chest.y = y0 + dy * c - dz * sn
 		chest.z = dy * sn + dz * c
+		# (2026-11-27, on the ground: the hips slide out off the bike only as far as their box (HIP_SIDE), the torso is turned
+		# upright about them by the chest's counter-roll. Turned as one about a point low on the bike, the hips swung out past
+		# the box, the limit pulled them back with the chest left where it was and the spine stood ~10-25 deg off the counter-
+		# roll - the upper body sat at odd angles in deep turns. BMX_OLD_SLOWBODY=1 = the turn about the pivot)
+		var g_k: float = 0.0 if _OLD_SLOWBODY else 1.0 - clampf(air, 0.0, 1.0)
+		if g_k > 0.0:
+			var pel_g := Vector3(pelvis.x, pelvis.y, clampf(pelvis.z, -HIP_SIDE, HIP_SIDE))
+			var ch_g: Vector3 = pel_g + Basis(Vector3.RIGHT, cr_c) * (ch0 - pel0)
+			pelvis = pelvis.lerp(pel_g, g_k)
+			chest = chest.lerp(ch_g, g_k)
 		if air_piv > 0.0:
 			# about the chest: the chest stays (a little toward the low side), the torso turns by the chest's roll
 			var ty := pel0.y - ch0.y
@@ -2211,15 +2243,24 @@ func update_pose(dt: float, p: Dictionary) -> void:
 			var tz2: float = ch0.z - pel0.z
 			var ch_h := pelvis + Vector3(ch0.x - pel0.x, ty2 * ca2 - tz2 * sa2, ty2 * sa2 + tz2 * ca2)
 			chest = chest.lerp(ch_h, air)
-		pelvis.y -= absf(cr) * 0.12 * float(sty.turnLow)
-		# (2026-11-26, Project X reference: with the bike laid out under him the rider crouches into the turn, hips dropped, chest
-		# low and forward over the bars. A deeper crouch the further the bike is out from under the body, on the ground only.
-		# BMX_OLD_CORNERBODY=1 = off)
-		if not _OLD_CORNERCROUCH:
-			var crk: float = smoothstep(0.15, 0.7, absf(cr)) * (1.0 - air) * float(sty.turnLow) * float(sty.get("cornerCrouch", 1.0))
-			pelvis.y -= 0.07 * crk
-			chest.y -= 0.12 * crk
-			chest.x += 0.05 * crk
+		_roll_dp = pelvis - pel0; _roll_dc = chest - ch0
+		# the crouch into a turn (Project X: hips dropped, chest low and forward over the bars as the bike goes out from under him).
+		# (2026-11-27, user: "shoulders look weird in fast turns when the body sinks", "sinks too much"): two crouches stacked here -
+		# 0.12 m x the lean and a deep-turn one (hips -7, chest -12 cm) - plus the turn load's: the chest went ~25 cm down with the
+		# hands still on the bars and the shoulders were shoved up round the neck. Now one crouch, CORNER_HIP / CORNER_CHEST at
+		# most. Slow he rides tall (slow_up). BMX_OLD_SLOWBODY=1 = the stacked ones
+		if _OLD_SLOWBODY:
+			pelvis.y -= absf(cr) * 0.12 * float(sty.turnLow)
+			if not _OLD_CORNERCROUCH:
+				var crk0: float = smoothstep(0.15, 0.7, absf(cr)) * (1.0 - air) * float(sty.turnLow) * float(sty.get("cornerCrouch", 1.0))
+				pelvis.y -= 0.07 * crk0
+				chest.y -= 0.12 * crk0
+				chest.x += 0.05 * crk0
+		else:
+			var crk: float = smoothstep(0.1, 0.7, absf(cr)) * (1.0 - air) * float(sty.turnLow) * float(sty.get("cornerCrouch", 1.0)) * (1.0 - slow_up)
+			pelvis.y -= CORNER_HIP * crk
+			chest.y -= CORNER_CHEST * crk
+			chest.x += 0.04 * crk
 	# (in a whip the bike is yawed under him; his torso keeps facing the flight: its lean turns back against the bike's
 	# yaw, AIR_FACE of it, about the bike's up through the hips. The shoulders' own twist (below) does the rest)
 	var awh_pos: float = clampf(_num(p, "airWhip"), -1.4, 1.4) * air * (0.0 if _OLD_AIRBODY else AIR_FACE)
@@ -2300,6 +2341,15 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		var tgt := _constrain(pelvis, chest, p, sty, standing, aero, false)
 		pelvis = tgt[0]; chest = tgt[1]
 		if Env.s("BMX_JPOSE") != "" and sm_lip > 0.3: print("JPOSE lim pel=(%.2f,%.2f) ch=(%.2f,%.2f)" % [pelvis.x, pelvis.y, chest.x, chest.y])   # tests
+	# (2026-11-27, F8: "a quick little steer at low speed jolts the whole upper body") the springs below work in the BIKE's frame
+	# (for bumps). The counter-roll (the bike tipping under the body) moves their targets quickly in that frame, and they lagged
+	# and rang (damping 0.4): the body was carried over with the bike, then bounced back, 18 cm out and 7 cm back in 0.1 s. The
+	# counter-roll already has its own eased springs (roll_p / roll_c), so the spring state is moved by this frame's change of
+	# the roll's offset (_roll_dp / _roll_dc): the bump springs only see the rest. BMX_OLD_SLOWBODY=1 = off
+	if spring_init and not _OLD_SLOWBODY:
+		pel_s += _roll_dp - _roll_dp_prev
+		ch_s += _roll_dc - _roll_dc_prev
+	_roll_dp_prev = _roll_dp; _roll_dc_prev = _roll_dc
 	# critically-damped-ish springs -> follow-through
 	if not spring_init:
 		pel_s = pelvis
@@ -2493,6 +2543,16 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# piece, so the shoulder never leaves the chest - moving the shoulder joint alone tore it off the torso)
 	if not _OLD_SPRINT: tw_base += SPR_PULL_TWIST * 0.5 * (float(_arm_pull[1]) - float(_arm_pull[0])) * (1.0 - air)
 	var tw := Basis(tw_axis, tw_base + tw_air)
+	# (2026-11-27: the body's counter-roll (cr / cr_c above) only moved the hips' and chest's POSITIONS back toward upright; the
+	# shoulders were placed along the bike's axes, so they tilted ~80 % of the bike's lean whatever the body did - a slow corner
+	# with the bike laid under an upright rider still showed the whole upper body tipping with it. On the ground the body's
+	# frame is now the bike's turned by the chest's counter-roll (the torso is built on exactly that, see HIP_SIDE). Not
+	# shoulder_at (the air's): square to a forward-folded spine it only turns by ~cos(fold) of the roll. BMX_OLD_SLOWBODY=1 = off)
+	var roll_fix: float = 0.0 if _OLD_SLOWBODY else 1.0 - air
+	if roll_fix > 0.0: tw = Basis(Vector3.RIGHT, cr_c * roll_fix) * tw
+	# (the pelvis stays on the bike: it sits on the saddle / pedals and the spine bends sideways for the counter-roll. Rolled
+	# with the body it dropped a thigh ~15 cm into the rear tyre)
+	_body_roll = cr_c * roll_fix
 	# (2026-11-23, user: "the shoulder pops off") the shoulders' twist (a whip, a tabletop) is held to what both arms can
 	# still reach the grips from: the arm-reach limit above works with untwisted shoulders, so a big twist left a shoulder
 	# out of reach and the joint came apart. Never more twist than leaves both hands on (or within 1 % of) the grips
@@ -2753,7 +2813,20 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		if standing: pole_a = Vector3(-1.0, 0.0, side * 0.25).normalized()   # arms hanging: elbows point back
 		if _pk_eo != 0.0: pole_a = (pole_a + Vector3(0, 0, side * _pk_eo)).normalized()   # (Pose Lab: elbows out / in)
 		var hand_t: Vector3 = hand
-		var ika := limb_ik(shp, hand, L_UARM, L_FARM, pole_a, Vector3(0, -0.5, side), ELBOW_MIN, ELBOW_MAX, _bd_prev[2 + i], max_turn)
+		# (2026-11-27, user: "elbows too up" leaned over: the elbow's pole is "out, a little back / down" in the BIKE's frame. With
+		# the body held upright over a leaned bike, the outside arm's "out" tipped up toward the sky. It turns with the body's
+		# counter-roll, like the shoulders. BMX_OLD_SLOWBODY=1 = the bike's frame)
+		var pole2_a := Vector3(0, -0.5, side)
+		if not standing and absf(_body_roll) > 1e-4:
+			var br := Basis(Vector3.RIGHT, _body_roll)
+			pole_a = br * pole_a; pole2_a = br * pole2_a
+			# the outside grip rises toward the rider in a lean and that arm folds: riders keep the elbow out but DROPPED, not
+			# winged up to the shoulder. The higher grip's elbow swings down and back as the counter-lean grows (OUT_ELBOW_DOWN)
+			var other = p.get("handR" if i == 0 else "handL")
+			if other is Vector3 and hand.y > (other as Vector3).y + 0.01:
+				var dk: float = OUT_ELBOW_DOWN * clampf(absf(_body_roll) / 0.4, 0.0, 1.0)
+				pole_a = pole_a.lerp(br * Vector3(-0.35, -0.8, side * 0.45).normalized(), dk).normalized()
+		var ika := limb_ik(shp, hand, L_UARM, L_FARM, pole_a, pole2_a, ELBOW_MIN, ELBOW_MAX, _bd_prev[2 + i], max_turn)
 		_bd_prev[2 + i] = ika[2]
 		# arms never through the leg on their side (a deep lean, braking hard into a turn): the elbow goes out round it
 		ika[0] = _swing_clear(shp, ika[1], ika[0], side, [hp.lerp(ik[0], 0.3), ik[0], ik[0], ik[1]], LIMB_LIMB)
@@ -2883,9 +2956,15 @@ func _constrain(pelvis: Vector3, chest: Vector3, p: Dictionary, sty: Dictionary,
 		var reach := (L_UARM + L_FARM) * clampf(0.9 - 0.2 * float(sty.armBend), 0.55, 0.98)
 		# (on a jump face / popped: arms nearly straight, video 2 - the elbows' usual bend folded the chest onto the bars)
 		reach = lerpf(reach, (L_UARM + L_FARM) * FACE_REACH, maxf(_face_k, clampf(_num(p, "flipExt"), 0.0, 1.0)))   # (and hanging long off the bike mid-flip)
+		# (2026-11-27: leaned over with the body held more upright than the bike, the inside arm goes long - the bars tip away
+		# under the rider. Held to the usual elbow bend, this limit dragged the upright chest back over the bike: the spine leaned
+		# ~75 % of the bike whatever the counter-roll said. The arms may straighten as far as LEAN_REACH as the body counters
+		# 0.35 rad. BMX_OLD_SLOWBODY=1 = always the usual bend)
+		if not _OLD_SLOWBODY:
+			reach = lerpf(reach, (L_UARM + L_FARM) * LEAN_REACH, clampf(absf(_body_roll) / 0.35, 0.0, 1.0))
 		var worst := 0.0
 		for sd in [[-1.0, handL], [1.0, handR]]:
-			var shp := Vector3(chest.x - 0.03, chest.y - 0.04, chest.z + sd[0] * sty.shoulders)
+			var shp: Vector3 = chest + Basis(Vector3.RIGHT, _body_roll) * Vector3(-0.03, -0.04, float(sd[0]) * float(sty.shoulders))   # (on the body's frame, as drawn)
 			var over: float = shp.distance_to(sd[1]) - reach
 			if over > worst:
 				worst = over
@@ -2905,7 +2984,7 @@ func _constrain(pelvis: Vector3, chest: Vector3, p: Dictionary, sty: Dictionary,
 	# bike's up (back / forward, sideways) and never folds below the hips
 	pelvis.x = clampf(pelvis.x, -0.6, 0.22)
 	pelvis.y = clampf(pelvis.y, 0.42, 1.08)
-	var z_cap: float = lerpf(0.22, AIR_HIP_SIDE, clampf(_num(p, "air"), 0.0, 1.0)) if not _OLD_AIRBODY else 0.22   # (air: an upright body over a laid-over bike)
+	var z_cap: float = lerpf(HIP_SIDE, AIR_HIP_SIDE, clampf(_num(p, "air"), 0.0, 1.0)) if not _OLD_AIRBODY else 0.22   # (air: an upright body over a laid-over bike)
 	pelvis.z = clampf(pelvis.z, -z_cap, z_cap)
 	if probe: _pp_mark(2, pelvis, chest)
 	# ---- never through the handlebar. The chest and the helmet keep clear of the bar / stem (the middle of the two
@@ -2918,9 +2997,16 @@ func _constrain(pelvis: Vector3, chest: Vector3, p: Dictionary, sty: Dictionary,
 		var head_off := Vector2(0.05 + float(sty.lookAhead) + 0.04 * aero + TUCK_HEAD.x * speed_tuck_k, 0.2 + float(sty.neck) + TUCK_HEAD.y * speed_tuck_k)
 		var push := Vector2.ZERO
 		var deep := 0.0
+		# (2026-11-27: seen from the side only, a chest held upright out past the end of a leaned bike's bar - a slow corner,
+		# 0.5-0.7 m to the outside - read as inside the bar and the whole upper body was shoved up / back up to 26 cm, on and off.
+		# What sticks out sideways past the grips needs that much less clearance. BMX_OLD_SLOWBODY=1 = side view only)
+		var bar_hw: float = absf(handL.z - handR.z) * 0.5
+		var ez: float = 0.0 if _OLD_SLOWBODY else maxf(0.0, absf(chest.z - bar_c.z) - bar_hw)
 		for pass_i in 2:
 			for which in 2:
 				var bar_r: float = BAR_HEAD if which == 1 else BAR_CHEST
+				bar_r = sqrt(maxf(0.0, bar_r * bar_r - ez * ez))
+				if bar_r < 1e-3: continue
 				var d2b := Vector2(chest.x - bar_c.x, chest.y - bar_c.y) + push + (head_off if which == 1 else Vector2.ZERO)
 				var dl2 := d2b.length()
 				if dl2 >= bar_r: continue
@@ -2964,7 +3050,9 @@ func _constrain(pelvis: Vector3, chest: Vector3, p: Dictionary, sty: Dictionary,
 	# hips it is (atan2 there flips between +-180 deg as it crosses over: the torso snapped back and forth)
 	var f_ang := 1.4 if tv0.y < 0.05 else clampf(atan2(tv0.x, tv0.y), -0.45, 1.4)
 	var s_cap: float = lerpf(0.6, AIR_SIDE, clampf(_num(p, "air"), 0.0, 1.0)) if not _OLD_AIRBODY else 0.6
-	var s_ang := clampf(asin(clampf(tv0.z / tl0, -1.0, 1.0)), -s_cap, s_cap)   # sideways (more in the air: the bike laid under him)
+	# (sideways: from the body's counter-roll (_body_roll), not the bike's up: measured from the bike's up an upright torso over a
+	# leaned bike read as bent 30-50 deg and was pulled back over with the bike)
+	var s_ang := clampf(asin(clampf(tv0.z / tl0, -1.0, 1.0)) - _body_roll, -s_cap, s_cap) + _body_roll   # (more in the air: the bike laid under him)
 	chest = pelvis + Vector3(sin(f_ang) * cos(s_ang), cos(f_ang) * cos(s_ang), sin(s_ang)) * tl0
 	if probe: _pp_mark(5, pelvis, chest)
 	# the torso never stretches or squashes: past its length range the hips follow the chest

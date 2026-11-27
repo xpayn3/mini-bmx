@@ -258,7 +258,9 @@ const FO_SKIM := 0.05         # m above the ground
 var fo_k := 0.0               # how far out (eased 0..1)
 var fo_side := -1.0           # -1 left, +1 right
 var _fo_lin := 0.0
-var _OLD_FOOTOUT := Env.raw("BMX_OLD_FOOTOUT") != ""
+# (2026-11-27, user: "remove this leg out on lean at low speeds, it ruins our style": slow turns are the bike laid under an
+# upright body with both feet on the pedals, Project X style. Off; BMX_FOOTOUT=1 turns it back on for tests)
+var _OLD_FOOTOUT := Env.raw("BMX_OLD_FOOTOUT") != "" or Env.raw("BMX_FOOTOUT") == ""
 var _FO_PROBE := Env.raw("BMX_FOOTOUT_PROBE") != ""
 var _dab_vprev := 0.0
 var _dab_dec := 0.0          # smoothed deceleration (m/s^2): slowing to a stop brings the foot out early
@@ -2819,10 +2821,11 @@ var _jit := {}
 ## per s²]). Normal riding it tracks within ~0.03 s; a single bad step (a grip limit snapping, a bump spike, a
 ## clamp letting go) can no longer jolt the torso, the head or the bike. The physics and the ride feel are untouched
 const MCAP := {
-	"bike_lean": [10.0, 160.0], "steer": [9.0, 200.0], "counter": [7.0, 110.0], "head_roll": [8.0, 120.0],
+	"bike_lean": [10.0, 160.0], "steer": [9.0, 200.0], "counter": [7.0, 110.0], "body_roll": [6.0, 100.0], "head_roll": [8.0, 120.0],
 	"lat_g": [6.0, 80.0], "hip_shift": [1.6, 30.0], "absorb": [5.0, 220.0], "body_stick": [6.0, 80.0],
 }
 var _mc := {}
+static var _OLD_BODYEASE := Env.raw("BMX_OLD_SLOWBODY") != ""
 var _lean_c := 0.0; var _steer_c := 0.0   # this frame's capped bike lean / bars (the bike and the rider's pose share them)
 ## the bars as drawn (2026-11-23, research review #5; drawing only, the physics' steer is unchanged). The physics' steer is
 ## the turn on the ground; the bars turn about the tilted head tube and a leaned wheel turns more on the ground than the
@@ -4101,7 +4104,7 @@ func _process(dt: float) -> void:
 		var fw := Vector3(cos(st.course if not is_nan(st.course) else st.heading), 0, -sin(st.course if not is_nan(st.course) else st.heading))
 		var sd := fw.cross(Vector3.UP).normalized()
 		var hz := Vector2(up.dot(fw), up.dot(sd))
-		print("BODYUP air=%s bike_lean=%.0f whip_yaw=%.0f | torso tilt from vertical=%.0f, faces %.0f deg off the flight | head %.2f m to the side" % [st.air, rad_to_deg(st.bike_lean), rad_to_deg(st.slip), rad_to_deg(acos(clampf(up.y, -1, 1))), rad_to_deg(atan2(hz.y, hz.x)), (hd_w - rig.global_position).dot(sd)])
+		print("BODYUP v=%.1f shoulder_roll=%.0f head_up_side=%.0f air=%s bike_lean=%.0f whip_yaw=%.0f | torso tilt from vertical=%.0f, faces %.0f deg off the flight | head %.2f m to the side" % [st.v, rad_to_deg(asin(clampf(((gt * rider.skeleton.bone_rider("LeftUpperArm").origin) - (gt * rider.skeleton.bone_rider("RightUpperArm").origin)).normalized().y, -1, 1))), rad_to_deg(asin(clampf((hd_w - hp).normalized().dot(sd), -1, 1))), st.air, rad_to_deg(st.bike_lean), rad_to_deg(st.slip), rad_to_deg(acos(clampf(up.y, -1, 1))), rad_to_deg(atan2(hz.y, hz.x)), (hd_w - rig.global_position).dot(sd)])
 	if Env.s("BMX_LAND_SHOT") != "" and _land_shots < 12:   # tests: 12 shots, 0.06 s apart, from just before a touch-down
 		if _land_shots == 0 and st.air and st.air_time > 0.5 and st.land_prep > 0.6: _land_t = t
 		if _land_t >= 0.0 and t - _land_t >= _land_shots * 0.06:
@@ -4187,7 +4190,15 @@ func _process(dt: float) -> void:
 		pi["lean"] = _lean_c + st.rock
 		pi["steer"] = _steer_c
 		pi["yawRate"] = _yaw_s
-		pi["counter"] = _mcap("counter", st.counter, pdt)
+		# (2026-11-27, F8: "a quick little steer at low speed jolts the whole upper body"): the bike's lean and the counter were
+		# eased separately (10 vs 7 rad/s), so when the bike tipped quickly the counter lagged and the body was carried over
+		# with the bike for a moment, then pulled back (the chest 32 cm sideways in the world in 0.1 s). The body is eased as
+		# its own layer now - its lean in the world, slower and heavier than the bike's - and the counter is what's left between
+		# them. BMX_OLD_SLOWBODY=1 = the counter eased on its own
+		if _OLD_BODYEASE:
+			pi["counter"] = _mcap("counter", st.counter, pdt)
+		else:
+			pi["counter"] = _lean_c - _mcap("body_roll", st.bike_lean - st.counter, pdt)
 		pi["rockRoll"] = st.rock
 		pi["frameY"] = _frame_y
 		pi["headRoll"] = _mcap("head_roll", st.bike_lean * 0.85, pdt)
