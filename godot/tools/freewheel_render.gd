@@ -1,12 +1,12 @@
 extends SceneTree
 ## Renders FreewheelSynth (C#) to a mono 16-bit WAV and prints its level + brightness.
 ## godot --headless -s res://tools/freewheel_render.gd -- out.wav [kmh=30] [secs=4] [sweep=1] [<FreewheelSound key>=v ...]
-## sweep=1: speed runs 5 -> kmh over the file. Uses the Stock values unless overridden.
+## shake=0..1: road vibration (FreewheelSynth.SetShake). sweep=1: speed runs 5 -> kmh over the file. Uses the Stock values unless overridden.
 
 func _init() -> void:
 	var a := OS.get_cmdline_user_args()
 	var out := a[0] if a.size() > 0 else "user://freewheel.wav"
-	var c := {"kmh": 30.0, "secs": 4.0, "sweep": 0.0}
+	var c := {"kmh": 30.0, "secs": 4.0, "sweep": 0.0, "shake": 0.0}
 	for r in FreewheelSound.PARAMS: c[r[0]] = float(r[2])
 	for s in a.slice(1):
 		var kv: PackedStringArray = s.split("=")
@@ -14,6 +14,7 @@ func _init() -> void:
 	var syn = load("res://scripts/game/FreewheelSynth.cs").new()
 	syn.SetParams(c.pitch, c.ring, c.crack, c.crack_len, c.detune, c.tilt, c.uneven, c.jitter, c.vary)
 	syn.SetSpeedParams(c.poe, c.warble, c.sp_pitch, c.sp_bright, c.sp_ring, c.repeat, c.sp_soft)
+	syn.SetShake(c.shake)
 	var sr := 44100.0
 	var n := int(c.secs * sr)
 	var data := PackedByteArray()

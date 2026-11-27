@@ -3394,6 +3394,35 @@ func _step_lip(dt: float, f: Vector3, brake: bool) -> void:
 		host.susp.update(dt, {"air": air, "load": maxf(load, -compress * 2.5), "brake": 1.0 if (brake and not air) else 0.0,
 			"bumpF": 0.0 if air else w_f - (y + (L - BB_REAR) * sp), "bumpR": 0.0 if air else w_r - (y - BB_REAR * sp)})
 
+## the rear wheel's own spin (rad/s; 2026-11-27, for the freewheel sound and the drawn wheel). On the ground
+## the tyre holds it to the ground speed (0 while the rear is locked). Off the ground (a jump, a nose
+## manual, a skip) it spins free: bearings, seals and air slow it only a little, the rear brake stops it in
+## ~0.3 s, and pedalling spins it up through the pawls (the driver = the cranks x the drive ratio).
+## Touching down, the tyre grabs it back to the ground speed at once. BMX_OLD_FW=1 = always v / RWR.
+var wr_w := 0.0
+var _wr_old := Env.s("BMX_OLD_FW") != ""
+const WR_BEARING := 0.35      # rad/s^2: hub bearings + freehub drag on a free-spinning wheel
+const WR_AIR := 0.0005        # 1/s per rad/s: the spokes / tyre's air drag
+const WR_BRAKE := 90.0        # rad/s^2 at a full rear lever, wheel in the air
+var wr_knock := 0.0          # the biggest one-tick change of the rear wheel's vertical speed since the sound read it (m/s)
+var _wr_vr := 0.0
+var wr_vib2 := 0.0; var wr_vibn := 0   # sum of squared one-tick changes of the rear wheel's vertical speed (+ how many ticks) since the sound read it
+func _rear_spin_step(dt: float) -> void:
+	if not (air or rear_air):
+		var dv := absf(vw_r - _wr_vr)
+		wr_knock = maxf(wr_knock, dv)
+		wr_vib2 += dv * dv; wr_vibn += 1
+	_wr_vr = vw_r
+	var ground_w := 0.0 if skid else v / RWR
+	if _wr_old or not (air or rear_air):
+		wr_w = ground_w
+		return
+	var a := WR_BEARING + WR_AIR * wr_w * wr_w + WR_BRAKE * brake_r
+	wr_w = move_toward(wr_w, 0.0, a * dt)
+	# the legs drive the wheel through the pawls only while the driver is the faster one
+	if pedal > 0.05:
+		wr_w = maxf(wr_w, crank_rate(v / RWF, gear_k(), T.topSpeed, sprint) * pedal * 2.78 * gear_k() * T.topSpeed * RWF / RWR)
+
 ## stage 11: wheels and cranks turning, the body in the air, effects
 func _step_wheels(dt: float, f: Vector3, in_water: bool, va: float) -> void:
 	# --- wheels / cranks ---
@@ -3407,7 +3436,8 @@ func _step_wheels(dt: float, f: Vector3, in_water: bool, va: float) -> void:
 		crank -= clampf(dg_vR, -1.0, 2.0) * CHAIN_GROWTH / CRANK_ARM * kk * dt
 		kick_to = clampf(absf(dg_vR) * kk, 0.0, 1.5) / 1.5
 	_kick_k += (kick_to - _kick_k) * minf(1.0, dt * 25.0)
-	if not skid: wheel_r += v / RWR * dt
+	_rear_spin_step(dt)
+	wheel_r += wr_w * dt
 	if v < -0.05 and not air and not skid:
 		# rolling backwards the freewheel's pawls catch: the chain turns the cranks back with the wheel
 		crank += v / RWR / (2.78 * gear_k() * T.topSpeed) * dt

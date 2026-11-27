@@ -131,6 +131,43 @@ func _setup_chain() -> void:
 var _crank_last := 0.0
 var _crank_w := 0.0   # how fast the cranks really turn (rad/s, smoothed)
 
+# freewheel: the hub shell's spin over the driver's (rad/s of the rear wheel, smoothed)
+var OLD_FW := Env.s("BMX_OLD_FW") != ""   # = the old rule: bike speed whenever the gas key is up
+var _hw_crank := 0.0; var _hw_init := false
+var _hw_cw := 0.0     # the cranks' turn rate (rad/s, signed, smoothed)
+var _hub_w := 0.0
+
+func _hub_overrun(dt: float, st) -> float:
+	if dt <= 0.0: return maxf(_hub_w, 0.0)
+	var phys = game.phys
+	# the rear wheel: the physics turns it at exactly v / RWR, and not at all while the rear is locked
+	# the live physics has the rear wheel's own spin (free in the air, braked, spun by the legs: wr_w);
+	# a replay state only the speed and the skid
+	var wheel_w: float
+	if "wr_w" in st:
+		wheel_w = float(st.wr_w)
+	else:
+		wheel_w = 0.0 if bool(st.skid_fx) else float(st.v) / float(st.RWR)
+	# the cranks: measured off their angle (pedalling, slowing legs, settling to the coasting angle, kickback);
+	# smoothed over ~0.1 s: a drawn frame holds 0..3 physics ticks
+	var crank: float = float(st.crank)
+	var dc := crank - _hw_crank
+	_hw_crank = crank
+	if not _hw_init or absf(dc) > 100.0 * dt + 1.0:   # first frame / a respawn or replay jump
+		_hw_init = true
+		dc = _hw_cw * dt
+	_hw_cw += (dc / dt - _hw_cw) * minf(1.0, dt * 10.0)
+	# rear turns per crank turn (the physics spins the cranks off the FRONT wheel's rate, w = v / RWF, so
+	# that ratio x RWF / RWR)
+	var ratio := 2.78
+	if phys != null:
+		ratio = 2.78 * phys.gear_k() * float(phys.T.topSpeed) * float(phys.RWF) / maxf(float(phys.RWR), 0.05)
+	var raw := wheel_w - _hw_cw * ratio
+	# pawls engaged: the driver keeps up within a few % (chain slack, smoothing lag) = no clicks
+	raw = signf(raw) * maxf(0.0, absf(raw) - (0.06 * absf(wheel_w) + 0.3))
+	_hub_w += (raw - _hub_w) * minf(1.0, dt * 20.0)
+	return maxf(_hub_w, 0.0)
+
 func _update_chain(dt: float, va: float, on_ground: bool, st) -> void:
 	if chain.stream == null: return
 	# only while the legs spin the cranks: the raw gas key (the smoothed pedal lingers ~0.5 s after letting
@@ -309,14 +346,21 @@ func update_audio(dt: float) -> void:
 		var c := FreewheelSound.current
 		fw_synth.SetParams(c.pitch, c.ring, c.crack, c.crack_len, c.detune, c.tilt, c.uneven, c.jitter, c.vary)
 		fw_synth.SetSpeedParams(c.poe, c.warble, c.sp_pitch, c.sp_bright, c.sp_ring, c.repeat, c.sp_soft)
-	var fs: float = va
-	# (the raw key, not the smoothed pedal: that took ~0.4 s to fall under the threshold after letting go)
-	var coasting: bool = st.throttle_in < 0.1 and va > 0.12 and not st.crash_on
+	# (2026-11-27) the pawls click as fast as the hub shell overruns the driver: rear wheel spin (its real
+	# angle, so a locked / skidding rear is silent) minus the cranks' spin x the drive ratio (the cassette
+	# turns with the cranks). Pedalling = driver engaged = silent; legs slowing / stopped = the clicks build
+	# with the gap; the cranks settling to the coasting angle or kicked back move them a touch.
+	# fs = that overrun as a rim speed (m/s), so loudness / the fast-click tone follow it too.
+	var fs: float = _hub_overrun(dt, st) * float(st.RWR)
+	if OLD_FW:
+		fs = va if (st.throttle_in < 0.1 and va > 0.12) else 0.0
+	var coasting: bool = fs > 0.12 and not st.crash_on
 	if FreewheelSound.preview_speed > 0.0 and va < 0.5:
 		fs = FreewheelSound.preview_speed; coasting = true
 	var poe := FreewheelSound.get_value("poe")
 	fw_clicks = fs / st.RWR / TAU * poe if coasting else 0.0
 	fw_amp = 0.23 * FreewheelSound.get_value("vol") * smoothstep(0.1, 1.0, fs) 		* (1.0 - FreewheelSound.get_value("fade") * clampf((fs - 8.0) / 10.0, 0.0, 1.0))
+	_fw_hits(dt, st)
 	# at speed the pawls have less time to drop: higher, brighter, shorter clicks (0 slow .. 1 full)
 	var sp0 := FreewheelSound.get_value("sp_from") / 3.6
 	fw_fast = smoothstep(sp0, maxf(sp0 + 0.5, FreewheelSound.get_value("sp_full") / 3.6), fs)
@@ -328,9 +372,42 @@ func update_audio(dt: float) -> void:
 	_fill()
 	_fill_fw()
 	if Env.s("BMX_AUDIO_PROBE") != "" and Engine.get_process_frames() % 30 == 0:
-		print("FW v=%.1f pedal=%.2f clicks/s=%.0f amp=%.2f fast=%.2f peak=%.3f | GRAVEL surf=%d amp=%.2f wind=%.2f | CHAIN db=%.1f rate=%.2f crank_w=%.1f" % [va, st.pedal, fw_clicks, fw_amp, fw_fast, fw_peak, st.surf, g_amp, wind, chain.volume_db, chain.pitch_scale, _crank_w])
-		fw_peak = 0.0
+		print("FW v=%.1f vib=%.3f hit=%.2f shake=%.2f wr=%.1f air=%s knocks=%d hub_w=%.1f pedal=%.2f clicks/s=%.0f amp=%.2f fast=%.2f peak=%.3f | GRAVEL surf=%d amp=%.2f wind=%.2f | CHAIN db=%.1f rate=%.2f crank_w=%.1f" % [va, _fw_vibp, _fw_hitp, _fw_shake, float(st.wr_w) if "wr_w" in st else 0.0, st.air, _fw_knocks, _hub_w, st.pedal, fw_clicks, fw_amp, fw_fast, fw_peak, st.surf, g_amp, wind, chain.volume_db, chain.pitch_scale, _crank_w])
+		fw_peak = 0.0; _fw_vibp = 0.0; _fw_hitp = 0.0
 
+
+# hits on the rear wheel: a sharp change of its vertical speed (a rock, a root, a landing) knocks the hub,
+# and the pawls riding the ratchet bounce = a short loose rattle (FreewheelSynth.Knock); rough ground's
+# steady shaking makes the clicks uneven in loudness (the hub never sits still)
+var _fw_knocks := 0
+var _fw_vibp := 0.0; var _fw_hitp := 0.0
+var _fw_vr := 0.0; var _fw_rair := true; var _fw_shake := 0.0; var _fw_kcool := 0.0
+func _fw_hits(dt: float, st) -> void:
+	if dt <= 0.0 or not ("wr_knock" in st) or OLD_FW: return
+	var rair: bool = bool(st.air) or bool(st.rear_air)
+	var hit := 0.0
+	if "wr_knock" in st:
+		hit = float(st.wr_knock); st.wr_knock = 0.0
+	var vib := 0.0   # rms one-tick change of the rear wheel's vertical speed this frame (m/s)
+	if "wr_vibn" in st and int(st.wr_vibn) > 0:
+		vib = sqrt(float(st.wr_vib2) / int(st.wr_vibn)); st.wr_vib2 = 0.0; st.wr_vibn = 0
+	_fw_vibp = maxf(_fw_vibp, vib); _fw_hitp = maxf(_fw_hitp, hit)
+	if rair:
+		hit = 0.0
+	elif _fw_rair:
+		hit = maxf(hit, 2.5)   # the rear wheel touching down (the tyre grabs it back to the ground speed)
+	_fw_rair = rair
+	_fw_kcool = maxf(0.0, _fw_kcool - dt)
+	# one physics tick: 0.4 m/s = a small knock .. 3 m/s+ = a hard hit
+	if hit > 0.4 and _fw_kcool <= 0.0 and fw_synth != null and fw_clicks > 0.0:
+		fw_synth.Knock(clampf((hit - 0.4) / 2.6, 0.0, 1.0))
+		_fw_knocks += 1
+		_fw_kcool = 0.05
+	# road vibration: the rear wheel's vertical speed changing tick to tick (measured on seed 4242's trail:
+	# ~0.03 m/s smooth packed dirt .. 0.2-0.35 rough, 0.5 rocks) -> 0..1 into the synth, per click
+	var sh_to := 0.0 if rair else clampf((vib - 0.03) / 0.3, 0.0, 1.0)
+	_fw_shake += (sh_to - _fw_shake) * minf(1.0, dt * (20.0 if sh_to > _fw_shake else 6.0))
+	if fw_synth != null: fw_synth.SetShake(_fw_shake)
 
 func _fill_fw() -> void:
 	if fw_synth == null: return

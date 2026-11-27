@@ -39,6 +39,16 @@ public partial class FreewheelSynth : RefCounted
 	private double _clp, _crackG = 1.0, _crackK1 = 1.0;
 	private double _rev, _fast, _ringE = 1.0;
 	private int _ci;
+	// a hit on the rear wheel (Knock): the pawls bounce off the ratchet and slap back = a quick loose flurry
+	private int _kn; private double _kt, _ka;
+	// road vibration through the rear wheel (SetShake, 0 smooth .. 1 rough): the pawls get knocked off
+	// their rhythm, hit harder / softer, and the hub rattles on its own between them
+	// (the timing is NOT touched: the pawls drop on the ratchet's teeth and the wheel's spin doesn't change
+	// with a bump; a per-click timing spread bunched clicks up and left audible gaps at speed)
+	private double _shake, _wob, _wobT, _wobN;
+	private const double SHAKE_AMP = 0.35;     // depth of the loudness wobble at full shake
+	private const double SHAKE_HZ = 28.0;      // how fast the wobble moves (the wheel / frame shaking)
+	private const double SHAKE_RATTLE = 8.0;   // quiet loose ticks a second at full shake
 	private const int TAB = 256;
 	private readonly double[] _tabG = new double[TAB], _tabU = new double[TAB];   // one wheel turn's fixed pattern
 
@@ -108,6 +118,35 @@ public partial class FreewheelSynth : RefCounted
 
 	public double Sr { get; private set; }
 
+	/// road vibration through the rear wheel, 0 smooth .. 1 rough (ride_audio.gd, every frame)
+	public void SetShake(double k) { _shake = Math.Clamp(k, 0.0, 1.0); }
+
+	/// a hit on the rear wheel (k 0..1: a bump .. a hard landing): 2-5 extra, loose pawl clicks over ~10-40 ms
+	/// on top of the ratchet (a real hub rattles when the wheel is knocked while it freewheels)
+	public void Knock(double k)
+	{
+		k = Math.Clamp(k, 0.0, 1.0);
+		if (k < 0.02) return;
+		_kn = Math.Max(_kn, 2 + (int)(k * 3.0 + _rng.NextDouble()));
+		_ka = Math.Max(_ka, 0.45 + 0.75 * k);
+		if (_kt <= 0.0) _kt = (0.0005 + 0.002 * _rng.NextDouble()) * Sr;
+	}
+
+	// one click: excite the hub's resonances and the snap (shared by the ratchet and the knock flurry)
+	private void Fire(double a, double wv)
+	{
+		_burst = Math.Max(_burst, a);
+		double pe = _pitch * (1.0 + _spPitch * _fast);
+		double te = _tilt + _spBright * _fast + 0.4 * _warble * wv;
+		_ringE = 1.0 - _spRing * _fast;
+		for (int k = 0; k < _m; k++)
+		{
+			_ex[k] = 0.5 + 1.0 * _rng.NextDouble();
+			_g[k] = MODES[k, 1] * Math.Pow(MODES[k, 0] * _pitch / 4500.0, te);
+			SetMode(k, MODES[k, 0] * pe * (1.0 + (_rng.NextDouble() * 2.0 - 1.0) * _detune));
+		}
+	}
+
 	/// n stereo frames. clicks: pawl clicks per second (0 = none, the ring still dies away naturally);
 	/// amp: output gain. Both glide over the block so nothing zips. fast: 0 slow .. 1 full speed character.
 	public Vector2[] Render(int n, double clicks, double amp, double fast = 0.0)
@@ -140,18 +179,33 @@ public partial class FreewheelSynth : RefCounted
 				double wv = 0.7 * Math.Sin(2.0 * Math.PI * _rev) + 0.3 * Math.Sin(4.0 * Math.PI * _rev + 1.3);
 				a *= Math.Max(0.1, 1.0 + _warble * wv);
 				imp = a; _burst = a;
-				double pe = _pitch * (1.0 + _spPitch * _fast);
-				double te = _tilt + _spBright * _fast + 0.4 * _warble * wv;
-				_ringE = 1.0 - _spRing * _fast;
-				for (int k = 0; k < _m; k++)
-				{
-					_ex[k] = 0.5 + 1.0 * _rng.NextDouble();
-					_g[k] = MODES[k, 1] * Math.Pow(MODES[k, 0] * _pitch / 4500.0, te);
-					SetMode(k, MODES[k, 0] * pe * (1.0 + (_rng.NextDouble() * 2.0 - 1.0) * _detune));
-				}
+				Fire(a, wv);
 			}
 			else if (cr <= 0.5)
 				_ph = 0.0;
+			// rough ground: now and then the hub rattles by itself between the clicks
+			if (_shake > 0.0 && cr > 0.5 && _kn == 0 && _rng.NextDouble() < _shake * SHAKE_RATTLE / Sr)
+			{
+				// one quiet loose tick (not a flurry)
+				_kn = 1; _ka = 0.25 + 0.3 * _shake * _rng.NextDouble(); _kt = 1.0;
+			}
+			// loudness wobble: smooth random, a new target every 1 / SHAKE_HZ s
+			if ((_wobN -= 1.0) <= 0.0) { _wobT = Math.Clamp(Gauss(), -2.0, 2.0); _wobN = Sr / SHAKE_HZ; }
+			_wob += (_wobT - _wob) * (SHAKE_HZ * 2.0 / Sr);
+			ga *= Math.Max(0.55, 1.0 + _shake * SHAKE_AMP * _wob);
+			// the knock flurry: only while the pawls ride the ratchet (engaged, the hub can't rattle)
+			if (_kn > 0)
+			{
+				if (cr <= 0.5) _kn = 0;
+				else if ((_kt -= 1.0) <= 0.0)
+				{
+					double a = _ka * (0.55 + 0.45 * _rng.NextDouble());
+					imp = Math.Max(imp, a);
+					Fire(a, 0.0);
+					_kn--; _ka *= 0.72;
+					_kt = (0.003 + 0.009 * _rng.NextDouble()) * Sr;
+				}
+			}
 			double s = 0.0;
 			for (int k = 0; k < _m; k++)
 			{
