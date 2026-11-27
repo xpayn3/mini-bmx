@@ -17,6 +17,7 @@ const LIST_NAMES := ["trunk", "trunk_pale", "trunk_pine", "blob", "pine", "rock"
 	"rock_tundra0", "rock_tundra1", "pebble_tundra", "rock_basalt0", "rock_basalt1", "pebble_basalt"]
 const SPAN := 2.4
 static var OLD_WEED := Env.raw("BMX_OLD_WEED") == "1"
+static var OLD_ROADSIDE := Env.raw("BMX_OLD_ROADSIDE") == "1"   # no extra bushes along the road
 static var OLD_VERGE := Env.raw("BMX_OLD_VERGE") != ""   # grass stops ~1 m off the dirt, none under jumps
 const TAPE_SEG := 30
 const TAPE_W := 0.075
@@ -273,6 +274,8 @@ func _build() -> void:
 	_nature(ox, oz)
 	_wood(ox, oz)
 	_stage("nature+wood")
+	_roadside(ox, oz)   # (last: put() draws from the shared rnd, so nothing placed before it moves)
+	_stage("roadside")
 	# ---- bake the ground textures with ambient occlusion ----
 	var ao := PackedFloat32Array(); ao.resize(NV * NV); ao.fill(1.0)
 	var R := maxi(1, WorldRng.jround(1.5 / d))   # JS: 4 texels at 0.375 m
@@ -2051,6 +2054,71 @@ func _nature(ox: float, oz: float) -> void:
 
 
 ## which green bush variant (round / low + wide / tall + loose): from the yaw, so no random numbers are used up
+## A bushy verge along the road (not the forest singletrack): clumps just past the dirt, thickest 1.5 - 4 m out, small ones
+## in front and bigger ones behind, in long denser and thinner stretches. No colliders; nothing away from the road changes.
+const ROADSIDE_IN := 0.9     # m past the trail's half-width where the strip starts
+const ROADSIDE_OUT := 6.5    # ...and ends
+const ROADSIDE_TRIES := 900  # random throws a chunk (about a quarter land in the strip)
+const ROADSIDE_KEEP := 0.45  # share of those that grow a clump
+
+
+func _roadside(ox: float, oz: float) -> void:
+	if OLD_ROADSIDE:
+		return
+	# does the road come into this chunk? (route_dist only sees QR = 19 m, so nine spots across it, not just the middle)
+	var near := false
+	for i in 9:
+		if f.route_dist(ox + (i % 3 - 1) * S / 3.0, oz + (i / 3 - 1) * S / 3.0) < TerrainField.QR:
+			near = true
+			break
+	if not near:
+		return
+	var rn := WorldRng.new(WorldRng.i32(cx * 668265263) ^ WorldRng.i32(cz * 2246822519) ^ WorldRng.i32(f.seed_value * 374761393) ^ 0x3c6ef372)
+	for i in ROADSIDE_TRIES:
+		var x := ox + (rn.next() - .5) * S
+		var z := oz + (rn.next() - .5) * S
+		var r := rn.next()
+		f.query(x, z)
+		if f.q_d >= TerrainField.QR or f.q_kind == TrailCourse.FOREST:
+			continue
+		var o: float = f.q_d - f.q_w   # taken now: the height / land reads below overwrite the q_ values
+		if o < ROADSIDE_IN or o > ROADSIDE_OUT:
+			continue
+		var patch := 0.5 + 0.8 * sm(-0.35, 0.35, f.n(x + 910, z - 370, TerrainField.I38))
+		var peak := 1.0 - 0.6 * sm(1.5, 4.0, absf(o - 2.5))
+		if r > ROADSIDE_KEEP * patch * peak:
+			continue
+		var far := sm(ROADSIDE_IN, 3.5, o)   # 0 at the dirt .. 1 further out
+		f.biome(x, z)
+		if f.b_ash > 0.5:
+			continue
+		var dry: bool = f.b_dry > 0.55
+		var cold: bool = f.b_cold > 0.5
+		for k in 1 + int(rn.next() * 3):
+			var a := rn.next() * 6.28
+			var d := (0.45 + rn.next() * 0.8) if k else 0.0
+			var bx := x + cos(a) * d
+			var bz := z + sin(a) * d
+			var sc := (0.28 + rn.next() * 0.32) * (0.75 + 0.55 * far)
+			var yaw := rn.next() * 6.28
+			var tone := 0.85 + rn.next() * 0.3
+			var pick := rn.next()
+			if f.trail(bx, bz) > 0.02 or f.jump_mask(bx, bz) > 0 or is_blocked(bx, bz, 0.6):
+				continue
+			var h := ok_spot(bx, bz, WATER + 0.4)
+			if is_nan(h):
+				continue
+			if dry:
+				var col: Color = SCRUB[int(pick * SCRUB.size())]
+				put("bushdry", bx, h - 0.06, bz, sc * 2.3, sc * 1.8, sc * 2.3, yaw, col * tone, 0.3)
+			elif cold:
+				var col: Color = HEATHER[int(pick * HEATHER.size())]
+				put("bush1", bx, h - 0.06, bz, sc * 1.5, sc * 0.6, sc * 1.5, yaw, col * tone, 0.2)
+			else:
+				var col: Color = BUSHES[int(pick * BUSHES.size())]
+				put(_bush_kind(yaw), bx, h - 0.08, bz, sc * 1.2, sc * (0.8 + 0.3 * far), sc * 1.2, yaw, col * tone, 0.3)
+
+
 static func _bush_kind(yaw: float) -> String:
 	return ["bush", "bush1", "bush2"][int(yaw * 10.0) % 3]
 

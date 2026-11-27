@@ -1113,6 +1113,12 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   see low poly bushes") is gone, every one is the leaf-card `bushdry` now (`BMX_OLD_WEED=1` = before; the tumbleweeds have
   their own twig mesh, the title's wind puffs find `bushdry` too). Not done: sandstone ledges are subtle;
   the rope-bridge canyon rocks and arches still use the old blob.
+- **Bushy roadsides (2026-11-27, user: "make it more bushy along the road only")**. `TerrainChunkBuilder._roadside`: clumps of
+  1-3 bushes `ROADSIDE_IN` 0.9 .. `ROADSIDE_OUT` 6.5 m past the trail's half-width, both sides, thickest ~2.5 m out, smaller at the
+  dirt, in denser / thinner stretches; none on the forest singletrack, jumps, signs / fences (`blocked`) or ash; dry = `bushdry`,
+  cold = heather, else leaf bushes; no colliders. It runs last (put() draws from the shared `rnd`: nothing else moves).
+  `BMX_OLD_ROADSIDE=1` = without. `route_dist` only sees `QR` 19 m: the chunk check samples nine spots. Seed 4242 Dune Sea:
+  ~+2 % triangles a frame; fps not measured cleanly. Title land not re-baked.
 - **Leaf-card bushes (2026-11-25, user: "could we add Megascans bushes, or too heavy?" -> prototype from a procedural texture)**: bushes are no
   longer the lumpy blob. `world/card_bush.gd` (`CardBush`): ~30-46 upright quads (each folded in the middle, turned at random about the vertical, front
   facing away from the bush's middle: tilted cards looked wrong, user) on a dome, each with a leaf-cluster texture drawn in code (`texture("leaf" | "dry")`,
