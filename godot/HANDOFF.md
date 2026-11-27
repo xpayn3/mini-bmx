@@ -810,6 +810,41 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   summit the far land's end shows as a flat band on the horizon (`FarHills` ~2.6 km): push the far rings out. (3) After the
   bottom the world still climbs the next ranges (4.2 %): the user's call (a lift to the next peak? endless descent?).
   (4) Snow reads uniform white on the summit plateau. Not ridden by the user yet.
+- **Snow as a material (2026-11-27, step 1 of 2; user: "nice procedural snow, how Riders Republic does it, lightest way")**.
+  `color_post` (GD + C#) now also gives `cl_snow` (how much snow covers the point: both snow lerps, minus rock faces, none at
+  the water); the chunk bake writes it as `snow_img` (R8, mipmapped, only chunks that have snow; `ground_stage` key `SN`,
+  `terrain_cs_cmp` compares it). `ground.gdshader` snow layer (`snow_tex` / `snow_on`, `snow_look`, `snow_sparkle`,
+  `snow_scatter`): the edge breaks up through noise (clean patches, no 50 % grey blend), it lingers on slopes facing -z,
+  the ridden trail is dirt with packed snow in patches at its edges, albedo ~0.8 blue-white (greyer old patches), smooth
+  surface (buries the ground's scan relief) with drifts + wind ripples as height, roughness 0.72, light wrapped round the
+  terminator in `light()`, glints = one candidate per 3 cm cell, never under ~1 px and gone past gpx 0.018 (no shimmer).
+  Rocks (`rock.gdshader`, `rock_scan.gdshader`) and tree crowns (`deco_cards`, `tree_billboard`) get a snow cap from
+  instance custom data a < 0 (= -snow, `TerrainChunkBuilder._snow_at`: most of the 3 x 3 grid nodes round it). The far
+  backdrop impostors don't (green past ~124 m). New Land Lab knob `snow_h` (group Snow, default 280 = as before) = the
+  high snowline. `BMX_OLD_SNOW=1` = no layer (the baked white only). Probe `-s res://tools/snow_probe.gd -- seed half_m`
+  (share of land with snow, snowy spots). NOTE: the user's route.cfg pins Dune Sea and `start_peak` 0.2 puts the start at
+  ~174 m, so they see no snow; test with `APPDATA=<temp>`: seed 4242 `BMX_SPAWN_AT=440,760,0` is in snow. Not done: step 2
+  (snow grip / sound, deeper ruts + prints on snow), GPU cost not measured, glints not checked by eye, title land not re-baked.
+  **Real 20 cm snow, trampled (same day, user: "real accumulated snow 20 cm that we trample when riding")**: `snow_img` is RG8
+  now (R cover, G depth: none on the trail / built jumps). `ground.gdshader` vertex lifts the ground `snow_depth` 0.2 m x G
+  (normal bent by its slope; in the shadow pass not inside the patch). `world/snow_patch.gd` (`SnowPatch`, made by
+  `Game._make_ruts`, needs the rut field) = a 22 m PlaneMesh of 6.25 cm cells snapped to whole cells round the bike, drawn by
+  `shaders/snow_patch.gdshader`: height = the chunks' 0.5 m ground (`grass_h`, 3 x 3 chunk window) - rut depth + 0.2 x G, cut
+  down to a packed floor (10 % left) where the rut field holds a tyre / shoe print (its signed edge distance, wall ~7 cm),
+  snow pushed up beside it; vertex normals from 4 neighbours. Global `snow_patch` (x, z, half, on): the ground discards its
+  deep snow (G > 0.06) inside the patch by the same screen-door pattern the patch draws (G > 0.04), so every pixel is drawn
+  once. Bike: `BikePhysics.snow_k` (Game, from `Terrain.snow_depth_at` = the bake's G) adds rolling drag `SNOW_DRAG` 0.35 +
+  0.1 x v m/s^2; the physics still rides the ground under the snow (tyres sink 20 cm, drawn). `BMX_SNOW_PATCH=0` = no patch.
+  Test: `APPDATA=<temp> BMX_SEED=4242 BMX_SPAWN_AT=440,800,0 BMX_STRAIGHT=1 BMX_START_V=4 BMX_STOP_AT=5,99 BMX_CAM_ORBIT=2.8`.
+  Left: trenches only inside the 22 m patch (further out: the ground's prints), a trench in your own trench still drags, no
+  snow spray, the ragdoll / crashed bike don't dent it.
+  **Then (same day)**: snowfields fully covered (`TerrainChunkBuilder._snow_fill`: each node takes 0.9 x the most snow within
+  1.5 m, separable max; ground slope gate 0.3..0.55); grass carpet + tufts / flowers / pebbles under snow buried (instances
+  folded to nothing in `_push`); trails through snow = packed white snow (`rsn`) over a faint copy of their own texture
+  (stronger on the ridden middle), their relief buried, icy glossy stretches on the line; the bank down to the trail eases over
+  the whole dirt fade (G x (1 - sm(0, 0.75, TW))). Glitter + crust shared in `shaders/snow_glint.gdshaderinc` (two cell sizes,
+  3 cm / 8 cm, ~14 %, each faded before a speck gets under a pixel; crust = 25 cm lumps + 5 cm grain as a normal slope).
+  The patch's light() = ground.gdshader's sheen exactly (a stronger sheen made the patch read brighter than the ground).
 - **Mountains for ever + technical sections** (2026-11-21, user: "add mountains ... some gentle climbs ... missing nice tight
   turns for slow speed, more technical parts"). `TerrainField.range_at(x)` (mirrored in `TerrainFieldCs`, integer hash of slot +
   seed, no table): from `RANGE_X0` 2100 m one mountain every `RANGE_P` 2800 m on the trail's corridor: a climb averaging

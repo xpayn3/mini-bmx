@@ -39,6 +39,9 @@ var bike_rock := 1.0
 
 # ---- state (st in the JS) ----
 var x := 0.0; var z := 0.0; var y := 0.0; var vy := 0.0
+var snow_k := 0.0          # how deep the snow is under the bike, 0..1 (Game, from Terrain.snow_depth_at): ploughing drag
+const SNOW_DRAG := 0.35     # m/s^2 at snow_k 1, + SNOW_DRAG_V per m/s (20 cm of fresh snow: ~1.4 m/s^2 at 10 m/s)
+const SNOW_DRAG_V := 0.1
 var heading := 0.0; var v := 0.0; var steer := 0.0; var steer_in := 0.0; var steer_in_v := 0.0
 var lean := 0.0; var lean_v := 0.0; var bike_lean := 0.0; var counter := 0.0; var rock := 0.0
 var pitch := 0.0; var pitch_v := 0.0; var hop_nose := 0.0
@@ -1281,6 +1284,9 @@ func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_wa
 		var rr_f: float = 0.32 if surf_f == 0 else 0.42 if surf_f == 3 else 0.1
 		var rr_r: float = 0.32 if surf_r == 0 else 0.42 if surf_r == 3 else 0.1
 		var roll: float = (rr_r * SH_R + rr_f * (1.0 - SH_R)) * T.rollRes * signf(v) * minf(1.0, absf(v) * 4)
+		# fresh snow (2026-11-27): the tyres plough through it, more the faster (Game sets snow_k from the bake's depth)
+		if snow_k > 0.0 and not air:
+			roll += snow_k * (SNOW_DRAG + SNOW_DRAG_V * absf(v)) * signf(v) * minf(1.0, absf(v) * 4)
 		# aerodynamics: the drag is the rider's frontal area. Folded down over the bars (right stick forward)
 		# it drops (~40 %: an upright downhill rider vs a race tuck), so the bike runs on and tops out faster;
 		# sat up tall (stick back) it catches the wind like an air brake. Pedalling hard spoils the tuck a bit

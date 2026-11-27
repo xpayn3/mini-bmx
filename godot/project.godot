@@ -103,6 +103,10 @@ rut_win={
 "type": "vec4",
 "value": Vector4(0, 0, 0, 0)
 }
+snow_patch={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
 rut_far_tex={
 "type": "sampler2D",
 "value": ""

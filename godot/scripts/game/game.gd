@@ -2336,6 +2336,11 @@ func _make_ruts() -> void:
 	ruts.dig = Env.s("BMX_RUTS") != "0" and (Env.s("BMX_RUTS") == "1" or bool(Settings.get_v("ruts")))
 	add_child(ruts)
 	if not ruts.active(): ruts.queue_free(); ruts = null
+	# real snow round the rider, trenched by the tyres' prints (world/snow_patch.gd; needs the rut field's prints)
+	if ruts != null and not Terrain.OLD_SNOW and Env.s("BMX_SNOW_PATCH") != "0":
+		snow_patch = SnowPatch.new(self)
+		add_child(snow_patch)
+var snow_patch = null   # world/snow_patch.gd
 var ghost = null   # game/ghost_rider.gd (rides of this world only, not the title / levels)
 
 func respawn(new_world: bool) -> void:
@@ -3309,6 +3314,8 @@ func _physics_process(dt: float) -> void:
 	phys.step(dt, inp)
 	_bar_tick(phys)
 	if ruts: ruts.step(phys)
+	# snow under the bike drags (BikePhysics.snow_k: 0 none .. 1 the full depth)
+	phys.snow_k = terrain.snow_depth_at(phys.x, phys.z) if not Terrain.OLD_SNOW else 0.0
 	if _SKIP: _skip_probe(dt, inp)
 	if level_probe: level_probe.post_step(dt)
 	if diag: diag.record(dt, inp)

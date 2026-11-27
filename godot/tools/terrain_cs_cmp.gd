@@ -154,6 +154,7 @@ func _cmp_seed(seed: int) -> void:
 			_eq("chunk." + key, bg.out[key], bc.out[key], c.x, c.y)
 		_eq("chunk.land_img", bg.out["land_img"].get_data(), bc.out["land_img"].get_data(), c.x, c.y)
 		_eq("chunk.dirt_img", bg.out["dirt_img"].get_data(), bc.out["dirt_img"].get_data(), c.x, c.y)
+		_eq("chunk.snow_img", (bg.out["snow_img"].get_data() if bg.out.has("snow_img") else PackedByteArray()), (bc.out["snow_img"].get_data() if bc.out.has("snow_img") else PackedByteArray()), c.x, c.y)
 		_eq("chunk.counts", bg.out["counts"], bc.out["counts"], c.x, c.y)
 		for name in bg.out["lists"]:
 			_eq("chunk.lists", bg.out["lists"][name], bc.out["lists"][name], c.x, c.y)

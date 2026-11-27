@@ -32,6 +32,7 @@ varying vec3 v_wn;
 varying vec3 v_world;
 varying flat vec3 v_origin;
 varying flat float v_moss;
+varying flat float v_snow;   // snow on its top (instance custom a < 0 = -snow; 2026-11-27)
 global uniform vec4 cam_see;
 global uniform vec4 cam_eye;
 
@@ -39,6 +40,7 @@ void vertex() {
 	vec4 ic = use_instance ? INSTANCE_CUSTOM : vec4(1.0, 1.0, 1.0, 0.0);
 	v_col = COLOR.rgb * ic.rgb * tint;
 	v_moss = clamp(ic.a * moss_k, 0.0, 1.0);
+	v_snow = clamp(-ic.a, 0.0, 1.0);
 	v_origin = MODEL_MATRIX[3].xyz;
 	v_wn = normalize(NORMAL);
 	if (deco_fold(v_origin, fade_mode, PROJECTION_MATRIX[3][3] > 0.5)) VERTEX = v_origin;
@@ -103,7 +105,17 @@ void fragment() {
 		r = mix(r, mr, k);
 		wn = normalize(mix(wn, mn, k));
 	}
-	ALBEDO = c * v_col;
+	c *= v_col;
+	if (v_snow > 0.001) {
+		// a snow cap on what looks up, more the deeper the snow round it; the scan's relief breaks its edge
+		float up = wn.y * 0.7 + n.y * 0.5;
+		float s = up + (rk_noise(v_world * 2.3 + off) - 0.5) * 0.35;
+		float k = smoothstep(0.95 - v_snow * 0.55, 1.05 - v_snow * 0.55, s);
+		c = mix(c, vec3(0.80, 0.83, 0.87), k);
+		r = mix(r, 0.72, k);
+		wn = normalize(mix(wn, n, k * 0.8));
+	}
+	ALBEDO = c;
 	ROUGHNESS = clamp(r * rough_k, 0.05, 1.0);
 	SPECULAR = specular;
 	NORMAL = normalize((VIEW_MATRIX * vec4(wn, 0.0)).xyz);

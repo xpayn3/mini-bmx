@@ -426,6 +426,21 @@ func deck_height(x: float, z: float) -> float:
 	return g - rut_at(x, z)
 
 
+## how deep the snow lies here, 0..1 of SnowPatch.DEPTH (the bake's snow G at the nearest 0.5 m node; 0 = none)
+func snow_depth_at(x: float, z: float) -> float:
+	var k := Vector2i(WorldRng.jround(x / SIZE), WorldRng.jround(z / SIZE))
+	var rec = chunks.get(k)
+	if rec == null:
+		return 0.0
+	var img = rec.get("snow_img")
+	if img == null:
+		return 0.0
+	var n: int = (img as Image).get_width() - 1
+	var ix := clampi(roundi((x - (k.x * SIZE - SIZE / 2)) / SIZE * n), 0, n)
+	var iz := clampi(roundi((z - (k.y * SIZE - SIZE / 2)) / SIZE * n), 0, n)
+	return (img as Image).get_pixel(ix, iz).g
+
+
 ## 0 grass, 1 trail, 2 water, 3 sand (beaches, dunes)
 func surface(x: float, z: float) -> int:
 	var h := height(x, z)
@@ -760,6 +775,7 @@ func _update_grow(px: float, pz: float) -> void:
 ## being built read the old trail (dropped, built again), loaded ones whose drawn grid no longer matches the field are
 ## built again (the old one stays drawn until the new one is in: _finalize). Returns how many are queued to check (a few a frame: _land_check_step). BMX_OLD_GROWLAND=1 = before
 static var OLD_GROWLAND := Env.raw("BMX_OLD_GROWLAND") != ""
+static var OLD_SNOW := Env.raw("BMX_OLD_SNOW") != ""   # (2026-11-27: no snow layer in ground.gdshader, the baked white only)
 const LAND_REDO_TOL := 0.15   # m: drawn grid vs the field's ground at a node (micro detail is only in the fine grid MG)
 func _restale_after_grow() -> int:
 	if OLD_GROWLAND:
@@ -1080,6 +1096,9 @@ func _finalize_out(k: Vector2i, o: Dictionary, chunk_n: int) -> void:
 	mat.set_shader_parameter("trail_tex", ImageTexture.create_from_image(o["trail_img"]))
 	mat.set_shader_parameter("trail2_tex", ImageTexture.create_from_image(o["trail2_img"]))
 	mat.set_shader_parameter("trail3_tex", ImageTexture.create_from_image(o["trail3_img"]))
+	if o.has("snow_img") and not OLD_SNOW:   # (chunks with snow: ground.gdshader's snow layer)
+		mat.set_shader_parameter("snow_tex", ImageTexture.create_from_image(o["snow_img"]))
+		mat.set_shader_parameter("snow_on", true)
 	mat.set_shader_parameter("trail_fx", 1.0)
 	if _trail_puddles != "": mat.set_shader_parameter("trail_puddles", float(_trail_puddles))
 	if _trail_play != "": mat.set_shader_parameter("trail_play", float(_trail_play))
@@ -1173,7 +1192,8 @@ func _finalize_out(k: Vector2i, o: Dictionary, chunk_n: int) -> void:
 	var colliders: Array = o["colliders"]
 	var rec := {"cx": k.x, "cz": k.y, "node": node, "colliders": colliders, "small": small, "deco_mi": deco_mi, "rock_keys": [],
 		"G": o["G"], "N": chunk_n, "MG": o.get("GF", o["G"]), "MN": o.get("MN", chunk_n), "mms": mms, "packs": [], "grass_img": o["grass_img"], "grass_h": o["grass_h"],
-		"pud": o.get("pud", PackedFloat32Array()), "mat": mat}   # (mat: RoadDetail bakes from its trail textures)
+		"pud": o.get("pud", PackedFloat32Array()), "mat": mat,
+		"snow_img": o.get("snow_img") if not OLD_SNOW else null}   # (mat: RoadDetail bakes from its trail textures)
 	chunk_serial += 1   # GrassField re-reads the chunks round the camera
 	var fl: PackedFloat32Array = o.get("flags", PackedFloat32Array())
 	if fl.size() > 0:
