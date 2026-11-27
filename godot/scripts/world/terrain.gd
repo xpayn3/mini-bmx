@@ -1425,7 +1425,7 @@ func break_collider(c: Dictionary, vel: Vector3, at = null) -> bool:
 			_broken.pop_back()
 			return false
 		for part in panel["parts"]:
-			if not TerrainDebris.fence_part_goes(part, hit):
+			if not TerrainDebris.fence_part_goes(part, hit, Vector2(vel.x, vel.z).length(), TerrainDebris.is_fence(panel)):
 				continue   # a post you didn't hit stays standing
 			var mm: MultiMesh = panel["meshes"].get(part["kind"])
 			if mm:

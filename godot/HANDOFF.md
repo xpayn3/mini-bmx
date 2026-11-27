@@ -2862,6 +2862,16 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   capped cuts in flesh colour, seeds denser at bike height); chunks get convex hulls, collide with each other,
   and are flung by their distance from the hit (`TerrainDebris.smash_cactus`). Check: `tools/cactus_probe.gd`
   (every body / piece closed, piece volumes = whole, must say `PASS`).
+- **Fences break like wood (2026-11-27, user: "planks overlap and flicker", "break in half, posts stay")**. Rails run 6 cm past
+  each post, so neighbouring panels' rails overlapped in one plane and z-fought: every other panel's rails now sit one rail
+  thickness further out (lapped at the post; `BMX_OLD_RAILS=1` = before). Smashing a ranch / picket span (`TerrainDebris._break_rail`):
+  the rail snaps at the hit, torn along the grain (6-8 fibres, each breaking at its own place with a pointed tip; both halves
+  from the same fibres, so they interlock), each half stays nailed to its post and swings with the bike / droops toward the
+  ground (`_hinges`, underdamped, ~1 s), torn off its nail only by a fast hit (`TEAR_FROM` 7 .. `TEAR_FULL` 16 m/s, up to 50 %),
+  a stub < 0.3 m, or its post going. Posts go only when hit within 0.3 m above 9 m/s (signs / billboards keep the old rule).
+  Broken wood uses the fence's Wood049 shader (`wood_fence.gdshader` `use_tint`). Flying debris freezes while time is stopped
+  (photo mode: a zero time step made spinning bodies NaN). `BMX_OLD_FENCEBREAK=1` = the old break. Test: `BMX_FENCE=prefix
+  BMX_FENCE_SPEED=12 BMX_PHOTO=10 BMX_PHOTO_AT=63.2,171.4,-7.0,66.4,170.3,-10.7` (seed 4242).
 - **Race tape stretches before it snaps** (`TapeSim.grab`): riding into a span hands it to the sim pinned at both stakes, its
   hit point carried on the bike's front (`Terrain.tape_push`, set by `Game` every frame). It pulls straight, stretches, and tears
   only past `SNAP_STRAIN` (17 %); the halves whip back towards their stakes. Stop / back off / slide off its end / crash before
