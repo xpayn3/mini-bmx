@@ -558,7 +558,7 @@ public partial class TerrainFieldCs : RefCounted
 	private const double RIDGE_E2 = 0.01, RIDGE_TOP = 1.1, RIDGE_K2 = 0.2;
 	public static readonly bool OLD_PEAK = DevFlags.Env("BMX_OLD_PEAK") is { Length: > 0 };
 	public static double HILL_TOP = 450.0, HILL_LEN = 2800.0, START_K = 1.0;   // (TerrainField: the start peak; set in _land_from)
-	private const double SNOW_H = 280.0;
+	public static double SNOW_H = 280.0;   // (TerrainField.SNOW_H: Land Lab "snow_h", set in _land_from)
 	public const double MTN_W = 150.0;
 	public const double QR = 19.0;
 	public const double CELL = 16.0;
@@ -593,7 +593,7 @@ public partial class TerrainFieldCs : RefCounted
 		PK_H = G("PK_H", 140.0); PK_I = G("PK_I", 1.0 / 700.0); PK_RI = G("PK_RI", 1.0 / 3000.0); PK_NEAR = G("PK_NEAR", 60.0); PK_FAR = G("PK_FAR", 300.0);
 		ER_H = G("ER_H", 6.0); ER_C = G("ER_C", 48.0); ER_SP = G("ER_SP", 0.5);
 		VL_D = G("VL_D", 10.0); VL_W = G("VL_W", 45.0); VL_I = G("VL_I", 1.0 / 1100.0); VL_BD = G("VL_BD", 1.2); VL_BW = G("VL_BW", 4.0);
-		HILL_TOP = G("HILL_TOP", 450.0); HILL_LEN = G("HILL_LEN", 2800.0); RANGE_X0 = G("RANGE_X0", 3500.0); START_K = G("START_K", 1.0);
+		HILL_TOP = G("HILL_TOP", 450.0); HILL_LEN = G("HILL_LEN", 2800.0); RANGE_X0 = G("RANGE_X0", 3500.0); START_K = G("START_K", 1.0); SNOW_H = G("SNOW_H", 280.0);
 	}
 	private static readonly bool OLD_LAND = DevFlags.Env("BMX_OLD_LAND") is { Length: > 0 };
 	private const double I700 = 1.0 / 700.0;
@@ -665,6 +665,7 @@ public partial class TerrainFieldCs : RefCounted
 	private double _gr_x = double.NaN, _gr_z = double.NaN, _gx, _gz;
 	public Color cl_g, cl_d;
 	public double cl_steep;
+	public double cl_snow;   // (TerrainField.cl_snow)
 	public double cp_dry, cp_rug, cp_cold, cp_ash;
 	public double _cp_h;
 	private Godot.Collections.Dictionary _col;
@@ -2630,10 +2631,13 @@ public partial class TerrainFieldCs : RefCounted
 		var C = _sh;
 		Color g = cl_g;
 		double snow_k = maxf(rug, cold);
+		double s_keep = 1.0;   // (TerrainField.color_post: 1 - snow cover, for cl_snow)
 		if (snow_k > 0.0 && dry < 1.0)
 		{
 			double lo = 11.0 - 7.0 * cold;
-			g = clerp(g, C.snow, sm(lo, lo + 8.0, h - hill(x, z) + noise(x * I9, z * I9) * 3) * snow_k * (1.0 - dry) * sm(0.75, 0.9, ny));
+			double s1 = sm(lo, lo + 8.0, h - hill(x, z) + noise(x * I9, z * I9) * 3) * snow_k * (1.0 - dry) * sm(0.75, 0.9, ny);
+			g = clerp(g, C.snow, s1);
+			s_keep *= 1.0 - s1;
 		}
 		if (!OLD_PEAK && h > SNOW_H - 40.0 && dry < 1.0)
 		{
@@ -2642,6 +2646,7 @@ public partial class TerrainFieldCs : RefCounted
 			double sk = sm(SNOW_H, SNOW_H + 60.0, sh) * sm(0.72, 0.88, ny) * (1.0 - dry);
 			sk *= sm(-0.25, 0.15, noise((x + 77.0) * I26, (z - 31.0) * I26) + sm(SNOW_H, SNOW_H + 150.0, h) * 0.6);
 			g = clerp(g, C.snow, sk);
+			s_keep *= 1.0 - sk;
 		}
 		double steep = sm(0.86, 0.6, ny);
 		if (steep > 0.0)
@@ -2655,8 +2660,12 @@ public partial class TerrainFieldCs : RefCounted
 			g = clerp(g, clerp(gb, rb, sm(0.35, 0.65, dry)), steep);
 		}
 		cl_steep = steep;
+		cl_snow = (1.0 - s_keep) * (1.0 - steep);
 		if (h < WATER + 0.7)
+		{
+			cl_snow = 0.0;
 			g = clerp(g, C.sand, sm(WATER + 0.7, WATER + 0.2, h));
+		}
 		if (h < WATER)
 		{
 			g = clerp(g, C.bed, 0.6);
@@ -3125,6 +3134,7 @@ public partial class TerrainFieldCs : RefCounted
 		var TW = new float[NV * NV];
 		var SW = new float[NV * NV];
 		var DRY = new float[NV * NV];   // biome dryness (grass field density, GrassField)
+		var SN = new float[NV * NV];    // snow cover (cl_snow): ground.gdshader snow layer
 		for (long iz = 0; iz < NV; iz++)
 		{
 			for (long ix = 0; ix < NV; ix++)
@@ -3153,6 +3163,7 @@ public partial class TerrainFieldCs : RefCounted
 				color_post(lx + ox, lz + oz, h, nv.Y, pre_b[o * 4], pre_b[o * 4 + 1], pre_b[o * 4 + 2], pre_b[o * 4 + 3]);
 				TW[o] = pre_t[o];
 				SW[o] = (float)cl_steep;
+				SN[o] = (float)cl_snow;
 				DRY[o] = (float)maxf(pre_b[o * 4], pre_b[o * 4 + 3]);   // (no grass on ash)
 				LG[o] = cl_g;
 				LD[o] = cl_d;
@@ -3161,7 +3172,7 @@ public partial class TerrainFieldCs : RefCounted
 		return new Godot.Collections.Dictionary
 		{
 			["G"] = G, ["verts"] = verts, ["norms"] = norms, ["uvs"] = uvs,
-			["LG"] = LG, ["LD"] = LD, ["TW"] = TW, ["SW"] = SW, ["DRY"] = DRY, ["TR"] = TR, ["T2"] = T2, ["T3"] = T3, ["T4"] = T4, ["T5"] = T5,
+			["LG"] = LG, ["LD"] = LD, ["TW"] = TW, ["SW"] = SW, ["DRY"] = DRY, ["TR"] = TR, ["T2"] = T2, ["T3"] = T3, ["T4"] = T4, ["T5"] = T5, ["SN"] = SN,
 		};
 	}
 

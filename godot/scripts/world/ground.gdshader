@@ -8,6 +8,7 @@ shader_type spatial;
 render_mode blend_mix, depth_draw_opaque, cull_back, diffuse_burley, specular_schlick_ggx;
 #include "res://shaders/atmos.gdshaderinc"
 #include "res://shaders/ruts.gdshaderinc"
+#include "res://shaders/snow_glint.gdshaderinc"
 
 uniform sampler2D land_tex : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
 uniform sampler2D dirt_tex : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
@@ -19,6 +20,22 @@ uniform sampler2D trail2_tex : filter_linear, repeat_disable;
 // r = riders are in the air here (between a jump's lip and where they land): no ridden lines
 uniform sampler2D trail3_tex : filter_linear, repeat_disable;
 uniform float trail_fx = 0.0;      // 0 = plain trail colour (no frame bound)
+// snow (2026-11-27): the chunk's baked snow cover (R8, only chunks that have snow; terrain_chunk_builder "snow_img")
+uniform sampler2D snow_tex : hint_default_black, filter_linear_mipmap, repeat_disable;
+uniform bool snow_on = false;
+uniform float snow_look = 1.0;      // 0 = only the baked white colour (as before)
+uniform float snow_sparkle = 1.0;   // glints in the snow up close (0 = none)
+uniform float snow_scatter = 0.35;  // light wrapping round into the snow's shade side (soft, translucent look)
+uniform float snow_depth = 0.2;     // m: the snow's real thickness where snow_tex G = 1 (world/snow_patch.gd DEPTH)
+// the fine snow patch round the rider (world/snow_patch.gd): (centre x, z, half size, 1 = on). Inside it the patch draws the
+// snow (with the tyres' trenches) and this ground hands over by the same screen-door pattern; in the shadow pass the ground
+// keeps no snow there (the patch casts it)
+global uniform vec4 snow_patch;
+float snow_patch_k(vec2 xz) {
+	if (snow_patch.w < 0.5) return 0.0;
+	vec2 d = abs(xz - snow_patch.xy);
+	return 1.0 - smoothstep(snow_patch.z - 3.0, snow_patch.z - 0.6, max(d.x, d.y));
+}
 // fine relief only (assets/textures/trail, Poly Haven CC0): normal xy + roughness of packed dirt / loose gravel.
 // Colour, rider lines, wear and puddles are procedural, so nothing tiles and no scan edge can show.
 uniform sampler2D tr_nr0 : filter_linear_mipmap_anisotropic, repeat_enable;
@@ -172,7 +189,21 @@ float road_level(vec4 inf, float layer, vec2 p, vec2 dx, vec2 dy, inout vec4 a, 
 
 varying float v_gut;   // the trail-edge gutter's depth here (0..1, fine mesh vertex colour r = 1 - it; none = 0)
 varying float v_bank;  // the trail-edge bank step's face here (0..1, vertex colour g = 1 - it)
+varying float v_snow;  // snow cover drawn here (fragment -> light: soft scatter)
+varying vec4 v_glint;  // a snow glint: its facet normal (view space) + strength (fragment -> light)
 void vertex() {
+	// real snow (2026-11-27): the ground lies snow_depth higher where the bake says it's deep (G), bent round its edges
+	if (snow_on) {
+		float du = 1.0 / float(textureSize(snow_tex, 0).x);
+		float l0 = textureLod(snow_tex, UV, 0.0).g;
+		float lx = textureLod(snow_tex, UV + vec2(du, 0.0), 0.0).g - textureLod(snow_tex, UV - vec2(du, 0.0), 0.0).g;
+		float lz = textureLod(snow_tex, UV + vec2(0.0, du), 0.0).g - textureLod(snow_tex, UV - vec2(0.0, du), 0.0).g;
+		float dp = snow_depth * snow_look;
+		if (PROJECTION_MATRIX[3][3] > 0.5) dp *= 1.0 - snow_patch_k((MODEL_MATRIX * vec4(VERTEX, 1.0)).xz);
+		VERTEX.y += dp * l0;
+		// (one texel = 0.5 m; the slope the lift adds, on top of the mesh's own)
+		NORMAL = normalize(NORMAL - vec3(lx, 0.0, lz) * dp / (2.0 * 48.0 * du));
+	}
 	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	v_gut = 1.0 - COLOR.r;
 	v_bank = 1.0 - COLOR.g;
@@ -183,6 +214,14 @@ void fragment() {
 		float gk = 1.0 - smoothstep(ground_fade.z, ground_fade.w, distance(v_world.xz, ground_fade.xy));
 		float gn = fract(52.9829189 * fract(dot(FRAGCOORD.xy, vec2(0.06711056, 0.00583715))));
 		if (gn >= gk) discard;   // far_hills.gd discards the exact opposite pixels: every pixel is drawn once
+	}
+	// the fine snow patch takes over its deep snow (snow_patch.gdshader draws exactly the other pixels)
+	if (snow_on && PROJECTION_MATRIX[3][3] < 0.5) {
+		float pk = snow_patch_k(v_world.xz);
+		if (pk > 0.0 && texture(snow_tex, UV).g > 0.06) {
+			float gn = fract(52.9829189 * fract(dot(FRAGCOORD.xy, vec2(0.06711056, 0.00583715))));
+			if (gn < pk) discard;
+		}
 	}
 	vec4 gA = texture(land_tex, UV), gB = texture(dirt_tex, UV);
 	vec3 P = v_world;
@@ -719,6 +758,87 @@ void fragment() {
 	// the pixel's footprint (far off / grazing), where one pixel covers many ripples
 	col = mix(col, dirtc * vec3(0.3, 0.29, 0.27), pud * 0.85);
 	col = mix(col, vec3(0.7, 0.68, 0.62), pw_f * 0.3 * pud);
+	// ---- snow (2026-11-27): the baked cover (snow_tex = TerrainField.cl_snow) as a material, not only a white colour.
+	// The edge breaks up through noise (rock / grass shows through in clean patches, no grey 50 % blend), it lingers on
+	// slopes facing away from the sun's usual side, thins on the ridden line; the surface is smooth (it buries the ground's
+	// small relief) with soft wind ripples and drifts; pale blue-white, a little greyer where old / packed. The blue in the
+	// shade comes from the sky light by itself. Glints: see light()
+	float sn = 0.0;
+	float rsn = 0.0, road_ice = 0.0, road_flat = 0.0;
+	vec2 snow_crust_s = vec2(0.0);   // the snow crust's slope (world xz)   // the trail through snow: packed snow / ice over its own texture
+	float snow_hh = 0.0;
+	v_snow = 0.0;
+	v_glint = vec4(0.0);
+	if (snow_on && snow_look > 0.0) {
+		float s0 = texture(snow_tex, UV).r;
+		if (s0 > 0.004) {
+			float bn = gd_noise3(vec3(P.xz * 0.16, 31.0)) * 0.6 + gd_noise3(vec3(P.xz * 0.7, 37.0)) * 0.3 + mix(0.5, n1, f2) * 0.1;
+			float shade_side = clamp(dot(fwn.xz, vec2(0.0, -1.0)), -1.0, 1.0) * (1.0 - fwn.y) * 1.6;
+			float sv = s0 + (bn - 0.5) * 0.7 * (1.0 - s0 * 0.5) + shade_side * 0.25;
+			float aa = max(0.06, fwidth(sv) * 1.5);
+			sn = smoothstep(0.5 - aa, 0.5 + aa, sv) * smoothstep(0.02, 0.15, s0);
+			sn *= smoothstep(0.3, 0.55, fwn.y);            // (only real rock faces stay bare)
+			// the trail: ridden down to dirt, a little packed snow left in patches toward its edges
+			sn *= 1.0 - smoothstep(0.15, 0.6, wd) * (0.85 + 0.15 * smoothstep(0.35, 0.65, gd_noise3(vec3(P.xz * 0.5, 41.0))));
+			// the trail through snow country (user: "roads white too, keep the texture, snowy or icy"): its own dirt / stone
+			// texture stays (its light and dark), recoloured as packed snow; the ridden middle polished to ice in stretches
+			rsn = smoothstep(0.08, 0.45, s0) * smoothstep(0.02, 0.3, wd) * smoothstep(0.3, 0.55, fwn.y) * snow_look;
+			if (rsn > 0.0) {
+				const vec3 LW = vec3(0.2126, 0.7152, 0.0722);
+				float tex = clamp(dot(col, LW) / max(dot(dirtc, LW), 0.02), 0.45, 1.6);
+				// ice on the racing line (user: "icy zones on the ridden path, like the dirt has"): the line riders wear in
+				// (m_driven, the dirt's own worn line) polished glassy, broken now and then where it's still crusty
+				float brk = 0.45 + 0.55 * smoothstep(0.3, 0.7, gd_noise3(vec3(v_world.xz * 0.3, 3.0))) * (0.75 + 0.25 * gd_noise3(vec3(v_world.xz * 1.7, 9.0)));
+				float ice = smoothstep(0.15, 0.6, m_driven) * smoothstep(0.3, 0.7, wd) * brk * (1.0 - 0.6 * jm);   // (thinner up a built jump)
+				// (user: "the road should transition to the smooth snow"): the trail's texture shows only faintly, on the
+				// ridden middle; toward its edges it is smooth packed snow running into the snowfield
+				float mid = smoothstep(0.6, 0.97, wd);
+				float tk = mix(0.12, 0.35, mid);
+				vec3 pk = vec3(0.80, 0.83, 0.87) * mix(1.0, tex, tk);   // (the snowfield's own white)
+				vec3 ic = vec3(0.44, 0.53, 0.64) * mix(1.0, tex, tk * 0.5);   // (glazed ice: grey-blue, a little darker than the snow)
+				col = mix(col, mix(pk, ic, ice), rsn * mix(0.97, 0.9, mid));
+				road_ice = ice * rsn;
+				// its stones / lines / grit relief buried the same way
+				float flat_r = rsn * mix(0.92, 0.6, mid);
+				sslope *= 1.0 - flat_r;
+				tslope *= 1.0 - flat_r;
+				lslope *= 1.0 - flat_r;
+				road_flat = flat_r;
+				v_snow = max(v_snow, rsn);
+			}
+			sn *= snow_look;
+			if (sn > 0.0) {
+				// the land's baked AO kept (the baked colour there was snow x AO)
+				float ao = clamp(dot(gA.rgb, vec3(0.2126, 0.7152, 0.0722)) / 0.86, 0.62, 1.0);
+				float old_s = smoothstep(0.35, 0.75, gd_noise3(vec3(P.xz * 0.035, 43.0)));
+				vec3 snowc = mix(vec3(0.80, 0.83, 0.87), vec3(0.70, 0.72, 0.75), old_s * 0.6);
+				snowc *= 0.96 + 0.08 * bn;
+				snowc *= mix(ao, 1.0, 0.4);
+				// thin snow at its edge lets the ground's colour show through a little
+				snowc = mix(snowc, mix(col, snowc, 0.55), (1.0 - smoothstep(0.3, 1.0, sn)) * 0.5);
+				col = mix(col, snowc, sn);
+				// the surface: drifts (~5 m) + wind ripples (sastrugi, ~0.7 m, stretched across the wind) as a height
+				vec2 wdir = normalize(vec2(0.8, 0.6));
+				float along = dot(P.xz, wdir), across = dot(P.xz, vec2(-wdir.y, wdir.x));
+				float drf = gd_noise3(vec3(P.xz * 0.2, 47.0));
+				float rip = gd_noise3(vec3(along * 1.4, across * 0.35, 53.0)) * f3;
+				snow_hh = (drf * 0.09 + rip * 0.025) * sn;
+				// small speckled glints: one candidate per 3 cm cell, ~7 % of cells, each never under ~1 px (drawn
+				// wider and dimmer as the pixel grows) and gone once the cells are smaller than ~2 px: no sparkling noise
+				v_glint = snow_glint(P.xz, fwn, gpx, VIEW_MATRIX);
+				v_glint.w *= snow_sparkle * sn;
+				// the crust (lumps + grain) as a slope, as the patch draws it
+				vec2 cs = snow_crust(P.xz, 1.0 - smoothstep(0.01, 0.04, gpx)) * (1.0 - smoothstep(0.05, 0.2, gpx)) * sn;
+				snow_crust_s = cs;
+				v_snow = max(v_snow, sn);
+				// snow buries the ground's own small relief
+				lslope *= 1.0 - sn;
+				sslope *= 1.0 - sn;
+				tslope *= 1.0 - sn * 0.8;
+				lslope -= snow_crust_s * 2.0;   // (lslope goes in x0.5: the crust's own slope)
+			}
+		}
+	}
 	// ruts (world/ruts.gd): the dug groove darker, its lip lighter
 	float rd = rut_depth(P.xz);
 	col = rut_colour(col, rd);
@@ -749,19 +869,19 @@ void fragment() {
 	}
 	ALBEDO = col;
 	float pud_r = mix(0.075, 0.22, smoothstep(0.02, 0.25, gpx));
-	ROUGHNESS = mix(mix(0.95, trough, wd), pud_r, pud);
+	ROUGHNESS = mix(mix(mix(mix(0.95, trough, wd), 0.72, sn), mix(0.7, 0.2, road_ice / max(rsn, 1e-3)), rsn), pud_r, pud);
 	// soil reflects almost no sky: at 0.3 a low sun's sky lit the whole road white at grazing angles (Fresnel)
-	SPECULAR = mix(0.12, 0.6, pud);
+	SPECULAR = mix(mix(mix(mix(0.12, 0.35, sn), 0.5, rsn), 0.5, road_ice), 0.6, pud);
 	// screen derivatives here, in uniform control flow: inside the branch below they are undefined wherever the
 	// branch differs between neighbouring pixels (trail / puddle edges), which flickered in 2x2 blocks
 	// (everything baked from above smears down steep faces: the cut bank beside the trail; faded there)
 	float flat_k = smoothstep(0.62, 0.82, normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz).y);
-	float hh = (thgt * wd * trail_relief - jprint * 0.006) * flat_k;
+	float hh = (thgt * wd * trail_relief - jprint * 0.006) * flat_k * (1.0 - sn) * (1.0 - road_flat) + snow_hh;
 	// (the prints' knobs are colour only, from the mipmapped tread texture: lit as a bump per pixel they shimmered)
 	vec3 dpx = dFdx(P), dpy = dFdy(P);
 	float dhx = dFdx(hh), dhy = dFdy(hh);
 	// the baked relief's slope (worn lines, prints, grit, edge stones): on the dirt, and the stones on the grass too
-	vec2 rsl = (rb.xy * max(wd, rc.a) * trail_relief * vt + rks) * flat_k;
+	vec2 rsl = (rb.xy * max(wd, rc.a) * trail_relief * vt * (1.0 - road_flat) + rks) * flat_k;
 	tslope *= flat_k;
 	if (wd * tbump > 0.0 || pud > 0.0 || hh != 0.0 || rd != 0.0 || ofl > 0.01 || dot(rsl, rsl) > 0.0 || dot(sslope, sslope) > 0.0 || dot(tslope, tslope) > 0.0) {
 		vec3 nw = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
@@ -804,6 +924,7 @@ void fragment() {
 		ROUGHNESS = 1.0;
 	}
 	if (trail_debug == 8 && rut_win.w > 0.5) { ALBEDO = vec3(fract(rut_bilerp(rut_tex, P.xz).g * 40.0)); ROUGHNESS = 1.0; }   // print edge distance as contours (2.5 cm)
+	if (trail_debug == 10) { ALBEDO = vec3(road_ice, rsn, m_driven); ROUGHNESS = 1.0; }   // snowy trail: ice (r), packed snow (g), ridden line (b)
 	if (trail_debug == 9) { ALBEDO = vec3(v_gut, pud, 0.0); ROUGHNESS = 1.0; }   // the gutter's depth (r), standing water (g)
 	if (trail_debug == 7) { ALBEDO = vec3(rpr.x, rpr.y * rpr.x, rpr.z); ROUGHNESS = 1.0; }   // tyre prints: cover, knobs, lip
 	if (trail_debug == 1) {
@@ -816,7 +937,12 @@ void fragment() {
 // packed lines / damp soil / puddles on the trail get a sun glint
 void light() {
 	vec3 lc = atmos_light_col(ATTENUATION * LIGHT_COLOR, LIGHT_IS_DIRECTIONAL, v_world);   // cloud shade once
-	DIFFUSE_LIGHT += clamp(dot(NORMAL, LIGHT), 0.0, 1.0) * lc;
+	float ndl = dot(NORMAL, LIGHT);
+	// snow: light wraps a little past the terminator (scattered inside the snow), so its shade side is never dead flat
+	float wr = snow_scatter * v_snow;
+	DIFFUSE_LIGHT += clamp((ndl + wr) / (1.0 + wr), 0.0, 1.0) * lc;
+	// snow glints: a facet turned to mirror the sun into the eye (shaders/snow_glint.gdshaderinc)
+	if (v_glint.w > 0.0 && ndl > 0.0) SPECULAR_LIGHT += snow_glint_light(v_glint, LIGHT, VIEW, lc);
 	if (ROUGHNESS < 0.9) {
 		vec3 hv = normalize(LIGHT + VIEW);
 		float nl = clamp(dot(NORMAL, LIGHT), 0.0, 1.0), nh = clamp(dot(NORMAL, hv), 0.0, 1.0), lh = max(dot(LIGHT, hv), 0.2);

@@ -31,11 +31,13 @@ varying flat float v_tile;
 varying vec3 v_col;
 varying flat vec3 v_origin;
 varying vec3 v_world;
+varying flat float v_snow;   // snow on the crown (instance custom a < 0 = -snow; 2026-11-27)
 global uniform vec4 cam_see;
 global uniform vec4 cam_eye;
 
 void vertex() {
 	v_col = albedo * COLOR.rgb * INSTANCE_CUSTOM.rgb;
+	v_snow = clamp(-INSTANCE_CUSTOM.a, 0.0, 1.0);
 	v_tile = tile_m > 0.0 ? max(1.0, round(COLOR.a * length(MODEL_MATRIX[0].xyz) / tile_m)) : 1.0;
 	v_origin = MODEL_MATRIX[3].xyz;
 	vec3 base = MODEL_MATRIX[3].xyz;
@@ -67,6 +69,12 @@ void fragment() {
 		if (n < cut * 0.95) discard;
 	}
 	ALBEDO = v_col * t.rgb;
+	if (v_snow > 0.001) {
+		// snow lying on the cards that face up (the dome's top, each whorl's upper side), in clumps by the leaves' own alpha
+		float wy = (INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).y;
+		float k = smoothstep(0.78, 0.95, wy + (t.g - 0.25) * 0.4);
+		ALBEDO = mix(ALBEDO, vec3(0.78, 0.81, 0.85), k * 0.7 * smoothstep(0.2, 0.7, v_snow));
+	}
 	v_trans = 0.5;
 	if (use_nrm) {
 		vec4 nt = texture(nrm_tex, uv);

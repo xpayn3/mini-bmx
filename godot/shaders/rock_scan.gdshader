@@ -20,12 +20,16 @@ uniform bool use_instance = true;
 varying vec3 v_col;
 varying vec3 v_world;
 varying flat vec3 v_origin;
+varying flat float v_snow;   // snow on its top (instance custom a < 0 = -snow; 2026-11-27)
+varying vec3 v_wn;
 global uniform vec4 cam_see;
 global uniform vec4 cam_eye;
 
 void vertex() {
 	vec4 ic = use_instance ? INSTANCE_CUSTOM : vec4(1.0);
 	v_col = ic.rgb * tint;
+	v_snow = use_instance ? clamp(-ic.a, 0.0, 1.0) : 0.0;
+	v_wn = (MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz;
 	v_origin = (MODEL_MATRIX * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
 	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	if (deco_fold(v_origin, fade_mode, PROJECTION_MATRIX[3][3] > 0.5)) VERTEX = vec3(0.0);
@@ -46,6 +50,15 @@ void fragment() {
 	SPECULAR = specular;
 	NORMAL_MAP = texture(rock_nrm, UV).rgb;
 	NORMAL_MAP_DEPTH = relief;
+	if (v_snow > 0.001) {
+		// a snow cap on what looks up (2026-11-27), its edge broken by the scan's own light / dark (cracks hold it last)
+		float up = normalize(v_wn).y;
+		float s = up + (dot(c.rgb, vec3(0.3, 0.59, 0.11)) - mean_lum) * 0.8;
+		float k = smoothstep(0.92 - v_snow * 0.5, 1.02 - v_snow * 0.5, s);
+		ALBEDO = mix(ALBEDO, vec3(0.80, 0.83, 0.87), k);
+		ROUGHNESS = mix(ROUGHNESS, 0.72, k);
+		NORMAL_MAP_DEPTH = relief * (1.0 - 0.8 * k);
+	}
 }
 
 void light() {

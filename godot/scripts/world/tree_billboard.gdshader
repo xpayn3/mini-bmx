@@ -20,11 +20,13 @@ varying vec3 v_col;
 varying vec3 v_right;
 varying vec3 v_fwd;
 varying vec3 v_world;
+varying flat float v_snow;   // (deco_cards: the crown's snow, custom a < 0)
 
 void vertex() {
 	vec3 o = MODEL_MATRIX[3].xyz;
 	v_origin = o;
 	v_col = INSTANCE_CUSTOM.rgb;
+	v_snow = clamp(-INSTANCE_CUSTOM.a, 0.0, 1.0);
 	float sy = length(MODEL_MATRIX[1].xyz);
 	float sx = length(MODEL_MATRIX[0].xyz);
 	vec3 to = CAMERA_POSITION_WORLD - o;
@@ -51,6 +53,10 @@ void fragment() {
 	ALPHA = clamp(t.a * (1.0 + max(lod, 0.0) * 0.3), 0.0, 1.0);
 	ALPHA_SCISSOR_THRESHOLD = 0.5;
 	ALBEDO = t.rgb * v_col;
+	if (v_snow > 0.001) {   // (the near cards' snow, seen from afar: the crown's upper part, patchy by the baked picture)
+		float k = smoothstep(0.85, 1.0, (1.0 - UV.y) * 0.6 + dot(t.rgb, vec3(0.3, 0.6, 0.1)) * 1.2);
+		ALBEDO = mix(ALBEDO, vec3(0.78, 0.81, 0.85), k * 0.3 * smoothstep(0.2, 0.7, v_snow));
+	}
 	vec3 nw = normalize(v_right * (UV.x - 0.5) * 1.6 + v_fwd * 0.75 + vec3(0.0, 0.3, 0.0));
 	NORMAL = normalize((VIEW_MATRIX * vec4(nw, 0.0)).xyz);
 	ROUGHNESS = 0.85;

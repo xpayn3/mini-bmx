@@ -16,7 +16,7 @@ static var HILL_TOP := 450.0
 static var HILL_LEN := 2800.0
 static var PITCH_N := 9
 static var PITCH_K := 84.0 / 450.0   # (a pitch: ~5-8 m of drop over 34-58 m)
-const SNOW_H := 280.0      # m: the high peaks' snowline
+static var SNOW_H := 280.0      # m: the high peaks' snowline (Land Lab "snow_h")
 ## the trail never ends: it runs on through the hills after the mountain. The first COURSE_LEN m are laid
 ## out at setup; Terrain grows it (grow_course) on a worker thread well before the rider gets near the end.
 const COURSE_LEN := 4000.0
@@ -275,6 +275,7 @@ var _g_has_wood: bool = false
 var cl_g := Color()
 var cl_d := Color()
 var cl_steep: float = 0.0
+var cl_snow: float = 0.0   # how much snow lies here (color_post), baked for ground.gdshader's snow layer
 
 var col := {}            # per-instance copies (no shared refcounts between threads)
 var red_bands := PackedColorArray()
@@ -2278,9 +2279,12 @@ func color_post(x: float, z: float, h: float, ny: float, dry: float, rug: float,
 	var C := col
 	var g := cl_g
 	var snow_k := maxf(rug, cold)
+	var s_keep := 1.0   # (1 - how much snow covers this point: the ground shader's snow layer, cl_snow)
 	if snow_k > 0.0 and dry < 1.0:
 		var lo := 11.0 - 7.0 * cold
-		g = g.lerp(C["snow"], sm(lo, lo + 8.0, h - hill(x, z) + noise(x * I9, z * I9) * 3) * snow_k * (1.0 - dry) * sm(0.75, 0.9, ny))
+		var s1 := sm(lo, lo + 8.0, h - hill(x, z) + noise(x * I9, z * I9) * 3) * snow_k * (1.0 - dry) * sm(0.75, 0.9, ny)
+		g = g.lerp(C["snow"], s1)
+		s_keep *= 1.0 - s1
 	if not OLD_PEAK and h > SNOW_H - 40.0 and dry < 1.0:
 		# the high peaks' snowline (2026-11-26): from ~SNOW_H up, wandering +-25 m, in patches that join up toward the summit,
 		# not on faces too steep to hold it, none on dry land
@@ -2288,6 +2292,7 @@ func color_post(x: float, z: float, h: float, ny: float, dry: float, rug: float,
 		var sk := sm(SNOW_H, SNOW_H + 60.0, sh) * sm(0.72, 0.88, ny) * (1.0 - dry)
 		sk *= sm(-0.25, 0.15, noise((x + 77.0) * I26, (z - 31.0) * I26) + sm(SNOW_H, SNOW_H + 150.0, h) * 0.6)
 		g = g.lerp(C["snow"], sk)
+		s_keep *= 1.0 - sk
 	var steep := sm(0.86, 0.6, ny)
 	if steep > 0.0:
 		var bh := h * 0.3 + noise(x * I40, z * I40) * 0.5
@@ -2298,7 +2303,9 @@ func color_post(x: float, z: float, h: float, ny: float, dry: float, rug: float,
 		var rb: Color = red_bands[posmod(bi, 6)].lerp(red_bands[posmod(bi + 1, 6)], k)
 		g = g.lerp(gb.lerp(rb, sm(0.35, 0.65, dry)), steep)
 	cl_steep = steep
+	cl_snow = (1.0 - s_keep) * (1.0 - steep)
 	if h < WATER + 0.7:
+		cl_snow = 0.0
 		g = g.lerp(C["sand"], sm(WATER + 0.7, WATER + 0.2, h))
 	if h < WATER:
 		g = g.lerp(C["bed"], 0.6)

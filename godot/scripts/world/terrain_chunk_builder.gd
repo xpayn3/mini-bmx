@@ -121,6 +121,7 @@ var _rock_sharp := false   # granite (rounded, weathered) -> tundra (frost-split
 var _moss_k := 1.0
 var _lg := PackedColorArray()   # this chunk's land / dirt colours (sRGB, per grid node): the scanned rocks take their tone
 var _ld := PackedColorArray()
+var _sn := PackedFloat32Array()   # this chunk's snow cover per grid node (ground_stage SN): rocks there get a snow cap
 static var OLD_ROCKTONE := Env.raw("BMX_OLD_ROCKTONE") == "1"
 ## (2026-11-27, user: "rocks don't match the surroundings, they pop"): a scanned rock's instance colour = the ground's own colour
 ## where it lies (half land, half dirt; a little greyer, a little darker), so its average albedo sits just under the ground's
@@ -139,6 +140,46 @@ func _rock_tone(x: float, z: float, b: float) -> Color:
 	lin = Color(lerpf(lin.r, l, 0.5), lerpf(lin.g, l, 0.5), lerpf(lin.b, l, 0.5))
 	var k := 0.82 / 0.19 * b
 	return Color(lin.r * k, lin.g * k, lin.b * k)   # x the rocks' moss (_rock_type): the brink rocks by the trail are scraped / sun-baked, mostly bare
+## snow fills the gaps (user: "also cover all"): the bake leaves short slopes / banks inside a snowfield bare (too
+## steep for it, a green zigzag through the white); every node takes 0.9 x the most snow within 3 nodes (1.5 m)
+## (a separable max). Chunks with no snow skip it
+static func _snow_fill(SN: PackedFloat32Array, NV: int) -> PackedFloat32Array:
+	var any := false
+	for v in SN:
+		if v > 0.01:
+			any = true
+			break
+	if not any or Terrain.OLD_SNOW:
+		return SN
+	const R := 3
+	var tmp := PackedFloat32Array(); tmp.resize(NV * NV)
+	for iz in NV:
+		for ix in NV:
+			var m := 0.0
+			for d in range(maxi(0, ix - R), mini(NV, ix + R + 1)):
+				m = maxf(m, SN[iz * NV + d])
+			tmp[iz * NV + ix] = m
+	var out := SN.duplicate()
+	for iz in NV:
+		for ix in NV:
+			var m := 0.0
+			for d in range(maxi(0, iz - R), mini(NV, iz + R + 1)):
+				m = maxf(m, tmp[d * NV + ix])
+			out[iz * NV + ix] = maxf(SN[iz * NV + ix], m * 0.9)
+	return out
+
+
+## snow cover at a spot (the most of the 3 x 3 grid nodes round it: a rock beside a snow patch still catches some)
+func _snow_at(x: float, z: float) -> float:
+	var NV := N + 1
+	var d := S / N
+	var ix := clampi(roundi((x - (cx * S - S / 2)) / d), 0, NV - 1)
+	var iz := clampi(roundi((z - (cz * S - S / 2)) / d), 0, NV - 1)
+	var m := 0.0
+	for j in range(maxi(0, iz - 1), mini(NV, iz + 2)):
+		for i in range(maxi(0, ix - 1), mini(NV, ix + 2)):
+			m = maxf(m, _sn[j * NV + i])
+	return m
 func _push(name: String, b: Basis, p: Vector3, c: Color) -> int:
 	var ca := 1.0
 	if name == "rock" and not OLD_SCANROCKS and not TerrainGeo.old_rocks():
@@ -174,6 +215,24 @@ func _push(name: String, b: Basis, p: Vector3, c: Color) -> int:
 		if not OLD_ROADROCKS: ca = rt[3]
 	if (name.begins_with("scan_") or name.begins_with("spebble_")) and not _lg.is_empty() and not OLD_ROCKTONE:
 		c = _rock_tone(p.x, p.z, (c.r + c.g + c.b) / 3.0)
+	# snow caps (2026-11-27): a rock lying in snow carries it on its top; custom data a < 0 = snow amount (rock.gdshader /
+	# rock_scan.gdshader), no moss under it
+	if not _sn.is_empty() and not Terrain.OLD_SNOW and (name.begins_with("scan_") or name.begins_with("spebble_") or name.begins_with("rock_") or name.begins_with("pebble_")):
+		var sk := _snow_at(p.x, p.z)
+		if sk > 0.03:
+			ca = -sk
+		# pebbles (the trail-edge clumps) lie buried under the snow
+		if sk > 0.3 and (name.begins_with("spebble_") or name.begins_with("pebble_")):
+			b = Basis.from_scale(Vector3(0.001, 0.001, 0.001))
+	elif (name == "grass" or name == "daisy" or name == "tulip" or name == "spike") and not _sn.is_empty() and not Terrain.OLD_SNOW:
+		# buried under the snow (the instance stays, folded to nothing: callers keep their index)
+		if _snow_at(p.x, p.z) > 0.3:
+			b = Basis.from_scale(Vector3(0.001, 0.001, 0.001))
+	elif (name == "pine" or name == "blob") and not _sn.is_empty() and not Terrain.OLD_SNOW:
+		# snow on the crowns (deco_cards / tree_billboard read custom a < 0 = -snow)
+		var sk := _snow_at(p.x, p.z)
+		if sk > 0.03:
+			ca = -sk
 	var arr: PackedFloat32Array = lists[name]
 	lists[name] = PackedFloat32Array()   # drop the dict's reference so the append grows arr in place (no copy of the whole list)
 	arr.append_array([b.x.x, b.y.x, b.z.x, p.x, b.x.y, b.y.y, b.z.y, p.y, b.x.z, b.y.z, b.z.z, p.z, c.r, c.g, c.b, ca])
@@ -281,6 +340,8 @@ func _build() -> void:
 	var LG: PackedColorArray = gs["LG"]
 	var LD: PackedColorArray = gs["LD"]
 	_lg = LG; _ld = LD
+	_sn = _snow_fill(gs["SN"], NV) if gs.has("SN") else PackedFloat32Array()
+	if not _sn.is_empty(): gs["SN"] = _sn
 	var TW: PackedFloat32Array = gs["TW"]
 	var SW: PackedFloat32Array = gs["SW"]
 	_stage("ground+colour")
@@ -420,6 +481,23 @@ func _build() -> void:
 				fv = maxf(clampf(fv, 0.0, 1.0), clampf(T5a[iz * NV + ix], 0.0, 1.0))
 				pA[(iz * NV + ix) * 4 + 3] = roundi((1.0 - fv) * 255)
 	out["trail3_img"] = Image.create_from_data(NV, NV, false, Image.FORMAT_RGBA8, pA)
+	# snow (2026-11-27, ground.gdshader's snow layer + world/snow_patch.gd): R = cover (its colour), G = depth (0..1 of
+	# SnowPatch.DEPTH: the snow's real thickness; none on the trail / built jumps, thin at the patches' edges). Only chunks
+	# that have any snow get the texture
+	if gs.has("SN"):
+		var SNa: PackedFloat32Array = gs["SN"]
+		var pS := PackedByteArray(); pS.resize(NV * NV * 2)
+		var any_snow := false
+		for o in NV * NV:
+			var cv := clampf(SNa[o], 0, 1)
+			var sv := roundi(cv * 255)
+			pS[o * 2] = sv
+			pS[o * 2 + 1] = roundi(sm(0.12, 0.7, cv) * (1.0 - sm(0.0, 0.75, TW[o])) * 255)   # (a gentle bank down to the trail)
+			any_snow = any_snow or sv > 2
+		if any_snow:
+			var img_s := Image.create_from_data(NV, NV, false, Image.FORMAT_RG8, pS)
+			img_s.generate_mipmaps()
+			out["snow_img"] = img_s
 	# where puddles can be (world/trail_puddle.gd: tyre dust stops over them); empty for chunks with no wet road
 	out["pud"] = TrailPuddle.table(TRa, T2a, TW, norms, NV)
 	# ---- grass field data (world/grass_field.gd): the ground's own heights + land colour, density in alpha ----
@@ -460,6 +538,7 @@ func _build() -> void:
 					den *= 1.0 - (0.6 + 0.38 * sp) * sm(0.01, 0.35, tw)
 			den *= (1.0 - sm(0.1, 0.6, SW[o])) * sm(WATER + 0.25, WATER + 0.8, h)
 			den *= (1.0 - sm(0.7, 0.97, DRY[o])) * (1.0 - snow) * (0.55 + 0.45 * ao[o])
+			if not _sn.is_empty(): den *= 1.0 - sm(0.08, 0.3, _sn[o])
 			pK[o * 4] = pG[o * 4]; pK[o * 4 + 1] = pG[o * 4 + 1]; pK[o * 4 + 2] = pG[o * 4 + 2]
 			pK[o * 4 + 3] = roundi(clampf(den, 0, 1) * 255)
 	for sb in blocked:   # sheds, tape stakes, billboards: no grass through their floors / feet
@@ -561,6 +640,7 @@ func ground_stage(ox: float, oz: float) -> Dictionary:
 	var TW := PackedFloat32Array(); TW.resize(NV * NV)
 	var SW := PackedFloat32Array(); SW.resize(NV * NV)
 	var DRY := PackedFloat32Array(); DRY.resize(NV * NV)
+	var SN := PackedFloat32Array(); SN.resize(NV * NV)   # snow cover (cl_snow): ground.gdshader snow layer
 	for iz in NV:
 		for ix in NV:
 			var k := (iz + 1) * W + ix + 1
@@ -577,10 +657,11 @@ func ground_stage(ox: float, oz: float) -> Dictionary:
 			f.color_post(lx + ox, lz + oz, h, nv.y, pre_b[o * 4], pre_b[o * 4 + 1], pre_b[o * 4 + 2], pre_b[o * 4 + 3])
 			TW[o] = pre_t[o]
 			SW[o] = f.cl_steep
+			SN[o] = f.cl_snow
 			DRY[o] = maxf(pre_b[o * 4], pre_b[o * 4 + 3])   # (no grass on ash)
 			LG[o] = f.cl_g
 			LD[o] = f.cl_d
-	return {"G": G, "verts": verts, "norms": norms, "uvs": uvs, "LG": LG, "LD": LD, "TW": TW, "SW": SW, "DRY": DRY, "TR": TR, "T2": T2, "T3": T3, "T4": T4, "T5": T5}
+	return {"G": G, "verts": verts, "norms": norms, "uvs": uvs, "LG": LG, "LD": LD, "TW": TW, "SW": SW, "DRY": DRY, "TR": TR, "T2": T2, "T3": T3, "T4": T4, "T5": T5, "SN": SN}
 
 
 ## clears grass density (alpha of the grass_img bytes) within r of (x, z), soft over the outer 30 %
