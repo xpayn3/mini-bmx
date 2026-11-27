@@ -31,7 +31,7 @@ const DEFS := [
 	["vol_density", "Haze density", 1.0, 0.0, 4.0, 0.05, "Haze"],
 	["sun_scatter", "Glow round the sun (distance fog)", 0.02, 0.0, 0.2, 0.005, "Haze"],
 	["fog_aerial", "Distance takes the sky\'s own colour (rest: the haze colour)", 0.25, 0.0, 1.0, 0.05, "Haze"],
-	["agx_contrast", "Tonemapper contrast (AgX)", 1.25, 1.0, 1.7, 0.01, "Tone"],
+	["agx_contrast", "Tonemapper contrast (AgX)", 1.38, 1.0, 1.7, 0.01, "Tone"],
 	["agx_white", "Tonemapper white point (AgX)", 12.0, 4.0, 24.0, 0.5, "Tone"],
 	["bloom_mix", "Lens glow (bloom mix)", 0.04, 0.0, 0.2, 0.005, "Tone"],
 	["night_sat", "Colour left at night", 0.5, 0.0, 1.0, 0.02, "Tone"],

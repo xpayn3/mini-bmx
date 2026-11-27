@@ -2664,7 +2664,12 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
 - Grime: mud builds up (slow: `Grime.MUD_RATE` 0.25) and washes off in water; wet gloss + drips. **Dust first** (2026-11-20): riding dirt / sand
   lays a see-through film of the ground's colour (`Grime.dust`, global `grime_dust`, ~30 s to full, thickest low down, drawn by the
   same `grime_mud` pass, now a transparent pass); mud only piles up once the bike is dusty (`smoothstep(0.4, 0.95, dust)`) or
-  wet. **Colours = the ground ridden on** (2026-11-21, user: bike looked pale / bright, "make dirt and dust the same colour as
+  wet. **Dust film toned down (2026-11-27, user: "bike looks lame when riding")**: it covered ~60 % evenly, so after ~20 s of
+  desert the whole bike + kit went one beige blob (tyres, stanchions, stickers). Now patchy (noise threshold), low on the
+  bike (fades by ~0.7 m up), tyre sidewalls mostly clear, cap 25 % (`grime_mud.gdshader` dust block); mud unchanged.
+  Same day: contact shadow `TYRE_A` 0.6 -> 0.78, `BODY_A` 0.22 -> 0.3; LightLab `agx_contrast` 1.25 -> 1.38. Measured: the
+  near haze is NOT what flattens the bike (vol fog + far fog off moved the bike's darkest 2 % only 72 -> 74 of 255).
+  Compare: `BMX_IDLE=1 BMX_CAM=side BMX_DUST_COAT=1 BMX_MUD_COAT=0.25` vs both 0. **Colours = the ground ridden on** (2026-11-21, user: bike looked pale / bright, "make dirt and dust the same colour as
   the ground"): the dust film is the ground colour itself, mud the same colour x 0.68 (sand 0.8); both keep following the
   ground while riding it (`Grime.GROUND_FOLLOW` 6 s, mud 2.5x). `grime_dust` is a plain vec4 global, so it must be sent
   linear (`srgb_to_linear`): sRGB numbers read as linear were the chalky white film. Mud is raised (screen-space bump from a lumpy height field in the pass: no UVs

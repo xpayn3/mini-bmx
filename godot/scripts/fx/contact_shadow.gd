@@ -7,11 +7,11 @@ extends Node3D
 ## under each tyre's contact patch (stretched along the bike) and a wide soft one under bike + body. Each
 ## fades out as what casts it rises off the ground (jumps), and with distance.
 
-const TYRE_A := 0.6           # darkness right under a tyre that's on the ground
+const TYRE_A := 0.78          # darkness right under a tyre that's on the ground (0.6 until 2026-11-27: the bike read as floating)
 const TYRE_LEN := 0.32        # m: the tyre patch, along the bike (the darkening under the round tyre)
 const TYRE_W := 0.13          # m: across
 const TYRE_LIFT := 0.3        # m: tyre bottom this high over the ground = gone
-const BODY_A := 0.22          # the wide one under bike + rider
+const BODY_A := 0.3           # the wide one under bike + rider (was 0.22)
 const BODY_LEN := 1.7
 const BODY_W := 0.7
 const BODY_LIFT := 1.6        # m: bike middle this much higher than when riding = gone

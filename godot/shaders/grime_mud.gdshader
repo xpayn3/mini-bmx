@@ -144,10 +144,14 @@ void fragment() {
 	if (wheel) { spr = 0.0; cav = 0.0; under = 0.0; front = 0.0; top = 0.0; }
 	// dust film: soft clouds, thickest low down, grainy up close; wet = darker (dust turns to a muddy wash)
 	float dn = gr_noise(v_local * 7.0) * 0.55 + gr_noise(v_local * 23.0) * 0.3 + gr_noise(v_local * 130.0) * 0.15;
-	float dlow = tyre ? 0.7 + 0.3 * v_tread : 1.15 - hgt * 0.95;
+	// 2026-11-27 (user: the bike went one beige blob): the film is patchy and stays low, the tyre's sidewall keeps
+	// most of its black (dust sits in the tread), and it never covers more than ~25 % (was an even 60 % veil
+	// over everything: tyres, stanchions, stickers, kit all turned ground-coloured within 20 s). The mud keeps
+	// its own strength: dark patches read well, the pale film over everything didn't.
+	float dlow = tyre ? 0.12 + 0.5 * v_tread : clamp(1.15 - hgt * 1.6, 0.06, 1.15);
 	if (wheel) dlow = (0.25 + 0.6 * bead) * smoothstep(0.25, 0.75, clump) * 1.4;
-	float dmap = dlow + 0.5 * cav + 0.3 * top + 0.4 * spr;
-	float da = clamp(grime_dust.a * min(bias, 1.3) * dmap * (0.15 + 0.85 * dn), 0.0, 0.6);
+	float dmap = dlow + 0.4 * cav + 0.25 * top + 0.3 * spr;
+	float da = clamp(grime_dust.a * min(bias, 1.2) * dmap * (0.1 + 0.9 * smoothstep(0.35, 0.8, dn)), 0.0, 0.25);
 	vec3 dc = grime_dust.rgb * (0.9 + 0.2 * gr_noise(v_local * 41.0));
 	float w = grime.y;
 	float m = 0.0;
