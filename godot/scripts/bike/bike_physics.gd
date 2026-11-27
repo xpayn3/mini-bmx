@@ -1921,7 +1921,11 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 	var gnd: float = (0.0 if air else 1.0) if _OLD_AIRBLEND else 1.0 - air_k
 	if gnd > 0.0:
 		gx_t = flick * (0.35 if _OLD_STICKBIKE else float(T.get("flickLean", 0.0))) * smooth01(va / 1.5)
-		gx_t += s_in * float(T.get("slowLean", 0.3)) * slow_k * smooth01(va / 1.2)
+		# (2026-11-27, Project X slow corners: the bike is laid into the turn with the steer under a body that stays upright.
+		# The throw is full up to slowBodyFrom and gone by slowBodyTo (was 1 - va / 14 m/s: half gone at 25 km/h).
+		# BMX_OLD_SLOWBODY=1 = before)
+		var sl_k: float = slow_k if _OLD_SLOWBODY else 1.0 - _slow_body_k(va)
+		gx_t += s_in * float(T.get("slowLean", 0.5)) * sl_k * smooth01(va / 1.2)
 		bank_t = float(T.get("bankLean", 0.6)) * (_bank_hold if air else bank)
 		if whip > 0.0: gx_t += whip_side * float(T.get("whipLean", 0.22)) * whip * whip * (3.0 - 2.0 * whip) * (minf(1.5, float(T.get("whipStraight", 1.0))) if _whip_straight else 1.0)
 		gx_t *= gnd; bank_t *= gnd
@@ -1962,6 +1966,10 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 	else:   # the bank's extra room is carried off the lip, fading over 2 s (the lean must not snap at take-off)
 		cap_bank = maxf(0.0, cap_bank - dt * 0.5)
 	var cap_b: float = T.bikeLeanCap + cap_bank
+	# (slow, the drawn bike goes no further than slowBikeCap: an upright rider can't reach the bars of a bike laid out past ~45 deg.
+	# Gone by slowBodyTo. BMX_OLD_SLOWBODY=1 = off)
+	if not _OLD_SLOWBODY:
+		cap_b = lerpf(minf(cap_b, float(T.get("slowBikeCap", 0.62))), cap_b, _slow_body_k(va))
 	bike_lean = cap_b * tanh(bl / cap_b)
 	var lim_t := 9.0
 	if not air and absf(bike_lean) > 0.05:
@@ -2030,6 +2038,13 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 		# in gentle turns to 50 % from ~0.5 to 1.1 rad of bike lean. BMX_OLD_CORNERBODY=1 = always 80 %)
 		var sh_max: float = 0.8 if _OLD_CORNERBODY else lerpf(0.8, float(T.get("cornerBody", 0.5)), smooth01((absf(bl_nw) - 0.5) / 0.6))
 		var body_l: float = b_t - w_c * b_sg * maxf(0.0, (b_t - sh_max * bl_nw) * b_sg)
+		# (2026-11-27, Project X + DH riders: slow, the rider lays the BIKE into the turn and stays upright over the outside pedal;
+		# with speed the body leans in with it. So the body's lean is a share of the bike's: slowBody below slowBodyFrom, bodyLean
+		# from slowBodyTo, never past the deep-turn share above. Drawing only: the turn follows `lean` as before. It was 80 % of
+		# the shared lean at every speed, and the rider drew the shoulders on the bike's frame, so they tipped with the bike
+		# (~78 % of it) whatever this said. BMX_OLD_SLOWBODY=1 = before)
+		if not _OLD_SLOWBODY:
+			body_l = (bl_nw - _bike_lead) * minf(lerpf(float(T.get("slowBody", 0.15)), float(T.bodyLean), _slow_body_k(va)), sh_max)
 		counter = bl_nw - body_l
 	# on a bank the rider goes WITH the bike (drawn only). "Bike under an upright body" is flat-corner technique; in a
 	# berm rider and bike are one line, square to its face. The body's target above is measured against gravity, and
@@ -2053,6 +2068,9 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 			# half the bike's lean and at most 80 % of it)
 			var sh_b: float = lerpf(0.8, float(T.get("cornerBody", 0.5)), smooth01((absf(bl_nw) - 0.5) / 0.6))
 			var body_b: float = minf(maxf(0.8, sh_b) * absf(bl_nw), maxf(absf(bank) * minf(1.0, sh_b / 0.5), sh_b * absf(bl_nw)))
+			# (slow in a berm the body still stays nearer upright: at least half of its berm lean, more with speed)
+			if not _OLD_SLOWBODY:
+				body_b *= lerpf(maxf(0.5, float(T.get("slowBody", 0.15))), 1.0, _slow_body_k(va))
 			counter = lerpf(counter, bl_nw - signf(bl_nw) * body_b, bank_sq)
 	# in the air the stick's lean is the rider's doing: they push the bike over with the legs and arms and
 	# their body goes the other way a little (counter-lean), staying over the centre of mass. It comes in with the air
@@ -2069,6 +2087,11 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 	counter += w_part
 	rock = pedal_rock(crank, sprint, pedal, va, bike_rock)
 	return va
+
+## 0 slow .. 1 fast: how much of its lean the body takes with the bike (Project X: slow = bike under an upright body)
+func _slow_body_k(va: float) -> float:
+	var v0: float = float(T.get("slowBodyFrom", 4.0))
+	return smooth01((va - v0) / maxf(0.5, float(T.get("slowBodyTo", 11.0)) - v0))
 
 ## stage 7: move along the travel direction, then everything it can run into (rocks, trees, fences, tape, walls)
 func _step_move(dt: float, f: Vector3) -> void:
@@ -3511,8 +3534,11 @@ func _step_wheels(dt: float, f: Vector3, in_water: bool, va: float) -> void:
 		var aR: float = host.pedal_a0[1]
 		var tgt: float
 		var period := TAU
-		if lean > 0.12: tgt = aR + PI / 2
-		elif lean < -0.12: tgt = aL + PI / 2
+		# (the drawn bike's lean, not the shared one: slow, the bike is laid into the turn while the shared lean is small, and
+		# the rider stands on the outside pedal. BMX_OLD_SLOWBODY=1 = the shared lean)
+		var cl: float = lean if _OLD_SLOWBODY else bike_lean * 0.65
+		if cl > 0.12: tgt = aR + PI / 2
+		elif cl < -0.12: tgt = aL + PI / 2
 		else:
 			tgt = aL; period = PI
 		tgt += period * round((crank - tgt) / period)
@@ -3762,6 +3788,7 @@ static var _OLD_AUTOTUCK := Env.raw("BMX_OLD_AUTOTUCK") != ""   # tuck reach 0.1
 static var _OLD_WEAVE := Env.raw("BMX_OLD_WEAVE") != ""
 static var WEAVE_ON := Env.raw("BMX_WEAVE") != ""   # the bike weave, off (rocked the whole rider)   # no bike weave under the rider
 static var _OLD_CORNERBODY := Env.raw("BMX_OLD_CORNERBODY") != ""   # body at up to 80 % of the bike's lean in deep turns
+static var _OLD_SLOWBODY := Env.raw("BMX_OLD_SLOWBODY") != ""   # slow turns: the body leans with the bike like at speed
 static var _OLD_BANKLOCK := Env.raw("BMX_OLD_BANKLOCK") != ""   # leaned into tilted ground: only camberPull
 static var _OLD_SLOW := Env.raw("BMX_OLD_SLOW") != ""   # slow-riding / reverse as before 2026-11-26
 static var _OLD_LEANDRAW := Env.raw("BMX_OLD_LEANDRAW") != ""   # the drawn body / bike lean with its one-tick jumps

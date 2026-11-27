@@ -199,6 +199,11 @@ func _autotest(seconds: float) -> void:
 				var srun := int(Env.s("BMX_SHIFT_RUN")) if Env.s("BMX_SHIFT_RUN") != "" else 3   # shifts each way (12 = run into the ends)
 				game._shift(1 if (si / srun) % 2 == 0 else -1)
 				print("SHIFT t=%.2f d=%d gear=%d" % [el, 1 if (si / srun) % 2 == 0 else -1, game.phys.gear])
+		if Env.s("BMX_HOLD_KMH") != "":   # tests: hold about this speed (pedal below it, brake 3 km/h over it)
+			var hk := float(Env.s("BMX_HOLD_KMH"))
+			pedal = pedal and game.phys.v * 3.6 < hk
+			if game.phys.v * 3.6 > hk + 3.0: Input.action_press("brake", 0.5)
+			else: Input.action_release("brake")
 		if pedal and not (Env.s("BMX_COAST") != "" and int(el) % 6 >= 3): Input.action_press("pedal")   # BMX_COAST: 3 s pedal / 3 s coast
 		else: Input.action_release("pedal")
 		if Env.s("BMX_BRAKETURN") != "" and el > float(Env.s("BMX_BRAKETURN")):   # tests: 2 s pedal up to speed, 1.5 s hard brake + full steer, repeat
@@ -584,13 +589,57 @@ func _autotest(seconds: float) -> void:
 		elif Env.s("BMX_FLIPFLOP") != "":   # tests: full left / full right, swapped every half period (s), from 3 s
 			var per := float(Env.s("BMX_FLIPFLOP"))
 			var sv := 0.0 if el < 3.0 else (1.0 if fmod(el - 3.0, per) < per * 0.5 else -1.0)
-			Input.action_press("steer_left", 1.0) if sv > 0 else Input.action_release("steer_left")
-			Input.action_press("steer_right", 1.0) if sv < 0 else Input.action_release("steer_right")
+			if Env.s("BMX_FLIPFLOP_TAP") != "":   # tests: only a short tap of the steer (s) at the start of each half period
+				sv = sv if fmod(el - 3.0, per * 0.5) < float(Env.s("BMX_FLIPFLOP_TAP")) and el >= 3.0 else 0.0
+			if Env.s("BMX_TAPPROBE") != "" and el > 3.0:   # tests: chest / head in the world, sideways to the bike's travel, every frame
+				var gt2: Transform3D = game.rider.global_transform
+				var chw: Vector3 = gt2 * game.rider.skeleton.bone_rider("UpperChest").origin
+				var hdw: Vector3 = gt2 * game.rider.skeleton.bone_rider("Head").origin
+				var phs = game.phys
+				var rg2 := Vector3(sin(phs.course), 0.0, cos(phs.course))
+				var base2 := Vector3(phs.x, 0.0, phs.z)
+				var rbx: Vector3 = game.rig.global_transform.basis.x
+				var rgr := Vector3(rbx.z, 0.0, -rbx.x).normalized()   # the drawn bike's sideways, level
+				var bbw: Vector3 = game.rig.crank_n.global_position
+				var gw2: Vector3 = (game.rig.wheel_f.global_position + game.rig.wheel_r.global_position) * 0.5
+				print("TAPP t=%.3f v=%.1f sv=%+.0f bike=%+.3f ctr=%+.3f chest_vs_bb=%+.3f head_vs_bb=%+.3f bb_vs_axles=%+.3f roll_p=%+.3f roll_c=%+.3f pel=%s ch=%s" % [el, phs.v, sv, phs.bike_lean, phs.counter, (chw - bbw).dot(rgr), (hdw - bbw).dot(rgr), (bbw - gw2).dot(rgr), game.rider.roll_p, game.rider.roll_c, game.rider.J[2].snapped(Vector3.ONE * 0.001), game.rider.J[1].snapped(Vector3.ONE * 0.001)])
+			Input.action_press("steer_left", (float(Env.s("BMX_FLIPFLOP_K")) if Env.s("BMX_FLIPFLOP_K") != "" else 1.0)) if sv > 0 else Input.action_release("steer_left")
+			Input.action_press("steer_right", (float(Env.s("BMX_FLIPFLOP_K")) if Env.s("BMX_FLIPFLOP_K") != "" else 1.0)) if sv < 0 else Input.action_release("steer_right")
 			var ph3 = game.phys
 			var bl_prev: float = _probe.get("ff_bl", ph3.bike_lean)
 			var fdt := maxf(get_process_delta_time(), 1e-4)
 			_probe["ff_rate"] = maxf(_probe.get("ff_rate", 0.0), absf(ph3.bike_lean - bl_prev) / fdt) if el > 3.5 else 0.0
 			_probe["ff_bl"] = ph3.bike_lean
+			# CHESTROLL: how still the upper body stays while the bike is swapped side to side
+			var hl: float = game.rider.roll_c   # the chest's roll in the world (rad): how still the upper body stays
+			# + the head's sideways place in the world against the line between the two tyres' contact patches (m)
+			var rbs: Basis = game.rig.global_transform.basis
+			var upb: Vector3 = rbs.y.normalized()
+			var cf: Vector3 = game.rig.wheel_f.global_position - upb * 0.36
+			var crr: Vector3 = game.rig.wheel_r.global_position - upb * 0.36
+			var fw := Vector3(cf.x - crr.x, 0.0, cf.z - crr.z).normalized()
+			var hpos: Vector3 = game.rider.head.global_position
+			var mid := (cf + crr) * 0.5
+			var hside: float = Vector3(hpos.x - mid.x, 0.0, hpos.z - mid.z).dot(Vector3(-fw.z, 0.0, fw.x))
+			if el > 4.0 and ph3.v > 1.0 and not ph3.crash_on:
+				var s1: float = _probe.get("ff_s1", hside)
+				var s2: float = _probe.get("ff_s2", s1)
+				_probe["ff_sd2"] = _probe.get("ff_sd2", 0.0) + pow(hside - 2.0 * s1 + s2, 2)
+				_probe["ff_smin"] = minf(_probe.get("ff_smin", hside), hside)
+				_probe["ff_smax"] = maxf(_probe.get("ff_smax", hside), hside)
+				_probe["ff_s2"] = s1; _probe["ff_s1"] = hside
+			if el > 4.0 and ph3.v > 1.0 and not ph3.crash_on:
+				var h1: float = _probe.get("ff_h1", hl)
+				var h2: float = _probe.get("ff_h2", h1)
+				var d2: float = hl - 2.0 * h1 + h2
+				_probe["ff_n"] = _probe.get("ff_n", 0) + 1
+				_probe["ff_d2"] = _probe.get("ff_d2", 0.0) + d2 * d2
+				_probe["ff_hmin"] = minf(_probe.get("ff_hmin", hl), hl)
+				_probe["ff_hmax"] = maxf(_probe.get("ff_hmax", hl), hl)
+				_probe["ff_h2"] = h1
+				_probe["ff_h1"] = hl
+				if int(_probe["ff_n"]) % 120 == 0:
+					print("CHESTROLL n=%d d2_rms_mdeg=%.1f range_deg=%.1f head_side_range_cm=%.1f head_side_d2_mm=%.2f" % [_probe["ff_n"], 1000.0 * rad_to_deg(sqrt(_probe["ff_d2"] / _probe["ff_n"])), rad_to_deg(_probe["ff_hmax"] - _probe["ff_hmin"]), 100.0 * (_probe["ff_smax"] - _probe["ff_smin"]), 1000.0 * sqrt(_probe["ff_sd2"] / _probe["ff_n"])])
 			if el - float(_probe.get("ff_t", 0.0)) > 0.1:
 				_probe["ff_t"] = el
 				print("LEANFF t=%.1f v=%.1f key=%+.0f steer_in=%+.2f lat=%+.1f bike=%+.0fdeg body_hip=%+.0fdeg body_chest=%+.0fdeg max_rate=%.1frad/s" % [el, ph3.v, sv, ph3.steer_in, ph3.lat_a, rad_to_deg(ph3.bike_lean), rad_to_deg(game.rider.roll_p), rad_to_deg(game.rider.roll_c), _probe["ff_rate"]])

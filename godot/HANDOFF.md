@@ -522,6 +522,36 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   (`gripCatch`, drawn countersteer `bar_catch`). Locked rear = fishtail (`gripRearLock`), wheelspin in a turn steps out
   (`gripPower`), pedal stamps / bumps (`gripBumps`) / chatter nudge it, tyres run a few degrees of slip angle in turns
   (`gripSquirm`), the rear swings round the front (`gripPivot`). Probe: `BMX_GRIP_PROBE=1` (`GRIP` lines).
+- **Slow corners Project X style: the bike laid under an upright rider (2026-11-27, user + Project X videos in GameResearch:
+  "slower, he leans the bike into the turn, he is more or less straight; only at speed he leans with the body", "must be stable",
+  "not so seated", "no leg out")**. Drawing only, the turn still follows `lean`. (1) Body lean = a share of the BIKE's lean
+  (`bike_physics.gd`, `_slow_body_k(va)`): `slowBody` 0.15 below `slowBodyFrom` 4 m/s .. `bodyLean` 0.8 from `slowBodyTo` 11 m/s,
+  capped by the deep-turn share (`cornerBody`); it was 80 % of the shared lean at every speed. The steer's bike throw (`slowLean`
+  0.3 -> 0.5, Tune VER 35) is full to slowBodyFrom; slow the drawn bike's soft cap is `slowBikeCap` 0.62 rad (an upright rider's
+  arms can't reach the bars of a bike laid out further). Cranks: the outside pedal down from the drawn bike's lean (slow corners
+  have a small shared lean). (2) **Root fix in `rider.gd`**: the body's counter-roll (cr / cr_c) only turned the hips' and chest's
+  POSITIONS upright; the shoulder line (`tw`) stayed on the bike's frame, so the shoulders tipped ~78 % of the bike's lean whatever
+  the body did (that was "the whole upper body moves"). `tw` now turns with cr_c on the ground; the pelvis stays on the bike
+  (rolled, a thigh dropped 15 cm into the rear tyre) and the spine bends; the torso's sideways limit is measured from the body's
+  counter-roll (`_body_roll`), not the bike's up. The handlebar limit (side view only) counts what sticks out sideways past the
+  grips (it shoved an upright chest 26 cm up / back). Slow (`slow_up`, 4 .. 11 m/s): body turns about `SLOW_PIVOT` 0.18 m (fast
+  0.3), turn crouches off, `SLOW_TALL` +5 cm, stands from walking pace (was from 5 m/s). (3) Foot out in flat corners is off
+  (`BMX_FOOTOUT=1` for tests). Measured (world seed 4242, swaps at 60 % lock, `BMX_BODYUP=1` `shoulder_roll`): 12 km/h shoulders
+  26 -> 1 deg at bike 28-34 deg; 30 km/h 30 -> 6; at 45 km/h the body roll is ~70 % of the bike's (31 vs 44 deg). Body clip same
+  as before; slope_stress 56 / 56. Tests: `BMX_HOLD_KMH=<km/h>` (autotest holds that speed), `BMX_FLIPFLOP=s BMX_FLIPFLOP_K=0.6`,
+  `CHESTROLL` lines. `BMX_OLD_SLOWBODY=1` = all before.
+  Same day, from the user riding it: (4) a quick steer slow "jolts the whole upper body": the hips / chest bump springs work in
+  the BIKE's frame (k 260 / 200, damping 0.4) and rang on the counter-roll's quick change there; their state is now moved by
+  the roll's own offset each frame (`_roll_dp` / `_roll_dc`), and Game eases the body's world lean (MCAP `body_roll` 6 rad/s,
+  100 rad/s^2) instead of the counter. Test `BMX_FLIPFLOP=3 BMX_FLIPFLOP_TAP=0.3 BMX_HOLD_KMH=18 BMX_TAPPROBE=1` (`TAPP`: chest vs
+  the bottom bracket, world): was 18 cm out in 0.08 s, 7 back, out again; now one smooth curve. (5) The torso is built on the
+  counter-roll exactly: hips slide out at most `HIP_SIDE` 0.22 m, chest = hips + the spine turned by cr_c (the low pivot pushed
+  the hips past their box, the limit pulled them back and the spine stood 10-25 deg off); shoulders on the bike frame turned by
+  cr_c (`shoulder_at`, square to a forward-folded spine, only turns ~cos(fold) of the roll); the arm reach may go to `LEAN_REACH`
+  0.97 as the body counters 0.35 rad (the inside arm goes long). Steady slow turn: shoulders 1-2 deg at bike 18 deg. (6) "Sinks
+  too much, shoulders weird in fast turns": two turn crouches stacked (0.12 x lean + hips 7 / chest 12 cm) -> one,
+  `CORNER_HIP` 0.07 / `CORNER_CHEST` 0.08 m. Sliders Ride > Steering > Slow riding. Not ridden by the user yet; at 45
+  km/h fewer side-by-side shots taken (GPU busy).
 - **Right stick side = the body, not the bike (2026-11-26, user: "leaning the stick also leans the bike, a double effect, it
   swings violently into the next corner", "make it like MX vs ATV")**. On the ground the side lean no longer steers
   (`flickSteer` 0, was 0.5 = half lock), no longer tips the drawn bike (`flickLean` 0, was 0.35 rad) and a flick no longer
