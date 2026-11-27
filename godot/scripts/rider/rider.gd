@@ -2273,7 +2273,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var dab := clampf(_num(p, "dab"), 0, 1)
 	if dab > 0.0:
 		var ds := signf(_num(p, "dabSide", -1.0))
-		var a := -ds * _num(p, "dabLean") * 0.8 * dab
+		var a := -ds * (_num(p, "dabLean") * 0.8 + _num(p, "dabLeanVar")) * dab   # (the moving part held against fully: the bike moves under a still body)
 		var c := cos(a)
 		var sn := sin(a)
 		var y0 := 0.3
@@ -2539,6 +2539,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var tw_cap: float = 0.6 if _OLD_TWIST else lerpf(0.3, 0.6, air)   # (an air spin keeps its old room)
 	var tw_base: float = _pk_tyaw + float(sty.twist) + clampf(_num(p, "airSpin") * 0.07 + sm_turn * tw_k * float(sty.turnTwist) + lead, -tw_cap, tw_cap) + _num(p, "flipTwist")   # (a flip: the shoulders turn to spot the landing)
 	var tw_air: float = -0.22 * tab - 0.85 * awhip
+	tw_base += _num(p, "lookTwist")   # (at a stop: the shoulders turn with a look over the shoulder, Game LOOK_TWIST)
 	# sprint bar pull: the shoulders turn with it, the pulling side forward (last frame's pull per arm; the torso turns as one
 	# piece, so the shoulder never leaves the chest - moving the shoulder joint alone tore it off the torso)
 	if not _OLD_SPRINT: tw_base += SPR_PULL_TWIST * 0.5 * (float(_arm_pull[1]) - float(_arm_pull[0])) * (1.0 - air)

@@ -1424,6 +1424,11 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   drawing only, fades in once settled on the foot: weight shifts every 1.5-5 s tip the bike up to `IDLE_SHIFT` 0.07 rad more onto /
   off the foot, the bars are turned up to `IDLE_BAR` 0.24 rad and held (+ a slow drift), (a suspension bob every few s was tried and removed: it read as a landing). Critically damped springs, own RNG. `BMX_OLD_IDLE=1` = off,
   `BMX_IDLE_PROBE=1` = `IDLELIFE` lines (test: `BMX_STRAIGHT=1 BMX_STOP_AT=3,60`).
+  Then (same day, user): the moving part of the stop lean (shifts + the player's tipping) is held against fully by the body
+  (`dabLeanVar`): the bike moves in his hands, the body stays still. The lean input (right stick sideways / arrows) tips the bike
+  at a stop (`STAND_LEAN` 0.3 rad, never past `STAND_OVER` 0.08 rad away from the foot). Looking back the shoulders turn with
+  it (`LOOK_TWIST` 0.45) and past `HAND_HIP_YAW` 1 rad the hand on that side goes to the hip (`_hand_to_hip`, Riders Republic).
+  The relaxed "sat up, chin up" stop pose is off (user: "awful"; title screen only). A small tremor was tried: "all shaking", removed.
 - **Foot down at a stop** (`Game._update_dab` / `_dab_foot`, drawn only): nearly stopped, not pedalling, on the ground
   -> the foot on the lower pedal (level cranks: the side the bike leans to, else left) goes to `Terrain.top_height`
   beside the bike, the bike leans `DAB_LEAN` onto it, the body stays upright (rider `dab` input). Eases in 0.5 s, out
