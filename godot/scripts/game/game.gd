@@ -2106,6 +2106,8 @@ const CRASH_DUST_BODY := 0.08
 const CRASH_DUST_BIKE := 0.15
 ## how much grit / dirt chunks fly off the body when it hits (1 = the old amount): kept low so the rider stays readable
 const CRASH_DEBRIS := 0.2
+## half width (m) of the hollow each ragdoll point presses into snow (Ragdoll order: head, chest, pelvis, then the limbs)
+const RAG_SNOW_W := [0.1, 0.16, 0.15, 0.07, 0.05, 0.05, 0.07, 0.05, 0.05, 0.08, 0.06, 0.05, 0.08, 0.06, 0.05]
 func _crash_dust() -> void:
 	var pts: Array = ragdoll.p
 	var prv: Array = ragdoll.q
@@ -2131,6 +2133,15 @@ func _crash_dust() -> void:
 		if grass and i % 2 == 0:   # the body flattens the grass it lies / slides in
 			var pq: Vector3 = prv[i] if i < prv.size() else pp
 			grass.trample(100 + i, pp, pp - pq, 0.28)
+		# (2026-11-27, user: "can the ragdoll trample snow too"): in snow every body part presses a print into the rut field
+		# (smeared, no tread), which world/snow_patch.gd digs out like the tyres' trenches: a body-shaped hollow where it
+		# lands, a furrow where it slides. Landing: a short stroke across the part so even a still body leaves its shape
+		if ruts != null and not Terrain.OLD_SNOW and terrain.snow_depth_at(pp.x, pp.z) > 0.05:
+			var hw: float = RAG_SNOW_W[i] if i < RAG_SNOW_W.size() else 0.05
+			if _rd_air[i] == 1:
+				ruts.track(300 + i, pp - Vector3(hw, 0, 0), 0.0, hw * 2.0, true, 0.0)   # (lifted: the next one starts afresh)
+				ruts.track(300 + i, pp - Vector3(hw * 0.6, 0, 0), 0.8, hw * 2.0, true, 0.0)
+			ruts.track(300 + i, pp, 0.8, hw * 2.0, true, 0.0)
 		var v: Vector3 = (pp - (prv[i] as Vector3)) / h
 		var s: int = terrain.surface(pp.x, pp.z)
 		if s == 2: continue

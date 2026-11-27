@@ -825,7 +825,7 @@ void fragment() {
 				snow_hh = (drf * 0.09 + rip * 0.025) * sn;
 				// small speckled glints: one candidate per 3 cm cell, ~7 % of cells, each never under ~1 px (drawn
 				// wider and dimmer as the pixel grows) and gone once the cells are smaller than ~2 px: no sparkling noise
-				v_glint = snow_glint(P.xz, fwn, gpx, VIEW_MATRIX);
+				v_glint = snow_glint(P.xz, fwn, rdx, rdy, VIEW_MATRIX);
 				v_glint.w *= snow_sparkle * sn;
 				// the crust (lumps + grain) as a slope, as the patch draws it
 				vec2 cs = snow_crust(P.xz, 1.0 - smoothstep(0.01, 0.04, gpx)) * (1.0 - smoothstep(0.05, 0.2, gpx)) * sn;
