@@ -24,6 +24,13 @@ uniform float scatter_rim = 0.0;   // > 0: only the silhouette glows (thick cact
 uniform float dapple = 0.0;
 uniform float dapple_size = 0.55;  // m, the size of a gap in the leaves
 uniform bool tint_own = false;   // cacti: UV.x = 1 keeps the vertex colour (spines, flowers, cut flesh)
+// cacti (2026-11-27, user: "realistic graphics, cacti stayed stylised"): a procedural skin on the body (UV.x = 0 parts):
+// dusty waxy bloom, fine vertical striations, pitted cuticle relief, sun-bleached / dry patches, grey-brown cork low on the
+// stem. In the plant's own space (rides with smashed pieces), every detail fades out before it is under ~2 px (no shimmer)
+uniform bool cactus_skin = false;
+uniform float skin_relief = 1.0;
+varying vec3 v_local;   // (cactus_skin) the vertex in the instance's own unscaled space
+varying float v_skin;   // 1 = skin, 0 = own-colour parts
 // tree trunks (2026-11-25): a bark scan (assets/textures/bark, CC0) wrapped round the upright trunk at real size: u round it in
 // whole tiles (no seam: the count comes from the instance's girth), v up it; its normal map lights the grooves
 uniform bool bark = false;
@@ -49,6 +56,10 @@ void vertex() {
 	v_col = albedo * COLOR.rgb * ic;
 	if (tint_own) v_col = mix(v_col, COLOR.rgb, clamp(UV.x, 0.0, 1.0));
 	v_rest = VERTEX;
+	if (cactus_skin) {
+		v_local = inverse(mat3(MODEL_MATRIX)) * (VERTEX - MODEL_MATRIX[3].xyz);
+		v_skin = 1.0 - clamp(UV.x, 0.0, 1.0);
+	}
 	v_origin = MODEL_MATRIX[3].xyz;
 	// the trunk mesh's mean radius is 0.13 m at scale 1: whole tiles round it, so u meets itself
 	v_bark_n = max(1.0, round(TAU * 0.13 * length(MODEL_MATRIX[0].xyz) / bark_tile));
@@ -75,6 +86,19 @@ float dap_noise(vec3 x) {
 	           mix(mix(dap_hash(i + vec3(0, 0, 1)), dap_hash(i + vec3(1, 0, 1)), f.x), mix(dap_hash(i + vec3(0, 1, 1)), dap_hash(i + vec3(1, 1, 1)), f.x), f.y), f.z);
 }
 
+float sk_fbm(vec3 p) {
+	return dap_noise(p) * 0.5 + dap_noise(p * 2.03 + 7.1) * 0.3 + dap_noise(p * 4.1 + 3.7) * 0.2;
+}
+
+// the skin's relief height (m-ish units, scaled later) and its colour, from the plant-space point
+float sk_height(vec3 q, float fine, float mid) {
+	// striations running up the stem + a pitted cuticle
+	float st = dap_noise(vec3(q.x * 55.0, q.y * 4.0, q.z * 55.0)) - 0.5;
+	float pit = dap_noise(q * 75.0) - 0.5;
+	float lump = dap_noise(q * 11.0) - 0.5;
+	return lump * 0.35 * mid + (st * 0.6 + pit * 0.4) * fine;
+}
+
 void fragment() {
 	if (deco_cut_pair(v_origin, fade_mode, FRAGCOORD.xy, PROJECTION_MATRIX[3][3] > 0.5)) discard;   // ortho = the sun's shadow pass
 	// the sun's shadow pass (orthographic; every view camera is perspective): leaf gaps. Only within ~40 m of
@@ -99,6 +123,47 @@ void fragment() {
 	ROUGHNESS = roughness;
 	METALLIC = metallic;
 	SPECULAR = specular;
+	if (cactus_skin && v_skin > 0.5) {
+		vec3 q = v_local;
+		float fw = length(fwidth(q));                 // plant-space size of a pixel
+		float fine = 1.0 - smoothstep(0.003, 0.009, fw);   // ~1.5 cm detail
+		float mid = 1.0 - smoothstep(0.02, 0.06, fw);      // ~10 cm detail
+		vec3 c = v_col;
+		// a real cactus is a dusty grey-olive, not grass green: pull the saturation down toward its own grey
+		float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
+		c = mix(vec3(lum), c, 0.8);
+		// glaucous wax bloom: paler and bluer on faces turned up / out to the sky, in patches
+		vec3 nw = (INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz;
+		float bloom = clamp(nw.y * 0.5 + 0.5, 0.0, 1.0) * (0.55 + 0.45 * sk_fbm(q * 3.0));
+		c = mix(c, vec3(lum * 1.25, lum * 1.32, lum * 1.3), 0.28 * bloom);
+		// long vertical streaks (rain run-off, growth lines)
+		float streak = dap_noise(vec3(q.x * 18.0, q.y * 0.9, q.z * 18.0));
+		c *= mix(1.0, 0.84 + 0.3 * streak, mid);
+		// large slow colour drift: some stems yellower / sun-bleached, some darker
+		float drift = sk_fbm(q * 1.3 + 5.0);
+		c = mix(c, c * vec3(1.18, 1.08, 0.78), smoothstep(0.55, 0.85, drift) * 0.55);
+		// dry / scarred patches: tan-grey
+		float scar = smoothstep(0.68, 0.8, sk_fbm(q * 4.5 + 2.3));
+		c = mix(c, vec3(0.42, 0.36, 0.24) * (0.8 + 0.4 * streak), scar * 0.5);
+		// cork low on the stem: grey-brown bark creeping up from the ground, ragged edge
+		float cork_h = 0.08 + 0.3 * sk_fbm(vec3(q.x * 9.0, q.y * 2.0, q.z * 9.0));
+		float cork = 1.0 - smoothstep(cork_h - 0.1, cork_h + 0.05, q.y);
+		vec3 cork_c = vec3(0.3, 0.22, 0.13) * (0.75 + 0.5 * sk_fbm(q * 22.0));
+		c = mix(c, cork_c, cork * 0.75);
+		// fine speckle (stomata / dust), only where it can be resolved
+		c *= 1.0 + (dap_noise(q * 140.0) - 0.5) * 0.18 * fine;
+		ALBEDO = c;
+		// a waxy cuticle: a little sheen, rougher where corky / scarred / dusty
+		ROUGHNESS = clamp(mix(0.52, 0.72, sk_fbm(q * 6.0)) + 0.25 * max(cork, scar), 0.0, 1.0);
+		SPECULAR = mix(0.32, 0.12, max(cork, scar));
+		// relief: surface-gradient bump from the height's screen derivatives (Mikkelsen)
+		float h = sk_height(q, fine, mid) * (0.002 + 0.005 * cork) * skin_relief;
+		vec3 sx = dFdx(VERTEX), sy = dFdy(VERTEX);
+		vec3 r1 = cross(sy, NORMAL), r2 = cross(NORMAL, sx);
+		float det = dot(sx, r1);
+		vec3 grad = sign(det) * (dFdx(h) * r1 + dFdy(h) * r2);
+		NORMAL = normalize(abs(det) * NORMAL - grad);
+	}
 	if (bark && bark_uv) {
 		vec2 uv = vec2(UV.x, UV.y * v_len / bark_tile);
 		ALBEDO = v_col * texture(bark_col, uv).rgb;

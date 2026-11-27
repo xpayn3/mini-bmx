@@ -2862,6 +2862,12 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   capped cuts in flesh colour, seeds denser at bike height); chunks get convex hulls, collide with each other,
   and are flung by their distance from the hit (`TerrainDebris.smash_cactus`). Check: `tools/cactus_probe.gd`
   (every body / piece closed, piece volumes = whole, must say `PASS`).
+  **Realistic skin (2026-11-27, user: "realistic graphics, cacti stayed stylised")**: `deco.gdshader` `cactus_skin` (on the
+  "cactus" material) draws the body (UV.x = 0 parts) procedurally in the plant's own space: desaturated dusty grey-olive,
+  glaucous wax bloom on up-facing faces, vertical streaks, yellow / sun-bleached drift, tan dry scars, grey-brown cork
+  creeping up from the ground, fine speckle, waxy roughness, and a surface-gradient bump (striations + pitted cuticle) that
+  fades out before it's under ~2 px. Instance colours `CACTI` are now olive (0x758a55 ...). `BMX_OLD_CACTUS=1` = the old
+  look. Gallery: `res://tools/cactus_gallery.tscn -- out.png [yaw= dist= h= at= sun= old=1]`. No texture files added.
 - **Race tape stretches before it snaps** (`TapeSim.grab`): riding into a span hands it to the sim pinned at both stakes, its
   hit point carried on the bike's front (`Terrain.tape_push`, set by `Game` every frame). It pulls straight, stretches, and tears
   only past `SNAP_STRAIN` (17 %); the halves whip back towards their stakes. Stop / back off / slide off its end / crash before
