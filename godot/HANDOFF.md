@@ -4109,6 +4109,16 @@ Known, not fixed (lower priority from the code review):
   half and make GPU spikes; check `nvidia-smi pmon -c 1` first. `TIME_PHYSICS_PROCESS` / `TIME_PROCESS` are the slowest
   single tick of the last second, not averages (our physics tick is ~0.3–0.7 ms). Don't print per slow frame while
   measuring: console prints through a pipe cost tens of ms and make more slow frames.
+- **HITCH / MEM lines in every ride's session log (2026-11-27)** (`Game._hitch_watch`, F8 reports carry them): a drawn frame
+  over 80 ms writes `HITCH frame_ms= phys_ticks= ... focus= | <top 5 of our _perf sections this frame> rest=<ms none of
+  them covered> | gc_ms=<C# collector pause inside it> gc_runs=+g0/+g1/+g2 | at=<clock> sys_mem=<% of RAM in use>
+  other_godot=<other Godot processes> proc= static= vram= objects= ... cs_heap= ...`; every 30 s of ride a `MEM t=` line
+  with the same memory part (`CsGc.stats` / `counters`). Found with them: the user's 1-3.5 s freezes (F8, seed 61298) did
+  NOT happen in a lone test ride (15 min, worst ~130 ms, memory flat at ~7.7 GB after the first minutes); each game
+  process holds ~7-7.7 GB private (Godot's own static 0.6 GB, C# ~0.25 GB, the rest outside Godot's counters: driver /
+  Vulkan, not looked into), and other sessions start ~1 test window a minute on the same PC. Read `rest`, `sys_mem` and
+  `other_godot` of the next real freeze before changing code. C# allocates ~30-40 MB/s of garbage while riding (mostly
+  chunk builds on workers), a collection every ~0.5 s, pauses ~1-2 ms each.
 
 Ideas offered, not started:
 - Tyre tracks option **B**: a painted top-down "track map" the ground shader reads → real ruts in mud/sand.
