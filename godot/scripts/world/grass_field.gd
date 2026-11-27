@@ -44,10 +44,15 @@ var _mat: ShaderMaterial
 const BLADES := "res://assets/textures/grass_blade/blades.png"   # Texture2DArray (tools/make_grass_blades.py)
 var _near: MultiMeshInstance3D
 var _mid: MultiMeshInstance3D
-var _tile_buf := {}                    # MultiMesh -> PackedFloat32Array (reused)
-var _tile_prev := {}                   # MultiMesh -> [buffer last uploaded, its count]: unchanged = no upload
+# each ring is two MultiMeshes: a new tile list is written into the hidden one and shown the NEXT frame. Written into
+# the one on screen, an instance slot changed tiles between frames, the renderer read that as the blade having flown
+# tens of metres (motion vectors), and the motion blur smeared the whole field for a frame: the grass flickered
+var _spare := {}                       # ring (0 near, 1 mid) -> the hidden MultiMeshInstance3D
+var _pending := {}                     # ring -> true: the hidden one holds a newer tile list
+var _tile_buf := {}                    # ring -> PackedFloat32Array (reused)
+var _tile_prev := {}                   # ring -> [buffer last uploaded, its count]: unchanged = no upload
 var _h_arr := PackedFloat32Array()     # the height window as floats (for the tiles' height range)
-var _tile_h := {}                      # MultiMesh -> {tile Vector2i: Vector2(min, max) ground height}, per window
+var _tile_h := {}                      # ring -> {tile Vector2i: Vector2(min, max) ground height}, per window
 var probe := Env.s("BMX_GRASS_PROBE") != ""
 var _cs = null   # GrassPlaceCs (C#: the per-frame tile placement, ~10x cheaper) or null = the GDScript `_place`
 var _probe_t := 0.0
@@ -214,8 +219,10 @@ func set_quality(q: int) -> void:
 	if q == quality:
 		return
 	quality = q
-	for n in [_near, _mid]:
+	for n in [_near, _mid] + _spare.values():
 		if n: n.queue_free()
+	_spare.clear()
+	_pending.clear()
 	_near = null
 	_mid = null
 	_tile_buf.clear()
@@ -228,6 +235,10 @@ func set_quality(q: int) -> void:
 	_q = QUALITY[q]
 	_near = _ring(_q.ns, _q.nt, true)
 	_mid = _ring(_q.ms, _q.mt, false)
+	for k in 2:
+		var sp := _ring(_q.ns if k == 0 else _q.ms, _q.nt if k == 0 else _q.mt, k == 0, (_near if k == 0 else _mid).multimesh.mesh)
+		sp.visible = false
+		_spare[k] = sp
 	_mat.set_shader_parameter("near_r", float(_q.nr))
 	_mat.set_shader_parameter("mid_r", float(_q.mr))
 	_mat.set_shader_parameter("near_spacing", float(_q.ns))
@@ -255,17 +266,17 @@ func _exit_tree() -> void:
 	RenderingServer.global_shader_parameter_set("grass_win_info", Vector4.ZERO)
 
 
-func _ring(spacing: float, tile: float, near: bool) -> MultiMeshInstance3D:
+func _ring(spacing: float, tile: float, near: bool, mesh: ArrayMesh = null) -> MultiMeshInstance3D:
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
 	mm.use_custom_data = true          # x = 1 near ring, 0 mid ring
-	mm.mesh = _tile_mesh(spacing, tile, near)
+	mm.mesh = mesh if mesh else _tile_mesh(spacing, tile, near)
 	var mi := MultiMeshInstance3D.new()
 	mi.multimesh = mm
 	mi.material_override = _mat
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	mi.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
-	mi.name = "Near" if near else "Mid"
+	mi.name = ("Near" if near else "Mid") + ("B" if mesh else "")
 	add_child(mi)
 	return mi
 
@@ -370,17 +381,18 @@ func update(cam: Camera3D) -> void:
 		rc += flat.normalized() * clampf((cp.y - ground) * 1.3, 0.0, _q.nr + 4.0)
 	_mat.set_shader_parameter("ring_centre", rc)
 	var c3 := Vector3(rc.x, cp.y, rc.y)
+	_show_pending()
 	var planes := cam.get_frustum()
 	var nn: int
 	var nm: int
 	if _cs != null:
 		var pf := PackedFloat32Array()
 		for p in planes: pf.append_array([p.normal.x, p.normal.y, p.normal.z, p.d])
-		nn = _place_cs(0, _near, c3, pf, _q.nt, 0.0, _q.nr + 1.0, 1.0, ground)
-		nm = _place_cs(1, _mid, c3, pf, _q.mt, _q.nr - 12.0, _q.mr + 1.0, 0.0, ground)
+		nn = _place_cs(0, c3, pf, _q.nt, 0.0, _q.nr + 1.0, 1.0, ground)
+		nm = _place_cs(1, c3, pf, _q.mt, _q.nr - 12.0, _q.mr + 1.0, 0.0, ground)
 	else:
-		nn = _place(_near, c3, planes, _q.nt, 0.0, _q.nr + 1.0, 1.0, ground)
-		nm = _place(_mid, c3, planes, _q.mt, _q.nr - 12.0, _q.mr + 1.0, 0.0, ground)
+		nn = _place(0, c3, planes, _q.nt, 0.0, _q.nr + 1.0, 1.0, ground)
+		nm = _place(1, c3, planes, _q.mt, _q.nr - 12.0, _q.mr + 1.0, 0.0, ground)
 	if probe:
 		_probe_t += get_process_delta_time()
 		if _probe_t > 1.0:
@@ -389,30 +401,48 @@ func update(cam: Camera3D) -> void:
 				nn * roundi(_q.nt / _q.ns) ** 2 + nm * roundi(_q.mt / _q.ms) ** 2])
 
 
-## the same as `_place`, in C# (GrassPlaceCs): the buffer only comes back when the visible tiles changed
-func _place_cs(k: int, mi: MultiMeshInstance3D, cp: Vector3, pf: PackedFloat32Array, tile: float, r0: float, r1: float, ring: float, ground: float) -> int:
-	var mm := mi.multimesh
-	var cap := (2 * (ceili(r1 / tile) + 1) + 1) ** 2
-	if mm.instance_count < cap:
+## puts the tile lists written last frame on screen
+func _show_pending() -> void:
+	for k in _pending:
+		var shown: MultiMeshInstance3D = _near if k == 0 else _mid
+		var next: MultiMeshInstance3D = _spare[k]
+		next.visible = true
+		shown.visible = false
+		_spare[k] = shown
+		if k == 0: _near = next
+		else: _mid = next
+	_pending.clear()
+
+
+## writes a ring's new tile list into its hidden MultiMesh (on screen from the next frame; the very first at once)
+func _upload(k: int, buf: PackedFloat32Array, c: int) -> void:
+	var first: bool = (_near if k == 0 else _mid).multimesh.instance_count == 0
+	var mm: MultiMesh = (_near if k == 0 else _mid).multimesh if first else (_spare[k] as MultiMeshInstance3D).multimesh
+	var cap := buf.size() / 16
+	if mm.instance_count != cap:
 		mm.instance_count = cap
+	mm.buffer = buf
+	mm.visible_instance_count = c
+	if not first: _pending[k] = true
+
+
+## the same as `_place`, in C# (GrassPlaceCs): the buffer only comes back when the visible tiles changed
+func _place_cs(k: int, cp: Vector3, pf: PackedFloat32Array, tile: float, r0: float, r1: float, ring: float, ground: float) -> int:
+	var cap := (2 * (ceili(r1 / tile) + 1) + 1) ** 2
 	var c: int = _cs.Place(k, cp, pf, tile, r0, r1, ring, 0.0 if is_nan(ground) else ground, is_nan(ground))
-	if _cs.Changed(k) or mm.visible_instance_count != c:
+	if _cs.Changed(k) or (_near if k == 0 else _mid).multimesh.instance_count == 0:
 		var buf: PackedFloat32Array = _cs.Buf(k)
-		if buf.size() != mm.instance_count * 16: buf.resize(mm.instance_count * 16)
-		mm.buffer = buf
-		mm.visible_instance_count = c
+		if buf.size() < cap * 16: buf.resize(cap * 16)
+		_upload(k, buf, c)
 	return c
 
 
 ## puts the ring's tiles that reach r0..r1 (horizontal distance from the camera) and touch the view into its
 ## MultiMesh; returns how many
-func _place(mi: MultiMeshInstance3D, cp: Vector3, planes: Array, tile: float, r0: float, r1: float, ring: float, ground: float) -> int:
-	var mm := mi.multimesh
+func _place(k: int, cp: Vector3, planes: Array, tile: float, r0: float, r1: float, ring: float, ground: float) -> int:
 	var n := ceili(r1 / tile) + 1
 	var cap := (2 * n + 1) * (2 * n + 1)
-	if mm.instance_count < cap:
-		mm.instance_count = cap
-	var buf: PackedFloat32Array = _tile_buf.get(mm, PackedFloat32Array())
+	var buf: PackedFloat32Array = _tile_buf.get(k, PackedFloat32Array())
 	if buf.size() != cap * 16:
 		buf.resize(cap * 16)
 	var tx0 := floori(cp.x / tile)
@@ -421,8 +451,8 @@ func _place(mi: MultiMeshInstance3D, cp: Vector3, planes: Array, tile: float, r0
 	var c := 0
 	var half := tile * 0.5
 	var rad := half * 1.4143
-	var hcache: Dictionary = _tile_h.get(mm, {})
-	_tile_h[mm] = hcache
+	var hcache: Dictionary = _tile_h.get(k, {})
+	_tile_h[k] = hcache
 	var have_h := _h_arr.size() == TEX * TEX
 	var ex := half + 1.0   # + blades leaning / blowing over the tile's edge
 	for dz in range(-n, n + 1):
@@ -469,13 +499,12 @@ func _place(mi: MultiMeshInstance3D, cp: Vector3, planes: Array, tile: float, r0
 			buf[b + 8] = 0.0; buf[b + 9] = 0.0; buf[b + 10] = 1.0; buf[b + 11] = oz
 			buf[b + 12] = ring; buf[b + 13] = 0.0; buf[b + 14] = 0.0; buf[b + 15] = 0.0
 			c += 1
-	_tile_buf[mm] = buf
+	_tile_buf[k] = buf
 	# same tiles as last frame (camera within a tile, view barely turned): nothing to upload
-	var prev: Array = _tile_prev.get(mm, [])
+	var prev: Array = _tile_prev.get(k, [])
 	if prev.is_empty() or prev[1] != c or prev[0] != buf:
-		mm.buffer = buf
-		mm.visible_instance_count = c
-		_tile_prev[mm] = [buf.duplicate(), c]
+		_upload(k, buf, c)
+		_tile_prev[k] = [buf.duplicate(), c]
 	return c
 
 

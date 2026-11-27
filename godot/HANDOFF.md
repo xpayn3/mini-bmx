@@ -1071,6 +1071,10 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   30 frames, `GRASSAB off_ms= on_ms= diff_ms=`): camera down in the grass +0.25..0.34 ms GPU, riding view ~0 (measured with
   other programs on the GPU). Not done: flowers / weeds from the other scans, the mid ring (too small to show).
 
+- **Grass flicker (2026-11-27)**: with motion blur on, a new grass tile list written into the MultiMesh on screen moved
+  instance slots between tiles; the motion vectors read that as huge motion and the field smeared for single frames. Each
+  ring is now two MultiMeshes: written hidden, shown next frame (`GrassField._upload` / `_show_pending`). Any other
+  MultiMesh that REORDERS its instances while on screen would do the same.
 - **Grass to the trail's edge, a raised verge, grass under jumps (2026-11-26, user: "grass more to the edge of the road like in
   real life, a grass edge and then a depressed road; on longer jumps grass under it")**. (1) `TerrainChunkBuilder` grass density
   = 1 - sm(0.62, 0.9, TW) (was sm(0.04, 0.4): grass stopped ~0.75 m past the dirt, where its fade only began): now half density
