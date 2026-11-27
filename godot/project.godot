@@ -192,6 +192,10 @@ rider_trim={
 "type": "float",
 "value": 0.0
 }
+mud_col_old={
+"type": "color",
+"value": Color(0.35, 0.235, 0.133, 1)
+}
 grime_age={
 "type": "vec4",
 "value": Vector4(0, 0, 0, 0)

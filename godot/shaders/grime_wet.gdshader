@@ -75,7 +75,8 @@ void fragment() {
 	// only on the surface that is seen: this pass is pulled towards the lens (POSITION.z above), so a part lying
 	// just under another (elbow / shoulder balls inside the sleeves) drew its film too = dark discs on the joints
 	vec4 scn = INV_PROJECTION_MATRIX * vec4(SCREEN_UV * 2.0 - 1.0, texture(depth_tex, SCREEN_UV).r, 1.0);
-	if (-VERTEX.z + scn.z / scn.w > 0.001) trim = 0.0;
+	// (the tolerance grows with distance: a fixed 1 mm flipped on / off frame to frame on far or grazing faces)
+	if (-VERTEX.z + scn.z / scn.w > 0.001 + 0.0008 * -VERTEX.z) trim = 0.0;
 	ALPHA = 1.0 - (1.0 - a_wet) * (1.0 - trim);
 	float wk = clamp(w * 4.0, 0.0, 1.0);
 	ROUGHNESS = mix(1.0, mix(0.32, 0.1, bead), wk);   // wet, not a mirror (0.18 / 0.04 read as glass)
