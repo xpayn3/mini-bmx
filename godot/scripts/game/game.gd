@@ -245,6 +245,21 @@ var dab_side := -1.0
 const DAB_LEAN := 0.24       # rad (~14 deg) the bike leans onto the foot: a relaxed, stylish lean, the body stays upright
 const DAB_OUT := 0.36        # m from the bike's centre line to the foot on the ground
 const DAB_FWD := 0.10        # m ahead of the bottom bracket the foot goes down (a little forward, braced)
+## FOOT OUT (2026-11-27, user, now that the rider has feet): coasting through a tight flat corner the inside foot comes
+## off its pedal (the up one: the outside foot is down) and the leg goes out forward, the sole skimming FO_SKIM above the
+## ground like a moto / downhill rider in a flat turn; back on the pedal as the turn opens or the pedals turn. Drawing
+## only (the physics isn't touched). BMX_OLD_FOOTOUT=1 = off, BMX_FOOTOUT_PROBE=1 = FOOTOUT lines
+const FO_LEAN_ON := 0.45      # rad of bike lean to put it out ...
+const FO_LEAN_OFF := 0.3      # ... and back under this
+const FO_V := Vector2(3.0, 13.0)   # m/s: between these speeds
+const FO_FWD := 0.42          # m ahead of the bottom bracket
+const FO_OUT := 0.46          # m to the inside of the bike's middle
+const FO_SKIM := 0.05         # m above the ground
+var fo_k := 0.0               # how far out (eased 0..1)
+var fo_side := -1.0           # -1 left, +1 right
+var _fo_lin := 0.0
+var _OLD_FOOTOUT := Env.raw("BMX_OLD_FOOTOUT") != ""
+var _FO_PROBE := Env.raw("BMX_FOOTOUT_PROBE") != ""
 var _dab_vprev := 0.0
 var _dab_dec := 0.0          # smoothed deceleration (m/s^2): slowing to a stop brings the foot out early
 var _dab_gap := 0.0          # foot side's ground height minus the other side's (side slope)
@@ -420,6 +435,7 @@ func _ready() -> void:
 	rig = BikeRig.new()
 	add_child(rig)
 	rig.load_bike(bike_cfg, bike_cfg.get("build", {}))
+	rig.crash_hull_prepare()   # (the crashed bike's hull points: once, while the ride loads)
 	susp = rig.susp
 	if susp != null and Env.s("BMX_NOUNCLIP") == "": susp.wheels_follow = true   # the wheels track the ground, the frame floats
 	pedal_a0 = rig.pedal_a0
@@ -1632,23 +1648,29 @@ func start_crash(reason: String) -> void:
 			reason, phys.v, phys.air, phys.since_land, phys.slip, phys.lean, phys.lean_err, phys.front_use, phys.rear_lock, phys.front_lock, phys.bank,
 			wrapf(phys.pitch - phys._g_pitch, -PI, PI)])
 	var pts: Array = rider.joints_world()
+	# (the shoes now, in the world: the rider node is moved to the world's origin below, after which their global
+	# transforms are the riding-space ones and the ragdoll's feet were built 175 m from the legs)
+	var shoes_w: Array = [rider.shoe[0].global_transform, rider.shoe[1].global_transform]
 	var f := phys.fwd()
 	# the body carries on with the bike's own motion (no extra pop up: it used to throw the body into the air)
 	var body_vel := f * phys.v + Vector3(0, minf(maxf(phys.vy, 0), 6.0 if phys.air else 0.3) + 0.2, 0)
 	var spin_v := f * (1.0 + absf(phys.v) * 0.08)   # the top of the body keeps going a little as the bike stops
 	var crash_v := body_vel.length()
 	phys.begin_crash()
+	_crash_bike_begin(reason.begins_with("BAIL"))
 	_break_action_cam(body_vel)
 	# detach the rider into world space
 	rider.get_parent().remove_child(rider)
 	add_child(rider)
 	rider.transform = Transform3D.IDENTITY
+	ragdoll.shoes_in = shoes_w
+	ragdoll.shoe_box = _shoe_box()
 	ragdoll.start(pts, body_vel, spin_v, 1.0 / 60)
 	var flat_v := Vector2(body_vel.x, body_vel.z).length()
 	crash_fatal = flat_v > Blood_FATAL_SPEED or Env.s("BMX_FATAL") != ""
 	if blood: blood.crash_start(flat_v)
 	grime.add_blood(clampf((crash_v - 8.0) * 0.035, 0.0, 0.5))   # only a severe crash (> ~8 m/s) stains; the rider + bike stay bloody until a death + revive
-	rider.pose_ragdoll(ragdoll.p)
+	rider.pose_ragdoll(ragdoll.p, {}, ragdoll.shoe_xf)
 	# (no dust right where the crash starts with the smoke sim: only where the body / bike hit and slide)
 	burst(Vector3(phys.x, phys.y + 0.05, phys.z), 30 if dust.sim == null else 2, terrain.surface(phys.x, phys.z), 1.5, dust.sim == null)
 	var cs: int = terrain.surface(phys.x, phys.z)
@@ -1658,6 +1680,118 @@ func start_crash(reason: String) -> void:
 	else: flash(reason)
 	if hud: hud.on_crash(crash_v)
 	if audio: audio.crash()
+
+## the crashed bike becomes a body of its own (CrashBikeCs, see bike/CrashBikeCs.cs): points on the hull of the frame's
+## and the steer's meshes (BikeRig.crash_points) + a ring round each tyre, starting with the bike's own motion and the
+## fall toward the side it leaned. No C# (or BMX_OLD_CRASHBIKE=1) = the old scripted fall.
+const CB_RING := 12
+var _CB_CAM := Env.raw("BMX_CRASHBIKE_CAM")
+var _cb_cam_hd := 0.0
+var _CB_SHOTS := Env.raw("BMX_CRASHBIKE_SHOTS")
+var _cb_shot_n := 0
+var _CB_SHOT_DT := float(Env.raw("BMX_CRASHBIKE_SHOT_DT")) if Env.raw("BMX_CRASHBIKE_SHOT_DT") != "" else 0.3
+var _CB_SHOT_N := int(Env.raw("BMX_CRASHBIKE_SHOT_N")) if Env.raw("BMX_CRASHBIKE_SHOT_N") != "" else 10
+var _cb_crash_n := 0
+func _crash_bike_begin(reason_bail := false) -> void:
+	phys.crash_sim = null
+	if phys._OLD_CRASHBIKE or rig == null or rig.model == null: return
+	var _t0 := Time.get_ticks_usec()
+	var hull: Dictionary = rig.crash_points()
+	var _t1 := Time.get_ticks_usec()
+	if hull.is_empty(): return
+	var sim = CrashLog.cs_new("res://scripts/bike/CrashBikeCs.cs")
+	if sim == null: return
+	var pts := PackedFloat32Array(); var grp := PackedInt32Array(); var wid := PackedInt32Array()
+	var mass := PackedFloat32Array(); var rad := PackedFloat32Array()
+	var add := func(p: Vector3, g: int, w: int, m: float, r: float) -> void:
+		pts.append(p.x); pts.append(p.y); pts.append(p.z); grp.append(g); wid.append(w); mass.append(m); rad.append(r)
+	for p in (hull.frame as PackedVector3Array): add.call(p, 0, -1, 1.0, 0.006)
+	for p in (hull.steer as PackedVector3Array): add.call(p, 1, -1, 0.45, 0.006)
+	var axle_i := [-1, -1]
+	# the tyres: a ring at the tread's middle each (radius = the casing's half width: it bulges past the rim's plane)
+	for w in 2:
+		var wn: Node3D = rig.wheel_f if w == 0 else rig.wheel_r
+		var R: float = (rig.wheel_rf if w == 0 else rig.wheel_rr) - rig.tyre_hw
+		var c := wn.global_position
+		var ax := wn.global_transform.basis.z.normalized()
+		var u := ax.cross(Vector3.UP)
+		if u.length() < 0.1: u = ax.cross(Vector3.RIGHT)
+		u = u.normalized()
+		var vv := ax.cross(u).normalized()
+		var g := 1 if w == 0 else 0
+		for k in CB_RING:
+			var a := TAU * k / CB_RING
+			add.call(c + (u * cos(a) + vv * sin(a)) * R, g, w, 0.25, rig.tyre_hw)
+		axle_i[w] = grp.size()
+		add.call(c, g, w, 1.0, 0.0)   # the axle / hub
+	var mb := rig.model.global_transform
+	var body0 := Transform3D(mb.basis.orthonormalized(), mb.origin)
+	var axis: Vector3 = ((rig.steer_n.get_parent() as Node3D).global_transform.basis * rig.steer_axis).normalized()
+	# the tubes the rider can hit (capsules between these points): bottom bracket, head tube ends, saddle, grips
+	var up := mb.basis.y.normalized()
+	var sad := rig.crank_n.global_position + up * 0.7
+	var best := -INF
+	for p in (hull.frame as PackedVector3Array):
+		if p.dot(up) > best: best = p.dot(up); sad = p   # (the frame's highest point: the saddle)
+	var piv := rig.steer_n.global_position
+	var bb_i := grp.size(); add.call(rig.crank_n.global_position, 0, -1, 0.5, 0.01)
+	var sad_i := grp.size(); add.call(sad, 0, -1, 0.2, 0.01)
+	var ht_i := grp.size(); add.call(piv + axis * 0.06, 0, -1, 0.3, 0.01)
+	var hb_i := grp.size(); add.call(piv - axis * 0.1, 0, -1, 0.3, 0.01)
+	var gl_i := grp.size(); add.call(rig.steer_n.global_transform * rig.grip_l, 1, -1, 0.15, 0.02)
+	var gr_i := grp.size(); add.call(rig.steer_n.global_transform * rig.grip_r, 1, -1, 0.15, 0.02)
+	var ped_i := [-1, -1]
+	for k in mini(2, rig.pedal_pivots.size()):
+		ped_i[k] = grp.size(); add.call((rig.pedal_pivots[k] as Node3D).global_position, 0, -1, 0.1, 0.01)
+	var caps := PackedInt32Array([axle_i[1], bb_i, bb_i, hb_i, ht_i, sad_i, bb_i, sad_i, ht_i, hb_i, hb_i, axle_i[0], gl_i, gr_i, ht_i, gl_i, ht_i, gr_i])
+	var caps_r := PackedFloat32Array([0.035, 0.045, 0.035, 0.035, 0.04, 0.035, 0.03, 0.025, 0.025])
+	var f := phys.fwd()
+	var vel := f * phys.v + Vector3(0, clampf(phys.vy, -12.0, 6.0) if phys.air else minf(phys.vy, 0.4), 0)
+	# the spin it carries: falling over toward its lean (lean_g turns about the bike's forward axis by -lean), its yaw,
+	# and in the air its pitch spin
+	var bx := mb.basis.x.normalized(); var bz := mb.basis.z.normalized()
+	var omega := -bx * phys.crash_fall_v + Vector3.UP * phys.yaw_rate + bz * (phys.air_w if phys.air else 0.0)
+	sim.Begin(pts, grp, wid, mass, rad, body0, rig.steer_n.global_position, axis, rig.steer_angle(),
+		rig.wheel_f.global_transform, rig.wheel_r.global_transform, vel, omega, rig.wheel_rf, rig.wheel_rr, 1.0 / 120.0)
+	var own_terrain: bool = terrain.get_script() != null and terrain.get_script().resource_path == "res://scripts/world/terrain.gd"
+	var fld = terrain.fcs if own_terrain and terrain.fcs != null and terrain.cs_tyres and terrain.ropes.is_empty() else null
+	sim.SetGround(fld, Callable(terrain, "top_height"))
+	sim.SetCapsules(caps, caps_r, axle_i[0], axle_i[1])
+	# hands on the bars, feet on the pedals for the first moments (CrashBikeCs.SetHolds): the grip slips after a short
+	# random time, a hard yank breaks it sooner; flat pedals let go first. A bail on purpose lets go at once.
+	if not phys._OLD_RIDERBIKE and not reason_bail:
+		var hb := PackedInt32Array([gl_i, gr_i]); var hr := PackedInt32Array([Ragdoll.HA_L, Ragdoll.HA_R])
+		var hd := PackedFloat32Array([0.12, 0.12]); var ht := PackedFloat32Array([randf_range(0.25, 0.7), randf_range(0.25, 0.7)])
+		for k in 2:
+			if ped_i[k] < 0: continue
+			hb.append(ped_i[k]); hr.append(Ragdoll.FT_L if k == 0 else Ragdoll.FT_R); hd.append(0.07); ht.append(randf_range(0.08, 0.3))
+		sim.SetHolds(hb, hr, hd, ht)
+	phys.crash_K = body0.affine_inverse() * mb
+	phys.crash_RK = phys.crash_K * (rig.fit_g.transform * rig.model.transform).affine_inverse()
+	phys._cb_hit = [0.0, 0.0]
+	phys.crash_sim = sim
+	if Env.s("BMX_CRASHBIKE_PROBE") != "": print("CRASHBIKE begin points=%d frame=%d steer=%d v=%.1f field=%s hull_ms=%.2f total_ms=%.2f" % [grp.size(), (hull.frame as PackedVector3Array).size(), (hull.steer as PackedVector3Array).size(), phys.v, fld != null, (_t1 - _t0) / 1000.0, (Time.get_ticks_usec() - _t0) / 1000.0])
+
+## a shoe's mesh box in its own space (the ragdoll's feet are built from it), measured once
+var _shoe_aabb = null
+func _shoe_box() -> AABB:
+	if _shoe_aabb != null: return _shoe_aabb
+	var box := AABB()
+	var got := false
+	var s0: Node3D = rider.shoe[0]
+	for mi in s0.find_children("*", "MeshInstance3D", true, false):
+		var m: MeshInstance3D = mi
+		if m.mesh == null: continue
+		var a: AABB = (s0.global_transform.affine_inverse() * m.global_transform) * m.mesh.get_aabb()
+		box = a if not got else box.merge(a)
+		got = true
+	if s0 is MeshInstance3D and (s0 as MeshInstance3D).mesh != null:
+		var a2: AABB = (s0 as MeshInstance3D).mesh.get_aabb()
+		box = a2 if not got else box.merge(a2)
+		got = true
+	if not got or box.size.x < 0.12 or box.size.x > 0.45: box = AABB(Vector3(-0.11, 0.0, -0.05), Vector3(0.28, 0.1, 0.1))
+	_shoe_aabb = box
+	return box
 
 ## the helmet action cam snaps off its hinge and tumbles away (FlyingCam); a new one is on the helmet
 ## after getting up. The old one lies where it landed until a respawn or FlyingCam.LIFE.
@@ -1714,6 +1848,37 @@ func begin_getup() -> void:
 	if wasted: wasted.finish()
 	if Env.s("BMX_GETUP_PROBE") != "": print("GETUP start at ", (ragdoll.p[Ragdoll.PELVIS] as Vector3).snapped(Vector3.ONE * 0.01))
 
+## FOOTPRINTS (2026-11-27, user): getting up, standing dizzy and limping to the bike, a shoe that comes to rest flat on
+## the ground (sole within FP_H of it, still) presses a print into the rut field once per step; it prints red for a few
+## steps after standing in blood. BMX_OLD_FOOTPRINTS=1 = none, BMX_FOOTPRINT_PROBE=1 = FOOTPRINT lines
+const FP_H := 0.045
+const FP_STEP := 0.12        # m a shoe moves before it can print again
+var _fp_last := [null, null]
+var _fp_prev := [Vector3.ZERO, Vector3.ZERO]
+var _fp_blood := [0.0, 0.0]
+var _OLD_FOOTPRINTS := Env.raw("BMX_OLD_FOOTPRINTS") != ""
+func _footprints(dt: float) -> void:
+	if _OLD_FOOTPRINTS or ruts == null or rider == null or rider.shoe.size() < 2: return
+	var box := _shoe_box()
+	for i in 2:
+		var x: Transform3D = rider.shoe[i].global_transform
+		var heel: Vector3 = x * Vector3(box.position.x + 0.03, box.position.y, 0.0)
+		var toe: Vector3 = x * Vector3(box.end.x - 0.03, box.position.y, 0.0)
+		var mid := heel.lerp(toe, 0.5)
+		var spd: float = mid.distance_to(_fp_prev[i]) / maxf(dt, 1e-4)
+		_fp_prev[i] = mid
+		var gh: float = terrain.top_height(mid.x, mid.z)
+		var low: bool = maxf(heel.y, toe.y) - gh < FP_H + 0.03 and minf(heel.y, toe.y) - gh < FP_H
+		if blood != null:
+			var b: float = blood.blood_at(mid.x, mid.z)
+			if b > 0.2 and low: _fp_blood[i] = maxf(_fp_blood[i], b)
+		if not low or spd > 0.35: continue
+		if _fp_last[i] != null and mid.distance_to(_fp_last[i]) < FP_STEP: continue
+		_fp_last[i] = mid
+		ruts.shoe(heel, toe, 0.85, clampf(_fp_blood[i], 0.0, 1.0))
+		_fp_blood[i] *= 0.75
+		if Env.s("BMX_FOOTPRINT_PROBE") != "": print("FOOTPRINT foot=%d at=%s blood=%.2f" % [i, mid.snapped(Vector3.ONE * 0.01), _fp_blood[i]])
+
 ## one physics step of the get-up: draw it, keep the ragdoll's points on it (camera, photo mode follow them)
 func _getup_step(dt: float, hop: bool) -> void:
 	if getup_anim is ClipGetUp and getup_anim.dizzy():
@@ -1728,6 +1893,7 @@ func _getup_step(dt: float, hop: bool) -> void:
 		elif _hop_armed: getup_anim.skip()
 	var going: bool = getup_anim.step(dt)
 	var P: Array = getup_anim.last_world
+	_footprints(dt)
 	for i in mini(P.size(), ragdoll.p.size()):
 		ragdoll.p[i] = P[i]; ragdoll.q[i] = P[i]
 	if not going:
@@ -1775,6 +1941,7 @@ func get_up() -> void:
 	getup_anim = null
 	_reset_draw_state()
 	phys.get_up()
+	rig.restore_wheels()
 	_out_of_crevasse()
 	if wasted: wasted.finish()
 	_gt = _perf("getup.phys_wasted", _gt)
@@ -3166,10 +3333,16 @@ func _physics_process(dt: float) -> void:
 				["gx_lean", phys._gx_lean, 0.002], ["berm_k", phys.berm_k, 0.01], ["corner_g", phys.corner_g, 0.05], ["front_use", phys.front_use, 0.02],
 				["lean_v", phys.lean_v, 0.05], ["slip_w", phys.slip_w, 0.02]]:
 			_jitter_sample(kv[0], kv[1], kv[2])
-	if phys.crash_on and getup_anim != null:
+	if phys.crash_on and getup_anim == null and ragdoll.stood and ragdoll.active:
+		# caught himself on his feet (Ragdoll BALANCE): straight back onto the bike from the standing pose
+		ragdoll.stood = false
+		_stand_world = ragdoll.p.duplicate()
+		get_up()
+		_stand_blend = 0.0
+	elif phys.crash_on and getup_anim != null:
 		_getup_step(dt, inp.hop)
 	elif phys.crash_on:
-		rider.pose_ragdoll(ragdoll.p, _ragdoll_roots())
+		rider.pose_ragdoll(ragdoll.p, _ragdoll_roots(), ragdoll.shoe_xf)
 		if Env.s("BMX_RAGSTART_DUMP") != "" and phys.crash_t < 0.25:   # tests: the ragdoll's first steps (world, relative to the bike)
 			var bk := Vector3(phys.x, phys.y, phys.z)
 			print("RAGSTART t=%.3f head=%s chest=%s pelvis=%s bike_v=%.2f" % [phys.crash_t, str(((ragdoll.p[0] as Vector3) - bk).snapped(Vector3.ONE * 0.01)), str(((ragdoll.p[1] as Vector3) - bk).snapped(Vector3.ONE * 0.01)), str(((ragdoll.p[2] as Vector3) - bk).snapped(Vector3.ONE * 0.01)), phys.v])
@@ -3589,6 +3762,42 @@ func _update_dab(dt: float, st: BikePhysics) -> void:
 	_dab_lean_s += (lean_t - _dab_lean_s) * (1.0 - exp(-dt * 3.0))
 	_dab_hold = _dab_hold + dt if dab_k > 0.99 else 0.0
 
+## FOOT OUT: when (see the constants) and which side (the inside of the lean: bike_lean > 0 leans left)
+func _update_footout(dt: float, st: BikePhysics) -> void:
+	var flat: bool = st.berm_k < 0.25 and (is_nan(st.bank) or absf(st.bank) < 0.18)
+	var lean_abs := absf(st.bike_lean)
+	var on := not _OLD_FOOTOUT and not st.crash_on and not st.air and st.pedal < 0.05 and dab_k < 0.01 and flat \
+		and st.v > FO_V.x and st.v < FO_V.y and lean_abs > (FO_LEAN_OFF if _fo_lin > 0.0 else FO_LEAN_ON)
+	if on and _fo_lin <= 0.0: fo_side = -1.0 if st.bike_lean > 0.0 else 1.0
+	if on and signf(-st.bike_lean) != fo_side and lean_abs > 0.2: on = false   # (a swap to the other side: back first)
+	_fo_lin = move_toward(_fo_lin, 1.0 if on else 0.0, dt / (0.35 if on else 0.25))
+	fo_k = smoothstep(0.0, 1.0, _fo_lin)
+	if _FO_PROBE and Engine.get_process_frames() % 30 == 0:
+		print("FOOTOUT k=%.2f side=%d lean=%.2f v=%.1f pedal=%.2f berm=%.2f" % [fo_k, int(fo_side), st.bike_lean, st.v, st.pedal, st.berm_k])
+
+## the out foot's target (lean-node space): ahead and to the inside, skimming the ground; the ground's slope for the sole
+func _footout_foot(lt: Dictionary) -> void:
+	var key := "footL" if fo_side < 0.0 else "footR"
+	var hb := rig.global_transform.basis
+	var fwd := Vector3(hb.x.x, 0.0, hb.x.z).normalized()
+	var rgt := Vector3(hb.z.x, 0.0, hb.z.z).normalized()
+	var bb: Vector3 = rig.crank_n.global_position
+	var g := bb + rgt * fo_side * FO_OUT + fwd * FO_FWD
+	g.y = terrain.top_height(g.x, g.z) + FO_SKIM
+	var tl: Vector3 = rig.lean_g.to_local(g)
+	tl.y -= 0.03
+	var e := 0.08
+	var gx: float = terrain.top_height(g.x + e, g.z) - terrain.top_height(g.x - e, g.z)
+	var gz: float = terrain.top_height(g.x, g.z + e) - terrain.top_height(g.x, g.z - e)
+	var n := Vector3(-gx, 2.0 * e, -gz).normalized()
+	lt["dabNormal"] = (rig.lean_g.global_transform.basis.orthonormalized().inverse() * n).normalized()
+	var pedal_p: Vector3 = lt[key]
+	var f := pedal_p.lerp(tl, fo_k)
+	f.y += sin(PI * fo_k) * 0.05
+	lt[key] = f
+	if _FO_PROBE and Engine.get_process_frames() % 30 == 0:
+		print("FOOTOUT foot above ground=%.3f m" % (g.y - FO_SKIM - terrain.top_height(g.x, g.z) + FO_SKIM))
+
 ## Which foot goes down: the one on the uphill side of a side slope (the ground is closer: a short, easy
 ## reach), never onto a rock / bank much higher than the other side (that's a wall, step to the open side);
 ## on flat ground the foot on the lower pedal, level cranks -> the side the bike leans to, else left.
@@ -3663,6 +3872,14 @@ func _dab_foot(lt: Dictionary) -> void:
 	g.y = terrain.top_height(g.x, g.z) + 0.012   # sole just on the drawn ground (rocks, decks too)
 	var tl: Vector3 = rig.lean_g.to_local(g)
 	tl.y -= 0.03   # the rider draws the shoe 3 cm above its foot point
+	# the ground's slope under the foot (lean-node space): the shoe stands flat on it, the ankle takes the rest (it used
+	# to stay square to the leaned bike: ~14 deg off flat ground, more on a slope or a rock). BMX_OLD_ANKLES=1 = before
+	if not Rider._OLD_ANKLES:
+		var e := 0.08
+		var gx: float = terrain.top_height(g.x + e, g.z) - terrain.top_height(g.x - e, g.z)
+		var gz: float = terrain.top_height(g.x, g.z + e) - terrain.top_height(g.x, g.z - e)
+		var n := Vector3(-gx, 2.0 * e, -gz).normalized()
+		lt["dabNormal"] = (rig.lean_g.global_transform.basis.orthonormalized().inverse() * n).normalized()
 	var pedal_p: Vector3 = lt[key]
 	var f := pedal_p.lerp(tl, dab_k)
 	f.y += sin(PI * dab_k) * 0.07   # lifts off the pedal on the way out / back
@@ -3731,6 +3948,7 @@ func _process(dt: float) -> void:
 	drawn_pos = Vector3(_lerp_k("x"), _lerp_k("y"), _lerp_k("z"))
 	var body_y: float = _lerp_k("body_y")
 	_update_dab(dt, st)
+	_update_footout(dt, st)
 	_update_look(dt)
 	var wobble := sin(t * 2.3) * 0.025 * maxf(0.0, 1 - absf(st.v) / 2) * (1.0 - dab_k)
 	var dab_lean := -dab_side * _dab_lean_s * dab_k   # bike_lean > 0 tips the top to the rider's left
@@ -3739,8 +3957,14 @@ func _process(dt: float) -> void:
 	var mdt := minf(get_process_delta_time(), 0.05)
 	_lean_c = _mcap("bike_lean", st.bike_lean, mdt)
 	_steer_c = _mcap("steer", _bar_draw(st, mdt, dab_lean) + st.bar_catch, mdt)
-	rig.pose(drawn_pos.x, y_draw + (1.5 if Env.s("BMX_PITCH_POSE") != "" else 0.0), drawn_pos.z, hd, p_draw, st.hop_nose,
-		_lean_c + st.rock + wobble + dab_lean, _steer_c - wobble * 1.5 + _pk_bar, st.wheel_f, st.wheel_r, st.crank)
+	var cb_on: bool = st.crash_on and st.crash_sim != null
+	if cb_on:   # the crashed bike's own body (CrashBikeCs): drawn between its last two steps
+		var cs = st.crash_sim
+		rig.pose_crash(cs.BodyAt(a) * st.crash_K, cs.ThetaAt(a), st.wheel_f, st.wheel_r, st.crank,
+			cs.WheelAt(0, a) if cs.WheelOff(0) else null, cs.WheelAt(1, a) if cs.WheelOff(1) else null)
+	else:
+		rig.pose(drawn_pos.x, y_draw + (1.5 if Env.s("BMX_PITCH_POSE") != "" else 0.0), drawn_pos.z, hd, p_draw, st.hop_nose,
+			_lean_c + st.rock + wobble + dab_lean, _steer_c - wobble * 1.5 + _pk_bar, st.wheel_f, st.wheel_r, st.crank)
 	# (2026-11-26, F8 seed 876814: "jumps from the back wheel are glitchy as hell": the drawn bike pitches about its own origin,
 	# its rear axle 0.44 m behind and 0.45 m above it, while the physics puts the rear axle 0.33 m behind its point with no
 	# height. Flat that is invisible; 0.9 rad up on the back wheel the drawn rear wheel sat ~25 cm under the physics' one, inside
@@ -3768,7 +3992,7 @@ func _process(dt: float) -> void:
 	if _overlay: _overlay.draw(self, st, drawn_pos, hd)
 	# the physics' tyres are soft and follow the smooth height field; the drawn ground is a triangle mesh
 	# (higher in hollows) with rocks and decks on it. Lift / tilt the drawn bike so no tyre is ever inside it
-	if Env.s("BMX_NOUNCLIP") == "":
+	if Env.s("BMX_NOUNCLIP") == "" and not cb_on:   # (the crashed bike's body keeps itself out of the ground)
 		rig.fit_wheels(terrain.top_height)
 		if Env.s("BMX_STEERFIT_PROBE") != "" and Engine.get_process_frames() % 30 == 0:
 			print("STEERFIT steer=%.3f xF=%.4f v=%.2f" % [_steer_c, rig.susp.xF, st.v])
@@ -3895,6 +4119,7 @@ func _process(dt: float) -> void:
 	if not st.crash_on:
 		var lt := rig.limb_targets()
 		if dab_k > 0.0: _dab_foot(lt)
+		elif fo_k > 0.0: _footout_foot(lt)
 		var T: Dictionary = Tune.v
 		# the pose inputs that switch on / off with the bike leaving / touching the ground are eased, never stepped
 		# (a corner's turn pose used to snap to zero on the first air frame, a stick tilt off on landing)
@@ -3921,6 +4146,9 @@ func _process(dt: float) -> void:
 		pi["gripX_L"] = lt.gripX_L; pi["gripX_R"] = lt.gripX_R; pi["gripZ"] = lt.gripZ
 		pi["dab"] = dab_k
 		pi["dabSide"] = dab_side
+		pi["dabNormal"] = lt.get("dabNormal", null)
+		pi["footOut"] = fo_k
+		pi["footOutSide"] = fo_side
 		pi["dabLean"] = _dab_lean_s
 		pi["v"] = st.v
 		# (through the motion cap, MCAP: the torso, head and hips can't move faster than a body can)
@@ -4200,6 +4428,20 @@ func _process(dt: float) -> void:
 	_grade_mips(gm, lens_mips or blur_k > (0.0008 if gm.shader == _grade_sh_mip else 0.001))   # (the shader blurs from 0.001)
 	_pk = _perf("speed_fx", _pk)
 	cam.update_cam(dt)
+	if _CB_CAM != "" and phys.crash_on and rig != null:   # tests (BMX_CRASHBIKE_CAM=dist[,height,side]): watch the crashed bike, not the rider
+		var cc := Array(_CB_CAM.split(",")).map(func(q): return float(q))
+		var bp := rig.model.global_position
+		if Env.s("BMX_CRASHBIKE_CAM_RIDER") != "" and ragdoll != null and ragdoll.active: bp = ragdoll.p[Ragdoll.PELVIS]
+		var ff := Vector3(cos(_cb_cam_hd), 0, -sin(_cb_cam_hd))
+		var sd := Vector3(sin(_cb_cam_hd), 0, cos(_cb_cam_hd))
+		cam.global_position = bp - ff * cc[0] * 0.3 + sd * (cc[2] if cc.size() > 2 else cc[0]) + Vector3(0, cc[1] if cc.size() > 1 else 1.0, 0)
+		cam.look_at(bp + Vector3(0, 0.2, 0))
+	elif not phys.crash_on: _cb_cam_hd = phys.heading
+	if _CB_SHOTS != "" and phys.crash_on and phys.crash_sim != null and _cb_shot_n < _CB_SHOT_N and phys.crash_t >= _cb_shot_n * _CB_SHOT_DT:   # tests: BMX_CRASHBIKE_SHOTS=prefix [BMX_CRASHBIKE_SHOT_DT=s, _N=n, _SLOW=time scale]
+		if _cb_shot_n == 0 and Env.s("BMX_CRASHBIKE_SLOW") != "": Engine.time_scale = float(Env.s("BMX_CRASHBIKE_SLOW"))
+		get_viewport().get_texture().get_image().save_png("%s_%d_%02d.png" % [_CB_SHOTS, _cb_crash_n, _cb_shot_n]); _cb_shot_n += 1
+		if _cb_shot_n >= _CB_SHOT_N and Env.s("BMX_CRASHBIKE_SLOW") != "": Engine.time_scale = 1.0
+	elif not phys.crash_on and _cb_shot_n > 0: _cb_shot_n = 0; _cb_crash_n += 1
 	_pk = _perf("camera", _pk)
 	# fog + shadows sized to the zoom level, sun follows the rider
 	if scenic:

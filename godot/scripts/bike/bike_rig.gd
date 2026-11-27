@@ -950,6 +950,97 @@ func pose(px: float, py: float, pz: float, heading: float, pitch: float, hop_nos
 	if susp:
 		susp.apply()
 
+## ---- the crashed bike (CrashBikeCs, driven by BikePhysics._crash_step) ----
+## every part mesh's support points along 26 directions in its own space, worked out once per bike (crash_hull_prepare,
+## at ride load); at a crash they are taken to the world as the parts lie (pedals at their crank angle, the bars turned)
+var _hull := []        # [MeshInstance3D, group: 0 frame / 1 steer, PackedVector3Array]
+var _hull_cs = null
+static var _cb_warmed := false   # (CrashBikeCs.Warm ran once this session)
+var _wheel_rest := {}  # wheel node -> its transform before it came off (restore_wheels)
+
+func crash_hull_prepare() -> void:
+	if not _hull.is_empty() or model == null: return
+	if _hull_cs == null: _hull_cs = CrashLog.cs_new("res://scripts/bike/CrashBikeCs.cs")
+	if _hull_cs == null: return
+	var t0 := Time.get_ticks_usec()
+	for mi in model.find_children("*", "MeshInstance3D", true, false):
+		var m: MeshInstance3D = mi
+		if m.mesh == null or not _shown_in_model(m): continue
+		if m == wheel_f or m == wheel_r or wheel_f.is_ancestor_of(m) or wheel_r.is_ancestor_of(m): continue   # (tyres: a ring each)
+		if m.mesh.get_aabb().get_longest_axis_size() < 0.02: continue
+		var verts := PackedVector3Array()
+		for s in m.mesh.get_surface_count():
+			var arr := m.mesh.surface_get_arrays(s)
+			if arr.size() > Mesh.ARRAY_VERTEX and arr[Mesh.ARRAY_VERTEX] is PackedVector3Array:
+				verts.append_array(arr[Mesh.ARRAY_VERTEX])
+		var sp: PackedVector3Array = _hull_cs.MeshSupport(verts)
+		if not sp.is_empty(): _hull.append([m, 1 if steer_n.is_ancestor_of(m) else 0, sp])
+	if not _hull.is_empty() and not _cb_warmed:
+		_cb_warmed = true
+		var w = CrashLog.cs_new("res://scripts/bike/CrashBikeCs.cs")
+		if w: w.Warm()
+	if Env.s("BMX_CRASHBIKE_PROBE") != "": print("CRASHBIKE hull parts=%d ms=%.1f" % [_hull.size(), (Time.get_ticks_usec() - t0) / 1000.0])
+
+## shown, judged inside the model only (the rig may not be in the scene yet at load)
+func _shown_in_model(n: Node) -> bool:
+	while n != null and n != model:
+		if n is Node3D and not (n as Node3D).visible: return false
+		n = n.get_parent()
+	return true
+
+## the frame's and the steer's hull points in the world now ({frame, steer}; {} without C#)
+func crash_points() -> Dictionary:
+	crash_hull_prepare()
+	if _hull_cs == null or _hull.is_empty(): return {}
+	var fr := PackedVector3Array()
+	var st := PackedVector3Array()
+	for e in _hull:
+		var mi: MeshInstance3D = e[0]
+		if not is_instance_valid(mi) or not _shown_in_model(mi): continue
+		var xf := mi.global_transform
+		for p in (e[2] as PackedVector3Array):
+			if e[1] == 0: fr.append(xf * p)
+			else: st.append(xf * p)
+	var b := model.global_transform.basis.orthonormalized()
+	return {"frame": _hull_cs.Reduce(fr, b, 0.025), "steer": _hull_cs.Reduce(st, b, 0.025)}
+
+## pose the crashed bike: model_xf = the model's world transform, steer = the bars' angle; off_f / off_r = a wheel that
+## came off (its node's world transform) or null
+func pose_crash(model_xf: Transform3D, steer: float, wf: float, wr: float, crank: float, off_f, off_r) -> void:
+	_ground_cache.clear()
+	pitch_g.transform = Transform3D.IDENTITY
+	lean_g.transform = Transform3D.IDENTITY
+	global_transform = model_xf * (fit_g.transform * model.transform).affine_inverse()
+	steer_n.quaternion = Quaternion(steer_axis, steer)
+	if off_f == null: wheel_f.rotation.z = -wf
+	if off_r == null: wheel_r.rotation.z = -wr
+	crank_n.rotation.z = -crank
+	crank_angle = crank
+	for p in pedal_pivots:
+		p.rotation.z = crank
+	if susp:
+		susp.apply()
+	for pair in [[wheel_f, off_f], [wheel_r, off_r]]:
+		var w: Node3D = pair[0]
+		if pair[1] == null: continue
+		if not _wheel_rest.has(w): _wheel_rest[w] = w.transform
+		w.global_transform = pair[1]
+	if chain: chain.visible = off_r == null
+
+## the wheels back on (getting up: a new bike, as with the torn-off action cam)
+func restore_wheels() -> void:
+	for w in _wheel_rest:
+		if is_instance_valid(w): (w as Node3D).transform = _wheel_rest[w]
+	_wheel_rest.clear()
+	if chain: chain.visible = true
+
+## the bars' angle the steer node is turned to now (rad, about steer_axis)
+func steer_angle() -> float:
+	var q := steer_n.quaternion
+	var ang := q.get_angle()
+	if ang < 1e-5: return 0.0
+	return wrapf(ang * signf(q.get_axis().dot(steer_axis)), -PI, PI)
+
 ## How deep the tyre on `wheel` (radius R) sits inside the ground (m, > 0 = inside), the ground given as
 ## top(x, z) -> height. Samples round the tyre (the lower half when it stands, all the way round when it
 ## lies over) and across the round casing.

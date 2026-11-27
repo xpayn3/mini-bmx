@@ -18,7 +18,7 @@ const GEAR := preload("res://scripts/rider/rider_gear.gd")
 const NEUTRAL := {hipX = 0.0, hipY = 0.0, lean = 0.0, elbowsOut = 0.0, kneesOut = 0.0, stance = 0.0, seatFloor = false,
 	crouch = 1.0, standPedal = 1.0, aero = 1.0, speedTuckPose = 1.0, sway = 1.0, bikeRock = 1.0, upright = 1.0, hipSway = 0.015, torso = 0.46, attackStand = 1.0, kneeOpen = 1.0, bumpAbsorb = 2.0, bodyBounce = 0.4, leanFollow = 1.0, leanSwing = 1.0, leanUnweight = 1.0, leanLively = 1.0, leanBalance = 1.0, leanBumps = 1.0, leanLoad = 1.0, cornerCrouch = 1.0, bodyBob = 1.0,
 	flowBend = 1.0, flowLead = 1.0, flowSink = 1.0,   # pro flow through lean changes: spine bend, shoulders / eyes lead, sink into the turn
-	headSteady = 1.0, ankling = 1.0, heelsDown = 1.0,   # head held steady against the bike's kicks; ankle swing pedalling; heels drop coasting / landing
+	headSteady = 1.0, ankling = 1.0, heelsDown = 1.0, ankleRoll = 1.0, heelTurn = 1.0,   # head held steady against the bike's kicks; ankle swing pedalling; heels drop coasting / landing
 	# style (Rider > Style): the numbers the riding pose is built from
 	hipSteady = 90.0, standHeight = 0.15, standBack = 0.03, pedalChest = 0.05, turnLow = 1.0, turnTwist = 1.0,
 	turnHips = 1.0, slowWobble = 1.0, airCrouch = 1.0,
@@ -271,7 +271,7 @@ func _init() -> void:
 	baker.text = "COLOSSUS"
 	add_child(baker)
 	for i in 2:
-		var s := GEAR.build_shoe(shoe_mats)
+		var s := GEAR.build_shoe(shoe_mats, -1.0 if i == 0 else 1.0)
 		add_child(s)
 		shoe.append(s)
 
@@ -853,7 +853,7 @@ const UARM_PROF := [[0.0, 0.050, 0.050, 0.050], [0.35, 0.049, 0.054, 0.052], [0.
 const FARM_PROF := [[0.0, 0.044, 0.043, 0.045], [0.22, 0.047, 0.046, 0.047], [0.6, 0.039, 0.037, 0.037], [0.9, 0.032, 0.030, 0.030], [1.0, 0.032, 0.030, 0.030]]
 static var _OLD_LIMBSHAPE := Env.raw("BMX_OLD_LIMBSHAPE") != ""
 
-static func set_limb(n: Node3D, a: Vector3, b: Vector3) -> void:
+static func set_limb(n: Node3D, a: Vector3, b: Vector3, side: Vector3 = Vector3.ZERO) -> void:
 	var d := b - a
 	var l := d.length()
 	if l < 1e-5:
@@ -862,10 +862,19 @@ static func set_limb(n: Node3D, a: Vector3, b: Vector3) -> void:
 	# the twist about the limb comes from the rider's sideways axis, not the shortest turn from +Y: that one
 	# spun the cylinder round its axis whenever a shin / forearm pointed down, and the mud / blood (drawn in
 	# the part's own space, shaders/grime_*) slid round the leg as it pedalled. Same as before for an upright limb.
+	# side (the crashed body, _pose_from_points): the limb's own sideways axis from the body, not the scene's fixed
+	# axes - lying anywhere in the world a limb could point along them and its twist snapped round (2026-11-27, user:
+	# "joints flip lying on the ground", "textures slide on the limbs")
 	var y := d / l
-	var w := smoothstep(0.8, 0.95, absf(y.z))   # limb along the sideways axis: take the forward one instead
-	var ref := Vector3.BACK * (1.0 - w) + Vector3.RIGHT * w
-	var z := (ref - y * ref.dot(y)).normalized()
+	var ref: Vector3
+	if side != Vector3.ZERO:
+		ref = side
+	else:
+		var w := smoothstep(0.8, 0.95, absf(y.z))   # limb along the sideways axis: take the forward one instead
+		ref = Vector3.BACK * (1.0 - w) + Vector3.RIGHT * w
+	var z := (ref - y * ref.dot(y))
+	if z.length_squared() < 1e-8: z = (Vector3.BACK - y * y.z)
+	z = z.normalized()
 	n.transform = Transform3D(Basis(y.cross(z), y, z).scaled_local(Vector3(1, l, 1)), a + d * 0.5)
 
 
@@ -1310,9 +1319,14 @@ func joints_world() -> Array:
 ## drive the meshes from world-space ragdoll points (this node must sit at the world origin).
 ## roots: torn-off limbs (Ragdoll.cut): joint index -> the free piece's root point, so the segment that
 ## ends at that joint is drawn from the root instead of stretching back to the body
-func pose_ragdoll(P: Array, roots: Dictionary = {}) -> void:
+func pose_ragdoll(P: Array, roots: Dictionary = {}, shoes: Array = []) -> void:
 	_cap_ok = false   # (the motion cap starts fresh once riding again)
+	_tw_rag = true
 	_pose_from_points(P, roots, {})
+	# the rigid-body ragdoll's feet: the shoes where the foot bodies are (this node sits at the world's origin in a crash)
+	if shoes.size() == 2:
+		for i in 2: shoe[i].transform = shoes[i]
+	_tw_rag = false
 
 
 var anim: RiderAnim = null   # animation clips played in the menus (animate)
@@ -1367,17 +1381,21 @@ func _pose_from_points(P: Array, roots: Dictionary, orient: Dictionary) -> void:
 		var ha_from: Vector3 = roots.get(hi, el[i])
 		var kn_from: Vector3 = roots.get(ki, hp[i])
 		var ft_from: Vector3 = roots.get(fi, kn[i])
+		# each limb's sideways axis (its twist): the elbow / knee's own bend axis, the body's left-right axis where the
+		# limb is straight; kept from flipping sign frame to frame
+		var arm_side := Vector3.ZERO if _OLD_LIMBTWIST else _limb_side(i, el_from, el[i], ha[i], -1.0, sh_r)
+		var leg_side := Vector3.ZERO if _OLD_LIMBTWIST else _limb_side(i + 2, kn_from, kn[i], ft[i], 1.0, body_r)
 		shoulder_sph[i].position = sh[i]
-		set_limb(upper_arm[i], el_from, el[i])
+		set_limb(upper_arm[i], el_from, el[i], _twist(i, el_from, el[i], arm_side))
 		elbow[i].position = el[i]
 		glove[i].position = ha[i]
 		if orient.has("hand%d" % i): glove[i].basis = orient["hand%d" % i]
 		else: orient_hand(glove[i], ha_from, ha[i], sh_r)
-		set_limb(fore_arm[i], ha_from, _wrist(i, ha_from))
+		set_limb(fore_arm[i], ha_from, _wrist(i, ha_from), _twist(2 + i, ha_from, _wrist(i, ha_from), arm_side))
 		_curl_to(i, float(orient.get("curl%d" % i, GloveFingers.RELAXED)), 3.6 * cdt)
 		if skeleton: skeleton.fin[i] = null; skeleton.lever[i] = 0.0; skeleton.pull[i] = 0.0   # (clips / ragdoll: no lever, one curl)
-		set_limb(thigh[i], kn_from, kn[i])
-		set_limb(shin[i], ft_from, ft[i])
+		set_limb(thigh[i], kn_from, kn[i], _twist(4 + i, kn_from, kn[i], leg_side))
+		set_limb(shin[i], ft_from, ft[i], _twist(6 + i, ft_from, ft[i], leg_side))
 		knee[i].position = kn[i]
 		knee_pad[i].pose(kn_from, kn[i], ft_from, ft[i], bb.x)
 		var up: Vector3 = ft_from - ft[i]
@@ -1385,7 +1403,81 @@ func _pose_from_points(P: Array, roots: Dictionary, orient: Dictionary) -> void:
 		# the ankle sits over the back of the shoe (riding: 4 cm behind the shoe's origin, 9 cm up), not over its middle
 		shoe[i].transform = Transform3D(sb, ft[i] - sb.y.normalized() * float(orient.get("shoe_drop", 0.08)) + sb.x.normalized() * float(orient.get("shoe_fwd", 0.0)))
 	_sync_skeleton(P)
+	if _TWIST_PROBE and not roots.has("_clip") and _tw_rag: _twist_probe()
 
+
+## tests (BMX_TWIST_PROBE=1): how fast each arm / leg tube turns about its own length while posed from points (the
+## crash): TWIST lines every 2 s, mean and max deg per frame over 8 limbs
+static var _OLD_LIMBTWIST := Env.raw("BMX_OLD_LIMBTWIST") != ""
+static var _TWIST_PROBE := Env.raw("BMX_TWIST_PROBE") != ""
+var _tw_prev: Array = []
+var _tw_rag := false
+var _tw_us := 0
+var _tw_sum := 0.0; var _tw_n := 0; var _tw_max := 0.0; var _tw_big := 0; var _tw_last := 0
+func _twist_probe() -> void:
+	var limbs := [upper_arm[0], upper_arm[1], fore_arm[0], fore_arm[1], thigh[0], thigh[1], shin[0], shin[1]]
+	var cur := []
+	for n in limbs: cur.append((n as Node3D).global_transform.basis.orthonormalized())
+	if Time.get_ticks_usec() - _tw_us > 200000: _tw_prev = []   # (a new crash: no frame before it to compare with)
+	_tw_us = Time.get_ticks_usec()
+	if _tw_prev.size() == cur.size():
+		for j in cur.size():
+			var a: Basis = _tw_prev[j]; var b: Basis = cur[j]
+			# the turn about the limb's own axis: last frame's z projected off this frame's y, angle to this z
+			var y: Vector3 = b.y
+			var z0: Vector3 = (a.z - y * a.z.dot(y)).normalized()
+			var ang := rad_to_deg(acos(clampf(z0.dot(b.z), -1.0, 1.0)))
+			_tw_sum += ang; _tw_n += 1; _tw_max = maxf(_tw_max, ang)
+			if ang > 20.0: _tw_big += 1
+	_tw_prev = cur
+	var now := Time.get_ticks_msec()
+	if now - _tw_last > 2000 and _tw_n > 0:
+		_tw_last = now
+		print("TWIST mean_deg_per_frame=%.2f max=%.1f frames_over_20deg=%d" % [_tw_sum / _tw_n, _tw_max, _tw_big])
+
+
+## a limb tube's twist carried over from last frame by the smallest turn (parallel transport: it can only turn about
+## its own length if the limb itself turns), drifting TWIST_FOLLOW a frame toward `target` (the body-based axis) so it
+## never wanders off. k = 0..7 (upper arms, forearms, thighs, shins)
+const TWIST_FOLLOW := 0.06
+var _tw_z: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
+func _twist(k: int, a: Vector3, b: Vector3, target: Vector3) -> Vector3:
+	if target == Vector3.ZERO: return target   # (the old way: BMX_OLD_LIMBTWIST)
+	var d := b - a
+	if d.length_squared() < 1e-10: return target
+	var y := d.normalized()
+	var t := target - y * target.dot(y)
+	if t.length_squared() < 1e-8: t = Vector3.BACK - y * y.z
+	t = t.normalized()
+	var prev: Vector3 = _tw_z[k]
+	var z := t
+	if prev != Vector3.ZERO:
+		var pz := prev - y * prev.dot(y)
+		if pz.length_squared() > 1e-6:
+			z = pz.normalized().lerp(t, TWIST_FOLLOW)
+			if z.length_squared() < 1e-8: z = pz
+			z = z.normalized()
+	_tw_z[k] = z
+	return z
+
+## a limb's sideways axis for the crashed / clip-posed body: the bend axis of root -> joint -> end (sign: knees
+## bend +1, elbows -1, so it points to the body's right like `fallback`), blended to `fallback` (the body's right)
+## where the limb is nearly straight, and never flipped against last frame's (k: 0/1 arms, 2/3 legs)
+var _side_prev: Array = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
+func _limb_side(k: int, root: Vector3, mid: Vector3, end: Vector3, sgn: float, fallback: Vector3) -> Vector3:
+	var u := mid - root
+	var v := end - mid
+	var n := u.cross(v) * sgn
+	var bend := n.length() / maxf(u.length() * v.length(), 1e-6)   # sin of the bend
+	var fb := fallback.normalized() if fallback.length_squared() > 1e-8 else Vector3.BACK
+	var s := fb
+	if bend > 1e-4:
+		s = fb.lerp(n / n.length(), smoothstep(0.1, 0.35, bend))
+	var prev: Vector3 = _side_prev[k]
+	if prev != Vector3.ZERO and s.dot(prev) < 0.0: s = -s   # (a sign flip would spin the limb half a turn)
+	s = s.normalized() if s.length_squared() > 1e-8 else fb
+	_side_prev[k] = s
+	return s
 
 var _pk_wb := 0.0; var _pk_wt := 0.0; var _pk_grip := 0.0; var _pk_lp := 0.0   # Pose Lab wrist keys (extension / turn, rad)
 var _pk_tyaw := 0.0; var _pk_hp := 0.0; var _pk_hy := 0.0; var _pk_eo := 0.0; var _pk_ko := 0.0   # Pose Lab key values of this frame (see the hook in update_pose)
@@ -1418,6 +1510,8 @@ func reset_pose() -> void:
 	roll_init = false; roll_pv = 0.0; roll_cv = 0.0; lat_g_s = 0.0; flow_e = 0.0
 	_fy_prev = NAN; _fv_prev = NAN; _facc = 0.0   # the bump bounce starts fresh (NAN = no previous frame)
 	_hp_init = false; _hy = 0.0; _neck_d = Vector3.ZERO; _neck_v = Vector3.ZERO
+	_side_prev = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
+	_tw_z.fill(Vector3.ZERO)
 	# (a crash mid-sprint left the sprint elbows up for ~0.8 s back on the bike; one at touch-down left the in-air
 	# hips offset, which Game takes off the drawn bike)
 	_spr_arm = 0.0; _fat = 0.0; body_off = Vector2.ZERO; _air_ref_ok = false
@@ -1546,6 +1640,19 @@ var foot_pitch := [0.0, 0.0]   # this frame's foot pitch per foot (rad, + = toes
 # 0.175 toe, the ball ~70 % along); the sole rests on the pedal's top (set per frame from the bike: pose input pedalTop)
 const BALL_X := 0.08
 const ANKLE_UP := 0.09         # m: the ankle over the sole (and 4 cm behind the shoe's origin)
+const ANKLE_DORSI := deg_to_rad(50.0)    # shin to sole: 40 deg of dorsiflexion (shin forward over the foot) at most
+const ANKLE_PLANTAR := deg_to_rad(135.0) # 45 deg of plantarflexion (toes pointed) at most
+const SHIN_INTO := 0.04
+## the ankle over the shoe: x from the shoe's origin (the v2 shoe seats it further back, in its heel)
+static var ANKLE_X := -0.04 if GEAR._OLD_SHOE else -0.055
+static var _OLD_ANKLELIM := Env.raw("BMX_OLD_ANKLELIM") != ""
+const HEEL_TURN_MAX := 0.3     # rad: the heel swivels in (toes out) as the knee goes out (see ANKLES)
+const ANKLE_ROLL_MAX := 0.21   # rad: the foot rolls onto its edge with the shin's sideways tilt
+const HEEL_OUT_DROP := 0.1     # rad: the outside heel drops leaning into a turn
+static var _OLD_ANKLES := Env.raw("BMX_OLD_ANKLES") != ""
+static var _ANKLE_PROBE := Env.raw("BMX_ANKLE_PROBE") != ""   # tests: ANKLE lines
+var _heel_yaw := [0.0, 0.0]
+var _ank_roll := [0.0, 0.0]
 var pedal_top := 0.017
 
 
@@ -2470,6 +2577,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var fL0 = p.get("footL"); var fR0 = p.get("footR")
 	if fL0 is Vector3 and fR0 is Vector3: bb = Vector2((fL0.x + fR0.x) * 0.5, (fL0.y + fR0.y) * 0.5)
 	pedal_top = clampf(_num(p, "pedalTop", 0.017), 0.0, 0.05)
+	var dab_w: float = clampf(_num(p, "dab"), 0.0, 1.0)
 	var ank_k: float = clampf(float(sty.get("ankling", 1.0)), 0.0, 2.5) * (0.0 if standing else 1.0)
 	var heels: float = clampf(float(sty.get("heelsDown", 1.0)), 0.0, 2.5) * (0.0 if standing else 1.0)
 	# (sprinting: more ankle swing, the feet work the whole stroke and pull up through recovery - Gregor 2000: competitive riders
@@ -2485,7 +2593,9 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		# leg
 		var hp: Vector3 = pelvis + pel_b * Vector3(0, -0.02, side * (0.11 + sty.stance))
 		var phi := atan2(foot.y - bb.y, foot.x - bb.x)   # where on the stroke (0 = front, + up)
-		var toe_up: float = clampf(ank_swing * cos(phi + ANKLE_PHASE) + ank_bias, -0.35, 0.35)
+		# the outside foot's heel drops leaning into a turn (driving into the outside pedal)
+		var out_heel: float = 0.0 if _OLD_ANKLES else HEEL_OUT_DROP * heels * clampf(side * knee_lean * 1.6, 0.0, 1.0) * (1.0 - air)
+		var toe_up: float = clampf(ank_swing * cos(phi + ANKLE_PHASE) + ank_bias + out_heel, -0.35, 0.4)
 		# the shoe on its pedal: the ball of the foot (shoe x = BALL_X) over the axle, the sole resting on the pedal's top
 		# (pedalTop above the axle), both turned by the foot's pitch about the axle (Game / the garage turn the pedal with
 		# it: foot_pitch). The ankle hangs off the shoe. Standing on the floor (no pedal): the old placement
@@ -2495,7 +2605,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		var sb := Basis(Vector3.UP, -side * float(sty.footOut)) * pb
 		var shoe_o: Vector3 = foot + Vector3(0.0, 0.03, 0.0) if standing \
 			else foot + pb.y * pedal_top - sb.x * BALL_X
-		var ankle: Vector3 = shoe_o + sb * Vector3(-0.04 + sty.heelFwd, ANKLE_UP + sty.heelUp, 0.0) if not standing \
+		var ankle: Vector3 = shoe_o + sb * Vector3(ANKLE_X + sty.heelFwd, ANKLE_UP + sty.heelUp, 0.0) if not standing \
 			else Vector3(foot.x - 0.04 + sty.heelFwd, foot.y + 0.12 + sty.heelUp, foot.z)
 		# turning: the inside knee opens out toward the turn, the outside leg drives down on its pedal
 		var inside: float = clampf(-side * knee_lean * 1.6, 0.0, 0.9) * float(sty.kneeOpen) * (1.0 - air)
@@ -2506,8 +2616,76 @@ func update_pose(dt: float, p: Dictionary) -> void:
 			if not _OLD_SPRINT:   # knees drive straight ahead over the pedals, brushing the top tube (not flared out)
 				pole_l.z *= 1.0 - SPR_KNEE_IN * _spr_arm
 				pole_l = pole_l.normalized()
+		# the foot down at a stop stands flat on the ground under it (its slope from Game._dab_foot: dabNormal)
+		var dn = p.get("dabNormal")
+		var gw := 0.0
+		# (the foot out in a flat corner stands its sole on the ground the same way)
+		gw = dab_w if signf(_num(p, "dabSide", -1.0)) == side else 0.0
+		var fo_w: float = clampf(_num(p, "footOut"), 0.0, 1.0) if signf(_num(p, "footOutSide", -1.0)) == side else 0.0
+		if fo_w > gw: gw = fo_w
+		if dn is Vector3 and gw > 0.0:
+			var dab_w2 := gw
+			var q0: Quaternion = sb.get_rotation_quaternion()
+			var tilt := Quaternion(sb.y.normalized(), (dn as Vector3).normalized())
+			var q1: Quaternion = (tilt * q0).normalized()
+			sb = Basis(q0.slerp(q1, dab_w2))
+			shoe_o = foot + sb.y * pedal_top - sb.x * BALL_X
+			ankle = shoe_o + sb * Vector3(ANKLE_X + sty.heelFwd, ANKLE_UP + sty.heelUp, 0.0)
 		var ik := limb_ik(hp, ankle, L_THIGH, L_SHIN, pole_l, Vector3.UP, KNEE_MIN, KNEE_MAX, _bd_prev[i], max_turn)
+		# ANKLES (2026-11-27, user: "ankles and feet are a big part of how a rider twists and rides a bike"): the shoe is no
+		# longer rigidly straight on its pedal. As the knee goes out (the inside knee in a turn) the heel swivels in, toes
+		# out, about the ball of the foot (HEEL_TURN_MAX), and the foot rolls a little with the shin's sideways tilt onto
+		# its outer edge (ANKLE_ROLL_MAX); both eased, then the leg is solved again on the turned shoe. BMX_OLD_ANKLES=1 = off
+		if not _OLD_ANKLES and not standing and not (dn is Vector3 and (dab_w > 0.5 or _num(p, "footOut") > 0.5) and absf(signf(_num(p, "footOutSide" if _num(p, "footOut") > 0.5 else "dabSide", -1.0)) - side) < 0.1):
+			var mid: Vector3 = hp.lerp(ankle, 0.5)
+			var knee_out: float = side * ((ik[0] as Vector3).z - mid.z)   # m the knee sits out from the hip-ankle line
+			var yaw_t: float = clampf(knee_out / 0.18, -0.5, 1.0) * HEEL_TURN_MAX * float(sty.get("heelTurn", 1.0))
+			var s_dir: Vector3 = ((ik[0] as Vector3) - ankle).normalized()   # up the shin
+			var ar_t: float = clampf(-side * s_dir.z * 0.6, -1.0, 1.0) * ANKLE_ROLL_MAX * float(sty.get("ankleRoll", 1.0))
+			var ek := 1.0 - exp(-12.0 * maxf(dt, 0.0)) if dt > 0.0 else 1.0
+			_heel_yaw[i] = lerpf(_heel_yaw[i], yaw_t, ek)
+			_ank_roll[i] = lerpf(_ank_roll[i], ar_t, ek)
+			if absf(_heel_yaw[i]) > 1e-4 or absf(_ank_roll[i]) > 1e-4:
+				# yaw about the vertical through the ball of the foot (the pedal axle), roll about the foot's length
+				# (no roll of the shoe on its pedal: a pedal only turns on its axle, so the sole stays flat on it and the ankle
+				# takes the shin's sideways tilt; a rolled shoe sat 2-6 deg off its level pedal. ankleRoll kept as a key, unused)
+				sb = Basis(Vector3.UP, -side * float(sty.footOut)) * pb * Basis(Vector3.UP, -side * _heel_yaw[i])   # (the swivel about the pedal's own up: flat on it however the stroke pitches it)
+				shoe_o = foot + sb.y * pedal_top - sb.x * BALL_X
+				ankle = shoe_o + sb * Vector3(ANKLE_X + sty.heelFwd, ANKLE_UP + sty.heelUp, 0.0)
+				ik = limb_ik(hp, ankle, L_THIGH, L_SHIN, pole_l, Vector3.UP, KNEE_MIN, KNEE_MAX, _bd_prev[i], max_turn)
+		# ANKLE LIMIT (2026-11-27, user: "he can't bend it so much, unrealistic"): the angle between the shin and the sole
+		# stays in a real ankle's range (ANKLE_DORSI .. ANKLE_PLANTAR, 90 deg = neutral); past it the foot pitches on its
+		# pedal (the pedal turns with it: foot_pitch) and the leg is solved again. BMX_OLD_ANKLELIM=1 = off
+		if not standing and gw < 0.5:
+			for _it in (0 if _OLD_ANKLELIM else 3):
+				var shin_up: Vector3 = (ik[0] as Vector3) - ankle
+				var fwd: Vector3 = sb.x
+				# the angle in the foot's own side plane (its sideways part left out: that is the swivel / roll)
+				var sz: Vector3 = sb.z.normalized()
+				shin_up -= sz * shin_up.dot(sz)
+				fwd -= sz * fwd.dot(sz)
+				if shin_up.length() < 1e-4 or fwd.length() < 1e-4: break
+				var a_ank: float = fwd.angle_to(shin_up)
+				var fix: float = 0.0
+				if a_ank > ANKLE_PLANTAR: fix = a_ank - ANKLE_PLANTAR        # toes pointed too far down: toes up
+				elif a_ank < ANKLE_DORSI: fix = a_ank - ANKLE_DORSI          # heel too far down: toes down
+				if absf(fix) < 0.005: break
+				f_pitch += fix
+				foot_pitch[i] = f_pitch
+				pb = Basis(Vector3.BACK, f_pitch)
+				sb = Basis(Vector3.UP, -side * float(sty.footOut)) * pb * Basis(Vector3.UP, -side * float(_heel_yaw[i]) * (0.0 if _OLD_ANKLES else 1.0))
+				shoe_o = foot + sb.y * pedal_top - sb.x * BALL_X
+				ankle = shoe_o + sb * Vector3(ANKLE_X + sty.heelFwd, ANKLE_UP + sty.heelUp, 0.0)
+				ik = limb_ik(hp, ankle, L_THIGH, L_SHIN, pole_l, Vector3.UP, KNEE_MIN, KNEE_MAX, _bd_prev[i], max_turn)
+			if _ANKLE_PROBE and Engine.get_process_frames() % 30 == 0:
+				var su: Vector3 = (ik[0] as Vector3) - ankle
+				var zz: Vector3 = sb.z.normalized()
+				su -= zz * su.dot(zz)
+				var fx: Vector3 = sb.x - zz * sb.x.dot(zz)
+				print("ANKLEANG foot=%d deg=%.0f pitch=%.2f air=%.1f phi=%.0f toe_up=%.2f shin=%.0f" % [i, rad_to_deg(fx.angle_to(su)), f_pitch, air, rad_to_deg(phi), toe_up, rad_to_deg(atan2(su.x, su.y))])
 		_bd_prev[i] = ik[2]
+		if _ANKLE_PROBE and i == 1 and Engine.get_process_frames() % 30 == 0:
+			print("ANKLE lean=%.2f pedal=%.2f heel_turn_deg L=%.1f R=%.1f foot_y L=%.2f R=%.2f" % [knee_lean, pedal, rad_to_deg(_heel_yaw[0]), rad_to_deg(_heel_yaw[1]), (J[11] as Vector3).y, (J[14] as Vector3).y])
 		var ik_raw: Vector3 = ik[0]
 		var kn_pre: Vector3 = ik[0]
 		ik[0] = _knee_clear(hp, ankle, ik[0], side, KNEE_CLEAR if _OLD_SPRINT else lerpf(KNEE_CLEAR, SPR_KNEE_CLEAR, _spr_arm * (1.0 - air)))
@@ -2521,7 +2699,8 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		if knee_dbg.size() < 40 and _KNEE_PROBE and knee[i].position.distance_to(ik[0]) > 0.08:
 			knee_dbg.append([i, snappedf(_num(p, "pitch"), 0.01), knee[i].position.snapped(Vector3.ONE * 0.01), hp.snapped(Vector3.ONE * 0.01), ankle.snapped(Vector3.ONE * 0.01), ik_raw.snapped(Vector3.ONE * 0.01), (ik[0] as Vector3).snapped(Vector3.ONE * 0.01)])
 		set_limb(thigh[i], hp, ik[0])
-		set_limb(shin[i], ik[0], ik[1])
+		# (the shin runs SHIN_INTO down into the shoe: the shoe's collar wraps it however the ankle bends, no gap)
+		set_limb(shin[i], ik[0], (ik[1] as Vector3) + ((ik[1] as Vector3) - (ik[0] as Vector3)).normalized() * (0.0 if GEAR._OLD_SHOE else SHIN_INTO))
 		knee[i].position = ik[0]
 		knee_pad[i].pose(hp, ik[0], ik[0], ik[1], pole_l)
 		# out of reach: the foot stays at the end of the leg (limbs never stretch)

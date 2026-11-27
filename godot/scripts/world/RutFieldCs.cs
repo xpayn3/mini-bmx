@@ -192,6 +192,40 @@ public partial class RutFieldCs : RefCounted
 			}
 	}
 
+	/// a shoe sole pressed into the ground (walking after a crash): heel (hx, hz) to toe (tx, tz), a rounded sole a little
+	/// wider at the ball; drawn as a plain pressed print (the skid look: no tyre knobs), blood 0..1 = a bloody sole
+	public void StampShoe(float hx, float hz, float tx, float tz, float strength, float blood)
+	{
+		var a = new Vector2(hx, hz); var b = new Vector2(tx, tz);
+		Vector2 ab = b - a; float len = ab.Length();
+		if (len < 0.05f) return;
+		Vector2 dir = ab / len;
+		var c2 = (Half)(dir.X * dir.X - dir.Y * dir.Y);
+		var s2 = (Half)(2f * dir.X * dir.Y);
+		var sv = (Half)strength; var mv = (Half)1f; var bv = (Half)blood;
+		float reach = 0.05f + 2.2f * CELL;
+		int ix0 = (int)Math.Floor((Math.Min(a.X, b.X) - reach) / CELL), ix1 = (int)Math.Floor((Math.Max(a.X, b.X) + reach) / CELL);
+		int iz0 = (int)Math.Floor((Math.Min(a.Y, b.Y) - reach) / CELL), iz1 = (int)Math.Floor((Math.Max(a.Y, b.Y) + reach) / CELL);
+		for (int iz = iz0; iz <= iz1; iz++)
+			for (int ix = ix0; ix <= ix1; ix++)
+			{
+				var c = new Vector2((ix + 0.5f) * CELL, (iz + 0.5f) * CELL);
+				float t = Math.Clamp((c - a).Dot(dir) / len, 0f, 1f);
+				float r = 0.034f + 0.012f * (float)Math.Sin(Math.PI * Math.Min(1f, t * 1.25f));   // heel 3.4 cm, ball ~4.6
+				float e = (c - (a + ab * t)).Length() - r;
+				if (e > reach - 0.05f) continue;
+				int ttx = (int)Math.Floor((double)ix / TILE), ttz = (int)Math.Floor((double)iz / TILE);
+				TileFor(ttx, ttz, true);
+				long k = Key(ttx, ttz);
+				if (!_tracks.TryGetValue(k, out var tt)) { tt = new TrackTile(); _tracks[k] = tt; }
+				int i = (iz - ttz * TILE) * TILE + (ix - ttx * TILE);
+				float eo = (float)tt.E[i];
+				if (e < 0f || e < eo) { tt.S[i] = sv; tt.M[i] = mv; tt.B[i] = bv; tt.C2[i] = c2; tt.S2[i] = s2; }
+				if (e < eo) tt.E[i] = (Half)e;
+				_dirty.Add(k);
+			}
+	}
+
 	/// a tile for the ground shader's window: per cell 4 x uint32 = half pairs (depth, edge distance), (strength, blood),
 	/// (cos 2a, sin 2a), (smear, 0), row by row (shaders/rut_upload.glsl unpacks them); empty if the tile doesn't exist
 	private byte[] _pack;

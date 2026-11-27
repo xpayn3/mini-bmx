@@ -2515,6 +2515,18 @@ public partial class TerrainFieldCs : RefCounted
 		return worst;
 	}
 
+	/// Terrain.top_height() at one point (the drawn ground, the same rule as tyre_worst's): the crashed bike (CrashBikeCs)
+	public double top_height(double px, double pz)
+	{
+		double hs = height(px, pz);
+		double m = mesh_height(px, pz);
+		double h;
+		if (OLD_TOPFIT || double.IsNegativeInfinity(m)) h = Math.Max(hs, m);
+		else h = hs > ground(px, pz) + 0.001 ? Math.Max(hs, m) : m;
+		if (_ruts != null) h -= _ruts.Depth((float)px, (float)pz);
+		return h;
+	}
+
 	/// Terrain.height(): ground, a wooden deck, and a dome over every rock / log / stump of the loaded chunks
 	public double height(double x, double z)
 	{
