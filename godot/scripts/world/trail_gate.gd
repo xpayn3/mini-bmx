@@ -141,4 +141,7 @@ static func build(g: Dictionary) -> Node3D:
 	# two floodlight boxes on the truss
 	for s in [-0.3, 0.3]:
 		_box(n, Vector3(0.5, 0.3, 0.4), Vector3(s * bw, ytop + 0.3, 0.1), _steel)
+	# for the pass-by whoosh (RideLayers._gates): the gap, how high the banner's bottom is, the way through
+	n.add_to_group("pass_gate")
+	n.set_meta("pass", {"at": Vector3(g["x"], g["hc"], g["z"]), "dir": fwd.normalized(), "half": half, "clear": ytop - bh - 0.5 - float(g["hc"]), "depth": 0.6, "flap": 0.25})
 	return n

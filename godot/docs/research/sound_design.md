@@ -63,3 +63,10 @@ biome, time of day, tunnels / arches / canyons, rope bridge, race tape snap, cro
 
 Rule for this game: new sounds are the user's recordings (memory "Recorded sounds only"). Every row above
 that says "needs a recording" stays silent until one is given; the code that drives it can be written first.
+
+## Done since (2026-11-27)
+- Close-pass whoosh off trees / rocks / posts (recorded layer `whoosh`, silent until clips are given).
+- **Gate whoosh, procedural** (`PassBySynth.cs`): how racing games do trackside pass-bys: synthesised from the
+  pass's geometry (Doppler, distance, reflections off the structure overhead) rather than a recording, so it fits every
+  speed and line. The user asked for it to be procedural and approved the sound.
+- **Open-landscape ambience, procedural** (`VastAirSynth.cs`), louder the more open / high the view.

@@ -91,6 +91,9 @@ static func _gate(f: LevelField, g: Dictionary, parent: Node3D, internal: bool) 
 	lbl.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 	lbl.double_sided = true
 	root.add_child(lbl)
+	# for the pass-by whoosh (RideLayers._gates): cloth banner on two posts
+	root.add_to_group("pass_gate")
+	root.set_meta("pass", {"at": Vector3(pos.x, y0, pos.y), "dir": Vector3(dir.x, 0, dir.y).normalized(), "half": half, "clear": hgt - 0.35, "depth": 0.3, "flap": 1.0})
 	_add(parent, root, internal)
 
 

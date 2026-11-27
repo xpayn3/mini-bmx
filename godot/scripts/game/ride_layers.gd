@@ -72,6 +72,20 @@ var _rattle := 0.0
 var _sprint_prev := 0.0
 var _crash_prev := false
 var events := {}           # layer -> count (probe)
+# gate whoosh: procedural (PassBySynth.cs), rendered on a worker as a gate comes up, played as the bike passes under it
+const GATE_LOOK := 60.0    # m: gates this close are looked at
+const GATE_AHEAD := 1.2    # s before the clip must start: the render is queued then (it takes ~20-40 ms)
+var _gsyn = null
+# vast landscape air: procedural (VastAirSynth.cs), two seamless loops (29 s, 37 s) rendered on a worker at the start,
+# faded up by how open the view is (the land falling away round the rider, far and wide)
+var _vsyn = null
+var _vpl: Array = []
+var _vast := 0.0           # 0 closed in .. 1 high over a wide open landscape (measured)
+var _vast_lvl := 0.0       # what is playing (eased)
+var _vast_t := 0.0
+var _gstate := {}          # gate instance id -> 1 queued / 2 played
+var _gpl: Array = []
+var _gpi := 0
 var _probe_t := 0.0
 var _on := true
 
@@ -100,6 +114,17 @@ func _ready() -> void:
 			a.unit_size = 4.0; a.max_distance = 60.0; a.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
 			a.doppler_tracking = AudioStreamPlayer3D.DOPPLER_TRACKING_DISABLED
 			add_child(a); _pool3.append(a)
+	var gs = load("res://scripts/game/PassBySynth.cs")
+	if gs != null and _on and Env.s("BMX_GATE_WHOOSH") != "0":
+		_gsyn = gs.new()
+		for i in 2:
+			var g := AudioStreamPlayer.new()
+			g.bus = Settings.bus_for("Wind")
+			add_child(g); _gpl.append(g)
+	var vs = load("res://scripts/game/VastAirSynth.cs")
+	if vs != null and _on and Env.s("BMX_VAST_AIR") != "0":
+		_vsyn = vs.new()
+		_vsyn.Start(randi() % 100000)
 	if need2:
 		for i in 6:
 			var b := AudioStreamPlayer.new()
@@ -223,6 +248,7 @@ func update(dt: float, st, va: float, on_ground: bool, live: bool) -> void:
 	_sprint_prev = spr
 	# ambience: always there, a little lower at speed (the wind takes over)
 	_set_loop("ambience", (1.0 - 0.5 * clampf(va / 20.0, 0, 1)) if live else 0.0, minf(1.0, dt * 1.5), 1.0)
+	_vast_air(dt, p, va, live)
 	# heartbeat: only when it means something (tired, hurt, lying after a crash, flat out)
 	var hk := 0.0
 	if st.tired: hk = maxf(hk, 0.6)
@@ -243,6 +269,7 @@ func update(dt: float, st, va: float, on_ground: bool, live: bool) -> void:
 	_crash_prev = crashed
 	if crashed: return
 	_whoosh(dt, p, va)
+	_gates(p, va)
 	_stones(dt, p, va, on_ground)
 	_suspension(dt, p)
 
@@ -290,6 +317,106 @@ func _whoosh(dt: float, p, va: float) -> void:
 	_pass = seen
 
 
+## how open the land is round the rider: at 16 headings x 60 / 150 / 320 m, how far below the horizon the ground
+## lies (a drop of a quarter of the distance = 14 deg = full); hemmed in by slopes counts against it
+func _openness(p) -> float:
+	var t = game.terrain
+	if t == null or not t.has_method("deck_height"): return 0.0
+	var sum := 0.0; var cnt := 0
+	for i in 16:
+		var a := TAU * float(i) / 16.0
+		var dx := cos(a); var dz := sin(a)
+		for d: float in [60.0, 150.0, 320.0]:
+			var h: float = t.deck_height(p.x + dx * d, p.z + dz * d)
+			sum += clampf((p.y - h) / (d * 0.25), -1.0, 1.0)
+			cnt += 1
+	return clampf(sum / cnt * 1.3 + 0.15, 0.0, 1.0)
+
+
+func _vast_air(dt: float, p, va: float, live: bool) -> void:
+	if _vsyn == null: return
+	if _vpl.is_empty():
+		var got: Array = _vsyn.Take()
+		if got.size() < 2: return
+		for d in got:
+			var w := AudioStreamWAV.new()
+			w.format = AudioStreamWAV.FORMAT_16_BITS; w.stereo = true; w.mix_rate = 48000; w.data = d
+			w.loop_mode = AudioStreamWAV.LOOP_FORWARD; w.loop_begin = 0; w.loop_end = (d as PackedByteArray).size() / 4
+			var a := AudioStreamPlayer.new()
+			a.bus = Settings.bus_for("World"); a.stream = w; a.volume_db = -80.0
+			add_child(a)
+			a.play(randf() * 20.0)
+			_vpl.append(a)
+	_vast_t -= dt
+	if _vast_t <= 0.0:
+		_vast_t = 0.5
+		_vast = _openness(p)
+	# the ride's own wind covers it at speed; quiet while it isn't the live ride (replay, photo, map)
+	var want := (_vast * (1.0 - 0.5 * clampf(va / 18.0, 0.0, 1.0))) if live else 0.0
+	_vast_lvl += (want - _vast_lvl) * minf(1.0, dt * 0.4)
+	for i in _vpl.size():
+		(_vpl[i] as AudioStreamPlayer).volume_db = -9.0 + linear_to_db(maxf(_vast_lvl, 0.001) * (0.8 if i == 0 else 0.6))
+
+
+## riding under a gate (sponsor gantry, race gate): its pass-by is worked out for this pass (speed, how far off
+## the middle, how high the banner is) on a worker ~1 s ahead, then played so its loudest moment is under the banner
+func _gates(p, va: float) -> void:
+	if _gsyn == null: return
+	if va < 4.0:
+		_gstate.clear(); return
+	var f: Vector3 = p.fwd()
+	var b := Vector3(p.x, p.y, p.z)
+	var keep := {}
+	for g in get_tree().get_nodes_in_group("pass_gate"):
+		var m: Dictionary = g.get_meta("pass", {})
+		if m.is_empty(): continue
+		var at: Vector3 = m.at
+		var d := at - b
+		if absf(d.x) > GATE_LOOK or absf(d.z) > GATE_LOOK: continue
+		var dir: Vector3 = m.dir
+		var c := f.x * dir.x + f.z * dir.z   # riding with (+) or against (-) the gate's way
+		if absf(c) < 0.35: continue
+		var sg := signf(c)
+		var ahead := (d.x * dir.x + d.z * dir.z) * sg      # m to the gate's plane
+		var right := Vector3(-dir.z, 0, dir.x) * sg        # the rider's right through the gate
+		# + = bike right of the middle, where it will CROSS the gate's line (it is still ~10 m off when this is read)
+		var lat := -(d.x * right.x + d.z * right.z) + maxf(0.0, (d.x * dir.x + d.z * dir.z) * sg) / absf(c) * (f.x * right.x + f.z * right.z)
+		var half: float = m.half
+		var id := g.get_instance_id()
+		var st: int = _gstate.get(id, 0)
+		if ahead < -6.0: continue                          # (forgotten: passed)
+		keep[id] = st
+		if absf(lat) > half + 2.5: continue
+		var v := va * absf(c)
+		var tt := ahead / maxf(v, 0.1)                     # s until under it
+		if st == 0 and ahead > 0.0 and tt < PassBySynthPeak() + GATE_AHEAD:
+			var clear := maxf(1.5, float(m.clear) + at.y - p.y - 1.4)   # banner over the rider's head
+			_gsyn.Queue(id, id % 100000, v, half, clear, lat, float(m.depth), float(m.flap), 0.8)
+			keep[id] = 1
+		elif st == 1 and tt <= PassBySynthPeak():
+			var pcm: PackedByteArray = _gsyn.Take(id)
+			if pcm.is_empty():
+				if ahead < 0.0: keep[id] = 2   # it came too late: let it go
+				continue
+			var w := AudioStreamWAV.new()
+			w.format = AudioStreamWAV.FORMAT_16_BITS; w.stereo = true; w.mix_rate = 48000; w.data = pcm
+			var a: AudioStreamPlayer = _gpl[_gpi]; _gpi = (_gpi + 1) % _gpl.size()
+			a.stream = w
+			a.volume_db = -4.0 + linear_to_db(clampf((v - 3.0) / 15.0, 0.2, 1.1))
+			a.play()
+			events["gate_whoosh"] = events.get("gate_whoosh", 0) + 1
+			if Env.s("BMX_LAYER_PROBE") != "":
+				print("GATEWHOOSH v=%.1f lat=%.2f half=%.1f ahead=%.1f t_left=%.2f" % [v, lat, half, ahead, tt])
+			keep[id] = 2
+	for id in _gstate:
+		if not keep.has(id) and int(_gstate[id]) == 1: _gsyn.Forget(id)
+	_gstate = keep
+
+
+func PassBySynthPeak() -> float:
+	return 0.6   # PassBySynth.PEAK: the clip's loudest moment
+
+
 ## stones kicked up: a random rate by speed and how loose the ground is, more in a skid
 func _stones(dt: float, p, va: float, on_ground: bool) -> void:
 	if not on_ground or va < 3.0: return
@@ -328,4 +455,4 @@ func probe(dt: float) -> void:
 	var have := []
 	for k in _clips:
 		if not _clips[k].is_empty(): have.append("%s:%d" % [k, _clips[k].size()])
-	print("LAYERS loops[%s] events%s clips[%s]" % [" ".join(lv), str(events), " ".join(have)])
+	print("LAYERS loops[%s] events%s clips[%s] vast=%.2f/%.2f" % [" ".join(lv), str(events), " ".join(have), _vast, _vast_lvl])
