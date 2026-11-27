@@ -45,6 +45,10 @@ func _init() -> void:
 				continue
 			if c.E[i] != old.E[i] or c.W[i] != old.W[i] or c.BT[i] != old.BT[i] or c.KAP[i] != old.KAP[i]:
 				der += 1
+		# the racing line: kept exactly up to LINE_REACH points before the old end (only its tail is solved again)
+		for i in maxi(0, old.n - TrailCourse.LINE_REACH - 12):
+			if c.LN[i] != old.LN[i]:
+				der += 1
 		_grown = c
 		var ma := _marks(old, old, cut)
 		var mb := _marks(c, old, cut)
