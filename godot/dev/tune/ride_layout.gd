@@ -136,6 +136,31 @@ const PAGES := [
 			["brakeSkid", "The brake key: how far past locking the rear goes (dust!).", "No skid", "Skids"],
 			["brakeFade", "Long hard braking heats the brakes and the levers lose bite.", "No fade", "Fades"],
 		]],
+		["Dirt", [
+			["*brakeRamp", "How long the levers take to bite (the tyre's load building).", "Instant", "Slow"],
+			["*brakeLoose", "Gravel and dust patches: the stopping grip drops, the rider gets caught out.", "Asphalt", "Loose"],
+			["brakeRough", "Rocks and roots: the tyre skips and the stopping grip jumps about.", "Smooth", "Skippy"],
+		]],
+		["Surfaces", [
+			["*brakeMuTrail", "How hard the tyres can stop on trail hardpack (asphalt ~0.8-0.9).", "Slippy", "Sticky"],
+			["*brakeMuGround", "...on grass and plain ground off the trail.", "Slippy", "Sticky"],
+			["brakeMuWater", "...in water.", "Slippy", "Sticky"],
+			["brakeMuSand", "...in sand.", "Slippy", "Sticky"],
+			["lockSlideTrail", "A locked tyre on hardpack slides at this share of its stopping grip.", "Ploughs", "Bites"],
+			["lockSlideGround", "...on grass / ground.", "Ploughs", "Bites"],
+			["lockSlideWater", "...in water.", "Ploughs", "Bites"],
+			["lockSlideSand", "...in sand.", "Ploughs", "Bites"],
+		]],
+		["Brake drift", [
+			["*brakeDrift", "Braking hard into a turn he keeps the rear locked and lets it come round (straight stops unchanged).", "Never", "Lots"],
+			["brakeDriftAngle", "How far round the rear may come before he eases it.", "A little", "Sideways"],
+		]],
+		["Rider's feel", [
+			["brakeFeelLag", "The brake key brakes to the grip he felt this long ago: loose patches catch him out.", "Instant", "Late"],
+			["brakeFrontHold", "How close to the front's limit the brake key squeezes (over 1 = it tucks).", "Careful", "On the edge"],
+			["brakeSkidEar", "How fast a rear skid makes him ease the brake key off.", "Keeps skidding", "Lets off"],
+			["brakeRearLet", "Rear lever alone: how far the locked rear swings out before he eases it.", "Early", "Late"],
+		]],
 	]],
 	["speed", "Speed", "Pedalling, sprinting and air drag", [
 		["Pedalling", [

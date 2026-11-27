@@ -232,6 +232,31 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   rear and a locked front then stopped at 0.14 g. Playground @30 km/h: dirt 0.80 g (was 0.86), sand 0.49 (0.73), front
   lever only locks 0.53 (never locked), rear only locks 0.46 (0.68). `sim=1` SIM BRAKE now per surface. `BMX_OLD_BRAKE=1`
   = before. Lateral grip (`SURF_MU` x `grip`) unchanged.
+- **Dirt braking (2026-11-27, user: "always braking like I'm on asphalt")**. The S key stopped at 0.74 g on the trail
+  (road-bike numbers), instantly, at 97 % of the exact limit every tick (perfect ABS), the same on every metre.
+  Now (`BMX_OLD_DIRTBRAKE=1` = all of it off): (1) `BRAKE_MU` ground 0.54 / trail 0.64 / water 0.5 / sand 0.4 (were
+  0.62 / 0.78 / 0.6 / 0.45). (2) `_brake_dirt`: loose patches under EACH tyre (the grip sim's 4.5 m noise + a finer
+  ~1 m one, x `BRAKE_LOOSE_S` per surface) take up to `brakeLoose` x 0.45 off the brake limit; (5) rough ground
+  (`_grip_rough`, the suspension's smoothed jolt) makes it jump by up to `brakeRough` x 0.3 every ~0.4 m.
+  (3) A locked tyre slides at `LOCK_SLIDE` 0.66 / 0.76 / 0.6 / 0.58 of the limit (was 0.8), less on a loose patch.
+  (4) The levers bite over `brakeRamp` 0.15 s (`_brk_r` / `_brk_f`; a key was the full brake in one tick), let go in
+  ~0.08 s. The S key brakes to the grip the rider FEELS (`_feel_f` / `_feel_r`, ~0.15 s behind the real one; front held
+  at 93 % of it): onto a loose patch the rear skids longer and the front can tuck for a moment; a rear lock tells him
+  fast (he hears it). The bare rear lever lets off a touch once the locked rear swings past ~55 % of `slipMax`
+  (riderSkill; without it a straight rear-lever stop on grass washed out). Sliders Ride > Brakes > Dirt.
+  `slope_stress sim=1` S from 40 km/h: trail 0.74 -> 0.57 g, grass 0.62 -> 0.49, wet 0.64 -> 0.51, sand 0.49 -> 0.36;
+  no crashes. Playground strips @30: dirt 0.69 -> 0.54 g, wet 0.72 -> 0.45 (now weaker than dirt), sand 0.44 -> 0.37;
+  the S stop's rear now locks fully at some point (was 0.4). Stress 56 / 56, demo AI 90 s seeds 4242 / 5 no crash.
+  Suite baseline NOT re-saved (only the 5 brake runs move). User rode it: "feels good".
+  Every number is a dev slider (Ride > Brakes: Dirt, Surfaces = `brakeMu*` / `lockSlide*` per surface, the tables
+  `BRAKE_MU` / `LOCK_SLIDE` are only their defaults; Brake drift; Rider's feel = `brakeFeelLag`, `brakeFrontHold`,
+  `brakeSkidEar`, `brakeRearLet`). **Brake drift** (same day, user: "braking in a corner, wouldn't it slip the rear out?
+  could we make some drift, realistic"): measured first, the bare rear lever locked through a turn already swings the
+  rear 50-60 deg at 30 km/h (`slide=1` SKIDTURN, old and new alike), but the S key eased the rear off at 2-7 deg of slip,
+  so it never drifted. Now braking with S while the bike turns (tk = `brakeDrift` 0.6 x smooth(|lat_a| 1..4 m/s^2)) he
+  keeps the rear locked (+0.4 tk past the limit, a skid tells him less) and eases off only past `brakeDriftAngle` 0.3 x tk
+  rad. `sim=1` new `SIM BRAKEDRIFT` (S into a half-lock turn, trail / grass / sand, 25 / 40 km/h): rear 8-16 deg ->
+  15-18 deg, held 0.4-1.7 s, no crash; brakeDrift 1.2 -> 26-29 deg. Straight stops unchanged (no turn = tk 0).
 - **Research review follow-ups (2026-11-23, `docs/research/papers_review_2026-11-23.md`)**. #2 off-trail "flow ground":
   measured first (`-s res://tools/offtrail_probe.gd`: crests that throw the bike at 20/30/40 km/h, slopes): only ~1 % of
   the open land throws at 30 km/h, 2.7 % at 40; removing the 8 m bumps, ridge creases, 28 m hills and rugged cliffs all

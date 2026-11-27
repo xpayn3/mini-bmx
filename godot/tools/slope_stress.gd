@@ -448,6 +448,19 @@ func _sim(cfg: Dictionary) -> void:
 			fu = maxf(fu, p.front_use); push = maxf(push, p.front_push)
 			if r[1].crash != "": break
 		print("SIM TURNBRAKE %-5s 30 km/h full lock  front_use=%.2f push=%.2f v=%.1f crash=%s" % [b[0], fu, push, p.v * 3.6, r[1].crash])
+	# the brake key into a half-lock turn per surface: how far the rear comes round (brake drift) and does he keep it
+	for su in [[1, "trail"], [0, "grass"], [3, "sand"]]:
+		for kmh in [25.0, 40.0]:
+			var r := _make(cfg, "flat"); var p: BikePhysics = r[0]; p.v = kmh / 3.6
+			r[1].terrain.surf = su[0]
+			_ride(p, r[1], 1.2, func(_t, pp): return _inp(clampf((kmh / 3.6 - pp.v) * 2.0, 0.0, 1.0), 0.0, 0.5))
+			var smax := 0.0; var lr := 0.0; var c0: float = p.course; var t_out := 0.0
+			for i in int(2.5 / DT):
+				p.step(DT, _inp(0.0, 1.0, 0.5))
+				smax = maxf(smax, absf(p.slip)); lr = maxf(lr, p.rear_lock)
+				if absf(p.slip) > 0.2: t_out += DT
+				if p.v < 0.5 or r[1].crash != "": break
+			print("SIM BRAKEDRIFT %-5s %2.0f km/h half lock  slip_max=%2.0fdeg  past_11deg=%.2fs  rear_lock=%.2f  turned=%3.0fdeg  crash=%s" % [su[1], kmh, rad_to_deg(smax), t_out, lr, rad_to_deg(absf(p.course - c0)), r[1].crash])
 	for kn in [0.0, 0.6]:
 		tune.v["groundKnock"] = kn
 		var r := _make(cfg, "noise", 0.12); var p: BikePhysics = r[0]
