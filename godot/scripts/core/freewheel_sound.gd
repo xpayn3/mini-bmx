@@ -17,7 +17,7 @@ const PARAMS := [
 	["uneven", "Pawl unevenness", 1.0, 0.0, 2.5, 0.05, "×"],
 	["jitter", "Timing wobble", 0.06, 0.0, 0.3, 0.01, ""],
 	["vary", "Click strength spread", 0.55, 0.0, 1.0, 0.05, ""],
-	["fade", "Quieter at speed", 0.3, 0.0, 1.0, 0.05, ""],
+	["fade", "Quieter at speed", 0.0, 0.0, 1.0, 0.05, ""],
 	# the wheel's turn and speed (FreewheelSynth.SetSpeedParams); 0 on all = the old speed-blind sound
 	["warble", "Wheel-turn warble (swell each turn)", 0.04, 0.0, 1.0, 0.05, ""],
 	["repeat", "Pattern repeats each turn", 0.3, 0.0, 1.0, 0.05, ""],
@@ -65,6 +65,12 @@ static func ensure_loaded() -> void:
 		var c: Dictionary = cf.get_value("fw", "customs", {})
 		for n in c: customs[n] = _complete(c[n])
 		current = _complete(cf.get_value("fw", "current", {}))
+		# ver 2 (2026-11-27): "Quieter at speed" 0.3 -> 0 (a real hub at speed is a loud, dense buzz);
+		# saves still at the old default move with it
+		if int(cf.get_value("fw", "ver", 1)) < 2:
+			if is_equal_approx(float(current.get("fade", 0.0)), 0.3): current["fade"] = 0.0
+			for n in customs:
+				if is_equal_approx(float(customs[n].get("fade", 0.0)), 0.3): customs[n]["fade"] = 0.0
 	if not (active in BUILTIN or active in customs): active = "Stock"
 	# tests: BMX_FW_PRESET=<name> and BMX_FW=pitch=1.3,poe=60 (not saved unless a slider is touched)
 	var ep := Env.raw("BMX_FW_PRESET")
@@ -87,6 +93,7 @@ static func _complete(d: Dictionary) -> Dictionary:
 static func save() -> void:
 	if Env.raw("BMX_PADSEQ") != "": return   # menu tests: never into the player\'s files
 	var cf := ConfigFile.new()
+	cf.set_value("fw", "ver", 2)
 	cf.set_value("fw", "active", active)
 	cf.set_value("fw", "current", current)
 	cf.set_value("fw", "customs", customs)
