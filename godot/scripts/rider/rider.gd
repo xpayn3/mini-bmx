@@ -1011,9 +1011,14 @@ const HIP_SIDE := 0.22      # m: the hips' room off the bike's middle sideways o
 const CORNER_HIP := 0.07    # m: the hips drop into a deep turn (one crouch, see update_pose)
 const CORNER_CHEST := 0.08  # m: the chest drops (and goes 4 cm forward)
 const OUT_ELBOW_DOWN := 0.7  # how far the outside (higher) grip's elbow is turned down + back, fully leaned (see the arms)
+const STOP_HIP_FWD := 0.12  # m: standing at a stop, the hips this far ahead of the saddle's nose (over the top tube)
+const STOP_LEG := 0.95      # share of the leg's length the hips stand above the ankles (knees a touch soft)
+const STOP_TORSO := 0.3     # rad forward from upright, standing over the bike (hands on the bars)
+const SIT_TORSO := 0.15     # rad forward from upright, sat on the saddle (sat up, arms long)
 const SLOW_TALL := 0.05      # m: the hips higher (legs extended) riding slow
 static var _OLD_SLOWBODY := Env.raw("BMX_OLD_SLOWBODY") != ""
 var slow_up := 0.0           # 0..1, see SLOW_*: eased, ground only
+var _stop_long := 0.0        # stop poses: the arms may go long (sat up / standing over the bike), see _constrain
 var _body_roll := 0.0        # the body's counter-roll against the bike on the ground (rad): the torso's sideways limit is
                              # measured from it, not from the bike's up
 const AIR_HIP_SHARE := 0.3   # in the air the hips counter only this share of the bike's lay-over (they stay on the bike)
@@ -2271,26 +2276,48 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# foot down at a stop: the bike leans onto the foot, the body stays nearly upright over it,
 	# hips a little lower and toward the foot (standing over the top tube)
 	var dab := clampf(_num(p, "dab"), 0, 1)
+	# STOP POSES (2026-11-27, user + photos of riders waiting: "this is all kind of wrong", "we can also sit on the seat"): settled
+	# at a stop he either stands over the top tube - both feet on the ground, legs nearly straight, hips just ahead of the saddle,
+	# upright - or sits on the saddle with the dab foot down. Game picks one per stop (stopStand / stopSit, eased). Placed in the
+	# bike's frame here; the dab turn below then stands it upright in the world
+	var st_w: float = clampf(_num(p, "stopStand"), 0.0, 1.0)
+	var si_w: float = clampf(_num(p, "stopSit"), 0.0, 1.0)
+	_stop_long = maxf(st_w, si_w)
+	if (st_w > 0.0 or si_w > 0.0) and seat != null:
+		if st_w > 0.0:
+			var fl: Vector3 = p.get("footL", Vector3.ZERO)
+			var fr: Vector3 = p.get("footR", Vector3.ZERO)
+			var pt := Vector3(float(seat.front) + STOP_HIP_FWD, (fl.y + fr.y) * 0.5 + 0.12 + (L_THIGH + L_SHIN) * STOP_LEG, 0.0)
+			pelvis = pelvis.lerp(pt, st_w)
+			chest = chest.lerp(pt + Vector3(sin(STOP_TORSO), cos(STOP_TORSO), 0.0) * float(sty.torso), st_w)
+		if si_w > 0.0:
+			var ps := Vector3((float(seat.rear) + float(seat.front)) * 0.5, float(seat.top) + 0.09, 0.0)
+			pelvis = pelvis.lerp(ps, si_w)
+			chest = chest.lerp(ps + Vector3(sin(SIT_TORSO), cos(SIT_TORSO), 0.0) * float(sty.torso), si_w)
 	if dab > 0.0:
 		var ds := signf(_num(p, "dabSide", -1.0))
-		var a := -ds * _num(p, "dabLean") * 0.8 * dab
+		var a := -ds * (_num(p, "dabLean") * 0.8 + _num(p, "dabLeanVar")) * dab   # (the moving part held against fully: the bike moves under a still body)
 		var c := cos(a)
 		var sn := sin(a)
-		var y0 := 0.3
+		# (sat on the saddle the hips are the pivot: they stay planted on it and only the upper body is held upright - turned
+		# about a point near the pedals they slid across the saddle as the bike tipped. User: "ass should not move")
+		var y0: float = lerpf(0.3, pelvis.y, si_w)
+		var z0: float = pelvis.z * si_w
 		var dy := pelvis.y - y0
-		var dz := pelvis.z
+		var dz := pelvis.z - z0
 		pelvis.y = y0 + dy * c - dz * sn
-		pelvis.z = dy * sn + dz * c
+		pelvis.z = z0 + dy * sn + dz * c
 		dy = chest.y - y0
-		dz = chest.z
+		dz = chest.z - z0
 		chest.y = y0 + dy * c - dz * sn
-		chest.z = dy * sn + dz * c
-		pelvis.z += ds * 0.04 * dab
-		pelvis.y -= 0.05 * dab
-		chest.y -= 0.03 * dab
+		chest.z = z0 + dy * sn + dz * c
+		var free_k: float = 1.0 - maxf(st_w, si_w)   # (the stop poses place the hips themselves)
+		pelvis.z += ds * 0.04 * dab * free_k
+		pelvis.y -= 0.05 * dab * free_k
+		chest.y -= 0.03 * dab * free_k
 	# never sit INTO the saddle
 	if sty.seatFloor and seat != null:
-		var over := clampf((pelvis.x - (float(seat.rear) - 0.18)) / 0.08, 0, 1)
+		var over := clampf((pelvis.x - (float(seat.rear) - 0.18)) / 0.08, 0, 1) * (1.0 - st_w)   # (standing over the top tube: no saddle under him)
 		var floor_y: float = float(seat.top) + 0.085 - 0.3 * _sink   # (sinking into a landing the thighs come down onto it)
 		if not _OLD_PRELOAD: floor_y -= 0.14 * j_pre * (1.0 - clampf(j_ext * 1.5, 0.0, 1.0)) * (1.0 - air)   # (loading a lip: hips down over the saddle, thighs on it)
 		if pelvis.y < floor_y:
@@ -2539,6 +2566,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var tw_cap: float = 0.6 if _OLD_TWIST else lerpf(0.3, 0.6, air)   # (an air spin keeps its old room)
 	var tw_base: float = _pk_tyaw + float(sty.twist) + clampf(_num(p, "airSpin") * 0.07 + sm_turn * tw_k * float(sty.turnTwist) + lead, -tw_cap, tw_cap) + _num(p, "flipTwist")   # (a flip: the shoulders turn to spot the landing)
 	var tw_air: float = -0.22 * tab - 0.85 * awhip
+	tw_base += _num(p, "lookTwist")   # (at a stop: the shoulders turn with a look over the shoulder, Game LOOK_TWIST)
 	# sprint bar pull: the shoulders turn with it, the pulling side forward (last frame's pull per arm; the torso turns as one
 	# piece, so the shoulder never leaves the chest - moving the shoulder joint alone tore it off the torso)
 	if not _OLD_SPRINT: tw_base += SPR_PULL_TWIST * 0.5 * (float(_arm_pull[1]) - float(_arm_pull[0])) * (1.0 - air)
@@ -2962,7 +2990,7 @@ func _constrain(pelvis: Vector3, chest: Vector3, p: Dictionary, sty: Dictionary,
 		# ~75 % of the bike whatever the counter-roll said. The arms may straighten as far as LEAN_REACH as the body counters
 		# 0.35 rad. BMX_OLD_SLOWBODY=1 = always the usual bend)
 		if not _OLD_SLOWBODY:
-			reach = lerpf(reach, (L_UARM + L_FARM) * LEAN_REACH, clampf(absf(_body_roll) / 0.35, 0.0, 1.0))
+			reach = lerpf(reach, (L_UARM + L_FARM) * LEAN_REACH, maxf(clampf(absf(_body_roll) / 0.35, 0.0, 1.0), _stop_long))
 		var worst := 0.0
 		for sd in [[-1.0, handL], [1.0, handR]]:
 			var shp: Vector3 = chest + Basis(Vector3.RIGHT, _body_roll) * Vector3(-0.03, -0.04, float(sd[0]) * float(sty.shoulders))   # (on the body's frame, as drawn)
