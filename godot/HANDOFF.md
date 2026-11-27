@@ -407,6 +407,18 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   (crouch before a lip, pop, reach for the landing), **fore/aft body spring** (`body_x`, `hip_shift`: braking
   and landings throw the body forward, drive sits it back), **air control** (Space tucks the bike up about the
   shared centre of mass, W/S lean the nose; keys held at take-off count only once pressed again).
+- **DH sprint form (2026-11-27, user: "knees out too much at speed", "no pulling on the bars", "looks down a bit then back up")**,
+  `rider.gd` `SPR_*`, drawing only. Measured (`BMX_SPRINT_PROBE=1` + `BMX_LAUNCH=sprint BMX_STRAIGHT=1`: `SPRKNEE` knee / hip
+  distance from the frame's middle plane, how often the knee clearance pushed it): knees sat 15-17 cm out (peaks 25 cm), the
+  12 cm clearance pushed them out on 20-40 % of frames. Now sprinting: the knee pole's sideways part x 0.15 (`SPR_KNEE_IN`),
+  clearance 8.5 cm (`SPR_KNEE_CLEAR`, `_knee_clear` takes it), hips take back half the pedalling-rock undo (`SPR_HIP_ROCK`):
+  11-12 cm, peaks 13-16 at speed. Bar pull by each arm's own foot (peak ~30 deg past the front of its stroke, Stone & Hull):
+  the SHOULDERS TURN toward the pulling arm (`SPR_PULL_TWIST` 0.16 rad, was 0.22: "a bit less", via `tw`) with a small shrug, pulling elbow out / back,
+  pressing arm straighter. (Moving the shoulder joint 10 cm tore it off the torso: never move `shp` alone by much.) At speed
+  the hips go 5 cm back and the back flattens (`SPR_HIP_BACK`, `SPR_CHEST_LOW`). Head-down bursts: 0.34 rad down for
+  0.3-1.1 s, then up 0.4-1.7 s (shorter down / longer up the faster). Spinning a high cadence the upper body goes
+  quiet (user: "only high spinning"): bar pull, shoulder turn, hip rock / tilt x `calm_k`, down to `SPIN_CALM_LEFT` 0.08 from
+  85 to 125 rpm, eased in over ~1.5 s (`_spin_calm`; `SPRKNEE` prints rpm / calm). `BMX_OLD_SPRINT=1` = before. User: "nice".
 - **Sprint from slow** (`sprintKick`, `BikePhysics.slowness`): the slower the rider, the harder a sprint pushes (0–25 km/h 1.5 s vs 2.7 s pedalling), legs spin up, the bike is thrown side to side and the rider stands tall over the bars (`effort` in `rider.gd`). Stamping from below ~12 km/h lifts the front into the balance manual (`manSprintLift`), balanced from there like any manual.
 - **Body stick** (gamepad right stick, `body_fwd/back/left/right` actions → `inp.body_fwd`, `inp.body_lean`): fore / aft adds to
   `body_x` / `hip_shift` (reach `stickShift` × `weightShift`); past `manualFrom` pulled back it holds a manual (`manual_up` feeds
@@ -4119,6 +4131,16 @@ Known, not fixed (lower priority from the code review):
   half and make GPU spikes; check `nvidia-smi pmon -c 1` first. `TIME_PHYSICS_PROCESS` / `TIME_PROCESS` are the slowest
   single tick of the last second, not averages (our physics tick is ~0.3–0.7 ms). Don't print per slow frame while
   measuring: console prints through a pipe cost tens of ms and make more slow frames.
+- **HITCH / MEM lines in every ride's session log (2026-11-27)** (`Game._hitch_watch`, F8 reports carry them): a drawn frame
+  over 80 ms writes `HITCH frame_ms= phys_ticks= ... focus= | <top 5 of our _perf sections this frame> rest=<ms none of
+  them covered> | gc_ms=<C# collector pause inside it> gc_runs=+g0/+g1/+g2 | at=<clock> sys_mem=<% of RAM in use>
+  other_godot=<other Godot processes> proc= static= vram= objects= ... cs_heap= ...`; every 30 s of ride a `MEM t=` line
+  with the same memory part (`CsGc.stats` / `counters`). Found with them: the user's 1-3.5 s freezes (F8, seed 61298) did
+  NOT happen in a lone test ride (15 min, worst ~130 ms, memory flat at ~7.7 GB after the first minutes); each game
+  process holds ~7-7.7 GB private (Godot's own static 0.6 GB, C# ~0.25 GB, the rest outside Godot's counters: driver /
+  Vulkan, not looked into), and other sessions start ~1 test window a minute on the same PC. Read `rest`, `sys_mem` and
+  `other_godot` of the next real freeze before changing code. C# allocates ~30-40 MB/s of garbage while riding (mostly
+  chunk builds on workers), a collection every ~0.5 s, pauses ~1-2 ms each.
 
 Ideas offered, not started:
 - Tyre tracks option **B**: a painted top-down "track map" the ground shader reads → real ruts in mud/sand.
