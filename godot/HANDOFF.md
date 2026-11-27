@@ -878,6 +878,98 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   finer than the 0.25 m mesh, they aliased into ~2 m stripes across the trail; detail under ~1 m belongs in the shader's normal, not the mesh), a pothole / washout on the road in some 37 m
   stretches (hash), ragged dirt edge, rills down banked faces. The physics + tyre fit read the smooth ground, so a tyre can sit up to ~3 cm off the drawn surface. Berm rim
   rounded too (cap 0.8..1.4 m, lip 1.1 m half-width, back slope 2.5..6 m). Not re-checked: C# vs GD EXACT after the rim rounding, the rim's shadow edge up close.
+- **Photo-scanned trail surface + stony shoulders (2026-11-27, user reference shots: packed dirt full of embedded stones, a
+  stony shoulder breaking into the land, "rock on the side a lot")**. Two Poly Haven CC0 scans (`assets/textures/trail_scan/`,
+  packed by root `tools/make_trail_scans.py`: `_col` = colour / its mean x 0.5 + height in A, `_nr` = normal + roughness; 2K BC7):
+  `rocky_trail` (stony dirt) and `forest_ground_04` (packed dirt). `ground.gdshader` (`ts_*`, set by `Terrain.set_trail_scans`,
+  also on built levels): two turned reads per scan height-blended by a slow noise (no tiling seen); packed on the ridden line,
+  stony elsewhere, mixed through their heights; the scan's light / dark / grey multiplies the world's own dirt colour
+  (`scan_colour` 0.85), its stones are desaturated grey; the dirt / land edge uses the stony scan's height (stones stay as the
+  dirt fades); past the edge the scan's highest spots (= stones) show in patches (`scan_shoulder`). The grass thins in those
+  patches (`TerrainChunkBuilder` grass density), and `_roadside_rocks` puts pebble clumps + an occasional 10-40 cm rock along both
+  edges (no colliders, like the berm rim clutter). `BMX_OLD_TRAILSCAN=1` = no scans, `BMX_OLD_ROADROCKS=1` = no edge rocks / grass
+  thinning. Then (same day) two more CC0 scans per biome: `dry_ground_rocks` (cracked hardpack, pale pebbles) height-blended
+  into the packed scan by `trail2` G (dry), `forrest_ground_01` (needles / twigs / grass, its own colours at the land's
+  brightness) as a litter band over the land + the dirt's outer edge where forest (`trail3` A = 1 - forest, baked by the chunk
+  builder from `biome()` on a 13 x 13 grid + the singletrack narrowness; 255 = none, so other bakes need nothing). **Edge
+  geometry = one cross-section swept along the trail** (`TerrainFieldCs.micro_detail`, drawn fine mesh only, physics untouched;
+  user sketch): o = metres past the half-width: dirt shoulder rising `sh` (2.5-6 cm) over `sw` (0.25-0.8 m), a steep bank step
+  `bh` (6-22 cm) over `bw` (0.14-0.3 m), a flat grass top 1.5-3 m, then back to the land over 2 m. Each stretch AND side picks
+  smooth (no bank, wide shoulder) / raised grass bank / lower bank with a gutter dug along its foot (3-7 cm, trails > 1 m wide)
+  from slow noises; narrow singletracks get a smaller profile. The 0.25 m mesh makes the step ~one cell wide (no vertical face).
+  The shader darkens the foot of the bank and draws a steep face beside the trail (vertex normal y < ~0.9) as bare darker soil
+  with the stony scan. **Bank cells split finer** (`TerrainFieldCs.bank_split`, from `fine_ground`): grid cells near the edge
+  where the drawn surface bends > 1.5 cm off the cell's flat are split 4 x 4 (6 cm); edges shared with unsplit cells / the chunk
+  border stay straight (crack-free); only LOD 0 draws them (`_ground_lods` skips those grid cells, `scell`). ~200-400 cells /
+  +6-8k triangles per trail chunk (more on twisty bits). `BMX_NO_BANKSPLIT=1` = off, `BMX_SPLIT_PROBE=1` prints `BANKSPLIT`,
+  `BMX_EDGE_STYLE=smooth|bank|gutter` forces one edge everywhere (test). **Parallax** on the scans (`scan_parallax`,
+  `SCAN_DEPTH` 5 cm, offset limiting, 4 damped steps on the stony scan's height, one offset for every scan, fades 6-14 m;
+  `BMX_NO_PARALLAX=1`). Stones reach in from the edges: the packed line only half-wins (`want` <= 0.9) and pebble clumps (no
+  bigger rocks) go on the trail's outer third. Cost, all of it vs `BMX_OLD_TRAILSCAN=1 BMX_NO_BANKSPLIT=1 BMX_OLD_ROADROCKS=1
+  BMX_OLD_CUT=1`, standing at the seed 4242 green start, no vsync, the user's game window open: 57.5 -> 53.2 fps (~1.4 ms).
+  **Puddles in the gutters**: `micro_detail` leaves the gutter's depth in `_gut_last`; `fine_ground` / `bank_split` put it in the
+  fine mesh's vertex colour (r = 1 - depth; chunk `cols` -> `ARRAY_COLOR`, kept in step through skirts / split cells by
+  `TerrainChunkBuilder._gcols`; no colour array = none), `ground.gdshader` `v_gut`: in wet stretches (25 m-ish noise) the
+  deepest part fills with the trail's puddle water to a level that varies along it; never in dry country. `BMX_TRAIL_PUDDLES=2`
+  = every gutter wet, `BMX_TRAIL_DEBUG=9` shows gutter depth (r) / water (g). In dry country only in bends (`trail3` G corner
+  load > ~0.4), where the runoff collects.
+  **Brink rocks** (`TerrainChunkBuilder._brink_rocks` / `_brink_stone`, after `_roadside_rocks`): the rock gardens' generated
+  rocks along both edges 0.8-3.5 m past the dirt (thickest ~1-1.5 m), clusters = a main stone (scale 0.6-1.7, bigger further
+  out) + 0-3 smaller + pebbles, patchy along the trail; dome colliders like rock gardens (run wide = hit them); never on dirt /
+  jumps / B-lines; grass cleared round their feet (`blocked`). NOTE: the rock meshes' scale is not metres: scale 0.5 reads as a
+  ~30 cm stone, half-hidden by green-land grass (the first try was invisible). `BMX_BRINK_PROBE=1|2` (counts / every stone),
+  `BMX_BRINK_BIG=k` scales them (test). `BMX_OLD_ROADROCKS=1` also turns these off.
+  Here and there (12 % of clusters past 2.4 m out) a boulder instead: scale 1.4-2.3 (~1.2-2 m across), 1.35x taller, placed
+  only if its whole footprint (4 points at 0.75 x its scale) is clear of any trail dirt (a first try at scale 2-3.4 spilled
+  onto a bend of the trail).
+  **Scanned rocks** (same day, user: "use Poly Haven rock scans, make them light"): `assets/rocks_scan/` = Poly Haven CC0
+  boulder_01, namaqualand_boulder_02, rock_09, namaqualand_stones_01 (5 stones), decimated in Blender by root
+  `tools/make_scan_rocks.py` (welded, then collapse passes; horizontal radius 1, foot at -0.12 like rock_gen.gd) to LOD0
+  ~1600 / LOD1 ~360 triangles, textures by `tools/make_scan_rock_textures.py` (1K: colour x AO + roughness in A, normal).
+  `TerrainGeo.SCAN_ROCKS` / `MESH["scan_<id>"(_lod0)]` / `MAT["scan_<tex>"]` (`shaders/rock_scan.gdshader`: own UVs, deco_fade,
+  per-material tint: the scans' colour maps are dark, lifted 1.1-3.4x), lists `scan_*` in `Terrain.LIST_SPEC` (+ the usual
+  LOD0 twin). Used by `_brink_stone`: dry country = Namaqualand boulder + stones, else boulder_01 / rock_09 / stones.
+  `BMX_OLD_SCANROCKS=1` = the generated rocks there. **Moss bug fixed** in `_push`: the moss amount was computed but custom
+  data a was always written 1.0, so every granite-type rock (world rocks, rock gardens, desert too) was fully mossy; now the
+  biome's amount (none in dry country). All rocks look different (much less moss); `BMX_OLD_ROADROCKS=1` = before.
+  Then (same day): boulders 6 % of far clusters (was 12); scans colour-corrected (each scan's brightness evened to linear
+  ~0.19 by `tint`, saturation 0.3, the tone from the instance colour: warm sandstone grey in dry country, cool grey elsewhere).
+  Ground shader: the scans fade out on steep faces (`sfar` x normal y: laid from above they smeared down cut banks); the grass
+  floor detail too. The fine mesh's vertex colour g = 1 - the bank step's face (`micro_detail` `_bank_last`), drawn as bare
+  soil (`v_bank`). Stoniness varies: a slow layered noise (patches ~5-25 m) shifts the packed / stony scan balance and the
+  shoulder stones' density. **Grass matches the drawn edge**: `TerrainChunkBuilder._warped_tw` ports the ground shader's
+  edge wander (gd_hash / gd_noise3, the 4 taps) over the chunk's TW grid (nodes within 3 m of the trail only), the grass bake
+  uses max(TW, that), and the whole shoulder band thins (stony patches bare). Not measured: chunk build cost of the port.
+  **All world rocks are scans now** (user: "still dark low-poly stones"): `_push` routes every `put("rock")` (rock gardens, land
+  rocks, berm / trail clutter) to a scan list by country + a hash of the spot (no random draws: nothing else moves), and every
+  `put("pebble")` to `spebble_a..e` (the stone set's LOD1 mesh only, no near twin: `MESH["spebble_*"]`). The generated
+  rock_gen.gd lists stay for `BMX_OLD_SCANROCKS=1` / levels that name them. Known: colliders / domes still assume the generated
+  shape (top ~0.9 x scale); the flat rock_09 (height 0.44) can feel taller than it looks.
+  **Rock tone from the ground** (user: "rocks don't match the surroundings, they pop"): `_push` gives every scan rock / pebble the
+  instance colour `_rock_tone(x, z, b)` = the chunk's land colour at the spot (the dirt colour where the land is grass-green),
+  70 % greyed, at 0.82 of its brightness (the shader's tint brings each scan's mean to linear 0.19, so instance = ground_lin x
+  0.82 / 0.19 x b); scan saturation 0.15. Desert rocks now read pale grey-tan in the sand. `BMX_OLD_ROCKTONE=1` = the fixed tones.
+  Tone then 50 % greyed (70 % read cool mauve) and the scans' contrast squeezed toward each one's own mean (`contrast` 0.6,
+  `mean_lum`: deep cracks + baked shadow read as black patches). **Biplanar on slopes** (ground.gdshader; user: "stripes /
+  smears on the lips"): everything laid from above stretched down the gutter walls and the cut bank (and a first fix that
+  faded the scans out on slopes left a smooth brown band). Now the scans blend (`wside`, normal y 0.92 -> 0.7) to two side
+  projections on fixed world axes (P.zy / P.xy, weighted by |n.x|^4 vs |n.z|^4; one following the slope's own direction swirled
+  along curved gutters), only fade out near vertical (y < 0.2-0.4); parallax and the dry scan off on slopes; the baked trail
+  relief / thgt / tslope fade on steep (`flat_k`). The bank-face mask (`_bank_last`) no longer pads 12 cm into the gutter.
+  **Regional drift** (user: "the path is too similar through time"): `reg` (4 noises, ~150-300 m) + `reg_wear` in ground.gdshader:
+  fine (2.2 m) vs coarse (3.8 m, was 2.7) stone read, stoniness bias, a dry hardpack stretch also in green land (`tdry_s`), the
+  dirt's warmth / lightness (+-~8 %), how worn the ridden line is. **Gutter water only on level ground** (`glvl`, normal y >
+  0.985: no puddles on berm faces). **Built jumps** (user: "too smooth, weird blend, no grass on top"): they counted as fully
+  ridden + extra packed = the smooth packed scan only, switched at the jump mask's edge; now the line's wear is taken out on
+  them (`drv`) and they lean only slightly to packed (jm x 0.15): stony like the trail, no seam. The fly-over grass under jumps
+  only grows where the jump adds < ~0.12-0.4 m (`f.jump()[0]` = fo_h), so never on a deck / lip. A worn, packed track ~0.6 m wide runs up
+  each built jump along the racing line (`jtrack`: trail_tex across vs the line's place, a little wobble, x (1 - t_air)), a
+  touch darker, the stony scan pushed to its sides (user drew it). Two faint old tyre prints in it (`jprint`: the ruts' mipmapped
+  tread texture, one read each, colour x0.84 + 6 mm into `hh`'s relief; only within gpx < 0.06; user: "light code").
+  `BMX_OLD_CUT=1` = the old even 3.5-7 cm verge. Seen: desert + green biome at the seed 4242 start (chase, drone). Not measured: GPU cost (8 extra texture reads on
+  trail pixels). Not re-baked: the title land. Poliigon (the user has a paid account) has better matches (Dirt Road With Field
+  Edges, Soil With Forest Debris, Loose Gravel and Dirt): their licence forbids redistributing the files (public repo): gitignore
+  them like the beech leaves.
 - **Baked road detail, racing-game style (2026-11-25, user: "racing games' roads look so nice, ours fades in a lot")**.
   `world/road_detail.gd` (`RoadDetail`, made by `Game` for rides + built levels, not the title / playground) + compute
   `shaders/road_detail_bake.glsl` / `road_detail_mip.glsl`. The trail's marks (ridden lines, prints, stray lines,

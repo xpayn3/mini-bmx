@@ -21,6 +21,21 @@ static func lin(hex: int) -> Color:
 	return TerrainField.lin(hex)
 
 
+const SCAN_ROCKS := ["boulder01", "nboulder02", "rock09", "nstone_a", "nstone_b", "nstone_c", "nstone_d", "nstone_e"]
+const SCAN_ROCK_TEX := {"boulder01": "boulder01", "nboulder02": "nboulder02", "rock09": "rock09", "nstone_a": "nstone", "nstone_b": "nstone",
+	"nstone_c": "nstone", "nstone_d": "nstone", "nstone_e": "nstone"}
+## the first mesh in an imported .glb
+static func _glb_mesh(path: String) -> Mesh:
+	var sc: PackedScene = load(path)
+	var n := sc.instantiate()
+	var found: Mesh = null
+	for c in n.find_children("*", "MeshInstance3D", true, false):
+		found = (c as MeshInstance3D).mesh
+		break
+	n.free()
+	return found
+
+
 static func ensure() -> void:
 	if not MESH.is_empty():
 		return
@@ -42,6 +57,11 @@ static func ensure() -> void:
 			MESH["pebble_" + t] = RockGen.mesh(t, 1, -1)
 		MESH["rock"] = MESH["rock_granite0"]
 		MESH["pebble"] = MESH["pebble_granite"]
+	# scanned rocks (assets/rocks_scan: Poly Haven CC0, decimated by tools/make_scan_rocks.py): LOD1 = the list's mesh, LOD0 its twin
+	for id in SCAN_ROCKS:
+		MESH["scan_" + id] = _glb_mesh("res://assets/rocks_scan/%s_lod1.glb" % id)
+		MESH["scan_" + id + "_lod0"] = _glb_mesh("res://assets/rocks_scan/%s_lod0.glb" % id)
+		if id.begins_with("nstone_"): MESH["spebble_" + id.substr(7)] = MESH["scan_" + id]   # (pebbles: no _lod0 twin)
 	MESH["box"] = GeoBuf.box(1, 1, 1).to_mesh()
 	CactusGeo.ensure()
 	for k in CactusGeo.KINDS:
@@ -261,6 +281,20 @@ static func _build_materials() -> void:
 		MAT["rock"] = MAT["rock_granite"]
 		MAT["rock_plain"] = MAT["rock_granite"].duplicate()   # (a single MeshInstance: no instance data)
 		MAT["rock_plain"].set_shader_parameter("use_instance", false)
+	for id in SCAN_ROCK_TEX.values():
+		if MAT.has("scan_" + id): continue
+		var sm := ShaderMaterial.new()
+		sm.shader = preload("res://shaders/rock_scan.gdshader")
+		sm.set_shader_parameter("rock_col", load("res://assets/rocks_scan/%s_col.png" % id))
+		sm.set_shader_parameter("rock_nrm", load("res://assets/rocks_scan/%s_nrm.png" % id))
+		# the scans' colour maps are dark (linear brightness 0.04..0.23): brought to the stone set's level; [tint, saturation]
+		# (colour-corrected: each scan's mean brightness brought to the same level, its hue mostly taken out (saturation 0.3),
+		# the tone comes from the instance colour = the country: TerrainChunkBuilder._brink_stone)
+		var tn: Array = {"boulder01": [1.9, 0.15], "nboulder02": [3.0, 0.15], "rock09": [4.9, 0.15], "nstone": [1.1, 0.15]}[id]
+		sm.set_shader_parameter("tint", Vector3(tn[0], tn[0], tn[0]))
+		sm.set_shader_parameter("saturation", tn[1])
+		sm.set_shader_parameter("mean_lum", {"boulder01": 0.10, "nboulder02": 0.064, "rock09": 0.039, "nstone": 0.172}[id])
+		MAT["scan_" + id] = sm
 	MAT["tuft"] = _mat(w, 0.9)
 	MAT["shed"] = _mat(w, 0.85)
 	MAT["fence"] = _mat(w, 0.9)
