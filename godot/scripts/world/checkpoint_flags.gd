@@ -5,14 +5,11 @@ class_name CheckpointFlags
 ## shaders/feather_flag.gdshader from the shared wind globals (atm_wind): no script runs per frame.
 ## The print is one atlas of DESIGNS columns of 512 x 1856 px, the user's designs on flag_design/flag_template.png
 
-const H_POLE := 3.4        # m, top of the pole above the ground
-const CLOTH_Y0 := 0.5      # bottom of the cloth at the pole
-const CLOTH_W := 0.8       # widest point of the cloth (pole to free edge) = where the top arc starts
-const ARC_H := 0.95        # how far down from the pole top the arc meets the free edge
-const BOT_X := 0.38        # the tied-back bottom corner: out from the pole ..
-const BOT_Y := 0.12        # .. and up from the cloth's bottom at the pole
-const T_ARC := 0.6         # grid rows t < this run along the free edge, above it along the arc
-const NY := 20             # cloth grid rows (up)
+const H_POLE := 3.4        # m, the top of the flag (the pole's end, over the free edge)
+const CLOTH_Y0 := 0.5      # bottom of the cloth (a straight edge)
+const CLOTH_W := 0.8       # cloth width (pole to the straight free edge)
+const ARC_H := 0.85        # how far down from the top the pole starts curving over
+const NY := 22             # cloth grid rows (up)
 const NX := 7              # cloth grid columns (across)
 const POLE_R := 0.016
 const SINK := 0.25         # pole spike into the ground
@@ -22,27 +19,40 @@ const TEX_H := 1856        # (flag_design/flag_template.png)
 
 static var _mesh: ArrayMesh
 static var _mat: ShaderMaterial
+static var _lb := PackedVector2Array()    # the pole's line (ground .. top corner), sampled
+static var _lbl := PackedFloat32Array()   # its length along, per sample
 
 
-## the classic feather flag outline (user reference photos): the pole runs straight up, then bends over the top in a
-## quarter ellipse down to the free edge's top corner (CLOTH_W out, ARC_H down); the free edge falls from there, vertical
-## at the corner and curving in to the tied-back bottom corner. Mirrored in flag_design/make_template.py (keep in step).
-## outline(t): the point on the outline t of the way from the bottom corner (0) up the free edge and round the arc to
-## the pole top (1)
-static func outline(t: float) -> Vector2:
-	var yc := H_POLE - ARC_H
-	if t <= T_ARC:
-		var u := t / T_ARC
-		return Vector2(BOT_X + (CLOTH_W - BOT_X) * sin(u * PI * 0.5), lerpf(CLOTH_Y0 + BOT_Y, yc, u))
-	var th := (t - T_ARC) / (1.0 - T_ARC) * PI * 0.5
-	return Vector2(CLOTH_W * cos(th), yc + ARC_H * sin(th))
+## the feather flag of the user's reference (2026-11-27, "nice geometric curve, bottom straight"): the pole runs straight up
+## the cloth's side, then bends over in a quarter ellipse (CLOTH_W across, ARC_H down) to the top of the free edge; the free
+## edge and the bottom are straight. Mirrored in flag_design/make_template.py (keep in step).
+## pole_line(u): the point u of the way along the cloth's pole side, from the bottom corner (0) to the top corner (1)
+static func pole_line(u: float) -> Vector2:
+	if _lb.is_empty():
+		var ya := H_POLE - ARC_H
+		_lb.append(Vector2(0.0, CLOTH_Y0))
+		for k in 61:
+			var th := float(k) / 60.0 * PI * 0.5
+			_lb.append(Vector2(CLOTH_W * (1.0 - cos(th)), ya + ARC_H * sin(th)))
+		var acc := 0.0
+		for i in _lb.size():
+			if i > 0:
+				acc += _lb[i].distance_to(_lb[i - 1])
+			_lbl.append(acc)
+	var want := clampf(u, 0.0, 1.0) * _lbl[_lbl.size() - 1]
+	for i in range(1, _lb.size()):
+		if _lbl[i] >= want:
+			var f := (want - _lbl[i - 1]) / maxf(1e-6, _lbl[i] - _lbl[i - 1])
+			return _lb[i - 1].lerp(_lb[i], f)
+	return _lb[_lb.size() - 1]
 
 
 ## the cloth point at grid (t up 0..1, s across 0..1), in the flag's own frame (pole on +y, cloth towards +x): row t runs
-## from the pole to outline(t)
+## from the pole side (t of the way along it) to the straight free edge (t of the way up it)
 static func cloth_point(t: float, s: float) -> Vector3:
-	var l := Vector2(0.0, lerpf(CLOTH_Y0, H_POLE, t))
-	var p := l.lerp(outline(t), s)
+	var l := pole_line(t)
+	var r := Vector2(CLOTH_W, lerpf(CLOTH_Y0, H_POLE, t))
+	var p := l.lerp(r, s)
 	return Vector3(p.x, p.y, 0.0)
 
 
@@ -74,17 +84,18 @@ static func mesh() -> ArrayMesh:
 	# pole: COLOR.a = 0 (never displaced), a 6-sided tube from the spike up and over the top arc to the free corner
 	var path := PackedVector3Array()
 	path.append(Vector3(0, -SINK, 0))
-	path.append(Vector3(0, H_POLE - 0.3, 0))
-	for k in 15:
-		var o := outline(1.0 - (1.0 - T_ARC) * float(k) / 14.0)
+	for k in 25:
+		var o := pole_line(float(k) / 24.0)
 		path.append(Vector3(o.x, o.y, 0))
+	var tip := pole_line(1.0)
+	path.append(Vector3(tip.x + 0.04, tip.y, 0))   # (the pole's end sticks out a little past the cloth)
 	var sides := 6
 	var start := v.size()
 	for i in path.size():
 		var tg := (path[mini(path.size() - 1, i + 1)] - path[maxi(0, i - 1)]).normalized()
 		var a1 := tg.cross(Vector3(0, 0, 1)).normalized()
 		var a2 := tg.cross(a1)
-		var r := POLE_R * (0.75 if i > 1 else 1.0)   # the top arc is the thinner fibreglass section
+		var r := POLE_R * lerpf(1.0, 0.7, float(i) / path.size())   # tapering fibreglass toward the tip
 		for k in sides + 1:
 			var ang := float(k) / sides * TAU
 			var d := a1 * cos(ang) + a2 * sin(ang)
@@ -98,23 +109,6 @@ static func mesh() -> ArrayMesh:
 			var a := start + i * (sides + 1) + k
 			var b := a + sides + 1
 			idx.append_array([a, a + 1, b, a + 1, b + 1, b])
-	# the cord tying the cloth's bottom corner back to the pole
-	var cs := v.size()
-	var p0 := cloth_point(0.0, 1.0)
-	var p1 := Vector3(0, CLOTH_Y0 - 0.1, 0)
-	for e in [p0, p1]:
-		for k in 4:
-			var ang := float(k) / 4.0 * TAU
-			var d := Vector3(0, cos(ang), sin(ang)) * 0.004
-			v.append(e + d)
-			n.append(d.normalized())
-			uv.append(Vector2(0, 1))
-			uv2.append(Vector2(0, 1))   # grid corner (t 0, s 1): the cord's corner end moves with the cloth's corner
-			c.append(Color(1, 1, 1, 0.5 if e == p0 else 0.0))
-	for k in 4:
-		var a := cs + k
-		var b := cs + (k + 1) % 4
-		idx.append_array([a, b, a + 4, b, b + 4, a + 4])
 	var arr := []
 	arr.resize(Mesh.ARRAY_MAX)
 	arr[Mesh.ARRAY_VERTEX] = v
