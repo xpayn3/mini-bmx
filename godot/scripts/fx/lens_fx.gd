@@ -123,14 +123,23 @@ func add_dust(k: float, col: Color) -> void:
 	dust = clampf(dust + k, 0.0, 0.75)   # (never fully filthy: subtle, edges and corners only)
 	dust_col = dust_col.lerp(col, clampf(k * 4.0, 0.02, 0.5))
 
-## water thrown at the glass (a splash: 0.05 a few drops .. 1 soaked)
+## water thrown at the glass (a splash: 0.05 a few drops .. 1 soaked). k sets HOW MANY drops, not how big:
+## riding through water calls this every frame with a tiny k, which used to give one speck (1-4 px) a frame,
+## smaller the higher the frame rate. The fractions add up to whole drops of the full size mix.
+const SPRAY_DROPS := 70.0    # drops per unit of k
+var _spray := 0.0
 var _se_t := 0.0
 
 func splash(k: float) -> void:
 	if not is_inside_tree(): _pend += k   # before the sim exists (the first respawn runs before _ready)
 	if drops == null or k <= 0.0: return
-	drops.Splash(maxi(1, int(k * 70.0)), _aspect, 0.0015, 0.004 + 0.012 * minf(k * 2.0, 1.0))
 	_wet_t = 0.0
+	_spray += k * SPRAY_DROPS
+	var n := int(_spray)
+	if n < 1: return
+	_spray -= n
+	# radius in screen heights, many small and a few big (LensDropsCs.RandR)
+	drops.Splash(n, _aspect, 0.0025, 0.014 + 0.004 * minf(k * 2.0, 1.0))
 
 func wipe() -> void:
 	dust = 0.0

@@ -2599,6 +2599,12 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   drop, a thin meniscus ring inside the dark rim (`lens_fx.gdshaderinc`), faint colour dispersion where a drop sits
   (`grade.gdshader`, only lwet > 0.3: faint drying rivulets drew fringes everywhere). Probe `-s res://tools/lens_drop_probe.gd
   [-- wind=0.8]` (`DROP n starts_moving= heading_change_sum=`); `BMX_LENS_SPLASH_EVERY=secs[,k]` splashes on a timer.
+  **Bigger, straighter spray (2026-11-27, user: droplets "not visible now", "zig zag ... verrrry little")**: in-game
+  splashes are a tiny `k` every frame, and `splash` made at least one drop per call with its size from `k`: one 1-4 px
+  speck a frame, smaller the higher the fps. Now `k` only sets how many (`SPRAY_DROPS` 70 per unit, fractions add up),
+  sizes are the full mix (radius 0.0025..0.018 screen heights, before SIZE); they cling 0.45-0.8 s (was 0.3-0.5);
+  wander cut (`WANDER` 0.75 -> 0.12, `GLASS_TURN` 0.9 -> 0.15, `PATH_TURN` 0.6 -> 0.1). The ride's corner fringes
+  (`lens_ca`) overwrote red / blue inside drops with a sharp read: added as a difference now.
   Tests: `BMX_LENS_RAIN=0..1`, `BMX_LENS_SPLASH=k`, `BMX_LENS_DUST=0..1`, `BMX_LENS_WIND=0..1` (else the camera's
   speed), `BMX_LENS_DUMP=file.png` (the normal map + `LENS ... flow=` line, 10 s in).
 - **Dust = a real 3D smoke simulation** (`fx/smoke_sim.gd` + compute shaders `shaders/smoke/*.glsl`): a

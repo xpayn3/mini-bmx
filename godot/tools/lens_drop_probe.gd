@@ -13,17 +13,24 @@ func _init() -> void:
 	pts.sort_custom(func(a, b): return a.z > b.z)
 	var track := []
 	for k in 4: track.append([Vector2(pts[k].x, pts[k].y)])
+	# every step, so a drop isn't mixed up with the beads it leaves: the nearest one of about its size
+	var cur := []
+	for k in 4: cur.append(pts[k])
 	for step in 300:   # 2.5 s at 120 Hz
 		d.Step(1.0 / 120.0, 0.0, wind, 1.78, 0.89, 0.5, 1.0, 0.0, 1.0)
-		if step % 12 == 11:
-			for k in 4:
-				var last: Vector2 = track[k][-1]
-				var best := Vector2.INF
-				for i in d.Count():
-					var g: Vector4 = d.Get(i)
-					var p := Vector2(g.x, g.y)
-					if p.distance_to(last) < best.distance_to(last): best = p
-				track[k].append(best)
+		for k in 4:
+			var c: Vector4 = cur[k]
+			var best := Vector4.ZERO
+			var score := INF
+			for i in d.Count():
+				var g: Vector4 = d.Get(i)
+				if g.z < c.z * 0.7: continue
+				var s := Vector2(g.x - c.x, g.y - c.y).length()
+				if s < score:
+					score = s
+					best = g
+			if score < 0.06: cur[k] = best
+			if step % 12 == 11: track[k].append(Vector2(cur[k].x, cur[k].y))
 	for k in 4:
 		var line := "DROP %d r=%.4f:" % [k, pts[k].z]
 		var t0 := -1.0
