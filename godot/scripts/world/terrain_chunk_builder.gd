@@ -82,6 +82,7 @@ var rnd: WorldRng
 var lists := {}       # name -> PackedFloat32Array (16 floats / instance: 3x4 row-major + custom rgba)
 var counts := {}      # name -> int
 var shed_lists: Array = []
+var flags := PackedFloat32Array()   # checkpoint feather flags: MultiMesh buffer (12 transform + design, seed, 0, 0)
 var packs: Array = []   # health pack spots (Vector3, world) beside the sheds
 var colliders: Array = []
 var blocked: Array = []   # [x, z, r]
@@ -244,10 +245,10 @@ func _build() -> void:
 	_rock_gardens()
 	for p in panels:
 		blocked.append([p["cx"], p["cz"], 1.6])
-	_gates()
 	_arches()
 	_boards()
 	_dist_signs()
+	_checkpoint_flags()
 	_line_signs()
 	_tape()
 	for k in colliders:
@@ -381,6 +382,7 @@ func _build() -> void:
 	out["counts"] = counts
 	out["sheds"] = shed_lists
 	out["packs"] = packs
+	out["flags"] = flags
 	out["colliders"] = colliders
 	out["panels"] = panels
 
@@ -749,42 +751,6 @@ func _rock_gardens() -> void:
 			colliders.append({"x": x, "z": z, "r": (sx + sc) * 0.45, "top": h - sc * 0.3 + sy * 0.9, "base": f.ground(x, z), "sink": sc * 0.3})
 
 
-# ---------------- sponsor gates ----------------
-## big gantries over the trail with a banner on top (data only; Terrain builds the nodes)
-func _gates() -> void:
-	var C: TrailCourse = f.course
-	var list := []
-	for i in C.chunk_gates.get(TrailCourse.chunk_key(cx, cz), PackedInt32Array()):
-		var tx: float = C.TX[i]
-		var tz: float = C.TZ[i]
-		var half: float = C.W[i] + 1.3
-		var nx := -tz
-		var nz := tx
-		var cxp: float = C.X[i]
-		var czp: float = C.Z[i]
-		if sqrt(cxp * cxp + czp * czp) < 14:
-			continue
-		var ok := true
-		var hl := height(cxp - nx * half, czp - nz * half)
-		var hr := height(cxp + nx * half, czp + nz * half)
-		var hc := height(cxp, czp)
-		if hl < WATER + 0.2 or hr < WATER + 0.2 or absf(hl - hr) > 3.0:
-			continue
-		# not on a jump / ramp / bridge (check the posts and the track either side)
-		for s in [-1.0, 0.0, 1.0]:
-			for off in [-half, 0.0, half]:
-				f.jump_eval(cxp + tx * s * 3.0 + nx * off, czp + tz * s * 3.0 + nz * off)
-				if f.fo_h > 0.05:
-					ok = false
-		if not ok:
-			continue
-		list.append({"x": cxp, "z": czp, "tx": tx, "tz": tz, "half": half, "hl": hl, "hr": hr, "hc": hc, "i": i})
-	if not list.is_empty():
-		out["gates"] = list
-	if Env.raw("BMX_GATE_PROBE") != "":
-		print("GATES chunk=", cx, ",", cz, " cand=", C.chunk_gates.get(TrailCourse.chunk_key(cx, cz), PackedInt32Array()).size(), " placed=", list.size(), " boards_cand=", C.chunk_boards.get(TrailCourse.chunk_key(cx, cz), PackedInt32Array()).size())
-
-
 ## rare rock tunnels / cliff overhangs over the trail (data only; Terrain builds the nodes)
 func _arches() -> void:
 	var C: TrailCourse = f.course
@@ -1064,6 +1030,49 @@ func _dist_signs() -> void:
 		if Env.raw("BMX_GATE_PROBE") != "":
 			print("DISTSIGN i=", i, " at ", bx, ",", h, ",", bz)
 		panels.append(panel)
+
+
+## the checkpoint every 5 km (the distance sign's spot, not the early 1 km one): one feather flag each
+## side of the trail, facing each other across it, 1.3 m past its edge (CheckpointFlags; visual only, no collider).
+## If a side's spot doesn't fit (fence, water, a jump), the next course points along are tried
+const FLAG_SCALE := 5.0 / CheckpointFlags.H_POLE   # drawn 5 m tall (user 2026-11-27), cloth ~1.2 m wide
+
+func _checkpoint_flags() -> void:
+	var C: TrailCourse = f.course
+	for i in C.chunk_signs.get(TrailCourse.chunk_key(cx, cz), PackedInt32Array()):
+		if i == TrailCourse.SIGN_FIRST:
+			continue
+		var n := 0
+		var gate: int = int(i) / maxi(1, C.sign_every)   # which checkpoint this is down the trail
+		for side in [-1.0, 1.0]:
+			for k in [1, 2, 3, 0, 4, 5]:   # course points ~2 m apart; (the distance sign sits on point i)
+				var j := clampi(i + k, 0, C.X.size() - 1)
+				var tx: float = C.TX[j]
+				var tz: float = C.TZ[j]
+				var nx: float = -tz * side
+				var nz: float = tx * side
+				var bx: float = C.X[j] + nx * (C.W[j] + 1.3)   # close to the riders, just inside the tape (W + 1.7)
+				var bz: float = C.Z[j] + nz * (C.W[j] + 1.3)
+				var why := _sign_spot_why(bx, bz, tx, tz, 0.1)
+				if why == "tape line":
+					why = ""   # (signs keep out past the tape; a flag stands right at the trail's edge)
+				if why != "" and (why != "blocked" or is_blocked(bx, bz, -0.95)):   # (only the distance sign's own small spot is let off)
+					continue
+				var h := height(bx, bz)
+				var rr := fposmod(sin(float(j) * 12.9898 + side * 4.1) * 43758.5453, 1.0)
+				var o := flags.size()
+				flags.resize(o + 16)
+				# basis: identity (the shader turns the flag to the wind about its own vertical); designs by side
+				flags[o] = FLAG_SCALE; flags[o + 3] = bx
+				flags[o + 5] = FLAG_SCALE; flags[o + 7] = h
+				flags[o + 10] = FLAG_SCALE; flags[o + 11] = bz
+				flags[o + 12] = float(gate % 2)   # slalom: both flags of a checkpoint one colour, blue / red in turn
+				flags[o + 13] = rr
+				n += 1
+				blocked.append([bx, bz, 0.5])
+				break
+		if Env.raw("BMX_GATE_PROBE") != "":
+			print("CHECKFLAGS i=", i, " flags=", n, " at ", C.X[i], ",", height(C.X[i], C.Z[i]), ",", C.Z[i], " dir ", C.TX[i], ",", C.TZ[i])
 
 
 # ---------------- race tape ----------------

@@ -1208,8 +1208,22 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   from above (TAA / blue noise would soften it), the middle ring's colour is still vertex colour at 8 m (no road / trail detail, flatter than the chunks), no
   decorations in it (the far trees are the backdrop's, fading in at ~124 m), the water sheet itself still ends hard at the chunk edge (z-ordered over the
   ring's water), a third ring to push the 20 m backdrop further out, geomorphing instead of dithering, not measured on a slow GPU.
-- **Sponsor props** (`TrailCourse.chunk_gates` / `chunk_boards`, fixed spacing by centreline index so growing never moves them): a huge steel gantry with a sponsor banner over the trail every 300 m (`TrailGate.build`, made-up brands in `TrailGate.SPONSORS`, no collision, skipped on jumps) and breakable wooden roadside billboards every ~80 m (fence-style panel in `TerrainChunkBuilder._boards`, so the bike smashes them; the Label3D text is freed on smash). Probe: `BMX_GATE_PROBE=1`.
+- **Sponsor props** (`TrailCourse.chunk_boards`, fixed spacing by centreline index so growing never moves them): (the steel gantries over the trail were removed 2026-11-27) breakable wooden roadside billboards every ~80 m (fence-style panel in `TerrainChunkBuilder._boards`, so the bike smashes them; the Label3D text is freed on smash). Probe: `BMX_GATE_PROBE=1`.
 
+- **Checkpoint feather flags (2026-11-27)** (`world/checkpoint_flags.gd` `CheckpointFlags`, `shaders/feather_flag.gdshader`): at every
+  5 km distance sign (not the 1 km one) one feather flag on each side of the trail, drawn 5 m tall (`FLAG_SCALE`), W + 1.3 m out (inside the tape;
+  spot checked like the signs, `TerrainChunkBuilder._checkpoint_flags` -> `out["flags"]`, one MultiMesh per chunk in
+  `Terrain._finalize_out`). Visual only, no collider. Shape = the classic feather outline (`CheckpointFlags.outline()`:
+  straight pole, a quarter-ellipse arc over the top, a convex free edge, tied-back bottom corner). All motion in the vertex
+  shader from `atm_wind`: the flag turns on its pole to stream downwind, ripples run pole -> free edge, bellies with the gusts,
+  the free edge pulls in; UV = the flag's box (the print), UV2 = the grid (the motion). Print = `DESIGNS` columns of
+  512 x 1856 px drawn upright (pole left) in `assets/textures/flags/checkpoint_flags.png` (BC7 + mipmaps): the user's two
+  designs (originals `flag_design/flag_blue.png`, `flag_pink.png`), slalom style: both flags of a checkpoint
+  one colour, blue and red in turn down the trail (checkpoint number % 2). **Design template**: repo root `flag_design/flag_template.png`
+  (outline, sleeve, safe area, 10 cm grid) + `flag_mask.png`, made by `flag_design/make_template.py` (same outline formula:
+  keep in step). Test: `BMX_SIGN_EVERY=60 BMX_GATE_PROBE=1` (checkpoints every 120 m, `CHECKFLAGS` lines).
+- **Sponsor gantries over the trail removed (2026-11-27, user)**: `_gates()` / `chunk_gates` bucketing / `TrailGate.build` in
+  chunks are gone (`TrailGate` still holds the sponsor list, labels and the distance flag).
 - **Printed signs** (`world/sign_tex.gd` `SignTex`, `shaders/sign_board.gdshader`; 2026-11-25). Every sign face is printed once per look
   into a SubViewport, read back, mipmapped and DXT1-compressed, cached (`SignTex.material(km)`, `billboard(sp, size, planks)`,
   `banner(sp, size)`, `for_plate(dict)`): no Label3D text, the print is lit with the board. One shader weathers them all per sign
