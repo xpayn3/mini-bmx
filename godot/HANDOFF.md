@@ -525,7 +525,11 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   cr_c (`shoulder_at`, square to a forward-folded spine, only turns ~cos(fold) of the roll); the arm reach may go to `LEAN_REACH`
   0.97 as the body counters 0.35 rad (the inside arm goes long). Steady slow turn: shoulders 1-2 deg at bike 18 deg. (6) "Sinks
   too much, shoulders weird in fast turns": two turn crouches stacked (0.12 x lean + hips 7 / chest 12 cm) -> one,
-  `CORNER_HIP` 0.07 / `CORNER_CHEST` 0.08 m. Sliders Ride > Steering > Slow riding. Not ridden by the user yet; at 45
+  `CORNER_HIP` 0.07 / `CORNER_CHEST` 0.08 m.
+  (7) "Sprinting in fast berms he is full down": `cornerBody` 0.5 -> 0.7 (Tune VER 36). With the body really separated from
+  the bike now, 50 % of a 60 deg lean put the inside grip out of the arms' reach and the limits folded him onto the bars, head
+  below the hips. Riders Republic (GameResearch, same chase camera): sprinting = out of the saddle, back ~40-45 deg, head up;
+  pedalling through corners rider and bike lean together at the same height. `BMX_HOLD_SPRINT=1` holds sprint in tests. Sliders Ride > Steering > Slow riding. Not ridden by the user yet; at 45
   km/h fewer side-by-side shots taken (GPU busy).
 - **Right stick side = the body, not the bike (2026-11-26, user: "leaning the stick also leans the bike, a double effect, it
   swings violently into the next corner", "make it like MX vs ATV")**. On the ground the side lean no longer steers
