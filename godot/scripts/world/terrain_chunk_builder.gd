@@ -1150,6 +1150,7 @@ func _checkpoint_flags() -> void:
 	var C: TrailCourse = f.course
 	for i in C.chunk_flags.get(TrailCourse.chunk_key(cx, cz), PackedInt32Array()):
 		var n := 0
+		var pair := []   # where each side's flag went (for the pass-by whoosh: RideLayers._gates)
 		var gate: int = (int(i) - TrailCourse.FLAG_FIRST) / TrailCourse.FLAG_EVERY   # which checkpoint this is down the trail
 		for side in [-1.0, 1.0]:
 			for k in [1, 2, 3, 0, 4, 5]:   # course points ~2 m apart; (the distance sign sits on point i)
@@ -1176,8 +1177,21 @@ func _checkpoint_flags() -> void:
 				flags[o + 12] = float(gate % 2)   # slalom: both flags of a checkpoint one colour, blue / red in turn
 				flags[o + 13] = rr
 				n += 1
+				pair.append(Vector3(bx, h, bz))
 				blocked.append([bx, bz, 0.5])
 				break
+		if not pair.is_empty():
+			var ci := clampi(int(i) + 2, 0, C.X.size() - 1)
+			var mid := Vector3(C.X[ci], height(C.X[ci], C.Z[ci]), C.Z[ci])
+			var half := 0.0
+			if pair.size() == 2:
+				mid = (pair[0] + pair[1]) * 0.5
+				half = Vector2(pair[0].x - pair[1].x, pair[0].z - pair[1].z).length() * 0.5
+			else:
+				half = Vector2(pair[0].x - mid.x, pair[0].z - mid.z).length()
+			if not out.has("flag_gates"): out["flag_gates"] = []
+			out["flag_gates"].append({"at": mid, "dir": Vector3(C.TX[ci], 0, C.TZ[ci]).normalized(), "half": half,
+				"clear": 0.0, "depth": 0.0, "flap": 1.0})
 		if Env.raw("BMX_GATE_PROBE") != "":
 			print("CHECKFLAGS i=", i, " flags=", n, " at ", C.X[i], ",", height(C.X[i], C.Z[i]), ",", C.Z[i], " dir ", C.TX[i], ",", C.TZ[i])
 

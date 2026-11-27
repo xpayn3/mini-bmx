@@ -1178,6 +1178,11 @@ func _finalize_out(k: Vector2i, o: Dictionary, chunk_n: int) -> void:
 	var fl: PackedFloat32Array = o.get("flags", PackedFloat32Array())
 	if fl.size() > 0:
 		_multimesh(node, CheckpointFlags.mesh(), CheckpointFlags.material(), fl, fl.size() / 16, true)
+	for fg in o.get("flag_gates", []):   # a checkpoint's flag pair: a marker for the pass-by whoosh (RideLayers._gates)
+		var mk := Node3D.new()
+		mk.add_to_group("pass_gate")
+		mk.set_meta("pass", fg)
+		node.add_child(mk)
 	for pp in o.get("packs", []):
 		var pkey := Vector2i(roundi(pp.x * 4.0), roundi(pp.z * 4.0))
 		if _pack_taken.has(pkey) or _packs.has(pkey):

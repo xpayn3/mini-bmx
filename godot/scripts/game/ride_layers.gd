@@ -86,6 +86,8 @@ var _vast_t := 0.0
 var _gstate := {}          # gate instance id -> 1 queued / 2 played
 var _gpl: Array = []
 var _gpi := 0
+var _g_last := Vector3(INF, 0, 0)   # where the last gate whoosh played (one gate seen twice: neighbouring chunks)
+var _g_last_t := 0
 var _probe_t := 0.0
 var _on := true
 
@@ -390,10 +392,12 @@ func _gates(p, va: float) -> void:
 		var v := va * absf(c)
 		var tt := ahead / maxf(v, 0.1)                     # s until under it
 		if st == 0 and ahead > 0.0 and tt < PassBySynthPeak() + GATE_AHEAD:
-			var clear := maxf(1.5, float(m.clear) + at.y - p.y - 1.4)   # banner over the rider's head
+			var clear := maxf(1.5, float(m.clear) + at.y - p.y - 1.4) if float(m.clear) > 0.0 else 0.0   # banner over the head (0 = none)
 			_gsyn.Queue(id, id % 100000, v, half, clear, lat, float(m.depth), float(m.flap), 0.8)
 			keep[id] = 1
 		elif st == 1 and tt <= PassBySynthPeak():
+			if at.distance_to(_g_last) < 8.0 and Time.get_ticks_msec() - _g_last_t < 1500:
+				keep[id] = 2; _gsyn.Forget(id); continue
 			var pcm: PackedByteArray = _gsyn.Take(id)
 			if pcm.is_empty():
 				if ahead < 0.0: keep[id] = 2   # it came too late: let it go
@@ -402,9 +406,10 @@ func _gates(p, va: float) -> void:
 			w.format = AudioStreamWAV.FORMAT_16_BITS; w.stereo = true; w.mix_rate = 48000; w.data = pcm
 			var a: AudioStreamPlayer = _gpl[_gpi]; _gpi = (_gpi + 1) % _gpl.size()
 			a.stream = w
-			a.volume_db = -4.0 + linear_to_db(clampf((v - 3.0) / 15.0, 0.2, 1.1))
+			a.volume_db = (-4.0 if float(m.clear) > 0.0 else -7.0) + linear_to_db(clampf((v - 3.0) / 15.0, 0.2, 1.1))   # (flags on poles: lighter)
 			a.play()
 			events["gate_whoosh"] = events.get("gate_whoosh", 0) + 1
+			_g_last = at; _g_last_t = Time.get_ticks_msec()
 			if Env.s("BMX_LAYER_PROBE") != "":
 				print("GATEWHOOSH v=%.1f lat=%.2f half=%.1f ahead=%.1f t_left=%.2f" % [v, lat, half, ahead, tt])
 			keep[id] = 2

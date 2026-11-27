@@ -34,7 +34,7 @@ public partial class PassBySynth : RefCounted
 	}
 
 	/// speed m/s; half = half the gap between the posts; clear = banner bottom over the bike (m);
-	/// lat = the bike's sideways offset from the gate's middle (+ = right); depth = how deep the overhead
+	/// (clear <= 0: nothing overhead); lat = the bike's sideways offset from the gate's middle (+ = right); depth = how deep the overhead
 	/// part is along the trail (m); flap 0..1 (cloth banner); peak = loudest sample (0..1)
 	public byte[] Render(int seed, float speed, float half, float clear, float lat, float depth, float flap, float peak)
 	{
@@ -93,7 +93,9 @@ public partial class PassBySynth : RefCounted
 			}
 		}
 
-		// --- overhead reflections: banner bottom, lower chord, top chord (each its own delay sweep + wobble)
+		// --- overhead reflections: banner bottom, lower chord, top chord (each its own delay sweep + wobble);
+		// clear <= 0: nothing over the trail (checkpoint feather flags)
+		if (clear > 0f)
 		{
 			double h = Math.Max(1.5, clear);
 			double[] hs = { h, h + 0.35, h + 2.9 };
