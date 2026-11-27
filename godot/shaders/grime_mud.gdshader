@@ -41,6 +41,16 @@ uniform bool tyre = false;
 // wheel: rim / hub / spokes / rotor. No dirt map, no height (they turn): mud in a few clumps round the rim,
 // more toward the tyre bead, dust in uneven drifts. Axle = local Z.
 uniform bool wheel = false;
+// real mud (Poly Haven CC0 scans, tools/make_mud_scans.py): RG = normal x, y, B = height, A = brightness (0.5 = mean).
+// They give the mud its clods, wet shine and the dried crust's cracks; the colour stays the ground's, and the dirt
+// map still decides where the mud is. Tyres / wheels map them round the axle (one read each), other parts in 3
+// planes of their own space (planes that barely show are skipped). Both are mipmapped: no shimmer.
+uniform sampler2D mud_wet_tex : filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D mud_dry_tex : filter_linear_mipmap_anisotropic, repeat_enable;
+uniform bool scan_on = false;         // grime.gd turns it on (false = the old all-noise mud, BMX_OLD_MUDTEX)
+uniform float wet_tile = 0.16;        // metres one wet-mud scan covers (its clods ~1-3 cm)
+uniform float dry_tile = 0.24;        // metres one crust scan covers (its plates ~1.5 cm)
+uniform float scan_relief = 1.0;      // how strongly the scans' normals bend the light
 // decal: this pass follows a sticker (logo / lettering) so the dirt covers it; only where the sticker is
 uniform bool decal = false;
 uniform sampler2D decal_tex : source_color, filter_linear_mipmap;
@@ -56,6 +66,7 @@ varying float v_sp;     // 1 = v_p / v_n are known (not the skinned torso / fing
 varying float v_hgt;
 varying vec2 v_tyre;    // tyre: x = how far up a knob (0 casing / base .. 1 tip), y = crown 0 .. bead 1
 varying float v_rest;   // 1 = pinned: use the tyres as they were at pin time
+varying vec3 v_on;      // the part's own normal (the scans are laid in the part's space)
 
 float gr_hash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
 float gr_noise(vec3 x) {
@@ -67,6 +78,7 @@ float gr_noise(vec3 x) {
 void vertex() {
 	vec3 rest = (grime_pin > 1.5 && grime_pin < 2.5) ? CUSTOM0.xyz : VERTEX;
 	v_local = rest;
+	v_on = NORMAL;
 	v_tyre = UV2.y > 0.0005 ? vec2(UV2.x, UV2.y - 0.001) : vec2(0.0, abs(normalize(NORMAL).z) * 0.8);
 	v_hgt = grime_pin > 0.5 ? dot(grime_hrow, vec4(rest, 1.0)) : (grime_root * (MODEL_MATRIX * vec4(VERTEX, 1.0))).y;
 	v_sp = 1.0;
@@ -115,11 +127,49 @@ float gr_oct(vec3 p, float f, float px) {
 // tyre mud cover at mud level lvl (see `tyre` above). ty = v_tyre, side = the flung clumps round the wall
 float tyre_cover(float lvl, vec2 ty, float side) {
 	float band = 1.0 - smoothstep(0.45, 0.62, ty.y);              // the tread: crown + shoulder knobs
-	float gaps = lvl * 1.8;                                       // between the knobs: packs first
+	float crown = 1.15 - 0.3 * smoothstep(0.0, 0.5, ty.y);        // thickest down the middle of the tread
+	float gaps = lvl * 2.0;                                       // between the knobs: packs first
+	float sides = lvl * 1.45;                                     // then it builds up round the knobs' sides
 	float tops = pow(lvl, 1.7) * 1.2;                             // knob tops: scrubbed, cake only when deep
-	float tread = mix(gaps, tops, ty.x) * band;
+	float tread = (ty.x < 0.5 ? mix(gaps, sides, ty.x * 2.0) : mix(sides, tops, ty.x * 2.0 - 1.0)) * band * crown;
 	float wall = max(lvl - 0.18, 0.0) * 1.6 * (1.0 - smoothstep(0.45, 1.0, ty.y)) * side;
 	return max(tread, wall);
+}
+
+// a scan read in 3 planes of the part's space (p in metres, n = the part's normal, dx / dy = p's screen slopes),
+// blended by the normal; returns the blended texel and, in nrm, the part-space normal bent by its relief (UDN)
+vec4 scan_tri(sampler2D t, vec3 p, vec3 n, vec3 dx, vec3 dy, float s, float k, out vec3 nrm) {
+	vec3 w = pow(abs(n), vec3(4.0));
+	w /= (w.x + w.y + w.z + 1e-6);
+	vec4 acc = vec4(0.0);
+	vec3 bend = vec3(0.0);
+	float ws = 1e-6;
+	if (w.x > 0.02) {
+		vec4 c = textureGrad(t, p.zy * s, dx.zy * s, dy.zy * s);
+		vec2 tn = (c.rg * 2.0 - 1.0) * k;
+		acc += c * w.x; bend += vec3(0.0, tn.y, tn.x) * w.x; ws += w.x;
+	}
+	if (w.y > 0.02) {
+		vec4 c = textureGrad(t, p.xz * s, dx.xz * s, dy.xz * s);
+		vec2 tn = (c.rg * 2.0 - 1.0) * k;
+		acc += c * w.y; bend += vec3(tn.x, 0.0, tn.y) * w.y; ws += w.y;
+	}
+	if (w.z > 0.02) {
+		vec4 c = textureGrad(t, p.xy * s, dx.xy * s, dy.xy * s);
+		vec2 tn = (c.rg * 2.0 - 1.0) * k;
+		acc += c * w.z; bend += vec3(tn.x, tn.y, 0.0) * w.z; ws += w.z;
+	}
+	nrm = normalize(n + bend / ws);
+	return acc / ws;
+}
+
+// a scan wrapped round the axle (tyres, rims): uv along = turns x a whole number of tiles, across = local z +
+// radius (so it runs across the tread AND out the sidewall); ta / tb = those two directions in the part's space
+vec4 scan_cyl(sampler2D t, vec2 uv, vec2 dx, vec2 dy, vec3 n, vec3 ta, vec3 tb, float k, out vec3 nrm) {
+	vec4 c = textureGrad(t, uv, dx, dy);
+	vec2 tn = (c.rg * 2.0 - 1.0) * k;
+	nrm = normalize(n + ta * tn.x + tb * tn.y);
+	return c;
 }
 
 vec3 gr_hash3(vec3 p) {
@@ -191,6 +241,32 @@ void fragment() {
 	// the mud itself (splotches, bump, drying crust) only once there is any: a dust-only bike stops here.
 	// grime.x is a uniform, so the derivatives below stay in uniform control flow.
 	if (grime.x > 0.001) {
+		// the scans (scan_tri / scan_cyl): read here, outside any per-pixel branch. sw = wet mud, sd = the crust
+		vec4 sw = vec4(0.5), sd = vec4(0.5, 0.5, 0.65, 0.5);
+		vec3 pn = normalize(v_on);
+		vec3 nw = pn, nd = pn;
+		bool dry_on = grime_age.z > 0.0 || (grime_age.z < 0.0 && grime_age.x > 0.01);
+		if (scan_on) {
+			if (tyre || wheel) {
+				// round the axle: a whole number of tiles per turn (no seam), across in metres
+				float ang = atan(v_local.y, v_local.x);
+				float dax = dFdx(ang), day = dFdy(ang);
+				dax -= 6.2831853 * round(dax / 6.2831853); day -= 6.2831853 * round(day / 6.2831853);
+				vec3 ta = vec3(-sin(ang), cos(ang), 0.0);
+				vec3 rd = vec3(cos(ang), sin(ang), 1.0);
+				vec3 tb = normalize(rd - pn * dot(rd, pn) + 1e-5);
+				float across = v_local.z + length(v_local.xy);
+				vec2 u = vec2(ang / 6.2831853, across);
+				vec2 gx = vec2(dax / 6.2831853, dFdx(across)), gy = vec2(day / 6.2831853, dFdy(across));
+				vec2 kw = vec2(round(2.07 / wet_tile), 1.0 / wet_tile), kd = vec2(round(2.07 / dry_tile), 1.0 / dry_tile);
+				sw = scan_cyl(mud_wet_tex, u * kw, gx * kw, gy * kw, pn, ta, tb, scan_relief, nw);
+				if (dry_on) sd = scan_cyl(mud_dry_tex, u * kd + 0.37, gx * kd, gy * kd, pn, ta, tb, scan_relief * 1.3, nd);
+			} else {
+				vec3 dx = dFdx(v_local), dy = dFdy(v_local);
+				sw = scan_tri(mud_wet_tex, v_local, pn, dx, dy, 1.0 / wet_tile, scan_relief, nw);
+				if (dry_on) sd = scan_tri(mud_dry_tex, v_local + 0.37, pn, dx, dy, 1.0 / dry_tile, scan_relief * 1.3, nd);
+			}
+		}
 		// mud: crisp splotches laid over the dust, thicker toward their middles
 		float mmap = (1.05 - hgt * 1.4) + 1.1 * spr + 0.8 * cav + 0.45 * under + 0.35 * front + 0.2 * (1.0 - v_sp);
 		if (wheel) mmap = (0.1 + 0.9 * bead) * smoothstep(0.35, 0.8, clump) * 1.5;
@@ -198,7 +274,9 @@ void fragment() {
 		float side = 0.3 + 0.9 * smoothstep(0.3, 0.75, clump);
 		float cmul = bias * mmap;
 		float cover = tyre ? tyre_cover(grime.x, ty, side) : grime.x * cmul;
-		float n = gr_oct(v_local, 26.0, px) * 0.6 + gr_oct(v_local, 71.0, px) * 0.4;
+		// the splotch shape: big blobs from noise, their edges ragged along the scan's clods
+		float n = scan_on ? gr_oct(v_local, 26.0, px) * 0.62 + sw.b * 0.38
+			: gr_oct(v_local, 26.0, px) * 0.6 + gr_oct(v_local, 71.0, px) * 0.4;
 		// flecks (~5 mm beads): only while they are bigger than a pixel or so; further off they just go
 		float fleck = gr_noise(v_local * 190.0) * (1.0 - smoothstep(0.25, 0.6, px * 190.0));
 		float edge = 1.0 - cover;
@@ -223,23 +301,34 @@ void fragment() {
 			old = max(smoothstep(eo + 0.02, eo + 0.16, n), smoothstep(1.0 - co * 0.35, 1.0 - co * 0.28, fleck));
 		}
 		if (on) {
-			lump = gr_oct(v_local, 140.0, px) * 0.6 + gr_oct(v_local, 330.0, px) * 0.4;
+			lump = scan_on ? sw.b : gr_oct(v_local, 140.0, px) * 0.6 + gr_oct(v_local, 330.0, px) * 0.4;
 			bool drying = grime_age.z >= 0.0 ? old > 0.0 : grime_age.x > 0.01;
 			if (drying) {
-				vec3 c = gr_cells(v_local * 55.0);
+				// c.z = which plate dries / breaks off first: a coarse noise (scans) or the noise cells' own (old)
+				vec3 c = scan_on ? vec3(0.0, 1.0, gr_oct(v_local + 3.3, 34.0, px)) : gr_cells(v_local * 55.0);
 				if (grime_age.z >= 0.0)
 					// a crust dries from its thin rim inward, plate by plate
 					ld = clamp(old * 1.25 - 0.15 + (1.0 - t) * 0.3 + (c.z - 0.5) * 0.35, 0.0, 1.0) * step(0.001, old);
 				else
 					ld = clamp(grime_age.x * 1.7 - 0.7 + (1.0 - t) * 0.55 + (c.z - 0.5) * 0.5, 0.0, 1.0);
-				// crack lines no thinner than a pixel, gone once a whole plate is a few pixels
-				float cpx = px * 55.0;
-				crack = 0.75 * (1.0 - smoothstep(0.012, 0.05 + cpx * 0.6, c.y - c.x)) * (1.0 - smoothstep(0.12, 0.35, cpx))
-					* smoothstep(0.6, 0.95, ld) * smoothstep(0.45, 0.8, t);
-				gone = m * step(c.z, grime_age.y * smoothstep(0.4, 0.9, ld));
+				float cl;
+				if (scan_on) {
+					// the crust scan's cracks (low in its height); its mips average them away with distance
+					cl = 1.0 - smoothstep(0.12, 0.4, sd.b);
+				} else {
+					// crack lines no thinner than a pixel, gone once a whole plate is a few pixels
+					float cpx = px * 55.0;
+					cl = 0.75 * (1.0 - smoothstep(0.012, 0.05 + cpx * 0.6, c.y - c.x)) * (1.0 - smoothstep(0.12, 0.35, cpx));
+				}
+				crack = cl * smoothstep(0.6, 0.95, ld) * smoothstep(0.45, 0.8, t);
+				// a plate goes whole: its edge pulled onto the cracks
+				float pid = scan_on ? c.z + 0.3 * (sd.b - 0.6) : c.z;
+				gone = m * step(pid, grime_age.y * smoothstep(0.4, 0.9, ld));
 			}
 		}
-		float h = (max(t, fl * 0.6) * (0.5 + 0.5 * lump * (1.0 - 0.5 * ld))) * (0.0018 + 0.0035 * grime.x) - crack * 0.0014;
+		// with the scans the rise is smooth (their normals carry the clods and cracks: finer than a 2x2-pixel slope)
+		float h = scan_on ? max(t, fl * 0.6) * (0.0018 + 0.0035 * grime.x)
+			: (max(t, fl * 0.6) * (0.5 + 0.5 * lump * (1.0 - 0.5 * ld))) * (0.0018 + 0.0035 * grime.x) - crack * 0.0014;
 		vec3 dpdx = dFdx(VERTEX), dpdy = dFdy(VERTEX);
 		vec3 r1 = cross(dpdy, NORMAL), r2 = cross(NORMAL, dpdx);
 		float det = dot(dpdx, r1);
@@ -249,15 +338,29 @@ void fragment() {
 		if (gl > gmax) grad *= gmax / gl;
 		m *= 1.0 - gone;
 		vec3 bumped = normalize(abs(det) * NORMAL - grad + 1e-9);
+		if (scan_on) {
+			// the scans' relief (wet clods / crust plates by how dry), part space -> view, added over the rise;
+			// a thin splotch edge is smoother than its thick middle
+			mat3 to_view = mat3(VIEW_MATRIX) * mat3(MODEL_MATRIX);
+			vec3 nv = normalize(to_view * normalize(mix(nw, nd, ld)));
+			vec3 gv = normalize(to_view * pn);
+			bumped = normalize(bumped + (nv - gv) * (0.4 + 0.6 * max(t, fl)));
+		}
 		NORMAL = normalize(mix(NORMAL, bumped, m));
 		// fresh: wet, dark, a little glossy, thick middles darkest; the colour of the ground ridden now
-		vec3 fresh = mud_col.rgb * (0.58 + 0.3 * gr_oct(v_local, 9.0, px)) * mix(1.05, 0.72, t) * (0.9 + 0.2 * lump);
+		float fb = scan_on ? 0.36 + 0.5 * sw.a : 0.58 + 0.3 * gr_oct(v_local, 9.0, px);
+		vec3 fresh = mud_col.rgb * fb * mix(1.05, 0.72, t) * (0.9 + 0.2 * lump);
 		// dried: lighter, matte, toward the dust; the colour of the mud as it was laid
 		vec3 base_old = grime_age.z >= 0.0 ? mud_col_old.rgb : mud_col.rgb;
-		vec3 dried = mix(base_old * 1.3, grime_dust.rgb * 0.85, 0.35) * (0.85 + 0.3 * lump);
+		// (with the scans: a dry crust is paler than wet mud but never brighter than the ground it came off)
+		float db = scan_on ? 0.6 + 0.75 * sd.a : 0.85 + 0.3 * lump;
+		vec3 dried = scan_on ? mix(base_old * 1.12, grime_dust.rgb * 0.8, 0.3) * db
+			: mix(base_old * 1.3, grime_dust.rgb * 0.85, 0.35) * db;
 		mc = mix(fresh, dried, ld) * tint * (1.0 - crack * 0.45);
-		rough_m = mix(mix(0.55, 0.3, t), 0.97, ld);
-		spec_m = mix(0.5, 0.25, ld);
+		// wet mud is glossiest in its hollows (water stands there), its clods duller; the crust is matte
+		float wet_r = scan_on ? mix(mix(0.62, 0.48, t), mix(0.3, 0.58, smoothstep(0.3, 0.75, sw.b)), t) : mix(0.55, 0.3, t);
+		rough_m = mix(wet_r, 0.97, ld);
+		spec_m = scan_on ? mix(0.3, 0.2, ld) : mix(0.5, 0.25, ld);   // wet = water's reflectance (F0 ~2 %), not paint
 		// specular antialiasing: where the bent normal changes a lot within the pixel, roughen it (Kaplanyan)
 		vec3 dnn = fwidth(NORMAL);
 		rough_m = sqrt(min(rough_m * rough_m + min(2.0 * dot(dnn, dnn), 0.3), 1.0));

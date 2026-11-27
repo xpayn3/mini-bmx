@@ -2721,6 +2721,18 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   scrubs them), the sidewall starts past mud 0.18, from the shoulder down in flung clumps, cleanest at the bead; dust
   sits on the sidewall, knob tops rolled clean. Also fixed: the tyre LOD switch ran on game time, so in photo mode /
   paused replays the tyres kept their far knob-less LOD up close (`BikeRig._process` now on real time).
+  **Real mud scans (same day, user: "lame mud on tyres, make it realistic")**: two Poly Haven CC0 scans
+  (`assets/textures/mud/`: `mud_wet` = brown_mud_03, `mud_dry` = mud_cracked_dry_03), packed by root
+  `tools/make_mud_scans.py` into RGBA (RG normal, B height, A brightness / mean x 0.5), 1K BC7 + mipmaps, ~3 MB VRAM.
+  `grime_mud.gdshader` (`scan_on`, set by grime.gd): tyres / wheels read them wrapped round the axle (a whole number of
+  tiles per turn, across = local z + radius so it runs out over the sidewall; one read each), other parts in 3 planes
+  of their own space (`scan_tri`, planes under 2 % skipped). The noise still decides WHERE (big blobs), the wet scan's
+  height makes the splotch edges ragged and the clods, its normal + brightness the relief / colour detail, wet mud
+  glossiest in its hollows (specular 0.3 = water, was 0.5); the crust scan gives the cracks (replaces the 27-cell
+  noise loop) and the crust's detail; a crust is never brighter than the ground. The colour is still the ground's.
+  Tyre cover: gaps, then the knob sides, then the tops; thickest down the crown. Tiles: `wet_tile` 0.16 m, `dry_tile`
+  0.24 m, `scan_relief`. `BMX_OLD_MUDTEX=1` = the all-noise mud. Fewer noise reads per pixel than before; frame time
+  not measured cleanly (other GPU work). Seen on seed 4242 sand / desert starts only.
   Test: `BMX_DUST_COAT=0.8` (+ `BMX_MUD`, `BMX_BLOOD_COAT`). Mud / blood on rider limbs stay put: `Rider.set_limb` takes the
   limb's twist from the sideways axis (the shortest turn from +Y spun shins / forearms round as they pointed down, so the
   pattern slid round the leg); glove fingers carry their bone-space shape in CUSTOM0 (`grime_pin` 2). Passes
