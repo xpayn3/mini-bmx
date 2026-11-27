@@ -90,4 +90,6 @@ func _strut(parent: Node3D, m: Material, a: Vector3, b: Vector3, thick := 0.45) 
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	parent.add_child(mi)
 	mi.position = (a + b) * 0.5
-	mi.look_at_from_position(mi.position, b, Vector3.UP)
+	# (an upright strut points along UP: look_at warned for every one of them and picked its own roll)
+	var up := Vector3.RIGHT if absf((b - a).normalized().y) > 0.99 else Vector3.UP
+	mi.look_at_from_position(mi.position, b, up)

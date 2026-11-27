@@ -27,12 +27,23 @@ static func ensure_loaded() -> void:
 	if cf.load(PATH) == OK:
 		active = str(cf.get_value("presets", "active", "Default"))
 		customs = cf.get_value("presets", "customs", {})
+		# the player's own presets follow Tune's retunes too (Tune.RETUNED_AT only dropped keys from tune.cfg: picking
+		# an older preset brought back values a retune had reset on purpose). A file from before this had no version:
+		# when its presets were saved isn't known, so it is only stamped (kept as it is) and follows from the next retune
+		var pv: int = int(cf.get_value("presets", "ver", Tune.VER))
+		if pv < Tune.VER:
+			for n in customs:
+				for rv in Tune.RETUNED_AT:
+					if pv < rv:
+						for k in Tune.RETUNED_AT[rv]: (customs[n] as Dictionary).erase(k)
+			save()
 	if not (active in BUILTIN or active in customs): active = "Default"
 
 
 static func save() -> void:
 	if Env.raw("BMX_PADSEQ") != "": return   # menu tests: never into the player\'s files
 	var cf := ConfigFile.new()
+	cf.set_value("presets", "ver", Tune.VER)
 	cf.set_value("presets", "active", active)
 	cf.set_value("presets", "customs", customs)
 	cf.save(PATH)

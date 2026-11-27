@@ -205,7 +205,9 @@ func _ground_slope(p: Vector3, f: Vector3, air: bool, dt: float) -> float:
 	return _slope_s
 
 func _unhandled_input(e: InputEvent) -> void:
-	if get_tree().paused or (game and (game.photo or game.replay_on)): return   # photo mode drives the camera itself
+	if get_tree().paused or (game and (game.photo or game.replay_on)):   # photo mode drives the camera itself
+		dragging = false   # (the button let go in there was never seen: back in the ride the mouse orbited with no button held)
+		return
 	var sens: float = Settings.get_v("mouse_sens")
 	var inv := -1.0 if Settings.get_v("invert_y") else 1.0
 	if e is InputEventMouseButton:

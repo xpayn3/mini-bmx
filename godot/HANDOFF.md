@@ -3964,12 +3964,18 @@ tyre prints / grass trample / blood per wheel (`front_air` / `rear_air`); `Camer
 `Rider.reset_pose` clears `_spr_arm` / `body_off`; the bar kick is measured per physics tick (`Game._bar_tick`); the
 rider room's air preview passes `inAir`; the ghost records one sample per 1/30 s slot; `_shadow_fit` uses `cam.dist`
 as is; the UpperArm bone's twist. Stress 56 / 56, playground suite identical before / after (it rides hands off).
-Found, NOT fixed: phantom brake force while reversing on purpose (`_b_prev` / `_fb_f` / `_a_rear` set with no brake
-applied, ~line 1080); `a_drive` > 0 when braking rolling backwards (pedal-stamp kicks, HUD power); the load split's
-clamp with min > max when both tyres are light (line 967); flip landings on one wheel still read NOSE DIVE / LOOPED OUT;
-custom tune presets escape `RETUNED_AT`; `dragging` sticks if the mouse is released while paused; `PlaygroundLab.KEEP`
-lacks `test_rider` (the suite's test rider loses TEST_ASSIST after its first restart) and `prof`; `title_sign.gd:93`
-`looking_at` warnings for vertical struts.
+Second pass, same day: `_step_drive` only records a brake that was applied (`braked`: backing up on purpose holds the
+key with no brake on, and the lever force still went into the load split / friction circles); `a_pedal` = `a_drive`
+without a brake applied rolling backwards (pedal-stamp kicks, body-back shift, HUD power, dust `g_long` read it; the
+pitch torque keeps `a_drive`); the load split's clamp no longer runs with min > max; a touch-down turned > 83 deg off
+the slope is left to `_land_trick` (UNDER- / OVER-ROTATED, not NOSE DIVE / LOOPED OUT when one wheel touched first);
+`tune_presets.cfg` has a `ver` and custom presets drop `RETUNED_AT` keys from the NEXT retune on (older files are only
+stamped: when their presets were saved isn't known); `_snap_prev` clears `_jw_prev` (no false JUMP note); the camera's
+`dragging` is cleared while paused / photo / replay; `PlaygroundLab.KEEP` + `ReplayMode.SNAP_KEEP` hold `test_rider`
+and `prof` (the suite's test rider used to lose TEST_ASSIST 0.85 after its first restart: **suite numbers moved, the
+baseline needs re-saving**); the title sign's upright struts no longer warn in `look_at`.
+Left: "Reset ride tuning" doesn't switch the active custom preset; `_rope_rail` returns instead of `continue` with two
+bridges loaded; the brake-hold slide check (~line 1190) ignores `BRAKE_MU`; `_line_keys` fixed from the first input.
 
 Known, not fixed (lower priority from the code review):
 - Quit warnings: with SSIL on (GI setting 1, the default preset) Godot reports "7 RIDs of type Texture were leaked" at

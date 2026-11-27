@@ -241,6 +241,7 @@ var _crash_log := Env.s("BMX_CRASH_LOG") != ""
 var front_air := false; var rear_air := false; var c_f := true; var c_r := true
 var pitch_w := NAN; var stamina := 1.0; var tired := false; var sprint := 0.0
 var spin := 0.0; var a_drive := 0.0
+var a_pedal := 0.0   # a_drive without a brake applied while rolling backwards (what "pedalling" readers use)
 var _nR_s := NAN      # the rear tyre's load as its grip feels it (eased: tyre relaxation, see _grip_step)
 var _OLD_GRIP := Env.raw("BMX_OLD_GRIP") != ""   # (tests: the grip before the off-trail fix)
 var n_f := NAN; var n_r := NAN; var n_ref := NAN
@@ -966,10 +967,14 @@ func _step_loads(dt: float) -> void:
 		var lift := (-nR + 0.03 * G) - (dN + d_brake)
 		_danger("OVER THE BARS!", lift / (0.25 * G) if (brake_f > 0.4 and v > 3.0 and not _nosing() and nose_push <= 0.0) else -1.0, dt)   # (a stoppie on purpose is the nose balance's)
 		dN += d_brake
-		dN = clampf(dN, -nR + 0.08 * G, nF - 0.08 * G)
-		nR += dN; nF -= dN
+		# (both tyres nearly weightless, over a crest still in contact: the two limits cross, and clampf with min > max
+		# left one tyre under its floor or negative - a negative rear load gave a negative drive cap = phantom wheelspin)
+		var dn_lo: float = -nR + 0.08 * G
+		var dn_hi: float = nF - 0.08 * G
+		dN = clampf(dN, dn_lo, dn_hi) if dn_lo <= dn_hi else 0.5 * (dn_lo + dn_hi)
+		nR = maxf(0.0, nR + dN); nF = maxf(0.0, nF - dN)
 	n_load = n_tot
-	spin = 0; a_drive = 0
+	spin = 0; a_drive = 0; a_pedal = 0
 	n_rear = nR; n_front = nF
 
 ## stage 5: along the bike: pedalling, the two brakes (sets skid), pumping, drag, speed. Returns a_long, how much of
@@ -1079,24 +1084,35 @@ func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_wa
 		# fade is taken off the force that gets through, not off the lever)
 		var fade_k: float = 1.0 - float(T.get("brakeFade", 0.35)) * brake_fade
 		fb_r *= fade_k; fb_f *= fade_k
-		_fb_f = fb_f; _fb_r = fb_r
-		_a_rear = maxf(0.0, drive) + (fb_r if (brake and rear_down) else 0.0)   # what the REAR tyre carries along the bike
 		var b_all := fb_r + fb_f
 		# (gated on any tyre down, not on the rear: with the rear bounced up the front brake did nothing; each brake
 		# is already zero while its own wheel is off the ground)
-		_b_prev = b_all if (brake and not air and absf(v) > 0.3) else 0.0
-		if brake and not air and v > 0.3:
+		var braked_fwd: bool = brake and not air and v > 0.3
+		# braking while rolling backwards (after a fakie landing, or sliding back down a climb the brakes
+		# can't hold); a fresh press from a standstill backs up on purpose (brake_back) and doesn't brake
+		var braked_rev: bool = brake and not air and v < -0.3 and (rev_cap > 3.0 or not brake_back)
+		var braked: bool = braked_fwd or braked_rev
+		# (only what was really applied: backing up on purpose holds the brake key with no brake on, and the lever's
+		# whole force still went into the load split, the front's friction circle and the rear's: reverse turns ran wide)
+		_fb_f = fb_f if braked else 0.0; _fb_r = fb_r if braked else 0.0
+		_a_rear = maxf(0.0, drive) + (fb_r if (braked and rear_down) else 0.0)   # what the REAR tyre carries along the bike
+		_b_prev = b_all if braked else 0.0
+		var drive_p := drive
+		if braked_fwd:
 			a -= b_all; a_long += b_all; drive -= b_all
 			brake_heat += b_all * v * dt / 45.0
 			if _EPROBE: _e_add("brakes", -b_all * v * dt)
-		elif brake and not air and v < -0.3 and (rev_cap > 3.0 or not brake_back):
-			# braking while rolling backwards (after a fakie landing, or sliding back down a climb the brakes
-			# can't hold); a fresh press from a standstill backs up on purpose (brake_back) and doesn't brake
+			drive_p = drive
+		elif braked_rev:
 			a += b_all; a_long += b_all; drive += b_all
 			brake_heat += b_all * -v * dt / 45.0
 		else:
 			rear_lock = move_toward(rear_lock, 0.0, dt * 8.0); front_lock = move_toward(front_lock, 0.0, dt * 8.0)
 		a_drive = drive
+		# (a_drive is the signed push along the bike, right for the pitch torque. Braking while rolling backwards makes it
+		# positive, which everything that reads it as "pedalling" took for a sprint: pedal-stamp slip kicks, the body
+		# sat back, the HUD's power. Those read a_pedal)
+		a_pedal = drive_p
 		# --- the pump = the legs' stroke (the same legs that hop and pop off a lip). Pumping is work done against the
 		# ground's push: straightening the legs while the ground presses harder than standing weight (the dip at the
 		# bottom of a roller, a compression) or bending them while it goes light (over a crest) adds that difference x the
@@ -2292,7 +2308,7 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 			bal_max *= 1.0 + 2.5 * lip_hold
 		if true:
 			var R: float = T.weightShift
-			var x_brake: float = -0.8 * R * (1.0 if (brake and not air) else 0.0) + 0.5 * R * clampf(a_drive / 4, 0, 1)
+			var x_brake: float = -0.8 * R * (1.0 if (brake and not air) else 0.0) + 0.5 * R * clampf(a_pedal / 4, 0, 1)
 			var xT: float = 0.0 if air else x_brake + R * clampf(_g_pitch * 2.2, -1, 1)
 			# in the air the rider leans where they choose (W forward, S back)
 			if air:
@@ -2625,7 +2641,11 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 		# looped out: on the back wheel past what the rider can hold, or still rotating back well past
 		# the balance point (a back-wheel landing itself is caught, see _land_trick)
 		var back_up := pitch - _local_slope(f, XR, RWR, cp0) if cR and not cF and pitch - gpC > 0.6 else 0.0
-		if _balancing() or _man_grace > 0.0: pass   # the balance manual handles its own loop-out (no crash)
+		# (touching down turned past 83 deg from the slope, a flip not come round: the landing verdict below names it
+		# UNDER- / OVER-ROTATED. These checks ran first and, when one wheel touched before the other, called it
+		# LOOPED OUT / NOSE DIVE)
+		var flipped: bool = was_air and not now_air and air_time >= 0.2 and absf(wrapf(pitch - _g_pitch, -PI, PI)) > 1.45   # (_land_trick's own test)
+		if _balancing() or _man_grace > 0.0 or flipped: pass   # the balance manual handles its own loop-out (no crash)
 		elif back_up > T.landBack + 0.1 or (back_up > 1.15 and pitch_v > 0.5 and not was_air):
 			# weight held back on purpose (the body stick, or the power wheelie it makes with the pedals) rolling over rollers /
 			# crests: the rider feels it going and throws the front back down (speed lost, no crash). Thrown back off a
@@ -2652,7 +2672,7 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 		# (on the touch-down step itself the reference is the ground it lands on: nose_ref was still the lip's slope from
 		# the take-off, so a back wheel landing down a 29 deg landing read 45 deg nose down = NOSE DIVE. BMX_OLD_NOSEREF=1)
 		var n_ref: float = _g_pitch if (air and not _OLD_NOSEREF) else _or(nose_ref, _g_pitch)
-		if front_air and pitch - n_ref < -T.noseDive and not _balancing() and _man_grace <= 0.0: _crash("NOSE DIVE!")
+		if front_air and pitch - n_ref < -T.noseDive and not _balancing() and _man_grace <= 0.0 and not flipped: _crash("NOSE DIVE!")
 		# the rider's head and chest ride on the bike: turned well past the ground's slope (upside down in a flip, a spin
 		# that came round wrong) they reach the terrain before the bike does. A body point under the ground = the crash
 		# (it used to clip through until the wheels hit)
@@ -3891,7 +3911,7 @@ func _grip_step(dt: float, va: float, mu: float, nR: float, u_lat_in: float) -> 
 	var pw: float = float(T.get("gripPower", 1.0))
 	acc += pw * spin * signf(a_lat) * 6.0 * spd
 	# pedal strokes on loose ground: each stamp nudges the rear (alternating sides)
-	acc += pw * sin(crank * 2.0) * clampf(a_drive / r_cap, 0.0, 1.0) * (1.25 - minf(1.0, g)) * 3.0 * spd
+	acc += pw * sin(crank * 2.0) * clampf(a_pedal / r_cap, 0.0, 1.0) * (1.25 - minf(1.0, g)) * 3.0 * spd
 	slip_w += acc * dt
 	# bumps: rough ground (suspension working hard, smoothed over ~0.2 s) makes a rear that's cornering near
 	# its limit drift out of the turn - a gentle push, never a kick (instant kicks per rock made the bike

@@ -2044,7 +2044,7 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 		# the tread's real state: sideways slide (slip angle x speed) and wheelspin throw the spray harder / further out
 		var g_long0 := 0.0
 		if skid_fx: g_long0 = -va
-		elif st.a_drive > 6.0: g_long0 = clampf((st.a_drive - 6.0) * 0.8, 0.0, 7.0)
+		elif st.a_pedal > 6.0: g_long0 = clampf((st.a_pedal - 6.0) * 0.8, 0.0, 7.0)
 		var slide_k := clampf(absf(va * sin(clampf(st.slip_w, -1.2, 1.2))) / 4.0, 0.0, 1.0)
 		var spin_k := clampf(g_long0 / 7.0, 0.0, 1.0)
 		var load_k := clampf(0.55 + 0.45 * st.n_rear / 9.81, 0.4, 1.2)   # a light rear (bouncing, unloaded) kicks up less
@@ -2062,7 +2062,7 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 		# slide of the tread (slip angle x speed), the rear's load, and how loose the ground is
 		var g_long := 0.0
 		if skid_fx: g_long = -va
-		elif st.a_drive > 6.0: g_long = clampf((st.a_drive - 6.0) * 0.8, 0.0, 7.0)
+		elif st.a_pedal > 6.0: g_long = clampf((st.a_pedal - 6.0) * 0.8, 0.0, 7.0)
 		var g_lat := va * sin(clampf(st.slip_w, -1.2, 1.2))
 		var g_loose := (1.5 if sand else (1.0 if dirt else 0.35)) * (0.75 + 0.5 * clampf(st.loose, 0.0, 1.0))
 		dust.set_grit_state(f * st.v, f, g_long, g_lat, clampf(st.n_rear / 9.81, 0.0, 2.0), g_loose, clampf((absf(st.vw_r) - 2.5) / 3.5, 0.0, 1.0))
@@ -2418,6 +2418,7 @@ const DRAW_KEYS :=["x", "z", "y", "y_draw", "pitch", "pitch_draw", "heading", "b
 
 func _snap_prev() -> void:
 	for k in DRAW_KEYS: _prev[k] = phys.get(k)
+	_jw_prev = Vector2(INF, INF)   # (a move on purpose: no "JUMP ... m in one step" note in the session log)
 
 func _unhandled_input(e: InputEvent) -> void:
 	if get_tree().paused or not input_enabled: return
