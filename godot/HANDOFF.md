@@ -823,6 +823,18 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   (`x2800` = the foot of the second mountain; within the 4 km laid out at start), `BMX_TRAIL_FEAT=tech` 40 m before the first
   hairpin stack past the first mountain. Not done: the hairpin legs sit ~10-14 m apart, so their dirt nearly joins.
 
+- **Racing line = minimum-curvature solve (2026-11-27, user: "the perfect line just goes in the middle of the track")**.
+  `TrailCourse.LN` (the worn line the ground shader / road-detail bake draw, the demo AI's aim) was a band-pass of the
+  curvature, then overwritten on every berm with a fixed 0.9 m out: a strip parallel to the centreline. Now
+  `_min_curvature_line()` (the standard racing-game line): an elastic band, each point pulled to the middle of its
+  neighbours 16 / 8 / 4 / 2 / 1 points apart (`LINE_PASSES`), clamped `LINE_MARGIN` 0.45 m inside the dirt's edges: out
+  wide into a bend, the inside at the apex, wide on the exit. Berms are a floor inside the solve, not an overwrite: the
+  line can't go further in than `BERM_FLOOR` 0.15 m onto a gentle berm's face, rising to `BERM_LINE` 0.9 m on steep ones
+  (|BT| 0.3 -> 0.55; with 0.15 everywhere the demo AI rode low on a 29 deg hairpin berm and went over the bars). Growing
+  keeps the solved line up to `LINE_REACH` 800 points before the old end (`_lnr_prev`; `trail_grow_probe` now checks LN).
+  `BMX_OLD_LINE2=1` = the old formula. Probes: `-s res://tools/racing_line_probe.gd -- [seed]` (apex / entry place per
+  sharp bend), `-s res://tools/racing_line_map.gd -- out.png [seed i0 len px_per_m]` (top-down picture: edges, centre, LN).
+  Demo AI 90 s seeds 4242 / 12: no crash; seed 5 hits a cliff with the old line too. Every world's worn line + AI line change.
 - **Livelier trail** (`TrailCourse._shape_profile`, `trail_arch.gd`): roads bend more often and tighter; past the mountain the trail height gets rolling dips (~60 m); **ridge-and-cliff drops** (`drops`, ~1 per 3 km: the trail climbs ~4 % onto a ridge above the land, a short level run, then falls 3-6 m, and 2 % of slots 12-22 m: rare "gem" cliffs; route features skip them) and **rock tunnels / overhangs** (`chunk_arches`, merged blob-rock mesh, visual only, no collision). All deterministic by slot hash + seed, nothing near the laid-out end changes when the trail grows. **Gorge bridges** (route feature `gorge`, rare on straight road: a 36 m wooden bridge, deck on stilts, over a 9 m deep crevasse ~6.4 m wide; Wood kind 2 now takes its end from `u1`; mirrored in `TerrainFieldCs.cs`, `terrain_cs_cmp` must stay EXACT; HUD alert GORGE BRIDGE). Test: `BMX_TRAIL_FEAT=gorge` (try `BMX_SEED=5`), `BMX_TRAIL_FEAT=arch|<n>` spawns 80 m before the first arch / the n-th drop; `BMX_GATE_PROBE=1` prints `ARCHES` lines; `trail_grow_probe` prints `STATS`.
 
 - **Land shaping v3 + climate biomes + smart siting (2026-11-25, `docs/research/terrain_generation.md`)**. Research first (4 researchers: stateless

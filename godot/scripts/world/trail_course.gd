@@ -160,6 +160,7 @@ func grown(field, to_s: float) -> TrailCourse:
 	c._x = _x; c._z = _z; c._h = _h; c._v = _v; c._hv = _hv; c._lt = _lt; c._forest_end = _forest_end
 	c.X = X.duplicate(); c.Z = Z.duplicate(); c.KD = KD.duplicate(); c.flow_starts = flow_starts.duplicate()
 	c._cells = _cells.duplicate()
+	c._lnr_prev = _lnr   # the solved racing line so far: only its tail is solved again (_min_curvature_line)
 	c._build()
 	c._finish()
 	c._M = null   # only needed for the layout; kept, field.course <-> course._M was a cycle (never freed)
@@ -777,21 +778,79 @@ func _finish() -> void:
 		fill[c] += 1
 
 
+## Minimum-curvature racing line (the standard one in racing games / motorsport tools): the smoothest path that fits
+## inside the trail's edges. Solved as an elastic band: every point is pulled to the middle of its neighbours (that
+## straightens the path = less curvature) and kept within the edges, coarse to fine (neighbours 16 .. 1 points apart).
+## Out wide into a bend, the inside at the apex, out wide on the exit fall out of it by themselves. Offsets are across
+## the trail along (-TZ, TX), like LN. Each pass only reaches its neighbours, so growing the trail moves the line only
+## within ~1 km of the old end (well past where chunks are built).
+const BERM_FLOOR := 0.15      # m out (berm side) the solved line keeps at least on a berm (its face starts inside the middle)
+const LINE_MARGIN := 0.45     # m the line keeps from the dirt's edge (both tyres + their lines on the dirt)
+const LINE_PASSES := [[16, 24], [8, 24], [4, 30], [2, 30], [1, 20]]
+const LINE_REACH := 800       # points a solve can move (sum of stride x passes, 776): a grown course keeps the line before
+var _lnr := PackedFloat32Array()        # the solved line (before the berm blend / smoothing)
+var _lnr_prev := PackedFloat32Array()   # the course this one grew from: its _lnr
+func _min_curvature_line() -> PackedFloat32Array:
+	var ln := PackedFloat32Array(); ln.resize(n)
+	# grown: everything more than LINE_REACH before the old end stays exactly as it was solved (built chunks keep it)
+	var keep := clampi(_lnr_prev.size() - LINE_REACH, 0, n)
+	for i in keep:
+		ln[i] = _lnr_prev[i]
+	_lnr_prev = PackedFloat32Array()
+	var lim := PackedFloat32Array(); lim.resize(n)
+	# on a berm the line may not drop inside the berm's face (riders use the bank: ride_feel.md): a floor on
+	# bs[i] x offset (bs = the berm's side), so the band still swings wide in / hugs the face / drifts out wide
+	var bs := PackedFloat32Array(); bs.resize(n)
+	var bf := PackedFloat32Array(); bf.resize(n)
+	for i in n:
+		lim[i] = maxf(0.0, W[i] - LINE_MARGIN)
+		var bw := 0.0 if Env.raw("BMX_OLD_LINE") != "" else smooth(BERM_LINE_FROM, BERM_LINE_FULL, absf(BT[i]))
+		bs[i] = -signf(BT[i])
+		# gentle berms: just onto the face; steep ones (hairpins, > ~17 deg of bank): up on the face where the bank is
+		var fl := lerpf(BERM_FLOOR, BERM_LINE, smooth(0.3, 0.55, absf(BT[i])))
+		bf[i] = minf(lim[i], bw * minf(fl, maxf(0.0, W[i] - 0.9)))
+	var nx := PackedFloat32Array(); nx.resize(n)
+	for pass_ in LINE_PASSES:
+		var k: int = pass_[0]
+		for _it in int(pass_[1]):
+			for i in range(maxi(k, keep), n - k):
+				var a := i - k
+				var b := i + k
+				# neighbours' line points, their middle, its offset across the trail at i
+				var mx: float = 0.5 * (X[a] - TZ[a] * ln[a] + X[b] - TZ[b] * ln[b])
+				var mz: float = 0.5 * (Z[a] + TX[a] * ln[a] + Z[b] + TX[b] * ln[b])
+				var o: float = -(mx - X[i]) * TZ[i] + (mz - Z[i]) * TX[i]
+				var v := clampf(lerpf(ln[i], o, 0.7), -lim[i], lim[i])
+				if v * bs[i] < bf[i]:
+					v = bs[i] * bf[i]
+				nx[i] = v
+			for i in range(maxi(k, keep), n - k):
+				ln[i] = nx[i]
+	_lnr = ln
+	return ln
+
+
 ## the line a good rider takes, from the curvature alone: a short average of it minus a long one is positive at
 ## an apex (-> the inside) and negative just before and after the turn (-> the outside); straights sit in the middle.
 ## Then the run-offs: at some sharp corners one rider's skid leaves the line before the apex and carries straight on
 ## off the outside. Both depend only on the layout near them, so growing the trail leaves the ridden part alone.
 func _racing_line() -> void:
-	var kn := _avg(KAP, 4)
-	var kw := _avg(_avg(KAP, 14), 14)
 	var ln := PackedFloat32Array(); ln.resize(n)
-	for i in n:
-		ln[i] = clampf(37.0 * (kn[i] - kw[i]), -1.0, 1.0) * maxf(0.0, W[i] - 0.6)
+	if Env.raw("BMX_OLD_LINE2") != "":
+		var kn := _avg(KAP, 4)
+		var kw := _avg(_avg(KAP, 14), 14)
+		for i in n:
+			ln[i] = clampf(37.0 * (kn[i] - kw[i]), -1.0, 1.0) * maxf(0.0, W[i] - 0.6)
+	else:
+		ln = _min_curvature_line()
 	# on a banked bend the line rides the berm: up its face on the outside (berm_shape's bank is there, from the
 	# centreline out), not on the flat inside of it - cutting to the inside missed the bank (the bike felt 4-10 deg on
 	# berms built at 20-31 deg) and threw away the corner speed it is there to hold (docs/research/ride_feel.md)
 	var old_line := Env.raw("BMX_OLD_LINE") != ""   # (tests: the line cutting inside, as before)
+	var old2 := Env.raw("BMX_OLD_LINE2") != ""      # (the min-curvature solve holds the berm itself)
 	for i in n:
+		if not old2:
+			break
 		var bw := 0.0 if old_line else smooth(BERM_LINE_FROM, BERM_LINE_FULL, absf(BT[i]))
 		if bw > 0.0:
 			ln[i] = lerpf(ln[i], -signf(BT[i]) * minf(BERM_LINE, maxf(0.0, W[i] - 0.9)), bw)
