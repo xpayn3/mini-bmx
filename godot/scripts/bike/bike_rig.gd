@@ -508,6 +508,7 @@ const TYRE_LOD1 := 5.0     # m (as seen through a 75 deg lens)
 const TYRE_LOD2 := 14.0
 const TYRE_LOD_HYST := 0.8
 var _wlods: Array = []
+var _wlod_ms := 0
 var _wlod_t := 0.0
 var _gen_wheels := false
 var _wheel_build: Dictionary = {}
@@ -591,8 +592,12 @@ func _set_wheel_mesh(mi: MeshInstance3D, m: Mesh) -> void:
 	for s in mini(ov.size(), m.get_surface_count()):
 		mi.set_surface_override_material(s, ov[s])
 
-func _process(delta: float) -> void:
-	_wlod_t -= delta
+func _process(_delta: float) -> void:
+	# real time, not the game's delta: with time frozen (photo mode, a paused replay) the tyres kept the far,
+	# knob-less LOD they had before, even with the camera right up at them
+	var now := Time.get_ticks_msec()
+	_wlod_t -= float(now - _wlod_ms) / 1000.0 if _wlod_ms > 0 else 0.0
+	_wlod_ms = now
 	if _wlod_t > 0.0 or _wlods.is_empty():
 		return
 	_wlod_t = 0.2

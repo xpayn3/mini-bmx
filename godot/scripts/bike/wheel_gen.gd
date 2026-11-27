@@ -160,12 +160,19 @@ class Surf:
 	var uv := PackedVector2Array()
 	var c := PackedColorArray()
 	var idx := PackedInt32Array()
+	## UV2 (only the tyre writes it, `want_uv2`): where a vertex is on the tyre, for the mud pass
+	## (shaders/grime_mud: tread gaps fill first, knob tops later, the sidewall last). x = 0 casing / knob base ..
+	## 1 knob tip, y = 0.001 + profile 0 crown .. 1 bead (0 = no data)
+	var want_uv2 := false
+	var uv2 := PackedVector2Array()
+	var uv2_cur := Vector2.ZERO
 
 	func add(p: Vector3, nn: Vector3, t: Vector2, col: Color) -> int:
 		v.append(p)
 		n.append(nn)
 		uv.append(t)
 		c.append(col)
+		uv2.append(uv2_cur)
 		return v.size() - 1
 
 	## Quads over a row-major (rows x cols) block of vertices starting at `base`. The winding is picked
@@ -221,6 +228,7 @@ class Surf:
 		arr[Mesh.ARRAY_VERTEX] = v
 		arr[Mesh.ARRAY_NORMAL] = n
 		arr[Mesh.ARRAY_TEX_UV] = uv
+		if want_uv2 and uv2.size() == v.size(): arr[Mesh.ARRAY_TEX_UV2] = uv2
 		arr[Mesh.ARRAY_COLOR] = c
 		arr[Mesh.ARRAY_INDEX] = idx
 		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
@@ -269,6 +277,7 @@ static func _lathe(s: Surf, pts: PackedVector2Array, sharp: Array, cols: PackedC
 			var p := pts[i]
 			var col := cols[i]
 			var vv := vlen[i] / tot
+			s.uv2_cur = Vector2(0.0, 0.001 + absf(vv - 0.5) * 2.0)
 			for j in segs + 1:
 				s.add(Vector3(p.x * cs[j], p.x * sn[j], p.y), Vector3(nn.x * cs[j], nn.x * sn[j], nn.y),
 					Vector2(float(j) / float(segs) * uv_rep, vv), col)
@@ -429,6 +438,7 @@ static func _build(s: Dictionary) -> ArrayMesh:
 	var segs := maxi(24, int(round(96.0 * det)))
 
 	var tyre := Surf.new()
+	tyre.want_uv2 = true
 	var rim := Surf.new()
 	var spokes := Surf.new()
 	var hub := Surf.new()
@@ -563,11 +573,18 @@ static func _build_tyre(s: Surf, sp: Dictionary, rb: float, R: float, rim_w: flo
 			var u1 := tip + tp * hw * tk - tc * hl * tk
 			var u2 := tip + tp * hw * tk + tc * hl * tk
 			var u3 := tip - tp * hw * tk + tc * hl * tk
+			var k0 := s.v.size()
+			s.uv2_cur = Vector2(1.0, 0.001 + absf(float(kn[0])) / (PI * 0.5 + tb))
 			s.quad(u0, u1, u2, u3, nn, tcol)
 			s.quad(b0, b1, u1, u0, -tc, tcol)
 			s.quad(b1, b2, u2, u1, tp, tcol)
 			s.quad(b2, b3, u3, u2, tc, tcol)
 			s.quad(b3, b0, u0, u3, -tp, tcol)
+			# the four sides run base (b) -> tip (u): their first two corners are the base
+			for q4 in 4:
+				var kb := k0 + 4 + q4 * 4
+				s.uv2[kb].x = 0.0
+				s.uv2[kb + 1].x = 0.0
 
 
 # ---------------------------------------------------------------- rim
