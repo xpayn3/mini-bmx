@@ -14,8 +14,8 @@ const NX := 7              # cloth grid columns (across)
 const POLE_R := 0.016
 const SINK := 0.25         # pole spike into the ground
 const DESIGNS := 2         # atlas columns (assets/textures/flags/checkpoint_flags.png): the user's designs, flag_design/flag_*.png
-const TEX_W := 512         # one design: 512 x 1856 px = the flag's box (CLOTH_W x H_POLE - CLOTH_Y0), 1 px = 1.56 mm
-const TEX_H := 1856        # (flag_design/flag_template.png)
+const TEX_W := 1024        # one design: 1024 x 3712 px (2x the template, nearest-scaled: crisp pixel-art edges) = the flag's box
+const TEX_H := 3712        # (design at flag_design/flag_template.png: 512 x 1856)
 
 static var _mesh: ArrayMesh
 static var _mat: ShaderMaterial

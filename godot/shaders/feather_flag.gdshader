@@ -9,6 +9,7 @@ render_mode cull_disabled;
 uniform sampler2D board_tex : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
 uniform float designs = 4.0;
 uniform float cloth_w = 0.8;
+uniform float pole_h = 3.8;   // CheckpointFlags.H_POLE
 uniform float cloth_h = 2.8;
 
 varying float v_kind;     // 1 cloth, 0 pole / cord
@@ -56,6 +57,12 @@ void vertex() {
 			v_fold = clamp(abs(dzs) * 0.6, 0.0, 1.0);
 		}
 	}
+	// the fibreglass pole bows downwind (the cloth is on local +x = downwind): a cantilever bend, ~ height^2, more in
+	// a gust, swaying back and forth a little as the gusts come and go; everything above moves with it
+	float q = clamp(p.y / pole_h, 0.0, 1.0);
+	float bend = (0.05 + 0.08 * ws + 0.3 * g) + 0.05 * (0.4 + g) * sin(T * 1.7 + ph * 1.3) + 0.02 * sin(T * 3.1 + ph);
+	p.x += bend * q * q;
+	p.y -= 0.45 * bend * bend * q * q * q / pole_h;   // (bending, not stretching: the tip comes down a little)
 	// the whole flag swings round its pole to stream downwind (the cloth is on local +x), with a lazy wander
 	float a = atan(atm_wind.y, atm_wind.x) + 0.22 * sin(T * 0.53 + ph) + 0.12 * g * sin(T * 1.9 + ph * 2.1);
 	float ca = cos(a);
@@ -74,10 +81,10 @@ void fragment() {
 		ROUGHNESS = 0.72;
 		SPECULAR = 0.25;
 		// thin polyester: light comes through it with the sun behind (its own colour)
-		BACKLIGHT = col * 0.55;
+		BACKLIGHT = col * 0.3;
 	} else {
-		ALBEDO = vec3(0.62, 0.63, 0.65);   // bare aluminium / grey fibreglass
-		METALLIC = 0.75;
-		ROUGHNESS = 0.38;
+		ALBEDO = vec3(0.035, 0.036, 0.04);   // black powder-coated metal
+		METALLIC = 0.6;
+		ROUGHNESS = 0.42;
 	}
 }
