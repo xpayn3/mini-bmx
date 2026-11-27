@@ -3,7 +3,7 @@ checkpoint feather flags. Same outline as godot/scripts/world/checkpoint_flags.g
 Run: python make_template.py [out_dir]"""
 import math, sys, os
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
-H_POLE, Y0, CW, ARC_H = 3.4, 0.5, 0.8, 0.85
+H_POLE, Y0, CW, ARC_H = 3.8, 0.9, 0.8, 0.85
 W_PX, H_PX = 512, 1856   # = CW x (H_POLE - Y0) at 640 px per metre
 def px(x, y): return (x / CW * W_PX, (1 - (y - Y0) / (H_POLE - Y0)) * H_PX)
 out = sys.argv[1] if len(sys.argv) > 1 else os.path.dirname(os.path.abspath(__file__))
