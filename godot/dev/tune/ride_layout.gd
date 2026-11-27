@@ -264,6 +264,7 @@ const PAGES := [
 			["*suspRebound", "Rebound damping: how fast it comes back up.", "Lively", "Planted"],
 			["suspProg", "How much the springs ramp up at the end of the travel.", "Linear", "Ramps hard"],
 			["*suspGeo", "Fork dive under the front brake, the rear's squat under power and under its brake.", "None", "Lots"],
+			["suspSubsteps", "How many times a physics tick the springs, tyres and legs are stepped (x 120 Hz). More = stiffer hits resolved finer, costs CPU.", "4 (480 Hz)", "32 (3840 Hz)"],
 			["diveSteer", "A diving fork shortens the wheelbase: the bike turns in quicker under the front brake.", "None", "Lots"],
 			["pedalBob", "The shock pumps with every pedal stroke.", "None", "Lots"],
 			["pedalKick", "Bumps push the cranks back against your feet while you pedal.", "None", "Lots"],

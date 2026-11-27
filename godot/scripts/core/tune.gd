@@ -131,6 +131,7 @@ const DEFS := [
 		["suspRebound", "Rebound damping (× the setup)", 1.0, 0.4, 2.0, 0.05, "×"],
 		["suspProg", "Ramp-up at the end of the travel (× the setup)", 1.0, 0.0, 2.5, 0.05, "×"],
 		["suspGeo", "Brake dive and pedal squat from the geometry", 1.0, 0.0, 2.0, 0.05, "×"],
+		["suspSubsteps", "Suspension substeps a physics tick (4 = 480 Hz, 16 = 1920 Hz)", 4.0, 1.0, 32.0, 1.0, ""],
 		["diveSteer", "Fork dive shortens the wheelbase (quicker turn-in)", 1.0, 0.0, 2.0, 0.05, "×"],
 		["pedalBob", "Pedal bob (the shock moves with each stroke)", 1.0, 0.0, 2.0, 0.05, "×"],
 		["pedalKick", "Pedal kickback (cranks pushed back over bumps)", 1.0, 0.0, 2.0, 0.05, "×"],

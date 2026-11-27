@@ -2228,7 +2228,8 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 		# ring up and blow apart instead of settling. Any setup or slider (a very light wheel, rock-hard tyres, rebound
 		# wound right in, a huge bump stop) is held inside that: the stiffnesses share k_cap, each damping rate is at
 		# most c_cap. The stock setup is far inside both (spring + tyre at their stiffest ~2900 of 8400, damping ~4 of 13)
-		var h_sub: float = dt / 4.0
+		var n_sub: int = clampi(int(roundf(float(T.get("suspSubsteps", 4.0)))), 1, 32)   # substeps a tick (Ride > Suspension; 4 = 480 Hz)
+		var h_sub: float = dt / n_sub
 		var k_cap: float = WHEEL_M * (1.1 / h_sub) * (1.1 / h_sub)
 		var c_cap: float = 0.9 * WHEEL_M / h_sub
 		ccF = minf(ccF, c_cap); ccR = minf(ccR, c_cap); crF = minf(crF, c_cap); crR = minf(crR, c_cap)
@@ -2386,7 +2387,7 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 		var sumR := 0.0
 		if not is_finite(body_y):
 			body_y = y; body_v = vy
-		var N := 4
+		var N := n_sub
 		var h := dt / N
 		if prof != null: _vt = _prof("v_before_substeps", _vt)
 		for i in range(1, N + 1):
