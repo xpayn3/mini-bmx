@@ -1149,9 +1149,6 @@ func _finalize_out(k: Vector2i, o: Dictionary, chunk_n: int) -> void:
 			deco_mi.append(dmi.get_meta("shadow_proxy") if dmi.has_meta("shadow_proxy") else dmi)
 		if spec[3]:
 			small.append(dmi)
-	if o.has("gates"):
-		for g in o["gates"]:
-			node.add_child(TrailGate.build(g))
 	if o.has("arches"):
 		for a in o["arches"]:
 			node.add_child(TrailArch.build(a))
@@ -1178,6 +1175,9 @@ func _finalize_out(k: Vector2i, o: Dictionary, chunk_n: int) -> void:
 		"G": o["G"], "N": chunk_n, "MG": o.get("GF", o["G"]), "MN": o.get("MN", chunk_n), "mms": mms, "packs": [], "grass_img": o["grass_img"], "grass_h": o["grass_h"],
 		"pud": o.get("pud", PackedFloat32Array()), "mat": mat}   # (mat: RoadDetail bakes from its trail textures)
 	chunk_serial += 1   # GrassField re-reads the chunks round the camera
+	var fl: PackedFloat32Array = o.get("flags", PackedFloat32Array())
+	if fl.size() > 0:
+		_multimesh(node, CheckpointFlags.mesh(), CheckpointFlags.material(), fl, fl.size() / 16, true)
 	for pp in o.get("packs", []):
 		var pkey := Vector2i(roundi(pp.x * 4.0), roundi(pp.z * 4.0))
 		if _pack_taken.has(pkey) or _packs.has(pkey):

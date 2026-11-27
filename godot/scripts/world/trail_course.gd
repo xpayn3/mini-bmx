@@ -74,6 +74,7 @@ const GATE_FIRST := 150    # centreline index of the first gate (300 m down the 
 const GATE_EVERY := 150     # one every 300 m
 var chunk_arches := {}   # key -> PackedInt32Array of (centreline index * 2 + TrailArch kind)
 var chunk_boards := {}  # key -> PackedInt32Array of centreline indices with a roadside billboard
+var sign_every := SIGN_EVERY   # the distance signs' spacing in course points (BMX_SIGN_EVERY changes it for tests)
 var chunk_signs := {}   # key -> PackedInt32Array of centreline indices with a distance table (small leaning sign)
 const SIGN_FIRST := 500      # first sign at 1 km
 const SIGN_EVERY := 2500   # one every 5 km (centreline points are ~2 m apart)
@@ -1248,7 +1249,7 @@ func _bucket() -> void:
 		_add(chunk_roots, _chunk_of(X[i], Z[i]), i)
 	for i in bend_trees:
 		_add(chunk_btrees, _chunk_of(X[i], Z[i]), i)
-	var sign_every := SIGN_EVERY
+	sign_every = SIGN_EVERY
 	if Env.raw("BMX_SIGN_EVERY") != "":
 		sign_every = maxi(20, int(Env.raw("BMX_SIGN_EVERY")))   # test: signs closer together
 	if sign_every == SIGN_EVERY and SIGN_FIRST < n - 2:
@@ -1265,11 +1266,6 @@ func _bucket() -> void:
 	for i in n - 1:
 		if KD[i] == ROCKS:
 			_add(chunk_rocks, _chunk_of(X[i], Z[i]), i)
-	# sponsor gates: fixed spacing by index, so growing the course never moves one
-	for i in range(GATE_FIRST, n - 2, GATE_EVERY):
-		var kd := KD[i]
-		if kd == ROAD or kd == START or kd == ESSES or kd == FINISH:
-			_add(chunk_gates, _chunk_of(X[i], Z[i]), i)
 	# rare rock tunnels / overhangs on straight bits of road, one candidate per 200 m slot
 	var seed_i: int = _mark_seed % 9973
 	for k in range(2, n / 100):
