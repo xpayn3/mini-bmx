@@ -1307,9 +1307,11 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   spot checked like the signs, `TerrainChunkBuilder._checkpoint_flags` -> `out["flags"]`, one MultiMesh per chunk in
   `Terrain._finalize_out`). Visual only, no collider. Shape (user reference, `CheckpointFlags.pole_line()`): the pole runs straight up
   the cloth's side and bends over in a quarter ellipse to the top of the free edge; free edge and bottom are straight. All motion in the vertex
-  shader from `atm_wind`: the flag turns on its pole to stream downwind, ripples run pole -> free edge, bellies with the gusts,
+  shader from `atm_wind`: the flag turns on its pole to stream downwind, the pole bows downwind
+  (~ height^2, more in gusts, swaying), ripples run pole -> free edge, bellies with the gusts,
   the free edge pulls in; UV = the flag's box (the print), UV2 = the grid (the motion). Print = `DESIGNS` columns of
-  512 x 1856 px drawn upright (pole left) in `assets/textures/flags/checkpoint_flags.png` (BC7 + mipmaps): the user's two
+  1024 x 3712 px drawn upright (pole left) in `assets/textures/flags/checkpoint_flags.png` (BC7 + mipmaps; the
+  user's pixel-art designs snapped to their 3 flat colours and scaled 2x with nearest: crisp edges); black metal poles: the user's two
   designs (originals `flag_design/flag_blue.png`, `flag_pink.png`), slalom style: both flags of a checkpoint
   one colour, blue and red in turn down the trail (checkpoint number % 2). **Design template**: repo root `flag_design/flag_template.png`
   (outline, sleeve, safe area, 10 cm grid) + `flag_mask.png`, made by `flag_design/make_template.py` (same outline formula:
