@@ -67,7 +67,7 @@ const PAGES := [
 			["leanMax", "Deepest lean.", "Shallow", "Deep"],
 			["bikeLeanCap", "Bike lean soft limit.", "Low", "High"],
 			["bodyLean", "How much of the lean the body takes.", "Upright", "Leans with it"],
-			["cornerBody", "In a deep turn the body takes this share of the bike's lean (0.5 = Project X, 0.8 = before). Lower = the bike further out under you.", "Bike way out", "Leans with it"],
+			["cornerBody", "In a deep turn the body takes this share of the bike's lean (0.7: at speed rider and bike lean together; 0.5 left the arms unable to reach the low inside grip and folded him onto the bars). Lower = the bike further out under you.", "Bike way out", "Leans with it"],
 			["groundLeanMax", "Max lean towards ground rising beside you (off-camber).", "Careful", "Deep"],
 		]],
 		["Slow riding", [

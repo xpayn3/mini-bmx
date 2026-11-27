@@ -204,6 +204,7 @@ func _autotest(seconds: float) -> void:
 			pedal = pedal and game.phys.v * 3.6 < hk
 			if game.phys.v * 3.6 > hk + 3.0: Input.action_press("brake", 0.5)
 			else: Input.action_release("brake")
+		if Env.s("BMX_HOLD_SPRINT") != "" and el > 2.0: Input.action_press("sprint")   # tests: sprint held the whole ride
 		if pedal and not (Env.s("BMX_COAST") != "" and int(el) % 6 >= 3): Input.action_press("pedal")   # BMX_COAST: 3 s pedal / 3 s coast
 		else: Input.action_release("pedal")
 		if Env.s("BMX_BRAKETURN") != "" and el > float(Env.s("BMX_BRAKETURN")):   # tests: 2 s pedal up to speed, 1.5 s hard brake + full steer, repeat

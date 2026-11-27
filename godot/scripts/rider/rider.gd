@@ -2823,8 +2823,8 @@ func update_pose(dt: float, p: Dictionary) -> void:
 			# the outside grip rises toward the rider in a lean and that arm folds: riders keep the elbow out but DROPPED, not
 			# winged up to the shoulder. The higher grip's elbow swings down and back as the counter-lean grows (OUT_ELBOW_DOWN)
 			var other = p.get("handR" if i == 0 else "handL")
-			if other is Vector3 and hand.y > (other as Vector3).y + 0.01:
-				var dk: float = OUT_ELBOW_DOWN * clampf(absf(_body_roll) / 0.4, 0.0, 1.0)
+			if other is Vector3:   # (blended by how much higher this grip is: a hard switch snapped the elbows as the grips crossed level)
+				var dk: float = OUT_ELBOW_DOWN * clampf(absf(_body_roll) / 0.4, 0.0, 1.0) * smoothstep(-0.01, 0.06, hand.y - (other as Vector3).y)
 				pole_a = pole_a.lerp(br * Vector3(-0.35, -0.8, side * 0.45).normalized(), dk).normalized()
 		var ika := limb_ik(shp, hand, L_UARM, L_FARM, pole_a, pole2_a, ELBOW_MIN, ELBOW_MAX, _bd_prev[2 + i], max_turn)
 		_bd_prev[2 + i] = ika[2]
@@ -2915,6 +2915,7 @@ func _pp_joints() -> void:
 				s[0] += 1; s[1] += a * a; s[2] = maxf(s[2], a)
 				if a > 0.003: s[3] += 1
 				if a > 0.01 and jn[1] == "chest": print("POSETWITCH frame=%d chest 2nd diff=%.0fmm stages:%s | %s" % [_pp_t, a * 1000.0, _pp_frame, _pp_why])
+				if a > 0.1 and String(jn[1]).begins_with("elbow"): print("ELBOWJUMP frame=%d %s %.0fmm air=%.2f body_roll=%.3f slow=%.2f" % [_pp_t, jn[1], a * 1000.0, _pp_air, _body_roll, slow_up])
 				if a > 0.04 and jn[1] == "pelvis" and _pp_jumps < 30:
 					_pp_jumps += 1
 					print("POSEJUMP frame=%d pelvis 2nd diff=%.0fmm  air=%.2f pitch=%.2f %s" % [_pp_t, a * 1000.0, _pp_air, _probe_pitch, _pp_why])
