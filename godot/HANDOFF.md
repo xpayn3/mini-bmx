@@ -1422,8 +1422,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   `custom_aabb` follows the body (needed in crashes when the rider node sits at the world origin).
 - **Idle life at a stop (2026-11-27, user + Riders Republic: "the bike is alive, micro movements when he stands")**: `Game._idle_life`,
   drawing only, fades in once settled on the foot: weight shifts every 1.5-5 s tip the bike up to `IDLE_SHIFT` 0.07 rad more onto /
-  off the foot, the bars are turned up to `IDLE_BAR` 0.24 rad and held (+ a slow drift), every 4-11 s he pushes the bike down
-  `IDLE_BOB` 3.5 cm (fork / shock compress and rebound via the wheel fit). Critically damped springs, own RNG. `BMX_OLD_IDLE=1` = off,
+  off the foot, the bars are turned up to `IDLE_BAR` 0.24 rad and held (+ a slow drift), (a suspension bob every few s was tried and removed: it read as a landing). Critically damped springs, own RNG. `BMX_OLD_IDLE=1` = off,
   `BMX_IDLE_PROBE=1` = `IDLELIFE` lines (test: `BMX_STRAIGHT=1 BMX_STOP_AT=3,60`).
 - **Foot down at a stop** (`Game._update_dab` / `_dab_foot`, drawn only): nearly stopped, not pedalling, on the ground
   -> the foot on the lower pedal (level cranks: the side the bike leans to, else left) goes to `Terrain.top_height`
