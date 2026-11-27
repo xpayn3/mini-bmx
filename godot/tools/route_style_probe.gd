@@ -27,24 +27,4 @@ func _init() -> void:
 					if C.KD[i] == TrailCourse.JUMP: jl += 1
 					if C.KD[i] == TrailCourse.SWITCH: sw += 1
 			print("ROUTE seed=%d style=%s n=%d hash=%d feats=%d jumps=%d tightpts=%d jumpline_pts=%d switch_pts=%d drops=%d end=%.0f,%.0f build_ms=%.0f" % [sd, nm, C.n, hash(h), f.route_feats.size(), jumps, tight, jl, sw, C.drops.size(), C.X[C.n - 1], C.Z[C.n - 1], ms])
-	# the preview's difficulty + time per style (what the ROUTE page shows)
-	var names := ["GREEN", "BLUE", "BLACK", "DOUBLE BLACK"]
-	for sd in seeds:
-		for nm in styles:
-			var rp := RoutePreview.new()
-			rp._work(sd, styles[nm])
-			var st: Dictionary = rp._stats(rp._result)
-			print("RATING seed=%d style=%s score=%.0f %s time=%d:%02d avg=%.0f km/h steepest=%.0f tight=%d jumps=%d" % [sd, nm, st.score, names[st.rating], int(st.time) / 60, int(st.time) % 60, st.avg_kmh, st.steepest, st.tight, st.jumps])
-	# the same over 12 seeds: mean / range of the score per style (calibrates the green / blue / black cut-offs)
-	for nm in styles:
-		var tot := 0.0
-		var lo := 999.0
-		var hi := 0.0
-		var tsum := 0.0
-		for sd in range(1, 13):
-			var rp2 := RoutePreview.new()
-			rp2._work(sd * 37, styles[nm])
-			var s2: Dictionary = rp2._stats(rp2._result)
-			tot += s2.score; lo = minf(lo, s2.score); hi = maxf(hi, s2.score); tsum += s2.time
-		print("RATINGMEAN style=%s mean=%.0f min=%.0f max=%.0f time=%.1f min" % [nm, tot / 12.0, lo, hi, tsum / 12.0 / 60.0])
 	quit()

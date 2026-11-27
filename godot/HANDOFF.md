@@ -2348,6 +2348,16 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   (`menu_quit`, main page only) that asks first (`_confirm_quit`: CANCEL / QUIT, B or a click beside it cancels).
   Tests: `BMX_PADSEQ` has `click:x:y` (a left click). RIDE opens the **ride setup** page (`_menu_page_setup`): bike (Downhill / BMX) +
   time of day (the `LightSettings.BUILTIN` presets), then GO. Test: `BMX_MENU_PAGE=setup`.
+  **ROUTE step = sliders only (2026-11-27, user: no map, nothing generated there)**: seed, course code, presets, the four
+  `RouteStyle` sliders, biome; full screen like the computer step; changes only set `bike_dirty`. The old top-down map
+  (`ui/route_preview.gd`) is deleted.
+  **Loading screen on RACE** (`main._race` + `ui/loading_screen.gd` + `shaders/loading_screen.gdshader`): sky + ridges of
+  the picked hour, place name, style meters, tips, progress bar. A stale ride is built in `_ride_park` in stages
+  (`_build_ride_staged`: Terrain chunks a few a frame, then `Game` with `reuse.terrain`), then `_start_ride` takes it; the
+  ride is drawn 30 frames behind the cover with `pose_hold`, then respawned. Queued card pictures wait
+  (`PartThumbs.hold`). Measured: ready ride 3.0 s (the minimum is `LOAD_MIN_S`), new world ~6 s. `_start_ride` alone
+  (tests, garage Save & ride, LEVELS) has no loading screen. Tests: `BMX_RACE_AT=secs`, `BMX_LOAD_PROBE=1`,
+  `BMX_LOAD_SHOTS=prefix` (the captures themselves slow the frames).
 - **Design tokens** (`scripts/ui/tokens.gd`, class `Tokens`): every colour, gap, corner, border and type size the
   menus use. Look = flat, Metro-like: white paper cards, **no outlines, no drop shadows**, 1–3 px corners; the
   selected / focused thing is shown by a fill or a coloured bar (`Tokens.MARK`), never an outline. Components in

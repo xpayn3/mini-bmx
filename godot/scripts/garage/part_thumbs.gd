@@ -143,6 +143,7 @@ static func baked_count() -> int:
 
 ## saved pictures waiting to be decoded: a page full of cards decoded at once was a ~70 ms hitch
 var _disk_queue: Array = []
+var hold := false   # new pictures wait (main._race's loading screen)
 const DISK_BUDGET_US := 4000
 
 func _process(_dt: float) -> void:
@@ -164,6 +165,9 @@ func _process(_dt: float) -> void:
 func _run() -> void:
 	_busy = true
 	while not _queue.is_empty():
+		while hold:   # a level is loading: each picture would be a slow frame of its loading screen
+			await get_tree().process_frame
+			if not is_inside_tree(): return
 		var job: Array = _queue.pop_front()
 		var node: Node3D = job[1].call()
 		_stage.add_child(node)

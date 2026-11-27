@@ -242,10 +242,6 @@ func restart_ride() -> void:
 	_set_riding(state != MENU)
 	create_tween().set_ignore_time_scale().tween_property(fade, "modulate:a", 0.0, 0.5)
 
-## a new world seed: the title backdrop stays as it is, only a real ride world is rebuilt
-func _seed_changed() -> void:
-	if not (game and game.title_world): restart_ride()
-
 func _set_riding(riding: bool) -> void:
 	game.input_enabled = riding
 	game.hud.visible = riding
@@ -428,6 +424,9 @@ func _show_menu() -> void:
 	if Env.s("BMX_MENU_PAGE") == "profile": _open_profile.call_deferred()   # tests: the rider profile
 	if Env.s("BMX_MENU_PAGE") == "credits": _show_credits()   # tests: the credits window
 	if Env.s("BMX_MENU_PAGE") == "levels": _menu_page_levels()   # tests: the LEVELS page
+	if Env.s("BMX_RACE_AT") != "" and not _probe.get("race", false):   # tests: press RACE after that many seconds
+		_probe.race = true
+		get_tree().create_timer(float(Env.s("BMX_RACE_AT")), true, false, true).timeout.connect(_race)
 	if PartThumbs.BAKE != "" and not _baking:
 		_baking = true
 		_bake_menu_thumbs.call_deferred()
@@ -671,12 +670,14 @@ var menu_page := "main"
 var menu_focus: Control   # where the pad cursor lands on this page (RIDE, NEXT)
 
 func _menu_back() -> void:
+	if _loading: return
 	if menu_page == "levels" or menu_page == "replays": _menu_page_main(); return
 	if menu_page != "setup": return
 	if setup_step > 0: _menu_page_setup(setup_step - 1)
 	else: _menu_page_main()
 
 func _menu_tabs(dir: int) -> void:
+	if _loading: return
 	if menu_page == "setup": _menu_page_setup(clampi(setup_step + dir, 0, SETUP_STEPS.size() - 1))
 
 func _menu_page_main() -> void:
@@ -902,7 +903,7 @@ var lens_view: SubViewportContainer   # the RACE step's trail preview (LensScene
 var GOGGLE_VIEW: Vector3 = Vector3(1.0, 0.12, 0.16) if Env.s("BMX_GOG_VIEW") == "" else str_to_var("Vector3(" + Env.s("BMX_GOG_VIEW") + ")")   # lens cards: the camera looks from here
 const LensIcon = preload("res://scripts/ui/lens_icon.gd")
 const SETUP_STEPS := ["BIKE", "TUNE", "CHARACTER", "COMPUTER", "ROUTE", "RACE"]
-var route_view: RoutePreview   # the ROUTE step's top-down trail map
+const ROUTE_STEP := 4
 const COMPUTER_STEP := 3
 var setup_step := 0
 var bike_dirty := false   # the bike was changed in the selection flow; the ride is rebuilt on RACE
@@ -983,11 +984,12 @@ func _menu_page_setup_build(step := 0) -> void:
 	bg.color = Tokens.PAGE
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	scr.add_child(bg)
-	var split := setup_step != COMPUTER_STEP
+	var split := setup_step != COMPUTER_STEP and setup_step != ROUTE_STEP   # (full screen: the computer and the route sliders)
 	var title: String = ["CHOOSE YOUR BIKE", "COLOURS & WHEELS", "YOUR CHARACTER", "BIKE COMPUTER", "PLAN YOUR ROUTE", "READY TO RACE"][setup_step]
 	var back_cb: Callable = (_menu_page_setup.bind(setup_step - 1) if setup_step > 0 else _menu_page_main)
 	var last := setup_step == SETUP_STEPS.size() - 1
-	var next_btn := _menu_button("RACE" if last else "NEXT", "" if last else SETUP_STEPS[setup_step + 1].capitalize(), _start_ride if last else _menu_page_setup.bind(setup_step + 1), true)
+	var next_btn := _menu_button("RACE" if last else "NEXT", "" if last else SETUP_STEPS[setup_step + 1].capitalize(), _race if last else _menu_page_setup.bind(setup_step + 1), true)
+	if not last: next_btn.custom_minimum_size.y = 96   # two lines: the second one hung out under the box
 	var bar := HBoxContainer.new()
 	bar.add_theme_constant_override("separation", Tokens.S2)
 	for i in SETUP_STEPS.size():
@@ -1010,13 +1012,7 @@ func _menu_page_setup_build(step := 0) -> void:
 		left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(left)
 		var race := setup_step == SETUP_STEPS.size() - 1
-		var route := setup_step == SETUP_STEPS.size() - 2
-		if route:   # ROUTE: the trail this seed + style lays out, from straight above (RoutePreview), live
-			if not is_instance_valid(keep_view): keep_view = hero_view if is_instance_valid(hero_view) else null
-			route_view = RoutePreview.new()
-			route_view.set_anchors_preset(Control.PRESET_FULL_RECT)
-			left.add_child(route_view)
-		elif race:   # RACE: a little trail seen from riding height, lit by the picked time, through the picked lens (LensScene)
+		if race:   # RACE: a little trail seen from riding height, lit by the picked time, through the picked lens (LensScene)
 			if not is_instance_valid(keep_view): keep_view = hero_view if is_instance_valid(hero_view) else null
 			lens_view = LensScene.new()
 			lens_view.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -1063,9 +1059,6 @@ func _menu_page_setup_build(step := 0) -> void:
 				(lb as Control).add_theme_constant_override("shadow_outline_size", 6)
 			hero_spec.text = "THE TRAIL AT THIS TIME OF DAY  ·  THROUGH YOUR LENS"
 
-		if route:
-			hero_name.text = ""
-			hero_spec.text = ""
 		if setup_step == 2:
 			hero_name.text = "YOUR CHARACTER"
 			hero_spec.text = "KIT  ·  HAIR  ·  PLATE  ·  DRAG TO TURN"
@@ -1122,7 +1115,7 @@ func _menu_page_setup_build(step := 0) -> void:
 		foot.add_child(fl)
 		next_btn.custom_minimum_size.x = 420
 		foot.add_child(next_btn)
-	if keep_view:   # the full-screen computer step has no turntable: park it hidden for the next step
+	if keep_view:   # the full-screen steps have no turntable: park it hidden for the next step
 		keep_view.visible = false
 		scr.add_child(keep_view)
 	elif is_instance_valid(hero_view): hero_view.visible = true
@@ -1555,13 +1548,15 @@ func _setup_computer(content: HBoxContainer) -> void:
 	card.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	content.add_child(card)
 
-## step 4: the ROUTE. The map on the left is the trail of this seed + style, built live as the sliders move
+## step 5: the ROUTE: seed, course code, presets, sliders and biome. Nothing is generated or drawn here; the world
+## is built from these on RACE, behind the loading screen
 func _setup_route(content: HBoxContainer) -> void:
+	content.alignment = BoxContainer.ALIGNMENT_CENTER
 	var col := VBoxContainer.new()
-	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	col.add_theme_constant_override("separation", Tokens.S2)
+	col.custom_minimum_size.x = 1040
+	col.alignment = BoxContainer.ALIGNMENT_CENTER
+	col.add_theme_constant_override("separation", Tokens.S3)
 	content.add_child(col)
-	var rv := route_view
 	# the world seed
 	col.add_child(UITheme.caption("WORLD SEED"))
 	var seed_row := HBoxContainer.new()
@@ -1572,11 +1567,11 @@ func _setup_route(content: HBoxContainer) -> void:
 	se.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	se.custom_minimum_size.y = Tokens.H_CHIP
 	se.tooltip_text = "World seed: type a number and press Enter"
-	var ui := {}   # the course code line, filled below
+	var refs := {}   # the course code line and the biome chips, filled below
 	var sliders := {}
-	var ask := func():
-		if ui.has("code"): (ui["code"] as LineEdit).text = RouteStyle.code(GameState.seed)
-		if is_instance_valid(rv): rv.request(GameState.seed, RouteStyle.snapshot())
+	var changed := func():
+		if refs.has("code"): (refs["code"] as LineEdit).text = RouteStyle.code(GameState.seed)
+		bike_dirty = true
 	# a course code (or a bare seed) typed / pasted in: the same world + style
 	var load_code := func(t: String) -> bool:
 		var d := RouteStyle.parse(t)
@@ -1585,17 +1580,15 @@ func _setup_route(content: HBoxContainer) -> void:
 		se.text = str(GameState.seed)
 		RouteStyle.apply(d)
 		for k in sliders: (sliders[k] as HSlider).set_value_no_signal(RouteStyle.get_value(k))
-		var bc: Array = ui.get("biomes", [])
+		var bc: Array = refs.get("biomes", [])
 		for bi in bc.size(): (bc[bi] as Button).set_pressed_no_signal(roundi(RouteStyle.get_value("biome")) == bi)
-		bike_dirty = true
-		_seed_changed()
-		ask.call()
+		changed.call()
 		return true
 	se.text_submitted.connect(func(t):
 		if t.is_valid_int():
-			GameState.seed = int(t); _seed_changed(); ask.call())
+			GameState.seed = int(t); changed.call())
 	seed_row.add_child(se)
-	var nw := UITheme.make_button("NEW WORLD", func(): GameState.new_seed(); se.text = str(GameState.seed); _seed_changed(); ask.call(), "chip", Tokens.T_LG)
+	var nw := UITheme.make_button("NEW WORLD", func(): GameState.new_seed(); se.text = str(GameState.seed); changed.call(), "chip", Tokens.T_LG)
 	seed_row.add_child(nw)
 	col.add_child(seed_row)
 	# the course code: this seed + style as one line to share
@@ -1609,25 +1602,24 @@ func _setup_route(content: HBoxContainer) -> void:
 	ce.tooltip_text = "Course code: seed + jumps + bends + rolling + steepness. Paste a friend's code and press Enter."
 	ce.text_submitted.connect(func(t):
 		if not load_code.call(t): ce.text = RouteStyle.code(GameState.seed))
-	ui["code"] = ce
+	refs["code"] = ce
 	code_row.add_child(ce)
 	code_row.add_child(UITheme.make_button("COPY", func(): DisplayServer.clipboard_set(RouteStyle.code(GameState.seed)), "chip", Tokens.T_MD))
 	code_row.add_child(UITheme.make_button("PASTE", func():
 		if not load_code.call(DisplayServer.clipboard_get()): ce.text = RouteStyle.code(GameState.seed), "chip", Tokens.T_MD))
 	col.add_child(code_row)
 	# presets
-	var pg := GridContainer.new()
-	pg.columns = 3
-	pg.add_theme_constant_override("h_separation", Tokens.S2)
-	pg.add_theme_constant_override("v_separation", Tokens.S2)
+	col.add_child(UITheme.spacer(Tokens.S1))
+	col.add_child(UITheme.caption("STYLE"))
+	var pg := HBoxContainer.new()
+	pg.add_theme_constant_override("separation", Tokens.S2)
 	col.add_child(pg)
 	for pr in RouteStyle.PRESETS:
 		var vals: Dictionary = pr[1]
 		var pb := UITheme.make_button(String(pr[0]), func():
 			RouteStyle.apply(vals)
 			for k in sliders: (sliders[k] as HSlider).set_value_no_signal(RouteStyle.get_value(k))
-			bike_dirty = true
-			ask.call(), "chip", Tokens.T_MD)
+			changed.call(), "chip", Tokens.T_LG)
 		pb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		pg.add_child(pb)
 	# one slider per trait
@@ -1636,20 +1628,19 @@ func _setup_route(content: HBoxContainer) -> void:
 		["twist", "BENDS", "FLOWING", "TWISTY"],
 		["rolling", "ROLLING & DROPS", "SMOOTH", "ROLLERS"],
 		["grade", "STEEPNESS", "GENTLE", "STEEP"]]
-	var sgrid := GridContainer.new()   # the four sliders two by two: the page has to fit one screen
+	col.add_child(UITheme.spacer(Tokens.S1))
+	var sgrid := GridContainer.new()
 	sgrid.columns = 2
-	sgrid.add_theme_constant_override("h_separation", Tokens.S5)
-	sgrid.add_theme_constant_override("v_separation", Tokens.S1)
+	sgrid.add_theme_constant_override("h_separation", Tokens.S8)
+	sgrid.add_theme_constant_override("v_separation", Tokens.S2)
 	col.add_child(sgrid)
 	for rw in rows:
 		var k: String = rw[0]
 		var cell := VBoxContainer.new()
 		cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		cell.add_theme_constant_override("separation", 0)
+		cell.add_theme_constant_override("separation", Tokens.S1)
 		sgrid.add_child(cell)
-		var head := HBoxContainer.new()
-		head.add_child(UITheme.caption(String(rw[1])))
-		cell.add_child(head)
+		cell.add_child(UITheme.display(String(rw[1]), Tokens.T_XL, Tokens.INK, Tokens.SLANT_TITLE))
 		var sl := HSlider.new()
 		sl.min_value = RouteStyle.LIMITS[k][0]
 		sl.max_value = RouteStyle.LIMITS[k][1]
@@ -1657,12 +1648,11 @@ func _setup_route(content: HBoxContainer) -> void:
 		sl.scrollable = false
 		sl.value = RouteStyle.get_value(k)
 		sl.add_theme_stylebox_override("focus", StyleBoxEmpty.new())   # the focus wash covered the whole slider (the knob vanished)
-		sl.custom_minimum_size.y = 20
+		sl.custom_minimum_size.y = 28
 		sl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		sl.value_changed.connect(func(v: float):
 			RouteStyle.set_value(k, v, false)
-			bike_dirty = true
-			ask.call())
+			changed.call())
 		sl.drag_ended.connect(func(_c): RouteStyle.save_file())
 		sliders[k] = sl
 		cell.add_child(sl)
@@ -1673,54 +1663,24 @@ func _setup_route(content: HBoxContainer) -> void:
 		ends.add_child(UITheme.caption(String(rw[3]), Tokens.INK_FAINT, Tokens.T_XS))
 		cell.add_child(ends)
 	# where: the biome the ride is in
+	col.add_child(UITheme.spacer(Tokens.S1))
+	col.add_child(UITheme.caption("WHERE"))
 	var bm := HBoxContainer.new()
 	bm.add_theme_constant_override("separation", Tokens.S2)
 	var bgrp := ButtonGroup.new()
 	var bchips := []
 	for bi in RouteStyle.BIOMES.size():
-		var bb := UITheme.make_button(String(RouteStyle.BIOMES[bi][0]).replace(" MOUNTAINS", "").replace(" HILLS", " HILLS"), Callable(), "chip", Tokens.T_XS)
+		var bb := UITheme.make_button(String(RouteStyle.BIOMES[bi][0]), Callable(), "chip", Tokens.T_MD)
 		bb.toggle_mode = true; bb.button_group = bgrp
 		bb.button_pressed = roundi(RouteStyle.get_value("biome")) == bi
 		bb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		bb.pressed.connect(func():
 			RouteStyle.set_value("biome", float(bi))
-			bike_dirty = true
-			ask.call())
+			changed.call())
 		bchips.append(bb)
 		bm.add_child(bb)
-	ui["biomes"] = bchips
+	refs["biomes"] = bchips
 	col.add_child(bm)
-	# colouring of the map
-	var cm := HBoxContainer.new()
-	cm.add_theme_constant_override("separation", Tokens.S2)
-	var cgrp := ButtonGroup.new()
-	for c in [["type", "PAPER MAP"], ["grade", "COLOUR BY GRADE"]]:
-		var cb := UITheme.make_button(String(c[1]), Callable(), "chip", Tokens.T_SM)
-		cb.toggle_mode = true; cb.button_group = cgrp
-		cb.button_pressed = is_instance_valid(rv) and rv.color_mode == c[0]
-		cb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		cb.pressed.connect(func(): if is_instance_valid(rv): rv.color_mode = c[0]; rv.queue_redraw())
-		cm.add_child(cb)
-	col.add_child(cm)
-	# what this trail is
-	var rate := UITheme.display("", Tokens.T_XL, Tokens.INK, Tokens.SLANT_TITLE)
-	col.add_child(rate)
-	var stats := UITheme.text("", Tokens.INK, Tokens.T_SM)
-	stats.add_theme_constant_override("line_spacing", -4)
-	stats.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	col.add_child(stats)
-	var fill := Control.new(); fill.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	col.add_child(fill)
-	if is_instance_valid(rv):
-		rv.built.connect(func(st: Dictionary):
-			rate.text = ["GREEN  ·  EASY", "BLUE  ·  INTERMEDIATE", "BLACK  ·  HARD", "DOUBLE BLACK  ·  EXPERT"][st.rating]
-			rate.add_theme_color_override("font_color", [Color("2f9e58"), Color("2f6fd0"), Color("151a23"), Color("d22b25")][st.rating])
-			stats.text = "ABOUT %d:%02d AT A GOOD RIDER'S PACE  ·  %d KM/H
-%.1f KM  ·  FALLS %d M  ·  AVERAGE %.1f %%  ·  STEEPEST 100 M: %d M
-%d JUMPS  ·  %d ROLLER SETS  ·  %d BRIDGES  ·  %d CLIFF DROPS
-%d BENDS, %d TIGHT" % [
-				int(st.time) / 60, int(st.time) % 60, roundi(st.avg_kmh), st.length / 1000.0, roundi(st.fall), st.avg, roundi(st.steepest), st.jumps, st.rollers, st.bridges, st.drops, st.bends, st.tight])
-		rv.request(GameState.seed, RouteStyle.snapshot())
 	menu_focus = nw
 
 ## step 5: the time of day, then RACE (the bike on the left is the one you picked)
@@ -1831,7 +1791,7 @@ func _pick_card(b: Button) -> void:
 
 func _setup_next() -> void:
 	if setup_step < SETUP_STEPS.size() - 1: _menu_page_setup(setup_step + 1)
-	else: _start_ride()
+	else: _race()
 
 ## a big menu button: display-font title (+ optional small line under it); primary = the yellow one
 func _menu_button(text: String, sub: String, cb: Callable, primary := false, centred := false) -> Button:
@@ -1930,6 +1890,105 @@ func _close_garage(ride: bool) -> void:
 	if Env.s("BMX_GARAGE_PROBE") != "": print("GARAGE close total ms=%.1f" % ((Time.get_ticks_usec() - t0) / 1000.0))
 	create_tween().set_ignore_time_scale().tween_property(fade, "modulate:a", 0.0, 0.5)
 
+# ---------------------------------------------------------------- RACE: the level loads behind a loading screen
+const LoadingScreen := preload("res://scripts/ui/loading_screen.gd")
+const LOAD_MIN_S := 2.6          # the screen stays at least this long (a ready-built ride would only flash it)
+const LOAD_WARM_FRAMES := 30     # frames the ride is drawn behind the cover (first-frame shader / upload hitches)
+var _loading := false
+
+## RACE: cover the menu, build the level a piece a frame (the screen keeps moving), start the ride behind the cover
+## with its physics held, then take the cover away. (_start_ride alone = the instant start: tests, garage, levels.)
+func _race() -> void:
+	if _loading or state == RIDING: return
+	_loading = true
+	var t0 := Time.get_ticks_msec()
+	var scr := LoadingScreen.new()
+	add_child(scr)
+	await scr.cover()
+	if menu: menu.queue_free(); menu = null
+	if is_instance_valid(bike_thumbs): bike_thumbs.hold = true   # (card pictures still queued wait for the ride)
+	if GameState.level == "":
+		get_viewport().disable_3d = true   # (the title world isn't drawn under the cover: the build gets the time)
+		await _build_ride_staged(scr)
+		get_viewport().disable_3d = false
+	scr.step("DROPPING IN", 0.9)
+	await _frames_drawn(2)
+	await _start_ride()
+	game.input_enabled = false
+	game.pose_hold = true   # the bike waits at the start
+	if GameState.level == "": scr.place(game.biome_cur)
+	var warm := 0
+	var t1 := Time.get_ticks_msec()
+	var sc := Vector2i(WorldRng.jround(game.phys.x / Terrain.SIZE), WorldRng.jround(game.phys.z / Terrain.SIZE))   # the start's chunk
+	while warm < LOAD_WARM_FRAMES or Time.get_ticks_msec() - t0 < LOAD_MIN_S * 1000.0 \
+			or (game.level == "" and Time.get_ticks_msec() - t1 < 15000 and not game.terrain._missing(sc.x, sc.y).is_empty()):
+		await get_tree().process_frame
+		warm += 1
+		scr.step("DROPPING IN", 0.9 + 0.09 * clampf(float(warm) / LOAD_WARM_FRAMES, 0.0, 1.0))
+	scr.step("GO", 1.0)
+	await scr.filled()
+	game.respawn(false)   # the start again: ghost, area banner and bike computer begin now
+	game.pose_hold = false
+	game.input_enabled = true
+	game.swallow_held()
+	_loading = false
+	if is_instance_valid(bike_thumbs): bike_thumbs.hold = false
+	if Env.s("BMX_LOAD_PROBE") != "": print("LOADSCREEN total ms=", Time.get_ticks_msec() - t0)
+	scr.leave()
+
+func _frames_drawn(n: int) -> void:
+	for i in n: await get_tree().process_frame
+
+## the player's world built off-screen (the intro's park; _take_prebuilt moves it in): the land's chunks a few a
+## frame, then the Game round them. Nothing to do when the parked ride already matches.
+func _build_ride_staged(scr) -> void:
+	if is_instance_valid(ride_ready) and _ride_sig == _ride_sig_now():
+		scr.step("CHECKING THE BIKE", 0.85)
+		return
+	if is_instance_valid(ride_ready): ride_ready.queue_free()
+	ride_ready = null
+	if is_instance_valid(_ride_park): _ride_park.queue_free()
+	_ride_park = SubViewport.new()
+	_ride_park.own_world_3d = true
+	_ride_park.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	_ride_park.size = Vector2i(get_viewport().get_visible_rect().size)
+	add_child(_ride_park)
+	var sig := _ride_sig_now()
+	scr.step("SHAPING THE MOUNTAIN", 0.12)
+	await _frames_drawn(3)
+	var t0 := Time.get_ticks_msec()
+	var land: Node3D = load("res://scripts/world/terrain.gd").new(GameState.seed)   # (lays the whole trail out: one hitch)
+	land.process_mode = Node.PROCESS_MODE_DISABLED
+	_ride_park.add_child(land)
+	land.view_scale = float(Settings.get_v("view_distance"))
+	scr.place(land.biome_name(0, 0))
+	var t1 := Time.get_ticks_msec()
+	var total: int = land._missing(0, 0).size()
+	while Time.get_ticks_msec() - t1 < 30000:   # (a stuck worker: Game builds the rest itself)
+		var frame_t := Time.get_ticks_msec()
+		while Time.get_ticks_msec() - frame_t < 10:
+			land.update_stream(0, 0, 8.0)
+			if land.last_finalized == 0: break
+		var left: int = land._missing(0, 0).size()
+		var k := 1.0 - float(left) / maxf(total, 1.0)
+		scr.step("CUTTING THE TRAIL" if k < 0.5 else "PLANTING THE FOREST", 0.15 + 0.6 * k)
+		if left == 0: break
+		await get_tree().process_frame
+	var t2 := Time.get_ticks_msec()
+	_ride_park.remove_child(land)
+	land.process_mode = Node.PROCESS_MODE_INHERIT
+	scr.step("BUILDING YOUR BIKE", 0.78)
+	await _frames_drawn(3)
+	var g := Game.new()
+	g.title_world = false
+	g.reuse = {"terrain": land}
+	_ride_park.add_child(g)
+	g.process_mode = Node.PROCESS_MODE_DISABLED
+	ride_ready = g
+	_ride_sig = sig
+	if Env.s("BMX_LOAD_PROBE") != "":
+		print("LOADSCREEN land ms=%d, %d chunks in %d ms, game ms=%d" % [t1 - t0, total, t2 - t1, Time.get_ticks_msec() - t2])
+
 func _start_ride() -> void:
 	if game and game.title_world and _take_prebuilt():   # the world built during the intro: straight in
 		bike_dirty = false
@@ -1963,7 +2022,7 @@ func _start_demo() -> void:
 
 # ---------------------------------------------------------------- pause
 func _unhandled_input(e: InputEvent) -> void:
-	if not e.is_action_pressed("pause") or e.is_echo(): return
+	if _loading or not e.is_action_pressed("pause") or e.is_echo(): return
 	if is_instance_valid(settings_open) or garage: return
 	if state == RIDING and game and game.photo:   # Esc leaves photo mode first (back to the replay, if one is up)
 		game.toggle_photo()
@@ -1998,12 +2057,12 @@ func _on_pad_connection(_device: int, connected: bool) -> void:
 	_pause_unfocused.call_deferred()
 
 func _pause_unfocused() -> void:
-	if state == RIDING: _pause()
+	if state == RIDING and not _loading: _pause()
 
 ## window lost focus: freeze the ride and grey the screen, no pause menu; coming back resumes (FOCUS_IN above)
 var _grey_dim: ColorRect = null
 func _pause_greyed() -> void:
-	if state != RIDING: return
+	if state != RIDING or _loading: return
 	_pause(false)
 	_grey_dim = ColorRect.new()
 	_grey_dim.color = Color(0.42, 0.42, 0.42, 0.62)
