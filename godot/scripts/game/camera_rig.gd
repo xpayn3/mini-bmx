@@ -155,6 +155,11 @@ func snap_to(p: Vector3) -> void:
 	_ys_init = false
 	pos_init = false
 	trail_i = -1; trail_dir = Vector3.ZERO
+	# (also the view's own heading: chase / side / drone kept the old spot's yaw and looked at the rider from the side
+	# or the front until he passed 0.5 m/s, then swung round)
+	_hd_s = NAN; _slope_init = false; occ = 0.0; _yaw_snap = true
+
+var _yaw_snap := false   # a teleport: the follow cameras take the new heading at once
 
 
 ## The bike's height as the camera follows it: bumps and impacts taken out, slopes and jumps kept. Two low-passes in a
@@ -340,13 +345,17 @@ func update_cam(dt: float) -> void:
 		fov_t = clampf(rad_to_deg(2 * atan(2.2 / d)), 7, 40)
 		dist = d
 	else:
-		if P.get("follow", false) and absf(st.v) > 0.5:
+		if P.get("follow", false) and (absf(st.v) > 0.5 or _yaw_snap):
 			# in the air follow the travel direction, not the bike (it may be spinning a 360)
 			var dir_h: float = st.course if st.air and not is_nan(st.course) else st.heading
 			if P.get("ahead", false) and trail_dir.length_squared() > 0.01:
 				dir_h = atan2(-trail_dir.z, trail_dir.x)
-			cam_yaw += BikePhysics.ang_diff(dir_h, cam_yaw) * minf(1.0, dt * P.get("rate", 1.4) * follow_k * minf(1.0, absf(st.v) / 4))
-		elif bool(Settings.get_v("cam_recenter")) and t - pan_t > 2.5 and not dragging:
+			if _yaw_snap: cam_yaw = dir_h
+			else: cam_yaw += BikePhysics.ang_diff(dir_h, cam_yaw) * minf(1.0, dt * P.get("rate", 1.4) * follow_k * minf(1.0, absf(st.v) / 4))
+		_yaw_snap = false
+		# (its own check: as the elif of the follow branch it only ran below 0.5 m/s, so a dragged / Z X view stayed
+		# turned for the whole ride and only swung back when the rider stopped)
+		if bool(Settings.get_v("cam_recenter")) and t - pan_t > 2.5 and not dragging:
 			# swing back to the preset angle a moment after the last drag / Z X / stick turn
 			var k := minf(1.0, dt * 1.2)
 			orbit_t += BikePhysics.ang_diff(float(P.get("orbit", 0.0)), orbit_t) * k

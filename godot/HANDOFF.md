@@ -3952,6 +3952,25 @@ rebuild hitch); rider body physics (fore/aft + air tuck/lean); bending spine + p
 
 All of it is on `main` (the Godot branch was merged, the web version removed). Work continues in this repo.
 
+**Ride code review (2026-11-27)**: physics / game loop / camera / rider / ragdoll / rig / tune read in full. Fixed:
+a saved replay's viewer Game was parked as the player's next ride (`main._unpark_title`; `_take_prebuilt` now also
+calls `Tune.set_ride`); a body-point hit on a fence / cactus was pushed out with the frame's radius (pulled a slow bike
+INTO it, `b_min`); `_graze` never expired (ate the pop of a later take-off; cleared 0.25 s after touch-down);
+`_land_hit` carried a judged landing into the next (cleared at the verdict); the head / chest ground check read
+`air_lean` (fore / aft input) as roll; `_hop_pop` floored the descent rate at 0 (hops on a descent flew 2-3x high);
+tyre prints / grass trample / blood per wheel (`front_air` / `rear_air`); `CameraRig.snap_to` also resets the view's yaw
+(`_yaw_snap`), heading, slope, occlusion, and ride-from-here snaps the camera; the camera re-centre runs while riding
+(it was an `elif` of the follow branch); `_reset_draw_state` also clears the lift / pivot / air offset / bar kick / dab;
+`Rider.reset_pose` clears `_spr_arm` / `body_off`; the bar kick is measured per physics tick (`Game._bar_tick`); the
+rider room's air preview passes `inAir`; the ghost records one sample per 1/30 s slot; `_shadow_fit` uses `cam.dist`
+as is; the UpperArm bone's twist. Stress 56 / 56, playground suite identical before / after (it rides hands off).
+Found, NOT fixed: phantom brake force while reversing on purpose (`_b_prev` / `_fb_f` / `_a_rear` set with no brake
+applied, ~line 1080); `a_drive` > 0 when braking rolling backwards (pedal-stamp kicks, HUD power); the load split's
+clamp with min > max when both tyres are light (line 967); flip landings on one wheel still read NOSE DIVE / LOOPED OUT;
+custom tune presets escape `RETUNED_AT`; `dragging` sticks if the mouse is released while paused; `PlaygroundLab.KEEP`
+lacks `test_rider` (the suite's test rider loses TEST_ASSIST after its first restart) and `prof`; `title_sign.gd:93`
+`looking_at` warnings for vertical struts.
+
 Known, not fixed (lower priority from the code review):
 - Quit warnings: with SSIL on (GI setting 1, the default preset) Godot reports "7 RIDs of type Texture were leaked" at
   exit (gone with `--set=gi=0`; a bare SSIL scene doesn't do it, not found which of our viewports / features adds it;

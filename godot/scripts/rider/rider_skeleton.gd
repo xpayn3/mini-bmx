@@ -159,7 +159,9 @@ func follow(P: Array, spine: Array, head_t: Transform3D, hands: Array, shoes: Ar
 		var hand_t: Transform3D = hands[i]
 		var shoe_t: Transform3D = shoes[i]
 		# arms: the elbow's bend direction (where the forearm folds to) is "forward" at rest (T-pose)
-		var bend_a := (ha - sh) - (el - sh).project(ha - sh)   # elbow out of the shoulder -> hand line
+		# (elbow out of the shoulder -> hand line. It was (ha - sh) - ..., a vector ALONG that line: the same twist for the
+		# forearm, but the upper arm bone rolled half a turn about its own axis against it)
+		var bend_a := (el - sh) - (el - sh).project(ha - sh)
 		var fold := -bend_a if bend_a.length_squared() > 1e-8 else -fwd
 		_put(side + "Shoulder", collar.lerp(sh, 0.15), _aim(side + "Shoulder", sh - collar, up, tor_up))
 		_put(side + "UpperArm", sh, _aim(side + "UpperArm", el - sh, fwd, fold))

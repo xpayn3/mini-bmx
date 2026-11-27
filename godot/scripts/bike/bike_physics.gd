@@ -422,7 +422,7 @@ func _reset_motion() -> void:
 	bike_lean = 0; counter = 0; rock = 0; yaw_rate = 0; hop_nose = 0; hop_t = 0; air_time = 0; air_k = 0
 	load = 0; compress = 0; compress_v = 0; prep = 0; land_prep = 0; pop_fired = false; spun_out = false; shake = 0
 	turn_off = 0.0; rev_cap = 3.0; _fakie_hold = 0.0
-	course = heading; slip = 0; slip_w = 0.0; bar_catch = 0.0; w_init = false; front_air = false; rear_air = false; pump_acc = 0; since_land = 1
+	course = heading; slip = 0; slip_w = 0.0; bar_catch = 0.0; w_init = false; front_air = false; rear_air = false; pump_acc = 0; since_land = 1; _graze = false
 	pitch_v = 0; c_f = true; c_r = true; wheelie_up = 0.0; _bog = 0.0
 	g_pitch = NAN
 	y = host.terrain.height(x, z); body_y = y; body_v = 0
@@ -908,6 +908,8 @@ func _step_ground(dt: float, f: Vector3) -> void:
 	if is_nan(course):
 		course = heading; slip = 0
 	since_land += dt
+	# (a brush with a lip that was NOT followed by the take-off: the flag stayed set and ate the pop of the next jump)
+	if _graze and not air and since_land > 0.25: _graze = false
 
 ## stage 3: sprint and stamina
 func _step_sprint(dt: float, inp: Dictionary, throttle: float, brake: bool, _in_water: bool) -> void:   # (sprinting through water is allowed since 2026-11-24)
@@ -1992,7 +1994,7 @@ func _step_move(dt: float, f: Vector3) -> void:
 		# fences and cacti: the rider's body, the bars and the rear wheel count too, at their own height (a flip, a whip,
 		# a low jump over the top rail: it's the body that goes through it)
 		var hit_b := false
-		var bdx := 0.0; var bdz := 0.0
+		var bdx := 0.0; var bdz := 0.0; var b_min := c_min
 		if not hit_f and not hit_c and cd < c.r + 2.4 and (c.has("fence") or c.has("cactus")) and Env.s("BMX_OLD_BODYHIT") == "":
 			var gr: float = terrain.height(c.x, c.z)
 			var top: float = c.ceil if c.has("ceil") else gr + (1.2 if c.get("fence", false) else 2.0)
@@ -2003,12 +2005,14 @@ func _step_move(dt: float, f: Vector3) -> void:
 				var ddx: float = x + f.x * off - c.x
 				var ddz: float = z + f.z * off - c.z
 				if ddx * ddx + ddz * ddz < (c.r + bp.z + 0.04) * (c.r + bp.z + 0.04):
-					hit_b = true; bdx = ddx; bdz = ddz; break
+					hit_b = true; bdx = ddx; bdz = ddz; b_min = c.r + bp.z + 0.04; break
 		if not hit_f and not hit_c and not hit_b: continue
 		var dx := fdx if hit_f else (cdx if hit_c else bdx)
 		var dz := fdz if hit_f else (cdz if hit_c else bdz)
 		var d := maxf(1e-4, fd if hit_f else (cd if hit_c else sqrt(bdx * bdx + bdz * bdz)))
-		var mn := f_min if hit_f else c_min
+		# (a body point is pushed out to its own reach: with the frame's, smaller, the push came out negative and a slow
+		# bike was pulled INTO the fence / cactus its rear wheel or the rider's chest touched)
+		var mn: float = f_min if hit_f else (c_min if hit_c else b_min)
 		var vel := Vector3(f.x * v, vy, f.z * v)
 		if c.get("cactus", false) and absf(v) > 2.5 and not (air and y > c.get("ceil", INF)):
 			if host.smash(c, vel, Vector3(x, y, z)):
@@ -2655,7 +2659,7 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 		if prof != null: _vt = _prof("v_nose_checks", _vt)
 		if Env.s("BMX_OLD_BODYHIT") == "" and not _balancing() and not _nosing() and absf(pitch - _g_pitch) > 1.0:
 			var sp := sin(pitch); var cp := cos(pitch)
-			var cr := cos(clampf(air_lean if air else bike_lean, -1.4, 1.4))
+			var cr := cos(clampf(bike_lean, -1.4, 1.4))   # (roll; it read air_lean in the air, which is the fore / aft air input)
 			# (forward, up) from the bottom bracket in the bike's frame: head, chest
 			for pt in [Vector2(0.02, 0.98), Vector2(0.0, 0.66)]:
 				var wx: float = pt.x * cp - pt.y * sp * cr
@@ -2971,6 +2975,7 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 					if host.msg_idle(): host.flash("HEAVY LANDING" if land_heavy > 0.5 else "OOF!")
 				if Env.s("BMX_TRICK") != "" or Env.s("BMX_LAND_PROBE") != "": print("HIT legs=%.2f rim=%.2f hit=%.2f of %.2f pe=%.2f heavy=%.2f v=%.1f vn=%.1f reach=%.2f" % [land_jolt, _rim_hit, hit, slam, _land_pe, land_heavy, v, _vn_td, _reach_td])   # tests
 				land_jolt = -1.0   # one verdict per landing
+				_land_hit = 0.0    # (judged: a hop 0.4-0.6 s later carried this hit into the NEXT landing's verdict)
 		kick_t = maxf(0.0, kick_t - dt)
 
 ## stage 9: the hop and the pump button
@@ -3655,7 +3660,9 @@ func _hop_pop(load_k: float, power: float) -> void:
 		var th := clampf(_g_pitch, -0.6, 0.8)
 		# (the climb the bike already has up a slope is kept; the frame coming up as the front is pulled into a manual
 		# is the bike turning about its rear wheel, not rider + bike rising: it used to add ~0.9 m/s to every scooped hop)
-		vy = clampf(vy, 0.0, maxf(0.0, v * sin(th)) + 0.2) + dv * cos(th); v -= signf(v) * minf(absf(v), dv * tan(th))
+		# (down a slope the fall the bike already has is kept the same way: floored at 0, a hop on a descent threw the
+		# descent away and flew ~2-3x as high as on the flat)
+		vy = clampf(vy, minf(0.0, v * sin(th)), maxf(0.0, v * sin(th)) + 0.2) + dv * cos(th); v -= signf(v) * minf(absf(v), dv * tan(th))
 	_pop_used += dv; pop_q = power; pop_fx = 1.0
 	kick_t = 0.3; hop_nose = 0.22 + 0.15 * load_k + 0.08 * power
 	body_v = vy

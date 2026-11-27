@@ -996,7 +996,7 @@ func _pose_rider(dt: float) -> void:
 	rider.update_pose(dt, {"footL": lt.footL, "footR": lt.footR, "handL": lt.handL, "handR": lt.handR, "gripX_L": lt.gripX_L, "gripX_R": lt.gripX_R, "gripZ": lt.gripZ,
 		"v": P.get("pose_v", P.v), "bodyStick": P.get("body", 0.0), "relax": P.get("relax", 0.0), "lean": rock, "steer": 0.0, "yawRate": 0.0, "counter": 0.0, "rockRoll": rock, "headRoll": 0.0,
 		"absorb": 0.0, "pitch": P.pitch, "bodyLevel": 0.85, "attackDrop": P.get("drop", 0.18), "pedal": P.pedal,
-		"sprint": P.get("sprint", 0.0), "crank": preview_crank, "air": P.air, "compress": P.compress, "hipShift": 0.0, "t": hand_t,
+		"sprint": P.get("sprint", 0.0), "crank": preview_crank, "air": P.air, "inAir": P.air, "compress": P.compress, "hipShift": 0.0, "t": hand_t,
 		"pedalTop": rig.pedal_top_in(rider)})
 	# the pedals turn with the feet (foot angle + ankling), about their axle
 	if rig.pedal_pivots.size() == 2:

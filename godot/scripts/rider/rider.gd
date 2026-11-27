@@ -1418,6 +1418,9 @@ func reset_pose() -> void:
 	roll_init = false; roll_pv = 0.0; roll_cv = 0.0; lat_g_s = 0.0; flow_e = 0.0
 	_fy_prev = NAN; _fv_prev = NAN; _facc = 0.0   # the bump bounce starts fresh (NAN = no previous frame)
 	_hp_init = false; _hy = 0.0; _neck_d = Vector3.ZERO; _neck_v = Vector3.ZERO
+	# (a crash mid-sprint left the sprint elbows up for ~0.8 s back on the bike; one at touch-down left the in-air
+	# hips offset, which Game takes off the drawn bike)
+	_spr_arm = 0.0; _fat = 0.0; body_off = Vector2.ZERO; _air_ref_ok = false
 
 
 # ---------------- per-frame pose ----------------

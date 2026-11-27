@@ -834,6 +834,8 @@ func ride_from_snap(sn: Array) -> void:
 	game._reset_draw_state()
 	if game.rider: game.rider.reset_pose()
 	game._snap_prev()
+	game._jw_prev = Vector2(INF, INF)   # (a teleport on purpose: no "JUMP ... m in one step" note in the log)
+	if game.cam: game.cam.snap_to(Vector3(ph.x, ph.y + 0.5, ph.z))   # (it glided over from where the ride was before the replay)
 	game.terrain.update_stream(ph.x, ph.z, INF, 1)
 	# the recording carries on from that moment
 	frames = frames.slice(0, _at(ts) + 1)

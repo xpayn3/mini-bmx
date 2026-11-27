@@ -111,7 +111,7 @@ func _shadow_fit() -> void:
 	var reach: float = SHADOW_REACH[clampi(sq, 0, 3)]
 	if terrain is LevelTerrain and terrain.baked: reach = LevelTerrain.RT_SHADOW   # (baked level: far shadows are baked)
 	if Env.s("BMX_SHADOW_REACH") != "": reach = float(Env.s("BMX_SHADOW_REACH"))   # tests
-	var zoom := roundf(cam.dist / maxf(1.0 - 0.2 * cam.speed_feel, 0.5))   # the zoom set, without the speed dolly
+	var zoom := roundf(cam.dist)   # the zoom set (update_cam puts cam.dist back without the speed dolly: dividing it out again re-fitted the cascades as you sped up)
 	if absf(sun.directional_shadow_max_distance - reach) > 0.5: sun.directional_shadow_max_distance = reach
 	if zoom == _shadow_zoom: return
 	_shadow_zoom = zoom
@@ -1749,6 +1749,12 @@ func _stand_to_bike(dt: float) -> void:
 func _reset_draw_state() -> void:
 	_mc.clear(); _stand_blend = 1.0
 	_yaw_s = 0.0; _turn_s = 0.0; _aspin_s = 0.0; _atilt_s = 0.0; _blat_s = 0.0; _awhip_s = 0.0
+	# (also: the lying bike's unclip lift kept after a get-up = the bike hovering and sinking; a foot-down state from
+	# the old spot = the foot picked for the old ground; bar kick / pivot / air offset from before)
+	_lift_s = 0.0; _piv_c = 0.0; _piv_w = 0.5; _air_dlt = Vector3.ZERO; _slip_k = 0.0
+	_bar_kick = 0.0; _bar_kick_v = 0.0; _bar_hit = 0.0
+	if phys: _vwf_prev = phys.vw_f; _dab_vprev = phys.v
+	dab_lin = 0.0; dab_k = 0.0; _dab_lean_s = 0.0; _dab_hold = 0.0
 
 ## a crash (or its get-up / dizzy clip) is dropped at once: back on the bike, no slow motion, no WASTED.
 ## Respawn / the title hilltop: phys.reset_at clears crash_on without a get-up, which left the ragdoll, the
@@ -2131,21 +2137,25 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 			var ev := f * va * 0.85 + Vector3((randf() - 0.5) * 1.6, randf() * 1.4, (randf() - 0.5) * 1.6)
 			fx.chunk(bt * lp, ev, dc, randf_range(0.008, 0.02), 1.6)
 	var on_ground := not st.air and not bare and va > 0.2
+	# (per wheel: st.air is only "both off", so a manual printed its raised front tyre and laid the grass under it, a stoppie the rear)
+	var on_f: bool = on_ground and not st.front_air
+	var on_r: bool = on_ground and not st.rear_air
 	# tyre prints, pressed into the ground (world/ruts.gd; the ground shaders draw them in the ground's own colour):
 	# how dark per surface, a skid's smear darker and wider; a tyre that rolled through blood prints red for a few metres
 	var ta := 0.85 if s == 1 else (0.75 if sand else 0.45)
 	var bl_f := 0.0
 	var bl_r := 0.0
 	if blood and on_ground:
-		blood.tyre_color(0, front, Color.BLACK); blood.tyre_color(1, rear, Color.BLACK)   # (updates how bloody each tyre is)
+		# (updates how bloody each tyre is)
+		if on_f: blood.tyre_color(0, front, Color.BLACK)
+		if on_r: blood.tyre_color(1, rear, Color.BLACK)
 		bl_f = blood.tyre_blood(0); bl_r = blood.tyre_blood(1)
 	if ruts != null:
-		ruts.track(0, front, ta if on_ground else 0.0, 0.085, false, bl_f)
-		ruts.track(1, rear, ((minf(1.0, ta + 0.2) if skid_fx else ta) if on_ground else 0.0), 0.12 if skid_fx else 0.095, skid_fx, bl_r)
+		ruts.track(0, front, ta if on_f else 0.0, 0.085, false, bl_f)
+		ruts.track(1, rear, ((minf(1.0, ta + 0.2) if skid_fx else ta) if on_r else 0.0), 0.12 if skid_fx else 0.095, skid_fx, bl_r)
 	# the bike lays the grass down behind it (wheels + the frame / pedals sweeping over); it stands up again slowly
-	if grass and on_ground:
-		grass.trample(0, front, f, 0.26)
-		grass.trample(1, rear, f, 0.34 if skid_fx else 0.3)
+	if grass and on_f: grass.trample(0, front, f, 0.26)
+	if grass and on_r: grass.trample(1, rear, f, 0.34 if skid_fx else 0.3)
 
 # ---------------------------------------------------------------- ride control
 var ruts = null    # world/ruts.gd: ruts + tyre prints in the ground
@@ -2630,10 +2640,22 @@ const BAR_HIT_FROM := 1.0     # m/s: smaller changes of the front wheel's upward
 const BAR_HIT_K := 0.6        # rad/s of bar swing per m/s of hit past that
 var _vwf_prev := 0.0
 var _bar_kick := 0.0; var _bar_kick_v := 0.0
+var _bar_hit := 0.0   # bar swing (rad/s) from front-wheel hits since the last drawn frame, added up per physics tick
 var _OLD_BARS := Env.s("BMX_OLD_BARS") != ""
+
+## every physics tick: a hit on the front wheel (its upward speed jumping: a rock, a root, a landing) knocks the bars
+## one way or the other (the knock's side, else a fixed hash of where it happened). Measured per tick: per drawn frame
+## the same rock kicked the bars at 60 fps (2 ticks added up past the threshold) and not at 144
+func _bar_tick(st: BikePhysics) -> void:
+	var dvw: float = st.vw_f - _vwf_prev
+	_vwf_prev = st.vw_f
+	if st.air or st.crash_on or absf(dvw) <= BAR_HIT_FROM: return
+	var side: float = signf(st.knock) if absf(st.knock) > 0.02 else (1.0 if sin(st.x * 7.3 + st.z * 3.1) > 0.0 else -1.0)
+	_bar_hit += side * (absf(dvw) - BAR_HIT_FROM) * BAR_HIT_K * smoothstep(2.0, 6.0, absf(st.v))
+
 func _bar_draw(st: BikePhysics, dt: float, dab_lean: float) -> float:
 	if _OLD_BARS or st.crash_on:
-		_bar_kick = 0.0; _bar_kick_v = 0.0
+		_bar_kick = 0.0; _bar_kick_v = 0.0; _bar_hit = 0.0
 		return st.steer
 	var ln := clampf(st.bike_lean, -1.3, 1.3)
 	var sd: float = atan(tan(clampf(st.steer, -1.2, 1.2)) * cos(ln) / cos(HEAD_TILT))
@@ -2645,13 +2667,7 @@ func _bar_draw(st: BikePhysics, dt: float, dab_lean: float) -> float:
 	var steps := maxi(1, ceili(dt * 240.0))
 	var h := dt / steps
 	var push := 0.0 if st.air else st.knock * BAR_KICK_K
-	# a hit on the front wheel (its upward speed jumping: a rock, a root, a landing) knocks the bars one way or the
-	# other (the side the wheel was hit on: the knock's side, else a fixed hash of where it happened)
-	var dvw: float = st.vw_f - _vwf_prev
-	_vwf_prev = st.vw_f
-	if not st.air and absf(dvw) > BAR_HIT_FROM:
-		var side: float = signf(st.knock) if absf(st.knock) > 0.02 else (1.0 if sin(st.x * 7.3 + st.z * 3.1) > 0.0 else -1.0)
-		_bar_kick_v += side * (absf(dvw) - BAR_HIT_FROM) * BAR_HIT_K * smoothstep(2.0, 6.0, va)
+	_bar_kick_v += _bar_hit; _bar_hit = 0.0   # (front-wheel hits: _bar_tick)
 	for i in steps:
 		_bar_kick_v += (-w * w * (_bar_kick - push) - 2.0 * BAR_KICK_Z * w * _bar_kick_v) * h
 		_bar_kick += _bar_kick_v * h
@@ -3119,6 +3135,7 @@ func _physics_process(dt: float) -> void:
 	_line_record(inp)
 	_aim_update()
 	phys.step(dt, inp)
+	_bar_tick(phys)
 	if ruts: ruts.step(phys)
 	if _SKIP: _skip_probe(dt, inp)
 	if level_probe: level_probe.post_step(dt)
