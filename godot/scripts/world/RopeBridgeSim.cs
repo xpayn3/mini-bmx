@@ -411,13 +411,14 @@ public partial class RopeBridgeSim : RefCounted
 	readonly System.Collections.Generic.List<Vector3> _v = new();
 	readonly System.Collections.Generic.List<Vector3> _nm = new();
 	readonly System.Collections.Generic.List<int> _ix = new();
+	readonly System.Collections.Generic.List<Vector2> _uv = new();
 	Vector3[] _line = new Vector3[512];
 
 	/// the rope tubes (deck ropes under the plank ends, hand ropes, hangers): [verts, normals, indices]
 	public Godot.Collections.Array RopeMesh(float a)
 	{
 		DrawState(a);
-		_v.Clear(); _nm.Clear(); _ix.Clear();
+		_v.Clear(); _nm.Clear(); _ix.Clear(); _uv.Clear();
 		const int SUBD = 3;
 		for (int r = 0; r < 4; r++)
 		{
@@ -434,7 +435,7 @@ public partial class RopeBridgeSim : RefCounted
 				}
 			}
 			_line[cnt++] = P(b + _n) + new Vector3(0, drop, 0);
-			Tube(cnt, r < 2 ? 0.026f : 0.022f, 6);
+			Tube(cnt, r < 2 ? 0.026f : 0.022f, 8);
 		}
 		for (int i = 1; i < _n; i++)
 		{
@@ -442,10 +443,10 @@ public partial class RopeBridgeSim : RefCounted
 			{
 				int h = side == 0 ? HL(i) : HR(i), d = side == 0 ? DL(i) : DR(i);
 				_line[0] = P(h); _line[1] = P(d) + new Vector3(0, -0.03f, 0);
-				Tube(2, 0.010f, 4);
+				Tube(2, 0.010f, 5);
 			}
 		}
-		return new Godot.Collections.Array { _v.ToArray(), _nm.ToArray(), _ix.ToArray() };
+		return new Godot.Collections.Array { _v.ToArray(), _nm.ToArray(), _ix.ToArray(), _uv.ToArray() };
 	}
 
 	Vector3 P(int a) => new Vector3(_dx[a], _dy[a], _dz[a]);
@@ -456,30 +457,36 @@ public partial class RopeBridgeSim : RefCounted
 		return 0.5f * (2f * p1 + (p2 - p0) * t + (2f * p0 - 5f * p1 + 4f * p2 - p3) * t2 + (3f * p1 - p0 - 3f * p2 + p3) * t3);
 	}
 
+	/// a tube along _line[0..cnt): sides + 1 vertices a ring (a seam column for the UVs); UV.x = distance along in
+	/// circumferences (so the rope shader's strand twist has the same lay on thick and thin ropes), UV.y = round 0..1
 	void Tube(int cnt, float rad, int sides)
 	{
 		int start = _v.Count;
+		float along = 0f, circ = MathF.Tau * rad;
 		for (int i = 0; i < cnt; i++)
 		{
+			if (i > 0) along += (_line[i] - _line[i - 1]).Length();
 			Vector3 T = (_line[Math.Min(cnt - 1, i + 1)] - _line[Math.Max(0, i - 1)]).Normalized();
 			Vector3 N = T.Cross(Vector3.Up);
 			if (N.LengthSquared() < 1e-4f) N = T.Cross(Vector3.Right);
 			N = N.Normalized();
 			Vector3 B = T.Cross(N);
-			for (int k = 0; k < sides; k++)
+			for (int k = 0; k <= sides; k++)
 			{
 				float ang = k * MathF.Tau / sides;
 				Vector3 n = N * MathF.Cos(ang) + B * MathF.Sin(ang);
 				_v.Add(_line[i] + n * rad);
 				_nm.Add(n);
+				_uv.Add(new Vector2(along / circ, (float)k / sides));
 			}
 		}
+		int row = sides + 1;
 		for (int i = 0; i < cnt - 1; i++)
 		{
 			for (int k = 0; k < sides; k++)
 			{
-				int a0 = start + i * sides + k, a1 = start + i * sides + (k + 1) % sides;
-				int b0 = a0 + sides, b1 = a1 + sides;
+				int a0 = start + i * row + k, a1 = a0 + 1;
+				int b0 = a0 + row, b1 = a1 + row;
 				_ix.Add(a0); _ix.Add(b0); _ix.Add(a1);
 				_ix.Add(a1); _ix.Add(b0); _ix.Add(b1);
 			}
