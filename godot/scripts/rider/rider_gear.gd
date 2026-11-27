@@ -291,8 +291,197 @@ static func _upper_geo(n := 22, m := 12) -> Dictionary:
 	return {pos = pos, idx = idx}
 
 
+# ---------------- shoe v2 (2026-11-27, user: "a better shoe, not a low poly chunk") ----------------
+## a flat-pedal shoe: thick gum outsole with a raised rim and a little toe spring, white midsole stripe, a boxy rounded
+## upper (superellipse sections), rubber toe bumper + heel counter in the accent colour, a padded collar round the ankle
+## point (shoe (-0.04, 0.09): the shin always ends inside it), tongue, crossed laces. Same frame as the old one (+X toe,
+## sole bottom y 0, x X0..X1). BMX_OLD_SHOE=1 = the old shoe
+static var _OLD_SHOE := OS.get_environment("BMX_OLD_SHOE") != ""
+
+## v2 plan outline: slim road-shoe last, narrow heel, pointed toe
+static func _hw2(x: float) -> float:
+	var t := clampf((x - X0) / LEN, 0.0, 1.0)
+	var base := 0.043 + 0.009 * sin(minf(1.0, t / 0.66) * PI * 0.5)
+	var toe := pow(maxf(0.0, 1.0 - pow((t - 0.66) / 0.34, 2.0)), 0.62) if t > 0.66 else 1.0
+	var heel := sqrt(maxf(0.0, 1.0 - pow((0.1 - t) / 0.1, 2))) if t < 0.1 else 1.0
+	return base * minf(toe, heel) + 0.0015
+
+## toe spring: the sole's bottom rises toward the toe tip (past the ball: the pedal sits at x ~0.08)
+static func _spring(x: float) -> float:
+	var t := clampf((x - 0.12) / (X1 - 0.12), 0.0, 1.0)
+	return 0.02 * t * t
+
+## the upper's top line v2: low rounded toe box, the instep rising to the collar, a high padded heel
+## the top line (user's sketch, 2026-11-27): a high heel tab, a slight dip behind the ankle, a peak just in front of the
+## opening, then one long smooth curve over the instep down to the toe tip. Catmull-Rom through (t along the last, m)
+const TOP2 := [[-0.1, 0.104], [0.0, 0.106], [0.14, 0.099], [0.24, 0.097], [0.35, 0.102], [0.48, 0.091], [0.6, 0.078],
+	[0.72, 0.064], [0.84, 0.05], [0.93, 0.037], [1.0, 0.02], [1.1, 0.0]]
+static func _top2(x: float) -> float:
+	var t := clampf((x - X0) / LEN, 0.0, 1.0)
+	var i := 1
+	while i < TOP2.size() - 3 and float(TOP2[i + 1][0]) < t: i += 1
+	var p0: Array = TOP2[i - 1]; var p1: Array = TOP2[i]; var p2: Array = TOP2[i + 1]; var p3: Array = TOP2[i + 2]
+	var u := clampf((t - float(p1[0])) / (float(p2[0]) - float(p1[0])), 0.0, 1.0)
+	var u2 := u * u
+	var u3 := u2 * u
+	return 0.5 * (2.0 * p1[1] + (-p0[1] + p2[1]) * u + (2.0 * p0[1] - 5.0 * p1[1] + 4.0 * p2[1] - p3[1]) * u2 		+ (-p0[1] + 3.0 * p1[1] - 3.0 * p2[1] + p3[1]) * u3)
+
+## a lofted shell from xa to xb: sections with bottom yb(x), top ht(x) * frac, half width hw(x) - inset, superellipse
+## exponents (ey up the side, ez across); closed at both ends with a fan
+static func _loft2(xa: float, xb: float, n: int, m: int, inset: float, frac: float, y_base: float, ey := 0.5, ez := 0.7, frac_b := -1.0, caps := true) -> Dictionary:
+	var pos := PackedVector3Array()
+	var idx := PackedInt32Array()
+	for i in n + 1:
+		var tt := float(i) / n
+		# sections packed toward both ends (cosine spacing): the round heel and toe in plan need them, evenly every 7 mm
+		# the heel came out as a vertical crease
+		var x := xa + (xb - xa) * (0.5 - 0.5 * cos(PI * tt))
+		var hw := maxf(0.0015, _hw2(x) - inset)
+		var y0 := y_base + _spring(x)
+		var fr := frac if frac_b < 0.0 else lerpf(frac, frac_b, smoothstep(0.0, 1.0, tt))
+		var h := y0 + (_top2(x) + _spring(x) * 0.6 - y0) * fr + inset * 0.3
+		# the back third is boxier (walls straight up, a flat top): the ankle opening, the shin stays inside it
+		var bx := 1.0 - smoothstep(0.24, 0.44, (x - X0) / LEN)
+		var eyx := lerpf(ey, 0.2, bx)
+		var ezx := lerpf(ez, 0.95, bx)
+		for j in m + 1:
+			var a := PI * float(j) / m
+			var ca := cos(a)
+			var z := signf(ca) * pow(absf(ca), ezx) * hw
+			pos.append(Vector3(x, y0 + pow(sin(a), eyx) * (h - y0), z))
+	var row := m + 1
+	for i in n:
+		for j in m:
+			var k := i * row + j
+			idx.append_array([k, k + row, k + 1, k + 1, k + row, k + row + 1])
+	for cap in ([[0, false], [n, true]] if caps else []):
+		var ci: int = cap[0]
+		var c := pos.size()
+		var cx := pos[ci * row].x
+		pos.append(Vector3(cx, pos[ci * row].y + (pos[ci * row + m / 2].y - pos[ci * row].y) * 0.5, 0))
+		for j in m:
+			var k := ci * row + j
+			if cap[1]: idx.append_array([c, k, k + 1])
+			else: idx.append_array([c, k + 1, k])
+		var k0 := ci * row
+		var km := ci * row + m
+		if cap[1]: idx.append_array([c, km, k0])
+		else: idx.append_array([c, k0, km])
+	return {pos = pos, idx = idx}
+
+## the outsole: the outline (half_width) extruded from y0 to y1 with the toe spring, edges rounded by a ring of bevel rows
+static func _sole2(inset: float, y0: float, y1: float, n := 48) -> Dictionary:
+	var pos := PackedVector3Array()
+	var idx := PackedInt32Array()
+	var loop := []
+	for i in n + 1:
+		var x := X0 + LEN * (float(i) / n)
+		loop.append(Vector2(x, _hw2(x) - inset))
+	for i in range(n - 1, 0, -1):
+		loop.append(Vector2((loop[i] as Vector2).x, -(loop[i] as Vector2).y))
+	var L := loop.size()
+	# rows: bottom (pulled in 2 mm), bottom edge, top edge, top (pulled in 1.5 mm)
+	var rows := [[y0, -0.002], [y0 + 0.003, 0.0], [y1 - 0.002, 0.0], [y1, -0.0015]]
+	for r in rows:
+		for q in loop:
+			var v: Vector2 = q
+			var sz := signf(v.y) if absf(v.y) > 1e-5 else 1.0
+			var inn: float = r[1]
+			pos.append(Vector3(v.x + (inn if v.x < 0.0 else -inn) * 0.3, float(r[0]) + _spring(v.x), v.y + sz * inn))
+	for r in 3:
+		for k in L:
+			var a := r * L + k
+			var b2 := r * L + (k + 1) % L
+			idx.append_array([a, a + L, b2, b2, a + L, b2 + L])
+	# bottom and top caps: fans from the middle line
+	for cap in [[0, true], [3, false]]:
+		var base: int = cap[0] * L
+		var c := pos.size()
+		pos.append(Vector3((X0 + X1) * 0.5, pos[base].y, 0.0))
+		for k in L:
+			var a2 := base + k
+			var b3 := base + (k + 1) % L
+			if cap[1]: idx.append_array([c, b3, a2])
+			else: idx.append_array([c, a2, b3])
+	return {pos = pos, idx = idx}
+
+static func _build_shoe2(m: Dictionary, side := 1.0) -> Node3D:
+	var s := Node3D.new()
+	s.name = "Shoe"
+	_add(s, _sole2(0.0, 0.0, 0.011), m.sole)
+	_add(s, _sole2(0.001, 0.0105, 0.016), m.mid)
+	_add(s, _loft2(X0 + 0.0015, X1 - 0.002, 36, 20, 0.003, 1.0, 0.015), m.upper)
+	# rubber toe bumper: an open shell over the front, low at its back edge rising round the toe, a touch proud
+	_add(s, _loft2(X0 + LEN * 0.72, X1 + 0.0015, 14, 20, -0.0012, 0.12, 0.014, 0.5, 0.7, 0.5, false), m.accent)
+	# heel counter: an open shell round the heel, high at the back sweeping down toward the arch
+	_add(s, _loft2(X0 - 0.0025, X0 + LEN * 0.34, 18, 20, -0.0012, 0.85, 0.014, 0.5, 0.7, 0.12, true), m.accent)
+	# two BOA dials on the outer side of the instep (side = which foot: +1 right, -1 left, so they sit outside), each
+	# with a thin cable over the top to a guide on the inner side
+	var bits := []
+	var cab := []
+	for dx in [0.03, 0.082]:
+		var hw := _hw2(dx) - 0.003
+		var zo: float = side * hw * 0.78
+		var dp := _upper_pt(dx, zo, 0.0)
+		var y0 := 0.015 + _spring(dx)
+		var nrm := Vector3(0.0, (dp.y - y0) / maxf(_top2(dx) - y0, 1e-3) * 0.6, zo / maxf(hw, 1e-3)).normalized()
+		var bas := Basis(Quaternion(Vector3.UP, nrm))
+		var dm := MeshInstance3D.new()
+		var cy := CylinderMesh.new()
+		cy.top_radius = 0.0135; cy.bottom_radius = 0.0145; cy.height = 0.008; cy.radial_segments = 18; cy.rings = 1
+		dm.mesh = cy
+		dm.material_override = m.sole
+		dm.transform = Transform3D(bas, dp + nrm * 0.004)
+		s.add_child(dm)
+		var cp := MeshInstance3D.new()
+		var cc := CylinderMesh.new()
+		cc.top_radius = 0.009; cc.bottom_radius = 0.0105; cc.height = 0.003; cc.radial_segments = 18; cc.rings = 1
+		cp.mesh = cc
+		cp.material_override = m.accent
+		cp.transform = Transform3D(bas, dp + nrm * 0.009)
+		s.add_child(cp)
+		# cable: dial -> over the top -> a guide on the inner side, and back a little further forward
+		var g_in := Vector2(dx + 0.012, -side * (_hw2(dx + 0.012) - 0.003) * 0.7)
+		bits.append(G.xform(G.rounded_box(0.012, 0.004, 0.009, 1, 0.002), Transform3D(Basis(), _upper_pt(g_in.x, g_in.y, 0.002))))
+		cab.append_array(_cable(Vector2(dx - 0.004, zo * 0.8), g_in))
+		cab.append_array(_cable(g_in, Vector2(dx + 0.006, zo * 0.8)))
+	_add(s, G.merge(bits), m.sole)
+	_add(s, G.merge(cab), m.laces)
+	return s
+
+## a point on the v2 upper's surface at (x, z), lifted off it by `lift`
+static func _upper_pt(x: float, z: float, lift: float) -> Vector3:
+	var hw := maxf(0.0015, _hw2(x) - 0.003)
+	var y0 := 0.015 + _spring(x)
+	var h := y0 + (_top2(x) + _spring(x) * 0.6 - y0)
+	var c := pow(clampf(absf(z) / hw, 0.0, 1.0), 1.0 / 0.7)
+	var sn := sqrt(maxf(0.0, 1.0 - c * c))
+	return Vector3(x, y0 + pow(sn, 0.5) * (h - y0) + lift, z)
+
+## a BOA cable from (x, z) a to b over the upper's curve: short rods between points on its surface
+static func _cable(a: Vector2, b: Vector2) -> Array:
+	var out := []
+	var n := 6
+	var p0 := _upper_pt(a.x, a.y, 0.0022)
+	for k in range(1, n + 1):
+		var q := a.lerp(b, float(k) / n)
+		var p1 := _upper_pt(q.x, q.y, 0.0022)
+		out.append(_rod(p0, p1, 0.0014))
+		p0 = p1
+	return out
+
+## a thin round rod from a to b (a box would do at 1 mm, but a rod catches the light)
+static func _rod(a: Vector3, b: Vector3, r: float) -> Dictionary:
+	var d := b - a
+	var l := d.length()
+	var g := G.rounded_box(r * 2.0, l, r * 2.0, 1, r * 0.9)
+	var bas := Basis(Quaternion(Vector3.UP, d / maxf(l, 1e-5)))
+	return G.xform(g, Transform3D(bas, (a + b) * 0.5))
+
+
 ## m: {upper, accent, sole, mid, laces}
-static func build_shoe(m: Dictionary) -> Node3D:
+static func build_shoe(m: Dictionary, side := 1.0) -> Node3D:
+	if not _OLD_SHOE: return _build_shoe2(m, side)
 	var s := Node3D.new()
 	s.name = "Shoe"
 	_add(s, _sole_geo(0, 0, 0.022), m.sole)

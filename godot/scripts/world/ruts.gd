@@ -50,6 +50,11 @@ func clear() -> void:
 	_fdirty.clear()
 
 ## a tyre's print for this frame (fx.gd track() hands it here): wheel 0 front / 1 rear, strength 0 = lifted
+## a shoe print (heel -> toe, world), see RutFieldCs.StampShoe
+func shoe(heel: Vector3, toe: Vector3, strength: float, blood: float) -> void:
+	if field == null: return
+	field.StampShoe(heel.x, heel.z, toe.x, toe.z, strength, blood)
+
 func track(wheel: int, contact: Vector3, strength: float, width: float, smear: bool, blood: float) -> void:
 	if field == null or not prints: return
 	field.StampTrack(wheel, contact.x, contact.z, width * 0.5, strength, smear, blood)

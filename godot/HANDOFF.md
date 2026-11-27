@@ -2026,6 +2026,177 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
 - **Wheelie / manual pose** (`rider.gd`, `slope` from the physics): the front up on the ground is not a climb; the
   rider sits back, upright, arms long (leaning into the raised bars mangled the arms). Climbs use the ground slope.
 - **Joint limits** (`Rider.limb_ik`): elbows / knees are hinges that bend between `ELBOW_MIN`–`ELBOW_MAX` (12–150°) / `KNEE_MIN`–`KNEE_MAX` (4–160°); where a limb lines up with its pole the bend blends to a second pole (elbows: out + down, knees: up) instead of flipping, and the bend may swing round the limb at most `BEND_RATE` (6 rad/s). The slope body-levelling follows the bike pitch at most `PITCH_LEVEL_RATE` (it used to whip the torso mid-flip).
+- **The crashed bike is a real body (2026-11-27, user: "falls like one unit, no handlebar twisting", "clips lying on its
+  side", "can wheels fly off")**. `bike/CrashBikeCs.cs` (C#, ~0.1 ms a frame, sleeps once still): position-based dynamics
+  with rigid shape matching. Points = the hull of the frame's meshes and of the steer's meshes (support points along 26
+  directions, `BikeRig.crash_hull_prepare` once at ride load ~30 ms, `crash_points` at the crash: pedals at their crank
+  angle, bars as turned) + a 12-point ring round each tyre. Each 1/240 s: Verlet, then 4 passes of [pushed out of the
+  DRAWN ground (`TerrainFieldCs.top_height`, a callable on levels / near rope bridges) and out of trunks, matched back to
+  the rigid shape], Coulomb friction (an upright tyre rolls along its plane, laid flat it slides), small bounce on hard
+  hits, ground rising > 0.4 m in a move = a wall (stopped, not climbed). The bars are a hinge: the steer points match the
+  rest shape turned by theta about the head tube, theta fitted to where they were pushed, lock +-1.2 rad, headset drag.
+  A new tyre hit over `WHEEL_OFF_DV` 7 m/s may knock that wheel off (up to 50 %): its ring + axle become their own rigid
+  body (spin kept, rolls away, tips over), the drawn wheel follows (`BikeRig.pose_crash`), the chain hides with the rear
+  off; getting up puts them back (`restore_wheels`). Fences / cacti are smashed by the moving bike. x / y / z / heading /
+  pitch / lean / bars / speed are read back from it (camera, sound, get-up spot). Game draws it between physics steps
+  (`BodyAt` / `WheelAt`); the tyre unclip is skipped while it runs. `BMX_OLD_CRASHBIKE=1` (or no C#) = the old scripted
+  fall. Tests: `BMX_CRASHBIKE_PROBE=1` (`CRASHBIKE` lines: lean, bars, deepest point under the ground, wheels, hits),
+  `BMX_WHEEL_OFF=front|rear|both`, `BMX_CRASHBIKE_CAM=dist,height` (camera on the bike, not the rider),
+  `BMX_CRASHBIKE_SHOTS=prefix` (a shot every 0.3 s of each crash). Measured: deepest point <= ~3 cm while tumbling fast,
+  0 at rest; big-air crashes on seed 4242 hit tyres at <= 6 m/s (no wheel off), nose-first / cliff hits are what knock
+  them off. **Rider and bike collide** (same day, user: "bike and rider collide like in real life"): the bike's tubes are
+  capsules between its points (chainstay, down / top / seat / head tube, fork, bars + stem) and each wheel a disc;
+  `CrashBikeCs.CollideBody` after every ragdoll step pushes a body part out (it takes 75 %, the bike's points 25 %, which
+  becomes the bike's velocity: a body landing on the bike shoves it out from under him). A part only collides once it
+  has been clear of the bike (at the crash the rider is wrapped round it and untangles first). `BMX_OLD_RIDERBIKE=1` =
+  pass through. Not done: a knocked-off wheel isn't left in the world after getting up, no buckled-wheel look.
+- **Ragdoll behaviours (2026-11-27, user: "a lifeless puppet, no muscles or joints; can he try to roll or land on his
+  feet?")**, `ragdoll.gd` `_behave` / `_hinges` (see the BEHAVIOURS comment): weights that ease in / out and drive the
+  muscles harder toward their own pose: TUCK + ROLL (thrown > 5.5 m/s or the spine tumbling > 3.5 rad/s while really
+  moving: chin in, knees to chest, arms round the head; angular momentum is kept, so he spins faster tucked and rolls),
+  LAND (the old reach-for-the-ground, now off while tucking), BRACE (chest < 0.3 s from the ground: hands out), PAIN
+  (at rest 0.6 s: curls up, hand to the body, squirms, fades out over ~3.5 s, then lies still), KNOCKED OUT (head first
+  into the ground > 8 m/s, its own speed as it first touches: limp, tone 0.35). Knees bend one way only (elbows too
+  when the arm isn't out sideways); the hinge push is equal and opposite (a first version wasn't and launched the body
+  80 m). `BMX_OLD_RAGBEH=1` = before; probe `BMX_RAGBEH=1` (`RAGBEH` lines). Measured: bails / big-air crashes on seeds
+  4242 / 5: rise <= 0.6 m, tucks + rolls ~2 s, pain curl from ~2.5 s; one KO in 5 crashes (14 m/s head hit).
+  **Joint limits** (same day, user: "limbs rotate and fling like crazy", "legs make an X"): shoulders / hips / neck
+  are cones round their neutral direction (`CONES` 2.0 / 1.3 / 0.8 rad, `_cones`), the right knee / foot stay
+  0.1 / 0.08 m right of the left ones along the body's own axis (`_no_cross`: no X legs), limbs damped against their
+  parent in or out of the natural range (`LIMB_DAMP`), startle fling 2.6 -> 1.3 m/s, start jitter 0.6 -> 0.2, the tuck
+  only fires < 0.35 s before hitting the ground (tucked in mid-air he only spun faster). A broken knee / elbow lets
+  that limb ignore the cone and the leg ignore the no-cross rule. Measured (`BMX_RAGBEH=1` flail / bend_rate lines,
+  `BMX_RAGDUMP=file.csv` = every substep of the first crash): the limbs' swing against the spine in the air is ~8
+  rad/s vs ~11 before; every crash differs a lot, so whole-crash averages can't rank small changes. The crashed bike's
+  wall rule now compares with the ground under its own centre (it walked up a shed wall onto the roof).
+  **GTA-style additions (same day, user: "make ragdoll like GTA")**: (1) **Stay with the bike**: hands held to the
+  grips, feet to the pedals at the crash start (`CrashBikeCs.SetHolds` / `HoldBody`, set in `Game._crash_bike_begin`;
+  not on a bail): hands let go after 0.25-0.7 s or when yanked > 12 cm away, feet after 0.08-0.3 s / 7 cm. One way
+  only, soft (`HoldPull` 0.5 of the gap a step): the bike pulls the rider (over the bars with it), the rider never
+  pulls the bike - two-way, rider and bike pumped energy through the ground and he was thrown 12 m up. (2)
+  **Windmill** (`w_mill`, `_mill_dir`): high in the air with > 0.35 s before he hits, arms circle in opposite phase and
+  legs cycle (1.4 Hz, `MILL_DRIVE` 4). (3) **Hurt**: the part that hit the ground hardest (> 4 m/s) is held by the other
+  hand while he lies in pain (`hurt`). (4) **Self-collision** (`_self_collide`): hands / elbows / knees / feet kept out
+  of the trunk capsule and the head, equal and opposite (a 0.7 / 0.3 split launched the body). Tests:
+  `BMX_RAG_NOHOLD=1`, `BMX_RAG_NOMILL=1`, `BMX_RAG_NOSELF=1`; `BMX_CRASHBIKE_CAM_RIDER=1` (+ `BMX_CRASHBIKE_CAM`) points
+  the test camera at the rider; `BMX_CRASHBIKE_SHOT_DT` / `_N` / `BMX_CRASHBIKE_SLOW`. Rise on seeds 5 / 4242 / 12:
+  1.1 / 0.3 / 1.7 m (without holds 0.8 on seed 12: the bike catapulting him). Frame time with all of it 8.84 vs 8.73
+  ms. **F8 fixes (same day, user: "landed on my back, the ragdoll violently flaps around"; ride log: spine turning
+  10-15 rad/s for 10 s after the crash)**: (a) `CrashBikeCs.CollideBody` / `HoldBody` moved the body point but not its
+  previous point, so the ragdoll's Verlet read every push as velocity (a 1 cm push = a 3.6 m/s kick at 360 substeps / s):
+  now they take p AND q (return p then q), a push moves both and only the speed into the bike is taken out; a hold eases
+  the part's velocity to the bike point's; bike points are shifted without velocity (`_Shift`). (b) "in the air" was
+  pelvis > 0.45 m with no terrain touch, so lying propped on the bike read as flying and he windmilled on his back: now
+  air = no touch at all (terrain, shapes or the bike: `Ragdoll.contact_ext`, set by BikePhysics) for 0.1 s, windmill
+  also needs > 2.5 m/s, "tumbling" needs > 2 m/s. After: speed and spin ~0 within 2-3 s on bails / big-air crashes.
+  (c) **Limb twist while crashed** (user: "joints rotate / flip lying on the ground", "textures slide on the limbs"):
+  `Rider.set_limb` took the tube's twist from fixed axes of the rider node (world axes in a crash), which snapped
+  whenever a limb pointed along them. Now in `_pose_from_points` (crash, get-up clips, menus) each tube's twist is
+  carried from last frame by the smallest turn (`_twist`, parallel transport) drifting `TWIST_FOLLOW` 6 % a frame toward
+  the body's own axis (`_limb_side`: the knee / elbow bend axis, the body's right where straight). Probe
+  `BMX_TWIST_PROBE=1` (`TWIST` lines, crash frames only): worst 174-176 deg in one frame -> <= 3.7, frames over 20 deg
+  35-62 -> 0 (seeds 5 / 4242 / 12). `BMX_OLD_LIMBTWIST=1` = before. (d) **Knees, stiffness, jerks** (user: "too stiff,
+  jerky", "impossible pose": both knees folded in across the body): the knee / elbow hinge rule had the knee's bend axis
+  backwards (worked out in a mirrored axis convention): it turned every knee toward bending backwards against the
+  muscles, ~700 m/s2 joint jitter lying still (old ragdoll 39-79) and folded legs. Now `_hinges` = knees only: a bent
+  knee's bend axis (thigh x shin) stays within `KNEE_TURN` 0.8 rad of up x forward of the body frame (`b.y.cross(b.z)`,
+  independent of which hip is labelled left), turned about the hip-foot line by `KNEE_K` 0.1 of the excess a substep,
+  balanced on the foot only, never into the ground; elbows have no rule (the old ragdoll had none). Softer: drives tuck
+  4.5 / brace 3.5 / pain 1.6 / windmill 2.5 (were 7 / 5 / 3 / 4), `LIMB_DAMP` 0.018, `CONE_K` 0.4, pain squirm halved.
+  Measured (bail at 4 / 7 / 13 m/s, `jerk.py`-style p99 point acceleration after 1.5 s): ~111 / 150 / 220-420 m/s2
+  (were 1900-5600 at the worst step of the fix). `BMX_RAG_OFF=hinge,cone,cross,self,pain,damp` switches pieces off for
+  tests. Not done (the rest of Euphoria): a balance controller to run a slow crash out on his feet / stagger, torque joint
+  motors, grabbing the ground to stop a slide.
+- **The crash ragdoll is rigid bodies with real joints (2026-11-27, user: "make the ragdoll like GTA", "joint sockets
+  limit this in a human")**: `rider/RagdollRbCs.cs`. The old one (below) was 15 points on rods with rules bolted on (a
+  point has no twist, every limit was a patch: knees folded backwards / inward, limbs spun). Now, as in GTA (Euphoria) and
+  engine ragdolls: 11 solid capsules with mass + inertia (pelvis 12 kg, chest 26, head 5.5, upper arms 2.2, forearms 1.8,
+  thighs 8.5, shins 4.5), 10 joints: spine and neck = limited ball (cone 0.75 / 0.8 rad, twist +-0.5 / +-1.1), shoulders
+  and hips = sockets (cone 2.0 / 1.35 rad round the limb's natural direction, twist +-1.3 / +-0.6), elbows and knees =
+  hinges 0 .. 2.6 rad (axis from the riding pose's own bend; straight: the anatomical right = forward x up, never the hip
+  labels). Solver: XPBD for rigid bodies (Mueller et al. 2020), 10 substeps a physics step, one pass each: anchors,
+  limits, muscles, ground (3 spheres a capsule on `TerrainFieldCs.top_height` / a callable), trunks, limbs vs trunk and
+  each other, Coulomb friction, small bounce, joint damping. Muscles = soft motors (XPBD compliance: a spring of `ToneHz`
+  1.4 x sqrt(strength) on the child's inertia, equal and opposite) aimed by the old behaviour layer: `_neutral_pull(.., true)`
+  writes each part's target direction + strength (tone x tuck / brace / windmill / pain / spread drive) instead of moving
+  points; hinge motors turn only about the hinge axis. Before the first step, overlaps and joints are settled with the
+  velocities untouched (a crash upside down starts with capsules 6-15 cm in the ground: pushed out in a substep it span
+  bodies at hundreds of rad/s); push-outs give at most `MaxDepenV` 3 m/s; parts capped 40 m/s / 40 rad/s. The 15 points
+  (Ragdoll order) + torn pieces' roots are read off the bodies each step (`p`, `q` = last step's), so blood, get-up,
+  camera, drawing, the bike's contacts (`Ragdoll.external_push`, holds capped `RB_PUSH_DV` 3 m/s: a hand held to a
+  tumbling bike's grip yanked the body 10 m up) are unchanged. `sever` / `break_joint` free / un-limit the joint.
+  Measured: joint limits held within 0.04 rad (worst); rise <= 0.33 m on 7 big-air crashes (seeds 5 / 4242 / 12 / 807243);
+  lying still p99 joint accel 43 / 75 m/s2 on 4 / 7 m/s bails (the old point ragdoll 39-79, with my rules up to 700);
+  0.42 ms a crashed frame. Tests: `-s res://tools/rb_selftest.gd` (the solver alone, falling from rest, each constraint
+  kind on / off: `RBSELF` spin, joint gap, limit overshoot; `RB_N=1200` longer), `BMX_RAGBEH=1` (`RAGRB` speed + worst
+  limit, `RBSTEP` per-body speed / spin for the first 0.35 s). `BMX_OLD_RAGDOLL=1` (or no C#) = the point ragdoll.
+  **Rocking in pain** (same day, user: "rolling side to side on his back a few times, curled up, then slowing down"):
+  lying hurt (pain begun), both curled knees swing to the same side and back at `ROCK_HZ` 0.7 Hz slowing to 55 %, leg
+  motors `ROCK_DRIVE` 3x harder, arms hug the knees, the head turns away; `ROCK_T` 4 s then it settles over 1.5 s. Real
+  physics: the legs' weight shifting rolls the body, no outside push. Once the pain has begun it runs its course (the
+  rocking moved him past the "still" test and cut it off). Probe `BMX_RAGBEH=1` `ROCK roll_deg`; `BMX_RAG_OFF=rock`.
+  On his back: +-20..30 deg swings; landed on his side: he rocks over to ~60-80 deg and back.
+  **Feet** (same day, user: "we don't have feet?!"): two foot bodies (1.1 kg, heel -> toe along the shoe's mesh box on its
+  sole, `Game._shoe_box`), ankles = joints 10 / 11 (ball: cone 0.55 rad round the riding foot angle, twist = rolling onto
+  the edges +-0.35), held at their natural angle by a motor as firm as the knee; each foot stands on five spheres (heel,
+  middle, toe, both sides of the ball); feet vs the other leg in the self contacts; the shoe is drawn from its foot body
+  (`RagdollRbCs.ShoeXf` -> `Ragdoll.shoe_xf` -> `Rider.pose_ragdoll(.., shoes)`). The shoes' world transforms are read
+  at the same moment as the joints (`Game.start_crash`, before the rider is moved to the origin: read after, the feet were
+  built 175 m from the legs and exploded). Shins 4.5 -> 3.4 kg. Lying still (rocking off) 21-66 m/s2.
+  **Riding ankles** (user: "ankles and feet are a big part of how a rider twists and rides"): `rider.gd` ANKLES: the shoe
+  is no longer rigidly straight on its pedal: the heel swivels in / toes out about the ball of the foot as the knee goes
+  out (`HEEL_TURN_MAX` 0.3 rad), the foot rolls with the shin's sideways tilt (`ANKLE_ROLL_MAX` 0.21), the outside heel
+  drops leaning into a turn (`HEEL_OUT_DROP` 0.1); the leg is solved a second time on the turned shoe. Pose keys
+  `heelTurn` / `ankleRoll` (0 = off). Steady turn at 9 m/s: inside heel 16-17 deg, outside 4-8, roll ~2 deg; pedal probe:
+  ball on the axle within 0.4 mm. `BMX_OLD_ANKLES=1` = before, `BMX_ANKLE_PROBE=1` = `ANKLE` lines (+ foot heights).
+  The shoe does NOT roll on its pedal (a pedal only turns on its axle: the sole stays flat, the ankle takes the shin's
+  tilt; `ankleRoll` is kept as an unused key) and the heel swivels about the pedal's own up axis: pedal probe sole vs
+  pedal 0.0 deg, ball on the axle 0.0 mm. Outside foot down in corners was already there (`bike_physics.gd`, coasting
+  with |lean| > 0.12 the cranks turn to the outside pedal at the bottom, else level): checked, coasting a left turn the
+  right foot is 0.21 m up, the left 0.55; a right turn the mirror.
+  **Feet, round 2 (2026-11-27, user: "he can't bend it so much", "gap behind the heel", "a better shoe ... like this road
+  shoe, not so high poly", the top line sketched)**: (1) **Ankle limit** (`rider.gd` ANKLE LIMIT, `BMX_OLD_ANKLELIM=1` = off):
+  the angle between sole and shin (in the foot's side plane) stays in `ANKLE_DORSI` 50 .. `ANKLE_PLANTAR` 135 deg; past it the
+  foot pitches on its pedal (the pedal turns with it) and the leg is solved again (3 passes). Measured before: 17-40 deg at the
+  top / back of the stroke (shin 50-77 deg forward over a level foot); after 50-80. `BMX_ANKLE_PROBE=1` prints `ANKLEANG deg=
+  pitch= phi= shin=`. (2) **Shoe v2** (`rider_gear.gd` `_build_shoe2`, `BMX_OLD_SHOE=1` = the old one): a road-style cycling
+  shoe, one rigid piece: slim last (`_hw2`), thin gum sole + midsole stripe with toe spring, upper lofted with cosine-spaced
+  sections (round heel and toe), its top line a Catmull-Rom through `TOP2` (from the user's sketch), the back third boxier
+  so the shin stays inside the opening, open accent shells for heel counter and toe bumper, two BOA dials on the OUTER side
+  of the instep (`build_shoe(m, side)`, left shoe mirrored) with cables over the top to guides. No laces, no tongue, no
+  collar cuff. The ankle sits further back in it (`Rider.ANKLE_X` -0.055) and the shin tube runs `SHIN_INTO` 4 cm down into
+  the shoe: no gap behind the heel at any ankle angle. Check: `--path godot -s res://tools/shoe_gallery.gd -- out.png` (shoes
+  with a shin at 50 / 70 / 90 / 120 deg, side and back views). Pedal probe still 0.0 mm / 0.0 deg.
+  (3) **Foot out in flat corners** (`Game._update_footout` / `_footout_foot`, drawing only, `BMX_OLD_FOOTOUT=1` = off,
+  `BMX_FOOTOUT_PROBE=1`): coasting 3-13 m/s, leaned past `FO_LEAN_ON` 0.45 rad on flat ground (no berm / bank), the inside foot
+  leaves its pedal and goes out ahead and to the inside, sole `FO_SKIM` 5 cm over the ground and flat on it (the dab's
+  `dabNormal` tilt), back on the pedal under `FO_LEAN_OFF` or when pedalling. (4) **Foot down on slopes / rocks**: the dab
+  foot's sole lies on the ground's slope (`dabNormal`, `_dab_foot`). (5) **Footprints** (`Game._footprints`,
+  `RutFieldCs.StampShoe`, `Ruts.shoe`; `BMX_OLD_FOOTPRINTS=1`, `BMX_FOOTPRINT_PROBE=1`): getting up / standing dizzy / limping, a
+  shoe that comes to rest flat on the ground presses a sole print into the rut field (plain pressed band, rounded heel, wider
+  ball), once per `FP_STEP` 12 cm; red for a few steps after standing in blood (x0.75 a step). Not done: Pose Lab foot
+  channels, checking the get-up's first frame starts from the ragdoll's feet.
+  **Balance controller, first version (same day, `ragdoll.gd` BALANCE / `_balance`, `BMX_OLD_BALANCE=1` = off, `BMX_BAL_PROBE=1`
+  = BAL / BALSTEP lines)**: a crash under `BAL_V` 4.5 m/s with the torso within `BAL_TILT_START` 0.95 rad of upright and a foot
+  < 0.5 m off the ground: SIMBICON-style on the rigid-body ragdoll's own joint motors, no outside force. FEET DOWN first (both
+  legs reach for the ground, `BAL_DROP_T`), then the STANCE hip motor aimed so its reaction turns the trunk toward upright
+  leaning back `BAL_LEAN_BACK` against the speed (PD, `BAL_KD`), stance knee soft (`BAL_KNEE`), SWING foot to `BAL_CP_K` x the
+  capture point (stride <= `BAL_STRIDE`, under the hips once nearly stopped), steps of `BAL_SWING_T`. While balancing: no
+  hard-crash trunk throw / startle at the start, the ankles capped (`RagdollRbCs.AnkleMax`: a stiff ankle on a flat foot sprang
+  him up), leg joints damped x`BAL_LEG_DAMP` (`LegDampMul`: the stiff knee spring bounced him into hops). Gives up (normal
+  behaviours) on any non-foot touch, tilt > 1.15, centre of mass < 0.55 or > 1.15 m (stood on the bike), 5 s. Standing still
+  0.7 s = `stood` -> `Game` puts him back on the bike from that pose (`_stand_world` blend). STATE: he gets his feet down,
+  brings the trunk up, takes 2-7 steps and brakes (1.6 -> 0.2 m/s), but at bail speeds 1-3.5 m/s (seed 4242 start) he gives up
+  after 0.6-1.6 s: his feet land either side of the bike still upright between his legs and he goes down with it. Never reached
+  `stood` in tests, so the hand-back is untested. Next: let the legs clear the bike first (step off to one side), or only
+  try when the bike falls away from him.
+  **Ball-joint twist reference fixed (same day, `RagdollRbCs.AddBall`, `BMX_OLD_TWISTREF=1` = before)**: the child's twist
+  reference was "forward" projected onto the bone; a riding thigh points nearly forward, the projection degenerated and every
+  crash started with the hips ~1 rad "twisted": their limit spun the pelvis. Now the parent's reference carried over by the
+  swing (zero twist at the start). Bail at 13 m/s: body speed 0.5 s in 18.9 -> 14.1 m/s, upward kick 1.3 -> 0.1 m/s.
+  Test aids: `BMX_RB_DBGJ=<bit mask>` turns single joints' limits off; `RagdollRbCs.LimitEach()`.
+  Not done: a balance controller (stagger, run a slow crash out), hands as their own bodies, per-joint strength
+  tuning, the GDScript point rules (_hinges, _cones...) only matter for the fallback now.
 - Ragdoll on crashes (`ragdoll.gd`), then get up with Space. Ground friction is sliding (Coulomb `SLIDE_MU` once per
   substep, after the solver passes) so a fast fall slides a few metres. **Neutral body posture** (`NEUTRAL`, after
   NASA's microgravity studies: head ~24° forward, arms forward with elbows ~90°, hips + knees ~50°): inside `DEAD`

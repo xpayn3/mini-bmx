@@ -323,6 +323,14 @@ var skid_fx := false; var surf := 0; var hop_bar := 0.0; var hop_bar_show := fal
 var crash_on := false; var crash_t := 0.0; var crash_pending := ""; var crash_side := 1.0
 var getup_need := GETUP_HOLD   # hold time to get up (longer to revive at zero life, set by the HUD)
 var crash_rest := 0.0; var crash_bvy := 0.0; var crash_fall_v := 0.0; var crash_armed := false; var crash_hold := 0.0
+## the crashed bike as a real body (CrashBikeCs, made by Game._crash_bike_begin; null = the old scripted fall: no C#, BMX_OLD_CRASHBIKE)
+var crash_sim = null
+var _bal_shoved := false
+const STEPOFF_DV := 1.4   # m/s at the bike's top: the shove that tips it away (see STEPPING OFF)
+var crash_K := Transform3D()    # the model in the sim's body frame (BikeRig.pose_crash draws sim.BodyAt() * crash_K)
+var crash_RK := Transform3D()   # ... the rig's root (x, y, z, heading, pitch, lean are read back from it)
+var _cb_hit := [0.0, 0.0]       # each wheel's hit last step (a new hit can knock it off)
+var _cb_off_t := -1.0           # tests (BMX_WHEEL_OFF): when the forced wheels came off
 
 func _init(h) -> void:
 	host = h
@@ -418,7 +426,7 @@ func get_up() -> void:
 ## everything a respawn and a get-up share: the bike stands still on the ground at (x, z), facing heading
 ## (one list, so a new state variable can't be reset by one and forgotten by the other)
 func _reset_motion() -> void:
-	crash_on = false; crash_pending = ""; crash_hold = 0.0; crash_armed = false
+	crash_on = false; crash_pending = ""; crash_hold = 0.0; crash_armed = false; crash_sim = null; _cb_off_t = -1.0
 	v = 0; vy = 0; steer = 0; steer_in = 0; steer_in_v = 0; lean = 0; lean_v = 0; pitch = 0; air = false
 	bike_lean = 0; counter = 0; rock = 0; yaw_rate = 0; hop_nose = 0; hop_t = 0; air_time = 0; air_k = 0
 	load = 0; compress = 0; compress_v = 0; prep = 0; land_prep = 0; pop_fired = false; spun_out = false; shake = 0
@@ -460,6 +468,7 @@ func _reset_ground_sim() -> void:
 	_risk.clear(); risk = 0.0; _risk_peak = 0.0
 
 func begin_crash() -> void:
+	_bal_shoved = false
 	crash_pending = ""
 	flow = 0
 	crash_on = true; crash_t = 0; crash_rest = 0; crash_armed = false; crash_hold = 0; wheelie_time = 0.0; wheelie_pedal = false
@@ -501,6 +510,117 @@ func _crash_step(dt: float, inp: Dictionary) -> void:
 	v *= exp(-dt * 2.2)
 	if absf(v) < 0.05: v = 0
 	yaw_rate *= exp(-dt * 3); heading += yaw_rate * dt
+	if crash_sim != null:
+		_crash_sim_step(dt)
+	else:
+		_crash_old_step(dt, f)
+	if rag and rag.active:   # (not while the get-up animation draws the body: Game.getup_anim)
+		var P: Vector3 = rag.p[Ragdoll.PELVIS]
+		var near: Array = terrain.colliders_near(P.x, P.z)
+		for c in near:
+			if c.get("tape", false): continue
+			if not c.get("fence", false) or rag.speed < 2.5 or Vector2(P.x - c.x, P.z - c.z).length() > c.r + 0.3 or P.y > terrain.height(P.x, P.z) + 1.4: continue
+			var Q: Vector3 = rag.q[Ragdoll.PELVIS]
+			host.smash(c, (P - Q) / dt * 3.0 * Vector3(1, 0, 1), P - Vector3(0, 0.4, 0))
+		var _rt := Time.get_ticks_usec() if prof != null else 0
+		rag.step(dt, near)
+		# STEPPING OFF (Ragdoll BALANCE): catching himself in a slow bail he lets go of the bike and shoves it away to the
+		# side it leans to (its top goes, the tyres stay), and his legs don't tangle in it while he stands (no rider-bike
+		# contact while balancing; it starts again once he gives up). It used to stay upright between his legs and take
+		# him down with it. BMX_OLD_STEPOFF=1 = before
+		var step_off: bool = rag.bal_on and crash_sim != null and Env.s("BMX_OLD_STEPOFF") == ""
+		if step_off and not _bal_shoved:
+			_bal_shoved = true
+			crash_sim.Release()
+			var bb: Basis = crash_sim.BodyNow().basis
+			var side_v := Vector3(bb.z.x, 0.0, bb.z.z).normalized()   # the bike's right
+			var lean_s := signf(bb.y.dot(side_v))                      # its top leans that way already: help it over
+			if lean_s == 0.0: lean_s = 1.0
+			crash_sim.Shove(side_v * lean_s * STEPOFF_DV + Vector3(0, 0.0, 0), 0.9)
+		if crash_sim != null and not _OLD_RIDERBIKE and not step_off:   # rider and bike knock each other (CrashBikeCs.CollideBody; BMX_OLD_RIDERBIKE=1 = pass through)
+			var hp: PackedVector3Array = PackedVector3Array(rag.p)
+			var hq: PackedVector3Array = PackedVector3Array(rag.q)
+			var nr := hp.size()
+			var held: bool = crash_sim.HoldsOn > 0 and Env.s("BMX_RAG_NOHOLD") == ""
+			if held:   # (hands / feet still on the bike)
+				var hh: PackedVector3Array = crash_sim.HoldBody(hp, hq, dt, rag.last_h)
+				hp = hh.slice(0, nr); hq = hh.slice(nr)
+			var np: PackedVector3Array = crash_sim.CollideBody(hp, hq, PackedFloat32Array(rag.rad))
+			rag.external_push(np.slice(0, nr), np.slice(nr))
+			# the rider is touching the bike: not "in the air" for the ragdoll's behaviours
+			rag.contact_ext = 0.0 if (held or crash_sim.LastPush > 0.0005) else rag.contact_ext + dt
+		if prof != null: _prof("ragdoll", _rt)
+		crash_rest = crash_rest + dt if rag.speed < 0.6 else 0.0
+	if host.getup_anim != null: return   # already getting up
+	var holding: bool = crash_armed and inp.hop
+	if holding: crash_hold += dt
+	else:
+		crash_armed = false; crash_hold = maxf(0.0, crash_hold - dt * 3)
+	if crash_hold >= getup_need:
+		host.begin_getup()
+
+## the crashed bike as a body (CrashBikeCs): one step of it, trunks / fences near, a wheel knocked off by a hard hit, and
+## x, y, z, heading, pitch, lean, bars, speed read back from it (camera, sound, getting up where it lies use them)
+const WHEEL_OFF_DV := 7.0     # m/s: a hit on a tyre harder than this may knock the wheel off ...
+const WHEEL_OFF_SPAN := 9.0   # ... certain-ish (WHEEL_OFF_MAX) this much harder
+const WHEEL_OFF_MAX := 0.5
+var _OLD_CRASHBIKE := Env.raw("BMX_OLD_CRASHBIKE") != ""
+var _OLD_RIDERBIKE := Env.raw("BMX_OLD_RIDERBIKE") != ""
+func _crash_sim_step(dt: float) -> void:
+	var terrain = host.terrain
+	var sim = crash_sim
+	if not sim.Asleep:
+		var c: Vector3 = sim.Centre()
+		var vel: Vector3 = sim.Velocity()
+		var cyl := PackedFloat32Array()
+		for col in terrain.colliders_near(c.x, c.z):
+			if col.get("tape", false) or col.has("sink"): continue   # (rocks / logs are domes in the ground)
+			if col.get("fence", false) or col.get("cactus", false):   # (smashed by a moving bike, else left: they're light)
+				if vel.length() > 2.0 and Vector2(c.x - col.x, c.z - col.z).length() < float(col.r) + 0.7:
+					host.smash(col, vel, c)
+				continue
+			var top: float = float(col.get("top", INF))
+			if col.has("top") and top - float(col.get("base", top - 1.0)) < 0.6: continue
+			cyl.append(float(col.x)); cyl.append(float(col.z)); cyl.append(float(col.r)); cyl.append(top if top < 1e6 else 1e6)
+		sim.SetColliders(cyl)
+		var _st := Time.get_ticks_usec() if prof != null else 0
+		sim.Step(dt)
+		if prof != null: _prof("crash_bike", _st)
+		# a wheel knocked off: on a new hard hit, the harder the likelier (tests: BMX_WHEEL_OFF=front|rear|both forces it)
+		var force := Env.s("BMX_WHEEL_OFF")
+		for w in 2:
+			if sim.WheelOff(w): continue
+			var hv: float = sim.HitFront if w == 0 else sim.HitRear
+			var go := false
+			if hv > WHEEL_OFF_DV and float(_cb_hit[w]) <= WHEEL_OFF_DV:
+				go = randf() < clampf((hv - WHEEL_OFF_DV) / WHEEL_OFF_SPAN, 0.08, 1.0) * WHEEL_OFF_MAX
+			if force != "" and crash_t > 0.12 and (force == "both" or (force == "front") == (w == 0)): go = true
+			_cb_hit[w] = hv
+			if go:
+				var kick := Vector3((randf() - 0.5) * 2.5, 1.2 + randf() * 1.6, (randf() - 0.5) * 2.5) + vel * 0.15
+				sim.Detach(w, kick, sim.AxleRoll(w))
+				if Env.s("BMX_CRASHBIKE_PROBE") != "": print("CRASHBIKE wheel off %s hit=%.1f t=%.2f" % ["front" if w == 0 else "rear", hv, crash_t])
+	# read back what the rest of the game uses
+	var root: Transform3D = sim.BodyAt(1.0) * crash_RK
+	var bx := root.basis.x.normalized()
+	x = root.origin.x; y = root.origin.y; z = root.origin.z
+	if Vector2(bx.x, bx.z).length() > 0.05: heading = atan2(-bx.z, bx.x)
+	pitch = asin(clampf(bx.y, -1.0, 1.0))
+	bike_lean = asin(clampf(root.basis.z.normalized().y, -1.0, 1.0))
+	steer = sim.ThetaAt(1.0)
+	var vv: Vector3 = sim.Velocity()
+	v = Vector2(vv.x, vv.z).length() * (1.0 if vv.dot(fwd()) >= 0.0 else -1.0)
+	if not sim.WheelOff(0): wheel_f += sim.AxleRoll(0) * dt
+	if not sim.WheelOff(1): wheel_r += sim.AxleRoll(1) * dt
+	counter = 0; rock = 0; pedal = 0; hop_nose = 0.0; yaw_rate = 0.0
+	body_y = y; body_v = 0; y_draw = y; pitch_draw = pitch
+	if Env.s("BMX_CRASHBIKE_PROBE") != "" and Engine.get_physics_frames() % 30 == 0:
+		print("CRASHBIKE tangled=%d push_cm=%.1f t=%.2f v=%.2f y=%.2f pitch=%.2f lean=%.2f bars=%.2f deep_cm=%.1f asleep=%s off=%s/%s hit=%.1f/%.1f" % [sim.Tangled, sim.LastPush * 100.0, crash_t, v, y, pitch, bike_lean, steer,
+			sim.Deepest() * 100.0, sim.Asleep, sim.WheelOff(0), sim.WheelOff(1), sim.HitFront, sim.HitRear])
+
+## the old scripted fall (no C# / BMX_OLD_CRASHBIKE): the bike slides as one point, the lean falls to ~85 deg
+func _crash_old_step(dt: float, f: Vector3) -> void:
+	var terrain = host.terrain
 	var _x0 := x; var _z0 := z
 	x += f.x * v * dt; z += f.z * v * dt
 	# a wall (canyon side, cliff face) stops the crashed bike: it used to follow the ground straight up it (F8 log 2026-11-23:
@@ -535,25 +655,6 @@ func _crash_step(dt: float, inp: Dictionary) -> void:
 	hop_nose *= exp(-dt * 4)
 	wheel_f += v / RWF * dt; wheel_r += v / RWR * dt
 	body_y = y; body_v = 0; y_draw = y; pitch_draw = pitch
-	if rag and rag.active:   # (not while the get-up animation draws the body: Game.getup_anim)
-		var P: Vector3 = rag.p[Ragdoll.PELVIS]
-		var near: Array = terrain.colliders_near(P.x, P.z)
-		for c in near:
-			if c.get("tape", false): continue
-			if not c.get("fence", false) or rag.speed < 2.5 or Vector2(P.x - c.x, P.z - c.z).length() > c.r + 0.3 or P.y > terrain.height(P.x, P.z) + 1.4: continue
-			var Q: Vector3 = rag.q[Ragdoll.PELVIS]
-			host.smash(c, (P - Q) / dt * 3.0 * Vector3(1, 0, 1), P - Vector3(0, 0.4, 0))
-		var _rt := Time.get_ticks_usec() if prof != null else 0
-		rag.step(dt, near)
-		if prof != null: _prof("ragdoll", _rt)
-		crash_rest = crash_rest + dt if rag.speed < 0.6 else 0.0
-	if host.getup_anim != null: return   # already getting up
-	var holding: bool = crash_armed and inp.hop
-	if holding: crash_hold += dt
-	else:
-		crash_armed = false; crash_hold = maxf(0.0, crash_hold - dt * 3)
-	if crash_hold >= getup_need:
-		host.begin_getup()
 
 # ---------------------------------------------------------------------
 var _g_y := 0.0; var _g_pitch := 0.0; var _g_hr := 0.0; var _g_hf := 0.0
