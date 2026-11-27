@@ -1644,6 +1644,12 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
     (stock, softest, firmest, air, hydraulic stop, 160 / 220 mm, three sets of sliders at their ends, the BMX, the old
     single spring): 0 non-finite states, travel max 100.0 %, tyre 4.6 cm. Behaviour checks fail only on absurd
     slider sets (everything rigid: it bounces off washboard) and the chaotic "brake grade -35 deg" one.
+  - **Substeps slider (2026-11-27)**: `suspSubsteps` (Ride > Suspension, default 4 = 480 Hz, 1..32) = how many times a
+    120 Hz tick `_step_vertical` steps springs / tyres / legs; `k_cap` / `c_cap` follow the step. The ground is NOT re-read
+    per substep (lerped between last tick's and this tick's reading). `slope_stress`: 4 / 8 / 16 = 56 / 56 each, step
+    144 / 158 / 178 us (~2.5 us a substep, runs in parallel), `skip=1` flights 60 / 61 / 61, air 14.0 / 13.8 / 13.7 s:
+    a higher rate barely changes the ride, so the step rate is not what limits rock / curb feel (a C# port of the loop
+    for speed is not worth it).
   - **Rim strikes on rocks (found testing the merge on the trail)**: with the real, shorter travel a rock or kerb met
     mid-corner at trail speed put an end on its rim, and the frame was then thrown up at the edge's whole rise (up to
     12 m/s): the legs bottomed and it read SLAM! (2 in a 74 s ride; in the F8-style ride log `v` goes negative for a
