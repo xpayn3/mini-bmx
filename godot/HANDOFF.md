@@ -1315,7 +1315,8 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
 - **Sponsor props** (`TrailCourse.chunk_boards`, fixed spacing by centreline index so growing never moves them): (the steel gantries over the trail were removed 2026-11-27) breakable wooden roadside billboards every ~80 m (fence-style panel in `TerrainChunkBuilder._boards`, so the bike smashes them; the Label3D text is freed on smash). Probe: `BMX_GATE_PROBE=1`.
 
 - **Checkpoint feather flags (2026-11-27)** (`world/checkpoint_flags.gd` `CheckpointFlags`, `shaders/feather_flag.gdshader`): at every
-  5 km distance sign (not the 1 km one) one feather flag on each side of the trail, drawn at `FLAG_SCALE` 1.47 (cloth from ~1.3 m up to ~5.6 m), W + 1.3 m out (inside the tape;
+  checkpoint (`TrailCourse.chunk_flags`: a pair 10 m past the start line, then every `FLAG_EVERY` 60 points = 120 m; user: "a pair
+  at the start line", "closer together, not km"; no longer tied to the distance signs) one feather flag on each side of the trail, drawn at `FLAG_SCALE` 1.47 (cloth from ~1.3 m up to ~5.6 m), W + 1.3 m out (inside the tape;
   spot checked like the signs, `TerrainChunkBuilder._checkpoint_flags` -> `out["flags"]`, one MultiMesh per chunk in
   `Terrain._finalize_out`). Visual only, no collider. Shape (user reference, `CheckpointFlags.pole_line()`): the pole runs straight up
   the cloth's side and bends over in a quarter ellipse to the top of the free edge; free edge and bottom are straight. All motion in the vertex
@@ -1327,7 +1328,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   designs (originals `flag_design/flag_blue.png`, `flag_pink.png`), slalom style: both flags of a checkpoint
   one colour, blue and red in turn down the trail (checkpoint number % 2). **Design template**: repo root `flag_design/flag_template.png`
   (outline, sleeve, safe area, 10 cm grid) + `flag_mask.png`, made by `flag_design/make_template.py` (same outline formula:
-  keep in step). Test: `BMX_SIGN_EVERY=60 BMX_GATE_PROBE=1` (checkpoints every 120 m, `CHECKFLAGS` lines).
+  keep in step). Test: `BMX_GATE_PROBE=1` (`CHECKFLAGS` lines).
 - **Sponsor gantries over the trail removed (2026-11-27, user)**: `_gates()` / `chunk_gates` bucketing / `TrailGate.build` in
   chunks are gone (`TrailGate` still holds the sponsor list, labels and the distance flag).
 - **Printed signs** (`world/sign_tex.gd` `SignTex`, `shaders/sign_board.gdshader`; 2026-11-25). Every sign face is printed once per look

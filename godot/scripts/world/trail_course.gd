@@ -77,6 +77,11 @@ var chunk_boards := {}  # key -> PackedInt32Array of centreline indices with a r
 var sign_every := SIGN_EVERY   # the distance signs' spacing in course points (BMX_SIGN_EVERY changes it for tests)
 var chunk_signs := {}   # key -> PackedInt32Array of centreline indices with a distance table (small leaning sign)
 const SIGN_FIRST := 500      # first sign at 1 km
+# checkpoint flags (2026-11-27, user: "a pair at the start line", "closer together, like when we were testing, not km"):
+# a pair 8 m past the rider's start (x 0; the course starts at x -36, 2 m a point), then one every FLAG_EVERY points
+const FLAG_FIRST := 22
+const FLAG_EVERY := 60       # 120 m
+var chunk_flags := {}   # key -> PackedInt32Array of centreline indices with a checkpoint (pair of feather flags)
 const SIGN_EVERY := 2500   # one every 5 km (centreline points are ~2 m apart)
 const BOARD_FIRST := 18
 const BOARD_EVERY := 41     # one every ~80 m, alternating sides
@@ -1315,6 +1320,9 @@ func _bucket() -> void:
 		_add(chunk_signs, _chunk_of(X[SIGN_FIRST], Z[SIGN_FIRST]), SIGN_FIRST)   # an early one at 1 km, then every 5 km
 	for i in range(sign_every, n - 2, sign_every):
 		_add(chunk_signs, _chunk_of(X[i], Z[i]), i)
+	chunk_flags = {}
+	for i in range(FLAG_FIRST, n - 8, FLAG_EVERY):
+		_add(chunk_flags, _chunk_of(X[i], Z[i]), i)
 	for i in range(BOARD_FIRST, n - 2, BOARD_EVERY):
 		var gd := posmod(i - GATE_FIRST, GATE_EVERY)
 		if gd < 8 or gd > GATE_EVERY - 8:
