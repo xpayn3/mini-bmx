@@ -62,6 +62,13 @@ var dry := 0.0                    # 0 fresh, wet mud .. 1 a dry crust (shader: p
 var flake := 0.0                  # how much of the dry crust has been knocked off, 0..1
 var _shed := 0.0                  # dry chunks waiting to fly off the bike (take_shed)
 const DRY_T := 90.0               # seconds for fresh mud to dry out
+## the mud dries layer by layer (2026-11-27, user: "new dirt gets a new colour, wet mud that then dries slowly"):
+## mud_old = how much of the mud is already an old, dry crust (it follows mud ~DRY_T behind); in the shader the
+## splotches that were there at that mud level are dry (pale, matte, cracked, old_col), what came on since is
+## fresh (dark, glossy, the colour of the ground ridden now: mud_col)
+var mud_old := 0.0
+var old_col := Color(0.22, 0.145, 0.08)
+static var _OLD_DRY := Env.raw("BMX_OLD_MUDDRY") != ""   # tests: the old one-dryness-for-all
 static var _PROBE := Env.raw("BMX_GRIME_PROBE") != ""
 var _vw := Vector2(NAN, NAN)      # last wheel vertical speeds (rattle)
 const GROUND_FOLLOW := 6.0   # s of riding new ground until the dust film has its colour (mud: 2.5x)
@@ -93,6 +100,8 @@ func _init() -> void:
 	if Env.raw("BMX_MUD_DRY") != "": dry = float(Env.raw("BMX_MUD_DRY"))   # tests: start dried
 	if Env.raw("BMX_MUD_FLAKE") != "": flake = float(Env.raw("BMX_MUD_FLAKE"))
 	if Env.raw("BMX_MUD_COAT") != "": mud = float(Env.raw("BMX_MUD_COAT"))   # start muddy (not held)
+	mud_old = mud * dry   # tests: BMX_MUD_DRY = that share already a dry crust
+	old_col = mud_col
 	_wet_mat = ShaderMaterial.new()
 	_wet_mat.shader = WET_SHADER
 	_wet_mat.render_priority = 4   # last: over the mud, the stickers and the blood
@@ -364,7 +373,7 @@ func _cav_apply(m: ShaderMaterial) -> void:
 		m.set_shader_parameter("cav_size", cav_size)
 
 func clean() -> void:
-	mud = 0.0; wet = 0.0; dust = 0.0; dry = 0.0; flake = 0.0; _shed = 0.0
+	mud = 0.0; wet = 0.0; dust = 0.0; dry = 0.0; flake = 0.0; _shed = 0.0; mud_old = 0.0
 
 ## dry chunks knocked off since the last call (Game flings that many bits of dirt off the bike)
 func take_shed() -> int:
@@ -374,7 +383,7 @@ func take_shed() -> int:
 
 ## the colour of dried mud (lighter, a little toward the dust): for the chunks it sheds
 func dry_color() -> Color:
-	return mud_col.lerp(dust_col, 0.35) * 1.35
+	return old_col.lerp(dust_col, 0.35) * 1.1
 
 ## a knock on the bike (landing, rattle): dry crust breaks off. k ~ 1 for a hard landing
 func _knock(k: float) -> void:
@@ -383,6 +392,7 @@ func _knock(k: float) -> void:
 	var lost := minf(1.0, k * 0.12)
 	flake = minf(0.9, flake + lost * dry * dry * (1.0 - flake))
 	mud = maxf(0.0, mud - mud * lost * 0.08 * dry * dry)
+	mud_old = minf(mud_old, mud)
 	_shed += lost * crust * 120.0
 
 ## a crash leaves blood on the rider and the bike (more for a harder one); only a death + revive washes it off
@@ -527,6 +537,7 @@ func feed(dt: float, surf: int, speed: float, skid: bool, air: bool, landed: flo
 		# wet = how high the water has got (the wet pass draws it from the ground up: wheels and feet first); the
 		# spray climbs faster the faster you go, full in ~3 s at 30 km/h
 		dry = maxf(0.0, dry - dt * 0.5)   # what's left softens again
+		mud_old = minf(maxf(0.0, mud_old - dt * 0.08), mud)
 		mud = maxf(0.0, mud - dt * (0.02 + speed * 0.008) * clampf(wet * 2.0, 0.2, 1.0))   # ~10 s to rinse at 30 km/h
 		dust = maxf(0.0, dust - dt * (0.08 + speed * 0.015) * clampf(wet * 2.0, 0.2, 1.0))   # ~4 s
 		wet = minf(1.0, wet + dt * (0.12 + speed * 0.035) * (1.0 - 0.5 * wet))
@@ -559,13 +570,23 @@ func feed(dt: float, surf: int, speed: float, skid: bool, air: bool, landed: flo
 		var fresh := minf(1.0, gain / (mud + gain + 0.02))
 		mud_col = mud_col.lerp(target, maxf(fresh, 1.0 - exp(-dt / (GROUND_FOLLOW * 2.5))))   # fresh mud covers the old
 		mud = minf(1.0, mud + gain)
-		dry = maxf(0.0, dry - fresh * 1.5)       # fresh mud on top: wet again
+		if _OLD_DRY: dry = maxf(0.0, dry - fresh * 1.5)       # fresh mud on top: wet again
 		flake = maxf(0.0, flake - fresh * 2.0)   # and the gaps fill in
 	wet *= exp(-dt / 7.0)   # dries off over a few seconds
 	if _WET_HOLD > 0.0: wet = maxf(wet, _WET_HOLD)   # tests: kept this wet
 	# the mud dries while nothing fresh lands on it (not while it's soaked)
+	if _OLD_DRY:
+		if mud > 0.002 and wet < 0.3:
+			dry = minf(1.0, dry + dt / DRY_T * (1.0 - wet * 2.5))
+		return
+	# layer by layer: what was laid ~DRY_T ago is a crust now; the dried layer takes the colour of the mud it was
 	if mud > 0.002 and wet < 0.3:
-		dry = minf(1.0, dry + dt / DRY_T * (1.0 - wet * 2.5))
+		var adv := (mud - mud_old) * (1.0 - exp(-dt / (DRY_T * 0.4))) * (1.0 - wet * 2.5)
+		if adv > 0.0:
+			old_col = old_col.lerp(mud_col, minf(1.0, adv / (mud_old + adv + 0.01)))
+			mud_old += adv
+	mud_old = minf(mud_old, mud)
+	dry = clampf(mud_old / maxf(mud, 1e-3), 0.0, 1.0) if mud > 0.002 else 0.0   # the crust share: flakes, shed bits
 
 ## per frame. bike_root: world -> bike-root transform source (the rig: y = height above the ground)
 ## the frame profiler (F10): while it records, Game sets this to its per-frame dict ("grime.*")
@@ -587,7 +608,7 @@ func update(dt: float, bike_root: Node3D) -> void:
 	_cav_poll()
 	if prof != null: _gt = _gp("cavity", _gt)
 	if _PROBE and int(_t) != int(_t - dt):
-		print("GRIME t=%.0f mud=%.3f dust=%.2f dry=%.2f flake=%.2f wet=%.2f" % [_t, mud, dust, dry, flake, wet])
+		print("GRIME t=%.0f mud=%.3f old=%.3f dust=%.2f dry=%.2f flake=%.2f wet=%.2f" % [_t, mud, mud_old, dust, dry, flake, wet])
 	if _t > 0.3 and int(_t * 4.0) != int((_t - dt) * 4.0):
 		_pin()   # once the rider is posed on the bike; new parts (helmet, kit) get pinned as they appear
 	if prof != null: _gt = _gp("pin", _gt)
@@ -616,7 +637,8 @@ func update(dt: float, bike_root: Node3D) -> void:
 	RenderingServer.global_shader_parameter_set("grime", Vector4(m, w, _t, b))
 	RenderingServer.global_shader_parameter_set("mud_col", mud_col)
 	RenderingServer.global_shader_parameter_set("rider_trim", trim)
-	RenderingServer.global_shader_parameter_set("grime_age", Vector4(dry, flake, 0.0, 0.0))
+	RenderingServer.global_shader_parameter_set("mud_col_old", old_col)
+	RenderingServer.global_shader_parameter_set("grime_age", Vector4(dry, flake, mud_old if not _OLD_DRY else -1.0, 0.0))
 	var dl := dust_col.srgb_to_linear()   # a plain vec4 global: no colour conversion is done for us (sRGB numbers read
 	RenderingServer.global_shader_parameter_set("grime_dust", Vector4(dl.r, dl.g, dl.b, d))   # as linear made the film pale / chalky)
 	var inv := bike_root.global_transform.affine_inverse()

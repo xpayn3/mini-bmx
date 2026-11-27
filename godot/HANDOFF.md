@@ -2691,6 +2691,23 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   dried = pale / matte, thick crust cracks into ~2 cm Voronoi plates (`gr_cells`), flaked plates vanish along the cracks
   leaving a stain. Knocked-off crust flies as `fx.chunk`s (`Grime.take_shed`, spawned in `Game.ride_fx`).
   Tests: `BMX_MUD_COAT` (start, not held), `BMX_MUD_DRY`, `BMX_MUD_FLAKE`; `BMX_GRIME_PROBE=1` prints `GRIME t=` lines.
+  **No shimmer, layer-by-layer drying, colour variation (2026-11-27, user: "mud flickers standing still and circling the
+  camera", "dirt always so bright in the sun", "all one colour", "new dirt a new colour, wet mud that dries slowly")**:
+  every noise octave fades to its average once finer than ~2 pixels (`gr_oct`, pixel size = fwidth of the part-space
+  position), flecks fade out, splotch edges / fleck edges are antialiased over a pixel (were hard steps), crack lines no
+  thinner than a pixel, the bump's slope capped, specular AA (rough_m from fwidth(NORMAL)). The wet / light-match pass's
+  "seen surface" depth test grows with distance (0.001 + 0.0008 x depth). Drying is per layer: `Grime.mud_old` (the mud
+  level that is a crust, follows `mud` ~DRY_T behind, shader `grime_age.z`) -> splotches that existed at that level are
+  dry (pale, matte, cracked, colour `mud_col_old` = the mud as it was laid), what came on since is fresh (dark, glossy,
+  colour of the ground now); fresh mud no longer re-wets the old crust. Dust film x0.74 and dried crust less pale (they
+  read chalky in full sun); a clay-red .. grey-silt tint + value patches over each part. `BMX_OLD_MUDDRY=1` = the old
+  single dryness. Not measured: GPU cost of the extra fwidths (a few ALU ops).
+  **Tyre mud like a real knobby (same day)**: WheelGen writes UV2 on the tyre (x = knob base 0 .. tip 1, y = 0.001 +
+  crown 0 .. bead 1; 0 = no data, imported tyres fall back to the normal). `tyre_cover` in grime_mud: the gaps between
+  the knobs pack first (x1.8), the mud creeps up the knob sides, knob tops only cake in deep mud (lvl^1.7: the ground
+  scrubs them), the sidewall starts past mud 0.18, from the shoulder down in flung clumps, cleanest at the bead; dust
+  sits on the sidewall, knob tops rolled clean. Also fixed: the tyre LOD switch ran on game time, so in photo mode /
+  paused replays the tyres kept their far knob-less LOD up close (`BikeRig._process` now on real time).
   Test: `BMX_DUST_COAT=0.8` (+ `BMX_MUD`, `BMX_BLOOD_COAT`). Mud / blood on rider limbs stay put: `Rider.set_limb` takes the
   limb's twist from the sideways axis (the shortest turn from +Y spun shins / forearms round as they pointed down, so the
   pattern slid round the leg); glove fingers carry their bone-space shape in CUSTOM0 (`grime_pin` 2). Passes
