@@ -1014,6 +1014,15 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   steering), only `ROPE_TURN_PUSH` 0.3 of the turn's reaction shoves the deck and only `ROPE_CARRY` 0.4 of the deck's
   sideways swing moves the bike. Trail camera: looks along the bridge (`Terrain.rope_aim` in `CameraRig._look_dir`)
   and its look point never drops more than 3 m under the rider (it aimed at the canyon floor beside the deck).
+  **Look (2026-11-27, user: "our textures for planks, realistic rope, strong sticks not trees")**: planks = the fences'
+  Wood049 scan on real bevelled planks (`_plank_mesh`: rounded box, 1.2 cm edge radius, normals kept round under the
+  MultiMesh stretch by the shader), ropes = a three-strand twisted hemp shader on the tubes' UVs (`shaders/rope_fiber.gdshader`; the C#
+  `Tube` now writes UV.x = metres along / circumference), the four pines are gone: stout debarked log posts (Wood035,
+  `shaders/rope_wood.gdshader` for both) leaning back from the canyon, each with a side brace, a guy rope to a stake,
+  rope lashings coiled round them (hand rope, deck-rope tail, brace, top) and the world's own RockGen rocks (the
+  biome's type + scan material, `_add_stones`) half sunk at the foot (`_build_trees`,
+  `_add_log`, `_coil`, `_rope_line`). Visual only (the trees had no colliders either). Seeds with rope bridges now:
+  `-s res://tools/rope_seed_scan.gd` (seed 6 has several from s=1678; 12 / 4242 have none any more).
   Not done: a roadside billboard stands in the canyon under seed 12's bridge (`chunk_boards` doesn't skip ropes). Photo tests:
   `BMX_PHOTO_AT=x,y,z,lx,ly,lz` puts the photo camera at a world point looking at another (FEATSPAWN prints the feature's `at` / `dir`).
 

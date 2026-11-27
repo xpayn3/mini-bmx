@@ -1,7 +1,7 @@
 class_name RopeBridge
 extends Node3D
-## A swinging rope bridge high over a crevasse (route feature "rope"): four ropes tied round two pairs of big
-## trees, planks lashed across the two deck ropes, hangers from the hand ropes. Simulated in C#
+## A swinging rope bridge high over a crevasse (route feature "rope"): four ropes tied to two pairs of stout
+## log posts, planks lashed across the two deck ropes, hangers from the hand ropes. Simulated in C#
 ## (RopeBridgeSim.cs) every physics tick: it sags into a V under the rider, rolls when the weight is off
 ## centre, swings in the wind and from the rider's own sideways push, and its sideways swing carries the bike.
 ## The deck is part of Terrain.height() / deck_height() while this node lives (Terrain keeps the bridges near
@@ -67,18 +67,33 @@ static func available() -> bool:
 static func warm() -> void:
 	if not _mats.is_empty():
 		return
-	var rope := StandardMaterial3D.new()
-	rope.albedo_color = Color(0.58, 0.48, 0.33)
-	rope.roughness = 0.95
-	rope.cull_mode = BaseMaterial3D.CULL_DISABLED
+	# ropes: three-strand twisted hemp on the tubes' UVs (shaders/rope_fiber.gdshader)
+	var rope := ShaderMaterial.new()
+	rope.shader = preload("res://shaders/rope_fiber.gdshader")
 	_mats["rope"] = rope
-	for kv in [["plank", 0.9, false], ["bark", 0.95, false], ["leaves", 0.85, false], ["ties", 0.95, true]]:
-		var m := StandardMaterial3D.new()
-		m.vertex_color_use_as_albedo = true
-		m.roughness = kv[1]
-		if kv[2]:
-			m.cull_mode = BaseMaterial3D.CULL_DISABLED
-		_mats[kv[0]] = m
+	# deck planks: the fences' Wood049 plank scan; posts / braces / logs: the sign posts' Wood035 scan
+	var plank := ShaderMaterial.new()
+	plank.shader = preload("res://shaders/rope_wood.gdshader")
+	plank.set_shader_parameter("wood_col", load("res://assets/textures/wood_plank/wood_color.jpg"))
+	plank.set_shader_parameter("wood_nrm", load("res://assets/textures/wood_plank/wood_normal.jpg"))
+	plank.set_shader_parameter("wood_rgh", load("res://assets/textures/wood_plank/wood_rough.jpg"))
+	plank.set_shader_parameter("tile", 1.1)
+	_mats["plank"] = plank
+	var logm := ShaderMaterial.new()
+	logm.shader = plank.shader
+	logm.set_shader_parameter("wood_col", load("res://assets/textures/wood_post/wood_color.jpg"))
+	logm.set_shader_parameter("wood_nrm", load("res://assets/textures/wood_post/wood_normal.jpg"))
+	logm.set_shader_parameter("wood_rgh", load("res://assets/textures/wood_post/wood_rough.jpg"))
+	logm.set_shader_parameter("log_mode", true)
+	logm.set_shader_parameter("log_r", POST_R)
+	logm.set_shader_parameter("tile", 0.9)
+	logm.set_shader_parameter("scan_mean", Vector3(0.1261, 0.0752, 0.0482))
+	_mats["log"] = logm
+	var bark := StandardMaterial3D.new()   # vertex-coloured (the old canyon-wall rocks, unused)
+	bark.vertex_color_use_as_albedo = true
+	bark.roughness = 0.95
+	bark.vertex_color_is_srgb = true
+	_mats["bark"] = bark
 	# a material's shader is only generated when an instance first takes it (~80 ms for these): do that now
 	var mi := MultiMeshInstance3D.new()
 	for k in _mats:
@@ -182,8 +197,7 @@ func _build_planks(count: int) -> void:
 	_mm = MultiMesh.new()
 	_mm.transform_format = MultiMesh.TRANSFORM_3D
 	_mm.use_colors = true
-	_mm.mesh = BoxMesh.new()
-	(_mm.mesh as BoxMesh).size = Vector3.ONE
+	_mm.mesh = _plank_mesh()
 	_mm.instance_count = count
 	var mi := MultiMeshInstance3D.new()
 	mi.multimesh = _mm
@@ -191,59 +205,295 @@ func _build_planks(count: int) -> void:
 	add_child(mi)
 
 
-## four big pines the ropes are tied round, a rope lashing at each tie, and the short ropes from the
-## deck ends down to the trunks' feet
+## one plank with rounded (bevelled) edges, made once: built at a plank's real size (PLANK_LEN x PLANK_THICK x
+## PLANK_NOM) with its normals in metres, then the positions divided down to a unit box, because the MultiMesh scales
+## each instance to its plank (RopeBridgeSim.PlankBuffer). shaders/rope_wood.gdshader divides the normal by the scale
+## again in vertex(), so the edges stay round after the uneven stretch. Rounded box: each face a 3 x 3 grid whose
+## outer rows sit on the edge and are pushed round it (q + r n); ~108 triangles
+const PLANK_NOM := 2.35      # a plank's usual length across the deck (m)
+const PLANK_BEVEL := 0.012   # edge radius (m)
+static var _plank: ArrayMesh
+
+static func _plank_mesh() -> ArrayMesh:
+	if _plank != null:
+		return _plank
+	var hs := Vector3(PLANK_LEN, PLANK_THICK, PLANK_NOM) * 0.5
+	var rr := minf(PLANK_BEVEL, hs.y * 0.6)
+	var inner := hs - Vector3(rr, rr, rr)
+	var v := PackedVector3Array()
+	var n := PackedVector3Array()
+	var idx := PackedInt32Array()
+	for ax in 3:
+		for sg in [-1.0, 1.0]:
+			var a1 := (ax + 1) % 3
+			var a2 := (ax + 2) % 3
+			var s1 := [-hs[a1], -inner[a1], inner[a1], hs[a1]]
+			var s2 := [-hs[a2], -inner[a2], inner[a2], hs[a2]]
+			var base := v.size()
+			for i in 4:
+				for j in 4:
+					var p := Vector3()
+					p[ax] = sg * hs[ax]
+					p[a1] = s1[i]
+					p[a2] = s2[j]
+					var q := p.clamp(-inner, inner)
+					var nn := (p - q).normalized()
+					v.append((q + nn * rr) / (hs * 2.0))
+					n.append(nn)
+			var fn := Vector3()
+			fn[ax] = sg
+			for i in 3:
+				for j in 3:
+					var a := base + i * 4 + j
+					var b := a + 4
+					var tri := [a, b, a + 1, a + 1, b, b + 1]
+					# Godot's front faces are clockwise seen from outside: flip the quad if it isn't
+					var e := ((v[b] - v[a]) * hs).cross((v[a + 1] - v[a]) * hs)
+					if e.dot(fn) > 0.0:
+						tri = [a, a + 1, b, a + 1, b + 1, b]
+					idx.append_array(tri)
+	var arr := []
+	arr.resize(Mesh.ARRAY_MAX)
+	arr[Mesh.ARRAY_VERTEX] = v
+	arr[Mesh.ARRAY_NORMAL] = n
+	arr[Mesh.ARRAY_INDEX] = idx
+	_plank = ArrayMesh.new()
+	_plank.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+	return _plank
+
+
+## at each end two stout log posts the ropes are tied to (no trees: strong sticks dug in, leaning back against the
+## pull, user 2026-11-27): each post has a guy rope from its top back to a stake, a side brace, stones packed round its
+## foot, the hand rope lashed round it at hand height and the deck rope's tail lashed round its foot. A log under each
+## deck end carries the planks
+const POST_R := 0.15
+const POST_LEAN := 0.13     # rad, back away from the canyon
+const ROPE_R := 0.017       # lashing / guy rope radius
+
 func _build_trees(gy: Callable, r: WorldRng) -> void:
-	var bark := GeoBuf.new()
-	var leaves := GeoBuf.new()
-	var ties := GeoBuf.new()
-	var rope_c: Color = _mats["rope"].albedo_color
+	var stones: Array = []   # [Transform3D, brightness] for each rock, all of one type (the world's own, RockGen)
+	var rope := {"v": PackedVector3Array(), "n": PackedVector3Array(), "uv": PackedVector2Array(), "i": PackedInt32Array()}
 	for end in [0, 1]:
+		var back := -1.0 if end == 0 else 1.0   # away from the canyon
 		for side in [-1.0, 1.0]:
 			var u: float = TREE_U if end == 0 else length - TREE_U
 			var w: float = side * TREE_W
 			var g: float = gy.call(u, w)
-			var h := 13.0 + r.next() * 4.0
-			var lean := Vector3((r.next() - 0.5) * 0.04, 1, side * 0.03).normalized()
-			var trunk := GeoBuf.cylinder(0.11, 0.36, h, 10, 6).translate(0, h * 0.5 - 0.3, 0)
-			var roots := GeoBuf.new()
-			for k in 5:
-				var a := k * TAU / 5 + r.next()
-				roots.append(GeoBuf.cone(0.16, 0.9, 5).rot_z(PI * 0.62).translate(0.32, 0.15, 0).rot_y(a))
-			bark.append(GeoBuf.merge([trunk, roots]).paint(Color(0.17, 0.12, 0.09)).xform(Basis(Quaternion(Vector3.UP, lean)), Vector3(u, g, w)))
-			var crown := GeoBuf.new()
-			var tiers := 6
-			for k in tiers:
-				var f := float(k) / tiers
-				var cr := lerpf(2.2, 0.6, f) * (0.9 + r.next() * 0.2)   # high and slim: the ride cameras look past it
-				crown.append(GeoBuf.cone(cr, 2.2, 8).rot_y(r.next() * TAU).translate(0, lerpf(h * 0.6, h * 0.95, f), 0))
-			var green := Color(0.05, 0.2, 0.09).lerp(Color(0.09, 0.26, 0.1), r.next())
-			leaves.append(crown.paint(green).xform(Basis(Quaternion(Vector3.UP, lean)), Vector3(u, g, w)))
-			# lashings: the hand rope wrapped round at hand height, the deck rope round the foot
 			var du0: float = _u0 if end == 0 else _u1
 			var hy: float = gy.call(du0, 0.0) + DECK_LIFT + HAND_H
-			for wy in [hy, g + 0.35]:
-				var tr: float = 0.36 - 0.25 * (wy - g + 0.3) / h + 0.025
-				for k in 3:
-					ties.append(_ring(tr, 0.026).paint(rope_c).translate(u + lean.x * (wy - g), wy + (k - 1) * 0.055, w + lean.z * (wy - g)))
-			# the hand rope's end runs into its lashing round the trunk
+			var ax := Vector3(back * sin(POST_LEAN + (r.next() - 0.5) * 0.04), 1.0, side * (0.03 + r.next() * 0.03)).normalized()
+			var foot := Vector3(u, g, w)
+			var top_h := maxf(hy - g, 1.0) + 0.5 + r.next() * 0.25   # height of its top above the ground
+			var plen := top_h / ax.y
+			_add_log(foot - ax * 0.6, ax, plen + 0.6, POST_R * (1.05 + r.next() * 0.1), POST_R * 0.85, r, 1.0)
+			# side brace: from two thirds up the post down to the ground outside
+			var bt := foot + ax * plen * 0.62
+			var bf := Vector3(u + back * 0.3, 0.0, w + side * 1.35)
+			bf.y = gy.call(bf.x, bf.z) - 0.25
+			_add_log(bf, (bt - bf).normalized(), (bt - bf).length() + 0.05, 0.085, 0.07, r, 1.0)
+			_coil(rope, bt - ax * 0.05, ax, POST_R + ROPE_R, 3.0)
+			# guy rope from the post's top back to a stake
+			var top := foot + ax * (plen - 0.12)
+			var sx: float = u + back * (3.0 + r.next() * 0.6)
+			var sz: float = w + side * (0.8 + r.next() * 0.5)
+			var sg: float = gy.call(sx, sz)
+			var sax := Vector3(back * 0.35, 1.0, side * 0.15).normalized()
+			_add_log(Vector3(sx, sg - 0.35, sz), sax, 0.8, 0.055, 0.045, r, 1.0)
+			var stake_tie := Vector3(sx, sg, sz) + sax * 0.28
+			_coil(rope, top, ax, POST_R * 0.9 + ROPE_R, 3.0)
+			_coil(rope, stake_tie, sax, 0.05 + ROPE_R, 2.5)
+			_rope_line(rope, top + Vector3(back * POST_R, 0, 0), stake_tie - Vector3(back * 0.05, 0, 0), 0.04, ROPE_R)
+			# hand rope lashed round the post at hand height, its end running into the lashing
+			var hc := foot + ax * ((hy - g) / ax.y)
+			_coil(rope, hc, ax, POST_R + ROPE_R, 4.0)
 			var hu: float = TREE_U + 0.2 if end == 0 else length - TREE_U - 0.2
-			ties.append(_rod(Vector3(hu, hy, side * HAND_HALF), Vector3(u + lean.x * (hy - g), hy, w + lean.z * (hy - g)), 0.022).paint(rope_c))
-			# the deck rope's tail from its pinned end down to the trunk's foot
-			var du: float = _u0 if end == 0 else _u1
-			var a := Vector3(du, gy.call(du, 0.0) + 0.0, side * DECK_HALF)
-			var b := Vector3(u, g + 0.35, w - side * 0.3)
-			ties.append(_rod(a, b, 0.026).paint(rope_c))
+			_rope_line(rope, Vector3(hu, hy, side * HAND_HALF), hc - Vector3(0, 0, side * POST_R * 0.6), 0.0, 0.022)
+			# the deck rope's tail from its pinned end to a lashing round the foot
+			var fc := foot + ax * (0.35 / ax.y)
+			_coil(rope, fc, ax, POST_R * 1.08 + ROPE_R, 4.0)
+			var a := Vector3(du0, gy.call(du0, 0.0), side * DECK_HALF)
+			_rope_line(rope, a, fc - Vector3(back * POST_R * 0.5, 0, side * POST_R * 0.7), 0.02, 0.026)
+			# stones packed round the foot (half sunk), turned and squashed so no two look alike
+			for k in 4 + int(r.next() * 3):
+				var ang := r.next() * TAU
+				var d: float = POST_R + 0.14 + r.next() * 0.2
+				var at := Vector3(u + cos(ang) * d, 0.0, w + sin(ang) * d)
+				var sc := 0.11 + r.next() * 0.11
+				at.y = gy.call(at.x, at.z) - sc * 0.25
+				var bs := Basis(Vector3.UP, r.next() * TAU).rotated(Vector3.RIGHT, (r.next() - 0.5) * 0.4)
+				stones.append([Transform3D(bs.scaled(Vector3(sc, sc * (0.6 + r.next() * 0.3), sc * (0.9 + r.next() * 0.3))), at), 0.88 + r.next() * 0.24])
 	# a log under each deck end the planks sit on
 	for end in [0, 1]:
 		var du: float = _u0 if end == 0 else _u1
-		bark.append(GeoBuf.cylinder(0.13, 0.13, DECK_HALF * 2 + 0.7, 8).rot_x(PI / 2).paint(Color(0.34, 0.25, 0.17))
-			.translate(du, gy.call(du, 0.0) - 0.12, 0))
-	for gb in [[bark, "bark"], [leaves, "leaves"], [ties, "ties"]]:
-		var mi := MeshInstance3D.new()
-		mi.mesh = (gb[0] as GeoBuf).to_mesh(gb[0] == bark)
-		mi.material_override = _mats[gb[1]]
-		add_child(mi)
+		var hl := DECK_HALF + 0.35
+		_add_log(Vector3(du, gy.call(du, 0.0) - 0.12, -hl), Vector3(0, 0, 1), hl * 2.0, 0.13, 0.12, r, 0.0)
+	_add_stones(stones, r)
+	var arr := []
+	arr.resize(Mesh.ARRAY_MAX)
+	arr[Mesh.ARRAY_VERTEX] = rope.v
+	arr[Mesh.ARRAY_NORMAL] = rope.n
+	arr[Mesh.ARRAY_TEX_UV] = rope.uv
+	arr[Mesh.ARRAY_INDEX] = rope.i
+	var am := ArrayMesh.new()
+	am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+	var rmi := MeshInstance3D.new()
+	rmi.mesh = am
+	rmi.material_override = _mats["rope"]
+	add_child(rmi)
+
+
+## the stones as the world's rocks: RockGen's LOD0 mesh of the type that grows here (biome), its scan material
+## (TerrainGeo "rock_<type>", MultiMesh custom data = brightness, moss)
+func _add_stones(stones: Array, r: WorldRng) -> void:
+	if stones.is_empty():
+		return
+	TerrainGeo.ensure()
+	var c := world(TREE_U, 0.0)
+	var t := _rock_here(c.x, c.y)
+	var moss := 0.0 if t == "desert" else 0.25
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_custom_data = true
+	mm.mesh = RockGen.mesh(t, int(r.next() * RockGen.VARIANTS), 0)
+	mm.instance_count = stones.size()
+	for i in stones.size():
+		mm.set_instance_transform(i, stones[i][0])
+		var b: float = stones[i][1]
+		mm.set_instance_custom_data(i, Color(b, b, b, moss))
+	var mi := MultiMeshInstance3D.new()
+	mi.multimesh = mm
+	mi.material_override = TerrainGeo.MAT.get("rock_" + t, TerrainGeo.MAT["rock"])
+	add_child(mi)
+
+
+## the rock type the biome grows at (x, z), as TerrainChunkBuilder._rock_type picks it (its strongest weight)
+func _rock_here(x: float, z: float) -> String:
+	var f = _field
+	var keep := [f.b_dry, f.b_rug, f.b_cold, f.b_wet, f.b_forest, f.b_sav, f.b_ash, f._bi_x, f._bi_z]
+	f.biome(x, z)
+	var wt := {"basalt": f.b_ash * 1.6, "desert": f.b_dry * 1.3 + f.b_sav * 0.5,
+		"tundra": f.b_cold * 1.4 + f.b_rug * 0.35 * (1.0 - f.b_dry), "granite": 0.35 + f.b_forest * 0.6 + f.b_wet * 0.4}
+	f.b_dry = keep[0]; f.b_rug = keep[1]; f.b_cold = keep[2]; f.b_wet = keep[3]; f.b_forest = keep[4]
+	f.b_sav = keep[5]; f.b_ash = keep[6]; f._bi_x = keep[7]; f._bi_z = keep[8]
+	var best := "granite"
+	for k in wt:
+		if wt[k] > wt[best]:
+			best = k
+	return best
+
+
+## a debarked log from `base` along `axis` (its own node: the wood shader maps the scan round its local y); foot_k 1 =
+## darker and damp at the foot (dug-in posts), 0 = none (lying logs)
+func _add_log(base: Vector3, axis: Vector3, ln: float, r0: float, r1: float, r: WorldRng, foot_k: float) -> void:
+	var seg := 12
+	var rows := 6
+	var v := PackedVector3Array()
+	var n := PackedVector3Array()
+	var c := PackedColorArray()
+	var idx := PackedInt32Array()
+	var tone := Color(0.4, 0.33, 0.26).lerp(Color(0.5, 0.42, 0.33), r.next())
+	tone.a = foot_k
+	var wob := r.next() * TAU
+	for iy in rows + 1:
+		var t := float(iy) / rows
+		var rad := lerpf(r0, r1, t) * (1.0 + 0.04 * sin(t * 9.0 + wob))
+		for k in seg + 1:
+			var a := float(k) / seg * TAU
+			var d := Vector3(cos(a), 0, sin(a))
+			v.append(d * rad + Vector3(0, t * ln, 0))
+			n.append(d)
+			c.append(tone)
+	for iy in rows:
+		for k in seg:
+			var a0 := iy * (seg + 1) + k
+			var b0 := a0 + seg + 1
+			idx.append_array([a0, a0 + 1, b0, a0 + 1, b0 + 1, b0])
+	# end caps (end grain)
+	for cap in [0, 1]:
+		var y := 0.0 if cap == 0 else ln
+		var rad := r0 if cap == 0 else r1
+		var up := Vector3(0, -1 if cap == 0 else 1, 0)
+		var ci := v.size()
+		v.append(Vector3(0, y, 0)); n.append(up); c.append(tone)
+		for k in seg + 1:
+			var a := float(k) / seg * TAU
+			v.append(Vector3(cos(a) * rad, y, sin(a) * rad)); n.append(up); c.append(tone)
+		for k in seg:
+			if cap == 1:
+				idx.append_array([ci, ci + 1 + k + 1, ci + 1 + k])
+			else:
+				idx.append_array([ci, ci + 1 + k, ci + 1 + k + 1])
+	var arr := []
+	arr.resize(Mesh.ARRAY_MAX)
+	arr[Mesh.ARRAY_VERTEX] = v
+	arr[Mesh.ARRAY_NORMAL] = n
+	arr[Mesh.ARRAY_COLOR] = c
+	arr[Mesh.ARRAY_INDEX] = idx
+	var am := ArrayMesh.new()
+	am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+	var mi := MeshInstance3D.new()
+	mi.mesh = am
+	mi.material_override = _mats["log"]
+	var y := axis.normalized()
+	var x := y.cross(Vector3.FORWARD if absf(y.z) < 0.9 else Vector3.RIGHT).normalized()
+	var z := x.cross(y)
+	mi.transform = Transform3D(Basis(x, y, z).rotated(y, r.next() * TAU), base)
+	add_child(mi)
+
+
+## a rope tube through pts (UV.x = metres along / circumference, as RopeBridgeSim.Tube)
+static func _tube(arr: Dictionary, pts: PackedVector3Array, rad: float, sides: int = 7) -> void:
+	var start: int = arr.v.size()
+	var along := 0.0
+	var circ := TAU * rad
+	var nprev := Vector3.ZERO
+	for i in pts.size():
+		if i > 0:
+			along += pts[i].distance_to(pts[i - 1])
+		var t := (pts[mini(pts.size() - 1, i + 1)] - pts[maxi(0, i - 1)]).normalized()
+		var nn := t.cross(Vector3.UP) if nprev == Vector3.ZERO else nprev - t * t.dot(nprev)
+		if nn.length_squared() < 1e-6:
+			nn = t.cross(Vector3.RIGHT)
+		nn = nn.normalized()
+		nprev = nn
+		var b := t.cross(nn)
+		for k in sides + 1:
+			var a := float(k) / sides * TAU
+			var d := nn * cos(a) + b * sin(a)
+			arr.v.append(pts[i] + d * rad)
+			arr.n.append(d)
+			arr.uv.append(Vector2(along / circ, float(k) / sides))
+	var row := sides + 1
+	for i in pts.size() - 1:
+		for k in sides:
+			var a0 := start + i * row + k
+			var b0 := a0 + row
+			arr.i.append_array([a0, b0, a0 + 1, a0 + 1, b0, b0 + 1])
+
+
+## a rope wound `turns` times round an axis (a lashing), a little helix climbing ~2 rope widths a turn
+static func _coil(arr: Dictionary, centre: Vector3, axis: Vector3, radius: float, turns: float) -> void:
+	var y := axis.normalized()
+	var x := y.cross(Vector3.FORWARD if absf(y.z) < 0.9 else Vector3.RIGHT).normalized()
+	var z := x.cross(y)
+	var pts := PackedVector3Array()
+	var steps := int(turns * 20)
+	var rise := ROPE_R * 2.1
+	for k in steps + 1:
+		var t := float(k) / steps * turns
+		var a := t * TAU
+		pts.append(centre + (x * cos(a) + z * sin(a)) * radius + y * (t - turns * 0.5) * rise)
+	_tube(arr, pts, ROPE_R)
+
+
+## a rope from a to b hanging `sag` m in the middle
+static func _rope_line(arr: Dictionary, a: Vector3, b: Vector3, sag: float, rad: float) -> void:
+	var pts := PackedVector3Array()
+	var n := maxi(2, int(a.distance_to(b) / 0.25))
+	for k in n + 1:
+		var t := float(k) / n
+		pts.append(a.lerp(b, t) - Vector3(0, sag * 4.0 * t * (1.0 - t), 0))
+	_tube(arr, pts, rad)
 
 
 ## the canyon's walls (TerrainField.canyon_rims) faced with layered rock: flattened boulders stacked down each
@@ -431,5 +681,6 @@ func _draw(a: float) -> void:
 	mesh_arr[Mesh.ARRAY_VERTEX] = PackedVector3Array(arr[0])
 	mesh_arr[Mesh.ARRAY_NORMAL] = PackedVector3Array(arr[1])
 	mesh_arr[Mesh.ARRAY_INDEX] = PackedInt32Array(arr[2])
+	mesh_arr[Mesh.ARRAY_TEX_UV] = PackedVector2Array(arr[3])
 	_rope_mesh.clear_surfaces()
 	_rope_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, mesh_arr)
