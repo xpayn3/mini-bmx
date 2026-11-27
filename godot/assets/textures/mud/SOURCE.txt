@@ -1,0 +1,5 @@
+Poly Haven (https://polyhaven.com), CC0 1.0 - no attribution required. 1K JPG scans:
+brown_mud_03       = wet mud        -> mud_wet.png
+mud_cracked_dry_03 = cracked crust  -> mud_dry.png
+Packed by tools/make_mud_scans.py (repo root): RG = normal x, y (OpenGL), B = height, A = brightness detail
+(luminance / mean x 0.5; the mud's colour is the ground's). Used by shaders/grime_mud.gdshader.

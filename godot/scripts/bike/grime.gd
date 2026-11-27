@@ -15,6 +15,10 @@ extends Node3D
 ## there is something to draw, so a clean, dry bike costs nothing.
 
 const MUD_SHADER := preload("res://shaders/grime_mud.gdshader")
+# real mud scans (Poly Haven CC0, packed by tools/make_mud_scans.py): RG normal, B height, A brightness
+const MUD_WET_TEX := preload("res://assets/textures/mud/mud_wet.png")
+const MUD_DRY_TEX := preload("res://assets/textures/mud/mud_dry.png")
+static var _OLD_MUDTEX := Env.s("BMX_OLD_MUDTEX") == "1"
 const WET_SHADER := preload("res://shaders/grime_wet.gdshader")
 const BLOOD_SHADER := preload("res://shaders/grime_blood.gdshader")
 ## the blood pass is alpha-scissored (opaque pipeline); a sticker's blood stays see-through (masked by the
@@ -445,6 +449,9 @@ func _new_mud(bias: float, tyre: bool, wheel: bool, decal := false) -> ShaderMat
 	m.set_shader_parameter("bias", bias)
 	m.set_shader_parameter("tyre", tyre)
 	m.set_shader_parameter("wheel", wheel)
+	m.set_shader_parameter("mud_wet_tex", MUD_WET_TEX)
+	m.set_shader_parameter("mud_dry_tex", MUD_DRY_TEX)
+	m.set_shader_parameter("scan_on", not _OLD_MUDTEX)
 	var bm := ShaderMaterial.new()   # the blood pass that follows this mud pass (opaque, alpha scissor;
 	bm.shader = _blood_decal() if decal else BLOOD_SHADER   # a sticker's: see-through, masked by it)
 	bm.set_shader_parameter("bias", clampf(bias, 0.4, 1.0))
