@@ -85,7 +85,6 @@ const DEFAULTS := {
 	"sfx_fringe": 1.0,       # × the colour fringing at the corners
 	"sfx_vignette": 1.0,     # × the frame closing in
 	"sfx_pull": 1.0,         # × how far the camera pulls in at speed
-	"pacenotes": true,       # simple turn warning card for the next bend (arrow, distance, BRAKE when too fast)
 	"sfx_start": 18.0,      # km/h where the speed effects begin (full ~44 km/h above it)
 	"cam_recenter": true,    # the camera swings back behind the rider a moment after you turn it
 	"cam_keep": true,        # never let the rider leave the frame

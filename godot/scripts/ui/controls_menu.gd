@@ -158,7 +158,6 @@ func _camera() -> Control:
 	_slider(p, "Speed lines", "sfx_lines", 0.0, 2.0, 0.1, "%.1fx", "Streaks rushing out from the middle")
 	_slider(p, "Colour fringing", "sfx_fringe", 0.0, 2.0, 0.1, "%.1fx", "Red / blue split toward the corners")
 	_slider(p, "Vignette", "sfx_vignette", 0.0, 2.0, 0.1, "%.1fx", "The frame darkens and closes in at speed")
-	_check(p, "Turn warnings", "pacenotes", "A small card for the next bend: an arrow, the distance, and BRAKE when you are too fast for it")
 	var hs := HBoxContainer.new()
 	hs.add_child(UITheme.button("Reset speed effects", _reset_speed_fx, _f(15)))
 	p.add_child(hs)
@@ -168,7 +167,7 @@ func _camera() -> Control:
 	return p
 
 func _reset_speed_fx() -> void:
-	for k in ["speed_fx", "cam_speed_fov", "sfx_blur", "sfx_lines", "sfx_fringe", "sfx_vignette", "sfx_pull", "sfx_start", "pacenotes"]:
+	for k in ["speed_fx", "cam_speed_fov", "sfx_blur", "sfx_lines", "sfx_fringe", "sfx_vignette", "sfx_pull", "sfx_start"]:
 		Settings.data[k] = Settings.DEFAULTS[k]
 	Settings.apply()
 	Settings.save()

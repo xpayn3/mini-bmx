@@ -71,10 +71,6 @@ var trail_i := -1       # nearest trail centreline point
 var trail_d := INF      # how far off the trail centreline (m)
 var _full_scan_ms := -100000   # when _trail_scan last searched the whole trail (msec)
 var alert := {}         # the next turn / feature on the trail: {kind, text, d}, or empty
-var pace := {}          # the next bend as a simple turn warning: {sev 1..6, side, text, d, hot 0..1}, or empty
-var pace_view: Control
-const PACE_A_LAT := 7.0   # m/s^2 of sideways grip a rider plans a bend with (the demo pilot's number)
-const PACE_BRAKE := 5.5   # m/s^2 he can count on to slow down
 var alert_new := 0.0    # seconds left to show a just-appeared alert while it is still far off
 const FEAT_NAMES := {"table": "TABLETOP", "tableLine": "JUMP LINE", "kicker": "KICKER", "rhythm": "ROLLERS",
 	"flow": "FLOW LINE", "woodKicker": "WOOD KICKER", "bridge": "BRIDGE", "gorge": "GORGE BRIDGE", "rope": "ROPE BRIDGE"}
@@ -143,11 +139,6 @@ func _ready() -> void:
 	air_card = AirCard.new(); air_card.hud = self
 	air_card.size = Vector2(260, 112); air_card.position = Vector2(20, 14)   # top left (top centre is the area banner's)
 	root.add_child(air_card)
-	pace_view = PaceView.new(); pace_view.hud = self
-	pace_view.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	pace_view.size = Vector2(104, 78); pace_view.position = Vector2(-52, 96)   # top centre, under the area banner
-	pace_view.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	root.add_child(pace_view)
 	on_respawn()
 	_build_records()
 	quick = Dev.make("tune/quick_tune.gd")   # (a developer tool: none in a release build)
@@ -176,7 +167,7 @@ func _layout() -> void:
 ## along the bottom, the ride above it. The game HUD's big pieces (computer, jump card, life / stamina, style, corner
 ## lines, achievement pops) are hidden there; the hop / pump / balance bars + get-up prompt move up over the band.
 ## Normal rides never call these.
-const DEV_HIDE := ["gauge", "air_card", "pace_view", "life_bar", "stamina", "style_pop", "info_l", "biome_l", "msg_l", "quick"]
+const DEV_HIDE := ["gauge", "air_card", "life_bar", "stamina", "style_pop", "info_l", "biome_l", "msg_l", "quick"]
 var dev_on := false
 
 func dev_mode(on: bool) -> void:
@@ -584,13 +575,8 @@ func _probe_alerts() -> void:
 func _trail_scan(p: Vector2, fw: Vector2, crashed: bool) -> void:
 	var was: String = alert.get("text", "")
 	alert = {}
-	pace = {}
-	# the computer's own alert card needs a unit with navigation; the rally pacenote (`pace`) works with any
+	# the computer's own alert card needs a unit with navigation
 	var gauge_ok: bool = gauge.unit.nav and ComputerUnits.opt(GameState.computer_id, "alerts")
-	if Env.s("BMX_PACE_DEMO") != "":   # tests: a fixed pacenote (BMX_PACE_DEMO=<1..6>, BMX_PACE_HOT=1 flags it too fast)
-		var sv := clampi(int(Env.s("BMX_PACE_DEMO")), 1, 6)
-		pace = {"sev": sv, "side": 1, "text": "SHARP RIGHT", "d": 64.0, "deg": [170, 125, 90, 60, 35, 20][sv - 1], "vs": [18.0, 25.0, 35.0, 45.0, 58.0, 75.0][sv - 1], "hot": 1.0 if Env.s("BMX_PACE_HOT") != "" else 0.0}
-		return
 	if gauge_ok and Env.s("BMX_ALERT_DEMO") != "":   # tests: a fixed alert to look at
 		alert = {"kind": Env.s("BMX_ALERT_DEMO"), "text": "HAIRPIN RIGHT", "d": 22.0}
 		return
@@ -623,11 +609,8 @@ func _trail_scan(p: Vector2, fw: Vector2, crashed: bool) -> void:
 			while j > trail_i and absf(tc.KAP[j - 1]) > 1.0 / 60.0 and signf(tc.KAP[j - 1]) == sg: j -= 1
 			var k := i
 			var ang := 0.0
-			var kmax := 0.0
-			var apex := i
 			while k < tc.n - 1 and absf(tc.KAP[k]) > 1.0 / 60.0 and signf(tc.KAP[k]) == sg:
 				ang += tc.KAP[k] * S
-				if absf(tc.KAP[k]) > kmax: kmax = absf(tc.KAP[k]); apex = k
 				k += 1
 			var d := (j - trail_i) * S
 			if d < 4.0 or absf(ang) < 0.6:
@@ -635,19 +618,8 @@ func _trail_scan(p: Vector2, fw: Vector2, crashed: bool) -> void:
 			var side := "RIGHT" if sg > 0 else "LEFT"
 			var kind := ("H" if absf(ang) > 2.3 else "S" if absf(ang) > 1.2 else "") + side[0]
 			var txt := ("HAIRPIN " if absf(ang) > 2.3 else "SHARP " if absf(ang) > 1.2 else "") + side
-			# rally pacenote: the speed this bend can be taken at (its tightest curvature, the grip a rider plans with + the
-			# bank), graded 1 (hairpin) .. 6 (flat out), and whether the speed now leaves room to brake for it
-			var bank := absf(tc.BT[apex]) if apex < tc.BT.size() else 0.0
-			var vs := minf(sqrt((PACE_A_LAT + 9.81 * bank) / maxf(kmax, 0.001)), 40.0)
-			var vk := vs * 3.6
-			var sev := 1 if vk < 20.0 else 2 if vk < 28.0 else 3 if vk < 38.0 else 4 if vk < 50.0 else 5 if vk < 65.0 else 6
-			var v_now := absf(game.phys.v)
-			var hot := 0.0
-			if v_now > vs * 1.08:
-				hot = smoothstep(0.75, 1.25, ((v_now * v_now - vs * vs) / (2.0 * PACE_BRAKE)) / maxf(d - 3.0, 1.0))
-			pace = {"sev": sev, "side": 1 if sg > 0 else -1, "text": txt, "d": d, "vs": vk, "hot": hot, "deg": roundi(absf(ang) * 180.0 / PI)}
 			if d < best_d:
-				best_d = d; alert = {"kind": kind, "text": txt, "d": d, "sev": sev, "side": 1 if sg > 0 else -1}
+				best_d = d; alert = {"kind": kind, "text": txt, "d": d, "side": 1 if sg > 0 else -1}
 			break
 		i += 1
 	# the next route feature (jumps, rollers, wood)
@@ -1700,89 +1672,6 @@ class BalanceMeter extends Control:
 		SlimBar.disc(self, kc, 6.5, Color(0, 0, 0, 0.55 * a))
 		SlimBar.disc(self, kc, 5.0, Color(mc, a))
 		SlimBar.disc(self, kc + Vector2(-1.2, -1.4), 1.8, Color(1, 1, 1, 0.5 * a))
-
-class PaceView extends Control:
-	## rally pacenote for the next bend: its grade 1 (hairpin) .. 6 (flat out) big, an arrow whose bend matches the grade,
-	## the distance and the speed it can be taken at; when the speed now leaves no room to brake the card flashes red.
-	const COLS := [Color("ff3b30"), Color("ff7a1f"), Color("ffb020"), Color("ffe03a"), Color("b8ee6a"), Color("8be8a0")]
-	const TURN := [2.95, 2.15, 1.55, 1.1, 0.7, 0.3]   # how far each grade bends the road (rad)
-	var hud
-	var a := 0.0
-	var t := 0.0
-	var last := {}
-	## the bend as a geometric arrow: a straight shaft, one crisp mitred corner at the turn's angle (hairpins: a squared U),
-	## and a flat triangular head; `h` = its height in px
-	static func draw_arrow(c: CanvasItem, ic: Vector2, sev: int, side: float, col: Color, h: float, _w := 3.0) -> void:
-		sev = clampi(sev, 1, 6)
-		# centre line: straight run-in, a perfect circular arc through the turn's angle, a short run-out
-		var th: float = PI if sev == 1 else TURN[sev - 1]
-		var rad: float = [8.0, 9.5, 11.0, 13.0, 17.0, 24.0][sev - 1]
-		var pts := PackedVector2Array()
-		var y0 := 8.0 if sev == 1 else 6.0
-		pts.append(Vector2(0, y0 + 10.0))
-		pts.append(Vector2(0, y0))
-		var cen := Vector2(side * rad, y0)
-		var steps := maxi(6, int(th / 0.12))
-		for q in range(1, steps + 1):
-			var ph := th * float(q) / steps
-			pts.append(cen + Vector2(-cos(ph) * side, -sin(ph)) * rad)
-		var out_dir := Vector2(sin(th) * side, -cos(th))
-		var sw := 6.0          # stroke width
-		var hl := 9.0          # head length
-		# (the run-out is a touch longer than the head, which is cut back out of it: shorter, the shaft doubled back
-		# along the curve under the head - the hairpin's was 4 px)
-		pts.append(pts[pts.size() - 1] + out_dir * (hl + 1.0))
-		var hw := 7.5          # head half width
-		var n := pts.size()
-		var tip := pts[n - 1]
-		var hd := (tip - pts[n - 2]).normalized()
-		pts[n - 1] = tip - hd * hl          # the shaft stops where the head starts
-		var head := PackedVector2Array([tip, tip - hd * hl + Vector2(-hd.y, hd.x) * hw, tip - hd * hl - Vector2(-hd.y, hd.x) * hw])
-		var mn := tip; var mx := tip
-		for q in [pts, head]:
-			for p in q:
-				mn = Vector2(minf(mn.x, p.x), minf(mn.y, p.y)); mx = Vector2(maxf(mx.x, p.x), maxf(mx.y, p.y))
-		var mid := (mn + mx) * 0.5
-		var sc := h / 34.0
-		var o1 := PackedVector2Array(); for p in pts: o1.append(ic + (p - mid) * sc)
-		var o2 := PackedVector2Array(); for p in head: o2.append(ic + (p - mid) * sc)
-		c.draw_polyline(o1, col, sw * sc, true)
-		c.draw_colored_polygon(o2, col)
-	func _process(dt: float) -> void:
-		t += dt
-		var p: Dictionary = hud.pace
-		var show: bool = Settings.get_v("pacenotes") and not p.is_empty() and float(p.d) < 150.0 and not hud.game.phys.crash_on
-		a = move_toward(a, 1.0 if show else 0.0, dt * (6.0 if show else 3.0))
-		if show: last = p
-		visible = a > 0.01
-		if visible: queue_redraw()
-	func _draw() -> void:
-		if last.is_empty(): return
-		if Env.s("BMX_PACE_ALL") != "":   # test: all six grades in a row (right turns, then left)
-			for q in 12:
-				var cc := Rect2(-340.0 + (q % 6) * 72.0, (q / 6) * 84.0, 64.0, 74.0)
-				UITheme.draw_box(self, cc, COLS[q % 6], 10)
-				var ik := Color.WHITE if q % 6 <= 1 else Color("14181c")
-				draw_arrow(self, cc.position + Vector2(32, 27), q % 6 + 1, 1.0 if q < 6 else -1.0, ik, 38.0)
-			return
-		var p: Dictionary = last
-		var sev: int = p.sev
-		var hot: float = clampf(float(p.hot), 0.0, 1.0)
-		var warn := hot > 0.45
-		# a flat card: colour = how hard the turn is, the arrow = its shape; too fast = it flashes red and shakes
-		var shake := sin(t * 40.0) * 2.5 * hot if warn else 0.0
-		var cw := 64.0
-		var ch := 74.0
-		var card := Rect2((size.x - cw) * 0.5 + shake, (1.0 - a) * -12.0, cw, ch)
-		var base_col: Color = COLS[sev - 1]
-		var fill := base_col.lerp(Color("e0231a"), hot * (0.4 + 0.6 * (0.5 + 0.5 * sin(t * 14.0))))
-		fill.a = a
-		UITheme.draw_box(self, card, fill, 10)
-		var ink := Color("ffffff") if (sev <= 2 or warn) else Color("14181c")
-		ink.a = a
-		draw_arrow(self, card.position + Vector2(cw * 0.5, 27.0), sev, float(p.side), ink, 38.0)
-		# how far the road turns, in degrees (too fast for it = the card flashes red and shakes)
-		draw_string(UITheme.font(true), Vector2(card.position.x, card.end.y - 8), "%d°" % int(p.get("deg", 0)), HORIZONTAL_ALIGNMENT_CENTER, cw, 16, ink)
 
 class AirCard extends Control:
 	## live jump counter: distance from the take-off point, height and air time; the result holds for a
