@@ -13,6 +13,9 @@ uniform sampler2D wood_rgh : hint_roughness_gray, filter_linear_mipmap_anisotrop
 uniform sampler2D grime_tex : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform int grain_axis = 1;   // 0 = along the part's x, 1 = along its y
 uniform float tile = 1.0;     // metres of wood per texture repeat along the grain
+// broken pieces (TerrainDebris: rail halves, splinters) are plain MeshInstances with no instance data: their colour comes from here
+uniform bool use_tint = false;
+uniform vec3 tint = vec3(0.3, 0.2, 0.12);
 const vec3 WOOD_MEAN = vec3(0.2023, 0.1249, 0.0732);   // Wood049's mean colour (linear)
 varying flat vec3 v_origin;
 varying vec3 v_m;     // position on the part in metres (part space)
@@ -25,7 +28,7 @@ void vertex() {
 	vec3 sc = vec3(length(MODEL_MATRIX[0].xyz), length(MODEL_MATRIX[1].xyz), length(MODEL_MATRIX[2].xyz));
 	v_m = VERTEX * sc;
 	v_n = NORMAL;
-	v_tint = INSTANCE_CUSTOM.rgb;
+	v_tint = use_tint ? tint : INSTANCE_CUSTOM.rgb;
 	v_y = (MODEL_MATRIX * vec4(VERTEX, 1.0)).y;
 }
 

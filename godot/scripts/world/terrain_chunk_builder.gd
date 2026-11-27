@@ -19,6 +19,7 @@ const LIST_NAMES := ["trunk", "trunk_pale", "trunk_pine", "blob", "pine", "rock"
 	"spebble_a", "spebble_b", "spebble_c", "spebble_d", "spebble_e"]
 const SPAN := 2.4
 static var OLD_WEED := Env.raw("BMX_OLD_WEED") == "1"
+static var OLD_RAILS := Env.raw("BMX_OLD_RAILS") == "1"   # fence rails of every panel in one plane (overlaps z-fight)
 static var OLD_ROADSIDE := Env.raw("BMX_OLD_ROADSIDE") == "1"   # no extra bushes along the road
 static var OLD_VERGE := Env.raw("BMX_OLD_VERGE") != ""   # grass stops ~1 m off the dirt, none under jumps
 const TAPE_SEG := 30
@@ -737,7 +738,13 @@ func _build_fence(pts: Array, style: String, rs: WorldRng) -> void:
 		var qr := Basis(Vector3.UP, yaw) * Basis(Vector3.BACK, pitch)
 		for rl in st["rails"]:
 			var sag := (rs.next() - .5) * 0.04
-			add.call("rail", panel, Vector3((a[0] + b[0]) / 2 + nx * st["railOff"], (a[2] + b[2]) / 2 + rl[0] + sag, (a[1] + b[1]) / 2 + nz * st["railOff"]),
+			# Rails run 6 cm past each post, so neighbouring panels' rail ends overlap there. In one plane they z-fought
+			# (flickering planks): every other panel's rails sit one rail thickness further out, lapped over the
+			# neighbour's like rails nailed on at a post. BMX_OLD_RAILS=1 = all in one plane.
+			var off: float = st["railOff"]
+			if k % 2 == 1 and not OLD_RAILS:
+				off += signf(off) * (rl[2] + 0.004)
+			add.call("rail", panel, Vector3((a[0] + b[0]) / 2 + nx * off, (a[2] + b[2]) / 2 + rl[0] + sag, (a[1] + b[1]) / 2 + nz * off),
 				qr, Vector3(L + 0.12, rl[1], rl[2]))
 		if st["pickets"] > 0:
 			var n := WorldRng.jround(L / st["pickets"])
