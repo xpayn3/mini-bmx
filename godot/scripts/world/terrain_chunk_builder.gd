@@ -14,7 +14,9 @@ const SMALL := ["pebble", "pebble_granite", "pebble_desert", "pebble_tundra", "p
 const LIST_NAMES := ["trunk", "trunk_pale", "trunk_pine", "blob", "pine", "rock", "pebble", "grass", "daisy", "tulip", "spike", "cactus0", "cactus1", "cactus2", "cactus3", "cactus4",
 	"bush", "bush1", "bush2", "bushdry", "log", "root", "stick", "fern", "mushroom", "weed", "plank", "beam", "post", "rail", "picket", "stake", "pole", "signboard",
 	"rock_granite0", "rock_granite1", "pebble_granite", "rock_desert0", "rock_desert1", "pebble_desert",
-	"rock_tundra0", "rock_tundra1", "pebble_tundra", "rock_basalt0", "rock_basalt1", "pebble_basalt"]
+	"rock_tundra0", "rock_tundra1", "pebble_tundra", "rock_basalt0", "rock_basalt1", "pebble_basalt",
+	"scan_boulder01", "scan_nboulder02", "scan_rock09", "scan_nstone_a", "scan_nstone_b", "scan_nstone_c", "scan_nstone_d", "scan_nstone_e",
+	"spebble_a", "spebble_b", "spebble_c", "spebble_d", "spebble_e"]
 const SPAN := 2.4
 static var OLD_WEED := Env.raw("BMX_OLD_WEED") == "1"
 static var OLD_ROADSIDE := Env.raw("BMX_OLD_ROADSIDE") == "1"   # no extra bushes along the road
@@ -112,14 +114,66 @@ func run() -> void:
 
 
 # ---------------- instance lists ----------------
+var _rock_sharp := false   # granite (rounded, weathered) -> tundra (frost-split, crisp edges): the brink boulders
+var _moss_k := 1.0
+var _lg := PackedColorArray()   # this chunk's land / dirt colours (sRGB, per grid node): the scanned rocks take their tone
+var _ld := PackedColorArray()
+static var OLD_ROCKTONE := Env.raw("BMX_OLD_ROCKTONE") == "1"
+## (2026-11-27, user: "rocks don't match the surroundings, they pop"): a scanned rock's instance colour = the ground's own colour
+## where it lies (half land, half dirt; a little greyer, a little darker), so its average albedo sits just under the ground's
+## (rock_scan.gdshader: scan detail x tint, the tint brings each scan's mean to linear ~0.19). b = the rock's own brightness
+func _rock_tone(x: float, z: float, b: float) -> Color:
+	var NV := N + 1
+	var d := S / N
+	var ix := clampi(roundi((x - (cx * S - S / 2)) / d), 0, NV - 1)
+	var iz := clampi(roundi((z - (cz * S - S / 2)) / d), 0, NV - 1)
+	# mostly the land's colour (sand, soil, rock); where the land is grass-green its dirt colour instead (no green rocks)
+	var lg: Color = _lg[iz * NV + ix]
+	var green := clampf((lg.g - maxf(lg.r, lg.b)) * 6.0, 0.0, 1.0)
+	var g: Color = lg.lerp(_ld[iz * NV + ix], lerpf(0.2, 1.0, green))
+	var lin := g.srgb_to_linear()
+	var l := 0.2126 * lin.r + 0.7152 * lin.g + 0.0722 * lin.b
+	lin = Color(lerpf(lin.r, l, 0.5), lerpf(lin.g, l, 0.5), lerpf(lin.b, l, 0.5))
+	var k := 0.82 / 0.19 * b
+	return Color(lin.r * k, lin.g * k, lin.b * k)   # x the rocks' moss (_rock_type): the brink rocks by the trail are scraped / sun-baked, mostly bare
 func _push(name: String, b: Basis, p: Vector3, c: Color) -> int:
-	if (name == "rock" or name == "pebble") and not TerrainGeo.old_rocks():
+	var ca := 1.0
+	if name == "rock" and not OLD_SCANROCKS and not TerrainGeo.old_rocks():
+		# (2026-11-27, user: "still dark low-poly stones"): every big rock in the world is one of the scanned rocks, picked by
+		# country and a hash of the spot (no random numbers drawn: nothing else moves); the tone as the brink rocks
+		var keep := [f.b_dry, f.b_rug, f.b_cold, f.b_wet, f.b_forest, f.b_sav, f.b_ash, f._bi_x, f._bi_z]
+		f.biome(p.x, p.z)
+		var dry: bool = f.b_dry > 0.45
+		f.b_dry = keep[0]; f.b_rug = keep[1]; f.b_cold = keep[2]; f.b_wet = keep[3]; f.b_forest = keep[4]
+		f.b_sav = keep[5]; f.b_ash = keep[6]; f._bi_x = keep[7]; f._bi_z = keep[8]
+		var hx := sin(p.x * 12.9898 + p.z * 78.233) * 43758.5453
+		var h := hx - floorf(hx)
+		var big := b.y.length() > 0.9
+		if dry:
+			name = "scan_nboulder02" if big and h < 0.35 else SCAN_STONES[int(h * 50.0) % 5]
+		else:
+			name = "scan_boulder01" if big and h < 0.3 else ("scan_rock09" if h < 0.55 else SCAN_STONES[int(h * 50.0) % 5])
+		var bb := 0.82 + 0.28 * fmod(h * 7.31, 1.0)
+		c = Color(bb * 1.04, bb * 0.95, bb * 0.83) if dry else Color(bb * 0.93, bb * 0.94, bb * 0.97)
+	elif name == "pebble" and not OLD_SCANROCKS and not TerrainGeo.old_rocks():
+		# pebbles: the scanned stone set too, light mesh only (no near twin: there are many)
+		var hx := sin(p.x * 39.346 + p.z * 11.135) * 24634.6345
+		var h := hx - floorf(hx)
+		name = "spebble_" + "abcde"[int(h * 5.0) % 5]
+		var bb := 0.85 + 0.25 * fmod(h * 5.17, 1.0)
+		c = Color(bb * 1.04, bb * 0.95, bb * 0.83) if f.b_dry > 0.45 else Color(bb * 0.93, bb * 0.94, bb * 0.97)
+	elif (name == "rock" or name == "pebble") and not TerrainGeo.old_rocks():
 		var rt := _rock_type(p.x, p.z)
 		name = ("pebble_" + rt[0]) if name == "pebble" else RockGen.list_name(rt[0], rt[1])
 		c = Color(c.r * rt[2].r, c.g * rt[2].g, c.b * rt[2].b, rt[3])
+		# (2026-11-27) the moss amount goes in custom data a: it was always written 1.0, so every granite-type rock was fully
+		# mossy, desert ones too. BMX_OLD_ROADROCKS=1 = before
+		if not OLD_ROADROCKS: ca = rt[3]
+	if (name.begins_with("scan_") or name.begins_with("spebble_")) and not _lg.is_empty() and not OLD_ROCKTONE:
+		c = _rock_tone(p.x, p.z, (c.r + c.g + c.b) / 3.0)
 	var arr: PackedFloat32Array = lists[name]
 	lists[name] = PackedFloat32Array()   # drop the dict's reference so the append grows arr in place (no copy of the whole list)
-	arr.append_array([b.x.x, b.y.x, b.z.x, p.x, b.x.y, b.y.y, b.z.y, p.y, b.x.z, b.y.z, b.z.z, p.z, c.r, c.g, c.b, 1.0])
+	arr.append_array([b.x.x, b.y.x, b.z.x, p.x, b.x.y, b.y.y, b.z.y, p.y, b.x.z, b.y.z, b.z.z, p.z, c.r, c.g, c.b, ca])
 	lists[name] = arr
 	counts[name] += 1
 	return counts[name] - 1
@@ -137,6 +191,10 @@ func _rock_type(x: float, z: float) -> Array:
 	var w_granite: float = 0.35 + f.b_forest * 0.6 + f.b_wet * 0.4
 	var green: float = (1.0 - f.b_dry) * (1.0 - f.b_ash) * (1.0 - f.b_cold * 0.6)
 	var moss: float = clampf(0.15 * green + f.b_forest * 0.75 + f.b_wet * 0.6 - f.b_sav * 0.3, 0.0, 1.0) * (1.0 - f.b_ash) * (1.0 - 0.7 * f.b_cold)
+	# (2026-11-27, user: "mossy green rocks on deserts are off-putting"): the forest / wet weights don't know about dry country, so
+	# desert rocks came out mossy; none in dry country. BMX_OLD_ROADROCKS=1 = before
+	if not OLD_ROADROCKS:
+		moss *= (1.0 - sm(0.25, 0.6, f.b_dry)) * _moss_k
 	f.b_dry = keep[0]; f.b_rug = keep[1]; f.b_cold = keep[2]; f.b_wet = keep[3]; f.b_forest = keep[4]
 	f.b_sav = keep[5]; f.b_ash = keep[6]; f._bi_x = keep[7]; f._bi_z = keep[8]
 	var hx := sin(x * 12.9898 + z * 78.233) * 43758.5453
@@ -149,6 +207,7 @@ func _rock_type(x: float, z: float) -> Array:
 	if pick < w_basalt: t = "basalt"
 	elif pick < w_basalt + w_desert: t = "desert"
 	elif pick < w_basalt + w_desert + w_tundra: t = "tundra"
+	if _rock_sharp and t == "granite": t = "tundra"
 	var b := 0.88 + 0.24 * fmod(h * 7.31, 1.0)   # a little brightness per rock
 	return [t, v, Color(b, b, b), moss if t != "desert" else 0.0]
 
@@ -218,21 +277,27 @@ func _build() -> void:
 	var uvs: PackedVector2Array = gs["uvs"]
 	var LG: PackedColorArray = gs["LG"]
 	var LD: PackedColorArray = gs["LD"]
+	_lg = LG; _ld = LD
 	var TW: PackedFloat32Array = gs["TW"]
 	var SW: PackedFloat32Array = gs["SW"]
 	_stage("ground+colour")
 	out["G"] = G
 	var mk := 1
+	var split := {}   # fine_ground's bank cells split finer (TerrainFieldCs.bank_split)
+	_gcols = PackedColorArray()
 	if MESH_K > 1 and not (f is TerrainField) and f.route_dist(ox, oz) < MESH_NEAR:
 		# finer ground mesh (the textures keep N + 1 texels): the nearest chunks draw 0.25 m triangles where the ground has detail,
 		# the coarser LODs (the old 0.5 m grid and below) take over by distance / flatness (_ground_lods keys them by real error)
 		var fm: Dictionary = f.fine_ground(ox, oz, N, MESH_K)
 		verts = fm["verts"]; norms = fm["norms"]; uvs = fm["uvs"]
+		_gcols = PackedColorArray(fm["cols"])
 		mk = MESH_K
 		out["GF"] = fm["H"]   # the drawn (fine) heights, for the drawn tyres' fit (Terrain.mesh_height)
 		out["MN"] = N * mk
-	_ground_lods(verts, norms, uvs, N * mk, mk)   # adds edge skirts to the vertex arrays
+		if fm.has("sv"): split = fm
+	_ground_lods(verts, norms, uvs, N * mk, mk, split)   # adds edge skirts (+ the split bank cells) to the vertex arrays
 	out["verts"] = verts
+	if not _gcols.is_empty(): out["cols"] = _gcols   # r = 1 - gutter depth (ground.gdshader: puddles in the gutters)
 	out["norms"] = norms
 	out["uvs"] = uvs
 
@@ -275,6 +340,8 @@ func _build() -> void:
 	_wood(ox, oz)
 	_stage("nature+wood")
 	_roadside(ox, oz)   # (last: put() draws from the shared rnd, so nothing placed before it moves)
+	_roadside_rocks(ox, oz)   # (after it, same reason)
+	_brink_rocks(ox, oz)
 	_stage("roadside")
 	# ---- bake the ground textures with ambient occlusion ----
 	var ao := PackedFloat32Array(); ao.resize(NV * NV); ao.fill(1.0)
@@ -331,6 +398,24 @@ func _build() -> void:
 		pA[o * 4 + 1] = roundi(clampf(T4a[o], 0, 1) * 255)
 		pA[o * 4 + 2] = roundi(clampf(T5a[o], 0, 1) * 255)
 		pA[o * 4 + 3] = 255
+	# A = 1 - forest (2026-11-27: ground.gdshader's forest trail scans; 255 = none, so other bakes need nothing). Read on a
+	# 12 x 12 grid of the chunk (biome() is a few noises) and blended between
+	if not OLD_ROADROCKS:
+		var fgs := 13
+		var fgv := PackedFloat32Array(); fgv.resize(fgs * fgs)
+		for gz in fgs:
+			for gx in fgs:
+				f.biome(ox - S / 2 + gx * S / (fgs - 1), oz - S / 2 + gz * S / (fgs - 1))
+				fgv[gz * fgs + gx] = f.b_forest
+		var stp := float(NV - 1) / (fgs - 1)
+		for iz in NV:
+			for ix in NV:
+				var fx := ix / stp; var fz := iz / stp
+				var x0 := mini(int(fx), fgs - 2); var z0 := mini(int(fz), fgs - 2)
+				var tx := fx - x0; var tz := fz - z0
+				var fv := lerpf(lerpf(fgv[z0 * fgs + x0], fgv[z0 * fgs + x0 + 1], tx), lerpf(fgv[(z0 + 1) * fgs + x0], fgv[(z0 + 1) * fgs + x0 + 1], tx), tz)
+				fv = maxf(clampf(fv, 0.0, 1.0), clampf(T5a[iz * NV + ix], 0.0, 1.0))
+				pA[(iz * NV + ix) * 4 + 3] = roundi((1.0 - fv) * 255)
 	out["trail3_img"] = Image.create_from_data(NV, NV, false, Image.FORMAT_RGBA8, pA)
 	# where puddles can be (world/trail_puddle.gd: tyre dust stops over them); empty for chunks with no wet road
 	out["pud"] = TrailPuddle.table(TRa, T2a, TW, norms, NV)
@@ -339,6 +424,7 @@ func _build() -> void:
 	var AIR: PackedFloat32Array = gs["T3"]
 	var pK := PackedByteArray(); pK.resize(NV * NV * 4)
 	var gh := PackedFloat32Array(); gh.resize(NV * NV)
+	var TWW := PackedFloat32Array() if OLD_ROADROCKS else _warped_tw(TW, T2a, T4a, T5a, ox, oz)
 	for iz in NV:
 		for ix in NV:
 			var o := iz * NV + ix
@@ -352,8 +438,23 @@ func _build() -> void:
 			else:
 				# grass right up to the dirt's edge (it stopped ~1 m out, where the dirt only began to fade), and over the
 				# stretch of a jump riders fly over (the gap / deck middle nobody rolls on: AIR is 0 at the lip and landing)
-				var tw: float = TW[o] * (1.0 - 0.9 * sm(0.35, 0.85, AIR[o]))
+				# (user: "no grass on top of the jumps"): the fly-over grass only where the jump adds ~no height (the gap / ground
+				# riders fly over), never on its built deck or lip (fo_h = the jump's own height there)
+				var airg: float = AIR[o]
+				if airg > 0.02 and not OLD_ROADROCKS:
+					var jh: Array = f.jump(ox - S / 2 + ix * d, oz - S / 2 + iz * d)
+					airg *= 1.0 - sm(0.12, 0.4, float(jh[0]))
+				var tw: float = (TW[o] if TWW.is_empty() else maxf(TW[o], TWW[o])) * (1.0 - 0.9 * sm(0.35, 0.85, airg))
 				den = 1.0 - sm(0.62, 0.9, tw)
+				# stony shoulders (2026-11-27): in patches the ground just past the dirt is stones and grit, the grass
+				# thins out there (ground.gdshader draws the stones); elsewhere it still grows to the edge
+				if not OLD_ROADROCKS and tw > 0.01:
+					var wx := ox - S / 2 + ix * d
+					var wz := oz - S / 2 + iz * d
+					var sp := sm(-0.1, 0.35, f.n(wx - 517, wz + 233, TerrainField.I38) + 0.35 * (f.n(wx * 3.0, wz * 3.0, TerrainField.I38) - 0.0))
+					# (user: "grass grows on the rocky path"): the whole shoulder band thins (the ground shader's stony shoulder
+					# reaches ~2-3 m out through its wandering edge), the stony patches go bare
+					den *= 1.0 - (0.6 + 0.38 * sp) * sm(0.01, 0.35, tw)
 			den *= (1.0 - sm(0.1, 0.6, SW[o])) * sm(WATER + 0.25, WATER + 0.8, h)
 			den *= (1.0 - sm(0.7, 0.97, DRY[o])) * (1.0 - snow) * (0.55 + 0.45 * ao[o])
 			pK[o * 4] = pG[o * 4]; pK[o * 4 + 1] = pG[o * 4 + 1]; pK[o * 4 + 2] = pG[o * 4 + 2]
@@ -2136,6 +2237,256 @@ func _roadside(ox: float, oz: float) -> void:
 				put(_bush_kind(yaw), bx, h - 0.08, bz, sc * 1.2, sc * (0.8 + 0.3 * far), sc * 1.2, yaw, col * tone, 0.3)
 
 
+# rocks + pebbles thrown / dug out along both edges of the trail (2026-11-27, user reference: "rock on the side a lot"):
+# clumps of pebbles, now and then a fist- to knee-high stone among them, thickest just past the dirt, in denser / thinner
+# stretches. Visual only (no colliders, like the berm rim clutter). BMX_OLD_ROADROCKS=1 = without
+static var OLD_ROADROCKS := Env.raw("BMX_OLD_ROADROCKS") == "1"
+const ROADROCK_TRIES := 1100
+const ROADROCK_OUT := 4.5     # metres past the trail's half-width
+func _roadside_rocks(ox: float, oz: float) -> void:
+	if OLD_ROADROCKS:
+		return
+	var near := false
+	for i in 9:
+		if f.route_dist(ox + (i % 3 - 1) * S / 3.0, oz + (i / 3 - 1) * S / 3.0) < TerrainField.QR:
+			near = true
+			break
+	if not near:
+		return
+	var rn := WorldRng.new(WorldRng.i32(cx * 3266489917) ^ WorldRng.i32(cz * 668265263) ^ WorldRng.i32(f.seed_value * 2246822519) ^ 0x5bd1e995)
+	for i in ROADROCK_TRIES:
+		var x := ox + (rn.next() - .5) * S
+		var z := oz + (rn.next() - .5) * S
+		var r := rn.next()
+		f.query(x, z)
+		if f.q_d >= TerrainField.QR:
+			continue
+		var o: float = f.q_d - f.q_w
+		# (user: "stones further toward the centre"): small pebbles also on the trail's outer third, kept off the ridden middle
+		var inner := -0.35 * minf(f.q_w, 1.6)
+		if o < inner or o > ROADROCK_OUT:
+			continue
+		var on_trail := o < 0.05
+		var patch := 0.35 + 0.9 * sm(-0.3, 0.3, f.n(x - 517, z + 233, TerrainField.I38))
+		var peak := 1.0 - 0.75 * sm(0.3, 3.5, o)
+		if r > 0.55 * patch * peak:
+			continue
+		if f.jump_mask(x, z) > 0.05 or is_blocked(x, z, 0.4):
+			continue
+		var h := ok_spot(x, z, WATER + 0.3)
+		if is_nan(h):
+			continue
+		if not on_trail and rn.next() < 0.22:
+			var sc := 0.1 + rn.next() * rn.next() * 0.32
+			put("rock", x, h - sc * 0.3, z, sc * (1.0 + rn.next() * 0.5), sc * 0.65, sc, rn.next() * 6.28, null, 0.5)
+		for k in 2 + int(rn.next() * 6):
+			var sc := (0.025 + rn.next() * rn.next() * 0.1) * (0.6 if on_trail else 1.0)
+			var a := rn.next() * 6.28
+			var d := 0.1 + rn.next() * (0.35 if on_trail else 0.6)
+			var px := x + cos(a) * d
+			var pz := z + sin(a) * d
+			if not on_trail and f.trail(px, pz) > 0.5:
+				continue
+			put("pebble", px, height(px, pz) - sc * 0.3, pz, sc * 1.3, sc * 0.7, sc, rn.next() * 6.28, null, 0.5)
+
+
+# bigger rocks along the trail's brink (2026-11-27, user: "use the 3D rocks we have on rock features, along the road, more on
+# the brink so we don't mess the ride"): the rock gardens' generated rocks (put "rock" -> biome rock types + LODs), 25-80 cm,
+# out on top of the bank (>= ~0.8 m past the dirt's edge, the big ones further), in clusters of one main stone + a few smaller
+# ones + pebbles, thicker in some stretches. They are real (dome colliders like the rock gardens: run wide and you hit them),
+# never on the dirt, jumps or B-lines. BMX_OLD_ROADROCKS=1 = without
+const BRINK_TRIES := 2200
+func _brink_rocks(ox: float, oz: float) -> void:
+	if OLD_ROADROCKS:
+		return
+	var near := false
+	for i in 9:
+		if f.route_dist(ox + (i % 3 - 1) * S / 3.0, oz + (i / 3 - 1) * S / 3.0) < TerrainField.QR:
+			near = true
+			break
+	if not near:
+		return
+	var rej := [0, 0, 0, 0, 0, 0]   # (probe) band, chance, trail, jump, blocked, placed
+	_moss_k = 0.3
+	var rn := WorldRng.new(WorldRng.i32(cx * 1103515245) ^ WorldRng.i32(cz * 2654435761) ^ WorldRng.i32(f.seed_value * 3266489917) ^ 0x6a09e667)
+	for i in BRINK_TRIES:
+		var x := ox + (rn.next() - .5) * S
+		var z := oz + (rn.next() - .5) * S
+		var r := rn.next()
+		f.query(x, z)
+		if f.q_d >= TerrainField.QR:
+			continue
+		var w: float = f.q_w
+		var o: float = f.q_d - w
+		if o < 0.8 or o > 3.5:
+			rej[0] += 1
+			continue
+		var patch := 0.35 + 0.9 * sm(-0.25, 0.35, f.n(x + 271, z - 659, TerrainField.I38))
+		var peak := 1.0 - 0.7 * sm(1.4, 3.5, o)
+		if r > 1.4 * patch * peak:
+			rej[1] += 1
+			continue
+		if f.trail(x, z) > 0.02:
+			rej[2] += 1
+			continue
+		if f.jump_mask(x, z) > 0.0:
+			rej[3] += 1
+			continue
+		if is_blocked(x, z, 0.8):
+			rej[4] += 1
+			continue
+		rej[5] += 1
+		var h := ok_spot(x, z, WATER + 0.4)
+		if is_nan(h):
+			continue
+		# the main stone: bigger the further out it sits
+		var big := 0.6 + rn.next() * rn.next() * 1.1 * (0.4 + 0.6 * sm(0.8, 1.8, o))
+		# here and there a proper boulder (~1-2 m across: the rock meshes' scale x ~0.6 m), only out where its edge still
+		# clears the dirt by ~1 m
+		var boulder := false
+		if o > 2.4 and rn.next() < 0.06:
+			big = 1.4 + rn.next() * 0.9
+			# its whole footprint clear of any dirt (this trail's or another's bend nearby)
+			var fr := big * 0.75
+			if is_blocked(x, z, fr) or f.trail(x + fr, z) > 0.0 or f.trail(x - fr, z) > 0.0 or f.trail(x, z + fr) > 0.0 or f.trail(x, z - fr) > 0.0:
+				continue
+			boulder = true
+		_rock_sharp = boulder
+		_brink_stone(x, z, h, big, rn, 1.35 if boulder else 1.0)
+		for k in int(rn.next() * 3.5):
+			var a := rn.next() * 6.28
+			var d := big * (0.55 + rn.next() * 0.55)
+			var bx := x + cos(a) * d
+			var bz := z + sin(a) * d
+			f.query(bx, bz)
+			if f.q_d - f.q_w < 0.6 or f.trail(bx, bz) > 0.02 or f.jump_mask(bx, bz) > 0.0:
+				continue
+			var hb := ok_spot(bx, bz, WATER + 0.4)
+			if not is_nan(hb):
+				_brink_stone(bx, bz, hb, big * (0.25 + rn.next() * 0.4), rn)
+		for k in 2 + int(rn.next() * 5):
+			var a := rn.next() * 6.28
+			var d := big * (0.45 + rn.next() * 0.9)
+			var px := x + cos(a) * d
+			var pz := z + sin(a) * d
+			if f.trail(px, pz) > 0.3:
+				continue
+			var sc := 0.03 + rn.next() * rn.next() * 0.09
+			put("pebble", px, height(px, pz) - sc * 0.3, pz, sc * 1.3, sc * 0.7, sc, rn.next() * 6.28, null, 0.5)
+		blocked.append([x, z, big * 0.8])
+	_moss_k = 1.0
+	_rock_sharp = false
+	if Env.raw("BMX_BRINK_PROBE") != "": print("BRINK chunk=%d,%d band_out=%d chance=%d trail=%d jump=%d blocked=%d placed=%d" % [cx, cz, rej[0], rej[1], rej[2], rej[3], rej[4], rej[5]])
+
+
+# the scanned rocks (assets/rocks_scan, TerrainGeo: Poly Haven scans made light): dry country = the Namaqualand granite
+# (blocky split boulder + its stone set), else the angular boulder_01 / rock_09 + the stone set. BMX_OLD_SCANROCKS=1 = the
+# generated rocks (rock_gen.gd) instead
+static var OLD_SCANROCKS := Env.raw("BMX_OLD_SCANROCKS") == "1"
+const SCAN_STONES := ["scan_nstone_a", "scan_nstone_b", "scan_nstone_c", "scan_nstone_d", "scan_nstone_e"]
+func _brink_stone(x: float, z: float, h: float, sc: float, rn: WorldRng, tall: float = 1.0) -> void:
+	if Env.raw("BMX_BRINK_BIG") != "": sc *= float(Env.raw("BMX_BRINK_BIG"))   # (test)
+	var sx := sc * (1.0 + rn.next() * 0.5)
+	var sy := sc * (0.65 + rn.next() * 0.4) * tall
+	var yaw := rn.next() * 6.28
+	if sc < 0.2:
+		put("pebble", x, h - sc * 0.2, z, sx, sy, sc, yaw, null, 0.4)
+	elif OLD_SCANROCKS:
+		put("rock", x, h - sc * 0.2, z, sx, sy, sc, yaw, null, 0.4)
+	else:
+		f.biome(x, z)
+		var dry: bool = f.b_dry > 0.45
+		var pick := rn.next()
+		var name: String
+		if tall > 1.0:
+			name = "scan_nboulder02" if dry else "scan_boulder01"
+		elif dry or pick < 0.55:
+			name = SCAN_STONES[int(rn.next() * 5.0) % 5]
+		else:
+			name = "scan_rock09"
+		# the scans keep their own proportions: a near-uniform scale, a little stretch
+		var u := sc * (0.85 + rn.next() * 0.3)
+		var b := 0.82 + rn.next() * 0.28
+		# one rock tone per country (rock_scan.gdshader keeps ~30 % of each scan's own hue): warm sandstone grey / cool grey
+		var col := Color(b * 1.04, b * 0.95, b * 0.83) if dry else Color(b * 0.93, b * 0.94, b * 0.97)
+		put(name, x, h - u * 0.04, z, u * (0.9 + rn.next() * 0.25), u * tall, u, yaw, col, 0.25)
+		sx = u; sy = u * tall * 0.9
+	if Env.raw("BMX_BRINK_PROBE") == "2": print("BRINKROCK %.1f %.2f %.1f sc=%.2f" % [x, h, z, sc])
+	if sc >= 0.2:
+		colliders.append({"x": x, "z": z, "r": (sx + sc) * 0.45, "top": h - sc * 0.2 + sy * 0.9, "base": f.ground(x, z), "sink": sc * 0.2})
+
+
+# ---- the trail's edge as the ground shader draws it (2026-11-27, user: "grass grows on the rocky path") ----
+# ground.gdshader moves the baked trail weight's edge in / out with value noise (three octaves, a slow "how loose" noise) and
+# averages four taps ~1 m apart; the grass bake only knew the unmoved edge, so grass grew over the drawn dirt and stones.
+# Same noise (gd_hash / gd_noise3 ported; float maths, close to the GPU's), same taps, over the chunk's own TW grid (clamped
+# at its border like the texture). Only nodes within ~3 m of the trail.
+static func _gd_hash(x: float, y: float, z: float) -> float:
+	x = fposmod(x * 0.1031, 1.0); y = fposmod(y * 0.1031, 1.0); z = fposmod(z * 0.1031, 1.0)
+	var d := x * (z + 31.32) + y * (y + 31.32) + z * (x + 31.32)
+	x += d; y += d; z += d
+	return fposmod((x + y) * z, 1.0)
+
+
+static func _gd_noise3(px: float, py: float, pz: float) -> float:
+	var ix := floorf(px); var iy := floorf(py); var iz := floorf(pz)
+	var fx := px - ix; var fy := py - iy; var fz := pz - iz
+	var ux := fx * fx * (3.0 - 2.0 * fx); var uy := fy * fy * (3.0 - 2.0 * fy); var uz := fz * fz * (3.0 - 2.0 * fz)
+	var a := lerpf(lerpf(_gd_hash(ix, iy, iz), _gd_hash(ix + 1, iy, iz), ux), lerpf(_gd_hash(ix, iy + 1, iz), _gd_hash(ix + 1, iy + 1, iz), ux), uy)
+	var b := lerpf(lerpf(_gd_hash(ix, iy, iz + 1), _gd_hash(ix + 1, iy, iz + 1), ux), lerpf(_gd_hash(ix, iy + 1, iz + 1), _gd_hash(ix + 1, iy + 1, iz + 1), ux), uy)
+	return lerpf(a, b, uz)
+
+
+func _tw_bilerp(TW: PackedFloat32Array, fx: float, fz: float) -> float:
+	var NV := N + 1
+	fx = clampf(fx, 0.0, NV - 1.001); fz = clampf(fz, 0.0, NV - 1.001)
+	var x0 := int(fx); var z0 := int(fz)
+	var tx := fx - x0; var tz := fz - z0
+	return lerpf(lerpf(TW[z0 * NV + x0], TW[z0 * NV + x0 + 1], tx), lerpf(TW[(z0 + 1) * NV + x0], TW[(z0 + 1) * NV + x0 + 1], tx), tz)
+
+
+func _warped_tw(TW: PackedFloat32Array, T2a: PackedFloat32Array, T4a: PackedFloat32Array, T5a: PackedFloat32Array, ox: float, oz: float) -> PackedFloat32Array:
+	var NV := N + 1
+	var d := S / N
+	var out_w := PackedFloat32Array(); out_w.resize(NV * NV)
+	# near the trail: a node within 6 nodes (3 m) of any TW > 0 (row / column max, then a box)
+	var near := PackedByteArray(); near.resize(NV * NV)
+	var any := false
+	var R := 6
+	for iz in NV:
+		for ix in NV:
+			if TW[iz * NV + ix] > 0.001:
+				any = true
+				for dz in range(maxi(0, iz - R), mini(NV, iz + R + 1)):
+					for dx in range(maxi(0, ix - R), mini(NV, ix + R + 1)):
+						near[dz * NV + dx] = 1
+	if not any:
+		return out_w
+	for iz in NV:
+		for ix in NV:
+			var o := iz * NV + ix
+			if near[o] == 0:
+				continue
+			var px := ox - S / 2 + ix * d
+			var pz := oz - S / 2 + iz * d
+			var jmk := maxf(T2a[o * 4 + 2], 0.85 * sm(0.3, 0.65, T4a[o]))
+			var w1x := _gd_noise3(px * 0.033, pz * 0.033, 3.3) - 0.5; var w1z := _gd_noise3(px * 0.033 + 17.0, pz * 0.033 + 17.0, 7.7) - 0.5
+			var w2x := _gd_noise3(px * 0.11, pz * 0.11, 2.1) - 0.5; var w2z := _gd_noise3(px * 0.11 + 31.0, pz * 0.11 + 31.0, 4.4) - 0.5
+			var w3x := _gd_noise3(px * 0.55, pz * 0.55, 1.1) - 0.5; var w3z := _gd_noise3(px * 0.55 + 9.0, pz * 0.55 + 9.0, 5.5) - 0.5
+			var loose := 0.45 + 1.1 * _gd_noise3(px * 0.017, pz * 0.017, 8.8)
+			var nar := 1.0 - 0.8 * T5a[o]
+			var k := loose * (1.0 - jmk) * nar
+			var wx := (w1x * 4.4 + w2x * 2.2 + w3x) * k
+			var wz := (w1z * 4.4 + w2z * 2.2 + w3z) * k
+			var sp := 1.4 * (1.0 - jmk) * lerpf(0.35, 1.0, nar)   # metres (the shader's tap spread, edge_fade 1)
+			var cx_ := float(ix) + wx / d; var cz_ := float(iz) + wz / d
+			var s := sp / d
+			var t := (_tw_bilerp(TW, cx_ + s, cz_ + 0.4 * s) + _tw_bilerp(TW, cx_ - s, cz_ - 0.4 * s)
+				+ _tw_bilerp(TW, cx_ - 0.4 * s, cz_ + s) + _tw_bilerp(TW, cx_ + 0.4 * s, cz_ - s)) * 0.25
+			out_w[o] = lerpf(TW[o], t, 1.0)
+	return out_w
+
+
 static func _bush_kind(yaw: float) -> String:
 	return ["bush", "bush1", "bush2"][int(yaw * 10.0) % 3]
 
@@ -2214,7 +2565,8 @@ const LOD_STEPS := [2, 4, 8]
 const MESH_NEAR := 60.0
 static var MESH_K := maxi(1, int(Env.raw("BMX_MESH_K"))) if Env.raw("BMX_MESH_K") != "" else 2
 
-func _ground_lods(verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array, n: int, mk: int = 1) -> void:
+var _gcols := PackedColorArray()   # the fine mesh's vertex colours (fine_ground "cols"), kept in step with verts by _ground_lods
+func _ground_lods(verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array, n: int, mk: int = 1, split: Dictionary = {}) -> void:
 	var nv := n + 1
 	# skirt vertices: the 4 edges, walked in order, each point copied SKIRT lower
 	var edges := []
@@ -2231,9 +2583,28 @@ func _ground_lods(verts: PackedVector3Array, norms: PackedVector3Array, uvs: Pac
 			if skirt_of.has(vi): continue
 			skirt_of[vi] = verts.size()
 			verts.append(verts[vi] - Vector3(0, SKIRT, 0))
+			if not _gcols.is_empty(): _gcols.append(_gcols[vi])
 			norms.append(norms[vi])
 			uvs.append(uvs[vi])
-	out["indices"] = _grid_lod_indices(1, edges, skirt_of, n)
+	var skip := PackedByteArray()
+	var serr := 0.0
+	if not split.is_empty():
+		# the split bank cells: their own vertices after the skirts, LOD 0 draws them instead of those grid cells
+		skip.resize(n * n)
+		for c: int in split["scell"]: skip[c] = 1
+		var base := verts.size()
+		verts.append_array(split["sv"]); norms.append_array(split["sn"]); uvs.append_array(split["suv"])
+		if not _gcols.is_empty(): _gcols.append_array(PackedColorArray(split["scol"]))
+		var si: PackedInt32Array = split["sidx"]
+		for i in si.size(): si[i] += base
+		var i0 := _grid_lod_indices(1, edges, skirt_of, n, skip)
+		i0.append_array(si)
+		out["indices"] = i0
+		serr = split["serr"]
+		if Env.raw("BMX_SPLIT_PROBE") != "":
+			print("BANKSPLIT chunk=%d,%d cells=%d of %d tris_added=%d max_bend_cm=%.1f" % [cx, cz, split["scell"].size(), n * n, split["scell"].size() * 30, serr * 100.0])
+	else:
+		out["indices"] = _grid_lod_indices(1, edges, skirt_of, n)
 	var lods := {}
 	var steps: Array = LOD_STEPS if mk == 1 else [2, 4, 8, 16]
 	for s: int in steps:
@@ -2256,14 +2627,16 @@ func _ground_lods(verts: PackedVector3Array, norms: PackedVector3Array, uvs: Pac
 		lods[maxf(err, 0.02 * s / mk)] = _grid_lod_indices(s, edges, skirt_of, n)
 	out["lods"] = lods
 
-func _grid_lod_indices(s: int, edges: Array, skirt_of: Dictionary, n: int) -> PackedInt32Array:
+func _grid_lod_indices(s: int, edges: Array, skirt_of: Dictionary, n: int, skip: PackedByteArray = PackedByteArray()) -> PackedInt32Array:
 	var nv := n + 1
 	var idx := PackedInt32Array()
 	var m := n / s
 	idx.resize(m * m * 6)
 	var o := 0
+	var sk := not skip.is_empty()
 	for iz in range(0, n, s):
 		for ix in range(0, n, s):
+			if sk and skip[iz * n + ix]: continue
 			var v00 := iz * nv + ix
 			var v10 := v00 + s
 			var v01 := v00 + s * nv
@@ -2272,6 +2645,7 @@ func _grid_lod_indices(s: int, edges: Array, skirt_of: Dictionary, n: int) -> Pa
 			idx[o] = v00; idx[o + 1] = v10; idx[o + 2] = v01
 			idx[o + 3] = v10; idx[o + 4] = v11; idx[o + 5] = v01
 			o += 6
+	idx.resize(o)
 	# skirts at this level's spacing, both windings (seen from either side)
 	for line in edges:
 		var i := 0

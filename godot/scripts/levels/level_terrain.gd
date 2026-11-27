@@ -227,6 +227,7 @@ func _chunk_nodes(k: Vector2i, data: Dictionary, shader: Shader, scans: Array) -
 	mat.set_shader_parameter("land_tex", ImageTexture.create_from_image(img_g))
 	mat.set_shader_parameter("dirt_tex", ImageTexture.create_from_image(img_d))
 	for q in scans.size(): mat.set_shader_parameter("tr_nr%d" % q, scans[q])
+	set_trail_scans(mat)
 	var tr: PackedFloat32Array = data.tr
 	mat.set_shader_parameter("trail_tex", ImageTexture.create_from_image(Image.create_from_data(NV, NV, false, Image.FORMAT_RGBAF, tr.to_byte_array())))
 	mat.set_shader_parameter("trail2_tex", ImageTexture.create_from_image(Image.create_from_data(NV, NV, false, Image.FORMAT_RGBA8, data.tr2)))

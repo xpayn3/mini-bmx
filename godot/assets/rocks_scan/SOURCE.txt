@@ -1,0 +1,6 @@
+Poly Haven, CC0 (https://polyhaven.com/license), decimated + packed by tools/make_scan_rocks.py (Blender) and
+tools/make_scan_rock_textures.py:
+  boulder_01              https://polyhaven.com/a/boulder_01
+  namaqualand_boulder_02  https://polyhaven.com/a/namaqualand_boulder_02
+  namaqualand_stones_01   https://polyhaven.com/a/namaqualand_stones_01
+  rock_09                 https://polyhaven.com/a/rock_09

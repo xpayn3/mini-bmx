@@ -29,6 +29,23 @@ uniform float trail_edge_var = 1.0;   // how far the road's edge wanders in / ou
 uniform float dirt_match = 0.65;      // road dirt darkened / tinted toward a darker landscape (0 = the baked dirt colour)
 uniform float ground_macro = 0.26;   // off-trail colour patchiness (0 = the baked colour only)
 uniform float ground_detail = 1.0;    // off-trail fine relief from the dirt scans (0 = off)
+// the photo-scanned trail surface (Terrain.set_trail_scans, tools/make_trail_scans.py): rgb = colour / its mean x 0.5, a = height;
+// nr: rg normal, b roughness. rock = stony dirt (loose ground, shoulders, stones out into the land), pack = packed dirt (ridden line)
+uniform sampler2D ts_rock_col : filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D ts_rock_nr : filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D ts_pack_col : filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D ts_pack_nr : filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D ts_dry_col : filter_linear_mipmap_anisotropic, repeat_enable;   // cracked hardpack, pale pebbles: dry country
+uniform sampler2D ts_dry_nr : filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2D ts_lit_col : filter_linear_mipmap_anisotropic, repeat_enable;   // needles, twigs, grass: forest trail edges
+uniform sampler2D ts_lit_nr : filter_linear_mipmap_anisotropic, repeat_enable;
+const vec3 LIT_MEAN = vec3(0.3, 0.256, 0.122);   // forrest_ground_01's mean colour (linear; make_trail_scans.py prints it)
+uniform float trail_scan = 0.0;       // 0 = off (no textures given)
+uniform float scan_colour = 0.85;     // how much of the scans' light / dark / grey shows on the dirt
+uniform float scan_shoulder = 1.0;    // stones breaking out past the dirt's edge into the land
+uniform float scan_relief = 1.0;
+uniform float scan_parallax = 1.0;    // 0 = off
+const float SCAN_DEPTH = 0.05;        // how deep the scans' height field reads (m)
 uniform float trail_relief = 1.0;   // depth of the worn lines / tyre prints / grit, x the real centimetres below
 uniform float trail_play = 0.34;   // share of 26 m stretches with a playful mark (donut, figure of eight, slalom, skid arc); test: 1 = all
 uniform float trail_puddles = 1.0;   // 0 = none, 1 = normal
@@ -116,6 +133,19 @@ vec3 gd_relief(sampler2D nt, vec2 p, vec2 dx, vec2 dy, vec2 a, float inv) {
 	return vec3(a * n.x - b * n.y, n.z);
 }
 
+// a scan's texel at a world point, turned and sized like gd_relief (the same a / inv read the same spot)
+vec4 ts_read(sampler2D tx, vec2 p, vec2 dx, vec2 dy, vec2 a, float inv) {
+	vec2 b = vec2(-a.y, a.x);
+	return textureGrad(tx, vec2(dot(p, a), dot(p, b)) * inv, vec2(dot(dx, a), dot(dx, b)) * inv, vec2(dot(dy, a), dot(dy, b)) * inv);
+}
+// height blend: the share of b, w = how much b is wanted; the higher surface wins near the middle (stones poke through)
+float ts_hb(float ha, float hb, float w) {
+	float a = (1.0 - w) + ha * 0.6, b = w + hb * 0.6;
+	float m = max(a, b) - 0.18;
+	float x = max(a - m, 0.0), y = max(b - m, 0.0);
+	return y / max(x + y, 1e-4);
+}
+
 // how much of a clipmap level holds this point: 0 outside its window, a soft border inside it
 float road_in(vec4 inf, vec2 p) {
 	if (inf.w <= 0.0) return 0.0;
@@ -140,8 +170,12 @@ float road_level(vec4 inf, float layer, vec2 p, vec2 dx, vec2 dy, inout vec4 a, 
 	return wt;
 }
 
+varying float v_gut;   // the trail-edge gutter's depth here (0..1, fine mesh vertex colour r = 1 - it; none = 0)
+varying float v_bank;  // the trail-edge bank step's face here (0..1, vertex colour g = 1 - it)
 void vertex() {
 	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	v_gut = 1.0 - COLOR.r;
+	v_bank = 1.0 - COLOR.g;
 }
 
 void fragment() {
@@ -209,6 +243,86 @@ void fragment() {
 	if (peb_f > 0.0) pb = gd_pebbles(P.xz * 16.0);
 	float peb = vt > 0.0 ? rb.a : pb.x * peb_f;   // (baked: the pebble field's cover, averaged far off instead of gone)
 	float hD = peb * 0.6 + gd_noise3(P * 3.1 + 11.0) * 0.45 + gd_noise3(P * 0.9 + 2.0) * 0.3;
+	// ---- photo-scanned trail surface (2026-11-27, user reference: packed dirt full of embedded stones, a stony shoulder
+	// that breaks up into the land). Two reads per scan, turned / sized differently, height-blended by a slow noise (no
+	// repeat to see). Read only on / near the trail; far off the mips average to 1 (the colour is stored around its mean)
+	float sfar = (1.0 - smoothstep(0.25, 0.6, gpx)) * trail_scan;
+	// the trail's character drifts along the ride (2026-11-27, user: "the path is too similar through time"): slow regional
+	// noises (~150-300 m) choose the stone size, how stony, a dry hardpack stretch in green land, the dirt's warmth / lightness
+	// and how worn the ridden line is. Each a gentle bias on top of the small-scale patches
+	vec4 reg = vec4(gd_noise3(vec3(P.xz * 0.0045, 61.0)), gd_noise3(vec3(P.xz * 0.0038, 73.0)),
+		gd_noise3(vec3(P.xz * 0.0052, 85.0)), gd_noise3(vec3(P.xz * 0.0041, 97.0)));
+	float reg_wear = 0.45 + 0.9 * smoothstep(0.25, 0.75, gd_noise3(vec3(P.xz * 0.0047, 109.0)));
+	// biplanar (2026-11-27, user: "stripes / smears on the lips"): the scans are laid from above; on slopes (gutter walls, the cut
+	// bank, a berm's rim) they would stretch, so as the ground steepens they blend to a side projection along the slope's own
+	// horizontal direction (wside), and only fade out where it stands near vertical. Coordinates + derivatives here, in
+	// uniform control flow
+	// (fixed world axes: a projection along x and one along z, blended by which way the slope faces; one that followed the
+	// slope's own direction twisted into swirls where that direction turns, e.g. along a curved gutter)
+	vec3 fwn = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
+	vec2 fuvx = P.zy / 2.2, fuvz = P.xy / 2.2;
+	vec2 fdxx = dFdx(fuvx), fdyx = dFdy(fuvx), fdxz = dFdx(fuvz), fdyz = dFdy(fuvz);
+	float fwx = pow(abs(fwn.x), 4.0), fwz = pow(abs(fwn.z), 4.0);
+	fwx /= max(fwx + fwz, 1e-5);
+	float wside = 1.0 - smoothstep(0.7, 0.92, fwn.y);
+	sfar *= smoothstep(0.2, 0.4, fwn.y);
+	vec4 rk = vec4(0.5), pk = vec4(0.5), lit = vec4(0.5);
+	vec3 nlit = vec3(0.0, 0.0, 0.9);
+	float tdry = texture(trail2_tex, UV).g, tfor = 1.0 - texture(trail3_tex, UV).a;
+	vec3 nrk = vec3(0.0, 0.0, 0.9), npk = vec3(0.0, 0.0, 0.9);
+	if (sfar > 0.0 && t > 0.001) {
+		// (two reads: fine 2.2 m and coarse 3.8 m stones; the region leans to one or the other)
+		float sw = smoothstep(0.25, 0.75, gd_noise3(vec3(P.xz * 0.13, 3.9)) * 0.45 + reg.x * 0.55);
+		const vec2 RA = vec2(0.966, 0.259), RB = vec2(-0.5, 0.866), PA = vec2(0.259, -0.966), PB = vec2(-0.866, -0.5);
+		// parallax (2026-11-27): close to the camera the scans are read where the eye ray meets their height field (the stony
+		// scan's height, SCAN_DEPTH deep), so the stones stand up and the dirt between them sinks as the view moves. Offset
+		// limiting, a few damped steps, one offset for every scan; gone by ~14 m
+		vec2 sp = P.xz;
+		float pom = scan_parallax * (1.0 - smoothstep(6.0, 14.0, length(P - CAMERA_POSITION_WORLD))) * (1.0 - wside);
+		if (pom > 0.0) {
+			vec3 V = normalize(CAMERA_POSITION_WORLD - P);
+			vec2 dir = -V.xz / max(V.y, 0.3) * SCAN_DEPTH * pom;
+			vec2 off = vec2(0.0);
+			for (int i = 0; i < 4; i++) {
+				vec2 q = P.xz + off;
+				float h = mix(ts_read(ts_rock_col, q, rdx, rdy, RA, 1.0 / 2.2).a, ts_read(ts_rock_col, q + 23.0, rdx, rdy, RB, 1.0 / 3.8).a, sw);
+				off = mix(off, dir * (1.0 - h), 0.6);
+			}
+			sp = P.xz + off;
+		}
+		vec4 a0 = ts_read(ts_rock_col, sp, rdx, rdy, RA, 1.0 / 2.2), a1 = ts_read(ts_rock_col, sp + 23.0, rdx, rdy, RB, 1.0 / 3.8);
+		float bw = ts_hb(a0.a, a1.a, sw);
+		rk = mix(a0, a1, bw);
+		nrk = mix(gd_relief(ts_rock_nr, sp, rdx, rdy, RA, 1.0 / 2.2), gd_relief(ts_rock_nr, sp + 23.0, rdx, rdy, RB, 1.0 / 3.8), bw);
+		vec4 c0 = ts_read(ts_pack_col, sp + 7.0, rdx, rdy, PA, 1.0 / 2.0), c1 = ts_read(ts_pack_col, sp - 41.0, rdx, rdy, PB, 1.0 / 2.4);
+		float cw = ts_hb(c0.a, c1.a, 1.0 - sw);
+		pk = mix(c0, c1, cw);
+		npk = mix(gd_relief(ts_pack_nr, sp + 7.0, rdx, rdy, PA, 1.0 / 2.0), gd_relief(ts_pack_nr, sp - 41.0, rdx, rdy, PB, 1.0 / 2.4), cw);
+		if (wside > 0.01) {   // (biplanar: the side projection on slopes; its relief left out: the mesh's slope carries the shading)
+			vec4 sc = mix(textureGrad(ts_rock_col, fuvz, fdxz, fdyz), textureGrad(ts_rock_col, fuvx, fdxx, fdyx), fwx);
+			rk = mix(rk, sc, wside);
+			pk = mix(pk, sc, wside * 0.7);
+			nrk.xy *= 1.0 - wside;
+			npk.xy *= 1.0 - wside;
+		}
+		// dry country: the packed dirt is cracked hardpack with pale pebbles (trail2 G = dry)
+		float tdry_s = max(tdry, smoothstep(0.64, 0.8, reg.y) * 0.75);   // (a dry hardpack stretch, also in green land)
+		if (tdry_s > 0.01) {
+			const vec2 DA = vec2(0.574, 0.819);
+			vec4 d0 = ts_read(ts_dry_col, sp - 13.0, rdx, rdy, DA, 1.0 / 2.6);
+			float dw = ts_hb(pk.a, d0.a, tdry_s) * (1.0 - wside);
+			pk = mix(pk, d0, dw);
+			npk = mix(npk, gd_relief(ts_dry_nr, sp - 13.0, rdx, rdy, DA, 1.0 / 2.6), dw);
+		}
+		// forest: needles, twigs and grass on the ground beside the trail
+		if (tfor > 0.01) {
+			const vec2 LA = vec2(-0.951, 0.309);
+			lit = ts_read(ts_lit_col, sp + 5.0, rdx, rdy, LA, 1.0 / 2.4);
+			nlit = gd_relief(ts_lit_nr, sp + 5.0, rdx, rdy, LA, 1.0 / 2.4);
+		}
+		// the dirt's edge follows the stones: the trail's own height for the dirt / land blend is the stony scan's
+		hD = mix(hD, rk.a * 0.85 + gd_noise3(P * 0.9 + 2.0) * 0.3, sfar);
+	}
 	float a1 = (1.0 - t) + hG * 0.75, a2 = t + hD * 0.75;
 	float m = max(a1, a2) - 0.28;
 	float b1 = max(a1 - m, 0.0), b2 = max(a2 - m, 0.0);
@@ -437,7 +551,100 @@ void fragment() {
 	}
 	// slow light / dark drifts along the trail, so a long straight never reads as one flat band
 	float drift = 1.0 + (gd_noise3(vec3(P.xz * 0.05, 4.2)) - 0.5) * 0.1;
-	vec3 col = mix(landc, dirtc * tcol * drift, wd);
+	// regional dirt tone: warmer / redder here, paler / greyer there (+-~8 %), a little lighter / darker
+	dirtc *= mix(vec3(1.05, 0.99, 0.92), vec3(0.97, 0.99, 1.03), smoothstep(0.25, 0.75, reg.z)) * (0.94 + 0.12 * reg.w);
+	// the scans on the dirt: packed where it's ridden, stony elsewhere, mixed through their heights (stones stick up
+	// through the packed line, the packed dirt fills the stony ground's hollows)
+	vec2 sslope = vec2(0.0);
+	vec3 srel = vec3(1.0);
+	float stn = 0.0;   // how much this pixel is a stone of the stony scan
+	float jtrack = 0.0;   // the worn track up a built jump
+	float jprint = 0.0;   // old tyre prints in it (0..1, with the knobs)
+	if (sfar > 0.0 && t > 0.001) {
+		// (2026-11-27, user: "stones further toward the centre"): the packed line only half-wins, the stony scan's bigger stones
+		// still poke through it, and the stony ground reaches in from the edges across the unridden middle
+		// how stony the ground is here (user: "more in some areas, less in others, realistic noise, now it's all one pattern"):
+		// a slow layered noise (patches ~5-25 m) shifts the balance between the stony and the packed scan
+		float stony = gd_noise3(vec3(P.xz * 0.045, 41.0)) * 0.55 + gd_noise3(vec3(P.xz * 0.16, 7.3)) * 0.3 + gd_noise3(vec3(P.xz * 0.6, 2.9)) * 0.15;
+		stony = smoothstep(0.28, 0.72, stony + (reg.w - 0.5) * 0.5);
+		// built jumps (user: "jumps way too smooth, weird blend"): shaped from the local dirt, stones in it, just compacted. They
+		// counted as fully ridden (m_driven = 0.8 there) + 0.5: the smooth packed scan only, switched at the jump mask's edge.
+		// Now the line's wear is taken out on them and they lean only a little to packed
+		// (user: "a track up the jump"): everyone rides one line over a built jump, so a worn, packed track ~0.6 m wide runs up
+		// it along the racing line (trail_tex: across = r, the line's place = g, along = b), stones pushed to its sides; none
+		// where riders are in the air
+		float jtk = (1.0 - smoothstep(0.12, 0.42, abs(tf.r - tf.g + sin(tf.b * 0.6) * 0.05))) * jm * (1.0 - t_air);
+		jtrack = jtk;
+		// old tyre prints in the jump track (user: "knob tracks, light code"): two faint lines, one tread read each, near only
+		if (jtk > 0.02 && gpx < 0.06) {
+			float acr = tf.r - tf.g;
+			for (int i = 0; i < 2; i++) {
+				float fi = float(i);
+				float d = abs(acr - (fi - 0.5) * 0.16 - sin(tf.b * (0.23 + 0.08 * fi) + fi * 2.3) * 0.04);
+				float band = 1.0 - smoothstep(0.03, 0.05, d);
+				if (band > 0.0) {
+					float h = textureGrad(rut_tread_tex, vec2(d / 0.045, (tf.b + fi * 3.7) / (2.0 * RUT_ROW)), vec2(gpx / 0.045, 0.0), vec2(0.0, gpx / (2.0 * RUT_ROW))).r;
+					jprint = max(jprint, band * (0.6 + 0.4 * h) * jtk * (1.0 - smoothstep(0.03, 0.06, gpx)));
+				}
+			}
+		}
+		float drv = clamp(m_driven * (1.0 - 0.75 * jm) + jtk, 0.0, 1.0);
+		float want = clamp(drv * 0.95 * reg_wear + jm * 0.15 + (0.75 - stony) * 0.9, 0.0, 0.95);
+		float pkw = ts_hb(rk.a, pk.a, want);
+		// the packed line is calmer (its scan is the more contrasty one); the stones of the stony scan go grey (they are
+		// rock, not the dirt's colour)
+		srel = mix(vec3(1.0), mix(rk.rgb * 2.0, mix(vec3(1.0), pk.rgb * 2.0, 0.6), pkw), scan_colour * sfar);
+		stn = smoothstep(0.5, 0.85, rk.a) * (1.0 - pkw) * sfar * scan_colour;
+		vec2 ssl = mix(nrk.xy, npk.xy * 0.8, pkw) * scan_relief * (1.0 - 0.35 * jm);
+		tslope = mix(tslope, ssl * (vt > 0.0 ? trail_fx : max(tnear, 0.6 * trail_fx)), sfar);
+		trough = mix(trough, max(mix(nrk.z, npk.z, pkw), 0.9), sfar * wd);
+	}
+	vec3 dcol = dirtc * tcol * drift * srel * (1.0 - 0.08 * jtrack) * (1.0 - 0.16 * jprint);
+	const vec3 LUMW = vec3(0.2126, 0.7152, 0.0722);
+	dcol = mix(dcol, vec3(dot(dcol, LUMW)) * vec3(1.06, 1.02, 0.96) * 1.1, stn * 0.6);
+	vec3 col = mix(landc, dcol, wd);
+	// the stony shoulder: past the dirt's edge its stones keep showing in the land, in patches, fewer the further out
+	// (only the scan's highest spots = its stones, sitting in the grass / soil)
+	if (sfar > 0.0 && t > 0.001 && scan_shoulder > 0.0) {
+		float shp = smoothstep(0.25, 0.75, gd_noise3(vec3(P.xz * 0.21, 6.1)) * 0.7 + gd_noise3(vec3(P.xz * 0.85, 2.4)) * 0.3);
+		float sho = smoothstep(0.0, 0.3, t) * (1.0 - wd) * (0.35 + 0.65 * shp) * scan_shoulder * sfar * (1.0 - jm) * (1.0 - 0.6 * tfor);
+		float stony2 = smoothstep(0.28, 0.72, gd_noise3(vec3(P.xz * 0.045, 41.0)) * 0.55 + gd_noise3(vec3(P.xz * 0.16, 7.3)) * 0.3 + gd_noise3(vec3(P.xz * 0.6, 2.9)) * 0.15);
+		float th = 1.0 - 0.75 * sho * (0.35 + 0.9 * stony2);
+		float st = smoothstep(th - 0.05, th + 0.05, rk.a) * step(0.01, sho);
+		vec3 stone = dirtc * drift * rk.rgb * 2.0;
+		stone = mix(stone, vec3(dot(stone, LUMW)) * vec3(1.06, 1.02, 0.96) * 1.12, 0.6);
+		col = mix(col, stone, st);
+		sslope = nrk.xy * st * scan_relief;
+	}
+	// forest trail edges: a band of needles / twigs / grass litter over the land and the dirt's outer edge, its own colours
+	// at the land's brightness, coming in through its height (the litter's high bits first)
+	if (sfar > 0.0 && t > 0.001 && tfor > 0.01) {
+		float band = smoothstep(0.0, 0.35, t) * (1.0 - smoothstep(0.5, 0.95, wd)) * tfor * sfar * (1.0 - jm);
+		float lw = smoothstep(0.0, 0.25, band - (1.0 - lit.a) * 0.55) * (1.0 - stn);
+		vec3 lcol = lit.rgb * 2.0 * LIT_MEAN * (dot(landc, LUMW) / dot(LIT_MEAN, LUMW));
+		col = mix(col, lcol, lw * 0.9);
+		sslope = mix(sslope, nlit.xy * scan_relief, lw);
+	}
+	// the cut edge (2026-11-27, real geometry: TerrainFieldCs.micro_detail lifts the verge 6-16 cm): the foot of the bank
+	// holds a little shade and the dirt there is the darker, damper soil the edge was dug from
+	if (trail_scan > 0.0 && wd > 0.01) {
+		float foot = smoothstep(0.35, 0.65, wd) * (1.0 - smoothstep(0.8, 0.98, wd)) * (1.0 - jm) * (1.0 - stn);
+		col *= 1.0 - 0.22 * foot;
+	}
+	// the bank's face: where the mesh beside the trail stands steep (the swept edge profile's step), it is bare, darker soil
+	// with the stony scan in it, not grass. Only in the band along the trail's edge (hillsides elsewhere keep their colour)
+	if (trail_scan > 0.0 && (t > 0.01 || v_bank > 0.05) && wd < 0.97) {
+		float vny = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz).y;
+		float face = max(smoothstep(0.9, 0.75, vny) * smoothstep(0.01, 0.15, t), smoothstep(0.2, 0.6, v_bank) * smoothstep(0.9, 0.72, vny))
+			* (1.0 - jm) * (1.0 - smoothstep(0.25, 0.6, gpx));
+		// a side projection on the face (the triplanar idea, only where it's steep): the stony scan laid along the face's own
+		// horizontal direction and up the world, so the cut shows dirt with stones in it, not stripes smeared from above
+		vec4 fc = mix(textureGrad(ts_rock_col, fuvz, fdxz, fdyz), textureGrad(ts_rock_col, fuvx, fdxx, fdyx), fwx);
+		vec3 soil = dirtc * drift * mix(vec3(1.0), fc.rgb * 2.0, scan_colour) * 0.72;
+		col = mix(col, soil, face);
+		sslope = mix(sslope, vec2(0.0), face);
+		tslope = mix(tslope, vec2(0.0), face);
+	}
 	// stones along the trail's edges (baked: C.a): grey-brown, each its own shade, on dirt and grass alike
 	if (vt > 0.0 && rc.a > 0.002) {
 		float sh = gd_noise3(vec3(P.xz * 9.0, 2.6));
@@ -462,6 +669,8 @@ void fragment() {
 			// blade-scale texture on the floor between / under the blades: fine dark gaps, pale blade tips, tuft mottling
 			// (fades with distance so far ground stays calm, no shimmer)
 			float gn = under * (1.0 - smoothstep(6.0, 38.0, gd));
+			// (laid from above: smeared down steep faces, e.g. the trail's cut bank)
+			gn *= smoothstep(0.72, 0.9, normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz).y);
 			if (gn > 0.01) {
 				float g1 = gd_noise3(vec3(P.xz * 14.0, 1.7));
 				float g2 = gd_noise3(vec3(P.xz * 41.0, 5.1));
@@ -473,6 +682,20 @@ void fragment() {
 		}
 	}
 	float pud = m_puddle * wd;
+	// rain water standing in the gutters along the trail's edge (2026-11-27, user): in wet stretches, filling the gutter's deepest
+	// bits to a level that varies along it; never in dry country
+	if (trail_scan > 0.0 && v_gut > 0.05) {
+		float rainz = smoothstep(0.42, 0.58, gd_noise3(vec3(P.xz * 0.025, 17.0)));
+		rainz = max(rainz, trail_puddles - 1.0);   // (tests: BMX_TRAIL_PUDDLES=2 = every gutter wet)
+		float lvl = 0.3 + 0.35 * gd_noise3(vec3(P.xz * 0.35, 5.0));
+		float paa = max(gpx * 2.0, 0.04);
+		// dry country (user: "also in deserts, in the gutters on some corners"): only in bends, where the runoff collects
+		float wetk = max(1.0 - smoothstep(0.3, 0.6, tdry), smoothstep(0.4, 0.75, tf3.g) * 0.9);
+		// (user: "puddles on sloped berms?"): water only lies where the ground is level
+		float glvl = smoothstep(0.985, 0.997, fwn.y);
+		float gp = smoothstep(lvl - paa, lvl + paa, v_gut) * rainz * wetk * glvl * min(trail_puddles, 1.0);
+		pud = max(pud, min(gp, 1.0));
+	}
 	// a tyre through a puddle pushes it: the wake's slope tilts the puddle's normal, its foam lightens it (only read inside a puddle)
 	vec2 pw_g = vec2(0.0);
 	float pw_f = 0.0;
@@ -531,16 +754,19 @@ void fragment() {
 	SPECULAR = mix(0.12, 0.6, pud);
 	// screen derivatives here, in uniform control flow: inside the branch below they are undefined wherever the
 	// branch differs between neighbouring pixels (trail / puddle edges), which flickered in 2x2 blocks
-	float hh = thgt * wd * trail_relief;
+	// (everything baked from above smears down steep faces: the cut bank beside the trail; faded there)
+	float flat_k = smoothstep(0.62, 0.82, normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz).y);
+	float hh = (thgt * wd * trail_relief - jprint * 0.006) * flat_k;
 	// (the prints' knobs are colour only, from the mipmapped tread texture: lit as a bump per pixel they shimmered)
 	vec3 dpx = dFdx(P), dpy = dFdy(P);
 	float dhx = dFdx(hh), dhy = dFdy(hh);
 	// the baked relief's slope (worn lines, prints, grit, edge stones): on the dirt, and the stones on the grass too
-	vec2 rsl = rb.xy * max(wd, rc.a) * trail_relief * vt + rks;
-	if (wd * tbump > 0.0 || pud > 0.0 || hh != 0.0 || rd != 0.0 || ofl > 0.01 || dot(rsl, rsl) > 0.0) {
+	vec2 rsl = (rb.xy * max(wd, rc.a) * trail_relief * vt + rks) * flat_k;
+	tslope *= flat_k;
+	if (wd * tbump > 0.0 || pud > 0.0 || hh != 0.0 || rd != 0.0 || ofl > 0.01 || dot(rsl, rsl) > 0.0 || dot(sslope, sslope) > 0.0 || dot(tslope, tslope) > 0.0) {
 		vec3 nw = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
 		if (rd != 0.0) nw = rut_normal(P.xz, nw);   // (the groove's walls)
-		nw = normalize(nw + vec3(lslope.x, 0.0, lslope.y) * 0.5);
+		nw = normalize(nw + vec3(lslope.x, 0.0, lslope.y) * 0.5 + vec3(sslope.x, 0.0, sslope.y));
 		nw = normalize(nw + vec3(tslope.x, 0.0, tslope.y) * (wd * trail_bump));
 		nw = normalize(nw - vec3(clamp(rsl.x, -1.2, 1.2), 0.0, clamp(rsl.y, -1.2, 1.2)));
 		// the height above as a real slope of the surface (its screen-space gradient turned into the world)
@@ -578,6 +804,7 @@ void fragment() {
 		ROUGHNESS = 1.0;
 	}
 	if (trail_debug == 8 && rut_win.w > 0.5) { ALBEDO = vec3(fract(rut_bilerp(rut_tex, P.xz).g * 40.0)); ROUGHNESS = 1.0; }   // print edge distance as contours (2.5 cm)
+	if (trail_debug == 9) { ALBEDO = vec3(v_gut, pud, 0.0); ROUGHNESS = 1.0; }   // the gutter's depth (r), standing water (g)
 	if (trail_debug == 7) { ALBEDO = vec3(rpr.x, rpr.y * rpr.x, rpr.z); ROUGHNESS = 1.0; }   // tyre prints: cover, knobs, lip
 	if (trail_debug == 1) {
 		ALBEDO = vec3(m_driven, m_loose, max(m_puddle, m_wet * 0.4)) * wd + vec3(m_tracks) * 0.5 + vec3(m_skid, m_skid, 0.0) + vec3(m_stray, 0.0, m_stray) * wd + vec3(0.0, m_play, m_play) * wd;

@@ -1,0 +1,6 @@
+Poly Haven, CC0 (https://polyhaven.com/license):
+  rocky_trail       https://polyhaven.com/a/rocky_trail
+  forest_ground_04  https://polyhaven.com/a/forest_ground_04
+Packed by tools/make_trail_scans.py (colour relative to its mean + height; normal + roughness).
+  dry_ground_rocks  https://polyhaven.com/a/dry_ground_rocks
+  forrest_ground_01 https://polyhaven.com/a/forrest_ground_01

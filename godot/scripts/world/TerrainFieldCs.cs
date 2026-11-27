@@ -2739,12 +2739,18 @@ public partial class TerrainFieldCs : RefCounted
 
 	private static readonly bool NO_MICRO = DevFlags.Env("BMX_NO_MICRO") is { Length: > 0 };
 	private static readonly bool OLD_VERGE = DevFlags.Env("BMX_OLD_VERGE") is { Length: > 0 };
+	private static readonly string EDGE_STYLE = DevFlags.Env("BMX_EDGE_STYLE") ?? "";   // test: smooth | bank | gutter everywhere
+	private static readonly bool OLD_CUT = DevFlags.Env("BMX_OLD_CUT") is { Length: > 0 };
 
 	/// Imperfections of the ground, in metres, for the finer mesh only (visual: tyres and physics read the smooth ground, so it is kept to
 	/// a few cm): fine roughness near the trail (0.3 m and 1 m grain), now and then a pothole / washout on the road (hash of the 37 m stretch), a ragged dirt edge, and rills
 	/// running down banked faces. Zero away from the trail.
+	private double _gut_last;
+	private double _bank_last;   // micro_detail's bank step face at the last point (0..1): ground.gdshader draws bare soil there   // micro_detail's gutter at the last point asked, 0..1 of a deep one (fine_ground passes it to the shader)
 	private double micro_detail(double x, double z)
 	{
+		_gut_last = 0.0;
+		_bank_last = 0.0;
 		query(x, z);
 		double w = q_w;
 		double dtr = q_d;
@@ -2791,12 +2797,52 @@ public partial class TerrainFieldCs : RefCounted
 		{
 			double fade = Math.Min(1.2, 0.35 + w);
 			double e0 = w + 0.05 * fade;
-			double vg = sm(e0, e0 + 0.25 * fade + 0.08, dtr) * (1.0 - sm(e0 + 0.6, e0 + 2.2, dtr));
-			if (vg > 0.0)
+			// 2026-11-27: the trail's edge as ONE cross-section swept along it (user sketch: trail bed -> a dirt shoulder rising
+			// gently -> a steep bank step -> the flat grass top, easing back to the land), like racing games' road profiles. o =
+			// metres past the trail's half-width. Each stretch and each side picks its numbers from slow noises: a smooth edge
+			// (no bank), a raised grass bank (step up to ~22 cm), or a lower bank with a gutter dug along its foot. Drawn mesh only
+			// (the physics rides the smooth ground). BMX_OLD_CUT=1 = the old even 3.5-7 cm lip
+			double nv = sm(-0.4, 0.4, noise((x - 5.3) * 0.31, (z + 8.9) * 0.31));
+			if (OLD_CUT)
 			{
-				double lip = (0.035 + 0.035 * Math.Min(1.0, w / 1.2)) * (0.75 + 0.5 * sm(-0.4, 0.4, noise((x - 5.3) * 0.31, (z + 8.9) * 0.31)));
-				double jm = jump_mask(x, z);
-				d += lip * vg * (1.0 - jm);
+				double vg = sm(e0, e0 + 0.25 * fade + 0.08, dtr) * (1.0 - sm(e0 + 0.6, e0 + 2.2, dtr));
+				d += (0.035 + 0.035 * Math.Min(1.0, w / 1.2)) * (0.75 + 0.5 * nv) * vg * (1.0 - jump_mask(x, z));
+			}
+			else
+			{
+				double o = dtr - w;
+				double side = qa < 0.0 ? -1.0 : 1.0;
+				double es = noise((x + 17.1) * 0.035, (z - 3.3) * 0.035) + 0.55 * side * noise((x - 61.7) * 0.05, (z + 23.9) * 0.05);
+				if (EDGE_STYLE.Length > 0) es = EDGE_STYLE == "smooth" ? -1.0 : (EDGE_STYLE == "gutter" ? 1.0 : 0.0);   // test
+				double wSm = 1.0 - sm(-0.4, -0.1, es);
+				double wGu = sm(0.12, 0.4, es);
+				double wBk = Math.Max(0.0, 1.0 - wSm - wGu);
+				double wk = Math.Min(1.0, w / 1.2);   // narrow singletracks: a smaller profile
+				double n2 = sm(-0.4, 0.4, noise((x + 2.9) * 0.09, (z - 14.1) * 0.09));
+				// the profile's numbers (m)
+				double sw = (0.25 + 0.55 * nv) * (0.5 + 0.5 * wk) + 0.4 * wSm;             // shoulder width
+				double sh = (0.025 + 0.035 * n2) * wk * (1.0 - 0.6 * wGu);                 // shoulder rise
+				double bw = 0.14 + 0.16 * (1.0 - n2) + 0.6 * wSm;                          // bank width (steep = narrow)
+				double bh = (0.06 + 0.16 * n2) * (0.5 + 0.5 * wk) * (wBk + 0.6 * wGu);     // bank step
+				double top = 1.5 + 1.5 * nv;                                               // flat grass top before it eases out
+				if (bh > 0.015)
+					_bank_last = Math.Clamp(1.0 - Math.Abs(o - (sw + bw * 0.5)) / (bw * 0.5 + 0.03), 0.0, 1.0) * Math.Min(1.0, bh / 0.07) * (1.0 - jump_mask(x, z));
+				double prof = sh * sm(-0.15, sw, o)
+					+ bh * sm(sw, sw + bw, o)
+					- (sh + bh) * sm(sw + bw + top, sw + bw + top + 2.0, o);
+				// the gutter: dug along the foot of the bank
+				if (wGu > 0.0 && w > 0.5)
+				{
+					double gc = 1.0 - Math.Abs(o - (sw - 0.12)) / 0.24;
+					if (gc > 0.0)
+					{
+						double gd = (0.03 + 0.04 * n2) * wGu * gc * gc * (3.0 - 2.0 * gc);
+						prof -= gd;
+						_gut_last = gd / 0.07 * (1.0 - jump_mask(x, z));
+					}
+				}
+				if (prof != 0.0)
+					d += prof * (1.0 - jump_mask(x, z));
 			}
 		}
 		return d;
@@ -2813,6 +2859,8 @@ public partial class TerrainFieldCs : RefCounted
 		double d = S / M;
 		long NV = N + 1;
 		var H = new float[W * W];
+		var GU = new float[MV * MV];
+		var BK = new float[MV * MV];   // the bank step's face (0..1)   // the gutter's depth at each vertex (0..1): ground.gdshader fills the deepest with water
 		for (long iz = -1; iz < M + 2; iz++)
 			for (long ix = -1; ix < M + 2; ix++)
 				H[(iz + 1) * W + ix + 1] = (float)ground(ox - S / 2 + ix * d, oz - S / 2 + iz * d);
@@ -2821,7 +2869,14 @@ public partial class TerrainFieldCs : RefCounted
 			// micro detail the 0.5 m grid could not show: DRAWN ONLY (the physics ground stays smooth), centimetres
 			for (long iz = -1; iz < M + 2; iz++)
 				for (long ix = -1; ix < M + 2; ix++)
+				{
 					H[(iz + 1) * W + ix + 1] += (float)micro_detail(ox - S / 2 + ix * d, oz - S / 2 + iz * d);
+					if (ix >= 0 && iz >= 0 && ix <= M && iz <= M)
+					{
+						GU[iz * MV + ix] = (float)_gut_last;
+						BK[iz * MV + ix] = (float)_bank_last;
+					}
+				}
 		}
 		var verts = new Vector3[MV * MV];
 		var norms = new Vector3[MV * MV];
@@ -2841,7 +2896,142 @@ public partial class TerrainFieldCs : RefCounted
 			}
 		}
 		// H = the drawn heights ((M + 3)^2, one ring outside): the drawn tyres' fit reads them (Terrain.mesh_height / mesh_add)
-		return new Godot.Collections.Dictionary { ["verts"] = verts, ["norms"] = norms, ["uvs"] = uvs, ["H"] = H };
+		var cols = new Color[MV * MV];   // r = 1 - gutter (no colour array = 1 = none)
+		for (long i = 0; i < MV * MV; i++)
+			cols[i] = new Color(1f - Math.Clamp(GU[i], 0f, 1f), 1f - Math.Clamp(BK[i], 0f, 1f), 1f, 1f);
+		var res = new Godot.Collections.Dictionary { ["verts"] = verts, ["norms"] = norms, ["uvs"] = uvs, ["H"] = H, ["cols"] = cols };
+		if (!NO_MICRO && !OLD_CUT && !NO_BANKSPLIT)
+			bank_split(ox, oz, N, K, H, norms, GU, BK, res);
+		return res;
+	}
+
+	private static readonly bool NO_BANKSPLIT = DevFlags.Env("BMX_NO_BANKSPLIT") is { Length: > 0 };
+	private const int BS = 4;   // a bank cell is split BS x BS
+
+	/// the drawn height (ground + micro detail) at a world point
+	private double drawn_h(double x, double z) => ground(x, z) + micro_detail(x, z);
+
+	/// 2026-11-27 (user: "finer mesh at the banks if not too heavy"): the trail edge's bank step (micro_detail's swept profile) is
+	/// sharper than the 0.25 m grid. Only the grid cells near the trail's edge where the drawn surface bends away from the cell's
+	/// flat (bilinear) surface by more than SPLIT_TOL are split BS x BS; their own vertices + triangles go in res["sv"] / ["sn"] /
+	/// ["suv"] / ["sidx"] (indices into sv), the split cells in ["scell"] (iz * M + ix: the base mesh's LOD 0 leaves them out),
+	/// the largest bend in ["serr"] (the LODs' error). Crack-free: a vertex on an edge shared with an unsplit cell (or the chunk's
+	/// border) lies on that edge's straight line; one shared by two split cells gets the true height on both sides.
+	private void bank_split(double ox, double oz, long N, long K, float[] H, Vector3[] norms, float[] GU, float[] BK, Godot.Collections.Dictionary res)
+	{
+		const double S = 48.0;
+		const double SPLIT_TOL = 0.015;
+		long M = N * K, MV = M + 1, W = M + 3;
+		double d = S / M;
+		var split = new bool[M * M];
+		double serr = 0.0;
+		int count = 0;
+		for (long cz = 0; cz < M; cz++)
+		{
+			for (long cx = 0; cx < M; cx++)
+			{
+				double x0 = ox - S / 2 + cx * d, z0 = oz - S / 2 + cz * d;
+				query(x0 + d / 2, z0 + d / 2);
+				double o = q_d - q_w;
+				if (o < -0.4 || o > 2.0 || q_w < 0.2)
+					continue;
+				float h00 = H[(cz + 1) * W + cx + 1], h10 = H[(cz + 1) * W + cx + 2];
+				float h01 = H[(cz + 2) * W + cx + 1], h11 = H[(cz + 2) * W + cx + 2];
+				double dev = 0.0;
+				// the middle and the four edge midpoints against the cell's bilinear surface
+				for (int t = 0; t < 5; t++)
+				{
+					double u = t == 0 ? 0.5 : (t == 1 ? 0.5 : (t == 2 ? 0.5 : (t == 3 ? 0.0 : 1.0)));
+					double v = t == 0 ? 0.5 : (t == 1 ? 0.0 : (t == 2 ? 1.0 : 0.5));
+					double hb = (h00 * (1 - u) + h10 * u) * (1 - v) + (h01 * (1 - u) + h11 * u) * v;
+					dev = Math.Max(dev, Math.Abs(drawn_h(x0 + u * d, z0 + v * d) - hb));
+				}
+				if (dev > SPLIT_TOL)
+				{
+					split[cz * M + cx] = true;
+					serr = Math.Max(serr, dev);
+					count++;
+				}
+			}
+		}
+		if (count == 0)
+			return;
+		const int SV = BS + 1;
+		var sv = new Vector3[count * SV * SV];
+		var sn = new Vector3[count * SV * SV];
+		var suv = new Vector2[count * SV * SV];
+		var scol = new Color[count * SV * SV];
+		var sidx = new int[count * BS * BS * 6];
+		var scell = new int[count];
+		long NV = N + 1;
+		double e = d / BS;
+		int vi = 0, ii = 0, ci = 0;
+		bool is_split(long x, long z) => x >= 0 && z >= 0 && x < M && z < M && split[z * M + x];
+		for (long cz = 0; cz < M; cz++)
+		{
+			for (long cx = 0; cx < M; cx++)
+			{
+				if (!split[cz * M + cx])
+					continue;
+				scell[ci++] = (int)(cz * M + cx);
+				double x0 = -S / 2 + cx * d, z0 = -S / 2 + cz * d;   // chunk-local
+				long g00 = cz * MV + cx;
+				float h00 = H[(cz + 1) * W + cx + 1], h10 = H[(cz + 1) * W + cx + 2];
+				float h01 = H[(cz + 2) * W + cx + 1], h11 = H[(cz + 2) * W + cx + 2];
+				Vector3 n00 = norms[g00], n10 = norms[g00 + 1], n01 = norms[g00 + MV], n11 = norms[g00 + MV + 1];
+				float u00 = GU[g00], u10 = GU[g00 + 1], u01 = GU[g00 + MV], u11 = GU[g00 + MV + 1];
+				float k00 = BK[g00], k10 = BK[g00 + 1], k01 = BK[g00 + MV], k11 = BK[g00 + MV + 1];
+				int v0 = vi;
+				for (int b = 0; b < SV; b++)
+				{
+					for (int a = 0; a < SV; a++)
+					{
+						double u = (double)a / BS, v = (double)b / BS;
+						double lx = x0 + a * e, lz = z0 + b * e;
+						bool corner = (a == 0 || a == BS) && (b == 0 || b == BS);
+						bool edge = !corner && (a == 0 || a == BS || b == 0 || b == BS);
+						// an edge vertex takes the true height only if the cell across that edge is split too
+						bool truth = !corner && (!edge
+							|| (b == 0 && is_split(cx, cz - 1)) || (b == BS && is_split(cx, cz + 1))
+							|| (a == 0 && is_split(cx - 1, cz)) || (a == BS && is_split(cx + 1, cz)));
+						float hy, gu, bk;
+						Vector3 nn;
+						if (truth)
+						{
+							double wx = ox + lx, wz = oz + lz;
+							hy = (float)drawn_h(wx, wz);
+							gu = (float)_gut_last;
+							bk = (float)_bank_last;
+							double hl = drawn_h(wx - e, wz), hr = drawn_h(wx + e, wz), hd = drawn_h(wx, wz - e), hu = drawn_h(wx, wz + e);
+							var q = new Vector3((float)(hl - hr), (float)(2 * e), (float)(hd - hu));
+							nn = q.Normalized();
+						}
+						else
+						{
+							hy = (float)((h00 * (1 - u) + h10 * u) * (1 - v) + (h01 * (1 - u) + h11 * u) * v);
+							gu = (float)((u00 * (1 - u) + u10 * u) * (1 - v) + (u01 * (1 - u) + u11 * u) * v);
+							bk = (float)((k00 * (1 - u) + k10 * u) * (1 - v) + (k01 * (1 - u) + k11 * u) * v);
+							nn = ((n00 * (float)(1 - u) + n10 * (float)u) * (float)(1 - v) + (n01 * (float)(1 - u) + n11 * (float)u) * (float)v).Normalized();
+						}
+						sv[vi] = new Vector3((float)lx, hy, (float)lz);
+						sn[vi] = nn;
+						scol[vi] = new Color(1f - Math.Clamp(gu, 0f, 1f), 1f - Math.Clamp(bk, 0f, 1f), 1f, 1f);
+						suv[vi] = new Vector2((float)(((cx + u) / K + 0.5) / NV), (float)(((cz + v) / K + 0.5) / NV));
+						vi++;
+					}
+				}
+				for (int b = 0; b < BS; b++)
+				{
+					for (int a = 0; a < BS; a++)
+					{
+						int q00 = v0 + b * SV + a, q10 = q00 + 1, q01 = q00 + SV, q11 = q01 + 1;
+						sidx[ii++] = q00; sidx[ii++] = q10; sidx[ii++] = q01;
+						sidx[ii++] = q10; sidx[ii++] = q11; sidx[ii++] = q01;
+					}
+				}
+			}
+		}
+		res["sv"] = sv; res["sn"] = sn; res["suv"] = suv; res["scol"] = scol; res["sidx"] = sidx; res["scell"] = scell; res["serr"] = serr;
 	}
 
 	public Godot.Collections.Dictionary build_ground(double ox, double oz, long N)

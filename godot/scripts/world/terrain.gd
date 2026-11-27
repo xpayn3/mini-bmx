@@ -56,6 +56,19 @@ static func trail_textures() -> Array:
 		for id in TRAIL_SCANS:
 			_trail_tex.append(load("res://assets/textures/trail/%s_nr.jpg" % id))
 	return _trail_tex
+## the photo-scanned trail surface (assets/textures/trail_scan/SOURCE.txt, tools/make_trail_scans.py): rocky_trail = stony
+## dirt (loose ground, the shoulders, stones breaking into the land beside the trail), forest_ground_04 = packed dirt (the
+## ridden line). ground.gdshader ts_*; BMX_OLD_TRAILSCAN=1 = without
+const TRAIL_SCAN2 := {"ts_rock_col": "rocky_trail_col", "ts_rock_nr": "rocky_trail_nr", "ts_pack_col": "forest_ground_04_col", "ts_pack_nr": "forest_ground_04_nr",
+	"ts_dry_col": "dry_ground_rocks_col", "ts_dry_nr": "dry_ground_rocks_nr", "ts_lit_col": "forrest_ground_01_col", "ts_lit_nr": "forrest_ground_01_nr"}
+static var _scan2: Dictionary = {}
+static func set_trail_scans(mat: ShaderMaterial) -> void:
+	if Env.s("BMX_OLD_TRAILSCAN") == "1": return
+	if _scan2.is_empty():
+		for k in TRAIL_SCAN2: _scan2[k] = load("res://assets/textures/trail_scan/%s.webp" % TRAIL_SCAN2[k])
+	for k in _scan2: mat.set_shader_parameter(k, _scan2[k])
+	mat.set_shader_parameter("trail_scan", 1.0)
+	if Env.s("BMX_NO_PARALLAX") == "1": mat.set_shader_parameter("scan_parallax", 0.0)
 var _tape_mat: ShaderMaterial
 var _debris: TerrainDebris
 var _tapes: TapeSim              # torn tape ribbons (tape.js TapeSim)
@@ -897,12 +910,21 @@ const LIST_SPEC := {
 	"pebble_tundra": ["pebble_tundra", "rock_tundra", false, true],
 	"rock_basalt0": ["rock_basalt0", "rock_basalt", true, false], "rock_basalt1": ["rock_basalt1", "rock_basalt", true, false],
 	"pebble_basalt": ["pebble_basalt", "rock_basalt", false, true],
+	# scanned rocks (TerrainGeo.SCAN_ROCKS): the brink rocks + boulders along the trail
+	"scan_boulder01": ["scan_boulder01", "scan_boulder01", true, false], "scan_nboulder02": ["scan_nboulder02", "scan_nboulder02", true, false],
+	"scan_rock09": ["scan_rock09", "scan_rock09", true, false],
+	"scan_nstone_a": ["scan_nstone_a", "scan_nstone", true, false], "scan_nstone_b": ["scan_nstone_b", "scan_nstone", true, false],
+	"scan_nstone_c": ["scan_nstone_c", "scan_nstone", true, false], "scan_nstone_d": ["scan_nstone_d", "scan_nstone", true, false],
+	"scan_nstone_e": ["scan_nstone_e", "scan_nstone", true, false],
+	"spebble_a": ["spebble_a", "scan_nstone", false, true], "spebble_b": ["spebble_b", "scan_nstone", false, true],
+	"spebble_c": ["spebble_c", "scan_nstone", false, true], "spebble_d": ["spebble_d", "scan_nstone", false, true],
+	"spebble_e": ["spebble_e", "scan_nstone", false, true],
 }
 
 
 ## how far (m, camera to the chunk's centre) each kind of decoration is drawn; past the fog they fade
 ## out. Small ground clutter is also limited to the 3x3 chunks round the rider (update_stream).
-const VIS_RANGE := {"pebble": 90.0, "pebble_granite": 90.0, "pebble_desert": 90.0, "pebble_tundra": 90.0, "pebble_basalt": 90.0, "grass": 90.0, "daisy": 90.0, "tulip": 90.0, "spike": 90.0, "stick": 90.0,
+const VIS_RANGE := {"spebble_a": 90.0, "spebble_b": 90.0, "spebble_c": 90.0, "spebble_d": 90.0, "spebble_e": 90.0, "pebble": 90.0, "pebble_granite": 90.0, "pebble_desert": 90.0, "pebble_tundra": 90.0, "pebble_basalt": 90.0, "grass": 90.0, "daisy": 90.0, "tulip": 90.0, "spike": 90.0, "stick": 90.0,
 	"fern": 90.0, "mushroom": 90.0}
 ## everything else (trees, rocks, bushes, logs, weeds, fence wood, sheds) has no per-chunk range: it dissolves by
 ## its own distance from the rider (shaders/deco_fade.gdshaderinc, the band set by Game: FADE_IN .. FADE_OUT),
@@ -1042,6 +1064,7 @@ func _finalize_out(k: Vector2i, o: Dictionary, chunk_n: int) -> void:
 	arr[Mesh.ARRAY_VERTEX] = o["verts"]
 	arr[Mesh.ARRAY_NORMAL] = o["norms"]
 	arr[Mesh.ARRAY_TEX_UV] = o["uvs"]
+	if o.has("cols"): arr[Mesh.ARRAY_COLOR] = o["cols"]
 	arr[Mesh.ARRAY_INDEX] = o["indices"]
 	var mesh := ArrayMesh.new()
 	# distance LOD: coarser grids keyed by their geometric error (terrain_chunk_builder._ground_lods)
@@ -1053,6 +1076,7 @@ func _finalize_out(k: Vector2i, o: Dictionary, chunk_n: int) -> void:
 	var scans := trail_textures()
 	for i in TRAIL_SCANS.size():
 		mat.set_shader_parameter("tr_nr%d" % i, scans[i])
+	set_trail_scans(mat)
 	mat.set_shader_parameter("trail_tex", ImageTexture.create_from_image(o["trail_img"]))
 	mat.set_shader_parameter("trail2_tex", ImageTexture.create_from_image(o["trail2_img"]))
 	mat.set_shader_parameter("trail3_tex", ImageTexture.create_from_image(o["trail3_img"]))
