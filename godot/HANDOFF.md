@@ -407,6 +407,18 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   (crouch before a lip, pop, reach for the landing), **fore/aft body spring** (`body_x`, `hip_shift`: braking
   and landings throw the body forward, drive sits it back), **air control** (Space tucks the bike up about the
   shared centre of mass, W/S lean the nose; keys held at take-off count only once pressed again).
+- **DH sprint form (2026-11-27, user: "knees out too much at speed", "no pulling on the bars", "looks down a bit then back up")**,
+  `rider.gd` `SPR_*`, drawing only. Measured (`BMX_SPRINT_PROBE=1` + `BMX_LAUNCH=sprint BMX_STRAIGHT=1`: `SPRKNEE` knee / hip
+  distance from the frame's middle plane, how often the knee clearance pushed it): knees sat 15-17 cm out (peaks 25 cm), the
+  12 cm clearance pushed them out on 20-40 % of frames. Now sprinting: the knee pole's sideways part x 0.15 (`SPR_KNEE_IN`),
+  clearance 8.5 cm (`SPR_KNEE_CLEAR`, `_knee_clear` takes it), hips take back half the pedalling-rock undo (`SPR_HIP_ROCK`):
+  11-12 cm, peaks 13-16 at speed. Bar pull by each arm's own foot (peak ~30 deg past the front of its stroke, Stone & Hull):
+  the SHOULDERS TURN toward the pulling arm (`SPR_PULL_TWIST` 0.16 rad, was 0.22: "a bit less", via `tw`) with a small shrug, pulling elbow out / back,
+  pressing arm straighter. (Moving the shoulder joint 10 cm tore it off the torso: never move `shp` alone by much.) At speed
+  the hips go 5 cm back and the back flattens (`SPR_HIP_BACK`, `SPR_CHEST_LOW`). Head-down bursts: 0.34 rad down for
+  0.3-1.1 s, then up 0.4-1.7 s (shorter down / longer up the faster). Spinning a high cadence the upper body goes
+  quiet (user: "only high spinning"): bar pull, shoulder turn, hip rock / tilt x `calm_k`, down to `SPIN_CALM_LEFT` 0.08 from
+  85 to 125 rpm, eased in over ~1.5 s (`_spin_calm`; `SPRKNEE` prints rpm / calm). `BMX_OLD_SPRINT=1` = before. User: "nice".
 - **Sprint from slow** (`sprintKick`, `BikePhysics.slowness`): the slower the rider, the harder a sprint pushes (0–25 km/h 1.5 s vs 2.7 s pedalling), legs spin up, the bike is thrown side to side and the rider stands tall over the bars (`effort` in `rider.gd`). Stamping from below ~12 km/h lifts the front into the balance manual (`manSprintLift`), balanced from there like any manual.
 - **Body stick** (gamepad right stick, `body_fwd/back/left/right` actions → `inp.body_fwd`, `inp.body_lean`): fore / aft adds to
   `body_x` / `hip_shift` (reach `stickShift` × `weightShift`); past `manualFrom` pulled back it holds a manual (`manual_up` feeds
