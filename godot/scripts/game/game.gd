@@ -1910,6 +1910,7 @@ func on_landing(air_time: float, impact: float) -> void:
 	_lt = _perf("p_step.land_dust", _lt)
 	if rumble: rumble.landing(air_time, impact)
 	if audio and air_time > 0.15: audio.landing(impact, phys.land_yaw)
+	if audio and audio.layers: audio.layers.on_landing(impact, air_time)
 	_perf("p_step.land_audio", _lt)
 
 ## the bike and rider as solid shapes the dust sim's air has to go round: two spinning wheels, the

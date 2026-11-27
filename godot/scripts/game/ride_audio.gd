@@ -55,6 +55,7 @@ var g_rumble := 1.0
 const GRAVEL_SURF := [[0.09, 420.0, 0.04, 1.2], [0.15, 600.0, 0.12, 0.9], [0.0, 500.0, 0.05, 0.5], [0.13, 520.0, 0.08, 0.7]]   # subtle: ~half the level, little crack (clicks)
 # one-shots: [kind, t, amp]
 var shots: Array = []
+var layers: RideLayers   # recorded layers driven by the ride (game/ride_layers.gd): silent until recordings exist
 var shift_snd: ShiftSound
 ## the instant replay drives the sound: `src` = a recorded state (ReplayMode.AudioState: the same fields this reads
 ## from BikePhysics), and every one-shot played while riding is handed to the replay (`_rec`) to play again there
@@ -84,6 +85,9 @@ func _ready() -> void:
 	player.play()
 	pb = player.get_stream_playback()
 	_setup_chain()
+	layers = RideLayers.new()
+	layers.game = game
+	add_child(layers)
 	shift_snd = ShiftSound.new()
 	add_child(shift_snd)
 	var gs = load("res://scripts/game/GravelSynth.cs")
@@ -317,6 +321,10 @@ func update_audio(dt: float) -> void:
 	var sp0 := FreewheelSound.get_value("sp_from") / 3.6
 	fw_fast = smoothstep(sp0, maxf(sp0 + 0.5, FreewheelSound.get_value("sp_full") / 3.6), fs)
 	_update_chain(dt, va, on_ground, st)
+	# the recorded layers only follow the live ride (in a replay / the map / photo mode they fade out)
+	var live: bool = not (game.replay_on or game.photo or (game.paper_map != null and game.paper_map.busy()))
+	layers.update(dt, game.phys, va if live else 0.0, on_ground and live, live)
+	if Env.s("BMX_LAYER_PROBE") != "": layers.probe(dt)
 	_fill()
 	_fill_fw()
 	if Env.s("BMX_AUDIO_PROBE") != "" and Engine.get_process_frames() % 30 == 0:
