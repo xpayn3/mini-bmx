@@ -3551,6 +3551,29 @@ ide_<date>.replay` (test runs: `replays/tests/`), zstd, ~4 MB a
 - Not done: whoosh for big things past 3 m (gantries, cliffs), ambience per biome, reverb zones, camera-aware mix of the
   bike layers, recorded layers in replays. Research + gap list: `docs/research/sound_design.md`.
 
+### Procedural air: gate whoosh + open-landscape ambience (2026-11-27, user asked for procedural here)
+- `scripts/game/AirDsp.cs`: shared building blocks (pink noise, slow random drift, state-variable band-pass, one-pole
+  low-pass; filter settings recomputed only when they move > 0.05 %, finer steps made a "zipper" grit).
+- **Gate whoosh** (`PassBySynth.cs`, driven by `RideLayers._gates`): riding under a trail gantry (`TrailGate.build`) or a
+  level race gate (`LevelVisuals._gate`): both join group `pass_gate` with meta `pass` = {at, dir, half, clear (banner
+  bottom over the ground), depth, flap}. ~1.8 s ahead (`GATE_AHEAD` + `PEAK`) the pass is rendered on a worker
+  (`Queue`, ~20-40 ms) for this speed, the predicted sideways offset AT the crossing and the banner's height, then
+  `Take`n and played (2D stereo, bus Wind) so its loudest moment (`PEAK` 0.6 s in) is under the banner. Layers: air past
+  each post (Doppler band-pass, (r0/r)^2, air absorption, the far ear 0.4 ms late + duller), the rider's wind reflected
+  off banner + both truss chords (sweeping delays with wobble, not one metallic comb), a low pressure swell, cloth
+  flutter LOW (100-600 Hz, smooth AM: a 1-4 kHz gated flutter sounded like scratching, user), a light tape saturation
+  (hard drive crackled). `BMX_GATE_WHOOSH=0` off; `BMX_LAYER_PROBE=1` prints `GATEWHOOSH v= lat= half=`.
+  Render alone: `-s res://tools/passby_render.gd -- outdir`. User: "perfect".
+- **Open-landscape ambience** (`VastAirSynth.cs`, `RideLayers._vast_air`): two seamless stereo loops (29 s / 37 s, 3 s
+  equal-power seam, never line up the same way) rendered on a worker at ride start (~0.2 s each): a deep bed under
+  ~250 Hz swelling over tens of seconds, the air band (~300-1500 Hz) in slow gusts with its own mix per ear, far gust
+  fronts every few seconds that roll across the stereo field, a faint rolled-off hiss, the same analog chain. Level =
+  `_openness` (every 0.5 s: 16 headings x 60 / 150 / 320 m, how far below the horizon `deck_height` lies, a drop of a
+  quarter of the distance = full), x (1 - 0.5 x speed/18 m/s), eased 0.4 /s, bus World, quiet outside the live ride.
+  Seed 4242: 0.67 on the peak, 0.2-0.35 in the hills. `BMX_VAST_AIR=0` off; probe line ends `vast=open/level`.
+  Render: `-s res://tools/vast_render.gd -- out.wav [seed] [secs]` (the loop twice, to hear the seam).
+  Not done: per-biome colour (forest leaves, desert), real wind strength (`atmos.gd`) driving it.
+
 ### Ghost rider (2026-11-24, `scripts/game/ghost_rider.gd`, made by `Game._ready` in rides of a world, not levels)
 - Your best run on this world (seed + bike) rides with you as a see-through glowing rider + bike; the HUD shows the gap
   to it ("GHOST +1.2 s" red = behind, green = ahead; "GHOST: AHEAD OF IT" past where it got to, "GHOST FINISHED").
