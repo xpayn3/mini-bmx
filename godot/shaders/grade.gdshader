@@ -91,8 +91,11 @@ void fragment() {
 		// lateral chromatic aberration: red lands a little further out than blue, growing toward the corners
 		vec2 dd = uv - 0.5;
 		vec2 off = dd * dot(dd, dd) * ca;
-		c.r = texture(screen_tex, uv + off).r;
-		c.b = texture(screen_tex, uv - off).b;
+		// added as shifted-minus-centre, so the drops' soft focus + dispersion above are kept on red / blue
+		float clod = lwet * 1.5;
+		vec2 mid = textureLod(screen_tex, uv, clod).rb;
+		c.r += textureLod(screen_tex, uv + off, clod).r - mid.x;
+		c.b += textureLod(screen_tex, uv - off, clod).b - mid.y;
 	}
 	float kb = 0.0;   // how much the speed blur smeared this pixel (the fringing below keeps it)
 	if (blur > 0.001) {
