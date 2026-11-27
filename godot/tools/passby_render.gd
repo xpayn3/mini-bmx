@@ -9,7 +9,8 @@ func _init() -> void:
 	# name, speed m/s, half, clear, lat, depth, flap  (gantry: half ~2.3, clear ~5.5; race gate: half 3.5, clear 3.25)
 	var cases := [["gantry_25kmh", 7.0, 2.3, 5.5, 0.0, 0.6, 0.25], ["gantry_45kmh", 12.5, 2.3, 5.5, 0.0, 0.6, 0.25],
 		["gantry_65kmh", 18.0, 2.3, 5.5, 0.0, 0.6, 0.25], ["gantry_offset_left", 14.0, 2.3, 5.5, -1.5, 0.6, 0.25],
-		["racegate_45kmh", 12.5, 3.5, 3.25, 0.0, 0.3, 1.0], ["racegate_65kmh", 18.0, 3.5, 3.25, 0.4, 0.3, 1.0]]
+		["racegate_45kmh", 12.5, 3.5, 3.25, 0.0, 0.3, 1.0], ["racegate_65kmh", 18.0, 3.5, 3.25, 0.4, 0.3, 1.0],
+		["checkflags_45kmh", 12.5, 2.0, 0.0, 0.3, 0.0, 1.0], ["checkflags_65kmh", 18.0, 2.0, 0.0, -0.5, 0.0, 1.0]]
 	for c in cases:
 		var t0 := Time.get_ticks_usec()
 		var data: PackedByteArray = syn.Render(7, c[1], c[2], c[3], c[4], c[5], c[6], 0.8)

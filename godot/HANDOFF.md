@@ -3691,8 +3691,10 @@ ide_<date>.replay` (test runs: `replays/tests/`), zstd, ~4 MB a
 ### Procedural air: gate whoosh + open-landscape ambience (2026-11-27, user asked for procedural here)
 - `scripts/game/AirDsp.cs`: shared building blocks (pink noise, slow random drift, state-variable band-pass, one-pole
   low-pass; filter settings recomputed only when they move > 0.05 %, finer steps made a "zipper" grit).
-- **Gate whoosh** (`PassBySynth.cs`, driven by `RideLayers._gates`): riding under a trail gantry (`TrailGate.build`) or a
-  level race gate (`LevelVisuals._gate`): both join group `pass_gate` with meta `pass` = {at, dir, half, clear (banner
+- **Gate whoosh** (`PassBySynth.cs`, driven by `RideLayers._gates`): riding under a trail gantry (`TrailGate.build`), a
+  level race gate (`LevelVisuals._gate`) or between a checkpoint's feather flags (`_checkpoint_flags` -> chunk
+  `flag_gates` -> a marker node per pair in `Terrain._finalize`; clear 0 = nothing overhead, -3 dB lighter; one gate
+  seen by two chunks plays once): all join group `pass_gate` with meta `pass` = {at, dir, half, clear (banner
   bottom over the ground), depth, flap}. ~1.8 s ahead (`GATE_AHEAD` + `PEAK`) the pass is rendered on a worker
   (`Queue`, ~20-40 ms) for this speed, the predicted sideways offset AT the crossing and the banner's height, then
   `Take`n and played (2D stereo, bus Wind) so its loudest moment (`PEAK` 0.6 s in) is under the banner. Layers: air past
