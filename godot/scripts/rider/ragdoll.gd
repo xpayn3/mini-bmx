@@ -768,7 +768,7 @@ var _bal_v := Vector3.ZERO
 var _bal_steps := 0
 var _bal_down := false        # a foot on the ground yet
 var _bal_try := false
-var _OLD_BAL := Env.raw("BMX_OLD_BALANCE") != ""
+var _OLD_BAL := Env.raw("BMX_BALANCE") == ""   # off: slow crashes fall like any other (GTA-style ragdoll). BMX_BALANCE=1 = the experimental controller
 var _BAL_PROBE := Env.raw("BMX_BAL_PROBE") != ""
 
 ## step -> the points (and their velocities as q = p - v dt) read back

@@ -2176,7 +2176,9 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   shoe that comes to rest flat on the ground presses a sole print into the rut field (plain pressed band, rounded heel, wider
   ball), once per `FP_STEP` 12 cm; red for a few steps after standing in blood (x0.75 a step). Not done: Pose Lab foot
   channels, checking the get-up's first frame starts from the ragdoll's feet.
-  **Balance controller, first version (same day, `ragdoll.gd` BALANCE / `_balance`, `BMX_OLD_BALANCE=1` = off, `BMX_BAL_PROBE=1`
+  **Balance controller, first version: OFF since (user: "we have the GTA-style fall, that's all I want"; `BMX_BALANCE=1` turns it
+  on for tests). It never got him to stand: he sinks into a squat over the bike. Kept for reference** (same day, `ragdoll.gd`
+  BALANCE / `_balance`, `BMX_BAL_PROBE=1`
   = BAL / BALSTEP lines)**: a crash under `BAL_V` 4.5 m/s with the torso within `BAL_TILT_START` 0.95 rad of upright and a foot
   < 0.5 m off the ground: SIMBICON-style on the rigid-body ragdoll's own joint motors, no outside force. FEET DOWN first (both
   legs reach for the ground, `BAL_DROP_T`), then the STANCE hip motor aimed so its reaction turns the trunk toward upright
