@@ -120,6 +120,89 @@ public partial class SlamSynth : RefCounted
 		}
 	}
 
+	private static readonly bool OLD_DOUBLE = DevFlags.Env("BMX_OLD_SLAMDOUBLE") is { Length: > 0 };
+	private const double RATTLE_K = 1.55;   // the rattle noise louder than the recording's (user: "more rattle when we land")
+
+	/// the bike's parts shaken by the hit (every landing, more the bigger): the chain slapping the chainstay (a low, short metallic
+	/// "tchak" or two), and loose bits ticking (cable housings, the brake pads in their calipers, the chain on the cassette):
+	/// short two-partial rings spread over ~20-280 ms, thinning out. Level relative to the hit already in y. t0 = shift (s).
+	private static void Parts(float[] y, Random rng, double size, double t0)
+	{
+		int n = y.Length;
+		double sz = Math.Clamp(size, 0.0, 1.0);
+		double refA = Math.Max(1e-4, RmsFirst(y, 0.08));
+		if (refA < 1e-3) refA = 0.08;   // (an empty buffer: the bad-landing layer)
+		// chain slap: 1-2 hits, 15-60 ms after touch-down
+		int slaps = 1 + (rng.NextDouble() < 0.35 + 0.5 * sz ? 1 : 0);
+		for (int k = 0; k < slaps; k++)
+		{
+			int at = (int)((t0 + 0.015 + 0.045 * rng.NextDouble() + 0.03 * k) * RATE);
+			double amp = refA * (0.55 + 0.6 * sz) * (k == 0 ? 1.0 : 0.6);
+			// (metallic and light, above the hit's low end: a low partial read as a second thump)
+			double[] fs = { 700.0 + 250.0 * rng.NextDouble(), 1700.0 + 500.0 * rng.NextDouble(), 3300.0 + 900.0 * rng.NextDouble() };
+			double[] gs = { 0.8, 0.6, 0.35 }, ds = { 70.0, 110.0, 170.0 };
+			for (int m = 0; m < 3; m++)
+			{
+				double w = 2.0 * Math.PI * fs[m] / RATE, ph = 6.28 * rng.NextDouble();
+				for (int i = at; i < n && i < at + (int)(0.09 * RATE); i++)
+				{
+					double t = (i - at) / (double)RATE;
+					y[i] += (float)(amp * gs[m] * Math.Exp(-ds[m] * t) * Math.Sin(w * (i - at) + ph) * Math.Min(1.0, t / 0.0008));
+				}
+			}
+			// the rattle of the links themselves: a short burst of grit
+			for (int i = at; i < n && i < at + (int)(0.025 * RATE); i++)
+				y[i] += (float)(amp * 0.35 * (rng.NextDouble() * 2 - 1) * Math.Exp(-(i - at) / (0.006 * RATE)));
+		}
+		// loose bits ticking: many tiny rings, thinning out
+		int ticks = 6 + (int)(12 * sz);
+		for (int k = 0; k < ticks; k++)
+		{
+			double u = rng.NextDouble();
+			int at = (int)((t0 + 0.02 + 0.26 * Math.Pow(u, 1.6)) * RATE);
+			double fade = 1.0 - 0.75 * Math.Pow(u, 1.6);
+			double amp = refA * (0.16 + 0.22 * rng.NextDouble()) * fade * (0.7 + 0.6 * sz);
+			for (int m = 0; m < 2; m++)
+			{
+				double f = 1400.0 * Math.Pow(3.2, rng.NextDouble()), dc = 110.0 + 170.0 * rng.NextDouble(), w = 2.0 * Math.PI * f / RATE, ph = 6.28 * rng.NextDouble();
+				for (int i = at; i < n && i < at + (int)(0.04 * RATE); i++)
+					y[i] += (float)(amp * (m == 0 ? 1.0 : 0.6) * Math.Exp(-dc * (i - at) / RATE) * Math.Sin(w * (i - at) + ph));
+			}
+		}
+	}
+
+	/// the body's close resonances (51 / 66 / 68 / 76 / 81 Hz, 167 / 169 / 178 Hz) beat: the hit dies down and swells back
+	/// ~50 ms later, heard as a second thump (user: "double impact, weird"). After its first peak the body may only die
+	/// away: a 2 ms envelope held to its running minimum, the gain eased per sample (pitch / colour unchanged)
+	private static void NoRebound(float[] y)
+	{
+		int n = y.Length, blk = RATE / 500;
+		int nb = n / blk;
+		if (nb < 4) return;
+		var env = new double[nb];
+		for (int b = 0; b < nb; b++)
+		{
+			double s = 0; for (int i = b * blk; i < (b + 1) * blk; i++) s += y[i] * y[i];
+			env[b] = Math.Sqrt(s / blk) + 1e-9;
+		}
+		int pk = 0; for (int b = 1; b < Math.Min(nb, RATE / 20 / blk); b++) if (env[b] > env[pk]) pk = b;
+		var g = new double[nb];
+		double allowed = env[pk];
+		for (int b = 0; b < nb; b++)
+		{
+			if (b <= pk) { g[b] = 1.0; continue; }
+			allowed = Math.Min(allowed, env[b]);
+			g[b] = Math.Min(1.0, allowed / env[b]);
+		}
+		for (int i = 0; i < nb * blk; i++)
+		{
+			double p = (i + 0.5) / blk - 0.5; int b = Math.Clamp((int)Math.Floor(p), 0, nb - 1); double fr = Math.Clamp(p - b, 0.0, 1.0);
+			double gg = g[b] + (g[Math.Min(b + 1, nb - 1)] - g[b]) * fr;
+			y[i] = (float)(y[i] * gg);
+		}
+		for (int i = nb * blk; i < n; i++) y[i] *= (float)g[nb - 1];
+	}
+
 	private static double RmsFirst(float[] y, double secs)
 	{
 		int m = Math.Min(y.Length, (int)(secs * RATE)); double s = 0;
@@ -144,19 +227,25 @@ public partial class SlamSynth : RefCounted
 		if (kind == 0)
 		{
 			y = BodyBuf(n, rng, vary, pitch, decayK, 1.0, 0);
+			if (!OLD_DOUBLE) NoRebound(y);
 			if (sz > 0.1)   // big: a sub thump under the body
 			{
 				double f0 = 52.0 * (1.0 + 0.1 * R()), dc = 14.0, w = 2.0 * Math.PI * f0 / RATE, amp = 0.55 * (sz - 0.1) / 0.4;
 				for (int i = 0; i < n; i++) y[i] += (float)(amp * Math.Exp(-dc * i / RATE) * Math.Sin(w * i) * Math.Min(1.0, i / (0.004 * RATE)));
 			}
-			Rattle(y, rng, vary, Math.Max(0.2, rat), stretch, 1.0);
+			Rattle(y, rng, vary, Math.Max(0.2, rat) * (OLD_DOUBLE ? 1.0 : RATTLE_K), stretch, OLD_DOUBLE ? 1.0 : 1.12);
+			if (!OLD_DOUBLE) Parts(y, rng, size, 0.0);
 			if (side > 0.01)
 			{
-				// the rear tyre comes down ~35 ms after the front: the same hit again, lighter, a touch lower
-				var y2 = BodyBuf(n, rng, vary, pitch * 0.93, decayK, 0.55 * side, 0);
-				Rattle(y2, rng, vary, 0.5 * side * Math.Max(0.2, rat), stretch, 1.0);
-				int off = (int)((0.028 + 0.012 * (double)side) * RATE);
-				for (int i = off; i < n; i++) y[i] += y2[i - off];
+				// (the rear tyre's own second hit ~35 ms later was removed 2026-11-27: it read as a weird double impact, user;
+				// OLD_DOUBLE = it back)
+				if (OLD_DOUBLE)
+				{
+					var y2 = BodyBuf(n, rng, vary, pitch * 0.93, decayK, 0.55 * side, 0);
+					Rattle(y2, rng, vary, 0.5 * side * Math.Max(0.2, rat), stretch, 1.0);
+					int off = (int)((0.028 + 0.012 * (double)side) * RATE);
+					for (int i = off; i < n; i++) y[i] += y2[i - off];
+				}
 				// rubber scrubbing sideways over dirt: band-passed noise 500-3500 Hz, swells in over ~25 ms, dies over ~0.3 s
 				var sc = new float[n];
 				for (int i = 0; i < n; i++) sc[i] = (float)R();
@@ -174,11 +263,21 @@ public partial class SlamSynth : RefCounted
 		else
 		{
 			// bad landing: the second bounce of the bike (a lighter, lower copy of the body 110-170 ms later) + the clatter
-			int off = (int)((0.11 + 0.06 * (R() * 0.5 + 0.5)) * RATE);
-			y = BodyBuf(n, rng, vary, pitch * 0.86, decayK * 1.2, 0.5, off);
+			// (its second bounce of the bike body, 110-170 ms later, was removed 2026-11-27: "double impact, weird"; the
+			// clatter of the parts stays, and more of it)
+			if (OLD_DOUBLE)
+			{
+				int off = (int)((0.11 + 0.06 * (R() * 0.5 + 0.5)) * RATE);
+				y = BodyBuf(n, rng, vary, pitch * 0.86, decayK * 1.2, 0.5, off);
+			}
+			else
+			{
+				y = new float[n];
+				Parts(y, rng, 0.6 + 0.4 * Math.Clamp(size, 0f, 1f), 0.02);
+			}
 			var cl = new float[n];
 			Rattle(cl, rng, vary, 1.5, stretch, 1.35);
-			int shift = (int)(0.09 * RATE);
+			int shift = (int)((OLD_DOUBLE ? 0.09 : 0.012) * RATE);   // (now played with the touch-down: the clatter rides the hit)
 			for (int i = shift; i < n; i++) y[i] += cl[i - shift];
 			// loose parts knocking: lots of tiny ticks (two short metallic partials, 1.5-4.5 kHz, 5-12 ms) between 90 and 330 ms, thinning out
 			// as it settles (no late stray pings: a lone bell tone at 0.5 s read as a glitch)

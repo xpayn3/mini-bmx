@@ -239,4 +239,172 @@ public partial class PassBySynth : RefCounted
 	}
 
 	public void Forget(long id) { lock (_lock) _ready.Remove(id); }
+
+	// ---- close pass-bys: a rock, a trunk, a bush going past the rider's head (one side, often inches away)
+	public const float NEAR_PEAK = 0.35f;   // s into the clip: the closest moment
+	private const float NEAR_LEN = 1.05f;
+	private const double HEAD_R = 0.0875;   // m: half the ear-to-ear distance (Woodworth's head model)
+
+	/// a close pass: speed m/s; r0 = closest distance from the head to the object's surface (m); side -1 left / +1 right;
+	/// up = how far the closest point is above (+) / below (-) the ears (m); kind 0 rock, 1 bush, 2 trunk / post;
+	/// size = the object's height (m); peak = loudest sample (0..1). Stereo with real head cues: the far ear later
+	/// (ITD, up to ~0.65 ms), quieter and duller (head shadow, stronger for highs), a touch duller behind (the pinna).
+	/// Hard things (rock, trunk): the rider's own wind reflected off the face, the echo's delay 2 r / c sweeping
+	/// down to under a millisecond and back (the "phasing" swish of passing a wall) + the air pinched in the gap.
+	/// A bush: many small reflections (leaves), no clean comb, a leafy hiss, and if it is within reach of the
+	/// body (r0 under ~0.3 m) the leaves brush the helmet / shoulder: a crackle of twigs.
+	public byte[] RenderNear(int seed, float speed, float r0, float side, float up, int kind, float size, float peak)
+	{
+		var rng = new Random(seed);
+		int n = (int)(NEAR_LEN * RATE);
+		var L = new float[n]; var R = new float[n];
+		double v = Math.Max(2.0, speed);
+		int p0 = (int)(NEAR_PEAK * RATE);
+		double fast = Math.Clamp((v - 4.0) / 18.0, 0.0, 1.0);
+		double d0 = Math.Max(0.05, r0);
+		bool leafy = kind == 1;
+		double sgn = side < 0 ? -1.0 : 1.0;
+		double sz = Math.Clamp(size, 0.2, 6.0);
+		// how long it is "beside" you: the object's own width along the path + the distance
+		double reach = Math.Max(0.6, 0.8 * d0 + (kind == 2 ? 0.35 : 0.5 * Math.Min(sz, kind == 0 ? 3.5 : 1.5)));
+		double big = kind == 0 ? Math.Clamp((sz - 0.7) / 1.8, 0.0, 1.0) : 0.0;   // a boulder: a big face   // (a little longer than the bare geometry: a 20 cm trunk at 50 km/h is ~30 ms)
+		double lat2 = Math.Max(0.0, d0 * d0 - up * up);
+
+		// the rider's wind at the head: turbulent pink noise, brighter with speed
+		var wind = new float[n];
+		{
+			var pk = new Pink(); var gust = new Drift(); var col = new Drift(); var lp = new Lp(); var hp = new Lp();
+			for (int i = 0; i < n; i++)
+			{
+				double x = pk.Next(rng) * (1.0 + 0.4 * gust.Next(rng, 6.0));
+				x = lp.Run(x, (3000.0 + 7000.0 * fast) * (1.0 + 0.25 * col.Next(rng, 2.0)));
+				x -= hp.Run(x, 120.0);
+				wind[i] = (float)x;
+			}
+		}
+		// the object's sound at its own position (mono), then put round the head
+		var src = new float[n];
+		var az = new double[n];   // azimuth: 0 ahead, +-pi/2 beside, +-pi behind (sign = side)
+		{
+			var air = new Lp(); var pk = new Pink(); var sv = new Svf(); var sv2 = new Svf(); var gust = new Drift();
+			var svLo = new Svf(); var svLo2 = new Svf();
+			var leaf = new Pink(); var leafHp = new Lp(); var leafAm = new Drift();
+			double crack = leafy && d0 < 0.3 ? Math.Clamp((0.3 - d0) / 0.25, 0.0, 1.0) : 0.0;
+			double f0 = 380.0 + 26.0 * v;
+			for (int i = 0; i < n; i++)
+			{
+				double t = (i - p0) / (double)RATE;
+				double x = v * t;                                   // along the path past it (- = still ahead)
+				double r = Math.Sqrt(d0 * d0 + x * x);
+				az[i] = sgn * Math.Atan2(Math.Sqrt(lat2) + 1e-3, -x);
+				double near = (d0 * d0) / (r * r);                  // closest = 1
+				double env = Math.Exp(-(x / reach) * (x / reach));
+				double y = 0.0;
+				if (!leafy)
+				{
+					// 1) the wind's echo off the face: delay 2 r / c (a 1.5 ms comb at 25 cm, sweeping)
+					double dl = 2.0 * r / C * RATE;
+					double echo = Tap(wind, i - dl) * (kind == 2 ? 0.95 : 0.85 + 0.35 * big);
+					y += (wind[i] * 0.55 + echo) * env * (1.2 / (0.35 + d0));
+					// 2) the air pinched in the gap: a band that rises the narrower the gap, Doppler-shifted
+					double vr = v * x / r, dop = C / (C + vr);
+					double fg = f0 * dop * (1.0 + 0.6 / (0.25 + d0));
+					double ps = pk.Next(rng);
+					y += (sv.Band(ps, fg, 1.0) + 0.5 * sv2.Band(ps, fg * 2.4, 0.7)) * near * (1.0 + 0.3 * gust.Next(rng, 7.0)) * 1.4;
+					// a big face also pushes the air back as a low "whoomf" (like riding under a gate)
+					if (big > 0.0)
+					{
+						double lw = pk.Next(rng);
+						y += (svLo.Band(lw, 85.0 + 2.0 * v, 1.3) * 1.8 + svLo2.Band(lw, 190.0 + 3.5 * v, 1.0) * 0.7)
+							* Math.Exp(-(x / (reach * 0.7)) * (x / (reach * 0.7))) * big * 2.2 / (0.5 + d0);
+					}
+				}
+				else
+				{
+					// a bush: leaves scatter the wind (many short taps, no single comb) + a soft leafy hiss
+					double e = 0.0;
+					for (int k = 0; k < 6; k++)
+					{
+						double rk = r + 0.07 * k + 0.05 * Math.Sin(i * 0.0007 * (k + 1));
+						e += Tap(wind, i - 2.0 * rk / C * RATE) * (0.32 - 0.04 * k);
+					}
+					double lh = leaf.Next(rng); lh -= leafHp.Run(lh, 2200.0);
+					double flutter = 0.55 + 0.45 * Math.Abs(leafAm.Next(rng, 18.0));
+					y += (e + lh * 0.6 * flutter) * env * (1.0 / (0.3 + d0));
+					// twigs and leaves brushing the helmet / shoulder: short crackles while right beside
+					if (crack > 0.0 && Math.Abs(x) < 0.35 + 0.3 * sz && rng.NextDouble() < crack * 900.0 / RATE)
+					{
+						double a = (0.4 + 0.6 * rng.NextDouble()) * crack;
+						int len = 40 + rng.Next(160);
+						for (int j = 0; j < len && i + j < n; j++)
+							src[i + j] += (float)((rng.NextDouble() * 2 - 1) * a * Math.Exp(-j / (len * 0.3)) * 0.9);
+					}
+				}
+				// air absorption: the further, the duller
+				y = air.Run(y, 3000.0 + 15000.0 / (1.0 + r * 0.8));
+				src[i] += (float)y;
+			}
+		}
+		// round the head: ITD (Woodworth: a / c (sin + theta)), ILD + head shadow on the far ear, pinna behind
+		{
+			var nearLp = new Lp(); var farLp = new Lp(); var backLp = new Lp();
+			for (int i = 0; i < n; i++)
+			{
+				double a = az[i];                                   // + right
+				double th = Math.Abs(a) > Math.PI / 2 ? Math.PI - Math.Abs(a) : Math.Abs(a);   // lateral angle 0..pi/2
+				double itd = HEAD_R / C * (Math.Sin(th) + th) * RATE;   // samples (~31 at 90 deg)
+				double behind = Math.Clamp(-Math.Cos(a), 0.0, 1.0);
+				double sb = backLp.Run(src[i], 16000.0 - 9000.0 * behind);
+				double nearEar = nearLp.Run(sb, 18000.0) * (1.0 + 0.25 * Math.Sin(th));
+				double far = farLp.Run(Tap(src, i - itd), 9000.0 - 7200.0 * Math.Sin(th)) * (1.0 - 0.55 * Math.Sin(th));
+				if (a >= 0) { R[i] += (float)nearEar; L[i] += (float)far; }
+				else { L[i] += (float)nearEar; R[i] += (float)far; }
+			}
+		}
+		// the same analog finish as the gates: DC block, soft tape saturation, top roll-off, fades, normalised
+		{
+			double dcl = 0, dcr = 0, ol = 0, or_ = 0; var tl = new Lp(); var tr = new Lp();
+			double mx = 1e-6;
+			for (int i = 0; i < n; i++) mx = Math.Max(mx, Math.Max(Math.Abs(L[i]), Math.Abs(R[i])));
+			double drive = 0.6 / mx, pkOut = 1e-6;
+			int fade = RATE / 50;
+			for (int i = 0; i < n; i++)
+			{
+				double a = L[i], b = R[i];
+				ol = a - dcl + 0.995 * ol; dcl = a; or_ = b - dcr + 0.995 * or_; dcr = b;
+				double sa = Math.Tanh(ol * drive + 0.05) - Math.Tanh(0.05), sb = Math.Tanh(or_ * drive + 0.05) - Math.Tanh(0.05);
+				sa = tl.Run(sa, 14000.0); sb = tr.Run(sb, 14000.0);
+				double k = Math.Min(1.0, Math.Min(i, n - 1 - i) / (double)fade); k = k * k * (3 - 2 * k);
+				L[i] = (float)(sa * k); R[i] = (float)(sb * k);
+				pkOut = Math.Max(pkOut, Math.Max(Math.Abs(L[i]), Math.Abs(R[i])));
+			}
+			double sc = Math.Clamp(peak, 0f, 1f) / pkOut;
+			for (int i = 0; i < n; i++) { L[i] = (float)(L[i] * sc); R[i] = (float)(R[i] * sc); }
+		}
+		return Pcm(L, R, rng);
+	}
+
+	public void QueueNear(long id, int seed, float speed, float r0, float side, float up, int kind, float size, float peak)
+	{
+		System.Threading.Tasks.Task.Run(() =>
+		{
+			var b = RenderNear(seed, speed, r0, side, up, kind, size, peak);
+			lock (_lock) _ready[id] = b;
+		});
+	}
+
+	private static byte[] Pcm(float[] L, float[] R, Random rng)
+	{
+		int n = L.Length;
+		var b8 = new byte[n * 4];
+		for (int i = 0; i < n; i++)
+		{
+			double d = (rng.NextDouble() - rng.NextDouble()) / 32767.0;
+			int ql = (int)Math.Round(Math.Clamp(L[i] + d, -1.0, 1.0) * 32767.0);
+			int qr = (int)Math.Round(Math.Clamp(R[i] + d, -1.0, 1.0) * 32767.0);
+			b8[4 * i] = (byte)(ql & 0xff); b8[4 * i + 1] = (byte)((ql >> 8) & 0xff);
+			b8[4 * i + 2] = (byte)(qr & 0xff); b8[4 * i + 3] = (byte)((qr >> 8) & 0xff);
+		}
+		return b8;
+	}
 }

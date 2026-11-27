@@ -271,6 +271,7 @@ func update(dt: float, st, va: float, on_ground: bool, live: bool) -> void:
 	_crash_prev = crashed
 	if crashed: return
 	_whoosh(dt, p, va)
+	if live and Env.s("BMX_NEAR_PASS") != "0": _near_pass(dt, p, va)
 	_gates(p, va)
 	_stones(dt, p, va, on_ground)
 	_suspension(dt, p)
@@ -417,6 +418,146 @@ func _gates(p, va: float) -> void:
 		if not keep.has(id) and int(_gstate[id]) == 1: _gsyn.Forget(id)
 	_gstate = keep
 
+
+## close pass-bys (2026-11-27): a rock, a trunk / post, a bush going past the rider's HEAD, often inches away
+## in a corner. Every frame the near objects are checked against where the head will be: the path ahead is
+## the current travel turned at the current turn rate (an arc), the head's offset from the bike (its lean
+## into the turn) kept as it is now. The closest one-sided pass is rendered on a worker (PassBySynth.
+## RenderNear: stereo, the object's echo of the rider's wind, leaves brushing) ~0.2 s before it is played,
+## timed so its closest moment is the moment the head goes by; re-timed every frame (the line changes).
+const NEAR_MAX := 1.4        # m from the head to the object's surface: further, nothing
+const NEAR_LOOK := 14.0      # m: objects this close (by centre) are looked at
+const NEAR_T := 0.9          # s of path predicted
+const NEAR_STEP := 0.03      # s per predicted step
+const NEAR_LEAD := 0.18      # s: queued this much before it must start (render ~10-25 ms)
+const NEAR_VOICES := 4
+var _nstate := {}            # object key -> 1 queued / 2 played
+var _npl: Array = []
+var _npi := 0
+var _n_course := NAN
+var _n_turn := 0.0           # rad/s, smoothed
+var _n_gap := 0.0
+
+func _near_pass(dt: float, p, va: float) -> void:
+	if _gsyn == null or game.terrain == null: return
+	var rid = game.rider
+	if va < 4.0 or p.crash_on or rid == null or rid.head == null:
+		_nstate.clear(); _n_course = NAN; return
+	if _npl.is_empty():
+		for i in NEAR_VOICES:
+			var a := AudioStreamPlayer.new()
+			a.bus = Settings.bus_for("Wind")
+			add_child(a); _npl.append(a)
+	# travel and turn rate
+	var crs: float = float(p.course)
+	if is_nan(_n_course): _n_course = crs
+	var dc := wrapf(crs - _n_course, -PI, PI)
+	_n_course = crs
+	if dt > 0.0: _n_turn += (clampf(dc / dt, -4.0, 4.0) - _n_turn) * minf(1.0, dt * 10.0)
+	_n_gap = maxf(0.0, _n_gap - dt)
+	var tv := Vector2(cos(crs), -sin(crs))           # travel direction (x, z)
+	var hd: Vector3 = rid.head.global_position
+	var b := Vector2(float(p.x), float(p.z))
+	var off := Vector2(hd.x, hd.z) - b
+	# (Godot: -z forward, +x right: right of a travel (dx, dz) is (-dz, dx))
+	var h_al := off.dot(tv)                             # head offset along / across the travel (+ = right)
+	var h_lt := off.dot(Vector2(-tv.y, tv.x))
+	var hy := hd.y
+	# candidates: [key, x, z, r, base, top, kind]
+	var cand: Array = []
+	var seen_c := {}
+	var cols: Array = game.terrain.colliders_near(b.x + tv.x * 2.0, b.y + tv.y * 2.0)
+	cols.append_array(game.terrain.colliders_near(b.x + tv.x * 6.5, b.y + tv.y * 6.5))
+	for c in cols:
+		if c.has("tape"): continue
+		var ck := Vector2i(roundi(float(c.x) * 40.0), roundi(float(c.z) * 40.0))
+		if seen_c.has(ck): continue
+		seen_c[ck] = true
+		var base: float = float(c.get("base", p.y - 0.3))
+		var top: float = float(c.get("top", c.get("ceil", base + 1.2)))
+		var kind := 0 if c.has("top") else 2
+		if c.has("fence"): top = base + 1.2; kind = 2
+		if top - base < 0.25: continue
+		cand.append([Vector2i(roundi(float(c.x) * 40.0), roundi(float(c.z) * 40.0)), float(c.x), float(c.z), float(c.r), base, top, kind])
+	if game.terrain.has_method("bushes_near"):
+		var bl: PackedFloat32Array = game.terrain.bushes_near(b.x + tv.x * 5.0, b.y + tv.y * 5.0, 7.0)
+		for i in range(0, bl.size(), 6):
+			if bl[i + 4] < 0.3: continue
+			cand.append([Vector2i(roundi(bl[i] * 40.0), roundi(bl[i + 1] * 40.0)), bl[i], bl[i + 1], bl[i + 3], bl[i + 2], bl[i + 2] + bl[i + 4], 1])
+	var keep := {}
+	for cd in cand:
+		var key: Vector2i = cd[0]
+		var o := Vector2(cd[1], cd[2])
+		if (o - b).length() > NEAR_LOOK: continue
+		# walk the arc: closest head-to-surface distance and when
+		var best := INF; var bt := 0.0; var bside := 0.0; var bup := 0.0
+		var pos := b; var ang := crs
+		var t := 0.0
+		while t <= NEAR_T:
+			var d := Vector2(cos(ang), -sin(ang))
+			var rt := Vector2(-d.y, d.x)
+			var hpos := pos + d * h_al + rt * h_lt
+			var rel := o - hpos
+			var hor := maxf(0.0, rel.length() - float(cd[3]))
+			var vy := 0.0
+			if hy > float(cd[5]): vy = hy - float(cd[5])
+			elif hy < float(cd[4]): vy = float(cd[4]) - hy
+			var dist := sqrt(hor * hor + vy * vy)
+			if dist < best:
+				best = dist; bt = t
+				bside = 1.0 if rel.dot(rt) >= 0.0 else -1.0
+				bup = -vy if hy > float(cd[5]) else vy   # the closest gap's vertical part (+ = the object above the ears)
+			pos += d * va * NEAR_STEP
+			ang += _n_turn * NEAR_STEP
+			t += NEAR_STEP
+		# size: a big face sends back far more of the wind than a stone (heard further off, louder, deeper)
+		# (hard things only: a bush's leaves don't send the air back, so a big bush is no louder; user: "bushes too loud")
+		var bushy := int(cd[6]) == 1
+		var size := float(cd[5]) - float(cd[4]) if bushy else maxf(float(cd[5]) - float(cd[4]), float(cd[3]) * 1.5)
+		var reach := NEAR_MAX if bushy else clampf(NEAR_MAX * (0.6 + 0.5 * size), NEAR_MAX * 0.8, 4.0)
+		var st: int = _nstate.get(key, 0)
+		if st == 2:
+			if bt > 0.0 or best < reach * 1.5: keep[key] = 2   # (passed: forgotten once it is behind)
+			continue
+		if best > reach or bt <= 0.0 or bt >= NEAR_T - NEAR_STEP:
+			if st == 1: _gsyn.Forget(_near_id(key))
+			continue
+		var id := _near_id(key)
+		if st == 0:
+			if bt < PassBySynth_NEAR_PEAK + NEAR_LEAD:
+				_gsyn.QueueNear(id, (key.x * 73856093) ^ (key.y * 19349663), va, best, bside, bup, int(cd[6]), size, 0.85)
+				keep[key] = 1
+			continue
+		keep[key] = 1
+		if bt <= PassBySynth_NEAR_PEAK:
+			var pcm: PackedByteArray = _gsyn.Take(id)
+			if pcm.is_empty(): continue
+			keep[key] = 2
+			if _n_gap > 0.0 and best > 0.5: continue   # a row of bushes: not every one (the closest still plays)
+			var w := AudioStreamWAV.new()
+			w.format = AudioStreamWAV.FORMAT_16_BITS; w.stereo = true; w.mix_rate = 48000; w.data = pcm
+			var a: AudioStreamPlayer = _npl[_npi]; _npi = (_npi + 1) % _npl.size()
+			a.stream = w
+			# closer = much louder (that is the fun of it); faster = louder; bushes softer than rock
+			# (the distance is soft by the object's size: a 2 m boulder 1 m off ~ a stone at 25 cm)
+			var sk := 0.0 if bushy else 0.4 * size
+			var loud := clampf((va - 3.0) / 14.0, 0.25, 1.2) * pow(clampf((0.35 + sk) / (best + 0.12 + sk), 0.08, 1.6), 0.9)
+			if bushy: loud *= 0.75 * clampf(size / 1.2, 0.5, 1.0)
+			else: loud *= [1.0, 0.75, 0.9][int(cd[6])] * pow(clampf(size / 1.0, 0.5, 2.5), 0.6)
+			a.volume_db = -6.0 + linear_to_db(maxf(loud, 0.001)) + _rider_db("Wind")
+			a.play()
+			_n_gap = 0.05
+			events["near_pass"] = events.get("near_pass", 0) + 1
+			if Env.s("BMX_LAYER_PROBE") != "":
+				print("NEARPASS kind=%s size=%.1f d=%.2f side=%+.0f up=%+.2f v=%.1f turn=%+.2f loud=%.2f" % [["rock", "bush", "trunk"][int(cd[6])], size, best, bside, bup, va, _n_turn, loud])
+	for k in _nstate:
+		if not keep.has(k) and int(_nstate[k]) == 1: _gsyn.Forget(_near_id(k))
+	_nstate = keep
+
+const PassBySynth_NEAR_PEAK := 0.35   # PassBySynth.NEAR_PEAK
+
+static func _near_id(key: Vector2i) -> int:
+	return 0x40000000 + absi((key.x * 92821) ^ (key.y * 68917)) % 0x3fffffff
 
 func PassBySynthPeak() -> float:
 	return 0.6   # PassBySynth.PEAK: the clip's loudest moment

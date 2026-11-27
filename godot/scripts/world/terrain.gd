@@ -510,6 +510,51 @@ static func _col_key(gx: int, gz: int) -> int:
 
 
 ## everything within 3 m (by centre) that can be hit: trees, rocks, logs, stumps, sheds, fences, tape, cacti
+## bushes (no colliders: the bike rides through them) for the sound of passing close by (RideLayers):
+## per COL_CELL cell a flat array of [x, z, ground y, radius, height, chunk id] (BUSH_STRIDE floats each)
+const BUSH_LISTS := ["bush", "bush1", "bush2", "bushdry"]
+const BUSH_STRIDE := 6
+var _bush_grid := {}
+
+static func _bush_cid(k: Vector2i) -> float:   # (a chunk id that a 32-bit float holds exactly)
+	return float((k.x & 2047) * 2048 + (k.y & 2047))
+
+func _bushes_add(k: Vector2i, o: Dictionary) -> Array:
+	var keys := {}
+	var lists: Dictionary = o.get("lists", {})
+	var counts: Dictionary = o.get("counts", {})
+	var cid := _bush_cid(k)
+	for name in BUSH_LISTS:
+		var cnt: int = counts.get(name, 0)
+		if cnt == 0 or not lists.has(name) or not TerrainGeo.MESH.has(name): continue
+		var ab: AABB = (TerrainGeo.MESH[name] as Mesh).get_aabb()
+		var hr := maxf(ab.size.x, ab.size.z) * 0.5
+		var buf: PackedFloat32Array = lists[name]
+		var st := buf.size() / cnt
+		for i in cnt:
+			var b := i * st
+			# MultiMesh 3D transform rows: [xx yx zx ox, xy yy zy oy, xz yz zz oz]
+			var sx := Vector3(buf[b], buf[b + 4], buf[b + 8]).length()
+			var sy := Vector3(buf[b + 1], buf[b + 5], buf[b + 9]).length()
+			var x := buf[b + 3]; var y := buf[b + 7]; var z := buf[b + 11]
+			var key := _col_key(floori(x / COL_CELL), floori(z / COL_CELL))
+			var arr: PackedFloat32Array = _bush_grid.get(key, PackedFloat32Array())
+			arr.append_array([x, z, y + ab.position.y * sy, hr * sx, ab.size.y * sy, cid])
+			_bush_grid[key] = arr
+			keys[key] = true
+	return keys.keys()
+
+## bushes within d m (by centre) of x, z: flat [x, z, base, r, h, chunk] x n
+func bushes_near(x: float, z: float, d := 3.0) -> PackedFloat32Array:
+	var out := PackedFloat32Array()
+	for gx in range(floori((x - d) / COL_CELL), floori((x + d) / COL_CELL) + 1):
+		for gz in range(floori((z - d) / COL_CELL), floori((z + d) / COL_CELL) + 1):
+			var l = _bush_grid.get(_col_key(gx, gz))
+			if l == null: continue
+			for i in range(0, l.size(), BUSH_STRIDE):
+				if absf(l[i] - x) < d and absf(l[i + 1] - z) < d: out.append_array(l.slice(i, i + BUSH_STRIDE))
+	return out
+
 func colliders_near(x: float, z: float) -> Array:
 	var out := []
 	for gx in range(floori((x - 3.0) / COL_CELL), floori((x + 3.0) / COL_CELL) + 1):
@@ -879,6 +924,15 @@ func _unload(k: Vector2i) -> void:
 			_col_grid.erase(key)
 		else:
 			_col_grid[key] = nl
+	for key in c.get("bush_keys", []):
+		var bl = _bush_grid.get(key)
+		if bl == null: continue
+		var nb := PackedFloat32Array()
+		var cid := _bush_cid(k)
+		for i in range(0, bl.size(), BUSH_STRIDE):
+			if bl[i + 5] != cid: nb.append_array(bl.slice(i, i + BUSH_STRIDE))
+		if nb.is_empty(): _bush_grid.erase(key)
+		else: _bush_grid[key] = nb
 	for pkey in c.get("packs", []):
 		_packs.erase(pkey)
 	for sk in c.get("stakes", []):
@@ -1272,6 +1326,7 @@ func _finalize_out(k: Vector2i, o: Dictionary, chunk_n: int) -> void:
 		_col_grid[key].append(c)
 		ckeys[key] = true
 	rec["col_keys"] = ckeys.keys()
+	rec["bush_keys"] = _bushes_add(k, o)
 	chunks[k] = rec
 	if _water:
 		_water.mark_dirty(Vector2(k) * SIZE, SIZE)

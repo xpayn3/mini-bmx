@@ -3951,6 +3951,14 @@ ide_<date>.replay` (test runs: `replays/tests/`), zstd, ~4 MB a
   kind 1 = the bad-landing layer (second bounce + short metallic ticks). ~4-10 ms a render, so `RideAudio.landing(impact, yaw)` makes a fresh one every landing; `landing_bad(sev)`
   is called from `bike_physics` on HEAVY / SLAM (`Game.on_bad_landing`). No C#: the recorded `bike_slam_1..10.ogg` play. Hit A (messy multi-bounce) fitted badly and is not used.
   Test: `-s res://tools/slam_render.gd -- <dir>` writes every type to WAV; `BMX_LAND_TEST=5` fakes a hard landing.
+  **One hit, more rattle (2026-11-27, user: "more rattle when we land", "remove the double impact, weird")**: three things read as a second
+  hit and are gone: the body's close resonances beat and swelled back ~50 ms after the hit (`SlamSynth.NoRebound`: after its first peak
+  the body only dies away, 2 ms envelope held to its running minimum), the sideways landing's second rear-tyre hit 30-40 ms later, and the
+  heavy-landing layer, which played at the landing VERDICT (0.4 s after touch-down) + its own second bounce (`landing_bad` is silent now;
+  `landing` plays the clatter layer, no bounce, WITH the hit when k > 0.45, -12..-4 dB). More rattle: the rattle noise x`RATTLE_K` 1.55
+  (+3 dB vs the hit), and `SlamSynth.Parts` on every landing: the chain slapping the chainstay (1-2 light metallic "tchak"s, 0.7-4 kHz, at
+  15-60 ms) + 6-18 loose-part ticks over ~20-280 ms, more the bigger. `BMX_OLD_SLAMDOUBLE=1` = before. `BMX_LAYER_PROBE=1` prints
+  `LANDSND impact= k= db= side= clatter=`. Cactus smashes are silent (the synthesised `crunch` was "goofy").
 
 ### Recorded ride layers: whoosh, breathing, heartbeat, physics sound layers (2026-11-27, `scripts/game/ride_layers.gd`)
 - DiRT-style: each layer is a folder of the USER'S recordings in `assets/audio/ride/<layer>/` (`README.txt` there lists
@@ -3988,6 +3996,17 @@ ide_<date>.replay` (test runs: `replays/tests/`), zstd, ~4 MB a
   flutter LOW (100-600 Hz, smooth AM: a 1-4 kHz gated flutter sounded like scratching, user), a light tape saturation
   (hard drive crackled). `BMX_GATE_WHOOSH=0` off; `BMX_LAYER_PROBE=1` prints `GATEWHOOSH v= lat= half=`.
   Render alone: `-s res://tools/passby_render.gd -- outdir`. User: "perfect".
+- **Close pass-bys** (2026-11-27, user: "rocks and bushes in corners with my head inches away"; `RideLayers._near_pass`,
+  `PassBySynth.RenderNear`): every frame the rocks / trunks / posts (`colliders_near`) and bushes (`Terrain.bushes_near`: the
+  bush MultiMesh instances kept per chunk as [x, z, ground, radius, height]) are checked against where the rider's HEAD
+  will be: the path = the travel turned at the current turn rate (an arc, 0.9 s), the head's offset from the bike (its lean
+  into the turn) held. Closest pass under `NEAR_MAX` 1.4 m from the head to the object's surface: rendered on a worker
+  ~0.2 s ahead, played so its closest moment (`NEAR_PEAK` 0.35 s in) is the moment the head goes by; re-timed every
+  frame. Sound: hard things = the rider's wind echoed off the face (delay 2 r / c sweeping: the phasing swish of a wall)
+  + air pinched in the gap (Doppler band); bushes = scattered leaf echoes + leafy hiss, twigs crackle on the helmet within
+  0.3 m. Stereo with head cues (Woodworth ITD up to ~0.65 ms, far ear quieter + duller, duller behind): measured ~10 dB /
+  26-30 samples to the near ear. Louder the closer and faster. Size counts for rocks / trunks only (user: "big boulders very faint, I need to be very close"; bushes kept as they were: "bushes too loud" when they scaled too): size = max(height, 1.5 x radius); heard from `NEAR_MAX` x (0.6 + 0.5 size) (up to 4 m), the distance falloff softened by 0.4 x size, x size^0.6; a boulder (rock > 0.7 m) has a stronger echo, a longer swell and a low "whoomf" off its face. Seed 4242 follow ride: 1.6-1.8 m boulders at 0.7-1.9 m now play at 0.6-1.1 loudness. Forest singletrack seed 12, 35 s: 34 passes. `BMX_NEAR_PASS=0`
+  off; `BMX_LAYER_PROBE=1` prints `NEARPASS kind= d= side= up= v= turn= loud=`; render alone `-s res://tools/near_pass_render.gd -- outdir`.
 - **Open-landscape ambience** (`VastAirSynth.cs`, `RideLayers._vast_air`): two seamless stereo loops (29 s / 37 s, 3 s
   equal-power seam, never line up the same way) rendered on a worker at ride start (~0.2 s each): a deep bed under
   ~250 Hz swelling over tens of seconds, the air band (~300-1500 Hz) in slow gusts with its own mix per ear, far gust

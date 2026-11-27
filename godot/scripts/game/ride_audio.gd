@@ -133,6 +133,7 @@ var _crank_w := 0.0   # how fast the cranks really turn (rad/s, smoothed)
 
 # freewheel: the hub shell's spin over the driver's (rad/s of the rear wheel, smoothed)
 var OLD_FW := Env.s("BMX_OLD_FW") != ""   # = the old rule: bike speed whenever the gas key is up
+var OLD_SLAMDOUBLE := Env.s("BMX_OLD_SLAMDOUBLE") != ""   # = the double hits of before (rear tyre's second hit, late clatter)
 var _hw_crank := 0.0; var _hw_init := false
 var _hw_cw := 0.0     # the cranks' turn rate (rad/s, signed, smoothed)
 var _hub_w := 0.0
@@ -257,6 +258,12 @@ func landing(impact: float, yaw: float = 0.0) -> void:
 	if _slam_syn != null:
 		var side := clampf((yaw - 0.8) / 3.5, 0.0, 1.0)
 		_slam_play(_slam_take(k, side, 0), db, 1.0)
+		# a hard landing shakes the whole bike: the parts' clatter WITH the hit (it used to come with the heavy-landing
+		# verdict 0.4 s later and read as a second impact; user: "double impact, weird")
+		if k > 0.45 and not OLD_SLAMDOUBLE:
+			var kc := clampf((k - 0.45) / 0.55, 0.0, 1.0)
+			_slam_play(_slam_take(0.5 + 0.5 * kc, 0.0, 1), db + lerpf(-12.0, -4.0, kc), 1.0)
+		if Env.s("BMX_LAYER_PROBE") != "": print("LANDSND impact=%.1f k=%.2f db=%.1f side=%.2f clatter=%s" % [impact, k, db, side, k > 0.45 and not OLD_SLAMDOUBLE])
 		return
 	if _slam_clips.is_empty(): return
 	var i := randi() % _slam_clips.size()
@@ -267,6 +274,7 @@ func landing(impact: float, yaw: float = 0.0) -> void:
 ## a landing that went badly (heavy landing / SLAM, `sev` 0..1): the bike bounces again and parts clatter, a moment after the first hit
 func landing_bad(sev: float) -> void:
 	_rec("landing_bad", [sev])
+	if not OLD_SLAMDOUBLE: return   # (silent: the clatter plays with the touch-down hit, `landing`)
 	_slam_pool()
 	if _slam_syn == null: return
 	_slam_play(_slam_take(clampf(0.4 + 0.6 * sev, 0.0, 1.0), 0.0, 1), lerpf(-16.0, -6.0, clampf(sev, 0.0, 1.0)), 1.0)
