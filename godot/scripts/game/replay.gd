@@ -759,7 +759,7 @@ func photo_end() -> void:
 ## second for the last SNAP_SECS: "ride from here" puts one back and the ride carries on from that moment
 const SNAP_HZ := 4.0
 const SNAP_SECS := 120.0
-const SNAP_KEEP := ["host", "T", "L", "RWF", "RWR", "BB_REAR", "SH_R", "LAND", "geared", "cogs", "ring_k", "bike_rock", "distance", "bank_probe", "sus", "_sus_synced", "_su", "_sag_seen"]
+const SNAP_KEEP := ["host", "T", "L", "RWF", "RWR", "BB_REAR", "SH_R", "LAND", "geared", "cogs", "ring_k", "bike_rock", "distance", "bank_probe", "sus", "_sus_synced", "_su", "_sag_seen", "test_rider", "prof"]
 var snaps: Array = []          # [t, crashed, values]
 var _snap_keys := PackedStringArray()
 var _t_off := 0.0              # ride time - recording time (grows by what a "ride from here" cut away)
@@ -834,6 +834,8 @@ func ride_from_snap(sn: Array) -> void:
 	game._reset_draw_state()
 	if game.rider: game.rider.reset_pose()
 	game._snap_prev()
+	game._jw_prev = Vector2(INF, INF)   # (a teleport on purpose: no "JUMP ... m in one step" note in the log)
+	if game.cam: game.cam.snap_to(Vector3(ph.x, ph.y + 0.5, ph.z))   # (it glided over from where the ride was before the replay)
 	game.terrain.update_stream(ph.x, ph.z, INF, 1)
 	# the recording carries on from that moment
 	frames = frames.slice(0, _at(ts) + 1)

@@ -197,7 +197,9 @@ func _unpark_title() -> bool:
 	var t := title_parked
 	title_parked = null
 	if game and game != t:
-		if game.level == "" and _park_ride(game): pass   # the ride waits for RIDE (ride_ready / _take_prebuilt)
+		# (never a saved replay's viewer: it is the replay's world / bike / rider, and RIDE handed it over as the player's own)
+		var viewing: bool = game.replay != null and game.replay.viewer
+		if game.level == "" and not viewing and _park_ride(game): pass   # the ride waits for RIDE (ride_ready / _take_prebuilt)
 		else: game.queue_free()
 	t.reparent(self, false)
 	move_child(t, 0)
@@ -308,6 +310,7 @@ func _take_prebuilt() -> bool:
 	move_child(g, 0)
 	g.process_mode = Node.PROCESS_MODE_PAUSABLE
 	g.cam.current = true
+	Tune.set_ride(g.bike_cfg.ride)   # (the bike's multipliers are global: another Game built since, a replay's viewer, set its own)
 	if g.hud and g.hud.has_method("set_computer"): g.hud.set_computer()
 	game = g
 	_ride_park.queue_free()

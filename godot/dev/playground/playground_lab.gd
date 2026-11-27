@@ -371,7 +371,7 @@ func _end_replay() -> void:
 ## from the last run and made the same run come out different: gap_5 left at 41 deg one time, 84 the next). The bike's
 ## build (geometry, gearing), the Tune values and objects stay; the gear goes back to the start gear.
 ## Call before Game.level_reset_to (its reset_at then puts the bike down).
-const KEEP := ["host", "T", "L", "RWF", "RWR", "BB_REAR", "SH_R", "LAND", "geared", "cogs", "ring_k", "bike_rock", "distance", "bank_probe", "sus", "_sus_synced", "_su", "_sag_seen"]
+const KEEP := ["host", "T", "L", "RWF", "RWR", "BB_REAR", "SH_R", "LAND", "geared", "cogs", "ring_k", "bike_rock", "distance", "bank_probe", "sus", "_sus_synced", "_su", "_sag_seen", "test_rider", "prof"]   # (test_rider: its landing help was lost after the first restart; prof: the profiler's dict)
 func fresh(ph) -> void:
 	var clean := BikePhysics.new(game)
 	for p in clean.get_property_list():

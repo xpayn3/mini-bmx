@@ -197,11 +197,15 @@ func _process(dt: float) -> void:
 	var st = game.phys
 	_rec_t += dt
 	# record (a fixed 30 Hz)
+	# (one sample per 1/30 s slot, also when a frame spans several: playback reads sample i as time i / 30, so with
+	# one per FRAME a run recorded under 30 fps played back too fast and "finished" early)
 	if _rec_t >= _rec_next and _rec_t < MAX_T:
-		_rec_next += 1.0 / HZ
 		_s_track = _trail_s(st.x, st.z, _s_track)
 		var s := maxf(float(_s_track) * 2.0, _rec[_rec.size() - F + 1] if _rec.size() >= F else 0.0)
-		_rec.append_array(_sample(s))
+		var smp := _sample(s)
+		while _rec_t >= _rec_next:
+			_rec_next += 1.0 / HZ
+			_rec.append_array(smp)
 	if not enabled or not _have_ghost:
 		_show(false); return
 	# the ghost at this run's time

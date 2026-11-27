@@ -3958,6 +3958,31 @@ rebuild hitch); rider body physics (fore/aft + air tuck/lean); bending spine + p
 
 All of it is on `main` (the Godot branch was merged, the web version removed). Work continues in this repo.
 
+**Ride code review (2026-11-27)**: physics / game loop / camera / rider / ragdoll / rig / tune read in full. Fixed:
+a saved replay's viewer Game was parked as the player's next ride (`main._unpark_title`; `_take_prebuilt` now also
+calls `Tune.set_ride`); a body-point hit on a fence / cactus was pushed out with the frame's radius (pulled a slow bike
+INTO it, `b_min`); `_graze` never expired (ate the pop of a later take-off; cleared 0.25 s after touch-down);
+`_land_hit` carried a judged landing into the next (cleared at the verdict); the head / chest ground check read
+`air_lean` (fore / aft input) as roll; `_hop_pop` floored the descent rate at 0 (hops on a descent flew 2-3x high);
+tyre prints / grass trample / blood per wheel (`front_air` / `rear_air`); `CameraRig.snap_to` also resets the view's yaw
+(`_yaw_snap`), heading, slope, occlusion, and ride-from-here snaps the camera; the camera re-centre runs while riding
+(it was an `elif` of the follow branch); `_reset_draw_state` also clears the lift / pivot / air offset / bar kick / dab;
+`Rider.reset_pose` clears `_spr_arm` / `body_off`; the bar kick is measured per physics tick (`Game._bar_tick`); the
+rider room's air preview passes `inAir`; the ghost records one sample per 1/30 s slot; `_shadow_fit` uses `cam.dist`
+as is; the UpperArm bone's twist. Stress 56 / 56, playground suite identical before / after (it rides hands off).
+Second pass, same day: `_step_drive` only records a brake that was applied (`braked`: backing up on purpose holds the
+key with no brake on, and the lever force still went into the load split / friction circles); `a_pedal` = `a_drive`
+without a brake applied rolling backwards (pedal-stamp kicks, body-back shift, HUD power, dust `g_long` read it; the
+pitch torque keeps `a_drive`); the load split's clamp no longer runs with min > max; a touch-down turned > 83 deg off
+the slope is left to `_land_trick` (UNDER- / OVER-ROTATED, not NOSE DIVE / LOOPED OUT when one wheel touched first);
+`tune_presets.cfg` has a `ver` and custom presets drop `RETUNED_AT` keys from the NEXT retune on (older files are only
+stamped: when their presets were saved isn't known); `_snap_prev` clears `_jw_prev` (no false JUMP note); the camera's
+`dragging` is cleared while paused / photo / replay; `PlaygroundLab.KEEP` + `ReplayMode.SNAP_KEEP` hold `test_rider`
+and `prof` (the suite's test rider used to lose TEST_ASSIST 0.85 after its first restart: **suite numbers moved, the
+baseline needs re-saving**); the title sign's upright struts no longer warn in `look_at`.
+Left: "Reset ride tuning" doesn't switch the active custom preset; `_rope_rail` returns instead of `continue` with two
+bridges loaded; the brake-hold slide check (~line 1190) ignores `BRAKE_MU`; `_line_keys` fixed from the first input.
+
 Known, not fixed (lower priority from the code review):
 - Quit warnings: with SSIL on (GI setting 1, the default preset) Godot reports "7 RIDs of type Texture were leaked" at
   exit (gone with `--set=gi=0`; a bare SSIL scene doesn't do it, not found which of our viewports / features adds it;

@@ -521,7 +521,7 @@ func _ride_stats(st: BikePhysics, dt: float) -> void:
 	cad += (minf(rpm, 150.0) - cad) * minf(1.0, dt * 3.0)
 	var pw := 0.0
 	if not st.air and not st.crash_on and st.pedal > 0.05:
-		pw = 32.0 * maxf(0.0, st.a_drive) * absf(st.v) + st.pedal * (30.0 + 5.0 * absf(st.v))
+		pw = 32.0 * maxf(0.0, st.a_pedal) * absf(st.v) + st.pedal * (30.0 + 5.0 * absf(st.v))
 	power += (minf(pw, 1100.0) - power) * minf(1.0, dt * 2.0)
 	var hr_t := 68.0 + 95.0 * clampf(power / 650.0, 0, 1) + 22.0 * st.sprint + 18.0 * (1.0 - st.stamina) \
 		+ 8.0 * clampf(absf(st.v) / 15.0, 0, 1) + (25.0 if st.crash_on else 0.0)
