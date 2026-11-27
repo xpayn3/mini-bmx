@@ -1,9 +1,7 @@
 """Makes the card trees' two leaf textures (godot/scripts/world/card_tree.gd) from photographed foliage:
   needle_branch.png  2048 x 1024  a pine branch at real scale (~2-3 m: needle bundles 4-6 cm): stem along x (0 = the trunk
                      end .. 1 = the tip), side shoots, small twigs off them, real needle bundles stamped along all of them
-  needle_tuft.png    1024 x 1024  a clump of needle twigs at a branch tip (~0.7 m across): the pines' foliage tufts
   leaf_cluster.png   1024 x 1024  a clump of real leaves at real size (~0.8 m: the bushes' card)
-  leaf_spray.png     1024 x 1024  twigs + small real leaves (the airy look: green bushes + leafy tree clusters)
   leaf_tile.png      1024 x 1024  the same leaves as a dense SEAMLESS patch: the leafy crowns repeat it across their cards
 RGBA, transparent texels carry the foliage colour (no dark fringe in the mips). Colours are light and only slightly
 green: the card shader multiplies them by each tree's own instance colour, so every biome keeps its greens; the photos
@@ -193,63 +191,6 @@ def needles(folder, out):
     bleed(img, (0.62, 0.72, 0.55)).save(f"{out}/needle_branch.png")
 
 
-def tufts(folder, out):
-    """needle_tuft.png 1024 x 1024: a clump of needles at a pine branch tip, as seen from above / the side: short twigs
-    fanning forward (+x) from the branch's end (left middle), real needle bundles all along them (~0.8 m: needles ~5 cm)."""
-    c, o = load(folder, "PineNeedles001")
-    bs = [b for b in boxes(o > 0.4) if (b[3] - b[2]) > 300]
-    rng = random.Random(7331)
-    tint = (0.82, 1.0, 0.74)
-    spr = []
-    for b in bs:
-        s = sprite(c, o, b, tint, 0.8, grow=14)
-        a = np.asarray(s)[..., 3]
-        cols = np.nonzero(a.max(axis=0) > 100)[0]
-        x0 = cols[0] if len(cols) else 0
-        rows = np.nonzero(a[:, x0:x0 + 12].max(axis=1) > 100)[0]
-        y0 = rows.mean() if len(rows) else a.shape[0] / 2
-        k = 64.0 / s.size[0]
-        s = s.resize((64, max(2, int(s.size[1] * k))), Image.LANCZOS)
-        spr.append((s, (x0 / a.shape[1], y0 / a.shape[0])))
-    # a FAN of twigs spreading forward (+x) from the branch's end at the left middle, like the tip of a pine branch:
-    # the card is laid along the branch with u = forward
-    S = 1024
-    img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-    twigs = []
-    for i in range(44):
-        a = rng.gauss(0.0, 0.55)
-        a = max(-1.45, min(1.45, a))
-        ln = S * rng.uniform(0.35, 0.8) * (1.0 - 0.35 * abs(a) / 1.45)
-        p0 = (S * 0.08 + rng.uniform(0, S * 0.25), S / 2 + rng.uniform(-30, 30))
-        pts = []; q = list(p0); ang = a
-        for _ in range(int(ln)):
-            pts.append(tuple(q))
-            ang += rng.uniform(-0.018, 0.018) - ang * 0.0015
-            q = [q[0] + math.cos(ang), q[1] + math.sin(ang)]
-            if q[0] < 4 or q[0] > S - 8 or q[1] < 8 or q[1] > S - 8:
-                break
-        twigs.append(pts)
-    stamps = []
-    for pts in twigs:
-        for j in range(0, len(pts) - 2, 4):
-            x, y = pts[j]
-            x2, y2 = pts[j + 2]
-            d = math.degrees(math.atan2(y2 - y, x2 - x))
-            tt = j / len(pts)
-            for side in (-1, 1):
-                stamps.append((rng.random(), (x, y), d + side * rng.uniform(22, 58), rng.uniform(38, 54) * (1 - 0.3 * tt), rng.uniform(0.66, 1.06)))
-    stamps.sort(key=lambda s: s[0])
-    for _, at, deg, ln, shade in stamps:
-        s, anc = rng.choice(spr)
-        paste(img, s, at, -deg, ln / s.size[0], shade, anc)
-    from PIL import ImageDraw
-    dr = ImageDraw.Draw(img)
-    for pts in twigs:
-        for j in range(len(pts) - 1):
-            dr.line([pts[j], pts[j + 1]], fill=(92, 84, 60, 255), width=max(1, int(round(3 * (1 - j / len(pts))))))
-    bleed(img, (0.62, 0.72, 0.55)).save(f"{out}/needle_tuft.png")
-
-
 def leaves(folder, out):
     c, o = load(folder, "LeafSet005")
     bs = boxes(o > 0.4)
@@ -294,70 +235,6 @@ def _tile_paste(paste_fn, S, at, *args):
     for oy in (-1, 0, 1):
         for ox in (-1, 0, 1):
             paste_fn((at[0] + S + ox * S, at[1] + S + oy * S), *args)
-
-
-def spray(folder, out):
-    """leaf_spray.png 1024 x 1024: the airy bush look the user picked (2026-11-26, like the dry shrub): thin twigs branching
-    up / out from the bottom middle, small real leaves (LeafSet005 singles, ~6-8 cm on a ~1 m card) along them, light
-    through the gaps. The green bushes' and the leafy trees' card (one spray per card, no repeat)."""
-    c, o = load(folder, "LeafSet005")
-    bs = [b for b in boxes(o > 0.4) if (b[1] - b[0]) >= 300 and (b[3] - b[2]) <= (b[1] - b[0]) * 0.6]   # single leaves
-    tint = (0.86, 1.0, 0.72)
-    leaves_ = []
-    for b in bs:
-        s_ = sprite(c, o, b, tint, 0.72, shrink=3)
-        k = 96.0 / s_.size[1]
-        leaves_.append(s_.resize((max(2, int(s_.size[0] * k)), 96), Image.LANCZOS))
-    S = 1024
-    img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-    rng = random.Random(4711)
-    twigs = []
-
-    def grow(p0, ang, ln, depth):
-        pts = []; q = list(p0); a = ang
-        for _ in range(int(ln)):
-            pts.append(tuple(q))
-            a += rng.uniform(-0.03, 0.03) + (-math.pi / 2 - a) * 0.002   # (wandering, drawn up a little)
-            q = [q[0] + math.cos(a), q[1] + math.sin(a)]
-            if q[0] < 10 or q[0] > S - 10 or q[1] < 10 or q[1] > S - 10:
-                break
-        twigs.append((pts, depth))
-        if depth < 2:
-            for j in range(int(len(pts) * 0.2), len(pts) - 20, rng.randint(55, 95)):
-                side = 1 if rng.random() < 0.5 else -1
-                grow(pts[j], a + side * rng.uniform(0.4, 0.9), (len(pts) - j) * rng.uniform(0.5, 0.8), depth + 1)
-    for i in range(9):
-        ang = -math.pi / 2 + rng.uniform(-1.15, 1.15)
-        grow((S / 2 + rng.uniform(-30, 30), S * 0.94), ang, S * rng.uniform(0.45, 0.8), 0)
-    # leaves along the twigs, alternate sides, back ones darker
-    stamps = []
-    for pts, depth in twigs:
-        k = 0
-        for j in range(int(len(pts) * 0.4), len(pts) - 2, rng.randint(48, 70)):
-            x, y = pts[j]
-            x2, y2 = pts[j + 2]
-            d = math.degrees(math.atan2(y2 - y, x2 - x))
-            side = 1 if k % 2 == 0 else -1
-            k += 1
-            if rng.random() < 0.18:
-                continue   # (a gap: bare twig)
-            stamps.append((rng.random(), (x, y), d + side * rng.uniform(35, 75), rng.uniform(44, 62), rng.uniform(0.66, 1.06)))
-        if rng.random() < 0.6:   # often a leaf at the tip, sometimes the bare twig sticks out
-            x, y = pts[-1]
-            x0, y0 = pts[max(0, len(pts) - 4)]
-            stamps.append((rng.random(), (x, y), math.degrees(math.atan2(y - y0, x - x0)), rng.uniform(46, 60), 1.0))
-    from PIL import ImageDraw
-    dr = ImageDraw.Draw(img)
-    for pts, depth in twigs:
-        for j in range(len(pts) - 1):
-            w = (5 if depth == 0 else 3 if depth == 1 else 2) * (1 - j / len(pts) * 0.6)
-            dr.line([pts[j], pts[j + 1]], fill=(104, 86, 62, 255), width=max(1, int(round(w))))
-    stamps.sort(key=lambda t: t[0])
-    for _, at, deg, ln, shade in stamps:
-        s_ = rng.choice(leaves_)
-        # (the leaf's stalk at its bottom: anchor there; turned so it points along `deg`, image y down)
-        paste(img, s_, at, -(deg + 90), ln / s_.size[1], shade, (0.5, 0.97))
-    bleed(img, (0.6, 0.72, 0.48)).save(f"{out}/leaf_spray.png")
 
 
 def beech(prefix, out):
@@ -458,9 +335,7 @@ def _paste_normal(dst, cov, n4, at, deg, scale):
 
 if __name__ == "__main__":
     needles(sys.argv[1], sys.argv[3])
-    tufts(sys.argv[1], sys.argv[3])
     leaves(sys.argv[2], sys.argv[3])
-    spray(sys.argv[2], sys.argv[3])
     if len(sys.argv) > 4:
         beech(sys.argv[4], sys.argv[3])
     print("done")

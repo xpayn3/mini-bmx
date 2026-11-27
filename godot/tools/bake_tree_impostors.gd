@@ -13,7 +13,7 @@ const CH := 512
 const SS := 2            # rendered at this many times the cell size, then filtered down (smooth edges)
 const OUT := "res://assets/textures/tree_cards/impostors.png"
 ## [kind, crown size (py for a pine, sc for a leafy tree), instance colour]
-const VARIANTS := [["pine", 0.4, 0x3b7d4b], ["pine", 2.2, 0x2f6e45], ["leafy", 0.4, 0x6cb544], ["leafy", 2.2, 0x4f9a3a],
+const VARIANTS := [["pine", 1.0, 0x3b7d4b], ["pine", 3.0, 0x2f6e45], ["leafy", 1.0, 0x6cb544], ["leafy", 3.0, 0x4f9a3a],
 	["pine_crown", 0.0, 0xffffff], ["pine_crown", 1.9, 0xffffff], ["leafy_crown", 0.0, 0xffffff], ["leafy_crown", 2.3, 0xffffff]]
 ## crown cells: the crown at unit height (instance scale (A, 1, A)), its width squeezed by A into the 1 : 2 cell, so the
 ## billboard is stretched by the world instance's own x / y scale exactly like the 3D crown (crown v[1] = the yaw)
@@ -54,17 +54,25 @@ func _ready() -> void:
 		var col := TerrainGeo.lin(int(v[2]))
 		var H: float
 		var crown := {}   # crown cells: frame bottom / height in world units, the instance's scale
-		# every cell: a whole grown tree (GrownTree, normalised: root at 0, top at 1) from the ground
-		var gkind := "pine" if String(v[0]).begins_with("pine") else "leafy"
-		var w: float = GrownTree.info(gkind).width
-		var crown_cell := String(v[0]).ends_with("_crown")
-		var A := minf(1.0, 0.53 / (w * 1.08)) if crown_cell else 1.0   # (crown cells: width squeezed into the 1 : 2 cell)
-		var fhw := 1.06 if crown_cell else maxf(1.06, w * 2.16)
-		var smi := _one(root, TerrainGeo.MESH["pine" if gkind == "pine" else "blob"], TerrainGeo.MAT["leaf" if gkind == "pine" else "leafSoft"],
-			Transform3D(Basis(Vector3.UP, float(v[1])).scaled(Vector3(A, 1, A)), Vector3.ZERO), col)
-		CardTree.add_twin(smi, "pine" if gkind == "pine" else "blob")
-		crown = {"yb": -0.02, "fh": fhw, "a": A}
-		H = fhw
+		if v[0] == "pine_crown":
+			var smi := _one(root, TerrainGeo.MESH["pine"], TerrainGeo.MAT["leaf"], Transform3D(Basis(Vector3.UP, float(v[1])).scaled(Vector3(PINE_A, 1, PINE_A)), Vector3.ZERO), col)
+			CardTree.add_twin(smi, "pine")
+			crown = {"yb": -0.45, "fh": 3.45, "a": PINE_A}
+		elif v[0] == "leafy_crown":
+			var smi := _one(root, TerrainGeo.MESH["blob"], TerrainGeo.MAT["leafSoft"], Transform3D(Basis(Vector3.UP, float(v[1])).scaled(Vector3(BLOB_A, 1, BLOB_A)), Vector3.ZERO), col)
+			CardTree.add_twin(smi, "blob")
+			crown = {"yb": -1.6, "fh": 3.2, "a": BLOB_A}
+		elif v[0] == "pine" or v[0] == "leafy":
+			# a whole real-size tree (CardTree.dims: the variant's number picks its shape), trunk + crown
+			var dm := CardTree.dims(v[0], 0.9, 0.55, float(v[1]) * 0.3, 0.5)
+			var ts: Vector3 = dm.trunk
+			_one(root, TerrainGeo.MESH["trunk"], TerrainGeo.MAT["trunk_pine" if v[0] == "pine" else "trunk"], Transform3D(Basis().scaled(ts), Vector3(0, -0.1, 0)), Color(1, 1, 1))
+			var smi := _one(root, TerrainGeo.MESH["pine" if v[0] == "pine" else "blob"], TerrainGeo.MAT["leaf" if v[0] == "pine" else "leafSoft"],
+				Transform3D(Basis(Vector3.UP, float(v[1])).scaled(dm.crown), Vector3(0, float(dm.crown_y), 0)), col)
+			CardTree.add_twin(smi, "pine" if v[0] == "pine" else "blob")
+			H = float(dm.H) * 1.04
+			if v[0] == "leafy":
+				H = maxf(H, float(dm.R) * 2.0 * 2.0)   # (the 1 : 2 cell: a wide crown sets the frame)
 		# frame: the cell is 1 : 2; a tree fits by its height, a wide one by its width (frame width = 2.9 x its scale)
 		var fh := H
 		var yb := -0.02

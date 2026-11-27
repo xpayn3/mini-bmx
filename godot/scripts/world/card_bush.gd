@@ -31,23 +31,10 @@ static func material(kind: String = "leaf") -> ShaderMaterial:
 	m.set_shader_parameter("leaf_tex", texture(kind))
 	if kind == "leaf":
 		m.set_shader_parameter("albedo", Vector3.ONE * leaf_gain())
-		var tiles := tile_textures()
-		if ResourceLoader.exists(SPRAY_PNG) and Env.raw("BMX_OLD_TREES_TEX") != "1":
-			# the airy look the user picked (like the dry shrub): one twig spray of small real leaves per card
-			m.set_shader_parameter("leaf_tex", load(SPRAY_PNG))
-		elif not tiles.is_empty():
-			# real leaf size: the seamless foliage patch repeated by each card's size (COLOR.a x the bush's scale), with a
-			# ragged oval outline (user: "leaves scale is way off, too big")
-			m.set_shader_parameter("leaf_tex", tiles[0])
-			m.set_shader_parameter("tile_m", 0.8)
-			if tiles[1]:
-				m.set_shader_parameter("nrm_tex", tiles[1])
-				m.set_shader_parameter("use_nrm", true)
-		else:
-			var nt := leaf_normal()
-			if nt:
-				m.set_shader_parameter("nrm_tex", nt)
-				m.set_shader_parameter("use_nrm", true)
+		var nt := leaf_normal()
+		if nt:
+			m.set_shader_parameter("nrm_tex", nt)
+			m.set_shader_parameter("use_nrm", true)
 	if kind == "dry":
 		m.set_shader_parameter("roughness", 0.9)
 		m.set_shader_parameter("sway", 0.02)
@@ -72,10 +59,6 @@ static func _photo_leaf() -> bool:
 
 static func _beech() -> bool:
 	return ResourceLoader.exists(BEECH_PNG) and ResourceLoader.exists(BEECH_N_PNG) and Env.raw("BMX_NO_BEECH") != "1"
-
-## the airy twig spray (twigs + small real LeafSet005 leaves, tools/make_tree_cards.py spray(); user 2026-11-26: "all must
-## be like the dry shrub, this style"): green bushes and the leafy trees' clusters
-const SPRAY_PNG := "res://assets/textures/tree_cards/leaf_spray.png"
 
 ## the leafy crowns' card: the same foliage as a dense seamless patch (repeated across big cards, deco_cards tile_m)
 const TILE_PNG := "res://assets/textures/tree_cards/leaf_tile.png"
@@ -221,7 +204,7 @@ static func mesh(variant: String = "bush") -> ArrayMesh:
 				var ao := (0.4 + 0.6 * smoothstep(0.05, 1.0, depth)) * (0.72 + 0.28 * clampf(q.y / 0.9, 0.0, 1.0))
 				pos.append(q)
 				nor.append((out.normalized() * 0.7 + d * 0.3).normalized())
-				col.append(Color(ao, ao, ao, s))   # (a = the card's size: deco_cards tile_m repeats the leaf patch by it)
+				col.append(Color(ao, ao, ao))
 				uv.append(Vector2(e.x * 0.5, 1.0 - e.y))
 		for cx in 2:
 			quad.call(Vector2i(cx, 0), Vector2i(cx + 1, 0), Vector2i(cx + 1, 1))

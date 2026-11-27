@@ -1222,8 +1222,10 @@ func _root_system(C: TrailCourse, i: int) -> void:
 	# the tree
 	var dm := CardTree.dims("pine", 1.0, rr.next(), rr.next(), rr.next(), true)   # (a tall forest pine, real size)
 	var yaw := rr.next() * 6.28
-	var sc3: Vector3 = dm.scale   # (a whole grown tree from the ground: GrownTree / CardTree)
-	put("pine", tx, h - 0.1, tz, sc3.x, sc3.y, sc3.z, yaw, PINES[int(rr.next() * PINES.size())])
+	var ts: Vector3 = dm.trunk
+	var cs: Vector3 = dm.crown
+	put("trunk_pine" if rr.next() < 0.45 else "trunk", tx, h - 0.1, tz, ts.x, ts.y + 0.1, ts.z, yaw)
+	put("pine", tx, h + float(dm.crown_y), tz, cs.x, cs.y, cs.z, yaw, PINES[int(rr.next() * PINES.size())])
 	var tr: float = dm.rt   # the trunk's radius at its foot
 	colliders.append({"x": tx, "z": tz, "r": tr + 0.03, "ceil": h + float(dm.H)})
 	blocked.append([tx, tz, tr + 0.4])
@@ -1338,9 +1340,11 @@ func _bend_trees() -> void:
 		# an old giant: 26-34 m, a thick trunk, bare high up, the crown over everything
 		var dm := CardTree.dims("pine", 1.0, 0.7 + TrailCourse._hash(i, 72) * 0.3, TrailCourse._hash(i, 73), TrailCourse._hash(i, 76), true)
 		var yaw := TrailCourse._hash(i, 74) * 6.28
-		var sc3: Vector3 = dm.scale * Vector3(1.2, 1.0, 1.2)   # (an old giant: a wider crown, a thicker trunk)
-		var rt: float = float(dm.rt) * 1.2
-		put("pine", x, h - 0.15, z, sc3.x, sc3.y, sc3.z, yaw, PINES[int(TrailCourse._hash(i, 75) * PINES.size())])
+		var rt: float = float(dm.rt) * 1.35
+		var ts: Vector3 = dm.trunk
+		var cs: Vector3 = dm.crown
+		put("trunk", x, h - 0.15, z, rt / 0.16, ts.y + 0.15, rt / 0.16, yaw)
+		put("pine", x, h + float(dm.crown_y), z, cs.x, cs.y, cs.z, yaw, PINES[int(TrailCourse._hash(i, 75) * PINES.size())])
 		colliders.append({"x": x, "z": z, "r": rt + 0.02, "ceil": h + float(dm.H)})
 		blocked.append([x, z, rt + 0.4])
 		var sc := rt / 0.16   # (the stones below are placed by it)
@@ -1630,13 +1634,17 @@ func _trees_old(ox: float, oz: float) -> void:
 			# (and the camera behind them) ride under the canopy, not through the branches (user, 2026-11-25)
 			var tall: bool = fe or f.b_forest > 0.5
 			var dm := CardTree.dims("pine", rnd.next(), rnd.next(), rnd.next(), rnd.next(), tall, 0.3 * f.b_cold)
+			if tall and float(dm.cb) < TALL_CROWN:
+				dm = CardTree.dims("pine", 1.0, 0.6 + rnd.next() * 0.4, 0.5 + rnd.next() * 0.5, rnd.next(), true)
 			var R: float = dm.R
 			if not fe and not tall and not _crown_clear(x, z, R * 1.05):
 				continue
 			if tall and not fe and not _crown_clear(x, z, float(dm.rt) + 0.5):
 				continue   # (a tall trunk only needs its trunk off the trail: its crown is overhead)
-			var sc3: Vector3 = dm.scale   # (a whole grown tree from the ground: GrownTree / CardTree)
-			put("pine", x, h - 0.1, z, sc3.x, sc3.y, sc3.z, yaw, PINES[int(rnd.next() * PINES.size())], 0.04)
+			var ts: Vector3 = dm.trunk
+			var cs: Vector3 = dm.crown
+			put("trunk_pine" if rnd.next() < 0.45 else "trunk", x, h - 0.1, z, ts.x, ts.y + 0.1, ts.z, yaw)
+			put("pine", x, h + float(dm.crown_y), z, cs.x, cs.y, cs.z, yaw, PINES[int(rnd.next() * PINES.size())])
 			ceil_h = h + float(dm.H)
 			rt = dm.rt
 		elif f.b_sav > 0.4:
@@ -1644,8 +1652,10 @@ func _trees_old(ox: float, oz: float) -> void:
 			var dm := CardTree.dims("savanna", rnd.next(), rnd.next(), rnd.next(), rnd.next())
 			if not _crown_clear(x, z, float(dm.R)):
 				continue
-			var sc3: Vector3 = dm.scale
-			put("blob", x, h - 0.1, z, sc3.x, sc3.y, sc3.z, yaw, SAV_LEAVES[int(rnd.next() * SAV_LEAVES.size())], 0.04)
+			var ts: Vector3 = dm.trunk
+			var cs: Vector3 = dm.crown
+			put("trunk", x, h - 0.1, z, ts.x, ts.y + 0.1, ts.z, yaw)
+			put("blob", x, h + float(dm.crown_y), z, cs.x, cs.y, cs.z, yaw, SAV_LEAVES[int(rnd.next() * SAV_LEAVES.size())], 0.3)
 			ceil_h = h + float(dm.H)
 			rt = dm.rt
 		else:
@@ -1653,8 +1663,15 @@ func _trees_old(ox: float, oz: float) -> void:
 			var dm := CardTree.dims("leafy", rnd.next(), rnd.next(), rnd.next(), rnd.next())
 			if not _crown_clear(x, z, float(dm.R) * 0.9):
 				continue
-			var sc3: Vector3 = dm.scale
-			put("blob", x, h - 0.1, z, sc3.x, sc3.y, sc3.z, yaw, LEAVES[int(rnd.next() * LEAVES.size())], 0.04)
+			var ts: Vector3 = dm.trunk
+			var cs: Vector3 = dm.crown
+			put("trunk_pale" if rnd.next() < 0.6 else "trunk", x, h - 0.1, z, ts.x, ts.y + 0.1, ts.z, yaw)
+			put("blob", x, h + float(dm.crown_y), z, cs.x, cs.y, cs.z, yaw, LEAVES[int(rnd.next() * LEAVES.size())], 0.3)
+			if rnd.next() < 0.5:
+				var R: float = dm.R
+				var bx := x + (rnd.next() - .5) * R
+				var bz := z + (rnd.next() - .5) * R
+				put("blob", bx, h + float(dm.crown_y) + cs.y * 0.5, bz, cs.x * 0.7, cs.y * 0.7, cs.z * 0.7, yaw, LEAVES[int(rnd.next() * LEAVES.size())], 0.3)
 			ceil_h = h + float(dm.H)
 			rt = dm.rt
 		colliders.append({"x": x, "z": z, "r": rt + 0.02, "ceil": ceil_h})

@@ -27,9 +27,6 @@ varying float v_trans;
 // > 0: the leaf picture covers this many metres of foliage, and each card repeats it by its real size (COLOR.a = the
 // card's size in mesh units x the instance's scale), so leaves keep their real size on crowns of any size (leafy trees)
 uniform float tile_m = 0.0;
-// > 0: the cards were made for a tree this many metres tall (GrownTree's grown size); each card shrinks / grows about its
-// anchor (CUSTOM0.xyz, mesh space) so it keeps that real size on a tree scaled to any height (needles / leaves stay real)
-uniform float card_ref = 0.0;
 varying flat float v_tile;
 varying vec3 v_col;
 varying flat vec3 v_origin;
@@ -39,12 +36,7 @@ global uniform vec4 cam_eye;
 
 void vertex() {
 	v_col = albedo * COLOR.rgb * INSTANCE_CUSTOM.rgb;
-	float sx = length(MODEL_MATRIX[0].xyz);
-	if (card_ref > 0.0) {
-		vec3 aw = (MODEL_MATRIX * vec4(CUSTOM0.xyz, 1.0)).xyz;
-		VERTEX = aw + (VERTEX - aw) * (card_ref / max(sx, 0.001));
-	}
-	v_tile = tile_m > 0.0 ? max(1.0, round(COLOR.a * (card_ref > 0.0 ? card_ref : sx) / tile_m)) : 1.0;
+	v_tile = tile_m > 0.0 ? max(1.0, round(COLOR.a * length(MODEL_MATRIX[0].xyz) / tile_m)) : 1.0;
 	v_origin = MODEL_MATRIX[3].xyz;
 	vec3 base = MODEL_MATRIX[3].xyz;
 	float h = max(VERTEX.y - base.y, 0.0);

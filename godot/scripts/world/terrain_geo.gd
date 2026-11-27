@@ -69,21 +69,17 @@ static func ensure() -> void:
 	MESH["blobSolid"] = MESH["blob"]
 	MAT["leafSolid"] = MAT["leaf"]
 	MAT["leafSoftSolid"] = MAT["leafSoft"]
-	# (always: tree placement is whole grown trees from the ground now, which the old crowns don't fit)
-	MESH["pine"] = CardTree.mesh("pineCardLod1")
-	MESH["blob"] = CardTree.mesh("blobCardLod1")
-	MAT["leaf"] = CardTree.material("needle")
-	MAT["leafSoft"] = CardTree.material("leaf")
-	for k in ["pineWood0", "pineWood1", "leafyWood0", "leafyWood1"]:   # (grown trees' wood: GrownTree)
-		MESH[k] = CardTree.mesh(k)
-	MAT["wood_pine"] = CardTree.material("wood_pine")
-	MAT["wood_leafy"] = CardTree.material("wood_leafy")
-	var pbb := CardTree._billboard("pine")
-	if not pbb.is_empty():
-		MESH["pineBillboard"] = pbb[0]
-		MAT["pineBillboard"] = pbb[1]
+	if CardTree.enabled():
+		MESH["pine"] = CardTree.mesh("pineCardLod1")
+		MESH["blob"] = CardTree.mesh("blobCardLod1")
+		MAT["leaf"] = CardTree.material("needle")
+		MAT["leafSoft"] = CardTree.material("leaf")
+	MESH["pineSpire"] = CardTree.mesh("pineSpire")
+	MESH["blobLimbs"] = CardTree.mesh("blobLimbs")
 	if CardTree.enabled():
 		MESH["trunk"] = CardTree.mesh("trunkFlare")   # (every tree's trunk: roots flaring out at the foot)
+	MAT["spire"] = CardTree.material("spire")
+	MAT["limbs"] = CardTree.material("limbs")
 	var log_g := GeoBuf.merge([GeoBuf.cylinder(0.17, 0.21, 1, 7).rot_z(PI / 2),
 		GeoBuf.cylinder(0.035, 0.05, 0.4, 4).rot_z(-0.7).translate(0.18, 0.2, 0.05)])
 	MESH["log"] = log_g.to_mesh(false, _soft_normals(log_g))
