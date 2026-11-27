@@ -2783,6 +2783,7 @@ var _perf_print := 5.0
 var _perf_last := 0
 func _perf(key: String, t0: int) -> int:
 	var now := Time.get_ticks_usec()
+	_hw_acc[key] = _hw_acc.get(key, 0) + (now - t0)   # (always: the hitch watch names the sections of a slow frame)
 	if perf_on: _perf_acc[key] = _perf_acc.get(key, 0) + (now - t0)
 	if _prof_rec: profiler.acc[key] = profiler.acc.get(key, 0) + (now - t0)
 	return now
@@ -3181,11 +3182,68 @@ var _hw_last := 0
 var _hw_ticks := 0
 var _jw_prev := Vector2(INF, INF)
 var _jw_crash := false
+## (2026-11-27, F8: 1-3.5 s freezes that came more often the longer a session ran, the game at 9.5 GB) each HITCH line
+## now also says where the time went: our own timed sections since the last frame (`_perf`, top 5, + "rest" = the
+## part none of them covered: other nodes, the engine, the render, the OS) and the memory / C# collector numbers, with
+## how much C# collector pause fell inside the slow frame (gc_ms). A MEM line every MEM_EVERY s of ride shows growth.
+var _hw_acc := {}
+var _hw_gc = null      # CsGc (null without C#)
+var _hw_gc_tried := false
+var _hw_pause := -1.0
+var _hw_gen := [0, 0, 0]
+const MEM_EVERY := 30.0
+var _mem_next := 0.0
+func _mem_stats() -> Dictionary:
+	if not _hw_gc_tried:
+		_hw_gc_tried = true
+		_hw_gc = CrashLog.cs_new("res://scripts/core/CsGc.cs")
+	var d := {"static_mb": Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0,
+		"objects": int(Performance.get_monitor(Performance.OBJECT_COUNT)),
+		"resources": int(Performance.get_monitor(Performance.OBJECT_RESOURCE_COUNT)),
+		"nodes": int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT)),
+		"orphans": int(Performance.get_monitor(Performance.OBJECT_ORPHAN_NODE_COUNT)),
+		"vram_mb": Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1048576.0}
+	if _hw_gc: d.merge(_hw_gc.stats())
+	return d
+
+func _mem_line(d: Dictionary) -> String:
+	var s := "at=%s sys_mem=%.0f%% other_godot=%d proc=%.0fMB static=%.0fMB vram=%.0fMB objects=%d resources=%d nodes=%d orphans=%d" % [Time.get_time_string_from_system(), d.get("sys_load", -1.0), d.get("other_godot", -1), d.get("proc_mb", -1.0),
+		d.static_mb, d.vram_mb, d.objects, d.resources, d.nodes, d.orphans]
+	if d.has("heap_mb"):
+		s += " cs_heap=%.0fMB cs_committed=%.0fMB cs_alloc=%.0fMB gc=%d/%d/%d gc_pause_total=%.0fms" % [d.heap_mb, d.committed_mb,
+			d.alloc_mb, d.gen0, d.gen1, d.gen2, d.pause_ms]
+	return s
+
 func _hitch_watch() -> void:
 	var now := Time.get_ticks_usec()
 	var ms := (now - _hw_last) / 1000.0
-	if _hw_last > 0 and ms > HITCH_MS and Engine.get_process_frames() > 300 and input_enabled and not scenic and not title_world and not photo and not get_tree().paused:
-		CrashLog.note("HITCH frame_ms=%.0f phys_ticks=%d pos=(%.1f, %.1f) v=%.1f crashed=%s fps=%d" % [ms, _hw_ticks, phys.x, phys.z, phys.v, phys.crash_on, Engine.get_frames_per_second()])
+	var riding: bool = Engine.get_process_frames() > 300 and input_enabled and not scenic and not title_world and not photo and not get_tree().paused
+	if _hw_last > 0 and ms > HITCH_MS and riding:
+		var keys := _hw_acc.keys()
+		keys.sort_custom(func(a, b): return _hw_acc[a] > _hw_acc[b])
+		var ours := 0
+		for k in keys:
+			if not String(k).contains("."): ours += _hw_acc[k]
+		var top := ""
+		for i in mini(5, keys.size()):
+			top += " %s=%.1f" % [keys[i], _hw_acc[keys[i]] / 1000.0]
+		var d := _mem_stats()
+		var gc := ""
+		if d.has("pause_ms") and _hw_pause >= 0.0:
+			gc = " gc_ms=%.0f gc_runs=+%d/+%d/+%d" % [d.pause_ms - _hw_pause, d.gen0 - _hw_gen[0], d.gen1 - _hw_gen[1], d.gen2 - _hw_gen[2]]
+		CrashLog.note("HITCH frame_ms=%.0f phys_ticks=%d pos=(%.1f, %.1f) v=%.1f crashed=%s fps=%d focus=%s |%s rest=%.1f |%s | %s" % [ms, _hw_ticks,
+			phys.x, phys.z, phys.v, phys.crash_on, Engine.get_frames_per_second(), get_window().has_focus(), top,
+			ms - ours / 1000.0, gc, _mem_line(d)])
+	if riding and t >= _mem_next:
+		_mem_next = t + MEM_EVERY
+		CrashLog.note("MEM t=%.0f %s" % [t, _mem_line(_mem_stats())])
+	# collector state at the start of this frame (cheap: counters only), so the next HITCH knows what fell inside it
+	if not _hw_gc_tried: _mem_stats()
+	if _hw_gc:
+		var c: Vector4 = _hw_gc.counters()
+		_hw_pause = c.x
+		_hw_gen = [int(c.y), int(c.z), int(c.w)]
+	_hw_acc.clear()
 	_hw_last = now
 	_hw_ticks = 0
 
