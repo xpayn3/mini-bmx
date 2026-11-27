@@ -326,6 +326,7 @@ static func _build_materials() -> void:
 	MAT["signpole"] = sp
 	MAT["cactus"] = _mat(w, 0.7)
 	MAT["cactus"].set_shader_parameter("tint_own", true)
+	MAT["cactus"].set_shader_parameter("cactus_skin", Env.s("BMX_OLD_CACTUS") == "")
 	# what the wind moves (m of sway per m of height in a full gust) and how much sun shows through
 	for k in [["leaf", 0.02, 0.2], ["cactus", 0.004, 0.12], ["leafSoft", 0.035, 0.25], ["tuft", 0.12, 0.3]]:
 		MAT[k[0]].set_shader_parameter("sway", k[1])
