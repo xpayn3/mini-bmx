@@ -75,7 +75,7 @@ var cam_i := 0
 var ui_on := true
 var cam3: Camera3D
 var bar: Control
-var style_ui: StyleInspector   # T: what the rider's style did (clip layers, events, channels, state)
+var style_ui = null   # StyleInspector (res://dev: dev builds only). T: what the rider's style did (clip layers, events, channels, state)
 var hint: PadGlyph.PromptBar
 var _hint_pad := false
 var _last_us := 0
@@ -127,9 +127,10 @@ func _ready() -> void:
 	bar.rp = self
 	bar.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(bar)
-	style_ui = StyleInspector.new()
-	style_ui.rp = self
-	add_child(style_ui)
+	style_ui = Dev.make("style_inspector.gd")
+	if style_ui:
+		style_ui.rp = self
+		add_child(style_ui)
 	hint = PadGlyph.PromptBar.new()
 	hint.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	hint.offset_top = -38; hint.offset_bottom = -4
@@ -1068,7 +1069,7 @@ func update(rdt: float) -> void:
 	hint.visible = ui_on and not exporting
 	if _hint_pad != Settings.pad_active: _refresh_hint()
 	bar.queue_redraw()
-	if style_ui.visible: style_ui.queue_redraw()
+	if style_ui and style_ui.visible: style_ui.queue_redraw()
 	if Env.s("BMX_REPLAY_SHOTS") != "":   # tests: a shot every 0.5 s of real time
 		_shots_t += rdt
 		if _shots_t >= 0.5 and _shots_i < 16:
@@ -1430,10 +1431,10 @@ func _input(e: InputEvent) -> void:
 			KEY_DELETE: clip_in = -1.0; clip_out = -1.0; status = "CLIP CLEARED"; _status_t = 1.5
 			KEY_V: export_clip()
 			KEY_ENTER, KEY_KP_ENTER: ride_from_here()
-			KEY_INSERT: _pose_from_here()
-			KEY_L: reride_from_here()
-			KEY_T: style_ui.visible = not style_ui.visible
-			KEY_Y: style_ui.cycle_window()
+			KEY_INSERT: if Dev.on: _pose_from_here()
+			KEY_L: if Dev.on: reride_from_here()
+			KEY_T: if style_ui: style_ui.visible = not style_ui.visible
+			KEY_Y: if style_ui: style_ui.cycle_window()
 			KEY_HOME: tp = t0(); _shot = null; _snap_cam = true
 			KEY_END: tp = t1()
 			KEY_H, KEY_F1: ui_on = not ui_on
@@ -1539,6 +1540,7 @@ func _free_input(e: InputEvent) -> bool:
 ## Pose Lab from the replay: rewind to the moment, press Insert: the ride carries on from there (ride from here) and
 ## the Lab opens with the physics paused, so the jump can be posed / keyed in place
 func _pose_from_here() -> void:
+	if not Dev.on: return
 	if viewer or not can_ride_from_here():
 		status = "NO POINT TO POSE FROM HERE"; _status_t = 1.5
 		return
@@ -1616,9 +1618,9 @@ func _test_set(spec: String) -> void:
 			"at": tp = clampf(t1() + float(p[1]), t0(), t1()) if float(p[1]) <= 0.0 else clampf(t0() + float(p[1]), t0(), t1())
 			"pause": playing = p[1] != "1"
 			"ui": ui_on = p[1] != "0"
-			"style": style_ui.visible = p[1] != "0"   # tests: the Style Inspector
-			"pick": style_ui.sel = p[1]
-			"win": style_ui.win = float(p[1])
+			"style": if style_ui: style_ui.visible = p[1] != "0"   # tests: the Style Inspector
+			"pick": if style_ui: style_ui.sel = p[1]
+			"win": if style_ui: style_ui.win = float(p[1])
 			"hl": if p[1] == "1": toggle_highlights.call_deferred()
 			"in": clip_in = clampf(t1() + float(p[1]), t0(), t1())
 			"out": clip_out = clampf(t1() + float(p[1]), t0(), t1())

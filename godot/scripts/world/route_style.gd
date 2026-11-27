@@ -33,7 +33,7 @@ static func ensure() -> void:
 	if cf.load(PATH) == OK:
 		for k in KEYS:
 			current[k] = clampf(float(cf.get_value("route", k, DEFAULT[k])), LIMITS[k][0], LIMITS[k][1])
-	var tb := OS.get_environment("BMX_ROUTE_BIOME")   # tests: 0 any .. 4 (BIOMES), not saved
+	var tb := Env.raw("BMX_ROUTE_BIOME")   # tests: 0 any .. 4 (BIOMES), not saved
 	if tb != "": current["biome"] = clampf(float(tb), 0.0, 4.0)
 
 

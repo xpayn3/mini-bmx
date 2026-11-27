@@ -96,7 +96,7 @@ const WOOD_BEVEL_MAX := 0.44
 
 class Wood:
 	extends RefCounted
-	static var OLD_BRIDGE := OS.get_environment("BMX_OLD_BRIDGE") != ""
+	static var OLD_BRIDGE := Env.raw("BMX_OLD_BRIDGE") != ""
 	var kind: int   # 0 woodKicker, 1 skinny, 2 bridge
 	var u0: float
 	var u1: float

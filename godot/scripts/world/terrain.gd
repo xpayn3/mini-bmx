@@ -31,7 +31,7 @@ const USE_CS := true
 ## ground and nothing lying on it
 const GROUND_LAYER := 1 << 10
 const CS_FIELD := "res://scripts/world/TerrainFieldCs.cs"
-var use_cs := USE_CS and OS.get_environment("BMX_TERRAIN_GD") == ""   # env BMX_TERRAIN_GD=1: GDScript (A/B runs); tools flip it before set_seed()
+var use_cs := USE_CS and Env.raw("BMX_TERRAIN_GD") == ""   # env BMX_TERRAIN_GD=1: GDScript (A/B runs); tools flip it before set_seed()
 
 var seed_value: int = 0
 var field: TerrainField          # GDScript field: the seed's course / route tables (and every query without C#)
@@ -47,9 +47,9 @@ var _ground_shader: Shader = preload("res://scripts/world/ground.gdshader")
 ## the trail's surface relief (assets/textures/trail/SOURCE.txt): the normals + roughness of two scans, packed dirt and
 ## loose gravel. Colour, rider lines, wear and puddles are procedural in ground.gdshader; the scans only add fine relief.
 const TRAIL_SCANS := ["brown_mud_02", "gravelly_sand"]
-static var _trail_debug := int(OS.get_environment("BMX_TRAIL_DEBUG"))
-static var _trail_play := OS.get_environment("BMX_TRAIL_PLAY")   # test: 1 = a playful mark in every stretch
-static var _trail_puddles := OS.get_environment("BMX_TRAIL_PUDDLES")   # test: 0 = none, 2 = on every wet road
+static var _trail_debug := int(Env.raw("BMX_TRAIL_DEBUG"))
+static var _trail_play := Env.raw("BMX_TRAIL_PLAY")   # test: 1 = a playful mark in every stretch
+static var _trail_puddles := Env.raw("BMX_TRAIL_PUDDLES")   # test: 0 = none, 2 = on every wet road
 static var _trail_tex: Array = []   # [nr0, nr1], loaded once
 static func trail_textures() -> Array:
 	if _trail_tex.is_empty():
@@ -746,7 +746,7 @@ func _update_grow(px: float, pz: float) -> void:
 ## physics ground, the crashed rider slid into it and vanished "through the world"). After adopting it: chunks still
 ## being built read the old trail (dropped, built again), loaded ones whose drawn grid no longer matches the field are
 ## built again (the old one stays drawn until the new one is in: _finalize). Returns how many are queued to check (a few a frame: _land_check_step). BMX_OLD_GROWLAND=1 = before
-static var OLD_GROWLAND := OS.get_environment("BMX_OLD_GROWLAND") != ""
+static var OLD_GROWLAND := Env.raw("BMX_OLD_GROWLAND") != ""
 const LAND_REDO_TOL := 0.15   # m: drawn grid vs the field's ground at a node (micro detail is only in the fine grid MG)
 func _restale_after_grow() -> int:
 	if OLD_GROWLAND:
@@ -1164,7 +1164,7 @@ func _finalize_out(k: Vector2i, o: Dictionary, chunk_n: int) -> void:
 		node.add_child(hp)
 		_packs[pkey] = {"node": hp, "pos": pp}
 		rec["packs"].append(pkey)
-		if OS.get_environment("BMX_PACK_PROBE") != "": print("PACK at ", pp)
+		if Env.raw("BMX_PACK_PROBE") != "": print("PACK at ", pp)
 	for c in colliders:
 		if c.has("cactus"):
 			c["cactus"]["mm"] = mms.get("cactus%d" % c["cactus"].get("kind", 0))
@@ -1292,7 +1292,7 @@ func _mesh_h(x: float, z: float, coarse: bool) -> float:
 ## drawn tyres sit on what is drawn, not hover over it (the physics still rides the smooth field). A rock, log,
 ## wooden deck or rope deck (height() above the plain ground) still counts where it stands up out of the mesh.
 ## BMX_OLD_TOPFIT=1 = the old max(field, coarse mesh) (the bike hovered over every drawn dip)
-static var OLD_TOPFIT := OS.get_environment("BMX_OLD_TOPFIT") != ""
+static var OLD_TOPFIT := Env.raw("BMX_OLD_TOPFIT") != ""
 func top_height(x: float, z: float) -> float:
 	if OLD_TOPFIT:
 		var r0 := rut_at(x, z)

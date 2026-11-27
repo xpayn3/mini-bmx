@@ -49,6 +49,8 @@ const CREDITS := [
 ]
 
 ## full texts of the licences that require their text to ship (shown on the Licences page)
+## credited parts only dev builds carry (the physics overlay addon is left out of a release export)
+const DEV_ONLY := ["Debug Draw 3D"]
 const LICENSE_FILES := [
 	["Steamworks.NET", "res://addons/steamworks/Steamworks.NET-LICENSE.txt"],
 	["Debug Draw 3D", "res://addons/debug_draw_3d/LICENSE"],
@@ -89,6 +91,7 @@ func _licences() -> Control:
 	_section(p, "END USER LICENCE AGREEMENT")
 	_hint(p, _read("res://EULA.txt"))
 	for lf in LICENSE_FILES:
+		if not Dev.on and String(lf[0]) in DEV_ONLY: continue   # (not in a release build)
 		_section(p, String(lf[0]).to_upper())
 		_hint(p, _read(lf[1]))
 	return p

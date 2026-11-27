@@ -25,7 +25,7 @@ func _ready() -> void:
 	_view.draw.connect(_draw_toast)
 	add_child(_view)
 	Input.joy_connection_changed.connect(_on_change)
-	var t := OS.get_environment("BMX_PADTOAST")
+	var t := Env.raw("BMX_PADTOAST")
 	if t != "":
 		_hold = true
 		_show.call_deferred(t == "connect", "Xbox Series Controller")
@@ -34,7 +34,7 @@ func _on_change(device: int, connected: bool) -> void:
 	if connected: _names[device] = Input.get_joy_name(device)
 	var nm: String = _names.get(device, "")
 	if not connected: _names.erase(device)
-	if Settings._test_run and OS.get_environment("BMX_PADTOAST") == "": return
+	if Settings._test_run and Env.raw("BMX_PADTOAST") == "": return
 	if Time.get_ticks_msec() < STARTUP_QUIET * 1000.0: return
 	_show(connected, nm)
 

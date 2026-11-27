@@ -150,9 +150,10 @@ func _ready() -> void:
 	root.add_child(pace_view)
 	on_respawn()
 	_build_records()
-	quick = load("res://scripts/ui/quick_tune.gd").new()
-	quick.hud = self
-	root.add_child(quick)
+	quick = Dev.make("tune/quick_tune.gd")   # (a developer tool: none in a release build)
+	if quick:
+		quick.hud = self
+		root.add_child(quick)
 	gear_changed()
 	apply_settings()
 	root.resized.connect(_layout)
@@ -337,11 +338,11 @@ func _unhandled_input(e: InputEvent) -> void:
 		_refresh_records(); records_panel.visible = not records_panel.visible
 	elif e.is_action_pressed("toggle_hud") and not e.is_echo():
 		hidden = not hidden; root.visible = not hidden
-	elif e.is_action_pressed("tune") and not e.is_echo():
+	elif Dev.on and e.is_action_pressed("tune") and not e.is_echo():
 		toggle_tune()
-	elif e.is_action_pressed("pose_panel") and not e.is_echo():
+	elif Dev.on and e.is_action_pressed("pose_panel") and not e.is_echo():
 		_toggle_side("pose")
-	elif e.is_action_pressed("look_panel") and not e.is_echo():
+	elif Dev.on and e.is_action_pressed("look_panel") and not e.is_echo():
 		_toggle_side("look")
 	elif e.is_action_pressed("screenshot") and not e.is_echo():
 		var dir := "user://screenshots"
@@ -350,7 +351,7 @@ func _unhandled_input(e: InputEvent) -> void:
 		get_viewport().get_texture().get_image().save_png(p)
 		flash("Screenshot saved")
 
-var card: TuneCard   # the tuning card (P Ride, K Rider, L Look): built on first use
+var card = null   # TuneCard (res://dev/tune: dev builds only): the tuning card (P Ride, K Rider, L Look): built on first use
 
 const SIDE_TABS := {"tune": "ride", "pose": "rider", "look": "look", "ride": "ride", "rider": "rider", "sound": "sound", "light": "light", "dust": "dust"}
 
@@ -363,22 +364,23 @@ func _side_open() -> bool:
 ## the ✕ on the card
 func close_sides() -> void:
 	if card: card.visible = false
-	quick.visible = Settings.get_v("hud_quick")
+	if quick: quick.visible = Settings.get_v("hud_quick")
 
 ## open the card on a tab (tune / pose / look, or ride / rider / look); the same key again closes it
 func _toggle_side(which: String) -> void:
+	if not Dev.on: return
 	var t: String = SIDE_TABS.get(which, "ride")
 	if card and card.visible and card.tab == t:
 		close_sides()
 		return
 	if card == null:
-		card = TuneCard.new(game)
+		card = Dev.make("tune/tune_card.gd", [game])
 		card.tab = t
 		root.add_child(card)
 	else:
 		card.show_tab(t)
 	card.visible = true
-	quick.visible = false
+	if quick: quick.visible = false
 	_dock_card()
 
 func _build_records() -> void:
@@ -443,10 +445,12 @@ func update_hud(dt: float) -> void:
 	var sys_up: bool = gauge != null and gauge.visible and visible and gauge.order.size() > gauge.page and int(gauge.order[gauge.page]) == GaugeView.SYS_PAGE
 	if sys_up != _sys_overlay:
 		_sys_overlay = sys_up
-		if sys_up:
-			_overlay_was = DebugOverlay.on
-			if not DebugOverlay.on and DebugOverlay.available(): DebugOverlay.toggle()
-		elif DebugOverlay.on and not _overlay_was: DebugOverlay.toggle()
+		var ov := Dev.overlay()   # (null in a release build)
+		if ov == null: pass
+		elif sys_up:
+			_overlay_was = ov.on
+			if not ov.on and ov.available(): ov.toggle()
+		elif ov.on and not _overlay_was: ov.toggle()
 	info_l.text = "%s  ·  %s cam  ·  world #%d" % [GameState.BIKES[GameState.bike_id].label, game.cam.preset().label, GameState.seed]
 	if msg_a > 0:
 		msg_a -= dt
@@ -823,8 +827,8 @@ class GaugeView extends Control:
 		y += 48
 		_pair(f, ink, scr_, x0, w, y, "AVG MS", "%.1f" % avg, "WORST", "%.0f" % worst)
 		# the 3D physics view's state, small in the graph's top right
-		var on3d := DebugOverlay.on and DebugOverlay.available()
-		draw_string(f, Vector2(g.position.x, g.position.y + 8), "3D " + ("ON" if on3d else ("OFF" if DebugOverlay.available() else "N/A")), HORIZONTAL_ALIGNMENT_RIGHT, g.size.x - 2, 7, Color(ink, 0.6))
+		var ov := Dev.overlay()
+		if ov: draw_string(f, Vector2(g.position.x, g.position.y + 8), "3D " + ("ON" if ov.on and ov.available() else ("OFF" if ov.available() else "N/A")), HORIZONTAL_ALIGNMENT_RIGHT, g.size.x - 2, 7, Color(ink, 0.6))
 	## TRIP: ride time, distance, average / max speed, odometer (every ride, saved)
 	func _page_trip(f: Font, ink: Color, scr_: Rect2, x0: float, w: float) -> void:
 		var y := scr_.position.y + 28

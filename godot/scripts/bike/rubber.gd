@@ -65,7 +65,7 @@ const SCAN_TILE_M := 0.20    # one scan tile = 20 cm of tyre (the grain is ~1.5 
 ## true = the photographed ambientCG Rubber004 scan (colour already holds the compound's colour, so the
 ## vertex colour is white); false = the generated grain above (env BMX_RUBBER=gen, or the files are missing)
 static func use_scan() -> bool:
-	return OS.get_environment("BMX_RUBBER") != "gen" and ResourceLoader.exists(SCAN_DIR + "rubber_color.jpg")
+	return Env.raw("BMX_RUBBER") != "gen" and ResourceLoader.exists(SCAN_DIR + "rubber_color.jpg")
 
 
 ## Turns a StandardMaterial3D (vertex colour = the compound colour) into realistic rubber.
@@ -102,7 +102,7 @@ static func _apply_scan(m: StandardMaterial3D) -> void:
 	m.roughness_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_RED
 	m.normal_enabled = true
 	m.normal_texture = load(SCAN_DIR + "rubber_normal.jpg")
-	var lift := float(OS.get_environment("BMX_RUBBER_LIFT")) if OS.get_environment("BMX_RUBBER_LIFT") != "" else SCAN_LIFT
+	var lift := float(Env.raw("BMX_RUBBER_LIFT")) if Env.raw("BMX_RUBBER_LIFT") != "" else SCAN_LIFT
 	m.albedo_color = Color(lift, lift, lift)   # the scan is nearly black (sRGB ~0.16): lifted to a dark charcoal so the tread reads
 	m.normal_scale = 1.8
 	m.uv1_triplanar = true

@@ -82,17 +82,17 @@ static func ensure_loaded() -> void:
 				for n in customs: customs[n][k] = d[k]
 	if not (active in BUILTIN or active in customs): active = "Golden hour"
 	# tests: BMX_LIGHT=time=12,haze=2 / BMX_LIGHT_PRESET=Night (not saved unless a slider is touched)
-	var ep := OS.get_environment("BMX_LIGHT_PRESET")
+	var ep := Env.raw("BMX_LIGHT_PRESET")
 	if ep in BUILTIN or ep in customs:
 		active = ep; current = preset(ep)
-	for kv in OS.get_environment("BMX_LIGHT").split(",", false):
+	for kv in Env.raw("BMX_LIGHT").split(",", false):
 		var p := kv.split("=")
 		if p.size() == 2 and current.has(p[0]): current[p[0]] = float(p[1])
 	version += 1
 
 
 static func save() -> void:
-	if OS.get_environment("BMX_PADSEQ") != "": return   # menu tests: never into the player\'s files
+	if Env.raw("BMX_PADSEQ") != "": return   # menu tests: never into the player\'s files
 	var cf := ConfigFile.new()
 	cf.set_value("light", "ver", VER)
 	cf.set_value("light", "active", active)

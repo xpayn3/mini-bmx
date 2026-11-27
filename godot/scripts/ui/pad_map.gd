@@ -354,6 +354,7 @@ func _open(c: Array, at: Vector2) -> void:
 		var cur := _actions_on(c)
 		for a in Settings.ACTIONS:
 			if a.begins_with("body_") or a.begins_with("cam_"): continue   # stick roles
+			if not Dev.on and a in Dev.ACTIONS: continue   # developer tools
 			_popup.add_radio_check_item(_short(a), _popup_items.size())
 			_popup.set_item_checked(_popup_items.size(), a in cur)
 			_popup_items.append(a)

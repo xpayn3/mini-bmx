@@ -180,7 +180,7 @@ internal sealed class TfWood
 		return OLD_BRIDGE ? ramp(u1 - L, u1, 0.45, 0.02, u) : ease(u1 - L, u1, 0.45, 0.02, u);
 	}
 
-	private static readonly bool OLD_BRIDGE = System.Environment.GetEnvironmentVariable("BMX_OLD_BRIDGE") is { Length: > 0 };
+	private static readonly bool OLD_BRIDGE = DevFlags.Env("BMX_OLD_BRIDGE") is { Length: > 0 };
 
 	private static double ease(double a, double b, double h0, double h1, double u)
 	{
@@ -554,9 +554,9 @@ public partial class TerrainFieldCs : RefCounted
 {
 	public const double WATER = -2.2;
 	public const double JC = 34.0;
-	private static readonly bool OLD_RIDGE = System.Environment.GetEnvironmentVariable("BMX_OLD_RIDGE") is { Length: > 0 };
+	private static readonly bool OLD_RIDGE = DevFlags.Env("BMX_OLD_RIDGE") is { Length: > 0 };
 	private const double RIDGE_E2 = 0.01, RIDGE_TOP = 1.1, RIDGE_K2 = 0.2;
-	public static readonly bool OLD_PEAK = System.Environment.GetEnvironmentVariable("BMX_OLD_PEAK") is { Length: > 0 };
+	public static readonly bool OLD_PEAK = DevFlags.Env("BMX_OLD_PEAK") is { Length: > 0 };
 	public static double HILL_TOP = 450.0, HILL_LEN = 2800.0, START_K = 1.0;   // (TerrainField: the start peak; set in _land_from)
 	private const double SNOW_H = 280.0;
 	public const double MTN_W = 150.0;
@@ -595,7 +595,7 @@ public partial class TerrainFieldCs : RefCounted
 		VL_D = G("VL_D", 10.0); VL_W = G("VL_W", 45.0); VL_I = G("VL_I", 1.0 / 1100.0); VL_BD = G("VL_BD", 1.2); VL_BW = G("VL_BW", 4.0);
 		HILL_TOP = G("HILL_TOP", 450.0); HILL_LEN = G("HILL_LEN", 2800.0); RANGE_X0 = G("RANGE_X0", 3500.0); START_K = G("START_K", 1.0);
 	}
-	private static readonly bool OLD_LAND = System.Environment.GetEnvironmentVariable("BMX_OLD_LAND") is { Length: > 0 };
+	private static readonly bool OLD_LAND = DevFlags.Env("BMX_OLD_LAND") is { Length: > 0 };
 	private const double I700 = 1.0 / 700.0;
 	private const double I28 = 1.0 / 28.0;
 	private const double I8 = 1.0 / 8.0;
@@ -1070,7 +1070,7 @@ public partial class TerrainFieldCs : RefCounted
 
 	// ---------------- the route spine (terrain_field.gd spine_sd / _sp_node, RouteSpine): s along, |d| across ----------------
 	private const double SP_NODE = 8.0, RS_R = 450.0, RS_CELL = 160.0;
-	private static readonly bool OLD_ROUTE = System.Environment.GetEnvironmentVariable("BMX_OLD_ROUTE") is { Length: > 0 };
+	private static readonly bool OLD_ROUTE = DevFlags.Env("BMX_OLD_ROUTE") is { Length: > 0 };
 	private double[] sX, sZ, sS;
 	private long s_gx0, s_gz0, s_gnx, s_gnz;
 	private int[] s_start, s_items;
@@ -1422,7 +1422,7 @@ public partial class TerrainFieldCs : RefCounted
 
 	/// (TerrainField._spur: the land lifted round a drop's ridge, same operation order)
 	private const double SPUR_R = 36.0;
-	private static readonly bool OLD_SPUR = System.Environment.GetEnvironmentVariable("BMX_OLD_SPUR") is { Length: > 0 };
+	private static readonly bool OLD_SPUR = DevFlags.Env("BMX_OLD_SPUR") is { Length: > 0 };
 
 	private double _spur(double x, double z)
 	{
@@ -1495,9 +1495,9 @@ public partial class TerrainFieldCs : RefCounted
 		return tn * (om + 0.8) * (1.0 - sm(edge - 0.5, edge + 6.5, o));
 	}
 
-	private static readonly bool OLD_BERM = System.Environment.GetEnvironmentVariable("BMX_OLD_BERM") is { Length: > 0 };
-	private static readonly bool OLD_NARROWBERM = System.Environment.GetEnvironmentVariable("BMX_OLD_NARROWBERM") is { Length: > 0 };
-	private static readonly bool OLD_WEAR = System.Environment.GetEnvironmentVariable("BMX_OLD_WEAR") is { Length: > 0 };
+	private static readonly bool OLD_BERM = DevFlags.Env("BMX_OLD_BERM") is { Length: > 0 };
+	private static readonly bool OLD_NARROWBERM = DevFlags.Env("BMX_OLD_NARROWBERM") is { Length: > 0 };
+	private static readonly bool OLD_WEAR = DevFlags.Env("BMX_OLD_WEAR") is { Length: > 0 };
 	private double bs_c, bs_F = 2.7, bs_cw = 0.5, bs_lip, bs_scoop;
 
 	/// terrain_field.gd berm_style / berm_shape2 (berm v2)
@@ -2080,7 +2080,7 @@ public partial class TerrainFieldCs : RefCounted
 	}
 
 	private const double SITE_SIDE = 3.0, SITE_RISE = 1.3, SITE_DROP = 1.8;
-	private static readonly bool OLD_SITING = System.Environment.GetEnvironmentVariable("BMX_OLD_SITING") is { Length: > 0 };
+	private static readonly bool OLD_SITING = DevFlags.Env("BMX_OLD_SITING") is { Length: > 0 };
 
 	private TfFeat _jump_at(long cx, long cz)
 	{
@@ -2479,7 +2479,7 @@ public partial class TerrainFieldCs : RefCounted
 	}
 
 	private static readonly double[] ACROSS = { -0.8, 0.0, 0.8 };   // BikeRig.TYRE_ACROSS
-	private static readonly bool OLD_TOPFIT = System.Environment.GetEnvironmentVariable("BMX_OLD_TOPFIT") is { Length: > 0 };
+	private static readonly bool OLD_TOPFIT = DevFlags.Env("BMX_OLD_TOPFIT") is { Length: > 0 };
 
 	/// BikeRig.tyre_depth's sample loop in one call: how deep the tyre (centre c, axle ax, d0 = down in the wheel's
 	/// plane, side = ax x d0, radius R, casing half width hw) sits inside max(height, mesh_height). n points round the
@@ -2737,8 +2737,8 @@ public partial class TerrainFieldCs : RefCounted
 		return o;
 	}
 
-	private static readonly bool NO_MICRO = System.Environment.GetEnvironmentVariable("BMX_NO_MICRO") is { Length: > 0 };
-	private static readonly bool OLD_VERGE = System.Environment.GetEnvironmentVariable("BMX_OLD_VERGE") is { Length: > 0 };
+	private static readonly bool NO_MICRO = DevFlags.Env("BMX_NO_MICRO") is { Length: > 0 };
+	private static readonly bool OLD_VERGE = DevFlags.Env("BMX_OLD_VERGE") is { Length: > 0 };
 
 	/// Imperfections of the ground, in metres, for the finer mesh only (visual: tyres and physics read the smooth ground, so it is kept to
 	/// a few cm): fine roughness near the trail (0.3 m and 1 m grain), now and then a pothole / washout on the road (hash of the 37 m stretch), a ragged dirt edge, and rills

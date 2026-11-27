@@ -388,12 +388,12 @@ static func _wrap_uvs(Q: PackedVector3Array, M: PackedVector3Array, size: Vector
 	uv.resize(Q.size())
 	for i in Q.size():
 		uv[i] = Vector2(Q[i].x / size.x + 0.5, 1.0 - (Q[i].y / size.y + 0.5))
-	if Q.size() < 6 or OS.get_environment("BMX_DECAL_FLAT") != "": return uv
+	if Q.size() < 6 or Env.raw("BMX_DECAL_FLAT") != "": return uv
 	var mx := 0.0; var my := 0.0
 	for n in M:
 		mx += absf(n.x); my += absf(n.y)
 	var across_y := my >= mx   # the normals swing in y: the tube runs along x, wrap y
-	var pr := OS.get_environment("BMX_DECAL_PROBE") != ""
+	var pr := Env.raw("BMX_DECAL_PROBE") != ""
 	# fit, then again on the points that sit on that circle: a sticker's box also catches bits round the tube
 	# (a fork leg's brake mount, arch), which on their own throw the fit off
 	var keep := PackedByteArray()
@@ -429,7 +429,7 @@ static func _wrap_uvs(Q: PackedVector3Array, M: PackedVector3Array, size: Vector
 	# the angle of the point straight under the projector's centre line (across = 0, front side): the
 	# sticker's middle stays where the flat projection put it
 	var a0 := asin(clampf(-ca / r, -1.0, 1.0))
-	if OS.get_environment("BMX_DECAL_PROBE") != "":
+	if Env.raw("BMX_DECAL_PROBE") != "":
 		var lo := INF; var hi := -INF
 		for i in Q.size():
 			var pa := Q[i].y if across_y else Q[i].x

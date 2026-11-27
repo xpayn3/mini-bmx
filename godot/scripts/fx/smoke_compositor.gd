@@ -100,7 +100,7 @@ static func _put4(a: PackedFloat32Array, o: int, v: Vector3, w: float) -> void:
 	a[o] = v.x; a[o + 1] = v.y; a[o + 2] = v.z; a[o + 3] = w
 
 var _dbg := 0
-var _probe := OS.get_environment("BMX_SMOKE_PROBE") != ""   # read once: the callback runs every frame on the render thread
+var _probe := Env.raw("BMX_SMOKE_PROBE") != ""   # read once: the callback runs every frame on the render thread
 func _dbgp(m: String) -> void:
 	if _probe and _dbg < 40:
 		_dbg += 1

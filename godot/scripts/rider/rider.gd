@@ -5,10 +5,10 @@ extends Node3D
 ## +Y up, +Z the rider's right; the bottom bracket sits near the origin (0.297 up on the BMX).
 
 const G := preload("res://scripts/rider/rider_geo.gd")
-static var _OLD_JUMPPOSE := OS.get_environment("BMX_OLD_JUMPPOSE") != ""
-static var _OLD_PRELOAD := OS.get_environment("BMX_OLD_PRELOAD") != ""
-static var _OLD_SPEEDTUCK := OS.get_environment("BMX_OLD_SPEEDTUCK") != ""
-static var _OLD_STICKBIKE := OS.get_environment("BMX_OLD_STICKBIKE") != ""   # body stick side lean = hips out over a tipped bike
+static var _OLD_JUMPPOSE := Env.raw("BMX_OLD_JUMPPOSE") != ""
+static var _OLD_PRELOAD := Env.raw("BMX_OLD_PRELOAD") != ""
+static var _OLD_SPEEDTUCK := Env.raw("BMX_OLD_SPEEDTUCK") != ""
+static var _OLD_STICKBIKE := Env.raw("BMX_OLD_STICKBIKE") != ""   # body stick side lean = hips out over a tipped bike
 const LAT_HIP := 0.06     # ground: hips slide this far towards the stick's side (m)
 const LAT_CHEST := 0.22   # ground: chest this far over (m)
 const LAT_DROP := 0.03    # ground: chest drops a little as he leans over
@@ -78,9 +78,9 @@ const GOGGLE_FIT := {x = 0.15, y = 0.025, tilt = 0.25, w = 0.23, h = 0.087, R = 
 
 const L_THIGH := 0.44
 const L_SHIN := 0.44
-static var L_UARM: float = 0.31 if OS.get_environment("BMX_OLD_BODYSIZE") != "" else 0.32   # (2026-11-27: real arm, ~1.79 m rider; was 0.31)
-static var L_FARM: float = 0.29 if OS.get_environment("BMX_OLD_BODYSIZE") != "" else 0.32   # (elbow to the middle of the grip; was 0.29)
-static var _LIMBLEN := OS.get_environment("BMX_LIMBLEN") != ""
+static var L_UARM: float = 0.31 if Env.raw("BMX_OLD_BODYSIZE") != "" else 0.32   # (2026-11-27: real arm, ~1.79 m rider; was 0.31)
+static var L_FARM: float = 0.29 if Env.raw("BMX_OLD_BODYSIZE") != "" else 0.32   # (elbow to the middle of the grip; was 0.29)
+static var _LIMBLEN := Env.raw("BMX_LIMBLEN") != ""
 var _ll := {}; var _ll_t := 0.0; var _ll_air := false
 func _ll_note(k: String, d: float) -> void:
 	var r: Array = _ll.get(k, [INF, -INF, 0])
@@ -851,7 +851,7 @@ const THIGH_PROF := [[0.0, 0.074, 0.072, 0.076], [0.25, 0.076, 0.075, 0.080], [0
 const SHIN_PROF := [[0.0, 0.056, 0.052, 0.056], [0.14, 0.055, 0.050, 0.066], [0.32, 0.053, 0.048, 0.070], [0.62, 0.046, 0.043, 0.052], [0.86, 0.040, 0.040, 0.040], [1.0, 0.040, 0.040, 0.040]]
 const UARM_PROF := [[0.0, 0.050, 0.050, 0.050], [0.35, 0.049, 0.054, 0.052], [0.62, 0.046, 0.050, 0.049], [0.9, 0.043, 0.043, 0.045], [1.0, 0.043, 0.043, 0.045]]
 const FARM_PROF := [[0.0, 0.044, 0.043, 0.045], [0.22, 0.047, 0.046, 0.047], [0.6, 0.039, 0.037, 0.037], [0.9, 0.032, 0.030, 0.030], [1.0, 0.032, 0.030, 0.030]]
-static var _OLD_LIMBSHAPE := OS.get_environment("BMX_OLD_LIMBSHAPE") != ""
+static var _OLD_LIMBSHAPE := Env.raw("BMX_OLD_LIMBSHAPE") != ""
 
 static func set_limb(n: Node3D, a: Vector3, b: Vector3) -> void:
 	var d := b - a
@@ -991,9 +991,9 @@ const AIR_HIP_SIDE := 0.5   # m: the hips' sideways room in the bike's frame in 
 const AIR_SIDE := 1.2       # rad: ... the torso bent sideways from the bike's up (ground: 0.6)
 const AIR_HIP_SHARE := 0.3   # in the air the hips counter only this share of the bike's lay-over (they stay on the bike)
 const AIR_CHEST_CAP := 0.75  # rad: the upper body stays at most this much more upright than the bike in the air
-static var _OLD_AIRTILT := OS.get_environment("BMX_OLD_AIRTILT") != ""
-static var _ROLL_PROBE := OS.get_environment("BMX_ROLL_PROBE") != ""
-static var _OLD_AIRBODY := OS.get_environment("BMX_OLD_AIRBODY") != ""
+static var _OLD_AIRTILT := Env.raw("BMX_OLD_AIRTILT") != ""
+static var _ROLL_PROBE := Env.raw("BMX_ROLL_PROBE") != ""
+static var _OLD_AIRBODY := Env.raw("BMX_OLD_AIRBODY") != ""
 const BAR_CHEST := 0.32   # m: the chest joint stays this far from the middle of the bar (side view)
 const BAR_HEAD := 0.31    # m: and the head's centre this far (helmet + chin bar)
 var bar_stats := [0.0, 0.0, 0.0, 9.0, 9.0]   # tests: deepest it was held out of the bar, frames held, frames, least chest / head distance
@@ -1443,9 +1443,9 @@ var sm_pre := 0.0; var sm_ext := 0.0; var sm_popfx := 0.0; var sm_squash := 0.0;
 var sm_tuck := 0.0   # the air tuck (bike pulled up into the body), eased
 var tuck_out := 0.0  # this frame's tuck (0..1)
 var speed_tuck_k := 0.0   # this frame's speed tuck (0..1, after the jump / trick poses took their share)
-static var _OLD_ARMS := OS.get_environment("BMX_OLD_ARMS") != ""   # elbows back + down, arms nearly straight
-static var _OLD_CORNERCROUCH := OS.get_environment("BMX_OLD_CORNERBODY") != ""   # no extra crouch into deep turns
-static var _OLD_TWIST := OS.get_environment("BMX_OLD_TWIST") != ""   # the shoulders twisted up to 0.6 rad into a turn
+static var _OLD_ARMS := Env.raw("BMX_OLD_ARMS") != ""   # elbows back + down, arms nearly straight
+static var _OLD_CORNERCROUCH := Env.raw("BMX_OLD_CORNERBODY") != ""   # no extra crouch into deep turns
+static var _OLD_TWIST := Env.raw("BMX_OLD_TWIST") != ""   # the shoulders twisted up to 0.6 rad into a turn
 var body_off := Vector2.ZERO   # in the air: the hips (x fwd, y up, bike frame) against take-off; Game moves the bike against it
 var _air_ref := Vector2.ZERO; var _air_ref_ok := false
 var sm_effort := 0.0

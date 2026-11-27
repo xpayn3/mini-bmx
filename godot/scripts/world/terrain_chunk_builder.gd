@@ -16,8 +16,8 @@ const LIST_NAMES := ["trunk", "trunk_pale", "trunk_pine", "blob", "pine", "rock"
 	"rock_granite0", "rock_granite1", "pebble_granite", "rock_desert0", "rock_desert1", "pebble_desert",
 	"rock_tundra0", "rock_tundra1", "pebble_tundra", "rock_basalt0", "rock_basalt1", "pebble_basalt"]
 const SPAN := 2.4
-static var OLD_WEED := OS.get_environment("BMX_OLD_WEED") == "1"
-static var OLD_VERGE := OS.get_environment("BMX_OLD_VERGE") != ""   # grass stops ~1 m off the dirt, none under jumps
+static var OLD_WEED := Env.raw("BMX_OLD_WEED") == "1"
+static var OLD_VERGE := Env.raw("BMX_OLD_VERGE") != ""   # grass stops ~1 m off the dirt, none under jumps
 const TAPE_SEG := 30
 const TAPE_W := 0.075
 const TAPE_H := 0.85
@@ -778,7 +778,7 @@ func _gates() -> void:
 		list.append({"x": cxp, "z": czp, "tx": tx, "tz": tz, "half": half, "hl": hl, "hr": hr, "hc": hc, "i": i})
 	if not list.is_empty():
 		out["gates"] = list
-	if OS.get_environment("BMX_GATE_PROBE") != "":
+	if Env.raw("BMX_GATE_PROBE") != "":
 		print("GATES chunk=", cx, ",", cz, " cand=", C.chunk_gates.get(TrailCourse.chunk_key(cx, cz), PackedInt32Array()).size(), " placed=", list.size(), " boards_cand=", C.chunk_boards.get(TrailCourse.chunk_key(cx, cz), PackedInt32Array()).size())
 
 
@@ -809,7 +809,7 @@ func _arches() -> void:
 		if ok:
 			list.append({"x": cxp, "z": czp, "tx": tx, "tz": tz, "half": half, "hl": hl, "hr": hr,
 				"hc": height(cxp, czp), "i": i, "kind": code & 1})
-	if OS.get_environment("BMX_GATE_PROBE") != "":
+	if Env.raw("BMX_GATE_PROBE") != "":
 		print("ARCHES chunk=", cx, ",", cz, " cand=", C.chunk_arches.get(TrailCourse.chunk_key(cx, cz), PackedInt32Array()).size(), " placed=", list.size())
 	if not list.is_empty():
 		out["arches"] = list
@@ -845,7 +845,7 @@ func _boards() -> void:
 			if _sign_spot_ok(bx, bz, nx * cos(a2) - nz * sin(a2), nx * sin(a2) + nz * cos(a2), 1.9):
 				found = true
 				break
-		if OS.get_environment("BMX_GATE_PROBE") != "":
+		if Env.raw("BMX_GATE_PROBE") != "":
 			print("BOARD i=", i, " found=", found, " at ", bx, ",", bz, " cx=", cx, " cz=", cz)
 		if not found:
 			continue
@@ -956,7 +956,7 @@ func _table_sign(bx: float, h: float, bz: float, px: float, pz: float, big: Stri
 ## (user 2026-11-25: boards / signs / fences overlapped, boards sat clipped into slopes)
 func _sign_spot_ok(bx: float, bz: float, dx: float, dz: float, half: float) -> bool:
 	var why := _sign_spot_why(bx, bz, dx, dz, half)
-	if why != "" and OS.get_environment("BMX_GATE_PROBE") != "":
+	if why != "" and Env.raw("BMX_GATE_PROBE") != "":
 		print("SIGNSPOT no: ", why)
 	return why == ""
 
@@ -1058,7 +1058,7 @@ func _dist_signs() -> void:
 		panel["cx"] = bx
 		panel["cz"] = bz
 		panel["plate"] = {"km": km, "xform": plate_x}
-		if OS.get_environment("BMX_GATE_PROBE") != "":
+		if Env.raw("BMX_GATE_PROBE") != "":
 			print("DISTSIGN i=", i, " at ", bx, ",", h, ",", bz)
 		panels.append(panel)
 
@@ -1191,7 +1191,7 @@ func _crown_clear(x: float, z: float, r: float) -> bool:
 ## levels); every root is then swept as a tube whose rings sit ON the ground under them (_sweep). Where a root crosses the
 ## trail the tyres feel it (a chain of low domes)
 var _root_st: SurfaceTool = null   # this chunk's roots (out["roots"]: Terrain makes one mesh)
-static var _OLD_ROOTS := OS.get_environment("BMX_OLD_ROOTS") != ""   # the old trunk-thick roots
+static var _OLD_ROOTS := Env.raw("BMX_OLD_ROOTS") != ""   # the old trunk-thick roots
 
 
 func _roots() -> void:
@@ -1361,7 +1361,7 @@ func _bend_trees() -> void:
 const ECO_CELL := 3.6
 const ECO_JIT := 0.34      # jitter, x the cell (min spacing ~1.1 m between candidates)
 const ECO_K := 0.47        # overall: about the old tree count in the same land (saplings + waterside trees included)
-static var OLD_PLACE := OS.get_environment("BMX_OLD_PLACE") != ""
+static var OLD_PLACE := Env.raw("BMX_OLD_PLACE") != ""
 
 
 func _trees(ox: float, oz: float) -> void:
@@ -2127,7 +2127,7 @@ const LOD_STEPS := [2, 4, 8]
 ## Needs the C# field (fine_ground); the GDScript field keeps 0.5 m.
 ## only chunks within MESH_NEAR m of the trail get it (where the berms, jumps and lips are: the rest of the land keeps 0.5 m)
 const MESH_NEAR := 60.0
-static var MESH_K := maxi(1, int(OS.get_environment("BMX_MESH_K"))) if OS.get_environment("BMX_MESH_K") != "" else 2
+static var MESH_K := maxi(1, int(Env.raw("BMX_MESH_K"))) if Env.raw("BMX_MESH_K") != "" else 2
 
 func _ground_lods(verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array, n: int, mk: int = 1) -> void:
 	var nv := n + 1

@@ -61,7 +61,7 @@ static func ensure() -> void:
 	if _loaded: return
 	_loaded = true
 	values = defaults()
-	if OS.get_environment("BMX_LIGHT_LAB_FILE") != "0":
+	if Env.raw("BMX_LIGHT_LAB_FILE") != "0":
 		for path in [USER_FILE, FILE]:
 			if not FileAccess.file_exists(path): continue
 			var d = JSON.parse_string(FileAccess.get_file_as_string(path))
@@ -69,7 +69,7 @@ static func ensure() -> void:
 				for k in d:
 					if values.has(k): values[k] = float(d[k])
 			break
-	for kv in OS.get_environment("BMX_LIGHT_LAB").split(",", false):
+	for kv in Env.raw("BMX_LIGHT_LAB").split(",", false):
 		var p := kv.split("=")
 		if p.size() == 2 and values.has(p[0]): values[p[0]] = float(p[1])
 	version += 1

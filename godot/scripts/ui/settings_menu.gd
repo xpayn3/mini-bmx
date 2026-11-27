@@ -127,7 +127,7 @@ func _interface() -> Control:
 	_check(p, "Bike computer (speed / slope)", "hud_gauge")
 	_check(p, "Gear shifter", "hud_gear")
 	_check(p, "Jump card", "hud_jump")
-	_check(p, "Quick tune card", "hud_quick", "The pinned ride sliders, top right (its ✕ hides it)")
+	if Dev.on: _check(p, "Quick tune card", "hud_quick", "The pinned ride sliders, top right (its ✕ hides it)")
 	return p
 
 ## Controller: the Xbox pad drawn with what every button does; click one to change it

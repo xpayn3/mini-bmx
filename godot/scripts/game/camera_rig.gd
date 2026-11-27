@@ -58,7 +58,7 @@ var orbit_t := 0.0
 var cam_pitch := 36.0
 var cam_pitch_t := 36.0
 var cam_yaw := 0.0
-static var _OLD_CAMHEAD := OS.get_environment("BMX_OLD_CAMHEAD") != ""
+static var _OLD_CAMHEAD := Env.raw("BMX_OLD_CAMHEAD") != ""
 var _hd_s := NAN   # the view's heading, turned at most camHeadingRate rad/s (smooths the air -> ground switch)
 var _cy_prev := NAN; var _cy_max := 0.0   # tests: BMX_CAMYAW_PROBE
 var cam_fov := 34.0

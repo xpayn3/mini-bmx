@@ -105,7 +105,7 @@ func _init() -> void:
 	process_priority = -1000
 	var args := OS.get_cmdline_args() + OS.get_cmdline_user_args()
 	test_run = DisplayServer.get_name() == "headless" or args.has("-s") or args.has("--script") \
-		or OS.get_environment("BMX_PADSEQ") != "" or OS.get_environment("BMX_MIN") != "" or OS.get_environment("BMX_OFFSCREEN") != "" \
+		or Env.raw("BMX_PADSEQ") != "" or Env.raw("BMX_MIN") != "" or Env.raw("BMX_OFFSCREEN") != "" \
 		or Array(args).any(func(a): return a.begins_with("--autotest") or a.begins_with("--bench") or a.begins_with("--hitch") \
 			or a.begins_with("--showcase") or a.begins_with("--shot"))
 	dir = ROOT + ("/tests" if test_run else "")
@@ -162,7 +162,7 @@ func _process(dt: float) -> void:
 var _ct_done := false
 func _crash_test() -> void:
 	if _ct_done or not test_run: return
-	var spec := OS.get_environment("BMX_CRASHTEST")
+	var spec := Env.raw("BMX_CRASHTEST")
 	if spec == "":
 		_ct_done = true
 		return
@@ -212,7 +212,7 @@ func note(s: String) -> void:
 
 ## the title menu calls this: a small card saying the last session crashed, once per launch
 func notice(parent: Control) -> void:
-	if _notice_shown or last_crash == "" or parent == null or (test_run and OS.get_environment("BMX_CRASH_NOTICE") == ""): return
+	if _notice_shown or last_crash == "" or parent == null or (test_run and Env.raw("BMX_CRASH_NOTICE") == ""): return
 	_notice_shown = true
 	var card := PanelContainer.new()
 	card.add_theme_stylebox_override("panel", UITheme.card_style(Tokens.PAPER, Tokens.R_XL, Tokens.S4))

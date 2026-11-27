@@ -90,14 +90,14 @@ var _send := 0.0
 ## from the land's fall: gravity in, rolling + air drag out, pedalling when slow, capped by every bend it lays) and sizes bends
 ## to it, eases into and out of every bend, alternates bends, spaces them by time, and only lays the tight sections on
 ## steep hillsides. BMX_OLD_FLOW=1 = the layout before (tests).
-static var OLD_FLOW := OS.get_environment("BMX_OLD_FLOW") != ""
+static var OLD_FLOW := Env.raw("BMX_OLD_FLOW") != ""
 ## the rolling dips / grade reversals eased in and out between section kinds (no ledges). BMX_OLD_LEDGES=1 = switched per point
-static var OLD_LEDGES := OS.get_environment("BMX_OLD_LEDGES") != ""
+static var OLD_LEDGES := Env.raw("BMX_OLD_LEDGES") != ""
 ## straight run-in / run-out round jump runs (trail builders: ~1.5 s straight into a lip, ~1 s after the landing; with
 ## TerrainField._jump_site_ok). BMX_OLD_RUNIN=1 = the old 4-10 m / 6-8 m
 const RUNIN := 20.0
 const RUNOUT := 16.0
-static var OLD_RUNIN := OS.get_environment("BMX_OLD_RUNIN") != ""
+static var OLD_RUNIN := Env.raw("BMX_OLD_RUNIN") != ""
 const A_BEND := 9.4      # m/s^2 a rider takes a bend with (A_RIDE + a modest berm's share of g)
 const CLO_MAX := 6       # steps (12 m): the most an arc's curvature ramps in / out over
 var _v := 4.0           # m/s: the speed estimate at the turtle
@@ -728,7 +728,7 @@ func _finish() -> void:
 		bsrc[i] = signf(k) * minf(0.6, 17 * absf(k)) * smooth(0.012, 0.03, absf(k)) * BERM[KD[i]]
 	# ...and a bend that can carry a berm gets at least the bank the speed riders arrive at needs (up to BANK_MAX), so
 	# it can be ridden without braking it all away (docs/research/ride_feel.md, change 1)
-	if OS.get_environment("BMX_OLD_BANK") == "":
+	if Env.raw("BMX_OLD_BANK") == "":
 		var need := _bank_need(bsrc)
 		for i in n:
 			if absf(need[i]) > absf(bsrc[i]): bsrc[i] = need[i]
@@ -790,7 +790,7 @@ func _racing_line() -> void:
 	# on a banked bend the line rides the berm: up its face on the outside (berm_shape's bank is there, from the
 	# centreline out), not on the flat inside of it - cutting to the inside missed the bank (the bike felt 4-10 deg on
 	# berms built at 20-31 deg) and threw away the corner speed it is there to hold (docs/research/ride_feel.md)
-	var old_line := OS.get_environment("BMX_OLD_LINE") != ""   # (tests: the line cutting inside, as before)
+	var old_line := Env.raw("BMX_OLD_LINE") != ""   # (tests: the line cutting inside, as before)
 	for i in n:
 		var bw := 0.0 if old_line else smooth(BERM_LINE_FROM, BERM_LINE_FULL, absf(BT[i]))
 		if bw > 0.0:
@@ -936,7 +936,7 @@ const DROP_SMAX := 0.70       # tan: steepest straight face (35 deg)
 const DROP_SMAX_BIG := 0.78
 const DROP_RB := 22.0         # m: the bottom transition's radius
 const DROP_DX := 0.25         # m: the shape's sampling
-static var OLD_DROPS := OS.get_environment("BMX_OLD_DROPS") != ""
+static var OLD_DROPS := Env.raw("BMX_OLD_DROPS") != ""
 
 ## depth below the lip every DROP_DX m from it, ending at exactly hh
 static func _drop_shape(hh: float, big: bool) -> PackedFloat32Array:
@@ -1029,7 +1029,7 @@ func runs() -> Array:
 
 # ---------------- fences and tape ----------------
 ## BMX_OLD_MARKING=1 = tape also beside the start / finish picket fences and in a ranch fence's gate gaps (before 2026-11-25)
-static var OLD_MARKING := OS.get_environment("BMX_OLD_MARKING") != ""
+static var OLD_MARKING := Env.raw("BMX_OLD_MARKING") != ""
 
 func plan_marking(field) -> void:
 	var r := WorldRng.new(_mark_seed)
@@ -1249,8 +1249,8 @@ func _bucket() -> void:
 	for i in bend_trees:
 		_add(chunk_btrees, _chunk_of(X[i], Z[i]), i)
 	var sign_every := SIGN_EVERY
-	if OS.get_environment("BMX_SIGN_EVERY") != "":
-		sign_every = maxi(20, int(OS.get_environment("BMX_SIGN_EVERY")))   # test: signs closer together
+	if Env.raw("BMX_SIGN_EVERY") != "":
+		sign_every = maxi(20, int(Env.raw("BMX_SIGN_EVERY")))   # test: signs closer together
 	if sign_every == SIGN_EVERY and SIGN_FIRST < n - 2:
 		_add(chunk_signs, _chunk_of(X[SIGN_FIRST], Z[SIGN_FIRST]), SIGN_FIRST)   # an early one at 1 km, then every 5 km
 	for i in range(sign_every, n - 2, sign_every):

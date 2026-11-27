@@ -9,7 +9,7 @@ const JC := 34.0
 ## the start peak (2026-11-26, user: "Riders Republic: very steep mountains, vast; we always start on peaks and descend, this
 ## game is downhill"): a 450 m peak, a 2.8 km descent (~16 % on average, steeper pitches), a narrower crest whose flanks fall
 ## ~2 x its height to the land (spurs and gullies). BMX_OLD_PEAK=1 = the 105 m / 1.4 km mountain. Mirrored in TerrainFieldCs
-static var OLD_PEAK := OS.get_environment("BMX_OLD_PEAK") != ""
+static var OLD_PEAK := Env.raw("BMX_OLD_PEAK") != ""
 ## set by LandParams.apply (the Land Lab's "Start peak" knobs; these are the defaults = start_peak 1)
 static var START_K := 1.0      # 0 = the previous mountain exactly, 1 = the big peak (massif, concave descent)
 static var HILL_TOP := 450.0
@@ -23,7 +23,7 @@ const COURSE_LEN := 4000.0
 const MTN_W := 150.0
 ## the world's route (RouteSpine, 2026-11-25): the mountains and the trail's corridor are measured along it (s) and
 ## across it (d). BMX_OLD_ROUTE=1 = the old straight corridor along +x (s = x, d = z - zc(x)).
-static var OLD_ROUTE := OS.get_environment("BMX_OLD_ROUTE") != ""
+static var OLD_ROUTE := Env.raw("BMX_OLD_ROUTE") != ""
 const SPINE_AHEAD := 4000.0   # m of spine laid out past the course's end (the land there already follows it)
 const SP_NODE := 8.0          # m: the (s, |d|) lattice the land reads, bilinear between nodes (exact nodes, same in C#)
 const QR := 19.0
@@ -100,7 +100,7 @@ const BIO_A := 1.0 / 1300.0
 const BIO_M := 1.0 / 1700.0
 const BIO_F := 1.0 / 900.0
 const BIO_S := 1.0 / 2200.0
-static var OLD_LAND := OS.get_environment("BMX_OLD_LAND") != ""
+static var OLD_LAND := Env.raw("BMX_OLD_LAND") != ""
 const I28 := 1.0 / 28.0
 const I8 := 1.0 / 8.0
 const I1_5 := 1.0 / 1.5
@@ -282,7 +282,7 @@ var grey_bands := PackedColorArray()
 var profiles := {}
 var sized := {}   # TrailFeatures.make_set()["sized"]: type -> [profile per speed size]
 ## (2026-11-24) route jumps sized to the speed riders arrive at (TrailCourse.VA); BMX_OLD_JUMPSIZE=1 = always the big one
-static var OLD_JUMPSIZE := OS.get_environment("BMX_OLD_JUMPSIZE") != ""
+static var OLD_JUMPSIZE := Env.raw("BMX_OLD_JUMPSIZE") != ""
 ## the AI's planned speed / least speed as a share of a size's design speed, per type (DemoPilot.FEAT_V / FEAT_MIN at size 3)
 ## (a smaller kicker at its full design speed, never under 90 % of it: slower, the AI rolled off its open back nose first)
 const SIZE_V_K := {"table": [0.9, 0.8], "tableLine": [0.9, 0.8], "kicker": [1.0, 0.9], "flow": [0.93, 0.0]}
@@ -1006,7 +1006,7 @@ func line_off(x: float, z: float) -> float:
 ## round it is lifted by the same amount near the trail, falling away over SPUR_R (ragged by a noise) to the sides: a spur
 ## you ride along and drop off the end of. Before, only the trail was lifted: a causeway with a fall on each side.
 const SPUR_R := 36.0
-static var OLD_SPUR := OS.get_environment("BMX_OLD_SPUR") != ""
+static var OLD_SPUR := Env.raw("BMX_OLD_SPUR") != ""
 
 func _spur(x: float, z: float) -> float:
 	var best := 0.0
@@ -1075,10 +1075,10 @@ func berm_shape(o: float, tn: float) -> float:
 ## m deep, in short stretches of some berms: the hollow riders wear into the lip taking it fast / whipping it). Style per arc length from
 ## noises (`berm_style`), so a berm differs from the next: tilted .. curved, rim at the trail's own width + 0 .. 0.8 m, lip or none,
 ## scoop or none. Only + * / - sm() here (no exp / log): C# mirrors it exactly. BMX_OLD_BERM=1 = the old shape.
-static var OLD_BERM := OS.get_environment("BMX_OLD_BERM") != ""
-static var OLD_NARROWBERM := OS.get_environment("BMX_OLD_NARROWBERM") != ""   # narrow trails' berms with the rim close in
+static var OLD_BERM := Env.raw("BMX_OLD_BERM") != ""
+static var OLD_NARROWBERM := Env.raw("BMX_OLD_NARROWBERM") != ""   # narrow trails' berms with the rim close in
 ## the trail's bumps the same across it and along the route, the line bumpier (before 2026-11-26). BMX_OLD_WEAR=1
-static var OLD_WEAR := OS.get_environment("BMX_OLD_WEAR") != ""
+static var OLD_WEAR := Env.raw("BMX_OLD_WEAR") != ""
 var bs_c := 0.0
 var bs_F := 2.7
 var bs_cw := 0.5
@@ -1362,7 +1362,7 @@ func _gully(x: float, z: float, ux: float, uz: float, c: float, ch: int) -> floa
 ## the relief layers (Land Lab: Mountains, Erosion, Valleys) added to the land in base(): never on the course
 ## (they fade in from a few metres off it: course heights, berms, jumps are untouched) nor on the side paths, the spawn
 ## or the first mountain (wild_mask). Mirrored in TerrainFieldCs._relief.
-static var OLD_RIDGE := OS.get_environment("BMX_OLD_RIDGE") != ""
+static var OLD_RIDGE := Env.raw("BMX_OLD_RIDGE") != ""
 const RIDGE_E2 := 0.01        # smooth |n|: crest rounding (0.1 of noise)
 const RIDGE_TOP := 1.1        # 1 + sqrt(RIDGE_E2): a crest stays at 1
 const RIDGE_K2 := 0.2         # the fine octave's share (was 0.45)
@@ -1651,7 +1651,7 @@ func make_feat(x: float, z: float, dx: float, dz: float, type: String, b0: float
 ## ("" = plain trail for that beat). Jump lines draw from their own random stream (seeded by where they start), so the
 ## road features after them are laid out exactly as before
 const RHYTHM := [["rhythm", "flow", "rhythm"], ["kicker", "table", "kicker", "tableLine", "kicker", "flow", "woodKicker", "woodDrop"], ["bridge", "skinny", ""]]   # (wood drop + north-shore skinny: 2026-11-25)   # (more kickers: 2026-11-23, user)
-static var OLD_RHYTHM := OS.get_environment("BMX_OLD_RHYTHM") != ""
+static var OLD_RHYTHM := Env.raw("BMX_OLD_RHYTHM") != ""
 ## built jumps only on level / falling trail (grade from 15 m before the lip to the landing's end <= UPHILL_MAX), where riders
 ## arrive at >= SLOW_K x the smallest jump's design speed, with a straight run-in / run-out and no blind lip (_jump_site_ok).
 ## BMX_OLD_UPHILL=1 = anywhere (before 2026-11-26)
@@ -1662,7 +1662,7 @@ const FLAT_TYPES := ["gorge", "rope", "bridge", "skinny"]
 const FLAT_MAX := 0.08     # the steepest trail grade a bridge / skinny is built on
 const SKINNY_VMAX := 8.0   # m/s riders may arrive at a north-shore skinny
 const SKINNY_GAP := 25.0   # m clear after the feature before it
-static var OLD_UPHILL := OS.get_environment("BMX_OLD_UPHILL") != ""
+static var OLD_UPHILL := Env.raw("BMX_OLD_UPHILL") != ""
 
 
 ## more builders' rules for a jump at s (len long, riders arriving at v): a straight run-in (no bend tighter than JUMP_STRAIGHT_R in
@@ -1773,7 +1773,7 @@ func _build_route() -> void:
 				var why := ""
 				if (e1 - e0) / (len + 15.0) > UPHILL_MAX:
 					why = "uphill"
-					if OS.get_environment("BMX_REJ_PRINT") != "": print("REJ uphill seed=%d s=%.0f grade=%.1f%% %s mtn=%s" % [seed_value, s, 100.0 * (e1 - e0) / (len + 15.0), type, str(s < _hill_s())])
+					if Env.raw("BMX_REJ_PRINT") != "": print("REJ uphill seed=%d s=%.0f grade=%.1f%% %s mtn=%s" % [seed_value, s, 100.0 * (e1 - e0) / (len + 15.0), type, str(s < _hill_s())])
 				elif vin < float(TrailJumpSizes.V[0]) * SLOW_K: why = "slow"
 				else: why = _jump_site_why(s, len, vin)
 				if why != "":
@@ -1829,7 +1829,7 @@ const ALT_IN := 22.0
 const ALT_OUT := 18.0
 const ALT_W := 0.9      # half-width of a B-line
 const ALT_REACH := 9.0  # how far its ground shaping reaches
-static var OLD_LINES := OS.get_environment("BMX_OLD_LINES") != ""
+static var OLD_LINES := Env.raw("BMX_OLD_LINES") != ""
 var alt_pts := PackedFloat64Array()
 var alt_lines := PackedFloat64Array()
 var alt_feats: Array = []   # [route feature index, line index] (signs, HUD)
@@ -1915,7 +1915,7 @@ func alt_near(x: float, z: float) -> void:
 const SITE_SIDE := 3.0
 const SITE_RISE := 1.3
 const SITE_DROP := 1.8
-static var OLD_SITING := OS.get_environment("BMX_OLD_SITING") != ""
+static var OLD_SITING := Env.raw("BMX_OLD_SITING") != ""
 
 
 func jump_at(cx: int, cz: int) -> Feat:

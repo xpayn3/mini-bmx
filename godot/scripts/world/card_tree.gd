@@ -35,7 +35,7 @@ static var _mesh := {}
 
 
 static func enabled() -> bool:
-	return OS.get_environment("BMX_OLD_TREES") != "1"
+	return Env.raw("BMX_OLD_TREES") != "1"
 
 
 ## twin list of a solid crown list: [card mesh, card material] or [] for none
@@ -243,7 +243,7 @@ static func material(kind: String) -> ShaderMaterial:
 		m.set_shader_parameter("albedo", Vector3(1.2, 1.2, 1.2))
 	else:
 		var tiles := CardBush.tile_textures()
-		if ResourceLoader.exists(CardBush.SPRAY_PNG) and OS.get_environment("BMX_OLD_TREES_TEX") != "1":
+		if ResourceLoader.exists(CardBush.SPRAY_PNG) and Env.raw("BMX_OLD_TREES_TEX") != "1":
 			# the airy twig spray, one per cluster card (real leaf size: card_ref)
 			m.set_shader_parameter("leaf_tex", load(CardBush.SPRAY_PNG))
 			m.set_shader_parameter("card_ref", float(GrownTree.info("leafy").top))
@@ -273,7 +273,7 @@ const NEEDLE_PNG := "res://assets/textures/tree_cards/needle_tuft.png"   # (a fa
 static func texture(kind: String) -> Texture2D:
 	if _tex.has(kind):
 		return _tex[kind]
-	if kind == "needle" and ResourceLoader.exists(NEEDLE_PNG) and OS.get_environment("BMX_OLD_TREES_TEX") != "1":
+	if kind == "needle" and ResourceLoader.exists(NEEDLE_PNG) and Env.raw("BMX_OLD_TREES_TEX") != "1":
 		_tex[kind] = load(NEEDLE_PNG)
 		return _tex[kind]
 	var img := Image.create(TEX_W, TEX_H, true, Image.FORMAT_RGBA8)

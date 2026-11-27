@@ -371,7 +371,7 @@ func _ready() -> void:
 		pins = cf.get_value("ui", "pins", pins)
 		quick_folded = cf.get_value("ui", "quick_folded", false)
 		if old_ver < VER: save()
-	for kv in OS.get_environment("BMX_TUNE").split(",", false):   # tests: "topSpeed=1.6,grip=1.1" (not saved)
+	for kv in Env.raw("BMX_TUNE").split(",", false):   # tests: "topSpeed=1.6,grip=1.1" (not saved)
 		var p := kv.split("=")
 		if p.size() == 2 and defaults.has(p[0]): base[p[0]] = float(p[1])
 	_rebuild()
@@ -399,7 +399,7 @@ func reset_defaults() -> void:
 	save()
 
 func save() -> void:
-	if OS.get_environment("BMX_PADSEQ") != "": return   # menu tests: never into the player\'s files
+	if Env.raw("BMX_PADSEQ") != "": return   # menu tests: never into the player\'s files
 	for a in OS.get_cmdline_user_args():   # ride tests too (an autotest must never change the player's tuning)
 		if a.begins_with("--autotest") or a.begins_with("--bench"): return
 	var cf := ConfigFile.new()

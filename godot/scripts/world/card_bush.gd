@@ -32,7 +32,7 @@ static func material(kind: String = "leaf") -> ShaderMaterial:
 	if kind == "leaf":
 		m.set_shader_parameter("albedo", Vector3.ONE * leaf_gain())
 		var tiles := tile_textures()
-		if ResourceLoader.exists(SPRAY_PNG) and OS.get_environment("BMX_OLD_TREES_TEX") != "1":
+		if ResourceLoader.exists(SPRAY_PNG) and Env.raw("BMX_OLD_TREES_TEX") != "1":
 			# the airy look the user picked (like the dry shrub): one twig spray of small real leaves per card
 			m.set_shader_parameter("leaf_tex", load(SPRAY_PNG))
 		elif not tiles.is_empty():
@@ -68,10 +68,10 @@ const BEECH_PNG := "res://assets/textures/tree_cards/leaf_beech.png"
 const BEECH_N_PNG := "res://assets/textures/tree_cards/leaf_beech_n.png"
 
 static func _photo_leaf() -> bool:
-	return (ResourceLoader.exists(LEAF_PNG) or _beech()) and OS.get_environment("BMX_OLD_TREES_TEX") != "1"
+	return (ResourceLoader.exists(LEAF_PNG) or _beech()) and Env.raw("BMX_OLD_TREES_TEX") != "1"
 
 static func _beech() -> bool:
-	return ResourceLoader.exists(BEECH_PNG) and ResourceLoader.exists(BEECH_N_PNG) and OS.get_environment("BMX_NO_BEECH") != "1"
+	return ResourceLoader.exists(BEECH_PNG) and ResourceLoader.exists(BEECH_N_PNG) and Env.raw("BMX_NO_BEECH") != "1"
 
 ## the airy twig spray (twigs + small real LeafSet005 leaves, tools/make_tree_cards.py spray(); user 2026-11-26: "all must
 ## be like the dry shrub, this style"): green bushes and the leafy trees' clusters
@@ -83,11 +83,11 @@ const BEECH_TILE_PNG := "res://assets/textures/tree_cards/leaf_beech_tile.png"
 const BEECH_TILE_N_PNG := "res://assets/textures/tree_cards/leaf_beech_tile_n.png"
 
 static func _beech_tile() -> bool:
-	return ResourceLoader.exists(BEECH_TILE_PNG) and ResourceLoader.exists(BEECH_TILE_N_PNG) and OS.get_environment("BMX_NO_BEECH") != "1"
+	return ResourceLoader.exists(BEECH_TILE_PNG) and ResourceLoader.exists(BEECH_TILE_N_PNG) and Env.raw("BMX_NO_BEECH") != "1"
 
 ## [albedo, normal / translucency or null] for crowns; [] = no photo tile (use the bush card)
 static func tile_textures() -> Array:
-	if OS.get_environment("BMX_OLD_TREES_TEX") == "1":
+	if Env.raw("BMX_OLD_TREES_TEX") == "1":
 		return []
 	if _beech_tile():
 		return [load(BEECH_TILE_PNG), load(BEECH_TILE_N_PNG)]
@@ -97,7 +97,7 @@ static func tile_textures() -> Array:
 
 ## the green leaf card's normal / translucency map, or null (no beech atlas)
 static func leaf_normal() -> Texture2D:
-	return load(BEECH_N_PNG) if _beech() and OS.get_environment("BMX_OLD_TREES_TEX") != "1" else null
+	return load(BEECH_N_PNG) if _beech() and Env.raw("BMX_OLD_TREES_TEX") != "1" else null
 
 ## the photo card is brighter than the drawn one: this keeps the bushes' / crowns' overall tone
 static func leaf_gain() -> float:

@@ -12,7 +12,7 @@ extends RefCounted
 ## Merged pieces are freed (or keep their node with no mesh when they have children). Returns the new mesh, or null.
 ## BMX_NO_MERGE=1 = leave everything as built (A/B).
 
-static var OFF := OS.get_environment("BMX_NO_MERGE") != ""
+static var OFF := Env.raw("BMX_NO_MERGE") != ""
 const SHADOW_MIN := 0.1   # = Game.SMALL_SHADOW
 
 static func merge(parent: Node3D, sources: Array, flat := true, keep: Array = [], skip: Array = []) -> MeshInstance3D:

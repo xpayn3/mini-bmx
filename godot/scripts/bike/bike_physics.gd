@@ -147,14 +147,14 @@ const SCOOP_TILT := 0.4     # rad: hands off, the toes scoop the rear up: the no
 const LIP_SPARE_OWN := 0.05   # rad: the same, hands off (the rider rides with the lip)
 const EDGE_BASE := 0.06   # m: an edge under the frame is read over at least this much ground, whatever the speed
 const REAR_ROLL := 0.65   # x the rear wheel's radius: the tallest edge the rear rolls up (the front already on top)
-var _OLD_AIRBLEND := OS.get_environment("BMX_OLD_AIRBLEND") != ""   # (tests: air_k + the drawn parts' raw air flag before 2026-11-26)
+var _OLD_AIRBLEND := Env.raw("BMX_OLD_AIRBLEND") != ""   # (tests: air_k + the drawn parts' raw air flag before 2026-11-26)
 const AIR_BODY_MIN := 0.25    # s: a flight predicted at least this long (air_time + _land_t) gets the air pose (see _air_blend)
 const AIR_BODY_FROM := 0.15   # s of air before it, when no landing is predicted
 const AIR_BODY_IN := 0.18     # s: the air pose eases in (time constant; 0.1 swung the body 0.1 rad a tick off a lip)
 const AIR_BODY_OUT := 0.25    # s: and back out after touch-down
 var _air_wl := 0.0           # drawing: the air stick's share of the body counter-lean, held after touch-down while it eases out
 var _bank_hold := 0.0         # drawing: the bank last read on the ground, held through a skip (the physics' bank falls to flat in the air)
-var _OLD_CURB := OS.get_environment("BMX_OLD_CURB") != ""   # (tests: the old per-step edge check, rear stops dead)
+var _OLD_CURB := Env.raw("BMX_OLD_CURB") != ""   # (tests: the old per-step edge check, rear stops dead)
 const RIM_CLIMB := 4.0  # m/s: the most upward speed a rim strike on a rising edge gives the frame
 const TYRE_MAX := 0.045   # m: a tyre squashed this far is on its rim
 var _ty_f := 0.0; var _ty_r := 0.0   # each tyre's push last substep (m/s2 of the whole weight)
@@ -217,7 +217,7 @@ const SURF_MU := [0.72, 0.95, 0.62, 0.5]   # tyre grip by surface: ground, trail
 const BRAKE_MU := [0.62, 0.78, 0.6, 0.45]
 var surf_f := 0; var surf_r := 0; var _mu_f := NAN; var _mu_r := NAN   # the ground under each tyre, its eased grip
 var _bmu_f := NAN; var _bmu_r := NAN   # ...and its eased braking grip (BRAKE_MU)
-var _OLD_BRAKE := OS.get_environment("BMX_OLD_BRAKE") != ""   # (tests: the lever-limited brakes before 2026-11-23)
+var _OLD_BRAKE := Env.raw("BMX_OLD_BRAKE") != ""   # (tests: the lever-limited brakes before 2026-11-23)
 var _gx_lean := 0.0    # the rest of the ground's drawn lean (body stick, slow steer, whip), eased through jumps
 var _lock_hold := 0.0   # steering into tilted ground, held LOCK_HOLD s after letting go (bankLock)
 const LOCK_HOLD := 1.0
@@ -242,7 +242,7 @@ var front_air := false; var rear_air := false; var c_f := true; var c_r := true
 var pitch_w := NAN; var stamina := 1.0; var tired := false; var sprint := 0.0
 var spin := 0.0; var a_drive := 0.0
 var _nR_s := NAN      # the rear tyre's load as its grip feels it (eased: tyre relaxation, see _grip_step)
-var _OLD_GRIP := OS.get_environment("BMX_OLD_GRIP") != ""   # (tests: the grip before the off-trail fix)
+var _OLD_GRIP := Env.raw("BMX_OLD_GRIP") != ""   # (tests: the grip before the off-trail fix)
 var n_f := NAN; var n_r := NAN; var n_ref := NAN
 var flow := 0.0; var flow_t := 0.0
 var spun_out := false
@@ -267,7 +267,7 @@ var y_prev := NAN; var pump_acc := 0.0; var brake_heat := 0.0
 const HEAT_TAU := 3.5; const FADE_FROM := 3.0; const FADE_FULL := 10.0
 const DIVE_L := 0.12; const BOB_K := 0.35; const CHAIN_GROWTH := 0.2; const CRANK_ARM := 0.17; const KICK_LOSS := 0.25
 var brake_fade := 0.0; var dive := 0.0; var _fade_warn := false; var _kick_k := 0.0
-var _BOB_PROBE := OS.get_environment("BMX_BOB_PROBE") != ""; var _bob_n := 0; var _bob_s := 0.0; var _bob_q := 0.0
+var _BOB_PROBE := Env.raw("BMX_BOB_PROBE") != ""; var _bob_n := 0; var _bob_s := 0.0; var _bob_q := 0.0
 ## a rear shock to bob / kick: the bike has a suspension setup AND its frame has a rear linkage (no setup = the BMX;
 ## a hardtail frame has none). In a test harness with no drawn bike the setup alone counts
 func _rear_shock() -> bool:
@@ -277,20 +277,20 @@ func _sprung_fork() -> bool:
 	return not sus.is_empty() and (host.susp == null or host.susp.has_f)
 const SHORT_FROM := 0.7; const SHORT_TO := 1.3   # s of whole flight: short below SHORT_FROM, as before from SHORT_TO
 const SHORT_DELAY := 0.25; const SHORT_RAMP := 0.3; const SHORT_HELP := 0.9; const SHORT_SPEED := 40.0   # (short flights: when / how fast / how firmly he aims)
-var _OLD_SHORTAIM := OS.get_environment("BMX_OLD_SHORTAIM") != ""   # (tests: the same slow hands-off aim on every flight)
-var _OLD_FADE := OS.get_environment("BMX_OLD_FADE") != ""       # (tests: before the brakes could fade)
+var _OLD_SHORTAIM := Env.raw("BMX_OLD_SHORTAIM") != ""   # (tests: the same slow hands-off aim on every flight)
+var _OLD_FADE := Env.raw("BMX_OLD_FADE") != ""       # (tests: before the brakes could fade)
 # speed tuck (2026-11-26, user: a downhill speed record rider - hips right back over the rear wheel, back flat, head
 # low behind the bars): coasting fast he tucks by himself, more the faster (speedTuckFrom .. speedTuckFull), and a
 # LIGHT pull back on the right stick tucks him at any speed; pulled further it goes over into the weight-back /
 # manual as before. speed_tuck 0..1 goes to the rider's pose (`speedTuck`) and cuts the drag (the stick's tuck by
 # tuckDrag, the automatic one by speedTuckDrag of that). BMX_OLD_SPEEDTUCK=1 = before (stick back = sat up)
-var _OLD_SPEEDTUCK := OS.get_environment("BMX_OLD_SPEEDTUCK") != ""
+var _OLD_SPEEDTUCK := Env.raw("BMX_OLD_SPEEDTUCK") != ""
 var speed_tuck := 0.0        # 0..1, eased: how far into the speed tuck
 var speed_tuck_auto := 0.0   # the automatic part (by speed)
 const TUCK_BACK_IN := Vector2(0.05, 0.3)     # stick back: tuck ramps in over this
 const TUCK_BACK_OUT := Vector2(0.55, 0.95)   # ...and gives way to the weight-back pose / sit up over this
-var _HEAT_HOLD := float(OS.get_environment("BMX_HEAT")) if OS.get_environment("BMX_HEAT") != "" else 0.0
-var _OLD_SUSPFX := OS.get_environment("BMX_OLD_SUSPFX") != ""   # (tests: before dive steering, pedal bob and kickback)
+var _HEAT_HOLD := float(Env.raw("BMX_HEAT")) if Env.raw("BMX_HEAT") != "" else 0.0
+var _OLD_SUSPFX := Env.raw("BMX_OLD_SUSPFX") != ""   # (tests: before dive steering, pedal bob and kickback)
 var foot_down := false    # set by Game: the rider's foot is on the ground (the bike stays put)
 var brake_stop := false  # braked to a standstill: held in place while the brake stays on
 var _rev_hold := 0.0   # s the brake has been held at a stop (reverse after REV_HOLD)
@@ -606,8 +606,8 @@ var _wg_raw := PackedFloat32Array(); var _wg_init := _wg_raw.resize(11)
 ## across every other stage of the step (steer: slides / scrub; move: what it hits + the height it changes; vertical:
 ## springs / landings; lip: take-offs). The grade's pull and the height change in `move` are the same energy changing
 ## form: their sum is the path's own error. Printed every 5 s (J/kg) with the time braking / in the air / crashed
-var _EPROBE := OS.get_environment("BMX_ENERGY_PROBE") != ""
-var _OLD_BOUNCE := OS.get_environment("BMX_OLD_BOUNCE") != ""   # (tests: a one-wheel bounce seeds the flight from the body's spin, as before)
+var _EPROBE := Env.raw("BMX_ENERGY_PROBE") != ""
+var _OLD_BOUNCE := Env.raw("BMX_OLD_BOUNCE") != ""   # (tests: a one-wheel bounce seeds the flight from the body's spin, as before)
 var _eb := {}
 var _e_y := 0.0
 var _eb_t := 0.0; var _eb_n := {t = 0.0, brake = 0.0, air = 0.0, dist = 0.0, vmax = 0.0, turn_t = 0.0, turn_bank = 0.0}
@@ -3502,54 +3502,54 @@ func _pop_along(dv: float) -> void:
 	var k := sqrt(sp * sp + dv * dv) / sp
 	v *= k; vy *= k
 
-static var _OLD_SPIN := OS.get_environment("BMX_OLD_SPIN") != ""
-static var _OLD_TUCK := OS.get_environment("BMX_OLD_TUCK") != ""
+static var _OLD_SPIN := Env.raw("BMX_OLD_SPIN") != ""
+static var _OLD_TUCK := Env.raw("BMX_OLD_TUCK") != ""
 var _air_pull_v := 0.0   # air_pull's speed (its spring)
-static var _OLD_AUTOTUCK := OS.get_environment("BMX_OLD_AUTOTUCK") != ""   # tuck reach 0.17 m, drawn only after a timed pop
-static var _OLD_WEAVE := OS.get_environment("BMX_OLD_WEAVE") != ""
-static var WEAVE_ON := OS.get_environment("BMX_WEAVE") != ""   # the bike weave, off (rocked the whole rider)   # no bike weave under the rider
-static var _OLD_CORNERBODY := OS.get_environment("BMX_OLD_CORNERBODY") != ""   # body at up to 80 % of the bike's lean in deep turns
-static var _OLD_BANKLOCK := OS.get_environment("BMX_OLD_BANKLOCK") != ""   # leaned into tilted ground: only camberPull
-static var _OLD_SLOW := OS.get_environment("BMX_OLD_SLOW") != ""   # slow-riding / reverse as before 2026-11-26
-static var _OLD_LEANDRAW := OS.get_environment("BMX_OLD_LEANDRAW") != ""   # the drawn body / bike lean with its one-tick jumps
-static var _OLD_STRAIGHTWHIP := OS.get_environment("BMX_OLD_STRAIGHTWHIP") != ""   # the whip only in corners (both sticks)
-static var _OLD_STICKBIKE := OS.get_environment("BMX_OLD_STICKBIKE") != ""   # right stick side lean throws the bike (before 2026-11-26)
+static var _OLD_AUTOTUCK := Env.raw("BMX_OLD_AUTOTUCK") != ""   # tuck reach 0.17 m, drawn only after a timed pop
+static var _OLD_WEAVE := Env.raw("BMX_OLD_WEAVE") != ""
+static var WEAVE_ON := Env.raw("BMX_WEAVE") != ""   # the bike weave, off (rocked the whole rider)   # no bike weave under the rider
+static var _OLD_CORNERBODY := Env.raw("BMX_OLD_CORNERBODY") != ""   # body at up to 80 % of the bike's lean in deep turns
+static var _OLD_BANKLOCK := Env.raw("BMX_OLD_BANKLOCK") != ""   # leaned into tilted ground: only camberPull
+static var _OLD_SLOW := Env.raw("BMX_OLD_SLOW") != ""   # slow-riding / reverse as before 2026-11-26
+static var _OLD_LEANDRAW := Env.raw("BMX_OLD_LEANDRAW") != ""   # the drawn body / bike lean with its one-tick jumps
+static var _OLD_STRAIGHTWHIP := Env.raw("BMX_OLD_STRAIGHTWHIP") != ""   # the whip only in corners (both sticks)
+static var _OLD_STICKBIKE := Env.raw("BMX_OLD_STICKBIKE") != ""   # right stick side lean throws the bike (before 2026-11-26)
 const SPIN_EDGE := 0.85     # stick to the side this far into a lip = a spin wound up (less = a whip)
 const SPIN_AIR_ONLY := 0.35 # share of the spin rate the stick gives from the air alone (no wind-up at the lip)
 const SPIN_OPEN := 3.5      # /s: let go of a wound spin, it eases out this fast (the rider opens up)
 const FLIP_AIR_ONLY := 0.35
-static var _OLD_FLIPPULL := OS.get_environment("BMX_OLD_FLIPPULL") != ""
+static var _OLD_FLIPPULL := Env.raw("BMX_OLD_FLIPPULL") != ""
 const FLIP_PULL_EARLY := 1.0e9  # s: a stick held back however long before the lip still throws a flip (the user: "a held lean
 # should turn into a back flip like other games")
 const FLIP_RATE_MAX := 9.0    # rad/s: the most the flip help turns it (a full turn in 0.7 s) # share of the flip rate without a throw at the lip
 var spin_load := 0.0        # -1..1: a spin wound up into the lip ahead
 var _spin_in := 0.0         # this flight's spin wind-up
 var _flip_in := 0.0         # this flight's flip throw (-1..1, + = back)
-static var _OLD_POPSNAP := OS.get_environment("BMX_OLD_POPSNAP") != ""
+static var _OLD_POPSNAP := Env.raw("BMX_OLD_POPSNAP") != ""
 var _pop_latch := false
-static var _OLD_NOSEREF := OS.get_environment("BMX_OLD_NOSEREF") != ""
-static var _OLD_LIPLOAD := OS.get_environment("BMX_OLD_LIPLOAD") != ""
-static var _OLD_POPDIR := OS.get_environment("BMX_OLD_POPDIR") != ""
-static var _OLD_AUTOPOP := OS.get_environment("BMX_OLD_AUTOPOP") != ""
-static var _OLD_AIRLEAN := OS.get_environment("BMX_OLD_AIRLEAN") != ""
+static var _OLD_NOSEREF := Env.raw("BMX_OLD_NOSEREF") != ""
+static var _OLD_LIPLOAD := Env.raw("BMX_OLD_LIPLOAD") != ""
+static var _OLD_POPDIR := Env.raw("BMX_OLD_POPDIR") != ""
+static var _OLD_AUTOPOP := Env.raw("BMX_OLD_AUTOPOP") != ""
+static var _OLD_AIRLEAN := Env.raw("BMX_OLD_AIRLEAN") != ""
 var test_rider := false     # the playground's test rider is riding (Game.set_demo)
 const TEST_ASSIST := 0.85
-static var _OLD_LANDAIM := OS.get_environment("BMX_OLD_LANDAIM") != ""
+static var _OLD_LANDAIM := Env.raw("BMX_OLD_LANDAIM") != ""
 var _land_pitch := NAN      # the ground's slope where this flight comes down (_landing_slope), NAN on the ground
 var _aim_tick := 0
 var _land_t := 0.0          # s of flight left (from _landing_slope)
-static var _OLD_LANDLEGS := OS.get_environment("BMX_OLD_LANDLEGS") != ""
+static var _OLD_LANDLEGS := Env.raw("BMX_OLD_LANDLEGS") != ""
 var land_vn := 0.0          # m/s: the predicted speed into the landing, square to its slope
 var _vn_td := 0.0; var _reach_td := 1.0   # (tests: the last flight's, for the HIT line)
 var land_reach := 1.0       # 0.35..1: how far the legs reach for this landing (by land_vn)
-static var _OLD_LANDSPEED := OS.get_environment("BMX_OLD_LANDSPEED") != ""
-static var _OLD_STICKPOP := OS.get_environment("BMX_OLD_STICKPOP") != ""
-static var _OLD_BOG := OS.get_environment("BMX_OLD_BOG") != ""   # (tests: a bad landing's speed cut whole, in one step)
+static var _OLD_LANDSPEED := Env.raw("BMX_OLD_LANDSPEED") != ""
+static var _OLD_STICKPOP := Env.raw("BMX_OLD_STICKPOP") != ""
+static var _OLD_BOG := Env.raw("BMX_OLD_BOG") != ""   # (tests: a bad landing's speed cut whole, in one step)
 const STICK_POP_FWD := 0.6   # how far forward the stick must snap (after being back) to pop
 const BOG_T := 0.4           # s a bad landing's speed cost is spread over
 const BOG_SOFT := 0.35       # share of that cost a soft landing (impact ~0) still pays; full from impact 4 m/s
 const LAND_ANGLE_FREE := 0.26   # rad (~15 deg) off the landing's slope that costs no speed
-static var _OLD_WHIP := OS.get_environment("BMX_OLD_WHIP") != ""
+static var _OLD_WHIP := Env.raw("BMX_OLD_WHIP") != ""
 const WHIP_WINDOW := 0.35   # s before the lip: the stick held to the side winds the whip up
 const WHIP_WIND := 0.2      # s of holding it to wind it right up
 const WHIP_KICK := 3.0      # rad/s the bike swings out with off the lip, fully wound
@@ -3558,9 +3558,9 @@ const WHIP_AIR_ONLY := 0.4  # rad: the most a whip started in the air alone can 
 # A / D / the left stick turn the bike off its travel by up to airSteer rad (hips twist, like the whip's spring, no wind-up);
 # it banks with it (airPrelean) and at touch-down a heading within CARVE_MAX of the travel is turned into (landCarve).
 # BMX_OLD_AIRSTEER=1 = off
-static var _OLD_AIRSTEER := OS.get_environment("BMX_OLD_AIRSTEER") != ""
-static var _OLD_LANDSWAP := OS.get_environment("BMX_OLD_LANDSWAP") != ""
-static var _AIRSTEER_PROBE := OS.get_environment("BMX_AIRSTEER_PROBE") != ""
+static var _OLD_AIRSTEER := Env.raw("BMX_OLD_AIRSTEER") != ""
+static var _OLD_LANDSWAP := Env.raw("BMX_OLD_LANDSWAP") != ""
+static var _AIRSTEER_PROBE := Env.raw("BMX_AIRSTEER_PROBE") != ""
 const AIR_STEER_K := 190.0      # hip-twist spring while steering in the air (the whip's is 60)
 const AIR_LOCK_FROM := 0.3      # s: a steer held from the ground works in the air up to here...
 const AIR_LOCK_FADE := 0.3      # ...and fades out over this long (a real jump: it is the old lock again)
@@ -3579,7 +3579,7 @@ const AIM_EASE := 7.0           # /s: how quickly the aim comes in / goes out
 var carve_now := 0.0            # rad: how far the last landing's carve turned the travel (drawing: the bars bite into it, fades)
 var whip_load := 0.0        # -1..1: the whip wound up into the lip ahead (signed like the stick)
 var _whip_in := 0.0         # this flight's whip load
-static var _OLD_ABSORB := OS.get_environment("BMX_OLD_ABSORB") != ""
+static var _OLD_ABSORB := Env.raw("BMX_OLD_ABSORB") != ""
 const ABSORB_V0 := 6.0      # m/s: a small lip of height h needs ~ V0 + VH x h (0.56 m kicker ~31 km/h, 1.1 m table ~40)
 const ABSORB_VH := 5.0
 const ABSORB_SMALL := 0.9   # m: lips up to this he soaks fully when fast; ABSORB_BIG and up never (a real jump: popped)
@@ -3587,8 +3587,8 @@ const ABSORB_BIG := 1.3
 var lip_h := 0.0            # the lip ahead's height over the ground where it was spotted (m)
 var _absorb_k := 0.0        # a hands-off absorb waiting for the rear wheel to leave the lip
 var auto_absorb := 0.0      # 0..1: hands off, how much he soaks up the lip ahead instead of popping it
-static var _OLD_PULLUP := OS.get_environment("BMX_OLD_PULLUP") != ""
-static var _PULL_PROBE := OS.get_environment("BMX_PULL_PROBE") != ""   # tests: the air tilt / pull-up each 0.05 s
+static var _OLD_PULLUP := Env.raw("BMX_OLD_PULLUP") != ""
+static var _PULL_PROBE := Env.raw("BMX_PULL_PROBE") != ""   # tests: the air tilt / pull-up each 0.05 s
 const AIR_PULL_UP := 0.4    # rad of nose-up the rider pulls the bike to off a full pop (air_tilt, within airTilt)
 var _pull_k := 0.0          # this step's pull-up (0..1)
 const PULL_HOLD := 0.4      # s a pro holds the pulled-up bike before levelling it for the landing
@@ -3824,7 +3824,7 @@ static func _fric(a_lat: float, cb: float, sb: float) -> float:
 ## load. The turn limit has it (load^0.7); this is the same for the brakes, the drive and the front tyre: x the grip at
 ## the tyre's resting load n0, -LOAD_SENS per 100 % more load. BMX_OLD_LOADSENS=1 = off
 const LOAD_SENS := 0.15
-var _OLD_LS := OS.get_environment("BMX_OLD_LOADSENS") != ""
+var _OLD_LS := Env.raw("BMX_OLD_LOADSENS") != ""
 func _ls(n: float, n0: float) -> float:
 	if _OLD_LS: return 1.0
 	return clampf(1.0 - LOAD_SENS * (n / maxf(0.1, n0) - 1.0), 0.75, 1.15)
@@ -3833,7 +3833,7 @@ func _ls(n: float, n0: float) -> float:
 ## Schmeitz 2013 MF-Swift sl. 22-25, Limebeer & Sharp 2006 eq. 31): t_ref is the lag at RELAX_V (6 m/s), so it is
 ## shorter at speed and longer slow, within 0.015 .. 0.12 s. BMX_OLD_RELAX=1 = the fixed times
 const RELAX_V := 6.0
-var _OLD_RELAX := OS.get_environment("BMX_OLD_RELAX") != ""
+var _OLD_RELAX := Env.raw("BMX_OLD_RELAX") != ""
 func _relax_t(t_ref: float, va: float) -> float:
 	if _OLD_RELAX: return maxf(0.005, t_ref)
 	return clampf(t_ref * RELAX_V / maxf(va, 1.5), 0.015, 0.12) if t_ref > 0.005 else 0.005

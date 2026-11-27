@@ -225,7 +225,7 @@ func _gap_probe(st) -> void:
 	var man: String = "manual" if st.man_a > 0.1 else ("nose" if st.nose_a > 0.1 else "both")
 	for w in [["F", rig.wheel_f, rig.wheel_rf, st.c_f], ["R", rig.wheel_r, rig.wheel_rr, st.c_r]]:
 		if not w[3]: continue
-		var drawn: Callable = terrain.drawn_height if terrain.has_method("drawn_height") and not (terrain is PlaygroundTerrain) and not (terrain is LevelTerrain) else terrain.top_height
+		var drawn: Callable = terrain.drawn_height if terrain.has_method("drawn_height") and level == "" and not (terrain is LevelTerrain) else terrain.top_height
 		rig._ground_cache.clear()   # (it holds this frame's fit samples of top_height)
 		var g: float = -rig.tyre_depth(w[1], w[2], drawn)
 		rig._ground_cache.clear()
@@ -275,10 +275,10 @@ var title_world := false
 ## a test level instead of the procedural world (main sets it before add_child from GameState.level): "playground" =
 ## the test playground (scripts/levels: PlaygroundTerrain + PlaygroundProbe, which measures every jump)
 var level := ""
-var level_probe: PlaygroundProbe
-var lab: PlaygroundLab   # the playground's lab tools (energy / checks, pause / step / slow, record / replay), made by diag
+var level_probe = null   # PlaygroundProbe (res://dev/playground: dev builds only)
+var lab = null   # PlaygroundLab: the playground's lab tools (energy / checks, pause / step / slow, record / replay), made by diag
 var race: LevelRace   # a built level's race timing (levels/level_race.gd: gates, splits, best times)
-var diag: RideDiag   # ride diagnostics (F4, levels/ride_diag.gd): graphs of suspension, input, tyres, body, air
+var diag = null   # RideDiag: ride diagnostics (F4, levels/ride_diag.gd): graphs of suspension, input, tyres, body, air
 var _level_light_ver := -1
 ## parts of an earlier Game of the same world to use instead of building them ({terrain, far_hills}; main sets it
 ## before add_child: the title backdrop round a garage visit). See take_world().
@@ -335,11 +335,11 @@ func _ready() -> void:
 		ghost = preload("res://scripts/game/ghost_rider.gd").new(self)
 		add_child(ghost)
 		ghost.start_run.call_deferred()
-	if Env.s("BMX_TRI_SCAN") != "" and not title_world:   # tests: triangles + LOD levels of every rider / bike mesh
-		var RPT := preload("res://scripts/game/render_probe.gd")
+	if Env.s("BMX_TRI_SCAN") != "" and not title_world and Dev.on:   # tests: triangles + LOD levels of every rider / bike mesh
+		var RPT := Dev.script("render_probe.gd")
 		get_tree().create_timer(6.0).timeout.connect(func(): RPT.tri_scan(rig, "bike"); RPT.tri_scan(rider, "rider"))
-	if Env.s("BMX_MERGE_SCAN") != "" and not title_world:   # tests: what merging rider / bike meshes could save
-		var RP := preload("res://scripts/game/render_probe.gd")
+	if Env.s("BMX_MERGE_SCAN") != "" and not title_world and Dev.on:   # tests: what merging rider / bike meshes could save
+		var RP := Dev.script("render_probe.gd")
 		var snap_r := {}; var snap_b := {}
 		get_tree().create_timer(6.0).timeout.connect(func(): RP.merge_scan(rider, "rider", snap_r, false); RP.merge_scan(rig, "bike", snap_b, false))
 		get_tree().create_timer(12.0).timeout.connect(func(): RP.merge_scan(rider, "rider", snap_r, true); RP.merge_scan(rig, "bike", snap_b, true))
@@ -352,8 +352,8 @@ func _ready() -> void:
 	_build_environment()
 	if reuse.has("terrain"):   # the title world's own, kept while the garage was open (it is always the same place)
 		terrain = reuse.terrain
-	elif level == "playground":
-		terrain = PlaygroundTerrain.new(GameState.seed)
+	elif level == "playground" and Dev.on:   # the test playground (res://dev/playground)
+		terrain = Dev.make("playground/playground_terrain.gd", [GameState.seed])
 	elif level.ends_with(".tscn"):   # a level built in the editor (the level builder, res://levels/)
 		terrain = LevelTerrain.new(level, GameState.seed)
 	elif title_world and TitleTerrain.available() and Env.s("BMX_TITLE_PROC") == "" and Env.s("BMX_TITLE_SEED") == "":
@@ -397,18 +397,18 @@ func _ready() -> void:
 		add_child(sheep)
 		sheep.setup(terrain)
 		if level != "": sheep.enabled = false
-	if Env.s("BMX_RENDER_PROBE") != "": add_child(preload("res://scripts/game/render_probe.gd").new(self))
+	if Env.s("BMX_RENDER_PROBE") != "" and Dev.on: add_child(Dev.make("render_probe.gd", [self]))
 	if terrain is LevelTerrain:
 		race = LevelRace.new()
 		race.name = "LevelRace"
 		add_child(race)
 		race.setup(self, terrain.lf, terrain.path)
-	if terrain is PlaygroundTerrain:
-		level_probe = PlaygroundProbe.new()
+	if level == "playground" and Dev.on:
+		level_probe = Dev.make("playground/playground_probe.gd")
 		level_probe.name = "PlaygroundProbe"
 		add_child(level_probe)
 		level_probe.setup(self, terrain.course)
-		diag = RideDiag.new()   # the developer view: graphs + the tuning card (only on the test playground)
+		diag = Dev.make("playground/ride_diag.gd")   # the developer view: graphs + the tuning card (only on the test playground)
 		diag.name = "RideDiag"
 		add_child(diag)
 		diag.setup(self)
@@ -1791,8 +1791,8 @@ func get_up() -> void:
 ## (hop button, stick hop, a pop: pop_fx or kick_t), "crash", else "skip" = the ground threw the bike off by itself.
 ## One-wheel lifts on the ground are counted too (front / rear off > 0.05 s, no flight). SKIP lines per event of
 ## a skip (speed, air, height, ground slope / curve under the bike), SKIPSUM every 10 s (counts per km, air time)
-var _SKIP := OS.get_environment("BMX_SKIP_PROBE") != ""
-var _SKIP_TR: PackedFloat64Array = PackedFloat64Array(Array(OS.get_environment("BMX_SKIP_TRACE").split(",", false)).map(func(q): return float(q)))   # (tests: x0,x1 = every step between)
+var _SKIP := Env.raw("BMX_SKIP_PROBE") != ""
+var _SKIP_TR: PackedFloat64Array = PackedFloat64Array(Array(Env.raw("BMX_SKIP_TRACE").split(",", false)).map(func(q): return float(q)))   # (tests: x0,x1 = every step between)
 var _sk := {"t": 0.0, "dist": 0.0, "jump": 0, "hop": 0, "skip": 0, "skip_air": 0.0, "skip_big": 0, "jump_air": 0.0, "lift_f": 0, "lift_r": 0, "lift_t": 0.0, "fast_t": 0.0, "fast_skip": 0, "fo_long": 0, "fo_max": 0.0, "fo_t": 0.0}
 var _sk_air := false; var _sk_why := ""; var _sk_v := 0.0; var _sk_y0 := 0.0; var _sk_peak := 0.0; var _sk_kap := 0.0; var _sk_sl := 0.0
 var _sk_fr1 := 0.0; var _sk_fo := 0.0; var _sk_fr := 0.0; var _sk_next := 10.0; var _sk_x := 0.0
@@ -2223,7 +2223,7 @@ const START_TV_SIDE := 5.5
 ## the old CRT TV from the boot intro, dumped on the ground beside the start of every world, facing the rider:
 ## it switches on to the RUNOUT card a moment after the ride starts and stays on
 func place_start_tv() -> void:
-	if OS.get_environment("BMX_NO_TV") != "" or not CrtTv.assets_ok(): return
+	if Env.raw("BMX_NO_TV") != "" or not CrtTv.assets_ok(): return
 	if start_tv == null:
 		start_tv = CrtTv.new()
 		start_tv.light_energy = 3.0
@@ -2413,7 +2413,7 @@ func _unhandled_input(e: InputEvent) -> void:
 	if get_tree().paused or not input_enabled: return
 	if e.is_action_pressed("photo") and not e.is_echo() and (photo or replay_on): toggle_photo(); return   # (also a replay frame)
 	if replay_on: return   # (the replay takes its own keys in its _input)
-	if e is InputEventKey and e.pressed and not e.echo and e.keycode == KEY_INSERT and not photo:   # Pose Lab
+	if e is InputEventKey and e.pressed and not e.echo and e.keycode == KEY_INSERT and not photo and Dev.on:   # Pose Lab
 		toggle_pose_lab(); return
 	if e.is_action_pressed("replay") and not e.is_echo() and not photo:
 		if not open_replay(): flash("NO REPLAY YET")
@@ -2424,11 +2424,11 @@ func _unhandled_input(e: InputEvent) -> void:
 		# all caps = the loud pop (the quiet info line went unnoticed), with the folder it went to
 		flash(("LOG SAVED · CRASHLOGS/" + lp.replace("\\", "/").get_file().to_upper()) if lp != "" else "LOG NOT SAVED")
 		return
-	if e.is_action_pressed("profiler") and not e.is_echo() and not (e is InputEventKey and (e.ctrl_pressed or e.shift_pressed)):
+	if Dev.on and e.is_action_pressed("profiler") and not e.is_echo() and not (e is InputEventKey and (e.ctrl_pressed or e.shift_pressed)):
 		toggle_profiler()
 		return
-	if e.is_action_pressed("debug_draw") and not e.is_echo():
-		if DebugOverlay.available(): flash("Physics overlay " + ("on" if DebugOverlay.toggle() else "off"))
+	if Dev.on and e.is_action_pressed("debug_draw") and not e.is_echo():
+		if _overlay and _overlay.available(): flash("Physics overlay " + ("on" if _overlay.toggle() else "off"))
 		else: flash("Debug Draw 3D addon not loaded")
 		return
 	if photo: return
@@ -2438,7 +2438,7 @@ func _unhandled_input(e: InputEvent) -> void:
 		_bail_down = -1
 		get_viewport().set_input_as_handled()
 		return
-	if e.is_action_pressed("demo") and not e.is_echo(): set_demo(demo == null); return
+	if Dev.on and e.is_action_pressed("demo") and not e.is_echo(): set_demo(demo == null); return
 	if e.is_action_pressed("map") and not e.is_echo(): open_map(); return
 	if e.is_action_pressed("new_world") and not e.is_echo(): respawn(true)
 	elif e.is_action_pressed("respawn") and not e.is_echo(): respawn(false)
@@ -2470,18 +2470,20 @@ func _shift(d: int) -> void:
 		hud.gear_blocked()
 
 ## demo mode: an AI rider (game/demo_pilot.gd) supplies the input instead of the keys / pad, F2 hands it back
-var demo: DemoPilot = null
+var demo = null   # DemoPilot / PlaygroundPilot (res://dev: dev builds only)
+var _overlay: Script = Dev.overlay()   # the physics overlay (Debug Draw 3D, F3; null in a release build)
 
 func set_demo(on: bool) -> void:
 	if on == (demo != null): return
-	if on and terrain is PlaygroundTerrain:   # the test playground: its test rider repeats one feature / lane
-		demo = PlaygroundPilot.new(terrain.course)
+	if on and not Dev.on: return   # (the AI riders are developer tools)
+	if on and level == "playground":   # the test playground: its test rider repeats one feature / lane
+		demo = Dev.make("playground/playground_pilot.gd", [terrain.course])
 	else:
-		demo = DemoPilot.new() if on else null
-	phys.test_rider = demo is PlaygroundPilot   # (its stronger landing help: test runs only)
+		demo = Dev.make("demo_pilot.gd") if on else null
+	phys.test_rider = demo != null and level == "playground"   # (its stronger landing help: test runs only)
 	if not on:
 		for a in ["pedal", "brake", "steer_left", "steer_right", "hop", "sprint"]: Input.action_release(a)
-	if demo is PlaygroundPilot:
+	if demo != null and level == "playground":
 		flash("TEST RIDER on  -  STOP / F2: ride yourself")
 		if diag: diag.pilot_changed()
 	else:
@@ -2586,13 +2588,13 @@ const AIR_SHARE_EASE := 0.08   # s: back on the ground the air offset eases out 
 var _air_dlt := Vector3.ZERO
 var _sway: Array[Vector2] = []   # tests (BMX_SWAY_PROBE)
 var _slip_k := 0.0   # share of a small unasked slip drawn along the travel
-static var _OLD_SLIPDRAW := OS.get_environment("BMX_OLD_SLIPDRAW") != ""
+static var _OLD_SLIPDRAW := Env.raw("BMX_OLD_SLIPDRAW") != ""
 var _piv_c := 0.0; var _piv_w := 0.5   # drawn pitch pivot correction (m) and its rear share
 const LIFT_AIR := 1.5   # m/s: the tyre-unclip lift lets go in the air
-static var _OLD_PIVOT := OS.get_environment("BMX_OLD_PIVOT") != ""
-static var _OLD_AIRSHARE_SNAP := OS.get_environment("BMX_OLD_AIRSHARE_SNAP") != ""
+static var _OLD_PIVOT := Env.raw("BMX_OLD_PIVOT") != ""
+static var _OLD_AIRSHARE_SNAP := Env.raw("BMX_OLD_AIRSHARE_SNAP") != ""
 const AIR_SHARE := 0.8   # in the air the drawn bike moves this share of the rider's hip moves against it (the bike is ~1/6 of the weight)
-static var _OLD_AIRSHARE := OS.get_environment("BMX_OLD_AIRSHARE") != ""
+static var _OLD_AIRSHARE := Env.raw("BMX_OLD_AIRSHARE") != ""
 var _frame_y := NAN      # where the physics put the frame this frame (before the lift): what the rider's legs feel
 var jitter_on := Env.s("BMX_JITTER_ALL") != ""
 var _jit_skip := 0
@@ -2790,7 +2792,8 @@ var profiler = null   # FrameProfiler (loaded by path below: works before Godot'
 var _prof_rec := false
 func toggle_profiler(m: int = -1) -> void:
 	if profiler == null:
-		profiler = preload("res://scripts/game/frame_profiler.gd").new(self)
+		if not Dev.on: return
+		profiler = Dev.make("frame_profiler.gd", [self])
 		add_child(profiler)
 	if m < 0: profiler.cycle()
 	else: profiler.set_mode(m)
@@ -3080,7 +3083,8 @@ func _style_fill(st, pi: Dictionary, pk: Dictionary) -> void:
 
 func toggle_pose_lab() -> void:
 	if pose_lab == null:
-		pose_lab = PoseLab.new()
+		if not Dev.on: return
+		pose_lab = Dev.make("pose_lab.gd")
 		pose_lab.game = self
 		add_child(pose_lab)
 	pose_lab.toggle()
@@ -3683,7 +3687,7 @@ func _process(dt: float) -> void:
 	else:
 		_piv_c = 0.0
 	_pk = _perf("bike_pose", _pk)
-	DebugOverlay.draw(self, st, drawn_pos, hd)
+	if _overlay: _overlay.draw(self, st, drawn_pos, hd)
 	# the physics' tyres are soft and follow the smooth height field; the drawn ground is a triangle mesh
 	# (higher in hollows) with rocks and decks on it. Lift / tilt the drawn bike so no tyre is ever inside it
 	if Env.s("BMX_NOUNCLIP") == "":
@@ -4217,9 +4221,9 @@ func _landbody_probe(st) -> void:
 
 ## tests (BMX_AIRJERK=1): how smooth the bike's attitude is in the air: per flight, the worst step-to-step change of
 ## its pitch / lean / yaw rate (rad/s per physics step: a jerk shows as a spike) and of the stick values the physics got
-static var _AIRJERK := OS.get_environment("BMX_AIRJERK") != ""
-static var _BODYUP := OS.get_environment("BMX_BODYUP") != ""
-static var _OLD_AIRFADE := OS.get_environment("BMX_OLD_AIRFADE") != ""
+static var _AIRJERK := Env.raw("BMX_AIRJERK") != ""
+static var _BODYUP := Env.raw("BMX_BODYUP") != ""
+static var _OLD_AIRFADE := Env.raw("BMX_OLD_AIRFADE") != ""
 const KB_SIDE := 0.75   # the arrow keys' side lean: short of the stick's spin edge (BikePhysics.SPIN_EDGE 0.85), past the whip's 0.7
 var _aj := {}
 func _air_jerk_probe(inp: Dictionary) -> void:

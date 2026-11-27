@@ -25,7 +25,7 @@ const SUB := 3        # substeps per frame
 ## Shorter substeps (crash slow motion: Engine.time_scale 0.22) scale those terms so the body behaves the
 ## same in game time (they used to act ~20x stronger in slow motion and set the body spinning).
 const H0 := 1.0 / 360.0
-var _no_lkeep := OS.get_environment("BMX_NO_LKEEP") != ""   # tests: compare without the spin fix
+var _no_lkeep := Env.raw("BMX_NO_LKEEP") != ""   # tests: compare without the spin fix
 const RAD := [0.2, 0.15, 0.12, 0.08, 0.06, 0.06, 0.08, 0.06, 0.06, 0.08, 0.07, 0.07, 0.08, 0.07, 0.07]
 
 ## [a, b, stiffness] rigid-ish bones; the torso is cross-braced so it keeps its shape
@@ -78,12 +78,12 @@ const BOUNCE := 0.12           # of the speed into the ground given back on a ha
 const BOUNCE_MIN := 3.0        # m/s into the ground before anything bounces
 const ROCK_SLIDE := 0.98       # speed kept along a rock / trunk per contact (like the ground drag)
 const MAX_V := 40.0            # m/s: no part ever moves faster (a solver blow-up can't launch the body)
-var _old_col := OS.get_environment("BMX_OLD_RAGCOL") != ""
+var _old_col := Env.raw("BMX_OLD_RAGCOL") != ""
 ## the constraint solver in C# (RagdollSolverCs: ~half the ragdoll's cost); GDScript `_dist` / `_collide` stay the fallback
 ## (no C#, BMX_RAG_GD=1, or the old contact model)
 var _cs = null
 var _cs_try := false
-var _CMP := OS.get_environment("BMX_RAG_CMP") != ""
+var _CMP := Env.raw("BMX_RAG_CMP") != ""
 var _cmp_max := 0.0
 var _cmp_n := 0
 var _cmp_near := 0
@@ -174,7 +174,7 @@ func _init(t) -> void:
 	lim.fill(0.0)
 	_reset_points()
 	# the C# solver made and run once now (the ride loading), not on the first crash: its load + JIT cost ~2.8 ms
-	if not _old_col and OS.get_environment("BMX_RAG_GD") == "":
+	if not _old_col and Env.raw("BMX_RAG_GD") == "":
 		_cs_try = true
 		var sc = load("res://scripts/rider/RagdollSolverCs.cs") if ClassDB.class_exists("CSharpScript") else null
 		_cs = sc.new() if sc else null
@@ -302,7 +302,7 @@ func start(pts: Array, vel: Vector3, spin: Vector3, dt := 1.0 / 60) -> void:
 	t_fall = 0.0
 	probe_kick = 0.0; probe_slide = 0.0; _slide_on = false; _rest_said = false
 	_com0 = _com().y
-	if OS.get_environment("BMX_RAGDOLL_PROBE") != "":
+	if Env.raw("BMX_RAGDOLL_PROBE") != "":
 		var deep := 0.0
 		var nb := 0
 		for i in RAD.size():
@@ -537,7 +537,7 @@ func step(dt: float, colliders: Array) -> void:
 	if _col_probe and not _rest_said and t_fall > 0.3 and sp < 0.6:
 		_rest_said = true
 		print("RAGCOL rest t=%.2f slide=%.2f rise=%.2f vup=%.1f kick=%.1f shapes=%d near=%d" % [t_fall, probe_slide, probe_rise, probe_vup, probe_kick, _shapes.size(), _near.size()])
-var _col_probe := OS.get_environment("BMX_RAGCOL_PROBE") != ""   # tests: RAGCOL line when the body comes to rest
+var _col_probe := Env.raw("BMX_RAGCOL_PROBE") != ""   # tests: RAGCOL line when the body comes to rest
 var _rest_said := false
 
 
@@ -640,7 +640,7 @@ func _squirm(h: float) -> void:
 	p[HEAD] = (p[HEAD] as Vector3) + d * 0.5
 
 ## tension toward the neutral posture + a soft limit (see NEUTRAL)
-var tone_k := float(OS.get_environment("BMX_RAGDOLL_TONE")) if OS.get_environment("BMX_RAGDOLL_TONE") != "" else 1.0   # tests: x the tension / soft limit
+var tone_k := float(Env.raw("BMX_RAGDOLL_TONE")) if Env.raw("BMX_RAGDOLL_TONE") != "" else 1.0   # tests: x the tension / soft limit
 var nb_off := 0.0          # tests: summed neutral offsets (BMX_RAGDOLL_PROBE)
 func _neutral_pull(kt := 1.0) -> void:
 	var b := _frame()
@@ -692,7 +692,7 @@ func _solver_cs() -> bool:
 	if _old_col: return false
 	if not _cs_try:
 		_cs_try = true
-		if OS.get_environment("BMX_RAG_GD") == "":
+		if Env.raw("BMX_RAG_GD") == "":
 			var sc = load("res://scripts/rider/RagdollSolverCs.cs") if ClassDB.class_exists("CSharpScript") else null
 			_cs = sc.new() if sc else null
 	if _cs == null: return false

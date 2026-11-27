@@ -491,7 +491,7 @@ func _lifted(src: PrimitiveMesh, lift: float) -> ArrayMesh:
 
 ## the impostor atlas + its cells (impostors.json), loaded once; false = draw the old cones / balls
 static func _impostors() -> bool:
-	if OS.get_environment("BMX_OLD_TREES") == "1" or not ResourceLoader.exists(IMPOSTOR_PNG):
+	if Env.raw("BMX_OLD_TREES") == "1" or not ResourceLoader.exists(IMPOSTOR_PNG):
 		return false
 	if _imp_sh == null:
 		_imp_sh = Shader.new(); _imp_sh.code = IMPOSTOR_SHADER

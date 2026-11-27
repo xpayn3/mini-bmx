@@ -52,7 +52,7 @@ static func ensure() -> void:
 	MESH["bush"] = _crown(11, 2, true).translate(0, 0.55, 0).scale(1, 0.7, 1).to_mesh(true)
 	# bushes are leaf cards (card_bush.gd): bush / bush1 / bush2 = green variants, bushdry = the dry biomes' shrub.
 	# BMX_OLD_BUSH=1 = the old blobs for all of them.
-	if OS.get_environment("BMX_OLD_BUSH") == "1":
+	if Env.raw("BMX_OLD_BUSH") == "1":
 		for k in ["bush1", "bush2", "bushdry"]:
 			MESH[k] = MESH["bush"]
 		for k in ["leafCard", "leafCardDry"]:
@@ -148,7 +148,7 @@ static func _sign_board() -> ArrayMesh:
 
 
 static func old_rocks() -> bool:
-	return OS.get_environment("BMX_OLD_ROCKS") == "1"
+	return Env.raw("BMX_OLD_ROCKS") == "1"
 
 
 static func _rock_mat(id: String, tint: Color, tile: float, relief: float, moss: float) -> ShaderMaterial:
@@ -244,7 +244,7 @@ static func _build_materials() -> void:
 	MAT["trunk_pine"] = _bark_mat("bark_pine", Color(1.0, 0.95, 0.9))
 	# (2026-11-26, user: "the roots are awful": the dark pine scan x a dark tint read as black cracks across the dirt. Exposed
 	# trail roots are worn pale grey-brown on top: the light bark scan, warm tint. BMX_OLD_ROOTS=1 = before)
-	if OS.get_environment("BMX_OLD_ROOTS") != "": MAT["root"] = _bark_mat("bark_pine", Color(0.72, 0.62, 0.55))
+	if Env.raw("BMX_OLD_ROOTS") != "": MAT["root"] = _bark_mat("bark_pine", Color(0.72, 0.62, 0.55))
 	else: MAT["root"] = _bark_mat("bark_light", Color(1.0, 0.88, 0.74))
 	MAT["root"].set_shader_parameter("bark_uv", true)
 	MAT["root"].set_shader_parameter("bark_tile", 0.35)
