@@ -1213,8 +1213,8 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
 - **Checkpoint feather flags (2026-11-27)** (`world/checkpoint_flags.gd` `CheckpointFlags`, `shaders/feather_flag.gdshader`): at every
   5 km distance sign (not the 1 km one) one feather flag on each side of the trail, drawn 5 m tall (`FLAG_SCALE`), W + 1.3 m out (inside the tape;
   spot checked like the signs, `TerrainChunkBuilder._checkpoint_flags` -> `out["flags"]`, one MultiMesh per chunk in
-  `Terrain._finalize_out`). Visual only, no collider. Shape = the classic feather outline (`CheckpointFlags.outline()`:
-  straight pole, a quarter-ellipse arc over the top, a convex free edge, tied-back bottom corner). All motion in the vertex
+  `Terrain._finalize_out`). Visual only, no collider. Shape (user reference, `CheckpointFlags.pole_line()`): the pole runs straight up
+  the cloth's side and bends over in a quarter ellipse to the top of the free edge; free edge and bottom are straight. All motion in the vertex
   shader from `atm_wind`: the flag turns on its pole to stream downwind, ripples run pole -> free edge, bellies with the gusts,
   the free edge pulls in; UV = the flag's box (the print), UV2 = the grid (the motion). Print = `DESIGNS` columns of
   512 x 1856 px drawn upright (pole left) in `assets/textures/flags/checkpoint_flags.png` (BC7 + mipmaps): the user's two

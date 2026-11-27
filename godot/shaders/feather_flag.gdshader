@@ -1,7 +1,7 @@
 // Feather flags (scripts/world/checkpoint_flags.gd): the whole flag turns on its pole to stream downwind, the cloth
 // ripples from the pole to the free edge, bellies out with the gusts and flutters at its edge, all from the shared wind
 // globals (atmos.gdshaderinc). Nothing is stored per flag but a design row and a seed (INSTANCE_CUSTOM.xy).
-// Mesh: cloth COLOR.a = 1, UV = the print (up, across the flag's box), UV2 = the grid (t up, s across); pole COLOR.a = 0, UV.y = 0; tie cord UV.y = 1, COLOR.a 0..0.5.
+// Mesh: cloth COLOR.a = 1, UV = the print (up, across the flag's box), UV2 = the grid (t up, s across); pole COLOR.a = 0, UV.y = 0.
 shader_type spatial;
 render_mode cull_disabled;
 #include "res://shaders/atmos.gdshaderinc"
@@ -10,7 +10,6 @@ uniform sampler2D board_tex : source_color, filter_linear_mipmap_anisotropic, re
 uniform float designs = 4.0;
 uniform float cloth_w = 0.8;
 uniform float cloth_h = 2.8;
-uniform float t_arc = 0.6;
 
 varying float v_kind;     // 1 cloth, 0 pole / cord
 varying flat float v_row;
@@ -20,10 +19,8 @@ varying float v_fold;     // how much the cloth is turned away right here (darke
 float disp(float t, float s, float T, float g, float ws, float ph) {
 	float x = s * cloth_w;
 	float y = t * cloth_h;
-	// held along the pole (s = 0); above t_arc each row's far end is the pole's arc too (held both ends)
-	float free_w = pow(s, 1.25) * mix(0.55, 1.0, smoothstep(0.0, 0.3, t));
-	float arc_w = 4.0 * s * (1.0 - s) * 0.7;
-	float w = mix(free_w, arc_w, smoothstep(t_arc - 0.12, t_arc + 0.04, t)) * (1.0 - smoothstep(0.9, 1.0, t));
+	// held along the pole side (s = 0, the straight part and the arc), and at the top corner where both meet
+	float w = pow(s, 1.2) * (1.0 - smoothstep(0.88, 1.0, t)) * mix(0.75, 1.0, smoothstep(0.0, 0.2, t));
 	// fixed rates: a gust only makes the waves bigger (scaling the rate by the gust whips it faster as time grows)
 	float a = 0.045 + 0.06 * ws + 0.1 * g;
 	float wave = sin(7.0 * x - 6.3 * T + 1.6 * y + ph) + 0.45 * sin(12.5 * x + 3.1 * y - 10.7 * T + ph * 1.7)
@@ -78,9 +75,6 @@ void fragment() {
 		SPECULAR = 0.25;
 		// thin polyester: light comes through it with the sun behind (its own colour)
 		BACKLIGHT = col * 0.55;
-	} else if (UV.y > 0.5) {
-		ALBEDO = vec3(0.03);
-		ROUGHNESS = 0.8;
 	} else {
 		ALBEDO = vec3(0.62, 0.63, 0.65);   // bare aluminium / grey fibreglass
 		METALLIC = 0.75;
