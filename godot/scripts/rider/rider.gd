@@ -1219,8 +1219,8 @@ static func orient_hand(n: Node3D, el: Vector3, at: Vector3, right: Vector3) -> 
 ## Keep a knee clear of the frame: swing it outward round the hip -> ankle line (leg lengths unchanged)
 ## until it sits at least KNEE_CLEAR off the bike's centre plane (z = 0 in the bike's leaning space).
 const KNEE_CLEAR := 0.12
-static func _knee_clear(hip: Vector3, ankle: Vector3, kn: Vector3, side: float) -> Vector3:
-	if side * kn.z >= KNEE_CLEAR:
+static func _knee_clear(hip: Vector3, ankle: Vector3, kn: Vector3, side: float, clear: float = KNEE_CLEAR) -> Vector3:
+	if side * kn.z >= clear:
 		return kn
 	var ax := ankle - hip
 	if ax.length_squared() < 1e-6:
@@ -1235,14 +1235,14 @@ static func _knee_clear(hip: Vector3, ankle: Vector3, kn: Vector3, side: float) 
 	if out.length_squared() < 1e-6:
 		return kn
 	out = out.normalized()
-	if u.dot(out) < -0.999 or side * (c + out * r).z < KNEE_CLEAR:
+	if u.dot(out) < -0.999 or side * (c + out * r).z < clear:
 		return c + out * r   # can't clear it: as far out as the leg allows
 	# smallest swing that clears (bisection, so the knee moves smoothly frame to frame)
 	var lo := 0.0
 	var hi := 1.0
 	for _k in 14:
 		var m := (lo + hi) * 0.5
-		if side * (c + u.slerp(out, m) * r).z >= KNEE_CLEAR: hi = m
+		if side * (c + u.slerp(out, m) * r).z >= clear: hi = m
 		else: lo = m
 	return c + u.slerp(out, hi) * r
 
@@ -1462,7 +1462,43 @@ var _NO_BREATH := Env.s("BMX_NO_BREATH") != ""   # test: no breathing
 var _inhale := 0.0     # 0..1, the in-breath of a winded rider (lifts elbows + shoulders)
 var _winded := 0.0   # how out of breath, 0..1 (slow to recover)
 var _breath_ph := 0.0
+var _SPR_PROBE := Env.s("BMX_SPRINT_PROBE") != ""   # test: knee width / clearance pushes while sprinting (SPRKNEE lines)
+var _spk := {}
+func _spr_probe_leg(i: int, side: float, hp: Vector3, pre: Vector3, post: Vector3, rock: float, v: float, arm: float) -> void:
+	if arm < 0.5: return
+	var k := str(i)
+	if not _spk.has(k): _spk[k] = [0, 0.0, 0.0, 0, 0.0, 0.0, 0.0]
+	var a: Array = _spk[k]
+	a[0] += 1; a[1] += side * post.z; a[2] = maxf(a[2], side * post.z)
+	if post.distance_to(pre) > 0.005: a[3] += 1
+	a[4] = maxf(a[4], post.distance_to(pre)); a[5] += side * hp.z; a[6] = maxf(a[6], absf(rock))
+	if i == 1 and a[0] >= 120:
+		for kk in ["0", "1"]:
+			var b: Array = _spk.get(kk, [1, 0, 0, 0, 0, 0, 0])
+			print("SPRKNEE side=%s v=%.1f knee_out_avg=%.3f max=%.3f clear_frames=%d%% clear_max=%.3f hip_out_avg=%.3f rock_max=%.3f rpm=%.0f calm=%.2f" % [kk, v * 3.6, b[1] / b[0], b[2], 100 * b[3] / b[0], b[4], b[5] / b[0], b[6], _cad_s, _spin_calm])
+		_spk.clear()
 var _fat := 0.0       # sprint fatigue 0..1
+# DH sprint form (2026-11-27, user: "knees not out so much at speed", "no pulling on the bars", "he looks down a bit, then
+# back up so he doesn't crash"). BMX_OLD_SPRINT=1 = before
+var _OLD_SPRINT := Env.s("BMX_OLD_SPRINT") != ""
+const SPR_KNEE_IN := 0.85      # share of the knees' sideways pole taken out sprinting: knees drive straight, by the top tube
+const SPR_KNEE_CLEAR := 0.085  # knee centre off the frame's middle plane sprinting (top tube half width + the knee), was KNEE_CLEAR
+const SPR_HIP_ROCK := 0.5      # share of the bike's pedalling rock the HIPS stay upright against sprinting (the chest: all of it)
+const SPR_HIP_BACK := 0.05    # m the hips go back sprinting at speed
+const SPR_CHEST_LOW := 0.30   # rad more forward lean sprinting at speed: chest down over the stem, the back flatter
+const SPR_PULL_TWIST := 0.16  # rad the shoulders turn toward the pulling arm at a full pull
+const SPR_PULL_FWD := 0.015    # pull side: shoulder drawn forward / down to the grip (the arm bends, the bar is hauled up)
+const SPR_PULL_DOWN := 0.012
+const SPR_PUSH_UP := 0.01      # other side: the shoulder rises a touch, that arm straightens, pressing its grip down
+const SPR_HEAD_DOWN := 0.34    # rad the head drops in a head-down burst of strokes
+var _arm_pull := [0.0, 0.0]   # per arm: + hauling its grip up, - pressing it down (the elbow follows)
+var _spin_calm := 0.0   # 0 .. 1: spinning a high cadence the upper body goes quiet (eased in slowly, ~1.5 s)
+const SPIN_CALM_FROM := 85.0    # rpm where the shoulders start to settle
+const SPIN_CALM_FULL := 125.0   # rpm where only the legs spin
+const SPIN_CALM_LEFT := 0.08    # share of the bar pull / shoulder turn / hip rock still there spinning flat out
+var _hd_s := 0.0      # head-down share 0..1 (eased)
+var _hd_on := false
+var _hd_t := 0.0      # time left in this phase
 var _spr_arm := 0.0   # sprint arm pose 0..1 (quick on, slow off)
 var sm_pitch0 := 0.0
 var sm_pitch_slow := 0.0   # the bike's pitch averaged over ~0.35 s: what the body swings with
@@ -1604,10 +1640,24 @@ func update_pose(dt: float, p: Dictionary) -> void:
 			_cad_acc = 0.0; _cad_t = 0.0
 	_cad_prev = crank
 	var cad_k: float = smoothstep(70.0, 130.0, _cad_s) * clampf(spr + sm_effort, 0.0, 1.0)   # 0 grinding .. 1 spinning flat out
+	# (2026-11-27, user: "at higher speeds, high cadence, he should slowly stop rocking the shoulders - then only high spinning")
+	var calm_t: float = 0.0 if _OLD_SPRINT else smoothstep(SPIN_CALM_FROM, SPIN_CALM_FULL, _cad_s) * clampf(spr + sm_effort, 0.0, 1.0)
+	_spin_calm += (calm_t - _spin_calm) * (1.0 - exp(-(0.7 if calm_t > _spin_calm else 2.5) * minf(dt, 0.1)))
+	var calm_k: float = lerpf(1.0, SPIN_CALM_LEFT, _spin_calm)
 	var arm_tgt: float = clampf(maxf(spr * pedal, sm_effort), 0.0, 1.0) * (0.0 if _NO_SPR2 else 1.0)
 	_spr_arm += (arm_tgt - _spr_arm) * (1.0 - exp(-(7.0 if arm_tgt > _spr_arm else 1.3) * minf(dt, 0.1)))   # ~0.8 s to relax
 	# fatigue: as the sprint's stamina runs out the form goes - head and chest sink toward the bars, the elbows narrow,
 	# and the bike rocks wilder (a tired rider hauls harder on the bars). Slow in, slower out.
+	# head down for a few strokes, then a glance back up the trail (shorter heads-down and longer looks the faster he goes)
+	if not _OLD_SPRINT and _spr_arm > 0.5 and _num(p, "air") < 0.3:
+		_hd_t -= dt
+		if _hd_t <= 0.0:
+			_hd_on = not _hd_on
+			var fast: float = smoothstep(6.0, 15.0, absf(v))
+			_hd_t = randf_range(lerpf(0.6, 0.3, fast), lerpf(1.1, 0.6, fast)) if _hd_on else randf_range(lerpf(0.4, 0.8, fast), lerpf(0.9, 1.7, fast))
+	else:
+		_hd_on = false; _hd_t = randf_range(0.15, 0.4)
+	_hd_s += ((1.0 if _hd_on else 0.0) * _spr_arm - _hd_s) * (1.0 - exp(-(9.0 if _hd_on else 12.0) * minf(dt, 0.1)))
 	var fat_tgt: float = pow(1.0 - clampf(_num(p, "stamina", 1.0), 0.0, 1.0), 1.5) * _spr_arm
 	_fat += (fat_tgt - _fat) * (1.0 - exp(-(2.0 if fat_tgt > _fat else 0.6) * minf(dt, 0.1)))
 	var fat: float = _fat
@@ -1616,10 +1666,10 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# (Body bob: how far the body rises and drops with each pedal stroke)
 	# sprint hip rock: out of the saddle the hips swing over the pushing foot every stroke (~3-4 cm each way grinding, less spinning);
 	# not faded with speed like the idle sway, a sprint at 40 km/h still rocks
-	var hip_rock: float = sin(crank) * pedal * _spr_arm * float(sty.sway) * 0.04 * lerpf(1.0, 0.5, cad_k)
+	var hip_rock: float = sin(crank) * pedal * _spr_arm * float(sty.sway) * 0.04 * lerpf(1.0, 0.5, cad_k) * calm_k
 	# sprint hip tilt: out of the saddle the pelvis dips to the side of the foot that is pushing (about 7 deg grinding, half that spinning);
 	# the shoulders stay level, so the spine takes the difference. Flip the sign if it dips the wrong side.
-	var hip_tilt: float = sin(crank - SPR_LAG) * pedal * _spr_arm * float(sty.sway) * 0.12 * lerpf(1.0, 0.5, cad_k) * (1.0 + 0.6 * fat)
+	var hip_tilt: float = sin(crank - SPR_LAG) * pedal * _spr_arm * float(sty.sway) * 0.12 * lerpf(1.0, 0.5, cad_k) * calm_k * (1.0 + 0.6 * fat)
 	var bob: float = sin(crank * 2) * pedal * sty.sway * float(sty.get("bodyBob", 1.0)) * (1 + 0.4 * spr + 0.35 * eff) * lerpf(0.4, 1.0, hi_fade)
 	# (the idle balance wobble is gone once the rider commits to a sprint: no random drifting)
 	var wig: float = clampf(1 - absf(v) / 3, 0, 1) * sty.sway * float(sty.slowWobble) * (1.0 - 0.9 * clampf(eff * 1.5, 0.0, 1.0))
@@ -1699,6 +1749,10 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		sway * sty.hipSway + hip_rock + shift * 0.3 + sin(t * 2.1) * 0.02 * wig) + fit
 	pelvis.x += sty.hipX * (1 - 0.5 * pedal) + 0.10 * aero_a - 0.05 * aero_g - 0.03 * eff   # sprint start: hips stay back over the saddle nose, the chest goes forward instead; forward over the cranks (air stick: hips forward; ground tuck: a touch back)
 	pelvis.y += 0.02 * eff                                               # up tall to stamp down
+	if not _OLD_SPRINT:   # sprinting at speed: hips a touch back and up over the cranks so the back can flatten over the bars
+		var spk: float = _spr_arm * (1.0 - clampf(eff, 0.0, 1.0)) * (1.0 - air)
+		pelvis.x -= SPR_HIP_BACK * spk
+		pelvis.y += 0.015 * spk
 	pelvis.y += sty.hipY * (1 - 0.6 * pedal)
 	# the air pose's hip height: crouched in the air (none with the stick forward: legs pushed out), knees tucked up in a
 	# spin; reaching for the ground it goes (the legs straighten), and on the ground it is gone at once (air_st)
@@ -1742,7 +1796,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 
 	# chest
 	# (pedalling out of the saddle the chest stays forward over the bars)
-	var ang: float = 0.52 - 0.2 * clampf(-bstick, 0.0, 1.0) - float(sty.pedalChest) * pedal + 0.12 * spr + 0.3 * eff + 0.18 * fat +0.15 * (comp / 0.3) + 0.08 * air + sty.lean * (1 - 0.5 * pedal) + 0.32 * aero_a + 0.6 * aero_g
+	var ang: float = 0.52 - 0.2 * clampf(-bstick, 0.0, 1.0) - float(sty.pedalChest) * pedal + 0.12 * spr + 0.3 * eff + (0.0 if _OLD_SPRINT else SPR_CHEST_LOW * _spr_arm * (1.0 - clampf(eff, 0.0, 1.0)) * (1.0 - air)) + 0.18 * fat +0.15 * (comp / 0.3) + 0.08 * air + sty.lean * (1 - 0.5 * pedal) + 0.32 * aero_a + 0.6 * aero_g
 	ang += 0.2 * clampf(-bstick, 0.0, 1.0) * stk_stick   # (the light pull is the tuck, not sitting up)
 	ang = lerpf(ang, TUCK_ANG, stk)   # speed tuck: the back near flat
 	ang -= FLIP_LEAN * clampf(_num(p, "flipArch"), 0.0, 1.0)   # (a back flip's arch: he lies back, chest out)
@@ -2230,6 +2284,11 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		pelvis.z = dy * sn + dz * c
 		dy = chest.y
 		dz = chest.z
+		if not _OLD_SPRINT and _spr_arm > 0.0:   # (sprinting the hips go part way with the rocking bike: done above at full; take some back)
+			var hr2: float = -rr * SPR_HIP_ROCK * _spr_arm * (1.0 - air)
+			var py := pelvis.y; var pz := pelvis.z
+			pelvis.y = py * cos(hr2) - pz * sin(hr2)
+			pelvis.z = py * sin(hr2) + pz * cos(hr2)
 		chest.y = dy * c - dz * sn
 		chest.z = dy * sn + dz * c
 	# quick pitch kicks: the bike turns under the body (see bump_pitch above)
@@ -2323,6 +2382,9 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var tw_cap: float = 0.6 if _OLD_TWIST else lerpf(0.3, 0.6, air)   # (an air spin keeps its old room)
 	var tw_base: float = _pk_tyaw + float(sty.twist) + clampf(_num(p, "airSpin") * 0.07 + sm_turn * tw_k * float(sty.turnTwist) + lead, -tw_cap, tw_cap) + _num(p, "flipTwist")   # (a flip: the shoulders turn to spot the landing)
 	var tw_air: float = -0.22 * tab - 0.85 * awhip
+	# sprint bar pull: the shoulders turn with it, the pulling side forward (last frame's pull per arm; the torso turns as one
+	# piece, so the shoulder never leaves the chest - moving the shoulder joint alone tore it off the torso)
+	if not _OLD_SPRINT: tw_base += SPR_PULL_TWIST * 0.5 * (float(_arm_pull[1]) - float(_arm_pull[0])) * (1.0 - air)
 	var tw := Basis(tw_axis, tw_base + tw_air)
 	# (2026-11-23, user: "the shoulder pops off") the shoulders' twist (a whip, a tabletop) is held to what both arms can
 	# still reach the grips from: the arm-reach limit above works with untwisted shoulders, so a big twist left a shoulder
@@ -2394,7 +2456,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var yaw: float = clampf((_num(p, "steer") * 1.2 + _num(p, "yawRate") * 0.15) * sty.headTurn + lead * 0.8, -0.8, 0.8) + sty.headYaw + _num(p, "lookYaw") - 0.95 * awhip + head_yaw_hold + _pk_hy
 	# (+ the pedalling rock taken back out: the bike rocks under a level head)
 	var rx: float = (_num(p, "headRoll") if p.get("headRoll") != null else _num(p, "lean") * 0.6) + sty.headRoll + _num(p, "rockRoll") * minf(steady, 1.0)
-	var rz: float = -0.12 * (ang - 0.72) + 0.04 * sin(t * 3.3) * wig - sty.headTilt * (1.0 - 0.6 * relax) + 0.12 * tall + _num(p, "lookPitch") - head_kick - _pk_hp
+	var rz: float = -0.12 * (ang - 0.72) + 0.04 * sin(t * 3.3) * wig - sty.headTilt * (1.0 - 0.6 * relax) + 0.12 * tall + _num(p, "lookPitch") - head_kick - _pk_hp - SPR_HEAD_DOWN * _hd_s
 	head.transform = Transform3D(GEAR.euler_xyz(rx, yaw, rz), head_p)
 	_pose_neck()
 
@@ -2441,10 +2503,15 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		# sprint knee lift: the foot pulling up through the top of the stroke brings that knee up and forward
 		if _spr_arm > 0.01 and not standing and air < 0.3:
 			pole_l = (pole_l + Vector3(0.25, 0.7, 0.0) * (_spr_arm * pow(clampf(sin(phi), 0.0, 1.0), 2.0) * lerpf(1.0, 0.6, cad_k))).normalized()
+			if not _OLD_SPRINT:   # knees drive straight ahead over the pedals, brushing the top tube (not flared out)
+				pole_l.z *= 1.0 - SPR_KNEE_IN * _spr_arm
+				pole_l = pole_l.normalized()
 		var ik := limb_ik(hp, ankle, L_THIGH, L_SHIN, pole_l, Vector3.UP, KNEE_MIN, KNEE_MAX, _bd_prev[i], max_turn)
 		_bd_prev[i] = ik[2]
 		var ik_raw: Vector3 = ik[0]
-		ik[0] = _knee_clear(hp, ankle, ik[0], side)
+		var kn_pre: Vector3 = ik[0]
+		ik[0] = _knee_clear(hp, ankle, ik[0], side, KNEE_CLEAR if _OLD_SPRINT else lerpf(KNEE_CLEAR, SPR_KNEE_CLEAR, _spr_arm * (1.0 - air)))
+		if _SPR_PROBE: _spr_probe_leg(i, side, hp, kn_pre, ik[0], _num(p, "rockRoll"), v, _spr_arm)
 		# knees never into the chest / belly: folded right down they go out round it
 		ik[0] = _swing_clear(hp, ik[1], ik[0], side, [pelvis.lerp(chest, 0.35), chest], LIMB_TORSO)
 		# (in the air the knees come up over the top tube in a tabletop / whip: never through the handlebar)
@@ -2471,8 +2538,18 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		# and the peak comes late in the stroke): the shoulder on the pushing side is drawn forward and down toward the
 		# grip, so that arm bends and the bar is hauled in; the other arm eases. Flip `side` if the wrong arm pulls.
 		if _spr_arm > 0.01 and not standing and air < 0.3:
-			var pull: float = pow(clampf(sin(crank - SPR_LAG) * side, 0.0, 1.0), 2.0) * _spr_arm * float(sty.sway) * lerpf(1.0, 0.6, cad_k)
-			shp += Vector3(0.035 * pull, -0.02 * pull, 0.0)
+			if _OLD_SPRINT:
+				var pull: float = pow(clampf(sin(crank - SPR_LAG) * side, 0.0, 1.0), 2.0) * _spr_arm * float(sty.sway) * lerpf(1.0, 0.6, cad_k)
+				shp += Vector3(0.035 * pull, -0.02 * pull, 0.0)
+			else:
+				# by this side's own foot: the pull peaks ~30 deg past the front of its stroke (phi = 0 front, + up), the push
+				# on the way up; less spinning fast (Stone & Hull: bar forces fall as cadence rises)
+				var ph: float = cos(phi + SPR_LAG)
+				var spk_k: float = _spr_arm * clampf(float(sty.sway) / 0.035, 0.5, 1.5) * lerpf(1.0, 0.7, cad_k) * calm_k * (1.0 + 0.3 * fat)
+				var pull: float = pow(clampf(ph, 0.0, 1.0), 1.5) * spk_k
+				var push: float = pow(clampf(-ph, 0.0, 1.0), 1.5) * spk_k
+				_arm_pull[i] = pull - push
+				shp += Vector3(SPR_PULL_FWD * pull - 0.01 * push, -SPR_PULL_DOWN * pull + SPR_PUSH_UP * push, 0.0)   # (a small shrug only: the rest is the chest's turn)
 		if not _OLD_AIRBODY and air > 0.0: shp = shp.lerp(shoulder_at(hip, chest, tw, sh_off), air)   # (in the air: on the torso's frame)
 		shoulder_sph[i].position = shp
 		# hand nearly on the elbow's pole line (deep turns, arms up in the air): elbow out and down
@@ -2485,6 +2562,9 @@ func update_pose(dt: float, p: Dictionary) -> void:
 		if _spr_arm > 0.01 and not standing and air < 0.3:
 			var wide := (Vector3(-0.1, 0.05, side * 1.0) if _OLD_ARMS else Vector3(-0.15, -0.15, side * 1.0)).normalized().lerp(Vector3(-0.25, -0.15, side * 0.7).normalized(), 0.8 * cad_k).normalized()   # (sprint elbows out, a touch under the shoulders)
 			pole_a = pole_a.lerp(wide, 0.85 * _spr_arm * (1.0 - 0.4 * fat)).normalized()
+			if not _OLD_SPRINT:   # the pulling elbow bends out and back, the pressing arm's elbow comes in as it straightens
+				var ap: float = float(_arm_pull[i])
+				pole_a = (pole_a + Vector3(-0.25, 0.1, side * 0.35) * maxf(ap, 0.0) + Vector3(0.0, -0.2, -side * 0.25) * maxf(-ap, 0.0)).normalized()
 		if _inhale > 0.01 and not standing:
 			# a deep breath is mostly rib flare: the ribcage widens, so the shoulders and elbows spread out a touch (not up)
 			pole_a = pole_a.lerp(Vector3(pole_a.x, pole_a.y * 0.5, side * 1.1).normalized(), 0.12 * _inhale).normalized()
