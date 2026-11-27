@@ -65,6 +65,7 @@ var _hd_s := NAN   # the view's heading, turned at most camHeadingRate rad/s (sm
 var _cy_prev := NAN; var _cy_max := 0.0   # tests: BMX_CAMYAW_PROBE
 var cam_fov := 34.0
 var occ := 0.0
+var _occ_v := 0.0
 var track_pos = null
 var target := Vector3.ZERO
 var _probe_on := Env.s("BMX_CAM_PROBE") != ""
@@ -127,7 +128,7 @@ func set_mode(m: String) -> void:
 	mode = m
 	track_pos = null
 	dr_init = false; helm_init = false
-	view.reset()
+	view.reset(); _f_init = false; _lk_init = false
 	if P.get("mode", "") == "helmet":   # crashed: the chase view takes over (PRESETS.chase), ready here
 		dist = PRESETS.chase.dist; cam_pitch_t = PRESETS.chase.pitch; orbit_t = 0.0; orbit = 0.0
 		return
@@ -162,8 +163,8 @@ func snap_to(p: Vector3) -> void:
 	trail_i = -1; trail_dir = Vector3.ZERO
 	# (also the view's own heading: chase / side / drone kept the old spot's yaw and looked at the rider from the side
 	# or the front until he passed 0.5 m/s, then swung round)
-	_hd_s = NAN; _slope_init = false; occ = 0.0; _yaw_snap = true
-	view.reset()
+	_hd_s = NAN; _slope_init = false; occ = 0.0; _occ_v = 0.0; _yaw_snap = true
+	view.reset(); _f_init = false; _lk_init = false
 
 var _yaw_snap := false   # a teleport: the follow cameras take the new heading at once
 
@@ -182,6 +183,50 @@ func _smooth_y(y: float, dt: float) -> float:
 	_ys1 += (y - _ys1) * k
 	_ys2 += (_ys1 - _ys2) * k
 	return 2.0 * _ys1 - _ys2
+
+## The trail view floats (2026-11-27, user: "shaky, abrupt shakes on small bumps, make it smooth floaty"): it follows a
+## smoothed rider, not the drawn one. Two low-passes in a row per axis (exact for a steadily moving input, so uneven
+## frame times don't shake it: a plain per-frame lerp lags speed x half a frame, which changed frame by frame).
+## Across: read as 2 a - b, no lag at a steady speed. Up / down: the second low-pass plus a SLOWLY learnt climb rate x
+## its lag: bumps and a landing's stop come through gently (reading 2 a - b there passed ~3x the jolt)
+const FLOAT_TAU := Vector3(0.16, 0.28, 0.16)
+const FLOAT_V_TAU := 0.6     # s: how slowly the climb rate is learnt
+const FLOAT_LEAD := 1.6      # x tau of it added back (2 = no lag at a steady fall, more overshoot after a landing)
+const LOOK_W := 8.0          # the view's turning: a critically damped spring (rad/s)
+const SHAKE_FLOOR := 0.5     # trail view: this much of a hit's "trauma" is ignored (small knocks don't shake it)
+var _fa := Vector3.ZERO; var _fb := Vector3.ZERO; var _fx := Vector3.ZERO; var _f_init := false
+var _fvy := 0.0; var _fo := Vector3.ZERO
+func _float_follow(p: Vector3, dt: float) -> Vector3:
+	if not _f_init or p.distance_to(_fo) > 8.0:
+		_fa = p; _fb = p; _fx = p; _fo = p; _fvy = 0.0; _f_init = true
+	if dt > 0.0:
+		var by := _fb.y
+		for i in 3:
+			var tau: float = FLOAT_TAU[i]
+			var e := exp(-dt / tau)
+			var v := (p[i] - _fx[i]) / dt
+			var a0: float = _fa[i]
+			_fa[i] = p[i] - v * tau + (a0 - _fx[i] + v * tau) * e
+			var va := (_fa[i] - a0) / dt
+			_fb[i] = _fa[i] - va * tau + (_fb[i] - a0 + va * tau) * e
+		_fx = p
+		_fvy += ((_fb.y - by) / dt - _fvy) * (1.0 - exp(-dt / FLOAT_V_TAU))
+		_fo = 2.0 * _fa - _fb
+		_fo.y = _fb.y + _fvy * FLOAT_TAU.y * FLOAT_LEAD
+	return _fo
+
+var _lk := Vector2.ZERO; var _lkv := Vector2.ZERO; var _lk_init := false   # the view's yaw / pitch and their speeds
+func _soft_look(aim: Vector3, dt: float) -> Vector3:
+	var d := aim - global_position
+	var want := Vector2(atan2(-d.z, d.x), atan2(d.y, Vector2(d.x, d.z).length()))
+	if not _lk_init:
+		_lk = want; _lkv = Vector2.ZERO; _lk_init = true
+	var x := Vector2(BikePhysics.ang_diff(_lk.x, want.x), _lk.y - want.y)
+	var e := exp(-LOOK_W * dt)
+	var b := _lkv + x * LOOK_W
+	_lk = want + (x + b * dt) * e
+	_lkv = (_lkv - b * LOOK_W * dt) * e
+	return global_position + Vector3(cos(_lk.x) * cos(_lk.y), sin(_lk.y), -sin(_lk.x) * cos(_lk.y)) * d.length()
 
 ## Slope-following chase (2026-11-26, user: "on descents / climbs we can't see anything in front"). The chase pitch was
 ## from the horizon and it aimed level: down a 33 deg slope the camera sat level with the ground behind the rider, the
@@ -291,13 +336,18 @@ func update_cam(dt: float) -> void:
 	if not slope_on: _slope_init = false
 	# the director: only the trail view, and not while it watches a crash
 	var directed: bool = P.get("ahead", false) and not _OLD_TRAILCAM and not (st.crash_on and game.ragdoll != null)
-	if not directed: view.reset()
+	var fp := drawn   # what the trail view follows
+	if directed:
+		fp = _float_follow(drawn, dt)
+		ys = fp.y
+	else:
+		view.reset(); _f_init = false; _lk_init = false
 	var want: Vector3
 	if st.crash_on and game.ragdoll:
 		want = (game.ragdoll.p[Ragdoll.PELVIS] as Vector3) + Vector3(0, 0.3, 0)   # the body itself (the bike slides off on its own)
 	elif directed:
 		view.from_yaw = NAN if (_yaw_snap or not pos_init) else cam_yaw   # (after a crash: swing back, no cut)
-		view.update(dt, game.terrain, st, f, drawn, ys, dist * float(Settings.get_v("cam_dist")) * (1.0 - 0.3 * float(Settings.get_v("sfx_pull")) * speed_feel),
+		view.update(dt, game.terrain, st, f, fp, ys, dist * float(Settings.get_v("cam_dist")) * (1.0 - 0.3 * float(Settings.get_v("sfx_pull")) * speed_feel),
 			cam_pitch + float(Settings.get_v("cam_height")), orbit + deg_to_rad(float(Settings.get_v("cam_side"))), float(Settings.get_v("cam_ahead")), follow_k)
 		want = target   # (the aim is worked out once the camera is placed)
 		cam_yaw = view.yaw
@@ -335,7 +385,9 @@ func update_cam(dt: float) -> void:
 		crash_cam_t = 0.0
 		crash_zoom += (0.0 - crash_zoom) * minf(1.0, rdt * 2.5)
 	target = target.lerp(want, minf(1.0, (rdt * 18.0) if crashed else dt * (7.0 if P.get("drift", false) else P.get("lag", 5.0))))
-	if P.get("ahead", false) and not (st.crash_on and game.ragdoll):
+	if directed:
+		anchor = fp + Vector3(0, 1.0, 0)
+	elif P.get("ahead", false) and not (st.crash_on and game.ragdoll):
 		# placed behind the RIDER (not behind the look point, which runs up to 14 m ahead)
 		anchor = anchor.lerp(Vector3(drawn.x, ys + 1.0, drawn.z), minf(1.0, dt * 12.0)) if pos_init else Vector3(drawn.x, ys + 1.0, drawn.z)
 	elif P.get("ahead", false):
@@ -405,7 +457,15 @@ func update_cam(dt: float) -> void:
 		var occ_max: float = P.get("occ_max", 46.0)
 		while not P.get("square", false) and need < occ_max and pit + need < 84 and _blocked(pit + need, back, ys, anchor):   # (the smoothed height: the bike's bumps flipped this on and off)
 			need += 4 if P.get("ahead", false) else 6
-		occ += (need - occ) * minf(1.0, dt * (2.0 if need > occ else 0.7))   # rise gently: no hops at some angles
+		if directed:   # (a spring: the plain ease's speed jumped each time the blocked test flipped)
+			var wo := 2.4 if need > occ else 1.1
+			var ox := occ - need
+			var oe := exp(-wo * dt)
+			var ob := _occ_v + wo * ox
+			occ = need + (ox + ob * dt) * oe
+			_occ_v = (_occ_v - wo * ob * dt) * oe
+		else:
+			occ += (need - occ) * minf(1.0, dt * (2.0 if need > occ else 0.7))   # rise gently: no hops at some angles
 		pit = minf(84, pit + occ)
 		var pr := deg_to_rad(pit)
 		var want_pos := anchor - back * dist * cos(pr) + Vector3(0, dist * sin(pr), 0)
@@ -442,6 +502,7 @@ func update_cam(dt: float) -> void:
 	if sk > 0 and _OLD_SHAKE:
 		global_position += Vector3(sin(t * 37) * sk * 0.06, sin(t * 29 + 1) * sk * 0.06, 0)
 	var trauma := clampf(sk / 0.45, 0.0, 1.0)
+	if directed: trauma = maxf(0.0, trauma - SHAKE_FLOOR)
 	st.shake = maxf(0.0, st.shake - dt * 1.2)
 	if _probe_on:   # BMX_CAM_PROBE: how much the camera rattles (2nd difference per frame: position, aim)
 		var po: Vector3 = global_position - game.drawn_pos
@@ -464,10 +525,12 @@ func update_cam(dt: float) -> void:
 		var vs := get_viewport().get_visible_rect().size
 		var drag: float = absf(BikePhysics.ang_diff(orbit, float(P.get("orbit", 0.0))))
 		aim = view.aim(dt, global_position, cam_yaw + orbit + view.side + deg_to_rad(float(Settings.get_v("cam_side"))), fov, vs.x / maxf(vs.y, 1.0),
-			Vector3(drawn.x, ys + 0.9, drawn.z), 1.0 - clampf(drag / 0.8, 0.0, 1.0))
+			fp + Vector3(0, 0.9, 0), 1.0 - clampf(drag / 0.8, 0.0, 1.0))
 		target = aim   # (a crash eases over from here)
 	if bool(Settings.get_v("cam_keep")) and not (st.crash_on and game.ragdoll):
-		aim = _keep_rider_in_view(aim if directed else target, drawn + Vector3(0, 0.9, 0))
+		aim = _keep_rider_in_view(aim if directed else target, (fp if directed else drawn) + Vector3(0, 0.9, 0))
+	if directed and global_position.distance_to(aim) > 0.01:
+		aim = _soft_look(aim, dt)
 	if P.get("square", false) and not st.crash_on:
 		# the same angle down whatever the rider does: towards him across, the preset's pitch down
 		var hz := Vector3(target.x - global_position.x, 0.0, target.z - global_position.z)

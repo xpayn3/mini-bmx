@@ -1869,6 +1869,10 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   (`dev/cam_view_probe.gd`, judges any camera from outside: share of trail points 6 .. 35 m seen / in bends / in the air /
   over drops, share of each flight that showed the real touch-down spot, view turn rate, rider's height in the frame;
   `CAMVIEWSHOT=prefix` shots). Run with `BMX_DEMO=1 BMX_CAM=trail BMX_TRAIL_FEAT=tech|table|kicker|woodDrop`.
+  **Floaty (same day, user: "shaky, abrupt shakes on small bumps")**: the trail view follows a smoothed rider
+  (`CameraRig._float_follow`, frame-time independent), turns on a spring (`_soft_look`), springs the blocked-view lift and
+  the points' heights, and ignores small impact shake (`SHAKE_FLOOR`). `CAMVIEW shake` line (headless, `--fixed-fps 60`):
+  turn acceleration max 1300-2300 -> ~100 deg/s2, rms 31-67 -> 27; the camera's vertical jolt p99 14 -> 9 m/s2.
 - **Cameras ride the bike's height without its bumps (2026-11-21, user: "side cam reacts harshly on bumps, exaggerates impacts, looks glitchy")**:
   `CameraRig._smooth_y` (two low-passes of `Y_TAU` 0.28 s read as 2 x first - second: no lag on slopes / jumps, a rock's kick or a landing's
   compression at about a sixth) feeds every follow camera's aim and anchor (side, chase, trail, drone, the playground's). The view-blocked check

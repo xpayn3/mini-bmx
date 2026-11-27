@@ -45,16 +45,17 @@ var _started := false
 var _i := -1                  # nearest course point (search hint)
 var _course = null
 var _pts: Array = []          # the points up the trail (world)
+var _h := PackedFloat32Array()   # each point's height over the rider, eased (a point sliding over bumps jumped the frame)
 var _bend := 0.0              # 0..1 how sharply the trail ahead turns
 var _land := Vector3.ZERO
 var _land_w := 0.0            # 0..1: a flight's landing spot counts this much
 
 func reset() -> void:
-	_started = false; _aim_init = false; _i = -1; _pts.clear()
+	_started = false; _aim_init = false; _i = -1; _pts.clear(); _h.clear()
 	_land_w = 0.0; _fit = 0.0; _over = 0.0; _bend = 0.0
 
 ## where the trail goes: S metres up it from the rider (along the heading off the trail / without a course)
-func _path(terrain, st, f: Vector3, ys: float, reach: float) -> void:
+func _path(dt: float, terrain, st, f: Vector3, ys: float, reach: float) -> void:
 	var c = terrain.field.course if terrain.field else null
 	var k := 0.0      # 0 = follow the heading, 1 = follow the trail
 	var u := 0.0      # the rider's place along the course, in points
@@ -92,6 +93,8 @@ func _path(terrain, st, f: Vector3, ys: float, reach: float) -> void:
 	_bend = k * smoothstep(0.7, 2.4, absf(turn))
 	var scale_s := reach / float(S[S.size() - 1])
 	_pts.resize(S.size())
+	var fresh := _h.size() != S.size()
+	if fresh: _h.resize(S.size())
 	for n in S.size():
 		var s: float = float(S[n]) * scale_s
 		var p := Vector3(st.x + f.x * s, 0.0, st.z + f.z * s)
@@ -109,7 +112,8 @@ func _path(terrain, st, f: Vector3, ys: float, reach: float) -> void:
 			gy = maxf(terrain.deck_height(p.x, p.z), ys - 1.5)   # (the canyon floor is not the trail)
 		else:
 			gy = terrain.deck_height(p.x, p.z)
-		p.y = gy + 0.3
+		_h[n] = gy - ys if fresh else lerpf(_h[n], gy - ys, 1.0 - exp(-dt * 5.0))
+		p.y = ys + _h[n] + 0.3
 		_pts[n] = p
 
 ## the spot this flight comes down on (the physics' own predictor sets state the ride reads: this one only looks)
@@ -145,7 +149,7 @@ func _need_height(terrain, p: Vector3, eye: Vector2) -> float:
 ## yaw, extra pitch and zoom for this frame. `dist` / `pitch` = the camera's own (before ours), `orbit` = the user's drag
 func update(dt: float, terrain, st, f: Vector3, drawn: Vector3, ys: float, dist: float, pitch: float, orbit: float, ahead_k: float, follow_k: float) -> void:
 	var reach := clampf(22.0 + absf(st.v) * 1.2, 24.0, 42.0) * clampf(ahead_k, 0.4, 2.0)
-	_path(terrain, st, f, ys, reach)
+	_path(dt, terrain, st, f, ys, reach)
 	_landing(terrain, st, dt)
 	# --- yaw: the middle of what lies ahead ---
 	var hd := atan2(-f.z, f.x)
@@ -208,7 +212,7 @@ func update(dt: float, terrain, st, f: Vector3, drawn: Vector3, ys: float, dist:
 			need = maxf(need, minf(pit_r - pitch, 22.0 if n >= S.size() else 15.0) * minf(w, 1.0))
 	need = clampf(maxf(need, BEND_PITCH * _bend), 0.0, EXTRA_MAX)
 	# (up quickly, down gently: a crest coming and going mustn't pump the view)
-	var we := 4.0 if need > extra else 1.6
+	var we := 3.0 if need > extra else 1.3
 	var ex := extra - need
 	var ee := exp(-we * dt)
 	var eb := _ev + we * ex
