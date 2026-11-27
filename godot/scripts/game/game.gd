@@ -255,6 +255,11 @@ const STAND_OVER := 0.08      # rad: ... but never more than this past upright a
 const LOOK_TWIST := 0.45      # share of a look over the shoulder the shoulders turn with (at a stop)
 const HAND_HIP_YAW := 1.0     # rad of look: past it the hand on that side comes off the bar to the hip (Riders Republic)
 var _hand_hip := 0.0; var _hand_hip_side := -1.0
+var _stop_mode := 0           # this stop's pose: 1 stands over the top tube (both feet down), 2 sits on the saddle
+var _stop_w := 0.0             # how far into it (eased)
+const STOP_AFTER := 0.5        # s settled on the foot before he goes into the stop pose
+const STOP_IN := 0.7           # s to go into it (out: 0.3 s, or as the foot leaves the ground)
+const STAND_FOOT_OUT := 0.3    # m: standing over the bike, each foot this far out from the frame's middle
 var _stand_var := 0.0   # the stop lean's moving part (toward the foot +), handed to the rider to hold against
 ## (a small tremor on lean + bars was tried 2026-11-27 and removed: "he's all shaking, it's disturbing")
 const IDLE_IN := 0.8          # s: fades in over this once settled on the foot
@@ -3809,14 +3814,17 @@ func _update_dab(dt: float, st: BikePhysics) -> void:
 	var want: bool = not st.air and st.pedal < 0.05 and (st.v < 1.2 and st.v > -0.7 if dab_lin > 0.0 else (absf(st.v) < 0.5 or coming))   # backing up (brake held) lifts it
 	if want and dab_lin <= 0.0:
 		_pick_dab_side(st)
+		_stop_mode = int(Env.s("BMX_STOP_MODE")) if Env.s("BMX_STOP_MODE") != "" else (1 if _idle_rng.randf() < 0.55 else 2)   # (tests: BMX_STOP_MODE=1 stand / 2 sit)
 	dab_lin = move_toward(dab_lin, 1.0 if want else 0.0, dt / (0.45 if want else 0.4))
 	dab_k = smoothstep(0.0, 1.0, dab_lin)
 	st.foot_down = want and dab_lin >= 0.6
 	# the bike settles onto the foot: a cool, deliberate lean (more when the foot's ground is lower than the
 	# other side's: the bike has to go further over to reach it), with a slow small breathing sway once settled
-	var lean_t := DAB_LEAN + clampf(-_dab_gap * 0.9, -0.08, 0.1) + 0.02 * sin(t * 0.8) * clampf(_dab_hold - 0.5, 0.0, 1.0)
+	var lean_t := DAB_LEAN * (1.0 - 0.65 * smoothstep(0.0, 1.0, _stop_w) * (1.0 if _stop_mode == 1 else 0.0)) + clampf(-_dab_gap * 0.9, -0.08, 0.1) + 0.02 * sin(t * 0.8) * clampf(_dab_hold - 0.5, 0.0, 1.0)
 	_dab_lean_s += (lean_t - _dab_lean_s) * (1.0 - exp(-dt * 3.0))
 	_dab_hold = _dab_hold + dt if dab_k > 0.99 else 0.0
+	var sw_on: bool = not _OLD_IDLE and not scenic and _stop_mode > 0 and _dab_hold > STOP_AFTER
+	_stop_w = move_toward(_stop_w, 1.0 if sw_on else 0.0, minf(dt, 0.05) / (STOP_IN if sw_on else 0.3))
 
 ## FOOT OUT: when (see the constants) and which side (the inside of the lean: bike_lean > 0 leans left)
 func _update_footout(dt: float, st: BikePhysics) -> void:
@@ -3902,7 +3910,7 @@ func _pedal_probe() -> void:
 ## trail over a shoulder, down at the foot, out ahead), holding each glance a while. Feeds lookYaw / lookPitch.
 ## see IDLE_*: weight shifts and bars while settled at a stop (critically damped springs: no snaps)
 func _idle_life(dt: float) -> void:
-	var on: bool = not _OLD_IDLE and dab_k > 0.5 and _dab_hold > 0.4
+	var on: bool = not _OLD_IDLE and not scenic and dab_k > 0.5 and _dab_hold > 0.4
 	_idle_k = move_toward(_idle_k, 1.0 if on else 0.0, dt / (IDLE_IN if on else 0.3))
 	var k := smoothstep(0.0, 1.0, _idle_k)
 	var h := minf(dt, 0.05)
@@ -3924,12 +3932,12 @@ func _idle_life(dt: float) -> void:
 	_idle_lean = IDLE_SHIFT * _idle_shift * k
 	_idle_steer = (IDLE_BAR * _idle_bar + IDLE_BAR_DRIFT * sin(t * 0.37 + 1.3) * sin(t * 0.19)) * k
 	if Env.s("BMX_IDLE_PROBE") != "" and Engine.get_process_frames() % 15 == 0 and k > 0.0:
-		print("IDLELIFE k=%.2f lean=%.3f bars=%.3f head=%s stroke=%.4f y=%.3f" % [k, _idle_lean, _idle_steer, (rider.to_global(rider.J[0]) if rider and rider.J.size() > 0 else Vector3.ZERO).snapped(Vector3.ONE * 0.001), rig.susp.last_stroke if rig and rig.susp else 0.0, rig.global_position.y if rig else 0.0])
+		print("IDLELIFE k=%.2f lean=%.3f bars=%.3f head=%s pel=%s stroke=%.4f y=%.3f" % [k, _idle_lean, _idle_steer, (rider.to_global(rider.J[0]) if rider and rider.J.size() > 0 else Vector3.ZERO).snapped(Vector3.ONE * 0.001), (rider.J[2] if rider and rider.J.size() > 2 else Vector3.ZERO).snapped(Vector3.ONE * 0.001), rig.susp.last_stroke if rig and rig.susp else 0.0, rig.global_position.y if rig else 0.0])
 
 ## at a stop, looking back over a shoulder (|look| past HAND_HIP_YAW) the hand on that side leaves the bar for the hip and
 ## comes back as he looks ahead again (Riders Republic's waiting rider). Eased over ~0.35 s
 func _hand_to_hip(lt: Dictionary, dt: float) -> void:
-	var want: bool = not _OLD_IDLE and dab_k > 0.9 and absf(_look_yaw) > HAND_HIP_YAW
+	var want: bool = not _OLD_IDLE and not scenic and dab_k > 0.9 and absf(_look_yaw) > HAND_HIP_YAW
 	if want and _hand_hip <= 0.01: _hand_hip_side = -1.0 if _look_yaw > 0.0 else 1.0   # (yaw > 0 = left: the left hand)
 	_hand_hip = move_toward(_hand_hip, 1.0 if want else 0.0, minf(dt, 0.05) / 0.35)
 	if _hand_hip <= 0.0 or rider == null or rider.J.size() < 3: return
@@ -3981,6 +3989,22 @@ func _dab_foot(lt: Dictionary) -> void:
 	var f := pedal_p.lerp(tl, dab_k)
 	f.y += sin(PI * dab_k) * 0.07   # lifts off the pedal on the way out / back
 	lt[key] = f
+	# standing over the bike (stop pose 1): the other foot comes off its pedal to the ground too, both STAND_FOOT_OUT out
+	var sk: float = smoothstep(0.0, 1.0, _stop_w) if _stop_mode == 1 else 0.0
+	if sk > 0.0:
+		var key2 := "footR" if dab_side < 0.0 else "footL"
+		var g2 := bb - rgt * dab_side * STAND_FOOT_OUT + fwd * DAB_FWD
+		g2.y = terrain.top_height(g2.x, g2.z) + 0.012
+		var tl2: Vector3 = rig.lean_g.to_local(g2)
+		tl2.y -= 0.03
+		var f2: Vector3 = (lt[key2] as Vector3).lerp(tl2, sk)
+		f2.y += sin(PI * sk) * 0.08
+		lt[key2] = f2
+		var g1 := bb + rgt * dab_side * STAND_FOOT_OUT + fwd * DAB_FWD   # (the dab foot in a little, a natural stance)
+		g1.y = terrain.top_height(g1.x, g1.z) + 0.012
+		var tl1: Vector3 = rig.lean_g.to_local(g1)
+		tl1.y -= 0.03
+		lt[key] = (lt[key] as Vector3).lerp(tl1, sk)
 
 ## the drawn value of a physics state key, between the last two steps (`_lerp_a` = the fraction, set per frame)
 var _lerp_a := 1.0
@@ -4051,7 +4075,7 @@ func _process(dt: float) -> void:
 	var wobble := sin(t * 2.3) * 0.025 * maxf(0.0, 1 - absf(st.v) / 2) * (1.0 - dab_k)
 	var dab_lean := -dab_side * (_dab_lean_s + _idle_lean) * dab_k   # bike_lean > 0 tips the top to the rider's left (+ idle weight shifts)
 	# (the player tips the bike at a stop with the lean input: + = left, like bike_lean; never far past upright away from the foot)
-	if not _OLD_IDLE and dab_k > 0.0:
+	if not _OLD_IDLE and not scenic and dab_k > 0.0:
 		dab_lean += phys.flick * STAND_LEAN * dab_k
 		var fs := -dab_side
 		dab_lean = fs * maxf(dab_lean * fs, -STAND_OVER)
@@ -4260,6 +4284,8 @@ func _process(dt: float) -> void:
 		pi["footOutSide"] = fo_side
 		pi["dabLean"] = _dab_lean_s
 		pi["dabLeanVar"] = _stand_var
+		pi["stopStand"] = smoothstep(0.0, 1.0, _stop_w) * dab_k if _stop_mode == 1 else 0.0
+		pi["stopSit"] = smoothstep(0.0, 1.0, _stop_w) * dab_k if _stop_mode == 2 else 0.0
 		pi["v"] = st.v
 		# (through the motion cap, MCAP: the torso, head and hips can't move faster than a body can)
 		var pdt := minf(dt, 0.05)
@@ -4312,7 +4338,7 @@ func _process(dt: float) -> void:
 		pi["tall"] = 1.0 if scenic else 0.0
 		pi["lookYaw"] = _look_yaw
 		pi["lookPitch"] = _look_pitch
-		pi["lookTwist"] = 0.0 if _OLD_IDLE else clampf(_look_yaw * LOOK_TWIST, -0.7, 0.7) * dab_k   # (the shoulders turn with a look over the shoulder)
+		pi["lookTwist"] = 0.0 if (_OLD_IDLE or scenic) else clampf(_look_yaw * LOOK_TWIST, -0.7, 0.7) * dab_k   # (the shoulders turn with a look over the shoulder)
 		# the LAND's slope under the two wheels (deck_height: no rock / log domes). With the domes in it the slope
 		# flipped +-6 deg as each wheel crossed a stone, and the rider read every rock as a climb / a wheelie
 		var sf: Vector3 = phys.fwd()

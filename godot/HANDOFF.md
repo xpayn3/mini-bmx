@@ -1429,6 +1429,12 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   at a stop (`STAND_LEAN` 0.3 rad, never past `STAND_OVER` 0.08 rad away from the foot). Looking back the shoulders turn with
   it (`LOOK_TWIST` 0.45) and past `HAND_HIP_YAW` 1 rad the hand on that side goes to the hip (`_hand_to_hip`, Riders Republic).
   The relaxed "sat up, chin up" stop pose is off (user: "awful"; title screen only). A small tremor was tried: "all shaking", removed.
+  **Stop poses** (photos of riders waiting, user: "we can also sit on the seat"): settled `STOP_AFTER` 0.5 s each stop picks
+  one (Game `_stop_mode`): 1 = stands over the top tube, both feet down `STAND_FOOT_OUT` 0.3 m out, hips `STOP_HIP_FWD` 0.12 m
+  ahead of the saddle nose, legs `STOP_LEG` 0.95 straight, torso 0.3 rad (bike lean onto the foot x0.35); 2 = sat on the saddle
+  (hips the pivot of the dab counter-turn: they stay on it), dab foot down, torso 0.15 rad, arms long. rider.gd `stopStand` /
+  `stopSit`, the saddle floor off when standing. None of the stop features on the title screen (`scenic`). Test
+  `BMX_STOP_MODE=1|2`.
 - **Foot down at a stop** (`Game._update_dab` / `_dab_foot`, drawn only): nearly stopped, not pedalling, on the ground
   -> the foot on the lower pedal (level cranks: the side the bike leans to, else left) goes to `Terrain.top_height`
   beside the bike, the bike leans `DAB_LEAN` onto it, the body stays upright (rider `dab` input). Eases in 0.5 s, out
