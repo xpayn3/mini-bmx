@@ -124,6 +124,7 @@ const DEFAULTS := {
 	"vol_impacts": 1.0, "on_impacts": true,
 	"vol_world": 1.0, "on_world": true,
 	"vol_ui": 1.0, "on_ui": true,
+	"vol_rider": 1.0, "on_rider": true,
 	# gameplay / controller
 	"pause_unfocused": true,
 	"boot_intro": true,      # launch: the CRT TV intro (off = a still frame of it while the game loads)
@@ -582,6 +583,7 @@ const MIX := [
 	["Wind", "wind", "Wind, tyres & water", "The rush of air, tyre roll on the ground, skids, splashes"],
 	["Bike", "bike", "Bike mechanics", "Freewheel clicks, chain, gear shifts"],
 	["Impacts", "impacts", "Landings & crashes", "Landing slams, crashes, bone crunches, wood smashes"],
+	["Rider", "rider", "Rider's body", "Breathing, heartbeat, grunts"],
 	["World", "world", "World sounds", "TVs, garage door and other things out in the world"],
 	["UI", "ui", "Computer beeps & paper", "Bike computer tones, map / leaflet paper rustle"],
 ]

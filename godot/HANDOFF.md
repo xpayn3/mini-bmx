@@ -3530,6 +3530,27 @@ ide_<date>.replay` (test runs: `replays/tests/`), zstd, ~4 MB a
   is called from `bike_physics` on HEAVY / SLAM (`Game.on_bad_landing`). No C#: the recorded `bike_slam_1..10.ogg` play. Hit A (messy multi-bounce) fitted badly and is not used.
   Test: `-s res://tools/slam_render.gd -- <dir>` writes every type to WAV; `BMX_LAND_TEST=5` fakes a hard landing.
 
+### Recorded ride layers: whoosh, breathing, heartbeat, physics sound layers (2026-11-27, `scripts/game/ride_layers.gd`)
+- DiRT-style: each layer is a folder of the USER'S recordings in `assets/audio/ride/<layer>/` (`README.txt` there lists
+  them), driven by the ride; an empty / missing folder = silent (no synth placeholders). **No recordings yet: all silent.**
+  Made by `RideAudio` (`audio.layers`), updated from `update_audio`; only the live ride (fades out in replays, photo mode,
+  the map). Cost: a few us of script a frame, Godot mixes on its audio thread (~20 voices).
+- Loops: `roll_ground / roll_trail / roll_water / roll_sand` (rear surface, level + pitch by speed), `rattle` (wheel shake
+  `vw_f` + `vw_r`), `breath_calm / work / hard` (crossfaded by the HUD heart rate `hud.hr`, 95 .. 150 bpm; tired /
+  crashed = hard; quieter in the air = held breath), `ambience` (lower at speed).
+- One-shots (3D at the spot for the first four): `whoosh` (a collider from `terrain.colliders_near` taller than 0.45 m
+  crossing from ahead to behind within 2.5 m of the bike's line, > 5 m/s; fences quieter, 0.06 s apart), `stones`
+  (random rate by speed x looseness, more skidding), `susp_compress` (shock speed `dg_vF/R` > 0.9 m/s), `bottom_out`
+  (`dg_botF/R` rising), `heartbeat` (ONE beat per clip, fired at `hud.hr` when tired / life < 0.6 / crashed / > 170 bpm),
+  `breath_exhale` (after > 0.45 s air or a sprint), `grunt_hop` (`pop_fx` rising), `grunt_land` (impact > 4), `grunt_crash`.
+- Rider sounds are +4 dB on the helmet cam, -2 on trail / chase, -8 on far cams. New mixer channel **Rider**
+  (`Settings.MIX`, `vol_rider` / `on_rider`).
+- Probe `BMX_LAYER_PROBE=1` (`LAYERS loops[...] events{...} clips[...]` 1x / s, works with no clips); `BMX_LAYERS=0` = off.
+  Seed 4242 follow ride, 30 s: ~1 stone / s, 16 suspension hits, 3 bottom-outs, 3 landing grunts, 1 whoosh (the trail
+  keeps trees ~1.3 m+ off its edge). The follow rider pedals flat out, so breathing reaches "hard" in ~6 s.
+- Not done: whoosh for big things past 3 m (gantries, cliffs), ambience per biome, reverb zones, camera-aware mix of the
+  bike layers, recorded layers in replays. Research + gap list: `docs/research/sound_design.md`.
+
 ### Ghost rider (2026-11-24, `scripts/game/ghost_rider.gd`, made by `Game._ready` in rides of a world, not levels)
 - Your best run on this world (seed + bike) rides with you as a see-through glowing rider + bike; the HUD shows the gap
   to it ("GHOST +1.2 s" red = behind, green = ahead; "GHOST: AHEAD OF IT" past where it got to, "GHOST FINISHED").
