@@ -5,9 +5,9 @@ extends Camera3D
 
 ## C / pad Y cycle in this order (the most used first, so the default is never far away)
 const PRESETS := {
-	# default: high drone-like view a little off to the side, turning with the trail AHEAD (not the bike)
-	# and aiming past the rider so the rider sits low in the frame and you see what's coming
-	"trail":     {"label": "Trail",      "dist": 10.5, "pitch": 18.0, "follow": true,  "fov": 52.0, "orbit": 0.2, "rate": 2.6, "ahead": true, "occ_max": 16.0},
+	# default: behind and above, a little off to the side, framing what's coming (the trail ahead, round a hairpin, and
+	# where a flight comes down): its yaw / height / distance / aim come from TrailView (trail_view.gd)
+	"trail":     {"label": "Trail",      "dist": 10.5, "pitch": 20.0, "follow": true,  "fov": 54.0, "orbit": 0.12, "rate": 2.6, "ahead": true, "occ_max": 16.0},
 	# POV from the action cam on top of the helmet (Rider.action_cam): wide lens, lightly stabilised
 	"helmet":    {"label": "Helmet",  "mode": "helmet", "fov": 88.0},
 	# POV from the action cam on the bike (BikeRig.action_cam: handlebar / fork leg), only in the cycle when one is mounted
@@ -52,6 +52,8 @@ var mode := "trail"
 var trail_i := -1            # nearest trail centreline point (search hint)
 var trail_dir := Vector3.ZERO  # smoothed direction to the trail ahead (Trail camera)
 var trail_course = null
+var view := TrailView.new()   # the Trail camera's director (BMX_OLD_TRAILCAM=1 = the old trail camera)
+var _OLD_TRAILCAM := Env.s("BMX_OLD_TRAILCAM") != ""
 var dist := 22.0
 var orbit := 0.0
 var orbit_t := 0.0
@@ -66,6 +68,7 @@ var occ := 0.0
 var track_pos = null
 var target := Vector3.ZERO
 var _probe_on := Env.s("BMX_CAM_PROBE") != ""
+var _view_probe = null   # BMX_CAMVIEW tests (dev/cam_view_probe.gd)
 const SHAKE_YAW := 0.026     # rad at full trauma (~1.5 deg)
 const SHAKE_PITCH := 0.026
 const SHAKE_ROLL := 0.044    # (~2.5 deg)
@@ -109,6 +112,7 @@ func _ready() -> void:
 	osd.rig = self
 	osd.visible = false
 	layer.add_child(osd)
+	if Env.s("BMX_CAMVIEW") != "": _view_probe = Dev.make("cam_view_probe.gd", [self])
 
 func preset() -> Dictionary:
 	return VISTA if mode == "vista" else presets()[mode]
@@ -123,6 +127,7 @@ func set_mode(m: String) -> void:
 	mode = m
 	track_pos = null
 	dr_init = false; helm_init = false
+	view.reset()
 	if P.get("mode", "") == "helmet":   # crashed: the chase view takes over (PRESETS.chase), ready here
 		dist = PRESETS.chase.dist; cam_pitch_t = PRESETS.chase.pitch; orbit_t = 0.0; orbit = 0.0
 		return
@@ -158,6 +163,7 @@ func snap_to(p: Vector3) -> void:
 	# (also the view's own heading: chase / side / drone kept the old spot's yaw and looked at the rider from the side
 	# or the front until he passed 0.5 m/s, then swung round)
 	_hd_s = NAN; _slope_init = false; occ = 0.0; _yaw_snap = true
+	view.reset()
 
 var _yaw_snap := false   # a teleport: the follow cameras take the new heading at once
 
@@ -283,9 +289,19 @@ func update_cam(dt: float) -> void:
 	var slope_on: bool = P.get("slope", false) and not _OLD_CHASE and not st.crash_on
 	var gs := _ground_slope(drawn, f, st.air, dt) if slope_on else 0.0   # + = the trail climbs ahead
 	if not slope_on: _slope_init = false
+	# the director: only the trail view, and not while it watches a crash
+	var directed: bool = P.get("ahead", false) and not _OLD_TRAILCAM and not (st.crash_on and game.ragdoll != null)
+	if not directed: view.reset()
 	var want: Vector3
 	if st.crash_on and game.ragdoll:
 		want = (game.ragdoll.p[Ragdoll.PELVIS] as Vector3) + Vector3(0, 0.3, 0)   # the body itself (the bike slides off on its own)
+	elif directed:
+		view.from_yaw = NAN if (_yaw_snap or not pos_init) else cam_yaw   # (after a crash: swing back, no cut)
+		view.update(dt, game.terrain, st, f, drawn, ys, dist * float(Settings.get_v("cam_dist")) * (1.0 - 0.3 * float(Settings.get_v("sfx_pull")) * speed_feel),
+			cam_pitch + float(Settings.get_v("cam_height")), orbit + deg_to_rad(float(Settings.get_v("cam_side"))), float(Settings.get_v("cam_ahead")), follow_k)
+		want = target   # (the aim is worked out once the camera is placed)
+		cam_yaw = view.yaw
+		trail_dir = Vector3(cos(view.yaw), 0, -sin(view.yaw))
 	elif P.get("ahead", false):
 		# aim a few metres up the trail (more at speed): the rider sits in the lower part of the frame
 		_look_dir(st, f, dt)   # steers cam_yaw toward the trail ahead (below)
@@ -347,7 +363,7 @@ func update_cam(dt: float) -> void:
 		fov_t = clampf(rad_to_deg(2 * atan(2.2 / d)), 7, 40)
 		dist = d
 	else:
-		if P.get("follow", false) and (absf(st.v) > 0.5 or _yaw_snap):
+		if P.get("follow", false) and not directed and (absf(st.v) > 0.5 or _yaw_snap):
 			# in the air follow the travel direction, not the bike (it may be spinning a 360)
 			var dir_h: float = st.course if st.air and not is_nan(st.course) else st.heading
 			if P.get("ahead", false) and trail_dir.length_squared() > 0.01:
@@ -381,6 +397,7 @@ func update_cam(dt: float) -> void:
 		dist = dist0 * float(Settings.get_v("cam_dist")) * (1.0 - 0.3 * float(Settings.get_v("sfx_pull")) * speed_feel)   # the zoom the user set × the Settings distance
 		if P.get("square", false): dist = dist0 * float(Settings.get_v("cam_dist"))
 		dist *= 1.0 - crash_zoom   # crashed: slowly zooming in on the body (eases back out after a reset)
+		if directed: dist *= view.zoom; pit = clampf(pit + view.extra, 2.0, 75.0); yaw += view.side
 		if P.get("drift", false):
 			yaw += sin(t * 0.13) * 0.3; pit += sin(t * 0.09) * 4
 		var back := Vector3(cos(yaw), 0, -sin(yaw))
@@ -399,7 +416,8 @@ func update_cam(dt: float) -> void:
 			var off_want := want_pos - anchor
 			if not pos_init:
 				pos_s = off_want; pos_v = Vector3.ZERO; pos_init = true
-			var w := (3.2 if P.get("ahead", false) else 2.4) * clampf(follow_k, 0.4, 2.5)
+			# (directed: its yaw / height / distance are eased already, a slow spring on top only lagged the turns)
+			var w := ((5.5 if directed else 3.2) if P.get("ahead", false) else 2.4) * clampf(follow_k, 0.4, 2.5)
 			pos_v = (pos_v + (off_want - pos_s) * w * w * dt) * exp(-2 * w * dt)
 			pos_s += pos_v * dt
 			global_position = anchor + pos_s
@@ -442,8 +460,14 @@ func update_cam(dt: float) -> void:
 		# (shift the aim by the slope's rise over the camera's own reach: the view turns by about that angle, the rider stays framed)
 		var hd_c := Vector2(target.x - global_position.x, target.z - global_position.z).length()
 		aim.y += tan(absf(gs) * (SLOPE_LOOK_UP if gs > 0.0 else SLOPE_LOOK_DN)) * maxf(hd_c, 1.0)
+	if directed:
+		var vs := get_viewport().get_visible_rect().size
+		var drag: float = absf(BikePhysics.ang_diff(orbit, float(P.get("orbit", 0.0))))
+		aim = view.aim(dt, global_position, cam_yaw + orbit + view.side + deg_to_rad(float(Settings.get_v("cam_side"))), fov, vs.x / maxf(vs.y, 1.0),
+			Vector3(drawn.x, ys + 0.9, drawn.z), 1.0 - clampf(drag / 0.8, 0.0, 1.0))
+		target = aim   # (a crash eases over from here)
 	if bool(Settings.get_v("cam_keep")) and not (st.crash_on and game.ragdoll):
-		aim = _keep_rider_in_view(target, drawn + Vector3(0, 0.9, 0))
+		aim = _keep_rider_in_view(aim if directed else target, drawn + Vector3(0, 0.9, 0))
 	if P.get("square", false) and not st.crash_on:
 		# the same angle down whatever the rider does: towards him across, the preset's pitch down
 		var hz := Vector3(target.x - global_position.x, 0.0, target.z - global_position.z)
@@ -469,6 +493,7 @@ func update_cam(dt: float) -> void:
 	var see: Vector3 = target if (st.crash_on and game.ragdoll) else drawn + Vector3(0, 0.9, 0)
 	RenderingServer.global_shader_parameter_set("cam_see", Vector4(see.x, see.y, see.z, 1.0 if bool(Settings.get_v("cam_fade")) else 0.0))
 	RenderingServer.global_shader_parameter_set("cam_eye", Vector4(global_position.x, global_position.y, global_position.z, 0.0))
+	if _view_probe: _view_probe.sample(dt)
 
 ## Drone: the camera hangs under a quadcopter. It hovers (slow bob + gusts), the airframe banks into
 ## its sideways acceleration and noses down as it speeds up; the gimbal only half cancels that, so the
