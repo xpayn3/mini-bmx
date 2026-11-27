@@ -2669,7 +2669,14 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   bike (fades by ~0.7 m up), tyre sidewalls mostly clear, cap 25 % (`grime_mud.gdshader` dust block); mud unchanged.
   Same day: contact shadow `TYRE_A` 0.6 -> 0.78, `BODY_A` 0.22 -> 0.3; LightLab `agx_contrast` 1.25 -> 1.38. Measured: the
   near haze is NOT what flattens the bike (vol fog + far fog off moved the bike's darkest 2 % only 72 -> 74 of 255).
-  Compare: `BMX_IDLE=1 BMX_CAM=side BMX_DUST_COAT=1 BMX_MUD_COAT=0.25` vs both 0. **Colours = the ground ridden on** (2026-11-21, user: bike looked pale / bright, "make dirt and dust the same colour as
+  Compare: `BMX_IDLE=1 BMX_CAM=side BMX_DUST_COAT=1 BMX_MUD_COAT=0.25` vs both 0.
+  Then (user: "Godot vs Unity render, do the best option"): (1) a live reflection probe riding with the bike
+  (UPDATE_ALWAYS, 60 m box) was tried and dropped: 72 -> 37 fps (Godot re-renders all 6 faces every frame) for a
+  change you can barely see. (2) Kept: `sky_hdri.gdshader` `ground_dim` (LightLab `ground_bounce` 0.4, Tone): in the
+  lighting (cubemap) pass the sky below the horizon is darkened, so ambient + reflections from below are a ground bounce
+  instead of the bright haze; the visible sky is untouched, the SkyMeter card faces up so it doesn't undo it. Free, but
+  small in sun (bike's darkest 2 % 68 -> 65 of 255). `BMX_OLD_SKYGROUND=1` = before. Not looked at: night / title /
+  shade-heavy forest, where ambient matters more. **Colours = the ground ridden on** (2026-11-21, user: bike looked pale / bright, "make dirt and dust the same colour as
   the ground"): the dust film is the ground colour itself, mud the same colour x 0.68 (sand 0.8); both keep following the
   ground while riding it (`Grime.GROUND_FOLLOW` 6 s, mud 2.5x). `grime_dust` is a plain vec4 global, so it must be sent
   linear (`srgb_to_linear`): sRGB numbers read as linear were the chalky white film. Mud is raised (screen-space bump from a lumpy height field in the pass: no UVs

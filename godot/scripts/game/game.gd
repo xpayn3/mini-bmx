@@ -1170,6 +1170,8 @@ func _apply_light(h: float, L: Dictionary) -> void:
 	_sky_set("haze_amt", clampf(LightLab.v("dust_haze") * float(L.haze), 0.0, 1.0))
 	_sky_set("haze_col", Vector3(hz_c.r, hz_c.g, hz_c.b))
 	_sky_set("haze_height", LightLab.v("haze_height"))
+	# ambient + reflections from below = the ground's (darker) bounce, not more haze (BMX_OLD_SKYGROUND=1 = before)
+	_sky_set("ground_dim", 1.0 if Env.s("BMX_OLD_SKYGROUND") != "" else LightLab.v("ground_bounce"))
 	# the haze is lit: its brightness = what the sky and the sun put into it (SunSky's numbers), not the blurred average of
 	# the sky (aerial perspective alone made the far hills dark grey silhouettes)
 	env.fog_light_color = hz_c

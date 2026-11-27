@@ -12,6 +12,7 @@ uniform float rotation_b = 0.0;
 uniform float mix_b = 0.0;
 uniform float energy = 1.0;          // sky brightness in the view
 uniform float light_energy = 1.0;    // sky brightness in ambient / reflections
+uniform float ground_dim = 0.4;      // lighting passes: the lower half (the ground's bounce) x this; 1 = as bright as the haze
 uniform float sun_clamp = 6.0;       // cap on radiance in the lighting passes (kills the double sun)
 uniform vec3 tint : source_color = vec3(1.0);
 uniform float golden = 0.0;
@@ -203,6 +204,10 @@ void sky() {
 		c = mix(c, hz, clamp(w, 0.0, 1.0));
 	}
 	if (AT_CUBEMAP_PASS) {
+		// the light coming from below = the ground, not more sky (2026-11-27): the haze filled the lower half as
+		// bright as the horizon, so ambient + reflections lit everything as strongly from under as from over it
+		// and the bike / rider / trees had no shading from the ground up (flat, "lame"). The visible sky is untouched.
+		c *= mix(1.0, ground_dim, smoothstep(0.0, -0.3, d.y));
 		c = min(c, vec3(sun_clamp)) * light_energy;
 	} else {
 		c *= energy;
