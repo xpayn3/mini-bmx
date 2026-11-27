@@ -5,8 +5,8 @@ class_name CheckpointFlags
 ## shaders/feather_flag.gdshader from the shared wind globals (atm_wind): no script runs per frame.
 ## The print is one atlas of DESIGNS columns of 512 x 1856 px, the user's designs on flag_design/flag_template.png
 
-const H_POLE := 3.4        # m, the top of the flag (the pole's end, over the free edge)
-const CLOTH_Y0 := 0.5      # bottom of the cloth (a straight edge)
+const H_POLE := 3.8        # m, the top of the flag (the pole's end, over the free edge)
+const CLOTH_Y0 := 0.9      # bottom of the cloth (a straight edge): the bare pole below it (user: "start the flag higher")
 const CLOTH_W := 0.8       # cloth width (pole to the straight free edge)
 const ARC_H := 0.85        # how far down from the top the pole starts curving over
 const NY := 22             # cloth grid rows (up)

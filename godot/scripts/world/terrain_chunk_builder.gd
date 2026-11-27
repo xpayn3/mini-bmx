@@ -1035,7 +1035,7 @@ func _dist_signs() -> void:
 ## the checkpoint every 5 km (the distance sign's spot, not the early 1 km one): one feather flag each
 ## side of the trail, facing each other across it, 1.3 m past its edge (CheckpointFlags; visual only, no collider).
 ## If a side's spot doesn't fit (fence, water, a jump), the next course points along are tried
-const FLAG_SCALE := 5.0 / CheckpointFlags.H_POLE   # drawn 5 m tall (user 2026-11-27), cloth ~1.2 m wide
+const FLAG_SCALE := 1.47   # x the mesh: cloth ~1.2 x 4.3 m, its bottom ~1.3 m up, top ~5.6 m (user 2026-11-27)
 
 func _checkpoint_flags() -> void:
 	var C: TrailCourse = f.course
