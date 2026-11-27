@@ -36,13 +36,15 @@ public partial class LensDropsCs : RefCounted
 	int _tn;
 	readonly bool[] _mov = new bool[MAX];
 	// each drop's own life: how long since it hit the glass, how long it clings there first (a splash drop sits
-	// still ~half a second, then lets go: user, 2026-11-25), and its own wander (a slow random turn + a phase for
+	// still ~half a second or a bit more, then lets go: user, 2026-11-25), and its own wander (a slow random turn + a phase for
 	// its stick-slip) so no two run the same straight line
 	readonly float[] _age = new float[MAX], _hold = new float[MAX], _wan = new float[MAX], _seed = new float[MAX];
 	readonly float[] _fx = new float[MAX], _fy = new float[MAX], _load = new float[MAX];   // the push's direction, how near it is to letting go (0..1)
 	readonly bool[] _splat = new bool[MAX];   // landed from a splash: drawn as an impact that pulls into a bead
 	const float HOLD_EASE = 0.3f;    // after its hold the grip lets go over this long (the drop wets out, sags, then goes)
-	const float WANDER = 0.75f;      // rad: how far a running drop's own wander turns it off the push
+	const float WANDER = 0.12f;      // rad: how far a running drop's own wander turns it off the push (0.75 zig-zagged: user, 2026-11-27)
+	const float GLASS_TURN = 0.15f;  // rad, peak to peak: how much the glass's own pattern turns it (was 0.9)
+	const float PATH_TURN = 0.1f;    // rad, peak to peak: a slow bend along its own path (was 0.6)
 	const float WANDER_RATE = 5f;    // 1/s: how quickly that wander changes
 	const float STUTTER = 0.8f;      // 0..1: a running drop's speed swings this much (catches on the glass, lets go)
 	int _n;
@@ -92,7 +94,7 @@ public partial class LensDropsCs : RefCounted
 		for (int k = 0; k < count; k++)
 		{
 			float x = Rnd() * aspect, y = 1f - MathF.Pow(Rnd(), 0.7f), r = RandR(rmin, rmax);
-			Add(x, y, r, 0.3f + 0.2f * Rnd());
+			Add(x, y, r, 0.45f + 0.35f * Rnd());
 			// a big splat throws a ring of fine mist beads round it (they cling and dry; the odd one joins it)
 			if (r > 0.006f * SIZE)
 			{
@@ -169,8 +171,8 @@ public partial class LensDropsCs : RefCounted
 				_mov[i] = true;
 				float vt = MathF.Min((F - pin) / (FRICTION * r), V_MAX);   // runs at what glass friction lets it
 				// meander: the glass's own pattern turns it a little (both ways)
-				float turn = (Noise(_x[i] * 80f + 17f, _y[i] * 80f) - 0.5f) * 0.9f + _wan[i]
-					+ (Noise(_seed[i], _age[i] * 3f) - 0.5f) * 0.6f;
+				float turn = (Noise(_x[i] * 80f + 17f, _y[i] * 80f) - 0.5f) * GLASS_TURN + _wan[i]
+					+ (Noise(_seed[i], _age[i] * 3f) - 0.5f) * PATH_TURN;
 				// stick-slip: it catches on the glass and lets go, faster / slower along its own path
 				vt *= 1f - STUTTER * Noise(_seed[i] + 31f, _age[i] * 4.5f) * Noise(_x[i] * 140f, _y[i] * 140f + _seed[i]);
 				float cx = Fx / F, cy = Fy / F;
