@@ -222,7 +222,23 @@ var _share_f := NAN    # the front tyre's share of the load, eased the same way
 const SURF_MU := [0.72, 0.95, 0.62, 0.5]   # tyre grip by surface: ground, trail, water, sand / dry
 ## what a tyre can stop with on each surface (friction along the tyre, x brakeGrip): ground / grass, trail hardpack,
 ## water, sand. The brakes are limited by these, not by the levers (they used to run out first: ~0.84 g on every surface)
-const BRAKE_MU := [0.62, 0.78, 0.6, 0.45]
+## (2026-11-27, user: "always braking like I'm on asphalt": the trail stopped at 0.74 g. Loose dirt on MTB tyres is
+## ~0.45-0.6 g. Old values with BMX_OLD_DIRTBRAKE=1: [0.62, 0.78, 0.6, 0.45])
+const BRAKE_MU := [0.54, 0.64, 0.5, 0.4]
+const BRAKE_MU_OLD := [0.62, 0.78, 0.6, 0.45]
+## (both tables are the defaults of Tune sliders, Ride > Brakes > Surfaces: these keys, same order)
+const BRAKE_MU_KEYS := ["brakeMuGround", "brakeMuTrail", "brakeMuWater", "brakeMuSand"]
+const LOCK_SLIDE_KEYS := ["lockSlideGround", "lockSlideTrail", "lockSlideWater", "lockSlideSand"]
+## dirt braking (BMX_OLD_DIRTBRAKE=1 = off): a locked tyre slides at this share of its braking grip per surface (it
+## was 0.8 everywhere: locked on dirt it ploughs, on hardpack it still bites), less again on a loose patch
+const LOCK_SLIDE := [0.66, 0.76, 0.6, 0.58]
+## how loose each surface's patches get for braking (the brake limit drops up to brakeLoose x 0.45 on the loosest)
+const BRAKE_LOOSE_S := [1.0, 0.6, 0.7, 1.2]
+var _OLD_DIRT := Env.raw("BMX_OLD_DIRTBRAKE") != ""
+var _brk_noise: FastNoiseLite = null   # fine loose patches + rough-ground jitter under the tyres (braking)
+var _brk_r := 0.0; var _brk_f := 0.0   # the levers as squeezed (they take brakeRamp s to bite)
+var _feel_r := NAN; var _feel_f := NAN # the grip the rider THINKS each tyre has (lags a loose patch: he gets caught out)
+var brk_loose_f := 0.0; var brk_loose_r := 0.0   # how loose the ground under each tyre is for braking (0..~1.2)
 var surf_f := 0; var surf_r := 0; var _mu_f := NAN; var _mu_r := NAN   # the ground under each tyre, its eased grip
 var _bmu_f := NAN; var _bmu_r := NAN   # ...and its eased braking grip (BRAKE_MU)
 var _OLD_BRAKE := Env.raw("BMX_OLD_BRAKE") != ""   # (tests: the lever-limited brakes before 2026-11-23)
@@ -470,6 +486,7 @@ func _reset_motion() -> void:
 
 func _reset_ground_sim() -> void:
 	front_use = 0.0; front_push = 0.0; rear_lock = 0.0; front_lock = 0.0; _fb_f = 0.0; _rear_up_k = 0.0
+	_brk_r = 0.0; _brk_f = 0.0; _feel_r = NAN; _feel_f = NAN; brk_loose_f = 0.0; brk_loose_r = 0.0
 	corner_g = 0.0; weight_in = 0.0; lean_err = 0.0; knock = 0.0; _amax = 99.0; _amin = -99.0; bal_k = 0.0
 	_b_prev = 0.0; _f_prev = 0.0; _circ_f = 1.0; bank_lean = 0.0; bank_sq = 0.0; _gx_lean = 0.0; berm_k = 0.0
 	_mu_f = NAN; _mu_r = NAN; _bmu_f = NAN; _bmu_r = NAN; bank_v = 0.0; _load_s = NAN; _share_f = NAN; _bike_lead = 0.0; _weave = 0.0
@@ -840,6 +857,13 @@ func _step_controls(dt: float, inp: Dictionary, throttle: float, steer_input: fl
 	# two levers: "brake" (S / LT) squeezes both (the front by brakeFrontMix), brake_front / brake_rear one each
 	brake_r = maxf(float(inp.brake), float(inp.get("brake_rear", 0.0)))
 	brake_f = maxf(float(inp.brake) * float(T.get("brakeFrontMix", 0.7)), float(inp.get("brake_front", 0.0)))
+	# the levers take a moment to bite (pads closing, the tyre's load building): squeezed over brakeRamp s, let go
+	# at once-ish (a key / trigger used to be the full brake in one tick: the "asphalt" stop)
+	if not _OLD_DIRT:
+		var up: float = dt / maxf(0.01, float(T.get("brakeRamp", 0.15)))
+		_brk_r = move_toward(_brk_r, brake_r, up if brake_r > _brk_r else dt * 12.0)
+		_brk_f = move_toward(_brk_f, brake_f, up if brake_f > _brk_f else dt * 12.0)
+		brake_r = _brk_r; brake_f = _brk_f
 	# the brake key is a rider squeezing both with feel: they keep each wheel at the edge of locking (the rear a
 	# touch past it, a light skid). The front-only / rear-only keys are the bare levers: lock what you squeeze
 	_brake_feel = float(inp.brake) >= maxf(float(inp.get("brake_front", 0.0)), float(inp.get("brake_rear", 0.0)))
@@ -1037,8 +1061,9 @@ func _step_ground(dt: float, f: Vector3) -> void:
 	var mk := minf(1.0, dt * 12.0)
 	_mu_f = SURF_MU[clampi(surf_f, 0, 3)] if is_nan(_mu_f) else lerpf(_mu_f, SURF_MU[clampi(surf_f, 0, 3)], mk)
 	_mu_r = SURF_MU[clampi(surf_r, 0, 3)] if is_nan(_mu_r) else lerpf(_mu_r, SURF_MU[clampi(surf_r, 0, 3)], mk)
-	_bmu_f = BRAKE_MU[clampi(surf_f, 0, 3)] if is_nan(_bmu_f) else lerpf(_bmu_f, BRAKE_MU[clampi(surf_f, 0, 3)], mk)
-	_bmu_r = BRAKE_MU[clampi(surf_r, 0, 3)] if is_nan(_bmu_r) else lerpf(_bmu_r, BRAKE_MU[clampi(surf_r, 0, 3)], mk)
+	var bf: float = _brake_mu(surf_f); var br: float = _brake_mu(surf_r)
+	_bmu_f = bf if is_nan(_bmu_f) else lerpf(_bmu_f, bf, mk)
+	_bmu_r = br if is_nan(_bmu_r) else lerpf(_bmu_r, br, mk)
 	if is_nan(course):
 		course = heading; slip = 0
 	since_land += dt
@@ -1204,15 +1229,47 @@ func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_wa
 		var bmu_r: float = mu_r if _OLD_BRAKE else _or(_bmu_r, 0.7) * bg
 		var cap_r: float = maxf(0.05, bmu_r * nR * _ls(nR, G * SH_R))
 		var cap_f: float = maxf(0.05, bmu_f * nF * _ls(nF, G * (1.0 - SH_R)) * float(T.get("frontGrip", 1.0)))
+		var slide_r := 0.8; var slide_f := 0.8
+		if not _OLD_DIRT:
+			# dirt isn't asphalt: the brake limit under each tyre wanders with loose patches (gravel, dust over hardpack)
+			# and jumps about on rough ground (the tyre skipping over stones), and a locked tyre ploughs at less
+			var dk := _brake_dirt(dt)
+			cap_f = maxf(0.05, cap_f * dk.x); cap_r = maxf(0.05, cap_r * dk.y)
+			slide_f = _lock_slide(surf_f) * (1.0 - 0.15 * minf(1.0, brk_loose_f))
+			slide_r = _lock_slide(surf_r) * (1.0 - 0.15 * minf(1.0, brk_loose_r))
 		if _brake_feel:
+			# the brake key = a rider squeezing by feel. He brakes to the grip he FEELS (the last ~0.15 s of it): ride
+			# onto a loose patch and he's still squeezing for the hardpack behind him, so the rear skids longer and the
+			# front can tuck for a moment before he lets off (it was 97 % of the exact limit every tick: perfect ABS)
+			var fcap_f := cap_f; var fcap_r := cap_r
+			# brake drift: braking hard INTO a turn he keeps the rear locked and lets it come round (a brake slide, how
+			# DH riders square off a loose corner) instead of easing it off at the first few degrees. tk = how much he
+			# lets it: brakeDrift x how hard the bike is turning (none riding straight: straight stops are unchanged)
+			var tk: float = 0.0 if _OLD_DIRT else clampf(float(T.get("brakeDrift", 0.6)) * smooth01((absf(lat_a) - 1.0) / 3.0), 0.0, 1.5)
+			if not _OLD_DIRT:
+				var lag: float = maxf(0.01, float(T.get("brakeFeelLag", 0.15)))
+				var fk: float = minf(1.0, dt / lag)
+				_feel_f = cap_f if is_nan(_feel_f) else _feel_f + (cap_f - _feel_f) * fk
+				# (the rear: he hears it skid and lets off, so a lock tells him quickly; without it the rear stayed locked
+				# for the whole stop as the load moved forward and the rear's grip fell under what he felt)
+				var fk_r: float = minf(1.0, dt * (1.0 / lag + 24.0 * float(T.get("brakeSkidEar", 1.0)) * rear_lock * maxf(0.0, 1.0 - 0.8 * tk)))
+				_feel_r = cap_r if is_nan(_feel_r) else _feel_r + (cap_r - _feel_r) * fk_r
+				fcap_f = _feel_f * float(T.get("brakeFrontHold", 0.93)); fcap_r = _feel_r
 			# ...and eases the rear off the moment it starts stepping out sideways, so it grips sideways again
-			var r_ease := smooth01((absf(slip) - 0.04) / 0.08)
-			fb_r = minf(fb_r, cap_r * lerpf(1.0 + 0.25 * float(T.get("brakeSkid", 0.4)), 0.85, r_ease))
-			fb_f = minf(fb_f, cap_f * 0.97)
+			var r_ease := smooth01((absf(slip) - 0.04 - float(T.get("brakeDriftAngle", 0.3)) * tk) / 0.08)
+			fb_r = minf(fb_r, fcap_r * lerpf(1.0 + 0.25 * float(T.get("brakeSkid", 0.4)) + 0.4 * tk, 0.85, r_ease))
+			fb_f = minf(fb_f, fcap_f if not _OLD_DIRT else cap_f * 0.97)
+		else:
+			_feel_f = cap_f; _feel_r = cap_r
+			# the bare rear lever locks what you squeeze, but a rider whose locked rear swings well out of line lets
+			# it off a little (riderSkill) before it washes out: on loose dirt a locked rear fishtails on a hair
+			if not _OLD_DIRT and fb_r > cap_r:
+				var out_k: float = smooth01((absf(slip) - float(T.get("brakeRearLet", 0.55)) * T.slipMax) / (0.3 * T.slipMax)) * clampf(float(T.get("riderSkill", 1.0)), 0.0, 1.0)
+				fb_r = lerpf(fb_r, minf(fb_r, cap_r * 0.92), out_k)
 		rear_lock = move_toward(rear_lock, clampf((fb_r - cap_r) / (0.25 * cap_r), 0.0, 1.0) if fb_r > cap_r else 0.0, dt * 8.0)
 		front_lock = move_toward(front_lock, clampf((fb_f - cap_f) / (0.25 * cap_f), 0.0, 1.0) if fb_f > cap_f else 0.0, dt * 8.0)
-		fb_r = lerpf(minf(fb_r, cap_r), cap_r * 0.8, rear_lock) if rear_down else 0.0
-		fb_f = lerpf(minf(fb_f, cap_f), cap_f * 0.8, front_lock)
+		fb_r = lerpf(minf(fb_r, cap_r), cap_r * slide_r, rear_lock) if rear_down else 0.0
+		fb_f = lerpf(minf(fb_f, cap_f), cap_f * slide_f, front_lock)
 		# hot brakes: what the pads can still deliver (the levers had far more than the tyres could hold, so the
 		# fade is taken off the force that gets through, not off the lever)
 		var fade_k: float = 1.0 - float(T.get("brakeFade", 0.35)) * brake_fade
@@ -4035,6 +4092,46 @@ var _OLD_RELAX := Env.raw("BMX_OLD_RELAX") != ""
 func _relax_t(t_ref: float, va: float) -> float:
 	if _OLD_RELAX: return maxf(0.005, t_ref)
 	return clampf(t_ref * RELAX_V / maxf(va, 1.5), 0.015, 0.12) if t_ref > 0.005 else 0.005
+
+## a surface's braking grip (Ride > Brakes > Surfaces) / a locked tyre's slide share there
+func _brake_mu(su: int) -> float:
+	var i := clampi(su, 0, 3)
+	return BRAKE_MU_OLD[i] if _OLD_DIRT else float(T.get(BRAKE_MU_KEYS[i], BRAKE_MU[i]))
+func _lock_slide(su: int) -> float:
+	var i := clampi(su, 0, 3)
+	return float(T.get(LOCK_SLIDE_KEYS[i], LOCK_SLIDE[i]))
+
+## dirt braking: what share of its braking grip each tyre has where it is now (x = front, y = rear). Loose patches
+## (the grip sim's 4.5 m patches + finer ~1 m ones: gravel, dust, a scatter of stones) take up to brakeLoose x 0.45
+## off, rough ground (the suspension's smoothed jolt, _grip_rough) makes it jump about by up to brakeRough x 0.3 every
+## ~0.4 m rolled (the tyre skipping over stones and roots). Sets brk_loose_f / brk_loose_r.
+func _brake_dirt(_dt: float) -> Vector2:
+	if _grip_noise == null:
+		_grip_noise = FastNoiseLite.new()
+		_grip_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+		_grip_noise.frequency = 0.22; _grip_noise.fractal_octaves = 2; _grip_noise.seed = 913
+		_grip_rng.seed = 4711
+	if _brk_noise == null:
+		_brk_noise = FastNoiseLite.new()
+		_brk_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+		_brk_noise.frequency = 0.9; _brk_noise.fractal_octaves = 2; _brk_noise.seed = 2741
+	var ch := cos(heading); var sh := sin(heading)
+	var rx := x - ch * BB_REAR; var rz := z + sh * BB_REAR
+	var fx := rx + ch * L; var fz := rz - sh * L
+	var lk: float = float(T.get("brakeLoose", 1.0)) * 0.45
+	var rk: float = float(T.get("brakeRough", 1.0)) * 0.3 * smooth01(_grip_rough / 30.0)
+	var out := Vector2.ONE
+	for i in 2:
+		var px: float = fx if i == 0 else rx
+		var pz: float = fz if i == 0 else rz
+		var s: float = BRAKE_LOOSE_S[clampi(surf_f if i == 0 else surf_r, 0, 3)]
+		var n: float = 0.6 * (0.5 + 0.5 * _grip_noise.get_noise_2d(px, pz)) + 0.4 * (0.5 + 0.5 * _brk_noise.get_noise_2d(px, pz))
+		var ls: float = smooth01((n - 0.35) / 0.5) * s
+		var jit: float = 0.5 + 0.5 * _brk_noise.get_noise_2d(px * 3.0 + 517.0, pz * 3.0 - 233.0)
+		var k: float = clampf(1.0 - lk * ls - rk * jit, 0.35, 1.0)
+		if i == 0: out.x = k; brk_loose_f = ls
+		else: out.y = k; brk_loose_r = ls
+	return out
 
 func _grip_step(dt: float, va: float, mu: float, nR: float, u_lat_in: float) -> float:
 	if _grip_noise == null:
