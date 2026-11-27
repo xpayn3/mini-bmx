@@ -2671,6 +2671,33 @@ func set_demo(on: bool) -> void:
 		flash("DEMO RIDER on  -  P: tune it live  ·  F2: ride yourself" if on else "You ride")
 		if diag: diag.pilot_changed()
 
+var _li_rows := []; var _li_i := -1; var _li_t0 := 0.0
+func _log_input():
+	if _li_i < 0:
+		_li_i = 0
+		var spec := Env.s("BMX_LOG_INPUT").split("@")
+		var t0 := float(spec[1]) if spec.size() > 1 else 0.0
+		_li_t0 = t0
+		var fa := FileAccess.open(spec[0], FileAccess.READ)
+		if fa == null: return null
+		fa.get_line()
+		var hd := fa.get_line().split(",")
+		var ci := {}
+		for k in hd.size(): ci[hd[k]] = k
+		while not fa.eof_reached():
+			var ln := fa.get_line().split(",")
+			if ln.size() < hd.size() or float(ln[ci["t"]]) < t0: continue
+			var g := func(k: String) -> float: return float(ln[ci[k]]) if ci.has(k) else 0.0
+			_li_rows.append({"throttle": g.call("in_throttle"), "brake": g.call("in_brake"), "steer": g.call("in_steer"),
+				"hop": g.call("in_hop") > 0.5, "sprint": g.call("in_sprint") > 0.5, "body_fwd": g.call("in_body_fwd"),
+				"body_lean": g.call("in_body_lean"), "pad": g.call("pad") > 0.5})
+		print("LOGINPUT rows=%d from t=%.2f" % [_li_rows.size(), t0])
+	if _li_i >= _li_rows.size(): return null
+	if _li_i % 30 == 0: print("LOGINPUT i=%d t=%.2f pos=%.1f,%.1f,%.1f v=%.1f air=%s crash=%s pitch=%.2f lean=%.2f" % [_li_i, _li_t0 + _li_i / 120.0, phys.x, phys.y, phys.z, phys.v, phys.air, phys.crash_on, phys.pitch, phys.bike_lean])
+	_li_i += 1
+	return _li_rows[_li_i - 1]
+
+
 func _read_input() -> Dictionary:
 	if not input_enabled:
 		return {"throttle": 0.0, "brake": 0.0, "steer": 0.0, "hop": false, "sprint": false, "body_fwd": 0.0, "body_lean": 0.0}
@@ -2680,6 +2707,9 @@ func _read_input() -> Dictionary:
 	if not line_play.is_empty():   # re-riding a recorded line (replay: L)
 		var lp = line_input()
 		if lp != null: return lp
+	if Env.s("BMX_LOG_INPUT") != "" and get_viewport() == get_tree().root and not scenic:   # tests: "ride_log.csv@t0" feeds an F8 ride log's inputs from t0, step by step (pair with BMX_SPAWN_AT / BMX_START_V)
+		var li = _log_input()
+		if li != null: return li
 	if demo != null and not photo:
 		var dout: Dictionary = demo.tick(self, get_physics_process_delta_time())
 		if Env.s("BMX_BODY") != "":   # tests: a scripted body stick (BMX_BODY=...) rides along with the test / demo rider

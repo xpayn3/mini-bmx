@@ -155,7 +155,12 @@ const AIR_BODY_OUT := 0.25    # s: and back out after touch-down
 var _air_wl := 0.0           # drawing: the air stick's share of the body counter-lean, held after touch-down while it eases out
 var _bank_hold := 0.0         # drawing: the bank last read on the ground, held through a skip (the physics' bank falls to flat in the air)
 var _OLD_CURB := Env.raw("BMX_OLD_CURB") != ""   # (tests: the old per-step edge check, rear stops dead)
-const RIM_CLIMB := 4.0  # m/s: the most upward speed a rim strike on a rising edge gives the frame
+const RIM_CLIMB := 4.0  # m/s: the most upward speed a rim strike on a rising edge gives the frame (over the slope's own)
+# (2026-11-27, F8 seed 324818: RIM_CLIMB is counted from the slope the bike rides down - 4 m/s straight up while
+# riding down a 14 deg berm at 15 m/s was a 7.5 m/s kick against the slope - and a rear thrown up off the ground
+# with the front brake on gets the brake let off (the rider's reflex), instead of a front flip. BMX_OLD_RIMKICK=1)
+var _OLD_RIMKICK := Env.raw("BMX_OLD_RIMKICK") != ""
+var _rear_up_k := 0.0   # 0..1: how far the rider has let the front lever off because the rear was thrown up
 const TYRE_MAX := 0.045   # m: a tyre squashed this far is on its rim
 var _ty_f := 0.0; var _ty_r := 0.0   # each tyre's push last substep (m/s2 of the whole weight)
 var _rim_hit := 0.0   # the most speed the frame lost against the ground with nothing left to give, since it was read (m/s)
@@ -461,7 +466,7 @@ func _reset_motion() -> void:
 	_reset_ground_sim()
 
 func _reset_ground_sim() -> void:
-	front_use = 0.0; front_push = 0.0; rear_lock = 0.0; front_lock = 0.0; _fb_f = 0.0
+	front_use = 0.0; front_push = 0.0; rear_lock = 0.0; front_lock = 0.0; _fb_f = 0.0; _rear_up_k = 0.0
 	corner_g = 0.0; weight_in = 0.0; lean_err = 0.0; knock = 0.0; _amax = 99.0; _amin = -99.0; bal_k = 0.0
 	_b_prev = 0.0; _f_prev = 0.0; _circ_f = 1.0; bank_lean = 0.0; bank_sq = 0.0; _gx_lean = 0.0; berm_k = 0.0
 	_mu_f = NAN; _mu_r = NAN; _bmu_f = NAN; _bmu_r = NAN; bank_v = 0.0; _load_s = NAN; _share_f = NAN; _bike_lead = 0.0; _weave = 0.0
@@ -807,6 +812,24 @@ func _ride_step(dt: float, inp: Dictionary) -> void:
 	_step_wheels(dt, f, in_water, va)
 	if _EPROBE: e0 = _e_stage("wheels", e0); _e_tick(dt, brake)
 	if prof != null: _prof("wheels", _pt)
+	if _JOLT_PROBE: _jolt_probe(dt, brake_k)
+
+
+# (tests, BMX_JOLT_PROBE=1) a one-step change no body + bike could make: up-speed or pitch spin jumping in a single
+# physics step. Landings (air -> ground) are tagged, so the rest stands out. JOLTSUM per 10 s
+var _JOLT_PROBE := Env.raw("BMX_JOLT_PROBE") != ""
+var _jp_prev := []; var _jp_rim := 0; var _jp_n := {}; var _jp_t := 0.0
+func _jolt_probe(dt: float, brake_k: float) -> void:
+	_jp_t += dt
+	if _jp_prev.size() == 4 and not crash_on and absf(v) > 1.0:
+		var dvy: float = vy - _jp_prev[0]
+		var dpw: float = pitch_v - _jp_prev[1]
+		if absf(dvy) > 2.5 or absf(dpw) > 3.0:
+			var kind := "land" if (_jp_prev[2] and not air) else ("takeoff" if (not _jp_prev[2] and air) else ("rim" if _jp_rim > 0 else ("air" if air else "ground")))
+			_jp_n[kind] = int(_jp_n.get(kind, 0)) + 1
+			print("JOLT %s t=%.2f at=%.1f,%.1f v=%.1f vy %.2f->%.2f pw %.2f->%.2f pitch=%.2f gp=%.2f fa=%s ra=%s brake=%.2f lean=%.2f" % [kind, _jp_t, x, z, v, _jp_prev[0], vy, _jp_prev[1], pitch_v, pitch, _g_pitch, front_air, rear_air, brake_k, bike_lean])
+	_jp_prev = [vy, pitch_v, air, 0]; _jp_rim = 0
+	if int(_jp_t / 10.0) != int((_jp_t - dt) / 10.0): print("JOLTSUM t=%.0f %s" % [_jp_t, _jp_n])
 
 ## stage 1: the controls. Brake levers, the body stick, air control (tilt / spin / tuck inputs) and the lip throw.
 ## Returns the brake level (0 when S was a flip throw at a lip, not a brake)
@@ -821,6 +844,12 @@ func _step_controls(dt: float, inp: Dictionary, throttle: float, steer_input: fl
 	var rfx := float(T.get("riderSkill", 1.0)) * smooth01((risk - 0.15) / 0.5)
 	var rb: float = float(T.get("reflexBrake", 0.6))
 	brake_f *= 1.0 - rb * rfx; brake_r *= 1.0 - rb * 0.67 * rfx
+	# the rear thrown up off the ground with the front still down (a rear rim strike, a rock) and no nose manual asked
+	# for: the rider lets the front lever off at once. Held on, the brake's torque about the front axle turned the kick
+	# into a front flip at 8 rad/s (F8 seed 324818). Eased in over ~0.05 s, back over ~0.25 s
+	var rear_up: bool = not _OLD_RIMKICK and _brake_feel and rear_air and not front_air and not air and nose_a <= 0.0 and body_in < 0.3
+	_rear_up_k = move_toward(_rear_up_k, 1.0 if rear_up else 0.0, dt * (20.0 if rear_up else 4.0))
+	brake_f *= 1.0 - 0.85 * _rear_up_k
 	var brake_k: float = maxf(maxf(float(inp.brake), brake_r), float(inp.get("brake_front", 0.0)))
 	var brake := brake_k > 0.1
 	# rider body stick (gamepad right stick): fore / aft weight, side lean. Works the whole ride
@@ -2697,9 +2726,13 @@ func _step_vertical(dt: float, f: Vector3, throttle: float, brake: bool) -> void
 				# is thrown up at no more than RIM_CLIMB of the edge's rise. Matched to all of it, up to 12 m/s at trail
 				# speed, a stone met mid-corner launched the bike and slammed the rider. Coming down onto ground - a
 				# landing - is not touched: there the ground's speed under the wheel is zero or falling away)
-				vg = minf(vg, RIM_CLIMB)
+				# (counted from the slope the bike rides: 4 m/s straight up while riding down a 14 deg berm at 15 m/s was a
+				# 7.5 m/s kick against the slope)
+				var slope_vy := 0.0 if _OLD_RIMKICK else minf(0.0, v * tan(clampf(_g_pitch, -1.2, 1.2)))
+				vg = minf(vg, slope_vy + RIM_CLIMB)
 				if vpp < vg:
 					var j := (vg - vpp) / m_inv
+					if _JOLT_PROBE and j > 0.5: _jp_rim += 1
 					vy += j / mB; pitch_v += j * lx / IK
 					_rim_hit = maxf(_rim_hit, j / mB)   # (what it did to the bike as a whole: a wheel far from the middle slapping down mostly turns it)
 				if wi == 0: cF = true

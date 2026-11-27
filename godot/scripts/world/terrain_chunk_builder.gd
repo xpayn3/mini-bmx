@@ -1829,6 +1829,13 @@ func _rocks(ox: float, oz: float) -> void:
 			continue
 		var r1 := rnd.next()
 		var sc := 0.2 + r1 * r1 * r1 * 1.3
+		# (2026-11-27) only the centre was kept off the dirt: a big one's collider (radius up to ~1.4 m) reached onto the
+		# trail. Near a trail its edge keeps the brink stones' clearance (shrunk, not skipped: the same random draws)
+		if not OLD_BRINKCLEAR:
+			f.query(x, z)
+			if f.q_d < TerrainField.QR:
+				var o: float = f.q_d - f.q_w
+				sc = clampf(minf(sc, maxf((o - BRINK_CLEAR) / 1.1, minf(0.3, (o - BRINK_CLEAR_LOW) / 1.1))), 0.05, sc)
 		var sx := sc * (1 + rnd.next() * .5)
 		var sy := sc * (0.6 + rnd.next() * .4)
 		put("pebble" if sc < 0.6 else "rock", x, h - sc * 0.25, z, sx, sy, sc, rnd.next() * 6.28, null, 0.5)
@@ -2370,11 +2377,18 @@ func _brink_rocks(ox: float, oz: float) -> void:
 			continue
 		# the main stone: bigger the further out it sits
 		var big := 0.6 + rn.next() * rn.next() * 1.1 * (0.4 + 0.6 * sm(0.8, 1.8, o))
+		# (2026-11-27, F8 seed 324818: a 70 cm stone whose collider - radius ~0.95 x its scale - reached 0.5 m past the
+		# dirt; a rider running a little wide in a berm caught it with the rear wheel. Its edge now stays BRINK_CLEAR
+		# past the dirt; only low stones may come to within BRINK_CLEAR_LOW. BMX_OLD_BRINKCLEAR=1 = before)
+		if not OLD_BRINKCLEAR:
+			big = minf(big, maxf((o - BRINK_CLEAR) / 0.95, minf(0.3, (o - BRINK_CLEAR_LOW) / 0.95)))
 		# here and there a proper boulder (~1-2 m across: the rock meshes' scale x ~0.6 m), only out where its edge still
 		# clears the dirt by ~1 m
 		var boulder := false
 		if o > 2.4 and rn.next() < 0.06:
 			big = 1.4 + rn.next() * 0.9
+			if not OLD_BRINKCLEAR and o - big * 0.95 < BRINK_CLEAR:
+				continue
 			# its whole footprint clear of any dirt (this trail's or another's bend nearby)
 			var fr := big * 0.75
 			if is_blocked(x, z, fr) or f.trail(x + fr, z) > 0.0 or f.trail(x - fr, z) > 0.0 or f.trail(x, z + fr) > 0.0 or f.trail(x, z - fr) > 0.0:
@@ -2392,7 +2406,12 @@ func _brink_rocks(ox: float, oz: float) -> void:
 				continue
 			var hb := ok_spot(bx, bz, WATER + 0.4)
 			if not is_nan(hb):
-				_brink_stone(bx, bz, hb, big * (0.25 + rn.next() * 0.4), rn)
+				var bsc := big * (0.25 + rn.next() * 0.4)
+				# (its edge clear of the dirt like the main stone's; ok_spot overwrote f.query: read it again)
+				f.query(bx, bz)
+				if not OLD_BRINKCLEAR and f.q_d - f.q_w - bsc * 0.95 < (BRINK_CLEAR if bsc > 0.3 else BRINK_CLEAR_LOW):
+					continue
+				_brink_stone(bx, bz, hb, bsc, rn)
 		for k in 2 + int(rn.next() * 5):
 			var a := rn.next() * 6.28
 			var d := big * (0.45 + rn.next() * 0.9)
@@ -2411,6 +2430,9 @@ func _brink_rocks(ox: float, oz: float) -> void:
 # the scanned rocks (assets/rocks_scan, TerrainGeo: Poly Haven scans made light): dry country = the Namaqualand granite
 # (blocky split boulder + its stone set), else the angular boulder_01 / rock_09 + the stone set. BMX_OLD_SCANROCKS=1 = the
 # generated rocks (rock_gen.gd) instead
+static var OLD_BRINKCLEAR := Env.raw("BMX_OLD_BRINKCLEAR") == "1"
+const BRINK_CLEAR := 1.0       # m: a brink stone's collider edge past the dirt's edge
+const BRINK_CLEAR_LOW := 0.5   # m: the same for low stones (scale <= 0.3, under ~20 cm)
 static var OLD_SCANROCKS := Env.raw("BMX_OLD_SCANROCKS") == "1"
 const SCAN_STONES := ["scan_nstone_a", "scan_nstone_b", "scan_nstone_c", "scan_nstone_d", "scan_nstone_e"]
 func _brink_stone(x: float, z: float, h: float, sc: float, rn: WorldRng, tall: float = 1.0) -> void:

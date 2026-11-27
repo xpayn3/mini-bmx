@@ -380,6 +380,24 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   0.29 -> 0.32, DH pose torso 0.5 -> 0.52 (RiderPanels POSE_VER 5 moves saves still at 0.5); `BMX_OLD_BODYSIZE=1`. Limbs are
   shaped tubes (`Rider.limb_mesh`, profiles `THIGH_PROF` / `SHIN_PROF` (calf at the back) / `UARM_PROF` / `FARM_PROF`), not
   cones; `BMX_OLD_LIMBSHAPE=1`. Not done: checking reach / stack against each frame's geometry.
+- **Rear kicked into a front flip on a berm (2026-11-27, F8 seed 324818 x1070 z507, user: "slid down the last berm like
+  we were vertical", "physically impossible")**. Braking with S (both levers), leaned ~38 deg into a berm at 15 m/s, the
+  rear's ground probe met the side of a 70 cm brink boulder (collider edge 0.5 m past the dirt). The rim strike threw the
+  rear up at `RIM_CLIMB` 4 m/s STRAIGHT UP while the ground fell at 3.5 m/s: a 7.5 m/s kick against the slope in one step
+  (-8 rad/s nose down); the front brake stayed on while the rear flew, its torque kept the bike rotating, it left the
+  ground nose-first, flew ~1 m over the falling slope for 0.9 s (v kept: "sliding") and ended in HEAD HIT. (A pivot about
+  the grounded wheel was looked at: with the rider's weight on the legs the free-body response already lifts the other
+  wheel a little, the pivot never engages; not the bug.) Fixed: (1) the rim kick is counted from the slope the bike rides
+  (`slope_vy` = min(0, v tan(ground pitch)) + RIM_CLIMB); (2) the rear thrown up with the front down and no nose manual
+  asked for: the rider lets the FEEL brake's front lever off (`_rear_up_k`, in ~0.05 s, x0.15; the bare front lever is left
+  alone) (`BMX_OLD_RIMKICK=1` = both off); (3) brink stones keep their collider edge `BRINK_CLEAR` 1 m past the dirt
+  (low ones, scale <= 0.3, `BRINK_CLEAR_LOW` 0.5 m), boulders that can't are skipped; the same clearance shrinks big land
+  rocks (`_rocks`) near a trail (only their centre was kept off the dirt) (`BMX_OLD_BRINKCLEAR=1`). Every world's rocks
+  near the trail are smaller / fewer. Tests: `BMX_JOLT_PROBE=1` (`JOLT <land|takeoff|rim|air|ground>` = vy or pitch spin
+  jumping > 2.5 m/s / 3 rad/s in ONE step, `JOLTSUM` per 10 s: demo AI on 3 seeds only shows rim jolts on hard landings);
+  `BMX_LOG_INPUT=<ride_log.csv>@t0` feeds an F8 log's inputs step by step (+ `BMX_SPAWN_AT=x,z,heading BMX_START_V`;
+  copy the user's `route.cfg` into the test APPDATA or the world differs). Replayed from 2 s before: old = OVER THE BARS
+  at the berm, new rides through (the replay drifts from the real ride: the spawn isn't settled).
 - **Curbs / ledges: the rear rolls up, the tyres don't shiver at the edge (2026-11-24, user: "the rear always gets
   stuck on a curb")**. (1) `_step_move`'s edge check (at the bottom bracket) read the rise per physics step, so whether a
   curb was a wall at all depended on speed: at 6 km/h it never saw one (rolled up 30 cm), at 15 km/h a 20 cm curb was
