@@ -26,12 +26,7 @@ varying vec4 v_glint;
 
 vec2 win_uv(vec2 xz) { return ((xz - win_origin) / win_texel + 0.5) / vec2(textureSize(win_h, 0)); }
 
-float sp_hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-float sp_noise(vec2 p) {
-	vec2 i = floor(p), f = fract(p);
-	f = f * f * (3.0 - 2.0 * f);
-	return mix(mix(sp_hash(i), sp_hash(i + vec2(1, 0)), f.x), mix(sp_hash(i + vec2(0, 1)), sp_hash(i + vec2(1, 1)), f.x), f.y);
-}
+float sp_noise(vec2 p) { return sg_noise(p); }   // (snow_glint.gdshaderinc's integer-hash noise)
 
 // the snow's top at a point: y, carve 0..1, lip 0..1
 vec3 snow_top(vec2 xz) {
@@ -74,6 +69,7 @@ void vertex() {
 
 void fragment() {
 	vec3 P = v_world;
+	vec2 pdx = dFdx(P.xz), pdy = dFdy(P.xz);   // (uniform control flow: the glints' pixel footprint)
 	vec4 sw = texture(win_s, win_uv(P.xz));
 	if (PROJECTION_MATRIX[3][3] < 0.5) {
 		// the ground draws the pixels it keeps (ground.gdshader: same pattern, its deep snow > 0.06 handed over)
@@ -108,7 +104,7 @@ void fragment() {
 	ALBEDO = col;
 	ROUGHNESS = mix(mix(0.72, 0.5, glaze), 0.55, v_carve);
 	SPECULAR = 0.35;
-	v_glint = snow_glint(P.xz, wn, gpx, VIEW_MATRIX);
+	v_glint = snow_glint(P.xz, wn, pdx, pdy, VIEW_MATRIX);
 	v_glint.w *= sparkle * (1.0 - v_carve);
 }
 
