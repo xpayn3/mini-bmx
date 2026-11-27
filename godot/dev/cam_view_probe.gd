@@ -20,6 +20,15 @@ var _rates: Array = []
 var _last_dir := Vector3.ZERO
 var _rider_y: Array = []
 var _t := 0.0
+# shake (on the ground at speed): how abruptly the view's turning / moving changes
+var _w := Vector3.ZERO      # the view's turn rate (rad/s)
+var _pv := Vector3.ZERO     # the camera's velocity
+var _pp := Vector3.ZERO
+var _bp := Basis()
+var _sn := 0
+var _rot_acc: Array = []    # deg/s^2
+var _pos_acc: Array = []    # m/s^2
+var _vert_acc: Array = []
 var _shot := OS.get_environment("CAMVIEWSHOT")
 var _shot_n := {"bend": 0, "air": 0, "drop": 0}
 var _shot_wait := 0.0
@@ -66,6 +75,7 @@ func _count(k: String, ok: bool) -> void:
 func sample(dt: float) -> void:
 	var st = cam.game.phys
 	var c = cam.game.terrain.field.course
+	_shake(dt, st)
 	_t += dt
 	_shot_wait -= dt
 	if st.crash_on or _t < 1.5:
@@ -138,6 +148,26 @@ func sample(dt: float) -> void:
 			print("CAMVIEWSHOT %s%d t=%.1f seen=%d/6 v=%.1f" % [kind, _shot_n[kind], _t, seen, st.v])
 			_shot_n[kind] += 1; _shot_wait = 1.2
 
+func _shake(dt: float, st) -> void:
+	var b: Basis = cam.global_transform.basis.orthonormalized()
+	var p: Vector3 = cam.global_position
+	if st.crash_on or _t < 2.0 or dt <= 0.0: _sn = 0
+	if _sn > 0:
+		var q := (b * _bp.inverse()).get_rotation_quaternion()
+		var w: Vector3 = Vector3(q.x, q.y, q.z) * 2.0 * signf(q.w) / dt
+		var v: Vector3 = (p - _pp) / dt
+		if _sn > 1 and absf(st.v) > 5.0 and not st.air:
+			_rot_acc.append(rad_to_deg((w - _w).length()) / dt)
+			_pos_acc.append((v - _pv).length() / dt)
+			_vert_acc.append(absf(v.y - _pv.y) / dt)
+		_w = w; _pv = v
+	_bp = b; _pp = p; _sn += 1
+
+func _rms(a: Array) -> float:
+	var m := 0.0
+	for v in a: m += v * v
+	return sqrt(m / maxf(1.0, a.size()))
+
 func _pct(a: Array, q: float) -> float:
 	if a.is_empty(): return 0.0
 	var s := a.duplicate(); s.sort()
@@ -157,4 +187,5 @@ func _report() -> void:
 	for v in _land_late:
 		if v < 0.5: none += 1
 	print("CAMVIEW landing flights=%d seen=%.1f%% late_half=%.1f%% hidden_flights=%d" % [_land.size(), 100.0 * _mean(_land), 100.0 * _mean(_land_late), none])
+	print("CAMVIEW shake rot_acc rms=%.0f p99=%.0f max=%.0f deg/s2   pos_acc rms=%.1f p99=%.1f   vert rms=%.1f p99=%.1f m/s2  n=%d" % [_rms(_rot_acc), _pct(_rot_acc, 0.99), _pct(_rot_acc, 1.0), _rms(_pos_acc), _pct(_pos_acc, 0.99), _rms(_vert_acc), _pct(_vert_acc, 0.99), _rot_acc.size()])
 	print("CAMVIEW calm turn_p50=%.1f turn_p95=%.1f turn_max=%.1f deg/s  rider_y p05=%.2f p50=%.2f p95=%.2f (-1 bottom .. 1 top)" % [_pct(_rates, 0.5), _pct(_rates, 0.95), _pct(_rates, 1.0), _pct(_rider_y, 0.05), _pct(_rider_y, 0.5), _pct(_rider_y, 0.95)])
