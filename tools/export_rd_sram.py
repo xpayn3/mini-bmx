@@ -17,13 +17,12 @@ The model's jockey wheels are left out (14.5k polygons each): the game draws lig
 as the HDA does.
 
 Output (model frame = the bike's axes, +x forward, +y up, +z outboard, METRES; each group node sits at its pivot):
-  godot/assets/parts/rd_sram.glb       (Godot's copy, for later)
-  unity/Assets/Runout/Art/Models/Bikes/rd_sram.glb + rd_sram.extras.txt
+  unity/Assets/Runout/Art/Models/Bikes/rd_sram.glb + rd_sram.extras.txt   (Unity only: nothing under godot/ is written)
 
 Run with Houdini 21 hython, from the repo root:
   & "C:\\Program Files\\Side Effects Software\\Houdini 21.0.440\\bin\\hython.exe" tools\\export_rd_sram.py
 """
-import os, sys, shutil
+import os, sys
 import numpy as np
 import hou
 
@@ -33,7 +32,6 @@ sys.path.insert(0, HERE)
 from bike_glb import write_glb
 
 HDA = os.path.expanduser(r"~\Documents\houdini21.0\otls\bike_skeleton.hda")
-OUT_G = os.path.join(REPO, "godot", "assets", "parts", "rd_sram.glb")
 OUT_U = os.path.join(REPO, "unity", "Assets", "Runout", "Art", "Models", "Bikes")
 MM = 0.001
 
@@ -122,9 +120,7 @@ def main():
             nd["parts"].append((pos, nr, mat))
         print(grp, sum(len(p[0]) // 3 for p in nd["parts"]), "tris")
         nodes.append(nd)
-    os.makedirs(os.path.dirname(OUT_G), exist_ok=True)
-    write_glb(OUT_G, nodes, root="rd_sram")
-    shutil.copyfile(OUT_G, os.path.join(OUT_U, "rd_sram.glb"))
+    write_glb(os.path.join(OUT_U, "rd_sram.glb"), nodes, root="rd_sram")
     # the kinematics + this frame's numbers, for the game's solve (metres)
     bk = (REAR[0] + np.cos(np.radians(HANGER_ANG)) * HANGER_LEN, REAR[1] + np.sin(np.radians(HANGER_ANG)) * HANGER_LEN)
     L = []
