@@ -142,7 +142,7 @@ namespace Runout.Game
                 rideConfig = UnityEditor.AssetDatabase.LoadAssetAtPath<TextAsset>("Assets/Runout/Config/Rides/dh.ride.txt");
             if (riderModel == null)
                 riderModel = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Runout/Art/Characters/UnityDefaultMale/DefaultMale.fbx");
-            if (riderAlbedo == null)
+            if (riderAlbedo == null || riderAlbedo.name == "DefaultMale_Albedo")   // (the lighter kit replaces the near-black one)
                 riderAlbedo = UnityEditor.AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Runout/Art/Characters/UnityDefaultMale/DefaultMale_Albedo_Light.png");
         }
 #endif
