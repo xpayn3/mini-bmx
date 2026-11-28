@@ -117,6 +117,8 @@ namespace Runout.Game
                 }
             }
             else Debug.LogWarning("RideBootstrap: no bike extras / model found: the bike is drawn as one rigid piece");
+            // gears (Q / E, LB / RB), the drawn chain, the rider's heart rate + a stand-in readout
+            gameObject.AddComponent<RideGears>().Init(Sim, rig, sh.drawer != null ? sh.drawer.rider : null, sh.input);
         }
 
         /// bail (Godot: the bail key held BAIL_HOLD_MS = a crash on purpose): hold F / pad B

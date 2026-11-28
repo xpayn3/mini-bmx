@@ -80,6 +80,27 @@ Graph / HLSL · glTFast (`.glb`) · Splines · Timeline · Test Framework · Ste
 - [x] Play mode: the Ride scene rides under our physics (test `RideTests.PedallingMovesTheBike`).
 - [x] Test playground: `Scenes/Playground.unity` (reference lanes + bowls from Runout.Levels, exact vs Godot) and
       **PlaygroundFeature**: place any lane feature in the scene, set its numbers, press Play / Ride from here.
+- [x] Gears, chain, effort (`Game/RideGears.cs`, `Game/Bike/BikeChain.cs`, `Game/Rider/RiderEffort.cs`): Q / E, LB / RB
+      shift into `BikeSim.shift` (the sim's cassette, real drive ratio, spin-out, chain skip under load; shifter
+      recordings play). **Drivetrain = the bike HDA's derailleur / chain solve, ported** (`Game/Bike/RearDerailleur.cs`,
+      engine-free): the SRAM Force eTap AXS model from the HDA (`tools/export_rd_sram.py` -> `Art/Models/Bikes/rd_sram.glb`
+      + `rd_sram.extras.txt`: 6 rigid parts + the kinematics the HDA measured), B-tension set once on the biggest cog,
+      slant parallelogram to each cog plane, cage on the top pulley's axle solved to close a FIXED chain (big-big + 2
+      links), sprung cage + clutch + the runs as strings (bow, chainstay slap), chain climbs onto a new cog only as it
+      travels. Checked against a Houdini cook: B-tension 0.5749 rad, 108 links, cage 252.03 / 270.33 / 296.02 deg in
+      gears 1 / 4 / 7 (C# 252.03 / 270.32 / 296.02). Any ring / cassette is solved (modular), but this mech can't
+      reach big cogs (gap < 0 from ~32T, as the real road Force AXS): `BikeChain.Problem` says so. So the Unity DH rides
+      the cassette drawn on its wheel (`dh.ride.txt` cogs 10-24 7-speed, was 9-50). dh.glb's frozen chain (swingarm)
+      and frozen derailleur (seatstay) are cut out at load. F7 = close-up camera on the drivetrain. Robust: the
+      dynamics' step follows the stiffest spring (cage vs chain, the runs at their highest tension, the chainstay),
+      a frame over 1/30 s just loses the time, nothing non-finite is ever drawn (falls back to the last good pose);
+      stress test 20k frames with 0.3 s hitches / 400 m/s2 hits / NaN inputs: 0 bad. Light: ~14 us a frame (solve
+      3, dynamics 8, path 3), no dynamics at the far LOD (the swept band, as Godot), the mech decimated to 7k
+      triangles (RD_REDUCE_PCT). Heart rate / power /
+      cadence = hud.gd's model, fed to the pose (breathing, fatigue). Stand-in OnGUI readout until the HUD is ported.
+      Not done: a long-cage (Eagle-class) mech for 10-52+ cassettes (the HDA's "built" rd_type 0 is the way), a
+      procedural cassette per build (the wheel's is fixed), the ring mesh for other chainrings, the physics changing
+      gear before the chain has climbed (it switches at once), shift clips + the mech load only in the editor.
 - Note: keep the project on a short path (D:\Runout): deep paths hit Windows' 260-character limit in HDRP's import.
 
 ## Commands

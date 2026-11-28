@@ -8,7 +8,7 @@ namespace Runout.Game
     /// arrows the rider's body (= the pad's right stick). Rebinding: InputActionRebindingExtensions later.
     public sealed class InputReader : MonoBehaviour
     {
-        InputAction _pedal, _brake, _brakeF, _brakeR, _steer, _hop, _sprint, _body;
+        InputAction _pedal, _brake, _brakeF, _brakeR, _steer, _hop, _sprint, _body, _gearEasier, _gearHarder;
         bool _pad;
 
         void Awake()
@@ -19,6 +19,11 @@ namespace Runout.Game
             _brakeR = Axis("brakeRear", "<Keyboard>/alt", null);
             _hop = Axis("hop", "<Keyboard>/space", "<Gamepad>/buttonWest");
             _sprint = Axis("sprint", "<Keyboard>/shift", "<Gamepad>/buttonSouth");
+            // gears (Godot gear_easier / gear_harder): Q / LB = a bigger cog, E / RB = a smaller one
+            _gearEasier = new InputAction("gear_easier", InputActionType.Button, "<Keyboard>/q");
+            _gearEasier.AddBinding("<Gamepad>/leftShoulder");
+            _gearHarder = new InputAction("gear_harder", InputActionType.Button, "<Keyboard>/e");
+            _gearHarder.AddBinding("<Gamepad>/rightShoulder");
 
             _steer = new InputAction("steer", InputActionType.Value);
             _steer.AddCompositeBinding("1DAxis").With("Negative", "<Keyboard>/d").With("Positive", "<Keyboard>/a");
@@ -30,7 +35,7 @@ namespace Runout.Game
                 .With("Left", "<Keyboard>/leftArrow").With("Right", "<Keyboard>/rightArrow");
             _body.AddBinding("<Gamepad>/rightStick");
 
-            foreach (var a in new[] { _pedal, _brake, _brakeF, _brakeR, _steer, _hop, _sprint, _body }) a.Enable();
+            foreach (var a in new[] { _pedal, _brake, _brakeF, _brakeR, _steer, _hop, _sprint, _body, _gearEasier, _gearHarder }) a.Enable();
             InputSystem.onActionChange += (o, c) =>
             {
                 if (c == InputActionChange.ActionPerformed && o is InputAction act && act.activeControl != null)
@@ -67,9 +72,18 @@ namespace Runout.Game
             return _inp;
         }
 
+        /// +1 = shift easier, -1 = harder, 0 = none, pressed this frame (no key repeat)
+        public int ShiftPressed()
+        {
+            int d = 0;
+            if (_gearEasier != null && _gearEasier.WasPressedThisFrame()) d += 1;
+            if (_gearHarder != null && _gearHarder.WasPressedThisFrame()) d -= 1;
+            return d;
+        }
+
         void OnDestroy()
         {
-            foreach (var a in new[] { _pedal, _brake, _brakeF, _brakeR, _steer, _hop, _sprint, _body }) a?.Dispose();
+            foreach (var a in new[] { _pedal, _brake, _brakeF, _brakeR, _steer, _hop, _sprint, _body, _gearEasier, _gearHarder }) a?.Dispose();
         }
     }
 }

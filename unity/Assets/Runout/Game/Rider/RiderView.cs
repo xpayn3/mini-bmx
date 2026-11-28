@@ -17,6 +17,7 @@ namespace Runout.Game
         public Animator character;   // a Humanoid
         public RiderPose pose;
         public readonly RiderStops stops = new RiderStops();   // the rider at a stop (foot down, idle life, look round)
+        [System.NonSerialized] public RiderEffort effort;      // heart rate for the breathing / fatigue (set by RideGears)
         public readonly PoseInput pi = new PoseInput();
 
         BikeSim st;
@@ -522,7 +523,7 @@ namespace Runout.Game
             pi["sprint"] = st.sprint * st.pedal;
             pi["spinOut"] = st.spin_out_k;
             pi["stamina"] = st.stamina;
-            pi["hr"] = 72.0;
+            pi["hr"] = effort != null ? effort.hr : 72.0;   // (RideGears: the heart rate the HUD makes up, Godot hud.gd)
             pi["crank"] = st.crank;
             pi["air"] = st.air_k;
             pi["compress"] = Math.Max(0.0, -st.compress);
