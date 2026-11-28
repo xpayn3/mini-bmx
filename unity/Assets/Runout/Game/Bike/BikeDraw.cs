@@ -119,6 +119,22 @@ namespace Runout.Game
                 else if (need > _lift_s) _lift_s = Mathf.Min(need, _lift_s + LIFT_UP * mdt);
                 else _lift_s = Mathf.Max(need, _lift_s - LIFT_DOWN * mdt);
                 rig.position.y = pre_y + _lift_s;
+                // in the air the rider's hip moves against the bike move the BIKE (it is ~1/6 of the weight: the pair's
+                // centre of mass flies the arc): AIR_SHARE of the rider's body_off the other way (last frame's: the rider is
+                // posed after the bike); back on the ground it eases out, never pushing the bike down (Godot game.gd)
+                Vector3 dlt = Vector3.zero;
+                if (rider != null && rider.pose != null)
+                {
+                    var bo = rider.pose.body_off;
+                    if (bo.x * bo.x + bo.y * bo.y > 1e-8)
+                    {
+                        dlt = -AIR_SHARE * (1f - (float)st.land_prep) * (rig.RootRot * new Vector3((float)bo.x, (float)bo.y, 0f));
+                        if (!st.air) dlt.y = Mathf.Max(0f, dlt.y);
+                    }
+                }
+                if (st.air) _air_dlt = dlt;
+                else _air_dlt = dlt + (_air_dlt - dlt) * Mathf.Exp(-mdt / AIR_SHARE_EASE);
+                rig.position += _air_dlt;
                 rig.Place();
                 _frame_y = pre_y;
             }
@@ -130,6 +146,8 @@ namespace Runout.Game
         [System.NonSerialized] public RiderView rider;
         [System.NonSerialized] public CrashView crash;
         float _frame_y;
+        const float AIR_SHARE = 0.8f, AIR_SHARE_EASE = 0.08f;
+        Vector3 _air_dlt;
 
         // ---- motion cap (Godot: _mcap / MCAP) ----
         static readonly Dictionary<string, Vector2> MCAP = new Dictionary<string, Vector2>
