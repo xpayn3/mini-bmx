@@ -94,6 +94,7 @@ namespace Runout.EditorTools
             sunGo.AddComponent<HDAdditionalLightData>();
             sunGo.transform.rotation = Quaternion.Euler(10f, 230f, 0f);
             sun.shadows = LightShadows.Soft;
+            sun.intensity = RideLighting.SUN_LUX;   // (HDRP: lux; a light from code is 1 = night)
 
             // Sky + fog + exposure in one global volume (physically based, like the Godot SunSky model).
             var volGo = new GameObject("Sky and Fog");
@@ -176,6 +177,7 @@ namespace Runout.EditorTools
             sunGo.AddComponent<HDAdditionalLightData>();
             sunGo.transform.rotation = Quaternion.Euler(55f, 200f, 0f);
             sun.shadows = LightShadows.Soft;
+            sun.intensity = RideLighting.SUN_LUX;   // (HDRP: lux; a light from code is 1 = night)
             var volGo = new GameObject("Sky and Fog");
             var vol = volGo.AddComponent<Volume>();
             vol.isGlobal = true;
