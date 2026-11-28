@@ -61,7 +61,14 @@ Graph / HLSL · glTFast (`.glb`) · Splines · Timeline · Test Framework · Ste
    `IGround`; chunk meshing as Burst jobs in Unity.
 3. **Ride scene**: the bike model (dh.glb) + BikeRig (wheels, fork, linkage, fit to ground), `ISusp`, the trail camera, HUD.
 4. **Rider**: Humanoid rig + Animation Rigging fed by the ported pose solver (`rider.gd`).
-5. **Ragdoll + crash bike** (already C# in Godot: make them engine-free and share like `godot/sim`).
+5. **Ragdoll + crash bike** (already C# in Godot: make them engine-free and share like `godot/sim`). Hybrid (user,
+   2026-11-28): our solver + behaviours (tuck, brace, pain, windmill, holds) and our crashed-bike body stay ours;
+   Unity does the Humanoid skeleton (driven from the ragdoll like the riding pose), collision against the scene's
+   colliders (physics queries), and getting up (Mecanim clips blended out of the ragdoll pose). Not PhysX joints.
+   **Rider, Unity-style (2026-11-28)**: our solver gives points + frames only (pelvis, spine, head, grips, shoes, where
+   elbows / knees point); each Humanoid bone is turned from the model's own rest axes, arms / legs are two-bone IK on its
+   own bones, fingers are Humanoid muscles (ours decides grip / lever / squeeze), joints held in the human range. No
+   Godot bone conversion (it twisted shoulders / hands on a different skeleton).
 6. **Look**: ground / grass / trees / water, mud / dust / blood, smoke sim, ruts / prints.
 7. **Game shell**: menus, garage, shop, replay, photo mode, ghost, sound (our C# synths via `OnAudioFilterRead`), Steam, saves.
 8. **Dev tools** in `Runout.Dev`, excluded from release builds.

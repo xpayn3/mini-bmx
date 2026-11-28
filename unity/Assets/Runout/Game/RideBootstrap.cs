@@ -93,6 +93,10 @@ namespace Runout.Game
                 var draw = bikeObj.gameObject.AddComponent<BikeDraw>();
                 draw.Init(Sim, g, rig, sh.Stepper);
                 sh.drawer = draw;
+                // the crash: our crashed-bike body (and the ragdoll, hooked by the rider below)
+                var crashView = new CrashView(Sim, rig, g);
+                host.crash = crashView;
+                draw.crash = crashView;
                 // the rider: a Humanoid model posed by our solver (RiderView)
                 if (riderModel != null)
                 {
@@ -106,9 +110,27 @@ namespace Runout.Game
                     var rv = bikeObj.gameObject.AddComponent<RiderView>();
                     rv.Init(Sim, rig, anim);
                     draw.rider = rv;
+                    rv.HookCrash(host, crashView);
                 }
             }
             else Debug.LogWarning("RideBootstrap: no bike extras / model found: the bike is drawn as one rigid piece");
+        }
+
+        /// bail (Godot: the bail key held BAIL_HOLD_MS = a crash on purpose): hold F / pad B
+        float _bailHeld;
+        const float BAIL_HOLD = 0.35f;
+        void Update()
+        {
+            if (Sim == null) return;
+            var kb = UnityEngine.InputSystem.Keyboard.current;
+            var gp = UnityEngine.InputSystem.Gamepad.current;
+            bool down = (kb != null && kb.fKey.isPressed) || (gp != null && gp.buttonEast.isPressed);
+            _bailHeld = down ? _bailHeld + Time.unscaledDeltaTime : 0f;
+            if (_bailHeld >= BAIL_HOLD && !Sim.crash_on && Sim.crash_pending == "")
+            {
+                Sim.crash_pending = "BAIL!";
+                _bailHeld = -999f;   // (once per hold)
+            }
         }
 
 #if UNITY_EDITOR

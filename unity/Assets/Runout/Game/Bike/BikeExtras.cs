@@ -34,6 +34,7 @@ namespace Runout.Game
 
         public bool has(string k) => _v.ContainsKey(k);
         public bool has_prefix(string p) { foreach (var k in _v.Keys) if (k.StartsWith(p)) return true; return false; }
+        public List<string> keys(string prefix) { var o = new List<string>(); foreach (var k in _v.Keys) if (k.StartsWith(prefix)) o.Add(k); return o; }
         public double[] list(string k) => _v.TryGetValue(k, out var a) ? a : new double[0];
         public double f(string k, double d = 0.0) => _v.TryGetValue(k, out var a) && a.Length > 0 ? a[0] : d;
         public Vector2 v2(string k) => _v.TryGetValue(k, out var a) && a.Length >= 2 ? new Vector2((float)a[0], (float)a[1]) : Vector2.zero;

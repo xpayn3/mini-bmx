@@ -1,3 +1,4 @@
+using Runout.Rider;
 using System.Collections.Generic;
 using Runout.Config;
 using Runout.Sim;
@@ -47,6 +48,15 @@ namespace Runout.Game
         {
             if (st == null || rig == null) return;
             dt = Mathf.Min(dt, 0.1f);
+            // crashed: the bike is our crashed-bike body (CrashView), the rider the ragdoll (RiderView)
+            if (st.crash_on && crash != null && crash.Draw(alpha))
+            {
+                HasFollow = true;
+                Xf cb = CrashBike.Mul(crash.bike.BodyAt(alpha), crash.bike.RK);
+                FollowPos = GodotSpace.W(GodotSpace.U(cb.o));
+                if (rider != null) rider.Draw(dt, 0f, 0f, 0f, 0f, 0f, _mcap);
+                return;
+            }
             t += dt;
             double a = alpha;
             if (new Vector2((float)(st.x - _px), (float)(st.z - _pz)).magnitude > 2f) a = 1.0;
@@ -118,6 +128,7 @@ namespace Runout.Game
         }
 
         [System.NonSerialized] public RiderView rider;
+        [System.NonSerialized] public CrashView crash;
         float _frame_y;
 
         // ---- motion cap (Godot: _mcap / MCAP) ----

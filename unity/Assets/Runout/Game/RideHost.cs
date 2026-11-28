@@ -30,9 +30,25 @@ namespace Runout.Game
         public bool smash(GdDict c, V3 vel, V3 pos) => false;
         public void rock_chips(GdDict c) { }
         public void burst(V3 pos, long n, long surf, double power) { }
-        public void start_crash(string reason) { Debug.Log("CRASH " + reason); sim.begin_crash(); }
-        /// until the ragdoll is ported: getting up = back on the bike where it lies
-        public void begin_getup() => sim.get_up();
+        /// the crash (Godot Game.start_crash): the physics' crash state, then our crashed-bike body and the ragdoll
+        public CrashView crash;
+        public System.Action<string> onCrash;            // (the rider: the ragdoll starts from his pose)
+        public System.Action<double, RideInput> onCrashStep;
+        public System.Action onGetUp;
+        public void start_crash(string reason)
+        {
+            Debug.Log("CRASH " + reason);
+            sim.begin_crash();
+            crash?.Begin(reason.Contains("BAIL"));
+            onCrash?.Invoke(reason);
+        }
+        /// getting up (Mecanim get-up clips come later): back on the bike where it lies
+        public void begin_getup()
+        {
+            crash?.End();
+            onGetUp?.Invoke();
+            sim.get_up();
+        }
         public void on_style(long points, string text) { }
         public void on_trick(string trick) { }
         public void on_takeoff() { }
@@ -41,7 +57,11 @@ namespace Runout.Game
         public void ride_fx(double dt, V3 f, double va, bool in_water) { }
         public void log(string text) => Debug.Log(text);
         public void crashlog_note(string text) => Debug.Log(text);
-        public void crash_body_step(BikeSim s, double dt, RideInput inp) { }   // (crashed-bike body + ragdoll: port step 5)
+        public void crash_body_step(BikeSim s, double dt, RideInput inp)
+        {
+            crash?.Step(dt, inp);
+            onCrashStep?.Invoke(dt, inp);
+        }
         public long get_ticks_usec() => _clock.ElapsedTicks * 1_000_000 / Stopwatch.Frequency;
         public long get_ticks_msec() => _clock.ElapsedMilliseconds;
         public long get_physics_frames() => _frames;

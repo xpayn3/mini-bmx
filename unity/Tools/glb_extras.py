@@ -128,6 +128,81 @@ def rig_lines(j, binc):
     if tris:
         ps = [p for t in tris for p in t]
         out.append('rig.seat=%s' % fmt([max(p[1] for p in ps), min(p[0] for p in ps), max(p[0] for p in ps)]))
+    out += hull_lines(j, binc)
+    return out
+
+
+# ---- the crashed bike's hull (BikeRig.crash_hull_prepare + CrashBikeCs.MeshSupport) ----------------------------------
+DIRS26 = []
+for a in (-1, 0, 1):
+    for b in (-1, 0, 1):
+        for c in (-1, 0, 1):
+            if a or b or c:
+                l = (a * a + b * b + c * c) ** 0.5
+                DIRS26.append((a / l, b / l, c / l))
+
+
+def mesh_support(verts):
+    """the vertex furthest along each of 26 directions, duplicates (< 1 mm apart) dropped (CrashBikeCs.MeshSupport)"""
+    if not verts:
+        return []
+    best = [float('-inf')] * 26
+    bi = [0] * 26
+    for j, v in enumerate(verts):
+        for k, d in enumerate(DIRS26):
+            s = v[0] * d[0] + v[1] * d[1] + v[2] * d[2]
+            if s > best[k]:
+                best[k] = s
+                bi[k] = j
+    out = []
+    for k in range(26):
+        p = verts[bi[k]]
+        if not any((q[0] - p[0]) ** 2 + (q[1] - p[1]) ** 2 + (q[2] - p[2]) ** 2 < 1e-6 for q in out):
+            out.append(p)
+    return out
+
+
+def hull_lines(j, binc):
+    """per mesh node of the bike (not the wheels, not tiny: longest side >= 2 cm): its support points along 26
+    directions in its own mesh space, as rig.hull.frame.<node> / rig.hull.steer.<node> (steer = a node BELOW the steer
+    node: Godot's steer_n.is_ancestor_of(m), so the steer mesh itself counts as frame, as in Godot). At the crash the
+    adapter multiplies each node's points by that node's world transform and hands them to CrashBikeStart."""
+    nodes = j['nodes']
+    parent = {}
+    for i, n in enumerate(nodes):
+        for c in n.get('children', []):
+            parent[c] = i
+
+    def under(i, name):   # a strict descendant of the node called name
+        p = parent.get(i)
+        while p is not None:
+            if nodes[p].get('name') == name:
+                return True
+            p = parent.get(p)
+        return False
+    out = []
+    seen = set()
+    for i, n in enumerate(nodes):
+        if 'mesh' not in n:
+            continue
+        name = n.get('name', 'node%d' % i)
+        if name in ('wheel_front', 'wheel_rear') or under(i, 'wheel_front') or under(i, 'wheel_rear'):
+            continue   # (tyres: a ring each)
+        verts = []
+        for pr in j['meshes'][n['mesh']]['primitives']:
+            verts += [tuple(v) for v in accessor(j, binc, pr['attributes']['POSITION'])]
+        if not verts:
+            continue
+        ext = max(max(v[k] for v in verts) - min(v[k] for v in verts) for k in range(3))
+        if ext < 0.02:
+            continue
+        sp = mesh_support(verts)
+        key = name
+        while key in seen:
+            key += '_'
+        seen.add(key)
+        grp = 'steer' if under(i, 'steer') else 'frame'
+        out.append('rig.hull.%s.%s=%s' % (grp, key, ','.join(repr(float(x)) for p in sp for x in p)))
     return out
 
 

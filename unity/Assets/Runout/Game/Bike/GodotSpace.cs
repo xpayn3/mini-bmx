@@ -45,6 +45,26 @@ namespace Runout.Game
         public static Vector3 WorldAxisY(Transform t) => W(t.up);
         public static Vector3 WorldAxisZ(Transform t) => W(t.forward);
 
+        /// a part's whole Godot-space world transform (scale included), G = W U M, as the engine-free code's Xf
+        public static Runout.Rider.Xf WorldXf(Transform t)
+        {
+            Matrix4x4 u = t.localToWorldMatrix;
+            Vector3 cx = -W((Vector3)u.GetColumn(0)), cy = W((Vector3)u.GetColumn(1)), cz = W((Vector3)u.GetColumn(2));
+            return new Runout.Rider.Xf(new Runout.Rider.Basis(V(cx), V(cy), V(cz)), V(W(t.position)));
+        }
+        public static Runout.Rider.Vec3 V(Vector3 v) => new Runout.Rider.Vec3(v.x, v.y, v.z);
+        public static Vector3 U(Runout.Rider.Vec3 v) => new Vector3((float)v.x, (float)v.y, (float)v.z);
+        /// a Godot basis (scale allowed) as a rotation
+        public static Quaternion Rot(Runout.Rider.Basis b)
+        {
+            Vector3 x = U(b.x).normalized, y = U(b.y).normalized, z = U(b.z).normalized;
+            var m = Matrix4x4.identity;
+            m.SetColumn(0, x); m.SetColumn(1, y); m.SetColumn(2, z);
+            return m.rotation;
+        }
+        /// place a model so its Godot world transform is xf (rotation part only; the model keeps its scale)
+        public static void SetModelWorld(Transform model, Runout.Rider.Xf xf) => SetModelWorld(model, U(xf.o), Rot(xf.b));
+
         /// a point in `model`'s Godot model space, from a Unity world point
         public static Vector3 ToModel(Transform model, Vector3 unityWorld) => M(model.InverseTransformPoint(unityWorld));
     }

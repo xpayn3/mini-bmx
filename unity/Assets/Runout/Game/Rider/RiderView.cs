@@ -217,6 +217,100 @@ namespace Runout.Game
         public float thumbSpread = -0.3f;
         [Tooltip("hold every joint inside Unity's human range")] public bool humanLimits = true;
 
+        // ---- the crash: OUR ragdoll (Runout.Rider.Ragdoll, port of Godot's) steps with the physics; the mannequin is
+        // drawn from it the Unity way (frames for pelvis / chest / head / feet from the bodies, IK for the limbs) ----
+        public Ragdoll ragdoll;
+        CrashView _crash;
+        static readonly (double, double, double, double)[] NO_NEAR = new (double, double, double, double)[0];
+
+        public void HookCrash(RideHost host, CrashView crash)
+        {
+            _crash = crash;
+            host.onCrash = _ => StartRagdoll();
+            host.onCrashStep = StepRagdoll;
+            host.onGetUp = () => { if (ragdoll != null) ragdoll.stop(); pose.reset_pose(); };
+        }
+
+        void StartRagdoll()
+        {
+            ragdoll = new Ragdoll { top_height = (x, z) => st.host.terrain.top_height(x, z) };
+            Quaternion mr = rig.ModelRot;
+            var lean = new Xf(new Basis(GodotSpace.V(mr * Vector3.right), GodotSpace.V(mr * Vector3.up), GodotSpace.V(mr * Vector3.forward)), GodotSpace.V(rig.position));
+            var joints = new Vec3[15];
+            for (int i = 0; i < 15; i++) joints[i] = lean.b * pose.J[i] + lean.o;
+            var f = st.fwd();
+            Ragdoll.CrashVelocity(new Vec3(f.x, f.y, f.z), st.v, st.crash_bvy, st.crash_bvy > 0.5, out Vec3 vel, out Vec3 spin);
+            ragdoll.start(joints, vel, spin, lean * pose.shoeL, lean * pose.shoeR);
+        }
+
+        /// one physics step of the crash (Godot GameHost.crash_body_step, after the bike): the ragdoll, then the bike
+        /// holding his hands / feet for the first moments and the two pushing each other apart
+        void StepRagdoll(double dt, RideInput inp)
+        {
+            if (ragdoll == null || !ragdoll.active) return;
+            ragdoll.step(dt, NO_NEAR);
+            CrashBike b = _crash?.bike;
+            if (b != null && ReferenceEquals(st.crash_sim, b))
+            {
+                Vec3[] hp = ragdoll.p, hq = ragdoll.q;
+                int nr = hp.Length;
+                bool held = b.HoldsOn > 0;
+                if (held)
+                {
+                    var hh = b.HoldBody(hp, hq, dt, ragdoll.last_h);
+                    hp = Slice(hh, 0, nr); hq = Slice(hh, nr, nr);
+                }
+                var np = b.CollideBody(hp, hq, ragdoll.rad);
+                ragdoll.external_push(Slice(np, 0, nr), Slice(np, nr, nr));
+                ragdoll.contact_ext = (held || b.LastPush > 0.0005) ? 0.0 : ragdoll.contact_ext + dt;
+            }
+            st.crash_rest = ragdoll.speed < 0.6 ? st.crash_rest + dt : 0.0;
+        }
+
+        static Vec3[] Slice(Vec3[] a, int from, int n) { var o = new Vec3[n]; Array.Copy(a, from, o, 0, n); return o; }
+
+        /// the mannequin drawn from the ragdoll (sim world space -> Unity: W)
+        void DrawRagdoll(float dt)
+        {
+            if (character == null || ragdoll == null) return;
+            Transform root = character.transform;
+            foreach (var b in _bones) b.t.localRotation = RestLocal(b.t);
+            Vector3 Pw(Vec3 v) => GodotSpace.W(GodotSpace.U(v));
+            Vector3 Dw(Vec3 v) => GodotSpace.W(GodotSpace.U(v));
+            Xf pel = ragdoll.body(0), che = ragdoll.body(1), hd = ragdoll.body(2);
+            root.position = Pw(ragdoll.p[Ragdoll.PELVIS]);
+            Transform hips = character.GetBoneTransform(HumanBodyBones.Hips);
+            if (hips != null) hips.position = Pw(ragdoll.p[Ragdoll.PELVIS]);
+            // bodies: y along the bone (up the spine), x the rider's right, z = x cross y (= backward): forward is -z
+            Face(HumanBodyBones.Hips, Dw(-pel.b.z), Dw(pel.b.y));
+            Vector3 sf = Vector3.Slerp(Dw(-pel.b.z).normalized, Dw(-che.b.z).normalized, 0.5f), su = Vector3.Slerp(Dw(pel.b.y).normalized, Dw(che.b.y).normalized, 0.5f);
+            Face(HumanBodyBones.Spine, sf, su);
+            Face(HumanBodyBones.Chest, Dw(-che.b.z), Dw(che.b.y));
+            Face(HumanBodyBones.UpperChest, Dw(-che.b.z), Dw(che.b.y));
+            Face(HumanBodyBones.Neck, Dw(-hd.b.z), Dw(hd.b.y));
+            Face(HumanBodyBones.Head, Dw(-hd.b.z), Dw(hd.b.y));
+            for (int i = 0; i < 2; i++)
+            {
+                string sd = i == 0 ? "Left" : "Right";
+                Xf sh = ragdoll.shoe(i);
+                Face(i == 0 ? HumanBodyBones.LeftFoot : HumanBodyBones.RightFoot, Dw(sh.b.x), Dw(sh.b.y));
+                Transform ua = Bone(sd + "UpperArm"), la = Bone(sd + "LowerArm"), hb = Bone(sd + "Hand");
+                if (ua != null && la != null && hb != null)
+                {
+                    TwoBoneIK(ua, la, hb, Pw(ragdoll.p[i == 0 ? Ragdoll.HA_L : Ragdoll.HA_R]), Pw(ragdoll.p[i == 0 ? Ragdoll.EL_L : Ragdoll.EL_R]));
+                    hb.localRotation = RestLocal(hb);   // (a loose wrist: the hand follows the forearm)
+                }
+                Transform ul = Bone(sd + "UpperLeg"), ll = Bone(sd + "LowerLeg"), fb = Bone(sd + "Foot");
+                if (ul != null && ll != null && fb != null)
+                {
+                    Vec3 ankle = sh.o + sh.b.x.normalized() * pose.ANKLE_X + sh.b.y.normalized() * pose.ANKLE_UP;
+                    TwoBoneIK(ul, ll, fb, Pw(ankle), Pw(ragdoll.p[i == 0 ? 10 : 13]));
+                }
+            }
+            fingers.update(dt, true, 0.0, 0.0, 0.0);   // (relaxed hands)
+            HumanMuscles();
+        }
+
         bool _offscreenSet;
         HumanPoseHandler _hph;
         HumanPose _hp;
@@ -307,8 +401,7 @@ namespace Runout.Game
         {
             if (pose == null || st == null) return;
             t += dt;
-            if (st.crash_on) { if (character != null) character.gameObject.SetActive(false); return; }   // (the ragdoll is not ported yet)
-            if (character != null && !character.gameObject.activeSelf) { character.gameObject.SetActive(true); pose.reset_pose(); }
+            if (st.crash_on) { if (ragdoll != null && ragdoll.active) DrawRagdoll(dt); return; }
             var lt = rig.limb_targets();
             float ek = 1f - Mathf.Exp(-dt * 8f);
             float ak = (float)st.air_k;

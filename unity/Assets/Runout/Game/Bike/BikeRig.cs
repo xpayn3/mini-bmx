@@ -229,6 +229,12 @@ namespace Runout.Game
             susp?.apply();
         }
 
+        /// the bars turned to `steer` about the steering axis (the crashed bike sets them alone)
+        public void set_steer(float steer)
+        {
+            if (steer_n != null) steer_n.localRotation = GodotSpace.MRot(steerRest * Quaternion.AngleAxis(steer * Mathf.Rad2Deg, steer_axis));
+        }
+
         /// a point / axis of a part in Godot world space (the model placed by Place())
         public static Vector3 GPos(Transform t) => GodotSpace.WorldPos(t);
 

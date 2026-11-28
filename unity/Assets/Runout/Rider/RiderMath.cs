@@ -228,6 +228,8 @@ namespace Runout.Rider
         public Xf(Basis b, Vec3 o) { this.b = b; this.o = o; }
         public static readonly Xf IDENTITY = new Xf(Basis.IDENTITY, Vec3.ZERO);
         public static Vec3 operator *(Xf t, Vec3 v) => t.b * v + t.o;
+        public static Xf operator *(Xf a, Xf c) => new Xf(a.b * c.b, a.b * c.o + a.o);
+        public Xf affine_inverse() { Basis bi = b.inverse(); return new Xf(bi, -(bi * o)); }
     }
 
     /// the pose inputs, Godot's `p` dictionary: values double, bool, Vec3 or null (and "pk": a Dictionary<string, double>)

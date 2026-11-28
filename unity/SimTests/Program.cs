@@ -17,6 +17,8 @@ namespace Runout.Sim.Tests
             StepperInterpolates();
             BikeSmoke();
             RiderSmoke();
+            _fail += CrashBikeSmoke.Run(System.IO.Path.GetFullPath(System.IO.Path.Combine(RefDir(), "..", "..")));
+            RagdollSmoke();
             // the bike physics port vs the Godot reference traces (godot/tools/port_trace.tscn -> SimTests/ref)
             int diff = TraceCompare.Run(RefDir(), Environment.GetEnvironmentVariable("TRACE_DETAIL") == "1");
             if (diff > 0) { Console.WriteLine($"FAIL trace_compare {diff} run(s) drift from Godot"); _fail += diff; }
@@ -89,6 +91,46 @@ namespace Runout.Sim.Tests
             var J = rp.J;
             Check("rider_smoke", err == null && bad == 0 && worst < 0.02 && rp.bones.Count == 22,
                 err ?? $"NaN {bad}, hands off grips max {worst * 100:0.0} cm, bones {rp.bones.Count}, pelvis {J[2]}, chest {J[1]}, head {J[0]}, knee L {J[10]}, elbow R {J[7]}");
+        }
+
+        /// the crash ragdoll (Assets/Runout/Rider/Ragdoll, port of ragdoll.gd + RagdollRbCs): a riding-shaped body thrown
+        /// forward at 8 m/s from 1 m over flat ground, 4 s at 120 Hz (10 substeps); finite, never above 3 m, lies on the
+        /// ground at the end, stopped
+        static void RagdollSmoke()
+        {
+            double[] y = { 1.75, 1.45, 1.0, 1.45, 1.2, 1.05, 1.45, 1.2, 1.05, 0.95, 0.55, 0.1, 0.95, 0.55, 0.1 };
+            double[] z = { 0, 0, 0, -0.2, -0.22, -0.22, 0.2, 0.22, 0.22, -0.1, -0.1, -0.1, 0.1, 0.1, 0.1 };
+            double[] x = { 0.05, 0, 0, 0, 0.15, 0.4, 0, 0.15, 0.4, 0, 0.25, 0.1, 0, 0.25, 0.1 };
+            var J = new Runout.Rider.Vec3[15];
+            for (int i = 0; i < 15; i++) J[i] = new Runout.Rider.Vec3(x[i], y[i] + 1.0, z[i]);
+            var rag = new Runout.Rider.Ragdoll { top_height = (gx, gz) => 0.0 };
+            Runout.Rider.Ragdoll.CrashVelocity(new Runout.Rider.Vec3(1, 0, 0), 8.0, 0.0, true, out var vel, out var spin);
+            var shL = new Runout.Rider.Xf(Runout.Rider.Basis.IDENTITY, J[11] + new Runout.Rider.Vec3(0.02, -0.05, 0));
+            var shR = new Runout.Rider.Xf(Runout.Rider.Basis.IDENTITY, J[14] + new Runout.Rider.Vec3(0.02, -0.05, 0));
+            string err = null, at4 = ""; int bad = 0; double top = 0, worstLimit = 0;
+            var near = new List<(double, double, double, double)>();
+            try
+            {
+                rag.start(J, vel, spin, shL, shR);
+                for (int s = 0; s < 1200; s++)
+                {
+                    rag.step(1.0 / 120.0, near);
+                    if (s == 479) at4 = $"at 4 s: speed {rag.speed:0.00} m/s, pain {rag.w_pain:0.00}, tuck {rag.w_tuck:0.00}, pelvis y {rag.p[2].y:0.00}";
+                    foreach (var pt in rag.p) { if (pt.is_nan()) bad++; top = Math.Max(top, pt.y); }
+                    worstLimit = Math.Max(worstLimit, rag.worst_limit());
+                }
+            }
+            catch (Exception e) { err = e.GetType().Name + ": " + e.Message + " @ " + e.StackTrace?.Split('\n')[0]; }
+            double highest = 0; string hb = "";
+            for (int i = 0; i < Runout.Rider.Ragdoll.BODIES; i++)
+            {
+                double by = rag.body_y(i);
+                if (by > highest) { highest = by; hb = Runout.Rider.Ragdoll.BODY_NAMES[i]; }
+            }
+            // a body lying on the ground: every part's centre within its own thickness + 0.2 m of it (the chest is 0.15 thick)
+            Check("ragdoll_smoke", err == null && bad == 0 && top < 3.0 && highest < 0.35 && rag.speed < 0.3,
+                err ?? $"NaN {bad}, highest point ever {top:0.00} m, highest body at the end {hb} {highest:0.00} m, speed {rag.speed:0.000} m/s, " +
+                $"pelvis {rag.p[2]}, slid to x {rag.p[2].x:0.0} m, worst joint limit overshoot {worstLimit:0.000} rad, pain {rag.w_pain:0.00}; {at4}");
         }
 
         static string RefDir()
