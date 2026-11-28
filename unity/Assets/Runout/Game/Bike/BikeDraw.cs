@@ -54,6 +54,7 @@ namespace Runout.Game
                 HasFollow = true;
                 Xf cb = CrashBike.Mul(crash.bike.BodyAt(alpha), crash.bike.RK);
                 FollowPos = GodotSpace.W(GodotSpace.U(cb.o));
+                if (rider != null) { rider.stops.reset(); st.foot_down = false; }
                 if (rider != null) rider.Draw(dt, 0f, 0f, 0f, 0f, 0f, _mcap);
                 return;
             }
@@ -77,12 +78,28 @@ namespace Runout.Game
             FollowPos = new Vector3(drawn_pos.x, y_draw, -drawn_pos.z);
             FollowFwd = new Vector3(Mathf.Cos(hd), 0f, Mathf.Sin(hd));
             HasFollow = true;
-            float wobble = Mathf.Sin(t * 2.3f) * 0.025f * Mathf.Max(0f, 1f - Mathf.Abs((float)st.v) / 2f);
-            float dab_lean = 0f;
+            // at a stop (RiderStops, Godot _update_dab / _idle_life / the look round): the foot comes down, the bike leans onto
+            // it (+ idle weight shifts, the player's tipping), the bars wander
+            float dab_lean = 0f, dab_k = 0f, idle_steer = 0f;
+            if (rider != null && rig.crank_n != null)
+            {
+                var sp = rider.stops;
+                double pdy = 0.0;
+                if (rig.pedal_pivots[0] != null && rig.pedal_pivots[1] != null)
+                    pdy = GodotSpace.WorldPos(rig.pedal_pivots[0]).y - GodotSpace.WorldPos(rig.pedal_pivots[1]).y;
+                else
+                    pdy = BikeRig.GPoint(rig.crank_n, rig.pedal_l).y - BikeRig.GPoint(rig.crank_n, rig.pedal_r).y;
+                sp.update(dt, st, GodotSpace.V(GodotSpace.WorldPos(rig.crank_n)),
+                    GodotSpace.V(rig.RootRot * Vector3.right), GodotSpace.V(rig.RootRot * Vector3.forward), pdy);
+                dab_lean = (float)sp.lean(st.flick);
+                dab_k = (float)sp.dab_k;
+                idle_steer = (float)sp.idle_steer;
+            }
+            float wobble = Mathf.Sin(t * 2.3f) * 0.025f * Mathf.Max(0f, 1f - Mathf.Abs((float)st.v) / 2f) * (1f - dab_k);
             if (st.crash_on) _mc.Clear();
             float mdt = Mathf.Min(Time.deltaTime, 0.05f);
             _lean_c = _mcap("bike_lean", (float)st.bike_lean, mdt);
-            _steer_c = _mcap("steer", _bar_draw(st, mdt, dab_lean) + (float)st.bar_catch, mdt);
+            _steer_c = _mcap("steer", _bar_draw(st, mdt, dab_lean) + (float)st.bar_catch + idle_steer, mdt);
             rig.pose(drawn_pos.x, y_draw, drawn_pos.z, hd, p_draw, (float)st.hop_nose,
                 _lean_c + (float)st.rock + wobble + dab_lean, _steer_c - wobble * 1.5f + (rider != null ? (float)rider.clips.barSteer : 0f), (float)st.wheel_f, (float)st.wheel_r, (float)st.crank);
             // the drawn bike moved so the axle carrying it is where the physics has it (back wheel / nose / both / in the air)

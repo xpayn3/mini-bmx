@@ -16,6 +16,7 @@ namespace Runout.Game
     {
         public Animator character;   // a Humanoid
         public RiderPose pose;
+        public readonly RiderStops stops = new RiderStops();   // the rider at a stop (foot down, idle life, look round)
         public readonly PoseInput pi = new PoseInput();
 
         BikeSim st;
@@ -34,6 +35,7 @@ namespace Runout.Game
             st = sim; rig = r; T = sim.T; character = model;
             pose = new RiderPose();
             pose.tune = (k, d) => T != null ? T.get(k, d) : d;
+            stops.top_height = (x, z) => st.host.terrain.top_height(x, z);
             pose.seat = rig.seat;
             pose.pedal_top = rig.pedal_top;
             // the rider fitted to the bike like Godot does (Game: rider.fit from the grips + crank), model space ~ lean space
@@ -434,6 +436,43 @@ namespace Runout.Game
             t += dt;
             if (st.crash_on) { if (ragdoll != null && ragdoll.active) DrawRagdoll(dt); return; }
             var lt = rig.limb_targets();
+            // at a stop (Godot _dab_foot / _hand_to_hip): the foot to the ground beside the bike, standing over it both
+            // feet, looking back the hand to the hip. stops.update() already ran in BikeDraw (before the bike was posed)
+            object dabNormal = null;
+            if (stops.dab_k > 0.0 && rig.crank_n != null)
+            {
+                Vector3 bbW = GodotSpace.WorldPos(rig.crank_n);
+                Vec3 bb = V(bbW), fwd = V(rig.RootRot * Vector3.right), rgt = V(rig.RootRot * Vector3.forward);
+                double side = stops.dab_side;
+                double dk = stops.dab_k;
+                Vector3 Lean(Vec3 g) { Vector3 l = rig.LeanLocal(U(g)); l.y -= 0.03f; return l; }   // (the shoe is drawn 3 cm above its foot point)
+                Vec3 g1 = stops.Ground(bb, fwd, rgt, side, RiderStops.DAB_OUT, out Vec3 n);
+                dabNormal = V((Quaternion.Inverse(rig.ModelRot) * U(n)).normalized);
+                Vector3 f = Vector3.Lerp(side < 0 ? lt.footL : lt.footR, Lean(g1), (float)dk);
+                f.y += Mathf.Sin(Mathf.PI * (float)dk) * 0.07f;   // (lifts off the pedal on the way out / back)
+                if (side < 0) lt.footL = f; else lt.footR = f;
+                double sk = stops.stop_mode == 1 ? Gd.smoothstep(0.0, 1.0, stops.stop_w) : 0.0;
+                if (sk > 0.0)
+                {
+                    // standing over the bike: the other foot down too, both STAND_FOOT_OUT out
+                    Vec3 g2 = stops.Ground(bb, fwd, rgt, -side, RiderStops.STAND_FOOT_OUT, out _);
+                    Vector3 f2 = Vector3.Lerp(side < 0 ? lt.footR : lt.footL, Lean(g2), (float)sk);
+                    f2.y += Mathf.Sin(Mathf.PI * (float)sk) * 0.08f;
+                    if (side < 0) lt.footR = f2; else lt.footL = f2;
+                    Vec3 g3 = stops.Ground(bb, fwd, rgt, side, RiderStops.STAND_FOOT_OUT, out _);
+                    if (side < 0) lt.footL = Vector3.Lerp(lt.footL, Lean(g3), (float)sk); else lt.footR = Vector3.Lerp(lt.footR, Lean(g3), (float)sk);
+                }
+            }
+            stops.update_hand_hip(dt);
+            if (stops.hand_hip > 0.0 && pose.J != null && pose.J.Length > 2)
+            {
+                double hs = stops.hand_hip_side;
+                Vector3 hip = U(pose.J[2] + new Vec3(-0.03, 0.05, hs * 0.2));   // (rider space = lean space at a stop)
+                float w = (float)Gd.smoothstep(0.0, 1.0, stops.hand_hip);
+                Vector3 h = Vector3.Lerp(hs < 0 ? lt.handL : lt.handR, hip, w);
+                h.y += Mathf.Sin(Mathf.PI * w) * 0.05f;   // (an arc off the bar)
+                if (hs < 0) lt.handL = h; else lt.handR = h;
+            }
             float ek = 1f - Mathf.Exp(-dt * 8f);
             float ak = (float)st.air_k;
             _yaw_s += ((float)st.yaw_rate - _yaw_s) * (1f - Mathf.Exp(-dt * 14f));
@@ -449,8 +488,10 @@ namespace Runout.Game
             pi["footL"] = V(lt.footL); pi["footR"] = V(lt.footR);
             pi["handL"] = V(lt.handL); pi["handR"] = V(lt.handR);
             pi["gripX_L"] = V(lt.gripX); pi["gripX_R"] = V(lt.gripX); pi["gripZ"] = V(lt.gripZ);
-            pi["dab"] = 0.0; pi["dabSide"] = 0.0; pi["dabNormal"] = null; pi["footOut"] = 0.0; pi["footOutSide"] = 0.0;
-            pi["dabLean"] = 0.0; pi["dabLeanVar"] = 0.0; pi["stopStand"] = 0.0; pi["stopSit"] = 0.0;
+            pi["dab"] = stops.dab_k; pi["dabSide"] = stops.dab_side; pi["dabNormal"] = dabNormal;
+            pi["footOut"] = 0.0; pi["footOutSide"] = 0.0;   // (foot out in flat corners: off in Godot by default)
+            pi["dabLean"] = stops.dab_lean_s; pi["dabLeanVar"] = stops.stand_var;
+            pi["stopStand"] = stops.stop_stand; pi["stopSit"] = stops.stop_sit;
             pi["v"] = st.v;
             pi["lean"] = (double)(lean_c + (float)st.rock);
             pi["steer"] = (double)steer_c;
@@ -486,7 +527,7 @@ namespace Runout.Game
             pi["bodyStick"] = (double)mcap("body_stick", (float)st.body_in_s, pdt);
             pi["speedTuck"] = st.speed_tuck;
             pi["relax"] = 0.0; pi["tall"] = 0.0;
-            pi["lookYaw"] = 0.0; pi["lookPitch"] = 0.0; pi["lookTwist"] = 0.0;
+            pi["lookYaw"] = stops.look_yaw; pi["lookPitch"] = stops.look_pitch; pi["lookTwist"] = stops.look_twist;
             // the LAND's slope under the two wheels (no rock domes)
             double hx = Gd.cos(st.heading), hz = -Gd.sin(st.heading);
             double fx = st.x + hx * (st.L - st.BB_REAR), fz = st.z + hz * (st.L - st.BB_REAR);
@@ -510,7 +551,7 @@ namespace Runout.Game
                 double thr = Gd.clampf(st.throw_v / Math.Max(T.f("flipRate"), 0.1), 0.0, 1.0);
                 pi["preload"] = (double)pi["preload"] * (1.0 - thr);
                 pi["extend"] = Math.Max((double)pi["extend"], 0.1 * thr);
-                pi["lookPitch"] = 0.45 * thr;
+                pi["lookPitch"] = (double)pi["lookPitch"] + 0.45 * thr;
                 if (st.throw_v > 0.0) pi["flipArch"] = thr;
             }
             else if (st.air && Math.Abs(st.flip_acc) > 0.25)
@@ -520,8 +561,8 @@ namespace Runout.Game
                 double f_head = fon * (1.0 - Gd.smoothstep(0.15, 0.35, ph));
                 double f_look = fon * Gd.smoothstep(0.35, 0.55, ph) * (1.0 - Gd.smoothstep(0.85, 1.0, ph));
                 double f_open = Math.Max(fon, Gd.smoothstep(0.6, 0.75, ph)) * Gd.smoothstep(0.7, 0.9, ph);
-                pi["lookPitch"] = (0.5 * f_head - 0.35 * f_look) * Gd.signf(st.flip_acc);
-                pi["lookYaw"] = 0.75 * f_look;
+                pi["lookPitch"] = (double)pi["lookPitch"] + (0.5 * f_head - 0.35 * f_look) * Gd.signf(st.flip_acc);
+                pi["lookYaw"] = (double)pi["lookYaw"] + 0.75 * f_look;
                 pi["flipTwist"] = 0.4 * f_look;
                 if (st.flip_acc > 0.0) pi["flipArch"] = fon * (1.0 - Gd.smoothstep(0.2, 0.4, ph));
                 double f_ext = fon * Gd.smoothstep(0.1, 0.3, ph);

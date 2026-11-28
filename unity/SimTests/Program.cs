@@ -20,6 +20,7 @@ namespace Runout.Sim.Tests
             _fail += CrashBikeSmoke.Run(System.IO.Path.GetFullPath(System.IO.Path.Combine(RefDir(), "..", "..")));
             RagdollSmoke();
             PoseClipsSmoke();
+            StopsSmoke();
             // the bike physics port vs the Godot reference traces (godot/tools/port_trace.tscn -> SimTests/ref)
             int diff = TraceCompare.Run(RefDir(), Environment.GetEnvironmentVariable("TRACE_DETAIL") == "1");
             if (diff > 0) { Console.WriteLine($"FAIL trace_compare {diff} run(s) drift from Godot"); _fail += diff; }
@@ -53,6 +54,44 @@ namespace Runout.Sim.Tests
             catch (Exception e) { err = e.GetType().Name + ": " + e.Message + " @ " + e.StackTrace?.Split('\n')[0]; }
             Check("bike_smoke", err == null && vmax > 4.0 && Math.Abs(p.v) < 1.0 && !double.IsNaN(p.x),
                 err ?? $"vmax {vmax * 3.6:0.0} km/h, after braking {p.v * 3.6:0.0} km/h, x {p.x:0.0} m, crashed {p.crash_on}");
+        }
+
+        /// RiderStops: the bike rolls to a stop on flat ground, then on a 20 deg side slope (ground rising to the rider's
+        /// right): the foot comes down; on the slope the uphill (right) foot is picked; no NaN
+        static void StopsSmoke()
+        {
+            string err = null; int bad = 0; var log = new System.Text.StringBuilder();
+            bool okAll = true;
+            try
+            {
+                foreach (double slope in new[] { 0.0, 20.0 * Math.PI / 180.0 })
+                {
+                    var h = new TraceCompare.Host();
+                    var st = new BikeSim(h) { T = new Tune().fill(new RideParams()) }; h.phys = st;
+                    var rs = new Runout.Rider.RiderStops();
+                    rs.top_height = (x, z) => z * Math.Tan(slope);   // heading +x: the rider's right = +z, the ground rises that way
+                    var bb = new Runout.Rider.Vec3(0.0, 0.3, 0.0);
+                    var fwd = new Runout.Rider.Vec3(1, 0, 0); var rgt = new Runout.Rider.Vec3(0, 0, 1);
+                    double dt = 1.0 / 60.0, v = 3.0, maxDab = 0.0, stopW = 0.0;
+                    for (int f = 0; f < 360; f++)
+                    {
+                        v = Math.Max(0.0, v - 2.5 * dt);
+                        st.v = v; st.pedal = 0.0; st.air = false; st.crash_on = false; st.bike_lean = 0.0;
+                        rs.update(dt, st, bb, fwd, rgt, 0.0);
+                        double lean = rs.lean(0.0);
+                        rs.update_hand_hip(dt);
+                        foreach (double d in new[] { rs.dab_k, lean, rs.dab_lean_s, rs.idle_lean, rs.idle_steer, rs.look_yaw, rs.look_pitch, rs.stand_var, rs.stop_w })
+                            if (double.IsNaN(d) || double.IsInfinity(d)) bad++;
+                        maxDab = Math.Max(maxDab, rs.dab_k); stopW = Math.Max(stopW, rs.stop_w);
+                    }
+                    rs.Ground(bb, fwd, rgt, rs.dab_side, Runout.Rider.RiderStops.DAB_OUT, out var n);
+                    bool ok = maxDab > 0.99 && (slope == 0.0 || rs.dab_side > 0.0);
+                    okAll &= ok;
+                    log.Append($"\n   slope {slope * 180 / Math.PI:0} deg: dab {maxDab:0.00}, side {(rs.dab_side < 0 ? "left" : "right")}, foot_down {st.foot_down}, lean {rs.dab_lean_s:0.000} rad, stop pose {rs.stop_mode} ({stopW:0.00}), ground normal ({n.x:0.00},{n.y:0.00},{n.z:0.00})");
+                }
+            }
+            catch (Exception e) { err = e.ToString(); }
+            Check("stops_smoke", err == null && bad == 0 && okAll, err ?? $"NaN {bad}{log}");
         }
 
         /// the Pose Lab clips (Assets/Runout/Rider/PoseClips.cs, port of PoseKeys + game.gd _clips_mix): a scripted jump
