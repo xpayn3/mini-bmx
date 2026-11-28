@@ -74,7 +74,7 @@ Graph / HLSL · glTFast (`.glb`) · Splines · Timeline · Test Framework · Ste
 ## Commands
 ```powershell
 # open the project
-& "C:\Program Files\Unity\Hub\Editor\6000.3.10f1\Editor\Unity.exe" -projectPath unity
+& "C:\Program Files\Unity\Hub\Editor\6000.3.10f1\Editor\Unity.exe" -projectPath D:RunoutNity
 # bootstrap / compile check, headless
 & "C:\Program Files\Unity\Hub\Editor\6000.3.10f1\Editor\Unity.exe" -batchmode -projectPath unity -executeMethod Runout.EditorTools.ProjectBootstrap.Run -quit -logFile unity/Logs/bootstrap.log
 # play-mode tests, headless

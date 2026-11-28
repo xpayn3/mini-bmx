@@ -8,5 +8,8 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Runout/Scenes/Ride.unity
     guid: f6d11752a1c91ba4981ca6edc4c9cb16
+  - enabled: 1
+    path: Assets/Runout/Scenes/Playground.unity
+    guid: 35ab91cc465cdb44d939000de33bc8f2
   m_configObjects: {}
   m_UseUCBPForAssetBundles: 0
