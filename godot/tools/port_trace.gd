@@ -38,6 +38,13 @@ func _ready() -> void:
 	var tune = get_node("/root/Tune")
 	var cfg: Dictionary = get_node("/root/GameState").bike_config_for("dh")
 	tune.set_ride(cfg.ride)
+	# ride_out=<file>: the DH as the game rides it (effective Tune values = the player's sliders x the bike's multipliers,
+	# and the bike config), plain key=value lines for the Unity port's RideBootstrap. No test overrides. Then quit
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("ride_out="):
+			_write_ride(a.substr(9), tune, cfg)
+			get_tree().quit(0)
+			return
 	for k in TRACE_TUNE: tune.v[k] = TRACE_TUNE[k]
 	var extras: Dictionary = SS.DH_EXTRAS
 	var sc: Node = load(cfg.file).instantiate()
@@ -61,6 +68,37 @@ func _ready() -> void:
 		_run(r, cfg, extras, out)
 	print("PORT_TRACE wrote %d runs to %s" % [RUNS.size(), ProjectSettings.globalize_path(out)])
 	get_tree().quit(0)
+
+## a float as text that reads back exactly (GDScript has no %g)
+static func _num(v) -> String:
+	return JSON.stringify(float(v), "", false, true)
+
+func _write_ride(path: String, tune, cfg: Dictionary) -> void:
+	var lines := PackedStringArray()
+	lines.append("bike=dh")
+	lines.append("land=" + _num(cfg.get("land", 1.0)))
+	lines.append("geared=%d" % (1 if cfg.get("geared", false) else 0))
+	var mods: Dictionary = cfg.get("mods", {})
+	if mods.has("cogs"):
+		var cs := PackedStringArray()
+		for c in mods.cogs: cs.append(_num(c))
+		lines.append("cogs=" + ",".join(cs))
+		lines.append("ring_k=" + _num(mods.get("ring_k", 1.0)))
+		lines.append("mods_land=" + _num(mods.get("land", 1.0)))
+	var su: Dictionary = mods.get("susp", {})
+	for e in ["f", "r"]:
+		if su.has(e):
+			for k in ["travel", "sag", "prog", "zc", "zr", "hs", "fric", "bump"]:
+				lines.append("susp.%s.%s=" % [e, k] + _num(su[e][k]))
+	for k in ["psi_f", "psi_r"]:
+		if su.has(k): lines.append("susp.%s=" % k + _num(su[k]))
+	var keys: Array = tune.v.keys()
+	keys.sort()
+	for k in keys: lines.append("tune.%s=" % k + _num(tune.v[k]))
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	f.store_string("\n".join(lines) + "\n")
+	f.close()
+	print("PORT_TRACE ride config: %d lines -> %s" % [lines.size(), path])
 
 func _inp(script: String, t: float) -> Dictionary:
 	var i := {"throttle": 0.0, "brake": 0.0, "steer": 0.0, "hop": false, "sprint": false, "body_fwd": 0.0, "body_lean": 0.0, "pad": false}

@@ -18,7 +18,8 @@ namespace Runout.Game
         public RideHost(IGround ground) { _ground = ground; }
 
         public IGround terrain => _ground;
-        public ISusp susp => null;            // the drawn suspension (BikeRig port)
+        public ISusp drawnSusp;               // the drawn suspension (BikeRig's Suspension), null = none drawn
+        public ISusp susp => drawnSusp;
         public object ragdoll => null;        // (ragdoll port)
         public object getup_anim => null;
         public List<double> pedal_a0 => _pedal_a0;

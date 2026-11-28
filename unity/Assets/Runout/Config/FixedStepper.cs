@@ -74,8 +74,10 @@ namespace Runout.Config
             while (_acc >= Dt && n < MaxSteps)
             {
                 _prev = _cur;
+                BeforeStep?.Invoke();
                 _sim.Step(Dt, input);
                 _sim.Capture(ref _cur);
+                AfterStep?.Invoke();
                 _acc -= Dt;
                 n++;
                 Steps++;
@@ -83,6 +85,11 @@ namespace Runout.Config
             if (n == MaxSteps && _acc > Dt) _acc = 0;
             return n;
         }
+
+        /// around every step (a drawing that interpolates its own values keeps the previous state; per-tick effects)
+        public event Action BeforeStep, AfterStep;
+        /// how far between the last two steps this frame is drawn (0..1; Godot: get_physics_interpolation_fraction)
+        public double Alpha => Math.Min(1.0, _acc / Dt);
 
         /// The pose to draw this frame (between the last two steps).
         public SimPose Drawn => SimPose.Lerp(_prev, _cur, (float)(_acc / Dt));

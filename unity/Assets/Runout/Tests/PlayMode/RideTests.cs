@@ -22,7 +22,9 @@ namespace Runout.Tests
             Assert.NotNull(host, "SimHost in the Ride scene");
             var boot = host.GetComponent<RideBootstrap>();
             Assert.NotNull(boot.Sim, "RideBootstrap built the ride (godot/sim BikeSim)");
-            var bike = host.bikeView.transform;
+            var drawn = Object.FindFirstObjectByType<BikeDraw>();
+            Assert.NotNull(drawn, "the full bike drawing (BikeRig + suspension) is built");
+            var bike = drawn.rig.model;   // (the model is placed directly; the Bike object stays put)
             Vector3 start = bike.position;
             var inp = new RideInput(); inp.set("throttle", 1.0); host.overrideInput = inp;
             float t = 0f;
@@ -64,7 +66,11 @@ namespace Runout.Tests
                 vmax = System.Math.Max(vmax, boot.Sim.v);
                 yield return null;
             }
-            Debug.Log($"PGTEST start_y={y0:0.00} m vmax={vmax * 3.6:0.0} km/h x={boot.Sim.x:0.0} crashed={boot.Sim.crash_on} placed={world.Course.placed.Count}");
+            var draw = Object.FindFirstObjectByType<BikeDraw>();
+            Assert.NotNull(draw, "the full bike drawing (BikeRig + suspension) is built");
+            Assert.NotNull(draw.rig.susp, "the DH has its suspension rig");
+            Debug.Log($"PGTEST start_y={y0:0.00} m vmax={vmax * 3.6:0.0} km/h x={boot.Sim.x:0.0} crashed={boot.Sim.crash_on} placed={world.Course.placed.Count} " +
+                $"fork={draw.rig.susp.xF:0.000} rear={draw.rig.susp.xR:0.000} shock_stroke={draw.rig.susp.last_stroke:0.000} cogs={boot.Sim.cogs.Count} land={boot.Sim.LAND:0.00}");
             Assert.Greater(y0, 3.5, "starts on the 4 m roll-in deck");
             Assert.Greater(vmax * 3.6, 20.0, "the roll-in gives ~30 km/h");
             Assert.AreEqual(3, world.Course.placed.Count, "the three example features are placed");

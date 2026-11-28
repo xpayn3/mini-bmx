@@ -11,8 +11,11 @@ namespace Runout.Game
     {
         public InputReader input;
         public BikeView bikeView;
+        /// the full drawing (BikeRig + suspension + Godot's draw pipeline); when set it draws instead of bikeView
+        [System.NonSerialized] public BikeDraw drawer;
 
         FixedStepper _stepper;
+        public FixedStepper Stepper => _stepper;
         public ISimStep Sim { get; private set; }
         public SimPose Pose { get; private set; }
         /// tests / replays / the demo rider: when set, used instead of the player's controls
@@ -33,7 +36,8 @@ namespace Runout.Game
             RideInput inp = overrideInput ?? (input != null ? input.Read() : _none);
             _stepper.Advance(Time.unscaledDeltaTime * Time.timeScale, inp);
             Pose = _stepper.Drawn;
-            if (bikeView != null) bikeView.Apply(Pose);
+            if (drawer != null) drawer.Draw(_stepper.Alpha, Time.deltaTime);
+            else if (bikeView != null) bikeView.Apply(Pose);
         }
     }
 }
