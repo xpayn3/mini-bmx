@@ -122,6 +122,83 @@ namespace Runout.Tests
             Assert.Less(world.WorstStageMs, 33.0, "no streaming stage over two frames");
         }
 
+        /// Which GPU passes cause the GPU spikes: every render marker timed on the GPU (ProfilerRecorder GpuRecorder) while
+        /// riding the world 20 s; reports the markers whose worst frame is far above their typical one, and what the
+        /// biggest ones were doing in the frames round each GPU spike. Run: Tools/run_in_editor.ps1 -Filter GpuSpikes
+        [UnityTest]
+        public IEnumerator GpuSpikes()
+        {
+            Debug.Log($"GPUSPIKE api {SystemInfo.graphicsDeviceType}");
+            SceneManager.LoadScene("World");
+            yield return null;
+            yield return null;
+            var host = Object.FindFirstObjectByType<SimHost>();
+            var inp = new RideInput();
+            inp.set("throttle", 1.0);
+            host.overrideInput = inp;
+            // every profiler sampler, timed on the GPU by name (HDRP's passes are command-buffer samplers); samplers that
+            // only appear later (a pass that runs only on the spike frames) are picked up by re-listing every second
+            var recs = new Dictionary<string, (UnityEngine.Profiling.Recorder rec, Dictionary<int, double> v)>();
+            var names = new List<string>();
+            void Enlist()
+            {
+                names.Clear();
+                UnityEngine.Profiling.Sampler.GetNames(names);
+                foreach (var nm in names)
+                {
+                    if (recs.ContainsKey(nm)) continue;
+                    var r = UnityEngine.Profiling.Recorder.Get(nm);
+                    if (r == null || !r.isValid) continue;
+                    r.enabled = true;
+                    recs[nm] = (r, new Dictionary<int, double>());
+                }
+            }
+            Enlist();
+            Debug.Log($"GPUSPIKE recording {recs.Count} samplers");
+            var ft = new FrameTiming[1];
+            var gpu = new List<double>(4096);
+            float t = 0f, nextList = 1f;
+            int f = 0;
+            while (t < 20f)
+            {
+                t += Time.deltaTime;
+                yield return null;
+                FrameTimingManager.CaptureFrameTimings();
+                gpu.Add(FrameTimingManager.GetLatestTimings(1, ft) > 0 ? ft[0].gpuFrameTime : double.NaN);
+                foreach (var kv in recs)
+                {
+                    double ms = kv.Value.rec.gpuElapsedNanoseconds / 1e6;
+                    if (ms > 0.05) kv.Value.v[f] = ms;
+                }
+                f++;
+                if (t > nextList) { Enlist(); nextList += 1f; }
+            }
+            int n = gpu.Count;
+            double Med(IEnumerable<double> l) { var c = l.Where(x => !double.IsNaN(x)).OrderBy(x => x).ToList(); return c.Count == 0 ? 0 : c[c.Count / 2]; }
+            Debug.Log($"GPUSPIKE frames {n}, {recs.Count} samplers, {recs.Count(r => r.Value.v.Count > 0)} with GPU time, gpu median {Med(gpu):0.0} ms, worst {gpu.Where(x => !double.IsNaN(x)).DefaultIfEmpty(0).Max():0.0} ms");
+            // a sampler's typical GPU time = median over ALL frames (absent = 0); its worst; how many frames it was over 2 ms
+            var rows = recs.Where(r => r.Key != "FrameTime.GPU" && r.Value.v.Count > 0)
+                           .Select(r => (name: r.Key, med: Med(Enumerable.Range(0, n).Select(i => r.Value.v.TryGetValue(i, out var x) ? x : 0.0)),
+                                         max: r.Value.v.Values.Max(), seen: r.Value.v.Count, over: r.Value.v.Values.Count(x => x > 2.0)))
+                           .OrderByDescending(r => r.max - r.med).Take(25).ToList();
+            foreach (var r in rows) Debug.Log($"GPUSPIKE sampler {r.name}: typical {r.med:0.00} ms, worst {r.max:0.00} ms, in {r.seen} of {n} frames, over 2 ms in {r.over}");
+            // the worst GPU frames: the biggest samplers in the frames round them
+            var worst = Enumerable.Range(60, System.Math.Max(0, n - 60)).Where(i => !double.IsNaN(gpu[i])).OrderByDescending(i => gpu[i]).Take(5).OrderBy(i => i).ToList();
+            foreach (int i in worst)
+            {
+                var sb = new System.Text.StringBuilder();
+                for (int k = System.Math.Max(0, i - 3); k <= System.Math.Min(n - 1, i + 1); k++)
+                {
+                    var top = recs.Where(r => r.Key != "FrameTime.GPU" && r.Value.v.ContainsKey(k)).Select(r => (r.Key, ms: r.Value.v[k])).Where(x => x.ms > 1.0)
+                                  .OrderByDescending(x => x.ms).Take(5);
+                    sb.Append($" [f{k} gpu {gpu[k]:0.0}: {string.Join(", ", top.Select(x => $"{x.Key} {x.ms:0.0}"))}]");
+                }
+                Debug.Log($"GPUSPIKE around frame {i}:{sb}");
+            }
+            foreach (var r in recs.Values) r.rec.enabled = false;
+            Assert.Greater(n, 100);
+        }
+
         static string Saved(double a, double b) => double.IsNaN(a) || double.IsNaN(b) ? "n/a" : $"{a - b:+0.00;-0.00} ms";
 
         /// each switch: (name, turn it off, put it back). Frame settings on the camera's own custom frame settings.
