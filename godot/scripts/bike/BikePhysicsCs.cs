@@ -308,7 +308,7 @@ public partial class BikePhysicsCs : RefCounted
 			s.v = new Vector2(vv.X, vv.Z).Length() * (vv.Dot(f) >= 0.0f ? 1.0 : -1.0);
 			if (!sim.WheelOff(0)) s.wheel_f += sim.AxleRoll(0) * dt;
 			if (!sim.WheelOff(1)) s.wheel_r += sim.AxleRoll(1) * dt;
-			s.counter = 0; s.rock = 0; s.pedal = 0; s.hop_nose = 0.0; s.yaw_rate = 0.0;
+			s.counter = 0; s.rock = 0; s.pedal = 0; s.hop_nose = 0.0; s._hop_nose_t = 0.0; s._hop_nose_m = 0.0; s.yaw_rate = 0.0;
 			s.body_y = s.y; s.body_v = 0; s.y_draw = s.y; s.pitch_draw = s.pitch;
 		}
 	}

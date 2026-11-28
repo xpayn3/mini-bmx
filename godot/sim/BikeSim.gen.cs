@@ -50,9 +50,11 @@ namespace Runout.Sim
 		public double bike_lean = 0.0;
 		public double counter = 0.0;
 		public double rock = 0.0;
-		public double pitch = 0.0;
-		public double pitch_v = 0.0;
-		public double hop_nose = 0.0;
+		public double pitch = 0.0;   // (drawn nose kick of a hop and where it eases to)
+		public double pitch_v = 0.0;   // (drawn nose kick of a hop and where it eases to)
+		public double hop_nose = 0.0;   // (drawn nose kick of a hop and where it eases to)
+		public double _hop_nose_t = 0.0;   // (drawn nose kick of a hop and where it eases to)
+		public double _hop_nose_m = 0.0;   // (drawn nose kick of a hop and where it eases to)
 		public static readonly List<V3> BODY_PTS = new List<V3> { new V3(-0.43, 0.05, 0.3), new V3(0.42, 0.62, 0.1), new V3(0.0, 0.66, 0.16), new V3(0.02, 0.98, 0.14) };
 		public double wheelie_up = 0.0;   // sprint wheelie: how far up (rad) the rider is holding the front
 		public bool air = false;
@@ -320,6 +322,12 @@ namespace Runout.Sim
 		public double weave_lean = 0.0;   // the weave's share of bike_lean this step (read by Game)
 		public double _weave = 0.0;   // the bike's own small roll under the rider (step 2)
 		public double _wv_t = 0.0;   // the bike's own small roll under the rider (step 2)
+		public double man_lk = 0.0;   // back-wheel turn look: 0..1 weight, the eased drawn lean (see _step_steer)
+		public double _man_lean_s = 0.0;   // back-wheel turn look: 0..1 weight, the eased drawn lean (see _step_steer)
+		public const double MAN_LEAN_K = 1.1;   // drawn lean on the back wheel per rad of the turn's own lean, atan(lat / g)
+		public const double MAN_LEAN_IN = 0.12;   // + this many rad per unit of steer: the rider throws his hips into it before the turn builds
+		public const double MAN_BODY_OFF = 0.12;   // share of the bike's lean the body stays more upright on one wheel (two wheels: 30-85 %)
+		public const double MAN_BAR = 0.42;   // rad the bars turn into the turn at full steer on the back wheel (Game._bar_draw)
 		public double _bike_lead = 0.0;   // how far the bike runs ahead of the rider's lean while it changes (two masses)
 		public double _lean_peak = 0.0;   // this jump's biggest lay-over in the air (tabletop, rad)
 		public double _scrub_k = 0.0;   // this take-off was soaked (squash / absorb) - with a lay-over or whip: a scrub
@@ -511,62 +519,85 @@ namespace Runout.Sim
 		public double _wr_vr = 0.0;
 		public double wr_vib2 = 0.0;   // sum of squared one-tick changes of the rear wheel's vertical speed (+ how many ticks) since the sound read it
 		public long wr_vibn = 0;   // sum of squared one-tick changes of the rear wheel's vertical speed (+ how many ticks) since the sound read it
-		public bool _OLD_SPIN = Env.raw("BMX_OLD_SPIN") != "";
-		public bool _OLD_TUCK = Env.raw("BMX_OLD_TUCK") != "";
+		public static bool _OLD_SPIN = Env.raw("BMX_OLD_SPIN") != "";
+		public const double DRAG_REAL = 1.69;
+		public static bool _OLD_DRAG = Env.raw("BMX_OLD_DRAG") != "";
+		public static bool _OLD_CADENCE = Env.raw("BMX_OLD_CADENCE") != "";
+		public const double SPIN_RPM = 150.0;
+		public const double SPIN_SPRINT = 175.0;
+		public static bool _OLD_SPINOUT = Env.raw("BMX_OLD_SPINOUT") != "";
+		public const double CHAIN_SLIP_T = 0.2;
+		public const double CHAIN_SLIP_LURCH = 7.0;   // rad/s extra crank spin while it skips
+		public static bool _OLD_CHAINSLIP = Env.raw("BMX_OLD_CHAINSLIP") != "";
+		public double chain_slip = 0.0;   // s left of a skip (0 = the chain holds)
+		public double chain_slip_k = 0.0;   // 0..1 how much drive is lost right now (HUD / rumble / tests can read it)
+		public double spin_out_k = 0.0;   // 0..1: pushing on the ground at (from ~90 % of) the legs' top cadence, or spun out past it (drawing: head down)
+		public static bool _OLD_TUCK = Env.raw("BMX_OLD_TUCK") != "";
 		public double _air_pull_v = 0.0;   // air_pull's speed (its spring)
-		public bool _OLD_AUTOTUCK = Env.raw("BMX_OLD_AUTOTUCK") != "";   // tuck reach 0.17 m, drawn only after a timed pop
-		public bool _OLD_WEAVE = Env.raw("BMX_OLD_WEAVE") != "";
-		public bool WEAVE_ON = Env.raw("BMX_WEAVE") != "";   // the bike weave, off (rocked the whole rider)   # no bike weave under the rider
-		public bool _OLD_CORNERBODY = Env.raw("BMX_OLD_CORNERBODY") != "";   // body at up to 80 % of the bike's lean in deep turns
-		public bool _OLD_SLOWBODY = Env.raw("BMX_OLD_SLOWBODY") != "";   // slow turns: the body leans with the bike like at speed
-		public bool _OLD_BANKLOCK = Env.raw("BMX_OLD_BANKLOCK") != "";   // leaned into tilted ground: only camberPull
-		public bool _OLD_SLOW = Env.raw("BMX_OLD_SLOW") != "";   // slow-riding / reverse as before 2026-11-26
-		public bool _OLD_LEANDRAW = Env.raw("BMX_OLD_LEANDRAW") != "";   // the drawn body / bike lean with its one-tick jumps
-		public bool _OLD_STRAIGHTWHIP = Env.raw("BMX_OLD_STRAIGHTWHIP") != "";   // the whip only in corners (both sticks)
-		public bool _OLD_STICKBIKE = Env.raw("BMX_OLD_STICKBIKE") != "";   // right stick side lean throws the bike (before 2026-11-26)
+		public static bool _OLD_AUTOTUCK = Env.raw("BMX_OLD_AUTOTUCK") != "";   // tuck reach 0.17 m, drawn only after a timed pop
+		public static bool _OLD_WEAVE = Env.raw("BMX_OLD_WEAVE") != "";
+		public static bool WEAVE_ON = Env.raw("BMX_WEAVE") != "";   // the bike weave, off (rocked the whole rider)   # no bike weave under the rider
+		public static bool _OLD_CORNERBODY = Env.raw("BMX_OLD_CORNERBODY") != "";   // body at up to 80 % of the bike's lean in deep turns
+		public static bool _OLD_MANLEAN = Env.raw("BMX_OLD_MANLEAN") != "";   // back wheel: old lean / bars (body upright, bars barely turned)
+		public static bool _OLD_SLOWBODY = Env.raw("BMX_OLD_SLOWBODY") != "";   // slow turns: the body leans with the bike like at speed
+		public static bool _OLD_BANKLOCK = Env.raw("BMX_OLD_BANKLOCK") != "";   // leaned into tilted ground: only camberPull
+		public static bool _OLD_SLOW = Env.raw("BMX_OLD_SLOW") != "";   // slow-riding / reverse as before 2026-11-26
+		public static bool _OLD_LEANDRAW = Env.raw("BMX_OLD_LEANDRAW") != "";   // the drawn body / bike lean with its one-tick jumps
+		public static bool _OLD_STRAIGHTWHIP = Env.raw("BMX_OLD_STRAIGHTWHIP") != "";   // the whip only in corners (both sticks)
+		public static bool _OLD_STICKBIKE = Env.raw("BMX_OLD_STICKBIKE") != "";   // right stick side lean throws the bike (before 2026-11-26)
 		public const double SPIN_EDGE = 0.85;   // stick to the side this far into a lip = a spin wound up (less = a whip)
 		public const double SPIN_AIR_ONLY = 0.35;   // share of the spin rate the stick gives from the air alone (no wind-up at the lip)
 		public const double SPIN_OPEN = 3.5;   // /s: let go of a wound spin, it eases out this fast (the rider opens up)
 		public const double FLIP_AIR_ONLY = 0.35;
-		public bool _OLD_FLIPPULL = Env.raw("BMX_OLD_FLIPPULL") != "";
+		public static bool _OLD_FLIPPULL = Env.raw("BMX_OLD_FLIPPULL") != "";
 		public const double FLIP_PULL_EARLY = 1.0e9;   // s: a stick held back however long before the lip still throws a flip (the user: "a held lean
 		public const double FLIP_RATE_MAX = 9.0;   // rad/s: the most the flip help turns it (a full turn in 0.7 s) # share of the flip rate without a throw at the lip
 		public double spin_load = 0.0;   // -1..1: a spin wound up into the lip ahead
 		public double _spin_in = 0.0;   // this flight's spin wind-up
 		public double _flip_in = 0.0;   // this flight's flip throw (-1..1, + = back)
-		public bool _OLD_POPSNAP = Env.raw("BMX_OLD_POPSNAP") != "";
+		public static bool _OLD_POPSNAP = Env.raw("BMX_OLD_POPSNAP") != "";
 		public bool _pop_latch = false;
-		public bool _OLD_NOSEREF = Env.raw("BMX_OLD_NOSEREF") != "";
-		public bool _OLD_LIPLOAD = Env.raw("BMX_OLD_LIPLOAD") != "";
-		public bool _OLD_POPDIR = Env.raw("BMX_OLD_POPDIR") != "";
-		public bool _OLD_AUTOPOP = Env.raw("BMX_OLD_AUTOPOP") != "";
-		public bool _OLD_AIRLEAN = Env.raw("BMX_OLD_AIRLEAN") != "";
+		public static bool _OLD_NOSEREF = Env.raw("BMX_OLD_NOSEREF") != "";
+		public static bool _OLD_LIPLOAD = Env.raw("BMX_OLD_LIPLOAD") != "";
+		public static bool _OLD_SETDOWN = Env.raw("BMX_OLD_SETDOWN") != "";
+		public static bool _OLD_HOPNOSE = Env.raw("BMX_OLD_HOPNOSE") != "";
+		public const double HOP_NOSE_TAU = 0.04;   // s: each of the two easing stages of a pop's drawn nose kick (it peaks ~0.1 s in)
+		public static bool _SD_PROBE = Env.raw("BMX_SETDOWN_PROBE") != "";   // tests: SETDOWN lines while the front is lowered
+		public const double SETDOWN_T = 0.6;   // s after touch-down the rider lowers the front (then the plain one-wheel hold again)
+		public const double SETDOWN_W0 = 0.5;   // rad/s the nose may still fall just above the ground (front axle ~0.7 m/s)
+		public const double SETDOWN_K = 4.0;   // + this x radians still up
+		public const double SETDOWN_MAX = 2.0;   // rad/s at most
+		public const double SETDOWN_HIT0 = 5.0;   // m/s into the landing he can still hold the front back fully
+		public const double SETDOWN_HIT = 0.6;   // rad/s faster nose fall per m/s of landing hit over that
+		public static bool _OLD_POPDIR = Env.raw("BMX_OLD_POPDIR") != "";
+		public static bool _OLD_AUTOPOP = Env.raw("BMX_OLD_AUTOPOP") != "";
+		public static bool _OLD_AIRLEAN = Env.raw("BMX_OLD_AIRLEAN") != "";
 		public bool test_rider = false;   // the playground's test rider is riding (Game.set_demo)
 		public const double TEST_ASSIST = 0.85;
-		public bool _OLD_LANDAIM = Env.raw("BMX_OLD_LANDAIM") != "";
+		public static bool _OLD_LANDAIM = Env.raw("BMX_OLD_LANDAIM") != "";
 		public double _land_pitch = NAN;   // the ground's slope where this flight comes down (_landing_slope), NAN on the ground
 		public long _aim_tick = 0;
 		public double _land_t = 0.0;   // s of flight left (from _landing_slope)
-		public bool _OLD_LANDLEGS = Env.raw("BMX_OLD_LANDLEGS") != "";
+		public static bool _OLD_LANDLEGS = Env.raw("BMX_OLD_LANDLEGS") != "";
 		public double land_vn = 0.0;   // m/s: the predicted speed into the landing, square to its slope
 		public double _vn_td = 0.0;   // (tests: the last flight's, for the HIT line)
 		public double _reach_td = 1.0;   // (tests: the last flight's, for the HIT line)
 		public double land_reach = 1.0;   // 0.35..1: how far the legs reach for this landing (by land_vn)
-		public bool _OLD_LANDSPEED = Env.raw("BMX_OLD_LANDSPEED") != "";
-		public bool _OLD_STICKPOP = Env.raw("BMX_OLD_STICKPOP") != "";
-		public bool _OLD_BOG = Env.raw("BMX_OLD_BOG") != "";   // (tests: a bad landing's speed cut whole, in one step)
+		public static bool _OLD_LANDSPEED = Env.raw("BMX_OLD_LANDSPEED") != "";
+		public static bool _OLD_STICKPOP = Env.raw("BMX_OLD_STICKPOP") != "";
+		public static bool _OLD_BOG = Env.raw("BMX_OLD_BOG") != "";   // (tests: a bad landing's speed cut whole, in one step)
 		public const double STICK_POP_FWD = 0.6;   // how far forward the stick must snap (after being back) to pop
 		public const double BOG_T = 0.4;   // s a bad landing's speed cost is spread over
 		public const double BOG_SOFT = 0.35;   // share of that cost a soft landing (impact ~0) still pays; full from impact 4 m/s
 		public const double LAND_ANGLE_FREE = 0.26;   // rad (~15 deg) off the landing's slope that costs no speed
-		public bool _OLD_WHIP = Env.raw("BMX_OLD_WHIP") != "";
+		public static bool _OLD_WHIP = Env.raw("BMX_OLD_WHIP") != "";
 		public const double WHIP_WINDOW = 0.35;   // s before the lip: the stick held to the side winds the whip up
 		public const double WHIP_WIND = 0.2;   // s of holding it to wind it right up
 		public const double WHIP_KICK = 3.0;   // rad/s the bike swings out with off the lip, fully wound
 		public const double WHIP_AIR_ONLY = 0.4;   // rad: the most a whip started in the air alone can throw the bike out
-		public bool _OLD_AIRSTEER = Env.raw("BMX_OLD_AIRSTEER") != "";
-		public bool _OLD_LANDSWAP = Env.raw("BMX_OLD_LANDSWAP") != "";
-		public bool _AIRSTEER_PROBE = Env.raw("BMX_AIRSTEER_PROBE") != "";
+		public static bool _OLD_AIRSTEER = Env.raw("BMX_OLD_AIRSTEER") != "";
+		public static bool _OLD_LANDSWAP = Env.raw("BMX_OLD_LANDSWAP") != "";
+		public static bool _AIRSTEER_PROBE = Env.raw("BMX_AIRSTEER_PROBE") != "";
 		public const double AIR_STEER_K = 190.0;   // hip-twist spring while steering in the air (the whip's is 60)
 		public const double AIR_LOCK_FROM = 0.3;   // s: a steer held from the ground works in the air up to here...
 		public const double AIR_LOCK_FADE = 0.3;   // ...and fades out over this long (a real jump: it is the old lock again)
@@ -583,7 +614,7 @@ namespace Runout.Sim
 		public double carve_now = 0.0;   // rad: how far the last landing's carve turned the travel (drawing: the bars bite into it, fades)
 		public double whip_load = 0.0;   // -1..1: the whip wound up into the lip ahead (signed like the stick)
 		public double _whip_in = 0.0;   // this flight's whip load
-		public bool _OLD_ABSORB = Env.raw("BMX_OLD_ABSORB") != "";
+		public static bool _OLD_ABSORB = Env.raw("BMX_OLD_ABSORB") != "";
 		public const double ABSORB_V0 = 6.0;   // m/s: a small lip of height h needs ~ V0 + VH x h (0.56 m kicker ~31 km/h, 1.1 m table ~40)
 		public const double ABSORB_VH = 5.0;
 		public const double ABSORB_SMALL = 0.9;   // m: lips up to this he soaks fully when fast; ABSORB_BIG and up never (a real jump: popped)
@@ -591,8 +622,8 @@ namespace Runout.Sim
 		public double lip_h = 0.0;   // the lip ahead's height over the ground where it was spotted (m)
 		public double _absorb_k = 0.0;   // a hands-off absorb waiting for the rear wheel to leave the lip
 		public double auto_absorb = 0.0;   // 0..1: hands off, how much he soaks up the lip ahead instead of popping it
-		public bool _OLD_PULLUP = Env.raw("BMX_OLD_PULLUP") != "";
-		public bool _PULL_PROBE = Env.raw("BMX_PULL_PROBE") != "";   // tests: the air tilt / pull-up each 0.05 s
+		public static bool _OLD_PULLUP = Env.raw("BMX_OLD_PULLUP") != "";
+		public static bool _PULL_PROBE = Env.raw("BMX_PULL_PROBE") != "";   // tests: the air tilt / pull-up each 0.05 s
 		public const double AIR_PULL_UP = 0.4;   // rad of nose-up the rider pulls the bike to off a full pop (air_tilt, within airTilt)
 		public double _pull_k = 0.0;   // this step's pull-up (0..1)
 		public const double PULL_HOLD = 0.4;   // s a pro holds the pulled-up bike before levelling it for the landing
@@ -632,10 +663,25 @@ namespace Runout.Sim
 			return g;
 		}
 
-		public static double crank_rate(double w, double gk, double top_speed, double p_sprint)
+		public static double crank_rate(double w, double gk, double top_speed, double p_sprint, double ratio = -1.0)
 		{
 			// a sprint from slow spins the legs up hard (~70 rpm at once), not just at the wheel's rate
-			return maxf(w / (2.78 * gk * top_speed), 3.5 + RideParams.global.get("sprintSpin", 4.0) * p_sprint * slowness(w * 0.37)) * (1 + 0.3 * p_sprint);
+			double spin_up = 3.5 + RideParams.global.get("sprintSpin", 4.0) * p_sprint * slowness(w * 0.37);
+			if (_OLD_CADENCE || ratio <= 0.0)
+			{
+				return maxf(w / (2.78 * gk * top_speed), spin_up) * (1 + 0.3 * p_sprint);
+			}
+			return maxf(w / ratio, spin_up * (1.0 - smooth01(w / ratio / maxf(spin_up, 0.1))));
+		}
+
+		public static double ratio_for(double gk, bool p_geared)
+		{
+			return (p_geared ? 2.125 * gk : 2.78);
+		}
+
+		public double drive_ratio()
+		{
+			return ratio_for(gear_k(), gear >= 0);
 		}
 
 		public static double kb_back_cap()
@@ -679,6 +725,11 @@ namespace Runout.Sim
 				return false;
 			}
 			gear = g;
+			if (!_OLD_CHAINSLIP && !air && pedal > 0.3 && throttle_in > 0.3)
+			{
+				double load_k = clampf(pedal * throttle_in * (0.6 + 0.4 * sprint), 0.0, 1.0);
+				chain_slip = maxf(chain_slip, CHAIN_SLIP_T * (0.4 + 0.6 * load_k));
+			}
 			return true;
 		}
 
@@ -736,9 +787,12 @@ namespace Runout.Sim
 			air = false;
 			bike_lean = 0.0;
 			counter = 0.0;
+			man_lk = 0.0;
 			rock = 0.0;
 			yaw_rate = 0.0;
 			hop_nose = 0.0;
+			_hop_nose_t = 0.0;
+			_hop_nose_m = 0.0;
 			hop_t = 0.0;
 			air_time = 0.0;
 			air_k = 0.0;
@@ -749,6 +803,8 @@ namespace Runout.Sim
 			land_prep = 0.0;
 			pop_fired = false;
 			spun_out = false;
+			chain_slip = 0.0;
+			chain_slip_k = 0.0;
 			shake = 0.0;
 			turn_off = 0.0;
 			rev_cap = 3.0;
@@ -1100,6 +1156,8 @@ namespace Runout.Sim
 			double hf = terrain.height(x + f.x * (L - BB_REAR), z + f.z * (L - BB_REAR));
 			pitch += (atan2(hf - hr, L) - pitch) * minf(1.0, dt * 6);
 			hop_nose *= exp(-dt * 4);
+			_hop_nose_t = 0.0;
+			_hop_nose_m = 0.0;
 			wheel_f += v / RWF * dt;
 			wheel_r += v / RWR * dt;
 			body_y = y;
@@ -1753,12 +1811,17 @@ namespace Runout.Sim
 				double gk = gear_k();
 				double ts = T.f("topSpeed");
 				double p_top = (T.f("pedalTop") + T.f("sprintTop") * sp_k) * gk * ts;
+				if (!_OLD_SPINOUT)
+				{
+					p_top = spin_top(sp_k);
+				}
 				double kick = T.get("sprintKick", 0.9) * slowness(v);
 				double p_mul = (1 + (T.f("sprintPower") - 1 + kick) * sp_k) * ts;
-				double cad = v / (gk * T.f("pedalTop") * ts * 0.7);
+				double cad = (_OLD_SPINOUT ? v / (gk * T.f("pedalTop") * ts * 0.7) : v / (0.7 * spin_top(0.0)));   // (1 = ~105 rpm)
 				double grind = (gear < 0 ? 1.0 : 0.35 + 0.65 * smooth01((cad - 0.15) / 0.7));
 				double drive = (((rear_down && !(v < -0.3 && rev_cap > 3.0)) ? throttle : 0.0)) * minf(T.f("pedalLaunch") * p_mul / ts / gk, T.f("pedalPower") * p_mul / vp) * grind * clampf((p_top - v) / 2.5, 0, 1);
 				drive *= 1.0 - KICK_LOSS * _kick_k;   // (a kicked-back crank costs a little of the stroke)
+				drive *= 1.0 - chain_slip_k;   // (the chain skipping after a shift under load)
 				double drive_cap = mu_r * nR;
 				if (!_OLD_GRIP && !is_nan(_nR_s))
 				{
@@ -1967,11 +2030,12 @@ namespace Runout.Sim
 					roll += snow_k * (SNOW_DRAG + SNOW_DRAG_V * absf(v)) * signf(v) * minf(1.0, absf(v) * 4);
 				}
 				_aero_update(throttle);
-				a -= (roll + T.f("airDrag") / (ts * ts) * v * absf(v) * aero_k) * carry;
+				double k_drag = T.f("airDrag") / (ts * ts) * drag_k();
+				a -= (roll + k_drag * v * absf(v) * aero_k) * carry;
 				if (_EPROBE)
 				{
 					_e_add("rolling", -roll * carry * v * dt);
-					_e_add("air", -T.f("airDrag") / (ts * ts) * v * absf(v) * aero_k * carry * v * dt);
+					_e_add("air", -k_drag * v * absf(v) * aero_k * carry * v * dt);
 				}
 				if (in_water)   // (was 0.7: the water dragged a rider to a halt)
 				{
@@ -2029,7 +2093,7 @@ namespace Runout.Sim
 				{
 					_aero_update(throttle);
 				}
-				double k_air = T.f("airDrag") / (T.f("topSpeed") * T.f("topSpeed")) * aero_k;
+				double k_air = T.f("airDrag") / (T.f("topSpeed") * T.f("topSpeed")) * aero_k * drag_k();
 				double sp_air = sqrt(v * v + vy * vy);
 				if (_EPROBE)
 				{
@@ -2051,7 +2115,14 @@ namespace Runout.Sim
 				}
 			}
 			skid = brake && rear_down && v > 0.5 && rear_lock > 0.15;
-			double top_now = (T.f("pedalTop") + T.f("sprintTop") * sprint) * gear_k() * T.f("topSpeed");
+			double top_now = (_OLD_SPINOUT ? (T.f("pedalTop") + T.f("sprintTop") * sprint) * gear_k() * T.f("topSpeed") : spin_top(sprint));
+			chain_slip = maxf(0.0, chain_slip - dt);
+			chain_slip_k = (chain_slip > 0.0 ? smoothstep(0.0, CHAIN_SLIP_T * 0.35, chain_slip) : 0.0);
+			spin_out_k = 0.0;
+			if (!air && throttle_in > 0.3 && !crash_on && top_now > 0.5)
+			{
+				spin_out_k = smoothstep(0.9, 1.0, v / top_now) * clampf(throttle_in, 0.0, 1.0);
+			}
 			if (v > top_now + 0.3)
 			{
 				spun_out = true;
@@ -2641,6 +2712,19 @@ namespace Runout.Sim
 			}
 			_weave += (wv_t - _weave) * minf(1.0, dt * 8.0);
 			double bl = lean * T.f("bikeLeanMul") + _gx_lean + bank_lean + _bike_lead + _weave;
+			double mk_t = ((!_OLD_MANLEAN && !air && front_air && _balancing()) ? 1.0 : 0.0);
+			man_lk = move_toward(man_lk, mk_t, ((mk_t > man_lk ? 5.0 : 3.0)) * dt);
+			if (man_lk > 0.0)
+			{
+				double ml = T.get("manLean", 0.42) * 1.25;
+				double ml_t = clampf(atan(lat_a / G) * MAN_LEAN_K + steer_in * MAN_LEAN_IN, -ml, ml);
+				_man_lean_s += (ml_t - _man_lean_s) * minf(1.0, dt * 7.0);
+				bl = lerpf(bl, _man_lean_s, man_lk);
+			}
+			else
+			{
+				_man_lean_s = bl;
+			}
 			if (!air)
 			{
 				double cb_t = (signf(bk) != signf(bl) ? 0.0 : absf(bk));
@@ -2770,6 +2854,10 @@ namespace Runout.Sim
 			else if (air_k > 0.0)
 			{
 				counter = lerpf(counter, bl_nw * (1.0 + T.get("stickBodyCounter", 0.25)), _air_wl * air_k);
+			}
+			if (man_lk > 0.0)
+			{
+				counter = lerpf(counter, bl_nw * MAN_BODY_OFF, man_lk);
 			}
 			counter += w_part;
 			rock = pedal_rock(crank, sprint, pedal, va, bike_rock);
@@ -3407,6 +3495,10 @@ namespace Runout.Sim
 					// and only off level ground (a drop's deck): going over a crest or off a lip the rear is still on a slope,
 					// and there the bike follows the ground / keeps its take-off attitude
 					edge_k = smooth01((absf(v) - 2.0) / 5.0) * smooth01((zw_f - hfC - 0.15) / 0.25) * (1.0 - smooth01((absf(_local_slope(f, XR, RWR, cp0)) - 0.05) / 0.1));
+					if (!_OLD_SETDOWN)
+					{
+						edge_k *= smooth01((since_land - SETDOWN_T) / 0.3);
+					}
 					bal_max *= 1.0 + 2.5 * edge_k;
 				}
 				double lip_hold = 0.0;
@@ -3419,6 +3511,11 @@ namespace Runout.Sim
 					lip_ref = face_sl + ((squash > 0.2 ? 0.0 : ((popping ? LIP_NOSE_POP : LIP_NOSE)) * nose_k));
 					lip_hold = clampf(maxf(prep, (popping ? 1.0 : 0.0)) / 0.3, 0.0, 1.0);
 					bal_max *= 1.0 + 2.5 * lip_hold;
+				}
+				double setdown = 0.0;
+				if (!_OLD_SETDOWN && front_air && !rear_air && !air && wheelie_up <= 0.0 && nose_a <= 0.0 && lip_hold <= 0.0)
+				{
+					setdown = 1.0 - smooth01((since_land - SETDOWN_T) / 0.3);
 				}
 				if (true)
 				{
@@ -3607,6 +3704,26 @@ namespace Runout.Sim
 					}
 					vy += (FF + FR - geoF - geoR - (((cF || cR) ? press : 0.0)) - mB * (G + cg) - leg_f) / mB * h;
 					pitch_v += alpha * h;
+					if (setdown > 0.0 && cR && !cF && pitch_v < 0.0)   // (rear-first landing: the front lowered, not dropped)
+					{
+						double sd_err = pitch - _g_pitch;   // (the ground it landed on: nose_ref can still be the take-off lip's)
+						if (sd_err > 0.0)
+						{
+							// (the user: "if the force and jump is huge the slam makes sense, should be realistic": the harder the hit into the
+							// landing, the less of the rear's kick his arms and body can hold back - from SETDOWN_HIT0 m/s each m/s more lets the
+							// nose fall SETDOWN_HIT rad/s faster)
+							double sd_hit = SETDOWN_HIT * maxf(0.0, _vn_td - SETDOWN_HIT0);
+							double sd_w = minf(SETDOWN_MAX + sd_hit, SETDOWN_W0 + sd_hit + SETDOWN_K * sd_err);
+							if (pitch_v < -sd_w)
+							{
+								pitch_v = lerpf(pitch_v, -sd_w, setdown);
+							}
+							if (_SD_PROBE && i == N)
+							{
+								host.log(Gd.fmt("SETDOWN t=%.3f err=%.3f cap=%.2f pv=%.2f k=%.2f vn=%.1f", since_land, sd_err, sd_w, pitch_v, setdown, _vn_td));
+							}
+						}
+					}
 					if (!cF && !cR && was_air)
 					{
 						// in the air: no outside torque. The shared spin air_w only changes with the inertia (tuck),
@@ -4624,7 +4741,7 @@ namespace Runout.Sim
 			if (hop_t > 0)
 			{
 				hop_t -= dt;
-				hop_nose = maxf(hop_nose, (0.22 + 0.15 * hop_load) * 0.6 * (1 - maxf(0.0, hop_t) / HOP_PUSH));
+				_hop_nose_t = maxf(_hop_nose_t, (0.22 + 0.15 * hop_load) * 0.6 * (1 - maxf(0.0, hop_t) / HOP_PUSH));
 				if (hop_t <= 0 || air)
 				{
 					hop_t = 0.0;
@@ -4640,7 +4757,19 @@ namespace Runout.Sim
 			hop_bar_show = !air && crouch > 0.12 && (space || back_in > 0.05 || _cr_rel < 0.2);
 			hop_bar = _crouch_power();   // (it peaks on the rebound, then sags while the crouch is held: pop at the peak)
 			hop_held = space;
-			hop_nose *= exp(-dt * 3.5);
+			if (_OLD_HOPNOSE)
+			{
+				hop_nose = maxf(hop_nose, _hop_nose_t);
+				_hop_nose_t = 0.0;
+				hop_nose *= exp(-dt * 3.5);
+			}
+			else
+			{
+				_hop_nose_t *= exp(-dt * 3.5);
+				double hk = 1.0 - exp(-dt / HOP_NOSE_TAU);   // (two stages: the kick starts from rest, no jump in its speed either)
+				_hop_nose_m += (_hop_nose_t - _hop_nose_m) * hk;
+				hop_nose += (_hop_nose_m - hop_nose) * hk;
+			}
 			land_perfect = maxf(0.0, land_perfect - dt * 1.2);
 		}
 
@@ -4891,7 +5020,14 @@ namespace Runout.Sim
 			wr_w = move_toward(wr_w, 0.0, a * dt);
 			if (pedal > 0.05)
 			{
-				wr_w = maxf(wr_w, crank_rate(v / RWF, gear_k(), T.f("topSpeed"), sprint) * pedal * 2.78 * gear_k() * T.f("topSpeed") * RWF / RWR);
+				if (_OLD_CADENCE)
+				{
+					wr_w = maxf(wr_w, crank_rate(v / RWF, gear_k(), T.f("topSpeed"), sprint) * pedal * 2.78 * gear_k() * T.f("topSpeed") * RWF / RWR);
+				}
+				else
+				{
+					wr_w = maxf(wr_w, crank_rate(v / RWR, gear_k(), T.f("topSpeed"), sprint, drive_ratio()) * pedal * drive_ratio());
+				}
 			}
 		}
 
@@ -4913,11 +5049,18 @@ namespace Runout.Sim
 			if (v < -0.05 && !air && !skid)
 			{
 				// rolling backwards the freewheel's pawls catch: the chain turns the cranks back with the wheel
-				crank += v / RWR / (2.78 * gear_k() * T.f("topSpeed")) * dt;
+				crank += v / RWR / ((_OLD_CADENCE ? 2.78 * gear_k() * T.f("topSpeed") : drive_ratio())) * dt;
 			}
 			else if (pedal > 0.05)
 			{
-				crank += crank_rate(w, gear_k(), T.f("topSpeed"), sprint) * pedal * dt;
+				if (_OLD_CADENCE)
+				{
+					crank += crank_rate(w, gear_k(), T.f("topSpeed"), sprint) * pedal * dt;
+				}
+				else
+				{
+					crank += (crank_rate((air ? wr_w : v / RWR), gear_k(), T.f("topSpeed"), sprint, drive_ratio()) + CHAIN_SLIP_LURCH * chain_slip_k) * pedal * dt;
+				}
 			}
 			else if (!air)
 			{
@@ -5160,7 +5303,7 @@ namespace Runout.Sim
 				man_zone_t = (man_zone ? man_zone_t + dt : 0.0);
 				if (Env.s("BMX_MAN_PROBE") != "" && host.get_physics_frames() % 15 == 0)   // tests
 				{
-					host.log(Gd.fmt("MAN a=%.2f pull=%.2f pitch=%.2f gp=%.2f v=%.1f stick=%.2f armed=%s pw=%.2f lean=%.2f", man_a, pull, pitch, _g_pitch, v, body_in, _man_armed, _man_pw, lean));
+					host.log(Gd.fmt("MAN a=%.2f pull=%.2f pitch=%.2f gp=%.2f v=%.1f stick=%.2f armed=%s pw=%.2f lean=%.2f lk=%.2f bike_lean=%.2f counter=%.2f steer_in=%.2f yaw=%.2f", man_a, pull, pitch, _g_pitch, v, body_in, _man_armed, _man_pw, lean, man_lk, bike_lean, counter, steer_in, yaw_rate));
 				}
 			}
 			double nb = T.get("noseBalance", 0.5);
@@ -5254,6 +5397,16 @@ namespace Runout.Sim
 			vy *= k;
 		}
 
+		public static double drag_k()
+		{
+			return (_OLD_DRAG ? 1.0 : DRAG_REAL);
+		}
+
+		public double spin_top(double p_sprint)
+		{
+			return lerpf(SPIN_RPM, SPIN_SPRINT, clampf(p_sprint, 0.0, 1.0)) / 60.0 * TAU * drive_ratio() * RWR;
+		}
+
 		private void _pop_now(double pw)
 		{
 			double win = T.get("popWindow", 0.24);
@@ -5342,7 +5495,7 @@ namespace Runout.Sim
 			pop_q = power;
 			pop_fx = 1.0;
 			kick_t = 0.3;
-			hop_nose = 0.22 + 0.15 * load_k + 0.08 * power;
+			_hop_nose_t = 0.22 + 0.15 * load_k + 0.08 * power;
 			body_v = vy;
 			if (Env.s("BMX_FORGIVE_PROBE") != "")   // tests
 			{

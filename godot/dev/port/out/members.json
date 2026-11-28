@@ -31,6 +31,8 @@
   "pitch": "double",
   "pitch_v": "double",
   "hop_nose": "double",
+  "_hop_nose_t": "double",
+  "_hop_nose_m": "double",
   "wheelie_up": "double",
   "air": "bool",
   "air_time": "double",
@@ -269,6 +271,8 @@
   "weave_lean": "double",
   "_weave": "double",
   "_wv_t": "double",
+  "man_lk": "double",
+  "_man_lean_s": "double",
   "_bike_lead": "double",
   "_lean_peak": "double",
   "_scrub_k": "double",
@@ -433,12 +437,20 @@
   "wr_vib2": "double",
   "wr_vibn": "long",
   "_OLD_SPIN": "bool",
+  "_OLD_DRAG": "bool",
+  "_OLD_CADENCE": "bool",
+  "_OLD_SPINOUT": "bool",
+  "_OLD_CHAINSLIP": "bool",
+  "chain_slip": "double",
+  "chain_slip_k": "double",
+  "spin_out_k": "double",
   "_OLD_TUCK": "bool",
   "_air_pull_v": "double",
   "_OLD_AUTOTUCK": "bool",
   "_OLD_WEAVE": "bool",
   "WEAVE_ON": "bool",
   "_OLD_CORNERBODY": "bool",
+  "_OLD_MANLEAN": "bool",
   "_OLD_SLOWBODY": "bool",
   "_OLD_BANKLOCK": "bool",
   "_OLD_SLOW": "bool",
@@ -453,6 +465,9 @@
   "_pop_latch": "bool",
   "_OLD_NOSEREF": "bool",
   "_OLD_LIPLOAD": "bool",
+  "_OLD_SETDOWN": "bool",
+  "_OLD_HOPNOSE": "bool",
+  "_SD_PROBE": "bool",
   "_OLD_POPDIR": "bool",
   "_OLD_AUTOPOP": "bool",
   "_OLD_AIRLEAN": "bool",
@@ -534,6 +549,10 @@
   "LOCK_SLIDE": "List<double>",
   "BRAKE_LOOSE_S": "List<double>",
   "LOCK_HOLD": "double",
+  "MAN_LEAN_K": "double",
+  "MAN_LEAN_IN": "double",
+  "MAN_BODY_OFF": "double",
+  "MAN_BAR": "double",
   "CRASH_HARD": "double",
   "HEAT_TAU": "double",
   "FADE_FROM": "double",
@@ -563,12 +582,24 @@
   "WR_BEARING": "double",
   "WR_AIR": "double",
   "WR_BRAKE": "double",
+  "DRAG_REAL": "double",
+  "SPIN_RPM": "double",
+  "SPIN_SPRINT": "double",
+  "CHAIN_SLIP_T": "double",
+  "CHAIN_SLIP_LURCH": "double",
   "SPIN_EDGE": "double",
   "SPIN_AIR_ONLY": "double",
   "SPIN_OPEN": "double",
   "FLIP_AIR_ONLY": "double",
   "FLIP_PULL_EARLY": "double",
   "FLIP_RATE_MAX": "double",
+  "HOP_NOSE_TAU": "double",
+  "SETDOWN_T": "double",
+  "SETDOWN_W0": "double",
+  "SETDOWN_K": "double",
+  "SETDOWN_MAX": "double",
+  "SETDOWN_HIT0": "double",
+  "SETDOWN_HIT": "double",
   "TEST_ASSIST": "double",
   "STICK_POP_FWD": "double",
   "BOG_T": "double",
@@ -638,9 +669,23 @@
     "double",
     "double",
     "double",
+    "double",
     "double"
    ],
    true
+  ],
+  "ratio_for": [
+   "double",
+   [
+    "double",
+    "bool"
+   ],
+   true
+  ],
+  "drive_ratio": [
+   "double",
+   [],
+   false
   ],
   "kb_back_cap": [
    "double",
@@ -1076,6 +1121,18 @@
   ],
   "_pop_along": [
    "void",
+   [
+    "double"
+   ],
+   false
+  ],
+  "drag_k": [
+   "double",
+   [],
+   true
+  ],
+  "spin_top": [
+   "double",
    [
     "double"
    ],
