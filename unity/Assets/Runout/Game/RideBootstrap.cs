@@ -116,7 +116,7 @@ namespace Runout.Game
             if (rideConfig == null)
                 rideConfig = UnityEditor.AssetDatabase.LoadAssetAtPath<TextAsset>("Assets/Runout/Config/Rides/dh.ride.txt");
             if (riderModel == null)
-                riderModel = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Runout/Art/Characters/Mixamo_Ch07/Ch07.fbx");
+                riderModel = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Runout/Art/Characters/UnityDefaultMale/DefaultMale.fbx");
         }
 #endif
     }
