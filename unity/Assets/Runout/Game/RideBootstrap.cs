@@ -20,7 +20,11 @@ namespace Runout.Game
 
         void Start()
         {
-            var host = new RideHost(new TerrainGround(ground != null ? ground : Terrain.activeTerrain));
+            // the test playground when the scene has one (its course is the ground), else the scene's terrain
+            var playground = FindFirstObjectByType<PlaygroundWorld>();
+            if (playground != null && playground.Course == null) playground.Rebuild();
+            IGround g = playground != null ? playground.Ground : new TerrainGround(ground != null ? ground : Terrain.activeTerrain);
+            var host = new RideHost(g);
             Tune = new Tune();
             Sim = new BikeSim(host);
             host.sim = Sim;
@@ -36,7 +40,12 @@ namespace Runout.Game
             var cfg = new GdDict();
             cfg["land"] = 1.0; cfg.set("geared", true); cfg.set("mods", mods);
             Sim.setup(extras, cfg);
-            Sim.reset_at(spawn.x, -spawn.z, heading * Mathf.Deg2Rad);
+            if (playground != null)
+            {
+                V3 s = playground.Spawn();   // (x, heading, z) in sim coordinates
+                Sim.reset_at(s.x, s.z, s.y);
+            }
+            else Sim.reset_at(spawn.x, -spawn.z, heading * Mathf.Deg2Rad);
             GetComponent<SimHost>().Attach(new BikeSimStep(Sim, host));
         }
     }

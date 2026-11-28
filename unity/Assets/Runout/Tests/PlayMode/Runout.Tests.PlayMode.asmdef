@@ -4,6 +4,7 @@
     "references": [
         "Runout.Sim",
         "Runout.Config",
+        "Runout.Levels",
         "Runout.Game",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"

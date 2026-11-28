@@ -16,6 +16,7 @@
   <ItemGroup>
     <Compile Include="../../godot/sim/**/*.cs" />
     <Compile Include="../Assets/Runout/Config/**/*.cs" />
+    <Compile Include="../Assets/Runout/Levels/**/*.cs" />
     <Compile Include="*.cs" />
   </ItemGroup>
 </Project>

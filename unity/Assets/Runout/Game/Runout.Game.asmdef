@@ -4,6 +4,7 @@
     "references": [
         "Runout.Sim",
         "Runout.Config",
+        "Runout.Levels",
         "Unity.InputSystem",
         "Unity.Mathematics",
         "Unity.Burst",

@@ -1,0 +1,16 @@
+{
+    "name": "Runout.Levels",
+    "rootNamespace": "Runout.Levels",
+    "references": [
+        "Runout.Sim"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": true
+}

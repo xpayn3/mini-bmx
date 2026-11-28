@@ -19,6 +19,8 @@ namespace Runout.Sim.Tests
             // the bike physics port vs the Godot reference traces (godot/tools/port_trace.tscn -> SimTests/ref)
             int diff = TraceCompare.Run(RefDir(), Environment.GetEnvironmentVariable("TRACE_DETAIL") == "1");
             if (diff > 0) { Console.WriteLine($"FAIL trace_compare {diff} run(s) drift from Godot"); _fail += diff; }
+            // the test playground course (Assets/Runout/Levels) vs Godot (godot/tools/pg_dump.gd -> SimTests/ref/playground)
+            _fail += PlaygroundCheck.Run(RefDir());
             Console.WriteLine(_fail == 0 ? "SIMTESTS PASS" : $"SIMTESTS FAIL {_fail}");
             return _fail;
         }
