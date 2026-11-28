@@ -143,7 +143,7 @@ namespace Runout.Game
             if (riderModel == null)
                 riderModel = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Runout/Art/Characters/UnityDefaultMale/DefaultMale.fbx");
             if (riderAlbedo == null)
-                riderAlbedo = UnityEditor.AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Runout/Art/Characters/UnityDefaultMale/DefaultMale_Albedo.png");
+                riderAlbedo = UnityEditor.AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Runout/Art/Characters/UnityDefaultMale/DefaultMale_Albedo_Light.png");
         }
 #endif
     }

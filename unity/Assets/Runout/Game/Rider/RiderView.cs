@@ -381,9 +381,9 @@ namespace Runout.Game
                 {
                     var old = mats[k];
                     // (always replaced: an import can give an HDRP Lit material with no colour on it = black)
-                    Texture tex = albedo;
-                    if (old != null && old.HasProperty("_BaseColorMap") && old.GetTexture("_BaseColorMap") != null) tex = old.GetTexture("_BaseColorMap");
-                    else if (old != null && old.HasProperty("_MainTex") && old.mainTexture != null) tex = old.mainTexture;
+                    Texture tex = albedo;   // (the one given wins: e.g. a lighter kit than the model's own)
+                    if (tex == null && old != null && old.HasProperty("_BaseColorMap") && old.GetTexture("_BaseColorMap") != null) tex = old.GetTexture("_BaseColorMap");
+                    else if (tex == null && old != null && old.HasProperty("_MainTex") && old.mainTexture != null) tex = old.mainTexture;
                     var m = new Material(lit) { name = (old != null ? old.name : "rider") + "_HDRP" };
                     if (tex != null) m.SetTexture("_BaseColorMap", tex);
                     m.SetColor("_BaseColor", Color.white);
