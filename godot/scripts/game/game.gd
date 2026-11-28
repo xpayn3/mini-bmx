@@ -472,6 +472,8 @@ func _ready() -> void:
 	phys.T = Tune.v
 	rumble = PadRumble.new(self)
 	phys.setup(rig.extras, bike_cfg)
+	if Env.s("BMX_PHYS") == "cmp":   # (dev) the C# ride (godot/sim) stepped beside this one, compared member by member
+		_phys_cmp = Dev.make("sim/BikeLockstep.cs"); _phys_tap = Dev.make("port/host_tap.gd", [self])
 	ragdoll = Ragdoll.new(terrain)
 	rider = load("res://scripts/rider/rider.gd").new()
 	rig.lean_g.add_child(rider)
@@ -3354,6 +3356,17 @@ func toggle_pose_lab() -> void:
 	pose_lab.toggle()
 
 
+## (dev, BMX_PHYS=cmp) one tick of both rides: GDScript steps through a tap that keeps the game's answers, then the
+## C# twin steps from the same state with them and every member is compared (dev/sim/BikeLockstep.cs, PHYSCMP lines)
+var _phys_cmp = null; var _phys_tap = null
+func _phys_cmp_step(dt: float, inp: Dictionary) -> void:
+	_phys_tap.answers.clear(); _phys_tap.smashed = false
+	_phys_cmp.Before(phys, inp, self)
+	phys.host = _phys_tap
+	phys.step(dt, inp)
+	phys.host = self
+	_phys_cmp.After(phys, dt, _phys_tap.answers, _phys_tap.smashed)
+
 func _physics_process(dt: float) -> void:
 	# photo mode / the trail map set time_scale 0, but physics ticks still come, with dt = 0: stepping the ride then
 	# divided by zero (air yaw, pivot, wheel ground speed) and left NaNs in yaw_rate / spin_acc, and live keys fed it
@@ -3382,7 +3395,8 @@ func _physics_process(dt: float) -> void:
 	if lab: lab.pre_step(inp)
 	_line_record(inp)
 	_aim_update()
-	phys.step(dt, inp)
+	if _phys_cmp != null: _phys_cmp_step(dt, inp)
+	else: phys.step(dt, inp)
 	_bar_tick(phys)
 	if ruts: ruts.step(phys)
 	# snow under the bike drags (BikePhysics.snow_k: 0 none .. 1 the full depth)
@@ -3791,6 +3805,7 @@ func exit_map() -> void:
 		paper_map.close(true)
 
 func _exit_tree() -> void:
+	if _phys_cmp != null: _phys_cmp.Report(); _phys_cmp = null
 	if ghost: ghost.end_run()   # (the run so far may be the new best)
 	Engine.time_scale = 1.0
 	RenderingServer.global_shader_parameter_set("deco_fade", Vector4.ZERO)   # no ride: decorations unfaded (garage)

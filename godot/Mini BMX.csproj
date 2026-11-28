@@ -14,6 +14,10 @@
     <!-- Steam's native library next to the game's assemblies (editor runs + the exported data_ folder) -->
     <None Include="addons/steamworks/steam_api64.dll" Link="steam_api64.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- the physics port's standalone engine-free build (its obj/ holds generated .cs) and the translator's drafts -->
+    <Compile Remove="dev/port/simcheck/**;dev/port/out/**" />
+  </ItemGroup>
   <ItemGroup Condition="'$(Configuration)' == 'ExportRelease'">
     <!-- release exports carry no developer tools: the physics overlay's C# API and anything under dev/ stay out -->
     <Compile Remove="addons/debug_draw_3d/**;dev/**" />

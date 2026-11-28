@@ -33,6 +33,12 @@ namespace Runout.Sim
 
 		public ulong State { get => _state; set => _state = value; }
 
+		// GDScript's RandomNumberGenerator names
+		private ulong _seed;
+		public long seed { get => (long)_seed; set { _seed = (ulong)value; Seed(_seed); } }
+		public double randfn(double mean, double dev) => Randfn((float)mean, (float)dev);
+		public double randf() => Randf();
+
 		/// one 32-bit draw (pcg32_random_r)
 		public uint Rand()
 		{

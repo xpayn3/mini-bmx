@@ -17,24 +17,44 @@ namespace Runout.Sim
 		private const float F2 = 0.5f * (SQRT3 - 1);
 		private static readonly float[] GRAD = MakeGradients();
 
+		public const int TYPE_SIMPLEX_SMOOTH = 1;
 		public int Seed;
-		public float Frequency;
-		public int Octaves;
+		public float Frequency = 0.01f;
+		private int _octaves = 5;
 		public float Lacunarity = 2.0f;
 		public float Gain = 0.5f;
 		private float _bounding;
 
+		public int Octaves
+		{
+			get => _octaves;
+			set { _octaves = value; Bound(); }
+		}
+
+		public Noise2S() { Bound(); }
+
 		public Noise2S(int seed, float frequency, int octaves)
 		{
 			Seed = seed; Frequency = frequency; Octaves = octaves;
+		}
+
+		private void Bound()
+		{
 			float gain = Math.Abs(Gain), amp = gain, ampFractal = 1.0f;
-			for (int i = 1; i < Octaves; i++)
+			for (int i = 1; i < _octaves; i++)
 			{
 				ampFractal += amp;
 				amp *= gain;
 			}
 			_bounding = 1 / ampFractal;
 		}
+
+		// GDScript's FastNoiseLite names (the ported ride sets them like bike_physics.gd does)
+		public int noise_type { get => TYPE_SIMPLEX_SMOOTH; set { } }
+		public double frequency { get => Frequency; set => Frequency = (float)value; }
+		public long fractal_octaves { get => Octaves; set => Octaves = (int)value; }
+		public long seed { get => Seed; set => Seed = (int)value; }
+		public double get_noise_2d(double x, double y) => Get((float)x, (float)y);
 
 		/// FastNoiseLite's Gradients2D: the 24-direction block (literals as in its source) five times, then 8 diagonals
 		private static float[] MakeGradients()

@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Builds godot/sim/ alone, with no Godot reference: proves the ride core is engine-free (portable). dev only -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <OutputType>Library</OutputType>
+    <Nullable>disable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <NoWarn>CS0162;CS0168;CS0219;CS0414;CS1717;CS8981</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../sim/**/*.cs" />
+  </ItemGroup>
+</Project>
