@@ -9,8 +9,7 @@ using GDict = Godot.Collections.Dictionary;
 
 /// <summary>
 /// Godot glue for the engine-free ride (godot/sim): the terrain / game / suspension behind the core's interfaces, the
-/// engine's own math for the few functions SimMath leaves to the platform, and the state mirror between the GDScript
-/// BikePhysics and the C# BikeSim (member by member, same names). See docs/physics_port.md.
+/// engine's own math for the few functions SimMath leaves to the platform, and value conversions. See docs/physics_port.md.
 /// </summary>
 public static class RideBridge
 {
@@ -166,103 +165,8 @@ public static class RideBridge
 		_ => default,
 	};
 
-	// ---------------------------------------------------------------- the state mirror (BikePhysics <-> BikeSim)
-	/// fields that are not ride state (engine links, scratch, probes) or are synced specially
-	private static readonly HashSet<string> SKIP = new HashSet<string>
-	{
-		"host", "prof", "_grip_noise", "_brk_noise", "_tapes_seen", "_eb", "_eb_n", "_jp_prev", "_jp_n", "_jp_t", "_jp_rim",
-		"crash_K", "crash_RK",
-	};
-
-	private static List<FieldInfo> _fields;
-
-	public static List<FieldInfo> Fields
-	{
-		get
-		{
-			if (_fields != null)
-				return _fields;
-			_fields = new List<FieldInfo>();
-			foreach (var f in typeof(BikeSim).GetFields(BindingFlags.Public | BindingFlags.Instance))
-				if (!SKIP.Contains(f.Name))
-					_fields.Add(f);
-			return _fields;
-		}
-	}
-
-	private static readonly Dictionary<string, StringName> _names = new Dictionary<string, StringName>();
-
-	private static StringName N(string s)
-	{
-		if (!_names.TryGetValue(s, out var n))
-			_names[s] = n = new StringName(s);
-		return n;
-	}
-
-	/// set a BikeSim field from the GDScript BikePhysics member of the same name
-	public static void PullField(GodotObject gd, BikeSim s, FieldInfo f)
-	{
-		Variant v = gd.Get(N(f.Name));
-		f.SetValue(s, Convert(v, f.FieldType, f.Name, s));
-	}
-
-	public static void Pull(GodotObject gd, BikeSim s)
-	{
-		foreach (var f in Fields)
-			PullField(gd, s, f);
-	}
-
-	public static object Convert(Variant v, Type t, string name, BikeSim s)
-	{
-		if (t == typeof(double)) return v.VariantType == Variant.Type.Int ? v.AsInt64() : v.AsDouble();
-		if (t == typeof(long)) return v.AsInt64();
-		if (t == typeof(bool)) return v.AsBool();
-		if (t == typeof(string)) return v.AsString();
-		if (t == typeof(V3)) return V(v.AsVector3());
-		if (t == typeof(V2)) return V(v.AsVector2());
-		if (t == typeof(double[])) return v.VariantType == Variant.Type.Nil ? new double[0] : (double[])v.AsFloat64Array().Clone();
-		if (t == typeof(float[])) return v.VariantType == Variant.Type.Nil ? new float[0] : (float[])v.AsFloat32Array().Clone();
-		if (t == typeof(List<double>))
-		{
-			var l = new List<double>();
-			if (v.VariantType == Variant.Type.Array) foreach (var e in v.AsGodotArray()) l.Add(e.VariantType == Variant.Type.Int ? e.AsInt64() : e.AsDouble());
-			return l;
-		}
-		if (t == typeof(List<object>))
-			return v.VariantType == Variant.Type.Array ? Plain(v) : new List<object>();
-		if (t == typeof(GdDict))
-		{
-			if (v.VariantType != Variant.Type.Dictionary) return name == "joint_rock" ? null : new GdDict();
-			var d = ToDict(v.AsGodotDictionary());
-			if (name == "joint_rock") d.id = ColliderId(d);
-			return d;
-		}
-		if (t == typeof(Pcg32))
-		{
-			var g = s._grip_rng ?? new Pcg32();
-			if (v.Obj is GodotObject o) g.State = (ulong)o.Get("state").AsInt64();
-			return g;
-		}
-		if (t == typeof(RideParams))
-		{
-			var p = s.T ?? new RideParams();
-			p.v.Clear();
-			if (v.VariantType == Variant.Type.Dictionary)
-				foreach (var kv in v.AsGodotDictionary())
-					p.v[kv.Key.AsString()] = kv.Value.VariantType == Variant.Type.Int ? kv.Value.AsInt64() : (kv.Value.VariantType == Variant.Type.Bool ? (kv.Value.AsBool() ? 1.0 : 0.0) : kv.Value.AsDouble());
-			return p;
-		}
-		if (t == typeof(SusSetup))
-			return Sus(v.VariantType == Variant.Type.Dictionary ? v.AsGodotDictionary() : null);
-		if (t == typeof(ICrashSim))
-			return v.Obj is GodotObject co ? new GodotCrashSim(co) : null;
-		if (t == typeof(Noise2S)) return null;
-		return Plain(v);
-	}
-
+	/// the garage suspension setup (SuspSetup.resolve) as the core's SusSetup
 	private static readonly string[] UNIT_KEYS = { "travel", "sag", "prog", "zc", "zr", "hs", "fric", "bump" };
-
-	/// SuspSetup.resolve's dictionary as the core's SusSetup
 	public static SusSetup Sus(GDict d)
 	{
 		var s = new SusSetup();
@@ -279,91 +183,6 @@ public static class RideBridge
 		s.u[16] = d["psi_f"].AsDouble();
 		s.u[17] = d["psi_r"].AsDouble();
 		return s;
-	}
-
-	/// does a BikeSim field equal the GDScript member (bit for bit for numbers)? `why` = both values when not
-	public static bool Same(GodotObject gd, BikeSim s, FieldInfo f, out string why)
-	{
-		why = null;
-		Variant v = gd.Get(N(f.Name));
-		object c = f.GetValue(s);
-		Type t = f.FieldType;
-		if (t == typeof(double))
-		{
-			double a = v.VariantType == Variant.Type.Int ? v.AsInt64() : v.AsDouble(), b = (double)c;
-			if (BitConverter.DoubleToInt64Bits(a) == BitConverter.DoubleToInt64Bits(b) || (double.IsNaN(a) && double.IsNaN(b)) || a == b)
-				return true;
-			why = $"gd={a:R} cs={b:R} d={b - a:G3}";
-			return false;
-		}
-		if (t == typeof(long)) { long a = v.AsInt64(), b = (long)c; if (a == b) return true; why = $"gd={a} cs={b}"; return false; }
-		if (t == typeof(bool)) { bool a = v.AsBool(), b = (bool)c; if (a == b) return true; why = $"gd={a} cs={b}"; return false; }
-		if (t == typeof(string)) { string a = v.AsString(), b = (string)c ?? ""; if (a == b) return true; why = $"gd='{a}' cs='{b}'"; return false; }
-		if (t == typeof(V3))
-		{
-			var a = v.AsVector3(); var b = (V3)c;
-			if (a.X.Equals(b.fx) && a.Y.Equals(b.fy) && a.Z.Equals(b.fz)) return true;
-			why = $"gd={a} cs={b}"; return false;
-		}
-		if (t == typeof(V2))
-		{
-			var a = v.AsVector2(); var b = (V2)c;
-			if (a.X.Equals(b.fx) && a.Y.Equals(b.fy)) return true;
-			why = $"gd={a} cs={b}"; return false;
-		}
-		if (t == typeof(GdDict))
-		{
-			var b = (GdDict)c;
-			if (f.Name == "joint_rock")
-			{
-				string ia = v.VariantType == Variant.Type.Dictionary ? ColliderId(ToDict(v.AsGodotDictionary())) : null;
-				if (ia == b?.id) return true;
-				why = $"gd={ia} cs={b?.id}"; return false;
-			}
-			var a = v.VariantType == Variant.Type.Dictionary ? ToDict(v.AsGodotDictionary()) : new GdDict();
-			b ??= new GdDict();
-			foreach (var kv in a)
-				if (!b.TryGetValue(kv.Key, out var bv) || !Gd.to_f(kv.Value).Equals(Gd.to_f(bv)))
-				{
-					why = $"[{kv.Key}] gd={Gd.str(kv.Value)} cs={Gd.str(bv)}"; return false;
-				}
-			foreach (var kv in b)
-				if (!a.ContainsKey(kv.Key) && Gd.to_f(kv.Value) != 0.0)
-				{
-					why = $"[{kv.Key}] gd=<none> cs={Gd.str(kv.Value)}"; return false;
-				}
-			return true;
-		}
-		if (t == typeof(double[]))
-		{
-			var a = v.VariantType == Variant.Type.Nil ? new double[0] : v.AsFloat64Array(); var b = (double[])c;
-			if (a.Length != b.Length) { why = $"len gd={a.Length} cs={b.Length}"; return false; }
-			for (int i = 0; i < a.Length; i++) if (!a[i].Equals(b[i])) { why = $"[{i}] gd={a[i]:R} cs={b[i]:R}"; return false; }
-			return true;
-		}
-		if (t == typeof(float[]))
-		{
-			var a = v.VariantType == Variant.Type.Nil ? new float[0] : v.AsFloat32Array(); var b = (float[])c;
-			if (a.Length != b.Length) { why = $"len gd={a.Length} cs={b.Length}"; return false; }
-			for (int i = 0; i < a.Length; i++) if (!a[i].Equals(b[i])) { why = $"[{i}] gd={a[i]:R} cs={b[i]:R}"; return false; }
-			return true;
-		}
-		if (t == typeof(List<double>))
-		{
-			var b = (List<double>)c;
-			var a = v.VariantType == Variant.Type.Array ? v.AsGodotArray() : new GArray();
-			if (a.Count != b.Count) { why = $"len gd={a.Count} cs={b.Count}"; return false; }
-			for (int i = 0; i < a.Count; i++) if (!Gd.to_f(Plain(a[i])).Equals(b[i])) { why = $"[{i}]"; return false; }
-			return true;
-		}
-		if (t == typeof(Pcg32))
-		{
-			var b = (Pcg32)c;
-			ulong a = v.Obj is GodotObject o ? (ulong)o.Get("state").AsInt64() : 0;
-			if (b == null || a == b.State) return true;
-			why = $"rng state gd={a} cs={b.State}"; return false;
-		}
-		return true;   // (engine links, the tuning set, the suspension setup: inputs, not results)
 	}
 
 	// ---------------------------------------------------------------- engine math (tan, near-ties)
@@ -531,7 +350,7 @@ public sealed class GodotGround : IGround
 public sealed class GodotSusp : ISusp
 {
 	public readonly GodotObject S;
-	public bool Effects = true;   // (the lockstep twin reads it but must not move it)
+	public bool Effects = true;
 
 	public GodotSusp(GodotObject s) { S = s; }
 

@@ -6,12 +6,13 @@ using GDict = Godot.Collections.Dictionary;
 using GArray = Godot.Collections.Array;
 
 /// <summary>
-/// The ride's step in C# (godot/sim BikeSim) behind the GDScript BikePhysics the game holds: BikePhysics.step() hands
-/// over here. The GDScript object keeps the state between steps (the game reads it at full GDScript speed, the replay /
-/// lab / ride log walk it as before); each step its numbers cross in one packed array (bike_mirror.gd <->
-/// BikePhysicsCs.gen.cs), the C# ride steps, and they cross back. Before each of the game's callbacks inside the step
-/// (effects, events) the state is mirrored to GDScript first, so the game sees the same mid-step values as when GDScript
-/// stepped. The crashed bike + ragdoll step (engine objects) is here: a hand port of _crash_sim_step + _crash_step's part.
+/// The ride (godot/sim BikeSim: the source of truth) behind the GDScript BikePhysics the game holds
+/// (scripts/bike/bike_physics.gd = its face: members + calls handed over here). The GDScript object keeps the state
+/// between calls (the game reads it at full GDScript speed, the replay / lab / ride log walk it); each call its numbers
+/// cross in one packed array (_cs_out / _cs_in there, Unpack / Pack in BikePhysicsCs.gen.cs, both written by
+/// dev/port/gen_shell.py), the C# ride works, and they cross back. Before each of the game's callbacks inside a step
+/// (effects, events) the state is mirrored to GDScript first, so the game sees the mid-step values. The crashed bike +
+/// ragdoll step (engine objects) is here too (GameHost.crash_body_step).
 /// </summary>
 [GlobalClass]
 public partial class BikePhysicsCs : RefCounted
@@ -29,7 +30,7 @@ public partial class BikePhysicsCs : RefCounted
 	private bool _pushedAtFx;
 	private static readonly bool PROBES_AFTER_FX = (DevFlags.Env("BMX_ENERGY_PROBE") ?? "") != "" || (DevFlags.Env("BMX_JOLT_PROBE") ?? "") != "";
 	private static readonly StringName S_OUT = "_cs_out", S_IN = "_cs_in", S_PENDING = "crash_pending", S_RISK = "_risk",
-		S_CBHIT = "_cb_hit", S_T = "T", S_CRASH = "crash_sim", S_RK = "crash_RK", S_PROF = "prof", S_CHUNK = "chunk_acc";
+		S_CBHIT = "_cb_hit", S_T = "T", S_COGS = "cogs", S_CRASH = "crash_sim", S_RK = "crash_RK", S_PROF = "prof", S_CHUNK = "chunk_acc";
 
 	public void Init(GodotObject game)
 	{
@@ -40,8 +41,133 @@ public partial class BikePhysicsCs : RefCounted
 		tune?.Connect("changed", Callable.From(() => _tuneDirty = true));
 	}
 
+	/// a new BikePhysics: the C# ride's starting values into its members (they are declared there without values)
+	public void Defaults(GodotObject gd)
+	{
+		_gd = gd;
+		int n = gd.Call(S_OUT).AsFloat64Array().Length;
+		if (n != N)
+			throw new InvalidOperationException($"bike_physics.gd mirrors {n} values, BikeSim has {N}: run `python godot/dev/port/gen_shell.py`");
+		Push();
+		PushCogs();
+	}
+
+	/// BikePhysics.setup: the drawn bike's geometry + the ride config, then the state back into the GDScript object
+	public void Setup(GodotObject gd, GDict extras, GDict bike_cfg)
+	{
+		_gd = gd;
+		_tuneDirty = true;
+		LoadTuneIfDirty();
+		Pull();
+		Setup(extras, bike_cfg);
+		Push();
+		PushCogs();
+	}
+
+	/// the GDScript object's other calls (reset_at, get_up, begin_crash, shift, ...): state in, the C# ride does it, state
+	/// back. Read-only questions (gear_k, drive_ratio, is_sane) answer from the C# state as it is: it is the GDScript
+	/// object's state after the last step / call, and they're asked every frame
+	public Variant Run(GodotObject gd, string name, GArray a)
+	{
+		switch (name)
+		{
+			case "gear_k": return S.gear_k();
+			case "drive_ratio": return S.drive_ratio();
+			case "is_sane": return S.is_sane();
+		}
+		_gd = gd;
+		if (name == "reset_at" || name == "get_up") _tuneDirty = true;   // (tools change Tune between rides)
+		LoadTuneIfDirty();
+		Pull();
+		Variant r = default;
+		switch (name)
+		{
+			case "reset_at": S.reset_at(a[0].AsDouble(), a[1].AsDouble(), a[2].AsDouble()); break;
+			case "get_up": S.get_up(); break;
+			case "begin_crash": S.begin_crash(); break;
+			case "reset_body": S.reset_body(); break;
+			case "flow_up": S.flow_up(); break;
+			case "shift": r = S.shift(a[0].AsInt64()); break;
+			case "e_tick": S._e_tick(a[0].AsDouble(), a[1].AsBool()); break;   // (the energy probe's line now)
+			case "reseed_grip": S._grip_rng.Seed((ulong)a[0].AsInt64()); break;
+			default: GD.PushError("BikePhysicsCs.Run: no " + name); break;
+		}
+		Push();
+		return r;
+	}
+
+	private void PushCogs()
+	{
+		var c = new GArray();
+		foreach (var g in S.cogs) c.Add(g);
+		_gd.Set(S_COGS, c);
+	}
+
+	private void LoadTuneIfDirty()
+	{
+		if (!_tuneDirty) return;
+		_tuneDirty = false;
+		var t = _gd.Get(S_T);
+		LoadTune(t.VariantType == Variant.Type.Dictionary ? t.AsGodotDictionary() : null);
+	}
+
+	// ---------------------------------------------------------------- BikePhysics' static functions (garage, rider, HUD)
+	private static RideParams _statT;
+	/// the Tune values the static functions read (RideParams.global outside a ride): the Tune autoload, reloaded on a change
+	private static void StatTune()
+	{
+		if (_statT == null) StatLoad();
+		if (RideParams.global.v.Count == 0) RideParams.global = _statT;
+	}
+
+	private static void StatLoad()
+	{
+		_statT = new RideParams();
+		var tune = (Engine.GetMainLoop() as SceneTree)?.Root.GetNodeOrNull("Tune");
+		void load()
+		{
+			_statT.v.Clear();
+			if (tune == null) return;
+			foreach (var kv in tune.Get("v").AsGodotDictionary())
+			{
+				var v = kv.Value;
+				_statT.v[kv.Key.AsString()] = v.VariantType == Variant.Type.Int ? v.AsInt64() : (v.VariantType == Variant.Type.Bool ? (v.AsBool() ? 1.0 : 0.0) : v.AsDouble());
+			}
+		}
+		load();
+		tune?.Connect("changed", Callable.From(load));
+	}
+
+	public long StartGear(GArray cogs, double ring_k) => BikeSim.start_gear(RideBridge.ToDoubles(cogs), ring_k);
+	public double CrankRate(double w, double gk, double top, double sprint, double ratio) { StatTune(); return BikeSim.crank_rate(w, gk, top, sprint, ratio); }
+	public double RatioFor(double gk, bool geared) => BikeSim.ratio_for(gk, geared);
+	public double KbBackCap() { StatTune(); return BikeSim.kb_back_cap(); }
+	public double Slowness(double va) { StatTune(); return BikeSim.slowness(va); }
+	public double PedalRock(double crank, double sprint, double pedal, double va, double rock) { StatTune(); return BikeSim.pedal_rock(crank, sprint, pedal, va, rock); }
+	public double DragK() => BikeSim.drag_k();
+	/// a constant / test switch of the C# ride, for the GDScript shell's copies (checked once at start)
+	public Variant Const(string name)
+	{
+		var f = typeof(BikeSim).GetField(name, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+		if (f == null) return default;
+		object v = f.GetValue(null);
+		return v switch
+		{
+			double d => d, long l => l, bool b => b, string s => s,
+			List<double> da => ToArr(da),
+			_ => default,
+		};
+	}
+
+	private static GArray ToArr(List<double> l)
+	{
+		var r = new GArray();
+		foreach (var e in l) r.Add(e);
+		return r;
+	}
+
 	/// BikePhysics.setup's twin (the same extras / bike config)
-	public void Setup(GDict extras, GDict bike_cfg)
+	private void Setup(GDict extras, GDict bike_cfg)
 	{
 		var ex = RideBridge.ToDict(extras);
 		var cfg = new GdDict { src = bike_cfg };
@@ -69,11 +195,7 @@ public partial class BikePhysicsCs : RefCounted
 	public void Step(GodotObject gd, double dt, GDict inp)
 	{
 		_gd = gd;
-		if (_tuneDirty)
-		{
-			_tuneDirty = false;
-			LoadTune(gd.Get(S_T).AsGodotDictionary());
-		}
+		LoadTuneIfDirty();
 		var pv = gd.Get(S_PROF);
 		var prof = pv.VariantType == Variant.Type.Dictionary ? pv.AsGodotDictionary() : null;
 		S.prof = prof == null ? null : (S.prof ?? new Dictionary<string, long>());

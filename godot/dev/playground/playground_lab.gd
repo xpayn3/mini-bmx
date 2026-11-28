@@ -387,7 +387,7 @@ func fresh(ph) -> void:
 
 ## the same random draws for the same run: the grip noise and stamina carry over otherwise
 func _reseed(ph) -> void:
-	ph._grip_rng.seed = 4711
+	ph.reseed_grip(4711)
 	ph.stamina = 1.0
 
 

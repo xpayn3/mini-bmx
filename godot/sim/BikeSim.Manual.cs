@@ -1,6 +1,5 @@
 // Engine-free: nothing in godot/sim/ may reference the engine (checked by tools/sim_purity.ps1).
-// The parts of bike_physics.gd the translator leaves out (dev/port/gen.sh MANUAL): engine glue, lambdas, reflection.
-// Keep each in step with its GDScript function by hand.
+// More of the ride (BikeSim.cs): the constructor, setup, the crash step's core, is_sane and the probes.
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -116,7 +115,7 @@ namespace Runout.Sim
 		}
 
 		// ---- tests (BMX_ENERGY_PROBE / BMX_JOLT_PROBE): printed lines only, nothing the ride reads
-		private void _e_tick(double dt, bool brake)
+		public void _e_tick(double dt, bool brake)
 		{
 			_eb_n.set("t", _eb_n.f("t") + dt);
 			_eb_n.set("dist", _eb_n.f("dist") + absf(v) * dt);

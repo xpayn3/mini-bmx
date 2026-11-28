@@ -16,7 +16,7 @@
   </ItemGroup>
   <ItemGroup>
     <!-- the physics port's standalone engine-free build (its obj/ holds generated .cs) and the translator's drafts -->
-    <Compile Remove="dev/port/simcheck/**;dev/port/out/**" />
+    <Compile Remove="dev/port/simcheck/**" />
   </ItemGroup>
   <ItemGroup Condition="'$(Configuration)' == 'ExportRelease'">
     <!-- release exports carry no developer tools: the physics overlay's C# API and anything under dev/ stay out -->
