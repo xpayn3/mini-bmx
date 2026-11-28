@@ -17,6 +17,7 @@ namespace Runout.Sim.Tests
             StepperInterpolates();
             BikeSmoke();
             RiderSmoke();
+            PelvisCheck();
             _fail += CrashBikeSmoke.Run(System.IO.Path.GetFullPath(System.IO.Path.Combine(RefDir(), "..", "..")));
             RagdollSmoke();
             PoseClipsSmoke();
@@ -137,6 +138,85 @@ namespace Runout.Sim.Tests
             }
             catch (Exception e) { err = e.GetType().Name + ": " + e.Message + " @ " + e.StackTrace?.Split('\n')[0]; }
             Check("poseclips_smoke", err == null && bad == 0, err ?? $"NaN {bad}, largest offset {maxAbs:0.000}{log}");
+        }
+
+        /// the hips + spine rule RiderView uses (the torso's lean shared: pelvis PELVIS_SHARE, spine the rest) through every kind
+        /// of pose the solver makes: torso lean, pelvis tilt, lower back (lumbar) bend and hip flexion per scenario, flagged
+        /// where a real body wouldn't be (the back arched backwards, folded past ~40 deg in the lumbar, a thigh behind the pelvis)
+        static void PelvisCheck()
+        {
+            const double SHARE = 0.65;
+            var scen = new (string name, Dictionary<string, object> keys)[]
+            {
+                ("coast attack", new Dictionary<string, object>{{"v",8.0}}),
+                ("pedalling", new Dictionary<string, object>{{"v",8.0},{"pedal",1.0}}),
+                ("sprint", new Dictionary<string, object>{{"v",8.0},{"pedal",1.0},{"sprint",1.0}}),
+                ("slow sprint start", new Dictionary<string, object>{{"v",1.5},{"pedal",1.0},{"sprint",1.0}}),
+                ("speed tuck", new Dictionary<string, object>{{"v",16.0},{"speedTuck",1.0}}),
+                ("stick forward (tuck)", new Dictionary<string, object>{{"v",10.0},{"bodyStick",1.0}}),
+                ("stick back (sit up)", new Dictionary<string, object>{{"v",8.0},{"bodyStick",-1.0}}),
+                ("preload", new Dictionary<string, object>{{"v",9.0},{"preload",1.0},{"lipK",1.0}}),
+                ("pop / extend", new Dictionary<string, object>{{"v",9.0},{"extend",0.1},{"popFx",1.0},{"lipK",1.0}}),
+                ("air tuck", new Dictionary<string, object>{{"v",9.0},{"air",1.0},{"inAir",1.0},{"airPull",1.0}}),
+                ("reach for landing", new Dictionary<string, object>{{"v",9.0},{"air",1.0},{"inAir",1.0},{"landReach",1.0}}),
+                ("landing fold", new Dictionary<string, object>{{"v",9.0},{"landFold",1.0}}),
+                ("squash", new Dictionary<string, object>{{"v",9.0},{"squash",1.0},{"lipK",1.0}}),
+                ("manual", new Dictionary<string, object>{{"v",6.0},{"frontUp",0.5},{"pitch",0.5},{"bodyStick",-0.7}}),
+                ("back flip arch", new Dictionary<string, object>{{"v",9.0},{"air",1.0},{"inAir",1.0},{"flipArch",1.0}}),
+                ("stop: stand", new Dictionary<string, object>{{"v",0.0},{"dab",1.0},{"dabSide",-1.0},{"stopStand",1.0}}),
+                ("stop: sit", new Dictionary<string, object>{{"v",0.0},{"dab",1.0},{"dabSide",-1.0},{"stopSit",1.0}}),
+                ("deep lean turn", new Dictionary<string, object>{{"v",9.0},{"lean",0.9},{"counter",0.3}}),
+            };
+            var lines = new List<string>(); int flagged = 0; string err = null;
+            double Sag(Runout.Rider.Vec3 v) => Math.Atan2(v.x, v.y) * 180.0 / Math.PI;   // forward of straight up, deg
+            try
+            {
+                foreach (var (name, keys) in scen)
+                {
+                    var rp = new Runout.Rider.RiderPose();
+                    rp.set_style(new Dictionary<string, double> { { "torso", 0.52 }, { "hipX", -0.07 }, { "hipY", 0.075 }, { "lean", 0.22 }, { "kneesOut", 0.25 }, { "spineCurve", 0.24 }, { "spineLow", 0.31 }, { "seatFloor", 1.0 } });
+                    rp.seat = new double[] { 0.78, -0.3, -0.1 };
+                    for (int f = 0; f < 120; f++)
+                    {
+                        double t = f / 60.0, crank = t * 9.0;
+                        var p = new Runout.Rider.PoseInput();
+                        p["footL"] = new Runout.Rider.Vec3(0.17 * Math.Cos(crank + Math.PI), 0.3 + 0.17 * Math.Sin(crank + Math.PI), -0.1);
+                        p["footR"] = new Runout.Rider.Vec3(0.17 * Math.Cos(crank), 0.3 + 0.17 * Math.Sin(crank), 0.1);
+                        p["handL"] = new Runout.Rider.Vec3(0.44, 0.97, -0.39); p["handR"] = new Runout.Rider.Vec3(0.44, 0.97, 0.39);
+                        p["gripX_L"] = new Runout.Rider.Vec3(1, 0, 0); p["gripX_R"] = new Runout.Rider.Vec3(1, 0, 0); p["gripZ"] = new Runout.Rider.Vec3(0, 0, 1);
+                        p["crank"] = crank; p["t"] = t; p["counter"] = 0.0; p["lean"] = 0.0; p["steer"] = 0.0; p["yawRate"] = 0.0;
+                        p["pitch"] = 0.0; p["slope"] = 0.0; p["air"] = 0.0; p["inAir"] = 0.0; p["absorb"] = 0.0; p["frameY"] = 0.6; p["wheelY"] = 0.36;
+                        p["wheelR"] = new Runout.Rider.Vec3(-0.44, 0.355, 0); p["wheelRR"] = 0.355;
+                        p["wheelF"] = new Runout.Rider.Vec3(0.81, 0.374, 0); p["wheelRF"] = 0.374; p["pedal"] = 0.0;
+                        foreach (var kv in keys) p[kv.Key] = kv.Value;
+                        rp.update_pose(1.0 / 60.0, p);
+                    }
+                    var J = rp.J;
+                    var tor = (J[1] - J[2]).normalized();
+                    var up0 = new Runout.Rider.Vec3(0, 1, 0);
+                    double lean0 = Math.Atan2(tor.x, tor.y) * 180.0 / Math.PI, kk = Math.Max(0.0, Math.Min(1.0, (lean0 - 50.0) / 25.0));
+                    double share = SHARE + (0.5 - SHARE) * kk * kk * (3 - 2 * kk);   // (RiderView.PelvisShare)
+                    var uh = (up0 * (1 - share) + tor * share).normalized();
+                    double torso = Sag(tor), pelvis = Sag(uh), lumbar = torso - pelvis;
+                    double Flex(Runout.Rider.Vec3 hip, Runout.Rider.Vec3 knee)
+                    {
+                        var th = (knee - hip).normalized();
+                        double a = Math.Atan2(th.x, -th.y) * 180.0 / Math.PI, d = Math.Atan2(-uh.x, uh.y) * 180.0 / Math.PI;
+                        return a - d;
+                    }
+                    double fl = Flex(J[9], J[10]), fr = Flex(J[12], J[13]);
+                    var why = new List<string>();
+                    if (lumbar < -8) why.Add("back arched");
+                    if (lumbar > 40) why.Add("lumbar folded");
+                    if (Math.Min(fl, fr) < -15) why.Add("thigh behind pelvis");
+                    if (Math.Max(fl, fr) > 135) why.Add("hip over-flexed");
+                    if (pelvis < -12) why.Add("pelvis tipped back");
+                    if (why.Count > 0) flagged++;
+                    lines.Add($"   {name,-22} torso {torso,6:0.0}  pelvis {pelvis,6:0.0}  lumbar {lumbar,6:0.0}  hip flex L {fl,6:0.0} R {fr,6:0.0} deg  {(why.Count > 0 ? "<< " + string.Join(", ", why) : "")}");
+                }
+            }
+            catch (Exception e) { err = e.GetType().Name + ": " + e.Message; }
+            Check("pelvis_check", err == null, err ?? $"{scen.Length} poses, {flagged} flagged\n" + string.Join("\n", lines));
         }
 
         /// the rider pose solver (Assets/Runout/Rider, port of rider.gd update_pose): a DH rider pedalling at 8 m/s for 300

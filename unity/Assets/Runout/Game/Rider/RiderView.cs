@@ -204,6 +204,15 @@ namespace Runout.Game
 
         /// share of the torso's lean the pelvis takes (hip flexion ~2/3, the lumbar spine ~1/3 when a person bends forward)
         public const double PELVIS_SHARE = 0.65;
+        /// the pelvis's share of the torso's lean: PELVIS_SHARE, falling to PELVIS_SHARE_FOLD folded deep (a tuck, a landing fold):
+        /// there a rider rounds the lower back instead of closing the hips past their range (checked: SimTests pelvis_check)
+        public const double PELVIS_SHARE_FOLD = 0.5;
+        static double PelvisShare(Vec3 tor)
+        {
+            double lean = Math.Atan2(tor.x, tor.y) * 180.0 / Math.PI;
+            double k = Math.Max(0.0, Math.Min(1.0, (lean - 50.0) / 25.0));
+            return PELVIS_SHARE + (PELVIS_SHARE_FOLD - PELVIS_SHARE) * k * k * (3 - 2 * k);
+        }
         /// normalized lerp between two directions
         static Vec3 Nl(Vec3 a, Vec3 b, double k) { Vec3 v = a * (1 - k) + b * k; return v.length_squared() > 1e-12 ? v.normalized() : b; }
 
@@ -623,6 +632,7 @@ namespace Runout.Game
             Vec3 up0 = new Vec3(0, 1, 0);
             Vec3 tor = (pose.J[1] - pose.J[2]).normalized();
             Vec3 rHip = (pose.J[12] - pose.J[9]).normalized(), rSh = (pose.J[6] - pose.J[3]).normalized();
+            double share = PelvisShare(tor);
             void Trunk(HumanBodyBones hb, double k, double twist)
             {
                 Vec3 u = Nl(up0, tor, k);
