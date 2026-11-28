@@ -1754,6 +1754,24 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   `BMX_LEVEL=playground BMX_STRAIGHT=1 BMX_PAD=1 BMX_PG_AT=roller_0.3 BMX_PG_SPEED=25 BMX_BODY=slowback:1.0`. Every crash
   now writes `CRASH <reason> v= vy= pitch= ground= ... stick= man= armed= pw=` into the session log (so F8 / crash reports
   say why). Suite identical with / without (the suite rides hands off), stress 56 / 56.
+- **Pop snap + back-wheel landing slap (2026-11-28, user: "jumping is still glitchy, specially on the back wheel", "landing
+  sometimes weird under weird angles")**. (1) `_hop_pop` set the drawn nose kick `hop_nose` (added to the drawn pitch,
+  `BikeRig.pose`) to 0.22-0.45 rad in ONE step: every pop (player, auto pop at a lip, hop out of a manual = the biggest)
+  tipped bike + rider 13-26 deg in one frame. Now the pop sets a target (`_hop_nose_t`) and the kick follows through two
+  easing stages (`HOP_NOSE_TAU` 0.04 s, peaks ~0.1 s in, starts from rest). dtable_36 test rider: rider tilt per frame at
+  take-off 0.33 -> 0.06 rad. `BMX_OLD_HOPNOSE=1` = the step. (2) Landed rear-first nose up, `edge_k` (meant for rolling off
+  a drop's deck: front axle high over the ground, rear on level ground) read every such landing as an edge and pulled the
+  nose down 6x harder, its clamp letting it free-fall: front slammed at ~5 rad/s in 0.1 s. Now no `edge_k` for `SETDOWN_T`
+  0.6 s after a touch-down, and in that window the nose may only fall at `SETDOWN_W0` 0.5 + `SETDOWN_K` 4 x (pitch - ground
+  slope), max 2 rad/s (`setdown`), both + `SETDOWN_HIT` 0.6 rad/s per m/s the landing hit the ground faster than
+  `SETDOWN_HIT0` 5 m/s (`_vn_td`; user: "a huge jump should slam, realistic"): table_1.5 (5.6 m/s in) front down in 0.17 s at
+  <= 2.4 rad/s (was 0.13 s, 4.1), dtable_36 overshot to flat (7.2 m/s) 0.12 s at <= 4.5 rad/s, no one-tick dead stop.
+  `BMX_OLD_SETDOWN=1` = before, `BMX_SETDOWN_PROBE=1` prints `SETDOWN` lines. Stress 56 / 56; suite (stale baseline) vs old:
+  worse 8 -> 5, roller_0.6 one more small energy check. Tests: `BMX_JDUMP` rows now end with the pivot fix, tyre lift, which
+  wheels are off, each drawn axle over the drawn ground, man_a, and the rider node in the bike's root (pos, euler, parent);
+  judge per-frame jumps by game time (`t`), not physics frames (test windows draw unevenly). `BMX_LAND_SHOT` takes
+  `BMX_LAND_N` / `BMX_LAND_STEP`. User rode it: "feels better". Sideways / nose-down landings with the test rider
+  (`BMX_PG_PILOT_YAW` / `_PITCH`) showed no other glitch beyond those two (the aids themselves snap the bike in the air).
 - **Landing body soaks the hit (2026-11-23, user: "when we land the whole body is stiff", "all jumps look small")**.
   Drawing only (`rider.gd`, `game.gd`), physics unchanged. The physics legs (`body_y - y`) already compressed 17-26 cm,
   but the drawn hips dipped 0-10 cm, the same on every jump. Found with the new probe `BMX_LANDBODY=1` (`LANDBODY` per
