@@ -40,7 +40,7 @@ repo, see above — never develop it).
 | What | Where |
 |---|---|
 | Godot 4.7.2 **.NET** (use this one) | `C:\Users\Luka\Godot\Godot_v4.7.2-stable_mono_win64\Godot_v4.7.2-stable_mono_win64.exe` (+ `_console.exe` for logs/tests) |
-| Plain Godot 4.7.2 (no C#) | `C:\Users\Luka\Downloads\Godot_v4.7.2-stable_win64.exe\` (a folder) — runs, but terrain falls back to slow GDScript and some C# features are off |
+| Plain Godot 4.7.2 (no C#) | `C:\Users\Luka\Downloads\Godot_v4.7.2-stable_win64.exe\` (a folder) — can't ride since 2026-11-28 (the ride physics is C#) |
 | .NET SDK | 8.0.428 |
 | No MCP is used | Godot is driven from the command line |
 
@@ -122,7 +122,8 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
 | `project.godot` | Forward+, 1600×900 canvas_items stretch, **physics 120 Hz**, MSAA 2×, shader globals (`atm_wind`, `atm_pusher`, grime…) |
 | `scenes/main.tscn` + `scripts/main.gd` | title menu, ride, garage, pause, settings, controls card, all test flags |
 | `scripts/core/` | autoloads: **Settings** (graphics/display/audio/controls/rebinding, presets Low–Ultra), **Tune** (ride feel × bike multipliers, pins for the Quick tune card), **GameState** (bikes, seed, records, `bike_config()` merges the garage build) |
-| `scripts/bike/` | `bike_physics.gd` (the ride, fixed 120 Hz, 1:1 port of web `physics()` + new body model), `bike_rig.gd` (model, pose, pedals, grips, limb targets), `suspension.gd`, `bike_build.gd` (garage data: paint finishes, logos, wheels, suspension, cassettes, ride mods, stats), `wheel_gen.gd` (procedural wheels/tyres), `decals.gd`, `bike_fx.gd`, `grime.gd` (mud/wet overlay passes) |
+| `sim/` | **the ride physics, C#, engine-free**: `BikeSim.cs` (the ride, fixed 120 Hz) + `BikeSim.Manual.cs`, SimMath / Gd / Pcg32 / Noise / Contracts (section 5) |
+| `scripts/bike/` | `bike_physics.gd` (the ride's GDScript face: state + calls handed to C#, no physics), `BikePhysicsCs.cs` / `RideBridge.cs` (Godot glue), `bike_rig.gd` (model, pose, pedals, grips, limb targets), `suspension.gd`, `bike_build.gd` (garage data: paint finishes, logos, wheels, suspension, cassettes, ride mods, stats), `wheel_gen.gd` (procedural wheels/tyres), `decals.gd`, `bike_fx.gd`, `grime.gd` (mud/wet overlay passes) |
 | `scripts/rider/` | `rider.gd` (procedural rider posed every frame; **skinned spine** with 5 bones), `rider_gear.gd` (helmet, goggles, torso geometry), `rider_geo.gd`, `ragdoll.gd` |
 | `scripts/world/` | `terrain.gd` (chunk streaming, LOD ground with skirts, decorations, water, debris, tape), `terrain_field.gd` (GDScript reference height field) + **`TerrainFieldCs.cs` / `TerrainFeatCs.cs` / `TerrainWoodCs.cs`** (C# port, must match exactly), `terrain_chunk_builder.gd` (worker-thread chunk build), `trail_course.gd`, `trail_features.gd`, `terrain_water.gd`, `terrain_debris.gd`, `tape_sim.gd` (torn tape ribbons), `atmos.gd` (wind, cloud shadows), shaders |
 | `scripts/game/` | `game.gd` (one ride: interpolated drawing between physics states, crash/ragdoll, fx feeding), `camera_rig.gd` (**trail** = default: behind and above, frames the trail ahead and the landing (TrailView); C / pad Y cycle: trail, **helmet** (POV from the action cam on the helmet, `Rider.action_cam` built by `rider/action_cam.gd`, lightly stabilised, chase view while crashed; in a crash the camera body snaps off its hinge and tumbles away, `fx/flying_cam.gd`, a new one is on after getting up), chase, **drone** (banks into turns, noses down with speed, hovers in gusts, prop buzz + `ui/drone_osd.gd` REC / height / distance overlay), side, trackside, bike POV when a bike cam is mounted; Low dolly, Close, Diorama, Slow orbit, Isometric, Top-down were removed 2026-11-20 as near-duplicates), `ride_audio.gd` (procedural sound) + `FreewheelSynth.cs` (freehub clicks: modal resonances fitted to a real hub recording, click rate = how fast the rear hub overruns the driver: rear wheel spin (`BikePhysics.wr_w`: on the ground v / RWR, 0 while the rear is locked; off the ground (jump, nose manual, skip) it spins free: bearing + air drag `WR_BEARING` / `WR_AIR`, the rear brake stops it `WR_BRAKE`, pedalling spins it up through the pawls; the drawn rear wheel turns with it) minus the cranks' measured spin x the drive ratio, x the pawl count; pedalling = engaged = silent, legs slowing = the clicks build, `RideAudio._hub_overrun`; hits on the rear tyre (`wr_knock` = the biggest one-tick change of its vertical speed, and the touch-down) knock the hub: `FreewheelSynth.Knock` = 2-5 loose pawl clicks over ~10-40 ms, road vibration (rms one-tick change of the rear wheel's vertical speed: ~0.03 m/s smooth .. 0.2-0.35 rough trail, `wr_vib2` / `wr_vibn`) goes into `FreewheelSynth.SetShake` 0..1 = a smooth ~28 Hz loudness wobble (depth 0.35) + up to 8 quiet loose ticks a second; never the click timing (a timing spread bunched clicks and left audible gaps at speed: measured with `tools/freewheel_render.gd ... shake=`) (`_fw_hits`); "Quieter at speed" (`fade`) default 0.3 -> 0 (freewheel.cfg `ver` 2 moves saves still at 0.3); a replay has neither (speed only), `BMX_OLD_FW=1` = the old "bike speed whenever the gas key is up"; loudness and the fast-click tone follow that overrun too; tone never pitch-shifted) + `GravelSynth.cs` (tyre roll: ~500 pebble knocks per metre, damped rings around 650 Hz + cracks + casing rumble, fitted to a tyres-on-gravel recording within ~2 dB per band; tone per surface) |
@@ -138,7 +139,36 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
 
 ## 5. Systems — how they work
 
-### Ride physics (`bike_physics.gd`)
+### Ride physics is C# only (2026-11-28; full notes `docs/physics_port.md`)
+- **Edit the physics in `sim/BikeSim.cs`** (+ `sim/BikeSim.Manual.cs`: constructor, setup, the crash step's core,
+  is_sane, probes). It was translated bit for bit from the old `bike_physics.gd` (checked tick by tick over ~64k ticks;
+  stress / feel / ground-sim tests and the playground suite identical), then the GDScript ride was deleted. **Every older
+  note below that names a `bike_physics.gd` function (`_step_vertical`, `_step_lip`, `_balance_step`...) means the
+  function of the same name in `sim/BikeSim.cs` now.** It still reads like GDScript: snake_case, `Gd.*` helpers
+  (clampf, smoothstep, move_toward... with Godot's edge cases), `T.f("tuneKey")` = a Tune value, `GdDict` = a dictionary,
+  `Env.raw("BMX_X")` = a test flag. Godot's math (sin, exp, pow...) goes through `SimMath` so results match the engine.
+- **`scripts/bike/bike_physics.gd` = the ride's GDScript face, no physics in it**: the state as members (so the game, rider
+  pose, HUD, audio, ride log, replay and playground read `phys.x` at full GDScript speed), every call handed to
+  `scripts/bike/BikePhysicsCs.cs` (setup, step, reset_at, get_up, begin_crash, shift, reset_body, flow_up, is_sane,
+  gear_k, drive_ratio, reseed_grip, the statics). Each call the numbers cross in one packed array (`_cs_out` / `_cs_in`).
+  - **Added / removed / renamed a field in BikeSim.cs** -> `python godot/dev/port/gen_shell.py` (writes bike_physics.gd's
+    member list + the mirror, and `BikePhysicsCs.gen.cs`), then `dotnet build`. A stale shell stops at start with that
+    message. A field the game never reads needs nothing more.
+  - **A new function the game calls** -> a one-line function in bike_physics.gd + a `case` in `BikePhysicsCs.Run`.
+  - Constants other scripts read (`BikePhysics.G`, `FLOW_MAX`, `BRAKE_MU`...) are copies in bike_physics.gd, compared with
+    the C# once at the first ride (push_error if they differ).
+  - The crashed bike + ragdoll step drives engine objects: `BikePhysicsCs.GameHost.crash_body_step`.
+- `godot/sim/` = the engine-free core (no Godot reference: `powershell -File tools/sim_purity.ps1`; `dotnet build` in
+  `dev/port/simcheck` builds it alone): SimMath (`-s res://tools/sim_math_probe.gd`), Gd.cs (Godot's helpers + float32
+  V2 / V3), Pcg32 / Noise2S (RandomNumberGenerator / FastNoiseLite bit for bit: `-s res://tools/sim_rng_probe.gd`),
+  Contracts.cs (IGround = what it asks any terrain, incl. `cast()` for future wallrides; IRideHost = what it tells the
+  game). Portable to Unity / consoles: copy `sim/`, write IGround + IRideHost.
+- **Needs the .NET Godot**: the plain (non-C#) Godot can no longer ride. The headless tools (`slope_stress`, `phys_test`)
+  ride the C# too.
+- Speed: `p_bike_step` 0.80 (GDScript) -> 0.59 ms a frame; stress test 151 -> 121 us a step. `BMX_CSPERF=1` = where a C#
+  step's time goes.
+
+### Ride physics (`sim/BikeSim.cs`; notes before 2026-11-28 say `bike_physics.gd`)
 - **Real air drag + real cadence (2026-11-28, user: "the Garmin speed feels high", "also cadence")**. The computer showed
   the physics speed honestly; the bike was too fast: drag per kg = airDrag / topSpeed^2 = 0.0021 /m on the DH, the CdA of
   ~0.32 m^2 (less than a road racer's tuck). `BikePhysics.DRAG_REAL` 1.69 (x every drag term, `drag_k()`) = 0.0036 /m:
@@ -4648,6 +4678,9 @@ and other GPU apps open; uncapped ~430 fps on an RTX 3090 after the C# terrain.
   current glbs still bake many parts into one mesh (dh.glb's steer = stem + bars + grips + levers + crowns +
   stanchions; the seatstay holds the rear caliper), which is why the shop cuts stock parts out of meshes
   (`PartThumbs.make_part_alone`): the user will deliver properly split models; new models must come split.
+- **The ride physics is C# only** (user, 2026-11-28: "C# only so we don't write two versions"): change it in
+  `sim/BikeSim.cs`, never add physics to `bike_physics.gd` (section 5, "Ride physics is C# only"). Keep `sim/`
+  engine-free (portable to Unity / consoles later).
 - Riding / jump code: test it on the test playground (LEVELS, `BMX_LEVEL=playground`, section 5) before the trail; the user
   built it for exactly that.
 

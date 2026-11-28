@@ -1,0 +1,5956 @@
+// THE RIDE (bike + rider body physics, one 1/120 s step): the source of truth since 2026-11-28, edited by hand.
+// It started as a bit-for-bit translation of the old scripts/bike/bike_physics.gd (2026-11-28, docs/physics_port.md), so
+// it still reads like GDScript (snake_case, Gd.* helpers, T.f("tuneKey") for Tune values, GdDict for dictionaries).
+// The game reads the state through bike_physics.gd: after adding / removing / renaming a field, run
+// `python godot/dev/port/gen_shell.py` (writes that file's members + the state mirror), then `dotnet build`.
+// Engine-free: nothing in godot/sim/ may reference the engine (checked by tools/sim_purity.ps1).
+#pragma warning disable CS0162, CS0168, CS0219, CS0414, CS1717
+using System;
+using System.Collections.Generic;
+using static Runout.Sim.Gd;
+
+namespace Runout.Sim
+{
+	public partial class BikeSim
+	{
+		public const double G = 9.81;
+		public const double CLIMB = 1.2;
+		public const double CRASH_WALL = 0.6;   // m: ground rising more than this above the crashed bike in one step is a wall
+		public const double HOP_PUSH = 0.09;
+		public const double PUMP_STROKE = 0.3;   // m, the legs' pumping stroke from bent (-1) to pushed straight (+1)
+		public const double PUMP_SPAN = 0.6;   // m either side of the bottom bracket the ground's curve is read over (the wheels average a bump)
+		public const double PUMP_STROKE_T = 0.16;   // s, the quickest a rider makes that whole stroke (~0.4 s a roller at its best: Luginbuhl 2023)
+		public const double FLOW_MAX = 5.0;
+		public const double GETUP_HOLD = 0.25;   // seconds holding hop to get up after a crash
+		public const double SLOPE_TRANSFER = 0.7;   // centre-of-mass height / wheelbase: how much load a slope moves between the tyres
+		public IRideHost host = default;
+		public RideParams T = default;   // Tune.v (effective values)
+		public double L = 0.8985;
+		public double RWF = 0.261;
+		public double RWR = 0.261;
+		public double BB_REAR = 0.3331;
+		public double SH_R = 0.63;
+		public double LAND = 1.0;
+		public bool geared = false;
+		public long gear = -1;
+		public List<double> cogs = new List<double> { 11.0, 12.0, 14.0, 16.0, 18.0, 21.0, 24.0 };
+		public double ring_k = 1.0;   // chainring vs. the stock 34T
+		public double bike_rock = 1.0;
+		public double x = 0.0;
+		public double z = 0.0;
+		public double y = 0.0;
+		public double vy = 0.0;
+		public double snow_k = 0.0;   // how deep the snow is under the bike, 0..1 (Game, from Terrain.snow_depth_at): ploughing drag
+		public const double SNOW_DRAG = 0.35;   // m/s^2 at snow_k 1, + SNOW_DRAG_V per m/s (20 cm of fresh snow: ~1.4 m/s^2 at 10 m/s)
+		public const double SNOW_DRAG_V = 0.1;
+		public double heading = 0.0;
+		public double v = 0.0;
+		public double steer = 0.0;
+		public double steer_in = 0.0;
+		public double steer_in_v = 0.0;
+		public double lean = 0.0;
+		public double lean_v = 0.0;
+		public double bike_lean = 0.0;
+		public double counter = 0.0;
+		public double rock = 0.0;
+		public double pitch = 0.0;   // (drawn nose kick of a hop and where it eases to)
+		public double pitch_v = 0.0;   // (drawn nose kick of a hop and where it eases to)
+		public double hop_nose = 0.0;   // (drawn nose kick of a hop and where it eases to)
+		public double _hop_nose_t = 0.0;   // (drawn nose kick of a hop and where it eases to)
+		public double _hop_nose_m = 0.0;   // (drawn nose kick of a hop and where it eases to)
+		public static readonly List<V3> BODY_PTS = new List<V3> { new V3(-0.43, 0.05, 0.3), new V3(0.42, 0.62, 0.1), new V3(0.0, 0.66, 0.16), new V3(0.02, 0.98, 0.14) };
+		public double wheelie_up = 0.0;   // sprint wheelie: how far up (rad) the rider is holding the front
+		public bool air = false;
+		public double air_time = 0.0;
+		public double air_k = 0.0;
+		public double cap_bank = 0.0;
+		public double lean_lim = 9.0;
+		public double compress = 0.0;
+		public double compress_v = 0.0;
+		public double load = 0.0;
+		public double body_y = NAN;
+		public double body_v = 0.0;
+		public double body_x = 0.0;
+		public double hip_shift = 0.0;
+		public double body_xv = 0.0;
+		public double hip_v = 0.0;
+		public double v_last = NAN;
+		public double air_lean = 0.0;
+		public double air_pull = 0.0;
+		public bool air_lock_h = false;
+		public bool air_lock_a = false;
+		public double _lock_a0 = 0.0;
+		public double _air_own = 0.0;
+		public double air_help = 0.0;
+		public double flip_in = 0.0;
+		public double flip_acc = 0.0;
+		public double spin_acc = 0.0;
+		public double pump_lift = 0.0;   // a lip pump's leg drive still to come at take-off (m/s)
+		public double body_pw = 0.0;
+		public double throw_v = 0.0;
+		public bool lock_tw = false;
+		public bool lock_ts = false;
+		public double air_w = 0.0;
+		public double air_inertia = 1.0;
+		public double air_tilt = 0.0;
+		public double air_tilt_v = 0.0;
+		public double air_yaw = 0.0;
+		public double air_tw = 0.0;
+		public double air_tw_v = 0.0;
+		public double land_jolt = 0.0;
+		public double pivot = 0.0;
+		public double pivot_acc = 0.0;
+		public double aero_k = 1.0;   // air drag scale from the body position (tuck < 1, sat up > 1)
+		public double body_in = 0.0;
+		public double body_in_s = 0.0;
+		public double flick_in = 0.0;
+		public double flick = 0.0;
+		public double wheelie_time = 0.0;   // how long the current stick wheelie / manual has been held
+		public bool wheelie_pedal = false;   // how long the current stick wheelie / manual has been held
+		public bool lock_sb = false;
+		public bool lock_sf = false;
+		public double flick_kick = 0.0;
+		public bool _man_armed = false;
+		public double _pull_age = 0.0;
+		public double left_back = 0.0;
+		public double _loop_saved = 0.0;   // a weight-back loop-out just caught (s)
+		public double _man_pw = 0.0;   // power wheelie: weight back + pedalling lifts the front (0..1, eased)
+		public double _man_over = 0.0;   // s the front has been held past the loop-out angle (direct manual: then he falls off the back)
+		public double man_a = 0.0;
+		public double man_w = 0.0;
+		public bool man_zone = false;
+		public double man_lock = 0.0;
+		public double man_zone_t = 0.0;
+		public double pump_push = 0.0;
+		public double pump_gain = 0.0;
+		public double pump_idle = 0.0;
+		public double pump_press_t = 0.0;
+		public double _pump_release = 0.0;
+		public double land_perfect = 0.0;   // 1 on a perfect landing, fades (HUD flash)
+		public double man_pull = 0.0;   // the body stick pulled back for a manual (0..1): the HUD balance bar shows at once
+		public double _bend_in = 0.0;   // what the rider asks of the legs' bend this step (hop held / stick back), before the crouch follows
+		public double _ab_k = 0.0;   // auto-absorb on (eased) / the legs' rest it set (m, + = straighter), see _step_vertical
+		public double _ab_bend = 0.0;   // auto-absorb on (eased) / the legs' rest it set (m, + = straighter), see _step_vertical
+		public double dg_abs = 0.0;   // auto-absorb on (eased) / the legs' rest it set (m, + = straighter), see _step_vertical
+		public double pleg = 0.0;   // the legs' pump stroke: -1 bent (hop held / stick back) .. +1 pushed straight (stick forward)
+		public bool pump_on = false;   // hop held on the ground, rolling: the HUD pump bar is up
+		public double _sprint_lift = 0.0;   // balance mode: a sprint stamp from slow lifts the front through the balance
+		public double n_rear = 0.0;
+		public double n_front = 0.0;
+		public bool skid = false;
+		public double _man_grace = 0.0;   // a little while after a balance manual ends: its loop-out / nose-down isn't judged as a crash
+		public double nose_a = 0.0;
+		public double nose_w = 0.0;
+		public bool nose_zone = false;
+		public double nose_lock = 0.0;
+		public double nose_push = 0.0;
+		public double nose_time = 0.0;
+		public double nose_brake_t = 0.0;
+		public double _nose_grace = 0.0;
+		public double _tw_t = 9.0;
+		public double _ts_t = 9.0;
+		public double _sb_t = 9.0;
+		public double _sf_t = 9.0;
+		public double _hop_tap_t = 9.0;
+		public double _hop_buf = 0.0;
+		public double _pop_miss = 0.0;
+		public double _pop_miss_t = 0.0;
+		public double _gl = 0.0;
+		public double _gc = 0.0;
+		public double _bh_back = 0.0;
+		public double _bh_since = 9.0;
+		public double _bh_peak = 0.0;
+		public double gest_hop = 0.0;
+		public const double TUCK_SHARE = 0.75;   // the rider's share of rider + bike when he pulls the bike up under him in the air
+		public double crouch = 0.0;
+		public double crouch_t = 0.0;
+		public double rebound = 0.0;
+		public double _stick_hold = 0.0;
+		public double _cr_rel = 0.0;
+		public double _n_grd = 1.0;
+		public double pop_wait = 0.0;
+		public double _pop_arm_t = 0.0;
+		public double squash = 0.0;
+		public double _lip_ago = 9.0;   // s since a lip was last in sight just ahead
+		public SusSetup sus = new SusSetup();   // the bike's suspension setup (SuspSetup.resolve: fork, shock, tyre pressures); {} = none (the BMX)
+		public bool _sus_synced = false;
+		public double dg_sag_r = 0.0;   // (diagnostics: the rear's sag, on the front's travel scale like dg_xR)
+		public double[] _su = new double[0];   // the two units as floats (_sus_cache): fork [travel, sag, prog, zc, zr, hs, fric, bump], shock the same, psi f / r
+		public double _sag_seen = 1.0;
+		public const double ANTI_RISE = 0.6;   // how much of the rear's rise under its own brake the linkage takes back (and then some)
+		public double _fb_r = 0.0;   // the rear brake's deceleration this step (m/s2), like _fb_f
+		public const double FRAME_PROG = 0.35;   // the ramp-up the reference frame's linkage adds to its shock (BikeBuild.frame_mods scales it per frame)
+		public double _land_hit = 0.0;   // the biggest hit of the landing being judged
+		public double _bog = 0.0;   // a bad landing's speed still to lose (m/s) + the rate it goes
+		public double _bog_rate = 0.0;   // a bad landing's speed still to lose (m/s) + the rate it goes
+		public double _land_pe = 0.0;   // the last touch-down's pitch against the ground (rad)
+		public bool _land_up = false;   // ... nose up (back wheel first)
+		public const double LIP_SPARE = 0.15;   // rad: how much steeper than the lip under the wheels a take-off may leave
+		public const double LIP_NOSE = 0.25;   // rad: the front lets come up over the lip's face, hands off (video 2: ~14 deg)
+		public const double LIP_NOSE_POP = 0.4;   // rad: ... and lifted on purpose with a pop
+		public double nose_k = 1.0;   // 0..1: how much this lip lets the front come up (steep + slow = all)
+		public const double POP_FRONT_LIFT = 1.6;   // rad/s: the arms lift the front as a pop goes in on a lip's face
+		public const double SCOOP_TILT = 0.4;   // rad: hands off, the toes scoop the rear up: the nose can go that much further down for a landing
+		public const double LIP_SPARE_OWN = 0.05;   // rad: the same, hands off (the rider rides with the lip)
+		public const double EDGE_BASE = 0.06;   // m: an edge under the frame is read over at least this much ground, whatever the speed
+		public const double REAR_ROLL = 0.65;   // x the rear wheel's radius: the tallest edge the rear rolls up (the front already on top)
+		public bool _OLD_AIRBLEND = Env.raw("BMX_OLD_AIRBLEND") != "";   // (tests: air_k + the drawn parts' raw air flag before 2026-11-26)
+		public const double AIR_BODY_MIN = 0.25;   // s: a flight predicted at least this long (air_time + _land_t) gets the air pose (see _air_blend)
+		public const double AIR_BODY_FROM = 0.15;   // s of air before it, when no landing is predicted
+		public const double AIR_BODY_IN = 0.18;   // s: the air pose eases in (time constant; 0.1 swung the body 0.1 rad a tick off a lip)
+		public const double AIR_BODY_OUT = 0.25;   // s: and back out after touch-down
+		public double _air_wl = 0.0;   // drawing: the air stick's share of the body counter-lean, held after touch-down while it eases out
+		public double _bank_hold = 0.0;   // drawing: the bank last read on the ground, held through a skip (the physics' bank falls to flat in the air)
+		public bool _OLD_CURB = Env.raw("BMX_OLD_CURB") != "";   // (tests: the old per-step edge check, rear stops dead)
+		public const double RIM_CLIMB = 4.0;   // m/s: the most upward speed a rim strike on a rising edge gives the frame (over the slope's own)
+		public bool _OLD_RIMKICK = Env.raw("BMX_OLD_RIMKICK") != "";
+		public double _rear_up_k = 0.0;   // 0..1: how far the rider has let the front lever off because the rear was thrown up
+		public const double TYRE_MAX = 0.045;   // m: a tyre squashed this far is on its rim
+		public double _ty_f = 0.0;   // each tyre's push last substep (m/s2 of the whole weight)
+		public double _ty_r = 0.0;   // each tyre's push last substep (m/s2 of the whole weight)
+		public double _rim_hit = 0.0;   // the most speed the frame lost against the ground with nothing left to give, since it was read (m/s)
+		public double land_heavy = 0.0;
+		public double land_fold = 0.0;
+		public double _stun = 0.0;
+		public double land_yaw = 0.0;
+		public bool _tuck_in = false;   // the tuck is held (hop, in the air)
+		public bool _graze = false;   // the last "landing" was a tyre brushing the lip on the way up
+		public double air_peak = 0.0;   // this flight: the highest the bike got over the ground under it (m)
+		public double pop_fx = 0.0;
+		public double squash_fx = 0.0;
+		public double pop_q = 0.0;
+		public double pop_time = 0.0;
+		public double _pop_used = 0.0;
+		public double whip = 0.0;
+		public double whip_hold = 0.0;
+		public double whip_side = 0.0;
+		public double _whip_t = 0.0;
+		public bool _whip_flashed = false;
+		public double _whip_arm = 0.0;
+		public bool _whip_straight = false;   // this whip started on the straight (no steer) / its widest slip   # corner whip / drift (both sticks one way)
+		public double _whip_ang = 0.0;   // this whip started on the straight (no steer) / its widest slip   # corner whip / drift (both sticks one way)
+		public double flick_v = 0.0;   // flick spring speed, deliberate-flick detector
+		public double _flick_arm = 0.0;   // flick spring speed, deliberate-flick detector
+		public double _flick_side = 0.0;   // flick spring speed, deliberate-flick detector
+		public const double FLICK_VMAX = 6.0;   // the bike can be thrown over at most this fast (stick units / s)
+		public const double FLICK_WINDOW = 0.18;   // centre -> edge within this long = a deliberate flick
+		public V2 air_stick = V2.ZERO;   // right stick in the air, eased: x lean (+ left), y nose (+ up)
+		public double edge_s = 0.0;   // right stick held at its top / bottom edge in the air: the flip spin, built up gently
+		public double spin_hold = 0.0;
+		public double spin_k = 1.0;
+		public double yaw_edge_s = 0.0;
+		public double yaw_hold = 0.0;
+		public double stick_yaw = 0.0;
+		public double style_air = 0.0;   // this jump's tweak: seconds x how far the stick swung the bike about (style points)   # how long it's been held one way, and the spin-rate multiplier that gives
+		public bool pad = false;
+		public bool bank_probe = Env.s("BMX_BANK_PROBE") != "";
+		public double lean_room = NAN;   // how steeply the ground rises beside the bike on its lean side (rad, eased)
+		public List<double> _lean_hist = new List<double>();   // the player is on a gamepad (Settings.pad_active): triggers don't tilt / throw in the air
+		public double _bank_raw = 0.0;   // the player is on a gamepad (Settings.pad_active): triggers don't tilt / throw in the air
+		public double wheel_f = 0.0;   // the raw gas key / trigger this step (pedal is its smoothed version)
+		public double wheel_r = 0.0;   // the raw gas key / trigger this step (pedal is its smoothed version)
+		public double crank = 0.0;   // the raw gas key / trigger this step (pedal is its smoothed version)
+		public double pedal = 0.0;   // the raw gas key / trigger this step (pedal is its smoothed version)
+		public double throttle_in = 0.0;   // the raw gas key / trigger this step (pedal is its smoothed version)
+		public double yaw_rate = 0.0;
+		public double shake = 0.0;
+		public double course = NAN;
+		public double slip = 0.0;
+		public double since_land = 1.0;
+		public double turn_off = 0.0;
+		public double rev_cap = 3.0;
+		public bool _rev_land = false;
+		public bool _land_fix = false;
+		public double _fakie_hold = 0.0;
+		public const double LAND_CONE = 1.05;   // heading within ~60 deg of the travel at touch-down = a normal landing; past it the tyres grab the nearer axis
+		public double slip_w = 0.0;
+		public double grip_r = 1.0;
+		public double loose = 0.0;
+		public double bar_catch = 0.0;
+		public Noise2S _grip_noise = null;
+		public Pcg32 _grip_rng = new Pcg32();
+		public double _grip_cv = 0.0;
+		public double _squirm = 0.0;
+		public double _grip_rough = 0.0;
+		public double front_use = 0.0;
+		public double front_push = 0.0;
+		public double brake_f = 0.0;
+		public double brake_r = 0.0;
+		public double rear_lock = 0.0;
+		public double front_lock = 0.0;
+		public double _fb_f = 0.0;
+		public double corner_g = 0.0;
+		public double weight_in = 0.0;
+		public double lean_err = 0.0;
+		public double knock = 0.0;
+		public double _amax = 99.0;
+		public double _amin = -99.0;
+		public double bal_k = 0.0;
+		public double _b_prev = 0.0;
+		public double _f_prev = 0.0;
+		public double _circ_f = 1.0;
+		public bool _brake_feel = true;
+		public double _a_rear = 0.0;
+		public double berm_k = 0.0;   // how much a berm is carrying the turn right now (0..bermAssist)
+		public double bank_lean = 0.0;   // the drawn lean into tilted ground (bankLean x bank), bike + body
+		public double bank_sq = 0.0;   // how far the body goes into line with the bike on banked ground (0 flat .. bankBody), drawn only
+		public double bank_v = 0.0;   // how fast the bank reading is changing (its smoothing spring)
+		public double _load_s = NAN;   // the tyres' load factor for grip, eased (relaxation)
+		public double _share_f = NAN;   // the front tyre's share of the load, eased the same way
+		public static readonly List<double> SURF_MU = new List<double> { 0.72, 0.95, 0.62, 0.5 };   // tyre grip by surface: ground, trail, water, sand / dry
+		public static readonly List<double> BRAKE_MU = new List<double> { 0.54, 0.64, 0.5, 0.4 };
+		public static readonly List<double> BRAKE_MU_OLD = new List<double> { 0.62, 0.78, 0.6, 0.45 };
+		public static readonly List<string> BRAKE_MU_KEYS = new List<string> { "brakeMuGround", "brakeMuTrail", "brakeMuWater", "brakeMuSand" };
+		public static readonly List<string> LOCK_SLIDE_KEYS = new List<string> { "lockSlideGround", "lockSlideTrail", "lockSlideWater", "lockSlideSand" };
+		public static readonly List<double> LOCK_SLIDE = new List<double> { 0.66, 0.76, 0.6, 0.58 };
+		public static readonly List<double> BRAKE_LOOSE_S = new List<double> { 1.0, 0.6, 0.7, 1.2 };
+		public bool _OLD_DIRT = Env.raw("BMX_OLD_DIRTBRAKE") != "";
+		public Noise2S _brk_noise = null;   // fine loose patches + rough-ground jitter under the tyres (braking)
+		public double _brk_r = 0.0;   // the levers as squeezed (they take brakeRamp s to bite)
+		public double _brk_f = 0.0;   // the levers as squeezed (they take brakeRamp s to bite)
+		public double _feel_r = NAN;   // the grip the rider THINKS each tyre has (lags a loose patch: he gets caught out)
+		public double _feel_f = NAN;   // the grip the rider THINKS each tyre has (lags a loose patch: he gets caught out)
+		public double brk_loose_f = 0.0;   // how loose the ground under each tyre is for braking (0..~1.2)
+		public double brk_loose_r = 0.0;   // how loose the ground under each tyre is for braking (0..~1.2)
+		public long surf_f = 0;   // the ground under each tyre, its eased grip
+		public long surf_r = 0;   // the ground under each tyre, its eased grip
+		public double _mu_f = NAN;   // the ground under each tyre, its eased grip
+		public double _mu_r = NAN;   // the ground under each tyre, its eased grip
+		public double _bmu_f = NAN;   // ...and its eased braking grip (BRAKE_MU)
+		public double _bmu_r = NAN;   // ...and its eased braking grip (BRAKE_MU)
+		public bool _OLD_BRAKE = Env.raw("BMX_OLD_BRAKE") != "";   // (tests: the lever-limited brakes before 2026-11-23)
+		public double _gx_lean = 0.0;   // the rest of the ground's drawn lean (body stick, slow steer, whip), eased through jumps
+		public double _lock_hold = 0.0;   // steering into tilted ground, held LOCK_HOLD s after letting go (bankLock)
+		public const double LOCK_HOLD = 1.0;
+		public double weave_lean = 0.0;   // the weave's share of bike_lean this step (read by Game)
+		public double _weave = 0.0;   // the bike's own small roll under the rider (step 2)
+		public double _wv_t = 0.0;   // the bike's own small roll under the rider (step 2)
+		public double man_lk = 0.0;   // back-wheel turn look: 0..1 weight, the eased drawn lean (see _step_steer)
+		public double _man_lean_s = 0.0;   // back-wheel turn look: 0..1 weight, the eased drawn lean (see _step_steer)
+		public const double MAN_LEAN_K = 1.1;   // drawn lean on the back wheel per rad of the turn's own lean, atan(lat / g)
+		public const double MAN_LEAN_IN = 0.12;   // + this many rad per unit of steer: the rider throws his hips into it before the turn builds
+		public const double MAN_BODY_OFF = 0.12;   // share of the bike's lean the body stays more upright on one wheel (two wheels: 30-85 %)
+		public const double MAN_BAR = 0.42;   // rad the bars turn into the turn at full steer on the back wheel (Game._bar_draw)
+		public double _bike_lead = 0.0;   // how far the bike runs ahead of the rider's lean while it changes (two masses)
+		public double _lean_peak = 0.0;   // this jump's biggest lay-over in the air (tabletop, rad)
+		public double _scrub_k = 0.0;   // this take-off was soaked (squash / absorb) - with a lay-over or whip: a scrub
+		public double _whip_peak = 0.0;   // this jump's biggest air whip (bike twisted against the body, rad)
+		public GdDict _risk = new GdDict();   // reason -> trouble meter (0..1)
+		public double risk = 0.0;   // the biggest meter now: the rider's reflexes scale with it (and the HUD may show it)
+		public double _risk_peak = 0.0;   // the highest it got since it was last clear: a full recovery from > 0.5 = SAVED!
+		public const double CRASH_HARD = 3.0;
+		public bool _crash_log = Env.s("BMX_CRASH_LOG") != "";
+		public bool front_air = false;
+		public bool rear_air = false;
+		public bool c_f = true;
+		public bool c_r = true;
+		public double pitch_w = NAN;
+		public double stamina = 1.0;
+		public bool tired = false;
+		public double sprint = 0.0;
+		public double spin = 0.0;
+		public double a_drive = 0.0;
+		public double a_pedal = 0.0;   // a_drive without a brake applied while rolling backwards (what "pedalling" readers use)
+		public double _nR_s = NAN;   // the rear tyre's load as its grip feels it (eased: tyre relaxation, see _grip_step)
+		public bool _OLD_GRIP = Env.raw("BMX_OLD_GRIP") != "";   // (tests: the grip before the off-trail fix)
+		public double n_f = NAN;
+		public double n_r = NAN;
+		public double n_ref = NAN;
+		public double flow = 0.0;
+		public double flow_t = 0.0;
+		public bool spun_out = false;
+		public double bank = NAN;
+		public double carve = 0.0;
+		public double carve_acc = 0.0;
+		public bool carve_berm = false;
+		public double lat_m = NAN;   // (n_load: the ground's push on the tyres, m/s², for the ride log)
+		public double lat_a = 0.0;   // (n_load: the ground's push on the tyres, m/s², for the ride log)
+		public double n_load = G;   // (n_load: the ground's push on the tyres, m/s², for the ride log)
+		public double g_pitch = NAN;
+		public bool w_init = false;
+		public double hf_prev = NAN;
+		public double hr_prev = NAN;
+		public double zw_f = NAN;
+		public double zw_r = NAN;
+		public double vw_f = 0.0;
+		public double vw_r = 0.0;
+		public double nose_ref = NAN;   // (_gpc_last: the wheel-ground slope the last step both tyres were down)
+		public double _gpc_last = NAN;   // (_gpc_last: the wheel-ground slope the last step both tyres were down)
+		public double w_f = 0.0;
+		public double w_r = 0.0;
+		public double y_draw = 0.0;
+		public double pitch_draw = 0.0;
+		public double kick_t = 0.0;
+		public double hop_t = 0.0;
+		public double hop_load = 0.0;
+		public double hop_charge = 0.0;
+		public double charge = 0.0;
+		public double lift_t = 0.0;
+		public bool hop_block = false;
+		public bool hop_held = false;
+		public double prep = 0.0;
+		public double land_prep = 0.0;
+		public bool pop_fired = false;
+		public long lip_scan = 0;   // lip_state: 0 unknown, 1 none in sight, 2 lip_last valid
+		public long lip_state = 0;   // lip_state: 0 unknown, 1 none in sight, 2 lip_last valid
+		public double lip_last = 0.0;   // lip_state: 0 unknown, 1 none in sight, 2 lip_last valid
+		public double y_prev = NAN;
+		public double pump_acc = 0.0;
+		public double brake_heat = 0.0;
+		public const double HEAT_TAU = 3.5;
+		public const double FADE_FROM = 3.0;
+		public const double FADE_FULL = 10.0;
+		public const double DIVE_L = 0.12;
+		public const double BOB_K = 0.35;
+		public const double CHAIN_GROWTH = 0.2;
+		public const double CRANK_ARM = 0.17;
+		public const double KICK_LOSS = 0.25;
+		public double brake_fade = 0.0;
+		public double dive = 0.0;
+		public bool _fade_warn = false;
+		public double _kick_k = 0.0;
+		public bool _BOB_PROBE = Env.raw("BMX_BOB_PROBE") != "";
+		public long _bob_n = 0;
+		public double _bob_s = 0.0;
+		public double _bob_q = 0.0;
+		public const double SHORT_FROM = 0.7;   // s of whole flight: short below SHORT_FROM, as before from SHORT_TO
+		public const double SHORT_TO = 1.3;   // s of whole flight: short below SHORT_FROM, as before from SHORT_TO
+		public const double SHORT_DELAY = 0.25;   // (short flights: when / how fast / how firmly he aims)
+		public const double SHORT_RAMP = 0.3;   // (short flights: when / how fast / how firmly he aims)
+		public const double SHORT_HELP = 0.9;   // (short flights: when / how fast / how firmly he aims)
+		public const double SHORT_SPEED = 40.0;   // (short flights: when / how fast / how firmly he aims)
+		public bool _OLD_SHORTAIM = Env.raw("BMX_OLD_SHORTAIM") != "";   // (tests: the same slow hands-off aim on every flight)
+		public bool _OLD_FADE = Env.raw("BMX_OLD_FADE") != "";   // (tests: before the brakes could fade)
+		public bool _OLD_SPEEDTUCK = Env.raw("BMX_OLD_SPEEDTUCK") != "";
+		public double speed_tuck = 0.0;   // 0..1, eased: how far into the speed tuck
+		public double speed_tuck_auto = 0.0;   // the automatic part (by speed)
+		public static readonly V2 TUCK_BACK_IN = new V2(0.05, 0.3);   // stick back: tuck ramps in over this
+		public static readonly V2 TUCK_BACK_OUT = new V2(0.55, 0.95);   // ...and gives way to the weight-back pose / sit up over this
+		public double _HEAT_HOLD = (Env.raw("BMX_HEAT") != "" ? Gd.to_f(Env.raw("BMX_HEAT")) : 0.0);
+		public bool _OLD_SUSPFX = Env.raw("BMX_OLD_SUSPFX") != "";   // (tests: before dive steering, pedal bob and kickback)
+		public bool foot_down = false;   // set by Game: the rider's foot is on the ground (the bike stays put)
+		public bool brake_stop = false;   // braked to a standstill: held in place while the brake stays on
+		public double _rev_hold = 0.0;   // s the brake has been held at a stop (reverse after REV_HOLD)
+		public const double REV_HOLD = 1.0;
+		public const double REV_SLOPE = 0.14;   // rad: hold-to-reverse only on ground flatter than this
+		public bool rev_on_hold = true;   // (tests that hold the brake to check friction turn it off)
+		public bool brake_back = false;   // brake pressed fresh from a standstill: backs the bike up
+		public double chunk_acc = 0.0;
+		public GdDict joint_rock = null;
+		public double distance = 0.0;
+		public long probe_bottom = 0;
+		public double probe_acc2 = 0.0;
+		public long probe_n = 0;
+		public double probe_vy = NAN;
+		public double probe_g2 = 0.0;
+		public List<double> probe_gy = new List<double> { NAN, NAN };
+		public static readonly List<double> LEAN_PROBE = new List<double> { 0.3, 0.5 };   // m beside each tyre the lean room is read at
+		public List<GdDict> _tapes_seen = new List<GdDict>();   // tape spans already tested this step (_step_move)
+		public double dg_xF = 0.0;
+		public double dg_xR = 0.0;
+		public double dg_vF = 0.0;
+		public double dg_vR = 0.0;
+		public double dg_fF = 0.0;
+		public double dg_fR = 0.0;
+		public double dg_tyF = 0.0;
+		public double dg_tyR = 0.0;
+		public double dg_sqF = 0.0;
+		public double dg_sqR = 0.0;
+		public bool dg_botF = false;
+		public bool dg_botR = false;
+		public bool dg_blowF = false;
+		public bool dg_blowR = false;
+		public double dg_travel = 0.2;
+		public double dg_sag = 0.0;
+		public double dg_leg = 0.0;
+		public double dg_leg_f = 0.0;
+		public double dg_knee = 0.6;
+		public bool dg_cF = false;
+		public bool dg_cR = false;
+		public double ground_jolt = 0.0;   // biggest leg bottom-out on the ground (not a landing) since the test last read it
+		public bool skid_fx = false;
+		public long surf = 0;
+		public double hop_bar = 0.0;
+		public bool hop_bar_show = false;
+		public bool crash_on = false;
+		public double crash_t = 0.0;
+		public string crash_pending = "";
+		public double crash_side = 1.0;
+		public double getup_need = GETUP_HOLD;   // hold time to get up (longer to revive at zero life, set by the HUD)
+		public double crash_rest = 0.0;
+		public double crash_bvy = 0.0;
+		public double crash_fall_v = 0.0;
+		public bool crash_armed = false;
+		public double crash_hold = 0.0;
+		public ICrashSim crash_sim = null;
+		public bool _bal_shoved = false;
+		public const double STEPOFF_DV = 1.4;   // m/s at the bike's top: the shove that tips it away (see STEPPING OFF)
+		public object crash_K = null;   // the model in the sim's body frame (BikeRig.pose_crash draws sim.BodyAt() * crash_K)
+		public object crash_RK = null;   // ... the rig's root (x, y, z, heading, pitch, lean are read back from it)
+		public double[] _cb_hit = new double[] { 0.0, 0.0 };   // each wheel's hit last step (a new hit can knock it off)
+		public double _cb_off_t = -1.0;   // tests (BMX_WHEEL_OFF): when the forced wheels came off
+		public Dictionary<string, long> prof = null;
+		public const double WHEEL_OFF_DV = 7.0;   // m/s: a hit on a tyre harder than this may knock the wheel off ...
+		public const double WHEEL_OFF_SPAN = 9.0;   // ... certain-ish (WHEEL_OFF_MAX) this much harder
+		public const double WHEEL_OFF_MAX = 0.5;
+		public bool _OLD_CRASHBIKE = Env.raw("BMX_OLD_CRASHBIKE") != "";
+		public bool _OLD_RIDERBIKE = Env.raw("BMX_OLD_RIDERBIKE") != "";
+		public double _g_y = 0.0;
+		public double _g_pitch = 0.0;
+		public double _g_hr = 0.0;
+		public double _g_hf = 0.0;
+		public const double WG_EDGE = 0.008;   // m: the ground bending this much over three contact points = an edge, search finer there
+		public const long WG_FINE = 6;   // finer points per gap either side of the best one (~1.2 cm apart on a 0.36 m wheel)
+		public float[] _wg_raw = new float[11];
+		public bool _EPROBE = Env.raw("BMX_ENERGY_PROBE") != "";
+		public bool _OLD_BOUNCE = Env.raw("BMX_OLD_BOUNCE") != "";   // (tests: a one-wheel bounce seeds the flight from the body's spin, as before)
+		public GdDict _eb = new GdDict();
+		public double _e_y = 0.0;
+		public double _eb_t = 0.0;
+		public GdDict _eb_n = new GdDict { { "t", 0.0 }, { "brake", 0.0 }, { "air", 0.0 }, { "dist", 0.0 }, { "vmax", 0.0 }, { "turn_t", 0.0 }, { "turn_bank", 0.0 } };
+		public bool _JOLT_PROBE = Env.raw("BMX_JOLT_PROBE") != "";
+		public List<object> _jp_prev = new List<object>();
+		public long _jp_rim = 0;
+		public GdDict _jp_n = new GdDict();
+		public double _jp_t = 0.0;
+		public double wr_w = 0.0;
+		public bool _wr_old = Env.s("BMX_OLD_FW") != "";
+		public const double WR_BEARING = 0.35;   // rad/s^2: hub bearings + freehub drag on a free-spinning wheel
+		public const double WR_AIR = 0.0005;   // 1/s per rad/s: the spokes / tyre's air drag
+		public const double WR_BRAKE = 90.0;   // rad/s^2 at a full rear lever, wheel in the air
+		public double wr_knock = 0.0;   // the biggest one-tick change of the rear wheel's vertical speed since the sound read it (m/s)
+		public double _wr_vr = 0.0;
+		public double wr_vib2 = 0.0;   // sum of squared one-tick changes of the rear wheel's vertical speed (+ how many ticks) since the sound read it
+		public long wr_vibn = 0;   // sum of squared one-tick changes of the rear wheel's vertical speed (+ how many ticks) since the sound read it
+		public static bool _OLD_SPIN = Env.raw("BMX_OLD_SPIN") != "";
+		public const double DRAG_REAL = 1.69;
+		public static bool _OLD_DRAG = Env.raw("BMX_OLD_DRAG") != "";
+		public static bool _OLD_CADENCE = Env.raw("BMX_OLD_CADENCE") != "";
+		public const double SPIN_RPM = 150.0;
+		public const double SPIN_SPRINT = 175.0;
+		public static bool _OLD_SPINOUT = Env.raw("BMX_OLD_SPINOUT") != "";
+		public const double CHAIN_SLIP_T = 0.2;
+		public const double CHAIN_SLIP_LURCH = 7.0;   // rad/s extra crank spin while it skips
+		public static bool _OLD_CHAINSLIP = Env.raw("BMX_OLD_CHAINSLIP") != "";
+		public double chain_slip = 0.0;   // s left of a skip (0 = the chain holds)
+		public double chain_slip_k = 0.0;   // 0..1 how much drive is lost right now (HUD / rumble / tests can read it)
+		public double spin_out_k = 0.0;   // 0..1: pushing on the ground at (from ~90 % of) the legs' top cadence, or spun out past it (drawing: head down)
+		public static bool _OLD_TUCK = Env.raw("BMX_OLD_TUCK") != "";
+		public double _air_pull_v = 0.0;   // air_pull's speed (its spring)
+		public static bool _OLD_AUTOTUCK = Env.raw("BMX_OLD_AUTOTUCK") != "";   // tuck reach 0.17 m, drawn only after a timed pop
+		public static bool _OLD_WEAVE = Env.raw("BMX_OLD_WEAVE") != "";
+		public static bool WEAVE_ON = Env.raw("BMX_WEAVE") != "";   // the bike weave, off (rocked the whole rider)   # no bike weave under the rider
+		public static bool _OLD_CORNERBODY = Env.raw("BMX_OLD_CORNERBODY") != "";   // body at up to 80 % of the bike's lean in deep turns
+		public static bool _OLD_MANLEAN = Env.raw("BMX_OLD_MANLEAN") != "";   // back wheel: old lean / bars (body upright, bars barely turned)
+		public static bool _OLD_SLOWBODY = Env.raw("BMX_OLD_SLOWBODY") != "";   // slow turns: the body leans with the bike like at speed
+		public static bool _OLD_BANKLOCK = Env.raw("BMX_OLD_BANKLOCK") != "";   // leaned into tilted ground: only camberPull
+		public static bool _OLD_SLOW = Env.raw("BMX_OLD_SLOW") != "";   // slow-riding / reverse as before 2026-11-26
+		public static bool _OLD_LEANDRAW = Env.raw("BMX_OLD_LEANDRAW") != "";   // the drawn body / bike lean with its one-tick jumps
+		public static bool _OLD_STRAIGHTWHIP = Env.raw("BMX_OLD_STRAIGHTWHIP") != "";   // the whip only in corners (both sticks)
+		public static bool _OLD_STICKBIKE = Env.raw("BMX_OLD_STICKBIKE") != "";   // right stick side lean throws the bike (before 2026-11-26)
+		public const double SPIN_EDGE = 0.85;   // stick to the side this far into a lip = a spin wound up (less = a whip)
+		public const double SPIN_AIR_ONLY = 0.35;   // share of the spin rate the stick gives from the air alone (no wind-up at the lip)
+		public const double SPIN_OPEN = 3.5;   // /s: let go of a wound spin, it eases out this fast (the rider opens up)
+		public const double FLIP_AIR_ONLY = 0.35;
+		public static bool _OLD_FLIPPULL = Env.raw("BMX_OLD_FLIPPULL") != "";
+		public const double FLIP_PULL_EARLY = 1.0e9;   // s: a stick held back however long before the lip still throws a flip (the user: "a held lean
+		public const double FLIP_RATE_MAX = 9.0;   // rad/s: the most the flip help turns it (a full turn in 0.7 s) # share of the flip rate without a throw at the lip
+		public double spin_load = 0.0;   // -1..1: a spin wound up into the lip ahead
+		public double _spin_in = 0.0;   // this flight's spin wind-up
+		public double _flip_in = 0.0;   // this flight's flip throw (-1..1, + = back)
+		public static bool _OLD_POPSNAP = Env.raw("BMX_OLD_POPSNAP") != "";
+		public bool _pop_latch = false;
+		public static bool _OLD_NOSEREF = Env.raw("BMX_OLD_NOSEREF") != "";
+		public static bool _OLD_LIPLOAD = Env.raw("BMX_OLD_LIPLOAD") != "";
+		public static bool _OLD_SETDOWN = Env.raw("BMX_OLD_SETDOWN") != "";
+		public static bool _OLD_HOPNOSE = Env.raw("BMX_OLD_HOPNOSE") != "";
+		public const double HOP_NOSE_TAU = 0.04;   // s: each of the two easing stages of a pop's drawn nose kick (it peaks ~0.1 s in)
+		public static bool _SD_PROBE = Env.raw("BMX_SETDOWN_PROBE") != "";   // tests: SETDOWN lines while the front is lowered
+		public const double SETDOWN_T = 0.6;   // s after touch-down the rider lowers the front (then the plain one-wheel hold again)
+		public const double SETDOWN_W0 = 0.5;   // rad/s the nose may still fall just above the ground (front axle ~0.7 m/s)
+		public const double SETDOWN_K = 4.0;   // + this x radians still up
+		public const double SETDOWN_MAX = 2.0;   // rad/s at most
+		public const double SETDOWN_HIT0 = 5.0;   // m/s into the landing he can still hold the front back fully
+		public const double SETDOWN_HIT = 0.6;   // rad/s faster nose fall per m/s of landing hit over that
+		public static bool _OLD_POPDIR = Env.raw("BMX_OLD_POPDIR") != "";
+		public static bool _OLD_AUTOPOP = Env.raw("BMX_OLD_AUTOPOP") != "";
+		public static bool _OLD_AIRLEAN = Env.raw("BMX_OLD_AIRLEAN") != "";
+		public bool test_rider = false;   // the playground's test rider is riding (Game.set_demo)
+		public const double TEST_ASSIST = 0.85;
+		public static bool _OLD_LANDAIM = Env.raw("BMX_OLD_LANDAIM") != "";
+		public double _land_pitch = NAN;   // the ground's slope where this flight comes down (_landing_slope), NAN on the ground
+		public long _aim_tick = 0;
+		public double _land_t = 0.0;   // s of flight left (from _landing_slope)
+		public static bool _OLD_LANDLEGS = Env.raw("BMX_OLD_LANDLEGS") != "";
+		public double land_vn = 0.0;   // m/s: the predicted speed into the landing, square to its slope
+		public double _vn_td = 0.0;   // (tests: the last flight's, for the HIT line)
+		public double _reach_td = 1.0;   // (tests: the last flight's, for the HIT line)
+		public double land_reach = 1.0;   // 0.35..1: how far the legs reach for this landing (by land_vn)
+		public static bool _OLD_LANDSPEED = Env.raw("BMX_OLD_LANDSPEED") != "";
+		public static bool _OLD_STICKPOP = Env.raw("BMX_OLD_STICKPOP") != "";
+		public static bool _OLD_BOG = Env.raw("BMX_OLD_BOG") != "";   // (tests: a bad landing's speed cut whole, in one step)
+		public const double STICK_POP_FWD = 0.6;   // how far forward the stick must snap (after being back) to pop
+		public const double BOG_T = 0.4;   // s a bad landing's speed cost is spread over
+		public const double BOG_SOFT = 0.35;   // share of that cost a soft landing (impact ~0) still pays; full from impact 4 m/s
+		public const double LAND_ANGLE_FREE = 0.26;   // rad (~15 deg) off the landing's slope that costs no speed
+		public static bool _OLD_WHIP = Env.raw("BMX_OLD_WHIP") != "";
+		public const double WHIP_WINDOW = 0.35;   // s before the lip: the stick held to the side winds the whip up
+		public const double WHIP_WIND = 0.2;   // s of holding it to wind it right up
+		public const double WHIP_KICK = 3.0;   // rad/s the bike swings out with off the lip, fully wound
+		public const double WHIP_AIR_ONLY = 0.4;   // rad: the most a whip started in the air alone can throw the bike out
+		public static bool _OLD_AIRSTEER = Env.raw("BMX_OLD_AIRSTEER") != "";
+		public static bool _OLD_LANDSWAP = Env.raw("BMX_OLD_LANDSWAP") != "";
+		public static bool _AIRSTEER_PROBE = Env.raw("BMX_AIRSTEER_PROBE") != "";
+		public const double AIR_STEER_K = 190.0;   // hip-twist spring while steering in the air (the whip's is 60)
+		public const double AIR_LOCK_FROM = 0.3;   // s: a steer held from the ground works in the air up to here...
+		public const double AIR_LOCK_FADE = 0.3;   // ...and fades out over this long (a real jump: it is the old lock again)
+		public const double AIR_STEER_DELAY = 0.04;   // s in the air before the steer counts
+		public const double AIR_STEER_RAMP = 0.10;   // s to full
+		public const double CARVE_MAX = 0.7;   // rad (~40 deg): past it the old sideways-landing rule alone
+		public const double CARVE_COST = 0.15;   // speed share lost at a sin(turn) of 1
+		public double _air_steer_s = 0.0;   // the steered heading offset in use (rad, smoothed), kept for the landing
+		public double aim_off = 0.0;
+		public double _air_aim_s = 0.0;   // the aim in use (rad, smoothed)
+		public const double CARVE_REWARD_MIN = 0.12;   // rad (~7 deg): a carve smaller than this earns nothing
+		public const double AIM_MAX = 0.5;   // rad: the most the next-bend aim turns the bike
+		public const double AIM_EASE = 7.0;   // /s: how quickly the aim comes in / goes out
+		public double carve_now = 0.0;   // rad: how far the last landing's carve turned the travel (drawing: the bars bite into it, fades)
+		public double whip_load = 0.0;   // -1..1: the whip wound up into the lip ahead (signed like the stick)
+		public double _whip_in = 0.0;   // this flight's whip load
+		public static bool _OLD_ABSORB = Env.raw("BMX_OLD_ABSORB") != "";
+		public const double ABSORB_V0 = 6.0;   // m/s: a small lip of height h needs ~ V0 + VH x h (0.56 m kicker ~31 km/h, 1.1 m table ~40)
+		public const double ABSORB_VH = 5.0;
+		public const double ABSORB_SMALL = 0.9;   // m: lips up to this he soaks fully when fast; ABSORB_BIG and up never (a real jump: popped)
+		public const double ABSORB_BIG = 1.3;
+		public double lip_h = 0.0;   // the lip ahead's height over the ground where it was spotted (m)
+		public double _absorb_k = 0.0;   // a hands-off absorb waiting for the rear wheel to leave the lip
+		public double auto_absorb = 0.0;   // 0..1: hands off, how much he soaks up the lip ahead instead of popping it
+		public static bool _OLD_PULLUP = Env.raw("BMX_OLD_PULLUP") != "";
+		public static bool _PULL_PROBE = Env.raw("BMX_PULL_PROBE") != "";   // tests: the air tilt / pull-up each 0.05 s
+		public const double AIR_PULL_UP = 0.4;   // rad of nose-up the rider pulls the bike to off a full pop (air_tilt, within airTilt)
+		public double _pull_k = 0.0;   // this step's pull-up (0..1)
+		public const double PULL_HOLD = 0.4;   // s a pro holds the pulled-up bike before levelling it for the landing
+		public double _air_pop = 0.0;   // how good this flight's take-off pop was (0..1), when the player pumped it (pro_flight)
+		public bool pro_pop = false;   // the pop waiting for the lip is the player's (a timed pop / a held crouch), not the rider's own
+		public bool pro_flight = false;   // this flight left off the player's pump: the pro move (bike pulled nose up, then up into him)
+		public const double AIR_LEAN_K = 36.0;   // lean spring in the air with the sticks in use (was 80: instant), critically damped there   # tests: the old weak hands-off pop
+		public const double LOAD_SENS = 0.15;
+		public bool _OLD_LS = Env.raw("BMX_OLD_LOADSENS") != "";
+		public const double RELAX_V = 6.0;
+		public bool _OLD_RELAX = Env.raw("BMX_OLD_RELAX") != "";
+
+		private bool _rear_shock()
+		{
+			return !Gd.to_b(sus.is_empty()) && (host.susp == null || host.susp.has_r);
+		}
+
+		private bool _sprung_fork()
+		{
+			return !Gd.to_b(sus.is_empty()) && (host.susp == null || host.susp.has_f);
+		}
+		// _init: in BikeSim.Manual.cs
+		// setup: in BikeSim.Manual.cs
+
+		public static long start_gear(List<double> p_cogs, double p_ring_k)
+		{
+			long g = -1;
+			double best = 1e9;
+			for (long i = 0; i < p_cogs.Count; i++)
+			{
+				if (absf(p_cogs[(int)(i)] * 1.0 / p_ring_k - 16.0) < best)
+				{
+					best = absf(p_cogs[(int)(i)] * 1.0 / p_ring_k - 16.0);
+					g = i;
+				}
+			}
+			return g;
+		}
+
+		public static double crank_rate(double w, double gk, double top_speed, double p_sprint, double ratio = -1.0)
+		{
+			// a sprint from slow spins the legs up hard (~70 rpm at once), not just at the wheel's rate
+			double spin_up = 3.5 + RideParams.global.get("sprintSpin", 4.0) * p_sprint * slowness(w * 0.37);
+			if (_OLD_CADENCE || ratio <= 0.0)
+			{
+				return maxf(w / (2.78 * gk * top_speed), spin_up) * (1 + 0.3 * p_sprint);
+			}
+			return maxf(w / ratio, spin_up * (1.0 - smooth01(w / ratio / maxf(spin_up, 0.1))));
+		}
+
+		public static double ratio_for(double gk, bool p_geared)
+		{
+			return (p_geared ? 2.125 * gk : 2.78);
+		}
+
+		public double drive_ratio()
+		{
+			return ratio_for(gear_k(), gear >= 0);
+		}
+
+		public static double kb_back_cap()
+		{
+			double b = RideParams.global.get("manBalance", 0.55);
+			double m_from = RideParams.global.get("manualFrom", 0.4);
+			double p_cap = b / (b + RideParams.global.get("manLoop", 0.42) + 0.08);
+			return clampf(m_from + p_cap * (1.0 - m_from), 0.55, 1.0);   // (>= 0.55: past the 0.5 a quick pull needs to start a manual)
+		}
+
+		public static double slowness(double va)
+		{
+			return 1.0 - smooth01(absf(va) / RideParams.global.get("sprintSlowTo", 11.0));
+		}
+
+		public static double pedal_rock(double p_crank, double p_sprint, double p_pedal, double va, double p_bike_rock)
+		{
+			double rock_fade = 1.0 - 0.65 * smoothstep(5.0, 12.0, va);
+			double effort = p_sprint * slowness(va);
+			return sin(p_crank) * 0.105 * (1 + 0.65 * p_sprint + RideParams.global.get("sprintRock", 0.3) * effort) * p_pedal * minf(1.0, va / 2 + 0.3) * rock_fade * p_bike_rock;
+		}
+
+		public double gear_k()
+		{
+			if (gear < 0)
+			{
+				return (cogs.Count > 0 ? ring_k * 16.0 / cogs[0] : 1.0);
+			}
+			return ring_k * 16.0 / cogs[(int)(gear)];
+		}
+
+		public bool shift(long d)
+		{
+			if (gear < 0)
+			{
+				return false;
+			}
+			long g = clampi(gear + d, 0, cogs.Count - 1);
+			if (g == gear)
+			{
+				return false;
+			}
+			gear = g;
+			if (!_OLD_CHAINSLIP && !air && pedal > 0.3 && throttle_in > 0.3)
+			{
+				double load_k = clampf(pedal * throttle_in * (0.6 + 0.4 * sprint), 0.0, 1.0);
+				chain_slip = maxf(chain_slip, CHAIN_SLIP_T * (0.4 + 0.6 * load_k));
+			}
+			return true;
+		}
+
+		public static double smooth01(double t)
+		{
+			t = clampf(t, 0.0, 1.0);
+			return t * t * (3.0 - 2.0 * t);
+		}
+
+		public static double ang_diff(double a, double b)
+		{
+			return atan2(sin(a - b), cos(a - b));
+		}
+
+		private static double _or(double a, double d)
+		{
+			return (is_nan(a) ? d : a);
+		}
+
+		public V3 fwd()
+		{
+			return new V3(cos(heading), 0.0, -sin(heading));
+		}
+
+		public void reset_at(double px, double pz, double hd)
+		{
+			x = px;
+			z = pz;
+			heading = hd;
+			_reset_motion();
+		}
+
+		public void get_up()
+		{
+			_reset_motion();
+			hop_block = true;   // the hop held to get up doesn't hop
+		}
+
+		private void _reset_motion()
+		{
+			crash_on = false;
+			crash_pending = "";
+			crash_hold = 0.0;
+			crash_armed = false;
+			crash_sim = null;
+			_cb_off_t = -1.0;
+			v = 0.0;
+			vy = 0.0;
+			steer = 0.0;
+			steer_in = 0.0;
+			steer_in_v = 0.0;
+			lean = 0.0;
+			lean_v = 0.0;
+			pitch = 0.0;
+			air = false;
+			bike_lean = 0.0;
+			counter = 0.0;
+			man_lk = 0.0;
+			rock = 0.0;
+			yaw_rate = 0.0;
+			hop_nose = 0.0;
+			_hop_nose_t = 0.0;
+			_hop_nose_m = 0.0;
+			hop_t = 0.0;
+			air_time = 0.0;
+			air_k = 0.0;
+			load = 0.0;
+			compress = 0.0;
+			compress_v = 0.0;
+			prep = 0.0;
+			land_prep = 0.0;
+			pop_fired = false;
+			spun_out = false;
+			chain_slip = 0.0;
+			chain_slip_k = 0.0;
+			shake = 0.0;
+			turn_off = 0.0;
+			rev_cap = 3.0;
+			_fakie_hold = 0.0;
+			course = heading;
+			slip = 0.0;
+			slip_w = 0.0;
+			bar_catch = 0.0;
+			w_init = false;
+			front_air = false;
+			rear_air = false;
+			pump_acc = 0.0;
+			since_land = 1.0;
+			_graze = false;
+			pitch_v = 0.0;
+			c_f = true;
+			c_r = true;
+			wheelie_up = 0.0;
+			_bog = 0.0;
+			g_pitch = NAN;
+			y = host.terrain.height(x, z);
+			body_y = y;
+			body_v = 0.0;
+			_sample(fwd());
+			pitch = _g_pitch;
+			g_pitch = _g_pitch;
+			_gpc_last = NAN;
+			n_f = NAN;
+			n_r = NAN;
+			n_ref = NAN;
+			lip_state = 0;
+			hf_prev = NAN;
+			hr_prev = NAN;
+			zw_f = NAN;
+			zw_r = NAN;
+			bank = 0.0;
+			_bank_hold = 0.0;
+			_air_wl = 0.0;
+			body_x = 0.0;
+			hip_shift = 0.0;
+			spin = 0.0;
+			a_drive = 0.0;
+			charge = 0.0;
+			hop_charge = 0.0;
+			lift_t = 0.0;
+			body_xv = 0.0;
+			hip_v = 0.0;
+			v_last = NAN;
+			air_lean = 0.0;
+			air_pull = 0.0;
+			_air_pull_v = 0.0;
+			flip_acc = 0.0;
+			spin_acc = 0.0;
+			flip_in = 0.0;
+			body_pw = 0.0;
+			throw_v = 0.0;
+			air_w = 0.0;
+			air_inertia = 1.0;
+			air_tilt = 0.0;
+			air_tilt_v = 0.0;
+			air_yaw = 0.0;
+			air_tw = 0.0;
+			air_tw_v = 0.0;
+			whip_load = 0.0;
+			_whip_in = 0.0;
+			spin_load = 0.0;
+			_spin_in = 0.0;
+			_flip_in = 0.0;
+			land_jolt = 0.0;
+			pivot = 0.0;
+			pivot_acc = 0.0;
+			body_in_s = 0.0;
+			flick = 0.0;
+			flick_v = 0.0;
+			_flick_arm = 0.0;
+			_flick_side = 0.0;
+			flick_kick = 0.0;
+			nose_a = 0.0;
+			nose_w = 0.0;
+			nose_zone = false;
+			nose_lock = 0.0;
+			nose_push = 0.0;
+			nose_time = 0.0;
+			nose_brake_t = 0.0;
+			_nose_grace = 0.0;
+			_tw_t = 9.0;
+			_ts_t = 9.0;
+			_sb_t = 9.0;
+			_sf_t = 9.0;
+			_hop_tap_t = 9.0;
+			_hop_buf = 0.0;
+			_pop_miss = 0.0;
+			_pop_miss_t = 0.0;
+			_gl = 0.0;
+			_gc = 0.0;
+			_bh_back = 0.0;
+			_bh_since = 9.0;
+			_bh_peak = 0.0;
+			gest_hop = 0.0;
+			crouch = 0.0;
+			crouch_t = 0.0;
+			rebound = 0.0;
+			_stick_hold = 0.0;
+			_cr_rel = 0.0;
+			_n_grd = 1.0;
+			pop_wait = 0.0;
+			_pop_arm_t = 0.0;
+			squash = 0.0;
+			pop_fx = 0.0;
+			_pop_latch = false;
+			_air_pop = 0.0;
+			pro_pop = false;
+			pro_flight = false;
+			squash_fx = 0.0;
+			pop_q = 0.0;
+			pop_time = 0.0;
+			_pop_used = 0.0;
+			land_heavy = 0.0;
+			land_fold = 0.0;
+			_land_hit = 0.0;
+			_land_pe = 0.0;
+			_stun = 0.0;
+			land_yaw = 0.0;
+			_rim_hit = 0.0;
+			_ty_f = 0.0;
+			_ty_r = 0.0;
+			_tuck_in = false;
+			man_a = 0.0;
+			man_w = 0.0;
+			man_zone = false;
+			man_lock = 0.0;
+			man_zone_t = 0.0;
+			man_pull = 0.0;
+			_man_over = 0.0;
+			_man_armed = false;
+			_pull_age = 0.0;
+			_man_pw = 0.0;
+			_man_grace = 0.0;
+			_sprint_lift = 0.0;
+			pump_push = 0.0;
+			pump_gain = 0.0;
+			pump_idle = 0.0;
+			pump_press_t = 0.0;
+			_pump_release = 0.0;
+			pump_on = false;
+			pleg = 0.0;
+			pump_lift = 0.0;
+			land_perfect = 0.0;
+			wheelie_time = 0.0;
+			wheelie_pedal = false;
+			whip = 0.0;
+			whip_hold = 0.0;
+			whip_side = 0.0;
+			_whip_arm = 0.0;
+			_whip_t = 0.0;
+			_whip_flashed = false;
+			_whip_straight = false;
+			_whip_ang = 0.0;
+			_whip_peak = 0.0;
+			edge_s = 0.0;
+			spin_hold = 0.0;
+			spin_k = 1.0;
+			yaw_edge_s = 0.0;
+			yaw_hold = 0.0;
+			stick_yaw = 0.0;
+			air_stick = V2.ZERO;
+			style_air = 0.0;
+			brake_stop = false;
+			brake_back = false;
+			_rev_hold = 0.0;
+			lean_lim = 9.0;
+			lean_room = NAN;
+			sprint = 0.0;
+			flow = 0.0;
+			flow_t = 0.0;
+			lat_m = 0.0;
+			carve = 0.0;
+			carve_acc = 0.0;
+			carve_berm = false;
+			y_draw = y;
+			pitch_draw = pitch;
+			nose_ref = NAN;
+			pitch_w = NAN;
+			y_prev = NAN;
+			kick_t = 0.0;
+			w_f = y;
+			w_r = y;
+			pedal = 0.0;   // (hop_block keeps a held hop from firing)
+			throttle_in = 0.0;
+			_grip_cv = 0.0;
+			_grip_rough = 0.0;
+			hop_held = false;
+			_reset_ground_sim();
+		}
+
+		private void _reset_ground_sim()
+		{
+			front_use = 0.0;
+			front_push = 0.0;
+			rear_lock = 0.0;
+			front_lock = 0.0;
+			_fb_f = 0.0;
+			_rear_up_k = 0.0;
+			_brk_r = 0.0;
+			_brk_f = 0.0;
+			_feel_r = NAN;
+			_feel_f = NAN;
+			brk_loose_f = 0.0;
+			brk_loose_r = 0.0;
+			corner_g = 0.0;
+			weight_in = 0.0;
+			lean_err = 0.0;
+			knock = 0.0;
+			_amax = 99.0;
+			_amin = -99.0;
+			bal_k = 0.0;
+			_b_prev = 0.0;
+			_f_prev = 0.0;
+			_circ_f = 1.0;
+			bank_lean = 0.0;
+			bank_sq = 0.0;
+			_gx_lean = 0.0;
+			berm_k = 0.0;
+			_mu_f = NAN;
+			_mu_r = NAN;
+			_bmu_f = NAN;
+			_bmu_r = NAN;
+			bank_v = 0.0;
+			_load_s = NAN;
+			_share_f = NAN;
+			_bike_lead = 0.0;
+			_weave = 0.0;
+			_risk.Clear();
+			risk = 0.0;
+			_risk_peak = 0.0;
+		}
+
+		public void begin_crash()
+		{
+			_bal_shoved = false;
+			crash_pending = "";
+			flow = 0.0;
+			crash_on = true;
+			crash_t = 0.0;
+			crash_rest = 0.0;
+			crash_armed = false;
+			crash_hold = 0.0;
+			wheelie_time = 0.0;
+			wheelie_pedal = false;
+			crash_side = (absf(bike_lean) > 0.05 ? signf(bike_lean) : ((Gd.randf() < 0.5 ? -1.0 : 1.0)));
+			crash_fall_v = crash_side * 1.5;
+			crash_bvy = (air ? vy : minf(vy, 0.5));
+			air = false;
+			pedal = 0.0;
+			load = 0.0;
+			shake = 0.45;
+		}
+
+		public void step(double dt, RideInput inp)
+		{
+			if (dt <= 0.0)   // (time frozen: several rates divide by dt)
+			{
+				return;
+			}
+			long t0 = (prof != null ? host.get_ticks_usec() : 0);
+			if (crash_pending != "")
+			{
+				host.start_crash(crash_pending);
+				if (prof != null)
+				{
+					t0 = _prof("start_crash", t0);
+				}
+			}
+			if (crash_on)
+			{
+				_crash_step(dt, inp);
+				if (prof != null)
+				{
+					_prof("crash_step", t0);
+				}
+				return;
+			}
+			_ride_step(dt, inp);
+		}
+		// _prof: in BikeSim.Manual.cs
+		// _crash_step: in BikeSim.Manual.cs
+		// _crash_sim_step: the host does it (IRideHost.crash_body_step: BikePhysicsCs.cs, it drives engine objects)
+
+		private void _crash_old_step(double dt, V3 f)
+		{
+			IGround terrain = host.terrain;
+			double _x0 = x;
+			double _z0 = z;
+			x += f.x * v * dt;
+			z += f.z * v * dt;
+			if (terrain.height(x, z) > y + CRASH_WALL)
+			{
+				x = _x0;
+				z = _z0;
+				v *= -0.2;
+			}
+			foreach (var c in terrain.colliders_near(x, z))
+			{
+				if (c.has("top") && c.f("top") < y + 0.45)
+				{
+					continue;
+				}
+				if (c.get_b("tape", false))
+				{
+					continue;
+				}
+				if (c.get_b("fence", false) && absf(v) > 2 && new V2(x - c.f("x"), z - c.f("z")).length() < c.f("r") + 0.35)
+				{
+					host.smash(c, new V3(f.x * v, 0, f.z * v), new V3(x, y, z));
+					continue;
+				}
+				double dx = x - c.f("x");
+				double dz = z - c.f("z");
+				double d = sqrt(dx * dx + dz * dz);
+				double mn = ((c.has("top") ? c.f("r") : c.f("r") - 0.1)) + 0.25;
+				if (d < mn && d > 1e-4)
+				{
+					x = c.f("x") + dx / d * mn;
+					z = c.f("z") + dz / d * mn;
+					v *= -0.2;
+				}
+			}
+			double lim = 1.48;
+			crash_fall_v += sin((bike_lean != 0.0 ? bike_lean : crash_side * 0.05)) * 14.0 * dt;
+			bike_lean += crash_fall_v * dt;
+			if (absf(bike_lean) > lim)
+			{
+				bike_lean = signf(bike_lean) * lim;
+				crash_fall_v *= -0.25;
+			}
+			counter = 0.0;
+			rock = 0.0;
+			pedal = 0.0;
+			steer += (crash_side * 0.5 - steer) * minf(1.0, dt * 4);
+			double ground = terrain.height(x, z) + 0.24 * absf(sin(bike_lean));
+			crash_bvy -= G * dt;
+			y += crash_bvy * dt;
+			if (y < ground)
+			{
+				y = ground;
+				crash_bvy = (crash_bvy < -2 ? -crash_bvy * 0.25 : 0.0);
+			}
+			double hr = terrain.height(x - f.x * BB_REAR, z - f.z * BB_REAR);
+			double hf = terrain.height(x + f.x * (L - BB_REAR), z + f.z * (L - BB_REAR));
+			pitch += (atan2(hf - hr, L) - pitch) * minf(1.0, dt * 6);
+			hop_nose *= exp(-dt * 4);
+			_hop_nose_t = 0.0;
+			_hop_nose_m = 0.0;
+			wheel_f += v / RWF * dt;
+			wheel_r += v / RWR * dt;
+			body_y = y;
+			body_v = 0.0;
+			y_draw = y;
+			pitch_draw = pitch;
+		}
+
+		private void _sample(V3 f)
+		{
+			IGround terrain = host.terrain;
+			double hr = terrain.height(x - f.x * BB_REAR, z - f.z * BB_REAR);
+			double hf = terrain.height(x + f.x * (L - BB_REAR), z + f.z * (L - BB_REAR));
+			_g_hr = hr;
+			_g_hf = hf;
+			_g_y = hr + (hf - hr) * (BB_REAR / L);
+			_g_pitch = atan2(hf - hr, L);
+		}
+
+		private double _wheel_ground(V3 f, double x0, double R, double cp0)
+		{
+			IGround terrain = host.terrain;
+			double best = -INF;
+			long kb = 0;
+			float[] raw = _wg_raw;
+			for (long k = -5; k < 6; k++)   // 11 points across the contact: a small rock can't slip between them
+			{
+				double s = k / 5.0 * R;
+				double d = x0 * cp0 + s;
+				double h0 = terrain.height(x + f.x * d, z + f.z * d);
+				raw[(int)(k + 5)] = (float)(h0);
+				double hh = h0 + sqrt(R * R - s * s) - R;
+				if (hh > best)
+				{
+					best = hh;
+					kb = k;
+				}
+			}
+			if (_OLD_CURB)
+			{
+				return best;
+			}
+			long i = kb + 5;
+			bool sharp = false;
+			for (long j = maxi(i - 1, 1); j < mini(i + 1, 9) + 1; j++)
+			{
+				if (absf((double)raw[(int)(j - 1)] + (double)raw[(int)(j + 1)] - 2.0 * (double)raw[(int)(j)]) > WG_EDGE)
+				{
+					sharp = true;
+					break;
+				}
+			}
+			if (sharp)
+			{
+				double ds = R / 5.0;
+				for (long j = -WG_FINE + 1; j < WG_FINE; j++)
+				{
+					if (j == 0)
+					{
+						continue;
+					}
+					double s = kb * ds + j * ds / WG_FINE;
+					if (s <= -R || s >= R)
+					{
+						continue;
+					}
+					double d = x0 * cp0 + s;
+					double hh = terrain.height(x + f.x * d, z + f.z * d) + sqrt(R * R - s * s) - R;
+					if (hh > best)
+					{
+						best = hh;
+					}
+				}
+			}
+			return best;
+		}
+
+		private double _e_now()
+		{
+			return 0.5 * v * v + ((air ? 0.5 * vy * vy : 0.0)) + G * y;
+		}
+
+		private void _e_add(string k, double e)
+		{
+			_eb.set(k, _eb.get_f(k, 0.0) + e);
+			_eb.set("~" + k, _eb.get_f("~" + k, 0.0) + e);   // (the drive stage's own terms, to take out of its stage total)
+		}
+
+		private double _e_stage(string k, double e0)
+		{
+			double e1 = _e_now();
+			double d = e1 - e0;
+			double dh = G * (y - _e_y);
+			_e_y = y;
+			if (k != "drive")
+			{
+				string hk = (air ? "height_air" : "height");
+				_eb.set(hk, _eb.get_f(hk, 0.0) + dh);
+				d -= dh;
+				if (air)
+				{
+					_eb.set("S_" + k + "_air", _eb.get_f("S_" + k + "_air", 0.0) + d);
+					d = 0.0;
+				}
+			}
+			if (k == "drive")   // what the drive stage did beyond its own listed terms
+			{
+				foreach (var t in new List<string> { "pedal", "grade", "brakes", "pump", "rolling", "air", "manual" })
+				{
+					d -= _eb.get_f("~" + t, 0.0);
+					_eb.set("~" + t, 0.0);
+				}
+				k = "drive_rest";
+			}
+			_eb.set("S_" + k, _eb.get_f("S_" + k, 0.0) + d);
+			return e1;
+		}
+		// _e_tick: in BikeSim.Manual.cs
+
+		private void _ride_step(double dt, RideInput inp)
+		{
+			double throttle = inp.f("throttle");
+			if (_stun > 0.0)
+			{
+				_stun = maxf(0.0, _stun - dt);
+				throttle = 0.0;
+			}
+			land_fold = maxf(0.0, land_fold - dt / (0.45 + 0.9 * land_fold + 1.0 * land_heavy));
+			_loop_saved = maxf(0.0, _loop_saved - dt);
+			double steer_input = inp.f("steer");
+			long _pt = (prof != null ? host.get_ticks_usec() : 0);
+			double brake_k = _step_controls(dt, inp, throttle, steer_input);
+			if (prof != null)
+			{
+				_pt = _prof("controls", _pt);
+			}
+			bool brake = brake_k > 0.1;
+			double roll_keys = ((!air || air_lock_a) ? 0.0 : steer_input);   // A / D in the air, before the body stick is added
+			if (air && air_lock_a && !_OLD_AIRSTEER)
+			{
+				roll_keys = steer_input * (1.0 - smooth01((air_time - AIR_LOCK_FROM) / AIR_LOCK_FADE));
+			}
+			V3 f = fwd();
+			_step_ground(dt, f);
+			if (prof != null)
+			{
+				_pt = _prof("ground", _pt);
+			}
+			bool in_water = surf == 2;
+			double slope = ((!air && (front_air || rear_air) && wheelie_up <= 0.0 && nose_a <= 0.0) ? _or(pitch_w, _g_pitch) : _g_pitch);   // a wheelie rolls on the ground's slope
+			if (!air && front_air && !rear_air && wheelie_up <= 0.0 && nose_a <= 0.0)
+			{
+				slope = _local_slope(f, -BB_REAR, RWR, cos(clampf(pitch, -1.3, 1.3)));
+			}
+			bool rear_down = !air && !rear_air;
+			skid = false;
+			_step_sprint(dt, inp, throttle, brake, in_water);
+			_step_loads(dt);
+			if (prof != null)
+			{
+				_pt = _prof("sprint_loads", _pt);
+			}
+			double e0 = (_EPROBE ? _e_now() : 0.0);
+			_e_y = y;
+			double a_long = _step_drive(dt, inp, throttle, brake, in_water, slope, rear_down, n_rear, n_front);
+			if (_EPROBE)
+			{
+				e0 = _e_stage("drive", e0);
+			}
+			if (prof != null)
+			{
+				_pt = _prof("drive", _pt);
+			}
+			double va = _step_steer(dt, f, brake_k, steer_input, roll_keys, a_long, n_rear, n_front);
+			if (_EPROBE)
+			{
+				e0 = _e_stage("steer", e0);
+			}
+			if (prof != null)
+			{
+				_pt = _prof("steer", _pt);
+			}
+			f = fwd();   // (the steering turned the bike)
+			_step_move(dt, f);
+			if (_EPROBE)
+			{
+				e0 = _e_stage("move", e0);
+			}
+			if (prof != null)
+			{
+				_pt = _prof("move", _pt);
+			}
+			_step_vertical(dt, f, throttle, brake);
+			if (_EPROBE)
+			{
+				e0 = _e_stage("vertical", e0);
+			}
+			if (prof != null)
+			{
+				_pt = _prof("vertical", _pt);
+			}
+			_step_hop(dt, inp);
+			if (_EPROBE)
+			{
+				e0 = _e_stage("hop", e0);
+			}
+			if (prof != null)
+			{
+				_pt = _prof("hop", _pt);
+			}
+			_step_lip(dt, f, brake);
+			if (_EPROBE)
+			{
+				e0 = _e_stage("lip", e0);
+			}
+			if (prof != null)
+			{
+				_pt = _prof("lip", _pt);
+			}
+			_step_wheels(dt, f, in_water, va);
+			if (_EPROBE)
+			{
+				e0 = _e_stage("wheels", e0);
+				_e_tick(dt, brake);
+			}
+			if (prof != null)
+			{
+				_prof("wheels", _pt);
+			}
+			if (_JOLT_PROBE)
+			{
+				_jolt_probe(dt, brake_k);
+			}
+		}
+		// _jolt_probe: in BikeSim.Manual.cs
+
+		private double _step_controls(double dt, RideInput inp, double throttle, double steer_input)
+		{
+			// two levers: "brake" (S / LT) squeezes both (the front by brakeFrontMix), brake_front / brake_rear one each
+			brake_r = maxf(inp.f("brake"), inp.get("brake_rear", 0.0));
+			brake_f = maxf(inp.f("brake") * T.get("brakeFrontMix", 0.7), inp.get("brake_front", 0.0));
+			if (!_OLD_DIRT)
+			{
+				double up = dt / maxf(0.01, T.get("brakeRamp", 0.15));
+				_brk_r = move_toward(_brk_r, brake_r, (brake_r > _brk_r ? up : dt * 12.0));
+				_brk_f = move_toward(_brk_f, brake_f, (brake_f > _brk_f ? up : dt * 12.0));
+				brake_r = _brk_r;
+				brake_f = _brk_f;
+			}
+			_brake_feel = inp.f("brake") >= maxf(inp.get("brake_front", 0.0), inp.get("brake_rear", 0.0));
+			double rfx = T.get("riderSkill", 1.0) * smooth01((risk - 0.15) / 0.5);
+			double rb = T.get("reflexBrake", 0.6);
+			brake_f *= 1.0 - rb * rfx;
+			brake_r *= 1.0 - rb * 0.67 * rfx;
+			bool rear_up = !_OLD_RIMKICK && _brake_feel && rear_air && !front_air && !air && nose_a <= 0.0 && body_in < 0.3;
+			_rear_up_k = move_toward(_rear_up_k, (rear_up ? 1.0 : 0.0), dt * ((rear_up ? 20.0 : 4.0)));
+			brake_f *= 1.0 - 0.85 * _rear_up_k;
+			double brake_k = maxf(maxf(inp.f("brake"), brake_r), inp.get("brake_front", 0.0));
+			bool brake = brake_k > 0.1;
+			pad = inp.get_b("pad", false);
+			bool ws_air = !pad && inp.get_b("ws_air", false);
+			body_in = clampf(inp.get("body_fwd", 0.0), -1.0, 1.0);
+			if (_pop_latch)
+			{
+				if (body_in < 0.3 || (air && air_time > 0.5) || (!air && pop_wait <= 0.0 && !pro_flight) || _OLD_POPSNAP)
+				{
+					_pop_latch = false;
+				}
+				else if (air)
+				{
+					body_in = 0.0;
+				}
+			}
+			left_back = inp.get("left_back", 0.0);
+			flick_in = clampf(inp.get("body_lean", 0.0), -1.0, 1.0);
+			body_in_s += (body_in - body_in_s) * minf(1.0, dt * 10);
+			if (!air)
+			{
+				air_lock_h = inp.b("hop");
+				air_lock_a = absf(steer_input) > 0.1;
+				_lock_a0 = steer_input;
+				_air_own = 0.0;
+			}
+			else
+			{
+				if (!inp.b("hop"))
+				{
+					air_lock_h = false;
+				}
+				if (absf(steer_input) <= 0.1 || absf(steer_input - _lock_a0) > 0.35)
+				{
+					air_lock_a = false;
+				}
+				double used = maxf(new V2(flick_in, body_in).length(), (air_lock_a ? 0.0 : absf(steer_input)));
+				if (ws_air)
+				{
+					used = maxf(used, absf(throttle - brake_k));
+				}
+				_air_own = (used > 0.15 ? 1.0 : maxf(0.0, _air_own - 2.5 * dt));
+			}
+			air_help = (air ? maxf(T.get("airAssist", 0.6), (test_rider ? TEST_ASSIST : 0.0)) * (1.0 - _air_own) : 0.0);
+			double lean_in = 0.0;
+			if (air)   // W / S act straight away, even if held from the ground (the user wants no re-press)
+			{
+				// + the body stick (forward = nose down), with a dead band so a light lean held from the ground doesn't
+				// spin the bike. On a gamepad the triggers (held pedalling / braking into a jump) don't tilt it at all
+				// the right stick doesn't spin the bike, it points it (see air_stick); only pushed right to the top
+				// / bottom edge it keeps the bike turning over (flips in the air)
+				// The spin builds up gently while the stick is held at the edge (stickSpinBuild /s) and eases out
+				// quicker when it comes off the edge: no sudden kick into a flip
+				// the longer it's held one way, the faster it spins (like winding it up): spin_hold seconds held,
+				// x (1 + stickSpinGrow per second, up to 1.5 s); turning the other way starts over
+				V2 es = _edge_spin(body_in, edge_s, spin_hold, dt);
+				edge_s = es.x;
+				spin_hold = es.y;
+				spin_k = (absf(edge_s) > 0.01 ? _edge_grow(spin_hold) : 1.0);
+				lean_in = clampf(((ws_air ? throttle - brake_k : 0.0)) + edge_s * T.get("stickSpinMax", 0.7), -1.0, 1.0);
+				V2 ys = _edge_spin(flick_in, yaw_edge_s, yaw_hold, dt);
+				yaw_edge_s = ys.x;
+				yaw_hold = ys.y;
+				double y_t = yaw_edge_s * T.get("stickYawRate", 5.0) * _edge_grow(yaw_hold);
+				if (!_OLD_SPIN)
+				{
+					double wound = maxf(0.0, _spin_in * signf(yaw_edge_s));
+					y_t *= lerpf(SPIN_AIR_ONLY, 1.0, wound) / maxf(air_inertia, 0.5);
+				}
+				if (absf(flick_in) < 0.815 && land_prep > 0.2)
+				{
+					// coming in to land off a spin: the rider twists it the rest of the way straight if it's close
+					double off = wrapf(slip, -PI, PI);
+					if (absf(off) < 1.2)
+					{
+						y_t = lerpf(y_t, clampf(-off * 6.0, -4.0, 4.0), air_help);
+					}
+				}
+				double y_resp = (absf(y_t) > absf(stick_yaw) ? 11.0 : (((absf(_spin_in) > 0.2 && !_OLD_SPIN) ? SPIN_OPEN : 10.0)));
+				stick_yaw += (y_t - stick_yaw) * minf(1.0, y_resp * dt);
+			}
+			else
+			{
+				edge_s = 0.0;
+				spin_hold = 0.0;
+				spin_k = 1.0;
+				yaw_edge_s = 0.0;
+				yaw_hold = 0.0;
+				stick_yaw = 0.0;
+			}
+			flip_in = -lean_in;   // + = nose up
+			V2 stick_raw = (air ? new V2(flick_in, -body_in) : V2.ZERO);
+			if (stick_raw.length() < 0.08)
+			{
+				stick_raw = V2.ZERO;
+			}
+			air_stick += (stick_raw - air_stick) * (1.0 - exp(-dt * T.get("stickAirEase", 3.5)));
+			if (!air)
+			{
+				air_stick = V2.ZERO;
+			}
+			else
+			{
+				style_air += minf(air_stick.length(), 1.0) * dt;
+			}
+			air_lean += (lean_in - air_lean) * minf(1.0, dt * 6);
+			_tuck_in = air && inp.b("hop") && !air_lock_h;
+			double pull_t = maxf((_tuck_in ? 1.0 : 0.0), (air ? 0.7 * absf(flip_in) : 0.0));
+			if (air)
+			{
+				double lift_k = smooth01((air_time - 0.03) / 0.1) * (1.0 - smooth01((air_time - 0.3) / 0.3)) * (1.0 - land_prep);
+				pull_t = maxf(pull_t, T.f("airLift") * lift_k * (((pro_flight || _OLD_PULLUP) ? 1.0 : 0.0)));   // (the pull-up: after the player's pump only)
+				pull_t = maxf(pull_t, minf(1.0, 0.55 + 0.45 * pop_q) * smooth01((air_time - 0.02) / 0.08) * smooth01(pop_fx / 0.35) * (1.0 - land_prep) * (((pro_flight || _OLD_PULLUP) ? 1.0 : 0.0)));
+				pull_t = maxf(pull_t, squash_fx * (1.0 - land_prep));
+				if (!_OLD_AUTOTUCK)
+				{
+					double sy = air_stick.y;
+					double auto_t = T.get("autoTuck", 0.7) * smooth01((air_time - 0.04) / 0.14) * air_k;
+					auto_t = lerpf(auto_t, 1.0, smooth01((sy - 0.3) / 0.5));
+					auto_t *= 1.0 - smooth01((-sy - 0.2) / 0.5);
+					pull_t = maxf(pull_t, auto_t * (1.0 - land_prep));
+				}
+			}
+			if (_OLD_AUTOTUCK)
+			{
+				air_pull += (pull_t - air_pull) * minf(1.0, dt * 8);
+			}
+			else
+			{
+				// critically damped spring (SmoothDamp, exact step): eases out of rest and into the target with no kink in its
+				// speed, the way games blend a pose (a plain lag starts at full speed the instant the target moves)
+				double yk = 2.0 * 0.6931472 / maxf(0.02, T.get("tuckEase", 0.09));
+				double j0 = air_pull - pull_t;
+				double j1 = _air_pull_v + j0 * yk;
+				double ek = exp(-yk * dt);
+				air_pull = ek * (j0 + j1 * dt) + pull_t;
+				_air_pull_v = ek * (_air_pull_v - j1 * yk * dt);
+			}
+			bool lip_win = !air && !(_balancing() || _man_grace > 0.0 || _nosing() || _nose_grace > 0.0) && (prep > 0.25 || front_air || rear_air);
+			double t_buf = T.get("inputForgive", 0.12) * 1.5;
+			_tw_t = (throttle > 0.1 ? _tw_t + dt : 0.0);
+			_ts_t = (brake ? _ts_t + dt : 0.0);
+			_sb_t = (body_in < -0.05 ? _sb_t + dt : 0.0);
+			_sf_t = (body_in > 0.05 ? _sf_t + dt : 0.0);
+			if (!ws_air)   // gamepad / keys: pedal and brake never throw a flip (the right stick / arrow keys do), so brake stays a brake
+			{
+				lock_tw = true;
+				lock_ts = true;
+			}
+			else if (!lip_win)
+			{
+				lock_tw = throttle > 0.1 && _tw_t > t_buf;
+				lock_ts = brake && _ts_t > t_buf;
+			}
+			else
+			{
+				if (throttle <= 0.1)
+				{
+					lock_tw = false;
+				}
+				if (!brake)
+				{
+					lock_ts = false;
+				}
+			}
+			double throw_in = 0.0;
+			if (lip_win)
+			{
+				throw_in = ((lock_ts ? 0.0 : brake_k)) - ((lock_tw ? 0.0 : throttle));   // + = back (nose up)
+				if (!lock_ts)
+				{
+					brake_k = 0.0;
+					brake = false;
+					brake_f = 0.0;
+					brake_r = 0.0;
+				}
+			}
+			double t_buf_s = (_OLD_FLIPPULL ? t_buf : maxf(t_buf, FLIP_PULL_EARLY));
+			if (!lip_win)
+			{
+				lock_sb = body_in < -0.05 && _sb_t > t_buf_s;
+				lock_sf = body_in > 0.05 && _sf_t > t_buf;
+			}
+			else
+			{
+				if (body_in >= -0.15)
+				{
+					lock_sb = false;
+				}
+				if (body_in <= 0.15)
+				{
+					lock_sf = false;
+				}
+			}
+			if (_balancing() || _man_grace > 0.0 || _nosing() || _nose_grace > 0.0 || gest_hop > 0.0)
+			{
+				lock_sb = true;
+				lock_sf = true;
+			}
+			double yb = ((lock_sb || !lip_win) ? 0.0 : clampf((-body_in - 0.5) / 0.4, 0.0, 1.0));
+			double yf = ((lock_sf || !lip_win) ? 0.0 : clampf((body_in - 0.5) / 0.4, 0.0, 1.0));
+			throw_in = clampf(throw_in + yb - yf, -1.0, 1.0);
+			if (!air)
+			{
+				if (absf(throw_in) > 0.05)
+				{
+					double room = 1.0 - clampf(throw_v * signf(throw_in) / T.f("flipRate"), 0.0, 1.0);
+					throw_v += throw_in * T.f("flipAccel") * room * dt;
+				}
+				else
+				{
+					throw_v *= exp(-dt * 6);   // a throw can't be held on the ground: the body settles back
+				}
+			}
+			return brake_k;
+		}
+
+		private void _step_ground(double dt, V3 f)
+		{
+			IGround terrain = host.terrain;
+			_sample(f);
+			if (air && !_OLD_LANDAIM)
+			{
+				_aim_tick = (_aim_tick + 1) % 3;
+				if (_aim_tick == 0 || is_nan(_land_pitch))
+				{
+					_land_pitch = _landing_slope(terrain);
+				}
+			}
+			else
+			{
+				_land_pitch = NAN;
+			}
+			surf = terrain.surface(x, z);
+			surf_f = terrain.surface(x + f.x * (L - BB_REAR), z + f.z * (L - BB_REAR));
+			surf_r = terrain.surface(x - f.x * BB_REAR, z - f.z * BB_REAR);
+			double mk = minf(1.0, dt * 12.0);
+			_mu_f = (is_nan(_mu_f) ? SURF_MU[(int)(clampi(surf_f, 0, 3))] : lerpf(_mu_f, SURF_MU[(int)(clampi(surf_f, 0, 3))], mk));
+			_mu_r = (is_nan(_mu_r) ? SURF_MU[(int)(clampi(surf_r, 0, 3))] : lerpf(_mu_r, SURF_MU[(int)(clampi(surf_r, 0, 3))], mk));
+			double bf = _brake_mu(surf_f);
+			double br = _brake_mu(surf_r);
+			_bmu_f = (is_nan(_bmu_f) ? bf : lerpf(_bmu_f, bf, mk));
+			_bmu_r = (is_nan(_bmu_r) ? br : lerpf(_bmu_r, br, mk));
+			if (is_nan(course))
+			{
+				course = heading;
+				slip = 0.0;
+			}
+			since_land += dt;
+			if (_graze && !air && since_land > 0.25)
+			{
+				_graze = false;
+			}
+		}
+
+		private void _step_sprint(double dt, RideInput inp, double throttle, bool brake, bool _in_water)
+		{
+			bool want_sprint = inp.b("sprint") && throttle > 0.1 && !brake && !air;
+			if (stamina <= 0)
+			{
+				tired = true;
+			}
+			else if (stamina > 0.25)
+			{
+				tired = false;
+			}
+			bool sprinting = want_sprint && !tired;
+			if (sprinting && !air)
+			{
+				stamina = maxf(0.0, stamina - dt / T.f("sprintTime"));
+			}
+			else if (!sprinting)
+			{
+				stamina = minf(1.0, stamina + dt / T.f("sprintRecharge"));
+			}
+			sprint += (((sprinting ? 1.0 : 0.0)) - sprint) * minf(1.0, dt * 5);
+		}
+
+		private void _step_loads(double dt)
+		{
+			double n_sc = G / _or(n_ref, G);
+			double n_cos = cos(clampf(_g_pitch, -1.2, 1.2));
+			n_cos *= G / (G + maxf(0.0, corner_g));
+			double nR = (air ? 0.0 : _or(n_r, G * SH_R) * n_sc * n_cos);
+			double nF = (air ? 0.0 : _or(n_f, G * (1 - SH_R)) * n_sc * n_cos);
+			double n_tot = nR + nF;
+			double lean_fb = 0.0;
+			if (!air)
+			{
+				// (the hips go back when braking, x_brake in the body stage: that brace lowers the pitch-over a little, but it
+				// used to read as the rider sitting his weight on the rear: +0.36 g on the rear, nearly cancelling the brake's
+				// weight transfer; with the brakes tyre-limited a locked front then stopped at 0.14 g. Only a quarter counts)
+				double xb = (_OLD_BRAKE ? 0.0 : -0.8 * T.f("weightShift") * ((maxf(brake_f, brake_r) > 0.1 ? 1.0 : 0.0)) * 0.75);
+				lean_fb = clampf(body_in_s + (body_x + hip_shift - 2.0 * xb) * 0.5 / maxf(0.05, T.f("weightShift")), -1.0, 1.0);
+				if (lean_fb > 0.0 && pump_push > 0.05 && body_in > 0.12)
+				{
+					lean_fb *= 1.0 - T.get("pumpCentred", 0.75);
+				}
+				double dN = -lean_fb * T.get("leanTraction", 0.45) * G;
+				dN += G * sin(clampf(_g_pitch, -1.2, 1.2)) * SLOPE_TRANSFER;
+				double fw_k = T.get("riderSkill", 1.0) * smooth01((absf(lean) - 0.12) / 0.35);
+				dN -= G * T.get("frontWeight", 0.12) * fw_k * (1.0 + 3.5 * _risk.get_f("FRONT WASHED OUT!", 0.0));
+				double d_brake = -_b_prev * SLOPE_TRANSFER * ((v >= 0.0 ? 1.0 : -1.0));
+				double lift = (-nR + 0.03 * G) - (dN + d_brake);
+				_danger("OVER THE BARS!", ((brake_f > 0.4 && v > 3.0 && !_nosing() && nose_push <= 0.0) ? lift / (0.25 * G) : -1.0), dt);   // (a stoppie on purpose is the nose balance's)
+				dN += d_brake;
+				double dn_lo = -nR + 0.08 * G;
+				double dn_hi = nF - 0.08 * G;
+				dN = (dn_lo <= dn_hi ? clampf(dN, dn_lo, dn_hi) : 0.5 * (dn_lo + dn_hi));
+				nR = maxf(0.0, nR + dN);
+				nF = maxf(0.0, nF - dN);
+			}
+			n_load = n_tot;
+			spin = 0.0;
+			a_drive = 0.0;
+			a_pedal = 0.0;
+			n_rear = nR;
+			n_front = nF;
+		}
+
+		private void _speed_tuck_step(double dt, double throttle)
+		{
+			if (_OLD_SPEEDTUCK)
+			{
+				speed_tuck = 0.0;
+				speed_tuck_auto = 0.0;
+				return;
+			}
+			double b = clampf(-body_in_s, 0.0, 1.0);
+			double stick = smoothstep(TUCK_BACK_IN.x, TUCK_BACK_IN.y, b) * (1.0 - smoothstep(TUCK_BACK_OUT.x, TUCK_BACK_OUT.y, b));
+			double auto = smoothstep(T.get("speedTuckFrom", 11.0), T.get("speedTuckFull", 18.0), absf(v)) * T.get("speedTuck", 1.0);
+			auto *= (1.0 - clampf(throttle * 1.5, 0.0, 1.0)) * (1.0 - clampf(body_in_s * 2.0, 0.0, 1.0)) * (1.0 - smoothstep(TUCK_BACK_OUT.x, TUCK_BACK_OUT.y, b));
+			double bal = clampf(maxf(man_a, nose_a) / 0.15, 0.0, 1.0);
+			auto *= 1.0 - bal;
+			stick *= 1.0 - bal;
+			auto = clampf(auto, 0.0, 1.0);
+			double want = maxf(auto, stick);
+			double k = 1.0 - exp(-((want > speed_tuck ? 5.0 : 3.0)) * dt);
+			speed_tuck += (want - speed_tuck) * k;
+			speed_tuck_auto += (auto - speed_tuck_auto) * k;
+		}
+
+		private void _aero_update(double throttle)
+		{
+			// aerodynamics: the drag is the rider's frontal area. Folded down over the bars (right stick forward)
+			// it drops (~40 %: an upright downhill rider vs a race tuck), so the bike runs on and tops out faster;
+			// sat up tall (stick back) it catches the wind like an air brake. Pedalling hard spoils the tuck a bit
+			double tuck = clampf(body_in_s, 0.0, 1.0) * (1.0 - 0.5 * clampf(throttle, 0.0, 1.0));
+			double sit_up = clampf(-body_in_s, 0.0, 1.0);
+			if (!_OLD_SPEEDTUCK)
+			{
+				// the stick's part of the speed tuck counts fully, the automatic part speedTuckDrag of it
+				double st_stick = maxf(0.0, speed_tuck - speed_tuck_auto);
+				tuck = maxf(tuck, st_stick + speed_tuck_auto * T.get("speedTuckDrag", 0.5));
+				sit_up = smoothstep(TUCK_BACK_OUT.x, TUCK_BACK_OUT.y, sit_up);
+			}
+			aero_k = 1.0 - T.get("tuckDrag", 0.42) * tuck + T.get("upDrag", 0.3) * sit_up;
+		}
+
+		private double _step_drive(double dt, RideInput inp, double throttle, bool brake, bool in_water, double slope, bool rear_down, double nR, double nF)
+		{
+			double a_long = 0.0;
+			double sp_k = sprint;
+			double n_tot = n_load;
+			_speed_tuck_step(dt, throttle);
+			brake_heat *= exp(-dt / HEAT_TAU);
+			if (_HEAT_HOLD > 0.0)   // (tests: BMX_HEAT keeps the brakes that hot)
+			{
+				brake_heat = maxf(brake_heat, _HEAT_HOLD);
+			}
+			brake_fade = (_OLD_FADE ? 0.0 : smooth01((brake_heat - FADE_FROM) / (FADE_FULL - FADE_FROM)));
+			if (brake_fade > 0.3 && !_fade_warn)
+			{
+				_fade_warn = true;
+				if (host.msg_idle())
+				{
+					host.flash("BRAKES FADING");
+				}
+			}
+			else if (brake_fade < 0.1)
+			{
+				_fade_warn = false;
+			}
+			if (Env.s("BMX_FADE_PROBE") != "" && host.get_ticks_msec() / 500 != (host.get_ticks_msec() - 8) / 500)   // tests
+			{
+				host.log(Gd.fmt("FADE v=%.1f heat=%.2f fade=%.2f brake=%.2f/%.2f dive=%.2f kick=%.2f decel=%.2f", v, brake_heat, brake_fade, brake_f, brake_r, dive, _kick_k, _fb_f + _fb_r));
+			}
+			double mu_f = _mu_f * T.f("grip");
+			double mu_r = _mu_r * T.f("grip");
+			double mu = mu_r * SH_R + mu_f * (1.0 - SH_R);
+			if (!air)
+			{
+				double vp = maxf(v, 0.5);
+				double gk = gear_k();
+				double ts = T.f("topSpeed");
+				double p_top = (T.f("pedalTop") + T.f("sprintTop") * sp_k) * gk * ts;
+				if (!_OLD_SPINOUT)
+				{
+					p_top = spin_top(sp_k);
+				}
+				double kick = T.get("sprintKick", 0.9) * slowness(v);
+				double p_mul = (1 + (T.f("sprintPower") - 1 + kick) * sp_k) * ts;
+				double cad = (_OLD_SPINOUT ? v / (gk * T.f("pedalTop") * ts * 0.7) : v / (0.7 * spin_top(0.0)));   // (1 = ~105 rpm)
+				double grind = (gear < 0 ? 1.0 : 0.35 + 0.65 * smooth01((cad - 0.15) / 0.7));
+				double drive = (((rear_down && !(v < -0.3 && rev_cap > 3.0)) ? throttle : 0.0)) * minf(T.f("pedalLaunch") * p_mul / ts / gk, T.f("pedalPower") * p_mul / vp) * grind * clampf((p_top - v) / 2.5, 0, 1);
+				drive *= 1.0 - KICK_LOSS * _kick_k;   // (a kicked-back crank costs a little of the stroke)
+				drive *= 1.0 - chain_slip_k;   // (the chain skipping after a shift under load)
+				double drive_cap = mu_r * nR;
+				if (!_OLD_GRIP && !is_nan(_nR_s))
+				{
+					drive_cap = mu_r * _nR_s;
+				}
+				drive_cap *= _ls(_or(_nR_s, nR), G * SH_R);
+				if (drive > drive_cap)
+				{
+					spin = minf(1.0, (drive - drive_cap) / 3);
+					drive = drive_cap + (drive - drive_cap) * 0.15;
+				}
+				a_long = absf(drive);
+				double a = drive - G * sin(slope);
+				if (_EPROBE)
+				{
+					_e_add("pedal", drive * v * dt);
+					_e_add("grade", -G * sin(slope) * v * dt);
+				}
+				double lever = (_OLD_BRAKE ? 7.5 : T.f("brakeForce"));
+				double fb_r = lever * T.get("brakeRear", 0.6) * brake_r;
+				double fb_f = lever * T.get("brakeFront", 0.75) * brake_f * ((front_air ? 0.0 : 1.0));
+				double bg = T.get("brakeGrip", 1.0);
+				double bmu_f = (_OLD_BRAKE ? mu_f : _or(_bmu_f, 0.7) * bg);
+				double bmu_r = (_OLD_BRAKE ? mu_r : _or(_bmu_r, 0.7) * bg);
+				double cap_r = maxf(0.05, bmu_r * nR * _ls(nR, G * SH_R));
+				double cap_f = maxf(0.05, bmu_f * nF * _ls(nF, G * (1.0 - SH_R)) * T.get("frontGrip", 1.0));
+				double slide_r = 0.8;
+				double slide_f = 0.8;
+				if (!_OLD_DIRT)
+				{
+					// dirt isn't asphalt: the brake limit under each tyre wanders with loose patches (gravel, dust over hardpack)
+					// and jumps about on rough ground (the tyre skipping over stones), and a locked tyre ploughs at less
+					V2 dk = _brake_dirt(dt);
+					cap_f = maxf(0.05, cap_f * dk.x);
+					cap_r = maxf(0.05, cap_r * dk.y);
+					slide_f = _lock_slide(surf_f) * (1.0 - 0.15 * minf(1.0, brk_loose_f));
+					slide_r = _lock_slide(surf_r) * (1.0 - 0.15 * minf(1.0, brk_loose_r));
+				}
+				if (_brake_feel)
+				{
+					// the brake key = a rider squeezing by feel. He brakes to the grip he FEELS (the last ~0.15 s of it): ride
+					// onto a loose patch and he's still squeezing for the hardpack behind him, so the rear skids longer and the
+					// front can tuck for a moment before he lets off (it was 97 % of the exact limit every tick: perfect ABS)
+					double fcap_f = cap_f;
+					double fcap_r = cap_r;
+					double tk = (_OLD_DIRT ? 0.0 : clampf(T.get("brakeDrift", 0.6) * smooth01((absf(lat_a) - 1.0) / 3.0), 0.0, 1.5));
+					if (!_OLD_DIRT)
+					{
+						double lag = maxf(0.01, T.get("brakeFeelLag", 0.15));
+						double fk = minf(1.0, dt / lag);
+						_feel_f = (is_nan(_feel_f) ? cap_f : _feel_f + (cap_f - _feel_f) * fk);
+						double fk_r = minf(1.0, dt * (1.0 / lag + 24.0 * T.get("brakeSkidEar", 1.0) * rear_lock * maxf(0.0, 1.0 - 0.8 * tk)));
+						_feel_r = (is_nan(_feel_r) ? cap_r : _feel_r + (cap_r - _feel_r) * fk_r);
+						fcap_f = _feel_f * T.get("brakeFrontHold", 0.93);
+						fcap_r = _feel_r;
+					}
+					double r_ease = smooth01((absf(slip) - 0.04 - T.get("brakeDriftAngle", 0.3) * tk) / 0.08);
+					fb_r = minf(fb_r, fcap_r * lerpf(1.0 + 0.25 * T.get("brakeSkid", 0.4) + 0.4 * tk, 0.85, r_ease));
+					fb_f = minf(fb_f, (!_OLD_DIRT ? fcap_f : cap_f * 0.97));
+				}
+				else
+				{
+					_feel_f = cap_f;
+					_feel_r = cap_r;
+					if (!_OLD_DIRT && fb_r > cap_r)
+					{
+						double out_k = smooth01((absf(slip) - T.get("brakeRearLet", 0.55) * T.f("slipMax")) / (0.3 * T.f("slipMax"))) * clampf(T.get("riderSkill", 1.0), 0.0, 1.0);
+						fb_r = lerpf(fb_r, minf(fb_r, cap_r * 0.92), out_k);
+					}
+				}
+				rear_lock = move_toward(rear_lock, (fb_r > cap_r ? clampf((fb_r - cap_r) / (0.25 * cap_r), 0.0, 1.0) : 0.0), dt * 8.0);
+				front_lock = move_toward(front_lock, (fb_f > cap_f ? clampf((fb_f - cap_f) / (0.25 * cap_f), 0.0, 1.0) : 0.0), dt * 8.0);
+				fb_r = (rear_down ? lerpf(minf(fb_r, cap_r), cap_r * slide_r, rear_lock) : 0.0);
+				fb_f = lerpf(minf(fb_f, cap_f), cap_f * slide_f, front_lock);
+				double fade_k = 1.0 - T.get("brakeFade", 0.35) * brake_fade;
+				fb_r *= fade_k;
+				fb_f *= fade_k;
+				double b_all = fb_r + fb_f;
+				bool braked_fwd = brake && !air && v > 0.3;
+				bool braked_rev = brake && !air && v < -0.3 && (rev_cap > 3.0 || !brake_back);
+				bool braked = braked_fwd || braked_rev;
+				_fb_f = (braked ? fb_f : 0.0);
+				_fb_r = (braked ? fb_r : 0.0);
+				_a_rear = maxf(0.0, drive) + (((braked && rear_down) ? fb_r : 0.0));   // what the REAR tyre carries along the bike
+				_b_prev = (braked ? b_all : 0.0);
+				double drive_p = drive;
+				if (braked_fwd)
+				{
+					a -= b_all;
+					a_long += b_all;
+					drive -= b_all;
+					brake_heat += b_all * v * dt / 45.0;
+					if (_EPROBE)
+					{
+						_e_add("brakes", -b_all * v * dt);
+					}
+					drive_p = drive;
+				}
+				else if (braked_rev)
+				{
+					a += b_all;
+					a_long += b_all;
+					drive += b_all;
+					brake_heat += b_all * -v * dt / 45.0;
+				}
+				else
+				{
+					rear_lock = move_toward(rear_lock, 0.0, dt * 8.0);
+					front_lock = move_toward(front_lock, 0.0, dt * 8.0);
+				}
+				a_drive = drive;
+				a_pedal = drive_p;
+				pump_push = 0.0;
+				bool btn = inp.b("hop") && !hop_block;
+				double p_fwd = clampf((body_in - 0.12) / 0.6, 0.0, 1.0);
+				double p_back = clampf((-body_in - 0.12) / maxf(0.05, 0.4 - 0.12), 0.0, 1.0);
+				double p_in = maxf((btn ? 1.0 : 0.0), p_fwd * T.get("pumpStick", 1.2));
+				bool ground_ok = !(front_air && rear_air) && hop_t <= 0.0 && v > T.get("pumpMinSpeed", 2.0) && man_a < 0.08;
+				pump_on = ground_ok && (btn || p_fwd > 0.0 || p_back > 0.0);
+				IGround terrain_pump = host.terrain;
+				double pl_prev = pleg;
+				double pl_t = clampf(p_fwd - _bend_in, -1.0, 1.0);
+				pleg = move_toward(pleg, pl_t, dt * 2.0 / PUMP_STROKE_T);
+				if (ground_ok && prep < 0.1 && pop_wait <= 0.0 && kick_t <= 0.0 && since_land > 0.1)
+				{
+					// how much harder (or lighter) than standing weight the ground pushes on rider + bike along their path: speed²
+					// x the ground's curve under the bike, across about the wheelbase (+ in a dip, - over a crest). Not the tyre
+					// loads: over a roller's crest the front leaves the ground and the springs ring, which put the timing out by
+					// a quarter of a roller. The legs can drive against at most ~2.5 g
+					double cx = cos(_or(course, heading)) * PUMP_SPAN;
+					double cz = -sin(_or(course, heading)) * PUMP_SPAN;
+					double h0 = terrain_pump.deck_height(x, z);
+					double kap = (terrain_pump.deck_height(x + cx, z + cz) + terrain_pump.deck_height(x - cx, z - cz) - 2.0 * h0) / (PUMP_SPAN * PUMP_SPAN);
+					double n_ex = clampf(v * v * kap / G, -1.0, 1.5);
+					double de = clampf(T.f("riderMass"), 0.0, 0.7) * n_ex * G * 0.5 * PUMP_STROKE * (pleg - pl_prev) * T.get("pumpLegs", 1.0);
+					pump_push = de / (maxf(2.0, v) * dt);
+					a += pump_push;
+					if (_EPROBE)
+					{
+						_e_add("pump", de);
+					}
+					if (pump_push > 0.0)
+					{
+						pump_acc += pump_push * dt;
+					}
+					if (btn && absf(n_ex) > 0.15)   // (a press spent pumping doesn't hop when it's let go)
+					{
+						pump_press_t += dt;
+					}
+				}
+				if (absf(pleg - pl_t) < 0.02)
+				{
+					if (pump_acc > 0.35)
+					{
+						flow_up();
+						if (host.msg_idle())
+						{
+							host.flash(Gd.fmt("PUMP +%d km/h", roundi(pump_acc * 3.6)));
+						}
+					}
+					pump_acc = 0.0;
+				}
+				double berm_c = clampf(berm_k / maxf(0.05, T.get("bermAssist", 1.0)), 0.0, 1.0);
+				if (ground_ok && prep < 0.1 && p_in > 0.0 && berm_c > 0.05 && corner_g > 0.3)
+				{
+					double bp = T.get("bermPump", 0.12) * minf(corner_g, 8.0) * berm_c * minf(p_in, 1.0);
+					a += bp;
+					pump_push += bp;
+					if (btn)   // (a press spent pumping the berm doesn't hop when it's let go)
+					{
+						pump_press_t += dt;
+					}
+					if (_EPROBE)
+					{
+						_e_add("pump", bp * v * dt);
+					}
+				}
+				if (absf(pump_push) > 0.05)
+				{
+					pump_gain += pump_push * dt * 3.6;
+					pump_idle = 0.0;
+				}
+				else
+				{
+					pump_idle += dt;
+					if (pump_idle > 1.2)
+					{
+						pump_gain = move_toward(pump_gain, 0.0, dt * maxf(4.0, absf(pump_gain) * 1.5));
+					}
+				}
+				pump_gain = clampf(pump_gain, -30.0, 60.0);
+				if (man_zone)
+				{
+					a += T.get("manBoost", 0.5);
+				}
+				if (man_zone && _EPROBE)
+				{
+					_e_add("manual", T.get("manBoost", 0.5) * v * dt);
+				}
+				double carry = 1 - T.f("flowCarry") * flow / FLOW_MAX;
+				double rr_f = (surf_f == 0 ? 0.32 : (surf_f == 3 ? 0.42 : 0.1));
+				double rr_r = (surf_r == 0 ? 0.32 : (surf_r == 3 ? 0.42 : 0.1));
+				double roll = (rr_r * SH_R + rr_f * (1.0 - SH_R)) * T.f("rollRes") * signf(v) * minf(1.0, absf(v) * 4);
+				if (snow_k > 0.0 && !air)
+				{
+					roll += snow_k * (SNOW_DRAG + SNOW_DRAG_V * absf(v)) * signf(v) * minf(1.0, absf(v) * 4);
+				}
+				_aero_update(throttle);
+				double k_drag = T.f("airDrag") / (ts * ts) * drag_k();
+				a -= (roll + k_drag * v * absf(v) * aero_k) * carry;
+				if (_EPROBE)
+				{
+					_e_add("rolling", -roll * carry * v * dt);
+					_e_add("air", -k_drag * v * absf(v) * aero_k * carry * v * dt);
+				}
+				if (in_water)   // (was 0.7: the water dragged a rider to a halt)
+				{
+					a -= 0.06 * v;
+				}
+				v = clampf(v + a * dt, -maxf(3.0, rev_cap), 24 * maxf(1.0, ts));
+				rev_cap = maxf(3.0, minf(rev_cap, -v));   // the extra reverse room (fakie landing) only shrinks
+				if (!brake)
+				{
+					brake_stop = false;
+					brake_back = absf(v) < 0.3;
+				}
+				else if (absf(v) <= 0.3 && !brake_back)
+				{
+					brake_stop = true;
+				}
+				if (brake && brake_stop && throttle < 0.1 && rev_on_hold && absf(_g_pitch) < REV_SLOPE && !_OLD_SLOW)
+				{
+					_rev_hold += dt;
+					if (_rev_hold > REV_HOLD)
+					{
+						brake_stop = false;
+						brake_back = true;
+					}
+				}
+				else
+				{
+					_rev_hold = 0.0;
+				}
+				if (brake_stop && G * absf(sin(slope)) > minf(T.f("brakeForce") * (T.get("brakeRear", 0.6) * brake_r + T.get("brakeFront", 0.75) * brake_f), 0.85 * mu * n_tot))
+				{
+					brake_stop = false;
+				}
+				if (brake_stop || (foot_down && throttle < 0.1 && !(brake && brake_back)))
+				{
+					v = 0.0;   // a foot on the ground holds the bike still (no creeping on a slope)
+				}
+				else if (brake && brake_back && v <= 0.3)
+				{
+					v += (-1.3 - v) * minf(1.0, dt * 3);
+				}
+				if (throttle < 0.1 && !brake && absf(v) < 0.05 && absf(_g_pitch) < 0.03)
+				{
+					v = 0.0;
+				}
+			}
+			else
+			{
+				// no pumping in the air (these kept their last ground value through a jump: the HUD pump bar stayed up)
+				pump_push = 0.0;
+				pump_on = false;
+				pump_acc = 0.0;
+				pleg = clampf(clampf((body_in - 0.12) / 0.6, 0.0, 1.0) - _bend_in, -1.0, 1.0);   // (the legs' length carried to the landing)
+				if (!_OLD_SPEEDTUCK)   // (the flight tucks too: it kept the last ground value)
+				{
+					_aero_update(throttle);
+				}
+				double k_air = T.f("airDrag") / (T.f("topSpeed") * T.f("topSpeed")) * aero_k * drag_k();
+				double sp_air = sqrt(v * v + vy * vy);
+				if (_EPROBE)
+				{
+					_e_add("air", -k_air * sp_air * (v * v + vy * vy) * dt);
+				}
+				v -= k_air * sp_air * v * dt;
+				vy -= k_air * sp_air * vy * dt;
+			}
+			if (flow > 0)
+			{
+				flow_t += dt;
+				if (brake && v > 1)
+				{
+					flow = maxf(0.0, flow - dt * 3);
+				}
+				else if (flow_t > T.f("flowTime"))
+				{
+					flow = maxf(0.0, flow - dt * 1.5);
+				}
+			}
+			skid = brake && rear_down && v > 0.5 && rear_lock > 0.15;
+			double top_now = (_OLD_SPINOUT ? (T.f("pedalTop") + T.f("sprintTop") * sprint) * gear_k() * T.f("topSpeed") : spin_top(sprint));
+			chain_slip = maxf(0.0, chain_slip - dt);
+			chain_slip_k = (chain_slip > 0.0 ? smoothstep(0.0, CHAIN_SLIP_T * 0.35, chain_slip) : 0.0);
+			spin_out_k = 0.0;
+			if (!air && throttle_in > 0.3 && !crash_on && top_now > 0.5)
+			{
+				spin_out_k = smoothstep(0.9, 1.0, v / top_now) * clampf(throttle_in, 0.0, 1.0);
+			}
+			if (v > top_now + 0.3)
+			{
+				spun_out = true;
+			}
+			else if (v < top_now - 0.8)
+			{
+				spun_out = false;
+			}
+			pedal += ((((!air && !spun_out) ? throttle : 0.0)) - pedal) * minf(1.0, dt * 6);
+			throttle_in = throttle;
+			return a_long;
+		}
+
+		private double _step_steer(double dt, V3 f, double brake_k, double steer_input, double roll_keys, double a_long, double nR, double nF)
+		{
+			IGround terrain = host.terrain;
+			double n_tot = n_load;
+			double mu_f = _mu_f * T.f("grip");
+			double mu_r = _mu_r * T.f("grip");
+			double mu = mu_r * SH_R + mu_f * (1.0 - SH_R);
+			double va = absf(v);
+			double spd_k = smooth01(va / 14.0);
+			double fw = T.get("flickSpeed", 14.0);
+			flick_v += ((flick_in - flick) * fw * fw - 2.0 * fw * flick_v) * dt;
+			flick_v = clampf(flick_v, -FLICK_VMAX, FLICK_VMAX);
+			flick = clampf(flick + flick_v * dt, -1.0, 1.0);
+			if (absf(flick_in) < 0.35)
+			{
+				_flick_arm = 0.0;
+				_flick_side = 0.0;
+			}
+			else if (_flick_side == 0.0)
+			{
+				_flick_side = signf(flick_in);
+			}
+			double flick_thrown = 0.0;   // +-1 the step a deliberate flick lands (it may start a corner whip)
+			if (_flick_side != 0.0 && _flick_arm >= 0.0)
+			{
+				_flick_arm += dt;
+				if (absf(flick_in) > 0.85 && signf(flick_in) == _flick_side)
+				{
+					if (_flick_arm < FLICK_WINDOW && !air && va > 2.0)
+					{
+						flick_kick += _flick_side * ((_OLD_STICKBIKE ? 0.16 : T.get("flickKick", 0.0))) * smooth01((va - 2.0) / 5.0);
+						flick_thrown = _flick_side;
+					}
+					_flick_arm = -1.0;   // spent until the stick comes back towards the centre
+				}
+			}
+			double fs_k = ((absf(steer_input) < 0.2 || signf(flick) == signf(steer_input)) ? 1.0 : 0.25);
+			double steer_eff = clampf(steer_input + flick * ((_OLD_STICKBIKE ? 0.5 : T.get("flickSteer", 0.0))) * fs_k, -1.0, 1.0);
+			double agree = clampf(flick * steer_eff * 2.0, 0.0, 1.0) * absf(flick);
+			double oppose = (_OLD_STICKBIKE ? 0.0 : clampf(-flick * steer_eff * 2.0, 0.0, 1.0) * absf(flick));
+			double wtr = T.get("whipTrigger", 0.6);
+			bool whip_want = !air && va > T.get("whipMinSpeed", 4.0) && absf(steer_input) > wtr && absf(flick_in) > wtr && signf(steer_input) == signf(flick_in) && T.get("whipDrift", 0.42) > 0.0;
+			bool straight_ok = !_OLD_STRAIGHTWHIP && absf(steer_input) < wtr;
+			double whip_dir = (straight_ok ? signf(flick_in) : signf(steer_input));
+			bool skip_ok = !air || (!_OLD_STRAIGHTWHIP && air_time < 0.3 && whip > 0.05);
+			if (straight_ok)
+			{
+				whip_want = skip_ok && T.get("whipStraight", 1.0) > 0.0 && va > T.get("whipMinSpeed", 4.0) && absf(flick_in) > wtr && (absf(steer_input) < 0.05 || signf(steer_input) == signf(flick_in)) && T.get("whipDrift", 0.42) > 0.0;
+			}
+			else if (skip_ok && whip > 0.05 && !_OLD_STRAIGHTWHIP)
+			{
+				whip_want = whip_want || (air && absf(flick_in) > wtr && signf(flick_in) == whip_side);
+			}
+			if (flick_thrown != 0.0 && ((absf(steer_input) > wtr && signf(steer_input) == flick_thrown) || straight_ok))
+			{
+				_whip_arm = 0.25;
+			}
+			else
+			{
+				_whip_arm = maxf(0.0, _whip_arm - dt);
+			}
+			if (whip < 0.05 && _whip_arm <= 0.0)
+			{
+				whip_want = false;
+			}
+			if (whip_want && whip < 0.05)
+			{
+				whip_side = whip_dir;
+				_whip_straight = straight_ok;
+			}
+			if (whip_want && whip_dir != whip_side)
+			{
+				whip_want = false;
+			}
+			double w_in = (_whip_straight ? T.get("whipFlowIn", 2.5) : 4.0);
+			double w_out = (_whip_straight ? T.get("whipFlowOut", 1.8) : 3.0);
+			whip = (whip_want ? minf(1.0, whip + dt * w_in) : maxf(0.0, whip - dt * w_out));
+			if (whip_want)
+			{
+				_whip_t += dt;
+				_whip_ang = maxf(_whip_ang, absf(slip));
+				if (_whip_t > 0.3 && !_whip_flashed)
+				{
+					_whip_flashed = true;
+					if (host.msg_idle() && !_whip_straight)
+					{
+						host.flash("WHIP!");
+					}
+				}
+			}
+			else if (whip <= 0.0)
+			{
+				// a ground whip held a while, then brought back straight: style (the corner whip's speed is its reward, the straight one
+				// is all show). More the longer and further out it was held
+				if (_whip_straight && _whip_t > 0.45 && _whip_ang > 0.15 && !crash_on)
+				{
+					double deg = rad_to_deg(_whip_ang);
+					host.on_style(roundi(T.get("whipStyle", 1.0) * 160.0 * clampf(_whip_t, 0.45, 2.5) * clampf(_whip_ang / 0.35, 0.5, 1.5)), Gd.fmt("%s %.0f°", (deg > 28.0 ? "BIG WHIP" : "WHIP"), deg));
+				}
+				_whip_t = 0.0;
+				_whip_flashed = false;
+				_whip_ang = 0.0;
+				_whip_straight = false;
+			}
+			double rate = (absf(steer_eff) > 0.01 ? T.f("steerRate") : T.f("steerRelease"));
+			double se_w = T.get("steerEase", 30.0);
+			steer_in_v += ((steer_eff - steer_in) * se_w * se_w - 2.0 * se_w * steer_in_v) * dt;
+			steer_in_v = clampf(steer_in_v, -rate, rate);
+			steer_in = clampf(steer_in + steer_in_v * dt, -1.0, 1.0);
+			double s_in = steer_in * (1 - T.f("steerCurve") + T.f("steerCurve") * absf(steer_in));
+			if (true)
+			{
+				double b = (air ? 0.0 : _bank_at(f));
+				_bank_raw = b;
+				double b0 = _or(bank, b);
+				double bw_n = 2.15 / maxf(0.01, T.get("bankSmooth", 0.15));
+				bank_v += ((clampf(b, -0.9, 0.9) - b0) * bw_n * bw_n - 2.0 * bw_n * bank_v) * dt;
+				bank_v = clampf(bank_v, -3.0, 3.0);
+				bank = b0 + bank_v * dt;
+			}
+			if (!air)
+			{
+				_bank_hold = bank;
+			}
+			double bk = bank;
+			bool carving = !air && absf(steer_eff) > 0.01 && va > 4 && !skid && absf(slip) < 0.3;
+			carve = (carving ? minf(1.0, carve + dt * 2) : maxf(0.0, carve - dt * 5));
+			double carve_f = carve * smooth01((va - 4) / 4);
+			double turn_dir = (absf(_f_prev) > 0.08 ? signf(_f_prev) : signf(steer_eff));
+			weight_in = (air ? 0.0 : clampf(flick * turn_dir, -1.0, 1.0));
+			double w_grip = 1.0 + T.get("flickGrip", 0.2) * agree - T.get("weightInside", 0.2) * maxf(0.0, -weight_in);
+			double a_lat_lim = maxf(1.2, 9.0 + spd_k * 4.0 + G * tan(bk) * signf(s_in) * smooth01(va / 3.0) + carve_f * 2.0 + agree * 4.0 * spd_k - oppose * T.get("flickWide", 3.0) * spd_k);
+			double @lock = T.f("steerMax") + maxf(0.0, T.f("slowSteer") - T.f("steerMax")) * (1 - smooth01(va / maxf(0.5, T.f("slowSteerFade"))));
+			double d_max = minf(@lock, maxf(atan(a_lat_lim * L / maxf(va * va, 0.01)), atan(T.f("turnFloor") * L / maxf(va, 0.1))));
+			double cmd = s_in * d_max;
+			double b_in = signf(bk) * steer_eff;
+			double bw_t = (air ? 0.0 : T.get("bermAssist", 0.8) * smooth01((b_in - 0.03) / 0.25) * smooth01((absf(bk) - 0.04) / 0.08) * smooth01((va - 2.5) / 3.0));
+			berm_k = (air ? 0.0 : move_toward(berm_k, bw_t, dt * 4.0));
+			double bw = berm_k;
+			if (bw > 0.0)
+			{
+				// (no tighter than the bars may turn at this speed: at low speed the bank's own turn was full lock)
+				double cmd_bank = minf(d_max, atan(G * tan(absf(bk)) * L / maxf(va * va, 0.5)));
+				double held = (signf(cmd) == signf(bk) ? absf(cmd) : 0.0);
+				cmd = lerpf(cmd, signf(bk) * maxf(held, cmd_bank), bw);
+			}
+			double lean_need = clampf(atan(v * (v * tan(cmd) / L) / G), -T.f("leanMax") + minf(0.0, bk), T.f("leanMax") + maxf(0.0, bk));
+			if (_balancing() && !air)
+			{
+				double ml = T.get("manLean", 0.42);
+				lean_need = clampf(lean_need, -ml, ml);
+			}
+			bal_k = (air ? 0.0 : T.get("balanceSim", 0.4) * smooth01((va - 2.5) / 4.0));
+			if (bal_k > 0.0)
+			{
+				double l_hold = atan(maxf(0.0, (lean_need >= 0.0 ? _amax : -_amin)) / G) * 0.97;
+				lean_need = lerpf(lean_need, signf(lean_need) * minf(absf(lean_need), l_hold), bal_k);
+			}
+			lean_need *= 1.0 - T.get("reflexStandUp", 0.3) * T.get("riderSkill", 1.0) * smooth01((risk - 0.15) / 0.5);
+			bool tipping_in = absf(steer_eff) > 0.01 && absf(lean_need) > absf(lean) && signf(lean_need) == signf(steer_eff);
+			double c_max = absf(cmd) * T.f("counter");
+			double ctr = (tipping_in ? clampf((lean_need - lean) * T.f("counter"), -c_max, c_max) * minf(1.0, va / 4) * lerpf(1 - spd_k, 1.0, bal_k) : 0.0);
+			double steer_lean = clampf(atan(G * tan(lean) * L / maxf(va * va, 0.5)), -@lock, @lock);
+			double steer_target = lerpf(cmd, steer_lean, bal_k) - ctr;
+			steer += (steer_target - steer) * (1 - exp(-dt * T.f("barSpeed")));
+			double load_raw = clampf(pow(maxf(0.0, n_tot / G), 0.7), 0.25, 1.5);
+			_load_s = ((air || is_nan(_load_s)) ? load_raw : _load_s + (load_raw - _load_s) * minf(1.0, dt / _relax_t(T.get("tyreRelax", 0.04), va)));
+			double load_k = _load_s;
+			double mu_g = mu * G * load_k;
+			double a_grip = mu_g * sqrt(maxf(0.05, 1 - pow(a_long / mu_g, 2))) * ((skid ? 0.75 : 1.0)) * (1 + T.f("carveGrip") * carve_f) * w_grip;
+			if (!air)
+			{
+				// front up: no steering, except in a balance manual / wheelie, where the rider carves on the back wheel by
+				// leaning and twisting the bike (manTurn of the normal turn); before, a manual into any bend went straight on
+				// a diving fork pulls the front axle back and up: a shorter wheelbase and a steeper head angle, so the bars turn
+				// the bike quicker (turn-in under the front brake). Only the bars' yaw reads it: the lean / grip limits don't
+				double dive_k = 0.0;
+				if (_sprung_fork() && !_OLD_SUSPFX)
+				{
+					dive_k = clampf((dg_xF - dg_sag) / maxf(dg_travel, 0.05), -0.3, 1.0);
+				}
+				dive += (dive_k - dive) * minf(1.0, dt * 20.0);
+				double yaw_cmd = v * tan(steer) / (L * (1.0 - DIVE_L * dive * T.get("diveSteer", 1.0)));
+				if (front_air)
+				{
+					yaw_cmd *= (_balancing() ? T.get("manTurn", 0.65) : 0.0);
+				}
+				if (front_air && _balancing())
+				{
+					double y_lim = G * tan(T.get("manLean", 0.42)) / maxf(absf(v), 2.5);
+					yaw_cmd = clampf(yaw_cmd, -y_lim, y_lim);
+				}
+				double gE = G * load_k;
+				double mE = a_grip / gE;
+				double cb = cos(bk);
+				double sb = sin(bk);
+				double a_max = minf(2.5 * G, gE * (sb + mE * cb) / maxf(0.2, cb - mE * sb));
+				double a_min = maxf(-2.5 * G, gE * (sb - mE * cb) / maxf(0.2, cb + mE * sb));
+				double ak = minf(1.0, dt * 8.0);
+				_amax = (_amax > 90.0 ? a_max : _amax + (a_max - _amax) * ak);
+				_amin = (_amin < -90.0 ? a_min : _amin + (a_min - _amin) * ak);
+				double yaw_use = yaw_cmd;
+				if (carve_f > 0 && !skid && absf(v) > 0.3)
+				{
+					double want = v * yaw_cmd;
+					double cap = ((want >= 0 ? a_max : a_min)) * 0.97;
+					if (absf(want) > absf(cap))
+					{
+						yaw_use = yaw_cmd + (cap / v - yaw_cmd) * carve_f;
+					}
+				}
+				double a_lat_t = clampf(v * yaw_use, a_min, a_max);
+				double fg = T.get("frontGrip", 1.0);
+				double f_need = _fric(a_lat_t, cb, sb);
+				double share_raw = clampf(nF / maxf(0.1, n_tot), 0.05, 1.0);
+				_share_f = (is_nan(_share_f) ? share_raw : _share_f + (share_raw - _share_f) * minf(1.0, dt / _relax_t(T.get("tyreRelax", 0.04), va)));
+				double share_f = maxf(0.05, _share_f);
+				double circ_f = sqrt(maxf(0.05, 1.0 - pow(_fb_f / maxf(0.1, mu_f * nF * fg), 2)));
+				_circ_f = circ_f;
+				double mu_fr = mu_f * fg * circ_f * w_grip * (1 + T.f("carveGrip") * carve_f) * lerpf(1.0, 0.7, front_lock) * _ls(nF, G * (1.0 - SH_R));
+				front_use = (front_air ? 0.0 : absf(f_need) * (1.0 - SH_R) / share_f / maxf(0.05, mu_fr));
+				if (front_use > 1.0)
+				{
+					double f_cap = f_need / front_use;
+					double a_cap = G * (f_cap * cb + sb) / maxf(0.2, cb - f_cap * sb);
+					double pk = smooth01((front_use - 1.0) / 0.15);
+					double a_pushed = (f_need > 0.0 ? minf(a_lat_t, a_cap) : maxf(a_lat_t, a_cap));
+					a_lat_t = lerpf(a_lat_t, a_pushed, pk);
+					if (absf(v) > 0.3)
+					{
+						yaw_use = lerpf(yaw_use, a_lat_t / v, pk);
+					}
+				}
+				front_push = maxf(0.0, front_use - 1.0);
+				double wash_at = T.get("frontWashAt", 1.7);
+				double w_load = clampf(share_f / (1.0 - SH_R), 0.0, 1.2);
+				double w_lean = smooth01((absf(lean) - 0.1) / 0.3);
+				_danger("FRONT WASHED OUT!", ((va > 3.0 && !_balancing()) ? minf(2.2, (front_use - wash_at) / 0.6 * (1.0 + 2.0 * front_lock) * w_load * w_lean) : -1.0), dt, T.get("frontWashTime", 0.7));   // (not in a manual: the front is up or barely touching on purpose)
+				double tau_y = T.f("turnWeight") * (0.4 + 0.6 * spd_k);
+				lat_m = (tau_y > 0.005 ? _or(lat_m, a_lat_t) + (a_lat_t - _or(lat_m, a_lat_t)) * (1 - exp(-dt / tau_y)) : a_lat_t);
+				double a_lat = clampf(lat_m, a_min, a_max);
+				if (bank_probe)   // tests: the lean collapsing fast at speed, and what the bank / grip limits were then
+				{
+					_lean_hist.Add(lean);
+					if (_lean_hist.Count > 12)
+					{
+						Gd.pop_front(_lean_hist);
+					}
+					if (va > 7.0 && _lean_hist.Count == 12 && absf(lean - _lean_hist[0]) > 0.22 && absf(lean) < absf(_lean_hist[0]))
+					{
+						host.log(Gd.fmt("BANKDROP v=%.1f lean %.2f->%.2f bank=%.2f raw=%.2f lat_m=%.1f a_min=%.1f a_max=%.1f steer_in=%.2f slip=%.2f", va, _lean_hist[0], lean, bk, _bank_raw, lat_m, a_min, a_max, steer_in, slip));
+						_lean_hist.Clear();
+					}
+				}
+				double course_rate = (absf(v) > 0.3 ? a_lat / v : yaw_use);
+				double excess = yaw_use - course_rate;
+				double share = (skid ? 1.0 : T.f("oversteer"));
+				_f_prev = _fric(a_lat, cb, sb);
+				double u_lat = clampf(_f_prev / maxf(0.05, mE), -1.5, 1.5);
+				double margin = 1 - minf(1.0, absf(u_lat));
+				double gr = _grip_step(dt, va, mu_r, nR, u_lat);
+				double catch_k = (T.f("slipRecover") * (0.25 + margin) + maxf(0.0, -signf(slip) * steer) * 8) * gr * gr;
+				double wk = whip * whip * (3.0 - 2.0 * whip);
+				whip_hold = maxf(wk, whip_hold - dt / maxf(0.1, T.get("whipCatch", 0.9)));
+				catch_k *= 1.0 - 0.85 * whip_hold;
+				catch_k *= 1.0 + T.get("reflexCatch", 1.5) * T.get("riderSkill", 1.0) * risk;   // reflex: fights a slide harder the worse it gets
+				if (!_OLD_GRIP)
+				{
+					double asked = maxf(maxf(rear_lock, whip_hold), spin * sprint);
+					double out_k = smooth01((absf(slip - _squirm) - 0.07) / 0.12);
+					catch_k += T.get("slideHold", 6.0) * out_k * (1.0 - asked) * smooth01((va - 2.0) / 3.0);
+				}
+				double slip_rate = (excess * share + slip_w) * (1.0 - 0.75 * whip_hold) - (slip - _squirm) * catch_k;
+				if (whip_hold > 0.0)
+				{
+					double drift_t = whip_side * minf(T.get("whipDrift", 0.42), T.f("slipMax") * 0.6) * smooth01((va - 3.0) / 4.0) * wk;
+					if (_whip_straight)   // (the straight whip's own size; 0 = off)
+					{
+						drift_t *= T.get("whipStraight", 1.0);
+					}
+					slip_rate += clampf((drift_t - slip) * T.get("whipSnap", 5.0), -2.2, 2.2) * whip_hold;
+				}
+				if (_nosing() || _nose_grace > 0.0)
+				{
+					slip_w *= exp(-dt * 10.0);
+					slip_rate = -slip * 6.0;
+				}
+				double slip_was = slip;
+				slip = clampf(slip + slip_rate * dt, -1.5, 1.5);
+				if (v > 0.5)
+				{
+					// (2026-11-26, user: "berms are known for pulling in and locking you in, a global formula by angle, not just berms": leaned
+					// WITH the tilt (into a berm, a banked bend, the inside of any slope) the pull down it is stronger, bankLock: the bike is
+					// steered back down the face and settles higher at speed instead of riding straight up and over the rim. Ridden straight
+					// across a side slope (no lean into it) only camberPull, so a line across a hill can still be held. BMX_OLD_BANKLOCK=1)
+					double c_pull = T.get("camberPull", 0.22);
+					if (!_OLD_BANKLOCK)
+					{
+						// (only while steering INTO the tilt, held ~1 s after letting go: a berm you're turning in locks you in, a whip in it
+						// with the steer released stays locked; hands off down a hillside it fed itself into a slalom (leaned -> pulled down ->
+						// leaned more -> over the fall line -> the other way), F8 2026-11-26: "if I just let it roll down the hill we slide
+						// left and right")
+						_lock_hold = maxf(smooth01((b_in - 0.05) / 0.2), _lock_hold - dt / LOCK_HOLD);
+						c_pull += T.get("bankLock", 0.6) * smooth01((signf(bk) * lean - 0.05) / 0.3) * _lock_hold;
+					}
+					course_rate += c_pull * G * sin(bk) / maxf(va, 3.0) * smooth01((v - 0.5) / 2.0);
+				}
+				double kn = T.get("groundKnock", 0.6);
+				double knock_t = 0.0;
+				if (kn > 0.0 && !front_air)
+				{
+					double fwo = L - BB_REAR;
+					double fx = x + f.x * fwo;
+					double fz = z + f.z * fwo;
+					double ox = f.z * 0.12;
+					double oz = -f.x * 0.12;   // to the left
+					double grad = (terrain.top_height(fx + ox, fz + oz) - terrain.top_height(fx - ox, fz - oz)) / 0.24;
+					double loc = clampf(grad + tan(bk), -1.5, 1.5);
+					loc = signf(loc) * maxf(0.0, absf(loc) - 0.08);
+					knock_t = clampf(-kn * loc * 1.6 * clampf(nF / maxf(0.1, G * (1.0 - SH_R)), 0.0, 1.5) * smooth01(va / 3.0), -1.2, 1.2);
+				}
+				knock += (knock_t - knock) * minf(1.0, dt / maxf(0.005, T.get("knockSmooth", 0.08)));
+				course_rate += knock;
+				course += course_rate * dt;
+				double ds = slip - slip_was;
+				double pv = T.get("gripPivot", 0.7) * (L - BB_REAR) * ds;
+				double hh = course + slip;
+				x += pv * sin(hh);
+				z += pv * cos(hh);
+				if (flick_kick != 0.0)   // a body flick whips the bike round: most of it turns the travel, a little steps the rear out
+				{
+					double fk = flick_kick * minf(1.0, dt * 10);
+					flick_kick -= fk;
+					course += fk * 0.9;
+					slip = clampf(slip + fk * 0.1, -T.f("slipMax") * 0.8, T.f("slipMax") * 0.8);
+				}
+				if (absf(v) < 1.2)
+				{
+					double k = minf(1.0, dt * 6);
+					course += slip * k;
+					slip -= slip * k;
+					slip_w -= slip_w * k;
+				}
+				if (v < -0.5 && steer_input < -0.6 && flick_in > 0.6)
+				{
+					_fakie_hold += dt;
+				}
+				else
+				{
+					_fakie_hold = 0.0;
+				}
+				if (_fakie_hold > 0.1)
+				{
+					_fakie_hold = 0.0;
+					course += PI;
+					v = -v;
+					turn_off = -PI;
+					rev_cap = 3.0;
+					host.flash("SWITCH!");
+				}
+				turn_off -= turn_off * minf(1.0, dt * 7.0);
+				if (absf(turn_off) < 0.01)
+				{
+					turn_off = 0.0;
+				}
+				heading = course + slip + turn_off;
+				yaw_rate = course_rate + slip_rate;
+				lat_a = a_lat;
+				double cg_t = T.get("cornerLoad", 0.6) * (sqrt(G * G + a_lat * a_lat) - G);
+				corner_g += (cg_t - corner_g) * minf(1.0, dt / maxf(0.005, T.get("cornerSmooth", 0.1)));
+				double scrub = (mu * G * minf(load_k, 1.5) * maxf(0.0, absf(sin(slip)) - 0.015) * 0.9 + absf(excess) * (1 - share) * absf(v) * 0.15) * (1.0 - T.get("whipCarry", 0.6) * wk);   // a held drift keeps its speed
+				v -= signf(v) * minf(absf(v), scrub * dt);
+				double wo_sev = (va > 3.0 ? (absf(slip) - T.f("slipMax")) / 0.25 : -1.0);
+				if (_balancing() && (wo_sev > 0.0 || absf(slip) > T.f("slipMax") * T.get("manSlideCatch", 0.7)))
+				{
+					_man_drop();
+					wo_sev = -1.0;
+				}
+				if (_nosing() && rear_air)   // the rear is in the air: it swings round the front (an endo turn), nothing slides
+				{
+					wo_sev = -1.0;
+				}
+				_danger("WASHED OUT!", wo_sev, dt);
+				double into_bank = maxf(0.0, bk * signf(a_lat));
+				if (absf(slip) > 0.3)
+				{
+					carve_acc = 0.0;
+				}
+				else if (carve > 0.6)
+				{
+					carve_acc += absf(a_lat) * dt * (1 + 3 * into_bank);
+				}
+				else if (carve < 0.2 && carve_acc > 0)
+				{
+					double gain = (carve_acc > 2 ? minf(T.f("carveBoost") * (((into_bank > 0.1 || carve_berm) ? 1.0 : 0.5)), carve_acc * 0.08) : 0.0);
+					carve_acc = 0.0;
+					if (gain > 0.05 && v > 3)
+					{
+						v += gain;
+						flow_up();
+						if (host.msg_idle())
+						{
+							host.flash(Gd.fmt("%s +%d km/h", (carve_berm ? "BERM" : "CARVE"), roundi(gain * 3.6)));
+						}
+					}
+				}
+				carve_berm = (carve > 0.6 ? (carve_berm || into_bank > 0.15) : (carve_acc > 0 && carve_berm));
+			}
+			else
+			{
+				// yaw in the air: a turn carried off the lip keeps turning rider + bike (nothing outside can stop
+				// it). The rider can only twist the bike at the hips, within airTwist, to keep it pointing where
+				// they fly; slip is the bike's heading against the travel direction
+				double sys_slip = wrapf(slip - air_tw, -PI, PI) + (air_yaw + stick_yaw) * dt;
+				double w_cap = (_OLD_WHIP ? T.get("airWhip", 1.5) : lerpf(WHIP_AIR_ONLY, T.get("airWhip", 1.5), absf(_whip_in)));
+				double whip_t = clampf(air_stick.x / 0.8, -1.0, 1.0) * w_cap * (1.0 - T.get("whipReturn", 0.7) * land_prep * T.get("airAssist", 0.6));
+				double st_t = 0.0;
+				if (!_OLD_AIRSTEER)
+				{
+					st_t = clampf(roll_keys, -1.0, 1.0) * T.get("airSteer", 0.6) * smooth01((air_time - AIR_STEER_DELAY) / AIR_STEER_RAMP);
+					st_t *= 1.0 - clampf(absf(stick_yaw) / 1.2, 0.0, 1.0);
+				}
+				_air_steer_s += (st_t - _air_steer_s) * minf(1.0, dt * 12.0);
+				if (_AIRSTEER_PROBE && Gd.to_i(air_time * 120.0) % 12 == 0)
+				{
+					host.log(Gd.fmt("AIRSTEER t=%.2f steer=%.2f off=%.1fdeg aim_want=%.1fdeg aim=%.1fdeg lean=%.1fdeg slip=%.1fdeg", air_time, roll_keys, rad_to_deg(_air_steer_s), rad_to_deg(aim_off), rad_to_deg(_air_aim_s), rad_to_deg(lean), rad_to_deg(slip)));
+				}
+				double aim_t = 0.0;
+				if (!_OLD_AIRSTEER)
+				{
+					double own_k = (1.0 - _air_own) * (1.0 - clampf(absf(roll_keys) * 3.0, 0.0, 1.0)) * (1.0 - clampf(absf(stick_yaw) / 1.2, 0.0, 1.0));
+					aim_t = clampf(aim_off, -AIM_MAX, AIM_MAX) * T.get("airAim", 0.6) * own_k * smooth01((air_time - 0.06) / 0.12);
+				}
+				_air_aim_s += (aim_t - _air_aim_s) * minf(1.0, dt * AIM_EASE);
+				double steered = _air_steer_s + _air_aim_s;
+				double tw_lim = maxf(T.f("airTwist"), absf(whip_t) + absf(steered) + 0.05);
+				double tw_t = clampf(-sys_slip + whip_t + steered, -tw_lim, tw_lim);
+				tw_t *= 1.0 - clampf(absf(stick_yaw) / 1.2, 0.0, 1.0);
+				bool back_tw = !_OLD_WHIP && absf(tw_t) < absf(air_tw) - 0.02;
+				double k_tw = (back_tw ? 22.0 : 60.0);
+				if (absf(steered) > 0.05 && !_OLD_AIRSTEER)
+				{
+					k_tw = maxf(k_tw, lerpf(60.0, AIR_STEER_K, clampf(absf(steered) / 0.3, 0.0, 1.0)));
+				}
+				double c_tw = 2.0 * sqrt(k_tw) * ((back_tw ? 1.0 : 0.77));
+				air_tw_v += (k_tw * (tw_t - air_tw) - c_tw * air_tw_v) * dt;
+				air_tw += air_tw_v * dt;
+				if (absf(air_tw) > tw_lim)
+				{
+					air_tw = signf(air_tw) * tw_lim;
+					air_tw_v = 0.0;
+				}
+				_whip_peak = maxf(_whip_peak, absf(air_tw));
+				_lean_peak = maxf(_lean_peak, absf(bike_lean));
+				double slip_new = wrapf(sys_slip + air_tw, -PI, PI);
+				yaw_rate = wrapf(slip_new - slip, -PI, PI) / dt;
+				spin_acc += yaw_rate * dt;
+				slip = slip_new;
+				turn_off -= turn_off * minf(1.0, dt * 7.0);
+				heading = course + slip + turn_off;
+				lat_a = 0.0;
+				lat_m = 0.0;
+				flick_kick = 0.0;
+				corner_g = 0.0;
+				front_use = 0.0;
+				front_push = 0.0;
+				knock = 0.0;
+				slip_w = 0.0;
+				grip_r = 1.0;
+				bar_catch += -bar_catch * minf(1.0, dt * 6);
+			}
+			if (!air)
+			{
+				_pivot_step(dt, steer_input, brake_k);
+			}
+			double roll_t = roll_keys * T.f("airRoll") + ((_OLD_WHIP ? air_stick.x * T.get("stickAirRoll", 0.75) : clampf(air_stick.x / 0.8, -1.0, 1.0) * T.get("stickAirRoll", 1.25))) + clampf(air_stick.x / 0.8, -1.0, 1.0) * ((_OLD_WHIP ? T.get("airWhip", 1.5) : lerpf(WHIP_AIR_ONLY, T.get("airWhip", 1.5), absf(_whip_in)))) * 0.3;
+			if (air)   // spinning flat: a stylish lean, not laid right over
+			{
+				roll_t *= 1.0 - 0.6 * clampf(absf(stick_yaw) / 1.2, 0.0, 1.0);
+			}
+			if (air && !_OLD_AIRSTEER)   // banks into the steered turn
+			{
+				roll_t += (_air_steer_s + _air_aim_s) * T.get("airPrelean", 0.5);
+			}
+			double lean_t = (air ? ((absf(roll_t) > 0.03 ? roll_t : lean * 0.98)) : clampf(atan(lat_a / G), -T.f("leanMax") + minf(0.0, bk), T.f("leanMax") + maxf(0.0, bk)));
+			if (air && !_OLD_AIRLEAN)
+			{
+				lean_t = lerpf(lean * 0.98, roll_t, smooth01(absf(roll_t) / 0.15));
+			}
+			double slow_k = 1.0 - spd_k;
+			if (!air)
+			{
+				// balanced (bal_k): the rider leans to what the steer asks for and the turn follows the lean
+				lean_t = lerpf(lean_t, lean_need, maxf(T.get("leanLead", 0.5) * slow_k, bal_k));
+			}
+			double kL = (absf(steer_eff) > 0.01 ? T.f("leanIn") : T.f("leanOut"));
+			if (!air)
+			{
+				kL *= 1.0 + T.get("slowRoll", 1.0) * slow_k;
+			}
+			if (air && _OLD_AIRLEAN && air_stick.length() > 0.02)   // the stick lays the bike over in the air (soft, no snap)
+			{
+				kL = 80.0;
+			}
+			else if (air)
+			{
+				kL = lerpf(T.f("leanOut"), AIR_LEAN_K, smooth01(maxf(air_stick.length(), absf(roll_keys)) / 0.2));
+			}
+			if (!air)
+			{
+				// only the ground pushing on the tyres can change the lean: over a crest or an edge (tyres light) the
+				// bike carries its lean on instead of snapping upright with the momentary lack of grip
+				kL *= clampf(n_tot / G, 0.12, 1.0);
+			}
+			lean_v += ((lean_t - lean) * kL - lean_v * 2 * sqrt(kL) * (((air && !_OLD_AIRLEAN) ? maxf(1.0, T.f("leanDamp")) : T.f("leanDamp")))) * dt;
+			lean_err = 0.0;
+			if (!air)
+			{
+				// a balanced bike leaned further than the tyres can turn it falls on over (an inverted pendulum, centre of
+				// mass ~1 m up): a loose patch, a brake grabbed mid-corner or a front pushing wide drops it in. Held there
+				// past lowsideAngle for 0.3 s it's down (LOWSIDE). The rider only leans as far as the grip held a moment
+				// ago (lean_need above), so riding the limit is fine; losing the grip under it isn't
+				// (measured against the most the tyres could turn it, not the turn right now: through a left-right swap the
+				// lean always runs ahead of the turn, that's how a bike changes direction, not a fall)
+				double l_grip = atan(maxf(0.0, (lean >= 0.0 ? _amax : -_amin)) / G);
+				lean_err = signf(lean) * maxf(0.0, absf(lean) - l_grip);
+				double land_k = smooth01((since_land - 0.1) / 0.3);
+				double fall = T.get("balanceFall", 0.5) * bal_k * land_k;
+				if (fall > 0.0 && lean_err != 0.0)
+				{
+					lean_v += fall * G * sin(lean_err) * dt;
+				}
+				_danger("LOWSIDE!", ((bal_k > 0.3 && land_k > 0.99 && va > 4.0) ? (absf(lean_err) - T.get("lowsideAngle", 0.3)) / 0.25 : -1.0), dt);
+				double lr = T.get("leanRate", 6.0) / (1.0 + T.get("gyroStable", 0.25) * smooth01((va - 8.0) / 12.0));
+				lean_v = lr * tanh(lean_v / lr);
+			}
+			_risk_settle(dt);
+			lean += lean_v * dt;
+			double gx_t = 0.0;
+			double bank_t = 0.0;
+			double gnd = (_OLD_AIRBLEND ? ((air ? 0.0 : 1.0)) : 1.0 - air_k);
+			if (gnd > 0.0)
+			{
+				gx_t = flick * ((_OLD_STICKBIKE ? 0.35 : T.get("flickLean", 0.0))) * smooth01(va / 1.5);
+				double sl_k = (_OLD_SLOWBODY ? slow_k : 1.0 - _slow_body_k(va));
+				gx_t += s_in * T.get("slowLean", 0.5) * sl_k * smooth01(va / 1.2);
+				bank_t = T.get("bankLean", 0.6) * ((air ? _bank_hold : bank));
+				if (whip > 0.0)
+				{
+					gx_t += whip_side * T.get("whipLean", 0.22) * whip * whip * (3.0 - 2.0 * whip) * ((_whip_straight ? minf(1.5, T.get("whipStraight", 1.0)) : 1.0));
+				}
+				gx_t *= gnd;
+				bank_t *= gnd;
+			}
+			double swap_r = (_OLD_LANDSWAP ? 3.0 : T.get("landSwapRate", 7.0));
+			bool post_land = !air && since_land < 0.35;
+			double gx_rate = (air ? 1.2 : ((post_land ? swap_r : 60.0)));
+			_gx_lean = move_toward(_gx_lean, gx_t, gx_rate * dt);
+			double bank_r = T.get("bankLeanRate", 1.5);
+			if (post_land && !_OLD_LANDSWAP)
+			{
+				bank_r = maxf(bank_r, swap_r);
+			}
+			bank_lean = move_toward(bank_lean, bank_t, minf(gx_rate, bank_r) * dt);
+			double lead_t = clampf(lean_v * T.f("bikeLeanMul") * T.get("bikeLead", 0.08), -0.35, 0.35) * gnd;
+			_bike_lead += (lead_t - _bike_lead) * minf(1.0, dt * 20.0);
+			double wv_t = 0.0;
+			if (WEAVE_ON && gnd > 0.0)   // (off: it rocked the whole rider, 2026-11-26; experiments only, BMX_WEAVE=1)
+			{
+				_wv_t += dt;
+				double wn = 0.55 * sin(_wv_t * TAU * 0.9) + 0.3 * sin(_wv_t * TAU * 1.7 + 1.1) + 0.15 * sin(_wv_t * TAU * 2.9 + 2.3);
+				double wk = T.get("weave", 0.0) * smooth01((va - 3.0) / 7.0) * (1.0 - smooth01((absf(lean) - 0.45) / 0.45));
+				wv_t = (0.22 * wn + 0.5 * clampf(knock, -0.4, 0.4)) * wk * gnd;
+			}
+			_weave += (wv_t - _weave) * minf(1.0, dt * 8.0);
+			double bl = lean * T.f("bikeLeanMul") + _gx_lean + bank_lean + _bike_lead + _weave;
+			double mk_t = ((!_OLD_MANLEAN && !air && front_air && _balancing()) ? 1.0 : 0.0);
+			man_lk = move_toward(man_lk, mk_t, ((mk_t > man_lk ? 5.0 : 3.0)) * dt);
+			if (man_lk > 0.0)
+			{
+				double ml = T.get("manLean", 0.42) * 1.25;
+				double ml_t = clampf(atan(lat_a / G) * MAN_LEAN_K + steer_in * MAN_LEAN_IN, -ml, ml);
+				_man_lean_s += (ml_t - _man_lean_s) * minf(1.0, dt * 7.0);
+				bl = lerpf(bl, _man_lean_s, man_lk);
+			}
+			else
+			{
+				_man_lean_s = bl;
+			}
+			if (!air)
+			{
+				double cb_t = (signf(bk) != signf(bl) ? 0.0 : absf(bk));
+				cap_bank = (_OLD_LEANDRAW ? cb_t : move_toward(cap_bank, cb_t, 2.0 * dt));
+			}
+			else   // the bank's extra room is carried off the lip, fading over 2 s (the lean must not snap at take-off)
+			{
+				cap_bank = maxf(0.0, cap_bank - dt * 0.5);
+			}
+			double cap_b = T.f("bikeLeanCap") + cap_bank;
+			if (!_OLD_SLOWBODY)
+			{
+				cap_b = lerpf(minf(cap_b, T.get("slowBikeCap", 0.62)), cap_b, _slow_body_k(va));
+			}
+			bike_lean = cap_b * tanh(bl / cap_b);
+			double lim_t = 9.0;
+			if (!air && absf(bike_lean) > 0.05)
+			{
+				// what matters for the tyre is its lean against the ground WHERE IT SWINGS TO, not gravity: leaned deep
+				// toward ground that rises beside the bike (a trail's edge, the hillside, a berm's lip) the tyre went
+				// into it and the drawn bike was shoved 25-38 cm up ("shoots up for a sec"). Look 0.3 / 0.5 m to the
+				// lean side at both wheels: the bike leans at most groundLeanMax against the steepest rise there
+				double sg = signf(bike_lean);
+				double lx = f.z * sg;
+				double lz = -f.x * sg;   // unit vector to the lean side
+				double phi = -0.5;
+				for (long k = 0; k < 2; k++)   // front and rear wheel (no array built per step)
+				{
+					double wo = (k == 0 ? L - BB_REAR : -BB_REAR);
+					double wx = x + f.x * wo;
+					double wz = z + f.z * wo;
+					double h0 = terrain.deck_height(wx, wz);
+					foreach (var d in LEAN_PROBE)
+					{
+						phi = maxf(phi, atan((terrain.deck_height(wx + lx * d, wz + lz * d) - h0) / d));
+					}
+				}
+				lean_room = _or(lean_room, phi);
+				lean_room += clampf((phi - lean_room) * (1.0 - exp(-6.0 * dt)), -3.0 * dt, 3.0 * dt);
+				lim_t = maxf(0.25, T.get("groundLeanMax", 1.05) - ((lean_room > 0.0 ? lean_room : maxf(lean_room * 0.5, -T.get("bermLeanRoom", 0.15)))));
+			}
+			if (air)
+			{
+				lean_lim = minf(9.0, lean_lim + 2.5 * dt);
+			}
+			else if (since_land < 0.4)
+			{
+				lean_lim = maxf(lim_t, lean_lim - 4.0 * dt);
+			}
+			else
+			{
+				lean_lim = lim_t;
+			}
+			if (lean_lim < 8.0)
+			{
+				bike_lean = signf(bike_lean) * minf(absf(bike_lean), lean_lim);
+			}
+			double w_part = (_OLD_WEAVE ? 0.0 : cap_b * (tanh(bl / cap_b) - tanh((bl - _weave) / cap_b)));
+			weave_lean = w_part;   // (Game pivots the drawn bike about the rider's hips for this share)
+			double bl_nw = bike_lean - w_part;
+			double b_sg = signf(bl_nw);
+			if (_OLD_LEANDRAW)
+			{
+				counter = maxf((bl_nw - (lean + bank_lean) * T.f("bodyLean")) * b_sg, absf(bl_nw) * 0.2) * b_sg;
+			}
+			else
+			{
+				// (2026-11-26, F8 seed 876814 vs a pro's slow-motion: his lean changes are one smooth curve; ours jumped 0.1-0.3 rad in a
+				// tick at every swap. The clamp above holds the body to 80 % of the bike's lean on the bike's side only, so as the bike
+				// crossed upright it flipped sides and the body jumped by its whole target. Now the clamp fades in over the first
+				// ~0.3 rad of bike lean: the body passes upright continuously. BMX_OLD_LEANDRAW=1 = before)
+				double b_t = (lean + bank_lean) * T.f("bodyLean");
+				double w_c = smooth01(absf(bl_nw) / 0.3);
+				double sh_max = (_OLD_CORNERBODY ? 0.8 : lerpf(0.8, T.get("cornerBody", 0.7), smooth01((absf(bl_nw) - 0.5) / 0.6)));
+				double body_l = b_t - w_c * b_sg * maxf(0.0, (b_t - sh_max * bl_nw) * b_sg);
+				if (!_OLD_SLOWBODY)
+				{
+					body_l = (bl_nw - _bike_lead) * minf(lerpf(T.get("slowBody", 0.15), T.f("bodyLean"), _slow_body_k(va)), sh_max);
+				}
+				counter = bl_nw - body_l;
+			}
+			double sq_t = 0.0;
+			if (_OLD_AIRBLEND)
+			{
+				if (!air)
+				{
+					sq_t = T.get("bankBody", 0.7) * smooth01((bank * signf(bl_nw) - 0.03) / 0.12);
+				}
+				bank_sq = move_toward(bank_sq, sq_t, ((air ? 1.2 : 3.0)) * dt);
+			}
+			else   // the held ground bank through a skip, faded out by the air blend on a real flight
+			{
+				sq_t = T.get("bankBody", 0.7) * smooth01((((air ? _bank_hold : bank)) * signf(bl_nw) - 0.03) / 0.12) * gnd;
+				bank_sq = move_toward(bank_sq, sq_t, 3.0 * dt);
+			}
+			if (bank_sq > 0.0)
+			{
+				if (_OLD_CORNERBODY)
+				{
+					counter = lerpf(counter, bl_nw * 0.2, bank_sq);
+				}
+				else
+				{
+					// (2026-11-26, Project X berms: bank ~35 deg, bike ~60, body ~35-40: the body square to the berm's FACE, the bike leaned
+					// further past it. It used to go to 80 % of the bike's lean on any bank. Now the body leans as far as the bank, at least
+					// half the bike's lean and at most 80 % of it)
+					double sh_b = lerpf(0.8, T.get("cornerBody", 0.7), smooth01((absf(bl_nw) - 0.5) / 0.6));
+					double body_b = minf(maxf(0.8, sh_b) * absf(bl_nw), maxf(absf(bank) * minf(1.0, sh_b / 0.5), sh_b * absf(bl_nw)));
+					if (!_OLD_SLOWBODY)
+					{
+						body_b *= lerpf(maxf(0.5, T.get("slowBody", 0.15)), 1.0, _slow_body_k(va));
+					}
+					counter = lerpf(counter, bl_nw - signf(bl_nw) * body_b, bank_sq);
+				}
+			}
+			if (air)
+			{
+				_air_wl = (_OLD_LEANDRAW ? clampf(absf(air_stick.x) * 2.5, 0.0, 1.0) : move_toward(_air_wl, clampf(absf(air_stick.x) * 2.5, 0.0, 1.0), 4.0 * dt));
+			}
+			if (_OLD_AIRBLEND)
+			{
+				if (air)
+				{
+					counter = lerpf(counter, bl_nw * (1.0 + T.get("stickBodyCounter", 0.25)), _air_wl);
+				}
+			}
+			else if (air_k > 0.0)
+			{
+				counter = lerpf(counter, bl_nw * (1.0 + T.get("stickBodyCounter", 0.25)), _air_wl * air_k);
+			}
+			if (man_lk > 0.0)
+			{
+				counter = lerpf(counter, bl_nw * MAN_BODY_OFF, man_lk);
+			}
+			counter += w_part;
+			rock = pedal_rock(crank, sprint, pedal, va, bike_rock);
+			return va;
+		}
+
+		private double _slow_body_k(double va)
+		{
+			double v0 = T.get("slowBodyFrom", 4.0);
+			return smooth01((va - v0) / maxf(0.5, T.get("slowBodyTo", 11.0) - v0));
+		}
+
+		private void _step_move(double dt, V3 f)
+		{
+			IGround terrain = host.terrain;
+			double px = x;
+			double pz = z;
+			double g_prev = terrain.deck_height(px, pz);   // (the JS meant this: its duplicate surface() shadowed it)
+			double v_h = (air ? v : v * cos(_g_pitch));
+			x += cos(course) * v_h * dt;
+			z -= sin(course) * v_h * dt;
+			distance += absf(v) * dt;
+			if (true)
+			{
+				double stp = maxf(absf(v) * dt, 1e-3);
+				double g_new = terrain.deck_height(x, z);
+				double sv = (v != 0.0 ? signf(v) : 1.0);
+				bool wall = false;
+				if (air)
+				{
+					wall = g_new > y + 0.35;
+				}
+				else if (_OLD_CURB)
+				{
+					wall = (g_new - g_prev) / stp > 1.6 && g_new - g_prev > 0.05;
+				}
+				else
+				{
+					// an edge is read over at least EDGE_BASE whatever the speed: per step, a slow bike's steps were too short
+					// to see a curb at all (it rolled up 30 cm at 6 km/h) and a fast one's long enough to stop dead on 20 cm
+					double bs = maxf(stp, EDGE_BASE);
+					double g_c = maxf(g_new, terrain.deck_height(px + cos(course) * bs * sv, pz - sin(course) * bs * sv));
+					wall = (g_c - g_prev) / bs > 1.6 && g_c - g_prev > 0.05;
+				}
+				if (wall && !air)
+				{
+					// a steep edge is only a wall if it's taller than a tyre rolls up: a 12 cm curb / root step used to stop
+					// the bike dead ("BONK!", or a SMACK crash above 6 m/s). Look a little further along the travel so a
+					// real face (that keeps rising) still is one; the tyres + suspension ride the small ones
+					double g_ahead = terrain.deck_height(x + cos(course) * 0.3 * sv, z - sin(course) * 0.3 * sv);
+					double rise = maxf(g_new, g_ahead) - g_prev;
+					double lim = 0.5 * minf(RWF, RWR);
+					if (!_OLD_CURB && v > 0.0 && rise > lim)
+					{
+						double fr = L - BB_REAR;
+						double g_fr = terrain.deck_height(x + f.x * fr, z + f.z * fr);
+						if (g_fr >= g_prev + 0.7 * rise && rise <= REAR_ROLL * RWR)
+						{
+							lim = rise + 0.01;
+						}
+					}
+					wall = rise > lim;
+				}
+				if (wall)
+				{
+					x = px;
+					z = pz;
+					if (absf(v) > 6)
+					{
+						_crash("SMACK! Hit the cliff");
+					}
+					else
+					{
+						if (absf(v) > 1.5)
+						{
+							shake = 0.3;
+							host.flash("BONK!");
+						}
+						v *= -0.25;
+					}
+				}
+			}
+			double FRONT = L - BB_REAR;
+			double tf = FRONT + RWF;
+			V2 a0 = new V2(px + f.x * tf, pz + f.z * tf);
+			V2 a1 = new V2(x + f.x * tf, z + f.z * tf);
+			List<GdDict> near = terrain.colliders_near(x, z);   // one grid walk for tape + obstacles (it was done twice a step)
+			_tapes_seen.Clear();   // (one member array + a plain loop: no array / lambda per step)
+			foreach (var c in near)
+			{
+				if (!c.get_b("tape", false))
+				{
+					continue;
+				}
+				GdDict sp = Gd.as_<GdDict>(c.get_o("tape", null));
+				if (Gd.to_b(sp.get_o("broken", null)))
+				{
+					continue;
+				}
+				bool seen = false;
+				foreach (var o in _tapes_seen)
+				{
+					if (is_same(o, sp))
+					{
+						seen = true;
+						break;
+					}
+				}
+				if (seen)
+				{
+					continue;
+				}
+				_tapes_seen.Add(sp);
+				List<V3> tp = Gd.as_<List<V3>>(sp.get_o("pts", null));
+				V2 tA = new V2(tp[0].x, tp[0].z);
+				V2 tB = new V2(tp[(int)(tp.Count - 1)].x, tp[(int)(tp.Count - 1)].z);
+				V2 dm = a1 - a0;
+				V2 dt_ab = tB - tA;
+				double den = dm.cross(dt_ab);
+				if (absf(den) < 1e-9)
+				{
+					continue;
+				}
+				double sm = (tA - a0).cross(dt_ab) / den;   // along the tyre's move
+				double su = (tA - a0).cross(dm) / den;   // along the tape
+				if (sm < 0.0 || sm > 1.0 || su < 0.0 || su > 1.0)
+				{
+					continue;
+				}
+				double tape_y = tp[(int)(clampi(roundi(su * (tp.Count - 1)), 0, tp.Count - 1))].y;
+				if (y > tape_y - 0.05)   // the wheels are over it
+				{
+					if (Env.s("BMX_TAPE_PROBE") != "")
+					{
+						host.log(Gd.fmt("TAPESKIP over y=%.2f tape_y=%.2f air=%s", y, tape_y, air));
+					}
+					continue;
+				}
+				V2 hp = tA + dt_ab * su;
+				if (Env.s("BMX_TAPE_PROBE") != "")
+				{
+					host.log(Gd.fmt("TAPECROSS su=%.2f v=%.1f", su, v));
+				}
+				if (host.smash(c, new V3(f.x * v, vy, f.z * v), new V3(hp.x, tape_y, hp.y)))
+				{
+					v *= 0.97;   // ("SNAP!" pops when it tears: TapeSim.torn -> Game._on_tape_torn)
+				}
+			}
+			if (Env.s("BMX_OLD_BODYHIT") == "")
+			{
+				double cb0 = cos(pitch);
+				double sb0 = sin(pitch);
+				for (long bi = 1; bi < BODY_PTS.Count; bi++)
+				{
+					V3 bp = BODY_PTS[(int)(bi)];
+					double off = bp.x * cb0 - bp.y * sb0;
+					double by = y + bp.x * sb0 + bp.y * cb0;
+					V2 b0 = new V2(px + f.x * off, pz + f.z * off);
+					V2 b1 = new V2(x + f.x * off, z + f.z * off);
+					foreach (var c in near)
+					{
+						if (!c.get_b("tape", false))
+						{
+							continue;
+						}
+						GdDict sp = Gd.as_<GdDict>(c.get_o("tape", null));
+						if (Gd.to_b(sp.get_o("broken", null)))
+						{
+							continue;
+						}
+						List<V3> tp = Gd.as_<List<V3>>(sp.get_o("pts", null));
+						V2 tA = new V2(tp[0].x, tp[0].z);
+						V2 dt_ab = new V2(tp[(int)(tp.Count - 1)].x, tp[(int)(tp.Count - 1)].z) - tA;
+						V2 dm = b1 - b0;
+						double den = dm.cross(dt_ab);
+						if (absf(den) < 1e-9)
+						{
+							continue;
+						}
+						double sm = (tA - b0).cross(dt_ab) / den;
+						double su = (tA - b0).cross(dm) / den;
+						if (sm < 0.0 || sm > 1.0 || su < 0.0 || su > 1.0)
+						{
+							continue;
+						}
+						double tape_y = tp[(int)(clampi(roundi(su * (tp.Count - 1)), 0, tp.Count - 1))].y;
+						if (absf(by - tape_y) > bp.z)
+						{
+							continue;
+						}
+						V2 hp = tA + dt_ab * su;
+						if (Env.s("BMX_TAPE_PROBE") != "")
+						{
+							host.log(Gd.fmt("TAPEBODY pt=%d su=%.2f by=%.2f tape_y=%.2f", bi, su, by, tape_y));
+						}
+						if (host.smash(c, new V3(f.x * v, vy, f.z * v), new V3(hp.x, tape_y, hp.y)))
+						{
+							v *= 0.97;
+						}
+					}
+				}
+			}
+			double cbp = cos(pitch);
+			double sbp = sin(pitch);
+			foreach (var c in near)
+			{
+				if (c.get_b("tape", false))   // handled above
+				{
+					continue;
+				}
+				double fx0 = x + f.x * FRONT;
+				double fz0 = z + f.z * FRONT;
+				double fdx = fx0 - c.f("x");
+				double fdz = fz0 - c.f("z");
+				double fd = sqrt(fdx * fdx + fdz * fdz);
+				double cdx = x - c.f("x");
+				double cdz = z - c.f("z");
+				double cd = sqrt(cdx * cdx + cdz * cdz);
+				double f_min = c.f("r") + 0.05;
+				double c_min = c.f("r") + 0.16;
+				bool hit_f = fd < f_min;
+				bool hit_c = cd < c_min;
+				bool hit_b = false;
+				double bdx = 0.0;
+				double bdz = 0.0;
+				double b_min = c_min;
+				if (!hit_f && !hit_c && cd < c.f("r") + 2.4 && (c.has("fence") || c.has("cactus")) && Env.s("BMX_OLD_BODYHIT") == "")
+				{
+					double gr = terrain.height(c.f("x"), c.f("z"));
+					double top = (c.has("ceil") ? c.f("ceil") : gr + ((c.get_b("fence", false) ? 1.2 : 2.0)));
+					foreach (var bp in BODY_PTS)
+					{
+						double wy = y + bp.x * sbp + bp.y * cbp;
+						if (wy > top + bp.z || wy < gr - 0.1)
+						{
+							continue;
+						}
+						double off = bp.x * cbp - bp.y * sbp;
+						double ddx = x + f.x * off - c.f("x");
+						double ddz = z + f.z * off - c.f("z");
+						if (ddx * ddx + ddz * ddz < (c.f("r") + bp.z + 0.04) * (c.f("r") + bp.z + 0.04))
+						{
+							hit_b = true;
+							bdx = ddx;
+							bdz = ddz;
+							b_min = c.f("r") + bp.z + 0.04;
+							break;
+						}
+					}
+				}
+				if (!hit_f && !hit_c && !hit_b)
+				{
+					continue;
+				}
+				double dx = (hit_f ? fdx : ((hit_c ? cdx : bdx)));
+				double dz = (hit_f ? fdz : ((hit_c ? cdz : bdz)));
+				double d = maxf(1e-4, (hit_f ? fd : ((hit_c ? cd : sqrt(bdx * bdx + bdz * bdz)))));
+				double mn = (hit_f ? f_min : ((hit_c ? c_min : b_min)));
+				V3 vel = new V3(f.x * v, vy, f.z * v);
+				if (c.get_b("cactus", false) && absf(v) > 2.5 && !(air && y > c.get_f("ceil", INF)))
+				{
+					if (host.smash(c, vel, new V3(x, y, z)))
+					{
+						v *= 0.8;
+						shake = maxf(shake, 0.35);
+						host.flash("OUCH! CACTUS!");
+					}
+					continue;
+				}
+				if (c.get_b("fence", false) && (absf(v) > 2.2 || (air && vy < -2)) && !(air && y > terrain.height(c.f("x"), c.f("z")) + 1.2 && !hit_b))
+				{
+					if (host.smash(c, vel, new V3(x, y, z)))
+					{
+						v *= 0.86;
+						shake = maxf(shake, 0.3);
+						host.flash((c.get_s("fence_style", "") == "picket" ? "CRUNCH!" : "SMASH!"));
+					}
+					continue;
+				}
+				if (c.has("top"))
+				{
+					// how tall the rock stands: over the bike's own height, but never more than over the ground it sits on. On a
+					// climb, a bank or leaned in a turn the rock's ground is higher than the bike's middle, and a 15 cm stone
+					// measured from there read as a wall: BONK, the bike thrown backwards off a rock it rolls over
+					double clear = minf(c.f("top") - y, c.f("top") - c.get_f("base", y));
+					if (clear < CLIMB * RWF)
+					{
+						continue;
+					}
+					if (!hit_f || fd > c.f("r") * 0.85)
+					{
+						continue;
+					}
+					if ((f.x * fdx + f.z * fdz) / fd >= 0)
+					{
+						continue;
+					}
+					if (absf(v) > 2 && joint_rock != c)
+					{
+						joint_rock = c;
+						host.rock_chips(c);
+					}
+					double back = (c.f("r") * 0.85 - fd) / fd;
+					x += fdx * back;
+					z += fdz * back;
+					double head = (f.x * fdx + f.z * fdz) / fd;
+					double tall = clampf((clear - CLIMB * RWF) / (RWF * 0.8), 0.0, 1.0);
+					double bb = T.get("bonkBoulder", 6.0);
+					double bonk_v = bb + (T.get("bonkSmall", 12.0) - bb) * (1.0 - tall);
+					if (head < -0.77 && -v * head > bonk_v && !front_air)
+					{
+						_crash("BONK! Over the bars");
+						if (Env.s("BMX_MAN_PROBE") != "")
+						{
+							host.log(Gd.fmt("BONKROCK top=%.2f y=%.2f r=%.2f hit_f=%s front_air=%s w_f=%.2f keys=%s", c.f("top"), y, c.f("r"), hit_f, front_air, w_f, c.keys()));
+						}
+					}
+					else if (head < -0.3 && v > 1.5)
+					{
+						host.burst(new V3(fx0, y + 0.3, fz0), 16, 0, 1.2);
+						v *= -0.25;
+						shake = 0.35;
+						host.flash("BONK!");
+					}
+					else   // rubbing past it (0.97 a step at 120 Hz, the same at any rate)
+					{
+						v *= exp(-3.6 * dt);
+					}
+					continue;
+				}
+				if (air)
+				{
+					double ceil_h = (c.has("ceil") ? c.f("ceil") : terrain.height(c.f("x"), c.f("z")) + ((c.get_b("fence", false) ? 1.2 : 3.2)));
+					if (y > ceil_h)
+					{
+						continue;
+					}
+				}
+				double push = (mn - d) / d;
+				x += dx * push;
+				z += dz * push;
+				double hd = (f.x * dx + f.z * dz) / d;
+				if (hd < -0.77 && -v * hd > 6 && !front_air)   // a front already up (manual, hop) rides into it, like rocks
+				{
+					_crash("BONK! Over the bars");
+					if (Env.s("BMX_MAN_PROBE") != "")
+					{
+						host.log(Gd.fmt("BONKOBJ y=%.2f r=%.2f hit_f=%s front_air=%s w_f=%.2f g=%.2f keys=%s", y, c.f("r"), hit_f, front_air, w_f, terrain.height(c.f("x"), c.f("z")), c.keys()));
+					}
+				}
+				else if (hd < -0.3 && v > 1.5)
+				{
+					host.burst(new V3(fx0, y + 0.3, fz0), 16, 0, 1.2);
+					v *= -0.25;
+					shake = 0.35;
+					host.flash("BONK!");
+				}
+				else
+				{
+					v *= exp(-3.6 * dt);
+				}
+			}
+		}
+
+		private void _step_vertical(double dt, V3 f, double throttle, bool brake)
+		{
+			long _vt = (prof != null ? host.get_ticks_usec() : 0);
+			IGround terrain = host.terrain;
+			if (_bog > 0.0)
+			{
+				double take = minf(_bog, _bog_rate * dt);
+				_bog -= take;
+				if (absf(v) > take)
+				{
+					v -= signf(v) * take;
+				}
+			}
+			_sample(f);
+			if (prof != null)
+			{
+				_vt = _prof("v_sample", _vt);
+			}
+			bool natural = false;
+			double dP = _g_pitch - _or(g_pitch, _g_pitch);
+			if (true)
+			{
+				double v_pre = v;
+				if (!air && dP > 0.02 && v > 0)
+				{
+					v *= cos(minf(dP, 1.2));
+				}
+				double proj_dv = v - v_pre;   // speed lost to the ground kinking up this step (a rock's edge, a curb)
+				g_pitch = _g_pitch;
+				natural = terrain.jump_mask(x, z) < 0.05;
+				double climb_max = absf(v) * 0.9 + 0.3;
+				double XF = L - BB_REAR;
+				double XR = -BB_REAR;
+				double cp0 = cos(clampf(pitch, -1.3, 1.3));
+				double hfC = _wheel_ground(f, XF, RWF, cp0);
+				double hrC = _wheel_ground(f, XR, RWR, cp0);
+				if (!w_init || is_nan(hf_prev))
+				{
+					hf_prev = hfC;
+					hr_prev = hrC;
+					pitch_v = 0.0;
+					w_init = true;
+				}
+				if (!is_finite(zw_f + zw_r + vw_f + vw_r))
+				{
+					zw_f = hfC;
+					zw_r = hrC;
+					vw_f = 0.0;
+					vw_r = 0.0;
+				}
+				double hfP = hf_prev;
+				double hrP = hr_prev;
+				double vgF = minf((hfC - hfP) / dt, climb_max);
+				double vgR = minf((hrC - hrP) / dt, climb_max);
+				hf_prev = hfC;
+				hr_prev = hrC;
+				double shF = 1 - SH_R;
+				double shR = SH_R;
+				double IK = 0.32;
+				bool coupled = !air && !(hop_t > 0) && !(lift_t > 0);
+				double PHI = (coupled ? clampf(T.f("riderMass"), 0, 0.7) : 0.0);
+				double mB = 1 - PHI;
+				double Kb = pow(2 * PI * T.f("tyreHz"), 2);
+				double K = Kb * mB;
+				double C = 2 * T.f("tyreDamp") * sqrt(Kb) * mB;
+				double brace = 1.0 - smooth01(since_land / 0.35);
+				double kB = T.f("legStiff") * (1 + 5 * prep + 4 * brace);
+				double rel_t = 0.0;
+				double ab = T.get("autoAbsorb", 0.0);
+				bool ab_on = ab > 0.0 && !air && prep < 0.1 && natural && !(hop_t > 0) && kick_t <= 0.0 && man_a < 0.05 && nose_a < 0.05 && absf(pleg) < 0.1 && since_land > 0.3;
+				_ab_k = move_toward(_ab_k, (ab_on ? 1.0 : 0.0), dt * 6.0);
+				if (_ab_k > 0.0 && absf(v) > 4.0)
+				{
+					double worst = 0.0;   // the hardest throw-off ahead, in g past standing (the crest's v^2 curve + g; < 0 = it flies)
+					double here = 0.0;   // the same under the bike now
+					for (long q = 0; q < 4; q++)
+					{
+						double dq = (q == 0 ? 0.0 : signf(v) * absf(v) * (0.02 + 0.1 * q));   // (0.12 .. 0.32 s ahead)
+						double sp = clampf(absf(v) * 0.12, 0.7, 3.0);
+						double hq = terrain.deck_height(x + f.x * dq, z + f.z * dq);
+						double kq = (terrain.deck_height(x + f.x * (dq + sp), z + f.z * (dq + sp)) + terrain.deck_height(x + f.x * (dq - sp), z + f.z * (dq - sp)) - 2.0 * hq) / (sp * sp);
+						if (q == 0)
+						{
+							here = minf(0.0, 1.0 + v * v * kq / G);
+						}
+						else
+						{
+							worst = minf(worst, 1.0 + v * v * kq / G);
+						}
+					}
+					double on_it = smooth01(-here / 0.6);
+					_ab_bend = move_toward(_ab_bend, smooth01((0.3 - worst) / 0.8) * (1.0 - on_it), dt * 5.0);
+					rel_t = -0.85 * T.f("legComp") * _ab_bend * minf(1.0, ab) * _ab_k;
+					kB *= 1.0 + 1.5 * _ab_k * minf(1.0, ab);   // (working legs, not hanging ones)
+				}
+				else
+				{
+					_ab_bend = 0.0;
+				}
+				dg_abs = rel_t;
+				double cB = 2 * sqrt(kB) * T.f("legDamp");
+				double press = ((natural && !(hop_t > 0) && !(lift_t > 0)) ? T.f("legPress") * G : 0.0);
+				if (!Gd.to_b(sus.is_empty()))
+				{
+					press *= 0.35;
+				}
+				n_ref = _or(n_ref, G + press) + (G + press - _or(n_ref, G + press)) * minf(1.0, dt * 2 * PI * T.f("tyreHz") * 0.6);
+				double TRAVEL = T.f("travel");
+				double WHEEL_M = T.get("wheelMass", 0.03);
+				double BLOW_V = T.get("damperKnee", 0.6);
+				double BLOW_K = T.get("damperBlow", 0.2);
+				double trF = TRAVEL;
+				double trR = TRAVEL;
+				double kF = shF * K;
+				double kR = shR * K;
+				double pgF = 0.0;
+				double pgR = 0.0;
+				double ccF = shF * C;
+				double ccR = shR * C;
+				double crF = ccF;
+				double crR = ccR;
+				double hsF = BLOW_K;
+				double hsR = BLOW_K;
+				double frF = 0.0;
+				double frR = 0.0;
+				double bsF = 6.0;
+				double bsR = 6.0;
+				double sq_cm = T.get("tyreSquash", 1.2) * 0.01;
+				double tyKF = 0.5 * G / sq_cm;
+				double tyKR = tyKF;
+				double s0F = (G + press) / K;
+				double s0R = s0F;
+				if (!Gd.to_b(sus.is_empty()))
+				{
+					if (_su.Length != 18)   // (the units' numbers as plain floats: this runs 120 times a second)
+					{
+						_sus_cache();
+					}
+					double k_mul = (T.f("tyreHz") / 2.4) * (T.f("tyreHz") / 2.4);
+					double d_mul = T.f("tyreDamp") / 0.39;
+					double sag_mul = T.get("suspSag", 1.0);
+					double pg_mul = T.get("suspProg", 1.0);
+					double rb_mul = T.get("suspRebound", 1.0);
+					trF = _su[0];
+					trR = _su[8];
+					if (host.susp != null && host.susp.wheels_follow)   // never more than the drawn fork / rear end can move
+					{
+						if (host.susp.has_f)
+						{
+							trF = minf(trF, Gd.to_f(host.susp.F.get_o("max", null)) - Gd.to_f(host.susp.F.get_o("min", null)));
+						}
+						if (host.susp.has_r)
+						{
+							trR = minf(trR, Gd.to_f(host.susp.R.get_o("max", null)) - Gd.to_f(host.susp.R.get_o("min", null)));
+						}
+					}
+					trF = maxf(trF, 0.03);
+					trR = maxf(trR, 0.03);
+					pgF = _su[2] * pg_mul;   // (+ the frame's linkage: its leverage falls through the travel)
+					pgR = (_su[10] + FRAME_PROG * T.get("shockProg", 1.0)) * pg_mul;
+					double sgF = clampf(_su[1] * sag_mul, 0.1, 0.5);
+					double sgR = clampf(_su[9] * sag_mul, 0.1, 0.5);
+					kF = shF * G / (sgF * trF * (1.0 + pgF * sgF * sgF)) * k_mul;
+					kR = shR * G / (sgR * trR * (1.0 + pgR * sgR * sgR)) * k_mul;
+					double ccrF = 2.0 * sqrt(kF * shF * mB);
+					double ccrR = 2.0 * sqrt(kR * shR * mB);
+					ccF = _su[3] * ccrF * d_mul;
+					ccR = _su[11] * ccrR * d_mul;
+					crF = _su[4] * ccrF * d_mul * rb_mul;
+					crR = _su[12] * ccrR * d_mul * rb_mul;
+					hsF = clampf(_su[5] * BLOW_K / 0.4, 0.05, 1.0);
+					hsR = clampf(_su[13] * BLOW_K / 0.4, 0.05, 1.0);
+					frF = _su[6] * shF * G;
+					frR = _su[14] * shR * G;
+					bsF = _su[7];
+					bsR = _su[15];
+					tyKF = 0.5 * G / (sq_cm * SuspMath.PSI_REF / _su[16]);
+					tyKR = 0.5 * G / (sq_cm * SuspMath.PSI_REF / _su[17]);
+					s0F = SuspMath.rest(shF * (G + press), kF, trF, pgF);
+					s0R = SuspMath.rest(shR * (G + press), kR, trR, pgR);
+					if (!_sus_synced && host.susp != null)   // the drawn fork / rear end sit at the same sag
+					{
+						_sus_synced = true;
+						if (Gd.to_b(host.susp.has_method("set_sag")))
+						{
+							host.susp.set_sag(SuspMath.rest(shF * G, kF, trF, pgF) / trF, SuspMath.rest(shR * G, kR, trR, pgR) / trR);
+						}
+					}
+					if (absf(sag_mul - _sag_seen) > 0.001)   // (the sag slider moved: the drawn ends follow)
+					{
+						_sag_seen = sag_mul;
+						_sus_synced = false;
+					}
+				}
+				else if (host.susp != null && host.susp.wheels_follow)
+				{
+					if (host.susp.has_f)
+					{
+						trF = clampf(s0F + Gd.to_f(host.susp.F.get_o("max", null)), 0.05, TRAVEL);
+					}
+					if (host.susp.has_r)
+					{
+						trR = clampf(s0R + Gd.to_f(host.susp.R.get_o("max", null)), 0.05, TRAVEL);
+					}
+				}
+				double tyCF = 0.5 * sqrt(tyKF * WHEEL_M);
+				double tyCR = 0.5 * sqrt(tyKR * WHEEL_M);
+				long n_sub = clampi(Gd.to_i(roundf(T.get("suspSubsteps", 4.0))), 1, 32);   // substeps a tick (Ride > Suspension; 4 = 480 Hz)
+				double h_sub = dt / n_sub;
+				double k_cap = WHEEL_M * (1.1 / h_sub) * (1.1 / h_sub);
+				double c_cap = 0.9 * WHEEL_M / h_sub;
+				ccF = minf(ccF, c_cap);
+				ccR = minf(ccR, c_cap);
+				crF = minf(crF, c_cap);
+				crR = minf(crR, c_cap);
+				double fr_w = maxf(0.04, maxf(frF, frR) / maxf(0.3 * c_cap, 1e-6));   // (the friction's ease through zero is a damper too)
+				double ks_cap = 0.35 * k_cap;
+				double kt_cap = 0.65 * k_cap;
+				tyKF = minf(tyKF, kt_cap);
+				tyKR = minf(tyKR, kt_cap);
+				tyCF = minf(tyCF, 0.5 * c_cap);
+				tyCR = minf(tyCR, 0.5 * c_cap);
+				double dvF = 0.0;
+				double dvR = 0.0;
+				if (!Gd.to_b(sus.is_empty()) && !air && v > 0.3)
+				{
+					double geo = T.get("suspGeo", 1.0);
+					double tan_f = 0.5;
+					if (host.susp != null && host.susp.axis.y > 0.3)
+					{
+						tan_f = clampf(absf(host.susp.axis.x) / host.susp.axis.y, 0.2, 0.75);
+					}
+					bool braking = _b_prev > 0.0;
+					if (braking)
+					{
+						dvF = _fb_f * tan_f * geo;
+					}
+					double h_l = T.f("loadHeight") / maxf(L, 0.5);   // (the same lever the weight transfer's pitch torque uses)
+					double a_sq = T.get("antiSquat", 0.9);
+					dvR = (((braking ? (_fb_r * ANTI_RISE) : 0.0)) - maxf(0.0, a_drive) * a_sq) * h_l * geo;
+					if (pedal > 0.05 && a_drive > 0.3 && _rear_shock() && !_OLD_SUSPFX)
+					{
+						double stroke = (absf(sin(crank)) - 0.6366) / 0.6366;
+						dvR += stroke * a_drive * (1.1 - 0.7 * a_sq) * h_l * BOB_K * T.get("pedalBob", 1.0);
+						if (_BOB_PROBE)
+						{
+							_bob_n += 1;
+							_bob_s += dg_xR;
+							_bob_q += dg_xR * dg_xR;
+							if (_bob_n >= 600)
+							{
+								double m = _bob_s / _bob_n;
+								host.log(Gd.fmt("BOB shock_rms=%.2f mm  mean=%.1f mm  sag=%.1f mm  zc=%.2f  drive=%.2f", 1000.0 * sqrt(maxf(0.0, _bob_q / _bob_n - m * m)), 1000.0 * m, 1000.0 * dg_sag_r * trR / maxf(dg_travel, 0.01), (_su.Length > 11 ? _su[11] : -1.0), a_drive));
+								_bob_n = 0;
+								_bob_s = 0.0;
+								_bob_q = 0.0;
+							}
+						}
+					}
+					if (Env.s("BMX_GEO_PROBE") != "" && Gd.to_i(since_land * 4.0) != Gd.to_i((since_land - dt) * 4.0) && (braking || a_drive > 1.0))   // tests
+					{
+						host.log(Gd.fmt("GEO v=%.1f brake f=%.2f r=%.2f drive=%.2f tan=%.2f AS=%.2f dive=%.2f rear=%+.2f fork=%d%% shock=%d%%", v, (braking ? _fb_f : 0.0), (braking ? _fb_r : 0.0), a_drive, tan_f, a_sq, dvF, dvR, roundi(100.0 * dg_xF / maxf(dg_travel, 0.01)), roundi(100.0 * dg_xR / maxf(dg_travel, 0.01))));
+					}
+				}
+				double bal_max = T.f("riderBalance") * G * BB_REAR / IK;
+				double edge_k = 0.0;
+				if (front_air && !rear_air && !air && wheelie_up <= 0.0 && nose_a <= 0.0)
+				{
+					// (only where the ground really falls away under the front wheel: over a roller's crest the front is a
+					// few cm off the ground, and held up there the bike "climbed" down the back side and stalled)
+					// and only off level ground (a drop's deck): going over a crest or off a lip the rear is still on a slope,
+					// and there the bike follows the ground / keeps its take-off attitude
+					edge_k = smooth01((absf(v) - 2.0) / 5.0) * smooth01((zw_f - hfC - 0.15) / 0.25) * (1.0 - smooth01((absf(_local_slope(f, XR, RWR, cp0)) - 0.05) / 0.1));
+					if (!_OLD_SETDOWN)
+					{
+						edge_k *= smooth01((since_land - SETDOWN_T) / 0.3);
+					}
+					bal_max *= 1.0 + 2.5 * edge_k;
+				}
+				double lip_hold = 0.0;
+				double lip_ref = 0.0;
+				if (front_air && !rear_air && !air && lip_state == 2 && wheelie_up <= 0.0 && nose_a <= 0.0 && auto_absorb * prep < 0.05 && !_OLD_LIPLOAD)
+				{
+					bool popping = (pop_wait > 0.0 && pro_pop) || crouch > 0.1;
+					double face_sl = _local_slope(f, XR, RWR, cp0);
+					nose_k = (_OLD_LIPLOAD ? 1.0 : smooth01((face_sl - 0.4) / 0.35) * (1.0 - smooth01((absf(v) - 9.0) / 6.0)));
+					lip_ref = face_sl + ((squash > 0.2 ? 0.0 : ((popping ? LIP_NOSE_POP : LIP_NOSE)) * nose_k));
+					lip_hold = clampf(maxf(prep, (popping ? 1.0 : 0.0)) / 0.3, 0.0, 1.0);
+					bal_max *= 1.0 + 2.5 * lip_hold;
+				}
+				double setdown = 0.0;
+				if (!_OLD_SETDOWN && front_air && !rear_air && !air && wheelie_up <= 0.0 && nose_a <= 0.0 && lip_hold <= 0.0)
+				{
+					setdown = 1.0 - smooth01((since_land - SETDOWN_T) / 0.3);
+				}
+				if (true)
+				{
+					double R = T.f("weightShift");
+					double x_brake = -0.8 * R * (((brake && !air) ? 1.0 : 0.0)) + 0.5 * R * clampf(a_pedal / 4, 0, 1);
+					double xT = (air ? 0.0 : x_brake + R * clampf(_g_pitch * 2.2, -1, 1));
+					if (air)
+					{
+						xT = air_lean * R;
+					}
+					double hT = (air ? air_lean * R : x_brake);
+					double reach = R * T.get("stickShift", 1.7);
+					double R2 = maxf(R, absf(body_in_s) * reach);   // stick idle: exactly the old limits
+					if (!air)
+					{
+						xT = clampf(xT, -R, R) + body_in_s * reach;
+						hT = clampf(hT, -R, R) + body_in_s * reach;
+					}
+					else   // in the air the body shifts with the stick too (the bike tilts against it)
+					{
+						xT += body_in_s * reach * 0.7;
+						hT += body_in_s * reach * 0.7;
+					}
+					double a_body = 0.0;
+					if (!is_nan(v_last) && !air)
+					{
+						// (not the kink loss above: over a rock that is a one-step spike of 10-40 m/s2, and the body was thrown
+						// forward and back by every stone - "the whole rider leans back and forth")
+						a_body = clampf((v - v_last - proj_dv) / maxf(dt, 1e-4), -40.0, 40.0);
+					}
+					v_last = (air ? NAN : v);
+					double kx = T.f("bodyStiff");
+					double cx = 2 * sqrt(kx) * 0.75;
+					double push = -a_body * T.f("bodyInertia");
+					body_xv += (kx * (clampf(xT, -R2, R2) - body_x) - cx * body_xv + push) * dt;
+					body_x = clampf(body_x + body_xv * dt, -R2 * 1.4, R2 * 1.4);
+					hip_v += (kx * (clampf(hT, -R2, R2) - hip_shift) - cx * hip_v + push) * dt;
+					hip_shift = clampf(hip_shift + hip_v * dt, -R2 * 1.6, R2 * 1.6);
+				}
+				double tq = a_drive * T.f("loadHeight");
+				bool pulling = sprint > 0.5 && !air && throttle > 0.1 && !brake;
+				_sprint_lift = (pulling ? sprint * minf(throttle, 1.0) * slowness(v) : 0.0);
+				bool pedalling = throttle > 0.1 && !brake;
+				_balance_step(dt, pedalling, throttle, brake);
+				if (man_a > 0.12 && front_air && !rear_air)
+				{
+					wheelie_time += dt;
+					wheelie_pedal = wheelie_pedal || pedalling;
+				}
+				else if (man_a < 0.05 && wheelie_time > 0.0)
+				{
+					if (wheelie_time > 1.0 && host.has_method("on_style"))
+					{
+						host.on_style(roundi(wheelie_time * 220.0), Gd.fmt("%s %.1f s", (wheelie_pedal ? "WHEELIE" : "MANUAL"), wheelie_time));
+					}
+					wheelie_time = 0.0;
+					wheelie_pedal = false;
+				}
+				wheelie_up = maxf(man_a, wheelie_up - T.get("wheelieDrop", 1.6) * (1.0 + 3.0 * T.get("manDirect", 1.0)) * dt);
+				if (nose_a > 0.12 && rear_air && !front_air)
+				{
+					nose_time += dt;
+					if (brake)
+					{
+						nose_brake_t += dt;
+					}
+				}
+				else if (nose_a < 0.05 && nose_time > 0.0)
+				{
+					if (nose_time > 0.8 && host.has_method("on_style"))
+					{
+						host.on_style(roundi(nose_time * 260.0), Gd.fmt("%s %.1f s", (nose_brake_t > nose_time * 0.6 ? "STOPPIE" : "NOSE MANUAL"), nose_time));
+					}
+					nose_time = 0.0;
+					nose_brake_t = 0.0;
+				}
+				if ((wheelie_up > 0.0 || nose_a > 0.0) && !air && !is_nan(nose_ref))
+				{
+					nose_ref = lerpf(nose_ref, _g_pitch, minf(1.0, dt * 6.0));
+				}
+				if (wheelie_up > 0.0 || nose_a > 0.0)
+				{
+					bal_max = maxf(bal_max, 30.0);   // the whole body holds a wheelie, not just the hands
+				}
+				if (nose_a > 0.0)
+				{
+					bal_max = maxf(bal_max, 75.0);
+				}
+				bool was_air = air;
+				double g_jolt = 0.0;   // legs bottomed out on the ground this step (a compression, not a landing): the hit taken
+				double vy_in = vy;
+				bool was_f = c_f;
+				bool was_r = c_r;
+				bool cF = false;
+				bool cR = false;
+				double sumF = 0.0;
+				double sumR = 0.0;
+				if (!is_finite(body_y))
+				{
+					body_y = y;
+					body_v = vy;
+				}
+				long N = n_sub;
+				double h = dt / N;
+				if (prof != null)
+				{
+					_vt = _prof("v_before_substeps", _vt);
+				}
+				for (long i = 1; i < N + 1; i++)
+				{
+					double u = (double)(i) / N;
+					double gF = hfP + (hfC - hfP) * u;
+					double gR = hrP + (hrC - hrP) * u;
+					double cs = cos(pitch);
+					double sn = sin(pitch);
+					double dF = zw_f - (y + XF * sn) + s0F;
+					double dR = zw_r - (y + XR * sn) + s0R;
+					double pvF = vy + XF * cs * pitch_v;
+					double pvR = vy + XR * cs * pitch_v;
+					cF = gF > zw_f;
+					cR = gR > zw_r;
+					double relF = vw_f - pvF;
+					double relR = vw_r - pvR;
+					double cdF = ((relF >= 0.0 ? ccF * ((relF <= BLOW_V ? relF : BLOW_V + hsF * (relF - BLOW_V))) : crF * relF)) + frF * clampf(relF / fr_w, -1.0, 1.0);
+					double cdR = ((relR >= 0.0 ? ccR * ((relR <= BLOW_V ? relR : BLOW_V + hsR * (relR - BLOW_V))) : crR * relR)) + frR * clampf(relR / fr_w, -1.0, 1.0);
+					double bpF = maxf(0.0, dF / trF - 0.8) * 5.0 * smooth01(relF / 0.3);
+					double bpR = maxf(0.0, dR / trR - 0.8) * 5.0 * smooth01(relR / 0.3);
+					double uF = dF / trF;
+					double uR = dR / trR;
+					double FF = (dF > 0.0 ? maxf(0.0, minf(kF * (1.0 + pgF * uF * uF) * (1.0 + bsF * bpF * bpF), ks_cap) * dF + cdF) : 0.0);
+					double FR = (dR > 0.0 ? maxf(0.0, minf(kR * (1.0 + pgR * uR * uR) * (1.0 + bsR * bpR * bpR), ks_cap) * dR + cdR) : 0.0);
+					if (dF >= trF - 0.0005)
+					{
+						FF = maxf(FF, _ty_f);
+					}
+					if (dR >= trR - 0.0005)
+					{
+						FR = maxf(FR, _ty_r);
+					}
+					sumF += maxf(0.0, FF - ((cF ? dvF : 0.0)));   // (the tyres' loads: the spring forces less the geometry's part)
+					sumR += maxf(0.0, FR - ((cR ? dvR : 0.0)));
+					if (i == 1)
+					{
+						dg_botF = false;
+						dg_botR = false;
+						dg_blowF = false;
+						dg_blowR = false;
+					}
+					dg_xF = dF;
+					dg_xR = dR;
+					dg_vF = relF;
+					dg_vR = relR;
+					dg_fF = FF;
+					dg_fR = FR;
+					dg_blowF = dg_blowF || relF > BLOW_V;
+					dg_blowR = dg_blowR || relR > BLOW_V;
+					double leg_f = 0.0;
+					double cg = (was_air ? 0.0 : corner_g);
+					if (!was_air)
+					{
+						double f_leg = kB * (y + rel_t - body_y) - cB * (body_v - vy);
+						body_v += (f_leg - cg) * h;
+						body_y += body_v * h;
+						leg_f = PHI * (G + f_leg);
+						dg_leg_f = f_leg;
+					}
+					double geoF = (cF ? dvF : 0.0);
+					double geoR = (cR ? dvR : 0.0);
+					double alpha = ((FF - geoF) * XF + (FR - geoR) * XR - leg_f * body_x) * cs / IK + (((cF || cR) ? tq / IK : 0.0));
+					bool w_up = wheelie_up > 0.0 && cR;
+					bool e_up = nose_a > 0.0 && cF && !w_up;   // a nose manual: the same hold, about the front wheel
+					if (cF != cR || w_up || e_up)
+					{
+						double @ref = _or(nose_ref, _g_pitch) + ((cR ? wheelie_up : 0.0)) - ((e_up ? nose_a : 0.0));
+						double wk = (e_up ? 8.0 : ((w_up ? 4.0 : 1.0 + 5.0 * edge_k)));   // holding a wheelie: the whole body works it
+						if (lip_hold > 0.0 && cR)   // (loading the lip: the bike held to the face under the rear wheel)
+						{
+							@ref = lerpf(@ref, lip_ref, lip_hold);
+							wk = maxf(wk, 1.0 + 5.0 * lip_hold);
+						}
+						alpha += clampf(30 * wk * (@ref - pitch) - 9 * sqrt(wk) * pitch_v, -bal_max, bal_max);
+						if (e_up)
+						{
+							alpha -= FF * XF * cs / IK * smooth01(nose_a / 0.15);
+						}
+					}
+					vy += (FF + FR - geoF - geoR - (((cF || cR) ? press : 0.0)) - mB * (G + cg) - leg_f) / mB * h;
+					pitch_v += alpha * h;
+					if (setdown > 0.0 && cR && !cF && pitch_v < 0.0)   // (rear-first landing: the front lowered, not dropped)
+					{
+						double sd_err = pitch - _g_pitch;   // (the ground it landed on: nose_ref can still be the take-off lip's)
+						if (sd_err > 0.0)
+						{
+							// (the user: "if the force and jump is huge the slam makes sense, should be realistic": the harder the hit into the
+							// landing, the less of the rear's kick his arms and body can hold back - from SETDOWN_HIT0 m/s each m/s more lets the
+							// nose fall SETDOWN_HIT rad/s faster)
+							double sd_hit = SETDOWN_HIT * maxf(0.0, _vn_td - SETDOWN_HIT0);
+							double sd_w = minf(SETDOWN_MAX + sd_hit, SETDOWN_W0 + sd_hit + SETDOWN_K * sd_err);
+							if (pitch_v < -sd_w)
+							{
+								pitch_v = lerpf(pitch_v, -sd_w, setdown);
+							}
+							if (_SD_PROBE && i == N)
+							{
+								host.log(Gd.fmt("SETDOWN t=%.3f err=%.3f cap=%.2f pv=%.2f k=%.2f vn=%.1f", since_land, sd_err, sd_w, pitch_v, setdown, _vn_td));
+							}
+						}
+					}
+					if (!cF && !cR && was_air)
+					{
+						// in the air: no outside torque. The shared spin air_w only changes with the inertia (tuck),
+						// the bike turns with it plus whatever tilt the rider gives it against their own body:
+						// W / S tilt it on purpose, hands off the rider aims it at the landing slope
+						if (_absorb_k > 0.0)   // the hands-off absorb of a small lip, now that the rear is off it too
+						{
+							if (vy > 0.3)
+							{
+								double ad = minf(T.f("popPower") * 1.4 * _absorb_k, 0.6 * vy);
+								double sp2a = v * v + vy * vy;
+								vy -= ad;
+								v = signf(v) * sqrt(maxf(0.0, sp2a - vy * vy));
+								if (_PULL_PROBE)
+								{
+									host.log(Gd.fmt("ABSORB applied k=%.2f dvy=-%.2f vy=%.2f", _absorb_k, ad, vy));
+								}
+							}
+							_absorb_k = 0.0;
+						}
+						double I_new = 1.0 - T.f("riderShare") * T.f("tuckSpin") * air_pull;
+						air_w *= air_inertia / I_new;
+						air_inertia = I_new;
+						double arc = T.f("airArcade");
+						if (arc > 0.0)
+						{
+							if (absf(flip_in) > 0.05)
+							{
+								// (a flip is thrown at the lip: without a throw the stick only rolls it FLIP_AIR_ONLY as fast;
+								// tucked it turns faster - the old arcade drive ignored the tuck)
+								double f_cap = (_OLD_SPIN ? 1.0 : lerpf(FLIP_AIR_ONLY, 1.0, maxf(0.0, _flip_in * signf(flip_in))) / maxf(air_inertia, 0.5));
+								double f_rate = flip_in * T.f("airSpinRate") * spin_k * f_cap;
+								double thrown = maxf(0.0, _flip_in * signf(flip_in));
+								if (!_OLD_SPIN && thrown > 0.3 && absf(flip_in) > 0.5 && !is_nan(_land_pitch) && _land_t > 0.05)
+								{
+									// (only for the first turn: held on past it, it aimed at a second whole turn and over-rotated a held
+									// key flip to 540 deg; a double flip is still the normal rate held long enough)
+									double done = absf(flip_acc);
+									double left = TAU - done;
+									if (left > 0.35)
+									{
+										double need = left / maxf(_land_t, 0.12) * 1.05;
+										f_rate = signf(f_rate) * clampf(maxf(absf(f_rate), need), 0.0, FLIP_RATE_MAX);
+									}
+								}
+								air_w += (f_rate - air_w) * minf(1.0, T.f("airSpinResp") * h) * arc;
+							}
+							else
+							{
+								air_w *= 1.0 - minf(1.0, T.f("airSpinStop") * h) * arc;
+							}
+						}
+						double tgt = 0.0;
+						double kt_base = 70.0;
+						if (absf(flip_in) > 0.05)
+						{
+							tgt = flip_in * T.f("airTilt");
+						}
+						else
+						{
+							double hh = maxf(0.0, y - _g_y);
+							double tg = (vy + sqrt(vy * vy + 2 * G * hh)) / G;
+							double aim_g = (is_nan(_land_pitch) ? _g_pitch : _land_pitch);   // (the landing's slope ahead, not the deck below)
+							tgt = wrapf(aim_g - (pitch - air_tilt + air_w * minf(tg, 1.0)), -PI, PI);
+							double off_k = clampf((absf(tgt) - 0.3) / 0.3, 0.0, 1.0);
+							double aim_delay = T.get("airAimDelay", 1.0);
+							double aim_ramp = 0.5;
+							double short_k = 0.0;
+							if (!_OLD_SHORTAIM && !is_nan(_land_pitch) && _land_t > 0.0)
+							{
+								double tot = air_time + _land_t;
+								short_k = (1.0 - smooth01((tot - SHORT_FROM) / (SHORT_TO - SHORT_FROM))) * clampf(T.get("shortAim", 0.0), 0.0, 1.0);
+								aim_delay = lerpf(aim_delay, SHORT_DELAY * tot, short_k);
+								aim_ramp = lerpf(aim_ramp, SHORT_RAMP * tot, short_k);
+							}
+							double aim_k = maxf(maxf(smooth01((air_time - aim_delay) / maxf(aim_ramp, 0.05)), land_prep), off_k);
+							if (pro_flight && !_OLD_PULLUP)
+							{
+								aim_k = maxf(smooth01((air_time - PULL_HOLD) / 0.35), land_prep);
+							}
+							double help_s = lerpf(air_help, maxf(air_help, SHORT_HELP * (1.0 - _air_own) * ((air_help > 0.0 ? 1.0 : 0.0))), short_k);
+							tgt *= aim_k * (((pro_flight && !_OLD_PULLUP) ? maxf(air_help, 0.95 * (1.0 - _air_own)) : help_s));   // landing help: hands off only, airAssist of it (a pro flight: he puts it down himself)
+							_pull_k = 0.0;
+							if (!_OLD_PULLUP && _air_pop > 0.0)
+							{
+								_pull_k = smooth01((air_time - 0.02) / 0.12) * (1.0 - aim_k);
+								tgt += AIR_PULL_UP * _air_pop * _pull_k;
+							}
+							kt_base = lerpf(lerpf(lerpf(T.get("airAimSpeed", 14.0), SHORT_SPEED, short_k), 45.0, off_k), 70.0, land_prep);
+						}
+						double scoop = (_OLD_LIPLOAD ? 0.0 : SCOOP_TILT * (1.0 - _air_own));
+						tgt = clampf(tgt, -T.f("airTilt") - scoop, T.f("airTilt"));
+						double st_t = T.get("stickAirTilt", 0.55);
+						tgt += air_stick.y * st_t;
+						double t_lim = T.f("airTilt") + absf(air_stick.y) * st_t;
+						double soft = clampf(air_stick.length() * 3.0 + absf(edge_s) * 2.0, 0.0, 1.0);
+						double kt = lerpf(kt_base, 50.0, soft);
+						if (pro_flight && !_OLD_PULLUP)   // (a pull on the bars, and putting it down for the landing: quick, the whole body)
+						{
+							kt = maxf(kt, lerpf(55.0, 90.0, maxf(_pull_k, land_prep)));
+						}
+						air_tilt_v += (kt * (tgt - air_tilt) - 2.0 * sqrt(kt) * 0.85 * air_tilt_v) * h;
+						air_tilt += air_tilt_v * h;
+						double t_lo = t_lim + scoop;
+						if (air_tilt > t_lim || air_tilt < -t_lo)
+						{
+							air_tilt = clampf(air_tilt, -t_lo, t_lim);
+							if (air_tilt_v * air_tilt > 0)
+							{
+								air_tilt_v = 0.0;
+							}
+						}
+						pitch_v = air_w + air_tilt_v;
+						if (_PULL_PROBE && Gd.to_i(air_time * 120.0) % 6 == 0)
+						{
+							host.log(Gd.fmt("PULLP t=%.2f pitch=%.1f tilt=%.2f tgt=%.2f air_w=%.2f pop=%.2f pro=%s flip=%.2f own=%.2f lp=%.2f airTilt=%.3f", air_time, rad_to_deg(pitch), air_tilt, tgt, air_w, _air_pop, pro_flight, flip_in, _air_own, land_prep, T.f("airTilt")));
+						}
+					}
+					y += vy * h;
+					pitch += pitch_v * h;
+					double sqF = gF - zw_f;
+					double sqR = gR - zw_r;
+					double tyF = (sqF > 0.0 ? maxf(0.0, minf(tyKF * (1.0 + minf(5.0, sqF * sqF / 0.0009)), kt_cap) * sqF + tyCF * (vgF - vw_f)) : 0.0);
+					double tyR = (sqR > 0.0 ? maxf(0.0, minf(tyKR * (1.0 + minf(5.0, sqR * sqR / 0.0009)), kt_cap) * sqR + tyCR * (vgR - vw_r)) : 0.0);
+					_ty_f = tyF;
+					_ty_r = tyR;
+					vw_f += ((tyF - FF + ((sqF > 0.0 ? dvF : 0.0))) / WHEEL_M - G) * h;
+					zw_f += vw_f * h;
+					vw_r += ((tyR - FR + ((sqR > 0.0 ? dvR : 0.0))) / WHEEL_M - G) * h;
+					zw_r += vw_r * h;
+					dg_tyF = tyF;
+					dg_tyR = tyR;
+					dg_sqF = maxf(0.0, gF - zw_f);
+					dg_sqR = maxf(0.0, gR - zw_r);
+					double wsn = sin(pitch);
+					double wcs = cos(pitch);
+					double topF = y + XF * wsn - s0F;
+					double topR = y + XR * wsn - s0R;
+					if (zw_f < topF)
+					{
+						zw_f = topF;
+						vw_f = maxf(vw_f, vy + XF * wcs * pitch_v);
+					}
+					if (zw_r < topR)
+					{
+						zw_r = topR;
+						vw_r = maxf(vw_r, vy + XR * wcs * pitch_v);
+					}
+					if (zw_f > topF + trF)
+					{
+						zw_f = topF + trF;
+						vw_f = minf(vw_f, vy + XF * wcs * pitch_v);
+					}
+					if (zw_r > topR + trR)
+					{
+						zw_r = topR + trR;
+						vw_r = minf(vw_r, vy + XR * wcs * pitch_v);
+					}
+					if (!cF && !cR)   // in the air the bike can go all the way round (flips)
+					{
+						flip_acc += pitch_v * h;
+						pitch = wrapf(pitch, -PI, PI);
+					}
+					for (long wi = 0; wi < 2; wi++)
+					{
+						double xx = (wi == 0 ? XF : XR);
+						double gg = (wi == 0 ? gF : gR);
+						double vg = (wi == 0 ? vgF : vgR);
+						double c2 = cos(pitch);
+						double dd = gg - (y + xx * sin(pitch) - ((wi == 0 ? s0F : s0R)) + ((wi == 0 ? trF : trR))) - TYRE_MAX;
+						if (dd <= 0)
+						{
+							continue;
+						}
+						probe_bottom += 1;
+						if (wi == 0)
+						{
+							dg_botF = true;
+						}
+						else
+						{
+							dg_botR = true;
+						}
+						double lx = xx * c2;
+						double m_inv = 1 / mB + lx * lx / IK;
+						double dq = dd / m_inv;
+						y += dq / mB;
+						pitch += dq * lx / IK;
+						double vpp = vy + lx * pitch_v;
+						double slope_vy = (_OLD_RIMKICK ? 0.0 : minf(0.0, v * tan(clampf(_g_pitch, -1.2, 1.2))));
+						vg = minf(vg, slope_vy + RIM_CLIMB);
+						if (vpp < vg)
+						{
+							double j = (vg - vpp) / m_inv;
+							if (_JOLT_PROBE && j > 0.5)
+							{
+								_jp_rim += 1;
+							}
+							vy += j / mB;
+							pitch_v += j * lx / IK;
+							_rim_hit = maxf(_rim_hit, j / mB);   // (what it did to the bike as a whole: a wheel far from the middle slapping down mostly turns it)
+						}
+						if (wi == 0)
+						{
+							cF = true;
+						}
+						else
+						{
+							cR = true;
+						}
+					}
+					zw_f = maxf(zw_f, gF - TYRE_MAX);
+					zw_r = maxf(zw_r, gR - TYRE_MAX);
+					double endF = y + XF * sin(pitch) - s0F + trF;
+					double endR = y + XR * sin(pitch) - s0R + trR;
+					if (zw_f > endF)
+					{
+						zw_f = endF;
+						vw_f = minf(vw_f, vy + XF * cos(pitch) * pitch_v);
+					}
+					if (zw_r > endR)
+					{
+						zw_r = endR;
+						vw_r = minf(vw_r, vy + XR * cos(pitch) * pitch_v);
+					}
+					dg_sqF = maxf(0.0, gF - zw_f);
+					dg_sqR = maxf(0.0, gR - zw_r);
+					if (!was_air)
+					{
+						double rel = body_y - y;
+						if (rel < -T.f("legComp"))
+						{
+							body_y = y - T.f("legComp");
+							if (body_v < vy && since_land < 0.6 && land_jolt >= 0)
+							{
+								land_jolt = maxf(land_jolt, vy - body_v);
+							}
+							if (body_v < vy && since_land >= 0.6)
+							{
+								g_jolt = maxf(g_jolt, vy - body_v);
+							}
+							if (body_v < vy)
+							{
+								double vc = (coupled ? PHI * body_v + mB * vy : vy);
+								body_v = vc;
+								vy = vc;
+							}
+						}
+						else if (rel > T.f("legExt"))
+						{
+							body_y = y + T.f("legExt");
+							if (body_v > vy)
+							{
+								double vc = (coupled ? PHI * body_v + mB * vy : vy);
+								body_v = vc;
+								vy = vc;
+							}
+						}
+					}
+				}
+				if (prof != null)
+				{
+					_vt = _prof("v_substeps", _vt);
+				}
+				dg_xR *= trF / trR;
+				dg_travel = trF;
+				dg_sag = s0F;
+				dg_sag_r = s0R * trF / trR;
+				dg_knee = BLOW_V;
+				dg_cF = cF;
+				dg_cR = cR;
+				dg_leg = (!was_air ? body_y - y : 0.0);
+				double kN = minf(1.0, dt * 30);
+				n_f = _or(n_f, shF * G) + (sumF / N - _or(n_f, shF * G)) * kN;
+				n_r = _or(n_r, shR * G) + (sumR / N - _or(n_r, shR * G)) * kN;
+				bool now_air = !cF && !cR;
+				front_air = !now_air && !cF;
+				rear_air = !now_air && !cR;
+				double gpC = asin(clampf((hfC - hrC) / L, -1, 1));
+				double back_up = (cR && !cF && pitch - gpC > 0.6 ? pitch - _local_slope(f, XR, RWR, cp0) : 0.0);
+				bool flipped = was_air && !now_air && air_time >= 0.2 && absf(wrapf(pitch - _g_pitch, -PI, PI)) > 1.45;   // (_land_trick's own test)
+				if (_balancing() || _man_grace > 0.0 || flipped)   // the balance manual handles its own loop-out (no crash)
+				{
+					;
+				}
+				else if (back_up > T.f("landBack") + 0.1 || (back_up > 1.15 && pitch_v > 0.5 && !was_air))
+				{
+					// weight held back on purpose (the body stick, or the power wheelie it makes with the pedals) rolling over rollers /
+					// crests: the rider feels it going and throws the front back down (speed lost, no crash). Thrown back off a
+					// landing, or nobody leaning back, it is still the crash
+					if ((body_in_s < -0.3 || _man_pw > 0.05) && !was_air && since_land > 0.3 && Env.s("BMX_OLD_LOOPOUT") == "")
+					{
+						if (_loop_saved <= 0.0)
+						{
+							v *= T.get("manLoopKeep", 0.72);
+							shake = maxf(shake, 0.25);
+							_man_pw = 0.0;
+							if (host.msg_idle())
+							{
+								host.flash("LOOPED OUT!");
+							}
+						}
+						_loop_saved = 0.6;
+						pitch_v = minf(pitch_v, -2.5);
+					}
+					else
+					{
+						_crash("LOOPED OUT!");
+					}
+				}
+				else if (_nosing() || _nose_grace > 0.0)   // so does the nose manual
+				{
+					;
+				}
+				else if (cF && !cR && gpC - pitch > 0.6 && _local_slope(f, XF, RWF, cp0) - pitch > 1.15)
+				{
+					_crash("NOSE DIVE!");
+				}
+				if (absf(pitch) > 1.45 && (cF || cR) && !was_air)   // on the ground only: in the air flips go all the way round
+				{
+					pitch = signf(pitch) * 1.45;
+					pitch_v = 0.0;
+				}
+				if (!now_air && (front_air || rear_air) && was_f && was_r)
+				{
+					nose_ref = _or(_gpc_last, gpC);
+				}
+				_gpc_last = ((cF && cR) ? gpC : _gpc_last);
+				double l_n_ref = ((air && !_OLD_NOSEREF) ? _g_pitch : _or(nose_ref, _g_pitch));
+				if (front_air && pitch - l_n_ref < -T.f("noseDive") && !_balancing() && _man_grace <= 0.0 && !flipped)
+				{
+					_crash("NOSE DIVE!");
+				}
+				if (prof != null)
+				{
+					_vt = _prof("v_nose_checks", _vt);
+				}
+				if (Env.s("BMX_OLD_BODYHIT") == "" && !_balancing() && !_nosing() && absf(pitch - _g_pitch) > 1.0)
+				{
+					double sp = sin(pitch);
+					double cp = cos(pitch);
+					double cr = cos(clampf(bike_lean, -1.4, 1.4));   // (roll; it read air_lean in the air, which is the fore / aft air input)
+					foreach (var pt in new List<V2> { new V2(0.02, 0.98), new V2(0.0, 0.66) })
+					{
+						double wx = pt.x * cp - pt.y * sp * cr;
+						double wy = y + pt.x * sp + pt.y * cp * cr;
+						double gh = terrain.top_height(x + f.x * wx, z + f.z * wx);
+						if (wy < gh + ((pt.y > 0.8 ? 0.12 : 0.10)))
+						{
+							_crash((pt.y > 0.8 ? "HEAD HIT!" : "BODY HIT!"));
+							break;
+						}
+					}
+				}
+				double snN = sin(pitch);
+				w_f = (cF ? hfC : y + XF * snN);
+				w_r = (cR ? hrC : y + XR * snN);
+				pitch_w = pitch;
+				if (prof != null)
+				{
+					_vt = _prof("v_crash_checks", _vt);
+				}
+				if (host.susp != null)
+				{
+					y_draw = y;
+					pitch_draw = pitch;
+				}
+				else
+				{
+					y_draw = w_r + (w_f - w_r) * (BB_REAR / L);
+					pitch_draw = asin(clampf((w_f - w_r) / L, -1, 1));
+				}
+				if (!was_air && !now_air && !was_f && cF)
+				{
+					double slap = maxf(0.0, vgF - (vy_in + XF * cos(pitch) * pitch_v));
+					if (slap > 2)
+					{
+						compress_v -= minf(1.5, slap * 0.25);   // (no camera shake: at speed it rattled all the time)
+						if (slap > 3.5)
+						{
+							host.burst(new V3(x + f.x * XF, _g_hf + 0.03, z + f.z * XF), 10, surf, 0.8);
+						}
+					}
+				}
+				c_f = cF;
+				c_r = cR;
+				if (!now_air)
+				{
+					// the rider's body turns with the bike, smoothed by the arms and legs
+					body_pw += (pitch_v - body_pw) * minf(1.0, dt * 4);
+				}
+				if (prof != null)
+				{
+					_vt = _prof("v_slap_contacts", _vt);
+				}
+				if (now_air && !was_air)
+				{
+					if (since_land < 0.5 && Env.s("BMX_TRICK") != "")   // tests
+					{
+						host.log(Gd.fmt("BOUNCE %.2fs after landing vy=%.2f pitch=%.2f", since_land, vy, pitch));
+					}
+					air = true;
+					air_time = 0.0;
+					air_peak = 0.0;
+					flip_acc = 0.0;
+					spin_acc = 0.0;
+					style_air = 0.0;
+					_whip_peak = 0.0;
+					_lean_peak = 0.0;
+					_scrub_k = 0.0;
+					if (coupled && !is_nan(body_v))
+					{
+						vy = PHI * body_v + mB * vy;
+					}
+					if (!_balancing() && _man_grace <= 0.0 && vy > 0.0)
+					{
+						double lip_a = maxf(_or(_gpc_last, gpC), _local_slope(f, XR, RWR, cp0));
+						double spare = ((pop_wait > 0.0 && pro_pop) || crouch > 0.1 || _OLD_LIPLOAD ? LIP_SPARE : LIP_SPARE_OWN);
+						double up_max = minf(lip_a + spare, 1.2);
+						double vy_cap = maxf(absf(v) * sin(up_max), 2.5);   // (a bounce / small hop off a crest or down a slope: never cut)
+						if (Env.s("BMX_LIP_PROBE") != "")   // tests
+						{
+							host.log(Gd.fmt("LIPCAP v=%.2f vy=%.2f cap=%.2f lip=%.2f pitch=%.2f", v, vy, vy_cap, lip_a, pitch));
+						}
+						if (vy > vy_cap)
+						{
+							vy = vy_cap;
+							double nose_room = (_OLD_LIPLOAD ? 0.0 : ((spare == LIP_SPARE ? LIP_NOSE_POP : LIP_NOSE)) * nose_k);   // (the front lifted over the lip)
+							pitch = minf(pitch, up_max + 0.15 + nose_room);
+							pitch_v = minf(pitch_v, 0.6);
+							body_pw = minf(body_pw, 0.6);
+						}
+						else if (pitch > up_max + 0.5)
+						{
+							pitch = up_max + 0.5;
+							pitch_v = minf(pitch_v, 1.0);
+							body_pw = minf(body_pw, 1.0);
+						}
+					}
+					v *= cos(asin(clampf(vy / maxf(absf(v), 0.5), -0.94, 0.94)));
+					double pop = 0.0;
+					if (kick_t <= 0.0)
+					{
+						_pop_used = 0.0;
+					}
+					_air_pop = 0.0;
+					pro_flight = false;
+					if (since_land > 0.6)   // (a new jump: not a bounce off the last landing)
+					{
+						_land_hit = 0.0;
+					}
+					if (_PULL_PROBE)
+					{
+						host.log(Gd.fmt("TAKEOFF graze=%s pop_wait=%.2f squash=%.2f absorb=%.2f prep=%.2f vy=%.2f kick=%.2f v=%.1f", _graze, pop_wait, squash, auto_absorb, prep, vy, kick_t, v));
+					}
+					if (_graze)   // (the same take-off, after a brush with the lip: the legs have had their say)
+					{
+						_graze = false;
+					}
+					else if (pop_wait > 0.0)
+					{
+						pop = maxf(0.0, _leg_dv(pop_wait) - _pop_used);
+						pop_q = pop_wait;
+						pop_wait = 0.0;
+						_air_pop = (pro_pop ? clampf(pop_q, 0.0, 1.0) : 0.0);   // (the pro pull-up: only after the player's own pump)
+						pro_flight = pro_pop;
+						pro_pop = false;
+						if (pro_flight || _OLD_POPDIR)
+						{
+							_pop_apply(pop);
+						}
+						else
+						{
+							_pop_along(pop);
+						}
+						_pop_used += pop;
+						pop_fx = 1.0;
+						if (pop_time > 0.9 && pop_q > 0.85 && host.msg_idle())
+						{
+							host.flash("PERFECT POP");
+						}
+					}
+					else if (vy > 0.3 && ((squash > 0.05 && kick_t <= 0.0) || auto_absorb * prep > 0.05))
+					{
+						// the legs let the bike come up into the body: the centre of mass flies a flatter line than the lip's. The
+						// speed is kept, only its direction turns (low and fast). (Hands off, auto_absorb: up to half the throw)
+						double sq_k = maxf(squash, auto_absorb * prep);
+						double sq_d = minf(T.f("popPower") * 0.7 * squash, 0.45 * vy);
+						if (auto_absorb * prep > squash && !_OLD_ABSORB)
+						{
+							// (hands off: applied once BOTH wheels are off - here the rear is still on the face and its spring gave
+							// the climb straight back; up to 60 % of the climb, the faster / smaller the more)
+							_absorb_k = sq_k;
+							sq_d = 0.0;
+						}
+						double sp2 = v * v + vy * vy;
+						vy -= sq_d;
+						v = signf(v) * sqrt(maxf(0.0, sp2 - vy * vy));
+						squash_fx = clampf(sq_k, 0.0, 1.0);
+						_scrub_k = sq_k;
+						if (squash > 0.6 && sq_d > 0.8 && host.msg_idle())
+						{
+							host.flash("SQUASH");
+						}
+						if (Env.s("BMX_TRICK") != "")   // tests
+						{
+							host.log(Gd.fmt("SQUASH k=%.2f dvy=-%.2f", squash, sq_d));
+						}
+					}
+					if (pop > 0.0 && absf(bank) > 0.03 && absf(v) > 1.0)
+					{
+						double dc_t = atan(pop * sin(bank) / absf(v)) * signf(v);
+						course += dc_t;
+						slip -= dc_t;
+					}
+					double sh = T.f("riderShare");
+					if (was_f != was_r && !_balancing() && !_OLD_BOUNCE && absf(pitch_v) < absf(body_pw))
+					{
+						body_pw = pitch_v;
+					}
+					if (_man_grace > 0.0 || _balancing())
+					{
+						pitch_v = clampf(pitch_v, -0.8, 0.8);
+						body_pw = clampf(body_pw, -0.8, 0.8);
+					}
+					air_w = (1 - sh) * pitch_v + sh * body_pw + throw_v;
+					if (pro_flight && !_OLD_PULLUP && absf(throw_v) < 0.05)
+					{
+						air_w = maxf(air_w, -0.15);
+					}
+					air_tilt = 0.0;
+					air_tilt_v = sh * (pitch_v - body_pw);
+					air_inertia = 1.0;
+					pitch_v = air_w + air_tilt_v;
+					_flip_in = (!_OLD_SPIN ? clampf(throw_v / maxf(T.f("flipRate"), 0.1), -1.0, 1.0) : 1.0);
+					throw_v = 0.0;
+					air_yaw = yaw_rate;
+					air_tw = 0.0;
+					air_tw_v = 0.0;
+					_air_steer_s = 0.0;
+					_air_aim_s = 0.0;
+					if (!_OLD_STRAIGHTWHIP && whip > 0.3 && absf(whip_load) < whip * 0.8)
+					{
+						whip_load = whip_side * whip * 0.8;
+					}
+					_whip_in = (_OLD_WHIP ? 0.0 : whip_load);
+					air_tw_v = WHIP_KICK * _whip_in;
+					whip_load = 0.0;
+					_spin_in = spin_load;
+					spin_load = 0.0;
+					if (absf(_spin_in) > 0.05)
+					{
+						stick_yaw = T.get("stickYawRate", 5.0) * _spin_in;
+						yaw_edge_s = _spin_in;
+					}
+					if (Env.s("BMX_TRICK") != "")   // tests
+					{
+						host.log(Gd.fmt("TAKEOFF v=%.1f vy=%.2f pitch_v=%.2f spin=%.2f natural=%s at=(%.0f,%.0f) slope=%.2f", v, vy, pitch_v, air_w, natural, x, z, _g_pitch));
+					}
+					host.on_takeoff();
+				}
+				else if (!now_air && was_air)
+				{
+					if (prof != null)
+					{
+						_vt = _prof("land_0_before", _vt);
+					}
+					double b_land = _bank_at(f);
+					bank = b_land;
+					_bank_raw = b_land;
+					double impact = maxf(0.0, v * sin(_g_pitch) - vy_in * cos(_g_pitch)) * cos(b_land);
+					if (vy_in < 0.0 && absf(b_land) > 0.03 && absf(v) > 0.5)
+					{
+						double s_lat = -vy_in * cos(_g_pitch) * sin(b_land) * T.get("landSlide", 1.0);
+						double dc_l = atan(s_lat / absf(v)) * signf(v);
+						course += dc_l;
+						slip -= dc_l;
+						v = signf(v) * sqrt(v * v + s_lat * s_lat);
+					}
+					double at = air_time;
+					if (Env.s("BMX_FORGIVE_PROBE") != "" && at > 0.1)   // tests
+					{
+						host.log(Gd.fmt("LANDED air=%.2f peak=%.2f pop=%.2f", at, air_peak, pop_q));
+					}
+					bool back_land = cR && !cF && wrapf(pitch - _g_pitch, -PI, PI) > 0.4;
+					_land_pe = absf(wrapf(pitch - _g_pitch, -PI, PI));   // (how square to the ground it came down: the verdict's forgiveness)
+					_land_up = wrapf(pitch - _g_pitch, -PI, PI) > 0.0;   // (back wheel first)
+					_rev_land = false;
+					_land_fix = false;
+					long _lt = (prof != null ? host.get_ticks_usec() : 0);
+					if (prof != null)
+					{
+						_lt = _prof("land_1_pre", _vt);
+					}
+					_land_trick(at);
+					if (prof != null)
+					{
+						_lt = _prof("land_trick", _lt);
+					}
+					if (_land_fix)
+					{
+						// the tyres grab the nearer axis: the bike keeps its heading, the travel is dragged round to within
+						// slipMax of it (what's left decays as a normal slide), speed lost by the angle dragged through.
+						// Past 90 deg that axis is backwards: speed runs negative (fakie)
+						double @base = (_rev_land ? wrapf(slip - PI, -PI, PI) : wrapf(slip, -PI, PI));
+						double keep = minf(absf(@base), 0.9 * T.f("slipMax"));
+						double sl = signf(@base) * keep;
+						double drag_a = absf(@base) - keep;
+						v = ((_rev_land ? -v : v)) * cos(minf(drag_a, 1.4));
+						course = heading - sl;
+						slip = sl;
+						slip_w = 0.0;
+						turn_off = 0.0;
+						if (_rev_land)
+						{
+							rev_cap = maxf(3.0, -v);
+						}
+						_rev_land = false;
+						_land_fix = false;
+					}
+					air = false;
+					since_land = 0.0;
+					land_jolt = 0.0;
+					_rim_hit = 0.0;
+					land_heavy = 0.0;
+					body_v = vy_in;
+					body_pw = air_w;
+					nose_ref = _g_pitch;
+					_graze = vy_in > 0.3 && at < 0.2;
+					if (_graze)
+					{
+						v = signf(v) * sqrt(v * v + vy_in * vy_in);
+					}
+					else
+					{
+						v = v * cos(_g_pitch) + vy_in * sin(_g_pitch);
+					}
+					land_yaw = 0.0;
+					double carve_k = T.get("landCarve", 0.8);
+					double a_c = wrapf(slip, -PI, PI);
+					if (!_OLD_AIRSTEER && carve_k > 0.0 && !_graze && at > 0.1 && absf(v) > 3.0 && crash_pending == "" && absf(_air_steer_s + _air_aim_s) > 0.05 && signf(a_c) == signf(_air_steer_s + _air_aim_s) && absf(a_c) < CARVE_MAX)
+					{
+						double turn_c = a_c * carve_k;
+						course += turn_c;
+						slip -= turn_c;
+						slip_w = 0.0;
+						v *= 1.0 - CARVE_COST * minf(1.0, absf(sin(turn_c)));
+						carve_now = turn_c;
+						double cs = T.get("carveStyle", 1.0);
+						if (cs > 0.0 && absf(turn_c) >= CARVE_REWARD_MIN && host.has_method("on_style"))
+						{
+							host.on_style(roundi(120.0 * cs * clampf(absf(turn_c) / 0.4, 0.5, 1.5)), "CARVE");
+							flow_up();
+						}
+						if (Env.s("BMX_AIRSTEER_PROBE") != "")
+						{
+							host.log(Gd.fmt("CARVE angle=%.0fdeg turned=%.0fdeg v=%.1f", rad_to_deg(a_c), rad_to_deg(turn_c), v));
+						}
+					}
+					_air_steer_s = 0.0;
+					_air_aim_s = 0.0;
+					double a_y = wrapf(slip, -PI, PI);
+					double yaw_free = T.get("landYawFree", 0.12);
+					if (!_graze && at > 0.2 && absf(v) > 2.0 && absf(a_y) > yaw_free && absf(a_y) < 1.35 && crash_pending == "")
+					{
+						double v_abs = absf(v);
+						double v_lat = v_abs * sin(absf(a_y) - yaw_free);
+						double v_lon = v_abs * cos(absf(a_y) - yaw_free);
+						double catch_v = _or(_mu_r, 0.8) * (impact * 0.8 + 2.5) * T.get("landYawGrip", 1.0);
+						double rem = maxf(0.0, v_lat - catch_v);
+						land_yaw = v_lat - rem;
+						double a_new = signf(a_y) * (atan2(rem, maxf(v_lon, 0.1)) + yaw_free * minf(1.0, rem / 0.5));
+						v = signf(v) * sqrt(v_lon * v_lon + rem * rem);
+						course = heading - a_new;
+						slip = a_new;
+						slip_w = 0.0;
+						shake = maxf(shake, minf(0.25, land_yaw * 0.035));
+						if (land_yaw > T.get("landYawCrash", 5.5))
+						{
+							_crash("HIGHSIDE!");
+						}
+						else if (land_yaw > 1.8)
+						{
+							land_fold = maxf(land_fold, minf(0.8, land_yaw / 5.0));
+							_stun = maxf(_stun, 0.15 + 0.07 * land_yaw);
+							if (host.msg_idle())
+							{
+								host.flash((land_yaw > 3.5 ? "SIDEWAYS!" : "SKETCHY!"));
+							}
+						}
+						if (Env.s("BMX_TRICK") != "" || Env.s("BMX_LAND_PROBE") != "")   // tests
+						{
+							host.log(Gd.fmt("YAWLAND angle=%.0fdeg side=%.1f caught=%.1f left=%.1f v=%.1f -> %.1f %s", rad_to_deg(absf(a_y)), v_lat, land_yaw, rem, v_abs, absf(v), crash_pending));
+						}
+					}
+					if (!_graze && at > 0.2)
+					{
+						land_fold = maxf(land_fold, clampf((impact - 1.5) / 5.5, 0.0, 1.0));
+					}
+					double land_err = absf(wrapf(pitch - _g_pitch, -PI, PI));
+					if (at > T.get("landPerfectAir", 0.45) && crash_pending == "" && land_err < T.get("landPerfect", 0.14) && absf(slip) < 0.25 && v > 1.0)
+					{
+						double boost = T.get("landBoost", 1.6) * clampf(-sin(_g_pitch) / 0.3, 0.0, 1.0) * clampf(impact / 2.5, 0.0, 1.0);
+						v += boost;
+						land_perfect = 1.0;
+						if (host.msg_idle())
+						{
+							host.flash((boost > 0.4 ? (Gd.fmt("PERFECT LANDING +%d km/h", roundi(boost * 3.6))) : "PERFECT LANDING"));
+						}
+					}
+					if (!_OLD_LANDSPEED && at > T.get("landPerfectAir", 0.45) && crash_pending == "" && absf(v) > 2.0)
+					{
+						double bad = smooth01((land_err - LAND_ANGLE_FREE) / (deg_to_rad(35.0) - LAND_ANGLE_FREE));
+						if (bad > 0.0)
+						{
+							double cut = absf(v) * T.get("landAngleCost", 0.25) * bad;
+							if (_OLD_BOG)
+							{
+								v -= signf(v) * cut;
+							}
+							else
+							{
+								// (2026-11-25, F8: a soft 34 deg nose-high landing took 16 km/h in ONE step. Now a soft one pays less, and
+								// the bike bogs over BOG_T instead of stopping dead)
+								cut *= lerpf(BOG_SOFT, 1.0, smooth01(impact / 4.0));
+								_bog = cut;
+								_bog_rate = cut / BOG_T;
+							}
+							if (cut > 1.0 && host.msg_idle())
+							{
+								host.flash(Gd.fmt("BAD LANDING -%d km/h", roundi(cut * 3.6)));
+							}
+							if (Env.s("BMX_LAND_PROBE") != "")
+							{
+								host.log(Gd.fmt("LANDANGLE err=%.0fdeg cut=%.1f km/h", rad_to_deg(land_err), cut * 3.6));
+							}
+						}
+					}
+					if (Env.s("BMX_TRICK") != "")   // tests
+					{
+						host.log(Gd.fmt("LANDERR %.3f perfect=%s", land_err, land_perfect >= 1.0));
+					}
+					compress_v -= minf(2.2, impact * 0.35) + ((back_land ? minf(1.2, impact * 0.2 + 0.4) : 0.0));
+					if (host.susp != null)
+					{
+						host.susp.land(maxf(0.0, -vy_in) * cos(_g_pitch) * 0.5 + impact * ((back_land ? 0.57 : 0.4)), front_air, rear_air);
+					}
+					if (Env.s("BMX_TRICK") != "")   // tests
+					{
+						host.log(Gd.fmt("LAND impact=%.1f back=%s v_after=%.1f", impact, back_land, v));
+					}
+					if (at > 0.4 && impact > 3.0)
+					{
+						shake = maxf(shake, minf(0.2, (impact - 3.0) * 0.04));
+					}
+					if (prof != null)
+					{
+						_lt = _prof("land_verdict", _lt);
+					}
+					if (at > 0.15)
+					{
+						host.burst(new V3(x, y + 0.03, z), roundi(10 + minf(30, impact * 6)), surf, 0.8 + minf(1.5, impact * 0.25));
+					}
+					if (prof != null)
+					{
+						_lt = _prof("land_burst", _lt);
+					}
+					if (at > 0.45 && impact < 5)
+					{
+						flow_up();
+					}
+					host.on_landing(at, impact);
+					if (prof != null)
+					{
+						_vt = _prof("land_9_on_landing", _lt);
+					}
+				}
+				double gy_now = hrC + (hfC - hrC) * (BB_REAR / L);
+				if (!air && !was_air && since_land > 0.6 && !is_nan(probe_vy) && !is_nan(probe_gy[1]))
+				{
+					double ay = (vy - probe_vy) / dt;
+					double ag = (gy_now - 2.0 * probe_gy[0] + probe_gy[1]) / (dt * dt);
+					probe_acc2 += ay * ay;
+					probe_g2 += ag * ag;
+					probe_n += 1;
+				}
+				probe_vy = vy;   // (in place: no array per step)
+				probe_gy[1] = probe_gy[0];
+				probe_gy[0] = gy_now;
+				ground_jolt = maxf(ground_jolt, g_jolt);
+				if (!air && g_jolt > 0.0 && since_land >= 0.6)
+				{
+					if (g_jolt > T.f("slamJolt") * LAND)
+					{
+						_crash("SLAM!");
+					}
+					else if (g_jolt > T.f("slamJolt") * LAND * 0.6 && host.msg_idle())
+					{
+						host.flash("OOF!");
+					}
+				}
+				if (air)
+				{
+					air_time += dt;
+					air_peak = maxf(air_peak, y - _g_y);
+				}
+				else if (land_jolt >= 0 && since_land < 0.6)
+				{
+					// the landing's verdict, from what got through: the speed the body still had into the bike when the legs
+					// ran out (land_jolt) and the speed the frame lost against the ground with suspension and tyres on their
+					// stops (_rim_hit; nothing softens that, it counts 1.3x). Past what the rider can take
+					// (slamJolt) it throws him down; from landHeavy of that it is a heavy landing: speed lost, and he needs a
+					// moment to gather himself (land_heavy 0..1: the pose, the pedals)
+					// (the two together: legs that were still folded AND a bike on its rims is worse than either)
+					double hit = sqrt(maxf(land_jolt, 0.0) * maxf(land_jolt, 0.0) + _rim_hit * _rim_hit * 1.69);
+					_land_hit = maxf(_land_hit, hit);
+					hit = _land_hit;
+					double clean = 1.0 - smoothstep(0.18, 0.6, _land_pe);
+					if (_land_up && Env.s("BMX_OLD_LANDUP") == "")
+					{
+						clean = 1.0 - 0.15 * smoothstep(0.18, 0.5, _land_pe) - 0.85 * smoothstep(0.5, 0.95, _land_pe);
+					}
+					double slam0 = T.f("slamJolt") * LAND;
+					double slam = slam0 * (1.0 + T.get("landForgive", 1.0) * clean);
+					if (hit > slam)
+					{
+						if (Env.s("BMX_TRICK") != "" || Env.s("BMX_LAND_PROBE") != "")   // tests
+						{
+							host.log(Gd.fmt("HIT legs=%.2f rim=%.2f hit=%.2f of %.2f pe=%.2f SLAM vn=%.1f reach=%.2f", land_jolt, _rim_hit, hit, slam, _land_pe, _vn_td, _reach_td));
+						}
+						host.on_bad_landing(1.0);
+						_crash("SLAM!");
+						land_jolt = -1.0;
+					}
+					else if (since_land > 0.4)
+					{
+						double hv = T.get("landHeavy", 0.6);
+						if (hit > slam0 * hv)
+						{
+							land_heavy = clampf((hit - slam0 * hv) / maxf(0.05, slam - slam0 * hv), 0.0, 1.0);
+							v *= 1.0 - 0.12 * land_heavy;   // (it was 22 %: at trail speed every built jump is overshot onto the flat, and each one took a fifth of the speed)
+							land_fold = maxf(land_fold, 0.3 + 0.3 * land_heavy);   // (he stays down: no second dip, a slower way back up)
+							_stun = 0.15 + 0.45 * land_heavy;
+							if (land_heavy > 0.12)
+							{
+								host.on_bad_landing(land_heavy);
+							}
+							shake = maxf(shake, 0.1 + 0.15 * land_heavy);
+							if (host.msg_idle())
+							{
+								host.flash((land_heavy > 0.5 ? "HEAVY LANDING" : "OOF!"));
+							}
+						}
+						if (Env.s("BMX_TRICK") != "" || Env.s("BMX_LAND_PROBE") != "")   // tests
+						{
+							host.log(Gd.fmt("HIT legs=%.2f rim=%.2f hit=%.2f of %.2f pe=%.2f heavy=%.2f v=%.1f vn=%.1f reach=%.2f", land_jolt, _rim_hit, hit, slam, _land_pe, land_heavy, v, _vn_td, _reach_td));
+						}
+						land_jolt = -1.0;   // one verdict per landing
+						_land_hit = 0.0;   // (judged: a hop 0.4-0.6 s later carried this hit into the NEXT landing's verdict)
+					}
+				}
+				kick_t = maxf(0.0, kick_t - dt);
+			}
+		}
+
+		private void _step_hop(double dt, RideInput inp)
+		{
+			IGround terrain = host.terrain;
+			if (hop_block && !inp.b("hop"))
+			{
+				hop_block = false;
+			}
+			bool space = inp.b("hop") && !hop_block;
+			double back_in = clampf((-body_in - 0.25) / 0.45, 0.0, 1.0);
+			_stick_hold = (back_in > 0.05 ? _stick_hold + dt : 0.0);
+			double pre_in = maxf((space ? 1.0 : 0.0), back_in * (1.0 - smooth01((_stick_hold - 0.9) / 0.6)));
+			if (air)
+			{
+				pre_in = 0.0;
+			}
+			_bend_in = pre_in;
+			if (pre_in >= crouch - 0.01)
+			{
+				crouch = minf(pre_in, crouch + dt / maxf(0.08, T.get("crouchTime", 0.25)));
+				_cr_rel = 0.0;
+			}
+			else
+			{
+				_cr_rel += dt;
+				if (_cr_rel > 0.22)
+				{
+					crouch = maxf(pre_in, crouch - dt * 5.0);
+				}
+			}
+			crouch_t = (crouch > 0.05 ? crouch_t + dt : 0.0);
+			rebound = smooth01((crouch_t - 0.08) / 0.12) * (1.0 - smooth01((crouch_t - 0.5) / 0.45));
+			load = crouch;
+			if (!air)
+			{
+				_n_grd += (clampf((_or(n_f, 0.0) + _or(n_r, 0.0)) / maxf(1.0, _or(n_ref, G)), 0.0, 3.0) - _n_grd) * minf(1.0, dt * 10.0);
+			}
+			double sq_in = ((_sf_t > 0.25 && gest_hop <= 0.0 && !_nosing()) ? clampf((body_in - 0.25) / 0.45, 0.0, 1.0) * T.get("squashPower", 1.0) : 0.0);
+			if (!air)
+			{
+				squash += (sq_in - squash) * minf(1.0, dt * 10.0);
+			}
+			else
+			{
+				squash = maxf(0.0, squash - dt * 4.0);
+			}
+			pop_fx = maxf(0.0, pop_fx - dt / (((pro_flight && air && !_OLD_POPSNAP) ? 0.65 : 0.45)));
+			squash_fx = maxf(0.0, squash_fx - dt / 0.5);
+			if (pop_wait > 0.0)
+			{
+				_pop_arm_t -= dt;
+				if (_pop_arm_t <= 0.0)   // the lip never came (braked, turned off it)
+				{
+					pop_wait = 0.0;
+				}
+			}
+			bool backside = !air && _g_pitch < -0.06 && terrain.jump_mask(x, z) > 0.05;
+			bool pumped = (_pump_release > 0.25 || (_pump_release > 0.08 && _pump_release > 0.5 * _hop_tap_t)) && prep < 0.1 && man_a < 0.08;
+			_pump_release = (space ? pump_press_t : _pump_release);
+			if (!inp.b("hop"))
+			{
+				pump_press_t = 0.0;
+			}
+			double fgv = T.get("inputForgive", 0.12);
+			bool let_go = !space && hop_held;
+			_hop_tap_t = ((space && !hop_held) ? 0.0 : _hop_tap_t + dt);
+			_hop_buf = maxf(0.0, _hop_buf - dt);
+			gest_hop = maxf(0.0, gest_hop - dt);
+			if (body_in < -0.5 && !air)
+			{
+				_bh_back += dt;
+				_bh_since = 0.0;
+				_bh_peak = maxf(_bh_peak, man_a);
+			}
+			else
+			{
+				_bh_since += dt;
+				if (_bh_since > 0.3)
+				{
+					_bh_back = 0.0;
+					_bh_peak = 0.0;
+				}
+			}
+			bool snapped = _bh_back > 0.04 && body_in > ((_OLD_STICKPOP ? 0.3 : STICK_POP_FWD)) && _bh_since < 0.22 && T.get("stickHop", 1.0) > 0.0;
+			bool can_hop = !air && !rear_air && !_nosing() && !(hop_t > 0) && kick_t <= 0.0;
+			if (snapped && can_hop && v > 1.0)
+			{
+				// (a slow snap is a weaker one; even a bare tap of the stick hops a little)
+				double q_snap = 1.0 - 0.6 * smooth01((_bh_since - 0.06) / 0.16);
+				double scoop = _scoop_k(maxf(man_a, _bh_peak));
+				double pw = _hop_power(maxf(0.45, _crouch_power()), scoop) * q_snap;
+				_bh_back = 0.0;
+				_bh_peak = 0.0;
+				gest_hop = 0.4;
+				throw_v = 0.0;   // (the pull back was the preload, not a back flip throw)
+				if (space)   // the button's crouch went into this pop: letting go doesn't pop again
+				{
+					hop_block = true;
+				}
+				if (Env.s("BMX_FORGIVE_PROBE") != "")   // tests
+				{
+					host.log(Gd.fmt("STICKHOP power=%.2f scoop=%.2f snap=%.2f man=%.2f v=%.1f lip=%s", pw, scoop, q_snap, man_a, v, (lip_state == 2 ? lip_last : -1.0)));
+				}
+				_pop_now(pw);
+			}
+			else if (let_go && !air && !_nosing() && crouch > 0.1 && !(hop_t > 0) && !backside && !pumped)
+			{
+				double pw2 = _hop_power(maxf(0.45, _crouch_power()), _scoop_k(man_a));
+				if (Env.s("BMX_FORGIVE_PROBE") != "" && man_a > 0.05)   // tests
+				{
+					host.log(Gd.fmt("SCOOPHOP power=%.2f crouch=%.2f man=%.2f", pw2, crouch, man_a));
+				}
+				_pop_now(pw2);
+			}
+			else if (let_go && !air && (pumped || backside))
+			{
+				_cr_rel = 1.0;   // a pumping press let go: the legs straighten now (that is the push), no pop
+			}
+			else if ((let_go || (snapped && _bh_since < 0.22)) && air && !pumped)
+			{
+				if (air_time <= fgv && crouch > 0.1 && kick_t <= 0.0)
+				{
+					// coyote time: let go a moment after the wheels left the lip still pops (what the legs have left)
+					if (snapped)
+					{
+						_bh_back = 0.0;
+						gest_hop = 0.4;
+					}
+					pop_time = 0.75;
+					_hop_pop(0.5, maxf(0.45, _crouch_power()));
+					crouch = 0.0;
+					if (Env.s("BMX_FORGIVE_PROBE") != "")   // tests
+					{
+						host.log(Gd.fmt("FORGIVE coyote pop air=%.3f vy=%.2f", air_time, vy));
+					}
+				}
+				else if (let_go && _hop_tap_t < 0.25 && fgv > 0.0)
+				{
+					_hop_buf = fgv * 1.25;   // a tap just before touch-down: the hop comes as the tyres land
+				}
+			}
+			else if (_hop_buf > 0.0 && can_hop && !space)
+			{
+				_hop_buf = 0.0;
+				_pop_now(0.45);
+				if (Env.s("BMX_FORGIVE_PROBE") != "")   // tests
+				{
+					host.log(Gd.fmt("FORGIVE buffered hop since_land=%.3f", since_land));
+				}
+			}
+			if (hop_t > 0)
+			{
+				hop_t -= dt;
+				_hop_nose_t = maxf(_hop_nose_t, (0.22 + 0.15 * hop_load) * 0.6 * (1 - maxf(0.0, hop_t) / HOP_PUSH));
+				if (hop_t <= 0 || air)
+				{
+					hop_t = 0.0;
+					_hop_pop(hop_load, hop_charge);
+					hop_charge = 0.0;
+					lift_t = 0.12;
+				}
+			}
+			if (lift_t > 0)
+			{
+				lift_t = (air ? 0.0 : maxf(0.0, lift_t - dt));
+			}
+			hop_bar_show = !air && crouch > 0.12 && (space || back_in > 0.05 || _cr_rel < 0.2);
+			hop_bar = _crouch_power();   // (it peaks on the rebound, then sags while the crouch is held: pop at the peak)
+			hop_held = space;
+			if (_OLD_HOPNOSE)
+			{
+				hop_nose = maxf(hop_nose, _hop_nose_t);
+				_hop_nose_t = 0.0;
+				hop_nose *= exp(-dt * 3.5);
+			}
+			else
+			{
+				_hop_nose_t *= exp(-dt * 3.5);
+				double hk = 1.0 - exp(-dt / HOP_NOSE_TAU);   // (two stages: the kick starts from rest, no jump in its speed either)
+				_hop_nose_m += (_hop_nose_t - _hop_nose_m) * hk;
+				hop_nose += (_hop_nose_m - hop_nose) * hk;
+			}
+			land_perfect = maxf(0.0, land_perfect - dt * 1.2);
+		}
+
+		private double _landing_slope(IGround terrain)
+		{
+			double c = (!is_nan(course) ? course : heading);
+			V2 d = new V2(cos(c), -sin(c));
+			double hv = absf(v) * signf((v != 0.0 ? v : 1.0));
+			double py = y;
+			double pvy = vy;
+			double px = x;
+			double pz = z;
+			for (long i = 0; i < 80; i++)
+			{
+				double st = 0.04;
+				px += d.x * hv * st;
+				pz += d.y * hv * st;
+				pvy -= G * st;
+				py += pvy * st;
+				double gh = terrain.height(px, pz);
+				if (py <= gh && pvy < 0.0)
+				{
+					_land_t = (i + 1) * st;
+					double hf = terrain.height(px + d.x * 0.6, pz + d.y * 0.6);
+					double hb = terrain.height(px - d.x * 0.6, pz - d.y * 0.6);
+					return atan2(hf - hb, 1.2);
+				}
+			}
+			return NAN;
+		}
+
+		private void _air_blend(double dt)
+		{
+			if (_OLD_AIRBLEND)
+			{
+				air_k += ((((air && air_time > 0.12) ? 1.0 : 0.0)) - air_k) * minf(1.0, dt * 6);
+				return;
+			}
+			double a_min = T.get("airBodyMin", AIR_BODY_MIN);
+			bool real = false;
+			if (air)
+			{
+				if (!is_nan(_land_pitch))
+				{
+					real = air_time + _land_t >= a_min || air_time > a_min;
+				}
+				else
+				{
+					real = air_time > maxf(a_min, AIR_BODY_FROM);
+				}
+			}
+			double k_t = (real ? 1.0 : 0.0);
+			air_k += (k_t - air_k) * minf(1.0, dt / maxf(0.01, (k_t > air_k ? T.get("airBodyIn", AIR_BODY_IN) : T.get("airBodyOut", AIR_BODY_OUT))));
+		}
+
+		private void _step_lip(double dt, V3 f, bool brake)
+		{
+			IGround terrain = host.terrain;
+			double lip_t = INF;
+			lip_scan = (lip_scan + 1) % 3;
+			if (lip_scan != 0 && !air && v > 3 && lip_state != 0)
+			{
+				lip_t = (lip_state == 1 ? INF : maxf(0.0, lip_last - dt));
+			}
+			else if (!air && v > 3)
+			{
+				double stp = 0.3;
+				long n = mini(36, ceili(v * (T.f("prepTime") + 0.1) / stp));
+				double h_prev = terrain.height(x, z);
+				double s_prev = NAN;
+				for (long i = 1; i < n + 1; i++)
+				{
+					double d = i * stp;
+					double sx = x + f.x * d;
+					double sz = z + f.z * d;
+					double hh = terrain.height(sx, sz);
+					double sl = (hh - h_prev) / stp;
+					if (!is_nan(s_prev) && s_prev > 0.15 && (s_prev - sl) * v * v / stp > 2.5 * G && terrain.jump_mask(sx, sz) > 0.05)
+					{
+						lip_t = (d - stp) / v;
+						if (lip_state != 2)   // (measured from where it's first seen)
+						{
+							lip_h = maxf(0.0, h_prev - terrain.height(x, z));
+						}
+						break;
+					}
+					s_prev = sl;
+					h_prev = hh;
+				}
+			}
+			if (air || v <= 3)
+			{
+				lip_state = 0;
+			}
+			else if (lip_t == INF)
+			{
+				lip_state = 1;
+			}
+			else
+			{
+				lip_state = 2;
+				lip_last = lip_t;
+			}
+			_lip_ago = (lip_state == 2 ? 0.0 : _lip_ago + dt);
+			if (!_OLD_WHIP)
+			{
+				// (spins, 2026-11-24: pushed right to the stick's edge it winds up a SPIN instead - the shoulders and head turned
+				// into it, carved off the lip; short of the edge it stays a whip. BMX_OLD_SPIN=1 = spins from the air alone)
+				bool spin_edge = absf(flick_in) >= SPIN_EDGE && !_OLD_SPIN;
+				if (!air && lip_state == 2 && lip_last < WHIP_WINDOW && absf(flick_in) > 0.25 && !spin_edge)
+				{
+					whip_load = move_toward(whip_load, clampf(flick_in / 0.8, -1.0, 1.0), dt / WHIP_WIND);
+				}
+				else if (!air)
+				{
+					whip_load = move_toward(whip_load, 0.0, dt * 3.0);
+				}
+				if (!air && lip_state == 2 && lip_last < WHIP_WINDOW && spin_edge)
+				{
+					spin_load = move_toward(spin_load, signf(flick_in), dt / WHIP_WIND);
+				}
+				else if (!air)
+				{
+					spin_load = move_toward(spin_load, 0.0, dt * 3.0);
+				}
+			}
+			double ab_t = 0.0;
+			if (lip_state == 2 && crouch < 0.1 && !_OLD_ABSORB)
+			{
+				// small lips only (a real jump he pops): fully under ABSORB_SMALL, none past ABSORB_BIG; the faster past what it
+				// needs, the more (floatier over it)
+				ab_t = smooth01((absf(v) - (ABSORB_V0 + ABSORB_VH * lip_h)) / 3.0) * smooth01((ABSORB_BIG - lip_h) / (ABSORB_BIG - ABSORB_SMALL));
+			}
+			auto_absorb += (ab_t - auto_absorb) * minf(1.0, dt * ((ab_t > auto_absorb ? 12.0 : 3.0)));
+			if (air)
+			{
+				auto_absorb = maxf(0.0, auto_absorb - dt * 3.0);
+			}
+			if (_PULL_PROBE && lip_state == 2 && host.get_physics_frames() % 6 == 0)
+			{
+				host.log(Gd.fmt("ABSORB v=%.1f lip_h=%.2f lip_t=%.2f ab_t=%.2f absorb=%.2f prep=%.2f", v, lip_h, lip_last, ab_t, auto_absorb, prep));
+			}
+			double prep_t = (lip_t < T.f("prepTime") ? smooth01(1 - lip_t / T.f("prepTime")) : 0.0);
+			prep = (air ? maxf(0.0, prep - dt * 4) : prep + (prep_t - prep) * minf(1.0, dt * 8));
+			bool popping = lip_t < ((!_OLD_AUTOPOP ? 0.10 : 0.14));
+			if (popping && !pop_fired)
+			{
+				// hands off, the rider gives the lip a push of his own (autoPump of a full one). A crouch still held
+				// into the lip (hop / stick held, never let go) is timed for the player, at popAssist of what letting go on
+				// time gives. A lip being squashed gets no push
+				double p_auto = T.f("autoPump") * ((_OLD_AUTOPOP ? 0.6 : 1.0)) * prep * (1.0 - auto_absorb);
+				if (crouch > 0.1)
+				{
+					p_auto = maxf(p_auto, _crouch_power() * T.get("popAssist", 0.6));
+				}
+				if (squash > 0.2 || (crouch <= 0.1 && auto_absorb > 0.5))   // (soaking it up: no push at all)
+				{
+					p_auto = 0.0;
+				}
+				pop_fired = true;
+				if (p_auto > pop_wait)
+				{
+					pop_wait = p_auto;
+					_pop_arm_t = 0.5;
+					pro_pop = crouch > 0.1;   // (a crouch the player held into the lip: his pump; hands off: the rider's own, plain)
+				}
+				compress_v += 2.5 * prep * p_auto;
+				if (Env.s("BMX_TRICK") != "")   // tests
+				{
+					host.log(Gd.fmt("POP auto prep=%.2f crouch=%.2f power=%.2f squash=%.2f", prep, crouch, p_auto, squash));
+				}
+			}
+			if (!air && lip_t == INF)
+			{
+				pop_fired = false;
+			}
+			double lp = 0.0;
+			double tuck = 0.0;
+			if (air)
+			{
+				double hh = maxf(0.0, y - _g_y);
+				double tg = (vy + sqrt(vy * vy + 2 * G * hh)) / G;
+				land_vn = 0.0;
+				land_reach = 1.0;
+				if (!_OLD_LANDLEGS)
+				{
+					double tg_l = ((!is_nan(_land_pitch) && _land_t > 0.0) ? _land_t : tg);
+					double sl = (!is_nan(_land_pitch) ? _land_pitch : _g_pitch);
+					double vy_td = vy - G * tg_l;
+					land_vn = absf(absf(v) * sin(sl) - vy_td * cos(sl));
+					land_reach = lerpf(0.35, 1.0, smooth01((land_vn - 1.0) / 3.0));
+					_vn_td = land_vn;
+					_reach_td = land_reach;
+				}
+				double lpt = T.f("landPrepTime") * ((_OLD_LANDLEGS ? 1.0 : lerpf(0.85, 1.4, (land_reach - 0.35) / 0.65)));
+				lp = (vy < 0 ? smooth01(1 - tg / lpt) : 0.0);
+				if (_tuck_in)   // the tuck held into the ground: the legs are still folded, with little left to take the hit
+				{
+					lp *= 0.25;
+				}
+				tuck = smooth01((air_time - 0.08) / 0.2) * (1 - lp);
+			}
+			land_prep = lp;
+			double cT = 0.0;
+			if (air)
+			{
+				cT = -0.12 * tuck;
+			}
+			else if (pop_wait > 0.0 || hop_t > 0)   // the legs drive straight through the edge
+			{
+				cT = 0.05 + 0.05 * minf(1.0, pop_wait);
+			}
+			else if (popping && squash < 0.2)
+			{
+				cT = 0.03;
+			}
+			else
+			{
+				cT = -0.15 * crouch - 0.06 * carve - T.f("prepDepth") * prep * (1.0 - 0.7 * crouch) - 0.08 * squash;
+			}
+			compress_v += ((cT - compress) * 120 - compress_v * 14) * dt;
+			compress = clampf(compress + compress_v * dt, -0.28, 0.1);
+			_air_blend(dt);
+			if (host.susp != null && !host.susp.wheels_follow)   // in a ride the tyres follow the ground (BikeRig.fit_wheels)
+			{
+				double sp = sin(pitch);
+				host.susp.update(dt, new GdDict { { "air", air }, { "load", maxf(load, -compress * 2.5) }, { "brake", ((brake && !air) ? 1.0 : 0.0) }, { "bumpF", (air ? 0.0 : w_f - (y + (L - BB_REAR) * sp)) }, { "bumpR", (air ? 0.0 : w_r - (y - BB_REAR * sp)) } });
+			}
+		}
+
+		private void _rear_spin_step(double dt)
+		{
+			if (!(air || rear_air))
+			{
+				double dv = absf(vw_r - _wr_vr);
+				wr_knock = maxf(wr_knock, dv);
+				wr_vib2 += dv * dv;
+				wr_vibn += 1;
+			}
+			_wr_vr = vw_r;
+			double ground_w = (skid ? 0.0 : v / RWR);
+			if (_wr_old || !(air || rear_air))
+			{
+				wr_w = ground_w;
+				return;
+			}
+			double a = WR_BEARING + WR_AIR * wr_w * wr_w + WR_BRAKE * brake_r;
+			wr_w = move_toward(wr_w, 0.0, a * dt);
+			if (pedal > 0.05)
+			{
+				if (_OLD_CADENCE)
+				{
+					wr_w = maxf(wr_w, crank_rate(v / RWF, gear_k(), T.f("topSpeed"), sprint) * pedal * 2.78 * gear_k() * T.f("topSpeed") * RWF / RWR);
+				}
+				else
+				{
+					wr_w = maxf(wr_w, crank_rate(v / RWR, gear_k(), T.f("topSpeed"), sprint, drive_ratio()) * pedal * drive_ratio());
+				}
+			}
+		}
+
+		private void _step_wheels(double dt, V3 f, bool in_water, double va)
+		{
+			// --- wheels / cranks ---
+			double w = v / RWF;
+			wheel_f += w * dt;
+			double kick_to = 0.0;
+			if (_rear_shock() && !air && pedal > 0.05 && !_OLD_SUSPFX)
+			{
+				double kk = T.get("pedalKick", 1.0);
+				crank -= clampf(dg_vR, -1.0, 2.0) * CHAIN_GROWTH / CRANK_ARM * kk * dt;
+				kick_to = clampf(absf(dg_vR) * kk, 0.0, 1.5) / 1.5;
+			}
+			_kick_k += (kick_to - _kick_k) * minf(1.0, dt * 25.0);
+			_rear_spin_step(dt);
+			wheel_r += wr_w * dt;
+			if (v < -0.05 && !air && !skid)
+			{
+				// rolling backwards the freewheel's pawls catch: the chain turns the cranks back with the wheel
+				crank += v / RWR / ((_OLD_CADENCE ? 2.78 * gear_k() * T.f("topSpeed") : drive_ratio())) * dt;
+			}
+			else if (pedal > 0.05)
+			{
+				if (_OLD_CADENCE)
+				{
+					crank += crank_rate(w, gear_k(), T.f("topSpeed"), sprint) * pedal * dt;
+				}
+				else
+				{
+					crank += (crank_rate((air ? wr_w : v / RWR), gear_k(), T.f("topSpeed"), sprint, drive_ratio()) + CHAIN_SLIP_LURCH * chain_slip_k) * pedal * dt;
+				}
+			}
+			else if (!air)
+			{
+				double aL = host.pedal_a0[0];
+				double aR = host.pedal_a0[1];
+				double tgt = 0.0;
+				double period = TAU;
+				double cl = (_OLD_SLOWBODY ? lean : bike_lean * 0.65);
+				if (cl > 0.12)
+				{
+					tgt = aR + PI / 2;
+				}
+				else if (cl < -0.12)
+				{
+					tgt = aL + PI / 2;
+				}
+				else
+				{
+					tgt = aL;
+					period = PI;
+				}
+				tgt += period * round((crank - tgt) / period);
+				crank += (tgt - crank) * minf(1.0, dt * 3.5);
+			}
+			if (air)
+			{
+				// legs reach for the landing; holding Space tucks the bike up into the body instead
+				// (2026-11-26, Project X reference, step 3: the rider pulls the bike right up to himself, knees nearly to the chest. The
+				// tuck's reach was 0.85 x legComp = 0.17 m of leg (the bike rose ~13 cm about the shared centre of mass); tuckPull 0.32
+				// m: ~24 cm, so the wheels clear the ground longer. BMX_OLD_TUCK=1 = before)
+				double tk_r = (_OLD_TUCK ? T.f("legComp") * 0.85 : T.get("tuckPull", 0.32));
+				double rel_t = T.f("legExt") * land_prep * land_reach - (tk_r + 0.07 * smooth01(pop_fx / 0.35) * pop_q) * air_pull * (1 - land_prep);
+				double rel = _or(body_y, y) - ((air_time <= dt * 1.5 ? y : _or(y_prev, y)));
+				double nrel = rel + (rel_t - rel) * (1 - exp(-dt * 12));
+				y -= TUCK_SHARE * (nrel - rel);
+				body_y = y + nrel;
+				body_v = vy;
+			}
+			y_prev = y;
+			skid_fx = skid || spin > 0.3 || (!air && va > 1.5 && (absf(slip - _squirm) > 0.1 || (grip_r < 0.45 && absf(slip_w) > 0.3)));
+			host.ride_fx(dt, f, va, in_water);
+		}
+
+		private V2 _edge_spin(double axis, double s, double hold, double dt)
+		{
+			double edge = signf(axis) * clampf((absf(axis) - 0.8) / 0.15, 0.0, 1.0);
+			double rate = (absf(edge) > absf(s) ? T.get("stickSpinBuild", 2.5) : 10.0);   // let go = the spin stops soon (4 /s ran on ~120 deg)
+			s = move_toward(s, edge, rate * dt);
+			if (absf(edge) > 0.5 && signf(edge) == signf(s))
+			{
+				hold += dt;
+			}
+			else
+			{
+				hold = maxf(0.0, hold - dt * 3.0);
+			}
+			return new V2(s, hold);
+		}
+
+		private double _edge_grow(double hold)
+		{
+			return 1.0 + T.get("stickSpinGrow", 0.8) * minf(hold, 1.5);
+		}
+
+		private bool _balancing()
+		{
+			return man_a > 0.05;
+		}
+
+		private void _man_drop()
+		{
+			if (man_w > -2.0)
+			{
+				man_w = -2.0;
+			}
+			man_lock = maxf(man_lock, 0.35);
+		}
+
+		private bool _nosing()
+		{
+			return nose_a > 0.05;
+		}
+
+		private V2 _tip(double a, double w, double b, double grav, double drive, double dt)
+		{
+			w += (grav * sin(a - b) + drive - T.get("manDamp", 1.6) * w) * dt;
+			a += w * dt;
+			if (a <= 0.0)
+			{
+				a = 0.0;
+				w = maxf(0.0, w);
+			}
+			return new V2(a, w);
+		}
+
+		private V2 _tip_over(double b, string msg)
+		{
+			v *= T.get("manLoopKeep", 0.72);
+			shake = maxf(shake, 0.25);
+			host.flash(msg);
+			return new V2(b * 0.45, -2.5);
+		}
+
+		private void _balance_step(double dt, bool pedalling, double throttle, bool brake)
+		{
+			double zone = T.get("manZone", 0.14);
+			double b = T.get("manBalance", 0.55);
+			double m_from = T.get("manualFrom", 0.4);
+			double lift = T.get("manLift", 9.0);
+			man_lock = maxf(0.0, man_lock - dt);
+			_man_grace = (man_a > 0.05 ? 0.5 : maxf(0.0, _man_grace - dt));
+			double pull = clampf((-body_in - m_from) / maxf(0.05, 1.0 - m_from), 0.0, 1.0);
+			double pull_t = T.get("manPullTime", 0.25);
+			if (air && Env.s("BMX_OLD_LOOPOUT") == "")
+			{
+				_pull_age = maxf(_pull_age, 1.0);
+			}
+			else if (-body_in < 0.15)
+			{
+				_pull_age = 0.0;
+			}
+			else
+			{
+				_pull_age += dt;
+			}
+			if (-body_in < 0.12 && !(air && Env.s("BMX_OLD_LOOPOUT") == ""))   // back at the centre: it has to be pulled again
+			{
+				_man_armed = false;
+			}
+			bool gate_ok = absf(lean) < T.get("manGate", 0.2);
+			bool straight = gate_ok || man_a > 0.05;
+			if (!_man_armed && gate_ok && lip_state != 2 && !air && -body_in >= 0.5 && _pull_age <= pull_t && (!pad || T.get("manBothSticks", 0.0) < 0.5 || left_back >= 0.5))
+			{
+				_man_armed = true;
+				if (Env.s("BMX_MAN_PROBE") != "")
+				{
+					host.log(Gd.fmt("MANARM age=%.2f body_in=%.2f air_time=%.2f since_land=%.2f v=%.1f", _pull_age, body_in, air_time, since_land, v));
+				}
+			}
+			double vp = maxf(1.0, T.get("manPowerSpeed", 9.0));
+			double pw_t = ((pedalling && straight && !air) ? T.get("manPower", 1.0) * minf(throttle, 1.0) * (1.0 - smooth01((absf(v) - 0.5 * vp) / (0.5 * vp))) : 0.0);
+			_man_pw += (pw_t - _man_pw) * minf(1.0, dt * ((pw_t > _man_pw ? 6.0 : 3.0)));
+			if (!straight)   // leaned into a corner with the front down: nothing left over lifts it
+			{
+				_man_pw = 0.0;
+			}
+			if (T.get("manDirect", 1.0) >= 0.5 && pull_t > 0.0)
+			{
+				// (the pedals alone lift it to the balance point at most: only a pull can take it over the back)
+				double p_cap = b / (b + T.get("manLoop", 0.42) + 0.08);
+				pull = maxf((_man_armed ? pull : 0.0), minf(pull, p_cap) * minf(1.0, _man_pw));
+			}
+			else if (!straight)   // the corner gate holds in every mode (old tipping balance, manPullTime 0 too)
+			{
+				pull = 0.0;
+			}
+			bool can = !air && !_nosing() && v > ((pedalling ? 0.6 : 1.5)) && throw_v <= 0.5;
+			man_pull = (can ? pull : 0.0);
+			if (!can)
+			{
+				// in the air or too slow the balance is let go (the air control owns the pitch)
+				man_w = 0.0;
+				man_a = move_toward(man_a, 0.0, 3.0 * dt);
+				man_zone = false;
+				man_zone_t = 0.0;
+			}
+			else
+			{
+				double drive = 0.0;
+				if (man_lock <= 0.0)
+				{
+					drive += lift * pull;
+					drive += lift * T.get("manSprintLift", 1.1) * _sprint_lift * (0.55 + 0.45 * absf(sin(crank)));
+					if (pedalling && pull > 0.0)
+					{
+						drive += T.get("manPedal", 3.0) * pull * minf(throttle, 1.0) * (0.4 + 0.6 * absf(sin(crank)));
+					}
+				}
+				if (brake && brake_r > 0.1 && man_a > 0.0)
+				{
+					drive -= T.get("manBrake", 12.0);
+				}
+				drive -= lift * 0.8 * clampf((body_in - 0.2) / 0.6, 0.0, 1.0);
+				V2 t = _tip(man_a, man_w, b, T.get("manGravity", 7.0), drive, dt);
+				double direct = clampf(T.get("manDirect", 1.0), 0.0, 1.0);
+				double loop_at = b + T.get("manLoop", 0.42);
+				if (direct > 0.0)
+				{
+					double tgt = (man_lock <= 0.0 ? pull * (loop_at + 0.08) : 0.0);
+					tgt = maxf(tgt, 0.35 * T.get("manSprintLift", 1.1) * _sprint_lift);
+					if (brake && brake_r > 0.1)   // the rear brake sets it down
+					{
+						tgt *= 1.0 - minf(1.0, brake_r * 1.5);
+					}
+					tgt *= 1.0 - clampf((body_in - 0.2) / 0.6, 0.0, 1.0);
+					double kf = T.get("manFollow", 40.0);
+					double acc = kf * (tgt - man_a) - 2.0 * sqrt(kf) * 0.9 * man_w;
+					if (pedalling && pull > 0.0 && man_lock <= 0.0)   // a wheelie: each stroke nudges the front
+					{
+						acc += 0.35 * T.get("manPedal", 3.0) * pull * minf(throttle, 1.0) * absf(sin(crank));
+					}
+					double w2 = man_w + acc * dt;
+					double a2 = man_a + w2 * dt;
+					if (a2 <= 0.0)
+					{
+						a2 = 0.0;
+						w2 = maxf(0.0, w2);
+					}
+					t = new V2(lerpf(t.x, a2, direct), lerpf(t.y, w2, direct));
+				}
+				if (t.x > loop_at)
+				{
+					if (direct >= 0.5)
+					{
+						// pulled too far and kept there: he goes off the back (manFall; 0 = the front just floats at the top)
+						_man_over += dt;
+						if (T.get("manFall", 1.0) < 0.5)
+						{
+							t = new V2(loop_at, minf(t.y, 0.0));
+						}
+						else if (_man_over > 0.2)
+						{
+							_crash("LOOPED OUT!");
+							_man_over = 0.0;
+						}
+					}
+					else
+					{
+						t = _tip_over(b, "LOOPED OUT!");
+						man_lock = 0.6;
+					}
+				}
+				else
+				{
+					_man_over = maxf(0.0, _man_over - dt * 2.0);
+				}
+				man_a = t.x;
+				man_w = t.y;
+				man_zone = man_a > 0.15 && absf(man_a - b) < zone;
+				man_zone_t = (man_zone ? man_zone_t + dt : 0.0);
+				if (Env.s("BMX_MAN_PROBE") != "" && host.get_physics_frames() % 15 == 0)   // tests
+				{
+					host.log(Gd.fmt("MAN a=%.2f pull=%.2f pitch=%.2f gp=%.2f v=%.1f stick=%.2f armed=%s pw=%.2f lean=%.2f lk=%.2f bike_lean=%.2f counter=%.2f steer_in=%.2f yaw=%.2f", man_a, pull, pitch, _g_pitch, v, body_in, _man_armed, _man_pw, lean, man_lk, bike_lean, counter, steer_in, yaw_rate));
+				}
+			}
+			double nb = T.get("noseBalance", 0.5);
+			double n_from = T.get("noseFrom", 0.6);
+			double n_lift = T.get("noseLift", 9.0);
+			nose_lock = maxf(0.0, nose_lock - dt);
+			_nose_grace = (nose_a > 0.05 ? 0.5 : maxf(0.0, _nose_grace - dt));
+			double push = clampf((body_in - n_from) / maxf(0.05, 1.0 - n_from), 0.0, 1.0);
+			double grab = minf(1.0, (((brake && !front_air) ? brake_f : 0.0)) * 1.8);
+			bool n_can = n_lift > 0.0 && !air && !front_air && !_balancing() && v > ((nose_a > 0.05 ? 1.0 : 2.5)) && gest_hop <= 0.0;
+			nose_push = (n_can ? push * grab : 0.0);
+			if (!n_can)
+			{
+				nose_w = 0.0;
+				nose_a = move_toward(nose_a, 0.0, 3.0 * dt);
+				nose_zone = false;
+			}
+			else
+			{
+				double n_drive = 0.0;
+				if (nose_lock <= 0.0)
+				{
+					n_drive += n_lift * push * ((nose_a < 0.08 ? grab : maxf(grab, 0.6)));
+					if (nose_a > 0.08)
+					{
+						n_drive += T.get("noseBrake", 4.0) * grab;
+					}
+				}
+				n_drive -= n_lift * 0.8 * clampf((-body_in - 0.15) / 0.6, 0.0, 1.0);
+				V2 nt = _tip(nose_a, nose_w, nb, T.get("noseGravity", 7.0), n_drive, dt);
+				double n_direct = clampf(T.get("manDirect", 1.0), 0.0, 1.0);
+				if (n_direct > 0.0)
+				{
+					// the same on the front wheel: the stick forward is how far the rear is up (the brake only starts it); it
+					// tops out just past the balance point, it never throws him over
+					double n_tgt = (nose_lock <= 0.0 ? push * (nb + 0.12) * ((nose_a < 0.08 ? grab : 1.0)) : 0.0);
+					n_tgt *= 1.0 - clampf((-body_in - 0.15) / 0.6, 0.0, 1.0);
+					double nk = T.get("manFollow", 40.0);
+					double nw2 = nose_w + (nk * (n_tgt - nose_a) - 2.0 * sqrt(nk) * 0.9 * nose_w) * dt;
+					double na2 = nose_a + nw2 * dt;
+					if (na2 <= 0.0)
+					{
+						na2 = 0.0;
+						nw2 = maxf(0.0, nw2);
+					}
+					nt = new V2(lerpf(nt.x, na2, n_direct), lerpf(nt.y, nw2, n_direct));
+				}
+				if (nt.x > nb + T.get("noseLoop", 0.4))
+				{
+					nt = _tip_over(nb, "TOO FAR!");
+					nose_lock = 0.6;
+				}
+				nose_a = nt.x;
+				nose_w = nt.y;
+				nose_zone = nose_a > 0.15 && absf(nose_a - nb) < zone;
+				if (Env.s("BMX_NOSE_PROBE") != "" && host.get_physics_frames() % 15 == 0)   // tests
+				{
+					host.log(Gd.fmt("NOSE a=%.2f w=%.2f push=%.2f grab=%.2f zone=%s pitch=%.2f gp=%.2f v=%.1f rear_air=%s slip=%.2f", nose_a, nose_w, push, grab, nose_zone, pitch, _g_pitch, v, rear_air, slip));
+				}
+			}
+		}
+
+		private double _crouch_power()
+		{
+			return sqrt(clampf(crouch, 0.0, 1.0)) * (1.0 - T.get("popRebound", 0.18) * (1.0 - rebound));
+		}
+		// _sus_cache: in BikeSim.Manual.cs
+
+		private double _leg_dv(double power)
+		{
+			return T.f("popPower") * clampf(power, 0.0, 1.15) * (1.0 - 0.45 * clampf(_n_grd - 1.0, 0.0, 1.4));
+		}
+
+		private void _pop_apply(double dv)
+		{
+			double th = clampf(atan2(vy, maxf(absf(v), 0.5)), -0.6, 1.2);
+			vy += dv * cos(th);
+			v -= signf(v) * minf(absf(v), dv * sin(th));
+		}
+
+		private void _pop_along(double dv)
+		{
+			double sp = sqrt(v * v + vy * vy);
+			if (sp < 0.5)
+			{
+				_pop_apply(dv);
+				return;
+			}
+			double k = sqrt(sp * sp + dv * dv) / sp;
+			v *= k;
+			vy *= k;
+		}
+
+		public static double drag_k()
+		{
+			return (_OLD_DRAG ? 1.0 : DRAG_REAL);
+		}
+
+		public double spin_top(double p_sprint)
+		{
+			return lerpf(SPIN_RPM, SPIN_SPRINT, clampf(p_sprint, 0.0, 1.0)) / 60.0 * TAU * drive_ratio() * RWR;
+		}
+
+		private void _pop_now(double pw)
+		{
+			double win = T.get("popWindow", 0.24);
+			crouch = 0.0;
+			bool edge = front_air && !rear_air && _lip_ago < 0.35;
+			if (((lip_state == 2 && lip_last < win) || edge) && !rear_air && v > 3.0)
+			{
+				double lt = ((edge || lip_state != 2) ? 0.0 : lip_last);
+				pop_time = 1.0 - 0.4 * smooth01((lt - 0.12) / maxf(0.02, win - 0.12));
+				pop_wait = maxf(pop_wait, pw * pop_time);
+				_pop_arm_t = lt + 0.3;
+				pop_fired = true;
+				pro_pop = true;
+				if (body_in > 0.3)
+				{
+					_pop_latch = true;
+				}
+				if (!front_air && !air && !_OLD_LIPLOAD)
+				{
+					nose_k = smooth01((_g_pitch - 0.4) / 0.35) * (1.0 - smooth01((absf(v) - 9.0) / 6.0));
+					pitch_v += POP_FRONT_LIFT * clampf(pw, 0.0, 1.0) * nose_k;
+				}
+				compress_v += 2.0 * pw;
+				if (man_a > 0.05)
+				{
+					man_lock = maxf(man_lock, 0.3);
+				}
+				if (Env.s("BMX_TRICK") != "" || Env.s("BMX_FORGIVE_PROBE") != "")   // tests
+				{
+					host.log(Gd.fmt("POP lip in %.2fs power=%.2f timing=%.2f edge=%s", lt, pw, pop_time, edge));
+				}
+			}
+			else
+			{
+				pop_time = 0.0;
+				_hop_begin(0.5 + 0.5 * minf(1.0, pw), pw);
+			}
+		}
+
+		private double _scoop_k(double front)
+		{
+			double b = T.get("manBalance", 0.55);
+			return smooth01(front / 0.3) * (1.0 - 0.6 * smooth01((front - b) / 0.3)) * T.get("stickHop", 1.0);
+		}
+
+		private double _hop_power(double charge_k, double scoop)
+		{
+			return minf(1.15, maxf(charge_k, scoop) + 0.15 * minf(charge_k, scoop));
+		}
+
+		private void _hop_begin(double load_k, double power)
+		{
+			hop_t = HOP_PUSH;
+			hop_load = maxf(load_k, 0.5);
+			hop_charge = power;
+			compress_v = maxf(compress_v, (0.05 - compress) / HOP_PUSH);
+			body_v = vy + (T.f("legExt") - minf(0.0, _or(body_y, y) - y)) / HOP_PUSH;
+			if (man_a > 0.05)
+			{
+				// out of a manual: the scoop brings the front back down, the balance lets go
+				man_lock = maxf(man_lock, 0.3);
+				if (man_a > T.get("manBalance", 0.55))
+				{
+					man_w = minf(man_w, -3.0);
+				}
+			}
+		}
+
+		private void _hop_pop(double load_k, double power)
+		{
+			double dv = _leg_dv(power);
+			if (air)
+			{
+				// (just past a lip: late. The edge is gone, so three quarters of the push at most, less what the legs gave it)
+				dv = maxf(0.0, 0.75 * dv - _pop_used);
+				_pop_apply(dv);
+			}
+			else
+			{
+				_pop_used = 0.0;
+				double th = clampf(_g_pitch, -0.6, 0.8);
+				vy = clampf(vy, minf(0.0, v * sin(th)), maxf(0.0, v * sin(th)) + 0.2) + dv * cos(th);
+				v -= signf(v) * minf(absf(v), dv * tan(th));
+			}
+			_pop_used += dv;
+			pop_q = power;
+			pop_fx = 1.0;
+			kick_t = 0.3;
+			_hop_nose_t = 0.22 + 0.15 * load_k + 0.08 * power;
+			body_v = vy;
+			if (Env.s("BMX_FORGIVE_PROBE") != "")   // tests
+			{
+				host.log(Gd.fmt("HOP power=%.2f dv=%.2f vy=%.2f air=%s n=%.2f legs=%.2f v=%.1f slope=%.2f", power, dv, vy, air, _n_grd, T.f("popPower"), v, _g_pitch));
+			}
+		}
+
+		private void _land_trick(double at)
+		{
+			slip = wrapf(slip, -PI, PI);
+			if (Env.s("BMX_TRICK") != "")   // tests
+			{
+				host.log(Gd.fmt("TRICK air=%.2fs v=%.1f flip=%.0fdeg spin=%.0fdeg pitch_err=%.0fdeg twist=%.0fdeg", at, v, rad_to_deg(flip_acc), rad_to_deg(spin_acc), rad_to_deg(absf(wrapf(pitch - _g_pitch, -PI, PI))), rad_to_deg(absf(slip))));
+			}
+			if (at < 0.2)
+			{
+				return;
+			}
+			double perr_s = wrapf(pitch - _g_pitch, -PI, PI);   // + = nose up (back wheel first)
+			if (absf(perr_s) > 1.45)
+			{
+				// (a flip short of all the way round lands turned against the spin, one too far lands turned with it)
+				_crash((absf(flip_acc) > 3.0 && signf(perr_s) != signf(flip_acc) ? "UNDER-ROTATED!" : (absf(flip_acc) > 3.0 ? "OVER-ROTATED!" : (perr_s > 0 ? "LOOPED OUT!" : "BAD LANDING!"))));
+				return;
+			}
+			double a_s = absf(slip);
+			if (a_s > LAND_CONE)
+			{
+				_rev_land = a_s > PI * 0.5;
+				_land_fix = true;
+				host.flash((_rev_land ? "FAKIE!" : "SKETCHY!"));
+			}
+			long flips = roundi(absf(flip_acc) / TAU);
+			long turns = Gd.to_i((absf(spin_acc) + 0.6) / TAU);   // flat spins landed facing forward again (within ~35 deg): 360, 720...
+			bool whipped = _whip_peak > 0.6 && turns == 0 && absf(slip) < 0.35;
+			if (flips >= 1 || turns >= 1 || whipped)
+			{
+				string trick = "";
+				if (whipped)
+				{
+					trick = (_whip_peak < 0.95 ? "WHIP" : "BIG WHIP");
+				}
+				if (turns >= 1)
+				{
+					trick = Gd.fmt("%d", (turns * 360));
+				}
+				if (flips >= 1)
+				{
+					string kind = (flip_acc > 0 ? "BACKFLIP" : "FRONTFLIP");
+					trick = ((trick != "" ? trick + " " : "")) + ((flips > 1 ? new List<string> { "", "", "DOUBLE ", "TRIPLE " }[(int)(mini(flips, 3))] : "")) + kind;
+				}
+				host.flash(trick + "!");
+				if (host.has_method("on_trick"))
+				{
+					host.on_trick(trick);
+				}
+				flow_up();
+			}
+			_style_points(at, flips, turns);
+		}
+
+		private void _style_points(double at, long flips, long turns)
+		{
+			if (at < 0.35 || !host.has_method("on_style"))
+			{
+				return;
+			}
+			long pts = roundi(at * 250.0) + turns * 600 + flips * 1000 + roundi(minf(style_air, 3.0) * 400.0);
+			List<object> parts = new List<object> {  };
+			if (turns >= 1)
+			{
+				parts.Add(Gd.fmt("%d", (turns * 360)));
+			}
+			if (flips >= 1)
+			{
+				parts.Add(((flips > 1 ? Gd.fmt("%dx ", flips) : "")) + ((flip_acc > 0 ? "BACKFLIP" : "FRONTFLIP")));
+			}
+			bool whip_ok = _whip_peak > 0.6 && turns == 0 && absf(wrapf(slip, -PI, PI)) < 0.35;
+			if (whip_ok)   // an air whip brought back for the landing: more the further it was thrown
+			{
+				pts += roundi(500.0 * clampf(_whip_peak, 0.6, 1.3));
+				parts.Add((_whip_peak < 0.95 ? "WHIP" : "BIG WHIP"));
+			}
+			bool landed_up = absf(bike_lean) < 0.4;
+			if (_scrub_k > 0.3 && (_lean_peak > 0.5 || _whip_peak > 0.4))
+			{
+				pts += 400;
+				parts.Add("SCRUB");
+			}
+			else if (_lean_peak > 0.9 && landed_up && !whip_ok)
+			{
+				pts += roundi(450.0 + 400.0 * clampf((_lean_peak - 0.9) / 0.4, 0.0, 1.0));
+				parts.Add((_lean_peak < 1.15 ? "TABLETOP" : "BIG TABLETOP"));
+			}
+			else if (style_air > 0.35 && !whip_ok)
+			{
+				parts.Add("TWEAK");
+			}
+			if ((parts.Count == 0))
+			{
+				parts.Add((at > 1.0 ? "BIG AIR" : "AIR"));
+			}
+			bool clean = absf(wrapf(slip, -PI, PI)) < 0.2 && absf(wrapf(pitch - _g_pitch, -PI, PI)) < 0.15;
+			if (clean)
+			{
+				pts = roundi(pts * 1.5);
+				parts.Add("CLEAN");
+			}
+			host.on_style(pts, string.Join(" + ", parts));
+		}
+
+		private void _pivot_step(double dt, double steer_input, double brake_k)
+		{
+			bool on = absf(v) < 2.5 && brake_k > 0.3 && absf(steer_input) > 0.1 && !front_air && !rear_air;
+			if (!_OLD_SLOW)
+			{
+				on = on && v > 0.5 && !brake_back;
+			}
+			if (!on)
+			{
+				pivot = maxf(0.0, pivot - dt * 5);
+				if (pivot == 0.0)
+				{
+					pivot_acc = 0.0;
+				}
+				return;
+			}
+			pivot = minf(1.0, pivot + dt * 5);
+			double FRONT = L - BB_REAR;
+			double fx = x + cos(heading) * FRONT;
+			double fz = z - sin(heading) * FRONT;
+			double dh = signf(steer_input) * T.f("pivotRate") * pivot * dt;
+			long n0 = floori(absf(pivot_acc) / PI);
+			pivot_acc += dh;
+			course += dh;
+			heading += dh;
+			x = fx - cos(heading) * FRONT;
+			z = fz + sin(heading) * FRONT;
+			v = move_toward(v, 0.0, 10.0 * dt);
+			yaw_rate = dh / dt;
+			long n1 = floori(absf(pivot_acc) / PI);
+			if (n1 > n0)
+			{
+				host.flash(Gd.fmt("%d PIVOT!", (n1 * 180)));
+				if (n1 % 2 == 0)
+				{
+					flow_up();
+				}
+			}
+		}
+
+		private void _danger(string reason, double sev, double dt, double t_build = -1.0)
+		{
+			double r = _risk.get_f(reason, 0.0);
+			if (sev > 0.0 && absf(v) > 2.5)
+			{
+				if (sev >= T.get("crashHard", 3.0))
+				{
+					r = 1.0;
+				}
+				else
+				{
+					r += dt / maxf(0.05, (t_build > 0.0 ? t_build : T.get("crashTime", 0.4))) * sev * (0.5 + 0.5 * sev);
+				}
+			}
+			else
+			{
+				r = maxf(0.0, r - dt * T.get("riderSave", 1.2));
+			}
+			_risk.set(reason, r);
+			if (r >= 1.0)
+			{
+				_crash(reason);
+			}
+		}
+
+		private void _crash(string reason)
+		{
+			if (crash_pending == "")
+			{
+				long _ct = (prof != null ? host.get_ticks_usec() : 0);
+				crash_pending = reason;
+				host.crashlog_note(Gd.fmt("CRASH %s v=%.1f vy=%.1f pitch=%.2f ground=%.2f air=%s front_air=%s rear_air=%s legs=%.2f stick=%.2f man=%.2f armed=%s pw=%.2f at=%.1f,%.1f,%.1f", reason, v, vy, pitch, _g_pitch, air, front_air, rear_air, body_y - y, body_in_s, man_a, _man_armed, _man_pw, x, y, z));
+				if (prof != null)
+				{
+					_prof("crash_note", _ct);
+				}
+			}
+		}
+
+		private void _risk_settle(double dt)
+		{
+			if (air)   // (the ground-only checks don't run in the air: their meters drain there)
+			{
+				foreach (var k in _risk.Keys)
+				{
+					_risk.set(k, maxf(0.0, Gd.to_f(_risk.get_o(k, null)) - dt * T.get("riderSave", 1.2)));
+				}
+			}
+			risk = 0.0;
+			foreach (var k in _risk.Keys)
+			{
+				risk = maxf(risk, Gd.to_f(_risk.get_o(k, null)));
+			}
+			_risk_peak = maxf(_risk_peak, risk);
+			if (risk < 0.02)
+			{
+				if (_risk_peak > 0.5 && crash_pending == "" && !crash_on)
+				{
+					if (_crash_log)   // tests (BMX_CRASH_LOG)
+					{
+						host.log(Gd.fmt("SAVED peak=%.2f v=%.1f", _risk_peak, v));
+					}
+					if (host.msg_idle())
+					{
+						host.flash("SAVED!");
+					}
+					if (host.has_method("on_style"))
+					{
+						host.on_style(roundi(300.0 * _risk_peak), "SAVE");
+					}
+				}
+				_risk_peak = 0.0;
+			}
+		}
+
+		private double _bank_at(V3 f)
+		{
+			double w = 0.5;
+			double lx = f.z * w;
+			double lz = -f.x * w;
+			double dh = 0.0;
+			for (long k = 0; k < 2; k++)   // front and rear axle
+			{
+				double wo = (k == 0 ? L - BB_REAR : -BB_REAR);
+				double mx = x + f.x * wo;
+				double mz = z + f.z * wo;
+				dh += host.terrain.deck_height(mx - lx, mz - lz) - host.terrain.deck_height(mx + lx, mz + lz);
+			}
+			return atan(dh * 0.5 / (2 * w));
+		}
+
+		private static double _fric(double a_lat, double cb, double sb)
+		{
+			return (a_lat * cb - G * sb) / maxf(0.2 * G, G * cb + a_lat * sb);
+		}
+
+		private double _ls(double n, double n0)
+		{
+			if (_OLD_LS)
+			{
+				return 1.0;
+			}
+			return clampf(1.0 - LOAD_SENS * (n / maxf(0.1, n0) - 1.0), 0.75, 1.15);
+		}
+
+		private double _relax_t(double t_ref, double va)
+		{
+			if (_OLD_RELAX)
+			{
+				return maxf(0.005, t_ref);
+			}
+			return (t_ref > 0.005 ? clampf(t_ref * RELAX_V / maxf(va, 1.5), 0.015, 0.12) : 0.005);
+		}
+
+		private double _brake_mu(long su)
+		{
+			long i = clampi(su, 0, 3);
+			return (_OLD_DIRT ? BRAKE_MU_OLD[(int)(i)] : T.get(BRAKE_MU_KEYS[(int)(i)], BRAKE_MU[(int)(i)]));
+		}
+
+		private double _lock_slide(long su)
+		{
+			long i = clampi(su, 0, 3);
+			return T.get(LOCK_SLIDE_KEYS[(int)(i)], LOCK_SLIDE[(int)(i)]);
+		}
+
+		private V2 _brake_dirt(double _dt)
+		{
+			if (_grip_noise == null)
+			{
+				_grip_noise = new Noise2S();
+				_grip_noise.noise_type = Noise2S.TYPE_SIMPLEX_SMOOTH;
+				_grip_noise.frequency = 0.22;
+				_grip_noise.fractal_octaves = 2;
+				_grip_noise.seed = 913;
+				_grip_rng.seed = 4711;
+			}
+			if (_brk_noise == null)
+			{
+				_brk_noise = new Noise2S();
+				_brk_noise.noise_type = Noise2S.TYPE_SIMPLEX_SMOOTH;
+				_brk_noise.frequency = 0.9;
+				_brk_noise.fractal_octaves = 2;
+				_brk_noise.seed = 2741;
+			}
+			double ch = cos(heading);
+			double sh = sin(heading);
+			double rx = x - ch * BB_REAR;
+			double rz = z + sh * BB_REAR;
+			double fx = rx + ch * L;
+			double fz = rz - sh * L;
+			double lk = T.get("brakeLoose", 1.0) * 0.45;
+			double rk = T.get("brakeRough", 1.0) * 0.3 * smooth01(_grip_rough / 30.0);
+			V2 @out = V2.ONE;
+			for (long i = 0; i < 2; i++)
+			{
+				double px = (i == 0 ? fx : rx);
+				double pz = (i == 0 ? fz : rz);
+				double s = BRAKE_LOOSE_S[(int)(clampi((i == 0 ? surf_f : surf_r), 0, 3))];
+				double n = 0.6 * (0.5 + 0.5 * _grip_noise.get_noise_2d(px, pz)) + 0.4 * (0.5 + 0.5 * _brk_noise.get_noise_2d(px, pz));
+				double ls = smooth01((n - 0.35) / 0.5) * s;
+				double jit = 0.5 + 0.5 * _brk_noise.get_noise_2d(px * 3.0 + 517.0, pz * 3.0 - 233.0);
+				double k = clampf(1.0 - lk * ls - rk * jit, 0.35, 1.0);
+				if (i == 0)
+				{
+					@out.x = k;
+					brk_loose_f = ls;
+				}
+				else
+				{
+					@out.y = k;
+					brk_loose_r = ls;
+				}
+			}
+			return @out;
+		}
+
+		private double _grip_step(double dt, double va, double mu, double nR, double u_lat_in)
+		{
+			if (_grip_noise == null)
+			{
+				_grip_noise = new Noise2S();
+				_grip_noise.noise_type = Noise2S.TYPE_SIMPLEX_SMOOTH;
+				_grip_noise.frequency = 0.22;
+				_grip_noise.fractal_octaves = 2;
+				_grip_noise.seed = 913;
+				_grip_rng.seed = 4711;
+			}
+			double spd = smooth01((va - 1.0) / 5.0);
+			double rx = x - cos(heading) * BB_REAR;
+			double rz = z + sin(heading) * BB_REAR;
+			double s_loose = (surf_r == 0 ? 1.0 : (surf_r == 1 ? 0.2 : (surf_r == 2 ? 0.7 : 1.4)));
+			double n = 0.5 + 0.5 * _grip_noise.get_noise_2d(rx, rz);
+			loose = smooth01((n - 0.4) / 0.45) * s_loose;
+			double patch = 1.0 - T.get("gripLoose", 0.5) * 0.4 * loose;
+			double @lock = rear_lock;   // the rear brake past what the tyre holds (the brakes, longitudinal step)
+			_nR_s = (is_nan(_nR_s) ? nR : _nR_s + (nR - _nR_s) * minf(1.0, dt / _relax_t(0.08, va)));
+			if (!_OLD_GRIP)
+			{
+				nR = _nR_s;
+			}
+			double r_cap = maxf(0.3, mu * nR);
+			double use = clampf(_a_rear / r_cap, 0.0, 1.0);   // its own drive / brake only (the front brake is the front's)
+			use = maxf(use, @lock);
+			if (spin > 0.0)
+			{
+				use = maxf(use, 0.85 + 0.15 * spin);
+			}
+			double lat_k = sqrt(maxf(0.0, 1.0 - use * use));
+			lat_k = lerpf(lat_k, 0.12, @lock);   // a sliding tyre still drags a little sideways
+			double load_r = clampf(nR / (G * SH_R), 0.0, 1.4);   // a light rear (bumps, nose-heavy braking) grips less
+			double g = clampf(lat_k * patch * sqrt(load_r), 0.0, 1.2);
+			grip_r = g;
+			double u_lat = clampf(u_lat_in, -1.0, 1.0);   // + = the tyres pushing left (a left turn, or holding up a slope falling right)
+			double a_lat = u_lat;   // (only its sign is used below: which way the rear is thrown)
+			_squirm = T.get("gripSquirm", 1.0) * (0.025 * u_lat + 0.07 * u_lat * u_lat * u_lat) * spd * (1.0 + 0.5 * loose);
+			double catch_r = T.get("gripCatch", 0.6);
+			double k_r = 15.0 * g;
+			double k_f = 18.0 * T.get("gripRearLock", 1.0) * spd * _circ_f;
+			double k = k_r - k_f + 4.0 * catch_r;
+			double c = 2.2 + 3.0 * g + 1.5 * catch_r;
+			double acc = -k * (sin(slip) - _squirm) - c * slip_w;
+			double pw = T.get("gripPower", 1.0);
+			acc += pw * spin * signf(a_lat) * 6.0 * spd;
+			acc += pw * sin(crank * 2.0) * clampf(a_pedal / r_cap, 0.0, 1.0) * (1.25 - minf(1.0, g)) * 3.0 * spd;
+			slip_w += acc * dt;
+			double bmp = T.get("gripBumps", 1.0) * (1.0 - T.get("weightSteady", 0.5) * maxf(0.0, weight_in) + 0.5 * maxf(0.0, -weight_in));
+			if (!_OLD_STRAIGHTWHIP)
+			{
+				bmp *= 1.0 - T.get("whipGlide", 0.6) * whip_hold;
+			}
+			double jolt = minf(absf(compress_v - _grip_cv) / maxf(dt, 1e-4), 60.0);
+			_grip_cv = compress_v;
+			_grip_rough += (jolt - _grip_rough) * minf(1.0, dt * 5.0);
+			double lim_k = smooth01((absf(u_lat) - 0.5) / 0.5);   // only near the grip limit
+			slip_w += bmp * signf(a_lat) * lim_k * minf(_grip_rough / 30.0, 1.0) * 1.2 * spd * dt;
+			slip_w += bmp * _grip_rng.randfn(0.0, 1.0) * sqrt(dt) * spd * (0.1 + 0.45 * loose + 0.8 * (1.0 - minf(1.0, g)));
+			slip_w = clampf(slip_w, -4.0, 4.0);
+			double bc = clampf(-(slip - _squirm) * (0.5 + 0.4 * catch_r) - slip_w * 0.06, -0.55, 0.55) * spd;
+			bar_catch += (bc - bar_catch) * minf(1.0, dt * 14.0);
+			return g;
+		}
+
+		private double _local_slope(V3 f, double xx, double R, double cp0)
+		{
+			return atan((_wheel_ground(f, xx + 0.05 / cp0, R, cp0) - _wheel_ground(f, xx - 0.05 / cp0, R, cp0)) / 0.1);
+		}
+
+		public void flow_up()
+		{
+			flow = minf(FLOW_MAX, floorf(flow) + 1);
+			flow_t = 0.0;
+		}
+		// is_sane: in BikeSim.Manual.cs
+
+		public void reset_body()
+		{
+			body_v = 0.0;
+			body_y = y;
+			body_x = 0.0;
+			body_xv = 0.0;
+			hip_shift = 0.0;
+			hip_v = 0.0;
+			v_last = NAN;
+			air_lean = 0.0;
+			air_pull = 0.0;
+			_air_pull_v = 0.0;
+			a_drive = 0.0;
+			pitch_v = 0.0;
+			compress_v = 0.0;
+			lean_v = 0.0;
+			steer_in_v = 0.0;
+			air_w = 0.0;
+			air_tilt = 0.0;
+			air_tilt_v = 0.0;
+			flick = 0.0;
+			flick_v = 0.0;
+			bike_lean = 0.0;
+			counter = 0.0;
+			man_a = 0.0;
+			man_w = 0.0;
+			bank = 0.0;
+			_bank_hold = 0.0;
+			bank_v = 0.0;
+			corner_g = 0.0;
+			nose_a = 0.0;
+			nose_w = 0.0;
+			gest_hop = 0.0;
+			_hop_buf = 0.0;
+			_pop_miss = 0.0;
+			slip_w = 0.0;
+			steer_in = 0.0;
+			knock = 0.0;
+			_gx_lean = 0.0;
+			bank_lean = 0.0;
+			bank_sq = 0.0;
+			_bike_lead = 0.0;
+			_weave = 0.0;
+			_amax = 99.0;
+			_amin = -99.0;
+			yaw_rate = 0.0;
+		}
+	}
+}
