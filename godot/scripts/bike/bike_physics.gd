@@ -247,6 +247,11 @@ var _lock_hold := 0.0   # steering into tilted ground, held LOCK_HOLD s after le
 const LOCK_HOLD := 1.0
 var weave_lean := 0.0   # the weave's share of bike_lean this step (read by Game)
 var _weave := 0.0; var _wv_t := 0.0   # the bike's own small roll under the rider (step 2)
+var man_lk := 0.0; var _man_lean_s := 0.0   # back-wheel turn look: 0..1 weight, the eased drawn lean (see _step_steer)
+const MAN_LEAN_K := 1.1     # drawn lean on the back wheel per rad of the turn's own lean, atan(lat / g)
+const MAN_LEAN_IN := 0.12   # + this many rad per unit of steer: the rider throws his hips into it before the turn builds
+const MAN_BODY_OFF := 0.12  # share of the bike's lean the body stays more upright on one wheel (two wheels: 30-85 %)
+const MAN_BAR := 0.42       # rad the bars turn into the turn at full steer on the back wheel (Game._bar_draw)
 var _bike_lead := 0.0  # how far the bike runs ahead of the rider's lean while it changes (two masses)
 var _lean_peak := 0.0  # this jump's biggest lay-over in the air (tabletop, rad)
 var _scrub_k := 0.0    # this take-off was soaked (squash / absorb) - with a lay-over or whip: a scrub
@@ -452,7 +457,7 @@ func get_up() -> void:
 func _reset_motion() -> void:
 	crash_on = false; crash_pending = ""; crash_hold = 0.0; crash_armed = false; crash_sim = null; _cb_off_t = -1.0
 	v = 0; vy = 0; steer = 0; steer_in = 0; steer_in_v = 0; lean = 0; lean_v = 0; pitch = 0; air = false
-	bike_lean = 0; counter = 0; rock = 0; yaw_rate = 0; hop_nose = 0; hop_t = 0; air_time = 0; air_k = 0
+	bike_lean = 0; counter = 0; man_lk = 0.0; rock = 0; yaw_rate = 0; hop_nose = 0; hop_t = 0; air_time = 0; air_k = 0
 	load = 0; compress = 0; compress_v = 0; prep = 0; land_prep = 0; pop_fired = false; spun_out = false; shake = 0
 	turn_off = 0.0; rev_cap = 3.0; _fakie_hold = 0.0
 	course = heading; slip = 0; slip_w = 0.0; bar_catch = 0.0; w_init = false; front_air = false; rear_air = false; pump_acc = 0; since_land = 1; _graze = false
@@ -1958,6 +1963,20 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 		wv_t = (0.22 * wn + 0.5 * clampf(knock, -0.4, 0.4)) * wk * gnd
 	_weave += (wv_t - _weave) * minf(1.0, dt * 8.0)
 	var bl: float = lean * T.bikeLeanMul + _gx_lean + bank_lean + _bike_lead + _weave
+	# (2026-11-28, user: "on the back wheel, steering, we must turn the handlebar and lean that way like irl") on one wheel
+	# rider + bike balance over the one contact patch, so they lean TOGETHER, by what the turn needs against gravity:
+	# atan(lateral accel / g), the same rule a two-wheel turn follows - no bike laid under an upright body, no slow steer throw
+	# (the bike would fall the other way). man_lk 0..1 = how far into that look; Game turns the bars into the turn with it.
+	# Drawing only. BMX_OLD_MANLEAN=1 = before
+	var mk_t: float = 1.0 if (not _OLD_MANLEAN and not air and front_air and _balancing()) else 0.0
+	man_lk = move_toward(man_lk, mk_t, (5.0 if mk_t > man_lk else 3.0) * dt)
+	if man_lk > 0.0:
+		var ml: float = float(T.get("manLean", 0.42)) * 1.25
+		var ml_t: float = clampf(atan(lat_a / G) * MAN_LEAN_K + steer_in * MAN_LEAN_IN, -ml, ml)
+		_man_lean_s += (ml_t - _man_lean_s) * minf(1.0, dt * 7.0)
+		bl = lerpf(bl, _man_lean_s, man_lk)
+	else:
+		_man_lean_s = bl
 	if not air:
 		var cb_t: float = 0.0 if signf(bk) != signf(bl) else absf(bk)
 		# (eased: it switched on / off in one step as the bank or the lean changed side, and the tanh cap below stepped the drawn
@@ -2084,6 +2103,9 @@ func _step_steer(dt: float, f: Vector3, brake_k: float, steer_input: float, roll
 		if air: counter = lerpf(counter, bl_nw * (1.0 + float(T.get("stickBodyCounter", 0.25))), _air_wl)
 	elif air_k > 0.0:
 		counter = lerpf(counter, bl_nw * (1.0 + float(T.get("stickBodyCounter", 0.25))), _air_wl * air_k)
+	# (on the back wheel the body goes over with the bike, hips a touch into the turn: only MAN_BODY_OFF of the bike's lean
+	# is left as counter-lean)
+	if man_lk > 0.0: counter = lerpf(counter, bl_nw * MAN_BODY_OFF, man_lk)
 	counter += w_part
 	rock = pedal_rock(crank, sprint, pedal, va, bike_rock)
 	return va
@@ -3702,7 +3724,7 @@ func _balance_step(dt: float, pedalling: bool, throttle: float, brake: bool) -> 
 		man_zone = man_a > 0.15 and absf(man_a - b) < zone
 		man_zone_t = man_zone_t + dt if man_zone else 0.0
 		if Env.s("BMX_MAN_PROBE") != "" and Engine.get_physics_frames() % 15 == 0:   # tests
-			print("MAN a=%.2f pull=%.2f pitch=%.2f gp=%.2f v=%.1f stick=%.2f armed=%s pw=%.2f lean=%.2f" % [man_a, pull, pitch, _g_pitch, v, body_in, _man_armed, _man_pw, lean])
+			print("MAN a=%.2f pull=%.2f pitch=%.2f gp=%.2f v=%.1f stick=%.2f armed=%s pw=%.2f lean=%.2f lk=%.2f bike_lean=%.2f counter=%.2f steer_in=%.2f yaw=%.2f" % [man_a, pull, pitch, _g_pitch, v, body_in, _man_armed, _man_pw, lean, man_lk, bike_lean, counter, steer_in, yaw_rate])
 	# --- front wheel: nose manual / stoppie ---
 	var nb: float = float(T.get("noseBalance", 0.5))
 	var n_from: float = float(T.get("noseFrom", 0.6))
@@ -3788,7 +3810,8 @@ static var _OLD_AUTOTUCK := Env.raw("BMX_OLD_AUTOTUCK") != ""   # tuck reach 0.1
 static var _OLD_WEAVE := Env.raw("BMX_OLD_WEAVE") != ""
 static var WEAVE_ON := Env.raw("BMX_WEAVE") != ""   # the bike weave, off (rocked the whole rider)   # no bike weave under the rider
 static var _OLD_CORNERBODY := Env.raw("BMX_OLD_CORNERBODY") != ""   # body at up to 80 % of the bike's lean in deep turns
-static var _OLD_SLOWBODY := Env.raw("BMX_OLD_SLOWBODY") != ""   # slow turns: the body leans with the bike like at speed
+static var _OLD_MANLEAN := Env.raw("BMX_OLD_MANLEAN") != ""   # back wheel: old lean / bars (body upright, bars barely turned)
+static var _OLD_SLOWBODY :=Env.raw("BMX_OLD_SLOWBODY") != ""   # slow turns: the body leans with the bike like at speed
 static var _OLD_BANKLOCK := Env.raw("BMX_OLD_BANKLOCK") != ""   # leaned into tilted ground: only camberPull
 static var _OLD_SLOW := Env.raw("BMX_OLD_SLOW") != ""   # slow-riding / reverse as before 2026-11-26
 static var _OLD_LEANDRAW := Env.raw("BMX_OLD_LEANDRAW") != ""   # the drawn body / bike lean with its one-tick jumps

@@ -1950,7 +1950,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   No lock-out, no speed cut in direct mode (`_tip_over` only in the old mode). Rear brake / stick forward lower the target; a sprint stamp raises it.
   Nose manual: same spring, tops out at `noseBalance` + 0.12, never throws him over. `wheelieDrop` x4 in direct mode. **Turning on the back wheel**:
   the turn and the lean asked are capped at what `manLean` (0.42 rad) gives at that speed (G tan / v: ~21 m radius at 36 km/h, tighter slower), x
-  `manTurn`; no FRONT WASHED OUT verdict while balancing. The drawn pitch sits ~0.13-0.17 rad under `man_a`. Tests: `BMX_BODY=pull:<0..1>`
+  `manTurn`; no FRONT WASHED OUT verdict while balancing. **Drawn (2026-11-28, user: "turn the bars and lean that way like irl")**: on the back wheel rider + bike lean TOGETHER by the turn's own lean (atan(lat_a / g) x `MAN_LEAN_K` 1.1 + `MAN_LEAN_IN` x steer, body only `MAN_BODY_OFF` 12 % more upright) and the bars turn into the turn (`MAN_BAR` 0.42 rad x steer, `Game._bar_draw`), faded by `man_lk`; drawing only, `BMX_OLD_MANLEAN=1` = before, `BMX_MAN_PROBE` prints `lk= bike_lean= counter=`. The drawn pitch sits ~0.13-0.17 rad under `man_a`. Tests: `BMX_BODY=pull:<0..1>`
   (+ `BMX_STRAIGHT=1 BMX_PAD=1 BMX_MAN_PROBE=1 BMX_CRASH_LOG=1`): 0.5 -> a 0.28, 0.7 -> 0.59 steady in the zone, 1.0 -> falls after ~0.6 s. The old
   **It starts from a quick pull, not from how far the stick is** (user: the manual "overrode our leaning", leaning back / forward on the track
   changes the cornering): `_man_armed` is set when the stick goes centre -> back past 0.5 within `manPullTime` (0.25 s, `_pull_age`; 0 = any pull),

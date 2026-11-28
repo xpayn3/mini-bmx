@@ -2937,6 +2937,10 @@ func _bar_draw(st: BikePhysics, dt: float, dab_lean: float) -> float:
 		sd += (inair + _bar_carve * 0.8) * bc
 	else:
 		_bar_carve = 0.0
+	# on the back wheel the rider turns the bars into the turn (the front swings that way: part of how a manual is steered and
+	# balanced), with the lean (BikePhysics.man_lk). The physics' own steer stays tiny there: the turn is the lean
+	if st.man_lk > 0.0:
+		sd = lerpf(sd, clampf(st.steer_in, -1.0, 1.0) * BikePhysics.MAN_BAR + _bar_kick, st.man_lk)
 	if _bar_probe:   # tests: BMX_BAR_PROBE (BARS lines once a second: biggest kick, biggest countersteer, bars vs physics)
 		_bp_k = maxf(_bp_k, absf(_bar_kick)); _bp_n = maxf(_bp_n, absf(st.knock)); _bp_c = maxf(_bp_c, absf(st.lean_v * BAR_CS_K)); _bp_d = maxf(_bp_d, absf(sd - st.steer))
 		if int(t) != int(t - dt):
