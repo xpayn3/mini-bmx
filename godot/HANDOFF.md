@@ -1547,6 +1547,23 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   Pose saved per bike in `rider.cfg`; edited in the garage Rider tab and the tuning card's Rider tab.
 - The torso is **skinned to 5 spine bones** (Skeleton3D "Spine", identity binds) so it bends; its
   `custom_aabb` follows the body (needed in crashes when the rider node sits at the world origin).
+- **Skinned neck + skeleton audit (2026-11-28, user: "do a proper neck", "I will later use a real humanoid", "check the
+  other limbs, whole torso")**. The neck is no longer a straight tube placed by `set_limb`: `RiderSkeleton.make_neck` builds
+  it the way an imported character's is, authored in the humanoid skeleton's REST pose, binds = inverse bone rests (what a
+  glTF / FBX skin carries), weights Neck at the collar easing to Head up the neck (`NECK_W0` .. `NECK_W1`). The bones move it
+  (`follow`), so the head turning / nodding bends and twists it along its length; it runs `NECK_DOWN` into the collar and
+  `NECK_UP` into the helmet. `BMX_OLD_NECKSKIN=1` = the old tube; `BMX_NECK_SHOW=1|xray` draws it magenta (xray: through
+  everything; unlit, so a tube side-on reads as a flat strip). **`BMX_SKEL_AUDIT=1`** checks whether the skeleton can drive a
+  real skinned humanoid: every body bone vs its drawn joint (m), bone y aimed at its child (deg), scale / skew in the global
+  poses, knees bending the anatomical way, frame-to-frame turns (`SKELAUDIT` every 2 s, `SKELJUMP` > 45 deg in a frame, with
+  the folds). Riding 30 s: 0.0 mm, <= 0.0001 deg, no scale / skew, no wrong-way knees, worst turn 16 deg a frame (pedalling).
+  Crashes found arms rolling 170-230 deg in one frame (the elbow / knee bend direction is noise when a limb is near straight):
+  `RiderSkeleton._carry_fold` carries last frame's bend side there and keeps a bend reading backwards on the side it had
+  (`BMX_OLD_SKELTWIST=1`); and the DRAWN crashed glove flipped the same way (rolled from the shoulder line): it now rolls with
+  its forearm's carried twist (`BMX_OLD_HANDROLL=1`). After: no flips on seeds 4242 / 5 / 12 / 77 crashes; ~45-57 deg a frame
+  is left only at the most violent tumbling (the bend itself whipping round). Rest neck length 11.7 cm (Godot's humanoid
+  profile x `SCALE`), drawn 13-16 cm. The torso is still skinned to its own 5-bone `Spine` skeleton (the humanoid's Spine /
+  Chest / UpperChest follow the same curve); a real body mesh would replace that, the neck, limbs and head parts.
 - **Neck on the spine (2026-11-28, user: "helmet placement on head / neck is off leaning and using the right stick")**: the head sat chest + a fixed offset straight up in the BIKE's frame with its roll kept near world level, so with the torso tilted sideways (counter-roll, right stick) the helmet hung off the shoulders' line, rolled up to ~55 deg against the spine. Now (`rider.gd`, after the head pose) the neck leaves the chest along the spine's sideways tilt, bends `NECK_BEND` 0.4 of the head's roll, and the head's roll against the spine is soft-limited to `NECK_ROLL` 0.6 rad (tanh). Deep lean + stick into the turn: head vs spine 54 -> ~31 deg; the head is a little less level in the world. `BMX_OLD_NECK=1` = before, `BMX_NECK_PROBE=1` = `NECKP` lines (spine / neck side tilt, head roll, body roll, stick). Not ridden by the user yet.
 - **Idle life at a stop (2026-11-27, user + Riders Republic: "the bike is alive, micro movements when he stands")**: `Game._idle_life`,
   drawing only, fades in once settled on the foot: weight shifts every 1.5-5 s tip the bike up to `IDLE_SHIFT` 0.07 rad more onto /
@@ -2512,6 +2529,14 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   "6dgoggles" maps from the download are not used). Neither is recoloured: the Shell / Peak / Goggles colour rows are hidden for them. `Rider.HELMET_FITS` = where each sits
   (scale 1.12, a little back + low; the dark face sphere is smaller for them); test override `BMX_HELMET_FIT=x,y,scale,tilt`. Real brand logos on the textures (6D, TLD,
   FXR, Oakley): check before sharing the game.
+  **Real size (2026-11-28, user: "aren't our helmets all huge?")**: the glbs are modelled at real size (~34 cm long) but were
+  drawn x1.3 (stock: 45 x 38 x 31 cm) / x1.12 (models), ~40 / 20 % over a real full-face helmet. All now x `Rider.HELMET_REAL`
+  0.92 (~31-32 cm long, `Rider.helmet_fit(id)`); our goggles + strap (GOGGLE_FIT, sized for x1.3) are built as before and their
+  node scaled by scale / `GOGGLE_FIT_SCALE` (the strap's shell hug is read in that unscaled space), the built-in fallback helmet's
+  R likewise (`gear_k()`). The action cam keeps its real size. `BMX_OLD_HELMETSIZE=1` = the old sizes. `PartThumbs.THUMB_VER`
+  7 -> 8 (head / rider pictures): **re-run `tools/bake_thumbs.ps1`** before a release. Test aid `BMX_PHOTO_HEAD=dist,yaw_deg,up`
+  (+ `BMX_PHOTO=secs`): the photo camera that far from the rider's head (yaw 0 = in front). The garage camera follows a real
+  pad's right stick (raw axes), so garage test shots drift when one is plugged in: use photo mode in a ride.
   **The rider always wears a helmet (no bare head, user decision):** `Rider.set_look` forces helmet on; hair only shows as the tuft / tail coming out under the back
   of the helmet (`Hair.HELMET_STYLES`: none = short, long, ponytail, braid; `hair.gd` braid = the ponytail tie, stiffer). Menus: title-menu Character > HELMET tab (models, hair style,
   hair colour), garage Kit tab + tuning card Look > Helmet (same pickers + hair colour row). Old saved `helmetOn = 0` is ignored.

@@ -811,6 +811,18 @@ func _test_hooks() -> void:
 		yaw = atan2(-d.x, -d.z)
 		pitch = asin(d.y)
 		_place()
+	var hd := Env.s("BMX_PHOTO_HEAD")   # tests: "dist,yaw_deg,up" camera that far from the rider's head (yaw 0 = in front)
+	if hd != "" and game.rider:
+		var a := hd.split(",")
+		var hb: Basis = game.rider.head.global_transform.basis.orthonormalized()
+		var fwd := Vector3(hb.x.x, 0.0, hb.x.z).normalized()   # head +X = face
+		var dir := fwd.rotated(Vector3.UP, deg_to_rad(float(a[1]) if a.size() > 1 else 0.0))
+		var c: Vector3 = game.rider.head.global_position
+		pos = c + dir * float(a[0]) + Vector3(0, float(a[2]) if a.size() > 2 else 0.0, 0)
+		var d := (c - pos).normalized()
+		yaw = atan2(-d.x, -d.z)
+		pitch = asin(d.y)
+		_place()
 	if Env.s("BMX_PHOTO_ORBIT") != "":   # tests: swing round the rider like a left drag
 		_orbit(Vector2(float(Env.s("BMX_PHOTO_ORBIT")), 0.0)); _limit(); _place()
 	if Env.s("BMX_PHOTO_TAB") != "":
