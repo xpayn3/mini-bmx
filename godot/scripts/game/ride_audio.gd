@@ -133,6 +133,7 @@ var _crank_w := 0.0   # how fast the cranks really turn (rad/s, smoothed)
 
 # freewheel: the hub shell's spin over the driver's (rad/s of the rear wheel, smoothed)
 var OLD_FW := Env.s("BMX_OLD_FW") != ""   # = the old rule: bike speed whenever the gas key is up
+var FW_OLDSYN := Env.s("BMX_OLD_FWSYNTH") != ""   # = the freewheel synth before 2026-11-28 (FreewheelSynth.OLD)
 var OLD_SLAMDOUBLE := Env.s("BMX_OLD_SLAMDOUBLE") != ""   # = the double hits of before (rear tyre's second hit, late clatter)
 var _hw_crank := 0.0; var _hw_init := false
 var _hw_cw := 0.0     # the cranks' turn rate (rad/s, signed, smoothed)
@@ -353,7 +354,7 @@ func update_audio(dt: float) -> void:
 		fw_ver = FreewheelSound.version
 		var c := FreewheelSound.current
 		fw_synth.SetParams(c.pitch, c.ring, c.crack, c.crack_len, c.detune, c.tilt, c.uneven, c.jitter, c.vary)
-		fw_synth.SetSpeedParams(c.poe, c.warble, c.sp_pitch, c.sp_bright, c.sp_ring, c.repeat, c.sp_soft)
+		fw_synth.SetSpeedParams(c.poe, c.warble, c.sp_pitch, c.sp_bright, c.sp_ring, c.repeat, c.sp_soft, c.drop_ms, c.sp_hit)
 	# (2026-11-27) the pawls click as fast as the hub shell overruns the driver: rear wheel spin (its real
 	# angle, so a locked / skidding rear is silent) minus the cranks' spin x the drive ratio (the cassette
 	# turns with the cranks). Pedalling = driver engaged = silent; legs slowing / stopped = the clicks build
@@ -367,11 +368,14 @@ func update_audio(dt: float) -> void:
 		fs = FreewheelSound.preview_speed; coasting = true
 	var poe := FreewheelSound.get_value("poe")
 	fw_clicks = fs / st.RWR / TAU * poe if coasting else 0.0
-	fw_amp = 0.23 * FreewheelSound.get_value("vol") * smoothstep(0.1, 1.0, fs) 		* (1.0 - FreewheelSound.get_value("fade") * clampf((fs - 8.0) / 10.0, 0.0, 1.0))
+	# each click is as loud at walking pace as at speed (the pawl's spring sets the hit): only a short ramp
+	# so the first click doesn't pop (2026-11-28; was smoothstep(0.1, 1.0 m/s): slow ticks at ~25 %)
+	var amp_ramp := smoothstep(0.1, 1.0, fs) if FW_OLDSYN else smoothstep(0.12, 0.25, fs)
+	fw_amp = 0.23 * FreewheelSound.get_value("vol") * amp_ramp 		* (1.0 - FreewheelSound.get_value("fade") * clampf((fs - 8.0) / 10.0, 0.0, 1.0))
 	_fw_hits(dt, st)
 	# at speed the pawls have less time to drop: higher, brighter, shorter clicks (0 slow .. 1 full)
-	var sp0 := FreewheelSound.get_value("sp_from") / 3.6
-	fw_fast = smoothstep(sp0, maxf(sp0 + 0.5, FreewheelSound.get_value("sp_full") / 3.6), fs)
+	# (the new synth works out the pawls' float itself from the click rate; the old one took km/h 12 .. 60)
+	fw_fast = smoothstep(12.0 / 3.6, 60.0 / 3.6, fs) if FW_OLDSYN else (fw_synth.Fast if fw_synth != null else 0.0)
 	_update_chain(dt, va, on_ground, st)
 	# the recorded layers only follow the live ride (in a replay / the map / photo mode they fade out)
 	var live: bool = not (game.replay_on or game.photo or (game.paper_map != null and game.paper_map.busy()))

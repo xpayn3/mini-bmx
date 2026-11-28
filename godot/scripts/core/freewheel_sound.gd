@@ -21,22 +21,33 @@ const PARAMS := [
 	# the wheel's turn and speed (FreewheelSynth.SetSpeedParams); 0 on all = the old speed-blind sound
 	["warble", "Wheel-turn warble (swell each turn)", 0.04, 0.0, 1.0, 0.05, ""],
 	["repeat", "Pattern repeats each turn", 0.3, 0.0, 1.0, 0.05, ""],
-	["sp_pitch", "Pitch rise at speed", 0.06, -0.2, 0.5, 0.01, ""],
-	["sp_bright", "Brighter at speed", 0.3, -1.0, 1.5, 0.05, ""],
-	["sp_ring", "Shorter ring at speed", 0.3, 0.0, 0.8, 0.05, ""],
-	["sp_soft", "Softer snap at speed", 0.6, 0.0, 1.0, 0.05, ""],
-	["sp_from", "Speed effects start", 12.0, 0.0, 60.0, 1.0, " km/h"],
-	["sp_full", "Speed effects full", 60.0, 10.0, 120.0, 1.0, " km/h"],
+	# once a tooth passes faster than a pawl can fall into the next valley the pawls "float": the clicks get
+	# softer, duller, shorter. That depends on the click RATE (teeth x speed), so a 102-click hub floats at a
+	# quarter of the speed of a 24-click one (2026-11-28; it was set in km/h: sp_from / sp_full)
+	# faster wheel = harder pawl hits (the next tooth runs into the falling pawl): louder + brighter with speed
+	["sp_hit", "Harder hits at speed", 1.0, 0.0, 3.0, 0.05, "×"],
+	["drop_ms", "Pawl drop time (floats sooner)", 2.0, 0.5, 6.0, 0.1, " ms"],
+	["sp_soft", "Softer when floating", 0.6, 0.0, 1.0, 0.05, ""],
+	["sp_ring", "Shorter ring when floating", 0.3, 0.0, 0.8, 0.05, ""],
+	["sp_pitch", "Pitch rise when floating", 0.0, -0.2, 0.5, 0.01, ""],
+	["sp_bright", "Brighter when floating", 0.0, -1.0, 1.5, 0.05, ""],
 ]
 
 ## built-in hubs: only the values that differ from the defaults
 const BUILTIN := {
 	"Stock": {},
-	"Loud buzz": {"vol": 1.7, "poe": 44.0, "pitch": 0.85, "ring": 1.6, "crack": 1.4, "tilt": 0.2, "fade": 0.0, "sp_pitch": 0.1},
+	"Loud buzz": {"vol": 1.7, "poe": 44.0, "pitch": 0.85, "ring": 1.6, "crack": 1.4, "tilt": 0.2, "fade": 0.0},
 	"Quiet": {"vol": 0.45, "poe": 36.0, "ring": 0.6, "crack": 0.5, "tilt": -0.4, "fade": 0.5},
 	"Deep ratchet": {"poe": 36.0, "pitch": 0.7, "ring": 1.4, "crack": 0.8, "tilt": -0.3, "uneven": 0.2, "jitter": 0.03},
 	"High engagement": {"vol": 0.9, "poe": 102.0, "pitch": 1.15, "ring": 0.7, "uneven": 0.4, "crack": 0.9},
 	"Old school": {"poe": 18.0, "pitch": 0.9, "ring": 1.2, "crack": 1.2, "uneven": 1.5, "jitter": 0.1, "vary": 0.7, "warble": 0.12, "repeat": 0.6},
+	# by mechanism (docs/research/freewheel.md); made-up names, numbers from the real kinds
+	"3-pawl quiet (18)": {"vol": 0.6, "poe": 18.0, "crack": 0.7, "ring": 0.8, "tilt": -0.2, "drop_ms": 2.5},
+	"4-pawl loud (44)": {"vol": 1.4, "poe": 44.0, "crack": 1.2, "ring": 1.2, "drop_ms": 1.8},
+	"Star ratchet (54)": {"vol": 1.3, "poe": 54.0, "pitch": 0.9, "ring": 1.5, "crack": 1.1, "uneven": 0.0, "drop_ms": 1.6, "vary": 0.35},
+	"Ring drive (72)": {"vol": 1.6, "poe": 72.0, "pitch": 0.95, "ring": 1.8, "crack": 1.0, "uneven": 0.0, "drop_ms": 1.2, "vary": 0.3},
+	"6-pawl phased (120)": {"vol": 1.1, "poe": 120.0, "pitch": 1.1, "ring": 0.8, "crack": 0.9, "uneven": 1.5, "drop_ms": 0.9},
+	"Sprag (silent)": {"vol": 0.0},
 }
 
 const PATH := "user://freewheel.cfg"
@@ -67,10 +78,17 @@ static func ensure_loaded() -> void:
 		current = _complete(cf.get_value("fw", "current", {}))
 		# ver 2 (2026-11-27): "Quieter at speed" 0.3 -> 0 (a real hub at speed is a loud, dense buzz);
 		# saves still at the old default move with it
-		if int(cf.get_value("fw", "ver", 1)) < 2:
+		var ver := int(cf.get_value("fw", "ver", 1))
+		if ver < 2:
 			if is_equal_approx(float(current.get("fade", 0.0)), 0.3): current["fade"] = 0.0
 			for n in customs:
 				if is_equal_approx(float(customs[n].get("fade", 0.0)), 0.3): customs[n]["fade"] = 0.0
+		# ver 3 (2026-11-28): the hub's ring tones don't rise / brighten with speed (the rising buzz is the click
+		# rate): "pitch rise" 0.06 -> 0, "brighter" 0.3 -> 0 for saves still at those defaults
+		if ver < 3:
+			for d in [current] + customs.values():
+				if is_equal_approx(float(d.get("sp_pitch", 0.0)), 0.06): d["sp_pitch"] = 0.0
+				if is_equal_approx(float(d.get("sp_bright", 0.0)), 0.3): d["sp_bright"] = 0.0
 	if not (active in BUILTIN or active in customs): active = "Stock"
 	# tests: BMX_FW_PRESET=<name> and BMX_FW=pitch=1.3,poe=60 (not saved unless a slider is touched)
 	var ep := Env.raw("BMX_FW_PRESET")
@@ -93,7 +111,7 @@ static func _complete(d: Dictionary) -> Dictionary:
 static func save() -> void:
 	if Env.raw("BMX_PADSEQ") != "": return   # menu tests: never into the player\'s files
 	var cf := ConfigFile.new()
-	cf.set_value("fw", "ver", 2)
+	cf.set_value("fw", "ver", 3)
 	cf.set_value("fw", "active", active)
 	cf.set_value("fw", "current", current)
 	cf.set_value("fw", "customs", customs)
