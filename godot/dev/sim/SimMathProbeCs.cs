@@ -77,6 +77,79 @@ public partial class SimMathProbeCs : RefCounted
 		return _ex[fn].Execute(args).AsDouble();
 	}
 
+	/// n draws from a fresh Pcg32(seed): kind 0 = Rand, 1 = Randf, 2 = Randd, 3 = Randfn(0, 1)
+	public double[] Rng(long seed, long kind, long n)
+	{
+		var g = new Pcg32((ulong)seed);
+		var r = new double[n];
+		for (long i = 0; i < n; i++)
+			r[i] = kind switch { 0 => g.Rand(), 1 => g.Randf(), 2 => g.Randd(), _ => g.Randfn(0f, 1f) };
+		return r;
+	}
+
+	/// randf candidates from a raw stream (tests: which layout Godot uses)
+	public double[] RandfVariant(long seed, long variant, long n)
+	{
+		var g = new Pcg32((ulong)seed);
+		var r = new double[n];
+		for (long i = 0; i < n; i++)
+		{
+			uint a = g.Rand();
+			if (a == 0) { r[i] = 0; continue; }
+			uint b = g.Rand();
+			int tz = System.Numerics.BitOperations.TrailingZeroCount(a), lz = System.Numerics.BitOperations.LeadingZeroCount(a);
+			r[i] = variant switch
+			{
+				0 => System.MathF.ScaleB((float)(b | 0x80000001u), -33 - tz),
+				1 => System.MathF.ScaleB((float)(b | 0x80000001u), -32 - lz),
+				2 => System.MathF.ScaleB((float)(b | 0x80000001u), -33 - lz),
+				3 => System.MathF.ScaleB((float)(a | 0x80000001u), -33 - System.Numerics.BitOperations.TrailingZeroCount(b)),
+				4 => System.MathF.ScaleB((float)((b | 0x80000001u) >> 0), -32 - tz - 1),
+				5 => (float)System.Math.ScaleB((double)(b | 0x80000001u), -33 - tz),
+				_ => 0,
+			};
+		}
+		return r;
+	}
+
+	/// randfn candidates (which parts Godot does in float)
+	public double[] RandfnVariant(long seed, long v, long n)
+	{
+		var g = new Pcg32((ulong)seed);
+		var r = new double[n];
+		const float TAU_F = (float)(System.Math.PI * 2.0);
+		for (long i = 0; i < n; i++)
+		{
+			float t = g.Randf();
+			if (t < 1e-5f) t += 1e-5f;
+			float u = g.Randf();
+			double lg = SimMath.Log(t);
+			float lgf = (float)lg;
+			switch (v)
+			{
+				case 0: r[i] = (float)(SimMath.Cos(TAU_F * u) * System.Math.Sqrt(-2.0 * lg)); break;              // angle in float, cos double
+				case 1: r[i] = (float)((float)SimMath.Cos(TAU_F * u) * System.Math.Sqrt(-2.0 * lgf)); break;      // cosf, logf, rest double
+				case 2: r[i] = (float)SimMath.Cos(TAU_F * u) * (float)System.Math.Sqrt(-2.0 * lgf); break;        // all float
+				case 3: r[i] = (float)SimMath.Cos(TAU_F * u) * System.MathF.Sqrt(-2.0f * lgf); break;
+				case 4: r[i] = (float)((float)SimMath.Cos(TAU_F * u) * System.Math.Sqrt(-2.0 * lg)); break;
+				case 5: r[i] = (float)(SimMath.Cos(TAU_F * u) * System.Math.Sqrt(-2.0 * lgf)); break;
+				case 6: r[i] = (float)(SimMath.Cos(System.Math.PI * 2.0 * u) * (float)System.Math.Sqrt(-2.0 * lgf)); break;
+				case 7: r[i] = (float)SimMath.Cos(TAU_F * u) * (float)System.Math.Sqrt((float)(-2.0 * lgf)); break;
+			}
+		}
+		return r;
+	}
+
+	/// Noise2S at the given points
+	public double[] Noise(long seed, double freq, long oct, double[] xs, double[] ys)
+	{
+		var nz = new Noise2S((int)seed, (float)freq, (int)oct);
+		var r = new double[xs.Length];
+		for (int i = 0; i < xs.Length; i++)
+			r[i] = nz.Get((float)xs[i], (float)ys[i]);
+		return r;
+	}
+
 	public long Ties() => SimMath.Ties;
 	public void ResetTies() => SimMath.Ties = 0;
 }

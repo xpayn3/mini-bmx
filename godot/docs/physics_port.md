@@ -78,7 +78,10 @@ in `godot/sim/`.
 
 ## Steps
 1. SimMath + math probe (no game change). DONE
-2. V3f / Pcg32 / Noise + their probes.
+2. V3f / Pcg32 / Noise + their probes. `tools/sim_rng_probe.gd`: **Pcg32 = Godot's RandomNumberGenerator bit for bit**
+   (rand / randf / randfn, 5 seeds x 200k: randf's exponent comes from the first draw's LEADING zeros; randfn does
+   cos and log in float, the rest in double). **Noise2S NOT matching yet** (written from memory: 15-50 % of points
+   differ from Godot's FastNoiseLite): to be ported from FastNoiseLite's own source (MIT), then V3f.
 3. IGround / IRideHost / RideParams + adapter; state mirror (C# <-> GDScript by member name); lockstep harness
    with an empty C# step (only reports the differences).
 4. Port the stages in order: helpers, `_step_controls`, `_step_ground`, `_step_sprint`, `_step_loads`,
