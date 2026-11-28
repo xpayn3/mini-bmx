@@ -1516,6 +1516,7 @@ func _sync_skeleton(P: Array) -> void:
 
 ## back on the bike: clear the ragdoll orientations the normal update doesn't set
 func reset_pose() -> void:
+	_so_s = 0.0; _so_up = 0.0; _so_t = 0.0
 	_cap_ok = false
 	if bib_node and is_instance_valid(bib_node) and bib_node.has_method("restart"): bib_node.restart()   # (the race number starts flat: it kept the crash's crumple for a frame)
 	pelvis_mesh.basis = Basis()
@@ -1616,6 +1617,15 @@ const SPIN_CALM_LEFT := 0.08    # share of the bar pull / shoulder turn / hip ro
 var _hd_s := 0.0      # head-down share 0..1 (eased)
 var _hd_on := false
 var _hd_t := 0.0      # time left in this phase
+# spun out / spinning his top cadence (2026-11-28, user: "when the rider spins out he usually looks down, also spinning
+# on max"): the head drops to the drivetrain (SPIN_LOOK_DOWN), with a glance back up the trail every ~1-2 s.
+# BMX_OLD_SPINLOOK=1 = off
+const SPIN_LOOK_DOWN := 0.5
+var _so_s := 0.0      # eased 0..1
+var _so_up := 0.0     # s left of a glance up
+var _so_t := 0.0      # s looking down since the last glance
+var _so_next := 1.5   # s down before the next glance
+static var _OLD_SPINLOOK := Env.raw("BMX_OLD_SPINLOOK") != ""
 var _spr_arm := 0.0   # sprint arm pose 0..1 (quick on, slow off)
 var sm_pitch0 := 0.0
 var sm_pitch_slow := 0.0   # the bike's pitch averaged over ~0.35 s: what the body swings with
@@ -1788,6 +1798,15 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	else:
 		_hd_on = false; _hd_t = randf_range(0.15, 0.4)
 	_hd_s += ((1.0 if _hd_on else 0.0) * _spr_arm - _hd_s) * (1.0 - exp(-(9.0 if _hd_on else 12.0) * minf(dt, 0.1)))
+	var so_in: float = 0.0 if _OLD_SPINLOOK or _num(p, "air") > 0.3 else clampf(_num(p, "spinOut"), 0.0, 1.0)
+	if so_in > 0.3:
+		_so_t += dt
+		if _so_up > 0.0: _so_up -= dt
+		elif _so_t > _so_next: _so_up = randf_range(0.35, 0.6); _so_t = 0.0; _so_next = randf_range(1.1, 2.2)
+	else:
+		_so_t = 0.0; _so_up = 0.0
+	var so_tgt: float = so_in * (0.15 if _so_up > 0.0 else 1.0)
+	_so_s += (so_tgt - _so_s) * (1.0 - exp(-(6.0 if so_tgt > _so_s else 8.0) * minf(dt, 0.1)))
 	var fat_tgt: float = pow(1.0 - clampf(_num(p, "stamina", 1.0), 0.0, 1.0), 1.5) * _spr_arm
 	_fat += (fat_tgt - _fat) * (1.0 - exp(-(2.0 if fat_tgt > _fat else 0.6) * minf(dt, 0.1)))
 	var fat: float = _fat
@@ -2651,7 +2670,7 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var yaw: float = clampf((_num(p, "steer") * 1.2 + _num(p, "yawRate") * 0.15) * sty.headTurn + lead * 0.8, -0.8, 0.8) + sty.headYaw + _num(p, "lookYaw") - 0.95 * awhip + head_yaw_hold + _pk_hy
 	# (+ the pedalling rock taken back out: the bike rocks under a level head)
 	var rx: float = (_num(p, "headRoll") if p.get("headRoll") != null else _num(p, "lean") * 0.6) + sty.headRoll + _num(p, "rockRoll") * minf(steady, 1.0)
-	var rz: float = -0.12 * (ang - 0.72) + 0.04 * sin(t * 3.3) * wig - sty.headTilt * (1.0 - 0.6 * relax) + 0.12 * tall + _num(p, "lookPitch") - head_kick - _pk_hp - SPR_HEAD_DOWN * _hd_s
+	var rz: float = -0.12 * (ang - 0.72) + 0.04 * sin(t * 3.3) * wig - sty.headTilt * (1.0 - 0.6 * relax) + 0.12 * tall + _num(p, "lookPitch") - head_kick - _pk_hp - maxf(SPR_HEAD_DOWN * _hd_s, SPIN_LOOK_DOWN * _so_s)
 	head.transform = Transform3D(GEAR.euler_xyz(rx, yaw, rz), head_p)
 	_pose_neck()
 

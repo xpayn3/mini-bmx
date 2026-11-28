@@ -58,6 +58,8 @@ var moving_t := 0.0
 var ride_dist := 0.0
 var max_v := 0.0
 var cad := 0.0          # rpm, from the crank
+var _CAD_PROBE := Env.s("BMX_CAD_PROBE") != ""   # test: CADPROBE lines, the computer's cadence vs the real gear ratio
+var _cad_pt := 0.0
 var power := 0.0        # W, from the drive force
 var hr := 72.0          # bpm, made up from effort, sprint, stamina
 var _crank_last := NAN
@@ -509,7 +511,15 @@ func _ride_stats(st: BikePhysics, dt: float) -> void:
 	var dc := st.crank - _crank_last
 	_crank_last = st.crank
 	var rpm := absf(dc) / maxf(dt, 1e-4) / TAU * 60.0 if (st.pedal > 0.15 and not st.air) else 0.0
-	cad += (minf(rpm, 150.0) - cad) * minf(1.0, dt * 3.0)
+	cad += (minf(rpm, 220.0) - cad) * minf(1.0, dt * 3.0)
+	if _CAD_PROBE:
+		_cad_pt += dt
+		if _cad_pt >= 1.0:
+			_cad_pt = 0.0
+			# what a real drivetrain gives: rear wheel turns / s x 60 / (chainring / cog)
+			var real := absf(st.v) / st.RWR / TAU * 60.0 / st.drive_ratio()
+			print("CADPROBE v=%.1f km/h cog=%s ratio=%.2f cad=%.0f real_rpm=%.0f pedal=%.2f slip=%.2f" % [absf(st.v) * 3.6,
+				str(st.cogs[st.gear]) if st.gear >= 0 else "-", st.drive_ratio(), cad, real, st.pedal, st.chain_slip_k])
 	var pw := 0.0
 	if not st.air and not st.crash_on and st.pedal > 0.05:
 		pw = 32.0 * maxf(0.0, st.a_pedal) * absf(st.v) + st.pedal * (30.0 + 5.0 * absf(st.v))
