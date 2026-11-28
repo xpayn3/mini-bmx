@@ -1,6 +1,7 @@
 # Runout: Godot -> Unity port
 
-State as of **2026-11-28**. Unity project = `unity/` (this folder). The Godot game in `godot/` stays the reference and
+State as of **2026-11-28**. Unity project = `unity/` (this folder). Working checkout: **`D:\Runout`** (a git worktree of
+this repo on branch `unity`; open `D:\Runout\unity` in Unity Hub). The main checkout on C: keeps the Godot work. The Godot game in `godot/` stays the reference and
 keeps running; port from it. `godot/HANDOFF.md` describes how every system works.
 
 ## The rules (user, 2026-11-28)
@@ -25,6 +26,8 @@ keeps running; port from it. `godot/HANDOFF.md` describes how every system works
 | `Assets/Runout/Config/` | **Runout.Config** (engine-free): `Tune` (the 290 ride values from `TuneDefs.g.cs`, generated from `godot/scripts/core/tune.gd` by `Tools/gen_tune_defs.py`; player value x bike multiplier x Feel macros + followers -> `RideParams`), `SuspSetup` (fork / shock parts + clicks -> `SusSetup`), `FixedStepper` (120 Hz + interpolation). |
 | `Assets/Runout/Game/` | **Runout.Game**: Unity adapters. `SimHost` (steps the ride on its own clock, draws interpolated), `BikeSimStep`, `RideHost` (IRideHost), `TerrainGround` (IGround over a Unity Terrain, test scenes only), `InputReader` (Input System -> RideInput), `BikeView` (axis bridge), `RideBootstrap` (builds the DH ride), `ChaseCamera` (stand-in). |
 | `Assets/Runout/Editor/` | `ProjectBootstrap` (menu Runout > Bootstrap Project, re-runnable): HDRP, linear colour, Input System, 120 Hz fixed step, the Ride scene wired. |
+| `Assets/Runout/Levels/` | **Runout.Levels** (engine-free): the test playground course + JumpDesign (ported from Godot, checked by SimTests), PlacedFeature (lane features placed anywhere). |
+| `Assets/Runout/Game/Playground/` | PlaygroundWorld (course -> IGround + meshes, live in the editor), PlaygroundFeature (a placeable feature); Inspector: Ride from here. Scene `Scenes/Playground.unity`. |
 | `Assets/Runout/Tests/PlayMode/` | play-mode tests (Unity Test Framework): the Ride scene rides under our physics. |
 | `Assets/Runout/Art/` | assets copied from `godot/assets`. `Art/Plants` + beech leaf cards are licensed scans: gitignored, copied from the main checkout. |
 | `SimTests/` | dotnet console project: builds `godot/sim` + Config with C# 9 and runs the checks, incl. **the Godot reference traces** (`SimTests/ref`, written by `godot/tools/port_trace.tscn`: 14 scripted runs; all match step for step). `dotnet run --project unity/SimTests`, exit code = failures. |
@@ -68,8 +71,9 @@ Graph / HLSL · glTFast (`.glb`) · Splines · Timeline · Test Framework · Ste
 - [x] Project, assemblies, packages (pruned), bootstrap, Ride scene; assets copied.
 - [x] Ride physics = `godot/sim` as a package; SimTests: all 14 Godot reference runs match.
 - [x] Play mode: the Ride scene rides under our physics (test `RideTests.PedallingMovesTheBike`).
-- [ ] Note: in a deep worktree path a few HDRP files hit Windows' 260-character limit on import; the normal checkout
-      (`Documents\gamecycling\unity`) is short enough.
+- [x] Test playground: `Scenes/Playground.unity` (reference lanes + bowls from Runout.Levels, exact vs Godot) and
+      **PlaygroundFeature**: place any lane feature in the scene, set its numbers, press Play / Ride from here.
+- Note: keep the project on a short path (D:\Runout): deep paths hit Windows' 260-character limit in HDRP's import.
 
 ## Commands
 ```powershell
