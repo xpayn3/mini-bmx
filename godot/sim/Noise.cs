@@ -4,7 +4,7 @@ using System;
 namespace Runout.Sim
 {
 	/// <summary>
-	/// The part of FastNoiseLite (Jordan Peck, MIT) the ride uses: 2D OpenSimplex2S ("simplex smooth"), FBm fractal,
+	/// The part of FastNoiseLite (Copyright (c) 2023 Jordan Peck and Contributors, MIT licence) the ride uses: 2D OpenSimplex2S ("simplex smooth"), FBm fractal,
 	/// in 32-bit floats like Godot's FastNoiseLite resource, so the same seed / frequency / octaves give the same numbers
 	/// (checked by tools/sim_rng_probe.gd).
 	/// </summary>
@@ -36,16 +36,27 @@ namespace Runout.Sim
 			_bounding = 1 / ampFractal;
 		}
 
-		/// the 128 gradient pairs: 24 directions 15 deg apart, starting at 7.5 deg, as (sin, cos), repeated
+		/// FastNoiseLite's Gradients2D: the 24-direction block (literals as in its source) five times, then 8 diagonals
 		private static float[] MakeGradients()
 		{
-			var g = new float[256];
-			for (int k = 0; k < 128; k++)
+			float[] block =
 			{
-				double a = (7.5 + 15.0 * (k % 24)) * Math.PI / 180.0;
-				g[2 * k] = (float)Math.Round(Math.Sin(a), 15);
-				g[2 * k + 1] = (float)Math.Round(Math.Cos(a), 15);
-			}
+				0.130526192220052f, 0.99144486137381f, 0.38268343236509f, 0.923879532511287f, 0.608761429008721f, 0.793353340291235f, 0.793353340291235f, 0.608761429008721f,
+				0.923879532511287f, 0.38268343236509f, 0.99144486137381f, 0.130526192220051f, 0.99144486137381f, -0.130526192220051f, 0.923879532511287f, -0.38268343236509f,
+				0.793353340291235f, -0.60876142900872f, 0.608761429008721f, -0.793353340291235f, 0.38268343236509f, -0.923879532511287f, 0.130526192220052f, -0.99144486137381f,
+				-0.130526192220052f, -0.99144486137381f, -0.38268343236509f, -0.923879532511287f, -0.608761429008721f, -0.793353340291235f, -0.793353340291235f, -0.608761429008721f,
+				-0.923879532511287f, -0.38268343236509f, -0.99144486137381f, -0.130526192220052f, -0.99144486137381f, 0.130526192220051f, -0.923879532511287f, 0.38268343236509f,
+				-0.793353340291235f, 0.608761429008721f, -0.608761429008721f, 0.793353340291235f, -0.38268343236509f, 0.923879532511287f, -0.130526192220052f, 0.99144486137381f,
+			};
+			float[] tail =
+			{
+				0.38268343236509f, 0.923879532511287f, 0.923879532511287f, 0.38268343236509f, 0.923879532511287f, -0.38268343236509f, 0.38268343236509f, -0.923879532511287f,
+				-0.38268343236509f, -0.923879532511287f, -0.923879532511287f, -0.38268343236509f, -0.923879532511287f, 0.38268343236509f, -0.38268343236509f, 0.923879532511287f,
+			};
+			var g = new float[256];
+			for (int r = 0; r < 5; r++)
+				Array.Copy(block, 0, g, r * 48, 48);
+			Array.Copy(tail, 0, g, 240, 16);
 			return g;
 		}
 
