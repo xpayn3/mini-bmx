@@ -6,9 +6,23 @@ namespace Runout.Game
     /// Places the drawn bike from the sim pose. Coordinate bridge: the sim uses the Godot convention
     /// (right-handed, y up, heading 0 = +x, + lean = left); Unity is left-handed (y up, z forward).
     /// We map sim (x, y, z) -> Unity (x, y, -z) and flip the handedness of rotations accordingly.
+    [ExecuteAlways]
     public sealed class BikeView : MonoBehaviour
     {
         public Transform steer;   // the steering assembly's pivot (turns about its local up)
+        [Tooltip("the bike model (a glb made for Godot); none = the first child")]
+        public Transform model;
+
+        /// A Godot / glTF model imported by glTFast is mirrored in X ((x, y, z) -> (-x, y, z)); the sim maps to Unity as
+        /// (x, y, -z). The two differ by a half turn about up, so the model sits under this object turned 180 deg: its
+        /// forward (Godot +X) then points along this object's +X, the way the sim moves it.
+        public static readonly Quaternion GODOT_MODEL = Quaternion.Euler(0f, 180f, 0f);
+
+        void OnEnable()
+        {
+            if (model == null && transform.childCount > 0) model = transform.GetChild(0);
+            if (model != null) model.localRotation = GODOT_MODEL;
+        }
 
         public static Vector3 ToUnity(float x, float y, float z) => new Vector3(x, y, -z);
 
