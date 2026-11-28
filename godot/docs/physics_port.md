@@ -54,7 +54,8 @@ godot/dev/port/
 - **The Unity port loads `sim/` as its package `com.runout.sim`** (`unity/PORTING.md`): keep it **C# 9** and off
   **.NET-Core-only APIs** (Unity runs .NET Standard 2.1). Anything like `Math.FusedMultiplyAdd`, `Math.BitIncrement`,
   `Math.ScaleB`, `BitOperations` goes through `sim/SimCompat.cs`: System.Math under .NET 8 (Godot unchanged), exact
-  emulations in Unity / with `RUNOUT_COMPAT`. `sim/package.json`, `sim/Runout.Sim.asmdef` and the `.meta` files are
+  emulations in Unity / with `RUNOUT_COMPAT`. Never write to a Dictionary while walking it, not even a new value for a
+  key it has (.NET 8 allows it, Unity's Mono throws): walk a copy of the keys. `sim/package.json`, `sim/Runout.Sim.asmdef` and the `.meta` files are
   Unity's; leave them. `dotnet run --project unity/SimTests` rides the core (C# 9 + RUNOUT_COMPAT) against Godot
   reference traces from `tools/port_trace.tscn`: every run must match.
 

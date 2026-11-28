@@ -168,7 +168,9 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   **C# 9 only** (Unity's compiler) and **no .NET-Core-only APIs** (Unity's runtime is .NET Standard 2.1: no
   `Math.FusedMultiplyAdd` / `BitIncrement` / `ScaleB`, no public `BitOperations`...): anything like that goes through
   `sim/SimCompat.cs` (System.Math under .NET 8 = the Godot build unchanged; exact emulations elsewhere or with
-  `RUNOUT_COMPAT`). Leave `sim/package.json`, `sim/Runout.Sim.asmdef` and the `.meta` files as they are (Unity's;
+  `RUNOUT_COMPAT`). **Never write to a Dictionary while walking it**, not even a new value for a key it has (.NET 8
+  allows it, Unity's Mono throws "Collection was modified"): walk a copy of the keys (`_risk_settle` does).
+  Leave `sim/package.json`, `sim/Runout.Sim.asmdef` and the `.meta` files as they are (Unity's;
   Godot ignores them). `dev/port/simcheck` builds with LangVersion 9 + RUNOUT_COMPAT, so `dotnet build` there catches a
   break; `dotnet run --project unity/SimTests` also rides it against Godot reference traces (`tools/port_trace.tscn`).
 - **Needs the .NET Godot**: the plain (non-C#) Godot can no longer ride. The headless tools (`slope_stress`, `phys_test`)
