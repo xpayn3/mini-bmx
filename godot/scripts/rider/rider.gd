@@ -1683,6 +1683,10 @@ const HEEL_TURN_MAX := 0.3     # rad: the heel swivels in (toes out) as the knee
 const ANKLE_ROLL_MAX := 0.21   # rad: the foot rolls onto its edge with the shin's sideways tilt
 const HEEL_OUT_DROP := 0.1     # rad: the outside heel drops leaning into a turn
 static var _OLD_ANKLES := Env.raw("BMX_OLD_ANKLES") != ""
+static var _NECK_PROBE := Env.raw("BMX_NECK_PROBE") != ""
+static var _OLD_NECK := Env.raw("BMX_OLD_NECK") != ""
+const NECK_ROLL := 0.6    # rad: most the head rolls against the spine sideways (neck lateral flexion, soft limit)
+const NECK_BEND := 0.4    # share of that roll the neck itself leans by (it bends from the shoulders up to the head)
 static var _ANKLE_PROBE := Env.raw("BMX_ANKLE_PROBE") != ""   # tests: ANKLE lines
 var _heel_yaw := [0.0, 0.0]
 var _ank_roll := [0.0, 0.0]
@@ -2671,8 +2675,26 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	# (+ the pedalling rock taken back out: the bike rocks under a level head)
 	var rx: float = (_num(p, "headRoll") if p.get("headRoll") != null else _num(p, "lean") * 0.6) + sty.headRoll + _num(p, "rockRoll") * minf(steady, 1.0)
 	var rz: float = -0.12 * (ang - 0.72) + 0.04 * sin(t * 3.3) * wig - sty.headTilt * (1.0 - 0.6 * relax) + 0.12 * tall + _num(p, "lookPitch") - head_kick - _pk_hp - maxf(SPR_HEAD_DOWN * _hd_s, SPIN_LOOK_DOWN * _so_s)
+	# NECK ON THE SPINE (2026-11-28, user: "helmet placement on head or neck is off leaning and using the right stick"): the
+	# head's offset off the chest was straight up in the BIKE's frame and its roll (kept near world level) free, so with the
+	# torso tilted sideways (counter-roll, right stick) the neck stood off the spine's line and the head was rolled up to ~55 deg
+	# against the shoulders. Now the neck leaves the chest along the spine's own sideways tilt and bends from there toward the
+	# head, and the head's roll against the spine is held to a neck's range (NECK_ROLL, soft). BMX_OLD_NECK=1 = before
+	if not _OLD_NECK and not standing:
+		var sp_v: Vector3 = chest - hip
+		var a_sp: float = atan2(sp_v.z, maxf(0.05, sp_v.y))   # the spine's sideways tilt in the bike's frame (+ = to +z)
+		var rel: float = wrapf(rx - a_sp, -PI, PI)
+		var rel_c: float = NECK_ROLL * tanh(rel / NECK_ROLL)
+		rx = a_sp + rel_c
+		var nd: Vector3 = head_p - chest
+		head_p = chest + Basis(Vector3.RIGHT, a_sp + NECK_BEND * rel_c) * nd
+		J[0] = head_p
 	head.transform = Transform3D(GEAR.euler_xyz(rx, yaw, rz), head_p)
 	_pose_neck()
+	if _NECK_PROBE and Engine.get_process_frames() % 20 == 0 and not standing:
+		var sp_d: Vector3 = chest - hip
+		var nk_d: Vector3 = head_p - chest
+		print("NECKP spine_side=%+.0f neck_side=%+.0f head_roll=%+.0f body_roll=%+.0f lat=%+.2f air=%.1f" % [rad_to_deg(atan2(sp_d.z, sp_d.y)), rad_to_deg(atan2(nk_d.z, nk_d.y)), rad_to_deg(rx), rad_to_deg(_body_roll), _num(p, "bodyLat"), air])
 
 	var right := Vector3(0, 0, 1)
 	var max_turn := BEND_RATE * minf(dt, 0.1) if dt > 0.0 else PI
