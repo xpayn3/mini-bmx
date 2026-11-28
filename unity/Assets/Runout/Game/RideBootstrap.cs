@@ -20,6 +20,8 @@ namespace Runout.Game
         public GameObject riderModel;
         [Tooltip("its colour texture, for HDRP materials when the model's own are for another pipeline")]
         public Texture2D riderAlbedo;
+        [Tooltip("the rider's style as Godot rides this bike (Config/Rides/<bike>.pose.txt, from rider.cfg [pose_dh])")]
+        public TextAsset riderStyle;
         public Vector3 spawn = new Vector3(0f, 0f, 0f);
         [Tooltip("degrees: 0 = along +x (the sim's heading)")] public float heading = 0f;
 
@@ -108,6 +110,7 @@ namespace Runout.Game
                     anim.runtimeAnimatorController = null;   // (no clips: our pose drives the bones)
                     anim.applyRootMotion = false;
                     var rv = bikeObj.gameObject.AddComponent<RiderView>();
+                    rv.styleText = riderStyle != null ? riderStyle.text : null;
                     rv.Init(Sim, rig, anim);
                     draw.rider = rv;
                     rv.HookCrash(host, crashView);
@@ -144,6 +147,8 @@ namespace Runout.Game
                 riderModel = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Runout/Art/Characters/UnityDefaultMale/DefaultMale.fbx");
             if (riderAlbedo == null || riderAlbedo.name == "DefaultMale_Albedo")   // (the lighter kit replaces the near-black one)
                 riderAlbedo = UnityEditor.AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Runout/Art/Characters/UnityDefaultMale/DefaultMale_Albedo_Light.png");
+            if (riderStyle == null)
+                riderStyle = UnityEditor.AssetDatabase.LoadAssetAtPath<TextAsset>("Assets/Runout/Config/Rides/dh.pose.txt");
         }
 #endif
     }

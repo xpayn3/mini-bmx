@@ -27,6 +27,8 @@ namespace Runout.Game
         // game.gd's smoothed pose inputs
         float _yaw_s, _turn_s, _aspin_s, _atilt_s, _blat_s, _awhip_s;
 
+        public string styleText;   // the rider style file's text (Config/Rides/<bike>.pose.txt), set before Init
+
         public void Init(BikeSim sim, BikeRig r, Animator model)
         {
             st = sim; rig = r; T = sim.T; character = model;
@@ -97,7 +99,22 @@ namespace Runout.Game
             float tor = Len(HumanBodyBones.Hips, HumanBodyBones.Neck), shw = Len(HumanBodyBones.LeftUpperArm, HumanBodyBones.RightUpperArm) * 0.5f;
             if (tor > 0.3f) pose.TORSO = tor;
             if (shw > 0.1f) pose.SHOULDERS = shw;
-            pose.set_style(new Dictionary<string, double>());   // (after the lengths: they seed the style's torso / shoulders)
+            // the rider's style as Godot rides this bike (Config/Rides/<bike>.pose.txt = rider.cfg [pose_dh]), after the lengths:
+            // they seed the style's torso / shoulders, and the saved torso / shoulders (the Godot rider's own) are left out
+            var sty = new Dictionary<string, double>();
+            if (styleText != null)
+            {
+                var sx = BikeExtras.Parse(styleText);
+                foreach (string line in styleText.Split('\n'))
+                {
+                    int eq = line.IndexOf('=');
+                    if (eq <= 0 || line.TrimStart().StartsWith("#")) continue;
+                    string k = line.Substring(0, eq).Trim();
+                    if (k == "torso" || k == "shoulders" || !sx.has(k)) continue;
+                    sty[k] = sx.f(k);
+                }
+            }
+            pose.set_style(sty);
             Debug.Log($"RiderView: {character.name} humanoid, {_bones.Count} bones, thigh {th:F3} shin {sh:F3} upper arm {ua:F3} forearm {fa:F3} m");
         }
 
