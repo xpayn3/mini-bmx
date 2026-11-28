@@ -280,7 +280,7 @@ var crash_zoom := 0.0       # the current zoom-in on a crashed rider (0 = normal
 
 func update_cam(dt: float) -> void:
 	t += dt
-	var st: BikePhysics = game.phys
+	var st = game.phys
 	var P: Dictionary = preset()
 	if osd:
 		osd.visible = P.get("drone", false) and game.hud != null and game.hud.visible
@@ -407,8 +407,8 @@ func update_cam(dt: float) -> void:
 			var sgn := -1.0 if randf() < 0.5 else 1.0
 			var ahead := 18 + randf() * 8
 			var off := 5 + randf() * 5
-			var px := st.x + f.x * ahead + side.x * off * sgn
-			var pz := st.z + f.z * ahead + side.z * off * sgn
+			var px = st.x + f.x * ahead + side.x * off * sgn
+			var pz = st.z + f.z * ahead + side.z * off * sgn
 			track_pos = Vector3(px, terrain.height(px, pz) + 1.2 + randf() * 1.6, pz)
 		global_position = track_pos
 		var d := global_position.distance_to(target)
@@ -617,7 +617,7 @@ func _helmet(dt: float, P: Dictionary) -> bool:
 	global_transform = Transform3D(helm_basis, xf.origin)
 	cam_fov += (float(lens.get_meta("fov", P.fov)) - cam_fov) * minf(1.0, dt * 3.0)   # the camera model / lens mod sets it
 	fov = clampf(cam_fov * (1.0 + fov_boost * float(Settings.get_v("cam_speed_fov")) / 68.0) + float(Settings.get_v("fov")), 5, 120)
-	var st: BikePhysics = game.phys
+	var st = game.phys
 	st.shake = maxf(0.0, st.shake - dt * 1.2)
 	RenderingServer.global_shader_parameter_set("cam_see", Vector4.ZERO)
 	RenderingServer.global_shader_parameter_set("cam_eye", Vector4(xf.origin.x, xf.origin.y, xf.origin.z, 0.0))
@@ -679,7 +679,7 @@ func _blocked(p_deg: float, back: Vector3, dy: float, from: Vector3) -> bool:
 
 ## Trail camera: smoothed horizontal direction from the rider to the trail ~10-25 m ahead (in the way
 ## the rider is going), so the view turns INTO a bend before the bike does. Off the trail: the heading.
-func _look_dir(st: BikePhysics, f: Vector3, dt: float) -> Vector3:
+func _look_dir(st, f: Vector3, dt: float) -> Vector3:
 	var want := f
 	var c = null
 	if game.terrain and game.terrain.field:

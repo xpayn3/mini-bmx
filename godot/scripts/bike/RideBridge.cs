@@ -105,6 +105,41 @@ public static class RideBridge
 	/// a content key for a collider (where it stands and how big): the same post / rock from two lookups is one object
 	public static string ColliderId(GdDict c) => string.Format(CultureInfo.InvariantCulture, "{0:R},{1:R},{2:R}", c.f("x"), c.f("z"), c.f("r"));
 
+	/// a fresh engine dictionary with the values (never the source object: the ride may have changed them)
+	public static GDict ToGodotCopy(GdDict d)
+	{
+		if (d == null)
+			return null;
+		var o = new GDict();
+		foreach (var kv in d)
+			o[kv.Key] = ToVariant(kv.Value);
+		return o;
+	}
+
+	public static GArray ToArray(System.Collections.IEnumerable l)
+	{
+		var a = new GArray();
+		if (l != null)
+			foreach (var e in l) a.Add(ToVariant(e));
+		return a;
+	}
+
+	public static List<double> ToDoubles(GArray a)
+	{
+		var l = new List<double>(a?.Count ?? 0);
+		if (a != null)
+			foreach (var e in a) l.Add(e.VariantType == Variant.Type.Int ? e.AsInt64() : e.AsDouble());
+		return l;
+	}
+
+	public static List<object> ToObjects(GArray a)
+	{
+		var l = new List<object>(a?.Count ?? 0);
+		if (a != null)
+			foreach (var e in a) l.Add(Plain(e));
+		return l;
+	}
+
 	public static GDict ToGodot(GdDict d)
 	{
 		if (d.src is GDict g)

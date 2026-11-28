@@ -112,7 +112,7 @@ func update(dt: float, inp: Dictionary) -> void:
 	weak = 0.0; strong = 0.0
 	if probe: layers.clear()
 	for e in EFFECTS: _k[e[0]] = strength(e[0])
-	var st: BikePhysics = game.phys
+	var st = game.phys
 	if st.crash_on:
 		if not _crashed: crash()
 		_crashed = true
@@ -138,7 +138,7 @@ func update(dt: float, inp: Dictionary) -> void:
 	if probe: _probe_step(dt)
 	_output()
 
-func _ride_layers(dt: float, st: BikePhysics, inp: Dictionary) -> void:
+func _ride_layers(dt: float, st, inp: Dictionary) -> void:
 	var va := absf(st.v)
 	var spd := clampf(va / 14.0, 0.0, 1.0)
 	var ground := 0.0 if st.air else 1.0
@@ -352,7 +352,7 @@ func _probe_step(dt: float) -> void:
 	_pr_t += dt
 	if _pr_t >= 0.25:
 		_pr_t = 0.0
-		var st: BikePhysics = game.phys
+		var st = game.phys
 		var parts := []
 		for key in layers:
 			parts.append("%s=%.2f/%.2f" % [key.trim_prefix("rumble_"), layers[key][0], layers[key][1]])
