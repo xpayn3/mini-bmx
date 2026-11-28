@@ -45,6 +45,19 @@ namespace Runout.Game
             // measured off the meshes by unity/Tools/glb_extras.py (Godot: _grips, _split_pedals, _saddle)
             grip_l = extras.v3("rig.gripL", new Vector3(0f, 0f, -0.3f));
             grip_r = extras.v3("rig.gripR", new Vector3(0f, 0f, 0.3f));
+            // the grips as cylinders (glb_extras.py measures any bar: width, sweep, rise): a rider holds a grip with the
+            // little finger at the bar end, so the hand's middle sits HAND_IN in from the outer end, along the grip's axis
+            if (extras.has("rig.gripLOut") && extras.has("rig.gripROut"))
+            {
+                Vector3 li = extras.v3("rig.gripLIn", grip_l), lo = extras.v3("rig.gripLOut", grip_l);
+                Vector3 ri = extras.v3("rig.gripRIn", grip_r), ro = extras.v3("rig.gripROut", grip_r);
+                grip_axis_l = (lo - li).normalized; grip_axis_r = (ro - ri).normalized;
+                float inL = Mathf.Min(HAND_IN, (lo - li).magnitude * 0.5f), inR = Mathf.Min(HAND_IN, (ro - ri).magnitude * 0.5f);
+                grip_l = lo - grip_axis_l * inL;
+                grip_r = ro - grip_axis_r * inR;
+                grip_radius = (float)extras.f("rig.gripLR", 0.014);
+            }
+            SplitPedals();
             pedal_l = extras.v3("rig.pedalL", new Vector3(0f, 0f, -0.1f));
             pedal_r = extras.v3("rig.pedalR", new Vector3(0f, 0f, 0.1f));
             pedal_top = (float)extras.f("rig.pedalTop", 0.017);
@@ -63,6 +76,94 @@ namespace Runout.Game
         public Vector3 LeanLocal(Vector3 gworld) => Quaternion.Inverse(ModelRot) * (gworld - position);
         /// lean space -> Godot world
         public Vector3 LeanToWorld(Vector3 lean) => position + ModelRot * lean;
+
+        public const float HAND_IN = 0.045f;   // m: the hand's middle in from the grip's outer end (half a gloved palm)
+        public Vector3 grip_axis_l = new Vector3(0f, 0f, -1f), grip_axis_r = new Vector3(0f, 0f, 1f);   // steer mesh space, pointing out
+        public float grip_radius = 0.014f;
+
+        /// a grip's axis (pointing out of the bar end) in lean space, as the bar is turned now
+        public Vector3 GripAxis(int side)
+        {
+            if (steer_n == null) return side == 0 ? Vector3.back : Vector3.forward;
+            Vector3 a = side == 0 ? grip_axis_l : grip_axis_r;
+            Vector3 g0 = GPoint(steer_n, Vector3.zero), g1 = GPoint(steer_n, a);
+            return (Quaternion.Inverse(ModelRot) * (g1 - g0)).normalized;
+        }
+
+        // ---- pedals kept level (Godot: _pedals): the crank's "plastic" surface (both pedals) cut into one pedal per
+        // side, each on its own pivot under the crank, turned back by the crank angle every frame (+ the rider's foot
+        // pitch: flat pedals tip under the shoe) ----
+        public readonly Transform[] pedal_pivots = new Transform[2];
+
+        void SplitPedals()
+        {
+            if (crank_n == null) return;
+            var mf = crank_n.GetComponent<MeshFilter>();
+            var mr = crank_n.GetComponent<MeshRenderer>();
+            if (mf == null || mr == null || mf.sharedMesh == null) return;
+            Mesh mesh = mf.sharedMesh;
+            if (!mesh.isReadable) { Debug.LogWarning("BikeRig: the crank mesh is not readable: the pedals turn with it"); return; }
+            int si = -1;
+            var mats = mr.sharedMaterials;
+            for (int k = 0; k < mats.Length && k < mesh.subMeshCount; k++)
+                if (mats[k] != null && mats[k].name.StartsWith("plastic")) si = k;
+            if (si < 0) return;
+            Vector3[] v = mesh.vertices; Vector3[] n = mesh.normals; Vector2[] uv = mesh.uv;
+            int[] tri = mesh.GetTriangles(si);
+            for (int side = 0; side < 2; side++)
+            {
+                float want = side == 0 ? -1f : 1f;   // (z is the same in Godot and in glTFast's mirrored-x space)
+                var sel = new List<int>();
+                Vector3 c = Vector3.zero; int cn = 0;
+                for (int t = 0; t + 2 < tri.Length; t += 3)
+                {
+                    float zc = (v[tri[t]].z + v[tri[t + 1]].z + v[tri[t + 2]].z) / 3f;
+                    if (Mathf.Sign(zc) != want || zc == 0f) continue;
+                    for (int k = 0; k < 3; k++) { sel.Add(tri[t + k]); c += v[tri[t + k]]; cn++; }
+                }
+                if (cn == 0) continue;
+                c /= cn;
+                var remap = new Dictionary<int, int>();
+                var pv = new List<Vector3>(); var pn = new List<Vector3>(); var pu = new List<Vector2>(); var pi = new List<int>();
+                foreach (int vi in sel)
+                {
+                    if (!remap.TryGetValue(vi, out int ni))
+                    {
+                        ni = pv.Count; remap[vi] = ni;
+                        pv.Add(v[vi] - c);
+                        pn.Add(n != null && n.Length > vi ? n[vi] : Vector3.up);
+                        pu.Add(uv != null && uv.Length > vi ? uv[vi] : Vector2.zero);
+                    }
+                    pi.Add(ni);
+                }
+                var pm = new Mesh { name = "pedal_" + (side == 0 ? "L" : "R") };
+                pm.SetVertices(pv); pm.SetNormals(pn); pm.SetUVs(0, pu); pm.SetTriangles(pi, 0);
+                pm.RecalculateBounds();
+                var go = new GameObject(pm.name);
+                go.transform.SetParent(crank_n, false);
+                go.transform.localPosition = c;
+                go.AddComponent<MeshFilter>().sharedMesh = pm;
+                go.AddComponent<MeshRenderer>().sharedMaterial = mats[si];
+                pedal_pivots[side] = go.transform;
+                // (the pedal pivot's place = the foot's target: the measured centre in Godot axes)
+                if (side == 0) pedal_l = GodotSpace.M(c); else pedal_r = GodotSpace.M(c);
+            }
+            // the crank without its pedals
+            var cm = Instantiate(mesh);
+            cm.name = mesh.name + "_nopedals";
+            cm.SetTriangles(new int[0], si);
+            mf.sharedMesh = cm;
+        }
+
+        static Mesh Instantiate(Mesh m) => UnityEngine.Object.Instantiate(m);
+
+        /// turn the pedals back level against the crank, tipped by each foot's pitch (Godot: pivot.rotation.z = crank + foot_pitch)
+        public void pose_pedals(float crank, float pitchL, float pitchR)
+        {
+            for (int i = 0; i < 2; i++)
+                if (pedal_pivots[i] != null)
+                    pedal_pivots[i].localRotation = GodotSpace.MRot(RotZ(crank + (i == 0 ? pitchL : pitchR)));
+        }
 
         public struct Limbs { public Vector3 handL, handR, footL, footR, gripX, gripZ; }
         /// where the hands / feet go, in lean space (Godot BikeRig.limb_targets); the pedals are the pedal pivots
@@ -123,6 +224,7 @@ namespace Runout.Game
             if (wheel_r != null) wheel_r.localRotation = GodotSpace.MRot(wrRest * RotZ(-wr));
             if (crank_n != null) crank_n.localRotation = GodotSpace.MRot(crRest * RotZ(-crank));
             crank_angle = crank;
+            pose_pedals(crank, 0f, 0f);   // (level; the rider tips them with his feet after posing)
             Place();
             susp?.apply();
         }

@@ -21,7 +21,7 @@ namespace Runout.Game
         BikeSim st;
         BikeRig rig;
         RideParams T;
-        readonly List<(HumanBodyBones hb, string name, Transform t, Quaternion rest)> _bones = new List<(HumanBodyBones, string, Transform, Quaternion)>();
+        readonly List<(HumanBodyBones hb, string name, Transform t)> _bones = new List<(HumanBodyBones, string, Transform)>();
         static readonly Quaternion FACE_X = Quaternion.Euler(0f, 90f, 0f);   // a model facing Unity +Z, turned to face the rider's forward (W(+X) = Unity +X)
         float t;
         // game.gd's smoothed pose inputs
@@ -48,13 +48,37 @@ namespace Runout.Game
             _bones.Clear();
             if (character == null || !character.isHuman) { Debug.LogWarning("RiderView: the character is not a Humanoid"); return; }
             Transform root = character.transform;
-            Quaternion inv = Quaternion.Inverse(root.rotation);
+            // the rest = the avatar's T-pose (the skeleton pose the Humanoid import was configured with), NOT the mesh's
+            // file pose: a model's file pose is often an A-pose or relaxed, and taking that as the T-pose twisted the
+            // shoulders, wrists, hips. A bone's rest rotation in the root's space = its chain of rest local rotations
+            _restLocal.Clear();
+            if (character.avatar != null)
+                foreach (var sb in character.avatar.humanDescription.skeleton) _restLocal[sb.name] = sb.rotation;
             foreach (HumanBodyBones hb in Enum.GetValues(typeof(HumanBodyBones)))
             {
                 if (hb == HumanBodyBones.LastBone) continue;
                 Transform bt = character.GetBoneTransform(hb);
                 if (bt == null) continue;
-                _bones.Add((hb, hb.ToString(), bt, FACE_X * (inv * bt.rotation)));
+                _bones.Add((hb, hb.ToString(), bt));
+            }
+            // each hand's own axes, from its own skeleton (whatever pose the model was made in): toward the middle finger's
+            // knuckle, across the knuckles toward the index (thumb side), the back of the hand = their cross product
+            for (int i = 0; i < 2; i++)
+            {
+                string sd = i == 0 ? "Left" : "Right";
+                Transform hb = Bone(sd + "Hand"), mk = Bone(sd + "MiddleProximal"), ix = Bone(sd + "IndexProximal"), lt = Bone(sd + "LittleProximal");
+                if (hb == null || mk == null) continue;
+                Vector3 fw = mk.localPosition.normalized;
+                Vector3 up;
+                if (ix != null && lt != null && ix.parent == hb && lt.parent == hb)
+                {
+                    Vector3 across = ix.localPosition - lt.localPosition;   // (toward the thumb side)
+                    up = Vector3.Cross(fw, across).normalized * (i == 0 ? 1f : -1f);
+                }
+                else up = Quaternion.Inverse(RestInRoot(hb)) * Vector3.up;   // (no finger bones: a T-pose's palms are down)
+                _handFwdL[i] = fw;
+                _handUpL[i] = (up - fw * Vector3.Dot(up, fw)).normalized;
+                _handOk[i] = true;
             }
             // parents before children (so setting a world rotation never disturbs one already set)
             _bones.Sort((a, b) => Depth(a.t).CompareTo(Depth(b.t)));
@@ -69,24 +93,215 @@ namespace Runout.Game
             if (sh > 0.2f) pose.L_SHIN = sh;
             if (ua > 0.15f) pose.L_UARM = ua;
             if (fa > 0.15f) pose.L_FARM = fa + 0.07;   // (Godot's forearm runs to the middle of the grip: the wrist + half the hand)
+            // the torso (pelvis -> the chest joint at the base of the neck) and half the shoulder width, from the model
+            float tor = Len(HumanBodyBones.Hips, HumanBodyBones.Neck), shw = Len(HumanBodyBones.LeftUpperArm, HumanBodyBones.RightUpperArm) * 0.5f;
+            if (tor > 0.3f) pose.TORSO = tor;
+            if (shw > 0.1f) pose.SHOULDERS = shw;
             pose.set_style(new Dictionary<string, double>());   // (after the lengths: they seed the style's torso / shoulders)
             Debug.Log($"RiderView: {character.name} humanoid, {_bones.Count} bones, thigh {th:F3} shin {sh:F3} upper arm {ua:F3} forearm {fa:F3} m");
         }
 
         static int Depth(Transform t) { int d = 0; while (t.parent != null) { t = t.parent; d++; } return d; }
 
-        static Vec3 V(Vector3 v) => new Vec3(v.x, v.y, v.z);
-        static Vector3 U(Vec3 v) => new Vector3((float)v.x, (float)v.y, (float)v.z);
-        static Quaternion Q(Basis b)
+        readonly Dictionary<string, Quaternion> _restLocal = new Dictionary<string, Quaternion>();
+        Quaternion RestLocal(Transform n) => _restLocal.TryGetValue(n.name, out var q) ? q : n.localRotation;
+        Quaternion RestInRoot(Transform bt)
         {
-            var m = new Matrix4x4();
-            m.SetColumn(0, new Vector4((float)b.x.x, (float)b.x.y, (float)b.x.z, 0f));
-            m.SetColumn(1, new Vector4((float)b.y.x, (float)b.y.y, (float)b.y.z, 0f));
-            m.SetColumn(2, new Vector4((float)b.z.x, (float)b.z.y, (float)b.z.z, 0f));
-            m.SetColumn(3, new Vector4(0f, 0f, 0f, 1f));
-            return m.rotation;
+            Quaternion r = Quaternion.identity;
+            for (Transform n = bt; n != null && n != character.transform; n = n.parent) r = RestLocal(n) * r;
+            return r;
         }
 
+        // ---- fingers: WHEN they grip / rest on the lever / squeeze = ours (RiderFingers); HOW = Unity muscles ----
+        public readonly RiderFingers fingers = new RiderFingers();
+        /// The model's proportions are not the solver's: after the retarget its own arms and legs are bent (two-bone IK,
+        /// the hands' / feet's rotation kept) so the contact points are exactly where Godot puts them: the middle
+        /// finger's knuckle on the grip where GloveFingers has it (on a circle of GRIP_R round the bar, KNUCKLE_ANG up the
+        /// front), the ankles where the solver's feet are
+        void ContactIK(Quaternion frame)
+        {
+            Vector3 ToWorld(Vec3 riderPos) => GodotSpace.W(rig.LeanToWorld(U(riderPos)));
+            for (int i = 0; i < 2; i++)
+            {
+                string sd = i == 0 ? "Left" : "Right";
+                Xf hand = i == 0 ? pose.handL : pose.handR;
+                Transform ua = Bone(sd + "UpperArm"), la = Bone(sd + "LowerArm"), hb = Bone(sd + "Hand"), mk = Bone(sd + "MiddleProximal");
+                if (ua != null && la != null && hb != null && mk != null)
+                {
+                    double inner = i == 0 ? 1.0 : -1.0;
+                    var kn = new Vec3(Math.Cos(RiderFingers.KNUCKLE_ANG + 0.04) * RiderFingers.GRIP_R, Math.Sin(RiderFingers.KNUCKLE_ANG + 0.04) * RiderFingers.GRIP_R, inner * 0.0115);
+                    Vector3 knuckle = ToWorld(hand.o + hand.b * kn);
+                    Vector3 target = knuckle - (mk.position - hb.position);   // (rigid with the hand: its rotation is kept)
+                    TwoBoneIK(ua, la, hb, target, ToWorld(pose.J[i == 0 ? 4 : 7]));   // (bends toward our solver's elbow)
+                }
+                Transform ul = Bone(sd + "UpperLeg"), ll = Bone(sd + "LowerLeg"), fb = Bone(sd + "Foot");
+                if (ul != null && ll != null && fb != null)
+                {
+                    Xf shoe = i == 0 ? pose.shoeL : pose.shoeR;   // the ankle over the shoe (Rider ANKLE_X / ANKLE_UP)
+                    Vec3 ankle = shoe.o + shoe.b.x.normalized() * pose.ANKLE_X + shoe.b.y.normalized() * pose.ANKLE_UP;
+                    TwoBoneIK(ul, ll, fb, ToWorld(ankle), ToWorld(pose.J[i == 0 ? 10 : 13]));   // (toward our knee)
+                }
+            }
+        }
+
+        readonly Vector3[] _handFwdL = new Vector3[2], _handUpL = new Vector3[2];
+        readonly bool[] _handOk = new bool[2];
+
+        /// each hand turned to hold the grip: its fingers along our hand's +X (across the bar, a little down its front:
+        /// Godot's orient_grip), the back of the hand along our +Y. From the model's own hand axes (no conversion of
+        /// Godot's hand bone, whose axes are not a Unity Humanoid's)
+        void SetHands(Quaternion frame)
+        {
+            for (int i = 0; i < 2; i++)
+            {
+                if (!_handOk[i]) continue;
+                Transform hb = Bone(i == 0 ? "LeftHand" : "RightHand");
+                Xf hand = i == 0 ? pose.handL : pose.handR;
+                // the fingers go across the REAL grip (its measured axis: swept / angled bars), back of the hand up
+                Vector3 axis = frame * GodotSpace.W(rig.GripAxis(i));
+                Vector3 fw = frame * GodotSpace.W(U(hand.b.x));
+                fw = (fw - axis * Vector3.Dot(fw, axis)).normalized;
+                Vector3 up = frame * GodotSpace.W(U(hand.b.y));
+                up = (up - axis * Vector3.Dot(up, axis) - fw * Vector3.Dot(up, fw)).normalized;
+                Quaternion want = Quaternion.LookRotation(fw, up);
+                Quaternion rest = Quaternion.LookRotation(_handFwdL[i], _handUpL[i]);
+                hb.rotation = want * Quaternion.Inverse(rest);
+            }
+        }
+
+        /// turn a bone so its rest forward / up (the model's T-pose: root +Z / +Y) point along fw / up (world)
+        void Face(HumanBodyBones hb, Vector3 fw, Vector3 up)
+        {
+            Transform t = character.GetBoneTransform(hb);
+            if (t == null || fw.sqrMagnitude < 1e-10f || up.sqrMagnitude < 1e-10f) return;
+            Quaternion rest = RestInRoot(t);
+            Vector3 fl = Quaternion.Inverse(rest) * Vector3.forward, ul = Quaternion.Inverse(rest) * Vector3.up;
+            t.rotation = Quaternion.LookRotation(fw, up) * Quaternion.Inverse(Quaternion.LookRotation(fl, ul));
+        }
+
+        Transform Bone(string n) => Enum.TryParse(n, out HumanBodyBones hb) ? character.GetBoneTransform(hb) : null;
+
+        /// a -> b -> c reaches `target` (as near as the lengths allow), bending in the plane it already bends in; c keeps its
+        /// world rotation
+        /// a -> b -> c reaches `target` (as near as the lengths allow) with the middle joint toward `hint` (our solver's
+        /// elbow / knee: the plane it bends in); c keeps its world rotation. The model's own bone lengths
+        static void TwoBoneIK(Transform a, Transform b, Transform c, Vector3 target, Vector3 hint)
+        {
+            Quaternion cRot = c.rotation;
+            Vector3 pa = a.position;
+            float la = (b.position - pa).magnitude, lb = (c.position - b.position).magnitude;
+            if (la < 1e-4f || lb < 1e-4f) return;
+            Vector3 to = target - pa;
+            float lt = Mathf.Clamp(to.magnitude, Mathf.Abs(la - lb) + 1e-3f, la + lb - 1e-3f);
+            Vector3 dir = to.sqrMagnitude > 1e-10f ? to.normalized : Vector3.down;
+            Vector3 side = (hint - pa) - Vector3.Dot(hint - pa, dir) * dir;   // toward the hint, square to the reach
+            if (side.sqrMagnitude < 1e-8f) side = (b.position - pa) - Vector3.Dot(b.position - pa, dir) * dir;
+            side = side.sqrMagnitude > 1e-10f ? side.normalized : Vector3.Cross(dir, Vector3.up).normalized;
+            float along = (la * la - lb * lb + lt * lt) / (2f * lt);
+            float h = Mathf.Sqrt(Mathf.Max(0f, la * la - along * along));
+            Vector3 elbow = pa + dir * along + side * h;
+            a.rotation = Quaternion.FromToRotation(b.position - pa, elbow - pa) * a.rotation;
+            b.rotation = Quaternion.FromToRotation(c.position - b.position, pa + dir * lt - b.position) * b.rotation;
+            c.rotation = cRot;
+        }
+
+        // ---- Unity's Humanoid muscle space: the skeleton is a real human's. After our pose is on the bones, it is read
+        // back as muscles (normalized: -1 .. 1 = each joint's human range), held inside that range, and the fingers are
+        // set as muscles from our grip state (RiderFingers: when they wrap the bar, rest on the lever, squeeze) ----
+        [Header("Fingers (Humanoid muscles: -1 bent .. 1 straight)")]
+        [Tooltip("each finger joint wrapped round the grip (proximal, middle, tip)")] public Vector3 gripCurl = new Vector3(-0.55f, -0.8f, -0.6f);
+        [Tooltip("open / relaxed hand")] public Vector3 openCurl = new Vector3(0.1f, 0.05f, 0.05f);
+        [Tooltip("index + middle resting on the brake lever")] public Vector3 leverRest = new Vector3(0.15f, -0.1f, -0.25f);
+        [Tooltip("... squeezing it")] public Vector3 leverPull = new Vector3(-0.25f, -0.55f, -0.5f);
+        [Tooltip("thumb round the grip (1, 2, 3)")] public Vector3 thumbGrip = new Vector3(-0.3f, -0.5f, -0.6f);
+        public float thumbSpread = -0.3f;
+        [Tooltip("hold every joint inside Unity's human range")] public bool humanLimits = true;
+
+        bool _offscreenSet;
+        HumanPoseHandler _hph;
+        HumanPose _hp;
+        int[,,] _mFinger;   // [hand, finger 0 thumb..4 little, joint 0..2] -> muscle index ("Left Index 2 Stretched")
+        int[,] _mSpread;    // [hand, finger] -> "Left Index Spread"
+
+        void InitMuscles()
+        {
+            if (character == null || character.avatar == null || !character.avatar.isHuman) return;
+            _hph = new HumanPoseHandler(character.avatar, character.transform);
+            _hp = new HumanPose();
+            _mFinger = new int[2, 5, 3];
+            _mSpread = new int[2, 5];
+            string[] names = HumanTrait.MuscleName;
+            int Find(string n) => Array.IndexOf(names, n);
+            string[] fn = { "Thumb", "Index", "Middle", "Ring", "Little" };
+            for (int h = 0; h < 2; h++)
+                for (int f = 0; f < 5; f++)
+                {
+                    string pre = (h == 0 ? "Left " : "Right ") + fn[f];
+                    for (int j = 0; j < 3; j++) _mFinger[h, f, j] = Find($"{pre} {j + 1} Stretched");
+                    _mSpread[h, f] = Find($"{pre} Spread");
+                }
+        }
+
+        void HumanMuscles()
+        {
+            if (_hph == null) InitMuscles();
+            if (_hph == null) return;
+            // (the round trip through muscle space may place the body by its own rules: the hips are put back after)
+            Transform hips = character.GetBoneTransform(HumanBodyBones.Hips);
+            Vector3 hipPos = hips.position; Quaternion hipRot = hips.rotation;
+            _hph.GetHumanPose(ref _hp);
+            if (humanLimits)
+                for (int m = 0; m < _hp.muscles.Length; m++) _hp.muscles[m] = Mathf.Clamp(_hp.muscles[m], -1f, 1f);
+            for (int h = 0; h < 2; h++)
+            {
+                float lev = (float)fingers.on_lever(h), sq = (float)fingers.squeeze(h);
+                for (int f = 0; f < 5; f++)
+                {
+                    float c = (float)fingers.finger_curl(h, f);
+                    for (int j = 0; j < 3; j++)
+                    {
+                        int mi = _mFinger[h, f, j];
+                        if (mi < 0) continue;
+                        float v = f == 0 ? Mathf.Lerp(openCurl[j], thumbGrip[j], c) : Mathf.Lerp(openCurl[j], gripCurl[j], c);
+                        if ((f == 1 || f == 2) && lev > 0f) v = Mathf.Lerp(v, Mathf.Lerp(leverRest[j], leverPull[j], sq), lev);
+                        _hp.muscles[mi] = v;
+                    }
+                    int ms = _mSpread[h, f];
+                    if (ms >= 0) _hp.muscles[ms] = f == 0 ? Mathf.Lerp(0f, thumbSpread, (float)fingers.finger_curl(h, 0)) : 0f;
+                }
+            }
+            _hph.SetHumanPose(ref _hp);
+            hips.SetPositionAndRotation(hipPos, hipRot);
+        }
+
+        /// the model's materials made HDRP Lit (a model made for the built-in pipeline draws black / pink in HDRP),
+        /// keeping its colour texture
+        public static void HdrpMaterials(GameObject model, Texture albedo)
+        {
+            var lit = Shader.Find("HDRP/Lit");
+            if (lit == null) return;
+            foreach (var r in model.GetComponentsInChildren<Renderer>())
+            {
+                var mats = r.sharedMaterials;
+                for (int k = 0; k < mats.Length; k++)
+                {
+                    var old = mats[k];
+                    // (always replaced: an import can give an HDRP Lit material with no colour on it = black)
+                    Texture tex = albedo;
+                    if (old != null && old.HasProperty("_BaseColorMap") && old.GetTexture("_BaseColorMap") != null) tex = old.GetTexture("_BaseColorMap");
+                    else if (old != null && old.HasProperty("_MainTex") && old.mainTexture != null) tex = old.mainTexture;
+                    var m = new Material(lit) { name = (old != null ? old.name : "rider") + "_HDRP" };
+                    if (tex != null) m.SetTexture("_BaseColorMap", tex);
+                    m.SetColor("_BaseColor", Color.white);
+                    m.SetFloat("_Smoothness", 0.35f);
+                    mats[k] = m;
+                }
+                r.sharedMaterials = mats;
+            }
+        }
+
+        static Vec3 V(Vector3 v) => new Vec3(v.x, v.y, v.z);
+        static Vector3 U(Vec3 v) => new Vector3((float)v.x, (float)v.y, (float)v.z);
         /// one drawn frame, after the bike is posed (BikeDraw). The inputs are game.gd's (lines ~4280-4415), in order
         public void Draw(float dt, float p_draw, float y_draw, float frame_y, float lean_c, float steer_c, Func<string, float, float, float> mcap)
         {
@@ -193,6 +408,9 @@ namespace Runout.Game
             pi["turn"] = (double)_turn_s;
             pi["pedalTop"] = (double)rig.pedal_top;
             pose.update_pose(dt, pi);
+            fingers.update(dt, false, st.brake_f, st.brake_r, (double)pi["landFold"]);
+            // the pedals turn with the feet (ankling): flat pedals tip under the shoe, about their axle (Godot game.gd)
+            rig.pose_pedals((float)st.crank, (float)pose.foot_pitch[0], (float)pose.foot_pitch[1]);
             Retarget();
         }
 
@@ -200,22 +418,39 @@ namespace Runout.Game
         /// bone's change from its rest in rider space; the hips are put where the solver has them
         void Retarget()
         {
-            if (character == null || pose.bones == null || pose.bones_rest == null) return;
+            if (character == null) return;
             Quaternion frame = GodotSpace.WRot(rig.ModelRot);   // rider space -> Unity world, for rotations (W R W)
             // the model's root sits under the hips' place, turned with the bike (only the bones are moved after this)
             Transform root = character.transform;
             root.rotation = frame * Quaternion.Inverse(FACE_X);
-            foreach (var b in _bones)
+            // the root rides with the bike (its bounds / culling are the root's; the bones are placed in world space below)
+            root.position = GodotSpace.W(rig.position);
+            if (!_offscreenSet)
             {
-                if (!pose.bones.TryGetValue(b.name, out Xf cur) || !pose.bones_rest.TryGetValue(b.name, out Xf rest)) continue;
-                Quaternion d = Q(cur.b) * Quaternion.Inverse(Q(rest.b));
-                b.t.rotation = frame * GodotSpace.WRot(d) * b.rest;
-                if (b.hb == HumanBodyBones.Hips)
-                {
-                    Vector3 gw = rig.LeanToWorld(U(cur.o));
-                    b.t.position = GodotSpace.W(gw);
-                }
+                foreach (var smr in character.GetComponentsInChildren<SkinnedMeshRenderer>()) smr.updateWhenOffscreen = true;
+                _offscreenSet = true;
             }
+            // No conversion of Godot's bones: our solver gives POINTS and FRAMES (where the pelvis, spine, head, hands, feet
+            // are and which way they face; Godot axes: x forward, y up, z right) and every Unity bone is turned to match
+            // from the model's own rest axes (its T-pose: forward +Z, up +Y in the root's space). Arms / legs are IK on
+            // the model's own bones; clavicles, toes, eyes, jaw stay at rest. Everything from rest each frame (no drift)
+            foreach (var b in _bones) b.t.localRotation = RestLocal(b.t);
+            Vector3 Dir(Vec3 v) => frame * GodotSpace.W(U(v));
+            Vector3 P(Vec3 v) => GodotSpace.W(rig.LeanToWorld(U(v)));
+            Transform hips = character.GetBoneTransform(HumanBodyBones.Hips);
+            if (hips != null) hips.position = P(pose.J[2]);
+            Face(HumanBodyBones.Hips, Dir(pose.pelvis_xf.b.x), Dir(pose.pelvis_xf.b.y));
+            Face(HumanBodyBones.Spine, Dir(pose.spine[1].b.x), Dir(pose.spine[1].b.y));
+            Face(HumanBodyBones.Chest, Dir(pose.spine[2].b.x), Dir(pose.spine[2].b.y));
+            Face(HumanBodyBones.UpperChest, Dir(pose.spine[3].b.x), Dir(pose.spine[3].b.y));
+            Face(HumanBodyBones.Neck, Dir(pose.head.b.x), Dir(pose.head.o - pose.J[1]));
+            Face(HumanBodyBones.Head, Dir(pose.head.b.x), Dir(pose.head.b.y));
+            Face(HumanBodyBones.LeftFoot, Dir(pose.shoeL.b.x), Dir(pose.shoeL.b.y));
+            Face(HumanBodyBones.RightFoot, Dir(pose.shoeR.b.x), Dir(pose.shoeR.b.y));
+            SetHands(frame);
+            ContactIK(frame);
+            HumanMuscles();     // (fingers + every joint in its human range)
+            ContactIK(frame);   // (the range may have moved a hand a little off its grip)
         }
     }
 }

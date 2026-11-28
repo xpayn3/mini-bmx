@@ -18,6 +18,8 @@ namespace Runout.Game
         public TextAsset rideConfig;
         [Tooltip("the rider: any Humanoid model (Art/Characters, imported as Humanoid by CharacterImport)")]
         public GameObject riderModel;
+        [Tooltip("its colour texture, for HDRP materials when the model's own are for another pipeline")]
+        public Texture2D riderAlbedo;
         public Vector3 spawn = new Vector3(0f, 0f, 0f);
         [Tooltip("degrees: 0 = along +x (the sim's heading)")] public float heading = 0f;
 
@@ -96,6 +98,7 @@ namespace Runout.Game
                 {
                     var go = Instantiate(riderModel);
                     go.name = "Rider";
+                    RiderView.HdrpMaterials(go, riderAlbedo);
                     var anim = go.GetComponentInChildren<Animator>();
                     if (anim == null) anim = go.AddComponent<Animator>();
                     anim.runtimeAnimatorController = null;   // (no clips: our pose drives the bones)
@@ -117,6 +120,8 @@ namespace Runout.Game
                 rideConfig = UnityEditor.AssetDatabase.LoadAssetAtPath<TextAsset>("Assets/Runout/Config/Rides/dh.ride.txt");
             if (riderModel == null)
                 riderModel = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Runout/Art/Characters/UnityDefaultMale/DefaultMale.fbx");
+            if (riderAlbedo == null)
+                riderAlbedo = UnityEditor.AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Runout/Art/Characters/UnityDefaultMale/DefaultMale_Albedo.png");
         }
 #endif
     }

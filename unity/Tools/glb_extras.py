@@ -63,6 +63,30 @@ def prim_tris(j, binc, mesh_name, mat_name):
     return tris
 
 
+def grip_cylinder(pts):
+    """(inner end, outer end, radius) of the grip's vertices: the axis = their main direction (power iteration on the
+    covariance), the ends = the extreme points along it (outer = the one further from the bike's middle plane z = 0)"""
+    n = len(pts)
+    if n < 8:
+        return None
+    c = [sum(p[i] for p in pts) / n for i in range(3)]
+    C = [[sum((p[a] - c[a]) * (p[b] - c[b]) for p in pts) / n for b in range(3)] for a in range(3)]
+    v = [0.0, 0.0, 1.0]
+    for _ in range(60):
+        w = [sum(C[a][b] * v[b] for b in range(3)) for a in range(3)]
+        l = sum(x * x for x in w) ** 0.5 or 1.0
+        v = [x / l for x in w]
+    ts = [sum((p[i] - c[i]) * v[i] for i in range(3)) for p in pts]
+    a = [c[i] + v[i] * min(ts) for i in range(3)]
+    b = [c[i] + v[i] * max(ts) for i in range(3)]
+    inner, outer = (a, b) if abs(a[2]) < abs(b[2]) else (b, a)
+    rad = 0.0
+    for p, t in zip(pts, ts):
+        d = [p[i] - c[i] - v[i] * t for i in range(3)]
+        rad += sum(x * x for x in d) ** 0.5
+    return inner, outer, rad / n
+
+
 def fmt(v):
     return ','.join(repr(float(x)) for x in v)
 
@@ -81,6 +105,12 @@ def rig_lines(j, binc):
         for nm, s in (('gripL', L), ('gripR', R)):
             if s:
                 out.append('rig.%s=%s' % (nm, fmt([sum(p[i] for p in s) / len(s) for i in range(3)])))
+                # the grip as a cylinder (any bar: width, sweep, rise): its axis by PCA, the inner / outer end on it, radius
+                g = grip_cylinder(s)
+                if g:
+                    out.append('rig.%sIn=%s' % (nm, fmt(g[0])))
+                    out.append('rig.%sOut=%s' % (nm, fmt(g[1])))
+                    out.append('rig.%sR=%r' % (nm, g[2]))
     # pedals: the crank's plastic, triangles by the side of their middle (BikeRig._split_pedals)
     tris = prim_tris(j, binc, 'crank', 'plastic')
     if tris:
