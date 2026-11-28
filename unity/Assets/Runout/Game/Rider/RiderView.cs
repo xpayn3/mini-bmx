@@ -202,6 +202,11 @@ namespace Runout.Game
             }
         }
 
+        /// share of the torso's lean the pelvis takes (hip flexion ~2/3, the lumbar spine ~1/3 when a person bends forward)
+        public const double PELVIS_SHARE = 0.65;
+        /// normalized lerp between two directions
+        static Vec3 Nl(Vec3 a, Vec3 b, double k) { Vec3 v = a * (1 - k) + b * k; return v.length_squared() > 1e-12 ? v.normalized() : b; }
+
         /// turn a bone so its rest forward / up (the model's T-pose: root +Z / +Y) point along fw / up (world)
         void Face(HumanBodyBones hb, Vector3 fw, Vector3 up)
         {
@@ -611,10 +616,25 @@ namespace Runout.Game
             Vector3 P(Vec3 v) => RP(v);
             Transform hips = character.GetBoneTransform(HumanBodyBones.Hips);
             if (hips != null) hips.position = P(pose.J[2]);
-            Face(HumanBodyBones.Hips, Dir(pose.pelvis_xf.b.x), Dir(pose.pelvis_xf.b.y));
-            Face(HumanBodyBones.Spine, Dir(pose.spine[1].b.x), Dir(pose.spine[1].b.y));
-            Face(HumanBodyBones.Chest, Dir(pose.spine[2].b.x), Dir(pose.spine[2].b.y));
-            Face(HumanBodyBones.UpperChest, Dir(pose.spine[3].b.x), Dir(pose.spine[3].b.y));
+            // hips + spine the way a real body bends (not Godot's pelvis frame / spine curve, made to bend its tube torso):
+            // from our solver only the POINTS (pelvis, chest, hip joints, shoulders). The torso's lean is shared out like
+            // the lumbopelvic rhythm: the pelvis tips PELVIS_SHARE of it, the spine bones take the rest in steps up to
+            // the chest; the hips face along the hip-joint line, the chest along the shoulder line, twisting between
+            Vec3 up0 = new Vec3(0, 1, 0);
+            Vec3 tor = (pose.J[1] - pose.J[2]).normalized();
+            Vec3 rHip = (pose.J[12] - pose.J[9]).normalized(), rSh = (pose.J[6] - pose.J[3]).normalized();
+            void Trunk(HumanBodyBones hb, double k, double twist)
+            {
+                Vec3 u = Nl(up0, tor, k);
+                Vec3 r = Nl(rHip, rSh, twist);
+                r = (r - u * r.dot(u)).normalized();
+                Vec3 fwd = u.cross(r);   // (Godot axes: y up x z right = x forward)
+                Face(hb, Dir(fwd), Dir(u));
+            }
+            Trunk(HumanBodyBones.Hips, PELVIS_SHARE, 0.0);
+            Trunk(HumanBodyBones.Spine, PELVIS_SHARE + (1 - PELVIS_SHARE) * 0.4, 0.3);
+            Trunk(HumanBodyBones.Chest, PELVIS_SHARE + (1 - PELVIS_SHARE) * 0.8, 0.7);
+            Trunk(HumanBodyBones.UpperChest, 1.0, 1.0);
             Face(HumanBodyBones.Neck, Dir(pose.head.b.x), Dir(pose.head.o - pose.J[1]));
             Face(HumanBodyBones.Head, Dir(pose.head.b.x), Dir(pose.head.b.y));
             Face(HumanBodyBones.LeftFoot, Dir(pose.shoeL.b.x), Dir(pose.shoeL.b.y));
