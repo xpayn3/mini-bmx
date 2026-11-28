@@ -139,6 +139,29 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
 ## 5. Systems — how they work
 
 ### Ride physics (`bike_physics.gd`)
+- **Real air drag + real cadence (2026-11-28, user: "the Garmin speed feels high", "also cadence")**. The computer showed
+  the physics speed honestly; the bike was too fast: drag per kg = airDrag / topSpeed^2 = 0.0021 /m on the DH, the CdA of
+  ~0.32 m^2 (less than a road racer's tuck). `BikePhysics.DRAG_REAL` 1.69 (x every drag term, `drag_k()`) = 0.0036 /m:
+  an upright DH rider with pads (CdA ~0.55, 92 kg); the stick tuck (-42 %) lands at a real race tuck. The sliders keep
+  their numbers (Tune unchanged). Coast on 12 deg (`slope_stress compare=1`) 104 -> 88 km/h (real: ~86). Demo AI 110 s
+  seeds 4242 / 5: average ~50 km/h either way (it brakes 15 -> 13 % / 19 -> 14 % of the time: the air now does part of
+  the braking), max 67 -> 65 km/h, every built jump on its landing, no crash; the energy probe's air term now matches
+  `TrailCourse.VA_DRAG` 0.0033 (it was measured as that but the physics had ~0.002), so the trail layout needs no
+  change. `slope_stress`'s coast model includes the automatic speed tuck now (56 / 56). Cadence: the cranks were
+  w_front / (2.78 x gear_k x topSpeed) (64 % of a real drivetrain, and the Top speed slider moved it; sprint x1.3 made
+  them outrun the wheel); now the rear wheel / the real ratio (`drive_ratio()` = 34T ring / cog = 2.125 x gear_k; the
+  BMX 25 / 9 = 2.78), legs only spin up ahead from slow. Used by the drawn cranks, the rear wheel's pawl spin-up, the
+  freewheel overrun (`ride_audio`) and the garage rollers. The computer's cadence cap 150 -> 220. `BMX_CAD_PROBE=1`
+  (`CADPROBE cad= real_rpm=`): within the display's smoothing of the real number. `BMX_OLD_DRAG=1` / `BMX_OLD_CADENCE=1`
+  = before. Same day: **real spin-out** (`spin_top()`: the drive fades to 0 at `SPIN_RPM` 150 / `SPIN_SPRINT` 175 rpm in
+  the gear you're in: 16T ~44 km/h, 34 x 11 ~64; it was pedalTop x gear_k x topSpeed = ~240 rpm in every cog, so the
+  pedalTop / Top speed sliders no longer move the pedalling top speed; `BMX_OLD_SPINOUT=1`). Straight pedal test in the
+  16T: tops out at ~145 rpm / 41 km/h. **Chain skip on a shift under load** (`shift()`: `chain_slip` = `CHAIN_SLIP_T`
+  0.2 x (0.4 + 0.6 x load) s, drive x (1 - `chain_slip_k`), the cranks fall forward `CHAIN_SLIP_LURCH` 7 rad/s; clean
+  coasting / in the air; `BMX_OLD_CHAINSLIP=1`; `BMX_SHIFT` lines print it). The demo AI now shifts by cadence (> 115 /
+  < 65 rpm, `dev/demo_pilot.gd`). **Head down spun out** (`spin_out_k` from 90 % of the spin-out speed with the gas on ->
+  pose input `spinOut` -> `rider.gd` `SPIN_LOOK_DOWN` 0.5 rad, a glance up every 1.1-2.2 s; `BMX_OLD_SPINLOOK=1`).
+  Playground suite not re-run (speeds moved). Not ridden by the user yet.
 - **Energy account (2026-11-22, `BMX_ENERGY_PROBE=1`)**: every 5 s an `ENERGY` line, J/kg since the start: the drive
   stage's terms (pedal, brakes, pump, rolling, air, grade, manual), the change across each other stage (`S_steer` slides,
   `S_move` hits, `S_vertical` springs / landings, `S_lip`, ...) and `height` (g x height change). First result (seed 4242,
@@ -4287,7 +4310,7 @@ ide_<date>.replay` (test runs: `replays/tests/`), zstd, ~4 MB a
 - Garmin-style computer bottom-left (made-up brand **CHARMIN** on the bezel between the ◀ ▶ buttons; which page = a segmented bar along the screen's bottom edge, `_page_bar`); six pages flipped with the ◀ ▶ bezel buttons under the screen (mouse):
   **RIDE** speed, slope / grade, gear (the shifter: n/N, cassette, teeth; flashes on a shift; Settings › Gear
   shifter hides the row) · **TRIP** ride time, distance, avg / max, odometer (`records.distance`, now counted) ·
-  **EFFORT** heart rate (made up from power, sprint, stamina; beating heart, zone), cadence (from `crank`),
+  **EFFORT** heart rate (made up from power, sprint, stamina; beating heart, zone), cadence (from `crank`, which turns at the real gear ratio since 2026-11-28),
   power (from `a_drive`), stamina, gear ratio · **AIR** last jump, height, air time, best, jumps, tricks
   (`BikePhysics._land_trick` → `game.on_trick` → `hud.on_trick`) · **ELEV** elevation, ascent / descent, the last
   30 s + the next 400 m of trail coloured by steepness (from `course.E`) · **MAP** (`MapView`) heading-up 2D topo,

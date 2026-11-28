@@ -986,7 +986,7 @@ func _pose_rider(dt: float) -> void:
 		var g := BikePhysics.start_gear(cogs, m.ring_k)
 		var gk: float = m.ring_k * 16.0 / float(cogs[maxi(g, 0)])
 		var ts: float = Tune.v.topSpeed * float((m.ride as Dictionary).get("topSpeed", 1.0))
-		preview_crank += BikePhysics.crank_rate(v / rig.wheel_rf, gk, ts, spr) * dt
+		preview_crank += BikePhysics.crank_rate(v / (rig.wheel_rf if BikePhysics._OLD_CADENCE else rig.wheel_rr), gk, ts, spr, BikePhysics.ratio_for(gk, g >= 0)) * dt
 		rig.crank_n.rotation.z = -preview_crank
 		for pv in rig.pedal_pivots: pv.rotation.z = preview_crank
 		var br: float = float(rider.style.get("bikeRock", 1.0)) if rider.get("style") is Dictionary else 1.0

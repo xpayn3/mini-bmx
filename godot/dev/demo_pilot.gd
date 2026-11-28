@@ -24,6 +24,7 @@ var _thr := 0.0             # last throttle (held through lips and the air: a fr
 var _brk := 0.0             # last brake
 var _crash_t := 0.0
 var _stuck_t := 0.0
+var _gear_t := 0.0           # s until the next shift
 var _flash_t := 0.0
 var target_v := 0.0         # m/s, the speed the plan wants now (HUD / debug)
 var s_here := 0.0           # m along the trail
@@ -199,4 +200,11 @@ func tick(game, dt: float) -> Dictionary:
 			game.reset_to_trail(); reset()
 	else:
 		_stuck_t = 0.0
+	# gears by cadence like a rider (2026-11-28: the legs spin out at a real ~150 rpm now, so a rider who never shifts
+	# stops pushing at ~44 km/h in the start cog): harder past ~115 rpm, easier under ~65 (shift() +1 = easier)
+	_gear_t -= dt
+	if ph.geared and not ph.air and _gear_t <= 0.0 and out.throttle > 0.3:
+		var rpm: float = absf(ph.v) / ph.RWR / TAU * 60.0 / ph.drive_ratio()
+		if rpm > 115.0 and ph.shift(-1): _gear_t = 0.5
+		elif rpm < 65.0 and ph.v > 1.0 and ph.shift(1): _gear_t = 0.5
 	return out

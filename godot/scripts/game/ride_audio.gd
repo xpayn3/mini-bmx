@@ -162,7 +162,8 @@ func _hub_overrun(dt: float, st) -> float:
 	# that ratio x RWF / RWR)
 	var ratio := 2.78
 	if phys != null:
-		ratio = 2.78 * phys.gear_k() * float(phys.T.topSpeed) * float(phys.RWF) / maxf(float(phys.RWR), 0.05)
+		if BikePhysics._OLD_CADENCE: ratio = 2.78 * phys.gear_k() * float(phys.T.topSpeed) * float(phys.RWF) / maxf(float(phys.RWR), 0.05)
+		else: ratio = phys.drive_ratio()   # (the real chainring / cog: the cranks turn off the rear wheel now)
 	var raw := wheel_w - _hw_cw * ratio
 	# pawls engaged: the driver keeps up within a few % (chain slack, smoothing lag) = no clicks
 	raw = signf(raw) * maxf(0.0, absf(raw) - (0.06 * absf(wheel_w) + 0.3))

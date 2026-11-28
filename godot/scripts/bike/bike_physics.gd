@@ -387,10 +387,24 @@ static func start_gear(p_cogs: Array, p_ring_k: float) -> int:
 		if absf(p_cogs[i] * 1.0 / p_ring_k - 16.0) < best: best = absf(p_cogs[i] * 1.0 / p_ring_k - 16.0); g = i
 	return g
 
-## crank turn rate (rad/s) for a wheel spinning at w rad/s in gear gk; shared with the garage rollers
-static func crank_rate(w: float, gk: float, top_speed: float, p_sprint: float) -> float:
+## crank turn rate (rad/s) for a wheel spinning at w rad/s in gear gk; shared with the garage rollers.
+## w = the FRONT wheel's rate (v / RWF) for the old formula; with the real one pass the REAR wheel's and its ratio
+static func crank_rate(w: float, gk: float, top_speed: float, p_sprint: float, ratio := -1.0) -> float:
 	# a sprint from slow spins the legs up hard (~70 rpm at once), not just at the wheel's rate
-	return maxf(w / (2.78 * gk * top_speed), 3.5 + float(Tune.v.get("sprintSpin", 4.0)) * p_sprint * slowness(w * 0.37)) * (1 + 0.3 * p_sprint)
+	var spin_up: float = 3.5 + float(Tune.v.get("sprintSpin", 4.0)) * p_sprint * slowness(w * 0.37)
+	if _OLD_CADENCE or ratio <= 0.0:
+		return maxf(w / (2.78 * gk * top_speed), spin_up) * (1 + 0.3 * p_sprint)
+	# the chain ties the cranks to the rear wheel: on the ground they can't turn faster than it (the old x1.3 sprint
+	# did); only from slow do the legs spin up ahead (the tyre slips / the bike is still getting going)
+	return maxf(w / ratio, spin_up * (1.0 - smooth01(w / ratio / maxf(spin_up, 0.1))))
+
+## rear wheel turns per crank turn: chainring / cog (stock ring 34T; gear_k = ring_k x 16 / cog). Ungeared bikes
+## (the BMX) ride a 25 / 9 like a real one
+static func ratio_for(gk: float, p_geared: bool) -> float:
+	return 2.125 * gk if p_geared else 2.78
+
+func drive_ratio() -> float:
+	return ratio_for(gear_k(), gear >= 0)
 
 ## how far back (0..1 of the body stick) holds a direct manual on its balance point: what the keyboard's held ↓
 ## gives rolling (Game._read_input), so a held key sits in the sweet spot instead of falling off the back
@@ -423,6 +437,10 @@ func shift(d: int) -> bool:
 	if g == gear:
 		return false
 	gear = g
+	# shifting under load the chain skips before it settles on the new cog (coasting / in the air it just moves over)
+	if not _OLD_CHAINSLIP and not air and pedal > 0.3 and throttle_in > 0.3:
+		var load_k: float = clampf(pedal * throttle_in * (0.6 + 0.4 * sprint), 0.0, 1.0)
+		chain_slip = maxf(chain_slip, CHAIN_SLIP_T * (0.4 + 0.6 * load_k))
 	return true
 
 static func smooth01(t: float) -> float:
@@ -453,7 +471,7 @@ func _reset_motion() -> void:
 	crash_on = false; crash_pending = ""; crash_hold = 0.0; crash_armed = false; crash_sim = null; _cb_off_t = -1.0
 	v = 0; vy = 0; steer = 0; steer_in = 0; steer_in_v = 0; lean = 0; lean_v = 0; pitch = 0; air = false
 	bike_lean = 0; counter = 0; rock = 0; yaw_rate = 0; hop_nose = 0; hop_t = 0; air_time = 0; air_k = 0
-	load = 0; compress = 0; compress_v = 0; prep = 0; land_prep = 0; pop_fired = false; spun_out = false; shake = 0
+	load = 0; compress = 0; compress_v = 0; prep = 0; land_prep = 0; pop_fired = false; spun_out = false; chain_slip = 0.0; chain_slip_k = 0.0; shake = 0
 	turn_off = 0.0; rev_cap = 3.0; _fakie_hold = 0.0
 	course = heading; slip = 0; slip_w = 0.0; bar_catch = 0.0; w_init = false; front_air = false; rear_air = false; pump_acc = 0; since_land = 1; _graze = false
 	pitch_v = 0; c_f = true; c_r = true; wheelie_up = 0.0; _bog = 0.0
@@ -1198,14 +1216,16 @@ func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_wa
 		# to reach it and less drag holding it back (drag-limited top speed scales with it too)
 		var ts: float = T.topSpeed
 		var p_top: float = (T.pedalTop + T.sprintTop * sp_k) * gk * ts
+		if not _OLD_SPINOUT: p_top = spin_top(sp_k)
 		# sprinting, the slower the rider is the harder they stamp on it (out of the saddle, full body):
 		# all of the extra push from a standstill, less and less as the speed comes back, none by ~40 km/h
 		var kick: float = float(T.get("sprintKick", 0.9)) * slowness(v)
 		var p_mul: float = (1 + (T.sprintPower - 1 + kick) * sp_k) * ts
-		var cad: float = v / (gk * T.pedalTop * ts * 0.7)
+		var cad: float = v / (gk * T.pedalTop * ts * 0.7) if _OLD_SPINOUT else v / (0.7 * spin_top(0.0))   # (1 = ~105 rpm)
 		var grind := 1.0 if gear < 0 else 0.35 + 0.65 * smooth01((cad - 0.15) / 0.7)
 		var drive: float = (throttle if (rear_down and not (v < -0.3 and rev_cap > 3.0)) else 0.0) * minf(T.pedalLaunch * p_mul / ts / gk, T.pedalPower * p_mul / vp) * grind * clampf((p_top - v) / 2.5, 0, 1)
 		drive *= 1.0 - KICK_LOSS * _kick_k   # (a kicked-back crank costs a little of the stroke)
+		drive *= 1.0 - chain_slip_k   # (the chain skipping after a shift under load)
 		var drive_cap := mu_r * nR
 		# (the rear's grip follows its load only after a little rolling: a bump that unloads it for a few cm doesn't
 		# empty its friction circle. _nR_s is eased in _grip_step)
@@ -1377,8 +1397,9 @@ func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_wa
 		# it drops (~40 %: an upright downhill rider vs a race tuck), so the bike runs on and tops out faster;
 		# sat up tall (stick back) it catches the wind like an air brake. Pedalling hard spoils the tuck a bit
 		_aero_update(throttle)
-		a -= (roll + T.airDrag / (ts * ts) * v * absf(v) * aero_k) * carry
-		if _EPROBE: _e_add("rolling", -roll * carry * v * dt); _e_add("air", -T.airDrag / (ts * ts) * v * absf(v) * aero_k * carry * v * dt)
+		var k_drag: float = T.airDrag / (ts * ts) * drag_k()
+		a -= (roll + k_drag * v * absf(v) * aero_k) * carry
+		if _EPROBE: _e_add("rolling", -roll * carry * v * dt); _e_add("air", -k_drag * v * absf(v) * aero_k * carry * v * dt)
 		if in_water: a -= 0.06 * v   # (was 0.7: the water dragged a rider to a halt)
 		v = clampf(v + a * dt, -maxf(3.0, rev_cap), 24 * maxf(1.0, ts))
 		rev_cap = maxf(3.0, minf(rev_cap, -v))   # the extra reverse room (fakie landing) only shrinks
@@ -1412,7 +1433,7 @@ func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_wa
 		# air drag doesn't stop at the lip: the same body area slows the flight (on the full speed, along it).
 		# Small (~0.5 m/s off a 1 s jump at 55 km/h) but it was missing, so jumps flew a touch long and fast
 		if not _OLD_SPEEDTUCK: _aero_update(throttle)   # (the flight tucks too: it kept the last ground value)
-		var k_air: float = T.airDrag / (T.topSpeed * T.topSpeed) * aero_k
+		var k_air: float = T.airDrag / (T.topSpeed * T.topSpeed) * aero_k * drag_k()
 		var sp_air := sqrt(v * v + vy * vy)
 		if _EPROBE: _e_add("air", -k_air * sp_air * (v * v + vy * vy) * dt)
 		v -= k_air * sp_air * v * dt; vy -= k_air * sp_air * vy * dt
@@ -1421,7 +1442,13 @@ func _step_drive(dt: float, inp: Dictionary, throttle: float, brake: bool, in_wa
 		if brake and v > 1: flow = maxf(0.0, flow - dt * 3)
 		elif flow_t > T.flowTime: flow = maxf(0.0, flow - dt * 1.5)
 	skid = brake and rear_down and v > 0.5 and rear_lock > 0.15
-	var top_now: float = (T.pedalTop + T.sprintTop * sprint) * gear_k() * T.topSpeed
+	var top_now: float = (T.pedalTop + T.sprintTop * sprint) * gear_k() * T.topSpeed if _OLD_SPINOUT else spin_top(sprint)
+	# the chain skip: full loss for most of it, biting back over the last third
+	chain_slip = maxf(0.0, chain_slip - dt)
+	chain_slip_k = smoothstep(0.0, CHAIN_SLIP_T * 0.35, chain_slip) if chain_slip > 0.0 else 0.0
+	spin_out_k = 0.0
+	if not air and throttle_in > 0.3 and not crash_on and top_now > 0.5:
+		spin_out_k = smoothstep(0.9, 1.0, v / top_now) * clampf(throttle_in, 0.0, 1.0)
 	if v > top_now + 0.3: spun_out = true
 	elif v < top_now - 0.8: spun_out = false
 	pedal += ((throttle if (not air and not spun_out) else 0.0) - pedal) * minf(1.0, dt * 6)
@@ -3507,7 +3534,8 @@ func _rear_spin_step(dt: float) -> void:
 	wr_w = move_toward(wr_w, 0.0, a * dt)
 	# the legs drive the wheel through the pawls only while the driver is the faster one
 	if pedal > 0.05:
-		wr_w = maxf(wr_w, crank_rate(v / RWF, gear_k(), T.topSpeed, sprint) * pedal * 2.78 * gear_k() * T.topSpeed * RWF / RWR)
+		if _OLD_CADENCE: wr_w = maxf(wr_w, crank_rate(v / RWF, gear_k(), T.topSpeed, sprint) * pedal * 2.78 * gear_k() * T.topSpeed * RWF / RWR)
+		else: wr_w = maxf(wr_w, crank_rate(v / RWR, gear_k(), T.topSpeed, sprint, drive_ratio()) * pedal * drive_ratio())
 
 ## stage 11: wheels and cranks turning, the body in the air, effects
 func _step_wheels(dt: float, f: Vector3, in_water: bool, va: float) -> void:
@@ -3526,9 +3554,10 @@ func _step_wheels(dt: float, f: Vector3, in_water: bool, va: float) -> void:
 	wheel_r += wr_w * dt
 	if v < -0.05 and not air and not skid:
 		# rolling backwards the freewheel's pawls catch: the chain turns the cranks back with the wheel
-		crank += v / RWR / (2.78 * gear_k() * T.topSpeed) * dt
+		crank += v / RWR / (2.78 * gear_k() * T.topSpeed if _OLD_CADENCE else drive_ratio()) * dt
 	elif pedal > 0.05:
-		crank += crank_rate(w, gear_k(), T.topSpeed, sprint) * pedal * dt
+		if _OLD_CADENCE: crank += crank_rate(w, gear_k(), T.topSpeed, sprint) * pedal * dt
+		else: crank += (crank_rate(wr_w if air else v / RWR, gear_k(), T.topSpeed, sprint, drive_ratio()) + CHAIN_SLIP_LURCH * chain_slip_k) * pedal * dt
 	elif not air:
 		var aL: float = host.pedal_a0[0]
 		var aR: float = host.pedal_a0[1]
@@ -3782,6 +3811,36 @@ func _pop_along(dv: float) -> void:
 	v *= k; vy *= k
 
 static var _OLD_SPIN := Env.raw("BMX_OLD_SPIN") != ""
+# real rider air drag (2026-11-28, user: "the Garmin speed feels high"): drag per mass was airDrag / topSpeed^2 =
+# 0.0021 /m on the DH (an upright rider's CdA would be ~0.32 m^2: less than a road racer's tuck). A downhill rider in
+# the attack position with pads: CdA ~0.55 m^2 -> 0.5 rho CdA / (75 + 17 kg) = 0.0036 /m; the stick tuck (-42 %)
+# then lands at ~0.0021 = a real race tuck (~0.33 m^2). DRAG_REAL scales every drag term to that.
+# BMX_OLD_DRAG=1 = before. And the cranks turn at the real gear ratio (chainring / cog x the rear wheel), not a
+# made-up one that also moved with the Top speed slider: BMX_OLD_CADENCE=1 = before
+const DRAG_REAL := 1.69
+static var _OLD_DRAG := Env.raw("BMX_OLD_DRAG") != ""
+static var _OLD_CADENCE := Env.raw("BMX_OLD_CADENCE") != ""
+static func drag_k() -> float:
+	return 1.0 if _OLD_DRAG else DRAG_REAL
+# the legs spin out at a real cadence (2026-11-28): the drive fades to nothing at SPIN_RPM (SPIN_SPRINT sprinting) in
+# the gear you're in, so past ~44 km/h in the stock 16T you shift down to keep pushing (34 x 11: ~64 km/h). It was
+# pedalTop x gear_k x topSpeed = ~240 rpm in every cog. BMX_OLD_SPINOUT=1 = before
+const SPIN_RPM := 150.0
+const SPIN_SPRINT := 175.0
+static var _OLD_SPINOUT := Env.raw("BMX_OLD_SPINOUT") != ""
+# a shift under load skips the chain for a moment (2026-11-28, user): the drive drops out for CHAIN_SLIP_T x how hard
+# he pushes (up to ~0.2 s), the cranks fall forward through the stroke, then the chain bites on the new cog.
+# Coasting shifts are clean. BMX_OLD_CHAINSLIP=1 = none
+const CHAIN_SLIP_T := 0.2
+const CHAIN_SLIP_LURCH := 7.0   # rad/s extra crank spin while it skips
+static var _OLD_CHAINSLIP := Env.raw("BMX_OLD_CHAINSLIP") != ""
+var chain_slip := 0.0   # s left of a skip (0 = the chain holds)
+var chain_slip_k := 0.0 # 0..1 how much drive is lost right now (HUD / rumble / tests can read it)
+var spin_out_k := 0.0   # 0..1: pushing on the ground at (from ~90 % of) the legs' top cadence, or spun out past it (drawing: head down)
+
+## the speed the legs spin out at in the current gear (m/s): cadence x the real ratio x the rear wheel
+func spin_top(p_sprint: float) -> float:
+	return lerpf(SPIN_RPM, SPIN_SPRINT, clampf(p_sprint, 0.0, 1.0)) / 60.0 * TAU * drive_ratio() * RWR
 static var _OLD_TUCK := Env.raw("BMX_OLD_TUCK") != ""
 var _air_pull_v := 0.0   # air_pull's speed (its spring)
 static var _OLD_AUTOTUCK := Env.raw("BMX_OLD_AUTOTUCK") != ""   # tuck reach 0.17 m, drawn only after a timed pop

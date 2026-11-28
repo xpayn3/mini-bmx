@@ -4328,6 +4328,7 @@ func _process(dt: float) -> void:
 		pi["attackDrop"] = T.attackDrop
 		pi["pedal"] = st.pedal
 		pi["sprint"] = st.sprint * st.pedal
+		pi["spinOut"] = st.spin_out_k   # (near / at the legs' top cadence: he looks down at the drivetrain)
 		pi["stamina"] = st.stamina
 		pi["hr"] = hud.hr if hud else 72.0   # the bike computer's heart rate (made up from effort, slow to recover): drives the breathing
 		pi["crank"] = st.crank

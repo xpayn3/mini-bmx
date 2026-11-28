@@ -198,7 +198,7 @@ func _autotest(seconds: float) -> void:
 				_probe.shift_i = si
 				var srun := int(Env.s("BMX_SHIFT_RUN")) if Env.s("BMX_SHIFT_RUN") != "" else 3   # shifts each way (12 = run into the ends)
 				game._shift(1 if (si / srun) % 2 == 0 else -1)
-				print("SHIFT t=%.2f d=%d gear=%d" % [el, 1 if (si / srun) % 2 == 0 else -1, game.phys.gear])
+				print("SHIFT t=%.2f d=%d gear=%d v=%.1f chain_slip=%.2f" % [el, 1 if (si / srun) % 2 == 0 else -1, game.phys.gear, game.phys.v * 3.6, game.phys.chain_slip])
 		if Env.s("BMX_HOLD_KMH") != "":   # tests: hold about this speed (pedal below it, brake 3 km/h over it)
 			var hk := float(Env.s("BMX_HOLD_KMH"))
 			pedal = pedal and game.phys.v * 3.6 < hk

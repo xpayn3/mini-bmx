@@ -40,7 +40,6 @@ var auto_v := {}               # feature id -> run-in speed (m/s) it learned for
 var cur = null                 # the feature it's riding at now (the bar shows its speed)
 var _last := {}               # feature id -> [run-in m/s, landing error m] of the last run (bracketing)
 var _brake_t := 0.0
-var _gear_t := 0.0
 var ended := ""                # how the last run ended: OVER (past the feature), STALLED, ROLLED_BACK, CRASH, STOPPED (brakes)
 var _back_t := 0.0
 var _brake_done := ""          # lane mode: the strip it has stopped on (rides on from there)
