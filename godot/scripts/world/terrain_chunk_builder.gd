@@ -182,17 +182,26 @@ func _snow_at(x: float, z: float) -> float:
 	return m
 func _push(name: String, b: Basis, p: Vector3, c: Color) -> int:
 	var ca := 1.0
+	if (name == "bush" or name == "bush1" or name == "bush2" or name == "bushdry") and ScanPlants.enabled():
+		var sp := _scan_plant(b, p)
+		if not sp.is_empty():
+			name = sp[0]; b = sp[1]; c = sp[2]
 	if name == "rock" and not OLD_SCANROCKS and not TerrainGeo.old_rocks():
 		# (2026-11-27, user: "still dark low-poly stones"): every big rock in the world is one of the scanned rocks, picked by
 		# country and a hash of the spot (no random numbers drawn: nothing else moves); the tone as the brink rocks
 		var keep := [f.b_dry, f.b_rug, f.b_cold, f.b_wet, f.b_forest, f.b_sav, f.b_ash, f._bi_x, f._bi_z]
 		f.biome(p.x, p.z)
 		var dry: bool = f.b_dry > 0.45
+		var cold: bool = f.b_cold > 0.4
 		f.b_dry = keep[0]; f.b_rug = keep[1]; f.b_cold = keep[2]; f.b_wet = keep[3]; f.b_forest = keep[4]
 		f.b_sav = keep[5]; f.b_ash = keep[6]; f._bi_x = keep[7]; f._bi_z = keep[8]
 		var hx := sin(p.x * 12.9898 + p.z * 78.233) * 43758.5453
 		var h := hx - floorf(hx)
 		var big := b.y.length() > 0.9
+		# Megascans rocks / mossy ground patches (ScanPlants) for part of them in tundra and dry country
+		var sp := _scan_rock(b, p, h, dry, cold)
+		if not sp.is_empty():
+			return _push_raw(sp[0], sp[1], p, sp[2], 1.0)
 		if dry:
 			name = "scan_nboulder02" if big and h < 0.35 else SCAN_STONES[int(h * 50.0) % 5]
 		else:
@@ -233,6 +242,10 @@ func _push(name: String, b: Basis, p: Vector3, c: Color) -> int:
 		var sk := _snow_at(p.x, p.z)
 		if sk > 0.03:
 			ca = -sk
+	return _push_raw(name, b, p, c, ca)
+
+
+func _push_raw(name: String, b: Basis, p: Vector3, c: Color, ca: float) -> int:
 	var arr: PackedFloat32Array = lists[name]
 	lists[name] = PackedFloat32Array()   # drop the dict's reference so the append grows arr in place (no copy of the whole list)
 	arr.append_array([b.x.x, b.y.x, b.z.x, p.x, b.x.y, b.y.y, b.z.y, p.y, b.x.z, b.y.z, b.z.z, p.z, c.r, c.g, c.b, ca])
@@ -321,7 +334,7 @@ func sm(a: float, b: float, x: float) -> float:
 func _build() -> void:
 	ensure_static()
 	_st = Time.get_ticks_usec()
-	for k in LIST_NAMES:
+	for k in LIST_NAMES + ScanPlants.LISTS:
 		lists[k] = PackedFloat32Array()
 		counts[k] = 0
 	for i in 8:
@@ -404,6 +417,8 @@ func _build() -> void:
 	_wood(ox, oz)
 	_stage("nature+wood")
 	_roadside(ox, oz)   # (last: put() draws from the shared rnd, so nothing placed before it moves)
+	_stumps(ox, oz)           # (own random streams: Megascans scans, ScanPlants)
+	_roadside_grass(ox, oz)
 	_roadside_rocks(ox, oz)   # (after it, same reason)
 	_brink_rocks(ox, oz)
 	_stage("roadside")
@@ -481,6 +496,28 @@ func _build() -> void:
 				fv = maxf(clampf(fv, 0.0, 1.0), clampf(T5a[iz * NV + ix], 0.0, 1.0))
 				pA[(iz * NV + ix) * 4 + 3] = roundi((1.0 - fv) * 255)
 	out["trail3_img"] = Image.create_from_data(NV, NV, false, Image.FORMAT_RGBA8, pA)
+	# tundra (2026-11-28, ground.gdshader's tundra layer: moss / stony ground / gravel scans, ScanPlants' tundra_ground): R =
+	# how cold the country is (TerrainField.biome b_cold) on a 13 x 13 grid of the chunk, blended between. Only chunks with any
+	if not Terrain.OLD_TUNDRA:
+		var tgs := 13
+		var tgv := PackedFloat32Array(); tgv.resize(tgs * tgs)
+		var tmax := 0.0
+		for gz in tgs:
+			for gx in tgs:
+				f.biome(ox - S / 2 + gx * S / (tgs - 1), oz - S / 2 + gz * S / (tgs - 1))
+				tgv[gz * tgs + gx] = f.b_cold
+				tmax = maxf(tmax, f.b_cold)
+		if tmax > 0.2:
+			var pU := PackedByteArray(); pU.resize(NV * NV)
+			var stp := float(NV - 1) / (tgs - 1)
+			for iz in NV:
+				for ix in NV:
+					var fx := ix / stp; var fz := iz / stp
+					var x0 := mini(int(fx), tgs - 2); var z0 := mini(int(fz), tgs - 2)
+					var tx := fx - x0; var tz := fz - z0
+					var tv := lerpf(lerpf(tgv[z0 * tgs + x0], tgv[z0 * tgs + x0 + 1], tx), lerpf(tgv[(z0 + 1) * tgs + x0], tgv[(z0 + 1) * tgs + x0 + 1], tx), tz)
+					pU[iz * NV + ix] = roundi(clampf(tv, 0.0, 1.0) * 255)
+			out["tundra_img"] = Image.create_from_data(NV, NV, false, Image.FORMAT_R8, pU)
 	# snow (2026-11-27, ground.gdshader's snow layer + world/snow_patch.gd): R = cover (its colour), G = depth (0..1 of
 	# SnowPatch.DEPTH: the snow's real thickness; none on the trail / built jumps, thin at the patches' edges). Only chunks
 	# that have any snow get the texture
@@ -2515,6 +2552,150 @@ static var OLD_BRINKCLEAR := Env.raw("BMX_OLD_BRINKCLEAR") == "1"
 const BRINK_CLEAR := 1.0       # m: a brink stone's collider edge past the dirt's edge
 const BRINK_CLEAR_LOW := 0.5   # m: the same for low stones (scale <= 0.3, under ~20 cm)
 static var OLD_SCANROCKS := Env.raw("BMX_OLD_SCANROCKS") == "1"
+## a bush the placement put -> a scanned plant (ScanPlants): the country picks the plant, the old bush's width the
+## variant (of the few this chunk uses) and its size; no random numbers drawn (nothing else moves). [list, basis, colour]
+func _scan_plant(b: Basis, p: Vector3) -> Array:
+	var keep := [f.b_dry, f.b_rug, f.b_cold, f.b_wet, f.b_forest, f.b_sav, f.b_ash, f._bi_x, f._bi_z]
+	f.biome(p.x, p.z)
+	var fam := ScanPlants.families(f.b_dry, f.b_cold, f.b_wet, f.b_forest)
+	var dry: bool = f.b_dry > 0.45
+	f.b_dry = keep[0]; f.b_rug = keep[1]; f.b_cold = keep[2]; f.b_wet = keep[3]; f.b_forest = keep[4]
+	f.b_sav = keep[5]; f.b_ash = keep[6]; f._bi_x = keep[7]; f._bi_z = keep[8]
+	var hx := sin(p.x * 17.137 + p.z * 61.791) * 31758.5453
+	var h := hx - floorf(hx)
+	var cxh := sin(float(cx) * 12.9898 + float(cz) * 78.233) * 43758.5453
+	var want := 2.0 * maxf(Vector2(b.x.x, b.x.z).length(), Vector2(b.z.x, b.z.z).length()) * 0.95   # (unit bush ~0.95 radius)
+	var pk := ScanPlants.pick(fam, want, h, cxh - floorf(cxh))
+	if pk.is_empty():
+		return []
+	var s: float = pk[1] * (0.9 + 0.2 * fmod(h * 13.7, 1.0))
+	var nb := Basis(Vector3.UP, fmod(h * 91.3, 1.0) * TAU).scaled(Vector3(s, s, s))
+	var bb := 0.9 + 0.18 * fmod(h * 7.31, 1.0)   # the scan keeps its own colours: only a little brightness / warmth per plant
+	var col := Color(bb * 1.03, bb, bb * 0.92) if dry else Color(bb, bb, bb)
+	return [pk[0], nb, col]
+
+
+## a rock in tundra / dry country -> a Megascans rock or (tundra) a mossy ground patch, for part of them: [list, basis,
+## colour] or [] (keep the scanned rock set)
+func _scan_rock(b: Basis, p: Vector3, h: float, dry: bool, cold: bool) -> Array:
+	if not ScanPlants.enabled() or not (cold or dry):
+		return []
+	var g := fmod(h * 31.7, 1.0)
+	var fam: Array
+	if cold:
+		if g > 0.75:
+			return []
+		fam = ["trockground", "tmossground"] if g < 0.18 else ["tboulder", "tmossboulder", "tstone", "tstone"]
+	else:
+		if g > 0.5:
+			return []
+		fam = ["sboulder", "drock", "drock"]
+	var cxh := sin(float(cx) * 12.9898 + float(cz) * 78.233) * 43758.5453
+	var want := 2.0 * maxf(Vector2(b.x.x, b.x.z).length(), Vector2(b.z.x, b.z.z).length())
+	if fam[0] == "trockground":
+		want *= 2.2   # (a patch of ground: wider than the rock it stands for)
+	var pk := ScanPlants.pick(fam, want, fmod(h * 7.77, 1.0), cxh - floorf(cxh))
+	if pk.is_empty():
+		return []
+	var s: float = pk[1]
+	var bb := 0.9 + 0.2 * fmod(h * 5.31, 1.0)
+	return [pk[0], Basis(Vector3.UP, fmod(h * 53.1, 1.0) * TAU).scaled(Vector3(s, s, s)), Color(bb, bb, bb)]
+
+
+## Megascans grass clumps along both edges of the trail (2026-11-28, user: "leave our procedural grass, pick some grass
+## clumps for next to roads"): from the dirt's edge out to ROADGRASS_OUT m, thickest right at the edge, in denser / thinner
+## stretches, the species by country (ScanPlants.grass_families). Own random stream (nothing else moves); no colliders
+const ROADGRASS_OUT := 2.4
+const ROADGRASS_TRIES := 1400
+const ROADGRASS_KEEP := 0.55
+
+func _roadside_grass(ox: float, oz: float) -> void:
+	if not ScanPlants.enabled() or OLD_ROADSIDE:
+		return
+	var near := false
+	for i in 9:
+		if f.route_dist(ox + (i % 3 - 1) * S / 3.0, oz + (i / 3 - 1) * S / 3.0) < TerrainField.QR:
+			near = true
+			break
+	if not near:
+		return
+	var rn := WorldRng.new(WorldRng.i32(cx * 1103515245) ^ WorldRng.i32(cz * 2654435761) ^ WorldRng.i32(f.seed_value * 97531) ^ 0x51ed27)
+	var cxh := sin(float(cx) * 12.9898 + float(cz) * 78.233) * 43758.5453
+	var ch := cxh - floorf(cxh)
+	for i in ROADGRASS_TRIES:
+		var x := ox + (rn.next() - .5) * S
+		var z := oz + (rn.next() - .5) * S
+		var r := rn.next()
+		f.query(x, z)
+		if f.q_d >= TerrainField.QR:
+			continue
+		var o: float = f.q_d - f.q_w
+		if o < -0.05 or o > ROADGRASS_OUT:
+			continue
+		var patch := 0.35 + 0.9 * sm(-0.3, 0.3, f.n(x - 410, z + 770, TerrainField.I38))
+		if r > ROADGRASS_KEEP * patch * (1.0 - 0.6 * sm(0.4, ROADGRASS_OUT, o)):
+			continue
+		f.biome(x, z)
+		if f.b_ash > 0.5:
+			continue
+		var fam := ScanPlants.grass_families(f.b_dry, f.b_cold, f.b_wet, f.b_forest)
+		for k in 1 + int(rn.next() * 3):
+			var a := rn.next() * 6.28
+			var d := (0.25 + rn.next() * 0.45) if k else 0.0
+			var bx := x + cos(a) * d
+			var bz := z + sin(a) * d
+			var hh := rn.next()
+			if f.trail(bx, bz) > 0.05 or f.jump_mask(bx, bz) > 0 or is_blocked(bx, bz, 0.3):
+				continue
+			var gy := ok_spot(bx, bz, WATER + 0.3)
+			if is_nan(gy):
+				continue
+			var pk := ScanPlants.pick(fam, 0.45 + hh * 0.6, hh, ch)
+			if pk.is_empty():
+				return
+			var s: float = pk[1] * (0.85 + 0.3 * rn.next())
+			var bb := 0.9 + 0.18 * rn.next()
+			_push_raw(pk[0], Basis(Vector3.UP, rn.next() * TAU).scaled(Vector3(s, s, s)), Vector3(bx, gy - 0.03, bz), Color(bb, bb, bb), 1.0)
+
+
+## Megascans tree stumps in forests (2026-11-28): a few a chunk where trees stand thick, off the trail, a trunk collider
+## each (hit one and it is a wall). Own random stream
+const STUMP_TRIES := 28
+
+func _stumps(ox: float, oz: float) -> void:
+	if not ScanPlants.enabled() or not (ScanPlants.has("pinestump") or ScanPlants.has("sprucestump") or ScanPlants.has("brokenstump")):
+		return
+	var rn := WorldRng.new(WorldRng.i32(cx * 362437) ^ WorldRng.i32(cz * 521288629) ^ WorldRng.i32(f.seed_value * 88675123) ^ 0x2f6b11)
+	var cxh := sin(float(cx) * 12.9898 + float(cz) * 78.233) * 43758.5453
+	var ch := cxh - floorf(cxh)
+	for i in STUMP_TRIES:
+		var x := ox + (rn.next() - .5) * S
+		var z := oz + (rn.next() - .5) * S
+		var r := rn.next()
+		var hh := rn.next()
+		f.biome(x, z)
+		var wood := maxf(f.b_forest, 0.6 * (1.0 - f.b_dry) * (1.0 - f.b_cold))
+		if r > 0.5 * wood or f.b_dry > 0.5:
+			continue
+		f.query(x, z)
+		if f.q_d < TerrainField.QR and f.q_d < f.q_w + 3.5:
+			continue
+		if f.trail(x, z) > 0.02 or f.jump_mask(x, z) > 0 or is_blocked(x, z, 0.8):
+			continue
+		var h := ok_spot(x, z)
+		if is_nan(h):
+			continue
+		var pk := ScanPlants.pick(["pinestump", "sprucestump", "brokenstump"], 0.5 + hh * 0.5, hh, ch)
+		if pk.is_empty():
+			return
+		var sz: Vector3 = ScanPlants.SIZE[pk[0]]
+		# the tall broken trunks cut down to stump height: never taller than ~1.3 m
+		var s: float = minf(pk[1], 1.3 / maxf(sz.y, 0.1))
+		_push_raw(pk[0], Basis(Vector3.UP, rn.next() * TAU).scaled(Vector3(s, s, s)), Vector3(x, h - 0.05, z), Color(1, 1, 1), 1.0)
+		colliders.append({"x": x, "z": z, "r": 0.4 * maxf(sz.x, sz.z) * s, "ceil": h + sz.y * s})
+		blocked.append([x, z, 0.5 * maxf(sz.x, sz.z) * s])
+
+
 const SCAN_STONES := ["scan_nstone_a", "scan_nstone_b", "scan_nstone_c", "scan_nstone_d", "scan_nstone_e"]
 func _brink_stone(x: float, z: float, h: float, sc: float, rn: WorldRng, tall: float = 1.0) -> void:
 	if Env.raw("BMX_BRINK_BIG") != "": sc *= float(Env.raw("BMX_BRINK_BIG"))   # (test)

@@ -50,6 +50,10 @@ static func twin(solid_mesh: String) -> Array:
 	match solid_mesh:
 		"pine": return [mesh("pineCard"), material("needle")]
 		"blob": return [mesh("blobCard"), material("leaf")]
+		"bush", "bush1", "bush2", "bushdry":   # (bushes: CardBush's shell bush near the rider, same material)
+			if CardBush.shell_enabled() and Env.raw("BMX_OLD_BUSH") != "1":
+				TerrainGeo.ensure()
+				return [CardBush.shell_mesh(solid_mesh), TerrainGeo.MAT["leafCardDry" if solid_mesh == "bushdry" else "leafCard"]]
 	return []
 
 
@@ -76,8 +80,11 @@ static func add_twin(solid: MultiMeshInstance3D, solid_mesh: String, vis := 0.0)
 	mi.transform = solid.transform
 	if vis > 0.0:
 		mi.visibility_range_end = vis
-	solid.set_instance_shader_parameter("fade_mode", 3.0)
 	mi.set_instance_shader_parameter("fade_mode", 4.0)
+	if not solid_mesh in ["pine", "blob"]:   # (bushes: no billboard, so their LOD1 runs to the far fade)
+		solid.set_instance_shader_parameter("fade_mode", 6.0)
+		return mi
+	solid.set_instance_shader_parameter("fade_mode", 3.0)
 	add_spire(solid, solid_mesh)
 	add_billboard(solid, solid_mesh)
 	add_shadow_proxy(solid, solid_mesh)

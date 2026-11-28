@@ -22,6 +22,14 @@ uniform sampler2D trail3_tex : filter_linear, repeat_disable;
 uniform float trail_fx = 0.0;      // 0 = plain trail colour (no frame bound)
 // snow (2026-11-27): the chunk's baked snow cover (R8, only chunks that have snow; terrain_chunk_builder "snow_img")
 uniform sampler2D snow_tex : hint_default_black, filter_linear_mipmap, repeat_disable;
+// tundra (2026-11-28, user: "tundra as realistic as the road"): Megascans moss / stony ground / gravel on the land in cold
+// country (Terrain._tundra_ground, tools/make_tundra_scans.py): tundra_tex R = how cold (chunk bake), the scans in two
+// 4-layer arrays (0 icelandic moss, 1 nordic moss, 2 stony ground, 3 gravel) in the trail scans' format
+uniform bool tundra_on = false;
+uniform sampler2D tundra_tex : hint_default_black, filter_linear, repeat_disable;
+uniform sampler2DArray tun_col : filter_linear_mipmap_anisotropic, repeat_enable;
+uniform sampler2DArray tun_nr : filter_linear_mipmap_anisotropic, repeat_enable;
+uniform float tundra_amount = 1.0;
 uniform bool snow_on = false;
 uniform float snow_look = 1.0;      // 0 = only the baked white colour (as before)
 uniform float snow_sparkle = 1.0;   // glints in the snow up close (0 = none)
@@ -150,6 +158,23 @@ vec3 gd_relief(sampler2D nt, vec2 p, vec2 dx, vec2 dy, vec2 a, float inv) {
 	return vec3(a * n.x - b * n.y, n.z);
 }
 
+// a tundra scan layer (sampler2DArray) at a world point, turned / sized like ts_read; relief like gd_relief
+vec4 tun_read(sampler2DArray tx, float l, vec2 p, vec2 dx, vec2 dy, vec2 a, float inv) {
+	vec2 b = vec2(-a.y, a.x);
+	return textureGrad(tx, vec3(vec2(dot(p, a), dot(p, b)) * inv, l), vec2(dot(dx, a), dot(dx, b)) * inv, vec2(dot(dy, a), dot(dy, b)) * inv);
+}
+vec2 tun_relief(sampler2DArray tx, float l, vec2 p, vec2 dx, vec2 dy, vec2 a, float inv) {
+	vec2 b = vec2(-a.y, a.x);
+	vec2 n = tun_read(tx, l, p, dx, dy, a, inv).xy * 2.0 - 1.0;
+	return a * n.x - b * n.y;
+}
+// the layers' mean linear colours (tools/make_tundra_scans.py prints them): the ground keeps each one's own hue
+const vec3 TUN_MEAN0 = vec3(0.1485, 0.0924, 0.0086);
+const vec3 TUN_MEAN1 = vec3(0.0515, 0.0460, 0.0041);
+const vec3 TUN_MEAN2 = vec3(0.1631, 0.1265, 0.0797);
+const vec3 TUN_MEAN3 = vec3(0.0409, 0.0391, 0.0371);
+const vec3 LUMW_T = vec3(0.2126, 0.7152, 0.0722);
+const float TUN_HUE = 0.4;
 // a scan's texel at a world point, turned and sized like gd_relief (the same a / inv read the same spot)
 vec4 ts_read(sampler2D tx, vec2 p, vec2 dx, vec2 dy, vec2 a, float inv) {
 	vec2 b = vec2(-a.y, a.x);
@@ -575,6 +600,41 @@ void fragment() {
 		vec3 rlo2 = gd_relief(tr_nr1, P.xz - 5.0, pdx, pdy, vec2(-0.6, 0.8), 1.0 / 1.1);
 		lslope = (rlo.xy * 0.7 + rlo2.xy * 0.35) * ofl;
 		landc *= 1.0 - 0.07 * length(lslope);   // slopes / hollows read a touch darker
+	}
+	// tundra: moss carpets (two kinds in slow patches), the stony ground showing through where the moss is thin and on slopes,
+	// gravel in some hollows; mixed through their heights. Each keeps its own hue, at the land's brightness (so the world's
+	// light / biome tone still rule); its relief on the land. Off the trail only; rock faces keep theirs
+	if (tundra_on) {
+		float tun = smoothstep(0.3, 0.65, texture(tundra_tex, UV).r) * (1.0 - wd) * (1.0 - smoothstep(0.2, 0.6, gB.a)) * tundra_amount;
+		if (tun > 0.01) {
+			const vec2 TA = vec2(0.809, 0.588), TB = vec2(-0.309, 0.951), TC = vec2(0.643, -0.766), TD = vec2(-0.940, -0.342);
+			vec3 tn = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
+			float mb = smoothstep(0.3, 0.7, gd_noise3(vec3(P.xz * 0.025, 17.0)) * 0.7 + gd_noise3(vec3(P.xz * 0.11, 3.1)) * 0.3);
+			float sw = clamp(smoothstep(0.55, 0.85, gd_noise3(vec3(P.xz * 0.045, 23.0)) * 0.75 + gd_noise3(vec3(P.xz * 0.3, 8.0)) * 0.25)
+				+ smoothstep(0.93, 0.75, tn.y), 0.0, 1.0);
+			float gw = smoothstep(0.62, 0.82, gd_noise3(vec3(P.xz * 0.07, 5.0)) * 0.8 + gd_noise3(vec3(P.xz * 0.5, 1.3)) * 0.2);
+			vec4 m0 = tun_read(tun_col, 0.0, P.xz, pdx, pdy, TA, 1.0 / 2.0), m1 = tun_read(tun_col, 1.0, P.xz + 31.0, pdx, pdy, TB, 1.0 / 2.4);
+			float w1 = ts_hb(m0.a, m1.a, mb);
+			vec4 mo = mix(m0, m1, w1);
+			vec3 mc = mix(TUN_MEAN0, TUN_MEAN1, w1);
+			vec4 st = tun_read(tun_col, 2.0, P.xz - 17.0, pdx, pdy, TC, 1.0 / 2.6);
+			float w2 = ts_hb(mo.a, st.a, sw * 0.85);
+			vec4 gr = tun_read(tun_col, 3.0, P.xz + 9.0, pdx, pdy, TD, 1.0 / 1.6);
+			float w3 = ts_hb(max(mo.a, st.a), gr.a, gw * 0.8);
+			vec3 rel = mix(mix(mo.rgb, st.rgb, w2), gr.rgb, w3) * 2.0;
+			vec3 mean = mix(mix(mc, TUN_MEAN2, w2), TUN_MEAN3, w3);
+			// hue: less than half the scans' own (their colour maps read very saturated, orange), the rest the land's (so it sits
+			// under the grass carpet, which takes its colour from the land); brightness: the land's
+			float ll = max(dot(landc, LUMW_T), 1e-4);
+			vec3 hue = mix(landc / ll, mean / max(dot(mean, LUMW_T), 1e-4), TUN_HUE);
+			vec3 tc = rel * hue * ll;
+			landc = mix(landc, tc, tun);
+			if (gpx < 0.4) {
+				vec2 tsl = mix(mix(mix(tun_relief(tun_nr, 0.0, P.xz, pdx, pdy, TA, 1.0 / 2.0), tun_relief(tun_nr, 1.0, P.xz + 31.0, pdx, pdy, TB, 1.0 / 2.4), w1),
+					tun_relief(tun_nr, 2.0, P.xz - 17.0, pdx, pdy, TC, 1.0 / 2.6), w2), tun_relief(tun_nr, 3.0, P.xz + 9.0, pdx, pdy, TD, 1.0 / 1.6), w3);
+				lslope = mix(lslope, tsl * 0.8, tun * (1.0 - smoothstep(0.08, 0.4, gpx)));
+			}
+		}
 	}
 	// the road's dirt is baked one orange-brown whatever country it runs through, so where the land turns dark (forest floor,
 	// marsh, ash, frost) it glowed bright against it. Match the dirt to the land beside it: only ever darker (the sunny

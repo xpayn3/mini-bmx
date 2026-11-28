@@ -1395,6 +1395,50 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   at the back, the four variants in front). Seen: close-ups + two rides (seeds 4242, 80019), no script errors; NOT measured: frame time with many bushes in
   view, the wind sway, how distant leaves thin out (mip alpha). Poly Haven's `searsia_burchellii` (1.4M polygons, ~35 MB glTF) was looked at as a scan source
   and not used: it would have to be decimated + baked to cards first.
+- **Shell bushes, near LOD (2026-11-28, user: "bushes are too bad quality")**: near the rider (full to 36 m, gone by 48 m,
+  `CardTree.add_twin` / `twin()` now also takes "bush" / "bush1" / "bush2" / "bushdry") a bush is `CardBush.shell_mesh`:
+  108-164 smaller twig cards (0.27-0.6 units) through the volume, thickest outside, mostly upright, tipping up to ~35 deg
+  on the top, facing roughly out, mirrored at random, tips past the outline (ragged silhouette instead of the old flat
+  walls), lit as one volume (`volume_normals`), albedo x1.12. Past 48 m and in the shadow pass the old upright-card bush
+  (`CardBush.mesh`) as before, as new fade mode 6 in `deco_fade.gdshaderinc` (a LOD1 with no billboard after it: drawn to
+  the far fade). Cost at the seed 4242 start: +0.1M triangles (+1 %), +13 draw calls. Gallery `tools/bush_gallery.tscn`:
+  back row LOD1, front row shell. `BMX_OLD_BUSH2=1` = no near LOD. Free atlases checked (ShareTextures CC0: 1K only, no
+  better than the beech atlas; the paid Poliigon leaf atlases, e.g. beautyberry, are the next step up, gitignored like
+  the beech). Not ridden by the user yet; the look is only a moderate step (they still read dark green from the chase cam).
+- **Megascans scans in the world (2026-11-28, user: "bushes are too bad quality", "use all", "billboards far away", grass clumps
+  beside the road, rocks, stumps; `scripts/world/scan_plants.gd` `ScanPlants`)**. The user claimed Megascans on Fab in 2024 (Fab
+  Standard licence: may ship in the game, the FILES may not be redistributed: `assets/plants_scan/` is **gitignored**, a clone without
+  it keeps the card bushes / rock set). 34 downloads: bushes (blackberry, boxwood, downy willow, elderberry, bilberry, bracken,
+  dead shrubs, rhazya, alpine bearberry, crowberry, lingonberry, 3 desert cacti), grass clumps (tufted, rough meadow, wild, dry,
+  marram, tundra, cotton, ribbon, 2 grass-clump sets from Downloads\TONDACH), rocks (tundra boulder / mossy boulder / stone,
+  sandstone boulder, desert western rock), 2 tundra ground patches, 3 stumps. Pipeline (re-run after new downloads; unzip each into
+  its own folder): `blender -b -P tools/make_scan_plants.py -- <dir> godot/assets/plants_scan` (FBX per LOD, glTF "UE" packages with
+  SM_<id>_Var<X>_LOD<n> nodes, single glTF / glb; near = finest LOD under 5000 triangles, far = Megascans' billboard LOD3 or a
+  decimated LOD; solids decimated to 3000 / 450) then `python tools/pack_scan_plant_textures.py <dir> godot/assets/plants_scan`
+  (col.png colour + opacity, nrm.png normal + translucency, bcol / bnrm the billboard's; UE normals green-flipped; transparent texels
+  filled with leaf colour (black there darkened the mips); colour LIFTED to linear 0.12 / solids 0.14, never darkened: the classic
+  FBX downloads' maps come out ~10x darker than the UE / glTF ones; single-channel maps keep their value in R), then Godot import
+  with compress/mode=2 + mipmaps (billboards / grass / small plants size_limit 1024). Lists `sp_<short>_<var>`: far mesh everywhere
+  (fade mode 6), its near twin `_lod0` (mode 4, `Terrain._plant_twin`, the plant's material; the far list a billboard material
+  `sp_<short>_bb`, flat cards turned to the camera: `deco_cards` `face_cam`). Leafy meshes get the card bushes' volume normals +
+  baked AO (`ScanPlants._volume`). Where: every bush put (`TerrainChunkBuilder._scan_plant`, `ScanPlants.families` by biome),
+  grass clumps along both trail edges (`_roadside_grass`, `grass_families`), part of the rocks in tundra (+ ground patches) / dry
+  country (`_scan_rock`), forest stumps with colliders (`_stumps`). Each chunk uses <= 2 species per family and 2 variants each
+  (draw calls); grass / patches cast no shadow. Measured (start views, other GPU apps busy): seed 4242 green start triangles +1 %,
+  draws 2289 -> 2584 (+13 %); seed 5 forest triangles -3 %, draws +4 %. `BMX_OLD_PLANTS=1` = off; tests `BMX_PLANT_ALB`,
+  `BMX_PLANT_NONRM`, `BMX_PLANT_RAWNRM`; gallery `res://tools/bush_gallery.tscn -- out.png scan=1`. Biome test spots (with
+  `APPDATA=<temp> BMX_ROUTE_BIOME=0`): cold seed 2 start, dry seed 4242 x 60, forest seed 5 x 160 z -29.5, wet seed 12 x 2244 z -960.6.
+  **Tundra ground** (user: "tundra as realistic as the road"): the 4 Megascans surfaces (icelandic moss, nordic moss, icelandic
+  stony ground, icelandic gravel) packed by root `tools/make_tundra_scans.py <dir> godot/assets/plants_scan/tundra_ground` into two
+  Texture2DArrays (4 x 1024 px strips, the trail scans' format: colour / its mean x 0.5 + height, normal + roughness; it writes
+  their .import as 2d_array_texture and prints TUN_MEAN for ground.gdshader). Each chunk with cold country bakes `tundra_img`
+  (R8, TerrainField.biome b_cold on a 13 x 13 grid; `Terrain._tundra_ground` sets tundra_tex / tun_col / tun_nr / tundra_on).
+  `ground.gdshader` tundra block (after the off-trail relief): on the land (not the dirt, not rock faces) two mosses in slow
+  patches, the stony ground through them where thin / on slopes, gravel in some patches, height-blended; hue = TUN_HUE 0.4 of
+  the scans' own (theirs read very orange) + the land's, brightness the land's (it sits under the grass carpet); relief into
+  lslope. Seen at seed 2's start (cold): flat green -> olive moss with stones. Draws / triangles unchanged. `BMX_OLD_TUNDRA=1` = off.
+  Not done: snow on scans, rock tone matching the ground, the title land, the grass carpet's colour in tundra (still the
+  land's baked green).
 - **Card trees (2026-11-26, user: "same trick as the bushes for trees", "no low poly trees, make LODs from our new ones",
   "far LOD as a baked PNG billboard", "roots flare at the bottom, branches for the leafy ones", "leaves too big, realistic
   scales, trunk thickness and height, can vary")**: `world/card_tree.gd` (`CardTree`). `BMX_OLD_TREES=1` = the old small

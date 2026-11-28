@@ -62,6 +62,8 @@ static func ensure() -> void:
 		MESH["scan_" + id] = _glb_mesh("res://assets/rocks_scan/%s_lod1.glb" % id)
 		MESH["scan_" + id + "_lod0"] = _glb_mesh("res://assets/rocks_scan/%s_lod0.glb" % id)
 		if id.begins_with("nstone_"): MESH["spebble_" + id.substr(7)] = MESH["scan_" + id]   # (pebbles: no _lod0 twin)
+	# scanned Megascans plants (gitignored, may be missing: ScanPlants), near + far meshes and one material per plant
+	ScanPlants.ensure(MESH, MAT)
 	MESH["box"] = GeoBuf.box(1, 1, 1).to_mesh()
 	CactusGeo.ensure()
 	for k in CactusGeo.KINDS:
