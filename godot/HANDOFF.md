@@ -138,6 +138,25 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
 
 ## 5. Systems — how they work
 
+### Ride physics in C# (branch `claude/physics-porting-c-39765e`, 2026-11-28; full notes `docs/physics_port.md`)
+- **`bike_physics.gd` is still the source**: the C# ride `sim/BikeSim.gen.cs` is GENERATED from it by
+  `dev/port/gd2cs.py`. After any change to bike_physics.gd: `bash dev/port/gen.sh` (regenerate + build the core with no
+  Godot), `python dev/port/gen_mirror.py` if members were added / removed, `dotnet build`, then a lockstep run.
+- `godot/sim/` = the engine-free core (no Godot reference: `powershell -File tools/sim_purity.ps1`): SimMath (GDScript's
+  sin / cos / tan / atan / atan2 / asin / exp / log / tanh / pow bit for bit: `-s res://tools/sim_math_probe.gd`), Gd.cs
+  (Godot's helpers + float32 V2 / V3), Pcg32 / Noise2S (RandomNumberGenerator / FastNoiseLite bit for bit:
+  `-s res://tools/sim_rng_probe.gd`), Contracts.cs (IGround = what it asks any terrain, incl. `cast()` for future
+  wallrides; IRideHost = what it tells the game). Portable to Unity / consoles: copy `sim/`, write IGround + IRideHost.
+- The game's ride steps in C# by default (`CS_DEFAULT` in bike_physics.gd; `BMX_PHYS=gd` = GDScript). The game still holds
+  the GDScript BikePhysics and reads it as before; step() hands over to `scripts/bike/BikePhysicsCs.cs` and the 436
+  number / bool / int members cross in one packed array (`_cs_out` / `_cs_in`, generated at the end of bike_physics.gd).
+  Lines marked `# (cs-hook)` are the hand-over (the translator skips them). The crashed bike + ragdoll step is a hand port
+  in BikePhysicsCs.cs.
+- **Lockstep `BMX_PHYS=cmp`** (dev): every tick the C# twin is set to the GDScript ride's state, both step, all 594
+  members compared bit for bit (`PHYSCMP SUM ... PASS`). 0 mismatches over ~55k ticks (demo AI, flips, gamepad whips,
+  manuals, stoppies, the whole playground suite). Run it after regenerating.
+- Speed: `p_bike_step` 0.70 -> 0.62 ms a frame. `BMX_CSPERF=1` = where a C# step's time goes.
+
 ### Ride physics (`bike_physics.gd`)
 - **Energy account (2026-11-22, `BMX_ENERGY_PROBE=1`)**: every 5 s an `ENERGY` line, J/kg since the start: the drive
   stage's terms (pedal, brakes, pump, rolling, air, grade, manual), the change across each other stage (`S_steer` slides,

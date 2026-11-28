@@ -236,7 +236,7 @@ func _autotest(seconds: float) -> void:
 			Input.parse_input_event(ev)
 		var body_t := Env.s("BMX_BODY")   # tests: the body stick. manual / fwd / lean / flick (from 3 s)
 		if body_t != "" and el >= 3.0:
-			var ph2 = game.phys
+			var ph2: BikePhysics = game.phys
 			if body_t == "manual": Input.action_press("body_back", 0.9 if int(el) % 4 < 3 else 0.0)
 			elif body_t.begins_with("slowback:"):   # tests: lean back slowly (over 1 s) to that far and hold: must NOT start a manual
 				if ph2.v > 4.0 and not _probe.has("sb0"): _probe["sb0"] = el   # (from rolling: the test clock runs while the ride loads)
@@ -292,7 +292,7 @@ func _autotest(seconds: float) -> void:
 			elif body_t == "fwd": Input.action_press("body_fwd", 1.0)
 			elif body_t == "lightfwd": Input.action_press("body_fwd", 0.25)   # resting the stick a little forward (attack position)
 			elif body_t == "holdback":   # in the air: stick held fully back (wind up a back flip), hands off on the ground
-				var on2 = ph2.air and ph2.air_time > 0.08
+				var on2 := ph2.air and ph2.air_time > 0.08
 				Input.action_press("body_back", 1.0) if on2 else Input.action_release("body_back")
 				if on2 and Env.s("BMX_BODY_PRINT") != "":
 					print("SPIN t=%.2f air=%.2f edge=%.2f hold=%.2f k=%.2f pitch_v=%.2f lean=%.2f" % [el, ph2.air_time, ph2.edge_s, ph2.spin_hold, ph2.spin_k, ph2.pitch_v, ph2.bike_lean])
@@ -312,7 +312,7 @@ func _autotest(seconds: float) -> void:
 				Input.action_press("body_back", -ay) if ay < 0.0 else Input.action_release("body_back")
 			elif body_t == "circle":   # in the air: circle the stick (0.8 deflection, ~1 turn / s); hands off on the ground
 				var ca := el * TAU * 1.0
-				var on = ph2.air and ph2.air_time > 0.08
+				var on := ph2.air and ph2.air_time > 0.08
 				var sx := sin(ca) * 0.8 if on else 0.0
 				var sy := cos(ca) * 0.8 if on else 0.0
 				Input.action_press("body_left", sx) if sx > 0.0 else Input.action_release("body_left")
@@ -323,7 +323,7 @@ func _autotest(seconds: float) -> void:
 					print("AIRSTICK t=%.2f stick=(%.2f,%.2f) pitch=%.2f g=%.2f bike_lean=%.2f air_tilt=%.2f" % [el, ph2.air_stick.x, ph2.air_stick.y, ph2.pitch, ph2._g_pitch, ph2.bike_lean, ph2.air_tilt])
 			elif body_t == "circle2":   # tests (air smoothness): in the air circle the right stick AND steer the left stick back and forth
 				var ca2 := el * TAU * 0.8
-				var on2 = ph2.air and ph2.air_time > 0.08
+				var on2 := ph2.air and ph2.air_time > 0.08
 				var sx2 := sin(ca2) * 0.9 if on2 else 0.0
 				var sy2 := cos(ca2) * 0.9 if on2 else 0.0
 				var ls := sin(el * TAU * 0.6) * 0.8 if on2 else 0.0
@@ -379,7 +379,7 @@ func _autotest(seconds: float) -> void:
 				Input.action_press("body_right", -sx) if sx < 0.0 else Input.action_release("body_right")
 				Input.action_press("body_fwd", sy) if sy > 0.0 else Input.action_release("body_fwd")
 				Input.action_press("body_back", -sy) if sy < 0.0 else Input.action_release("body_back")
-				var ph3 = game.phys
+				var ph3: BikePhysics = game.phys
 				if not ph3.air and not ph3.crash_on:
 					_probe.thumb_n = int(_probe.get("thumb_n", 0)) + 1
 					if ph3.man_a > 0.05: _probe.thumb_manual = int(_probe.get("thumb_manual", 0)) + 1
@@ -767,7 +767,7 @@ func _autotest(seconds: float) -> void:
 			_resume()
 			await get_tree().process_frame
 			print("AUTOTEST resumed: paused=%s state_riding=%s" % [get_tree().paused, state == RIDING])
-	var st = game.phys
+	var st := game.phys
 	if not _probe.is_empty(): print("AUTOTEST body ", _probe)
 	if Env.s("BMX_BODY_CLIP") != "":   # tests: the rider's body parts inside each other / the bike (frames > 1.5 cm in, deepest)
 		var cpz: Dictionary = game.rider.clip_pairs

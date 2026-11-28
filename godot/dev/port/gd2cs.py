@@ -727,6 +727,8 @@ def logical_lines(src):
     comments = []
     for no, raw in enumerate(src.split("\n"), 1):
         code, com = split_comment(raw.rstrip("\r"))
+        if com is not None and "(cs-hook)" in com and not code.lstrip().startswith("func "):
+            continue   # (the GDScript ride's hand-over to the C# one: not part of the ride)
         if not buf:
             if not code.strip():
                 out.append((None, "", com, no))
@@ -951,8 +953,9 @@ class Translator:
             # trim trailing blanks
             while body and body[-1][0] is None:
                 body.pop()
-            if name in self.manual:
-                o.append(f"\t\t// {name}: hand-ported (BikeSim.Manual.cs)")
+            if name in self.manual or name.startswith("_cs_"):
+                if not name.startswith("_cs_"):   # (_cs_*: the hand-over to C#, not part of the ride)
+                    o.append(f"\t\t// {name}: hand-ported (BikeSim.Manual.cs)")
                 i = j
                 continue
             params = self.params(m.group(3))

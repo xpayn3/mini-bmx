@@ -69,8 +69,16 @@ namespace Runout.Sim
 	public static class Env
 	{
 		public static Func<string, string> lookup;
-		public static string s(string k) => lookup?.Invoke(k) ?? "";
-		public static string raw(string k) => lookup?.Invoke(k) ?? "";
+		private static readonly Dictionary<string, string> _cache = new Dictionary<string, string>();
+		/// (read once per key: the switches don't change during a run, and the ride asks for some every step)
+		public static string s(string k)
+		{
+			if (_cache.TryGetValue(k, out var v)) return v;
+			v = lookup?.Invoke(k) ?? "";
+			_cache[k] = v;
+			return v;
+		}
+		public static string raw(string k) => s(k);
 	}
 
 	/// <summary>What the ride asks of the ground (metres, Y up). Any terrain can answer it: a height field, a mesh with

@@ -30,7 +30,7 @@ func _init() -> void:
 	assert(COLS.size() == NC)
 	_buf.resize(ROWS * NC)
 
-func record(dt: float, st, inp: Dictionary, lift: float, drawn_y: float, J: Array) -> void:
+func record(dt: float, st: BikePhysics, inp: Dictionary, lift: float, drawn_y: float, J: Array) -> void:
 	_t += dt
 	var pel: Vector3 = J[2] if J.size() > 2 and J[2] is Vector3 else Vector3.ZERO
 	var ch: Vector3 = J[1] if J.size() > 1 and J[1] is Vector3 else Vector3.ZERO

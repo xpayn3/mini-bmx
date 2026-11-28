@@ -38,7 +38,7 @@ var fx
 var ragdoll
 var rider
 var rig: BikeRig
-var phys   # BikePhysics (GDScript) or BikePhysicsCs (the C# ride, BMX_PHYS=cs): the same members
+var phys: BikePhysics
 var rumble: PadRumble   # layered controller vibration (game/pad_rumble.gd)
 var cam: CameraRig
 var hud
@@ -468,10 +468,7 @@ func _ready() -> void:
 	susp = rig.susp
 	if susp != null and Env.s("BMX_NOUNCLIP") == "": susp.wheels_follow = true   # the wheels track the ground, the frame floats
 	pedal_a0 = rig.pedal_a0
-	if Env.s("BMX_PHYS") == "cs":   # the ride in C# (godot/sim, docs/physics_port.md)
-		phys = load("res://scripts/bike/BikePhysicsCs.cs").new(); phys.init(self)
-	else:
-		phys = BikePhysics.new(self)
+	phys = BikePhysics.new(self)
 	phys.T = Tune.v
 	rumble = PadRumble.new(self)
 	phys.setup(rig.extras, bike_cfg)
@@ -1685,11 +1682,11 @@ func start_crash(reason: String) -> void:
 	# (the shoes now, in the world: the rider node is moved to the world's origin below, after which their global
 	# transforms are the riding-space ones and the ragdoll's feet were built 175 m from the legs)
 	var shoes_w: Array = [rider.shoe[0].global_transform, rider.shoe[1].global_transform]
-	var f: Vector3 = phys.fwd()
+	var f := phys.fwd()
 	# the body carries on with the bike's own motion (no extra pop up: it used to throw the body into the air)
-	var body_vel = f * phys.v + Vector3(0, minf(maxf(phys.vy, 0), 6.0 if phys.air else 0.3) + 0.2, 0)
-	var spin_v: Vector3 = f * (1.0 + absf(phys.v) * 0.08)   # the top of the body keeps going a little as the bike stops
-	var crash_v = body_vel.length()
+	var body_vel := f * phys.v + Vector3(0, minf(maxf(phys.vy, 0), 6.0 if phys.air else 0.3) + 0.2, 0)
+	var spin_v := f * (1.0 + absf(phys.v) * 0.08)   # the top of the body keeps going a little as the bike stops
+	var crash_v := body_vel.length()
 	phys.begin_crash()
 	_crash_bike_begin(reason.begins_with("BAIL"))
 	_break_action_cam(body_vel)
@@ -1779,12 +1776,12 @@ func _crash_bike_begin(reason_bail := false) -> void:
 		ped_i[k] = grp.size(); add.call((rig.pedal_pivots[k] as Node3D).global_position, 0, -1, 0.1, 0.01)
 	var caps := PackedInt32Array([axle_i[1], bb_i, bb_i, hb_i, ht_i, sad_i, bb_i, sad_i, ht_i, hb_i, hb_i, axle_i[0], gl_i, gr_i, ht_i, gl_i, ht_i, gr_i])
 	var caps_r := PackedFloat32Array([0.035, 0.045, 0.035, 0.035, 0.04, 0.035, 0.03, 0.025, 0.025])
-	var f: Vector3 = phys.fwd()
-	var vel = f * phys.v + Vector3(0, clampf(phys.vy, -12.0, 6.0) if phys.air else minf(phys.vy, 0.4), 0)
+	var f := phys.fwd()
+	var vel := f * phys.v + Vector3(0, clampf(phys.vy, -12.0, 6.0) if phys.air else minf(phys.vy, 0.4), 0)
 	# the spin it carries: falling over toward its lean (lean_g turns about the bike's forward axis by -lean), its yaw,
 	# and in the air its pitch spin
 	var bx := mb.basis.x.normalized(); var bz := mb.basis.z.normalized()
-	var omega = -bx * phys.crash_fall_v + Vector3.UP * phys.yaw_rate + bz * (phys.air_w if phys.air else 0.0)
+	var omega := -bx * phys.crash_fall_v + Vector3.UP * phys.yaw_rate + bz * (phys.air_w if phys.air else 0.0)
 	sim.Begin(pts, grp, wid, mass, rad, body0, rig.steer_n.global_position, axis, rig.steer_angle(),
 		rig.wheel_f.global_transform, rig.wheel_r.global_transform, vel, omega, rig.wheel_rf, rig.wheel_rr, 1.0 / 120.0)
 	var own_terrain: bool = terrain.get_script() != null and terrain.get_script().resource_path == "res://scripts/world/terrain.gd"
@@ -2095,12 +2092,12 @@ func on_landing(air_time: float, impact: float) -> void:
 	_landed = clampf(impact / 6.0, 0.0, 1.0) if air_time > 0.25 else 0.0
 	var ls: int = terrain.surface(phys.x, phys.z)
 	if ls == 2 and air_time > 0.15:   # a landing in the water: a ring of ripples off both tyres
-		var wf: Vector3 = phys.fwd()
+		var wf := phys.fwd()
 		var wk := clampf(0.1 + impact / 24.0, 0.1, 0.4)
 		terrain.water_splash(Vector3(phys.x - wf.x * phys.BB_REAR, phys.y, phys.z - wf.z * phys.BB_REAR), wk, 0.5)
 		terrain.water_splash(Vector3(phys.x + wf.x * (phys.L - phys.BB_REAR), phys.y, phys.z + wf.z * (phys.L - phys.BB_REAR)), wk, 0.5)
 	if dust.sim != null and air_time > 0.3 and ls != 2:   # real smoke sim: a ring of dust blasted outward
-		var lf: Vector3 = phys.fwd()
+		var lf := phys.fwd()
 		var lbb: float = phys.BB_REAR
 		var tyres := [Vector3(phys.x - lf.x * lbb, phys.y, phys.z - lf.z * lbb),
 			Vector3(phys.x + lf.x * (phys.L - lbb), phys.y, phys.z + lf.z * (phys.L - lbb))]
@@ -2116,15 +2113,15 @@ func on_landing(air_time: float, impact: float) -> void:
 
 ## the bike and rider as solid shapes the dust sim's air has to go round: two spinning wheels, the
 ## frame and the rider's body
-func _body_parts(st) -> Array:
+func _body_parts(st: BikePhysics) -> Array:
 	var f: Vector3 = st.fwd()
-	var vel = f * st.v + Vector3(0, st.vy if st.air else 0.0, 0)
+	var vel := f * st.v + Vector3(0, st.vy if st.air else 0.0, 0)
 	var axle := f.cross(Vector3.UP).normalized()
 	var base := drawn_pos
 	var rr: float = st.RWR
 	var rf: float = st.RWF
-	var rear = base - f * st.BB_REAR + Vector3(0, rr, 0)
-	var front = base + f * (st.L - st.BB_REAR) + Vector3(0, rf, 0)
+	var rear := base - f * st.BB_REAR + Vector3(0, rr, 0)
+	var front := base + f * (st.L - st.BB_REAR) + Vector3(0, rf, 0)
 	return [
 		{p = rear, v = vel, r = rr * 1.05, spin = -axle * (st.v / rr), solid = false, blend = 6.0},   # spokes: they stir the air (gently: the tyre's spray wins), they don't fill it
 		{p = front, v = vel, r = rf * 1.05, spin = -axle * (st.v / rf), solid = false, blend = 6.0},
@@ -2203,7 +2200,7 @@ func _crash_dust() -> void:
 	if absf(phys.v) > 0.6 and bs != 2 and phys.crash_t > 0.25:
 		var g2: float = terrain.height(phys.x, phys.z)
 		var ba := 1.0 if bs == 1 else (0.85 if bs == 3 else 0.3)
-		var f: Vector3 = phys.fwd()
+		var f := phys.fwd()
 		if Env.s("BMX_SMOKE_PROBE") != "": print("CRASHDUST bike t=%.2f v=%.1f" % [phys.crash_t, phys.v])
 		for e in [-0.5, 0.5]:   # both wheels / the frame scraping
 			dust.sim.add_source(Vector3(phys.x + f.x * e, g2 + 0.1, phys.z + f.z * e), f * phys.v * 0.3 + Vector3(0, 0.6, 0),
@@ -2211,20 +2208,20 @@ func _crash_dust() -> void:
 
 ## dust / roost / tyre tracks for one physics step (bottom of physics() in main.js)
 func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
-	var st = phys
-	var bb: float = st.BB_REAR
+	var st := phys
+	var bb := st.BB_REAR
 	var rear := Vector3(st.x - f.x * bb, st.y + 0.03, st.z - f.z * bb)
 	var front := Vector3(st.x + f.x * (st.L - bb), st.y + 0.03, st.z + f.z * (st.L - bb))
-	var s: int = st.surf
+	var s := st.surf
 	var dcol := ground_dust(rear.x, rear.z, s)
-	var sand = s == 3
-	var skid_fx: bool = st.skid_fx
+	var sand := s == 3
+	var skid_fx := st.skid_fx
 	if st.air: air_peak = maxf(air_peak, st.y)
 	# on a rope bridge's planks: no dirt to throw, and no tyre tracks (they're drawn fixed in the world: on a deck
 	# that swings and sags they hung in the air / sank into the planks)
 	var bare := in_water or _on_rope_deck(st.x, st.z, st.y)
 	if not st.air and va > 0.6 and not bare:
-		var dirt = s == 1
+		var dirt := s == 1
 		var side := Vector3(-f.z, 0, f.x)
 		var lat_a := absf(st.v * st.yaw_rate)
 		var turn_dir := signf(st.yaw_rate)
@@ -2351,7 +2348,7 @@ func ride_fx(dt: float, f: Vector3, va: float, in_water: bool) -> void:
 			var lp := Vector3(randf_range(-0.45, 0.75), randf_range(0.15, 0.75), randf_range(-0.12, 0.12))
 			var ev := f * va * 0.85 + Vector3((randf() - 0.5) * 1.6, randf() * 1.4, (randf() - 0.5) * 1.6)
 			fx.chunk(bt * lp, ev, dc, randf_range(0.008, 0.02), 1.6)
-	var on_ground = not st.air and not bare and va > 0.2
+	var on_ground := not st.air and not bare and va > 0.2
 	# (per wheel: st.air is only "both off", so a manual printed its raised front tyre and laid the grass under it, a stoppie the rear)
 	var on_f: bool = on_ground and not st.front_air
 	var on_r: bool = on_ground and not st.rear_air
@@ -2898,14 +2895,14 @@ var _OLD_BARS := Env.s("BMX_OLD_BARS") != ""
 ## every physics tick: a hit on the front wheel (its upward speed jumping: a rock, a root, a landing) knocks the bars
 ## one way or the other (the knock's side, else a fixed hash of where it happened). Measured per tick: per drawn frame
 ## the same rock kicked the bars at 60 fps (2 ticks added up past the threshold) and not at 144
-func _bar_tick(st) -> void:
+func _bar_tick(st: BikePhysics) -> void:
 	var dvw: float = st.vw_f - _vwf_prev
 	_vwf_prev = st.vw_f
 	if st.air or st.crash_on or absf(dvw) <= BAR_HIT_FROM: return
 	var side: float = signf(st.knock) if absf(st.knock) > 0.02 else (1.0 if sin(st.x * 7.3 + st.z * 3.1) > 0.0 else -1.0)
 	_bar_hit += side * (absf(dvw) - BAR_HIT_FROM) * BAR_HIT_K * smoothstep(2.0, 6.0, absf(st.v))
 
-func _bar_draw(st, dt: float, dab_lean: float) -> float:
+func _bar_draw(st: BikePhysics, dt: float, dab_lean: float) -> float:
 	if _OLD_BARS or st.crash_on:
 		_bar_kick = 0.0; _bar_kick_v = 0.0; _bar_hit = 0.0
 		return st.steer
@@ -2918,7 +2915,7 @@ func _bar_draw(st, dt: float, dab_lean: float) -> float:
 	var w := TAU * BAR_KICK_HZ
 	var steps := maxi(1, ceili(dt * 240.0))
 	var h := dt / steps
-	var push = 0.0 if st.air else st.knock * BAR_KICK_K
+	var push := 0.0 if st.air else st.knock * BAR_KICK_K
 	_bar_kick_v += _bar_hit; _bar_hit = 0.0   # (front-wheel hits: _bar_tick)
 	for i in steps:
 		_bar_kick_v += (-w * w * (_bar_kick - push) - 2.0 * BAR_KICK_Z * w * _bar_kick_v) * h
@@ -2953,7 +2950,7 @@ func _bar_draw(st, dt: float, dab_lean: float) -> float:
 ## physics (`aim_off`, same sign as `slip`). Off the trail, backwards on it, or no airAim: 0. The nearest trail point is kept up to
 ## date every quarter second on the ground (a window round the last one), searched afresh when lost.
 func _aim_update() -> void:
-	var ph = phys
+	var ph := phys
 	ph.aim_off = 0.0
 	if float(Tune.v.get("airAim", 0.6)) <= 0.0 or Env.s("BMX_OLD_AIRSTEER") != "": return
 	var t = terrain
@@ -3578,7 +3575,7 @@ func _rope_rail() -> void:
 	for b in terrain.ropes:
 		if not b.fenced(phys.x, phys.z, phys.y):
 			continue
-		var fw: Vector3 = phys.fwd()
+		var fw := phys.fwd()
 		var over := 0.0
 		for d in [phys.L - phys.BB_REAR, -phys.BB_REAR, 0.0]:
 			var l: Vector2 = b.local(phys.x + fw.x * d, phys.z + fw.z * d)
@@ -3635,7 +3632,7 @@ func _rope_tick(dt: float) -> void:
 			# a wheel rolled off the side of a deck: down you go. Left to the ride physics, the bike hung on the plank
 			# edge with one axle on the deck and one over the drop: an ~85 deg "slope" it sped up on without moving,
 			# sunk into the planks, until it washed out a second later
-			var fw: Vector3 = phys.fwd()
+			var fw := phys.fwd()
 			for d in [0.0, phys.L - phys.BB_REAR, -phys.BB_REAR]:
 				var px: float = phys.x + fw.x * d
 				var pz: float = phys.z + fw.z * d
@@ -3649,9 +3646,9 @@ func _rope_tick(dt: float) -> void:
 					if rope_probe: print("ROPE off the side at d=%.2f" % d)
 					break
 	if rb != null and not phys.air:
-		var h: float = phys.heading
+		var h := phys.heading
 		# sideways: the turn's reaction + each pedal stroke shoving the deck (like footsteps set a rope bridge swinging)
-		var side: float = phys.lat_a * ROPE_TURN_PUSH + ROPE_STROKE * phys.pedal * sin(phys.crank)
+		var side := phys.lat_a * ROPE_TURN_PUSH + ROPE_STROKE * phys.pedal * sin(phys.crank)
 		# the weight goes down through the two tyres (split as the physics loads them), not one point under the
 		# cranks: one point folded the deck into a V the bike pitched about in. A wheel still on the rim or off
 		# the end pushes on nothing (AddLoad ignores points off the deck), as it should
@@ -3661,8 +3658,8 @@ func _rope_tick(dt: float) -> void:
 		if phys.front_air: kf = 0.0
 		elif phys.rear_air: kf = 1.0
 		var fy := -RIDER_KG * clampf(phys.n_load, 0.0, 40.0)
-		var fs = Vector3(sin(h), 0, cos(h)) * RIDER_KG * side
-		var fw: Vector3 = phys.fwd()
+		var fs := Vector3(sin(h), 0, cos(h)) * RIDER_KG * side
+		var fw := phys.fwd()
 		var df: float = phys.L - phys.BB_REAR
 		var dr: float = -phys.BB_REAR
 		rb.push(phys.x + fw.x * df, phys.z + fw.z * df, fy * kf, fs * kf)
@@ -3820,7 +3817,7 @@ func _exit_tree() -> void:
 var dab_probe := Env.s("BMX_DAB_PROBE") != ""
 var _dab_last := []
 var _dab_stats := {"jump_dab": 0.0, "jump_ride": 0.0, "sole_min": 1e9, "t_print": 0.0}
-func _dab_probe(st) -> void:
+func _dab_probe(st: BikePhysics) -> void:
 	for i in 2:
 		var lp: Vector3 = rider.shoe[i].position
 		if _dab_last.size() == 2:
@@ -3837,16 +3834,16 @@ func _dab_probe(st) -> void:
 
 ## Foot down at a stop: nearly stopped, not pedalling, on the ground, not crashed -> one foot leaves its
 ## pedal for the ground beside the bike (eased in over 0.5 s, back up over 0.4 s when riding off).
-func _update_dab(dt: float, st) -> void:
+func _update_dab(dt: float, st: BikePhysics) -> void:
 	if st.crash_on:
 		dab_lin = 0.0; dab_k = 0.0; st.foot_down = false
 		return
 	# slowing down to a stop: the foot comes off the pedal a moment before the bike stands (like a real rider
 	# reaching for the ground), not only once it's already stopped
-	var decel: float = (_dab_vprev - st.v) / maxf(dt, 1e-3)
+	var decel := (_dab_vprev - st.v) / maxf(dt, 1e-3)
 	_dab_vprev = st.v
 	_dab_dec += (decel - _dab_dec) * (1.0 - exp(-dt * 6.0))
-	var coming = st.v < 1.8 and st.v > 0.0 and _dab_dec > 0.8
+	var coming := st.v < 1.8 and st.v > 0.0 and _dab_dec > 0.8
 	var want: bool = not st.air and st.pedal < 0.05 and (st.v < 1.2 and st.v > -0.7 if dab_lin > 0.0 else (absf(st.v) < 0.5 or coming))   # backing up (brake held) lifts it
 	if want and dab_lin <= 0.0:
 		_pick_dab_side(st)
@@ -3863,10 +3860,10 @@ func _update_dab(dt: float, st) -> void:
 	_stop_w = move_toward(_stop_w, 1.0 if sw_on else 0.0, minf(dt, 0.05) / (STOP_IN if sw_on else 0.3))
 
 ## FOOT OUT: when (see the constants) and which side (the inside of the lean: bike_lean > 0 leans left)
-func _update_footout(dt: float, st) -> void:
+func _update_footout(dt: float, st: BikePhysics) -> void:
 	var flat: bool = st.berm_k < 0.25 and (is_nan(st.bank) or absf(st.bank) < 0.18)
 	var lean_abs := absf(st.bike_lean)
-	var on = not _OLD_FOOTOUT and not st.crash_on and not st.air and st.pedal < 0.05 and dab_k < 0.01 and flat \
+	var on := not _OLD_FOOTOUT and not st.crash_on and not st.air and st.pedal < 0.05 and dab_k < 0.01 and flat \
 		and st.v > FO_V.x and st.v < FO_V.y and lean_abs > (FO_LEAN_OFF if _fo_lin > 0.0 else FO_LEAN_ON)
 	if on and _fo_lin <= 0.0: fo_side = -1.0 if st.bike_lean > 0.0 else 1.0
 	if on and signf(-st.bike_lean) != fo_side and lean_abs > 0.2: on = false   # (a swap to the other side: back first)
@@ -3901,7 +3898,7 @@ func _footout_foot(lt: Dictionary) -> void:
 ## Which foot goes down: the one on the uphill side of a side slope (the ground is closer: a short, easy
 ## reach), never onto a rock / bank much higher than the other side (that's a wall, step to the open side);
 ## on flat ground the foot on the lower pedal, level cranks -> the side the bike leans to, else left.
-func _pick_dab_side(st) -> void:
+func _pick_dab_side(st: BikePhysics) -> void:
 	var hb := rig.global_transform.basis
 	var fwd := Vector3(hb.x.x, 0.0, hb.x.z).normalized()
 	var rgt := Vector3(hb.z.x, 0.0, hb.z.z).normalized()
@@ -4081,7 +4078,7 @@ func _process(dt: float) -> void:
 		if not phys.crash_on: phys.crash_pending = "BAIL!"
 	dt = minf(dt, 0.1)
 	t += dt
-	var st = phys
+	var st := phys
 	var a := Engine.get_physics_interpolation_fraction()
 	if Vector2(st.x - _prev.x, st.z - _prev.z).length() > 2: a = 1.0
 	_lerp_a = a

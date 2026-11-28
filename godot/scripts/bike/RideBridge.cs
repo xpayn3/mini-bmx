@@ -392,22 +392,115 @@ public static class RideBridge
 	}
 }
 
-/// <summary>The game's Terrain (GDScript) as the core's ground.</summary>
+/// (tests, BMX_CSPERF=1) where the C# ride's step time goes: ground calls, host calls, the rest
+public static class RidePerf
+{
+	public static readonly bool On = (DevFlags.Env("BMX_CSPERF") ?? "") != "";
+	public static long MirrorTicks, Mirrors, GroundTicks, GroundCalls, HostTicks, HostCalls, StepTicks, Steps, CollTicks, CollCalls;
+	public static readonly System.Diagnostics.Stopwatch W = System.Diagnostics.Stopwatch.StartNew();
+	public static long Now => W.ElapsedTicks;
+	public static double Ms(long t) => t * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+
+	public static void Report()
+	{
+		if (Steps == 0) return;
+		GD.Print($"CSPERF steps={Steps} step_us={Ms(StepTicks) * 1000 / Steps:F1} ground_us={Ms(GroundTicks) * 1000 / Steps:F1} ({GroundCalls / (double)Steps:F1} calls) colliders_us={Ms(CollTicks) * 1000 / Steps:F1} ({CollCalls / (double)Steps:F2} calls) host_us={Ms(HostTicks) * 1000 / Steps:F1} ({HostCalls / (double)Steps:F1} calls) core_us={(Ms(StepTicks - GroundTicks - HostTicks) * 1000) / Steps:F1} mirror_us={Ms(MirrorTicks) * 1000 / Steps:F1} ({Mirrors / (double)Steps:F1} a step)");
+		MirrorTicks = Mirrors = 0;
+		GroundTicks = GroundCalls = HostTicks = HostCalls = StepTicks = Steps = CollTicks = CollCalls = 0;
+	}
+}
+
+/// <summary>The game's Terrain (GDScript) as the core's ground. On the world's own Terrain (no rope bridge loaded) the
+/// height / deck / surface / jump queries go straight to the C# objects Terrain itself uses (TerrainFieldCs, RutFieldCs),
+/// with the same arithmetic as terrain.gd, so the numbers are the same; anything else asks Terrain.</summary>
 public sealed class GodotGround : IGround
 {
 	public readonly GodotObject T;
 	private static readonly StringName S_HEIGHT = "height", S_DECK = "deck_height", S_TOP = "top_height", S_SURF = "surface",
-		S_JUMP = "jump_mask", S_NEAR = "colliders_near";
+		S_JUMP = "jump_mask", S_NEAR = "colliders_near", S_FCS = "fcs", S_RUT = "rut_field", S_BOX = "rut_box", S_ROPES = "ropes";
+	private static readonly bool NO_FAST = (DevFlags.Env("BMX_CS_GROUND_GD") ?? "") != "";
+	private readonly bool _plainTerrain;
+	private TerrainFieldCs _fcs;
+	private RutFieldCs _rut;
+	private Vector4 _box;
+	private bool _fast;
 
-	public GodotGround(GodotObject terrain) { T = terrain; }
+	public GodotGround(GodotObject terrain)
+	{
+		T = terrain;
+		var scr = terrain.GetScript().Obj as Script;
+		_plainTerrain = scr != null && scr.ResourcePath == "res://scripts/world/terrain.gd";
+	}
 
-	public double height(double x, double z) => T.Call(S_HEIGHT, x, z).AsDouble();
-	public double deck_height(double x, double z) => T.Call(S_DECK, x, z).AsDouble();
-	public double top_height(double x, double z) => T.Call(S_TOP, x, z).AsDouble();
-	public long surface(double x, double z) => T.Call(S_SURF, x, z).AsInt64();
-	public double jump_mask(double x, double z) => T.Call(S_JUMP, x, z).AsDouble();
+	/// once a physics step: what terrain.gd's queries would read (its field, the ruts' window, rope bridges)
+	public void BeginStep()
+	{
+		_fast = false;
+		if (NO_FAST || !_plainTerrain) return;
+		_fcs = T.Get(S_FCS).Obj as TerrainFieldCs;
+		if (_fcs == null) return;
+		if (T.Get(S_ROPES).AsGodotArray().Count > 0) return;   // (rope decks: Terrain._rope_deck)
+		_rut = T.Get(S_RUT).Obj as RutFieldCs;
+		_box = T.Get(S_BOX).AsVector4();
+		_fast = true;
+	}
+
+	/// Terrain.rut_at
+	private double Rut(double x, double z)
+	{
+		if (_rut == null || x < _box.X || z < _box.Y || x > _box.Z || z > _box.W) return 0.0;
+		return _rut.Depth((float)x, (float)z);
+	}
+
+	public double height(double x, double z)
+	{
+		long t0 = RidePerf.On ? RidePerf.Now : 0;
+		double r = _fast ? _fcs.height(x, z) - Rut(x, z) : T.Call(S_HEIGHT, x, z).AsDouble();
+		if (RidePerf.On) { RidePerf.GroundTicks += RidePerf.Now - t0; RidePerf.GroundCalls++; }
+		return r;
+	}
+
+	public double deck_height(double x, double z)
+	{
+		long t0 = RidePerf.On ? RidePerf.Now : 0;
+		double r = _fast ? _fcs.deck(x, z) - Rut(x, z) : T.Call(S_DECK, x, z).AsDouble();
+		if (RidePerf.On) { RidePerf.GroundTicks += RidePerf.Now - t0; RidePerf.GroundCalls++; }
+		return r;
+	}
+
+	public double top_height(double x, double z)
+	{
+		long t0 = RidePerf.On ? RidePerf.Now : 0;
+		double r = T.Call(S_TOP, x, z).AsDouble();
+		if (RidePerf.On) { RidePerf.GroundTicks += RidePerf.Now - t0; RidePerf.GroundCalls++; }
+		return r;
+	}
+
+	public long surface(double x, double z)
+	{
+		long t0 = RidePerf.On ? RidePerf.Now : 0;
+		long r = _fast ? _fcs.surface_at(x, z, _fcs.height(x, z) - Rut(x, z)) : T.Call(S_SURF, x, z).AsInt64();
+		if (RidePerf.On) { RidePerf.GroundTicks += RidePerf.Now - t0; RidePerf.GroundCalls++; }
+		return r;
+	}
+
+	public double jump_mask(double x, double z)
+	{
+		long t0 = RidePerf.On ? RidePerf.Now : 0;
+		double r = _fast ? _fcs.jump_mask(x, z) : T.Call(S_JUMP, x, z).AsDouble();
+		if (RidePerf.On) { RidePerf.GroundTicks += RidePerf.Now - t0; RidePerf.GroundCalls++; }
+		return r;
+	}
 
 	public List<GdDict> colliders_near(double x, double z)
+	{
+		long t0 = RidePerf.On ? RidePerf.Now : 0;
+		var l0 = Near(x, z);
+		if (RidePerf.On) { long d = RidePerf.Now - t0; RidePerf.GroundTicks += d; RidePerf.CollTicks += d; RidePerf.CollCalls++; }
+		return l0;
+	}
+
+	private List<GdDict> Near(double x, double z)
 	{
 		var a = T.Call(S_NEAR, x, z).AsGodotArray();
 		var l = new List<GdDict>(a.Count);
@@ -475,7 +568,9 @@ public class GodotRideHost : IRideHost
 	{
 		get
 		{
+			long t0 = RidePerf.On ? RidePerf.Now : 0;
 			var t = Game.Get(S_TERRAIN).Obj as GodotObject;
+			if (RidePerf.On) { RidePerf.HostTicks += RidePerf.Now - t0; RidePerf.HostCalls++; }
 			if (t == null) return null;
 			if (_ground == null || _ground.T != t) _ground = new GodotGround(t);
 			return _ground;
@@ -508,7 +603,13 @@ public class GodotRideHost : IRideHost
 
 	public bool has_method(string name) => Game.HasMethod(name);
 	public virtual void flash(string text) => Game.Call("flash", text);
-	public virtual bool msg_idle() => Game.Call("msg_idle").AsBool();
+	public virtual bool msg_idle()
+	{
+		long t0 = RidePerf.On ? RidePerf.Now : 0;
+		bool r = Game.Call("msg_idle").AsBool();
+		if (RidePerf.On) { RidePerf.HostTicks += RidePerf.Now - t0; RidePerf.HostCalls++; }
+		return r;
+	}
 	public virtual bool smash(GdDict c, V3 vel, V3 pos) => Game.Call("smash", RideBridge.ToGodot(c), RideBridge.G(vel), RideBridge.G(pos)).AsBool();
 	public virtual void rock_chips(GdDict c) => Game.Call("rock_chips", RideBridge.ToGodot(c));
 	public virtual void burst(V3 pos, long n, long surf, double power) => Game.Call("burst", RideBridge.G(pos), n, surf, power);
@@ -519,7 +620,12 @@ public class GodotRideHost : IRideHost
 	public virtual void on_takeoff() => Game.Call("on_takeoff");
 	public virtual void on_landing(double air_time, double impact) => Game.Call("on_landing", air_time, impact);
 	public virtual void on_bad_landing(double k) => Game.Call("on_bad_landing", k);
-	public virtual void ride_fx(double dt, V3 f, double va, bool in_water) => Game.Call("ride_fx", dt, RideBridge.G(f), va, in_water);
+	public virtual void ride_fx(double dt, V3 f, double va, bool in_water)
+	{
+		long t0 = RidePerf.On ? RidePerf.Now : 0;
+		Game.Call("ride_fx", dt, RideBridge.G(f), va, in_water);
+		if (RidePerf.On) { RidePerf.HostTicks += RidePerf.Now - t0; RidePerf.HostCalls++; }
+	}
 	public virtual void flow_up() => Game.Call("flow_up");
 	public virtual void log(string text) => GD.Print(text);
 	public virtual void crashlog_note(string text) => ((Engine.GetMainLoop() as SceneTree)?.Root.GetNodeOrNull("CrashLog"))?.Call("note", text);

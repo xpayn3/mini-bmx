@@ -6,98 +6,42 @@ using GDict = Godot.Collections.Dictionary;
 using GArray = Godot.Collections.Array;
 
 /// <summary>
-/// The ride in C# (godot/sim BikeSim) as the game's `phys`: every member under its GDScript name (BikePhysicsCs.gen.cs),
-/// the same methods as bike_physics.gd. Game makes it with BMX_PHYS=cs. The crashed bike + ragdoll step is here (engine
-/// objects): a hand port of BikePhysics._crash_sim_step and the ragdoll part of _crash_step.
+/// The ride's step in C# (godot/sim BikeSim) behind the GDScript BikePhysics the game holds: BikePhysics.step() hands
+/// over here. The GDScript object keeps the state between steps (the game reads it at full GDScript speed, the replay /
+/// lab / ride log walk it as before); each step its numbers cross in one packed array (bike_mirror.gd <->
+/// BikePhysicsCs.gen.cs), the C# ride steps, and they cross back. Before each of the game's callbacks inside the step
+/// (effects, events) the state is mirrored to GDScript first, so the game sees the same mid-step values as when GDScript
+/// stepped. The crashed bike + ragdoll step (engine objects) is here: a hand port of _crash_sim_step + _crash_step's part.
 /// </summary>
 [GlobalClass]
 public partial class BikePhysicsCs : RefCounted
 {
 	public BikeSim S;
-	private GodotObject _game;
+	private GodotObject _gd;   // the GDScript BikePhysics
 	private GameHost _host;
 	private readonly RideInput _inp = new RideInput();
-	private GDict _tuneSrc;
-	private bool _tuneDirty;
-	private GDict _susSrc = new GDict();
+	private bool _tuneDirty = true;
 	private GodotObject _crashSim;
-	private GDict _profGd;
+	private Transform3D _crashRK = Transform3D.Identity;
+	private readonly double[] _buf = new double[N];
+	/// ride_fx is the step's last statement: the state pushed before it is the step's end state (unless the energy /
+	/// jolt probes, which run after it, are on), so the push after the step is skipped
+	private bool _pushedAtFx;
+	private static readonly bool PROBES_AFTER_FX = (DevFlags.Env("BMX_ENERGY_PROBE") ?? "") != "" || (DevFlags.Env("BMX_JOLT_PROBE") ?? "") != "";
+	private static readonly StringName S_OUT = "_cs_out", S_IN = "_cs_in", S_PENDING = "crash_pending", S_RISK = "_risk",
+		S_CBHIT = "_cb_hit", S_T = "T", S_CRASH = "crash_sim", S_RK = "crash_RK", S_PROF = "prof", S_CHUNK = "chunk_acc";
 
-	/// once after new(): the game is the host (GDScript can't pass constructor arguments to a C# script)
-	public void init(GodotObject game)
+	public void Init(GodotObject game)
 	{
 		RideBridge.Init();
-		_game = game;
 		_host = new GameHost(this, game);
 		S = new BikeSim(_host) { T = new RideParams() };
 		var tune = (Engine.GetMainLoop() as SceneTree)?.Root.GetNodeOrNull("Tune");
 		tune?.Connect("changed", Callable.From(() => _tuneDirty = true));
 	}
 
-	// ---- members held as engine values
-	public GodotObject host
-	{
-		get => _game;
-		set { }   // (the lockstep tap swaps the GDScript ride's host; this one always talks to the game)
-	}
-
-	public GDict T
-	{
-		get => _tuneSrc;
-		set { _tuneSrc = value; _tuneDirty = true; RefreshTune(); }
-	}
-
-	private void RefreshTune()
-	{
-		if (!_tuneDirty || _tuneSrc == null)
-			return;
-		_tuneDirty = false;
-		var p = S.T;
-		p.v.Clear();
-		foreach (var kv in _tuneSrc)
-		{
-			var v = kv.Value;
-			p.v[kv.Key.AsString()] = v.VariantType == Variant.Type.Int ? v.AsInt64() : (v.VariantType == Variant.Type.Bool ? (v.AsBool() ? 1.0 : 0.0) : v.AsDouble());
-		}
-		RideParams.global = p;
-	}
-
-	public GDict sus
-	{
-		get => _susSrc;
-		set { _susSrc = value ?? new GDict(); S.sus = RideBridge.Sus(_susSrc); }
-	}
-
-	public GodotObject crash_sim
-	{
-		get => _crashSim;
-		set { _crashSim = value; S.crash_sim = value == null ? null : new GodotCrashSim(value); }
-	}
-
-	/// the grip randomness, as GDScript's RandomNumberGenerator looks to the game (the playground reseeds it per run)
-	public RngView _grip_rng => _rng ??= new RngView(this);
-	private RngView _rng;
-
-	public partial class RngView : RefCounted
-	{
-		private readonly BikePhysicsCs _o;
-		public RngView() { }
-		public RngView(BikePhysicsCs o) { _o = o; }
-		public long seed { get => _o.S._grip_rng.seed; set => _o.S._grip_rng.seed = value; }
-		public long state { get => (long)_o.S._grip_rng.State; set => _o.S._grip_rng.State = (ulong)value; }
-	}
-
-	public Transform3D crash_K = Transform3D.Identity;
-	public Transform3D crash_RK = Transform3D.Identity;
-
-	public GDict prof
-	{
-		get => _profGd;
-		set { _profGd = value; S.prof = value == null ? null : new Dictionary<string, long>(); }
-	}
-
-	// ---- the methods the game calls (bike_physics.gd's)
-	public void setup(GDict extras, GDict bike_cfg)
+	/// BikePhysics.setup's twin (the same extras / bike config)
+	public void Setup(GDict extras, GDict bike_cfg)
 	{
 		var ex = RideBridge.ToDict(extras);
 		var cfg = new GdDict { src = bike_cfg };
@@ -109,47 +53,108 @@ public partial class BikePhysicsCs : RefCounted
 		var mods = new GdDict();
 		if (bike_cfg.ContainsKey("mods"))
 		{
-			var md = bike_cfg["mods"].AsGodotDictionary();
-			foreach (var kv in md)
+			foreach (var kv in bike_cfg["mods"].AsGodotDictionary())
 			{
 				string k = kv.Key.AsString();
 				if (k == "cogs") mods.set(k, RideBridge.ToDoubles(kv.Value.AsGodotArray()));
-				else if (k == "susp") { _susSrc = kv.Value.AsGodotDictionary(); mods.set(k, RideBridge.Sus(_susSrc)); }
+				else if (k == "susp") mods.set(k, RideBridge.Sus(kv.Value.AsGodotDictionary()));
 				else mods.set(k, RideBridge.Plain(kv.Value));
 			}
 		}
 		cfg.set("mods", mods);
 		S.setup(ex, cfg);
-		if (S.sus.is_empty()) _susSrc = new GDict();
 	}
 
-	public void step(double dt, GDict inp)
+	/// one physics step of the GDScript BikePhysics `gd`, done here
+	public void Step(GodotObject gd, double dt, GDict inp)
 	{
-		RefreshTune();
+		_gd = gd;
+		if (_tuneDirty)
+		{
+			_tuneDirty = false;
+			LoadTune(gd.Get(S_T).AsGodotDictionary());
+		}
+		var pv = gd.Get(S_PROF);
+		var prof = pv.VariantType == Variant.Type.Dictionary ? pv.AsGodotDictionary() : null;
+		S.prof = prof == null ? null : (S.prof ?? new Dictionary<string, long>());
+		Pull();
 		_inp.v.Clear();
 		foreach (var kv in inp)
 		{
 			var v = kv.Value;
 			_inp.v[kv.Key.AsString()] = v.VariantType == Variant.Type.Bool ? (v.AsBool() ? 1.0 : 0.0) : (v.VariantType == Variant.Type.Int ? v.AsInt64() : v.AsDouble());
 		}
+		(_host.terrain as GodotGround)?.BeginStep();
+		_pushedAtFx = false;
+		long t0 = RidePerf.On ? RidePerf.Now : 0;
 		S.step(dt, _inp);
-		if (_profGd != null && S.prof != null)
+		if (RidePerf.On)
+		{
+			RidePerf.StepTicks += RidePerf.Now - t0; RidePerf.Steps++;
+			if (RidePerf.Steps >= 600) RidePerf.Report();
+		}
+		if (!_pushedAtFx || PROBES_AFTER_FX)
+			Push();
+		if (prof != null && S.prof != null)
 		{
 			foreach (var kv in S.prof)
-				_profGd[kv.Key] = (_profGd.TryGetValue(kv.Key, out var was) ? was.AsInt64() : 0) + kv.Value;
+				prof[kv.Key] = (prof.TryGetValue(kv.Key, out var was) ? was.AsInt64() : 0) + kv.Value;
 			S.prof.Clear();
 		}
 	}
 
-	public void reset_at(double px, double pz, double hd) => S.reset_at(px, pz, hd);
-	public void get_up() => S.get_up();
-	public void begin_crash() => S.begin_crash();
-	public bool shift(long d) => S.shift(d);
-	public double gear_k() => S.gear_k();
-	public void reset_body() => S.reset_body();
-	public bool is_sane() => S.is_sane();
-	public Vector3 fwd() => RideBridge.G(S.fwd());
-	public void flow_up() => S.flow_up();
+	private void LoadTune(GDict t)
+	{
+		var p = S.T;
+		p.v.Clear();
+		if (t != null)
+			foreach (var kv in t)
+			{
+				var v = kv.Value;
+				p.v[kv.Key.AsString()] = v.VariantType == Variant.Type.Int ? v.AsInt64() : (v.VariantType == Variant.Type.Bool ? (v.AsBool() ? 1.0 : 0.0) : v.AsDouble());
+			}
+		RideParams.global = p;
+	}
+
+	/// the GDScript object's state into the C# ride (before a step, after a game callback that may have changed it)
+	private void Pull()
+	{
+		long t0 = RidePerf.On ? RidePerf.Now : 0;
+		Unpack(_gd.Call(S_OUT).AsFloat64Array());
+		S.crash_pending = _gd.Get(S_PENDING).AsString();
+		var risk = _gd.Get(S_RISK).AsGodotDictionary();
+		if (risk.Count > 0 || S._risk.Count > 0)
+		{
+			S._risk.Clear();
+			foreach (var kv in risk) S._risk.set(kv.Key.AsString(), kv.Value.AsDouble());
+		}
+		var cb = _gd.Get(S_CBHIT).AsGodotArray();
+		if (cb.Count >= 2) { S._cb_hit[0] = cb[0].AsDouble(); S._cb_hit[1] = cb[1].AsDouble(); }
+		// the crashed-bike body (Game.start_crash makes it, inside the step: read again after every callback)
+		var cs = _gd.Get(S_CRASH).Obj as GodotObject;
+		if (cs != _crashSim)
+		{
+			_crashSim = cs;
+			S.crash_sim = cs == null ? null : new GodotCrashSim(cs);
+		}
+		if (cs != null)
+			_crashRK = _gd.Get(S_RK).AsTransform3D();
+		if (RidePerf.On) { RidePerf.MirrorTicks += RidePerf.Now - t0; RidePerf.Mirrors++; }
+	}
+
+	/// the C# ride's state into the GDScript object (after a step, before a game callback inside one)
+	private void Push()
+	{
+		long t0 = RidePerf.On ? RidePerf.Now : 0;
+		Pack(_buf);
+		_gd.Call(S_IN, _buf);
+		_gd.Set(S_PENDING, S.crash_pending);
+		var risk = new GDict();
+		foreach (var kv in S._risk) risk[kv.Key] = Gd.to_f(kv.Value);
+		_gd.Set(S_RISK, risk);
+		_gd.Set(S_CBHIT, new GArray { S._cb_hit[0], S._cb_hit[1] });
+		if (RidePerf.On) { RidePerf.MirrorTicks += RidePerf.Now - t0; RidePerf.Mirrors++; }
+	}
 
 	// ---------------------------------------------------------------- the host (the game) + the crash body step
 	private sealed class GameHost : GodotRideHost
@@ -163,6 +168,29 @@ public partial class BikePhysicsCs : RefCounted
 		public GameHost(BikePhysicsCs o, GodotObject game) : base(game) { _o = o; }
 
 		public override void log(string text) => GD.Print(text);
+
+		// the game's callbacks see the state as GDScript would have it at this point of the step, and may change it
+		private void Before() => _o.Push();
+		private void After() => _o.Pull();
+		public override void flash(string text) { Before(); base.flash(text); After(); }
+		public override bool smash(GdDict c, V3 vel, V3 pos) { Before(); bool r = base.smash(c, vel, pos); After(); return r; }
+		public override void rock_chips(GdDict c) { Before(); base.rock_chips(c); After(); }
+		public override void burst(V3 pos, long n, long surf, double power) { Before(); base.burst(pos, n, surf, power); After(); }
+		public override void start_crash(string reason) { Before(); base.start_crash(reason); After(); }
+		public override void begin_getup() { Before(); base.begin_getup(); After(); }
+		public override void on_style(long points, string text) { Before(); base.on_style(points, text); After(); }
+		public override void on_trick(string trick) { Before(); base.on_trick(trick); After(); }
+		public override void on_takeoff() { Before(); base.on_takeoff(); After(); }
+		public override void on_landing(double air_time, double impact) { Before(); base.on_landing(air_time, impact); After(); }
+		public override void on_bad_landing(double k) { Before(); base.on_bad_landing(k); After(); }
+		public override void flow_up() { Before(); base.flow_up(); After(); }
+		public override void ride_fx(double dt, V3 f, double va, bool in_water)
+		{
+			Before();
+			base.ride_fx(dt, f, va, in_water);
+			_o.S.chunk_acc = _o._gd.Get(S_CHUNK).AsDouble();   // (all the effects write back)
+			_o._pushedAtFx = true;
+		}
 
 		/// _crash_sim_step (when the crashed bike is a body), then the ragdoll part of _crash_step
 		public override void crash_body_step(BikeSim s, double dt, RideInput inp)
@@ -268,7 +296,7 @@ public partial class BikePhysicsCs : RefCounted
 					}
 				}
 			}
-			var root = sim.BodyAt(1.0f) * _o.crash_RK;
+			var root = sim.BodyAt(1.0f) * _o._crashRK;
 			var bx = root.Basis.X.Normalized();
 			s.x = root.Origin.X; s.y = root.Origin.Y; s.z = root.Origin.Z;
 			if (new Vector2(bx.X, bx.Z).Length() > 0.05f) s.heading = Gd.atan2(-bx.Z, bx.X);

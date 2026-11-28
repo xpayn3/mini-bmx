@@ -420,7 +420,7 @@ func update_hud(dt: float) -> void:
 		_power_t = maxf(_power_t, 0.0) + dt
 		if was < 0.35 and _power_t >= 0.35: beep.power_on()
 	if prof != null: _ht = _hp("warm_font", _ht)
-	var st = game.phys
+	var st: BikePhysics = game.phys
 	# frame times on real time (the SYSTEM page): FPS over half a second + the last FRAME_HIST frames
 	var now_us := Time.get_ticks_usec()
 	var fdt := (now_us - _frame_us) / 1000.0 if _frame_us > 0 else 16.7
@@ -496,7 +496,7 @@ func update_hud(dt: float) -> void:
 	air_card.tick(dt)
 	biome_l.text = game.biome_cur
 
-func _ride_stats(st, dt: float) -> void:
+func _ride_stats(st: BikePhysics, dt: float) -> void:
 	ride_t += dt
 	if not st.crash_on:
 		var ds := absf(st.v) * dt
@@ -506,7 +506,7 @@ func _ride_stats(st, dt: float) -> void:
 		if absf(st.v) > 0.5: moving_t += dt
 		max_v = maxf(max_v, absf(st.v))
 	if is_nan(_crank_last): _crank_last = st.crank
-	var dc = st.crank - _crank_last
+	var dc := st.crank - _crank_last
 	_crank_last = st.crank
 	var rpm := absf(dc) / maxf(dt, 1e-4) / TAU * 60.0 if (st.pedal > 0.15 and not st.air) else 0.0
 	cad += (minf(rpm, 150.0) - cad) * minf(1.0, dt * 3.0)
@@ -514,12 +514,12 @@ func _ride_stats(st, dt: float) -> void:
 	if not st.air and not st.crash_on and st.pedal > 0.05:
 		pw = 32.0 * maxf(0.0, st.a_pedal) * absf(st.v) + st.pedal * (30.0 + 5.0 * absf(st.v))
 	power += (minf(pw, 1100.0) - power) * minf(1.0, dt * 2.0)
-	var hr_t: float = 68.0 + 95.0 * clampf(power / 650.0, 0, 1) + 22.0 * st.sprint + 18.0 * (1.0 - st.stamina) \
+	var hr_t := 68.0 + 95.0 * clampf(power / 650.0, 0, 1) + 22.0 * st.sprint + 18.0 * (1.0 - st.stamina) \
 		+ 8.0 * clampf(absf(st.v) / 15.0, 0, 1) + (25.0 if st.crash_on else 0.0)
 	hr += (hr_t - hr) * minf(1.0, dt * 0.35)
 
 ## the bike computer's own beeps: satellites found, auto-pause / resume, auto lap, low battery
-func _computer_tones(st, dt: float) -> void:
+func _computer_tones(st: BikePhysics, dt: float) -> void:
 	_alert_beep_t = maxf(0.0, _alert_beep_t - dt)
 	if not visible or _power_t < 0.35: return
 	if not _gps_beeped and ride_t >= GaugeView.FIX_T:
@@ -553,7 +553,7 @@ func set_computer() -> void:
 	gauge.queue_redraw()
 
 ## where you are on the trail, and the next turn or feature ahead of you (the Garmin's alerts)
-func _trail_watch(st) -> void:
+func _trail_watch(st: BikePhysics) -> void:
 	if Env.s("BMX_ALERT_PROBE") != "" and ride_t > 1.0 and not _probed:
 		_probed = true
 		_probe_alerts()
@@ -713,7 +713,7 @@ class GaugeView extends Control:
 					accept_event()
 					return
 	func _draw() -> void:
-		var st = hud.game.phys
+		var st: BikePhysics = hud.game.phys
 		var f := UITheme.lcd_font()
 		light = maxf(0.0, light - get_process_delta_time())
 		if int(ComputerUnits.opt(GameState.computer_id, "light")) == 1: light = 3.0   # backlight: always on
@@ -814,7 +814,7 @@ class GaugeView extends Control:
 		y += 40
 		_pair(f, ink, scr_, x0, w, y, "MAX", hud.speed_text(hud.max_v), "ODO " + du, "%.1f" % (float(GameState.records.distance) / dk))
 	## EFFORT: heart rate (beating heart, zone), cadence, power, stamina, gear ratio
-	func _page_effort(st, f: Font, ink: Color, scr_: Rect2, x0: float, w: float) -> void:
+	func _page_effort(st: BikePhysics, f: Font, ink: Color, scr_: Rect2, x0: float, w: float) -> void:
 		var y := scr_.position.y + 28
 		_big(f, ink, x0, w, y, "HEART", "bpm", "%d" % roundi(hud.hr))
 		var beat := pow(maxf(0.0, sin(hud.ride_t * hud.hr / 60.0 * TAU)), 8.0)
@@ -963,7 +963,7 @@ class GaugeView extends Control:
 		for j in np:
 			var r := Rect2(strip.position.x + j * (sw + gap), strip.position.y + 1, sw, 3)
 			draw_rect(r, Color("111417") if j == page else Color(0.07, 0.08, 0.09, 0.18))
-	func _page_ride(st, f: Font, ink: Color, scr: Rect2, x0: float, w: float) -> void:
+	func _page_ride(st: BikePhysics, f: Font, ink: Color, scr: Rect2, x0: float, w: float) -> void:
 		var y := scr.position.y + 28
 		draw_string(f, Vector2(x0, y), "SPEED", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(ink, 0.6))
 		draw_string(f, Vector2(x0, y), hud.speed_unit(), HORIZONTAL_ALIGNMENT_RIGHT, w, 9, Color(ink, 0.7))
@@ -984,14 +984,14 @@ class GaugeView extends Control:
 			draw_line(Vector2(scr.position.x, y), Vector2(scr.end.x, y), Color(ink, 0.22))
 			_gear_row(st, f, ink, x0, y, w, scr.end.y)
 	## page 3: the map screen is its own clipped control (MapView) laid over the LCD
-	func _page_map(_st, _f: Font, _ink: Color, scr: Rect2, _x0: float, _w: float) -> void:
+	func _page_map(_st: BikePhysics, _f: Font, _ink: Color, scr: Rect2, _x0: float, _w: float) -> void:
 		var area := Rect2(scr.position.x, scr.position.y + 14, scr.size.x, scr.size.y - 14)
 		if map_v.position != area.position or map_v.size != area.size:
 			map_v.position = area.position; map_v.size = area.size
 		map_v.queue_redraw()
 	## elevation now, climbed / descended this ride; the profile: the last 30 s, then the trail ahead
 	## (next 400 m, coloured by how steep it is, like ClimbPro)
-	func _page_elev(st, f: Font, ink: Color, scr_: Rect2, x0: float, w: float) -> void:
+	func _page_elev(st: BikePhysics, f: Font, ink: Color, scr_: Rect2, x0: float, w: float) -> void:
 		var y := scr_.position.y + 28
 		_big(f, ink, x0, w, y, "ELEV", "m", "%d" % roundi(st.y))
 		y += 46
@@ -1007,8 +1007,8 @@ class GaugeView extends Control:
 			for m in range(0, 404, 4):
 				var q := mini(tc.n - 1, ti + int(m / TrailCourse.STEP))
 				ahead.append(tc.E[q] + off)
-		var lo: float = st.y
-		var hi: float = st.y
+		var lo := st.y
+		var hi := st.y
 		for e in hist: lo = minf(lo, e); hi = maxf(hi, e)
 		for e in ahead: lo = minf(lo, e); hi = maxf(hi, e)
 		hi = maxf(hi, lo + 4)
@@ -1037,7 +1037,7 @@ class GaugeView extends Control:
 			draw_colored_polygon(PackedVector2Array([Vector2(split - 3, gt - 4), Vector2(split + 3, gt - 4), Vector2(split, gt)]), ink)
 	## GEAR n | the cassette side-on, chain on the dark cog | teeth (LCD ink, no colour)
 	## the shifter: fills the rest of the screen below y (to y1), digit | cassette | teeth centred in it
-	func _gear_row(st, f: Font, ink: Color, x0: float, y: float, w: float, y1: float) -> void:
+	func _gear_row(st: BikePhysics, f: Font, ink: Color, x0: float, y: float, w: float, y1: float) -> void:
 		draw_string(f, Vector2(x0, y + 12), "GEAR", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(ink, 0.6))
 		var top := y + 15.0
 		var bot := y1 - 4.0
@@ -1046,7 +1046,7 @@ class GaugeView extends Control:
 			draw_string(f, Vector2(x0, mid + 9), "1", HORIZONTAL_ALIGNMENT_LEFT, -1, 26, ink)
 			draw_string(f, Vector2(x0, mid + 4), "SINGLE", HORIZONTAL_ALIGNMENT_RIGHT, w, 11, Color(ink, 0.7))
 			return
-		var n = st.cogs.size()
+		var n := st.cogs.size()
 		draw_string(f, Vector2(x0, y + 12), "%d/%d" % [st.gear + 1, n], HORIZONTAL_ALIGNMENT_RIGHT, w, 9, Color(ink, 0.6))
 		# the gear digit, inverted for a moment after a shift
 		var d := str(st.gear + 1)
@@ -1066,12 +1066,12 @@ class GaugeView extends Control:
 		var big: float = st.cogs[n - 1]
 		for j in n:
 			var gi: int = n - 1 - j
-			var on = gi == st.gear
+			var on := gi == st.gear
 			var hgt: float = st.cogs[gi] / big * hmax
 			var bw := step - 2.0 if on else step - 3.0
 			draw_rect(Rect2(cx + j * step, mid - hgt / 2, maxf(1.5, bw), hgt), ink if on else Color(ink, 0.3))
 			if on:
-				var px = cx + j * step + bw / 2
+				var px := cx + j * step + bw / 2
 				draw_colored_polygon(PackedVector2Array([Vector2(px - 3.5, mid - hgt / 2 - 7), Vector2(px + 3.5, mid - hgt / 2 - 7), Vector2(px, mid - hgt / 2 - 2)]), ink)
 		draw_string(f, Vector2(x0, mid + 5), "%dT" % st.cogs[st.gear], HORIZONTAL_ALIGNMENT_RIGHT, w, 13, ink)
 
@@ -1096,7 +1096,7 @@ class MapView extends Control:
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
 	func _process(_dt: float) -> void:
 		if not visible: return
-		var st = hud.game.phys
+		var st: BikePhysics = hud.game.phys
 		var p := Vector2(st.x, st.z)
 		if _row < 0 and p.distance_to(_at) > 40.0:
 			_bc = p.snapped(Vector2(STEP, STEP)); _bh.resize(N * N); _row = 0
@@ -1132,7 +1132,7 @@ class MapView extends Control:
 						dst.append(pts[q]); dst.append(pts[q + 1])
 					lv += CI
 	func _draw() -> void:
-		var st = hud.game.phys
+		var st: BikePhysics = hud.game.phys
 		var ink := Color("111417")
 		var k := size.x / MAP_M
 		var me := Vector2(size.x * 0.5, size.y * 0.66)
@@ -1198,11 +1198,11 @@ class StaminaView extends Control:
 		UITheme.draw_box(ci, r, c, int(r.size.y * 0.5), Tokens.CLEAR, 0, square_end)
 
 	func _draw() -> void:
-		var st = hud.game.phys
+		var st: BikePhysics = hud.game.phys
 		var val: float = hud.life if life else st.stamina
-		var tired = st.tired and not life
-		var sprinting = st.sprint > 0.5 and not life
-		var low = val < 0.25 and not tired
+		var tired := st.tired and not life
+		var sprinting := st.sprint > 0.5 and not life
+		var low := val < 0.25 and not tired
 		var col := Color("ff4d5e") if life else Color("4fd1ff")
 		if tired: col = Color("8d979c")
 		elif low and not life: col = Color("ff8a2a")
@@ -1279,7 +1279,7 @@ class GetUpPrompt extends Control:
 	var dizzy := false
 
 	func tick(dt: float) -> void:
-		var st = hud.game.phys
+		var st: BikePhysics = hud.game.phys
 		t += dt
 		var ga = hud.game.getup_anim
 		var dz: bool = st.crash_on and ga is ClipGetUp and ga.dizzy() and ga.t > 0.8   # standing dizzy: press hop to ride on
@@ -1363,7 +1363,7 @@ class FlowLeds extends RefCounted:
 	var top_b := PackedFloat32Array()    # per-LED brightness (LEDs switch fast, not instantly)
 	var side_b := PackedFloat32Array()
 
-	func tick(st, dt: float) -> void:
+	func tick(st: BikePhysics, dt: float) -> void:
 		t += dt
 		new_t += dt
 		# tests: BMX_FLOW_DEMO=1 adds a flow level every 0.9 s from 3 s until MAX, then lets it drain
@@ -1538,7 +1538,7 @@ class HopBar extends Control:
 	var sweet := false    # the preload is on its rebound: pop now for all of it
 	var pop_pct := 0      # the pop that just went: its share of a full leg push
 
-	func tick(st, dt: float) -> void:
+	func tick(st: BikePhysics, dt: float) -> void:
 		var show: bool = st.hop_bar_show and st.pump_press_t < 0.25 and not st.crash_on   # a press pumping a downhill won't hop
 		if _was and not show and _last_k > 0.15 and (st.hop_t > 0.0 or st.kick_t > 0.0 or st.air or st.pop_wait > 0.0):
 			fire = 1.0; pop_pct = roundi(100.0 * minf(1.15, maxf(st.pop_q, st.pop_wait)))
@@ -1587,7 +1587,7 @@ class PumpBar extends Control:
 	var gain_s := 0.0
 	var t := 0.0
 
-	func tick(st, dt: float) -> void:
+	func tick(st: BikePhysics, dt: float) -> void:
 		var live: bool = not st.air and (st.pump_on or absf(st.pump_gain) > 0.6)
 		a = move_toward(a, 1.0 if (live and not st.crash_on) else 0.0, dt * (12.0 if live else 2.0))
 		var full := 4.0   # m/s²: a good stroke into a roller's dip = a full half
@@ -1630,9 +1630,9 @@ class BalanceMeter extends Control:
 	var t := 0.0
 	var nose := false   # showing the nose manual / stoppie (the same balance, on the front wheel)
 
-	func tick(st, dt: float) -> void:
-		var n_up = (st.nose_a > 0.04 or st.nose_push > 0.0) and not st.crash_on and not st.air
-		var up = ((st.man_a > 0.04 or st.man_pull > 0.0) and not st.crash_on and not st.air) or n_up
+	func tick(st: BikePhysics, dt: float) -> void:
+		var n_up := (st.nose_a > 0.04 or st.nose_push > 0.0) and not st.crash_on and not st.air
+		var up := ((st.man_a > 0.04 or st.man_pull > 0.0) and not st.crash_on and not st.air) or n_up
 		if up: nose = n_up
 		a = move_toward(a, 1.0 if up else 0.0, dt * (16.0 if up else 4.0))
 		ang_s = lerpf(ang_s, st.nose_a if nose else st.man_a, minf(1.0, dt * 40.0))
@@ -1645,7 +1645,7 @@ class BalanceMeter extends Control:
 		if visible: queue_redraw()
 
 	func _draw() -> void:
-		var st = hud.game.phys
+		var st: BikePhysics = hud.game.phys
 		var T := Tune.v
 		var b: float = float(T.get("noseBalance", 0.5)) if nose else float(T.get("manBalance", 0.55))
 		var loop_at: float = b + (float(T.get("noseLoop", 0.4)) if nose else float(T.get("manLoop", 0.42)))
@@ -1711,7 +1711,7 @@ class AirCard extends Control:
 			bailed = true; hold = HOLD
 		flying = false
 	func tick(dt: float) -> void:
-		var st = hud.game.phys
+		var st: BikePhysics = hud.game.phys
 		if flying:
 			air = st.air_time
 			var tk: Vector3 = hud.game.takeoff

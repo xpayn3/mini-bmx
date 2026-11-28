@@ -63,6 +63,7 @@ public partial class BikeLockstep : RefCounted
 		_host.Answers.Clear();
 		foreach (var a in answers) _host.Answers.Enqueue(a.AsBool());
 		string err = null;
+		(_host.terrain as GodotGround)?.BeginStep();
 		try { _s.step(dt, _inp); }
 		catch (Exception e) { err = e.GetType().Name + ": " + e.Message + " @ " + e.StackTrace?.Split('\n').FirstOrDefault(l => l.Contains("BikeSim"))?.Trim(); }
 		var bad = new List<string>();

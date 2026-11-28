@@ -1256,6 +1256,26 @@
    "void",
    [],
    false
+  ],
+  "_cs_setup": [
+   "void",
+   [
+    "GdDict",
+    "GdDict"
+   ],
+   false
+  ],
+  "_cs_out": [
+   "double[]",
+   [],
+   false
+  ],
+  "_cs_in": [
+   "void",
+   [
+    "double[]"
+   ],
+   false
   ]
  }
 }
