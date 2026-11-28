@@ -27,6 +27,8 @@ varying float v_trans;
 // > 0: the leaf picture covers this many metres of foliage, and each card repeats it by its real size (COLOR.a = the
 // card's size in mesh units x the instance's scale), so leaves keep their real size on crowns of any size (leafy trees)
 uniform float tile_m = 0.0;
+// a flat billboard card (scanned plants' far LOD, ScanPlants): turned about the plant's vertical axis to face the camera
+uniform bool face_cam = false;
 varying flat float v_tile;
 varying vec3 v_col;
 varying flat vec3 v_origin;
@@ -36,6 +38,18 @@ global uniform vec4 cam_see;
 global uniform vec4 cam_eye;
 
 void vertex() {
+	if (face_cam) {
+		vec3 o = MODEL_MATRIX[3].xyz;
+		vec3 ax = MODEL_MATRIX[0].xyz;   // the card's width axis (x) in the world, with the instance's scale
+		vec3 d = VERTEX - o;
+		float lx = dot(d, normalize(ax));
+		vec3 tc = CAMERA_POSITION_WORLD - o;
+		tc.y = 0.0;
+		tc = length(tc) > 0.001 ? normalize(tc) : vec3(0.0, 0.0, 1.0);
+		vec3 right = vec3(tc.z, 0.0, -tc.x);
+		VERTEX = o + right * lx + vec3(0.0, d.y, 0.0);
+		NORMAL = normalize(tc + vec3(0.0, 0.35, 0.0));
+	}
 	v_col = albedo * COLOR.rgb * INSTANCE_CUSTOM.rgb;
 	v_snow = clamp(-INSTANCE_CUSTOM.a, 0.0, 1.0);
 	v_tile = tile_m > 0.0 ? max(1.0, round(COLOR.a * length(MODEL_MATRIX[0].xyz) / tile_m)) : 1.0;

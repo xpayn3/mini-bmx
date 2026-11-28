@@ -11,3 +11,7 @@ obj/
 # Made locally by root tools/make_tree_cards.py from the downloaded atlas; a clone without them uses leaf_cluster.png.
 assets/textures/tree_cards/leaf_beech*.png
 assets/textures/tree_cards/leaf_beech*.png.import
+
+# Megascans plants (Fab Standard licence: may ship in the game, the files may not be redistributed; the repo is public).
+# Made locally by root tools/make_scan_plants.py + tools/pack_scan_plant_textures.py; without them the card bushes stay.
+assets/plants_scan/
