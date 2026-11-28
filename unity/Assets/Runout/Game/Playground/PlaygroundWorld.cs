@@ -346,7 +346,7 @@ namespace Runout.Game
     public sealed class PlaygroundGround : IGround
     {
         readonly PlaygroundCourse _c;
-        readonly List<GdDict> _near = new List<GdDict>();
+        static readonly List<GdDict> NONE = new List<GdDict>();
         public PlaygroundGround(PlaygroundCourse c) { _c = c; }
 
         public double height(double x, double z) => _c.height_rocks(x, z);
@@ -360,10 +360,13 @@ namespace Runout.Game
         }
         public double jump_mask(double x, double z) => _c.jump_mask(x, z);
 
+        /// a fresh list when there are rocks (the ride may look again while it walks one), a shared empty one otherwise
         public List<GdDict> colliders_near(double x, double z)
         {
-            _near.Clear();
-            foreach (var r in _c.rocks_near(x, z))
+            var rocks = _c.rocks_near(x, z);
+            if (rocks.Count == 0) return NONE;
+            var _near = new List<GdDict>(rocks.Count);
+            foreach (var r in rocks)
             {
                 var d = new GdDict { id = "rock" + r.x.ToString("R") + "," + r.z.ToString("R") };
                 d["x"] = r.x; d["z"] = r.z; d["r"] = r.r; d["top"] = r.top; d["base"] = r.@base; d["sink"] = r.sink;

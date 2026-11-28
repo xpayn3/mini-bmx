@@ -5689,11 +5689,17 @@ namespace Runout.Sim
 			}
 		}
 
+		private readonly List<string> _risk_keys = new List<string>();
+
 		private void _risk_settle(double dt)
 		{
 			if (air)   // (the ground-only checks don't run in the air: their meters drain there)
 			{
-				foreach (var k in _risk.Keys)
+				// (over a copy of the keys: writing a value while walking a Dictionary's keys throws on Unity's Mono runtime,
+				// .NET 8 allows it. Same order, same result)
+				_risk_keys.Clear();
+				_risk_keys.AddRange(_risk.Keys);
+				foreach (var k in _risk_keys)
 				{
 					_risk.set(k, maxf(0.0, Gd.to_f(_risk.get_o(k, null)) - dt * T.get("riderSave", 1.2)));
 				}
