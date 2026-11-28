@@ -84,7 +84,7 @@ namespace Runout.Game
             _lean_c = _mcap("bike_lean", (float)st.bike_lean, mdt);
             _steer_c = _mcap("steer", _bar_draw(st, mdt, dab_lean) + (float)st.bar_catch, mdt);
             rig.pose(drawn_pos.x, y_draw, drawn_pos.z, hd, p_draw, (float)st.hop_nose,
-                _lean_c + (float)st.rock + wobble + dab_lean, _steer_c - wobble * 1.5f, (float)st.wheel_f, (float)st.wheel_r, (float)st.crank);
+                _lean_c + (float)st.rock + wobble + dab_lean, _steer_c - wobble * 1.5f + (rider != null ? (float)rider.clips.barSteer : 0f), (float)st.wheel_f, (float)st.wheel_r, (float)st.crank);
             // the drawn bike moved so the axle carrying it is where the physics has it (back wheel / nose / both / in the air)
             if (!st.crash_on && rig.wheel_f != null && rig.wheel_r != null)
             {

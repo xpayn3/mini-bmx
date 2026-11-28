@@ -131,13 +131,27 @@ namespace Runout.Game
 
         // ---- fingers: WHEN they grip / rest on the lever / squeeze = ours (RiderFingers); HOW = Unity muscles ----
         public readonly RiderFingers fingers = new RiderFingers();
+        public readonly PoseClips clips = new PoseClips();
+
+        /// a rider-space point / direction to the Unity world: through the clips' bike-under-body turn (Godot set the rider
+        /// node to clips.riderXf in lean space), then the bike's lean frame
+        Vector3 RP(Vec3 p)
+        {
+            if (clips.underBody) p = clips.riderXf.b * p + clips.riderXf.o;
+            return GodotSpace.W(rig.LeanToWorld(U(p)));
+        }
+        Vector3 RD(Vec3 d)
+        {
+            if (clips.underBody) d = clips.riderXf.b * d;
+            return GodotSpace.W(rig.ModelRot * U(d));
+        }
         /// The model's proportions are not the solver's: after the retarget its own arms and legs are bent (two-bone IK,
         /// the hands' / feet's rotation kept) so the contact points are exactly where Godot puts them: the middle
         /// finger's knuckle on the grip where GloveFingers has it (on a circle of GRIP_R round the bar, KNUCKLE_ANG up the
         /// front), the ankles where the solver's feet are
         void ContactIK(Quaternion frame)
         {
-            Vector3 ToWorld(Vec3 riderPos) => GodotSpace.W(rig.LeanToWorld(U(riderPos)));
+            Vector3 ToWorld(Vec3 riderPos) => RP(riderPos);
             for (int i = 0; i < 2; i++)
             {
                 string sd = i == 0 ? "Left" : "Right";
@@ -176,9 +190,9 @@ namespace Runout.Game
                 Xf hand = i == 0 ? pose.handL : pose.handR;
                 // the fingers go across the REAL grip (its measured axis: swept / angled bars), back of the hand up
                 Vector3 axis = frame * GodotSpace.W(rig.GripAxis(i));
-                Vector3 fw = frame * GodotSpace.W(U(hand.b.x));
+                Vector3 fw = RD(hand.b.x);
                 fw = (fw - axis * Vector3.Dot(fw, axis)).normalized;
-                Vector3 up = frame * GodotSpace.W(U(hand.b.y));
+                Vector3 up = RD(hand.b.y);
                 up = (up - axis * Vector3.Dot(up, axis) - fw * Vector3.Dot(up, fw)).normalized;
                 Quaternion want = Quaternion.LookRotation(fw, up);
                 Quaternion rest = Quaternion.LookRotation(_handFwdL[i], _handUpL[i]);
@@ -517,8 +531,15 @@ namespace Runout.Game
             pi["wheelY"] = rig.wheel_f != null && rig.wheel_r != null ? (double)((GodotSpace.WorldPos(rig.wheel_f).y + GodotSpace.WorldPos(rig.wheel_r).y) * 0.5f) : 0.0;
             pi["turn"] = (double)_turn_s;
             pi["pedalTop"] = (double)rig.pedal_top;
+            // the Pose Lab clips (Godot's authored style layers: whip, tabletop, scrub, flip tucks, manual, stoppie), on by
+            // default as in Godot; they may turn the bike under the body (clips.riderXf, drawn through RP / RD)
+            clips.SetCrankPivot(rig.crank_n != null ? V(rig.LeanLocal(GodotSpace.WorldPos(rig.crank_n))) : new Vec3(0, 0.3, 0));
+            clips.Apply(dt, st, pi);
             pose.update_pose(dt, pi);
-            fingers.update(dt, false, st.brake_f, st.brake_r, (double)pi["landFold"]);
+            var pkd = pi.TryGetValue("pk", out object pko) ? pko as Dictionary<string, double> : null;
+            double pkGrip = 0, pkPull = 0;
+            if (pkd != null) { pkd.TryGetValue("grip", out pkGrip); pkd.TryGetValue("lever_pull", out pkPull); }
+            fingers.update(dt, false, st.brake_f, st.brake_r, (double)pi["landFold"], pkGrip, pkPull);
             // the pedals turn with the feet (ankling): flat pedals tip under the shoe, about their axle (Godot game.gd)
             rig.pose_pedals((float)st.crank, (float)pose.foot_pitch[0], (float)pose.foot_pitch[1]);
             Retarget();
@@ -545,8 +566,8 @@ namespace Runout.Game
             // from the model's own rest axes (its T-pose: forward +Z, up +Y in the root's space). Arms / legs are IK on
             // the model's own bones; clavicles, toes, eyes, jaw stay at rest. Everything from rest each frame (no drift)
             foreach (var b in _bones) b.t.localRotation = RestLocal(b.t);
-            Vector3 Dir(Vec3 v) => frame * GodotSpace.W(U(v));
-            Vector3 P(Vec3 v) => GodotSpace.W(rig.LeanToWorld(U(v)));
+            Vector3 Dir(Vec3 v) => RD(v);
+            Vector3 P(Vec3 v) => RP(v);
             Transform hips = character.GetBoneTransform(HumanBodyBones.Hips);
             if (hips != null) hips.position = P(pose.J[2]);
             Face(HumanBodyBones.Hips, Dir(pose.pelvis_xf.b.x), Dir(pose.pelvis_xf.b.y));

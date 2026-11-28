@@ -19,6 +19,7 @@ namespace Runout.Sim.Tests
             RiderSmoke();
             _fail += CrashBikeSmoke.Run(System.IO.Path.GetFullPath(System.IO.Path.Combine(RefDir(), "..", "..")));
             RagdollSmoke();
+            PoseClipsSmoke();
             // the bike physics port vs the Godot reference traces (godot/tools/port_trace.tscn -> SimTests/ref)
             int diff = TraceCompare.Run(RefDir(), Environment.GetEnvironmentVariable("TRACE_DETAIL") == "1");
             if (diff > 0) { Console.WriteLine($"FAIL trace_compare {diff} run(s) drift from Godot"); _fail += diff; }
@@ -52,6 +53,51 @@ namespace Runout.Sim.Tests
             catch (Exception e) { err = e.GetType().Name + ": " + e.Message + " @ " + e.StackTrace?.Split('\n')[0]; }
             Check("bike_smoke", err == null && vmax > 4.0 && Math.Abs(p.v) < 1.0 && !double.IsNaN(p.x),
                 err ?? $"vmax {vmax * 3.6:0.0} km/h, after braking {p.v * 3.6:0.0} km/h, x {p.x:0.0} m, crashed {p.crash_on}");
+        }
+
+        /// the Pose Lab clips (Assets/Runout/Rider/PoseClips.cs, port of PoseKeys + game.gd _clips_mix): a scripted jump
+        /// (ground, preload, pop, air with a whip, reach, landing fold, then a manual); every clip's weight 4x a second, no NaN
+        static void PoseClipsSmoke()
+        {
+            var h = new TraceCompare.Host();
+            var st = new BikeSim(h) { T = new Tune().fill(new RideParams()) }; h.phys = st;
+            var pc = new Runout.Rider.PoseClips();
+            pc.SetCrankPivot(new Runout.Rider.Vec3(0.0, 0.3, 0.0));
+            var pi = new Runout.Rider.PoseInput();
+            string err = null; int bad = 0; double maxAbs = 0; var log = new System.Text.StringBuilder();
+            double dt = 1.0 / 60.0;
+            try
+            {
+                for (int f = 0; f < 240; f++)
+                {
+                    double t = f * dt;
+                    pi.Clear();
+                    pi["handL"] = new Runout.Rider.Vec3(0.44, 0.97, -0.39); pi["handR"] = new Runout.Rider.Vec3(0.44, 0.97, 0.39);
+                    st.air = t >= 1.1 && t < 2.1;
+                    st.prep = t >= 0.5 && t < 1.1 ? (t - 0.5) / 0.6 : 0.0;
+                    pi["preload"] = st.prep * 0.8;
+                    pi["popFx"] = t >= 1.0 && t < 1.4 ? 1.0 - (t - 1.0) / 0.4 : 0.0;
+                    st._land_t = st.air ? 2.1 - t : 0.0;
+                    st.land_prep = st.air && t > 1.8 ? (t - 1.8) / 0.3 : 0.0;
+                    st.land_reach = 1.0;
+                    pi["airWhip"] = st.air && t > 1.3 && t < 1.9 ? 0.8 : 0.0;
+                    pi["bodyLat"] = 0.0;
+                    pi["landFold"] = t >= 2.1 && t < 2.6 ? 1.0 - (t - 2.1) / 0.5 : 0.0;
+                    st.man_a = t >= 3.0 && t < 3.6 ? 0.4 : 0.0;
+                    pc.Apply(dt, st, pi);
+                    var pk = pi["pk"] as Dictionary<string, double>;
+                    foreach (var kv in pk) { if (double.IsNaN(kv.Value) || double.IsInfinity(kv.Value)) bad++; maxAbs = Math.Max(maxAbs, Math.Abs(kv.Value)); }
+                    foreach (var c in pc.clips) if (double.IsNaN(c.w)) bad++;
+                    if (f % 15 == 0)
+                    {
+                        log.Append($"\n   t {t:0.00} pose_t {pc.pose_t:0.00}:");
+                        foreach (var c in pc.clips) if (c.w > 0.005) log.Append($" {c.name}={c.w:0.00}");
+                        if (pc.underBody) log.Append(" [bike under body]");
+                    }
+                }
+            }
+            catch (Exception e) { err = e.GetType().Name + ": " + e.Message + " @ " + e.StackTrace?.Split('\n')[0]; }
+            Check("poseclips_smoke", err == null && bad == 0, err ?? $"NaN {bad}, largest offset {maxAbs:0.000}{log}");
         }
 
         /// the rider pose solver (Assets/Runout/Rider, port of rider.gd update_pose): a DH rider pedalling at 8 m/s for 300
