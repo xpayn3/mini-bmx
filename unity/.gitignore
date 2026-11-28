@@ -1,0 +1,32 @@
+# Unity generated
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Mm]emoryCaptures/
+/[Rr]ecordings/
+*.csproj
+*.sln
+*.slnx
+*.suo
+*.user
+*.pidb
+*.booproj
+.vs/
+.idea/
+.vscode/
+*.unityproj
+crashlytics-buildid.txt
+
+# The dotnet test harness (built outside Unity)
+/SimTests/bin/
+/SimTests/obj/
+!/SimTests/Runout.Sim.Tests.csproj
+
+# Licensed scans that may not be redistributed (public repo): kept locally only
+/Assets/Runout/Art/Plants/
+/Assets/Runout/Art/Plants.meta
+/Assets/Runout/Art/Textures/tree_cards/leaf_beech*

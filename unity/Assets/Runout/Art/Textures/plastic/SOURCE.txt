@@ -1,0 +1,5 @@
+ambientCG (https://ambientcg.com), CC0 1.0 - no attribution required.
+p012a_* = Plastic012A (4K JPG): textured black plastic (action cam bodies, silicone sleeve)
+p018a_* = Plastic018A (4K JPG): grey plastic (mounts, buckles)
+p006_*  = Plastic006  (4K JPG): smooth shiny black plastic (bezels, trim, buttons)
+Colour + roughness copied as-is, NormalGL re-encoded at JPEG q92. Used by scripts/bike/plastic_finish.gd.

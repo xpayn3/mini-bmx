@@ -1,0 +1,1 @@
+ski_goggle.*: the "Ski Goggle" model + textures the user supplied (Downloads/Ski Goggle.zip, 2026-11-19). Alpha baked into the albedo; one of six identical OBJ copies.

@@ -4,7 +4,8 @@ Downhill & BMX riding on endless procedural trails: a native PC game made in **G
 
 | Folder | What |
 |---|---|
-| `godot/` | **The game.** Open or run it from here; see [godot/README.md](godot/README.md) and the full project guide [godot/HANDOFF.md](godot/HANDOFF.md). |
+| `unity/` | **The Unity port** (Unity 6.3 LTS, HDRP), in progress: see [unity/PORTING.md](unity/PORTING.md). |
+| `godot/` | The original Godot game, the reference for the port; see [godot/README.md](godot/README.md) and [godot/HANDOFF.md](godot/HANDOFF.md). |
 | `tools/` | Houdini exporters: `export_bmx.py`, `export_dh.py` and `export_helmet.py` write the bike and helmet models into `godot/assets/`. |
 
 Run the game:

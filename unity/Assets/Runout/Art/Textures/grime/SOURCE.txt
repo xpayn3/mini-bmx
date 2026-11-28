@@ -1,0 +1,4 @@
+SurfaceImperfections008 (2K JPG: NormalGL used as is; Color/Opacity baked into grime_dirt.jpg,
+a brown-grey multiply map: white = clean)
+ambientCG - https://ambientcg.com/a/SurfaceImperfections008
+Licence: CC0 1.0 Universal (public domain), no credit needed.

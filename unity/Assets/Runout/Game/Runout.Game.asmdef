@@ -1,0 +1,25 @@
+{
+    "name": "Runout.Game",
+    "rootNamespace": "Runout.Game",
+    "references": [
+        "Runout.Sim",
+        "Unity.InputSystem",
+        "Unity.Mathematics",
+        "Unity.Burst",
+        "Unity.Collections",
+        "Unity.Animation.Rigging",
+        "Unity.Cinemachine",
+        "Unity.RenderPipelines.Core.Runtime",
+        "Unity.RenderPipelines.HighDefinition.Runtime",
+        "glTFast"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

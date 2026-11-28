@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Builds the engine plug (Assets/Runout/Sim) outside Unity, for fast headless physics tests
+       (the Godot slope_stress / playground-suite role). LangVersion 9 = what Unity 6 compiles, so code that
+       builds here builds in Unity. Run: dotnet run - -project unity/SimTests -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <RootNamespace>Runout.Sim.Tests</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../Assets/Runout/Sim/**/*.cs" />
+    <Compile Include="*.cs" />
+  </ItemGroup>
+</Project>
