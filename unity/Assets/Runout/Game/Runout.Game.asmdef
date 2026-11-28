@@ -3,6 +3,7 @@
     "rootNamespace": "Runout.Game",
     "references": [
         "Runout.Sim",
+        "Runout.Config",
         "Unity.InputSystem",
         "Unity.Mathematics",
         "Unity.Burst",

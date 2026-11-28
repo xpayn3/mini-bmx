@@ -1,4 +1,4 @@
-"""Regenerate unity/Assets/Runout/Sim/Bike/TuneDefs.g.cs from godot/scripts/core/tune.gd (run from the repo root)."""
+"""Regenerate unity/Assets/Runout/Config/TuneDefs.g.cs from godot/scripts/core/tune.gd (run from the repo root)."""
 import re
 
 src = open('godot/scripts/core/tune.gd', encoding='utf-8').read()
@@ -15,7 +15,7 @@ def f(v):
 
 out = ['// GENERATED from godot/scripts/core/tune.gd DEFS by unity/Tools/gen_tune_defs.py. Do not edit by hand.',
        '// Row = group, key, label, default, min, max, step, unit.',
-       'namespace Runout.Sim', '{', '    public static partial class TuneDefs', '    {',
+       'namespace Runout.Config', '{', '    public static partial class TuneDefs', '    {',
        '        public static readonly TuneRow[] Rows =', '        {']
 group, n = None, 0
 for ln in body.split('\n'):
@@ -32,5 +32,5 @@ for ln in body.split('\n'):
     elif s.startswith('["') and not s.endswith('['):
         print('UNPARSED', s[:110])
 out += ['        };', '    }', '}', '']
-open('unity/Assets/Runout/Sim/Bike/TuneDefs.g.cs', 'w', encoding='utf-8').write('\n'.join(out))
+open('unity/Assets/Runout/Config/TuneDefs.g.cs', 'w', encoding='utf-8').write('\n'.join(out))
 print(n, 'rows')

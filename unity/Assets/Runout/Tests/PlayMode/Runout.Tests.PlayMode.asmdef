@@ -3,6 +3,7 @@
     "rootNamespace": "Runout.Tests",
     "references": [
         "Runout.Sim",
+        "Runout.Config",
         "Runout.Game",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"

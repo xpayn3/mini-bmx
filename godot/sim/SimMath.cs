@@ -45,7 +45,7 @@ namespace Runout.Sim
 				if (n > 0)
 					f *= n;
 				IFH[n] = 1.0 / f;
-				IFL[n] = Math.FusedMultiplyAdd(-IFH[n], f, 1.0) / f;
+				IFL[n] = SimCompat.Fma(-IFH[n], f, 1.0) / f;
 			}
 		}
 
@@ -60,7 +60,7 @@ namespace Runout.Sim
 		private static void Mul(double ah, double al, double bh, double bl, out double h, out double l)
 		{
 			double p = ah * bh;
-			double e = Math.FusedMultiplyAdd(ah, bh, -p) + (ah * bl + al * bh);
+			double e = SimCompat.Fma(ah, bh, -p) + (ah * bl + al * bh);
 			h = p + e;
 			l = e - (h - p);
 		}
@@ -106,7 +106,7 @@ namespace Runout.Sim
 				return hi;
 			long bits = BitConverter.DoubleToInt64Bits(hi);
 			double ah = Math.Abs(hi);
-			double U = Math.BitIncrement(ah) - ah;
+			double U = SimCompat.BitIncrement(ah) - ah;
 			if ((bits & 0xFFFFFFFFFFFFFL) == 0 && (lo < 0) != (hi < 0))
 			{
 				// just below a power of two: the grid there is twice as fine and can only tie back to hi (even)
@@ -120,7 +120,7 @@ namespace Runout.Sim
 				return hi;
 			if ((bits & 1) == 0)
 				return hi;
-			return lo > 0 ? Math.BitIncrement(hi) : Math.BitDecrement(hi);
+			return lo > 0 ? SimCompat.BitIncrement(hi) : SimCompat.BitDecrement(hi);
 		}
 
 		/// how each function is computed (index F_*), from tools/sim_math_probe.gd (2026-11-28, Godot 4.7.2 Windows):
@@ -151,7 +151,7 @@ namespace Runout.Sim
 			h = hi; l = 0.0;
 			if (lo == 0.0 || double.IsNaN(lo) || double.IsInfinity(hi))
 				return;
-			double U = Math.BitIncrement(Math.Abs(hi)) - Math.Abs(hi);
+			double U = SimCompat.BitIncrement(Math.Abs(hi)) - Math.Abs(hi);
 			double u64 = U / 2048.0;
 			if ((BitConverter.DoubleToInt64Bits(hi) & 0xFFFFFFFFFFFFFL) == 0 && (lo < 0) != (hi < 0))
 				u64 /= 2.0;
@@ -163,7 +163,7 @@ namespace Runout.Sim
 		private static double Round53(double hi, double lo, out bool amb)
 		{
 			TwoSum(hi, lo, out double h, out double l);
-			double U = Math.BitIncrement(Math.Abs(h)) - Math.Abs(h);
+			double U = SimCompat.BitIncrement(Math.Abs(h)) - Math.Abs(h);
 			amb = Math.Abs(Math.Abs(l) - U / 2) < U * 1e-9;
 			return h;
 		}
@@ -228,7 +228,7 @@ namespace Runout.Sim
 		{
 			double k = Math.Round(x / phi);
 			double p = k * phi;
-			double pe = Math.FusedMultiplyAdd(k, phi, -p);
+			double pe = SimCompat.Fma(k, phi, -p);
 			double s = x - p;
 			TwoSum(s, -(pe + k * plo), out rh, out rl);
 			return (long)k & 3;
@@ -254,7 +254,7 @@ namespace Runout.Sim
 		{
 			double m = Math.Round(x / LN2_HI);
 			double p = m * LN2_HI;
-			double pe = Math.FusedMultiplyAdd(m, LN2_HI, -p);
+			double pe = SimCompat.Fma(m, LN2_HI, -p);
 			TwoSum(x - p, -(pe + m * LN2_LO), out double rh, out double rl);
 			double z = rh;
 			double tail = 1.0 / 5040.0 + z * (1.0 / 40320.0 + z * (1.0 / 362880.0 + z * (1.0 / 3628800.0 + z * (1.0 / 39916800.0
@@ -276,8 +276,8 @@ namespace Runout.Sim
 			Mul(rh, rl, h, l, out h, out l);
 			Add(1.0, 0.0, h, l, out h, out l);
 			int mi = (int)m;
-			h = Math.ScaleB(h, mi);
-			l = Math.ScaleB(l, mi);
+			h = SimCompat.ScaleB(h, mi);
+			l = SimCompat.ScaleB(l, mi);
 		}
 
 		/// e^(xh + xl)

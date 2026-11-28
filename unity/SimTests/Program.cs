@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Runout.Config;
 using Runout.Sim;
 
 namespace Runout.Sim.Tests
@@ -22,28 +23,26 @@ namespace Runout.Sim.Tests
             return _fail;
         }
 
-        sealed class SmokeHost : IBikeHost
-        {
-            public BikePhysics phys;
-            readonly Flat _g = new Flat();
-            public IGround terrain => _g;
-            public ISuspensionLimits susp => null;
-            public void flow_up() => phys.flow_up();
-            public void start_crash(string r) { Console.WriteLine("  crash: " + r); phys.begin_crash(); }
-        }
-
-        /// the ported bike on default tuning: pedals on flat ground for 5 s, then brakes; must stay finite and move
+        /// the shared ride (godot/sim BikeSim) on default tuning: pedals on flat ground for 5 s, then brakes; must stay
+        /// finite and move
         static void BikeSmoke()
         {
-            var h = new SmokeHost();
-            var p = new BikePhysics(h, new Tune()); h.phys = p;
-            p.setup(new BikeConfig { cogs = new List<double> { 11, 12, 14, 16, 18, 21, 24 } });
+            var h = new TraceCompare.Host();
+            var tune = new Tune();
+            var p = new BikeSim(h) { T = tune.fill(new RideParams()) }; h.phys = p;
+            var mods = new GdDict(); mods.set("cogs", new List<double> { 11, 12, 14, 16, 18, 21, 24 }); mods["ring_k"] = 1.0;
+            mods.set("susp", SuspSetup.resolve(null, SuspSetup.DEFAULT_SHOCK, "air", null).to_sim());
+            var cfg = new GdDict(); cfg.set("geared", true); cfg.set("mods", mods);
+            var ex = new GdDict(); ex["wheelbase"] = 1.2557; ex["wheelRadius"] = 0.374; ex["wheelRadiusRear"] = 0.355; ex["bbToRearAxle"] = 0.4423;
+            p.setup(ex, cfg);
             p.reset_at(0, 0, 0);
             string err = null; double vmax = 0;
+            var go = new RideInput(); go.set("throttle", 1.0);
+            var stop = new RideInput(); stop.set("brake", 1.0);
             try
             {
-                for (int i = 0; i < 600; i++) { p.step(1.0 / 120.0, new RideInput { throttle = 1.0 }); vmax = Math.Max(vmax, p.v); }
-                for (int i = 0; i < 360; i++) p.step(1.0 / 120.0, new RideInput { brake = 1.0 });
+                for (int i = 0; i < 600; i++) { p.step(1.0 / 120.0, go); vmax = Math.Max(vmax, p.v); }
+                for (int i = 0; i < 360; i++) p.step(1.0 / 120.0, stop);
             }
             catch (Exception e) { err = e.GetType().Name + ": " + e.Message + " @ " + e.StackTrace?.Split('\n')[0]; }
             Check("bike_smoke", err == null && vmax > 4.0 && Math.Abs(p.v) < 1.0 && !double.IsNaN(p.x),
@@ -69,7 +68,7 @@ namespace Runout.Sim.Tests
             public float Y = 5f, Vy;
             readonly IGround _g;
             public Dropper(IGround g) { _g = g; }
-            public void Step(double dt, in RideInput i)
+            public void Step(double dt, RideInput i)
             {
                 Vy -= (float)(9.81 * dt); Y += (float)(Vy * dt);
                 float h = (float)_g.height(0, 0);
@@ -83,9 +82,10 @@ namespace Runout.Sim.Tests
             public double height(double x, double z) => 0;
             public double deck_height(double x, double z) => 0;
             public double top_height(double x, double z) => 0;
-            public int surface(double x, double z) => Surf.Trail;
+            public long surface(double x, double z) => 1;
             public double jump_mask(double x, double z) => 0;
-            public void colliders_near(double x, double z, List<Obstacle> into) { }
+            public List<GdDict> colliders_near(double x, double z) => new List<GdDict>();
+            public RayHit cast(V3 o, V3 d, double m) => new RayHit();
         }
 
         static void StepperIsDeterministic()
@@ -93,18 +93,18 @@ namespace Runout.Sim.Tests
             // Same total time fed in different frame chunks must give the same steps and state.
             var a = new Dropper(new Flat()); var sa = new FixedStepper(a);
             var b = new Dropper(new Flat()); var sb = new FixedStepper(b);
-            for (int i = 0; i < 60; i++) sa.Advance(1.0 / 60.0, RideInput.None);
+            for (int i = 0; i < 60; i++) sa.Advance(1.0 / 60.0, new RideInput());
             var rnd = new Random(1);
             double left = 1.0;
-            while (left > 1e-9) { double d = Math.Min(left, rnd.NextDouble() * 0.03); sb.Advance(d, RideInput.None); left -= d; }
+            while (left > 1e-9) { double d = Math.Min(left, rnd.NextDouble() * 0.03); sb.Advance(d, new RideInput()); left -= d; }
             Check("stepper_deterministic", sa.Steps == sb.Steps && a.Y == b.Y, $"steps {sa.Steps}/{sb.Steps} y {a.Y}/{b.Y}");
         }
 
         static void StepperInterpolates()
         {
             var a = new Dropper(new Flat()); var s = new FixedStepper(a);
-            s.Advance(0.5 / 120.0, RideInput.None);
-            s.Advance(1.0 / 120.0, RideInput.None);   // one step done, half a step left over
+            s.Advance(0.5 / 120.0, new RideInput());
+            s.Advance(1.0 / 120.0, new RideInput());   // one step done, half a step left over
             var d = s.Drawn;
             Check("stepper_interpolates", d.Y < 5f && d.Y > a.Y, $"drawn {d.Y} current {a.Y}");
         }

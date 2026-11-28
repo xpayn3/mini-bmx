@@ -46,24 +46,25 @@ namespace Runout.Game
             return a;
         }
 
+        readonly RideInput _inp = new RideInput();
+
+        /// this frame's controls as the ride reads them (the Godot input dictionary's keys)
         public RideInput Read()
         {
             Vector2 body = _body.ReadValue<Vector2>();
             var g = Gamepad.current;
-            return new RideInput
-            {
-                throttle = _pedal.ReadValue<float>(),
-                brake = _brake.ReadValue<float>(),
-                brake_front = _brakeF.ReadValue<float>(),
-                brake_rear = _brakeR.ReadValue<float>(),
-                steer = Mathf.Clamp(_steer.ReadValue<float>(), -1f, 1f),
-                hop = _hop.ReadValue<float>() > 0.5f,
-                sprint = _sprint.ReadValue<float>() > 0.5f,
-                body_fwd = body.y,
-                body_lean = -body.x,
-                left_back = g != null ? Mathf.Max(0f, -g.leftStick.ReadValue().y) : 0f,
-                pad = _pad,
-            };
+            _inp.set("throttle", _pedal.ReadValue<float>());
+            _inp.set("brake", _brake.ReadValue<float>());
+            _inp.set("brake_front", _brakeF.ReadValue<float>());
+            _inp.set("brake_rear", _brakeR.ReadValue<float>());
+            _inp.set("steer", Mathf.Clamp(_steer.ReadValue<float>(), -1f, 1f));
+            _inp.set("hop", _hop.ReadValue<float>() > 0.5f);
+            _inp.set("sprint", _sprint.ReadValue<float>() > 0.5f);
+            _inp.set("body_fwd", body.y);
+            _inp.set("body_lean", -body.x);
+            _inp.set("left_back", g != null ? Mathf.Max(0f, -g.leftStick.ReadValue().y) : 0f);
+            _inp.set("pad", _pad);
+            return _inp;
         }
 
         void OnDestroy()

@@ -163,6 +163,14 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   V2 / V3), Pcg32 / Noise2S (RandomNumberGenerator / FastNoiseLite bit for bit: `-s res://tools/sim_rng_probe.gd`),
   Contracts.cs (IGround = what it asks any terrain, incl. `cast()` for future wallrides; IRideHost = what it tells the
   game). Portable to Unity / consoles: copy `sim/`, write IGround + IRideHost.
+- **The Unity port rides this same folder** (2026-11-28, `unity/PORTING.md`): `unity/Packages/manifest.json` loads
+  `godot/sim` as the local package `com.runout.sim`, so one physics fix lands in both engines. Rules for `sim/`:
+  **C# 9 only** (Unity's compiler) and **no .NET-Core-only APIs** (Unity's runtime is .NET Standard 2.1: no
+  `Math.FusedMultiplyAdd` / `BitIncrement` / `ScaleB`, no public `BitOperations`...): anything like that goes through
+  `sim/SimCompat.cs` (System.Math under .NET 8 = the Godot build unchanged; exact emulations elsewhere or with
+  `RUNOUT_COMPAT`). Leave `sim/package.json`, `sim/Runout.Sim.asmdef` and the `.meta` files as they are (Unity's;
+  Godot ignores them). `dev/port/simcheck` builds with LangVersion 9 + RUNOUT_COMPAT, so `dotnet build` there catches a
+  break; `dotnet run --project unity/SimTests` also rides it against Godot reference traces (`tools/port_trace.tscn`).
 - **Needs the .NET Godot**: the plain (non-C#) Godot can no longer ride. The headless tools (`slope_stress`, `phys_test`)
   ride the C# too.
 - Speed: `p_bike_step` 0.80 (GDScript) -> 0.59 ms a frame; stress test 151 -> 121 us a step. `BMX_CSPERF=1` = where a C#

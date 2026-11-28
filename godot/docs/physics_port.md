@@ -49,7 +49,14 @@ godot/dev/port/
 - **A constant other scripts read** (`BikePhysics.G`, `FLOW_MAX`, `BRAKE_MU`, `SPIN_EDGE`...) is a copy at the top of
   bike_physics.gd; `_check_consts` compares the copies with the C# at the first ride.
 - Check a change: the playground suite (HANDOFF section 5), `tools/slope_stress.tscn` (headless, rides the C#), rides.
-- `cd godot/dev/port/simcheck && dotnet build` must stay at 0 errors (the core can't use Godot).
+- `cd godot/dev/port/simcheck && dotnet build` must stay at 0 errors (the core can't use Godot). It builds with
+  LangVersion 9 + RUNOUT_COMPAT, the way Unity compiles it.
+- **The Unity port loads `sim/` as its package `com.runout.sim`** (`unity/PORTING.md`): keep it **C# 9** and off
+  **.NET-Core-only APIs** (Unity runs .NET Standard 2.1). Anything like `Math.FusedMultiplyAdd`, `Math.BitIncrement`,
+  `Math.ScaleB`, `BitOperations` goes through `sim/SimCompat.cs`: System.Math under .NET 8 (Godot unchanged), exact
+  emulations in Unity / with `RUNOUT_COMPAT`. `sim/package.json`, `sim/Runout.Sim.asmdef` and the `.meta` files are
+  Unity's; leave them. `dotnet run --project unity/SimTests` rides the core (C# 9 + RUNOUT_COMPAT) against Godot
+  reference traces from `tools/port_trace.tscn`: every run must match.
 
 ## How the game uses it
 The game holds the GDScript `BikePhysics` (typed; everything reads it at full GDScript speed: the rider pose, audio, HUD,

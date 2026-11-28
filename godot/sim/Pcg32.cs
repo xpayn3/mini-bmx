@@ -56,7 +56,7 @@ namespace Runout.Sim
 			if (proto == 0)
 				return 0f;
 			uint sig = Rand() | 0x80000001u;
-			return MathF.ScaleB((float)sig, -32 - BitOperations.LeadingZeroCount(proto));
+			return SimCompat.ScaleBF((float)sig, -32 - SimCompat.Lzc(proto));
 		}
 
 		/// [0, 1) as a double
@@ -66,7 +66,7 @@ namespace Runout.Sim
 			if (proto == 0)
 				return 0.0;
 			ulong sig = ((ulong)Rand() << 32) | Rand() | 0x8000000000000001UL;
-			return Math.ScaleB((double)sig, -64 - BitOperations.LeadingZeroCount(proto));
+			return SimCompat.ScaleB((double)sig, -64 - SimCompat.Lzc(proto));
 		}
 
 		/// a normal draw (Box-Muller), the float version RandomNumberGenerator.randfn uses

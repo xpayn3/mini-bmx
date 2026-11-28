@@ -1,0 +1,7 @@
+{
+  "name": "com.runout.sim",
+  "displayName": "Runout Sim (bike physics)",
+  "version": "0.1.0",
+  "unity": "6000.3",
+  "description": "The ride physics, engine-free C# shared by the Godot game and the Unity port. One source: edit here, both engines get it (see godot/docs/physics_port.md, unity/PORTING.md)."
+}

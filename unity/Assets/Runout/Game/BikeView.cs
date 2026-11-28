@@ -1,4 +1,4 @@
-using Runout.Sim;
+using Runout.Config;
 using UnityEngine;
 
 namespace Runout.Game

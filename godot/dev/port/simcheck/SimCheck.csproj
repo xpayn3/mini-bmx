@@ -6,6 +6,9 @@
     <Nullable>disable</Nullable>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!-- the way Unity compiles godot/sim (unity/PORTING.md): C# 9 + the .NET-Standard path of sim/SimCompat.cs -->
+    <LangVersion>9.0</LangVersion>
+    <DefineConstants>$(DefineConstants);RUNOUT_COMPAT</DefineConstants>
     <NoWarn>CS0162;CS0168;CS0219;CS0414;CS1717;CS8981</NoWarn>
   </PropertyGroup>
   <ItemGroup>
