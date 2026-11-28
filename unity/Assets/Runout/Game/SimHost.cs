@@ -33,11 +33,15 @@ namespace Runout.Game
         void Update()
         {
             if (_stepper == null) return;
+            long a = AllocProbe.Mark();
             RideInput inp = overrideInput ?? (input != null ? input.Read() : _none);
+            AllocProbe.Add("input", a); a = AllocProbe.Mark();
             _stepper.Advance(Time.unscaledDeltaTime * Time.timeScale, inp);
+            AllocProbe.Add("physics steps", a); a = AllocProbe.Mark();
             Pose = _stepper.Drawn;
             if (drawer != null) drawer.Draw(_stepper.Alpha, Time.deltaTime);
             else if (bikeView != null) bikeView.Apply(Pose);
+            AllocProbe.Add("bike + rider drawing", a);
         }
     }
 }

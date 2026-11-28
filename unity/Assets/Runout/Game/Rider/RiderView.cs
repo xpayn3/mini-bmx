@@ -141,7 +141,7 @@ namespace Runout.Game
         Vector3 RP(Vec3 p)
         {
             if (clips.underBody) p = clips.riderXf.b * p + clips.riderXf.o;
-            return GodotSpace.W(rig.LeanToWorld(U(p)));
+            return GodotSpace.P(rig.LeanToWorld(U(p)));
         }
         Vector3 RD(Vec3 d)
         {
@@ -323,7 +323,7 @@ namespace Runout.Game
             if (character == null || ragdoll == null) return;
             Transform root = character.transform;
             foreach (var b in _bones) b.t.localRotation = RestLocal(b.t);
-            Vector3 Pw(Vec3 v) => GodotSpace.W(GodotSpace.U(v));
+            Vector3 Pw(Vec3 v) => GodotSpace.P(GodotSpace.U(v));
             Vector3 Dw(Vec3 v) => GodotSpace.W(GodotSpace.U(v));
             Xf pel = ragdoll.body(0), che = ragdoll.body(1), hd = ragdoll.body(2);
             root.position = Pw(ragdoll.p[Ragdoll.PELVIS]);
@@ -611,7 +611,7 @@ namespace Runout.Game
             Transform root = character.transform;
             root.rotation = frame * Quaternion.Inverse(FACE_X);
             // the root rides with the bike (its bounds / culling are the root's; the bones are placed in world space below)
-            root.position = GodotSpace.W(rig.position);
+            root.position = GodotSpace.P(rig.position);
             if (!_offscreenSet)
             {
                 foreach (var smr in character.GetComponentsInChildren<SkinnedMeshRenderer>()) smr.updateWhenOffscreen = true;

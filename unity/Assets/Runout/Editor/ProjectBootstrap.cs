@@ -111,6 +111,7 @@ namespace Runout.EditorTools
             fog.meanFreePath.Override(450f);
             var exp = profile.Add<Exposure>(true);
             exp.mode.Override(ExposureMode.AutomaticHistogram);
+            RideLook.Persist(profile);   // save the components INTO the asset (Add alone keeps them in memory only)
             vol.sharedProfile = profile;
 
             var camGo = new GameObject("Ride Camera");

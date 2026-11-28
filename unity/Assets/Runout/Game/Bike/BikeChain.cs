@@ -100,6 +100,13 @@ namespace Runout.Game
 
         void LateUpdate()   // (after SimHost / BikeDraw posed the bike this frame)
         {
+            long a0 = AllocProbe.Mark();
+            Step();
+            AllocProbe.Add("chain", a0);
+        }
+
+        void Step()
+        {
             if (rig == null || model == null || axle == null || ringNode == null || sim == null) return;
             bool show = axle.gameObject.activeInHierarchy;
             if (rdRoot != null && rdRoot.gameObject.activeSelf != show) rdRoot.gameObject.SetActive(show);

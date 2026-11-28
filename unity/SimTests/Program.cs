@@ -13,6 +13,10 @@ namespace Runout.Sim.Tests
 
         static int Main()
         {
+            if (Environment.GetEnvironmentVariable("ALLOC_PROFILE") == "1") { AllocProfile.Run(); return 0; }
+            // the world port vs Godot (WORLD_ONLY=1: just this)
+            _fail += WorldCheck.Run(System.IO.Path.GetFullPath(System.IO.Path.Combine(RefDir(), "..")));
+            if (Environment.GetEnvironmentVariable("WORLD_ONLY") == "1") { Console.WriteLine(_fail == 0 ? "SIMTESTS PASS" : $"SIMTESTS FAIL {_fail}"); return _fail; }
             StepperIsDeterministic();
             StepperInterpolates();
             BikeSmoke();

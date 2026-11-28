@@ -1,0 +1,16 @@
+{
+    "name": "Runout.World",
+    "rootNamespace": "Runout.World",
+    "references": [
+        "Runout.Sim"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstants": [],
+    "versionDefines": [],
+    "noEngineReferences": true
+}

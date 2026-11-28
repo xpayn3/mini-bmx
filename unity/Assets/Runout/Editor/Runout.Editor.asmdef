@@ -3,6 +3,7 @@
     "rootNamespace": "Runout.EditorTools",
     "references": [
         "Runout.Sim",
+        "Runout.World",
         "Runout.Config",
         "Runout.Levels",
         "Runout.Game",

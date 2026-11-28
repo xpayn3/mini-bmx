@@ -71,7 +71,7 @@ namespace Runout.Game
         public double[] seat;   // top, rear, front of the saddle (frame mesh space) or null
 
         /// a point in a part's own (Godot) mesh space -> Godot world
-        public static Vector3 GPoint(Transform t, Vector3 local) => GodotSpace.W(t.TransformPoint(GodotSpace.M(local)));
+        public static Vector3 GPoint(Transform t, Vector3 local) => GodotSpace.PInv(t.TransformPoint(GodotSpace.M(local)));
         /// a Godot world point -> lean space (= the rider's space: Godot parents the rider to lean_g, identity)
         public Vector3 LeanLocal(Vector3 gworld) => Quaternion.Inverse(ModelRot) * (gworld - position);
         /// lean space -> Godot world

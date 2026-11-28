@@ -7,7 +7,7 @@ using UnityEngine.Rendering.HighDefinition;
 namespace Runout.EditorTools
 {
     /// Daylight in physical units, as HDRP wants it: the sun ~100 000 lux (a plain Unity light added from code is 1 lux:
-    /// the scenes were near black) and the auto exposure free to reach a sunny day (EV 9 .. 15). Runs by itself after
+    /// the scenes were near black) and the auto exposure in a sunny day's range (EV 10 .. 14). Runs by itself after
     /// every compile on the open scene(s) and the ride volume (idempotent; only fixes what is still at the dark defaults),
     /// or from the menu Runout > Fix Ride Lighting.
     [InitializeOnLoad]
@@ -27,13 +27,17 @@ namespace Runout.EditorTools
             var profile = AssetDatabase.LoadAssetAtPath<VolumeProfile>(Volume);
             if (profile != null)
             {
-                if (!profile.TryGet(out Exposure exp)) exp = profile.Add<Exposure>(true);
-                if (force || !exp.limitMin.overrideState)
+                bool fresh = !profile.TryGet(out Exposure exp);
+                if (fresh) exp = profile.Add<Exposure>(false);
+                if (force || fresh || !exp.active || !exp.limitMin.overrideState)
                 {
+                    exp.active = true;
                     exp.mode.Override(ExposureMode.AutomaticHistogram);
-                    exp.limitMin.Override(9f);
-                    exp.limitMax.Override(15f);
-                    exp.compensation.Override(0.3f);
+                    exp.meteringMode.Override(MeteringMode.CenterWeighted);
+                    exp.limitMin.Override(10f);   // same as RideLook: EV 10..14 (at 15 the physical sky reads navy)
+                    exp.limitMax.Override(14f);
+                    exp.compensation.Override(0f);
+                    RideLook.Persist(profile);    // save it INTO the asset (Add alone is lost on reload)
                     EditorUtility.SetDirty(profile);
                     AssetDatabase.SaveAssets();
                 }

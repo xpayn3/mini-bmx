@@ -22,9 +22,11 @@ namespace Runout.Game
         {
             if (model == null && transform.childCount > 0) model = transform.GetChild(0);
             if (model != null) model.localRotation = GODOT_MODEL;
+            BikeMaterialSet.Dress(transform);   // our HDRP materials (paint, chrome...) on the glb's parts
         }
 
-        public static Vector3 ToUnity(float x, float y, float z) => new Vector3(x, y, -z);
+        /// a sim point -> Unity world (through the floating origin, GodotSpace.P)
+        public static Vector3 ToUnity(float x, float y, float z) => GodotSpace.P(new Vector3(x, y, z));
 
         public void Apply(in SimPose p)
         {

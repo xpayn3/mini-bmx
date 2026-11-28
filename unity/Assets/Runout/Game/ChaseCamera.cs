@@ -22,6 +22,13 @@ namespace Runout.Game
         void LateUpdate()
         {
             if (target == null) return;
+            long a0 = AllocProbe.Mark();
+            Follow();
+            AllocProbe.Add("chase camera", a0);
+        }
+
+        void Follow()
+        {
             ReadMouse();
 
             // follow the DRAWN bike (BikeDraw moves the model, not the Bike object); without one, the target itself

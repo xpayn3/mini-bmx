@@ -10,8 +10,17 @@ namespace Runout.Game
     /// (Unity's Quaternion / Matrix4x4 maths is plain maths: a Godot rotation is the same numbers in them.)
     public static class GodotSpace
     {
-        /// Godot point / direction <-> Unity world (mirror z, self-inverse)
+        /// Godot direction <-> Unity world (mirror z, self-inverse). For POINTS use P / PInv (they add the floating origin).
         public static Vector3 W(Vector3 v) => new Vector3(v.x, v.y, -v.z);
+
+        /// The floating origin, in Godot space (x, z; y stays 0): Unity world = W(godot - Origin). The physics and every
+        /// Godot-space formula stay absolute; only Unity transforms sit near (0, 0, 0), so float32 precision holds however
+        /// far the trail runs. WorldOrigin moves it (and everything already placed) as the rider rides on.
+        public static Vector3 Origin;
+        /// a Godot world POINT -> Unity world
+        public static Vector3 P(Vector3 g) => new Vector3(g.x - Origin.x, g.y, Origin.z - g.z);
+        /// a Unity world point -> Godot world
+        public static Vector3 PInv(Vector3 u) => new Vector3(u.x + Origin.x, u.y, Origin.z - u.z);
         /// Godot model space <-> Unity model-local space (mirror x, self-inverse)
         public static Vector3 M(Vector3 v) => new Vector3(-v.x, v.y, v.z);
 
@@ -36,11 +45,11 @@ namespace Runout.Game
         {
             // W R M = (W R W)(W M), and W M = diag(-1, 1, -1) = a half turn about y
             Quaternion r = WRot(grot) * Quaternion.Euler(0f, 180f, 0f);
-            model.SetPositionAndRotation(W(gpos), r);
+            model.SetPositionAndRotation(P(gpos), r);
         }
 
         /// a part's Godot-space world origin / axes, from its Unity transform (G = W U M)
-        public static Vector3 WorldPos(Transform t) => W(t.position);
+        public static Vector3 WorldPos(Transform t) => PInv(t.position);
         public static Vector3 WorldAxisX(Transform t) => -W(t.right);
         public static Vector3 WorldAxisY(Transform t) => W(t.up);
         public static Vector3 WorldAxisZ(Transform t) => W(t.forward);
@@ -50,7 +59,7 @@ namespace Runout.Game
         {
             Matrix4x4 u = t.localToWorldMatrix;
             Vector3 cx = -W((Vector3)u.GetColumn(0)), cy = W((Vector3)u.GetColumn(1)), cz = W((Vector3)u.GetColumn(2));
-            return new Runout.Rider.Xf(new Runout.Rider.Basis(V(cx), V(cy), V(cz)), V(W(t.position)));
+            return new Runout.Rider.Xf(new Runout.Rider.Basis(V(cx), V(cy), V(cz)), V(PInv(t.position)));
         }
         public static Runout.Rider.Vec3 V(Vector3 v) => new Runout.Rider.Vec3(v.x, v.y, v.z);
         public static Vector3 U(Runout.Rider.Vec3 v) => new Vector3((float)v.x, (float)v.y, (float)v.z);

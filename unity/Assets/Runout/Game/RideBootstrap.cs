@@ -36,7 +36,11 @@ namespace Runout.Game
             // the test playground when the scene has one (its course is the ground), else the scene's terrain
             var playground = FindFirstObjectByType<PlaygroundWorld>();
             if (playground != null && playground.Course == null) playground.Rebuild();
-            IGround g = playground != null ? playground.Ground : new TerrainGround(ground != null ? ground : Terrain.activeTerrain);
+            // the procedural world (our field, Unity Terrain tiles) when the scene has a streamer
+            var world = FindFirstObjectByType<WorldStreamer>();
+            if (world != null) world.Load();
+            IGround g = world != null ? world.Ground
+                : playground != null ? playground.Ground : new TerrainGround(ground != null ? ground : Terrain.activeTerrain);
             var host = new RideHost(g);
             // the ride as Godot rides the DH (Config/Rides/dh.ride.txt, from godot/tools/port_trace.tscn ride_out=): the
             // effective Tune values (the player's sliders x the bike's multipliers) and the bike config. None: Tune defaults
@@ -83,7 +87,12 @@ namespace Runout.Game
             var cfg = new GdDict();
             cfg["land"] = ride.f("land", 1.0); cfg.set("geared", ride.f("geared", 1.0) != 0.0); cfg.set("mods", mods);
             Sim.setup(extras, cfg);
-            if (playground != null)
+            if (world != null)
+            {
+                var s = world.Spawn();   // on the trail, facing down it (sim coordinates)
+                Sim.reset_at(s.x, s.z, s.heading);
+            }
+            else if (playground != null)
             {
                 V3 s = playground.Spawn();   // (x, heading, z) in sim coordinates
                 Sim.reset_at(s.x, s.z, s.y);

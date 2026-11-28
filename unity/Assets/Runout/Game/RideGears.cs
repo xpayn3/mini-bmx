@@ -52,6 +52,13 @@ namespace Runout.Game
         void Update()
         {
             if (sim == null) return;
+            long a0 = AllocProbe.Mark();
+            Tick();
+            AllocProbe.Add("gears + effort", a0);
+        }
+
+        void Tick()
+        {
             int d = input != null ? input.ShiftPressed() : 0;
             if (d != 0) Shift(d);
             effort.Update(sim, Time.deltaTime);

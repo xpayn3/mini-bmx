@@ -53,7 +53,7 @@ namespace Runout.Game
             {
                 HasFollow = true;
                 Xf cb = CrashBike.Mul(crash.bike.BodyAt(alpha), crash.bike.RK);
-                FollowPos = GodotSpace.W(GodotSpace.U(cb.o));
+                FollowPos = GodotSpace.P(GodotSpace.U(cb.o));
                 if (rider != null) { rider.stops.reset(); st.foot_down = false; }
                 if (rider != null) rider.Draw(dt, 0f, 0f, 0f, 0f, 0f, _mcap);
                 return;
@@ -75,7 +75,7 @@ namespace Runout.Game
             hd -= Mathf.Clamp((float)st.slip, -0.25f, 0.25f) * 0.8f * _slip_k;
             Vector3 drawn_pos = new Vector3((float)L(_px, st.x, a), (float)L(_py, st.y, a), (float)L(_pz, st.z, a));
             // what the cameras follow (Unity world): the drawn bike's place and its travel direction
-            FollowPos = new Vector3(drawn_pos.x, y_draw, -drawn_pos.z);
+            FollowPos = GodotSpace.P(new Vector3(drawn_pos.x, y_draw, drawn_pos.z));
             FollowFwd = new Vector3(Mathf.Cos(hd), 0f, Mathf.Sin(hd));
             HasFollow = true;
             // at a stop (RiderStops, Godot _update_dab / _idle_life / the look round): the foot comes down, the bike leans onto

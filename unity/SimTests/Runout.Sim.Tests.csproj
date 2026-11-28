@@ -18,6 +18,7 @@
     <Compile Include="../Assets/Runout/Config/**/*.cs" />
     <Compile Include="../Assets/Runout/Levels/**/*.cs" />
     <Compile Include="../Assets/Runout/Rider/**/*.cs" />
+    <Compile Include="../Assets/Runout/World/**/*.cs" />
     <Compile Include="*.cs" />
   </ItemGroup>
 </Project>

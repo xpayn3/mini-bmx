@@ -6,6 +6,9 @@
         "Runout.Config",
         "Runout.Levels",
         "Runout.Game",
+        "Runout.World",
+        "Unity.RenderPipelines.HighDefinition.Runtime",
+        "Unity.RenderPipelines.Core.Runtime",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],
