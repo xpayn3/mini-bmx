@@ -32,10 +32,36 @@ namespace Runout.Tests
             double v = boot.Sim.v;
             float moved = Vector3.Distance(start, bike.position);
             Debug.Log($"RIDETEST v={v * 3.6:0.0} km/h moved={moved:0.00} m steps air={boot.Sim.air} crashed={boot.Sim.crash_on}");
-            string shot = Path.Combine(Application.dataPath, "..", "Logs", "ride_test.png");
-            ScreenCapture.CaptureScreenshot(shot);
+            // the rider: his wrists by the grips, ankles by the pedals (the model's wrist sits ~7 cm off the grip's middle)
+            var rv = Object.FindFirstObjectByType<RiderView>();
+            Assert.NotNull(rv, "the rider is built");
+            Assert.NotNull(rv.character, "the rider has a Humanoid model");
+            var lt = drawn.rig.limb_targets();
+            float Off(HumanBodyBones b, Vector3 leanTarget) =>
+                Vector3.Distance(rv.character.GetBoneTransform(b).position, GodotSpace.W(drawn.rig.LeanToWorld(leanTarget)));
+            float hl = Off(HumanBodyBones.LeftHand, lt.handL), hr = Off(HumanBodyBones.RightHand, lt.handR);
+            float fl = Off(HumanBodyBones.LeftFoot, lt.footL), fr = Off(HumanBodyBones.RightFoot, lt.footR);
+            Debug.Log($"RIDERTEST hand off grip L={hl:0.000} R={hr:0.000} m, ankle off pedal L={fl:0.000} R={fr:0.000} m, hips at {rv.character.GetBoneTransform(HumanBodyBones.Hips).position}");
+            // a side view of bike + rider (rendered by a camera of our own: batch mode has no game view)
+            var camGo = new GameObject("TestCam");
+            var cam = camGo.AddComponent<Camera>();
+            Vector3 c = drawn.FollowPos + Vector3.up * 0.9f;
+            Vector3 side = Vector3.Cross(Vector3.up, drawn.FollowFwd).normalized;
+            cam.transform.position = c + side * 3.2f + Vector3.up * 0.3f;
+            cam.transform.LookAt(c);
+            cam.fieldOfView = 40f;
+            var rt = new RenderTexture(1280, 720, 24);
+            cam.targetTexture = rt;
+            cam.Render();
+            RenderTexture.active = rt;
+            var tex = new Texture2D(1280, 720, TextureFormat.RGB24, false);
+            tex.ReadPixels(new Rect(0, 0, 1280, 720), 0, 0);
+            tex.Apply();
+            RenderTexture.active = null;
+            File.WriteAllBytes(Path.Combine(Application.dataPath, "..", "Logs", "rider_side.png"), tex.EncodeToPNG());
+            Object.Destroy(camGo);
             yield return null;
-            yield return null;
+            Assert.Less(Mathf.Max(hl, hr), 0.2f, "hands at the grips");
             Assert.Greater(v, 2.0, "the bike got going");
             Assert.Greater(moved, 2.0f, "the drawn bike followed the physics");
             Assert.IsFalse(boot.Sim.crash_on, "no crash on flat ground");

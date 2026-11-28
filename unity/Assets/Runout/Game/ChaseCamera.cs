@@ -17,13 +17,18 @@ namespace Runout.Game
 
         float _yaw, _pitch, _zoom = 1f, _idle = 99f;
         bool _hold;
+        BikeDraw _draw;
 
         void LateUpdate()
         {
             if (target == null) return;
             ReadMouse();
 
-            Vector3 fwd = target.right;   // the bike's forward is its local +x (the sim's convention)
+            // follow the DRAWN bike (BikeDraw moves the model, not the Bike object); without one, the target itself
+            if (_draw == null) _draw = target.GetComponentInChildren<BikeDraw>();
+            bool drawn = _draw != null && _draw.HasFollow;
+            Vector3 tp = drawn ? _draw.FollowPos : target.position;
+            Vector3 fwd = drawn ? _draw.FollowFwd : target.right;   // (the sim's forward = the Bike object's local +x)
             fwd.y = 0f;
             if (fwd.sqrMagnitude < 1e-4f) fwd = Vector3.right;
             fwd.Normalize();
@@ -32,11 +37,11 @@ namespace Runout.Game
             float d = distance * _zoom;
             float pitch = Mathf.Atan2(height, distance) * Mathf.Rad2Deg + _pitch;
             Vector3 off = back * (d * Mathf.Cos(pitch * Mathf.Deg2Rad)) + Vector3.up * (d * Mathf.Sin(pitch * Mathf.Deg2Rad));
-            Vector3 want = target.position + off;
+            Vector3 want = tp + off;
             bool dragging = _idle == 0f;
             float k = dragging ? 1f : 1f - Mathf.Exp(-follow * Time.unscaledDeltaTime);
             transform.position = Vector3.Lerp(transform.position, want, k);
-            transform.rotation = Quaternion.LookRotation(target.position + Vector3.up * lookUp - transform.position, Vector3.up);
+            transform.rotation = Quaternion.LookRotation(tp + Vector3.up * lookUp - transform.position, Vector3.up);
         }
 
         void ReadMouse()

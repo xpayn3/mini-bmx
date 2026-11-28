@@ -30,3 +30,6 @@ crashlytics-buildid.txt
 /Assets/Runout/Art/Plants/
 /Assets/Runout/Art/Plants.meta
 /Assets/Runout/Art/Textures/tree_cards/leaf_beech*
+# Mixamo characters (Adobe licence: use in the game, don't redistribute the files): copied locally
+/Assets/Runout/Art/Characters/Mixamo_*/
+/Assets/Runout/Art/Characters/Mixamo_*.meta

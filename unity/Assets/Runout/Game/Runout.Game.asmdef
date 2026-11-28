@@ -5,6 +5,7 @@
         "Runout.Sim",
         "Runout.Config",
         "Runout.Levels",
+        "Runout.Rider",
         "Unity.InputSystem",
         "Unity.Mathematics",
         "Unity.Burst",

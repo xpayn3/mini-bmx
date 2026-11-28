@@ -42,6 +42,48 @@ namespace Runout.Game
             if (wheel_r != null) wrRest = GodotSpace.LocalRot(wheel_r);
             if (crank_n != null) crRest = GodotSpace.LocalRot(crank_n);
             if (extras.has_prefix("suspension.")) susp = new Suspension(model, extras) { wheels_follow = true };
+            // measured off the meshes by unity/Tools/glb_extras.py (Godot: _grips, _split_pedals, _saddle)
+            grip_l = extras.v3("rig.gripL", new Vector3(0f, 0f, -0.3f));
+            grip_r = extras.v3("rig.gripR", new Vector3(0f, 0f, 0.3f));
+            pedal_l = extras.v3("rig.pedalL", new Vector3(0f, 0f, -0.1f));
+            pedal_r = extras.v3("rig.pedalR", new Vector3(0f, 0f, 0.1f));
+            pedal_top = (float)extras.f("rig.pedalTop", 0.017);
+            var st = extras.list("rig.seat");
+            if (st.Length == 3) seat = st;
+        }
+
+        // ---- the rider's contact points (Godot: limb_targets) ----
+        public Vector3 grip_l, grip_r, pedal_l, pedal_r;   // steer / crank mesh space (Godot axes)
+        public float pedal_top = 0.017f;
+        public double[] seat;   // top, rear, front of the saddle (frame mesh space) or null
+
+        /// a point in a part's own (Godot) mesh space -> Godot world
+        public static Vector3 GPoint(Transform t, Vector3 local) => GodotSpace.W(t.TransformPoint(GodotSpace.M(local)));
+        /// a Godot world point -> lean space (= the rider's space: Godot parents the rider to lean_g, identity)
+        public Vector3 LeanLocal(Vector3 gworld) => Quaternion.Inverse(ModelRot) * (gworld - position);
+        /// lean space -> Godot world
+        public Vector3 LeanToWorld(Vector3 lean) => position + ModelRot * lean;
+
+        public struct Limbs { public Vector3 handL, handR, footL, footR, gripX, gripZ; }
+        /// where the hands / feet go, in lean space (Godot BikeRig.limb_targets); the pedals are the pedal pivots
+        /// (children of the crank: they go round with it)
+        public Limbs limb_targets()
+        {
+            var o = new Limbs();
+            if (steer_n != null)
+            {
+                o.handL = LeanLocal(GPoint(steer_n, grip_l));
+                o.handR = LeanLocal(GPoint(steer_n, grip_r));
+                Quaternion inv = Quaternion.Inverse(ModelRot);
+                o.gripX = (inv * GodotSpace.WorldAxisX(steer_n)).normalized;
+                o.gripZ = (inv * GodotSpace.WorldAxisZ(steer_n)).normalized;
+            }
+            if (crank_n != null)
+            {
+                o.footL = LeanLocal(GPoint(crank_n, pedal_l));
+                o.footR = LeanLocal(GPoint(crank_n, pedal_r));
+            }
+            return o;
         }
 
         public static Transform Find(Transform root, string name)

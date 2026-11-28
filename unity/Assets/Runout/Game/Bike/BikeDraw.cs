@@ -17,6 +17,8 @@ namespace Runout.Game
         public BikeSim st;
         public IGround ground;
         public BikeRig rig;
+        [System.NonSerialized] public Vector3 FollowPos, FollowFwd = Vector3.right;
+        [System.NonSerialized] public bool HasFollow;
 
         // the physics state the drawing interpolates (Godot: _prev + _lerp_k)
         double _px, _py, _pz, _pyd, _ppd, _ph, _pby, _pp;
@@ -61,6 +63,10 @@ namespace Runout.Game
             _slip_k = Mathf.MoveTowards(_slip_k, sk_t, 4f * Mathf.Min(dt, 0.05f));
             hd -= Mathf.Clamp((float)st.slip, -0.25f, 0.25f) * 0.8f * _slip_k;
             Vector3 drawn_pos = new Vector3((float)L(_px, st.x, a), (float)L(_py, st.y, a), (float)L(_pz, st.z, a));
+            // what the cameras follow (Unity world): the drawn bike's place and its travel direction
+            FollowPos = new Vector3(drawn_pos.x, y_draw, -drawn_pos.z);
+            FollowFwd = new Vector3(Mathf.Cos(hd), 0f, Mathf.Sin(hd));
+            HasFollow = true;
             float wobble = Mathf.Sin(t * 2.3f) * 0.025f * Mathf.Max(0f, 1f - Mathf.Abs((float)st.v) / 2f);
             float dab_lean = 0f;
             if (st.crash_on) _mc.Clear();
@@ -104,8 +110,15 @@ namespace Runout.Game
                 else _lift_s = Mathf.Max(need, _lift_s - LIFT_DOWN * mdt);
                 rig.position.y = pre_y + _lift_s;
                 rig.Place();
+                _frame_y = pre_y;
             }
+            else _frame_y = rig.position.y;
+            // the rider, posed on the drawn bike (Godot: Game._process -> rider.update_pose)
+            if (rider != null) rider.Draw(dt, p_draw, y_draw, _frame_y, _lean_c, _steer_c, _mcap);
         }
+
+        [System.NonSerialized] public RiderView rider;
+        float _frame_y;
 
         // ---- motion cap (Godot: _mcap / MCAP) ----
         static readonly Dictionary<string, Vector2> MCAP = new Dictionary<string, Vector2>

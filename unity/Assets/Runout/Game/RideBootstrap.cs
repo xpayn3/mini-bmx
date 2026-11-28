@@ -16,6 +16,8 @@ namespace Runout.Game
         public TextAsset bikeExtras;
         [Tooltip("the ride setup as Godot rides it (Config/Rides/<bike>.ride.txt, from godot/tools/port_trace.tscn ride_out=)")]
         public TextAsset rideConfig;
+        [Tooltip("the rider: any Humanoid model (Art/Characters, imported as Humanoid by CharacterImport)")]
+        public GameObject riderModel;
         public Vector3 spawn = new Vector3(0f, 0f, 0f);
         [Tooltip("degrees: 0 = along +x (the sim's heading)")] public float heading = 0f;
 
@@ -89,6 +91,19 @@ namespace Runout.Game
                 var draw = bikeObj.gameObject.AddComponent<BikeDraw>();
                 draw.Init(Sim, g, rig, sh.Stepper);
                 sh.drawer = draw;
+                // the rider: a Humanoid model posed by our solver (RiderView)
+                if (riderModel != null)
+                {
+                    var go = Instantiate(riderModel);
+                    go.name = "Rider";
+                    var anim = go.GetComponentInChildren<Animator>();
+                    if (anim == null) anim = go.AddComponent<Animator>();
+                    anim.runtimeAnimatorController = null;   // (no clips: our pose drives the bones)
+                    anim.applyRootMotion = false;
+                    var rv = bikeObj.gameObject.AddComponent<RiderView>();
+                    rv.Init(Sim, rig, anim);
+                    draw.rider = rv;
+                }
             }
             else Debug.LogWarning("RideBootstrap: no bike extras / model found: the bike is drawn as one rigid piece");
         }
@@ -100,6 +115,8 @@ namespace Runout.Game
                 bikeExtras = UnityEditor.AssetDatabase.LoadAssetAtPath<TextAsset>("Assets/Runout/Art/Models/Bikes/dh.extras.txt");
             if (rideConfig == null)
                 rideConfig = UnityEditor.AssetDatabase.LoadAssetAtPath<TextAsset>("Assets/Runout/Config/Rides/dh.ride.txt");
+            if (riderModel == null)
+                riderModel = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Runout/Art/Characters/Mixamo_Ch07/Ch07.fbx");
         }
 #endif
     }
