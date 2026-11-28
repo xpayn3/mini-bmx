@@ -29,8 +29,10 @@ static func material(kind: String = "leaf") -> ShaderMaterial:
 	var m := ShaderMaterial.new()
 	m.shader = preload("res://scripts/world/deco_cards.gdshader")
 	m.set_shader_parameter("leaf_tex", texture(kind))
+	# shell cards face every way: light the bush as one volume from both sides (as the crowns do)
+	m.set_shader_parameter("volume_normals", shell_enabled())
 	if kind == "leaf":
-		m.set_shader_parameter("albedo", Vector3.ONE * leaf_gain())
+		m.set_shader_parameter("albedo", Vector3.ONE * leaf_gain() * (1.12 if shell_enabled() else 1.0))   # (a touch lighter: the bushes read as dark blobs)
 		var nt := leaf_normal()
 		if nt:
 			m.set_shader_parameter("nrm_tex", nt)
@@ -158,7 +160,101 @@ static func _twigs(img: Image, rng: RandomNumberGenerator, count: int) -> void:
 						img.set_pixel(x, y, Color(shade * 1.1, shade * 0.9, shade * 0.7, 1.0))
 
 
+## Shell bushes (2026-11-27, user: "bushes are too bad quality"): the old 30-46 big upright cards read as a few flat
+## pictures, thin from above. Like scanned / SpeedTree bushes: ~3x more, smaller twig cards laid along the bush's outer
+## shell, each facing out of it (tilted only as far as the shell is: the top ones look up, the sides out) with its twig
+## growing outward from its base (the photo's stems are at the bottom of the card), turned / mirrored at random, some
+## reaching past the outline for a ragged edge; an inner core of upright cards in shade gives it depth. ~4 triangles a card.
+## It is the near LOD (LOD0, CardTree.add_twin: full to 36 m, gone by 48 m, ~4-650 triangles a bush); past it and in
+## the shadow pass the upright-card bush (`mesh`, ~160 triangles) as before. BMX_OLD_BUSH2=1 = no near LOD.
+const SHELL := {
+	"bush": {"shell": 120, "core": 34, "s0": 0.3, "s1": 0.5},
+	"bush1": {"shell": 130, "core": 34, "s0": 0.27, "s1": 0.45},
+	"bush2": {"shell": 108, "core": 30, "s0": 0.32, "s1": 0.52},
+	"bushdry": {"shell": 84, "core": 22, "s0": 0.28, "s1": 0.46},
+}
+
+static var _shell := {}
+
+static func shell_enabled() -> bool:
+	return Env.raw("BMX_OLD_BUSH2") != "1"
+
+## LOD1 (everywhere, + the shadow caster): the upright-card bush
 static func mesh(variant: String = "bush") -> ArrayMesh:
+	return _mesh_upright(variant)
+
+## LOD0 near the rider (cached)
+static func shell_mesh(variant: String) -> ArrayMesh:
+	if not _shell.has(variant):
+		_shell[variant] = _mesh_shell(variant)
+	return _shell[variant]
+
+static func _mesh_shell(variant: String) -> ArrayMesh:
+	var V: Dictionary = VARIANTS[variant]
+	var S: Dictionary = SHELL[variant]
+	var dc := Vector3(0, V.cy, 0)
+	var dr: Vector3 = V.r
+	var top: float = V.top
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(V.seed) + 17
+	var b := CardTree._Buf.new()
+	var n: int = int(S.shell) + int(S.core)
+	for k in n:
+		# a direction over the dome (golden-angle azimuth + jitter: even cover, no bald patch), filled through the
+		# volume but thickest towards the outside (that is what you see; the inside is shade between the twigs)
+		var fy := rng.randf_range(-0.3, 1.0)
+		var az := k * 2.39996 + rng.randf_range(-0.4, 0.4)
+		var ry := sqrt(maxf(1.0 - fy * fy, 0.0))
+		var dir := Vector3(cos(az) * ry, fy, sin(az) * ry)
+		var rad := 0.25 + 0.75 * pow(rng.randf(), 0.45)
+		var core := rad < 0.55
+		var p := dc + dir * rad * dr
+		if p.y < 0.04:
+			p.y = rng.randf_range(0.04, 0.2)
+		# the shell's outward normal at that point (an ellipsoid's: dir / r^2)
+		var nout := Vector3(dir.x / dr.x, dir.y / dr.y, dir.z / dr.z).normalized()
+		var s: float = rng.randf_range(S.s0, S.s1) * (0.8 if core else 1.0)
+		# the card's front: mostly upright, turned roughly out of the bush; on the top it tips up towards the sky
+		# (at most ~45 deg: cards lying flat smear seen from the side)
+		var ra := rng.randf() * TAU
+		var h := (Vector3(dir.x, 0, dir.z) * 0.9 + Vector3(cos(ra), 0, sin(ra)) * 0.7)
+		if h.length() < 0.05:
+			h = Vector3(cos(ra), 0, sin(ra))
+		h = h.normalized()
+		var tilt := clampf(nout.y, 0.0, 1.0) * 0.6 + rng.randf_range(-0.1, 0.1)
+		var face := (h * cos(tilt) + Vector3.UP * sin(tilt)).normalized()
+		# its stem (texture bottom) -> tip (texture top) axis: world up laid in the card, leaning a little at random
+		var up := (Vector3.UP - face * face.y).normalized().rotated(face, rng.randf_range(-0.5, 0.5))
+		var side := up.cross(face).normalized()
+		# the base sits a little inside, the tip may reach past the outline
+		var c := p + up * s * (0.15 if core else rng.randf_range(0.05, 0.25))
+		c.y = clampf(c.y, s * 0.35 + 0.02, maxf(top - s * 0.2, s * 0.35 + 0.03))
+		var flip := 1.0 if rng.randf() < 0.5 else -1.0   # mirrored cards: the one photo reads as many twigs
+		var fold := 0.12 * s
+		var g: Array = []   # 3 x 2: rows base / tip, columns across
+		for ry2 in 2:
+			var row: Array = []
+			for cx in 3:
+				var q := c + side * (cx - 1) * 0.5 * s + up * (ry2 - 0.5) * s + face * (fold * (1.0 - absf(cx - 1)))
+				q.y = maxf(q.y, 0.02)
+				row.append(q)
+			g.append(row)
+		for cx in 2:
+			for tri in [[Vector2i(cx, 0), Vector2i(cx + 1, 0), Vector2i(cx + 1, 1)], [Vector2i(cx, 0), Vector2i(cx + 1, 1), Vector2i(cx, 1)]]:
+				for e in [tri[0], tri[2], tri[1]]:
+					var q: Vector3 = g[e.y][e.x]
+					var o := (q - dc) / dr
+					var depth := clampf(o.length(), 0.0, 1.1)
+					var ao := (0.42 + 0.58 * smoothstep(0.15, 1.0, depth)) * (0.75 + 0.25 * clampf(q.y / maxf(top, 0.5), 0.0, 1.0))
+					if core:
+						ao *= 0.85
+					var nrm := (o.normalized() * 0.65 + face * 0.35).normalized()
+					var u: float = 0.5 + (e.x * 0.5 - 0.5) * flip
+					b.vert(q, nrm, ao, Vector2(u, 1.0 - e.y), s)
+	return b.commit()
+
+
+static func _mesh_upright(variant: String) -> ArrayMesh:
 	var V: Dictionary = VARIANTS[variant]
 	var dome_c := Vector3(0, V.cy, 0)
 	var dome_r: Vector3 = V.r

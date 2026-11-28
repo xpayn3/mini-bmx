@@ -2939,6 +2939,10 @@ func _bar_draw(st: BikePhysics, dt: float, dab_lean: float) -> float:
 		sd += (inair + _bar_carve * 0.8) * bc
 	else:
 		_bar_carve = 0.0
+	# on the back wheel the rider turns the bars into the turn (the front swings that way: part of how a manual is steered and
+	# balanced), with the lean (BikePhysics.man_lk). The physics' own steer stays tiny there: the turn is the lean
+	if st.man_lk > 0.0:
+		sd = lerpf(sd, clampf(st.steer_in, -1.0, 1.0) * BikePhysics.MAN_BAR + _bar_kick, st.man_lk)
 	if _bar_probe:   # tests: BMX_BAR_PROBE (BARS lines once a second: biggest kick, biggest countersteer, bars vs physics)
 		_bp_k = maxf(_bp_k, absf(_bar_kick)); _bp_n = maxf(_bp_n, absf(st.knock)); _bp_c = maxf(_bp_c, absf(st.lean_v * BAR_CS_K)); _bp_d = maxf(_bp_d, absf(sd - st.steer))
 		if int(t) != int(t - dt):
@@ -4236,9 +4240,9 @@ func _process(dt: float) -> void:
 		var sd := fw.cross(Vector3.UP).normalized()
 		var hz := Vector2(up.dot(fw), up.dot(sd))
 		print("BODYUP v=%.1f shoulder_roll=%.0f head_up_side=%.0f air=%s bike_lean=%.0f whip_yaw=%.0f | torso tilt from vertical=%.0f, faces %.0f deg off the flight | head %.2f m to the side" % [st.v, rad_to_deg(asin(clampf(((gt * rider.skeleton.bone_rider("LeftUpperArm").origin) - (gt * rider.skeleton.bone_rider("RightUpperArm").origin)).normalized().y, -1, 1))), rad_to_deg(asin(clampf((hd_w - hp).normalized().dot(sd), -1, 1))), st.air, rad_to_deg(st.bike_lean), rad_to_deg(st.slip), rad_to_deg(acos(clampf(up.y, -1, 1))), rad_to_deg(atan2(hz.y, hz.x)), (hd_w - rig.global_position).dot(sd)])
-	if Env.s("BMX_LAND_SHOT") != "" and _land_shots < 12:   # tests: 12 shots, 0.06 s apart, from just before a touch-down
+	if Env.s("BMX_LAND_SHOT") != "" and _land_shots < (int(Env.s("BMX_LAND_N")) if Env.s("BMX_LAND_N") != "" else 12):   # tests: 12 shots (BMX_LAND_N), 0.06 s apart (BMX_LAND_STEP), from just before a touch-down
 		if _land_shots == 0 and st.air and st.air_time > 0.5 and st.land_prep > 0.6: _land_t = t
-		if _land_t >= 0.0 and t - _land_t >= _land_shots * 0.06:
+		if _land_t >= 0.0 and t - _land_t >= _land_shots * (float(Env.s("BMX_LAND_STEP")) if Env.s("BMX_LAND_STEP") != "" else 0.06):
 			get_viewport().get_texture().get_image().save_png("%s_%d.png" % [Env.s("BMX_LAND_SHOT"), _land_shots])
 			print("LANDSHOT %d air=%s since=%.2f fold=%.2f heavy=%.2f absorb=%.2f prep=%.2f" % [_land_shots, st.air, st.since_land, st.land_fold, st.land_heavy, st.body_y - st.y, st.land_prep])
 			_land_shots += 1
@@ -4343,6 +4347,7 @@ func _process(dt: float) -> void:
 		pi["attackDrop"] = T.attackDrop
 		pi["pedal"] = st.pedal
 		pi["sprint"] = st.sprint * st.pedal
+		pi["spinOut"] = st.spin_out_k   # (near / at the legs' top cadence: he looks down at the drivetrain)
 		pi["stamina"] = st.stamina
 		pi["hr"] = hud.hr if hud else 72.0   # the bike computer's heart rate (made up from effort, slow to recover): drives the breathing
 		pi["crank"] = st.crank
@@ -4465,6 +4470,13 @@ func _process(dt: float) -> void:
 				var rgt: Transform3D = rig.global_transform
 				var wh: Vector3 = rider.to_global(rider.J[0]); var wp: Vector3 = rider.to_global(rider.J[2])
 				row += ",%.4f,%.4f,%.4f,%.4f,%d,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%d" % [rgt.origin.x, rgt.origin.y, rgt.origin.z, asin(clampf(rgt.basis.x.normalized().y, -1.0, 1.0)), int(st.air), st.pitch, st.y, Engine.get_physics_frames(), float(pi["pitch"]), st.pitch_draw, wh.x, wh.y, wh.z, wp.x, wp.y, wp.z, int(st.crash_on)]
+				# + the pitch-pivot fix, the tyre lift, which wheels are off, each drawn axle over the drawn ground, the manual
+				var gwr: Vector3 = rig.wheel_r.global_position; var gwf: Vector3 = rig.wheel_f.global_position
+				row += ",%.4f,%.4f,%d,%d,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f" % [_piv_c, _lift_s, int(st.front_air), int(st.rear_air),
+					gwr.y - terrain.top_height(gwr.x, gwr.z), gwf.y - terrain.top_height(gwf.x, gwf.z), st.man_a, st.y_draw, _piv_w, _air_dlt.y]
+				var rlt: Transform3D = rig.global_transform.affine_inverse() * rider.global_transform   # the rider node in the bike's root
+				var rle: Vector3 = rlt.basis.get_euler()
+				row += ",%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%s,%d" % [rlt.origin.x, rlt.origin.y, rlt.origin.z, rle.x, rle.y, rle.z, rider.get_parent().name, int(_pk_rt_on)]
 				_jdump.append(row)
 	_pk = _perf("rider_pose", _pk)
 	if replay and input_enabled and not scenic and not title_world: replay.capture(t)   # (real rides only, not the title backdrop)

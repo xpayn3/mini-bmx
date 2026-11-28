@@ -47,12 +47,29 @@ const HELMETS := {
 	"tld": ["TOPLINE S5", "res://assets/helmets/helmet_tld.glb"],
 }
 ## per helmet model: where it sits on the head, on top of HELMET_FIT (same keys)
+## (2026-11-28) the glbs are modelled at real size (~34 cm long); they were drawn x1.3 (stock) / x1.12 (models), ~40 / 20 %
+## bigger than a real full-face helmet. Now x HELMET_REAL: ~31-32 cm long, ~27 cm tall. BMX_OLD_HELMETSIZE=1 = before.
+const HELMET_REAL := 0.92
 const HELMET_FITS := {
 	"6d_black": {x = -0.005, y = -0.02, tilt = 0.0, scale = 1.12},
 	"6d_silver": {x = -0.005, y = -0.02, tilt = 0.0, scale = 1.12},
 	"tld": {x = -0.005, y = -0.02, tilt = 0.0, scale = 1.12},
 }
 const HELMET_FIT := {x = 0.01, y = 0.0, tilt = 0.0, scale = 1.3}
+## GOGGLE_FIT and the built-in helmet were sized for the stock helmet at this scale: they shrink by (scale / it)
+const GOGGLE_FIT_SCALE := 1.3
+
+## the helmet fit with the real-size scale (old saves / tests: BMX_OLD_HELMETSIZE=1 keeps the old scales)
+static func helmet_fit(id: String) -> Dictionary:
+	var F: Dictionary = HELMET_FIT.duplicate()
+	F.merge(HELMET_FITS.get(id, {}), true)
+	if Env.s("BMX_OLD_HELMETSIZE") == "":
+		F.scale = HELMET_REAL
+	return F
+
+## how much our goggles / the built-in helmet are drawn smaller than they were sized (1 = as sized)
+static func gear_k() -> float:
+	return helmet_fit("glory").scale / GOGGLE_FIT_SCALE
 ## goggles (RiderGear.build_goggles): lens position / tilt / size, strap ellipse round the shell
 const SKI_GOGGLE_MESH := "res://assets/goggles/ski_goggle.obj"
 
@@ -233,8 +250,9 @@ func _init() -> void:
 	add_child(bib)
 	# the neck: a tapered tube (jersey collar colour) from inside the collar up into the helmet, posed
 	# every frame by _pose_neck (both ends are hidden, so it never shows a cap)
-	neck_mesh = cyl.call(NECK_R_TOP, NECK_R_BASE, mCoralDark, 18)
-	neck_mesh.name = "Neck"
+	if _OLD_NECKSKIN:   # (the skinned neck on the humanoid skeleton is made with it, below)
+		neck_mesh = cyl.call(NECK_R_TOP, NECK_R_BASE, mCoralDark, 18)
+		neck_mesh.name = "Neck"
 	shoulder_sph.assign([sph.call(0.075, mCoral), sph.call(0.075, mCoral)])
 
 	# legs (0 = left, 1 = right)
@@ -302,6 +320,9 @@ func _init() -> void:
 	skeleton = RiderSkeleton.new()
 	add_child(skeleton)
 	skeleton.make_fingers(hand_mats.glove)   # the gloves' fingers ride on its finger bones (GloveFingers)
+	if not _OLD_NECKSKIN:   # the neck: skinned to its Neck + Head bones like an imported character's (RiderSkeleton.make_neck)
+		neck_mesh = skeleton.make_neck(kit.jersey[1], NECK_R_BASE, NECK_R_TOP)
+		skeleton.neck = neck_mesh
 
 
 ## the bare head and the hair that replaces the helmet (look.helmetOn = "0"). A friendly, slightly cartoon face:
@@ -370,7 +391,7 @@ func _build_builtin_helmet() -> void:
 	lensMat.emission_enabled = true
 	lensMat.emission = Color("#3a1806")
 	lensMat.emission_energy_multiplier = 0.5
-	var R := 0.185
+	var R := 0.185 * gear_k()   # (sized for the old x1.3 helmet: real size now, see HELMET_REAL)
 	hel = Node3D.new()
 	hel.name = "Helmet"
 	hel.transform = Transform3D(Basis(Vector3.BACK, 0.05).scaled_local(Vector3(1.14, 0.96, 0.9)), Vector3(-0.005, 0.02, 0))
@@ -480,8 +501,7 @@ static func _shell_top(tris: PackedVector3Array, x: float) -> float:
 ## Swap the built-in helmet for the model (helmet.glb's "helmet" MeshInstance3D: centred on its shell,
 ## +X = face, +Y up). Adds the moto goggles with the strap hugging the shell.
 func set_helmet(model: Node3D, own_goggles: Node3D = null) -> void:
-	var F: Dictionary = HELMET_FIT.duplicate()
-	F.merge(HELMET_FITS.get(helmet_id.get_slice("/", 0), {}), true)
+	var F: Dictionary = helmet_fit(helmet_id.get_slice("/", 0))
 	var ev := Env.s("BMX_HELMET_FIT").split(",", false)   # tests: "x,y,scale,tilt" for the model on
 	if ev.size() == 4 and helmet_id != "glory/game":
 		F = {x = float(ev[0]), y = float(ev[1]), scale = float(ev[2]), tilt = float(ev[3])}
@@ -541,7 +561,16 @@ func set_helmet(model: Node3D, own_goggles: Node3D = null) -> void:
 		hug = func(x: float, y: float, dx: float, dz: float) -> Variant:
 			return _hug(shell_tris, x, y, dx, dz)
 	if not builtin:
-		goggles = GEAR.build_goggles(goggle_mats, GOGGLE_FIT, hug)
+		# GOGGLE_FIT is sized for the helmet at GOGGLE_FIT_SCALE: the goggles are built at that size and the node
+		# scaled down with the helmet (gk); the strap's shell hug is read in that unscaled space
+		var gk: float = F.scale / GOGGLE_FIT_SCALE
+		var hug_k := hug
+		if hug.is_valid() and absf(gk - 1.0) > 1e-4:
+			hug_k = func(x: float, y: float, dx: float, dz: float) -> Variant:
+				var r = hug.call(x * gk, y * gk, dx, dz)
+				return null if r == null else float(r) / gk
+		goggles = GEAR.build_goggles(goggle_mats, GOGGLE_FIT, hug_k)
+		goggles.scale = Vector3.ONE * gk
 		head.add_child(goggles)
 		var flap := HelmetFlap.new()   # loose strap tail that flaps with speed
 		flap.name = "StrapFlap"
@@ -1181,7 +1210,9 @@ const NECK_TOP := Vector3(-0.035, -0.07, 0.0)
 
 
 ## run after set_spine and the head transform: the tube follows the spine's bend and the head's turn / tilt
+static var _OLD_NECKSKIN := Env.raw("BMX_OLD_NECKSKIN") != ""   # the old straight tube posed by set_limb
 func _pose_neck() -> void:
+	if not _OLD_NECKSKIN: return   # skinned: the skeleton's Neck / Head bones move it (_sync_skeleton)
 	var base := spine_skel.get_bone_pose(SPINE_BONES - 1) * NECK_BASE
 	set_limb(neck_mesh, base, head.transform * NECK_TOP)
 
@@ -1412,9 +1443,14 @@ func _pose_from_points(P: Array, roots: Dictionary, orient: Dictionary) -> void:
 		set_limb(upper_arm[i], el_from, el[i], _twist(i, el_from, el[i], arm_side))
 		elbow[i].position = el[i]
 		glove[i].position = ha[i]
+		var fa_side := _twist(2 + i, ha_from, _wrist(i, ha_from), arm_side)
 		if orient.has("hand%d" % i): glove[i].basis = orient["hand%d" % i]
-		else: orient_hand(glove[i], ha_from, ha[i], sh_r)
-		set_limb(fore_arm[i], ha_from, _wrist(i, ha_from), _twist(2 + i, ha_from, _wrist(i, ha_from), arm_side))
+		elif _OLD_LIMBTWIST or _OLD_HANDROLL: orient_hand(glove[i], ha_from, ha[i], sh_r)
+		else:
+			# the hand rolls with its forearm (the forearm's carried twist, `fa_side`); from the shoulder line it flipped
+			# half a turn whenever the arm pointed along it (crashes: 211 deg in one frame, BMX_SKEL_AUDIT)
+			orient_hand(glove[i], ha_from, ha[i], fa_side if fa_side.length_squared() > 1e-8 else sh_r)
+		set_limb(fore_arm[i], ha_from, _wrist(i, ha_from), fa_side)
 		_curl_to(i, float(orient.get("curl%d" % i, GloveFingers.RELAXED)), 3.6 * cdt)
 		if skeleton: skeleton.fin[i] = null; skeleton.lever[i] = 0.0; skeleton.pull[i] = 0.0   # (clips / ragdoll: no lever, one curl)
 		set_limb(thigh[i], kn_from, kn[i], _twist(4 + i, kn_from, kn[i], leg_side))
@@ -1432,6 +1468,7 @@ func _pose_from_points(P: Array, roots: Dictionary, orient: Dictionary) -> void:
 ## tests (BMX_TWIST_PROBE=1): how fast each arm / leg tube turns about its own length while posed from points (the
 ## crash): TWIST lines every 2 s, mean and max deg per frame over 8 limbs
 static var _OLD_LIMBTWIST := Env.raw("BMX_OLD_LIMBTWIST") != ""
+static var _OLD_HANDROLL := Env.raw("BMX_OLD_HANDROLL") != ""   # crashed hands rolled from the shoulder line (flips)
 static var _TWIST_PROBE := Env.raw("BMX_TWIST_PROBE") != ""
 var _tw_prev: Array = []
 var _tw_rag := false
@@ -1516,6 +1553,7 @@ func _sync_skeleton(P: Array) -> void:
 
 ## back on the bike: clear the ragdoll orientations the normal update doesn't set
 func reset_pose() -> void:
+	_so_s = 0.0; _so_up = 0.0; _so_t = 0.0
 	_cap_ok = false
 	if bib_node and is_instance_valid(bib_node) and bib_node.has_method("restart"): bib_node.restart()   # (the race number starts flat: it kept the crash's crumple for a frame)
 	pelvis_mesh.basis = Basis()
@@ -1616,6 +1654,15 @@ const SPIN_CALM_LEFT := 0.08    # share of the bar pull / shoulder turn / hip ro
 var _hd_s := 0.0      # head-down share 0..1 (eased)
 var _hd_on := false
 var _hd_t := 0.0      # time left in this phase
+# spun out / spinning his top cadence (2026-11-28, user: "when the rider spins out he usually looks down, also spinning
+# on max"): the head drops to the drivetrain (SPIN_LOOK_DOWN), with a glance back up the trail every ~1-2 s.
+# BMX_OLD_SPINLOOK=1 = off
+const SPIN_LOOK_DOWN := 0.5
+var _so_s := 0.0      # eased 0..1
+var _so_up := 0.0     # s left of a glance up
+var _so_t := 0.0      # s looking down since the last glance
+var _so_next := 1.5   # s down before the next glance
+static var _OLD_SPINLOOK := Env.raw("BMX_OLD_SPINLOOK") != ""
 var _spr_arm := 0.0   # sprint arm pose 0..1 (quick on, slow off)
 var sm_pitch0 := 0.0
 var sm_pitch_slow := 0.0   # the bike's pitch averaged over ~0.35 s: what the body swings with
@@ -1673,6 +1720,10 @@ const HEEL_TURN_MAX := 0.3     # rad: the heel swivels in (toes out) as the knee
 const ANKLE_ROLL_MAX := 0.21   # rad: the foot rolls onto its edge with the shin's sideways tilt
 const HEEL_OUT_DROP := 0.1     # rad: the outside heel drops leaning into a turn
 static var _OLD_ANKLES := Env.raw("BMX_OLD_ANKLES") != ""
+static var _NECK_PROBE := Env.raw("BMX_NECK_PROBE") != ""
+static var _OLD_NECK := Env.raw("BMX_OLD_NECK") != ""
+const NECK_ROLL := 0.6    # rad: most the head rolls against the spine sideways (neck lateral flexion, soft limit)
+const NECK_BEND := 0.4    # share of that roll the neck itself leans by (it bends from the shoulders up to the head)
 static var _ANKLE_PROBE := Env.raw("BMX_ANKLE_PROBE") != ""   # tests: ANKLE lines
 var _heel_yaw := [0.0, 0.0]
 var _ank_roll := [0.0, 0.0]
@@ -1788,6 +1839,15 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	else:
 		_hd_on = false; _hd_t = randf_range(0.15, 0.4)
 	_hd_s += ((1.0 if _hd_on else 0.0) * _spr_arm - _hd_s) * (1.0 - exp(-(9.0 if _hd_on else 12.0) * minf(dt, 0.1)))
+	var so_in: float = 0.0 if _OLD_SPINLOOK or _num(p, "air") > 0.3 else clampf(_num(p, "spinOut"), 0.0, 1.0)
+	if so_in > 0.3:
+		_so_t += dt
+		if _so_up > 0.0: _so_up -= dt
+		elif _so_t > _so_next: _so_up = randf_range(0.35, 0.6); _so_t = 0.0; _so_next = randf_range(1.1, 2.2)
+	else:
+		_so_t = 0.0; _so_up = 0.0
+	var so_tgt: float = so_in * (0.15 if _so_up > 0.0 else 1.0)
+	_so_s += (so_tgt - _so_s) * (1.0 - exp(-(6.0 if so_tgt > _so_s else 8.0) * minf(dt, 0.1)))
 	var fat_tgt: float = pow(1.0 - clampf(_num(p, "stamina", 1.0), 0.0, 1.0), 1.5) * _spr_arm
 	_fat += (fat_tgt - _fat) * (1.0 - exp(-(2.0 if fat_tgt > _fat else 0.6) * minf(dt, 0.1)))
 	var fat: float = _fat
@@ -2651,9 +2711,27 @@ func update_pose(dt: float, p: Dictionary) -> void:
 	var yaw: float = clampf((_num(p, "steer") * 1.2 + _num(p, "yawRate") * 0.15) * sty.headTurn + lead * 0.8, -0.8, 0.8) + sty.headYaw + _num(p, "lookYaw") - 0.95 * awhip + head_yaw_hold + _pk_hy
 	# (+ the pedalling rock taken back out: the bike rocks under a level head)
 	var rx: float = (_num(p, "headRoll") if p.get("headRoll") != null else _num(p, "lean") * 0.6) + sty.headRoll + _num(p, "rockRoll") * minf(steady, 1.0)
-	var rz: float = -0.12 * (ang - 0.72) + 0.04 * sin(t * 3.3) * wig - sty.headTilt * (1.0 - 0.6 * relax) + 0.12 * tall + _num(p, "lookPitch") - head_kick - _pk_hp - SPR_HEAD_DOWN * _hd_s
+	var rz: float = -0.12 * (ang - 0.72) + 0.04 * sin(t * 3.3) * wig - sty.headTilt * (1.0 - 0.6 * relax) + 0.12 * tall + _num(p, "lookPitch") - head_kick - _pk_hp - maxf(SPR_HEAD_DOWN * _hd_s, SPIN_LOOK_DOWN * _so_s)
+	# NECK ON THE SPINE (2026-11-28, user: "helmet placement on head or neck is off leaning and using the right stick"): the
+	# head's offset off the chest was straight up in the BIKE's frame and its roll (kept near world level) free, so with the
+	# torso tilted sideways (counter-roll, right stick) the neck stood off the spine's line and the head was rolled up to ~55 deg
+	# against the shoulders. Now the neck leaves the chest along the spine's own sideways tilt and bends from there toward the
+	# head, and the head's roll against the spine is held to a neck's range (NECK_ROLL, soft). BMX_OLD_NECK=1 = before
+	if not _OLD_NECK and not standing:
+		var sp_v: Vector3 = chest - hip
+		var a_sp: float = atan2(sp_v.z, maxf(0.05, sp_v.y))   # the spine's sideways tilt in the bike's frame (+ = to +z)
+		var rel: float = wrapf(rx - a_sp, -PI, PI)
+		var rel_c: float = NECK_ROLL * tanh(rel / NECK_ROLL)
+		rx = a_sp + rel_c
+		var nd: Vector3 = head_p - chest
+		head_p = chest + Basis(Vector3.RIGHT, a_sp + NECK_BEND * rel_c) * nd
+		J[0] = head_p
 	head.transform = Transform3D(GEAR.euler_xyz(rx, yaw, rz), head_p)
 	_pose_neck()
+	if _NECK_PROBE and Engine.get_process_frames() % 20 == 0 and not standing:
+		var sp_d: Vector3 = chest - hip
+		var nk_d: Vector3 = head_p - chest
+		print("NECKP spine_side=%+.0f neck_side=%+.0f head_roll=%+.0f body_roll=%+.0f lat=%+.2f air=%.1f" % [rad_to_deg(atan2(sp_d.z, sp_d.y)), rad_to_deg(atan2(nk_d.z, nk_d.y)), rad_to_deg(rx), rad_to_deg(_body_roll), _num(p, "bodyLat"), air])
 
 	var right := Vector3(0, 0, 1)
 	var max_turn := BEND_RATE * minf(dt, 0.1) if dt > 0.0 else PI

@@ -158,6 +158,29 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
 - Speed: `p_bike_step` 0.70 -> 0.62 ms a frame. `BMX_CSPERF=1` = where a C# step's time goes.
 
 ### Ride physics (`bike_physics.gd`)
+- **Real air drag + real cadence (2026-11-28, user: "the Garmin speed feels high", "also cadence")**. The computer showed
+  the physics speed honestly; the bike was too fast: drag per kg = airDrag / topSpeed^2 = 0.0021 /m on the DH, the CdA of
+  ~0.32 m^2 (less than a road racer's tuck). `BikePhysics.DRAG_REAL` 1.69 (x every drag term, `drag_k()`) = 0.0036 /m:
+  an upright DH rider with pads (CdA ~0.55, 92 kg); the stick tuck (-42 %) lands at a real race tuck. The sliders keep
+  their numbers (Tune unchanged). Coast on 12 deg (`slope_stress compare=1`) 104 -> 88 km/h (real: ~86). Demo AI 110 s
+  seeds 4242 / 5: average ~50 km/h either way (it brakes 15 -> 13 % / 19 -> 14 % of the time: the air now does part of
+  the braking), max 67 -> 65 km/h, every built jump on its landing, no crash; the energy probe's air term now matches
+  `TrailCourse.VA_DRAG` 0.0033 (it was measured as that but the physics had ~0.002), so the trail layout needs no
+  change. `slope_stress`'s coast model includes the automatic speed tuck now (56 / 56). Cadence: the cranks were
+  w_front / (2.78 x gear_k x topSpeed) (64 % of a real drivetrain, and the Top speed slider moved it; sprint x1.3 made
+  them outrun the wheel); now the rear wheel / the real ratio (`drive_ratio()` = 34T ring / cog = 2.125 x gear_k; the
+  BMX 25 / 9 = 2.78), legs only spin up ahead from slow. Used by the drawn cranks, the rear wheel's pawl spin-up, the
+  freewheel overrun (`ride_audio`) and the garage rollers. The computer's cadence cap 150 -> 220. `BMX_CAD_PROBE=1`
+  (`CADPROBE cad= real_rpm=`): within the display's smoothing of the real number. `BMX_OLD_DRAG=1` / `BMX_OLD_CADENCE=1`
+  = before. Same day: **real spin-out** (`spin_top()`: the drive fades to 0 at `SPIN_RPM` 150 / `SPIN_SPRINT` 175 rpm in
+  the gear you're in: 16T ~44 km/h, 34 x 11 ~64; it was pedalTop x gear_k x topSpeed = ~240 rpm in every cog, so the
+  pedalTop / Top speed sliders no longer move the pedalling top speed; `BMX_OLD_SPINOUT=1`). Straight pedal test in the
+  16T: tops out at ~145 rpm / 41 km/h. **Chain skip on a shift under load** (`shift()`: `chain_slip` = `CHAIN_SLIP_T`
+  0.2 x (0.4 + 0.6 x load) s, drive x (1 - `chain_slip_k`), the cranks fall forward `CHAIN_SLIP_LURCH` 7 rad/s; clean
+  coasting / in the air; `BMX_OLD_CHAINSLIP=1`; `BMX_SHIFT` lines print it). The demo AI now shifts by cadence (> 115 /
+  < 65 rpm, `dev/demo_pilot.gd`). **Head down spun out** (`spin_out_k` from 90 % of the spin-out speed with the gas on ->
+  pose input `spinOut` -> `rider.gd` `SPIN_LOOK_DOWN` 0.5 rad, a glance up every 1.1-2.2 s; `BMX_OLD_SPINLOOK=1`).
+  Playground suite not re-run (speeds moved). Not ridden by the user yet.
 - **Energy account (2026-11-22, `BMX_ENERGY_PROBE=1`)**: every 5 s an `ENERGY` line, J/kg since the start: the drive
   stage's terms (pedal, brakes, pump, rolling, air, grade, manual), the change across each other stage (`S_steer` slides,
   `S_move` hits, `S_vertical` springs / landings, `S_lip`, ...) and `height` (g x height change). First result (seed 4242,
@@ -1391,6 +1414,50 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   at the back, the four variants in front). Seen: close-ups + two rides (seeds 4242, 80019), no script errors; NOT measured: frame time with many bushes in
   view, the wind sway, how distant leaves thin out (mip alpha). Poly Haven's `searsia_burchellii` (1.4M polygons, ~35 MB glTF) was looked at as a scan source
   and not used: it would have to be decimated + baked to cards first.
+- **Shell bushes, near LOD (2026-11-28, user: "bushes are too bad quality")**: near the rider (full to 36 m, gone by 48 m,
+  `CardTree.add_twin` / `twin()` now also takes "bush" / "bush1" / "bush2" / "bushdry") a bush is `CardBush.shell_mesh`:
+  108-164 smaller twig cards (0.27-0.6 units) through the volume, thickest outside, mostly upright, tipping up to ~35 deg
+  on the top, facing roughly out, mirrored at random, tips past the outline (ragged silhouette instead of the old flat
+  walls), lit as one volume (`volume_normals`), albedo x1.12. Past 48 m and in the shadow pass the old upright-card bush
+  (`CardBush.mesh`) as before, as new fade mode 6 in `deco_fade.gdshaderinc` (a LOD1 with no billboard after it: drawn to
+  the far fade). Cost at the seed 4242 start: +0.1M triangles (+1 %), +13 draw calls. Gallery `tools/bush_gallery.tscn`:
+  back row LOD1, front row shell. `BMX_OLD_BUSH2=1` = no near LOD. Free atlases checked (ShareTextures CC0: 1K only, no
+  better than the beech atlas; the paid Poliigon leaf atlases, e.g. beautyberry, are the next step up, gitignored like
+  the beech). Not ridden by the user yet; the look is only a moderate step (they still read dark green from the chase cam).
+- **Megascans scans in the world (2026-11-28, user: "bushes are too bad quality", "use all", "billboards far away", grass clumps
+  beside the road, rocks, stumps; `scripts/world/scan_plants.gd` `ScanPlants`)**. The user claimed Megascans on Fab in 2024 (Fab
+  Standard licence: may ship in the game, the FILES may not be redistributed: `assets/plants_scan/` is **gitignored**, a clone without
+  it keeps the card bushes / rock set). 34 downloads: bushes (blackberry, boxwood, downy willow, elderberry, bilberry, bracken,
+  dead shrubs, rhazya, alpine bearberry, crowberry, lingonberry, 3 desert cacti), grass clumps (tufted, rough meadow, wild, dry,
+  marram, tundra, cotton, ribbon, 2 grass-clump sets from Downloads\TONDACH), rocks (tundra boulder / mossy boulder / stone,
+  sandstone boulder, desert western rock), 2 tundra ground patches, 3 stumps. Pipeline (re-run after new downloads; unzip each into
+  its own folder): `blender -b -P tools/make_scan_plants.py -- <dir> godot/assets/plants_scan` (FBX per LOD, glTF "UE" packages with
+  SM_<id>_Var<X>_LOD<n> nodes, single glTF / glb; near = finest LOD under 5000 triangles, far = Megascans' billboard LOD3 or a
+  decimated LOD; solids decimated to 3000 / 450) then `python tools/pack_scan_plant_textures.py <dir> godot/assets/plants_scan`
+  (col.png colour + opacity, nrm.png normal + translucency, bcol / bnrm the billboard's; UE normals green-flipped; transparent texels
+  filled with leaf colour (black there darkened the mips); colour LIFTED to linear 0.12 / solids 0.14, never darkened: the classic
+  FBX downloads' maps come out ~10x darker than the UE / glTF ones; single-channel maps keep their value in R), then Godot import
+  with compress/mode=2 + mipmaps (billboards / grass / small plants size_limit 1024). Lists `sp_<short>_<var>`: far mesh everywhere
+  (fade mode 6), its near twin `_lod0` (mode 4, `Terrain._plant_twin`, the plant's material; the far list a billboard material
+  `sp_<short>_bb`, flat cards turned to the camera: `deco_cards` `face_cam`). Leafy meshes get the card bushes' volume normals +
+  baked AO (`ScanPlants._volume`). Where: every bush put (`TerrainChunkBuilder._scan_plant`, `ScanPlants.families` by biome),
+  grass clumps along both trail edges (`_roadside_grass`, `grass_families`), part of the rocks in tundra (+ ground patches) / dry
+  country (`_scan_rock`), forest stumps with colliders (`_stumps`). Each chunk uses <= 2 species per family and 2 variants each
+  (draw calls); grass / patches cast no shadow. Measured (start views, other GPU apps busy): seed 4242 green start triangles +1 %,
+  draws 2289 -> 2584 (+13 %); seed 5 forest triangles -3 %, draws +4 %. `BMX_OLD_PLANTS=1` = off; tests `BMX_PLANT_ALB`,
+  `BMX_PLANT_NONRM`, `BMX_PLANT_RAWNRM`; gallery `res://tools/bush_gallery.tscn -- out.png scan=1`. Biome test spots (with
+  `APPDATA=<temp> BMX_ROUTE_BIOME=0`): cold seed 2 start, dry seed 4242 x 60, forest seed 5 x 160 z -29.5, wet seed 12 x 2244 z -960.6.
+  **Tundra ground** (user: "tundra as realistic as the road"): the 4 Megascans surfaces (icelandic moss, nordic moss, icelandic
+  stony ground, icelandic gravel) packed by root `tools/make_tundra_scans.py <dir> godot/assets/plants_scan/tundra_ground` into two
+  Texture2DArrays (4 x 1024 px strips, the trail scans' format: colour / its mean x 0.5 + height, normal + roughness; it writes
+  their .import as 2d_array_texture and prints TUN_MEAN for ground.gdshader). Each chunk with cold country bakes `tundra_img`
+  (R8, TerrainField.biome b_cold on a 13 x 13 grid; `Terrain._tundra_ground` sets tundra_tex / tun_col / tun_nr / tundra_on).
+  `ground.gdshader` tundra block (after the off-trail relief): on the land (not the dirt, not rock faces) two mosses in slow
+  patches, the stony ground through them where thin / on slopes, gravel in some patches, height-blended; hue = TUN_HUE 0.4 of
+  the scans' own (theirs read very orange) + the land's, brightness the land's (it sits under the grass carpet); relief into
+  lslope. Seen at seed 2's start (cold): flat green -> olive moss with stones. Draws / triangles unchanged. `BMX_OLD_TUNDRA=1` = off.
+  Not done: snow on scans, rock tone matching the ground, the title land, the grass carpet's colour in tundra (still the
+  land's baked green).
 - **Card trees (2026-11-26, user: "same trick as the bushes for trees", "no low poly trees, make LODs from our new ones",
   "far LOD as a baked PNG billboard", "roots flare at the bottom, branches for the leafy ones", "leaves too big, realistic
   scales, trunk thickness and height, can vary")**: `world/card_tree.gd` (`CardTree`). `BMX_OLD_TREES=1` = the old small
@@ -1499,6 +1566,24 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   Pose saved per bike in `rider.cfg`; edited in the garage Rider tab and the tuning card's Rider tab.
 - The torso is **skinned to 5 spine bones** (Skeleton3D "Spine", identity binds) so it bends; its
   `custom_aabb` follows the body (needed in crashes when the rider node sits at the world origin).
+- **Skinned neck + skeleton audit (2026-11-28, user: "do a proper neck", "I will later use a real humanoid", "check the
+  other limbs, whole torso")**. The neck is no longer a straight tube placed by `set_limb`: `RiderSkeleton.make_neck` builds
+  it the way an imported character's is, authored in the humanoid skeleton's REST pose, binds = inverse bone rests (what a
+  glTF / FBX skin carries), weights Neck at the collar easing to Head up the neck (`NECK_W0` .. `NECK_W1`). The bones move it
+  (`follow`), so the head turning / nodding bends and twists it along its length; it runs `NECK_DOWN` into the collar and
+  `NECK_UP` into the helmet. `BMX_OLD_NECKSKIN=1` = the old tube; `BMX_NECK_SHOW=1|xray` draws it magenta (xray: through
+  everything; unlit, so a tube side-on reads as a flat strip). **`BMX_SKEL_AUDIT=1`** checks whether the skeleton can drive a
+  real skinned humanoid: every body bone vs its drawn joint (m), bone y aimed at its child (deg), scale / skew in the global
+  poses, knees bending the anatomical way, frame-to-frame turns (`SKELAUDIT` every 2 s, `SKELJUMP` > 45 deg in a frame, with
+  the folds). Riding 30 s: 0.0 mm, <= 0.0001 deg, no scale / skew, no wrong-way knees, worst turn 16 deg a frame (pedalling).
+  Crashes found arms rolling 170-230 deg in one frame (the elbow / knee bend direction is noise when a limb is near straight):
+  `RiderSkeleton._carry_fold` carries last frame's bend side there and keeps a bend reading backwards on the side it had
+  (`BMX_OLD_SKELTWIST=1`); and the DRAWN crashed glove flipped the same way (rolled from the shoulder line): it now rolls with
+  its forearm's carried twist (`BMX_OLD_HANDROLL=1`). After: no flips on seeds 4242 / 5 / 12 / 77 crashes; ~45-57 deg a frame
+  is left only at the most violent tumbling (the bend itself whipping round). Rest neck length 11.7 cm (Godot's humanoid
+  profile x `SCALE`), drawn 13-16 cm. The torso is still skinned to its own 5-bone `Spine` skeleton (the humanoid's Spine /
+  Chest / UpperChest follow the same curve); a real body mesh would replace that, the neck, limbs and head parts.
+- **Neck on the spine (2026-11-28, user: "helmet placement on head / neck is off leaning and using the right stick")**: the head sat chest + a fixed offset straight up in the BIKE's frame with its roll kept near world level, so with the torso tilted sideways (counter-roll, right stick) the helmet hung off the shoulders' line, rolled up to ~55 deg against the spine. Now (`rider.gd`, after the head pose) the neck leaves the chest along the spine's sideways tilt, bends `NECK_BEND` 0.4 of the head's roll, and the head's roll against the spine is soft-limited to `NECK_ROLL` 0.6 rad (tanh). Deep lean + stick into the turn: head vs spine 54 -> ~31 deg; the head is a little less level in the world. `BMX_OLD_NECK=1` = before, `BMX_NECK_PROBE=1` = `NECKP` lines (spine / neck side tilt, head roll, body roll, stick). Not ridden by the user yet.
 - **Idle life at a stop (2026-11-27, user + Riders Republic: "the bike is alive, micro movements when he stands")**: `Game._idle_life`,
   drawing only, fades in once settled on the foot: weight shifts every 1.5-5 s tip the bike up to `IDLE_SHIFT` 0.07 rad more onto /
   off the foot, the bars are turned up to `IDLE_BAR` 0.24 rad and held (+ a slow drift), (a suspension bob every few s was tried and removed: it read as a landing). Critically damped springs, own RNG. `BMX_OLD_IDLE=1` = off,
@@ -1773,6 +1858,24 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   `BMX_LEVEL=playground BMX_STRAIGHT=1 BMX_PAD=1 BMX_PG_AT=roller_0.3 BMX_PG_SPEED=25 BMX_BODY=slowback:1.0`. Every crash
   now writes `CRASH <reason> v= vy= pitch= ground= ... stick= man= armed= pw=` into the session log (so F8 / crash reports
   say why). Suite identical with / without (the suite rides hands off), stress 56 / 56.
+- **Pop snap + back-wheel landing slap (2026-11-28, user: "jumping is still glitchy, specially on the back wheel", "landing
+  sometimes weird under weird angles")**. (1) `_hop_pop` set the drawn nose kick `hop_nose` (added to the drawn pitch,
+  `BikeRig.pose`) to 0.22-0.45 rad in ONE step: every pop (player, auto pop at a lip, hop out of a manual = the biggest)
+  tipped bike + rider 13-26 deg in one frame. Now the pop sets a target (`_hop_nose_t`) and the kick follows through two
+  easing stages (`HOP_NOSE_TAU` 0.04 s, peaks ~0.1 s in, starts from rest). dtable_36 test rider: rider tilt per frame at
+  take-off 0.33 -> 0.06 rad. `BMX_OLD_HOPNOSE=1` = the step. (2) Landed rear-first nose up, `edge_k` (meant for rolling off
+  a drop's deck: front axle high over the ground, rear on level ground) read every such landing as an edge and pulled the
+  nose down 6x harder, its clamp letting it free-fall: front slammed at ~5 rad/s in 0.1 s. Now no `edge_k` for `SETDOWN_T`
+  0.6 s after a touch-down, and in that window the nose may only fall at `SETDOWN_W0` 0.5 + `SETDOWN_K` 4 x (pitch - ground
+  slope), max 2 rad/s (`setdown`), both + `SETDOWN_HIT` 0.6 rad/s per m/s the landing hit the ground faster than
+  `SETDOWN_HIT0` 5 m/s (`_vn_td`; user: "a huge jump should slam, realistic"): table_1.5 (5.6 m/s in) front down in 0.17 s at
+  <= 2.4 rad/s (was 0.13 s, 4.1), dtable_36 overshot to flat (7.2 m/s) 0.12 s at <= 4.5 rad/s, no one-tick dead stop.
+  `BMX_OLD_SETDOWN=1` = before, `BMX_SETDOWN_PROBE=1` prints `SETDOWN` lines. Stress 56 / 56; suite (stale baseline) vs old:
+  worse 8 -> 5, roller_0.6 one more small energy check. Tests: `BMX_JDUMP` rows now end with the pivot fix, tyre lift, which
+  wheels are off, each drawn axle over the drawn ground, man_a, and the rider node in the bike's root (pos, euler, parent);
+  judge per-frame jumps by game time (`t`), not physics frames (test windows draw unevenly). `BMX_LAND_SHOT` takes
+  `BMX_LAND_N` / `BMX_LAND_STEP`. User rode it: "feels better". Sideways / nose-down landings with the test rider
+  (`BMX_PG_PILOT_YAW` / `_PITCH`) showed no other glitch beyond those two (the aids themselves snap the bike in the air).
 - **Landing body soaks the hit (2026-11-23, user: "when we land the whole body is stiff", "all jumps look small")**.
   Drawing only (`rider.gd`, `game.gd`), physics unchanged. The physics legs (`body_y - y`) already compressed 17-26 cm,
   but the drawn hips dipped 0-10 cm, the same on every jump. Found with the new probe `BMX_LANDBODY=1` (`LANDBODY` per
@@ -1969,7 +2072,7 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   No lock-out, no speed cut in direct mode (`_tip_over` only in the old mode). Rear brake / stick forward lower the target; a sprint stamp raises it.
   Nose manual: same spring, tops out at `noseBalance` + 0.12, never throws him over. `wheelieDrop` x4 in direct mode. **Turning on the back wheel**:
   the turn and the lean asked are capped at what `manLean` (0.42 rad) gives at that speed (G tan / v: ~21 m radius at 36 km/h, tighter slower), x
-  `manTurn`; no FRONT WASHED OUT verdict while balancing. The drawn pitch sits ~0.13-0.17 rad under `man_a`. Tests: `BMX_BODY=pull:<0..1>`
+  `manTurn`; no FRONT WASHED OUT verdict while balancing. **Drawn (2026-11-28, user: "turn the bars and lean that way like irl")**: on the back wheel rider + bike lean TOGETHER by the turn's own lean (atan(lat_a / g) x `MAN_LEAN_K` 1.1 + `MAN_LEAN_IN` x steer, body only `MAN_BODY_OFF` 12 % more upright) and the bars turn into the turn (`MAN_BAR` 0.42 rad x steer, `Game._bar_draw`), faded by `man_lk`; drawing only, `BMX_OLD_MANLEAN=1` = before, `BMX_MAN_PROBE` prints `lk= bike_lean= counter=`. The drawn pitch sits ~0.13-0.17 rad under `man_a`. Tests: `BMX_BODY=pull:<0..1>`
   (+ `BMX_STRAIGHT=1 BMX_PAD=1 BMX_MAN_PROBE=1 BMX_CRASH_LOG=1`): 0.5 -> a 0.28, 0.7 -> 0.59 steady in the zone, 1.0 -> falls after ~0.6 s. The old
   **It starts from a quick pull, not from how far the stick is** (user: the manual "overrode our leaning", leaning back / forward on the track
   changes the cornering): `_man_armed` is set when the stick goes centre -> back past 0.5 within `manPullTime` (0.25 s, `_pull_age`; 0 = any pull),
@@ -2445,6 +2548,14 @@ Tests: `BMX_BODY=holdback` (`SPIN` lines), `BMX_BODY=spin360` (`YAW` lines; air-
   "6dgoggles" maps from the download are not used). Neither is recoloured: the Shell / Peak / Goggles colour rows are hidden for them. `Rider.HELMET_FITS` = where each sits
   (scale 1.12, a little back + low; the dark face sphere is smaller for them); test override `BMX_HELMET_FIT=x,y,scale,tilt`. Real brand logos on the textures (6D, TLD,
   FXR, Oakley): check before sharing the game.
+  **Real size (2026-11-28, user: "aren't our helmets all huge?")**: the glbs are modelled at real size (~34 cm long) but were
+  drawn x1.3 (stock: 45 x 38 x 31 cm) / x1.12 (models), ~40 / 20 % over a real full-face helmet. All now x `Rider.HELMET_REAL`
+  0.92 (~31-32 cm long, `Rider.helmet_fit(id)`); our goggles + strap (GOGGLE_FIT, sized for x1.3) are built as before and their
+  node scaled by scale / `GOGGLE_FIT_SCALE` (the strap's shell hug is read in that unscaled space), the built-in fallback helmet's
+  R likewise (`gear_k()`). The action cam keeps its real size. `BMX_OLD_HELMETSIZE=1` = the old sizes. `PartThumbs.THUMB_VER`
+  7 -> 8 (head / rider pictures): **re-run `tools/bake_thumbs.ps1`** before a release. Test aid `BMX_PHOTO_HEAD=dist,yaw_deg,up`
+  (+ `BMX_PHOTO=secs`): the photo camera that far from the rider's head (yaw 0 = in front). The garage camera follows a real
+  pad's right stick (raw axes), so garage test shots drift when one is plugged in: use photo mode in a ride.
   **The rider always wears a helmet (no bare head, user decision):** `Rider.set_look` forces helmet on; hair only shows as the tuft / tail coming out under the back
   of the helmet (`Hair.HELMET_STYLES`: none = short, long, ponytail, braid; `hair.gd` braid = the ponytail tie, stiffer). Menus: title-menu Character > HELMET tab (models, hair style,
   hair colour), garage Kit tab + tuning card Look > Helmet (same pickers + hair colour row). Old saved `helmetOn = 0` is ignored.
@@ -4306,7 +4417,7 @@ ide_<date>.replay` (test runs: `replays/tests/`), zstd, ~4 MB a
 - Garmin-style computer bottom-left (made-up brand **CHARMIN** on the bezel between the ◀ ▶ buttons; which page = a segmented bar along the screen's bottom edge, `_page_bar`); six pages flipped with the ◀ ▶ bezel buttons under the screen (mouse):
   **RIDE** speed, slope / grade, gear (the shifter: n/N, cassette, teeth; flashes on a shift; Settings › Gear
   shifter hides the row) · **TRIP** ride time, distance, avg / max, odometer (`records.distance`, now counted) ·
-  **EFFORT** heart rate (made up from power, sprint, stamina; beating heart, zone), cadence (from `crank`),
+  **EFFORT** heart rate (made up from power, sprint, stamina; beating heart, zone), cadence (from `crank`, which turns at the real gear ratio since 2026-11-28),
   power (from `a_drive`), stamina, gear ratio · **AIR** last jump, height, air time, best, jumps, tricks
   (`BikePhysics._land_trick` → `game.on_trick` → `hud.on_trick`) · **ELEV** elevation, ascent / descent, the last
   30 s + the next 400 m of trail coloured by steepness (from `course.E`) · **MAP** (`MapView`) heading-up 2D topo,
@@ -4370,7 +4481,7 @@ ide_<date>.replay` (test runs: `replays/tests/`), zstd, ~4 MB a
   look ahead, follow speed, shake, mouse, re-centre after a drag, keep the rider in view (`_keep_rider_in_view`),
   fade things at the lens (`deco.gdshader` dithers trees / rocks within ~3 m of the camera; globals `cam_see` / `cam_eye`).
 - One tuning card (`TuneCard`): tabs Ride (Steering, Lean, Grip, Speed, Suspension, Jumps), Rider (Body, Spine,
-  Head, Arms, Legs, Motion, Physics) Look (Kits, Helmet, Clothes) and **Sound › Freewheel** (every `FreewheelSynth` knob: volume, engagement, pitch, ring, brightness, snap, detune, pawl unevenness, wobble…; built-in hub presets + the player's own named presets with Save as / Delete, saved in `user://freewheel.cfg` by `scripts/core/freewheel_sound.gd`; Preview spins the wheel while standing; since 2026-11-21 also the wheel's turn + speed: `warble` = loudness / brightness swell once per wheel turn (default only 0.04: at 0.25 the user heard a wobbly wheel), `repeat` = share of the timing / strength pattern that comes back every turn, and above `sp_from`..`sp_full` km/h the clicks go higher / brighter / shorter, `sp_pitch` / `sp_bright` / `sp_ring`, and the snap gets quieter + rounder, `sp_soft` (without it ~240 full-band snaps a second put half the energy above 14 kHz: the user heard it as distortion; measure with numpy band energies on the render tool's WAVs), applied per click via `FreewheelSynth.SetSpeedParams` + `Render(.., fast)`, never by resampling; all 0 = the old speed-blind sound. Render it alone: `-s res://tools/freewheel_render.gd --headless -- out.wav kmh=60 [sweep=1 secs=10 <key>=v]`). Skids play the gravel synth louder and grittier (no separate hiss). P / K / L open it on Ride / Rider / Look,
+  Head, Arms, Legs, Motion, Physics) Look (Kits, Helmet, Clothes) and **Sound › Freewheel** (every `FreewheelSynth` knob: volume, engagement, pitch, ring, brightness, snap, detune, pawl unevenness, wobble…; built-in hub presets + the player's own named presets with Save as / Delete, saved in `user://freewheel.cfg` by `scripts/core/freewheel_sound.gd`; Preview spins the wheel while standing; since 2026-11-21 also the wheel's turn + speed: `warble` = loudness / brightness swell once per wheel turn (default only 0.04: at 0.25 the user heard a wobbly wheel), `repeat` = share of the timing / strength pattern that comes back every turn, and above `sp_from`..`sp_full` km/h the clicks go higher / brighter / shorter, `sp_pitch` / `sp_bright` / `sp_ring`, and the snap gets quieter + rounder, `sp_soft` (without it ~240 full-band snaps a second put half the energy above 14 kHz: the user heard it as distortion; measure with numpy band energies on the render tool's WAVs), applied per click via `FreewheelSynth.SetSpeedParams` + `Render(.., fast)`, never by resampling; all 0 = the old speed-blind sound. Render it alone: `-s res://tools/freewheel_render.gd --headless -- out.wav kmh=60 [sweep=1 secs=10 <key>=v]`). **Rebuilt 2026-11-28** (`docs/research/freewheel.md`: hub mechanisms + measured vs the recording): clicks fire on a fixed tooth grid (per-tooth offset that repeats each turn + a tiny random one, phased-pawl odd / even offset `PHASE_AB`, 2-3-tick pawl flams; before, chained random intervals + a 4-step pawl pattern gave no click-rate pitch: periodicity 0.1-0.2 -> 0.45-0.53, recording 0.40-0.44); the snap is low-passed (3 x 6 kHz) and the top modes cut, a small wheel body at 0.76 / 1.1 kHz (centroid 7-12 -> 5.4 kHz, recording 5.3-6; it was half its energy over 12.5 kHz); loudness now rises with speed (+7.6 dB 15 -> 80 km/h, was flat); the softer / shorter clicks follow the CLICK RATE vs the pawl drop time (`drop_ms` 2 ms: pawls float), not km/h (`sp_from` / `sp_full` removed); faster = harder hits (`sp_hit` 1: the next tooth runs into the falling pawl, impact = drop speed + tooth speed x sin(ramp): 15 -> 60 km/h +8.8 dB, centre 5.8 -> 7.0 kHz; user: "I don't feel any speed" without it), `sp_pitch` / `sp_bright` 0 (freewheel.cfg ver 3 moves saves at the old defaults); slow ticks are full loudness from 0.25 m/s (`fw_amp` ramp 0.12-0.25 m/s, was 0.1-1.0); resonators are coupled-form (retune without an amplitude step). New presets by mechanism (3-pawl 18, 4-pawl 44, star ratchet 54, ring drive 72, 6-pawl 120, sprag = silent). `BMX_OLD_FWSYNTH=1` = the synth before. Not heard by the user yet. Skids play the gravel synth louder and grittier (no separate hiss). P / K / L open it on Ride / Rider / Look,
   **Ride presets** sit on top of every Ride / Rider › Physics category (`scripts/core/tune_presets.gd`: built-ins Default, Flowy, Grippy, Drifty, Floaty air, Fast + the player's own via Save as / Delete, in `user://tune_presets.cfg`; an own preset follows its sliders). Reset puts the category back to the active preset's values. Quick tune card keeps the pinned (☆) sliders. Test: `BMX_PANEL=ride|rider|look|sound`
   + `BMX_PANEL_CAT=<n>`.
 

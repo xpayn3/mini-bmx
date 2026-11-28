@@ -62,6 +62,19 @@ static func trail_textures() -> Array:
 const TRAIL_SCAN2 := {"ts_rock_col": "rocky_trail_col", "ts_rock_nr": "rocky_trail_nr", "ts_pack_col": "forest_ground_04_col", "ts_pack_nr": "forest_ground_04_nr",
 	"ts_dry_col": "dry_ground_rocks_col", "ts_dry_nr": "dry_ground_rocks_nr", "ts_lit_col": "forrest_ground_01_col", "ts_lit_nr": "forrest_ground_01_nr"}
 static var _scan2: Dictionary = {}
+## tundra ground (2026-11-28): Megascans moss / stony ground / gravel as two Texture2DArrays (tools/make_tundra_scans.py;
+## gitignored with the plants: none = the land's baked colour as before). BMX_OLD_TUNDRA=1 = off
+static var OLD_TUNDRA := Env.raw("BMX_OLD_TUNDRA") == "1"
+const TUN_DIR := "res://assets/plants_scan/tundra_ground/"
+static var _tun_tex: Array = []
+static func _tundra_ground() -> bool:
+	if OLD_TUNDRA: return false
+	if _tun_tex.is_empty():
+		if not ResourceLoader.exists(TUN_DIR + "tundra_col.png"):
+			_tun_tex = [null]
+			return false
+		_tun_tex = [load(TUN_DIR + "tundra_col.png"), load(TUN_DIR + "tundra_nr.png")]
+	return _tun_tex[0] != null
 static func set_trail_scans(mat: ShaderMaterial) -> void:
 	if Env.s("BMX_OLD_TRAILSCAN") == "1": return
 	if _scan2.is_empty():
@@ -524,7 +537,7 @@ func _bushes_add(k: Vector2i, o: Dictionary) -> Array:
 	var lists: Dictionary = o.get("lists", {})
 	var counts: Dictionary = o.get("counts", {})
 	var cid := _bush_cid(k)
-	for name in BUSH_LISTS:
+	for name in BUSH_LISTS + ScanPlants.BUSHY:
 		var cnt: int = counts.get(name, 0)
 		if cnt == 0 or not lists.has(name) or not TerrainGeo.MESH.has(name): continue
 		var ab: AABB = (TerrainGeo.MESH[name] as Mesh).get_aabb()
@@ -1013,6 +1026,30 @@ func set_view_scale(s: float) -> void:
 				mi.visibility_range_end = float(mi.get_meta("vis")) * view_scale
 
 
+## a scanned plant's near twin (ScanPlants): the far mesh runs to the far fade (mode 6, the shadow caster), the near one
+## shows within the card band (mode 4: full to 36 m, gone by 48 m), no shadow of its own
+static func _plant_twin(far: MultiMeshInstance3D, list: String) -> void:
+	if not TerrainGeo.MESH.has(list + "_lod0"):
+		return
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_custom_data = far.multimesh.use_custom_data
+	mm.use_colors = far.multimesh.use_colors
+	mm.mesh = TerrainGeo.MESH[list + "_lod0"]
+	mm.instance_count = far.multimesh.instance_count
+	mm.buffer = far.multimesh.buffer
+	var mi := MultiMeshInstance3D.new()
+	mi.name = String(far.name) + "_lod0"
+	mi.multimesh = mm
+	mi.material_override = TerrainGeo.MAT[ScanPlants.near_material_of(list)]
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	far.get_parent().add_child(mi)
+	mi.transform = far.transform
+	mi.visibility_range_end = 60.0
+	far.set_instance_shader_parameter("fade_mode", 6.0)
+	mi.set_instance_shader_parameter("fade_mode", 4.0)
+
+
 ## a rock list's LOD0 (rock_gen.gd): the same instances drawn with the fine mesh near the rider (deco_fade mode 4),
 ## the list itself becomes LOD1 + the shadow caster at every distance (mode 3)
 static func _rock_twin(lod1: MultiMeshInstance3D, mesh_name: String) -> void:
@@ -1150,6 +1187,11 @@ func _finalize_out(k: Vector2i, o: Dictionary, chunk_n: int) -> void:
 	mat.set_shader_parameter("trail_tex", ImageTexture.create_from_image(o["trail_img"]))
 	mat.set_shader_parameter("trail2_tex", ImageTexture.create_from_image(o["trail2_img"]))
 	mat.set_shader_parameter("trail3_tex", ImageTexture.create_from_image(o["trail3_img"]))
+	if o.has("tundra_img") and _tundra_ground():   # (chunks in cold country: ground.gdshader's tundra layer)
+		mat.set_shader_parameter("tundra_tex", ImageTexture.create_from_image(o["tundra_img"]))
+		mat.set_shader_parameter("tun_col", _tun_tex[0])
+		mat.set_shader_parameter("tun_nr", _tun_tex[1])
+		mat.set_shader_parameter("tundra_on", true)
 	if o.has("snow_img") and not OLD_SNOW:   # (chunks with snow: ground.gdshader's snow layer)
 		mat.set_shader_parameter("snow_tex", ImageTexture.create_from_image(o["snow_img"]))
 		mat.set_shader_parameter("snow_on", true)
@@ -1206,16 +1248,18 @@ func _finalize_out(k: Vector2i, o: Dictionary, chunk_n: int) -> void:
 	var mms := {}
 	var small := []
 	var deco_mi := []   # the shadow-casting ones: update_stream turns their shadows off 2+ chunks out
-	for name in LIST_SPEC:
+	for name in LIST_SPEC.keys() + ScanPlants.LISTS:
 		var n: int = counts.get(name, 0)
 		if n == 0:
 			continue
-		var spec: Array = LIST_SPEC[name]
+		var spec: Array = LIST_SPEC[name] if LIST_SPEC.has(name) else [name, ScanPlants.material_of(name), ScanPlants.casts(name), false]
 		var mm := _multimesh(node, TerrainGeo.MESH[spec[0]], TerrainGeo.MAT[spec[1]], lists[name], n, spec[2], VIS_RANGE.get(name, 0.0))
 		mms[name] = mm
 		var dmi := node.get_child(node.get_child_count() - 1)
 		dmi.set_instance_shader_parameter("fade_mode", 2.0 if spec[3] else 1.0)   # deco_fade.gdshaderinc
 		_rock_twin(dmi, spec[0])
+		if name.begins_with("sp_"):
+			_plant_twin(dmi, name)
 		CardTree.add_twin(dmi, spec[0], CardTree.CHUNK_VIS)   # tree crowns: leaf cards near the rider (card_tree.gd), sets both fade modes
 		if spec[2]:
 			# (a card crown casts through its invisible shadow stand-in: that is what the far-shadow rule switches)

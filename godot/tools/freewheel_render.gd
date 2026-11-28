@@ -13,7 +13,7 @@ func _init() -> void:
 		c[kv[0]] = float(kv[1])
 	var syn = load("res://scripts/game/FreewheelSynth.cs").new()
 	syn.SetParams(c.pitch, c.ring, c.crack, c.crack_len, c.detune, c.tilt, c.uneven, c.jitter, c.vary)
-	syn.SetSpeedParams(c.poe, c.warble, c.sp_pitch, c.sp_bright, c.sp_ring, c.repeat, c.sp_soft)
+	syn.SetSpeedParams(c.poe, c.warble, c.sp_pitch, c.sp_bright, c.sp_ring, c.repeat, c.sp_soft, c.drop_ms, c.sp_hit)
 	syn.SetShake(c.shake)
 	var sr := 44100.0
 	var n := int(c.secs * sr)
@@ -27,8 +27,7 @@ func _init() -> void:
 		var fs := kmh / 3.6
 		var clicks: float = fs / 0.35 / TAU * c.poe
 		var amp: float = 0.23 * c.vol * (1.0 - c.fade * clampf((fs - 8.0) / 10.0, 0.0, 1.0))
-		var sp0: float = c.sp_from / 3.6
-		var fast := smoothstep(sp0, maxf(sp0 + 0.5, c.sp_full / 3.6), fs)
+		var fast := smoothstep(12.0 / 3.6, 60.0 / 3.6, fs)   # only the old synth (BMX_OLD_FWSYNTH=1) reads it
 		var buf: PackedVector2Array = syn.Render(m, clicks, amp, fast)
 		for v in buf:
 			var x := clampf(v.x, -1.0, 1.0)

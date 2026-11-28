@@ -230,13 +230,17 @@ func _want(name: String) -> bool:
 func _coast_model(v0: float, g: Ground, secs: float) -> float:
 	var T: Dictionary = tune.v
 	var ts: float = T.topSpeed
-	var k: float = T.airDrag / (ts * ts)
+	var k: float = T.airDrag / (ts * ts) * BikePhysics.drag_k()
 	var v := v0
 	var x := 0.0
 	for i in int(secs / DT):
 		var th := atan((g.height(x + 0.4, 0.0) - g.height(x - 0.4, 0.0)) / 0.8)
 		var roll: float = 0.32 * T.rollRes * signf(v) * minf(1.0, absf(v) * 4)
-		v += (-9.81 * sin(th) - roll - k * v * absf(v)) * DT
+		# the rider tucks by himself coasting fast (the speed tuck: x 1 - tuckDrag x speedTuckDrag); with real-size drag
+		# (BikePhysics.DRAG_REAL) leaving it out read 3 % slow on the steepest grade
+		var tk: float = smoothstep(float(T.get("speedTuckFrom", 11.0)), float(T.get("speedTuckFull", 18.0)), absf(v)) * float(T.get("speedTuck", 1.0))
+		var ak: float = 1.0 - float(T.get("tuckDrag", 0.42)) * float(T.get("speedTuckDrag", 0.5)) * tk
+		v += (-9.81 * sin(th) - roll - k * ak * v * absf(v)) * DT
 		v = clampf(v, -3.0, 24.0 * maxf(1.0, ts))
 		x += v * cos(th) * DT
 	return v
